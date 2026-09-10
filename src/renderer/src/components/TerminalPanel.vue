@@ -7,8 +7,9 @@ import {
   clampTerminalHeight,
   maxTerminalHeightFor
 } from '@shared/terminal-height'
+import { SCROLL_PIN_THRESHOLD_PX, isPinnedToBottom } from '@shared/log-scroll'
 import { useProjectsStore, type TerminalState } from '@/stores/projects'
-import type { ProjectStatus } from '@/types'
+import type { LogLine, ProjectStatus } from '@/types'
 
 const store = useProjectsStore()
 const bodyRef = ref<HTMLElement | null>(null)
@@ -103,20 +104,27 @@ function onWindowResize(): void {
 }
 
 window.addEventListener('resize', onWindowResize)
-onUnmounted(() => {
-  window.removeEventListener('resize', onWindowResize)
-  detachResize()
-})
 
 const tabs = computed(() => store.terminalList)
 const active = computed(() => store.activeTerminalState)
 
 /**
  * 单次渲染的行数上限（F-6.11）。
- * 缓冲区仍保留 5000 行（F-6.6），但超过这个数就只把尾部挂到 DOM 上，
- * 否则几千个节点会让滚动明显掉帧——规格允许「虚拟滚动或阈值截断」，这里取截断。
+ * 缓冲区仍保留 5000 行（F-6.6），但超过这个数就只把尾部挂到 DOM 上。
+ * 规格允许「虚拟滚动或阈值截断」，这里取截断 —— 但只截断还不够，
+ * 见下面 CHUNK_SIZE 的分块说明。
  */
 const RENDER_LIMIT = 1000
+
+/**
+ * 渲染分块大小。
+ *
+ * 1000 行一次性 patch 依然会让滚动掉帧，所以在截断之上再分块：
+ * 每块套一个 `content-visibility: auto` 的容器，屏幕外的块浏览器直接跳过
+ * 布局与绘制。这样既不用自己实现虚拟滚动的定位与高度测量，
+ * 又能把一帧的渲染量压到「可见的那几块」。
+ */
+const CHUNK_SIZE = 100
 
 const toneOf = (s: ProjectStatus): string =>
   s === 'failed' ? 'fail' : s === 'success' ? 'ok' : s === 'idle' ? 'idle' : 'run'
@@ -125,6 +133,8 @@ const isRunning = (terminal: TerminalState): boolean =>
   terminal.status === 'running' || terminal.status === 'installing' || terminal.status === 'building'
 
 function projectName(terminal: TerminalState): string {
+  // 系统终端不属于任何项目，别把它显示成「已移除的项目」
+  if (terminal.kind === 'system') return '本机环境'
   return store.findProject(terminal.projectId)?.name ?? '已移除的项目'
 }
 
@@ -132,7 +142,12 @@ function closeTerminal(terminal: TerminalState): void {
   store.closeTerminal(terminal.key)
 }
 
-const allLines = computed(() => active.value?.logs ?? [])
+/**
+ * 日志快照。用 store.activeLogs 而不是 active.logs：
+ * 缓冲是环形且 markRaw 的，store 那个 computed 会跟着 logVersion 更新，
+ * 这里只负责截断到渲染上限。
+ */
+const allLines = computed<LogLine[]>(() => store.activeLogs)
 
 const omitted = computed(() => Math.max(0, allLines.value.length - RENDER_LIMIT))
 
@@ -140,15 +155,134 @@ const lines = computed(() =>
   omitted.value ? allLines.value.slice(-RENDER_LIMIT) : allLines.value
 )
 
+const chunks = computed(() => {
+  const list = lines.value
+  const out: LogLine[][] = []
+  for (let i = 0; i < list.length; i += CHUNK_SIZE) {
+    out.push(list.slice(i, i + CHUNK_SIZE))
+  }
+  return out
+})
+
 const currentCommand = computed(() => active.value?.currentCommand)
 
-async function scrollToBottom(): Promise<void> {
-  await nextTick()
+// ---------- 自动滚动：只在用户贴底时跟随 ----------
+
+/**
+ * 用户是否停在底部。
+ *
+ * 原实现每帧无条件 `scrollTop = scrollHeight`，有两个毛病：
+ * 一是每帧读 scrollHeight 就是一次强制同步布局；二是用户往上翻着看编译报错时，
+ * 会被下一帧硬拽回底部。改成贴底才跟随，判定本身抽在 shared/log-scroll.ts 里。
+ */
+const pinned = ref(true)
+
+function onBodyScroll(): void {
   const el = bodyRef.value
-  if (el) el.scrollTop = el.scrollHeight
+  if (!el) return
+  pinned.value = isPinnedToBottom(el)
 }
 
-watch([lines, () => store.activeTerminal], scrollToBottom, { deep: true, flush: 'post' })
+function scrollToBottom(): void {
+  const el = bodyRef.value
+  if (!el) return
+  el.scrollTop = el.scrollHeight
+  // 程序化滚动同样会触发 scroll 事件，这里直接把状态定下来，省一次回调
+  pinned.value = true
+}
+
+/**
+ * 有新日志就跟随。
+ *
+ * `flush: 'post'` 是关键，也是这里唯一「时序敏感」的一行：回调要跑在本次
+ * DOM patch **之后**、浏览器绘制**之前**。这样读到的 scrollHeight 已经算上新插入的行，
+ * 滚动与绘制落在同一帧。原来的写法要 `await nextTick()`，白等一帧 ——
+ * 刷屏时那种「慢半拍」的感觉主要来自这里。
+ */
+watch(
+  () => store.logVersion,
+  () => {
+    if (pinned.value) scrollToBottom()
+  },
+  { flush: 'post' }
+)
+
+// 切终端时回到该终端的底部（每个终端都是「最新在下面」）
+watch(
+  () => store.activeTerminal,
+  () => {
+    pinned.value = true
+    scrollToBottom()
+  },
+  { flush: 'post' }
+)
+
+// 面板被拖高、窗口变大或 Tab 条换行都会改变可视高度，贴底时跟着走
+const bodyObserver = new ResizeObserver(() => {
+  if (pinned.value) scrollToBottom()
+})
+
+/**
+ * 一行实测高度。
+ *
+ * 用来喂给分块的 `contain-intrinsic-size`：`content-visibility: auto` 让屏外的块
+ * 按「估算高度」计入 scrollHeight，估算值与真实值不一致时，跳到底部会停在离底部
+ * 一截的地方。行高由字体与缩放决定，实测一次就基本稳定，之后再变也只是微调。
+ */
+const lineHeight = ref(0)
+const chunkEstimatePx = computed(() => Math.round((lineHeight.value || 22) * CHUNK_SIZE))
+
+const lineObserver = new ResizeObserver((entries) => {
+  for (const entry of entries) {
+    const height = entry.borderBoxSize?.[0]?.blockSize ?? entry.contentRect.height
+    if (height > 0 && Math.abs(height - lineHeight.value) > 0.5) lineHeight.value = height
+  }
+})
+
+function measureLine(el: Element | null): void {
+  if (!el) return
+  const height = (el as HTMLElement).getBoundingClientRect().height
+  if (height > 0) lineHeight.value = height
+}
+
+/**
+ * 量第一行的高度。
+ * bodyRef 赋值时子节点已经渲染好了，直接同步查；查不到（比如面板空着）
+ * 就断开观察，等下一次 watch 再试。
+ */
+function measureFirstLine(el: HTMLElement | null): void {
+  const firstLine = el?.querySelector('.line:not(.term__omitted)') ?? null
+  if (!firstLine) {
+    lineObserver.disconnect()
+    return
+  }
+  measureLine(firstLine)
+  lineObserver.observe(firstLine)
+}
+
+watch(bodyRef, (el, prev) => {
+  if (prev) bodyObserver.unobserve(prev)
+  if (el) bodyObserver.observe(el)
+  measureFirstLine(el)
+})
+
+// 第一行渲染出来之后量一次；此后行高若因缩放 / 设置变化，由 observer 接住
+watch(
+  () => chunks.value.length > 0,
+  async (hasLines) => {
+    if (!hasLines) return
+    await nextTick()
+    measureFirstLine(bodyRef.value)
+  },
+  { immediate: true }
+)
+
+onUnmounted(() => {
+  window.removeEventListener('resize', onWindowResize)
+  bodyObserver.disconnect()
+  lineObserver.disconnect()
+  detachResize()
+})
 
 function clearLogs(): void {
   const target = active.value
@@ -159,12 +293,16 @@ function exportLogs(): void {
   const target = active.value
   if (!target) return
 
-  if (!target.logs.length) {
+  const buffer = target.logs
+  if (!buffer.size) {
     ElMessage.info('当前没有可导出的日志')
     return
   }
 
-  const text = target.logs.map((line) => `[${line.time}] ${line.text}`).join('\r\n')
+  const text = buffer
+    .toArray()
+    .map((line) => `[${line.time}] ${line.text}`)
+    .join('\r\n')
   const blob = new Blob([text], { type: 'text/plain;charset=utf-8' })
   const url = URL.createObjectURL(blob)
   const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')
@@ -259,14 +397,29 @@ function exportLogs(): void {
       </div>
     </div>
 
-    <div v-show="!collapsed" ref="bodyRef" class="term__body scroll-dark">
+    <div
+      v-show="!collapsed"
+      ref="bodyRef"
+      class="term__body scroll-dark"
+      role="log"
+      aria-live="polite"
+      @scroll.passive="onBodyScroll"
+    >
       <template v-if="lines.length">
         <p v-if="omitted" class="line line--sys term__omitted">
           已省略较早的 {{ omitted }} 行（缓冲区保留最近 5000 行，此处只渲染最近 {{ RENDER_LIMIT }} 行）
         </p>
-        <div v-for="line in lines" :key="line.id" class="line" :class="`line--${line.stream}`">
-          <span class="line__time mono">{{ line.time }}</span>
-          <span class="line__text mono">{{ line.text || ' ' }}</span>
+        <!-- 分块渲染：屏幕外的块由 content-visibility 跳过布局与绘制 -->
+        <div
+          v-for="(chunk, index) in chunks"
+          :key="chunk[0]?.id ?? index"
+          class="chunk"
+          :style="{ containIntrinsicSize: `auto ${chunkEstimatePx}px` }"
+        >
+          <div v-for="line in chunk" :key="line.id" class="line" :class="`line--${line.stream}`">
+            <span class="line__time mono">{{ line.time }}</span>
+            <span class="line__text mono">{{ line.text || ' ' }}</span>
+          </div>
         </div>
       </template>
       <p v-else class="term__blank mono">
@@ -461,6 +614,25 @@ function exportLogs(): void {
 .tab__dot.tone-run {
   background: var(--st-run);
   box-shadow: 0 0 0 3px rgba(199, 127, 10, 0.18);
+  /* 命令还在跑：点呼吸一下，比一个静止的点更能说明「正在进行」 */
+  animation: dot-pulse 1.3s ease-in-out infinite;
+}
+
+@keyframes dot-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 3px rgba(199, 127, 10, 0.18);
+  }
+
+  50% {
+    box-shadow: 0 0 0 6px rgba(199, 127, 10, 0.06);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tab__dot.tone-run {
+    animation: none;
+  }
 }
 
 .tab__dot.tone-ok {
@@ -513,6 +685,21 @@ function exportLogs(): void {
   overflow-y: auto;
   padding: var(--sp-2) var(--sp-3) var(--sp-3);
   line-height: 1.65;
+  /*
+   * 把这块子树从页面其余部分的布局与绘制里隔离出来：
+   * 面板底部的日志再多，也不会牵动上面的项目列表。
+   */
+  contain: content;
+}
+
+/*
+ * 渲染分块：屏幕外的块不必布局，也不必绘制。
+ * contain-intrinsic-size 给出「没渲染时按多高估算」，滚动条长度才不会
+ * 随着内容进出视口来回跳；这里的值按 100 行 × 1.65 行高估一个中间数。
+ */
+.chunk {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 1800px;
 }
 
 .line {

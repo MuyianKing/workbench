@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>快捷操作面板 · 间距对比</title>
+  <link rel="stylesheet" href="../src/renderer/src/styles/tokens.css" />
+  <link rel="stylesheet" href="../src/renderer/src/styles/global.css" />
+  <style>
+    body {
+      overflow: auto;
+      padding: 28px;
+      background: var(--bg-canvas);
+    }
+
+    .compare {
+      display: flex;
+      align-items: flex-start;
+      gap: 28px;
+    }
+
+    .col {
+      width: 340px;
+    }
+
+    .col > h2 {
+      margin-bottom: 10px;
+      font-size: var(--fs-meta);
+      font-weight: 600;
+      color: var(--ink-3);
+    }
+
+    /* 复刻 HomePanels 的 .panels：单列、面板按内容高度排列 */
+    .panels {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      gap: 14px;
+    }
+
+    /* HomePanels 里的 scoped 样式，静态页复制一份 */
+    .tips__note {
+      margin-top: 0;
+      padding-top: var(--sp-1);
+      border-top: 1px solid var(--border);
+      font-size: var(--fs-micro);
+      color: var(--ink-3);
+    }
+
+    /* 「修改前」：说明上方 padding-top 是 --sp-3 */
+    .is-before .tips__note {
+      padding-top: var(--sp-3);
+    }
+  </style>
+</head>
+<body>
+  <div class="compare">
+    <div class="col is-before">
+      <h2>修改前 · 说明上方 12px（上 24 / 下 16）</h2>
+      <div class="panels">
+        <article class="panel">
+          <header class="panel__head">
+            <span class="eyebrow">快捷操作</span>
+          </header>
+
+          <ul class="tips">
+            <li class="tip">
+              <span class="tip__text truncate">搜索项目名或路径</span>
+              <kbd class="tip__key mono">Ctrl K</kbd>
+            </li>
+            <li class="tip">
+              <span class="tip__text truncate">唤起 / 隐藏窗口</span>
+              <kbd class="tip__key mono">Control + Shift + W</kbd>
+            </li>
+            <li class="tip">
+              <span class="tip__text truncate">把卡片拖到分组标签即归类</span>
+              <kbd class="tip__key mono">拖动</kbd>
+            </li>
+            <li class="tip">
+              <span class="tip__text truncate">拖动分组标签可调整顺序</span>
+              <kbd class="tip__key mono">拖动</kbd>
+            </li>
+            <li class="tip">
+              <span class="tip__text truncate">点关闭按钮收进托盘，不会退出</span>
+              <kbd class="tip__key mono">关闭</kbd>
+            </li>
+          </ul>
+
+          <p class="tips__note">主题、托盘、开机自启在右上角的设置里。</p>
+        </article>
+      </div>
+    </div>
+
+    <div class="col">
+      <h2>修改后 · 说明上方 4px（上 16 / 下 16）</h2>
+      <div class="panels">
+        <article class="panel">
+          <header class="panel__head">
+            <span class="eyebrow">快捷操作</span>
+          </header>
+
+          <ul class="tips">
+            <li class="tip">
+              <span class="tip__text truncate">搜索项目名或路径</span>
+              <kbd class="tip__key mono">Ctrl K</kbd>
+            </li>
+            <li class="tip">
+              <span class="tip__text truncate">唤起 / 隐藏窗口</span>
+              <kbd class="tip__key mono">Control + Shift + W</kbd>
+            </li>
+            <li class="tip">
+              <span class="tip__text truncate">把卡片拖到分组标签即归类</span>
+              <kbd class="tip__key mono">拖动</kbd>
+            </li>
+            <li class="tip">
+              <span class="tip__text truncate">拖动分组标签可调整顺序</span>
+              <kbd class="tip__key mono">拖动</kbd>
+            </li>
+            <li class="tip">
+              <span class="tip__text truncate">点关闭按钮收进托盘，不会退出</span>
+              <kbd class="tip__key mono">关闭</kbd>
+            </li>
+          </ul>
+
+          <p class="tips__note">主题、托盘、开机自启在右上角的设置里。</p>
+        </article>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

@@ -168,4 +168,33 @@ describe('ProcessManager 的终端划分', () => {
     },
     60000
   )
+
+  it(
+    '清空前会先排空待发日志，上一轮的输出不会落到新一轮的终端里',
+    async () => {
+      const project = makeProject('hello')
+      const sequence: string[] = []
+
+      // 模拟 LogBatcher：日志先攒着，直到 flush 才真正发出
+      const pending: string[] = []
+      const manager = new ProcessManager(() => {
+        for (const text of pending.splice(0, pending.length)) sequence.push(`log:${text}`)
+      })
+      managers.push(manager)
+
+      manager.on('clear', () => sequence.push('clear'))
+
+      // 上一轮的最后几行还没到聚合窗口 —— 这正是「改按帧聚合」引入的时序窗口
+      pending.push('上一轮的最后一行')
+
+      expect(manager.build(project, 'build')).toBeNull()
+
+      // 若无条件先 clear，这里会是 ['clear', 'log:上一轮的最后一行']，
+      // 那行旧日志就落到了新一轮的终端里
+      expect(sequence).toEqual(['log:上一轮的最后一行', 'clear'])
+
+      await waitFor(() => !manager.isActive(project.id))
+    },
+    60000
+  )
 })

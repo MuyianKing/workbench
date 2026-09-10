@@ -8,6 +8,13 @@ import {
   type PersistedData
 } from '../shared/types'
 import { clampTerminalHeight } from '../shared/terminal-height'
+import { clampSidePanelWidth } from '../shared/side-panel-width'
+import { sanitizeSidePanelPosition } from '../shared/side-panel-position'
+import {
+  clampBackgroundOpacity,
+  sanitizeBackgroundPath,
+  sanitizeVeilColor
+} from '../shared/workspace-background'
 import { pruneDays, sanitizeActivity, type ActivityCounts } from '../shared/activity'
 
 const DATA_FILE = 'workbench-data.json'
@@ -118,6 +125,16 @@ export function sanitizeSettings(raw: unknown): AppSettings {
   value.minimizeToTray = value.minimizeToTray === true
   // 终端高度是拖出来的像素值，老数据文件里没有；非法值落回默认高度
   value.terminalHeight = clampTerminalHeight(value.terminalHeight)
+  // 侧栏宽度同上：老数据文件里没有这个字段
+  value.sidePanelWidth = clampSidePanelWidth(value.sidePanelWidth)
+  // 侧栏位置：老数据文件里没有，认不出来的写法一律当「右」
+  value.sidePanelPosition = sanitizeSidePanelPosition(value.sidePanelPosition)
+  // 背景图：老数据文件里没有。图片被删 / 换了格式读不出来时不在这里拦，
+  // 由主进程读图时给出具体原因，界面才好提示用户重新选一张
+  value.workspaceBackground = sanitizeBackgroundPath(value.workspaceBackground)
+  value.workspaceBackgroundOpacity = clampBackgroundOpacity(value.workspaceBackgroundOpacity)
+  // 蒙版色：认不出来的写法一律当「跟随主题」，别让一个手改过的色值把整条 background 拼废
+  value.workspaceBackgroundVeil = sanitizeVeilColor(value.workspaceBackgroundVeil)
 
   return value
 }

@@ -147,6 +147,15 @@ function onMore(command: string): void {
           />
         </el-tooltip>
       </template>
+      <!-- 安装 / 打包进行中也给一个停止入口，否则长命令卡住时只能干等 -->
+      <el-button
+        v-else-if="isBusy"
+        size="small"
+        :icon="VideoPause"
+        @click="store.stop(project.id)"
+      >
+        停止
+      </el-button>
       <el-tooltip
         v-else
         :content="project.scripts.serve ? '启动开发服务' : '未配置启动命令'"

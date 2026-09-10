@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { app, BrowserWindow, dialog, nativeTheme, shell } from 'electron'
 import { data, flushSync, loadData, save } from './store'
-import { manager, registerIpc } from './ipc'
+import { manager, flushLogBatches, registerIpc } from './ipc'
 import { reapOrphanSessions } from './orphan'
 import {
   currentSettings,
@@ -301,6 +301,8 @@ app.on('before-quit', (event) => {
 })
 
 app.on('will-quit', () => {
+  // 还在聚合窗口里的最后几行日志先排空，再让窗口消失
+  flushLogBatches()
   disposeAppSettings()
 })
 

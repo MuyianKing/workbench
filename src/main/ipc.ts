@@ -6,13 +6,17 @@ import {
   IPC,
   type AddProjectInput,
   type AppSettings,
+  type BackgroundImage,
+  type BuiltinWallpaper,
   type DataLocation,
   type DataLocationPick,
+  type InstallablePackageManager,
   type NodeCheckResult,
   type PackageManagerStatus,
   type Project,
   type ProjectGroup,
   type ProjectPatch,
+  type ProcessLogEvent,
   type Result,
   type RunRecord
 } from '../shared/types'
@@ -35,18 +39,40 @@ import { findNodeDir, getNvmStatus, matchInstalledVersion } from './nvm'
 import {
   checkPackageManagers,
   checkPort,
+  installPackageManager,
   killPortProcess,
   pickDirectory,
   reveal
 } from './system'
 import { updateAppSettings } from './app-settings'
+import { pickBackgroundImage, readBackgroundImage } from './background'
+import { listWallpapers } from './wallpapers'
+import { LogBatcher } from './log-batcher'
 
 const COMMON_OUTPUT_DIRS = ['dist', 'dist_electron', 'build', 'out']
 
 /** 每个项目保留的执行记录条数 */
 const HISTORY_LIMIT = 10
 
-export const manager = new ProcessManager()
+/**
+ * 命令输出先聚合、再整批广播。
+ *
+ * 逐行 send 在高产出的命令下会把两侧一起拖垮 —— npm install / vite build 几秒能出
+ * 上万行，每行一次结构化克隆加跨进程唤醒。这里按帧攒批，把 IPC 次数从
+ * 「行数」压到「帧数」。系统提示、包管理器安装输出仍走单条直发：
+ * 它们本来就稀疏，聚合只会平白多一层延迟。
+ *
+ * 放在 manager 之前：manager 需要它来保证「清空终端」这类事件的先后顺序。
+ */
+const logBatcher = new LogBatcher((events) => broadcast(IPC.eventLog, events))
+logBatcher.start()
+
+/** 退出前把还没到窗口的日志排空，免得最后几行随进程一起消失 */
+export function flushLogBatches(): void {
+  logBatcher.dispose()
+}
+
+export const manager = new ProcessManager(() => logBatcher.flush())
 
 // ---------- 工具 ----------
 
@@ -75,8 +101,13 @@ function nowLabel(): string {
 }
 
 /** 往某个项目的日志面板里补一条系统提示 */
-function logTo(projectId: string, stream: 'sys' | 'err', text: string): void {
-  broadcast(IPC.eventLog, { projectId, stream, text, time: nowLabel() })
+function logTo(
+  projectId: string,
+  terminal: string,
+  stream: 'sys' | 'err',
+  text: string
+): void {
+  broadcast(IPC.eventLog, { terminal, projectId, stream, text, time: nowLabel() })
 }
 
 /**
@@ -140,7 +171,7 @@ function ensureNodeVersion(project: Project): string | null {
 
 // ---------- 子进程事件转发 ----------
 
-manager.on('log', (payload) => broadcast(IPC.eventLog, payload))
+manager.on('log', (payload: ProcessLogEvent) => logBatcher.push(payload))
 manager.on('status', (payload) => broadcast(IPC.eventStatus, payload))
 manager.on('terminal-open', (payload) => broadcast(IPC.eventTerminalOpen, payload))
 manager.on('clear', (payload) => broadcast(IPC.eventClear, payload))
@@ -191,7 +222,7 @@ manager.on('build-done', async ({ projectId }: { projectId: string }) => {
 
   const { dir, detected } = await resolveOutputDir(project)
   if (!detected) {
-    logTo(projectId, 'sys', '未探测到产物目录，已打开项目根目录')
+    logTo(projectId, `${projectId}::start`, 'sys', '未探测到产物目录，已打开项目根目录')
   }
 
   if (!project.autoOpenExplorer) return
@@ -199,16 +230,11 @@ manager.on('build-done', async ({ projectId }: { projectId: string }) => {
   try {
     await reveal(dir)
   } catch (err) {
-    logTo(projectId, 'err', `打开目录失败：${(err as Error).message}`)
+    logTo(projectId, `${projectId}::start`, 'err', `打开目录失败：${(err as Error).message}`)
   }
 })
 
-/** dev server 就绪事件保留：日志里解析出的地址/端口仍会推到界面，但不再自动拉起浏览器 */
-manager.on('server-ready', ({ projectId, url }: { projectId: string; url: string }) => {
-  const project = findProject(projectId)
-  if (!project) return
-  logTo(projectId, 'sys', `服务地址 ${url}`)
-})
+
 
 /** 新增项目：校验目录、扫描 package.json、落盘 */
 export async function addProject(input: AddProjectInput): Promise<Result<Project>> {
@@ -435,6 +461,28 @@ export function registerIpc(): void {
 
   ipcMain.handle(IPC.checkPackageManagers, () => checkPackageManagers())
 
+  ipcMain.handle(
+    IPC.installPackageManager,
+    async (_event, pm: InstallablePackageManager): Promise<Result<PackageManagerStatus>> => {
+      if (pm !== 'yarn' && pm !== 'pnpm') return fail('暂不支持安装该包管理器')
+
+      const result = await installPackageManager(pm, (text) =>
+        broadcast(IPC.eventPmInstallLog, { pm, text })
+      )
+
+      // 装完（或装失败）都重探一次：既顶掉 30 秒缓存，也顺便把 PATH 里新出现的东西认出来。
+      // 探测结果无论如何都跟着返回，界面不用再多跑一次往返。
+      pmCache = null
+      const status = await pmStatus()
+
+      if (!result.ok) return fail(result.error ?? `${pm} 安装失败`)
+      if (!status[pm]) {
+        return fail(`安装已结束，但 ${pm} 仍不可用，请确认 npm 的全局目录在系统 PATH 中`)
+      }
+      return ok(status)
+    }
+  )
+
   ipcMain.handle(IPC.checkPort, async (_event, port: number) => checkPort(Number(port)))
 
   ipcMain.handle(IPC.killPortProcess, async (_event, port: number): Promise<Result<null>> => {
@@ -477,6 +525,19 @@ export function registerIpc(): void {
       return ok(updateAppSettings(patch))
     }
   )
+
+  // 选背景图只返回路径（落盘走 updateSettings），读图则统一由主进程解码成 data URL
+  ipcMain.handle(IPC.pickBackground, async (event): Promise<string | null> => {
+    const win = BrowserWindow.fromWebContents(event.sender) ?? undefined
+    return pickBackgroundImage(win)
+  })
+
+  ipcMain.handle(IPC.loadBackground, async (_event, path: string): Promise<Result<BackgroundImage>> =>
+    readBackgroundImage(path)
+  )
+
+  // 内置壁纸清单：目录里有什么就列什么，没有则返回空数组（设置里那一栏自动收起）
+  ipcMain.handle(IPC.listWallpapers, (): Promise<BuiltinWallpaper[]> => listWallpapers())
 
   // ---------- 进程操作 ----------
 

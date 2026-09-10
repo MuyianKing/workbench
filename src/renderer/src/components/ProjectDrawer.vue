@@ -185,7 +185,7 @@ function addCustom(): void {
 function removeCustom(index: number): void {
   const current = project.value
   if (!current) return
-  current.scripts.custom = customs.value.filter((_, i) => i !== index)
+  current.scripts.custom = customs.value.filter((_: unknown, i: number) => i !== index)
 }
 
 function runCustom(index: number): void {
@@ -249,7 +249,7 @@ const suggestedNode = computed(() => {
   const current = project.value?.nodeVersion?.trim()
   return (
     installedVersions.value.find(
-      (v) => v !== current && satisfiesNodeVersion(state.required, v)
+      (v: string) => v !== current && satisfiesNodeVersion(state.required, v)
     ) ?? null
   )
 })
@@ -324,19 +324,21 @@ async function removeProject(): Promise<void> {
 
       <!-- 主操作 -->
       <div class="drawer__actions">
+        <!-- 安装 / 打包进行中：只能停，不能启动，否则按钮全是灰的没处下手 -->
+        <el-button v-if="isBusy" :icon="VideoPause" @click="store.stop(project.id)">停止</el-button>
+        <template v-else-if="isRunning">
+          <el-button :icon="VideoPause" @click="store.stop(project.id)">停止</el-button>
+          <el-button :icon="Refresh" @click="restart">重启</el-button>
+        </template>
         <el-button
-          v-if="!isRunning"
+          v-else
           type="primary"
           :icon="VideoPlay"
-          :disabled="isBusy || !pathValid || !project.scripts.serve || !!project.manageOnly"
+          :disabled="!pathValid || !project.scripts.serve || !!project.manageOnly"
           @click="store.start(project.id)"
         >
           启动
         </el-button>
-        <template v-else>
-          <el-button :icon="VideoPause" @click="store.stop(project.id)">停止</el-button>
-          <el-button :icon="Refresh" @click="restart">重启</el-button>
-        </template>
 
         <el-dropdown
           split-button

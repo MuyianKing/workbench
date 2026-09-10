@@ -2,7 +2,12 @@ import { spawn, exec } from 'node:child_process'
 import { promises as fs } from 'node:fs'
 import net from 'node:net'
 import { dialog, shell, BrowserWindow } from 'electron'
-import type { PackageManagerStatus, PortCheckResult } from '../shared/types'
+import type {
+  InstallablePackageManager,
+  PackageManagerStatus,
+  PortCheckResult,
+  Result
+} from '../shared/types'
 
 /** 执行 `<bin> --version`，用于探测包管理器是否可用 */
 function probeVersion(bin: string): Promise<string | null> {
@@ -56,6 +61,71 @@ export async function checkPackageManagers(): Promise<PackageManagerStatus> {
     pnpm: pnpm !== null,
     node: node ?? ''
   }
+}
+
+/** 安装包管理器最多等 5 分钟：registry 慢的时候一分钟上下是常态，但也不能无限挂着 */
+const PM_INSTALL_TIMEOUT = 5 * 60 * 1000
+
+/**
+ * 用 npm 全局安装 yarn / pnpm。
+ *
+ * 走 shell 是为了照顾 Windows 的 npm.cmd；输出按行回调，界面能一直看到 npm 在干什么，
+ * 不用对着一个转圈等一分钟。npm 本身不在可安装之列（它随 Node.js 分发）。
+ */
+export function installPackageManager(
+  pm: InstallablePackageManager,
+  onLog?: (text: string) => void
+): Promise<Result<null>> {
+  return new Promise((resolve) => {
+    let child: ReturnType<typeof spawn>
+    try {
+      child = spawn('npm', ['install', '-g', pm], { shell: true, windowsHide: true })
+    } catch (err) {
+      resolve({ ok: false, error: `无法启动 npm：${(err as Error).message}` })
+      return
+    }
+
+    let settled = false
+    let timer: NodeJS.Timeout | undefined
+    /** 最后一行输出：失败时把它当作原因带回去，比只报一个退出码有用 */
+    let tail = ''
+
+    const finish = (ok: boolean, error?: string): void => {
+      if (settled) return
+      settled = true
+      if (timer) clearTimeout(timer)
+      resolve(ok ? { ok: true } : { ok: false, error })
+    }
+
+    const pipe = (chunk: Buffer): void => {
+      for (const line of chunk.toString('utf8').split(/\r?\n/)) {
+        const text = line.trim()
+        if (!text) continue
+        tail = text
+        onLog?.(text)
+      }
+    }
+
+    child.stdout?.on('data', pipe)
+    child.stderr?.on('data', pipe)
+    child.on('error', (err) => finish(false, `无法启动 npm：${err.message}`))
+    child.on('close', (code) => {
+      if (code === 0) {
+        finish(true)
+        return
+      }
+      finish(false, tail || `npm install -g ${pm} 退出码 ${code}`)
+    })
+
+    timer = setTimeout(() => {
+      try {
+        child.kill()
+      } catch {
+        /* 忽略 */
+      }
+      finish(false, `安装 ${pm} 超时，请检查网络或手动执行 npm install -g ${pm}`)
+    }, PM_INSTALL_TIMEOUT)
+  })
 }
 
 export async function pickDirectory(

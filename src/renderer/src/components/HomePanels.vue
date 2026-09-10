@@ -1,13 +1,13 @@
 <script setup lang="ts">
 /**
- * 首页卡片网格下面的工作台面板。
+ * 首页卡片网格旁边的工作台面板。
  *
- * 卡片网格下面是整块空画布，项目少的时候尤其明显。这三块面板把剩下的高度接住：
+ * 卡片网格之外是整块空画布，项目少的时候尤其明显。这几块面板把剩下的空间接住：
  * 系统状态 / 最近使用 / 快捷操作。列表顶在面板上沿、动作贴在下沿，
  * 窗口越高面板只是越舒展，不会出现半张空卡片。
  */
 import { computed } from 'vue'
-import { FolderOpened, Plus } from '@element-plus/icons-vue'
+import { FolderOpened } from '@element-plus/icons-vue'
 import { useProjectsStore } from '@/stores/projects'
 import { buildHints } from '@/hints'
 import ActivityGraph from '@/components/ActivityGraph.vue'
@@ -204,11 +204,6 @@ const hints = computed(() => buildHints(store.settings))
           </div>
         </li>
       </ul>
-
-      <button class="add-row" type="button" @click="store.addDialogVisible = true">
-        <el-icon><Plus /></el-icon>
-        添加项目
-      </button>
     </article>
 
     <!-- 快捷操作 -->
@@ -232,18 +227,14 @@ const hints = computed(() => buildHints(store.settings))
 <style scoped>
 .panels {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(266px, 1fr));
-  /**
-   * 第一行留给活跃度图（跨整列），它按内容定高；
-   * 其余是隐式行，行高把剩余空间吃满，内容再多也不会压到 264px 以下。
-   */
+  /* 侧栏就一条窄栏那么宽：面板只能竖着叠，活跃度图跨满整列（.panel--wide） */
   grid-template-columns: minmax(0, 1fr);
   grid-auto-rows: auto;
   gap: 14px;
   min-height: 0;
 }
 
-/* 活跃度图在窄栏里也占满整列——它需要整宽来铺一年 53 周 */
+/* 活跃度图始终占满整列——它需要整宽来铺一年 53 周 */
 .panel--wide {
   grid-column: 1 / -1;
 }
@@ -282,7 +273,8 @@ const hints = computed(() => buildHints(store.settings))
   align-items: center;
   gap: var(--sp-2);
   min-width: 0;
-  padding: 5px 6px;
+  /* 只留上下：左右缩进会让整行和面板标题、右上角计数对不齐 */
+  padding: 5px 0;
   border-radius: var(--r-sm);
   cursor: pointer;
 }
@@ -333,6 +325,10 @@ const hints = computed(() => buildHints(store.settings))
 }
 
 .row__act {
+  /* 按钮和状态文字共用这个盒子：自己居中，别指望 <button> 的默认行为 */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
   height: 22px;
   padding: 0 8px;
@@ -357,6 +353,8 @@ const hints = computed(() => buildHints(store.settings))
 
 /* 不能点的时候它就是一句状态文字，按状态上色（和卡片的状态灯一个语义） */
 .row__act.is-static {
+  /* 没有按钮那圈边框，就不用再为它留内缩，右缘才和右上角计数齐平 */
+  padding: 0;
   border-color: transparent;
   background: transparent;
   color: var(--ink-3);
@@ -376,33 +374,19 @@ const hints = computed(() => buildHints(store.settings))
 
 /* ---------- 快捷操作面板的私有部分（提示行本体见全局 .tips / .tip） ---------- */
 .tips__note {
-  margin-top: auto;
-  padding-top: var(--sp-3);
+  /**
+   * 说明是列表的补充，但它的字号只比行文字小 1.5px，光靠字号差和 12px 的
+   * 面板 gap 分不出层次：最后一条提示会跟它黏成一坨。
+   * 用一条实线把它划到列表外面——行间是虚线，说明用实线，读起来是"列表到此为止"。
+   *
+   * 负上距抵消面板 gap 后只留 4px，线紧贴在最后一条提示下面（不抵消会被
+   * 12px 的 gap 推到说明头上，看着像说明的边框）；上内距 10px 顶开说明，
+   * 下面不留内距——说明贴着面板自己的 --sp-4 下边距收尾就行。
+   */
+  margin-top: calc(var(--sp-3) * -1 + 4px);
+  padding: calc(var(--sp-2) + 2px) 0 0;
   border-top: 1px solid var(--border);
   font-size: var(--fs-micro);
   color: var(--ink-3);
-}
-
-/* ---------- 幽灵行：加项目 ---------- */
-.add-row {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
-  flex-shrink: 0;
-  margin-top: auto;
-  height: 30px;
-  border: 1px dashed var(--border-strong);
-  border-radius: var(--r-md);
-  background: transparent;
-  color: var(--ink-3);
-  font-size: var(--fs-meta);
-  cursor: pointer;
-  transition: border-color 0.18s ease, color 0.18s ease;
-}
-
-.add-row:hover {
-  border-color: var(--ink);
-  color: var(--ink);
 }
 </style>

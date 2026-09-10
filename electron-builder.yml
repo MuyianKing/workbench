@@ -17,6 +17,19 @@ files:
   - package.json
   - '!node_modules/**'
 
+# 内置壁纸：打包后落在 resourcesPath/backgrounds 下（主进程按这个位置读，见 src/main/wallpapers.ts）。
+# 只带位图，出图母版（resources/masters 里的 svg）不进安装包。
+extraResources:
+  - from: resources/backgrounds
+    to: backgrounds
+    filter:
+      - '**/*.png'
+      - '**/*.jpg'
+      - '**/*.jpeg'
+      - '**/*.webp'
+      - '**/*.bmp'
+      - '**/*.gif'
+
 win:
   target:
     - target: nsis

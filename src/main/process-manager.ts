@@ -116,9 +116,19 @@ export function buildInvocation(
   return { bin: pm, args: ['run', name], label: `${pm} run ${name}` }
 }
 
-/** 子进程管理：状态机、按行日志、进程树终止 */
+/**
+ * 子进程管理：状态机、按行日志、进程树终止
+ *
+ * `flushLogs` 用来在顺序敏感的事件（清空终端输出）之前，把攒批中的日志先发出去。
+ * 逐行发送时不需要它 —— 那是「改按帧聚合」才引入的时序窗口，
+ * 不排空就会让上一轮的最后几行落到清屏之后（见 launch 里的 clear）。
+ */
 export class ProcessManager extends EventEmitter {
   private sessions = new Map<string, Session>()
+
+  constructor(private readonly flushLogs?: () => void) {
+    super()
+  }
 
   isActive(projectId: string): boolean {
     return this.sessions.has(projectId)
@@ -317,13 +327,16 @@ export class ProcessManager extends EventEmitter {
     this.sessions.set(project.id, session)
     this.emit('sessions-changed')
 
-    // 先把终端建出来（渲染层据此新增/切换 Tab），再清空这个终端上一轮的输出
+    // 先把终端建出来（渲染层据此新增/切换 Tab），再清空这个终端上一轮的输出。
+    // clear 之前必须排空待发日志：否则上一轮最后几行会排在 clear 之后送达，
+    // 落在新一轮的输出里（改按帧聚合后才有的窗口）。
     this.emit('terminal-open', {
       terminal,
       projectId: project.id,
       kind: target.kind,
       label: target.label
     })
+    if (this.flushLogs) this.flushLogs()
     this.emit('clear', { terminal })
     this.emitLog(session, 'cmd', inv.label)
 

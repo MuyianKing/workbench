@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from 'vue'
-import { Monitor, Search, Setting } from '@element-plus/icons-vue'
+import { Monitor, Refresh, Search, Setting } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
 import { useProjectsStore } from '@/stores/projects'
 import SettingsDialog from '@/components/SettingsDialog.vue'
+import type { InstallablePackageManager } from '@/types'
 
 const store = useProjectsStore()
 const searchInput = ref<HTMLInputElement | null>(null)
@@ -10,14 +12,33 @@ const settingsVisible = ref(false)
 
 const versions = window.workbench?.versions ?? { electron: '—', node: '—', chrome: '—' }
 
+/** installable 为 true 的可以点一下用 npm 全局装；npm 自己随 Node.js 分发，装不了 */
 const managers = [
-  { key: 'npm', label: 'npm' },
-  { key: 'yarn', label: 'yarn' },
-  { key: 'pnpm', label: 'pnpm' }
+  { key: 'npm', label: 'npm', installable: false },
+  { key: 'yarn', label: 'yarn', installable: true },
+  { key: 'pnpm', label: 'pnpm', installable: true }
 ] as const
 
 function managerAvailable(key: 'npm' | 'yarn' | 'pnpm'): boolean {
   return store.packageManagers?.[key] ?? false
+}
+
+function installing(key: 'npm' | 'yarn' | 'pnpm'): boolean {
+  return store.pmInstalling === key
+}
+
+async function installManager(key: 'npm' | 'yarn' | 'pnpm'): Promise<void> {
+  if (key === 'npm') {
+    ElMessage.warning('npm 随 Node.js 分发，请重新安装 Node.js 后再试')
+    return
+  }
+  await store.installPackageManager(key as InstallablePackageManager)
+}
+
+/** 每次打开弹层都重探一次：可能在应用外面刚装完东西，状态不该等到下次启动才更新 */
+function onEnvShow(): void {
+  if (store.pmInstalling) return
+  void store.refreshPackageManagers()
 }
 
 function focusSearch(): void {
@@ -51,7 +72,13 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
     </label>
 
     <div class="actions">
-      <el-popover placement="bottom-end" :width="252" trigger="click" popper-class="env-popover">
+      <el-popover
+        placement="bottom-end"
+        :width="268"
+        trigger="click"
+        popper-class="env-popover"
+        @show="onEnvShow"
+      >
         <template #reference>
           <el-button class="icon-btn" :icon="Monitor" aria-label="环境信息" />
         </template>
@@ -73,18 +100,46 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
             </li>
           </ul>
 
-          <p class="eyebrow env__gap">包管理器</p>
+          <p class="eyebrow env__gap">
+            包管理器
+            <el-button
+              class="env__refresh"
+              link
+              size="small"
+              :icon="Refresh"
+              :disabled="!!store.pmInstalling"
+              title="重新检测"
+              aria-label="重新检测"
+              @click="store.refreshPackageManagers()"
+            />
+          </p>
           <ul class="env__list">
             <li v-for="m in managers" :key="m.key">
               <span class="mono">{{ m.label }}</span>
-              <b
-                class="env__state"
-                :class="managerAvailable(m.key) ? 'is-ok' : 'is-missing'"
+
+              <b v-if="managerAvailable(m.key)" class="env__state is-ok">可用</b>
+
+              <el-button
+                v-else-if="m.installable"
+                class="env__install"
+                link
+                size="small"
+                :loading="installing(m.key)"
+                :disabled="!!store.pmInstalling && !installing(m.key)"
+                @click="installManager(m.key)"
               >
-                {{ managerAvailable(m.key) ? '可用' : '未安装' }}
-              </b>
+                {{ installing(m.key) ? '安装中' : '安装' }}
+              </el-button>
+
+              <b v-else class="env__state is-missing" title="npm 随 Node.js 分发，请重新安装 Node.js">未安装</b>
             </li>
           </ul>
+
+          <p v-if="store.pmInstalling && store.pmInstallLog" class="env__log mono truncate" :title="store.pmInstallLog">
+            {{ store.pmInstallLog }}
+          </p>
+          <p v-else-if="store.pmInstalling" class="env__log env__log--idle">正在通过 npm 安装…</p>
+          <p v-if="store.pmInstalling" class="env__note">完整输出在下方终端</p>
         </div>
       </el-popover>
 
@@ -179,9 +234,49 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 }
 
 .env__gap {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 2px;
   margin-top: var(--sp-4);
   margin-bottom: var(--sp-1);
+}
+
+/* 标题旁边的重探按钮：不占地方，也不抢眼 */
+.env__refresh {
+  height: auto;
+  padding: 0;
+  color: var(--ink-3);
+}
+
+.env__refresh:hover {
+  color: var(--ink);
+}
+
+/* 未安装时那一下点击：做成行内小按钮，别把列表撑高 */
+.env__install {
+  height: auto;
+  padding: 0;
+  font-size: var(--fs-meta);
+  font-weight: 600;
+}
+
+.env__log {
+  margin-top: var(--sp-2);
+  padding-top: var(--sp-2);
+  border-top: 1px solid var(--border);
+  font-size: var(--fs-micro);
+  color: var(--ink-3);
+}
+
+.env__log--idle {
+  font-family: var(--font-ui);
+}
+
+.env__note {
+  margin-top: 4px;
+  font-size: var(--fs-micro);
+  color: var(--ink-3);
+  opacity: 0.75;
 }
 
 .env__list li {

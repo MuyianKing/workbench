@@ -1,0 +1,187 @@
+    <!-- PREVIEW-ONLY: 在浏览器里跑渲染层时用来顶替 electron preload 暴露的 API，截图后会删除 -->
+    <script>
+      ;(function () {
+       try {
+        const now = Date.now()
+        const make = (i, name) => ({
+          id: 'p' + i,
+          name,
+          path: 'F:/projects/' + name,
+          packageManager: 'auto',
+          detectedPackageManager: 'npm',
+          framework: 'Vue 3',
+          version: '1.0.0',
+          scripts: { serve: 'dev', build: ['build'], defaultBuild: 'build' },
+          autoOpenExplorer: false,
+          order: i,
+          createdAt: now - i * 86400000,
+          lastUsedAt: now - i * 3600000
+        })
+
+        const params = new URLSearchParams(location.search)
+
+        // PREVIEW-ONLY: 内置壁纸，与 resources/backgrounds 保持一致（截图前会把原图拷进 dist）
+        const WALLPAPER_FILES = ['古建云雾.jpg', '橘子洲头.jpg', '万重山.jpg', '五星红旗.jpg']
+        const idOf = (file) => file.replace(/\.[^.]+$/, '')
+
+        function loadImage(src) {
+          return new Promise((resolve, reject) => {
+            const img = new Image()
+            img.onload = () => resolve(img)
+            img.onerror = () => reject(new Error('加载失败：' + src))
+            img.src = src
+          })
+        }
+
+        /** 缩略图：跟主进程一样压到 360 宽，别拿几兆的原图铺设置面板 */
+        function thumbnailOf(img) {
+          const canvas = document.createElement('canvas')
+          canvas.width = 360
+          canvas.height = Math.round((img.height / img.width) * 360)
+          canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height)
+          return canvas.toDataURL('image/jpeg', 0.72)
+        }
+
+        /** 背景图：主进程那条链路是「解码 → 缩放到 1920 → JPEG(q82)」，这里照抄一遍 */
+        function backgroundOf(img) {
+          const canvas = document.createElement('canvas')
+          const scale = Math.min(1, 1920 / img.width)
+          canvas.width = Math.round(img.width * scale)
+          canvas.height = Math.round(img.height * scale)
+          canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height)
+          return canvas.toDataURL('image/jpeg', 0.82)
+        }
+
+        async function listWallpapers() {
+          const out = []
+          for (const file of WALLPAPER_FILES) {
+            const img = await loadImage('wallpapers/' + file)
+            out.push({
+              id: idOf(file),
+              name: file,
+              reference: 'builtin:' + idOf(file),
+              thumbnail: thumbnailOf(img)
+            })
+          }
+          return out
+        }
+
+        // ?wall=五星红旗.jpg 时把这张内置壁纸当作当前背景；?local=1 时假装设了一张磁盘上的自选图
+        const wallFile = params.get('wall') ? decodeURIComponent(params.get('wall')) : ''
+        const localPick = params.get('local') === '1'
+
+        const settings = {
+          closeBehavior: 'confirm',
+          launchAtLogin: false,
+          theme: params.get('dark') === '1' ? 'dark' : 'light',
+          hotkeyEnabled: true,
+          hotkey: 'Control+Shift+W',
+          minimizeToTray: false,
+          terminalHeight: 288,
+          sidePanelWidth: 340,
+          // PREVIEW-ONLY: ?side=left|right 切侧栏在哪一侧，一次截图一种摆法
+          sidePanelPosition: params.get('side') || 'right',
+          workspaceBackground: localPick
+            ? 'D:/pics/我的图.jpg'
+            : wallFile
+              ? 'builtin:' + idOf(wallFile)
+              : '',
+          workspaceBackgroundOpacity: Number(params.get('op') || 40),
+          workspaceBackgroundVeil: params.get('veil') || ''
+        }
+
+        const data = {
+          listProjects: {
+            projects:
+              params.get('empty') === '1'
+                ? []
+                : [
+                    make(1, 'admin-web'),
+                    make(2, 'mobile-h5'),
+                    make(3, 'data-dashboard'),
+                    make(4, 'landing-page'),
+                    make(5, 'mini-program'),
+                    make(6, 'component-lib'),
+                    make(7, 'docs-site'),
+                    make(8, 'design-tokens')
+                  ],
+            groups: []
+          },
+          getSettings: settings,
+          updateSettings: { ok: true, data: settings },
+          getDataLocation: {
+            dir: 'C:/Users/me/AppData/Roaming/workbench',
+            file: 'workbench-data.json',
+            isDefault: true
+          },
+          getActivity: {},
+          checkPackageManagers: { npm: true, yarn: true, pnpm: false, node: 'v20.11.0' },
+          getNvmStatus: {
+            available: true,
+            root: 'C:/nvm',
+            symlink: 'C:/nodejs',
+            current: '20.11.0',
+            versions: ['20.11.0', '18.20.4']
+          },
+          checkProjectPaths: {},
+          reveal: { ok: true },
+          checkPort: { port: 0, inUse: false },
+          getNodeVersion: { required: undefined, actual: '20.11.0', source: 'system', ok: true }
+        }
+
+        const clone = (value) => JSON.parse(JSON.stringify(value))
+
+        window.workbench = new Proxy(
+          {
+            platform: 'win32',
+            versions: { electron: '33.4.11', node: '20.11.0', chrome: '130.0.6723.44' }
+          },
+          {
+            get(target, prop) {
+              if (prop in target) return target[prop]
+              if (prop === 'listWallpapers') return () => listWallpapers()
+              if (prop === 'loadBackground') {
+                return async (ref) => {
+                  const builtin = /^builtin:/.test(String(ref))
+                  const file = builtin
+                    ? String(ref).replace(/^builtin:/, '') + '.jpg'
+                    : WALLPAPER_FILES[0]
+                  const img = await loadImage('wallpapers/' + file)
+                  return {
+                    ok: true,
+                    data: {
+                      path: ref,
+                      name: builtin ? file : '我的图.jpg',
+                      dataUrl: backgroundOf(img)
+                    }
+                  }
+                }
+              }
+              if (prop in data) return () => Promise.resolve(clone(data[prop]))
+              // 其余（事件订阅等）统一返回一个 unsubscribe
+              return () => () => {}
+            }
+          }
+        )
+
+        // PREVIEW-ONLY: ?settings=1 打开设置弹窗，方便截图看背景那一栏
+        if (params.get('settings') === '1') {
+          setTimeout(() => {
+            document.querySelector('[aria-label="设置"]')?.click()
+          }, 1200)
+        }
+
+        // PREVIEW-ONLY: 截图前滚到底部，方便看右栏最下面那块面板
+        if (params.get('scroll') === '1') {
+          setTimeout(() => {
+            const home = document.querySelector('.home')
+            if (home) home.scrollTop = home.scrollHeight
+          }, 1200)
+        }
+       } catch (err) {
+        // PREVIEW-ONLY: mock 挂了要看得见，否则界面只会静悄悄地停在空数据上
+        window.__previewMockError = String((err && err.message) || err)
+        document.title = 'MOCK-ERR: ' + window.__previewMockError
+       }
+      })()
+    </script>

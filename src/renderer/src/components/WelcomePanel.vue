@@ -274,7 +274,10 @@ const hints = computed(() => buildHints(store.settings))
 /* ---------- 右侧：环境 + 快捷操作 ---------- */
 .side {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  /* 两张面板都按内容高度，贴顶排列——原来第二行用 1fr 撑满，
+     内容不够高时多出来的高度只能堆在面板里，显得上下不匀 */
+  grid-template-rows: auto auto;
+  align-content: start;
   gap: 14px;
   min-height: 0;
 }
@@ -284,8 +287,11 @@ const hints = computed(() => buildHints(store.settings))
 }
 
 .side__note {
-  margin-top: auto;
-  padding-top: var(--sp-3);
+  /* 说明是列表的补充；和 HomePanels 的 .tips__note 保持同一套层次处理：
+     实线把它划到列表外面（行间是虚线），线上 4px 贴住最后一条提示，
+     上内距 10px、下内距 0 */
+  margin-top: calc(var(--sp-3) * -1 + 4px);
+  padding: calc(var(--sp-2) + 2px) 0 0;
   border-top: 1px solid var(--border);
   font-size: var(--fs-micro);
   color: var(--ink-3);

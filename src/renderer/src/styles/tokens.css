@@ -17,13 +17,20 @@
   --border-strong: #c9cfd8;
 
   /* ---------- 工作区背景装饰 ----------
-   * 不上任何图案（网格会跟卡片抢视线），只有顶部一层很淡的光晕。
+   * 默认不上任何图案（网格会跟卡片抢视线），只有顶部一层很淡的光晕。
+   * 用户可以在设置里指定一张背景图，它铺在首页画布的最底层；盖在图片上的那层蒙版就是
+   * --ws-veil：默认底色取画布色本身，用户也可以在设置里指定「渐淡色」（此时 ProjectGrid
+   * 会把 --ws-veil-rgb 写在元素上覆盖这里），alpha 由「背景图浓淡」实时换算
+   * （--ws-veil-alpha 同样写在元素上），图片越浓蒙版越淡。
    * --ambient 由「有项目在跑」时点亮（颜色仍然只表达状态）。
    */
   --wash: rgba(255, 255, 255, 0.6);
   --ambient: transparent;
   /* 有项目在跑时工作区顶部会亮起一层很淡的暖色：颜色依旧只用来表达状态 */
   --ambient-live: rgba(199, 127, 10, 0.09);
+  /* 背景图蒙版：底色 = --bg-canvas（#edeff2）；alpha 由 ProjectGrid 按浓淡实时覆盖 */
+  --ws-veil-rgb: 237, 239, 242;
+  --ws-veil-alpha: 0.6;
 
   /* ---------- 文本 ---------- */
   --ink: #11151b;
@@ -70,6 +77,18 @@
   --sp-5: 20px;
   --sp-6: 24px;
   --sp-8: 32px;
+
+  /* ---------- 弹层遮罩 ----------
+   * 应用里的弹窗（对话框、抽屉、确认框）一律走 Element Plus 的 .el-overlay，
+   * 它的底色就是 --el-overlay-color-lighter。取 transparent 表示「遮罩只负责挡点击」，
+   * 不再压暗背后的界面：弹窗靠边框与阴影从背景里浮起来，而不是靠一层半透明的灰。
+   * 另外两个同族变量（--el-overlay-color / -light）EP 的弹层不用，但下拉、上传、图片预览
+   * 会在自己的根节点上局部覆盖它们，一并置空，避免以后换个组件又冒出一层灰。
+   * 想恢复压暗效果时改这里即可，不必去动各个弹窗组件。
+   */
+  --el-overlay-color: transparent;
+  --el-overlay-color-light: transparent;
+  --el-overlay-color-lighter: transparent;
 
   /* ---------- 圆角 ---------- */
   --r-sm: 6px;
@@ -139,6 +158,8 @@
   --wash: rgba(232, 237, 244, 0.04);
   --ambient: transparent;
   --ambient-live: rgba(224, 162, 58, 0.12);
+  /* 背景图蒙版：底色 = 暗色的 --bg-canvas（#151a21） */
+  --ws-veil-rgb: 21, 26, 33;
 
   --ink: #e8edf4;
   --ink-2: #b3bdc9;

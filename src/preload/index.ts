@@ -5,6 +5,8 @@ import {
   type AddProjectInput,
   type AppSettings,
   type EffectiveTheme,
+  type InstallablePackageManager,
+  type PmInstallLogEvent,
   type ProcessLogEvent,
   type ProcessStatusEvent,
   type Project,
@@ -50,6 +52,8 @@ const api: WorkbenchApi = {
 
   reveal: (targetPath: string) => ipcRenderer.invoke(IPC.reveal, targetPath),
   checkPackageManagers: () => ipcRenderer.invoke(IPC.checkPackageManagers),
+  installPackageManager: (pm: InstallablePackageManager) =>
+    ipcRenderer.invoke(IPC.installPackageManager, pm),
   checkPort: (port: number) => ipcRenderer.invoke(IPC.checkPort, port),
   killPortProcess: (port: number) => ipcRenderer.invoke(IPC.killPortProcess, port),
   checkNodeVersion: (id: string) => ipcRenderer.invoke(IPC.checkNodeVersion, id),
@@ -63,6 +67,9 @@ const api: WorkbenchApi = {
 
   getSettings: () => ipcRenderer.invoke(IPC.getSettings),
   updateSettings: (patch: Partial<AppSettings>) => ipcRenderer.invoke(IPC.updateSettings, patch),
+  pickBackground: () => ipcRenderer.invoke(IPC.pickBackground),
+  loadBackground: (path: string) => ipcRenderer.invoke(IPC.loadBackground, path),
+  listWallpapers: () => ipcRenderer.invoke(IPC.listWallpapers),
 
   getDataLocation: () => ipcRenderer.invoke(IPC.getDataLocation),
   pickDataDir: () => ipcRenderer.invoke(IPC.pickDataDir),
@@ -78,6 +85,8 @@ const api: WorkbenchApi = {
   onSettingsChanged: (handler: (settings: AppSettings) => void) =>
     subscribe(IPC.eventSettings, handler),
   onTheme: (handler: (theme: EffectiveTheme) => void) => subscribe(IPC.eventTheme, handler),
+  onPmInstallLog: (handler: (event: PmInstallLogEvent) => void) =>
+    subscribe(IPC.eventPmInstallLog, handler),
   onDataReload: (handler: () => void) => subscribe(IPC.eventDataReload, handler)
 }
 

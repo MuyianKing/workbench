@@ -1,9 +1,15 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { FolderOpened } from '@element-plus/icons-vue'
+import { CircleClose, FolderOpened, Picture } from '@element-plus/icons-vue'
 import { useProjectsStore } from '@/stores/projects'
-import type { AppSettings, ThemeSource } from '@/types'
+import { SIDE_PANEL_WIDTH_MAX, SIDE_PANEL_WIDTH_MIN } from '@shared/side-panel-width'
+import {
+  BACKGROUND_OPACITY_MAX,
+  BACKGROUND_OPACITY_MIN
+} from '@shared/workspace-background'
+import { builtinIdOf } from '@shared/wallpaper'
+import type { AppSettings, SidePanelPosition, ThemeSource } from '@/types'
 
 const props = defineProps<{ modelValue: boolean }>()
 const emit = defineEmits<{ 'update:modelValue': [value: boolean] }>()
@@ -21,7 +27,58 @@ const themes: Array<{ value: ThemeSource; label: string }> = [
   { value: 'dark', label: '暗色' }
 ]
 
+/** 侧栏两条边，按钮顺序就是「左右」 */
+const sidePositions: Array<{ value: SidePanelPosition; label: string }> = [
+  { value: 'left', label: '左' },
+  { value: 'right', label: '右' }
+]
+
 const isPackaged = computed(() => !import.meta.env.DEV)
+
+/**
+ * 背景预览框里那行字：有图就是空的（img 顶掉它），没图要分清「还没选」和「选了但读不出来」，
+ * 后者是图片被删 / 换了格式，得让用户知道该重新选一张。
+ */
+const backgroundHint = computed(() => {
+  if (store.backgroundImage) return ''
+  if (store.backgroundError) return '图片读不出来'
+  return store.settings.workspaceBackground ? '读取中…' : '未设置'
+})
+
+/**
+ * 名字不再单独占一行（内置壁纸那一栏已经高亮说明了是哪张，自选的图看预览也知道），
+ * 但「到底设的是哪个文件」还得能查到 —— 鼠标停在预览上给全名。
+ */
+const backgroundTitle = computed(
+  () => store.backgroundName || store.settings.workspaceBackground || '还没有选择背景图'
+)
+
+/** 当前背景是自选的本地文件（不是内置壁纸），给「本地图片」那块一个选中态 */
+const isLocalBackground = computed(
+  () =>
+    !!store.settings.workspaceBackground &&
+    builtinIdOf(store.settings.workspaceBackground) === null
+)
+
+/**
+ * 渐淡色：给几个跟这套界面同调的低饱和底色，省得每次现调。
+ * 前两个就是明暗两套主题的画布色，选它们等于「跟随主题」的显式版本。
+ */
+const VEIL_PRESETS = [
+  '#edeff2',
+  '#1b212a',
+  '#f3efe7',
+  '#eef1ec',
+  '#e9edf2',
+  '#f6ece0',
+  '#2a2620'
+]
+
+const veilLabel = computed(() =>
+  store.settings.workspaceBackgroundVeil
+    ? store.settings.workspaceBackgroundVeil.toUpperCase()
+    : '默认（主题画布色）'
+)
 
 /** 快捷键录制状态 */
 const recording = ref(false)
@@ -67,7 +124,7 @@ function normalizeKey(key: string): string | null {
 const hotkeyLabel = computed(() =>
   store.settings.hotkey
     .split('+')
-    .map((part) => part.trim())
+    .map((part: string) => part.trim())
     .filter(Boolean)
     .join(' + ')
 )
@@ -104,7 +161,7 @@ watch(visible, (open) => {
 </script>
 
 <template>
-  <el-dialog v-model="visible" title="设置" width="560" align-center>
+  <el-dialog v-model="visible" title="设置" width="760" align-center>
     <div class="settings">
       <!-- 外观 -->
       <section class="block">
@@ -124,6 +181,160 @@ watch(visible, (open) => {
               {{ t.label }}
             </el-radio-button>
           </el-radio-group>
+        </div>
+
+        <div class="row">
+          <div class="row__text">
+            <span class="row__label">首页侧栏位置</span>
+            <span class="row__hint">
+              「活跃度 / 系统状态 / 最近使用 / 快捷操作」四块面板放在卡片网格的哪一侧。
+            </span>
+          </div>
+          <el-radio-group
+            :model-value="store.settings.sidePanelPosition"
+            size="small"
+            @update:model-value="
+              (value: unknown) => save({ sidePanelPosition: value as SidePanelPosition })
+            "
+          >
+            <el-radio-button v-for="p in sidePositions" :key="p.value" :value="p.value">
+              {{ p.label }}
+            </el-radio-button>
+          </el-radio-group>
+        </div>
+
+        <div class="row row--stack">
+          <div class="row__text">
+            <span class="row__label">首页侧栏宽度</span>
+            <span class="row__hint">
+              侧栏那条窄栏的宽度。窗口窄于 880px 时侧栏会自动排到卡片下方，这个值不再生效。
+            </span>
+          </div>
+          <div class="slider">
+            <el-slider
+              :model-value="store.sidePanelWidth"
+              :min="SIDE_PANEL_WIDTH_MIN"
+              :max="SIDE_PANEL_WIDTH_MAX"
+              :step="10"
+              :show-tooltip="false"
+              size="small"
+              @input="(value: unknown) => (store.sidePanelWidth = Number(value))"
+              @change="(value: unknown) => void store.setSidePanelWidth(Number(value))"
+            />
+            <span class="slider__value mono">{{ store.sidePanelWidth }} px</span>
+          </div>
+        </div>
+        <div class="row row--stack">
+          <div class="row__text">
+            <span class="row__label">工作区背景</span>
+            <span class="row__hint">
+              图片铺在首页画布的最底层，只在留白与卡片间隙里透出来；卡片和右栏面板照旧压在它上面，
+              显示与交互都不受影响。图片不进数据文件，这里只记路径。图片是渐淡进「渐淡色」的，
+              那个颜色默认跟着主题的画布色走。
+            </span>
+          </div>
+
+          <div class="bg">
+            <div class="bg__preview" :title="backgroundTitle">
+              <img v-if="store.backgroundImage" :src="store.backgroundImage" alt="工作区背景预览" />
+              <span v-else class="bg__empty">{{ backgroundHint }}</span>
+            </div>
+
+            <div class="bg__body">
+              <div class="slider">
+                <span class="bg__label">浓淡</span>
+                <el-slider
+                  :model-value="store.backgroundOpacity"
+                  :min="BACKGROUND_OPACITY_MIN"
+                  :max="BACKGROUND_OPACITY_MAX"
+                  :step="5"
+                  :show-tooltip="false"
+                  size="small"
+                  :disabled="!store.settings.workspaceBackground"
+                  @input="(value: unknown) => (store.backgroundOpacity = Number(value))"
+                  @change="(value: unknown) => void store.setBackgroundOpacity(Number(value))"
+                />
+                <span class="slider__value mono">{{ store.backgroundOpacity }}%</span>
+              </div>
+
+              <!-- 蒙版色：图片渐淡进去的那个颜色；留空就跟着主题的画布色走 -->
+              <div class="slider">
+                <span class="bg__label">渐淡色</span>
+                <el-color-picker
+                  :model-value="store.settings.workspaceBackgroundVeil || null"
+                  size="small"
+                  :predefine="VEIL_PRESETS"
+                  @change="(value: unknown) => void store.setBackgroundVeil(String(value ?? ''))"
+                />
+                <span class="bg__veil mono">{{ veilLabel }}</span>
+                <el-button
+                  link
+                  size="small"
+                  :disabled="!store.settings.workspaceBackgroundVeil"
+                  @click="store.setBackgroundVeil('')"
+                >
+                  跟随主题
+                </el-button>
+              </div>
+
+              <p v-if="store.backgroundError" class="bg__error">{{ store.backgroundError }}</p>
+            </div>
+          </div>
+
+          <!--
+            壁纸：摆出方格直接点选，选中即生效 —— 没有单独的「选择 / 清除」按钮。
+            每格都是「正方形图位 + 下方标签」，壁纸、本地入口、无背景三者形状完全一致。
+            内置的那几张引用 builtin:<id> 而不是安装路径（路径换个安装位置就失效了）；
+            「本地图片」是自选磁盘文件的入口，「无背景」相当于清除。
+            内置目录为空（老版本升级上来）时只少几块图，入口仍在。
+          -->
+          <div class="wallpapers">
+            <span v-if="store.wallpapers.length" class="bg__label">内置壁纸</span>
+
+            <div class="wallpapers__list">
+              <button
+                v-for="item in store.wallpapers"
+                :key="item.reference"
+                class="wallpaper"
+                type="button"
+                :class="{ 'is-active': store.settings.workspaceBackground === item.reference }"
+                :title="item.name"
+                @click="store.useWallpaper(item.reference)"
+              >
+                <span class="wallpaper__thumb">
+                  <img v-if="item.thumbnail" :src="item.thumbnail" alt="" />
+                  <span v-else class="wallpaper__name">读不出来</span>
+                </span>
+                <span class="wallpaper__name truncate">{{ item.id }}</span>
+              </button>
+
+              <button
+                class="wallpaper wallpaper--local"
+                type="button"
+                :class="{ 'is-active': isLocalBackground }"
+                :title="backgroundTitle"
+                @click="store.pickBackground()"
+              >
+                <span class="wallpaper__thumb wallpaper__thumb--blank">
+                  <el-icon><Picture /></el-icon>
+                </span>
+                <span class="wallpaper__name truncate">本地图片</span>
+              </button>
+
+              <button
+                class="wallpaper"
+                type="button"
+                :class="{ 'is-active': !store.settings.workspaceBackground }"
+                title="恢复默认画布"
+                @click="store.clearBackground()"
+              >
+                <span class="wallpaper__thumb wallpaper__thumb--blank">
+                  <el-icon><CircleClose /></el-icon>
+                </span>
+                <span class="wallpaper__name">无背景</span>
+              </button>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -346,6 +557,191 @@ watch(visible, (open) => {
 
 .stacked :deep(.el-radio) {
   margin-right: 0;
+}
+
+/* ---------- 宽度滑块 ---------- */
+.slider {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+/**
+ * 弹窗正文是滚动容器（overflow-y: auto），横向裁剪边界落在正文自己的 padding box 上；
+ * 而 16px 内边距在外层的 .el-dialog 上、不在正文身上，所以正文左边缘就是裁剪线。
+ * 滑块的圆形手柄在两端会探出跑道半个身位，最小值时左半边正好被这条线裁掉。
+ * 给滑块留出略大于半只手柄（含 hover 放大的 1.2 倍）的横向内边距即可。
+ */
+.slider :deep(.el-slider) {
+  flex: 1;
+  min-width: 0;
+  padding: 0 12px;
+}
+
+/**
+ * 主题切换：Element Plus 靠 box-shadow 盖住相邻按钮之间那道 1px 的缝，但选中项自身的
+ * 灰色 outline 会画在这道阴影之上，于是选中「亮色」时左边就留下一条灰竖线。
+ * 把选中项的 outline 换成主色，让它和实心块同色即可（首 / 末项的外沿也跟着填充色走）。
+ */
+.settings :deep(.el-radio-button.is-active .el-radio-button__inner) {
+  outline-color: var(--el-color-primary);
+}
+
+.slider__value {
+  flex-shrink: 0;
+  min-width: 52px;
+  font-size: var(--fs-meta);
+  color: var(--ink-2);
+  text-align: right;
+}
+
+/* ---------- 工作区背景 ---------- */
+
+.bg {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+.bg__preview {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 132px;
+  height: 78px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg-subtle);
+  overflow: hidden;
+}
+
+.bg__preview img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  /* 预览只交代「选了哪张图」，不按画布的 cover 裁切，缩略图更容易认 */
+  object-fit: cover;
+}
+
+.bg__empty {
+  font-size: var(--fs-micro);
+  color: var(--ink-3);
+}
+
+.bg__body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.bg__label {
+  flex-shrink: 0;
+  font-size: var(--fs-micro);
+  color: var(--ink-3);
+}
+
+.bg__veil {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-micro);
+  color: var(--ink-2);
+}
+
+/* ---------- 内置壁纸 ---------- */
+
+.wallpapers {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.wallpapers__list {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: var(--sp-2);
+}
+
+.wallpaper {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  /* 72px × 6 格（4 张内置 + 本地图片 + 无背景）在 760px 弹窗里只占左半，右边留白；再加图才会换行 */
+  width: 72px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg-subtle);
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.wallpaper:hover {
+  border-color: var(--border-strong);
+}
+
+/* 选中态用主色描边而不是换底色：缩略图本身颜色各异，底色一变就看不出图了 */
+.wallpaper.is-active {
+  border-color: var(--ink);
+  box-shadow: 0 0 0 1px var(--ink);
+}
+
+/**
+ * 图位：正方形。壁纸、本地入口、无背景共用同一副骨架，
+ * 所以一排格子的外形完全一致，只有里面是图还是图标之分。
+ */
+.wallpaper__thumb {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  border-radius: 3px;
+  background: var(--bg-inset);
+  overflow: hidden;
+}
+
+.wallpaper__thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.wallpaper__thumb--blank {
+  font-size: 17px;
+  color: var(--ink-3);
+}
+
+.wallpaper.is-active .wallpaper__thumb--blank {
+  color: var(--ink);
+}
+
+.wallpaper__name {
+  font-size: var(--fs-micro);
+  color: var(--ink-3);
+  text-align: center;
+}
+
+.wallpaper.is-active .wallpaper__name {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/* 本地入口用虚框：一眼看出这不是一张图 */
+.wallpaper--local {
+  border-style: dashed;
+}
+
+/* 图片读不出来是一种状态，按「颜色只表达状态」的规矩用失败色，而不是随手来个红字 */
+.bg__error {
+  font-size: var(--fs-micro);
+  line-height: 1.6;
+  color: var(--st-fail);
 }
 
 /* ---------- 数据位置 ---------- */

@@ -6,16 +6,29 @@
  * 数据来自 store.activity（YYYY-MM-DD → 次数），由主进程在每条命令结束时累加。
  * 只画次数不画成败：活跃度回答的是「这段时间用得勤不勤」，不是「跑得顺不顺」。
  */
-import { computed } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
 import { useProjectsStore } from '@/stores/projects'
 import { buildActivityCalendar, monthLabels, type ActivityDay } from '@shared/activity'
 
 const store = useProjectsStore()
 
+/** 横向滚动容器：默认要停在最右，先看到今天 */
+const scrollEl = ref<HTMLElement | null>(null)
+
+/**
+ * 滚到最右。列的宽度是固定的像素（--cell），不依赖字体加载，
+ * 所以挂载后量到的 scrollWidth 就是最终宽度，不用等 resize 再补一次。
+ * 横轴末端固定是今天，往后新数据也只是把今天的格子填上，图不会变宽。
+ */
+function scrollToLatest(): void {
+  const el = scrollEl.value
+  if (el) el.scrollLeft = el.scrollWidth
+}
+
+onMounted(() => void nextTick(scrollToLatest))
+
 /** 一列从上到下是周日到周六，只在周一 / 周三 / 周五标一下（GitHub 的做法） */
 const WEEKDAY_LABELS = ['', 'Mon', '', 'Wed', '', 'Fri', '']
-
-const LEVELS = [0, 1, 2, 3, 4]
 
 /**
  * 横轴末端是今天，所以拿 store.dayStart（今天 00:00，跨天变一次）当基准 ——
@@ -41,42 +54,32 @@ function tipOf(day: ActivityDay): string {
     </header>
 
     <div class="graph">
-      <div class="graph__scroll scroll-dark">
+      <div class="graph__dows" aria-hidden="true">
+        <span v-for="(label, i) in WEEKDAY_LABELS" :key="i" class="graph__dow">
+          {{ label }}
+        </span>
+      </div>
+
+      <div ref="scrollEl" class="graph__scroll">
         <div class="graph__months">
           <span v-for="(label, i) in months" :key="i" class="graph__month">{{ label }}</span>
         </div>
 
-        <div class="graph__body">
-          <div class="graph__dows" aria-hidden="true">
-            <span v-for="(label, i) in WEEKDAY_LABELS" :key="i" class="graph__dow">
-              {{ label }}
-            </span>
-          </div>
-
-          <div
-            class="graph__grid"
-            role="img"
-            :aria-label="`过去一年共 ${calendar.total} 次命令执行`"
-          >
-            <div v-for="(week, wi) in calendar.weeks" :key="wi" class="graph__week">
-              <i
-                v-for="day in week.days"
-                :key="day.date"
-                class="cell"
-                :class="[`is-${day.level}`, { 'is-future': day.future }]"
-                :title="tipOf(day)"
-              />
-            </div>
+        <div
+          class="graph__grid"
+          role="img"
+          :aria-label="`过去一年共 ${calendar.total} 次命令执行`"
+        >
+          <div v-for="(week, wi) in calendar.weeks" :key="wi" class="graph__week">
+            <i
+              v-for="day in week.days"
+              :key="day.date"
+              class="cell"
+              :class="[`is-${day.level}`, { 'is-future': day.future }]"
+              :title="tipOf(day)"
+            />
           </div>
         </div>
-      </div>
-    </div>
-
-    <div class="graph__foot">
-      <div class="legend">
-        <span class="legend__word">少</span>
-        <i v-for="level in LEVELS" :key="level" class="cell" :class="`is-${level}`" />
-        <span class="legend__word">多</span>
       </div>
     </div>
   </article>
@@ -90,6 +93,12 @@ function tipOf(day: ActivityDay): string {
   --col-gap: 5px;
   /* 星期标签列的宽度：要放得下 Mon / Wed / Fri 三个字母 */
   --dow-w: 26px;
+  /* 月份标签行的高度 + 下边距，星期列靠它对齐到网格 */
+  --months-h: 18px;
+
+  /* 星期标签固定在左，只有网格随滚动条横向滚动 */
+  display: flex;
+  gap: var(--col-gap);
 
   /**
    * 深浅五档，纯黑到浅灰。
@@ -109,10 +118,59 @@ function tipOf(day: ActivityDay): string {
   --lv-3: #8b96a5;
 }
 
+/**
+ * 卡片下沿留白比上沿大：横向滚动条即使隐形也在流里占着一条，
+ * 于是底部平白多出一截空。把它压薄，再去掉额外的 padding-bottom，
+ * 下方间距就和上方对得上。
+ */
+.panel {
+  padding-bottom: var(--sp-3);
+}
+
 /* 网格整体左对齐：内容宽度不够一整行时不要被拉散 */
 .graph__scroll {
+  flex: 1;
+  min-width: 0;
   overflow-x: auto;
-  padding-bottom: 2px;
+}
+
+/**
+ * 横向滚动条：平时完全隐形，鼠标进到图上才浮出来。
+ *
+ * hover 只换拇指颜色，不动滚动条的占位 —— overflow-x 保持 auto，
+ * 而 53 列必然超出栏宽，轨道自始至终都在，所以进出 hover 时
+ * 图的高度与位置都不会跳。
+ *
+ * 高度压到 8px、拇指边框同步收窄到 2px，显形时的粗细仍是 4px：
+ * 细一点，卡片下沿能少占一截空。
+ */
+.graph__scroll::-webkit-scrollbar {
+  height: 8px;
+}
+
+.graph__scroll::-webkit-scrollbar-thumb {
+  border-width: 2px;
+  background: transparent;
+}
+
+.graph:hover .graph__scroll::-webkit-scrollbar-thumb {
+  background: rgba(17, 21, 27, 0.2);
+  background-clip: content-box;
+}
+
+.graph:hover .graph__scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(17, 21, 27, 0.38);
+  background-clip: content-box;
+}
+
+:root[data-theme='dark'] .graph:hover .graph__scroll::-webkit-scrollbar-thumb {
+  background: rgba(199, 208, 219, 0.24);
+  background-clip: content-box;
+}
+
+:root[data-theme='dark'] .graph:hover .graph__scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(199, 208, 219, 0.44);
+  background-clip: content-box;
 }
 
 .graph__months,
@@ -124,10 +182,8 @@ function tipOf(day: ActivityDay): string {
 }
 
 .graph__months {
-  /* 让开星期标签那一列，月份才和各自的列对齐 */
-  margin-left: calc(var(--dow-w) + var(--col-gap));
   margin-bottom: 4px;
-  height: 14px;
+  height: calc(var(--months-h) - 4px);
 }
 
 .graph__month {
@@ -139,15 +195,12 @@ function tipOf(day: ActivityDay): string {
   white-space: nowrap;
 }
 
-.graph__body {
-  display: flex;
-  gap: var(--col-gap);
-}
-
 .graph__dows {
   display: grid;
   grid-template-rows: repeat(7, var(--cell));
   row-gap: var(--gap);
+  /* 与月份标签行等高对齐，让标签正好落在各自的网格行上 */
+  margin-top: var(--months-h);
   flex-shrink: 0;
   width: var(--dow-w);
 }
@@ -195,26 +248,8 @@ function tipOf(day: ActivityDay): string {
   background: transparent;
 }
 
-/* ---------- 上下两条说明 ---------- */
+/* ---------- 右上角统计 ---------- */
 .graph__total {
-  font-size: var(--fs-micro);
-  color: var(--ink-3);
-}
-
-.graph__foot {
-  display: flex;
-  justify-content: flex-end;
-  min-width: 0;
-}
-
-.legend {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--gap);
-  flex-shrink: 0;
-}
-
-.legend__word {
   font-size: var(--fs-micro);
   color: var(--ink-3);
 }

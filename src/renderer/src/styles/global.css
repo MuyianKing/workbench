@@ -214,6 +214,8 @@ body.is-resizing-terminal * {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  /* dl 默认带 1em 上下外边距，不清掉会比旁边用 ul 的面板多出两截留白 */
+  margin: 0;
   font-size: var(--fs-meta);
 }
 
@@ -274,6 +276,7 @@ body.is-resizing-terminal * {
 .tips {
   display: flex;
   flex-direction: column;
+  /* 提示按内容高度紧凑排列，不参与拉伸——拉伸只会把行距撑松 */
   flex-shrink: 0;
 }
 
@@ -364,11 +367,14 @@ body.is-resizing-terminal * {
  *
  * 统一做法：遮罩从标题栏下沿开始。弹层就只能在这块区域里居中与滚动，永远不会钻到窗口按钮下面。
  * 这些元素要么 Teleport 到 body，要么不在组件模板里，scoped 样式够不着，所以放全局。
+ *
+ * 遮罩本身不压暗背景、也不虚化背景（--el-overlay-color-lighter 见 tokens.css，这里原来是
+ * backdrop-filter: blur(1px)，已去掉）：它仍然铺满这块区域负责「点击外部关闭」，
+ * 所以这层元素必须留着，只是完全看不见、也不改变背后的画面。
  */
 .el-overlay {
   top: var(--h-titlebar);
   height: calc(100% - var(--h-titlebar));
-  backdrop-filter: blur(1px);
 }
 
 /* 高对话框改成「头部/底部固定 + 内容滚动」，否则内容一长就整体溢出、顶部被裁掉 */

@@ -1,4 +1,4 @@
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, markRaw, reactive, ref, watch } from 'vue'
 import { defineStore } from 'pinia'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
@@ -6,13 +6,16 @@ import {
   type ActivityCounts,
   type AddProjectInput,
   type AppSettings,
+  type BuiltinWallpaper,
   type DataLocation,
   type EffectiveTheme,
+  type InstallablePackageManager,
   type LogLine,
   type NvmStatus,
   type PackageManager,
   type PackageManagerStatus,
   type ProcessLogEvent,
+  type ProcessLogPayload,
   type ProcessStatusEvent,
   type Project,
   type ProjectGroup,
@@ -22,10 +25,25 @@ import {
   type TerminalOpenEvent
 } from '@/types'
 import { clampTerminalHeight } from '@shared/terminal-height'
+import { clampSidePanelWidth } from '@shared/side-panel-width'
+import { clampBackgroundOpacity, sanitizeVeilColor } from '@shared/workspace-background'
+import { RingLog } from '@shared/log-ring'
 
 const LOG_LIMIT = 5000
 
+/** 本机环境那个终端（npm 全局安装包管理器）的固定键，全局只有一个 */
+export const SYSTEM_PM_TERMINAL = 'system::pm'
+
 let logSeq = 0
+
+/**
+ * 日志缓冲区每次变化的计数。
+ *
+ * 缓冲区本身被 markRaw 掉、不参与响应式（5000 行的数组让 Vue 代理它纯属浪费），
+ * 所以渲染层靠这个计数器知道「有新日志了」。放在 store 外面：
+ * 一份就够 —— 面板同一时刻只渲染一个终端的日志。
+ */
+const logVersion = ref(0)
 
 /** 未分组项目在筛选栏里的伪分组 id */
 export const UNGROUPED = 'ungrouped'
@@ -49,7 +67,12 @@ export interface TerminalState {
   durationMs?: number
   exitCode?: number | null
   port?: number
-  logs: LogLine[]
+  /**
+   * 输出缓冲：定长环形，且被 markRaw 掉（刻意不参与响应式）。
+   * 用 ring 而不是数组，是为了避开写满之后每行一次 `splice(0, 1)` 的整体搬移；
+   * 想看它的变化请依赖 `logVersion`。
+   */
+  logs: RingLog<LogLine>
 }
 
 const RUNNING_STATUS: ReadonlyArray<string> = ['running', 'installing', 'building']
@@ -97,6 +120,10 @@ export const useProjectsStore = defineStore('projects', () => {
   const addDialogVisible = ref(false)
 
   const packageManagers = ref<PackageManagerStatus | null>(null)
+  /** 正在通过 npm 全局安装的包管理器，null 表示空闲 */
+  const pmInstalling = ref<InstallablePackageManager | null>(null)
+  /** 安装过程的最新一行 npm 输出，仅安装期间有值 */
+  const pmInstallLog = ref('')
   /** nvm 探测结果：可选的项目级 Node 版本来自这里 */
   const nvm = ref<NvmStatus | null>(null)
   const ready = ref(false)
@@ -129,6 +156,154 @@ export const useProjectsStore = defineStore('projects', () => {
     if (next === settings.value.terminalHeight) return
 
     await updateSettings({ terminalHeight: next })
+  }
+
+  /**
+   * 首页右栏宽度（px）。
+   *
+   * 与终端高度同一套做法：滑块拖动过程中只改这个 ref 让布局跟手，
+   * 松手（change）才落盘，免得每动一格就写一次数据文件。
+   */
+  const sidePanelWidth = ref(DEFAULT_SETTINGS.sidePanelWidth)
+
+  watch(
+    () => settings.value.sidePanelWidth,
+    (value) => {
+      sidePanelWidth.value = clampSidePanelWidth(value)
+    },
+    { immediate: true }
+  )
+
+  async function setSidePanelWidth(px: number): Promise<void> {
+    const next = clampSidePanelWidth(px)
+    sidePanelWidth.value = next
+    if (next === settings.value.sidePanelWidth) return
+
+    await updateSettings({ sidePanelWidth: next })
+  }
+
+  /**
+   * 工作区背景。
+   *
+   * 设置里存的是磁盘路径，这里拿到的永远是主进程压好的 data URL（见 stores 上方说明与
+   * main/background.ts）：图片不进数据文件，换图只是换一个字符串。
+   * 图片被删、被换成读不出来的格式时留空并把原因记在 backgroundError 里，设置界面据此提示。
+   */
+  const backgroundImage = ref('')
+  const backgroundName = ref('')
+  const backgroundError = ref('')
+  /** 已经读进 backgroundImage 的那条路径，用来免掉「刚选完又被设置变化推着读一遍」 */
+  const backgroundPath = ref('')
+
+  const backgroundOpacity = ref(DEFAULT_SETTINGS.workspaceBackgroundOpacity)
+
+  watch(
+    () => settings.value.workspaceBackgroundOpacity,
+    (value) => {
+      backgroundOpacity.value = clampBackgroundOpacity(value)
+    },
+    { immediate: true }
+  )
+
+  async function setBackgroundOpacity(percent: number): Promise<void> {
+    const next = clampBackgroundOpacity(percent)
+    backgroundOpacity.value = next
+    if (next === settings.value.workspaceBackgroundOpacity) return
+
+    await updateSettings({ workspaceBackgroundOpacity: next })
+  }
+
+  /**
+   * 蒙版色：图片渐淡进去的那个颜色，空串表示跟随主题的画布色。
+   * 没有背景图时它照样生效 —— 相当于给工作区定一个底色。
+   */
+  async function setBackgroundVeil(color: string): Promise<boolean> {
+    const next = sanitizeVeilColor(color)
+    if (next === settings.value.workspaceBackgroundVeil) return true
+
+    return updateSettings({ workspaceBackgroundVeil: next })
+  }
+
+  /** 读一张图贴上工作区；读不出来时清空并把原因留在 backgroundError */
+  async function applyBackground(path: string): Promise<boolean> {
+    if (!path) {
+      backgroundImage.value = ''
+      backgroundName.value = ''
+      backgroundPath.value = ''
+      backgroundError.value = ''
+      return true
+    }
+
+    // 同一张图已经在手上：选完图落盘会再触发一次，没必要把几兆的 data URL 再搬一遍
+    if (path === backgroundPath.value && backgroundImage.value) return true
+
+    const result = await window.workbench.loadBackground(path)
+    if (!result.ok || !result.data) {
+      backgroundImage.value = ''
+      backgroundName.value = ''
+      backgroundPath.value = ''
+      backgroundError.value = result.error ?? '背景图读取失败'
+      return false
+    }
+
+    backgroundImage.value = result.data.dataUrl
+    backgroundName.value = result.data.name
+    backgroundPath.value = result.data.path
+    backgroundError.value = ''
+    return true
+  }
+
+  // 设置是异步载入的，也可能被设置窗口改写（甚至被数据目录迁移整份换掉），跟着它同步
+  watch(
+    () => settings.value.workspaceBackground,
+    (value) => void applyBackground(value),
+    { immediate: true }
+  )
+
+  /**
+   * 随应用发布的内置壁纸（resources/backgrounds 下的那几张）。
+   *
+   * 只在启动时拉一次：它们的缩略图是主进程现压的 data URL，没必要每次开设置都重来一遍。
+   * 目录里没有图时是空数组，设置里那一栏自己会收起来。
+   */
+  const wallpapers = ref<BuiltinWallpaper[]>([])
+
+  async function refreshWallpapers(): Promise<void> {
+    wallpapers.value = await window.workbench.listWallpapers()
+  }
+
+  /**
+   * 换一张工作区背景。
+   *
+   * target 可以是磁盘路径、`builtin:<id>` 内置引用，或空串（恢复默认画布）。
+   * 一律先读通再落盘：免得把一个读不出来的值写进设置，下次启动才发现是一片空白。
+   */
+  async function chooseBackground(target: string): Promise<boolean> {
+    if (!(await applyBackground(target))) {
+      ElMessage.error(backgroundError.value || '这张图片读不出来，请换一张')
+      return false
+    }
+    if (target === settings.value.workspaceBackground) return true
+
+    return updateSettings({ workspaceBackground: target })
+  }
+
+  /** 从磁盘上挑一张图当背景 */
+  async function pickBackground(): Promise<boolean> {
+    const picked = await window.workbench.pickBackground()
+    if (!picked) return false
+
+    return chooseBackground(picked)
+  }
+
+  /** 点选一张内置壁纸 */
+  async function useWallpaper(reference: string): Promise<boolean> {
+    return chooseBackground(reference)
+  }
+
+  /** 恢复默认画布 */
+  async function clearBackground(): Promise<boolean> {
+    return chooseBackground('')
   }
 
   /** 驱动运行时长刷新 */
@@ -169,6 +344,27 @@ export const useProjectsStore = defineStore('projects', () => {
       .filter((item): item is TerminalState => !!item && item.projectId === projectId)
   }
 
+  /**
+   * 新建一个终端状态。
+   * 日志缓冲必须 markRaw：否则 5000 行的数组会被 Vue 整个包成响应式代理，
+   * 每写一行都在触发器里走一遍转换。
+   */
+  function createTerminal(
+    key: string,
+    projectId: string,
+    kind: TerminalKind,
+    label: string
+  ): TerminalState {
+    return {
+      key,
+      projectId,
+      kind,
+      label,
+      status: 'idle',
+      logs: markRaw(new RingLog<LogLine>(LOG_LIMIT))
+    }
+  }
+
   function ensureTerminal(event: TerminalOpenEvent): TerminalState {
     const existing = terminals[event.terminal]
     if (existing) {
@@ -177,17 +373,45 @@ export const useProjectsStore = defineStore('projects', () => {
       return existing
     }
 
-    const created: TerminalState = {
-      key: event.terminal,
-      projectId: event.projectId,
-      kind: event.kind,
-      label: event.label,
-      status: 'idle',
-      logs: []
-    }
+    const created = createTerminal(event.terminal, event.projectId, event.kind, event.label)
     terminals[event.terminal] = created
     terminalOrder.value = [...terminalOrder.value, event.terminal]
     return created
+  }
+
+  /**
+   * 打开（或复用）本机环境那个终端，并把它切到前台。
+   *
+   * 它不属于任何项目，所以主进程不会推 terminal-open —— 整个生命周期都在渲染层，
+   * 复用同一套 Tab / 日志 / 滚动机制，安装 npm 全局包时用户看到的就是熟悉的面板。
+   */
+  function openSystemTerminal(label: string): TerminalState {
+    const existing = terminals[SYSTEM_PM_TERMINAL]
+    if (existing) {
+      existing.label = label
+      return existing
+    }
+
+    const created = createTerminal(SYSTEM_PM_TERMINAL, '', 'system', label)
+    terminals[SYSTEM_PM_TERMINAL] = created
+    terminalOrder.value = [...terminalOrder.value, SYSTEM_PM_TERMINAL]
+
+    activeTerminal.value = SYSTEM_PM_TERMINAL
+    terminalCollapsed.value = false
+    return created
+  }
+
+  /** 往系统终端补一行输出；走批量通道，与项目日志同一套节奏 */
+  function appendSystemLog(text: string, stream: LogLine['stream'] = 'out'): void {
+    if (!terminals[SYSTEM_PM_TERMINAL]) return
+    pendingLogs.push({
+      terminal: SYSTEM_PM_TERMINAL,
+      projectId: '',
+      stream,
+      text,
+      time: new Date().toLocaleTimeString('zh-CN', { hour12: false })
+    })
+    scheduleFlush()
   }
 
   function onTerminalOpen(event: TerminalOpenEvent): void {
@@ -217,7 +441,13 @@ export const useProjectsStore = defineStore('projects', () => {
     }
   }
 
-  /** 日志按帧批量写入，避免高频 IPC 触发过多渲染 */
+  /**
+   * 日志按帧批量写入。
+   *
+   * 主进程已经按帧聚合过一次（见 main/log-batcher.ts），这里再兜一层是因为
+   * 同一条通道上还混着系统提示与安装输出；而且批次到了以后要一次性写进环形缓冲、
+   * 只把版本号加一次，让 Vue 每帧至多重新渲染一次。
+   */
   const pendingLogs: ProcessLogEvent[] = []
   let flushScheduled = false
 
@@ -232,27 +462,57 @@ export const useProjectsStore = defineStore('projects', () => {
     if (!pendingLogs.length) return
 
     const batch = pendingLogs.splice(0, pendingLogs.length)
-    for (const event of batch) {
-      const target = terminals[event.terminal]
-      // 终端被用户关掉了就丢弃后续输出，不要凭日志把它复活
-      if (!target) continue
 
-      const line: LogLine = {
+    // 同一帧里同一个终端可能来好几条，先归堆再整批写入
+    const grouped = new Map<string, LogLine[]>()
+    for (const event of batch) {
+      // 终端被用户关掉了就丢弃后续输出，不要凭日志把它复活
+      if (!terminals[event.terminal]) continue
+
+      let list = grouped.get(event.terminal)
+      if (!list) {
+        list = []
+        grouped.set(event.terminal, list)
+      }
+      list.push({
         id: ++logSeq,
         time: event.time,
         stream: event.stream,
         text: event.text
-      }
-      target.logs.push(line)
-      if (target.logs.length > LOG_LIMIT) target.logs.splice(0, target.logs.length - LOG_LIMIT)
+      })
     }
+
+    if (!grouped.size) return
+
+    for (const [key, list] of grouped) {
+      terminals[key]?.logs.pushMany(list)
+    }
+    // 版本号只加一次：这一帧新增的所有行共用一个渲染批次
+    logVersion.value += 1
   }
 
-  function onLog(event: ProcessLogEvent): void {
-    // 终端被关掉后主进程可能还有在途输出，这里过滤掉，避免又冒出一个 Tab
-    if (!terminals[event.terminal]) return
-    pendingLogs.push(event)
-    scheduleFlush()
+  function onLog(payload: ProcessLogPayload): void {
+    // 主进程批量通道推的是一整批；单条直发的是系统提示这类零散消息
+    const events = Array.isArray(payload) ? payload : [payload]
+
+    for (const event of events) {
+      if (terminals[event.terminal]) {
+        pendingLogs.push(event)
+        continue
+      }
+
+      // 系统 / 错误提示可能来自命令之外的动作（如「打开产物目录」），没有绑定到
+      // 具体命令终端。落到该项目当前已有的任一终端，免得这些信息凭空消失；
+      // 已关闭的终端不在 terminalOrder 里，所以不会把已关的 Tab 复活。
+      if (event.stream !== 'sys' && event.stream !== 'err') continue
+
+      const fallback = terminalOrder.value
+        .map((key) => terminals[key])
+        .find((item) => item && item.projectId === event.projectId)
+      if (fallback) pendingLogs.push({ ...event, terminal: fallback.key })
+    }
+
+    if (pendingLogs.length) scheduleFlush()
   }
 
   function onStatus(event: ProcessStatusEvent): void {
@@ -296,7 +556,11 @@ export const useProjectsStore = defineStore('projects', () => {
       if (pendingLogs[i].terminal === payload.terminal) pendingLogs.splice(i, 1)
     }
     const target = terminals[payload.terminal]
-    if (target) target.logs = []
+    if (target) {
+      target.logs.clear()
+      // 清空也是一次变化：面板得跟着重画，否则旧行会留在 DOM 上
+      logVersion.value += 1
+    }
   }
 
   /** 切到某个终端并把面板展开 */
@@ -309,7 +573,9 @@ export const useProjectsStore = defineStore('projects', () => {
 
   function clearTerminalLogs(key: string): void {
     const target = terminals[key]
-    if (target) target.logs = []
+    if (!target) return
+    target.logs.clear()
+    logVersion.value += 1
   }
 
   /** 主进程更新了项目（执行记录、最近使用时间），同步回本地列表 */
@@ -375,6 +641,7 @@ export const useProjectsStore = defineStore('projects', () => {
     settings.value = await window.workbench.getSettings()
     dataLocation.value = await window.workbench.getDataLocation()
     activity.value = await window.workbench.getActivity()
+    await refreshWallpapers()
     applyTheme(resolveTheme(settings.value))
   }
 
@@ -399,6 +666,11 @@ export const useProjectsStore = defineStore('projects', () => {
       applyTheme(resolveTheme(value))
     })
     window.workbench.onTheme(applyTheme)
+    // 安装包管理器时把 npm 的输出原样透出来：弹层里显示最后一行，完整过程进底部终端
+    window.workbench.onPmInstallLog((event) => {
+      pmInstallLog.value = event.text
+      appendSystemLog(event.text)
+    })
     // 数据目录切换后整份重新加载：项目 ID 可能整套换掉，旧终端与选中态都不再成立
     window.workbench.onDataReload(() => {
       void reloadAfterDataMove()
@@ -441,6 +713,65 @@ export const useProjectsStore = defineStore('projects', () => {
       ElMessage.warning(`快捷键 ${patch.hotkey ?? result.data.hotkey} 被系统或其他应用占用，已自动停用`)
     }
     return true
+  }
+
+  // ---------- 本机环境 ----------
+
+  /** 重新探测包管理器。装上东西之后界面上那一列状态就靠它刷新 */
+  async function refreshPackageManagers(): Promise<void> {
+    packageManagers.value = await window.workbench.checkPackageManagers()
+  }
+
+  /**
+   * 用 npm 全局安装 yarn / pnpm。
+   *
+   * 主进程装完会顺带重探一次并把结果带回来，所以这里只是兜底再刷一遍 ——
+   * 失败的情况也一样刷，例如装成功了但 PATH 还没生效，至少状态是准的。
+   */
+  async function installPackageManager(pm: InstallablePackageManager): Promise<boolean> {
+    if (pmInstalling.value) return false
+
+    const terminal = openSystemTerminal(`安装 ${pm}`)
+    // 同一轮接一轮地装不同的包时，日志从零开始，别把上一次的输出混进来
+    onClear({ terminal: SYSTEM_PM_TERMINAL })
+
+    const startedAt = Date.now()
+    terminal.status = 'installing'
+    terminal.currentCommand = `npm install -g ${pm}`
+    terminal.startedAt = startedAt
+    appendSystemLog(`npm install -g ${pm}`, 'cmd')
+
+    pmInstalling.value = pm
+    pmInstallLog.value = ''
+
+    const settle = (status: 'success' | 'failed', note?: string): void => {
+      terminal.status = status
+      terminal.startedAt = undefined
+      terminal.durationMs = Date.now() - startedAt
+      if (note) appendSystemLog(note, status === 'failed' ? 'err' : 'sys')
+    }
+
+    try {
+      const result = await window.workbench.installPackageManager(pm)
+      await refreshPackageManagers()
+      if (!result.ok) {
+        settle('failed', result.error ?? `${pm} 安装失败`)
+        ElMessage.error(result.error ?? `安装 ${pm} 失败`)
+        return false
+      }
+      settle('success', `${pm} 安装完成，已刷新环境状态`)
+      ElMessage.success(`${pm} 安装完成`)
+      return true
+    } catch (err) {
+      await refreshPackageManagers()
+      const message = (err as Error).message || `安装 ${pm} 失败`
+      settle('failed', message)
+      ElMessage.error(message)
+      return false
+    } finally {
+      pmInstalling.value = null
+      pmInstallLog.value = ''
+    }
   }
 
   // ---------- 项目与分组 ----------
@@ -966,6 +1297,18 @@ export const useProjectsStore = defineStore('projects', () => {
     activeTerminal.value ? terminals[activeTerminal.value] ?? null : null
   )
 
+  /**
+   * 当前终端的日志快照。
+   *
+   * 显式依赖 logVersion：缓冲数组被 markRaw 掉了，Vue 看不见它的写入，
+   * 这个计数器就是「有新行」的信号。调用方拿到的是一个新数组，
+   * 不该拿去写，只用于渲染与导出。
+   */
+  const activeLogs = computed<LogLine[]>(() => {
+    void logVersion.value
+    return activeTerminalState.value?.logs.toArray() ?? []
+  })
+
   const drawerProject = computed(() =>
     drawerProjectId.value ? findProject(drawerProjectId.value) ?? null : null
   )
@@ -977,10 +1320,24 @@ export const useProjectsStore = defineStore('projects', () => {
     runtimes,
     terminals,
     terminalList,
+    terminalOrder,
+    /**
+     * 日志缓冲区的变化计数（见文件顶部的 logVersion）。
+     * 缓冲区本身不参与响应式，依赖它才能知道「有新的日志行」。
+     */
+    logVersion,
+    activeLogs,
     activeTerminal,
     activeTerminalState,
     terminalCollapsed,
     terminalHeight,
+    sidePanelWidth,
+    backgroundImage,
+    backgroundName,
+    backgroundError,
+    backgroundOpacity,
+    wallpapers,
+    refreshWallpapers,
     dataLocation,
     keyword,
     groupFilter,
@@ -988,6 +1345,8 @@ export const useProjectsStore = defineStore('projects', () => {
     drawerProjectId,
     addDialogVisible,
     packageManagers,
+    pmInstalling,
+    pmInstallLog,
     nvm,
     ready,
     pathValidity,
@@ -1007,6 +1366,8 @@ export const useProjectsStore = defineStore('projects', () => {
     assignGroup,
     reorderGroups,
     refreshNvm,
+    refreshPackageManagers,
+    installPackageManager,
     installedNodeVersion,
     init,
     refreshActivity,
@@ -1025,6 +1386,12 @@ export const useProjectsStore = defineStore('projects', () => {
     closeTerminal,
     clearTerminalLogs,
     setTerminalHeight,
+    setSidePanelWidth,
+    setBackgroundOpacity,
+    setBackgroundVeil,
+    pickBackground,
+    useWallpaper,
+    clearBackground,
     isPathValid,
     refreshPaths,
     relocate,
