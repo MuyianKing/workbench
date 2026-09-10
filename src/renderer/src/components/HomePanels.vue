@@ -2,15 +2,16 @@
 /**
  * 首页卡片网格下面的工作台面板。
  *
- * 卡片网格下面是整块空画布，项目少的时候尤其明显。这四块面板把剩下的高度接住：
- * 系统状态 / 最近使用 / 最近执行 / 快捷操作。列表顶在面板上沿、动作贴在下沿，
+ * 卡片网格下面是整块空画布，项目少的时候尤其明显。这三块面板把剩下的高度接住：
+ * 系统状态 / 最近使用 / 快捷操作。列表顶在面板上沿、动作贴在下沿，
  * 窗口越高面板只是越舒展，不会出现半张空卡片。
  */
 import { computed } from 'vue'
 import { FolderOpened, Plus } from '@element-plus/icons-vue'
 import { useProjectsStore } from '@/stores/projects'
 import { buildHints } from '@/hints'
-import type { Project, ProjectStatus, RunRecord } from '@/types'
+import ActivityGraph from '@/components/ActivityGraph.vue'
+import type { Project, ProjectStatus } from '@/types'
 
 const store = useProjectsStore()
 
@@ -33,21 +34,14 @@ const STATUS_LABEL: Record<ProjectStatus, string> = {
   failed: '执行失败'
 }
 
-const RESULT_META: Record<RunRecord['result'], { label: string; tone: string }> = {
-  success: { label: '成功', tone: 'ok' },
-  failed: { label: '失败', tone: 'fail' },
-  stopped: { label: '已停止', tone: 'idle' }
-}
-
 const managers = [
   { key: 'npm', label: 'npm' },
   { key: 'pnpm', label: 'pnpm' },
   { key: 'yarn', label: 'yarn' }
 ] as const
 
-/** 面板高度有限，列表都截断到一屏左右：最近使用 5 条刚好铺满最矮的面板，不会半行悬在边上 */
+/** 面板高度有限，列表截断到一屏左右：5 条刚好铺满最矮的面板，不会半行悬在边上 */
 const RECENT_LIMIT = 5
-const RUN_LIMIT = 8
 
 function statusOf(project: Project): ProjectStatus {
   return store.runtimeOf(project.id).status
@@ -99,45 +93,12 @@ function relativeTime(timestamp?: number): string {
   return `${Math.floor(diff / (30 * day))} 个月前`
 }
 
-function formatTime(timestamp: number): string {
-  const date = new Date(timestamp)
-  const pad = (n: number): string => String(n).padStart(2, '0')
-  return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`
-}
-
-function formatDuration(ms?: number): string {
-  return ms ? `${(ms / 1000).toFixed(1)}s` : '—'
-}
-
-const stats = computed(() => {
-  const list = [
-    { label: '项目', value: store.projects.length, tone: 'idle' },
-    { label: '分组', value: store.groups.length, tone: 'idle' },
-    { label: '运行中', value: store.runningCount, tone: store.runningCount ? 'run' : 'idle' }
-  ]
-  const invalid = store.projects.filter((p) => !store.isPathValid(p.id)).length
-  // 只在真有问题时占一格，平时不占位置
-  if (invalid) list.push({ label: '路径失效', value: invalid, tone: 'fail' })
-  return list
-})
-
 const recent = computed(() =>
   store.projects
     .slice()
     .sort((a, b) => (b.lastUsedAt ?? 0) - (a.lastUsedAt ?? 0))
     .slice(0, RECENT_LIMIT)
 )
-
-/** 所有项目的执行记录按时间倒序，取最近几条 */
-const runs = computed(() => {
-  const list: Array<{ key: string; project: Project; record: RunRecord }> = []
-  for (const project of store.projects) {
-    for (const record of project.history ?? []) {
-      list.push({ key: `${project.id}:${record.id}`, project, record })
-    }
-  }
-  return list.sort((a, b) => b.record.startedAt - a.record.startedAt).slice(0, RUN_LIMIT)
-})
 
 const nodeVersion = computed(() => store.packageManagers?.node || '未检测到')
 const dataDir = computed(() => store.dataLocation?.dir ?? '')
@@ -155,18 +116,14 @@ const hints = computed(() => buildHints(store.settings))
 
 <template>
   <section class="panels">
+    <!-- 活跃度：53 列要横着铺满一整行，塞不进下面那些窄面板 -->
+    <ActivityGraph class="panel--wide" />
+
     <!-- 系统状态 -->
     <article class="panel">
       <header class="panel__head">
         <span class="eyebrow">系统状态</span>
       </header>
-
-      <div class="stats">
-        <div v-for="s in stats" :key="s.label" class="stat">
-          <b class="stat__value mono" :class="`tone-${s.tone}`">{{ s.value }}</b>
-          <span class="stat__label">{{ s.label }}</span>
-        </div>
-      </div>
 
       <dl class="facts">
         <div class="fact">
@@ -254,37 +211,6 @@ const hints = computed(() => buildHints(store.settings))
       </button>
     </article>
 
-    <!-- 最近执行 -->
-    <article class="panel">
-      <header class="panel__head">
-        <span class="eyebrow">最近执行</span>
-        <span v-if="runs.length" class="panel__count mono">{{ runs.length }}</span>
-      </header>
-
-      <ul v-if="runs.length" class="rows">
-        <li v-for="item in runs" :key="item.key" class="run">
-          <div class="run__line">
-            <span class="run__result" :class="`tone-${RESULT_META[item.record.result].tone}`">
-              {{ RESULT_META[item.record.result].label }}
-            </span>
-            <span class="run__name truncate" :title="item.project.name">{{ item.project.name }}</span>
-            <span class="run__time mono">{{ formatTime(item.record.startedAt) }}</span>
-          </div>
-          <div class="run__line">
-            <span class="run__cmd mono truncate" :title="item.record.command">
-              {{ item.record.command }}
-            </span>
-            <span class="run__time mono">{{ formatDuration(item.record.durationMs) }}</span>
-          </div>
-        </li>
-      </ul>
-
-      <div v-else class="panel__empty">
-        <span>还没有执行记录</span>
-        <span>启动或打包一次，最近 8 条会留在这里。</span>
-      </div>
-    </article>
-
     <!-- 快捷操作 -->
     <article class="panel">
       <header class="panel__head">
@@ -307,59 +233,22 @@ const hints = computed(() => buildHints(store.settings))
 .panels {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(266px, 1fr));
-  /* 行高把剩余空间吃满；内容再多也不会压到 264px 以下，超出的部分由外层滚动 */
-  grid-auto-rows: minmax(264px, 1fr);
+  /**
+   * 第一行留给活跃度图（跨整列），它按内容定高；
+   * 其余是隐式行，行高把剩余空间吃满，内容再多也不会压到 264px 以下。
+   */
+  grid-template-columns: minmax(0, 1fr);
+  grid-auto-rows: auto;
   gap: 14px;
-  flex: 1 1 auto;
-  min-height: 264px;
-  /* 屏幕再高也不让面板无限长高，否则四块面板会变成四根空柱子 */
-  max-height: 720px;
+  min-height: 0;
 }
 
-/* 高窗口里四栏并排会拉成四根细高的空柱子，改成两栏两行（1080p 最大化后就会走到这里） */
-@media (min-height: 880px) {
-  .panels {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
+/* 活跃度图在窄栏里也占满整列——它需要整宽来铺一年 53 周 */
+.panel--wide {
+  grid-column: 1 / -1;
 }
 
 .panel__count {
-  font-size: var(--fs-micro);
-  color: var(--ink-3);
-}
-
-/* ---------- 统计格 ---------- */
-.stats {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(62px, 1fr));
-  gap: var(--sp-2);
-  flex-shrink: 0;
-}
-
-.stat {
-  padding: var(--sp-2) var(--sp-3);
-  border-radius: var(--r-md);
-  background: var(--bg-subtle);
-}
-
-.stat__value {
-  display: block;
-  font-size: var(--fs-display);
-  font-weight: 600;
-  line-height: 1.3;
-  letter-spacing: -0.02em;
-  color: var(--ink);
-}
-
-.stat__value.tone-run {
-  color: var(--st-run);
-}
-
-.stat__value.tone-fail {
-  color: var(--st-fail);
-}
-
-.stat__label {
   font-size: var(--fs-micro);
   color: var(--ink-3);
 }
@@ -483,70 +372,6 @@ const hints = computed(() => buildHints(store.settings))
 
 .row__act.is-static.tone-fail {
   color: var(--st-fail);
-}
-
-/* ---------- 最近执行 ---------- */
-.run {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-  padding: 6px;
-  border-radius: var(--r-sm);
-}
-
-.run + .run {
-  border-top: 1px solid var(--border);
-  border-radius: 0;
-}
-
-.run__line {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  min-width: 0;
-}
-
-.run__result {
-  flex-shrink: 0;
-  padding: 0 6px;
-  border-radius: var(--r-pill);
-  background: var(--st-idle-soft);
-  color: var(--ink-3);
-  font-size: var(--fs-micro);
-  font-weight: 600;
-  line-height: 16px;
-}
-
-.run__result.tone-ok {
-  background: var(--st-ok-soft);
-  color: var(--st-ok);
-}
-
-.run__result.tone-fail {
-  background: var(--st-fail-soft);
-  color: var(--st-fail);
-}
-
-.run__name {
-  flex: 1;
-  min-width: 0;
-  font-size: var(--fs-body);
-  font-weight: 500;
-  color: var(--ink);
-}
-
-.run__cmd {
-  flex: 1;
-  min-width: 0;
-  font-size: var(--fs-micro);
-  color: var(--ink-3);
-}
-
-.run__time {
-  flex-shrink: 0;
-  font-size: var(--fs-micro);
-  color: var(--ink-3);
 }
 
 /* ---------- 快捷操作面板的私有部分（提示行本体见全局 .tips / .tip） ---------- */

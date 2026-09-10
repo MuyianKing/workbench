@@ -2,9 +2,9 @@
 /**
  * 首页主体。
  *
- * 从上到下：卡片网格 → 工作台面板。
- * 没有项目时整块换成 WelcomePanel；有项目但被筛没了时，网格位置放一条窄提示，
- * 面板照旧——不然筛一次条件，半屏就空了。
+ * 桌面打开后第一眼看到的整块内容：左边是项目卡片网格，右边是窄栏的四块工作台面板。
+ * 窗口窄到挤不下两栏时退化成单列，面板排到卡片下方。
+ * 一个项目都没有时直接整屏 WelcomePanel，侧栏没什么好显示的。
  */
 import { Plus } from '@element-plus/icons-vue'
 import { useProjectsStore } from '@/stores/projects'
@@ -21,38 +21,48 @@ function clearFilter(): void {
 </script>
 
 <template>
-  <main class="home" :class="{ 'is-live': store.runningCount > 0 }">
-    <WelcomePanel v-if="!store.projects.length" />
+  <main
+    class="home"
+    :class="{ 'is-live': store.runningCount > 0, 'is-empty': !store.projects.length }"
+  >
+    <WelcomePanel v-if="store.projects.length === 0" class="home__solo" />
 
     <template v-else>
-      <div v-if="store.filteredProjects.length" class="grid">
-        <ProjectCard v-for="p in store.filteredProjects" :key="p.id" :project="p" />
+      <section class="home__main">
+        <div v-if="store.filteredProjects.length" class="grid">
+          <ProjectCard v-for="p in store.filteredProjects" :key="p.id" :project="p" />
 
-        <button class="add-tile" type="button" @click="store.addDialogVisible = true">
-          <el-icon class="add-tile__icon"><Plus /></el-icon>
-          <span class="add-tile__text">添加项目</span>
-          <span class="add-tile__hint mono">选择项目目录</span>
-        </button>
-      </div>
+          <button class="add-tile" type="button" @click="store.addDialogVisible = true">
+            <el-icon class="add-tile__icon"><Plus /></el-icon>
+            <span class="add-tile__text">添加项目</span>
+            <span class="add-tile__hint mono">选择项目目录</span>
+          </button>
+        </div>
 
-      <div v-else class="nomatch">
-        <p class="nomatch__title">没有匹配的项目</p>
-        <p class="nomatch__desc">换个关键词，或切换到其他分组看看。</p>
-        <el-button size="small" @click="clearFilter">清除筛选条件</el-button>
-      </div>
+        <div v-else class="nomatch">
+          <p class="nomatch__title">没有匹配的项目</p>
+          <p class="nomatch__desc">换个关键词，或切换到其他分组看看。</p>
+          <el-button size="small" @click="clearFilter">清除筛选条件</el-button>
+        </div>
+      </section>
 
-      <HomePanels />
+      <aside class="home__side">
+        <HomePanels />
+      </aside>
     </template>
   </main>
 </template>
 
 <style scoped>
 .home {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  /* 默认两栏：左卡片网格占满剩余，右栏固定 340px 放四块面板 */
+  grid-template-columns: minmax(0, 1fr) 340px;
   gap: 14px;
   padding: var(--sp-5);
+  min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
 
   /**
    * 工作区背景：不上任何图案，只有顶部一层很淡的光晕——
@@ -71,14 +81,28 @@ function clearFilter(): void {
   --ambient: var(--ambient-live);
 }
 
+/* 没有项目时退化成单列，让 WelcomePanel 独占整行 */
+.home.is-empty {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.home__main,
+.home__side {
+  min-width: 0;
+  min-height: 0;
+}
+
+/* 欢迎页那张单独铺满整行 */
+.home__solo {
+  grid-column: 1 / -1;
+}
+
 /* ---------- 卡片网格 ---------- */
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(302px, 1fr));
   gap: 14px;
   align-content: start;
-  /* 网格按内容定高，剩下的高度留给下面的面板 */
-  flex: none;
 }
 
 /* ---------- 添加项目幽灵卡片 ---------- */
@@ -128,7 +152,6 @@ function clearFilter(): void {
   align-items: center;
   justify-content: center;
   gap: var(--sp-2);
-  flex: none;
   min-height: 156px;
   padding: var(--sp-6);
   border: 1px dashed var(--border-strong);
@@ -146,5 +169,20 @@ function clearFilter(): void {
   margin-bottom: var(--sp-1);
   font-size: var(--fs-body);
   color: var(--ink-3);
+}
+
+/* ---------- 窄窗口退化：右栏排到下方 ---------- */
+@media (max-width: 880px) {
+  .home {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .home__side {
+    order: 1;
+  }
+
+  .home__main {
+    order: 0;
+  }
 }
 </style>

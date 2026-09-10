@@ -18,8 +18,10 @@ import {
 } from '../shared/types'
 import { satisfiesNodeVersion } from '../shared/node-version'
 import { reorderById } from '../shared/reorder'
+import { bumpDay, pruneDays } from '../shared/activity'
 import { broadcast } from './broadcast'
 import {
+  activity,
   data,
   dataFileExistsIn,
   getDataLocation,
@@ -152,7 +154,22 @@ manager.on('sessions-changed', () => {
   save()
 })
 
+/**
+ * 往当天的格子里记一次执行。
+ *
+ * 用命令开始的时间而不是结束时间：跨零点跑的构建，人是在前一天点的按钮。
+ * 图只画最近一年，顺手裁掉更旧的计数，数据文件才不会跟着使用年限一直长。
+ */
+function recordActivity(timestamp?: number): void {
+  const at = typeof timestamp === 'number' && Number.isFinite(timestamp) ? timestamp : Date.now()
+  data().activity = pruneDays(bumpDay(activity(), at), Date.now())
+  save()
+}
+
 manager.on('run-finished', ({ projectId, record }: { projectId: string; record: RunRecord }) => {
+  // 命令跑完了就算活跃，与结果无关，也与这个项目还在不在列表里无关
+  recordActivity(record.startedAt)
+
   const project = findProject(projectId)
   if (!project) return
 
@@ -308,6 +325,8 @@ export function registerIpc(): void {
     )
     return Object.fromEntries(entries)
   })
+
+  ipcMain.handle(IPC.activity, () => activity())
 
   ipcMain.handle(
     IPC.relocateProject,

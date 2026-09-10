@@ -1,6 +1,10 @@
 /** 主进程与渲染进程共用的类型定义与 IPC 契约 */
 
 import { TERMINAL_HEIGHT_DEFAULT } from './terminal-height'
+import type { ActivityCounts } from './activity'
+
+/** 活跃度计数也走这里导出，渲染层统一从 @/types 取类型 */
+export type { ActivityCounts }
 
 export type ProjectStatus = 'idle' | 'installing' | 'running' | 'building' | 'success' | 'failed'
 
@@ -117,6 +121,11 @@ export interface PersistedData {
   settings: AppSettings
   /** 上次运行期间启动、尚未确认结束的子进程 */
   activeSessions?: ActiveSession[]
+  /**
+   * 按本地日期聚合的命令执行次数，首页活跃度图的数据源。
+   * 与项目各自的 history 分开存：history 每个项目只留最近 10 条，撑不起一整年的图。
+   */
+  activity?: ActivityCounts
 }
 
 export interface LogLine {
@@ -283,6 +292,8 @@ export interface WorkbenchApi {
   relocateProject: (id: string, newPath: string) => Promise<Result<Project>>
   /** 检查所有项目目录是否仍然存在，返回 项目 ID -> 是否有效 */
   checkProjectPaths: () => Promise<Record<string, boolean>>
+  /** 按天聚合的命令执行次数（YYYY-MM-DD -> 次数） */
+  getActivity: () => Promise<ActivityCounts>
   createGroup: (name: string) => Promise<Result<ProjectGroup>>
   renameGroup: (id: string, name: string) => Promise<Result<ProjectGroup>>
   removeGroup: (id: string) => Promise<Result<null>>
@@ -344,6 +355,7 @@ export const IPC = {
   removeProject: 'project:remove',
   relocateProject: 'project:relocate',
   checkProjectPaths: 'project:check-paths',
+  activity: 'stats:activity',
   createGroup: 'group:create',
   renameGroup: 'group:rename',
   removeGroup: 'group:remove',

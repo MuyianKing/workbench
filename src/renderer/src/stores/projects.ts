@@ -3,6 +3,7 @@ import { defineStore } from 'pinia'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   DEFAULT_SETTINGS,
+  type ActivityCounts,
   type AddProjectInput,
   type AppSettings,
   type DataLocation,
@@ -53,6 +54,13 @@ export interface TerminalState {
 
 const RUNNING_STATUS: ReadonlyArray<string> = ['running', 'installing', 'building']
 
+/** 今天 00:00 的时间戳（本地时区） */
+function startOfToday(): number {
+  const date = new Date()
+  date.setHours(0, 0, 0, 0)
+  return date.getTime()
+}
+
 function prefersDark(): boolean {
   return window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false
 }
@@ -96,6 +104,8 @@ export const useProjectsStore = defineStore('projects', () => {
   const pathValidity = ref<Record<string, boolean>>({})
   const settings = ref<AppSettings>({ ...DEFAULT_SETTINGS })
   const dataLocation = ref<DataLocation | null>(null)
+  /** 按天聚合的命令执行次数，首页活跃度图的数据源；每次执行结束后由主进程推着刷新 */
+  const activity = ref<ActivityCounts>({})
 
   /**
    * 终端面板展开时的高度（px）。
@@ -123,8 +133,16 @@ export const useProjectsStore = defineStore('projects', () => {
 
   /** 驱动运行时长刷新 */
   const clock = ref(Date.now())
+  /**
+   * 今天 00:00。只在跨天时变一次 —— 活跃度图的横轴末端是今天，
+   * 每秒重铺 371 个格子没必要，跨过零点重算一次就够。
+   */
+  const dayStart = ref(startOfToday())
   window.setInterval(() => {
-    clock.value = Date.now()
+    const now = Date.now()
+    clock.value = now
+    const today = startOfToday()
+    if (today !== dayStart.value) dayStart.value = today
   }, 1000)
 
   // ---------- 运行态 ----------
@@ -302,6 +320,8 @@ export const useProjectsStore = defineStore('projects', () => {
     // 先更新落盘快照，避免这次同步又被 watcher 推回主进程
     pushedSnapshot.set(updated.id, JSON.stringify(editableOf(updated)))
     projects.value[index] = updated
+    // 这条推送也意味着刚有一条命令跑完，活跃度计数随之 +1
+    void refreshActivity()
   }
 
   /** 项目被移除时，连带清掉它的终端 */
@@ -354,7 +374,13 @@ export const useProjectsStore = defineStore('projects', () => {
 
     settings.value = await window.workbench.getSettings()
     dataLocation.value = await window.workbench.getDataLocation()
+    activity.value = await window.workbench.getActivity()
     applyTheme(resolveTheme(settings.value))
+  }
+
+  /** 重新拉一次活跃度计数（命令跑完、数据目录切换后调用） */
+  async function refreshActivity(): Promise<void> {
+    activity.value = await window.workbench.getActivity()
   }
 
   let subscribed = false
@@ -967,6 +993,8 @@ export const useProjectsStore = defineStore('projects', () => {
     pathValidity,
     settings,
     clock,
+    dayStart,
+    activity,
     runningCount,
     filteredProjects,
     drawerProject,
@@ -981,6 +1009,7 @@ export const useProjectsStore = defineStore('projects', () => {
     refreshNvm,
     installedNodeVersion,
     init,
+    refreshActivity,
     changeDataDir,
     addProject,
     removeProject,

@@ -8,6 +8,7 @@ import {
   type PersistedData
 } from '../shared/types'
 import { clampTerminalHeight } from '../shared/terminal-height'
+import { pruneDays, sanitizeActivity, type ActivityCounts } from '../shared/activity'
 
 const DATA_FILE = 'workbench-data.json'
 /**
@@ -35,7 +36,13 @@ let writeTimer: NodeJS.Timeout | null = null
 let loaded = false
 
 function emptyData(): PersistedData {
-  return { projects: [], groups: [], settings: { ...DEFAULT_SETTINGS }, activeSessions: [] }
+  return {
+    projects: [],
+    groups: [],
+    settings: { ...DEFAULT_SETTINGS },
+    activeSessions: [],
+    activity: {}
+  }
 }
 
 export function currentDataDir(): string {
@@ -123,6 +130,10 @@ export function settings(): AppSettings {
   return cache.settings
 }
 
+export function activity(): ActivityCounts {
+  return cache.activity ?? {}
+}
+
 export async function loadData(): Promise<PersistedData> {
   customDir = readPointer()
 
@@ -134,7 +145,9 @@ export async function loadData(): Promise<PersistedData> {
       groups: Array.isArray(parsed.groups) ? parsed.groups : [],
       settings: sanitizeSettings(parsed.settings),
       // 上次被强杀时留下的子进程记录，启动清理要用（漏掉这个字段清理就成了空转）
-      activeSessions: Array.isArray(parsed.activeSessions) ? parsed.activeSessions : []
+      activeSessions: Array.isArray(parsed.activeSessions) ? parsed.activeSessions : [],
+      // 老数据文件没有这个字段；顺手裁掉图已经画不到的旧计数
+      activity: pruneDays(sanitizeActivity(parsed.activity), Date.now())
     }
   } catch {
     // 首次运行、文件损坏，或指针指向了一个还没有数据的目录

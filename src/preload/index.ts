@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import {
   IPC,
+  type ActivityCounts,
   type AddProjectInput,
   type AppSettings,
   type EffectiveTheme,
@@ -40,6 +41,7 @@ const api: WorkbenchApi = {
   relocateProject: (id: string, newPath: string) =>
     ipcRenderer.invoke(IPC.relocateProject, id, newPath),
   checkProjectPaths: () => ipcRenderer.invoke(IPC.checkProjectPaths),
+  getActivity: (): Promise<ActivityCounts> => ipcRenderer.invoke(IPC.activity),
 
   createGroup: (name: string) => ipcRenderer.invoke(IPC.createGroup, name),
   renameGroup: (id: string, name: string) => ipcRenderer.invoke(IPC.renameGroup, id, name),
