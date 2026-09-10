@@ -1,0 +1,440 @@
+/* ---------- 基础重置 ---------- */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: var(--font-ui);
+  font-size: var(--fs-body);
+  color: var(--ink);
+  background: var(--bg-canvas);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overflow: hidden;
+}
+
+h1,
+h2,
+h3,
+h4,
+p,
+ul,
+ol,
+figure {
+  margin: 0;
+  padding: 0;
+}
+
+ul,
+ol {
+  list-style: none;
+}
+
+button {
+  font-family: inherit;
+}
+
+/* ---------- 拖动终端上沿 ---------- */
+
+/**
+ * 拖动时指针可能离开那条 10px 的把手，光标与文本选择都是全局状态，只能在这里兜住。
+ * 光标用 ns-resize 而不是默认箭头，让「现在正在拖高度」这件事一直看得见。
+ */
+body.is-resizing-terminal,
+body.is-resizing-terminal * {
+  cursor: ns-resize !important;
+  user-select: none !important;
+}
+
+/* ---------- 键盘可达性 ---------- */
+
+:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+/* ---------- 滚动条 ---------- */
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(17, 21, 27, 0.16);
+  border: 3px solid transparent;
+  background-clip: content-box;
+  border-radius: var(--r-pill);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(17, 21, 27, 0.3);
+  background-clip: content-box;
+}
+
+.scroll-dark::-webkit-scrollbar-thumb {
+  background: rgba(199, 208, 219, 0.22);
+  background-clip: content-box;
+}
+
+.scroll-dark::-webkit-scrollbar-thumb:hover {
+  background: rgba(199, 208, 219, 0.4);
+  background-clip: content-box;
+}
+
+/* 暗色下滚动条要反过来用浅色，否则深底上看不见 */
+:root[data-theme='dark'] ::-webkit-scrollbar-thumb {
+  background: rgba(232, 237, 244, 0.18);
+  background-clip: content-box;
+}
+
+:root[data-theme='dark'] ::-webkit-scrollbar-thumb:hover {
+  background: rgba(232, 237, 244, 0.32);
+  background-clip: content-box;
+}
+
+:root[data-theme='dark'] .scroll-dark::-webkit-scrollbar-thumb {
+  background: rgba(199, 208, 219, 0.22);
+  background-clip: content-box;
+}
+
+/* ---------- 通用原子类 ---------- */
+
+.mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+}
+
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  font-weight: 500;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- 工作台面板 ---------- */
+
+/**
+ * 首页卡片网格下面的面板（HomePanels）与「还没有项目」时的侧栏（WelcomePanel）共用同一副外壳。
+ * 放在全局而不是各自 scoped，是为了两个地方的面板永远长得一样。
+ *
+ * 面板自己撑满分到的高度：内容顶在上沿、动作靠 foot 的 margin-top: auto 贴在下沿，
+ * 所以窗口再高，卡片里也不会出现半截空白。
+ */
+.panel {
+  position: relative; /* 面板里的装饰（例如空状态那张巨大水印）拿它当定位参照 */
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  min-width: 0;
+  padding: var(--sp-4);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+}
+
+.panel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  flex-shrink: 0;
+}
+
+.panel__foot {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-top: auto;
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--border);
+  min-width: 0;
+}
+
+/* 面板里没内容时的居中说明（例如还没跑过任何命令） */
+.panel__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  flex: 1;
+  min-height: 0;
+  text-align: center;
+  font-size: var(--fs-meta);
+  line-height: 1.7;
+  color: var(--ink-3);
+}
+
+.panel__link {
+  flex-shrink: 0;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--ink-2);
+  font-size: var(--fs-micro);
+  cursor: pointer;
+}
+
+.panel__link:hover {
+  background: var(--bg-inset);
+  color: var(--ink);
+}
+
+/* ---------- 面板里的通用内容块 ---------- */
+
+/* 明细行：左边标签、右边值（node 版本、nvm、electron…） */
+.facts {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: var(--fs-meta);
+}
+
+.fact {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+
+.fact dt {
+  flex-shrink: 0;
+  color: var(--ink-3);
+}
+
+.fact dd {
+  margin: 0;
+  min-width: 0;
+  font-weight: 600;
+  color: var(--ink-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 包管理器可用性：可用绿点、未装红点，和右上角环境弹层同一套语义 */
+.pms {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+.pm {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-weight: 500;
+  color: var(--ink-2);
+}
+
+.pm__dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--st-idle);
+}
+
+.pm__dot.is-ok {
+  background: var(--st-ok);
+}
+
+.pm__dot.is-off {
+  background: var(--st-fail);
+}
+
+/* 键位提示行：左边做什么、右边按键或鼠标动作 */
+.tips {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+
+.tip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: 7px 0;
+  min-width: 0;
+}
+
+.tip + .tip {
+  border-top: 1px dashed var(--border);
+}
+
+.tip__text {
+  min-width: 0;
+  font-size: var(--fs-meta);
+  color: var(--ink-2);
+}
+
+.tip__key {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-subtle);
+  color: var(--ink-2);
+  font-size: var(--fs-micro);
+}
+
+/* ---------- Element Plus 局部收敛 ---------- */
+
+.el-button {
+  font-weight: 500;
+}
+
+.el-button--small {
+  height: 28px;
+  padding: 0 10px;
+  font-size: var(--fs-meta);
+}
+
+.el-button + .el-button {
+  margin-left: 0;
+}
+
+/* 主按钮禁用时回到中性灰，避免出现蓝色调，保持“颜色只表达状态”的克制 */
+.el-button--primary.is-disabled,
+.el-button--primary.is-disabled:hover,
+.el-button--primary.is-disabled:focus {
+  background-color: var(--border-strong);
+  border-color: var(--border-strong);
+  color: #ffffff;
+}
+
+.el-dropdown-menu__item {
+  font-size: var(--fs-body);
+}
+
+.el-dropdown-menu__item.is-current {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.el-dialog__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+}
+
+.el-drawer__header {
+  margin-bottom: 0;
+  padding: 0;
+}
+
+.el-drawer__body {
+  padding: 0;
+}
+
+/**
+ * 所有弹层（抽屉、对话框、确认框）都要让开系统窗口按钮。
+ *
+ * 窗口用 titleBarStyle: 'hidden'，最小化 / 最大化 / 关闭由系统绘制在右上角，且永远压在最上层。
+ * 弹层如果铺满整屏，它自己的关闭按钮和标题栏就可能落在那三个按钮底下点不到；窗口高度不够时，
+ * 居中的高对话框还会向上溢出、把头部顶到标题栏区域里。
+ *
+ * 统一做法：遮罩从标题栏下沿开始。弹层就只能在这块区域里居中与滚动，永远不会钻到窗口按钮下面。
+ * 这些元素要么 Teleport 到 body，要么不在组件模板里，scoped 样式够不着，所以放全局。
+ */
+.el-overlay {
+  top: var(--h-titlebar);
+  height: calc(100% - var(--h-titlebar));
+  backdrop-filter: blur(1px);
+}
+
+/* 高对话框改成「头部/底部固定 + 内容滚动」，否则内容一长就整体溢出、顶部被裁掉 */
+.el-dialog {
+  border-radius: var(--r-lg);
+  max-height: calc(100vh - var(--h-titlebar) - 48px);
+  display: flex;
+  flex-direction: column;
+}
+
+.el-dialog__header,
+.el-dialog__footer {
+  flex-shrink: 0;
+}
+
+.el-dialog__body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/**
+ * 确认框同理：内容多了滚动，别把按钮挤出可视区。
+ *
+ * 但改成 flex 就顺手拆了 Element Plus 的居中：它是靠 .el-overlay-message-box 的
+ * text-align: center 和一个 ::after 内联垫片，把 display: inline-block 的确认框摆到正中的。
+ * 盒子一旦变成块级的 flex 容器，text-align 与 vertical-align 同时失效，确认框就贴到左上角。
+ * 所以居中得自己接管。
+ */
+.el-message-box {
+  max-height: calc(100vh - var(--h-titlebar) - 48px);
+  display: flex;
+  flex-direction: column;
+  /* flex 布局里靠 auto 外边距吃剩余空间，内容超高时也还能滚到 */
+  margin: auto;
+}
+
+.el-overlay-message-box {
+  display: flex;
+}
+
+/* 上面那套内联垫片在 flex 布局里已经多余，留着反而会多出一个 flex item */
+.el-overlay-message-box::after {
+  display: none;
+}
+
+/* 内容区自己能滚：overflow 非 visible 时 flex item 的最小尺寸本来就是 0，无需再写 min-height */
+.el-message-box__content {
+  overflow-y: auto;
+}
+
+/**
+ * 按钮间距统一由容器的 gap 负责（应用里自己写的按钮行都带 gap），而上面那条重置把 EP 默认的
+ * margin-left 清零了。确认框这行用的是 EP 自己的模板，靠 margin 排间距，于是「取消 / 删除」
+ * 会严丝合缝贴在一起 —— 补一个 gap，取值与 .el-dialog__footer 保持一致。
+ */
+.el-message-box__btns {
+  gap: var(--sp-2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}

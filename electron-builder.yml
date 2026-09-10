@@ -1,0 +1,36 @@
+appId: com.muyian.workbench
+productName: Workbench
+copyright: Copyright © 2026 Workbench
+
+directories:
+  output: dist
+  buildResources: build
+
+# 直接用 npm 已经装好的 Electron 发行包，避免打包时再从 GitHub 下一份 115MB
+electronDist: node_modules/electron/dist
+
+# 渲染层已经被 Vite 打进 out/renderer，主进程只依赖 electron 与 Node 内置模块，
+# 因此打包只需要带上构建产物与 package.json（main 字段指向 out/main/index.js）；
+# node_modules 会被 electron-builder 默认全量塞进 asar，对纯 Vite 打包的应用是 60MB+ 的死重。
+files:
+  - out/**
+  - package.json
+  - '!node_modules/**'
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: build/icon.ico
+  artifactName: ${productName}-${version}-setup.${ext}
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Workbench
+  # 卸载时保留用户数据（projects.json 里的项目列表），避免误删配置
+  deleteAppDataOnUninstall: false

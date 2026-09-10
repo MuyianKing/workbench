@@ -1,0 +1,199 @@
+/**
+ * 设计令牌
+ *
+ * 视觉主张：颜色即状态。
+ * 界面本身是灰度的——黑、白、灰只承担层次；界面里出现的每一处彩色，
+ * 都在表达项目的运行状态（运行中 / 成功 / 失败）。唯一的例外是终端面板，
+ * 它必须是深色的，因为它就是终端。
+ */
+
+:root {
+  /* ---------- 画布与层次 ---------- */
+  --bg-canvas: #edeff2;
+  --bg-surface: #ffffff;
+  --bg-subtle: #f5f6f8;
+  --bg-inset: #e8eaee;
+  --border: #e1e4e9;
+  --border-strong: #c9cfd8;
+
+  /* ---------- 工作区背景装饰 ----------
+   * 不上任何图案（网格会跟卡片抢视线），只有顶部一层很淡的光晕。
+   * --ambient 由「有项目在跑」时点亮（颜色仍然只表达状态）。
+   */
+  --wash: rgba(255, 255, 255, 0.6);
+  --ambient: transparent;
+  /* 有项目在跑时工作区顶部会亮起一层很淡的暖色：颜色依旧只用来表达状态 */
+  --ambient-live: rgba(199, 127, 10, 0.09);
+
+  /* ---------- 文本 ---------- */
+  --ink: #11151b;
+  --ink-2: #4e5866;
+  --ink-3: #848e9c;
+  --ink-inverse: #ffffff;
+
+  /* ---------- 终端 ---------- */
+  --term-bg: #11151b;
+  --term-surface: #171c23;
+  --term-border: #262d37;
+  --term-ink: #c7d0db;
+  --term-dim: #6b7787;
+
+  /* ---------- 状态色（界面上仅有的彩色） ---------- */
+  --st-idle: #9ba4b0;
+  --st-run: #c77f0a;
+  --st-ok: #0b8a57;
+  --st-fail: #ce3f3f;
+
+  --st-run-soft: #fdf4e3;
+  --st-ok-soft: #e8f5ee;
+  --st-fail-soft: #fbecec;
+  --st-idle-soft: #f0f2f5;
+
+  /* ---------- 字体 ---------- */
+  --font-ui: system-ui, -apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei',
+    'Hiragino Sans GB', sans-serif;
+  --font-mono: 'Cascadia Mono', 'Cascadia Code', 'JetBrains Mono', Consolas, 'SF Mono',
+    ui-monospace, monospace;
+
+  /* ---------- 字号 ---------- */
+  --fs-display: 19px;
+  --fs-title: 15px;
+  --fs-body: 13px;
+  --fs-meta: 12px;
+  --fs-micro: 10.5px;
+
+  /* ---------- 间距 ---------- */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+
+  /* ---------- 圆角 ---------- */
+  --r-sm: 6px;
+  --r-md: 9px;
+  --r-lg: 12px;
+  --r-pill: 999px;
+
+  /* ---------- 阴影 ---------- */
+  --shadow-card: 0 1px 2px rgba(17, 21, 27, 0.05), 0 1px 1px rgba(17, 21, 27, 0.03);
+  --shadow-hover: 0 8px 20px -8px rgba(17, 21, 27, 0.18);
+  --shadow-pop: 0 16px 40px -12px rgba(17, 21, 27, 0.26);
+
+  /* ---------- 布局 ---------- */
+  --h-titlebar: 36px;
+  --h-header: 58px;
+  --h-filter: 46px;
+  --h-terminal: 288px;
+  --h-terminal-collapsed: 42px;
+  --w-drawer: 420px;
+
+  /* ---------- Element Plus 主题覆盖 ---------- */
+  --el-color-primary: #11151b;
+  --el-color-primary-light-3: #3a424e;
+  --el-color-primary-light-5: #5b6472;
+  --el-color-primary-light-7: #a8aeb8;
+  --el-color-primary-light-8: #c9cfd8;
+  --el-color-primary-light-9: #eef0f3;
+  --el-color-primary-dark-2: #000000;
+
+  --el-color-success: #0b8a57;
+  --el-color-danger: #ce3f3f;
+  --el-color-warning: #c77f0a;
+
+  --el-text-color-primary: #11151b;
+  --el-text-color-regular: #4e5866;
+  --el-text-color-secondary: #848e9c;
+
+  --el-border-color: #e1e4e9;
+  --el-border-color-light: #e8eaee;
+  --el-border-color-lighter: #eef0f3;
+
+  --el-fill-color-blank: #ffffff;
+  --el-bg-color-overlay: #ffffff;
+
+  --el-font-family: var(--font-ui);
+  --el-font-size-base: 13px;
+  --el-border-radius-base: 6px;
+  --el-border-radius-small: 5px;
+}
+
+/**
+ * 暗色主题（F-8.6）
+ *
+ * 主进程把 system 解析成 light / dark 后写在 <html data-theme="…"> 上，
+ * 这里只需要维护一份暗色覆盖。选择器特异性高于 Element Plus 的 .dark，
+ * 因此 element-plus/theme-chalk/dark/css-vars.css 只负责补齐我们没覆盖的变量。
+ */
+:root[data-theme='dark'] {
+  --bg-canvas: #151a21;
+  --bg-surface: #1b212a;
+  --bg-subtle: #20262f;
+  --bg-inset: #262d37;
+  --border: #2b323d;
+  --border-strong: #3a424f;
+
+  /* 暗色下的光晕反向压暗 */
+  --wash: rgba(232, 237, 244, 0.04);
+  --ambient: transparent;
+  --ambient-live: rgba(224, 162, 58, 0.12);
+
+  --ink: #e8edf4;
+  --ink-2: #b3bdc9;
+  --ink-3: #7f8a98;
+  --ink-inverse: #11151b;
+
+  /* 终端在暗色下再压深一档，和卡片面板拉开层次 */
+  --term-bg: #0f1319;
+  --term-surface: #171c23;
+  --term-border: #262d37;
+  --term-ink: #c7d0db;
+  --term-dim: #6b7787;
+
+  --st-idle: #6b7787;
+  --st-run: #e0a23a;
+  --st-ok: #3fb37f;
+  --st-fail: #ef7373;
+
+  --st-run-soft: rgba(224, 162, 58, 0.14);
+  --st-ok-soft: rgba(63, 179, 127, 0.14);
+  --st-fail-soft: rgba(239, 115, 115, 0.14);
+  --st-idle-soft: rgba(107, 119, 135, 0.16);
+
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4), 0 1px 1px rgba(0, 0, 0, 0.3);
+  --shadow-hover: 0 8px 20px -8px rgba(0, 0, 0, 0.6);
+  --shadow-pop: 0 16px 40px -12px rgba(0, 0, 0, 0.7);
+
+  /* 暗色下主按钮反过来：浅底深字，否则近黑按钮会在深背景上消失 */
+  --el-color-primary: #e8edf4;
+  --el-color-primary-light-3: #cfd6e0;
+  --el-color-primary-light-5: #aab4c1;
+  --el-color-primary-light-7: #7f8a98;
+  --el-color-primary-light-8: #5c6673;
+  --el-color-primary-light-9: #2b323d;
+  --el-color-primary-dark-2: #ffffff;
+  --el-color-white: #11151b;
+
+  --el-color-success: #3fb37f;
+  --el-color-danger: #ef7373;
+  --el-color-warning: #e0a23a;
+
+  --el-text-color-primary: #e8edf4;
+  --el-text-color-regular: #b3bdc9;
+  --el-text-color-secondary: #7f8a98;
+  --el-text-color-placeholder: #6b7787;
+
+  --el-border-color: #2b323d;
+  --el-border-color-light: #262d37;
+  --el-border-color-lighter: #20262f;
+
+  --el-fill-color-blank: #1b212a;
+  --el-fill-color-light: #20262f;
+  --el-fill-color: #20262f;
+  --el-bg-color: #1b212a;
+  --el-bg-color-overlay: #1f2631;
+  --el-bg-color-page: #151a21;
+  --el-mask-color: rgba(10, 13, 18, 0.72);
+}

@@ -1,0 +1,24 @@
+import { resolve } from 'node:path'
+import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
+import vue from '@vitejs/plugin-vue'
+
+export default defineConfig({
+  main: {
+    plugins: [externalizeDepsPlugin()]
+  },
+  preload: {
+    plugins: [externalizeDepsPlugin()]
+  },
+  renderer: {
+    resolve: {
+      alias: {
+        '@': resolve(__dirname, 'src/renderer/src'),
+        '@shared': resolve(__dirname, 'src/shared')
+      }
+    },
+    plugins: [vue()],
+    server: {
+      port: 5273
+    }
+  }
+})
