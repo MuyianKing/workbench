@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue'
-import { Monitor, Refresh, Search, Setting } from '@element-plus/icons-vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { Grid, Monitor, Moon, Refresh, Search, Setting, Sunny } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { useProjectsStore } from '@/stores/projects'
 import SettingsDialog from '@/components/SettingsDialog.vue'
@@ -43,6 +43,19 @@ function onEnvShow(): void {
 
 function focusSearch(): void {
   searchInput.value?.focus()
+}
+
+/** 直接进首页布局编辑态，不用先打开设置再点「进入编辑」 */
+function enterLayoutEdit(): void {
+  store.layoutEditing = true
+}
+
+/** 当前是不是暗色：图标画的是「点下去会切到哪一边」，所以亮色时显示月亮 */
+const isDark = computed(() => store.effectiveTheme === 'dark')
+
+/** 传点击坐标，明暗过渡就从这颗图标扩散开（与设置里的主题按钮同一套动效） */
+function toggleTheme(event: MouseEvent): void {
+  void store.toggleTheme({ x: event.clientX, y: event.clientY })
 }
 
 function onKeydown(e: KeyboardEvent): void {
@@ -145,8 +158,25 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 
       <el-button
         class="icon-btn"
+        :icon="Grid"
+        title="编辑布局"
+        aria-label="编辑布局"
+        @click="enterLayoutEdit"
+      />
+
+      <el-button
+        class="icon-btn"
+        :icon="isDark ? Sunny : Moon"
+        :title="isDark ? '切换到亮色' : '切换到暗色'"
+        :aria-label="isDark ? '切换到亮色' : '切换到暗色'"
+        @click="toggleTheme"
+      />
+
+      <el-button
+        class="icon-btn"
         :icon="Setting"
-        aria-label="设置"
+        title="系统配置"
+        aria-label="系统配置"
         @click="settingsVisible = true"
       />
     </div>

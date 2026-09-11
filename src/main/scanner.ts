@@ -1,6 +1,14 @@
 import { promises as fs, statSync } from 'node:fs'
 import { join, basename } from 'node:path'
 import type { PackageManager, ScanResult } from '../shared/types'
+import {
+  BUILD_TOOLS,
+  TOOL_CONFIG_FILES,
+  detectBuildTool,
+  guessDevPort,
+  type BuildTool,
+  type DevPortGuess
+} from '../shared/dev-port'
 
 const LOCK_FILES: Array<[string, PackageManager]> = [
   ['pnpm-lock.yaml', 'pnpm'],
@@ -141,6 +149,52 @@ async function detectNodeRequirement(
   return {}
 }
 
+/** 读出该工具实际存在的那份配置文件 */
+async function readToolConfig(
+  root: string,
+  tool: BuildTool
+): Promise<{ name: string; text: string } | undefined> {
+  for (const name of TOOL_CONFIG_FILES[tool]) {
+    const text = await readIfExists(join(root, name))
+    if (text !== null) return { name, text }
+  }
+  return undefined
+}
+
+/** 依赖里看不出工具时，退一步看项目里放着哪家的配置文件 */
+async function detectToolByConfigFile(
+  root: string
+): Promise<{ tool: BuildTool; file: { name: string; text: string } } | undefined> {
+  for (const tool of BUILD_TOOLS) {
+    const file = await readToolConfig(root, tool)
+    if (file) return { tool, file }
+  }
+  return undefined
+}
+
+/**
+ * 监听端口推断：配置文件 → 启动脚本参数 → 工具默认值。
+ * 工具本身也在这里定下来（依赖优先，配置文件兜底），界面据此解释端口是怎么来的。
+ */
+async function detectDevPort(
+  root: string,
+  deps: Record<string, string | undefined>,
+  serveCommand?: string
+): Promise<{ tool?: BuildTool; guess?: DevPortGuess }> {
+  let tool = detectBuildTool(deps)
+  let configFile = tool ? await readToolConfig(root, tool) : undefined
+
+  if (!tool) {
+    const byFile = await detectToolByConfigFile(root)
+    if (byFile) {
+      tool = byFile.tool
+      configFile = byFile.file
+    }
+  }
+
+  return { tool, guess: guessDevPort({ tool, configFile, serveCommand }) }
+}
+
 /** 读取并分析一个项目目录，得到可用于添加项目预览的结果 */
 export async function scanProject(dirPath: string): Promise<ScanResult> {
   const empty: ScanResult = {
@@ -188,6 +242,7 @@ export async function scanProject(dirPath: string): Promise<ScanResult> {
   const outputDir = await detectOutputDir(dirPath)
   const serve = pickServe(scripts)
   const nodeRequirement = await detectNodeRequirement(dirPath, pkg.engines?.node)
+  const { tool, guess } = await detectDevPort(dirPath, deps, serve ? scripts[serve] : undefined)
 
   return {
     ok: true,
@@ -201,6 +256,10 @@ export async function scanProject(dirPath: string): Promise<ScanResult> {
     allScripts: Object.keys(scripts),
     outputDir,
     enginesNode: nodeRequirement.value,
-    nodeRequirementFrom: nodeRequirement.from
+    nodeRequirementFrom: nodeRequirement.from,
+    buildTool: tool,
+    port: guess?.port,
+    portFrom: guess?.from,
+    portFile: guess?.file
   }
 }

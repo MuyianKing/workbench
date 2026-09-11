@@ -9,6 +9,8 @@ export interface SettingsHost {
   showWindow: () => void
   toggleWindow: () => void
   requestQuit: () => void
+  /** 程序名称变化后更新窗口标题（隐藏标题栏时任务栏 / Alt+Tab 仍用它） */
+  setWindowTitle: (name: string) => void
 }
 
 let host: SettingsHost | null = null
@@ -34,6 +36,7 @@ export function initAppSettings(nextHost: SettingsHost): void {
   applyTheme()
   applyHotkey()
   applyAutoLaunch()
+  applyAppName()
   // 托盘常驻：关闭按钮就是「隐藏到托盘」，没有托盘就再也找不回窗口了
   ensureTray()
 }
@@ -50,6 +53,7 @@ export function updateAppSettings(patch: Partial<AppSettings>): AppSettings {
   applyTheme()
   applyHotkey()
   applyAutoLaunch()
+  applyAppName()
 
   broadcast(IPC.eventSettings, settings())
   return settings()
@@ -60,7 +64,7 @@ export function notifyHiddenToTray(): void {
   if (!tray || tray.isDestroyed()) return
   try {
     tray.displayBalloon({
-      title: 'Workbench 仍在运行',
+      title: `${settings().appName} 仍在运行`,
       content: '窗口已收进托盘，点击托盘图标可以重新打开。'
     })
   } catch {
@@ -114,11 +118,18 @@ function applyAutoLaunch(): void {
   }
 }
 
+/** 程序名称改了之后，窗口标题与托盘提示一起跟上（托盘可能还没建好，跳过即可） */
+function applyAppName(): void {
+  const name = settings().appName
+  host?.setWindowTitle(name)
+  if (tray && !tray.isDestroyed()) tray.setToolTip(name)
+}
+
 function ensureTray(): void {
   if (tray && !tray.isDestroyed()) return
 
   tray = new Tray(nativeImage.createFromDataURL(TRAY_ICON_DATA_URL))
-  tray.setToolTip('Workbench')
+  tray.setToolTip(settings().appName)
   tray.setContextMenu(
     Menu.buildFromTemplate([
       { label: '显示主窗口', click: () => host?.showWindow() },

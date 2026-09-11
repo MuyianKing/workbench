@@ -20,14 +20,32 @@ import {
   type Project,
   type ProjectGroup,
   type ProjectPatch,
+  type QuickApp,
+  type QuickAppInput,
+  type QuickAppList,
+  type QuickAppPatch,
   type RuntimeState,
   type TerminalKind,
-  type TerminalOpenEvent
+  type TerminalOpenEvent,
+  type ThemeSource
 } from '@/types'
 import { clampTerminalHeight } from '@shared/terminal-height'
-import { clampSidePanelWidth } from '@shared/side-panel-width'
+import {
+  DEFAULT_THEME,
+  clampCardGap,
+  clampCardHeight,
+  clampColumnWidth,
+  clampGridStep,
+  moveCard as placeCard,
+  sanitizeTheme,
+  type CardPlacement,
+  type HomeCardId,
+  type SideColumnId,
+  type ThemeConfig
+} from '@shared/theme'
 import { clampBackgroundOpacity, sanitizeVeilColor } from '@shared/workspace-background'
 import { RingLog } from '@shared/log-ring'
+import { applyThemeWithTransition, type ThemeOrigin } from '@/theme-transition'
 
 const LOG_LIMIT = 5000
 
@@ -130,6 +148,11 @@ export const useProjectsStore = defineStore('projects', () => {
   /** 项目目录是否仍然存在；尚未检查过的项目按有效处理 */
   const pathValidity = ref<Record<string, boolean>>({})
   const settings = ref<AppSettings>({ ...DEFAULT_SETTINGS })
+  /**
+   * 当前实际生效的明暗（`system` 已被解析成 light / dark）。
+   * 界面里要按它画图标（顶栏的主题开关），所以不能只落在 DOM 属性上，得是个响应式的值。
+   */
+  const effectiveTheme = ref<EffectiveTheme>('light')
   const dataLocation = ref<DataLocation | null>(null)
   /** 按天聚合的命令执行次数，首页活跃度图的数据源；每次执行结束后由主进程推着刷新 */
   const activity = ref<ActivityCounts>({})
@@ -159,27 +182,100 @@ export const useProjectsStore = defineStore('projects', () => {
   }
 
   /**
-   * 首页右栏宽度（px）。
+   * 首页三栏布局（独立落在 theme.json 里）。
    *
-   * 与终端高度同一套做法：滑块拖动过程中只改这个 ref 让布局跟手，
-   * 松手（change）才落盘，免得每动一格就写一次数据文件。
+   * 与终端高度同一套做法：拖动栏宽 / 卡片高度时只改这个 ref 让布局跟手，
+   * 松手才整份落盘，免得每动一格就写一次文件。
    */
-  const sidePanelWidth = ref(DEFAULT_SETTINGS.sidePanelWidth)
+  const themeConfig = ref<ThemeConfig>(sanitizeTheme(DEFAULT_THEME))
+  /** 是否处于布局编辑态：由设置里的「布局调整」进入，画布上的「完成」退出 */
+  const layoutEditing = ref(false)
 
-  watch(
-    () => settings.value.sidePanelWidth,
-    (value) => {
-      sidePanelWidth.value = clampSidePanelWidth(value)
-    },
-    { immediate: true }
-  )
+  const gridStep = computed(() => themeConfig.value.gridStep)
+  const cardGap = computed(() => themeConfig.value.cardGap)
 
-  async function setSidePanelWidth(px: number): Promise<void> {
-    const next = clampSidePanelWidth(px)
-    sidePanelWidth.value = next
-    if (next === settings.value.sidePanelWidth) return
+  function applyThemeConfig(value: ThemeConfig): void {
+    themeConfig.value = sanitizeTheme(value)
+  }
 
-    await updateSettings({ sidePanelWidth: next })
+  async function saveThemeConfig(patch: Partial<ThemeConfig>): Promise<boolean> {
+    const result = await window.workbench.updateThemeConfig(patch)
+    if (!result.ok || !result.data) {
+      ElMessage.error(result.error ?? '保存首页布局失败')
+      return false
+    }
+    applyThemeConfig(result.data)
+    return true
+  }
+
+  /** 把一块卡片挪到某栏的第 index 位：本地先跟手，随即落盘（拖放是一次性动作） */
+  async function moveCard(id: HomeCardId, column: CardPlacement['column'], index: number): Promise<void> {
+    themeConfig.value.cards = placeCard(themeConfig.value.cards, id, column, index)
+    await saveThemeConfig({ cards: themeConfig.value.cards })
+  }
+
+  /** 拖动下边缘改高度：过程中只改本地 */
+  function setCardHeight(id: HomeCardId, height: number): void {
+    themeConfig.value.cards[id].height = clampCardHeight(height, id)
+  }
+
+  /** 切换高度模式（固定 / 自适应）；一次性动作，切完直接落盘 */
+  async function toggleCardMode(id: HomeCardId): Promise<void> {
+    const card = themeConfig.value.cards[id]
+    card.mode = card.mode === 'flex' ? 'fixed' : 'flex'
+    await commitCards()
+  }
+
+  /** 松手落盘：六块一起送，避免只有被拖的那块更新、其余停留在旧快照 */
+  async function commitCards(): Promise<void> {
+    const cards = {} as Record<HomeCardId, CardPlacement>
+    for (const id of Object.keys(themeConfig.value.cards) as HomeCardId[]) {
+      cards[id] = { ...themeConfig.value.cards[id] }
+    }
+    await saveThemeConfig({ cards })
+  }
+
+  /** 拖动分栏边界改栏宽：过程中只改本地 */
+  function setColumnWidth(side: SideColumnId, width: number): void {
+    const fallback = side === 'left' ? themeConfig.value.leftWidth : themeConfig.value.rightWidth
+    const next = clampColumnWidth(width, fallback)
+    if (side === 'left') themeConfig.value.leftWidth = next
+    else themeConfig.value.rightWidth = next
+  }
+
+  /** 松手落盘栏宽 */
+  async function commitColumns(): Promise<void> {
+    await saveThemeConfig({
+      leftWidth: themeConfig.value.leftWidth,
+      rightWidth: themeConfig.value.rightWidth
+    })
+  }
+
+  /** 步进是设置项，改完立即落盘 */
+  async function setGridStep(value: number): Promise<void> {
+    const next = clampGridStep(value)
+    themeConfig.value.gridStep = next
+    await saveThemeConfig({ gridStep: next })
+  }
+
+  /** 卡片间距是设置项，改完立即落盘（栏间、栏内卡片、项目卡网格同时生效） */
+  async function setCardGap(value: number): Promise<void> {
+    const next = clampCardGap(value)
+    themeConfig.value.cardGap = next
+    await saveThemeConfig({ cardGap: next })
+  }
+
+  /** 恢复默认布局；栏宽 / 栏内位置 / 高度 / 步进全部回到默认 */
+  async function resetLayout(): Promise<void> {
+    const fallback = sanitizeTheme(DEFAULT_THEME)
+    themeConfig.value = fallback
+    await saveThemeConfig({
+      gridStep: fallback.gridStep,
+      cardGap: fallback.cardGap,
+      leftWidth: fallback.leftWidth,
+      rightWidth: fallback.rightWidth,
+      cards: fallback.cards
+    })
   }
 
   /**
@@ -525,6 +621,8 @@ export const useProjectsStore = defineStore('projects', () => {
     rt.durationMs = event.durationMs
     rt.exitCode = event.exitCode
     rt.port = event.port ?? rt.port
+    // 事件只可能来自 Workbench 自己的子进程，探测出来的「外部运行」到此为止
+    rt.external = false
 
     if (event.status === 'idle' || event.status === 'failed' || event.status === 'success') {
       rt.startedAt = undefined
@@ -607,11 +705,52 @@ export const useProjectsStore = defineStore('projects', () => {
 
   let initialized = false
 
-  /** 主题落在 <html> 上；同时切换 Element Plus 需要的 .dark 类 */
-  function applyTheme(theme: EffectiveTheme): void {
+  /**
+   * 已经生效的主题。
+   *
+   * 必须用这个变量做守卫，不能读 root.dataset.theme：View Transitions 的 DOM 改动要等旧快照
+   * 拍完才执行，是异步的。一次用户切换会从三条路各推一次主题进来（IPC 回包、主进程显式的
+   * 主题广播、nativeTheme 的 updated 广播），读 DOM 的话后两次会误判成「还没应用」，
+   * 于是连开好几个转场、互相把对方挤成 skipped，界面上就是动效错乱甚至没有。
+   */
+  let appliedTheme: EffectiveTheme | null = null
+
+  /**
+   * 用户刚点下的切换起点，等「真正生效的那一次应用」来认领。
+   * IPC 回包与主进程广播谁先到不确定，把起点挂在这里，谁先到都能从点击处扩散。
+   */
+  let pendingThemeOrigin: ThemeOrigin | null = null
+
+  /**
+   * 主题落在 <html> 上；同时切换 Element Plus 需要的 .dark 类。
+   *
+   * origin 是这次切换的起点（用户点主题按钮的位置），过渡会从那个点扩散开；没有起点
+   * （跟随系统、主进程推送）就从视口中心扩散。启动时传 animate: false，首帧不该播动画。
+   */
+  function applyTheme(
+    theme: EffectiveTheme,
+    options: { origin?: ThemeOrigin | null; animate?: boolean } = {}
+  ): void {
+    // 同一轮切换里的其余推送到这里直接返回，保证一次切换只开一个转场
+    if (appliedTheme === theme) return
+
+    appliedTheme = theme
+    effectiveTheme.value = theme
+
+    const origin = options.origin ?? pendingThemeOrigin
+    pendingThemeOrigin = null
+
     const root = document.documentElement
-    root.dataset.theme = theme
-    root.classList.toggle('dark', theme === 'dark')
+    const commit = (): void => {
+      root.dataset.theme = theme
+      root.classList.toggle('dark', theme === 'dark')
+    }
+
+    if (options.animate === false) {
+      commit()
+      return
+    }
+    applyThemeWithTransition(commit, origin)
   }
 
   async function init(): Promise<void> {
@@ -627,8 +766,13 @@ export const useProjectsStore = defineStore('projects', () => {
     snapshotProjects()
 
     void refreshPaths()
-    // 目录可能在应用之外被移动/删除，窗口重新获得焦点时复查一次
-    window.addEventListener('focus', () => void refreshPaths())
+    // 项目可能在上次关闭后、或在 Workbench 之外已经跑起来了，进应用先按端口认一遍
+    void detectAll()
+    // 目录与程序都可能在应用之外被移动/删除，窗口重新获得焦点时复查一次
+    window.addEventListener('focus', () => {
+      void refreshPaths()
+      void refreshQuickApps()
+    })
   }
 
   /** 拉一次项目 / 分组 / 设置 / 数据位置 */
@@ -638,11 +782,14 @@ export const useProjectsStore = defineStore('projects', () => {
     groups.value = data.groups
     for (const project of data.projects) runtimeOf(project.id)
 
+    await refreshQuickApps()
     settings.value = await window.workbench.getSettings()
     dataLocation.value = await window.workbench.getDataLocation()
     activity.value = await window.workbench.getActivity()
     await refreshWallpapers()
-    applyTheme(resolveTheme(settings.value))
+    applyThemeConfig(await window.workbench.getThemeConfig())
+    // 首帧直接落到目标主题，不播过渡动画
+    applyTheme(resolveTheme(settings.value), { animate: false })
   }
 
   /** 重新拉一次活跃度计数（命令跑完、数据目录切换后调用） */
@@ -661,6 +808,10 @@ export const useProjectsStore = defineStore('projects', () => {
     window.workbench.onTerminalOpen(onTerminalOpen)
     window.workbench.onClear(onClear)
     window.workbench.onProjectChanged(onProjectChanged)
+    // 启动常用软件后主进程会推整份列表（最近使用时间变了），失效标记也一并刷新
+    window.workbench.onQuickApps(applyQuickApps)
+    // 首页布局被改（本地保存或另一个窗口），整份同步
+    window.workbench.onThemeConfig(applyThemeConfig)
     window.workbench.onSettingsChanged((value) => {
       settings.value = value
       applyTheme(resolveTheme(value))
@@ -693,26 +844,48 @@ export const useProjectsStore = defineStore('projects', () => {
     for (const project of projects.value) runtimeOf(project.id)
     snapshotProjects()
     await refreshPaths()
+    await detectAll()
   }
 
   // ---------- 设置 ----------
 
-  async function updateSettings(patch: Partial<AppSettings>): Promise<boolean> {
+  async function updateSettings(
+    patch: Partial<AppSettings>,
+    origin?: ThemeOrigin | null
+  ): Promise<boolean> {
     const wantedHotkey = patch.hotkeyEnabled === true
+
+    // 主题的起点先挂上：主进程既会回包又会广播，哪条路先触发应用都要用同一个起点。
+    // 传了主题却没传起点（键盘切换）就是 null，从中心扩散。
+    if (patch.theme !== undefined) pendingThemeOrigin = origin ?? null
+
     const result = await window.workbench.updateSettings(patch)
     if (!result.ok || !result.data) {
+      // 没保存成功就不会有主题应用来认领，别把起点留给下一次系统切换
+      pendingThemeOrigin = null
       ElMessage.error(result.error ?? '保存设置失败')
       return false
     }
 
     settings.value = result.data
-    applyTheme(resolveTheme(result.data))
+    applyTheme(resolveTheme(result.data), { origin })
 
     // 主进程注册失败时会自动把开关关掉，这里替它把原因说清楚
     if (wantedHotkey && !result.data.hotkeyEnabled) {
       ElMessage.warning(`快捷键 ${patch.hotkey ?? result.data.hotkey} 被系统或其他应用占用，已自动停用`)
     }
     return true
+  }
+
+  /**
+   * 快速切换明暗（顶栏那颗图标）。
+   *
+   * 按「当前生效主题」取反后显式写进设置：原本是「跟随系统」的话，点一下就等于手动
+   * 指定了相反的明或暗。origin 传点击位置，过渡动画从图标那一点扩散开。
+   */
+  function toggleTheme(origin?: ThemeOrigin | null): Promise<boolean> {
+    const next: ThemeSource = effectiveTheme.value === 'dark' ? 'light' : 'dark'
+    return updateSettings({ theme: next }, origin)
   }
 
   // ---------- 本机环境 ----------
@@ -841,7 +1014,8 @@ export const useProjectsStore = defineStore('projects', () => {
       groupId: input.groupId,
       serve: input.serve,
       build: [...input.build],
-      defaultBuild: input.defaultBuild
+      defaultBuild: input.defaultBuild,
+      port: input.port
     }
 
     const result = await window.workbench.addProject(payload)
@@ -933,6 +1107,164 @@ export const useProjectsStore = defineStore('projects', () => {
     if (groupFilter.value === id) groupFilter.value = 'all'
   }
 
+  // ---------- 快捷启动（常用软件） ----------
+
+  /** 首页那排常用软件；顺序就是用户拖出来的顺序 */
+  const quickApps = ref<QuickApp[]>([])
+  /** 启动项 id -> 程序是否已经不在原路径上（主进程每次列表现算，不落盘） */
+  const quickMissing = ref<Record<string, boolean>>({})
+  /** 程序路径 -> 图标 data URL；只在内存里留一份，重开应用由系统重新取 */
+  const quickIcons = ref<Record<string, string>>({})
+  const quickDialogVisible = ref(false)
+  /** 正在编辑的启动项 id；null 表示「新增」 */
+  const quickDialogId = ref<string | null>(null)
+
+  const quickEditing = computed(() =>
+    quickDialogId.value
+      ? quickApps.value.find((item) => item.id === quickDialogId.value) ?? null
+      : null
+  )
+
+  function openQuickDialog(id?: string): void {
+    quickDialogId.value = id ?? null
+    quickDialogVisible.value = true
+  }
+
+  /**
+   * 清掉「上次没取到图标」的空位。
+   *
+   * 取不到图标时会在表里留一个空串占位，免得每帧都重问一遍；但那个失败可能只是一时的
+   * （程序刚装好、快捷方式刚被修好）。列表一旦重新拉取就丢掉这些空位，
+   * 让图标在下一帧自己长回来，不用重启应用。
+   */
+  function dropFailedIcons(): void {
+    const next: Record<string, string> = {}
+    for (const [target, dataUrl] of Object.entries(quickIcons.value)) {
+      if (dataUrl) next[target] = dataUrl
+    }
+    quickIcons.value = next
+  }
+
+  async function refreshQuickApps(): Promise<void> {
+    const list: QuickAppList = await window.workbench.listQuickApps()
+    dropFailedIcons()
+    quickApps.value = list.apps
+    quickMissing.value = list.missing
+  }
+
+  function applyQuickApps(list: QuickAppList): void {
+    dropFailedIcons()
+    quickApps.value = list.apps
+    quickMissing.value = list.missing
+  }
+
+  /** 图标请求只发一次：同一个程序被加两次也只取一张 */
+  const iconPending = new Set<string>()
+
+  async function loadQuickIcon(target: string): Promise<void> {
+    if (quickIcons.value[target] !== undefined || iconPending.has(target)) return
+    iconPending.add(target)
+    try {
+      const result = await window.workbench.quickAppIcon(target)
+      // 取不到图标不算错误（有些文件本来就没有图标，程序也可能刚被删）：
+      // 界面用首字母兜底，不值得为它弹一个提示。空串表示「问过了，别再问」
+      quickIcons.value = {
+        ...quickIcons.value,
+        [target]: result.ok && result.data ? result.data : ''
+      }
+    } finally {
+      iconPending.delete(target)
+    }
+  }
+
+  /** 组件取图标：第一次问的时候顺手去取，取回来之前先用首字母顶着 */
+  function quickIconOf(target: string): string {
+    const cached = quickIcons.value[target]
+    if (cached === undefined) {
+      void loadQuickIcon(target)
+      return ''
+    }
+    return cached
+  }
+
+  function isQuickAppMissing(id: string): boolean {
+    return quickMissing.value[id] === true
+  }
+
+  async function addQuickApp(input: QuickAppInput): Promise<boolean> {
+    const result = await window.workbench.addQuickApp(input)
+    if (!result.ok || !result.data) {
+      ElMessage.error(result.error ?? '添加失败')
+      return false
+    }
+
+    quickApps.value = [...quickApps.value, result.data]
+    quickMissing.value[result.data.id] = false
+    ElMessage.success(`已添加 ${result.data.name}`)
+    return true
+  }
+
+  async function updateQuickApp(id: string, patch: QuickAppPatch): Promise<boolean> {
+    const result = await window.workbench.updateQuickApp(id, patch)
+    if (!result.ok || !result.data) {
+      ElMessage.error(result.error ?? '保存失败')
+      return false
+    }
+
+    const index = quickApps.value.findIndex((item) => item.id === id)
+    if (index !== -1) quickApps.value[index] = result.data
+    // 路径可能被换成了另一个程序，失效标记得重算
+    void refreshQuickApps()
+    return true
+  }
+
+  async function removeQuickApp(id: string): Promise<void> {
+    const entry = quickApps.value.find((item) => item.id === id)
+    const result = await window.workbench.removeQuickApp(id)
+    if (!result.ok) {
+      ElMessage.error(result.error ?? '移除失败')
+      return
+    }
+
+    quickApps.value = quickApps.value.filter((item) => item.id !== id)
+    ElMessage.success(entry ? `已移除 ${entry.name}` : '已移除')
+  }
+
+  /** 拖动排序：先本地生效再落盘，失败整份回滚（与分组排序同一套） */
+  async function reorderQuickApps(ids: string[]): Promise<void> {
+    const snapshot = quickApps.value.slice()
+    const byId = new Map(quickApps.value.map((item) => [item.id, item]))
+    quickApps.value = ids
+      .map((id) => byId.get(id))
+      .filter((item): item is QuickApp => !!item)
+      .map((item, index) => ({ ...item, order: index }))
+
+    const result = await window.workbench.reorderQuickApps(ids)
+    if (!result.ok || !result.data) {
+      quickApps.value = snapshot
+      ElMessage.error(result.error ?? '保存顺序失败')
+      return
+    }
+    quickApps.value = result.data
+  }
+
+  /**
+   * 启动一个常用软件。
+   *
+   * 成功后主进程会把整个列表推回来（最近使用时间变了），界面只需给一句反馈；
+   * 失败多半是程序被移动或删除，顺手刷新失效标记。
+   */
+  async function launchQuickApp(id: string): Promise<void> {
+    const entry = quickApps.value.find((item) => item.id === id)
+    const result = await window.workbench.launchQuickApp(id)
+    if (!result.ok) {
+      ElMessage.error(result.error ?? '启动失败')
+      void refreshQuickApps()
+      return
+    }
+    ElMessage.success(`已启动 ${entry?.name ?? '程序'}`)
+  }
+
   // ---------- 配置变更自动落盘 ----------
 
   /** 同 addProject：patch 会经 IPC 传输，必须转成普通对象 */
@@ -953,6 +1285,7 @@ export const useProjectsStore = defineStore('projects', () => {
       autoOpenExplorer: project.autoOpenExplorer,
       // 未选择时送空串而不是 undefined：结构化克隆后键仍在，主进程才能识别「清空」
       nodeVersion: project.nodeVersion ?? '',
+      port: project.port ?? null,
       groupId: project.groupId
     }
   }
@@ -1037,9 +1370,10 @@ export const useProjectsStore = defineStore('projects', () => {
       )
     }
 
-    // 端口不再让用户手填：用上次从启动日志里识别到的那个。知道端口才做占用检测，
-    // 不知道就静默跳过 —— 需求上已经去掉了「期望端口」这个配置项。
-    const knownPort = runtimeOf(id).port
+    // 先看项目配置的监听端口，其次用本次会话里从启动日志识别到的那个。
+    // 两个都没有就静默跳过 —— 不知道端口就无从检测占用。
+    const rt = runtimeOf(id)
+    const knownPort = project.port ?? rt.port
     if (knownPort) {
       const check = await window.workbench.checkPort(knownPort)
       if (check.inUse) {
@@ -1064,6 +1398,11 @@ export const useProjectsStore = defineStore('projects', () => {
           ElMessage.error(killed.error ?? '结束占用进程失败')
           return
         }
+      } else if (rt.external) {
+        // 端口已经空出来，之前探测到的「外部运行中」不再成立
+        rt.status = 'idle'
+        rt.external = false
+        rt.pid = undefined
       }
     }
 
@@ -1087,9 +1426,102 @@ export const useProjectsStore = defineStore('projects', () => {
     if (!result.ok) ElMessage.error(result.error ?? '打包失败')
   }
 
-  async function stop(id: string): Promise<void> {
+  async function stop(id: string): Promise<boolean> {
+    const rt = runtimes[id]
+
+    // 探测到的外部服务没有进程句柄，只能按端口结束。杀的是 Workbench 之外的进程，先确认一次。
+    if (rt?.external && rt.port) {
+      const name = findProject(id)?.name ?? '该项目'
+      try {
+        await ElMessageBox.confirm(
+          `将结束【${name}】占用【${rt.port}】端口。确定吗？`,
+          '结束外部进程',
+          { confirmButtonText: '结束进程', cancelButtonText: '取消', type: 'warning' }
+        )
+      } catch {
+        return false
+      }
+
+      const killed = await window.workbench.killPortProcess(rt.port)
+      if (!killed.ok) {
+        ElMessage.error(killed.error ?? '结束进程失败')
+        return false
+      }
+      rt.status = 'idle'
+      rt.external = false
+      rt.pid = undefined
+      rt.port = undefined
+      return true
+    }
+
     const result = await window.workbench.stop(id)
-    if (!result.ok) ElMessage.error(result.error ?? '停止失败')
+    if (!result.ok) {
+      ElMessage.error(result.error ?? '停止失败')
+      return false
+    }
+    return true
+  }
+
+  /**
+   * 检测项目是否已经在运行。
+   *
+   * 判据是端口占用：优先用项目里配置的监听端口，没配置就回退到本次会话里从启动日志识别到的。
+   * 命中的运行态打上 external 标记 —— 这种进程没有 Workbench 的句柄，也没有日志，
+   * 卡片上的「停止」会改成按端口结束。
+   *
+   * silent 用于启动时的批量检测：只更新状态，不打扰用户。
+   */
+  async function detect(id: string, options: { silent?: boolean } = {}): Promise<boolean> {
+    const project = findProject(id)
+    if (!project) return false
+
+    const rt = runtimeOf(id)
+    // Workbench 自己启动的进程，状态本来就准，不必再探；
+    // 而探测出来的「外部运行中」只是个快照，要重新确认（服务可能已经被人停了）
+    if (
+      !rt.external &&
+      (rt.status === 'running' || rt.status === 'installing' || rt.status === 'building')
+    ) {
+      if (!options.silent) ElMessage.info('项目正在执行 Workbench 启动的命令，无需检测')
+      return true
+    }
+
+    const port = project.port ?? rt.port
+    if (!port) {
+      if (!options.silent) ElMessage.warning('未配置监听端口，请先在项目详情里填写')
+      return false
+    }
+
+    const check = await window.workbench.checkPort(port)
+    if (check.inUse) {
+      rt.status = 'running'
+      rt.external = true
+      rt.port = port
+      rt.pid = check.pid
+      if (!options.silent) {
+        const who = check.processName
+          ? `${check.processName}（PID ${check.pid}）`
+          : `PID ${check.pid ?? '未知'}`
+        ElMessage.success(`端口 ${port} 已被 ${who} 占用，项目已在运行`)
+      }
+      return true
+    }
+
+    // 端口空着：之前探测到的外部运行已经结束，把状态收回来
+    if (rt.external) {
+      rt.status = 'idle'
+      rt.external = false
+      rt.pid = undefined
+      rt.port = undefined
+    }
+    if (!options.silent) ElMessage.info(`端口 ${port} 空闲，项目未在运行`)
+    return false
+  }
+
+  /** 启动应用后做一次全量检测：项目可能是在 Workbench 之外启动、至今还跑着的 */
+  async function detectAll(): Promise<void> {
+    const targets = projects.value.filter((project) => project.port)
+    await Promise.all(targets.map((project) => detect(project.id, { silent: true })))
   }
 
   /** 执行项目配置里的第 index 条自定义命令（F-2.6） */
@@ -1132,10 +1564,15 @@ export const useProjectsStore = defineStore('projects', () => {
   async function restart(id: string): Promise<void> {
     const status = runtimes[id]?.status ?? 'idle'
     if (status === 'running' || status === 'installing' || status === 'building') {
-      await window.workbench.stop(id)
-      if (!(await waitForIdle(id))) {
-        ElMessage.error('停止超时，请稍后再试')
-        return
+      if (runtimes[id]?.external) {
+        // 外部进程没有退出事件可等，结束成功与否看 stop 的返回值
+        if (!(await stop(id))) return
+      } else {
+        await window.workbench.stop(id)
+        if (!(await waitForIdle(id))) {
+          ElMessage.error('停止超时，请稍后再试')
+          return
+        }
       }
     }
     await start(id)
@@ -1331,7 +1768,19 @@ export const useProjectsStore = defineStore('projects', () => {
     activeTerminalState,
     terminalCollapsed,
     terminalHeight,
-    sidePanelWidth,
+    themeConfig,
+    gridStep,
+    cardGap,
+    layoutEditing,
+    moveCard,
+    setCardHeight,
+    toggleCardMode,
+    commitCards,
+    setColumnWidth,
+    commitColumns,
+    setGridStep,
+    setCardGap,
+    resetLayout,
     backgroundImage,
     backgroundName,
     backgroundError,
@@ -1351,6 +1800,7 @@ export const useProjectsStore = defineStore('projects', () => {
     ready,
     pathValidity,
     settings,
+    effectiveTheme,
     clock,
     dayStart,
     activity,
@@ -1381,12 +1831,12 @@ export const useProjectsStore = defineStore('projects', () => {
     build,
     stop,
     restart,
+    detect,
     runCustom,
     reveal,
     closeTerminal,
     clearTerminalLogs,
     setTerminalHeight,
-    setSidePanelWidth,
     setBackgroundOpacity,
     setBackgroundVeil,
     pickBackground,
@@ -1397,7 +1847,20 @@ export const useProjectsStore = defineStore('projects', () => {
     relocate,
     renameGroup,
     updateSettings,
+    toggleTheme,
     openDrawer,
-    closeDrawer
+    closeDrawer,
+    quickApps,
+    quickDialogVisible,
+    quickEditing,
+    openQuickDialog,
+    refreshQuickApps,
+    quickIconOf,
+    isQuickAppMissing,
+    addQuickApp,
+    updateQuickApp,
+    removeQuickApp,
+    reorderQuickApps,
+    launchQuickApp
   }
 })

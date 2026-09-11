@@ -1,6 +1,9 @@
 import { existsSync, promises as fs, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { randomUUID } from 'node:crypto'
 import { app } from 'electron'
+import { sanitizeQuickApps } from '../shared/quick-launch'
+import { sanitizeAppName } from '../shared/app-name'
 import {
   DEFAULT_SETTINGS,
   type AppSettings,
@@ -46,6 +49,7 @@ function emptyData(): PersistedData {
   return {
     projects: [],
     groups: [],
+    quickApps: [],
     settings: { ...DEFAULT_SETTINGS },
     activeSessions: [],
     activity: {}
@@ -111,9 +115,11 @@ export function sanitizeSettings(raw: unknown): AppSettings {
   const input = (raw ?? {}) as Partial<AppSettings>
   const value: AppSettings = { ...DEFAULT_SETTINGS, ...input }
 
-  if (value.closeBehavior !== 'confirm' && value.closeBehavior !== 'stopAll') {
-    value.closeBehavior = DEFAULT_SETTINGS.closeBehavior
-  }
+  // 「退出行为」设置已废弃：现在从托盘退出时只要还有项目在跑就统一弹窗让用户选，
+  // 旧数据文件里可能还留着这个字段，顺手清掉，免得一直写回。
+  delete (value as unknown as Record<string, unknown>).closeBehavior
+  // 程序名称：老数据文件里没有，空白名会让标题栏空掉，统一收敛
+  value.appName = sanitizeAppName(value.appName)
   if (value.theme !== 'system' && value.theme !== 'light' && value.theme !== 'dark') {
     value.theme = DEFAULT_SETTINGS.theme
   }
@@ -160,6 +166,8 @@ export async function loadData(): Promise<PersistedData> {
     cache = {
       projects: Array.isArray(parsed.projects) ? parsed.projects : [],
       groups: Array.isArray(parsed.groups) ? parsed.groups : [],
+      // 老数据文件没有这一项；手工改坏过的条目在这里被丢掉或补全
+      quickApps: sanitizeQuickApps(parsed.quickApps, randomUUID),
       settings: sanitizeSettings(parsed.settings),
       // 上次被强杀时留下的子进程记录，启动清理要用（漏掉这个字段清理就成了空转）
       activeSessions: Array.isArray(parsed.activeSessions) ? parsed.activeSessions : [],

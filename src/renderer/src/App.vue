@@ -7,6 +7,8 @@ import ProjectGrid from '@/components/ProjectGrid.vue'
 import TerminalPanel from '@/components/TerminalPanel.vue'
 import ProjectDrawer from '@/components/ProjectDrawer.vue'
 import AddProjectDialog from '@/components/AddProjectDialog.vue'
+import QuickAppDialog from '@/components/QuickAppDialog.vue'
+import QuitConfirmDialog from '@/components/QuitConfirmDialog.vue'
 import { useProjectsStore } from '@/stores/projects'
 
 const store = useProjectsStore()
@@ -25,6 +27,8 @@ onMounted(() => {
     <TerminalPanel />
     <ProjectDrawer />
     <AddProjectDialog />
+    <QuickAppDialog />
+    <QuitConfirmDialog />
   </div>
 </template>
 

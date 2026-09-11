@@ -1,15 +1,17 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { CircleClose, FolderOpened, Picture } from '@element-plus/icons-vue'
+import { CircleClose, FolderOpened, Picture, Rank } from '@element-plus/icons-vue'
 import { useProjectsStore } from '@/stores/projects'
-import { SIDE_PANEL_WIDTH_MAX, SIDE_PANEL_WIDTH_MIN } from '@shared/side-panel-width'
+import { APP_NAME_DEFAULT, APP_NAME_MAX_LENGTH } from '@shared/app-name'
+import { CARD_GAP_MAX, CARD_GAP_MIN, GRID_STEP_MAX, GRID_STEP_MIN } from '@shared/theme'
 import {
   BACKGROUND_OPACITY_MAX,
   BACKGROUND_OPACITY_MIN
 } from '@shared/workspace-background'
 import { builtinIdOf } from '@shared/wallpaper'
-import type { AppSettings, SidePanelPosition, ThemeSource } from '@/types'
+import type { AppSettings, ThemeSource } from '@/types'
+import type { ThemeOrigin } from '@/theme-transition'
 
 const props = defineProps<{ modelValue: boolean }>()
 const emit = defineEmits<{ 'update:modelValue': [value: boolean] }>()
@@ -25,12 +27,6 @@ const themes: Array<{ value: ThemeSource; label: string }> = [
   { value: 'system', label: '跟随系统' },
   { value: 'light', label: '亮色' },
   { value: 'dark', label: '暗色' }
-]
-
-/** 侧栏两条边，按钮顺序就是「左右」 */
-const sidePositions: Array<{ value: SidePanelPosition; label: string }> = [
-  { value: 'left', label: '左' },
-  { value: 'right', label: '右' }
 ]
 
 const isPackaged = computed(() => !import.meta.env.DEV)
@@ -83,8 +79,56 @@ const veilLabel = computed(() =>
 /** 快捷键录制状态 */
 const recording = ref(false)
 
+/**
+ * 程序名称的草稿：边打边存会每敲一个字就回推一次设置（还会被主进程收敛后覆盖光标），
+ * 所以本地先存着，失焦 / 回车时再提交。
+ */
+const appNameDraft = ref('')
+watch(
+  () => store.settings.appName,
+  (value) => {
+    appNameDraft.value = value
+  },
+  { immediate: true }
+)
+
+function commitAppName(): void {
+  if (appNameDraft.value === store.settings.appName) return
+  save({ appName: appNameDraft.value })
+}
+
 function save(patch: Partial<AppSettings>): void {
   void store.updateSettings(patch)
+}
+
+/**
+ * 主题切换的扩散起点：记按下位置，切换动画就从那颗按钮长出来。
+ * 用 pointerdown 是因为它一定早于 radio 的 change；键盘切换没有按下位置，交给 store 从中心扩散。
+ */
+const themeOrigin = ref<ThemeOrigin | null>(null)
+
+function rememberThemeOrigin(event: PointerEvent): void {
+  themeOrigin.value = { x: event.clientX, y: event.clientY }
+}
+
+function changeTheme(value: ThemeSource): void {
+  const origin = themeOrigin.value
+  themeOrigin.value = null
+  void store.updateSettings({ theme: value }, origin)
+}
+
+/** 进入首页布局编辑态：关掉设置，把画面让给画布上的拖动把手 */
+function enterLayoutEdit(): void {
+  store.layoutEditing = true
+  visible.value = false
+}
+
+function changeGridStep(value: number | undefined): void {
+  if (typeof value === 'number') void store.setGridStep(value)
+}
+
+function changeCardGap(value: number | undefined): void {
+  if (typeof value === 'number') void store.setCardGap(value)
 }
 
 // ---------- 快捷键 ----------
@@ -163,6 +207,30 @@ watch(visible, (open) => {
 <template>
   <el-dialog v-model="visible" title="设置" width="760" align-center>
     <div class="settings">
+      <!-- 程序 -->
+      <section class="block">
+        <h3 class="block__title">程序</h3>
+
+        <div class="row">
+          <div class="row__text">
+            <span class="row__label">程序名称</span>
+            <span class="row__hint">
+              显示在标题栏、托盘提示与窗口标题上的名字。留空恢复为 {{ APP_NAME_DEFAULT }}，最多
+              {{ APP_NAME_MAX_LENGTH }} 个字符；输入后失焦或按回车生效。
+            </span>
+          </div>
+          <el-input
+            v-model="appNameDraft"
+            class="name-input"
+            size="small"
+            :maxlength="APP_NAME_MAX_LENGTH"
+            spellcheck="false"
+            :placeholder="APP_NAME_DEFAULT"
+            @change="commitAppName"
+          />
+        </div>
+      </section>
+
       <!-- 外观 -->
       <section class="block">
         <h3 class="block__title">外观</h3>
@@ -175,7 +243,8 @@ watch(visible, (open) => {
           <el-radio-group
             :model-value="store.settings.theme"
             size="small"
-            @update:model-value="(value: unknown) => save({ theme: value as ThemeSource })"
+            @pointerdown="rememberThemeOrigin"
+            @update:model-value="(value: unknown) => changeTheme(value as ThemeSource)"
           >
             <el-radio-button v-for="t in themes" :key="t.value" :value="t.value">
               {{ t.label }}
@@ -183,47 +252,6 @@ watch(visible, (open) => {
           </el-radio-group>
         </div>
 
-        <div class="row">
-          <div class="row__text">
-            <span class="row__label">首页侧栏位置</span>
-            <span class="row__hint">
-              「活跃度 / 系统状态 / 最近使用 / 快捷操作」四块面板放在卡片网格的哪一侧。
-            </span>
-          </div>
-          <el-radio-group
-            :model-value="store.settings.sidePanelPosition"
-            size="small"
-            @update:model-value="
-              (value: unknown) => save({ sidePanelPosition: value as SidePanelPosition })
-            "
-          >
-            <el-radio-button v-for="p in sidePositions" :key="p.value" :value="p.value">
-              {{ p.label }}
-            </el-radio-button>
-          </el-radio-group>
-        </div>
-
-        <div class="row row--stack">
-          <div class="row__text">
-            <span class="row__label">首页侧栏宽度</span>
-            <span class="row__hint">
-              侧栏那条窄栏的宽度。窗口窄于 880px 时侧栏会自动排到卡片下方，这个值不再生效。
-            </span>
-          </div>
-          <div class="slider">
-            <el-slider
-              :model-value="store.sidePanelWidth"
-              :min="SIDE_PANEL_WIDTH_MIN"
-              :max="SIDE_PANEL_WIDTH_MAX"
-              :step="10"
-              :show-tooltip="false"
-              size="small"
-              @input="(value: unknown) => (store.sidePanelWidth = Number(value))"
-              @change="(value: unknown) => void store.setSidePanelWidth(Number(value))"
-            />
-            <span class="slider__value mono">{{ store.sidePanelWidth }} px</span>
-          </div>
-        </div>
         <div class="row row--stack">
           <div class="row__text">
             <span class="row__label">工作区背景</span>
@@ -338,6 +366,57 @@ watch(visible, (open) => {
         </div>
       </section>
 
+      <!-- 首页布局 -->
+      <section class="block">
+        <h3 class="block__title">首页布局</h3>
+
+        <div class="row">
+          <div class="row__text">
+            <span class="row__label">布局调整</span>
+            <span class="row__hint">
+              进入编辑模式后：拖动卡片可以在左中右三栏之间移动、调整栏内顺序；拖卡片下沿改高度；
+              拖两栏之间的竖线改左右栏宽度（中栏自动占满剩余宽度）。没有卡片的栏平时不显示，
+              编辑时会全部摆出来。布局单独保存在 theme.json 里，不跟项目数据混在一起。
+            </span>
+          </div>
+          <el-button size="small" :icon="Rank" @click="enterLayoutEdit">进入编辑</el-button>
+        </div>
+
+        <div class="row">
+          <div class="row__text">
+            <span class="row__label">拖动步进</span>
+            <span class="row__hint">位置与尺寸按这个像素网格吸附，越小越精细。</span>
+          </div>
+          <el-input-number
+            :model-value="store.gridStep"
+            :min="GRID_STEP_MIN"
+            :max="GRID_STEP_MAX"
+            :step="1"
+            size="small"
+            controls-position="right"
+            @change="changeGridStep"
+          />
+        </div>
+
+        <div class="row">
+          <div class="row__text">
+            <span class="row__label">卡片间距</span>
+            <span class="row__hint">
+              卡片之间的留白（px）：三栏之间、同栏卡片之间、项目列表里的项目卡之间都用它。0 表示紧贴。
+            </span>
+          </div>
+          <el-input-number
+            :model-value="store.cardGap"
+            :min="CARD_GAP_MIN"
+            :max="CARD_GAP_MAX"
+            :step="1"
+            size="small"
+            controls-position="right"
+            @change="changeCardGap"
+          />
+        </div>
+      </section>
+
       <!-- 窗口与托盘 -->
       <section class="block">
         <h3 class="block__title">窗口与托盘</h3>
@@ -359,7 +438,7 @@ watch(visible, (open) => {
         <div class="row">
           <div class="row__text">
             <span class="row__label">全局快捷键</span>
-            <span class="row__hint">在任何窗口下唤起 / 隐藏 Workbench。</span>
+            <span class="row__hint">在任何窗口下唤起 / 隐藏 {{ store.settings.appName }}。</span>
           </div>
           <el-switch
             :model-value="store.settings.hotkeyEnabled"
@@ -402,26 +481,6 @@ watch(visible, (open) => {
             @update:model-value="(value: unknown) => save({ launchAtLogin: Boolean(value) })"
           />
         </div>
-
-        <div class="row row--stack">
-          <div class="row__text">
-            <span class="row__label">退出行为</span>
-            <span class="row__hint">
-              关闭按钮只收进托盘，真正退出要走托盘菜单的「退出」；这里决定退出时怎么处理在跑的项目。
-            </span>
-          </div>
-          <el-radio-group
-            :model-value="store.settings.closeBehavior"
-            size="small"
-            class="stacked"
-            @update:model-value="
-              (value: unknown) => save({ closeBehavior: value as AppSettings['closeBehavior'] })
-            "
-          >
-            <el-radio value="confirm">先提示确认，确认后再全部停止并退出</el-radio>
-            <el-radio value="stopAll">不提示，直接停止所有项目并退出</el-radio>
-          </el-radio-group>
-        </div>
       </section>
 
       <!-- 数据存储 -->
@@ -432,7 +491,7 @@ watch(visible, (open) => {
           <div class="row__text">
             <span class="row__label">数据目录</span>
             <span class="row__hint">
-              Workbench 写的东西都放这个目录里，换位置会把当前数据整体搬过去；目标目录已有同名数据文件时会拒绝并提示。
+              {{ store.settings.appName }} 写的东西都放这个目录里，换位置会把当前数据整体搬过去；目标目录已有同名数据文件时会拒绝并提示。
             </span>
           </div>
           <p class="path mono truncate" :title="store.dataLocation?.dir">
@@ -495,6 +554,12 @@ watch(visible, (open) => {
 .row--hotkey {
   align-items: center;
   gap: var(--sp-3);
+}
+
+/* 程序名称输入框：定宽，别把右边这列的宽度让给长名字 */
+.name-input {
+  width: 220px;
+  flex-shrink: 0;
 }
 
 .row__text {

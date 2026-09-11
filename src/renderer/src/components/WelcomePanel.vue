@@ -287,7 +287,7 @@ const hints = computed(() => buildHints(store.settings))
 }
 
 .side__note {
-  /* 说明是列表的补充；和 HomePanels 的 .tips__note 保持同一套层次处理：
+  /* 说明是列表的补充；和「快捷操作」面板的 .tips__note 保持同一套层次处理：
      实线把它划到列表外面（行间是虚线），线上 4px 贴住最后一条提示，
      上内距 10px、下内距 0 */
   margin-top: calc(var(--sp-3) * -1 + 4px);

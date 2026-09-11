@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { ArrowDown, FolderOpened } from '@element-plus/icons-vue'
+import { ArrowDown, FolderOpened, Refresh, Select } from '@element-plus/icons-vue'
 import { UNGROUPED, useProjectsStore } from '@/stores/projects'
 import { moveToPosition } from '@shared/reorder'
 import GroupManageDialog from '@/components/GroupManageDialog.vue'
@@ -112,63 +112,84 @@ function pickSort(key: string): void {
 </script>
 
 <template>
-  <div class="filter">
-    <div class="filter__chips">
-      <button
-        v-for="chip in chips"
-        :key="chip.key"
-        class="chip"
-        :class="{
-          'is-active': store.groupFilter === chip.key,
-          'is-drop': dragOverKey === chip.key && draggingGroup !== chip.key,
-          'is-dragging': draggingGroup === chip.key
-        }"
-        type="button"
-        :draggable="chip.sortable"
-        :title="chip.sortable ? '拖动可调整分组顺序' : undefined"
-        @click="store.groupFilter = chip.key"
-        @dragover="onDragOver(chip.key, $event)"
-        @dragleave="onDragLeave(chip.key)"
-        @drop="onDrop(chip.key, $event)"
-        @dragstart="onGroupDragStart(chip.key, $event)"
-        @dragend="onGroupDragEnd"
-      >
-        <span
-          v-if="chip.key === 'running'"
-          class="chip__dot"
-          :class="{ 'is-live': chip.count > 0 }"
-        />
-        {{ chip.label }}
-        <span class="chip__count mono">{{ chip.count }}</span>
-      </button>
-    </div>
+  <div class="filter" :class="{ 'is-editing': store.layoutEditing }">
+    <!--
+      布局编辑态：原地接管这一行，而不是在画布上方再插一条操作栏 ——
+      行高固定（--h-filter），进出编辑态画布都不会上下跳。
+    -->
+    <template v-if="store.layoutEditing">
+      <span class="filter__hint">
+        拖动卡片可在三栏之间移动、调整栏内顺序；卡片右上角切换「固定高度 / 自适应」，
+        固定高度可拖下沿改高；拖两栏之间的竖线改栏宽 · 步进
+        <b class="mono">{{ store.gridStep }}px</b> · 卡片间距
+        <b class="mono">{{ store.cardGap }}px</b>
+      </span>
+      <div class="filter__tools">
+        <el-button size="small" :icon="Refresh" @click="store.resetLayout()">恢复默认</el-button>
+        <el-button size="small" type="primary" :icon="Select" @click="store.layoutEditing = false">
+          完成
+        </el-button>
+      </div>
+    </template>
 
-    <div class="filter__tools">
-      <button class="sort" type="button" @click="groupDialog = true">
-        <el-icon class="sort__caret"><FolderOpened /></el-icon>
-        <span class="sort__value">分组管理</span>
-      </button>
-
-      <el-dropdown trigger="click" placement="bottom-end" @command="pickSort">
-        <button class="sort" type="button">
-          <span class="sort__label">排序</span>
-          <span class="sort__value">{{ sortLabels[store.sortBy] }}</span>
-          <el-icon class="sort__caret"><ArrowDown /></el-icon>
+    <template v-else>
+      <div class="filter__chips">
+        <button
+          v-for="chip in chips"
+          :key="chip.key"
+          class="chip"
+          :class="{
+            'is-active': store.groupFilter === chip.key,
+            'is-drop': dragOverKey === chip.key && draggingGroup !== chip.key,
+            'is-dragging': draggingGroup === chip.key
+          }"
+          type="button"
+          :draggable="chip.sortable"
+          :title="chip.sortable ? '拖动可调整分组顺序' : undefined"
+          @click="store.groupFilter = chip.key"
+          @dragover="onDragOver(chip.key, $event)"
+          @dragleave="onDragLeave(chip.key)"
+          @drop="onDrop(chip.key, $event)"
+          @dragstart="onGroupDragStart(chip.key, $event)"
+          @dragend="onGroupDragEnd"
+        >
+          <span
+            v-if="chip.key === 'running'"
+            class="chip__dot"
+            :class="{ 'is-live': chip.count > 0 }"
+          />
+          {{ chip.label }}
+          <span class="chip__count mono">{{ chip.count }}</span>
         </button>
-        <template #dropdown>
-          <el-dropdown-menu>
-            <el-dropdown-item
-              v-for="(label, key) in sortLabels"
-              :key="key"
-              :command="key"
-              :class="{ 'is-current': store.sortBy === key }"
-            >
-              {{ label }}
-            </el-dropdown-item>
-          </el-dropdown-menu>
-        </template>
-      </el-dropdown>
-    </div>
+      </div>
+
+      <div class="filter__tools">
+        <button class="sort" type="button" @click="groupDialog = true">
+          <el-icon class="sort__caret"><FolderOpened /></el-icon>
+          <span class="sort__value">分组管理</span>
+        </button>
+
+        <el-dropdown trigger="click" placement="bottom-end" @command="pickSort">
+          <button class="sort" type="button">
+            <span class="sort__label">排序</span>
+            <span class="sort__value">{{ sortLabels[store.sortBy] }}</span>
+            <el-icon class="sort__caret"><ArrowDown /></el-icon>
+          </button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item
+                v-for="(label, key) in sortLabels"
+                :key="key"
+                :command="key"
+                :class="{ 'is-current': store.sortBy === key }"
+              >
+                {{ label }}
+              </el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
+      </div>
+    </template>
 
     <GroupManageDialog v-model="groupDialog" />
   </div>
@@ -191,6 +212,26 @@ function pickSort(key: string): void {
   align-items: center;
   gap: 6px;
   flex-wrap: wrap;
+}
+
+/* 编辑态：这一行临时换成布局操作条，给一点底色和常规筛选栏区分开 */
+.filter.is-editing {
+  background: var(--bg-surface);
+}
+
+.filter__hint {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--fs-meta);
+  color: var(--ink-2);
+  /* 一行放不下就省略，绝不换行把行撑高、把下面的画布顶下去 */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.filter__hint b {
+  color: var(--ink);
 }
 
 .chip {

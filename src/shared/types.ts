@@ -1,14 +1,17 @@
 /** 主进程与渲染进程共用的类型定义与 IPC 契约 */
 
+import { APP_NAME_DEFAULT } from './app-name'
 import { TERMINAL_HEIGHT_DEFAULT } from './terminal-height'
 import { SIDE_PANEL_WIDTH_DEFAULT } from './side-panel-width'
 import { SIDE_PANEL_POSITION_DEFAULT } from './side-panel-position'
 import { BACKGROUND_OPACITY_DEFAULT } from './workspace-background'
 import type { ActivityCounts } from './activity'
 import type { SidePanelPosition } from './side-panel-position'
+import type { BuildTool, PortSource } from './dev-port'
+import type { ThemeConfig } from './theme'
 
-/** 活跃度计数、侧栏位置也走这里导出，渲染层统一从 @/types 取类型 */
-export type { ActivityCounts, SidePanelPosition }
+/** 活跃度计数、侧栏位置、首页布局也走这里导出，渲染层统一从 @/types 取类型 */
+export type { ActivityCounts, SidePanelPosition, ThemeConfig }
 
 export type ProjectStatus = 'idle' | 'installing' | 'running' | 'building' | 'success' | 'failed'
 
@@ -70,6 +73,13 @@ export interface Project {
   /** 项目声明的 Node 版本要求（engines.node 或 .nvmrc），仅用于提示 */
   nodeRequirement?: string
   /**
+   * 开发服务的监听端口。
+   * 它是「项目是否已经在运行」的判据：启动应用后按它探测一次，
+   * 就能认出上一次（可能是在 Workbench 之外）启动、至今还占着端口的服务。
+   * 留空表示不检测 —— 此时只能靠本次会话里从启动日志识别到的端口。
+   */
+  port?: number
+  /**
    * 该项目执行命令时使用的 nvm Node 版本（如 20.20.2）。
    * 留空表示跟随系统 PATH 里的 node；只影响本项目的子进程，不修改全局软链。
    */
@@ -89,10 +99,50 @@ export interface ProjectGroup {
   order: number
 }
 
+/**
+ * 首页「快捷启动」里的一个常用软件。
+ *
+ * 与项目不是一回事：这里只是「用系统的方式把某个程序拉起来」，
+ * Workbench 不接管它的进程 —— 没有日志、没有停止按钮，关掉 Workbench 也不会连带结束它。
+ */
+export interface QuickApp {
+  id: string
+  name: string
+  /** 程序路径：.exe / .lnk / .bat / .cmd，或任意能被系统关联打开的文件 */
+  target: string
+  order: number
+  createdAt: number
+  lastUsedAt?: number
+}
+
+/** 新增快捷启动项时提交给主进程的数据 */
+export interface QuickAppInput {
+  name: string
+  target: string
+}
+
+/** 可编辑的快捷启动项配置 */
+export interface QuickAppPatch {
+  name?: string
+  target?: string
+}
+
+/**
+ * 快捷启动的完整状态。
+ * missing 以「启动项 id」为键（不是路径）：同一个程序可能被加两次，界面按 id 取用最直接。
+ */
+export interface QuickAppList {
+  apps: QuickApp[]
+  missing: Record<string, boolean>
+}
+
 /** 应用级设置（F-8.x） */
 export interface AppSettings {
-  /** 退出行为：有项目运行时提示确认 / 直接停止全部并退出 */
-  closeBehavior: 'confirm' | 'stopAll'
+  /**
+   * 程序名称：显示在标题栏、托盘提示与窗口标题上。
+   * 空串 / 全空白 / 超长都会在落盘前被收敛，见 shared/app-name.ts。
+   */
+  appName: string
   /** 开机自启，默认关闭 */
   launchAtLogin: boolean
   /** 主题，默认跟随系统 */
@@ -109,13 +159,13 @@ export interface AppSettings {
   /** 终端面板展开时的高度（px），由拖动面板上沿决定 */
   terminalHeight: number
   /**
-   * 首页侧栏的宽度（px），放「系统状态 / 最近使用 / 快捷操作」三块面板。
-   * 窗口窄到挤不下两栏时（< 880px）会退化成单列，这个值自动失效。
+   * （旧版固定侧栏布局）首页侧栏的宽度（px）。
+   * 现在的首页由 theme.json 里的自由布局接管，这个值只是为兼容老数据文件保留，界面不再使用。
    */
   sidePanelWidth: number
   /**
-   * 首页侧栏放在卡片网格的哪一侧：左 / 右。
-   * 换边不换宽度，栏宽始终看 sidePanelWidth。
+   * （旧版固定侧栏布局）首页侧栏放在卡片网格的哪一侧。
+   * 同样只为兼容老数据文件保留，界面不再使用。
    */
   sidePanelPosition: SidePanelPosition
   /**
@@ -152,6 +202,8 @@ export interface ActiveSession {
 export interface PersistedData {
   projects: Project[]
   groups: ProjectGroup[]
+  /** 首页「快捷启动」的常用软件 */
+  quickApps: QuickApp[]
   settings: AppSettings
   /** 上次运行期间启动、尚未确认结束的子进程 */
   activeSessions?: ActiveSession[]
@@ -178,6 +230,11 @@ export interface RuntimeState {
   durationMs?: number
   exitCode?: number | null
   port?: number
+  /**
+   * 这次「运行中」是探测到端口被占得出的，进程不归 Workbench 管：
+   * 没有进程句柄也没有日志，停止只能按端口结束。
+   */
+  external?: boolean
 }
 
 /** 扫描项目目录得到的结果，用于添加项目前的预览 */
@@ -199,6 +256,14 @@ export interface ScanResult {
   enginesNode?: string
   /** enginesNode 的来源，用于提示文案 */
   nodeRequirementFrom?: 'engines' | 'nvmrc'
+  /** 识别到的构建工具，决定端口按哪家的规则找 */
+  buildTool?: BuildTool
+  /** 自动识别出的开发服务监听端口 */
+  port?: number
+  /** 端口的来源：配置文件 / 启动脚本参数 / 工具默认值 */
+  portFrom?: PortSource
+  /** portFrom 为 config 时的配置文件名 */
+  portFile?: string
 }
 
 /** 添加项目时提交给主进程的数据 */
@@ -209,6 +274,8 @@ export interface AddProjectInput {
   serve?: string
   build: string[]
   defaultBuild?: string
+  /** 监听端口；显式传 null 表示用户清空了它，按「不检测」落盘 */
+  port?: number | null
   /** package.json 解析失败时，是否以「仅管理目录」的方式加入 */
   allowInvalid?: boolean
 }
@@ -221,6 +288,8 @@ export interface ProjectPatch {
   outputDir?: string
   autoOpenExplorer?: boolean
   nodeVersion?: string
+  /** 监听端口；null 或非法值表示清空 */
+  port?: number | null
   groupId?: string
 }
 
@@ -383,6 +452,19 @@ export interface WorkbenchApi {
   removeGroup: (id: string) => Promise<Result<null>>
   /** 按给定顺序重排分组（拖动排序） */
   reorderGroups: (ids: string[]) => Promise<Result<ProjectGroup[]>>
+  /** 快捷启动：列表 + 哪些程序已经不在原路径上了 */
+  listQuickApps: () => Promise<QuickAppList>
+  /** 挑一个要启动的程序（.exe / 快捷方式…），取消返回 null */
+  pickQuickTarget: () => Promise<string | null>
+  addQuickApp: (input: QuickAppInput) => Promise<Result<QuickApp>>
+  updateQuickApp: (id: string, patch: QuickAppPatch) => Promise<Result<QuickApp>>
+  removeQuickApp: (id: string) => Promise<Result<null>>
+  /** 按给定顺序重排快捷启动项（拖动排序） */
+  reorderQuickApps: (ids: string[]) => Promise<Result<QuickApp[]>>
+  /** 启动一个常用软件；程序被移动或删除时返回失败原因 */
+  launchQuickApp: (id: string) => Promise<Result<null>>
+  /** 取程序的系统图标（主进程转成 data URL，取不到时用首字母兜底） */
+  quickAppIcon: (target: string) => Promise<Result<string>>
   reveal: (targetPath: string) => Promise<Result<null>>
   checkPackageManagers: () => Promise<PackageManagerStatus>
   /** 用 npm 全局安装 yarn / pnpm；返回的 status 是装完（或装失败）后重新探测的结果 */
@@ -408,6 +490,10 @@ export interface WorkbenchApi {
   loadBackground: (path: string) => Promise<Result<BackgroundImage>>
   /** 内置壁纸清单（含缩略图）；目录里没有图时返回空数组 */
   listWallpapers: () => Promise<BuiltinWallpaper[]>
+  /** 首页布局配置（theme.json）：六块卡片的位置 / 尺寸与拖动步进 */
+  getThemeConfig: () => Promise<ThemeConfig>
+  /** 合并保存首页布局；返回收敛后的最终值 */
+  updateThemeConfig: (patch: Partial<ThemeConfig>) => Promise<Result<ThemeConfig>>
   /** 项目数据文件所在目录（含是否为默认位置） */
   getDataLocation: () => Promise<DataLocation>
   /** 选择新的数据目录；目标已存在数据文件时返回冲突而不是直接覆盖 */
@@ -420,12 +506,20 @@ export interface WorkbenchApi {
   onTerminalOpen: (fn: (e: TerminalOpenEvent) => void) => () => void
   onClear: (fn: (e: { terminal: string }) => void) => () => void
   onProjectChanged: (fn: (project: Project) => void) => () => void
+  /** 快捷启动列表被主进程改过（启动一次会刷新最近使用时间），整份推过来 */
+  onQuickApps: (fn: (payload: QuickAppList) => void) => () => void
   onSettingsChanged: (fn: (settings: AppSettings) => void) => () => void
   onTheme: (fn: (theme: EffectiveTheme) => void) => () => void
   /** 包管理器安装过程中的输出，一行一行推过来 */
   onPmInstallLog: (fn: (e: PmInstallLogEvent) => void) => () => void
   /** 数据目录切换后，渲染层需要整份重新加载 */
   onDataReload: (fn: () => void) => () => void
+  /** 首页布局被改过（本地保存或别的窗口），整份推过来 */
+  onThemeConfig: (fn: (config: ThemeConfig) => void) => () => void
+  /** 主进程请求弹出退出确认框（托盘退出且还有项目在运行时） */
+  onQuitConfirm: (fn: (payload: QuitConfirmPayload) => void) => () => void
+  /** 回传退出确认框里选中的结果 */
+  respondQuitConfirm: (choice: QuitChoice) => void
 }
 
 /** 数据文件位置信息 */
@@ -443,6 +537,19 @@ export interface DataLocationPick {
   conflict: boolean
 }
 
+/** 退出确认的结果：停止所有项目再退 / 保留项目直接退 / 取消（不退出） */
+export type QuitChoice = 'stop' | 'direct' | 'cancel'
+
+/**
+ * 「仍有项目在运行」确认框的载荷。
+ * 主进程在托盘「退出」时推给渲染层，由渲染层用应用内弹窗展示，
+ * 这样样式能跟界面统一，而不是走系统原生消息框。
+ */
+export interface QuitConfirmPayload {
+  /** 仍在运行的项目数（含启动检测按端口认出的外部服务） */
+  count: number
+}
+
 export const IPC = {
   pickDirectory: 'system:pick-directory',
   scanProject: 'project:scan',
@@ -457,6 +564,15 @@ export const IPC = {
   renameGroup: 'group:rename',
   removeGroup: 'group:remove',
   reorderGroups: 'group:reorder',
+  quickList: 'quick:list',
+  quickPick: 'quick:pick',
+  quickAdd: 'quick:add',
+  quickUpdate: 'quick:update',
+  quickRemove: 'quick:remove',
+  quickReorder: 'quick:reorder',
+  quickLaunch: 'quick:launch',
+  quickIcon: 'quick:icon',
+  eventQuickApps: 'quick:changed',
   reveal: 'system:reveal',
   checkPackageManagers: 'system:check-pm',
   installPackageManager: 'system:install-pm',
@@ -469,6 +585,9 @@ export const IPC = {
   pickBackground: 'settings:pick-background',
   loadBackground: 'settings:load-background',
   listWallpapers: 'settings:list-wallpapers',
+  getThemeConfig: 'theme:get',
+  updateThemeConfig: 'theme:update',
+  eventThemeConfig: 'theme:changed',
   getDataLocation: 'data:location',
   pickDataDir: 'data:pick-dir',
   migrateDataDir: 'data:migrate',
@@ -485,12 +604,14 @@ export const IPC = {
   eventSettings: 'settings:changed',
   eventTheme: 'settings:theme',
   eventPmInstallLog: 'system:pm-install-log',
-  eventDataReload: 'data:reload'
+  eventDataReload: 'data:reload',
+  eventQuitConfirm: 'app:quit-confirm',
+  quitConfirmRespond: 'app:quit-confirm-respond'
 } as const
 
 /** 设置默认值：与设计文档 4.8 一致 */
 export const DEFAULT_SETTINGS: AppSettings = {
-  closeBehavior: 'confirm',
+  appName: APP_NAME_DEFAULT,
   launchAtLogin: false,
   theme: 'system',
   hotkeyEnabled: true,

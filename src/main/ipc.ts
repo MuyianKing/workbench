@@ -17,10 +17,16 @@ import {
   type ProjectGroup,
   type ProjectPatch,
   type ProcessLogEvent,
+  type QuickApp,
+  type QuickAppInput,
+  type QuickAppPatch,
   type Result,
-  type RunRecord
+  type RunRecord,
+  type ThemeConfig
 } from '../shared/types'
 import { satisfiesNodeVersion } from '../shared/node-version'
+import { parsePort } from '../shared/port'
+import { samePath } from '../shared/project-path'
 import { reorderById } from '../shared/reorder'
 import { bumpDay, pruneDays } from '../shared/activity'
 import { broadcast } from './broadcast'
@@ -47,7 +53,18 @@ import {
 import { updateAppSettings } from './app-settings'
 import { pickBackgroundImage, readBackgroundImage } from './background'
 import { listWallpapers } from './wallpapers'
+import { themeConfig, updateTheme } from './theme'
 import { LogBatcher } from './log-batcher'
+import {
+  addQuickApp,
+  launchQuickApp,
+  pickApplication,
+  quickAppIcon,
+  quickAppList,
+  removeQuickApp,
+  reorderQuickApps,
+  updateQuickApp
+} from './quick-launch'
 
 const COMMON_OUTPUT_DIRS = ['dist', 'dist_electron', 'build', 'out']
 
@@ -186,21 +203,18 @@ manager.on('sessions-changed', () => {
 })
 
 /**
- * 往当天的格子里记一次执行。
+ * 用户每点一次「启动」或「打包」，就往当天的格子里记一次。
  *
- * 用命令开始的时间而不是结束时间：跨零点跑的构建，人是在前一天点的按钮。
+ * 只认这两种主动操作：安装依赖、自定义命令，以及停止 / 强制结束 / 启动失败都不算 ——
+ * 图回答的是「主动跑了多少次」，不是「进程收尾了几次」。
  * 图只画最近一年，顺手裁掉更旧的计数，数据文件才不会跟着使用年限一直长。
  */
-function recordActivity(timestamp?: number): void {
-  const at = typeof timestamp === 'number' && Number.isFinite(timestamp) ? timestamp : Date.now()
-  data().activity = pruneDays(bumpDay(activity(), at), Date.now())
+function recordActivity(): void {
+  data().activity = pruneDays(bumpDay(activity(), Date.now()), Date.now())
   save()
 }
 
 manager.on('run-finished', ({ projectId, record }: { projectId: string; record: RunRecord }) => {
-  // 命令跑完了就算活跃，与结果无关，也与这个项目还在不在列表里无关
-  recordActivity(record.startedAt)
-
   const project = findProject(projectId)
   if (!project) return
 
@@ -242,7 +256,10 @@ export async function addProject(input: AddProjectInput): Promise<Result<Project
 
   const dirPath = input.path.trim()
   if (!(await isDirectory(dirPath))) return fail('目录不存在或不是文件夹')
-  if (data().projects.some((p) => p.path === dirPath)) return fail('该目录已经添加过了')
+
+  // 界面上已经拦过一次，这里是兜底：路径写法不同（盘符大小写、斜杠方向）也算同一个目录
+  const existing = data().projects.find((p) => samePath(p.path, dirPath))
+  if (existing) return fail(`该目录已经添加过了（「${existing.name}」）`)
 
   const scan = await scanProject(dirPath)
 
@@ -254,6 +271,8 @@ export async function addProject(input: AddProjectInput): Promise<Result<Project
 
   const manageOnly = !scan.ok
   const buildList = Array.isArray(input.build) ? input.build : scan.build
+  // 界面上传了端口就用它（用户可能改过或清空），没传才回退到自动识别的结果
+  const port = 'port' in input ? parsePort(input.port) : parsePort(scan.port)
 
   const project: Project = {
     id: randomUUID(),
@@ -270,6 +289,7 @@ export async function addProject(input: AddProjectInput): Promise<Result<Project
     },
     outputDir: scan.outputDir ?? '',
     nodeRequirement: scan.enginesNode,
+    port,
     autoOpenExplorer: true,
     manageOnly: manageOnly || undefined,
     groupId: input.groupId,
@@ -327,6 +347,7 @@ export function registerIpc(): void {
         const next = typeof patch.nodeVersion === 'string' ? patch.nodeVersion.trim() : ''
         project.nodeVersion = next || undefined
       }
+      if ('port' in (patch ?? {})) project.port = parsePort(patch.port)
       if ('groupId' in (patch ?? {})) project.groupId = patch.groupId
 
       save()
@@ -362,7 +383,7 @@ export function registerIpc(): void {
 
       const target = typeof newPath === 'string' ? newPath.trim() : ''
       if (!(await isDirectory(target))) return fail('目录不存在或不是文件夹')
-      if (data().projects.some((p) => p.id !== id && p.path === target)) {
+      if (data().projects.some((p) => p.id !== id && samePath(p.path, target))) {
         return fail('该目录已经被其他项目使用')
       }
 
@@ -381,6 +402,7 @@ export function registerIpc(): void {
           project.scripts.defaultBuild = scan.build[0]
         }
         if (!project.outputDir && scan.outputDir) project.outputDir = scan.outputDir
+        if (!project.port && scan.port) project.port = scan.port
         // 新目录的 package.json 是好的，就解除「仅管理目录」
         if (project.manageOnly) project.manageOnly = undefined
       }
@@ -539,6 +561,18 @@ export function registerIpc(): void {
   // 内置壁纸清单：目录里有什么就列什么，没有则返回空数组（设置里那一栏自动收起）
   ipcMain.handle(IPC.listWallpapers, (): Promise<BuiltinWallpaper[]> => listWallpapers())
 
+  // ---------- 首页布局（theme.json） ----------
+
+  ipcMain.handle(IPC.getThemeConfig, () => themeConfig())
+
+  ipcMain.handle(
+    IPC.updateThemeConfig,
+    async (_event, patch: Partial<ThemeConfig>): Promise<Result<ThemeConfig>> => {
+      if (!patch || typeof patch !== 'object') return fail('参数不合法')
+      return ok(updateTheme(patch))
+    }
+  )
+
   // ---------- 进程操作 ----------
 
   ipcMain.handle(IPC.install, async (_event, id: string): Promise<Result<null>> => {
@@ -582,6 +616,7 @@ export function registerIpc(): void {
     const error = manager.start(project, script)
     if (error) return fail(error)
 
+    recordActivity()
     touchProject(project)
     return ok(null)
   })
@@ -606,6 +641,7 @@ export function registerIpc(): void {
     const error = manager.build(project, target)
     if (error) return fail(error)
 
+    recordActivity()
     touchProject(project)
     return ok(null)
   })
@@ -638,6 +674,44 @@ export function registerIpc(): void {
     manager.stop(id)
     return ok(null)
   })
+
+  // ---------- 快捷启动（常用软件） ----------
+
+  ipcMain.handle(IPC.quickList, () => quickAppList())
+
+  ipcMain.handle(IPC.quickPick, async (event): Promise<string | null> => {
+    const win = BrowserWindow.fromWebContents(event.sender) ?? undefined
+    return pickApplication(win)
+  })
+
+  ipcMain.handle(IPC.quickAdd, async (_event, input: QuickAppInput) => addQuickApp(input))
+
+  ipcMain.handle(
+    IPC.quickUpdate,
+    async (_event, id: string, patch: QuickAppPatch): Promise<Result<QuickApp>> =>
+      updateQuickApp(id, patch)
+  )
+
+  ipcMain.handle(IPC.quickRemove, async (_event, id: string): Promise<Result<null>> =>
+    removeQuickApp(id)
+  )
+
+  ipcMain.handle(IPC.quickReorder, async (_event, ids: string[]): Promise<Result<QuickApp[]>> =>
+    reorderQuickApps(ids)
+  )
+
+  ipcMain.handle(IPC.quickLaunch, async (_event, id: string): Promise<Result<null>> => {
+    try {
+      await launchQuickApp(id)
+      return ok(null)
+    } catch (err) {
+      return fail((err as Error).message)
+    }
+  })
+
+  ipcMain.handle(IPC.quickIcon, async (_event, target: string): Promise<Result<string>> =>
+    quickAppIcon(target)
+  )
 
   // ---------- 数据存储位置 ----------
 

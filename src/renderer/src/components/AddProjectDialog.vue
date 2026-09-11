@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
-import { ElMessageBox } from 'element-plus'
-import { FolderOpened, Plus, Refresh } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { FolderOpened, Plus } from '@element-plus/icons-vue'
+import { BUILD_TOOL_LABEL } from '@shared/dev-port'
+import { parsePort } from '@shared/port'
+import { samePath } from '@shared/project-path'
 import { useProjectsStore } from '@/stores/projects'
 import type { ScanResult } from '@/types'
 
@@ -12,7 +15,9 @@ const form = reactive({
   name: '',
   groupId: undefined as string | undefined,
   serve: undefined as string | undefined,
-  build: [] as string[]
+  build: [] as string[],
+  /** 监听端口先按字符串收，提交时再校验；空串表示不检测 */
+  port: ''
 })
 
 const scan = ref<ScanResult | null>(null)
@@ -33,8 +38,15 @@ const allScripts = computed(() => scan.value?.allScripts ?? [])
 /** 解析失败的项目只能管目录，不能执行命令，所以要用户显式勾选 */
 const parseFailed = computed(() => !!scan.value?.parseError)
 
+/** 选中的目录已经在列表里了；重复添加没有意义，在选路径这一步就拦掉 */
+const duplicate = computed(() => {
+  const target = form.path.trim()
+  if (!target) return null
+  return store.projects.find((project) => samePath(project.path, target)) ?? null
+})
+
 const canSubmit = computed(() => {
-  if (scanning.value || !form.name.trim()) return false
+  if (scanning.value || !form.name.trim() || duplicate.value) return false
   if (scan.value?.ok) return true
   return allowInvalid.value && parseFailed.value
 })
@@ -70,7 +82,25 @@ async function runScan(dirPath: string): Promise<void> {
   if (!nameTouched.value) form.name = result.data.name
   form.serve = result.data.serve
   form.build = result.data.build.length ? [...result.data.build] : []
+  form.port = result.data.port ? String(result.data.port) : ''
 }
+
+/** 端口那行的说明：讲清楚它是从哪儿认出来的，还是按默认值推测的 */
+const portHint = computed(() => {
+  const result = scan.value
+  if (!result?.port) {
+    return '用于判断项目是否已在运行；留空表示不检测，之后也可以在项目详情里补。'
+  }
+
+  const tool = result.buildTool ? BUILD_TOOL_LABEL[result.buildTool] : '构建工具'
+  if (result.portFrom === 'config') {
+    return `自动识别自 ${result.portFile}（${tool} 的监听端口）。`
+  }
+  if (result.portFrom === 'script') {
+    return '自动识别自启动脚本里的 --port 参数。'
+  }
+  return `配置里没写端口，按 ${tool} 的默认值推测；端口被占时工具会自动换一个，请以实际为准。`
+})
 
 async function pickDirectory(): Promise<void> {
   const picked = await window.workbench.pickDirectory()
@@ -114,6 +144,7 @@ function reset(): void {
   form.groupId = undefined
   form.serve = undefined
   form.build = []
+  form.port = ''
   scan.value = null
   scanError.value = ''
   scanning.value = false
@@ -124,6 +155,12 @@ function reset(): void {
 async function submit(): Promise<void> {
   if (!canSubmit.value) return
 
+  const rawPort = form.port.trim()
+  if (rawPort && !parsePort(rawPort)) {
+    ElMessage.warning('监听端口需为 1–65535 的整数，或留空表示不检测')
+    return
+  }
+
   const added = await store.addProject({
     path: form.path.trim(),
     name: form.name.trim(),
@@ -131,6 +168,7 @@ async function submit(): Promise<void> {
     serve: form.serve,
     build: form.build,
     defaultBuild: form.build[0],
+    port: rawPort ? parsePort(rawPort) : null,
     allowInvalid: allowInvalid.value
   })
 
@@ -158,18 +196,13 @@ async function submit(): Promise<void> {
             @keydown.enter="runScan(form.path)"
           />
           <el-button :icon="FolderOpened" @click="pickDirectory">浏览</el-button>
-          <el-button
-            v-if="form.path"
-            class="icon-btn"
-            :icon="Refresh"
-            :loading="scanning"
-            aria-label="重新扫描"
-            @click="runScan(form.path)"
-          />
         </div>
       </div>
 
-      <p v-if="scanning" class="hint">正在读取 package.json…</p>
+      <p v-if="duplicate" class="hint hint--error">
+        该目录已经在项目列表里了（「{{ duplicate.name }}」），不能重复添加。
+      </p>
+      <p v-else-if="scanning" class="hint">正在读取 package.json…</p>
       <p v-else-if="scanError" class="hint hint--error">{{ scanError }}</p>
 
       <el-alert
@@ -182,7 +215,7 @@ async function submit(): Promise<void> {
         description="勾选下方选项后，Workbench 只记录这个目录、不执行任何命令；等 package.json 修好后，可在详情抽屉里用「重新定位」重新识别。"
       />
 
-      <template v-if="scan && (scan.ok || parseFailed)">
+      <template v-if="scan && (scan.ok || parseFailed) && !duplicate">
         <div class="field">
           <label class="field__label">显示名</label>
           <el-input
@@ -245,6 +278,12 @@ async function submit(): Promise<void> {
             <p v-if="!scan.serve" class="field__hint">
               scripts 中没有 serve / dev / start，请手动指定。
             </p>
+          </div>
+
+          <div class="field">
+            <label class="field__label">监听端口</label>
+            <el-input v-model="form.port" placeholder="留空表示不检测" spellcheck="false" />
+            <p class="field__hint">{{ portHint }}</p>
           </div>
 
           <div class="field">
@@ -311,12 +350,6 @@ async function submit(): Promise<void> {
 
 .hint--error {
   color: var(--st-fail);
-}
-
-.icon-btn {
-  width: 32px;
-  padding: 0;
-  flex-shrink: 0;
 }
 
 .alert {

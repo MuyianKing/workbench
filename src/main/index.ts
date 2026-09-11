@@ -1,8 +1,11 @@
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { app, BrowserWindow, dialog, nativeTheme, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, nativeTheme, shell } from 'electron'
+import { IPC, type QuitChoice } from '../shared/types'
 import { data, flushSync, loadData, save } from './store'
+import { flushThemeSync, loadTheme } from './theme'
 import { manager, flushLogBatches, registerIpc } from './ipc'
+import { checkPort, killPortProcess } from './system'
 import { reapOrphanSessions } from './orphan'
 import {
   currentSettings,
@@ -19,6 +22,19 @@ let quitting = false
 let appQuitting = false
 /** 「已收进托盘」的提示每次运行只弹一次，避免每次关窗口都打扰 */
 let trayHintShown = false
+/**
+ * 退出时是否要停止运行中的项目。
+ * 退出弹窗里选「直接退出」会置为 false，此时跳过 shutdown，
+ * 把进程留给下次启动的残留清理（reapOrphanSessions）。
+ */
+let stopProjectsOnQuit = true
+/** 退出确认框同时只允许一个，避免连点托盘「退出」弹出多个 */
+let quitPromptOpen = false
+/**
+ * 退出时要按端口结束的「外部运行中」项目（启动检测发现、进程不归 Workbench 管）。
+ * 这些不在 manager 里，只能按端口 kill；选「直接退出」时留空表示不动它们。
+ */
+let externalPortsToStop: number[] = []
 
 // 单实例：两个进程各持一份内存数据，后写的一次会把前一次的改动整个覆盖掉。
 // 只在打包后启用——开发模式下 electron-vite 重启时若被上一个实例挡住，窗口会「起不来」。
@@ -66,17 +82,34 @@ function hideToTray(): void {
 }
 
 /**
+ * 探测「不归 Workbench 管、但端口被占」的运行中项目。
+ * 判据与渲染层启动时的 detectAll 一致：项目配了监听端口，且端口连得上。
+ * 排除 manager 正在管的项目，免得同一个项目被算两次。
+ */
+async function detectExternalRunning(managedIds: Set<string>): Promise<number[]> {
+  const ports = [
+    ...new Set(
+      (data().projects ?? [])
+        .filter((project) => project.port && !managedIds.has(project.id))
+        .map((project) => project.port as number)
+    )
+  ]
+
+  const hits: number[] = []
+  for (const port of ports) {
+    const result = await checkPort(port)
+    if (result.inUse) hits.push(port)
+  }
+  return hits
+}
+
+/**
  * 真正的退出入口（托盘的「退出」）。
- * 关闭按钮只是收进托盘，所以退出行为的确认挪到了这里。
+ * 关闭按钮只是收进托盘，所以退出确认挪到了这里：只要还有项目在跑就先问一次。
  */
 function requestQuit(): void {
-  const value = currentSettings()
-  if (!appQuitting && manager.activeProjectIds().length > 0 && value.closeBehavior === 'confirm') {
-    void confirmQuitWithRunning()
-    return
-  }
-  appQuitting = true
-  app.quit()
+  if (appQuitting) return
+  void promptQuitIfRunning()
 }
 
 /** 隐藏标题栏的窗口按钮叠加层要跟着主题走，否则暗色下右上角是三个黑点 */
@@ -94,35 +127,88 @@ function syncTitleBarOverlay(): void {
   }
 }
 
-/** 有项目在跑且用户选了「提示确认」时，先问再退（F-8.4） */
-async function confirmQuitWithRunning(): Promise<void> {
-  const running = manager.activeProjectIds().length
-  if (running === 0) {
-    appQuitting = true
-    app.quit()
-    return
-  }
+/** 退出确认框正在等待渲染层回传的选择（渲染层挂掉时由兜底逻辑接管） */
+let pendingQuitChoice: ((choice: QuitChoice) => void) | null = null
 
+/** 渲染层 / 兜底弹窗回传退出选择，只认第一次 */
+function resolveQuitChoice(choice: QuitChoice): void {
+  const resolve = pendingQuitChoice
+  pendingQuitChoice = null
+  resolve?.(choice)
+}
+
+/** 渲染层不可用时的兜底：走系统原生确认框 */
+async function nativeQuitChoice(count: number): Promise<QuitChoice> {
   const options = {
     type: 'warning' as const,
-    buttons: ['退出并停止', '取消'],
+    buttons: ['关闭所有项目并退出', '直接退出', '取消'],
     defaultId: 0,
-    cancelId: 1,
+    cancelId: 2,
     noLink: true,
     title: '仍有项目在运行',
-    message: `还有 ${running} 个项目的进程正在运行`,
-    detail: '退出 Workbench 会同时结束这些进程，未保存的命令输出将丢失。'
+    message: `还有 ${count} 个项目的进程正在运行`,
+    detail:
+      '「关闭所有项目并退出」会结束这些进程，未保存的命令输出将丢失；' +
+      '「直接退出」会让它们继续在后台运行，下次启动 Workbench 时会自动检测并清理。'
   }
 
   const { response } =
     mainWindow && !mainWindow.isDestroyed()
       ? await dialog.showMessageBox(mainWindow, options)
       : await dialog.showMessageBox(options)
+  return response === 0 ? 'stop' : response === 1 ? 'direct' : 'cancel'
+}
 
-  // 确认后才真正退出；这里不能回头调用 requestQuit()，否则会再弹一次同样的确认框
-  if (response === 0) {
+/**
+ * 询问用户退出方式：优先让渲染层弹应用内确认框（样式与界面统一），
+ * 窗口不可用或渲染进程崩溃时退回系统原生确认框，别把退出卡死。
+ */
+function askQuitChoice(count: number): Promise<QuitChoice> {
+  const contents = mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents : null
+  if (!contents || contents.isDestroyed()) return nativeQuitChoice(count)
+
+  showMainWindow()
+  return new Promise<QuitChoice>((resolve) => {
+    pendingQuitChoice = resolve
+    contents.once('render-process-gone', () => {
+      void nativeQuitChoice(count).then(resolveQuitChoice)
+    })
+    contents.send(IPC.eventQuitConfirm, { count })
+  })
+}
+
+/**
+ * 有项目在跑时先问一次再退（F-8.4）：
+ *   ① 关闭所有项目并退出 —— 停掉进程树再退，不留残留；
+ *   ② 直接退出 —— 保留进程，交给下次启动时的残留清理（reapOrphanSessions）。
+ * 「在跑」既包括本次会话启动的进程，也包括启动检测认出、端口被占的外部服务。
+ * 关闭按钮 / Esc 是「取消」：关掉弹窗，什么都不做，应用继续运行。
+ */
+async function promptQuitIfRunning(): Promise<void> {
+  if (quitPromptOpen) return
+  quitPromptOpen = true
+
+  try {
+    const managedIds = manager.activeProjectIds()
+    const externalPorts = await detectExternalRunning(new Set(managedIds))
+    const running = managedIds.length + externalPorts.length
+
+    if (running === 0) {
+      appQuitting = true
+      app.quit()
+      return
+    }
+
+    // 这里不能回头调用 requestQuit()，否则会再弹一次同样的确认框
+    const choice = await askQuitChoice(running)
+    if (choice === 'cancel') return
+
+    stopProjectsOnQuit = choice === 'stop'
+    externalPortsToStop = choice === 'stop' ? externalPorts : []
     appQuitting = true
     app.quit()
+  } finally {
+    quitPromptOpen = false
   }
 }
 
@@ -157,6 +243,8 @@ function createWindow(): void {
     minWidth: 1080,
     minHeight: 680,
     show: false,
+    // 隐藏标题栏后标题栏本身看不见，但任务栏 / Alt+Tab 仍用窗口标题
+    title: currentSettings().appName,
     // Windows 上 ICO 才能拿到最好的缩放效果，多尺寸都在 build/icon.ico 里
     ...(icon ? { icon } : {}),
     backgroundColor: dark ? '#151a21' : '#eef0f3',
@@ -180,6 +268,9 @@ function createWindow(): void {
     if (!mainWindow || mainWindow.isDestroyed() || mainWindow.isVisible()) return
     mainWindow.show()
   }
+
+  // 标题由设置里的程序名称决定，别让 index.html 的 <title> 把它覆盖回默认值
+  mainWindow.on('page-title-updated', (event) => event.preventDefault())
 
   mainWindow.on('ready-to-show', showWindow)
 
@@ -254,6 +345,7 @@ app.whenReady().then(async () => {
   if (!hasLock) return
 
   await loadData()
+  await loadTheme()
   await reapLeftovers()
 
   // 打包后设置与 electron-builder 的 appId 一致的 AUMID：任务栏归组、托盘通知都靠它
@@ -264,13 +356,20 @@ app.whenReady().then(async () => {
   initAppSettings({
     showWindow: showMainWindow,
     toggleWindow: toggleMainWindow,
-    requestQuit
+    requestQuit,
+    setWindowTitle: (name) => {
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setTitle(name)
+    }
   })
 
   // 主题变化时同步窗口按钮叠加层的配色
   nativeTheme.on('updated', syncTitleBarOverlay)
 
   registerIpc()
+  // 退出确认框的用户选择由渲染层回传；认不出的值当「取消」，别让它触发一次退出
+  ipcMain.on(IPC.quitConfirmRespond, (_event, choice: QuitChoice) => {
+    resolveQuitChoice(choice === 'stop' || choice === 'direct' ? choice : 'cancel')
+  })
   createWindow()
 
   app.on('activate', () => {
@@ -285,20 +384,41 @@ app.on('before-quit', (event) => {
   appQuitting = true
   if (quitting) return
 
-  // 没有子进程在跑，直接落盘退出
-  if (manager.activeProjectIds().length === 0) {
+  const hasManaged = manager.activeProjectIds().length > 0
+
+  // 用户选了「直接退出」，或根本没有要收尾的进程：落盘后直接走
+  if (!stopProjectsOnQuit || (!hasManaged && externalPortsToStop.length === 0)) {
     flushSync()
+    flushThemeSync()
     return
   }
 
-  // 有子进程时先拦住退出，等进程树真正结束再落盘，避免开发服务器残留占用端口
+  // 有进程要收尾时先拦住退出，等它们真正结束再落盘，避免开发服务器残留占用端口
   event.preventDefault()
   quitting = true
-  void manager.shutdown().finally(() => {
-    flushSync()
-    app.quit()
-  })
+  void stopRunningAndQuit()
 })
+
+/** 结束本次会话启动的进程与启动检测认出的外部服务，然后退出 */
+async function stopRunningAndQuit(): Promise<void> {
+  const externalPorts = externalPortsToStop
+  try {
+    await Promise.all([
+      manager.shutdown(),
+      ...externalPorts.map((port) =>
+        killPortProcess(port).catch((err) => {
+          // 进程可能已经自己退出，或端口被别的程序接管；不拦退出，只记一笔
+          console.warn(`[workbench] 结束端口 ${port} 上的进程失败:`, err)
+        })
+      )
+    ])
+  } finally {
+    externalPortsToStop = []
+    flushSync()
+    flushThemeSync()
+    app.quit()
+  }
+}
 
 app.on('will-quit', () => {
   // 还在聚合窗口里的最后几行日志先排空，再让窗口消失

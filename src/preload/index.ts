@@ -11,7 +11,13 @@ import {
   type ProcessStatusEvent,
   type Project,
   type ProjectPatch,
+  type QuitChoice,
+  type QuitConfirmPayload,
+  type QuickAppInput,
+  type QuickAppList,
+  type QuickAppPatch,
   type TerminalOpenEvent,
+  type ThemeConfig,
   type WorkbenchApi
 } from '../shared/types'
 
@@ -50,6 +56,16 @@ const api: WorkbenchApi = {
   removeGroup: (id: string) => ipcRenderer.invoke(IPC.removeGroup, id),
   reorderGroups: (ids: string[]) => ipcRenderer.invoke(IPC.reorderGroups, ids),
 
+  listQuickApps: () => ipcRenderer.invoke(IPC.quickList),
+  pickQuickTarget: () => ipcRenderer.invoke(IPC.quickPick),
+  addQuickApp: (input: QuickAppInput) => ipcRenderer.invoke(IPC.quickAdd, input),
+  updateQuickApp: (id: string, patch: QuickAppPatch) =>
+    ipcRenderer.invoke(IPC.quickUpdate, id, patch),
+  removeQuickApp: (id: string) => ipcRenderer.invoke(IPC.quickRemove, id),
+  reorderQuickApps: (ids: string[]) => ipcRenderer.invoke(IPC.quickReorder, ids),
+  launchQuickApp: (id: string) => ipcRenderer.invoke(IPC.quickLaunch, id),
+  quickAppIcon: (target: string) => ipcRenderer.invoke(IPC.quickIcon, target),
+
   reveal: (targetPath: string) => ipcRenderer.invoke(IPC.reveal, targetPath),
   checkPackageManagers: () => ipcRenderer.invoke(IPC.checkPackageManagers),
   installPackageManager: (pm: InstallablePackageManager) =>
@@ -70,6 +86,9 @@ const api: WorkbenchApi = {
   pickBackground: () => ipcRenderer.invoke(IPC.pickBackground),
   loadBackground: (path: string) => ipcRenderer.invoke(IPC.loadBackground, path),
   listWallpapers: () => ipcRenderer.invoke(IPC.listWallpapers),
+  getThemeConfig: () => ipcRenderer.invoke(IPC.getThemeConfig),
+  updateThemeConfig: (patch: Partial<ThemeConfig>) =>
+    ipcRenderer.invoke(IPC.updateThemeConfig, patch),
 
   getDataLocation: () => ipcRenderer.invoke(IPC.getDataLocation),
   pickDataDir: () => ipcRenderer.invoke(IPC.pickDataDir),
@@ -82,12 +101,20 @@ const api: WorkbenchApi = {
   onClear: (handler: (event: { terminal: string }) => void) => subscribe(IPC.eventClear, handler),
   onProjectChanged: (handler: (project: Project) => void) =>
     subscribe(IPC.eventProjectChanged, handler),
+  onQuickApps: (handler: (payload: QuickAppList) => void) =>
+    subscribe(IPC.eventQuickApps, handler),
   onSettingsChanged: (handler: (settings: AppSettings) => void) =>
     subscribe(IPC.eventSettings, handler),
   onTheme: (handler: (theme: EffectiveTheme) => void) => subscribe(IPC.eventTheme, handler),
   onPmInstallLog: (handler: (event: PmInstallLogEvent) => void) =>
     subscribe(IPC.eventPmInstallLog, handler),
-  onDataReload: (handler: () => void) => subscribe(IPC.eventDataReload, handler)
+  onDataReload: (handler: () => void) => subscribe(IPC.eventDataReload, handler),
+  onThemeConfig: (handler: (config: ThemeConfig) => void) =>
+    subscribe(IPC.eventThemeConfig, handler),
+  onQuitConfirm: (handler: (payload: QuitConfirmPayload) => void) =>
+    subscribe(IPC.eventQuitConfirm, handler),
+  respondQuitConfirm: (choice: QuitChoice) =>
+    ipcRenderer.send(IPC.quitConfirmRespond, choice)
 }
 
 contextBridge.exposeInMainWorld('workbench', api)

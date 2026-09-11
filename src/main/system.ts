@@ -158,16 +158,50 @@ export async function reveal(targetPath: string): Promise<void> {
   }
 }
 
-function isPortInUse(port: number): Promise<boolean> {
+/**
+ * 端口是否已被占用。
+ *
+ * 以「能不能连上」为准。Windows 上不能只用 bind 探测：某个进程绑了 0.0.0.0:P 之后，
+ * 再往 127.0.0.1:P 绑仍然会成功，于是端口明明被占着却探测成空闲。
+ * 只有连接结果不明确（超时、非「拒绝」类错误，例如防火墙拦了回包）时，才回退到 bind 兜底。
+ */
+async function isPortInUse(port: number): Promise<boolean> {
+  const connected = await canConnect(port)
+  if (connected !== null) return connected
+  return !(await canBind(port, '0.0.0.0')) || !(await canBind(port, '127.0.0.1'))
+}
+
+/** 连得上 = 有服务在听；ECONNREFUSED = 明确没人听；其余情况返回 null 交给调用方兜底 */
+function canConnect(port: number): Promise<boolean | null> {
+  return new Promise((resolve) => {
+    const socket = net.connect({ port, host: '127.0.0.1' })
+    let settled = false
+    const done = (value: boolean | null): void => {
+      if (settled) return
+      settled = true
+      socket.destroy()
+      resolve(value)
+    }
+    socket.setTimeout(800)
+    socket.once('connect', () => done(true))
+    socket.once('error', (err: NodeJS.ErrnoException) =>
+      done(err.code === 'ECONNREFUSED' || err.code === 'ENETUNREACH' ? false : null)
+    )
+    socket.once('timeout', () => done(null))
+  })
+}
+
+/** 能不能在这个地址上监听；绑不上说明端口被占 */
+function canBind(port: number, host: string): Promise<boolean> {
   return new Promise((resolve) => {
     const server = net.createServer()
     server.once('error', (err: NodeJS.ErrnoException) => {
-      resolve(err.code === 'EADDRINUSE' || err.code === 'EACCES')
+      resolve(!(err.code === 'EADDRINUSE' || err.code === 'EACCES'))
     })
     server.once('listening', () => {
-      server.close(() => resolve(false))
+      server.close(() => resolve(true))
     })
-    server.listen(port, '127.0.0.1')
+    server.listen(port, host)
   })
 }
 

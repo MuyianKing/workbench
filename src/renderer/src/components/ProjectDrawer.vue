@@ -12,6 +12,7 @@ import {
   VideoPlay
 } from '@element-plus/icons-vue'
 import { satisfiesNodeVersion } from '@shared/node-version'
+import { parsePort } from '@shared/port'
 import { useProjectsStore } from '@/stores/projects'
 import type { ProjectStatus, RunRecord } from '@/types'
 
@@ -191,6 +192,38 @@ function removeCustom(index: number): void {
 function runCustom(index: number): void {
   const current = project.value
   if (current) void store.runCustom(current.id, index)
+}
+
+// ---------- 监听端口 ----------
+
+/** 端口先进草稿，失焦或回车才提交，避免把半截数字写进配置 */
+const portDraft = ref('')
+
+watch(
+  () => project.value?.id,
+  () => {
+    portDraft.value = project.value?.port ? String(project.value.port) : ''
+  },
+  { immediate: true }
+)
+
+function commitPort(): void {
+  const current = project.value
+  if (!current) return
+
+  const raw = portDraft.value.trim()
+  if (!raw) {
+    current.port = undefined
+    return
+  }
+
+  const next = parsePort(raw)
+  if (!next) {
+    ElMessage.warning('监听端口需为 1–65535 的整数')
+    portDraft.value = current.port ? String(current.port) : ''
+    return
+  }
+  current.port = next
 }
 
 // ---------- 环境 ----------
@@ -432,6 +465,22 @@ async function removeProject(): Promise<void> {
               <el-option v-for="s in serveOptions" :key="s" :label="s" :value="s" />
             </el-select>
             <p class="field__hint">来自 package.json 的 scripts，可手动指定。</p>
+          </div>
+
+          <div class="field">
+            <label class="field__label">监听端口</label>
+            <el-input
+              v-model="portDraft"
+              size="small"
+              placeholder="如 5173"
+              clearable
+              @change="commitPort"
+              @keyup.enter="commitPort"
+            />
+            <p class="field__hint">
+              开发服务占用的端口，用来判断项目是否已经在运行（含 Workbench 之外启动的）。
+              启动应用时会自动探测一次，卡片上的「检测」也用它。留空则不检测。
+            </p>
           </div>
 
           <div class="field">

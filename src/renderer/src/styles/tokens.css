@@ -17,17 +17,12 @@
   --border-strong: #c9cfd8;
 
   /* ---------- 工作区背景装饰 ----------
-   * 默认不上任何图案（网格会跟卡片抢视线），只有顶部一层很淡的光晕。
+   * 默认不上任何图案（网格会跟卡片抢视线），画布保持平铺。
    * 用户可以在设置里指定一张背景图，它铺在首页画布的最底层；盖在图片上的那层蒙版就是
    * --ws-veil：默认底色取画布色本身，用户也可以在设置里指定「渐淡色」（此时 ProjectGrid
    * 会把 --ws-veil-rgb 写在元素上覆盖这里），alpha 由「背景图浓淡」实时换算
    * （--ws-veil-alpha 同样写在元素上），图片越浓蒙版越淡。
-   * --ambient 由「有项目在跑」时点亮（颜色仍然只表达状态）。
    */
-  --wash: rgba(255, 255, 255, 0.6);
-  --ambient: transparent;
-  /* 有项目在跑时工作区顶部会亮起一层很淡的暖色：颜色依旧只用来表达状态 */
-  --ambient-live: rgba(199, 127, 10, 0.09);
   /* 背景图蒙版：底色 = --bg-canvas（#edeff2）；alpha 由 ProjectGrid 按浓淡实时覆盖 */
   --ws-veil-rgb: 237, 239, 242;
   --ws-veil-alpha: 0.6;
@@ -49,6 +44,8 @@
   --st-idle: #9ba4b0;
   --st-run: #c77f0a;
   --st-ok: #0b8a57;
+  /* 实心绿按钮（打包）的 hover：亮色下再深一档，暗色下再亮一档 */
+  --st-ok-strong: #0a7a4d;
   --st-fail: #ce3f3f;
 
   --st-run-soft: #fdf4e3;
@@ -105,6 +102,8 @@
   --h-titlebar: 36px;
   --h-header: 58px;
   --h-filter: 46px;
+  /* 项目卡与「添加项目」幽灵卡同高，网格里两种方块外形一致 */
+  --h-project-card: 155px;
   --h-terminal: 288px;
   --h-terminal-collapsed: 42px;
   --w-drawer: 420px;
@@ -154,10 +153,6 @@
   --border: #2b323d;
   --border-strong: #3a424f;
 
-  /* 暗色下的光晕反向压暗 */
-  --wash: rgba(232, 237, 244, 0.04);
-  --ambient: transparent;
-  --ambient-live: rgba(224, 162, 58, 0.12);
   /* 背景图蒙版：底色 = 暗色的 --bg-canvas（#151a21） */
   --ws-veil-rgb: 21, 26, 33;
 
@@ -176,6 +171,7 @@
   --st-idle: #6b7787;
   --st-run: #e0a23a;
   --st-ok: #3fb37f;
+  --st-ok-strong: #4cc48e;
   --st-fail: #ef7373;
 
   --st-run-soft: rgba(224, 162, 58, 0.14);

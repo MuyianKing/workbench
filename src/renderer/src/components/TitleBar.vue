@@ -4,12 +4,15 @@
  * 窗口用 titleBarStyle: 'hidden'，最小化 / 最大化 / 关闭由系统以叠加层绘制在右上角，
  * 所以这条只负责左侧品牌 + 提供整条拖动区域。
  */
+import { useProjectsStore } from '@/stores/projects'
+
+const store = useProjectsStore()
 </script>
 
 <template>
   <header class="titlebar">
     <span class="titlebar__mark mono" aria-hidden="true">&rsaquo;_</span>
-    <span class="titlebar__name mono">WORKBENCH</span>
+    <span class="titlebar__name mono">{{ store.settings.appName }}</span>
   </header>
 </template>
 

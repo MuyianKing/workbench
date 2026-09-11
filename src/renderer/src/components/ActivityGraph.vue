@@ -3,8 +3,9 @@
  * 首页的活跃度图 —— 完全照 GitHub 贡献图的样子：一列一周、一行一周中的一天、
  * 53 列铺满一年，颜色深浅表示当天执行了多少次命令。
  *
- * 数据来自 store.activity（YYYY-MM-DD → 次数），由主进程在每条命令结束时累加。
- * 只画次数不画成败：活跃度回答的是「这段时间用得勤不勤」，不是「跑得顺不顺」。
+ * 数据来自 store.activity（YYYY-MM-DD → 次数），由主进程在用户点「启动 / 打包」时累加。
+ * 只算用户主动发起的启动与打包：安装依赖、自定义命令、停止与失败都不计入 ——
+ * 活跃度回答的是「这段时间用得勤不勤」，不是「跑得顺不顺」。
  */
 import { computed, nextTick, onMounted, ref } from 'vue'
 import { useProjectsStore } from '@/stores/projects'
@@ -99,6 +100,9 @@ function tipOf(day: ActivityDay): string {
   /* 星期标签固定在左，只有网格随滚动条横向滚动 */
   display: flex;
   gap: var(--col-gap);
+  /* 卡片被拖矮时图自己竖着滚，不会被卡片裁掉半行 */
+  min-height: 0;
+  overflow-y: auto;
 
   /**
    * 深浅五档，纯黑到浅灰。
@@ -119,12 +123,11 @@ function tipOf(day: ActivityDay): string {
 }
 
 /**
- * 卡片下沿留白比上沿大：横向滚动条即使隐形也在流里占着一条，
- * 于是底部平白多出一截空。把它压薄，再去掉额外的 padding-bottom，
- * 下方间距就和上方对得上。
+ * 卡片下沿不留白：横向滚动条即使隐形也在流里占着一条，
+ * 再叠一层 padding-bottom 就会多出一截空，索性压到 0。
  */
 .panel {
-  padding-bottom: var(--sp-3);
+  padding-bottom: 0;
 }
 
 /* 网格整体左对齐：内容宽度不够一整行时不要被拉散 */

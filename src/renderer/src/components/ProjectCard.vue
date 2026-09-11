@@ -1,7 +1,15 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { ElMessageBox } from 'element-plus'
-import { Download, MoreFilled, Refresh, VideoPause, VideoPlay } from '@element-plus/icons-vue'
+import {
+  Box,
+  Download,
+  MoreFilled,
+  Refresh,
+  Search,
+  VideoPause,
+  VideoPlay
+} from '@element-plus/icons-vue'
 import { useProjectsStore } from '@/stores/projects'
 import type { Project, ProjectStatus } from '@/types'
 
@@ -67,6 +75,19 @@ function restart(): void {
   void store.restart(props.project.id)
 }
 
+/** 检测进行中：按钮转圈，避免连点重复探测 */
+const detecting = ref(false)
+
+/** 按监听端口判断项目是否已经跑着（可能是 Workbench 之外启动的） */
+async function detect(): Promise<void> {
+  detecting.value = true
+  try {
+    await store.detect(props.project.id)
+  } finally {
+    detecting.value = false
+  }
+}
+
 /** 拖到筛选栏的分组标签上即可完成归类（场景 S7） */
 function onDragStart(event: DragEvent): void {
   if (!event.dataTransfer) return
@@ -114,7 +135,10 @@ function onMore(command: string): void {
 
     <div class="card__head">
       <h3 class="card__name truncate" :title="project.name">{{ project.name }}</h3>
-      <span class="state">
+      <span
+        class="state"
+        :title="runtime?.external ? '由 Workbench 之外启动的服务' : undefined"
+      >
         <i class="state__dot" />
         {{ meta.label }}
       </span>
@@ -173,14 +197,28 @@ function onMore(command: string): void {
         </el-button>
       </el-tooltip>
 
+      <!-- 只有一条打包命令时下拉没有意义，直接一个按钮；多条才给 split-button 切换。
+           两种形态共用同一个 .build-label，保证外观一致，也跟详情页的打包按钮对齐 -->
+      <el-button
+        v-if="project.scripts.build.length <= 1"
+        class="build-btn"
+        size="small"
+        :disabled="isBusy || !pathValid || !project.scripts.build.length"
+        @click="onBuild()"
+      >
+        <span class="build-label"><el-icon><Box /></el-icon>打包</span>
+      </el-button>
+
       <el-dropdown
+        v-else
+        class="build-split"
         split-button
         size="small"
         :disabled="isBusy || !pathValid || !project.scripts.build.length"
         @click="onBuild()"
         @command="onBuild"
       >
-        打包
+        <span class="build-label"><el-icon><Box /></el-icon>打包</span>
         <template #dropdown>
           <el-dropdown-menu>
             <el-dropdown-item
@@ -194,6 +232,21 @@ function onMore(command: string): void {
           </el-dropdown-menu>
         </template>
       </el-dropdown>
+
+      <el-tooltip
+        content="检测运行状态（按监听端口判断项目是否已启动）"
+        placement="top"
+        :show-after="400"
+      >
+        <el-button
+          class="icon-btn"
+          size="small"
+          :icon="Search"
+          :loading="detecting"
+          aria-label="检测运行状态"
+          @click="detect"
+        />
+      </el-tooltip>
 
       <el-tooltip content="安装依赖" placement="top" :show-after="400">
         <el-button
@@ -249,7 +302,11 @@ function onMore(command: string): void {
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: var(--sp-2);
+  /* 行间距 9px（不是 --sp-2 的 8）：与下面三处字号一起把卡片自然高度定在 155px，
+     六块卡片同高、网格各行高度一致；改字号时记得同步看这里。
+     min-height 与「添加项目」幽灵卡共用同一个令牌，两边不会各自漂移 */
+  gap: 9px;
+  min-height: var(--h-project-card);
   padding: var(--sp-3) var(--sp-4) var(--sp-3) calc(var(--sp-4) + 3px);
   background: var(--bg-surface);
   border: 1px solid var(--border);
@@ -325,7 +382,8 @@ function onMore(command: string): void {
 
 .card__name {
   flex: 1;
-  font-size: var(--fs-title);
+  /* 项目名比通用标题大 1px：卡片高度的定高组合之一（见 .card 的 gap 注释） */
+  font-size: 16px;
   font-weight: 600;
   letter-spacing: -0.01em;
   color: var(--ink);
@@ -391,7 +449,8 @@ function onMore(command: string): void {
 
 .card__path {
   flex: 1;
-  font-size: var(--fs-meta);
+  /* 路径用正文字号（--fs-body 13px）：定高组合之一（见 .card 的 gap 注释） */
+  font-size: var(--fs-body);
   color: var(--ink-3);
 }
 
@@ -415,7 +474,8 @@ function onMore(command: string): void {
   display: flex;
   align-items: center;
   gap: var(--sp-2);
-  font-size: var(--fs-micro);
+  /* 介于正文与 micro 之间：比路径小半档，又比原来的 10.5px 易读（定高组合之一） */
+  font-size: 11.5px;
   color: var(--ink-3);
   padding-top: var(--sp-1);
 }
@@ -442,14 +502,87 @@ function onMore(command: string): void {
 .card__actions {
   display: flex;
   align-items: center;
-  gap: var(--sp-1);
+  /* 比 --sp-1 再省 1px：运行态这排有 6 个控件，要放进最窄（302px）的卡片 */
+  gap: 3px;
   margin-top: var(--sp-2);
   padding-top: var(--sp-3);
   border-top: 1px solid var(--border);
 }
 
+/*
+ * 运行态这排有 6 个控件，放到最窄的卡片（网格下限 302px）刚好占满。
+ * 不许挤：拆分按钮被压窄后，Element Plus 的按钮组会换行，把「打包」叠成上下两块。
+ */
+.card__actions > * {
+  flex-shrink: 0;
+}
+
+/**
+ * 打包按钮用实心状态绿，和「启动」的实心黑拉开层次，又不至于抢它的位置。
+ * 字色取 --ink-inverse：亮色下是白字深绿，暗色下这对令牌会自动反过来（深字浅绿），
+ * 正好抵消绿色本身在暗色里调亮后的反差。
+ *
+ * 单条命令时是普通按钮（.build-btn），多条时是 split-button（.build-split），
+ * 两种形态要长得一样，所以选择器写在一起。
+ */
+.build-btn,
+.build-split :deep(.el-button) {
+  background: var(--st-ok);
+  border-color: var(--st-ok);
+  color: var(--ink-inverse);
+}
+
+.build-btn:hover,
+.build-btn:focus,
+.build-split :deep(.el-button:hover),
+.build-split :deep(.el-button:focus) {
+  background: var(--st-ok-strong);
+  border-color: var(--st-ok-strong);
+  color: var(--ink-inverse);
+}
+
+/* 拆开的那两个按钮中间有一条分隔线，底色变实心后要跟着反过来才看得见 */
+.build-split :deep(.el-button + .el-button) {
+  border-left-color: var(--ink-inverse);
+}
+
+/* Element Plus 把箭头按钮写死成 32px 宽，收到和其它图标按钮一样的 24px */
+.build-split :deep(.el-dropdown__caret-button) {
+  width: 24px;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+/*
+ * 键盘聚焦时 Element Plus 会给按钮套一圈灰色描边（--el-button-outline-color），
+ * 压在实心绿上像多了一圈脏边，鼠标点过之后也常驻。去掉它，聚焦反馈由底色变深承担。
+ */
+.build-btn:focus-visible,
+.build-split :deep(.el-button:focus-visible) {
+  outline: none;
+}
+
+/* 灰掉的时候回到中性底，别留一块实心色在那里 */
+.build-btn.is-disabled,
+.build-btn.is-disabled:hover,
+.build-btn.is-disabled:focus,
+.build-split :deep(.el-button.is-disabled),
+.build-split :deep(.el-button.is-disabled:hover),
+.build-split :deep(.el-button.is-disabled:focus) {
+  background: var(--bg-inset);
+  border-color: var(--border);
+  color: var(--ink-3);
+}
+
+/* 图标和文字用 flex 排，间距跟详情页的打包按钮一致（5px） */
+.build-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
 .icon-btn {
-  width: 28px;
+  width: 24px;
   padding: 0;
 }
 

@@ -71,7 +71,6 @@
         const localPick = params.get('local') === '1'
 
         const settings = {
-          closeBehavior: 'confirm',
           launchAtLogin: false,
           theme: params.get('dark') === '1' ? 'dark' : 'light',
           hotkeyEnabled: true,
@@ -88,6 +87,78 @@
               : '',
           workspaceBackgroundOpacity: Number(params.get('op') || 40),
           workspaceBackgroundVeil: params.get('veil') || ''
+        }
+
+        // PREVIEW-ONLY: 快捷启动的假数据。图标由 canvas 现画（真机上是系统图标），
+        // 故意留一个没有图标的（走首字母兜底）和一个路径失效的
+        // 画成圆角块而不是整块填满：真实图标多数是透明底的，
+        // 这样一眼能看出卡片有没有给图标垫一块多余的白底
+        function fakeIcon(letter, bg) {
+          const canvas = document.createElement('canvas')
+          canvas.width = 32
+          canvas.height = 32
+          const ctx = canvas.getContext('2d')
+          ctx.fillStyle = bg
+          ctx.beginPath()
+          ctx.roundRect(3, 3, 26, 26, 7)
+          ctx.fill()
+          ctx.fillStyle = '#fff'
+          ctx.font = 'bold 16px system-ui, sans-serif'
+          ctx.textAlign = 'center'
+          ctx.textBaseline = 'middle'
+          ctx.fillText(letter, 16, 17)
+          return canvas.toDataURL('image/png')
+        }
+
+        // ?quickMany=1 时铺满 20 个，用来检查换行与面板内部滚动
+        const QUICK_NAMES = [
+          'Visual Studio Code', 'Chrome', '微信', 'Postman', 'Figma', 'Typora',
+          'Notion', 'Slack', '钉钉', 'Docker Desktop', 'Xshell', 'Navicat',
+          'Redis Insight', 'WPS Office', 'PotPlayer', 'Everything', 'Bandizip',
+          'Snipaste', 'DBeaver', 'GitHub Desktop'
+        ]
+
+        const quickAll = QUICK_NAMES.map((name, i) => ({
+          id: 'q' + (i + 1),
+          name,
+          target: 'C:/Program Files/' + name + '/' + name.split(' ')[0] + '.exe',
+          args: name === 'Typora' ? '--new' : undefined,
+          order: i,
+          createdAt: now
+        }))
+
+        const quickApps = params.get('quickMany') === '1' ? quickAll : quickAll.slice(0, 6)
+        // 第 5 个当作路径失效，Postman 故意不给图标（走首字母兜底）
+        quickApps[4].target = 'D:/old/Figma/Figma.exe'
+
+        const quickIcons = {
+          'C:/Program Files/Visual Studio Code/Visual.exe': fakeIcon('V', '#0b7bd4'),
+          'C:/Program Files/Chrome/Chrome.exe': fakeIcon('C', '#e0653a'),
+          'C:/Program Files/微信/微信.exe': fakeIcon('微', '#1aad19'),
+          'C:/Program Files/Typora/Typora.exe': fakeIcon('T', '#4a4f57')
+        }
+
+        // PREVIEW-ONLY: 首页布局（theme.json）的假数据，与 shared/theme.ts 的默认布局一致
+        const themeConfig = {
+          version: 1,
+          gridStep: 2,
+          leftWidth: 320,
+          rightWidth: 300,
+          cards: {
+            activity: { column: 'left', order: 0, mode: 'fixed', height: 200 },
+            system: { column: 'left', order: 1, mode: 'flex', height: 184 },
+            recent: { column: 'right', order: 0, mode: 'fixed', height: 222 },
+            actions: { column: 'right', order: 1, mode: 'flex', height: 180 },
+            quick: { column: 'center', order: 0, mode: 'fixed', height: 176 },
+            projects: { column: 'center', order: 1, mode: 'flex', height: 600 }
+          }
+        }
+
+        // PREVIEW-ONLY: ?centerOnly=1 把六块全放中栏，用来验证「空栏平时不显示 / 编辑时才显示」
+        if (params.get('centerOnly') === '1') {
+          Object.keys(themeConfig.cards).forEach((id, i) => {
+            themeConfig.cards[id] = { column: 'center', order: i, mode: 'fixed', height: 150 }
+          })
         }
 
         const data = {
@@ -123,10 +194,17 @@
             current: '20.11.0',
             versions: ['20.11.0', '18.20.4']
           },
+          listQuickApps: {
+            // ?quick=0 时当作一个常用软件都没加，看空状态
+            apps: params.get('quick') === '0' ? [] : quickApps,
+            missing: params.get('quick') === '0' ? {} : { q5: true }
+          },
           checkProjectPaths: {},
           reveal: { ok: true },
           checkPort: { port: 0, inUse: false },
-          getNodeVersion: { required: undefined, actual: '20.11.0', source: 'system', ok: true }
+          getNodeVersion: { required: undefined, actual: '20.11.0', source: 'system', ok: true },
+          launchQuickApp: { ok: true },
+          getThemeConfig: themeConfig
         }
 
         const clone = (value) => JSON.parse(JSON.stringify(value))
@@ -140,6 +218,21 @@
             get(target, prop) {
               if (prop in target) return target[prop]
               if (prop === 'listWallpapers') return () => listWallpapers()
+              // 布局保存：像主进程那样把 patch 合并进去再回传，否则界面会「拖完弹回去」
+              if (prop === 'updateThemeConfig') {
+                return async (patch) => {
+                  Object.assign(themeConfig, patch, {
+                    cards: { ...themeConfig.cards, ...((patch && patch.cards) || {}) }
+                  })
+                  return { ok: true, data: clone(themeConfig) }
+                }
+              }
+              if (prop === 'quickAppIcon') {
+                return async (target) =>
+                  quickIcons[target]
+                    ? { ok: true, data: quickIcons[target] }
+                    : { ok: false, error: '取不到图标（预览）' }
+              }
               if (prop === 'loadBackground') {
                 return async (ref) => {
                   const builtin = /^builtin:/.test(String(ref))
@@ -157,6 +250,21 @@
                   }
                 }
               }
+              // PREVIEW-ONLY: 退出确认框。订阅时把处理函数存起来，?quit=1 时手动触发；
+              // 回传的选择只记下来，预览里不真退。
+              if (prop === 'onQuitConfirm') {
+                return (fn) => {
+                  window.__quitHandler = fn
+                  return () => {
+                    window.__quitHandler = null
+                  }
+                }
+              }
+              if (prop === 'respondQuitConfirm') {
+                return (choice) => {
+                  window.__quitChoice = choice
+                }
+              }
               if (prop in data) return () => Promise.resolve(clone(data[prop]))
               // 其余（事件订阅等）统一返回一个 unsubscribe
               return () => () => {}
@@ -164,10 +272,48 @@
           }
         )
 
+        // PREVIEW-ONLY: ?quickDialog=1 打开「添加常用软件」；=edit 再点开第一张卡的「⋯ → 编辑…」
+        if (params.get('quickDialog') === '1') {
+          setTimeout(() => document.querySelector('.launch__item--add')?.click(), 1200)
+        } else if (params.get('quickDialog') === 'edit') {
+          setTimeout(() => {
+            document.querySelector('.launch__item .launch__more-btn')?.click()
+            setTimeout(() => {
+              const items = [...document.querySelectorAll('.el-dropdown-menu__item')]
+              const edit = items.find((el) => el.textContent.includes('编辑'))
+              if (edit) edit.click()
+            }, 600)
+          }, 1200)
+        }
+
+        // PREVIEW-ONLY: ?quit=1 弹出退出确认框；?quitCount=N 控制项目数
+        if (params.get('quit') === '1') {
+          const fire = (attempt) => {
+            if (typeof window.__quitHandler === 'function') {
+              window.__quitHandler({ count: Number(params.get('quitCount') || 2) })
+            } else if (attempt < 40) {
+              setTimeout(() => fire(attempt + 1), 100)
+            }
+          }
+          setTimeout(() => fire(0), 1200)
+        }
+
         // PREVIEW-ONLY: ?settings=1 打开设置弹窗，方便截图看背景那一栏
         if (params.get('settings') === '1') {
           setTimeout(() => {
-            document.querySelector('[aria-label="设置"]')?.click()
+            document.querySelector('[aria-label="系统配置"]')?.click()
+          }, 1200)
+        }
+
+        // PREVIEW-ONLY: ?layoutEdit=1 进入首页布局编辑态（设置 → 首页布局 → 进入编辑）
+        if (params.get('layoutEdit') === '1') {
+          setTimeout(() => {
+            document.querySelector('[aria-label="系统配置"]')?.click()
+            setTimeout(() => {
+              const buttons = [...document.querySelectorAll('.el-dialog button')]
+              const enter = buttons.find((el) => el.textContent.includes('进入编辑'))
+              if (enter) enter.click()
+            }, 700)
           }, 1200)
         }
 
