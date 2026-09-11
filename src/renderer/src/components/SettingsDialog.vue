@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { CircleClose, FolderOpened, Picture, Rank } from '@element-plus/icons-vue'
 import { useProjectsStore } from '@/stores/projects'
+import { ACCENT_PRESETS, type AccentInkMode } from '@shared/accent-color'
 import { APP_NAME_DEFAULT, APP_NAME_MAX_LENGTH } from '@shared/app-name'
 import { CARD_GAP_MAX, CARD_GAP_MIN, GRID_STEP_MAX, GRID_STEP_MIN } from '@shared/theme'
 import {
@@ -10,7 +11,7 @@ import {
   BACKGROUND_OPACITY_MIN
 } from '@shared/workspace-background'
 import { builtinIdOf } from '@shared/wallpaper'
-import type { AppSettings, ThemeSource } from '@/types'
+import type { AppSettings, ThemeSource, TopBarStyle } from '@/types'
 import type { ThemeOrigin } from '@/theme-transition'
 
 const props = defineProps<{ modelValue: boolean }>()
@@ -27,6 +28,20 @@ const themes: Array<{ value: ThemeSource; label: string }> = [
   { value: 'system', label: '跟随系统' },
   { value: 'light', label: '亮色' },
   { value: 'dark', label: '暗色' }
+]
+
+/** 顶部三条栏的三种处理方式，顺序与设置界面上的一致 */
+const topBarStyles: Array<{ value: TopBarStyle; label: string }> = [
+  { value: 'band', label: '正常' },
+  { value: 'glass', label: '毛玻璃' },
+  { value: 'clear', label: '透明' }
+]
+
+/** 主题色上文字的三种取法，顺序与设置界面上的一致 */
+const accentInkModes: Array<{ value: AccentInkMode; label: string }> = [
+  { value: 'auto', label: '自动' },
+  { value: 'white', label: '白字' },
+  { value: 'dark', label: '黑字' }
 ]
 
 const isPackaged = computed(() => !import.meta.env.DEV)
@@ -74,6 +89,13 @@ const veilLabel = computed(() =>
   store.settings.workspaceBackgroundVeil
     ? store.settings.workspaceBackgroundVeil.toUpperCase()
     : '默认（主题画布色）'
+)
+
+const accentPresets: string[] = [...ACCENT_PRESETS]
+
+/** 主题色当前值：留空就是界面原本的中性色，得说清楚「没配」不等于没生效 */
+const accentLabel = computed(() =>
+  store.settings.accentColor ? store.settings.accentColor.toUpperCase() : '默认（中性色）'
 )
 
 /** 快捷键录制状态 */
@@ -205,7 +227,8 @@ watch(visible, (open) => {
 </script>
 
 <template>
-  <el-dialog v-model="visible" title="设置" width="760" align-center>
+  <!-- append-to-body：弹层必须离开 .app 子树，否则会被顶部毛玻璃的 backdrop-filter 连累（见 global.css 弹层一节） -->
+  <el-dialog v-model="visible" title="设置" width="760" align-center append-to-body>
     <div class="settings">
       <!-- 程序 -->
       <section class="block">
@@ -252,14 +275,53 @@ watch(visible, (open) => {
           </el-radio-group>
         </div>
 
+        <div class="row">
+          <div class="row__text">
+            <span class="row__label">主题色</span>
+            <span class="row__hint">用在开关、选中、聚焦环与主按钮上；留空是界面原本的中性灰。</span>
+          </div>
+          <div class="slider">
+            <el-color-picker
+              :model-value="store.settings.accentColor || null"
+              size="small"
+              :predefine="accentPresets"
+              @change="(value: unknown) => void store.setAccentColor(String(value ?? ''))"
+            />
+            <span class="accent__value mono">{{ accentLabel }}</span>
+            <el-button
+              link
+              size="small"
+              :disabled="!store.settings.accentColor"
+              @click="store.setAccentColor('')"
+            >
+              恢复默认
+            </el-button>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="row__text">
+            <span class="row__label">主题色文字</span>
+            <span class="row__hint">
+              铺在主题色上的那层字（主按钮、选中的胶囊、单选按钮）。自动按主题色的深浅挑：
+              底色深用白字、底色浅用黑字；也可以手动钉死一种（还没设主题色时先存着，看不出效果）。
+            </span>
+          </div>
+          <el-radio-group
+            class="style-pick"
+            :model-value="store.settings.accentInk"
+            size="small"
+            @update:model-value="(value: unknown) => void store.setAccentInk(value as AccentInkMode)"
+          >
+            <el-radio-button v-for="m in accentInkModes" :key="m.value" :value="m.value">
+              {{ m.label }}
+            </el-radio-button>
+          </el-radio-group>
+        </div>
+
         <div class="row row--stack">
           <div class="row__text">
             <span class="row__label">工作区背景</span>
-            <span class="row__hint">
-              图片铺在首页画布的最底层，只在留白与卡片间隙里透出来；卡片和右栏面板照旧压在它上面，
-              显示与交互都不受影响。图片不进数据文件，这里只记路径。图片是渐淡进「渐淡色」的，
-              那个颜色默认跟着主题的画布色走。
-            </span>
           </div>
 
           <div class="bg">
@@ -364,6 +426,23 @@ watch(visible, (open) => {
             </div>
           </div>
         </div>
+
+        <div class="row">
+          <div class="row__text">
+            <span class="row__label">顶部样式</span>
+            <span class="row__hint">正常＝实底，毛玻璃＝整块磨砂，透明＝全部透出壁纸。</span>
+          </div>
+          <el-radio-group
+            class="style-pick"
+            :model-value="store.settings.topBarStyle"
+            size="small"
+            @update:model-value="(value: unknown) => void store.setTopBarStyle(value as TopBarStyle)"
+          >
+            <el-radio-button v-for="s in topBarStyles" :key="s.value" :value="s.value">
+              {{ s.label }}
+            </el-radio-button>
+          </el-radio-group>
+        </div>
       </section>
 
       <!-- 首页布局 -->
@@ -388,6 +467,7 @@ watch(visible, (open) => {
             <span class="row__hint">位置与尺寸按这个像素网格吸附，越小越精细。</span>
           </div>
           <el-input-number
+            class="number-input"
             :model-value="store.gridStep"
             :min="GRID_STEP_MIN"
             :max="GRID_STEP_MAX"
@@ -406,6 +486,7 @@ watch(visible, (open) => {
             </span>
           </div>
           <el-input-number
+            class="number-input"
             :model-value="store.cardGap"
             :min="CARD_GAP_MIN"
             :max="CARD_GAP_MAX"
@@ -471,7 +552,7 @@ watch(visible, (open) => {
           <div class="row__text">
             <span class="row__label">开机自启</span>
             <span class="row__hint">
-              {{ isPackaged ? '登录系统后自动在后台启动。' : '开发模式下不会写入系统自启项。' }}
+              {{ isPackaged ? '登录系统后自动在后台启动，只在托盘显示图标，点击图标即可打开界面。' : '开发模式下不会写入系统自启项。' }}
             </span>
           </div>
           <el-switch
@@ -562,6 +643,15 @@ watch(visible, (open) => {
   flex-shrink: 0;
 }
 
+/**
+ * 顶部样式的三个选项比「主题」那条文案长，不加这条会被左边的说明挤窄 ——
+ * el-radio-group 是 inline-flex + 可换行，宽度不够时按钮就竖起来排了。
+ * 让它自己撑开、由左边那段说明去换行。
+ */
+.style-pick {
+  flex-shrink: 0;
+}
+
 .row__text {
   min-width: 0;
 }
@@ -636,8 +726,10 @@ watch(visible, (open) => {
  * 主题切换：Element Plus 靠 box-shadow 盖住相邻按钮之间那道 1px 的缝，但选中项自身的
  * 灰色 outline 会画在这道阴影之上，于是选中「亮色」时左边就留下一条灰竖线。
  * 把选中项的 outline 换成主色，让它和实心块同色即可（首 / 末项的外沿也跟着填充色走）。
+ *
+ * 只管能点的项：禁用态的取色由 global.css 统一收敛，否则一块灰底上会挂一圈主色亮边。
  */
-.settings :deep(.el-radio-button.is-active .el-radio-button__inner) {
+.settings :deep(.el-radio-button.is-active:not(.is-disabled) .el-radio-button__inner) {
   outline-color: var(--el-color-primary);
 }
 
@@ -647,6 +739,26 @@ watch(visible, (open) => {
   font-size: var(--fs-meta);
   color: var(--ink-2);
   text-align: right;
+}
+
+/**
+ * 主题色当前值。这一列被挤窄时该换行的是左边那段说明，不是这个标签 ——
+ * 否则「默认（中性色）」会断成「默认（中 / 性色）」，色号也会跟着折行。
+ */
+.accent__value {
+  flex-shrink: 0;
+  white-space: nowrap;
+  font-size: var(--fs-micro);
+  color: var(--ink-2);
+}
+
+/**
+ * 拖动步进 / 卡片间距：取值只有一到两位，用 EP 默认的 120px 宽输入框会占掉半行、
+ * 和旁边的说明文字抢地方，收窄到刚够放下数字加右侧的加减按钮。
+ */
+.number-input {
+  width: 100px;
+  flex-shrink: 0;
 }
 
 /* ---------- 工作区背景 ---------- */

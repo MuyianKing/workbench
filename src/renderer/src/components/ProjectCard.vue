@@ -503,60 +503,19 @@ function onMore(command: string): void {
 }
 
 /**
- * 打包按钮用实心状态绿，和「启动」的实心黑拉开层次，又不至于抢它的位置。
- * 字色取 --ink-inverse：亮色下是白字深绿，暗色下这对令牌会自动反过来（深字浅绿），
- * 正好抵消绿色本身在暗色里调亮后的反差。
+ * 打包按钮保持中性（Element Plus 默认样式），和详情页的打包按钮一致。
+ * 界面是灰度的，彩色只表达运行状态；绿色是「打包成功」的状态色，不能同时当常驻的操作按钮用，
+ * 否则同一块绿在不同位置有两种含义，也抢掉实心黑「启动」的主操作位置。
  *
  * 单条命令时是普通按钮（.build-btn），多条时是 split-button（.build-split），
  * 两种形态要长得一样，所以选择器写在一起。
  */
-.build-btn,
-.build-split :deep(.el-button) {
-  background: var(--st-ok);
-  border-color: var(--st-ok);
-  color: var(--ink-inverse);
-}
-
-.build-btn:hover,
-.build-btn:focus,
-.build-split :deep(.el-button:hover),
-.build-split :deep(.el-button:focus) {
-  background: var(--st-ok-strong);
-  border-color: var(--st-ok-strong);
-  color: var(--ink-inverse);
-}
-
-/* 拆开的那两个按钮中间有一条分隔线，底色变实心后要跟着反过来才看得见 */
-.build-split :deep(.el-button + .el-button) {
-  border-left-color: var(--ink-inverse);
-}
 
 /* Element Plus 把箭头按钮写死成 32px 宽，收到和其它图标按钮一样的 24px */
 .build-split :deep(.el-dropdown__caret-button) {
   width: 24px;
   padding-left: 0;
   padding-right: 0;
-}
-
-/*
- * 键盘聚焦时 Element Plus 会给按钮套一圈灰色描边（--el-button-outline-color），
- * 压在实心绿上像多了一圈脏边，鼠标点过之后也常驻。去掉它，聚焦反馈由底色变深承担。
- */
-.build-btn:focus-visible,
-.build-split :deep(.el-button:focus-visible) {
-  outline: none;
-}
-
-/* 灰掉的时候回到中性底，别留一块实心色在那里 */
-.build-btn.is-disabled,
-.build-btn.is-disabled:hover,
-.build-btn.is-disabled:focus,
-.build-split :deep(.el-button.is-disabled),
-.build-split :deep(.el-button.is-disabled:hover),
-.build-split :deep(.el-button.is-disabled:focus) {
-  background: var(--bg-inset);
-  border-color: var(--border);
-  color: var(--ink-3);
 }
 
 /* 图标和文字用 flex 排，间距跟详情页的打包按钮一致（5px） */

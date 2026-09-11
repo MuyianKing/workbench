@@ -2,10 +2,12 @@ import { existsSync, promises as fs, readFileSync, writeFileSync } from 'node:fs
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { app } from 'electron'
+import { sanitizeAccentColor, sanitizeAccentInkMode } from '../shared/accent-color'
 import { sanitizeQuickApps } from '../shared/quick-launch'
 import { sanitizeAppName } from '../shared/app-name'
 import {
   DEFAULT_SETTINGS,
+  TOP_BAR_STYLES,
   type AppSettings,
   type DataLocation,
   type PersistedData
@@ -132,6 +134,11 @@ export function sanitizeSettings(raw: unknown): AppSettings {
   value.workspaceBackgroundOpacity = clampBackgroundOpacity(value.workspaceBackgroundOpacity)
   // 蒙版色：认不出来的写法一律当「跟随主题」，别让一个手改过的色值把整条 background 拼废
   value.workspaceBackgroundVeil = sanitizeVeilColor(value.workspaceBackgroundVeil)
+  // 主题色：同理，认不出来的一律回到默认的中性色，别让一个手改过的色值把整族主色带崩
+  value.accentColor = sanitizeAccentColor(value.accentColor)
+  value.accentInk = sanitizeAccentInkMode(value.accentInk)
+  // 顶部样式：老数据文件里没有这个字段，认不出的取值一律回到默认那一种
+  if (!TOP_BAR_STYLES.includes(value.topBarStyle)) value.topBarStyle = DEFAULT_SETTINGS.topBarStyle
 
   return value
 }

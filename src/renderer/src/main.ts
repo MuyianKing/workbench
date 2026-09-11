@@ -10,5 +10,10 @@ import './styles/tokens.css'
 import './styles/global.css'
 
 import App from './App.vue'
+import { applyBootstrapTheme } from './bootstrap'
+
+// 创建应用之前先把明暗与主题色落到 <html>：窗口在首帧之后就显示了，
+// 等异步设置回来再改会让用户看见一次「默认外观 → 自己的外观」（见 bootstrap.ts）
+applyBootstrapTheme()
 
 createApp(App).use(createPinia()).use(ElementPlus, { locale: zhCn }).mount('#app')

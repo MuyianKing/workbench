@@ -12,8 +12,8 @@ export const BACKGROUND_OPACITY_MIN = 5
 /** 浓淡上限：100% 就是一张实图铺在留白里，卡片边缘反而看不清 */
 export const BACKGROUND_OPACITY_MAX = 100
 
-/** 默认浓淡：看得出是张图，又不跟卡片抢视线 */
-export const BACKGROUND_OPACITY_DEFAULT = 40
+/** 默认浓淡：按当前配置固化的一档，图存在感很弱、只作为一层底纹 */
+export const BACKGROUND_OPACITY_DEFAULT = 10
 
 /** 收敛到合法区间；不是有限数字（缺失 / null / 字符串 / NaN）一律回到默认值 */
 export function clampBackgroundOpacity(value: unknown): number {

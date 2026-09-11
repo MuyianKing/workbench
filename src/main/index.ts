@@ -1,7 +1,8 @@
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { app, BrowserWindow, dialog, ipcMain, nativeTheme, shell } from 'electron'
-import { IPC, type QuitChoice } from '../shared/types'
+import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
+import { IPC, type QuitChoice, type WindowState } from '../shared/types'
+import { broadcast } from './broadcast'
 import { data, flushSync, loadData, save } from './store'
 import { flushThemeSync, loadTheme } from './theme'
 import { registerIpc } from './ipc'
@@ -12,8 +13,9 @@ import {
   currentSettings,
   disposeAppSettings,
   effectiveTheme,
+  hideWindowToTray,
   initAppSettings,
-  notifyHiddenToTray
+  launchedHidden
 } from './app-settings'
 
 let mainWindow: BrowserWindow | null = null
@@ -21,8 +23,6 @@ let mainWindow: BrowserWindow | null = null
 let quitting = false
 /** 任何来源的退出请求一旦开始，close 事件就不再拦截（否则退出会被「隐藏到托盘」吃掉） */
 let appQuitting = false
-/** 「已收进托盘」的提示每次运行只弹一次，避免每次关窗口都打扰 */
-let trayHintShown = false
 /**
  * 退出时是否要停止运行中的项目。
  * 退出弹窗里选「直接退出」会置为 false，此时跳过 shutdown，
@@ -57,12 +57,14 @@ function showMainWindow(): void {
     return
   }
   if (mainWindow.isMinimized()) mainWindow.restore()
+  // 隐藏期间任务栏按钮被摘掉了（见 hideWindowToTray），重新显示时先装回来
+  mainWindow.setSkipTaskbar(false)
   if (!mainWindow.isVisible()) mainWindow.show()
   mainWindow.focus()
 }
 
 function hideMainWindow(): void {
-  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.hide()
+  hideWindowToTray(mainWindow)
 }
 
 function toggleMainWindow(): void {
@@ -72,14 +74,6 @@ function toggleMainWindow(): void {
   }
   if (mainWindow.isVisible() && !mainWindow.isMinimized()) hideMainWindow()
   else showMainWindow()
-}
-
-function hideToTray(): void {
-  hideMainWindow()
-  if (!trayHintShown) {
-    trayHintShown = true
-    notifyHiddenToTray()
-  }
 }
 
 /**
@@ -111,21 +105,6 @@ async function detectExternalRunning(managedIds: Set<string>): Promise<number[]>
 function requestQuit(): void {
   if (appQuitting) return
   void promptQuitIfRunning()
-}
-
-/** 隐藏标题栏的窗口按钮叠加层要跟着主题走，否则暗色下右上角是三个黑点 */
-function syncTitleBarOverlay(): void {
-  if (!mainWindow || mainWindow.isDestroyed()) return
-  const dark = effectiveTheme() === 'dark'
-  try {
-    mainWindow.setTitleBarOverlay({
-      color: dark ? '#151a21' : '#edeff2',
-      symbolColor: dark ? '#e8edf4' : '#11151b',
-      height: 36
-    })
-  } catch {
-    /* 平台不支持叠加层时忽略 */
-  }
 }
 
 /** 退出确认框正在等待渲染层回传的选择（渲染层挂掉时由兜底逻辑接管） */
@@ -230,7 +209,14 @@ function devWindowIcon(): string | undefined {
   return candidates.find((file) => existsSync(file))
 }
 
-function createWindow(): void {
+/**
+ * 创建主窗口。
+ *
+ * launchHidden 只在开机自启那一次为 true（见 app-settings.ts 的 applyAutoLaunch）：
+ * 窗口照常建好、渲染层照常准备数据，只是不显示 —— 用户点托盘图标时能立刻出来。
+ * 之后从托盘唤起的创建都走默认的 false，否则窗口会永远出不来。
+ */
+function createWindow(launchHidden = false): void {
   const dark = effectiveTheme() === 'dark'
   const icon = devWindowIcon()
 
@@ -250,13 +236,14 @@ function createWindow(): void {
     ...(icon ? { icon } : {}),
     backgroundColor: dark ? '#151a21' : '#eef0f3',
     autoHideMenuBar: true,
-    // 隐藏原生标题栏，把窗口按钮以叠加层交给系统绘制（右上角仍是原生的最小化/最大化/关闭）
+    /**
+     * 隐藏原生标题栏，但不挂 titleBarOverlay：叠加层那 138×36 是系统独占的，
+     * DOM 既进不去、也模糊不到，壁纸铺到顶时右上角会留下一块对不上的实色。
+     * 右上角的最小化 / 最大化 / 关闭改由渲染层自绘（components/TitleBar.vue），
+     * 代价是失去 Windows 11 最大化按钮上的贴靠布局，换来顶栏层次可以随便做。
+     * 拖动依然由 -webkit-app-region: drag 交给系统，双击最大化与贴靠不受影响。
+     */
     titleBarStyle: 'hidden',
-    titleBarOverlay: {
-      color: dark ? '#151a21' : '#edeff2',
-      symbolColor: dark ? '#e8edf4' : '#11151b',
-      height: 36
-    },
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false,
@@ -273,11 +260,15 @@ function createWindow(): void {
   // 标题由设置里的程序名称决定，别让 index.html 的 <title> 把它覆盖回默认值
   mainWindow.on('page-title-updated', (event) => event.preventDefault())
 
-  mainWindow.on('ready-to-show', showWindow)
+  mainWindow.on('ready-to-show', () => {
+    if (!launchHidden) showWindow()
+  })
 
   // 兜底：GPU / 磁盘缓存异常时首帧可能迟迟不来，窗口会一直停在 show: false 里，
   // 表现就是「进程起来了但看不见窗口」。
   setTimeout(() => {
+    // 开机自启拉起的实例本来就该待在托盘里，不能到点又把它顶到前台
+    if (launchHidden) return
     if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isVisible()) {
       console.warn('[workbench] ready-to-show 未触发，强制显示窗口')
     }
@@ -288,10 +279,20 @@ function createWindow(): void {
     console.error('[workbench] 页面加载失败：', code, description, url)
   })
 
-  // 最小化到托盘（F-8.3）：minimize 事件不可取消，收起界面即可
+  // 最小化到托盘（F-8.3）：minimize 事件不可取消，收起界面即可。
+  // 走的是系统最小化（Win+↓、任务栏右键）这条路；自绘的最小化按钮在
+  // handlers/window.ts 里直接收托盘，不会到这里。
   mainWindow.on('minimize', () => {
-    if (currentSettings().minimizeToTray) hideToTray()
+    if (currentSettings().minimizeToTray) hideMainWindow()
   })
+
+  // 自绘标题栏的第三个按钮要跟着换图标：最大化画方框、还原画叠框。
+  // 拖窗口边缘、双击标题栏、系统快捷键都能最大化，所以状态从窗口事件推，不由按钮自己记。
+  const pushWindowState = (maximized: boolean): void => {
+    broadcast(IPC.eventWindowState, { maximized } satisfies WindowState)
+  }
+  mainWindow.on('maximize', () => pushWindowState(true))
+  mainWindow.on('unmaximize', () => pushWindowState(false))
 
   /**
    * 关闭按钮 = 收进托盘。
@@ -300,7 +301,7 @@ function createWindow(): void {
   mainWindow.on('close', (event) => {
     if (appQuitting || quitting) return
     event.preventDefault()
-    hideToTray()
+    hideMainWindow()
   })
 
   mainWindow.on('closed', () => {
@@ -363,15 +364,12 @@ app.whenReady().then(async () => {
     }
   })
 
-  // 主题变化时同步窗口按钮叠加层的配色
-  nativeTheme.on('updated', syncTitleBarOverlay)
-
   registerIpc()
   // 退出确认框的用户选择由渲染层回传；认不出的值当「取消」，别让它触发一次退出
   ipcMain.on(IPC.quitConfirmRespond, (_event, choice: QuitChoice) => {
     resolveQuitChoice(choice === 'stop' || choice === 'direct' ? choice : 'cancel')
   })
-  createWindow()
+  createWindow(launchedHidden())
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

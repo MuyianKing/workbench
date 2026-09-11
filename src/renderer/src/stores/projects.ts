@@ -3,6 +3,7 @@ import { defineStore } from 'pinia'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   DEFAULT_SETTINGS,
+  TOP_BAR_STYLES,
   type ActivityCounts,
   type AddProjectInput,
   type AppSettings,
@@ -27,7 +28,8 @@ import {
   type RuntimeState,
   type TerminalKind,
   type TerminalOpenEvent,
-  type ThemeSource
+  type ThemeSource,
+  type TopBarStyle
 } from '@/types'
 import { clampTerminalHeight } from '@shared/terminal-height'
 import { terminalKey } from '@shared/terminal-key'
@@ -45,7 +47,13 @@ import {
   type ThemeConfig
 } from '@shared/theme'
 import { clampBackgroundOpacity, sanitizeVeilColor } from '@shared/workspace-background'
+import {
+  sanitizeAccentColor,
+  sanitizeAccentInkMode,
+  type AccentInkMode
+} from '@shared/accent-color'
 import { RingLog } from '@shared/log-ring'
+import { bootstrapSnapshot, writeAccentColor, writeTheme } from '@/bootstrap'
 import { applyThemeWithTransition, type ThemeOrigin } from '@/theme-transition'
 
 const LOG_LIMIT = 5000
@@ -176,12 +184,21 @@ export const useProjectsStore = defineStore('projects', () => {
   const ready = ref(false)
   /** 项目目录是否仍然存在；尚未检查过的项目按有效处理 */
   const pathValidity = ref<Record<string, boolean>>({})
-  const settings = ref<AppSettings>({ ...DEFAULT_SETTINGS })
+  /**
+   * 首屏快照（见 bootstrap.ts）。
+   *
+   * 下面这几个「决定界面长什么样」的初始值都取自它：入口 main.ts 已经在 mount 之前把明暗与
+   * 主题色落到 <html> 上了，store 再用同一份快照起头，第一帧就不会是默认外观 ——
+   * 之后 loadData 拉回来的值只是核一遍，不再产生视觉变化。
+   * 拿不到快照（预览桩）时为 null，退回默认值 + 异步加载的老路。
+   */
+  const bootstrap = bootstrapSnapshot()
+  const settings = ref<AppSettings>(bootstrap ? bootstrap.settings : { ...DEFAULT_SETTINGS })
   /**
    * 当前实际生效的明暗（`system` 已被解析成 light / dark）。
    * 界面里要按它画图标（顶栏的主题开关），所以不能只落在 DOM 属性上，得是个响应式的值。
    */
-  const effectiveTheme = ref<EffectiveTheme>('light')
+  const effectiveTheme = ref<EffectiveTheme>(bootstrap?.theme ?? 'light')
   const dataLocation = ref<DataLocation | null>(null)
   /** 按天聚合的命令执行次数，首页活跃度图的数据源；每次执行结束后由主进程推着刷新 */
   const activity = ref<ActivityCounts>({})
@@ -216,7 +233,7 @@ export const useProjectsStore = defineStore('projects', () => {
    * 与终端高度同一套做法：拖动栏宽 / 卡片高度时只改这个 ref 让布局跟手，
    * 松手才整份落盘，免得每动一格就写一次文件。
    */
-  const themeConfig = ref<ThemeConfig>(sanitizeTheme(DEFAULT_THEME))
+  const themeConfig = ref<ThemeConfig>(sanitizeTheme(bootstrap?.themeConfig ?? DEFAULT_THEME))
   /** 是否处于布局编辑态：由设置里的「布局调整」进入，画布上的「完成」退出 */
   const layoutEditing = ref(false)
 
@@ -351,6 +368,33 @@ export const useProjectsStore = defineStore('projects', () => {
     if (next === settings.value.workspaceBackgroundVeil) return true
 
     return updateSettings({ workspaceBackgroundVeil: next })
+  }
+
+  /**
+   * 主题色：交互态与主按钮用的颜色，空串表示回到默认的中性色。
+   * 只影响 Element Plus 的主色一族与全局焦点环，状态色和终端不动。
+   */
+  async function setAccentColor(color: string): Promise<boolean> {
+    const next = sanitizeAccentColor(color)
+    if (next === settings.value.accentColor) return true
+
+    return updateSettings({ accentColor: next })
+  }
+
+  /** 铺在主题色上的文字色：自动 / 白字 / 黑字 */
+  async function setAccentInk(mode: AccentInkMode): Promise<boolean> {
+    const next = sanitizeAccentInkMode(mode)
+    if (next === settings.value.accentInk) return true
+
+    return updateSettings({ accentInk: next })
+  }
+
+  /** 顶部三条栏的样式（标题栏 / 搜索栏 / 筛选栏怎么跟壁纸叠） */
+  async function setTopBarStyle(style: TopBarStyle): Promise<boolean> {
+    if (!TOP_BAR_STYLES.includes(style)) return false
+    if (style === settings.value.topBarStyle) return true
+
+    return updateSettings({ topBarStyle: style })
   }
 
   /** 读一张图贴上工作区；读不出来时清空并把原因留在 backgroundError */
@@ -745,8 +789,11 @@ export const useProjectsStore = defineStore('projects', () => {
    * 拍完才执行，是异步的。一次用户切换会从三条路各推一次主题进来（IPC 回包、主进程显式的
    * 主题广播、nativeTheme 的 updated 广播），读 DOM 的话后两次会误判成「还没应用」，
    * 于是连开好几个转场、互相把对方挤成 skipped，界面上就是动效错乱甚至没有。
+   *
+   * 起点取首屏快照里的主题：入口 main.ts 已经把那一份落到 <html> 上了，这里登记成
+   * 「已生效」，loadData 拿回同一个值时才会直接返回，不会把首帧再改一遍。
    */
-  let appliedTheme: EffectiveTheme | null = null
+  let appliedTheme: EffectiveTheme | null = bootstrap?.theme ?? null
 
   /**
    * 用户刚点下的切换起点，等「真正生效的那一次应用」来认领。
@@ -773,10 +820,10 @@ export const useProjectsStore = defineStore('projects', () => {
     const origin = options.origin ?? pendingThemeOrigin
     pendingThemeOrigin = null
 
-    const root = document.documentElement
     const commit = (): void => {
-      root.dataset.theme = theme
-      root.classList.toggle('dark', theme === 'dark')
+      writeTheme(theme)
+      // 主题色的浅色 / 深色档是照着明暗派生的，换主题必须一起重算（同一帧落进去，快照才是完整的）
+      applyAccentColor()
     }
 
     if (options.animate === false) {
@@ -785,6 +832,22 @@ export const useProjectsStore = defineStore('projects', () => {
     }
     applyThemeWithTransition(commit, origin)
   }
+
+  /**
+   * 主题色：把派生出来的整族变量写到 <html> 的内联样式上（写法见 bootstrap.ts，
+   * 与 mount 之前那次首屏落地共用同一份）。
+   */
+  function applyAccentColor(): void {
+    writeAccentColor(settings.value.accentColor, effectiveTheme.value, settings.value.accentInk)
+  }
+
+  /**
+   * 设置里一改就跟着落地：主题没变时 applyTheme 会直接返回，所以挑色后的落点是这条 watch。
+   * 首次加载、别的窗口改设置、数据目录迁移推回来的整份设置也都经它。
+   */
+  watch([() => settings.value.accentColor, () => settings.value.accentInk], applyAccentColor, {
+    immediate: true
+  })
 
   async function init(): Promise<void> {
     if (initialized) return
@@ -815,14 +878,23 @@ export const useProjectsStore = defineStore('projects', () => {
     groups.value = data.groups
     for (const project of data.projects) runtimeOf(project.id)
 
-    await refreshQuickApps()
+    // 外观先落地。主题与首页布局决定界面长什么样，必须排在一串与外观无关的调用前面 ——
+    // 排到后面的话，用户会先看见默认外观、几十到几百毫秒后才被换成自己的设置。
+    // 首屏快照是启动那一瞬的值（数据目录可能在启动后被换过），所以这里仍照当前值核一遍。
     settings.value = await window.workbench.getSettings()
-    dataLocation.value = await window.workbench.getDataLocation()
-    activity.value = await window.workbench.getActivity()
-    await refreshWallpapers()
-    applyThemeConfig(await window.workbench.getThemeConfig())
-    // 首帧直接落到目标主题，不播过渡动画
     applyTheme(resolveTheme(settings.value), { animate: false })
+    applyThemeConfig(await window.workbench.getThemeConfig())
+
+    // 其余与外观无关，并行拉完即可：内置壁纸缩略图要现压 7 张图（实测 270ms），
+    // 而且只有设置弹窗会读它，再挡在主题前面纯属白等。
+    const [location, counts] = await Promise.all([
+      window.workbench.getDataLocation(),
+      window.workbench.getActivity(),
+      refreshQuickApps(),
+      refreshWallpapers()
+    ])
+    dataLocation.value = location
+    activity.value = counts
   }
 
   /** 重新拉一次活跃度计数（命令跑完、数据目录切换后调用） */
@@ -850,7 +922,7 @@ export const useProjectsStore = defineStore('projects', () => {
       applyTheme(resolveTheme(value))
     })
     window.workbench.onTheme(applyTheme)
-    // 安装包管理器时把 npm 的输出原样透出来：弹层里显示最后一行，完整过程进底部终端
+    // 安装包管理器时把 npm 的输出原样透出来：系统状态卡片显示最后一行，完整过程进底部终端
     window.workbench.onPmInstallLog((event) => {
       pmInstallLog.value = event.text
       appendSystemLog(event.text)
@@ -1881,6 +1953,9 @@ export const useProjectsStore = defineStore('projects', () => {
     setTerminalHeight,
     setBackgroundOpacity,
     setBackgroundVeil,
+    setAccentColor,
+    setAccentInk,
+    setTopBarStyle,
     pickBackground,
     useWallpaper,
     clearBackground,

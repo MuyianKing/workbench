@@ -296,7 +296,15 @@ async function removeProject(): Promise<void> {
 </script>
 
 <template>
-  <el-drawer v-model="visible" :with-header="false" :size="420" direction="rtl" @closed="onClosed">
+  <!-- append-to-body：弹层必须离开 .app 子树，否则会被顶部毛玻璃的 backdrop-filter 连累（见 global.css 弹层一节） -->
+  <el-drawer
+    v-model="visible"
+    :with-header="false"
+    :size="420"
+    direction="rtl"
+    append-to-body
+    @closed="onClosed"
+  >
     <div v-if="project" class="drawer">
       <!-- 头部 -->
       <header class="drawer__head">

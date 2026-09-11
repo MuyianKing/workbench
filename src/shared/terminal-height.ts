@@ -11,8 +11,8 @@ export const TERMINAL_HEIGHT_MIN = 120
 /** 展开后的最大高度（px）：只防「离谱的数据」，实际拖拽还要看窗口高度 */
 export const TERMINAL_HEIGHT_MAX = 1200
 
-/** 默认高度，与 tokens.css 里的 --h-terminal 保持一致 */
-export const TERMINAL_HEIGHT_DEFAULT = 288
+/** 默认高度，与 tokens.css 里的 --h-terminal 保持一致（按当前配置固化） */
+export const TERMINAL_HEIGHT_DEFAULT = 406
 
 /** 收敛到合法区间；不是有限数字（缺失 / null / 字符串 / NaN）一律回到默认值 */
 export function clampTerminalHeight(value: unknown): number {

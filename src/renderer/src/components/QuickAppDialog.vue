@@ -79,11 +79,13 @@ async function submit(): Promise<void> {
 </script>
 
 <template>
+  <!-- append-to-body：弹层必须离开 .app 子树，否则会被顶部毛玻璃的 backdrop-filter 连累（见 global.css 弹层一节） -->
   <el-dialog
     v-model="visible"
     :title="title"
     width="520"
     align-center
+    append-to-body
     :close-on-click-modal="false"
     @closed="reset"
   >

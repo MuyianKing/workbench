@@ -29,6 +29,21 @@ import {
   type HomeCardId
 } from './theme'
 
+/**
+ * 算法用例（移动 / 重排）的固定夹具：只关心栏与 order 的算法行为，
+ * 用自带布局而不是 DEFAULT_THEME，默认布局再改也不会波及这些断言。
+ */
+function sampleCards(): Record<HomeCardId, CardPlacement> {
+  return {
+    activity: { column: 'left', order: 0, mode: 'fixed', height: 155 },
+    system: { column: 'left', order: 1, mode: 'fixed', height: 147 },
+    recent: { column: 'right', order: 0, mode: 'fixed', height: 155 },
+    actions: { column: 'right', order: 1, mode: 'flex', height: 180 },
+    quick: { column: 'center', order: 0, mode: 'fixed', height: 108 },
+    projects: { column: 'center', order: 1, mode: 'flex', height: 600 }
+  }
+}
+
 describe('clampGridStep', () => {
   it('区间内的值原样返回，四舍五入成整数', () => {
     expect(clampGridStep(2)).toBe(2)
@@ -126,7 +141,12 @@ describe('sanitizeTheme', () => {
     // 与默认的 activity 同栏同 order 0 → 按 id 声明顺序让 activity 在前，quick 顺延到 1；
     // mode 缺省时沿用该卡片在默认布局里的模式（快捷启动是固定高度）
     expect(result.cards.quick).toEqual({ column: 'left', order: 1, mode: 'fixed', height: 240 })
-    expect(result.cards.recent).toEqual(DEFAULT_THEME.cards.recent)
+    // 没在入参里出现的卡片沿用默认布局（order 会被重排成连续序号，故只比对其余字段）
+    expect(result.cards.recent).toMatchObject({
+      column: DEFAULT_THEME.cards.recent.column,
+      mode: DEFAULT_THEME.cards.recent.mode,
+      height: DEFAULT_THEME.cards.recent.height
+    })
   })
 
   it('整份认不出来时就是默认布局', () => {
@@ -171,20 +191,28 @@ describe('sanitizeTheme', () => {
     expect(result.cards.actions.order).toBe(0)
   })
 
-  it('默认布局左右两栏都有卡片、中间是主栏，且每栏都有一块自适应卡片', () => {
+  it('默认布局：左栏排常用面板、中栏只放项目列表、右栏留空', () => {
     expect(DEFAULT_THEME.leftWidth).toBe(LEFT_WIDTH_DEFAULT)
     expect(DEFAULT_THEME.rightWidth).toBe(RIGHT_WIDTH_DEFAULT)
-    expect(cardIdsInColumn(DEFAULT_THEME.cards, 'center')).toEqual(['quick', 'projects'])
+    expect(cardIdsInColumn(DEFAULT_THEME.cards, 'left')).toEqual([
+      'activity',
+      'recent',
+      'quick',
+      'system',
+      'actions'
+    ])
+    expect(cardIdsInColumn(DEFAULT_THEME.cards, 'center')).toEqual(['projects'])
+    expect(cardIdsInColumn(DEFAULT_THEME.cards, 'right')).toEqual([])
+    // 中栏项目列表、左栏快捷操作各占一块 flex，整页随窗口自适应
     expect(DEFAULT_THEME.cards.projects.mode).toBe('flex')
-    expect(DEFAULT_THEME.cards.system.mode).toBe('flex')
     expect(DEFAULT_THEME.cards.actions.mode).toBe('flex')
   })
 })
 
 describe('normalizeOrder', () => {
   it('不改栏与高度，只把 order 排连续', () => {
-    const cards = {} as Record<HomeCardId, CardPlacement>
-    for (const id of HOME_CARD_IDS) cards[id] = { ...DEFAULT_THEME.cards[id], order: 42 }
+    const cards = sampleCards()
+    for (const id of HOME_CARD_IDS) cards[id] = { ...cards[id], order: 42 }
     const next = normalizeOrder(cards)
     expect(cardIdsInColumn(next, 'center')).toEqual(['quick', 'projects'])
     expect(cards.quick.order).toBe(42)
@@ -193,31 +221,32 @@ describe('normalizeOrder', () => {
 
 describe('moveCard', () => {
   it('跨栏插到指定位置', () => {
-    const next = moveCard(DEFAULT_THEME.cards, 'recent', 'left', 1)
+    const next = moveCard(sampleCards(), 'recent', 'left', 1)
     expect(cardIdsInColumn(next, 'left')).toEqual(['activity', 'recent', 'system'])
   })
 
   it('移到末尾时 index 越界会被夹住', () => {
-    const next = moveCard(DEFAULT_THEME.cards, 'recent', 'left', 99)
+    const next = moveCard(sampleCards(), 'recent', 'left', 99)
     expect(cardIdsInColumn(next, 'left')).toEqual(['activity', 'system', 'recent'])
   })
 
   it('原栏剩下的卡片 order 依然连续', () => {
-    const next = moveCard(DEFAULT_THEME.cards, 'recent', 'left', 0)
+    const next = moveCard(sampleCards(), 'recent', 'left', 0)
     expect(cardIdsInColumn(next, 'right')).toEqual(['actions'])
     expect(next.actions.order).toBe(0)
   })
 
   it('栏内前移 / 后移都按插入位算', () => {
-    const forward = moveCard(DEFAULT_THEME.cards, 'quick', 'center', 1)
+    const forward = moveCard(sampleCards(), 'quick', 'center', 1)
     expect(cardIdsInColumn(forward, 'center')).toEqual(['projects', 'quick'])
     const backward = moveCard(forward, 'quick', 'center', 0)
     expect(cardIdsInColumn(backward, 'center')).toEqual(['quick', 'projects'])
   })
 
   it('不动传入的对象', () => {
-    moveCard(DEFAULT_THEME.cards, 'quick', 'right', 0)
-    expect(DEFAULT_THEME.cards.quick.column).toBe('center')
+    const cards = sampleCards()
+    moveCard(cards, 'quick', 'right', 0)
+    expect(cards.quick.column).toBe('center')
   })
 })
 

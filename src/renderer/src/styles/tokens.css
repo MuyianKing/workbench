@@ -18,14 +18,16 @@
 
   /* ---------- 工作区背景装饰 ----------
    * 默认不上任何图案（网格会跟卡片抢视线），画布保持平铺。
-   * 用户可以在设置里指定一张背景图，它铺在首页画布的最底层；盖在图片上的那层蒙版就是
-   * --ws-veil：默认底色取画布色本身，用户也可以在设置里指定「渐淡色」（此时 ProjectGrid
+   * 用户可以在设置里指定一张背景图，它铺满整个窗口的最底层（见 App.vue 的 .app）；盖在图片上的那层蒙版就是
+   * --ws-veil：默认底色取画布色本身，用户也可以在设置里指定「渐淡色」（此时 App.vue
    * 会把 --ws-veil-rgb 写在元素上覆盖这里），alpha 由「背景图浓淡」实时换算
    * （--ws-veil-alpha 同样写在元素上），图片越浓蒙版越淡。
    */
-  /* 背景图蒙版：底色 = --bg-canvas（#edeff2）；alpha 由 ProjectGrid 按浓淡实时覆盖 */
+  /* 背景图蒙版：底色 = --bg-canvas（#edeff2）；alpha 由 App.vue 按浓淡实时覆盖 */
   --ws-veil-rgb: 237, 239, 242;
   --ws-veil-alpha: 0.6;
+  /* 「整条毛玻璃」那条玻璃带上沿的高光：亮色下是玻璃的厚度感，暗色下只能给一点点 */
+  --glass-edge: rgba(255, 255, 255, 0.55);
 
   /* ---------- 文本 ---------- */
   --ink: #11151b;
@@ -39,13 +41,13 @@
   --term-border: #262d37;
   --term-ink: #c7d0db;
   --term-dim: #6b7787;
+  /* 日志里的地址：终端始终深色，用这一档绿，两种主题下取同一个值 */
+  --term-link: #3fb37f;
 
   /* ---------- 状态色（界面上仅有的彩色） ---------- */
   --st-idle: #9ba4b0;
   --st-run: #c77f0a;
   --st-ok: #0b8a57;
-  /* 实心绿按钮（打包）的 hover：亮色下再深一档，暗色下再亮一档 */
-  --st-ok-strong: #0a7a4d;
   --st-fail: #ce3f3f;
 
   --st-run-soft: #fdf4e3;
@@ -103,7 +105,7 @@
   --h-filter: 46px;
   /* 项目卡与「添加项目」幽灵卡同高，网格里两种方块外形一致 */
   --h-project-card: 155px;
-  --h-terminal: 288px;
+  --h-terminal: 406px;
   --h-terminal-collapsed: 42px;
 
   /* ---------- Element Plus 主题覆盖 ---------- */
@@ -153,6 +155,8 @@
 
   /* 背景图蒙版：底色 = 暗色的 --bg-canvas（#151a21） */
   --ws-veil-rgb: 21, 26, 33;
+  /* 暗色下玻璃高光只能给一点点，给多了会在深底上拉出一条白线 */
+  --glass-edge: rgba(255, 255, 255, 0.09);
 
   --ink: #e8edf4;
   --ink-2: #b3bdc9;
@@ -165,11 +169,11 @@
   --term-border: #262d37;
   --term-ink: #c7d0db;
   --term-dim: #6b7787;
+  --term-link: #3fb37f;
 
   --st-idle: #6b7787;
   --st-run: #e0a23a;
   --st-ok: #3fb37f;
-  --st-ok-strong: #4cc48e;
   --st-fail: #ef7373;
 
   --st-run-soft: rgba(224, 162, 58, 0.14);

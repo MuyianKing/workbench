@@ -47,7 +47,7 @@ describe('backgroundVeilAlpha', () => {
     expect(backgroundVeilAlpha(0)).toBe(0.95)
     expect(backgroundVeilAlpha(999)).toBe(0)
     // 非法值先落到默认浓淡，再换算成蒙版
-    expect(backgroundVeilAlpha('x')).toBe(0.6)
+    expect(backgroundVeilAlpha('x')).toBe((100 - BACKGROUND_OPACITY_DEFAULT) / 100)
   })
 })
 

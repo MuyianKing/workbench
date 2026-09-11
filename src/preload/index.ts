@@ -18,6 +18,7 @@ import {
   type QuickAppPatch,
   type TerminalOpenEvent,
   type ThemeConfig,
+  type WindowState,
   type WorkbenchApi
 } from '../shared/types'
 
@@ -66,6 +67,7 @@ const api: WorkbenchApi = {
   quickAppIcon: (target: string) => ipcRenderer.invoke(IPC.quickIcon, target),
 
   reveal: (targetPath: string) => ipcRenderer.invoke(IPC.reveal, targetPath),
+  openExternal: (url: string) => ipcRenderer.invoke(IPC.openExternal, url),
   checkPackageManagers: () => ipcRenderer.invoke(IPC.checkPackageManagers),
   installPackageManager: (pm: InstallablePackageManager) =>
     ipcRenderer.invoke(IPC.installPackageManager, pm),
@@ -80,6 +82,11 @@ const api: WorkbenchApi = {
   runCustom: (id: string, index: number) => ipcRenderer.invoke(IPC.runCustom, id, index),
   stop: (id: string) => ipcRenderer.invoke(IPC.stop, id),
 
+  /**
+   * 首屏快照走同步通道：渲染层要在 mount 之前拿到它，异步的话第一帧已经画完了。
+   * 主进程那边只读内存里的配置，代价可以忽略（见 handlers/settings.ts）。
+   */
+  getBootstrap: () => ipcRenderer.sendSync(IPC.getBootstrap),
   getSettings: () => ipcRenderer.invoke(IPC.getSettings),
   updateSettings: (patch: Partial<AppSettings>) => ipcRenderer.invoke(IPC.updateSettings, patch),
   pickBackground: () => ipcRenderer.invoke(IPC.pickBackground),
@@ -113,7 +120,14 @@ const api: WorkbenchApi = {
   onQuitConfirm: (handler: (payload: QuitConfirmPayload) => void) =>
     subscribe(IPC.eventQuitConfirm, handler),
   respondQuitConfirm: (choice: QuitChoice) =>
-    ipcRenderer.send(IPC.quitConfirmRespond, choice)
+    ipcRenderer.send(IPC.quitConfirmRespond, choice),
+
+  minimizeWindow: () => ipcRenderer.send(IPC.windowMinimize),
+  toggleMaximizeWindow: () => ipcRenderer.send(IPC.windowToggleMaximize),
+  closeWindow: () => ipcRenderer.send(IPC.windowClose),
+  getWindowState: (): Promise<WindowState> => ipcRenderer.invoke(IPC.windowState),
+  onWindowState: (handler: (state: WindowState) => void) =>
+    subscribe(IPC.eventWindowState, handler)
 }
 
 contextBridge.exposeInMainWorld('workbench', api)

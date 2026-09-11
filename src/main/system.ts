@@ -169,6 +169,27 @@ export async function reveal(targetPath: string): Promise<void> {
 }
 
 /**
+ * 用系统默认浏览器打开链接。
+ *
+ * 只放行 http(s)：地址虽然是渲染层从日志里识别出来的，但通道本身对渲染层开放，
+ * 不能让它顺手变成 `file:` 或自定义协议的启动入口。
+ */
+export async function openExternal(url: string): Promise<void> {
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    throw new Error(`链接无效：${url}`)
+  }
+
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error('只支持 http / https 链接')
+  }
+
+  await shell.openExternal(parsed.href)
+}
+
+/**
  * 端口是否已被占用。
  *
  * 以「能不能连上」为准。Windows 上不能只用 bind 探测：某个进程绑了 0.0.0.0:P 之后，

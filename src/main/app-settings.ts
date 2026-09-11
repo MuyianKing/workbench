@@ -1,4 +1,4 @@
-import { app, globalShortcut, Menu, nativeImage, nativeTheme, Tray } from 'electron'
+import { app, BrowserWindow, globalShortcut, Menu, nativeImage, nativeTheme, Tray } from 'electron'
 import { IPC, type AppSettings, type EffectiveTheme } from '../shared/types'
 import { broadcast } from './broadcast'
 import { data, sanitizeSettings, save, settings } from './store'
@@ -13,8 +13,16 @@ export interface SettingsHost {
   setWindowTitle: (name: string) => void
 }
 
+/**
+ * 开机自启拉起时附加的启动参数（见 applyAutoLaunch）：只驻留托盘、不弹窗口。
+ * Windows 上读不到「由登录项启动」，只能靠这个参数自己认。
+ */
+const LAUNCH_HIDDEN_FLAG = '--hidden'
+
 let host: SettingsHost | null = null
 let tray: Tray | null = null
+/** 「已收进托盘」的提示每次运行只弹一次，避免每次收窗口都打扰 */
+let trayHintShown = false
 
 /** 实际生效的主题：system 交给系统解析后，渲染层只需要 light / dark 两种 */
 export function effectiveTheme(): EffectiveTheme {
@@ -23,6 +31,11 @@ export function effectiveTheme(): EffectiveTheme {
 
 export function currentSettings(): AppSettings {
   return settings()
+}
+
+/** 本次是不是「开机自启」拉起的实例：是的话窗口建好就藏着，界面交给托盘图标唤起 */
+export function launchedHidden(): boolean {
+  return process.argv.includes(LAUNCH_HIDDEN_FLAG)
 }
 
 export function initAppSettings(nextHost: SettingsHost): void {
@@ -72,6 +85,24 @@ export function notifyHiddenToTray(): void {
   }
 }
 
+/**
+ * 把窗口收进托盘：隐藏、摘掉任务栏按钮，并给一次提示（每次运行只提示一遍）。
+ *
+ * setSkipTaskbar 是必须的：窗口先被最小化、再被隐藏时（Win+↓ 这类系统最小化），
+ * Windows 会把任务栏按钮留在那儿，而窗口已经隐藏，点它没有任何反应 —— 看上去就是「卡死」。
+ * 隐藏期间统一摘掉按钮，showMainWindow 里再装回来。
+ */
+export function hideWindowToTray(win: BrowserWindow | null): void {
+  if (!win || win.isDestroyed()) return
+
+  win.hide()
+  win.setSkipTaskbar(true)
+
+  if (trayHintShown) return
+  trayHintShown = true
+  notifyHiddenToTray()
+}
+
 export function disposeAppSettings(): void {
   globalShortcut.unregisterAll()
   tray?.destroy()
@@ -112,7 +143,11 @@ function applyAutoLaunch(): void {
     return
   }
   try {
-    app.setLoginItemSettings({ openAtLogin: settings().launchAtLogin })
+    // 自启项带上 --hidden：开机的这个实例不该抢走焦点，只在托盘里待命
+    app.setLoginItemSettings({
+      openAtLogin: settings().launchAtLogin,
+      args: [LAUNCH_HIDDEN_FLAG]
+    })
   } catch (err) {
     console.warn('[workbench] 设置开机自启失败:', err)
   }

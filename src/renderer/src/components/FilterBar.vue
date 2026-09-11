@@ -216,9 +216,15 @@ function pickSort(key: string): void {
   flex-wrap: wrap;
 }
 
-/* 编辑态：这一行临时换成布局操作条，给一点底色和常规筛选栏区分开 */
+/**
+ * 编辑态：这一行临时换成布局操作条，整条铺一层主题色的淡底，一眼看出现在不在普通筛选状态。
+ *
+ * 淡底是按主色调出来的：主色在亮色下近黑、暗色下近白，所以两个主题下都是「往背景的反方向」
+ * 走一步 —— 没设主题色时是一条中性灰，设了主题色就是那支色的淡调。
+ * 毛玻璃 / 透明两档的底由 global.css 换成半透明的那一层，好让壁纸照旧透上来。
+ */
 .filter.is-editing {
-  background: var(--bg-surface);
+  background: color-mix(in srgb, var(--el-color-primary) 12%, var(--bg-canvas));
 }
 
 .filter__hint {
@@ -255,14 +261,17 @@ function pickSort(key: string): void {
   background: rgba(17, 21, 27, 0.05);
 }
 
+/* 选中态是一处「当前选择」的表达，跟主色走（见设置里的「主题色」）：
+   默认的中性主色就是 --ink，所以不设主题色时与原来完全一样。 */
 .chip.is-active {
-  background: var(--ink);
-  color: var(--ink-inverse);
+  background: var(--el-color-primary);
+  color: var(--el-color-white);
 }
 
-/* 拖拽落点：虚线描边 + 轻微底色，和选中态区分开 */
+/* 拖拽落点：虚线描边 + 轻微底色，和选中态区分开。
+   描边同样跟主色走（默认的中性主色就是 --ink），落点提示才和选中态是同一个颜色。 */
 .chip.is-drop {
-  border-color: var(--ink);
+  border-color: var(--el-color-primary);
   border-style: dashed;
   background: rgba(17, 21, 27, 0.06);
 }
@@ -277,8 +286,8 @@ function pickSort(key: string): void {
 }
 
 .chip.is-active.is-drop {
-  background: var(--ink);
-  color: var(--ink-inverse);
+  background: var(--el-color-primary);
+  color: var(--el-color-white);
 }
 
 :root[data-theme='dark'] .chip.is-drop {

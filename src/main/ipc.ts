@@ -31,12 +31,14 @@ import {
   checkPort,
   installPackageManager,
   killPortProcess,
+  openExternal,
   pickDirectory,
   reveal
 } from './system'
 import { manager } from './manager'
 import { registerQuickIpc } from './handlers/quick'
 import { registerSettingsIpc } from './handlers/settings'
+import { registerWindowIpc } from './handlers/window'
 
 /** 每个项目保留的执行记录条数 */
 const HISTORY_LIMIT = 10
@@ -450,6 +452,14 @@ export function registerIpc(): void {
     })
   })
 
+  ipcMain.handle(IPC.openExternal, async (_event, url: string): Promise<Result<null>> => {
+    if (typeof url !== 'string' || !url.trim()) return fail('链接为空')
+    return toResult(async () => {
+      await openExternal(url)
+      return null
+    })
+  })
+
   ipcMain.handle(IPC.checkPackageManagers, () => checkPackageManagers())
 
   ipcMain.handle(
@@ -588,4 +598,9 @@ export function registerIpc(): void {
   // 与项目命令是两套独立模型，注册逻辑在 ipc/quick.ts
 
   registerQuickIpc()
+
+  // ---------- 自绘标题栏的窗口控制 ----------
+  // 系统叠加层已经关掉，三个按钮的动效与实现都在渲染层，注册逻辑在 ipc/window.ts
+
+  registerWindowIpc()
 }

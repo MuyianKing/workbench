@@ -1,8 +1,10 @@
 /** 主进程与渲染进程共用的类型定义与 IPC 契约 */
 
+import { ACCENT_COLOR_DEFAULT, ACCENT_INK_DEFAULT, type AccentInkMode } from './accent-color'
 import { APP_NAME_DEFAULT } from './app-name'
 import { TERMINAL_HEIGHT_DEFAULT } from './terminal-height'
 import { BACKGROUND_OPACITY_DEFAULT } from './workspace-background'
+import { builtinReference } from './wallpaper'
 import type { ActivityCounts } from './activity'
 import type { BuildTool, PortSource } from './dev-port'
 import type { ThemeConfig } from './theme'
@@ -26,6 +28,19 @@ export type ThemeSource = 'system' | 'light' | 'dark'
 
 /** 实际生效的主题（system 由主进程解析成 light / dark 再推给渲染层） */
 export type EffectiveTheme = 'light' | 'dark'
+
+/**
+ * 顶部三条栏（标题栏 / 搜索栏 / 筛选栏）的样式。
+ *
+ * 壁纸现在铺满整个窗口，这三条栏就有了三种处理方式；取值同时用于落盘收敛与设置界面，
+ * 所以放在 shared 里当唯一口径。
+ *   band  —— 不透明的工具条：前两条白、筛选栏画布灰，壁纸从画布才开始（默认）
+ *   glass —— 三条合成一整块磨砂，壁纸隔着玻璃铺到窗口顶边
+ *   clear —— 三条全透，壁纸一路铺到窗口顶边
+ */
+export const TOP_BAR_STYLES = ['band', 'glass', 'clear'] as const
+
+export type TopBarStyle = (typeof TOP_BAR_STYLES)[number]
 
 export interface CustomCommand {
   name: string
@@ -169,6 +184,19 @@ export interface AppSettings {
    * 空串表示跟随主题画布色 —— 不动它就是原来的样子。
    */
   workspaceBackgroundVeil: string
+  /**
+   * 主题色（#rrggbb）：开关、选中、聚焦这类交互态与主按钮用它。
+   * 空串表示用默认的中性色（亮色近黑、暗色近白），也就是界面原本的灰度样子；
+   * 只接管交互态，状态色（--st-*）与终端（--term-*）不受影响。
+   */
+  accentColor: string
+  /**
+   * 铺在主题色上的文字色：auto 按主题色深浅自动挑（红底白字、浅灰底黑字），
+   * white / dark 是用户手动钉死的选择。没设主题色时无意义。
+   */
+  accentInk: AccentInkMode
+  /** 顶部三条栏的样式，默认 band（不透明工具条），设置界面里叫「正常 / 毛玻璃 / 透明」 */
+  topBarStyle: TopBarStyle
 }
 
 /**
@@ -418,6 +446,21 @@ export interface BuiltinWallpaper {
   thumbnail: string
 }
 
+/**
+ * 首屏快照。
+ *
+ * 设置只能经异步 IPC 拿到，而窗口在渲染层第一帧之后就显示了 —— 只走异步那条路的话，
+ * 用户会先看见一份默认外观（亮色、无主题色、默认布局），几十到几百毫秒后才被换成自己的
+ * 设置，看上去就是「启动时切换了一次」。主进程在创建窗口之前已经读完设置，所以这里把
+ * 决定第一帧的几份配置一次性同步交给渲染层（见 preload 的 getBootstrap）。
+ */
+export interface BootstrapSnapshot {
+  /** 实际生效的明暗；system 已按系统解析成 light / dark，与窗口底色用的是同一个值 */
+  theme: EffectiveTheme
+  settings: AppSettings
+  themeConfig: ThemeConfig
+}
+
 /** preload 向渲染进程暴露的 API */
 export interface WorkbenchApi {
   versions: { electron: string; node: string; chrome: string }
@@ -452,6 +495,8 @@ export interface WorkbenchApi {
   /** 取程序的系统图标（主进程转成 data URL，取不到时用首字母兜底） */
   quickAppIcon: (target: string) => Promise<Result<string>>
   reveal: (targetPath: string) => Promise<Result<null>>
+  /** 用系统默认浏览器打开 http(s) 链接 */
+  openExternal: (url: string) => Promise<Result<null>>
   checkPackageManagers: () => Promise<PackageManagerStatus>
   /** 用 npm 全局安装 yarn / pnpm；返回的 status 是装完（或装失败）后重新探测的结果 */
   installPackageManager: (
@@ -468,6 +513,11 @@ export interface WorkbenchApi {
   /** 执行项目配置里的第 index 条自定义命令 */
   runCustom: (id: string, index: number) => Promise<Result<null>>
   stop: (id: string) => Promise<Result<null>>
+  /**
+   * 同步取一份首屏快照（见 BootstrapSnapshot）。
+   * 渲染层在 mount 之前调用，让第一帧就是用户设置的样子，而不是先默认再切换。
+   */
+  getBootstrap: () => BootstrapSnapshot
   getSettings: () => Promise<AppSettings>
   updateSettings: (patch: Partial<AppSettings>) => Promise<Result<AppSettings>>
   /** 挑一张图片当工作区背景；只返回路径，落盘交给 updateSettings */
@@ -506,6 +556,19 @@ export interface WorkbenchApi {
   onQuitConfirm: (fn: (payload: QuitConfirmPayload) => void) => () => void
   /** 回传退出确认框里选中的结果 */
   respondQuitConfirm: (choice: QuitChoice) => void
+  /** 标题栏自绘窗口按钮：最小化 / 最大化（已最大化时为还原）/ 关闭（仍走托盘那套逻辑） */
+  minimizeWindow: () => void
+  toggleMaximizeWindow: () => void
+  closeWindow: () => void
+  /** 窗口当前是否最大化：首帧靠它决定第三个按钮画「最大化」还是「还原」 */
+  getWindowState: () => Promise<WindowState>
+  /** 最大化 / 还原状态变化（拖窗口边缘、系统快捷键也会走到这里） */
+  onWindowState: (fn: (state: WindowState) => void) => () => void
+}
+
+/** 自绘标题栏需要知道的窗口状态 */
+export interface WindowState {
+  maximized: boolean
 }
 
 /** 数据文件位置信息 */
@@ -560,6 +623,7 @@ export const IPC = {
   quickIcon: 'quick:icon',
   eventQuickApps: 'quick:changed',
   reveal: 'system:reveal',
+  openExternal: 'system:open-external',
   checkPackageManagers: 'system:check-pm',
   installPackageManager: 'system:install-pm',
   checkPort: 'system:check-port',
@@ -591,8 +655,14 @@ export const IPC = {
   eventTheme: 'settings:theme',
   eventPmInstallLog: 'system:pm-install-log',
   eventDataReload: 'data:reload',
+  getBootstrap: 'app:bootstrap',
   eventQuitConfirm: 'app:quit-confirm',
-  quitConfirmRespond: 'app:quit-confirm-respond'
+  quitConfirmRespond: 'app:quit-confirm-respond',
+  windowMinimize: 'window:minimize',
+  windowToggleMaximize: 'window:toggle-maximize',
+  windowClose: 'window:close',
+  windowState: 'window:state',
+  eventWindowState: 'window:state-changed'
 } as const
 
 /**
@@ -612,17 +682,27 @@ export type BroadcastChannel =
   | typeof IPC.eventDataReload
   | typeof IPC.eventThemeConfig
   | typeof IPC.eventQuitConfirm
+  | typeof IPC.eventWindowState
 
-/** 设置默认值：与设计文档 4.8 一致 */
+/**
+ * 设置默认值。
+ *
+ * 不再是设计文档 4.8 里的出厂值，而是按当前正在使用的配置固化的：
+ * 首次运行 / 数据文件里的 settings 整段缺失时，直接落成这一套。
+ * 各项常量（程序名、终端高度、背景浓淡）也一并跟着改，保证「默认值」只有一处口径。
+ */
 export const DEFAULT_SETTINGS: AppSettings = {
   appName: APP_NAME_DEFAULT,
   launchAtLogin: false,
-  theme: 'system',
+  theme: 'light',
   hotkeyEnabled: true,
-  hotkey: 'Control+Shift+W',
-  minimizeToTray: false,
+  hotkey: 'Control+Shift+M',
+  minimizeToTray: true,
   terminalHeight: TERMINAL_HEIGHT_DEFAULT,
-  workspaceBackground: '',
+  workspaceBackground: builtinReference('万重山'),
   workspaceBackgroundOpacity: BACKGROUND_OPACITY_DEFAULT,
-  workspaceBackgroundVeil: ''
+  workspaceBackgroundVeil: '',
+  accentColor: ACCENT_COLOR_DEFAULT,
+  accentInk: ACCENT_INK_DEFAULT,
+  topBarStyle: 'band'
 }

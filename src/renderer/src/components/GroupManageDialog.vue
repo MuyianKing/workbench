@@ -143,7 +143,8 @@ async function onDrop(group: ProjectGroup, event: DragEvent): Promise<void> {
 </script>
 
 <template>
-  <el-dialog v-model="visible" title="管理分组" width="480" align-center>
+  <!-- append-to-body：弹层必须离开 .app 子树，否则会被顶部毛玻璃的 backdrop-filter 连累（见 global.css 弹层一节） -->
+  <el-dialog v-model="visible" title="管理分组" width="480" align-center append-to-body>
     <div class="groups">
       <div v-if="store.sortedGroups.length" class="tags">
         <template v-for="group in store.sortedGroups" :key="group.id">

@@ -8,6 +8,7 @@ import {
   maxTerminalHeightFor
 } from '@shared/terminal-height'
 import { isPinnedToBottom } from '@shared/log-scroll'
+import { splitLinks, type LinkSegment } from '@shared/linkify'
 import { statusTone } from '@/status'
 import { useProjectsStore, type TerminalState } from '@/stores/projects'
 import type { LogLine, ProjectStatus } from '@/types'
@@ -110,6 +111,15 @@ const tabs = computed(() => store.terminalList)
 const active = computed(() => store.activeTerminalState)
 
 /**
+ * 选中一个终端。
+ * 收起时面板只剩工具栏，光切 active 是看不见日志的，所以顺手展开。
+ */
+function selectTab(key: string): void {
+  store.setActiveTerminal(key)
+  if (collapsed.value) collapsed.value = false
+}
+
+/**
  * 单次渲染的行数上限（F-6.11）。
  * 缓冲区仍保留 5000 行（F-6.6），但超过这个数就只把尾部挂到 DOM 上。
  * 规格允许「虚拟滚动或阈值截断」，这里取截断 —— 但只截断还不够，
@@ -165,6 +175,58 @@ const chunks = computed(() => {
 })
 
 const currentCommand = computed(() => active.value?.currentCommand)
+
+// ---------- 日志里的地址 ----------
+
+/**
+ * 行文本 -> 切分结果。
+ *
+ * 日志只追加不改写，同一行不会变，所以按文本缓存：刷屏时只有新行需要重新扫描。
+ * 缓冲区上限 5000 行，缓存跟着这个量级封顶，超了整体丢掉重新攒。
+ */
+const linkCache = new Map<string, LinkSegment[]>()
+
+function segmentsOf(text: string): LinkSegment[] {
+  const cached = linkCache.get(text)
+  if (cached) return cached
+
+  const segments = splitLinks(text)
+  if (linkCache.size >= 4096) linkCache.clear()
+  linkCache.set(text, segments)
+  return segments
+}
+
+/**
+ * 是否按住了 Ctrl。
+ *
+ * 只用来画「可点」的样式（下划线 + 手型）——按住才显形，和 Ctrl + 单击对得上；
+ * 真正能不能开还是看点击事件里的 ctrlKey，不依赖这个状态。
+ */
+const ctrlHeld = ref(false)
+
+function onKeyDown(event: KeyboardEvent): void {
+  if (event.key === 'Control') ctrlHeld.value = true
+}
+
+function onKeyUp(event: KeyboardEvent): void {
+  if (event.key === 'Control') ctrlHeld.value = false
+}
+
+/** 切走窗口时收不到 keyup，回来别停在「按住」的样子 */
+function onWindowBlur(): void {
+  ctrlHeld.value = false
+}
+
+window.addEventListener('keydown', onKeyDown)
+window.addEventListener('keyup', onKeyUp)
+window.addEventListener('blur', onWindowBlur)
+
+/** Ctrl + 单击：把地址交给系统默认浏览器 */
+async function openLink(event: MouseEvent, url: string): Promise<void> {
+  if (!event.ctrlKey) return
+  const result = await window.workbench.openExternal(url)
+  if (!result.ok) ElMessage.warning(result.error)
+}
 
 // ---------- 自动滚动：只在用户贴底时跟随 ----------
 
@@ -279,6 +341,9 @@ watch(
 
 onUnmounted(() => {
   window.removeEventListener('resize', onWindowResize)
+  window.removeEventListener('keydown', onKeyDown)
+  window.removeEventListener('keyup', onKeyUp)
+  window.removeEventListener('blur', onWindowBlur)
   bodyObserver.disconnect()
   lineObserver.disconnect()
   detachResize()
@@ -319,7 +384,7 @@ function exportLogs(): void {
   <footer
     v-if="tabs.length"
     class="term"
-    :class="{ 'is-collapsed': collapsed, 'is-resizing': resizing }"
+    :class="{ 'is-collapsed': collapsed, 'is-resizing': resizing, 'is-linkable': ctrlHeld }"
     :style="{ '--term-h': `${renderHeight}px` }"
   >
     <!-- 上沿的拖拽把手：收起时藏起来（收起高度是固定的） -->
@@ -362,8 +427,8 @@ function exportLogs(): void {
           role="tab"
           :aria-selected="t.key === active?.key"
           tabindex="0"
-          @click="store.setActiveTerminal(t.key)"
-          @keydown.enter.prevent="store.setActiveTerminal(t.key)"
+          @click="selectTab(t.key)"
+          @keydown.enter.prevent="selectTab(t.key)"
         >
           <i class="tab__dot" :class="`tone-${toneOf(t.status)}`" />
           <span class="tab__name truncate">{{ projectName(t) }} · {{ t.label }}</span>
@@ -418,7 +483,17 @@ function exportLogs(): void {
         >
           <div v-for="line in chunk" :key="line.id" class="line" :class="`line--${line.stream}`">
             <span class="line__time mono">{{ line.time }}</span>
-            <span class="line__text mono">{{ line.text || ' ' }}</span>
+            <!-- 先按地址切段：链接单独成段上绿色，空行仍拿空格占住行高 -->
+            <span class="line__text mono"><template
+              v-for="(seg, index) in segmentsOf(line.text || ' ')"
+              :key="index"
+            ><span
+              v-if="seg.url"
+              class="line__link"
+              role="link"
+              :title="`Ctrl + 单击用默认浏览器打开：${seg.url}`"
+              @click="openLink($event, seg.url)"
+            >{{ seg.text }}</span><template v-else>{{ seg.text }}</template></template></span>
           </div>
         </div>
       </template>
@@ -718,6 +793,18 @@ function exportLogs(): void {
   white-space: pre-wrap;
   word-break: break-word;
   color: var(--term-ink);
+}
+
+/* 日志里的地址：用终端专属的链接绿，不占状态色 */
+.line__link {
+  color: var(--term-link);
+}
+
+/* 按住 Ctrl 才显出可点：下划线 + 手型，跟「Ctrl + 单击」的操作对上 */
+.term.is-linkable .line__link {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
 }
 
 .line--cmd .line__text {

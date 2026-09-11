@@ -4,13 +4,14 @@ import {
   IPC,
   type AppSettings,
   type BackgroundImage,
+  type BootstrapSnapshot,
   type BuiltinWallpaper,
   type DataLocation,
   type DataLocationPick,
   type Result,
   type ThemeConfig
 } from '../../shared/types'
-import { updateAppSettings } from '../app-settings'
+import { effectiveTheme, updateAppSettings } from '../app-settings'
 import { pickBackgroundImage, readBackgroundImage } from '../background'
 import { broadcast } from '../broadcast'
 import { manager } from '../manager'
@@ -24,6 +25,24 @@ import { listWallpapers } from '../wallpapers'
  * 这一组只碰 store / theme / app-settings 等配置层，与项目、进程无关，故从 ipc.ts 拆出。
  */
 export function registerSettingsIpc(): void {
+  /**
+   * 首屏快照（同步通道）。
+   *
+   * 渲染层在 mount 之前用它把主题、主题色与首页布局一次取齐，第一帧就直接画成用户设置的样子；
+   * 走异步的话窗口已经显示，用户会先看见默认外观再被换成自己的设置。
+   *
+   * 敢用 sendSync 是因为这里只读内存里已经加载好的那几份配置：窗口创建前
+   * loadData / loadTheme 都已 await 完成，不碰磁盘也不碰子进程，载荷只有几百字节，
+   * 阻塞渲染进程的时间在微秒级。
+   */
+  ipcMain.on(IPC.getBootstrap, (event) => {
+    event.returnValue = {
+      theme: effectiveTheme(),
+      settings: settings(),
+      themeConfig: themeConfig()
+    } satisfies BootstrapSnapshot
+  })
+
   ipcMain.handle(IPC.getSettings, () => settings())
 
   ipcMain.handle(

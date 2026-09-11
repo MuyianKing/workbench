@@ -74,8 +74,13 @@ body.is-resizing-terminal * {
 
 /* ---------- 键盘可达性 ---------- */
 
+/**
+ * 焦点环是「交互态」最直接的表达，所以跟主色走（而不是 --ink）：
+ * 默认的中性主色与 --ink 是同一个值，视觉不变；用户挑了主题色之后，
+ * 键盘焦点才和开关、选中态用的是同一个颜色。
+ */
 :focus-visible {
-  outline: 2px solid var(--ink);
+  outline: 2px solid var(--el-color-primary);
   outline-offset: 2px;
 }
 
@@ -282,7 +287,7 @@ body.is-resizing-terminal * {
   white-space: nowrap;
 }
 
-/* 包管理器可用性：可用绿点、未装红点，和右上角环境弹层同一套语义 */
+/* 包管理器可用性：可用绿点、未装红点，系统状态卡片与欢迎页共用同一套语义 */
 .pms {
   display: flex;
   align-items: center;
@@ -297,11 +302,18 @@ body.is-resizing-terminal * {
   color: var(--ink-2);
 }
 
+/**
+ * 圆点要跟着文字走，不能只按行盒居中：
+ * 汉字的墨迹中心就是行盒中心，而小写字母（npm / pnpm / yarn）的视觉中心比行盒中心低
+ * 约 0.125em，只按行盒居中会让圆点浮在字母上面。
+ * 用 transform 而不是 margin —— 行高与基线都不动，旁边几行不受影响。
+ */
 .pm__dot {
   width: 5px;
   height: 5px;
   border-radius: 50%;
   background: var(--st-idle);
+  transform: translateY(0.125em);
 }
 
 .pm__dot.is-ok {
@@ -349,6 +361,123 @@ body.is-resizing-terminal * {
   font-size: var(--fs-micro);
 }
 
+/* ---------- 顶部三条栏的样式 ---------- */
+
+/**
+ * 工作区背景铺满整个窗口（见 App.vue 的 .app），标题栏 / 搜索栏 / 筛选栏这三条浮在它上面。
+ * 三条栏在 App.vue 里包成一块 .topbar，所以「毛玻璃」这一档是把玻璃画在容器上：
+ * 逐行各画一遍的话，每行都会各自渐一遍、各自叠一层，行与行之间就露出接缝了。
+ *
+ *   band  「正常」：不透明的工具条 —— 标题栏与搜索栏取面底色、筛选栏取画布色，壁纸从画布才开始
+ *   glass 「毛玻璃」：整块磨砂，壁纸隔着玻璃仍铺到窗口顶边
+ *   clear 「透明」：三条全透，壁纸一路透到窗口顶边
+ *
+ * 毛玻璃的底色取「渐淡色」（--ws-veil-rgb，亮暗两套主题各一份），
+ * 写死白色在暗色下会糊成一块亮灰。
+ */
+
+/* ---------- band：不透明的工具条 ---------- */
+
+.app.top-band .titlebar,
+.app.top-band .header {
+  background: var(--bg-surface);
+}
+
+.app.top-band .filter {
+  background: var(--bg-canvas);
+}
+
+/* 白→画布灰的界面本身就是分界，再加一条细线就是多画了一道 */
+.app.top-band .header {
+  border-bottom-color: transparent;
+}
+
+/* ---------- glass：整块毛玻璃 ---------- */
+
+.app.top-glass .titlebar,
+.app.top-glass .header,
+.app.top-glass .filter {
+  background: transparent;
+  border-bottom-color: transparent;
+}
+
+.app.top-glass .topbar {
+  /**
+   * 玻璃的「透」靠三件事：填充薄、模糊大、饱和度提上去。
+   * 填充做成由上到下略微变薄的一层渐变：一层渐变压上去比平涂更像一块有厚度的板，
+   * 而平涂叠在页面蒙版之上等于把壁纸又盖掉大半，看着发闷。
+   */
+  background: linear-gradient(
+    180deg,
+    rgba(var(--ws-veil-rgb), 0.3) 0%,
+    rgba(var(--ws-veil-rgb), 0.18) 100%
+  );
+  backdrop-filter: blur(26px) saturate(1.7) brightness(1.02);
+  /* 上沿一条高光给玻璃的厚度；下沿一条细边 + 一层又短又柔的投影，让它像浮在画布上 */
+  box-shadow:
+    inset 0 1px 0 var(--glass-edge),
+    0 10px 20px -16px rgba(17, 21, 27, 0.45);
+}
+
+/* ---------- clear：三条全透明 ---------- */
+
+.app.top-clear .titlebar,
+.app.top-clear .header,
+.app.top-clear .filter {
+  background: transparent;
+  border-bottom-color: transparent;
+}
+
+/**
+ * 布局编辑态：这一行整条铺一层主题色的淡底（见 FilterBar 的 .filter.is-editing）。
+ *
+ * 上面两条把这两档的筛选栏置成了透明，编辑态要在这里补回那层淡色 —— 但得往透明里调，
+ * 壁纸才能照旧从这条带上透上来（band 那一档是不透明的工具栏，壁纸本来就到不了那儿，
+ * 所以它的淡底由组件自己混在画布色里）。
+ */
+.app.top-glass .filter.is-editing,
+.app.top-clear .filter.is-editing {
+  background: color-mix(in srgb, var(--el-color-primary) 12%, transparent);
+}
+
+/* ---------- 壁纸上的控件（glass / clear 两档才需要） ---------- */
+
+/*
+ * band 那一档的顶部是实底白，控件用组件自己的样子最清楚：搜索框取面底、按钮是白底方砖，
+ * 因为半透明药丸铺在白色上等于看不见。下面这两条只在壁纸透出来的两档生效。
+ */
+
+/* 搜索框：半透明药丸，底色跟着主题走（写死白色在暗色下会糊成一块亮灰） */
+.app.top-glass .header .search,
+.app.top-clear .header .search {
+  background: color-mix(in srgb, var(--bg-surface) 64%, transparent);
+  border-color: color-mix(in srgb, var(--border-strong) 40%, transparent);
+  backdrop-filter: blur(12px) saturate(1.4);
+  /* 药丸上沿同样给一点高光，和玻璃带是同一套material */
+  box-shadow: inset 0 1px 0 var(--glass-edge);
+}
+
+.app.top-glass .header .search:focus-within,
+.app.top-clear .header .search:focus-within {
+  background: var(--bg-surface);
+  border-color: var(--border-strong);
+}
+
+/* 右上角三个工具按钮：去掉白底方砖，只留图标，悬停才浮出一层浅底 */
+.app.top-glass .header .icon-btn,
+.app.top-clear .header .icon-btn {
+  background: transparent;
+  border-color: transparent;
+  color: var(--ink-2);
+}
+
+.app.top-glass .header .icon-btn:hover,
+.app.top-clear .header .icon-btn:hover {
+  background: color-mix(in srgb, var(--bg-surface) 70%, transparent);
+  border-color: transparent;
+  color: var(--ink);
+}
+
 /* ---------- Element Plus 局部收敛 ---------- */
 
 .el-button {
@@ -383,6 +512,35 @@ body.is-resizing-terminal * {
   font-weight: 600;
 }
 
+/**
+ * 滑块手柄与滑杆刻点的底色。
+ *
+ * Element Plus 拿 --el-color-white 当它们的底色，而主题色把这个变量借去表示「主色上的文字色」
+ * （见 shared/accent-color.ts）—— 那样手柄会变成一颗实心墨点、压在灰轨道上。这两处要的是
+ * 「压在实心块上的那一档」，取 --ink-inverse：亮色下是白、暗色下是近黑，与 EP 原本取到的值一致，
+ * 不设主题色时看不出任何差别。
+ */
+.el-slider__button,
+.el-slider__stop {
+  background-color: var(--ink-inverse);
+}
+
+/**
+ * 取色器触发块里那个小色块。
+ *
+ * Element Plus 给它配了一圈 --el-text-color-secondary 的边（亮色 #848e9c、暗色 #7f8a98），
+ * 那是给「选中白色」准备的：白块得靠这条线从白底上分出来。可本项目的取色器多数时候装的是
+ * 深色块，一圈浅灰边就成了一条多余的「白边」。换成项目自己的强调边框色：
+ * 白块仍然分得出（比触发块那圈 --el-border-color 清楚一点），深块也不再挂一条亮线。
+ *
+ * overflow:hidden 是把里面那层平铺的色块裁进圆角里 —— 它是个铺满整块的方形，
+ * 不裁的话四角会顶出圆角边框。
+ */
+.el-color-picker__color {
+  border-color: var(--border-strong);
+  overflow: hidden;
+}
+
 .el-dialog__footer {
   display: flex;
   justify-content: flex-end;
@@ -401,12 +559,17 @@ body.is-resizing-terminal * {
 /**
  * 所有弹层（抽屉、对话框、确认框）都要让开系统窗口按钮。
  *
- * 窗口用 titleBarStyle: 'hidden'，最小化 / 最大化 / 关闭由系统绘制在右上角，且永远压在最上层。
- * 弹层如果铺满整屏，它自己的关闭按钮和标题栏就可能落在那三个按钮底下点不到；窗口高度不够时，
- * 居中的高对话框还会向上溢出、把头部顶到标题栏区域里。
+ * 窗口用 titleBarStyle: 'hidden'，最小化 / 最大化 / 关闭由渲染层自绘在右上角（components/TitleBar.vue）。
+ * 弹层如果铺满整屏，它自己的关闭按钮和标题行就会叠在那三个按钮上；窗口高度不够时，
+ * 居中的高对话框还会向上溢出、把头部顶进标题栏区域。
  *
- * 统一做法：遮罩从标题栏下沿开始。弹层就只能在这块区域里居中与滚动，永远不会钻到窗口按钮下面。
+ * 统一做法：遮罩从标题栏下沿开始。弹层就只能在这块区域里居中与滚动，永远不会盖住窗口按钮。
  * 这些元素要么 Teleport 到 body，要么不在组件模板里，scoped 样式够不着，所以放全局。
+ *
+ * 另外：Element Plus 的 el-dialog / el-drawer 默认**不** Teleport 到 body，DOM 会留在
+ * 应用根节点 .app 里。那样它们就和顶部三条栏的 backdrop-filter 同处一棵子树 ——
+ * 实测（部分环境下）弹层会整块画不出来或只画出一截。所以每个弹层都显式加了 append-to-body，
+ * 让它们离开 .app；新增弹层时也照做。
  *
  * 遮罩本身不压暗背景、也不虚化背景（--el-overlay-color-lighter 见 tokens.css，这里原来是
  * backdrop-filter: blur(1px)，已去掉）：它仍然铺满这块区域负责「点击外部关闭」，

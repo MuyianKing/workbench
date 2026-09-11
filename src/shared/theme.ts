@@ -79,18 +79,18 @@ export function isColumnId(value: unknown): value is ColumnId {
 
 export const THEME_VERSION = 1
 
-/** 步进的可配区间：1px 太细容易拖不齐，20px 又太跳，两头都够用 */
+/** 步进的可配区间：1px 太细容易拖不齐，20px 又太跳，两头都够用；默认 1 为按当前配置固化 */
 export const GRID_STEP_MIN = 1
 export const GRID_STEP_MAX = 20
-export const GRID_STEP_DEFAULT = 2
+export const GRID_STEP_DEFAULT = 1
 
 /**
  * 卡片间距的可配区间（px）。
- * 下限 0 允许卡片紧贴（想要一整面连排时用），上限 40 再大就只剩缝了；默认沿用改造前的 14。
+ * 下限 0 允许卡片紧贴（想要一整面连排时用），上限 40 再大就只剩缝了；默认 10 为按当前配置固化。
  */
 export const CARD_GAP_MIN = 0
 export const CARD_GAP_MAX = 40
-export const CARD_GAP_DEFAULT = 14
+export const CARD_GAP_DEFAULT = 10
 
 /**
  * 侧栏宽度区间。
@@ -121,9 +121,9 @@ export const CARD_HEIGHT_MIN: Record<HomeCardId, number> = {
 }
 
 /**
- * 默认布局：中间是主栏（快捷启动 + 项目列表），左右两栏放剩下的面板。
- * 每栏留一块 flex 卡片吃掉剩余高度，所以整页会随窗口自适应，不留半截空白；
- * 项目列表放中间那栏的 flex 位，窗口越高，能看到的项目卡越多。
+ * 默认布局（按当前配置固化）：左栏从上到下排常用面板，中间那栏只放项目列表，右栏留空。
+ * 项目列表占中间栏的 flex 位，窗口越高能看到的项目卡越多；左栏的快捷操作也自适应，
+ * 吃掉左栏剩余高度，整页仍然随窗口自适应、不留半截空白。
  */
 export const DEFAULT_THEME: ThemeConfig = {
   version: THEME_VERSION,
@@ -132,12 +132,12 @@ export const DEFAULT_THEME: ThemeConfig = {
   leftWidth: LEFT_WIDTH_DEFAULT,
   rightWidth: RIGHT_WIDTH_DEFAULT,
   cards: {
-    activity: { column: 'left', order: 0, mode: 'fixed', height: 200 },
-    system: { column: 'left', order: 1, mode: 'flex', height: 184 },
-    recent: { column: 'right', order: 0, mode: 'fixed', height: 222 },
-    actions: { column: 'right', order: 1, mode: 'flex', height: 180 },
-    quick: { column: 'center', order: 0, mode: 'fixed', height: 176 },
-    projects: { column: 'center', order: 1, mode: 'flex', height: 600 }
+    activity: { column: 'left', order: 0, mode: 'fixed', height: 155 },
+    recent: { column: 'left', order: 1, mode: 'fixed', height: 155 },
+    quick: { column: 'left', order: 2, mode: 'fixed', height: 108 },
+    system: { column: 'left', order: 3, mode: 'fixed', height: 147 },
+    actions: { column: 'left', order: 4, mode: 'flex', height: 180 },
+    projects: { column: 'center', order: 0, mode: 'flex', height: 600 }
   }
 }
 

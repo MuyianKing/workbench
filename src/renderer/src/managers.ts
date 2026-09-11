@@ -3,8 +3,8 @@ import type { InstallablePackageManager } from '@/types'
 /**
  * 界面上要展示的三个包管理器，以及本机环境信息的兜底值。
  *
- * AppHeader、WelcomePanel、SystemPanel 原先各写一份清单，顺序与字段还不一致，
- * 想加 bun 就得改三处。统一到这里，顺序也统一成 npm → pnpm → yarn。
+ * WelcomePanel、SystemPanel 原先各写一份清单，顺序与字段还不一致，
+ * 想加 bun 就得改两处。统一到这里，顺序也统一成 npm → pnpm → yarn。
  */
 export type PackageManagerKey = InstallablePackageManager | 'npm'
 
