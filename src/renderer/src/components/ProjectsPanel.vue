@@ -14,7 +14,7 @@ const store = useProjectsStore()
 
 function clearFilter(): void {
   store.keyword = ''
-  store.groupFilter = 'all'
+  store.setGroupFilter('all')
 }
 </script>
 
@@ -24,7 +24,7 @@ function clearFilter(): void {
       <div v-if="store.filteredProjects.length" class="grid">
         <ProjectCard v-for="p in store.filteredProjects" :key="p.id" :project="p" />
 
-        <button class="add-tile" type="button" @click="store.addDialogVisible = true">
+        <button class="add-tile" type="button" @click="store.openAddDialog()">
           <el-icon class="add-tile__icon"><Plus /></el-icon>
           <span class="add-tile__text">添加项目</span>
           <span class="add-tile__hint mono">选择项目目录</span>

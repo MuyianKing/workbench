@@ -13,6 +13,8 @@ import {
 } from '@element-plus/icons-vue'
 import { satisfiesNodeVersion } from '@shared/node-version'
 import { parsePort } from '@shared/port'
+import { formatDurationOrDash, formatTimestamp } from '@/format'
+import { STATUS_META, isBusyStatus, statusLabel } from '@/status'
 import { useProjectsStore } from '@/stores/projects'
 import type { ProjectStatus, RunRecord } from '@/types'
 
@@ -35,7 +37,7 @@ onMounted(() => {
 const project = computed(() => store.drawerProject)
 const runtime = computed(() => (project.value ? store.runtimeOf(project.value.id) : null))
 const status = computed<ProjectStatus>(() => runtime.value?.status ?? 'idle')
-const isBusy = computed(() => status.value === 'installing' || status.value === 'building')
+const isBusy = computed(() => isBusyStatus(status.value))
 const isRunning = computed(() => status.value === 'running')
 const pathValid = computed(() => (project.value ? store.isPathValid(project.value.id) : true))
 
@@ -95,23 +97,7 @@ const buildOptions = computed(() => {
   return [...set]
 })
 
-const STATUS_LABEL: Record<ProjectStatus, string> = {
-  idle: '空闲',
-  installing: '安装中',
-  running: '运行中',
-  building: '打包中',
-  success: '打包成功',
-  failed: '执行失败'
-}
-
-const tone = computed(() => {
-  if (!pathValid.value) return 'fail'
-  const s = status.value
-  if (s === 'failed') return 'fail'
-  if (s === 'success') return 'ok'
-  if (s === 'idle') return 'idle'
-  return 'run'
-})
+const tone = computed(() => (pathValid.value ? STATUS_META[status.value].tone : 'fail'))
 
 const pmOptions = [
   { label: '自动检测', value: 'auto' },
@@ -126,17 +112,6 @@ const RESULT_META: Record<RunRecord['result'], { label: string; tone: string }> 
   success: { label: '成功', tone: 'ok' },
   failed: { label: '失败', tone: 'fail' },
   stopped: { label: '已停止', tone: 'idle' }
-}
-
-function formatTime(timestamp: number): string {
-  const date = new Date(timestamp)
-  const pad = (n: number): string => String(n).padStart(2, '0')
-  return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`
-}
-
-function formatDuration(ms?: number): string {
-  if (!ms) return '—'
-  return `${(ms / 1000).toFixed(1)}s`
 }
 
 function close(): void {
@@ -335,7 +310,7 @@ async function removeProject(): Promise<void> {
       <div class="drawer__status">
         <span class="pill" :class="`tone-${tone}`">
           <i class="pill__dot" />
-          {{ pathValid ? STATUS_LABEL[status] : '路径无效' }}
+          {{ pathValid ? statusLabel(status) : '路径无效' }}
         </span>
         <span v-if="runtime?.pid" class="mono drawer__pid">PID {{ runtime.pid }}</span>
         <el-button
@@ -666,7 +641,7 @@ async function removeProject(): Promise<void> {
                 {{ record.command }}
               </span>
               <span class="history__meta mono">
-                {{ formatTime(record.startedAt) }} · {{ formatDuration(record.durationMs) }}
+                {{ formatTimestamp(record.startedAt) }} · {{ formatDurationOrDash(record.durationMs) }}
               </span>
             </li>
           </ul>
@@ -881,11 +856,6 @@ async function removeProject(): Promise<void> {
 
 .field__hint--warn {
   color: var(--st-fail);
-}
-
-.field__value {
-  font-size: var(--fs-body);
-  color: var(--ink-2);
 }
 
 .field__warn {

@@ -7,20 +7,17 @@
  */
 import { computed } from 'vue'
 import { Plus } from '@element-plus/icons-vue'
-import { useProjectsStore } from '@/stores/projects'
 import { buildHints } from '@/hints'
+import { PACKAGE_MANAGERS, VERSIONS_FALLBACK, type PackageManagerKey } from '@/managers'
+import { useProjectsStore } from '@/stores/projects'
 
 const store = useProjectsStore()
 
-const versions = window.workbench?.versions ?? { electron: '—', node: '—', chrome: '—' }
+const versions = window.workbench?.versions ?? VERSIONS_FALLBACK
 
-const managers = [
-  { key: 'npm', label: 'npm' },
-  { key: 'pnpm', label: 'pnpm' },
-  { key: 'yarn', label: 'yarn' }
-] as const
+const managers = PACKAGE_MANAGERS
 
-function available(key: 'npm' | 'yarn' | 'pnpm'): boolean {
+function available(key: PackageManagerKey): boolean {
   return store.packageManagers?.[key] ?? false
 }
 
@@ -65,7 +62,7 @@ const hints = computed(() => buildHints(store.settings))
       </div>
 
       <div class="hero__action">
-        <el-button type="primary" :icon="Plus" @click="store.addDialogVisible = true">
+        <el-button type="primary" :icon="Plus" @click="store.openAddDialog()">
           添加项目
         </el-button>
         <span class="hero__note">纯本地工具，不联网、不上报任何数据。</span>

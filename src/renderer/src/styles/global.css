@@ -129,6 +129,9 @@ body.is-resizing-terminal * {
   background-color: rgba(232, 237, 244, 0.32);
 }
 
+/* 取值与上面亮色下的 .scroll-dark 相同，但这里不能删：暗色主题的通用规则
+ * `:root[data-theme=dark] :hover::-webkit-scrollbar-thumb` 优先级更高，会盖掉
+ * 终端的浅色滚动条；必须用同等级再加一个类才能重新压回来。 */
 :root[data-theme='dark'] .scroll-dark:hover::-webkit-scrollbar-thumb {
   background-color: rgba(199, 208, 219, 0.22);
 }

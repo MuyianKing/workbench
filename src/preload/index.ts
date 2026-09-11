@@ -31,7 +31,6 @@ function subscribe<T>(channel: string, handler: (payload: T) => void): () => voi
 
 /** 暴露给渲染进程的白名单 API，渲染进程无法直接访问 Node 能力 */
 const api: WorkbenchApi = {
-  platform: process.platform,
   versions: {
     electron: process.versions.electron,
     node: process.versions.node,

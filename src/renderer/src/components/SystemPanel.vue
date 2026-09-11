@@ -5,15 +5,12 @@
  */
 import { computed } from 'vue'
 import { FolderOpened } from '@element-plus/icons-vue'
+import { PACKAGE_MANAGERS } from '@/managers'
 import { useProjectsStore } from '@/stores/projects'
 
 const store = useProjectsStore()
 
-const managers = [
-  { key: 'npm', label: 'npm' },
-  { key: 'pnpm', label: 'pnpm' },
-  { key: 'yarn', label: 'yarn' }
-] as const
+const managers = PACKAGE_MANAGERS
 
 const nodeVersion = computed(() => store.packageManagers?.node || '未检测到')
 const dataDir = computed(() => store.dataLocation?.dir ?? '')

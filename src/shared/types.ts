@@ -2,16 +2,13 @@
 
 import { APP_NAME_DEFAULT } from './app-name'
 import { TERMINAL_HEIGHT_DEFAULT } from './terminal-height'
-import { SIDE_PANEL_WIDTH_DEFAULT } from './side-panel-width'
-import { SIDE_PANEL_POSITION_DEFAULT } from './side-panel-position'
 import { BACKGROUND_OPACITY_DEFAULT } from './workspace-background'
 import type { ActivityCounts } from './activity'
-import type { SidePanelPosition } from './side-panel-position'
 import type { BuildTool, PortSource } from './dev-port'
 import type { ThemeConfig } from './theme'
 
-/** 活跃度计数、侧栏位置、首页布局也走这里导出，渲染层统一从 @/types 取类型 */
-export type { ActivityCounts, SidePanelPosition, ThemeConfig }
+/** 活跃度计数、首页布局也走这里导出，渲染层统一从 @/types 取类型 */
+export type { ActivityCounts, ThemeConfig }
 
 export type ProjectStatus = 'idle' | 'installing' | 'running' | 'building' | 'success' | 'failed'
 
@@ -158,16 +155,6 @@ export interface AppSettings {
   minimizeToTray: boolean
   /** 终端面板展开时的高度（px），由拖动面板上沿决定 */
   terminalHeight: number
-  /**
-   * （旧版固定侧栏布局）首页侧栏的宽度（px）。
-   * 现在的首页由 theme.json 里的自由布局接管，这个值只是为兼容老数据文件保留，界面不再使用。
-   */
-  sidePanelWidth: number
-  /**
-   * （旧版固定侧栏布局）首页侧栏放在卡片网格的哪一侧。
-   * 同样只为兼容老数据文件保留，界面不再使用。
-   */
-  sidePanelPosition: SidePanelPosition
   /**
    * 工作区背景图的磁盘路径，空串表示用默认的纯画布。
    *
@@ -433,7 +420,6 @@ export interface BuiltinWallpaper {
 
 /** preload 向渲染进程暴露的 API */
 export interface WorkbenchApi {
-  platform: string
   versions: { electron: string; node: string; chrome: string }
   pickDirectory: () => Promise<string | null>
   scanProject: (dirPath: string) => Promise<Result<ScanResult>>
@@ -609,6 +595,24 @@ export const IPC = {
   quitConfirmRespond: 'app:quit-confirm-respond'
 } as const
 
+/**
+ * 主进程 → 渲染进程的单向事件通道。
+ * `broadcast` 只接受这些通道，拼错通道名在编译期就会报错，而不是运行时静默丢事件。
+ */
+export type BroadcastChannel =
+  | typeof IPC.eventLog
+  | typeof IPC.eventStatus
+  | typeof IPC.eventTerminalOpen
+  | typeof IPC.eventClear
+  | typeof IPC.eventProjectChanged
+  | typeof IPC.eventQuickApps
+  | typeof IPC.eventSettings
+  | typeof IPC.eventTheme
+  | typeof IPC.eventPmInstallLog
+  | typeof IPC.eventDataReload
+  | typeof IPC.eventThemeConfig
+  | typeof IPC.eventQuitConfirm
+
 /** 设置默认值：与设计文档 4.8 一致 */
 export const DEFAULT_SETTINGS: AppSettings = {
   appName: APP_NAME_DEFAULT,
@@ -618,8 +622,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
   hotkey: 'Control+Shift+W',
   minimizeToTray: false,
   terminalHeight: TERMINAL_HEIGHT_DEFAULT,
-  sidePanelWidth: SIDE_PANEL_WIDTH_DEFAULT,
-  sidePanelPosition: SIDE_PANEL_POSITION_DEFAULT,
   workspaceBackground: '',
   workspaceBackgroundOpacity: BACKGROUND_OPACITY_DEFAULT,
   workspaceBackgroundVeil: ''

@@ -9,6 +9,7 @@ import {
   wallpaperIdOf
 } from '../shared/wallpaper'
 import type { BuiltinWallpaper, Result } from '../shared/types'
+import { fail, ok } from '../shared/result'
 
 /**
  * 内置壁纸：随应用一起发布、在设置里直接点选的那几张。
@@ -46,16 +47,21 @@ async function scanWallpaperFiles(): Promise<WallpaperFile[]> {
     .map((name) => ({ id: wallpaperIdOf(name), name, file: join(dir, name) }))
 }
 
-/** 缩略图宽度：设置里那一排小图，够看清是哪张就行 */
-const THUMBNAIL_WIDTH = 360
+/** 缩略图的最长边：设置里那一排小图，够看清是哪张就行 */
+const THUMBNAIL_EDGE = 360
 
 function thumbnailOf(file: string): string {
   const image = nativeImage.createFromPath(file)
   if (image.isEmpty()) return ''
 
-  const { width } = image.getSize()
+  // 与背景图同理：竖版壁纸也要按最长边收缩
+  const { width, height } = image.getSize()
   const scaled =
-    width > THUMBNAIL_WIDTH ? image.resize({ width: THUMBNAIL_WIDTH, quality: 'good' }) : image
+    Math.max(width, height) > THUMBNAIL_EDGE
+      ? width >= height
+        ? image.resize({ width: THUMBNAIL_EDGE, quality: 'good' })
+        : image.resize({ height: THUMBNAIL_EDGE, quality: 'good' })
+      : image
 
   return `data:image/jpeg;base64,${scaled.toJPEG(72).toString('base64')}`
 }
@@ -78,13 +84,13 @@ export async function listWallpapers(): Promise<BuiltinWallpaper[]> {
  * `builtin:../../…`，也只是查不到而已。
  */
 export async function resolveBackgroundTarget(value: string): Promise<Result<string>> {
-  if (!value.startsWith(BUILTIN_WALLPAPER_PREFIX)) return { ok: true, data: value }
+  if (!value.startsWith(BUILTIN_WALLPAPER_PREFIX)) return ok(value)
 
   const id = builtinIdOf(value)
-  if (id === null) return { ok: false, error: '内置壁纸的引用不合法' }
+  if (id === null) return fail('内置壁纸的引用不合法')
 
   const matched = (await scanWallpaperFiles()).find((entry) => entry.id === id)
-  if (!matched) return { ok: false, error: '这张内置壁纸已经不在安装目录里了' }
+  if (!matched) return fail('这张内置壁纸已经不在安装目录里了')
 
-  return { ok: true, data: matched.file }
+  return ok(matched.file)
 }

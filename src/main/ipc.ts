@@ -1,46 +1,30 @@
-import { promises as fs } from 'node:fs'
 import { isAbsolute, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { BrowserWindow, ipcMain } from 'electron'
 import {
   IPC,
   type AddProjectInput,
-  type AppSettings,
-  type BackgroundImage,
-  type BuiltinWallpaper,
-  type DataLocation,
-  type DataLocationPick,
   type InstallablePackageManager,
   type NodeCheckResult,
   type PackageManagerStatus,
+  type PortCheckResult,
   type Project,
   type ProjectGroup,
   type ProjectPatch,
-  type ProcessLogEvent,
-  type QuickApp,
-  type QuickAppInput,
-  type QuickAppPatch,
   type Result,
-  type RunRecord,
-  type ThemeConfig
+  type RunRecord
 } from '../shared/types'
 import { satisfiesNodeVersion } from '../shared/node-version'
+import { fail, ok, toResult } from '../shared/result'
 import { parsePort } from '../shared/port'
 import { samePath } from '../shared/project-path'
 import { reorderById } from '../shared/reorder'
 import { bumpDay, pruneDays } from '../shared/activity'
 import { broadcast } from './broadcast'
-import {
-  activity,
-  data,
-  dataFileExistsIn,
-  getDataLocation,
-  migrateDataDir,
-  save,
-  settings
-} from './store'
-import { detectConfiguredOutputDir, isNonEmptyDir, scanProject } from './scanner'
-import { ProcessManager, resolvePackageManager } from './process-manager'
+import { activity, data, save } from './store'
+import { detectOutputDir, isNonEmptyDir, scanProject } from './scanner'
+import { isDirectory } from './fs-util'
+import { resolvePackageManager } from './process-manager'
 import { findNodeDir, getNvmStatus, matchInstalledVersion } from './nvm'
 import {
   checkPackageManagers,
@@ -50,67 +34,17 @@ import {
   pickDirectory,
   reveal
 } from './system'
-import { updateAppSettings } from './app-settings'
-import { pickBackgroundImage, readBackgroundImage } from './background'
-import { listWallpapers } from './wallpapers'
-import { themeConfig, updateTheme } from './theme'
-import { LogBatcher } from './log-batcher'
-import {
-  addQuickApp,
-  launchQuickApp,
-  pickApplication,
-  quickAppIcon,
-  quickAppList,
-  removeQuickApp,
-  reorderQuickApps,
-  updateQuickApp
-} from './quick-launch'
-
-const COMMON_OUTPUT_DIRS = ['dist', 'dist_electron', 'build', 'out']
+import { manager } from './manager'
+import { registerQuickIpc } from './handlers/quick'
+import { registerSettingsIpc } from './handlers/settings'
 
 /** 每个项目保留的执行记录条数 */
 const HISTORY_LIMIT = 10
 
-/**
- * 命令输出先聚合、再整批广播。
- *
- * 逐行 send 在高产出的命令下会把两侧一起拖垮 —— npm install / vite build 几秒能出
- * 上万行，每行一次结构化克隆加跨进程唤醒。这里按帧攒批，把 IPC 次数从
- * 「行数」压到「帧数」。系统提示、包管理器安装输出仍走单条直发：
- * 它们本来就稀疏，聚合只会平白多一层延迟。
- *
- * 放在 manager 之前：manager 需要它来保证「清空终端」这类事件的先后顺序。
- */
-const logBatcher = new LogBatcher((events) => broadcast(IPC.eventLog, events))
-logBatcher.start()
-
-/** 退出前把还没到窗口的日志排空，免得最后几行随进程一起消失 */
-export function flushLogBatches(): void {
-  logBatcher.dispose()
-}
-
-export const manager = new ProcessManager(() => logBatcher.flush())
-
 // ---------- 工具 ----------
-
-function ok<T>(value: T): Result<T> {
-  return { ok: true, data: value }
-}
-
-function fail<T>(error: string): Result<T> {
-  return { ok: false, error }
-}
 
 function findProject(id: string): Project | undefined {
   return data().projects.find((p) => p.id === id)
-}
-
-async function isDirectory(target: string): Promise<boolean> {
-  try {
-    return (await fs.stat(target)).isDirectory()
-  } catch {
-    return false
-  }
 }
 
 function nowLabel(): string {
@@ -132,17 +66,18 @@ function logTo(
  * 手动配置 > 构建配置里声明的 outDir > 常见目录名（存在且非空），都没有就回退项目根目录。
  */
 async function resolveOutputDir(project: Project): Promise<{ dir: string; detected: boolean }> {
-  const candidates: string[] = []
-  if (project.outputDir) candidates.push(project.outputDir)
-
-  const configured = await detectConfiguredOutputDir(project.path)
-  if (configured) candidates.push(configured)
-
-  candidates.push(...COMMON_OUTPUT_DIRS)
-
-  for (const candidate of candidates) {
-    const full = isAbsolute(candidate) ? candidate : join(project.path, candidate)
+  // 手动配置优先：可能是绝对路径，也可能是相对项目根
+  if (project.outputDir) {
+    const full = isAbsolute(project.outputDir)
+      ? project.outputDir
+      : join(project.path, project.outputDir)
     if (await isNonEmptyDir(full)) return { dir: full, detected: true }
+  }
+
+  // 其余交给 scanner：构建配置里声明的 outDir 与常见目录名，候选清单只有一份
+  const found = await detectOutputDir(project.path)
+  if (found) {
+    return { dir: isAbsolute(found) ? found : join(project.path, found), detected: true }
   }
 
   // 产物目录还没生成（例如首次打包失败），也不该让用户对着空目录发愣
@@ -186,12 +121,46 @@ function ensureNodeVersion(project: Project): string | null {
   return `未在 nvm 中找到 Node v${wanted}，请在项目详情「环境」里重新选择`
 }
 
-// ---------- 子进程事件转发 ----------
+/** 找到项目，找不到就返回一句可以直接回给渲染层的错误 */
+function findProjectOrFail(id: string): { project: Project } | { error: string } {
+  const project = findProject(id)
+  return project ? { project } : { error: '项目不存在' }
+}
 
-manager.on('log', (payload: ProcessLogEvent) => logBatcher.push(payload))
-manager.on('status', (payload) => broadcast(IPC.eventStatus, payload))
-manager.on('terminal-open', (payload) => broadcast(IPC.eventTerminalOpen, payload))
-manager.on('clear', (payload) => broadcast(IPC.eventClear, payload))
+/**
+ * 「安装 / 启动 / 打包 / 自定义命令」共用的前置检查。
+ *
+ * 四个 handler 原先各抄一遍同样的四到五步（项目存在 → 无进行中命令 → 可执行 →
+ * Node 版本 → 包管理器），新增一项检查就得改四处、很容易漏。收成一个入口后，
+ * 各 handler 只负责自己那条脚本的额外校验。
+ */
+async function prepareRun(
+  id: string,
+  options: { requirePackageManager?: boolean } = {}
+): Promise<{ project: Project } | { error: string }> {
+  const found = findProjectOrFail(id)
+  if ('error' in found) return found
+
+  const { project } = found
+  if (manager.isActive(id)) return { error: '该项目已有命令在执行中' }
+
+  const executable = ensureExecutable(project)
+  if (executable) return { error: executable }
+
+  const nodeVersion = ensureNodeVersion(project)
+  if (nodeVersion) return { error: nodeVersion }
+
+  if (options.requirePackageManager !== false) {
+    const pmError = await ensurePackageManager(project)
+    if (pmError) return { error: pmError }
+  }
+
+  return { project }
+}
+
+
+// ---------- 子进程事件：需要落盘 / 查数据的部分 ----------
+// 纯广播部分（log / status / terminal-open / clear）由 manager.ts 自己接线。
 
 /**
  * 活跃子进程列表落盘：应用被强杀后，这些记录就是下次启动清理残留进程的依据（§7）。
@@ -230,13 +199,13 @@ function touchProject(project: Project): void {
   broadcast(IPC.eventProjectChanged, project)
 }
 
-manager.on('build-done', async ({ projectId }: { projectId: string }) => {
+manager.on('build-done', async ({ projectId, terminal }: { projectId: string; terminal: string }) => {
   const project = findProject(projectId)
   if (!project) return
 
   const { dir, detected } = await resolveOutputDir(project)
   if (!detected) {
-    logTo(projectId, `${projectId}::start`, 'sys', '未探测到产物目录，已打开项目根目录')
+    logTo(projectId, terminal, 'sys', '未探测到产物目录，已打开项目根目录')
   }
 
   if (!project.autoOpenExplorer) return
@@ -244,7 +213,7 @@ manager.on('build-done', async ({ projectId }: { projectId: string }) => {
   try {
     await reveal(dir)
   } catch (err) {
-    logTo(projectId, `${projectId}::start`, 'err', `打开目录失败：${(err as Error).message}`)
+    logTo(projectId, terminal, 'err', `打开目录失败：${(err as Error).message}`)
   }
 })
 
@@ -326,8 +295,9 @@ export function registerIpc(): void {
   ipcMain.handle(
     IPC.updateProject,
     async (_event, id: string, patch: ProjectPatch): Promise<Result<Project>> => {
-      const project = findProject(id)
-      if (!project) return fail('项目不存在')
+      const found = findProjectOrFail(id)
+      if ('error' in found) return fail(found.error)
+      const { project } = found
 
       if (typeof patch?.name === 'string' && patch.name.trim()) project.name = patch.name.trim()
       if (patch?.packageManager) project.packageManager = patch.packageManager
@@ -378,8 +348,9 @@ export function registerIpc(): void {
   ipcMain.handle(
     IPC.relocateProject,
     async (_event, id: string, newPath: string): Promise<Result<Project>> => {
-      const project = findProject(id)
-      if (!project) return fail('项目不存在')
+      const found = findProjectOrFail(id)
+      if ('error' in found) return fail(found.error)
+      const { project } = found
 
       const target = typeof newPath === 'string' ? newPath.trim() : ''
       if (!(await isDirectory(target))) return fail('目录不存在或不是文件夹')
@@ -473,12 +444,10 @@ export function registerIpc(): void {
 
   ipcMain.handle(IPC.reveal, async (_event, targetPath: string): Promise<Result<null>> => {
     if (typeof targetPath !== 'string' || !targetPath.trim()) return fail('路径为空')
-    try {
+    return toResult(async () => {
       await reveal(targetPath)
-      return ok(null)
-    } catch (err) {
-      return fail((err as Error).message)
-    }
+      return null
+    })
   })
 
   ipcMain.handle(IPC.checkPackageManagers, () => checkPackageManagers())
@@ -505,16 +474,21 @@ export function registerIpc(): void {
     }
   )
 
-  ipcMain.handle(IPC.checkPort, async (_event, port: number) => checkPort(Number(port)))
-
-  ipcMain.handle(IPC.killPortProcess, async (_event, port: number): Promise<Result<null>> => {
-    try {
-      await killPortProcess(Number(port))
-      return ok(null)
-    } catch (err) {
-      return fail((err as Error).message)
-    }
+  ipcMain.handle(IPC.checkPort, async (_event, port: number): Promise<PortCheckResult> => {
+    // 这个通道按约定直接回 PortCheckResult（渲染层读 check.inUse），不是 Result。
+    // 非法端口不能交给 net.connect —— 它会同步抛 RangeError 让 invoke reject，
+    // 这里退化成「未占用」，与「不知道端口就不检测」的既有策略一致。
+    const parsed = parsePort(port)
+    if (parsed === undefined) return { port: 0, inUse: false }
+    return checkPort(parsed)
   })
+
+  ipcMain.handle(IPC.killPortProcess, async (_event, port: number): Promise<Result<null>> =>
+    toResult(async () => {
+      await killPortProcess(Number(port))
+      return null
+    })
+  )
 
   ipcMain.handle(IPC.checkNodeVersion, async (_event, id: string): Promise<NodeCheckResult> => {
     const project = findProject(id)
@@ -536,82 +510,31 @@ export function registerIpc(): void {
   // 只读探测 nvm：已安装版本、当前软链指向的版本（切换靠项目级注入 PATH，不改全局）
   ipcMain.handle(IPC.nvmStatus, () => getNvmStatus())
 
-  // ---------- 设置 ----------
+  // ---------- 设置 / 首页布局 / 壁纸 / 数据位置 ----------
+  // 这些通道只碰配置层，注册逻辑在 ipc/settings.ts
 
-  ipcMain.handle(IPC.getSettings, () => settings())
-
-  ipcMain.handle(
-    IPC.updateSettings,
-    async (_event, patch: Partial<AppSettings>): Promise<Result<AppSettings>> => {
-      if (!patch || typeof patch !== 'object') return fail('参数不合法')
-      return ok(updateAppSettings(patch))
-    }
-  )
-
-  // 选背景图只返回路径（落盘走 updateSettings），读图则统一由主进程解码成 data URL
-  ipcMain.handle(IPC.pickBackground, async (event): Promise<string | null> => {
-    const win = BrowserWindow.fromWebContents(event.sender) ?? undefined
-    return pickBackgroundImage(win)
-  })
-
-  ipcMain.handle(IPC.loadBackground, async (_event, path: string): Promise<Result<BackgroundImage>> =>
-    readBackgroundImage(path)
-  )
-
-  // 内置壁纸清单：目录里有什么就列什么，没有则返回空数组（设置里那一栏自动收起）
-  ipcMain.handle(IPC.listWallpapers, (): Promise<BuiltinWallpaper[]> => listWallpapers())
-
-  // ---------- 首页布局（theme.json） ----------
-
-  ipcMain.handle(IPC.getThemeConfig, () => themeConfig())
-
-  ipcMain.handle(
-    IPC.updateThemeConfig,
-    async (_event, patch: Partial<ThemeConfig>): Promise<Result<ThemeConfig>> => {
-      if (!patch || typeof patch !== 'object') return fail('参数不合法')
-      return ok(updateTheme(patch))
-    }
-  )
+  registerSettingsIpc()
 
   // ---------- 进程操作 ----------
 
   ipcMain.handle(IPC.install, async (_event, id: string): Promise<Result<null>> => {
-    const project = findProject(id)
-    if (!project) return fail('项目不存在')
-    if (manager.isActive(id)) return fail('该项目已有命令在执行中')
+    const prepared = await prepareRun(id)
+    if ('error' in prepared) return fail(prepared.error)
 
-    const guard = ensureExecutable(project)
-    if (guard) return fail(guard)
-
-    const nodeGuard = ensureNodeVersion(project)
-    if (nodeGuard) return fail(nodeGuard)
-
-    const pmError = await ensurePackageManager(project)
-    if (pmError) return fail(pmError)
-
-    const error = manager.install(project)
+    const error = manager.install(prepared.project)
     if (error) return fail(error)
 
-    touchProject(project)
+    touchProject(prepared.project)
     return ok(null)
   })
 
   ipcMain.handle(IPC.start, async (_event, id: string): Promise<Result<null>> => {
-    const project = findProject(id)
-    if (!project) return fail('项目不存在')
-    if (manager.isActive(id)) return fail('该项目已有命令在执行中')
-
-    const guard = ensureExecutable(project)
-    if (guard) return fail(guard)
-
-    const nodeGuard = ensureNodeVersion(project)
-    if (nodeGuard) return fail(nodeGuard)
+    const prepared = await prepareRun(id)
+    if ('error' in prepared) return fail(prepared.error)
+    const { project } = prepared
 
     const script = project.scripts.serve
     if (!script) return fail('未配置启动命令，请在项目详情中选择')
-
-    const pmError = await ensurePackageManager(project)
-    if (pmError) return fail(pmError)
 
     const error = manager.start(project, script)
     if (error) return fail(error)
@@ -622,21 +545,12 @@ export function registerIpc(): void {
   })
 
   ipcMain.handle(IPC.build, async (_event, id: string, script: string): Promise<Result<null>> => {
-    const project = findProject(id)
-    if (!project) return fail('项目不存在')
-    if (manager.isActive(id)) return fail('该项目已有命令在执行中')
-
-    const guard = ensureExecutable(project)
-    if (guard) return fail(guard)
-
-    const nodeGuard = ensureNodeVersion(project)
-    if (nodeGuard) return fail(nodeGuard)
+    const prepared = await prepareRun(id)
+    if ('error' in prepared) return fail(prepared.error)
+    const { project } = prepared
 
     const target = script || project.scripts.defaultBuild || project.scripts.build[0]
     if (!target) return fail('未配置打包命令，请在项目详情中选择')
-
-    const pmError = await ensurePackageManager(project)
-    if (pmError) return fail(pmError)
 
     const error = manager.build(project, target)
     if (error) return fail(error)
@@ -647,15 +561,10 @@ export function registerIpc(): void {
   })
 
   ipcMain.handle(IPC.runCustom, async (_event, id: string, index: number): Promise<Result<null>> => {
-    const project = findProject(id)
-    if (!project) return fail('项目不存在')
-    if (manager.isActive(id)) return fail('该项目已有命令在执行中')
-
-    const guard = ensureExecutable(project)
-    if (guard) return fail(guard)
-
-    const nodeGuard = ensureNodeVersion(project)
-    if (nodeGuard) return fail(nodeGuard)
+    // 自定义命令是一整行原文，不依赖包管理器，因此跳过那一项检查
+    const prepared = await prepareRun(id, { requirePackageManager: false })
+    if ('error' in prepared) return fail(prepared.error)
+    const { project } = prepared
 
     const list = project.scripts.custom ?? []
     const position = Number(index)
@@ -676,67 +585,7 @@ export function registerIpc(): void {
   })
 
   // ---------- 快捷启动（常用软件） ----------
+  // 与项目命令是两套独立模型，注册逻辑在 ipc/quick.ts
 
-  ipcMain.handle(IPC.quickList, () => quickAppList())
-
-  ipcMain.handle(IPC.quickPick, async (event): Promise<string | null> => {
-    const win = BrowserWindow.fromWebContents(event.sender) ?? undefined
-    return pickApplication(win)
-  })
-
-  ipcMain.handle(IPC.quickAdd, async (_event, input: QuickAppInput) => addQuickApp(input))
-
-  ipcMain.handle(
-    IPC.quickUpdate,
-    async (_event, id: string, patch: QuickAppPatch): Promise<Result<QuickApp>> =>
-      updateQuickApp(id, patch)
-  )
-
-  ipcMain.handle(IPC.quickRemove, async (_event, id: string): Promise<Result<null>> =>
-    removeQuickApp(id)
-  )
-
-  ipcMain.handle(IPC.quickReorder, async (_event, ids: string[]): Promise<Result<QuickApp[]>> =>
-    reorderQuickApps(ids)
-  )
-
-  ipcMain.handle(IPC.quickLaunch, async (_event, id: string): Promise<Result<null>> => {
-    try {
-      await launchQuickApp(id)
-      return ok(null)
-    } catch (err) {
-      return fail((err as Error).message)
-    }
-  })
-
-  ipcMain.handle(IPC.quickIcon, async (_event, target: string): Promise<Result<string>> =>
-    quickAppIcon(target)
-  )
-
-  // ---------- 数据存储位置 ----------
-
-  ipcMain.handle(IPC.getDataLocation, () => getDataLocation())
-
-  ipcMain.handle(IPC.pickDataDir, async (event): Promise<DataLocationPick> => {
-    const win = BrowserWindow.fromWebContents(event.sender) ?? undefined
-    const dir = await pickDirectory(win, '选择 Workbench 数据目录')
-    if (!dir) return { dir: null, conflict: false }
-    return { dir, conflict: dataFileExistsIn(dir) }
-  })
-
-  ipcMain.handle(IPC.migrateDataDir, async (_event, dir: string): Promise<Result<DataLocation>> => {
-    if (typeof dir !== 'string' || !dir.trim()) return fail('目录为空')
-    if (manager.activeProjectIds().length > 0) {
-      return fail('还有项目在运行，请先全部停止再迁移数据')
-    }
-
-    try {
-      await migrateDataDir(dir)
-      // 数据文件换了位置，渲染层需要整份重新加载
-      broadcast(IPC.eventDataReload, null)
-      return ok(getDataLocation())
-    } catch (err) {
-      return fail((err as Error).message)
-    }
-  })
+  registerQuickIpc()
 }

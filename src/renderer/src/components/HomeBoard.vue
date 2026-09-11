@@ -217,6 +217,7 @@ const gapHeight = computed(() => {
 // ---------- 栏宽拖动 ----------
 
 function onColumnResizeDown(side: SideColumnId, event: PointerEvent): void {
+  if (event.button !== 0) return
   event.preventDefault()
   const startClientX = event.clientX
   const startWidth =
@@ -231,11 +232,15 @@ function onColumnResizeDown(side: SideColumnId, event: PointerEvent): void {
   const onUp = (): void => {
     window.removeEventListener('pointermove', onMove)
     window.removeEventListener('pointerup', onUp)
+    window.removeEventListener('pointercancel', onUp)
     void store.commitColumns()
   }
 
   window.addEventListener('pointermove', onMove)
   window.addEventListener('pointerup', onUp)
+  // 没有 pointercancel 时，系统取消指针（触控、手势接管）会让监听器留在 window 上，
+  // 之后每次移动都在改栏宽
+  window.addEventListener('pointercancel', onUp)
 }
 
 function onToggleMode(id: HomeCardId): void {

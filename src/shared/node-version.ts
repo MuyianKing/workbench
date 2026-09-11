@@ -156,9 +156,3 @@ export function satisfiesNodeVersion(range: string | undefined | null, actual: s
   )
   return !anyUnderstood
 }
-
-/** 从 node 版本号里取 major，用于展示 */
-export function majorOf(version: string): number | null {
-  const parsed = parseVersion(version)
-  return parsed ? parsed.major : null
-}

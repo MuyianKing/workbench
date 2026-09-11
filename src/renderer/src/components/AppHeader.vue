@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { Grid, Monitor, Moon, Refresh, Search, Setting, Sunny } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
+import { PACKAGE_MANAGERS, VERSIONS_FALLBACK, type PackageManagerKey } from '@/managers'
 import { useProjectsStore } from '@/stores/projects'
 import SettingsDialog from '@/components/SettingsDialog.vue'
 import type { InstallablePackageManager } from '@/types'
@@ -10,24 +11,19 @@ const store = useProjectsStore()
 const searchInput = ref<HTMLInputElement | null>(null)
 const settingsVisible = ref(false)
 
-const versions = window.workbench?.versions ?? { electron: '—', node: '—', chrome: '—' }
+const versions = window.workbench?.versions ?? VERSIONS_FALLBACK
 
-/** installable 为 true 的可以点一下用 npm 全局装；npm 自己随 Node.js 分发，装不了 */
-const managers = [
-  { key: 'npm', label: 'npm', installable: false },
-  { key: 'yarn', label: 'yarn', installable: true },
-  { key: 'pnpm', label: 'pnpm', installable: true }
-] as const
+const managers = PACKAGE_MANAGERS
 
-function managerAvailable(key: 'npm' | 'yarn' | 'pnpm'): boolean {
+function managerAvailable(key: PackageManagerKey): boolean {
   return store.packageManagers?.[key] ?? false
 }
 
-function installing(key: 'npm' | 'yarn' | 'pnpm'): boolean {
+function installing(key: PackageManagerKey): boolean {
   return store.pmInstalling === key
 }
 
-async function installManager(key: 'npm' | 'yarn' | 'pnpm'): Promise<void> {
+async function installManager(key: PackageManagerKey): Promise<void> {
   if (key === 'npm') {
     ElMessage.warning('npm 随 Node.js 分发，请重新安装 Node.js 后再试')
     return
@@ -47,7 +43,7 @@ function focusSearch(): void {
 
 /** 直接进首页布局编辑态，不用先打开设置再点「进入编辑」 */
 function enterLayoutEdit(): void {
-  store.layoutEditing = true
+  store.setLayoutEditing(true)
 }
 
 /** 当前是不是暗色：图标画的是「点下去会切到哪一边」，所以亮色时显示月亮 */

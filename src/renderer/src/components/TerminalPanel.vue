@@ -7,7 +7,8 @@ import {
   clampTerminalHeight,
   maxTerminalHeightFor
 } from '@shared/terminal-height'
-import { SCROLL_PIN_THRESHOLD_PX, isPinnedToBottom } from '@shared/log-scroll'
+import { isPinnedToBottom } from '@shared/log-scroll'
+import { statusTone } from '@/status'
 import { useProjectsStore, type TerminalState } from '@/stores/projects'
 import type { LogLine, ProjectStatus } from '@/types'
 
@@ -16,7 +17,7 @@ const bodyRef = ref<HTMLElement | null>(null)
 
 const collapsed = computed({
   get: () => store.terminalCollapsed,
-  set: (value: boolean) => (store.terminalCollapsed = value)
+  set: (value: boolean) => store.setTerminalCollapsed(value)
 })
 
 // ---------- 拖动调整高度 ----------
@@ -126,8 +127,7 @@ const RENDER_LIMIT = 1000
  */
 const CHUNK_SIZE = 100
 
-const toneOf = (s: ProjectStatus): string =>
-  s === 'failed' ? 'fail' : s === 'success' ? 'ok' : s === 'idle' ? 'idle' : 'run'
+const toneOf = (s: ProjectStatus): string => statusTone(s)
 
 const isRunning = (terminal: TerminalState): boolean =>
   terminal.status === 'running' || terminal.status === 'installing' || terminal.status === 'building'
@@ -362,8 +362,8 @@ function exportLogs(): void {
           role="tab"
           :aria-selected="t.key === active?.key"
           tabindex="0"
-          @click="store.activeTerminal = t.key"
-          @keydown.enter.prevent="store.activeTerminal = t.key"
+          @click="store.setActiveTerminal(t.key)"
+          @keydown.enter.prevent="store.setActiveTerminal(t.key)"
         >
           <i class="tab__dot" :class="`tone-${toneOf(t.status)}`" />
           <span class="tab__name truncate">{{ projectName(t) }} · {{ t.label }}</span>

@@ -13,6 +13,7 @@ import { computed, ref } from 'vue'
 import { ElMessageBox } from 'element-plus'
 import { MoreFilled, Plus } from '@element-plus/icons-vue'
 import { moveToPosition } from '@shared/reorder'
+import { DRAG_MIME } from '@/drag-mime'
 import { useProjectsStore } from '@/stores/projects'
 import type { QuickApp } from '@/types'
 
@@ -66,7 +67,7 @@ async function remove(app: QuickApp): Promise<void> {
 function onDragStart(app: QuickApp, event: DragEvent): void {
   if (!event.dataTransfer) return
   draggingId.value = app.id
-  event.dataTransfer.setData('application/x-workbench-quick-app', app.id)
+  event.dataTransfer.setData(DRAG_MIME.quickApp, app.id)
   event.dataTransfer.effectAllowed = 'move'
 }
 

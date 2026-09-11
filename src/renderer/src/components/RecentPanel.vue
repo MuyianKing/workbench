@@ -6,29 +6,12 @@
  * 项目一个都没有时给一句空状态，免得卡片里是一片空白。
  */
 import { computed } from 'vue'
+import { formatRelative } from '@/format'
+import { STATUS_META, statusLabel } from '@/status'
 import { useProjectsStore } from '@/stores/projects'
 import type { Project, ProjectStatus } from '@/types'
 
 const store = useProjectsStore()
-
-/** 状态 → 灯色，与卡片上的状态灯带保持一致 */
-const TONE: Record<ProjectStatus, string> = {
-  idle: 'idle',
-  installing: 'run',
-  running: 'run',
-  building: 'run',
-  success: 'ok',
-  failed: 'fail'
-}
-
-const STATUS_LABEL: Record<ProjectStatus, string> = {
-  idle: '空闲',
-  installing: '安装中',
-  running: '运行中',
-  building: '打包中',
-  success: '打包成功',
-  failed: '执行失败'
-}
 
 /** 卡片高度有限，列表截断到一屏左右 */
 const RECENT_LIMIT = 5
@@ -38,7 +21,7 @@ function statusOf(project: Project): ProjectStatus {
 }
 
 function toneOf(project: Project): string {
-  return store.isPathValid(project.id) ? TONE[statusOf(project)] : 'fail'
+  return store.isPathValid(project.id) ? STATUS_META[statusOf(project)].tone : 'fail'
 }
 
 function isRunning(project: Project): boolean {
@@ -58,23 +41,8 @@ function startHint(project: Project): string {
 
 function metaOf(project: Project): string {
   const port = store.runtimeOf(project.id).port
-  return port ? `:${port}` : relativeTime(project.lastUsedAt)
-}
-
-/** 最近使用的时间要跟着秒针走，所以读 store.clock（它每秒跳一次） */
-function relativeTime(timestamp?: number): string {
-  if (!timestamp) return '未使用过'
-
-  const minute = 60_000
-  const hour = 60 * minute
-  const day = 24 * hour
-  const diff = Math.max(0, store.clock - timestamp)
-
-  if (diff < minute) return '刚刚'
-  if (diff < hour) return `${Math.floor(diff / minute)} 分钟前`
-  if (diff < day) return `${Math.floor(diff / hour)} 小时前`
-  if (diff < 30 * day) return `${Math.floor(diff / day)} 天前`
-  return `${Math.floor(diff / (30 * day))} 个月前`
+  // 最近使用的时间要跟着秒针走，所以传 store.clock（它每秒跳一次）
+  return port ? `:${port}` : formatRelative(project.lastUsedAt, store.clock)
 }
 
 const recent = computed(() =>
@@ -121,7 +89,7 @@ const recent = computed(() =>
             启动
           </button>
           <span v-else class="row__act is-static" :class="`tone-${toneOf(project)}`">
-            {{ STATUS_LABEL[statusOf(project)] }}
+            {{ statusLabel(statusOf(project)) }}
           </span>
         </div>
       </li>

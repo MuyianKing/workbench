@@ -26,11 +26,6 @@ export class RingLog<T> {
     return Math.min(this.written, this.capacity)
   }
 
-  /** 因容量限制被覆盖掉的条数 */
-  get dropped(): number {
-    return Math.max(0, this.written - this.capacity)
-  }
-
   push(item: T): void {
     this.items[this.written % this.capacity] = item
     this.written += 1
@@ -39,12 +34,6 @@ export class RingLog<T> {
   /** 批量写入：一次调用写多行，只在最后更新一次计数 */
   pushMany(items: readonly T[]): void {
     for (const item of items) this.push(item)
-  }
-
-  /** 最新一条；空缓冲返回 undefined */
-  last(): T | undefined {
-    if (this.written === 0) return undefined
-    return this.items[(this.written - 1) % this.capacity]
   }
 
   /** 按写入顺序导出（最旧 → 最新） */
@@ -61,20 +50,6 @@ export class RingLog<T> {
     }
 
     for (let i = 0; i < size; i += 1) out[i] = this.items[i] as T
-    return out
-  }
-
-  /** 只取尾部 n 条，避免为了渲染把整段缓冲铺开 */
-  tail(n: number): T[] {
-    const size = this.size
-    if (n <= 0) return []
-    if (n >= size) return this.toArray()
-
-    const out = new Array<T>(n)
-    const start = this.written - n
-    for (let i = 0; i < n; i += 1) {
-      out[i] = this.items[(start + i) % this.capacity] as T
-    }
     return out
   }
 

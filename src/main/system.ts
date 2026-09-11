@@ -128,17 +128,27 @@ export function installPackageManager(
   })
 }
 
-export async function pickDirectory(
-  parent?: BrowserWindow,
-  title = '选择项目目录'
+/**
+ * 「有主窗口就挂上去、取消或空选择都返回 null」的对话框样板。
+ * 选目录、选程序、选背景图三处原本各抄一遍，统一收在这里。
+ */
+export async function showOpenDialogSafe(
+  parent: BrowserWindow | undefined,
+  options: Electron.OpenDialogOptions
 ): Promise<string | null> {
-  const options: Electron.OpenDialogOptions = { properties: ['openDirectory'], title }
   const result = parent
     ? await dialog.showOpenDialog(parent, options)
     : await dialog.showOpenDialog(options)
 
   if (result.canceled || result.filePaths.length === 0) return null
   return result.filePaths[0]
+}
+
+export async function pickDirectory(
+  parent?: BrowserWindow,
+  title = '选择项目目录'
+): Promise<string | null> {
+  return showOpenDialogSafe(parent, { properties: ['openDirectory'], title })
 }
 
 /** 用系统资源管理器打开目录（或定位到文件） */
@@ -262,6 +272,14 @@ export async function checkPort(port: number): Promise<PortCheckResult> {
   return { port, inUse: true, pid, processName: name }
 }
 
+/**
+ * 结束整棵进程树。
+ *
+ * Windows 上必须 taskkill /T，否则 shell 拉起的 cmd 之下还有真正的 dev server。
+ * POSIX 上子进程是 detached 起的（自成进程组），所以先按 `-pid` 杀整组；
+ * 拿不到进程组（例如进程不是组长）再退回杀单个 pid —— 只杀父进程会留下
+ * 占着端口的孙进程，表现为「已结束」但端口仍然被占。
+ */
 export function killProcessTree(pid: number): Promise<void> {
   return new Promise((resolve, reject) => {
     if (process.platform === 'win32') {
@@ -271,6 +289,14 @@ export function killProcessTree(pid: number): Promise<void> {
         code === 0 ? resolve() : reject(new Error(`taskkill 退出码 ${code}`))
       )
       return
+    }
+
+    try {
+      process.kill(-pid, 'SIGKILL')
+      resolve()
+      return
+    } catch {
+      /* 不是进程组长：退回杀单个进程 */
     }
     try {
       process.kill(pid, 'SIGKILL')

@@ -9,8 +9,10 @@ import type {
   ProjectStatus,
   RunRecord
 } from '../shared/types'
+import { terminalKey } from '../shared/terminal-key'
 import { isValidScriptName } from './scanner'
 import { nodeEnvFor } from './nvm'
+import { killProcessTree } from './system'
 
 const ANSI_RE = /\u001B\[[0-9;?]*[ -/]*[@-~]/g
 
@@ -207,15 +209,19 @@ export class ProcessManager extends EventEmitter {
     const pid = session.child.pid
 
     if (!pid) {
+      // 没有 pid 说明进程从未真正起来；仍要走一遍会话清理，否则磁盘上的
+      // activeSessions 会留下一条失效记录，下次启动被当成残留进程处理。
+      session.finished = true
       this.sessions.delete(projectId)
+      this.emit('sessions-changed')
       this.emitStatus(session, { status: 'idle' })
       return
     }
 
     if (process.platform === 'win32') {
-      // shell: true 时 pid 是 cmd.exe，必须用 /T 结束整棵进程树，否则会残留子进程占端口
-      const killer = spawn('taskkill', ['/pid', String(pid), '/T', '/F'], { windowsHide: true })
-      killer.on('error', () => {
+      // shell: true 时 pid 是 cmd.exe，必须结束整棵进程树，否则会残留子进程占端口。
+      // 走共享的 killProcessTree，与残留清理、按端口杀进程保持同一套语义。
+      void killProcessTree(pid).catch(() => {
         try {
           session.child.kill()
         } catch {
@@ -223,6 +229,7 @@ export class ProcessManager extends EventEmitter {
         }
       })
     } else {
+      // POSIX 先给 SIGTERM 留出优雅退出的机会，卡住由 armStopWatchdog 兜底强杀
       try {
         process.kill(-pid, 'SIGTERM')
       } catch {
@@ -308,7 +315,7 @@ export class ProcessManager extends EventEmitter {
       return `无法启动命令：${(err as Error).message}`
     }
 
-    const terminal = `${project.id}::${target.key}`
+    const terminal = terminalKey(project.id, target.key)
     const session: Session = {
       child,
       projectId: project.id,
@@ -478,7 +485,8 @@ export class ProcessManager extends EventEmitter {
       } else {
         this.emitLog(session, 'sys', `打包完成，用时 ${(durationMs / 1000).toFixed(1)}s`)
         this.emitStatus(session, { status: 'success', durationMs, exitCode: 0 })
-        this.emit('build-done', { projectId })
+        // 带上 terminal：上层要用它把「产物目录」提示写进打包终端，而不是另拼一个 key
+        this.emit('build-done', { projectId, terminal: session.terminal })
         setTimeout(() => {
           if (!this.sessions.has(projectId)) {
             this.emitStatus(session, { status: 'idle' })
@@ -502,13 +510,18 @@ export class ProcessManager extends EventEmitter {
       terminal: session.terminal,
       projectId: session.projectId,
       stream,
-      text: text.replace(ANSI_RE, ''),
+      // 命令输出在 handleLine 里已经剥过 ANSI；这里是纯文本提示，不必再扫一遍
+      text,
       time: new Date().toLocaleTimeString('zh-CN', { hour12: false })
     }
     this.emit('log', payload)
   }
 
   private emitStatus(session: Session, patch: Omit<ProcessStatusEvent, 'projectId' | 'terminal'>): void {
+    // 日志按帧聚合、状态是同步直发，两者走不同通道：不先排空的话，「打包完成」这类
+    // 状态会早于它上面最后几行日志到达，界面可能先跳到成功态再补上输出。
+    // 状态变更本就稀疏，这里排空不会把批处理的意义抵消掉。
+    if (this.flushLogs) this.flushLogs()
     this.emit('status', {
       projectId: session.projectId,
       terminal: session.terminal,

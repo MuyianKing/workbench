@@ -1,7 +1,7 @@
 import type { AppSettings } from '@shared/types'
 
 /** 一条操作提示：做什么 + 靠什么触发（键位或鼠标动作） */
-export interface Hint {
+interface Hint {
   text: string
   hint: string
 }

@@ -1,5 +1,6 @@
-import { promises as fs, statSync } from 'node:fs'
+import { promises as fs } from 'node:fs'
 import { join, basename } from 'node:path'
+import { isDirectory } from './fs-util'
 import type { PackageManager, ScanResult } from '../shared/types'
 import {
   BUILD_TOOLS,
@@ -56,14 +57,6 @@ async function readIfExists(file: string): Promise<string | null> {
   }
 }
 
-function existsDir(dir: string): boolean {
-  try {
-    return statSync(dir).isDirectory()
-  } catch {
-    return false
-  }
-}
-
 /** 目录存在且有内容——产物目录探测要求「非空」，空目录不算命中（F-5.2） */
 export async function isNonEmptyDir(target: string): Promise<boolean> {
   try {
@@ -108,24 +101,34 @@ export async function detectPackageManager(
   return { pm: 'npm' }
 }
 
-/** 只读构建配置里声明的产物目录，不看磁盘现状 */
+/**
+ * 只读构建配置里声明的产物目录，不看磁盘现状。
+ *
+ * 配置文件候选直接复用 dev-port 的 TOOL_CONFIG_FILES：以前这里手抄了一份 vite 列表，
+ * 漏掉了 .mts / .cts，导致 outDir 只写在 vite.config.mts 里的项目探测不到，
+ * 而端口推断却能读到 —— 同一个「读 vite 配置」的动作走两套清单迟早会漂。
+ */
 export async function detectConfiguredOutputDir(root: string): Promise<string | undefined> {
-  const viteConfigs = ['vite.config.ts', 'vite.config.js', 'vite.config.mjs', 'vite.config.cjs']
-  for (const name of viteConfigs) {
+  for (const name of TOOL_CONFIG_FILES.vite) {
     const text = await readIfExists(join(root, name))
     const matched = text?.match(/outDir\s*:\s*['"`]([^'"`]+)['"`]/)
     if (matched) return matched[1].replace(/\\/g, '/')
   }
 
-  const vueConfig = await readIfExists(join(root, 'vue.config.js'))
-  const vueMatched = vueConfig?.match(/outputDir\s*:\s*['"`]([^'"`]+)['"`]/)
-  if (vueMatched) return vueMatched[1].replace(/\\/g, '/')
+  for (const name of TOOL_CONFIG_FILES['vue-cli']) {
+    const text = await readIfExists(join(root, name))
+    const matched = text?.match(/outputDir\s*:\s*['"`]([^'"`]+)['"`]/)
+    if (matched) return matched[1].replace(/\\/g, '/')
+  }
 
   return undefined
 }
 
-/** 配置优先，其次猜常见目录名（要求已存在且非空） */
-async function detectOutputDir(root: string): Promise<string | undefined> {
+/**
+ * 配置优先，其次猜常见目录名（要求已存在且非空）。
+ * 打包完成后「去哪个目录找产物」也走这里，避免 ipc 再维护一份候选清单。
+ */
+export async function detectOutputDir(root: string): Promise<string | undefined> {
   const configured = await detectConfiguredOutputDir(root)
   if (configured) return configured
 
@@ -207,7 +210,7 @@ export async function scanProject(dirPath: string): Promise<ScanResult> {
     allScripts: []
   }
 
-  if (!existsDir(dirPath)) {
+  if (!(await isDirectory(dirPath))) {
     return { ...empty, error: '目录不存在或不是文件夹' }
   }
 

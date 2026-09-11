@@ -53,18 +53,6 @@ export class LogBatcher {
     this.emit(events)
   }
 
-  /**
-   * 先把某个终端的待发日志发出去，再执行 action。
-   *
-   * 用于「清空该终端输出」这类**顺序敏感**的事件：攒批会引入最长一个窗口的延迟，
-   * 如果 clear 先到、上一轮的尾巴后到，那些行就会落在清屏之后 ——
-   * 新一轮的输出里混进上一轮的日志。排空再清，顺序才和逐行发送时一致。
-   */
-  flushBefore(action: () => void): void {
-    this.flush()
-    action()
-  }
-
   /** 退出前或测试收尾时用：停掉定时器并排空队列 */
   dispose(): void {
     this.flush()

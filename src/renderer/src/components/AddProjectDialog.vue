@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { FolderOpened, Plus } from '@element-plus/icons-vue'
 import { BUILD_TOOL_LABEL } from '@shared/dev-port'
@@ -30,7 +30,7 @@ const allowInvalid = ref(false)
 
 const visible = computed({
   get: () => store.addDialogVisible,
-  set: (v: boolean) => (store.addDialogVisible = v)
+  set: (v: boolean) => (v ? store.openAddDialog() : store.closeAddDialog())
 })
 
 const allScripts = computed(() => scan.value?.allScripts ?? [])
@@ -51,7 +51,31 @@ const canSubmit = computed(() => {
   return allowInvalid.value && parseFailed.value
 })
 
+/** 输入路径后延迟扫描：手动选目录与逐字输入共用一个入口，避免选一次目录扫两遍 */
+const SCAN_DEBOUNCE_MS = 300
+
+let scanTimer: ReturnType<typeof setTimeout> | null = null
+/** 扫描序号：慢的那次结果回来时若已不是最新一次，就丢弃，避免旧结果覆盖新结果 */
+let scanSeq = 0
+
+function cancelScheduledScan(): void {
+  if (scanTimer === null) return
+  clearTimeout(scanTimer)
+  scanTimer = null
+}
+
+function scheduleScan(dirPath: string): void {
+  cancelScheduledScan()
+  scanTimer = setTimeout(() => {
+    scanTimer = null
+    void runScan(dirPath)
+  }, SCAN_DEBOUNCE_MS)
+}
+
 async function runScan(dirPath: string): Promise<void> {
+  cancelScheduledScan()
+  const seq = ++scanSeq
+
   const target = dirPath.trim()
   scan.value = null
   scanError.value = ''
@@ -61,6 +85,7 @@ async function runScan(dirPath: string): Promise<void> {
 
   scanning.value = true
   const result = await window.workbench.scanProject(target)
+  if (seq !== scanSeq) return // 已有更新的一次扫描，丢弃本次结果
   scanning.value = false
 
   if (!result.ok || !result.data) {
@@ -105,9 +130,9 @@ const portHint = computed(() => {
 async function pickDirectory(): Promise<void> {
   const picked = await window.workbench.pickDirectory()
   if (!picked) return
+  // 只赋值，扫描交给下面的 watch —— 以前这里再直接扫一次，选个目录会触发两趟 IPC
   form.path = picked
   nameTouched.value = false
-  await runScan(picked)
 }
 
 /** 就地新建分组并自动选中，省去先去别处建好再回来挑的来回 */
@@ -133,12 +158,17 @@ watch(
   () => form.path,
   (path, previous) => {
     if (path === previous) return
-    // 仅当路径像是一个完整目录时自动扫描，避免边输入边读盘
-    if (/^[A-Za-z]:[\\/]/.test(path.trim())) void runScan(path)
+    // 防抖：停止输入 300ms 后才读盘，而不是每敲一个字符就发一次扫描
+    // （UNC 路径不以盘符开头，所以不再用「盘符正则」当门槛）
+    scheduleScan(path)
   }
 )
 
+onBeforeUnmount(cancelScheduledScan)
+
 function reset(): void {
+  cancelScheduledScan()
+  scanSeq += 1
   form.path = ''
   form.name = ''
   form.groupId = undefined

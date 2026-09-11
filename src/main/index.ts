@@ -4,7 +4,8 @@ import { app, BrowserWindow, dialog, ipcMain, nativeTheme, shell } from 'electro
 import { IPC, type QuitChoice } from '../shared/types'
 import { data, flushSync, loadData, save } from './store'
 import { flushThemeSync, loadTheme } from './theme'
-import { manager, flushLogBatches, registerIpc } from './ipc'
+import { registerIpc } from './ipc'
+import { flushLogBatches, manager } from './manager'
 import { checkPort, killPortProcess } from './system'
 import { reapOrphanSessions } from './orphan'
 import {

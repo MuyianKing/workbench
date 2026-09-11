@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Close, Plus } from '@element-plus/icons-vue'
 import { moveToPosition } from '@shared/reorder'
+import { DRAG_MIME } from '@/drag-mime'
 import { useProjectsStore } from '@/stores/projects'
 import type { ProjectGroup } from '@/types'
 
@@ -49,10 +50,10 @@ function focusEdit(el: unknown): void {
   else instance.input?.focus()
 }
 
-async function startEdit(group: ProjectGroup): Promise<void> {
+/** 焦点由模板上的 :ref="focusEdit" 回调负责，这里只需要进入编辑态 */
+function startEdit(group: ProjectGroup): void {
   editingId.value = group.id
   editingName.value = group.name
-  await nextTick()
 }
 
 function cancelEdit(): void {
@@ -104,7 +105,7 @@ function onDragStart(group: ProjectGroup, event: DragEvent): void {
   if (!event.dataTransfer) return
   draggingId.value = group.id
   dragOverId.value = null
-  event.dataTransfer.setData('application/x-workbench-group', group.id)
+  event.dataTransfer.setData(DRAG_MIME.group, group.id)
   event.dataTransfer.effectAllowed = 'move'
 }
 
@@ -127,7 +128,7 @@ function onDragEnd(): void {
 
 async function onDrop(group: ProjectGroup, event: DragEvent): Promise<void> {
   const fromId =
-    draggingId.value ?? event.dataTransfer?.getData('application/x-workbench-group') ?? ''
+    draggingId.value ?? event.dataTransfer?.getData(DRAG_MIME.group) ?? ''
   draggingId.value = null
   dragOverId.value = null
   if (!fromId) return

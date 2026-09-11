@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { majorOf, satisfiesNodeVersion } from './node-version'
+import { satisfiesNodeVersion } from './node-version'
 
 describe('satisfiesNodeVersion', () => {
   it('未声明要求时一律通过', () => {
@@ -58,13 +58,5 @@ describe('satisfiesNodeVersion', () => {
   it('读不懂的写法不误报', () => {
     expect(satisfiesNodeVersion('lts/*', '18.0.0')).toBe(true)
     expect(satisfiesNodeVersion('latest', '18.0.0')).toBe(true)
-  })
-})
-
-describe('majorOf', () => {
-  it('取主版本号', () => {
-    expect(majorOf('v20.11.1')).toBe(20)
-    expect(majorOf('18')).toBe(18)
-    expect(majorOf('lts/*')).toBeNull()
   })
 })

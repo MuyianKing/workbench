@@ -7,11 +7,12 @@
 
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { existsSync, promises as fs } from 'node:fs'
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { app, dialog, shell, type BrowserWindow } from 'electron'
+import { app, shell, type BrowserWindow } from 'electron'
 import { defaultQuickAppName } from '../shared/quick-launch'
 import { reorderById } from '../shared/reorder'
+import { fail, ok } from '../shared/result'
 import {
   IPC,
   type QuickApp,
@@ -21,6 +22,8 @@ import {
   type Result
 } from '../shared/types'
 import { broadcast } from './broadcast'
+import { statOrNull } from './fs-util'
+import { showOpenDialogSafe } from './system'
 import { data, save } from './store'
 
 /** 文件对话框里的类型筛选项：程序本体、快捷方式、批处理，最后兜一个「所有文件」 */
@@ -29,26 +32,10 @@ const TARGET_FILTERS: Electron.FileFilter[] = [
   { name: '所有文件', extensions: ['*'] }
 ]
 
-function ok<T>(value: T): Result<T> {
-  return { ok: true, data: value }
-}
-
-function fail<T>(error: string): Result<T> {
-  return { ok: false, error }
-}
-
 function blankToUndefined(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined
   const text = value.trim()
   return text || undefined
-}
-
-async function statOrNull(target: string): Promise<Awaited<ReturnType<typeof fs.stat>> | null> {
-  try {
-    return await fs.stat(target)
-  } catch {
-    return null
-  }
 }
 
 // ---------- 列表 ----------
@@ -98,12 +85,7 @@ export async function pickApplication(parent?: BrowserWindow): Promise<string | 
     defaultPath: startMenuDir()
   }
 
-  const result = parent
-    ? await dialog.showOpenDialog(parent, options)
-    : await dialog.showOpenDialog(options)
-
-  if (result.canceled || result.filePaths.length === 0) return null
-  return result.filePaths[0]
+  return showOpenDialogSafe(parent, options)
 }
 
 // ---------- 启动 ----------

@@ -10,30 +10,24 @@ import {
   VideoPause,
   VideoPlay
 } from '@element-plus/icons-vue'
+import { DRAG_MIME } from '@/drag-mime'
+import { formatClock, formatDurationMs } from '@/format'
+import { STATUS_META, isBusyStatus } from '@/status'
 import { useProjectsStore } from '@/stores/projects'
 import type { Project, ProjectStatus } from '@/types'
 
 const props = defineProps<{ project: Project }>()
 const store = useProjectsStore()
 
-const META: Record<ProjectStatus, { label: string; tone: string }> = {
-  idle: { label: '空闲', tone: 'idle' },
-  installing: { label: '安装中', tone: 'run' },
-  running: { label: '运行中', tone: 'run' },
-  building: { label: '打包中', tone: 'run' },
-  success: { label: '打包成功', tone: 'ok' },
-  failed: { label: '执行失败', tone: 'fail' }
-}
-
 const runtime = computed(() => store.runtimeOf(props.project.id))
 const status = computed<ProjectStatus>(() => runtime.value?.status ?? 'idle')
 const pathValid = computed(() => store.isPathValid(props.project.id))
 /** 目录失效优先于运行态展示，避免对着一张点了必然失败的卡片操作 */
 const meta = computed(() =>
-  pathValid.value ? META[status.value] : { label: '路径无效', tone: 'fail' }
+  pathValid.value ? STATUS_META[status.value] : { label: '路径无效', tone: 'fail' }
 )
 const pm = computed(() => store.resolvedPm(props.project))
-const isBusy = computed(() => status.value === 'installing' || status.value === 'building')
+const isBusy = computed(() => isBusyStatus(status.value))
 const isRunning = computed(() => status.value === 'running')
 
 /** 运行中显示已运行时长，打包成功显示本次耗时 */
@@ -47,21 +41,12 @@ const elapsed = computed(() => {
     return formatClock(store.clock - rt.startedAt)
   }
   if (status.value === 'success' && rt.durationMs) {
-    return `${(rt.durationMs / 1000).toFixed(1)}s`
+    return formatDurationMs(rt.durationMs)
   }
   return ''
 })
 
 const elapsedLabel = computed(() => (status.value === 'success' ? '耗时' : '已运行'))
-
-function formatClock(ms: number): string {
-  const total = Math.max(0, Math.floor(ms / 1000))
-  const h = Math.floor(total / 3600)
-  const m = Math.floor((total % 3600) / 60)
-  const s = total % 60
-  const pad = (n: number): string => String(n).padStart(2, '0')
-  return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`
-}
 
 function open(): void {
   store.openDrawer(props.project.id)
@@ -91,7 +76,7 @@ async function detect(): Promise<void> {
 /** 拖到筛选栏的分组标签上即可完成归类（场景 S7） */
 function onDragStart(event: DragEvent): void {
   if (!event.dataTransfer) return
-  event.dataTransfer.setData('application/x-workbench-project', props.project.id)
+  event.dataTransfer.setData(DRAG_MIME.project, props.project.id)
   event.dataTransfer.setData('text/plain', props.project.id)
   event.dataTransfer.effectAllowed = 'move'
 }

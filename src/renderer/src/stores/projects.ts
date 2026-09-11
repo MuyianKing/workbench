@@ -30,6 +30,7 @@ import {
   type ThemeSource
 } from '@/types'
 import { clampTerminalHeight } from '@shared/terminal-height'
+import { terminalKey } from '@shared/terminal-key'
 import {
   DEFAULT_THEME,
   clampCardGap,
@@ -65,6 +66,9 @@ const logVersion = ref(0)
 
 /** 未分组项目在筛选栏里的伪分组 id */
 export const UNGROUPED = 'ungrouped'
+
+/** 项目列表的排序方式，筛选栏下拉可选 */
+export type SortBy = 'recent' | 'name' | 'created'
 
 /** 终端键后缀：一种操作一个终端 */
 export type TerminalKey = 'start' | 'build' | 'install' | `custom:${number}`
@@ -123,9 +127,22 @@ export const useProjectsStore = defineStore('projects', () => {
 
   const keyword = ref('')
   const groupFilter = ref<string>('all')
-  const sortBy = ref<'recent' | 'name' | 'created'>('recent')
+  const sortBy = ref<SortBy>('recent')
+
+  /** 筛选/排序状态只经 action 变更，模板里不再直接赋值，非法值也无从写进来 */
+  function setGroupFilter(value: string): void {
+    groupFilter.value = value
+  }
+
+  function setSortBy(value: SortBy): void {
+    sortBy.value = value
+  }
 
   const activeTerminal = ref<string | null>(null)
+
+  function setActiveTerminal(key: string | null): void {
+    activeTerminal.value = key
+  }
   /**
    * 终端面板是否收起。
    *
@@ -134,8 +151,20 @@ export const useProjectsStore = defineStore('projects', () => {
    */
   const terminalCollapsed = ref(true)
 
+  function setTerminalCollapsed(value: boolean): void {
+    terminalCollapsed.value = value
+  }
+
   const drawerProjectId = ref<string | null>(null)
   const addDialogVisible = ref(false)
+
+  function openAddDialog(): void {
+    addDialogVisible.value = true
+  }
+
+  function closeAddDialog(): void {
+    addDialogVisible.value = false
+  }
 
   const packageManagers = ref<PackageManagerStatus | null>(null)
   /** 正在通过 npm 全局安装的包管理器，null 表示空闲 */
@@ -190,6 +219,10 @@ export const useProjectsStore = defineStore('projects', () => {
   const themeConfig = ref<ThemeConfig>(sanitizeTheme(DEFAULT_THEME))
   /** 是否处于布局编辑态：由设置里的「布局调整」进入，画布上的「完成」退出 */
   const layoutEditing = ref(false)
+
+  function setLayoutEditing(value: boolean): void {
+    layoutEditing.value = value
+  }
 
   const gridStep = computed(() => themeConfig.value.gridStep)
   const cardGap = computed(() => themeConfig.value.cardGap)
@@ -426,7 +459,7 @@ export const useProjectsStore = defineStore('projects', () => {
   // ---------- 终端 ----------
 
   function terminalKeyOf(projectId: string, key: TerminalKey): string {
-    return `${projectId}::${key}`
+    return terminalKey(projectId, key)
   }
 
   function terminalOf(key: string): TerminalState | undefined {
@@ -1015,7 +1048,9 @@ export const useProjectsStore = defineStore('projects', () => {
       serve: input.serve,
       build: [...input.build],
       defaultBuild: input.defaultBuild,
-      port: input.port
+      port: input.port,
+      // 「仅管理目录」的放行标志，漏掉它会让勾选项静默失效
+      allowInvalid: input.allowInvalid
     }
 
     const result = await window.workbench.addProject(payload)
@@ -1128,6 +1163,14 @@ export const useProjectsStore = defineStore('projects', () => {
   function openQuickDialog(id?: string): void {
     quickDialogId.value = id ?? null
     quickDialogVisible.value = true
+  }
+
+  function closeQuickDialog(): void {
+    quickDialogVisible.value = false
+  }
+
+  function setQuickDialogVisible(value: boolean): void {
+    quickDialogVisible.value = value
   }
 
   /**
@@ -1754,10 +1797,7 @@ export const useProjectsStore = defineStore('projects', () => {
     projects,
     groups,
     sortedGroups,
-    runtimes,
-    terminals,
     terminalList,
-    terminalOrder,
     /**
      * 日志缓冲区的变化计数（见文件顶部的 logVersion）。
      * 缓冲区本身不参与响应式，依赖它才能知道「有新的日志行」。
@@ -1765,13 +1805,16 @@ export const useProjectsStore = defineStore('projects', () => {
     logVersion,
     activeLogs,
     activeTerminal,
+    setActiveTerminal,
     activeTerminalState,
     terminalCollapsed,
+    setTerminalCollapsed,
     terminalHeight,
     themeConfig,
     gridStep,
     cardGap,
     layoutEditing,
+    setLayoutEditing,
     moveCard,
     setCardHeight,
     toggleCardMode,
@@ -1786,19 +1829,21 @@ export const useProjectsStore = defineStore('projects', () => {
     backgroundError,
     backgroundOpacity,
     wallpapers,
-    refreshWallpapers,
     dataLocation,
     keyword,
     groupFilter,
     sortBy,
+    setGroupFilter,
+    setSortBy,
     drawerProjectId,
     addDialogVisible,
+    openAddDialog,
+    closeAddDialog,
     packageManagers,
     pmInstalling,
     pmInstallLog,
     nvm,
     ready,
-    pathValidity,
     settings,
     effectiveTheme,
     clock,
@@ -1809,9 +1854,7 @@ export const useProjectsStore = defineStore('projects', () => {
     drawerProject,
     runtimeOf,
     resolvedPm,
-    groupName,
     findProject,
-    hasDuplicateName,
     warnIfDuplicateName,
     assignGroup,
     reorderGroups,
@@ -1820,7 +1863,6 @@ export const useProjectsStore = defineStore('projects', () => {
     installPackageManager,
     installedNodeVersion,
     init,
-    refreshActivity,
     changeDataDir,
     addProject,
     removeProject,
@@ -1852,6 +1894,8 @@ export const useProjectsStore = defineStore('projects', () => {
     closeDrawer,
     quickApps,
     quickDialogVisible,
+    closeQuickDialog,
+    setQuickDialogVisible,
     quickEditing,
     openQuickDialog,
     refreshQuickApps,

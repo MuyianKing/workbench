@@ -119,7 +119,7 @@ function changeTheme(value: ThemeSource): void {
 
 /** 进入首页布局编辑态：关掉设置，把画面让给画布上的拖动把手 */
 function enterLayoutEdit(): void {
-  store.layoutEditing = true
+  store.setLayoutEditing(true)
   visible.value = false
 }
 
@@ -611,17 +611,6 @@ watch(visible, (open) => {
   border-color: var(--st-run);
   color: var(--st-run);
   background: var(--st-run-soft);
-}
-
-.stacked {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: var(--sp-1);
-}
-
-.stacked :deep(.el-radio) {
-  margin-right: 0;
 }
 
 /* ---------- 宽度滑块 ---------- */

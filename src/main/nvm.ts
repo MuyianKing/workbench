@@ -1,6 +1,7 @@
-import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs'
 import { basename, join, win32 } from 'node:path'
 import type { NvmStatus } from '../shared/types'
+import { isDirectorySync } from './fs-util'
 
 /**
  * 读取 nvm-windows 已安装的 Node 版本，并按项目给子进程注入 PATH。
@@ -18,14 +19,6 @@ import type { NvmStatus } from '../shared/types'
 
 /** nvm 的版本目录名固定是 vX.Y.Z */
 const VERSION_DIR_RE = /^v(\d+)\.(\d+)\.(\d+)$/
-
-function isDir(target: string): boolean {
-  try {
-    return statSync(target).isDirectory()
-  } catch {
-    return false
-  }
-}
 
 /** 一个版本目录必须真的有 node.exe，nvm 自己也会把这种目录判为损坏 */
 function isNodeInstall(dir: string): boolean {
@@ -109,10 +102,10 @@ function rootCandidates(): string[] {
 /** 定位 nvm 根目录：候选目录里的 settings.txt 会给出真正的 root */
 export function resolveNvmRoot(): string | null {
   for (const candidate of rootCandidates()) {
-    if (!isDir(candidate)) continue
+    if (!isDirectorySync(candidate)) continue
 
     const configured = readNvmSettings(candidate).root
-    if (configured && isDir(configured)) return configured
+    if (configured && isDirectorySync(configured)) return configured
 
     if (existsSync(join(candidate, 'nvm.exe')) || listInstalledVersions(candidate).length > 0) {
       return candidate

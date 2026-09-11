@@ -7,9 +7,7 @@ describe('RingLog', () => {
     ring.pushMany([1, 2, 3])
 
     expect(ring.size).toBe(3)
-    expect(ring.dropped).toBe(0)
     expect(ring.toArray()).toEqual([1, 2, 3])
-    expect(ring.last()).toBe(3)
   })
 
   it('写满后覆盖最旧的一条，顺序不乱', () => {
@@ -17,9 +15,7 @@ describe('RingLog', () => {
     ring.pushMany([1, 2, 3, 4, 5])
 
     expect(ring.size).toBe(3)
-    expect(ring.dropped).toBe(2)
     expect(ring.toArray()).toEqual([3, 4, 5])
-    expect(ring.last()).toBe(5)
   })
 
   it('绕多圈后依然按时间序导出', () => {
@@ -27,7 +23,6 @@ describe('RingLog', () => {
     for (let i = 1; i <= 10; i += 1) ring.push(i)
 
     expect(ring.toArray()).toEqual([8, 9, 10])
-    expect(ring.dropped).toBe(7)
   })
 
   it('刚好写满一圈时不当作已覆盖', () => {
@@ -35,18 +30,6 @@ describe('RingLog', () => {
     ring.pushMany([1, 2, 3])
 
     expect(ring.toArray()).toEqual([1, 2, 3])
-    expect(ring.dropped).toBe(0)
-  })
-
-  it('tail 只取尾部 n 条', () => {
-    const ring = new RingLog<number>(4)
-    ring.pushMany([1, 2, 3, 4, 5, 6])
-
-    expect(ring.tail(2)).toEqual([5, 6])
-    expect(ring.tail(0)).toEqual([])
-    expect(ring.tail(-1)).toEqual([])
-    // n 超过现有条数时退化成全量
-    expect(ring.tail(99)).toEqual([3, 4, 5, 6])
   })
 
   it('clear 之后容量还在，可以继续写', () => {
@@ -55,9 +38,7 @@ describe('RingLog', () => {
     ring.clear()
 
     expect(ring.size).toBe(0)
-    expect(ring.dropped).toBe(0)
     expect(ring.toArray()).toEqual([])
-    expect(ring.last()).toBeUndefined()
 
     ring.push(9)
     expect(ring.toArray()).toEqual([9])

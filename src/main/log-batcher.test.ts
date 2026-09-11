@@ -78,27 +78,6 @@ describe('LogBatcher', () => {
     }
   })
 
-  it('flushBefore 保证待发日志排在动作之前（清屏顺序）', () => {
-    vi.useFakeTimers()
-    try {
-      const order: string[] = []
-      const batcher = new LogBatcher((events) => order.push(`log:${events[0].text}`))
-      batcher.start()
-
-      batcher.push(line('上一轮的尾巴'))
-      batcher.flushBefore(() => order.push('clear'))
-
-      expect(order).toEqual(['log:上一轮的尾巴', 'clear'])
-
-      // 动作之后进来的日志仍然照常攒批
-      batcher.push(line('新一轮第一行'))
-      vi.advanceTimersByTime(LOG_FLUSH_INTERVAL_MS)
-      expect(order).toEqual(['log:上一轮的尾巴', 'clear', 'log:新一轮第一行'])
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-
   it('空队列不触发回调', () => {
     const emit = vi.fn()
     const batcher = new LogBatcher(emit)

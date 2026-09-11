@@ -22,7 +22,7 @@ const nameTouched = ref(false)
 
 const visible = computed({
   get: () => store.quickDialogVisible,
-  set: (value: boolean) => (store.quickDialogVisible = value)
+  set: (value: boolean) => store.setQuickDialogVisible(value)
 })
 
 const editing = computed(() => store.quickEditing)

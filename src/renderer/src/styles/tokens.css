@@ -73,7 +73,6 @@
   --sp-4: 16px;
   --sp-5: 20px;
   --sp-6: 24px;
-  --sp-8: 32px;
 
   /* ---------- 弹层遮罩 ----------
    * 应用里的弹窗（对话框、抽屉、确认框）一律走 Element Plus 的 .el-overlay，
@@ -106,7 +105,6 @@
   --h-project-card: 155px;
   --h-terminal: 288px;
   --h-terminal-collapsed: 42px;
-  --w-drawer: 420px;
 
   /* ---------- Element Plus 主题覆盖 ---------- */
   --el-color-primary: #11151b;

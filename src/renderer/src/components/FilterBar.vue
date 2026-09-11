@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { ArrowDown, FolderOpened, Refresh, Select } from '@element-plus/icons-vue'
-import { UNGROUPED, useProjectsStore } from '@/stores/projects'
+import { UNGROUPED, useProjectsStore, type SortBy } from '@/stores/projects'
 import { moveToPosition } from '@shared/reorder'
+import { DRAG_MIME } from '@/drag-mime'
 import GroupManageDialog from '@/components/GroupManageDialog.vue'
 
 const store = useProjectsStore()
@@ -12,7 +13,7 @@ const dragOverKey = ref<string | null>(null)
 /** 正在拖动哪个分组标签（拖动分组 = 排序，和拖卡片 = 归类是两回事） */
 const draggingGroup = ref<string | null>(null)
 
-const sortLabels: Record<string, string> = {
+const sortLabels: Record<SortBy, string> = {
   recent: '最近使用',
   name: '项目名称',
   created: '添加时间'
@@ -66,7 +67,7 @@ function onDragLeave(key: string): void {
 function onGroupDragStart(key: string, event: DragEvent): void {
   if (!canDrop(key) || !event.dataTransfer) return
   draggingGroup.value = key
-  event.dataTransfer.setData('application/x-workbench-group', key)
+  event.dataTransfer.setData(DRAG_MIME.group, key)
   event.dataTransfer.effectAllowed = 'move'
 }
 
@@ -90,7 +91,7 @@ function onDrop(key: string, event: DragEvent): void {
   if (!canDrop(key)) return
 
   // 拖的是分组标签 → 排序
-  const groupId = event.dataTransfer?.getData('application/x-workbench-group')
+  const groupId = event.dataTransfer?.getData(DRAG_MIME.group)
   if (groupId) {
     draggingGroup.value = null
     if (key !== UNGROUPED) void reorderGroup(groupId, key)
@@ -99,7 +100,7 @@ function onDrop(key: string, event: DragEvent): void {
 
   // 拖的是项目卡片 → 归类（场景 S7）
   const id =
-    event.dataTransfer?.getData('application/x-workbench-project') ||
+    event.dataTransfer?.getData(DRAG_MIME.project) ||
     event.dataTransfer?.getData('text/plain')
   if (!id) return
 
@@ -107,7 +108,8 @@ function onDrop(key: string, event: DragEvent): void {
 }
 
 function pickSort(key: string): void {
-  store.sortBy = key as typeof store.sortBy
+  // 走 store action 而不是直接赋值，非法值不会被写进 sortBy
+  if (key === 'recent' || key === 'name' || key === 'created') store.setSortBy(key)
 }
 </script>
 
@@ -126,7 +128,7 @@ function pickSort(key: string): void {
       </span>
       <div class="filter__tools">
         <el-button size="small" :icon="Refresh" @click="store.resetLayout()">恢复默认</el-button>
-        <el-button size="small" type="primary" :icon="Select" @click="store.layoutEditing = false">
+        <el-button size="small" type="primary" :icon="Select" @click="store.setLayoutEditing(false)">
           完成
         </el-button>
       </div>
@@ -146,7 +148,7 @@ function pickSort(key: string): void {
           type="button"
           :draggable="chip.sortable"
           :title="chip.sortable ? '拖动可调整分组顺序' : undefined"
-          @click="store.groupFilter = chip.key"
+          @click="store.setGroupFilter(chip.key)"
           @dragover="onDragOver(chip.key, $event)"
           @dragleave="onDragLeave(chip.key)"
           @drop="onDrop(chip.key, $event)"

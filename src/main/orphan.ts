@@ -1,5 +1,7 @@
 import { spawn } from 'node:child_process'
 import type { ActiveSession } from '../shared/types'
+import { normalizePath } from '../shared/project-path'
+import { killProcessTree } from './system'
 
 /**
  * 清理「无主进程」（设计文档 §7 最后一条）。
@@ -19,11 +21,6 @@ export interface ProcessInfo {
   commandLine: string
 }
 
-/** 统一大小写与斜杠，避免 D:\a\b 与 d:/a/b 比不相等 */
-function normalize(text: string): string {
-  return text.toLowerCase().replace(/\\/g, '/')
-}
-
 /**
  * 判断某个进程是否就是这条会话记录里的子进程。
  * 抽成纯函数是为了能直接测「PID 被复用」这类判断。
@@ -35,9 +32,9 @@ export function matchesSession(
   const line = (commandLine ?? '').trim()
   if (!line) return false
 
-  const normalized = normalize(line)
-  const cwd = normalize(session.cwd ?? '')
-  const command = normalize(session.command ?? '')
+  const normalized = normalizePath(line)
+  const cwd = normalizePath(session.cwd ?? '')
+  const command = normalizePath(session.command ?? '')
 
   // shell: true 时命令行里一定带着工作目录
   if (cwd && normalized.includes(cwd)) return true
@@ -113,26 +110,6 @@ export async function queryProcesses(pids: number[]): Promise<Map<number, Proces
   return result
 }
 
-function killTree(pid: number): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (process.platform !== 'win32') {
-      try {
-        process.kill(pid, 'SIGKILL')
-        resolve()
-      } catch (err) {
-        reject(err as Error)
-      }
-      return
-    }
-
-    const killer = spawn('taskkill', ['/pid', String(pid), '/T', '/F'], { windowsHide: true })
-    killer.on('error', reject)
-    killer.on('close', (code) =>
-      code === 0 ? resolve() : reject(new Error(`taskkill 退出码 ${code}`))
-    )
-  })
-}
-
 export interface ReapResult {
   killed: number
   /** 判定为「有主」而被保留的会话，调用方要写回去，别把它们丢了 */
@@ -169,7 +146,7 @@ export async function reapOrphanSessions(sessions: ActiveSession[]): Promise<Rea
     }
 
     try {
-      await killTree(session.pid)
+      await killProcessTree(session.pid)
       killed += 1
       notes.push(`已结束上次残留的进程 PID ${session.pid}（${session.command}）`)
     } catch (err) {
