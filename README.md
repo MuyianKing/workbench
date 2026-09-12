@@ -4,8 +4,6 @@
 
 一次添加项目目录，之后一键装依赖、一键启动、一键打包；打包结束自动弹出产物目录，命令输出在应用内的终端面板里实时可见，随时可停。
 
-需求与设计见 [`docs/superpowers/specs/2026-09-10-workbench-console-design.md`](docs/superpowers/specs/2026-09-10-workbench-console-design.md)。
-
 ## 功能
 
 **首页**

@@ -45,5 +45,5 @@ nsis:
   createDesktopShortcut: true
   createStartMenuShortcut: true
   shortcutName: Workbench
-  # 卸载时保留用户数据（projects.json 里的项目列表），避免误删配置
+  # 卸载时保留用户数据（workbench-data.json 里的项目列表），避免误删配置
   deleteAppDataOnUninstall: false
