@@ -4,10 +4,11 @@
  *   node scripts/make-icons.mjs
  *
  * 产物：
- *   build/icon.ico            electron-builder 打包用（含 256/64/32/16）
+ *   build/icon.ico            electron-builder 打包用（见下方 ICON_SIZES）
  *   src/main/tray-icon.ts     托盘图标（32px PNG 的 data URL，运行时不依赖任何资源文件）
  *
  * 图形语言与标题栏的「›_」标记一致：深色圆角方块 + 白色折角与下划线。
+ * 方块满幅绘制、不留透明边距，这样在任何尺寸下都和系统里其它应用图标一样大。
  */
 import { deflateSync } from 'node:zlib'
 import { mkdirSync, writeFileSync } from 'node:fs'
@@ -76,12 +77,9 @@ function distanceToSegment(px, py, x1, y1, x2, y2) {
   return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy))
 }
 
-function insideRoundedRect(x, y, size, radius, inset) {
-  const min = inset
-  const max = size - inset
-  if (x < min || x > max || y < min || y > max) return false
-  const cx = Math.min(Math.max(x, min + radius), max - radius)
-  const cy = Math.min(Math.max(y, min + radius), max - radius)
+function insideRoundedRect(x, y, size, radius) {
+  const cx = Math.min(Math.max(x, radius), size - radius)
+  const cy = Math.min(Math.max(y, radius), size - radius)
   return (x - cx) ** 2 + (y - cy) ** 2 <= radius * radius
 }
 
@@ -99,7 +97,6 @@ function render(size) {
   const rgba = Buffer.alloc(size * size * 4)
   const samples = 4
   const radius = size * 0.22
-  const inset = size * 0.04
   const total = samples * samples
 
   for (let py = 0; py < size; py += 1) {
@@ -110,7 +107,7 @@ function render(size) {
         for (let sx = 0; sx < samples; sx += 1) {
           const x = px + (sx + 0.5) / samples
           const y = py + (sy + 0.5) / samples
-          if (!insideRoundedRect(x, y, size, radius, inset)) continue
+          if (!insideRoundedRect(x, y, size, radius)) continue
           body += 1
           if (insideGlyph(x, y, size)) ink += 1
         }
@@ -158,8 +155,12 @@ function buildIco(images) {
 
 // ---------- 输出 ----------
 
-const sizes = [256, 64, 32, 16]
-const images = sizes.map((size) => ({ size, png: encodePng(size, render(size)) }))
+// Windows 在渲染图标时是按「请求尺寸」去 ICO 里挑最接近的一档，挑不到就现场缩放 —— 缺档位
+// 就会糊。桌面快捷方式默认请求 48px，所以 48 这一档不能少；20/24/40/96/128 是各种 DPI 缩放
+// 与列表视图会要的尺寸，一并备齐后系统基本总能拿到原生位图。
+const ICON_SIZES = [256, 128, 96, 64, 48, 40, 32, 24, 20, 16]
+
+const images = ICON_SIZES.map((size) => ({ size, png: encodePng(size, render(size)) }))
 
 mkdirSync(join(root, 'build'), { recursive: true })
 writeFileSync(join(root, 'build', 'icon.ico'), buildIco(images))
@@ -178,4 +179,4 @@ writeFileSync(
 export const TRAY_ICON_DATA_URL =\n  '${dataUrl}'\n`
 )
 
-console.log(`已生成 build/icon.ico（${sizes.join('/')}）与 src/main/tray-icon.ts`)
+console.log(`已生成 build/icon.ico（${ICON_SIZES.join('/')}）与 src/main/tray-icon.ts`)
