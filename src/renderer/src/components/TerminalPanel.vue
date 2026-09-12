@@ -145,6 +145,10 @@ const isRunning = (terminal: TerminalState): boolean =>
 function projectName(terminal: TerminalState): string {
   // 系统终端不属于任何项目，别把它显示成「已移除的项目」
   if (terminal.kind === 'system') return '本机环境'
+  // 命令卡片的终端同理：它归属的是一条命令，不是项目
+  if (terminal.kind === 'command') {
+    return store.findCommand(terminal.projectId)?.name ?? '已删除的命令'
+  }
   return store.findProject(terminal.projectId)?.name ?? '已移除的项目'
 }
 

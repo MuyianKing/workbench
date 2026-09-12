@@ -28,3 +28,15 @@ export function statusTone(status: ProjectStatus): string {
 export function isBusyStatus(status: ProjectStatus): boolean {
   return status === 'installing' || status === 'building'
 }
+
+/**
+ * 「命令」卡片的状态文案。
+ *
+ * 状态机与项目共用，但一条命令只有「在跑 / 没跑 / 退出了」这三种结果，
+ * 用项目那套说法（空闲、打包成功）都不贴切，所以单独给一份文案；色带仍取 STATUS_META。
+ */
+export function commandStatusLabel(status: ProjectStatus): string {
+  if (status === 'running') return '运行中'
+  if (status === 'failed') return '已退出'
+  return '未运行'
+}

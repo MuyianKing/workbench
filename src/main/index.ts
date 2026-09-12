@@ -80,6 +80,8 @@ function toggleMainWindow(): void {
  * 探测「不归 Workbench 管、但端口被占」的运行中项目。
  * 判据与渲染层启动时的 detectAll 一致：项目配了监听端口，且端口连得上。
  * 排除 manager 正在管的项目，免得同一个项目被算两次。
+ * 命令卡片的外部运行态不在这里算：那类进程更可能只是「顺手占着这个端口」的其他程序，
+ * 退出时按它去杀进程太危险，交给卡片上的「检测 / 停止」由用户自己决定。
  */
 async function detectExternalRunning(managedIds: Set<string>): Promise<number[]> {
   const ports = [
@@ -121,14 +123,14 @@ function resolveQuitChoice(choice: QuitChoice): void {
 async function nativeQuitChoice(count: number): Promise<QuitChoice> {
   const options = {
     type: 'warning' as const,
-    buttons: ['关闭所有项目并退出', '直接退出', '取消'],
+    buttons: ['结束全部进程并退出', '直接退出', '取消'],
     defaultId: 0,
     cancelId: 2,
     noLink: true,
-    title: '仍有项目在运行',
-    message: `还有 ${count} 个项目的进程正在运行`,
+    title: '仍有进程在运行',
+    message: `还有 ${count} 个进程正在运行`,
     detail:
-      '「关闭所有项目并退出」会结束这些进程，未保存的命令输出将丢失；' +
+      '「结束全部进程并退出」会结束这些进程，未保存的命令输出将丢失；' +
       '「直接退出」会让它们继续在后台运行，下次启动 Workbench 时会自动检测并清理。'
   }
 
@@ -252,6 +254,13 @@ function createWindow(launchHidden = false): void {
     }
   })
 
+  /**
+   * 首帧是否已经就绪（ready-to-show 触发过）。
+   * 触发过就说明渲染没问题，之后的「窗口不可见」只可能是用户自己最小化或收进了托盘，
+   * 兜底逻辑不能再插手。
+   */
+  let firstFrameReady = false
+
   const showWindow = (): void => {
     if (!mainWindow || mainWindow.isDestroyed() || mainWindow.isVisible()) return
     mainWindow.show()
@@ -261,29 +270,25 @@ function createWindow(launchHidden = false): void {
   mainWindow.on('page-title-updated', (event) => event.preventDefault())
 
   mainWindow.on('ready-to-show', () => {
+    firstFrameReady = true
     if (!launchHidden) showWindow()
   })
 
   // 兜底：GPU / 磁盘缓存异常时首帧可能迟迟不来，窗口会一直停在 show: false 里，
   // 表现就是「进程起来了但看不见窗口」。
+  // 只救「首帧没来、窗口也没露过面」这一种。最小化后的窗口 isVisible() 同样是 false，
+  // 光看可见性的话，用户在这 4 秒里自己最小化 / 收进托盘反而会被顶出来。
   setTimeout(() => {
     // 开机自启拉起的实例本来就该待在托盘里，不能到点又把它顶到前台
-    if (launchHidden) return
-    if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isVisible()) {
-      console.warn('[workbench] ready-to-show 未触发，强制显示窗口')
-    }
+    if (launchHidden || firstFrameReady) return
+    if (!mainWindow || mainWindow.isDestroyed()) return
+    if (mainWindow.isVisible() || mainWindow.isMinimized()) return
+    console.warn('[workbench] ready-to-show 未触发，强制显示窗口')
     showWindow()
   }, 4000)
 
   mainWindow.webContents.on('did-fail-load', (_event, code, description, url) => {
     console.error('[workbench] 页面加载失败：', code, description, url)
-  })
-
-  // 最小化到托盘（F-8.3）：minimize 事件不可取消，收起界面即可。
-  // 走的是系统最小化（Win+↓、任务栏右键）这条路；自绘的最小化按钮在
-  // handlers/window.ts 里直接收托盘，不会到这里。
-  mainWindow.on('minimize', () => {
-    if (currentSettings().minimizeToTray) hideMainWindow()
   })
 
   // 自绘标题栏的第三个按钮要跟着换图标：最大化画方框、还原画叠框。

@@ -1,5 +1,4 @@
 import { BrowserWindow, ipcMain } from 'electron'
-import { currentSettings, hideWindowToTray } from '../app-settings'
 import { IPC, type WindowState } from '../../shared/types'
 
 /**
@@ -13,17 +12,13 @@ import { IPC, type WindowState } from '../../shared/types'
  */
 export function registerWindowIpc(): void {
   /**
-   * 开了「最小化到托盘」就完全不走系统最小化，直接收进托盘。
+   * 最小化就是系统最小化：窗口收进任务栏，点任务栏按钮还能把它叫回来。
    *
-   * 先最小化再隐藏会留下「已最小化 + 已隐藏」的窗口：任务栏那个按钮变成点了没反应的残影
-   * （窗口其实已经隐藏），从托盘唤回来时窗口也还是最小化的样子，再点最小化自然没效果。
-   * 直接隐藏既没有这个状态，也不会有先最小化再消失的那段动画。
+   * 收进托盘只属于关闭按钮（见 index.ts 的 close 事件）：不做「最小化也收托盘」，
+   * 那会让两个按钮变成同一个动作，用户也分不清窗口到底在哪。
    */
   ipcMain.on(IPC.windowMinimize, (event) => {
-    const win = BrowserWindow.fromWebContents(event.sender)
-    if (!win) return
-    if (currentSettings().minimizeToTray) hideWindowToTray(win)
-    else win.minimize()
+    BrowserWindow.fromWebContents(event.sender)?.minimize()
   })
 
   ipcMain.on(IPC.windowToggleMaximize, (event) => {

@@ -4,6 +4,9 @@ import {
   type ActivityCounts,
   type AddProjectInput,
   type AppSettings,
+  type CommandEntry,
+  type CommandInput,
+  type CommandPatch,
   type EffectiveTheme,
   type InstallablePackageManager,
   type PmInstallLogEvent,
@@ -65,6 +68,14 @@ const api: WorkbenchApi = {
   reorderQuickApps: (ids: string[]) => ipcRenderer.invoke(IPC.quickReorder, ids),
   launchQuickApp: (id: string) => ipcRenderer.invoke(IPC.quickLaunch, id),
   quickAppIcon: (target: string) => ipcRenderer.invoke(IPC.quickIcon, target),
+
+  listCommands: () => ipcRenderer.invoke(IPC.commandList),
+  addCommand: (input: CommandInput) => ipcRenderer.invoke(IPC.commandAdd, input),
+  updateCommand: (id: string, patch: CommandPatch) =>
+    ipcRenderer.invoke(IPC.commandUpdate, id, patch),
+  removeCommand: (id: string) => ipcRenderer.invoke(IPC.commandRemove, id),
+  startCommand: (id: string) => ipcRenderer.invoke(IPC.commandStart, id),
+  stopCommand: (id: string) => ipcRenderer.invoke(IPC.commandStop, id),
 
   reveal: (targetPath: string) => ipcRenderer.invoke(IPC.reveal, targetPath),
   openExternal: (url: string) => ipcRenderer.invoke(IPC.openExternal, url),

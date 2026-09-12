@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { app } from 'electron'
 import { sanitizeAccentColor, sanitizeAccentInkMode } from '../shared/accent-color'
+import { sanitizeCommands } from '../shared/command'
 import { sanitizeQuickApps } from '../shared/quick-launch'
 import { sanitizeAppName } from '../shared/app-name'
 import {
@@ -45,6 +46,7 @@ function emptyData(): PersistedData {
     projects: [],
     groups: [],
     quickApps: [],
+    commands: [],
     settings: { ...DEFAULT_SETTINGS },
     activeSessions: [],
     activity: {}
@@ -115,6 +117,9 @@ export function sanitizeSettings(raw: unknown): AppSettings {
   // 「退出行为」设置已废弃：现在从托盘退出时只要还有项目在跑就统一弹窗让用户选，
   // 旧数据文件里可能还留着这个字段，顺手清掉，免得一直写回。
   delete (value as unknown as Record<string, unknown>).closeBehavior
+  // 「最小化到托盘」已废弃：关闭按钮本身就是收进托盘，最小化再收托盘两个按钮就成了同一个动作。
+  // 旧数据文件里存着 true 会把行为一直带下去，必须主动清掉。
+  delete (value as unknown as Record<string, unknown>).minimizeToTray
   // 程序名称：老数据文件里没有，空白名会让标题栏空掉，统一收敛
   value.appName = sanitizeAppName(value.appName)
   if (value.theme !== 'system' && value.theme !== 'light' && value.theme !== 'dark') {
@@ -125,7 +130,6 @@ export function sanitizeSettings(raw: unknown): AppSettings {
   }
   value.launchAtLogin = value.launchAtLogin === true
   value.hotkeyEnabled = value.hotkeyEnabled !== false
-  value.minimizeToTray = value.minimizeToTray === true
   // 终端高度是拖出来的像素值，老数据文件里没有；非法值落回默认高度
   value.terminalHeight = clampTerminalHeight(value.terminalHeight)
   // 背景图：老数据文件里没有。图片被删 / 换了格式读不出来时不在这里拦，
@@ -151,6 +155,7 @@ function parseData(raw: unknown): PersistedData {
     groups: Array.isArray(parsed.groups) ? parsed.groups : [],
     // 老数据文件没有这一项；手工改坏过的条目在这里被丢掉或补全
     quickApps: sanitizeQuickApps(parsed.quickApps, randomUUID),
+    commands: sanitizeCommands(parsed.commands, randomUUID),
     settings: sanitizeSettings(parsed.settings),
     // 上次被强杀时留下的子进程记录，启动清理要用（漏掉这个字段清理就成了空转）
     activeSessions: Array.isArray(parsed.activeSessions) ? parsed.activeSessions : [],

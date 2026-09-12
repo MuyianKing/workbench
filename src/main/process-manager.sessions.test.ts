@@ -170,6 +170,53 @@ describe('ProcessManager 的终端划分', () => {
   )
 
   it(
+    '命令卡片：命令落在自己的终端上，端口能被认出来，停止后回到未运行',
+    async () => {
+      // 命令卡片没有目录配置，工作目录由调用方给（主进程给的是用户主目录）
+      const dir = mkdtempSync(join(tmpdir(), 'workbench-cmd-'))
+      tempDirs.push(dir)
+      writeFileSync(
+        join(dir, 'serve.js'),
+        "console.log('Local: http://localhost:5199/')\nsetInterval(() => {}, 1000)\n"
+      )
+
+      const manager = new ProcessManager()
+      managers.push(manager)
+      const seen = watch(manager)
+
+      expect(manager.runCardCommand({ id: 'cmd-1', command: 'node serve.js' }, dir)).toBeNull()
+      await waitFor(() => seen.statuses.some((s) => s.status === 'running' && s.port === 5199))
+
+      // 一条命令一个终端，键与归属都用命令 id —— 它不属于任何项目
+      const terminal = 'cmd-1::command'
+      expect(seen.terminalOpens).toEqual([{ terminal, kind: 'command', label: '运行' }])
+      expect(seen.clears).toEqual([terminal])
+      expect(
+        seen.logs.some((l) => l.terminal === terminal && l.text.includes('localhost:5199'))
+      ).toBe(true)
+      // 活跃会话要带着命令 id 与工作目录落盘，否则应用被强杀后清不掉残留进程
+      expect(manager.liveSessions()).toEqual([
+        expect.objectContaining({ projectId: 'cmd-1', cwd: dir })
+      ])
+
+      manager.stop('cmd-1')
+      await waitFor(() => !manager.isActive('cmd-1'))
+    },
+    60000
+  )
+
+  it('命令卡片：空命令与含换行的命令在前置校验就被挡下，不会起进程', () => {
+    const manager = new ProcessManager()
+    managers.push(manager)
+
+    expect(manager.runCardCommand({ id: 'cmd-2', command: '   ' }, 'C:\\')).toBe('命令不能为空')
+    expect(manager.runCardCommand({ id: 'cmd-2', command: 'a\nb' }, 'C:\\')).toBe(
+      '命令不能包含换行'
+    )
+    expect(manager.isActive('cmd-2')).toBe(false)
+  })
+
+  it(
     '清空前会先排空待发日志，上一轮的输出不会落到新一轮的终端里',
     async () => {
       const project = makeProject('hello')

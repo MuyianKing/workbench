@@ -2,20 +2,21 @@
  * 首页布局（theme.json）的数据结构、收敛规则与纯计算。
  *
  * 首页分成左中右三栏：左右两栏宽度可调，中间那栏 flex:1 吃掉剩余宽度。
- * 六块卡片各自属于某一栏，在栏内按 order 从上到下排列、宽度铺满整栏，高度各自可调；
+ * 七块卡片各自属于某一栏，在栏内按 order 从上到下排列、宽度铺满整栏，高度各自可调；
  * 没有卡片的栏在平时不渲染（编辑时才显示出来，好把卡片拖进去）。
  *
  * 这个模块被主进程（读盘、收敛旧文件）和渲染层（拖动、缩放）共用：两边必须是同一套
  * 边界与吸附规则，否则一个手改过的 theme.json 就能把栏宽撑爆、或者拖出一个负高度。
  */
 
-/** 首页六块卡片的稳定 id；数组顺序也是同栏同 order 时的兜底排序 */
+/** 首页七块卡片的稳定 id；数组顺序也是同栏同 order 时的兜底排序 */
 export const HOME_CARD_IDS = [
   'activity',
   'system',
   'recent',
   'actions',
   'quick',
+  'commands',
   'projects'
 ] as const
 
@@ -98,8 +99,8 @@ export const CARD_GAP_DEFAULT = 10
  */
 export const COLUMN_WIDTH_MIN = 220
 export const COLUMN_WIDTH_MAX = 720
-export const LEFT_WIDTH_DEFAULT = 320
-export const RIGHT_WIDTH_DEFAULT = 300
+export const LEFT_WIDTH_DEFAULT = 290
+export const RIGHT_WIDTH_DEFAULT = 294
 
 /** 卡片高度上限：只防离谱数据，正常拖拽够不着 */
 export const CARD_HEIGHT_MAX = 4000
@@ -117,13 +118,14 @@ export const CARD_HEIGHT_MIN: Record<HomeCardId, number> = {
   recent: 88,
   actions: 76,
   quick: 76,
+  commands: 90,
   projects: 100
 }
 
 /**
- * 默认布局（按当前配置固化）：左栏从上到下排常用面板，中间那栏只放项目列表，右栏留空。
- * 项目列表占中间栏的 flex 位，窗口越高能看到的项目卡越多；左栏的快捷操作也自适应，
- * 吃掉左栏剩余高度，整页仍然随窗口自适应、不留半截空白。
+ * 默认布局（按当前配置固化）：左栏从上到下排常用面板，中间那栏上面是项目列表、
+ * 下面是命令，右栏默认空着。项目列表占中间栏的 flex 位，窗口越高能看到的项目卡越多；
+ * 左栏的快捷操作吃掉左栏剩余高度，整页随窗口自适应、不留半截空白。
  */
 export const DEFAULT_THEME: ThemeConfig = {
   version: THEME_VERSION,
@@ -134,10 +136,11 @@ export const DEFAULT_THEME: ThemeConfig = {
   cards: {
     activity: { column: 'left', order: 0, mode: 'fixed', height: 155 },
     recent: { column: 'left', order: 1, mode: 'fixed', height: 155 },
-    quick: { column: 'left', order: 2, mode: 'fixed', height: 108 },
+    quick: { column: 'left', order: 2, mode: 'fixed', height: 98 },
     system: { column: 'left', order: 3, mode: 'fixed', height: 147 },
     actions: { column: 'left', order: 4, mode: 'flex', height: 180 },
-    projects: { column: 'center', order: 0, mode: 'flex', height: 600 }
+    projects: { column: 'center', order: 0, mode: 'flex', height: 600 },
+    commands: { column: 'center', order: 1, mode: 'fixed', height: 90 }
   }
 }
 

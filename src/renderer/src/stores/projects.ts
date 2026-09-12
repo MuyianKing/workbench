@@ -8,6 +8,9 @@ import {
   type AddProjectInput,
   type AppSettings,
   type BuiltinWallpaper,
+  type CommandEntry,
+  type CommandInput,
+  type CommandPatch,
   type DataLocation,
   type EffectiveTheme,
   type InstallablePackageManager,
@@ -79,7 +82,7 @@ export const UNGROUPED = 'ungrouped'
 export type SortBy = 'recent' | 'name' | 'created'
 
 /** 终端键后缀：一种操作一个终端 */
-export type TerminalKey = 'start' | 'build' | 'install' | `custom:${number}`
+export type TerminalKey = 'start' | 'build' | 'install' | 'command' | `custom:${number}`
 
 /**
  * 一个终端 = 某个项目的一类操作。
@@ -276,7 +279,7 @@ export const useProjectsStore = defineStore('projects', () => {
     await commitCards()
   }
 
-  /** 松手落盘：六块一起送，避免只有被拖的那块更新、其余停留在旧快照 */
+  /** 松手落盘：七块一起送，避免只有被拖的那块更新、其余停留在旧快照 */
   async function commitCards(): Promise<void> {
     const cards = {} as Record<HomeCardId, CardPlacement>
     for (const id of Object.keys(themeConfig.value.cards) as HomeCardId[]) {
@@ -864,6 +867,8 @@ export const useProjectsStore = defineStore('projects', () => {
     void refreshPaths()
     // 项目可能在上次关闭后、或在 Workbench 之外已经跑起来了，进应用先按端口认一遍
     void detectAll()
+    // 命令卡片同理：它连日志都可能没有（在外面启动的），只能靠端口认
+    void detectAllCommands()
     // 目录与程序都可能在应用之外被移动/删除，窗口重新获得焦点时复查一次
     window.addEventListener('focus', () => {
       void refreshPaths()
@@ -891,10 +896,12 @@ export const useProjectsStore = defineStore('projects', () => {
       window.workbench.getDataLocation(),
       window.workbench.getActivity(),
       refreshQuickApps(),
+      refreshCommands(),
       refreshWallpapers()
     ])
     dataLocation.value = location
     activity.value = counts
+    for (const item of commands.value) runtimeOf(item.id)
   }
 
   /** 重新拉一次活跃度计数（命令跑完、数据目录切换后调用） */
@@ -944,12 +951,14 @@ export const useProjectsStore = defineStore('projects', () => {
     activeTerminal.value = null
     terminalCollapsed.value = true
     drawerProjectId.value = null
+    commands.value = []
 
     await loadData()
     for (const project of projects.value) runtimeOf(project.id)
     snapshotProjects()
     await refreshPaths()
     await detectAll()
+    await detectAllCommands()
   }
 
   // ---------- 设置 ----------
@@ -1380,8 +1389,204 @@ export const useProjectsStore = defineStore('projects', () => {
     ElMessage.success(`已启动 ${entry?.name ?? '程序'}`)
   }
 
-  // ---------- 配置变更自动落盘 ----------
+  // ---------- 首页「命令」卡片 ----------
 
+  /**
+   * 命令列表；顺序就是创建顺序（这块只有增删改，不做拖动排序）。
+   * 每条命令的进程由 Workbench 接管，所以它的运行态照样记在 runtimes 里、日志照样进终端面板。
+   */
+  const commands = ref<CommandEntry[]>([])
+  const commandDialogVisible = ref(false)
+  /** 正在编辑的命令 id；null 表示「新增」 */
+  const commandDialogId = ref<string | null>(null)
+
+  const commandEditing = computed(() =>
+    commandDialogId.value
+      ? commands.value.find((item) => item.id === commandDialogId.value) ?? null
+      : null
+  )
+
+  function openCommandDialog(id?: string): void {
+    commandDialogId.value = id ?? null
+    commandDialogVisible.value = true
+  }
+
+  function closeCommandDialog(): void {
+    commandDialogVisible.value = false
+  }
+
+  function setCommandDialogVisible(value: boolean): void {
+    commandDialogVisible.value = value
+  }
+
+  function findCommand(id: string): CommandEntry | undefined {
+    return commands.value.find((item) => item.id === id)
+  }
+
+  async function refreshCommands(): Promise<void> {
+    commands.value = await window.workbench.listCommands()
+  }
+
+  /** 同 addProject：会经 IPC 传输，必须转成普通对象 */
+  async function addCommand(input: CommandInput): Promise<boolean> {
+    const result = await window.workbench.addCommand({
+      name: input.name,
+      command: input.command,
+      port: input.port
+    })
+    if (!result.ok || !result.data) {
+      ElMessage.error(result.error ?? '添加失败')
+      return false
+    }
+
+    commands.value = [...commands.value, result.data]
+    runtimeOf(result.data.id)
+    ElMessage.success(`已添加 ${result.data.name}`)
+    return true
+  }
+
+  async function updateCommand(id: string, patch: CommandPatch): Promise<boolean> {
+    const result = await window.workbench.updateCommand(id, { ...patch })
+    if (!result.ok || !result.data) {
+      ElMessage.error(result.error ?? '保存失败')
+      return false
+    }
+
+    const index = commands.value.findIndex((item) => item.id === id)
+    if (index !== -1) commands.value[index] = result.data
+    return true
+  }
+
+  /**
+   * 删除一条命令。
+   * 主进程会先停掉还在跑的进程 —— 条目一删，它的终端与停止入口就都没了。
+   */
+  async function removeCommand(id: string): Promise<void> {
+    const entry = findCommand(id)
+    const result = await window.workbench.removeCommand(id)
+    if (!result.ok) {
+      ElMessage.error(result.error ?? '删除失败')
+      return
+    }
+
+    commands.value = commands.value.filter((item) => item.id !== id)
+    delete runtimes[id]
+    dropTerminalsOf(id)
+    ElMessage.success(entry ? `已删除 ${entry.name}` : '已删除')
+  }
+
+  /** 启动一条命令：端口占用按项目那套先处理掉，再交给主进程拉起进程 */
+  async function startCommand(id: string): Promise<void> {
+    const entry = findCommand(id)
+    if (!entry) return
+
+    const rt = runtimeOf(id)
+    if (!(await ensurePortFree(entry.port ?? rt.port, rt))) return
+
+    focusTerminal(id, 'command')
+    const result = await window.workbench.startCommand(id)
+    if (!result.ok) ElMessage.error(result.error ?? '启动失败')
+  }
+
+  /**
+   * 停止一条命令。
+   *
+   * 按端口探测出来的那种没有进程句柄，只能按端口结束；杀的是 Workbench 之外的进程，
+   * 所以先确认一次（与项目卡片的停止同一套做法）。
+   */
+  async function stopCommand(id: string): Promise<boolean> {
+    const rt = runtimes[id]
+
+    if (rt?.external && rt.port) {
+      const name = findCommand(id)?.name ?? '该命令'
+      try {
+        await ElMessageBox.confirm(
+          `将结束【${name}】占用【${rt.port}】端口。确定吗？`,
+          '结束外部进程',
+          { confirmButtonText: '结束进程', cancelButtonText: '取消', type: 'warning' }
+        )
+      } catch {
+        return false
+      }
+
+      const killed = await window.workbench.killPortProcess(rt.port)
+      if (!killed.ok) {
+        ElMessage.error(killed.error ?? '结束进程失败')
+        return false
+      }
+      rt.status = 'idle'
+      rt.external = false
+      rt.pid = undefined
+      rt.port = undefined
+      return true
+    }
+
+    const result = await window.workbench.stopCommand(id)
+    if (!result.ok) {
+      ElMessage.error(result.error ?? '停止失败')
+      return false
+    }
+    return true
+  }
+
+  /**
+   * 检测一条命令是否已经在运行。
+   *
+   * 判据是它配置的监听端口有没有被占用：命中的运行态打上 external 标记 ——
+   * 这种进程没有 Workbench 的句柄，也没有日志，卡片上的「停止」会改成按端口结束。
+   * silent 用于启动时的批量检测：只更新状态，不打扰用户。
+   */
+  async function detectCommand(id: string, options: { silent?: boolean } = {}): Promise<boolean> {
+    const entry = findCommand(id)
+    if (!entry) return false
+
+    const rt = runtimeOf(id)
+    // Workbench 自己启动的进程，状态本来就准，不必再探；
+    // 而探测出来的「外部运行中」只是个快照，要重新确认（服务可能已经被人停了）
+    if (!rt.external && RUNNING_STATUS.includes(rt.status)) {
+      if (!options.silent) ElMessage.info('命令正在运行，无需检测')
+      return true
+    }
+
+    const port = entry.port ?? rt.port
+    if (!port) {
+      if (!options.silent) ElMessage.warning('这条命令没有配置监听端口，无法检测运行状态')
+      return false
+    }
+
+    const check = await window.workbench.checkPort(port)
+    if (check.inUse) {
+      rt.status = 'running'
+      rt.external = true
+      rt.port = port
+      rt.pid = check.pid
+      if (!options.silent) {
+        const who = check.processName
+          ? `${check.processName}（PID ${check.pid}）`
+          : `PID ${check.pid ?? '未知'}`
+        ElMessage.success(`端口 ${port} 已被 ${who} 占用，命令已在运行`)
+      }
+      return true
+    }
+
+    // 端口空着：之前探测到的外部运行已经结束，把状态收回来
+    if (rt.external) {
+      rt.status = 'idle'
+      rt.external = false
+      rt.pid = undefined
+      rt.port = undefined
+    }
+    if (!options.silent) ElMessage.info(`端口 ${port} 空闲，命令未在运行`)
+    return false
+  }
+
+  /** 启动应用后做一次全量检测：命令可能是在 Workbench 之外启动、至今还跑着的 */
+  async function detectAllCommands(): Promise<void> {
+    const targets = commands.value.filter((item) => item.port)
+    await Promise.all(targets.map((item) => detectCommand(item.id, { silent: true })))
+  }
+
+  // ---------- 配置变更自动落盘 ----------
   /** 同 addProject：patch 会经 IPC 传输，必须转成普通对象 */
   function editableOf(project: Project): ProjectPatch {
     return {
@@ -1473,6 +1678,52 @@ export const useProjectsStore = defineStore('projects', () => {
     if (!result.ok) ElMessage.error(result.error ?? '安装依赖失败')
   }
 
+  /**
+   * 启动前确认监听端口没有被别人占着。
+   *
+   * 占着就问一次「结束进程并启动」—— 这多半是上次没关干净的开发服务；用户取消或结束失败都返回
+   * false，调用方直接中止启动。端口空着但本地还记着「外部运行中」时，顺手把状态收回来。
+   * 项目启动与命令卡片启动共用这一套，两边的确认文案与行为才一致。
+   */
+  async function ensurePortFree(port: number | undefined, rt: RuntimeState): Promise<boolean> {
+    if (!port) return true
+
+    const check = await window.workbench.checkPort(port)
+    if (!check.inUse) {
+      if (rt.external) {
+        // 端口已经空出来，之前探测到的「外部运行中」不再成立
+        rt.status = 'idle'
+        rt.external = false
+        rt.pid = undefined
+      }
+      return true
+    }
+
+    const who = check.processName
+      ? `${check.processName}（PID ${check.pid}）`
+      : `PID ${check.pid ?? '未知'}`
+    try {
+      await ElMessageBox.confirm(
+        `端口 ${port} 已被 ${who} 占用，是否结束该进程后重新启动？`,
+        '端口被占用',
+        {
+          confirmButtonText: '结束进程并启动',
+          cancelButtonText: '取消',
+          type: 'warning'
+        }
+      )
+    } catch {
+      return false
+    }
+
+    const killed = await window.workbench.killPortProcess(port)
+    if (!killed.ok) {
+      ElMessage.error(killed.error ?? '结束占用进程失败')
+      return false
+    }
+    return true
+  }
+
   async function start(id: string): Promise<void> {
     const project = await guardProject(id)
     if (!project) return
@@ -1488,38 +1739,7 @@ export const useProjectsStore = defineStore('projects', () => {
     // 先看项目配置的监听端口，其次用本次会话里从启动日志识别到的那个。
     // 两个都没有就静默跳过 —— 不知道端口就无从检测占用。
     const rt = runtimeOf(id)
-    const knownPort = project.port ?? rt.port
-    if (knownPort) {
-      const check = await window.workbench.checkPort(knownPort)
-      if (check.inUse) {
-        const who = check.processName
-          ? `${check.processName}（PID ${check.pid}）`
-          : `PID ${check.pid ?? '未知'}`
-        try {
-          await ElMessageBox.confirm(
-            `端口 ${knownPort} 已被 ${who} 占用，是否结束该进程后重新启动？`,
-            '端口被占用',
-            {
-              confirmButtonText: '结束进程并启动',
-              cancelButtonText: '取消',
-              type: 'warning'
-            }
-          )
-        } catch {
-          return
-        }
-        const killed = await window.workbench.killPortProcess(knownPort)
-        if (!killed.ok) {
-          ElMessage.error(killed.error ?? '结束占用进程失败')
-          return
-        }
-      } else if (rt.external) {
-        // 端口已经空出来，之前探测到的「外部运行中」不再成立
-        rt.status = 'idle'
-        rt.external = false
-        rt.pid = undefined
-      }
-    }
+    if (!(await ensurePortFree(project.port ?? rt.port, rt))) return
 
     focusTerminal(id, 'start')
     const result = await window.workbench.start(id)
@@ -1980,6 +2200,20 @@ export const useProjectsStore = defineStore('projects', () => {
     updateQuickApp,
     removeQuickApp,
     reorderQuickApps,
-    launchQuickApp
+    launchQuickApp,
+    commands,
+    commandDialogVisible,
+    closeCommandDialog,
+    setCommandDialogVisible,
+    commandEditing,
+    openCommandDialog,
+    refreshCommands,
+    findCommand,
+    addCommand,
+    updateCommand,
+    removeCommand,
+    startCommand,
+    stopCommand,
+    detectCommand
   }
 })

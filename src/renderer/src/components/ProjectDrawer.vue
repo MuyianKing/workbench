@@ -297,12 +297,14 @@ async function removeProject(): Promise<void> {
 
 <template>
   <!-- append-to-body：弹层必须离开 .app 子树，否则会被顶部毛玻璃的 backdrop-filter 连累（见 global.css 弹层一节） -->
+  <!-- modal-class：抽屉从窗口顶边铺满，把这条遮罩的样式交给 global.css 的 .overlay-drawer -->
   <el-drawer
     v-model="visible"
     :with-header="false"
     :size="420"
     direction="rtl"
     append-to-body
+    modal-class="overlay-drawer"
     @closed="onClosed"
   >
     <div v-if="project" class="drawer">

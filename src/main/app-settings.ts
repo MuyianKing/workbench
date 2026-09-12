@@ -88,9 +88,8 @@ export function notifyHiddenToTray(): void {
 /**
  * 把窗口收进托盘：隐藏、摘掉任务栏按钮，并给一次提示（每次运行只提示一遍）。
  *
- * setSkipTaskbar 是必须的：窗口先被最小化、再被隐藏时（Win+↓ 这类系统最小化），
- * Windows 会把任务栏按钮留在那儿，而窗口已经隐藏，点它没有任何反应 —— 看上去就是「卡死」。
- * 隐藏期间统一摘掉按钮，showMainWindow 里再装回来。
+ * setSkipTaskbar 一起做掉：隐藏的窗口不该再在任务栏留一个点了没反应的按钮，
+ * showMainWindow 里再把它装回来。
  */
 export function hideWindowToTray(win: BrowserWindow | null): void {
   if (!win || win.isDestroyed()) return

@@ -36,6 +36,7 @@ import {
   reveal
 } from './system'
 import { manager } from './manager'
+import { registerCommandsIpc } from './handlers/commands'
 import { registerQuickIpc } from './handlers/quick'
 import { registerSettingsIpc } from './handlers/settings'
 import { registerWindowIpc } from './handlers/window'
@@ -598,6 +599,11 @@ export function registerIpc(): void {
   // 与项目命令是两套独立模型，注册逻辑在 ipc/quick.ts
 
   registerQuickIpc()
+
+  // ---------- 首页「命令」卡片 ----------
+  // 与项目命令是两套独立模型（没有目录 / 包管理器 / 脚本），注册逻辑在 ipc/commands.ts
+
+  registerCommandsIpc()
 
   // ---------- 自绘标题栏的窗口控制 ----------
   // 系统叠加层已经关掉，三个按钮的动效与实现都在渲染层，注册逻辑在 ipc/window.ts

@@ -59,7 +59,8 @@ export interface ProjectScripts {
 
 export interface RunRecord {
   id: string
-  kind: 'start' | 'build' | 'install' | 'custom'
+  /** command 是首页「命令」卡片里那条独立的命令，不属于任何项目 */
+  kind: 'start' | 'build' | 'install' | 'custom' | 'command'
   command: string
   startedAt: number
   durationMs?: number
@@ -140,6 +141,44 @@ export interface QuickAppPatch {
 }
 
 /**
+ * 首页「命令」卡片里的一条命令。
+ *
+ * 与项目是两种东西：这里只有「一行命令 + 一个可选的监听端口」，没有目录、包管理器、
+ * 脚本这些配置。进程仍然由 Workbench 接管 —— 有日志、能停止，输出进底部终端；
+ * 命令的工作目录固定为用户主目录（见 main/commands.ts）。
+ */
+export interface CommandEntry {
+  id: string
+  name: string
+  /** 整条命令原文，交给 shell 执行 */
+  command: string
+  /**
+   * 监听端口，非必填。
+   * 它是「这条命令有没有在跑」的判据：留空时只能靠本次会话的进程句柄判断，
+   * 应用重启后也认不出上次留下的服务。
+   */
+  port?: number
+  order: number
+  createdAt: number
+}
+
+/** 新增命令卡片条目时提交给主进程的数据 */
+export interface CommandInput {
+  name: string
+  command: string
+  /** 显式传 null 表示用户清空了它，按「不检测」落盘 */
+  port?: number | null
+}
+
+/** 可编辑的命令配置 */
+export interface CommandPatch {
+  name?: string
+  command?: string
+  /** null 或非法值表示清空 */
+  port?: number | null
+}
+
+/**
  * 快捷启动的完整状态。
  * missing 以「启动项 id」为键（不是路径）：同一个程序可能被加两次，界面按 id 取用最直接。
  */
@@ -163,11 +202,6 @@ export interface AppSettings {
   hotkeyEnabled: boolean
   /** 唤起 / 隐藏主窗口的全局快捷键 */
   hotkey: string
-  /**
-   * 最小化时收进托盘。
-   * 没有「是否常驻托盘」这个开关了 —— 关闭按钮就是隐藏到托盘，托盘是找回窗口的唯一入口。
-   */
-  minimizeToTray: boolean
   /** 终端面板展开时的高度（px），由拖动面板上沿决定 */
   terminalHeight: number
   /**
@@ -219,6 +253,8 @@ export interface PersistedData {
   groups: ProjectGroup[]
   /** 首页「快捷启动」的常用软件 */
   quickApps: QuickApp[]
+  /** 首页「命令」卡片里的命令，与项目相互独立 */
+  commands: CommandEntry[]
   settings: AppSettings
   /** 上次运行期间启动、尚未确认结束的子进程 */
   activeSessions?: ActiveSession[]
@@ -310,9 +346,10 @@ export interface ProjectPatch {
 
 /**
  * 一个终端对应「某个项目的一类操作」，所以同一项目的启动与打包是两个终端。
- * system 是不属于任何项目的那类，例如在本机全局安装包管理器。
+ * system 是不属于任何项目的那类，例如在本机全局安装包管理器；
+ * command 是首页「命令」卡片里的一条命令（单独一个终端）。
  */
-export type TerminalKind = 'start' | 'build' | 'install' | 'custom' | 'system'
+export type TerminalKind = 'start' | 'build' | 'install' | 'custom' | 'command' | 'system'
 
 /** 终端被创建（或复用）时推送一次，渲染层据此建 Tab 并切过去 */
 export interface TerminalOpenEvent {
@@ -494,6 +531,15 @@ export interface WorkbenchApi {
   launchQuickApp: (id: string) => Promise<Result<null>>
   /** 取程序的系统图标（主进程转成 data URL，取不到时用首字母兜底） */
   quickAppIcon: (target: string) => Promise<Result<string>>
+  /** 首页「命令」卡片：独立于项目的一批命令 */
+  listCommands: () => Promise<CommandEntry[]>
+  addCommand: (input: CommandInput) => Promise<Result<CommandEntry>>
+  updateCommand: (id: string, patch: CommandPatch) => Promise<Result<CommandEntry>>
+  removeCommand: (id: string) => Promise<Result<null>>
+  /** 启动一条命令；进程由 Workbench 接管，日志进底部终端 */
+  startCommand: (id: string) => Promise<Result<null>>
+  /** 停止一条命令；已在应用外跑着的那种只能按端口结束，由渲染层先确认 */
+  stopCommand: (id: string) => Promise<Result<null>>
   reveal: (targetPath: string) => Promise<Result<null>>
   /** 用系统默认浏览器打开 http(s) 链接 */
   openExternal: (url: string) => Promise<Result<null>>
@@ -526,7 +572,7 @@ export interface WorkbenchApi {
   loadBackground: (path: string) => Promise<Result<BackgroundImage>>
   /** 内置壁纸清单（含缩略图）；目录里没有图时返回空数组 */
   listWallpapers: () => Promise<BuiltinWallpaper[]>
-  /** 首页布局配置（theme.json）：六块卡片的位置 / 尺寸与拖动步进 */
+  /** 首页布局配置（theme.json）：七块卡片的位置 / 尺寸与拖动步进 */
   getThemeConfig: () => Promise<ThemeConfig>
   /** 合并保存首页布局；返回收敛后的最终值 */
   updateThemeConfig: (patch: Partial<ThemeConfig>) => Promise<Result<ThemeConfig>>
@@ -595,7 +641,7 @@ export type QuitChoice = 'stop' | 'direct' | 'cancel'
  * 这样样式能跟界面统一，而不是走系统原生消息框。
  */
 export interface QuitConfirmPayload {
-  /** 仍在运行的项目数（含启动检测按端口认出的外部服务） */
+  /** 仍在运行的进程数：项目与「命令」卡片启动的，外加启动检测按端口认出的外部服务 */
   count: number
 }
 
@@ -622,6 +668,12 @@ export const IPC = {
   quickLaunch: 'quick:launch',
   quickIcon: 'quick:icon',
   eventQuickApps: 'quick:changed',
+  commandList: 'command:list',
+  commandAdd: 'command:add',
+  commandUpdate: 'command:update',
+  commandRemove: 'command:remove',
+  commandStart: 'command:start',
+  commandStop: 'command:stop',
   reveal: 'system:reveal',
   openExternal: 'system:open-external',
   checkPackageManagers: 'system:check-pm',
@@ -697,7 +749,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
   theme: 'light',
   hotkeyEnabled: true,
   hotkey: 'Control+Shift+M',
-  minimizeToTray: true,
   terminalHeight: TERMINAL_HEIGHT_DEFAULT,
   workspaceBackground: builtinReference('万重山'),
   workspaceBackgroundOpacity: BACKGROUND_OPACITY_DEFAULT,

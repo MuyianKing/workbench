@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { EventEmitter } from 'node:events'
 import type {
   ActiveSession,
+  CommandEntry,
   PackageManager,
   ProcessLogEvent,
   ProcessStatusEvent,
@@ -9,6 +10,7 @@ import type {
   ProjectStatus,
   RunRecord
 } from '../shared/types'
+import { commandTextError } from '../shared/command'
 import { terminalKey } from '../shared/terminal-key'
 import { isValidScriptName } from './scanner'
 import { nodeEnvFor } from './nvm'
@@ -57,7 +59,7 @@ const STOP_TIMEOUT_MS = 6000
 /** 应用退出时等待全部子进程结束的上限 */
 const SHUTDOWN_TIMEOUT_MS = 4000
 
-type Kind = 'start' | 'build' | 'install' | 'custom'
+type Kind = RunRecord['kind']
 
 type RunOutcome = 'success' | 'failed' | 'stopped'
 
@@ -80,17 +82,30 @@ interface Session {
   readyEmitted: boolean
 }
 
-/** 一次启动要落到哪个终端上 */
+/**
+ * 一次启动要落到哪个终端上
+ */
 interface LaunchTarget {
   kind: Kind
-  /** 终端键后缀：start / build / install / custom:<index> */
+  /** 终端键后缀：start / build / install / custom:<index> / command */
   key: string
   /** Tab 标题里的操作名 */
   label: string
 }
 
-/** 自定义命令是一整行命令原文，长度给个上限，也禁止换行（换行等于偷偷执行多条命令） */
-const CUSTOM_COMMAND_MAX = 500
+/**
+ * 启动一条命令所需的最小上下文。
+ *
+ * 项目与首页「命令」卡片的条目都满足它：前者用自己的目录与 nvm 版本，
+ * 后者只有 id 与一个固定的工作目录（命令卡片没有目录配置）。
+ * path 就是子进程的 cwd，也是残留进程记录里用来比对命令行的依据。
+ */
+export interface LaunchContext {
+  id: string
+  path: string
+  /** 选定的 nvm Node 版本，留空表示跟随系统 PATH（命令卡片用不到） */
+  nodeVersion?: string
+}
 
 interface Invocation {
   bin: string
@@ -188,14 +203,38 @@ export class ProcessManager extends EventEmitter {
 
   /** 执行项目配置里的自定义命令（F-2.6）；每条自定义命令各自一个终端 */
   runCustom(project: Project, command: string, index: number, name?: string): string | null {
-    const text = (command ?? '').trim()
-    if (!text) return '自定义命令为空'
-    if (text.length > CUSTOM_COMMAND_MAX) return `自定义命令过长（上限 ${CUSTOM_COMMAND_MAX} 字符）`
-    if (/[\r\n]/.test(text)) return '自定义命令不能包含换行'
+    // 命令原文的校验（空、换行、超长）与首页「命令」卡片共用同一套口径
+    const error = commandTextError(command)
+    if (error) return error
 
+    const text = command.trim()
     return this.launch(
       project,
       { kind: 'custom', key: `custom:${index}`, label: name?.trim() || '自定义命令' },
+      'running',
+      { bin: text, args: [], label: text }
+    )
+  }
+
+  /**
+   * 执行首页「命令」卡片里的一条命令。
+   *
+   * 与自定义命令的区别只在归属与工作目录：它不属于任何项目、不看包管理器，
+   * 整行原文直接交给 shell，在 cwd 下执行（命令卡片没有目录配置，调用方给的是用户主目录）。
+   * 每条命令各自一个终端，日志与项目命令走同一套面板。
+   */
+  runCardCommand(
+    entry: Pick<CommandEntry, 'id' | 'command'>,
+    cwd: string
+  ): string | null {
+    const error = commandTextError(entry.command)
+    if (error) return error
+
+    const text = entry.command.trim()
+    return this.launch(
+      { id: entry.id, path: cwd },
+      // 终端 Tab 显示「命令名 · 运行」；标签用固定动作名，别跟归属名重复一遍
+      { kind: 'command', key: 'command', label: '运行' },
       'running',
       { bin: text, args: [], label: text }
     )
@@ -284,24 +323,24 @@ export class ProcessManager extends EventEmitter {
 
   /** 真正拉起子进程：决定这次输出落到哪个终端，并把状态推给上层 */
   private launch(
-    project: Project,
+    context: LaunchContext,
     target: LaunchTarget,
     status: ProjectStatus,
     inv: Invocation
   ): string | null {
-    if (this.sessions.has(project.id)) {
-      return '该项目已有命令在执行中'
+    if (this.sessions.has(context.id)) {
+      return '已有命令在执行中'
     }
 
     // 项目选定了 nvm 的某个 Node 版本时，把它的目录前置到 PATH：
     // 只影响这个子进程，不动 NVM_SYMLINK，也不需要管理员权限。
-    const requestedNode = project.nodeVersion?.trim()
+    const requestedNode = context.nodeVersion?.trim()
     const nodeRuntime = nodeEnvFor(requestedNode)
 
     let child: ChildProcess
     try {
       child = spawn(inv.bin, inv.args, {
-        cwd: project.path,
+        cwd: context.path,
         shell: true,
         windowsHide: true,
         detached: process.platform !== 'win32',
@@ -315,15 +354,15 @@ export class ProcessManager extends EventEmitter {
       return `无法启动命令：${(err as Error).message}`
     }
 
-    const terminal = terminalKey(project.id, target.key)
+    const terminal = terminalKey(context.id, target.key)
     const session: Session = {
       child,
-      projectId: project.id,
+      projectId: context.id,
       terminal,
       terminalLabel: target.label,
       kind: target.kind,
       command: inv.label,
-      cwd: project.path,
+      cwd: context.path,
       startedAt: Date.now(),
       stdoutBuf: '',
       stderrBuf: '',
@@ -331,7 +370,7 @@ export class ProcessManager extends EventEmitter {
       finished: false,
       readyEmitted: false
     }
-    this.sessions.set(project.id, session)
+    this.sessions.set(context.id, session)
     this.emit('sessions-changed')
 
     // 先把终端建出来（渲染层据此新增/切换 Tab），再清空这个终端上一轮的输出。
@@ -339,7 +378,7 @@ export class ProcessManager extends EventEmitter {
     // 落在新一轮的输出里（改按帧聚合后才有的窗口）。
     this.emit('terminal-open', {
       terminal,
-      projectId: project.id,
+      projectId: context.id,
       kind: target.kind,
       label: target.label
     })
@@ -361,17 +400,17 @@ export class ProcessManager extends EventEmitter {
       startedAt: session.startedAt
     })
 
-    child.stdout?.on('data', (chunk: Buffer) => this.consume(project.id, session, 'out', chunk))
-    child.stderr?.on('data', (chunk: Buffer) => this.consume(project.id, session, 'err', chunk))
+    child.stdout?.on('data', (chunk: Buffer) => this.consume(context.id, session, 'out', chunk))
+    child.stderr?.on('data', (chunk: Buffer) => this.consume(context.id, session, 'err', chunk))
 
     child.on('error', (err) => {
       this.emitLog(session, 'err', `无法启动进程：${err.message}`)
-      this.finish(project.id, session, null, '命令未能执行，请确认包管理器已安装并在 PATH 中')
+      this.finish(context.id, session, null, '命令未能执行，请确认包管理器已安装并在 PATH 中')
     })
 
     child.on('close', (code) => {
-      this.flushBuffers(project.id, session)
-      this.finish(project.id, session, code, null)
+      this.flushBuffers(context.id, session)
+      this.finish(context.id, session, code, null)
     })
 
     return null
@@ -411,7 +450,9 @@ export class ProcessManager extends EventEmitter {
     // 端口只从标准输出里认，错误信息里出现的端口不算服务就绪。
     // 认出来只是为了显示与「端口被占用」的启动前提醒 —— 浏览器一律交给项目脚本自己开。
     if (stream !== 'out') return
-    if (session.kind !== 'start' && session.kind !== 'custom') return
+    if (session.kind !== 'start' && session.kind !== 'custom' && session.kind !== 'command') {
+      return
+    }
     if (session.readyEmitted) return
 
     const server = detectServerAddress(text)

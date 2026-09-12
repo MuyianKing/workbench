@@ -60,9 +60,9 @@ function onKeydown(event: KeyboardEvent): void {
           <div class="quit__head">
             <span class="quit__badge"><el-icon><WarningFilled /></el-icon></span>
             <div class="quit__head-text">
-              <h2 id="quit-title" class="quit__title">仍有项目在运行</h2>
+              <h2 id="quit-title" class="quit__title">仍有进程在运行</h2>
               <p class="quit__subtitle">
-                还有 <b>{{ count }}</b> 个项目的进程正在运行
+                还有 <b>{{ count }}</b> 个进程正在运行
               </p>
             </div>
           </div>
@@ -77,7 +77,7 @@ function onKeydown(event: KeyboardEvent): void {
               @click="choose('stop')"
             >
               <span class="opt__body">
-                <span class="opt__label">关闭所有项目并退出</span>
+                <span class="opt__label">结束全部进程并退出</span>
                 <span class="opt__hint">结束进程树，未保存的命令输出将丢失</span>
               </span>
             </button>
@@ -98,7 +98,7 @@ function onKeydown(event: KeyboardEvent): void {
 <style scoped>
 .quit {
   position: fixed;
-  /* 让开系统绘制的窗口按钮（titleBarStyle: 'hidden'），与其它弹层一致 */
+  /* 让开右上角的窗口按钮（自绘在 TitleBar.vue 里），与对话框一致 */
   inset: var(--h-titlebar) 0 0 0;
   z-index: 4000;
   display: flex;

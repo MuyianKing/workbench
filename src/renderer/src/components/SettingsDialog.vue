@@ -504,20 +504,6 @@ watch(visible, (open) => {
 
         <div class="row">
           <div class="row__text">
-            <span class="row__label">最小化到托盘</span>
-            <span class="row__hint">
-              开启后，最小化窗口会收进托盘。关闭按钮始终是收进托盘，托盘图标可以随时找回窗口。
-            </span>
-          </div>
-          <el-switch
-            :model-value="store.settings.minimizeToTray"
-            size="small"
-            @update:model-value="(value: unknown) => save({ minimizeToTray: Boolean(value) })"
-          />
-        </div>
-
-        <div class="row">
-          <div class="row__text">
             <span class="row__label">全局快捷键</span>
             <span class="row__hint">在任何窗口下唤起 / 隐藏 {{ store.settings.appName }}。</span>
           </div>

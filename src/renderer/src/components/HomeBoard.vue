@@ -28,17 +28,19 @@ import SystemPanel from '@/components/SystemPanel.vue'
 import RecentPanel from '@/components/RecentPanel.vue'
 import ActionsPanel from '@/components/ActionsPanel.vue'
 import QuickLaunch from '@/components/QuickLaunch.vue'
+import CommandPanel from '@/components/CommandPanel.vue'
 import ProjectsPanel from '@/components/ProjectsPanel.vue'
 
 const store = useProjectsStore()
 
-/** 六块卡片的固定清单：id 对应 theme.json，title 用于编辑态的标签 */
+/** 七块卡片的固定清单：id 对应 theme.json，title 用于编辑态的标签 */
 const CARDS: Record<HomeCardId, { title: string; component: Component }> = {
   activity: { title: '活跃度', component: ActivityGraph },
   system: { title: '系统状态', component: SystemPanel },
   recent: { title: '最近使用', component: RecentPanel },
   actions: { title: '快捷操作', component: ActionsPanel },
   quick: { title: '快捷启动', component: QuickLaunch },
+  commands: { title: '命令', component: CommandPanel },
   projects: { title: '项目列表', component: ProjectsPanel }
 }
 
@@ -386,22 +388,40 @@ function onToggleMode(id: HomeCardId): void {
 }
 
 /* ---------- 栏宽把手 ---------- */
+/*
+ * 热区是栏间空隙里一条通高的窄条（缝线任意位置都能拖），看得见的只有正中间那个小竖条：
+ * 卡片下沿的高度把手（34×8）旋转 90°，常显，不用 hover 才把边界画出来。
+ * 竖条宽 8px，窄于栏间空隙，两端都落在缝线里，不会压到两侧卡片。
+ */
 .col__resizer {
   position: absolute;
   top: 0;
   bottom: 0;
   z-index: 10;
   width: 10px;
-  border-radius: var(--r-pill);
   cursor: ew-resize;
+}
+
+.col__resizer::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 8px;
+  height: 34px;
+  transform: translate(-50%, -50%);
+  border: 1px solid var(--ink);
+  border-radius: var(--r-pill);
+  background: var(--bg-surface);
   transition: background 0.15s ease;
 }
 
-.col__resizer:hover {
-  background: var(--border-strong);
+/* 指针落到缝线上就把小竖条填实，提示这条缝可以拖 */
+.col__resizer:hover::after {
+  background: var(--ink);
 }
 
-/* 边界线落在栏间空隙的中线上：把手宽 10px，从「栏宽 + 间距/2」再往回让半个把手 */
+/* 边界线落在栏间空隙的中线上：热区宽 10px，从「栏宽 + 间距/2」再往回让半个热区 */
 .col__resizer.is-left {
   left: calc(var(--left-w) + var(--card-gap, 14px) / 2 - 5px);
 }

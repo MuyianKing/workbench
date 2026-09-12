@@ -9,6 +9,7 @@ import TerminalPanel from '@/components/TerminalPanel.vue'
 import ProjectDrawer from '@/components/ProjectDrawer.vue'
 import AddProjectDialog from '@/components/AddProjectDialog.vue'
 import QuickAppDialog from '@/components/QuickAppDialog.vue'
+import CommandDialog from '@/components/CommandDialog.vue'
 import QuitConfirmDialog from '@/components/QuitConfirmDialog.vue'
 import { useProjectsStore } from '@/stores/projects'
 
@@ -58,6 +59,7 @@ onMounted(() => {
     <ProjectDrawer />
     <AddProjectDialog />
     <QuickAppDialog />
+    <CommandDialog />
     <QuitConfirmDialog />
   </div>
 </template>
