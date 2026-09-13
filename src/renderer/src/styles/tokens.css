@@ -11,6 +11,8 @@
   /* ---------- 画布与层次 ---------- */
   --bg-canvas: #edeff2;
   --bg-surface: #ffffff;
+  /* 面底色的 RGB 三元组：卡片不透明度（--card-alpha，App.vue 按设置写在 .app 上）拼 rgba 用 */
+  --bg-surface-rgb: 255, 255, 255;
   --bg-subtle: #f5f6f8;
   --bg-inset: #e8eaee;
   --border: #e1e4e9;
@@ -148,6 +150,7 @@
 :root[data-theme='dark'] {
   --bg-canvas: #151a21;
   --bg-surface: #1b212a;
+  --bg-surface-rgb: 27, 33, 42;
   --bg-subtle: #20262f;
   --bg-inset: #262d37;
   --border: #2b323d;

@@ -186,7 +186,12 @@ body.is-resizing-terminal * {
   min-width: 0;
   padding: var(--sp-4);
   padding-bottom: var(--sp-2);
-  background: var(--bg-surface);
+  /**
+   * 底色浓度由设置里的「卡片不透明度」驱动：--card-alpha 由 App.vue 按设置写在 .app 上，
+   * 面板与项目卡（ProjectCard 同款写法）一起跟着变；没这个变量时回退 1，就是原来的实底。
+   * 只调背景这一层 —— 边框、阴影与内容不透明度不动，卡片仍然分得清、读得清。
+   */
+  background: rgba(var(--bg-surface-rgb), var(--card-alpha, 1));
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
   box-shadow: var(--shadow-card);
@@ -201,6 +206,16 @@ body.is-resizing-terminal * {
   flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
+}
+
+/**
+ * 卡片内的纵向滚动区：滚动条贴着卡片右缘，而不是缩在内容 padding 里。
+ * 负右 margin 把滚动容器出血到面板边缘，等宽的右 padding 把内容位置兜回来。
+ * 各卡片里真正滚动的那个容器挂这个类（如 .facts、.rows、.panel__body）。
+ */
+.panel__scroll {
+  margin-right: calc(-1 * var(--sp-4));
+  padding-right: var(--sp-4);
 }
 
 .panel__head {

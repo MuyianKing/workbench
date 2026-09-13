@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted } from 'vue'
 import { backgroundVeilAlpha, veilRgbTriplet } from '@shared/workspace-background'
+import { cardSurfaceAlpha } from '@shared/card-opacity'
 import TitleBar from '@/components/TitleBar.vue'
 import AppHeader from '@/components/AppHeader.vue'
 import FilterBar from '@/components/FilterBar.vue'
@@ -30,7 +31,9 @@ const appStyle = computed(() => {
   const style: Record<string, string> = {
     '--ws-image': store.backgroundImage ? `url("${store.backgroundImage}")` : 'none',
     // 图片越浓，蒙版越淡
-    '--ws-veil-alpha': String(backgroundVeilAlpha(store.backgroundOpacity))
+    '--ws-veil-alpha': String(backgroundVeilAlpha(store.backgroundOpacity)),
+    // 卡片底色浓度：面板（.panel）与项目卡拼 rgba 用，跟手渲染靠 store 里的 cardOpacity
+    '--card-alpha': String(cardSurfaceAlpha(store.cardOpacity))
   }
 
   // 蒙版底色：用户在设置里指定了就用它（图片「渐淡」进这个颜色），没指定则留空，

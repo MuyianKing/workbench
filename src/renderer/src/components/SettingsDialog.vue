@@ -11,6 +11,7 @@ import {
   BACKGROUND_OPACITY_MIN
 } from '@shared/workspace-background'
 import { builtinIdOf } from '@shared/wallpaper'
+import { CARD_OPACITY_MAX, CARD_OPACITY_MIN } from '@shared/card-opacity'
 import type { AppSettings, ThemeSource, TopBarStyle } from '@/types'
 import type { ThemeOrigin } from '@/theme-transition'
 
@@ -443,6 +444,28 @@ watch(visible, (open) => {
             </el-radio-button>
           </el-radio-group>
         </div>
+        <div class="row">
+          <div class="row__text">
+            <span class="row__label">卡片不透明度</span>
+            <span class="row__hint">
+              首页卡片与项目卡底色的浓度：越小越透，背景图（或画布）从卡片底下透出来；
+              只动底色，边框、阴影与文字不受影响，100% 是原本的实底。
+            </span>
+          </div>
+          <div class="slider card-slider">
+            <el-slider
+              :model-value="store.cardOpacity"
+              :min="CARD_OPACITY_MIN"
+              :max="CARD_OPACITY_MAX"
+              :step="5"
+              :show-tooltip="false"
+              size="small"
+              @input="(value: unknown) => (store.cardOpacity = Number(value))"
+              @change="(value: unknown) => void store.setCardOpacity(Number(value))"
+            />
+            <span class="slider__value mono">{{ store.cardOpacity }}%</span>
+          </div>
+        </div>
       </section>
 
       <!-- 首页布局 -->
@@ -482,7 +505,7 @@ watch(visible, (open) => {
           <div class="row__text">
             <span class="row__label">卡片间距</span>
             <span class="row__hint">
-              卡片之间的留白（px）：三栏之间、同栏卡片之间、项目列表里的项目卡之间都用它。0 表示紧贴。
+              卡片之间的留白（px）：三栏之间、同栏卡片之间、项目列表里的项目卡之间，以及页面四周的留白都用它。0 表示紧贴。
             </span>
           </div>
           <el-input-number
@@ -725,6 +748,12 @@ watch(visible, (open) => {
   font-size: var(--fs-meta);
   color: var(--ink-2);
   text-align: right;
+}
+
+/* 卡片不透明度这条滑块是行内右列控件，自己定宽，别跟左边说明抢地方 */
+.card-slider {
+  width: 240px;
+  flex-shrink: 0;
 }
 
 /**

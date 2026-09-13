@@ -4,6 +4,7 @@ import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { IPC, type QuitChoice, type WindowState } from '../shared/types'
 import { broadcast } from './broadcast'
 import { data, flushSync, loadData, save } from './store'
+import { flushTokenSync, loadTokenData } from './token-usage'
 import { flushThemeSync, loadTheme } from './theme'
 import { registerIpc } from './ipc'
 import { flushLogBatches, manager } from './manager'
@@ -353,6 +354,8 @@ app.whenReady().then(async () => {
 
   await loadData()
   await loadTheme()
+  // token 快照与主数据同目录,指针文件已就位后才能算出正确路径
+  await loadTokenData()
   await reapLeftovers()
 
   // 打包后设置与 electron-builder 的 appId 一致的 AUMID：任务栏归组、托盘通知都靠它
@@ -394,6 +397,7 @@ app.on('before-quit', (event) => {
   if (!stopProjectsOnQuit || (!hasManaged && externalPortsToStop.length === 0)) {
     flushSync()
     flushThemeSync()
+    flushTokenSync()
     return
   }
 
@@ -420,6 +424,7 @@ async function stopRunningAndQuit(): Promise<void> {
     externalPortsToStop = []
     flushSync()
     flushThemeSync()
+    flushTokenSync()
     app.quit()
   }
 }

@@ -113,7 +113,7 @@ async function remove(item: CommandEntry): Promise<void> {
       </button>
     </el-tooltip>
 
-    <div class="commands__body">
+    <div class="commands__body panel__scroll">
       <p v-if="!commands.length" class="panel__empty">还没有命令<br />点右上角的 + 添加</p>
 
       <ul v-else class="commands__list">

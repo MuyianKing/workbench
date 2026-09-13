@@ -44,7 +44,7 @@
 ## 1. 项目边界
 
 - 定位：Windows 桌面应用（Electron），本地「前端项目控制台」；纯本地工具，不联网、不上报数据。
-- 技术栈：Electron ^33.2.1 + Vue ^3.5.13 + TypeScript ^5.6.3；Element Plus ^2.8.8 + @element-plus/icons-vue ^2.3.1；Pinia ^2.2.6。
+- 技术栈：Electron ^44.3.0 + Vue ^3.5.13 + TypeScript ^5.6.3；Element Plus ^2.8.8 + @element-plus/icons-vue ^2.3.1；Pinia ^2.2.6。唯一的运行时依赖是 better-sqlite3（读 ZCode 本地 sqlite 用，v13 自带全平台 prebuilds，禁止再引入其他 native / 运行时依赖）。
 - 构建 / 打包：Vite ^5.4.11 + electron-vite ^2.3.0；electron-builder ^25.1.8 → Windows x64 NSIS。包管理器固定 npm（`package-lock.json`）。
 - 测试：Vitest ^2.1.9，`environment: 'node'`，仅 `src/**/*.test.ts`。
 - 禁止引入：Tailwind / UnoCSS 等原子化 CSS、Vue Router、axios 或其他请求库、Element Plus 之外的 UI 库、Pinia 之外的状态库、Vitest 之外的测试框架。
@@ -55,7 +55,7 @@
 
 - 主进程在 `src/main/`；IPC 注册入口 [ipc.ts](src/main/ipc.ts)，按业务拆出的通道处理放 `src/main/handlers/`（现有 `settings.ts` 配置、`quick.ts` 快捷启动、`commands.ts` 自定义命令、`window.ts` 窗口控制）。
 - 子进程：`process-manager.ts`（spawn、状态机、按行日志、进程树终止）、`manager.ts`（会话与事件接线）。
-- 持久化：`store.ts`（业务数据 + 设置收敛）、`json-store.ts`（通用 JSON 引擎）；两者只在主进程使用。
+- 持久化：`store.ts`（业务数据 + 设置收敛）、`json-store.ts`（通用 JSON 引擎）、`token-usage.ts`（Token 用量快照，实读 ZCode 本地 sqlite 并 max 合并落盘）；三者只在主进程使用。
 - 预加载 `src/preload/index.ts` 只做 `contextBridge` 白名单，类型声明在 `index.d.ts`；渲染层经 `window.workbench` 调用。
 - 渲染层在 `src/renderer/src/`：公共与页面组件都在 `components/`，Pinia store 在 `stores/`，设计令牌 `styles/tokens.css`，全局样式 `styles/global.css`。
 - 两端共用（类型、IPC 契约、纯函数）放 `src/shared/`；禁止在 `shared/` 里 import electron 或渲染层代码。
@@ -87,7 +87,7 @@
 - 渲染层不直接访问 Node / Electron：一切经 `window.workbench`（preload contextBridge），契约见 [types.ts](src/shared/types.ts) 的 `WorkbenchApi`。
 - API 约定：`invoke` 结果判 `result.ok`，失败取 `result.error` 提示；`checkPort`、`listProjects`、`checkPackageManagers` 等少数通道按约定直接返回具体结构而非 `Result`。
 - 状态管理：跨组件状态集中在 [stores/projects.ts](src/renderer/src/stores/projects.ts) 的 `useProjectsStore`，组件不另建全局状态、不用事件总线传业务数据。
-- 持久化只在主进程：走 `JsonStore`（300ms 防抖 + 临时文件 rename + 退出前 `flushSync`）；数据文件 `workbench-data.json`，目录指针 `data-location.json` 固定在 `%APPDATA%/Workbench/`。
+- 持久化只在主进程：走 `JsonStore`（300ms 防抖 + 临时文件 rename + 退出前 `flushSync`）；数据文件 `workbench-data.json` 与 `token-data.json`（Token 用量按天快照），目录指针 `data-location.json` 固定在 `%APPDATA%/Workbench/`。
 - 路径取值经 `store.ts` 的 `currentDataDir()` / `currentDataFile()`，不要缓存写死（数据目录可整体迁移）。
 - 日志：子进程输出经 `log-batcher` 按帧聚合后推送，渲染层按帧写入 `RingLog`；日志缓冲刻意 `markRaw`、不参与响应式，靠 `logVersion` 触发渲染，读取日志用 `activeLogs`。
 

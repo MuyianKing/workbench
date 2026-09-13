@@ -60,7 +60,7 @@ const recent = computed(() =>
       <span class="panel__count mono">{{ recent.length }}</span>
     </header>
 
-    <ul v-if="recent.length" class="rows">
+    <ul v-if="recent.length" class="rows panel__scroll">
       <li v-for="project in recent" :key="project.id">
         <!-- 整行可点开详情；项目名是个真按钮，键盘 Tab 也能到 -->
         <div class="row" @click="store.openDrawer(project.id)">

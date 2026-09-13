@@ -17,7 +17,7 @@ const hints = computed(() => buildHints(store.settings))
       <span class="eyebrow">快捷操作</span>
     </header>
 
-    <ul class="tips">
+    <ul class="tips panel__scroll">
       <li v-for="item in hints" :key="item.text" class="tip">
         <span class="tip__text truncate" :title="item.text">{{ item.text }}</span>
         <kbd class="tip__key mono">{{ item.hint }}</kbd>

@@ -61,7 +61,7 @@ function tipOf(day: ActivityDay): string {
         </span>
       </div>
 
-      <div ref="scrollEl" class="graph__scroll">
+      <div ref="scrollEl" class="graph__scroll panel__scroll">
         <div class="graph__months">
           <span v-for="(label, i) in months" :key="i" class="graph__month">{{ label }}</span>
         </div>

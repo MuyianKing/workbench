@@ -6,10 +6,17 @@
  * 工作区背景图归 App.vue 的 .app 管（要铺满整窗、从标题栏后面透出来），这里保持透明。
  */
 import HomeBoard from '@/components/HomeBoard.vue'
+import { useProjectsStore } from '@/stores/projects'
+
+const store = useProjectsStore()
 </script>
 
 <template>
-  <main class="home">
+  <!--
+    --card-gap 在最外层定义：页面四周的留白与栏间、栏内的卡片间距是同一个设置值，
+    定义在这里让 HomeBoard 的栏、卡片与把手都从它继承，不用各处再写一份。
+  -->
+  <main class="home" :style="{ '--card-gap': `${store.cardGap}px` }">
     <HomeBoard />
   </main>
 </template>
@@ -18,7 +25,8 @@ import HomeBoard from '@/components/HomeBoard.vue'
 .home {
   display: flex;
   flex-direction: column;
-  padding: var(--sp-5);
+  /* 四周留白与卡片间距同源：设置里改「卡片间距」，页面外圈的空隙跟着变 */
+  padding: var(--card-gap, 14px);
   min-height: 0;
   /*
    * 页面本身不滚：三栏各自撑满可用高度、需要时自己滚，

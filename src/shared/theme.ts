@@ -9,9 +9,10 @@
  * 边界与吸附规则，否则一个手改过的 theme.json 就能把栏宽撑爆、或者拖出一个负高度。
  */
 
-/** 首页七块卡片的稳定 id；数组顺序也是同栏同 order 时的兜底排序 */
+/** 首页八块卡片的稳定 id；数组顺序也是同栏同 order 时的兜底排序 */
 export const HOME_CARD_IDS = [
   'activity',
+  'token',
   'system',
   'recent',
   'actions',
@@ -114,6 +115,7 @@ export const CARD_HEIGHT_MAX = 4000
  */
 export const CARD_HEIGHT_MIN: Record<HomeCardId, number> = {
   activity: 110,
+  token: 160,
   system: 88,
   recent: 88,
   actions: 76,
@@ -123,9 +125,9 @@ export const CARD_HEIGHT_MIN: Record<HomeCardId, number> = {
 }
 
 /**
- * 默认布局（按当前配置固化）：左栏从上到下排常用面板，中间那栏上面是项目列表、
- * 下面是命令，右栏默认空着。项目列表占中间栏的 flex 位，窗口越高能看到的项目卡越多；
- * 左栏的快捷操作吃掉左栏剩余高度，整页随窗口自适应、不留半截空白。
+ * 默认布局（按当前配置固化）：左栏从上到下排活跃度、最近使用、快捷启动、系统状态，
+ * 最底下是吃剩余高度的命令；中间那栏整栏给项目列表（flex），窗口越高能看到的项目卡越多；
+ * 右栏上面是吃剩余高度的 Token 用量、下面是快捷操作。
  */
 export const DEFAULT_THEME: ThemeConfig = {
   version: THEME_VERSION,
@@ -138,9 +140,10 @@ export const DEFAULT_THEME: ThemeConfig = {
     recent: { column: 'left', order: 1, mode: 'fixed', height: 155 },
     quick: { column: 'left', order: 2, mode: 'fixed', height: 98 },
     system: { column: 'left', order: 3, mode: 'fixed', height: 147 },
-    actions: { column: 'left', order: 4, mode: 'flex', height: 180 },
+    commands: { column: 'left', order: 4, mode: 'flex', height: 90 },
     projects: { column: 'center', order: 0, mode: 'flex', height: 600 },
-    commands: { column: 'center', order: 1, mode: 'fixed', height: 90 }
+    token: { column: 'right', order: 0, mode: 'flex', height: 200 },
+    actions: { column: 'right', order: 1, mode: 'fixed', height: 224 }
   }
 }
 

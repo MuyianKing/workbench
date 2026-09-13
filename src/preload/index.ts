@@ -53,6 +53,7 @@ const api: WorkbenchApi = {
     ipcRenderer.invoke(IPC.relocateProject, id, newPath),
   checkProjectPaths: () => ipcRenderer.invoke(IPC.checkProjectPaths),
   getActivity: (): Promise<ActivityCounts> => ipcRenderer.invoke(IPC.activity),
+  getTokenUsage: () => ipcRenderer.invoke(IPC.tokenUsage),
 
   createGroup: (name: string) => ipcRenderer.invoke(IPC.createGroup, name),
   renameGroup: (id: string, name: string) => ipcRenderer.invoke(IPC.renameGroup, id, name),

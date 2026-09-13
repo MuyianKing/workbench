@@ -59,7 +59,7 @@ const nvmLabel = computed(() => {
       <el-icon><Refresh /></el-icon>
     </button>
 
-    <dl class="facts">
+    <dl class="facts panel__scroll">
       <div class="fact">
         <dt>node</dt>
         <dd class="mono">{{ nodeVersion }}</dd>

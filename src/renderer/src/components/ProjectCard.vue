@@ -293,7 +293,8 @@ function onMore(command: string): void {
   gap: 9px;
   min-height: var(--h-project-card);
   padding: var(--sp-3) var(--sp-4) var(--sp-3) calc(var(--sp-4) + 3px);
-  background: var(--bg-surface);
+  /* 与 .panel（global.css）同一条规则：底色浓度跟着设置里的「卡片不透明度」走 */
+  background: rgba(var(--bg-surface-rgb), var(--card-alpha, 1));
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
   box-shadow: var(--shadow-card);

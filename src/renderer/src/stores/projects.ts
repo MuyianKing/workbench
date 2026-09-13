@@ -50,6 +50,7 @@ import {
   type ThemeConfig
 } from '@shared/theme'
 import { clampBackgroundOpacity, sanitizeVeilColor } from '@shared/workspace-background'
+import { clampCardOpacity } from '@shared/card-opacity'
 import {
   sanitizeAccentColor,
   sanitizeAccentInkMode,
@@ -360,6 +361,28 @@ export const useProjectsStore = defineStore('projects', () => {
     if (next === settings.value.workspaceBackgroundOpacity) return
 
     await updateSettings({ workspaceBackgroundOpacity: next })
+  }
+
+  /**
+   * 卡片不透明度：首页工作台面板与项目卡共用的底色浓度。
+   * 与背景浓淡同一套做法：拖动滑块时先跟手，松手才落盘。
+   */
+  const cardOpacity = ref(DEFAULT_SETTINGS.cardOpacity)
+
+  watch(
+    () => settings.value.cardOpacity,
+    (value) => {
+      cardOpacity.value = clampCardOpacity(value)
+    },
+    { immediate: true }
+  )
+
+  async function setCardOpacity(percent: number): Promise<void> {
+    const next = clampCardOpacity(percent)
+    cardOpacity.value = next
+    if (next === settings.value.cardOpacity) return
+
+    await updateSettings({ cardOpacity: next })
   }
 
   /**
@@ -2120,6 +2143,7 @@ export const useProjectsStore = defineStore('projects', () => {
     backgroundName,
     backgroundError,
     backgroundOpacity,
+    cardOpacity,
     wallpapers,
     dataLocation,
     keyword,
@@ -2172,6 +2196,7 @@ export const useProjectsStore = defineStore('projects', () => {
     clearTerminalLogs,
     setTerminalHeight,
     setBackgroundOpacity,
+    setCardOpacity,
     setBackgroundVeil,
     setAccentColor,
     setAccentInk,

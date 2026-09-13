@@ -12,7 +12,8 @@ import {
   type ProjectGroup,
   type ProjectPatch,
   type Result,
-  type RunRecord
+  type RunRecord,
+  type TokenUsageResult
 } from '../shared/types'
 import { satisfiesNodeVersion } from '../shared/node-version'
 import { fail, ok, toResult } from '../shared/result'
@@ -36,6 +37,7 @@ import {
   reveal
 } from './system'
 import { manager } from './manager'
+import { getTokenUsage } from './token-usage'
 import { registerCommandsIpc } from './handlers/commands'
 import { registerQuickIpc } from './handlers/quick'
 import { registerSettingsIpc } from './handlers/settings'
@@ -347,6 +349,11 @@ export function registerIpc(): void {
   })
 
   ipcMain.handle(IPC.activity, () => activity())
+
+  // Token 用量:实读各 AI 工具本地库并合并进快照,失败来源带原因(数据回退快照),不抛错
+  ipcMain.handle(IPC.tokenUsage, (): Promise<Result<TokenUsageResult>> =>
+    toResult(async () => getTokenUsage())
+  )
 
   ipcMain.handle(
     IPC.relocateProject,

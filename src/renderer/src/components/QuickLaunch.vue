@@ -120,7 +120,7 @@ function onDrop(app: QuickApp): void {
       </button>
     </el-tooltip>
 
-    <div class="launch__body">
+    <div class="launch__body panel__scroll">
       <p v-if="!apps.length" class="launch__empty">还没有常用软件，点右上角的 + 添加</p>
 
       <ul v-else class="launch__list">

@@ -14,12 +14,14 @@ import {
   type PersistedData
 } from '../shared/types'
 import { clampTerminalHeight } from '../shared/terminal-height'
+import { clampCardOpacity } from '../shared/card-opacity'
 import {
   clampBackgroundOpacity,
   sanitizeBackgroundPath,
   sanitizeVeilColor
 } from '../shared/workspace-background'
 import { pruneDays, sanitizeActivity, type ActivityCounts } from '../shared/activity'
+import { TOKEN_DATA_FILE_NAME } from '../shared/token-usage'
 import { JsonStore } from './json-store'
 
 const DATA_FILE = 'workbench-data.json'
@@ -102,6 +104,13 @@ export async function migrateDataDir(target: string): Promise<void> {
   await fs.mkdir(dir, { recursive: true })
   await fs.writeFile(join(dir, DATA_FILE), JSON.stringify(persistent.get(), null, 2), 'utf-8')
 
+  // token 用量快照与主数据同目录,迁移时一并带走(还没有就跳过)
+  try {
+    await fs.copyFile(join(currentDataDir(), TOKEN_DATA_FILE_NAME), join(dir, TOKEN_DATA_FILE_NAME))
+  } catch {
+    // 快照尚不存在,不算迁移失败
+  }
+
   customDir = dir
   writeFileSync(pointerPath(), JSON.stringify({ dir }, null, 2), 'utf-8')
 }
@@ -143,6 +152,8 @@ export function sanitizeSettings(raw: unknown): AppSettings {
   value.accentInk = sanitizeAccentInkMode(value.accentInk)
   // 顶部样式：老数据文件里没有这个字段，认不出的取值一律回到默认那一种
   if (!TOP_BAR_STYLES.includes(value.topBarStyle)) value.topBarStyle = DEFAULT_SETTINGS.topBarStyle
+  // 卡片不透明度：老数据文件里没有这个字段，越界 / 非法值落回完全实底
+  value.cardOpacity = clampCardOpacity(value.cardOpacity)
 
   return value
 }

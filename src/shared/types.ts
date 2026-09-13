@@ -3,14 +3,17 @@
 import { ACCENT_COLOR_DEFAULT, ACCENT_INK_DEFAULT, type AccentInkMode } from './accent-color'
 import { APP_NAME_DEFAULT } from './app-name'
 import { TERMINAL_HEIGHT_DEFAULT } from './terminal-height'
+import { CARD_OPACITY_DEFAULT } from './card-opacity'
 import { BACKGROUND_OPACITY_DEFAULT } from './workspace-background'
 import { builtinReference } from './wallpaper'
 import type { ActivityCounts } from './activity'
 import type { BuildTool, PortSource } from './dev-port'
 import type { ThemeConfig } from './theme'
+import type { TokenUsageResult } from './token-usage'
 
 /** 活跃度计数、首页布局也走这里导出，渲染层统一从 @/types 取类型 */
 export type { ActivityCounts, ThemeConfig }
+export type { TokenUsageResult } from './token-usage'
 
 export type ProjectStatus = 'idle' | 'installing' | 'running' | 'building' | 'success' | 'failed'
 
@@ -194,9 +197,9 @@ export interface AppSettings {
    * 空串 / 全空白 / 超长都会在落盘前被收敛，见 shared/app-name.ts。
    */
   appName: string
-  /** 开机自启，默认关闭 */
+  /** 开机自启，默认开启 */
   launchAtLogin: boolean
-  /** 主题，默认跟随系统 */
+  /** 主题，默认暗色 */
   theme: ThemeSource
   /** 全局快捷键是否启用 */
   hotkeyEnabled: boolean
@@ -229,8 +232,13 @@ export interface AppSettings {
    * white / dark 是用户手动钉死的选择。没设主题色时无意义。
    */
   accentInk: AccentInkMode
-  /** 顶部三条栏的样式，默认 band（不透明工具条），设置界面里叫「正常 / 毛玻璃 / 透明」 */
+  /** 顶部三条栏的样式，默认 clear（三条全透），设置界面里叫「正常 / 毛玻璃 / 透明」 */
   topBarStyle: TopBarStyle
+  /**
+   * 卡片不透明度（百分比，越大越实）：首页工作台面板与项目卡共用的底色浓度。
+   * 只管背景这一层，边框、阴影与里面的文字不变；100% 就是原本的实底卡片。
+   */
+  cardOpacity: number
 }
 
 /**
@@ -513,6 +521,8 @@ export interface WorkbenchApi {
   checkProjectPaths: () => Promise<Record<string, boolean>>
   /** 按天聚合的命令执行次数（YYYY-MM-DD -> 次数） */
   getActivity: () => Promise<ActivityCounts>
+  /** Token 用量:实读各 AI 工具本地库并合并进快照;读取失败的来源带原因,数据回退快照 */
+  getTokenUsage: () => Promise<Result<TokenUsageResult>>
   createGroup: (name: string) => Promise<Result<ProjectGroup>>
   renameGroup: (id: string, name: string) => Promise<Result<ProjectGroup>>
   removeGroup: (id: string) => Promise<Result<null>>
@@ -655,6 +665,7 @@ export const IPC = {
   relocateProject: 'project:relocate',
   checkProjectPaths: 'project:check-paths',
   activity: 'stats:activity',
+  tokenUsage: 'stats:token-usage',
   createGroup: 'group:create',
   renameGroup: 'group:rename',
   removeGroup: 'group:remove',
@@ -745,15 +756,16 @@ export type BroadcastChannel =
  */
 export const DEFAULT_SETTINGS: AppSettings = {
   appName: APP_NAME_DEFAULT,
-  launchAtLogin: false,
-  theme: 'light',
+  launchAtLogin: true,
+  theme: 'dark',
   hotkeyEnabled: true,
-  hotkey: 'Control+Shift+M',
+  hotkey: 'Control+M',
   terminalHeight: TERMINAL_HEIGHT_DEFAULT,
-  workspaceBackground: builtinReference('万重山'),
+  workspaceBackground: builtinReference('二次元美女'),
   workspaceBackgroundOpacity: BACKGROUND_OPACITY_DEFAULT,
   workspaceBackgroundVeil: '',
   accentColor: ACCENT_COLOR_DEFAULT,
   accentInk: ACCENT_INK_DEFAULT,
-  topBarStyle: 'band'
+  topBarStyle: 'clear',
+  cardOpacity: CARD_OPACITY_DEFAULT
 }

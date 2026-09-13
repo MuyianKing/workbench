@@ -36,7 +36,8 @@ import {
 function sampleCards(): Record<HomeCardId, CardPlacement> {
   return {
     activity: { column: 'left', order: 0, mode: 'fixed', height: 155 },
-    system: { column: 'left', order: 1, mode: 'fixed', height: 147 },
+    token: { column: 'left', order: 1, mode: 'fixed', height: 200 },
+    system: { column: 'left', order: 2, mode: 'fixed', height: 147 },
     recent: { column: 'right', order: 0, mode: 'fixed', height: 155 },
     actions: { column: 'right', order: 1, mode: 'flex', height: 180 },
     quick: { column: 'center', order: 0, mode: 'fixed', height: 108 },
@@ -136,7 +137,7 @@ describe('sanitizeCardMode', () => {
 })
 
 describe('sanitizeTheme', () => {
-  it('缺哪块补哪块，七块一定齐全', () => {
+  it('缺哪块补哪块，八块一定齐全', () => {
     const result = sanitizeTheme({ cards: { quick: { column: 'left', order: 0, height: 240 } } })
     expect(Object.keys(result.cards).sort()).toEqual([...HOME_CARD_IDS].sort())
     // 与默认的 activity 同栏同 order 0 → 按 id 声明顺序让 activity 在前，quick 顺延到 1；
@@ -178,6 +179,7 @@ describe('sanitizeTheme', () => {
         activity: { column: 'left', order: 5, height: 200 },
         system: { column: 'left', order: 5, height: 200 },
         recent: { column: 'left', order: 0, height: 200 },
+        token: { column: 'right', order: 9, height: 200 },
         quick: { column: 'center', order: 9, height: 200 },
         projects: { column: 'center', order: 3, height: 200 },
         commands: { column: 'right', order: 7, height: 200 },
@@ -189,12 +191,13 @@ describe('sanitizeTheme', () => {
     expect(result.cards.activity.order).toBe(1)
     expect(result.cards.system.order).toBe(2)
     expect(cardIdsInColumn(result.cards, 'center')).toEqual(['projects', 'quick'])
-    expect(cardIdsInColumn(result.cards, 'right')).toEqual(['actions', 'commands'])
+    expect(cardIdsInColumn(result.cards, 'right')).toEqual(['actions', 'commands', 'token'])
     expect(result.cards.actions.order).toBe(0)
     expect(result.cards.commands.order).toBe(1)
+    expect(result.cards.token.order).toBe(2)
   })
 
-  it('默认布局：左栏排常用面板、中栏放项目列表与命令、右栏留空', () => {
+  it('默认布局：左栏排常用面板、中栏整栏给项目列表、右栏放 Token 与快捷操作', () => {
     expect(DEFAULT_THEME.leftWidth).toBe(LEFT_WIDTH_DEFAULT)
     expect(DEFAULT_THEME.rightWidth).toBe(RIGHT_WIDTH_DEFAULT)
     expect(cardIdsInColumn(DEFAULT_THEME.cards, 'left')).toEqual([
@@ -202,14 +205,15 @@ describe('sanitizeTheme', () => {
       'recent',
       'quick',
       'system',
-      'actions'
+      'commands'
     ])
-    expect(cardIdsInColumn(DEFAULT_THEME.cards, 'center')).toEqual(['projects', 'commands'])
-    expect(cardIdsInColumn(DEFAULT_THEME.cards, 'right')).toEqual([])
-    // 中栏项目列表、左栏快捷操作各占一块 flex，吃掉所在栏剩余高度
+    expect(cardIdsInColumn(DEFAULT_THEME.cards, 'center')).toEqual(['projects'])
+    expect(cardIdsInColumn(DEFAULT_THEME.cards, 'right')).toEqual(['token', 'actions'])
+    // 中栏项目列表、左栏命令、右栏 Token 各占一块 flex，吃掉所在栏剩余高度
     expect(DEFAULT_THEME.cards.projects.mode).toBe('flex')
-    expect(DEFAULT_THEME.cards.actions.mode).toBe('flex')
-    expect(DEFAULT_THEME.cards.commands.mode).toBe('fixed')
+    expect(DEFAULT_THEME.cards.token.mode).toBe('flex')
+    expect(DEFAULT_THEME.cards.commands.mode).toBe('flex')
+    expect(DEFAULT_THEME.cards.actions.mode).toBe('fixed')
   })
 })
 
@@ -226,12 +230,12 @@ describe('normalizeOrder', () => {
 describe('moveCard', () => {
   it('跨栏插到指定位置', () => {
     const next = moveCard(sampleCards(), 'recent', 'left', 1)
-    expect(cardIdsInColumn(next, 'left')).toEqual(['activity', 'recent', 'system'])
+    expect(cardIdsInColumn(next, 'left')).toEqual(['activity', 'recent', 'token', 'system'])
   })
 
   it('移到末尾时 index 越界会被夹住', () => {
     const next = moveCard(sampleCards(), 'recent', 'left', 99)
-    expect(cardIdsInColumn(next, 'left')).toEqual(['activity', 'system', 'recent'])
+    expect(cardIdsInColumn(next, 'left')).toEqual(['activity', 'token', 'system', 'recent'])
   })
 
   it('原栏剩下的卡片 order 依然连续', () => {

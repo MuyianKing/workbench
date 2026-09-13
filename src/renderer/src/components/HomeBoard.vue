@@ -24,6 +24,7 @@ import {
 import { useProjectsStore } from '@/stores/projects'
 import BoardCard from '@/components/BoardCard.vue'
 import ActivityGraph from '@/components/ActivityGraph.vue'
+import TokenPanel from '@/components/TokenPanel.vue'
 import SystemPanel from '@/components/SystemPanel.vue'
 import RecentPanel from '@/components/RecentPanel.vue'
 import ActionsPanel from '@/components/ActionsPanel.vue'
@@ -33,9 +34,10 @@ import ProjectsPanel from '@/components/ProjectsPanel.vue'
 
 const store = useProjectsStore()
 
-/** 七块卡片的固定清单：id 对应 theme.json，title 用于编辑态的标签 */
+/** 八块卡片的固定清单：id 对应 theme.json，title 用于编辑态的标签 */
 const CARDS: Record<HomeCardId, { title: string; component: Component }> = {
   activity: { title: '活跃度', component: ActivityGraph },
+  token: { title: 'Token 用量', component: TokenPanel },
   system: { title: '系统状态', component: SystemPanel },
   recent: { title: '最近使用', component: RecentPanel },
   actions: { title: '快捷操作', component: ActionsPanel },
@@ -66,9 +68,7 @@ const columnsStyle = computed(() => {
   return {
     gridTemplateColumns: parts.join(' '),
     '--left-w': `${store.themeConfig.leftWidth}px`,
-    '--right-w': `${store.themeConfig.rightWidth}px`,
-    // 卡片间距由设置里的一个值统一驱动：栏间、栏内卡片、项目列表里的项目卡网格都取它
-    '--card-gap': `${store.cardGap}px`
+    '--right-w': `${store.themeConfig.rightWidth}px`
   }
 })
 
