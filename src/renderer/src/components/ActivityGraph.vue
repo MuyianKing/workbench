@@ -61,7 +61,7 @@ function tipOf(day: ActivityDay): string {
         </span>
       </div>
 
-      <div ref="scrollEl" class="graph__scroll panel__scroll">
+      <div ref="scrollEl" class="graph__scroll">
         <div class="graph__months">
           <span v-for="(label, i) in months" :key="i" class="graph__month">{{ label }}</span>
         </div>
@@ -122,58 +122,19 @@ function tipOf(day: ActivityDay): string {
   --lv-3: #8b96a5;
 }
 
-/**
- * 卡片下沿不留白：横向滚动条即使隐形也在流里占着一条，
- * 再叠一层 padding-bottom 就会多出一截空，索性压到 0。
+/*
+ * 53 列在窄栏里必然横向溢出,滚动能力保留(触摸板 / Shift+滚轮),
+ * 但滚动条本身不渲染 —— 活跃度图是一张完整的「画」,不该被一条横杆切开。
  */
-.panel {
-  padding-bottom: 0;
-}
-
-/* 网格整体左对齐：内容宽度不够一整行时不要被拉散 */
 .graph__scroll {
   flex: 1;
   min-width: 0;
   overflow-x: auto;
+  scrollbar-width: none;
 }
 
-/**
- * 横向滚动条：平时完全隐形，鼠标进到图上才浮出来。
- *
- * hover 只换拇指颜色，不动滚动条的占位 —— overflow-x 保持 auto，
- * 而 53 列必然超出栏宽，轨道自始至终都在，所以进出 hover 时
- * 图的高度与位置都不会跳。
- *
- * 高度压到 8px、拇指边框同步收窄到 2px，显形时的粗细仍是 4px：
- * 细一点，卡片下沿能少占一截空。
- */
 .graph__scroll::-webkit-scrollbar {
-  height: 8px;
-}
-
-.graph__scroll::-webkit-scrollbar-thumb {
-  border-width: 2px;
-  background: transparent;
-}
-
-.graph:hover .graph__scroll::-webkit-scrollbar-thumb {
-  background: rgba(17, 21, 27, 0.2);
-  background-clip: content-box;
-}
-
-.graph:hover .graph__scroll::-webkit-scrollbar-thumb:hover {
-  background: rgba(17, 21, 27, 0.38);
-  background-clip: content-box;
-}
-
-:root[data-theme='dark'] .graph:hover .graph__scroll::-webkit-scrollbar-thumb {
-  background: rgba(199, 208, 219, 0.24);
-  background-clip: content-box;
-}
-
-:root[data-theme='dark'] .graph:hover .graph__scroll::-webkit-scrollbar-thumb:hover {
-  background: rgba(199, 208, 219, 0.44);
-  background-clip: content-box;
+  display: none;
 }
 
 .graph__months,
