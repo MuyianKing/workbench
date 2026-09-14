@@ -2,7 +2,8 @@
 /**
  * 首页「Token 用量」卡片:读各 AI 工具(ZCode)本地用量库的按天聚合快照,
  * 画 今日/本周/本月 概览、趋势条形图与模型/工具占比。
- * 趋势窗口由头部两个日期选择器给出(默认最近 30 天,起点不晚于终点,可选范围是快照里有数据的那段),
+ * 趋势窗口由头部的预设下拉给出(默认「本月」,与 DeepSeek 用量页同款:
+ * 近 7 天 / 近 30 天 / 本月 / 上月 / 自定义;可选的日子限于快照里有记录的那段),
  * 右侧 天/周/月 页签只切换柱子的分桶宽度,窗口本身不变;
  * 占比默认统计整个窗口(全部);点击某根柱子则把占比切到那个桶(那天/那周/那月),再点一下回到全部。
  *
@@ -13,6 +14,7 @@
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { CaretRight, Refresh } from '@element-plus/icons-vue'
+import TokenRangePicker from '@/components/TokenRangePicker.vue'
 import {
   SOURCE_LABELS,
   bucketRangeOf,
@@ -21,6 +23,7 @@ import {
   flattenSources,
   formatPercent,
   formatTokens,
+  resolvePresetRange,
   shareByModel,
   shareBySource,
   shortDayLabel,
@@ -29,24 +32,24 @@ import {
   type TokenBucket,
   type TokenCounters,
   type TokenGranularity,
+  type TokenRangePreset,
   type TokenUsageResult
 } from '@shared/token-usage'
-import { addDays, dayKey } from '@shared/activity'
+import { dayKey } from '@shared/activity'
 import { formatRelative } from '@/format'
 
-/** 三档粒度:只决定柱子的分桶宽度,趋势窗口由头部日期选择器给出 */
+/** 三档粒度:只决定柱子的分桶宽度,趋势窗口由头部的时间维度下拉给出 */
 const GRANULARITIES: Array<{ key: TokenGranularity; label: string }> = [
   { key: 'day', label: '天' },
   { key: 'week', label: '周' },
   { key: 'month', label: '月' }
 ]
 
-/** 趋势窗口的默认长度(天):与「天」档 30 根柱对齐 */
-const DEFAULT_WINDOW_DAYS = 30
-
 const result = ref<TokenUsageResult | null>(null)
 const loading = ref(false)
 const granularity = ref<TokenGranularity>('day')
+/** 生效的时间维度档位;日历上选过区间后即为 custom */
+const rangePreset = ref<TokenRangePreset>('thisMonth')
 /** 趋势窗口的起止日期(本地日期键,含两端);空串表示还没拿到数据 */
 const fromKey = ref('')
 const toKey = ref('')
@@ -88,26 +91,50 @@ const sourceErrorText = computed(() =>
 const updatedAt = computed(() => result.value?.data.updatedAt ?? 0)
 const hasData = computed(() => Object.keys(days.value).length > 0)
 
-/** 快照里最早的一天:日期选择器的可选下限(再往前没有记录,选了只会是一片空白) */
+/** 快照里最早的一天:日历与预设的可选下限(再往前没有记录,选了只会是一片空白) */
 const earliestKey = computed(() => Object.keys(days.value).sort()[0] ?? todayKey.value)
 
 /**
- * 把趋势窗口收敛回可选范围:数据刚到、或快照修剪后选中的区间落到边界之外时调用。
- * 首次收敛到「最近 30 天」,快照不足 30 天就贴着最早那天。
+ * 把趋势窗口收敛回可选范围:终点不晚于今天,起点不早于快照最早那天。
+ * 预设档每次都按「现在」重新解析 —— 跨过午夜后「今天 / 近 7 天 / 本月」才会跟着时钟走;
+ * 自定义档只做边界收敛,不动用户选的那一段。
  */
 function clampRange(): void {
-  const latest = todayKey.value
   const earliest = earliestKey.value
+  const latest = todayKey.value
+  if (rangePreset.value !== 'custom') {
+    const range = resolvePresetRange(rangePreset.value, nowTick.value)
+    if (range) {
+      fromKey.value = range.fromKey
+      toKey.value = range.toKey
+    }
+  }
   if (!fromKey.value || !toKey.value) {
-    const start = dayKey(addDays(nowTick.value, -(DEFAULT_WINDOW_DAYS - 1)))
+    // 数据刚到时还没有窗口:铺满可选的这一段
+    fromKey.value = earliest
     toKey.value = latest
-    fromKey.value = start < earliest ? earliest : start
     return
   }
   if (toKey.value > latest) toKey.value = latest
-  if (fromKey.value < earliest) fromKey.value = earliest
-  // 不变式:起点不晚于终点。选择器已按对方禁掉越界日期,正常操作碰不到,这里是兜底
+  // 起点贴到最早那天:只在不会把起点推到终点之后时才收 ——
+  // 否则(比如选了「昨天」而昨天还没有记录)那一档本就落在没数据的日子上,该照原样显示,而不是挪到有数据的地方
+  if (fromKey.value < earliest && earliest <= toKey.value) fromKey.value = earliest
+  // 不变式:起点不晚于终点。日历已按快照范围禁掉越界日期,正常操作碰不到,这里是兜底
   if (fromKey.value > toKey.value) fromKey.value = toKey.value
+}
+
+/** 下拉里点了某一档:窗口交给预设解析,再按快照范围收敛 */
+function pickPreset(preset: TokenRangePreset): void {
+  rangePreset.value = preset
+  clampRange()
+}
+
+/** 日历里选完一段:这一档随之成为自定义 */
+function pickRange(range: { fromKey: string; toKey: string }): void {
+  rangePreset.value = 'custom'
+  fromKey.value = range.fromKey
+  toKey.value = range.toKey
+  clampRange()
 }
 
 // ---------- 概览 ----------
@@ -138,22 +165,7 @@ watch([granularity, fromKey, toKey], () => {
   selectedBucketIndex.value = null
 })
 
-/** 可选的日期:快照里有记录的那段(到今天就够,未来的日期没有数据) */
-function isSelectable(date: Date): boolean {
-  const key = dayKey(date)
-  return !!key && key >= earliestKey.value && key <= todayKey.value
-}
-
-/** 起点不能晚于已选的终点 */
-function disableFrom(date: Date): boolean {
-  return !isSelectable(date) || dayKey(date) > toKey.value
-}
-
-/** 终点不能早于已选的起点 */
-function disableTo(date: Date): boolean {
-  return !isSelectable(date) || dayKey(date) < fromKey.value
-}
-
+/** 趋势序列:按当前粒度把窗口内的天级数据分桶,没有数据的桶补零 */
 const series = computed(() =>
   buildSeriesRange(days.value, granularity.value, fromKey.value, toKey.value)
 )
@@ -254,6 +266,16 @@ function detailRows(counters: TokenCounters): Array<{ label: string; value: numb
   return rows
 }
 
+/** 全部输入 = 缓存命中的那一半 + 未命中的那一半(计数里的 inputTokens 只记未命中) */
+function inputTotal(counters: TokenCounters): number {
+  return counters.cacheReadTokens + counters.inputTokens
+}
+
+/** 缓存命中率:命中占全部输入的比例 */
+function hitRateLabel(counters: TokenCounters): string {
+  return formatPercent(counters.cacheReadTokens, inputTotal(counters))
+}
+
 function shareWidth(counters: TokenCounters): string {
   return `${(totalTokens(counters) / maxModelTotal.value) * 100}%`
 }
@@ -307,35 +329,19 @@ function detailWidth(value: number, max: number): string {
 
       <div class="chart">
         <div class="chart__head">
-          <!-- 趋势窗口:起止日期自己选,右侧页签只切换柱子的分桶宽度;两个框互为上下限 -->
+          <!-- 趋势窗口:时间维度下拉(预设 + 自定义区间),右侧页签只切换柱子的分桶宽度 -->
           <div class="range" role="group" aria-label="趋势时间范围">
-            <el-date-picker
-              v-model="fromKey"
-              class="range__pick"
-              type="date"
-              size="small"
-              format="MM-DD"
-              value-format="YYYY-MM-DD"
-              placeholder="开始"
-              title="趋势起始日期"
-              :clearable="false"
-              :editable="false"
-              :disabled-date="disableFrom"
+            <TokenRangePicker
+              :from-key="fromKey"
+              :to-key="toKey"
+              :preset="rangePreset"
+              :earliest-key="earliestKey"
+              :latest-key="todayKey"
+              @pick-preset="pickPreset"
+              @pick-range="pickRange"
             />
-            <span class="range__sep" aria-hidden="true">~</span>
-            <el-date-picker
-              v-model="toKey"
-              class="range__pick"
-              type="date"
-              size="small"
-              format="MM-DD"
-              value-format="YYYY-MM-DD"
-              placeholder="结束"
-              title="趋势结束日期"
-              :clearable="false"
-              :editable="false"
-              :disabled-date="disableTo"
-            />
+            <!-- 实际生效的起止日:预设按快照收敛后可能与字面含义不同,这里给出确切窗口 -->
+            <span class="range__text mono">{{ shortDayLabel(fromKey) }} ~ {{ shortDayLabel(toKey) }}</span>
           </div>
           <div class="chart__tabs" role="tablist">
             <button
@@ -360,12 +366,16 @@ function detailWidth(value: number, max: number): string {
             :disabled="totalTokens(bucket.counters) === 0"
           >
             <template #content>
-              <div class="tip mono">
-                <p class="tip__title">{{ bucket.label }}</p>
-                <p>总量 {{ formatTokens(totalTokens(bucket.counters)) }}</p>
-                <p>输入 {{ formatTokens(bucket.counters.inputTokens) }} · 输出 {{ formatTokens(bucket.counters.outputTokens) }}</p>
-                <p>思考 {{ formatTokens(bucket.counters.reasoningTokens) }} · 缓存 {{ formatTokens(bucket.counters.cacheReadTokens + bucket.counters.cacheWriteTokens) }}</p>
-                <p>请求 {{ bucket.counters.requests }} 次</p>
+              <!-- 一行一个口径:输入那行是「缓存命中 / 全部输入 / 命中率」三段,
+                   与展开模型时的构成、下方的占比用的都是同一套口径 -->
+              <div class="token-tip mono">
+                <p class="token-tip__title">{{ bucket.label }}</p>
+                <p>
+                  输入：{{ formatTokens(bucket.counters.cacheReadTokens) }}/{{ formatTokens(inputTotal(bucket.counters)) }}/{{ hitRateLabel(bucket.counters) }}
+                </p>
+                <p>输出：{{ formatTokens(bucket.counters.outputTokens) }}</p>
+                <p>思考：{{ formatTokens(bucket.counters.reasoningTokens) }}</p>
+                <p>请求：{{ bucket.counters.requests }} 次</p>
               </div>
             </template>
             <!-- 点柱子把下方占比切到那个桶,再点一下回到全部 -->
@@ -421,8 +431,7 @@ function detailWidth(value: number, max: number): string {
               <b class="detail__val mono">{{ formatTokens(row.value) }}</b>
             </div>
             <div class="detail__foot">
-              请求 {{ m.counters.requests }} 次 · 缓存命中率
-              {{ formatPercent(m.counters.cacheReadTokens, m.counters.cacheReadTokens + m.counters.inputTokens) }}
+              请求 {{ m.counters.requests }} 次 · 缓存命中率 {{ hitRateLabel(m.counters) }}
             </div>
           </div>
         </template>
@@ -457,8 +466,7 @@ function detailWidth(value: number, max: number): string {
               <b class="detail__val mono">{{ formatTokens(totalTokens(tm.counters)) }}</b>
             </div>
             <div class="detail__foot">
-              请求 {{ s.counters.requests }} 次 · 缓存命中率
-              {{ formatPercent(s.counters.cacheReadTokens, s.counters.cacheReadTokens + s.counters.inputTokens) }}
+              请求 {{ s.counters.requests }} 次 · 缓存命中率 {{ hitRateLabel(s.counters) }}
             </div>
           </div>
         </template>
@@ -586,31 +594,19 @@ function detailWidth(value: number, max: number): string {
   flex-shrink: 0;
 }
 
-/* 趋势窗口:两个窄日期框夹一个「~」,宽度由 .range__pick 压到只放得下「09-14」 */
+/* 趋势窗口:时间维度下拉 + 实际生效的起止日 */
 .range {
   display: flex;
   align-items: center;
-  gap: 3px;
+  gap: var(--sp-2);
   min-width: 0;
 }
 
-.range__sep {
+/* 收敛后的确切窗口(预设可能被快照范围截短,数字要能对得上) */
+.range__text {
   font-size: var(--fs-micro);
   color: var(--ink-3);
-}
-
-/* Element Plus 的日期编辑器默认 220px 宽;日历面板 teleport 到 body,不受这里影响 */
-.range :deep(.el-date-editor.el-input) {
-  width: 72px;
-}
-
-.range :deep(.el-input__wrapper) {
-  padding: 1px 4px;
-}
-
-/* 窄框里省掉图标与文字之间那段默认间距 */
-.range :deep(.el-input__prefix-inner > :last-child) {
-  margin-right: 2px;
+  white-space: nowrap;
 }
 
 .chart__tabs {
@@ -643,8 +639,10 @@ function detailWidth(value: number, max: number): string {
   color: var(--ink);
 }
 
-/*
+/**
  * 柱状图:每个柱子是等宽的弹性槽,槽底对齐;底部一条基线把图「放」在面板上。
+ * 柱体最宽 10px 并在槽里居中 —— 窗口短(本月才十几根)时柱子不该长成一块块方砖,
+ * 槽本身仍是整格的热区,点击与悬停不受影响。
  * 柱体用灰阶,hover 才落主色 —— 彩色在本界面只表达运行状态,这里不做例外。
  * 高度写死不参与伸缩:面板矮了让内容区出滚动条,而不是把图压扁。
  */
@@ -653,7 +651,7 @@ function detailWidth(value: number, max: number): string {
   align-items: flex-end;
   gap: 2px;
   flex: 0 0 auto;
-  height: 120px;
+  height: 90px;
   border-bottom: 1px solid var(--border);
 }
 
@@ -661,6 +659,7 @@ function detailWidth(value: number, max: number): string {
 .bar-slot {
   display: flex;
   align-items: flex-end;
+  justify-content: center;
   flex: 1 1 0;
   height: 100%;
   min-width: 0;
@@ -672,6 +671,7 @@ function detailWidth(value: number, max: number): string {
 
 .bar {
   width: 100%;
+  max-width: 10px;
   border-radius: 2px 2px 0 0;
   background: var(--ink-3);
   opacity: 0.55;
@@ -963,13 +963,21 @@ function detailWidth(value: number, max: number): string {
   color: var(--ink-3);
 }
 
-/* 悬停提示里的行距 */
-.tip p {
+/*
+ * 柱子悬停提示:一行一个口径,行与行之间留一点点,四行才不像挤在一起的一段。
+ * 类名刻意不叫 `tip` —— global.css 里有个同名的 `.tip`(键位提示行,是 flex 行),
+ * 撞上它这几行就会被排成一行,正是这个提示以前那副「一长条」的样子。
+ * 颜色一律继承 Element Plus(dark 效果在暗色主题下反而是浅底),这里不改,免得两种主题下有一边看不清。
+ */
+.token-tip p {
   margin: 0;
 }
 
-.tip__title {
+.token-tip p + p {
+  margin-top: 2px;
+}
+
+.token-tip__title {
   font-weight: 600;
-  margin-bottom: 2px !important;
 }
 </style>

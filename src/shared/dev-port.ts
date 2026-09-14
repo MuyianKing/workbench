@@ -204,3 +204,21 @@ function stripComments(code: string): string {
   }
   return out
 }
+
+/**
+ * 从 dev server 的启动输出里认出监听端口。
+ *
+ * 只有项目配置里手填了 port 时才走配置；没填的时候，日志里的 `localhost:5173` 这类
+ * 输出就是唯一的线索 —— 卡片上显示的端口、以及「端口被占用」的检查都靠它。
+ * 认不出的返回 undefined，调用方据此跳过占用检查。
+ */
+const LOG_PORT_RE = /(?:localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0)[:/](\d{2,5})/i
+
+export function parsePortFromLog(text: string): number | undefined {
+  const matched = LOG_PORT_RE.exec(text)
+  if (!matched) return undefined
+
+  const port = Number(matched[1])
+  if (!Number.isInteger(port) || port < 1 || port > 65535) return undefined
+  return port
+}

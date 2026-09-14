@@ -25,7 +25,7 @@ const store = useProjectsStore()
  *
  * 背景交给 CSS 变量、最终画在 .app 自己的 background 上：
  * 它天然画在所有子元素之下（层级最低），既不占布局、也不接鼠标事件。
- * 图片是主进程压好的 data URL（见 main/background.ts）。
+ * 图片是后端授权、由 webview 按 asset 协议自己读的 URL（见适配层的 assetUrl），不是解码后的 data URL。
  */
 const appStyle = computed(() => {
   const style: Record<string, string> = {

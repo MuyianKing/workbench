@@ -1,6 +1,6 @@
 # 浏览器预览验证工作区
 
-改 UI 时不必每次都把整个 Electron 应用拉起来：把渲染层单独跑在浏览器里、喂一份假数据、截图比对，
+改 UI 时不必每次都把整个 Tauri 应用拉起来：把渲染层单独跑在浏览器里、喂一份假数据、截图比对，
 一轮只要几秒。这套工作区**用完即删**（见「清理约定」），所以要复现时照本文重建。
 
 ## 清理约定
@@ -20,7 +20,10 @@
 | 要验的东西 | 用什么 | 为什么 |
 |---|---|---|
 | 组件布局 / 间距、配色、明暗主题、hover / focus 态 | 浏览器（无头 Edge + CDP） | 快、可脚本化、能放大到像素 |
-| 主进程逻辑：读图与 `nativeImage` 解码缩放、内置壁纸目录发现、路径解析 | esbuild 打成 cjs + 真 `electron.exe` | 浏览器里没有这些 API，预览覆盖不到 |
+| Rust 侧逻辑：图像解码缩放、路径解析、端口判定、进程树终止 | `cargo test`（单测写在同文件的 `#[cfg(test)] mod tests`） | 这些逻辑不经过界面，浏览器预览覆盖不到 |
+
+新加一条通道、或者要确认「界面 → 适配层 → Rust」这一整串真的通了（假数据验证不了这一段），
+见最后一节「在真应用里验证」。
 
 ### 一、把渲染层单独跑起来
 
@@ -34,7 +37,7 @@ npx vite build --config vite.preview.config.ts
 开发态用 `npm run dev:renderer`。注意 vite 7 只监听 IPv6 的 `localhost`，脚本里访问 `127.0.0.1:5274`
 会被拒（浏览器里打开 http://localhost:5274/ 正常）。
 
-### 二、喂假数据：顶替 preload
+### 二、喂假数据：顶替 `window.workbench`
 
 渲染层不直接碰 Node，一切经 `window.workbench`。所以只要在页面里造一个假的 `window.workbench`
 就能让它跑起来，不需要真实项目数据：
@@ -52,7 +55,7 @@ window.workbench = new Proxy(
 - 把错误也暴露到标题上（`document.title = 'MOCK-ERR: ' + err.message`），
   这样截图里就能看见 mock 本身挂了，不会误判成界面问题
 - 假的内置壁纸清单要和 `resources/backgrounds/` 保持一致，并把原图拷进 `dist`；
-  缩略图按主进程的做法压到 360 宽，别拿几兆的原图铺设置面板
+  缩略图按 Rust 侧 `imaging.rs` 的做法压到 360 宽，别拿几兆的原图铺设置面板
 
 #### 只验一个组件
 
@@ -73,19 +76,46 @@ resolve: { alias: { '@': '…/src/renderer/src', '@shared': '…/src/shared' } }
 
 这样一次 build 一两秒，也不用碰仓库里的任何文件。
 
-### 三、主进程逻辑必须在真 Electron 里跑
+### 三、Rust 侧逻辑走 `cargo test`
 
-先把主进程模块打成 cjs，再丢进真的 electron 可执行文件：
+图像解码缩放、路径解析、端口判定、进程树终止这些逻辑现在都在 `src-tauri/src/` 里，
+浏览器预览够不到，也不该为了验它们去拉整个应用：测试就写在与实现同文件的 `#[cfg(test)] mod tests` 中。
 
-```powershell
-node_modules\.bin\esbuild src/main/wallpapers.ts --bundle --platform=node --format=cjs `
-  --external:electron --outfile=.preview/wallpapers.cjs
-node_modules\electron\dist\electron.exe .preview/check-wallpapers.cjs
+```bash
+cargo test --manifest-path src-tauri/Cargo.toml
 ```
 
-**坑**：这样直接起 electron 时，`app` 认为的根目录不是仓库根，相对路径取值会和 `electron-vite dev`
-下不一致。脚本里要显式把根目录固定成仓库根，否则 `builtinDir()` 一类函数找不到
-`resources/backgrounds`，你会以为功能坏了，其实只是路径不对。
+改 Rust 前先关掉正在运行的应用，否则链接会因 exe 被占用而报「拒绝访问」。另外 `cargo test`
+偶尔会卡在链接或执行上（旧二进制被残留句柄锁住、环境拦了刚链接出的 exe），两种绕法见
+[AGENTS.md](../../AGENTS.md) 第 6 节。
+
+**要顺手看一眼真数据时**，别改成临时 `main`：把待验的入参做成测试用例，用 `-- --nocapture`
+打印中间值，或者按下一节「在真应用里验证」连真应用的 CDP 求值。
+
+## 在真应用里验证（Tauri + WebView2）
+
+浏览器预览里 `window.workbench` 是假的，因此「新加的通道到底通没通」它是验不了的 ——
+明明只是命令名拼错、参数名没对上，预览里照样一片正常。这时直接连真应用：
+
+```bash
+WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="--remote-debugging-port=9222" npm run dev
+```
+
+起来之后 `/json` 里就有页面 target，连它的 `webSocketDebuggerUrl` 发 `Runtime.evaluate`
+即可（就是前面的无头配方，只是不用自己起浏览器）。几件顺手的事：
+
+- 通道直接求值最省事：`await window.workbench.getNrmStatus()`，把返回值原样打出来看形状对不对
+- **要驱动界面就去拿 Pinia store**：
+  `document.querySelector('#app').__vue_app__.config.globalProperties.$pinia._s.get('projects')`，
+  然后 `store.openDrawer(id)` / `store.refreshNrm()` 想调哪个调哪个，比在界面上找按钮稳
+- **原生对话框（选目录 / 选文件）必须换成桩**：真点会弹一个 CDP 关不掉的系统弹窗，
+  把 `window.workbench.pickDirectory` 临时改成返回固定路径，就能把「选完之后的处理」整条验完；
+  测完记得把桩换回去，别留在页面里
+- 改 `store` 里的数据会被去抖落盘（400ms），所以验证时**动过的字段要还原**，
+  还原后再等一个防抖周期，否则把测试值写进了用户的数据文件
+- `Runtime.evaluate` 里的字符串常量小心被 shell 吃转义：Windows 路径用正斜杠最省事
+  （项目里的路径工具本来就会归一方向），`\\` 在两层引号之后很可能变成别的字符，
+  那时量到的「相对路径没生效」其实是路径串本身就不是你想的那样
 
 ## 无头截图配方
 
@@ -176,9 +206,20 @@ const lum = (rgb) => rgb.map((c) => {
 - **展开的日历 / 下拉会盖住旁边的控件**：popper 按输入框左缘定位、宽 300+，
   很容易压住同一行右边那个输入框，这时点右边的框其实点在面板上。
   换控件前先发一次 `Input.dispatchKeyEvent` 的 Esc 关掉它。
+- **指针停在图表柱子上会弹出一块深色提示，它会吃掉那一带的合成点击**：`el-tooltip` 挂在柱子上，
+  指针停够 `show-after` 就弹出；此时若指针不动、只让数据变（例如切「天/周/月」页签），
+  提示会原地留着不走 —— 在这套无头环境里它还被摆到 `x=0`，正好压住卡片标题行。
+  症状是「点某个控件毫无反应」，很容易误判成新写的控件坏了。
+  定位办法：`document.elementFromPoint(控件中心)` 看命中的是谁（我这边命中 `DIV.tip`，
+  就是柱子提示的正文）。规避办法：每次点击前先把指针挪到卡片外的空白处再移回来
+  （`Input.dispatchMouseEvent` 的 `mouseMoved`），别让它停在图表上。
+  这是柱子提示本来就有的毛病（跟改动无关，指针一移开就散），别顺着新控件的代码找。
+- **`el-popover` 的 `width` 默认值是 150，而且写成内联 `style="width:150px"`**：
+  内联样式压过样式表，面板内容会直接溢出那 150px 的盒子，画到边框与阴影外面。
+  要按内容自适应，得用 `popper-style="width: auto"` 覆盖（`min-width` 另配样式表改），
+  别只在 CSS 里写 `width` / `min-width`。
 - **注入 HTML 必须用 Node 读写，不要用 PowerShell 的 `Get-Content` / `Set-Content`**：
   它按本地代码页解码，会把中文注释的字节连同换行一起吃掉，注入后的脚本直接语法错误。
-- **直接跑 electron 脚本时根目录不是仓库根**，相对路径要显式固定（见上）。
-- **浏览器预览只覆盖渲染层一半**，涉及 `nativeImage`、文件系统、子进程的都要回真 Electron 验。
+- **浏览器预览只覆盖渲染层一半**：涉及文件系统、子进程、图像解码的都在 Rust 侧，回 `cargo test` 或真应用里验。
 - **截图按"当时在调什么"命名，成对的用 `-before` / `-after`**。这是给当时的自己看的，
   反正是用完即删，别花心思整理成体系。

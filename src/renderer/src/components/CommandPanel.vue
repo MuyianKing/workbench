@@ -240,6 +240,11 @@ async function remove(item: CommandEntry): Promise<void> {
 /*
  * 状态色带：与项目卡左下那条同源，颜色即状态。
  * 不跑到上下边缘，做成一小段圆头，比整条通栏更轻、也更像项目卡的语汇。
+ *
+ * tone 类就挂在 .cmd 自己身上（见模板的 :class），所以选择器必须写成复合的
+ * `.cmd.tone-x` —— 写成后代选择器（`.tone-x .cmd`）永远选不中自己，
+ * 色带会一直停在 idle 灰上，而它旁边的小点却是对的（点确实在后代里），
+ * 表现成「竖条不反映运行状态」。项目卡不是这个结构，那里后代选择器是对的。
  */
 .cmd::before {
   content: '';
@@ -251,12 +256,12 @@ async function remove(item: CommandEntry): Promise<void> {
   opacity: 0.5;
 }
 
-.tone-run .cmd::before {
+.cmd.tone-run::before {
   background: var(--st-run);
   opacity: 1;
 }
 
-.tone-fail .cmd::before {
+.cmd.tone-fail::before {
   background: var(--st-fail);
   opacity: 1;
 }
@@ -283,13 +288,13 @@ async function remove(item: CommandEntry): Promise<void> {
   opacity: 0.45;
 }
 
-.tone-run .cmd__dot {
+.cmd.tone-run .cmd__dot {
   background: var(--st-run);
   opacity: 1;
   animation: cmd-pulse 1.4s ease-in-out infinite;
 }
 
-.tone-fail .cmd__dot {
+.cmd.tone-fail .cmd__dot {
   background: var(--st-fail);
   opacity: 1;
 }

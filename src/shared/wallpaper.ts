@@ -9,7 +9,7 @@
 
 export const BUILTIN_WALLPAPER_PREFIX = 'builtin:'
 
-/** 能当壁纸的后缀：只收 nativeImage 解得开的位图（svg 是母版，不是壁纸） */
+/** 能当壁纸的后缀：只收能解码的位图（svg 是母版，不是壁纸） */
 export const WALLPAPER_EXTENSIONS = ['png', 'jpg', 'jpeg', 'webp', 'bmp', 'gif'] as const
 
 /** 图片文件名 → 壁纸 id（去掉最后一段后缀） */
@@ -46,7 +46,7 @@ export function builtinIdOf(value: unknown): string | null {
   return isSafeWallpaperId(id) ? id : null
 }
 
-/** 这个文件名能不能当壁纸（按后缀判断，真正的解码能力由 nativeImage 说了算） */
+/** 这个文件名能不能当壁纸（按后缀判断，真正的解码能力由后端 imaging.rs 的 image crate 说了算） */
 export function isWallpaperFile(fileName: unknown): boolean {
   if (typeof fileName !== 'string') return false
 

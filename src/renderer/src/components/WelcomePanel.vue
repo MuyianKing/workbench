@@ -91,10 +91,6 @@ const hints = computed(() => buildHints(store.settings))
             <dd class="mono">{{ store.packageManagers?.node || '未检测到' }}</dd>
           </div>
           <div class="fact">
-            <dt>electron</dt>
-            <dd class="mono">{{ versions.electron }}</dd>
-          </div>
-          <div class="fact">
             <dt>chromium</dt>
             <dd class="mono">{{ versions.chrome }}</dd>
           </div>

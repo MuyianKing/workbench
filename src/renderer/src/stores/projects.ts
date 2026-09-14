@@ -13,8 +13,10 @@ import {
   type CommandPatch,
   type DataLocation,
   type EffectiveTheme,
+  type InstallableGlobalTool,
   type InstallablePackageManager,
   type LogLine,
+  type NrmStatus,
   type NvmStatus,
   type PackageManager,
   type PackageManagerStatus,
@@ -179,12 +181,16 @@ export const useProjectsStore = defineStore('projects', () => {
   }
 
   const packageManagers = ref<PackageManagerStatus | null>(null)
-  /** 正在通过 npm 全局安装的包管理器，null 表示空闲 */
-  const pmInstalling = ref<InstallablePackageManager | null>(null)
+  /** 正在通过 npm 全局安装的全局工具（包管理器 / nrm），null 表示空闲 */
+  const pmInstalling = ref<InstallableGlobalTool | null>(null)
   /** 安装过程的最新一行 npm 输出，仅安装期间有值 */
   const pmInstallLog = ref('')
   /** nvm 探测结果：可选的项目级 Node 版本来自这里 */
   const nvm = ref<NvmStatus | null>(null)
+  /** nrm 探测结果：当前 npm 镜像与可切换的清单来自这里 */
+  const nrm = ref<NrmStatus | null>(null)
+  /** 正在切换的镜像名，null 表示空闲 */
+  const nrmSwitching = ref<string | null>(null)
   const ready = ref(false)
   /** 项目目录是否仍然存在；尚未检查过的项目按有效处理 */
   const pathValidity = ref<Record<string, boolean>>({})
@@ -335,8 +341,8 @@ export const useProjectsStore = defineStore('projects', () => {
   /**
    * 工作区背景。
    *
-   * 设置里存的是磁盘路径，这里拿到的永远是主进程压好的 data URL（见 stores 上方说明与
-   * main/background.ts）：图片不进数据文件，换图只是换一个字符串。
+   * 设置里存的是磁盘路径，这里拿到的是后端授权、由 webview 按 asset 协议读的 URL（见 stores 上方说明
+   * 与适配层的 assetUrl）：图片不进数据文件，换图只是换一个字符串。
    * 图片被删、被换成读不出来的格式时留空并把原因记在 backgroundError 里，设置界面据此提示。
    */
   const backgroundImage = ref('')
@@ -433,7 +439,7 @@ export const useProjectsStore = defineStore('projects', () => {
       return true
     }
 
-    // 同一张图已经在手上：选完图落盘会再触发一次，没必要把几兆的 data URL 再搬一遍
+    // 同一张图已经在手上：选完图落盘会再触发一次，没必要把同一个 asset URL 再解析一遍
     if (path === backgroundPath.value && backgroundImage.value) return true
 
     const result = await window.workbench.loadBackground(path)
@@ -445,7 +451,7 @@ export const useProjectsStore = defineStore('projects', () => {
       return false
     }
 
-    backgroundImage.value = result.data.dataUrl
+    backgroundImage.value = result.data.url
     backgroundName.value = result.data.name
     backgroundPath.value = result.data.path
     backgroundError.value = ''
@@ -462,13 +468,22 @@ export const useProjectsStore = defineStore('projects', () => {
   /**
    * 随应用发布的内置壁纸（resources/backgrounds 下的那几张）。
    *
-   * 只在启动时拉一次：它们的缩略图是主进程现压的 data URL，没必要每次开设置都重来一遍。
+   * 每张的缩略图都要现解码 + 现压（7 张实测 270ms，全在 Rust 那边），而只有设置面板会读它，
+   * 所以不跟着启动一起拉：面板第一次打开时按需取一次，之后一直用这份缓存。
    * 目录里没有图时是空数组，设置里那一栏自己会收起来。
    */
   const wallpapers = ref<BuiltinWallpaper[]>([])
+  let wallpapersLoaded = false
 
-  async function refreshWallpapers(): Promise<void> {
-    wallpapers.value = await window.workbench.listWallpapers()
+  /** 打开设置面板时调一次；取不到就下次再试，不因为一组缩略图让面板打不开 */
+  async function ensureWallpapers(): Promise<void> {
+    if (wallpapersLoaded) return
+    try {
+      wallpapers.value = await window.workbench.listWallpapers()
+      wallpapersLoaded = true
+    } catch (error) {
+      console.warn('[workbench] 读取内置壁纸失败', error)
+    }
   }
 
   /**
@@ -643,7 +658,7 @@ export const useProjectsStore = defineStore('projects', () => {
   /**
    * 日志按帧批量写入。
    *
-   * 主进程已经按帧聚合过一次（见 main/log-batcher.ts），这里再兜一层是因为
+   * Rust 侧已经按帧聚合过一次（见 src-tauri/src/session.rs），这里再兜一层是因为
    * 同一条通道上还混着系统提示与安装输出；而且批次到了以后要一次性写进环形缓冲、
    * 只把版本号加一次，让 Vue 每帧至多重新渲染一次。
    */
@@ -882,8 +897,12 @@ export const useProjectsStore = defineStore('projects', () => {
     await loadData()
     await subscribeEvents()
 
-    packageManagers.value = await window.workbench.checkPackageManagers()
-    await refreshNvm()
+    // 系统状态卡片要的这两项探测不挡首屏：它们各自要起子进程（npm / yarn / pnpm --version）
+    // 与扫一遍 nvm 目录，加起来几百毫秒到几秒，而首屏只关心项目列表。让它们自己跑，
+    // 回来再填进卡片就行 —— 挡在这里纯属白等。
+    void refreshPackageManagers()
+    void refreshNvm()
+    void refreshNrm()
     ready.value = true
     snapshotProjects()
 
@@ -913,14 +932,12 @@ export const useProjectsStore = defineStore('projects', () => {
     applyTheme(resolveTheme(settings.value), { animate: false })
     applyThemeConfig(await window.workbench.getThemeConfig())
 
-    // 其余与外观无关，并行拉完即可：内置壁纸缩略图要现压 7 张图（实测 270ms），
-    // 而且只有设置弹窗会读它，再挡在主题前面纯属白等。
+    // 其余与外观无关，并行拉完即可。
     const [location, counts] = await Promise.all([
       window.workbench.getDataLocation(),
       window.workbench.getActivity(),
       refreshQuickApps(),
-      refreshCommands(),
-      refreshWallpapers()
+      refreshCommands()
     ])
     dataLocation.value = location
     activity.value = counts
@@ -1032,26 +1049,35 @@ export const useProjectsStore = defineStore('projects', () => {
     packageManagers.value = await window.workbench.checkPackageManagers()
   }
 
+  /** 重新探测 nrm：装完 / 换完镜像后那一行状态靠它刷新 */
+  async function refreshNrm(): Promise<void> {
+    nrm.value = await window.workbench.getNrmStatus()
+  }
+
   /**
-   * 用 npm 全局安装 yarn / pnpm。
+   * 用 npm 全局安装一个工具（yarn / pnpm / nrm）。
    *
-   * 主进程装完会顺带重探一次并把结果带回来，所以这里只是兜底再刷一遍 ——
-   * 失败的情况也一样刷，例如装成功了但 PATH 还没生效，至少状态是准的。
+   * 三个包共一条通道：都要开系统终端、都要把 npm 的输出顶在系统状态卡片上，
+   * 区别只在装完刷哪一项探测结果。装的事交给适配层（它知道走哪条命令），
+   * 这里只负责界面上的状态与提示。
+   *
+   * 安装结果以「重新探测」为准而不是 npm 的退出码：npm 有时装了包仍返回非 0。
+   * 失败的情况也照样刷一遍 —— 例如装成功了但 PATH 还没生效，至少状态是准的。
    */
-  async function installPackageManager(pm: InstallablePackageManager): Promise<boolean> {
+  async function installGlobalTool(tool: InstallableGlobalTool): Promise<boolean> {
     if (pmInstalling.value) return false
 
-    const terminal = openSystemTerminal(`安装 ${pm}`)
+    const terminal = openSystemTerminal(`安装 ${tool}`)
     // 同一轮接一轮地装不同的包时，日志从零开始，别把上一次的输出混进来
     onClear({ terminal: SYSTEM_PM_TERMINAL })
 
     const startedAt = Date.now()
     terminal.status = 'installing'
-    terminal.currentCommand = `npm install -g ${pm}`
+    terminal.currentCommand = `npm install -g ${tool}`
     terminal.startedAt = startedAt
-    appendSystemLog(`npm install -g ${pm}`, 'cmd')
+    appendSystemLog(`npm install -g ${tool}`, 'cmd')
 
-    pmInstalling.value = pm
+    pmInstalling.value = tool
     pmInstallLog.value = ''
 
     const settle = (status: 'success' | 'failed', note?: string): void => {
@@ -1061,26 +1087,65 @@ export const useProjectsStore = defineStore('projects', () => {
       if (note) appendSystemLog(note, status === 'failed' ? 'err' : 'sys')
     }
 
+    const refresh = (): Promise<void> =>
+      tool === 'nrm' ? refreshNrm() : refreshPackageManagers()
+
     try {
-      const result = await window.workbench.installPackageManager(pm)
-      await refreshPackageManagers()
+      const result =
+        tool === 'nrm'
+          ? await window.workbench.installNrm()
+          : await window.workbench.installPackageManager(tool)
+      await refresh()
       if (!result.ok) {
-        settle('failed', result.error ?? `${pm} 安装失败`)
-        ElMessage.error(result.error ?? `安装 ${pm} 失败`)
+        settle('failed', result.error ?? `${tool} 安装失败`)
+        ElMessage.error(result.error ?? `安装 ${tool} 失败`)
         return false
       }
-      settle('success', `${pm} 安装完成，已刷新环境状态`)
-      ElMessage.success(`${pm} 安装完成`)
+      settle('success', `${tool} 安装完成，已刷新环境状态`)
+      ElMessage.success(`${tool} 安装完成`)
       return true
     } catch (err) {
-      await refreshPackageManagers()
-      const message = (err as Error).message || `安装 ${pm} 失败`
+      await refresh()
+      const message = (err as Error).message || `安装 ${tool} 失败`
       settle('failed', message)
       ElMessage.error(message)
       return false
     } finally {
       pmInstalling.value = null
       pmInstallLog.value = ''
+    }
+  }
+
+  function installPackageManager(pm: InstallablePackageManager): Promise<boolean> {
+    return installGlobalTool(pm)
+  }
+
+  /** 一键安装 nrm；与包管理器共用一条安装通道，一次只装一个 */
+  function installNrm(): Promise<boolean> {
+    return installGlobalTool('nrm')
+  }
+
+  /**
+   * 换一个 npm 镜像源（nrm use）。
+   *
+   * 改的是 npm 的全局配置，此后所有不带自己的 .npmrc 的项目都走新源，
+   * 所以成功与失败都给一句明确反馈，并把重新探测的结果落回 nrm 那一行。
+   */
+  async function useNrmRegistry(name: string): Promise<boolean> {
+    if (nrmSwitching.value || !name) return false
+
+    nrmSwitching.value = name
+    try {
+      const result = await window.workbench.useNrmRegistry(name)
+      if (!result.ok) {
+        ElMessage.error(result.error ?? `切换到 ${name} 失败`)
+        return false
+      }
+      nrm.value = result.data ?? nrm.value
+      ElMessage.success(`npm 镜像已切到 ${name}`)
+      return true
+    } finally {
+      nrmSwitching.value = null
     }
   }
 
@@ -2145,6 +2210,7 @@ export const useProjectsStore = defineStore('projects', () => {
     backgroundOpacity,
     cardOpacity,
     wallpapers,
+    ensureWallpapers,
     dataLocation,
     keyword,
     groupFilter,
@@ -2159,6 +2225,8 @@ export const useProjectsStore = defineStore('projects', () => {
     pmInstalling,
     pmInstallLog,
     nvm,
+    nrm,
+    nrmSwitching,
     ready,
     settings,
     effectiveTheme,
@@ -2176,7 +2244,10 @@ export const useProjectsStore = defineStore('projects', () => {
     reorderGroups,
     refreshNvm,
     refreshPackageManagers,
+    refreshNrm,
     installPackageManager,
+    installNrm,
+    useNrmRegistry,
     installedNodeVersion,
     init,
     changeDataDir,

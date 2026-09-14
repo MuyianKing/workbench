@@ -12,12 +12,15 @@ import {
   maxCounters,
   mergeDays,
   monthKeyOf,
+  presetLabel,
   pruneTokenDays,
+  resolvePresetRange,
   sanitizeTokenData,
   shareByModel,
   shareBySource,
   shortDayLabel,
   sumRange,
+  TOKEN_RANGE_PRESETS,
   totalTokens,
   weekKeyOf,
   type TokenCounters,
@@ -336,5 +339,54 @@ describe('周期与聚合', () => {
     expect(shares.map((share) => share.key)).toEqual(['claude', 'zcode'])
     expect(shares[0].counters.inputTokens).toBe(30)
     expect(shares[1].counters.outputTokens).toBe(2)
+  })
+})
+
+describe('时间维度预设', () => {
+  /** 固定锚点:2026-09-14 下午,跨天与跨月都由这个时刻推 */
+  const NOW = new Date(2026, 8, 14, 15, 30)
+
+  it('近 7 天 / 近 30 天含今天,长度分别是 7 与 30 天', () => {
+    expect(resolvePresetRange('last7', NOW)).toEqual({ fromKey: '2026-09-08', toKey: '2026-09-14' })
+    expect(resolvePresetRange('last30', NOW)).toEqual({ fromKey: '2026-08-16', toKey: '2026-09-14' })
+  })
+
+  it('本月从 1 号起算,上月是整月', () => {
+    expect(resolvePresetRange('thisMonth', NOW)).toEqual({ fromKey: '2026-09-01', toKey: '2026-09-14' })
+    expect(resolvePresetRange('lastMonth', NOW)).toEqual({ fromKey: '2026-08-01', toKey: '2026-08-31' })
+  })
+
+  it('上月跨年、月末三十一天、闰年二月都对', () => {
+    // 3 月 31 日退一个月是 2 月,不能落到 3 月 3 日
+    expect(resolvePresetRange('lastMonth', new Date(2026, 2, 31))).toEqual({
+      fromKey: '2026-02-01',
+      toKey: '2026-02-28'
+    })
+    expect(resolvePresetRange('lastMonth', new Date(2027, 0, 5))).toEqual({
+      fromKey: '2026-12-01',
+      toKey: '2026-12-31'
+    })
+    expect(resolvePresetRange('lastMonth', new Date(2028, 2, 10))).toEqual({
+      fromKey: '2028-02-01',
+      toKey: '2028-02-29'
+    })
+  })
+
+  it('自定义没有固定区间,时间戳非法时返回 null', () => {
+    expect(resolvePresetRange('custom', NOW)).toBeNull()
+    expect(resolvePresetRange('last7', new Date(NaN))).toBeNull()
+  })
+
+  it('面板里的五档与界面名一一对应', () => {
+    expect(TOKEN_RANGE_PRESETS.map((option) => option.key)).toEqual([
+      'last7',
+      'last30',
+      'thisMonth',
+      'lastMonth',
+      'custom'
+    ])
+    for (const option of TOKEN_RANGE_PRESETS) {
+      expect(presetLabel(option.key)).toBe(option.label)
+    }
   })
 })

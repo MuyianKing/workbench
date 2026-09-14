@@ -1,4 +1,4 @@
-/** 主进程与渲染进程共用的类型定义与 IPC 契约 */
+/** 适配层与渲染层共用的类型定义与 IPC 契约 */
 
 import { ACCENT_COLOR_DEFAULT, ACCENT_INK_DEFAULT, type AccentInkMode } from './accent-color'
 import { APP_NAME_DEFAULT } from './app-name'
@@ -26,6 +26,14 @@ export type PackageManager = 'npm' | 'yarn' | 'pnpm'
 export type InstallablePackageManager = Exclude<PackageManager, 'npm'>
 
 export type PackageManagerSetting = 'auto' | PackageManager
+
+/**
+ * 能在应用内一键安装的全局工具。
+ *
+ * nrm 是「npm 镜像源管理器」，与包管理器不是一类东西，但安装方式一样（`npm install -g`），
+ * 所以放进同一个联合里共用「一次只装一个」的那条安装通道。
+ */
+export type InstallableGlobalTool = InstallablePackageManager | 'nrm'
 
 export type ThemeSource = 'system' | 'light' | 'dark'
 
@@ -144,6 +152,19 @@ export interface QuickAppPatch {
 }
 
 /**
+ * 程序图标的缓存条目（key 是程序路径，见 shared/icon-cache.ts）。
+ *
+ * 抽一张图标要打开程序、解析 PE 资源、编码 PNG 再 base64（实测 .lnk 每个 27~53ms），
+ * 而图标几乎不变，所以连图标带判断依据一起落盘：修改时间没变就直接用，不再重抽。
+ */
+export interface IconCacheEntry {
+  /** 程序文件的修改时间（毫秒，Unix 纪元）：与图标一一对应，程序升级换了图标就自动失效 */
+  mtime: number
+  /** 内联图片（data:image/png;base64,…），与界面直接可用的形状一致 */
+  dataUrl: string
+}
+
+/**
  * 首页「命令」卡片里的一条命令。
  *
  * 与项目是两种东西：这里只有「一行命令 + 一个可选的监听端口」，没有目录、包管理器、
@@ -253,6 +274,19 @@ export interface ActiveSession {
   startedAt: number
   /** 派生它的应用进程 PID；这个进程还活着就说明会话有主，不能当残留处理 */
   ownerPid: number
+  /**
+   * 宿主应用进程的创建时间（毫秒，Unix 纪元）。
+   * 光有 ownerPid 不够：PID 会被复用，一个复用了旧 PID 的新进程会让这条记录
+   * 被误判成「有主」而被永远保留，残留进程也就永远清不掉。缺失时按「认不出宿主」处理。
+   */
+  ownerCreatedAt?: number
+  /**
+   * 子进程的创建时间（毫秒，Unix 纪元）。
+   * 残留清理靠它确认「这个 PID 还是不是当初那个进程」—— PID 会被系统复用，
+   * 只按 PID 杀有可能杀到一个毫不相干的新进程。老数据文件里没有这个字段，
+   * 缺失时一律跳过（宁可漏清，不可杀错）。
+   */
+  processCreatedAt?: number
 }
 
 /** 持久化到磁盘的数据结构 */
@@ -261,6 +295,11 @@ export interface PersistedData {
   groups: ProjectGroup[]
   /** 首页「快捷启动」的常用软件 */
   quickApps: QuickApp[]
+  /**
+   * 程序图标的 base64 缓存，key 是程序路径。
+   * 省掉每次启动重新抽取一遍图标（见 shared/icon-cache.ts）。
+   */
+  iconCache?: Record<string, IconCacheEntry>
   /** 首页「命令」卡片里的命令，与项目相互独立 */
   commands: CommandEntry[]
   settings: AppSettings
@@ -382,8 +421,8 @@ export interface ProcessLogEvent {
  * 日志事件在 IPC 上的载荷。
  *
  * 单条形式仍然合法（系统提示、包管理器安装输出这类零散消息直接发一条），
- * 但命令输出走数组：狂刷日志时逐行 send 会让主进程和渲染进程互相拖累，
- * 主进程按帧聚合后整批发一次（见 main/log-batcher.ts）。
+ * 但命令输出走数组：狂刷日志时逐行发会让后端与渲染层互相拖累，
+ * Rust 侧按帧聚合后整批发一次（见 src-tauri/src/session.rs）。
  */
 export type ProcessLogPayload = ProcessLogEvent | ProcessLogEvent[]
 
@@ -416,7 +455,7 @@ export interface PackageManagerStatus {
 
 /** 包管理器安装过程中的一行输出，用于在界面上显示进度 */
 export interface PmInstallLogEvent {
-  pm: InstallablePackageManager
+  pm: InstallableGlobalTool
   text: string
 }
 
@@ -435,7 +474,7 @@ export interface NodeCheckResult {
  * nvm 探测结果（只读）。
  *
  * 这里刻意不调用 nvm.exe：nvm-windows 会先用 GetConsoleMode 检查 stdout 是不是真终端，
- * 从 Electron 这类 GUI 进程里 spawn 只会拿到「should be run from a terminal」然后静默退出；
+ * 从 GUI 进程里 spawn 只会拿到「should be run from a terminal」然后静默退出；
  * 而 nvm use 又要管理员权限去改软链。所以只读 nvm 的目录和软链，切换靠给子进程注入 PATH。
  */
 export interface NvmStatus {
@@ -449,6 +488,37 @@ export interface NvmStatus {
   current?: string
   /** 已安装版本，按版本号从高到低 */
   versions: string[]
+  /** 探测失败的原因，用于界面提示 */
+  error?: string
+}
+
+/**
+ * nrm 管理下的一个 npm 镜像源。
+ * 清单本身不在这里维护：名字与地址由 `nrm ls` 给出（taobao 改名 npmmirror 就是一次），
+ * 在代码里再抄一份必然过期。
+ */
+export interface NrmRegistry {
+  name: string
+  url: string
+  /** 是不是 npm 当前正在用的那个 */
+  current: boolean
+}
+
+/**
+ * nrm（npm 镜像源管理器）探测结果。
+ *
+ * nrm 是个全局 npm 包，自己带一份镜像清单，当前用的是哪个写在 npm 的配置里，
+ * 所以「装没装」「有哪些镜像」「当前是哪个」三件事都要问它。
+ */
+export interface NrmStatus {
+  /** 是否检测到 nrm */
+  available: boolean
+  /** nrm 版本（探不到版本串但命令可用时为空） */
+  version?: string
+  /** 当前镜像名；认不出来（例如 registry 被手工改成了清单之外的值）时为空 */
+  current?: string
+  /** 可切换的镜像清单；nrm 不可用或者读不出时为[] */
+  registries: NrmRegistry[]
   /** 探测失败的原因，用于界面提示 */
   error?: string
 }
@@ -470,8 +540,13 @@ export interface BackgroundImage {
   path: string
   /** 文件名，用于界面提示 */
   name: string
-  /** data:image/jpeg;base64,… */
-  dataUrl: string
+  /**
+   * 可以直接放进 CSS / `img.src` 的 URL。
+   *
+   * 是 asset 协议的 URL（webview 按文件加载，我们不碰像素），**不是** data URL ——
+   * 详见适配层 loadBackground 里为什么改的。
+   */
+  url: string
 }
 
 /**
@@ -496,8 +571,8 @@ export interface BuiltinWallpaper {
  *
  * 设置只能经异步 IPC 拿到，而窗口在渲染层第一帧之后就显示了 —— 只走异步那条路的话，
  * 用户会先看见一份默认外观（亮色、无主题色、默认布局），几十到几百毫秒后才被换成自己的
- * 设置，看上去就是「启动时切换了一次」。主进程在创建窗口之前已经读完设置，所以这里把
- * 决定第一帧的几份配置一次性同步交给渲染层（见 preload 的 getBootstrap）。
+ * 设置，看上去就是「启动时切换了一次」。Rust 侧在创建窗口之前已经读完设置，所以这里把
+ * 决定第一帧的几份配置一次性同步交给渲染层（见适配层的 getBootstrap）。
  */
 export interface BootstrapSnapshot {
   /** 实际生效的明暗；system 已按系统解析成 light / dark，与窗口底色用的是同一个值 */
@@ -506,10 +581,14 @@ export interface BootstrapSnapshot {
   themeConfig: ThemeConfig
 }
 
-/** preload 向渲染进程暴露的 API */
+/** `window.workbench` 向渲染层暴露的 API（由适配层实现） */
 export interface WorkbenchApi {
-  versions: { electron: string; node: string; chrome: string }
-  pickDirectory: () => Promise<string | null>
+  versions: { node: string; chrome: string }
+  /**
+   * 挑一个目录。
+   * title 用于给不同用途换标题（选项目目录 / 选输出目录），不传就是「选择项目目录」。
+   */
+  pickDirectory: (title?: string) => Promise<string | null>
   scanProject: (dirPath: string) => Promise<Result<ScanResult>>
   listProjects: () => Promise<{ projects: Project[]; groups: ProjectGroup[] }>
   addProject: (input: AddProjectInput) => Promise<Result<Project>>
@@ -563,6 +642,12 @@ export interface WorkbenchApi {
   checkNodeVersion: (id: string) => Promise<NodeCheckResult>
   /** 读取 nvm 已安装的 Node 版本，用于项目级选择 */
   getNvmStatus: () => Promise<NvmStatus>
+  /** nrm 状态：装没装、当前镜像、可切换的镜像清单 */
+  getNrmStatus: () => Promise<NrmStatus>
+  /** 用 npm 全局安装 nrm；返回装完（或装失败）后重新探测的结果 */
+  installNrm: () => Promise<Result<NrmStatus>>
+  /** 换一个 npm 镜像源（nrm use <name>）；返回切换后重新探测的结果 */
+  useNrmRegistry: (name: string) => Promise<Result<NrmStatus>>
   install: (id: string) => Promise<Result<null>>
   start: (id: string) => Promise<Result<null>>
   build: (id: string, script: string) => Promise<Result<null>>
@@ -693,6 +778,9 @@ export const IPC = {
   killPortProcess: 'system:kill-port',
   checkNodeVersion: 'system:check-node',
   nvmStatus: 'system:nvm-status',
+  nrmStatus: 'system:nrm-status',
+  nrmInstall: 'system:nrm-install',
+  nrmUse: 'system:nrm-use',
   getSettings: 'settings:get',
   updateSettings: 'settings:update',
   pickBackground: 'settings:pick-background',

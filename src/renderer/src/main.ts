@@ -11,9 +11,20 @@ import './styles/global.css'
 
 import App from './App.vue'
 import { applyBootstrapTheme } from './bootstrap'
+import { initState, installTauriWorkbench, reapOrphansOnStart } from './workbench'
 
-// 创建应用之前先把明暗与主题色落到 <html>：窗口在首帧之后就显示了，
-// 等异步设置回来再改会让用户看见一次「默认外观 → 自己的外观」（见 bootstrap.ts）
+// 先装后端适配层，再取首屏快照：getBootstrap 是同步读 window 上的注入值，
+// 顺序反了会读到 undefined，第一帧就会闪一次默认外观
+installTauriWorkbench()
 applyBootstrapTheme()
 
-createApp(App).use(createPinia()).use(ElementPlus, { locale: zhCn }).mount('#app')
+const app = createApp(App).use(createPinia()).use(ElementPlus, { locale: zhCn })
+
+// 磁盘数据是异步的，等它就绪再 mount。放进 finally 是为了让读取失败也能出界面
+// （届时 store 各自退回默认值，界面是空的但能用，而不是一片白）。
+// Electron 版是主进程先 loadData 再建窗口，这里等价地等一次。
+void initState().finally(() => {
+  app.mount('#app')
+  // 挂载之后再清理残留进程：它要挨个问进程的创建时间，别挡首屏
+  void reapOrphansOnStart()
+})

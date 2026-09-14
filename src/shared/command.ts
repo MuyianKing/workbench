@@ -1,8 +1,8 @@
 /**
  * 「命令」卡片的纯逻辑。
  *
- * 放在 shared 是因为两端都要用：渲染层拿它做表单校验与默认名，主进程拿它清洗落盘数据。
- * 真正的执行在 main/commands.ts 与 main/process-manager.ts，这里不碰任何 Node 内置模块。
+ * 放在 shared 是因为两边都要用：渲染层拿它做表单校验与默认名，适配层拿它清洗落盘数据。
+ * 真正的执行在 workbench/session.ts 与 src-tauri/src/session.rs，这里不碰任何 Node 内置模块。
  */
 
 import { parsePort } from './port'

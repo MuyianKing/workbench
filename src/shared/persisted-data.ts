@@ -2,12 +2,13 @@
  * 持久化数据文件的纯逻辑：默认值、逐项收敛（sanitize）、解析。
  *
  * 从 main/store.ts 下沉到这里，是因为「把磁盘上的未知数据收敛成合法结构」与运行环境无关：
- * Electron 主进程与 Tauri 侧的适配层都要用它，放 shared 才能两边共用一份（见 AGENTS.md 第 3 节）。
+ * 适配层落盘前要用它，单测也直接调它，放 shared 才能共用一份（见 AGENTS.md 第 3 节）。
  * 磁盘 IO、路径、防抖落盘不在这里 —— 那些各自留在宿主侧。
  */
 import { sanitizeAccentColor, sanitizeAccentInkMode } from './accent-color'
 import { sanitizeCommands } from './command'
 import { sanitizeQuickApps } from './quick-launch'
+import { sanitizeIconCache } from './icon-cache'
 import { sanitizeAppName } from './app-name'
 import { DEFAULT_SETTINGS, TOP_BAR_STYLES, type AppSettings, type PersistedData } from './types'
 import { clampTerminalHeight } from './terminal-height'
@@ -24,6 +25,7 @@ export function emptyData(): PersistedData {
     projects: [],
     groups: [],
     quickApps: [],
+    iconCache: {},
     commands: [],
     settings: { ...DEFAULT_SETTINGS },
     activeSessions: [],
@@ -80,11 +82,19 @@ export function sanitizeSettings(raw: unknown): AppSettings {
  */
 export function parseData(raw: unknown, uuid: () => string): PersistedData {
   const parsed = (raw ?? {}) as Partial<PersistedData>
+  // 快捷启动列表先收敛：图标缓存要按它过滤（见下）
+  const quickApps = sanitizeQuickApps(parsed.quickApps, uuid)
+
   return {
     projects: Array.isArray(parsed.projects) ? parsed.projects : [],
     groups: Array.isArray(parsed.groups) ? parsed.groups : [],
     // 老数据文件没有这一项；手工改坏过的条目在这里被丢掉或补全
-    quickApps: sanitizeQuickApps(parsed.quickApps, uuid),
+    quickApps,
+    // 老数据文件没有这一项；只留还在用的程序，删掉的程序不该把图标一直留在盘上
+    iconCache: sanitizeIconCache(
+      parsed.iconCache,
+      new Set(quickApps.map((app) => app.target))
+    ),
     commands: sanitizeCommands(parsed.commands, uuid),
     settings: sanitizeSettings(parsed.settings),
     // 上次被强杀时留下的子进程记录，启动清理要用（漏掉这个字段清理就成了空转）

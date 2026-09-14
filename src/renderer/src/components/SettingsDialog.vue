@@ -177,7 +177,7 @@ const KEY_ALIAS: Record<string, string> = {
 
 const PUNCTUATION = '`-=[]\\;\',./'
 
-/** 浏览器 KeyboardEvent.key → Electron accelerator 片段 */
+/** 浏览器 KeyboardEvent.key → 快捷键串里的一段（Rust 侧交给 tauri-plugin-global-shortcut 解析） */
 function normalizeKey(key: string): string | null {
   if (/^[a-zA-Z]$/.test(key)) return key.toUpperCase()
   if (/^[0-9]$/.test(key)) return key
@@ -223,7 +223,12 @@ function startRecording(): void {
 }
 
 watch(visible, (open) => {
-  if (!open) recording.value = false
+  if (!open) {
+    recording.value = false
+    return
+  }
+  // 内置壁纸的缩略图要现压，按需在第一次打开面板时取（见 store 的 ensureWallpapers）
+  void store.ensureWallpapers()
 })
 </script>
 

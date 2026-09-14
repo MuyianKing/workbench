@@ -2,9 +2,11 @@
   "include": [
     "src/renderer/src/**/*",
     "src/renderer/src/**/*.vue",
-    "src/shared/**/*",
-    "src/preload/index.d.ts"
+    "src/shared/**/*"
   ],
+  // 测试文件用 node:fs（vitest 跑在 node 里），不该把 node 类型带进渲染层；
+  // 它们由 tsconfig.test.json 单独检查
+  "exclude": ["src/**/*.test.ts"],
   "compilerOptions": {
     "composite": true,
     "target": "ES2022",

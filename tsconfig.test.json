@@ -1,0 +1,24 @@
+{
+  // 与 vitest.config.ts 的 include 保持一致：检查的正是会真正跑起来的那批测试。
+  // 后端逻辑（进程会话、日志攒批、进程树终止）现在在 Rust 里，由 cargo test 覆盖。
+  "include": ["src/shared/**/*.test.ts", "src/renderer/**/*.test.ts"],
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    // DOM 那一份是给 src/renderer 下的用例的：它们要 import 适配层，而适配层用的是 window 这组全局。
+    // 共享层的 DOM 误用照样由 tsconfig.web.json 兜着（那边也有 DOM lib），放宽这里不会漏掉什么
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["node"],
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/renderer/src/*"],
+      "@shared/*": ["src/shared/*"]
+    }
+  }
+}

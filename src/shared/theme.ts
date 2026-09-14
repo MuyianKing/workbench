@@ -139,7 +139,9 @@ export const DEFAULT_THEME: ThemeConfig = {
     activity: { column: 'left', order: 0, mode: 'fixed', height: 155 },
     recent: { column: 'left', order: 1, mode: 'fixed', height: 155 },
     quick: { column: 'left', order: 2, mode: 'fixed', height: 98 },
-    system: { column: 'left', order: 3, mode: 'fixed', height: 147 },
+    /* 系统状态：node / 包管理器 / nvm / nrm 四行 + 贴底的数据目录，
+       170 是四行刚好放全的高度（147 是按三行定的，加一行后明细区会被挤进滚动） */
+    system: { column: 'left', order: 3, mode: 'fixed', height: 170 },
     commands: { column: 'left', order: 4, mode: 'flex', height: 90 },
     projects: { column: 'center', order: 0, mode: 'flex', height: 600 },
     token: { column: 'right', order: 0, mode: 'flex', height: 200 },

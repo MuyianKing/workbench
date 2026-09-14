@@ -2,14 +2,18 @@
 /**
  * 自定义标题栏：左侧品牌 + 右侧自绘的窗口按钮。
  *
- * 窗口用 titleBarStyle: 'hidden' 且没有挂 titleBarOverlay（见 main/index.ts），
+ * 窗口用 decorations: false 建出来（见 src-tauri/src/main.rs），没有原生标题栏也没有叠加层，
  * 系统不会再画右上角那三个按钮，整条标题栏都是我们的画布 —— 这样顶栏的底色、层次
  * 才能跟壁纸方案一起改（叠加层那块区域 DOM 进不去、也模糊不了）。
  *
  * 图标按 Windows 的规格手画（10px 见方、1px 细线）：Element Plus 的图标是观感完全不同的
  * 另一套（更粗的笔画、圆角端点），而且没有「最大化 / 还原」这种方框字形，混着用就不像系统控件了。
  *
- * 拖动 / 双击最大化 / 贴靠仍由 -webkit-app-region: drag 交给系统处理，这里只补上点击动作。
+ * 拖动与双击最大化都归 Tauri：带 data-tauri-drag-region 的元素由框架注入的脚本接管，
+ * 它在 mousedown 里按 e.detail 分流 —— 1 开始拖动，2 最大化 / 还原（源码见 tauri 的
+ * window/scripts/drag.js）。所以这里**不要**再写 @dblclick 自己 toggle：两边各切一次正好
+ * 抵消，表现成双击标题栏毫无反应。拖动那条命令要 ACL 放行 core:window:allow-start-dragging
+ * （见 src-tauri/capabilities/default.json），漏了就变成「按住标题栏没反应、控制台也不报错」。
  */
 import { onMounted, onUnmounted, ref } from 'vue'
 import { useProjectsStore } from '@/stores/projects'
@@ -36,9 +40,9 @@ onUnmounted(() => unsubscribe?.())
 </script>
 
 <template>
-  <header class="titlebar">
-    <span class="titlebar__mark mono" aria-hidden="true">&rsaquo;_</span>
-    <span class="titlebar__name mono">{{ store.settings.appName }}</span>
+  <header class="titlebar" data-tauri-drag-region>
+    <span class="titlebar__mark mono" aria-hidden="true" data-tauri-drag-region>&rsaquo;_</span>
+    <span class="titlebar__name mono" data-tauri-drag-region>{{ store.settings.appName }}</span>
 
     <div class="wctl">
       <button
@@ -94,8 +98,8 @@ onUnmounted(() => unsubscribe?.())
   /* 右侧不留内边距：三个窗口按钮要顶到窗口右上角，和原生控件的位置一致 */
   padding-left: var(--sp-5);
   background: var(--bg-canvas);
-  /* 整条都能拖动窗口；右上角那三个按钮自己声明 no-drag */
-  -webkit-app-region: drag;
+  /* 整条都能拖动窗口（拖动标记在模板的 data-tauri-drag-region 上）；
+     右上角那三个按钮在 .wctl 里，Tauri 不会给非拖动区元素起拖 */
   user-select: none;
 }
 
@@ -126,7 +130,6 @@ onUnmounted(() => unsubscribe?.())
   display: flex;
   align-self: stretch;
   margin-left: auto;
-  -webkit-app-region: no-drag;
 }
 
 .wctl__btn {

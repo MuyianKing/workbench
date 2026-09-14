@@ -1,5 +1,5 @@
 /**
- * CodeBuddy IDE 扩展日志的用量解析(纯逻辑,供主进程的 reader 调用)。
+ * CodeBuddy IDE 扩展日志的用量解析(纯逻辑,供适配层的 reader 调用)。
  *
  * CodeBuddy 没有落地的用量库,唯一的数据源是扩展日志(%APPDATA%/CodeBuddy CN/logs/…)
  * 里的三类行,靠 id 串起来:

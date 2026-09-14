@@ -269,7 +269,7 @@ body.is-resizing-terminal * {
 
 /* ---------- 面板里的通用内容块 ---------- */
 
-/* 明细行：左边标签、右边值（node 版本、nvm、electron…） */
+/* 明细行：左边标签、右边值（node 版本、nvm、chromium…） */
 .facts {
   display: flex;
   flex-direction: column;
@@ -525,6 +525,22 @@ body.is-resizing-terminal * {
 .el-dropdown-menu__item.is-current {
   color: var(--ink);
   font-weight: 600;
+}
+
+/**
+ * 时间维度弹层（TokenRangePicker.vue）的外壳。
+ *
+ * 根节点是 Element Plus 自己渲染的，组件里的 <style scoped> 够不到它 —— 所以只在这里改外壳：
+ * 去掉默认的 12px 内边距与 150px 最小宽度（尺寸交给内容决定，收起时是一条窄条、
+ * 展开自定义日历后是双月宽面板），圆角与阴影换成卡片同一套令牌，弹层才像从卡片上浮起来的一张纸。
+ * 面板内部的布局仍归组件的 scoped 样式。
+ */
+.el-popover.el-popper.token-range-pop {
+  padding: 0;
+  min-width: 0;
+  border-radius: var(--r-md);
+  border-color: var(--border);
+  box-shadow: var(--shadow-pop);
 }
 
 /**

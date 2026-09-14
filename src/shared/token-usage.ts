@@ -446,6 +446,67 @@ export function shareBySource(
     .sort((a, b) => totalTokens(b.counters) - totalTokens(a.counters))
 }
 
+// ---------- 时间维度预设 ----------
+
+/**
+ * 时间筛选的档位:与 DeepSeek 用量页的「时间维度」同款。
+ * custom 不携带固定区间,由日历上选出的起止日期决定。
+ */
+export type TokenRangePreset = 'last7' | 'last30' | 'thisMonth' | 'lastMonth' | 'custom'
+
+/** 面板里的固定顺序:自定义放最后,选中它才展开右侧的区间日历 */
+export const TOKEN_RANGE_PRESETS: ReadonlyArray<{ key: TokenRangePreset; label: string }> = [
+  { key: 'last7', label: '近 7 天' },
+  { key: 'last30', label: '近 30 天' },
+  { key: 'thisMonth', label: '本月' },
+  { key: 'lastMonth', label: '上月' },
+  { key: 'custom', label: '自定义' }
+]
+
+/** 预设的界面名;未知值按自定义处理 */
+export function presetLabel(preset: TokenRangePreset): string {
+  return TOKEN_RANGE_PRESETS.find((option) => option.key === preset)?.label ?? '自定义'
+}
+
+/**
+ * 预设 → 日期区间(含两端),锚点是「今天」:近 N 天与本月都截至今天,上个月是已经走完的整月。
+ * 调用方每次刷新重新解析,跨过午夜后「近 7 天 / 本月」才会跟着走。
+ * 自定义没有固定区间,返回 null,由调用方保留已选的那段。
+ */
+export function resolvePresetRange(
+  preset: TokenRangePreset,
+  now: number | Date
+): { fromKey: string; toKey: string } | null {
+  const today = dayKey(now)
+  if (!today) return null
+  switch (preset) {
+    case 'last7':
+      return { fromKey: dayKey(addDays(now, -6)), toKey: today }
+    case 'last30':
+      return { fromKey: dayKey(addDays(now, -29)), toKey: today }
+    case 'thisMonth':
+      return { fromKey: `${today.slice(0, 7)}-01`, toKey: today }
+    case 'lastMonth':
+      return lastMonthRange(now)
+    default:
+      return null
+  }
+}
+
+/**
+ * 上个月的首尾两天:1 号到「本月 0 号」(即上月最后一天)。
+ * 先把日期挪到 1 号再退月份,否则 3 月 31 日退一个月会落到 3 月 3 日;跨年由 Date 自己进位。
+ */
+function lastMonthRange(now: number | Date): { fromKey: string; toKey: string } {
+  const source = now instanceof Date ? new Date(now.getTime()) : new Date(now)
+  const first = new Date(source.getTime())
+  first.setDate(1)
+  first.setMonth(first.getMonth() - 1)
+  const last = new Date(source.getTime())
+  last.setDate(0)
+  return { fromKey: dayKey(first), toKey: dayKey(last) }
+}
+
 // ---------- 展示 ----------
 
 /** token 数的中文数量级短写法:6.92亿 / 4380万 / 7.6万;非法与非正数归零 */

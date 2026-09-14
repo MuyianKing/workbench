@@ -4,8 +4,7 @@
  *   node scripts/make-icons.mjs
  *
  * 产物：
- *   build/icon.ico            electron-builder 打包用（见下方 ICON_SIZES）
- *   src/main/tray-icon.ts     托盘图标（32px PNG 的 data URL，运行时不依赖任何资源文件）
+ *   src-tauri/icon.ico        应用图标（见下方 ICON_SIZES），同时被 Tauri 用作窗口与托盘图标
  *
  * 图形语言与标题栏的「›_」标记一致：深色圆角方块 + 白色折角与下划线。
  * 方块满幅绘制、不留透明边距，这样在任何尺寸下都和系统里其它应用图标一样大。
@@ -162,21 +161,7 @@ const ICON_SIZES = [256, 128, 96, 64, 48, 40, 32, 24, 20, 16]
 
 const images = ICON_SIZES.map((size) => ({ size, png: encodePng(size, render(size)) }))
 
-mkdirSync(join(root, 'build'), { recursive: true })
-writeFileSync(join(root, 'build', 'icon.ico'), buildIco(images))
+mkdirSync(join(root, 'src-tauri'), { recursive: true })
+writeFileSync(join(root, 'src-tauri', 'icon.ico'), buildIco(images))
 
-const tray = images.find((image) => image.size === 32)
-const dataUrl = `data:image/png;base64,${tray.png.toString('base64')}`
-
-writeFileSync(
-  join(root, 'src', 'main', 'tray-icon.ts'),
-  `/**
- * 由 scripts/make-icons.mjs 生成，请勿手工编辑。
- *
- * 托盘图标内联为 data URL：主进程在开发态与打包态都能直接拿到，
- * 不需要把资源文件额外搬进 out/ 或 app.asar 的资源目录。
- */
-export const TRAY_ICON_DATA_URL =\n  '${dataUrl}'\n`
-)
-
-console.log(`已生成 build/icon.ico（${ICON_SIZES.join('/')}）与 src/main/tray-icon.ts`)
+console.log(`已生成 src-tauri/icon.ico（${ICON_SIZES.join('/')}）`)

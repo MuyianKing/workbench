@@ -5,13 +5,18 @@
   "identifier": "com.muyian.workbench",
   "build": {
     "frontendDist": "../out/renderer",
-    "devUrl": "http://localhost:5274"
+    "devUrl": "http://localhost:5274",
+    "beforeDevCommand": "npm run dev:renderer",
+    "beforeBuildCommand": "npm run build:renderer"
   },
   "app": {
     "windows": [],
     "withGlobalTauri": true,
     "security": {
-      "csp": null
+      "csp": null,
+      "assetProtocol": {
+        "enable": true
+      }
     }
   },
   "bundle": {

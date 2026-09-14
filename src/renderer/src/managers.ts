@@ -21,5 +21,5 @@ export const PACKAGE_MANAGERS: readonly PackageManagerEntry[] = [
   { key: 'yarn', label: 'yarn', installable: true }
 ]
 
-/** preload 拿不到版本信息时的占位，避免界面上出现 undefined */
-export const VERSIONS_FALLBACK = { electron: '—', node: '—', chrome: '—' } as const
+/** 拿不到版本信息时的占位，避免界面上出现 undefined */
+export const VERSIONS_FALLBACK = { node: '—', chrome: '—' } as const

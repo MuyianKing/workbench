@@ -9,14 +9,18 @@
 **首页**
 
 - 卡片网格下面是**活跃度图**：照 GitHub 贡献图的样子，一列一周、53 列铺满一年，格子的深浅是当天执行了多少条命令；悬停看当天次数，下方一行是连续 / 最长 / 活跃天数与单日峰值
-- 活跃度图下面是三块工作台面板：**系统状态**（项目 / 分组 / 运行中、node 与 nvm、包管理器可用性、数据目录）、
+- 活跃度图下面是三块工作台面板：**系统状态**（项目 / 分组 / 运行中、node 与 nvm、包管理器可用性、npm 镜像源 nrm、数据目录）、
   **最近使用**（点名称开详情，行内直接启动 / 停止）、**快捷操作**（全局快捷键等提示）
 - 这一栏放在卡片网格的左侧还是右侧可以在设置里选，栏宽也可调
 - **Token 用量**面板：读取本机 AI 编程工具（ZCode、DeepSeek Harness、CodeBuddy）的本地用量数据，
-  展示 今日 / 本周 / 本月 用量、趋势条形图（悬停拆出 输入 / 输出 / 思考 / 缓存 构成与请求次数），以及模型与工具占比。
-  趋势窗口由头部两个日期选择器自选起止，默认最近 30 天：可选范围就是快照里有记录的那段，
-  起点不晚于终点（两个框互为上下限，越界的日期在日历里直接置灰）；
-  右侧 天 / 周 / 月页签只切换柱子的分桶宽度，窗口本身不变。
+  展示 今日 / 本周 / 本月 用量、趋势条形图（悬停一行一个口径：输入给出「缓存命中 / 全部输入」与命中率，
+  再是输出、思考、请求次数），以及模型与工具占比。
+  趋势窗口由头部的时间维度下拉给出（照 DeepSeek 用量页的做法）：
+  近 7 天 / 近 30 天 / 本月 / 上月 四档预设直接定窗口（默认「本月」，按钮上只写当前档位），
+  选「自定义」会在同一个面板右侧展开双月日历，第一下定起点、第二下定终点，定完即时生效；
+  预设都按「今天」解析，跨过午夜自己跟着时钟走，可选的日子就是快照里有记录的那段（范围外的日期置灰）。
+  下拉右边那行小字是实际生效的起止日 —— 快照不够长时预设会被收敛到最早那天，以这行为准。
+  右侧 天 / 周 / 月页签只切换柱子的分桶宽度，窗口本身不变；柱子最宽 10px，窗口短时不会长成一块块方砖。
   模型 / 工具占比默认统计整个窗口，点击某根柱子则只统计那个天 / 周 / 月，再点一下回到全部。
   用量快照按天聚合后落盘 `token-data.json`，上游清理旧会话或日志也不丢历史；
   某个工具读取失败时只对它提示原因，其余工具与快照照常展示。
@@ -31,7 +35,7 @@
 - 卡片网格上面一块**「快捷启动」面板**，和侧栏那些面板同一副外壳，点图标即启动——和项目不是一回事，Workbench 不接管它们的进程（没有日志、没有停止，退出应用也不会连带结束）
 - 面板标题固定，程序按可用宽度**自适应换行**；超过两行就在面板内部滚动，不会越撑越高
 - 「添加软件」直接挑程序：对话框默认从**开始菜单**打开（常用软件的快捷方式都在这儿），支持 `.exe`、`.lnk`、`.bat` / `.cmd`
-- 图标取系统的真实图标（不落盘）：**快捷方式会先解析到它指向的真正程序再取图标**，不会只拿到快捷方式那个通用小箭头；有些程序（如 UGit 这类自建打包的 Electron 应用）的图标资源里没有大尺寸条目，shell 的图标接口会退回「exe 的默认图标」，这时会认出来并从程序资源里直接抽一张（每个程序只在第一次取图标时多花一两秒）
+- 图标取系统的真实图标（不落盘）：**快捷方式会先解析到它指向的真正程序再取图标**，不会只拿到快捷方式那个通用小箭头。解析走 `.lnk` 里那段 IDList（交给 `SHGetPathFromIDListW` 解释），不重写一遍快捷方式的文件格式；解析不出来（目标已卸载、指向 UWP 应用）时退回 shell 画的那张 32px 通用图，总比界面上只剩一个首字母强。程序自己有 48px 图标资源时一律从资源里直取，不经过 shell 的图标缓存
 - 只填「程序 + 名字」两项：启动、参数、工作目录一律交给系统按该程序的关联方式处理（快捷方式里自带的参数与工作目录照旧生效）
 - 一个程序都没加时面板里只留一个「添加软件」块，任何状态下都能找到入口
 - 排列顺序靠拖动，删除 / 编辑收在卡片右上角的「⋯」里；程序被移动或卸载后卡片标「失效」并给出原因，编辑一下换新路径即可
@@ -50,7 +54,8 @@
 **一键操作**
 
 - 安装依赖 / 启动 / 打包 / 停止 / 重启，同一项目不并发执行
-- 打包成功后自动打开产物目录（探测顺序：手动配置 > 构建配置 `outDir` > `dist` 等常见目录 > 项目根目录），可项目级关闭
+- 打包成功后自动打开产物目录（探测顺序：手动配置 > 构建配置 `outDir` > `dist` 等常见目录 > 项目根目录），可项目级关闭；
+  输出目录除了手填也能直接**选目录**：选项目内的会落成相对写法（如 `dist`），项目挪位置也不失效，选到项目外才记绝对路径，输入框下方始终显示拼好的实际路径
 - 启动日志里识别 `localhost` 端口：显示在卡片上；若该端口已被别的进程占用，启动前提示占用者名称与 PID，可选择结束它后重试（不需要手填端口）
 - **不代开浏览器**：地址解析只用于显示与端口占用提示，浏览器交给项目脚本自己开（如 Vite 的 `server.open`）
 - 自定义命令（名称 + 命令行）挂在项目上，卡片「⋯」菜单里一键运行
@@ -63,7 +68,8 @@
   Tab，输出互不覆盖，可以一边看打包日志一边跑 dev server
 - 终端可关闭（× 在 Tab 上，运行中的终端要先停止）；日志只在内存里，重开应用即清空
 - 应用刚启动时底部不占位置（没有终端就不渲染）；跑过一次命令后面板条常驻，条上的箭头展开/收起，收起时只留一条显示各终端状态点的窄条
-- 按行推送、ANSI 转义清洗、stderr 高亮、显示当前执行命令
+- 按行推送、清洗 ANSI 控制序列（进度条那类清行 / 移光标 / 颜色都丢掉，`\r` 按终端语义只保留最后一次改写）、
+  stderr 高亮、显示当前执行命令
 - 每个终端保留最近 5000 行，渲染超过 1000 行时只挂载尾部并提示省略行数
 - 清空与导出为 `.log`
 
@@ -78,6 +84,8 @@
   调低后背景图从卡片底下透出来；只动底色，边框、阴影与文字不变
 - 全局快捷键唤起或隐藏窗口（默认 `Ctrl+M`，可自行录制；被占用时自动停用并提示）
 - **关闭按钮 = 收进托盘**：窗口不会真的关掉，托盘常驻，点托盘图标或快捷键都能找回来；最小化是否也收进托盘可单独设置（默认收进托盘）
+- 右键不弹 WebView2 的原生菜单（返回 / 刷新 / 另存为 / 打印 / 更多工具 / 检查 那一套）：界面是自绘的，浏览器这套菜单在这里没有意义；
+  菜单键与 Shift+F10 触发的是同一个事件，也一样不出。调试因此没有「检查」可点，改走远程调试端口（见 AGENTS.md 第 6 节）
 - 开机自启（默认开启，仅打包后生效）
 - 退出提醒：从托盘菜单真正退出时，若还有项目在运行会弹窗二选一 —— 「关闭所有项目并退出」先结束进程再退；
   「直接退出」保留这些进程，交给下次启动的残留清理处理。「运行中」既包括本次会话启动的进程，
@@ -91,40 +99,86 @@
 - 应用被强杀后，下次启动会清理上次残留的 dev server（记录里带 `ownerPid`，宿主进程还活着就一律不动；
   动手前还会比对实际进程的命令行，避免 PID 被复用后杀错）
 
+**npm 镜像源（nrm）**
+
+- 系统状态卡片里多一行 nrm：能读到时显示**当前 npm 镜像**，点开下拉换一个（`nrm use <name>`）；
+  命令行要等一次 node 冷启动，所以这一行是首屏之后异步补上的
+- 镜像清单不写死在代码里：一律解析 `nrm ls` 的输出（含各镜像地址），taobao 改名 npmmirror 这类变化不用改代码；
+  当前项优先认输出里的 `*`，认不出（没打星号 / 颜色干扰）时再拿 `npm config get registry` 对一遍地址
+- 没装 nrm 时这一行整块是个安装按钮，点一下走 `npm install -g nrm`，过程与包管理器安装共用同一条通道
+  （输出顶在卡片上、完整日志进底部终端、超时按进程树收掉）
+- 切换改的是 npm 的**全局** registry，此后所有不带自己的 `.npmrc` 的项目都走新源；镜像名会先进一次
+  合法性检查再交给 shell，避免名字里混进命令分隔符
+
 ## 技术栈
 
 | 层 | 选型 |
 |---|---|
-| 桌面框架 | Electron |
+| 桌面框架 | Tauri 2（Windows 上走系统 WebView2，不再随包附带 Chromium） |
+| 后端 | Rust（窗口 / 托盘 / 单实例、子进程与日志、文件与 sqlite、系统能力） |
 | 前端 | Vue 3（组合式 API + `<script setup>`）+ Element Plus + Pinia |
-| 构建 | Vite + electron-vite |
-| 语言 | TypeScript（主进程 / 渲染进程共用 `src/shared` 类型与工具） |
-| 持久化 | 本地 JSON（防抖 300ms、临时文件 + rename、退出前同步落盘） |
-| 子进程 | `child_process.spawn`（按行推送日志，Windows 下 `taskkill /T /F` 结束整棵进程树） |
-| Token 用量数据源 | ZCode：`better-sqlite3` 只读打开本地 sqlite（WAL 并发读）；DeepSeek Harness：`~/.dsh/sessions` 会话文件；CodeBuddy：IDE 扩展日志解析（均只读、不联网） |
-| 测试 | Vitest |
-| 打包 | electron-builder → NSIS 安装包（Windows x64） |
+| 构建 | Vite（渲染层）+ cargo / Tauri CLI（后端） |
+| 语言 | TypeScript（渲染层）+ Rust（后端）；契约与纯逻辑共用 `src/shared` |
+| 持久化 | 本地 JSON，由 Rust 侧 `store.rs` 负责（防抖 300ms、临时文件 + rename、退出前同步落盘） |
+| 子进程 | `std::process` 起 shell 命令（按批回传输出，Windows 下 `taskkill /T /F` 结束整棵进程树） |
+| Token 用量数据源 | ZCode：`rusqlite` 只读打开本地 sqlite（WAL 并发读）；DeepSeek Harness：`~/.dsh/sessions` 会话文件（多帧 zstd）；CodeBuddy：IDE 扩展日志解析（均只读、不联网） |
+| 测试 | Vitest（渲染层与 shared）+ `cargo test`（Rust） |
+| 打包 | Tauri CLI → NSIS 安装包（Windows x64） |
+
+架构上值得单独说一句：**后端刻意做薄**。它只提供「取原始数据 / 落盘 / 调系统能力」这几类能力，
+合并、排序、修剪、状态机、命令构造这些业务语义都在渲染层的适配层里（`src/renderer/src/workbench/`）。
+好处是绝大多数改动仍然是 Vite 的秒级热更新，只有动到系统能力时才开始重编 Rust（实测增量 4~15 秒，见 [dev-notes](docs/dev-notes/)）。
+
+适配层顶替的是「preload + 主进程」那条**进程边界**，所以它递给渲染层的列表一律是快照（`structuredClone`）：
+渲染层的乐观追加（`[...list, created]`）不会和适配层刚改过的那份数据叠在一起，渲染层往自己列表里 push
+也写不进要落盘的数据。在 Electron 版这件事是进程间复制免费给的，边界搬进同一个 JS 上下文后必须自己补 ——
+漏掉时的表现是「添加一个程序先变成两个，过一会儿刷新又合成一个」。
+
+**IPC 命令默认跑在主线程上**：`#[tauri::command]` 不加参数时是「阻塞」执行上下文，函数体会在
+IPC 处理器所在的那个线程（主线程）上内联跑完。所以凡是会起子进程、读写文件、解码图片、跑 SQL 的命令
+都标了 `(async)`（宏会生成为 `async_runtime::spawn`，落到工作线程），只有纯内存读写与窗口控制保持同步。
+判断标准很简单：这个函数会不会等外部资源。漏标一个的后果不是「慢」而是「界面卡死」——
+窗口消息循环被一起堵住，拖不动也不重绘，而渲染层的 `await` / `Promise.all` 完全挡不住（并发只在
+JS 的 Promise 层面，真正干活的 Rust 还是那一条线程）。启动路径上踩过一次：包管理器探测（4 次
+`cmd /C npm --version`）加壁纸缩略图把首屏冻了好几秒；现在这两项都改成了「挂载之后再拉」。
+
+**工作区背景图走 asset 协议，后端不碰它的像素**：不再「解码 → 缩到 2560 → 编 JPEG → base64」回传
+（一张 3824×2400 的实测 **249ms**、产物 270KB，而且每次启动都重算，那 249ms 正好落在首屏之后，
+看起来就是「背景图要等一会儿才出来」）。现在渲染层只调一次 `allow_background`：后端只读文件头确认
+它是张能解码的图（1ms 量级），再把**这一个文件**的读取权限授给 asset 协议，URL 由 `convertFileSrc`
+转出来交给 CSS，图片由 webview 自己读、自己缩放。代价是全尺寸原图进 webview 内存（就是原图那么大）。
+`tauri.conf.json` 里 `assetProtocol.scope` 刻意留空 —— 授权一律在运行时按文件给，
+**别为了省事写成 `**`**，那等于把整个磁盘敞开给界面读。
 
 ## 目录结构
 
 ```
-src/
-  main/                  主进程
-    index.ts             窗口、生命周期、托盘/快捷键/主题/退出行为
-    ipc.ts               IPC 处理、项目增删改查、进程操作调度
-    process-manager.ts   spawn 子进程、状态机、按行日志、进程树终止、地址识别
-    scanner.ts           读取 package.json / 锁文件 / 产物目录 / Node 版本要求
-    token-usage.ts       Token 用量:实读各工具本地数据(ZCode sqlite / DSH 会话 / CodeBuddy 日志),合并进 token-data.json 快照
-    nvm.ts               只读探测 nvm 已安装的 Node 版本，并按项目给子进程注入 PATH
-    store.ts             数据与设置的持久化
-    app-settings.ts      设置的应用（主题、快捷键、托盘、自启）
-    system.ts            目录选择、打开资源管理器、端口检测、包管理器探测
-    quick-launch.ts      快捷启动：挑程序、取系统图标、拉起进程（不接管）
-  preload/index.ts       contextBridge 白名单 API
-  renderer/src/          Vue 应用（组件 / Pinia store / 设计令牌）
-    components/ActivityGraph.vue  首页活跃度图（GitHub 贡献图同款）
-    components/TokenPanel.vue     首页 Token 用量面板（趋势 / 模型与工具占比）
-  shared/                两端共用的类型、IPC 契约、活跃度统计、Token 用量聚合与日志解析、Node 版本区间判定
+src-tauri/               Rust 后端
+  src/main.rs            入口、窗口、托盘、单实例、生命周期
+  src/commands.rs        IPC 命令层（薄：取数据 / 落盘 / 调系统能力）
+  src/session.rs         子进程会话：起命令、按批回传输出、按进程树终止
+  src/proc.rs            带超时的子进程原语 + 进程树终止
+  src/store.rs           去抖 JSON 落盘（300ms 合并 + 临时文件 rename）
+  src/paths.rs           数据目录与指针（与旧 Electron 版同一位置）
+  src/system.rs          端口检测、资源管理器、ShellExecute
+  src/nvm.rs             nvm 只读探测（目录 / settings.txt / 软链）
+  src/nrm.rs             nrm 探测与镜像源切换（清单来自 nrm ls）
+  src/token.rs           ZCode sqlite 聚合 + DSH 多帧 zstd
+  src/icon.rs            程序图标抽取
+  tauri.conf.json        窗口、打包、资源映射
+  capabilities/          能力白名单
+
+src/renderer/src/        Vue 应用（组件 / Pinia store / 设计令牌）
+  workbench/             window.workbench 的适配层（原 preload + 主进程逻辑的替代品）
+    bridge.ts            invoke / 事件 / 未移植通道兜底
+    events.ts            适配层内部广播
+    state.ts             持久化状态与增删改
+    session.ts           进程会话与事件翻译
+    scanner.ts           扫描的生产侧（fs 经 IPC 落到 Rust）
+    nvm.ts / nrm.ts / token.ts / system.ts / quick-launch.ts
+  components/            公共与页面组件
+  stores/projects.ts     跨组件状态
+src/shared/              两端共用的类型、契约与纯逻辑（含 scanner 的规则与测试）
 scripts/make-icons.mjs   程序化生成应用图标与托盘图标
 ```
 
@@ -133,53 +187,73 @@ scripts/make-icons.mjs   程序化生成应用图标与托盘图标
 ```bash
 npm install
 
-npm run dev          # 启动开发态（主进程 + 渲染进程热更新）
-npm run typecheck    # 渲染层与主进程两个工程一起做类型检查
-npm test             # Vitest 单元测试
-npm run build        # 产出 out/（main + preload + renderer）
+npm run dev              # 启动开发态（Rust 后端 + 渲染层热更新）
+npm run typecheck        # 渲染层与测试两个 tsconfig 一起做类型检查
+npm test                 # Vitest 单元测试（渲染层与 shared）
+cargo test --manifest-path src-tauri/Cargo.toml   # Rust 侧测试
+npm run build:renderer   # 只编渲染层，产物落 out/renderer
+npm run preview:renderer # 只把渲染层跑在浏览器里，方便看布局（产物落 .preview/）
 ```
 
-安装环境需要 VS Build Tools（含“使用 C++ 的桌面开发”工作负载）：npm 会为 `better-sqlite3`
-排一次源码编译，踩坑细节与处理见 [npm-install-native-module.md](docs/dev-notes/npm-install-native-module.md)。
+环境前置：Rust stable（`x86_64-pc-windows-msvc`）+ MSVC 生成工具 + Windows SDK。
+不需要再为 native 模块准备编译环境 —— `better-sqlite3` / `node-gyp` 那套随 Electron 一起去掉了。
 
 ## 打包
 
 ```bash
-npm run icons        # 需要改图标时：重新生成 build/icon.ico 与托盘图标
-npm run dist:dir     # 只产出免安装目录 dist/win-unpacked，用于快速验证
-npm run dist         # 产出 NSIS 安装包 dist/Workbench-<version>-setup.exe
+npm run icons        # 需要改图标时：重新生成 src-tauri/icon.ico（窗口与托盘共用）
+npm run dist:dir     # 产出免安装目录（只编不打包，用于快速验证）
+npm run dist         # 产出 NSIS 安装包
 ```
 
-安装包为单用户（`perMachine: false`）、可选安装目录，卸载时保留 `workbench-data.json`，不会连带删掉项目列表。
+打包配置见 [`src-tauri/tauri.conf.json`](src-tauri/tauri.conf.json)；NSIS 安装包落在
+`src-tauri/target/release/bundle/nsis/`。几点需要留意：
 
-打包配置见 [`electron-builder.yml`](electron-builder.yml)，其中做了两件压体积的事：
+- 渲染层产物 `out/renderer` 是在**编译期**被内嵌进可执行文件的，所以改了前端要先 `npm run build:renderer`
+  （`npm run dist` 与 `npm run dev` 都会自动带上这一步）。
+- 内置壁纸经 `bundle.resources` 映射到 `backgrounds/`，运行时由 Rust 从 `resource_dir()` 读取
+  （清单与缩略图用）；开发态资源不经过打包流程，`list_wallpapers` 会回落到仓库里的 `resources/backgrounds`，
+  不过 `tauri dev` 会把资源拷到 `target/debug/backgrounds/` 下，实际优先命中那一份。
+  工作区背景图本身经 asset 协议按文件加载，不走 `resource_dir()` 这条链。
+- release 档位是 thin LTO + 16 个 codegen 单元，链接器换成工具链自带的 `rust-lld`
+  （配置在仓库根的 [`.cargo/config.toml`](.cargo/config.toml)）。**打包前先停掉 `npm run dev`**：
+  两者会抢 `target/` 的构建锁并互相拖慢。取舍、实测数据与更多坑见
+  [`docs/dev-notes/build-performance.md`](docs/dev-notes/build-performance.md)。
 
-- `electronDist` 直接复用 npm 已装好的 Electron，不再重复下载 115MB
-- `files` 排除 `node_modules`：渲染层已被 Vite 打成单文件，主进程只用 electron 与 Node 内置模块，
-  而 electron-builder 默认会把 60MB+ 的依赖塞进 `app.asar`（排除后 asar 从 65MB 降到 3MB）
+安装包为单用户、可选安装目录，卸载时保留 `workbench-data.json`，不会连带删掉项目列表。
 
-### 打包环境说明
+## 迁移状态（Electron → Tauri）
 
-electron-builder 首次打包要下载 `winCodeSign` / `nsis` / `nsis-resources` 三个工具包。若网络访问不了
-GitHub Releases，指定镜像即可：
+Electron 相关的依赖、配置与整个 `src/main` / `src/preload` 都已移除。已迁移并实测通过的部分：
+窗口与托盘、单实例、关闭收托盘、主题与壁纸、项目增删改、添加项目（扫描）、进程启动 / 停止 / 日志流、
+独立命令、快捷启动与图标抽取、Token 用量（ZCode sqlite 只读并发读）、nvm 探测与项目级 Node 版本、
+包管理器检测与安装、**nrm 镜像源探测与切换**（含一键安装）、数据目录迁移、**全局快捷键**、**开机自启**（仅打包后生效）、
+**退出确认**（还有项目在跑时托盘退出会先问一次）、**残留进程清理**（崩溃后重启会收掉上次留下的 dev server，已实测）、
+**启动日志里识别监听端口**（没手填端口时从 dev server 输出里认出 `localhost:5173`）、
+**包管理器安装过程的滚动日志**（npm 输出按行推给界面，超时按进程树收掉）。
 
-```powershell
-$env:ELECTRON_BUILDER_BINARIES_MIRROR='https://registry.npmmirror.com/-/binary/electron-builder-binaries/'
-npm run dist
-```
+至此 Electron 时代的功能都已迁移过来，**后端不再依赖 PowerShell**：
 
-另外，Windows 上没有创建符号链接的特权时（未开启开发者模式、也非管理员），`winCodeSign` 里的 macOS
-动态库会解压失败。可以先手工把缓存铺好，跳过那部分：
+- 程序图标抽取走原生 Win32，四步递进，前一步取不到才走下一步：
+  1. `PrivateExtractIconsW` 按边长直取（48px）；
+  2. 图标在别的文件里（文件夹、自己指定了图标文件的快捷方式）时，用 `SHGetFileInfoW` 问出
+     「哪个文件的第几条」再回到第 1 步；
+  3. `.lnk` 就从它自带的 IDList 解出目标程序，再回到第 1 步 —— 快捷方式自己没有图标资源，
+     直取必然落空，而 shell 那张通用图上还带着小箭头；
+  4. 都取不到才用 `SHGetFileInfoW` 的 `SHGFI_ICON` 兜底（32px）。
+  `GetIconInfo` + `GetDIBits` 摊成 BGRA，再用 `image` 编成 PNG；没有 alpha 通道的老图标按 AND 掩码补出透明。
+- 残留进程清理的判据换成**进程创建时间 + 存活判据**（`OpenProcess` + `GetProcessTimes` +
+  `GetExitCodeProcess`），宿主身份也一并核对。比原来比对命令行更可靠，也不必再起外部进程。
+  这里踩过两个坑，都记在 `proc.rs` 的注释里：PID 会被复用（光判存在性会把记录误当成「有主」而永远保留），
+  以及**已退出但进程对象尚未回收时创建时间依然可查**（必须比对退出码才知道它已经死了）。
+  老数据文件没有这些字段时一律跳过 —— 清理残留宁可漏掉几个，也不能杀错进程。
 
-```powershell
-$seven = 'node_modules\7zip-bin\win\x64\7za.exe'
-$cache = "$env:LOCALAPPDATA\electron-builder\Cache\winCodeSign"
-$arc   = Get-ChildItem "$cache\*.7z" | Sort-Object Length -Descending | Select-Object -First 1
-& $seven x -bd $arc.FullName "-o$cache\winCodeSign-2.6.0" '-x!darwin\*' '-x!linux\*'
-```
-
-未配置代码签名证书时，签名步骤会自动跳过（日志里的
-`no signing info identified, signing is skipped` 属正常现象）。
+**残留清理有一处已知局限（继承自原设计）**：会话记录的是 `cmd /C` 那个**包装进程**的 PID。
+应用被强杀时，它的 stdout 管道断裂、cmd 往往先于真正的 dev server 退出，此时记录里的 PID 已经没了，
+其后代也就无法定位 —— 这类孤儿清不掉。要彻底解决得给每个会话建 Job Object
+（`KILL_ON_JOB_CLOSE`，由系统在进程退出时连带收掉整棵树），但那会和退出确认里
+「直接退出（保留进程）」的语义冲突，需要先定取舍。抓整棵进程树（ToolHelp32）记录所有后代也能缓解，
+同样没有做。
 
 ## 数据与隐私
 
@@ -190,7 +264,10 @@ $arc   = Get-ChildItem "$cache\*.7z" | Sort-Object Length -Descending | Select-O
     （只留最近一年）、上次运行残留的子进程记录
   - `token-data.json`：Token 用量按「工具 → 天 → 模型」聚合的快照（只留最近一年）。
     结构按多工具来源设计，明细不复制 —— ZCode 自己的数据库是明细账本，快照用于对抗上游清理
-  - 快捷启动只存程序路径与参数，图标每次启动时从系统现取，不落盘
+  - 快捷启动只存程序路径与参数，不放程序本体
+  - 程序图标按「路径 + 程序文件的修改时间」缓存在 `workbench-data.json` 里（每个 1.5~4.4 KB）：
+    修改时间没变就直接用，不再打开程序解析图标资源（实测每个 27~53ms），程序升级换了图标会自动失效。
+    只缓存抽成功的图标；抽取失败的不落盘，下次启动照常重试
 - `data-location.json`：只在改过目录后出现，固定放在 `%APPDATA%/Workbench/`，内容就一个路径
 
 ## 本期不做

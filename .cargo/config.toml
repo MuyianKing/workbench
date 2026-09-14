@@ -1,0 +1,10 @@
+# 链接器换成工具链自带的 rust-lld（lld-link），debug 档位的链接时间明显短于 MSVC link.exe。
+#
+# 这里写裸名字是故意的：rust-lld 并不在 PATH 上，rustc 找不到 PATH 上的同名程序时
+# 会回退到 sysroot 的 lib/rustlib/<target>/bin/，所以在任何装了 rustup 的机器上都成立，
+# 不需要写死绝对路径。
+#
+# 配置必须放在仓库根而不是 src-tauri/ 下：cargo 只从「当前工作目录及其父目录」找
+# .cargo/config.toml，而 `tauri build` 与手敲 cargo 的 cwd 都在仓库根。
+[target.x86_64-pc-windows-msvc]
+linker = "rust-lld.exe"

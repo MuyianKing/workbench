@@ -4,43 +4,32 @@
   "private": true,
   "description": "前端项目控制台",
   "author": "muyian",
-  "main": "./out/main/index.js",
   "scripts": {
-    "dev": "electron-vite dev",
-    "build": "electron-vite build",
-    "preview": "electron-vite preview",
-    "dev:renderer": "vite --config vite.preview.config.ts",
-    "typecheck": "vue-tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.node.json",
-    "typecheck:web": "vue-tsc --noEmit -p tsconfig.web.json",
-    "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "dev:renderer": "vite",
+    "build:renderer": "vite build",
+    "preview:renderer": "vite --config vite.preview.config.ts",
+    "typecheck": "vue-tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.test.json",
     "test": "vitest run",
     "test:watch": "vitest",
     "icons": "node scripts/make-icons.mjs",
-    "dist": "npm run build && electron-builder --win nsis",
-    "dist:dir": "npm run build && electron-builder --win dir"
+    "dist": "tauri build",
+    "dist:dir": "tauri build --no-bundle"
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.1",
-    "@types/better-sqlite3": "^9.6.0",
-    "better-sqlite3": "^13.0.3",
     "element-plus": "^2.8.8",
     "pinia": "^4.0.3",
     "vue": "^3.5.13"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2.11.0",
+    "@types/node": "^26.5.1",
     "@vitejs/plugin-vue": "^6.0.8",
-    "electron": "^44.3.0",
-    "electron-builder": "^26.15.3",
-    "electron-vite": "^5.0.0",
-    "node-gyp": "^13.0.2",
     "typescript": "^5.9.3",
     "vite": "^7.3.6",
     "vitest": "^5.0.0",
     "vue-tsc": "^3.3.11"
-  },
-  "allowScripts": {
-    "electron@44.3.0": true,
-    "esbuild@0.21.5": true,
-    "vue-demi@0.14.10": true
   }
 }
