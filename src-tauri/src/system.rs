@@ -5,6 +5,7 @@
 
 use serde_json::{json, Value};
 use std::net::{SocketAddr, TcpStream};
+use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
 
@@ -83,10 +84,20 @@ pub fn kill_port_process(port: u16) -> Result<(), String> {
     kill_process_tree(pid)
 }
 
-/// 在资源管理器中打开并选中目标。explorer 即使成功也常返回非 0 退出码，
-/// 所以只发起、不校验结果。
+/// 在资源管理器中打开目标：目录就进到里面，文件则在所在目录里选中它。
+///
+/// 这两条分支与 Electron 版一致（目录走 `shell.openPath`、文件走 `shell.showItemInFolder`）。
+/// 目录若也走 `/select`，资源管理器只会停在**上级目录**把那个文件夹高亮一下 ——
+/// 用户要的是看产物，不是看装着产物的那个文件夹。
+///
+/// explorer 即使成功也常返回非 0 退出码，所以只发起、不校验结果。
 pub fn reveal(path: &str) {
-    let _ = hidden("explorer").arg(format!("/select,{path}")).spawn();
+    let arg = if Path::new(path).is_dir() {
+        path.to_string()
+    } else {
+        format!("/select,{path}")
+    };
+    let _ = hidden("explorer").arg(arg).spawn();
 }
 
 /// 外部链接交给系统浏览器
