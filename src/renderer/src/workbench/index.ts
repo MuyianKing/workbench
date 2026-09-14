@@ -38,7 +38,7 @@ import * as scanner from './scanner'
 import * as session from './session'
 import * as state from './state'
 import * as system from './system'
-import { getTokenUsage } from './token'
+import { getTokenUsage, syncTokenUsage } from './token'
 
 /** 把设置里的 system 解析成实际明暗 */
 function resolveTheme(theme: AppSettings['theme']): EffectiveTheme {
@@ -279,7 +279,15 @@ function createApi(): WorkbenchApi {
 
     // ---------- 统计 ----------
     getActivity: () => Promise.resolve(state.activityCounts()),
-    getTokenUsage: () => guard(getTokenUsage(), '读取 token 用量失败'),
+    /**
+     * Token 用量：实读 + 合并 + 按需同步。
+     * 同步仓库地址从设置里现取 —— 用户刚在设置里填完，下一次刷新就该用上新地址。
+     */
+    getTokenUsage: () =>
+      guard(getTokenUsage({ repo: state.settings().tokenSyncRepo }), '读取 token 用量失败'),
+    /** 手动同步：绕过自动同步的节流（面板上的同步按钮） */
+    syncTokenUsage: () =>
+      guard(syncTokenUsage(state.settings().tokenSyncRepo), '同步 token 用量失败'),
 
     // ---------- 设置与布局 ----------
     getSettings: () => Promise.resolve(state.settings()),

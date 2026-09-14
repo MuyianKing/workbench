@@ -13,6 +13,7 @@ import { sanitizeAppName } from './app-name'
 import { DEFAULT_SETTINGS, TOP_BAR_STYLES, type AppSettings, type PersistedData } from './types'
 import { clampTerminalHeight } from './terminal-height'
 import { clampCardOpacity } from './card-opacity'
+import { sanitizeSyncRepo } from './token-usage'
 import {
   clampBackgroundOpacity,
   sanitizeBackgroundPath,
@@ -72,6 +73,9 @@ export function sanitizeSettings(raw: unknown): AppSettings {
   if (!TOP_BAR_STYLES.includes(value.topBarStyle)) value.topBarStyle = DEFAULT_SETTINGS.topBarStyle
   // 卡片不透明度：老数据文件里没有这个字段，越界 / 非法值落回完全实底
   value.cardOpacity = clampCardOpacity(value.cardOpacity)
+  // Token 同步仓库：老数据文件里没有这个字段（默认空串 = 不同步）。
+  // 认不出的一律按没填处理，别留一个每次同步都失败的地址在那儿反复重试
+  value.tokenSyncRepo = sanitizeSyncRepo(value.tokenSyncRepo)
 
   return value
 }

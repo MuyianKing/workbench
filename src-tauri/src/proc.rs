@@ -63,8 +63,40 @@ fn shell_command(program: &str, args: &[String]) -> Command {
     }
 }
 
+/// 直接起可执行文件，不经 `cmd /C`。
+///
+/// 程序本身就是 .exe 的必须走这条路（git 就是）：绕开 cmd 就绕开了它对参数行的二次解析，
+/// 参数里带空格、引号、中文时不会被拆错 —— `cmd /C` 的引号规则是出了名的坑。
+/// `cwd` 给工作目录（git 的 `-C` 之外还有别的用法，交给调用方决定），
+/// `envs` 给子进程加环境变量（git 靠 `GIT_TERMINAL_PROMPT=0` 避免弹出看不见的凭据输入框后挂住）。
+pub fn run_direct(
+    program: &str,
+    args: &[String],
+    timeout: Duration,
+    cwd: Option<&std::path::Path>,
+    envs: &[(&str, &str)],
+) -> std::io::Result<Outcome> {
+    let mut cmd = Command::new(program);
+    cmd.args(args);
+    if let Some(dir) = cwd {
+        cmd.current_dir(dir);
+    }
+    for (key, value) in envs {
+        cmd.env(key, value);
+    }
+    #[cfg(windows)]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+
+    collect(cmd, timeout)
+}
+
 pub fn run(program: &str, args: &[String], timeout: Duration) -> std::io::Result<Outcome> {
-    let mut child = shell_command(program, args)
+    collect(shell_command(program, args), timeout)
+}
+
+/// 起进程 → 边跑边收输出 → 超时按进程树终止。`run` 与 `run_direct` 共用这一段。
+fn collect(mut cmd: Command, timeout: Duration) -> std::io::Result<Outcome> {
+    let mut child = cmd
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -238,6 +270,57 @@ mod tests {
 
         assert!(outcome.timed_out, "超时应当被标记出来");
         assert!(started.elapsed() < Duration::from_secs(10), "超时没有及时生效");
+    }
+
+    /// 直启：不经 cmd 也能起（cmd.exe 自己就是可执行文件，用它当被测对象不依赖外部程序）
+    #[test]
+    fn direct_run_works() {
+        let outcome = run_direct(
+            "cmd",
+            &["/C".into(), "echo".into(), "hi".into()],
+            Duration::from_secs(8),
+            None,
+            &[],
+        )
+        .expect("直启 cmd 失败");
+
+        assert!(outcome.ok());
+        assert_eq!(outcome.first_line(), "hi");
+    }
+
+    /// 环境变量确实传到了子进程里 —— git 的「别弹凭据框」就靠这条
+    #[test]
+    fn direct_run_passes_envs() {
+        let outcome = run_direct(
+            "cmd",
+            &["/C".into(), "echo".into(), "%WB_PROBE%".into()],
+            Duration::from_secs(8),
+            None,
+            &[("WB_PROBE", "xyz")],
+        )
+        .expect("直启 cmd 失败");
+
+        assert_eq!(outcome.first_line(), "xyz");
+    }
+
+    /// 工作目录确实生效（git 的子命令都在克隆目录里跑，目录错了会去动别的仓库）
+    #[test]
+    fn direct_run_honors_cwd() {
+        let cwd = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let outcome = run_direct(
+            "cmd",
+            &["/C".into(), "cd".into()],
+            Duration::from_secs(8),
+            Some(cwd),
+            &[],
+        )
+        .expect("直启 cmd 失败");
+
+        assert!(
+            outcome.stdout.contains("src-tauri"),
+            "工作目录没生效: {}",
+            outcome.stdout
+        );
     }
 
     /// 真问一次自己所在进程的创建时间：应当是一个晚于 2020 年的 Unix 毫秒值

@@ -13,7 +13,8 @@
  * 总量数字才不会因缓存命中波动而误导。
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { CaretRight, Refresh } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
+import { CaretRight, Connection, Refresh } from '@element-plus/icons-vue'
 import TokenRangePicker from '@/components/TokenRangePicker.vue'
 import {
   SOURCE_LABELS,
@@ -55,19 +56,45 @@ const fromKey = ref('')
 const toKey = ref('')
 /** 每次刷新时更新,驱动「今天 / 本周 / 本月」与相对时间跟着时钟走 */
 const nowTick = ref(Date.now())
+/** 手动同步进行中(自动同步在后台做,不给它加转圈,免得每分钟闪一下) */
+const syncing = ref(false)
 let timer: number | null = null
+
+function applyResult(res: Awaited<ReturnType<typeof window.workbench.getTokenUsage>>): void {
+  if (res.ok && res.data) {
+    result.value = res.data
+    nowTick.value = Date.now()
+    clampRange()
+  }
+}
 
 async function refresh(): Promise<void> {
   loading.value = true
   try {
-    const res = await window.workbench.getTokenUsage()
-    if (res.ok && res.data) {
-      result.value = res.data
-      nowTick.value = Date.now()
-      clampRange()
-    }
+    applyResult(await window.workbench.getTokenUsage())
   } finally {
     loading.value = false
+  }
+}
+
+/**
+ * 手动同步一次(绕过自动同步的节流)。
+ * 自动同步失败只会体现在状态点上,手动点的这次必须把原因说清楚,否则用户不知道为什么没同步上。
+ */
+async function syncNow(): Promise<void> {
+  syncing.value = true
+  try {
+    const res = await window.workbench.syncTokenUsage()
+    applyResult(res)
+    if (!res.ok) {
+      ElMessage.error(res.error ?? '同步失败')
+    } else if (res.data?.sync.error) {
+      ElMessage.error(res.data.sync.error)
+    } else {
+      ElMessage.success(`已同步 · ${deviceText.value}`)
+    }
+  } finally {
+    syncing.value = false
   }
 }
 
@@ -90,6 +117,46 @@ const sourceErrorText = computed(() =>
 )
 const updatedAt = computed(() => result.value?.data.updatedAt ?? 0)
 const hasData = computed(() => Object.keys(days.value).length > 0)
+
+// ---------- 同步状态 ----------
+
+/** 同步状态;设置里没填仓库地址时 enabled 为 false,标题行不显示同步那一块 */
+const sync = computed(() => result.value?.sync ?? null)
+const syncError = computed(() => sync.value?.error ?? '')
+
+/** 参与合并的本机与其它设备名字,拼成一句给悬停提示 */
+const deviceText = computed(() => {
+  const status = sync.value
+  if (!status?.enabled) return ''
+  const others = status.devices.map((item) => item.name).join('、')
+  return others ? `${status.deviceName}、${others}` : status.deviceName
+})
+
+/** 标题行右侧那行字:实读失败优先,其次是同步失败,再次才是更新时间 */
+const statusText = computed(() => {
+  if (sourceErrorText.value) return '部分来源不可用'
+  if (sync.value?.enabled && syncError.value) return '同步失败'
+  return updatedAt.value ? `更新于 ${formatRelative(updatedAt.value, nowTick.value)}` : ''
+})
+
+/** 悬停提示:实读与同步的具体原因、同步到哪个仓库、还有哪些设备合进来了 */
+const statusTitle = computed(() => {
+  const parts = [sourceErrorText.value, syncError.value].filter(Boolean)
+  const status = sync.value
+  if (status?.enabled) {
+    parts.push(`同步设备:${deviceText.value}`)
+    // 仓库地址写出来:同步打到别的仓库时 git 不报错,不写清楚就只能靠猜
+    parts.push(`同步仓库:${status.repo}`)
+    if (status.lastSyncAt) {
+      parts.push(`上次同步:${formatRelative(status.lastSyncAt, nowTick.value)}`)
+    } else {
+      parts.push('还没同步过')
+    }
+  }
+  return parts.join('\n') || undefined
+})
+
+const statusFail = computed(() => Boolean(sourceErrorText.value || syncError.value))
 
 /** 快照里最早的一天:日历与预设的可选下限(再往前没有记录,选了只会是一片空白) */
 const earliestKey = computed(() => Object.keys(days.value).sort()[0] ?? todayKey.value)
@@ -291,12 +358,22 @@ function detailWidth(value: number, max: number): string {
     <header class="panel__head">
       <span class="eyebrow">Token 用量</span>
       <!-- 底部的更新时间与状态点合并到标题行右侧,与刷新按钮同一条 flex 中线对齐 -->
-      <span class="head__meta" :title="sourceErrorText || undefined">
-        <i class="head__dot" :class="sourceErrorText ? 'is-fail' : 'is-ok'" aria-hidden="true" />
-        <span class="head__time">
-          {{ sourceErrorText ? '部分来源不可用' : updatedAt ? `更新于 ${formatRelative(updatedAt, nowTick)}` : '' }}
-        </span>
+      <span class="head__meta" :title="statusTitle">
+        <i class="head__dot" :class="statusFail ? 'is-fail' : 'is-ok'" aria-hidden="true" />
+        <span class="head__time">{{ statusText }}</span>
       </span>
+      <!-- 同步按钮只在设置里填了仓库地址时出现:没开同步就没得同步,按钮放着只会让人点 -->
+      <button
+        v-if="sync?.enabled"
+        class="head__refresh"
+        type="button"
+        :disabled="syncing || loading"
+        title="立即同步"
+        aria-label="立即同步"
+        @click="syncNow()"
+      >
+        <el-icon><Connection /></el-icon>
+      </button>
       <button
         class="head__refresh"
         type="button"

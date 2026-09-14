@@ -4,7 +4,11 @@
  * 逻辑一行都没有重复——扫描规则留在 shared（那批测试也因此留在 vitest 里跑），
  * 这里只提供「读文件 / 判目录 / 列目录」三个能力，全部经 IPC 落到 Rust。
  */
-import { scanProject as scanWith, type ScanFs } from '@shared/scanner'
+import {
+  resolveOutputDir as resolveWith,
+  scanProject as scanWith,
+  type ScanFs
+} from '@shared/scanner'
 import type { ScanResult } from '@shared/types'
 import { invoke } from './bridge'
 
@@ -43,4 +47,12 @@ const rustFs: ScanFs = {
 
 export function scan(dirPath: string): Promise<ScanResult> {
   return scanWith(rustFs, dirPath)
+}
+
+/** 打包成功后要打开的产物目录；探测规则在 shared，这里只补上 Rust 侧的 fs */
+export function outputDirOf(
+  root: string,
+  configured?: string
+): Promise<{ dir: string; detected: boolean }> {
+  return resolveWith(rustFs, root, configured)
 }

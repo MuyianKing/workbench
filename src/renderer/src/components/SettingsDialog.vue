@@ -120,6 +120,25 @@ function commitAppName(): void {
   save({ appName: appNameDraft.value })
 }
 
+/**
+ * 同步仓库地址的草稿：与程序名称同理，边打边存会把半截地址写进设置
+ * （每次落盘都会触发一轮注定失败的同步），失焦 / 回车时再提交。
+ * 提交后由 store 收敛（去掉空白、认不出的当没填），回推的值会盖掉草稿。
+ */
+const syncRepoDraft = ref('')
+watch(
+  () => store.settings.tokenSyncRepo,
+  (value) => {
+    syncRepoDraft.value = value
+  },
+  { immediate: true }
+)
+
+function commitSyncRepo(): void {
+  if (syncRepoDraft.value === store.settings.tokenSyncRepo) return
+  save({ tokenSyncRepo: syncRepoDraft.value })
+}
+
 function save(patch: Partial<AppSettings>): void {
   void store.updateSettings(patch)
 }
@@ -600,6 +619,34 @@ watch(visible, (open) => {
               {{ store.dataLocation?.isDefault ? '当前是默认目录（应用数据目录）' : '数据文件：workbench-data.json' }}
             </span>
           </div>
+        </div>
+      </section>
+
+      <!-- Token 同步 -->
+      <section class="block">
+        <h3 class="block__title">Token 同步</h3>
+
+        <div class="row row--stack">
+          <div class="row__text">
+            <span class="row__label">同步仓库</span>
+            <span class="row__hint">
+              多台机器各写一份自己的分片、读的时候合并成一份 —— 一个设备一个文件，所以永远不会互相覆盖。
+              填 git 仓库地址（HTTPS / SSH 都行，建议用私有仓库），留空表示不同步；输入后失焦或按回车生效。
+              提交走系统里 git 已经配好的凭据，{{
+                store.settings.appName
+              }} 自己不保存任何令牌，首次同步若弹出登录窗口，那是 git 在向你要授权。
+            </span>
+          </div>
+          <el-input
+            v-model="syncRepoDraft"
+            size="small"
+            spellcheck="false"
+            placeholder="git@github.com:you/workbench-token.git"
+            @change="commitSyncRepo"
+          />
+          <span class="row__hint row__hint--tight">
+            填完到首页「Token 用量」卡片上点一下同步按钮即可立刻同步一次；之后每台机器在后台自动同步。
+          </span>
         </div>
       </section>
     </div>

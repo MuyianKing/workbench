@@ -5,8 +5,15 @@
  * 原始明细不复制:上游工具(ZCode 等)自己的数据库就是明细账本,Workbench 只保留
  * 一层按天聚合的快照 —— 上游会清理旧会话,没有快照长期趋势就无从谈起。
  *
- * 合并规则(max):token 计数在一天之内只增不减,但上游清理会让重读出来的历史变小,
- * 所以快照合并时每天每个字段取「已存值与实读值的较大者」,永不缩水;这同时让写入幂等。
+ * 合并规则分两层:分片内取 max,分片之间求和。
+ *
+ *  - **分片内取 max**:token 计数在一天之内只增不减,但上游清理会让重读出来的历史变小,
+ *    所以快照合并时每天每个字段取「已存值与实读值的较大者」,永不缩水;这同时让写入幂等。
+ *  - **分片之间求和**:多台机器各写一份设备分片(见 TokenShard),同一天同一个模型上的用量
+ *    是两笔独立消耗,取 max 会把另一台机器整个丢掉,必须相加。
+ *
+ * 分片按设备拆还有个不显眼但关键的好处:每个文件只有一个写者,所以「一台机器一个文件」的
+ * 布局丢给任何同步工具都不会产生同文件冲突,同步不需要任何锁或合并策略。
  *
  * 结构为多工具设计:sources 的键是工具 id(zcode,将来可以是 claude、codex…),
  * 各工具独立聚合、互不干扰,新增接入方不动既有数据;「工具占比」就是这一层的占比。
@@ -51,7 +58,24 @@ export interface TokenSourceSnapshot {
   days: TokenDays
 }
 
-/** token-data.json 的落盘结构 */
+/**
+ * 一台机器的用量快照:既是本机 token-data.json 的落盘结构,也是同步仓库里的一份设备分片。
+ *
+ * device 是机器本地生成的 id(见 Rust 的 paths::device_file),分片文件名就是它。
+ * 它**绝不随数据目录迁移、也不进同步仓库** —— 两台机器拿到同一个 id 就会互相覆盖,
+ * 表现成「数据永远只有一台机器的」,而且没有任何报错。
+ */
+export interface TokenShard {
+  version: number
+  device: string
+  /** 设备名(默认取主机名),只当界面上的标签用 */
+  name: string
+  updatedAt: number
+  /** 工具 id → 快照 */
+  sources: Record<string, TokenSourceSnapshot>
+}
+
+/** 展示用的合计:多台机器合并后的一层,首页面板只认这个 */
 export interface TokenDataFile {
   version: number
   updatedAt: number
@@ -59,15 +83,66 @@ export interface TokenDataFile {
   sources: Record<string, TokenSourceSnapshot>
 }
 
+/** 参与合计的另一台机器(不含本机) */
+export interface TokenSyncDevice {
+  id: string
+  name: string
+  /** 那台机器最后一次写分片的时间 */
+  updatedAt: number
+}
+
+/**
+ * Token 同步状态。
+ * 未开启同步(设置里没填仓库地址)时只有 enabled=false 有意义,其余字段照旧给默认值,
+ * 界面据此决定要不要画同步那一块。
+ */
+export interface TokenSyncStatus {
+  enabled: boolean
+  /** 本机设备名,界面上说明这份数据来自哪台机器 */
+  deviceName: string
+  /**
+   * 实际在同步的仓库地址(就是设置里那个)。
+   * 显示出来是有用的:同步打到别的仓库时 git 不会报任何错,界面上不写清楚就只能靠猜
+   * (踩过一次:改了地址但克隆还指着老仓库,状态一切正常,数据全进了另一个仓库)。
+   */
+  repo: string
+  /** 上次同步尝试(成功或失败都算)的时间;0 表示这次启动还没同步过 */
+  lastSyncAt: number
+  /** 本次同步的失败原因;空串表示正常 */
+  error: string
+  /** 已合进来的其它设备 */
+  devices: TokenSyncDevice[]
+}
+
 /** 实读 + 快照合并后交给渲染层的结果 */
 export interface TokenUsageResult {
   data: TokenDataFile
   /** 本次实读失败的来源及原因;不出现在这里即读取正常 */
   sourceErrors: Record<string, string>
+  sync: TokenSyncStatus
 }
 
 /** token-data.json 与 workbench-data.json 同目录,文件名在这里当唯一口径 */
 export const TOKEN_DATA_FILE_NAME = 'token-data.json'
+
+/** 同步仓库地址的长度上限:git 远程地址远短于此,超长多半是贴错了东西 */
+export const TOKEN_SYNC_REPO_MAX_LENGTH = 300
+
+/**
+ * 同步仓库地址收敛:去掉首尾空白,**空串表示不开启同步**(设置里由它承担开关)。
+ *
+ * 两条拒绝规则是为「这个值最终会被当成 git 的命令行参数」服务的:
+ *  - 含空白:参数要经 Windows 的 shell 词法,带空格的地址容易被拆成两个参数;
+ *  - 以 `-` 开头:git 会把它当选项解析(`--upload-pack=...` 那一类),是实打实的参数注入面。
+ * 认不出来的一律按没填处理(等于关掉同步),而不是留着一个每次都失败的值。
+ */
+export function sanitizeSyncRepo(raw: unknown): string {
+  if (typeof raw !== 'string') return ''
+  const value = raw.trim()
+  if (!value || value.length > TOKEN_SYNC_REPO_MAX_LENGTH) return ''
+  if (/\s/.test(value) || value.startsWith('-')) return ''
+  return value
+}
 
 /** 快照保留窗口:53 周铺满一年,与活跃度图一致 */
 export const TOKEN_KEEP_DAYS = 53 * 7
@@ -75,9 +150,16 @@ export const TOKEN_KEEP_DAYS = 53 * 7
 /**
  * v2:去掉 v1 里的「厂商」层(当初误把模型供应商当成了统计维度)。
  * v3:修正 input_tokens 口径 —— ZCode 的输入是含缓存读取的总输入,v2 快照把缓存双算了。
- * 快照本来就会从上游实读自愈,版本不匹配整份弃用、下次实读即重建。
+ * v4:包一层设备信息(device / name),逐日计数与 v3 完全一致。
+ *
+ * 读取时**不能**按「版本不等就整份弃用」处理:v1→v2→v3 是口径修正,弃掉之后能从上游实读自愈;
+ * 而 v4 起文件里装着**别的机器**的历史,弃掉就再也读不回来(那台机器不开机就不会重写分片)。
+ * 所以兼容版本显式列进下面这张表,新增口径版本要手工往里加,别写成 `version >= 3`。
  */
-export const TOKEN_DATA_VERSION = 3
+export const TOKEN_DATA_VERSION = 4
+
+/** 能安全读进来的版本:这几版之间的逐日计数口径相同,包一层设备信息不改变计数 */
+export const TOKEN_DATA_COMPATIBLE_VERSIONS: readonly number[] = [3, 4]
 
 const DATE_KEY = /^\d{4}-\d{2}-\d{2}$/
 
@@ -166,13 +248,20 @@ function sanitizeDays(raw: unknown): TokenDays {
 }
 
 /**
- * token-data.json 里的数据可能是老版本写的或被手工改过的,逐层收敛:
+ * 分片里的数据可能是老版本写的或被手工改过的,逐层收敛:
  * 键不是合法日期 / 缺字段 / 非有限正数,一律丢弃或落到默认值,坏数据不能把面板弄崩。
- * 版本不匹配(比如 v1 的厂商层结构)整份弃用 —— 快照会从上游实读自愈,不值得做迁移。
+ * 版本不在兼容表里(v1 的厂商层结构)才整份弃用 —— 那几版计数口径不同,迁移不值得做。
+ *
+ * fallback 用于补设备信息:v3 的文件里没有 device / name 两个字段,
+ * 读本机旧文件时由调用方把本机设备填进来,这样老数据升级不用丢历史。
  */
-export function sanitizeTokenData(raw: unknown): TokenDataFile {
-  const input = (raw ?? {}) as Partial<TokenDataFile>
-  if (input.version !== TOKEN_DATA_VERSION) return emptyTokenData()
+export function sanitizeShard(
+  raw: unknown,
+  fallback: { device?: string; name?: string } = {}
+): TokenShard {
+  const input = (raw ?? {}) as Partial<TokenShard>
+  const version = typeof input.version === 'number' ? input.version : 0
+  if (!TOKEN_DATA_COMPATIBLE_VERSIONS.includes(version)) return emptyShard(fallback)
 
   const sources: Record<string, TokenSourceSnapshot> = {}
   if (input.sources && typeof input.sources === 'object' && !Array.isArray(input.sources)) {
@@ -183,6 +272,8 @@ export function sanitizeTokenData(raw: unknown): TokenDataFile {
   }
   return {
     version: TOKEN_DATA_VERSION,
+    device: text(input.device) || fallback.device || '',
+    name: text(input.name) || fallback.name || '',
     updatedAt:
       typeof input.updatedAt === 'number' && Number.isFinite(input.updatedAt)
         ? input.updatedAt
@@ -191,8 +282,18 @@ export function sanitizeTokenData(raw: unknown): TokenDataFile {
   }
 }
 
-export function emptyTokenData(): TokenDataFile {
-  return { version: TOKEN_DATA_VERSION, updatedAt: 0, sources: {} }
+function text(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+export function emptyShard(fallback: { device?: string; name?: string } = {}): TokenShard {
+  return {
+    version: TOKEN_DATA_VERSION,
+    device: fallback.device ?? '',
+    name: fallback.name ?? '',
+    updatedAt: 0,
+    sources: {}
+  }
 }
 
 // ---------- 快照合并与修剪 ----------
@@ -216,6 +317,37 @@ export function mergeDays(existing: TokenDays, incoming: TokenDays): TokenDays {
   return next
 }
 
+/**
+ * 两份天级数据是否完全一致。
+ *
+ * 用途是判断「这次实读有没有带来新东西」：没变就不该刷新快照的时间戳。
+ * 同步那边按内容比对决定要不要提交，时间戳每轮都动一下的话，应用开着就会
+ * 每 10 分钟往仓库里推一个什么都没改的提交。
+ */
+export function sameDays(a: TokenDays, b: TokenDays): boolean {
+  const dates = Object.keys(a)
+  if (dates.length !== Object.keys(b).length) return false
+
+  for (const date of dates) {
+    const left = a[date]
+    const right = b[date]
+    if (!right) return false
+
+    const models = Object.keys(left)
+    if (models.length !== Object.keys(right).length) return false
+
+    for (const model of models) {
+      const l = left[model]
+      const r = right[model]
+      if (!r) return false
+      for (const key of Object.keys(l) as Array<keyof TokenCounters>) {
+        if (l[key] !== r[key]) return false
+      }
+    }
+  }
+  return true
+}
+
 /** 丢掉超出保留窗口的旧天数:键是定长 YYYY-MM-DD,字典序即时间序 */
 export function pruneTokenDays(
   days: TokenDays,
@@ -231,6 +363,52 @@ export function pruneTokenDays(
     next[date] = models
   }
   return next
+}
+
+/** 合计两组天级数据:键的并集,同天同模型逐字段相加(跨设备合并用)。
+ *  名字避开 `addDays` —— 那是 activity 里「日期加减天数」的工具函数,本模块已经在用它推日期。 */
+export function sumDays(a: TokenDays, b: TokenDays): TokenDays {
+  const next: TokenDays = {}
+  for (const date of new Set([...Object.keys(a), ...Object.keys(b)])) {
+    const left = a[date] ?? {}
+    const right = b[date] ?? {}
+    const models: Record<string, TokenCounters> = {}
+    for (const model of new Set([...Object.keys(left), ...Object.keys(right)])) {
+      models[model] = addCounters(left[model] ?? emptyCounters(), right[model] ?? emptyCounters())
+    }
+    next[date] = models
+  }
+  return next
+}
+
+/**
+ * 把多台机器的分片合成一份展示用的合计:同工具、同天、同模型相加,并丢掉窗口外的旧天。
+ *
+ * 传进来的分片必须**每台机器只有一份**:本机那份要用内存里的最新分片,不能连仓库里的
+ * 副本一起传 —— 副本是上次推送时的样子,两份都算就会把本机重复计一遍。
+ * 分片内已经是 max 合并后的值(见 mergeDays),这里只负责求和,所以整条链幂等:
+ * 同一批分片合多少次结果都一样,反复同步不会让数字慢慢变大。
+ */
+export function combineShards(
+  shards: TokenShard[],
+  now: number | Date,
+  keepDays: number = TOKEN_KEEP_DAYS
+): TokenDataFile {
+  const sources: Record<string, TokenSourceSnapshot> = {}
+  let updatedAt = 0
+
+  for (const shard of shards) {
+    if (shard.updatedAt > updatedAt) updatedAt = shard.updatedAt
+    for (const [tool, source] of Object.entries(shard.sources)) {
+      const target = (sources[tool] ??= { days: {} })
+      target.days = sumDays(target.days, source.days)
+    }
+  }
+  for (const source of Object.values(sources)) {
+    source.days = pruneTokenDays(source.days, now, keepDays)
+  }
+
+  return { version: TOKEN_DATA_VERSION, updatedAt, sources }
 }
 
 /** 把所有工具的天级数据合并成一份(跨工具同天同模型直接相加),供模型占比与趋势使用 */

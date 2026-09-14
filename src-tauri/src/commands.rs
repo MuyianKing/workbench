@@ -164,6 +164,40 @@ pub fn token_zstd_decode(path: String) -> Result<String, String> {
     Ok(token::zstd_decode_frames(&buf))
 }
 
+/// 本机设备标识（Token 同步用）；首次调用生成并落盘
+#[tauri::command(async)]
+pub fn token_device() -> Result<Value, String> {
+    crate::sync::device_info()
+}
+
+/// CodeBuddy 扩展日志的文件清单（路径 / 修改时间 / 大小），不含文件内容。
+/// 内容由渲染层按需再读（`fs_read_text`）——日志加起来有近十兆，
+/// 闲着的时候没必要每分钟搬一遍（见适配层里的签名缓存）。
+#[tauri::command(async)]
+pub fn token_codebuddy_files() -> Result<Value, String> {
+    token::codebuddy_log_files()
+}
+
+/// DeepSeek Harness 的会话文件清单（路径 / 修改时间 / 大小），不含内容。
+/// 内容要先逐帧解压，走 `token_zstd_decode`（浏览器没有 zstd 解码 API）。
+#[tauri::command(async)]
+pub fn token_dsh_sessions() -> Result<Value, String> {
+    token::dsh_session_files()
+}
+
+/// 把本机分片写进同步仓库并推送；返回 `{ changed, pushed, log }`
+#[tauri::command(async)]
+pub fn token_sync_publish(repo: String, device: String, shard: Value) -> Result<Value, String> {
+    crate::sync::publish(&repo, &device, &shard)
+}
+
+/// 读同步仓库里各台机器的分片（原始 JSON，收敛与合并由渲染层负责）。
+/// 带上仓库地址：克隆指向的不是这个仓库时返回空表，免得把老仓库的分片当成最新的。
+#[tauri::command(async)]
+pub fn token_sync_shards(repo: String) -> Result<Vec<Value>, String> {
+    crate::sync::read_shards(&repo)
+}
+
 // ---------- 系统能力 ----------
 
 #[tauri::command(async)]

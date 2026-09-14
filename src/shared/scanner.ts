@@ -7,6 +7,7 @@
  *    能原样留在 vitest 里跑，不必为了换运行时把测试改成 Rust。
  */
 import type { PackageManager, ScanResult } from './types'
+import { resolveWithinProject } from './project-path'
 import {
   BUILD_TOOLS,
   TOOL_CONFIG_FILES,
@@ -151,6 +152,27 @@ export async function detectOutputDir(scan: ScanFs, root: string): Promise<strin
     if (await isNonEmptyDir(scan, joinPath(root, candidate))) return candidate
   }
   return undefined
+}
+
+/**
+ * 打包成功后该打开哪个目录：手动配置 > 构建配置声明的 outDir > 常见目录名，都没有就回退项目根。
+ *
+ * 手动配置与探测结果都要求「存在且非空」——产物目录是给用户看结果的，
+ * 打开一个空目录（首次打包失败时就是这样）不如让他对着项目根自己找。
+ * `detected: false` 表示上面两档都没命中，调用方据此提示用户。
+ */
+export async function resolveOutputDir(
+  scan: ScanFs,
+  root: string,
+  configured = ''
+): Promise<{ dir: string; detected: boolean }> {
+  const manual = resolveWithinProject(root, configured)
+  if (manual && (await isNonEmptyDir(scan, manual))) return { dir: manual, detected: true }
+
+  const found = await detectOutputDir(scan, root)
+  if (found) return { dir: resolveWithinProject(root, found), detected: true }
+
+  return { dir: root, detected: false }
 }
 
 /** Node 版本要求：package.json 的 engines.node 优先，其次 .nvmrc */

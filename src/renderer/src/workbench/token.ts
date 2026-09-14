@@ -1,22 +1,42 @@
 /**
- * Token 用量的读取与快照合并。
+ * Token 用量的读取、快照合并与多机同步。
  *
- * 分工：Rust 只把 ZCode 的 sqlite 原始聚合行取回来（`token_zcode_rows`），
- * 合并 / 取最大值 / 修剪 / 落盘都在这里 —— 与 `src/shared/token-usage.ts` 共用同一套函数，
- * 所以这段逻辑的既有单测全部继续有效。
+ * 分工：Rust 只把 ZCode 的 sqlite 原始聚合行取回来（`token_zcode_rows`）、
+ * 把本机分片推给 git（`token_sync_publish`）、把别人的分片读回来（`token_sync_shards`）；
+ * 合并 / 取最大值 / 求和 / 修剪 / 落盘 / 同步节流都在这里 —— 与 `src/shared/token-usage.ts`
+ * 共用同一套函数，所以那段逻辑的既有单测全部继续有效。
+ *
+ * 两台机器怎么合到一起（细节见 shared/token-usage.ts 的文件头）：
+ *   本机实读 → 与本机分片 mergeDays（取 max，抗上游清理）→ 落盘本机分片
+ *          → 推送到同步仓库 → 读回所有分片 → combineShards（跨设备求和）→ 交给界面
+ *
+ * 同步是**节流**的：界面每 60 秒拉一次数据，但 git 只在间隔到点或用户手点时才动。
+ * 没变化的分片不会产生提交 —— 时间戳只在计数真的变了之后才刷新，否则开着应用就会
+ * 每 10 分钟往仓库里堆一个「什么都没改」的提交。
  */
 import {
+  CODEBUDDY_SOURCE_ID,
+  DSH_SOURCE_ID,
   TOKEN_DATA_VERSION,
+  TOKEN_KEEP_DAYS,
   ZCODE_SOURCE_ID,
+  combineShards,
   isDateKey,
   mergeDays,
   pruneTokenDays,
-  sanitizeTokenData,
+  sameDays,
+  sanitizeShard,
+  sanitizeSyncRepo,
+  sumDays,
   type TokenCounters,
-  type TokenDataFile,
   type TokenDays,
+  type TokenShard,
+  type TokenSyncStatus,
+  type TokenSourceSnapshot,
   type TokenUsageResult
 } from '@shared/token-usage'
+import { collectCodeBuddyLogText, createCodeBuddyParseState } from '@shared/codebuddy-log'
+import { collectDshSessionText } from '@shared/dsh-log'
 import { invoke } from './bridge'
 
 /** Rust 侧 `token_zcode_rows` 回来的行：SUM 在无数据时是 NULL，所以全部可空 */
@@ -51,7 +71,7 @@ function toCounters(row: UsageRow): TokenCounters {
   }
 }
 
-type LiveRead = { ok: true; days: TokenDays } | { ok: false; error: string }
+type LiveRead = { ok: true; days: TokenDays } | { ok: false; error: string; missing?: boolean }
 
 /** 实读 ZCode：按天 × 模型聚合后交给共享逻辑去合并 */
 async function readZcodeLive(): Promise<LiveRead> {
@@ -66,35 +86,331 @@ async function readZcodeLive(): Promise<LiveRead> {
     }
     return { ok: true, days }
   } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : String(error) }
+    return { ok: false, error: reasonOf(error, '读取 ZCode 用量失败') }
   }
 }
 
+function reasonOf(error: unknown, fallback: string): string {
+  if (typeof error === 'string' && error.trim()) return error
+  if (error instanceof Error && error.message) return error.message
+  return fallback
+}
+
+// ---------- CodeBuddy(IDE 扩展日志) ----------
+
+/** `token_codebuddy_files` 回来的一项；Rust 只列文件，内容自己读 */
+interface CodeBuddyLogFile {
+  path: string
+  mtimeMs: number
+  size: number
+}
+
 /**
- * 实读 + 取最大值合并 + 修剪 + 落盘（防抖）。
+ * 上一次的解析结果与它的「输入签名」。
  *
- * ZCode 自己会清理旧会话，所以每次实读都要把结果 max 合并进快照并落盘，历史才守得住。
- * 读取失败不抛错：回退展示快照，把原因带给界面。
- *
- * 待移植：DSH（~/.dsh/sessions，多帧 zstd）与 CodeBuddy 扩展日志两个来源。
+ * 扩展日志只追加、不重写，所以「文件清单 + 修改时间 + 大小」一样就一定是同一份输入，
+ * 可以整份复用上次的结果 —— 这台机器上扩展日志将近十兆，闲着也每分钟重读重解析一遍
+ * 没有任何意义（而改了任何一个文件就必须整批重来：解析状态是跨文件的，见 codebuddy-log.ts）。
  */
-export async function getTokenUsage(): Promise<TokenUsageResult> {
+let codebuddyCache: { signature: string; days: TokenDays } | null = null
+
+/**
+ * 实读 CodeBuddy。分三步就是为了省掉上面那次无谓的重读：
+ * 先拿清单（很便宜）→ 比签名 → 只有变了才真去读文件、重新解析。
+ */
+async function readCodeBuddyLive(): Promise<LiveRead> {
+  let listing: { found?: unknown; files?: unknown }
+  try {
+    listing = await invoke<{ found?: unknown; files?: unknown }>('token_codebuddy_files')
+  } catch (error) {
+    return { ok: false, error: reasonOf(error, '读取 CodeBuddy 日志失败') }
+  }
+
+  // 没装就安静跳过：这台机器上没有这个工具是常态，
+  // 不该和「装了却读不出来」一样点亮面板上的「部分来源不可用」
+  if (listing?.found !== true) return { ok: false, missing: true, error: '' }
+
+  const files = (Array.isArray(listing.files) ? listing.files : [])
+    .map((item) => item as Partial<CodeBuddyLogFile>)
+    .filter(
+      (item): item is CodeBuddyLogFile =>
+        typeof item.path === 'string' &&
+        typeof item.mtimeMs === 'number' &&
+        typeof item.size === 'number'
+    )
+    // 快照只留最近一年，更早的日志里不可能有窗口内的记录
+    .filter((item) => item.mtimeMs >= Date.now() - (TOKEN_KEEP_DAYS - 1) * 86_400_000)
+
+  const signature = files.map((item) => `${item.path}:${item.mtimeMs}:${item.size}`).join('|')
+  if (codebuddyCache?.signature === signature) return { ok: true, days: codebuddyCache.days }
+
+  const state = createCodeBuddyParseState()
+  const days: TokenDays = {}
+  for (const file of files) {
+    try {
+      collectCodeBuddyLogText(await invoke<string>('fs_read_text', { path: file.path }), state, days)
+    } catch {
+      // 单个文件读不了（被占用 / 编码异常）只少几条记录，不影响其余
+    }
+  }
+
+  codebuddyCache = { signature, days }
+  return { ok: true, days }
+}
+
+// ---------- DeepSeek Harness(~/.dsh/sessions) ----------
+
+/** `token_dsh_sessions` 回来的一项 */
+interface DshSessionFile {
+  path: string
+  mtimeMs: number
+  size: number
+}
+
+/**
+ * 每个会话文件的解码结果，key 是路径。
+ *
+ * 与 CodeBuddy 的整批缓存不同，这里可以**按文件**缓存：会话文件之间互不依赖
+ * （每个文件都自带 request/header 声明模型、没有跨文件的链路），
+ * 所以只重解变化的那些就够 —— 解压是实打实的 CPU 活，本机 9MB 会话没必要时时全解一遍。
+ */
+const dshCache = new Map<string, { mtimeMs: number; size: number; days: TokenDays }>()
+
+/**
+ * 实读 DSH。清单由 Rust 给（很便宜），内容要逐帧解压 —— 浏览器没有 zstd 解码 API，
+ * 所以这一步回 Rust 走 `token_zstd_decode`，解出来的事件交给 shared 的纯函数解析。
+ */
+async function readDshLive(): Promise<LiveRead> {
+  let listing: { found?: unknown; sessions?: unknown }
+  try {
+    listing = await invoke<{ found?: unknown; sessions?: unknown }>('token_dsh_sessions')
+  } catch (error) {
+    return { ok: false, error: reasonOf(error, '读取 DSH 会话目录失败') }
+  }
+
+  // 没装就安静跳过（与 CodeBuddy 同一约定）
+  if (listing?.found !== true) return { ok: false, missing: true, error: '' }
+
+  const cutoff = Date.now() - (TOKEN_KEEP_DAYS - 1) * 86_400_000
+  const sessions = (Array.isArray(listing.sessions) ? listing.sessions : [])
+    .map((item) => item as Partial<DshSessionFile>)
+    .filter(
+      (item): item is DshSessionFile =>
+        typeof item.path === 'string' &&
+        typeof item.mtimeMs === 'number' &&
+        typeof item.size === 'number'
+    )
+    // 快照只留最近一年，更早的会话里不可能有窗口内的记录
+    .filter((item) => item.mtimeMs >= cutoff)
+
+  let days: TokenDays = {}
+  const alive = new Set<string>()
+
+  for (const session of sessions) {
+    alive.add(session.path)
+    let cached = dshCache.get(session.path)
+
+    if (!cached || cached.mtimeMs !== session.mtimeMs || cached.size !== session.size) {
+      try {
+        const text = await invoke<string>('token_zstd_decode', { path: session.path })
+        const parsed: TokenDays = {}
+        collectDshSessionText(text, parsed)
+        cached = { mtimeMs: session.mtimeMs, size: session.size, days: parsed }
+        dshCache.set(session.path, cached)
+      } catch {
+        // 单个会话坏了（帧损坏 / 文件被删）只少这一个，不影响其余
+        dshCache.delete(session.path)
+        continue
+      }
+    }
+
+    days = sumDays(days, cached.days)
+  }
+
+  // 会话被清理掉的就从缓存里摘掉，不然内存里会一直留着它们
+  for (const path of [...dshCache.keys()]) {
+    if (!alive.has(path)) dshCache.delete(path)
+  }
+
+  return { ok: true, days }
+}
+
+// ---------- 本机设备标识 ----------
+
+/** 本机设备标识只问一次：它落盘后就不再变，而面板每 60 秒就会走一次这条路 */
+let device: { id: string; name: string } | null = null
+
+async function localDevice(): Promise<{ id: string; name: string }> {
+  if (device) return device
+
+  try {
+    const info = await invoke<{ id?: unknown; name?: unknown }>('token_device')
+    device = {
+      id: typeof info?.id === 'string' ? info.id.trim() : '',
+      name: typeof info?.name === 'string' ? info.name.trim() : ''
+    }
+  } catch {
+    // 拿不到标识只影响同步（分片名要用它），本机数据照常展示
+    device = { id: '', name: '' }
+  }
+  return device
+}
+
+// ---------- 同步 ----------
+
+/** 自动同步的间隔：面板每分钟刷新一次，只有偶尔那几次真的走网络 */
+const SYNC_INTERVAL_MS = 10 * 60_000
+
+let lastSyncAt = 0
+/** 上次尝试同步用的仓库；设置里换了地址就立刻同步一次，不必等节流窗口过去 */
+let lastSyncRepo = ''
+let lastSyncError = ''
+/** 别人的分片（已收敛）；两次同步之间照旧参与合计，面板不会因为没到同步点就少一块数据 */
+let remoteShards: TokenShard[] = []
+
+/**
+ * 同步串行化：面板轮询与手动同步可能正好撞上，
+ * 两个 git 进程同时动同一个克隆目录会互相打架（index.lock 冲突）。
+ */
+let inflight: Promise<void> = Promise.resolve()
+
+function enqueue(task: () => Promise<void>): Promise<void> {
+  inflight = inflight.then(task, task)
+  return inflight
+}
+
+/**
+ * 一轮完整同步：推本机分片 → 读回所有分片。
+ *
+ * 两步各自兜住失败：推送失败（没网 / 凭据过期）不该连带把「读别人的分片」也停掉 ——
+ * 克隆目录还在，读是纯本地操作，能读到就还能看到别的机器的最新数据。
+ */
+async function runSync(repo: string, shard: TokenShard): Promise<void> {
+  const errors: string[] = []
+
+  try {
+    await invoke('token_sync_publish', { repo, device: shard.device, shard })
+  } catch (error) {
+    errors.push(reasonOf(error, '同步失败'))
+  }
+
+  try {
+    const raw = await invoke<unknown[]>('token_sync_shards', { repo })
+    remoteShards = (Array.isArray(raw) ? raw : [])
+      .map((item) => sanitizeShard(item))
+      // 本机那份要用内存里的最新分片，仓库里的副本是上次推送时的样子；
+      // 两份都合进去就会把本机重复计一遍。没有 device 的分片认不出是谁的，一并丢掉。
+      .filter((item) => item.device && item.device !== shard.device)
+  } catch (error) {
+    errors.push(reasonOf(error, '读取同步分片失败'))
+  }
+
+  lastSyncError = errors.join('；')
+  lastSyncAt = Date.now()
+  lastSyncRepo = repo
+}
+
+function syncStatus(enabled: boolean, deviceName: string, repo: string): TokenSyncStatus {
+  if (!enabled) {
+    return { enabled: false, deviceName, repo: '', lastSyncAt: 0, error: '', devices: [] }
+  }
+  return {
+    enabled: true,
+    deviceName,
+    repo,
+    lastSyncAt,
+    error: lastSyncError,
+    devices: remoteShards.map((shard) => ({
+      id: shard.device,
+      name: shard.name || shard.device,
+      updatedAt: shard.updatedAt
+    }))
+  }
+}
+
+// ---------- 对外入口 ----------
+
+/**
+ * 实读 + 合并 + 按需同步，返回界面要的合计。
+ *
+ * `repo` 是设置里的同步仓库地址（空串 = 不同步）；`force` 给手动同步按钮用，绕过节流。
+ *
+ * 实读失败不抛错：回退展示快照，把原因带给界面；
+ * 某个来源「没装」不算失败（`missing`），只是那个来源没有数据。
+ */
+export async function getTokenUsage(options: {
+  repo: string
+  force?: boolean
+}): Promise<TokenUsageResult> {
   const now = Date.now()
-  const snapshot = sanitizeTokenData(await invoke<unknown>('token_load'))
-  const sources = { ...snapshot.sources }
+  // 先取设备标识:v3 老文件里没有设备信息,收敛时要用它补齐(见 sanitizeShard 的 fallback)
+  const { id, name } = await localDevice()
+  const local = sanitizeShard(await invoke<unknown>('token_load'), { device: id, name })
+
+  // 各来源互不依赖,并行读:都是本地读取,串起来白等
+  const [zcodeLive, codebuddyLive, dshLive] = await Promise.all([
+    readZcodeLive(),
+    readCodeBuddyLive(),
+    readDshLive()
+  ])
+
+  const sources = { ...local.sources }
   const sourceErrors: Record<string, string> = {}
+  // 计数有没有真的变化:没变就不刷新快照时间戳,否则同步那边每轮都会推一个内容相同的提交
+  let changed = false
 
-  const live = await readZcodeLive()
-  if (!live.ok) {
-    sourceErrors[ZCODE_SOURCE_ID] = live.error
-    return { data: snapshot, sourceErrors }
+  // 逐个来源合并进本机快照:分片内取 max(抗上游清理、重复实读幂等),失败就保住旧数据
+  for (const { id: sourceId, read } of [
+    { id: ZCODE_SOURCE_ID, read: zcodeLive },
+    { id: CODEBUDDY_SOURCE_ID, read: codebuddyLive },
+    { id: DSH_SOURCE_ID, read: dshLive }
+  ]) {
+    if (!read.ok) {
+      // missing 是「这台机器上没装这个工具」,不算读取失败,只是没有这个来源
+      if (!read.missing) sourceErrors[sourceId] = read.error
+      continue
+    }
+
+    const before = local.sources[sourceId]?.days ?? {}
+    const merged = pruneTokenDays(mergeDays(before, read.days), now)
+    if (!sameDays(merged, before)) changed = true
+    sources[sourceId] = { days: merged }
   }
 
-  sources[ZCODE_SOURCE_ID] = {
-    days: pruneTokenDays(mergeDays(sources[ZCODE_SOURCE_ID]?.days ?? {}, live.days), now)
+  const shard: TokenShard = {
+    version: TOKEN_DATA_VERSION,
+    device: id,
+    name,
+    updatedAt: changed ? now : local.updatedAt,
+    sources
+  }
+  await invoke('token_save', { value: shard })
+
+  const repo = sanitizeSyncRepo(options.repo)
+
+  if (!repo) {
+    // 关掉同步：连别人机器上已经读到的分片也一起撤掉，界面回到「只有本机」
+    remoteShards = []
+    lastSyncRepo = ''
+    lastSyncError = ''
+  } else if (options.force || repo !== lastSyncRepo || now - lastSyncAt >= SYNC_INTERVAL_MS) {
+    // 换了地址会在下一次刷新时立刻同步（不必等节流窗口）；Rust 那边发现克隆指向的不是这个仓库
+    // 会重新克隆，而且读分片时也会核对仓库归属 —— 详见 sync.rs 的 ensure_clone / read_shards
+    if (!id) {
+      lastSyncAt = now
+      lastSyncRepo = repo
+      lastSyncError = '拿不到本机设备标识，无法同步'
+    } else {
+      await enqueue(() => runSync(repo, shard))
+    }
   }
 
-  const next: TokenDataFile = { version: TOKEN_DATA_VERSION, updatedAt: now, sources }
-  await invoke('token_save', { value: next })
-  return { data: next, sourceErrors }
+  // 本机那份用刚算出来的分片，仓库里的副本不参与
+  const data = combineShards(repo ? [shard, ...remoteShards] : [shard], now)
+  return { data, sourceErrors, sync: syncStatus(Boolean(repo), name, repo) }
+}
+
+/** 手动同步一次（面板上的同步按钮）：绕过自动同步的节流 */
+export async function syncTokenUsage(repo: string): Promise<TokenUsageResult> {
+  return getTokenUsage({ repo, force: true })
 }

@@ -11,6 +11,7 @@ mod paths;
 mod proc;
 mod session;
 mod store;
+mod sync;
 mod system;
 mod token;
 
@@ -297,6 +298,11 @@ fn main() {
             commands::window_is_maximized,
             commands::token_zcode_rows,
             commands::token_zstd_decode,
+            commands::token_codebuddy_files,
+            commands::token_dsh_sessions,
+            commands::token_device,
+            commands::token_sync_publish,
+            commands::token_sync_shards,
             commands::check_port,
             commands::kill_port_process,
             commands::reveal,

@@ -12,6 +12,12 @@ const POINTER_FILE: &str = "data-location.json";
 pub const DATA_FILE: &str = "workbench-data.json";
 pub const TOKEN_DATA_FILE: &str = "token-data.json";
 pub const THEME_FILE: &str = "theme.json";
+/// 本机设备标识（Token 同步用）
+const DEVICE_FILE: &str = "device.json";
+/// Token 同步仓库的本地克隆目录名
+const TOKEN_SYNC_DIR: &str = "token-sync";
+/// 克隆里放分片的子目录名
+pub(crate) const SHARD_DIR: &str = "devices";
 
 /// 用户数据根目录，等价于 Electron 的 `app.getPath('userData')`。
 pub fn user_data_dir() -> PathBuf {
@@ -52,6 +58,23 @@ pub fn theme_file() -> PathBuf {
 
 pub fn token_file() -> PathBuf {
     data_dir().join(TOKEN_DATA_FILE)
+}
+
+/// Token 同步仓库的本地克隆；机器本地的缓存，删掉会在下次同步时重新克隆
+pub fn token_sync_dir() -> PathBuf {
+    user_data_dir().join(TOKEN_SYNC_DIR)
+}
+
+/// 克隆里放设备分片的子目录：一台机器一个文件，所以永远没有同文件冲突
+pub fn token_shard_dir() -> PathBuf {
+    token_sync_dir().join(SHARD_DIR)
+}
+
+/// 本机设备标识（Token 同步用）。机器本地生成，**不随数据目录迁移、也不进同步仓库**：
+/// 两台机器拿到同一个 id 就会往同一个分片文件里写，互相覆盖且不会有任何报错。
+/// 放在 user_data_dir 而不是数据目录里，正是因为用户可能把数据目录指到别处（甚至是网盘）。
+pub fn device_file() -> PathBuf {
+    user_data_dir().join(DEVICE_FILE)
 }
 
 /// 目标目录里是否已经有数据文件（迁移前要拦一下，避免覆盖别人的数据）。

@@ -19,6 +19,7 @@ import type {
 } from '@shared/types'
 import { invoke, listen } from './bridge'
 import { emit } from './events'
+import { outputDirOf } from './scanner'
 import * as state from './state'
 import * as nvm from './nvm'
 
@@ -145,6 +146,25 @@ function pushLog(meta: SessionMeta, stream: ProcessLogEvent['stream'], text: str
     text,
     time: nowTime()
   })
+}
+
+/**
+ * 打包成功后按项目设置打开产物目录（F-5.1 / F-5.2）。
+ *
+ * 目录由 shared 的 resolveOutputDir 定：手动配置 > 构建配置声明的 outDir > 常见目录名。
+ * 两档都没命中才退到项目根，并往终端补一句说明 —— 否则用户看到资源管理器停在一个不是产物的
+ * 地方，只会以为探测错了。
+ */
+async function openBuildOutput(meta: SessionMeta): Promise<void> {
+  // 设置以完成时刻的为准：打包往往要跑几十秒，期间用户可能刚把开关关掉
+  const project = state.projects().find((item) => item.id === meta.projectId)
+  if (!project?.autoOpenExplorer) return
+
+  const { dir, detected } = await outputDirOf(project.path, project.outputDir)
+  if (!detected) pushLog(meta, 'sys', '未探测到产物目录，已打开项目根目录')
+
+  // 只发起、不等结果：explorer 就算成功也常返回非 0 退出码，等它没有意义
+  void invoke('reveal', { path: dir })
 }
 
 interface RunInput {
@@ -308,6 +328,9 @@ export function installSessionListeners(): void {
       exitCode: code,
       durationMs: Date.now() - meta.startedAt
     })
+
+    // 只有打包成功才谈得上「产物」；不 await：探测要跑几个来回，别拖住退出这条通道
+    if (meta.kind === 'build' && code === 0) void openBuildOutput(meta)
   })
 }
 

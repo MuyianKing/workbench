@@ -260,6 +260,16 @@ export interface AppSettings {
    * 只管背景这一层，边框、阴影与里面的文字不变；100% 就是原本的实底卡片。
    */
   cardOpacity: number
+  /**
+   * Token 用量同步仓库地址（git 远程地址），空串表示不同步。
+   *
+   * 多台机器各自把「本机分片」推到这一个仓库里，读的时候全量合并 ——
+   * 一个设备一个文件，所以永远不会有同文件冲突（详见 shared/token-usage.ts 的文件头）。
+   * 值会被 shared 的 sanitizeSyncRepo 收敛：带空白或以 `-` 开头的一律当没填。
+   *
+   * 仓库里放的是模型名与 token 计数，**没有对话内容**，但仍然建议用私有仓库。
+   */
+  tokenSyncRepo: string
 }
 
 /**
@@ -602,6 +612,11 @@ export interface WorkbenchApi {
   getActivity: () => Promise<ActivityCounts>
   /** Token 用量:实读各 AI 工具本地库并合并进快照;读取失败的来源带原因,数据回退快照 */
   getTokenUsage: () => Promise<Result<TokenUsageResult>>
+  /**
+   * 立刻同步一次 Token 快照并返回合并后的结果（面板上的手动同步按钮）。
+   * 自动同步按间隔节流，这个入口不受节流限制。
+   */
+  syncTokenUsage: () => Promise<Result<TokenUsageResult>>
   createGroup: (name: string) => Promise<Result<ProjectGroup>>
   renameGroup: (id: string, name: string) => Promise<Result<ProjectGroup>>
   removeGroup: (id: string) => Promise<Result<null>>
@@ -751,6 +766,7 @@ export const IPC = {
   checkProjectPaths: 'project:check-paths',
   activity: 'stats:activity',
   tokenUsage: 'stats:token-usage',
+  tokenSyncUsage: 'stats:token-sync',
   createGroup: 'group:create',
   renameGroup: 'group:rename',
   removeGroup: 'group:remove',
@@ -855,5 +871,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
   accentColor: ACCENT_COLOR_DEFAULT,
   accentInk: ACCENT_INK_DEFAULT,
   topBarStyle: 'clear',
-  cardOpacity: CARD_OPACITY_DEFAULT
+  cardOpacity: CARD_OPACITY_DEFAULT,
+  tokenSyncRepo: ''
 }

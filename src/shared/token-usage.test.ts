@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import {
   addCounters,
+  sumDays,
   bucketRangeOf,
   buildSeriesRange,
   cacheHitRate,
+  combineShards,
   emptyCounters,
   flattenSources,
   formatPercent,
@@ -15,7 +17,7 @@ import {
   presetLabel,
   pruneTokenDays,
   resolvePresetRange,
-  sanitizeTokenData,
+  sanitizeShard,
   shareByModel,
   shareBySource,
   shortDayLabel,
@@ -24,7 +26,8 @@ import {
   totalTokens,
   weekKeyOf,
   type TokenCounters,
-  type TokenDays
+  type TokenDays,
+  type TokenShard
 } from './token-usage'
 
 function counters(overrides: Partial<TokenCounters> = {}): TokenCounters {
@@ -95,8 +98,8 @@ describe('计数运算', () => {
 })
 
 describe('落盘收敛', () => {
-  it('sanitizeTokenData 对坏数据逐层丢弃,缺字段补默认', () => {
-    const clean = sanitizeTokenData({
+  it('sanitizeShard 对坏数据逐层丢弃,缺字段补默认', () => {
+    const clean = sanitizeShard({
       version: 3,
       updatedAt: 123,
       sources: {
@@ -121,20 +124,52 @@ describe('落盘收敛', () => {
     expect(clean.sources.zcode.days['2026-09-14']['glm-5'].inputTokens).toBe(0)
   })
 
-  it('版本不匹配(v1 的厂商层结构)整份弃用,下次实读自愈', () => {
+  it('v3 老文件照常读进来,设备信息由 fallback 补齐', () => {
+    const shard = sanitizeShard(
+      {
+        version: 3,
+        updatedAt: 7,
+        sources: { zcode: { days: { '2026-09-13': { 'glm-5': { inputTokens: 10 } } } } }
+      },
+      { device: 'dev-1', name: '办公室' }
+    )
+
+    // 口径没变,历史必须留住 —— 这里要是整份弃用,用户攒下的一年快照就没了
+    expect(shard.version).toBe(4)
+    expect(shard.device).toBe('dev-1')
+    expect(shard.name).toBe('办公室')
+    expect(shard.sources.zcode.days['2026-09-13']['glm-5'].inputTokens).toBe(10)
+  })
+
+  it('分片自带的设备信息优先于 fallback', () => {
+    const shard = sanitizeShard(
+      { version: 4, device: 'dev-2', name: '笔记本', sources: {} },
+      { device: 'dev-1', name: '办公室' }
+    )
+    expect(shard.device).toBe('dev-2')
+    expect(shard.name).toBe('笔记本')
+  })
+
+  it('版本不在兼容表里(v1 的厂商层结构)整份弃用,下次实读自愈', () => {
     const v1 = {
       version: 1,
       updatedAt: 123,
       sources: { zcode: { days: { '2026-09-13': { zhipu: { 'glm-5': { inputTokens: 10 } } } } } }
     }
-    expect(sanitizeTokenData(v1)).toEqual({ version: 3, updatedAt: 0, sources: {} })
+    expect(sanitizeShard(v1)).toEqual({
+      version: 4,
+      device: '',
+      name: '',
+      updatedAt: 0,
+      sources: {}
+    })
   })
 
-  it('sanitizeTokenData 对 null / 数组 / 数字等整份坏数据回空快照', () => {
-    const empty = { version: 3, updatedAt: 0, sources: {} }
-    expect(sanitizeTokenData(null)).toEqual(empty)
-    expect(sanitizeTokenData([1, 2])).toEqual(empty)
-    expect(sanitizeTokenData(42)).toEqual(empty)
+  it('sanitizeShard 对 null / 数组 / 数字等整份坏数据回空分片', () => {
+    const empty = { version: 4, device: '', name: '', updatedAt: 0, sources: {} }
+    expect(sanitizeShard(null)).toEqual(empty)
+    expect(sanitizeShard([1, 2])).toEqual(empty)
+    expect(sanitizeShard(42)).toEqual(empty)
   })
 
   it('isDateKey 只认 YYYY-MM-DD', () => {
@@ -185,7 +220,7 @@ describe('快照合并与修剪', () => {
 
 describe('跨工具合并', () => {
   it('flattenSources 跨工具同天同模型相加', () => {
-    const data = sanitizeTokenData({
+    const data = sanitizeShard({
       version: 3,
       sources: {
         zcode: { days: { '2026-09-13': { 'glm-5': { inputTokens: 10 } } } },
@@ -196,6 +231,70 @@ describe('跨工具合并', () => {
     const days = flattenSources(data)
     expect(days['2026-09-13']['glm-5'].inputTokens).toBe(15)
     expect(days['2026-09-13'].claude.inputTokens).toBe(7)
+  })
+})
+
+describe('跨设备合并', () => {
+  /** 造一份设备分片;days 直接给「天 → 模型 → 输入量」 */
+  function shard(device: string, updatedAt: number, days: TokenDays): TokenShard {
+    return { version: 4, device, name: device, updatedAt, sources: { zcode: { days } } }
+  }
+
+  it('sumDays 同天同模型相加,各自独有的日期与模型都留着', () => {
+    const a = makeDays([['2026-09-13', 'glm-5', 10]])
+    const b = makeDays([
+      ['2026-09-13', 'glm-5', 5],
+      ['2026-09-13', 'glm-flash', 3],
+      ['2026-09-14', 'glm-5', 7]
+    ])
+
+    const sum = sumDays(a, b)
+    expect(sum['2026-09-13']['glm-5'].inputTokens).toBe(15)
+    expect(sum['2026-09-13']['glm-flash'].inputTokens).toBe(3)
+    expect(sum['2026-09-14']['glm-5'].inputTokens).toBe(7)
+  })
+
+  it('combineShards 跨设备求和而不是取最大:两台机器同一天的用量是两笔', () => {
+    const now = new Date(2026, 8, 14)
+    const data = combineShards(
+      [
+        shard('dev-a', 100, makeDays([['2026-09-13', 'glm-5', 1000]])),
+        shard('dev-b', 200, makeDays([['2026-09-13', 'glm-5', 400]]))
+      ],
+      now
+    )
+
+    expect(data.sources.zcode.days['2026-09-13']['glm-5'].inputTokens).toBe(1400)
+    // updatedAt 取最新那台机器的时间,用于界面上的「更新于」
+    expect(data.updatedAt).toBe(200)
+  })
+
+  it('combineShards 丢掉窗口外的旧天:长期关机的那台机器不往图里塞陈年数据', () => {
+    const now = new Date(2026, 8, 14)
+    const data = combineShards(
+      [shard('dev-a', 1, makeDays([['2020-01-01', 'glm-5', 1]]))],
+      now
+    )
+    expect(data.sources.zcode.days['2020-01-01']).toBeUndefined()
+  })
+
+  it('反复合并同一批分片不会让数字越加越多(面板每轮刷新都重算,合计必须稳定)', () => {
+    const now = new Date(2026, 8, 14)
+    const shards = [
+      shard('dev-a', 1, makeDays([['2026-09-13', 'glm-5', 10]])),
+      shard('dev-b', 2, makeDays([['2026-09-13', 'glm-5', 20]]))
+    ]
+    const first = combineShards(shards, now)
+    const second = combineShards(shards, now)
+
+    expect(first.sources.zcode.days['2026-09-13']['glm-5'].inputTokens).toBe(30)
+    expect(second).toEqual(first)
+  })
+
+  it('combineShards 没有任何分片时给一份空合计', () => {
+    const data = combineShards([], new Date(2026, 8, 14))
+    expect(data.sources).toEqual({})
+    expect(data.updatedAt).toBe(0)
   })
 })
 
@@ -326,7 +425,7 @@ describe('周期与聚合', () => {
   })
 
   it('shareBySource 按工具合计:跨工具各自成行,零用量的工具不出现', () => {
-    const data = sanitizeTokenData({
+    const data = sanitizeShard({
       version: 3,
       sources: {
         zcode: { days: { '2026-09-13': { 'glm-5': { inputTokens: 10, outputTokens: 2 } } } },

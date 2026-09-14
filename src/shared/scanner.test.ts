@@ -10,6 +10,7 @@ import {
   isValidScriptName,
   pickBuild,
   pickServe,
+  resolveOutputDir,
   scanProject,
   type ScanFs
 } from './scanner'
@@ -171,6 +172,62 @@ describe('isNonEmptyDir', () => {
 
   it('不存在的路径返回 false', async () => {
     expect(await isNonEmptyDir(nodeFs, join(makeProject({}), 'nope'))).toBe(false)
+  })
+})
+
+describe('resolveOutputDir', () => {
+  /** 在项目里造一个非空目录 */
+  function makeDirWithFile(dir: string, name: string): void {
+    mkdirSync(join(dir, name), { recursive: true })
+    writeFileSync(join(dir, name, 'index.html'), '<html></html>')
+  }
+
+  it('手动配置优先，且相对项目根解析', async () => {
+    const dir = makeProject({}, { 'vite.config.ts': "export default { build: { outDir: 'www' } }" })
+    makeDirWithFile(dir, 'www')
+    makeDirWithFile(dir, 'public/dist')
+
+    const result = await resolveOutputDir(nodeFs, dir, 'public/dist')
+    expect(result).toEqual({ dir: join(dir, 'public', 'dist'), detected: true })
+  })
+
+  it('手动配置为空目录时退回探测', async () => {
+    const dir = makeProject({}, { 'vite.config.ts': "export default { build: { outDir: 'www' } }" })
+    mkdirSync(join(dir, 'public/dist'), { recursive: true })
+    makeDirWithFile(dir, 'www')
+
+    // 空目录不算命中：产物压根没生成，打开它没有意义
+    const result = await resolveOutputDir(nodeFs, dir, 'public/dist')
+    expect(result).toEqual({ dir: join(dir, 'www'), detected: true })
+  })
+
+  it('没有手动配置时用构建配置声明的 outDir', async () => {
+    const dir = makeProject({}, { 'vite.config.ts': "export default { build: { outDir: 'www' } }" })
+    makeDirWithFile(dir, 'www')
+
+    expect(await resolveOutputDir(nodeFs, dir)).toEqual({ dir: join(dir, 'www'), detected: true })
+  })
+
+  it('回退到常见目录名', async () => {
+    const dir = makeProject({})
+    makeDirWithFile(dir, 'dist')
+
+    expect(await resolveOutputDir(nodeFs, dir)).toEqual({ dir: join(dir, 'dist'), detected: true })
+  })
+
+  it('都没有命中时回退项目根并标记未探测到', async () => {
+    const dir = makeProject({})
+    expect(await resolveOutputDir(nodeFs, dir)).toEqual({ dir, detected: false })
+  })
+
+  it('手动配置写成绝对路径时原样使用', async () => {
+    const dir = makeProject({})
+    const outside = mkdtempSync(join(tmpdir(), 'workbench-scan-out-'))
+    tempDirs.push(outside)
+    makeDirWithFile(outside, 'release')
+
+    const result = await resolveOutputDir(nodeFs, dir, join(outside, 'release'))
+    expect(result).toEqual({ dir: join(outside, 'release'), detected: true })
   })
 })
 
