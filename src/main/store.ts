@@ -104,7 +104,7 @@ export function activity(): ActivityCounts {
 
 export async function loadData(): Promise<PersistedData> {
   customDir = readPointer()
-  return persistent.load(parseData)
+  return persistent.load((raw) => parseData(raw, randomUUID))
 }
 
 /** 变更即写，防抖 300ms；先写临时文件再重命名，避免写坏原文件 */
