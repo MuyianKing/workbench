@@ -32,11 +32,15 @@ export const DSH_SOURCE_ID = 'dsh'
 /** 接入来源:CodeBuddy(读它的 IDE 扩展日志里的逐步 usage 记录) */
 export const CODEBUDDY_SOURCE_ID = 'codebuddy'
 
+/** 接入来源:WorkBuddy(读它会话正文里每次模型调用自带的 usage 记录) */
+export const WORKBUDDY_SOURCE_ID = 'workbuddy'
+
 /** 接入工具的界面名;将来新增工具在这里登记 */
 export const SOURCE_LABELS: Record<string, string> = {
   [ZCODE_SOURCE_ID]: 'ZCode',
   [DSH_SOURCE_ID]: 'DeepSeek Harness',
-  [CODEBUDDY_SOURCE_ID]: 'CodeBuddy'
+  [CODEBUDDY_SOURCE_ID]: 'CodeBuddy',
+  [WORKBUDDY_SOURCE_ID]: 'WorkBuddy'
 }
 
 /** 一组 token 计数(某个工具某天某模型的合计) */

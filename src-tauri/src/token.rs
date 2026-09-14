@@ -195,6 +195,71 @@ fn collect_codebuddy_logs(
     }
 }
 
+// ---------- WorkBuddy(~/.workbuddy/projects) ----------
+//
+// 同样只做「列文件」：WorkBuddy 把每次模型调用的用量写进会话正文
+// （`projects/<项目>/<会话 id>.jsonl`，一行一个 JSON 事件），正文没有压缩、
+// 每一行都自带时间 / 模型 / 用量，读取与解析都在 TS 侧（shared/workbuddy-log.ts）。
+
+/// WorkBuddy 的 home。
+///
+/// 注意它与 Electron 的 `%APPDATA%/WorkBuddy`（只有窗口状态那些）**不是**一回事：
+/// 会话与排障日志都在 `~/.workbuddy` 这个 CLI 风格的目录下。
+/// 环境变量出口与其它来源同理，给装在别处的人留一条路。
+pub fn workbuddy_home() -> PathBuf {
+    std::env::var("WORKBUDDY_HOME")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home_dir().join(".workbuddy"))
+}
+
+/// 会话文件清单：`{ found, root, sessions: [{ path, mtimeMs, size }] }`，不读文件内容。
+///
+/// `found` 为 false 表示这台机器没有 WorkBuddy，调用方安静跳过这个来源。
+pub fn workbuddy_session_files() -> Result<Value, String> {
+    workbuddy_sessions_in(&workbuddy_home().join("projects"))
+}
+
+fn workbuddy_sessions_in(root: &std::path::Path) -> Result<Value, String> {
+    if !root.is_dir() {
+        return Ok(json!({ "found": false, "root": root.to_string_lossy(), "sessions": [] }));
+    }
+    std::fs::read_dir(root).map_err(|err| format!("WorkBuddy 会话目录读取失败: {err}"))?;
+
+    let mut sessions = Vec::new();
+    // 目录结构是 projects/<项目>/<会话 id>.jsonl；项目目录读不了只少一个项目。
+    // 只下探这一层：这一层才是会话正文，更深的位置没有实测过的用量来源，
+    // 多收一份就可能把同一次调用算两遍（子会话正文的用量是不是已经并进主正文，没有把握）。
+    for project in std::fs::read_dir(root).into_iter().flatten().flatten() {
+        if !project.path().is_dir() {
+            continue;
+        }
+        for entry in std::fs::read_dir(project.path()).into_iter().flatten().flatten() {
+            let path = entry.path();
+            // 每个会话都是一个 .jsonl 加两个同名侧车文件（.meta.json / .file-rollback.ndjson），
+            // 只有 .jsonl 才是会话正文
+            if path.extension().and_then(|ext| ext.to_str()) != Some("jsonl") {
+                continue;
+            }
+            let Ok(meta) = entry.metadata() else {
+                continue;
+            };
+            if !meta.is_file() {
+                continue;
+            }
+            sessions.push(json!({
+                "path": path.to_string_lossy(),
+                "mtimeMs": modified_ms(&meta),
+                "size": meta.len(),
+            }));
+        }
+    }
+
+    Ok(json!({ "found": true, "root": root.to_string_lossy(), "sessions": sessions }))
+}
+
 fn modified_ms(meta: &std::fs::Metadata) -> u64 {
     meta.modified()
         .ok()
@@ -552,6 +617,113 @@ mod tests {
 
         assert_eq!(value["found"], json!(false));
         assert!(value["sessions"].as_array().unwrap().is_empty());
+    }
+
+    /// 项目目录下的 .jsonl 才是会话正文：同名侧车（.meta.json / .file-rollback.ndjson）、
+    /// 项目目录之外的、以及更深一层的都不收
+    #[test]
+    fn collects_workbuddy_sessions_and_skips_sidecars() {
+        let root = std::env::temp_dir().join(format!("wb-wb-{}", uuid::Uuid::new_v4()));
+        let project = root.join("f-projects-workbench");
+        std::fs::create_dir_all(project.join("nested")).unwrap();
+
+        std::fs::write(project.join("7cc5feb0.jsonl"), "{}\n").unwrap();
+        std::fs::write(project.join("7cc5feb0.meta.json"), "{}").unwrap();
+        std::fs::write(project.join("7cc5feb0.file-rollback.ndjson"), "{}").unwrap();
+        std::fs::write(project.join("nested/deep.jsonl"), "{}").unwrap();
+        // 项目目录之外的 .jsonl 不是用量来源
+        std::fs::write(root.join("stray.jsonl"), "{}").unwrap();
+
+        let value = workbuddy_sessions_in(&root).unwrap();
+        assert_eq!(value["found"], json!(true));
+
+        let sessions = value["sessions"].as_array().unwrap();
+        assert_eq!(sessions.len(), 1, "只该收到项目目录下那一个会话正文");
+        let path = sessions[0]["path"].as_str().unwrap();
+        assert!(path.ends_with("7cc5feb0.jsonl"), "收到的是 {path}");
+        assert!(sessions[0]["size"].as_u64().unwrap() > 0);
+        assert!(sessions[0]["mtimeMs"].as_u64().unwrap() > 0);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// 没装 WorkBuddy 时 found=false、不是错误（界面上安静跳过，不点亮「来源不可用」）
+    #[test]
+    fn a_missing_workbuddy_install_is_not_an_error() {
+        let missing = std::env::temp_dir().join("wb-workbuddy-does-not-exist");
+        let value = workbuddy_sessions_in(&missing).unwrap();
+
+        assert_eq!(value["found"], json!(false));
+        assert!(value["sessions"].as_array().unwrap().is_empty());
+
+        // 默认 home 是 ~/.workbuddy，不是 Electron 的 %APPDATA%/WorkBuddy
+        assert!(workbuddy_home().ends_with(".workbuddy"));
+    }
+
+    /// 环境相关诊断：真读本机的 WorkBuddy 会话正文，核对解析规则的前提。
+    ///
+    /// 用例里的会话正文是自己造的，而真实正文长什么样只有这台机器知道 ——
+    /// WorkBuddy 还年轻，字段名或存放位置一变，`providerData.usage` 那条路径就会悄悄失配、
+    /// 这个来源静默变成 0 条记录。换机器 / WorkBuddy 升级后跑一次：
+    /// `cargo test -- --ignored --nocapture`
+    #[test]
+    #[ignore = "环境相关诊断：cargo test -- --ignored --nocapture"]
+    fn diagnose_real_workbuddy_sessions() {
+        let root = workbuddy_home().join("projects");
+        println!("会话目录: {}", root.display());
+        let Ok(value) = workbuddy_sessions_in(&root) else {
+            println!("列文件失败");
+            return;
+        };
+        let sessions = value["sessions"].as_array().cloned().unwrap_or_default();
+        let bytes: u64 = sessions.iter().filter_map(|f| f["size"].as_u64()).sum();
+        println!(
+            "{} 个会话正文, 共 {:.1} MB",
+            sessions.len(),
+            bytes as f64 / 1_048_576.0
+        );
+        if let Some(first) = sessions.first() {
+            println!("  例: {}", first["path"].as_str().unwrap_or(""));
+        }
+
+        // 逐条核对解析规则要用的三处：时间戳、模型、用量
+        let mut lines = 0usize;
+        let mut with_usage = 0usize;
+        let mut models: Vec<String> = Vec::new();
+        let mut sample = String::new();
+        for session in &sessions {
+            let path = session["path"].as_str().unwrap_or("");
+            let Ok(text) = std::fs::read_to_string(path) else {
+                continue;
+            };
+            for line in text.lines() {
+                lines += 1;
+                let Ok(event) = serde_json::from_str::<Value>(line) else {
+                    continue;
+                };
+                let provider = &event["providerData"];
+                let usage = &provider["usage"];
+                if !usage.is_object() {
+                    continue;
+                }
+                with_usage += 1;
+                if let Some(model) = provider["model"].as_str() {
+                    if !models.iter().any(|item| item == model) {
+                        models.push(model.to_string());
+                    }
+                }
+                if sample.is_empty() {
+                    sample = usage.to_string();
+                }
+            }
+        }
+        println!("共 {lines} 行, 其中带 usage 的 {with_usage} 行");
+        println!("模型: {}", models.join(", "));
+        println!("样例 usage: {}", sample.chars().take(240).collect::<String>());
+        if with_usage > 0 {
+            // 口径核实：inputTokens 到底含不含缓存读取。含就得在解析时减掉，否则缓存双算
+            println!("注意: 解析要求 usage.inputTokens 含 inputTokensDetails[].cached_tokens");
+        }
     }
 }
 

@@ -552,7 +552,7 @@ function detailWidth(value: number, max: number): string {
 
     <div v-else class="empty">
       <p>暂无 Token 用量记录</p>
-      <p class="empty__hint">在 ZCode / DeepSeek Harness / CodeBuddy 里跑过对话后,这里会出现按天的统计</p>
+      <p class="empty__hint">在 ZCode / DeepSeek Harness / CodeBuddy / WorkBuddy 里跑过对话后,这里会出现按天的统计</p>
     </div>
     </div>
   </article>

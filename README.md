@@ -12,7 +12,7 @@
 - 活跃度图下面是三块工作台面板：**系统状态**（项目 / 分组 / 运行中、node 与 nvm、包管理器可用性、npm 镜像源 nrm、数据目录）、
   **最近使用**（点名称开详情，行内直接启动 / 停止）、**快捷操作**（全局快捷键等提示）
 - 这一栏放在卡片网格的左侧还是右侧可以在设置里选，栏宽也可调
-- **Token 用量**面板：读取本机 AI 编程工具（ZCode、DeepSeek Harness、CodeBuddy）的本地用量数据，
+- **Token 用量**面板：读取本机 AI 编程工具（ZCode、DeepSeek Harness、CodeBuddy、WorkBuddy）的本地用量数据，
   展示 今日 / 本周 / 本月 用量、趋势条形图（悬停一行一个口径：输入给出「缓存命中 / 全部输入」与命中率，
   再是输出、思考、请求次数），以及模型与工具占比。
   趋势窗口由头部的时间维度下拉给出（照 DeepSeek 用量页的做法）：
@@ -26,7 +26,8 @@
   某个工具读取失败时只对它提示原因，其余工具与快照照常展示。
   ZCode 读它的本地 sqlite；DeepSeek Harness 读 `~/.dsh/sessions` 的会话文件（多帧 zstd，
   Rust 侧逐帧解压后交给渲染层解析）；CodeBuddy 没有落地用量库，解析它 IDE 扩展日志里的逐步 usage 记录
-  （模型从请求链路反推）。三者都只取用量数字，日志与会话正文不进快照
+  （模型从请求链路反推）；WorkBuddy 读 `~/.workbuddy/projects` 下的会话正文，每次调用的用量就写在那一行里
+  （带模型名，不用反推）。四者都只取用量数字，日志与会话正文不进快照
 - **Token 用量可以在多台机器之间同步**（默认关闭）：设置里填一个 git 仓库地址，每台机器各自把
   **自己的那份分片**推到仓库的 `devices/<设备id>.json`，读的时候把各台机器的分片合起来算。
   一个设备一个文件、每个文件只有一个写者，所以永远不会有同文件冲突，也不需要人工合并；
@@ -140,7 +141,7 @@
 | 语言 | TypeScript（渲染层）+ Rust（后端）；契约与纯逻辑共用 `src/shared` |
 | 持久化 | 本地 JSON，由 Rust 侧 `store.rs` 负责（防抖 300ms、临时文件 + rename、退出前同步落盘） |
 | 子进程 | `std::process` 起 shell 命令（按批回传输出，Windows 下 `taskkill /T /F` 结束整棵进程树） |
-| Token 用量数据源 | ZCode：`rusqlite` 只读打开本地 sqlite（WAL 并发读）；DeepSeek Harness：Rust 逐帧解压 `~/.dsh/sessions` 的多帧 zstd 会话；CodeBuddy：Rust 列扩展日志清单、渲染层读内容并解析。三者都只读，且只取用量数字 |
+| Token 用量数据源 | ZCode：`rusqlite` 只读打开本地 sqlite（WAL 并发读）；DeepSeek Harness：Rust 逐帧解压 `~/.dsh/sessions` 的多帧 zstd 会话；CodeBuddy：Rust 列扩展日志清单、渲染层读内容并解析；WorkBuddy：Rust 列会话正文清单、渲染层读内容并解析。四者都只读，且只取用量数字 |
 | Token 多机同步 | 可选（默认关闭）：`std::process` 直启系统的 `git`（不经 `cmd`，参数行不会被二次解析），推 / 拉一个用户指定的仓库；一台机器一份分片文件，凭据走系统 git，应用不存令牌 |
 | 测试 | Vitest（渲染层与 shared）+ `cargo test`（Rust） |
 | 打包 | Tauri CLI → NSIS 安装包（Windows x64） |
@@ -272,8 +273,10 @@ npm run dist         # 产出 NSIS 安装包
 另有 `ZCODE_HOME` 可指到别处）；DeepSeek Harness 是 `~/.dsh/sessions/<项目>/<会话>/` 下的会话文件
 （`DSH_HOME` 可指到别处；同一会话目录里 v3 与旧版文件并存时**只读 v3**，两个都读会把那次会话算两遍）；
 CodeBuddy 是 `%APPDATA%/CodeBuddy CN/logs`（国际版没有 `CN` 后缀，`CODEBUDDY_DATA_DIR` 可指到别处）
-里扩展目录 `Tencent-Cloud.coding-copilot` 下的 `.log`。
-这三处的正文里都带着对话内容，我们只解析其中的用量字段，**不会把正文写进快照** ——
+里扩展目录 `Tencent-Cloud.coding-copilot` 下的 `.log`；WorkBuddy 是 `~/.workbuddy/projects/<项目>/`
+下的会话正文 `.jsonl`（`WORKBUDDY_HOME` 可指到别处，注意它和 Electron 那个
+`%APPDATA%/WorkBuddy` 不是一个目录，后者只有窗口状态）。
+这四处的正文里都带着对话内容，我们只解析其中的用量字段，**不会把正文写进快照** ——
 所以同步推给仓库的也只有模型名与计数。
 
 同步用的克隆目录在 `%APPDATA%/Workbench/token-sync/`（机器本地的缓存，删掉会在下次同步时重新克隆）。

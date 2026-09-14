@@ -185,6 +185,13 @@ pub fn token_dsh_sessions() -> Result<Value, String> {
     token::dsh_session_files()
 }
 
+/// WorkBuddy 的会话正文清单（路径 / 修改时间 / 大小），不含内容。
+/// 正文没有压缩，渲染层自己按路径读回来解析（`fs_read_text`），不用再经 Rust 一趟。
+#[tauri::command(async)]
+pub fn token_workbuddy_sessions() -> Result<Value, String> {
+    token::workbuddy_session_files()
+}
+
 /// 把本机分片写进同步仓库并推送；返回 `{ changed, pushed, log }`
 #[tauri::command(async)]
 pub fn token_sync_publish(repo: String, device: String, shard: Value) -> Result<Value, String> {

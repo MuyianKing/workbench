@@ -42,6 +42,12 @@ let dsh: { found: boolean; sessions: Array<{ path: string; mtimeMs: number; size
 }
 let dshFrames: Record<string, string> = {}
 let dshDecodes: string[] = []
+/** WorkBuddy：`token_workbuddy_sessions` 回的清单，以及按路径取内容的桩会话正文 */
+let workbuddy: { found: boolean; sessions: Array<{ path: string; mtimeMs: number; size: number }> } = {
+  found: false,
+  sessions: []
+}
+let workbuddyText: Record<string, string> = {}
 
 /** 今天（本地时区）——快照只保留最近一年，用例里的日期必须落在窗口内 */
 function today(): string {
@@ -79,11 +85,15 @@ beforeAll(() => {
           case 'fs_read_text': {
             const path = String((args as { path?: unknown })?.path ?? '')
             textReads.push(path)
-            if (!(path in codebuddyText)) return Promise.reject('文件读不了')
-            return Promise.resolve(codebuddyText[path])
+            // CodeBuddy 与 WorkBuddy 都是「列清单 + 自己读文件」，共用一个读取桩
+            const text = workbuddyText[path] ?? codebuddyText[path]
+            if (typeof text !== 'string') return Promise.reject('文件读不了')
+            return Promise.resolve(text)
           }
           case 'token_dsh_sessions':
             return Promise.resolve(dsh)
+          case 'token_workbuddy_sessions':
+            return Promise.resolve(workbuddy)
           case 'token_zstd_decode': {
             const path = String((args as { path?: unknown })?.path ?? '')
             dshDecodes.push(path)
@@ -128,6 +138,8 @@ beforeEach(() => {
   dsh = { found: false, sessions: [] }
   dshFrames = {}
   dshDecodes = []
+  workbuddy = { found: false, sessions: [] }
+  workbuddyText = {}
 })
 
 /** 一条真实形状的扩展日志：模型 → 请求 → 用量 三行，靠 traceId / requestId 串起来 */
@@ -174,6 +186,39 @@ function addDshSession(name: string, text: string, mtimeMs = Date.now()): {
   const item = { path: `C:\\.dsh\\${name}`, mtimeMs, size: text.length }
   dsh = { found: true, sessions: [...dsh.sessions, item] }
   dshFrames[item.path] = text
+  return item
+}
+
+/** 一条真实形状的 WorkBuddy 会话正文：一行一次模型调用，自带时间、模型与用量 */
+function workbuddySession(
+  model = 'hy3',
+  usage: Record<string, unknown> = {
+    requests: 1,
+    inputTokens: 36775,
+    outputTokens: 280,
+    totalTokens: 37055,
+    inputTokensDetails: [{ cached_tokens: 3520 }],
+    outputTokensDetails: [{ reasoning_tokens: 243 }]
+  },
+  at = Date.now()
+): string {
+  return JSON.stringify({
+    id: 'cafebabe1234',
+    timestamp: at,
+    type: 'function_call',
+    providerData: { model, usage }
+  })
+}
+
+/** 挂上一个会话正文，并返回它进清单的那一项 */
+function addWorkbuddySession(name: string, text: string, mtimeMs = Date.now()): {
+  path: string
+  mtimeMs: number
+  size: number
+} {
+  const item = { path: `C:\\.workbuddy\\${name}`, mtimeMs, size: text.length }
+  workbuddy = { found: true, sessions: [...workbuddy.sessions, item] }
+  workbuddyText[item.path] = text
   return item
 }
 
@@ -422,6 +467,76 @@ describe('DSH(会话文件)', () => {
 
     expect(dshOf(result, 'deepseek-flash')).toBe(100)
     expect(result.sourceErrors.dsh).toBeUndefined()
+  })
+})
+
+describe('WorkBuddy(会话正文)', () => {
+  /** 取某天的模型输入量（WorkBuddy 的 inputTokens 是「减去缓存读取」之后的） */
+  function workbuddyOf(
+    result: Awaited<ReturnType<typeof import('./token').getTokenUsage>>,
+    model: string,
+    day = today()
+  ): number {
+    return result.data.sources.workbuddy?.days[day]?.[model]?.inputTokens ?? -1
+  }
+
+  it('会话正文里的用量算进 workbuddy 这个来源，输入里减掉缓存读取', async () => {
+    addWorkbuddySession('f-projects-workbench/7cc5feb0.jsonl', workbuddySession())
+
+    const token = await freshToken()
+    const result = await token.getTokenUsage({ repo: '' })
+
+    // 36775 里含 3520 的缓存读取，落盘时只记未命中的那部分（与 ZCode 同一口径）
+    expect(workbuddyOf(result, 'hy3')).toBe(36775 - 3520)
+    const counters = result.data.sources.workbuddy.days[today()]['hy3']
+    expect(counters.cacheReadTokens).toBe(3520)
+    expect(counters.outputTokens).toBe(280)
+    expect(counters.reasoningTokens).toBe(243)
+    expect(counters.requests).toBe(1)
+    expect(result.sourceErrors.workbuddy).toBeUndefined()
+  })
+
+  it('没装 WorkBuddy 就安静跳过：不算读取失败，也不留空来源', async () => {
+    const token = await freshToken()
+    const result = await token.getTokenUsage({ repo: '' })
+
+    expect(result.data.sources.workbuddy).toBeUndefined()
+    expect(result.sourceErrors.workbuddy).toBeUndefined()
+    expect(textReads).toHaveLength(0)
+  })
+
+  it('只重解变化的会话，且合计不会把没变的那个算两遍', async () => {
+    const first = addWorkbuddySession('a/session.jsonl', workbuddySession('hy3', { inputTokens: 100 }))
+    addWorkbuddySession('b/session.jsonl', workbuddySession('hy3', { inputTokens: 7 }))
+
+    const token = await freshToken()
+    expect(workbuddyOf(await token.getTokenUsage({ repo: '' }), 'hy3')).toBe(107)
+    expect(textReads).toHaveLength(2)
+
+    // 每分钟一次的轮询：清单没变就不该再读那些几兆的会话正文
+    expect(workbuddyOf(await token.getTokenUsage({ repo: '' }), 'hy3')).toBe(107)
+    expect(textReads).toHaveLength(2)
+
+    // a 追加了一轮（大小变了）：只重读 a，b 用缓存 —— 合计必须是 100+7 而不是 200+7
+    workbuddyText[first.path] = `${workbuddySession('hy3', { inputTokens: 100 })}\n${workbuddySession('hy3', { inputTokens: 100 })}`
+    const grown = { ...first, size: workbuddyText[first.path].length }
+    expect(grown.size).toBeGreaterThan(first.size)
+    workbuddy = { found: true, sessions: [grown, workbuddy.sessions[1]] }
+
+    expect(workbuddyOf(await token.getTokenUsage({ repo: '' }), 'hy3')).toBe(207)
+    expect(textReads).toHaveLength(3)
+  })
+
+  it('单个会话读不了不影响其余会话', async () => {
+    addWorkbuddySession('good/session.jsonl', workbuddySession('hy3', { inputTokens: 100 }))
+    const broken = addWorkbuddySession('broken/session.jsonl', 'x')
+    delete workbuddyText[broken.path]
+
+    const token = await freshToken()
+    const result = await token.getTokenUsage({ repo: '' })
+
+    expect(workbuddyOf(result, 'hy3')).toBe(100)
+    expect(result.sourceErrors.workbuddy).toBeUndefined()
   })
 })
 

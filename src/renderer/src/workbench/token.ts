@@ -19,6 +19,7 @@ import {
   DSH_SOURCE_ID,
   TOKEN_DATA_VERSION,
   TOKEN_KEEP_DAYS,
+  WORKBUDDY_SOURCE_ID,
   ZCODE_SOURCE_ID,
   combineShards,
   isDateKey,
@@ -37,6 +38,7 @@ import {
 } from '@shared/token-usage'
 import { collectCodeBuddyLogText, createCodeBuddyParseState } from '@shared/codebuddy-log'
 import { collectDshSessionText } from '@shared/dsh-log'
+import { collectWorkBuddySessionText } from '@shared/workbuddy-log'
 import { invoke } from './bridge'
 
 /** Rust 侧 `token_zcode_rows` 回来的行：SUM 在无数据时是 NULL，所以全部可空 */
@@ -235,6 +237,85 @@ async function readDshLive(): Promise<LiveRead> {
   return { ok: true, days }
 }
 
+// ---------- WorkBuddy(~/.workbuddy/projects) ----------
+
+/** `token_workbuddy_sessions` 回来的一项 */
+interface WorkBuddySessionFile {
+  path: string
+  mtimeMs: number
+  size: number
+}
+
+/**
+ * 每个会话文件的解析结果，key 是路径。
+ *
+ * 与 DSH 同样**按文件**缓存：会话正文里每一行都自带模型与用量（见 shared/workbuddy-log.ts），
+ * 文件之间互不依赖，所以只重解变化的那些就够 —— 会话正文会长到几兆，
+ * 每分钟整批重解析一遍没有意义。
+ */
+const workbuddyCache = new Map<string, { mtimeMs: number; size: number; days: TokenDays }>()
+
+/**
+ * 实读 WorkBuddy。清单由 Rust 给（很便宜），正文按路径读回来自己解析 ——
+ * 正文没有压缩，不用像 DSH 那样再回 Rust 解码一趟。
+ */
+async function readWorkBuddyLive(): Promise<LiveRead> {
+  let listing: { found?: unknown; sessions?: unknown }
+  try {
+    listing = await invoke<{ found?: unknown; sessions?: unknown }>('token_workbuddy_sessions')
+  } catch (error) {
+    return { ok: false, error: reasonOf(error, '读取 WorkBuddy 会话目录失败') }
+  }
+
+  // 没装就安静跳过（与 CodeBuddy / DSH 同一约定）
+  if (listing?.found !== true) return { ok: false, missing: true, error: '' }
+
+  const cutoff = Date.now() - (TOKEN_KEEP_DAYS - 1) * 86_400_000
+  const sessions = (Array.isArray(listing.sessions) ? listing.sessions : [])
+    .map((item) => item as Partial<WorkBuddySessionFile>)
+    .filter(
+      (item): item is WorkBuddySessionFile =>
+        typeof item.path === 'string' &&
+        typeof item.mtimeMs === 'number' &&
+        typeof item.size === 'number'
+    )
+    // 快照只留最近一年，更早的会话里不可能有窗口内的记录
+    .filter((item) => item.mtimeMs >= cutoff)
+
+  let days: TokenDays = {}
+  const alive = new Set<string>()
+
+  for (const session of sessions) {
+    alive.add(session.path)
+    let cached = workbuddyCache.get(session.path)
+
+    if (!cached || cached.mtimeMs !== session.mtimeMs || cached.size !== session.size) {
+      try {
+        const parsed: TokenDays = {}
+        collectWorkBuddySessionText(
+          await invoke<string>('fs_read_text', { path: session.path }),
+          parsed
+        )
+        cached = { mtimeMs: session.mtimeMs, size: session.size, days: parsed }
+        workbuddyCache.set(session.path, cached)
+      } catch {
+        // 单个会话读不了（被占用 / 编码异常）只少这一个，不影响其余
+        workbuddyCache.delete(session.path)
+        continue
+      }
+    }
+
+    days = sumDays(days, cached.days)
+  }
+
+  // 会话被清理掉的就从缓存里摘掉，不然内存里会一直留着它们
+  for (const path of [...workbuddyCache.keys()]) {
+    if (!alive.has(path)) workbuddyCache.delete(path)
+  }
+
+  return { ok: true, days }
+}
+
 // ---------- 本机设备标识 ----------
 
 /** 本机设备标识只问一次：它落盘后就不再变，而面板每 60 秒就会走一次这条路 */
@@ -348,10 +429,11 @@ export async function getTokenUsage(options: {
   const local = sanitizeShard(await invoke<unknown>('token_load'), { device: id, name })
 
   // 各来源互不依赖,并行读:都是本地读取,串起来白等
-  const [zcodeLive, codebuddyLive, dshLive] = await Promise.all([
+  const [zcodeLive, codebuddyLive, dshLive, workbuddyLive] = await Promise.all([
     readZcodeLive(),
     readCodeBuddyLive(),
-    readDshLive()
+    readDshLive(),
+    readWorkBuddyLive()
   ])
 
   const sources = { ...local.sources }
@@ -363,7 +445,8 @@ export async function getTokenUsage(options: {
   for (const { id: sourceId, read } of [
     { id: ZCODE_SOURCE_ID, read: zcodeLive },
     { id: CODEBUDDY_SOURCE_ID, read: codebuddyLive },
-    { id: DSH_SOURCE_ID, read: dshLive }
+    { id: DSH_SOURCE_ID, read: dshLive },
+    { id: WORKBUDDY_SOURCE_ID, read: workbuddyLive }
   ]) {
     if (!read.ok) {
       // missing 是「这台机器上没装这个工具」,不算读取失败,只是没有这个来源

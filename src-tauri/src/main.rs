@@ -300,6 +300,7 @@ fn main() {
             commands::token_zstd_decode,
             commands::token_codebuddy_files,
             commands::token_dsh_sessions,
+            commands::token_workbuddy_sessions,
             commands::token_device,
             commands::token_sync_publish,
             commands::token_sync_shards,
