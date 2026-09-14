@@ -27,9 +27,12 @@
 `vite.preview.config.ts` 只起 renderer（端口 5274），与构建无关：
 
 ```bash
-npm run build:renderer   # 或直接 vite build --config vite.preview.config.ts
+npx vite build --config vite.preview.config.ts
 # 产物在 .preview/dist
 ```
+
+开发态用 `npm run dev:renderer`。注意 vite 7 只监听 IPv6 的 `localhost`，脚本里访问 `127.0.0.1:5274`
+会被拒（浏览器里打开 http://localhost:5274/ 正常）。
 
 ### 二、喂假数据：顶替 preload
 
@@ -50,6 +53,25 @@ window.workbench = new Proxy(
   这样截图里就能看见 mock 本身挂了，不会误判成界面问题
 - 假的内置壁纸清单要和 `resources/backgrounds/` 保持一致，并把原图拷进 `dist`；
   缩略图按主进程的做法压到 360 宽，别拿几兆的原图铺设置面板
+
+#### 只验一个组件
+
+整页跑起来要喂十来个通道的假数据；改某一块面板时不必这么麻烦 —— 在工作区里再放一份
+vite 配置，把 `root` 指到工作区内的一个小目录，只挂那一个组件：
+
+```ts
+// .preview/vite.harness.config.ts
+root: resolve(__dirname, 'harness'),          // 工作区里的 index.html + main.ts
+resolve: { alias: { '@': '…/src/renderer/src', '@shared': '…/src/shared' } }
+```
+
+`main.ts` 里照旧 import `element-plus/dist/index.css`、`theme-chalk/dark/css-vars.css`、
+`@/styles/tokens.css`、`@/styles/global.css`（少了这几样配色与令牌就不是线上的样子），
+把组件挂进一个**尺寸等于真实卡片**的盒子里（卡片内边距由组件自己带，外面别再补一圈，
+否则量出来的宽度会比线上窄一截），`window.workbench` 只实现这一个组件用到的通道。
+暗色靠 `document.documentElement.dataset.theme` 加 `.dark` 类切。
+
+这样一次 build 一两秒，也不用碰仓库里的任何文件。
 
 ### 三、主进程逻辑必须在真 Electron 里跑
 
@@ -148,6 +170,12 @@ const lum = (rgb) => rgb.map((c) => {
 
 ## 已知的坑
 
+- **Element Plus 的弹层不信 `offsetParent`**：popper 是 `position: fixed`，可见时
+  `offsetParent` 照样是 `null`，拿它当「面板打开了吗」的判据会一直判成没打开。
+  用 `getComputedStyle(popper).display !== 'none'`（或 `aria-hidden`）来判断。
+- **展开的日历 / 下拉会盖住旁边的控件**：popper 按输入框左缘定位、宽 300+，
+  很容易压住同一行右边那个输入框，这时点右边的框其实点在面板上。
+  换控件前先发一次 `Input.dispatchKeyEvent` 的 Esc 关掉它。
 - **注入 HTML 必须用 Node 读写，不要用 PowerShell 的 `Get-Content` / `Set-Content`**：
   它按本地代码页解码，会把中文注释的字节连同换行一起吃掉，注入后的脚本直接语法错误。
 - **直接跑 electron 脚本时根目录不是仓库根**，相对路径要显式固定（见上）。

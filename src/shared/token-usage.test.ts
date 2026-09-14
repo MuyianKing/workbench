@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   addCounters,
   bucketRangeOf,
-  buildSeries,
+  buildSeriesRange,
   cacheHitRate,
   emptyCounters,
   flattenSources,
@@ -16,6 +16,7 @@ import {
   sanitizeTokenData,
   shareByModel,
   shareBySource,
+  shortDayLabel,
   sumRange,
   totalTokens,
   weekKeyOf,
@@ -208,14 +209,21 @@ describe('周期与聚合', () => {
     expect(monthKeyOf('oops')).toBe('')
   })
 
-  it('buildSeries 天视图:补零、从旧到新、窗口外不累计', () => {
+  it('shortDayLabel 去掉前导零', () => {
+    expect(shortDayLabel('2026-09-04')).toBe('9/4')
+    expect(shortDayLabel('2026-12-31')).toBe('12/31')
+    expect(shortDayLabel('oops')).toBe('')
+  })
+
+  it('buildSeriesRange 天视图:补零、从旧到新、区间外不累计', () => {
     const days = makeDays([
-      ['2026-08-10', 'glm-5', 100], // 30 天窗口(2026-08-15 起)之外
+      ['2026-08-14', 'glm-5', 100], // 区间(08-15 起)之外
       ['2026-09-12', 'glm-5', 7],
-      ['2026-09-13', 'glm-5', 8]
+      ['2026-09-13', 'glm-5', 8],
+      ['2026-09-14', 'glm-5', 9] // 区间之外
     ])
 
-    const { buckets, fromKey } = buildSeries(days, 'day', new Date(2026, 8, 13), 30)
+    const { buckets, fromKey } = buildSeriesRange(days, 'day', '2026-08-15', '2026-09-13')
     expect(buckets).toHaveLength(30)
     expect(fromKey).toBe('2026-08-15')
     expect(buckets[0].key).toBe('2026-08-15')
@@ -226,34 +234,55 @@ describe('周期与聚合', () => {
     expect(buckets.at(-2)?.label).toBe('9/12')
   })
 
-  it('buildSeries 周视图按周一分桶', () => {
+  it('buildSeriesRange 周视图按周一分桶,首尾桶只统计区间内的天', () => {
     const days = makeDays([
-      ['2026-09-07', 'glm-5', 1], // 周一
-      ['2026-09-10', 'glm-5', 2], // 周四,同一桶
-      ['2026-08-31', 'glm-5', 4] // 上一周的周一
+      ['2026-09-06', 'glm-5', 8], // 上一周的周日,区间之外
+      ['2026-09-07', 'glm-5', 1], // 周一,但早于区间起点(09-08),不进首桶
+      ['2026-09-10', 'glm-5', 2], // 周四,首桶
+      ['2026-09-15', 'glm-5', 5] // 下周二,末桶(09-14 那一周)
     ])
 
-    const { buckets } = buildSeries(days, 'week', new Date(2026, 8, 13), 3)
-    // 2026-09-13(周日)按周一起始属于 09-07 那一周,当前桶即 09-07
-    expect(buckets.map((bucket) => bucket.key)).toEqual(['2026-08-24', '2026-08-31', '2026-09-07'])
-    expect(buckets[1].counters.inputTokens).toBe(4)
-    expect(buckets[2].counters.inputTokens).toBe(3)
-    expect(buckets[0].counters.inputTokens).toBe(0)
+    const { buckets } = buildSeriesRange(days, 'week', '2026-09-08', '2026-09-15')
+    expect(buckets.map((bucket) => bucket.key)).toEqual(['2026-09-07', '2026-09-14'])
+    expect(buckets[0].counters.inputTokens).toBe(2)
+    expect(buckets[1].counters.inputTokens).toBe(5)
   })
 
-  it('buildSeries 月视图按自然月分桶,窗口起点对齐 1 号', () => {
+  it('buildSeriesRange 月视图按自然月分桶', () => {
     const days = makeDays([
       ['2026-07-15', 'glm-5', 1],
       ['2026-08-02', 'glm-5', 2],
       ['2026-09-13', 'glm-5', 3]
     ])
 
-    const { buckets, fromKey } = buildSeries(days, 'month', new Date(2026, 8, 13), 3)
-    expect(fromKey).toBe('2026-07-01')
+    const { buckets, fromKey } = buildSeriesRange(days, 'month', '2026-07-10', '2026-09-13')
+    expect(fromKey).toBe('2026-07-10')
     expect(buckets.map((bucket) => bucket.key)).toEqual(['2026-07', '2026-08', '2026-09'])
     expect(buckets.map((bucket) => bucket.label)).toEqual(['7月', '8月', '9月'])
     expect(buckets[0].counters.inputTokens).toBe(1)
     expect(buckets[2].counters.inputTokens).toBe(3)
+  })
+
+  it('buildSeriesRange 单天区间只有一根柱,跨年月份不出错', () => {
+    const days = makeDays([
+      ['2026-09-13', 'glm-5', 5],
+      ['2027-01-02', 'glm-5', 6]
+    ])
+
+    const single = buildSeriesRange(days, 'day', '2026-09-13', '2026-09-13')
+    expect(single.buckets).toHaveLength(1)
+    expect(single.buckets[0].counters.inputTokens).toBe(5)
+
+    const acrossYear = buildSeriesRange(days, 'month', '2026-11-05', '2027-01-20')
+    expect(acrossYear.buckets.map((bucket) => bucket.key)).toEqual(['2026-11', '2026-12', '2027-01'])
+    expect(acrossYear.buckets.at(-1)?.counters.inputTokens).toBe(6)
+  })
+
+  it('buildSeriesRange 区间不合法返回空序列', () => {
+    const days = makeDays([['2026-09-13', 'glm-5', 5]])
+    expect(buildSeriesRange(days, 'day', '2026-09-14', '2026-09-13').buckets).toEqual([])
+    expect(buildSeriesRange(days, 'day', 'oops', '2026-09-13').buckets).toEqual([])
+    expect(buildSeriesRange(days, 'day', '2026-09-13', '').buckets).toEqual([])
   })
 
   it('sumRange 含两端', () => {

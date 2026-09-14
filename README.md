@@ -13,9 +13,11 @@
   **最近使用**（点名称开详情，行内直接启动 / 停止）、**快捷操作**（全局快捷键等提示）
 - 这一栏放在卡片网格的左侧还是右侧可以在设置里选，栏宽也可调
 - **Token 用量**面板：读取本机 AI 编程工具（ZCode、DeepSeek Harness、CodeBuddy）的本地用量数据，
-  展示 今日 / 本周 / 本月 用量、
-  天 / 周 / 月三档趋势条形图（悬停拆出 输入 / 输出 / 思考 / 缓存 构成与请求次数），以及模型占比；
-  模型 / 工具占比默认统计整个趋势窗口，点击某根柱子则只统计那个天 / 周 / 月，再点一下回到全部。
+  展示 今日 / 本周 / 本月 用量、趋势条形图（悬停拆出 输入 / 输出 / 思考 / 缓存 构成与请求次数），以及模型与工具占比。
+  趋势窗口由头部两个日期选择器自选起止，默认最近 30 天：可选范围就是快照里有记录的那段，
+  起点不晚于终点（两个框互为上下限，越界的日期在日历里直接置灰）；
+  右侧 天 / 周 / 月页签只切换柱子的分桶宽度，窗口本身不变。
+  模型 / 工具占比默认统计整个窗口，点击某根柱子则只统计那个天 / 周 / 月，再点一下回到全部。
   用量快照按天聚合后落盘 `token-data.json`，上游清理旧会话或日志也不丢历史；
   某个工具读取失败时只对它提示原因，其余工具与快照照常展示。
   ZCode 读它的本地 sqlite；DeepSeek Harness 读 `~/.dsh/sessions` 的会话文件；
@@ -121,7 +123,7 @@ src/
   preload/index.ts       contextBridge 白名单 API
   renderer/src/          Vue 应用（组件 / Pinia store / 设计令牌）
     components/ActivityGraph.vue  首页活跃度图（GitHub 贡献图同款）
-    components/TokenPanel.vue     首页 Token 用量面板（趋势 / 模型与厂商占比）
+    components/TokenPanel.vue     首页 Token 用量面板（趋势 / 模型与工具占比）
   shared/                两端共用的类型、IPC 契约、活跃度统计、Token 用量聚合与日志解析、Node 版本区间判定
 scripts/make-icons.mjs   程序化生成应用图标与托盘图标
 ```
@@ -136,6 +138,9 @@ npm run typecheck    # 渲染层与主进程两个工程一起做类型检查
 npm test             # Vitest 单元测试
 npm run build        # 产出 out/（main + preload + renderer）
 ```
+
+安装环境需要 VS Build Tools（含“使用 C++ 的桌面开发”工作负载）：npm 会为 `better-sqlite3`
+排一次源码编译，踩坑细节与处理见 [npm-install-native-module.md](docs/dev-notes/npm-install-native-module.md)。
 
 ## 打包
 

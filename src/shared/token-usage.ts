@@ -293,53 +293,65 @@ function bucketKeyOf(dateKey: string, granularity: TokenGranularity): string {
   return monthKeyOf(dateKey)
 }
 
-function bucketLabel(key: string, granularity: TokenGranularity): string {
-  if (granularity === 'month') return `${Number(key.slice(5, 7))}月`
+/** 日期键的短标签(9/14):图表坐标与区间标题共用 */
+export function shortDayLabel(key: string): string {
+  if (!isDateKey(key)) return ''
   return `${Number(key.slice(5, 7))}/${Number(key.slice(8, 10))}`
 }
 
-/** 当前周期往前数第 index 个桶的日期键(index 0 即当前桶) */
-function currentBucketStart(granularity: TokenGranularity, now: Date): Date {
-  if (granularity === 'week') {
-    const monday = parseDateKey(dayKey(now))
-    monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7))
-    return monday
-  }
-  if (granularity === 'month') {
-    return new Date(now.getFullYear(), now.getMonth(), 1)
-  }
-  return parseDateKey(dayKey(now))
+function bucketLabel(key: string, granularity: TokenGranularity): string {
+  if (granularity === 'month') return `${Number(key.slice(5, 7))}月`
+  return shortDayLabel(key)
 }
 
-function bucketKeyAt(start: Date, granularity: TokenGranularity, index: number): string {
+/** firstKey 到 lastKey(含两端)之间的全部桶键;键是定长日期键,字典序即时间序 */
+function bucketKeysBetween(
+  firstKey: string,
+  lastKey: string,
+  granularity: TokenGranularity
+): string[] {
+  const keys: string[] = []
   if (granularity === 'month') {
-    const date = new Date(start.getFullYear(), start.getMonth() + index, 1)
-    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}`
+    const lastYear = Number(lastKey.slice(0, 4))
+    const lastMonth = Number(lastKey.slice(5, 7))
+    let year = Number(firstKey.slice(0, 4))
+    let month = Number(firstKey.slice(5, 7))
+    while (year < lastYear || (year === lastYear && month <= lastMonth)) {
+      keys.push(`${year}-${pad(month)}`)
+      month += 1
+      if (month > 12) {
+        month = 1
+        year += 1
+      }
+    }
+    return keys
   }
+
   const step = granularity === 'week' ? 7 : 1
-  return dayKey(addDays(start, index * step))
+  const start = parseDateKey(firstKey)
+  for (let index = 0; ; index += 1) {
+    const key = dayKey(addDays(start, index * step))
+    if (!key || key > lastKey) break
+    keys.push(key)
+  }
+  return keys
 }
 
 /**
- * 把天级数据铺成图表序列:当前周期往前数 periods 个桶(含当前),顺序从旧到新;
- * 没有数据的桶补零,横轴才连续。窗口外的天数不参与累计。
+ * 把天级数据铺成图表序列:按 granularity 从 fromKey 到 toKey(含两端)分桶,顺序从旧到新;
+ * 没有数据的桶补零,横轴才连续。区间外的天数不参与累计 ——
+ * 周桶与月桶按 fromKey / toKey 所在的周与月对齐,首尾桶可能只覆盖区间内的那几天。
+ * 区间不合法(非日期键,或起点晚于终点)返回空序列,调用方据此兜底。
  */
-export function buildSeries(
+export function buildSeriesRange(
   days: TokenDays,
   granularity: TokenGranularity,
-  now: number | Date,
-  periods: number
+  fromKey: string,
+  toKey: string
 ): TokenSeries {
-  const today = new Date(now)
-  if (!Number.isFinite(today.getTime()) || periods <= 0) {
+  if (!isDateKey(fromKey) || !isDateKey(toKey) || fromKey > toKey) {
     return { buckets: [], fromKey: '' }
   }
-
-  const start = currentBucketStart(granularity, today)
-  // 从当前桶往前数 periods-1 个,窗口起点(含)到当前桶(含)共 periods 个
-  const firstOffset = -(periods - 1)
-  const windowStartKey = bucketKeyAt(start, granularity, firstOffset)
-  const windowFrom = granularity === 'month' ? `${windowStartKey}-01` : windowStartKey
 
   const totals = new Map<string, TokenCounters>()
   const bump = (key: string, counters: TokenCounters): void => {
@@ -347,14 +359,17 @@ export function buildSeries(
   }
 
   for (const [date, models] of Object.entries(days)) {
-    if (date < windowFrom) continue
-    const key = bucketKeyOf(date, granularity)
-    for (const counters of Object.values(models)) bump(key, counters)
+    if (date < fromKey || date > toKey) continue
+    for (const counters of Object.values(models)) bump(bucketKeyOf(date, granularity), counters)
   }
 
   const buckets: TokenBucket[] = []
-  for (let index = firstOffset; index <= 0; index += 1) {
-    const key = bucketKeyAt(start, granularity, index)
+  const keyRange = bucketKeysBetween(
+    bucketKeyOf(fromKey, granularity),
+    bucketKeyOf(toKey, granularity),
+    granularity
+  )
+  for (const key of keyRange) {
     buckets.push({
       key,
       label: bucketLabel(key, granularity),
@@ -362,7 +377,7 @@ export function buildSeries(
     })
   }
 
-  return { buckets, fromKey: windowFrom }
+  return { buckets, fromKey }
 }
 
 /**

@@ -44,9 +44,12 @@
 ## 1. 项目边界
 
 - 定位：Windows 桌面应用（Electron），本地「前端项目控制台」；纯本地工具，不联网、不上报数据。
-- 技术栈：Electron ^44.3.0 + Vue ^3.5.13 + TypeScript ^5.6.3；Element Plus ^2.8.8 + @element-plus/icons-vue ^2.3.1；Pinia ^2.2.6。唯一的运行时依赖是 better-sqlite3（读 ZCode 本地 sqlite 用，v13 自带全平台 prebuilds，禁止再引入其他 native / 运行时依赖）。
-- 构建 / 打包：Vite ^5.4.11 + electron-vite ^2.3.0；electron-builder ^25.1.8 → Windows x64 NSIS。包管理器固定 npm（`package-lock.json`）。
-- 测试：Vitest ^2.1.9，`environment: 'node'`，仅 `src/**/*.test.ts`。
+- 技术栈：Electron ^44.3.0 + Vue ^3.5.13 + TypeScript ^5.9.3；Element Plus ^2.8.8 + @element-plus/icons-vue ^2.3.1；Pinia ^4.0.3。唯一的运行时依赖是 better-sqlite3（读 ZCode 本地 sqlite 用，v13 自带全平台 prebuilds，禁止再引入其他 native / 运行时依赖）。
+- 构建 / 打包：Vite ^7.3.6 + electron-vite ^5.0.0；electron-builder ^26.15.3 → Windows x64 NSIS。包管理器固定 npm（`package-lock.json`）。
+- 开发依赖里的 `node-gyp`（^13）是刻意钉的：npm 会给 better-sqlite3 排一次源码编译，旧版 node-gyp 认不出新版 Visual Studio，删掉就可能装不上；原因见 [npm-install-native-module.md](docs/dev-notes/npm-install-native-module.md)。
+- 测试：Vitest ^5.0.0，`environment: 'node'`，仅 `src/**/*.test.ts`。
+- TypeScript 停在 5.x，不要升到 7：vue-tsc 3 要靠 `typescript/lib/tsc` 子路径工作，TS 7（原生编译器）不再暴露它，升上去 `npm run typecheck` 直接报 `ERR_PACKAGE_PATH_NOT_EXPORTED`。
+- Vite 也不要用 8：electron-vite 最新稳定版（5.x）的 peer 只到 vite 7。
 - 禁止引入：Tailwind / UnoCSS 等原子化 CSS、Vue Router、axios 或其他请求库、Element Plus 之外的 UI 库、Pinia 之外的状态库、Vitest 之外的测试框架。
 - 无 ESLint / Prettier / EditorConfig：不要自行新增 lint 或格式化配置与依赖。
 - 平台边界：仅 Windows；不引入 macOS / Linux 适配。

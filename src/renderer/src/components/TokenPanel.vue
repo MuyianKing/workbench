@@ -1,9 +1,10 @@
 <script setup lang="ts">
 /**
  * 首页「Token 用量」卡片:读各 AI 工具(ZCode)本地用量库的按天聚合快照,
- * 画 今日/本周/本月 概览、天/周/月趋势条形图与模型/工具占比。
- * 天/周/月页签决定趋势窗口,占比默认统计整个窗口(全部);
- * 点击某根柱子则把占比切到那个桶(那天/那周/那月),再点一下回到全部。
+ * 画 今日/本周/本月 概览、趋势条形图与模型/工具占比。
+ * 趋势窗口由头部两个日期选择器给出(默认最近 30 天,起点不晚于终点,可选范围是快照里有数据的那段),
+ * 右侧 天/周/月 页签只切换柱子的分桶宽度,窗口本身不变;
+ * 占比默认统计整个窗口(全部);点击某根柱子则把占比切到那个桶(那天/那周/那月),再点一下回到全部。
  *
  * 数据是主进程「实读 + max 合并进快照」后的结果,这里不做任何持久化,只拉取与展示:
  * 挂载时取一次,之后每分钟刷新(与主进程的落盘节奏一致),「⋯」外还有标题栏右侧的
@@ -15,14 +16,14 @@ import { CaretRight, Refresh } from '@element-plus/icons-vue'
 import {
   SOURCE_LABELS,
   bucketRangeOf,
-  buildSeries,
-  cacheHitRate,
+  buildSeriesRange,
   emptyCounters,
   flattenSources,
   formatPercent,
   formatTokens,
   shareByModel,
   shareBySource,
+  shortDayLabel,
   sumRange,
   totalTokens,
   type TokenBucket,
@@ -30,19 +31,25 @@ import {
   type TokenGranularity,
   type TokenUsageResult
 } from '@shared/token-usage'
-import { dayKey } from '@shared/activity'
+import { addDays, dayKey } from '@shared/activity'
 import { formatRelative } from '@/format'
 
-/** 三种粒度:天数多走一档,柱子才不会太密或太空;window 是占比默认统计的整个窗口 */
-const GRANULARITIES: Array<{ key: TokenGranularity; label: string; periods: number; window: string }> = [
-  { key: 'day', label: '天', periods: 30, window: '30 天' },
-  { key: 'week', label: '周', periods: 12, window: '12 周' },
-  { key: 'month', label: '月', periods: 12, window: '12 个月' }
+/** 三档粒度:只决定柱子的分桶宽度,趋势窗口由头部日期选择器给出 */
+const GRANULARITIES: Array<{ key: TokenGranularity; label: string }> = [
+  { key: 'day', label: '天' },
+  { key: 'week', label: '周' },
+  { key: 'month', label: '月' }
 ]
+
+/** 趋势窗口的默认长度(天):与「天」档 30 根柱对齐 */
+const DEFAULT_WINDOW_DAYS = 30
 
 const result = ref<TokenUsageResult | null>(null)
 const loading = ref(false)
 const granularity = ref<TokenGranularity>('day')
+/** 趋势窗口的起止日期(本地日期键,含两端);空串表示还没拿到数据 */
+const fromKey = ref('')
+const toKey = ref('')
 /** 每次刷新时更新,驱动「今天 / 本周 / 本月」与相对时间跟着时钟走 */
 const nowTick = ref(Date.now())
 let timer: number | null = null
@@ -54,6 +61,7 @@ async function refresh(): Promise<void> {
     if (res.ok && res.data) {
       result.value = res.data
       nowTick.value = Date.now()
+      clampRange()
     }
   } finally {
     loading.value = false
@@ -80,6 +88,28 @@ const sourceErrorText = computed(() =>
 const updatedAt = computed(() => result.value?.data.updatedAt ?? 0)
 const hasData = computed(() => Object.keys(days.value).length > 0)
 
+/** 快照里最早的一天:日期选择器的可选下限(再往前没有记录,选了只会是一片空白) */
+const earliestKey = computed(() => Object.keys(days.value).sort()[0] ?? todayKey.value)
+
+/**
+ * 把趋势窗口收敛回可选范围:数据刚到、或快照修剪后选中的区间落到边界之外时调用。
+ * 首次收敛到「最近 30 天」,快照不足 30 天就贴着最早那天。
+ */
+function clampRange(): void {
+  const latest = todayKey.value
+  const earliest = earliestKey.value
+  if (!fromKey.value || !toKey.value) {
+    const start = dayKey(addDays(nowTick.value, -(DEFAULT_WINDOW_DAYS - 1)))
+    toKey.value = latest
+    fromKey.value = start < earliest ? earliest : start
+    return
+  }
+  if (toKey.value > latest) toKey.value = latest
+  if (fromKey.value < earliest) fromKey.value = earliest
+  // 不变式:起点不晚于终点。选择器已按对方禁掉越界日期,正常操作碰不到,这里是兜底
+  if (fromKey.value > toKey.value) fromKey.value = toKey.value
+}
+
 // ---------- 概览 ----------
 
 const today = computed(() => sumRange(days.value, todayKey.value, todayKey.value))
@@ -100,20 +130,32 @@ const thisMonth = computed(() => sumRange(days.value, monthStartKey.value, today
 
 // ---------- 趋势 ----------
 
-const granularityConfig = computed(
-  () => GRANULARITIES.find((g) => g.key === granularity.value) ?? GRANULARITIES[0]
-)
-
 /** 占比统计跟随的桶:null 即「全部」(整个趋势窗口);点了柱子锁定那根,再点一下回到全部 */
 const selectedBucketIndex = ref<number | null>(null)
 
-// 切粒度后桶的含义全变,选中作废,回到全部
-watch(granularity, () => {
+// 切粒度或换窗口后桶的含义全变,选中作废,回到全部
+watch([granularity, fromKey, toKey], () => {
   selectedBucketIndex.value = null
 })
 
+/** 可选的日期:快照里有记录的那段(到今天就够,未来的日期没有数据) */
+function isSelectable(date: Date): boolean {
+  const key = dayKey(date)
+  return !!key && key >= earliestKey.value && key <= todayKey.value
+}
+
+/** 起点不能晚于已选的终点 */
+function disableFrom(date: Date): boolean {
+  return !isSelectable(date) || dayKey(date) > toKey.value
+}
+
+/** 终点不能早于已选的起点 */
+function disableTo(date: Date): boolean {
+  return !isSelectable(date) || dayKey(date) < fromKey.value
+}
+
 const series = computed(() =>
-  buildSeries(days.value, granularity.value, nowTick.value, granularityConfig.value.periods)
+  buildSeriesRange(days.value, granularity.value, fromKey.value, toKey.value)
 )
 
 /** 选中柱子时生效的桶;未选中为 null,占比走整个窗口 */
@@ -122,18 +164,20 @@ const activeBucket = computed<TokenBucket | null>(() => {
   return series.value.buckets[selectedBucketIndex.value] ?? null
 })
 
-/** 占比的统计区间:未选中是整个趋势窗口(窗口起点到今天),选中后是那个桶覆盖的区间 */
+/** 占比的统计区间:未选中柱子就是整个趋势窗口,选中后是那个桶覆盖的区间 */
 const activeRange = computed(() => {
-  if (!activeBucket.value) {
-    return { fromKey: series.value.fromKey || todayKey.value, toKey: todayKey.value }
+  if (activeBucket.value) {
+    const range = bucketRangeOf(activeBucket.value.key, granularity.value)
+    if (range.fromKey) return range
   }
-  const range = bucketRangeOf(activeBucket.value.key, granularity.value)
-  return range.fromKey ? range : { fromKey: todayKey.value, toKey: todayKey.value }
+  return { fromKey: fromKey.value, toKey: toKey.value }
 })
 
-/** 占比区标题:默认「最近 30 天」这类窗口描述,选中柱子后显示那个桶的坐标标签 */
+/** 占比区标题:默认是当前窗口的起止日,选中柱子后显示那个桶的坐标标签 */
 const shareRangeLabel = computed(() =>
-  activeBucket.value ? activeBucket.value.label : `最近 ${granularityConfig.value.window}`
+  activeBucket.value
+    ? activeBucket.value.label
+    : `${shortDayLabel(fromKey.value)} ~ ${shortDayLabel(toKey.value)}`
 )
 
 function selectBucket(index: number): void {
@@ -263,7 +307,36 @@ function detailWidth(value: number, max: number): string {
 
       <div class="chart">
         <div class="chart__head">
-          <span class="chart__title">趋势</span>
+          <!-- 趋势窗口:起止日期自己选,右侧页签只切换柱子的分桶宽度;两个框互为上下限 -->
+          <div class="range" role="group" aria-label="趋势时间范围">
+            <el-date-picker
+              v-model="fromKey"
+              class="range__pick"
+              type="date"
+              size="small"
+              format="MM-DD"
+              value-format="YYYY-MM-DD"
+              placeholder="开始"
+              title="趋势起始日期"
+              :clearable="false"
+              :editable="false"
+              :disabled-date="disableFrom"
+            />
+            <span class="range__sep" aria-hidden="true">~</span>
+            <el-date-picker
+              v-model="toKey"
+              class="range__pick"
+              type="date"
+              size="small"
+              format="MM-DD"
+              value-format="YYYY-MM-DD"
+              placeholder="结束"
+              title="趋势结束日期"
+              :clearable="false"
+              :editable="false"
+              :disabled-date="disableTo"
+            />
+          </div>
           <div class="chart__tabs" role="tablist">
             <button
               v-for="g in GRANULARITIES"
@@ -507,13 +580,37 @@ function detailWidth(value: number, max: number): string {
 .chart__head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  /* 卡片窄到一行放不下时换行,让选择器和页签各占一行,而不是互相挤压 */
+  flex-wrap: wrap;
+  gap: var(--sp-1) var(--sp-2);
   flex-shrink: 0;
 }
 
-.chart__title {
+/* 趋势窗口:两个窄日期框夹一个「~」,宽度由 .range__pick 压到只放得下「09-14」 */
+.range {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+}
+
+.range__sep {
   font-size: var(--fs-micro);
   color: var(--ink-3);
+}
+
+/* Element Plus 的日期编辑器默认 220px 宽;日历面板 teleport 到 body,不受这里影响 */
+.range :deep(.el-date-editor.el-input) {
+  width: 72px;
+}
+
+.range :deep(.el-input__wrapper) {
+  padding: 1px 4px;
+}
+
+/* 窄框里省掉图标与文字之间那段默认间距 */
+.range :deep(.el-input__prefix-inner > :last-child) {
+  margin-right: 2px;
 }
 
 .chart__tabs {
@@ -522,6 +619,8 @@ function detailWidth(value: number, max: number): string {
   padding: 2px;
   border-radius: var(--r-pill);
   background: var(--bg-inset);
+  /* 页签永远贴右边缘:换行到第二行时也一样(只靠 space-between 会掉到左边) */
+  margin-left: auto;
 }
 
 .tab {
