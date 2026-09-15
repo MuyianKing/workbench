@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "前端项目控制台",
+  "description": "前端开发工作台：管项目、记工作、看 AI 用量",
   "author": "muyian",
   "scripts": {
     "dev": "tauri dev",
