@@ -76,10 +76,11 @@ function startResize(event: PointerEvent): void {
     onMove: (moveEvent, start) => {
       dragHeight.value = clampHeight(startHeight + (start.y - moveEvent.clientY))
     },
-    onEnd: () => {
+    // Esc / 系统取消：这一手作废，高度回到拖动前，不落盘（last 为 null 只说明没移动过）
+    onEnd: (last, cancelled) => {
       const next = dragHeight.value
       dragHeight.value = null
-      if (next !== null) void terminal.setTerminalHeight(next)
+      if (!cancelled && last && next !== null) void terminal.setTerminalHeight(next)
     }
   })
 }
@@ -218,8 +219,9 @@ const dockTone = computed(() => {
 /** 这一次拖动把位置改掉了：松手要落盘 */
 let dockMoved = false
 /**
- * 刚结束的这一按不算「点击」（拖动过，或按 Esc 取消了）。
- * 浏览器在 pointerup 之后还会补一个 click，靠它区分「拖」与「点」。
+ * 刚结束的这一按不算「点击」：只在这一按拖动过、或按 Esc 放弃了时置位。
+ * 浏览器在 pointerup 之后还会补一个 click，靠它区分「拖」与「点」——
+ * 按下没动过的单击要放行（否则要点第二下才展开）。
  */
 let dockSuppressClick = false
 
@@ -246,16 +248,17 @@ function startDockDrag(event: PointerEvent): void {
       const center = moveEvent.clientY - grabOffset
       dragDockTop.value = clampDockTop((center / Math.max(1, viewportHeight.value)) * 100)
     },
-    // last 为 null 表示这一手被取消了（Esc / 系统接管）：不落盘，也不算点击
-    onEnd: (last) => {
+    // last 为 null 只说明这一手没移动过；cancelled 才说明是被放弃的（Esc / 系统接管）
+    onEnd: (last, cancelled) => {
       const next = dragDockTop.value
       const moved = dockMoved
       dragDockTop.value = null
       dockMoved = false
       if (moved && last && next !== null) void terminal.setTerminalButtonTop(next)
-    },
-    onCleanup: () => {
-      if (dragDockTop.value !== null) dockSuppressClick = true
+      // 拖动过或放弃过：随后补的那个 click 不算「点开面板」（见 expandFromDock）。
+      // 这里不能用「dragDockTop 还没归零」来判断 —— onCleanup 早于 onEnd，
+      // 那个条件在每次收手时都成立，单击也就被一起吞掉了。
+      if (moved || cancelled) dockSuppressClick = true
     }
   })
 }

@@ -318,7 +318,6 @@ code.mono {
   border-radius: var(--r-md);
 }
 
-}
 
 .waiting__title {
   margin: 0;

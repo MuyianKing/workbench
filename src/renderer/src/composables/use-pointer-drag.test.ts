@@ -96,6 +96,28 @@ describe('startPointerDrag', () => {
     expect(counts().pointermove).toBe(0)
   })
 
+  /**
+   * 「没移动过」与「放弃了」都会让 last 是 null，调用方（终端那颗悬浮按钮）要抑制
+   * 随后的 click 就得靠第二个参数分辨：单击要能点开，Esc 放弃的那一下不能。
+   */
+  it('收手结果分得开「按下没动」与「被放弃」', () => {
+    const plain = stubWindow()
+    const plainEnd = vi.fn()
+    startPointerDrag({ start: { x: 0, y: 0 }, onMove: vi.fn(), onEnd: plainEnd })
+    plain.dispatch('pointerup', {})
+
+    expect(plainEnd.mock.calls[0][0]).toBeNull()
+    expect(plainEnd.mock.calls[0][1]).toBe(false)
+
+    const escaped = stubWindow()
+    const escEnd = vi.fn()
+    startPointerDrag({ start: { x: 0, y: 0 }, onMove: vi.fn(), onEnd: escEnd })
+    escaped.dispatch('keydown', { key: 'Escape' })
+
+    expect(escEnd.mock.calls[0][0]).toBeNull()
+    expect(escEnd.mock.calls[0][1]).toBe(true)
+  })
+
   it('拖动中按 Esc 是放弃：onEnd 收到 null，收手后不再响应移动', () => {
     const { dispatch } = stubWindow()
     const onEnd = vi.fn()

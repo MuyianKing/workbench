@@ -16,8 +16,13 @@ export interface PointerDragOptions {
    * 也就是说「按下没动」不会触发。
    */
   onMove: (event: PointerEvent, start: { x: number; y: number }) => void
-  /** 收手。参数是这次拖动期间最后一次 onMove 收到的那个事件（没有移动过则为 null） */
-  onEnd?: (last: PointerEvent | null) => void
+  /**
+   * 收手。`last` 是这次拖动期间最后一次 onMove 收到的那个事件（没有移动过则为 null），
+   * `cancelled` 表示这一手是被放弃的（Esc / 系统取消指针 / 组件卸载）而不是正常松手。
+   * 两个参数要一起看：`last` 为 null 只说明「没移动过」，按下没动也是 null，
+   * 光凭它分不出「点了一下」与「放弃了」（调用方要抑制随后的 click 时就需要这个区分）。
+   */
+  onEnd?: (last: PointerEvent | null, cancelled: boolean) => void
   /** 拖拽期间的清理（无论正常收手、Esc 还是被系统取消都会走一次） */
   onCleanup?: () => void
   /** 拖拽期间挂在 <body> 上的类名：用来关过渡动画、换光标（见 global.css 的 .is-* 几条） */
@@ -50,7 +55,7 @@ export function startPointerDrag(options: PointerDragOptions): () => void {
     done = true
     detach()
     onCleanup?.()
-    onEnd?.(cancelled ? null : last)
+    onEnd?.(cancelled ? null : last, cancelled)
   }
 
   function handleMove(moveEvent: PointerEvent): void {
