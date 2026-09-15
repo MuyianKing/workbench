@@ -30,11 +30,10 @@ import RecentPanel from '@/components/RecentPanel.vue'
 import ActionsPanel from '@/components/ActionsPanel.vue'
 import QuickLaunch from '@/components/QuickLaunch.vue'
 import CommandPanel from '@/components/CommandPanel.vue'
-import ProjectsPanel from '@/components/ProjectsPanel.vue'
 
 const store = useProjectsStore()
 
-/** 八块卡片的固定清单：id 对应 theme.json，title 用于编辑态的标签 */
+/** 七块卡片的固定清单：id 对应 theme.json，title 用于编辑态的标签 */
 const CARDS: Record<HomeCardId, { title: string; component: Component }> = {
   activity: { title: '活跃度', component: ActivityGraph },
   token: { title: 'Token 用量', component: TokenPanel },
@@ -42,8 +41,7 @@ const CARDS: Record<HomeCardId, { title: string; component: Component }> = {
   recent: { title: '最近使用', component: RecentPanel },
   actions: { title: '快捷操作', component: ActionsPanel },
   quick: { title: '快捷启动', component: QuickLaunch },
-  commands: { title: '命令', component: CommandPanel },
-  projects: { title: '项目列表', component: ProjectsPanel }
+  commands: { title: '命令', component: CommandPanel }
 }
 
 const editing = computed(() => store.layoutEditing)
@@ -354,8 +352,6 @@ function onToggleMode(id: HomeCardId): void {
   min-width: 0;
   min-height: 0;
   overflow-y: auto;
-  /* 给固定高度卡片留一点下沿空间，高度把手不会顶到滚动边界 */
-  padding-bottom: 6px;
 }
 
 /* 空栏只是一个虚线投放区 */

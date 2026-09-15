@@ -44,12 +44,15 @@
 ## 1. 项目边界
 
 - 定位：Windows 桌面应用（Tauri 2 + WebView2），本地「前端项目控制台」。
-- 联网边界：默认不联网、不上报任何数据。**唯一的例外是用户显式配置的 Token 同步仓库**（一个 git 远程地址，
-  设置里留空即关闭）—— 除它之外不要新增任何网络出口，也不要往任何第三方服务发数据。
+- 联网边界：默认不联网、不上报任何数据。**出口只有三个，且都由用户显式开启**：用户配置的 Token 同步仓库
+  （一个 git 远程地址，设置里留空即关闭）、账号登录（点登录时才打 GitHub / Gitee 的 OAuth 接口，
+  见 `oauth.rs`）、命令执行本身。除这三处不要新增网络出口，也不要往任何第三方服务发数据。
+  登录是这条边界唯一一次放宽，加别的东西之前先想清楚能不能不做。
 - 技术栈：Rust 后端（Tauri ^2）+ Vue ^3.5.13 + TypeScript ^5.9.3；Element Plus ^2.8.8 + @element-plus/icons-vue ^2.3.1；Pinia ^4.0.3。
 - Rust 侧依赖（`src-tauri/Cargo.toml`）：`tauri`（`tray-icon`）、`tauri-plugin-dialog` / `opener` / `single-instance`、`rusqlite`（`bundled`，读 ZCode 本地 sqlite）、`zstd`（DSH 会话多帧解压）、`serde` / `serde_json` / `uuid`。**不要**再引入其他 native / 运行时依赖。
 - 唯一需要用户预装的外部程序是 **git**，且只在 Token 同步（`sync.rs`）里用：直启 `git.exe`（`proc::run_direct`，
   **不要**经 `cmd /C` 起它，参数行会被二次解析），超时与失败一律收敛成给用户看的提示。别处不要新增这类外部依赖。
+  账号登录那点 HTTPS **不走外部程序也不引 HTTP 库**：用系统自带的 WinHTTP（`http.rs`），代价是自己写一段 FFI。
 - 构建 / 打包：Vite ^7.3.6（渲染层）+ cargo / Tauri CLI → Windows x64 NSIS。包管理器固定 npm（`package-lock.json`）；Rust 依赖的锁文件 `src-tauri/Cargo.lock` 要提交。
 - 工具链前置：Rust stable（`x86_64-pc-windows-msvc`）+ MSVC 生成工具 + Windows SDK。rustc 自己经注册表定位 MSVC，不依赖 PATH 上的 `cl.exe`（所以 Git 自带的 `link.exe` 不会被误用）。
 - 测试：Vitest ^5.0.0（前端，`environment: 'node'`）+ `cargo test`（Rust，测试写在同文件的 `#[cfg(test)] mod tests`）。
@@ -65,14 +68,18 @@
 - Rust 后端在 `src-tauri/src/`：
   - [main.rs](src-tauri/src/main.rs)：入口、窗口、托盘、单实例、生命周期（退出落盘 + 收掉子进程）。
   - [commands.rs](src-tauri/src/commands.rs)：IPC 命令层，只做「取原始数据 / 落盘 / 调系统能力」，不做业务语义。
-  - `paths.rs`（数据目录与指针）、`store.rs`（去抖 JSON 落盘）、`encoding.rs`（base64 / UTF-16LE）。
+  - `paths.rs`（数据目录与指针）、`store.rs`（去抖 JSON 落盘）、`encoding.rs`（base64 / base64url / UTF-16 宽字符串 / SHA-256）。
   - `session.rs`（子进程会话：起命令、按批回传输出、按进程树终止）、`proc.rs`（带超时的子进程原语与进程树终止）。
   - `system.rs`（端口检测 / 资源管理器 / ShellExecute）、`nvm.rs`（nvm 只读探测）、`token.rs`（ZCode sqlite + zstd）、
-    `sync.rs`（Token 分片的 git 同步：克隆 / 拉 / 提交 / 推、读回别人的分片）、`icon.rs`（程序图标抽取）。
+    `sync.rs`（同步仓库的 git 操作：克隆 / 拉 / 提交 / 推、读回别人的用量与配置）、`icon.rs`（程序图标抽取）。
+  - 账号登录三个模块：`oauth.rs`（两家授权流程、回环回调、换 token 与账号信息）、`http.rs`（WinHTTP 极简
+    HTTPS 客户端）、`credentials.rs`（Windows 凭据管理器读写）。它们的凭据来自 `src-tauri/oauth.local.json`，
+    由 `build.rs` 注入到 `OUT_DIR/oauth.json` 后 `include_str!` —— 该文件**不入库**，模板见 `oauth.example.json`，
+    缺它时应用照样能编译，只是登录按钮显示「未内置凭据」。
 - 配置：`src-tauri/tauri.conf.json`（窗口、打包、资源映射）、`src-tauri/capabilities/default.json`（能力白名单）。
 - 渲染层在 `src/renderer/src/`：公共与页面组件在 `components/`，Pinia store 在 `stores/`，设计令牌 `styles/tokens.css`，全局样式 `styles/global.css`。
 - **适配层**在 `src/renderer/src/workbench/` —— 它是原 preload + 主进程逻辑的替代品，实现 `window.workbench` 契约：
-  `bridge.ts`（invoke / 事件 / 未移植兜底）、`events.ts`（适配层内部广播）、`state.ts`（持久化状态与增删改）、`session.ts`（进程会话与事件翻译）、`scanner.ts` / `nvm.ts` / `token.ts` / `system.ts` / `quick-launch.ts`，全局类型声明在 `global.d.ts`。
+  `bridge.ts`（invoke / 事件 / 未移植兜底 / `guard`）、`events.ts`（适配层内部广播）、`state.ts`（持久化状态与增删改）、`session.ts`（进程会话与事件翻译）、`scanner.ts` / `nvm.ts` / `token.ts` / `system.ts` / `quick-launch.ts` / `auth.ts`（登录轮询与状态对账），全局类型声明在 `global.d.ts`。
 - 两端共用（类型、契约、纯逻辑）放 `src/shared/`；`shared/` 里禁止 import node、Rust 或渲染层代码。
 - 单测与被测模块同目录，命名 `*.test.ts`。路径别名：`@` → `src/renderer/src`，`@shared` → `src/shared`。
 - 文档分工：[README.md](README.md) 是当前功能与架构事实的唯一真源，本文件只写约束，`docs/dev-notes/` 放动手方法与踩坑。
@@ -114,12 +121,29 @@
 - 后端只负责「取原始数据 / 落盘 / 调系统能力」；合并、排序、修剪、状态机、命令构造这些业务语义留在 TS 适配层。好处是绝大多数改动仍是 Vite 的秒级热更新，不必重编 Rust——这也是选它而不是把逻辑写进 Rust 的原因。
 - API 约定：判 `result.ok`，失败取 `result.error` 提示；`checkPort`、`listProjects`、`getNvmStatus`、`listWallpapers`、`checkPackageManagers` 等少数通道按约定直接返回具体结构而非 `Result`。
 - 状态管理：跨组件状态集中在 [stores/projects.ts](src/renderer/src/stores/projects.ts) 的 `useProjectsStore`，组件不另建全局状态、不用事件总线传业务数据。
-- 持久化在 Rust 侧：走 `store.rs`（300ms 防抖 + 临时文件 rename + 退出前同步落盘）。数据文件 `workbench-data.json`、`theme.json`（首页布局）、`token-data.json`（Token 按天快照），目录指针 `data-location.json` 固定在 `%APPDATA%/Workbench/`。
+- 持久化在 Rust 侧：走 `store.rs`（300ms 防抖 + 临时文件 rename + 退出前同步落盘）。数据文件 `workbench-data.json`（项目 / 快捷启动 / 命令，以及与本机绑定的设置）、`theme.json`（**外观 + 首页布局**）、`token-usage.json`（Token 按天快照），目录指针 `data-location.json` 固定在 `%APPDATA%/Workbench/`。
 - **数据目录必须与 Electron 版保持一致**（`%APPDATA%\Workbench`）：不要图省事改用 Tauri 的 `app_config_dir()`，它按 identifier 生成 `%APPDATA%\com.muyian.workbench`，换位置用户就等于丢了项目列表。路径一律经 `paths.rs` 的 `data_dir()` / `data_file()` 现取，不要缓存写死。
 - 首屏快照：Tauri 没有同步 IPC（原 `ipcRenderer.sendSync` 那套行不通），改为建窗口时用 `initialization_script` 注入 `window.__WB_BOOTSTRAP__`（见 [main.rs](src-tauri/src/main.rs) 的 `bootstrap_script`），渲染层同步读它，第一帧就是用户设置的样子。
-- Token 快照的合并规则分两层，改数据模型时别混：**分片内取 max**（同一台机器重复实读要幂等，上游清理旧会话时历史不缩水）、**分片之间求和**（每台机器各自消耗，取 max 会把另一台整个丢掉）。一台机器一份分片、文件名就是设备 id，设备 id 存在 `%APPDATA%/Workbench/device.json`，**不随数据目录迁移、也不进同步仓库**（两台机器撞 id 会互相覆盖分片，且没有任何报错）。
+- Token 快照的合并规则分两层，改数据模型时别混：**分片内取 max**（同一台机器重复实读要幂等，上游清理旧会话时历史不缩水）、**分片之间求和**（每台机器各自消耗，取 max 会把另一台整个丢掉）。一台机器一份文件、文件名就是设备 id，设备 id 存在 `%APPDATA%/Workbench/device.json`，**不随数据目录迁移、也不进同步仓库**（两台机器撞 id 会互相覆盖文件，且没有任何报错）。
 - Token 快照的版本号**不能**按「版本不等就整份弃用」处理：v4 起文件里装着别的机器的历史，弃掉就再也读不回来（对端不开机就不会重写分片）。能接受哪些版本由 [token-usage.ts](src/shared/token-usage.ts) 的 `TOKEN_DATA_COMPATIBLE_VERSIONS` 显式列出，新增口径版本要手工往表里加，别写成 `version >= N`。
+- 同步仓库的布局是「一个功能一个目录、一台机器一个文件」：`token-usage/<设备id>.json` 是用量快照、`config/<设备id>.json` 是那份 `theme.json` 的整份副本（见 [sync-config.ts](src/shared/sync-config.ts)）。两个目录都必须保持**单写者**（只写自己那份、只读别人的）—— 这是「不需要人工合并」的全部依据；一次同步里这两个文件进**同一次提交**（见 [sync.rs](src-tauri/src/sync.rs) 的 `publish_at`），删掉配置同样是一次要提交的改动。**旧 `devices/` 目录不读**：升级后仓库里那些老文件就是读不到的，要手工删。
+- **外观设置与首页布局都住在 [theme.json](src/shared/theme.ts) 里**（哪些项算外观由 [appearance.ts](src/shared/appearance.ts) 的白名单定义）。宿主读的时候把两份文件合成渲染层认的那份 `AppSettings`、写的时候按白名单分流（`splitSettingsPatch`），组件永远只看得到一份完整设置。三条不能破：**采用别人的配置只能由用户手动点**（它是「以谁的为准」而非可相加的数据，自动套用会在两台机器之间来回覆盖、永远收敛不了，自动同步只负责推上去）；**只带换台机器仍然成立的项**（快捷键、开机自启、数据目录、同步仓库地址一律不进 theme.json —— 把仓库地址带过去等于让另一台机器往一个它没填过的地址推东西）；**theme.json 的 `updatedAt` 只在内容真的变过时才刷新**（`sameThemeContent`），它是「内容没变就不产生提交」的唯一依据，每轮都刷就会往仓库里堆一串只改了时间的提交。
+- 挪动设置项的落点（比如把某一项从数据文件搬进 theme.json）时，读侧必须**兼容老数据**：`migrateAppearanceIntoTheme` 负责把还在旧 settings 里的外观搬进主题，而且搬完**要立刻落盘主题文件** —— 数据文件下一次落盘就会把那些键摘掉，慢了半拍用户的主题色 / 背景就再也没处可搬。
 - 同步用的外部程序只有 git，且必须经 `proc::run_direct` 直启（**不要** `cmd /C`：参数行会被二次解析）；子进程一律带上 `GIT_TERMINAL_PROMPT=0`，否则没有终端可问时会挂在凭据输入上直到超时。
+- **账号的 access_token 绝不进渲染层**：它在 Rust 侧从授权码换出来，直接写进 Windows 凭据管理器（`credentials.rs`），
+  回给前端的只有昵称 / 头像 / 登录名。机密进凭据管理器，非机密（client_id、账号资料、开关）才进数据文件 ——
+  `workbench-data.json` 是明文 JSON，还会跟着数据目录迁移被复制到网盘。
+- 同步时把 token 交给 git 必须用 **host 限定**的配置键（`http.https://github.com/.extraheader`），
+  经 `GIT_CONFIG_*` 环境变量注入（见 `oauth::git_envs`）。写成全局 `http.extraheader` 会把 token 发给**任何**远端；
+  写成 `-c` 参数会让它出现在进程命令行里。这条注入只由设置里的 `useAccountForSync` 触发，
+  **默认开但要能关** —— token 会过期，关掉才能退回系统 git 凭据。
+- 账号登录的回环端口（`oauth.rs` 的 `REDIRECT_PORT`）必须与两家平台上注册的回调地址**逐字一致**，
+  那里有一条测试钉住了这个串；Gitee 要求完全一致，所以不能改成随机端口。
+- **两家的授权码流程都必须带 `client_secret`**（GitHub 支持 PKCE，但没有因此把它变成可选项）——
+  别为了「少内嵌一个 secret」把它改成选填：那会让浏览器授权成功、换 token 却在
+  `incorrect_client_credentials` 上失败，表现成「点了登录没反应」，很难往配置上想（踩过一次）。
+- 回调等待是**轮询**而不是阻塞：`auth_login_poll` 每次非阻塞地收一次，没消息就回 `pending`，
+  节奏由渲染层定（`workbench/auth.ts`）。别改成在命令里等几分钟 —— 那会占着工作线程，取消也没法立刻生效。
 - 日志：子进程输出由 `session.rs` 按批（200 行 / 50ms）回推 `session:lines`，`session:exit` 单独回退出码；适配层翻译成 `ProcessLogEvent` / `ProcessStatusEvent` 后广播，store 按帧写入 `RingLog`。日志缓冲刻意 `markRaw`、不参与响应式，靠 `logVersion` 触发渲染，读取日志用 `activeLogs`。
 - 子进程一律按**进程树**终止（`taskkill /T`）：`cmd /C npm run dev` 之下才是真正的 dev server，只杀 cmd 会留下占着端口的孙进程，表现为「已停止」但端口仍被占。超时清理也要走同一条路，否则超时形同虚设。
 
@@ -138,6 +162,8 @@
   进页面求值或读控制台。比看截图猜、比加日志重编都可靠得多。
 - 功能新增或调整后必须同步更新 [README.md](README.md)（分工见第 2 节）：漏更新就会把错误事实传给后来者，包括下一个会话的 Agent。
 - 不提交构建产物与缓存：`out/`、`dist/`、`.preview/`、`*.tsbuildinfo`、`src-tauri/target/`（已在 `.gitignore`）。
+- **绝不提交 `src-tauri/oauth.local.json`**（已在 `.gitignore`）：里面是 OAuth 应用的 client_id / client_secret，
+  进了仓库就等于公开凭据。提交前扫一眼 `git status`，看到它就说明忽略规则被绕过了。
 - 视觉验证（改布局 / 配色 / 主题时把渲染层单独跑在浏览器里截图比对）统一用 `.preview/` 作临时工作区，
   做法见 [browser-preview-verification.md](docs/dev-notes/browser-preview-verification.md)。
   **任务完成后必须直接删掉整个 `.preview/` 目录**，不留在磁盘上；值得留下的经验写进该文档，不靠保留脚本传递。

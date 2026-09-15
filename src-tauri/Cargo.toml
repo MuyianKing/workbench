@@ -27,10 +27,15 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png",
 uuid = { version = "1", features = ["v4"] }
 # 图标抽取直接走 Win32（PrivateExtractIconsW + GDI），不再依赖 PowerShell；
 # Shell / Shell_Common / Storage_FileSystem 是为了 SHGetFileInfoW 与 SHGetPathFromIDListW ——
-# 快捷方式自己不带图标资源，得先靠它们解析到目标程序（见 icon.rs）
+# 快捷方式自己不带图标资源，得先靠它们解析到目标程序（见 icon.rs）。
+# WinHttp 与 Security_Credentials 是账号登录用的：HTTPS 走系统自带的 WinHTTP（TLS 与
+# 系统代理都由 Windows 提供），access_token 走 Windows 凭据管理器（DPAPI 加密）。
+# 两条路都只给已有依赖加 feature，**不新增任何 crate**（见 oauth.rs / http.rs / credentials.rs）。
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Graphics_Gdi",
+    "Win32_Networking_WinHttp",
+    "Win32_Security_Credentials",
     "Win32_Storage_FileSystem",
     "Win32_System_Threading",
     "Win32_UI_Shell",

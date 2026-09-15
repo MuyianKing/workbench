@@ -6,17 +6,11 @@
  * 工作区背景图归 App.vue 的 .app 管（要铺满整窗、从标题栏后面透出来），这里保持透明。
  */
 import HomeBoard from '@/components/HomeBoard.vue'
-import { useProjectsStore } from '@/stores/projects'
-
-const store = useProjectsStore()
 </script>
 
 <template>
-  <!--
-    --card-gap 在最外层定义：页面四周的留白与栏间、栏内的卡片间距是同一个设置值，
-    定义在这里让 HomeBoard 的栏、卡片与把手都从它继承，不用各处再写一份。
-  -->
-  <main class="home" :style="{ '--card-gap': `${store.cardGap}px` }">
+  <!-- --card-gap 由 .app 统一给（导航栏那张卡片也吃它），这里只管画布自己的内边距 -->
+  <main class="home">
     <HomeBoard />
   </main>
 </template>

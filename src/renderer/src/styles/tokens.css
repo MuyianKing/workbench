@@ -15,6 +15,9 @@
   --bg-surface-rgb: 255, 255, 255;
   --bg-subtle: #f5f6f8;
   --bg-inset: #e8eaee;
+  /* 选中块的底色（左侧菜单的当前项）：要一眼看出「现在在哪一屏」，
+     必须比面底色明确高一档，所以不复用 --bg-inset —— 暗色下浮层底色与它只差几个色阶，等于没画 */
+  --bg-selected: #dde1e7;
   --border: #e1e4e9;
   --border-strong: #c9cfd8;
 
@@ -105,6 +108,8 @@
   --h-titlebar: 36px;
   --h-header: 58px;
   --h-filter: 46px;
+  /* 左侧导航栏宽度：图标 + 11.5px 的文字要一排放下，窄于此「快捷启动」这类四字项会折行 */
+  --w-nav: 88px;
   /* 项目卡与「添加项目」幽灵卡同高，网格里两种方块外形一致 */
   --h-project-card: 155px;
   --h-terminal: 406px;
@@ -153,6 +158,8 @@
   --bg-surface-rgb: 27, 33, 42;
   --bg-subtle: #20262f;
   --bg-inset: #262d37;
+  /* 同上：暗色下这一档要抬得比亮色更多，才能在浮层底色上分得出来 */
+  --bg-selected: #3b4552;
   --border: #2b323d;
   --border-strong: #3a424f;
 

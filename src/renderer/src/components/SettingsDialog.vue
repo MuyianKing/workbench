@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { CircleClose, FolderOpened, Picture, Rank } from '@element-plus/icons-vue'
+import { accountLabel } from '@shared/auth'
 import { useProjectsStore } from '@/stores/projects'
+import AccountDialog from '@/components/AccountDialog.vue'
 import { ACCENT_PRESETS, type AccentInkMode } from '@shared/accent-color'
 import { APP_NAME_DEFAULT, APP_NAME_MAX_LENGTH } from '@shared/app-name'
 import { CARD_GAP_MAX, CARD_GAP_MIN, GRID_STEP_MAX, GRID_STEP_MIN } from '@shared/theme'
@@ -12,7 +14,8 @@ import {
 } from '@shared/workspace-background'
 import { builtinIdOf } from '@shared/wallpaper'
 import { CARD_OPACITY_MAX, CARD_OPACITY_MIN } from '@shared/card-opacity'
-import type { AppSettings, ThemeSource, TopBarStyle } from '@/types'
+import { formatRelative } from '@/format'
+import type { AppSettings, SyncDeviceInfo, ThemeSource, TopBarStyle } from '@/types'
 import type { ThemeOrigin } from '@/theme-transition'
 
 const props = defineProps<{ modelValue: boolean }>()
@@ -24,6 +27,29 @@ const visible = computed({
   get: () => props.modelValue,
   set: (value: boolean) => emit('update:modelValue', value)
 })
+
+/** 「账号」那一行开的弹窗。也挂在顶栏上，两处共用同一个 store 状态，谁先开都行 */
+const accountVisible = ref(false)
+const account = computed(() => store.auth?.account ?? null)
+
+/** el-switch 的 model-value 是联合类型（开了 string/number 取值时），这里只要布尔 */
+function setUseAccountForSync(value: boolean | string | number): void {
+  save({ useAccountForSync: value === true })
+}
+
+/**
+ * 左侧菜单只有两项：外观（含首页画布的布局，它们都是「看起来什么样」的设置）、
+ * 通用（程序、快捷键、启动、数据目录、Token 同步）。选中项不随关闭重置，
+ * 下次打开还停在上一屏，省得每次都要再点一次。
+ */
+type SettingsTab = 'appearance' | 'general'
+
+const tabs: Array<{ value: SettingsTab; label: string }> = [
+  { value: 'appearance', label: '外观' },
+  { value: 'general', label: '通用' }
+]
+
+const activeTab = ref<SettingsTab>('appearance')
 
 const themes: Array<{ value: ThemeSource; label: string }> = [
   { value: 'system', label: '跟随系统' },
@@ -139,6 +165,60 @@ function commitSyncRepo(): void {
   save({ tokenSyncRepo: syncRepoDraft.value })
 }
 
+/** el-switch 的 model-value 可能是联合类型，这里只要布尔 */
+function setSyncAppearance(value: boolean | string | number): void {
+  save({ syncAppearance: value === true })
+}
+
+/**
+ * 应用另一台机器的配置。
+ *
+ * 会整份覆盖本机当前的外观与首页布局（连带对方的工作区背景设置），所以先问一句；
+ * 确认之后由 store 走既有的 updateThemeConfig 通道落盘，界面上不需要另做刷新。
+ */
+async function applyAppearance(device: SyncDeviceInfo): Promise<void> {
+  try {
+    await ElMessageBox.confirm(
+      `把本机的外观与首页布局换成「${device.name}」那一套？本机现在这份仍然留在仓库里，随时可以再取回来。` +
+        '对方若用的是它本机上的图片作背景，这边读不出来，需要重新选一张。',
+      '应用外观配置',
+      { type: 'warning', confirmButtonText: '应用', cancelButtonText: '取消' }
+    )
+  } catch {
+    return
+  }
+  await store.applySyncAppearance(device.id)
+}
+
+/** 手动同步一次，再把设备列表重新读一遍（列表是上一次同步取回来的样子） */
+async function syncNow(): Promise<void> {
+  syncing.value = true
+  try {
+    const result = await window.workbench.syncTokenUsage()
+    if (!result.ok) {
+      ElMessage.error(result.error ?? '同步失败')
+    } else if (result.data?.sync.error) {
+      ElMessage.error(result.data.sync.error)
+    }
+  } catch (error) {
+    // 版本不一致、后端没起来都可能走到这里：说一声比按钮转完圈什么都不发生强
+    ElMessage.error(error instanceof Error ? error.message : '同步失败')
+  } finally {
+    syncing.value = false
+    await store.loadSyncDevices()
+  }
+}
+
+/** 手动同步一次进行中 */
+const syncing = ref(false)
+
+/** 设备列表里的相对时间：打开设置时算一次就够，不必为它挂定时器 */
+function deviceUpdatedText(device: SyncDeviceInfo): string {
+  return device.theme
+    ? `更新于 ${formatRelative(device.updatedAt, Date.now())}`
+    : '没有配置'
+}
+
 function save(patch: Partial<AppSettings>): void {
   void store.updateSettings(patch)
 }
@@ -249,416 +329,604 @@ watch(visible, (open) => {
   // 内置壁纸的缩略图要现压，按需在第一次打开面板时取（见 store 的 ensureWallpapers）
   void store.ensureWallpapers()
 })
+
+/**
+ * 通用那一屏里的「从别的机器取外观」要一份设备列表。
+ * 读的是上一次同步取回的仓库快照（不联网），所以每次切到这一屏都重读一遍最省心 ——
+ * 用户很可能刚从首页点过同步按钮再进来。
+ */
+watch([visible, activeTab], ([open, tab]) => {
+  if (open && tab === 'general') void store.loadSyncDevices()
+})
 </script>
 
 <template>
-  <!-- append-to-body：弹层必须离开 .app 子树，否则会被顶部毛玻璃的 backdrop-filter 连累（见 global.css 弹层一节） -->
-  <el-dialog v-model="visible" title="设置" width="760" align-center append-to-body>
+  <!--
+    append-to-body：弹层必须离开 .app 子树，否则会被顶部毛玻璃的 backdrop-filter 连累（见 global.css 弹层一节）。
+    class / body-class：两栏骨架与固定高度都在 global.css 里（见 .el-dialog.settings-dialog）。
+    没有 footer：这里的设置都是改完即生效的，留一个「完成」按钮只是关窗用，不如省掉那一条 ——
+    关窗走右上角的 ×、Esc 或点遮罩，三条都是 EP 自带的。
+  -->
+  <el-dialog
+    v-model="visible"
+    class="settings-dialog"
+    title="设置"
+    width="920"
+    align-center
+    append-to-body
+    body-class="settings-body"
+  >
     <div class="settings">
-      <!-- 程序 -->
-      <section class="block">
-        <h3 class="block__title">程序</h3>
+      <!-- 左侧菜单：只有两项，点哪项右侧就换成哪一屏 -->
+      <nav class="settings__nav">
+        <button
+          v-for="tab in tabs"
+          :key="tab.value"
+          class="nav-item"
+          type="button"
+          :class="{ 'is-active': activeTab === tab.value }"
+          @click="activeTab = tab.value"
+        >
+          {{ tab.label }}
+        </button>
+      </nav>
 
-        <div class="row">
-          <div class="row__text">
-            <span class="row__label">程序名称</span>
-            <span class="row__hint">
-              显示在标题栏、托盘提示与窗口标题上的名字。留空恢复为 {{ APP_NAME_DEFAULT }}，最多
-              {{ APP_NAME_MAX_LENGTH }} 个字符；输入后失焦或按回车生效。
-            </span>
-          </div>
-          <el-input
-            v-model="appNameDraft"
-            class="name-input"
-            size="small"
-            :maxlength="APP_NAME_MAX_LENGTH"
-            spellcheck="false"
-            :placeholder="APP_NAME_DEFAULT"
-            @change="commitAppName"
-          />
-        </div>
-      </section>
-
-      <!-- 外观 -->
-      <section class="block">
-        <h3 class="block__title">外观</h3>
-
-        <div class="row">
-          <div class="row__text">
-            <span class="row__label">主题</span>
-            <span class="row__hint">跟随系统时会随系统切换实时变化。</span>
-          </div>
-          <el-radio-group
-            :model-value="store.settings.theme"
-            size="small"
-            @pointerdown="rememberThemeOrigin"
-            @update:model-value="(value: unknown) => changeTheme(value as ThemeSource)"
-          >
-            <el-radio-button v-for="t in themes" :key="t.value" :value="t.value">
-              {{ t.label }}
-            </el-radio-button>
-          </el-radio-group>
-        </div>
-
-        <div class="row">
-          <div class="row__text">
-            <span class="row__label">主题色</span>
-            <span class="row__hint">用在开关、选中、聚焦环与主按钮上；留空是界面原本的中性灰。</span>
-          </div>
-          <div class="slider">
-            <el-color-picker
-              :model-value="store.settings.accentColor || null"
-              size="small"
-              :predefine="accentPresets"
-              @change="(value: unknown) => void store.setAccentColor(String(value ?? ''))"
-            />
-            <span class="accent__value mono">{{ accentLabel }}</span>
-            <el-button
-              link
-              size="small"
-              :disabled="!store.settings.accentColor"
-              @click="store.setAccentColor('')"
-            >
-              恢复默认
-            </el-button>
-          </div>
-        </div>
-
-        <div class="row">
-          <div class="row__text">
-            <span class="row__label">主题色文字</span>
-            <span class="row__hint">
-              铺在主题色上的那层字（主按钮、选中的胶囊、单选按钮）。自动按主题色的深浅挑：
-              底色深用白字、底色浅用黑字；也可以手动钉死一种（还没设主题色时先存着，看不出效果）。
-            </span>
-          </div>
-          <el-radio-group
-            class="style-pick"
-            :model-value="store.settings.accentInk"
-            size="small"
-            @update:model-value="(value: unknown) => void store.setAccentInk(value as AccentInkMode)"
-          >
-            <el-radio-button v-for="m in accentInkModes" :key="m.value" :value="m.value">
-              {{ m.label }}
-            </el-radio-button>
-          </el-radio-group>
-        </div>
-
-        <div class="row row--stack">
-          <div class="row__text">
-            <span class="row__label">工作区背景</span>
-          </div>
-
-          <div class="bg">
-            <div class="bg__preview" :title="backgroundTitle">
-              <img v-if="store.backgroundImage" :src="store.backgroundImage" alt="工作区背景预览" />
-              <span v-else class="bg__empty">{{ backgroundHint }}</span>
+      <!-- 内容区只是过道；每个 pane 自己滚，切屏时各留各的位置 -->
+      <div class="settings__body">
+        <!-- 外观：主题、背景、顶部样式，以及首页画布的布局 -->
+        <section v-show="activeTab === 'appearance'" class="pane">
+          <!-- 这一组就是导航项本身，不再另起小标题 -->
+          <div class="block">
+            <div class="row">
+              <div class="row__text">
+                <span class="row__label">主题</span>
+                <span class="row__hint">跟随系统时会随系统切换实时变化。</span>
+              </div>
+              <el-radio-group
+                :model-value="store.settings.theme"
+                size="small"
+                @pointerdown="rememberThemeOrigin"
+                @update:model-value="(value: unknown) => changeTheme(value as ThemeSource)"
+              >
+                <el-radio-button v-for="t in themes" :key="t.value" :value="t.value">
+                  {{ t.label }}
+                </el-radio-button>
+              </el-radio-group>
             </div>
 
-            <div class="bg__body">
-              <div class="slider">
-                <span class="bg__label">浓淡</span>
-                <el-slider
-                  :model-value="store.backgroundOpacity"
-                  :min="BACKGROUND_OPACITY_MIN"
-                  :max="BACKGROUND_OPACITY_MAX"
-                  :step="5"
-                  :show-tooltip="false"
-                  size="small"
-                  :disabled="!store.settings.workspaceBackground"
-                  @input="(value: unknown) => (store.backgroundOpacity = Number(value))"
-                  @change="(value: unknown) => void store.setBackgroundOpacity(Number(value))"
-                />
-                <span class="slider__value mono">{{ store.backgroundOpacity }}%</span>
+            <div class="row">
+              <div class="row__text">
+                <span class="row__label">主题色</span>
+                <span class="row__hint">用在开关、选中、聚焦环与主按钮上；留空是界面原本的中性灰。</span>
               </div>
-
-              <!-- 蒙版色：图片渐淡进去的那个颜色；留空就跟着主题的画布色走 -->
               <div class="slider">
-                <span class="bg__label">渐淡色</span>
                 <el-color-picker
-                  :model-value="store.settings.workspaceBackgroundVeil || null"
+                  :model-value="store.settings.accentColor || null"
                   size="small"
-                  :predefine="VEIL_PRESETS"
-                  @change="(value: unknown) => void store.setBackgroundVeil(String(value ?? ''))"
+                  :predefine="accentPresets"
+                  @change="(value: unknown) => void store.setAccentColor(String(value ?? ''))"
                 />
-                <span class="bg__veil mono">{{ veilLabel }}</span>
+                <span class="accent__value mono">{{ accentLabel }}</span>
                 <el-button
                   link
                   size="small"
-                  :disabled="!store.settings.workspaceBackgroundVeil"
-                  @click="store.setBackgroundVeil('')"
+                  :disabled="!store.settings.accentColor"
+                  @click="store.setAccentColor('')"
                 >
-                  跟随主题
+                  恢复默认
                 </el-button>
               </div>
+            </div>
 
-              <p v-if="store.backgroundError" class="bg__error">{{ store.backgroundError }}</p>
+            <div class="row">
+              <div class="row__text">
+                <span class="row__label">主题色文字</span>
+                <span class="row__hint">
+                  铺在主题色上的那层字（主按钮、选中的胶囊、单选按钮）。自动按主题色的深浅挑：
+                  底色深用白字、底色浅用黑字；也可以手动钉死一种（还没设主题色时先存着，看不出效果）。
+                </span>
+              </div>
+              <el-radio-group
+                class="style-pick"
+                :model-value="store.settings.accentInk"
+                size="small"
+                @update:model-value="(value: unknown) => void store.setAccentInk(value as AccentInkMode)"
+              >
+                <el-radio-button v-for="m in accentInkModes" :key="m.value" :value="m.value">
+                  {{ m.label }}
+                </el-radio-button>
+              </el-radio-group>
+            </div>
+
+            <div class="row row--stack">
+              <div class="row__text">
+                <span class="row__label">工作区背景</span>
+              </div>
+
+              <div class="bg">
+                <div class="bg__preview" :title="backgroundTitle">
+                  <img v-if="store.backgroundImage" :src="store.backgroundImage" alt="工作区背景预览" />
+                  <span v-else class="bg__empty">{{ backgroundHint }}</span>
+                </div>
+
+                <div class="bg__body">
+                  <div class="slider">
+                    <span class="bg__label">浓淡</span>
+                    <el-slider
+                      :model-value="store.backgroundOpacity"
+                      :min="BACKGROUND_OPACITY_MIN"
+                      :max="BACKGROUND_OPACITY_MAX"
+                      :step="5"
+                      :show-tooltip="false"
+                      size="small"
+                      :disabled="!store.settings.workspaceBackground"
+                      @input="(value: unknown) => (store.backgroundOpacity = Number(value))"
+                      @change="(value: unknown) => void store.setBackgroundOpacity(Number(value))"
+                    />
+                    <span class="slider__value mono">{{ store.backgroundOpacity }}%</span>
+                  </div>
+
+                  <!-- 蒙版色：图片渐淡进去的那个颜色；留空就跟着主题的画布色走 -->
+                  <div class="slider">
+                    <span class="bg__label">渐淡色</span>
+                    <el-color-picker
+                      :model-value="store.settings.workspaceBackgroundVeil || null"
+                      size="small"
+                      :predefine="VEIL_PRESETS"
+                      @change="(value: unknown) => void store.setBackgroundVeil(String(value ?? ''))"
+                    />
+                    <span class="bg__veil mono">{{ veilLabel }}</span>
+                    <el-button
+                      link
+                      size="small"
+                      :disabled="!store.settings.workspaceBackgroundVeil"
+                      @click="store.setBackgroundVeil('')"
+                    >
+                      跟随主题
+                    </el-button>
+                  </div>
+
+                  <p v-if="store.backgroundError" class="bg__error">{{ store.backgroundError }}</p>
+                </div>
+              </div>
+
+              <!--
+                壁纸：摆出方格直接点选，选中即生效 —— 没有单独的「选择 / 清除」按钮。
+                每格都是「正方形图位 + 下方标签」，壁纸、本地入口、无背景三者形状完全一致。
+                内置的那几张引用 builtin:<id> 而不是安装路径（路径换个安装位置就失效了）；
+                「本地图片」是自选磁盘文件的入口，「无背景」相当于清除。
+                内置目录为空（老版本升级上来）时只少几块图，入口仍在。
+              -->
+              <div class="wallpapers">
+                <span v-if="store.wallpapers.length" class="bg__label">内置壁纸</span>
+
+                <div class="wallpapers__list">
+                  <button
+                    v-for="item in store.wallpapers"
+                    :key="item.reference"
+                    class="wallpaper"
+                    type="button"
+                    :class="{ 'is-active': store.settings.workspaceBackground === item.reference }"
+                    :title="item.name"
+                    @click="store.useWallpaper(item.reference)"
+                  >
+                    <span class="wallpaper__thumb">
+                      <img v-if="item.thumbnail" :src="item.thumbnail" alt="" />
+                      <span v-else class="wallpaper__name">读不出来</span>
+                    </span>
+                    <span class="wallpaper__name truncate">{{ item.id }}</span>
+                  </button>
+
+                  <button
+                    class="wallpaper wallpaper--local"
+                    type="button"
+                    :class="{ 'is-active': isLocalBackground }"
+                    :title="backgroundTitle"
+                    @click="store.pickBackground()"
+                  >
+                    <span class="wallpaper__thumb wallpaper__thumb--blank">
+                      <el-icon><Picture /></el-icon>
+                    </span>
+                    <span class="wallpaper__name truncate">本地图片</span>
+                  </button>
+
+                  <button
+                    class="wallpaper"
+                    type="button"
+                    :class="{ 'is-active': !store.settings.workspaceBackground }"
+                    title="恢复默认画布"
+                    @click="store.clearBackground()"
+                  >
+                    <span class="wallpaper__thumb wallpaper__thumb--blank">
+                      <el-icon><CircleClose /></el-icon>
+                    </span>
+                    <span class="wallpaper__name">无背景</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div class="row">
+              <div class="row__text">
+                <span class="row__label">顶部样式</span>
+                <span class="row__hint">正常＝实底，毛玻璃＝整块磨砂，透明＝全部透出壁纸。</span>
+              </div>
+              <el-radio-group
+                class="style-pick"
+                :model-value="store.settings.topBarStyle"
+                size="small"
+                @update:model-value="(value: unknown) => void store.setTopBarStyle(value as TopBarStyle)"
+              >
+                <el-radio-button v-for="s in topBarStyles" :key="s.value" :value="s.value">
+                  {{ s.label }}
+                </el-radio-button>
+              </el-radio-group>
+            </div>
+
+            <div class="row">
+              <div class="row__text">
+                <span class="row__label">卡片不透明度</span>
+                <span class="row__hint">
+                  首页卡片与项目卡底色的浓度：越小越透，背景图（或画布）从卡片底下透出来；
+                  只动底色，边框、阴影与文字不受影响，100% 是原本的实底。
+                </span>
+              </div>
+              <div class="slider card-slider">
+                <el-slider
+                  :model-value="store.cardOpacity"
+                  :min="CARD_OPACITY_MIN"
+                  :max="CARD_OPACITY_MAX"
+                  :step="5"
+                  :show-tooltip="false"
+                  size="small"
+                  @input="(value: unknown) => (store.cardOpacity = Number(value))"
+                  @change="(value: unknown) => void store.setCardOpacity(Number(value))"
+                />
+                <span class="slider__value mono">{{ store.cardOpacity }}%</span>
+              </div>
             </div>
           </div>
 
-          <!--
-            壁纸：摆出方格直接点选，选中即生效 —— 没有单独的「选择 / 清除」按钮。
-            每格都是「正方形图位 + 下方标签」，壁纸、本地入口、无背景三者形状完全一致。
-            内置的那几张引用 builtin:<id> 而不是安装路径（路径换个安装位置就失效了）；
-            「本地图片」是自选磁盘文件的入口，「无背景」相当于清除。
-            内置目录为空（老版本升级上来）时只少几块图，入口仍在。
-          -->
-          <div class="wallpapers">
-            <span v-if="store.wallpapers.length" class="bg__label">内置壁纸</span>
+          <div class="block">
+            <h3 class="block__title">首页布局</h3>
 
-            <div class="wallpapers__list">
-              <button
-                v-for="item in store.wallpapers"
-                :key="item.reference"
-                class="wallpaper"
-                type="button"
-                :class="{ 'is-active': store.settings.workspaceBackground === item.reference }"
-                :title="item.name"
-                @click="store.useWallpaper(item.reference)"
-              >
-                <span class="wallpaper__thumb">
-                  <img v-if="item.thumbnail" :src="item.thumbnail" alt="" />
-                  <span v-else class="wallpaper__name">读不出来</span>
+            <div class="row">
+              <div class="row__text">
+                <span class="row__label">布局调整</span>
+                <span class="row__hint">
+                  进入编辑模式后：拖动卡片可以在左中右三栏之间移动、调整栏内顺序；拖卡片下沿改高度；
+                  拖两栏之间的竖线改左右栏宽度（中栏自动占满剩余宽度）。没有卡片的栏平时不显示，
+                  编辑时会全部摆出来。布局单独保存在 theme.json 里，不跟项目数据混在一起。
                 </span>
-                <span class="wallpaper__name truncate">{{ item.id }}</span>
-              </button>
+              </div>
+              <el-button size="small" :icon="Rank" @click="enterLayoutEdit">进入编辑</el-button>
+            </div>
 
-              <button
-                class="wallpaper wallpaper--local"
-                type="button"
-                :class="{ 'is-active': isLocalBackground }"
-                :title="backgroundTitle"
-                @click="store.pickBackground()"
-              >
-                <span class="wallpaper__thumb wallpaper__thumb--blank">
-                  <el-icon><Picture /></el-icon>
-                </span>
-                <span class="wallpaper__name truncate">本地图片</span>
-              </button>
+            <div class="row">
+              <div class="row__text">
+                <span class="row__label">拖动步进</span>
+                <span class="row__hint">位置与尺寸按这个像素网格吸附，越小越精细。</span>
+              </div>
+              <el-input-number
+                class="number-input"
+                :model-value="store.gridStep"
+                :min="GRID_STEP_MIN"
+                :max="GRID_STEP_MAX"
+                :step="1"
+                size="small"
+                controls-position="right"
+                @change="changeGridStep"
+              />
+            </div>
 
-              <button
-                class="wallpaper"
-                type="button"
-                :class="{ 'is-active': !store.settings.workspaceBackground }"
-                title="恢复默认画布"
-                @click="store.clearBackground()"
-              >
-                <span class="wallpaper__thumb wallpaper__thumb--blank">
-                  <el-icon><CircleClose /></el-icon>
+            <div class="row">
+              <div class="row__text">
+                <span class="row__label">卡片间距</span>
+                <span class="row__hint">
+                  卡片之间的留白（px）：三栏之间、同栏卡片之间、项目列表里的项目卡之间，以及页面四周的留白都用它。0 表示紧贴。
                 </span>
-                <span class="wallpaper__name">无背景</span>
-              </button>
+              </div>
+              <el-input-number
+                class="number-input"
+                :model-value="store.cardGap"
+                :min="CARD_GAP_MIN"
+                :max="CARD_GAP_MAX"
+                :step="1"
+                size="small"
+                controls-position="right"
+                @change="changeCardGap"
+              />
             </div>
           </div>
-        </div>
+        </section>
 
-        <div class="row">
-          <div class="row__text">
-            <span class="row__label">顶部样式</span>
-            <span class="row__hint">正常＝实底，毛玻璃＝整块磨砂，透明＝全部透出壁纸。</span>
+        <!-- 通用：程序本身、窗口与托盘、启动退出、数据目录与 Token 同步 -->
+        <section v-show="activeTab === 'general'" class="pane">
+          <div class="block">
+            <h3 class="block__title">程序</h3>
+
+            <div class="row">
+              <div class="row__text">
+                <span class="row__label">程序名称</span>
+                <span class="row__hint">
+                  显示在标题栏、托盘提示与窗口标题上的名字。留空恢复为 {{ APP_NAME_DEFAULT }}，最多
+                  {{ APP_NAME_MAX_LENGTH }} 个字符；输入后失焦或按回车生效。
+                </span>
+              </div>
+              <el-input
+                v-model="appNameDraft"
+                class="name-input"
+                size="small"
+                :maxlength="APP_NAME_MAX_LENGTH"
+                spellcheck="false"
+                :placeholder="APP_NAME_DEFAULT"
+                @change="commitAppName"
+              />
+            </div>
           </div>
-          <el-radio-group
-            class="style-pick"
-            :model-value="store.settings.topBarStyle"
-            size="small"
-            @update:model-value="(value: unknown) => void store.setTopBarStyle(value as TopBarStyle)"
-          >
-            <el-radio-button v-for="s in topBarStyles" :key="s.value" :value="s.value">
-              {{ s.label }}
-            </el-radio-button>
-          </el-radio-group>
-        </div>
-        <div class="row">
-          <div class="row__text">
-            <span class="row__label">卡片不透明度</span>
-            <span class="row__hint">
-              首页卡片与项目卡底色的浓度：越小越透，背景图（或画布）从卡片底下透出来；
-              只动底色，边框、阴影与文字不受影响，100% 是原本的实底。
-            </span>
+
+          <div class="block">
+            <h3 class="block__title">窗口与托盘</h3>
+
+            <div class="row">
+              <div class="row__text">
+                <span class="row__label">全局快捷键</span>
+                <span class="row__hint">在任何窗口下唤起 / 隐藏 {{ store.settings.appName }}。</span>
+              </div>
+              <el-switch
+                :model-value="store.settings.hotkeyEnabled"
+                size="small"
+                @update:model-value="(value: unknown) => save({ hotkeyEnabled: Boolean(value) })"
+              />
+            </div>
+
+            <div class="row row--hotkey">
+              <button
+                class="hotkey"
+                :class="{ 'is-recording': recording }"
+                type="button"
+                :disabled="!store.settings.hotkeyEnabled"
+                @click="startRecording"
+                @keydown="recording && captureHotkey($event)"
+              >
+                <span v-if="recording" class="hotkey__recording">请按下新的组合键…</span>
+                <span v-else class="hotkey__value mono">{{ hotkeyLabel }}</span>
+              </button>
+              <span class="row__hint row__hint--tight">点击后直接按组合键即可替换（Esc 放弃需重开）</span>
+            </div>
           </div>
-          <div class="slider card-slider">
-            <el-slider
-              :model-value="store.cardOpacity"
-              :min="CARD_OPACITY_MIN"
-              :max="CARD_OPACITY_MAX"
-              :step="5"
-              :show-tooltip="false"
-              size="small"
-              @input="(value: unknown) => (store.cardOpacity = Number(value))"
-              @change="(value: unknown) => void store.setCardOpacity(Number(value))"
-            />
-            <span class="slider__value mono">{{ store.cardOpacity }}%</span>
+
+          <div class="block">
+            <h3 class="block__title">启动与退出</h3>
+
+            <div class="row">
+              <div class="row__text">
+                <span class="row__label">开机自启</span>
+                <span class="row__hint">
+                  {{ isPackaged ? '登录系统后自动在后台启动，只在托盘显示图标，点击图标即可打开界面。' : '开发模式下不会写入系统自启项。' }}
+                </span>
+              </div>
+              <el-switch
+                :model-value="store.settings.launchAtLogin"
+                size="small"
+                :disabled="!isPackaged"
+                @update:model-value="(value: unknown) => save({ launchAtLogin: Boolean(value) })"
+              />
+            </div>
           </div>
-        </div>
-      </section>
 
-      <!-- 首页布局 -->
-      <section class="block">
-        <h3 class="block__title">首页布局</h3>
+          <div class="block">
+            <h3 class="block__title">数据存储</h3>
 
-        <div class="row">
-          <div class="row__text">
-            <span class="row__label">布局调整</span>
-            <span class="row__hint">
-              进入编辑模式后：拖动卡片可以在左中右三栏之间移动、调整栏内顺序；拖卡片下沿改高度；
-              拖两栏之间的竖线改左右栏宽度（中栏自动占满剩余宽度）。没有卡片的栏平时不显示，
-              编辑时会全部摆出来。布局单独保存在 theme.json 里，不跟项目数据混在一起。
-            </span>
+            <div class="row row--stack">
+              <div class="row__text">
+                <span class="row__label">数据目录</span>
+                <span class="row__hint">
+                  {{ store.settings.appName }} 写的东西都放这个目录里，换位置会把当前数据整体搬过去；目标目录已有同名数据文件时会拒绝并提示。
+                </span>
+              </div>
+              <p class="path mono truncate" :title="store.dataLocation?.dir">
+                {{ store.dataLocation?.dir ?? '读取中…' }}
+              </p>
+              <div class="path__actions">
+                <el-button size="small" :icon="FolderOpened" @click="store.changeDataDir()">
+                  更改目录
+                </el-button>
+                <span class="row__hint row__hint--tight">
+                  {{ store.dataLocation?.isDefault ? '当前是默认目录（应用数据目录）' : '数据文件：workbench-data.json' }}
+                </span>
+              </div>
+            </div>
           </div>
-          <el-button size="small" :icon="Rank" @click="enterLayoutEdit">进入编辑</el-button>
-        </div>
 
-        <div class="row">
-          <div class="row__text">
-            <span class="row__label">拖动步进</span>
-            <span class="row__hint">位置与尺寸按这个像素网格吸附，越小越精细。</span>
+          <div class="block">
+            <h3 class="block__title">账号</h3>
+
+            <div class="row">
+              <div class="row__text">
+                <span class="row__label">登录状态</span>
+                <span class="row__hint">
+                  用一个已有的 GitHub / Gitee 账号登录，用来授权 Token 同步的私有仓库，
+                  省掉事先在命令行里给 git 配一次凭据。不登录也能照常用，同步会退回系统 git 凭据。
+                </span>
+              </div>
+              <el-button size="small" @click="accountVisible = true">
+                {{ account ? accountLabel(account) : '登录…' }}
+              </el-button>
+            </div>
+
+            <div v-if="account" class="row">
+              <div class="row__text">
+                <span class="row__label">用这个账号授权同步</span>
+                <span class="row__hint">
+                  关掉就继续用系统里 git 自己配好的凭据。这条退路值得留着 ——
+                  账号的 token 会过期、会被撤销，那种时候它还能让同步照常跑。
+                </span>
+              </div>
+              <el-switch
+                :model-value="store.settings.useAccountForSync"
+                @update:model-value="setUseAccountForSync"
+              />
+            </div>
           </div>
-          <el-input-number
-            class="number-input"
-            :model-value="store.gridStep"
-            :min="GRID_STEP_MIN"
-            :max="GRID_STEP_MAX"
-            :step="1"
-            size="small"
-            controls-position="right"
-            @change="changeGridStep"
-          />
-        </div>
 
-        <div class="row">
-          <div class="row__text">
-            <span class="row__label">卡片间距</span>
-            <span class="row__hint">
-              卡片之间的留白（px）：三栏之间、同栏卡片之间、项目列表里的项目卡之间，以及页面四周的留白都用它。0 表示紧贴。
-            </span>
+          <div class="block">
+            <h3 class="block__title">Token 同步</h3>
+
+            <div class="row row--stack">
+              <div class="row__text">
+                <span class="row__label">同步仓库</span>
+                <span class="row__hint">
+                  仓库里一台机器两个文件：<span class="mono">token-usage/</span> 是用量分片、<span class="mono">config/</span> 是外观配置，
+                  文件名都是设备 id，所以永远不会互相覆盖。
+                  填 git 仓库地址（HTTPS / SSH 都行，建议用私有仓库），留空表示不同步；输入后失焦或按回车生效。
+                  上面的账号登录过、且授权开关没关，就优先用那个账号的 token 推送；否则走系统里 git
+                  已经配好的凭据，首次同步若弹出登录窗口，那是 git 在向你要授权。
+                </span>
+              </div>
+              <el-input
+                v-model="syncRepoDraft"
+                size="small"
+                spellcheck="false"
+                placeholder="git@github.com:you/workbench-token.git"
+                @change="commitSyncRepo"
+              />
+              <span class="row__hint row__hint--tight">
+                填完到首页「Token 用量」卡片上点一下同步按钮即可立刻同步一次；之后每台机器在后台自动同步。
+              </span>
+            </div>
+
+            <div class="row">
+              <div class="row__text">
+                <span class="row__label">同步外观配置</span>
+                <span class="row__hint">
+                  把本机的 theme.json 整份推上去（<span class="mono">config/&lt;设备id&gt;.json</span>）：
+                  明暗、主题色、顶部样式、卡片不透明度、终端高度、程序名称、工作区背景与首页布局。
+                  关掉之后下一轮同步会把仓库里自己那份删掉 —— 只同步用量数字的话就关掉它。
+                </span>
+              </div>
+              <el-switch
+                :model-value="store.settings.syncAppearance"
+                @update:model-value="setSyncAppearance"
+              />
+            </div>
+
+            <!-- 别台机器的外观：列表来自上一次同步取回的仓库快照，「应用」是唯一的采用入口 -->
+            <div v-if="store.settings.tokenSyncRepo" class="row row--stack">
+              <div class="row__text">
+                <span class="row__label">从别的机器取外观</span>
+                <span class="row__hint">
+                  列表是上一次同步取回来的样子（只读仓库里的文件，不改动别人的东西）。
+                  「应用」会把本机的 theme.json 整份换成那一套（外观 + 首页布局）；
+                  本机自己那份仍留在仓库里，随时能再取回来。项目列表、快捷启动、快捷键、
+                  开机自启与同步仓库地址不在同步范围内。
+                </span>
+              </div>
+
+              <div class="devices">
+                <div v-for="device in store.syncDevices" :key="device.id" class="device">
+                  <span class="device__name truncate" :title="device.name">{{ device.name }}</span>
+                  <span class="device__time">{{ deviceUpdatedText(device) }}</span>
+                  <el-button
+                    size="small"
+                    :disabled="!device.theme"
+                    @click="applyAppearance(device)"
+                  >
+                    应用
+                  </el-button>
+                </div>
+
+                <span v-if="!store.syncDevices.length" class="row__hint">
+                  还没取到别的机器：在另一台机器上填好同一个仓库并同步一次，回来点下面的「同步一次」即可。
+                </span>
+              </div>
+
+              <div class="path__actions">
+                <el-button size="small" :loading="syncing" @click="syncNow">同步一次</el-button>
+                <span class="row__hint row__hint--tight">
+                  推一次本机那两个文件，并把其余机器最新的取回来。
+                </span>
+              </div>
+            </div>
           </div>
-          <el-input-number
-            class="number-input"
-            :model-value="store.cardGap"
-            :min="CARD_GAP_MIN"
-            :max="CARD_GAP_MAX"
-            :step="1"
-            size="small"
-            controls-position="right"
-            @change="changeCardGap"
-          />
-        </div>
-      </section>
-
-      <!-- 窗口与托盘 -->
-      <section class="block">
-        <h3 class="block__title">窗口与托盘</h3>
-
-        <div class="row">
-          <div class="row__text">
-            <span class="row__label">全局快捷键</span>
-            <span class="row__hint">在任何窗口下唤起 / 隐藏 {{ store.settings.appName }}。</span>
-          </div>
-          <el-switch
-            :model-value="store.settings.hotkeyEnabled"
-            size="small"
-            @update:model-value="(value: unknown) => save({ hotkeyEnabled: Boolean(value) })"
-          />
-        </div>
-
-        <div class="row row--hotkey">
-          <button
-            class="hotkey"
-            :class="{ 'is-recording': recording }"
-            type="button"
-            :disabled="!store.settings.hotkeyEnabled"
-            @click="startRecording"
-            @keydown="recording && captureHotkey($event)"
-          >
-            <span v-if="recording" class="hotkey__recording">请按下新的组合键…</span>
-            <span v-else class="hotkey__value mono">{{ hotkeyLabel }}</span>
-          </button>
-          <span class="row__hint row__hint--tight">点击后直接按组合键即可替换（Esc 放弃需重开）</span>
-        </div>
-      </section>
-
-      <!-- 启动与退出 -->
-      <section class="block">
-        <h3 class="block__title">启动与退出</h3>
-
-        <div class="row">
-          <div class="row__text">
-            <span class="row__label">开机自启</span>
-            <span class="row__hint">
-              {{ isPackaged ? '登录系统后自动在后台启动，只在托盘显示图标，点击图标即可打开界面。' : '开发模式下不会写入系统自启项。' }}
-            </span>
-          </div>
-          <el-switch
-            :model-value="store.settings.launchAtLogin"
-            size="small"
-            :disabled="!isPackaged"
-            @update:model-value="(value: unknown) => save({ launchAtLogin: Boolean(value) })"
-          />
-        </div>
-      </section>
-
-      <!-- 数据存储 -->
-      <section class="block">
-        <h3 class="block__title">数据存储</h3>
-
-        <div class="row row--stack">
-          <div class="row__text">
-            <span class="row__label">数据目录</span>
-            <span class="row__hint">
-              {{ store.settings.appName }} 写的东西都放这个目录里，换位置会把当前数据整体搬过去；目标目录已有同名数据文件时会拒绝并提示。
-            </span>
-          </div>
-          <p class="path mono truncate" :title="store.dataLocation?.dir">
-            {{ store.dataLocation?.dir ?? '读取中…' }}
-          </p>
-          <div class="path__actions">
-            <el-button size="small" :icon="FolderOpened" @click="store.changeDataDir()">
-              更改目录
-            </el-button>
-            <span class="row__hint row__hint--tight">
-              {{ store.dataLocation?.isDefault ? '当前是默认目录（应用数据目录）' : '数据文件：workbench-data.json' }}
-            </span>
-          </div>
-        </div>
-      </section>
-
-      <!-- Token 同步 -->
-      <section class="block">
-        <h3 class="block__title">Token 同步</h3>
-
-        <div class="row row--stack">
-          <div class="row__text">
-            <span class="row__label">同步仓库</span>
-            <span class="row__hint">
-              多台机器各写一份自己的分片、读的时候合并成一份 —— 一个设备一个文件，所以永远不会互相覆盖。
-              填 git 仓库地址（HTTPS / SSH 都行，建议用私有仓库），留空表示不同步；输入后失焦或按回车生效。
-              提交走系统里 git 已经配好的凭据，{{
-                store.settings.appName
-              }} 自己不保存任何令牌，首次同步若弹出登录窗口，那是 git 在向你要授权。
-            </span>
-          </div>
-          <el-input
-            v-model="syncRepoDraft"
-            size="small"
-            spellcheck="false"
-            placeholder="git@github.com:you/workbench-token.git"
-            @change="commitSyncRepo"
-          />
-          <span class="row__hint row__hint--tight">
-            填完到首页「Token 用量」卡片上点一下同步按钮即可立刻同步一次；之后每台机器在后台自动同步。
-          </span>
-        </div>
-      </section>
+        </section>
+      </div>
     </div>
-
-    <template #footer>
-      <el-button @click="visible = false">完成</el-button>
-    </template>
   </el-dialog>
+
+  <AccountDialog v-model="accountVisible" />
 </template>
 
 <style scoped>
+/**
+ * 两栏骨架：左侧菜单定宽、不滚动，右侧内容自己滚。
+ * 正文是 flex 容器（见 global.css 的 .el-dialog__body.settings-body），这里撑满它，
+ * 两栏就都拿到了确定的高度 —— 右侧内容区能滚、左侧菜单也不会漏出弹窗。
+ */
 .settings {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+}
+
+.settings__nav {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 148px;
+  padding: var(--sp-3) var(--sp-3) var(--sp-4);
+  border-right: 1px solid var(--border);
+}
+
+/**
+ * 菜单项：一块能点中的文字，选中时落一层灰底（界面主体灰度，彩色只留给运行状态）。
+ * button 只继承到 font-family，字号得自己给，否则会退回浏览器默认的 13.33px。
+ */
+.nav-item {
+  padding: 7px 10px;
+  border: none;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--ink-2);
+  font-size: var(--fs-body);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.nav-item:hover {
+  background: var(--bg-inset);
+  color: var(--ink);
+}
+
+.nav-item.is-active {
+  background: var(--bg-selected);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/* 内容区只是个过道：自己不留内边距、也不滚，两件事都下放给每一屏（见 .pane） */
+.settings__body {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+}
+
+/**
+ * 每一屏自己滚。
+ *
+ * 不能两屏共用一个滚动容器：那样滚动条长度与位置都是共享的 —— 在外观滚到底再切到通用，
+ * 通用会停在它自己的底部；切回外观时位置也回不到原处（浏览器把越界的值截到新内容的上限后就不动了）。
+ * 各滚各的之后，每一屏有自己的滚动区间与位置，互不干扰。
+ */
+.pane {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  padding: var(--sp-4) var(--sp-5) var(--sp-5);
+  overflow-y: auto;
+  /* 两屏各自成列，间距与原来「每个块之间 20px」保持一致 */
   display: flex;
   flex-direction: column;
   gap: var(--sp-5);
@@ -772,10 +1040,10 @@ watch(visible, (open) => {
 }
 
 /**
- * 弹窗正文是滚动容器（overflow-y: auto），横向裁剪边界落在正文自己的 padding box 上；
- * 而 16px 内边距在外层的 .el-dialog 上、不在正文身上，所以正文左边缘就是裁剪线。
- * 滑块的圆形手柄在两端会探出跑道半个身位，最小值时左半边正好被这条线裁掉。
- * 给滑块留出略大于半只手柄（含 hover 放大的 1.2 倍）的横向内边距即可。
+ * 滑块的圆形手柄在两端会探出跑道半个身位（hover 时还要放大 1.2 倍），
+ * 留一圈横向内边距当缓冲，免得它被滚动容器的裁剪边界切掉半个圆。
+ * 现在这套内边距之外还有右侧内容区自己的 20px 内边距兜着，看起来比需要的宽 —— 别顺手去掉，
+ * 那是两层保护里的一层，去掉后一旦内容区贴边，最小值处的手柄就又会被切。
  */
 .slider :deep(.el-slider) {
   flex: 1;
@@ -903,8 +1171,12 @@ watch(visible, (open) => {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  /* 72px × 6 格（4 张内置 + 本地图片 + 无背景）在 760px 弹窗里只占左半，右边留白；再加图才会换行 */
-  width: 72px;
+  /*
+   * 68px × 9 格（7 张内置 + 本地图片 + 无背景）在正文里排成一行，右边还留一点白；
+   * 再加图或把弹窗收窄就会换行。算式（弹窗 920）：正文 = 920 − 弹窗左右内边距 32 −
+   * 菜单 148 − 分隔线 1 − 正文左右内边距 40 − 滚动条 10 = 689，9 格需要 9×68 + 8×8 = 676。
+   */
+  width: 68px;
   padding: 4px;
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
@@ -992,5 +1264,36 @@ watch(visible, (open) => {
   display: flex;
   align-items: center;
   gap: var(--sp-3);
+}
+
+/* ---------- 同步设备（从别的机器取外观） ---------- */
+.devices {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+/* 一行 = 机器名 + 那份配置的时间 + 一颗按钮；外壳与数据目录那条路径同一副形状 */
+.device {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg-subtle);
+}
+
+.device__name {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-meta);
+  color: var(--ink);
+}
+
+.device__time {
+  flex-shrink: 0;
+  font-size: var(--fs-micro);
+  color: var(--ink-3);
 }
 </style>

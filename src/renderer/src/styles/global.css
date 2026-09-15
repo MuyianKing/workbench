@@ -376,19 +376,23 @@ body.is-resizing-terminal * {
   font-size: var(--fs-micro);
 }
 
-/* ---------- 顶部三条栏的样式 ---------- */
+/* ---------- 顶部两条栏的样式 ---------- */
 
 /**
- * 工作区背景铺满整个窗口（见 App.vue 的 .app），标题栏 / 搜索栏 / 筛选栏这三条浮在它上面。
- * 三条栏在 App.vue 里包成一块 .topbar，所以「毛玻璃」这一档是把玻璃画在容器上：
+ * 工作区背景铺满整个窗口（见 App.vue 的 .app），顶部两条栏（标题栏 / 搜索栏）浮在它上面。
+ * 两条栏在 App.vue 里包成一块 .topbar，所以「毛玻璃」这一档是把玻璃画在容器上：
  * 逐行各画一遍的话，每行都会各自渐一遍、各自叠一层，行与行之间就露出接缝了。
+ * 导航栏不在这一块里（它是顶栏下沿的一张卡片，见 NavRail.vue），所以不受这三档影响。
  *
- *   band  「正常」：不透明的工具条 —— 标题栏与搜索栏取面底色、筛选栏取画布色，壁纸从画布才开始
+ *   band  「正常」：不透明的工具条 —— 两条栏取面底色，壁纸从画布才开始
  *   glass 「毛玻璃」：整块磨砂，壁纸隔着玻璃仍铺到窗口顶边
- *   clear 「透明」：三条全透，壁纸一路透到窗口顶边
+ *   clear 「透明」：两条全透，壁纸一路透到窗口顶边
  *
  * 毛玻璃的底色取「渐淡色」（--ws-veil-rgb，亮暗两套主题各一份），
  * 写死白色在暗色下会糊成一块亮灰。
+ *
+ * 项目页那条筛选工具带（.filter）跟着同一套走：原先它在顶部带里，后来随项目卡一起
+ * 挪进了页面，但看起来还是原来那条带子（band 取画布色、另两档全透）。
  */
 
 /* ---------- band：不透明的工具条 ---------- */
@@ -434,25 +438,13 @@ body.is-resizing-terminal * {
     0 10px 20px -16px rgba(17, 21, 27, 0.45);
 }
 
-/* ---------- clear：三条全透明 ---------- */
+/* ---------- clear：两条全透明 ---------- */
 
 .app.top-clear .titlebar,
 .app.top-clear .header,
 .app.top-clear .filter {
   background: transparent;
   border-bottom-color: transparent;
-}
-
-/**
- * 布局编辑态：这一行整条铺一层主题色的淡底（见 FilterBar 的 .filter.is-editing）。
- *
- * 上面两条把这两档的筛选栏置成了透明，编辑态要在这里补回那层淡色 —— 但得往透明里调，
- * 壁纸才能照旧从这条带上透上来（band 那一档是不透明的工具栏，壁纸本来就到不了那儿，
- * 所以它的淡底由组件自己混在画布色里）。
- */
-.app.top-glass .filter.is-editing,
-.app.top-clear .filter.is-editing {
-  background: color-mix(in srgb, var(--el-color-primary) 12%, transparent);
 }
 
 /* ---------- 壁纸上的控件（glass / clear 两档才需要） ---------- */
@@ -641,6 +633,45 @@ body.is-resizing-terminal * {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+}
+
+/**
+ * 设置弹窗（components/SettingsDialog.vue 上的 class，正文另挂 body-class）：固定高度 + 两栏正文。
+ *
+ * 高度必须是个确定值。正文里的两栏靠 flex 撑满正文，而正文的高度是「弹窗定高 − 头 − 脚」算出来的；
+ * 若让弹窗按内容自动定高（只给 max-height），正文高度就成了内容反推的结果，
+ * 右侧内容区拿不到滚动所需的高度，超出的部分会被 overflow: hidden 整块裁掉、滚都滚不到。
+ * 上界跟着窗口走：窗口压到最小时弹窗跟着矮下去，而不是顶出可视区。
+ */
+.el-dialog.settings-dialog {
+  height: min(700px, calc(100vh - var(--h-titlebar) - 48px));
+}
+
+/**
+ * 内边距由两栏各自负责，所以清零；overflow 也要收掉：正文自己滚的话两栏会连左侧菜单一起滚走，
+ * 改成由右侧内容区独立滚动，菜单不再随内容长短上下跑。
+ * 类落在 EP 自己生成的元素上，scoped 样式够不着，所以放全局。
+ */
+.el-dialog__body.settings-body {
+  display: flex;
+  padding: 0;
+  overflow: hidden;
+}
+
+/**
+ * 账号弹窗：内容短，而且**没有页脚**（关闭靠右上角的 ×）。
+ *
+ * EP 的默认正文内边距是按「下面还有一个按钮行」留的，照搬过来底部会空出一大块，
+ * 内容看着像没对齐。这里把头和正文的内边距按实际结构定死：标题与内容之间收一点，
+ * 底部留一档与左右一致的白，弹窗四边才是均匀的。
+ */
+.el-dialog.account-dialog .el-dialog__header {
+  padding: var(--sp-5) var(--sp-5) var(--sp-3);
+  margin-right: 0;
+}
+
+.el-dialog.account-dialog .el-dialog__body {
+  padding: 0 var(--sp-5) var(--sp-5);
 }
 
 /**

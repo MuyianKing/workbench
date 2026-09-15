@@ -24,7 +24,7 @@ use crate::store::JsonStore;
 use crate::system;
 use crate::token;
 
-/// 主数据 / 首页布局 / token 快照各一份去抖存储
+/// 主数据 / 主题文件 / 用量快照各一份去抖存储
 static DATA: OnceLock<JsonStore> = OnceLock::new();
 static THEME: OnceLock<JsonStore> = OnceLock::new();
 static TOKEN: OnceLock<JsonStore> = OnceLock::new();
@@ -34,7 +34,7 @@ pub fn data_store() -> &'static JsonStore {
 }
 
 pub fn theme_store() -> &'static JsonStore {
-    THEME.get_or_init(|| JsonStore::new(paths::theme_file, "保存首页布局"))
+    THEME.get_or_init(|| JsonStore::new(paths::theme_file, "保存主题与外观"))
 }
 
 pub fn token_store() -> &'static JsonStore {
@@ -43,6 +43,8 @@ pub fn token_store() -> &'static JsonStore {
 
 /// 启动时载入三份数据（原始 JSON；收敛由 TS 侧负责）
 pub fn load_all() {
+    // 先做一次性的文件改名：必须早于 token_store().load()，否则会先按新名字读到空文件
+    paths::migrate_legacy_files();
     data_store().load();
     theme_store().load();
     token_store().load();
@@ -113,8 +115,9 @@ pub fn data_file_exists_in(dir: String) -> bool {
 /// 迁移数据目录要真搬文件，不能挡在主线程上
 #[tauri::command(async)]
 pub fn data_migrate(dir: String) -> Result<(), String> {
-    // 先把当前内存态同步落盘，迁移走的才是最新数据
+    // 先把当前内存态同步落盘，迁移走的才是最新数据（主题文件也在搬运行列里）
     data_store().flush_sync();
+    theme_store().flush_sync();
     token_store().flush_sync();
     paths::migrate_data_dir(&dir, &data_store().get())
 }
@@ -192,17 +195,71 @@ pub fn token_workbuddy_sessions() -> Result<Value, String> {
     token::workbuddy_session_files()
 }
 
-/// 把本机分片写进同步仓库并推送；返回 `{ changed, pushed, log }`
+/// 把本机那两个文件（用量快照 + 主题配置）写进同步仓库并推送；返回 `{ changed, pushed, log }`。
+///
+/// `config` 为 null 表示这次不同步配置（设置里的开关关着），仓库里自己那份会被删掉。
+/// `use_account` 由渲染层按设置传进来：为真时用已登录账号的 token 授权（见 oauth::git_envs），
+/// 为假就照旧走系统里 git 自己配好的凭据。
 #[tauri::command(async)]
-pub fn token_sync_publish(repo: String, device: String, shard: Value) -> Result<Value, String> {
-    crate::sync::publish(&repo, &device, &shard)
+pub fn token_sync_publish(
+    repo: String,
+    device: String,
+    shard: Value,
+    config: Option<Value>,
+    use_account: bool,
+) -> Result<Value, String> {
+    crate::sync::publish(&repo, &device, &shard, config.as_ref(), use_account)
 }
 
-/// 读同步仓库里各台机器的分片（原始 JSON，收敛与合并由渲染层负责）。
-/// 带上仓库地址：克隆指向的不是这个仓库时返回空表，免得把老仓库的分片当成最新的。
+/// 读同步仓库里各台机器的两个文件（原始 JSON，收敛与合并由渲染层负责）。
+/// 带上仓库地址：克隆指向的不是这个仓库时返回空表，免得把老仓库的东西当成最新的。
 #[tauri::command(async)]
-pub fn token_sync_shards(repo: String) -> Result<Vec<Value>, String> {
+pub fn token_sync_shards(repo: String) -> Result<crate::sync::SyncFiles, String> {
     crate::sync::read_shards(&repo)
+}
+
+// ---------- 账号 ----------
+
+/// 登录状态：能不能登录（是否内置了凭据）、回环地址、已登录哪些 provider。
+/// **不含任何 token** —— token 只在 Rust 侧流转（见 oauth.rs）。
+#[tauri::command]
+pub fn auth_status() -> Value {
+    crate::oauth::status()
+}
+
+/// 重新拉一次账号信息（启动时刷新头像与昵称）
+#[tauri::command(async)]
+pub fn auth_refresh_account(provider: String) -> Result<Value, String> {
+    crate::oauth::refresh_account(&provider)
+}
+
+/// 起一次登录：起回环监听、拼授权页地址。拿到地址后由渲染层交给 `open_external` 打开
+#[tauri::command(async)]
+pub fn auth_login_start(provider: String) -> Result<Value, String> {
+    crate::oauth::login_start(&provider)
+}
+
+/// 收一次回调。**非阻塞**：还没等到就返回 `{ status: "pending" }`，轮询节奏由渲染层控制
+/// （这样命令不会占着工作线程等五分钟，取消也能立刻生效）。
+#[tauri::command(async)]
+pub fn auth_login_poll() -> Value {
+    crate::oauth::login_poll()
+}
+
+/// 手动兜底：回调没跳回来时，把用户粘贴的整条回调地址直接交上来
+#[tauri::command(async)]
+pub fn auth_login_submit(url: String) -> Value {
+    crate::oauth::login_submit(&url)
+}
+
+#[tauri::command]
+pub fn auth_login_cancel() {
+    crate::oauth::login_cancel()
+}
+
+#[tauri::command(async)]
+pub fn auth_logout(provider: String) -> Result<(), String> {
+    crate::oauth::logout(&provider)
 }
 
 // ---------- 系统能力 ----------

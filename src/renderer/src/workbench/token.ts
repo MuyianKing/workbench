@@ -12,7 +12,14 @@
  *
  * 同步是**节流**的：界面每 60 秒拉一次数据，但 git 只在间隔到点或用户手点时才动。
  * 没变化的分片不会产生提交 —— 时间戳只在计数真的变了之后才刷新，否则开着应用就会
- * 每 10 分钟往仓库里堆一个「什么都没改」的提交。
+ * 每小时往仓库里堆一个「什么都没改」的提交。
+ *
+ * 同步也**不挡出数**：一轮同步里只有「推 + 拉」要联网，而「读回别人的分片」只碰本地克隆，
+ * 所以取数时先本地读一遍分片（首屏就带上别的机器），网络那一段丢到后台跑完再广播一次。
+ * 手点的同步按钮是例外 —— 它要等结果回来才能给出成功 / 失败的提示。
+ *
+ * 首屏还有一条更早的路：`getTokenUsageSnapshot` 只读本地那份快照（几毫秒），
+ * 让面板先把上次的数据摆出来，再被实读结果覆盖。它不实读、不落盘，只是一个先手。
  */
 import {
   CODEBUDDY_SOURCE_ID,
@@ -30,16 +37,25 @@ import {
   sanitizeSyncRepo,
   sumDays,
   type TokenCounters,
+  type TokenDataFile,
   type TokenDays,
   type TokenShard,
   type TokenSyncStatus,
   type TokenSourceSnapshot,
   type TokenUsageResult
 } from '@shared/token-usage'
+import {
+  captureThemeFile,
+  sanitizeThemeFile,
+  type SyncDeviceInfo,
+  type ThemeFile
+} from '@shared/sync-config'
 import { collectCodeBuddyLogText, createCodeBuddyParseState } from '@shared/codebuddy-log'
 import { collectDshSessionText } from '@shared/dsh-log'
 import { collectWorkBuddySessionText } from '@shared/workbuddy-log'
 import { invoke } from './bridge'
+import { emit } from './events'
+import * as state from './state'
 
 /** Rust 侧 `token_zcode_rows` 回来的行：SUM 在无数据时是 NULL，所以全部可空 */
 interface UsageRow {
@@ -339,8 +355,14 @@ async function localDevice(): Promise<{ id: string; name: string }> {
 
 // ---------- 同步 ----------
 
-/** 自动同步的间隔：面板每分钟刷新一次，只有偶尔那几次真的走网络 */
-const SYNC_INTERVAL_MS = 10 * 60_000
+/**
+ * 自动同步的间隔：面板每分钟刷新一次，一小时里只有到点的那一次真的走网络。
+ *
+ * 一小时是「推送」的节奏：分片内容只要变了就会推一次（没变不产生提交），
+ * 干活的时候十分钟一推会让仓库里堆出一串没有信息量的提交。
+ * 想让数据立刻出去就用手动同步按钮，它不受这个间隔限制。
+ */
+const SYNC_INTERVAL_MS = 60 * 60_000
 
 let lastSyncAt = 0
 /** 上次尝试同步用的仓库；设置里换了地址就立刻同步一次，不必等节流窗口过去 */
@@ -348,6 +370,10 @@ let lastSyncRepo = ''
 let lastSyncError = ''
 /** 别人的分片（已收敛）；两次同步之间照旧参与合计，面板不会因为没到同步点就少一块数据 */
 let remoteShards: TokenShard[] = []
+/** 别人的配置（`config/` 目录，按设备 id 配对）；与分片同一批读回来、同一个仓库 */
+let remoteConfigs: ThemeFile[] = []
+/** 上面那两份是从哪个仓库读回来的：换仓库要重读，同一个仓库不必每轮再读一遍 */
+let shardsRepo = ''
 
 /**
  * 同步串行化：面板轮询与手动同步可能正好撞上，
@@ -360,8 +386,105 @@ function enqueue(task: () => Promise<void>): Promise<void> {
   return inflight
 }
 
+/** Rust 侧 `token_sync_shards` 回来的形状：仓库里两个目录各一份（见 sync.rs 的 read_shards） */
+interface SyncFiles {
+  usage?: unknown
+  config?: unknown
+}
+
+/** 两个目录里的原始条目 → 收敛后的分片与配置（认不出来的整条丢掉，坏文件不拖垮面板） */
+function parseFiles(files: SyncFiles): { shards: TokenShard[]; configs: ThemeFile[] } {
+  const shards = (Array.isArray(files.usage) ? files.usage : []).map((item) => sanitizeShard(item))
+  const configs = (Array.isArray(files.config) ? files.config : [])
+    .map((item) => sanitizeThemeFile(item))
+    .filter((file): file is ThemeFile => file !== null)
+  return { shards, configs }
+}
+
 /**
- * 一轮完整同步：推本机分片 → 读回所有分片。
+ * 用量分片与配置文件按设备 id 配对，得到设置界面要的那份设备列表。
+ *
+ * 两个目录都要看：关掉外观同步的机器只有用量分片（或者反过来，只推过配置）。
+ * 时间取两份里较新的那个 —— 那才是「那台机器最后一次动过」。
+ */
+function pairDevices(shards: TokenShard[], configs: ThemeFile[]): SyncDeviceInfo[] {
+  const byDevice = new Map<string, SyncDeviceInfo>()
+
+  for (const shard of shards) {
+    byDevice.set(shard.device, {
+      id: shard.device,
+      name: shard.name || shard.device,
+      updatedAt: shard.updatedAt,
+      theme: null
+    })
+  }
+
+  for (const file of configs) {
+    const existing = byDevice.get(file.device)
+    const updatedAt = Math.max(existing?.updatedAt ?? 0, file.theme?.updatedAt ?? 0)
+    byDevice.set(file.device, {
+      id: file.device,
+      name: file.name || existing?.name || file.device,
+      updatedAt,
+      theme: file.theme
+    })
+  }
+
+  return [...byDevice.values()].sort((a, b) => b.updatedAt - a.updatedAt)
+}
+
+/**
+ * 读回别人的分片与配置。**只碰本地克隆，不联网**（见 sync.rs 的 read_shards）：
+ * 内容是上一次同步取回来的样子，所以它足够便宜，可以直接放在取数的关键路径上 ——
+ * 首屏因此就能带上别的机器，而不必等这一轮的 git 走完。
+ */
+async function readRemoteShards(repo: string, ownDevice: string): Promise<void> {
+  const files = await invoke<SyncFiles>('token_sync_shards', { repo })
+  const { shards, configs } = parseFiles(files ?? {})
+
+  // 本机那份要用内存里的最新分片 / 最新主题，仓库里的副本是上次推送时的样子；
+  // 两份都合进去就会把本机重复计一遍。没有 device 的条目认不出是谁的，一并丢掉。
+  remoteShards = shards.filter((item) => item.device && item.device !== ownDevice)
+  remoteConfigs = configs.filter((file) => file.device !== ownDevice)
+  shardsRepo = repo
+}
+
+/**
+ * 同步那一路的状态复位 + 本地分片读取（不联网）。
+ *
+ * 实读取数和首屏快照都要走这一步，所以它必须是一份：少了「换仓库先把旧分片丢掉」这段，
+ * 界面就会显示一份「看着正常、其实来自另一个仓库」的数字（踩过一次，见 sync.rs 的 read_shards）。
+ * 本身不抛错：读不回来只当没有别的机器，失败原因交给同步那轮去报，免得两处各报一遍。
+ */
+async function syncLocalShards(repo: string, ownDevice: string): Promise<void> {
+  if (!repo) {
+    // 关掉同步：连别人机器上已经读到的分片也一起撤掉，界面回到「只有本机」
+    remoteShards = []
+    remoteConfigs = []
+    shardsRepo = ''
+    lastSyncRepo = ''
+    lastSyncError = ''
+    return
+  }
+
+  // 同一个仓库只需要读一次：两次同步之间克隆目录不会被别的进程改写
+  if (shardsRepo === repo) return
+
+  try {
+    await readRemoteShards(repo, ownDevice)
+  } catch {
+    // 读不回来（克隆还指着上个仓库 / 目录被占）就把旧的丢掉，宁可少显示也不显示错的
+    remoteShards = []
+  }
+}
+
+/** 本机分片 + 别人的分片，合成界面要的合计；本机那份用内存里的，仓库副本不参与 */
+function buildData(repo: string, ownShard: TokenShard, now: number): TokenDataFile {
+  return combineShards(repo ? [ownShard, ...remoteShards] : [ownShard], now)
+}
+
+/**
+ * 一轮完整同步：推本机分片（联网）→ 读回所有分片（本地）。
  *
  * 两步各自兜住失败：推送失败（没网 / 凭据过期）不该连带把「读别人的分片」也停掉 ——
  * 克隆目录还在，读是纯本地操作，能读到就还能看到别的机器的最新数据。
@@ -370,18 +493,26 @@ async function runSync(repo: string, shard: TokenShard): Promise<void> {
   const errors: string[] = []
 
   try {
-    await invoke('token_sync_publish', { repo, device: shard.device, shard })
+    await invoke('token_sync_publish', {
+      repo,
+      device: shard.device,
+      shard,
+      // 主题文件整份作为这台机器的配置推上去（见 shared/sync-config.ts）。
+      // 关掉那个开关时给 null：Rust 那边会把仓库里自己那份配置删掉 ——
+      // 「不同步外观」就该是仓库里没有它，而不是留着一份越放越旧的副本
+      config: state.settings().syncAppearance
+        ? captureThemeFile(shard.device, shard.name, state.themeConfig())
+        : null,
+      // 登录过就默认用账号的 token 授权（省掉先手工给 git 配凭据）；
+      // 设置里关掉这个开关就退回系统凭据 —— token 失效时那条路还得能用
+      useAccount: state.settings().useAccountForSync
+    })
   } catch (error) {
     errors.push(reasonOf(error, '同步失败'))
   }
 
   try {
-    const raw = await invoke<unknown[]>('token_sync_shards', { repo })
-    remoteShards = (Array.isArray(raw) ? raw : [])
-      .map((item) => sanitizeShard(item))
-      // 本机那份要用内存里的最新分片，仓库里的副本是上次推送时的样子；
-      // 两份都合进去就会把本机重复计一遍。没有 device 的分片认不出是谁的，一并丢掉。
-      .filter((item) => item.device && item.device !== shard.device)
+    await readRemoteShards(repo, shard.device)
   } catch (error) {
     errors.push(reasonOf(error, '读取同步分片失败'))
   }
@@ -401,10 +532,11 @@ function syncStatus(enabled: boolean, deviceName: string, repo: string): TokenSy
     repo,
     lastSyncAt,
     error: lastSyncError,
-    devices: remoteShards.map((shard) => ({
-      id: shard.device,
-      name: shard.name || shard.device,
-      updatedAt: shard.updatedAt
+    // 时间取用量与配置里较新的那个（见 pairDevices）：配置改晚了也该反映出来
+    devices: pairDevices(remoteShards, remoteConfigs).map((device) => ({
+      id: device.id,
+      name: device.name,
+      updatedAt: device.updatedAt
     }))
   }
 }
@@ -424,17 +556,25 @@ export async function getTokenUsage(options: {
   force?: boolean
 }): Promise<TokenUsageResult> {
   const now = Date.now()
+  const repo = sanitizeSyncRepo(options.repo)
   // 先取设备标识:v3 老文件里没有设备信息,收敛时要用它补齐(见 sanitizeShard 的 fallback)
   const { id, name } = await localDevice()
   const local = sanitizeShard(await invoke<unknown>('token_load'), { device: id, name })
 
   // 各来源互不依赖,并行读:都是本地读取,串起来白等
-  const [zcodeLive, codebuddyLive, dshLive, workbuddyLive] = await Promise.all([
+  const sourcesRead = Promise.all([
     readZcodeLive(),
     readCodeBuddyLive(),
     readDshLive(),
     readWorkBuddyLive()
   ])
+
+  // 别人的分片同样是本地读（克隆目录），也并行：首屏就带上别的机器，
+  // 而不是等这一轮的 git 走完 —— 换仓库后才读得到新仓库的分片，所以按 shardsRepo 判断一次就够
+  const shardsRead = syncLocalShards(repo, id)
+
+  const [zcodeLive, codebuddyLive, dshLive, workbuddyLive] = await sourcesRead
+  await shardsRead
 
   const sources = { ...local.sources }
   const sourceErrors: Record<string, string> = {}
@@ -460,40 +600,95 @@ export async function getTokenUsage(options: {
     sources[sourceId] = { days: merged }
   }
 
+  // 外观配置**不在这份分片里**：它是 theme.json 的整份内容，由 runSync 单独作为 config 推上去
+  // （见 shared/sync-config.ts）。两个目录各管一件事，用量这边的版本演进不必再带上外观
   const shard: TokenShard = {
     version: TOKEN_DATA_VERSION,
     device: id,
     name,
+    // 计数没变就不刷新时间戳，否则每轮同步都会推一个内容相同的提交
     updatedAt: changed ? now : local.updatedAt,
     sources
   }
   await invoke('token_save', { value: shard })
 
-  const repo = sanitizeSyncRepo(options.repo)
-
-  if (!repo) {
-    // 关掉同步：连别人机器上已经读到的分片也一起撤掉，界面回到「只有本机」
-    remoteShards = []
-    lastSyncRepo = ''
-    lastSyncError = ''
-  } else if (options.force || repo !== lastSyncRepo || now - lastSyncAt >= SYNC_INTERVAL_MS) {
-    // 换了地址会在下一次刷新时立刻同步（不必等节流窗口）；Rust 那边发现克隆指向的不是这个仓库
-    // 会重新克隆，而且读分片时也会核对仓库归属 —— 详见 sync.rs 的 ensure_clone / read_shards
+  // 换仓库（或首次）之后的这一轮立刻走，不必等节流窗口过去；Rust 那边发现克隆指向的不是
+  // 这个仓库会重新克隆，读分片时也会核对仓库归属 —— 详见 sync.rs 的 ensure_clone / read_shards
+  if (repo && (options.force || repo !== lastSyncRepo || now - lastSyncAt >= SYNC_INTERVAL_MS)) {
     if (!id) {
       lastSyncAt = now
       lastSyncRepo = repo
       lastSyncError = '拿不到本机设备标识，无法同步'
-    } else {
+    } else if (options.force) {
+      // 手点的那一次必须等回来：按钮上的成功 / 失败提示要用这一轮的真实结果
       await enqueue(() => runSync(repo, shard))
+    } else {
+      // 自动同步放后台：数据上面已经全部算完了，没有理由让卡片再等两趟网络。
+      // 跑完（成功失败都算）广播一次，订阅方据此重取 —— 新读回的分片立刻显示出来，
+      // 同步失败的原因也能及时反映到标题行，都不必干等到下一个轮询周期
+      void enqueue(() => runSync(repo, shard))
+        .finally(() => emit('tokenSynced', null))
+        .catch(() => undefined)
     }
   }
 
   // 本机那份用刚算出来的分片，仓库里的副本不参与
-  const data = combineShards(repo ? [shard, ...remoteShards] : [shard], now)
+  const data = buildData(repo, shard, now)
   return { data, sourceErrors, sync: syncStatus(Boolean(repo), name, repo) }
+}
+
+/**
+ * 只读本地的那一份：本机快照 + 克隆里别人的分片。
+ *
+ * 给面板首屏用 —— 冷读一轮要一秒上下（CodeBuddy 的日志、DSH 的会话都要重新读重新解析），
+ * 那段时间卡片只能拿空态示人，明明有数据的用户会以为数据没了。先把这个摆出来，
+ * 实读结果随后整份覆盖它（见 TokenPanel 的 boot）。
+ *
+ * **形状与 getTokenUsage 一致**，所以界面上不用区分两条路。它**不实读、不落盘、不碰网络**：
+ * 快照是上次实读的结果，它的意义就是等着被实读修正（分片内取 max 抗上游清理），
+ * 拿它当结果用会把上游清理掉的历史永久锁住 —— 所以每次仍然要老老实实跑 getTokenUsage。
+ */
+export async function getTokenUsageSnapshot(options: {
+  repo: string
+}): Promise<TokenUsageResult> {
+  const now = Date.now()
+  const repo = sanitizeSyncRepo(options.repo)
+  const { id, name } = await localDevice()
+  const local = sanitizeShard(await invoke<unknown>('token_load'), { device: id, name })
+  await syncLocalShards(repo, id)
+
+  // 首屏没有任何实读，来源错误表就是空的：铺开的状态行由实读那一轮负责
+  return {
+    data: buildData(repo, local, now),
+    sourceErrors: {},
+    sync: syncStatus(Boolean(repo), name, repo)
+  }
 }
 
 /** 手动同步一次（面板上的同步按钮）：绕过自动同步的节流 */
 export async function syncTokenUsage(repo: string): Promise<TokenUsageResult> {
   return getTokenUsage({ repo, force: true })
+}
+
+/**
+ * 同步仓库里别的机器（含各自那份配置），按「最近动过的在前」排序。
+ *
+ * 只读本地那份克隆（Rust 侧 `token_sync_shards` 不联网、不推东西），所以设置界面打开时
+ * 随时可以问；内容就是上一次同步取回来的样子。地址没填、或还没同步过时是空数组。
+ *
+ * 本机那份要按 device 排除掉：设置界面的用途是「取别人的配置」，把自己列进去
+ * 只会让人以为多了一台机器（同一份分片已经在面板的「同步设备」里露过一次脸了）。
+ */
+export async function listSyncDevices(repo: string): Promise<SyncDeviceInfo[]> {
+  const target = sanitizeSyncRepo(repo)
+  if (!target) return []
+
+  const { id } = await localDevice()
+  const files = await invoke<SyncFiles>('token_sync_shards', { repo: target })
+  const { shards, configs } = parseFiles(files ?? {})
+
+  return pairDevices(
+    shards.filter((item) => item.device && item.device !== id),
+    configs.filter((file) => file.device !== id)
+  )
 }

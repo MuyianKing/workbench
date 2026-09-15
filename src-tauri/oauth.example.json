@@ -1,0 +1,26 @@
+{
+  "_readme": [
+    "这是模板，不是可用配置（值全是空的）。",
+    "要启用账号登录：把本文件复制成 oauth.local.json 并填入下面四项，然后重新构建。",
+    "oauth.local.json 已在 .gitignore 里，**不要提交**。改完必须重新构建才生效。",
+    "",
+    "GitHub（github.com/settings/developers → OAuth Apps → New OAuth App）：",
+    "  Authorization callback URL 必填 http://127.0.0.1:45871/callback",
+    "  勾掉 'Expire user access tokens'（默认是勾着的，勾着则 token 8 小时就过期）",
+    "  clientId 与 clientSecret 都要填：授权码流程里 client_secret 是必需的，",
+    "  GitHub 支持 PKCE 但没有因此把它变成可选项，缺了它换 token 会被拒",
+    "",
+    "Gitee（gitee.com/oauth/applications → 创建应用）：",
+    "  应用回调地址填 http://127.0.0.1:45871/callback（与上面同一个）",
+    "  权限范围至少勾 user_info 与 projects，漏勾 projects 会导致同步私有仓库 403",
+    "  clientId 与 clientSecret 都要填"
+  ],
+  "github": {
+    "clientId": "",
+    "clientSecret": ""
+  },
+  "gitee": {
+    "clientId": "",
+    "clientSecret": ""
+  }
+}

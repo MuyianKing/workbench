@@ -6,13 +6,16 @@ import { TERMINAL_HEIGHT_DEFAULT } from './terminal-height'
 import { CARD_OPACITY_DEFAULT } from './card-opacity'
 import { BACKGROUND_OPACITY_DEFAULT } from './workspace-background'
 import { builtinReference } from './wallpaper'
+import type { AppearanceSettingKey } from './appearance'
+import type { SyncDeviceInfo } from './sync-config'
 import type { ActivityCounts } from './activity'
 import type { BuildTool, PortSource } from './dev-port'
 import type { ThemeConfig } from './theme'
 import type { TokenUsageResult } from './token-usage'
+import type { ViewId } from './views'
 
-/** 活跃度计数、首页布局也走这里导出，渲染层统一从 @/types 取类型 */
-export type { ActivityCounts, ThemeConfig }
+/** 活跃度计数、首页布局、同步的其它设备也走这里导出，渲染层统一从 @/types 取类型 */
+export type { ActivityCounts, ThemeConfig, SyncDeviceInfo }
 export type { TokenUsageResult } from './token-usage'
 
 export type ProjectStatus = 'idle' | 'installing' | 'running' | 'building' | 'success' | 'failed'
@@ -211,7 +214,13 @@ export interface QuickAppList {
   missing: Record<string, boolean>
 }
 
-/** 应用级设置（F-8.x） */
+/**
+ * 应用级设置（F-8.x）。
+ *
+ * **这是渲染层看到的那一份完整设置**：外观那几项（见 APPEARANCE_SETTING_KEYS）实际存在
+ * 主题文件 `theme.json` 里，由适配层读的时候合过来、写的时候按白名单分回去
+ * （见 shared/appearance.ts）。组件照旧在一个对象上读写，不必知道文件怎么分的。
+ */
 export interface AppSettings {
   /**
    * 程序名称：显示在标题栏、托盘提示与窗口标题上。
@@ -270,7 +279,115 @@ export interface AppSettings {
    * 仓库里放的是模型名与 token 计数，**没有对话内容**，但仍然建议用私有仓库。
    */
   tokenSyncRepo: string
+  /**
+   * 上次停留的页面（左侧导航栏的当前项，见 shared/views.ts）。
+   *
+   * 放在设置里，只是因为设置本来就是「随数据文件落盘的界面状态」的容身处
+   * （终端高度、顶部样式、卡片不透明度都在这里）——它不是设置界面上的选项，
+   * 只用来让重启后回到上次那一页。
+   */
+  activeView: ViewId
+  /**
+   * 同步时是否把本机的外观配置一起写进分片（默认开启）。
+   *
+   * 外观＝明暗、主题色、顶部样式、卡片不透明度、终端高度、程序名称、工作区背景（只带内置壁纸）
+   * 与首页布局，见 shared/appearance.ts。关掉之后本机分片里那一项会被清掉（下一次同步时提交），
+   * 别的机器也就取不到这份配置了 —— 只同步用量数字的场景留给这个开关。
+   */
+  syncAppearance: boolean
+  /**
+   * 登录之后，是否用这个账号的 token 去授权 Token 同步（默认开启）。
+   *
+   * 关掉就退回「用系统里 git 自己配好的凭据」那条老路。**这条退路必须留着**：
+   * 账号 token 会过期、会被撤销，如果同步只剩它一条路，token 一失效，
+   * 原本一直好用的同步也跟着一起坏掉。
+   */
+  useAccountForSync: boolean
 }
+
+/**
+ * `workbench-data.json` 里真正落盘的那部分设置：外观与首页布局都住在 `theme.json`（见 appearance.ts）。
+ * 同步时带走的也是后面那一份 —— 这里的快捷键、开机自启、数据目录、仓库地址换台机器就不成立。
+ */
+export type StoredSettings = Omit<AppSettings, AppearanceSettingKey>
+
+/** 支持登录的两家平台 */
+export type AuthProvider = 'github' | 'gitee'
+
+/**
+ * 登录后的账号资料。
+ *
+ * **这里没有 token，也永远不会有**：token 只在 Rust 侧流转，落在 Windows 凭据管理器里
+ * （见 Rust 的 credentials.rs）。渲染层拿到的只有用来显示昵称头像的这几项。
+ */
+export interface AccountProfile {
+  provider: AuthProvider
+  /** 平台给的用户 id（数字被字符串化，避免超出 JS 安全整数范围） */
+  id: string
+  /** 登录名，一定有 */
+  login: string
+  /** 昵称；用户没在平台上填过就是 null，界面上回落到 login */
+  name: string | null
+  /** 头像的 data URL（由 Rust 拉下来转好）；拉不到就是 null */
+  avatar: string | null
+}
+
+/** 登录状态 */
+export interface AuthStatus {
+  /** 当前这个构建有没有内置 OAuth 凭据（没内置时登录按钮不可点） */
+  configured: boolean
+  /**
+   * 一家都用不了时的原因，由 Rust 侧给出；能用时是空串。
+   *
+   * 比「未内置凭据」具体得多 —— 凭据填了但少一项时，缺的到底是哪一项只有那边知道，
+   * 界面上照搬它就能直接告诉用户该补什么。
+   */
+  configError: string
+  /**
+   * 要在两家平台上注册的回调地址。
+   * 由 Rust 侧给出而不是这里写死：它必须和回环监听实际用的地址逐字一致。
+   */
+  redirectUri: string
+  /** 凭据管理器里确实有 token 的那些平台。**这才是「已登录」的判据。** */
+  providers: AuthProvider[]
+  /**
+   * 已登录账号的显示资料（昵称 / 头像 / 登录名），未登录是 null。
+   *
+   * 它只是缓存：凭据管理器里没有对应 token 时，适配层会把它一并清掉
+   * （在控制面板里手工删过凭据、换了 Windows 用户，都会走到这一步）。
+   */
+  account: AccountProfile | null
+}
+
+/** 起一次登录之后拿到的授权页地址 */
+export interface LoginStart {
+  authUrl: string
+  redirectUri: string
+}
+
+/**
+ * 一次登录轮询的结果。
+ *
+ * pending 之外的取值都意味着这次登录已经结束（无论成败），适配层据此停掉轮询。
+ */
+export interface LoginPoll {
+  status: 'pending' | 'ok' | 'denied' | 'expired' | 'failed'
+  /** status 为 ok 时必有 */
+  account?: AccountProfile
+  /** 失败原因（denied / expired / failed 时有） */
+  error?: string
+}
+
+/**
+ * 一次登录的最终结果。
+ *
+ * **取消单独占一档，没有被并进失败**：关掉弹窗、改主意都是正常操作，
+ * 界面上不该为此弹一个红色错误 —— 真要报错就得能在文案上把这两件事分开。
+ */
+export type LoginOutcome =
+  | { status: 'ok'; account: AccountProfile }
+  | { status: 'cancelled' }
+  | { status: 'failed'; error: string }
 
 /**
  * 正在运行的子进程记录（落盘）。
@@ -312,7 +429,8 @@ export interface PersistedData {
   iconCache?: Record<string, IconCacheEntry>
   /** 首页「命令」卡片里的命令，与项目相互独立 */
   commands: CommandEntry[]
-  settings: AppSettings
+  /** 这里只有「换台机器就不成立」的那些设置；外观与首页布局在 theme.json（见 StoredSettings） */
+  settings: StoredSettings
   /** 上次运行期间启动、尚未确认结束的子进程 */
   activeSessions?: ActiveSession[]
   /**
@@ -320,6 +438,14 @@ export interface PersistedData {
    * 与项目各自的 history 分开存：history 每个项目只留最近 10 条，撑不起一整年的图。
    */
   activity?: ActivityCounts
+  /**
+   * 登录过的账号资料（昵称 / 头像 / 登录名，**非机密**）。
+   *
+   * token 不在这里 —— 它在 Windows 凭据管理器里，文件被拷走也解不开。
+   * 因此判断「是否已登录」的权威来源始终是凭据管理器（`authStatus().providers`）：
+   * 这里有资料而那边没有 token 时，一律按未登录处理，并顺手清掉这份残留资料。
+   */
+  account?: AccountProfile | null
 }
 
 export interface LogLine {
@@ -613,10 +739,25 @@ export interface WorkbenchApi {
   /** Token 用量:实读各 AI 工具本地库并合并进快照;读取失败的来源带原因,数据回退快照 */
   getTokenUsage: () => Promise<Result<TokenUsageResult>>
   /**
+   * 只读本地那一份（本机快照 + 克隆里别人的分片），**不实读、不落盘、不碰网络**。
+   *
+   * 给面板首屏用：冷读一轮要一秒上下，那段时间卡片只能拿空态示人，
+   * 明明有数据的用户会以为数据没了。先把上次的数据摆出来，再被 getTokenUsage 整份覆盖。
+   * 返回形状与 getTokenUsage 一致，界面上不用区分两条路。
+   */
+  getTokenUsageSnapshot: () => Promise<Result<TokenUsageResult>>
+  /**
    * 立刻同步一次 Token 快照并返回合并后的结果（面板上的手动同步按钮）。
    * 自动同步按间隔节流，这个入口不受节流限制。
    */
   syncTokenUsage: () => Promise<Result<TokenUsageResult>>
+  /**
+   * 同步仓库里**别的机器**（各自的外观配置快照一起带回来）。
+   *
+   * 只读本地那份克隆，不联网、也不推东西，所以设置界面打开时随时可以问；
+   * 内容是上一次同步取回来的样子。地址没填时返回空数组。
+   */
+  listSyncDevices: () => Promise<SyncDeviceInfo[]>
   createGroup: (name: string) => Promise<Result<ProjectGroup>>
   renameGroup: (id: string, name: string) => Promise<Result<ProjectGroup>>
   removeGroup: (id: string) => Promise<Result<null>>
@@ -692,6 +833,32 @@ export interface WorkbenchApi {
   pickDataDir: () => Promise<DataLocationPick>
   /** 迁移：把当前数据写到新目录并切过去 */
   migrateDataDir: (dir: string) => Promise<Result<DataLocation>>
+  /**
+   * 账号登录状态：能不能登录、回调地址、已登录哪些平台。
+   * **不返回任何 token** —— 它在 Rust 侧，渲染层碰不到（见 AccountProfile）。
+   */
+  authStatus: () => Promise<AuthStatus>
+  /** 重新拉一次账号资料（启动时刷新头像与昵称） */
+  authRefreshAccount: (provider: AuthProvider) => Promise<Result<AccountProfile>>
+  /**
+   * 走完一次完整登录：起回环监听 → 打开浏览器 → 轮询等回调 → 回来时给账号资料。
+   *
+   * `onAuthUrl` 在浏览器被打开的那一刻回调一次，第二个参数说明自动打开成没成功 ——
+   * 没成功时界面要把那个地址露出来让用户自己点，否则这一步就彻底卡死了。
+   */
+  authLogin: (
+    provider: AuthProvider,
+    onAuthUrl?: (authUrl: string, opened: boolean) => void
+  ) => Promise<LoginOutcome>
+  /**
+   * 手动兜底：回调没跳回来时，把浏览器地址栏里那条完整地址直接交上去。
+   * 端口被占用、浏览器被拦下之类的情况不至于让整条流程卡死。
+   */
+  authLoginSubmit: (url: string) => Promise<Result<AccountProfile>>
+  /** 放弃进行中的登录（关掉回环监听，立刻停下轮询） */
+  authLoginCancel: () => Promise<void>
+  /** 退出登录：清掉凭据管理器里的 token */
+  authLogout: (provider: AuthProvider) => Promise<Result<null>>
   /** 日志可能单条推来，也可能是一批（主进程按帧聚合） */
   onLog: (fn: (e: ProcessLogPayload) => void) => () => void
   onStatus: (fn: (e: ProcessStatusEvent) => void) => () => void
@@ -706,6 +873,13 @@ export interface WorkbenchApi {
   onPmInstallLog: (fn: (e: PmInstallLogEvent) => void) => () => void
   /** 数据目录切换后，渲染层需要整份重新加载 */
   onDataReload: (fn: () => void) => () => void
+  /**
+   * 后台的 Token 自动同步跑完一轮（成功失败都算）。
+   *
+   * 同步不挡出数：数据先显示，别人机器的新分片稍后才到，订阅方据此重取一次即可，
+   * 不必干等到下一个轮询周期。手点的同步按钮不走这条 —— 它自己等结果。
+   */
+  onTokenSynced: (fn: () => void) => () => void
   /** 首页布局被改过（本地保存或别的窗口），整份推过来 */
   onThemeConfig: (fn: (config: ThemeConfig) => void) => () => void
   /** 主进程请求弹出退出确认框（托盘退出且还有项目在运行时） */
@@ -872,5 +1046,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   accentInk: ACCENT_INK_DEFAULT,
   topBarStyle: 'clear',
   cardOpacity: CARD_OPACITY_DEFAULT,
-  tokenSyncRepo: ''
+  tokenSyncRepo: '',
+  activeView: 'home',
+  syncAppearance: true,
+  useAccountForSync: true
 }

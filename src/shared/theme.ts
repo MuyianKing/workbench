@@ -1,15 +1,20 @@
 /**
- * 首页布局（theme.json）的数据结构、收敛规则与纯计算。
+ * 主题文件（theme.json）的数据结构、收敛规则与纯计算：**外观设置 + 首页三栏布局**。
  *
  * 首页分成左中右三栏：左右两栏宽度可调，中间那栏 flex:1 吃掉剩余宽度。
  * 七块卡片各自属于某一栏，在栏内按 order 从上到下排列、宽度铺满整栏，高度各自可调；
  * 没有卡片的栏在平时不渲染（编辑时才显示出来，好把卡片拖进去）。
  *
- * 这个模块被主进程（读盘、收敛旧文件）和渲染层（拖动、缩放）共用：两边必须是同一套
+ * 外观那几项（明暗 / 主题色 / 顶部样式 / 卡片不透明度 / 终端高度 / 程序名称 / 背景）也在这里，
+ * 原因见 appearance.ts 的文件头：它们与布局是同一类东西，而且同步时整个文件就是一台机器
+ * 要带给另一台机器的那份配置。
+ *
+ * 这个模块被宿主（读盘、收敛旧文件）和渲染层（拖动、缩放）共用：两边必须是同一套
  * 边界与吸附规则，否则一个手改过的 theme.json 就能把栏宽撑爆、或者拖出一个负高度。
  */
+import { DEFAULT_APPEARANCE, sanitizeAppearanceSettings, type AppearanceSettings } from './appearance'
 
-/** 首页八块卡片的稳定 id；数组顺序也是同栏同 order 时的兜底排序 */
+/** 首页七块卡片的稳定 id；数组顺序也是同栏同 order 时的兜底排序 */
 export const HOME_CARD_IDS = [
   'activity',
   'token',
@@ -17,8 +22,7 @@ export const HOME_CARD_IDS = [
   'recent',
   'actions',
   'quick',
-  'commands',
-  'projects'
+  'commands'
 ] as const
 
 export type HomeCardId = (typeof HOME_CARD_IDS)[number]
@@ -73,13 +77,33 @@ export interface ThemeConfig {
   /** 右栏宽度（px） */
   rightWidth: number
   cards: Record<HomeCardId, CardPlacement>
+  /**
+   * 外观设置（见 appearance.ts）：这一批也住在主题文件里，和布局一起构成
+   * 「一台机器的外观配置」—— 同步时整个文件就是带过去的那份东西。
+   */
+  appearance: AppearanceSettings
+  /**
+   * 这份外观**最后一次真的变化**的时间（毫秒，Unix 纪元）。
+   *
+   * 存在的唯一理由是同步：多个文件放在 git 里，只有内容变了才该提交，
+   * 所以时间戳不能每轮刷新，得由「内容与上次不同」来驱动（见适配层 state.ts 的 touchTheme）。
+   * 别的机器读它来显示「更新于」与排序。老文件里没有，补 0（表示时间未知）。
+   */
+  updatedAt: number
 }
 
 export function isColumnId(value: unknown): value is ColumnId {
   return COLUMN_IDS.includes(value as ColumnId)
 }
 
-export const THEME_VERSION = 1
+/**
+ * 配置结构的版本号。
+ *
+ * v1 → v2：卡片清单里移除了「项目列表」（它连筛选标签一起搬去了项目页）。
+ * 老文件里那张卡所在的栏会因此空出来，而空栏不渲染 —— 剩下的栏会挤在左边、右边空一大片，
+ * 比丢掉一次自定义摆放更难看。所以版本对不上时整份回到默认布局（见 sanitizeTheme）。
+ */
+export const THEME_VERSION = 2
 
 /** 步进的可配区间：1px 太细容易拖不齐，20px 又太跳，两头都够用；默认 1 为按当前配置固化 */
 export const GRID_STEP_MIN = 1
@@ -109,7 +133,7 @@ export const CARD_HEIGHT_MAX = 4000
 /**
  * 每块卡片的高度下限。
  *
- * 定得比较小：卡片内部该滚的都滚（最近使用 / 快捷操作 / 快捷启动 / 项目列表 / 明细行），
+ * 定得比较小：卡片内部该滚的都滚（最近使用 / 快捷操作 / 快捷启动 / 明细行），
  * 拖到很矮时大不了只剩标题加一行，不会把卡片压成一条没有意义的细边。
  * 真正的物理下限是「面板标题 + 上下内边距」那一圈，约 64px。
  */
@@ -120,14 +144,16 @@ export const CARD_HEIGHT_MIN: Record<HomeCardId, number> = {
   recent: 88,
   actions: 76,
   quick: 76,
-  commands: 90,
-  projects: 100
+  commands: 90
 }
 
 /**
- * 默认布局（按当前配置固化）：左栏从上到下排活跃度、最近使用、快捷启动、系统状态，
- * 最底下是吃剩余高度的命令；中间那栏整栏给项目列表（flex），窗口越高能看到的项目卡越多；
- * 右栏上面是吃剩余高度的 Token 用量、下面是快捷操作。
+ * 默认布局（按当前配置固化）：左栏从上到下是四张竖着排的清单卡（最近使用、快捷启动、
+ * 系统状态），最底下是吃剩余高度的命令；中栏整栏给两张吃宽度的图表（活跃度、Token 用量）；
+ * 右栏是快捷操作。
+ *
+ * 中栏以前整栏是项目列表，它搬去「项目」页之后中栏空了出来（空栏不渲染 = 默认变两栏、中间空一大片），
+ * 所以把两张大图挪了进来 —— 它们是这套卡片里最需要宽度的。
  */
 export const DEFAULT_THEME: ThemeConfig = {
   version: THEME_VERSION,
@@ -136,17 +162,20 @@ export const DEFAULT_THEME: ThemeConfig = {
   leftWidth: LEFT_WIDTH_DEFAULT,
   rightWidth: RIGHT_WIDTH_DEFAULT,
   cards: {
-    activity: { column: 'left', order: 0, mode: 'fixed', height: 155 },
-    recent: { column: 'left', order: 1, mode: 'fixed', height: 155 },
-    quick: { column: 'left', order: 2, mode: 'fixed', height: 98 },
+    recent: { column: 'left', order: 0, mode: 'fixed', height: 155 },
+    quick: { column: 'left', order: 1, mode: 'fixed', height: 98 },
     /* 系统状态：node / 包管理器 / nvm / nrm 四行 + 贴底的数据目录，
        170 是四行刚好放全的高度（147 是按三行定的，加一行后明细区会被挤进滚动） */
-    system: { column: 'left', order: 3, mode: 'fixed', height: 170 },
-    commands: { column: 'left', order: 4, mode: 'flex', height: 90 },
-    projects: { column: 'center', order: 0, mode: 'flex', height: 600 },
-    token: { column: 'right', order: 0, mode: 'flex', height: 200 },
-    actions: { column: 'right', order: 1, mode: 'fixed', height: 224 }
-  }
+    system: { column: 'left', order: 2, mode: 'fixed', height: 170 },
+    commands: { column: 'left', order: 3, mode: 'flex', height: 90 },
+    activity: { column: 'center', order: 0, mode: 'flex', height: 240 },
+    token: { column: 'center', order: 1, mode: 'flex', height: 240 },
+    actions: { column: 'right', order: 0, mode: 'fixed', height: 224 }
+  },
+  // 外观的默认值只有一处口径（数据文件那份设置的默认值，见 appearance.ts）
+  appearance: DEFAULT_APPEARANCE,
+  // 还没改过，所以时间未知
+  updatedAt: 0
 }
 
 /** 认不出来的高度模式回落到 fallback */
@@ -225,22 +254,65 @@ export function normalizeOrder(
   return next
 }
 
-/** 整份收敛：缺哪块补哪块，认不出来的值一律回到默认布局，最后把 order 排连续 */
+/**
+ * 整份收敛：缺哪块补哪块，认不出来的值一律回到默认布局，最后把 order 排连续。
+ *
+ * 版本对不上时整份回到默认布局（见 THEME_VERSION）：卡片清单变过，老布局按原样套用会缺一块。
+ * 走的是同一条收敛路径（每个字段都新造对象），所以不会改到 DEFAULT_THEME 那份常量。
+ *
+ * `updatedAt` 原样留着（缺省补 0）：它是同步用的时间戳，不是这里能判定的东西。
+ */
 export function sanitizeTheme(raw: unknown): ThemeConfig {
   const input = (raw ?? {}) as Partial<ThemeConfig>
-  const rawCards = (input.cards ?? {}) as Partial<Record<HomeCardId, CardPlacement>>
+  const base = input.version === THEME_VERSION ? input : DEFAULT_THEME
+  const rawCards = (base.cards ?? {}) as Partial<Record<HomeCardId, CardPlacement>>
 
   const cards = {} as Record<HomeCardId, CardPlacement>
   for (const id of HOME_CARD_IDS) cards[id] = sanitizeCardPlacement(rawCards[id], id)
 
   return {
     version: THEME_VERSION,
-    gridStep: clampGridStep(input.gridStep),
-    cardGap: clampCardGap(input.cardGap),
-    leftWidth: clampColumnWidth(input.leftWidth, LEFT_WIDTH_DEFAULT),
-    rightWidth: clampColumnWidth(input.rightWidth, RIGHT_WIDTH_DEFAULT),
-    cards: normalizeOrder(cards)
+    gridStep: clampGridStep(base.gridStep),
+    cardGap: clampCardGap(base.cardGap),
+    leftWidth: clampColumnWidth(base.leftWidth, LEFT_WIDTH_DEFAULT),
+    rightWidth: clampColumnWidth(base.rightWidth, RIGHT_WIDTH_DEFAULT),
+    cards: normalizeOrder(cards),
+    // 外观是后加的字段：老主题文件里没有，缺了就补默认（**不能**因为它去动上面的版本判定，
+    // 否则升级一次就会把用户的布局整份清掉）
+    appearance: sanitizeAppearanceSettings(base.appearance),
+    updatedAt:
+      typeof base.updatedAt === 'number' && Number.isFinite(base.updatedAt) && base.updatedAt > 0
+        ? Math.floor(base.updatedAt)
+        : 0
   }
+}
+
+/**
+ * 两份主题的**内容**是否一致（不看时间戳）。
+ *
+ * 用途只有一个：主题文件真的变了才刷新时间戳（见适配层 state.ts 的 touchTheme）——
+ * 每轮同步都刷新的话，仓库里会堆出一串只改了时间的提交。
+ */
+export function sameThemeContent(a: ThemeConfig, b: ThemeConfig): boolean {
+  if (layoutSignature(a) !== layoutSignature(b)) return false
+  return (Object.keys(b.appearance) as Array<keyof AppearanceSettings>).every(
+    (key) => a.appearance[key] === b.appearance[key]
+  )
+}
+
+/** 布局压成一行可比的字符串（外观由调用方逐项比） */
+function layoutSignature(layout: ThemeConfig): string {
+  return [
+    layout.version,
+    layout.gridStep,
+    layout.cardGap,
+    layout.leftWidth,
+    layout.rightWidth,
+    HOME_CARD_IDS.map((id) => {
+      const card = layout.cards[id]
+      return `${id}:${card.column}/${card.order}/${card.mode}/${card.height}`
+    }).join(',')
+  ].join('|')
 }
 
 /** 某一栏里的卡片 id，按 order 排好 */

@@ -1,9 +1,10 @@
 <script setup lang="ts">
 /**
- * 首页「项目列表」：项目卡网格 + 末尾的「添加项目」幽灵卡。
+ * 项目页的主体：项目卡网格 + 末尾的「添加项目」幽灵卡。
  *
- * 故意不套 .panel 外壳 —— 这块是首页的主体，直接铺在画布上（无白底、无边框、无标题），
- * 和改造前保持一致。卡片高度由布局决定，所以网格自己滚。
+ * 故意不套 .panel 外壳 —— 这块是页面的主体，直接铺在画布上（无白底、无边框、无标题）。
+ * 它自己就是滚动体：占据工具条以下的全部高度，四周的内边距取卡片间距，
+ * 项目再多也在这一层滚，不把页面撑高。
  */
 import { Plus } from '@element-plus/icons-vue'
 import { useProjectsStore } from '@/stores/projects'
@@ -22,7 +23,12 @@ function clearFilter(): void {
   <div class="projects">
     <template v-if="store.projects.length">
       <div v-if="store.filteredProjects.length" class="grid">
-        <ProjectCard v-for="p in store.filteredProjects" :key="p.id" :project="p" />
+        <ProjectCard
+          v-for="p in store.filteredProjects"
+          :key="p.id"
+          :project="p"
+          :highlight="store.focusProjectId === p.id"
+        />
 
         <button class="add-tile" type="button" @click="store.openAddDialog()">
           <el-icon class="add-tile__icon"><Plus /></el-icon>
@@ -43,18 +49,20 @@ function clearFilter(): void {
 </template>
 
 <style scoped>
-/* 项目再多也不撑高卡片：这块自己滚，高度由布局给定 */
+/* 项目再多也不撑高页面：这一层自己滚，高度由剩下的空间给定 */
 .projects {
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
+  /* 四周留白与卡片间距同源（--card-gap 由 .app 统一给），设置里改「卡片间距」，外圈跟着变 */
+  padding: var(--card-gap, 10px);
 }
 
 /* ---------- 卡片网格 ---------- */
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(302px, 1fr));
-  /* 与首页卡片共用同一个间距配置（由 HomeBoard 上的 --card-gap 继承下来） */
+  /* 与首页卡片共用同一个间距配置（--card-gap 由 .app 统一给） */
   gap: var(--card-gap, 14px);
   align-content: start;
 }

@@ -4,9 +4,12 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   DEFAULT_SETTINGS,
   TOP_BAR_STYLES,
+  type AccountProfile,
   type ActivityCounts,
   type AddProjectInput,
   type AppSettings,
+  type AuthProvider,
+  type AuthStatus,
   type BuiltinWallpaper,
   type CommandEntry,
   type CommandInput,
@@ -31,6 +34,7 @@ import {
   type QuickAppList,
   type QuickAppPatch,
   type RuntimeState,
+  type SyncDeviceInfo,
   type TerminalKind,
   type TerminalOpenEvent,
   type ThemeSource,
@@ -38,6 +42,7 @@ import {
 } from '@/types'
 import { clampTerminalHeight } from '@shared/terminal-height'
 import { terminalKey } from '@shared/terminal-key'
+import { accountLabel } from '@shared/auth'
 import {
   DEFAULT_THEME,
   clampCardGap,
@@ -59,6 +64,14 @@ import {
   type AccentInkMode
 } from '@shared/accent-color'
 import { RingLog } from '@shared/log-ring'
+import {
+  PROJECT_HIT_LIMIT,
+  searchProjects,
+  projectMatchesKeyword,
+  type SearchGroup
+} from '@shared/search'
+import { sanitizeViewId, type ViewId } from '@shared/views'
+import { STATUS_META } from '@/status'
 import { bootstrapSnapshot, writeAccentColor, writeTheme } from '@/bootstrap'
 import { applyThemeWithTransition, type ThemeOrigin } from '@/theme-transition'
 
@@ -143,6 +156,23 @@ export const useProjectsStore = defineStore('projects', () => {
   const groupFilter = ref<string>('all')
   const sortBy = ref<SortBy>('recent')
 
+  /**
+   * 从搜索结果跳过来时要点名的那张项目卡（画一圈定位环、滚到它）。
+   *
+   * 一次性提示：筛选条件一变就作废 —— 用户已经在自己筛了，还留着上一轮的环
+   * 只会让人以为「这张卡有什么特别」。sync 是必须的：jumpToProject 会在同一次
+   * 同步流程里先复位分组、再写这个值，异步的 watcher 会把刚写进去的值又清掉。
+   */
+  const focusProjectId = ref<string | null>(null)
+
+  watch(
+    [keyword, groupFilter],
+    () => {
+      focusProjectId.value = null
+    },
+    { flush: 'sync' }
+  )
+
   /** 筛选/排序状态只经 action 变更，模板里不再直接赋值，非法值也无从写进来 */
   function setGroupFilter(value: string): void {
     groupFilter.value = value
@@ -214,6 +244,18 @@ export const useProjectsStore = defineStore('projects', () => {
   const activity = ref<ActivityCounts>({})
 
   /**
+   * 账号状态。null 表示还没问过后端 —— 账号弹窗与设置界面据此显示加载态。
+   * 资料来源见 workbench/auth.ts：是否已登录以凭据管理器为准，这里存的只是显示资料。
+   */
+  const auth = ref<AuthStatus | null>(null)
+  /** 正在等待授权的那一家；null 表示空闲 */
+  const authPending = ref<AuthProvider | null>(null)
+  /** 等待期间的授权页地址（浏览器没被自动打开时，界面要把它露出来给用户点） */
+  const authUrl = ref('')
+  /** 浏览器是不是自动打开了；false 时界面把 authUrl 显眼地摆出来 */
+  const authOpened = ref(true)
+
+  /**
    * 终端面板展开时的高度（px）。
    * 拖动过程中终端组件只改这个 ref（跟手渲染），松手后才通过 setTerminalHeight 落盘。
    */
@@ -238,10 +280,14 @@ export const useProjectsStore = defineStore('projects', () => {
   }
 
   /**
-   * 首页三栏布局（独立落在 theme.json 里）。
+   * 首页三栏布局（theme.json：外观 + 布局都在这个文件里）。
    *
    * 与终端高度同一套做法：拖动栏宽 / 卡片高度时只改这个 ref 让布局跟手，
    * 松手才整份落盘，免得每动一格就写一次文件。
+   *
+   * 只读它的布局字段（cards / 栏宽 / 步进 / 间距）。改成外观那几项走的是 `settings`：
+   * 适配层在那边把两份合起来，这里的 `appearance` 可能比适配层旧一拍 ——
+   * 无妨，因为每次落盘都是把补丁交给适配层、由它并到自己那份权威值上（见 workbench/state.ts）。
    */
   const themeConfig = ref<ThemeConfig>(sanitizeTheme(bootstrap?.themeConfig ?? DEFAULT_THEME))
   /** 是否处于布局编辑态：由设置里的「布局调整」进入，画布上的「完成」退出 */
@@ -249,10 +295,70 @@ export const useProjectsStore = defineStore('projects', () => {
 
   function setLayoutEditing(value: boolean): void {
     layoutEditing.value = value
+    // 布局只有首页有得编辑（设置里那个入口不区分当前页），进编辑态先切回首页，
+    // 免得顶栏变成了编辑条、面前却没有画布
+    if (value && activeView.value !== 'home') {
+      applyView('home')
+      void updateSettings({ activeView: 'home' })
+    }
   }
 
   const gridStep = computed(() => themeConfig.value.gridStep)
   const cardGap = computed(() => themeConfig.value.cardGap)
+
+  /**
+   * 当前页（左侧导航栏的当前项）。
+   *
+   * 不引入 Vue Router：换页就是换这个 id，App.vue 用 <KeepAlive><component :is> 渲染，
+   * 各页的滚动位置由 KeepAlive 保住。值会落盘，重启后回到上次那一页。
+   */
+  const activeView = ref<ViewId>(sanitizeViewId(settings.value.activeView))
+
+  // 设置是异步载入的，跟着它核一遍（与 terminalHeight 同一套做法）
+  watch(
+    () => settings.value.activeView,
+    (value) => {
+      activeView.value = sanitizeViewId(value)
+    },
+    { immediate: true }
+  )
+
+  /** 切页的共同部分：布局编辑只对首页画布有意义，切走时收掉 */
+  function applyView(value: ViewId): void {
+    activeView.value = value
+    if (value !== 'home') layoutEditing.value = false
+  }
+
+  async function setActiveView(value: ViewId): Promise<void> {
+    if (value === activeView.value) return
+
+    applyView(value)
+    focusProjectId.value = null
+    await updateSettings({ activeView: value })
+  }
+
+  /**
+   * 从搜索结果跳到一个项目：切到项目页、把那张卡圈出来并滚进视野，**不带筛选**。
+   *
+   * 跳过去看到的是一份完整列表 + 一个定位环，而不是「按刚才那个词筛过一遍」的列表，
+   * 所以两处筛选都要复位：
+   *  - 关键词：搜索框与项目页的筛选是同一个值，不清掉的话页面照样是按它筛过的；
+   *  - 分组：matchesFilter 在非「全部」的分组下会直接忽略关键词（先按分组 return），
+   *    不清掉的话用户停在某个分组上时，目标项目可能根本不在列表里 —— 环就没地方可挂。
+   * `focusProjectId` 要在两者之后写：它被这两个值的同步 watcher 清掉（见它的注释）。
+   */
+  function jumpToProject(id: string): void {
+    if (!findProject(id)) return
+
+    keyword.value = ''
+    groupFilter.value = 'all'
+    focusProjectId.value = id
+
+    if (activeView.value !== 'projects') {
+      applyView('projects')
+      void updateSettings({ activeView: 'projects' })
+    }
+  }
 
   function applyThemeConfig(value: ThemeConfig): void {
     themeConfig.value = sanitizeTheme(value)
@@ -911,6 +1017,8 @@ export const useProjectsStore = defineStore('projects', () => {
     void detectAll()
     // 命令卡片同理：它连日志都可能没有（在外面启动的），只能靠端口认
     void detectAllCommands()
+    // 账号状态只读凭据管理器，很快；顶栏的头像要靠它才会在首帧之后补上
+    void refreshAuth()
     // 目录与程序都可能在应用之外被移动/删除，窗口重新获得焦点时复查一次
     window.addEventListener('focus', () => {
       void refreshPaths()
@@ -1029,6 +1137,137 @@ export const useProjectsStore = defineStore('projects', () => {
       ElMessage.warning(`快捷键 ${patch.hotkey ?? result.data.hotkey} 被系统或其他应用占用，已自动停用`)
     }
     return true
+  }
+
+  // ---------- 别台机器的外观 ----------
+
+  /**
+   * 同步仓库里其它机器（含各自的外观配置快照）。
+   *
+   * 只读本地那份克隆、不联网，所以设置界面打开时问一次是安全的；内容是上一次同步取回来的样子。
+   */
+  const syncDevices = ref<SyncDeviceInfo[]>([])
+
+  async function loadSyncDevices(): Promise<void> {
+    try {
+      syncDevices.value = await window.workbench.listSyncDevices()
+    } catch (error) {
+      // 取不到就当没有：没填仓库地址、还没同步过都是常态，界面上是一句空态提示
+      syncDevices.value = []
+      console.warn('[workbench] 读取同步设备失败', error)
+    }
+  }
+
+  /**
+   * 采用另一台机器的配置（设置界面里那一行的「应用」）。
+   *
+   * **只能由用户点**：配置是「以谁的为准」而不是能合并的数据，两台机器互相自动采用对方的
+   * 会来回覆盖、永远收敛不了（详见 shared/sync-config.ts 的文件头）。
+   * 走的是既有的 updateThemeConfig 通道 —— 外观与布局在同一个文件里，所以一次写入就够，
+   * 主题过渡、终端高度、卡片摆放这些联动不必另写一套。
+   */
+  async function applySyncAppearance(deviceId: string): Promise<boolean> {
+    const device = syncDevices.value.find((item) => item.id === deviceId)
+    if (!device?.theme) {
+      ElMessage.warning('那台机器没有可用的配置')
+      return false
+    }
+
+    if (!(await saveThemeConfig(device.theme))) return false
+
+    ElMessage.success(`已应用「${device.name}」的外观与布局`)
+    return true
+  }
+
+
+  // ---------- 账号 ----------
+
+  /**
+   * 问一次后端：能不能登录、已登录哪一家。
+   *
+   * 只读凭据管理器、不联网，所以启动时直接调也没问题；
+   * 头像那张图不在这一步拉（那是网络请求），留给账号弹窗打开时按需刷新。
+   */
+  async function refreshAuth(): Promise<void> {
+    try {
+      auth.value = await window.workbench.authStatus()
+    } catch {
+      // 拿不到就当没登录：账号是可选功能，不该把首屏拖下水
+      auth.value = null
+    }
+  }
+
+  /** 走一次登录。成功后账号资料由适配层落盘，这里只负责界面状态与提示 */
+  async function login(provider: AuthProvider): Promise<void> {
+    // 一次只允许一个登录流程：重复点击会让两个轮询循环对着同一个回环监听说话
+    if (authPending.value) return
+
+    authPending.value = provider
+    authUrl.value = ''
+    authOpened.value = true
+
+    try {
+      const outcome = await window.workbench.authLogin(provider, (url, opened) => {
+        authUrl.value = url
+        authOpened.value = opened
+      })
+
+      if (outcome.status === 'ok') {
+        ElMessage.success(`已登录 ${accountLabel(outcome.account)}`)
+      } else if (outcome.status === 'failed') {
+        // 只剩「失败」要报：cancelled 是用户自己关掉或点了取消，弹红字只会惹人烦
+        ElMessage.error(outcome.error)
+      }
+    } finally {
+      authPending.value = null
+      authUrl.value = ''
+      await refreshAuth()
+    }
+  }
+
+  /**
+   * 手动兜底：把粘贴回来的回调地址交上去。
+   * 返回是否成功；失败原因内联显示在输入框旁边，不弹全局提示 ——
+   * 成功那条由 login() 统一报一次，这里再报就重复了。
+   */
+  async function submitLoginCallback(url: string): Promise<boolean> {
+    const result = await window.workbench.authLoginSubmit(url)
+    if (!result.ok) return false
+
+    await refreshAuth()
+    return true
+  }
+
+  /** 放弃进行中的登录（点取消、关弹窗） */
+  async function cancelLogin(): Promise<void> {
+    if (!authPending.value) return
+    await window.workbench.authLoginCancel()
+  }
+
+  /** 退出登录；是否先确认由调用方决定 */
+  async function logout(): Promise<boolean> {
+    const provider = auth.value?.account?.provider
+    if (!provider) return false
+
+    const result = await window.workbench.authLogout(provider)
+    if (!result.ok) {
+      ElMessage.error(result.error ?? '退出登录失败')
+      return false
+    }
+
+    await refreshAuth()
+    return true
+  }
+
+  /** 重新拉一次账号资料（联网）：头像在平台上换过之后，打开账号弹窗就能看到 */
+  async function refreshAccount(): Promise<void> {
+    const provider = auth.value?.account?.provider
+    if (!provider) return
+
+    // 刷新失败就保留旧资料：头像没了比头像旧了更让人困惑
+    const result = await window.workbench.authRefreshAccount(provider)
+    if (!result.ok) return
+    await refreshAuth()
   }
 
   /**
@@ -1249,6 +1488,7 @@ export const useProjectsStore = defineStore('projects', () => {
     delete pathValidity.value[id]
     dropTerminalsOf(id)
     if (drawerProjectId.value === id) drawerProjectId.value = null
+    if (focusProjectId.value === id) focusProjectId.value = null
     ElMessage.success('已从列表移除')
   }
 
@@ -2096,13 +2336,12 @@ export const useProjectsStore = defineStore('projects', () => {
     () => projects.value.filter((p) => runtimes[p.id]?.status === 'running').length
   )
 
+  /** 关键词口径与搜索结果共用一份实现（见 shared/search.ts），两边各写一套就会对不上 */
   function matchesFilter(project: Project): boolean {
-    const kw = keyword.value.trim().toLowerCase()
     if (groupFilter.value === 'running') return runtimes[project.id]?.status === 'running'
     if (groupFilter.value === UNGROUPED) return !project.groupId
     if (groupFilter.value !== 'all') return project.groupId === groupFilter.value
-    if (!kw) return true
-    return project.name.toLowerCase().includes(kw) || project.path.toLowerCase().includes(kw)
+    return projectMatchesKeyword(project, keyword.value)
   }
 
   /**
@@ -2134,15 +2373,41 @@ export const useProjectsStore = defineStore('projects', () => {
     { immediate: true, flush: 'sync' }
   )
 
-  /** 顺序取快照，筛选仍然实时生效（运行状态、关键词、分组都是即时反映的） */
-  const filteredProjects = computed(() => {
+  /** 按展示顺序排好的全部项目（不筛）；搜索结果与筛选列表都从它出发 */
+  const orderedProjects = computed(() => {
     const byId = new Map(projects.value.map((p) => [p.id, p]))
     const list: Project[] = []
     for (const id of displayOrder.value) {
       const project = byId.get(id)
-      if (project && matchesFilter(project)) list.push(project)
+      if (project) list.push(project)
     }
     return list
+  })
+
+  /** 顺序取快照，筛选仍然实时生效（运行状态、关键词、分组都是即时反映的） */
+  const filteredProjects = computed(() => orderedProjects.value.filter(matchesFilter))
+
+  /** 搜索结果那行尾部的小字：与卡片上的状态标签同一口径（目录失效优先） */
+  function searchDetailOf(project: Project): string {
+    if (!isPathValid(project.id)) return '路径无效'
+    return STATUS_META[runtimes[project.id]?.status ?? 'idle'].label
+  }
+
+  /**
+   * 顶部搜索框的结果，按来源分组。
+   *
+   * 今天只有「项目」一个来源（面板此时不画分组标题，画了像半成品）；
+   * 以后接进命令 / 快捷启动，就是往这个数组里多塞一组，面板本身不用改。
+   * 没有命中就不返回任何组 —— 面板据此判断「弹不弹」。
+   */
+  const searchGroups = computed<SearchGroup[]>(() => {
+    const group = searchProjects(
+      orderedProjects.value,
+      keyword.value,
+      PROJECT_HIT_LIMIT,
+      searchDetailOf
+    )
+    return group.hits.length ? [group] : []
   })
 
   /** 终端面板里的 Tab，按创建顺序 */
@@ -2195,6 +2460,11 @@ export const useProjectsStore = defineStore('projects', () => {
     cardGap,
     layoutEditing,
     setLayoutEditing,
+    activeView,
+    setActiveView,
+    jumpToProject,
+    focusProjectId,
+    searchGroups,
     moveCard,
     setCardHeight,
     toggleCardMode,
@@ -2204,6 +2474,9 @@ export const useProjectsStore = defineStore('projects', () => {
     setGridStep,
     setCardGap,
     resetLayout,
+    syncDevices,
+    loadSyncDevices,
+    applySyncAppearance,
     backgroundImage,
     backgroundName,
     backgroundError,
@@ -2281,6 +2554,17 @@ export const useProjectsStore = defineStore('projects', () => {
     renameGroup,
     updateSettings,
     toggleTheme,
+    // 账号
+    auth,
+    authPending,
+    authUrl,
+    authOpened,
+    refreshAuth,
+    login,
+    submitLoginCallback,
+    cancelLogin,
+    logout,
+    refreshAccount,
     openDrawer,
     closeDrawer,
     quickApps,

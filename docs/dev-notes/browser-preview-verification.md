@@ -200,6 +200,14 @@ const lum = (rgb) => rgb.map((c) => {
 
 ## 已知的坑
 
+- **`backdrop-filter` 会把元素变成层叠上下文，里面的浮动面板会被后画的卡片盖住**：
+  顶栏（`.topbar`）在「毛玻璃」那一档带 `backdrop-filter`，于是顶栏内部那张搜索结果面板的
+  `z-index: 30` 只在这个上下文里比大小 —— 而画布里的卡片是定位元素（`position: relative`、
+  `z-index: auto`），按**树序**排在顶栏之后，整块盖在面板上面。卡片自己又是半透明的
+  （卡片不透明度），两层叠起来就是「面板透底、底下的卡片内容透上来」。
+  顶栏显式 `position: relative; z-index` 抬一手即可。**这一档才会露馅**：透明 / 正常两档
+  顶栏不构成层叠上下文，面板的 z-index 直接和卡片在同一层比，所以只截那两档是验不出来的 ——
+  验证浮动面板时要把顶栏三档都过一遍。
 - **Element Plus 的弹层不信 `offsetParent`**：popper 是 `position: fixed`，可见时
   `offsetParent` 照样是 `null`，拿它当「面板打开了吗」的判据会一直判成没打开。
   用 `getComputedStyle(popper).display !== 'none'`（或 `aria-hidden`）来判断。
@@ -220,6 +228,44 @@ const lum = (rgb) => rgb.map((c) => {
   别只在 CSS 里写 `width` / `min-width`。
 - **注入 HTML 必须用 Node 读写，不要用 PowerShell 的 `Get-Content` / `Set-Content`**：
   它按本地代码页解码，会把中文注释的字节连同换行一起吃掉，注入后的脚本直接语法错误。
+- **`el-dialog` 想做成「左菜单 + 右内容」这类分区时要同时拆三层，而且弹窗得给定高**：
+  EP 自己在 `.el-dialog` 上留了 16px 内边距、在 `.el-dialog__body` 上留了 30/20 内边距，
+  两栏的可用宽度是「弹窗宽 − 32 − 正文内边距 − 滚动条 10」量出来的（按 920 宽的弹窗算只剩 669）；
+  `class` 落在 `.el-dialog` 上、`body-class` 落在正文上，正文还是 EP 生成的元素，scoped 样式够不着，
+  这两条只能写进 `global.css`。
+  正文高度必须由弹窗的 `height` 定死（`min(700px, calc(100vh - var(--h-titlebar) - 48px))`），
+  只给 `max-height` 让弹窗按内容定高的话，正文高度成了内容反推的结果，
+  右侧内容区拿不到滚动高度、会被 `overflow: hidden` 整块裁掉（滚都滚不到），
+  `height: 100%` 也解析不出来 —— 症状是「两栏高过弹窗、下半截直接没了」。
+- **去掉页脚的弹窗要自己收紧正文内边距**：上面那个 30/20 是 EP 按「正文下面还有一个按钮行」留的，
+  只靠右上角 × 关闭时不放页脚，底部就会空出一大块、内容看着像没对齐 ——
+  放大截图里一眼能看见，正常尺寸下只是「说不上来哪里怪」。
+  写法是给弹窗挂个 class、在 `global.css` 里把 `.el-dialog__header` / `.el-dialog__body`
+  的内边距按实际结构定死（见 `.account-dialog`）。
+- **鼠标指针是真的移过去才能量 `:hover`**（`Input.dispatchMouseEvent` 的 `mouseMoved`）：
+  量到的 `getComputedStyle(...).backgroundColor` 才是悬停色，只读静态样式会得到「没反应」的错觉。
 - **浏览器预览只覆盖渲染层一半**：涉及文件系统、子进程、图像解码的都在 Rust 侧，回 `cargo test` 或真应用里验。
+- **产物要用 http 打开，别用 `file://`**：Chromium 会按 CORS 拦掉 `file://` 下的
+  `<script type="module">`，页面一片空白、控制台外没有任何迹象。在截图脚本里起一个十几行的
+  静态服务器（`node:http` + `readFileSync`，按后缀给 `Content-Type`）指向 `.preview/dist` 即可。
+- **假的 `window.workbench` 必须实现 `getBootstrap`**：`bootstrapSnapshot()` 走的就是它
+  （见 [bootstrap.ts](../../src/renderer/src/bootstrap.ts)），缺了它整个 store 退回 `DEFAULT_SETTINGS`
+  + 异步加载那条老路 —— 而单独挂一个组件时没人调 `init()`/`loadData()`，于是设置永远是默认值。
+  症状是「按设置分支渲染的区块根本不出现」（比如需要先填仓库地址才显示的那几块），
+  很容易误判成新写的 `v-if` 写错了。顺手给 `getThemeConfig` 也补上。
+- **store 的动作是一参调用，桩别按 `{ patch }` 解包**：`window.workbench.updateSettings(patch)`
+  收的就是补丁本身（`{ patch }` 那层是适配层调 Tauri 命令时的写法）。桩里写成 `args?.patch`
+  会静默返回未修改的值，看起来就是「点了没反应」。
+- **设置弹窗的滚动容器是每个 `.pane`，不是 `.settings__body`**：正文（`.settings__body`）只是过道，
+  各 pane 自己滚并各留各的位置（见 SettingsDialog 里的注释）。要滚到「账号 / Token 同步」那几块，
+  得挑当前可见的那个 pane 滚（`getComputedStyle(p).display !== 'none'`），
+  滚 `.settings__body` 只会原地不动，症状是「截来截去都停在半截」。
+- **刚打开的弹窗要在下一次求值里才查得到 DOM**：`demo.open(); document.querySelector('button.nav-item').click()`
+  写在同一次 `Runtime.evaluate` 里会**点空** —— Vue 还没重新渲染，节点根本不存在，
+  而 `querySelector(...)` 返回 null 时 `.click()` 抛错才看得见，写成 `?.click()` 就会静悄悄什么都不发生。
+  拆成两次求值（中间 sleep 一下）即可。
+- **切场景时注意状态之间的优先级**：组件里 `v-else-if` 的先后就是优先级。
+  账号弹窗里「等待授权」排在「已登录」前面，所以只改账号、不清 `authPending`，
+  截出来的仍然是等待态 —— 这类「改了没反应」先怀疑场景没切干净，别去改组件。
 - **截图按"当时在调什么"命名，成对的用 `-before` / `-after`**。这是给当时的自己看的，
   反正是用完即删，别花心思整理成体系。

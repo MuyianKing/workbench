@@ -1,1 +1,6 @@
 /target
+
+# 账号登录用的 OAuth 应用凭据（client_id / client_secret）。
+# **绝不能入库**：这是别人能把请求冒充成本应用的凭据。
+# 模板见 oauth.example.json，构建时由 build.rs 打进二进制。
+/oauth.local.json

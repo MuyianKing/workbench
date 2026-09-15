@@ -63,11 +63,15 @@ export interface TokenSourceSnapshot {
 }
 
 /**
- * 一台机器的用量快照:既是本机 token-data.json 的落盘结构,也是同步仓库里的一份设备分片。
+ * 一台机器的用量快照:既是本机 token-usage.json 的落盘结构,也是同步仓库里的一份设备分片。
  *
  * device 是机器本地生成的 id(见 Rust 的 paths::device_file),分片文件名就是它。
  * 它**绝不随数据目录迁移、也不进同步仓库** —— 两台机器拿到同一个 id 就会互相覆盖,
  * 表现成「数据永远只有一台机器的」,而且没有任何报错。
+ *
+ * 外观配置**不在这里**:它是 theme.json 的整份内容,按同样的「一台机器一个文件」布局
+ * 放在仓库的 config/ 目录下(见 sync-config.ts)。两者各走各的目录之后,
+ * 用量那边的口径/版本演进不必再带上外观,反之也一样。
  */
 export interface TokenShard {
   version: number
@@ -126,8 +130,8 @@ export interface TokenUsageResult {
   sync: TokenSyncStatus
 }
 
-/** token-data.json 与 workbench-data.json 同目录,文件名在这里当唯一口径 */
-export const TOKEN_DATA_FILE_NAME = 'token-data.json'
+/** token-usage.json 与 workbench-data.json 同目录,文件名在这里当唯一口径 */
+export const TOKEN_USAGE_FILE_NAME = 'token-usage.json'
 
 /** 同步仓库地址的长度上限:git 远程地址远短于此,超长多半是贴错了东西 */
 export const TOKEN_SYNC_REPO_MAX_LENGTH = 300
@@ -155,15 +159,17 @@ export const TOKEN_KEEP_DAYS = 53 * 7
  * v2:去掉 v1 里的「厂商」层(当初误把模型供应商当成了统计维度)。
  * v3:修正 input_tokens 口径 —— ZCode 的输入是含缓存读取的总输入,v2 快照把缓存双算了。
  * v4:包一层设备信息(device / name),逐日计数与 v3 完全一致。
+ * v5:多带一份外观配置(appearance),逐日计数与 v4 完全一致。
+ * v6:外观搬去 config/ 目录,这个文件只剩用量 —— 逐日计数与 v5 完全一致。
  *
  * 读取时**不能**按「版本不等就整份弃用」处理:v1→v2→v3 是口径修正,弃掉之后能从上游实读自愈;
  * 而 v4 起文件里装着**别的机器**的历史,弃掉就再也读不回来(那台机器不开机就不会重写分片)。
  * 所以兼容版本显式列进下面这张表,新增口径版本要手工往里加,别写成 `version >= 3`。
  */
-export const TOKEN_DATA_VERSION = 4
+export const TOKEN_DATA_VERSION = 6
 
-/** 能安全读进来的版本:这几版之间的逐日计数口径相同,包一层设备信息不改变计数 */
-export const TOKEN_DATA_COMPATIBLE_VERSIONS: readonly number[] = [3, 4]
+/** 能安全读进来的版本:这几版之间的逐日计数口径相同,多带一份外观、或是把外观搬走都不改变计数 */
+export const TOKEN_DATA_COMPATIBLE_VERSIONS: readonly number[] = [3, 4, 5, 6]
 
 const DATE_KEY = /^\d{4}-\d{2}-\d{2}$/
 

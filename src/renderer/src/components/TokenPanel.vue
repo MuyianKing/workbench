@@ -8,9 +8,10 @@
  * 占比默认统计整个窗口(全部);点击某根柱子则把占比切到那个桶(那天/那周/那月),再点一下回到全部。
  *
  * 数据是主进程「实读 + max 合并进快照」后的结果,这里不做任何持久化,只拉取与展示:
- * 挂载时取一次,之后每分钟刷新(与主进程的落盘节奏一致),「⋯」外还有标题栏右侧的
- * 手动刷新按钮(与系统状态卡片同款)。缓存读取通常占九成以上,构成拆分收在悬停里,
- * 总量数字才不会因缓存命中波动而误导。
+ * 挂载时**先出本地那份快照**、再实读覆盖它(boot),之后每分钟刷新(与主进程的落盘节奏一致),
+ * 「⋯」外还有标题栏右侧的手动刷新按钮(与系统状态卡片同款)。后台的自动同步跑完还会广播一次,
+ * 收到也重取 —— 同步不挡出数,别的机器的新数据靠这一下补上。
+ * 缓存读取通常占九成以上,构成拆分收在悬停里,总量数字才不会因缓存命中波动而误导。
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
@@ -58,7 +59,16 @@ const toKey = ref('')
 const nowTick = ref(Date.now())
 /** 手动同步进行中(自动同步在后台做,不给它加转圈,免得每分钟闪一下) */
 const syncing = ref(false)
+/**
+ * 实读是否已经回来过一次。
+ *
+ * 没回来之前不说「暂无记录」—— 那会把「还在读」说成「没有」，
+ * 而有数据的用户看到那句话只会以为自己的数据丢了（冷读一轮要一秒上下）。
+ */
+const readOnce = ref(false)
 let timer: number | null = null
+/** 后台同步广播的退订函数 */
+let unsubscribe: (() => void) | null = null
 
 function applyResult(res: Awaited<ReturnType<typeof window.workbench.getTokenUsage>>): void {
   if (res.ok && res.data) {
@@ -74,7 +84,19 @@ async function refresh(): Promise<void> {
     applyResult(await window.workbench.getTokenUsage())
   } finally {
     loading.value = false
+    readOnce.value = true
   }
+}
+
+/**
+ * 首屏那一步：只读本地那份快照（几毫秒），先把上次的数据摆出来，再走实读覆盖它。
+ *
+ * 必须**等它应用完**才发实读请求：两条路的结果是整份替换，谁后到谁说了算 ——
+ * 反过来（并发发出）实读可能先落地，然后被这份更旧的快照盖掉，界面上就是数字往回缩。
+ */
+async function boot(): Promise<void> {
+  applyResult(await window.workbench.getTokenUsageSnapshot())
+  await refresh()
 }
 
 /**
@@ -99,12 +121,17 @@ async function syncNow(): Promise<void> {
 }
 
 onMounted(() => {
-  void refresh()
+  // 先出本地快照，再实读（boot 内部按顺序来，理由见它上面那段注释）
+  void boot()
   timer = window.setInterval(() => void refresh(), 60_000)
+  // 后台的自动同步跑完会广播一次：新读回的别人的分片立刻显示出来，
+  // 不必干等到下一个轮询周期（首屏用的是上一次同步时读回的那一份）
+  unsubscribe = window.workbench.onTokenSynced(() => void refresh())
 })
 
 onBeforeUnmount(() => {
   if (timer) window.clearInterval(timer)
+  unsubscribe?.()
 })
 
 const days = computed(() => (result.value ? flattenSources(result.value.data) : {}))
@@ -550,9 +577,17 @@ function detailWidth(value: number, max: number): string {
       </div>
     </template>
 
+    <!-- 空态分两种:实读还没回来时是「读取中」,回来过才是「确实没有」——
+         把前者说成后者,有数据的用户会以为自己的记录没了 -->
     <div v-else class="empty">
-      <p>暂无 Token 用量记录</p>
-      <p class="empty__hint">在 ZCode / DeepSeek Harness / CodeBuddy / WorkBuddy 里跑过对话后,这里会出现按天的统计</p>
+      <template v-if="!readOnce">
+        <p>正在读取用量…</p>
+        <p class="empty__hint">首次读取要解析各工具的本地日志,稍等一下</p>
+      </template>
+      <template v-else>
+        <p>暂无 Token 用量记录</p>
+        <p class="empty__hint">在 ZCode / DeepSeek Harness / CodeBuddy / WorkBuddy 里跑过对话后,这里会出现按天的统计</p>
+      </template>
     </div>
     </div>
   </article>
@@ -879,7 +914,7 @@ function detailWidth(value: number, max: number): string {
 }
 
 .detail__foot {
-  padding-left: var(--sp-4);
+  padding-left: var(--sp-2);
   margin-top: 1px;
   font-size: var(--fs-micro);
   color: var(--ink-3);

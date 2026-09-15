@@ -16,7 +16,11 @@ import { STATUS_META, isBusyStatus } from '@/status'
 import { useProjectsStore } from '@/stores/projects'
 import type { Project, ProjectStatus } from '@/types'
 
-const props = defineProps<{ project: Project }>()
+const props = defineProps<{
+  project: Project
+  /** 从搜索结果跳过来的那一张：带一圈定位环，指出「就是它」 */
+  highlight?: boolean
+}>()
 const store = useProjectsStore()
 
 const runtime = computed(() => store.runtimeOf(props.project.id))
@@ -107,7 +111,8 @@ function onMore(command: string): void {
 <template>
   <article
     class="card"
-    :class="[`tone-${meta.tone}`, { 'is-busy': isBusy }]"
+    :class="[`tone-${meta.tone}`, { 'is-busy': isBusy, 'is-target': highlight }]"
+    :data-project-id="project.id"
     role="button"
     tabindex="0"
     draggable="true"
@@ -316,6 +321,18 @@ function onMore(command: string): void {
 
 .card.is-busy {
   cursor: default;
+}
+
+/**
+ * 从搜索结果跳过来的那一张。
+ *
+ * 用 box-shadow 画环而不是 ::after：卡片自己 overflow: hidden（状态灯带与长路径要靠它裁），
+ * 绝对定位的描边会被裁掉一圈。box-shadow 画在边框盒之外，不受影响。
+ */
+.card.is-target,
+.card.is-target:hover {
+  border-color: var(--el-color-primary);
+  box-shadow: var(--shadow-hover), 0 0 0 2px var(--el-color-primary);
 }
 
 /* ---------- 状态灯带（本设计的标志性元素） ---------- */

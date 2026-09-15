@@ -2,11 +2,14 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod commands;
+mod credentials;
 mod encoding;
+mod http;
 mod icon;
 mod imaging;
 mod nrm;
 mod nvm;
+mod oauth;
 mod paths;
 mod proc;
 mod session;
@@ -304,6 +307,13 @@ fn main() {
             commands::token_device,
             commands::token_sync_publish,
             commands::token_sync_shards,
+            commands::auth_status,
+            commands::auth_refresh_account,
+            commands::auth_login_start,
+            commands::auth_login_poll,
+            commands::auth_login_submit,
+            commands::auth_login_cancel,
+            commands::auth_logout,
             commands::check_port,
             commands::kill_port_process,
             commands::reveal,

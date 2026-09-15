@@ -1,12 +1,15 @@
 /**
  * 渲染层与 Tauri 后端之间的桥。
  *
- * 三条约定：
+ * 四条约定：
  *  1. 前端只认 `window.workbench` 这个契约，不认识 Tauri 命令名 —— 名字映射收敛在这里；
  *  2. 尚未移植的通道统一走 `notPorted`，返回与 `Result` 同形的失败值而不是抛错，
  *     界面因此降级成空态而不是白屏（迁移期间的可观测性靠它）；
- *  3. 全部经 `__TAURI__` / `__TAURI_INTERNALS__`，不引 npm 依赖（tauri.conf.json 里开了 withGlobalTauri）。
+ *  3. 全部经 `__TAURI__` / `__TAURI_INTERNALS__`，不引 npm 依赖（tauri.conf.json 里开了 withGlobalTauri）；
+ *  4. 可能失败的调用经 `guard` 收敛成 `Result`，形状与主进程版一致。
  */
+import { fail, ok } from '@shared/result'
+import type { Result } from '@shared/types'
 
 /** Tauri 注入到 window 上的全局对象（withGlobalTauri） */
 interface TauriGlobalApi {
@@ -86,9 +89,25 @@ export function listen<T>(event: string, handler: (payload: T) => void): () => v
   }
 }
 
+/**
+ * 把可能失败的异步动作收敛成 `Result` —— 与主进程版一样的返回形状，渲染层判断逻辑不变。
+ *
+ * 不复用 shared/result.ts 的 `toResult` 是因为这一层的失败值来自 Rust：
+ * 命令返回 `Err(String)` 时 Tauri 直接用那个字符串 reject，所以 `error` 往往不是 Error 实例，
+ * 取 `.message` 会得到 undefined；这里必须同时兼容字符串与 Error。
+ */
+export async function guard<T>(task: Promise<T>, fallback: string): Promise<Result<T>> {
+  try {
+    return ok(await task)
+  } catch (error) {
+    if (error instanceof Error) return fail(error.message)
+    if (typeof error === 'string' && error.trim()) return fail(error)
+    return fail(fallback)
+  }
+}
+
 /** 已经报过「尚未移植」的通道，避免同一个警告刷满控制台 */
 const warned = new Set<string>()
-
 /**
  * 尚未移植的通道。
  *

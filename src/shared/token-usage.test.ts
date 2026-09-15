@@ -135,10 +135,26 @@ describe('落盘收敛', () => {
     )
 
     // 口径没变,历史必须留住 —— 这里要是整份弃用,用户攒下的一年快照就没了
-    expect(shard.version).toBe(4)
+    expect(shard.version).toBe(6)
     expect(shard.device).toBe('dev-1')
     expect(shard.name).toBe('办公室')
     expect(shard.sources.zcode.days['2026-09-13']['glm-5'].inputTokens).toBe(10)
+  })
+
+  it('v5 分片也照常读进来,多出来的外观字段被忽略', () => {
+    // 外观已经搬去 config/ 目录(见 sync-config.ts),老分片里那份不再需要:
+    // 读它只会让同一份配置有两处来源,而那边是整份采用、这边根本没法合
+    const shard = sanitizeShard({
+      version: 5,
+      device: 'dev-3',
+      name: '书房',
+      updatedAt: 9,
+      sources: {},
+      appearance: { settings: { theme: 'light' } }
+    })
+
+    expect(shard.version).toBe(6)
+    expect(shard).not.toHaveProperty('appearance')
   })
 
   it('分片自带的设备信息优先于 fallback', () => {
@@ -157,7 +173,7 @@ describe('落盘收敛', () => {
       sources: { zcode: { days: { '2026-09-13': { zhipu: { 'glm-5': { inputTokens: 10 } } } } } }
     }
     expect(sanitizeShard(v1)).toEqual({
-      version: 4,
+      version: 6,
       device: '',
       name: '',
       updatedAt: 0,
@@ -166,7 +182,7 @@ describe('落盘收敛', () => {
   })
 
   it('sanitizeShard 对 null / 数组 / 数字等整份坏数据回空分片', () => {
-    const empty = { version: 4, device: '', name: '', updatedAt: 0, sources: {} }
+    const empty = { version: 6, device: '', name: '', updatedAt: 0, sources: {} }
     expect(sanitizeShard(null)).toEqual(empty)
     expect(sanitizeShard([1, 2])).toEqual(empty)
     expect(sanitizeShard(42)).toEqual(empty)

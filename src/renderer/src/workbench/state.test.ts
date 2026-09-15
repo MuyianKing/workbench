@@ -9,11 +9,22 @@
  */
 import { beforeAll, describe, expect, it } from 'vitest'
 
+/** 记下每个通道与它的入参：迁移有没有真的落盘，只能从这里看 */
+const calls: Array<{ command: string; args?: Record<string, unknown> }> = []
+/** 磁盘上那两份数据（用例直接摆，模拟升级前后的样子） */
+let rawData: unknown = null
+let rawTheme: unknown = null
+
 beforeAll(() => {
   ;(globalThis as { window?: unknown }).window = {
     __TAURI_INTERNALS__: {
-      invoke: (command: string): Promise<unknown> =>
-        Promise.resolve(command === 'fs_exists' ? true : null)
+      invoke: (command: string, args?: Record<string, unknown>): Promise<unknown> => {
+        calls.push({ command, args })
+        if (command === 'fs_exists') return Promise.resolve(true)
+        if (command === 'data_load') return Promise.resolve(rawData)
+        if (command === 'theme_load') return Promise.resolve(rawTheme)
+        return Promise.resolve(null)
+      }
     }
   }
 })
@@ -42,5 +53,50 @@ describe('适配层交出去的列表', () => {
     rendered.push({ id: 'ghost', name: '幽灵', target: 'C:\\ghost.exe', order: 99, createdAt: 0 })
 
     expect(state.quickApps()).toHaveLength(before)
+  })
+})
+
+/**
+ * 外观从数据文件搬进 theme.json 的那一次搬家（见 shared/appearance.ts）。
+ *
+ * 这是整次改动里最容易静默丢数据的一步：搬晚了（数据文件先按新口径落盘、把那些键摘掉），
+ * 用户的主题色、背景、终端高度就再也没处可搬。所以既要断言搬到了，也要断言**立刻落盘**。
+ */
+describe('老数据的搬家', () => {
+  function savedTheme(): { appearance?: { accentColor?: string }; gridStep?: number } | null {
+    const call = calls.find((item) => item.command === 'theme_save')
+    return (call?.args?.value ?? null) as { appearance?: { accentColor?: string } } | null
+  }
+
+  it('主题文件里还没有外观时，从设置里搬过去并立刻落盘', async () => {
+    rawTheme = { version: 2, gridStep: 3, cards: {} }
+    rawData = {
+      settings: { accentColor: '#ef4444', terminalHeight: 320, hotkey: 'Control+J' },
+      projects: []
+    }
+    calls.length = 0
+
+    await state.initState()
+
+    // 渲染层看到的那份设置是老样子（外观与其余项合在一起，组件不必知道文件怎么分的）
+    expect(state.settings().accentColor).toBe('#ef4444')
+    expect(state.settings().terminalHeight).toBe(320)
+    expect(state.settings().hotkey).toBe('Control+J')
+    // 布局不受影响：搬外观不能顺手把摆放清了
+    expect(state.themeConfig().gridStep).toBe(3)
+    expect(state.themeConfig().appearance.accentColor).toBe('#ef4444')
+    // 搬完必须马上写回主题文件：数据文件下一次落盘就会把那些键摘掉
+    expect(savedTheme()?.appearance?.accentColor).toBe('#ef4444')
+  })
+
+  it('主题文件里已经有外观时以它为准，不再回迁也不需要落盘', async () => {
+    rawTheme = { version: 2, appearance: { accentColor: '#22c55e' } }
+    rawData = { settings: { accentColor: '#ef4444' }, projects: [] }
+    calls.length = 0
+
+    await state.initState()
+
+    expect(state.settings().accentColor).toBe('#22c55e')
+    expect(calls.some((item) => item.command === 'theme_save')).toBe(false)
   })
 })

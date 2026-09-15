@@ -14,6 +14,7 @@ import { fail, ok } from '@shared/result'
 import type {
   AddProjectInput,
   AppSettings,
+  AuthProvider,
   BackgroundImage,
   BuiltinWallpaper,
   CommandEntry,
@@ -27,9 +28,10 @@ import type {
   WindowState,
   WorkbenchApi
 } from '@shared/types'
-import { assetUrl, hasTauri, invoke, listen, notPorted } from './bridge'
+import { assetUrl, guard, hasTauri, invoke, listen, notPorted } from './bridge'
 import { emit } from './events'
 import * as events from './events'
+import * as auth from './auth'
 import * as nrm from './nrm'
 import * as nvm from './nvm'
 import * as orphan from './orphan'
@@ -38,27 +40,14 @@ import * as scanner from './scanner'
 import * as session from './session'
 import * as state from './state'
 import * as system from './system'
-import { getTokenUsage, syncTokenUsage } from './token'
+import { getTokenUsage, getTokenUsageSnapshot, listSyncDevices, syncTokenUsage } from './token'
 
-/** 把设置里的 system 解析成实际明暗 */
+/**
+ * 把设置里的 system 解析成实际明暗
+ */
 function resolveTheme(theme: AppSettings['theme']): EffectiveTheme {
   if (theme === 'light' || theme === 'dark') return theme
   return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
-}
-
-/**
- * 把可能失败的异步动作收敛成 Result —— 与主进程版一样的返回形状，渲染层判断逻辑不变。
- *
- * 不复用 shared/result.ts 的 toResult 是因为这一层的失败值来自 Rust：
- * 命令返回 `Err(String)` 时 Tauri 直接用那个字符串 reject，所以 `error` 往往不是 Error 实例，
- * 取 `.message` 会得到 undefined；这里必须同时兼容字符串与 Error。
- */
-async function guard<T>(task: Promise<T>, fallback: string): Promise<Result<T>> {
-  try {
-    return ok(await task)
-  } catch (error) {
-    return fail(error instanceof Error ? error.message : fallback)
-  }
 }
 
 function reasonOf(error: unknown, fallback: string): string {
@@ -285,9 +274,20 @@ function createApi(): WorkbenchApi {
      */
     getTokenUsage: () =>
       guard(getTokenUsage({ repo: state.settings().tokenSyncRepo }), '读取 token 用量失败'),
+    /** 首屏先手：只读本地那份快照，实读结果随后覆盖它（见 shared/types.ts 的说明） */
+    getTokenUsageSnapshot: () =>
+      guard(
+        getTokenUsageSnapshot({ repo: state.settings().tokenSyncRepo }),
+        '读取 token 快照失败'
+      ),
     /** 手动同步：绕过自动同步的节流（面板上的同步按钮） */
     syncTokenUsage: () =>
       guard(syncTokenUsage(state.settings().tokenSyncRepo), '同步 token 用量失败'),
+    /**
+     * 仓库里的其它机器（含各自的外观配置），设置界面「从别的机器取外观」用。
+     * 与上面两个同理，地址从设置现取：用户刚填完就该看到新仓库里的机器。
+     */
+    listSyncDevices: () => listSyncDevices(state.settings().tokenSyncRepo),
 
     // ---------- 设置与布局 ----------
     getSettings: () => Promise.resolve(state.settings()),
@@ -298,8 +298,15 @@ function createApi(): WorkbenchApi {
       return Promise.resolve(ok(next))
     },
     getThemeConfig: () => Promise.resolve(state.themeConfig()),
-    updateThemeConfig: (patch: Partial<ThemeConfig>) =>
-      Promise.resolve(ok(state.updateThemeConfig(patch))),
+    /**
+     * 首页布局与外观同一个文件（theme.json），所以改主题也可能改了设置 ——
+     * 把合并后的那份推一遍，渲染层的 settings 才会跟着刷新（应用别的机器的配置就走这条路）。
+     */
+    updateThemeConfig: (patch: Partial<ThemeConfig>) => {
+      const next = state.updateThemeConfig(patch)
+      emit('settingsChanged', state.settings())
+      return Promise.resolve(ok(next))
+    },
 
     // ---------- 背景图 ----------
     pickBackground: () =>
@@ -422,6 +429,17 @@ function createApi(): WorkbenchApi {
     getWindowState: () =>
       invoke<boolean>('window_is_maximized').then((maximized): WindowState => ({ maximized })),
 
+    // ---------- 账号 ----------
+    // 换 token、回环监听、凭据落盘都在 Rust 侧；这里只驱动轮询并落显示资料，
+    // 全程不会有 token 回到渲染层（见 workbench/auth.ts）
+    authStatus: () => auth.authStatus(),
+    authRefreshAccount: (provider: AuthProvider) => auth.refreshAccount(provider),
+    authLogin: (provider: AuthProvider, onAuthUrl?: (authUrl: string, opened: boolean) => void) =>
+      auth.login(provider, onAuthUrl),
+    authLoginSubmit: (url: string) => auth.submit(url),
+    authLoginCancel: () => auth.cancel(),
+    authLogout: (provider: AuthProvider) => auth.logout(provider),
+
     // ---------- 事件订阅 ----------
     // 窗口状态来自 Tauri 事件；其余来自适配层内部的广播（见 events.ts），
     // 契约与 preload 版完全一致，组件不需要知道底下换了实现。
@@ -446,6 +464,9 @@ function createApi(): WorkbenchApi {
 
     onQuickApps: (handler: Parameters<WorkbenchApi['onQuickApps']>[0]) =>
       events.subscribe('quickApps', handler),
+
+    /** 后台自动同步跑完一轮（见 token.ts 的 getTokenUsage）：Token 面板据此立刻重取 */
+    onTokenSynced: (handler: () => void) => events.subscribe('tokenSynced', handler),
 
     onQuitConfirm: (handler: Parameters<WorkbenchApi['onQuitConfirm']>[0]) =>
       events.subscribe('quitConfirm', handler),

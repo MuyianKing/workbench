@@ -4,11 +4,22 @@
  * 这是「逻辑留在 TS」这条架构选择的落点：Rust 只负责把 JSON 安全地读写到磁盘，
  * 收敛（sanitize）、默认值合并、字段增删都在这里，与 `src/shared/persisted-data.ts` 共用一份实现，
  * 所以 Electron 时代那批纯逻辑单测可以原样保留，改起来也还是 HMR 秒级。
+ *
+ * **设置分两个文件**:外观与首页布局住在 theme.json,其余(快捷键 / 开机自启 / 数据目录 /
+ * 同步仓库地址…)住在 workbench-data.json。渲染层只认一份完整的 `AppSettings` ——
+ * 读的时候在这里合（`settings()`）、写的时候在这里分（`updateSettings` 按白名单分流）。
  */
 import { withSessionRecorded, withoutSession } from '@shared/orphan'
 import { emptyData, parseData, sanitizeSettings } from '@shared/persisted-data'
-import { DEFAULT_THEME, sanitizeTheme, type ThemeConfig } from '@shared/theme'
+import {
+  mergeSettingsAppearance,
+  migrateAppearanceIntoTheme,
+  splitSettingsPatch,
+  type AppearanceSettings
+} from '@shared/appearance'
+import { DEFAULT_THEME, sameThemeContent, sanitizeTheme, type ThemeConfig } from '@shared/theme'
 import type {
+  AccountProfile,
   ActiveSession,
   AppSettings,
   CommandEntry,
@@ -46,13 +57,19 @@ function rawBootstrap(): RawBootstrap | null {
 /**
  * 首屏设置：用同步注入的快照，拿不到就落默认值。
  * 与 Electron 版走的是同一条退化路径（见 src/renderer/src/bootstrap.ts）。
+ *
+ * 快照是两份原始数据（数据文件的 settings + 主题文件），这里要按同一条规则合成渲染层认的那一份：
+ * 先把老数据里还在 settings 中的外观搬进主题，再合起来。
  */
 export function initialSettings(): AppSettings {
-  return sanitizeSettings(rawBootstrap()?.settings)
+  const raw = rawBootstrap()
+  const theme = sanitizeTheme(migrateAppearanceIntoTheme(raw?.themeConfig, raw?.settings))
+  return mergeSettingsAppearance(sanitizeSettings(raw?.settings), theme.appearance)
 }
 
 export function initialTheme(): ThemeConfig {
-  return sanitizeTheme(rawBootstrap()?.themeConfig)
+  const raw = rawBootstrap()
+  return sanitizeTheme(migrateAppearanceIntoTheme(raw?.themeConfig, raw?.settings))
 }
 
 /** 载入磁盘数据。收敛逻辑与首屏快照完全同源，两条路径不会给出不一样的结果。 */
@@ -63,7 +80,15 @@ export async function initState(): Promise<void> {
   ])
 
   data = parseData(rawData, () => crypto.randomUUID())
-  theme = sanitizeTheme(rawTheme)
+
+  // 老数据：外观那几项原本住在数据文件的 settings 里，主题文件里还没有它们。
+  // 搬过去之后**立刻落盘主题文件**：数据文件那边下一次落盘就会把这些键摘掉
+  // （见 sanitizeSettings），中间要是被关掉，用户的主题色 / 背景就再也没处可搬了。
+  const rawSettings = (rawData as { settings?: unknown } | null)?.settings
+  const migrated = migrateAppearanceIntoTheme(rawTheme, rawSettings)
+  theme = sanitizeTheme(migrated)
+  if (migrated !== rawTheme) void invoke('theme_save', { value: theme })
+
   loaded = true
 }
 
@@ -106,8 +131,32 @@ export function groups(): ProjectGroup[] {
   return data.groups
 }
 
+/**
+ * 渲染层看到的那份完整设置：数据文件里的设置 + 主题文件里的外观。
+ *
+ * 快照（copy）是为了守住「适配层与渲染层之间是进程边界」这条约定（见下面 copy 的注释）：
+ * 直接递出内部对象的话，渲染层改 `settings.appName` 就会绕过 updateSettings 写进落盘数据。
+ */
 export function settings(): AppSettings {
-  return copy(data.settings)
+  return copy(mergeSettingsAppearance(data.settings, theme.appearance))
+}
+
+// ---------- 账号资料 ----------
+
+/**
+ * 登录账号的显示资料（昵称头像那几项）。
+ *
+ * **这不是「是否已登录」的判据**：token 在 Windows 凭据管理器里，权威来源是
+ * `authStatus().providers`。这里存着的资料在凭据被清掉之后只是残留，
+ * 由适配层在启动时对账清掉（见 workbench/auth.ts）。
+ */
+export function account(): AccountProfile | null {
+  return data.account ? copy(data.account) : null
+}
+
+export function setAccount(next: AccountProfile | null): void {
+  data.account = next
+  persist()
 }
 
 export function themeConfig(): ThemeConfig {
@@ -120,15 +169,46 @@ export function listProjects(): { projects: Project[]; groups: ProjectGroup[] } 
 
 // ---------- 设置与布局 ----------
 
+/**
+ * 主题文件只在**内容真的变过**时才刷新时间戳。
+ *
+ * 同步那边是「内容没变就不产生提交」（见 sync.rs 的 publish_at），而时间戳本身就在文件里：
+ * 每轮都刷一下的话，仓库里会堆出一串只改了时间的提交；反过来一直不刷，别的机器读到的
+ * 「更新于」就永远停在第一次同步那一刻。
+ */
+function touchTheme(next: ThemeConfig, before: ThemeConfig): ThemeConfig {
+  return sameThemeContent(before, next) ? next : { ...next, updatedAt: Date.now() }
+}
+
+/** 只改外观那几项（补丁来自 updateSettings 的分流） */
+function updateAppearance(patch: Partial<AppearanceSettings>): void {
+  const before = theme
+  const merged = sanitizeTheme({ ...theme, appearance: { ...theme.appearance, ...patch } })
+  theme = touchTheme(merged, before)
+  persistTheme()
+}
+
 export function updateSettings(patch: Partial<AppSettings>): AppSettings {
   // 先 sanitize 再落盘：手改过的数据文件不会把非法取值带进内存（与主进程版同一函数）
-  data.settings = sanitizeSettings({ ...data.settings, ...patch })
+  const { settings: stored, appearance } = splitSettingsPatch(patch)
+  if (Object.keys(appearance).length) updateAppearance(appearance)
+
+  data.settings = sanitizeSettings({ ...data.settings, ...stored })
   persist()
-  return copy(data.settings)
+  return settings()
 }
 
 export function updateThemeConfig(patch: Partial<ThemeConfig>): ThemeConfig {
-  theme = sanitizeTheme({ ...theme, ...patch })
+  const before = theme
+  // 时间戳不认调用方给的（它是同步用的推导值），外观按字段合并 —— 调用方给的是补丁，
+  // 直接替换整段会把没提到的外观项打回默认值
+  const merged = sanitizeTheme({
+    ...theme,
+    ...patch,
+    appearance: { ...theme.appearance, ...(patch.appearance ?? {}) },
+    updatedAt: before.updatedAt
+  })
+  theme = touchTheme(merged, before)
   persistTheme()
   return copy(theme)
 }
