@@ -11,7 +11,7 @@
  */
 import { computed } from 'vue'
 import type { Component } from 'vue'
-import { Notebook, FolderOpened, Grid } from '@element-plus/icons-vue'
+import { Notebook, FolderOpened, Grid, Document } from '@element-plus/icons-vue'
 import { VIEW_IDS, VIEW_LABELS, type ViewId } from '@shared/views'
 import { useProjectsStore } from '@/stores/projects'
 
@@ -21,7 +21,8 @@ const store = useProjectsStore()
 const ICONS: Record<ViewId, Component> = {
   home: Grid,
   projects: FolderOpened,
-  work: Notebook
+  work: Notebook,
+  notes: Document
 }
 
 const active = computed(() => store.activeView)

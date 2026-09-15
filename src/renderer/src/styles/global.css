@@ -502,6 +502,25 @@ body.is-dragging-terminal-dock * {
 }
 
 /**
+ * 工具带里左右两端那两组控件（.filter 的直接子元素）。
+ * 三个页面共用同一套外壳，所以与 .filter 一样放全局 —— 谁都不该是「规矩的出处」。
+ * `.filter` 已经负责把两组分开，这里只管各自内部怎么排队；间距由调用方在必要时收紧
+ * （项目页那一排筛选标签比工作页密一档，见 ProjectFilterBar）。
+ */
+.filter__head,
+.filter__tools {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+
+/* 右侧那组永远不参与收缩：工具带变窄时该让位的是左边的标签 */
+.filter__tools {
+  flex-shrink: 0;
+}
+
+/**
  * 工具带上的「排序」下拉（项目页按最近使用 / 名称 / 添加时间，工作页按时间 / 项目）。
  * 和 .filter 一样是两个页面共用的外壳，所以也放全局 —— 见上面那段说明。
  */

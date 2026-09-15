@@ -1,6 +1,7 @@
 import { resolve } from 'node:path'
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
+import { vditorAssets } from './scripts/sync-vditor-assets.mjs'
 
 /**
  * 渲染层的唯一构建入口。
@@ -17,7 +18,8 @@ export default defineConfig({
       '@shared': resolve(import.meta.dirname, 'src/shared')
     }
   },
-  plugins: [vue()],
+  // vditorAssets 把 Vditor 的图标 / 语言包 / 内容主题等复制到 public/（见 scripts/sync-vditor-assets.mjs）
+  plugins: [vue(), vditorAssets()],
   // Tauri 用自定义协议从根路径提供静态资源；相对路径在 http:// 与 tauri:// 下都不会出错
   base: './',
   build: {

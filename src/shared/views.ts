@@ -9,7 +9,7 @@
  * 重启后回到上次那一页，认不出来的值一律回首页。
  */
 
-export const VIEW_IDS = ['home', 'projects', 'work'] as const
+export const VIEW_IDS = ['home', 'projects', 'work', 'notes'] as const
 
 export type ViewId = (typeof VIEW_IDS)[number]
 
@@ -17,7 +17,8 @@ export type ViewId = (typeof VIEW_IDS)[number]
 export const VIEW_LABELS: Record<ViewId, string> = {
   home: '首页',
   projects: '项目',
-  work: '工作'
+  work: '工作',
+  notes: '笔记'
 }
 
 export function isViewId(value: unknown): value is ViewId {

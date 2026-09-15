@@ -37,6 +37,7 @@ import type {
   QuickAppPatch
 } from '@shared/types'
 import { invoke } from './bridge'
+import * as note from './note'
 import * as workLog from './work-log'
 
 let data: PersistedData = emptyData()
@@ -480,9 +481,11 @@ export async function dataFileExistsIn(dir: string): Promise<boolean> {
 export async function migrateDataDir(dir: string): Promise<void> {
   await invoke('data_save', { value: data })
   await invoke('theme_save', { value: theme })
-  // 工作日志是另一份文件，但它同属本地数据：不先落盘，Rust 搬走的是上一次写盘时的样子
+  // 工作日志与笔记是另外两份文件，但它们同属本地数据：不先落盘，Rust 搬走的是上一次写盘时的样子
   await workLog.flush()
+  await note.flush()
   await invoke('data_migrate', { dir })
-  // 搬完丢掉内存里那一份：它来自旧目录，下次打开工作页会从新目录重新读
+  // 搬完丢掉内存里那两份：它们来自旧目录，下次进对应页面会从新目录重新读
   workLog.reset()
+  note.reset()
 }

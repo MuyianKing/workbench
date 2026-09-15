@@ -248,13 +248,12 @@ function pickSort(key: string): void {
 
 /* ---------- 排序 ---------- */
 
-/* 排序控件（.sort / .sort__label / .sort__value / .sort__caret）与工具带外壳一样在 global.css：
-   工作页也用同一个控件，写法留在某个组件里另一个就只剩一半。 */
+/* 排序控件（.sort / .sort__label / .sort__value / .sort__caret）与工具带的排版（.filter__tools）
+   一样在 global.css：工作页也用同一套，写法留在某个组件里另一个就只剩一半。 */
 
-.filter__tools {
-  display: flex;
-  align-items: center;
+/* 这一页的筛选标签比工作页密一档，所以只收紧间距。
+   多带一层 .filter 是为了压过全局那条规则，而不是跟它打平手后赌样式注入顺序 */
+.filter .filter__tools {
   gap: 6px;
-  flex-shrink: 0;
 }
 </style>

@@ -44,12 +44,16 @@
 ## 1. 项目边界
 
 - 定位：Windows 桌面应用（Tauri 2 + WebView2），本机的「前端开发工作台」—— 管项目（一键启停打包）、
-  记工作（工作日志时间轴）、看 AI 用量（本机各工具的 Token 快照），三者都在一个窗口里，不是单纯的项目启动器。
+  记工作（工作日志时间轴）、写笔记（本地 markdown 笔记本）、看 AI 用量（本机各工具的 Token 快照），
+  四者都在一个窗口里，不是单纯的项目启动器。
 - 联网边界：默认不联网、不上报任何数据。**出口只有三个，且都由用户显式开启**：用户配置的 Token 同步仓库
   （一个 git 远程地址，设置里留空即关闭）、账号登录（点登录时才打 GitHub / Gitee 的 OAuth 接口，
   见 `oauth.rs`）、命令执行本身。除这三处不要新增网络出口，也不要往任何第三方服务发数据。
   登录是这条边界唯一一次放宽，加别的东西之前先想清楚能不能不做。
-- 技术栈：Rust 后端（Tauri ^2）+ Vue ^3.5.13 + TypeScript ^5.9.3；Element Plus ^2.8.8 + @element-plus/icons-vue ^2.3.1；Pinia ^4.0.3；markdown-it（**只服务工作日志正文的 markdown 渲染**，见第 5 节）。
+- 技术栈：Rust 后端（Tauri ^2）+ Vue ^3.5.13 + TypeScript ^5.9.3；Element Plus ^2.8.8 + @element-plus/icons-vue ^2.3.1；Pinia ^4.0.3；markdown-it（**只服务工作日志正文的 markdown 渲染**，见第 5 节）；Vditor（**只服务笔记正文**，见第 5 节）。
+- 引入新前端依赖前先想清楚它会不会在**运行时**去取外面的资源：Vditor 就是这类（图标 / 语言包 /
+  markdown 引擎 / 主题 / 代码高亮都按 `options.cdn` 在运行时取，默认指 unpkg）。
+  这类依赖要么把资源随包带一份、要么别引 —— 直接装上就等于给「默认不联网」开了个洞（做法见第 5 节）。
 - Rust 侧依赖（`src-tauri/Cargo.toml`）：`tauri`（`tray-icon`）、`tauri-plugin-dialog` / `opener` / `single-instance`、
   `rusqlite`（`bundled`，读 ZCode 本地 sqlite）、`zstd`（DSH 会话多帧解压）、`serde` / `serde_json` / `uuid`。
   另有六个**本来就在编译图里**的（由 tauri / tao / wry / tauri-utils 引入，加进来不新增任何编译单元）：
@@ -89,8 +93,11 @@
     缺它时应用照样能编译，只是登录按钮显示「未内置凭据」。
 - 配置：`src-tauri/tauri.conf.json`（窗口、打包、资源映射）、`src-tauri/capabilities/default.json`（能力白名单）。
 - 渲染层在 `src/renderer/src/`：公共与页面组件在 `components/`，Pinia store 在 `stores/`，设计令牌 `styles/tokens.css`，全局样式 `styles/global.css`。
+- **随包带的第三方静态资源放 `src/renderer/public/`**（目前只有 Vditor 那一份，内容由脚本生成、已在 `.gitignore` 里）：
+  vite 的 `publicDir` 会把它们原样复制进产物根目录，开发态由 dev server 直接提供，因此引用时用**相对基址**
+  （`import.meta.env.BASE_URL`）而不是写死 `/xxx` —— 打包后被引用的地址同时要在 `http://` 与 Tauri 的自定义协议下成立。
 - **适配层**在 `src/renderer/src/workbench/` —— 它是原 preload + 主进程逻辑的替代品，实现 `window.workbench` 契约：
-  `bridge.ts`（invoke / 事件 / 未移植兜底 / `guard`）、`events.ts`（适配层内部广播）、`state.ts`（持久化状态与增删改）、`session.ts`（进程会话与事件翻译）、`scanner.ts` / `nvm.ts` / `token.ts` / `work-log.ts`（工作日志，懒加载整份文件）/ `system.ts` / `quick-launch.ts` / `auth.ts`（登录轮询与状态对账），全局类型声明在 `global.d.ts`。
+  `bridge.ts`（invoke / 事件 / 未移植兜底 / `guard`）、`events.ts`（适配层内部广播）、`state.ts`（持久化状态与增删改）、`session.ts`（进程会话与事件翻译）、`scanner.ts` / `nvm.ts` / `token.ts` / `work-log.ts` 与 `note.ts`（工作日志与笔记，都懒加载整份文件）/ `system.ts` / `quick-launch.ts` / `auth.ts`（登录轮询与状态对账），全局类型声明在 `global.d.ts`。
 - 两端共用（类型、契约、纯逻辑）放 `src/shared/`；`shared/` 里禁止 import node、Rust 或渲染层代码。
 - 单测与被测模块同目录，命名 `*.test.ts`。路径别名：`@` → `src/renderer/src`，`@shared` → `src/shared`。
 - **跨组件复用的交互骨架放 `src/renderer/src/composables/`**（目前只有 `use-pointer-drag`：
@@ -150,8 +157,8 @@
 - **唯一的例外是工作区背景图**：它不经后端解码回传，而是让 webview 按文件直接加载（asset 协议），URL 由适配层的 `assetUrl()` 转出（见第 4 节）。读取权限**一律在 Rust 侧按单个文件授予**（[commands.rs](src-tauri/src/commands.rs) 的 `allow_background`），`tauri.conf.json` 里 `assetProtocol.scope` 必须保持为空 —— 往里写 `**` 等于把整块磁盘敞开给渲染层读。
 - 后端只负责「取原始数据 / 落盘 / 调系统能力」；合并、排序、修剪、状态机、命令构造这些业务语义留在 TS 适配层。好处是绝大多数改动仍是 Vite 的秒级热更新，不必重编 Rust——这也是选它而不是把逻辑写进 Rust 的原因。
 - API 约定：判 `result.ok`，失败取 `result.error` 提示；`checkPort`、`listProjects`、`getNvmStatus`、`listWallpapers`、`checkPackageManagers` 等少数通道按约定直接返回具体结构而非 `Result`。
-- 状态管理：跨组件状态按领域分在 [stores/](src/renderer/src/stores/) 下的六个 store 里（项目 / 终端 /
-  设置 / 环境 / 目录 / 账号，分工见 [docs/features-and-architecture.md](docs/features-and-architecture.md) 的目录一节），
+- 状态管理：跨组件状态按领域分在 [stores/](src/renderer/src/stores/) 下的七个 store 里（项目 / 终端 /
+  设置 / 环境 / 目录 / 账号 / 笔记，分工见 [docs/features-and-architecture.md](docs/features-and-architecture.md) 的目录一节），
   组件不另建全局状态、不用事件总线传业务数据。
 - **谁该进 store，判据是「跨页共享的状态」**：多个页面读写的状态（项目、终端、设置、环境探测结果）
   必须进 store 并只经 action 变更；只在单页生命周期内、用完即弃的数据与动作（工作日志那一页的
@@ -159,8 +166,13 @@
 - **store 里不要直接 import element-plus**：提示与确认框一律经 [notify.ts](src/renderer/src/notify.ts)
   的 `notifySuccess` / `notifyError` / `confirmAction`。这样这些 action 才可能被单测覆盖
   （测试里 `vi.mock('@/notify')` 即可记下「说了什么」），也让「状态层」与「怎么提示」分开演进。
-- 持久化在 Rust 侧：走 `store.rs`（300ms 防抖 + 临时文件 rename + 退出前同步落盘）。数据文件 `workbench-data.json`（项目 / 快捷启动 / 命令，以及与本机绑定的设置）、`theme.json`（**外观 + 首页布局**）、`token-usage.json`（Token 按天快照）、`work-log.json`（工作日志，**只在本机**），目录指针 `data-location.json` 固定在 `%APPDATA%/Workbench/`。
-- **工作日志不进同步仓库**（[work-log.ts](src/shared/work-log.ts)）：它是唯一一份既不写在 `workbench-data.json` 里、也不随同步走的用户数据 —— 工作内容是最贴近个人记录的东西，多机合并也不成立（不像用量数字那样可相加）。别为了「顺手统一」把它塞进同步或主数据文件；数据目录迁移时它跟着搬（`paths.rs` 的 `migrate_data_dir`），因为项目列表、快捷启动同样属于「这台机器上的数据」。
+- 持久化在 Rust 侧：走 `store.rs`（300ms 防抖 + 临时文件 rename + 退出前同步落盘）。数据文件 `workbench-data.json`（项目 / 快捷启动 / 命令，以及与本机绑定的设置）、`theme.json`（**外观 + 首页布局**）、`token-usage.json`（Token 按天快照）、`work-log.json`（工作日志，**只在本机**）、`note-data.json`（笔记，**只在本机**），目录指针 `data-location.json` 固定在 `%APPDATA%/Workbench/`。
+- **工作日志与笔记都不进同步仓库**（[work-log.ts](src/shared/work-log.ts) / [note.ts](src/shared/note.ts)）：它们是不写在 `workbench-data.json` 里、也不随同步走的用户数据 —— 工作内容与笔记是最贴近个人记录的东西，多机合并也不成立（不像用量数字那样可相加）。别为了「顺手统一」把它们塞进同步或主数据文件；数据目录迁移时它们跟着搬（`paths.rs` 的 `migrate_data_dir`），因为项目列表、快捷启动同样属于「这台机器上的数据」。
+- **笔记正文用 Vditor 编辑**（[NoteEditor.vue](src/renderer/src/components/NoteEditor.vue)）：它的图标 / 语言包 / markdown 引擎（lute）/ 内容主题 / 表情 / 代码高亮都是**运行时**按 `options.cdn` 去取的，默认指 unpkg —— 所以 `cdn` 必须指向随包带的那一份（`public/vditor/`），内容由 [sync-vditor-assets.mjs](scripts/sync-vditor-assets.mjs) 在 dev / build 前从 `node_modules/vditor/dist` 复制（挂在 vite 的 `configResolved` 上，两条路都绕不过去；该目录在 `.gitignore` 里）。**升级 Vditor 后要留意它是不是又要新资源**：缺哪个就是哪个功能不生效（本地 404，不会退回联网），编辑器本身会起不来（踩过：漏了 lute）。另外它的 localStorage 缓存要关掉（`cache.enable`），正文的落盘归 store 与适配层。
+  两条与它打交道时踩过的坑：**它的 `input` 回调不是同步到的**（内部还有一层处理延迟），
+  所以换篇 / 卸载时不能只看防抖攒下的那一份，要 `getValue()` 现取一份再交出去，否则「打完字立刻点开另一篇」那几个字就没了；
+  交出去的正文**必须带上它属于哪一篇**（`{ id, content }`），换上来的那篇正是「当前选中项」，
+  只按选中项取 id 会把上一篇的正文写进刚点开的那一篇。
 - 工作日志正文按 markdown 渲染，解析用 **markdown-it**（[markdown.ts](src/shared/markdown.ts)，唯一新增的前端运行时依赖）：`html: false` 转义原文里的标签、`linkify` 认裸地址、`breaks` 让单个换行就是 `<br>`；链接一律 `target="_blank"`，且点击在 [MarkdownView.vue](src/renderer/src/components/MarkdownView.vue) 里被接管交给 `openExternal` —— 界面是个 WebView，点 `<a>` 默认会把应用自己导航走。别再自己手写解析器或引第二个 markdown 库。
 - **数据目录必须与 Electron 版保持一致**（`%APPDATA%\Workbench`）：不要图省事改用 Tauri 的 `app_config_dir()`，它按 identifier 生成 `%APPDATA%\com.muyian.workbench`，换位置用户就等于丢了项目列表。路径一律经 `paths.rs` 的 `data_dir()` / `data_file()` 现取，不要缓存写死。
 - 首屏快照：Tauri 没有同步 IPC（原 `ipcRenderer.sendSync` 那套行不通），改为建窗口时用 `initialization_script` 注入 `window.__WB_BOOTSTRAP__`（见 [main.rs](src-tauri/src/main.rs) 的 `bootstrap_script`），渲染层同步读它，第一帧就是用户设置的样子。

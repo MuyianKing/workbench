@@ -17,6 +17,9 @@ pub const THEME_FILE: &str = "theme.json";
 /// 工作日志（见 shared/work-log.ts）。**只在本机**：它不进同步仓库，
 /// 但跟着数据目录走 —— 用户换数据目录时，自己写过的日志不该落在原地。
 pub const WORK_LOG_FILE: &str = "work-log.json";
+/// 笔记（见 shared/note.ts）。与工作日志同一条口径：**只在本机**，
+/// 不进同步仓库，但跟着数据目录一起搬。
+pub const NOTE_FILE: &str = "note-data.json";
 /// 改名前的用量快照文件名，只在一次性搬家时用得上
 const LEGACY_TOKEN_DATA_FILE: &str = "token-data.json";
 /// 本机设备标识（Token 同步用）
@@ -71,6 +74,10 @@ pub fn token_file() -> PathBuf {
 
 pub fn work_log_file() -> PathBuf {
     data_dir().join(WORK_LOG_FILE)
+}
+
+pub fn note_file() -> PathBuf {
+    data_dir().join(NOTE_FILE)
 }
 
 /// 一次性的本地改名：用量快照从 `token-data.json` 换成 `token-usage.json`。
@@ -133,6 +140,8 @@ pub fn migrate_data_dir(dir: &str, current: &serde_json::Value) -> Result<(), St
     let _ = std::fs::copy(theme_file(), target_dir.join(THEME_FILE));
     // 工作日志也是本地数据：它不进同步仓库，但数据目录一换就该跟着走
     let _ = std::fs::copy(work_log_file(), target_dir.join(WORK_LOG_FILE));
+    // 笔记同理：那是用户自己写的东西，换目录时漏掉就等于把它删了
+    let _ = std::fs::copy(note_file(), target_dir.join(NOTE_FILE));
 
     std::fs::write(
         pointer_path(),

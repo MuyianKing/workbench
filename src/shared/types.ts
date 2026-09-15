@@ -15,6 +15,7 @@ import type { ProjectColor } from './project-color'
 import type { ThemeConfig } from './theme'
 import type { TokenUsageResult } from './token-usage'
 import type { ViewId } from './views'
+import type { NoteCreated, NoteInput, NoteNode } from './note'
 import type { WorkLogEntry, WorkLogInput, WorkLogPatch } from './work-log'
 
 /** 活跃度计数、首页布局、同步的其它设备也走这里导出，渲染层统一从 @/types 取类型 */
@@ -22,6 +23,7 @@ export type { ActivityCounts, ThemeConfig, SyncDeviceInfo }
 export type { TokenUsageResult } from './token-usage'
 export type { ProjectColor } from './project-color'
 export type { WorkLogEntry, WorkLogInput, WorkLogPatch } from './work-log'
+export type { NoteCreated, NoteFile, NoteInput, NoteKind, NoteNode } from './note'
 
 export type ProjectStatus = 'idle' | 'installing' | 'running' | 'building' | 'success' | 'failed'
 
@@ -820,6 +822,25 @@ export interface WorkbenchApi {
   addWorkLog: (input: WorkLogInput) => Promise<Result<WorkLogEntry>>
   updateWorkLog: (id: string, patch: WorkLogPatch) => Promise<Result<WorkLogEntry>>
   removeWorkLog: (id: string) => Promise<Result<null>>
+  /**
+   * 笔记：整棵树的根节点列表（文件夹与笔记是同一种节点，`kind` 区分）。
+   *
+   * 数据住在本机的 `note-data.json` 里，与工作日志同一条口径：**不进同步仓库**
+   * （见 shared/note.ts 的文件头）。
+   *
+   * 结构变化（新建 / 改名 / 删除）一律回整棵树，而不是回被改动的那一个节点：
+   * 树的形状是这些操作的产物，「删文件夹连带子树」这种事由结构本身表达，
+   * 少一份在界面侧重算树的实现，也就少一份两份结果对不上的可能。
+   */
+  listNotes: () => Promise<Result<NoteNode[]>>
+  /** 新建一个文件夹或笔记；名字撞上同层的会自动往后编号。回整棵树 + 新节点的 id */
+  createNote: (input: NoteInput) => Promise<Result<NoteCreated>>
+  /** 改名；名字没变时不产生任何落盘 */
+  renameNote: (id: string, name: string) => Promise<Result<NoteNode[]>>
+  /** 删除；文件夹会连整棵子树一起删掉 */
+  removeNote: (id: string) => Promise<Result<NoteNode[]>>
+  /** 保存正文；只回成功与否，树的结构没变（见适配层里的说明） */
+  updateNoteContent: (id: string, content: string) => Promise<Result<null>>
   /** 启动一条命令；进程由 Workbench 接管，日志进底部终端 */
   startCommand: (id: string) => Promise<Result<null>>
   /** 停止一条命令；已在应用外跑着的那种只能按端口结束，由渲染层先确认 */

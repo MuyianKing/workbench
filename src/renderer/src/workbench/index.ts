@@ -33,6 +33,7 @@ import { assetUrl, guard, hasTauri, invoke, listen, notPorted } from './bridge'
 import { emit } from './events'
 import * as events from './events'
 import * as auth from './auth'
+import * as note from './note'
 import * as nrm from './nrm'
 import * as nvm from './nvm'
 import * as orphan from './orphan'
@@ -287,6 +288,13 @@ function createApi(): WorkbenchApi {
     updateWorkLog: (id: string, patch: Parameters<WorkbenchApi['updateWorkLog']>[1]) =>
       workLog.updateWorkLog(id, patch),
     removeWorkLog: (id: string) => workLog.removeWorkLog(id),
+
+    // ---------- 笔记（本地文件，不进同步仓库） ----------
+    listNotes: () => note.listNotes(),
+    createNote: (input: Parameters<WorkbenchApi['createNote']>[0]) => note.createNote(input),
+    renameNote: (id: string, name: string) => note.renameNote(id, name),
+    removeNote: (id: string) => note.removeNote(id),
+    updateNoteContent: (id: string, content: string) => note.updateNoteContent(id, content),
 
     // ---------- 统计 ----------
     getActivity: () => Promise.resolve(state.activityCounts()),

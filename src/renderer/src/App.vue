@@ -10,6 +10,7 @@ import AppHeader from '@/components/AppHeader.vue'
 import ProjectGrid from '@/components/ProjectGrid.vue'
 import ProjectsView from '@/components/ProjectsView.vue'
 import WorkView from '@/components/WorkView.vue'
+import NotesView from '@/components/NotesView.vue'
 import TerminalPanel from '@/components/TerminalPanel.vue'
 import ProjectDrawer from '@/components/ProjectDrawer.vue'
 import AddProjectDialog from '@/components/AddProjectDialog.vue'
@@ -31,7 +32,8 @@ const settings = useSettingsStore()
 const VIEWS: Record<ViewId, Component> = {
   home: ProjectGrid,
   projects: ProjectsView,
-  work: WorkView
+  work: WorkView,
+  notes: NotesView
 }
 
 const currentView = computed(() => VIEWS[store.activeView])

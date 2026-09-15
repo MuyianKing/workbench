@@ -405,24 +405,12 @@ async function remove(entry: WorkLogEntry): Promise<void> {
   min-height: 0;
 }
 
-/* 工具带左侧：时间范围 + 「只看待办」筛选标签 */
-.filter__head {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-3);
-  min-width: 0;
-}
+/* 工具带左右两组（.filter__head / .filter__tools）的排版在 global.css：三个页面共用同一条带子，
+   谁都不该是「规矩的出处」。这里只留这一页自己的那点东西。 */
 
 /* 范围切换用 el-segmented：外壳（底色 / 圆角 / 选中态）在 global.css，这里只补不显形的一行 */
 .ranges.el-segmented {
   flex-shrink: 0;
-}
-
-/* 工具带右侧：排序下拉 + 「记一条」。条数不在这里重复一遍，页脚已经有「共 N 天 / M 条」 */
-.filter__tools {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-3);
 }
 
 /* 时间轴区域自己滚，工具条与分页钉在上下两头 */
