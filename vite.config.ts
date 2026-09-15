@@ -10,18 +10,18 @@ import vue from '@vitejs/plugin-vue'
  * 浏览器里单独看布局仍走 vite.preview.config.ts（产物落在 .preview/，不参与打包）。
  */
 export default defineConfig({
-  root: resolve(__dirname, 'src/renderer'),
+  root: resolve(import.meta.dirname, 'src/renderer'),
   resolve: {
     alias: {
-      '@': resolve(__dirname, 'src/renderer/src'),
-      '@shared': resolve(__dirname, 'src/shared')
+      '@': resolve(import.meta.dirname, 'src/renderer/src'),
+      '@shared': resolve(import.meta.dirname, 'src/shared')
     }
   },
   plugins: [vue()],
   // Tauri 用自定义协议从根路径提供静态资源；相对路径在 http:// 与 tauri:// 下都不会出错
   base: './',
   build: {
-    outDir: resolve(__dirname, 'out/renderer'),
+    outDir: resolve(import.meta.dirname, 'out/renderer'),
     emptyOutDir: true
   },
   server: {

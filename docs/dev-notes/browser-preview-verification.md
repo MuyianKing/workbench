@@ -34,7 +34,7 @@ npx vite build --config vite.preview.config.ts
 # 产物在 .preview/dist
 ```
 
-开发态用 `npm run dev:renderer`。注意 vite 7 只监听 IPv6 的 `localhost`，脚本里访问 `127.0.0.1:5274`
+开发态用 `npm run dev:renderer`。注意 vite（7 / 8 都一样）只监听 IPv6 的 `localhost`，脚本里访问 `127.0.0.1:5274`
 会被拒（浏览器里打开 http://localhost:5274/ 正常）。
 
 ### 二、喂假数据：顶替 `window.workbench`
@@ -263,6 +263,15 @@ const lum = (rgb) => rgb.map((c) => {
   + 异步加载那条老路 —— 而单独挂一个组件时没人调 `init()`/`loadData()`，于是设置永远是默认值。
   症状是「按设置分支渲染的区块根本不出现」（比如需要先填仓库地址才显示的那几块），
   很容易误判成新写的 `v-if` 写错了。顺手给 `getThemeConfig` 也补上。
+- **桩必须拼出真正的源码，别 `JSON.stringify(带方法的对象)`**：`JSON.stringify` 会把值为函数的键整个丢掉，
+  于是每个通道都落到 Proxy 兜底、返回 `{ ok: true, data: null }`，页面只剩一片空态 ——
+  截图里「有外壳、有标题栏」看着像跑通了，其实一个通道都没验到（踩过一次，A/B 比对差点据此收工）。
+  判据是 `document.documentElement.dataset.theme` 有没有被写上：空的就说明 `getBootstrap` 没生效。
+- **纯浏览器里必定有一条 `Tauri 运行时不可用，无法调用 data_load` 异常**，这是环境造成的、不是产物的问题：
+  `main.ts` 调的 `initState()`（[state.ts](../../src/renderer/src/workbench/state.ts)）**直接** `invoke('data_load')`，
+  不经过 `window.workbench`，所以顶替 `window.workbench` 拦不住它。它只让 `initState` 提前 reject
+  （`app.mount` 在 `finally` 里，界面照常出），别顺着这条去查产物。
+  反过来，`window.workbench` 的桩是有效的：`installTauriWorkbench()` 里 `hasTauri()` 为假就直接 return，不会覆盖它。
 - **store 的动作是一参调用，桩别按 `{ patch }` 解包**：`window.workbench.updateSettings(patch)`
   收的就是补丁本身（`{ patch }` 那层是适配层调 Tauri 命令时的写法）。桩里写成 `args?.patch`
   会静默返回未修改的值，看起来就是「点了没反应」。

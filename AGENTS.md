@@ -53,7 +53,11 @@
 - 唯一需要用户预装的外部程序是 **git**，且只在 Token 同步（`sync.rs`）里用：直启 `git.exe`（`proc::run_direct`，
   **不要**经 `cmd /C` 起它，参数行会被二次解析），超时与失败一律收敛成给用户看的提示。别处不要新增这类外部依赖。
   账号登录那点 HTTPS **不走外部程序也不引 HTTP 库**：用系统自带的 WinHTTP（`http.rs`），代价是自己写一段 FFI。
-- 构建 / 打包：Vite ^7.3.6（渲染层）+ cargo / Tauri CLI → Windows x64 NSIS。包管理器固定 npm（`package-lock.json`）；Rust 依赖的锁文件 `src-tauri/Cargo.lock` 要提交。
+- 构建 / 打包：Vite ^8.3.0（渲染层，打包器是 **rolldown**，不再是 rollup + esbuild）+ cargo / Tauri CLI → Windows x64 NSIS。包管理器固定 npm（`package-lock.json`）；Rust 依赖的锁文件 `src-tauri/Cargo.lock` 要提交。
+- 根 `package.json` 是 `"type": "module"`：Vite 8 起配置文件按模块类型加载，缺了它会报「ESM syntax in a file loaded as CommonJS」，
+  将来 `configLoader: 'native'` 成为默认后则直接失效。因此三个配置（`vite.config.ts` / `vite.preview.config.ts` / `vitest.config.ts`）
+  里**一律用 `import.meta.dirname`，不要写 `__dirname`**（后者只在旧的打包式加载器下被 shim 出来）；
+  仓库里也不要新增 CJS 的 `.js` / `.cjs`，它们会被当成 ESM。
 - 工具链前置：Rust stable（`x86_64-pc-windows-msvc`）+ MSVC 生成工具 + Windows SDK。rustc 自己经注册表定位 MSVC，不依赖 PATH 上的 `cl.exe`（所以 Git 自带的 `link.exe` 不会被误用）。
 - 测试：Vitest ^5.0.0（前端，`environment: 'node'`）+ `cargo test`（Rust，测试写在同文件的 `#[cfg(test)] mod tests`）。
 - 渲染层与后端都不再需要 native 模块编译：`better-sqlite3`、`node-gyp`、`electron-builder` 之类的历史依赖已全部移除。
@@ -82,7 +86,9 @@
   `bridge.ts`（invoke / 事件 / 未移植兜底 / `guard`）、`events.ts`（适配层内部广播）、`state.ts`（持久化状态与增删改）、`session.ts`（进程会话与事件翻译）、`scanner.ts` / `nvm.ts` / `token.ts` / `work-log.ts`（工作日志，懒加载整份文件）/ `system.ts` / `quick-launch.ts` / `auth.ts`（登录轮询与状态对账），全局类型声明在 `global.d.ts`。
 - 两端共用（类型、契约、纯逻辑）放 `src/shared/`；`shared/` 里禁止 import node、Rust 或渲染层代码。
 - 单测与被测模块同目录，命名 `*.test.ts`。路径别名：`@` → `src/renderer/src`，`@shared` → `src/shared`。
-- 文档分工：[README.md](README.md) 是当前功能与架构事实的唯一真源，本文件只写约束，`docs/dev-notes/` 放动手方法与踩坑。
+- 文档分工：[README.md](README.md) 只给概览、截图与上手命令（面向别人看个大概），
+  [docs/features-and-architecture.md](docs/features-and-architecture.md) 是当前功能与架构事实的唯一真源，
+  本文件只写约束，`docs/dev-notes/` 放动手方法与踩坑。
 
 ## 3. 编码规范
 
@@ -170,7 +176,8 @@
 - 排查 WebView2 里的运行时问题（未捕获异常、控制台警告、接口实际返回值）：用
   `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222` 启动应用，再用 CDP
   进页面求值或读控制台。比看截图猜、比加日志重编都可靠得多。
-- 功能新增或调整后必须同步更新 [README.md](README.md)（分工见第 2 节）：漏更新就会把错误事实传给后来者，包括下一个会话的 Agent。
+- 功能新增或调整后必须同步更新 [docs/features-and-architecture.md](docs/features-and-architecture.md)（分工见第 2 节）：
+  README 只在功能清单有增减时跟着改；漏更新就会把错误事实传给后来者，包括下一个会话的 Agent。
 - 不提交构建产物与缓存：`out/`、`dist/`、`.preview/`、`*.tsbuildinfo`、`src-tauri/target/`（已在 `.gitignore`）。
 - **绝不提交 `src-tauri/oauth.local.json`**（已在 `.gitignore`）：里面是 OAuth 应用的 client_id / client_secret，
   进了仓库就等于公开凭据。提交前扫一眼 `git status`，看到它就说明忽略规则被绕过了。

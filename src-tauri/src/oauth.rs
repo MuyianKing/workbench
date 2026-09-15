@@ -146,7 +146,7 @@ fn validate(provider: &Provider, config: ProviderConfig) -> Result<ProviderConfi
     if config.client_id.is_empty() {
         return Err(format!(
             "当前构建未内置 {} 的 OAuth 凭据。把 oauth.example.json 复制成 oauth.local.json、\
-             填入 clientId 后重新构建即可（见 README 的「启用账号登录」一节）。",
+             填入 clientId 后重新构建即可（见 docs/features-and-architecture.md 的「启用账号登录」一节）。",
             provider.label
         ));
     }
@@ -610,7 +610,7 @@ fn fetch_account(provider: &'static Provider, token: &str) -> Result<Value, Stri
 /// 头像转 data URL。
 ///
 /// **为什么不让渲染层直接 `<img src>` 那个外网地址**：那样会多出一个不受本模块掌控的网络出口，
-/// 而这里所有对外请求都集中在 Rust，便于审计（README「数据与隐私」也是这么写的）。
+/// 而这里所有对外请求都集中在 Rust，便于审计（docs/features-and-architecture.md 的「数据与隐私」也是这么写的）。
 fn fetch_avatar(url: &str) -> Option<String> {
     let (host, path) = split_url(url)?;
     let response = http::request("GET", &host, &path, &[("User-Agent", "Workbench")], None).ok()?;

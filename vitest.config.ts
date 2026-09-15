@@ -6,8 +6,8 @@ export default defineConfig({
   // 少了这一段，src/renderer 下的用例连 import 都解析不了
   resolve: {
     alias: {
-      '@': resolve(__dirname, 'src/renderer/src'),
-      '@shared': resolve(__dirname, 'src/shared')
+      '@': resolve(import.meta.dirname, 'src/renderer/src'),
+      '@shared': resolve(import.meta.dirname, 'src/shared')
     }
   },
   test: {
