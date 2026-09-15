@@ -30,10 +30,11 @@ import RecentPanel from '@/components/RecentPanel.vue'
 import ActionsPanel from '@/components/ActionsPanel.vue'
 import QuickLaunch from '@/components/QuickLaunch.vue'
 import CommandPanel from '@/components/CommandPanel.vue'
+import TodayWorkPanel from '@/components/TodayWorkPanel.vue'
 
 const store = useProjectsStore()
 
-/** 七块卡片的固定清单：id 对应 theme.json，title 用于编辑态的标签 */
+/** 八块卡片的固定清单：id 对应 theme.json，title 用于编辑态的标签 */
 const CARDS: Record<HomeCardId, { title: string; component: Component }> = {
   activity: { title: '活跃度', component: ActivityGraph },
   token: { title: 'Token 用量', component: TokenPanel },
@@ -41,7 +42,8 @@ const CARDS: Record<HomeCardId, { title: string; component: Component }> = {
   recent: { title: '最近使用', component: RecentPanel },
   actions: { title: '快捷操作', component: ActionsPanel },
   quick: { title: '快捷启动', component: QuickLaunch },
-  commands: { title: '命令', component: CommandPanel }
+  commands: { title: '命令', component: CommandPanel },
+  work: { title: '今日完成', component: TodayWorkPanel }
 }
 
 const editing = computed(() => store.layoutEditing)

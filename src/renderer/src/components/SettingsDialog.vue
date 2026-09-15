@@ -39,7 +39,7 @@ function setUseAccountForSync(value: boolean | string | number): void {
 
 /**
  * 左侧菜单只有两项：外观（含首页画布的布局，它们都是「看起来什么样」的设置）、
- * 通用（程序、快捷键、启动、数据目录、Token 同步）。选中项不随关闭重置，
+ * 通用（程序、快捷键、启动、数据目录、账号与同步）。选中项不随关闭重置，
  * 下次打开还停在上一屏，省得每次都要再点一次。
  */
 type SettingsTab = 'appearance' | 'general'
@@ -380,7 +380,7 @@ watch([visible, activeTab], ([open, tab]) => {
             <div class="row">
               <div class="row__text">
                 <span class="row__label">主题</span>
-                <span class="row__hint">跟随系统时会随系统切换实时变化。</span>
+                <span class="row__hint">跟随系统时随系统切换。</span>
               </div>
               <el-radio-group
                 :model-value="store.settings.theme"
@@ -397,7 +397,7 @@ watch([visible, activeTab], ([open, tab]) => {
             <div class="row">
               <div class="row__text">
                 <span class="row__label">主题色</span>
-                <span class="row__hint">用在开关、选中、聚焦环与主按钮上；留空是界面原本的中性灰。</span>
+                <span class="row__hint">界面交互态用的颜色；留空是原本的中性灰。</span>
               </div>
               <div class="slider">
                 <el-color-picker
@@ -421,10 +421,7 @@ watch([visible, activeTab], ([open, tab]) => {
             <div class="row">
               <div class="row__text">
                 <span class="row__label">主题色文字</span>
-                <span class="row__hint">
-                  铺在主题色上的那层字（主按钮、选中的胶囊、单选按钮）。自动按主题色的深浅挑：
-                  底色深用白字、底色浅用黑字；也可以手动钉死一种（还没设主题色时先存着，看不出效果）。
-                </span>
+                <span class="row__hint">主题色上那层字；自动按底色深浅挑黑白，也可手动指定。</span>
               </div>
               <el-radio-group
                 class="style-pick"
@@ -549,7 +546,7 @@ watch([visible, activeTab], ([open, tab]) => {
             <div class="row">
               <div class="row__text">
                 <span class="row__label">顶部样式</span>
-                <span class="row__hint">正常＝实底，毛玻璃＝整块磨砂，透明＝全部透出壁纸。</span>
+                <span class="row__hint">正常＝实底，毛玻璃＝磨砂，透明＝透出壁纸。</span>
               </div>
               <el-radio-group
                 class="style-pick"
@@ -566,10 +563,7 @@ watch([visible, activeTab], ([open, tab]) => {
             <div class="row">
               <div class="row__text">
                 <span class="row__label">卡片不透明度</span>
-                <span class="row__hint">
-                  首页卡片与项目卡底色的浓度：越小越透，背景图（或画布）从卡片底下透出来；
-                  只动底色，边框、阴影与文字不受影响，100% 是原本的实底。
-                </span>
+                <span class="row__hint">首页卡片底色的浓度；越小越透，背景从卡片底下透出来。</span>
               </div>
               <div class="slider card-slider">
                 <el-slider
@@ -594,18 +588,18 @@ watch([visible, activeTab], ([open, tab]) => {
               <div class="row__text">
                 <span class="row__label">布局调整</span>
                 <span class="row__hint">
-                  进入编辑模式后：拖动卡片可以在左中右三栏之间移动、调整栏内顺序；拖卡片下沿改高度；
-                  拖两栏之间的竖线改左右栏宽度（中栏自动占满剩余宽度）。没有卡片的栏平时不显示，
-                  编辑时会全部摆出来。布局单独保存在 theme.json 里，不跟项目数据混在一起。
+                  编辑模式里可拖动卡片换栏、调顺序，拖下沿改高度，拖栏间竖线改宽度。
                 </span>
               </div>
-              <el-button size="small" :icon="Rank" @click="enterLayoutEdit">进入编辑</el-button>
+              <el-button class="layout-edit" size="small" :icon="Rank" @click="enterLayoutEdit">
+                进入编辑
+              </el-button>
             </div>
 
             <div class="row">
               <div class="row__text">
                 <span class="row__label">拖动步进</span>
-                <span class="row__hint">位置与尺寸按这个像素网格吸附，越小越精细。</span>
+                <span class="row__hint">位置与尺寸按这个像素网格吸附。</span>
               </div>
               <el-input-number
                 class="number-input"
@@ -622,9 +616,7 @@ watch([visible, activeTab], ([open, tab]) => {
             <div class="row">
               <div class="row__text">
                 <span class="row__label">卡片间距</span>
-                <span class="row__hint">
-                  卡片之间的留白（px）：三栏之间、同栏卡片之间、项目列表里的项目卡之间，以及页面四周的留白都用它。0 表示紧贴。
-                </span>
+                <span class="row__hint">卡片之间与页面四周的留白（px）。</span>
               </div>
               <el-input-number
                 class="number-input"
@@ -640,7 +632,7 @@ watch([visible, activeTab], ([open, tab]) => {
           </div>
         </section>
 
-        <!-- 通用：程序本身、窗口与托盘、启动退出、数据目录与 Token 同步 -->
+        <!-- 通用：程序本身、窗口与托盘、启动退出、数据目录、账号与同步（登录后才出现同步那几项） -->
         <section v-show="activeTab === 'general'" class="pane">
           <div class="block">
             <h3 class="block__title">程序</h3>
@@ -649,8 +641,8 @@ watch([visible, activeTab], ([open, tab]) => {
               <div class="row__text">
                 <span class="row__label">程序名称</span>
                 <span class="row__hint">
-                  显示在标题栏、托盘提示与窗口标题上的名字。留空恢复为 {{ APP_NAME_DEFAULT }}，最多
-                  {{ APP_NAME_MAX_LENGTH }} 个字符；输入后失焦或按回车生效。
+                  显示在标题栏、托盘提示与窗口标题上；留空恢复为 {{ APP_NAME_DEFAULT }}，
+                  最多 {{ APP_NAME_MAX_LENGTH }} 个字符。
                 </span>
               </div>
               <el-input
@@ -722,7 +714,7 @@ watch([visible, activeTab], ([open, tab]) => {
               <div class="row__text">
                 <span class="row__label">数据目录</span>
                 <span class="row__hint">
-                  {{ store.settings.appName }} 写的东西都放这个目录里，换位置会把当前数据整体搬过去；目标目录已有同名数据文件时会拒绝并提示。
+                  {{ store.settings.appName }} 的东西都放这个目录里，换位置会把当前数据整体搬过去。
                 </span>
               </div>
               <p class="path mono truncate" :title="store.dataLocation?.dir">
@@ -739,6 +731,10 @@ watch([visible, activeTab], ([open, tab]) => {
             </div>
           </div>
 
+          <!--
+            账号与同步同属一块：同步的凭据来自账号，所以没登录时下面几行整个不出现 ——
+            数据全部留在本机（地址等设置不丢，登录回来接着用）。
+          -->
           <div class="block">
             <h3 class="block__title">账号</h3>
 
@@ -746,8 +742,7 @@ watch([visible, activeTab], ([open, tab]) => {
               <div class="row__text">
                 <span class="row__label">登录状态</span>
                 <span class="row__hint">
-                  用一个已有的 GitHub / Gitee 账号登录，用来授权 Token 同步的私有仓库，
-                  省掉事先在命令行里给 git 配一次凭据。不登录也能照常用，同步会退回系统 git 凭据。
+                  登录后可把用量与外观同步到多台机器；不登录则只用本机数据。
                 </span>
               </div>
               <el-button size="small" @click="accountVisible = true">
@@ -755,99 +750,77 @@ watch([visible, activeTab], ([open, tab]) => {
               </el-button>
             </div>
 
-            <div v-if="account" class="row">
-              <div class="row__text">
-                <span class="row__label">用这个账号授权同步</span>
-                <span class="row__hint">
-                  关掉就继续用系统里 git 自己配好的凭据。这条退路值得留着 ——
-                  账号的 token 会过期、会被撤销，那种时候它还能让同步照常跑。
-                </span>
-              </div>
-              <el-switch
-                :model-value="store.settings.useAccountForSync"
-                @update:model-value="setUseAccountForSync"
-              />
-            </div>
-          </div>
-
-          <div class="block">
-            <h3 class="block__title">Token 同步</h3>
-
-            <div class="row row--stack">
-              <div class="row__text">
-                <span class="row__label">同步仓库</span>
-                <span class="row__hint">
-                  仓库里一台机器两个文件：<span class="mono">token-usage/</span> 是用量分片、<span class="mono">config/</span> 是外观配置，
-                  文件名都是设备 id，所以永远不会互相覆盖。
-                  填 git 仓库地址（HTTPS / SSH 都行，建议用私有仓库），留空表示不同步；输入后失焦或按回车生效。
-                  上面的账号登录过、且授权开关没关，就优先用那个账号的 token 推送；否则走系统里 git
-                  已经配好的凭据，首次同步若弹出登录窗口，那是 git 在向你要授权。
-                </span>
-              </div>
-              <el-input
-                v-model="syncRepoDraft"
-                size="small"
-                spellcheck="false"
-                placeholder="git@github.com:you/workbench-token.git"
-                @change="commitSyncRepo"
-              />
-              <span class="row__hint row__hint--tight">
-                填完到首页「Token 用量」卡片上点一下同步按钮即可立刻同步一次；之后每台机器在后台自动同步。
-              </span>
-            </div>
-
-            <div class="row">
-              <div class="row__text">
-                <span class="row__label">同步外观配置</span>
-                <span class="row__hint">
-                  把本机的 theme.json 整份推上去（<span class="mono">config/&lt;设备id&gt;.json</span>）：
-                  明暗、主题色、顶部样式、卡片不透明度、终端高度、程序名称、工作区背景与首页布局。
-                  关掉之后下一轮同步会把仓库里自己那份删掉 —— 只同步用量数字的话就关掉它。
-                </span>
-              </div>
-              <el-switch
-                :model-value="store.settings.syncAppearance"
-                @update:model-value="setSyncAppearance"
-              />
-            </div>
-
-            <!-- 别台机器的外观：列表来自上一次同步取回的仓库快照，「应用」是唯一的采用入口 -->
-            <div v-if="store.settings.tokenSyncRepo" class="row row--stack">
-              <div class="row__text">
-                <span class="row__label">从别的机器取外观</span>
-                <span class="row__hint">
-                  列表是上一次同步取回来的样子（只读仓库里的文件，不改动别人的东西）。
-                  「应用」会把本机的 theme.json 整份换成那一套（外观 + 首页布局）；
-                  本机自己那份仍留在仓库里，随时能再取回来。项目列表、快捷启动、快捷键、
-                  开机自启与同步仓库地址不在同步范围内。
-                </span>
+            <template v-if="account">
+              <div class="row">
+                <div class="row__text">
+                  <span class="row__label">用这个账号授权同步</span>
+                  <span class="row__hint">关掉则改用系统里 git 配好的凭据。</span>
+                </div>
+                <el-switch
+                  :model-value="store.settings.useAccountForSync"
+                  @update:model-value="setUseAccountForSync"
+                />
               </div>
 
-              <div class="devices">
-                <div v-for="device in store.syncDevices" :key="device.id" class="device">
-                  <span class="device__name truncate" :title="device.name">{{ device.name }}</span>
-                  <span class="device__time">{{ deviceUpdatedText(device) }}</span>
-                  <el-button
-                    size="small"
-                    :disabled="!device.theme"
-                    @click="applyAppearance(device)"
-                  >
-                    应用
-                  </el-button>
+              <div class="row row--stack">
+                <div class="row__text">
+                  <span class="row__label">同步仓库</span>
+                  <span class="row__hint">
+                    填一个 git 仓库地址（建议私有仓库），留空即不同步；失焦或回车生效。
+                  </span>
+                </div>
+                <el-input
+                  v-model="syncRepoDraft"
+                  size="small"
+                  spellcheck="false"
+                  placeholder="git@github.com:you/workbench-token.git"
+                  @change="commitSyncRepo"
+                />
+              </div>
+
+              <div class="row">
+                <div class="row__text">
+                  <span class="row__label">同步外观配置</span>
+                  <span class="row__hint">连同外观与首页布局一起同步；只同步用量数字就关掉。</span>
+                </div>
+                <el-switch
+                  :model-value="store.settings.syncAppearance"
+                  @update:model-value="setSyncAppearance"
+                />
+              </div>
+
+              <!-- 别台机器的外观：列表来自上一次同步取回的仓库快照，「应用」是唯一的采用入口 -->
+              <div v-if="store.settings.tokenSyncRepo" class="row row--stack">
+                <div class="row__text">
+                  <span class="row__label">从别的机器取外观</span>
+                  <span class="row__hint">
+                    「应用」会把本机的外观与首页布局整份换成对方那一套，本机这份仍留在仓库里。
+                  </span>
                 </div>
 
-                <span v-if="!store.syncDevices.length" class="row__hint">
-                  还没取到别的机器：在另一台机器上填好同一个仓库并同步一次，回来点下面的「同步一次」即可。
-                </span>
-              </div>
+                <div class="devices">
+                  <div v-for="device in store.syncDevices" :key="device.id" class="device">
+                    <span class="device__name truncate" :title="device.name">{{ device.name }}</span>
+                    <span class="device__time">{{ deviceUpdatedText(device) }}</span>
+                    <el-button
+                      size="small"
+                      :disabled="!device.theme"
+                      @click="applyAppearance(device)"
+                    >
+                      应用
+                    </el-button>
+                  </div>
 
-              <div class="path__actions">
-                <el-button size="small" :loading="syncing" @click="syncNow">同步一次</el-button>
-                <span class="row__hint row__hint--tight">
-                  推一次本机那两个文件，并把其余机器最新的取回来。
-                </span>
+                  <span v-if="!store.syncDevices.length" class="row__hint">
+                    还没有别的机器：在另一台机器上填同一个仓库并同步一次。
+                  </span>
+                </div>
+
+                <div class="path__actions">
+                  <el-button size="small" :loading="syncing" @click="syncNow">同步一次</el-button>
+                </div>
               </div>
-            </div>
+            </template>
           </div>
         </section>
       </div>
@@ -867,6 +840,12 @@ watch([visible, activeTab], ([open, tab]) => {
   display: flex;
   flex: 1;
   min-width: 0;
+  /*
+   * 弹窗里所有 small 控件统一 28px 高。global.css 把 small 按钮定成 28px，而 EP 的输入框 /
+   * 数字框 / 取色器走自己的 --el-component-size-small（24px），不改就会同列一个高一个矮
+   * （首页布局那列：按钮 28、两个数字框 24，一眼看出错位）。只影响输入类控件，开关与单选不受影响。
+   */
+  --el-component-size-small: 28px;
 }
 
 .settings__nav {
@@ -1090,10 +1069,41 @@ watch([visible, activeTab], ([open, tab]) => {
 /**
  * 拖动步进 / 卡片间距：取值只有一到两位，用 EP 默认的 120px 宽输入框会占掉半行、
  * 和旁边的说明文字抢地方，收窄到刚够放下数字加右侧的加减按钮。
+ *
+ * 首页布局那一列的三件控件（进入编辑 + 这两个数字框）宽度取同一个 100px，
+ * 右边缘才对得齐（高度由 .settings 上的 small 尺寸统一，见上）。
  */
-.number-input {
+.number-input,
+.layout-edit {
   width: 100px;
   flex-shrink: 0;
+}
+
+/**
+ * 数字框右侧那两个加减按钮。EP 是按 24px 高的框算死的：每个 11px、上下各让 1px、
+ * 中间再留 2px 缝。上面把框抬到 28px 之后那套数字就不成立了 —— 按钮还是 11px，
+ * 中间于是空出一道白缝。这里只让它们跟着框长：各占一半（减掉上下各 1px），
+ * 外沿圆角跟着输入框走（--r-sm 就是框的圆角）。
+ *
+ * **别把 EP 那 1px 的右 / 上 / 下内缩也去掉**：输入框的边框是画在框上的一圈 inset 阴影，
+ * 按钮贴到边上就会把它盖掉，表现成「最右边那条边框没了」（踩过一次）。
+ */
+.number-input :deep(.el-input-number__increase),
+.number-input :deep(.el-input-number__decrease) {
+  /*
+   * 高度直接写：EP 把它塞在 --el-input-number-controls-height 里，而给那个变量赋值的选择器
+   * （.is-controls-right[class*=small] [class*=increase]）比这里长，改变量压不过它。
+   * 这条能生效靠的是本组件样式排在 element-plus 之后，与 global.css 里改 small 按钮高度同一个道理。
+   */
+  height: calc(50% - 1px);
+}
+
+.number-input :deep(.el-input-number__increase) {
+  border-radius: 0 var(--r-sm) 0 0;
+}
+
+.number-input :deep(.el-input-number__decrease) {
+  border-radius: 0 0 var(--r-sm) 0;
 }
 
 /* ---------- 工作区背景 ---------- */

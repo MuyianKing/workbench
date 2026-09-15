@@ -186,18 +186,11 @@ function pickSort(key: string): void {
 </template>
 
 <style scoped>
-.filter {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--sp-4);
-  padding: 0 var(--sp-5);
-  min-height: var(--h-filter);
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-canvas);
-  flex-shrink: 0;
-}
-
+/**
+ * 工具带本身的外壳（flex 排布、高度、边框、底色与三档顶部样式）在 global.css 的
+ * 「工作区背景 / 顶部样式」一节里 —— 项目页与工作页共用同一条带子，
+ * 写法留在任一组件里都会让另一个只剩颜色、丢掉排版。
+ */
 .filter__chips {
   display: flex;
   align-items: center;
@@ -205,34 +198,10 @@ function pickSort(key: string): void {
   flex-wrap: wrap;
 }
 
-.chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 28px;
-  padding: 0 10px;
-  border: 1px solid transparent;
-  border-radius: var(--r-pill);
-  background: transparent;
-  color: var(--ink-2);
-  font-size: var(--fs-body);
-  cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
-}
-
-.chip:hover {
-  background: rgba(17, 21, 27, 0.05);
-}
-
-/* 选中态是一处「当前选择」的表达，跟主色走（见设置里的「主题色」）：
-   默认的中性主色就是 --ink，所以不设主题色时与原来完全一样。 */
-.chip.is-active {
-  background: var(--el-color-primary);
-  color: var(--el-color-white);
-}
-
-/* 拖拽落点：虚线描边 + 轻微底色，和选中态区分开。
-   描边同样跟主色走（默认的中性主色就是 --ink），落点提示才和选中态是同一个颜色。 */
+/*
+ * 筛选标签（.chip）的基础形态在 global.css —— 项目页与工作页都在用它，
+ * 这里只留项目页特有的那几档：拖拽落点、拖动中的样子、以及标签里那个运行状态点。
+ */
 .chip.is-drop {
   border-color: var(--el-color-primary);
   border-style: dashed;
@@ -257,10 +226,6 @@ function pickSort(key: string): void {
   background: rgba(232, 237, 244, 0.08);
 }
 
-.chip__count {
-  font-size: var(--fs-micro);
-  opacity: 0.6;
-}
 
 .chip__dot {
   width: 6px;
@@ -282,49 +247,14 @@ function pickSort(key: string): void {
 }
 
 /* ---------- 排序 ---------- */
+
+/* 排序控件（.sort / .sort__label / .sort__value / .sort__caret）与工具带外壳一样在 global.css：
+   工作页也用同一个控件，写法留在某个组件里另一个就只剩一半。 */
+
 .filter__tools {
   display: flex;
   align-items: center;
   gap: 6px;
   flex-shrink: 0;
-}
-
-.sort {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 28px;
-  padding: 0 8px 0 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-sm);
-  background: var(--bg-surface);
-  color: var(--ink-2);
-  font-size: var(--fs-meta);
-  cursor: pointer;
-  transition: border-color 0.15s ease;
-}
-
-.sort:hover {
-  border-color: var(--border-strong);
-}
-
-.sort__label {
-  color: var(--ink-3);
-}
-
-.sort__value {
-  color: var(--ink);
-  font-weight: 500;
-}
-
-.sort__caret {
-  font-size: 11px;
-  color: var(--ink-3);
-}
-
-@media (max-width: 900px) {
-  .sort__label {
-    display: none;
-  }
 }
 </style>

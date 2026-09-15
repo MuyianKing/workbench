@@ -87,7 +87,7 @@ async function signOut(): Promise<void> {
   try {
     await ElMessageBox.confirm(
       `退出后 Workbench 会删掉本机保存的 ${AUTH_PROVIDER_LABELS[current.provider]} 凭据，` +
-        'Token 同步将回到使用系统 git 凭据的方式。',
+        '同步随之停止，数据只留在这台机器上（设置里的仓库地址不会丢，重新登录即可接着同步）。',
       '退出登录',
       { confirmButtonText: '退出登录', cancelButtonText: '取消', type: 'warning' }
     )
@@ -183,7 +183,7 @@ async function signOut(): Promise<void> {
       </div>
 
       <p class="block__note block__note--after">
-        同步 Token 快照时会优先用这个账号的凭据推送私有仓库，不必再事先在命令行里给 git 配一次凭据。
+        同步用量与外观时会用这个账号的凭据推送私有仓库，不必再事先在命令行里给 git 配一次凭据。
       </p>
     </div>
 

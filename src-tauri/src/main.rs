@@ -292,6 +292,8 @@ fn main() {
             commands::theme_save,
             commands::token_load,
             commands::token_save,
+            commands::work_log_load,
+            commands::work_log_save,
             commands::data_location,
             commands::data_file_exists_in,
             commands::data_migrate,

@@ -48,7 +48,7 @@
   （一个 git 远程地址，设置里留空即关闭）、账号登录（点登录时才打 GitHub / Gitee 的 OAuth 接口，
   见 `oauth.rs`）、命令执行本身。除这三处不要新增网络出口，也不要往任何第三方服务发数据。
   登录是这条边界唯一一次放宽，加别的东西之前先想清楚能不能不做。
-- 技术栈：Rust 后端（Tauri ^2）+ Vue ^3.5.13 + TypeScript ^5.9.3；Element Plus ^2.8.8 + @element-plus/icons-vue ^2.3.1；Pinia ^4.0.3。
+- 技术栈：Rust 后端（Tauri ^2）+ Vue ^3.5.13 + TypeScript ^5.9.3；Element Plus ^2.8.8 + @element-plus/icons-vue ^2.3.1；Pinia ^4.0.3；markdown-it（**只服务工作日志正文的 markdown 渲染**，见第 5 节）。
 - Rust 侧依赖（`src-tauri/Cargo.toml`）：`tauri`（`tray-icon`）、`tauri-plugin-dialog` / `opener` / `single-instance`、`rusqlite`（`bundled`，读 ZCode 本地 sqlite）、`zstd`（DSH 会话多帧解压）、`serde` / `serde_json` / `uuid`。**不要**再引入其他 native / 运行时依赖。
 - 唯一需要用户预装的外部程序是 **git**，且只在 Token 同步（`sync.rs`）里用：直启 `git.exe`（`proc::run_direct`，
   **不要**经 `cmd /C` 起它，参数行会被二次解析），超时与失败一律收敛成给用户看的提示。别处不要新增这类外部依赖。
@@ -79,7 +79,7 @@
 - 配置：`src-tauri/tauri.conf.json`（窗口、打包、资源映射）、`src-tauri/capabilities/default.json`（能力白名单）。
 - 渲染层在 `src/renderer/src/`：公共与页面组件在 `components/`，Pinia store 在 `stores/`，设计令牌 `styles/tokens.css`，全局样式 `styles/global.css`。
 - **适配层**在 `src/renderer/src/workbench/` —— 它是原 preload + 主进程逻辑的替代品，实现 `window.workbench` 契约：
-  `bridge.ts`（invoke / 事件 / 未移植兜底 / `guard`）、`events.ts`（适配层内部广播）、`state.ts`（持久化状态与增删改）、`session.ts`（进程会话与事件翻译）、`scanner.ts` / `nvm.ts` / `token.ts` / `system.ts` / `quick-launch.ts` / `auth.ts`（登录轮询与状态对账），全局类型声明在 `global.d.ts`。
+  `bridge.ts`（invoke / 事件 / 未移植兜底 / `guard`）、`events.ts`（适配层内部广播）、`state.ts`（持久化状态与增删改）、`session.ts`（进程会话与事件翻译）、`scanner.ts` / `nvm.ts` / `token.ts` / `work-log.ts`（工作日志，懒加载整份文件）/ `system.ts` / `quick-launch.ts` / `auth.ts`（登录轮询与状态对账），全局类型声明在 `global.d.ts`。
 - 两端共用（类型、契约、纯逻辑）放 `src/shared/`；`shared/` 里禁止 import node、Rust 或渲染层代码。
 - 单测与被测模块同目录，命名 `*.test.ts`。路径别名：`@` → `src/renderer/src`，`@shared` → `src/shared`。
 - 文档分工：[README.md](README.md) 是当前功能与架构事实的唯一真源，本文件只写约束，`docs/dev-notes/` 放动手方法与踩坑。
@@ -93,6 +93,8 @@
 - 新增通道的三步：在 `WorkbenchApi` 登记 → 在适配层实现 → 需要后端时在 `commands.rs` 写命令并在 `main.rs` 的 `generate_handler!` 注册。渲染层→主进程的单向事件走适配层的 `events.ts` 广播。
 - **数组 / 对象形状的取值接口必须真实现，绝不能落到「尚未移植」兜底**：兜底返回的是 `Result` 对象，store 会把它当数组遍历，直接抛错并把整条 `init()` 打断——表现成完全无关的功能失灵（踩过一次：`listQuickApps` / `listCommands` 让「系统状态」一直没数据）。
 - 数据结构变更要同步落盘的 sanitize（[persisted-data.ts](src/shared/persisted-data.ts) 的 `sanitizeSettings` / `parseData`），老数据文件缺字段须有默认值，不留未收敛的 `undefined`。
+- **给项目加可编辑字段时，除了 `Project` / `ProjectPatch`，还要把它加进 store 里的 `editableOf`**（[stores/projects.ts](src/renderer/src/stores/projects.ts)）：项目是就地改 `projects.value` 的，落盘靠那条「与快照比对后推差异」的 watch，`editableOf` 就是它认得的那份字段清单 —— 漏加的表现是界面上改完看着生效、重启后回到旧值。
+- **读取时补齐老数据的字段**（例如项目标识色）要走「先 `snapshotProjects()`、再补」的顺序：补齐要经上面那条 watch 推给后端，而它只推与快照不同的项 —— 顺序反了的话快照里已经是补好的值，那批数据永远写不进磁盘。
 - 命名：文件 kebab-case，类型 / 接口 PascalCase，函数与变量 camelCase；注释与界面文案统一用中文。
 - 纯逻辑优先下沉到 `src/shared/` 并补对应单测。
 - **需要文件系统的逻辑，把 fs 抽成参数注入**（参考 [scanner.ts](src/shared/scanner.ts) 的 `ScanFs`）：生产实现走 Rust 命令，测试实现走 `node:fs`。这样逻辑与既有测试都留在 TS / vitest，不必为了换运行时重写一遍——`nvm.ts`、`scanner.ts` 就是这么落的。
@@ -101,8 +103,10 @@
 
 - 样式为手写 CSS，不使用 Tailwind / 原子化 CSS；颜色、间距、圆角、字号一律取 [tokens.css](src/renderer/src/styles/tokens.css) 的 `--bg-*`、`--ink-*`、`--st-*`、`--sp-*`、`--r-*`、`--fs-*`。
 - 暗色只在 `:root[data-theme='dark']` 覆盖令牌，不在组件里写 `data-theme` 分支。
-- 色彩语义：界面主体灰度，彩色只表达运行状态（`--st-run` / `--st-ok` / `--st-fail`）；终端面板始终深色（`--term-*`）。
-- 组件样式写 `<style scoped>`；需要穿透 Element Plus 或需全局共享的外壳（`.panel`、`.facts` 等）写进 [global.css](src/renderer/src/styles/global.css)。
+- 色彩语义：界面主体灰度，彩色只表达运行状态（`--st-run` / `--st-ok` / `--st-fail`）与**项目标识色**；终端面板始终深色（`--term-*`）。
+- **项目标识色**（[project-color.ts](src/shared/project-color.ts)）是灰度里刻意留的第二个彩色出口：它表达「这是哪个项目」，取值有两种 —— **预设名**（`primary` / `success` / `warning` / `danger` / `info`，渲染时经 `projectColorVar()` 取 `--el-color-*`，明暗切换与用户自定义的主题色因此自动跟着走）与**自定义色**（`#rrggbb`，跟着数据走）。**预设存名字、不存色值**；自定义色一律经 `sanitizeProjectColor()` 收敛（三位简写展开、大小写统一，认不出的当没设）。颜色怎么分配（新项目取「当前用得最少」的那个预设、老数据补齐）只在那一个文件里定义，界面别自己另拍一个颜色。
+- 工作日志里的项目标签用 **`el-tag` + `effect="dark"`**（实心色块 + 反白字），这是标签自己的主题，与应用明暗无关：预设色交给 `type`（EP 按 `--el-color-*` 取色），自定义色 EP 不认，就把 `--el-tag-bg-color` / `--el-tag-border-color` / `--el-tag-text-color` 这三个变量按算好的值写到行内，字色用 `inkOnAccent()`。**别为它再写一套自绘的浅底同色字标签**——「实心才分得清」是这一处的设计要求。
+- 组件样式写 `<style scoped>`；需要穿透 Element Plus 或需全局共享的外壳（`.panel`、`.facts`、`.filter`、`.sort` 等）写进 [global.css](src/renderer/src/styles/global.css)。**判断依据是「有没有第二个页面在用它」**：外壳留在某个组件的 scoped 样式里，另一个页面只会吃到 global.css 里那半截规则，排版会静悄悄地失效。
 - UI 复用顺序：`components/` 既有业务组件 → Element Plus 原生组件 → 新增局部组件；图标统一用 `@element-plus/icons-vue`。
 - 弹层遮罩由 `global.css` 的 `.el-overlay` 统一处理（从标题栏下沿开始、不压暗背景），不要在单个弹窗里另写遮罩。
 - 明暗切换经 `theme-transition.ts` 的 View Transitions 驱动，`<html>` 上同时维护 `data-theme` 与 `.dark` 类；主题切换的守卫用 [stores/projects.ts](src/renderer/src/stores/projects.ts) 内的 `appliedTheme` 变量而非读 DOM（原因见该文件里的注释）。
@@ -121,7 +125,9 @@
 - 后端只负责「取原始数据 / 落盘 / 调系统能力」；合并、排序、修剪、状态机、命令构造这些业务语义留在 TS 适配层。好处是绝大多数改动仍是 Vite 的秒级热更新，不必重编 Rust——这也是选它而不是把逻辑写进 Rust 的原因。
 - API 约定：判 `result.ok`，失败取 `result.error` 提示；`checkPort`、`listProjects`、`getNvmStatus`、`listWallpapers`、`checkPackageManagers` 等少数通道按约定直接返回具体结构而非 `Result`。
 - 状态管理：跨组件状态集中在 [stores/projects.ts](src/renderer/src/stores/projects.ts) 的 `useProjectsStore`，组件不另建全局状态、不用事件总线传业务数据。
-- 持久化在 Rust 侧：走 `store.rs`（300ms 防抖 + 临时文件 rename + 退出前同步落盘）。数据文件 `workbench-data.json`（项目 / 快捷启动 / 命令，以及与本机绑定的设置）、`theme.json`（**外观 + 首页布局**）、`token-usage.json`（Token 按天快照），目录指针 `data-location.json` 固定在 `%APPDATA%/Workbench/`。
+- 持久化在 Rust 侧：走 `store.rs`（300ms 防抖 + 临时文件 rename + 退出前同步落盘）。数据文件 `workbench-data.json`（项目 / 快捷启动 / 命令，以及与本机绑定的设置）、`theme.json`（**外观 + 首页布局**）、`token-usage.json`（Token 按天快照）、`work-log.json`（工作日志，**只在本机**），目录指针 `data-location.json` 固定在 `%APPDATA%/Workbench/`。
+- **工作日志不进同步仓库**（[work-log.ts](src/shared/work-log.ts)）：它是唯一一份既不写在 `workbench-data.json` 里、也不随同步走的用户数据 —— 工作内容是最贴近个人记录的东西，多机合并也不成立（不像用量数字那样可相加）。别为了「顺手统一」把它塞进同步或主数据文件；数据目录迁移时它跟着搬（`paths.rs` 的 `migrate_data_dir`），因为项目列表、快捷启动同样属于「这台机器上的数据」。
+- 工作日志正文按 markdown 渲染，解析用 **markdown-it**（[markdown.ts](src/shared/markdown.ts)，唯一新增的前端运行时依赖）：`html: false` 转义原文里的标签、`linkify` 认裸地址、`breaks` 让单个换行就是 `<br>`；链接一律 `target="_blank"`，且点击在 [MarkdownView.vue](src/renderer/src/components/MarkdownView.vue) 里被接管交给 `openExternal` —— 界面是个 WebView，点 `<a>` 默认会把应用自己导航走。别再自己手写解析器或引第二个 markdown 库。
 - **数据目录必须与 Electron 版保持一致**（`%APPDATA%\Workbench`）：不要图省事改用 Tauri 的 `app_config_dir()`，它按 identifier 生成 `%APPDATA%\com.muyian.workbench`，换位置用户就等于丢了项目列表。路径一律经 `paths.rs` 的 `data_dir()` / `data_file()` 现取，不要缓存写死。
 - 首屏快照：Tauri 没有同步 IPC（原 `ipcRenderer.sendSync` 那套行不通），改为建窗口时用 `initialization_script` 注入 `window.__WB_BOOTSTRAP__`（见 [main.rs](src-tauri/src/main.rs) 的 `bootstrap_script`），渲染层同步读它，第一帧就是用户设置的样子。
 - Token 快照的合并规则分两层，改数据模型时别混：**分片内取 max**（同一台机器重复实读要幂等，上游清理旧会话时历史不缩水）、**分片之间求和**（每台机器各自消耗，取 max 会把另一台整个丢掉）。一台机器一份文件、文件名就是设备 id，设备 id 存在 `%APPDATA%/Workbench/device.json`，**不随数据目录迁移、也不进同步仓库**（两台机器撞 id 会互相覆盖文件，且没有任何报错）。
@@ -137,6 +143,10 @@
   经 `GIT_CONFIG_*` 环境变量注入（见 `oauth::git_envs`）。写成全局 `http.extraheader` 会把 token 发给**任何**远端；
   写成 `-c` 参数会让它出现在进程命令行里。这条注入只由设置里的 `useAccountForSync` 触发，
   **默认开但要能关** —— token 会过期，关掉才能退回系统 git 凭据。
+- **没登录就没有同步**：适配层把同步仓库地址一律当空（[index.ts](src/renderer/src/workbench/index.ts)
+  的 `syncRepo()`），四条与用 / 拉相关的通道都经它取地址 —— 于是既推不上去，也读不到别人机器留在
+  本地克隆里的分片，界面上的数字全部出自本机。设置里照此只在登录后显示同步那几项（已填的地址等设置
+  保留，登录回来接着用）。别在 `token.ts` 或 Rust 侧另开一条绕开这个入口的路径。
 - 账号登录的回环端口（`oauth.rs` 的 `REDIRECT_PORT`）必须与两家平台上注册的回调地址**逐字一致**，
   那里有一条测试钉住了这个串；Gitee 要求完全一致，所以不能改成随机端口。
 - **两家的授权码流程都必须带 `client_secret`**（GitHub 支持 PKCE，但没有因此把它变成可选项）——

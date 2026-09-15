@@ -14,6 +14,9 @@ pub const DATA_FILE: &str = "workbench-data.json";
 pub const TOKEN_USAGE_FILE: &str = "token-usage.json";
 /// 主题文件：外观设置 + 首页布局（见 shared/theme.ts）
 pub const THEME_FILE: &str = "theme.json";
+/// 工作日志（见 shared/work-log.ts）。**只在本机**：它不进同步仓库，
+/// 但跟着数据目录走 —— 用户换数据目录时，自己写过的日志不该落在原地。
+pub const WORK_LOG_FILE: &str = "work-log.json";
 /// 改名前的用量快照文件名，只在一次性搬家时用得上
 const LEGACY_TOKEN_DATA_FILE: &str = "token-data.json";
 /// 本机设备标识（Token 同步用）
@@ -66,6 +69,10 @@ pub fn token_file() -> PathBuf {
     data_dir().join(TOKEN_USAGE_FILE)
 }
 
+pub fn work_log_file() -> PathBuf {
+    data_dir().join(WORK_LOG_FILE)
+}
+
 /// 一次性的本地改名：用量快照从 `token-data.json` 换成 `token-usage.json`。
 ///
 /// 只改文件名、不动内容，所以攒下的历史原样留着。必须在任何 store 载入之前跑
@@ -91,16 +98,6 @@ pub(crate) fn migrate_legacy_files_in(dir: &Path) {
 /// Token 同步仓库的本地克隆；机器本地的缓存，删掉会在下次同步时重新克隆
 pub fn token_sync_dir() -> PathBuf {
     user_data_dir().join(TOKEN_SYNC_DIR)
-}
-
-/// 克隆里放用量分片的子目录：一台机器一个文件，所以永远没有同文件冲突
-pub fn token_shard_dir() -> PathBuf {
-    token_sync_dir().join(TOKEN_USAGE_DIR)
-}
-
-/// 克隆里放配置的子目录：同样是「一台机器一个文件」
-pub fn config_shard_dir() -> PathBuf {
-    token_sync_dir().join(CONFIG_DIR)
 }
 
 /// 本机设备标识（Token 同步用）。机器本地生成，**不随数据目录迁移、也不进同步仓库**：
@@ -134,6 +131,8 @@ pub fn migrate_data_dir(dir: &str, current: &serde_json::Value) -> Result<(), St
     let _ = std::fs::copy(token_file(), target_dir.join(TOKEN_USAGE_FILE));
     // 主题文件同理：首页布局与外观设置都在里面，漏掉这一份等于把用户的摆放和配色清掉
     let _ = std::fs::copy(theme_file(), target_dir.join(THEME_FILE));
+    // 工作日志也是本地数据：它不进同步仓库，但数据目录一换就该跟着走
+    let _ = std::fs::copy(work_log_file(), target_dir.join(WORK_LOG_FILE));
 
     std::fs::write(
         pointer_path(),

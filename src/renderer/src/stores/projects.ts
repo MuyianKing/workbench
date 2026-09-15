@@ -41,6 +41,7 @@ import {
   type TopBarStyle
 } from '@/types'
 import { clampTerminalHeight } from '@shared/terminal-height'
+import { clampTerminalButtonTop } from '@shared/terminal-dock'
 import { terminalKey } from '@shared/terminal-key'
 import { accountLabel } from '@shared/auth'
 import {
@@ -64,6 +65,7 @@ import {
   type AccentInkMode
 } from '@shared/accent-color'
 import { RingLog } from '@shared/log-ring'
+import { backfillProjectColors as backfillColors } from '@shared/project-color'
 import {
   PROJECT_HIT_LIMIT,
   searchProjects,
@@ -190,8 +192,9 @@ export const useProjectsStore = defineStore('projects', () => {
   /**
    * 终端面板是否收起。
    *
-   * 面板本身只在「有终端」时才出现，所以应用刚启动时底部什么都没有（默认隐藏）；
-   * 一旦跑过命令，面板条就常驻在底部，由条上的箭头负责展开/收起 —— 不需要额外的顶栏开关。
+   * 面板本身只在「有终端」时才出现，所以应用刚启动时底部什么都没有（默认隐藏）。
+   * 收起不是「缩矮」，而是整块收进窗口右侧那颗悬浮按钮里（见 TerminalPanel 的 .dock）——
+   * 按钮上带着运行状态点，收起后仍看得出还有命令在跑；点它就把面板放回来。
    */
   const terminalCollapsed = ref(true)
 
@@ -277,6 +280,29 @@ export const useProjectsStore = defineStore('projects', () => {
     if (next === settings.value.terminalHeight) return
 
     await updateSettings({ terminalHeight: next })
+  }
+
+  /**
+   * 终端收起后那颗悬浮按钮的纵向位置（占窗口高度的百分比；null = 跟随终端面板）。
+   *
+   * 与终端高度同一套做法：拖动中组件只改本地临时值（跟手渲染），松手才经这里落盘。
+   */
+  const terminalButtonTop = ref(DEFAULT_SETTINGS.terminalButtonTop)
+
+  watch(
+    () => settings.value.terminalButtonTop,
+    (value) => {
+      terminalButtonTop.value = clampTerminalButtonTop(value)
+    },
+    { immediate: true }
+  )
+
+  async function setTerminalButtonTop(top: number | null): Promise<void> {
+    const next = clampTerminalButtonTop(top)
+    terminalButtonTop.value = next
+    if (next === settings.value.terminalButtonTop) return
+
+    await updateSettings({ terminalButtonTop: next })
   }
 
   /**
@@ -392,7 +418,7 @@ export const useProjectsStore = defineStore('projects', () => {
     await commitCards()
   }
 
-  /** 松手落盘：七块一起送，避免只有被拖的那块更新、其余停留在旧快照 */
+  /** 松手落盘：所有卡片一起送，避免只有被拖的那块更新、其余停留在旧快照 */
   async function commitCards(): Promise<void> {
     const cards = {} as Record<HomeCardId, CardPlacement>
     for (const id of Object.keys(themeConfig.value.cards) as HomeCardId[]) {
@@ -1011,6 +1037,8 @@ export const useProjectsStore = defineStore('projects', () => {
     void refreshNrm()
     ready.value = true
     snapshotProjects()
+    // 老数据文件里的项目还没有标识色，补齐（顺序有讲究，见函数注释）
+    backfillProjectColors()
 
     void refreshPaths()
     // 项目可能在上次关闭后、或在 Workbench 之外已经跑起来了，进应用先按端口认一遍
@@ -1104,6 +1132,8 @@ export const useProjectsStore = defineStore('projects', () => {
     await loadData()
     for (const project of projects.value) runtimeOf(project.id)
     snapshotProjects()
+    // 换过来的数据目录里可能是一份没有标识色的老数据（与 init 同一条顺序）
+    backfillProjectColors()
     await refreshPaths()
     await detectAll()
     await detectAllCommands()
@@ -1934,7 +1964,25 @@ export const useProjectsStore = defineStore('projects', () => {
       // 未选择时送空串而不是 undefined：结构化克隆后键仍在，主进程才能识别「清空」
       nodeVersion: project.nodeVersion ?? '',
       port: project.port ?? null,
-      groupId: project.groupId
+      groupId: project.groupId,
+      color: project.color
+    }
+  }
+
+  /**
+   * 给还没有标识色的项目补一个（老数据文件里没有这个字段）。
+   *
+   * **必须排在 snapshotProjects() 之后调用**：补出来的颜色要靠下面那条「配置变更自动落盘」的
+   * watch 推给后端，而它只推「与快照不同」的项目 —— 顺序反过来的话，快照里记的已经是补好的值，
+   * 这批颜色就永远写不进磁盘了（下次启动又补一遍，界面上看不出问题，但一直白补）。
+   *
+   * 是就地改 `projects.value`：这条路径本来就是这个 store 改项目的写法（见 editableOf 上面那段）。
+   */
+  function backfillProjectColors(): void {
+    const patch = backfillColors(projects.value)
+    for (const project of projects.value) {
+      const color = patch[project.id]
+      if (color) project.color = color
     }
   }
 
@@ -2539,6 +2587,8 @@ export const useProjectsStore = defineStore('projects', () => {
     closeTerminal,
     clearTerminalLogs,
     setTerminalHeight,
+    terminalButtonTop,
+    setTerminalButtonTop,
     setBackgroundOpacity,
     setCardOpacity,
     setBackgroundVeil,

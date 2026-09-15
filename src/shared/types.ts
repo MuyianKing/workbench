@@ -3,6 +3,7 @@
 import { ACCENT_COLOR_DEFAULT, ACCENT_INK_DEFAULT, type AccentInkMode } from './accent-color'
 import { APP_NAME_DEFAULT } from './app-name'
 import { TERMINAL_HEIGHT_DEFAULT } from './terminal-height'
+import { TERMINAL_BUTTON_TOP_DEFAULT } from './terminal-dock'
 import { CARD_OPACITY_DEFAULT } from './card-opacity'
 import { BACKGROUND_OPACITY_DEFAULT } from './workspace-background'
 import { builtinReference } from './wallpaper'
@@ -10,13 +11,17 @@ import type { AppearanceSettingKey } from './appearance'
 import type { SyncDeviceInfo } from './sync-config'
 import type { ActivityCounts } from './activity'
 import type { BuildTool, PortSource } from './dev-port'
+import type { ProjectColor } from './project-color'
 import type { ThemeConfig } from './theme'
 import type { TokenUsageResult } from './token-usage'
 import type { ViewId } from './views'
+import type { WorkLogEntry, WorkLogInput, WorkLogPatch } from './work-log'
 
 /** 活跃度计数、首页布局、同步的其它设备也走这里导出，渲染层统一从 @/types 取类型 */
 export type { ActivityCounts, ThemeConfig, SyncDeviceInfo }
 export type { TokenUsageResult } from './token-usage'
+export type { ProjectColor } from './project-color'
+export type { WorkLogEntry, WorkLogInput, WorkLogPatch } from './work-log'
 
 export type ProjectStatus = 'idle' | 'installing' | 'running' | 'building' | 'success' | 'failed'
 
@@ -85,6 +90,14 @@ export interface Project {
   id: string
   name: string
   path: string
+  /**
+   * 标识色：用于在项目卡与工作日志里区分项目。
+   *
+   * 存的是主题色名（见 shared/project-color.ts），不是色值 —— 明暗切换与用户自定义主题色
+   * 都会自动跟着走。**新加项目与老数据补齐都会自动分配一个**，所以正常不会缺失；
+   * 缺失时界面按中性色画，不影响别的功能。
+   */
+  color?: ProjectColor
   /** 用户选择的包管理器，auto 表示按锁文件自动判定 */
   packageManager: PackageManagerSetting
   /** 扫描锁文件得出的实际包管理器 */
@@ -237,6 +250,16 @@ export interface AppSettings {
   hotkey: string
   /** 终端面板展开时的高度（px），由拖动面板上沿决定 */
   terminalHeight: number
+  /**
+   * 终端收起后，窗口最右侧那颗悬浮按钮的纵向位置。
+   *
+   * `null`（默认）= 没拖动过，按钮落在终端面板自己的位置上（面板纵向中线），
+   * 由渲染层按当前面板高度现算；拖动过就是占窗口高度的百分比。
+   *
+   * 与 terminalHeight 不同，它**不进 theme.json**（见 appearance.ts 的白名单）：
+   * 面板高度是「面板长什么样」，跟着主题走；而按钮落在屏幕的哪一处只对这台机器成立。
+   */
+  terminalButtonTop: number | null
   /**
    * 工作区背景图的磁盘路径，空串表示用默认的纯画布。
    *
@@ -525,6 +548,8 @@ export interface ProjectPatch {
   /** 监听端口；null 或非法值表示清空 */
   port?: number | null
   groupId?: string
+  /** 标识色（见 Project.color） */
+  color?: ProjectColor
 }
 
 /**
@@ -781,6 +806,20 @@ export interface WorkbenchApi {
   addCommand: (input: CommandInput) => Promise<Result<CommandEntry>>
   updateCommand: (id: string, patch: CommandPatch) => Promise<Result<CommandEntry>>
   removeCommand: (id: string) => Promise<Result<null>>
+  /**
+   * 工作日志：整份列表（时间轴自己按范围分组、分页）。
+   *
+   * 数据住在本机的 `work-log.json` 里，**不进同步仓库** —— 它是个人记录，
+   * 多机合并的语义也不成立（见 shared/work-log.ts 的文件头）。
+   *
+   * 这里是 `Result` 而不是裸数组：读盘失败与「确实还没写过」必须分得开，
+   * 把前者显示成空列表会让人以为自己的记录丢了。
+   */
+  listWorkLogs: () => Promise<Result<WorkLogEntry[]>>
+  /** 新增一条；工作内容必填，为空时返回失败 */
+  addWorkLog: (input: WorkLogInput) => Promise<Result<WorkLogEntry>>
+  updateWorkLog: (id: string, patch: WorkLogPatch) => Promise<Result<WorkLogEntry>>
+  removeWorkLog: (id: string) => Promise<Result<null>>
   /** 启动一条命令；进程由 Workbench 接管，日志进底部终端 */
   startCommand: (id: string) => Promise<Result<null>>
   /** 停止一条命令；已在应用外跑着的那种只能按端口结束，由渲染层先确认 */
@@ -823,7 +862,7 @@ export interface WorkbenchApi {
   loadBackground: (path: string) => Promise<Result<BackgroundImage>>
   /** 内置壁纸清单（含缩略图）；目录里没有图时返回空数组 */
   listWallpapers: () => Promise<BuiltinWallpaper[]>
-  /** 首页布局配置（theme.json）：七块卡片的位置 / 尺寸与拖动步进 */
+  /** 首页布局配置（theme.json）：八块卡片的位置 / 尺寸与拖动步进 */
   getThemeConfig: () => Promise<ThemeConfig>
   /** 合并保存首页布局；返回收敛后的最终值 */
   updateThemeConfig: (patch: Partial<ThemeConfig>) => Promise<Result<ThemeConfig>>
@@ -1039,6 +1078,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   hotkeyEnabled: true,
   hotkey: 'Control+M',
   terminalHeight: TERMINAL_HEIGHT_DEFAULT,
+  terminalButtonTop: TERMINAL_BUTTON_TOP_DEFAULT,
   workspaceBackground: builtinReference('二次元美女'),
   workspaceBackgroundOpacity: BACKGROUND_OPACITY_DEFAULT,
   workspaceBackgroundVeil: '',

@@ -1,7 +1,13 @@
 {
-  // 与 vitest.config.ts 的 include 保持一致：检查的正是会真正跑起来的那批测试。
+  // 用例文件与 vitest.config.ts 的 include 保持一致：检查的正是会真正跑起来的那批测试。
   // 后端逻辑（进程会话、日志攒批、进程树终止）现在在 Rust 里，由 cargo test 覆盖。
-  "include": ["src/shared/**/*.test.ts", "src/renderer/**/*.test.ts"],
+  // 另加适配层那份全局声明：`window.workbench` 的类型来自它，用例 import 适配层时要能看见
+  // （它只是类型，不是测试文件，所以 vitest 那边不需要它）。
+  "include": [
+    "src/shared/**/*.test.ts",
+    "src/renderer/**/*.test.ts",
+    "src/renderer/src/workbench/global.d.ts"
+  ],
   "compilerOptions": {
     "target": "ES2022",
     "module": "ESNext",

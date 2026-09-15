@@ -32,6 +32,13 @@ export function formatTimestamp(timestamp: number): string {
   return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`
 }
 
+/** 时刻：HH:mm（日期已由所在分组给出，例如工作日志的时间轴） */
+export function formatTimeOfDay(timestamp: number): string {
+  const date = new Date(timestamp)
+  const pad = (n: number): string => String(n).padStart(2, '0')
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+
 /** 相对时间：刚刚 / N 分钟前 / N 小时前 / N 天前 / N 个月前 */
 export function formatRelative(timestamp: number | undefined, now: number): string {
   if (!timestamp) return '未使用过'

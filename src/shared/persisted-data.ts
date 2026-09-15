@@ -15,6 +15,7 @@ import { sanitizeCommands } from './command'
 import { sanitizeQuickApps } from './quick-launch'
 import { sanitizeIconCache } from './icon-cache'
 import { DEFAULT_SETTINGS, type PersistedData, type StoredSettings } from './types'
+import { clampTerminalButtonTop } from './terminal-dock'
 import { sanitizeSyncRepo } from './token-usage'
 import { pruneDays, sanitizeActivity } from './activity'
 import { sanitizeViewId } from './views'
@@ -66,6 +67,12 @@ export function sanitizeSettings(raw: unknown): StoredSettings {
   value.useAccountForSync = value.useAccountForSync !== false
   // 同步时是否连主题文件一起写进仓库：老数据文件里没有，默认开
   value.syncAppearance = value.syncAppearance !== false
+  // 终端收起后那颗悬浮按钮的位置：老数据文件里没有这个字段，默认 null（跟随终端面板）。
+  // 它落在视口外面的话用户再也够不着这颗按钮，必须在这里拦住
+  value.terminalButtonTop = clampTerminalButtonTop(value.terminalButtonTop)
+  // 这个字段的开发期名字，存的是「绝对值、没有跟随终端这一档」。它只出现在未发布的中间版本里，
+  // 而那个值会把「跟随终端」这档永远盖住 —— 清掉，免得它一直写回数据文件当第二份真源。
+  delete (value as unknown as Record<string, unknown>).terminalDockTop
 
   return value
 }

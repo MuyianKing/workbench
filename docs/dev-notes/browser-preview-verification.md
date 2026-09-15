@@ -244,6 +244,16 @@ const lum = (rgb) => rgb.map((c) => {
   的内边距按实际结构定死（见 `.account-dialog`）。
 - **鼠标指针是真的移过去才能量 `:hover`**（`Input.dispatchMouseEvent` 的 `mouseMoved`）：
   量到的 `getComputedStyle(...).backgroundColor` 才是悬停色，只读静态样式会得到「没反应」的错觉。
+- **共用外壳的类写在某个组件的 scoped 样式里时，第二个用它的页面只会吃到颜色、丢掉排版**：
+  项目页那条筛选工具带的 `.filter` 当初只写在 ProjectFilterBar.vue 的 `<style scoped>` 里，
+  global.css 里只有 `.app.top-band/glass/clear .filter` 那三档颜色规则。工作页照同名 class 用，
+  于是 display 还是 `block`：范围标签与「记一条」各占一整行竖着堆，计数被按钮压住 ——
+  截图上像「工具条被挤扁」，其实只是排版没生效。**判据是 `getComputedStyle(el).display` +
+  `getBoundingClientRect()`，别照着截图猜**（用探针脚本把工具条各级节点的盒子打出来最快）。
+  结论是共用外壳（`.panel`、`.facts`、`.filter` 这类）一律写进 global.css，谁都不当「规矩的出处」。
+- **v-html 里的列表看不见圆点**：global.css 的 reset 把 `ul / ol` 的 `list-style` 清成了 none
+  （那是给界面自己的布局列表定的），markdown 正文渲染出来后同样吃这条规则 ——
+  在展示组件的 `:deep()` 里把 `list-style` 写回来（disc / decimal），否则有序列表看着像没有序号。
 - **浏览器预览只覆盖渲染层一半**：涉及文件系统、子进程、图像解码的都在 Rust 侧，回 `cargo test` 或真应用里验。
 - **产物要用 http 打开，别用 `file://`**：Chromium 会按 CORS 拦掉 `file://` 下的
   `<script type="module">`，页面一片空白、控制台外没有任何迹象。在截图脚本里起一个十几行的
@@ -269,3 +279,22 @@ const lum = (rgb) => rgb.map((c) => {
   截出来的仍然是等待态 —— 这类「改了没反应」先怀疑场景没切干净，别去改组件。
 - **截图按"当时在调什么"命名，成对的用 `-before` / `-after`**。这是给当时的自己看的，
   反正是用完即删，别花心思整理成体系。
+- **按约定直接返回结构的通道，桩里不能再套一层 `Result`**：`listProjects` / `getSettings` /
+  `getThemeConfig` / `getDataLocation` / `getActivity` / `listQuickApps` / `listCommands` /
+  `checkPackageManagers` / `getNvmStatus` / `getNrmStatus` / `authStatus` / `listWallpapers` 都是
+  直接给数据（见 types.ts 的 WorkbenchApi），照着别的通道写成 `{ ok: true, data: … }` 的话，
+  `loadData()` 里 `data.projects` 就是 `undefined`，报出来的是某个 computed 里的
+  `Cannot read properties of undefined (reading 'map')` —— 错在桩上，别顺着组件找。
+- **拖拽这类交互可以用合成 PointerEvent 驱动**：`pointerdown` 派给元素本身、
+  `pointermove` / `pointerup` 派给 `window`（组件的监听就挂在 window 上），
+  不必为了验一次拖动去凑 `Input.dispatchMouseEvent` 的坐标。**但 Vue 是异步渲染**：
+  在同一次 `Runtime.evaluate` 里派完事件紧接着读 `getComputedStyle` / `getBoundingClientRect`，
+  拿到的还是渲染前的值（会误判成「拖了没反应」），要另发一次求值再读。
+- **运行中的终端不让关**：要验「一个终端都没有」那一步，得先按适配层的做法推一条
+  `success` / `idle` 的状态事件把它停下来，否则 `closeTerminal` 只会弹一句警告、界面纹丝不动。
+- **动画往哪边走，靠逐帧记录判，别靠截图猜**：在 `Runtime.evaluate` 里起一个 rAF 循环，每帧记下
+  `getComputedStyle` 的 `transform`（`new DOMMatrix(...).m41` 取横向位移）、`height`、`opacity`，
+  跑满几百毫秒后一次性把数组读回来 —— 一眼就能看出「谁先动、往哪边动、哪一段是空转」。
+  截图只能证明「某一帧长这样」，判定方向时很容易看成自己希望的那个答案。
+  这条也是查「一条 transition 挂多个属性」的顺手工具：同一个元素上高度和位移同时走时，
+  观感会被盖成另一个方向（踩过一次），把其中一个挪到 `transition: … 0.16s ease 0.18s` 的延迟里分成两拍就好了。

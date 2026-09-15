@@ -12,6 +12,7 @@ import {
 } from '@element-plus/icons-vue'
 import { DRAG_MIME } from '@/drag-mime'
 import { formatClock, formatDurationMs } from '@/format'
+import { sanitizeProjectColor, projectColorVar } from '@shared/project-color'
 import { STATUS_META, isBusyStatus } from '@/status'
 import { useProjectsStore } from '@/stores/projects'
 import type { Project, ProjectStatus } from '@/types'
@@ -33,6 +34,15 @@ const meta = computed(() =>
 const pm = computed(() => store.resolvedPm(props.project))
 const isBusy = computed(() => isBusyStatus(status.value))
 const isRunning = computed(() => status.value === 'running')
+
+/**
+ * 项目标识色（在抽屉里选、新项目自动分配）。
+ * 缺省时退回中性灰：老数据、手改坏的值都不该让卡片上出现一个空白的圆点。
+ */
+const colorVar = computed(() => {
+  const color = sanitizeProjectColor(props.project.color)
+  return color ? projectColorVar(color) : 'var(--border-strong)'
+})
 
 /** 运行中显示已运行时长，打包成功显示本次耗时 */
 const elapsed = computed(() => {
@@ -124,6 +134,8 @@ function onMore(command: string): void {
     <span class="card__rail" aria-hidden="true" />
 
     <div class="card__head">
+      <!-- 标识色：项目之间一眼分得出来（左侧那条灯带留给运行状态，两者不能混） -->
+      <i class="card__color" :style="{ background: colorVar }" aria-hidden="true" />
       <h3 class="card__name truncate" :title="project.name">{{ project.name }}</h3>
       <span
         class="state"
@@ -381,6 +393,17 @@ function onMore(command: string): void {
   display: flex;
   align-items: center;
   gap: var(--sp-2);
+}
+
+/**
+ * 项目标识色的小圆点。
+ * 8px 与状态胶囊里那个点（5px）不是一个量级：那个说的是「现在在跑」，这个说的是「这是哪个项目」。
+ */
+.card__color {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
 }
 
 .card__name {

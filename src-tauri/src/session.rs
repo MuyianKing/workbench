@@ -9,12 +9,18 @@
 //!    只杀 cmd 会留下占着端口的孙进程，表现为「已停止」但端口仍然被占。
 //!  - 输出要**按批**发：dev server 刷日志时逐行跨进程 send 会让两端互相拖累，
 //!    这里攒够行数或超过时间窗就整批发一次（对应 Electron 版的 log-batcher）。
+//!
+//! 第三点是移植时新踩的：**等子进程退出不能占着会话表的锁**。表锁被等待线程攥住的话，
+//! 子进程活着的每一秒里，别的入口（停止、列活跃会话、起下一条）都永久阻塞在取锁上；
+//! 而它们要么是同步 IPC、要么被主线程直接调用（托盘「退出」那条路），
+//! 于是整个窗口跟着一起画不动，表现成「点一下停止，应用当场死掉」。
+//! 所以：表锁只借一下就放，子进程句柄自带一把锁（见 `Session` 与 `wait_for_exit`）。
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -31,13 +37,37 @@ const BATCH_LINES: usize = 200;
 const BATCH_WINDOW: Duration = Duration::from_millis(50);
 
 pub struct Session {
-    child: Child,
+    /// 子进程句柄。等待线程要握着它一直等到进程退出，所以**单给它一把锁**：
+    /// 拿整张表的锁去 `wait()` 的话，子进程活多久整张表就被锁多久（见 `wait_for_exit`）。
+    child: Mutex<Child>,
     pub pid: u32,
 }
 
 /// 活跃会话表。键是渲染层给的会话 ID（与终端键同源），值持有子进程句柄。
+/// 用 `Arc` 包着是为了让等待线程能先把句柄拎出来、再放开表锁去等。
 #[derive(Default)]
-pub struct Sessions(pub Mutex<HashMap<String, Session>>);
+pub struct Sessions(pub Mutex<HashMap<String, Arc<Session>>>);
+
+/// 取一个会话（已克隆出 `Arc`，表锁随即释放）。取不到说明它已经被摘掉了。
+fn session_of(sessions: &Sessions, id: &str) -> Option<Arc<Session>> {
+    sessions.0.lock().unwrap().get(id).cloned()
+}
+
+/// 等子进程退出并取退出码。
+///
+/// 全场只有这一处会长时间持锁，而且锁的只是**这个会话自己的**子进程句柄 ——
+/// 表锁在这期间是空着的。反过来（拿着表锁 `wait()`）会让子进程活着的每一秒都堵住别处：
+/// 停止、`active_ids`、起下一条命令全卡在取锁上，而它们要么走同步 IPC、要么被主线程
+/// 直接调用（托盘「退出」那条路），一卡就是整个窗口画不动 —— 症状是点一下停止应用当场死掉。
+fn wait_for_exit(session: &Session) -> Option<i32> {
+    session
+        .child
+        .lock()
+        .unwrap()
+        .wait()
+        .ok()
+        .and_then(|status| status.code())
+}
 
 fn shell_command(line: &str) -> Command {
     #[cfg(windows)]
@@ -99,11 +129,11 @@ pub fn spawn(
     // 先入表再起等待线程：等待线程要能在表里找到它
     {
         let state = app.state::<Sessions>();
-        state
-            .0
-            .lock()
-            .unwrap()
-            .insert(session_id.clone(), Session { child, pid });
+        let entry = Arc::new(Session {
+            child: Mutex::new(child),
+            pid,
+        });
+        state.0.lock().unwrap().insert(session_id.clone(), entry);
     }
 
     if let Some(pipe) = stdout {
@@ -117,14 +147,13 @@ pub fn spawn(
     let handle = app.clone();
     let id = session_id;
     std::thread::spawn(move || {
-        let code = {
-            let state = handle.state::<Sessions>();
-            let mut map = state.0.lock().unwrap();
-            match map.get_mut(&id) {
-                Some(session) => session.child.wait().ok().and_then(|status| status.code()),
-                None => return,
-            }
+        let state = handle.state::<Sessions>();
+        // 先拎出句柄、放开表锁，再慢慢等 —— 顺序反了就是把整张表锁到进程结束
+        let Some(session) = session_of(&state, &id) else {
+            return;
         };
+        let code = wait_for_exit(&session);
+
         let _ = handle.emit(
             "session:exit",
             serde_json::json!({ "sessionId": id, "code": code }),
@@ -304,5 +333,47 @@ mod tests {
 
         assert_eq!(batcher.flush(), Some(vec!["only".to_string()]));
         assert_eq!(batcher.flush(), None, "冲过一次之后没有剩余");
+    }
+
+    /// 等子进程退出期间，整张会话表必须还是能拿到的。
+    ///
+    /// 钉的是「点停止整个应用卡死」那个 bug：等待线程原先握着表锁去 `child.wait()`，
+    /// 于是子进程活着的整个期间，别的入口都永久阻塞在取锁上（当时的 `stop_session`
+    /// 还是同步命令，卡的就是主线程）。这里用一条长命的 ping 当代替品，
+    /// 把「等」这件事放到别的线程上去做。
+    #[test]
+    fn waiting_for_a_process_keeps_the_session_table_free() {
+        let child = shell_command("ping -n 30 127.0.0.1")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("起 ping 失败");
+        let pid = child.id();
+
+        let sessions = Sessions::default();
+        sessions.0.lock().unwrap().insert(
+            "probe".to_string(),
+            Arc::new(Session {
+                child: Mutex::new(child),
+                pid,
+            }),
+        );
+
+        // 与 spawn 里的等待线程同一条路径：拎出句柄 → 放开表锁 → 等退出
+        let session = session_of(&sessions, "probe").expect("刚插进去的会话应当取得到");
+        let waiter = std::thread::spawn(move || wait_for_exit(&session));
+
+        // 等一小会儿，确认等待线程已经进去了：此时表锁必须空着
+        std::thread::sleep(Duration::from_millis(200));
+        assert!(
+            sessions.0.try_lock().is_ok(),
+            "等子进程期间表锁必须空着，否则停止 / 列活跃会话 / 起下一条都会一起卡住"
+        );
+        assert!(session_of(&sessions, "probe").is_some(), "会话应当还在表里");
+
+        // 收尾：掐掉 ping 让等待线程结束，别在测试进程外留下跑 30 秒的残留
+        let _ = crate::proc::kill_process_tree(pid);
+        assert!(waiter.join().is_ok(), "等待线程应当自己结束");
     }
 }

@@ -9,14 +9,15 @@
  * 重启后回到上次那一页，认不出来的值一律回首页。
  */
 
-export const VIEW_IDS = ['home', 'projects'] as const
+export const VIEW_IDS = ['home', 'projects', 'work'] as const
 
 export type ViewId = (typeof VIEW_IDS)[number]
 
 /** 导航栏上的名字；顺序与 VIEW_IDS 一致（图标在各页组件里给，属于界面层） */
 export const VIEW_LABELS: Record<ViewId, string> = {
   home: '首页',
-  projects: '项目'
+  projects: '项目',
+  work: '工作'
 }
 
 export function isViewId(value: unknown): value is ViewId {

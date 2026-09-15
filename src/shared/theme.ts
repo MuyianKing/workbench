@@ -2,7 +2,7 @@
  * 主题文件（theme.json）的数据结构、收敛规则与纯计算：**外观设置 + 首页三栏布局**。
  *
  * 首页分成左中右三栏：左右两栏宽度可调，中间那栏 flex:1 吃掉剩余宽度。
- * 七块卡片各自属于某一栏，在栏内按 order 从上到下排列、宽度铺满整栏，高度各自可调；
+ * 八块卡片各自属于某一栏，在栏内按 order 从上到下排列、宽度铺满整栏，高度各自可调；
  * 没有卡片的栏在平时不渲染（编辑时才显示出来，好把卡片拖进去）。
  *
  * 外观那几项（明暗 / 主题色 / 顶部样式 / 卡片不透明度 / 终端高度 / 程序名称 / 背景）也在这里，
@@ -14,7 +14,7 @@
  */
 import { DEFAULT_APPEARANCE, sanitizeAppearanceSettings, type AppearanceSettings } from './appearance'
 
-/** 首页七块卡片的稳定 id；数组顺序也是同栏同 order 时的兜底排序 */
+/** 首页八块卡片的稳定 id；数组顺序也是同栏同 order 时的兜底排序 */
 export const HOME_CARD_IDS = [
   'activity',
   'token',
@@ -22,7 +22,8 @@ export const HOME_CARD_IDS = [
   'recent',
   'actions',
   'quick',
-  'commands'
+  'commands',
+  'work'
 ] as const
 
 export type HomeCardId = (typeof HOME_CARD_IDS)[number]
@@ -144,13 +145,14 @@ export const CARD_HEIGHT_MIN: Record<HomeCardId, number> = {
   recent: 88,
   actions: 76,
   quick: 76,
-  commands: 90
+  commands: 90,
+  work: 88
 }
 
 /**
  * 默认布局（按当前配置固化）：左栏从上到下是四张竖着排的清单卡（最近使用、快捷启动、
  * 系统状态），最底下是吃剩余高度的命令；中栏整栏给两张吃宽度的图表（活跃度、Token 用量）；
- * 右栏是快捷操作。
+ * 右栏上面是快捷操作、下面「今日完成」吃掉剩余高度。
  *
  * 中栏以前整栏是项目列表，它搬去「项目」页之后中栏空了出来（空栏不渲染 = 默认变两栏、中间空一大片），
  * 所以把两张大图挪了进来 —— 它们是这套卡片里最需要宽度的。
@@ -170,7 +172,9 @@ export const DEFAULT_THEME: ThemeConfig = {
     commands: { column: 'left', order: 3, mode: 'flex', height: 90 },
     activity: { column: 'center', order: 0, mode: 'flex', height: 240 },
     token: { column: 'center', order: 1, mode: 'flex', height: 240 },
-    actions: { column: 'right', order: 0, mode: 'fixed', height: 224 }
+    actions: { column: 'right', order: 0, mode: 'fixed', height: 224 },
+    // 今日完成：条目数不确定，让它吃掉右栏剩下的高度、在里面自己滚
+    work: { column: 'right', order: 1, mode: 'flex', height: 200 }
   },
   // 外观的默认值只有一处口径（数据文件那份设置的默认值，见 appearance.ts）
   appearance: DEFAULT_APPEARANCE,
@@ -259,6 +263,10 @@ export function normalizeOrder(
  *
  * 版本对不上时整份回到默认布局（见 THEME_VERSION）：卡片清单变过，老布局按原样套用会缺一块。
  * 走的是同一条收敛路径（每个字段都新造对象），所以不会改到 DEFAULT_THEME 那份常量。
+ *
+ * **往里加一块卡片不必动版本号**：老文件里缺的那块会按默认布局补上（见 sanitizeCardPlacement），
+ * 用户自己摆过的位置一并留着。反过来，把某块从清单里拿掉才要动版本 —— 老布局会在它原来那一栏
+ * 留下一块空位（v1 → v2 移出「项目列表」就是这种情况）。
  *
  * `updatedAt` 原样留着（缺省补 0）：它是同步用的时间戳，不是这里能判定的东西。
  */

@@ -9,6 +9,7 @@
  * 通道补齐后应当去掉兜底（那时 `as` 断言也就不需要了）。
  */
 import { parsePort } from '@shared/port'
+import { nextProjectColor } from '@shared/project-color'
 import { samePath } from '@shared/project-path'
 import { fail, ok } from '@shared/result'
 import type {
@@ -40,6 +41,7 @@ import * as scanner from './scanner'
 import * as session from './session'
 import * as state from './state'
 import * as system from './system'
+import * as workLog from './work-log'
 import { getTokenUsage, getTokenUsageSnapshot, listSyncDevices, syncTokenUsage } from './token'
 
 /**
@@ -52,6 +54,17 @@ function resolveTheme(theme: AppSettings['theme']): EffectiveTheme {
 
 function reasonOf(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback
+}
+
+/**
+ * 当前该用的同步仓库地址：**没登录一律当没填**。
+ *
+ * 同步的凭据来自账号，所以未登录时既不推也不拉，界面上的数字全部出自本机（别人机器上
+ * 读回来的分片也一并撤掉，见 token.ts 的 syncLocalShards）。设置里的地址不动它 ——
+ * 登录回来接着用，不必重填一遍。
+ */
+function syncRepo(): string {
+  return state.account() ? state.settings().tokenSyncRepo : ''
 }
 
 /**
@@ -176,6 +189,8 @@ function createApi(): WorkbenchApi {
         id: crypto.randomUUID(),
         name: input.name?.trim() || scan.name,
         path: dirPath,
+        // 标识色：自动取一个当前用得最少的颜色，前五个项目因此两两不同（见 shared/project-color.ts）
+        color: nextProjectColor(state.projects().map((item) => item.color)),
         packageManager: 'auto',
         detectedPackageManager: scan.detectedPackageManager,
         framework: scan.framework || 'Node',
@@ -266,28 +281,30 @@ function createApi(): WorkbenchApi {
       return Promise.resolve(ok(null))
     },
 
+    // ---------- 工作日志（本地文件，不进同步仓库） ----------
+    listWorkLogs: () => workLog.listWorkLogs(),
+    addWorkLog: (input: Parameters<WorkbenchApi['addWorkLog']>[0]) => workLog.addWorkLog(input),
+    updateWorkLog: (id: string, patch: Parameters<WorkbenchApi['updateWorkLog']>[1]) =>
+      workLog.updateWorkLog(id, patch),
+    removeWorkLog: (id: string) => workLog.removeWorkLog(id),
+
     // ---------- 统计 ----------
     getActivity: () => Promise.resolve(state.activityCounts()),
     /**
      * Token 用量：实读 + 合并 + 按需同步。
      * 同步仓库地址从设置里现取 —— 用户刚在设置里填完，下一次刷新就该用上新地址。
      */
-    getTokenUsage: () =>
-      guard(getTokenUsage({ repo: state.settings().tokenSyncRepo }), '读取 token 用量失败'),
+    getTokenUsage: () => guard(getTokenUsage({ repo: syncRepo() }), '读取 token 用量失败'),
     /** 首屏先手：只读本地那份快照，实读结果随后覆盖它（见 shared/types.ts 的说明） */
     getTokenUsageSnapshot: () =>
-      guard(
-        getTokenUsageSnapshot({ repo: state.settings().tokenSyncRepo }),
-        '读取 token 快照失败'
-      ),
+      guard(getTokenUsageSnapshot({ repo: syncRepo() }), '读取 token 快照失败'),
     /** 手动同步：绕过自动同步的节流（面板上的同步按钮） */
-    syncTokenUsage: () =>
-      guard(syncTokenUsage(state.settings().tokenSyncRepo), '同步 token 用量失败'),
+    syncTokenUsage: () => guard(syncTokenUsage(syncRepo()), '同步 token 用量失败'),
     /**
      * 仓库里的其它机器（含各自的外观配置），设置界面「从别的机器取外观」用。
      * 与上面两个同理，地址从设置现取：用户刚填完就该看到新仓库里的机器。
      */
-    listSyncDevices: () => listSyncDevices(state.settings().tokenSyncRepo),
+    listSyncDevices: () => listSyncDevices(syncRepo()),
 
     // ---------- 设置与布局 ----------
     getSettings: () => Promise.resolve(state.settings()),

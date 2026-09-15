@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { ArrowDown, ArrowUp, Close, Delete, Download } from '@element-plus/icons-vue'
+import { ArrowLeft, ArrowRight, Close, Delete } from '@element-plus/icons-vue'
 import {
   TERMINAL_HEIGHT_MIN,
   clampTerminalHeight,
@@ -35,6 +35,12 @@ const panelHeight = computed(() => dragHeight.value ?? store.terminalHeight)
  * 再压到当前窗口允许的最大值，保证上面始终留得住项目列表。
  */
 const heightLimit = ref(maxTerminalHeightFor(window.innerHeight))
+
+/**
+ * 视口高度。
+ * 收起后那颗悬浮按钮的上下限按它现算（见下面的 dockRange），窗口一变就跟着收敛。
+ */
+const viewportHeight = ref(window.innerHeight)
 
 /**
  * 真正渲染的高度。
@@ -80,7 +86,6 @@ function onResizeKeydown(event: KeyboardEvent): void {
 }
 
 function startResize(event: PointerEvent): void {
-  if (collapsed.value) return
   event.preventDefault()
 
   startY = event.clientY
@@ -103,6 +108,7 @@ function nudgeHeight(delta: number): void {
 /** 窗口尺寸变了：上下限跟着走，渲染高度由 renderHeight 自动收敛 */
 function onWindowResize(): void {
   heightLimit.value = maxTerminalHeightFor(window.innerHeight)
+  viewportHeight.value = window.innerHeight
 }
 
 window.addEventListener('resize', onWindowResize)
@@ -112,11 +118,10 @@ const active = computed(() => store.activeTerminalState)
 
 /**
  * 选中一个终端。
- * 收起时面板只剩工具栏，光切 active 是看不见日志的，所以顺手展开。
+ * 只切 active：面板条本身只在展开时才在，切换时不必顺带展开。
  */
 function selectTab(key: string): void {
   store.setActiveTerminal(key)
-  if (collapsed.value) collapsed.value = false
 }
 
 /**
@@ -154,6 +159,152 @@ function projectName(terminal: TerminalState): string {
 
 function closeTerminal(terminal: TerminalState): void {
   store.closeTerminal(terminal.key)
+}
+
+// ---------- 收起后的悬浮按钮 ----------
+
+/**
+ * 收起不是把面板压矮，而是整块收成窗口最右侧这一颗按钮（Teleport 到 body，
+ * 与页面布局无关；面板则折回它原来的位置，见模板上的两个 Transition）。
+ *
+ * 位置：没拖动过时落在**终端面板自己的纵向中线**上 —— 收起看着才像面板收进了这颗按钮，
+ * 而不是凭空飘到屏幕中间去；拖动过就以存下来的百分比为准（shared/terminal-dock.ts）。
+ */
+const DOCK_SIZE = 34
+
+/** 下边留白：按钮贴到底时与窗口下沿的距离 */
+const DOCK_MARGIN = 10
+
+/** 面板自己的下外边距（tokens 里的 --sp-2）：算「面板纵向中线」时要用 */
+const PANEL_MARGIN = 8
+
+/** 顶栏（标题栏 + 搜索栏）占掉的高度：按钮最多贴到它下面 */
+const DOCK_TOP_LIMIT = 100
+
+/** 拖动中的临时位置：只影响渲染，松手才写进设置（与面板高度同一套做法） */
+const dragDockTop = ref<number | null>(null)
+const dockDragging = computed(() => dragDockTop.value !== null)
+
+/**
+ * 当前视口下的上下限（百分比）。
+ * 窗口特别矮时两条线可能交叉，此时 clampDockTop 取中间那点，仍保证按钮是够得着的。
+ */
+const dockRange = computed(() => {
+  const height = Math.max(1, viewportHeight.value)
+  const half = DOCK_SIZE / 2
+  return {
+    min: ((DOCK_TOP_LIMIT + half) / height) * 100,
+    max: ((height - half - DOCK_MARGIN) / height) * 100
+  }
+})
+
+function clampDockTop(percent: number): number {
+  const { min, max } = dockRange.value
+  return Math.min(Math.max(min, max), Math.max(Math.min(min, max), percent))
+}
+
+/**
+ * 没拖动过时的落点：面板纵向中线换算成百分比。
+ * 面板贴底铺开（renderHeight 是它当前的高度），所以中线在窗口偏下的位置，
+ * 收起与展开来回切时按钮始终在面板原来那一带。
+ */
+const autoDockTop = computed(() => {
+  const height = Math.max(1, viewportHeight.value)
+  const center = height - PANEL_MARGIN - renderHeight.value / 2
+  return clampDockTop((center / height) * 100)
+})
+
+/** 真正渲染的位置：拖动 > 用户存下来的 > 面板中线，再按当前窗口收一次 */
+const renderDockTop = computed(() =>
+  clampDockTop(dragDockTop.value ?? store.terminalButtonTop ?? autoDockTop.value)
+)
+
+/**
+ * 收起后 Tab 上那些状态点就看不见了，往按钮上补一个：
+ * 还有命令在跑（黄点，呼吸）或上一次跑失败了（红点）都得看得出来。
+ */
+const dockTone = computed(() => {
+  if (tabs.value.some(isRunning)) return 'run'
+  if (tabs.value.some((terminal) => terminal.status === 'failed')) return 'fail'
+  return ''
+})
+
+/** 按住时指针相对按钮中心的偏移：拖动中保持它，按钮才不会在指针底下跳一下 */
+let dockGrabOffset = 0
+let dockStartY = 0
+/** 这一次拖动把位置改掉了：松手要落盘 */
+let dockMoved = false
+/**
+ * 刚结束的这一按不算「点击」（拖动过，或按 Esc 取消了）。
+ * 浏览器在 pointerup 之后还会补一个 click，靠它区分「拖」与「点」。
+ */
+let dockSuppressClick = false
+
+function onDockMove(event: PointerEvent): void {
+  if (Math.abs(event.clientY - dockStartY) > 3) {
+    dockMoved = true
+    dockSuppressClick = true
+  }
+  const center = event.clientY - dockGrabOffset
+  dragDockTop.value = clampDockTop((center / Math.max(1, viewportHeight.value)) * 100)
+}
+
+function detachDockDrag(): void {
+  window.removeEventListener('pointermove', onDockMove)
+  window.removeEventListener('pointerup', onDockEnd)
+  window.removeEventListener('pointercancel', onDockEnd)
+  window.removeEventListener('keydown', onDockKeydown)
+  document.body.classList.remove('is-dragging-terminal-dock')
+}
+
+function onDockEnd(): void {
+  const next = dragDockTop.value
+  const moved = dockMoved
+  detachDockDrag()
+  dragDockTop.value = null
+  dockMoved = false
+  if (moved && next !== null) void store.setTerminalButtonTop(next)
+}
+
+/** 拖动中按 Esc：放弃这次调整，按钮回到拖动前的位置，也不算点击 */
+function onDockKeydown(event: KeyboardEvent): void {
+  if (event.key !== 'Escape') return
+  dockSuppressClick = true
+  dockMoved = false
+  detachDockDrag()
+  dragDockTop.value = null
+}
+
+function startDockDrag(event: PointerEvent): void {
+  if (event.button !== 0) return
+
+  const height = Math.max(1, viewportHeight.value)
+  dockStartY = event.clientY
+  dockGrabOffset = event.clientY - (renderDockTop.value / 100) * height
+  dockMoved = false
+  dockSuppressClick = false
+  dragDockTop.value = renderDockTop.value
+
+  // 监听挂在 window 上：指针挪出这颗 34px 的按钮也还能继续拖（与面板上沿的把手同一套）
+  window.addEventListener('pointermove', onDockMove)
+  window.addEventListener('pointerup', onDockEnd)
+  window.addEventListener('pointercancel', onDockEnd)
+  window.addEventListener('keydown', onDockKeydown)
+  document.body.classList.add('is-dragging-terminal-dock')
+}
+
+/** 按钮可聚焦：上下方向键微调位置，不必非得拖 */
+function nudgeDock(delta: number): void {
+  void store.setTerminalButtonTop(clampDockTop(renderDockTop.value + delta))
+}
+
+/** 点开面板；刚拖完 / 刚按 Esc 的那一下不算点 */
+function expandFromDock(): void {
+  if (dockSuppressClick) {
+    dockSuppressClick = false
+    return
+  }
+  collapsed.value = false
 }
 
 /**
@@ -351,164 +502,307 @@ onUnmounted(() => {
   bodyObserver.disconnect()
   lineObserver.disconnect()
   detachResize()
+  detachDockDrag()
 })
 
 function clearLogs(): void {
   const target = active.value
   if (target) store.clearTerminalLogs(target.key)
 }
-
-function exportLogs(): void {
-  const target = active.value
-  if (!target) return
-
-  const buffer = target.logs
-  if (!buffer.size) {
-    ElMessage.info('当前没有可导出的日志')
-    return
-  }
-
-  const text = buffer
-    .toArray()
-    .map((line) => `[${line.time}] ${line.text}`)
-    .join('\r\n')
-  const blob = new Blob([text], { type: 'text/plain;charset=utf-8' })
-  const url = URL.createObjectURL(blob)
-  const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')
-
-  const anchor = document.createElement('a')
-  anchor.href = url
-  anchor.download = `${projectName(target)}-${target.label}-${stamp}.log`
-  anchor.click()
-  URL.revokeObjectURL(url)
-}
 </script>
 
 <template>
-  <footer
-    v-if="tabs.length"
-    class="term"
-    :class="{ 'is-collapsed': collapsed, 'is-resizing': resizing, 'is-linkable': ctrlHeld }"
-    :style="{ '--term-h': `${renderHeight}px` }"
-  >
-    <!-- 上沿的拖拽把手：收起时藏起来（收起高度是固定的） -->
-    <div
-      v-show="!collapsed"
-      class="term__resizer"
-      :class="{ 'is-active': resizing }"
-      role="separator"
-      aria-orientation="horizontal"
-      aria-label="调整终端高度"
-      :aria-valuenow="ariaHeight"
-      :aria-valuemin="TERMINAL_HEIGHT_MIN"
-      :aria-valuemax="heightLimit"
-      tabindex="0"
-      @pointerdown="startResize"
-      @keydown.up.prevent="nudgeHeight(16)"
-      @keydown.down.prevent="nudgeHeight(-16)"
-    />
+  <!--
+    收起后整块面板收成这一颗按钮。
+    Teleport 到 body：它要贴在**窗口**最右侧，不参与页面（内容列 / 首页那几个面板）的布局，
+    也就不会被任何一层的定位或裁剪带偏；按住可上下拖，位置落盘（见 shared/terminal-dock.ts）。
+    收起后 Tab 上的状态点就看不见了，所以按钮带上一个（见 dockTone）。
+  -->
+  <Teleport to="body">
+    <Transition name="dock">
+      <button
+        v-if="tabs.length && collapsed"
+        class="dock"
+        :class="{ 'is-dragging': dockDragging }"
+        type="button"
+        :style="{ top: `${renderDockTop}%` }"
+        title="展开终端（按住可上下拖动）"
+        aria-label="展开终端"
+        @pointerdown="startDockDrag"
+        @keydown.up.prevent="nudgeDock(-2)"
+        @keydown.down.prevent="nudgeDock(2)"
+        @click="expandFromDock"
+      >
+        <el-icon><ArrowLeft /></el-icon>
+        <i v-if="dockTone" class="dock__dot" :class="`tone-${dockTone}`" />
+      </button>
+    </Transition>
+  </Teleport>
 
-    <div class="term__bar">
+  <!-- 面板整块向右侧滑出去（滑进窗口右缘那颗按钮里），按钮同时从右缘滑出来 -->
+  <Transition name="term-fold">
+    <footer
+      v-if="tabs.length && !collapsed"
+      class="term"
+      :class="{ 'is-resizing': resizing, 'is-linkable': ctrlHeld }"
+      :style="{ '--term-h': `${renderHeight}px` }"
+    >
+      <!-- 上沿的拖拽把手 -->
+      <div
+        class="term__resizer"
+        :class="{ 'is-active': resizing }"
+        role="separator"
+        aria-orientation="horizontal"
+        aria-label="调整终端高度"
+        :aria-valuenow="ariaHeight"
+        :aria-valuemin="TERMINAL_HEIGHT_MIN"
+        :aria-valuemax="heightLimit"
+        tabindex="0"
+        @pointerdown="startResize"
+        @keydown.up.prevent="nudgeHeight(16)"
+        @keydown.down.prevent="nudgeHeight(-16)"
+      />
+
+      <div class="term__bar">
       <button
         class="term__toggle"
         type="button"
-        :title="collapsed ? '展开终端' : '收起终端'"
-        @click="collapsed = !collapsed"
+        title="收起终端"
+        @click="collapsed = true"
       >
-        <el-icon class="term__caret">
-          <ArrowUp v-if="collapsed" />
-          <ArrowDown v-else />
-        </el-icon>
+        <el-icon class="term__caret"><ArrowRight /></el-icon>
         <span class="term__title">终端</span>
       </button>
 
-      <div class="term__tabs">
-        <div
-          v-for="t in tabs"
-          :key="t.key"
-          class="tab"
-          :class="{ 'is-active': t.key === active?.key }"
-          role="tab"
-          :aria-selected="t.key === active?.key"
-          tabindex="0"
-          @click="selectTab(t.key)"
-          @keydown.enter.prevent="selectTab(t.key)"
-        >
-          <i class="tab__dot" :class="`tone-${toneOf(t.status)}`" />
-          <span class="tab__name truncate">{{ projectName(t) }} · {{ t.label }}</span>
-          <button
-            class="tab__close"
-            type="button"
-            :disabled="isRunning(t)"
-            :title="isRunning(t) ? '正在运行，停止后才能关闭' : '关闭这个终端'"
-            :aria-label="`关闭 ${projectName(t)} · ${t.label}`"
-            @click.stop="closeTerminal(t)"
+        <div class="term__tabs">
+          <div
+            v-for="t in tabs"
+            :key="t.key"
+            class="tab"
+            :class="{ 'is-active': t.key === active?.key }"
+            role="tab"
+            :aria-selected="t.key === active?.key"
+            tabindex="0"
+            @click="selectTab(t.key)"
+            @keydown.enter.prevent="selectTab(t.key)"
           >
-            <el-icon><Close /></el-icon>
-          </button>
-        </div>
-      </div>
-
-      <div class="term__tools">
-        <span v-if="currentCommand" class="term__cmd mono truncate" :title="currentCommand">
-          $ {{ currentCommand }}
-        </span>
-        <el-tooltip content="清空日志" placement="top" :show-after="400">
-          <button class="tool" type="button" aria-label="清空日志" @click="clearLogs">
-            <el-icon><Delete /></el-icon>
-          </button>
-        </el-tooltip>
-        <el-tooltip content="导出日志" placement="top" :show-after="400">
-          <button class="tool" type="button" aria-label="导出日志" @click="exportLogs">
-            <el-icon><Download /></el-icon>
-          </button>
-        </el-tooltip>
-      </div>
-    </div>
-
-    <div
-      v-show="!collapsed"
-      ref="bodyRef"
-      class="term__body scroll-dark"
-      role="log"
-      aria-live="polite"
-      @scroll.passive="onBodyScroll"
-    >
-      <template v-if="lines.length">
-        <p v-if="omitted" class="line line--sys term__omitted">
-          已省略较早的 {{ omitted }} 行（缓冲区保留最近 5000 行，此处只渲染最近 {{ RENDER_LIMIT }} 行）
-        </p>
-        <!-- 分块渲染：屏幕外的块由 content-visibility 跳过布局与绘制 -->
-        <div
-          v-for="(chunk, index) in chunks"
-          :key="chunk[0]?.id ?? index"
-          class="chunk"
-          :style="{ containIntrinsicSize: `auto ${chunkEstimatePx}px` }"
-        >
-          <div v-for="line in chunk" :key="line.id" class="line" :class="`line--${line.stream}`">
-            <span class="line__time mono">{{ line.time }}</span>
-            <!-- 先按地址切段：链接单独成段上绿色，空行仍拿空格占住行高 -->
-            <span class="line__text mono"><template
-              v-for="(seg, index) in segmentsOf(line.text || ' ')"
-              :key="index"
-            ><span
-              v-if="seg.url"
-              class="line__link"
-              role="link"
-              :title="`Ctrl + 单击用默认浏览器打开：${seg.url}`"
-              @click="openLink($event, seg.url)"
-            >{{ seg.text }}</span><template v-else>{{ seg.text }}</template></template></span>
+            <i class="tab__dot" :class="`tone-${toneOf(t.status)}`" />
+            <span class="tab__name truncate">{{ projectName(t) }} · {{ t.label }}</span>
+            <button
+              class="tab__close"
+              type="button"
+              :disabled="isRunning(t)"
+              :title="isRunning(t) ? '正在运行，停止后才能关闭' : '关闭这个终端'"
+              :aria-label="`关闭 ${projectName(t)} · ${t.label}`"
+              @click.stop="closeTerminal(t)"
+            >
+              <el-icon><Close /></el-icon>
+            </button>
           </div>
         </div>
-      </template>
-      <p v-else class="term__blank mono">
-        {{ active ? '这个终端还没有输出。' : '点击上方标签切换终端。' }}
-      </p>
-    </div>
-  </footer>
+
+        <div class="term__tools">
+          <span v-if="currentCommand" class="term__cmd mono truncate" :title="currentCommand">
+            $ {{ currentCommand }}
+          </span>
+          <el-tooltip content="清空日志" placement="top" :show-after="400">
+            <button class="tool" type="button" aria-label="清空日志" @click="clearLogs">
+              <el-icon><Delete /></el-icon>
+            </button>
+          </el-tooltip>
+        <el-tooltip content="收起终端" placement="top" :show-after="400">
+          <button class="tool" type="button" aria-label="收起终端" @click="collapsed = true">
+            <el-icon><ArrowRight /></el-icon>
+          </button>
+        </el-tooltip>
+        </div>
+      </div>
+
+      <div
+        ref="bodyRef"
+        class="term__body scroll-dark"
+        role="log"
+        aria-live="polite"
+        @scroll.passive="onBodyScroll"
+      >
+        <template v-if="lines.length">
+          <p v-if="omitted" class="line line--sys term__omitted">
+            已省略较早的 {{ omitted }} 行（缓冲区保留最近 5000 行，此处只渲染最近 {{ RENDER_LIMIT }} 行）
+          </p>
+          <!-- 分块渲染：屏幕外的块由 content-visibility 跳过布局与绘制 -->
+          <div
+            v-for="(chunk, index) in chunks"
+            :key="chunk[0]?.id ?? index"
+            class="chunk"
+            :style="{ containIntrinsicSize: `auto ${chunkEstimatePx}px` }"
+          >
+            <div v-for="line in chunk" :key="line.id" class="line" :class="`line--${line.stream}`">
+              <span class="line__time mono">{{ line.time }}</span>
+              <!-- 先按地址切段：链接单独成段上绿色，空行仍拿空格占住行高 -->
+              <span class="line__text mono"><template
+                v-for="(seg, index) in segmentsOf(line.text || ' ')"
+                :key="index"
+              ><span
+                v-if="seg.url"
+                class="line__link"
+                role="link"
+                :title="`Ctrl + 单击用默认浏览器打开：${seg.url}`"
+                @click="openLink($event, seg.url)"
+              >{{ seg.text }}</span><template v-else>{{ seg.text }}</template></template></span>
+            </div>
+          </div>
+        </template>
+        <p v-else class="term__blank mono">
+          {{ active ? '这个终端还没有输出。' : '点击上方标签切换终端。' }}
+        </p>
+      </div>
+    </footer>
+  </Transition>
 </template>
 
 <style scoped>
+/* ---------- 收起后的悬浮按钮 ---------- */
+
+/**
+ * 收起后整块面板就剩这一颗按钮：贴在**窗口**最右侧（Teleport 到 body，见模板），
+ * 纵向位置来自设置（百分比，见 shared/terminal-dock.ts）。
+ * 用终端自己的深色底：它是终端面板的一部分，明暗主题下都不跟着变。
+ */
+.dock {
+  position: fixed;
+  /* 贴死窗口右缘，只留左边两个圆角：看着像挂在窗口边上的一道把手，而不是页面里的一个浮块 */
+  right: 0;
+  z-index: 5;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid var(--term-border);
+  border-right: 0;
+  border-radius: var(--r-md) 0 0 var(--r-md);
+  background: var(--term-bg);
+  color: var(--term-ink);
+  font-size: 15px;
+  box-shadow: var(--shadow-pop);
+  cursor: grab;
+  /* top 取的是「按钮中心落在窗口高度的百分之几」，所以自身上移一半 */
+  transform: translateY(-50%);
+  transition: top 0.16s ease, background 0.15s ease, color 0.15s ease;
+  touch-action: none;
+}
+
+.dock:hover {
+  background: var(--term-surface);
+  color: #ffffff;
+}
+
+/* 拖动中关掉过渡，否则按钮会慢半拍地追着指针跑（与面板上沿同一套） */
+.dock.is-dragging {
+  cursor: grabbing;
+  transition: none;
+}
+
+/* 状态点钉在右上角，像一枚角标：收起后它就是「还有命令在跑」的唯一提示 */
+.dock__dot {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--st-run);
+}
+
+.dock__dot.tone-run {
+  animation: dock-dot-pulse 1.3s ease-in-out infinite;
+}
+
+.dock__dot.tone-fail {
+  background: var(--st-fail);
+}
+
+/*
+ * 呼吸用透明度而不是 tab 上那圈 box-shadow：这颗点在按钮的角落里，
+ * 放大的光晕会溢到按钮外面去。
+ */
+@keyframes dock-dot-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dock__dot.tone-run {
+    animation: none;
+  }
+}
+
+/* ---------- 收起 / 展开的动效 ---------- */
+
+/*
+ * 面板整块横着走：**向右侧滑出去**（滑进窗口右缘那颗按钮里），两拍接续 ——
+ * 第一拍是看得见的那一下（向右滑 + 淡出），第二拍才收拢高度、把上面的内容放下来。
+ *
+ * 为什么高度不能和滑动同时收：面板贴底铺开，高度一收它的上沿就在往下走，
+ * 混进来会变成「往下折」的观感（踩过一次）—— 所以让高度在面板已经透明之后才走那一拍。
+ * 收缩期间要裁掉溢出的日志，否则日志会从正在变矮的盒子里探出来。
+ */
+.term.term-fold-leave-active {
+  overflow: hidden;
+  transform-origin: right center;
+  transition: transform 0.18s ease, opacity 0.16s ease, height 0.16s ease 0.18s;
+}
+
+.term.term-fold-leave-to {
+  transform: translateX(100%);
+  opacity: 0;
+  height: 0;
+}
+
+/* 展开是同一套倒着走：先让高度长出来（上面的内容让位），面板再从右缘滑回来 */
+.term.term-fold-enter-active {
+  overflow: hidden;
+  transform-origin: right center;
+  transition: height 0.16s ease, transform 0.18s ease 0.16s, opacity 0.16s ease 0.16s;
+}
+
+.term.term-fold-enter-from {
+  transform: translateX(100%);
+  opacity: 0;
+  height: 0;
+}
+
+/* 按钮从窗口右缘滑出来 / 缩回右缘：与面板那一拍错开，看着像面板收进去之后它才冒头 */
+.dock.dock-enter-active {
+  transition: transform 0.18s ease 0.14s, opacity 0.16s ease 0.14s;
+}
+
+.dock.dock-leave-active {
+  transition: transform 0.14s ease, opacity 0.12s ease;
+}
+
+.dock.dock-enter-from,
+.dock.dock-leave-to {
+  opacity: 0;
+  transform: translateY(-50%) translateX(100%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .term.term-fold-enter-active,
+  .term.term-fold-leave-active,
+  .dock.dock-enter-active,
+  .dock.dock-leave-active {
+    transition: none;
+  }
+}
+
+/* ---------- 面板 ---------- */
 .term {
   position: relative;
   display: flex;
@@ -518,11 +812,9 @@ function exportLogs(): void {
   background: var(--term-bg);
   border-top: 1px solid var(--term-border);
   transition: height 0.18s ease;
-}
-
-/* 收起时只留一条面板条：标签与状态点还在，正文藏起来 */
-.term.is-collapsed {
-  height: var(--h-terminal-collapsed);
+  border-radius: var(--r-md);
+  margin: var(--sp-2);
+  margin-top: 0;
 }
 
 /* 拖动过程中关掉过渡，否则高度会慢半拍地追着指针跑 */
@@ -570,10 +862,9 @@ function exportLogs(): void {
   display: flex;
   align-items: center;
   gap: var(--sp-2);
-  height: var(--h-terminal-collapsed);
+  height: var(--h-terminal-bar);
   flex-shrink: 0;
   padding: 0 var(--sp-3);
-  border-bottom: 1px solid var(--term-border);
 }
 
 .term__toggle {

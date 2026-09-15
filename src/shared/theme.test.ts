@@ -42,7 +42,8 @@ function sampleCards(): Record<HomeCardId, CardPlacement> {
     actions: { column: 'right', order: 1, mode: 'flex', height: 180 },
     commands: { column: 'right', order: 2, mode: 'flex', height: 400 },
     quick: { column: 'center', order: 0, mode: 'fixed', height: 108 },
-    token: { column: 'center', order: 1, mode: 'flex', height: 600 }
+    token: { column: 'center', order: 1, mode: 'flex', height: 600 },
+    work: { column: 'right', order: 3, mode: 'flex', height: 200 }
   }
 }
 
@@ -137,7 +138,7 @@ describe('sanitizeCardMode', () => {
 })
 
 describe('sanitizeTheme', () => {
-  it('缺哪块补哪块，七块一定齐全', () => {
+  it('缺哪块补哪块，八块一定齐全', () => {
     const result = sanitizeTheme({
       version: THEME_VERSION,
       cards: { quick: { column: 'left', order: 0, height: 240 } }
@@ -199,7 +200,8 @@ describe('sanitizeTheme', () => {
         token: { column: 'center', order: 3, height: 200 },
         quick: { column: 'center', order: 9, height: 200 },
         commands: { column: 'right', order: 7, height: 200 },
-        actions: { column: 'right', order: 2, height: 200 }
+        actions: { column: 'right', order: 2, height: 200 },
+        work: { column: 'right', order: 9, height: 200 }
       }
     })
     expect(cardIdsInColumn(result.cards, 'left')).toEqual(['recent', 'activity', 'system'])
@@ -209,12 +211,13 @@ describe('sanitizeTheme', () => {
     expect(cardIdsInColumn(result.cards, 'center')).toEqual(['token', 'quick'])
     expect(result.cards.token.order).toBe(0)
     expect(result.cards.quick.order).toBe(1)
-    expect(cardIdsInColumn(result.cards, 'right')).toEqual(['actions', 'commands'])
+    expect(cardIdsInColumn(result.cards, 'right')).toEqual(['actions', 'commands', 'work'])
     expect(result.cards.actions.order).toBe(0)
     expect(result.cards.commands.order).toBe(1)
+    expect(result.cards.work.order).toBe(2)
   })
 
-  it('默认布局：左栏排常用面板、中栏两张吃宽度的图表、右栏放快捷操作', () => {
+  it('默认布局：左栏排常用面板、中栏两张吃宽度的图表、右栏放快捷操作与今日完成', () => {
     expect(DEFAULT_THEME.leftWidth).toBe(LEFT_WIDTH_DEFAULT)
     expect(DEFAULT_THEME.rightWidth).toBe(RIGHT_WIDTH_DEFAULT)
     expect(cardIdsInColumn(DEFAULT_THEME.cards, 'left')).toEqual([
@@ -224,11 +227,12 @@ describe('sanitizeTheme', () => {
       'commands'
     ])
     expect(cardIdsInColumn(DEFAULT_THEME.cards, 'center')).toEqual(['activity', 'token'])
-    expect(cardIdsInColumn(DEFAULT_THEME.cards, 'right')).toEqual(['actions'])
-    // 中栏两张图表、左栏命令各占一块 flex，吃掉所在栏剩余高度
+    expect(cardIdsInColumn(DEFAULT_THEME.cards, 'right')).toEqual(['actions', 'work'])
+    // 中栏两张图表、左栏命令、右栏今日完成各占一块 flex，吃掉所在栏剩余高度
     expect(DEFAULT_THEME.cards.activity.mode).toBe('flex')
     expect(DEFAULT_THEME.cards.token.mode).toBe('flex')
     expect(DEFAULT_THEME.cards.commands.mode).toBe('flex')
+    expect(DEFAULT_THEME.cards.work.mode).toBe('flex')
     expect(DEFAULT_THEME.cards.actions.mode).toBe('fixed')
   })
 })
@@ -257,9 +261,10 @@ describe('moveCard', () => {
 
   it('原栏剩下的卡片 order 依然连续', () => {
     const next = moveCard(sampleCards(), 'recent', 'left', 0)
-    expect(cardIdsInColumn(next, 'right')).toEqual(['actions', 'commands'])
+    expect(cardIdsInColumn(next, 'right')).toEqual(['actions', 'commands', 'work'])
     expect(next.actions.order).toBe(0)
     expect(next.commands.order).toBe(1)
+    expect(next.work.order).toBe(2)
   })
 
   it('栏内前移 / 后移都按插入位算', () => {

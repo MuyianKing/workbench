@@ -44,15 +44,22 @@ button {
   font-family: inherit;
 }
 
-/* ---------- 拖动终端上沿 ---------- */
+/* ---------- 拖动终端上沿 / 收起后的悬浮按钮 ---------- */
 
 /**
- * 拖动时指针可能离开那条 10px 的把手，光标与文本选择都是全局状态，只能在这里兜住。
- * 光标用 ns-resize 而不是默认箭头，让「现在正在拖高度」这件事一直看得见。
+ * 拖动时指针可能离开那条 10px 的把手（或那颗 34px 的悬浮按钮），光标与文本选择
+ * 都是全局状态，只能在这里兜住。光标用 ns-resize / grabbing 而不是默认箭头，
+ * 让「现在正在拖」这件事一直看得见。
  */
 body.is-resizing-terminal,
 body.is-resizing-terminal * {
   cursor: ns-resize !important;
+  user-select: none !important;
+}
+
+body.is-dragging-terminal-dock,
+body.is-dragging-terminal-dock * {
+  cursor: grabbing !important;
   user-select: none !important;
 }
 
@@ -391,9 +398,110 @@ body.is-resizing-terminal * {
  * 毛玻璃的底色取「渐淡色」（--ws-veil-rgb，亮暗两套主题各一份），
  * 写死白色在暗色下会糊成一块亮灰。
  *
- * 项目页那条筛选工具带（.filter）跟着同一套走：原先它在顶部带里，后来随项目卡一起
+ * 项目页与工作页那条筛选工具带（.filter）跟着同一套走：原先它在顶部带里，后来随项目卡一起
  * 挪进了页面，但看起来还是原来那条带子（band 取画布色、另两档全透）。
+ * 它的**基础外壳**也放在这里（不在各自组件里）—— 两个页面共用同一条带子，
+ * 谁都不该是「规矩的出处」；写进组件 scoped 样式时，另一个页面就只剩下面那三档颜色规则、
+ * 排版全丢（踩过一次：工作页的工具条竖着堆成了两个整宽的行）。
  */
+
+/* 页面里的筛选工具带：左右两端各一组控件，高度与项目页一致 */
+.filter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  padding: 0 var(--sp-5);
+  min-height: var(--h-filter);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-canvas);
+  flex-shrink: 0;
+}
+
+/**
+ * 工具带上的「排序」下拉（项目页按最近使用 / 名称 / 添加时间，工作页按时间 / 项目）。
+ * 和 .filter 一样是两个页面共用的外壳，所以也放全局 —— 见上面那段说明。
+ */
+.sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 8px 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg-surface);
+  color: var(--ink-2);
+  font-size: var(--fs-meta);
+  cursor: pointer;
+  transition: border-color 0.15s ease;
+}
+
+.sort:hover {
+  border-color: var(--border-strong);
+}
+
+.sort__label {
+  color: var(--ink-3);
+}
+
+.sort__value {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.sort__caret {
+  font-size: 11px;
+  color: var(--ink-3);
+}
+
+/* 窄窗口下只留当前档位，省下的宽度让给筛选标签 */
+@media (max-width: 900px) {
+  .sort__label {
+    display: none;
+  }
+}
+
+/**
+ * 工具带上的筛选标签（项目页的分组 / 运行中 / 未分组，工作页的「待办」）。
+ * 同样是两处共用的外壳，所以放全局；各自特有的部分（拖拽落点、状态点）留在自己组件里。
+ */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: var(--r-pill);
+  background: transparent;
+  color: var(--ink-2);
+  font-size: var(--fs-body);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.chip:hover:not(:disabled) {
+  background: rgba(17, 21, 27, 0.05);
+}
+
+/* 没得筛（比如一条待办都没有）时不给点，但数字照常显示 */
+.chip:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+/* 选中态是一处「当前选择」的表达，跟主色走（见设置里的「主题色」）：
+   默认的中性主色就是 --ink，所以不设主题色时与原来完全一样。 */
+.chip.is-active {
+  background: var(--el-color-primary);
+  color: var(--el-color-white);
+}
+
+.chip__count {
+  font-size: var(--fs-micro);
+  opacity: 0.6;
+}
 
 /* ---------- band：不透明的工具条 ---------- */
 

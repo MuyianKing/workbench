@@ -24,10 +24,11 @@ use crate::store::JsonStore;
 use crate::system;
 use crate::token;
 
-/// 主数据 / 主题文件 / 用量快照各一份去抖存储
+/// 主数据 / 主题文件 / 用量快照 / 工作日志各一份去抖存储
 static DATA: OnceLock<JsonStore> = OnceLock::new();
 static THEME: OnceLock<JsonStore> = OnceLock::new();
 static TOKEN: OnceLock<JsonStore> = OnceLock::new();
+static WORK_LOG: OnceLock<JsonStore> = OnceLock::new();
 
 pub fn data_store() -> &'static JsonStore {
     DATA.get_or_init(|| JsonStore::new(paths::data_file, "保存项目数据"))
@@ -41,13 +42,19 @@ pub fn token_store() -> &'static JsonStore {
     TOKEN.get_or_init(|| JsonStore::new(paths::token_file, "保存 token 用量数据"))
 }
 
-/// 启动时载入三份数据（原始 JSON；收敛由 TS 侧负责）
+/// 工作日志单独一份文件：它**不进同步仓库**，只在本机读写（见 paths.rs 的说明）
+pub fn work_log_store() -> &'static JsonStore {
+    WORK_LOG.get_or_init(|| JsonStore::new(paths::work_log_file, "保存工作日志"))
+}
+
+/// 启动时载入四份数据（原始 JSON；收敛由 TS 侧负责）
 pub fn load_all() {
     // 先做一次性的文件改名：必须早于 token_store().load()，否则会先按新名字读到空文件
     paths::migrate_legacy_files();
     data_store().load();
     theme_store().load();
     token_store().load();
+    work_log_store().load();
 }
 
 /// 退出前同步落盘，防止防抖窗口内的改动丢失
@@ -55,6 +62,7 @@ pub fn flush_all() {
     data_store().flush_sync();
     theme_store().flush_sync();
     token_store().flush_sync();
+    work_log_store().flush_sync();
 }
 
 // ---------- 数据文件 ----------
@@ -97,6 +105,19 @@ pub fn token_save(value: Value) {
     token_store().schedule();
 }
 
+// ---------- 工作日志（本地，不进同步仓库） ----------
+
+#[tauri::command]
+pub fn work_log_load() -> Value {
+    work_log_store().get()
+}
+
+#[tauri::command]
+pub fn work_log_save(value: Value) {
+    work_log_store().set(value);
+    work_log_store().schedule();
+}
+
 #[tauri::command]
 pub fn data_location() -> Value {
     let custom = paths::custom_dir();
@@ -115,10 +136,11 @@ pub fn data_file_exists_in(dir: String) -> bool {
 /// 迁移数据目录要真搬文件，不能挡在主线程上
 #[tauri::command(async)]
 pub fn data_migrate(dir: String) -> Result<(), String> {
-    // 先把当前内存态同步落盘，迁移走的才是最新数据（主题文件也在搬运行列里）
+    // 先把当前内存态同步落盘，迁移走的才是最新数据（主题文件与工作日志也在搬运行列里）
     data_store().flush_sync();
     theme_store().flush_sync();
     token_store().flush_sync();
+    work_log_store().flush_sync();
     paths::migrate_data_dir(&dir, &data_store().get())
 }
 
@@ -469,7 +491,9 @@ pub fn kill_process_tree(pid: u32) -> Result<(), String> {
     crate::proc::kill_process_tree(pid)
 }
 
-#[tauri::command]
+/// 结束一个会话。`taskkill` 要一直等到整棵进程树消失才返回（dev server 底下挂着孙进程，
+/// 树大时能到秒级），所以必须异步 —— 留在主线程上就是一次可感知的停帧。
+#[tauri::command(async)]
 pub fn stop_session(app: AppHandle, session_id: String) -> Result<(), String> {
     crate::session::stop(&app, &session_id)
 }

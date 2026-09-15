@@ -113,7 +113,8 @@
   /* 项目卡与「添加项目」幽灵卡同高，网格里两种方块外形一致 */
   --h-project-card: 155px;
   --h-terminal: 406px;
-  --h-terminal-collapsed: 42px;
+  /* 终端面板顶部那条工具栏的高度（标签页与右侧工具都在这一行里） */
+  --h-terminal-bar: 42px;
 
   /* ---------- Element Plus 主题覆盖 ---------- */
   --el-color-primary: #11151b;

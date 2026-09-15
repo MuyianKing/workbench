@@ -11,7 +11,7 @@
  */
 import { computed } from 'vue'
 import type { Component } from 'vue'
-import { FolderOpened, Grid } from '@element-plus/icons-vue'
+import { Notebook, FolderOpened, Grid } from '@element-plus/icons-vue'
 import { VIEW_IDS, VIEW_LABELS, type ViewId } from '@shared/views'
 import { useProjectsStore } from '@/stores/projects'
 
@@ -20,7 +20,8 @@ const store = useProjectsStore()
 /** 每个页面一个图标；新增页面时这里会因缺 key 而报类型错，不会漏配 */
 const ICONS: Record<ViewId, Component> = {
   home: Grid,
-  projects: FolderOpened
+  projects: FolderOpened,
+  work: Notebook
 }
 
 const active = computed(() => store.activeView)
