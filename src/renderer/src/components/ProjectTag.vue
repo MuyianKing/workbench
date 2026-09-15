@@ -56,3 +56,17 @@ const tagStyle = computed(() => {
     {{ name }}
   </el-tag>
 </template>
+
+<style scoped>
+/**
+ * 内容层的行盒要撑开，**这一条在这里修、调用方不用管**。
+ *
+ * el-tag 自己的 `line-height: 1`：12px 的字只给 12px 行盒，而调用方为了截断长项目名
+ * 会在这一层加 `overflow: hidden`（配合 text-overflow 出省略号）—— 于是 g / p / y 的
+ * 下伸部被裁掉，表现成「英文显示不全、g 被遮挡」。标签固定 20px 高，1.6 倍行高（19.2px）
+ * 装得下，文字仍然居中；不截断时这条也没有任何副作用。
+ */
+.el-tag :deep(.el-tag__content) {
+  line-height: 1.6;
+}
+</style>

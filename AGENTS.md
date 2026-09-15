@@ -112,7 +112,7 @@
 - 暗色只在 `:root[data-theme='dark']` 覆盖令牌，不在组件里写 `data-theme` 分支。
 - 色彩语义：界面主体灰度，彩色只表达运行状态（`--st-run` / `--st-ok` / `--st-fail`）与**项目标识色**；终端面板始终深色（`--term-*`）。
 - **项目标识色**（[project-color.ts](src/shared/project-color.ts)）是灰度里刻意留的第二个彩色出口：它表达「这是哪个项目」，取值有两种 —— **预设名**（`primary` / `success` / `warning` / `danger` / `info`，渲染时经 `projectColorVar()` 取 `--el-color-*`，明暗切换与用户自定义的主题色因此自动跟着走）与**自定义色**（`#rrggbb`，跟着数据走）。**预设存名字、不存色值**；自定义色一律经 `sanitizeProjectColor()` 收敛（三位简写展开、大小写统一，认不出的当没设）。颜色怎么分配（新项目取「当前用得最少」的那个预设、老数据补齐）只在那一个文件里定义，界面别自己另拍一个颜色。
-- 工作日志里的项目标签用 **`el-tag` + `effect="dark"`**（实心色块 + 反白字），这是标签自己的主题，与应用明暗无关：预设色交给 `type`（EP 按 `--el-color-*` 取色），自定义色 EP 不认，就把 `--el-tag-bg-color` / `--el-tag-border-color` / `--el-tag-text-color` 这三个变量按算好的值写到行内，字色用 `inkOnAccent()`。**别为它再写一套自绘的浅底同色字标签**——「实心才分得清」是这一处的设计要求。
+- 工作日志里的项目标签用 **`el-tag` + `effect="dark"`**（实心色块 + 反白字），这是标签自己的主题，与应用明暗无关：预设色交给 `type`（EP 按 `--el-color-*` 取色），自定义色 EP 不认，就把 `--el-tag-bg-color` / `--el-tag-border-color` / `--el-tag-text-color` 这三个变量按算好的值写到行内，字色用 `inkOnAccent()`。**别为它再写一套自绘的浅底同色字标签**——「实心才分得清」是这一处的设计要求。统一走 [ProjectTag.vue](src/renderer/src/components/ProjectTag.vue)：调用方只管在自己的样式里限宽、给 `.el-tag__content` 加 `overflow: hidden` 出省略号，**行盒高度由它兜着** —— el-tag 的 `line-height` 是 1，调用方一加 overflow，g / p / y 的下伸部就被裁掉（表现成「英文显示不全、g 被遮挡」，踩过一次）。
 - 组件样式写 `<style scoped>`；需要穿透 Element Plus 或需全局共享的外壳（`.panel`、`.facts`、`.filter`、`.sort` 等）写进 [global.css](src/renderer/src/styles/global.css)。**判断依据是「有没有第二个页面在用它」**：外壳留在某个组件的 scoped 样式里，另一个页面只会吃到 global.css 里那半截规则，排版会静悄悄地失效。
 - UI 复用顺序：`components/` 既有业务组件 → Element Plus 原生组件 → 新增局部组件；图标统一用 `@element-plus/icons-vue`。
 - 弹层遮罩由 `global.css` 的 `.el-overlay` 统一处理（从标题栏下沿开始、不压暗背景），不要在单个弹窗里另写遮罩。

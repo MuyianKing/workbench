@@ -206,6 +206,7 @@ watch(
   max-width: 180px;
 }
 
+/* 长项目名在这里截断（行盒高度那条由 ProjectTag 自己兜着，见它的样式注释） */
 .log__project :deep(.el-tag__content) {
   overflow: hidden;
   text-overflow: ellipsis;
