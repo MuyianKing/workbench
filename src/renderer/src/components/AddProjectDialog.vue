@@ -217,9 +217,8 @@ async function submit(): Promise<void> {
     :close-on-click-modal="false"
     @closed="reset"
   >
-    <div class="form">
-      <div class="field">
-        <label class="field__label">项目目录</label>
+    <el-form class="form" :model="form" label-position="top" @submit.prevent>
+      <el-form-item label="项目目录">
         <div class="field__row">
           <el-input
             v-model="form.path"
@@ -229,7 +228,7 @@ async function submit(): Promise<void> {
           />
           <el-button :icon="FolderOpened" @click="pickDirectory">浏览</el-button>
         </div>
-      </div>
+      </el-form-item>
 
       <p v-if="duplicate" class="hint hint--error">
         该目录已经在项目列表里了（「{{ duplicate.name }}」），不能重复添加。
@@ -248,17 +247,15 @@ async function submit(): Promise<void> {
       />
 
       <template v-if="scan && (scan.ok || parseFailed) && !duplicate">
-        <div class="field">
-          <label class="field__label">显示名</label>
+        <el-form-item label="显示名">
           <el-input
             v-model="form.name"
             placeholder="列表中展示的名称"
             @input="nameTouched = true"
           />
-        </div>
+        </el-form-item>
 
-        <div class="field">
-          <label class="field__label">分组</label>
+        <el-form-item label="分组">
           <div class="field__row">
             <el-select v-model="form.groupId" placeholder="未分组" clearable>
               <el-option
@@ -270,7 +267,7 @@ async function submit(): Promise<void> {
             </el-select>
             <el-button :icon="Plus" @click="newGroup">新建分组</el-button>
           </div>
-        </div>
+        </el-form-item>
 
         <el-checkbox v-if="parseFailed" v-model="allowInvalid" class="allow">
           以「仅管理目录」方式加入（不执行命令）
@@ -297,42 +294,45 @@ async function submit(): Promise<void> {
             </li>
           </ul>
 
-          <div class="field">
-            <label class="field__label">启动命令</label>
-            <el-select
-              v-model="form.serve"
-              placeholder="未识别到启动脚本"
-              clearable
-              style="width: 100%"
-            >
-              <el-option v-for="s in allScripts" :key="s" :label="s" :value="s" />
-            </el-select>
-            <p v-if="!scan.serve" class="field__hint">
-              scripts 中没有 serve / dev / start，请手动指定。
-            </p>
-          </div>
+          <el-form-item label="启动命令">
+            <div class="field__stack">
+              <el-select
+                v-model="form.serve"
+                placeholder="未识别到启动脚本"
+                clearable
+                style="width: 100%"
+              >
+                <el-option v-for="s in allScripts" :key="s" :label="s" :value="s" />
+              </el-select>
+              <p v-if="!scan.serve" class="field__hint">
+                scripts 中没有 serve / dev / start，请手动指定。
+              </p>
+            </div>
+          </el-form-item>
 
-          <div class="field">
-            <label class="field__label">监听端口</label>
-            <el-input v-model="form.port" placeholder="留空表示不检测" spellcheck="false" />
-            <p class="field__hint">{{ portHint }}</p>
-          </div>
+          <el-form-item label="监听端口">
+            <div class="field__stack">
+              <el-input v-model="form.port" placeholder="留空表示不检测" spellcheck="false" />
+              <p class="field__hint">{{ portHint }}</p>
+            </div>
+          </el-form-item>
 
-          <div class="field">
-            <label class="field__label">打包命令</label>
-            <el-select
-              v-model="form.build"
-              multiple
-              placeholder="未识别到打包脚本"
-              style="width: 100%"
-            >
-              <el-option v-for="s in allScripts" :key="s" :label="s" :value="s" />
-            </el-select>
-            <p class="field__hint">可多选；列表中的第一条作为默认打包命令。</p>
-          </div>
+          <el-form-item label="打包命令">
+            <div class="field__stack">
+              <el-select
+                v-model="form.build"
+                multiple
+                placeholder="未识别到打包脚本"
+                style="width: 100%"
+              >
+                <el-option v-for="s in allScripts" :key="s" :label="s" :value="s" />
+              </el-select>
+              <p class="field__hint">可多选；列表中的第一条作为默认打包命令。</p>
+            </div>
+          </el-form-item>
         </div>
       </template>
-    </div>
+    </el-form>
 
     <template #footer>
       <el-button @click="visible = false">取消</el-button>
@@ -342,18 +342,9 @@ async function submit(): Promise<void> {
 </template>
 
 <style scoped>
-.form {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-4);
-}
+/* 字段排版（标签 / 说明小字）由 global.css 的「弹窗表单」一节统一给 */
 
-.field__label {
-  display: block;
-  margin-bottom: 6px;
-  font-size: var(--fs-meta);
-  color: var(--ink-2);
-}
+
 
 .field__row {
   display: flex;
@@ -369,11 +360,6 @@ async function submit(): Promise<void> {
   min-width: 0;
 }
 
-.field__hint {
-  margin-top: 5px;
-  font-size: var(--fs-micro);
-  color: var(--ink-3);
-}
 
 .hint {
   font-size: var(--fs-meta);

@@ -14,9 +14,9 @@
  * 缓存读取通常占九成以上,构成拆分收在悬停里,总量数字才不会因缓存命中波动而误导。
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { ElMessage } from 'element-plus'
 import { CaretRight, Connection, Refresh } from '@element-plus/icons-vue'
 import TokenRangePicker from '@/components/TokenRangePicker.vue'
+import { useSettingsStore } from '@/stores/settings'
 import {
   SOURCE_LABELS,
   bucketRangeOf,
@@ -47,6 +47,7 @@ const GRANULARITIES: Array<{ key: TokenGranularity; label: string }> = [
   { key: 'month', label: '月' }
 ]
 
+const settings = useSettingsStore()
 const result = ref<TokenUsageResult | null>(null)
 const loading = ref(false)
 const granularity = ref<TokenGranularity>('day')
@@ -100,21 +101,17 @@ async function boot(): Promise<void> {
 }
 
 /**
- * 手动同步一次(绕过自动同步的节流)。
- * 自动同步失败只会体现在状态点上,手动点的这次必须把原因说清楚,否则用户不知道为什么没同步上。
+ * 手动同步一次。
+ *
+ * 同步本身（以及「失败原因怎么说」）走 settings store 里那一份共用实现 ——
+ * 设置界面里那颗同步按钮用的是同一个 action，两处再各写一套分支迟早会分叉。
+ * 这里只管界面态：转圈、以及把同步回来的数字立刻显示出来。
  */
 async function syncNow(): Promise<void> {
   syncing.value = true
   try {
-    const res = await window.workbench.syncTokenUsage()
-    applyResult(res)
-    if (!res.ok) {
-      ElMessage.error(res.error ?? '同步失败')
-    } else if (res.data?.sync.error) {
-      ElMessage.error(res.data.sync.error)
-    } else {
-      ElMessage.success(`已同步 · ${deviceText.value}`)
-    }
+    const res = await settings.syncNow()
+    if (res?.ok && res.data) applyResult(res)
   } finally {
     syncing.value = false
   }
@@ -447,18 +444,14 @@ function detailWidth(value: number, max: number): string {
             <!-- 实际生效的起止日:预设按快照收敛后可能与字面含义不同,这里给出确切窗口 -->
             <span class="range__text mono">{{ shortDayLabel(fromKey) }} ~ {{ shortDayLabel(toKey) }}</span>
           </div>
-          <div class="chart__tabs" role="tablist">
-            <button
-              v-for="g in GRANULARITIES"
-              :key="g.key"
-              type="button"
-              class="tab"
-              :class="{ 'is-active': granularity === g.key }"
-              @click="granularity = g.key"
-            >
-              {{ g.label }}
-            </button>
-          </div>
+          <!-- 分桶宽度的三档页签：Element Plus 的分段控件（外观见 global.css） -->
+          <el-segmented
+            v-model="granularity"
+            class="chart__tabs"
+            :options="GRANULARITIES"
+            :props="{ label: 'label', value: 'key' }"
+            aria-label="趋势分桶宽度"
+          />
         </div>
 
         <div class="chart__bars">
@@ -594,6 +587,11 @@ function detailWidth(value: number, max: number): string {
 </template>
 
 <style scoped>
+/* 这块空态在卡片里，行距比别处紧一档（基础样式见 global.css 的 .empty） */
+.empty {
+  gap: var(--sp-1);
+}
+
 /* ---------- 根面板 ---------- */
 
 /*
@@ -721,34 +719,15 @@ function detailWidth(value: number, max: number): string {
   white-space: nowrap;
 }
 
-.chart__tabs {
-  display: flex;
-  gap: 2px;
-  padding: 2px;
-  border-radius: var(--r-pill);
-  background: var(--bg-inset);
-  /* 页签永远贴右边缘:换行到第二行时也一样(只靠 space-between 会掉到左边) */
+/* 分段控件的外壳（底色、圆角、内边距）在 global.css；这里只留这一处的排版：
+   贴右边缘 + 最小一档字号。 */
+.chart__tabs.el-segmented {
   margin-left: auto;
-}
-
-.tab {
-  padding: 1px 8px;
-  border: 0;
-  border-radius: var(--r-pill);
-  background: transparent;
   font-size: var(--fs-micro);
-  color: var(--ink-3);
-  cursor: pointer;
-  transition: background-color 0.15s ease, color 0.15s ease;
 }
 
-.tab:hover {
-  color: var(--ink);
-}
-
-.tab.is-active {
-  background: var(--bg-surface);
-  color: var(--ink);
+.chart__tabs :deep(.el-segmented__item) {
+  padding: 1px 8px;
 }
 
 /**
@@ -1026,23 +1005,7 @@ function detailWidth(value: number, max: number): string {
 
 /* ---------- 空态与底部 ---------- */
 
-.empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  flex: 1 1 auto;
-  gap: var(--sp-1);
-  text-align: center;
-  font-size: var(--fs-meta);
-  color: var(--ink-2);
-}
 
-.empty__hint {
-  margin: 0;
-  font-size: var(--fs-micro);
-  color: var(--ink-3);
-}
 
 /* 标题行右侧的更新时间与状态点(原底部信息合并到这里),与刷新按钮同一条 flex 中线 */
 .head__meta {

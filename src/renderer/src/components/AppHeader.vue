@@ -13,12 +13,16 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { Grid, Moon, Search, Setting, Sunny, User } from '@element-plus/icons-vue'
 import { accountLabel } from '@shared/auth'
 import { useProjectsStore } from '@/stores/projects'
+import { useSettingsStore } from '@/stores/settings'
+import { useAuthStore } from '@/stores/auth'
 import SettingsDialog from '@/components/SettingsDialog.vue'
 import AccountDialog from '@/components/AccountDialog.vue'
 import LayoutEditBar from '@/components/LayoutEditBar.vue'
 import SearchResults from '@/components/SearchResults.vue'
 
 const store = useProjectsStore()
+const settings = useSettingsStore()
+const auth = useAuthStore()
 const searchInput = ref<HTMLInputElement | null>(null)
 const settingsVisible = ref(false)
 const accountVisible = ref(false)
@@ -28,7 +32,7 @@ const focused = ref(false)
 const activeIndex = ref(0)
 
 /** 已登录时顶栏显示头像，未登录显示一个通用的账号图标 */
-const account = computed(() => store.auth?.account ?? null)
+const account = computed(() => auth.status?.account ?? null)
 
 /** 跨分组的扁平序号：上下键在整份结果里走，不按分组停 */
 const flatHits = computed(() => store.searchGroups.flatMap((group) => group.hits))
@@ -96,11 +100,11 @@ function onKeydown(event: KeyboardEvent): void {
 }
 
 /** 当前是不是暗色：图标画的是「点下去会切到哪一边」，所以亮色时显示月亮 */
-const isDark = computed(() => store.effectiveTheme === 'dark')
+const isDark = computed(() => settings.effectiveTheme === 'dark')
 
 /** 传点击坐标，明暗过渡就从这颗图标扩散开（与设置里的主题按钮同一套动效） */
 function toggleTheme(event: MouseEvent): void {
-  void store.toggleTheme({ x: event.clientX, y: event.clientY })
+  void settings.toggleTheme({ x: event.clientX, y: event.clientY })
 }
 
 function onGlobalKeydown(e: KeyboardEvent): void {

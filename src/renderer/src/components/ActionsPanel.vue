@@ -4,11 +4,11 @@
  * 说明行用实线划到列表外面（行间是虚线），读起来是「列表到此为止」。
  */
 import { computed } from 'vue'
-import { useProjectsStore } from '@/stores/projects'
+import { useSettingsStore } from '@/stores/settings'
 import { buildHints } from '@/hints'
 
-const store = useProjectsStore()
-const hints = computed(() => buildHints(store.settings))
+const settings = useSettingsStore()
+const hints = computed(() => buildHints(settings.settings))
 </script>
 
 <template>

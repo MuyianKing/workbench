@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import {
   Box,
   Close,
@@ -25,9 +25,15 @@ import { relativeToProject, resolveWithinProject } from '@shared/project-path'
 import { formatDurationOrDash, formatTimestamp } from '@/format'
 import { STATUS_META, isBusyStatus, statusLabel } from '@/status'
 import { useProjectsStore } from '@/stores/projects'
+import { useSettingsStore } from '@/stores/settings'
+import { useTerminalStore } from '@/stores/terminal'
+import { useEnvironmentStore } from '@/stores/environment'
 import type { ProjectStatus, RunRecord } from '@/types'
 
 const store = useProjectsStore()
+const settings = useSettingsStore()
+const terminal = useTerminalStore()
+const environment = useEnvironmentStore()
 
 /** 抽屉关闭动画期间仍需项目数据，因此用本地开关驱动，动画结束后再清空选中项 */
 const visible = ref(false)
@@ -44,7 +50,7 @@ onMounted(() => {
 })
 
 const project = computed(() => store.drawerProject)
-const runtime = computed(() => (project.value ? store.runtimeOf(project.value.id) : null))
+const runtime = computed(() => (project.value ? terminal.runtimeOf(project.value.id) : null))
 const status = computed<ProjectStatus>(() => runtime.value?.status ?? 'idle')
 const isBusy = computed(() => isBusyStatus(status.value))
 const isRunning = computed(() => status.value === 'running')
@@ -123,7 +129,7 @@ const CUSTOM_COLOR = 'custom'
 /** 预设色的实际取值：直接问主题变量（跟着当前明暗），取不到就退回中性灰 */
 const predefineColors = computed(() => {
   // 明暗一变，主题变量就换了值，取色器里的预设也得跟着换一套
-  void store.effectiveTheme
+  void settings.effectiveTheme
   return PROJECT_COLOR_PRESETS.map((preset) => readColorVar(preset))
 })
 
@@ -157,7 +163,7 @@ const colorModel = computed({
 /** 取色器：读的时候把预设解析成当前主题下的实际色值，写的时候直接落自定义色 */
 const customPicker = computed({
   get: () => {
-    void store.effectiveTheme
+    void settings.effectiveTheme
     const color = sanitizeProjectColor(project.value?.color)
     if (!color) return readColorVar('primary')
     return isProjectColorPreset(color) ? readColorVar(color) : color
@@ -271,13 +277,13 @@ function commitPort(): void {
 
 /** 系统在用的 node：nvm 软链优先，退回到 node -v 的探测结果 */
 const systemNode = computed(
-  () => store.nvm?.current ?? store.packageManagers?.node?.replace(/^v/, '') ?? ''
+  () => environment.nvm?.current ?? environment.packageManagers?.node?.replace(/^v/, '') ?? ''
 )
 
-const installedVersions = computed(() => store.nvm?.versions ?? [])
+const installedVersions = computed(() => environment.nvm?.versions ?? [])
 
 /** nvm 可用且真的有已安装版本，才让用户选 */
-const nvmUsable = computed(() => !!store.nvm?.available && installedVersions.value.length > 0)
+const nvmUsable = computed(() => !!environment.nvm?.available && installedVersions.value.length > 0)
 
 /** 下拉的绑定值：空字符串代表没选、跟随系统 */
 const nodeVersionModel = computed({
@@ -297,7 +303,7 @@ const systemNodeLabel = computed(() =>
 const nodeState = computed(() => {
   const required = project.value?.nodeRequirement?.trim()
   const selected = project.value?.nodeVersion?.trim()
-  const actual = selected ? store.installedNodeVersion(selected) ?? selected : systemNode.value
+  const actual = selected ? environment.installedNodeVersion(selected) ?? selected : systemNode.value
   if (!required || !actual) return null
   return {
     required,
@@ -371,16 +377,7 @@ async function removeProject(): Promise<void> {
   const current = project.value
   if (!current) return
 
-  try {
-    await ElMessageBox.confirm(
-      `确定把「${current.name}」从列表中移除？磁盘上的项目文件不会被删除。`,
-      '移除项目',
-      { confirmButtonText: '移除', cancelButtonText: '取消', type: 'warning' }
-    )
-  } catch {
-    return
-  }
-
+  // 确认框在 store 里（与项目卡上的「移除」共用同一句）
   visible.value = false
   await store.removeProject(current.id)
 }
@@ -727,13 +724,13 @@ async function removeProject(): Promise<void> {
               PATH。不改全局 node，也不需要管理员权限，多个项目可以同时跑不同版本。
             </p>
 
-            <p v-if="store.nvm?.available && installedVersions.length" class="field__hint mono">
-              nvm 目录 → {{ store.nvm?.root }}
+            <p v-if="environment.nvm?.available && installedVersions.length" class="field__hint mono">
+              nvm 目录 → {{ environment.nvm?.root }}
             </p>
             <p v-else class="field__hint field__hint--warn">
-              {{ store.nvm?.error ?? '未检测到 nvm' }}
+              {{ environment.nvm?.error ?? '未检测到 nvm' }}
             </p>
-            <el-button size="small" text :icon="Refresh" @click="store.refreshNvm()">
+            <el-button size="small" text :icon="Refresh" @click="environment.refreshNvm()">
               重新检测
             </el-button>
           </div>

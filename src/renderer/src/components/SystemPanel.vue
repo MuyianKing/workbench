@@ -11,30 +11,32 @@ import { computed } from 'vue'
 import { ArrowDown, FolderOpened, Refresh } from '@element-plus/icons-vue'
 import { PACKAGE_MANAGERS, type PackageManagerKey } from '@/managers'
 import { useProjectsStore } from '@/stores/projects'
+import { useEnvironmentStore } from '@/stores/environment'
 import type { InstallablePackageManager, NrmRegistry } from '@/types'
 
 const store = useProjectsStore()
+const environment = useEnvironmentStore()
 
 const managers = PACKAGE_MANAGERS
 
-const nodeVersion = computed(() => store.packageManagers?.node || '未检测到')
-const dataDir = computed(() => store.dataLocation?.dir ?? '')
+const nodeVersion = computed(() => environment.packageManagers?.node || '未检测到')
+const dataDir = computed(() => environment.dataLocation?.dir ?? '')
 
 function available(key: PackageManagerKey): boolean {
-  return store.packageManagers?.[key] ?? false
+  return environment.packageManagers?.[key] ?? false
 }
 
 function installing(key: PackageManagerKey): boolean {
-  return store.pmInstalling === key
+  return environment.pmInstalling === key
 }
 
 /** 模板只给 installable 的条目挂按钮，npm 随 Node.js 分发，走不到这里 */
 async function install(key: PackageManagerKey): Promise<void> {
-  await store.installPackageManager(key as InstallablePackageManager)
+  await environment.installPackageManager(key as InstallablePackageManager)
 }
 
 const nvmLabel = computed(() => {
-  const nvm = store.nvm
+  const nvm = environment.nvm
   if (!nvm?.available) return '未检测到'
   return nvm.current
     ? `已装 ${nvm.versions.length} 个 · 当前 ${nvm.current}`
@@ -44,8 +46,8 @@ const nvmLabel = computed(() => {
 // ---------- nrm ----------
 
 /** 正在装 nrm：按钮文字从「未安装」换成「正在安装」 */
-const nrmInstalling = computed(() => store.pmInstalling === 'nrm')
-const nrmRegistries = computed(() => store.nrm?.registries ?? [])
+const nrmInstalling = computed(() => environment.pmInstalling === 'nrm')
+const nrmRegistries = computed(() => environment.nrm?.registries ?? [])
 
 /**
  * 这一行显示什么：
@@ -53,7 +55,7 @@ const nrmRegistries = computed(() => store.nrm?.registries ?? [])
  * 只有真的能切换（有清单）才把值画成下拉。
  */
 const nrmLabel = computed(() => {
-  const nrm = store.nrm
+  const nrm = environment.nrm
   if (!nrm) return '检测中…'
   if (!nrm.available) return '未安装'
   if (!nrm.registries.length) return nrm.version ? `已安装 v${nrm.version}` : '已安装'
@@ -62,7 +64,7 @@ const nrmLabel = computed(() => {
 
 /** 悬停提示：版本、镜像地址，以及为什么读不出清单 */
 const nrmTip = computed(() => {
-  const nrm = store.nrm
+  const nrm = environment.nrm
   if (!nrm) return '正在检测 nrm'
   if (!nrm.available) return '通过 npm 全局安装 nrm（npm 镜像源管理器）'
   const current = nrmRegistries.value.find((item) => item.name === nrm.current)
@@ -81,13 +83,13 @@ function registryTip(item: NrmRegistry): string {
 }
 
 async function switchRegistry(name: unknown): Promise<void> {
-  if (typeof name === 'string') await store.useNrmRegistry(name)
+  if (typeof name === 'string') await environment.useNrmRegistry(name)
 }
 
 /** 重新检测本机环境：包管理器与 nrm 各探一次 */
 function refresh(): void {
-  void store.refreshPackageManagers()
-  void store.refreshNrm()
+  void environment.refreshPackageManagers()
+  void environment.refreshNrm()
 }
 </script>
 
@@ -101,7 +103,7 @@ function refresh(): void {
     <button
       class="head__refresh"
       type="button"
-      :disabled="!!store.pmInstalling"
+      :disabled="!!environment.pmInstalling"
       title="重新检测本机环境"
       aria-label="重新检测本机环境"
       @click="refresh"
@@ -128,7 +130,7 @@ function refresh(): void {
               v-else-if="m.installable"
               class="pm pm--install"
               type="button"
-              :disabled="!!store.pmInstalling"
+              :disabled="!!environment.pmInstalling"
               :title="installing(m.key) ? `正在安装 ${m.label}` : `通过 npm 全局安装 ${m.label}`"
               @click="install(m.key)"
             >
@@ -157,15 +159,15 @@ function refresh(): void {
         <dt>nrm</dt>
         <dd class="nrm" :title="nrmTip">
           <!-- 探测还没回来：先占位，别把「不知道」画成一个可点的安装按钮 -->
-          <span v-if="!store.nrm" class="mono">{{ nrmLabel }}</span>
+          <span v-if="!environment.nrm" class="mono">{{ nrmLabel }}</span>
 
           <button
-            v-else-if="!store.nrm.available"
+            v-else-if="!environment.nrm.available"
             class="pm pm--install"
             type="button"
-            :disabled="!!store.pmInstalling"
+            :disabled="!!environment.pmInstalling"
             :title="nrmTip"
-            @click="store.installNrm()"
+            @click="environment.installNrm()"
           >
             <i class="pm__dot is-off" aria-hidden="true" />
             {{ nrmInstalling ? '正在安装' : nrmLabel }}
@@ -182,7 +184,7 @@ function refresh(): void {
             <button
               class="nrm__pick"
               type="button"
-              :disabled="!!store.nrmSwitching"
+              :disabled="!!environment.nrmSwitching"
               :title="nrmTip"
             >
               <i class="pm__dot is-ok" aria-hidden="true" />
@@ -213,8 +215,8 @@ function refresh(): void {
     </dl>
 
     <!-- 把 npm 的最后一行输出顶在这里，不切到终端也能看到进展 -->
-    <p v-if="store.pmInstalling" class="pm-log mono truncate" :title="store.pmInstallLog">
-      {{ store.pmInstallLog || '正在通过 npm 安装…' }}
+    <p v-if="environment.pmInstalling" class="pm-log mono truncate" :title="environment.pmInstallLog">
+      {{ environment.pmInstallLog || '正在通过 npm 安装…' }}
     </p>
 
     <div class="panel__foot">

@@ -47,6 +47,12 @@ const form = reactive({
 
 /** 预览态：写的时候不用离开弹窗就能看渲染结果 */
 const mode = ref<'write' | 'preview'>('write')
+/** 两处分段控件的选项（Element Plus 的分段控件要 { label, value }） */
+const statusOptions = WORK_STATUSES.map((value) => ({ label: WORK_STATUS_LABELS[value], value }))
+const modeOptions = [
+  { label: '编写', value: 'write' },
+  { label: '预览', value: 'preview' }
+]
 const saving = ref(false)
 
 const editing = computed(() => props.entry)
@@ -138,10 +144,9 @@ async function submit(): Promise<void> {
     :close-on-click-modal="false"
     @closed="reset"
   >
-    <div class="form">
+    <el-form class="form" :model="form" label-position="top" @submit.prevent>
       <div class="form__row">
-        <div class="field field--date">
-          <label class="field__label">日期</label>
+        <el-form-item label="日期" class="field--date">
           <el-date-picker
             v-model="form.date"
             type="date"
@@ -150,10 +155,9 @@ async function submit(): Promise<void> {
             :clearable="false"
             placeholder="选择日期"
           />
-        </div>
+        </el-form-item>
 
-        <div class="field">
-          <label class="field__label">所属项目</label>
+        <el-form-item label="所属项目" class="field--project">
           <el-select
             v-model="form.projectId"
             class="select"
@@ -178,49 +182,32 @@ async function submit(): Promise<void> {
               </span>
             </el-option>
           </el-select>
-        </div>
+        </el-form-item>
 
         <!-- 状态：默认「已完成」，要记一条待办就点过去；时间轴上点记录也能改 -->
-        <div class="field field--status">
-          <label class="field__label">状态</label>
-          <div class="tabs" role="group" aria-label="状态">
-            <button
-              v-for="item in WORK_STATUSES"
-              :key="item"
-              type="button"
-              class="tab"
-              :class="{ 'is-active': form.status === item }"
-              @click="form.status = item"
-            >
-              {{ WORK_STATUS_LABELS[item] }}
-            </button>
-          </div>
-        </div>
+        <el-form-item label="状态" class="field--status">
+          <el-segmented
+            v-model="form.status"
+            class="tabs"
+            :options="statusOptions"
+            aria-label="状态"
+          />
+        </el-form-item>
       </div>
 
 
-      <div class="field">
-        <div class="field__head">
-          <label class="field__label">工作内容</label>
-          <div class="tabs" role="tablist">
-            <button
-              type="button"
-              class="tab"
-              :class="{ 'is-active': mode === 'write' }"
-              @click="mode = 'write'"
-            >
-              编写
-            </button>
-            <button
-              type="button"
-              class="tab"
-              :class="{ 'is-active': mode === 'preview' }"
-              @click="mode = 'preview'"
-            >
-              预览
-            </button>
-          </div>
-        </div>
+      <el-form-item class="field--content">
+        <template #label>
+          <span class="field__head">
+            <span>工作内容</span>
+            <el-segmented
+              v-model="mode"
+              class="tabs"
+              :options="modeOptions"
+              aria-label="编辑或预览"
+            />
+          </span>
+        </template>
 
         <el-input
           v-if="mode === 'write'"
@@ -240,8 +227,8 @@ async function submit(): Promise<void> {
           <template v-if="!form.content.trim()">工作内容是必填项。</template>
           <template v-else>支持 markdown 语法，时间轴上按这里的预览渲染。</template>
         </p>
-      </div>
-    </div>
+      </el-form-item>
+    </el-form>
 
     <template #footer>
       <el-button @click="visible = false">取消</el-button>
@@ -253,12 +240,7 @@ async function submit(): Promise<void> {
 </template>
 
 <style scoped>
-.form {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-4);
-}
-
+/* .form（竖排 + 间距）在 global.css 的「弹窗表单」一节 */
 .form__row {
   display: flex;
   gap: var(--sp-4);
@@ -273,9 +255,15 @@ async function submit(): Promise<void> {
   flex: 0 0 auto;
 }
 
-.form__row .field:not(.field--date):not(.field--status) {
+.form__row .field--project {
   flex: 1 1 auto;
   min-width: 0;
+}
+
+/* 「工作内容」那行：标签与「编写 / 预览」并排，所以把标签撑满整行当容器用 */
+.field--content :deep(.el-form-item__label) {
+  display: block;
+  width: 100%;
 }
 
 /* el-select 的默认宽度是固定值，这一行里要它跟着格子走 */
@@ -302,47 +290,17 @@ async function submit(): Promise<void> {
   width: 100%;
 }
 
-.field__head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--sp-2);
-}
 
-.field__label {
-  display: block;
-  margin-bottom: 6px;
-  font-size: var(--fs-meta);
-  color: var(--ink-2);
-}
 
 /* 编辑 / 预览的分段控件：与工作页头部的范围切换同一副样子 */
-.tabs {
-  display: flex;
-  gap: 2px;
-  padding: 2px;
-  border-radius: var(--r-pill);
-  background: var(--bg-inset);
-}
-
-.tab {
-  padding: 1px 10px;
-  border: 0;
-  border-radius: var(--r-pill);
-  background: transparent;
+/* 两处分段控件用 el-segmented：外壳（底色 / 圆角 / 选中态）在 global.css，
+   这里只留这一处的字号与内边距 */
+.tabs.el-segmented {
   font-size: var(--fs-micro);
-  color: var(--ink-3);
-  cursor: pointer;
-  transition: background-color 0.15s ease, color 0.15s ease;
 }
 
-.tab:hover {
-  color: var(--ink);
-}
-
-.tab.is-active {
-  background: var(--bg-surface);
-  color: var(--ink);
+.tabs :deep(.el-segmented__item) {
+  padding: 1px 10px;
 }
 
 /* 预览块：与输入框同一档高度，高度写死才不会在切换时抖动 */
@@ -361,14 +319,5 @@ async function submit(): Promise<void> {
   color: var(--ink-3);
 }
 
-.field__hint {
-  margin-top: 5px;
-  font-size: var(--fs-micro);
-  line-height: 1.7;
-  color: var(--ink-3);
-}
 
-.field__hint.is-invalid {
-  color: var(--st-fail);
-}
 </style>

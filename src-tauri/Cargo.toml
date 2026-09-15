@@ -25,16 +25,32 @@ zstd = "0.13"
 # 图片解码：现在只剩「内置壁纸的缩略图」用到（背景图已改走 asset 协议，不再过这里）
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "bmp", "gif"] }
 uuid = { version = "1", features = ["v4"] }
+# 下面这几个**全部已经在编译图里**（分别由 tauri / tao / wry / tauri-utils 引入），
+# 直接依赖它们只是把已有的实现用起来，不新增任何编译单元：
+#   - url / percent-encoding / form_urlencoded：URL 拆分与百分号编解码（oauth.rs）
+#   - walkdir：递归列目录（token.rs）
+#   - base64（tauri-codegen 已在构建期编译过，运行时是新进二进制的几 KB）：base64 编解码
+#   - sha2：SHA-256 —— 手写密码学不值得，PKCE 的 code_challenge 走它
+url = "2"
+percent-encoding = "2"
+form_urlencoded = "1"
+walkdir = "2"
+base64 = "0.22"
+sha2 = "0.10"
 # 图标抽取直接走 Win32（PrivateExtractIconsW + GDI），不再依赖 PowerShell；
 # Shell / Shell_Common / Storage_FileSystem 是为了 SHGetFileInfoW 与 SHGetPathFromIDListW ——
 # 快捷方式自己不带图标资源，得先靠它们解析到目标程序（见 icon.rs）。
 # WinHttp 与 Security_Credentials 是账号登录用的：HTTPS 走系统自带的 WinHTTP（TLS 与
 # 系统代理都由 Windows 提供），access_token 走 Windows 凭据管理器（DPAPI 加密）。
-# 两条路都只给已有依赖加 feature，**不新增任何 crate**（见 oauth.rs / http.rs / credentials.rs）。
+# IpHelper / WinSock 是端口查询用的：按端口找占用进程走 GetExtendedTcpTable，
+# 不再 shell 出去解析 netstat 的文本输出（见 system.rs）。
+# 这些路都只给已有依赖加 feature，**不新增任何 crate**。
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Graphics_Gdi",
+    "Win32_NetworkManagement_IpHelper",
     "Win32_Networking_WinHttp",
+    "Win32_Networking_WinSock",
     "Win32_Security_Credentials",
     "Win32_Storage_FileSystem",
     "Win32_System_Threading",

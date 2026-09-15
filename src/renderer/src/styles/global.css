@@ -233,6 +233,56 @@ body.is-dragging-terminal-dock * {
   flex-shrink: 0;
 }
 
+/* ---------- 弹窗表单（el-form） ---------- */
+
+/**
+ * 弹窗里的表单：把 `el-form-item` 调成项目原来那副「标签在上、控件在下、下面一行小字」的样子。
+ *
+ * 几个弹窗原先各写一份 `.field / .field__label / .field__hint`（字号与间距还略有出入），
+ * 现在共用这一段：字段的排版在这里一次定好，弹窗里只写 el-form + el-form-item。
+ * 校验失败的原因由 `el-form-item__error` 就地显示在字段下面，而不是弹一个转瞬即逝的提示。
+ */
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+/* 字段之间的间距由 .form 的 gap 统一给：表单里还夹着不是字段的块
+   （例如「快捷启动」的预览卡），逐项写 margin 会漏掉它们 */
+.form .el-form-item {
+  margin-bottom: 0;
+}
+
+.form .el-form-item__label {
+  margin-bottom: 6px;
+  padding: 0;
+  font-size: var(--fs-meta);
+  line-height: 1.4;
+  color: var(--ink-2);
+}
+
+/* 错误默认是绝对定位（会压住下一个字段），这里让它就位、把字段撑高 */
+.form .el-form-item__error {
+  position: static;
+  margin-top: 5px;
+  font-size: var(--fs-micro);
+  line-height: 1.7;
+}
+
+/** 控件下面那行说明小字：Element Plus 没有这个插槽，放在控件后面即可 */
+.form .field__hint {
+  margin-top: 5px;
+  font-size: var(--fs-micro);
+  line-height: 1.7;
+  color: var(--ink-3);
+}
+
+/** 一行里「控件 + 说明」要竖着排（el-form-item__content 是 flex 行） */
+.form .field__stack {
+  width: 100%;
+}
+
 .panel__foot {
   display: flex;
   align-items: center;
@@ -241,6 +291,39 @@ body.is-dragging-terminal-dock * {
   padding-top: var(--sp-2);
   border-top: 1px solid var(--border);
   min-width: 0;
+}
+
+/**
+ * 面板标题行右侧的计数（「最近使用 5」「今日完成 3」）。
+ * 两个面板在用，按约定放全局 —— 别留在各自的 scoped 样式里各抄一份。
+ */
+.panel__count {
+  font-size: var(--fs-micro);
+  color: var(--ink-3);
+}
+
+/**
+ * 空态 / 加载态的文字块：居中一段说明，可带一行更淡的补充。
+ *
+ * 三处在用（Token 用量、工作页、分组管理），原先各写一份、字号与间距还略有出入。
+ * 面板内部的空态另有一套 `.panel__empty`（它要吃掉剩余高度撑满卡片），两者分工不变。
+ */
+.empty {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  text-align: center;
+  font-size: var(--fs-meta);
+  color: var(--ink-2);
+}
+
+.empty__hint {
+  margin: 0;
+  font-size: var(--fs-micro);
+  color: var(--ink-3);
 }
 
 /* 面板里没内容时的居中说明（例如还没跑过任何命令） */
@@ -501,6 +584,33 @@ body.is-dragging-terminal-dock * {
 .chip__count {
   font-size: var(--fs-micro);
   opacity: 0.6;
+}
+
+/**
+ * 分段控件（`el-segmented`）：首页 Token 卡片的天/周/月、工作页的时间范围、工作日志弹窗的
+ * 状态与编写/预览 —— 三处原来是各写一遍的「inset 容器 + 白色药丸」，现在共用这一个组件。
+ *
+ * 这里把它调回原先那副样子：底色取 `--bg-inset`、选中项是浮起的白色药丸 + 主文字色，
+ * 而不是 Element Plus 默认的主色实心块（彩色在这个界面只表达运行状态）。
+ * 排版（字号 / 内边距 / 外边距）由各调用方在自己的 scoped 样式里微调。
+ */
+.el-segmented {
+  --el-segmented-bg-color: var(--bg-inset);
+  --el-segmented-color: var(--ink-3);
+  --el-segmented-item-hover-color: var(--ink);
+  --el-segmented-item-hover-bg-color: transparent;
+  --el-segmented-item-active-bg-color: transparent;
+  --el-segmented-item-selected-bg-color: var(--bg-surface);
+  --el-segmented-item-selected-color: var(--ink);
+  --el-segmented-padding: 2px;
+  /* 默认那 32px 的最小高度比原先的页签高出一截，会把标题行撑开 */
+  min-height: 0;
+  border-radius: var(--r-pill);
+}
+
+.el-segmented__item,
+.el-segmented__item-selected {
+  border-radius: var(--r-pill);
 }
 
 /* ---------- band：不透明的工具条 ---------- */

@@ -15,16 +15,18 @@ import { MoreFilled, Plus } from '@element-plus/icons-vue'
 import { moveToPosition } from '@shared/reorder'
 import { DRAG_MIME } from '@/drag-mime'
 import { useProjectsStore } from '@/stores/projects'
+import { useCatalogStore } from '@/stores/catalog'
 import type { QuickApp } from '@/types'
 
 const store = useProjectsStore()
+const catalog = useCatalogStore()
 
 /** 拖到哪张卡上了（落点高亮） */
 const dragOverId = ref<string | null>(null)
 /** 正在拖哪张卡（拖动排序用，与「拖项目卡到分组」是两回事） */
 const draggingId = ref<string | null>(null)
 
-const apps = computed(() => store.quickApps)
+const apps = computed(() => catalog.quickApps)
 
 function initialOf(app: QuickApp): string {
   return (app.name.trim() || '?').slice(0, 1).toUpperCase()
@@ -32,21 +34,21 @@ function initialOf(app: QuickApp): string {
 
 /** 悬停提示：平时只露图标，名字在这里；失效的顺便说清怎么补救 */
 function tipOf(app: QuickApp): string {
-  return store.isQuickAppMissing(app.id)
+  return catalog.isQuickAppMissing(app.id)
     ? `${app.name}（失效 · 用「⋯ → 编辑」重新选择）`
     : app.name
 }
 
 function iconOf(app: QuickApp): string {
-  return store.quickIconOf(app.target)
+  return catalog.quickIconOf(app.target)
 }
 
 function launch(app: QuickApp): void {
-  void store.launchQuickApp(app.id)
+  void catalog.launchQuickApp(app.id)
 }
 
 function onMore(app: QuickApp, command: string): void {
-  if (command === 'edit') store.openQuickDialog(app.id)
+  if (command === 'edit') catalog.openQuickDialog(app.id)
   else if (command === 'reveal') void store.reveal(app.target)
   else if (command === 'remove') void remove(app)
 }
@@ -61,7 +63,7 @@ async function remove(app: QuickApp): Promise<void> {
   } catch {
     return
   }
-  await store.removeQuickApp(app.id)
+  await catalog.removeQuickApp(app.id)
 }
 
 function onDragStart(app: QuickApp, event: DragEvent): void {
@@ -94,7 +96,7 @@ function onDrop(app: QuickApp): void {
     from,
     app.id
   )
-  if (next) void store.reorderQuickApps(next)
+  if (next) void catalog.reorderQuickApps(next)
 }
 </script>
 
@@ -114,7 +116,7 @@ function onDrop(app: QuickApp): void {
         class="launch__add"
         type="button"
         aria-label="添加软件"
-        @click="store.openQuickDialog()"
+        @click="catalog.openQuickDialog()"
       >
         <el-icon><Plus /></el-icon>
       </button>
@@ -129,7 +131,7 @@ function onDrop(app: QuickApp): void {
           :key="app.id"
           class="launch__item"
           :class="{
-            'is-missing': store.isQuickAppMissing(app.id),
+            'is-missing': catalog.isQuickAppMissing(app.id),
             'is-dragover': dragOverId === app.id
           }"
           role="button"
@@ -153,7 +155,7 @@ function onDrop(app: QuickApp): void {
                 <template v-else>{{ initialOf(app) }}</template>
               </span>
               <span
-                v-if="store.isQuickAppMissing(app.id)"
+                v-if="catalog.isQuickAppMissing(app.id)"
                 class="launch__flag mono"
                 aria-hidden="true"
               >

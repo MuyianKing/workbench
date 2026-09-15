@@ -137,10 +137,6 @@ function openWorkView(): void {
 </template>
 
 <style scoped>
-.panel__count {
-  font-size: var(--fs-micro);
-  color: var(--ink-3);
-}
 
 .rows {
   display: flex;

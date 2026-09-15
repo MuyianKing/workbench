@@ -9,16 +9,21 @@ import {
 } from '@shared/terminal-height'
 import { isPinnedToBottom } from '@shared/log-scroll'
 import { splitLinks, type LinkSegment } from '@shared/linkify'
+import { startPointerDrag } from '@/composables/use-pointer-drag'
 import { statusTone } from '@/status'
-import { useProjectsStore, type TerminalState } from '@/stores/projects'
+import { useProjectsStore } from '@/stores/projects'
+import { useTerminalStore, type TerminalState } from '@/stores/terminal'
+import { useCatalogStore } from '@/stores/catalog'
 import type { LogLine, ProjectStatus } from '@/types'
 
 const store = useProjectsStore()
+const terminal = useTerminalStore()
+const catalog = useCatalogStore()
 const bodyRef = ref<HTMLElement | null>(null)
 
 const collapsed = computed({
-  get: () => store.terminalCollapsed,
-  set: (value: boolean) => store.setTerminalCollapsed(value)
+  get: () => terminal.terminalCollapsed,
+  set: (value: boolean) => terminal.setTerminalCollapsed(value)
 })
 
 // ---------- 拖动调整高度 ----------
@@ -28,7 +33,7 @@ const dragHeight = ref<number | null>(null)
 const resizing = computed(() => dragHeight.value !== null)
 
 /** 展开时的高度：拖动中跟手，其余时间取设置里存的值 */
-const panelHeight = computed(() => dragHeight.value ?? store.terminalHeight)
+const panelHeight = computed(() => dragHeight.value ?? terminal.terminalHeight)
 
 /**
  * 高度上下限：先按硬边界收敛（顺带挡住 NaN 与小数），
@@ -55,54 +60,33 @@ function clampHeight(px: number): number {
   return Math.min(clampTerminalHeight(px), heightLimit.value)
 }
 
-let startY = 0
-let startHeight = 0
-
-function onPointerMove(event: PointerEvent): void {
-  // 指针往上走 = 面板变高，所以是减
-  dragHeight.value = clampHeight(startHeight + (startY - event.clientY))
-}
-
-function detachResize(): void {
-  window.removeEventListener('pointermove', onPointerMove)
-  window.removeEventListener('pointerup', onPointerEnd)
-  window.removeEventListener('pointercancel', onPointerEnd)
-  window.removeEventListener('keydown', onResizeKeydown)
-  document.body.classList.remove('is-resizing-terminal')
-}
-
-function onPointerEnd(): void {
-  const next = dragHeight.value
-  detachResize()
-  dragHeight.value = null
-  if (next !== null) void store.setTerminalHeight(next)
-}
-
-/** 拖动中按 Esc：放弃这次调整，高度回到拖动前 */
-function onResizeKeydown(event: KeyboardEvent): void {
-  if (event.key !== 'Escape') return
-  detachResize()
-  dragHeight.value = null
-}
+let endResize: (() => void) | null = null
 
 function startResize(event: PointerEvent): void {
   event.preventDefault()
 
-  startY = event.clientY
-  startHeight = renderHeight.value
+  const startHeight = renderHeight.value
   dragHeight.value = startHeight
 
-  // 监听挂在 window 上：指针跑出这条 10px 的把手也还能继续拖
-  window.addEventListener('pointermove', onPointerMove)
-  window.addEventListener('pointerup', onPointerEnd)
-  window.addEventListener('pointercancel', onPointerEnd)
-  window.addEventListener('keydown', onResizeKeydown)
-  document.body.classList.add('is-resizing-terminal')
+  // 起手 / 跟手 / 收手 / Esc 取消都在 composable 里（含解绑 pointercancel 与 body 类）
+  endResize = startPointerDrag({
+    start: { x: event.clientX, y: event.clientY },
+    bodyClass: 'is-resizing-terminal',
+    // 指针往上走 = 面板变高，所以是减
+    onMove: (moveEvent, start) => {
+      dragHeight.value = clampHeight(startHeight + (start.y - moveEvent.clientY))
+    },
+    onEnd: () => {
+      const next = dragHeight.value
+      dragHeight.value = null
+      if (next !== null) void terminal.setTerminalHeight(next)
+    }
+  })
 }
 
 /** 把手可聚焦：上下方向键微调，不必非得拖 */
 function nudgeHeight(delta: number): void {
-  void store.setTerminalHeight(clampHeight(renderHeight.value + delta))
+  void terminal.setTerminalHeight(clampHeight(renderHeight.value + delta))
 }
 
 /** 窗口尺寸变了：上下限跟着走，渲染高度由 renderHeight 自动收敛 */
@@ -113,15 +97,15 @@ function onWindowResize(): void {
 
 window.addEventListener('resize', onWindowResize)
 
-const tabs = computed(() => store.terminalList)
-const active = computed(() => store.activeTerminalState)
+const tabs = computed(() => terminal.terminalList)
+const active = computed(() => terminal.activeTerminalState)
 
 /**
  * 选中一个终端。
  * 只切 active：面板条本身只在展开时才在，切换时不必顺带展开。
  */
 function selectTab(key: string): void {
-  store.setActiveTerminal(key)
+  terminal.setActiveTerminal(key)
 }
 
 /**
@@ -144,21 +128,23 @@ const CHUNK_SIZE = 100
 
 const toneOf = (s: ProjectStatus): string => statusTone(s)
 
-const isRunning = (terminal: TerminalState): boolean =>
-  terminal.status === 'running' || terminal.status === 'installing' || terminal.status === 'building'
+/** 参数名一律避开 `terminal`：那是 store 的名字，遮住了就读不到 store 的成员 */
+const isRunning = (item: TerminalState): boolean =>
+  item.status === 'running' || item.status === 'installing' || item.status === 'building'
 
-function projectName(terminal: TerminalState): string {
+/** 这个终端属于谁：项目名 / 命令名 / 本机环境 */
+function projectName(item: TerminalState): string {
   // 系统终端不属于任何项目，别把它显示成「已移除的项目」
-  if (terminal.kind === 'system') return '本机环境'
+  if (item.kind === 'system') return '本机环境'
   // 命令卡片的终端同理：它归属的是一条命令，不是项目
-  if (terminal.kind === 'command') {
-    return store.findCommand(terminal.projectId)?.name ?? '已删除的命令'
+  if (item.kind === 'command') {
+    return catalog.findCommand(item.projectId)?.name ?? '已删除的命令'
   }
-  return store.findProject(terminal.projectId)?.name ?? '已移除的项目'
+  return store.findProject(item.projectId)?.name ?? '已移除的项目'
 }
 
-function closeTerminal(terminal: TerminalState): void {
-  store.closeTerminal(terminal.key)
+function closeTerminal(item: TerminalState): void {
+  terminal.closeTerminal(item.key)
 }
 
 // ---------- 收起后的悬浮按钮 ----------
@@ -216,7 +202,7 @@ const autoDockTop = computed(() => {
 
 /** 真正渲染的位置：拖动 > 用户存下来的 > 面板中线，再按当前窗口收一次 */
 const renderDockTop = computed(() =>
-  clampDockTop(dragDockTop.value ?? store.terminalButtonTop ?? autoDockTop.value)
+  clampDockTop(dragDockTop.value ?? terminal.terminalButtonTop ?? autoDockTop.value)
 )
 
 /**
@@ -225,13 +211,10 @@ const renderDockTop = computed(() =>
  */
 const dockTone = computed(() => {
   if (tabs.value.some(isRunning)) return 'run'
-  if (tabs.value.some((terminal) => terminal.status === 'failed')) return 'fail'
+  if (tabs.value.some((item) => item.status === 'failed')) return 'fail'
   return ''
 })
 
-/** 按住时指针相对按钮中心的偏移：拖动中保持它，按钮才不会在指针底下跳一下 */
-let dockGrabOffset = 0
-let dockStartY = 0
 /** 这一次拖动把位置改掉了：松手要落盘 */
 let dockMoved = false
 /**
@@ -240,62 +223,46 @@ let dockMoved = false
  */
 let dockSuppressClick = false
 
-function onDockMove(event: PointerEvent): void {
-  if (Math.abs(event.clientY - dockStartY) > 3) {
-    dockMoved = true
-    dockSuppressClick = true
-  }
-  const center = event.clientY - dockGrabOffset
-  dragDockTop.value = clampDockTop((center / Math.max(1, viewportHeight.value)) * 100)
-}
-
-function detachDockDrag(): void {
-  window.removeEventListener('pointermove', onDockMove)
-  window.removeEventListener('pointerup', onDockEnd)
-  window.removeEventListener('pointercancel', onDockEnd)
-  window.removeEventListener('keydown', onDockKeydown)
-  document.body.classList.remove('is-dragging-terminal-dock')
-}
-
-function onDockEnd(): void {
-  const next = dragDockTop.value
-  const moved = dockMoved
-  detachDockDrag()
-  dragDockTop.value = null
-  dockMoved = false
-  if (moved && next !== null) void store.setTerminalButtonTop(next)
-}
-
-/** 拖动中按 Esc：放弃这次调整，按钮回到拖动前的位置，也不算点击 */
-function onDockKeydown(event: KeyboardEvent): void {
-  if (event.key !== 'Escape') return
-  dockSuppressClick = true
-  dockMoved = false
-  detachDockDrag()
-  dragDockTop.value = null
-}
+let endDockDrag: (() => void) | null = null
 
 function startDockDrag(event: PointerEvent): void {
   if (event.button !== 0) return
 
+  // 按住时指针相对按钮中心的偏移：拖动中保持它，按钮才不会在指针底下跳一下
   const height = Math.max(1, viewportHeight.value)
-  dockStartY = event.clientY
-  dockGrabOffset = event.clientY - (renderDockTop.value / 100) * height
+  const grabOffset = event.clientY - (renderDockTop.value / 100) * height
   dockMoved = false
   dockSuppressClick = false
   dragDockTop.value = renderDockTop.value
 
-  // 监听挂在 window 上：指针挪出这颗 34px 的按钮也还能继续拖（与面板上沿的把手同一套）
-  window.addEventListener('pointermove', onDockMove)
-  window.addEventListener('pointerup', onDockEnd)
-  window.addEventListener('pointercancel', onDockEnd)
-  window.addEventListener('keydown', onDockKeydown)
-  document.body.classList.add('is-dragging-terminal-dock')
+  endDockDrag = startPointerDrag({
+    start: { x: event.clientX, y: event.clientY },
+    bodyClass: 'is-dragging-terminal-dock',
+    onMove: (moveEvent, start) => {
+      if (Math.abs(moveEvent.clientY - start.y) > 3) {
+        dockMoved = true
+        dockSuppressClick = true
+      }
+      const center = moveEvent.clientY - grabOffset
+      dragDockTop.value = clampDockTop((center / Math.max(1, viewportHeight.value)) * 100)
+    },
+    // last 为 null 表示这一手被取消了（Esc / 系统接管）：不落盘，也不算点击
+    onEnd: (last) => {
+      const next = dragDockTop.value
+      const moved = dockMoved
+      dragDockTop.value = null
+      dockMoved = false
+      if (moved && last && next !== null) void terminal.setTerminalButtonTop(next)
+    },
+    onCleanup: () => {
+      if (dragDockTop.value !== null) dockSuppressClick = true
+    }
+  })
 }
 
 /** 按钮可聚焦：上下方向键微调位置，不必非得拖 */
 function nudgeDock(delta: number): void {
-  void store.setTerminalButtonTop(clampDockTop(renderDockTop.value + delta))
+  void terminal.setTerminalButtonTop(clampDockTop(renderDockTop.value + delta))
 }
 
 /** 点开面板；刚拖完 / 刚按 Esc 的那一下不算点 */
@@ -308,11 +275,11 @@ function expandFromDock(): void {
 }
 
 /**
- * 日志快照。用 store.activeLogs 而不是 active.logs：
+ * 日志快照。用 terminal.activeLogs 而不是 active.logs：
  * 缓冲是环形且 markRaw 的，store 那个 computed 会跟着 logVersion 更新，
  * 这里只负责截断到渲染上限。
  */
-const allLines = computed<LogLine[]>(() => store.activeLogs)
+const allLines = computed<LogLine[]>(() => terminal.activeLogs)
 
 const omitted = computed(() => Math.max(0, allLines.value.length - RENDER_LIMIT))
 
@@ -417,7 +384,7 @@ function scrollToBottom(): void {
  * 刷屏时那种「慢半拍」的感觉主要来自这里。
  */
 watch(
-  () => store.logVersion,
+  () => terminal.logVersion,
   () => {
     if (pinned.value) scrollToBottom()
   },
@@ -426,7 +393,7 @@ watch(
 
 // 切终端时回到该终端的底部（每个终端都是「最新在下面」）
 watch(
-  () => store.activeTerminal,
+  () => terminal.activeTerminal,
   () => {
     pinned.value = true
     scrollToBottom()
@@ -501,13 +468,14 @@ onUnmounted(() => {
   window.removeEventListener('blur', onWindowBlur)
   bodyObserver.disconnect()
   lineObserver.disconnect()
-  detachResize()
-  detachDockDrag()
+  // 拖到一半被切走：window 上的那几个监听要收干净（composable 返回的就是收尾函数）
+  endResize?.()
+  endDockDrag?.()
 })
 
 function clearLogs(): void {
   const target = active.value
-  if (target) store.clearTerminalLogs(target.key)
+  if (target) terminal.clearTerminalLogs(target.key)
 }
 </script>
 

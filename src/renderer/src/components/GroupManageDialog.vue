@@ -188,7 +188,7 @@ async function onDrop(group: ProjectGroup, event: DragEvent): Promise<void> {
         </template>
       </div>
 
-      <p v-if="!store.sortedGroups.length" class="empty">
+      <p v-if="!store.sortedGroups.length" class="groups__empty">
         还没有分组。分组用于把项目归类，并在顶部筛选栏按组过滤。
       </p>
       <p v-else class="hint">双击分组改名，悬停标签可删除；拖动标签可调整顺序。</p>
@@ -212,6 +212,14 @@ async function onDrop(group: ProjectGroup, event: DragEvent): Promise<void> {
 </template>
 
 <style scoped>
+/* 对话框里的「还没有分组」：一行淡淡的说明，不是整块居中空态（那是 global.css 的 .empty） */
+.groups__empty {
+  padding: var(--sp-2) 0;
+  font-size: var(--fs-meta);
+  line-height: 1.7;
+  color: var(--ink-3);
+}
+
 .groups {
   display: flex;
   flex-direction: column;
@@ -307,15 +315,7 @@ async function onDrop(group: ProjectGroup, event: DragEvent): Promise<void> {
 
 /* ---------- 说明与新建 ---------- */
 .hint,
-.empty {
-  font-size: var(--fs-meta);
-  line-height: 1.7;
-  color: var(--ink-3);
-}
 
-.empty {
-  padding: var(--sp-2) 0;
-}
 
 .create {
   display: flex;

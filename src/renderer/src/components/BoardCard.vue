@@ -11,6 +11,7 @@
  */
 import { computed } from 'vue'
 import type { CSSProperties } from 'vue'
+import { startPointerDrag } from '@/composables/use-pointer-drag'
 import {
   CARD_HEIGHT_MIN,
   resizeCardHeight,
@@ -68,42 +69,25 @@ function onCardPointerDown(event: PointerEvent): void {
 
 // ---------- 高度缩放 ----------
 
-let resizing = false
-let startY = 0
-let startHeight = 0
-
 function onResizeDown(event: PointerEvent): void {
   if (!props.editing || props.mode === 'flex' || event.button !== 0) return
   event.preventDefault()
   event.stopPropagation()
 
-  resizing = true
-  startY = event.clientY
-  startHeight = props.height
+  const startHeight = props.height
 
-  window.addEventListener('pointermove', onResizeMove)
-  window.addEventListener('pointerup', onResizeUp)
-  window.addEventListener('pointercancel', onResizeUp)
-}
-
-function onResizeMove(event: PointerEvent): void {
-  if (!resizing) return
-  const next = resizeCardHeight(
-    startHeight,
-    event.clientY - startY,
-    props.step,
-    CARD_HEIGHT_MIN[props.id]
-  )
-  emit('resize', props.id, next)
-}
-
-function onResizeUp(): void {
-  if (!resizing) return
-  resizing = false
-  window.removeEventListener('pointermove', onResizeMove)
-  window.removeEventListener('pointerup', onResizeUp)
-  window.removeEventListener('pointercancel', onResizeUp)
-  emit('commit')
+  // 跟手与收手（含系统取消指针）交给 composable：这里只换算高度
+  startPointerDrag({
+    start: { x: event.clientX, y: event.clientY },
+    onMove: (moveEvent, start) => {
+      emit(
+        'resize',
+        props.id,
+        resizeCardHeight(startHeight, moveEvent.clientY - start.y, props.step, CARD_HEIGHT_MIN[props.id])
+      )
+    },
+    onEnd: () => emit('commit')
+  })
 }
 </script>
 

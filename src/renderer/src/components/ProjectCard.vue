@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { ElMessageBox } from 'element-plus'
 import {
   Box,
   Download,
@@ -15,6 +14,7 @@ import { formatClock, formatDurationMs } from '@/format'
 import { sanitizeProjectColor, projectColorVar } from '@shared/project-color'
 import { STATUS_META, isBusyStatus } from '@/status'
 import { useProjectsStore } from '@/stores/projects'
+import { useTerminalStore } from '@/stores/terminal'
 import type { Project, ProjectStatus } from '@/types'
 
 const props = defineProps<{
@@ -23,8 +23,9 @@ const props = defineProps<{
   highlight?: boolean
 }>()
 const store = useProjectsStore()
+const terminal = useTerminalStore()
 
-const runtime = computed(() => store.runtimeOf(props.project.id))
+const runtime = computed(() => terminal.runtimeOf(props.project.id))
 const status = computed<ProjectStatus>(() => runtime.value?.status ?? 'idle')
 const pathValid = computed(() => store.isPathValid(props.project.id))
 /** 目录失效优先于运行态展示，避免对着一张点了必然失败的卡片操作 */
@@ -106,15 +107,8 @@ function onMore(command: string): void {
   if (command === 'reveal') void store.reveal(props.project.path)
   else if (command === 'relocate') void store.relocate(id)
   else if (command === 'drawer') store.openDrawer(id)
-  else if (command === 'remove') {
-    void ElMessageBox.confirm(
-      `确定把「${props.project.name}」从列表中移除？磁盘上的项目文件不会被删除。`,
-      '移除项目',
-      { confirmButtonText: '移除', cancelButtonText: '取消', type: 'warning' }
-    )
-      .then(() => store.removeProject(id))
-      .catch(() => undefined)
-  }
+  // 确认框在 store 里（项目卡与详情抽屉共用同一句）
+  else if (command === 'remove') void store.removeProject(id)
 }
 </script>
 

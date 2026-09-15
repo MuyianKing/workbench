@@ -6,11 +6,13 @@
  * 一律在用户主目录下执行 —— 这类命令多是全局 CLI，等价于新开一个终端直接敲它。
  */
 import { computed, reactive, watch } from 'vue'
-import { ElMessage } from 'element-plus'
+import type { FormRules } from 'element-plus'
 import { parsePort } from '@shared/port'
 import { useProjectsStore } from '@/stores/projects'
+import { useCatalogStore } from '@/stores/catalog'
 
 const store = useProjectsStore()
+const catalog = useCatalogStore()
 
 const form = reactive({
   name: '',
@@ -19,11 +21,11 @@ const form = reactive({
 })
 
 const visible = computed({
-  get: () => store.commandDialogVisible,
-  set: (value: boolean) => store.setCommandDialogVisible(value)
+  get: () => catalog.commandDialogVisible,
+  set: (value: boolean) => catalog.setCommandDialogVisible(value)
 })
 
-const editing = computed(() => store.commandEditing)
+const editing = computed(() => catalog.commandEditing)
 const title = computed(() => (editing.value ? '编辑命令' : '添加命令'))
 
 /** 端口写了但不是 1–65535 的整数：既拦提交，也让下面的提示出现 */
@@ -33,16 +35,32 @@ const canSubmit = computed(
   () => !!form.name.trim() && !!form.command.trim() && !portInvalid.value
 )
 
+/**
+ * 校验规则：名称与命令必填，端口留空表示不检测、填了就必须是 1–65535。
+ * 失败原因由 el-form 就地显示在字段下面（原来只有那行小字变红 + 一个转瞬即逝的提示）。
+ */
+function validatePort(_rule: unknown, value: string, callback: (error?: Error) => void): void {
+  const text = String(value ?? '').trim()
+  if (!text || parsePort(text)) callback()
+  else callback(new Error('监听端口需要是 1–65535 的整数'))
+}
+
+const rules: FormRules = {
+  name: [{ required: true, message: '请填写名称', trigger: 'blur' }],
+  command: [{ required: true, message: '请填写要执行的命令', trigger: 'blur' }],
+  port: [{ validator: validatePort, trigger: 'blur' }]
+}
+
 /** 打开弹窗时按当前模式填值：编辑就回填已有配置，新增就是一张白纸 */
 function reset(): void {
-  const entry = store.commandEditing
+  const entry = catalog.commandEditing
   form.name = entry?.name ?? ''
   form.command = entry?.command ?? ''
   form.port = entry?.port ? String(entry.port) : ''
 }
 
 watch(
-  () => store.commandDialogVisible,
+  () => catalog.commandDialogVisible,
   (open) => {
     if (open) reset()
   }
@@ -60,15 +78,12 @@ async function submit(): Promise<void> {
 
   const current = editing.value
   const done = current
-    ? await store.updateCommand(current.id, payload)
-    : await store.addCommand(payload)
+    ? await catalog.updateCommand(current.id, payload)
+    : await catalog.addCommand(payload)
 
   if (done) visible.value = false
 }
 
-function onPortBlur(): void {
-  if (portInvalid.value) ElMessage.warning('监听端口需要是 1–65535 的整数')
-}
 </script>
 
 <template>
@@ -82,41 +97,34 @@ function onPortBlur(): void {
     :close-on-click-modal="false"
     @closed="reset"
   >
-    <div class="form">
-      <div class="field">
-        <label class="field__label">名称</label>
+    <el-form class="form" :model="form" :rules="rules" label-position="top" @submit.prevent>
+      <el-form-item label="名称" prop="name">
         <el-input v-model="form.name" placeholder="显示在卡片上的名字" />
-      </div>
+      </el-form-item>
 
-      <div class="field">
-        <label class="field__label">命令</label>
-        <el-input
-          v-model="form.command"
-          placeholder="npx @deepseek-ai/dsh web"
-          spellcheck="false"
-        />
-        <p class="field__hint">
-          整行原样交给系统 shell，在用户主目录下执行；不能包含换行（一行只跑一条命令）。
-        </p>
-      </div>
+      <el-form-item label="命令" prop="command">
+        <div class="field__stack">
+          <el-input
+            v-model="form.command"
+            placeholder="npx @deepseek-ai/dsh web"
+            spellcheck="false"
+          />
+          <p class="field__hint">
+            整行原样交给系统 shell，在用户主目录下执行；不能包含换行（一行只跑一条命令）。
+          </p>
+        </div>
+      </el-form-item>
 
-      <div class="field">
-        <label class="field__label">监听端口</label>
-        <el-input
-          v-model="form.port"
-          placeholder="留空表示不检测"
-          spellcheck="false"
-          @blur="onPortBlur"
-        />
-        <p class="field__hint" :class="{ 'is-invalid': portInvalid }">
-          <template v-if="portInvalid">监听端口需要是 1–65535 的整数。</template>
-          <template v-else>
+      <el-form-item label="监听端口" prop="port">
+        <div class="field__stack">
+          <el-input v-model="form.port" placeholder="留空表示不检测" spellcheck="false" />
+          <p class="field__hint">
             命令的服务端口。填了才能判断它是否已经在运行 —— 包括在 Workbench 之外启动、
             至今还占着端口的那种。
-          </template>
-        </p>
-      </div>
-    </div>
+          </p>
+        </div>
+      </el-form-item>
+    </el-form>
 
     <template #footer>
       <el-button @click="visible = false">取消</el-button>
@@ -128,27 +136,5 @@ function onPortBlur(): void {
 </template>
 
 <style scoped>
-.form {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-4);
-}
-
-.field__label {
-  display: block;
-  margin-bottom: 6px;
-  font-size: var(--fs-meta);
-  color: var(--ink-2);
-}
-
-.field__hint {
-  margin-top: 5px;
-  font-size: var(--fs-micro);
-  line-height: 1.7;
-  color: var(--ink-3);
-}
-
-.field__hint.is-invalid {
-  color: var(--st-fail);
-}
+/* 字段排版（标签 / 说明小字 / 错误行）由 global.css 的「弹窗表单」一节统一给 */
 </style>

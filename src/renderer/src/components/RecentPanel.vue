@@ -9,15 +9,17 @@ import { computed } from 'vue'
 import { formatRelative } from '@/format'
 import { STATUS_META, statusLabel } from '@/status'
 import { useProjectsStore } from '@/stores/projects'
+import { useTerminalStore } from '@/stores/terminal'
 import type { Project, ProjectStatus } from '@/types'
 
 const store = useProjectsStore()
+const terminal = useTerminalStore()
 
 /** 卡片高度有限，列表截断到一屏左右 */
 const RECENT_LIMIT = 5
 
 function statusOf(project: Project): ProjectStatus {
-  return store.runtimeOf(project.id).status
+  return terminal.runtimeOf(project.id).status
 }
 
 function toneOf(project: Project): string {
@@ -40,7 +42,7 @@ function startHint(project: Project): string {
 }
 
 function metaOf(project: Project): string {
-  const port = store.runtimeOf(project.id).port
+  const port = terminal.runtimeOf(project.id).port
   // 最近使用的时间要跟着秒针走，所以传 store.clock（它每秒跳一次）
   return port ? `:${port}` : formatRelative(project.lastUsedAt, store.clock)
 }
@@ -100,10 +102,6 @@ const recent = computed(() =>
 </template>
 
 <style scoped>
-.panel__count {
-  font-size: var(--fs-micro);
-  color: var(--ink-3);
-}
 
 .rows {
   display: flex;

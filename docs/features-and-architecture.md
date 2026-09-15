@@ -229,7 +229,7 @@
   填仓库地址（留空即不同步）、开关「同步外观配置」，以及「从别的机器取外观」（列出仓库里有文件的其它机器，
   逐台点「应用」把本机外观换成那一套）；旁边那颗「同步一次」就地推拉一次，不必回首页
   （做法见上面的「外观配置也走同一个仓库…」）
-- 退出提醒：从托盘菜单真正退出时，若还有项目在运行会弹窗二选一 —— 「关闭所有项目并退出」先结束进程再退；
+- 退出提醒（用 `el-dialog`，遮罩 / 焦点 / Esc 与其他弹窗同一套）：从托盘菜单真正退出时，若还有项目在运行会弹窗二选一 —— 「关闭所有项目并退出」先结束进程再退；
   「直接退出」保留这些进程，交给下次启动的残留清理处理。「运行中」既包括本次会话启动的进程，
   也包括启动检测按端口认出、不归 Workbench 管的服务（后者按端口结束）
 
@@ -290,9 +290,11 @@
 | 语言 | TypeScript（渲染层）+ Rust（后端）；契约与纯逻辑共用 `src/shared` |
 | 持久化 | 本地 JSON，由 Rust 侧 `store.rs` 负责（防抖 300ms、临时文件 + rename、退出前同步落盘） |
 | 子进程 | `std::process` 起 shell 命令（按批回传输出，Windows 下 `taskkill /T /F` 结束整棵进程树） |
+| 端口 → 进程 | `GetExtendedTcpTable`（iphlpapi，一次系统调用拿到监听表）+ `QueryFullProcessImageNameW`；不再起 `netstat` / `tasklist` 解析文本输出（全量检测会并发问十几个端口，原先每个端口两个子进程） |
 | Token 用量数据源 | ZCode：`rusqlite` 只读打开本地 sqlite（WAL 并发读）；DeepSeek Harness：Rust 逐帧解压 `~/.dsh/sessions` 的多帧 zstd 会话；CodeBuddy：Rust 列扩展日志清单、渲染层读内容并解析；WorkBuddy：Rust 列会话正文清单、渲染层读内容并解析。四者都只读，且只取用量数字 |
 | Token 多机同步 | 可选（默认关闭）：`std::process` 直启系统的 `git`（不经 `cmd`，参数行不会被二次解析），推 / 拉一个用户指定的仓库；`token-usage/` 与 `config/` 两个目录、都是一台机器一个文件（采用别人的配置只能手动点）。凭据默认走系统 git，登录过账号则改用该账号的 token（按 host 限定注入请求头，见下） |
 | 账号登录 | 可选：GitHub / Gitee 的授权码流程 + 本机回环回调（RFC 8252 那套，与 VS Code 同路）。HTTPS 走系统自带的 WinHTTP，access_token 存 Windows 凭据管理器（DPAPI）—— 两者都只给已有的 `windows-sys` 加 feature，**没有引入任何新的 crate**。两家都要求 clientId + clientSecret，凭据由 `build.rs` 编译期内置 |
+| 依赖取舍 | 新增 crate 的标准是**「不新增编译单元」**而不是「不新增名字」：`url` / `percent-encoding` / `form_urlencoded` / `walkdir` / `base64` / `sha2` 都已被 tauri / tao / wry / tauri-utils 拉进编译图（`cargo tree -e normal -i <crate>` 可查），所以直接用它们替掉手写的 URL 编解码、目录递归与摘要实现，代价为零。反过来，`reqwest`（hyper + tower + TLS 整套）、`git2`（libgit2 的 C 依赖）、`sysinfo` 会新增成片的编译单元，一律不引 |
 | 测试 | Vitest（渲染层与 shared）+ `cargo test`（Rust） |
 | 打包 | Tauri CLI → NSIS 安装包（Windows x64） |
 
@@ -331,14 +333,16 @@ src-tauri/               Rust 后端
   src/proc.rs            带超时的子进程原语 + 进程树终止
   src/store.rs           去抖 JSON 落盘（300ms 合并 + 临时文件 rename）
   src/paths.rs           数据目录与指针（与旧 Electron 版同一位置）
-  src/system.rs          端口检测、资源管理器、ShellExecute
+  src/system.rs          端口检测（GetExtendedTcpTable）、资源管理器、ShellExecute
   src/nvm.rs             nvm 只读探测（目录 / settings.txt / 软链）
   src/nrm.rs             nrm 探测与镜像源切换（清单来自 nrm ls）
-  src/token.rs           ZCode sqlite 聚合 + DSH 多帧 zstd
+  src/token.rs           ZCode sqlite 聚合 + DSH 多帧 zstd（会话文件用 walkdir 递归找）
   src/sync.rs            同步仓库的 git 操作（克隆 / 拉 / 提交 / 推、读回别人的用量与配置）
   src/oauth.rs           账号登录：两家的授权流程、回环回调、换 token 与账号信息
+                         （百分号编解码与 URL 拆分走 url / form_urlencoded，见 http.rs 同一条取舍）
   src/http.rs            WinHTTP 极简 HTTPS 客户端（只为登录那几个请求服务）
   src/credentials.rs     Windows 凭据管理器读写（access_token 落在这里，不落 JSON）
+  src/encoding.rs        base64 / SHA-256 / UTF-16 宽字符串（前两者用 base64 / sha2）
   src/icon.rs            程序图标抽取
   oauth.example.json     OAuth 应用凭据模板（真实凭据放 oauth.local.json，不入库）
   tauri.conf.json        窗口、打包、资源映射
@@ -353,7 +357,16 @@ src/renderer/src/        Vue 应用（组件 / Pinia store / 设计令牌）
     scanner.ts           扫描的生产侧（fs 经 IPC 落到 Rust）
     nvm.ts / nrm.ts / token.ts / system.ts / quick-launch.ts / work-log.ts / auth.ts
   components/            公共与页面组件
-  stores/projects.ts     跨组件状态
+  composables/           跨组件复用的交互骨架（目前是 use-pointer-drag：拖拽的起手 / 收手 /
+                         Esc 取消 / 解绑，五处拖拽共用，带单测）
+  notify.ts              非组件代码「说一句话 / 问一句」的唯一出口（可被测试顶替）
+  stores/                跨组件状态，按领域分文件：
+    projects.ts          项目、分组、筛选排序、搜索、抽屉；也是启动编排的落点（init）
+    terminal.ts          终端、运行态、日志缓冲；检测与停止的统一实现在这里
+    settings.ts          设置、外观（主题 / 主题色 / 背景）、首页布局、别台机器的外观
+    environment.ts       包管理器、nvm、nrm、数据目录
+    catalog.ts           快捷启动与独立命令
+    auth.ts              账号状态与登录流程
 src/shared/              两端共用的类型、契约与纯逻辑（含 scanner 的规则、项目标识色的分配、
                          工作日志的时间轴与 markdown 渲染等，各自带 `*.test.ts`）
 scripts/make-icons.mjs   程序化生成应用图标与托盘图标

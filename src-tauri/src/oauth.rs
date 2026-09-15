@@ -21,8 +21,10 @@ use std::net::TcpListener;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
+use percent_encoding::{utf8_percent_encode, AsciiSet, CONTROLS};
 use serde::Deserialize;
 use serde_json::{json, Value};
+use url::Url;
 
 use crate::credentials;
 use crate::encoding::{base64, base64_url, sha256};
@@ -621,54 +623,92 @@ fn fetch_avatar(url: &str) -> Option<String> {
     Some(format!("data:{mime};base64,{}", base64(&response.body)))
 }
 
-/// 从 `https://host/path?query` 里拆出 host 与 path+query。
+/// 从 `https://host/path?query` 里拆出 host（含端口）与 path+query。
+///
+/// 解析交给 `url`：它已经在编译图里（tauri / tao / wry 都依赖它），而 URL 的拆分规则
+/// 比「按第一个斜杠切一刀」细得多（用户信息、端口、大小写、IDN 都在这条路上）。
+/// 只认 http(s)：别的 scheme（`file:` 之类）一律拒绝。
 fn split_url(url: &str) -> Option<(String, String)> {
-    let rest = url.strip_prefix("https://").or_else(|| url.strip_prefix("http://"))?;
-    let (host, path) = match rest.find('/') {
-        Some(index) => (&rest[..index], &rest[index..]),
-        None => (rest, "/"),
-    };
-    if host.is_empty() {
+    let parsed = Url::parse(url).ok()?;
+    if !matches!(parsed.scheme(), "http" | "https") {
         return None;
     }
-    Some((host.to_string(), path.to_string()))
+
+    // 端口要留在 host 里：下游是 WinHTTP 的连接参数，`host:port` 才算完整地址
+    let host = match parsed.port() {
+        Some(port) => format!("{}:{port}", parsed.host_str()?),
+        None => parsed.host_str()?.to_string(),
+    };
+    let path = match parsed.query() {
+        Some(query) => format!("{}?{query}", parsed.path()),
+        None => parsed.path().to_string(),
+    };
+    Some((host, path))
 }
 
 /// 按文件头认图片类型。
 ///
 /// 不读响应的 `Content-Type`：为这一个用途去解析响应头，比读几个魔数字节复杂得多，
-/// 而这里唯一会拉的就是头像。认不出来就不显示头像（返回 None），不猜。
+/// 而这里唯一会拉的就是头像。认出来但不在支持列表里的（TIFF、ICO 之类）同样返回 None ——
+/// 数据地址的 mime 写错了，图片在界面上会直接碎掉，不如不显示。
 fn sniff_image(bytes: &[u8]) -> Option<&'static str> {
-    if bytes.starts_with(&[0x89, b'P', b'N', b'G']) {
-        Some("image/png")
-    } else if bytes.starts_with(&[0xff, 0xd8, 0xff]) {
-        Some("image/jpeg")
-    } else if bytes.starts_with(b"GIF8") {
-        Some("image/gif")
-    } else if bytes.len() > 12 && bytes.starts_with(b"RIFF") && &bytes[8..12] == b"WEBP" {
-        Some("image/webp")
-    } else if bytes.starts_with(b"BM") {
-        Some("image/bmp")
-    } else {
-        None
+    use image::ImageFormat;
+
+    match image::guess_format(bytes).ok()? {
+        ImageFormat::Png => Some("image/png"),
+        ImageFormat::Jpeg => Some("image/jpeg"),
+        ImageFormat::Gif => Some("image/gif"),
+        ImageFormat::WebP => Some("image/webp"),
+        ImageFormat::Bmp => Some("image/bmp"),
+        _ => None,
     }
 }
 
 // ---------- 查询串 ----------
 
+/// 「unreserved 之外全转义」的字符集。
+///
+/// `CONTROLS` 已经覆盖 0x00–0x1F 与 0x7F，下面补齐可打印 ASCII 里不属于 unreserved 的那些
+/// —— RFC 3986 的 unreserved 是 `A-Za-z0-9-_.~`，字母数字与这四个符号都不列进来。
+const NON_UNRESERVED: &AsciiSet = &CONTROLS
+    .add(b' ')
+    .add(b'!')
+    .add(b'"')
+    .add(b'#')
+    .add(b'$')
+    .add(b'%')
+    .add(b'&')
+    .add(b'\'')
+    .add(b'(')
+    .add(b')')
+    .add(b'*')
+    .add(b'+')
+    .add(b',')
+    .add(b'/')
+    .add(b':')
+    .add(b';')
+    .add(b'<')
+    .add(b'=')
+    .add(b'>')
+    .add(b'?')
+    .add(b'@')
+    .add(b'[')
+    .add(b'\\')
+    .add(b']')
+    .add(b'^')
+    .add(b'`')
+    .add(b'{')
+    .add(b'|')
+    .add(b'}');
+
 /// 只留 RFC 3986 的 unreserved 字符，其余百分号转义。
 /// 授权 URL 与表单体共用一套（`%20` 在两种场合都合法）。
+///
+/// **这里刻意不换成 `form_urlencoded` 的序列化器**：它按表单语义把空格写成 `+`，
+/// 而授权 URL 里的 `redirect_uri` 是逐字与平台上注册的回调地址比对的，
+/// 编码形式一变就是「回调地址不匹配」，且很难往编码上想（见文件头的说明）。
 fn encode_component(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    for byte in text.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(byte as char)
-            }
-            _ => out.push_str(&format!("%{byte:02X}")),
-        }
-    }
-    out
+    utf8_percent_encode(text, NON_UNRESERVED).to_string()
 }
 
 fn encode_pairs(pairs: &[(&str, String)]) -> String {
@@ -679,48 +719,17 @@ fn encode_pairs(pairs: &[(&str, String)]) -> String {
         .join("&")
 }
 
+/// 解析查询串或表单体（`application/x-www-form-urlencoded`）。
+///
+/// 解码交给 `form_urlencoded`（其唯一依赖 `percent-encoding` 本来就在编译图里）：
+/// `+` 解成空格、坏的转义（`100%`、`%zz`）原样保留、非 UTF-8 按替换字符收敛，
+/// 与原先手写的那版行为一致，但不必自己维护一个逐字节的状态机。
 fn parse_query(query: &str) -> Vec<(String, String)> {
-    query
-        .split('&')
-        .filter(|part| !part.is_empty())
-        .map(|part| match part.split_once('=') {
-            Some((name, value)) => (decode_component(name), decode_component(value)),
-            None => (decode_component(part), String::new()),
-        })
+    form_urlencoded::parse(query.as_bytes())
+        // 空段（`a=1&&b=2`）不进结果，与手写版的 filter 一致
+        .filter(|(name, _)| !name.is_empty())
+        .map(|(name, value)| (name.into_owned(), value.into_owned()))
         .collect()
-}
-
-fn decode_component(text: &str) -> String {
-    let bytes = text.as_bytes();
-    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
-    let mut index = 0;
-
-    while index < bytes.len() {
-        match bytes[index] {
-            b'%' if index + 2 < bytes.len() => {
-                match u8::from_str_radix(&text[index + 1..index + 3], 16) {
-                    Ok(byte) => {
-                        out.push(byte);
-                        index += 3;
-                    }
-                    Err(_) => {
-                        out.push(b'%');
-                        index += 1;
-                    }
-                }
-            }
-            b'+' => {
-                out.push(b' ');
-                index += 1;
-            }
-            byte => {
-                out.push(byte);
-                index += 1;
-            }
-        }
-    }
-
-    String::from_utf8_lossy(&out).into_owned()
 }
 
 /// 从用户粘进来的一整条回调地址里取出 `code` 与 `state`。
@@ -932,12 +941,18 @@ mod tests {
         assert_eq!(decoded[1].1, "read:user repo");
     }
 
+    /// 表单语义（`+` = 空格）与「坏转义不 panic、也不吃掉后面的字符」这两条，
+    /// 是回调串里真的会出现的输入（授权码里带 `+`，用户手抄的地址可能被截断）
     #[test]
     fn decodes_plus_as_space_and_keeps_broken_escapes() {
-        assert_eq!(decode_component("a+b"), "a b");
-        // 坏的转义不该 panic，也不该把后面的字符吃掉
-        assert_eq!(decode_component("100%"), "100%");
-        assert_eq!(decode_component("%zz"), "%zz");
+        let decoded = |query: &str| parse_query(query).into_iter().next().map(|(_, value)| value);
+        assert_eq!(decoded("k=a+b").as_deref(), Some("a b"));
+        assert_eq!(decoded("k=100%").as_deref(), Some("100%"));
+        assert_eq!(decoded("k=%zz").as_deref(), Some("%zz"));
+
+        // 空段不进结果，值与名字里的 `=` 都按第一个等号切
+        assert_eq!(parse_query("a=1&&b=2").len(), 2);
+        assert_eq!(decoded("k=a=b").as_deref(), Some("a=b"));
     }
 
     #[test]
@@ -975,7 +990,7 @@ mod tests {
 
     #[test]
     fn sniffs_the_image_types_we_may_get() {
-        assert_eq!(sniff_image(&[0x89, b'P', b'N', b'G', 0x0d]), Some("image/png"));
+        assert_eq!(sniff_image(b"\x89PNG\r\n\x1a\n____"), Some("image/png"));
         assert_eq!(sniff_image(&[0xff, 0xd8, 0xff, 0xe0]), Some("image/jpeg"));
         assert_eq!(sniff_image(b"GIF89a"), Some("image/gif"));
         assert_eq!(sniff_image(b"RIFF____WEBPVP8 "), Some("image/webp"));
@@ -983,6 +998,8 @@ mod tests {
         // 认不出来就不显示头像，不猜
         assert_eq!(sniff_image(b"not an image"), None);
         assert_eq!(sniff_image(b""), None);
+        // 认得出来但不在支持列表里（TIFF）：mime 写错会让图片碎掉，同样不显示
+        assert_eq!(sniff_image(b"II*\x00\x10\x00\x00\x00"), None);
     }
 
     /// 没内置凭据时错误信息要指路，而不是只说「失败」。
@@ -1019,12 +1036,37 @@ mod tests {
     /// git 凭据注入：必须是 host 限定的，且字段编号要对得上 GIT_CONFIG_COUNT
     #[test]
     fn git_envs_are_host_scoped_and_indexed() {
-        // 这台机器上大概率没登录过，所以先存两条假的，跑完删掉
-        let _ = credentials::store("github", "fake-token-for-test");
-        let _ = credentials::store("gitee", "fake-token-for-test");
+        // 先存两条假的来验「键怎么拼」，跑完要**原样还原**：这台机器上可能真的登录着，
+        // 直接删掉这两个键等于跑一次测试就把人登出了（原先就是 store 完再 remove）。
+        let backup: Vec<(&str, Option<String>)> = PROVIDERS
+            .iter()
+            .map(|provider| (provider.id, credentials::read(provider.id)))
+            .collect();
+        let restore = |backup: &Vec<(&str, Option<String>)>| {
+            for (id, token) in backup {
+                match token {
+                    Some(value) => {
+                        let _ = credentials::store(id, value);
+                    }
+                    None => {
+                        let _ = credentials::remove(id);
+                    }
+                }
+            }
+        };
+
+        // 凭据管理器偶发写不进去（系统策略、别的进程正占着它），那属于环境问题：
+        // 这条用例要验的是「键怎么拼」，不该被存储层的可用性带偏 —— 写不进去就跳过，
+        // 否则整包并行跑的时候会偶尔红一次（踩过：GIT_CONFIG_COUNT 变成 1）。
+        let stored = credentials::store("github", "fake-token-for-test").is_ok()
+            && credentials::store("gitee", "fake-token-for-test").is_ok();
         let envs = git_envs();
-        let _ = credentials::remove("github");
-        let _ = credentials::remove("gitee");
+        restore(&backup);
+
+        if !stored {
+            println!("跳过：本机凭据管理器写不进去");
+            return;
+        }
 
         let value = |key: &str| {
             envs.iter()

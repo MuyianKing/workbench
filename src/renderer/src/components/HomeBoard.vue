@@ -22,6 +22,8 @@ import {
   type SideColumnId
 } from '@shared/theme'
 import { useProjectsStore } from '@/stores/projects'
+import { startPointerDrag } from '@/composables/use-pointer-drag'
+import { useSettingsStore } from '@/stores/settings'
 import BoardCard from '@/components/BoardCard.vue'
 import ActivityGraph from '@/components/ActivityGraph.vue'
 import TokenPanel from '@/components/TokenPanel.vue'
@@ -33,6 +35,7 @@ import CommandPanel from '@/components/CommandPanel.vue'
 import TodayWorkPanel from '@/components/TodayWorkPanel.vue'
 
 const store = useProjectsStore()
+const settings = useSettingsStore()
 
 /** 八块卡片的固定清单：id 对应 theme.json，title 用于编辑态的标签 */
 const CARDS: Record<HomeCardId, { title: string; component: Component }> = {
@@ -51,7 +54,7 @@ const editing = computed(() => store.layoutEditing)
 // ---------- 栏与卡片 ----------
 
 function cardsIn(column: ColumnId): HomeCardId[] {
-  return cardIdsInColumn(store.themeConfig.cards, column)
+  return cardIdsInColumn(settings.themeConfig.cards, column)
 }
 
 /** 平时空栏不渲染；编辑时三栏都在，好把卡片拖进去 */
@@ -63,12 +66,12 @@ const columnsStyle = computed(() => {
   const parts = visibleColumns.value.map((column) =>
     column === 'center'
       ? 'minmax(0, 1fr)'
-      : `${column === 'left' ? store.themeConfig.leftWidth : store.themeConfig.rightWidth}px`
+      : `${column === 'left' ? settings.themeConfig.leftWidth : settings.themeConfig.rightWidth}px`
   )
   return {
     gridTemplateColumns: parts.join(' '),
-    '--left-w': `${store.themeConfig.leftWidth}px`,
-    '--right-w': `${store.themeConfig.rightWidth}px`
+    '--left-w': `${settings.themeConfig.leftWidth}px`,
+    '--right-w': `${settings.themeConfig.rightWidth}px`
   }
 })
 
@@ -106,7 +109,7 @@ const dropTarget = ref<{ column: ColumnId; index: number } | null>(null)
 function beginDrag(id: HomeCardId, grab: CardGrab): void {
   if (!editing.value) return
 
-  const column = store.themeConfig.cards[id].column
+  const column = settings.themeConfig.cards[id].column
   drag.value = {
     id,
     startX: grab.x,
@@ -121,9 +124,12 @@ function beginDrag(id: HomeCardId, grab: CardGrab): void {
   }
   dropTarget.value = { column, index: cardsIn(column).indexOf(id) }
 
-  window.addEventListener('pointermove', onDragMove)
-  window.addEventListener('pointerup', endDrag)
-  window.addEventListener('pointercancel', endDrag)
+  // 起点用卡片上按下时记下的坐标（BoardCard 已经量过位置，这里只借它当原点）
+  startPointerDrag({
+    start: { x: grab.x, y: grab.y },
+    onMove: onDragMove,
+    onEnd: endDrag
+  })
 }
 
 function onDragMove(event: PointerEvent): void {
@@ -163,7 +169,7 @@ function indexAt(container: HTMLElement, clientY: number): number {
   const gap = container.querySelector<HTMLElement>('.col__gap')
   const gapIndex = gap ? Number(gap.dataset.gapIndex) : -1
   // 空隙高度 + 它与相邻卡片之间的 flex 间距，都要从卡片位置上减掉（间距与 .col 的 gap 同源）
-  const shift = gap ? gap.getBoundingClientRect().height + store.cardGap : 0
+  const shift = gap ? gap.getBoundingClientRect().height + settings.cardGap : 0
 
   for (let i = 0; i < cards.length; i += 1) {
     const rect = cards[i].getBoundingClientRect()
@@ -173,17 +179,15 @@ function indexAt(container: HTMLElement, clientY: number): number {
   return cards.length
 }
 
-function endDrag(): void {
+function endDrag(last: PointerEvent | null): void {
   const state = drag.value
   const target = dropTarget.value
 
   drag.value = null
   dropTarget.value = null
-  window.removeEventListener('pointermove', onDragMove)
-  window.removeEventListener('pointerup', endDrag)
-  window.removeEventListener('pointercancel', endDrag)
 
-  if (state?.moved && target) void store.moveCard(state.id, target.column, target.index)
+  // last 为 null 表示被取消了（Esc / 系统接管）：不落盘
+  if (state?.moved && last && target) void settings.moveCard(state.id, target.column, target.index)
 }
 
 /** 拖起来的那张卡片：脱离文档流，跟着指针走 */
@@ -213,7 +217,7 @@ function gapRenderIndex(column: ColumnId): number | null {
 
 const gapHeight = computed(() => {
   const id = drag.value?.id
-  return id ? cardPlaceholderHeight(id, store.themeConfig.cards[id]) : 0
+  return id ? cardPlaceholderHeight(id, settings.themeConfig.cards[id]) : 0
 })
 
 // ---------- 栏宽拖动 ----------
@@ -221,32 +225,25 @@ const gapHeight = computed(() => {
 function onColumnResizeDown(side: SideColumnId, event: PointerEvent): void {
   if (event.button !== 0) return
   event.preventDefault()
-  const startClientX = event.clientX
+
   const startWidth =
-    side === 'left' ? store.themeConfig.leftWidth : store.themeConfig.rightWidth
+    side === 'left' ? settings.themeConfig.leftWidth : settings.themeConfig.rightWidth
   // 左栏往右拖变宽；右栏在另一侧，往左拖（dx 为负）才是变宽
   const direction = side === 'left' ? 1 : -1
 
-  const onMove = (moveEvent: PointerEvent): void => {
-    const wanted = startWidth + direction * (moveEvent.clientX - startClientX)
-    store.setColumnWidth(side, clampColumnWidth(wanted, startWidth))
-  }
-  const onUp = (): void => {
-    window.removeEventListener('pointermove', onMove)
-    window.removeEventListener('pointerup', onUp)
-    window.removeEventListener('pointercancel', onUp)
-    void store.commitColumns()
-  }
-
-  window.addEventListener('pointermove', onMove)
-  window.addEventListener('pointerup', onUp)
-  // 没有 pointercancel 时，系统取消指针（触控、手势接管）会让监听器留在 window 上，
-  // 之后每次移动都在改栏宽
-  window.addEventListener('pointercancel', onUp)
+  // 跟手与收手的解绑交给 composable（含 pointercancel 与 Esc 取消）
+  startPointerDrag({
+    start: { x: event.clientX, y: event.clientY },
+    onMove: (moveEvent, start) => {
+      const wanted = startWidth + direction * (moveEvent.clientX - start.x)
+      settings.setColumnWidth(side, clampColumnWidth(wanted, startWidth))
+    },
+    onEnd: () => void settings.commitColumns()
+  })
 }
 
 function onToggleMode(id: HomeCardId): void {
-  void store.toggleCardMode(id)
+  void settings.toggleCardMode(id)
 }
 </script>
 
@@ -271,15 +268,15 @@ function onToggleMode(id: HomeCardId): void {
           <BoardCard
             :id="id"
             :title="CARDS[id].title"
-            :mode="store.themeConfig.cards[id].mode"
-            :height="store.themeConfig.cards[id].height"
-            :step="store.gridStep"
+            :mode="settings.themeConfig.cards[id].mode"
+            :height="settings.themeConfig.cards[id].height"
+            :step="settings.gridStep"
             :editing="editing"
             :floating-style="drag?.id === id ? floatingStyle : null"
             @grab="beginDrag"
             @toggle-mode="onToggleMode"
-            @resize="store.setCardHeight"
-            @commit="() => void store.commitCards()"
+            @resize="settings.setCardHeight"
+            @commit="() => void settings.commitCards()"
           >
             <component :is="CARDS[id].component" />
           </BoardCard>

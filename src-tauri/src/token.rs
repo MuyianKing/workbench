@@ -6,6 +6,7 @@
 
 use serde_json::{json, Value};
 use std::path::PathBuf;
+use walkdir::WalkDir;
 
 /// 聚合 SQL：按 天 × 模型 汇总，与 Electron 版逐字一致。
 ///  - ROW_NUMBER 去重重试：同一个 logical_request_id 只留最后一次尝试，重试不双算；
@@ -146,53 +147,50 @@ fn codebuddy_files_in(root: &std::path::Path) -> Result<Value, String> {
     std::fs::read_dir(root).map_err(|err| format!("CodeBuddy 日志目录读取失败: {err}"))?;
 
     let mut files = Vec::new();
-    collect_codebuddy_logs(root, false, 0, &mut files);
+    collect_codebuddy_logs(root, &mut files);
     Ok(json!({ "found": true, "root": root.to_string_lossy(), "files": files }))
 }
 
 /// 只收扩展目录下的 `.log`。日志文件名是中文（腾讯云代码助手.log），
 /// 所以只能按目录名定位、不能按文件名找；扩展目录之外的 .log（main.log 那些）不是用量来源。
-fn collect_codebuddy_logs(
-    dir: &std::path::Path,
-    in_extension: bool,
-    depth: usize,
-    out: &mut Vec<Value>,
-) {
-    if depth > CODEBUDDY_MAX_DEPTH {
-        return;
-    }
-    // 单个子目录读不了只少一棵子树，不影响其余会话
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-
-    for entry in entries.flatten() {
+///
+/// 遍历交给 `walkdir`（tauri-utils 已经在用它，加进来不新增编译单元）：深度上限替掉手写的
+/// 递归与 depth 参数，单个子目录读不了（`filter_map(Result::ok)`）也只少一棵子树。
+fn collect_codebuddy_logs(root: &std::path::Path, out: &mut Vec<Value>) {
+    for entry in WalkDir::new(root)
+        .max_depth(CODEBUDDY_MAX_DEPTH)
+        .into_iter()
+        .filter_map(Result::ok)
+    {
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        if entry.path().extension().and_then(|ext| ext.to_str()) != Some("log") {
+            continue;
+        }
+        // 「在扩展目录下」按相对路径判：祖先里只要有那一层目录名，它的子树都算。
+        // 等价于原来那个一路往下传的 in_extension 标志，但不必自己带状态。
+        if !under_extension_dir(root, entry.path()) {
+            continue;
+        }
         let Ok(meta) = entry.metadata() else {
             continue;
         };
-        let path = entry.path();
-
-        if meta.is_dir() {
-            let nested = in_extension
-                || entry.file_name().to_string_lossy().to_ascii_lowercase()
-                    == CODEBUDDY_EXTENSION_DIR;
-            collect_codebuddy_logs(&path, nested, depth + 1, out);
-            continue;
-        }
-
-        if !in_extension || !meta.is_file() {
-            continue;
-        }
-        if path.extension().and_then(|ext| ext.to_str()) != Some("log") {
-            continue;
-        }
-
         out.push(json!({
-            "path": path.to_string_lossy(),
+            "path": entry.path().to_string_lossy(),
             "mtimeMs": modified_ms(&meta),
             "size": meta.len(),
         }));
     }
+}
+
+/// 这个路径是否落在扩展目录之下（相对 `root` 看）
+fn under_extension_dir(root: &std::path::Path, path: &std::path::Path) -> bool {
+    path.strip_prefix(root).is_ok_and(|relative| {
+        relative.components().any(|part| {
+            part.as_os_str().to_string_lossy().to_ascii_lowercase() == CODEBUDDY_EXTENSION_DIR
+        })
+    })
 }
 
 // ---------- WorkBuddy(~/.workbuddy/projects) ----------
@@ -232,29 +230,29 @@ fn workbuddy_sessions_in(root: &std::path::Path) -> Result<Value, String> {
     // 目录结构是 projects/<项目>/<会话 id>.jsonl；项目目录读不了只少一个项目。
     // 只下探这一层：这一层才是会话正文，更深的位置没有实测过的用量来源，
     // 多收一份就可能把同一次调用算两遍（子会话正文的用量是不是已经并进主正文，没有把握）。
-    for project in std::fs::read_dir(root).into_iter().flatten().flatten() {
-        if !project.path().is_dir() {
+    for entry in WalkDir::new(root)
+        .min_depth(2)
+        .max_depth(2)
+        .into_iter()
+        .filter_map(Result::ok)
+    {
+        let path = entry.path();
+        // 每个会话都是一个 .jsonl 加两个同名侧车文件（.meta.json / .file-rollback.ndjson），
+        // 只有 .jsonl 才是会话正文
+        if path.extension().and_then(|ext| ext.to_str()) != Some("jsonl") {
             continue;
         }
-        for entry in std::fs::read_dir(project.path()).into_iter().flatten().flatten() {
-            let path = entry.path();
-            // 每个会话都是一个 .jsonl 加两个同名侧车文件（.meta.json / .file-rollback.ndjson），
-            // 只有 .jsonl 才是会话正文
-            if path.extension().and_then(|ext| ext.to_str()) != Some("jsonl") {
-                continue;
-            }
-            let Ok(meta) = entry.metadata() else {
-                continue;
-            };
-            if !meta.is_file() {
-                continue;
-            }
-            sessions.push(json!({
-                "path": path.to_string_lossy(),
-                "mtimeMs": modified_ms(&meta),
-                "size": meta.len(),
-            }));
+        let Ok(meta) = entry.metadata() else {
+            continue;
+        };
+        if !meta.is_file() {
+            continue;
         }
+        sessions.push(json!({
+            "path": path.to_string_lossy(),
+            "mtimeMs": modified_ms(&meta),
+            "size": meta.len(),
+        }));
     }
 
     Ok(json!({ "found": true, "root": root.to_string_lossy(), "sessions": sessions }))
@@ -303,27 +301,27 @@ fn dsh_sessions_in(root: &std::path::Path) -> Result<Value, String> {
     std::fs::read_dir(root).map_err(|err| format!("DSH 会话目录读取失败: {err}"))?;
 
     let mut sessions = Vec::new();
-    // 目录结构是 sessions/<项目>/<会话>/<文件>；项目目录读不了只少一个项目
-    for project in std::fs::read_dir(root).into_iter().flatten().flatten() {
-        if !project.path().is_dir() {
+    // 目录结构是 sessions/<项目>/<会话>/<文件>：会话目录正好在第 2 层，逐个去挑该读的那个文件
+    for entry in WalkDir::new(root)
+        .min_depth(2)
+        .max_depth(2)
+        .into_iter()
+        .filter_map(Result::ok)
+    {
+        if !entry.file_type().is_dir() {
             continue;
         }
-        for session in std::fs::read_dir(project.path()).into_iter().flatten().flatten() {
-            if !session.path().is_dir() {
-                continue;
-            }
-            let Some(path) = pick_session_file(&session.path()) else {
-                continue;
-            };
-            let Ok(meta) = std::fs::metadata(&path) else {
-                continue;
-            };
-            sessions.push(json!({
-                "path": path.to_string_lossy(),
-                "mtimeMs": modified_ms(&meta),
-                "size": meta.len(),
-            }));
-        }
+        let Some(path) = pick_session_file(entry.path()) else {
+            continue;
+        };
+        let Ok(meta) = std::fs::metadata(&path) else {
+            continue;
+        };
+        sessions.push(json!({
+            "path": path.to_string_lossy(),
+            "mtimeMs": modified_ms(&meta),
+            "size": meta.len(),
+        }));
     }
 
     Ok(json!({ "found": true, "root": root.to_string_lossy(), "sessions": sessions }))

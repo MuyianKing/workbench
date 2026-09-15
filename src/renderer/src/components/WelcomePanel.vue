@@ -10,15 +10,19 @@ import { Plus } from '@element-plus/icons-vue'
 import { buildHints } from '@/hints'
 import { PACKAGE_MANAGERS, VERSIONS_FALLBACK, type PackageManagerKey } from '@/managers'
 import { useProjectsStore } from '@/stores/projects'
+import { useSettingsStore } from '@/stores/settings'
+import { useEnvironmentStore } from '@/stores/environment'
 
 const store = useProjectsStore()
+const settings = useSettingsStore()
+const environment = useEnvironmentStore()
 
 const versions = window.workbench?.versions ?? VERSIONS_FALLBACK
 
 const managers = PACKAGE_MANAGERS
 
 function available(key: PackageManagerKey): boolean {
-  return store.packageManagers?.[key] ?? false
+  return environment.packageManagers?.[key] ?? false
 }
 
 const steps = [
@@ -39,7 +43,7 @@ const steps = [
   }
 ]
 
-const hints = computed(() => buildHints(store.settings))
+const hints = computed(() => buildHints(settings.settings))
 </script>
 
 <template>
@@ -88,7 +92,7 @@ const hints = computed(() => buildHints(store.settings))
         <dl class="facts">
           <div class="fact">
             <dt>node</dt>
-            <dd class="mono">{{ store.packageManagers?.node || '未检测到' }}</dd>
+            <dd class="mono">{{ environment.packageManagers?.node || '未检测到' }}</dd>
           </div>
           <div class="fact">
             <dt>chromium</dt>

@@ -9,8 +9,10 @@ import { computed, reactive, ref, watch } from 'vue'
 import { Monitor } from '@element-plus/icons-vue'
 import { defaultQuickAppName } from '@shared/quick-launch'
 import { useProjectsStore } from '@/stores/projects'
+import { useCatalogStore } from '@/stores/catalog'
 
 const store = useProjectsStore()
+const catalog = useCatalogStore()
 
 const form = reactive({
   target: '',
@@ -21,28 +23,28 @@ const form = reactive({
 const nameTouched = ref(false)
 
 const visible = computed({
-  get: () => store.quickDialogVisible,
-  set: (value: boolean) => store.setQuickDialogVisible(value)
+  get: () => catalog.quickDialogVisible,
+  set: (value: boolean) => catalog.setQuickDialogVisible(value)
 })
 
-const editing = computed(() => store.quickEditing)
+const editing = computed(() => catalog.quickEditing)
 const title = computed(() => (editing.value ? '编辑常用软件' : '添加常用软件'))
 
-const icon = computed(() => (form.target.trim() ? store.quickIconOf(form.target.trim()) : ''))
+const icon = computed(() => (form.target.trim() ? catalog.quickIconOf(form.target.trim()) : ''))
 const initial = computed(() => (form.name.trim() || '?').slice(0, 1).toUpperCase())
 
 const canSubmit = computed(() => !!form.target.trim() && !!form.name.trim())
 
 /** 打开弹窗时按当前模式填值：编辑就回填已有配置，新增就是一张白纸 */
 function reset(): void {
-  const entry = store.quickEditing
+  const entry = catalog.quickEditing
   form.target = entry?.target ?? ''
   form.name = entry?.name ?? ''
   nameTouched.value = !!entry
 }
 
 watch(
-  () => store.quickDialogVisible,
+  () => catalog.quickDialogVisible,
   (open) => {
     if (open) reset()
   }
@@ -71,8 +73,8 @@ async function submit(): Promise<void> {
 
   const current = editing.value
   const done = current
-    ? await store.updateQuickApp(current.id, payload)
-    : await store.addQuickApp(payload)
+    ? await catalog.updateQuickApp(current.id, payload)
+    : await catalog.addQuickApp(payload)
 
   if (done) visible.value = false
 }
@@ -89,22 +91,23 @@ async function submit(): Promise<void> {
     :close-on-click-modal="false"
     @closed="reset"
   >
-    <div class="form">
-      <div class="field">
-        <label class="field__label">程序</label>
-        <div class="field__row">
-          <el-input
-            v-model="form.target"
-            placeholder="选择一个程序或开始菜单里的快捷方式"
-            spellcheck="false"
-            @input="onTargetInput"
-          />
-          <el-button :icon="Monitor" @click="browse">浏览</el-button>
+    <el-form class="form" :model="form" @submit.prevent>
+      <el-form-item label="程序">
+        <div class="field__stack">
+          <div class="field__row">
+            <el-input
+              v-model="form.target"
+              placeholder="选择一个程序或开始菜单里的快捷方式"
+              spellcheck="false"
+              @input="onTargetInput"
+            />
+            <el-button :icon="Monitor" @click="browse">浏览</el-button>
+          </div>
+          <p class="field__hint">
+            支持 .exe、快捷方式（.lnk）与 .bat / .cmd；对话框默认从开始菜单打开。
+          </p>
         </div>
-        <p class="field__hint">
-          支持 .exe、快捷方式（.lnk）与 .bat / .cmd；对话框默认从开始菜单打开。
-        </p>
-      </div>
+      </el-form-item>
 
       <div class="preview">
         <span class="preview__icon">
@@ -119,15 +122,10 @@ async function submit(): Promise<void> {
         </div>
       </div>
 
-      <div class="field">
-        <label class="field__label">名称</label>
-        <el-input
-          v-model="form.name"
-          placeholder="显示在首页的名字"
-          @input="nameTouched = true"
-        />
-      </div>
-    </div>
+      <el-form-item label="名称">
+        <el-input v-model="form.name" placeholder="显示在首页的名字" @input="nameTouched = true" />
+      </el-form-item>
+    </el-form>
 
     <template #footer>
       <el-button @click="visible = false">取消</el-button>
@@ -139,19 +137,8 @@ async function submit(): Promise<void> {
 </template>
 
 <style scoped>
-.form {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-4);
-}
-
-.field__label {
-  display: block;
-  margin-bottom: 6px;
-  font-size: var(--fs-meta);
-  color: var(--ink-2);
-}
-
+/* 字段排版（标签 / 说明小字）与错误行由 global.css 的「弹窗表单」一节统一给，
+   这里只留这个弹窗特有的部分 */
 .field__row {
   display: flex;
   gap: var(--sp-2);
@@ -160,13 +147,6 @@ async function submit(): Promise<void> {
 .field__row :deep(.el-input) {
   flex: 1;
   min-width: 0;
-}
-
-.field__hint {
-  margin-top: 5px;
-  font-size: var(--fs-micro);
-  line-height: 1.7;
-  color: var(--ink-3);
 }
 
 /* ---------- 预览：选完文件先在这儿看一眼，免得存进去才发现选错了 ---------- */

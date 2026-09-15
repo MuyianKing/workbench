@@ -4,6 +4,9 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { CircleClose, FolderOpened, Picture, Rank } from '@element-plus/icons-vue'
 import { accountLabel } from '@shared/auth'
 import { useProjectsStore } from '@/stores/projects'
+import { useSettingsStore } from '@/stores/settings'
+import { useEnvironmentStore } from '@/stores/environment'
+import { useAuthStore } from '@/stores/auth'
 import AccountDialog from '@/components/AccountDialog.vue'
 import { ACCENT_PRESETS, type AccentInkMode } from '@shared/accent-color'
 import { APP_NAME_DEFAULT, APP_NAME_MAX_LENGTH } from '@shared/app-name'
@@ -22,6 +25,9 @@ const props = defineProps<{ modelValue: boolean }>()
 const emit = defineEmits<{ 'update:modelValue': [value: boolean] }>()
 
 const store = useProjectsStore()
+const settings = useSettingsStore()
+const environment = useEnvironmentStore()
+const auth = useAuthStore()
 
 const visible = computed({
   get: () => props.modelValue,
@@ -30,7 +36,7 @@ const visible = computed({
 
 /** 「账号」那一行开的弹窗。也挂在顶栏上，两处共用同一个 store 状态，谁先开都行 */
 const accountVisible = ref(false)
-const account = computed(() => store.auth?.account ?? null)
+const account = computed(() => auth.status?.account ?? null)
 
 /** el-switch 的 model-value 是联合类型（开了 string/number 取值时），这里只要布尔 */
 function setUseAccountForSync(value: boolean | string | number): void {
@@ -78,9 +84,9 @@ const isPackaged = computed(() => !import.meta.env.DEV)
  * 后者是图片被删 / 换了格式，得让用户知道该重新选一张。
  */
 const backgroundHint = computed(() => {
-  if (store.backgroundImage) return ''
-  if (store.backgroundError) return '图片读不出来'
-  return store.settings.workspaceBackground ? '读取中…' : '未设置'
+  if (settings.backgroundImage) return ''
+  if (settings.backgroundError) return '图片读不出来'
+  return settings.settings.workspaceBackground ? '读取中…' : '未设置'
 })
 
 /**
@@ -88,14 +94,14 @@ const backgroundHint = computed(() => {
  * 但「到底设的是哪个文件」还得能查到 —— 鼠标停在预览上给全名。
  */
 const backgroundTitle = computed(
-  () => store.backgroundName || store.settings.workspaceBackground || '还没有选择背景图'
+  () => settings.backgroundName || settings.settings.workspaceBackground || '还没有选择背景图'
 )
 
 /** 当前背景是自选的本地文件（不是内置壁纸），给「本地图片」那块一个选中态 */
 const isLocalBackground = computed(
   () =>
-    !!store.settings.workspaceBackground &&
-    builtinIdOf(store.settings.workspaceBackground) === null
+    !!settings.settings.workspaceBackground &&
+    builtinIdOf(settings.settings.workspaceBackground) === null
 )
 
 /**
@@ -113,8 +119,8 @@ const VEIL_PRESETS = [
 ]
 
 const veilLabel = computed(() =>
-  store.settings.workspaceBackgroundVeil
-    ? store.settings.workspaceBackgroundVeil.toUpperCase()
+  settings.settings.workspaceBackgroundVeil
+    ? settings.settings.workspaceBackgroundVeil.toUpperCase()
     : '默认（主题画布色）'
 )
 
@@ -122,7 +128,7 @@ const accentPresets: string[] = [...ACCENT_PRESETS]
 
 /** 主题色当前值：留空就是界面原本的中性色，得说清楚「没配」不等于没生效 */
 const accentLabel = computed(() =>
-  store.settings.accentColor ? store.settings.accentColor.toUpperCase() : '默认（中性色）'
+  settings.settings.accentColor ? settings.settings.accentColor.toUpperCase() : '默认（中性色）'
 )
 
 /** 快捷键录制状态 */
@@ -134,7 +140,7 @@ const recording = ref(false)
  */
 const appNameDraft = ref('')
 watch(
-  () => store.settings.appName,
+  () => settings.settings.appName,
   (value) => {
     appNameDraft.value = value
   },
@@ -142,7 +148,7 @@ watch(
 )
 
 function commitAppName(): void {
-  if (appNameDraft.value === store.settings.appName) return
+  if (appNameDraft.value === settings.settings.appName) return
   save({ appName: appNameDraft.value })
 }
 
@@ -153,7 +159,7 @@ function commitAppName(): void {
  */
 const syncRepoDraft = ref('')
 watch(
-  () => store.settings.tokenSyncRepo,
+  () => settings.settings.tokenSyncRepo,
   (value) => {
     syncRepoDraft.value = value
   },
@@ -161,7 +167,7 @@ watch(
 )
 
 function commitSyncRepo(): void {
-  if (syncRepoDraft.value === store.settings.tokenSyncRepo) return
+  if (syncRepoDraft.value === settings.settings.tokenSyncRepo) return
   save({ tokenSyncRepo: syncRepoDraft.value })
 }
 
@@ -187,25 +193,17 @@ async function applyAppearance(device: SyncDeviceInfo): Promise<void> {
   } catch {
     return
   }
-  await store.applySyncAppearance(device.id)
+  await settings.applySyncAppearance(device.id)
 }
 
 /** 手动同步一次，再把设备列表重新读一遍（列表是上一次同步取回来的样子） */
 async function syncNow(): Promise<void> {
   syncing.value = true
   try {
-    const result = await window.workbench.syncTokenUsage()
-    if (!result.ok) {
-      ElMessage.error(result.error ?? '同步失败')
-    } else if (result.data?.sync.error) {
-      ElMessage.error(result.data.sync.error)
-    }
-  } catch (error) {
-    // 版本不一致、后端没起来都可能走到这里：说一声比按钮转完圈什么都不发生强
-    ElMessage.error(error instanceof Error ? error.message : '同步失败')
+    await settings.syncNow()
   } finally {
     syncing.value = false
-    await store.loadSyncDevices()
+    await settings.loadSyncDevices()
   }
 }
 
@@ -220,7 +218,7 @@ function deviceUpdatedText(device: SyncDeviceInfo): string {
 }
 
 function save(patch: Partial<AppSettings>): void {
-  void store.updateSettings(patch)
+  void settings.updateSettings(patch)
 }
 
 /**
@@ -236,7 +234,7 @@ function rememberThemeOrigin(event: PointerEvent): void {
 function changeTheme(value: ThemeSource): void {
   const origin = themeOrigin.value
   themeOrigin.value = null
-  void store.updateSettings({ theme: value }, origin)
+  void settings.updateSettings({ theme: value }, origin)
 }
 
 /** 进入首页布局编辑态：关掉设置，把画面让给画布上的拖动把手 */
@@ -246,11 +244,11 @@ function enterLayoutEdit(): void {
 }
 
 function changeGridStep(value: number | undefined): void {
-  if (typeof value === 'number') void store.setGridStep(value)
+  if (typeof value === 'number') void settings.setGridStep(value)
 }
 
 function changeCardGap(value: number | undefined): void {
-  if (typeof value === 'number') void store.setCardGap(value)
+  if (typeof value === 'number') void settings.setCardGap(value)
 }
 
 // ---------- 快捷键 ----------
@@ -288,7 +286,7 @@ function normalizeKey(key: string): string | null {
 
 /** 人类可读的展示形式：Control+Shift+W → Ctrl + Shift + W */
 const hotkeyLabel = computed(() =>
-  store.settings.hotkey
+  settings.settings.hotkey
     .split('+')
     .map((part: string) => part.trim())
     .filter(Boolean)
@@ -327,7 +325,7 @@ watch(visible, (open) => {
     return
   }
   // 内置壁纸的缩略图要现压，按需在第一次打开面板时取（见 store 的 ensureWallpapers）
-  void store.ensureWallpapers()
+  void settings.ensureWallpapers()
 })
 
 /**
@@ -336,7 +334,7 @@ watch(visible, (open) => {
  * 用户很可能刚从首页点过同步按钮再进来。
  */
 watch([visible, activeTab], ([open, tab]) => {
-  if (open && tab === 'general') void store.loadSyncDevices()
+  if (open && tab === 'general') void settings.loadSyncDevices()
 })
 </script>
 
@@ -383,7 +381,7 @@ watch([visible, activeTab], ([open, tab]) => {
                 <span class="row__hint">跟随系统时随系统切换。</span>
               </div>
               <el-radio-group
-                :model-value="store.settings.theme"
+                :model-value="settings.settings.theme"
                 size="small"
                 @pointerdown="rememberThemeOrigin"
                 @update:model-value="(value: unknown) => changeTheme(value as ThemeSource)"
@@ -401,17 +399,17 @@ watch([visible, activeTab], ([open, tab]) => {
               </div>
               <div class="slider">
                 <el-color-picker
-                  :model-value="store.settings.accentColor || null"
+                  :model-value="settings.settings.accentColor || null"
                   size="small"
                   :predefine="accentPresets"
-                  @change="(value: unknown) => void store.setAccentColor(String(value ?? ''))"
+                  @change="(value: unknown) => void settings.setAccentColor(String(value ?? ''))"
                 />
                 <span class="accent__value mono">{{ accentLabel }}</span>
                 <el-button
                   link
                   size="small"
-                  :disabled="!store.settings.accentColor"
-                  @click="store.setAccentColor('')"
+                  :disabled="!settings.settings.accentColor"
+                  @click="settings.setAccentColor('')"
                 >
                   恢复默认
                 </el-button>
@@ -425,9 +423,9 @@ watch([visible, activeTab], ([open, tab]) => {
               </div>
               <el-radio-group
                 class="style-pick"
-                :model-value="store.settings.accentInk"
+                :model-value="settings.settings.accentInk"
                 size="small"
-                @update:model-value="(value: unknown) => void store.setAccentInk(value as AccentInkMode)"
+                @update:model-value="(value: unknown) => void settings.setAccentInk(value as AccentInkMode)"
               >
                 <el-radio-button v-for="m in accentInkModes" :key="m.value" :value="m.value">
                   {{ m.label }}
@@ -442,7 +440,7 @@ watch([visible, activeTab], ([open, tab]) => {
 
               <div class="bg">
                 <div class="bg__preview" :title="backgroundTitle">
-                  <img v-if="store.backgroundImage" :src="store.backgroundImage" alt="工作区背景预览" />
+                  <img v-if="settings.backgroundImage" :src="settings.backgroundImage" alt="工作区背景预览" />
                   <span v-else class="bg__empty">{{ backgroundHint }}</span>
                 </div>
 
@@ -450,40 +448,40 @@ watch([visible, activeTab], ([open, tab]) => {
                   <div class="slider">
                     <span class="bg__label">浓淡</span>
                     <el-slider
-                      :model-value="store.backgroundOpacity"
+                      :model-value="settings.backgroundOpacity"
                       :min="BACKGROUND_OPACITY_MIN"
                       :max="BACKGROUND_OPACITY_MAX"
                       :step="5"
                       :show-tooltip="false"
                       size="small"
-                      :disabled="!store.settings.workspaceBackground"
-                      @input="(value: unknown) => (store.backgroundOpacity = Number(value))"
-                      @change="(value: unknown) => void store.setBackgroundOpacity(Number(value))"
+                      :disabled="!settings.settings.workspaceBackground"
+                      @input="(value: unknown) => (settings.backgroundOpacity = Number(value))"
+                      @change="(value: unknown) => void settings.setBackgroundOpacity(Number(value))"
                     />
-                    <span class="slider__value mono">{{ store.backgroundOpacity }}%</span>
+                    <span class="slider__value mono">{{ settings.backgroundOpacity }}%</span>
                   </div>
 
                   <!-- 蒙版色：图片渐淡进去的那个颜色；留空就跟着主题的画布色走 -->
                   <div class="slider">
                     <span class="bg__label">渐淡色</span>
                     <el-color-picker
-                      :model-value="store.settings.workspaceBackgroundVeil || null"
+                      :model-value="settings.settings.workspaceBackgroundVeil || null"
                       size="small"
                       :predefine="VEIL_PRESETS"
-                      @change="(value: unknown) => void store.setBackgroundVeil(String(value ?? ''))"
+                      @change="(value: unknown) => void settings.setBackgroundVeil(String(value ?? ''))"
                     />
                     <span class="bg__veil mono">{{ veilLabel }}</span>
                     <el-button
                       link
                       size="small"
-                      :disabled="!store.settings.workspaceBackgroundVeil"
-                      @click="store.setBackgroundVeil('')"
+                      :disabled="!settings.settings.workspaceBackgroundVeil"
+                      @click="settings.setBackgroundVeil('')"
                     >
                       跟随主题
                     </el-button>
                   </div>
 
-                  <p v-if="store.backgroundError" class="bg__error">{{ store.backgroundError }}</p>
+                  <p v-if="settings.backgroundError" class="bg__error">{{ settings.backgroundError }}</p>
                 </div>
               </div>
 
@@ -495,17 +493,17 @@ watch([visible, activeTab], ([open, tab]) => {
                 内置目录为空（老版本升级上来）时只少几块图，入口仍在。
               -->
               <div class="wallpapers">
-                <span v-if="store.wallpapers.length" class="bg__label">内置壁纸</span>
+                <span v-if="settings.wallpapers.length" class="bg__label">内置壁纸</span>
 
                 <div class="wallpapers__list">
                   <button
-                    v-for="item in store.wallpapers"
+                    v-for="item in settings.wallpapers"
                     :key="item.reference"
                     class="wallpaper"
                     type="button"
-                    :class="{ 'is-active': store.settings.workspaceBackground === item.reference }"
+                    :class="{ 'is-active': settings.settings.workspaceBackground === item.reference }"
                     :title="item.name"
-                    @click="store.useWallpaper(item.reference)"
+                    @click="settings.useWallpaper(item.reference)"
                   >
                     <span class="wallpaper__thumb">
                       <img v-if="item.thumbnail" :src="item.thumbnail" alt="" />
@@ -519,7 +517,7 @@ watch([visible, activeTab], ([open, tab]) => {
                     type="button"
                     :class="{ 'is-active': isLocalBackground }"
                     :title="backgroundTitle"
-                    @click="store.pickBackground()"
+                    @click="settings.pickBackground()"
                   >
                     <span class="wallpaper__thumb wallpaper__thumb--blank">
                       <el-icon><Picture /></el-icon>
@@ -530,9 +528,9 @@ watch([visible, activeTab], ([open, tab]) => {
                   <button
                     class="wallpaper"
                     type="button"
-                    :class="{ 'is-active': !store.settings.workspaceBackground }"
+                    :class="{ 'is-active': !settings.settings.workspaceBackground }"
                     title="恢复默认画布"
-                    @click="store.clearBackground()"
+                    @click="settings.clearBackground()"
                   >
                     <span class="wallpaper__thumb wallpaper__thumb--blank">
                       <el-icon><CircleClose /></el-icon>
@@ -550,9 +548,9 @@ watch([visible, activeTab], ([open, tab]) => {
               </div>
               <el-radio-group
                 class="style-pick"
-                :model-value="store.settings.topBarStyle"
+                :model-value="settings.settings.topBarStyle"
                 size="small"
-                @update:model-value="(value: unknown) => void store.setTopBarStyle(value as TopBarStyle)"
+                @update:model-value="(value: unknown) => void settings.setTopBarStyle(value as TopBarStyle)"
               >
                 <el-radio-button v-for="s in topBarStyles" :key="s.value" :value="s.value">
                   {{ s.label }}
@@ -567,16 +565,16 @@ watch([visible, activeTab], ([open, tab]) => {
               </div>
               <div class="slider card-slider">
                 <el-slider
-                  :model-value="store.cardOpacity"
+                  :model-value="settings.cardOpacity"
                   :min="CARD_OPACITY_MIN"
                   :max="CARD_OPACITY_MAX"
                   :step="5"
                   :show-tooltip="false"
                   size="small"
-                  @input="(value: unknown) => (store.cardOpacity = Number(value))"
-                  @change="(value: unknown) => void store.setCardOpacity(Number(value))"
+                  @input="(value: unknown) => (settings.cardOpacity = Number(value))"
+                  @change="(value: unknown) => void settings.setCardOpacity(Number(value))"
                 />
-                <span class="slider__value mono">{{ store.cardOpacity }}%</span>
+                <span class="slider__value mono">{{ settings.cardOpacity }}%</span>
               </div>
             </div>
           </div>
@@ -603,7 +601,7 @@ watch([visible, activeTab], ([open, tab]) => {
               </div>
               <el-input-number
                 class="number-input"
-                :model-value="store.gridStep"
+                :model-value="settings.gridStep"
                 :min="GRID_STEP_MIN"
                 :max="GRID_STEP_MAX"
                 :step="1"
@@ -620,7 +618,7 @@ watch([visible, activeTab], ([open, tab]) => {
               </div>
               <el-input-number
                 class="number-input"
-                :model-value="store.cardGap"
+                :model-value="settings.cardGap"
                 :min="CARD_GAP_MIN"
                 :max="CARD_GAP_MAX"
                 :step="1"
@@ -663,10 +661,10 @@ watch([visible, activeTab], ([open, tab]) => {
             <div class="row">
               <div class="row__text">
                 <span class="row__label">全局快捷键</span>
-                <span class="row__hint">在任何窗口下唤起 / 隐藏 {{ store.settings.appName }}。</span>
+                <span class="row__hint">在任何窗口下唤起 / 隐藏 {{ settings.settings.appName }}。</span>
               </div>
               <el-switch
-                :model-value="store.settings.hotkeyEnabled"
+                :model-value="settings.settings.hotkeyEnabled"
                 size="small"
                 @update:model-value="(value: unknown) => save({ hotkeyEnabled: Boolean(value) })"
               />
@@ -677,7 +675,7 @@ watch([visible, activeTab], ([open, tab]) => {
                 class="hotkey"
                 :class="{ 'is-recording': recording }"
                 type="button"
-                :disabled="!store.settings.hotkeyEnabled"
+                :disabled="!settings.settings.hotkeyEnabled"
                 @click="startRecording"
                 @keydown="recording && captureHotkey($event)"
               >
@@ -699,7 +697,7 @@ watch([visible, activeTab], ([open, tab]) => {
                 </span>
               </div>
               <el-switch
-                :model-value="store.settings.launchAtLogin"
+                :model-value="settings.settings.launchAtLogin"
                 size="small"
                 :disabled="!isPackaged"
                 @update:model-value="(value: unknown) => save({ launchAtLogin: Boolean(value) })"
@@ -714,18 +712,18 @@ watch([visible, activeTab], ([open, tab]) => {
               <div class="row__text">
                 <span class="row__label">数据目录</span>
                 <span class="row__hint">
-                  {{ store.settings.appName }} 的东西都放这个目录里，换位置会把当前数据整体搬过去。
+                  {{ settings.settings.appName }} 的东西都放这个目录里，换位置会把当前数据整体搬过去。
                 </span>
               </div>
-              <p class="path mono truncate" :title="store.dataLocation?.dir">
-                {{ store.dataLocation?.dir ?? '读取中…' }}
+              <p class="path mono truncate" :title="environment.dataLocation?.dir">
+                {{ environment.dataLocation?.dir ?? '读取中…' }}
               </p>
               <div class="path__actions">
-                <el-button size="small" :icon="FolderOpened" @click="store.changeDataDir()">
+                <el-button size="small" :icon="FolderOpened" @click="environment.changeDataDir()">
                   更改目录
                 </el-button>
                 <span class="row__hint row__hint--tight">
-                  {{ store.dataLocation?.isDefault ? '当前是默认目录（应用数据目录）' : '数据文件：workbench-data.json' }}
+                  {{ environment.dataLocation?.isDefault ? '当前是默认目录（应用数据目录）' : '数据文件：workbench-data.json' }}
                 </span>
               </div>
             </div>
@@ -757,7 +755,7 @@ watch([visible, activeTab], ([open, tab]) => {
                   <span class="row__hint">关掉则改用系统里 git 配好的凭据。</span>
                 </div>
                 <el-switch
-                  :model-value="store.settings.useAccountForSync"
+                  :model-value="settings.settings.useAccountForSync"
                   @update:model-value="setUseAccountForSync"
                 />
               </div>
@@ -784,13 +782,13 @@ watch([visible, activeTab], ([open, tab]) => {
                   <span class="row__hint">连同外观与首页布局一起同步；只同步用量数字就关掉。</span>
                 </div>
                 <el-switch
-                  :model-value="store.settings.syncAppearance"
+                  :model-value="settings.settings.syncAppearance"
                   @update:model-value="setSyncAppearance"
                 />
               </div>
 
               <!-- 别台机器的外观：列表来自上一次同步取回的仓库快照，「应用」是唯一的采用入口 -->
-              <div v-if="store.settings.tokenSyncRepo" class="row row--stack">
+              <div v-if="settings.settings.tokenSyncRepo" class="row row--stack">
                 <div class="row__text">
                   <span class="row__label">从别的机器取外观</span>
                   <span class="row__hint">
@@ -799,7 +797,7 @@ watch([visible, activeTab], ([open, tab]) => {
                 </div>
 
                 <div class="devices">
-                  <div v-for="device in store.syncDevices" :key="device.id" class="device">
+                  <div v-for="device in settings.syncDevices" :key="device.id" class="device">
                     <span class="device__name truncate" :title="device.name">{{ device.name }}</span>
                     <span class="device__time">{{ deviceUpdatedText(device) }}</span>
                     <el-button
@@ -811,7 +809,7 @@ watch([visible, activeTab], ([open, tab]) => {
                     </el-button>
                   </div>
 
-                  <span v-if="!store.syncDevices.length" class="row__hint">
+                  <span v-if="!settings.syncDevices.length" class="row__hint">
                     还没有别的机器：在另一台机器上填同一个仓库并同步一次。
                   </span>
                 </div>

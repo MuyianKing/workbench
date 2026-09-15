@@ -15,13 +15,13 @@ import { computed, ref, watch } from 'vue'
 import { ElMessageBox } from 'element-plus'
 import { Loading, User } from '@element-plus/icons-vue'
 import { AUTH_PROVIDERS, AUTH_PROVIDER_HINTS, AUTH_PROVIDER_LABELS, accountLabel } from '@shared/auth'
-import { useProjectsStore } from '@/stores/projects'
+import { useAuthStore } from '@/stores/auth'
 import type { AuthProvider } from '@/types'
 
 const props = defineProps<{ modelValue: boolean }>()
 const emit = defineEmits<{ 'update:modelValue': [value: boolean] }>()
 
-const store = useProjectsStore()
+const auth = useAuthStore()
 
 const visible = computed({
   get: () => props.modelValue,
@@ -34,8 +34,8 @@ const manualUrl = ref('')
 const manualBusy = ref(false)
 const manualError = ref('')
 
-const account = computed(() => store.auth?.account ?? null)
-const configured = computed(() => store.auth?.configured !== false)
+const account = computed(() => auth.status?.account ?? null)
+const configured = computed(() => auth.status?.configured !== false)
 
 watch(visible, (open) => {
   if (!open) return
@@ -43,9 +43,9 @@ watch(visible, (open) => {
   manualOpen.value = false
   manualUrl.value = ''
   manualError.value = ''
-  void store.refreshAuth()
+  void auth.refreshAuth()
   // 头像在平台上换过之后，打开这个弹窗就能看到；失败时静默保留旧资料
-  void store.refreshAccount()
+  void auth.refreshAccount()
 })
 
 /**
@@ -54,11 +54,11 @@ watch(visible, (open) => {
  * 只由明确的动作触发 —— 去浏览器授权时顺手点一下界面，不该把正在进行的登录掐掉。
  */
 function onClosed(): void {
-  void store.cancelLogin()
+  void auth.cancelLogin()
 }
 
 function start(provider: AuthProvider): void {
-  void store.login(provider)
+  void auth.login(provider)
 }
 
 async function submitManual(): Promise<void> {
@@ -68,7 +68,7 @@ async function submitManual(): Promise<void> {
   manualBusy.value = true
   manualError.value = ''
   try {
-    const done = await store.submitLoginCallback(url)
+    const done = await auth.submitLoginCallback(url)
     if (done) {
       manualUrl.value = ''
       manualOpen.value = false
@@ -96,7 +96,7 @@ async function signOut(): Promise<void> {
     return
   }
 
-  await store.logout()
+  await auth.logout()
 }
 </script>
 
@@ -108,8 +108,8 @@ async function signOut(): Promise<void> {
     width="400"
     align-center
     append-to-body
-    :close-on-click-modal="!store.authPending"
-    :close-on-press-escape="!store.authPending"
+    :close-on-click-modal="!auth.pending"
+    :close-on-press-escape="!auth.pending"
     @closed="onClosed"
   >
     <!-- 用不了：把 Rust 侧给出的具体原因摆在最前面，别让人以为是网络问题。
@@ -117,7 +117,7 @@ async function signOut(): Promise<void> {
     <div v-if="!configured" class="block">
       <p class="block__title">账号登录当前不可用</p>
       <p class="block__text">
-        {{ store.auth?.configError || '当前构建未内置 OAuth 凭据。' }}
+        {{ auth.status?.configError || '当前构建未内置 OAuth 凭据。' }}
       </p>
       <p class="block__note">
         自己从源码构建的话，把 <code class="mono">src-tauri/oauth.example.json</code> 复制成
@@ -127,18 +127,19 @@ async function signOut(): Promise<void> {
     </div>
 
     <!-- 等待授权 -->
-    <div v-else-if="store.authPending" class="waiting">
-      <span class="waiting__badge"><el-icon class="waiting__spin"><Loading /></el-icon></span>
+    <div v-else-if="auth.pending" class="waiting">
+      <!-- 转圈用 Element Plus 图标自带的 .is-loading（不必自己写 keyframes） -->
+      <span class="waiting__badge"><el-icon class="is-loading"><Loading /></el-icon></span>
       <p class="waiting__title">已打开浏览器，请在那里完成授权</p>
       <p class="waiting__text">
-        正在等待 {{ AUTH_PROVIDER_LABELS[store.authPending] }} 授权完成，这里会自动更新。
+        正在等待 {{ AUTH_PROVIDER_LABELS[auth.pending] }} 授权完成，这里会自动更新。
       </p>
 
       <!-- 只在浏览器没能自动打开时才把地址露出来：正常情况下它只是一串噪音 -->
-      <template v-if="!store.authOpened">
+      <template v-if="!auth.opened">
         <p class="waiting__warn">浏览器没能自动打开，请手动访问：</p>
-        <a class="waiting__link" :href="store.authUrl" target="_blank" rel="noreferrer">
-          {{ store.authUrl }}
+        <a class="waiting__link" :href="auth.url" target="_blank" rel="noreferrer">
+          {{ auth.url }}
         </a>
       </template>
 
@@ -163,7 +164,7 @@ async function signOut(): Promise<void> {
         <el-button size="small" text @click="manualOpen = !manualOpen">
           {{ manualOpen ? '收起' : '没有自动跳回来？' }}
         </el-button>
-        <el-button size="small" @click="store.cancelLogin()">取消</el-button>
+        <el-button size="small" @click="auth.cancelLogin()">取消</el-button>
       </div>
     </div>
 
@@ -317,14 +318,6 @@ code.mono {
   border-radius: var(--r-md);
 }
 
-.waiting__spin {
-  animation: account-spin 1.1s linear infinite;
-}
-
-@keyframes account-spin {
-  to {
-    transform: rotate(360deg);
-  }
 }
 
 .waiting__title {

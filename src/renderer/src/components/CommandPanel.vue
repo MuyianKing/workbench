@@ -22,17 +22,21 @@ import {
 } from '@element-plus/icons-vue'
 import { commandStatusLabel, statusTone } from '@/status'
 import { useProjectsStore } from '@/stores/projects'
+import { useTerminalStore } from '@/stores/terminal'
+import { useCatalogStore } from '@/stores/catalog'
 import type { CommandEntry, ProjectStatus } from '@/types'
 
 const store = useProjectsStore()
+const terminal = useTerminalStore()
+const catalog = useCatalogStore()
 
-const commands = computed(() => store.commands)
+const commands = computed(() => catalog.commands)
 
 /** 正在检测运行状态的命令 id：按钮转圈，避免连点重复探测 */
 const detectingId = ref<string | null>(null)
 
 function statusOf(item: CommandEntry): ProjectStatus {
-  return store.runtimeOf(item.id).status
+  return terminal.runtimeOf(item.id).status
 }
 
 function isRunning(item: CommandEntry): boolean {
@@ -41,12 +45,12 @@ function isRunning(item: CommandEntry): boolean {
 
 /** 端口：优先取配置的那个，其次用从启动日志里认出来的 */
 function portOf(item: CommandEntry): number | undefined {
-  return item.port ?? store.runtimeOf(item.id).port
+  return item.port ?? terminal.runtimeOf(item.id).port
 }
 
 /** 悬停提示：卡上放不下的信息都在这儿 —— 状态、端口、以及按端口认出来时的那句说明 */
 function tipOf(item: CommandEntry): string {
-  const rt = store.runtimeOf(item.id)
+  const rt = terminal.runtimeOf(item.id)
   const state = commandStatusLabel(statusOf(item)) + (rt.external ? '（由 Workbench 之外启动）' : '')
   const port = portOf(item)
   return [item.name, state, port ? `端口 ${port}` : ''].filter(Boolean).join('\n')
@@ -59,19 +63,19 @@ function detectTip(item: CommandEntry): string {
 async function detect(item: CommandEntry): Promise<void> {
   detectingId.value = item.id
   try {
-    await store.detectCommand(item.id)
+    await catalog.detectCommand(item.id)
   } finally {
     detectingId.value = null
   }
 }
 
 function toggle(item: CommandEntry): void {
-  if (isRunning(item)) void store.stopCommand(item.id)
-  else void store.startCommand(item.id)
+  if (isRunning(item)) void catalog.stopCommand(item.id)
+  else void catalog.startCommand(item.id)
 }
 
 function onMore(item: CommandEntry, command: string): void {
-  if (command === 'edit') store.openCommandDialog(item.id)
+  if (command === 'edit') catalog.openCommandDialog(item.id)
   else if (command === 'remove') void remove(item)
 }
 
@@ -87,7 +91,7 @@ async function remove(item: CommandEntry): Promise<void> {
   } catch {
     return
   }
-  await store.removeCommand(item.id)
+  await catalog.removeCommand(item.id)
 }
 </script>
 
@@ -107,7 +111,7 @@ async function remove(item: CommandEntry): Promise<void> {
         class="commands__add"
         type="button"
         aria-label="添加命令"
-        @click="store.openCommandDialog()"
+        @click="catalog.openCommandDialog()"
       >
         <el-icon><Plus /></el-icon>
       </button>

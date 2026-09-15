@@ -50,7 +50,13 @@
   见 `oauth.rs`）、命令执行本身。除这三处不要新增网络出口，也不要往任何第三方服务发数据。
   登录是这条边界唯一一次放宽，加别的东西之前先想清楚能不能不做。
 - 技术栈：Rust 后端（Tauri ^2）+ Vue ^3.5.13 + TypeScript ^5.9.3；Element Plus ^2.8.8 + @element-plus/icons-vue ^2.3.1；Pinia ^4.0.3；markdown-it（**只服务工作日志正文的 markdown 渲染**，见第 5 节）。
-- Rust 侧依赖（`src-tauri/Cargo.toml`）：`tauri`（`tray-icon`）、`tauri-plugin-dialog` / `opener` / `single-instance`、`rusqlite`（`bundled`，读 ZCode 本地 sqlite）、`zstd`（DSH 会话多帧解压）、`serde` / `serde_json` / `uuid`。**不要**再引入其他 native / 运行时依赖。
+- Rust 侧依赖（`src-tauri/Cargo.toml`）：`tauri`（`tray-icon`）、`tauri-plugin-dialog` / `opener` / `single-instance`、
+  `rusqlite`（`bundled`，读 ZCode 本地 sqlite）、`zstd`（DSH 会话多帧解压）、`serde` / `serde_json` / `uuid`。
+  另有六个**本来就在编译图里**的（由 tauri / tao / wry / tauri-utils 引入，加进来不新增任何编译单元）：
+  `url` / `percent-encoding` / `form_urlencoded`（URL 与百分号编解码）、`walkdir`（递归列目录）、
+  `base64` / `sha2`（编码与摘要，替掉手写的实现）。**判断标准是不新增编译单元**，
+  而不是「不新增 crate 名」：要加新依赖前先 `cargo tree -e normal -i <crate>` 看一眼它是否已经在图里。
+  除此之外**不要**引入其他 native / 运行时依赖（`reqwest`、`git2`、`sysinfo` 这类会拉进整套栈的不行）。
 - 唯一需要用户预装的外部程序是 **git**，且只在 Token 同步（`sync.rs`）里用：直启 `git.exe`（`proc::run_direct`，
   **不要**经 `cmd /C` 起它，参数行会被二次解析），超时与失败一律收敛成给用户看的提示。别处不要新增这类外部依赖。
   账号登录那点 HTTPS **不走外部程序也不引 HTTP 库**：用系统自带的 WinHTTP（`http.rs`），代价是自己写一段 FFI。
@@ -87,6 +93,11 @@
   `bridge.ts`（invoke / 事件 / 未移植兜底 / `guard`）、`events.ts`（适配层内部广播）、`state.ts`（持久化状态与增删改）、`session.ts`（进程会话与事件翻译）、`scanner.ts` / `nvm.ts` / `token.ts` / `work-log.ts`（工作日志，懒加载整份文件）/ `system.ts` / `quick-launch.ts` / `auth.ts`（登录轮询与状态对账），全局类型声明在 `global.d.ts`。
 - 两端共用（类型、契约、纯逻辑）放 `src/shared/`；`shared/` 里禁止 import node、Rust 或渲染层代码。
 - 单测与被测模块同目录，命名 `*.test.ts`。路径别名：`@` → `src/renderer/src`，`@shared` → `src/shared`。
+- **跨组件复用的交互骨架放 `src/renderer/src/composables/`**（目前只有 `use-pointer-drag`：
+  拖拽的起手 / 跟手 / 收手 / Esc 取消 / 解绑）。它带单测（用最小的 window 桩，见
+  [use-pointer-drag.test.ts](src/renderer/src/composables/use-pointer-drag.test.ts)），
+  所以「系统取消指针要收手」这类边界一次改对、五处都受益 —— 别再往组件里手写
+  `addEventListener('pointermove', …)` 那一套。
 - 文档分工：[README.md](README.md) 只给概览、截图与上手命令（面向别人看个大概），
   [docs/features-and-architecture.md](docs/features-and-architecture.md) 是当前功能与架构事实的唯一真源，
   本文件只写约束，`docs/dev-notes/` 放动手方法与踩坑。
@@ -115,8 +126,16 @@
 - 工作日志里的项目标签用 **`el-tag` + `effect="dark"`**（实心色块 + 反白字），这是标签自己的主题，与应用明暗无关：预设色交给 `type`（EP 按 `--el-color-*` 取色），自定义色 EP 不认，就把 `--el-tag-bg-color` / `--el-tag-border-color` / `--el-tag-text-color` 这三个变量按算好的值写到行内，字色用 `inkOnAccent()`。**别为它再写一套自绘的浅底同色字标签**——「实心才分得清」是这一处的设计要求。统一走 [ProjectTag.vue](src/renderer/src/components/ProjectTag.vue)：调用方只管在自己的样式里限宽、给 `.el-tag__content` 加 `overflow: hidden` 出省略号，**行盒高度由它兜着** —— el-tag 的 `line-height` 是 1，调用方一加 overflow，g / p / y 的下伸部就被裁掉（表现成「英文显示不全、g 被遮挡」，踩过一次）。
 - 组件样式写 `<style scoped>`；需要穿透 Element Plus 或需全局共享的外壳（`.panel`、`.facts`、`.filter`、`.sort` 等）写进 [global.css](src/renderer/src/styles/global.css)。**判断依据是「有没有第二个页面在用它」**：外壳留在某个组件的 scoped 样式里，另一个页面只会吃到 global.css 里那半截规则，排版会静悄悄地失效。
 - UI 复用顺序：`components/` 既有业务组件 → Element Plus 原生组件 → 新增局部组件；图标统一用 `@element-plus/icons-vue`。
+- **Element Plus 是全量引入的**（`main.ts` 里 `app.use(ElementPlus)` + 整包 CSS），所有组件与 `v-loading`
+  指令都已经在包里 —— 手搓一个 EP 已有的控件省不下体积，只多一份要维护的样式。几处已经定下来的用法：
+  - 分段选择（天/周/月、时间范围、状态、编写/预览）统一用 **`el-segmented`**，外观在
+    [global.css](src/renderer/src/styles/global.css) 里统一调成「inset 底 + 白色药丸」；
+  - 弹窗里的字段一律 **`el-form` + `el-form-item`**（`label-position="top"`），字段排版与错误行由
+    global.css 的「弹窗表单」一节给，校验失败就地显示在字段下面，不再用 `ElMessage` 弹一句；
+  - 弹层一律 `el-dialog` / `el-drawer`（`append-to-body`），**不要自己写遮罩**（见本节最后一条）；
+  - 图标按钮与关键操作用 `el-tooltip`，纯截断文字的全名用原生 `title`。
 - 弹层遮罩由 `global.css` 的 `.el-overlay` 统一处理（从标题栏下沿开始、不压暗背景），不要在单个弹窗里另写遮罩。
-- 明暗切换经 `theme-transition.ts` 的 View Transitions 驱动，`<html>` 上同时维护 `data-theme` 与 `.dark` 类；主题切换的守卫用 [stores/projects.ts](src/renderer/src/stores/projects.ts) 内的 `appliedTheme` 变量而非读 DOM（原因见该文件里的注释）。
+- 明暗切换经 `theme-transition.ts` 的 View Transitions 驱动，`<html>` 上同时维护 `data-theme` 与 `.dark` 类；主题切换的守卫用 [stores/settings.ts](src/renderer/src/stores/settings.ts) 内的 `appliedTheme` 变量而非读 DOM（原因见该文件里的注释）。
 - 拖动窗口要用 `data-tauri-drag-region`（WebView2 不认 `-webkit-app-region`），见 [TitleBar.vue](src/renderer/src/components/TitleBar.vue)：
   裸属性（无值 / `"true"`）只认「直接按在带属性那个元素上」，子元素要自己在模板上再标一遍，`"deep"` 才是整棵子树。
   框架注入的脚本在 mousedown 里按 `e.detail` 分流：1 走 `start_dragging`、2 走 `internal_toggle_maximize`（源码 `tauri/src/window/scripts/drag.js`），
@@ -131,7 +150,15 @@
 - **唯一的例外是工作区背景图**：它不经后端解码回传，而是让 webview 按文件直接加载（asset 协议），URL 由适配层的 `assetUrl()` 转出（见第 4 节）。读取权限**一律在 Rust 侧按单个文件授予**（[commands.rs](src-tauri/src/commands.rs) 的 `allow_background`），`tauri.conf.json` 里 `assetProtocol.scope` 必须保持为空 —— 往里写 `**` 等于把整块磁盘敞开给渲染层读。
 - 后端只负责「取原始数据 / 落盘 / 调系统能力」；合并、排序、修剪、状态机、命令构造这些业务语义留在 TS 适配层。好处是绝大多数改动仍是 Vite 的秒级热更新，不必重编 Rust——这也是选它而不是把逻辑写进 Rust 的原因。
 - API 约定：判 `result.ok`，失败取 `result.error` 提示；`checkPort`、`listProjects`、`getNvmStatus`、`listWallpapers`、`checkPackageManagers` 等少数通道按约定直接返回具体结构而非 `Result`。
-- 状态管理：跨组件状态集中在 [stores/projects.ts](src/renderer/src/stores/projects.ts) 的 `useProjectsStore`，组件不另建全局状态、不用事件总线传业务数据。
+- 状态管理：跨组件状态按领域分在 [stores/](src/renderer/src/stores/) 下的六个 store 里（项目 / 终端 /
+  设置 / 环境 / 目录 / 账号，分工见 [docs/features-and-architecture.md](docs/features-and-architecture.md) 的目录一节），
+  组件不另建全局状态、不用事件总线传业务数据。
+- **谁该进 store，判据是「跨页共享的状态」**：多个页面读写的状态（项目、终端、设置、环境探测结果）
+  必须进 store 并只经 action 变更；只在单页生命周期内、用完即弃的数据与动作（工作日志那一页的
+  读写入参、Token 卡片的取数节流）可以直接调 `window.workbench`，不必为它造一个 store 切片。
+- **store 里不要直接 import element-plus**：提示与确认框一律经 [notify.ts](src/renderer/src/notify.ts)
+  的 `notifySuccess` / `notifyError` / `confirmAction`。这样这些 action 才可能被单测覆盖
+  （测试里 `vi.mock('@/notify')` 即可记下「说了什么」），也让「状态层」与「怎么提示」分开演进。
 - 持久化在 Rust 侧：走 `store.rs`（300ms 防抖 + 临时文件 rename + 退出前同步落盘）。数据文件 `workbench-data.json`（项目 / 快捷启动 / 命令，以及与本机绑定的设置）、`theme.json`（**外观 + 首页布局**）、`token-usage.json`（Token 按天快照）、`work-log.json`（工作日志，**只在本机**），目录指针 `data-location.json` 固定在 `%APPDATA%/Workbench/`。
 - **工作日志不进同步仓库**（[work-log.ts](src/shared/work-log.ts)）：它是唯一一份既不写在 `workbench-data.json` 里、也不随同步走的用户数据 —— 工作内容是最贴近个人记录的东西，多机合并也不成立（不像用量数字那样可相加）。别为了「顺手统一」把它塞进同步或主数据文件；数据目录迁移时它跟着搬（`paths.rs` 的 `migrate_data_dir`），因为项目列表、快捷启动同样属于「这台机器上的数据」。
 - 工作日志正文按 markdown 渲染，解析用 **markdown-it**（[markdown.ts](src/shared/markdown.ts)，唯一新增的前端运行时依赖）：`html: false` 转义原文里的标签、`linkify` 认裸地址、`breaks` 让单个换行就是 `<br>`；链接一律 `target="_blank"`，且点击在 [MarkdownView.vue](src/renderer/src/components/MarkdownView.vue) 里被接管交给 `openExternal` —— 界面是个 WebView，点 `<a>` 默认会把应用自己导航走。别再自己手写解析器或引第二个 markdown 库。

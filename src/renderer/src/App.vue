@@ -17,8 +17,10 @@ import QuickAppDialog from '@/components/QuickAppDialog.vue'
 import CommandDialog from '@/components/CommandDialog.vue'
 import QuitConfirmDialog from '@/components/QuitConfirmDialog.vue'
 import { useProjectsStore } from '@/stores/projects'
+import { useSettingsStore } from '@/stores/settings'
 
 const store = useProjectsStore()
+const settings = useSettingsStore()
 
 /**
  * 页面清单：id 在 shared/views.ts 里登记，这里给出对应的组件。
@@ -47,21 +49,21 @@ const currentView = computed(() => VIEWS[store.activeView])
  */
 const appStyle = computed(() => {
   const style: Record<string, string> = {
-    '--ws-image': store.backgroundImage ? `url("${store.backgroundImage}")` : 'none',
+    '--ws-image': settings.backgroundImage ? `url("${settings.backgroundImage}")` : 'none',
     // 图片越浓，蒙版越淡
-    '--ws-veil-alpha': String(backgroundVeilAlpha(store.backgroundOpacity)),
+    '--ws-veil-alpha': String(backgroundVeilAlpha(settings.backgroundOpacity)),
     // 卡片底色浓度：面板（.panel）与项目卡拼 rgba 用，跟手渲染靠 store 里的 cardOpacity
-    '--card-alpha': String(cardSurfaceAlpha(store.cardOpacity)),
+    '--card-alpha': String(cardSurfaceAlpha(settings.cardOpacity)),
     /**
      * 卡片间距（px）：栏间、栏内卡片之间、项目页网格之间共用这一个值，
      * 导航栏这张卡片的四周留白也取它 —— 所以定义在 .app 上，全窗口一处来源。
      */
-    '--card-gap': `${store.cardGap}px`
+    '--card-gap': `${settings.cardGap}px`
   }
 
   // 蒙版底色：用户在设置里指定了就用它（图片「渐淡」进这个颜色），没指定则留空，
   // 交给 tokens.css 里按主题定义的那一份
-  const veil = veilRgbTriplet(store.settings.workspaceBackgroundVeil)
+  const veil = veilRgbTriplet(settings.settings.workspaceBackgroundVeil)
   if (veil) style['--ws-veil-rgb'] = veil
 
   return style
@@ -73,7 +75,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="app" :class="`top-${store.settings.topBarStyle}`" :style="appStyle">
+  <div class="app" :class="`top-${settings.settings.topBarStyle}`" :style="appStyle">
     <!--
       顶部两条栏包成一块、通宽：毛玻璃要整块画一次，逐行各画一遍会在行与行之间露出接缝。
       导航栏在它下面才开始，所以也进不了这条带子（进去就把玻璃块切成两块了）。

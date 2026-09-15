@@ -9,8 +9,10 @@
  */
 import { Refresh, Select } from '@element-plus/icons-vue'
 import { useProjectsStore } from '@/stores/projects'
+import { useSettingsStore } from '@/stores/settings'
 
 const store = useProjectsStore()
+const settings = useSettingsStore()
 </script>
 
 <template>
@@ -19,11 +21,11 @@ const store = useProjectsStore()
     <span class="layoutbar__hint">
       拖动卡片可在三栏之间移动、调整栏内顺序；卡片右上角切换「固定高度 / 自适应」，
       固定高度可拖下沿改高；拖两栏之间的竖线改栏宽 · 步进
-      <b class="mono">{{ store.gridStep }}px</b> · 卡片间距
-      <b class="mono">{{ store.cardGap }}px</b>
+      <b class="mono">{{ settings.gridStep }}px</b> · 卡片间距
+      <b class="mono">{{ settings.cardGap }}px</b>
     </span>
     <div class="layoutbar__tools">
-      <el-button size="small" :icon="Refresh" @click="store.resetLayout()">恢复默认</el-button>
+      <el-button size="small" :icon="Refresh" @click="settings.resetLayout()">恢复默认</el-button>
       <el-button
         size="small"
         type="primary"

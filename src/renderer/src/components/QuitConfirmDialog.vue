@@ -8,11 +8,13 @@
  * 右上角关闭按钮与 Esc 都是「取消」：关掉弹窗、什么都不做，应用继续运行。
  */
 import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
-import { Close, WarningFilled } from '@element-plus/icons-vue'
+import { WarningFilled } from '@element-plus/icons-vue'
 import type { QuitChoice } from '@/types'
 
 const visible = ref(false)
 const count = ref(0)
+/** 这一次退出确认是否已经回过后端；Esc 关窗与点选项两条路都要恰好回一次 */
+let answered = false
 const primaryButton = ref<HTMLButtonElement | null>(null)
 
 let unsubscribe: (() => void) | undefined
@@ -20,6 +22,7 @@ let unsubscribe: (() => void) | undefined
 onMounted(() => {
   unsubscribe = window.workbench.onQuitConfirm((payload) => {
     count.value = payload.count
+    answered = false
     visible.value = true
     void nextTick(() => primaryButton.value?.focus())
   })
@@ -27,133 +30,76 @@ onMounted(() => {
 
 onBeforeUnmount(() => unsubscribe?.())
 
+/**
+ * 选一个。Esc 与右上角关闭按钮都是「取消」—— 两者由 el-dialog 负责触发
+ * （Esc 关掉它，`@closed` 落到下面那个处理函数里回一个 cancel）。
+ */
 function choose(choice: QuitChoice): void {
   if (!visible.value) return
+  answered = true
   visible.value = false
   window.workbench.respondQuitConfirm(choice)
 }
 
-/** Esc = 取消，与右上角关闭按钮一致 */
-function onKeydown(event: KeyboardEvent): void {
-  if (event.key !== 'Escape') return
-  event.preventDefault()
-  choose('cancel')
+/** 关掉弹窗而没选过（Esc / 点右上角关闭）：按「取消」处理，应用继续运行 */
+function onClosed(): void {
+  if (answered) return
+  answered = true
+  window.workbench.respondQuitConfirm('cancel')
 }
 </script>
 
 <template>
-  <Teleport to="body">
-    <Transition name="quit">
-      <div v-if="visible" class="quit" @keydown="onKeydown">
-        <div class="quit__scrim" />
-        <div
-          class="quit__card"
-          role="alertdialog"
-          aria-modal="true"
-          aria-labelledby="quit-title"
-          aria-describedby="quit-desc"
-        >
-          <button type="button" class="quit__close" aria-label="关闭" @click="choose('cancel')">
-            <el-icon><Close /></el-icon>
-          </button>
-
-          <div class="quit__head">
-            <span class="quit__badge"><el-icon><WarningFilled /></el-icon></span>
-            <div class="quit__head-text">
-              <h2 id="quit-title" class="quit__title">仍有进程在运行</h2>
-              <p class="quit__subtitle">
-                还有 <b>{{ count }}</b> 个进程正在运行
-              </p>
-            </div>
-          </div>
-
-          <p id="quit-desc" class="quit__desc">选择先结束它们，还是让它们继续留在后台。</p>
-
-          <div class="quit__options">
-            <button
-              ref="primaryButton"
-              type="button"
-              class="opt opt--primary"
-              @click="choose('stop')"
-            >
-              <span class="opt__body">
-                <span class="opt__label">结束全部进程并退出</span>
-                <span class="opt__hint">结束进程树，未保存的命令输出将丢失</span>
-              </span>
-            </button>
-
-            <button type="button" class="opt" @click="choose('direct')">
-              <span class="opt__body">
-                <span class="opt__label">直接退出</span>
-                <span class="opt__hint">保留后台运行，下次启动时自动检测并清理</span>
-              </span>
-            </button>
-          </div>
-        </div>
+  <!--
+    用 el-dialog 而不是自绘遮罩：遮罩、焦点陷阱、Esc、滚动锁都由它统一处理，
+    与设置 / 添加项目那些弹窗走同一条路（应用里只有这一处曾经自带一层压暗的遮罩，
+    而别处的遮罩是「从标题栏下沿开始、不压暗背景」—— 见 global.css 的弹层一节）。
+    头部与两个选项仍然自绘：那块「警告徽标 + 两个带说明的选项卡」的版式与它的内容绑得紧，
+    el-message-box 装不下。
+  -->
+  <el-dialog
+    v-model="visible"
+    width="440"
+    align-center
+    append-to-body
+    :show-close="true"
+    :close-on-click-modal="false"
+    :close-on-press-escape="true"
+    :title="null"
+    aria-label="仍有进程在运行"
+    @closed="onClosed"
+  >
+    <div class="quit__head">
+      <span class="quit__badge"><el-icon><WarningFilled /></el-icon></span>
+      <div class="quit__head-text">
+        <h2 id="quit-title" class="quit__title">仍有进程在运行</h2>
+        <p class="quit__subtitle">
+          还有 <b>{{ count }}</b> 个进程正在运行
+        </p>
       </div>
-    </Transition>
-  </Teleport>
+    </div>
+
+    <p id="quit-desc" class="quit__desc">选择先结束它们，还是让它们继续留在后台。</p>
+
+    <div class="quit__options">
+      <button ref="primaryButton" type="button" class="opt opt--primary" @click="choose('stop')">
+        <span class="opt__body">
+          <span class="opt__label">结束全部进程并退出</span>
+          <span class="opt__hint">结束进程树，未保存的命令输出将丢失</span>
+        </span>
+      </button>
+
+      <button type="button" class="opt" @click="choose('direct')">
+        <span class="opt__body">
+          <span class="opt__label">直接退出</span>
+          <span class="opt__hint">保留后台运行，下次启动时自动检测并清理</span>
+        </span>
+      </button>
+    </div>
+  </el-dialog>
 </template>
 
 <style scoped>
-.quit {
-  position: fixed;
-  /* 让开右上角的窗口按钮（自绘在 TitleBar.vue 里），与对话框一致 */
-  inset: var(--h-titlebar) 0 0 0;
-  z-index: 4000;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: var(--sp-6);
-}
-
-.quit__scrim {
-  position: absolute;
-  inset: 0;
-  background: rgba(17, 21, 27, 0.28);
-}
-
-.quit__card {
-  position: relative;
-  width: min(440px, 100%);
-  padding: var(--sp-5);
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: var(--r-lg);
-  box-shadow: var(--shadow-pop);
-}
-
-.quit__close {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  padding: 0;
-  font-size: 14px;
-  color: var(--ink-3);
-  cursor: pointer;
-  background: transparent;
-  border: 0;
-  border-radius: var(--r-sm);
-  transition:
-    color 0.15s ease,
-    background 0.15s ease;
-}
-
-.quit__close:hover {
-  color: var(--ink);
-  background: var(--bg-subtle);
-}
-
-.quit__close:focus-visible {
-  outline: 2px solid var(--st-run);
-  outline-offset: 1px;
-}
-
 .quit__head {
   display: flex;
   align-items: center;
@@ -261,25 +207,5 @@ function onKeydown(event: KeyboardEvent): void {
 .opt__hint {
   font-size: var(--fs-micro);
   color: var(--ink-3);
-}
-
-.quit-enter-active,
-.quit-leave-active {
-  transition: opacity 0.16s ease;
-}
-
-.quit-enter-active .quit__card,
-.quit-leave-active .quit__card {
-  transition: transform 0.18s ease;
-}
-
-.quit-enter-from,
-.quit-leave-to {
-  opacity: 0;
-}
-
-.quit-enter-from .quit__card,
-.quit-leave-to .quit__card {
-  transform: translateY(6px) scale(0.98);
 }
 </style>

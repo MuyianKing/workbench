@@ -46,6 +46,8 @@ const loading = ref(true)
 /** 读盘失败与「一条都还没写过」是两回事，不能都显示成空列表 */
 const loadError = ref('')
 const range = ref<WorkRange>('today')
+/** 时间范围的选项：Element Plus 的分段控件要 { label, value }，标签表在 shared 里 */
+const rangeOptions = WORK_RANGES.map((value) => ({ label: WORK_RANGE_LABELS[value], value }))
 /** 排序维度：按时间（天为轴）或按项目（项目为轴） */
 const sort = ref<WorkSort>('time')
 /** 只看待办：把已完成的筛掉（默认关） */
@@ -262,20 +264,12 @@ async function remove(entry: WorkLogEntry): Promise<void> {
     <!-- 工具条与项目页那条同款（底色由 global.css 按顶部样式给），搜索栏以下的第一条 -->
     <div class="filter">
       <div class="filter__head">
-        <div class="ranges" role="tablist" aria-label="时间范围">
-          <button
-            v-for="item in WORK_RANGES"
-            :key="item"
-            type="button"
-            class="tab"
-            :class="{ 'is-active': range === item }"
-            role="tab"
-            :aria-selected="range === item"
-            @click="range = item"
-          >
-            {{ WORK_RANGE_LABELS[item] }}
-          </button>
-        </div>
+        <el-segmented
+          v-model="range"
+          class="ranges"
+          :options="rangeOptions"
+          aria-label="时间范围"
+        />
 
         <!-- 只看待办：一枚筛选标签，带当前范围里的待办条数（与项目页那些筛选标签同一副样子） -->
         <button
@@ -419,34 +413,9 @@ async function remove(entry: WorkLogEntry): Promise<void> {
   min-width: 0;
 }
 
-/* 范围切换：分段控件的样式（与写日志弹窗里的「编写 / 预览」同一副） */
-.ranges {
-  display: flex;
-  gap: 2px;
-  padding: 2px;
-  border-radius: var(--r-pill);
-  background: var(--bg-inset);
-}
-
-.tab {
-  padding: 2px 12px;
-  border: 0;
-  border-radius: var(--r-pill);
-  background: transparent;
-  font-size: var(--fs-meta);
-  color: var(--ink-3);
-  cursor: pointer;
-  transition: background-color 0.15s ease, color 0.15s ease;
-}
-
-.tab:hover {
-  color: var(--ink);
-}
-
-.tab.is-active {
-  background: var(--bg-surface);
-  color: var(--ink);
-  font-weight: 500;
+/* 范围切换用 el-segmented：外壳（底色 / 圆角 / 选中态）在 global.css，这里只补不显形的一行 */
+.ranges.el-segmented {
+  flex-shrink: 0;
 }
 
 /* 工具带右侧：排序下拉 + 「记一条」。条数不在这里重复一遍，页脚已经有「共 N 天 / M 条」 */
@@ -468,27 +437,22 @@ async function remove(entry: WorkLogEntry): Promise<void> {
   padding: var(--card-gap, 10px);
 }
 
+
+/* 工作页的空态比别处「重」一档（整页居中，等日志的时间更长），
+   基础样式在 global.css，这里只留与别处不同的高度与字号 */
 .empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: var(--sp-2);
-  flex: 1;
   min-height: 200px;
-  text-align: center;
   font-size: var(--fs-body);
-  color: var(--ink-2);
+}
+
+.empty__hint {
+  font-size: var(--fs-meta);
 }
 
 .empty p {
   margin: 0;
 }
 
-.empty__hint {
-  font-size: var(--fs-meta);
-  color: var(--ink-3);
-}
 
 .day {
   display: flex;

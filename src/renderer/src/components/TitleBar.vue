@@ -17,8 +17,10 @@
  */
 import { onMounted, onUnmounted, ref } from 'vue'
 import { useProjectsStore } from '@/stores/projects'
+import { useSettingsStore } from '@/stores/settings'
 
 const store = useProjectsStore()
+const settings = useSettingsStore()
 /** 模板里拿不到 window，先把白名单 API 取出来给模板用 */
 const api = window.workbench
 
@@ -42,7 +44,7 @@ onUnmounted(() => unsubscribe?.())
 <template>
   <header class="titlebar" data-tauri-drag-region>
     <span class="titlebar__mark mono" aria-hidden="true" data-tauri-drag-region>&rsaquo;_</span>
-    <span class="titlebar__name mono" data-tauri-drag-region>{{ store.settings.appName }}</span>
+    <span class="titlebar__name mono" data-tauri-drag-region>{{ settings.settings.appName }}</span>
 
     <div class="wctl">
       <button
