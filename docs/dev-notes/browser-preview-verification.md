@@ -64,8 +64,10 @@ vite 配置，把 `root` 指到工作区内的一个小目录，只挂那一个�
 
 ```ts
 // .preview/vite.harness.config.ts
-root: resolve(__dirname, 'harness'),          // 工作区里的 index.html + main.ts
-resolve: { alias: { '@': '…/src/renderer/src', '@shared': '…/src/shared' } }
+root: resolve(__dirname, 'harness'),                       // 工作区里的 index.html + main.ts
+publicDir: resolve(__dirname, '../src/renderer/public'),   // 见下面那条：Vditor 要靠它
+resolve: { alias: { '@': '…/src/renderer/src', '@shared': '…/src/shared' } },
+plugins: [vue(), vditorAssets()]                           // sync-vditor-assets.mjs 导出的那个插件
 ```
 
 `main.ts` 里照旧 import `element-plus/dist/index.css`、`theme-chalk/dark/css-vars.css`、
@@ -75,6 +77,11 @@ resolve: { alias: { '@': '…/src/renderer/src', '@shared': '…/src/shared' } }
 暗色靠 `document.documentElement.dataset.theme` 加 `.dark` 类切。
 
 这样一次 build 一两秒，也不用碰仓库里的任何文件。
+
+**挂到跟 Vditor 有关的组件时，`publicDir` 与 `vditorAssets()` 两样都要**：编辑器本体打在 JS 里，
+但图标 sprite、语言包、lute 是运行时按 `cdn` 取的，它们住在 `src/renderer/public/vditor/dist/`
+（由那个插件在 dev / build 前同步）。`root` 指到工作区之后 `public/` 默认变成工作区自己的目录，
+少了这两样会一路 404 —— 症状是「编辑器起不来 / 图标全空」，别顺着组件代码找。
 
 ### 三、Rust 侧逻辑走 `cargo test`
 
@@ -116,6 +123,39 @@ WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="--remote-debugging-port=9222" npm run dev
 - `Runtime.evaluate` 里的字符串常量小心被 shell 吃转义：Windows 路径用正斜杠最省事
   （项目里的路径工具本来就会归一方向），`\\` 在两层引号之后很可能变成别的字符，
   那时量到的「相对路径没生效」其实是路径串本身就不是你想的那样
+- **要动设置又不想污染自己的配置，就把整个 `APPDATA` 指到临时目录再起应用**：
+  `APPDATA='C:\Users\...\Temp\wb-smoke' npm run dev`。数据目录是 `%APPDATA%\Workbench`
+  （**不是 `%APPDATA%` 本身**），所以这一下连项目列表、设置、笔记文件夹一起隔离了；
+  想从某个状态起步（例如「已经选好笔记文件夹」）就先把 `workbench-data.json` 写进去再启动 ——
+  比在页面上找入口省事，也不用像上一节那样记着「测完还原」。收尾时连临时目录一起删掉。
+- **验证文件系统那一条链（笔记就是磁盘上的 `.md`）只能在真应用里做**：浏览器预览没有后端，
+  扫盘 / 写盘全走不了。值得按这个顺序点一遍：进页面看树 → 点一篇看正文 → 打字看盘上文件变了没有 →
+  拖动看文件真的换了目录 → 新建 / 改名 / 删除。这套「读一遍、写一遍、挪一遍」跑通，
+  才谈得上这条通道是活的。
+- **`el-tree` 的拖动可以用合成事件驱动，不必走 CDP 的拖放**：`new DataTransfer()` 造一个
+  `dataTransfer`，在源节点的 `.el-tree-node` 上 `dragstart`、在目标节点上 `dragover`
+  （`clientY` 取目标行中线）、再在源节点上 `dragend` —— 真挪数据发生在 **`dragend`** 里
+  （不是 `drop`），所以最后一下别漏。`data-key` 就是 `node-key`，按它选节点最稳。
+  `<script setup>` 里 `document.querySelector('#app').__vue_app__` 那套照样能拿到 store，
+  两边的验证互相补：DOM 事件验交互，store 验状态。
+- **粘贴图片同样能合成**，不用真去动系统剪切板：造一个 `File` 放进 `DataTransfer`，
+  再派发 `new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true })` ——
+  目标元素是有 `contenteditable="true"` 的那个（Vditor 的 paste 监听挂在它上面，
+  而且它会先判 `contenteditable` 是不是 true，挂错了什么都不发生）。用 `atob` 拼几十字节的假 PNG 就够：
+  这条链上没人真去解码那张图。上传要跑 git clone / commit / push，等 5~10 秒再看结果。
+- **要验「上传到 git」这类功能，把远端换成临时裸仓库**（`git init --bare`），
+  再把设置里的仓库地址指过去：不碰网络、不需要凭据，推没推上去直接 `git --git-dir=<裸仓库> ls-tree` 看。
+  注意裸仓库的 HEAD 默认指向 `master`，而我们推的是 `main` —— `git log` 会报「还没有提交」，
+  按分支名去查才对。
+- **「图裂了」先分清是哪一层的问题**，三层用三种办法量，别猜：
+  1. 地址本身能不能取到 → 在命令行 `curl -o /dev/null -w "%{http_code}" -L <url>`；
+  2. **WebView 能不能取到** → 在页面上量 `img.complete` 与 `img.naturalWidth`
+     （`complete: true, naturalWidth: 0` 就是加载失败，比看截图准）；
+  3. 两者不一致就逐个 http 头做对照（`curl -H …` 一次只加一个）。
+  踩过的例子：Gitee 的 `/raw/` 防盗链只认 `Referer` —— 不带、或者是 gitee 的域名才 200，
+  带 `Referer: http://localhost:5274/` 直接 403（UA 与 `Sec-Fetch-*` 都不影响），
+  而 WebView 一定带 Referer，于是 curl 全绿、界面全裂。顺手的修法是页面级
+  `<meta name="referrer" content="no-referrer">`（见 `src/renderer/index.html`）。
 
 ## 无头截图配方
 
@@ -157,6 +197,16 @@ writeFileSync(outPng, Buffer.from(shot.result.data, 'base64'))
   `undefined`，你会对着错误的结论调半天
 - **`:hover` 必须用 `Input.dispatchMouseEvent` 真的移指针**，只改 DOM 不算数
 - **`Page.captureScreenshot` 支持 `clip`**，配 `scale: 4` 能把一个按钮放大到看清配色
+- **面板里（iab）交互验一次就好，`reload()` 之后别再点**：重载过的标签页上，
+  `locator.click()` 会一直卡在 actionability 超时（"waiting for locator … >> nth=0"），
+  `tab.cua.click()` 也不会产生任何页面事件（注入一个捕获阶段的监听，`hits` 是空的）——
+  而同一个页面**重开一个标签页**后点一次就正常。所以「点一下看看会怎样」这类验证放在新开的标签页上做；
+  已经 reload 过的页面就只用来量数值（`evaluate` 一直好使）
+- **量间距用 `getBoundingClientRect` + `getComputedStyle`，别肉眼估截图里的像素**：
+  「这里空了一大块」多半能直接归因到某个盒子的 `margin` / 一行隐形的行盒。
+  定位到具体元素（连同它的伪元素：`getComputedStyle(el, '::before').content`）之后，
+  先注入一条探针 CSS 改一个变量、再量一次数字，比来回改组件重编快得多 ——
+  本次就是靠它认出 Vditor 收起态代码块那两行空档来自「零尺寸 inline 标记撑起的行盒」
 - **结束时要杀整个进程组**（`process.kill(-child.pid)`，配合 `detached: true`），
   否则无头 Edge 会残留
 
@@ -275,6 +325,11 @@ const lum = (rgb) => rgb.map((c) => {
 - **store 的动作是一参调用，桩别按 `{ patch }` 解包**：`window.workbench.updateSettings(patch)`
   收的就是补丁本身（`{ patch }` 那层是适配层调 Tauri 命令时的写法）。桩里写成 `args?.patch`
   会静默返回未修改的值，看起来就是「点了没反应」。
+- **`updateSettings` / `updateThemeConfig` 的桩要回一份新对象**：真适配层给的是拷贝，
+  桩里若 `Object.assign(settings, patch)` 之后把同一个对象回出去，store 那边
+  `settings.value = data` 等于赋了同一个引用 —— 依赖它的 computed / watch 全都不重算，
+  表现成「改是改了（直接读 store 能读到新值），界面纹丝不动」。
+  回 `{ ...settings }` 就好。这类「数据对了、界面没动」先怀疑桩，别改组件。
 - **设置弹窗的滚动容器是每个 `.pane`，不是 `.settings__body`**：正文（`.settings__body`）只是过道，
   各 pane 自己滚并各留各的位置（见 SettingsDialog 里的注释）。要滚到「账号 / Token 同步」那几块，
   得挑当前可见的那个 pane 滚（`getComputedStyle(p).display !== 'none'`），
@@ -307,3 +362,14 @@ const lum = (rgb) => rgb.map((c) => {
   截图只能证明「某一帧长这样」，判定方向时很容易看成自己希望的那个答案。
   这条也是查「一条 transition 挂多个属性」的顺手工具：同一个元素上高度和位移同时走时，
   观感会被盖成另一个方向（踩过一次），把其中一个挪到 `transition: … 0.16s ease 0.18s` 的延迟里分成两拍就好了。
+- **驱动脚本的结果要 `appendFileSync` 写文件，不要 `console.log` 走管道**：排错时最容易顺手敲成
+  `node .preview/drive.mjs | tail -40`，而 `tail` 会把输出攒到进程结束才吐 —— 脚本一旦中途挂住（见下一条），
+  你会对着一个空日志查半天，还以为脚本没跑。写文件则每一步都落得下。
+- **开着 WebSocket 的 node 脚本不会自己结束**：CDP 的 `WebSocket` 会让事件循环一直有活干，
+  于是出错退出时后台任务永远停在「运行中」。收尾放在 `finally` 里：关 ws + `process.kill(-child.pid)` 杀无头浏览器，
+  最后 `process.exit()` 兜底。CDP 自己也有超时上限，进程组不杀干净会留一堆无头 Edge 在后台。
+- **右键菜单用 `Input.dispatchMouseEvent` 的 `mousePressed` + `mouseReleased`（`button: 'right'`）开**：
+  走的是真指针，`contextmenu` 会照常发出，也顺带把 Chromium 那套「右键落点」的默认行为带上了 ——
+  比在页面里合成一个 `contextmenu` 事件更接近用户按下去的样子。菜单项的点击用 `Runtime.evaluate` 里
+  直接 `.click()` 就够（Vditor 那些处理函数不看 `isTrusted`）；要展开子菜单则必须真的移指针
+  （子菜单是 CSS `:hover` 开的），`mouseMoved` 之后另发一次求值再读。

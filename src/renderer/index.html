@@ -2,6 +2,19 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
+    <!--
+      文档级 Referrer-Policy：对外请求一律不带 Referer。
+
+      这一条是给**笔记里的图片**用的：Gitee 的 `/raw/` 有防盗链 —— Referer 不是 gitee.com 时
+      直接 403（实测：不带 Referer 报 200，带 `Referer: http://localhost:5274/` 报 403；
+      与 UA、Sec-Fetch-* 无关）。而 WebView 里 `<img>` 一定会带上 Referer，
+      于是所有 Gitee 图都裂在那儿 —— 传上去了、地址也对，就是显示不出来。
+      顺手也是个隐私改进：点开一篇引用了外链图片的笔记，不会再把自己的来源地址送给对方。
+
+      写在 <head> 里、早于任何子资源加载：它只管**本文件的对外请求**，
+      不碰 Rust 侧那些请求（OAuth、git 本来也不发 Referer）。
+    -->
+    <meta name="referrer" content="no-referrer" />
     <title>Workbench</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   </head>

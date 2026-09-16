@@ -6,6 +6,7 @@ import { TERMINAL_HEIGHT_DEFAULT } from './terminal-height'
 import { TERMINAL_BUTTON_TOP_DEFAULT } from './terminal-dock'
 import { CARD_OPACITY_DEFAULT } from './card-opacity'
 import { BACKGROUND_OPACITY_DEFAULT } from './workspace-background'
+import { NOTE_IMAGE_DEFAULT_DIR } from './note-image'
 import { builtinReference } from './wallpaper'
 import type { AppearanceSettingKey } from './appearance'
 import type { SyncDeviceInfo } from './sync-config'
@@ -15,7 +16,16 @@ import type { ProjectColor } from './project-color'
 import type { ThemeConfig } from './theme'
 import type { TokenUsageResult } from './token-usage'
 import type { ViewId } from './views'
-import type { NoteCreated, NoteInput, NoteNode } from './note'
+import type { NoteChange, NoteCreateInput, NoteNode, NoteSyncInput, NoteSyncSummary } from './note'
+import type {
+  NoteImageDeleteInput,
+  NoteImageDeleted,
+  NoteImageList,
+  NoteImageListInput,
+  NoteImageUploaded,
+  NoteImageUploadInput,
+  NoteTextScan
+} from './note-image'
 import type { WorkLogEntry, WorkLogInput, WorkLogPatch } from './work-log'
 
 /** 活跃度计数、首页布局、同步的其它设备也走这里导出，渲染层统一从 @/types 取类型 */
@@ -23,7 +33,27 @@ export type { ActivityCounts, ThemeConfig, SyncDeviceInfo }
 export type { TokenUsageResult } from './token-usage'
 export type { ProjectColor } from './project-color'
 export type { WorkLogEntry, WorkLogInput, WorkLogPatch } from './work-log'
-export type { NoteCreated, NoteFile, NoteInput, NoteKind, NoteNode } from './note'
+export type {
+  NoteChange,
+  NoteCreateInput,
+  NoteDocument,
+  NoteEntry,
+  NoteKind,
+  NoteNode,
+  NoteSyncInput,
+  NoteSyncSummary
+} from './note'
+export type {
+  NoteImage,
+  NoteImageAsset,
+  NoteImageDeleteInput,
+  NoteImageDeleted,
+  NoteImageList,
+  NoteImageListInput,
+  NoteImageUploaded,
+  NoteImageUploadInput,
+  NoteTextScan
+} from './note-image'
 
 export type ProjectStatus = 'idle' | 'installing' | 'running' | 'building' | 'success' | 'failed'
 
@@ -294,6 +324,59 @@ export interface AppSettings {
    * 只管背景这一层，边框、阴影与里面的文字不变；100% 就是原本的实底卡片。
    */
   cardOpacity: number
+  /**
+   * 笔记文件夹（用户自己挑的一个目录）：笔记页的目录树就是它里面的 `.md` 文件。
+   *
+   * 空串表示还没选过 —— 笔记页据此显示「先选一个文件夹」的引导，
+   * 在那之前不给任何操作入口（见 NotesView）。它**不进 theme.json**：
+   * 这个目录只在这台机器上成立，同步时不该把它带到另一台机器上。
+   * 空白与末尾分隔符由 `sanitizeNoteRoot` 收敛（`C:\` 这种盘根要留住分隔符）。
+   */
+  noteDir: string
+  /**
+   * 打开过的笔记本（最近打开的在最前面，最多 `NOTE_HISTORY_MAX` 条）。
+   *
+   * 与 `noteDir` 一样只对本机成立，所以也住在数据文件里、不参与同步。
+   * 它是笔记页左栏底部那份「最近打开」的来源：换回上一个笔记本不必再翻一遍目录树。
+   * 每一条都能单独删掉（那个目录也许已经不在了）。
+   */
+  noteDirs: string[]
+  /**
+   * 笔记本身同步到哪个 git 仓库。空串 = 不同步（笔记页那颗同步按钮就是它的开关）。
+   *
+   * 与另外三处地址（Token 同步、图片仓库）都不同：这里**没有克隆目录**，
+   * 同步的就是当前那个笔记文件夹本身 —— 首次同步会在它里面 `git init` 并接上这个地址，
+   * 之后提交 / 拉取 / 推送都在那个文件夹里跑（见 sync.rs 的 `sync_notes`）。
+   * 于是「笔记就是磁盘上那些 .md」这条不变：换台机器 clone 下来接着写就是同一份东西。
+   * 也是**新的一个出网口子**：只有填了地址、且用户点了同步，才会走一次 git，
+   * 目标就是用户自己填的那个仓库（不经过任何第三方服务）。
+   */
+  noteSyncRepo: string
+  /**
+   * 笔记里粘贴的图片推到哪个 git 仓库。空串 = 未配置（粘贴时会提示去哪儿填）。
+   *
+   * 这是个**新的出网口子，且由用户显式开出来**：只有填了地址、且用户真的粘贴了图片，
+   * 才会走一次 git（推送目标就是用户自己填的那个仓库，不经过任何第三方服务）。
+   * 与 Token 同步同一个机制（系统 git 凭据，或登录账号的 token），见 docs 的「数据与隐私」。
+   */
+  noteImageRepo: string
+  /**
+   * 图片在仓库里的基础目录，默认 `images`；空串表示从仓库根目录开始。
+   *
+   * 它下面还有两层由应用自己加：`<本机设备>/<笔记本>`（见 shared/note-image.ts 的 imageScopeDir），
+   * 于是上传后的地址形如 `<前缀>/<目录>/<设备>/<笔记本>/20260916-104512-ab12cd34.png`。
+   * 分这两层是为了让素材管理只看得到「当前这个笔记本在这台机器上传的图」——
+   * 图片仓库是所有笔记本、所有机器共用的一份，混在一起就说不清「谁还在用」。
+   */
+  noteImageDir: string
+  /**
+   * 图片访问地址的前缀（可选）：留空则按仓库地址自动推导。
+   *
+   * 自动推导只认 GitHub / Gitee / GitLab 三家公开托管（它们的 raw 地址规则各不相同），
+   * 自建 GitLab / Gitea、对象存储镜像、GitHub Pages 这类一律要在这里填 ——
+   * 推不出来时应用会提示，而不是往正文里插一个点不开的地址。
+   */
+  noteImageBaseUrl: string
   /**
    * Token 用量同步仓库地址（git 远程地址），空串表示不同步。
    *
@@ -823,24 +906,71 @@ export interface WorkbenchApi {
   updateWorkLog: (id: string, patch: WorkLogPatch) => Promise<Result<WorkLogEntry>>
   removeWorkLog: (id: string) => Promise<Result<null>>
   /**
-   * 笔记：整棵树的根节点列表（文件夹与笔记是同一种节点，`kind` 区分）。
+   * 笔记：**用户自己挑的一个文件夹**里的目录树（文件夹 + markdown 文件）。
    *
-   * 数据住在本机的 `note-data.json` 里，与工作日志同一条口径：**不进同步仓库**
-   * （见 shared/note.ts 的文件头）。
+   * 笔记不再有数据文件：它就是这个目录里的 `.md` 文件（见 shared/note.ts 的文件头），
+   * 应用只记住「选的是哪个目录」（设置里的 `noteDir`）。所以每条通道都要带上 root ——
+   * 用户换了文件夹，同一份树就换了来源，把路径存在适配层里迟早会与设置不一致。
    *
-   * 结构变化（新建 / 改名 / 删除）一律回整棵树，而不是回被改动的那一个节点：
-   * 树的形状是这些操作的产物，「删文件夹连带子树」这种事由结构本身表达，
-   * 少一份在界面侧重算树的实现，也就少一份两份结果对不上的可能。
+   * 结构变化（新建 / 改名 / 删除 / 拖动）一律回整棵新树 **加上被改动节点的新路径**：
+   * 树是这个文件夹现在的样子，而「打开的那一篇挪到哪去了」只有执行改动的那一侧知道。
+   * 回来的是 `Result`：目录被移走、被拔掉的网络盘都要与「里面什么都没有」分得开。
    */
-  listNotes: () => Promise<Result<NoteNode[]>>
-  /** 新建一个文件夹或笔记；名字撞上同层的会自动往后编号。回整棵树 + 新节点的 id */
-  createNote: (input: NoteInput) => Promise<Result<NoteCreated>>
-  /** 改名；名字没变时不产生任何落盘 */
-  renameNote: (id: string, name: string) => Promise<Result<NoteNode[]>>
+  listNotes: (root: string) => Promise<Result<NoteNode[]>>
+  /** 读一篇的正文；文件在应用外面被改成读不出来的内容时在这里报错 */
+  readNote: (root: string, rel: string) => Promise<Result<string>>
+  /** 保存正文（编辑器防抖后落盘）；结构没变，所以只回成功与否 */
+  writeNote: (root: string, rel: string, content: string) => Promise<Result<null>>
+  /** 新建一个文件夹或笔记；名字撞上同层的由调用方先往后编号 */
+  createNote: (root: string, input: NoteCreateInput) => Promise<Result<NoteChange>>
+  /** 改名（名字不带后缀）；回来的是新树 + 改完之后的路径 */
+  renameNote: (root: string, rel: string, name: string) => Promise<Result<NoteChange>>
   /** 删除；文件夹会连整棵子树一起删掉 */
-  removeNote: (id: string) => Promise<Result<NoteNode[]>>
-  /** 保存正文；只回成功与否，树的结构没变（见适配层里的说明） */
-  updateNoteContent: (id: string, content: string) => Promise<Result<null>>
+  removeNote: (root: string, rel: string) => Promise<Result<NoteChange>>
+  /** 把一篇移进某个文件夹（拖动）；targetDir 为空串表示移到笔记根 */
+  moveNote: (root: string, rel: string, targetDir: string) => Promise<Result<NoteChange>>
+  /**
+   * 笔记同步：把**当前这个笔记文件夹**与用户配置的仓库对齐（提交 → pull --rebase → 推送）。
+   *
+   * 与用量 / 图片那两处同步的区别是它没有克隆目录：跑 git 的地方就是用户自己的文件夹，
+   * 还不是仓库时就地 `git init` 并接上配置里的地址（已经指向别的仓库时如实报错，不改它的 origin）。
+   * 撞上冲突**不替用户挑边**：中止 rebase、把本地那笔提交留着，把冲突的文件名带回来让用户手工处理。
+   */
+  syncNotes: (input: NoteSyncInput) => Promise<Result<NoteSyncSummary>>
+  /**
+   * 上传一张图片（笔记里粘贴的图片走这条路）：推到设置的图片仓库，回来的是**可直接用的访问地址**。
+   *
+   * 与其它笔记通道一样，配置由调用方带进来（仓库地址 / 目录 / 访问地址前缀都在设置里），
+   * 另外还要带上**当前笔记本**（`root`）：落点是 `<目录>/<本机设备>/<笔记本>/<文件名>`，
+   * 后两层由适配层现算（见 shared/note-image.ts 的 imageScopeDir），拿不到设备标识就如实失败。
+   * 推不出访问地址时（自建托管、本地路径当远端）不是失败：`url` 是空串，
+   * 由界面提示去填「访问地址前缀」—— 图片此时已经进了仓库，只是还不知道怎么访问它。
+   */
+  uploadNoteImage: (input: NoteImageUploadInput) => Promise<Result<NoteImageUploaded>>
+  /**
+   * 素材管理：**当前这个笔记本（在这台机器上）**传过哪些图（顺手把本地克隆拉到最新，会走一次网络）。
+   *
+   * 只回那一层里的图片文件：别的笔记本、别的机器传上来的图不在里面，因为拿当前笔记本的正文
+   * 数不出它们的引用次数。清单里「谁被引用了多少次」不在这里算 —— 那要把笔记正文读出来
+   * （见 `scanNoteTexts`）再按文件名数，是纯计算，留在渲染层。
+   */
+  listNoteImages: (input: NoteImageListInput) => Promise<Result<NoteImageList>>
+  /**
+   * 素材管理：批量删掉**当前这个笔记本那一层**的图片，**一次提交、一次推送**（删除也是一次仓库改动）。
+   *
+   * `paths` 是列表回来的那种仓库内相对路径；越界、非法名字、不在这台机器这个笔记本的目录里的
+   * 一律被 Rust 拒掉 —— 删不到别处的图，正是「清单只列自己这一层」的另一半。
+   * 已经不在的文件会被跳过（上一次删到一半、别处已经删过），一张都没删到时不会留下空提交。
+   */
+  deleteNoteImages: (input: NoteImageDeleteInput) => Promise<Result<NoteImageDeleted>>
+  /**
+   * 笔记本里所有笔记的正文（素材管理算引用次数用）。
+   *
+   * 只读盘、只回原始文本：怎么算「引用了一次」是渲染层的纯函数（见 shared/note-image.ts）。
+   * `failed` 是读不出来的篇数 —— 大于 0 时界面必须如实说一句，少读一篇就可能把
+   * 一张还在用的图当成没人引用。
+   */
+  scanNoteTexts: (root: string) => Promise<Result<NoteTextScan>>
   /** 启动一条命令；进程由 Workbench 接管，日志进底部终端 */
   startCommand: (id: string) => Promise<Result<null>>
   /** 停止一条命令；已在应用外跑着的那种只能按端口结束，由渲染层先确认 */
@@ -1107,6 +1237,12 @@ export const DEFAULT_SETTINGS: AppSettings = {
   accentInk: ACCENT_INK_DEFAULT,
   topBarStyle: 'clear',
   cardOpacity: CARD_OPACITY_DEFAULT,
+  noteDir: '',
+  noteDirs: [],
+  noteSyncRepo: '',
+  noteImageRepo: '',
+  noteImageDir: NOTE_IMAGE_DEFAULT_DIR,
+  noteImageBaseUrl: '',
   tokenSyncRepo: '',
   activeView: 'home',
   syncAppearance: true,

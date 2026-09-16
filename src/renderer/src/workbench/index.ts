@@ -289,12 +289,24 @@ function createApi(): WorkbenchApi {
       workLog.updateWorkLog(id, patch),
     removeWorkLog: (id: string) => workLog.removeWorkLog(id),
 
-    // ---------- 笔记（本地文件，不进同步仓库） ----------
-    listNotes: () => note.listNotes(),
-    createNote: (input: Parameters<WorkbenchApi['createNote']>[0]) => note.createNote(input),
-    renameNote: (id: string, name: string) => note.renameNote(id, name),
-    removeNote: (id: string) => note.removeNote(id),
-    updateNoteContent: (id: string, content: string) => note.updateNoteContent(id, content),
+    // ---------- 笔记（用户自己挑的一个文件夹里的 markdown 文件） ----------
+    listNotes: (root: string) => note.listNotes(root),
+    readNote: (root: string, rel: string) => note.readNote(root, rel),
+    writeNote: (root: string, rel: string, content: string) => note.writeNote(root, rel, content),
+    createNote: (root: string, input: Parameters<WorkbenchApi['createNote']>[1]) =>
+      note.createNote(root, input),
+    renameNote: (root: string, rel: string, name: string) => note.renameNote(root, rel, name),
+    removeNote: (root: string, rel: string) => note.removeNote(root, rel),
+    moveNote: (root: string, rel: string, targetDir: string) =>
+      note.moveNote(root, rel, targetDir),
+    syncNotes: (input: Parameters<WorkbenchApi['syncNotes']>[0]) => note.syncNotes(input),
+    uploadNoteImage: (input: Parameters<WorkbenchApi['uploadNoteImage']>[0]) =>
+      note.uploadNoteImage(input),
+    listNoteImages: (input: Parameters<WorkbenchApi['listNoteImages']>[0]) =>
+      note.listNoteImages(input),
+    deleteNoteImages: (input: Parameters<WorkbenchApi['deleteNoteImages']>[0]) =>
+      note.deleteNoteImages(input),
+    scanNoteTexts: (root: string) => note.scanNoteTexts(root),
 
     // ---------- 统计 ----------
     getActivity: () => Promise.resolve(state.activityCounts()),

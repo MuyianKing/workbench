@@ -32,6 +32,14 @@ export function formatTimestamp(timestamp: number): string {
   return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`
 }
 
+/** 文件大小：`0 B` / `12.3 KB` / `1.4 MB`（素材列表用；再大也按 MB 显示，贴的图没有那么大） */
+export function formatBytes(bytes: number): string {
+  const value = Math.max(0, Math.floor(bytes))
+  if (value < 1024) return `${value} B`
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`
+  return `${(value / 1024 / 1024).toFixed(1)} MB`
+}
+
 /** 时刻：HH:mm（日期已由所在分组给出，例如工作日志的时间轴） */
 export function formatTimeOfDay(timestamp: number): string {
   const date = new Date(timestamp)

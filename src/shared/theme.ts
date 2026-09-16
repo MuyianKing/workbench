@@ -77,6 +77,8 @@ export interface ThemeConfig {
   leftWidth: number
   /** 右栏宽度（px） */
   rightWidth: number
+  /** 笔记页左栏（目录树）的宽度（px）：在那一页里左右拖动分隔条调整，与首页栏宽同一套做法 */
+  noteTreeWidth: number
   cards: Record<HomeCardId, CardPlacement>
   /**
    * 外观设置（见 appearance.ts）：这一批也住在主题文件里，和布局一起构成
@@ -128,6 +130,16 @@ export const COLUMN_WIDTH_MAX = 720
 export const LEFT_WIDTH_DEFAULT = 290
 export const RIGHT_WIDTH_DEFAULT = 294
 
+/**
+ * 笔记页左栏（目录树）的宽度区间。
+ *
+ * 下限要放得下「笔记本名字 + 右键菜单的入口」，上限只防手改数据把正文挤没。
+ * 它与首页那两栏同一个存放处（theme.json）：都是「界面长什么样」，也一起被同步带走。
+ */
+export const NOTE_TREE_WIDTH_MIN = 180
+export const NOTE_TREE_WIDTH_MAX = 520
+export const NOTE_TREE_WIDTH_DEFAULT = 232
+
 /** 卡片高度上限：只防离谱数据，正常拖拽够不着 */
 export const CARD_HEIGHT_MAX = 4000
 
@@ -163,6 +175,7 @@ export const DEFAULT_THEME: ThemeConfig = {
   cardGap: CARD_GAP_DEFAULT,
   leftWidth: LEFT_WIDTH_DEFAULT,
   rightWidth: RIGHT_WIDTH_DEFAULT,
+  noteTreeWidth: NOTE_TREE_WIDTH_DEFAULT,
   cards: {
     recent: { column: 'left', order: 0, mode: 'fixed', height: 155 },
     quick: { column: 'left', order: 1, mode: 'fixed', height: 98 },
@@ -211,6 +224,13 @@ export function clampColumnWidth(value: unknown, fallback: number): number {
     return Math.min(COLUMN_WIDTH_MAX, Math.max(COLUMN_WIDTH_MIN, Math.round(fallback)))
   }
   return Math.min(COLUMN_WIDTH_MAX, Math.max(COLUMN_WIDTH_MIN, Math.round(value)))
+}
+
+/** 收敛笔记页左栏宽度；非法值回到默认宽度 */
+export function clampNoteTreeWidth(value: unknown): number {
+  const fallback = NOTE_TREE_WIDTH_DEFAULT
+  const base = typeof value === 'number' && Number.isFinite(value) ? Math.round(value) : fallback
+  return Math.min(NOTE_TREE_WIDTH_MAX, Math.max(NOTE_TREE_WIDTH_MIN, base))
 }
 
 /** 收敛卡片高度：不低于该卡片的下限，不高于全局上限 */
@@ -284,6 +304,8 @@ export function sanitizeTheme(raw: unknown): ThemeConfig {
     cardGap: clampCardGap(base.cardGap),
     leftWidth: clampColumnWidth(base.leftWidth, LEFT_WIDTH_DEFAULT),
     rightWidth: clampColumnWidth(base.rightWidth, RIGHT_WIDTH_DEFAULT),
+    // 后加的字段：老主题文件里没有，补默认宽度（与 appearance 同理，不能因此去动上面的版本判定）
+    noteTreeWidth: clampNoteTreeWidth(base.noteTreeWidth),
     cards: normalizeOrder(cards),
     // 外观是后加的字段：老主题文件里没有，缺了就补默认（**不能**因为它去动上面的版本判定，
     // 否则升级一次就会把用户的布局整份清掉）
@@ -316,6 +338,7 @@ function layoutSignature(layout: ThemeConfig): string {
     layout.cardGap,
     layout.leftWidth,
     layout.rightWidth,
+    layout.noteTreeWidth,
     HOME_CARD_IDS.map((id) => {
       const card = layout.cards[id]
       return `${id}:${card.column}/${card.order}/${card.mode}/${card.height}`

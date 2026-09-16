@@ -24,12 +24,11 @@ use crate::store::JsonStore;
 use crate::system;
 use crate::token;
 
-/// 主数据 / 主题文件 / 用量快照 / 工作日志 / 笔记各一份去抖存储
+/// 主数据 / 主题文件 / 用量快照 / 工作日志各一份去抖存储
 static DATA: OnceLock<JsonStore> = OnceLock::new();
 static THEME: OnceLock<JsonStore> = OnceLock::new();
 static TOKEN: OnceLock<JsonStore> = OnceLock::new();
 static WORK_LOG: OnceLock<JsonStore> = OnceLock::new();
-static NOTE: OnceLock<JsonStore> = OnceLock::new();
 
 pub fn data_store() -> &'static JsonStore {
     DATA.get_or_init(|| JsonStore::new(paths::data_file, "保存项目数据"))
@@ -48,12 +47,10 @@ pub fn work_log_store() -> &'static JsonStore {
     WORK_LOG.get_or_init(|| JsonStore::new(paths::work_log_file, "保存工作日志"))
 }
 
-/// 笔记单独一份文件：与工作日志同一条口径，**不进同步仓库**（见 shared/note.ts 的文件头）
-pub fn note_store() -> &'static JsonStore {
-    NOTE.get_or_init(|| JsonStore::new(paths::note_file, "保存笔记"))
-}
+/// 笔记没有数据文件：它就是用户挑的那个文件夹里的 .md 文件（见 notes.rs），
+/// 所以这里没有第五份 JsonStore，也没有 load / save / flush。
 
-/// 启动时载入五份数据（原始 JSON；收敛由 TS 侧负责）
+/// 启动时载入四份数据（原始 JSON；收敛由 TS 侧负责）
 pub fn load_all() {
     // 先做一次性的文件改名：必须早于 token_store().load()，否则会先按新名字读到空文件
     paths::migrate_legacy_files();
@@ -61,7 +58,6 @@ pub fn load_all() {
     theme_store().load();
     token_store().load();
     work_log_store().load();
-    note_store().load();
 }
 
 /// 退出前同步落盘，防止防抖窗口内的改动丢失
@@ -70,7 +66,6 @@ pub fn flush_all() {
     theme_store().flush_sync();
     token_store().flush_sync();
     work_log_store().flush_sync();
-    note_store().flush_sync();
 }
 
 // ---------- 数据文件 ----------
@@ -126,17 +121,105 @@ pub fn work_log_save(value: Value) {
     work_log_store().schedule();
 }
 
-// ---------- 笔记（本地，不进同步仓库） ----------
+// ---------- 笔记（用户自己挑的一个文件夹，见 notes.rs） ----------
+//
+// 这一组只认「相对笔记根的路径」，越界与非法名字在 notes.rs 里挡住。
+// 一律异步：它们都是实打实的磁盘读写，笔记本还可能落在网络盘上。
 
-#[tauri::command]
-pub fn note_load() -> Value {
-    note_store().get()
+/// 列目录（平铺的清单：文件夹 + markdown 文件）；树由渲染层组
+#[tauri::command(async)]
+pub fn note_scan(root: String) -> Result<Vec<Value>, String> {
+    crate::notes::scan(&root)
 }
 
-#[tauri::command]
-pub fn note_save(value: Value) {
-    note_store().set(value);
-    note_store().schedule();
+#[tauri::command(async)]
+pub fn note_read(root: String, rel: String) -> Result<String, String> {
+    crate::notes::read(&root, &rel)
+}
+
+/// 写正文（编辑器防抖后落盘）：临时文件 + 改名，不留半篇
+#[tauri::command(async)]
+pub fn note_write(root: String, rel: String, content: String) -> Result<(), String> {
+    crate::notes::write(&root, &rel, &content)
+}
+
+/// 新建一个文件夹或一篇空笔记
+#[tauri::command(async)]
+pub fn note_create(root: String, rel: String, is_dir: bool) -> Result<(), String> {
+    crate::notes::create(&root, &rel, is_dir)
+}
+
+/// 改名；回来的是改完之后的相对路径（后缀由 Rust 补，见 notes.rs）
+#[tauri::command(async)]
+pub fn note_rename(root: String, rel: String, name: String) -> Result<String, String> {
+    crate::notes::rename(&root, &rel, &name)
+}
+
+/// 把一个条目移进某个文件夹（拖动）；`target_dir` 为空串表示移到笔记根
+#[tauri::command(async)]
+pub fn note_move(root: String, rel: String, target_dir: String) -> Result<String, String> {
+    crate::notes::move_entry(&root, &rel, &target_dir)
+}
+
+/// 删除；文件夹连整棵子树一起删（界面上先确认过）
+#[tauri::command(async)]
+pub fn note_delete(root: String, rel: String) -> Result<(), String> {
+    crate::notes::delete(&root, &rel)
+}
+
+/// 上传一张图片到**图片仓库**（笔记里粘贴的图片走这条路）。
+///
+/// `data` 是整张图的 base64（渲染层从粘贴的图片里读到的字节，原样过来）。
+/// 回来的是它在仓库里的相对路径与分支 —— 访问地址（raw URL）由渲染层按仓库地址拼，
+/// 那是纯计算，留在有测试的那一侧（见 shared/note-image.ts）。
+#[tauri::command(async)]
+pub fn note_image_upload(
+    repo: String,
+    dir: String,
+    name: String,
+    data: String,
+    use_account: bool,
+) -> Result<Value, String> {
+    let bytes = crate::encoding::base64_decode(&data)
+        .ok_or_else(|| "图片数据读不出来（base64 解不开）".to_string())?;
+    crate::sync::publish_image(&repo, &dir, &name, &bytes, use_account)
+}
+
+/// 素材管理：图片仓库里现有的图（顺手把本地克隆拉到最新）。
+///
+/// 只回仓库里那个图片子目录中的图片文件；「谁被引用了多少次」由渲染层拿笔记正文去算
+/// （那是纯计算，见 shared/note-image.ts）。
+#[tauri::command(async)]
+pub fn note_images_list(repo: String, dir: String, use_account: bool) -> Result<Value, String> {
+    crate::sync::list_images(&repo, &dir, use_account)
+}
+
+/// 素材管理：批量删掉仓库里的图片（一次提交、一次推送）。
+///
+/// `paths` 是列表回来的那种「仓库内相对路径」，越界与非法路径在 sync.rs 里逐条挡住。
+#[tauri::command(async)]
+pub fn note_images_delete(
+    repo: String,
+    dir: String,
+    paths: Vec<String>,
+    use_account: bool,
+) -> Result<Value, String> {
+    crate::sync::delete_images(&repo, &dir, &paths, use_account)
+}
+
+/// 笔记本里所有笔记的正文（引用计数用）：只读盘、不做任何过滤与统计
+#[tauri::command(async)]
+pub fn note_scan_texts(root: String) -> Result<Value, String> {
+    crate::notes::scan_texts(&root)
+}
+
+/// 笔记同步：把**这个笔记文件夹本身**与用户配置的仓库对齐（提交 → pull --rebase → 推送）。
+///
+/// 与另一个仓库（图片）一样，凭据要么是已登录账号的 token、要么是系统里 git 配好的那一套；
+/// 冲突与「文件夹里还留着半截 rebase」这类情况一律收敛成一句给用户看的话，见 sync::sync_notes。
+#[tauri::command(async)]
+pub fn note_sync(repo: String, dir: String, use_account: bool) -> Result<Value, String> {
+    crate::sync::sync_notes(&repo, &dir, use_account)
 }
 
 #[tauri::command]
@@ -157,12 +240,11 @@ pub fn data_file_exists_in(dir: String) -> bool {
 /// 迁移数据目录要真搬文件，不能挡在主线程上
 #[tauri::command(async)]
 pub fn data_migrate(dir: String) -> Result<(), String> {
-    // 先把当前内存态同步落盘，迁移走的才是最新数据（主题文件、工作日志与笔记也在搬运行列里）
+    // 先把当前内存态同步落盘，迁移走的才是最新数据（主题文件与工作日志也在搬运行列里）
     data_store().flush_sync();
     theme_store().flush_sync();
     token_store().flush_sync();
     work_log_store().flush_sync();
-    note_store().flush_sync();
     paths::migrate_data_dir(&dir, &data_store().get())
 }
 

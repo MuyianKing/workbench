@@ -13,6 +13,9 @@ import {
   GRID_STEP_MIN,
   HOME_CARD_IDS,
   LEFT_WIDTH_DEFAULT,
+  NOTE_TREE_WIDTH_DEFAULT,
+  NOTE_TREE_WIDTH_MAX,
+  NOTE_TREE_WIDTH_MIN,
   RIGHT_WIDTH_DEFAULT,
   THEME_VERSION,
   cardIdsInColumn,
@@ -20,6 +23,7 @@ import {
   clampCardHeight,
   clampColumnWidth,
   clampGridStep,
+  clampNoteTreeWidth,
   moveCard,
   normalizeOrder,
   resizeCardHeight,
@@ -170,6 +174,20 @@ describe('sanitizeTheme', () => {
       cards: { commands: { column: 'right', order: 0, mode: 'flex', height: 300 } }
     }
     expect(sanitizeTheme(old)).toEqual(DEFAULT_THEME)
+  })
+
+  /** 笔记页左栏宽度是后加的字段：老主题文件里没有它，得补默认值而不是当成 0 */
+  it('笔记页左栏宽度缺省用默认值，越界收敛', () => {
+    expect(sanitizeTheme({}).noteTreeWidth).toBe(NOTE_TREE_WIDTH_DEFAULT)
+    expect(clampNoteTreeWidth(undefined)).toBe(NOTE_TREE_WIDTH_DEFAULT)
+    expect(clampNoteTreeWidth('宽一点')).toBe(NOTE_TREE_WIDTH_DEFAULT)
+    expect(sanitizeTheme({ version: THEME_VERSION, noteTreeWidth: 9999 }).noteTreeWidth).toBe(
+      NOTE_TREE_WIDTH_MAX
+    )
+    expect(sanitizeTheme({ version: THEME_VERSION, noteTreeWidth: 1 }).noteTreeWidth).toBe(
+      NOTE_TREE_WIDTH_MIN
+    )
+    expect(sanitizeTheme({ version: THEME_VERSION, noteTreeWidth: 300 }).noteTreeWidth).toBe(300)
   })
 
   it('卡片间距缺省用默认值，越界收敛', () => {

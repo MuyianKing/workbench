@@ -16,6 +16,8 @@ import { sanitizeQuickApps } from './quick-launch'
 import { sanitizeIconCache } from './icon-cache'
 import { DEFAULT_SETTINGS, type PersistedData, type StoredSettings } from './types'
 import { clampTerminalButtonTop } from './terminal-dock'
+import { sanitizeNoteHistory, sanitizeNoteRepo, sanitizeNoteRoot } from './note'
+import { sanitizeImageBaseUrl, sanitizeImageDir, sanitizeImageRepo } from './note-image'
 import { sanitizeSyncRepo } from './token-usage'
 import { pruneDays, sanitizeActivity } from './activity'
 import { sanitizeViewId } from './views'
@@ -70,6 +72,20 @@ export function sanitizeSettings(raw: unknown): StoredSettings {
   // 终端收起后那颗悬浮按钮的位置：老数据文件里没有这个字段，默认 null（跟随终端面板）。
   // 它落在视口外面的话用户再也够不着这颗按钮，必须在这里拦住
   value.terminalButtonTop = clampTerminalButtonTop(value.terminalButtonTop)
+  // 笔记文件夹：老数据文件里没有它（默认空串 = 还没选过，笔记页显示引导）。
+  // 收尾的空白与分隔符在这里现收敛：值是要拿去拼文件路径的
+  value.noteDir = sanitizeNoteRoot(value.noteDir)
+  // 打开过的笔记本清单（笔记页左栏底部的「最近打开」）：老数据文件里没有，默认空；
+  // 手工改坏过、重复、超上限的都在这里收敛
+  value.noteDirs = sanitizeNoteHistory(value.noteDirs)
+  // 笔记仓库地址：老数据文件里没有，默认空串（不同步）。认不出的一律按没填处理 ——
+  // 与 Token 同步仓库同一个道理：留着一个每次同步都失败的地址在那儿反复重试，不如关掉
+  value.noteSyncRepo = sanitizeNoteRepo(value.noteSyncRepo)
+  // 图片仓库三项：老数据文件里没有，默认未配置 / images / 自动推导。
+  // 地址那一项与 Token 同步仓库同一条口径（含空白、以 `-` 开头的一律当没填）
+  value.noteImageRepo = sanitizeImageRepo(value.noteImageRepo)
+  value.noteImageDir = sanitizeImageDir(value.noteImageDir)
+  value.noteImageBaseUrl = sanitizeImageBaseUrl(value.noteImageBaseUrl)
   // 这个字段的开发期名字，存的是「绝对值、没有跟随终端这一档」。它只出现在未发布的中间版本里，
   // 而那个值会把「跟随终端」这档永远盖住 —— 清掉，免得它一直写回数据文件当第二份真源。
   delete (value as unknown as Record<string, unknown>).terminalDockTop

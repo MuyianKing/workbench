@@ -63,6 +63,13 @@ body.is-dragging-terminal-dock * {
   user-select: none !important;
 }
 
+/* 拖笔记页那条左右分隔条：指针会移到正文（Vditor 里是可选中文字）上，同样得全局兜住 */
+body.is-resizing-notes-tree,
+body.is-resizing-notes-tree * {
+  cursor: ew-resize !important;
+  user-select: none !important;
+}
+
 /* ---------- 主题切换动效 ---------- */
 
 /**

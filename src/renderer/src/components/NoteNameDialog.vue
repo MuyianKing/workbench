@@ -2,15 +2,19 @@
 /**
  * 给一个文件夹 / 笔记起名字（新建与重命名共用）。
  *
- * 新建与改名长得一样、校验也一样（只有「不能为空」一条），所以只留一个弹窗：
- * 打开时把名字预填成调用方给的那份、选中全部文字，回车即提交 ——
- * 从右键菜单新建时多数人直接回车，预填的「新建笔记」由适配层负责撞名退让。
+ * 新建与改名长得一样、校验也一样，所以只留一个弹窗：打开时把名字预填成调用方给的那份、
+ * 选中全部文字，回车即提交 —— 从右键菜单新建时多数人直接回车，
+ * 预填的「新建笔记」由 store 负责撞名退让。
+ *
+ * 名字最终落到**文件名**上（见 shared/note.ts），所以这里不只判「空不空」：
+ * 带上 `/`、`:`、系统保留名这些必须当场说清楚 —— 那种名字不是「换一个号码就能过」的，
+ * 只说一句「名字非法」会让人对着一个看着没问题的名字发愣。
  *
  * 写盘由调用方负责（它是这次业务动作的发起方），这里只把名字交出去。
  */
 import { computed, ref, watch } from 'vue'
 import type { InputInstance } from 'element-plus'
-import { NOTE_NAME_MAX, isValidNoteName, type NoteKind } from '@shared/note'
+import { NOTE_NAME_MAX, noteNameProblem, type NoteKind } from '@shared/note'
 
 const props = defineProps<{
   modelValue: boolean
@@ -35,14 +39,15 @@ const visible = computed({
 const name = ref('')
 const inputRef = ref<InputInstance | null>(null)
 
-const valid = computed(() => isValidNoteName(name.value))
-const hint = computed(() =>
-  valid.value
-    ? props.kind === 'folder'
-      ? '文件夹里可以继续放文件夹与笔记。'
-      : '正文按 markdown 写，随时保存。'
-    : '名字不能为空。'
-)
+/** 这个名字有什么问题（没问题就是空串）；有问题的原因直接写在字段下面 */
+const problem = computed(() => noteNameProblem(name.value))
+const valid = computed(() => !problem.value)
+const hint = computed(() => {
+  if (problem.value) return problem.value
+  return props.kind === 'folder'
+    ? '文件夹里可以继续放文件夹与笔记。'
+    : '正文按 markdown 写，存成同名的 .md 文件。'
+})
 
 watch(
   () => props.modelValue,

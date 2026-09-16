@@ -16,6 +16,7 @@ import {
   clampCardHeight,
   clampColumnWidth,
   clampGridStep,
+  clampNoteTreeWidth,
   moveCard as placeCard,
   sanitizeTheme,
   type CardPlacement,
@@ -417,6 +418,18 @@ export const useSettingsStore = defineStore('settings', () => {
     await saveThemeConfig({ cards })
   }
 
+  /**
+   * 笔记页左栏（目录树）宽度：与首页栏宽同一套做法 —— 拖动时只改本地让界面跟手，
+   * 松手才整份落盘（它也在 theme.json 里）。
+   */
+  function setNoteTreeWidth(width: number): void {
+    themeConfig.value.noteTreeWidth = clampNoteTreeWidth(width)
+  }
+
+  async function commitNoteTreeWidth(): Promise<void> {
+    await saveThemeConfig({ noteTreeWidth: themeConfig.value.noteTreeWidth })
+  }
+
   /** 拖动分栏边界改栏宽：过程中只改本地 */
   function setColumnWidth(side: SideColumnId, width: number): void {
     const fallback = side === 'left' ? themeConfig.value.leftWidth : themeConfig.value.rightWidth
@@ -600,6 +613,8 @@ export const useSettingsStore = defineStore('settings', () => {
     commitCards,
     setColumnWidth,
     commitColumns,
+    setNoteTreeWidth,
+    commitNoteTreeWidth,
     setGridStep,
     setCardGap,
     resetLayout,

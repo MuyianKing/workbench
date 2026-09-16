@@ -8,6 +8,7 @@ mod http;
 mod icon;
 mod imaging;
 mod nrm;
+mod notes;
 mod nvm;
 mod oauth;
 mod paths;
@@ -294,8 +295,18 @@ fn main() {
             commands::token_save,
             commands::work_log_load,
             commands::work_log_save,
-            commands::note_load,
-            commands::note_save,
+            commands::note_scan,
+            commands::note_read,
+            commands::note_write,
+            commands::note_create,
+            commands::note_rename,
+            commands::note_move,
+            commands::note_delete,
+            commands::note_image_upload,
+            commands::note_images_list,
+            commands::note_images_delete,
+            commands::note_scan_texts,
+            commands::note_sync,
             commands::data_location,
             commands::data_file_exists_in,
             commands::data_migrate,

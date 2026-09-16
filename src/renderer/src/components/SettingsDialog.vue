@@ -17,6 +17,7 @@ import {
 } from '@shared/workspace-background'
 import { builtinIdOf } from '@shared/wallpaper'
 import { CARD_OPACITY_MAX, CARD_OPACITY_MIN } from '@shared/card-opacity'
+import { imageRawUrl, imageRepoPath, imageScopeDir } from '@shared/note-image'
 import { formatRelative } from '@/format'
 import type { AppSettings, SyncDeviceInfo, ThemeSource, TopBarStyle } from '@/types'
 import type { ThemeOrigin } from '@/theme-transition'
@@ -220,6 +221,90 @@ function deviceUpdatedText(device: SyncDeviceInfo): string {
 function save(patch: Partial<AppSettings>): void {
   void settings.updateSettings(patch)
 }
+
+// ---------- 笔记仓库 ----------
+
+/*
+ * 与下面那三个图片输入框同一条做法：先落草稿、失焦或回车时才提交（地址是逐字符敲进去的），
+ * 提交后由 store 收敛（去空白、认不出的当没填），回推的值会盖掉草稿。
+ */
+const noteRepoDraft = ref('')
+
+watch(
+  () => settings.settings.noteSyncRepo,
+  (value) => {
+    noteRepoDraft.value = value
+  },
+  { immediate: true }
+)
+
+function commitNoteRepo(): void {
+  if (noteRepoDraft.value === settings.settings.noteSyncRepo) return
+  save({ noteSyncRepo: noteRepoDraft.value })
+}
+
+// ---------- 笔记图片 ----------
+
+const imageRepoDraft = ref('')
+const imageDirDraft = ref('')
+const imageBaseUrlDraft = ref('')
+
+watch(
+  () => settings.settings.noteImageRepo,
+  (value) => {
+    imageRepoDraft.value = value
+  },
+  { immediate: true }
+)
+watch(
+  () => settings.settings.noteImageDir,
+  (value) => {
+    imageDirDraft.value = value
+  },
+  { immediate: true }
+)
+watch(
+  () => settings.settings.noteImageBaseUrl,
+  (value) => {
+    imageBaseUrlDraft.value = value
+  },
+  { immediate: true }
+)
+
+function commitImageRepo(): void {
+  if (imageRepoDraft.value === settings.settings.noteImageRepo) return
+  save({ noteImageRepo: imageRepoDraft.value })
+}
+
+function commitImageDir(): void {
+  if (imageDirDraft.value === settings.settings.noteImageDir) return
+  save({ noteImageDir: imageDirDraft.value })
+}
+
+function commitImageBaseUrl(): void {
+  if (imageBaseUrlDraft.value === settings.settings.noteImageBaseUrl) return
+  save({ noteImageBaseUrl: imageBaseUrlDraft.value })
+}
+
+/**
+ * 照当前配置给一个样例地址，让人一眼看出「上传之后插进正文的是什么」。
+ *
+ * 中间那两层（设备 / 笔记本）由应用自己加上，这里用占位值示意 —— 真实值分别是本机设备 id
+ * 与「笔记本目录名 + 路径摘要」（见 shared/note-image.ts 的 imageScopeDir）。
+ * 分支拿 `main` 举例（真实分支是克隆之后才知道的），所以这里明说了是示例；
+ * 拼不出来时是空串 —— 那正是在提醒：下面那栏得自己填。
+ */
+const imageUrlSample = computed(() =>
+  imageRawUrl({
+    repo: settings.settings.noteImageRepo,
+    branch: 'main',
+    path: imageRepoPath(
+      imageScopeDir(settings.settings.noteImageDir, 'device-id', 'Notebook'),
+      '20260916-104512-ab12cd34.png'
+    ),
+    baseUrl: settings.settings.noteImageBaseUrl
+  })
+)
 
 /**
  * 主题切换的扩散起点：记按下位置，切换动画就从那颗按钮长出来。
@@ -727,6 +812,120 @@ watch([visible, activeTab], ([open, tab]) => {
                 </span>
               </div>
             </div>
+          </div>
+
+          <!--
+            笔记本身同步：同步的就是**当前那个笔记文件夹**（所以这里把它也显示出来），
+            与图片那条路一样，地址留空 = 关掉这个功能（笔记页那颗按钮点了只会得到一句提示）。
+          -->
+          <div class="block">
+            <h3 class="block__title">笔记</h3>
+
+            <div class="row row--stack">
+              <div class="row__text">
+                <span class="row__label">笔记仓库</span>
+                <span class="row__hint">
+                  笔记页左栏底部那颗同步按钮会把当前笔记本当成一个 git 工作区：提交本机改动、
+                  拉回别处的改动（第一次同步会在那个文件夹里 git init 并接上这个地址）。
+                  留空就是不同步。用账号授权同步的开关同样管这里；没登录就用系统里 git 配好的凭据。
+                </span>
+              </div>
+              <el-input
+                v-model="noteRepoDraft"
+                size="small"
+                spellcheck="false"
+                placeholder="git@github.com:you/notes.git"
+                @change="commitNoteRepo"
+              />
+            </div>
+
+            <!-- 同步的是「当前这个文件夹」，所以它得看得见：它是在笔记页挑的，不在这里改 -->
+            <div class="row">
+              <div class="row__text">
+                <span class="row__label">当前笔记本</span>
+                <span class="row__hint mono truncate" :title="settings.settings.noteDir">
+                  {{ settings.settings.noteDir || '还没选（在笔记页左栏底部挑一个文件夹）' }}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <!--
+            笔记里的图片：粘贴的图片推到用户自己的一个 git 仓库里，正文里只留一个外链。
+            地址由仓库地址推导（GitHub / Gitee / GitLab 三家自动认，其余自己填前缀），
+            所以这一块的核心是那三个输入框 —— 它们填完长什么样，下面那句示例直接给出来。
+          -->
+          <div class="block">
+            <h3 class="block__title">笔记图片</h3>
+
+            <div class="row row--stack">
+              <div class="row__text">
+                <span class="row__label">图片仓库</span>
+                <span class="row__hint">
+                  往笔记里粘贴图片时，图会推进这个 git 仓库，正文里只留一个链接（留空则粘贴时提示）。
+                  用账号授权同步的开关同样管这里；没登录就用系统里 git 配好的凭据。
+                </span>
+              </div>
+              <el-input
+                v-model="imageRepoDraft"
+                size="small"
+                spellcheck="false"
+                placeholder="git@github.com:you/notes-images.git"
+                @change="commitImageRepo"
+              />
+            </div>
+
+            <!--
+              路径这一栏**不跟着仓库地址一起藏**：它本来就是「上传到仓库哪里」的那一项，
+              仓库还没填时也得看得见（看不见会让人以为根本没有这一栏）。
+              后面两项（访问地址前缀与那句示例）只跟地址有关，没填仓库时留着是噪音。
+            -->
+            <div class="row">
+              <div class="row__text">
+                <span class="row__label">图片目录</span>
+                <span class="row__hint">
+                  上传到仓库的哪个目录下，例如 images 就是传进仓库的 images 目录（可以写多级，
+                  如 notes/images）。应用会在它下面再按「本机设备 / 笔记本」分两层，
+                  素材管理只看得到当前笔记本自己那一层；留空就是从仓库根目录开始分这两层。
+                </span>
+              </div>
+              <el-input
+                v-model="imageDirDraft"
+                class="name-input"
+                size="small"
+                spellcheck="false"
+                placeholder="images"
+                @change="commitImageDir"
+              />
+            </div>
+
+            <template v-if="settings.settings.noteImageRepo">
+              <div class="row row--stack">
+                <div class="row__text">
+                  <span class="row__label">访问地址前缀</span>
+                  <span class="row__hint">
+                    留空按仓库地址自动推导（GitHub / Gitee / GitLab）；
+                    自建 GitLab / Gitea、图床镜像或 Pages 在这里填前缀。
+                  </span>
+                </div>
+                <el-input
+                  v-model="imageBaseUrlDraft"
+                  size="small"
+                  spellcheck="false"
+                  placeholder="https://cdn.example.com/notes"
+                  @change="commitImageBaseUrl"
+                />
+              </div>
+
+              <div class="row">
+                <div class="row__text">
+                  <span class="row__label">上传后插入的地址</span>
+                  <span class="row__hint mono truncate" :title="imageUrlSample || ''">
+                    {{ imageUrlSample || '推不出来：仓库地址认不出托管方，请填上面的前缀' }}
+                  </span>
+                </div>
+              </div>
+            </template>
           </div>
 
           <!--

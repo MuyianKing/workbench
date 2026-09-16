@@ -1,76 +1,87 @@
 /**
- * 笔记（本地 `note-data.json`）：类型、默认值、收敛，以及笔记树要用的纯逻辑。
+ * 笔记：**用户自己挑的那个文件夹**，以及它里面的 markdown 文件。
  *
- * **这份数据只在本机**：它不进同步仓库，也不在 `workbench-data.json` 里（与工作日志同一条口径，
- * 见 AGENTS.md 第 5 节的出口约定）—— 笔记是最贴近个人记录的东西，默认不往外发；
- * 文件与数据目录同进同出（迁移数据目录时会一起搬），但不会跟着 Token 同步被推上去。
+ * 它不再是应用维护的一棵 JSON 树 —— 笔记就是磁盘上的 `.md` 文件，笔记本就是那个目录：
+ * 换台机器拿 Typora / VSCode 接着写也成立，应用里看到的目录树就是文件夹本来的结构。
+ * 因此这里**没有「数据版本」「落盘收敛」那一套**，只有三件事：
+ *   1. 文件名 / 相对路径的规矩（收敛、去重、拼装）；
+ *   2. 把后端扫出来的平铺清单组回一棵树（文件夹排在文件前面、同层按名字排）；
+ *   3. 拖动能不能落在某个节点上这类判断。
  *
- * 一份文件装下整棵树：文件夹与笔记是同一种节点（`kind` 区分），正文是 markdown 原文。
- * 之所以不像别的数据那样拍平成一个数组：树就是这个数据的本来形状，增删改都发生在某一层里，
- * 嵌套结构让「删掉文件夹连带子树」这件事直接由结构本身表达，不必再维护一套 parentId 的完整性。
+ * 全是纯函数：文件系统那一半在 `src-tauri/src/notes.rs`（它只认相对路径、并挡住越界），
+ * 适配层把两端接起来（见 workbench/note.ts）。放这里是为了能被单测直接覆盖 ——
+ * 「点开头的目录不理」「非 markdown 的文件不进树」这些口径改起来也不必重编 Rust。
  *
- * 落点分工与其它数据一致：Rust 只把 JSON 安全读写到磁盘，收敛与树操作都在这里，
- * 于是这些规则能被单测直接覆盖，也不需要为了改一版显示口径去重编 Rust。
+ * **只在本机**：笔记本是用户自己的目录，应用既不复制它、也不把它写进任何数据文件；
+ * 记下来的只有两样：当前打开的那个目录（设置里的 `noteDir`）与打开过的那几个
+ * （`noteDirs`，笔记页左栏底部的「最近打开」）。两个都只对本机成立、不参与同步。
+ *
+ * 这里说的「同步」是把**那个文件夹本身当成一个 git 工作区**（提交 / 拉取 / 推送都在它里面跑，
+ * 见 `src-tauri/src/sync.rs` 的 `sync_notes`）：所以在不在别的机器上，只取决于用户填的那个
+ * 仓库地址（设置里的 `noteSyncRepo`，空串 = 不同步）。这一份里只有地址的收敛规则与结果形状。
  */
 
-/** 文件口径版本。只在本机流转，不参与跨设备合并，所以版本只用来标记格式 */
-export const NOTE_DATA_VERSION = 1
+/** 算作笔记的后缀。编辑器写出来的是 `.md`，`.markdown` 是照顾别处写下的文件 */
+const NOTE_EXTENSIONS = ['.md', '.markdown'] as const
 
 export const NOTE_KINDS = ['folder', 'note'] as const
 export type NoteKind = (typeof NOTE_KINDS)[number]
 
-/** 节点名最长多少个字；超了直接截断，免得一行树被一个名字撑爆 */
+/** 名字最长多少个字；超了直接截断，免得一层目录被一个名字撑爆 */
 export const NOTE_NAME_MAX = 60
 
-/**
- * 嵌套最深几层。
- *
- * 收敛时按它截断：数据文件是可以被手工编辑的，一份上万层嵌套的 JSON 会让递归解析直接爆栈，
- * 表现成「启动就白屏」，很难往数据文件上想。
- */
-export const NOTE_MAX_DEPTH = 8
+/** 后端扫出来的一个条目（原始的平铺清单，树由 `buildNoteTree` 组） */
+export interface NoteEntry {
+  /** 相对笔记根的路径，用 `/` 分隔 */
+  rel: string
+  /** 条目自己的名字（含后缀） */
+  name: string
+  isDir: boolean
+  /** 最后修改时间（毫秒）；问不到就是 0 */
+  mtimeMs?: number
+}
 
+/** 树上的一个节点：文件夹或一篇笔记 */
 export interface NoteNode {
+  /** `el-tree` 的 node-key：就是 `rel`（同一个文件夹里不会有两条同路径的条目） */
   id: string
-  /** 节点名。笔记名不带 `.md` 后缀 —— 后缀是「它是什么」的表达，由 icon 与编辑器承担 */
+  /** 相对笔记根的路径 */
+  rel: string
+  /** 显示名。笔记不含 `.md` 后缀 —— 后缀是「它是什么」的表达，由图标与编辑器承担 */
   name: string
   kind: NoteKind
-  /** 正文（markdown 原文）。笔记必有；文件夹没有这一项 */
-  content?: string
-  /** 子项。文件夹必有（空文件夹是 `[]`）；笔记没有这一项 */
+  /** 子项；只有文件夹有 */
   children?: NoteNode[]
-  createdAt: number
-  updatedAt: number
-}
-
-export interface NoteFile {
-  version: number
-  nodes: NoteNode[]
+  /** 最后修改时间（毫秒）；文件夹没有这一项 */
+  mtimeMs?: number
 }
 
 /**
- * 新建的返回：整棵树 + 新节点的 id。
+ * 结构变化后的返回：改动之后的整棵树 + 被改动节点的新路径。
  *
- * 只回树是不够的 —— 界面要立刻选中刚建出来的那一篇、并把它的父文件夹展开，
- * 而「哪一个是新的」这件事只有真正执行插入的那一侧知道（在界面侧对比前后两棵树去找太脆）。
+ * 只回树是不够的：改名与拖动会让**当前打开的那一篇**换一个路径，
+ * 而上层只有拿到新路径才能把它接着认下去（删除时是空串）。
+ * 一次调用把两件事都定下来，也就不会有「树更新了、打开的那一篇还指着老路径」的中间态。
  */
-export interface NoteCreated {
+export interface NoteChange {
   nodes: NoteNode[]
-  id: string
+  rel: string
 }
 
-/** 新增一个节点时提交的数据 */
-export interface NoteInput {
-  /** 放进哪个文件夹；null / 不传表示根目录 */
-  parentId?: string | null
+/** 正在编辑的那一篇：路径 + 原文。编辑器只认它，不关心它从哪来 */
+export interface NoteDocument {
+  rel: string
+  name: string
+  content: string
+  mtimeMs: number
+}
+
+/** 新建一个节点的入参 */
+export interface NoteCreateInput {
+  /** 放进哪个文件夹（相对路径）；空串 / 不传表示根目录 */
+  parentRel?: string
   kind: NoteKind
   name: string
-  /** 笔记正文，不传按空笔记算 */
-  content?: string
-}
-
-export function isNoteKind(value: unknown): value is NoteKind {
-  return typeof value === 'string' && (NOTE_KINDS as readonly string[]).includes(value)
 }
 
 /** 新建时的默认名字；重名时由 `uniqueNoteName` 往后编号 */
@@ -79,36 +90,178 @@ export const NOTE_DEFAULT_NAMES: Record<NoteKind, string> = {
   note: '新建笔记'
 }
 
-export function emptyNoteFile(): NoteFile {
-  return { version: NOTE_DATA_VERSION, nodes: [] }
+export function isNoteKind(value: unknown): value is NoteKind {
+  return typeof value === 'string' && (NOTE_KINDS as readonly string[]).includes(value)
 }
 
-// ---------- 名称 ----------
+// ---------- 路径 ----------
 
 /**
- * 收敛一个名字：去掉首尾空白、压掉换行与其它控制字符，再按上限截断。
+ * 收敛一个相对路径：分隔符统一成 `/`、去掉空段与 `.` 段。
  *
- * 名字不是文件路径（笔记不落成 .md 文件），所以不按 Windows 的非法字符拦 ——
- * 拦了只会让「为什么这个名字不行」变成一句没法解释的话。
+ * 只做这些 —— `..` **不在这里拦**（那会让「路径不合法」变成一个静默的变形）。
+ * 真正的边界判断在 Rust 侧：那边逐段只接受普通名字，越界一律报错。
+ */
+export function normalizeRel(raw: unknown): string {
+  if (typeof raw !== 'string') return ''
+  return raw
+    .replace(/\\/g, '/')
+    .split('/')
+    .map((part) => part.trim())
+    .filter((part) => part && part !== '.')
+    .join('/')
+}
+
+/** 拼一个相对路径：`joinRel('工作', '周报.md')` → `工作/周报.md` */
+export function joinRel(dir: string, name: string): string {
+  const base = normalizeRel(dir)
+  const leaf = normalizeRel(name)
+  if (!base) return leaf
+  return leaf ? `${base}/${leaf}` : base
+}
+
+/** 所在文件夹的相对路径；根下的条目是空串 */
+export function parentRel(rel: string): string {
+  const parts = normalizeRel(rel).split('/')
+  parts.pop()
+  return parts.join('/')
+}
+
+/** 路径的最后一段（文件名 / 文件夹名） */
+export function relName(rel: string): string {
+  const parts = normalizeRel(rel).split('/')
+  return parts[parts.length - 1] ?? ''
+}
+
+/**
+ * 收敛笔记文件夹：去掉首尾空白与末尾的分隔符。
+ *
+ * 盘根那个特例要留住：`C:\` 去掉分隔符就成了 `C:`，那在 Windows 上是「当前目录」，
+ * 意思完全变了，所以只留一个盘符时补回分隔符。
+ */
+export function sanitizeNoteRoot(raw: unknown): string {
+  if (typeof raw !== 'string') return ''
+  const trimmed = raw.trim()
+  if (!trimmed) return ''
+  const cut = trimmed.replace(/[\\/]+$/, '')
+  return /^[a-zA-Z]:$/.test(cut) ? `${cut}\\` : cut
+}
+
+/** 笔记本在界面上显示的名字：路径的最后一段；问不出来就原样显示整条路径 */
+export function noteRootName(root: string): string {
+  const clean = sanitizeNoteRoot(root)
+  const parts = clean.split(/[\\/]/).filter(Boolean)
+  return parts.length ? parts[parts.length - 1] : clean
+}
+
+/** 笔记仓库地址上限，与 Token 同步仓库 / 图片仓库同一个口径 */
+const NOTE_REPO_MAX_LENGTH = 300
+
+/**
+ * 收敛笔记仓库地址：去掉首尾空白，**空串表示不同步**（设置里它就是这个开关）。
+ *
+ * 与 Token 同步仓库（`sanitizeSyncRepo`）逐字同一条口径，理由也一样：
+ * 这个值最终会被当成 git 的命令行参数 —— 含空白的地址会被 Windows 的 shell 词法拆成两个，
+ * 以 `-` 开头的会被 git 当成选项。认不出来的一律按没填处理（等于关掉同步），
+ * 而不是留一个每次都失败的值在那儿。
+ */
+export function sanitizeNoteRepo(raw: unknown): string {
+  if (typeof raw !== 'string') return ''
+  const value = raw.trim()
+  if (!value || value.length > NOTE_REPO_MAX_LENGTH) return ''
+  if (/\s/.test(value) || value.startsWith('-')) return ''
+  return value
+}
+
+/** 同步一次要带的东西：地址由调用方从设置里给（适配层不缓存设置） */
+export interface NoteSyncInput {
+  repo: string
+  /**
+   * 要同步的笔记本：**就是磁盘上那个文件夹本身**，应用在它里面跑 git
+   * （还没有仓库时就地 `git init` 并接上 `repo`）。空串 = 还没选文件夹。
+   */
+  dir: string
+  /** 是否用已登录账号的 token 授权（私有仓库用；关掉就走系统 git 凭据） */
+  useAccount?: boolean
+}
+
+/** 一次同步的结果 */
+export interface NoteSyncSummary {
+  /** 同步用的分支 */
+  branch: string
+  /** 这次提交了几个文件（0 = 本机没有改动） */
+  files: number
+  /** 远端有没有带回来新东西 */
+  received: boolean
+  /** git 自己的输出，排查时看它 */
+  log: string
+}
+
+// ---------- 名字 ----------
+
+/** Windows 上文件名里不能出现的字符：名字最终就是一个文件名，这些必须拦住 */
+const ILLEGAL_NAME_CHARS = /[<>:"/\\|?*]/
+/** Windows 的保留设备名：叫这些名字的文件建不出来 */
+const RESERVED_NAMES = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i
+
+/**
+ * 收敛一个名字：去掉首尾空白、压掉换行与其它控制字符、剔掉文件名里的非法字符，再按上限截断。
+ *
+ * 命令是可以被直接调的，所以这里收敛过的名字在 Rust 侧还会再判一遍
+ * （见 notes.rs 的 `validate_name`）—— 落盘的名字不能只靠上游自觉。
  */
 export function sanitizeNoteName(raw: unknown): string {
   if (typeof raw !== 'string') return ''
   return raw
     .replace(/[\u0000-\u001f\u007f]/g, ' ')
+    .replace(/[<>:"/\\|?*]/g, '')
     .replace(/\s+/g, ' ')
     .trim()
+    .replace(/[. ]+$/, '')
     .slice(0, NOTE_NAME_MAX)
 }
 
-/** 空名字是唯一的非法取值：它是树的显示主体，没名字就什么也点不了 */
-export function isValidNoteName(name: string): boolean {
-  return sanitizeNoteName(name).length > 0
+/**
+ * 这个名字有什么问题；没问题返回空串。
+ *
+ * 界面拿它写提示（不是「能不能保存」的开关）：名字最终落到文件名上，
+ * 有一类名字（带 `/`、系统保留名）不是「换一个号码就能过」的，说清原因比只报「非法」有用。
+ */
+export function noteNameProblem(raw: unknown): string {
+  if (typeof raw !== 'string' || !raw.trim()) return '名字不能为空'
+  const name = raw.trim()
+  if (ILLEGAL_NAME_CHARS.test(name)) return '名字里不能包含 \\ / : * ? " < > | 这些字符'
+  if (name.startsWith('.')) return '名字不能以点开头'
+  if (RESERVED_NAMES.test(name)) return '这是系统的保留名字，换一个'
+  if (!sanitizeNoteName(name)) return '名字不能为空'
+  return ''
+}
+
+export function isValidNoteName(raw: unknown): boolean {
+  return noteNameProblem(raw) === ''
+}
+
+/** 显示名 → 文件名：笔记一律写成 `.md`（改名时后缀由 Rust 补，这里给新建用） */
+export function noteFileName(name: string): string {
+  return `${sanitizeNoteName(name)}.md`
+}
+
+/** 是不是一篇笔记（按后缀判） */
+export function isNoteFile(name: string): boolean {
+  const lower = name.trim().toLowerCase()
+  return NOTE_EXTENSIONS.some((ext) => lower.endsWith(ext))
+}
+
+/** 文件名 → 显示名（去掉后缀） */
+export function noteDisplayName(fileName: string): string {
+  return fileName.replace(/\.(md|markdown)$/i, '')
 }
 
 /**
  * 在**同一层**里取一个不撞的名字：`新建笔记` 被占了就是 `新建笔记 2`、`新建笔记 3`。
  *
  * 只比同层：不同文件夹里各有一个「周报」是很正常的事，跨层去重只会让名字莫名其妙地涨号。
+ * 撞名的对象既包括笔记也包括文件夹 —— 两者在磁盘上是同级条目，同名是建不出来的。
  */
 export function uniqueNoteName(siblings: readonly NoteNode[], base: string): string {
   const wanted = sanitizeNoteName(base) || NOTE_DEFAULT_NAMES.note
@@ -122,105 +275,130 @@ export function uniqueNoteName(siblings: readonly NoteNode[], base: string): str
   return wanted
 }
 
-// ---------- 收敛 ----------
-
-function text(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : ''
-}
-
-function stamp(value: unknown, fallback: number): number {
-  return typeof value === 'number' && Number.isFinite(value) && value > 0
-    ? Math.floor(value)
-    : fallback
-}
+// ---------- 组树 ----------
 
 /**
- * 把磁盘上的一个节点收敛成合法结构；没名字的节点连同它的子树一起丢掉（返回 null）。
+ * 同层排序：**文件夹在前、文件在后**，各自按名字排。
  *
- * `seen` 跨整棵树共用：id 是树的 node-key，重复会让两个节点在界面上一起动，
- * 所以这里只留第一次出现的那个，后面的重新发一个 id。
+ * 用带 `numeric` 的排序规则：`笔记 10` 排在 `笔记 9` 后面，而不是按字符串逐位比。
+ * 名字完全相同时按原始字符串兜底，保证同一份输入每次都得到同一个顺序。
  */
-function sanitizeNoteNode(
-  raw: unknown,
-  uuid: () => string,
-  now: number,
-  seen: Set<string>,
-  depth: number
-): NoteNode | null {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+const collator = new Intl.Collator('zh-Hans-CN', { numeric: true, sensitivity: 'base' })
 
-  const input = raw as Partial<NoteNode>
-  const name = sanitizeNoteName(input.name)
-  if (!name) return null
+function compareNodes(left: NoteNode, right: NoteNode): number {
+  if (left.kind !== right.kind) return left.kind === 'folder' ? -1 : 1
+  return collator.compare(left.name, right.name) || collator.compare(left.rel, right.rel)
+}
 
-  const kind = isNoteKind(input.kind) ? input.kind : 'note'
-  const createdAt = stamp(input.createdAt, now)
-  let id = text(input.id)
-  if (!id || seen.has(id)) id = uuid()
-  seen.add(id)
-
-  const base = { id, name, kind, createdAt, updatedAt: stamp(input.updatedAt, createdAt) }
-
-  if (kind === 'note') {
-    return { ...base, content: typeof input.content === 'string' ? input.content : '' }
-  }
-
-  // 到深度上限就当作空文件夹，不再往下收：子树留着也显示不出来，还会让递归没完没了
-  const source = depth >= NOTE_MAX_DEPTH || !Array.isArray(input.children) ? [] : input.children
-  const children: NoteNode[] = []
-  for (const item of source) {
-    const child = sanitizeNoteNode(item, uuid, now, seen, depth + 1)
-    if (child) children.push(child)
-  }
-
-  return { ...base, children }
+/** 逐层排序（返回新对象，不改入参） */
+export function sortNoteNodes(nodes: readonly NoteNode[]): NoteNode[] {
+  return [...nodes]
+    .sort(compareNodes)
+    .map((node) => (node.children ? { ...node, children: sortNoteNodes(node.children) } : node))
 }
 
 /**
- * 磁盘 → 内存。文件缺失（首次使用）、损坏、被手工改坏都退化成一份空笔记本，不影响启动。
+ * 平铺清单 → 树。
+ *
+ * 两份过滤在这里定下：只收文件夹与 markdown 文件（图片、附件这些不进树，
+ * 它们在编辑器的链接里照样能用）；点开头的条目、以及 `node_modules` / `dist` 那批
+ * 依赖与构建产物的目录由后端扫的时候就跳过了（见 src-tauri/src/notes.rs 的 `IGNORED_DIRS`）。
+ *
+ * 父目录没出现在清单里时（扫描期间被删掉、或网络盘上那一段读不到），
+ * 把节点挂到根上：树里位置不准，但总比整篇笔记看不见强。
  */
-export function parseNoteData(
-  raw: unknown,
-  uuid: () => string,
-  now: number = Date.now()
-): NoteFile {
-  const parsed = (raw ?? {}) as Partial<NoteFile>
-  const source = Array.isArray(parsed.nodes) ? parsed.nodes : []
+export function buildNoteTree(entries: readonly NoteEntry[]): NoteNode[] {
+  const table = new Map<string, NoteNode>()
 
-  const nodes: NoteNode[] = []
-  const seen = new Set<string>()
-  for (const item of source) {
-    const node = sanitizeNoteNode(item, uuid, now, seen, 0)
-    if (node) nodes.push(node)
+  for (const entry of entries) {
+    const rel = normalizeRel(entry.rel)
+    if (!rel || table.has(rel)) continue
+
+    const fileName = entry.name ? normalizeRel(entry.name) : relName(rel)
+    if (entry.isDir) {
+      table.set(rel, { id: rel, rel, name: fileName, kind: 'folder', children: [] })
+      continue
+    }
+    if (!isNoteFile(fileName)) continue
+    table.set(rel, {
+      id: rel,
+      rel,
+      name: noteDisplayName(fileName),
+      kind: 'note',
+      mtimeMs: entry.mtimeMs ?? 0
+    })
   }
 
-  return { version: NOTE_DATA_VERSION, nodes }
+  const roots: NoteNode[] = []
+  for (const node of table.values()) {
+    const parent = parentRel(node.rel)
+    const owner = parent ? table.get(parent) : undefined
+    if (owner) owner.children?.push(node)
+    else roots.push(node)
+  }
+
+  return sortNoteNodes(roots)
 }
 
-/** 新建一个节点；名字为空（必填项没填）时返回 null，调用方据此给失败提示 */
-export function createNoteNode(
-  input: NoteInput,
-  uuid: () => string,
-  now: number = Date.now()
-): NoteNode | null {
-  const name = sanitizeNoteName(input.name)
-  if (!name) return null
-  if (!isNoteKind(input.kind)) return null
+// ---------- 打开过的笔记本 ----------
 
-  const base = { id: uuid(), name, createdAt: now, updatedAt: now }
-  return input.kind === 'folder'
-    ? { ...base, kind: 'folder', children: [] }
-    : { ...base, kind: 'note', content: input.content ?? '' }
+/**
+ * 「最近打开」最多留几条。
+ *
+ * 再多也只是一份往回找的清单，界面上那一段放不下 —— 而且真正的目的只有一个：
+ * 换回上次那个笔记本不用再翻一遍目录树。
+ */
+export const NOTE_HISTORY_MAX = 6
+
+/**
+ * 收敛一份「打开过的笔记本」清单。
+ *
+ * 逐条按目录的规矩收敛（去首尾空白与末尾分隔符），去掉空的与重复的 ——
+ * 同一个目录在 Windows 上不分大小写，所以比对用小写；
+ * 超过上限的部分整段丢掉，留下的是最近打开的那几个。
+ */
+export function sanitizeNoteHistory(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return []
+
+  const seen = new Set<string>()
+  const list: string[] = []
+  for (const item of raw) {
+    const dir = sanitizeNoteRoot(item)
+    if (!dir) continue
+
+    const key = dir.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    list.push(dir)
+    if (list.length >= NOTE_HISTORY_MAX) break
+  }
+  return list
+}
+
+/** 打开（或换到）一个目录：它排到最前面，已在那儿的不会出现两次 */
+export function pushNoteHistory(history: unknown, dir: unknown): string[] {
+  const target = sanitizeNoteRoot(dir)
+  if (!target) return sanitizeNoteHistory(history)
+  return sanitizeNoteHistory([target, ...sanitizeNoteHistory(history)])
+}
+
+/** 删掉清单里的一条（历史记录可以删）；本来就不在里面时原样返回 */
+export function removeFromNoteHistory(history: unknown, dir: unknown): string[] {
+  const target = sanitizeNoteRoot(dir).toLowerCase()
+  return sanitizeNoteHistory(history).filter((item) => item.toLowerCase() !== target)
 }
 
 // ---------- 读 ----------
 
-/** 深度优先找到节点本身；找不到返回 null */
-export function findNote(nodes: readonly NoteNode[], id: string): NoteNode | null {
+/** 深度优先找到某个路径上的节点；找不到返回 null */
+export function findNoteNode(nodes: readonly NoteNode[], rel: string): NoteNode | null {
+  const target = normalizeRel(rel)
+  if (!target) return null
+
   for (const node of nodes) {
-    if (node.id === id) return node
+    if (node.rel === target) return node
     if (node.children) {
-      const found = findNote(node.children, id)
+      const found = findNoteNode(node.children, target)
       if (found) return found
     }
   }
@@ -228,27 +406,25 @@ export function findNote(nodes: readonly NoteNode[], id: string): NoteNode | nul
 }
 
 /**
- * 从根到该节点的完整链（含自身）；找不到返回空数组。
- * 界面用它显示「它到底在哪一层」，也是「这个文件夹里还有没有别人」的判断依据。
+ * 从最外层到该节点的完整链（含自身）；找不到返回空数组。
+ * 界面用它写面包屑，也用它决定「要把哪几层展开」。
  */
-export function notePath(nodes: readonly NoteNode[], id: string): NoteNode[] {
+export function noteChain(nodes: readonly NoteNode[], rel: string): NoteNode[] {
+  const target = normalizeRel(rel)
+  if (!target) return []
+
   for (const node of nodes) {
-    if (node.id === id) return [node]
-    if (node.children) {
-      const deeper = notePath(node.children, id)
+    if (node.rel === target) return [node]
+    // 只往「可能是它祖先」的那一支里走：rel 是带层级的前缀路径
+    if (node.children && target.startsWith(`${node.rel}/`)) {
+      const deeper = noteChain(node.children, target)
       if (deeper.length) return [node, ...deeper]
     }
   }
   return []
 }
 
-/** 该节点的父文件夹 id（根节点返回 null）；找不到这个节点也返回 null */
-export function parentIdOf(nodes: readonly NoteNode[], id: string): string | null {
-  const path = notePath(nodes, id)
-  return path.length > 1 ? path[path.length - 2].id : null
-}
-
-/** 整棵树里的笔记条数（文件夹不算） */
+/** 整棵树里的笔记篇数（文件夹不算） */
 export function countNotes(nodes: readonly NoteNode[]): number {
   let total = 0
   for (const node of nodes) {
@@ -268,134 +444,26 @@ export function countNodes(nodes: readonly NoteNode[]): number {
   return total
 }
 
-// ---------- 写 ----------
+// ---------- 拖动 ----------
 
 /**
- * 把 `transform` 应用到命中的那个节点上，一路返回新树；没命中就原样返回（引用相等）。
+ * 拖动能不能落在某个节点上。
  *
- * 树的写操作都是这一套：命中之后每一层都要重建新数组、新对象，否则改动的就是内存里那份
- * 原始数据 —— 渲染层拿着它做乐观更新时，改到一半失败就退不回去了。
+ * 三条口径：
+ *   - **只有文件能拖**。文件夹也能拖的话，「把它拖进自己的下级」就是个能把整棵子树
+ *     从树里搬掉的动作 —— 后端挡住了（见 notes.rs），但那已经不是界面该允许的交互；
+ *   - **只能落在文件夹上**（`el-tree` 的 inner）。落在文件上意味着「插到它前面 / 后面」，
+ *     而这里的顺序是按名字算出来的，插出来的位置下一秒就没了。树下面的**空白区**也是落点：
+ *     拿 `{ rel: '', kind: 'folder' }` 问同一个函数，「移到最外层」与「拖进某个文件夹」
+ *     于是共用一条口径（原来靠最上面那一行根目录行兜着，根行去掉之后由空白区接手）；
+ *   - **拖回原处不算**：已经在那个文件夹里的文件拖上去，后端会返回一次空操作，
+ *     但界面上给个「能放」的提示再什么都不发生，会让人以为拖动坏了。
  */
-function mapNode(
-  nodes: NoteNode[],
-  id: string,
-  transform: (node: NoteNode) => NoteNode
-): NoteNode[] {
-  let changed = false
-  const next = nodes.map((node) => {
-    if (node.id === id) {
-      // 认「对象换没换」而不是「id 命中了吗」：transform 自己会判断这次改动是不是空操作，
-      // 命中了却什么都没改（改同一个名字、存同一份内容）时整棵树该保持原引用
-      const updated = transform(node)
-      if (updated !== node) changed = true
-      return updated
-    }
-    if (node.children) {
-      const children = mapNode(node.children, id, transform)
-      if (children !== node.children) {
-        changed = true
-        return { ...node, children }
-      }
-    }
-    return node
-  })
-  return changed ? next : nodes
-}
-
-/** 子项清单；`parentId` 为 null 时就是整棵树的根。找不到父节点返回 null（调用方按失败处理） */
-function childrenList(
-  nodes: readonly NoteNode[],
-  parentId: string | null | undefined
-): readonly NoteNode[] | null {
-  if (!parentId) return nodes
-  const parent = findNote(nodes, parentId)
-  if (!parent || parent.kind !== 'folder') return null
-  return parent.children ?? []
-}
-
-/** 同层现有的名字，供 `uniqueNoteName` 去重 */
-export function siblingNames(
-  nodes: readonly NoteNode[],
-  parentId: string | null | undefined
-): readonly NoteNode[] {
-  return childrenList(nodes, parentId) ?? nodes
-}
-
-/**
- * 把一个新节点挂进去。
- *
- * 父节点不存在或不是文件夹时原样返回（引用相等），调用方据此报「目标文件夹已经不在了」——
- * 界面上的树可能停在几步之前，这个分支是会走到的。
- */
-export function addNoteNode(
-  nodes: NoteNode[],
-  parentId: string | null | undefined,
-  node: NoteNode
-): NoteNode[] {
-  if (!parentId) return [...nodes, node]
-  return mapNode(nodes, parentId, (parent) =>
-    parent.kind === 'folder'
-      ? { ...parent, children: [...(parent.children ?? []), node] }
-      : parent
-  )
-}
-
-/** 改名。名字没变（或收敛后为空）时原样返回，不刷新 `updatedAt`（与主题文件同一条口径） */
-export function renameNoteNode(
-  nodes: NoteNode[],
-  id: string,
-  name: string,
-  now: number = Date.now()
-): NoteNode[] {
-  const clean = sanitizeNoteName(name)
-  if (!clean) return nodes
-
-  return mapNode(nodes, id, (node) =>
-    node.name === clean ? node : { ...node, name: clean, updatedAt: now }
-  )
-}
-
-/** 改正文。内容没变时不刷新 `updatedAt` —— 编辑器反复保存同一份内容不该算改动 */
-export function setNoteContent(
-  nodes: NoteNode[],
-  id: string,
-  content: string,
-  now: number = Date.now()
-): NoteNode[] {
-  return mapNode(nodes, id, (node) =>
-    node.kind === 'note' && node.content !== content
-      ? { ...node, content, updatedAt: now }
-      : node
-  )
-}
-
-/** 删掉一个节点；是文件夹就整棵子树一起走（树结构本身表达了这个语义，不需要额外处理） */
-export function removeNoteNode(nodes: NoteNode[], id: string): NoteNode[] {
-  let changed = false
-  const next: NoteNode[] = []
-
-  for (const node of nodes) {
-    if (node.id === id) {
-      changed = true
-      continue
-    }
-    if (node.children) {
-      const children = removeNoteNode(node.children, id)
-      if (children !== node.children) {
-        changed = true
-        next.push({ ...node, children })
-        continue
-      }
-    }
-    next.push(node)
-  }
-
-  return changed ? next : nodes
-}
-
-/** 按名字排序后的树（深拷贝）：树的默认摆放顺序是「建的时候什么样就什么样」，要名字序时用它 */
-export function sortByName(nodes: readonly NoteNode[]): NoteNode[] {
-  return [...nodes]
-    .map((node) => (node.children ? { ...node, children: sortByName(node.children) } : node))
-    .sort((left, right) => left.name.localeCompare(right.name, 'zh-Hans-CN'))
+export function noteDropAllowed(
+  drag: { rel: string; kind: NoteKind },
+  target: { rel: string; kind: NoteKind }
+): boolean {
+  if (drag.kind !== 'note') return false
+  if (target.kind !== 'folder') return false
+  return parentRel(drag.rel) !== normalizeRel(target.rel)
 }

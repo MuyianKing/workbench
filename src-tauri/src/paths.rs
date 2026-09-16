@@ -17,15 +17,19 @@ pub const THEME_FILE: &str = "theme.json";
 /// 工作日志（见 shared/work-log.ts）。**只在本机**：它不进同步仓库，
 /// 但跟着数据目录走 —— 用户换数据目录时，自己写过的日志不该落在原地。
 pub const WORK_LOG_FILE: &str = "work-log.json";
-/// 笔记（见 shared/note.ts）。与工作日志同一条口径：**只在本机**，
-/// 不进同步仓库，但跟着数据目录一起搬。
-pub const NOTE_FILE: &str = "note-data.json";
+/// **旧版**笔记数据文件（一棵「文件夹 + 笔记」的 JSON 树）。
+///
+/// 笔记现在就是用户自己挑的那个文件夹里的 .md 文件（见 notes.rs），这份文件不再读写；
+/// 保留它只是为了迁移数据目录时把这个历史文件一起带走，不把用户盘上唯一的旧副本落下。
+pub const LEGACY_NOTE_FILE: &str = "note-data.json";
 /// 改名前的用量快照文件名，只在一次性搬家时用得上
 const LEGACY_TOKEN_DATA_FILE: &str = "token-data.json";
 /// 本机设备标识（Token 同步用）
 const DEVICE_FILE: &str = "device.json";
 /// Token 同步仓库的本地克隆目录名
 const TOKEN_SYNC_DIR: &str = "token-sync";
+/// 图片仓库的本地克隆目录名（笔记里粘贴的图片推上去，见 sync.rs 的 publish_image）
+const IMAGE_SYNC_DIR: &str = "image-sync";
 /// 克隆里放**用量分片**的子目录名：一台机器一个文件
 pub(crate) const TOKEN_USAGE_DIR: &str = "token-usage";
 /// 克隆里放**配置**的子目录名：一台机器一份 theme.json 的副本（见 shared/sync-config.ts）
@@ -76,8 +80,9 @@ pub fn work_log_file() -> PathBuf {
     data_dir().join(WORK_LOG_FILE)
 }
 
-pub fn note_file() -> PathBuf {
-    data_dir().join(NOTE_FILE)
+/// 旧版笔记数据文件的落点（只给数据目录迁移用，见 LEGACY_NOTE_FILE 的说明）
+pub fn legacy_note_file() -> PathBuf {
+    data_dir().join(LEGACY_NOTE_FILE)
 }
 
 /// 一次性的本地改名：用量快照从 `token-data.json` 换成 `token-usage.json`。
@@ -105,6 +110,13 @@ pub(crate) fn migrate_legacy_files_in(dir: &Path) {
 /// Token 同步仓库的本地克隆；机器本地的缓存，删掉会在下次同步时重新克隆
 pub fn token_sync_dir() -> PathBuf {
     user_data_dir().join(TOKEN_SYNC_DIR)
+}
+
+/// 图片仓库的本地克隆。与用量同步那个**分开两份**：两个仓库地址可以完全不同，
+/// 共用一个克隆目录的话，换地址就会互相把对方的克隆删掉重新拉一遍。
+/// 同样是机器本地的缓存，删掉会在下次上传时重新克隆。
+pub fn image_sync_dir() -> PathBuf {
+    user_data_dir().join(IMAGE_SYNC_DIR)
 }
 
 /// 本机设备标识（Token 同步用）。机器本地生成，**不随数据目录迁移、也不进同步仓库**：
@@ -140,8 +152,8 @@ pub fn migrate_data_dir(dir: &str, current: &serde_json::Value) -> Result<(), St
     let _ = std::fs::copy(theme_file(), target_dir.join(THEME_FILE));
     // 工作日志也是本地数据：它不进同步仓库，但数据目录一换就该跟着走
     let _ = std::fs::copy(work_log_file(), target_dir.join(WORK_LOG_FILE));
-    // 笔记同理：那是用户自己写的东西，换目录时漏掉就等于把它删了
-    let _ = std::fs::copy(note_file(), target_dir.join(NOTE_FILE));
+    // 旧版笔记文件（不再读写）顺手带走：用户盘上可能只有这一份历史笔记
+    let _ = std::fs::copy(legacy_note_file(), target_dir.join(LEGACY_NOTE_FILE));
 
     std::fs::write(
         pointer_path(),

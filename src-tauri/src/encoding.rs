@@ -30,8 +30,11 @@ pub fn sha256(input: &[u8]) -> [u8; 32] {
     Sha256::digest(input).into()
 }
 
-/// base64 解码。生产侧只编码不回读，这里给测试用（icon.rs 要验证抽出来的 PNG 真能解码）。
-#[cfg(test)]
+/// base64 解码。`note_image_upload` 用它把渲染层递过来的整张图还原成字节
+/// （IPC 只走 JSON，二进制要编一手）；icon.rs 的测试也用它验证抽出来的 PNG 真能解码。
+///
+/// 解不开一律返回 None，由调用方给一句人话 —— 这里是唯一的调用对手方是渲染层，
+/// 拿不到字节就是这次调用本身不对，不该 panic。
 pub fn base64_decode(input: &str) -> Option<Vec<u8>> {
     base64::engine::general_purpose::STANDARD.decode(input).ok()
 }

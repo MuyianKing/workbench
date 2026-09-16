@@ -46,10 +46,14 @@
 - 定位：Windows 桌面应用（Tauri 2 + WebView2），本机的「前端开发工作台」—— 管项目（一键启停打包）、
   记工作（工作日志时间轴）、写笔记（本地 markdown 笔记本）、看 AI 用量（本机各工具的 Token 快照），
   四者都在一个窗口里，不是单纯的项目启动器。
-- 联网边界：默认不联网、不上报任何数据。**出口只有三个，且都由用户显式开启**：用户配置的 Token 同步仓库
-  （一个 git 远程地址，设置里留空即关闭）、账号登录（点登录时才打 GitHub / Gitee 的 OAuth 接口，
-  见 `oauth.rs`）、命令执行本身。除这三处不要新增网络出口，也不要往任何第三方服务发数据。
-  登录是这条边界唯一一次放宽，加别的东西之前先想清楚能不能不做。
+- 联网边界：默认不联网、不上报任何数据。**出口只有五个，且都由用户显式开启**：用户配置的三个 git 仓库
+  （Token 同步仓库、笔记图片仓库、**笔记仓库** —— 设置里各填各的，留空即关闭，见第 5 节）、
+  账号登录（点登录时才打 GitHub / Gitee 的 OAuth 接口，见 `oauth.rs`）、命令执行本身。
+  除这五处不要新增网络出口，也不要往任何第三方服务发数据 —— 前四个打的都是**用户自己填的那个 git 仓库
+  或那两家平台的接口**，没有一处是我们自己的服务。
+  「看图片」这件事包含在这一条里、不算新出口：正文里的外链图片由 webview 直接按那个地址取，
+  素材面板里的缩略图取的是同一条地址（只给看得见的行取，见第 5 节）。
+  登录是这条边界唯一一次放宽（应用内嵌了 client_id/secret），加别的东西之前先想清楚能不能不做。
 - 技术栈：Rust 后端（Tauri ^2）+ Vue ^3.5.13 + TypeScript ^5.9.3；Element Plus ^2.8.8 + @element-plus/icons-vue ^2.3.1；Pinia ^4.0.3；markdown-it（**只服务工作日志正文的 markdown 渲染**，见第 5 节）；Vditor（**只服务笔记正文**，见第 5 节）。
 - 引入新前端依赖前先想清楚它会不会在**运行时**去取外面的资源：Vditor 就是这类（图标 / 语言包 /
   markdown 引擎 / 主题 / 代码高亮都按 `options.cdn` 在运行时取，默认指 unpkg）。
@@ -61,8 +65,9 @@
   `base64` / `sha2`（编码与摘要，替掉手写的实现）。**判断标准是不新增编译单元**，
   而不是「不新增 crate 名」：要加新依赖前先 `cargo tree -e normal -i <crate>` 看一眼它是否已经在图里。
   除此之外**不要**引入其他 native / 运行时依赖（`reqwest`、`git2`、`sysinfo` 这类会拉进整套栈的不行）。
-- 唯一需要用户预装的外部程序是 **git**，且只在 Token 同步（`sync.rs`）里用：直启 `git.exe`（`proc::run_direct`，
-  **不要**经 `cmd /C` 起它，参数行会被二次解析），超时与失败一律收敛成给用户看的提示。别处不要新增这类外部依赖。
+- 唯一需要用户预装的外部程序是 **git**，且只在两处用：Token 同步与笔记图片上传（都在 `sync.rs`）。
+  直启 `git.exe`（`proc::run_direct`，**不要**经 `cmd /C` 起它，参数行会被二次解析），
+  超时与失败一律收敛成给用户看的提示。别处不要新增这类外部依赖。
   账号登录那点 HTTPS **不走外部程序也不引 HTTP 库**：用系统自带的 WinHTTP（`http.rs`），代价是自己写一段 FFI。
 - 构建 / 打包：Vite ^8.3.0（渲染层，打包器是 **rolldown**，不再是 rollup + esbuild）+ cargo / Tauri CLI → Windows x64 NSIS。包管理器固定 npm（`package-lock.json`）；Rust 依赖的锁文件 `src-tauri/Cargo.lock` 要提交。
 - 根 `package.json` 是 `"type": "module"`：Vite 8 起配置文件按模块类型加载，缺了它会报「ESM syntax in a file loaded as CommonJS」，
@@ -86,7 +91,10 @@
   - `paths.rs`（数据目录与指针）、`store.rs`（去抖 JSON 落盘）、`encoding.rs`（base64 / base64url / UTF-16 宽字符串 / SHA-256）。
   - `session.rs`（子进程会话：起命令、按批回传输出、按进程树终止）、`proc.rs`（带超时的子进程原语与进程树终止）。
   - `system.rs`（端口检测 / 资源管理器 / ShellExecute）、`nvm.rs`（nvm 只读探测）、`token.rs`（ZCode sqlite + zstd）、
-    `sync.rs`（同步仓库的 git 操作：克隆 / 拉 / 提交 / 推、读回别人的用量与配置）、`icon.rs`（程序图标抽取）。
+    `sync.rs`（同步仓库的 git 操作：克隆 / 拉 / 提交 / 推、读回别人的用量与配置；笔记图片的上传与清理；
+    **笔记同步**（`sync_notes` —— 在用户那个笔记文件夹里就地跑 git，没有克隆目录））、`icon.rs`（程序图标抽取）。
+  - `notes.rs`（笔记文件夹：列目录 / 读 / 写 / 新建 / 改名 / 移动 / 删除）。**它只认相对笔记根的路径**，
+    逐段只接受普通名字，`..` 与绝对路径一律挡住；改名 / 移动 / 删除还要再挡一道「不能对笔记根自己下手」。
   - 账号登录三个模块：`oauth.rs`（两家授权流程、回环回调、换 token 与账号信息）、`http.rs`（WinHTTP 极简
     HTTPS 客户端）、`credentials.rs`（Windows 凭据管理器读写）。它们的凭据来自 `src-tauri/oauth.local.json`，
     由 `build.rs` 注入到 `OUT_DIR/oauth.json` 后 `include_str!` —— 该文件**不入库**，模板见 `oauth.example.json`，
@@ -97,14 +105,17 @@
   vite 的 `publicDir` 会把它们原样复制进产物根目录，开发态由 dev server 直接提供，因此引用时用**相对基址**
   （`import.meta.env.BASE_URL`）而不是写死 `/xxx` —— 打包后被引用的地址同时要在 `http://` 与 Tauri 的自定义协议下成立。
 - **适配层**在 `src/renderer/src/workbench/` —— 它是原 preload + 主进程逻辑的替代品，实现 `window.workbench` 契约：
-  `bridge.ts`（invoke / 事件 / 未移植兜底 / `guard`）、`events.ts`（适配层内部广播）、`state.ts`（持久化状态与增删改）、`session.ts`（进程会话与事件翻译）、`scanner.ts` / `nvm.ts` / `token.ts` / `work-log.ts` 与 `note.ts`（工作日志与笔记，都懒加载整份文件）/ `system.ts` / `quick-launch.ts` / `auth.ts`（登录轮询与状态对账），全局类型声明在 `global.d.ts`。
+  `bridge.ts`（invoke / 事件 / 未移植兜底 / `guard`）、`events.ts`（适配层内部广播）、`state.ts`（持久化状态与增删改）、`session.ts`（进程会话与事件翻译）、`scanner.ts` / `nvm.ts` / `token.ts` / `work-log.ts`（懒加载整份文件）与 `note.ts`（笔记：每次调用都带着笔记文件夹去读写磁盘，**没有内存副本**）/ `system.ts` / `quick-launch.ts` / `auth.ts`（登录轮询与状态对账），全局类型声明在 `global.d.ts`。
 - 两端共用（类型、契约、纯逻辑）放 `src/shared/`；`shared/` 里禁止 import node、Rust 或渲染层代码。
+  笔记占两个文件：[note.ts](src/shared/note.ts)（目录树与文件名）与 [note-image.ts](src/shared/note-image.ts)
+  （图片文件名、**仓库内的三层落点**（见第 5 节的 `imageScopeDir`）、**粘贴后插进正文的那个访问地址**）。
 - 单测与被测模块同目录，命名 `*.test.ts`。路径别名：`@` → `src/renderer/src`，`@shared` → `src/shared`。
-- **跨组件复用的交互骨架放 `src/renderer/src/composables/`**（目前只有 `use-pointer-drag`：
-  拖拽的起手 / 跟手 / 收手 / Esc 取消 / 解绑）。它带单测（用最小的 window 桩，见
-  [use-pointer-drag.test.ts](src/renderer/src/composables/use-pointer-drag.test.ts)），
-  所以「系统取消指针要收手」这类边界一次改对、五处都受益 —— 别再往组件里手写
-  `addEventListener('pointermove', …)` 那一套。
+- **跨组件复用的交互骨架放 `src/renderer/src/composables/`**，目前两个：
+  `use-pointer-drag`（拖拽的起手 / 跟手 / 收手 / Esc 取消 / 解绑）与
+  `use-floating-dismiss`（浮层的收起：左键点别处 / 右键别处 / Esc / 滚轮 / 窗口缩放或失焦）。
+  两个都带单测（用最小的 window 桩，见同目录的 `*.test.ts`），
+  所以「系统取消指针要收手」「右键按下那一下不能收」这类边界一次改对、各处都受益 ——
+  别再往组件里手写 `addEventListener('pointermove' | 'pointerdown', …)` 那一套。
 - 文档分工：[README.md](README.md) 只给概览、截图与上手命令（面向别人看个大概），
   [docs/features-and-architecture.md](docs/features-and-architecture.md) 是当前功能与架构事实的唯一真源，
   本文件只写约束，`docs/dev-notes/` 放动手方法与踩坑。
@@ -166,13 +177,135 @@
 - **store 里不要直接 import element-plus**：提示与确认框一律经 [notify.ts](src/renderer/src/notify.ts)
   的 `notifySuccess` / `notifyError` / `confirmAction`。这样这些 action 才可能被单测覆盖
   （测试里 `vi.mock('@/notify')` 即可记下「说了什么」），也让「状态层」与「怎么提示」分开演进。
-- 持久化在 Rust 侧：走 `store.rs`（300ms 防抖 + 临时文件 rename + 退出前同步落盘）。数据文件 `workbench-data.json`（项目 / 快捷启动 / 命令，以及与本机绑定的设置）、`theme.json`（**外观 + 首页布局**）、`token-usage.json`（Token 按天快照）、`work-log.json`（工作日志，**只在本机**）、`note-data.json`（笔记，**只在本机**），目录指针 `data-location.json` 固定在 `%APPDATA%/Workbench/`。
-- **工作日志与笔记都不进同步仓库**（[work-log.ts](src/shared/work-log.ts) / [note.ts](src/shared/note.ts)）：它们是不写在 `workbench-data.json` 里、也不随同步走的用户数据 —— 工作内容与笔记是最贴近个人记录的东西，多机合并也不成立（不像用量数字那样可相加）。别为了「顺手统一」把它们塞进同步或主数据文件；数据目录迁移时它们跟着搬（`paths.rs` 的 `migrate_data_dir`），因为项目列表、快捷启动同样属于「这台机器上的数据」。
+- 持久化在 Rust 侧：走 `store.rs`（300ms 防抖 + 临时文件 rename + 退出前同步落盘）。数据文件 `workbench-data.json`（项目 / 快捷启动 / 命令，以及与本机绑定的设置，**笔记文件夹 `noteDir` 也在里面**）、`theme.json`（**外观 + 首页布局**）、`token-usage.json`（Token 按天快照）、`work-log.json`（工作日志，**只在本机**），目录指针 `data-location.json` 固定在 `%APPDATA%/Workbench/`。
+- **笔记没有数据文件**（[note.ts](src/shared/note.ts)）：它就是一个**用户自己挑的文件夹**里的 `.md` 文件，应用只记下「当前打开的是哪个目录」（设置里的 `noteDir`）与「打开过的那几个」（`noteDirs`，左栏底部的「最近打开」）。两个都只对本机成立，所以不进 theme.json、也不参与同步（左栏**宽度**是另一回事：它是「界面长什么样」，
+  住 theme.json 的 `noteTreeWidth`，与首页那两条栏宽同一套做法 —— 拖动时只改本地、松手才落盘）。
+  首次进笔记页必须先选这个文件夹，没选之前不显示任何操作入口。三条不能破：**所有笔记命令都要带 root**（别把路径缓存在适配层里，用户换了文件夹来源就换了）；**路径只认相对笔记根的写法**，`..` / 绝对路径在 `notes.rs` 里被挡住；**结构改动一律用后端重新扫出来的树**，别在本地推算改动结果（外面用别的编辑器改过那些文件时，只有磁盘说了算）。
+- **笔记的目录树**（[NoteTree.vue](src/renderer/src/components/NoteTree.vue)）：树就是笔记本里的东西本身，
+  **没有「根行」那一层**（笔记本是哪个目录写在左栏底部）。拖动往最外层的落点是树下面的**空白区**——
+  不归 `el-tree` 管（它的落点只认节点行），得自己接 `dragover` / `drop` 并 preventDefault，
+  用 `noteDropAllowed(被拖的, { rel: '', kind: 'folder' })` 判能不能落。
+  `el-tree` 的脾气要留意：它的落点是**上一次悬停过的那个节点**（指针离开节点行时不会清掉），
+  于是「划过某个文件夹、再落到空白区」会按那个文件夹挪 —— 所以指针一进空白区就立一个
+  `blankHover` 标记，让紧跟着的 `node-drop` 让路（**不论那儿能不能放**：已经在最外层时放它过去，
+  文件反而会被塞进刚划过的文件夹）。标记只看指针位置、只在 window 的 `dragend` 上收尾 ——
+  **不能挂在 `el-tree` 的 `node-drag-end` 上**：源码里它先于 `node-drop` 发出来，在那儿清就白记了。
+  右键菜单也分两处：节点行上是新建 / 重命名 / 删除，
+  空白区上只有新建，且一律落在笔记本根目录（顶部那条工具条已经去掉）。
+  口径都在 [note.ts](src/shared/note.ts) 的纯函数里：
+  文件夹排在文件前面、同层按名字排（`buildNoteTree`，带 `numeric` 的排序规则）；只收 `.md` / `.markdown`。
+  **扫的时候有一份忽略名单**（[notes.rs](src-tauri/src/notes.rs) 的 `IGNORED_DIRS`）：点开头的一律跳
+  （`.git`、`.obsidian`、`.vscode`、`.idea`…），外加 `node_modules` / `dist` / `build` / `out` / `target` /
+  `coverage` 这些不由点的噪音目录整棵不走 —— 它们动辄几万个文件，笔记也不会住在里面。
+  代价是用户真有一个叫 `build` 的目录装笔记时看不见它；要么改名单，要么那个目录换个名字，别把名单悄悄删掉。
+  **只有文件能拖、只能落进文件夹**（`noteDropAllowed`）——
+  顺序是按名字算出来的，所以 `el-tree` 的 prev / next 两种落法一律不放行。
+  两条要留意的：名字最终是文件名，带 `/`、`:` 或系统保留名的必须在名字弹窗里当场说清楚
+  （`noteNameProblem`，不是只报「非法」）；`el-tree` 在松手那一刻已经自己挪过它那份数据了，
+  磁盘上真挪没挪由 store 说了算 —— 移动失败时要**重新扫一遍**，否则左栏显示的是一个磁盘上并不存在的位置。
+  **展开态那份清单（`default-expanded-keys`）有两条 `el-tree` 的坑**，改之前先看 NoteTree 里的注释：
+  `auto-expand-parent` **默认是 true**（清单里任一项被展开时会顺手把它的祖先也展开，于是
+  「收起选中项所在的那一支」会被那一支里的子孙顶回去，表现成**那一支怎么点都收不起来、别处却正常**）；
+  清单里也**不能放选中项自己**（点一行同时会切换展开态，把自己塞回清单等于刚收起又被自己顶开）。
+  两条都是踩过的：修完要真点一遍「选中项所在那一支的展开箭头 / 行」，光看代码看不出来。
+- **工作日志与笔记都不进同步仓库**（[work-log.ts](src/shared/work-log.ts) / [note.ts](src/shared/note.ts)）：工作日志是不写在 `workbench-data.json` 里、也不随同步走的用户数据 —— 工作内容是最贴近个人记录的东西，多机合并也不成立（不像用量数字那样可相加）。数据目录迁移时它跟着搬（`paths.rs` 的 `migrate_data_dir`）；笔记则是用户自己的目录，本来就不在数据目录里，应用不复制它。别为了「顺手统一」把工作日志塞进同步或主数据文件 —— 旧版那棵笔记 JSON 树（`note-data.json`）就是反例，它只在迁移数据目录时顺手带走、不再读写。
 - **笔记正文用 Vditor 编辑**（[NoteEditor.vue](src/renderer/src/components/NoteEditor.vue)）：它的图标 / 语言包 / markdown 引擎（lute）/ 内容主题 / 表情 / 代码高亮都是**运行时**按 `options.cdn` 去取的，默认指 unpkg —— 所以 `cdn` 必须指向随包带的那一份（`public/vditor/`），内容由 [sync-vditor-assets.mjs](scripts/sync-vditor-assets.mjs) 在 dev / build 前从 `node_modules/vditor/dist` 复制（挂在 vite 的 `configResolved` 上，两条路都绕不过去；该目录在 `.gitignore` 里）。**升级 Vditor 后要留意它是不是又要新资源**：缺哪个就是哪个功能不生效（本地 404，不会退回联网），编辑器本身会起不来（踩过：漏了 lute）。另外它的 localStorage 缓存要关掉（`cache.enable`），正文的落盘归 store 与适配层。
+  还有一条与「这一页长什么样」有关：**写作区的底色必须是透明的**（`.vditor-ir pre.vditor-reset`
+  等几条，见 NoteEditor 的样式）。Vditor 默认给它铺一层不透明底色（`--panel-background-color`），
+  于是半透明卡片里会嵌着一块实心白，左栏那张卡片整块都透、右边只有标题那一行透，两张对不上；
+  这一页的底色归卡片（`.panel` + 卡片不透明度），编辑器只管字。它那条 `:focus` 换底色的规则
+  特异性更低，同一条声明就够了（改样式时别把它删了）。
+  另一条是**代码块上下的空档**（NoteEditor 样式里那组 `data-type='code-block'` 规则）：
+  收起态的代码块是「一行 inline 的围栏标记 + 一块 `<pre>`」，写作区又是 `white-space: pre-wrap`，
+  那两个零尺寸的标记照样撑起一整个行高，加上 Vditor 的 `:before/:after { content: ' ' }`，
+  代码块上下各多出 24px 空行 —— 写「列表项 + 代码块」时那两条空档就顶在文字与灰底之间。
+  收掉它们时**只能限定在收起态**（`:not(.vditor-ir__node--expand)`）：展开态那两行就是围栏本身
+  （` ``` ` 与语言名），一起删掉就没法改代码块的语言了。正文取值读的是 DOM 文本，
+  这些标记改成 `display: none` 不影响 `getValue()`（已实测：收起 / 展开 / 取正文都正常）。
   两条与它打交道时踩过的坑：**它的 `input` 回调不是同步到的**（内部还有一层处理延迟），
   所以换篇 / 卸载时不能只看防抖攒下的那一份，要 `getValue()` 现取一份再交出去，否则「打完字立刻点开另一篇」那几个字就没了；
-  交出去的正文**必须带上它属于哪一篇**（`{ id, content }`），换上来的那篇正是「当前选中项」，
-  只按选中项取 id 会把上一篇的正文写进刚点开的那一篇。
+  交出去的正文**必须带上它属于哪一篇**（`{ rel, content }`），换上来的那篇正是「当前选中项」，
+  只按选中项取路径会把上一篇的正文写进刚点开的那一篇。
+  第三条是这套「笔记就是磁盘上的文件」带来的：**空文档在 Vditor 里是 `'\n'`，不是 `''`**，
+  两者之间不算改动（`sameText`）—— 照实写下去，每打开一次空笔记都会给盘上的空文件补一个换行；
+  而一旦它被当成一次改动，改名 / 删除那一下的收尾 flush 就会带着**旧路径**发出去，在旧位置凭空长出一个文件（踩过）。
+  配套的另一道闸在 store 的 `saveContent`：路径已经不在树里就整次写盘不发出去。
+- **粘贴的图片推到用户自己的图片仓库**（[NoteEditor.vue](src/renderer/src/components/NoteEditor.vue) 的 `uploadImages` →
+  [workbench/note.ts](src/renderer/src/workbench/note.ts) 的 `uploadNoteImage` → [sync.rs](src-tauri/src/sync.rs) 的 `publish_image`）：
+  笔记本里**不放图片文件**，正文里只有一条外链，于是笔记搬到哪台机器、用哪个编辑器打开都成立。
+  落点是**三层**：`<设置里的图片目录>/<本机设备>/<笔记本>/<文件名>`，后两层由
+  [note-image.ts](src/shared/note-image.ts) 的 `imageScopeDir` 现算（设备 id 与 Token 分片同一个、
+  笔记本是「目录名小写 + 整个路径的摘要」）。**这三层是素材管理成立的前提**（见下面那一条），
+  上传 / 列清单 / 删图三条通道用的是同一个算法 —— 别在某一处另写一份路径拼法。
+  七条不能破：
+  1. **`upload.handler` 必须配着**。不配的话 Vditor 会把图片读成 base64 直接内联进正文
+     （它源码里那条「没有 url / handler 就用 FileReader」的分支），几篇带图的笔记就能把 `.md` 撑成几兆；
+  2. **handler 返回字符串等于报错**，成功时必须返回 `null` 并自己 `insertValue` ——
+     别指望它替你把 markdown 插进去（它只判「是不是字符串」，是就当提示弹出来然后结束）；
+  3. **图片仓库地址留空时只是提示**，不退回内联、也不发任何请求：这是联网边界上的第四条出口，
+     必须由用户显式开出来（见第 1 节）；
+  4. **访问地址由 TS 拼**（[note-image.ts](src/shared/note-image.ts) 的 `imageRawUrl`），Rust 只回「仓库里的路径 + 分支」。
+     GitHub / Gitee / GitLab 三家自动认，其余（自建 GitLab / Gitea、图床镜像、Pages）要用户填「访问地址前缀」——
+     拼不出来时**不要**往正文里插一个点不开的地址，如实告诉用户去填；
+  5. 文件名（时间戳 + 随机段，`imageFileName`）与**整条子目录**都由 TS 算好（`imageScopeDir`）；
+     **设备标识拿不到、或者没打开笔记本时如实报错，不要退回上一层目录去传** ——
+     退回等于让所有机器、所有笔记本的图混进同一层，素材管理里那列「未引用」立刻变成假数字。
+     Rust 侧只做最后一道把关（`image_relative_path`：名字里带分隔符或 `..` 就能写到克隆目录外面去）。
+  克隆目录是 `%APPDATA%/Workbench/image-sync`，**与用量同步那个分开两份**（两个仓库地址可以完全不同）。
+  6. **`src/renderer/index.html` 里那条 `<meta name="referrer" content="no-referrer">` 不能删**：
+     Gitee 的 `/raw/` 有防盗链 —— 请求带 `Referer`（且不是 gitee.com）时直接 403
+     （实测：不带 Referer 200、带 `Referer: http://localhost:5274/` 403，与 UA / Sec-Fetch-* 无关）。
+     WebView 里 `<img>` **一定会带** Referer，所以少了这一条，所有 Gitee 图都会裂：
+     上传成功、地址也对、curl 也 200，就是显示不出来（踩过）。顺手也是个隐私改进：
+     笔记里的外链图片不会再收到「这篇笔记在哪个地址被打开」。
+  7. **上传期间要在编辑器上挂一颗 loading 角标**（`uploading`，见 NoteEditor 的 `.upload`）：
+     一次上传就是一次 `git push`，几秒钟很正常，而这几秒里正文什么都不会出现 ——
+     没有提示就像按下去没反应。收尾只放在 `finally` 里（中途 return 时角标同样要收掉），
+     别用 `v-loading` 那层遮罩：上传时用户往往还在接着写，遮罩会把正文一起锁住。
+- **素材管理（笔记页左栏底部那颗图片按钮）管的是「当前这个笔记本在这台机器上的那一层图片」**：
+  它把「那一层里有哪些图」与「这个笔记本里谁还在用」凑起来，让你把没人用的清掉。四条口径：
+  1. **引用次数是数出来的，不是记下来的**。正文就是磁盘上的 `.md`，别处编辑器随时能改，
+     所以口径是「面板一开就重新数一遍」（缓存只用于先把上次的结果显示出来，**不用于决定删不删**）。
+     数的是**文件名**的出现次数（同一张图在正文里可能是 raw 地址、带前缀的地址、相对路径），
+     纯函数在 [note-image.ts](src/shared/note-image.ts)（`buildImageAssets` / `countImageReferences`）；
+  2. **清单与引用都只限「这台机器 + 当前笔记本」那一层**（就是上面那个目录：列它、也按它删）。
+     所以「未引用」才真的等于「这个笔记本里没人用」——**别把清单扩到上一层去**：那样列出来的是
+     别的笔记本、别的机器的图，它们的引用次数拿当前笔记本的正文根本数不出来，看着能删、删了会裂图。
+     还能删错的只剩一种情形：地址被**手工抄到别处**用过，确认框里如实说这一句，
+     这是这个功能唯一不可逆的地方。
+     **没打开笔记本时这一页什么都不列**（说一句「先选个文件夹」），不要退回上一层去猜；
+  3. **只放行「未引用」的那些**（勾不动的行就是有人用的），删除是**一次提交 + 一次推送**
+     （与粘贴上传同一套 git 机制，参数见 sync.rs 的 `delete_images_at`）；
+     一张都没删到时不提交空提交；
+  4. **路径边界一律在 Rust 侧**（`image_repo_path`）：递回去的路径必须逐段是普通名字、
+     必须是图片、必须落在**这次传下去的那个目录**里 —— 少最后一条，删图就能删到仓库里别的东西上
+     （用量分片、配置文件、别的笔记本的图都在同一个仓库里）。渲染层只负责「哪些被选中了」。
+  另外两条：**扫描正文那条通道只回原始文本**（`note_scan_texts`），怎么算「引用了一次」是上面的纯函数；
+  读不出来的笔记要**计数并如实说给用户**（少读一篇就可能把还在用的图当成没人引用）；
+  面板里那点缩略图取的就是图片自己的访问地址（与正文里显示图片同一条路，按行懒加载）。
+- **笔记可以整体同步到用户自己的一个 git 仓库**（设置里的「笔记仓库」`noteSyncRepo`，空串 = 不同步；
+  笔记页左栏底部那颗同步按钮是入口，实现在 [sync.rs](src-tauri/src/sync.rs) 的 `sync_notes`）。
+  与另外两处同步最大的区别是**没有克隆目录**：跑 git 的地方就是用户那个笔记文件夹本身，
+  还不是仓库时就地 `git init` 并接上配置里的地址 —— 「笔记就是磁盘上那些 `.md`」这条不变。
+  六条不能破：
+  1. **文件夹已经连着别的仓库时报错，不动它的 origin**：那是用户的文件夹，悄悄改地址等于把笔记推到
+     一个他没选的地方（与 `ensure_clone` 相反：那边是应用自己的缓存，可以整个删掉重来）。
+     比地址时**本地路径要放宽**（`C:/a/b` 与 `C:\a\b` 是同一处，见 `same_remote` / `local_path_key`），
+     网络地址仍按 `normalize_repo` 那条严口径 —— 这条是实测踩到的，不是设想；
+  2. **次序固定为「提交本机改动 → pull --rebase → 推」**，提交必须在前：反过来的话工作区里的改动
+     会挡住 rebase，而还没提交的那一份在冲突里没有落脚点；
+  3. **冲突不替用户挑边**：中止这次 rebase（本地那笔提交留着）、把冲突的文件名报回去 ——
+     笔记是文字，自动挑一边就是悄悄改掉人家的内容。**只在这次是我们起的 rebase 时才 abort**：
+     文件夹里本来就留着半截 rebase / merge 的话，那是用户的现场，入口直接拒绝动手；
+  4. **同步前必须先让编辑器把手上的那一份交出去**（[NotesView.vue](src/renderer/src/components/NotesView.vue)
+     的 `editorRef.flushAll()` + store 的 `waitForWrites()`），否则提交的是按下按钮之前的那一版
+     （实测：打字后立刻点同步，那一段确实进了这次提交）；回来之后**重扫树 + 重读打开着的那一篇**
+     （远端可能刚好改过它），换正文由 `reloadFromProps()` 转达给编辑器 —— 编辑器实例只有上层拿得到；
+  5. 分支按**这个工作区当前站着的**那个走（用户在自己文件夹里切过分支，别去动它）；只有还没有提交时
+     才交给 `sync_branch`（跟着远端已有分支，都没有才新建 main —— 与另外两处同一条口径）；
+  6. 提交信息是 `notes: <设备名>`；用户没配过 git 身份时只写**这个仓库的本地配置**兜底，
+     不动他的全局身份。
+- **编辑器的动作走右键菜单，工具带只是不显示、仍在 DOM 里**（[NoteContextMenu.vue](src/renderer/src/components/NoteContextMenu.vue) 按名字去点工具带上的按钮）：菜单负责摆位置与收起，动作本身一律交回 Vditor —— 别在菜单里另写一套格式化（选区、markdown 往返、撤销栈都会与工具带分叉）。三条不能破：`TOOLBAR` 里删项前先看菜单有没有用它（工具带藏着，点不到只会在控制台留一句告警）；菜单按下时要 `preventDefault` 掉 mousedown，否则焦点一走**选区就没了**（表现成「点了粗体没反应」）；菜单是 Teleport 到 body 的浮层，别挪回编辑器卡片里（`position: fixed` 的定位与层叠才不受卡片影响：这一处将来有个带 `transform` / `backdrop-filter` 的祖先，菜单就会被拽到那个盒子里摆）。
 - 工作日志正文按 markdown 渲染，解析用 **markdown-it**（[markdown.ts](src/shared/markdown.ts)，唯一新增的前端运行时依赖）：`html: false` 转义原文里的标签、`linkify` 认裸地址、`breaks` 让单个换行就是 `<br>`；链接一律 `target="_blank"`，且点击在 [MarkdownView.vue](src/renderer/src/components/MarkdownView.vue) 里被接管交给 `openExternal` —— 界面是个 WebView，点 `<a>` 默认会把应用自己导航走。别再自己手写解析器或引第二个 markdown 库。
 - **数据目录必须与 Electron 版保持一致**（`%APPDATA%\Workbench`）：不要图省事改用 Tauri 的 `app_config_dir()`，它按 identifier 生成 `%APPDATA%\com.muyian.workbench`，换位置用户就等于丢了项目列表。路径一律经 `paths.rs` 的 `data_dir()` / `data_file()` 现取，不要缓存写死。
 - 首屏快照：Tauri 没有同步 IPC（原 `ipcRenderer.sendSync` 那套行不通），改为建窗口时用 `initialization_script` 注入 `window.__WB_BOOTSTRAP__`（见 [main.rs](src-tauri/src/main.rs) 的 `bootstrap_script`），渲染层同步读它，第一帧就是用户设置的样子。
@@ -206,8 +339,18 @@
 ## 6. Agent 操作与验证
 
 - 常用脚本：`npm run typecheck`（渲染层 + 测试两个 tsconfig）、`npm test`（vitest run）、`cargo test --manifest-path src-tauri/Cargo.toml`、`npm run dev`（tauri dev）、`npm run build`（tauri build）、`npm run build:renderer`（只编渲染层）、`npm run dev:renderer`（只起渲染层开发服务器，tauri dev 的 devUrl）、`npm run preview:renderer`（在浏览器里看布局，产物落 `.preview/`）、`npm run icons`（重新生成应用与托盘图标）；其余脚本以 `package.json` 为准；不新增 lint / format 工具。
-- `npm run typecheck` 与 `npm test` 覆盖渲染层与 `src/shared`；改了 Rust 还要跑 `cargo test` 与 `cargo build`。
+- `npm run typecheck` 与 `npm test` 覆盖渲染层与 `src/shared`；改了 Rust 还要跑 `cargo test` **与 `cargo build`**。
+  两个都要跑，**`cargo test` 不能替代 `cargo build`**：`cargo test` 编译的是开着 `cfg(test)` 的那个 bin，
+  被 `#[cfg(test)]` 关起来的东西（函数、字段、导入）在那边是**可见的** —— 拿它当生产代码用时，
+  `cargo test` 一片绿、`cargo build` 才报「not found, an item that was configured out」（踩过：`encoding::base64_decode`）。
+  改一处 Rust 的公开接口之后尤其要跑一遍 `cargo build`，别等 `tauri dev` 替你发现。
 - **改 Rust 前先关掉正在运行的应用**：链接会因 exe 被占用而报「拒绝访问（os error 5）」，而**构建失败后你跑起来的仍是旧二进制**，据此得出的结论会完全跑偏（踩过一次，白追了两轮）。打包同理：`tauri build` 与 `tauri dev` 会抢同一个 `target/` 的构建锁，并行只会互相拖慢，量构建耗时还会得出错值（见 [docs/dev-notes/build-performance.md](docs/dev-notes/build-performance.md)）。
+- **停掉 `npm run dev` 之后要确认它那一串子进程真的都没了**：Windows 上杀掉外层那个命令**不会**带走它的子孙，
+  `workbench.exe`（还连着 vite 的 HMR）与 `dev:renderer` 的 vite 会一起活下来 —— 表现是下一次
+  `npm run dev` 报 `Port 5274 is already in use`，或者 Rust 怎么也链接不上（exe 被占）。
+  收尾按端口与进程名各查一遍：`netstat -ano | grep LISTENING | grep -E ":(5274|9222)"`、
+  `tasklist | grep -i workbench`；清的时候用 `taskkill /F /T /PID <pid>`（带 `/T` 才连带子孙）。
+  用后台任务起的那次尤其要显式收，别指望它随命令结束一起退（踩过两次）。
 - `cargo test` 有时会卡在链接或执行上，两种都能绕：
   `LNK1104 / failed to remove ...exe` 是旧的测试二进制被残留句柄锁住（进程早退了，句柄还在），
   给测试换个产物名即可（`RUSTFLAGS="--cfg wb_verify" cargo test`）；

@@ -337,7 +337,13 @@ async function readWorkBuddyLive(): Promise<LiveRead> {
 /** 本机设备标识只问一次：它落盘后就不再变，而面板每 60 秒就会走一次这条路 */
 let device: { id: string; name: string } | null = null
 
-async function localDevice(): Promise<{ id: string; name: string }> {
+/**
+ * 本机设备标识（`%APPDATA%/Workbench/device.json`，没有就现生成一份）。
+ *
+ * 除了 Token 分片，笔记图片的落点也要用它（见 `workbench/note.ts` 的 `imageScope`），
+ * 所以这里是导出的：它描述的是「这台机器」，不是「Token 面板」。
+ */
+export async function localDevice(): Promise<{ id: string; name: string }> {
   if (device) return device
 
   try {
@@ -347,7 +353,7 @@ async function localDevice(): Promise<{ id: string; name: string }> {
       name: typeof info?.name === 'string' ? info.name.trim() : ''
     }
   } catch {
-    // 拿不到标识只影响同步（分片名要用它），本机数据照常展示
+    // 拿不到标识只影响同步与图片上传（分片名 / 目录名要用它），本机数据照常展示
     device = { id: '', name: '' }
   }
   return device
