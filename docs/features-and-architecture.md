@@ -440,7 +440,7 @@
 | 前端 | Vue 3（组合式 API + `<script setup>`）+ Element Plus + Pinia |
 | 工作日志渲染 | markdown-it（只服务工作日志正文：`html: false` 转义原文里的标签、`linkify` 认裸地址、`breaks` 让单个换行就是 `<br>`，链接统一新窗口 + 交系统浏览器打开） |
 | 笔记编辑器 | Vditor（只服务笔记正文；静态资源随包带一份、不走 CDN，见「笔记」那一节） |
-| 构建 | Vite 8（渲染层，打包器是 rolldown）+ cargo / Tauri CLI（后端） |
+| 构建 | Vite 8（渲染层，打包器是 rolldown）+ cargo / Tauri CLI（后端）。根 `package.json` 是 `"type": "module"`，所以三个 vite / vitest 配置里用 `import.meta.dirname`（`__dirname` 只在旧的打包式加载器下被 shim 出来；仓库里也不要有 CJS 的 `.js` / `.cjs`，它们会被当成 ESM） |
 | 语言 | TypeScript（渲染层）+ Rust（后端）；契约与纯逻辑共用 `src/shared` |
 | 持久化 | 本地 JSON，由 Rust 侧 `store.rs` 负责（防抖 300ms、临时文件 + rename、退出前同步落盘） |
 | 子进程 | `std::process` 起 shell 命令（按批回传输出，Windows 下 `taskkill /T /F` 结束整棵进程树） |

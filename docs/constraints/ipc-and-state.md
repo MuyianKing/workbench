@@ -1,0 +1,52 @@
+# 通道、状态与落盘
+
+从 [AGENTS.md](../../AGENTS.md) 第 5 节拆出的硬约束：渲染层怎么与后端说话、状态放哪、数据落在哪。功能与架构事实（为什么这么做、
+踩过哪些坑）见 [features-and-architecture.md](../features-and-architecture.md) 的「数据与隐私」「目录结构」两节。
+
+关键落点：`src/renderer/src/workbench/`（适配层）、`src/renderer/src/stores/`、`src-tauri/src/commands.rs`、
+`src-tauri/src/store.rs`、`src-tauri/src/paths.rs`。
+
+## 通道
+
+- 契约以 [types.ts](../../src/shared/types.ts) 的 `WorkbenchApi` 为准：Tauri 命令名用 snake_case，camelCase 方法名到命令名的
+  映射只出现在适配层。
+- 通道一律返回 `Result<T>`（[result.ts](../../src/shared/result.ts) 的 `ok` / `fail` / `toResult`），不 reject；调用侧判 `result.ok`、
+  失败取 `result.error` 提示。Rust 的 `Err(String)` 会被 Tauri 直接 reject，所以适配层用 `guard()` 收敛（它兼容字符串与 Error，
+  不能直接套 shared 的 `toResult`）。
+- 新增通道三步：`WorkbenchApi` 登记 → 适配层实现 → 需要后端时在 `commands.rs` 写命令并在 `main.rs` 的 `generate_handler!`
+  注册。渲染层→主进程的单向事件走适配层的 `events.ts` 广播。
+- **数组 / 对象形状的取值接口必须真实现，绝不能落到「尚未移植」兜底**：兜底返回的是 `Result` 对象，store 会把它当数组遍历、
+  直接抛错并把整条 `init()` 打断，表现成完全无关的功能失灵（`listQuickApps` / `listCommands` 就这么让「系统状态」一直没数据）。
+- 渲染层不直接访问 Node / 文件系统 / WebView 宿主能力，一切经 `window.workbench`。**唯一例外是工作区背景图**：让 webview 按
+  文件直接加载（asset 协议，URL 由适配层的 `assetUrl()` 转出），读取权限一律在 Rust 侧按**单个文件**授予（`commands.rs` 的
+  `allow_background`），`tauri.conf.json` 的 `assetProtocol.scope` 必须保持为空 —— 往里写 `**` 等于把整块磁盘敞开给渲染层读。
+- 后端只做「取原始数据 / 落盘 / 调系统能力」；合并、排序、修剪、状态机、命令构造这些业务语义留在 TS 适配层（改动因此走 Vite
+  的秒级热更新，不必重编 Rust）。少数通道按约定直接返回具体结构而非 `Result`：`checkPort`、`listProjects`、`getNvmStatus`、
+  `listWallpapers`、`checkPackageManagers`。
+- 首屏快照：Tauri 没有同步 IPC，建窗口时用 `initialization_script` 注入 `window.__WB_BOOTSTRAP__`（`main.rs` 的
+  `bootstrap_script`），渲染层同步读它，第一帧就是用户设置的样子。
+
+## 状态
+
+- 跨组件状态按领域分在 [stores/](../../src/renderer/src/stores/) 下（分工见架构文档的「目录结构」一节）；不另建全局状态，也不
+  用事件总线传业务数据（组件设计那一层的约束见 [AGENTS.md](../../AGENTS.md) 第 0 节）。
+- **谁该进 store 的判据是「跨页共享」**：多处读写的状态必须进 store 且只经 action 变更；只在单页生命周期内用完即弃的数据与动作
+  （工作日志的读写入参、Token 卡片的取数节流）直接调 `window.workbench`，不为它造 store 切片。
+- **store 里不要直接 import element-plus**：提示与确认框一律经 [notify.ts](../../src/renderer/src/notify.ts) 的 `notifySuccess` /
+  `notifyError` / `confirmAction` —— 这样这些 action 才可能被单测覆盖，也让状态层与「怎么提示」分开演进。
+
+## 落盘
+
+- 落盘全在 Rust 侧（`store.rs`：300ms 防抖 + 临时文件 rename + 退出前同步落盘）。数据文件分工：`workbench-data.json`（项目 /
+  快捷启动 / 命令 + 与本机绑定的设置，含笔记文件夹 `noteDir`）、`theme.json`（外观 + 首页布局）、`token-usage.json`、
+  `work-log.json`（只在本机）；目录指针 `data-location.json` 与设备标识 `device.json` 固定在 `%APPDATA%/Workbench/`。
+- **数据目录必须与 Electron 版一致（`%APPDATA%\Workbench`）**：不要图省事改用 Tauri 的 `app_config_dir()`（它按 identifier 生成
+  `%APPDATA%\com.muyian.workbench`，换位置用户就等于丢了项目列表）；路径一律经 `paths.rs` 的 `data_dir()` / `data_file()` 现取，
+  不要缓存写死。
+- 数据结构变更要同步落盘的 sanitize（[persisted-data.ts](../../src/shared/persisted-data.ts) 的 `sanitizeSettings` / `parseData`），
+  老数据文件缺字段须有默认值，不留未收敛的 `undefined`。
+- 给项目加可编辑字段时，除了 `Project` / `ProjectPatch`，还要把它加进 store 里的 `editableOf`
+  （[stores/projects.ts](../../src/renderer/src/stores/projects.ts)）：项目是就地改 `projects.value` 的，落盘靠那条「与快照比对后推
+  差异」的 watch，`editableOf` 就是它认得的那份字段清单 —— 漏加的表现是界面上改完看着生效、重启后回到旧值。
+- **读取时补齐老数据的字段**（例如项目标识色）要走「先 `snapshotProjects()`、再补」的顺序：补齐要经上面那条 watch 推给后端，
+  而它只推与快照不同的项 —— 顺序反了的话快照里已经是补好的值，那批数据永远写不进磁盘。

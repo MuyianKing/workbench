@@ -209,24 +209,28 @@ async function submit(): Promise<void> {
           </span>
         </template>
 
-        <el-input
-          v-if="mode === 'write'"
-          v-model="form.content"
-          type="textarea"
-          :rows="8"
-          resize="vertical"
-          placeholder="做了什么、卡在哪、下一步…（支持 markdown：标题、列表、**粗体**、`代码`、链接）"
-        />
-        <!-- 预览区高度跟着写的那份走，切换时块不会突然长高变矮 -->
-        <div v-else class="preview">
-          <MarkdownView v-if="form.content.trim()" :source="form.content" />
-          <p v-else class="preview__empty">还没有内容</p>
-        </div>
+        <!-- 正文与下面那行说明必须包在 .field__stack 里：.el-form-item__content 是 flex 行，
+             说明直接当它的兄弟节点时，会按内容宽度和正文挤在同一行，正文被压成一小条 -->
+        <div class="field__stack">
+          <el-input
+            v-if="mode === 'write'"
+            v-model="form.content"
+            type="textarea"
+            :rows="8"
+            resize="vertical"
+            placeholder="做了什么、卡在哪、下一步…（支持 markdown：标题、列表、**粗体**、`代码`、链接）"
+          />
+          <!-- 预览区高度跟着写的那份走，切换时块不会突然长高变矮 -->
+          <div v-else class="preview">
+            <MarkdownView v-if="form.content.trim()" :source="form.content" />
+            <p v-else class="preview__empty">还没有内容</p>
+          </div>
 
-        <p class="field__hint" :class="{ 'is-invalid': !form.content.trim() }">
-          <template v-if="!form.content.trim()">工作内容是必填项。</template>
-          <template v-else>支持 markdown 语法，时间轴上按这里的预览渲染。</template>
-        </p>
+          <p class="field__hint" :class="{ 'is-invalid': !form.content.trim() }">
+            <template v-if="!form.content.trim()">工作内容是必填项。</template>
+            <template v-else>支持 markdown 语法，时间轴上按这里的预览渲染。</template>
+          </p>
+        </div>
       </el-form-item>
     </el-form>
 
@@ -260,9 +264,17 @@ async function submit(): Promise<void> {
   min-width: 0;
 }
 
-/* 「工作内容」那行：标签与「编写 / 预览」并排，所以把标签撑满整行当容器用 */
+/* 「工作内容」那行：标签撑满整行当容器用，行内左边是文字、右边是「编写 / 预览」 */
 .field--content :deep(.el-form-item__label) {
   display: block;
+  width: 100%;
+}
+
+.field__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
   width: 100%;
 }
 

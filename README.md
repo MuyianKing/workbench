@@ -74,4 +74,5 @@ Token 同步只推模型名与计数，**不含对话内容**；工作日志刻�
 
 - [功能与架构](docs/features-and-architecture.md)：每项功能怎么做的、为什么这么做，数据落在哪
 - [开发笔记](docs/dev-notes/)：构建性能、浏览器里做视觉验证的动手方法
-- [AGENTS.md](AGENTS.md)：工程约束（给 AI 编码 Agent 看的项目规则）
+- [模块约束](docs/constraints/)：各模块不能破的硬约束（通道与落盘、终端、工作日志、笔记、同步与账号）
+- [AGENTS.md](AGENTS.md)：工程约束（给 AI 编码 Agent 看的项目规则；跨模块的规矩在这里，按模块的细则在上一条）

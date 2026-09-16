@@ -1,7 +1,8 @@
 # 浏览器预览验证工作区
 
-改 UI 时不必每次都把整个 Tauri 应用拉起来：把渲染层单独跑在浏览器里、喂一份假数据、截图比对，
-一轮只要几秒。这套工作区**用完即删**（见「清理约定」），所以要复现时照本文重建。
+**这套只在用户明确要求做视觉验证时才用**（见 [AGENTS.md](../../AGENTS.md) 第 6 节：用户没提就不做）。把渲染层单独跑在浏览器里、
+喂一份假数据、截图比对，不必每次把整个 Tauri 应用拉起来，一轮只要几秒。这套工作区**用完即删**（见「清理约定」），所以要复现时
+照本文重建。
 
 ## 清理约定
 
@@ -10,6 +11,10 @@
 - `.gitignore` 里的 `.preview/**` 会忽略它的全部内容，任何东西都不进版本库
 - **任务完成后直接删掉整个目录**（`rm -rf .preview`）——截图、日志、临时脚本一律不留
 - 值得留下的经验写进本文件，不靠保留脚本传递
+- **同时有别的会话在改 UI 时，各用各的子目录**（`.preview/<这次在验什么>/` 里放 `harness/`、
+  `dist/`、`shot.mjs`、`out/`，配一份自己的 vite 配置）：`harness/main.ts`、`dist`、`shot.mjs`
+  这些路径是共享的，另一个会话一 build 就把你的换掉 —— 症状是「脚本跑完什么都没量到、
+  或者量到的是别人那个组件」，别顺着自己的组件找
 
 根目录的 `vite.preview.config.ts` 是常驻入口（挂在 `npm run dev:renderer` 上），不属于工作区，不要删。
 
@@ -93,8 +98,12 @@ cargo test --manifest-path src-tauri/Cargo.toml
 ```
 
 改 Rust 前先关掉正在运行的应用，否则链接会因 exe 被占用而报「拒绝访问」。另外 `cargo test`
-偶尔会卡在链接或执行上（旧二进制被残留句柄锁住、环境拦了刚链接出的 exe），两种绕法见
-[AGENTS.md](../../AGENTS.md) 第 6 节。
+偶尔会卡在链接或执行上，两种绕法：
+
+- `LNK1104 / failed to remove ...exe`：旧的测试二进制被残留句柄锁住（进程早退了，句柄还在），
+  给测试换个产物名即可 —— `RUSTFLAGS="--cfg wb_verify" cargo test`；
+- `could not execute ... (never executed) + 拒绝访问`：环境拦了刚链接出的可执行文件，
+  把 `target/debug/deps/workbench-*.exe` 复制一份再直接运行，副本能跑。
 
 **要顺手看一眼真数据时**，别改成临时 `main`：把待验的入参做成测试用例，用 `-- --nocapture`
 打印中间值，或者按下一节「在真应用里验证」连真应用的 CDP 求值。
@@ -208,7 +217,12 @@ writeFileSync(outPng, Buffer.from(shot.result.data, 'base64'))
   先注入一条探针 CSS 改一个变量、再量一次数字，比来回改组件重编快得多 ——
   本次就是靠它认出 Vditor 收起态代码块那两行空档来自「零尺寸 inline 标记撑起的行盒」
 - **结束时要杀整个进程组**（`process.kill(-child.pid)`，配合 `detached: true`），
-  否则无头 Edge 会残留
+  否则无头 Edge 会残留。残留的不只是几兆内存：**调试端口也被它占着**，下一次跑同一个端口的脚本
+  会连上那个**上一轮的**页面（`/json/list` 里照样有 target），于是量到的是旧页面的数字、
+  或者干脆卡在那里不出结果。起进程前先确认端口空着（`netstat -ano | grep LISTENING | grep :<port>`），
+  连之前筛 `t.url === 'about:blank'`；真清理时按命令行认人最稳：
+  `Get-CimInstance Win32_Process -Filter "Name='msedge.exe'" | Where-Object { $_.CommandLine -like '*wb-edge-*' }`
+  （只会命中这套流程起的无头实例，不会碰到用户自己的 Edge）
 
 ## 调试探针：一次只改一个变量
 
@@ -294,6 +308,17 @@ const lum = (rgb) => rgb.map((c) => {
   的内边距按实际结构定死（见 `.account-dialog`）。
 - **鼠标指针是真的移过去才能量 `:hover`**（`Input.dispatchMouseEvent` 的 `mouseMoved`）：
   量到的 `getComputedStyle(...).backgroundColor` 才是悬停色，只读静态样式会得到「没反应」的错觉。
+  **滚动伪元素是例外，它不随 `:hover` 重算**（见下面那条）。
+- **滚动条的「悬停态」选择器在这版 Chromium 里已经失效**：`global.css` 一直靠
+  `:hover::-webkit-scrollbar-thumb` 表达「滑块平时透明、指针移进滚动区才浮现」，
+  但 Edge 152（WebView2 跟着它走）起，**滚动容器自身的 `:hover` 不再带动滚动伪元素重算** ——
+  滑块永远停在透明那一档，症状是「所有滚动区都没有滚动条」（`::-webkit-scrollbar-thumb:hover`
+  同样失效，且没法用 CSS 找回来）。换成由**父元素**发号（`:hover > ::-webkit-scrollbar-thumb`）
+  立刻就好：祖先的 `:hover` 照旧带动子树重算，而指针落在容器里时父元素当然也是 `:hover`。
+  探针怎么问：一张最小页，两个 `overflow: auto` 的盒子分别写这两种选择器，
+  把指针移进盒子里各截一张 —— 前者空白、后者出滑块，一眼定性。
+  判断依据**要用截图、不要用 `getComputedStyle(el, '::-webkit-scrollbar-thumb')`**：
+  它压根不随 `:hover` 重算，改前改后返回同一个值（会得出「改不改都一样」的错觉）。
 - **共用外壳的类写在某个组件的 scoped 样式里时，第二个用它的页面只会吃到颜色、丢掉排版**：
   项目页那条筛选工具带的 `.filter` 当初只写在 ProjectFilterBar.vue 的 `<style scoped>` 里，
   global.css 里只有 `.app.top-band/glass/clear .filter` 那三档颜色规则。工作页照同名 class 用，

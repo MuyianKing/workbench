@@ -48,7 +48,7 @@ function tipOf(day: ActivityDay): string {
 </script>
 
 <template>
-  <article class="panel">
+  <article class="panel" style="padding-bottom:0">
     <header class="panel__head">
       <span class="eyebrow">活跃度</span>
       <span class="graph__total mono">过去一年共 {{ calendar.total }} 次执行</span>
@@ -123,18 +123,21 @@ function tipOf(day: ActivityDay): string {
 }
 
 /*
- * 53 列在窄栏里必然横向溢出,滚动能力保留(触摸板 / Shift+滚轮),
- * 但滚动条本身不渲染 —— 活跃度图是一张完整的「画」,不该被一条横杆切开。
+ * 53 列在窄栏里必然横向溢出，滚动能力保留（触摸板 / Shift+滚轮），横杆本身也画出来 ——
+ * 窄栏里光看截图分不清「就这么多」和「后面还有」，得有个东西明说这里能拖。
+ *
+ * 外观走 global.css 里那套：**槽位常占着、滑块平时透明、指针移进来才浮现**。
+ * 常占位这一条是必须的 —— 悬停时才让横杆出现，它会占掉 10px，
+ * 网格底部（以及整张图的高度）就得跟着往上跳一下；占着位、只换颜色，就没有这一下。
+ * 代价是图下方常留一条 10px 的空槽（这张卡片把 .panel 的 padding-bottom 压成了 0，
+ * 正好由这条空槽抵着卡片下沿，看不太出来）。
  */
 .graph__scroll {
   flex: 1;
   min-width: 0;
   overflow-x: auto;
-  scrollbar-width: none;
-}
-
-.graph__scroll::-webkit-scrollbar {
-  display: none;
+  /* 别写 scrollbar-width: none 之类的标准属性：Chromium 里它比 ::-webkit-scrollbar 优先级高，
+     一写就把整条滚动条连同占位一起拿掉，「悬停才浮现」也就无从谈起了 */
 }
 
 .graph__months,

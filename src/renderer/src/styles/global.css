@@ -120,18 +120,27 @@ body.is-resizing-notes-tree * {
   border-radius: var(--r-pill);
 }
 
-/* 悬停浮现：:hover 落在滚动容器上，内容区悬停同样会命中容器 */
-:hover::-webkit-scrollbar-thumb {
+/**
+ * 悬停浮现。**注意这里的落点是「滚动容器的父元素被悬停」，不是容器自己。**
+ * 写成 `:hover::-webkit-scrollbar-thumb` 更直白，但 Edge 152（WebView2 跟着它走）起
+ * 容器自身的 :hover 不再带动滚动伪元素重算，滑块永远停在上面那一档的透明色上 ——
+ * 界面上就是「所有滚动区都没有滚动条」，而祖先的 :hover 照旧会带动子树重算，用它是有效的。
+ * 观感与「容器自己悬停」一致：指针落在容器里时，它父元素当然也是 :hover。
+ * 代价是父元素被悬停时，它别的滚动子元素也会一起现形（本项目里没有并排的两个滚动区）。
+ */
+:hover > ::-webkit-scrollbar-thumb {
   background-color: rgba(17, 21, 27, 0.16);
 }
 
-/* 直接停在滚动条上时颜色再深一档，方便拖拽 */
+/* 直接停在滚动条上时颜色再深一档，方便拖拽。这一条同样受上面那个改动影响而不再生效，
+ * 且没法用 CSS 找回来（指针停在滑块上时没有别的选择器能命中），留着是等 Chromium 修。
+ */
 ::-webkit-scrollbar-thumb:hover {
   background-color: rgba(17, 21, 27, 0.3);
 }
 
 /* 终端始终是深色的，即使亮色主题也要用浅色滚动条 */
-.scroll-dark:hover::-webkit-scrollbar-thumb {
+:hover > .scroll-dark::-webkit-scrollbar-thumb {
   background-color: rgba(199, 208, 219, 0.22);
 }
 
@@ -140,7 +149,7 @@ body.is-resizing-notes-tree * {
 }
 
 /* 暗色主题整体反色，否则深底上看不见 */
-:root[data-theme='dark'] :hover::-webkit-scrollbar-thumb {
+:root[data-theme='dark'] :hover > ::-webkit-scrollbar-thumb {
   background-color: rgba(232, 237, 244, 0.18);
 }
 
@@ -149,9 +158,9 @@ body.is-resizing-notes-tree * {
 }
 
 /* 取值与上面亮色下的 .scroll-dark 相同，但这里不能删：暗色主题的通用规则
- * `:root[data-theme=dark] :hover::-webkit-scrollbar-thumb` 优先级更高，会盖掉
+ * `:root[data-theme=dark] :hover > ::-webkit-scrollbar-thumb` 优先级更高，会盖掉
  * 终端的浅色滚动条；必须用同等级再加一个类才能重新压回来。 */
-:root[data-theme='dark'] .scroll-dark:hover::-webkit-scrollbar-thumb {
+:root[data-theme='dark'] :hover > .scroll-dark::-webkit-scrollbar-thumb {
   background-color: rgba(199, 208, 219, 0.22);
 }
 
@@ -634,8 +643,24 @@ body.is-resizing-notes-tree * {
   border-radius: var(--r-pill);
 }
 
+/* 尺寸档的类在 EP 里也是单级选择器，与上面那条同权 —— 显式列出来，不靠加载顺序 */
+.el-segmented--small,
+.el-segmented--large {
+  border-radius: var(--r-pill);
+}
+
+/**
+ * 内层那两颗（选项与浮起的选中块）的圆角要跟外壳一致。EP 给尺寸档写的是两级选择器
+ * （`.el-segmented--small .el-segmented__item`），比单级的 `.el-segmented__item` 更具体 ——
+ * 只覆盖单级的话，`size="small"` 的外壳是胶囊、里面那颗选中药丸却只剩 3px
+ * （素材管理这一处就是这一档），看着内侧比外侧方。药丸是 999px，内外同取它自然同心。
+ */
 .el-segmented__item,
-.el-segmented__item-selected {
+.el-segmented__item-selected,
+.el-segmented--small .el-segmented__item,
+.el-segmented--small .el-segmented__item-selected,
+.el-segmented--large .el-segmented__item,
+.el-segmented--large .el-segmented__item-selected {
   border-radius: var(--r-pill);
 }
 
