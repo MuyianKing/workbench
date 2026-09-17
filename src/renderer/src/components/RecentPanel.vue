@@ -22,6 +22,12 @@ function statusOf(project: Project): ProjectStatus {
   return terminal.runtimeOf(project.id).status
 }
 
+/** 文案与卡片同一口径：「正常退出」只有打包才叫「打包成功」（见 status.ts 的 statusLabel） */
+function labelOf(project: Project): string {
+  const rt = terminal.runtimeOf(project.id)
+  return statusLabel(rt.status, rt.kind)
+}
+
 function toneOf(project: Project): string {
   return store.isPathValid(project.id) ? STATUS_META[statusOf(project)].tone : 'fail'
 }
@@ -91,7 +97,7 @@ const recent = computed(() =>
             启动
           </button>
           <span v-else class="row__act is-static" :class="`tone-${toneOf(project)}`">
-            {{ statusLabel(statusOf(project)) }}
+            {{ labelOf(project) }}
           </span>
         </div>
       </li>

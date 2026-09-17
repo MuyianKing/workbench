@@ -29,6 +29,7 @@ import {
   type NoteSyncSummary
 } from '@shared/note'
 import {
+  NOTE_IMAGE_DIR,
   imageRawUrl,
   imageScopeDir,
   sanitizeImageRepo,
@@ -171,7 +172,7 @@ export async function moveNote(
 // ---------- 粘贴的图片 ----------
 
 /**
- * 这次调用落在仓库的哪一层：`<图片目录>/<设备>/<笔记本>`（口径与算法都在 shared/note-image.ts）。
+ * 这次调用落在仓库的哪一层：`<images>/<设备>/<笔记本>`（口径与算法都在 shared/note-image.ts）。
  *
  * 设备标识问一次就缓存（`localDevice`，与 Token 分片用的是同一个 id），笔记本每次都由调用方带进来 ——
  * 这两样都不在适配层缓存：用户换了笔记本、换了机器，来源就换了。
@@ -179,14 +180,14 @@ export async function moveNote(
  * 缺哪一样都**不退回上一层**：退回等于让所有笔记本、所有机器的图混进同一个目录，
  * 素材管理里那列「未引用」立刻变成一份会删错东西的假数字。
  */
-async function imageScope(input: { dir: string; root: string }): Promise<Result<string>> {
+async function imageScope(input: { root: string }): Promise<Result<string>> {
   const root = rootArg(input.root)
   if (!root) return fail('还没有打开笔记文件夹')
 
   const device = await localDevice()
   if (!device.id) return fail('拿不到本机设备标识，暂时管理不了图片')
 
-  const dir = imageScopeDir(input.dir, device.id, root)
+  const dir = imageScopeDir(NOTE_IMAGE_DIR, device.id, root)
   if (!dir) return fail('拼不出这个笔记本在图片仓库里的目录')
 
   return ok(dir)
@@ -199,7 +200,7 @@ async function imageScope(input: { dir: string; root: string }): Promise<Result<
  * 图片进仓库只需要「路径 + 分支」两件事，托管方的 raw 地址规则与它无关，
  * 分开之后这段拼接有单测，也就不用为了改一版口径重编 Rust。
  *
- * 推不出地址时**不算失败**：图片已经进了仓库，只是访问前缀得用户自己填（`url` 是空串）。
+ * 推不出地址时**不算失败**：图片已经进了仓库，只是这个仓库不在三家公开托管上（`url` 是空串）。
  */
 export async function uploadNoteImage(
   input: NoteImageUploadInput
@@ -228,7 +229,7 @@ export async function uploadNoteImage(
   return ok({
     path,
     branch,
-    url: imageRawUrl({ repo, branch, path, baseUrl: input.baseUrl })
+    url: imageRawUrl({ repo, branch, path })
   })
 }
 
@@ -237,7 +238,7 @@ export async function uploadNoteImage(
 /**
  * 这个笔记本（这台机器）传过哪些图（顺手把本地克隆拉到最新，所以这一下会走一次网络）。
  *
- * 只列 `<图片目录>/<设备>/<笔记本>` 那一层（见 imageScope）：别的笔记本、别的机器传上来的图
+ * 只列 `<images>/<设备>/<笔记本>` 那一层（见 imageScope）：别的笔记本、别的机器传上来的图
  * **不在清单里** —— 它们的「引用次数」拿当前这个笔记本的正文根本数不出来。
  * 只把 Rust 回来的清单收成确定的形状：仓库没配 / 拉不下来都是失败（界面据此提示去哪儿配），
  * 而「被引用了几次」由调用方拿笔记正文另算（见 shared/note-image.ts 的 buildImageAssets）。

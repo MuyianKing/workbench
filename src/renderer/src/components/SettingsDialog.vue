@@ -1,23 +1,28 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { CircleClose, FolderOpened, Picture, Rank } from '@element-plus/icons-vue'
+import { CircleClose, FolderOpened, Picture } from '@element-plus/icons-vue'
 import { accountLabel } from '@shared/auth'
-import { useProjectsStore } from '@/stores/projects'
 import { useSettingsStore } from '@/stores/settings'
 import { useEnvironmentStore } from '@/stores/environment'
 import { useAuthStore } from '@/stores/auth'
 import AccountDialog from '@/components/AccountDialog.vue'
 import { ACCENT_PRESETS, type AccentInkMode } from '@shared/accent-color'
 import { APP_NAME_DEFAULT, APP_NAME_MAX_LENGTH } from '@shared/app-name'
-import { CARD_GAP_MAX, CARD_GAP_MIN, GRID_STEP_MAX, GRID_STEP_MIN } from '@shared/theme'
+import {
+  CARD_GAP_MAX,
+  CARD_GAP_MIN,
+  HOME_CARD_IDS,
+  HOME_CARD_LABELS,
+  type HomeCardId
+} from '@shared/theme'
+import { VIEW_IDS, VIEW_LABELS, type ViewId } from '@shared/views'
 import {
   BACKGROUND_OPACITY_MAX,
   BACKGROUND_OPACITY_MIN
 } from '@shared/workspace-background'
 import { builtinIdOf } from '@shared/wallpaper'
 import { CARD_OPACITY_MAX, CARD_OPACITY_MIN } from '@shared/card-opacity'
-import { imageRawUrl, imageRepoPath, imageScopeDir } from '@shared/note-image'
 import { formatRelative } from '@/format'
 import type { AppSettings, SyncDeviceInfo, ThemeSource, TopBarStyle } from '@/types'
 import type { ThemeOrigin } from '@/theme-transition'
@@ -25,7 +30,6 @@ import type { ThemeOrigin } from '@/theme-transition'
 const props = defineProps<{ modelValue: boolean }>()
 const emit = defineEmits<{ 'update:modelValue': [value: boolean] }>()
 
-const store = useProjectsStore()
 const settings = useSettingsStore()
 const environment = useEnvironmentStore()
 const auth = useAuthStore()
@@ -45,15 +49,18 @@ function setUseAccountForSync(value: boolean | string | number): void {
 }
 
 /**
- * 左侧菜单只有两项：外观（含首页画布的布局，它们都是「看起来什么样」的设置）、
- * 通用（程序、快捷键、启动、数据目录、账号与同步）。选中项不随关闭重置，
- * 下次打开还停在上一屏，省得每次都要再点一次。
+ * 左侧菜单四屏：外观（看起来什么样：主题、背景、顶部样式与首页画布的布局）、
+ * 菜单（左侧导航栏上留哪几页）、通用（程序、快捷键、启动、数据目录、账号与同步）、
+ * 关于（这个应用是什么、数据住在哪、什么时候才会联网）。
+ * 选中项不随关闭重置，下次打开还停在上一屏，省得每次都要再点一次。
  */
-type SettingsTab = 'appearance' | 'general'
+type SettingsTab = 'appearance' | 'menu' | 'general' | 'about'
 
 const tabs: Array<{ value: SettingsTab; label: string }> = [
   { value: 'appearance', label: '外观' },
-  { value: 'general', label: '通用' }
+  { value: 'menu', label: '菜单' },
+  { value: 'general', label: '通用' },
+  { value: 'about', label: '关于' }
 ]
 
 const activeTab = ref<SettingsTab>('appearance')
@@ -246,8 +253,6 @@ function commitNoteRepo(): void {
 // ---------- 笔记图片 ----------
 
 const imageRepoDraft = ref('')
-const imageDirDraft = ref('')
-const imageBaseUrlDraft = ref('')
 
 watch(
   () => settings.settings.noteImageRepo,
@@ -256,55 +261,11 @@ watch(
   },
   { immediate: true }
 )
-watch(
-  () => settings.settings.noteImageDir,
-  (value) => {
-    imageDirDraft.value = value
-  },
-  { immediate: true }
-)
-watch(
-  () => settings.settings.noteImageBaseUrl,
-  (value) => {
-    imageBaseUrlDraft.value = value
-  },
-  { immediate: true }
-)
 
 function commitImageRepo(): void {
   if (imageRepoDraft.value === settings.settings.noteImageRepo) return
   save({ noteImageRepo: imageRepoDraft.value })
 }
-
-function commitImageDir(): void {
-  if (imageDirDraft.value === settings.settings.noteImageDir) return
-  save({ noteImageDir: imageDirDraft.value })
-}
-
-function commitImageBaseUrl(): void {
-  if (imageBaseUrlDraft.value === settings.settings.noteImageBaseUrl) return
-  save({ noteImageBaseUrl: imageBaseUrlDraft.value })
-}
-
-/**
- * 照当前配置给一个样例地址，让人一眼看出「上传之后插进正文的是什么」。
- *
- * 中间那两层（设备 / 笔记本）由应用自己加上，这里用占位值示意 —— 真实值分别是本机设备 id
- * 与「笔记本目录名 + 路径摘要」（见 shared/note-image.ts 的 imageScopeDir）。
- * 分支拿 `main` 举例（真实分支是克隆之后才知道的），所以这里明说了是示例；
- * 拼不出来时是空串 —— 那正是在提醒：下面那栏得自己填。
- */
-const imageUrlSample = computed(() =>
-  imageRawUrl({
-    repo: settings.settings.noteImageRepo,
-    branch: 'main',
-    path: imageRepoPath(
-      imageScopeDir(settings.settings.noteImageDir, 'device-id', 'Notebook'),
-      '20260916-104512-ab12cd34.png'
-    ),
-    baseUrl: settings.settings.noteImageBaseUrl
-  })
-)
 
 /**
  * 主题切换的扩散起点：记按下位置，切换动画就从那颗按钮长出来。
@@ -322,18 +283,34 @@ function changeTheme(value: ThemeSource): void {
   void settings.updateSettings({ theme: value }, origin)
 }
 
-/** 进入首页布局编辑态：关掉设置，把画面让给画布上的拖动把手 */
-function enterLayoutEdit(): void {
-  store.setLayoutEditing(true)
-  visible.value = false
-}
-
-function changeGridStep(value: number | undefined): void {
-  if (typeof value === 'number') void settings.setGridStep(value)
-}
-
 function changeCardGap(value: number | undefined): void {
   if (typeof value === 'number') void settings.setCardGap(value)
+}
+
+// ---------- 菜单与首页卡片 ----------
+
+/**
+ * 「只剩它一个了」：这颗开关不给关。
+ *
+ * 收敛那一层也会拦（导航栏至少留一页、首页至少留一块，见 shared/views.ts 与 shared/theme.ts），
+ * 但在这里先拦一道，用户看到的是「点了没反应但按钮是灰的」，而不是「关掉之后它自己又开了」。
+ */
+function isOnlyVisible(all: readonly string[], hidden: readonly string[], id: string): boolean {
+  return !hidden.includes(id) && all.every((item) => item === id || hidden.includes(item))
+}
+
+const hiddenViews = computed(() => settings.settings.hiddenViews)
+
+function setViewVisible(id: ViewId, visible: boolean): void {
+  void settings.setViewVisible(id, visible)
+}
+
+const hiddenCards = computed(() =>
+  HOME_CARD_IDS.filter((id) => settings.themeConfig.cards[id].hidden)
+)
+
+function setCardVisible(id: HomeCardId, visible: boolean): void {
+  void settings.setCardVisible(id, visible)
 }
 
 // ---------- 快捷键 ----------
@@ -413,14 +390,68 @@ watch(visible, (open) => {
   void settings.ensureWallpapers()
 })
 
+/** 版本号的占位：取不到时如实显示，而不是编一个号出来 */
+const APP_VERSION_PENDING = '读取中…'
+
+const appVersion = ref(APP_VERSION_PENDING)
+
+async function loadAppVersion(): Promise<void> {
+  try {
+    appVersion.value = await window.workbench.getAppVersion()
+  } catch {
+    // 拿不到版本不该让这一屏打不开，如实说明即可
+    appVersion.value = '未知'
+  }
+}
+
 /**
  * 通用那一屏里的「从别的机器取外观」要一份设备列表。
  * 读的是上一次同步取回的仓库快照（不联网），所以每次切到这一屏都重读一遍最省心 ——
  * 用户很可能刚从首页点过同步按钮再进来。
+ *
+ * 「关于」那一屏的版本号取自后端，取到一次就够（它不会变），所以只在还是占位时去要。
  */
 watch([visible, activeTab], ([open, tab]) => {
-  if (open && tab === 'general') void settings.loadSyncDevices()
+  if (!open) return
+  if (tab === 'general') void settings.loadSyncDevices()
+  else if (tab === 'about' && appVersion.value === APP_VERSION_PENDING) void loadAppVersion()
 })
+
+/** 打开数据目录：与项目卡那颗「打开目录」同一条通道，失败时把原因说出来 */
+async function openDataDir(): Promise<void> {
+  const dir = environment.dataLocation?.dir
+  if (!dir) return
+
+  const result = await window.workbench.reveal(dir)
+  if (!result.ok) ElMessage.error(result.error ?? '打开目录失败')
+}
+
+/**
+ * 联网边界：**这个应用默认不联网**，出口只有这五处，且都由用户自己开出来
+ * （与架构文档「数据与隐私」那一节同源 —— 改了一边就要改另一边）。
+ */
+const networkBounds: Array<{ title: string; detail: string }> = [
+  {
+    title: 'Token 用量同步',
+    detail: '默认关闭：要在设置里登录账号并填一个你自己的 git 仓库，才会推拉那个仓库。'
+  },
+  {
+    title: '账号登录',
+    detail: '点登录时才会去 GitHub / Gitee 的授权接口；登录之后不会在后台反复打请求。'
+  },
+  {
+    title: '笔记里的图片',
+    detail: '只有填了图片仓库、并且你真的往正文里粘贴了图片（或删图），才会碰那个仓库。'
+  },
+  {
+    title: '笔记本身的同步',
+    detail: '只有填了笔记仓库、并且你点了那颗同步按钮，才会走一次 git。'
+  },
+  {
+    title: '命令执行',
+    detail: 'npm install、dev server 这些是你自己那条命令在上网，不属于应用的行为。'
+  }
+]
 </script>
 
 <template>
@@ -664,37 +695,9 @@ watch([visible, activeTab], ([open, tab]) => {
             </div>
           </div>
 
+          <!-- 布局编辑的入口只在首页顶栏（那颗「编辑布局」），这里不再放第二个 -->
           <div class="block">
             <h3 class="block__title">首页布局</h3>
-
-            <div class="row">
-              <div class="row__text">
-                <span class="row__label">布局调整</span>
-                <span class="row__hint">
-                  编辑模式里可拖动卡片换栏、调顺序，拖下沿改高度，拖栏间竖线改宽度。
-                </span>
-              </div>
-              <el-button class="layout-edit" size="small" :icon="Rank" @click="enterLayoutEdit">
-                进入编辑
-              </el-button>
-            </div>
-
-            <div class="row">
-              <div class="row__text">
-                <span class="row__label">拖动步进</span>
-                <span class="row__hint">位置与尺寸按这个像素网格吸附。</span>
-              </div>
-              <el-input-number
-                class="number-input"
-                :model-value="settings.gridStep"
-                :min="GRID_STEP_MIN"
-                :max="GRID_STEP_MAX"
-                :step="1"
-                size="small"
-                controls-position="right"
-                @change="changeGridStep"
-              />
-            </div>
 
             <div class="row">
               <div class="row__text">
@@ -711,6 +714,56 @@ watch([visible, activeTab], ([open, tab]) => {
                 controls-position="right"
                 @change="changeCardGap"
               />
+            </div>
+
+            <div class="row">
+              <div class="row__text">
+                <span class="row__label">首页上显示哪些卡片</span>
+                <span class="row__hint">
+                  关掉的卡片不画在首页上；它在栏内的位置与高度都留着，再打开时回到原处。
+                </span>
+              </div>
+            </div>
+
+            <div class="picks">
+              <div v-for="id in HOME_CARD_IDS" :key="id" class="pick">
+                <span class="pick__name">{{ HOME_CARD_LABELS[id] }}</span>
+                <el-switch
+                  :model-value="!settings.themeConfig.cards[id].hidden"
+                  size="small"
+                  :disabled="isOnlyVisible(HOME_CARD_IDS, hiddenCards, id)"
+                  @update:model-value="(value: unknown) => setCardVisible(id, Boolean(value))"
+                />
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 菜单：应用自己的入口留哪几个（与「这一页长什么样」无关，所以单独一屏） -->
+        <section v-show="activeTab === 'menu'" class="pane">
+          <div class="block">
+            <h3 class="block__title">左侧导航栏</h3>
+
+            <div class="row">
+              <div class="row__text">
+                <span class="row__label">显示哪些页</span>
+                <span class="row__hint">
+                  关掉的页不出现在左侧导航栏上；至少留一个（全关掉时首页会留下）。
+                  当前页被关掉会先退到第一页还开着的。
+                </span>
+              </div>
+            </div>
+
+            <div class="picks">
+              <div v-for="id in VIEW_IDS" :key="id" class="pick">
+                <span class="pick__name">{{ VIEW_LABELS[id] }}</span>
+                <el-switch
+                  :model-value="!hiddenViews.includes(id)"
+                  size="small"
+                  :disabled="isOnlyVisible(VIEW_IDS, hiddenViews, id)"
+                  @update:model-value="(value: unknown) => setViewVisible(id, Boolean(value))"
+                />
+              </div>
             </div>
           </div>
         </section>
@@ -800,22 +853,19 @@ watch([visible, activeTab], ([open, tab]) => {
                   {{ settings.settings.appName }} 的东西都放这个目录里，换位置会把当前数据整体搬过去。
                 </span>
               </div>
-              <p class="path mono truncate" :title="environment.dataLocation?.dir">
-                {{ environment.dataLocation?.dir ?? '读取中…' }}
-              </p>
               <div class="path__actions">
+                <p class="path mono truncate" :title="environment.dataLocation?.dir">
+                  {{ environment.dataLocation?.dir ?? '读取中…' }}
+                </p>
                 <el-button size="small" :icon="FolderOpened" @click="environment.changeDataDir()">
                   更改目录
                 </el-button>
-                <span class="row__hint row__hint--tight">
-                  {{ environment.dataLocation?.isDefault ? '当前是默认目录（应用数据目录）' : '数据文件：workbench-data.json' }}
-                </span>
               </div>
             </div>
           </div>
 
           <!--
-            笔记本身同步：同步的就是**当前那个笔记文件夹**（所以这里把它也显示出来），
+            笔记本身同步：同步的就是**当前那个笔记文件夹**（在笔记页左栏底部挑，这里不重复显示），
             与图片那条路一样，地址留空 = 关掉这个功能（笔记页那颗按钮点了只会得到一句提示）。
           -->
           <div class="block">
@@ -838,22 +888,13 @@ watch([visible, activeTab], ([open, tab]) => {
                 @change="commitNoteRepo"
               />
             </div>
-
-            <!-- 同步的是「当前这个文件夹」，所以它得看得见：它是在笔记页挑的，不在这里改 -->
-            <div class="row">
-              <div class="row__text">
-                <span class="row__label">当前笔记本</span>
-                <span class="row__hint mono truncate" :title="settings.settings.noteDir">
-                  {{ settings.settings.noteDir || '还没选（在笔记页左栏底部挑一个文件夹）' }}
-                </span>
-              </div>
-            </div>
           </div>
 
           <!--
             笔记里的图片：粘贴的图片推到用户自己的一个 git 仓库里，正文里只留一个外链。
-            地址由仓库地址推导（GitHub / Gitee / GitLab 三家自动认，其余自己填前缀），
-            所以这一块的核心是那三个输入框 —— 它们填完长什么样，下面那句示例直接给出来。
+            地址由仓库地址推导（GitHub / Gitee / GitLab 三家自动认，其余推不出来），
+            而落在仓库的哪一层是定死的（`images/<设备>/<笔记本>`，见 shared/note-image.ts），
+            所以这一块要填的只有一样：往哪个仓库推。
           -->
           <div class="block">
             <h3 class="block__title">笔记图片</h3>
@@ -862,8 +903,9 @@ watch([visible, activeTab], ([open, tab]) => {
               <div class="row__text">
                 <span class="row__label">图片仓库</span>
                 <span class="row__hint">
-                  往笔记里粘贴图片时，图会推进这个 git 仓库，正文里只留一个链接（留空则粘贴时提示）。
-                  用账号授权同步的开关同样管这里；没登录就用系统里 git 配好的凭据。
+                  往笔记里粘贴图片时推进这个仓库，正文里只留一个链接（留空则粘贴时提示）。
+                  图片落在仓库的 images/&lt;本机设备&gt;/&lt;笔记本&gt; 下；
+                  凭据跟着下面的「用这个账号授权同步」开关走。
                 </span>
               </div>
               <el-input
@@ -874,59 +916,8 @@ watch([visible, activeTab], ([open, tab]) => {
                 @change="commitImageRepo"
               />
             </div>
-
-            <!--
-              路径这一栏**不跟着仓库地址一起藏**：它本来就是「上传到仓库哪里」的那一项，
-              仓库还没填时也得看得见（看不见会让人以为根本没有这一栏）。
-              后面两项（访问地址前缀与那句示例）只跟地址有关，没填仓库时留着是噪音。
-            -->
-            <div class="row">
-              <div class="row__text">
-                <span class="row__label">图片目录</span>
-                <span class="row__hint">
-                  上传到仓库的哪个目录下，例如 images 就是传进仓库的 images 目录（可以写多级，
-                  如 notes/images）。应用会在它下面再按「本机设备 / 笔记本」分两层，
-                  素材管理只看得到当前笔记本自己那一层；留空就是从仓库根目录开始分这两层。
-                </span>
-              </div>
-              <el-input
-                v-model="imageDirDraft"
-                class="name-input"
-                size="small"
-                spellcheck="false"
-                placeholder="images"
-                @change="commitImageDir"
-              />
-            </div>
-
-            <template v-if="settings.settings.noteImageRepo">
-              <div class="row row--stack">
-                <div class="row__text">
-                  <span class="row__label">访问地址前缀</span>
-                  <span class="row__hint">
-                    留空按仓库地址自动推导（GitHub / Gitee / GitLab）；
-                    自建 GitLab / Gitea、图床镜像或 Pages 在这里填前缀。
-                  </span>
-                </div>
-                <el-input
-                  v-model="imageBaseUrlDraft"
-                  size="small"
-                  spellcheck="false"
-                  placeholder="https://cdn.example.com/notes"
-                  @change="commitImageBaseUrl"
-                />
-              </div>
-
-              <div class="row">
-                <div class="row__text">
-                  <span class="row__label">上传后插入的地址</span>
-                  <span class="row__hint mono truncate" :title="imageUrlSample || ''">
-                    {{ imageUrlSample || '推不出来：仓库地址认不出托管方，请填上面的前缀' }}
-                  </span>
-                </div>
-              </div>
-            </template>
           </div>
+
 
           <!--
             账号与同步同属一块：同步的凭据来自账号，所以没登录时下面几行整个不出现 ——
@@ -1018,6 +1009,92 @@ watch([visible, activeTab], ([open, tab]) => {
                 </div>
               </div>
             </template>
+          </div>
+        </section>
+
+        <!--
+          关于：这个应用是什么、数据住在哪、什么时候才会联网。
+          全是「如实说明」那一套 —— 没有宣传语，也没有一个数字是编出来的。
+          这里不做第二份可编辑入口：数据目录与账号的开关都在「通用」那一屏，这一屏只读地摆出当前值。
+        -->
+        <section v-show="activeTab === 'about'" class="pane">
+          <div class="block">
+            <h3 class="block__title">程序</h3>
+
+            <div class="row row--stack">
+              <div class="row__text">
+                <span class="row__label">{{ settings.settings.appName }}</span>
+                <span class="row__hint">
+                  版本 <span class="mono">{{ appVersion }}</span> ·
+                  Windows 桌面应用（Tauri 2 + WebView2）
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div class="block">
+            <h3 class="block__title">这台机器上的数据</h3>
+
+            <div class="row row--stack">
+              <div class="row__text">
+                <span class="row__label">数据目录</span>
+                <span class="row__hint">
+                  项目列表、设置、用量快照与工作日志都在这里；换位置在「通用」那一屏。
+                </span>
+              </div>
+              <div class="path__actions">
+                <p class="path mono truncate" :title="environment.dataLocation?.dir">
+                  {{ environment.dataLocation?.dir ?? '读取中…' }}
+                </p>
+                <el-button
+                  size="small"
+                  :icon="FolderOpened"
+                  :disabled="!environment.dataLocation"
+                  @click="openDataDir"
+                >
+                  打开目录
+                </el-button>
+              </div>
+            </div>
+
+            <div class="row">
+              <div class="row__text">
+                <span class="row__label">登录状态</span>
+                <span class="row__hint">
+                  登录只为授权同步私有仓库；access_token 存在 Windows 凭据管理器里，不落数据文件。
+                </span>
+              </div>
+              <span v-if="account" class="about__account">
+                <el-avatar :size="22" :src="account.avatar ?? undefined" />
+                <span class="truncate">{{ accountLabel(account) }}</span>
+              </span>
+              <span v-else class="row__hint">未登录</span>
+            </div>
+          </div>
+
+          <!--
+            联网边界：把「默认不联网」这句承诺连出口一起摊开，用户不必翻文档就知道这个程序会往哪儿发东西。
+            只有这五处，且都是显式开出来的 —— 这里写的与架构文档「数据与隐私」是同一份事实。
+          -->
+          <div class="block">
+            <h3 class="block__title">联网</h3>
+
+            <p class="about__lead">
+              默认不联网、不上报任何数据。对外发请求的只有下面五处，且都由你自己开出来：
+            </p>
+
+            <ul class="bounds">
+              <li v-for="item in networkBounds" :key="item.title" class="bounds__item">
+                <span class="bounds__title">{{ item.title }}</span>
+                <span class="bounds__detail">{{ item.detail }}</span>
+              </li>
+            </ul>
+
+            <p class="about__lead">
+              五处都不经过任何第三方服务：三处 git 同步发往你自己填的那三个仓库，登录走两家平台官方的
+              OAuth 接口，没有自建服务端。笔记页带文档级的 no-referrer，打开的笔记不会把自己的来源地址
+              送给图片服务器。
+            </p>
           </div>
         </section>
       </div>
@@ -1264,16 +1341,42 @@ watch([visible, activeTab], ([open, tab]) => {
 }
 
 /**
- * 拖动步进 / 卡片间距：取值只有一到两位，用 EP 默认的 120px 宽输入框会占掉半行、
- * 和旁边的说明文字抢地方，收窄到刚够放下数字加右侧的加减按钮。
- *
- * 首页布局那一列的三件控件（进入编辑 + 这两个数字框）宽度取同一个 100px，
- * 右边缘才对得齐（高度由 .settings 上的 small 尺寸统一，见上）。
+ * 卡片间距：取值只有一到两位，用 EP 默认的 120px 宽输入框会占掉半行、
+ * 和旁边的说明文字抢地方，收窄到刚够放下数字加右侧的加减按钮
+ * （高度由 .settings 上的 small 尺寸统一，见上）。
  */
-.number-input,
-.layout-edit {
+.number-input {
   width: 100px;
   flex-shrink: 0;
+}
+
+/**
+ * 开关清单（菜单那一屏的导航栏、外观那一屏的首页卡片）：说明文字下面一格一项，一行放两个 ——
+ * 四项、八项各占两行，不至于把这一屏撑出一整屏高。
+ * 每项是一小块浅底，名字在左、开关贴右，与上面那些 row 的行内控件同一个右边缘。
+ */
+.picks {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-2) var(--sp-3);
+  margin-top: var(--sp-3);
+}
+
+.pick {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  min-width: 0;
+  padding: 4px var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg-subtle);
+}
+
+.pick__name {
+  font-size: var(--fs-meta);
+  color: var(--ink);
 }
 
 /**
@@ -1457,8 +1560,10 @@ watch([visible, activeTab], ([open, tab]) => {
 }
 
 /* ---------- 数据位置 ---------- */
+/* 路径与「更改目录」同一行：路径占满剩下的宽度并自己截断，min-width 是截断生效的前提 */
 .path {
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   padding: 7px 10px;
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
@@ -1502,5 +1607,65 @@ watch([visible, activeTab], ([open, tab]) => {
   flex-shrink: 0;
   font-size: var(--fs-micro);
   color: var(--ink-3);
+}
+
+/* ---------- 关于 ---------- */
+/* 说明性段落：比 .row__hint 略大一点，因为它不是某一行的小字，而是这一块自己的正文 */
+.about__lead {
+  margin: 0;
+  font-size: var(--fs-meta);
+  line-height: 1.75;
+  color: var(--ink-2);
+}
+
+/*
+ * 「联网」那一块里是「说明 → 清单 → 说明」三段平级的内容，而 `.block` **不是** flex 容器
+ * （只有 .pane 有 gap）—— 三段的 margin 又都被上面清成了 0，于是它们贴在一起：
+ * 段与段之间没有任何空隙，清单的第一个出口像是上一句话的一部分（截图里一眼能看出来）。
+ * 间距自己补，取 --sp-4：比标题下的 --sp-3 松一点，三段之间的呼吸才够。
+ */
+.about__lead + .bounds,
+.bounds + .about__lead {
+  margin-top: var(--sp-4);
+}
+
+/* 一个出口一条：上面是名字，下面一行说清它什么时候才会被走到 */
+.bounds {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.bounds__item {
+  padding-left: var(--sp-3);
+  /* 左边一道细线代替项目符号：五条并排的圆点读起来像待办 */
+  border-left: 2px solid var(--border);
+}
+
+.bounds__title {
+  display: block;
+  font-size: var(--fs-meta);
+  color: var(--ink);
+}
+
+.bounds__detail {
+  display: block;
+  margin-top: 2px;
+  font-size: var(--fs-micro);
+  line-height: 1.6;
+  color: var(--ink-3);
+}
+
+.about__account {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-shrink: 0;
+  max-width: 180px;
+  font-size: var(--fs-meta);
+  color: var(--ink-2);
 }
 </style>

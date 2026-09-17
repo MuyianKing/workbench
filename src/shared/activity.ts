@@ -191,7 +191,7 @@ export function buildActivityCalendar(
     total,
     max,
     activeDays,
-    streak: streakFrom(source, today),
+    streak: streakOf(source, today),
     bestStreak: bestStreakIn(source, start, today)
   }
 }
@@ -199,8 +199,11 @@ export function buildActivityCalendar(
 /**
  * 连续天数：今天跑过就从今天往前数，今天还没跑则从昨天数起 ——
  * 今天没动过手不等于连续中断，那只是今天还没开始。
+ *
+ * 导出是因为首页顶部那一行也要这个数：它只关心「连着用了多少天」，
+ * 为这一个数把整张 371 格的日历铺一遍不值当（见 HomeGreeting.vue）。
  */
-function streakFrom(counts: ActivityCounts, today: Date): number {
+export function streakOf(counts: ActivityCounts, today: Date): number {
   let cursor = countOf(counts, today) > 0 ? today : addDays(today, -1)
   let streak = 0
   while (countOf(counts, cursor) > 0) {

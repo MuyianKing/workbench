@@ -134,7 +134,9 @@ fn attach_window_events(window: &tauri::WebviewWindow) {
 
 fn create_main_window(app: &AppHandle) -> tauri::Result<()> {
     let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
-        .title("Workbench")
+        // 只是启动那一瞬的占位：渲染层挂载后立刻用设置里的程序名覆盖它（见 commands::set_app_name）。
+        // 取 package_info 而不是写死一个字面量，改 productName 时这里跟着走
+        .title(app.package_info().name.clone())
         .inner_size(1360.0, 860.0)
         .min_inner_size(1080.0, 680.0)
         // 隐藏原生标题栏：最小化 / 最大化 / 关闭由渲染层自绘（components/TitleBar.vue）。
@@ -162,7 +164,8 @@ fn create_tray(app: &AppHandle) -> tauri::Result<()> {
     let menu = Menu::with_items(app, &[&show, &PredefinedMenuItem::separator(app)?, &quit])?;
 
     let mut builder = TrayIconBuilder::with_id("main")
-        .tooltip("Workbench")
+        // 同窗口标题：占位用构建时的产品名，渲染层随后按设置里的程序名覆盖
+        .tooltip(app.package_info().name.clone())
         .menu(&menu)
         // 左键单击留给「唤起窗口」，菜单只在右键出
         .show_menu_on_left_click(false)
@@ -314,6 +317,8 @@ fn main() {
             commands::window_toggle_maximize,
             commands::window_close,
             commands::window_is_maximized,
+            commands::set_app_name,
+            commands::app_version,
             commands::token_zcode_rows,
             commands::token_zstd_decode,
             commands::token_codebuddy_files,

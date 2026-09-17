@@ -465,6 +465,12 @@ function createApi(): WorkbenchApi {
     },
     getWindowState: () =>
       invoke<boolean>('window_is_maximized').then((maximized): WindowState => ({ maximized })),
+    // 窗口标题与托盘提示归系统，只能在 Rust 侧设；失败无处可报（它不影响任何功能），
+    // 名字的收敛已经在上游做过了
+    setAppName: (name: string) => {
+      void invoke('set_app_name', { name })
+    },
+    getAppVersion: () => invoke<string>('app_version').catch(() => '—'),
 
     // ---------- 账号 ----------
     // 换 token、回环监听、凭据落盘都在 Rust 侧；这里只驱动轮询并落显示资料，

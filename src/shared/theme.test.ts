@@ -8,9 +8,6 @@ import {
   COLUMN_WIDTH_MAX,
   COLUMN_WIDTH_MIN,
   DEFAULT_THEME,
-  GRID_STEP_DEFAULT,
-  GRID_STEP_MAX,
-  GRID_STEP_MIN,
   HOME_CARD_IDS,
   LEFT_WIDTH_DEFAULT,
   NOTE_TREE_WIDTH_DEFAULT,
@@ -22,14 +19,14 @@ import {
   clampCardGap,
   clampCardHeight,
   clampColumnWidth,
-  clampGridStep,
   clampNoteTreeWidth,
   moveCard,
   normalizeOrder,
   resizeCardHeight,
+  sameThemeContent,
   sanitizeCardMode,
   sanitizeTheme,
-  snapToStep,
+  visibleCardIdsInColumn,
   type CardPlacement,
   type HomeCardId
 } from './theme'
@@ -40,33 +37,16 @@ import {
  */
 function sampleCards(): Record<HomeCardId, CardPlacement> {
   return {
-    activity: { column: 'left', order: 0, mode: 'fixed', height: 155 },
-    system: { column: 'left', order: 1, mode: 'fixed', height: 147 },
-    recent: { column: 'right', order: 0, mode: 'fixed', height: 155 },
-    actions: { column: 'right', order: 1, mode: 'flex', height: 180 },
-    commands: { column: 'right', order: 2, mode: 'flex', height: 400 },
-    quick: { column: 'center', order: 0, mode: 'fixed', height: 108 },
-    token: { column: 'center', order: 1, mode: 'flex', height: 600 },
-    work: { column: 'right', order: 3, mode: 'flex', height: 200 }
+    activity: { column: 'left', order: 0, mode: 'fixed', height: 155, hidden: false },
+    system: { column: 'left', order: 1, mode: 'fixed', height: 147, hidden: false },
+    recent: { column: 'right', order: 0, mode: 'fixed', height: 155, hidden: false },
+    actions: { column: 'right', order: 1, mode: 'flex', height: 180, hidden: false },
+    commands: { column: 'right', order: 2, mode: 'flex', height: 400, hidden: false },
+    quick: { column: 'center', order: 0, mode: 'fixed', height: 108, hidden: false },
+    token: { column: 'center', order: 1, mode: 'flex', height: 600, hidden: false },
+    work: { column: 'right', order: 3, mode: 'flex', height: 200, hidden: false }
   }
 }
-
-describe('clampGridStep', () => {
-  it('区间内的值原样返回，四舍五入成整数', () => {
-    expect(clampGridStep(2)).toBe(2)
-    expect(clampGridStep(2.6)).toBe(3)
-    expect(clampGridStep(GRID_STEP_MIN)).toBe(GRID_STEP_MIN)
-    expect(clampGridStep(GRID_STEP_MAX)).toBe(GRID_STEP_MAX)
-  })
-
-  it('越界收敛到边界，非有限数字回落到默认值', () => {
-    expect(clampGridStep(0)).toBe(GRID_STEP_MIN)
-    expect(clampGridStep(999)).toBe(GRID_STEP_MAX)
-    expect(clampGridStep(undefined)).toBe(GRID_STEP_DEFAULT)
-    expect(clampGridStep('2')).toBe(GRID_STEP_DEFAULT)
-    expect(clampGridStep(Number.NaN)).toBe(GRID_STEP_DEFAULT)
-  })
-})
 
 describe('clampCardGap', () => {
   it('区间内的值原样返回，四舍五入成整数', () => {
@@ -82,20 +62,6 @@ describe('clampCardGap', () => {
     expect(clampCardGap(undefined)).toBe(CARD_GAP_DEFAULT)
     expect(clampCardGap('14')).toBe(CARD_GAP_DEFAULT)
     expect(clampCardGap(Number.NaN)).toBe(CARD_GAP_DEFAULT)
-  })
-})
-
-describe('snapToStep', () => {
-  it('吸附到最近的整数格', () => {
-    expect(snapToStep(7, 2)).toBe(8)
-    expect(snapToStep(9, 2)).toBe(10)
-    expect(snapToStep(980, 2)).toBe(980)
-    expect(snapToStep(13, 5)).toBe(15)
-    expect(snapToStep(11, 5)).toBe(10)
-  })
-
-  it('非法步进取默认值', () => {
-    expect(snapToStep(7, 0)).toBe(7)
   })
 })
 
@@ -150,7 +116,13 @@ describe('sanitizeTheme', () => {
     expect(Object.keys(result.cards).sort()).toEqual([...HOME_CARD_IDS].sort())
     // 与默认的 activity 同栏同 order 0 → 按 id 声明顺序让 activity 在前，quick 顺延到 1；
     // mode 缺省时沿用该卡片在默认布局里的模式（快捷启动是固定高度）
-    expect(result.cards.quick).toEqual({ column: 'left', order: 1, mode: 'fixed', height: 240 })
+    expect(result.cards.quick).toEqual({
+      column: 'left',
+      order: 1,
+      mode: 'fixed',
+      height: 240,
+      hidden: false
+    })
     // 没在入参里出现的卡片沿用默认布局（order 会被重排成连续序号，故只比对其余字段）
     expect(result.cards.recent).toMatchObject({
       column: DEFAULT_THEME.cards.recent.column,
@@ -300,15 +272,94 @@ describe('moveCard', () => {
 })
 
 describe('resizeCardHeight', () => {
-  it('按步进吸附增量', () => {
-    expect(resizeCardHeight(200, 37, 2, 150)).toBe(238)
+  it('落到整数像素（吸附网格就是 1px）', () => {
+    expect(resizeCardHeight(200, 37, 150)).toBe(237)
+    expect(resizeCardHeight(200, 36.4, 150)).toBe(236)
+    expect(resizeCardHeight(200.6, 0, 150)).toBe(201)
   })
 
   it('不低于下限', () => {
-    expect(resizeCardHeight(200, -9999, 2, 150)).toBe(150)
+    expect(resizeCardHeight(200, -9999, 150)).toBe(150)
   })
 
   it('不高于上限', () => {
-    expect(resizeCardHeight(200, 999999, 2, 150)).toBe(CARD_HEIGHT_MAX)
+    expect(resizeCardHeight(200, 999999, 150)).toBe(CARD_HEIGHT_MAX)
+  })
+})
+
+describe('关掉的卡片', () => {
+  /** 把某几块卡片标成关掉的，返回一整份合法的 cards */
+  function cardsWithHidden(hidden: HomeCardId[]): Record<HomeCardId, CardPlacement> {
+    const cards = {} as Record<HomeCardId, CardPlacement>
+    for (const id of HOME_CARD_IDS) cards[id] = { ...DEFAULT_THEME.cards[id] }
+    for (const id of hidden) cards[id].hidden = true
+    return cards
+  }
+
+  it('缺省是开着的：老主题文件里没有这个字段，也只有明确的 true 才算关', () => {
+    const result = sanitizeTheme({
+      version: THEME_VERSION,
+      cards: { quick: { column: 'left', order: 0, height: 200 } }
+    })
+    expect(result.cards.quick.hidden).toBe(false)
+
+    const loose = sanitizeTheme({
+      version: THEME_VERSION,
+      cards: { quick: { hidden: 'yes' }, work: { hidden: 1 } }
+    })
+    expect(loose.cards.quick.hidden).toBe(false)
+    expect(loose.cards.work.hidden).toBe(false)
+
+    const off = sanitizeTheme({ version: THEME_VERSION, cards: { quick: { hidden: true } } })
+    expect(off.cards.quick.hidden).toBe(true)
+  })
+
+  it('至少留一块：全关掉时第一块会被放开，首页不会是空白', () => {
+    const result = sanitizeTheme({ version: THEME_VERSION, cards: cardsWithHidden([...HOME_CARD_IDS]) })
+
+    expect(result.cards[HOME_CARD_IDS[0]].hidden).toBe(false)
+    expect(HOME_CARD_IDS.filter((id) => !result.cards[id].hidden)).toEqual([HOME_CARD_IDS[0]])
+  })
+
+  it('关掉只是不画：栏内位置与高度照旧留着，再打开时回到原处', () => {
+    const result = sanitizeTheme({ version: THEME_VERSION, cards: cardsWithHidden(['recent']) })
+
+    expect(result.cards.recent).toEqual({ ...DEFAULT_THEME.cards.recent, hidden: true })
+    // 栏里的清单不受影响（它是「摆了哪些」，画不画由 visibleCardIdsInColumn 决定）
+    expect(cardIdsInColumn(result.cards, 'left')).toEqual(
+      cardIdsInColumn(DEFAULT_THEME.cards, 'left')
+    )
+    expect(visibleCardIdsInColumn(result.cards, 'left')).not.toContain('recent')
+  })
+
+  it('关掉一块卡片也算内容变了（同步要跟着刷新时间戳）', () => {
+    const before = sanitizeTheme(DEFAULT_THEME)
+    const after = sanitizeTheme({ version: THEME_VERSION, cards: cardsWithHidden(['quick']) })
+    expect(sameThemeContent(before, after)).toBe(false)
+  })
+
+  it('读盘回来的数组是新对象，内容一样就不算变（否则每轮同步都多一条只改时间的提交）', () => {
+    const before = sanitizeTheme(DEFAULT_THEME)
+    const after = sanitizeTheme(JSON.parse(JSON.stringify(before)))
+    expect(sameThemeContent(before, after)).toBe(true)
+  })
+
+  it('导航栏关掉了哪几页也是内容，比的是清单不是引用', () => {
+    const before = sanitizeTheme(DEFAULT_THEME)
+    const same = sanitizeTheme(
+      JSON.parse(
+        JSON.stringify({
+          ...before,
+          appearance: { ...before.appearance, hiddenViews: [] }
+        })
+      )
+    )
+    expect(sameThemeContent(before, same)).toBe(true)
+
+    const changed = sanitizeTheme({
+      ...before,
+      appearance: { ...before.appearance, hiddenViews: ['notes'] }
+    })
+    expect(sameThemeContent(before, changed)).toBe(false)
   })
 })

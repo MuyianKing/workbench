@@ -83,6 +83,19 @@ function tipOf(day: ActivityDay): string {
         </div>
       </div>
     </div>
+
+    <!--
+      下方一行：连续 / 最长 / 活跃天数 / 单日峰值。
+      这四个数与上面的格子同源（同一个 calendar），回答的是「这一年怎么样」——
+      上面那行总数只说「跑了多少次」，说不出一段段连着用的日子。
+      一条记录都没有时整行不画：四个 0 摆在那里没有任何信息量。
+    -->
+    <p v-if="calendar.total" class="graph__stats">
+      <span class="stat"><i>连续</i><b class="mono">{{ calendar.streak }} 天</b></span>
+      <span class="stat"><i>最长</i><b class="mono">{{ calendar.bestStreak }} 天</b></span>
+      <span class="stat"><i>活跃</i><b class="mono">{{ calendar.activeDays }} 天</b></span>
+      <span class="stat"><i>单日最多</i><b class="mono">{{ calendar.max }} 次</b></span>
+    </p>
   </article>
 </template>
 
@@ -219,5 +232,44 @@ function tipOf(day: ActivityDay): string {
 .graph__total {
   font-size: var(--fs-micro);
   color: var(--ink-3);
+}
+
+/* ---------- 下方那行统计 ---------- */
+/*
+ * 卡片把 .panel 的 padding-bottom 压成了 0（那条空槽原来由图的横向滚动槽抵着），
+ * 现在最后一项变成了这里，得自己把这圈留白补回来。
+ *
+ * `margin-top: auto` 把它**贴到卡片下沿**：卡片是自适应的，吃掉剩余高度后会比图高出一大截，
+ * 不推下去的话这行字就悬在卡片中间、底下空一片，看着像没渲染完（截图里一眼能看出来）。
+ * 卡片被压矮时没有可分配的剩余空间，这条自动外边距自然塌成 0，它就贴在图的下面。
+ */
+.graph__stats {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  /* 横向间距大一些：四组数字挨着排会读成一句话 */
+  gap: 4px var(--sp-4);
+  flex-shrink: 0;
+  margin: 0;
+  margin-top: -5px;
+  padding-bottom: var(--sp-2);
+  font-size: var(--fs-meta);
+  justify-content:center;
+}
+
+.graph__stats .stat {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.graph__stats i {
+  font-style: normal;
+  font-size: var(--fs-micro);
+  color: var(--ink-3);
+}
+
+.graph__stats b {
+  font-weight: 600;
 }
 </style>

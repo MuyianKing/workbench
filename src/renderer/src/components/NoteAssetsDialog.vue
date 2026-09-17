@@ -102,13 +102,13 @@ const repoMissing = computed(() => !settings.settings.noteImageRepo)
 const rootMissing = computed(() => !props.root.trim())
 
 /**
- * 仓库地址、图片目录或笔记本换了：上次那份清单已经不是这一层的东西了。
+ * 仓库地址或笔记本换了：上次那份清单已经不是这一层的东西了。
  *
  * 笔记本也必须看着 —— 换了笔记本却把上一个的清单先显示出来，等于把「别的笔记本的图」
  * 说成「没人用的图」（虽然真删会被 Rust 的路径边界挡回来，但那种「删不动」本身就是个错）。
  */
 watch(
-  () => [settings.settings.noteImageRepo, settings.settings.noteImageDir, props.root],
+  () => [settings.settings.noteImageRepo, props.root],
   () => {
     cached = null
     result.value = null
@@ -155,7 +155,6 @@ async function scan(): Promise<void> {
     const [images, texts] = await Promise.all([
       window.workbench.listNoteImages({
         repo,
-        dir: settings.settings.noteImageDir,
         root,
         useAccount: settings.settings.useAccountForSync
       }),
@@ -178,8 +177,7 @@ async function scan(): Promise<void> {
         images: images.data.files,
         texts: texts.data.files.map((file) => file.text),
         repo,
-        branch: images.data.branch,
-        baseUrl: settings.settings.noteImageBaseUrl
+        branch: images.data.branch
       })
     )
 
@@ -238,7 +236,6 @@ async function remove(): Promise<void> {
 
   const deleted = await window.workbench.deleteNoteImages({
     repo,
-    dir: settings.settings.noteImageDir,
     root: props.root,
     paths: targets.map((asset) => asset.path),
     useAccount: settings.settings.useAccountForSync

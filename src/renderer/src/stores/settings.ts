@@ -15,7 +15,6 @@ import {
   clampCardGap,
   clampCardHeight,
   clampColumnWidth,
-  clampGridStep,
   clampNoteTreeWidth,
   moveCard as placeCard,
   sanitizeTheme,
@@ -27,6 +26,7 @@ import {
 import { clampBackgroundOpacity, sanitizeVeilColor } from '@shared/workspace-background'
 import { clampCardOpacity } from '@shared/card-opacity'
 import { sanitizeAccentColor, sanitizeAccentInkMode, type AccentInkMode } from '@shared/accent-color'
+import type { ViewId } from '@shared/views'
 import {
   DEFAULT_SETTINGS,
   TOP_BAR_STYLES,
@@ -137,6 +137,20 @@ export const useSettingsStore = defineStore('settings', () => {
     immediate: true
   })
 
+  /**
+   * 程序名：自绘的那条标题栏由组件自己读设置，而**窗口标题与托盘提示归系统**，只能在
+   * Rust 侧设 —— 少了这一步，改完名字任务栏上还是构建时那个名字。
+   *
+   * immediate：store 一建好就把快照里那个名字送过去，不必等 loadAppearance
+   * （在那之前窗口标题一直是构建时的占位名）。设置里改完由同一个 watch 接手。
+   * 浏览器预览下没有后端，用可选链跳过（与 bootstrap.ts 同一个写法）。
+   */
+  watch(
+    () => settings.value.appName,
+    (name) => window.workbench?.setAppName(name),
+    { immediate: true }
+  )
+
   // ---------- 设置本体 ----------
 
   async function updateSettings(
@@ -184,6 +198,21 @@ export const useSettingsStore = defineStore('settings', () => {
     if (style === settings.value.topBarStyle) return true
 
     return updateSettings({ topBarStyle: style })
+  }
+
+  /**
+   * 关掉 / 打开左侧导航栏上的某一页。
+   *
+   * 走 updateSettings：这一项在外观白名单里，实际落在 theme.json（与布局同一个文件）。
+   * 全关掉的补丁会被收敛拦下（至少留一页，见 shared/views.ts 的 sanitizeHiddenViews），
+   * 回推的设置就是收敛后的那一份，界面按它重画即可，这里不必自己兜 —— 所以也不做本地乐观更新。
+   */
+  async function setViewVisible(id: ViewId, visible: boolean): Promise<boolean> {
+    const hidden = visible
+      ? settings.value.hiddenViews.filter((item) => item !== id)
+      : [...settings.value.hiddenViews, id]
+
+    return updateSettings({ hiddenViews: hidden })
   }
 
   /**
@@ -368,13 +397,12 @@ export const useSettingsStore = defineStore('settings', () => {
    * 与终端高度同一套做法：拖动栏宽 / 卡片高度时只改这个 ref 让布局跟手，
    * 松手才整份落盘，免得每动一格就写一次文件。
    *
-   * 只读它的布局字段（cards / 栏宽 / 步进 / 间距）。改成外观那几项走的是 `settings`：
+   * 只读它的布局字段（cards / 栏宽 / 间距）。改成外观那几项走的是 `settings`：
    * 适配层在那边把两份合起来，这里的 `appearance` 可能比适配层旧一拍 ——
    * 无妨，因为每次落盘都是把补丁交给适配层、由它并到自己那份权威值上（见 workbench/state.ts）。
    */
   const themeConfig = ref<ThemeConfig>(sanitizeTheme(bootstrap?.themeConfig ?? DEFAULT_THEME))
 
-  const gridStep = computed(() => themeConfig.value.gridStep)
   const cardGap = computed(() => themeConfig.value.cardGap)
 
   function applyThemeConfig(value: ThemeConfig): void {
@@ -406,6 +434,17 @@ export const useSettingsStore = defineStore('settings', () => {
   async function toggleCardMode(id: HomeCardId): Promise<void> {
     const card = themeConfig.value.cards[id]
     card.mode = card.mode === 'flex' ? 'fixed' : 'flex'
+    await commitCards()
+  }
+
+  /**
+   * 关掉 / 打开首页的某一块卡片。
+   *
+   * 关掉只是不画它：栏内位置与高度都留着，再打开时回到原来那一格（见 shared/theme.ts）。
+   * 与拖动落盘走同一条路（commitCards）：整份送出去，免得别的卡片停在旧快照。
+   */
+  async function setCardVisible(id: HomeCardId, visible: boolean): Promise<void> {
+    themeConfig.value.cards[id].hidden = !visible
     await commitCards()
   }
 
@@ -446,13 +485,6 @@ export const useSettingsStore = defineStore('settings', () => {
     })
   }
 
-  /** 步进是设置项，改完立即落盘 */
-  async function setGridStep(value: number): Promise<void> {
-    const next = clampGridStep(value)
-    themeConfig.value.gridStep = next
-    await saveThemeConfig({ gridStep: next })
-  }
-
   /** 卡片间距是设置项，改完立即落盘（栏间、栏内卡片、项目卡网格同时生效） */
   async function setCardGap(value: number): Promise<void> {
     const next = clampCardGap(value)
@@ -460,12 +492,11 @@ export const useSettingsStore = defineStore('settings', () => {
     await saveThemeConfig({ cardGap: next })
   }
 
-  /** 恢复默认布局；栏宽 / 栏内位置 / 高度 / 步进全部回到默认 */
+  /** 恢复默认布局；栏宽 / 栏内位置 / 高度 / 间距 / 关掉的卡片全部回到默认 */
   async function resetLayout(): Promise<void> {
     const fallback = sanitizeTheme(DEFAULT_THEME)
     themeConfig.value = fallback
     await saveThemeConfig({
-      gridStep: fallback.gridStep,
       cardGap: fallback.cardGap,
       leftWidth: fallback.leftWidth,
       rightWidth: fallback.rightWidth,
@@ -588,6 +619,7 @@ export const useSettingsStore = defineStore('settings', () => {
     setTopBarStyle,
     setAccentColor,
     setAccentInk,
+    setViewVisible,
     // 背景
     backgroundImage,
     backgroundName,
@@ -604,18 +636,17 @@ export const useSettingsStore = defineStore('settings', () => {
     setCardOpacity,
     // 布局
     themeConfig,
-    gridStep,
     cardGap,
     applyThemeConfig,
     moveCard,
     setCardHeight,
     toggleCardMode,
+    setCardVisible,
     commitCards,
     setColumnWidth,
     commitColumns,
     setNoteTreeWidth,
     commitNoteTreeWidth,
-    setGridStep,
     setCardGap,
     resetLayout,
     // 别台机器的外观

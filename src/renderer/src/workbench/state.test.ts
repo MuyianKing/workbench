@@ -63,13 +63,13 @@ describe('适配层交出去的列表', () => {
  * 用户的主题色、背景、终端高度就再也没处可搬。所以既要断言搬到了，也要断言**立刻落盘**。
  */
 describe('老数据的搬家', () => {
-  function savedTheme(): { appearance?: { accentColor?: string }; gridStep?: number } | null {
+  function savedTheme(): { appearance?: { accentColor?: string } } | null {
     const call = calls.find((item) => item.command === 'theme_save')
     return (call?.args?.value ?? null) as { appearance?: { accentColor?: string } } | null
   }
 
   it('主题文件里还没有外观时，从设置里搬过去并立刻落盘', async () => {
-    rawTheme = { version: 2, gridStep: 3, cards: {} }
+    rawTheme = { version: 2, cardGap: 14, cards: {} }
     rawData = {
       settings: { accentColor: '#ef4444', terminalHeight: 320, hotkey: 'Control+J' },
       projects: []
@@ -83,7 +83,7 @@ describe('老数据的搬家', () => {
     expect(state.settings().terminalHeight).toBe(320)
     expect(state.settings().hotkey).toBe('Control+J')
     // 布局不受影响：搬外观不能顺手把摆放清了
-    expect(state.themeConfig().gridStep).toBe(3)
+    expect(state.themeConfig().cardGap).toBe(14)
     expect(state.themeConfig().appearance.accentColor).toBe('#ef4444')
     // 搬完必须马上写回主题文件：数据文件下一次落盘就会把那些键摘掉
     expect(savedTheme()?.appearance?.accentColor).toBe('#ef4444')

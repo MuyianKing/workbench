@@ -114,6 +114,25 @@ describe('按落点拆一份设置补丁', () => {
     expect(stored).toEqual({ hotkeyEnabled: false })
   })
 
+  it('导航菜单那一项算外观：住在 theme.json 里，跟着配置一起同步', () => {
+    const { settings: stored, appearance } = splitSettingsPatch({
+      hiddenViews: ['notes'],
+      activeView: 'projects'
+    })
+
+    expect(appearance).toEqual({ hiddenViews: ['notes'] })
+    // 当前页留在数据文件里：「这台机器上次停在哪儿」换台机器就不成立
+    expect(stored).toEqual({ activeView: 'projects' })
+    expect(DEFAULT_STORED_SETTINGS).not.toHaveProperty('hiddenViews')
+  })
+
+  it('关掉的页一样要过收敛（手改过的主题文件可能写着认不出来的 id）', () => {
+    expect(sanitizeAppearanceSettings({ hiddenViews: ['notes', 'nope', 'notes'] }).hiddenViews).toEqual([
+      'notes'
+    ])
+    expect(sanitizeAppearanceSettings({ hiddenViews: 'notes' }).hiddenViews).toEqual([])
+  })
+
   it('合回来的设置与拆之前一致', () => {
     const before = settings({ accentColor: '#ef4444', hotkey: 'Control+J', terminalHeight: 250 })
     const patch = { accentColor: '#22c55e', terminalHeight: 320 } as Partial<AppSettings>
@@ -129,7 +148,7 @@ describe('按落点拆一份设置补丁', () => {
 
 describe('老数据搬家', () => {
   it('主题文件里还没有外观时，从数据文件的设置里搬过去', () => {
-    const legacyTheme = { version: 2, gridStep: 2, cards: {} }
+    const legacyTheme = { version: 2, cardGap: 14, cards: {} }
     const legacySettings = { accentColor: '#ef4444', terminalHeight: 320, hotkey: 'Control+J' }
 
     const migrated = sanitizeTheme(migrateAppearanceIntoTheme(legacyTheme, legacySettings))
@@ -137,7 +156,7 @@ describe('老数据搬家', () => {
     expect(migrated.appearance.accentColor).toBe('#ef4444')
     expect(migrated.appearance.terminalHeight).toBe(320)
     // 布局与其余设置都照旧（搬外观不能顺手把布局清了）
-    expect(migrated.gridStep).toBe(2)
+    expect(migrated.cardGap).toBe(14)
   })
 
   it('主题文件里已经有外观时不再搬（否则每次启动都把新值覆盖回老的）', () => {
@@ -172,7 +191,6 @@ describe('theme.json 的整份收敛', () => {
   it('老主题文件（没有外观、没有时间戳）也能读进来，布局不动', () => {
     const legacy = {
       version: DEFAULT_THEME.version,
-      gridStep: 3,
       cardGap: 14,
       leftWidth: 320,
       rightWidth: 260,
@@ -180,7 +198,7 @@ describe('theme.json 的整份收敛', () => {
     }
     const theme = sanitizeTheme(legacy)
 
-    expect(theme.gridStep).toBe(3)
+    expect(theme.cardGap).toBe(14)
     expect(theme.leftWidth).toBe(320)
     expect(theme.cards.quick.column).toBe('center')
     expect(theme.appearance).toEqual(DEFAULT_APPEARANCE)

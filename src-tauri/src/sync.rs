@@ -45,6 +45,16 @@ const MAX_IMAGE_DEPTH: usize = 6;
 /// 用户看得见那个窗口，也知道自己在授权什么。
 const GIT_ENVS: [(&str, &str); 1] = [("GIT_TERMINAL_PROMPT", "0")];
 
+/// 每条 git 命令都先挂上的全局选项（拼在子命令之前）。
+///
+/// `core.quotepath=false`：**git 默认会把非 ASCII 路径转义成八进制** ——
+/// `周报.md` 会变成 `\345\221\250\346\212\245.md`。冲突提示里要点出的正是文件名
+/// （见 `conflict_names`），而这个应用的笔记多半是中文名，转义之后那句话就成了看不懂的乱码。
+///
+/// 不能指望本机的 git 配置：这是个**每台机器都可能不同**的全局项（用户自己在
+/// `~/.gitconfig` 里设过就不同），而我们每次都要拿到能直接上屏的名字。
+const GIT_GLOBAL_ARGS: [&str; 2] = ["-c", "core.quotepath=false"];
+
 thread_local! {
     /// 本次 git 调用额外要带的 git 配置（host 限定的 Authorization 头，见 `oauth::git_envs`）。
     ///
@@ -1052,7 +1062,12 @@ fn run_git_quiet(args: &[&str], cwd: &Path) -> bool {
 }
 
 fn run(args: &[&str], cwd: Option<&Path>, timeout: Duration) -> Result<proc::Outcome, String> {
-    let owned: Vec<String> = args.iter().map(|arg| (*arg).to_string()).collect();
+    // `-c` 是 git 的**全局**选项，必须排在子命令前面，所以在这里拼 ——
+    // 让每个调用方自己带的话，早晚有一条命令忘掉
+    let mut all: Vec<&str> = GIT_GLOBAL_ARGS.to_vec();
+    all.extend_from_slice(args);
+
+    let owned: Vec<String> = all.iter().map(|arg| (*arg).to_string()).collect();
     let auth = GIT_AUTH.with(|slot| slot.borrow().clone());
 
     // 非交互那条永远带；账号凭据由 set_git_auth 决定要不要加

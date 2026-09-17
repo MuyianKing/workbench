@@ -392,6 +392,9 @@ export const useTerminalStore = defineStore('terminal', () => {
   }
 
   function onStatus(event: ProcessStatusEvent): void {
+    // 终端级状态先取出来：目标级状态要借它认「这次是启动还是打包」（见 RuntimeState.kind）
+    const target = terminals[event.terminal]
+
     // 目标级状态：卡片 / 抽屉的按钮与指示灯都看这个
     const rt = runtimeOf(event.projectId)
     rt.status = event.status
@@ -401,6 +404,7 @@ export const useTerminalStore = defineStore('terminal', () => {
     rt.durationMs = event.durationMs
     rt.exitCode = event.exitCode
     rt.port = event.port ?? rt.port
+    if (target) rt.kind = target.kind
     // 事件只可能来自 Workbench 自己的子进程，探测出来的「外部运行」到此为止
     rt.external = false
 
@@ -410,7 +414,6 @@ export const useTerminalStore = defineStore('terminal', () => {
     }
 
     // 终端级状态：Tab 上的圆点与耗时
-    const target = terminals[event.terminal]
     if (!target) return
     target.status = event.status
     target.pid = event.pid

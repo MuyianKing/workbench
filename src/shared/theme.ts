@@ -4,10 +4,11 @@
  * 首页分成左中右三栏：左右两栏宽度可调，中间那栏 flex:1 吃掉剩余宽度。
  * 八块卡片各自属于某一栏，在栏内按 order 从上到下排列、宽度铺满整栏，高度各自可调；
  * 没有卡片的栏在平时不渲染（编辑时才显示出来，好把卡片拖进去）。
+ * 每块卡片还能单独关掉（`hidden`，在设置里勾选）：关掉只是不画它，栏内位置与高度都留着。
  *
- * 外观那几项（明暗 / 主题色 / 顶部样式 / 卡片不透明度 / 终端高度 / 程序名称 / 背景）也在这里，
- * 原因见 appearance.ts 的文件头：它们与布局是同一类东西，而且同步时整个文件就是一台机器
- * 要带给另一台机器的那份配置。
+ * 外观那几项（明暗 / 主题色 / 顶部样式 / 卡片不透明度 / 终端高度 / 程序名称 / 背景 /
+ * 导航菜单显示哪几页）也在这里，原因见 appearance.ts 的文件头：它们与布局是同一类东西，
+ * 而且同步时整个文件就是一台机器要带给另一台机器的那份配置。
  *
  * 这个模块被宿主（读盘、收敛旧文件）和渲染层（拖动、缩放）共用：两边必须是同一套
  * 边界与吸附规则，否则一个手改过的 theme.json 就能把栏宽撑爆、或者拖出一个负高度。
@@ -27,6 +28,21 @@ export const HOME_CARD_IDS = [
 ] as const
 
 export type HomeCardId = (typeof HOME_CARD_IDS)[number]
+
+/**
+ * 卡片的界面名字。放这里是因为有两处在用：画布（编辑态的卡片标签）与设置里的卡片清单 ——
+ * 各写一份的话改个名字总有一边忘（各页的名字在 views.ts 里，同一个道理）。
+ */
+export const HOME_CARD_LABELS: Record<HomeCardId, string> = {
+  activity: '活跃度',
+  token: 'Token 用量',
+  system: '系统状态',
+  recent: '最近使用',
+  actions: '快捷操作',
+  quick: '快捷启动',
+  commands: '命令',
+  work: '今日完成'
+}
 
 /** 三栏；center 没有固定宽度，永远吃掉剩余空间 */
 export const COLUMN_IDS = ['left', 'center', 'right'] as const
@@ -61,13 +77,18 @@ export interface CardPlacement {
   mode: CardMode
   /** 固定高度（px）；mode 为 flex 时只作为下限参考，不直接生效 */
   height: number
+  /**
+   * 关掉的卡片不画在画布上（设置里的卡片清单勾选的）。
+   *
+   * 关掉只是「不画」，column / order / height 照旧留着：再打开时回到原来那个位置，
+   * 而不是被塞回默认栏。所在栏因此空掉时整栏也不渲染（与「空栏不渲染」同一条规则）。
+   */
+  hidden: boolean
 }
 
 export interface ThemeConfig {
   /** 配置结构版本，将来改字段时用来兜底 */
   version: number
-  /** 拖动 / 缩放的吸附步进（px） */
-  gridStep: number
   /**
    * 卡片间距（px）：栏间、栏内卡片之间、项目列表里项目卡之间共用这一个值，
    * 让首页所有卡片之间的留白保持一致。
@@ -108,11 +129,6 @@ export function isColumnId(value: unknown): value is ColumnId {
  */
 export const THEME_VERSION = 2
 
-/** 步进的可配区间：1px 太细容易拖不齐，20px 又太跳，两头都够用；默认 1 为按当前配置固化 */
-export const GRID_STEP_MIN = 1
-export const GRID_STEP_MAX = 20
-export const GRID_STEP_DEFAULT = 1
-
 /**
  * 卡片间距的可配区间（px）。
  * 下限 0 允许卡片紧贴（想要一整面连排时用），上限 40 再大就只剩缝了；默认 10 为按当前配置固化。
@@ -151,7 +167,9 @@ export const CARD_HEIGHT_MAX = 4000
  * 真正的物理下限是「面板标题 + 上下内边距」那一圈，约 64px。
  */
 export const CARD_HEIGHT_MIN: Record<HomeCardId, number> = {
-  activity: 110,
+  // 比别的卡片高 20：图下方那行统计（连续 / 最长 / 活跃天数 / 单日峰值）也要占一行，
+  // 再矮就只剩两三行格子了 —— 图本身会滚，但那个高度已经读不出「这一年」的样子
+  activity: 130,
   token: 160,
   system: 88,
   recent: 88,
@@ -171,23 +189,22 @@ export const CARD_HEIGHT_MIN: Record<HomeCardId, number> = {
  */
 export const DEFAULT_THEME: ThemeConfig = {
   version: THEME_VERSION,
-  gridStep: GRID_STEP_DEFAULT,
   cardGap: CARD_GAP_DEFAULT,
   leftWidth: LEFT_WIDTH_DEFAULT,
   rightWidth: RIGHT_WIDTH_DEFAULT,
   noteTreeWidth: NOTE_TREE_WIDTH_DEFAULT,
   cards: {
-    recent: { column: 'left', order: 0, mode: 'fixed', height: 155 },
-    quick: { column: 'left', order: 1, mode: 'fixed', height: 98 },
+    recent: { column: 'left', order: 0, mode: 'fixed', height: 155, hidden: false },
+    quick: { column: 'left', order: 1, mode: 'fixed', height: 98, hidden: false },
     /* 系统状态：node / 包管理器 / nvm / nrm 四行 + 贴底的数据目录，
        170 是四行刚好放全的高度（147 是按三行定的，加一行后明细区会被挤进滚动） */
-    system: { column: 'left', order: 2, mode: 'fixed', height: 170 },
-    commands: { column: 'left', order: 3, mode: 'flex', height: 90 },
-    activity: { column: 'center', order: 0, mode: 'flex', height: 240 },
-    token: { column: 'center', order: 1, mode: 'flex', height: 240 },
-    actions: { column: 'right', order: 0, mode: 'fixed', height: 224 },
+    system: { column: 'left', order: 2, mode: 'fixed', height: 170, hidden: false },
+    commands: { column: 'left', order: 3, mode: 'flex', height: 90, hidden: false },
+    activity: { column: 'center', order: 0, mode: 'flex', height: 240, hidden: false },
+    token: { column: 'center', order: 1, mode: 'flex', height: 240, hidden: false },
+    actions: { column: 'right', order: 0, mode: 'fixed', height: 224, hidden: false },
     // 今日完成：条目数不确定，让它吃掉右栏剩下的高度、在里面自己滚
-    work: { column: 'right', order: 1, mode: 'flex', height: 200 }
+    work: { column: 'right', order: 1, mode: 'flex', height: 200, hidden: false }
   },
   // 外观的默认值只有一处口径（数据文件那份设置的默认值，见 appearance.ts）
   appearance: DEFAULT_APPEARANCE,
@@ -200,22 +217,10 @@ export function sanitizeCardMode(value: unknown, fallback: CardMode): CardMode {
   return value === 'fixed' || value === 'flex' ? value : fallback
 }
 
-/** 收敛步进；不是有限数字一律回到默认值 */
-export function clampGridStep(value: unknown): number {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return GRID_STEP_DEFAULT
-  return Math.min(GRID_STEP_MAX, Math.max(GRID_STEP_MIN, Math.round(value)))
-}
-
 /** 收敛卡片间距；不是有限数字一律回到默认值 */
 export function clampCardGap(value: unknown): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) return CARD_GAP_DEFAULT
   return Math.min(CARD_GAP_MAX, Math.max(CARD_GAP_MIN, Math.round(value)))
-}
-
-/** 吸附到步进网格：最近的整数格（2px 步进下 7 → 8、9 → 10） */
-export function snapToStep(value: number, step: number): number {
-  const size = clampGridStep(step)
-  return Math.round(value / size) * size
 }
 
 /** 收敛侧栏宽度；非法值回退到 fallback */
@@ -253,7 +258,9 @@ export function sanitizeCardPlacement(value: unknown, id: HomeCardId): CardPlace
     column: isColumnId(input.column) ? input.column : fallback.column,
     order: Math.round(finiteOr(input.order, fallback.order)),
     mode: sanitizeCardMode(input.mode, fallback.mode),
-    height: clampCardHeight(input.height, id)
+    height: clampCardHeight(input.height, id),
+    // 关掉的状态只在明确写了 true 时才认（老主题文件里没有这个字段 = 开着）
+    hidden: input.hidden === true
   }
 }
 
@@ -300,13 +307,12 @@ export function sanitizeTheme(raw: unknown): ThemeConfig {
 
   return {
     version: THEME_VERSION,
-    gridStep: clampGridStep(base.gridStep),
     cardGap: clampCardGap(base.cardGap),
     leftWidth: clampColumnWidth(base.leftWidth, LEFT_WIDTH_DEFAULT),
     rightWidth: clampColumnWidth(base.rightWidth, RIGHT_WIDTH_DEFAULT),
     // 后加的字段：老主题文件里没有，补默认宽度（与 appearance 同理，不能因此去动上面的版本判定）
     noteTreeWidth: clampNoteTreeWidth(base.noteTreeWidth),
-    cards: normalizeOrder(cards),
+    cards: normalizeOrder(keepOneVisible(cards)),
     // 外观是后加的字段：老主题文件里没有，缺了就补默认（**不能**因为它去动上面的版本判定，
     // 否则升级一次就会把用户的布局整份清掉）
     appearance: sanitizeAppearanceSettings(base.appearance),
@@ -325,28 +331,55 @@ export function sanitizeTheme(raw: unknown): ThemeConfig {
  */
 export function sameThemeContent(a: ThemeConfig, b: ThemeConfig): boolean {
   if (layoutSignature(a) !== layoutSignature(b)) return false
-  return (Object.keys(b.appearance) as Array<keyof AppearanceSettings>).every(
-    (key) => a.appearance[key] === b.appearance[key]
+  return (Object.keys(b.appearance) as Array<keyof AppearanceSettings>).every((key) =>
+    sameAppearanceValue(a.appearance[key], b.appearance[key])
   )
+}
+
+/**
+ * 外观项逐个比。字符串与数字直接比；**数组要比内容**（导航栏关掉了哪几页是 `ViewId[]`）——
+ * 用 `===` 比的话每次读盘都得到一个新数组，两份配置永远「不一样」，
+ * 时间戳就会在每轮同步里刷新，仓库里堆出一串只改了时间的提交。
+ */
+function sameAppearanceValue(a: unknown, b: unknown): boolean {
+  if (Array.isArray(a) || Array.isArray(b)) {
+    return Array.isArray(a) && Array.isArray(b) && a.join('\u0000') === b.join('\u0000')
+  }
+  return a === b
 }
 
 /** 布局压成一行可比的字符串（外观由调用方逐项比） */
 function layoutSignature(layout: ThemeConfig): string {
   return [
     layout.version,
-    layout.gridStep,
     layout.cardGap,
     layout.leftWidth,
     layout.rightWidth,
     layout.noteTreeWidth,
     HOME_CARD_IDS.map((id) => {
       const card = layout.cards[id]
-      return `${id}:${card.column}/${card.order}/${card.mode}/${card.height}`
+      return `${id}:${card.column}/${card.order}/${card.mode}/${card.height}/${card.hidden}`
     }).join(',')
   ].join('|')
 }
 
-/** 某一栏里的卡片 id，按 order 排好 */
+/**
+ * 「至少留一块」：全关掉时把清单里的第一块（活跃度）放开。
+ * 一个不剩的话首页是一片空白，用户连拖动把手都看不见 —— 与导航栏那条同样的道理
+ * （见 views.ts 的 sanitizeHiddenViews）。设置界面里最后一颗开关是禁用的，正常够不到这里。
+ */
+function keepOneVisible(
+  cards: Record<HomeCardId, CardPlacement>
+): Record<HomeCardId, CardPlacement> {
+  if (HOME_CARD_IDS.some((id) => !cards[id].hidden)) return cards
+
+  const next = {} as Record<HomeCardId, CardPlacement>
+  for (const id of HOME_CARD_IDS) next[id] = { ...cards[id] }
+  next[HOME_CARD_IDS[0]].hidden = false
+  return next
+}
+
+/** 某一栏里的卡片 id，按 order 排好（含关掉的那些） */
 export function cardIdsInColumn(
   cards: Record<HomeCardId, CardPlacement>,
   column: ColumnId
@@ -354,6 +387,17 @@ export function cardIdsInColumn(
   return HOME_CARD_IDS.filter((id) => cards[id].column === column).sort(
     (a, b) => cards[a].order - cards[b].order
   )
+}
+
+/**
+ * 某一栏里**要画出来**的卡片：顺序同 cardIdsInColumn，只是把关掉的滤掉。
+ * 画布与「栏里还有没有卡片」的判断都走它 —— 否则关掉一块卡会让空栏照旧占着位置。
+ */
+export function visibleCardIdsInColumn(
+  cards: Record<HomeCardId, CardPlacement>,
+  column: ColumnId
+): HomeCardId[] {
+  return cardIdsInColumn(cards, column).filter((id) => !cards[id].hidden)
 }
 
 /**
@@ -386,9 +430,14 @@ export function moveCard(
   return normalizeOrder(next)
 }
 
-/** 拖动下边缘改高度：按步进吸附，不低于该卡片的下限 */
-export function resizeCardHeight(start: number, dy: number, step: number, min: number): number {
-  return Math.min(CARD_HEIGHT_MAX, Math.max(min, snapToStep(start + dy, step)))
+/**
+ * 拖动下边缘改高度：落到整数像素（吸附网格就是 1px），不低于该卡片的下限。
+ *
+ * 界面上的拖动都是按指针位置现算的浮点数，不取整的话高度会是一串小数，
+ * 卡片间距与总高度跟着出现半像素的错位。
+ */
+export function resizeCardHeight(start: number, dy: number, min: number): number {
+  return Math.min(CARD_HEIGHT_MAX, Math.max(min, Math.round(start + dy)))
 }
 
 /**

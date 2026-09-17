@@ -7,7 +7,12 @@
 `src/shared/token-usage.ts`、`sync-config.ts`、`theme.ts`、`appearance.ts`（纯口径），
 `src/renderer/src/workbench/` 下的 `index.ts` / `token.ts` / `auth.ts` / `state.ts`。
 
-调用 git 的方式（直启 `git.exe`、不经 `cmd /C`、带 `GIT_TERMINAL_PROMPT=0`）是全局规则，见 [AGENTS.md](../../AGENTS.md) 第 1 节。
+调用 git 的方式（直启 `git.exe`、不经 `cmd /C`、带 `GIT_TERMINAL_PROMPT=0` 与 `-c core.quotepath=false`）是全局规则，
+见 [AGENTS.md](../../AGENTS.md) 第 1 节。两条都有非留不可的理由：`GIT_TERMINAL_PROMPT=0` 是因为子进程没有终端可问，
+挂着只会等到超时；`core.quotepath=false` 是因为**git 默认把非 ASCII 路径转义成八进制**
+（`周报.md` → `\345\221\250\346\212\245.md`），而冲突提示里报的就是文件名 —— 这个应用的笔记多半是中文名，
+转义之后那句话直接没法看。它还是个**每台机器都可能不同**的 git 全局项，不能指望用户自己设过，
+所以每次调用显式带上（`sync.rs` 的 `run()` 里一处拼好，别让调用方各带各的）。
 
 ## 开关与边界
 

@@ -6,13 +6,13 @@ import { TERMINAL_HEIGHT_DEFAULT } from './terminal-height'
 import { TERMINAL_BUTTON_TOP_DEFAULT } from './terminal-dock'
 import { CARD_OPACITY_DEFAULT } from './card-opacity'
 import { BACKGROUND_OPACITY_DEFAULT } from './workspace-background'
-import { NOTE_IMAGE_DEFAULT_DIR } from './note-image'
 import { builtinReference } from './wallpaper'
 import type { AppearanceSettingKey } from './appearance'
 import type { SyncDeviceInfo } from './sync-config'
 import type { ActivityCounts } from './activity'
 import type { BuildTool, PortSource } from './dev-port'
 import type { ProjectColor } from './project-color'
+import { PROJECT_SORT_DEFAULT, type ProjectSort } from './project-sort'
 import type { ThemeConfig } from './theme'
 import type { TokenUsageResult } from './token-usage'
 import type { ViewId } from './views'
@@ -26,7 +26,15 @@ import type {
   NoteImageUploadInput,
   NoteTextScan
 } from './note-image'
-import type { WorkLogEntry, WorkLogInput, WorkLogPatch } from './work-log'
+import {
+  WORK_RANGE_DEFAULT,
+  WORK_SORT_DEFAULT,
+  type WorkLogEntry,
+  type WorkLogInput,
+  type WorkLogPatch,
+  type WorkRange,
+  type WorkSort
+} from './work-log'
 
 /** 活跃度计数、首页布局、同步的其它设备也走这里导出，渲染层统一从 @/types 取类型 */
 export type { ActivityCounts, ThemeConfig, SyncDeviceInfo }
@@ -358,25 +366,11 @@ export interface AppSettings {
    * 这是个**新的出网口子，且由用户显式开出来**：只有填了地址、且用户真的粘贴了图片，
    * 才会走一次 git（推送目标就是用户自己填的那个仓库，不经过任何第三方服务）。
    * 与 Token 同步同一个机制（系统 git 凭据，或登录账号的 token），见 docs 的「数据与隐私」。
+   * 推上去落在仓库的哪一层不在设置里，定死是 `images/<本机设备>/<笔记本>/<文件名>`
+   * （见 shared/note-image.ts 的 imageScopeDir）——分这两层是为了让素材管理只看得到
+   * 「当前这个笔记本在这台机器上传的图」，仓库是所有笔记本、所有机器共用的一份。
    */
   noteImageRepo: string
-  /**
-   * 图片在仓库里的基础目录，默认 `images`；空串表示从仓库根目录开始。
-   *
-   * 它下面还有两层由应用自己加：`<本机设备>/<笔记本>`（见 shared/note-image.ts 的 imageScopeDir），
-   * 于是上传后的地址形如 `<前缀>/<目录>/<设备>/<笔记本>/20260916-104512-ab12cd34.png`。
-   * 分这两层是为了让素材管理只看得到「当前这个笔记本在这台机器上传的图」——
-   * 图片仓库是所有笔记本、所有机器共用的一份，混在一起就说不清「谁还在用」。
-   */
-  noteImageDir: string
-  /**
-   * 图片访问地址的前缀（可选）：留空则按仓库地址自动推导。
-   *
-   * 自动推导只认 GitHub / Gitee / GitLab 三家公开托管（它们的 raw 地址规则各不相同），
-   * 自建 GitLab / Gitea、对象存储镜像、GitHub Pages 这类一律要在这里填 ——
-   * 推不出来时应用会提示，而不是往正文里插一个点不开的地址。
-   */
-  noteImageBaseUrl: string
   /**
    * Token 用量同步仓库地址（git 远程地址），空串表示不同步。
    *
@@ -396,10 +390,42 @@ export interface AppSettings {
    */
   activeView: ViewId
   /**
+   * 左侧导航栏上**关掉**的页（见 shared/views.ts）。空数组 = 四页都显示。
+   *
+   * 存「关掉了哪些」而不是「显示了哪些」：将来加一页时老配置里没有它，新页对所有人就是默认
+   * 可见的，不必去动谁的数据文件。收敛保证至少留一页（全关掉时留下首页）。
+   *
+   * 它住在 theme.json 里（见 appearance.ts 的白名单），与明暗、布局同属「界面长什么样」，
+   * 同步时跟着整份配置一起带到另一台机器；而上面的 `activeView` 留在数据文件里 ——
+   * 「这台机器上次停在哪儿」跟配置不是一回事。
+   */
+  hiddenViews: ViewId[]
+  /**
+   * 项目页的排序方式（见 shared/project-sort.ts）。
+   *
+   * 从这里开始这几项是**行为记忆**：记的不是界面长什么样，而是「你习惯怎么看」——
+   * 上次用的那一档，下次打开还停在那儿，不必每次都重新拉一遍。
+   *
+   * 所以它们住在数据文件里、**不进 theme.json**：那是「这台机器该长成什么样」的配置，
+   * 会整份同步到别的机器；而「我上一眼在看什么」换台机器不成立（与 `activeView` 同一条口径）。
+   */
+  projectSort: ProjectSort
+  /** 工作页的时间范围（今天 / 昨天 / 本周 / 本月），同上 */
+  workRange: WorkRange
+  /** 工作页的排序维度（按时间 / 按项目） */
+  workSort: WorkSort
+  /**
+   * 笔记页目录树里**摊开的那几层文件夹**（相对笔记根的路径，如 `工作/周报`）。
+   *
+   * 只对当前这个笔记本成立，所以换笔记本时清空 —— 相对路径在另一个笔记本里
+   * 指的是完全不同的东西。与 `noteDir` 一样只在本机成立，不参与同步。
+   */
+  noteTreeExpanded: string[]
+  /**
    * 同步时是否把本机的外观配置一起写进分片（默认开启）。
    *
-   * 外观＝明暗、主题色、顶部样式、卡片不透明度、终端高度、程序名称、工作区背景（只带内置壁纸）
-   * 与首页布局，见 shared/appearance.ts。关掉之后本机分片里那一项会被清掉（下一次同步时提交），
+   * 外观＝明暗、主题色、顶部样式、卡片不透明度、终端高度、程序名称、工作区背景（只带内置壁纸）、
+   * 导航菜单显示哪几页与首页布局，见 shared/appearance.ts。关掉之后本机分片里那一项会被清掉（下一次同步时提交），
    * 别的机器也就取不到这份配置了 —— 只同步用量数字的场景留给这个开关。
    */
   syncAppearance: boolean
@@ -566,6 +592,11 @@ export interface LogLine {
 /** 项目级运行态（卡片 / 抽屉看这个）；日志按终端分开存放在渲染层 */
 export interface RuntimeState {
   status: ProjectStatus
+  /**
+   * 最近一条状态来自哪一类命令（启动 / 打包 / 安装…）。
+   * 「命令正常退出」的文案要按它区分：只有打包才谈得上「打包成功」（见 @/status 的 statusLabel）。
+   */
+  kind?: TerminalKind
   pid?: number
   currentCommand?: string
   startedAt?: number
@@ -940,11 +971,11 @@ export interface WorkbenchApi {
   /**
    * 上传一张图片（笔记里粘贴的图片走这条路）：推到设置的图片仓库，回来的是**可直接用的访问地址**。
    *
-   * 与其它笔记通道一样，配置由调用方带进来（仓库地址 / 目录 / 访问地址前缀都在设置里），
+   * 与其它笔记通道一样，配置由调用方带进来（仓库地址与目录都在设置里），
    * 另外还要带上**当前笔记本**（`root`）：落点是 `<目录>/<本机设备>/<笔记本>/<文件名>`，
    * 后两层由适配层现算（见 shared/note-image.ts 的 imageScopeDir），拿不到设备标识就如实失败。
-   * 推不出访问地址时（自建托管、本地路径当远端）不是失败：`url` 是空串，
-   * 由界面提示去填「访问地址前缀」—— 图片此时已经进了仓库，只是还不知道怎么访问它。
+   * 推不出访问地址时（仓库不在 GitHub / Gitee / GitLab 上）不是失败：`url` 是空串，
+   * 由界面如实说明 —— 图片此时已经进了仓库，只是应用拼不出访问它的地址。
    */
   uploadNoteImage: (input: NoteImageUploadInput) => Promise<Result<NoteImageUploaded>>
   /**
@@ -1013,7 +1044,7 @@ export interface WorkbenchApi {
   loadBackground: (path: string) => Promise<Result<BackgroundImage>>
   /** 内置壁纸清单（含缩略图）；目录里没有图时返回空数组 */
   listWallpapers: () => Promise<BuiltinWallpaper[]>
-  /** 首页布局配置（theme.json）：八块卡片的位置 / 尺寸与拖动步进 */
+  /** 首页布局配置（theme.json）：八块卡片的位置 / 尺寸与栏宽 */
   getThemeConfig: () => Promise<ThemeConfig>
   /** 合并保存首页布局；返回收敛后的最终值 */
   updateThemeConfig: (patch: Partial<ThemeConfig>) => Promise<Result<ThemeConfig>>
@@ -1084,6 +1115,15 @@ export interface WorkbenchApi {
   getWindowState: () => Promise<WindowState>
   /** 最大化 / 还原状态变化（拖窗口边缘、系统快捷键也会走到这里） */
   onWindowState: (fn: (state: WindowState) => void) => () => void
+  /**
+   * 把设置里的程序名交给系统画的那两处：窗口标题（任务栏悬停提示）与托盘提示。
+   *
+   * 自绘的那条标题栏由渲染层自己画，不经过这里；而这两处归系统，只能在 Rust 侧设。
+   * 传进去的值必须已经过 `sanitizeAppName` 收敛 —— 空名字会让两边都空掉。
+   */
+  setAppName: (name: string) => void
+  /** 应用自身的版本号（「关于」那一屏显示）；取不到时由适配层给一个占位 */
+  getAppVersion: () => Promise<string>
 }
 
 /** 自绘标题栏需要知道的窗口状态 */
@@ -1241,10 +1281,14 @@ export const DEFAULT_SETTINGS: AppSettings = {
   noteDirs: [],
   noteSyncRepo: '',
   noteImageRepo: '',
-  noteImageDir: NOTE_IMAGE_DEFAULT_DIR,
-  noteImageBaseUrl: '',
   tokenSyncRepo: '',
   activeView: 'home',
+  hiddenViews: [],
+  // 行为记忆：第一次打开时就是这几个默认档，之后记住用户自己选的那一档
+  projectSort: PROJECT_SORT_DEFAULT,
+  workRange: WORK_RANGE_DEFAULT,
+  workSort: WORK_SORT_DEFAULT,
+  noteTreeExpanded: [],
   syncAppearance: true,
   useAccountForSync: true
 }

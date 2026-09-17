@@ -265,9 +265,7 @@ async function uploadImages(files: File[]): Promise<string | null> {
 
       const result = await window.workbench.uploadNoteImage({
         repo: settings.settings.noteImageRepo,
-        dir: settings.settings.noteImageDir,
         root: props.root,
-        baseUrl: settings.settings.noteImageBaseUrl,
         name: imageFileName({ mime: file.type }),
         data,
         useAccount: settings.settings.useAccountForSync
@@ -275,7 +273,7 @@ async function uploadImages(files: File[]): Promise<string | null> {
       if (!result.ok || !result.data) return result.error ?? '上传图片失败'
 
       if (!result.data.url) {
-        return `图片已经传进仓库（${result.data.path}），但拼不出访问地址：去设置 → 笔记图片里填「访问地址前缀」`
+        return `图片已经传进仓库（${result.data.path}），但这个仓库拼不出访问地址：图片只认得 GitHub / Gitee / GitLab 的仓库地址`
       }
       editor?.insertValue(imageMarkdown(result.data.url))
     }

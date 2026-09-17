@@ -20,8 +20,7 @@ const settings = useSettingsStore()
     <span class="layoutbar__tag">布局编辑</span>
     <span class="layoutbar__hint">
       拖动卡片可在三栏之间移动、调整栏内顺序；卡片右上角切换「固定高度 / 自适应」，
-      固定高度可拖下沿改高；拖两栏之间的竖线改栏宽 · 步进
-      <b class="mono">{{ settings.gridStep }}px</b> · 卡片间距
+      固定高度可拖下沿改高；拖两栏之间的竖线改栏宽 · 卡片间距
       <b class="mono">{{ settings.cardGap }}px</b>
     </span>
     <div class="layoutbar__tools">

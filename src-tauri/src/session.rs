@@ -17,9 +17,10 @@
 //! 所以：表锁只借一下就放，子进程句柄自带一把锁（见 `Session` 与 `wait_for_exit`）。
 
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader, Read};
+use std::io::{BufRead, BufReader, ErrorKind, Read};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
@@ -208,6 +209,18 @@ impl LineBatcher {
         self.take()
     }
 
+    /// 时间窗到了就把攒着的行交出来（没到点、或没攒到东西都返回 None）。
+    ///
+    /// 给定时冲批线程用：读者阻塞在管道上时，只有这里能把「落在窗口内的最后几行」送出去 ——
+    /// `push` 里那次检查要等下一行走完，而安静下来的 dev server 没有下一行了。
+    pub fn flush_if_due(&mut self, now: Instant) -> Option<Vec<String>> {
+        if now.duration_since(self.last_flush) < BATCH_WINDOW {
+            return None;
+        }
+        self.last_flush = now;
+        self.take()
+    }
+
     fn take(&mut self) -> Option<Vec<String>> {
         if self.lines.is_empty() {
             return None;
@@ -216,38 +229,88 @@ impl LineBatcher {
     }
 }
 
+/// 一批行的去处。读管道与定时冲批两个线程共用同一个实例：
+/// 批次顺序由「取批与发送在同一把锁里」保证（见 `flush_locked`）。
+struct BatchSink {
+    app: AppHandle,
+    session_id: String,
+    stream: &'static str,
+}
+
+impl BatchSink {
+    /// 发一批行。**调用方必须持着攒批的锁**，否则两个线程可能把两批的先后颠倒过来。
+    fn send(&self, batch: Vec<String>) {
+        let lines: Vec<serde_json::Value> = batch
+            .into_iter()
+            .map(|text| serde_json::json!({ "stream": self.stream, "text": text }))
+            .collect();
+        let _ = self.app.emit(
+            "session:lines",
+            serde_json::json!({ "sessionId": self.session_id, "lines": lines }),
+        );
+    }
+}
+
+/// 取一批发出去（`force` 时连不足一批的剩余也发）。取与发都在同一把锁里完成。
+fn flush_locked(pending: &Mutex<LineBatcher>, sink: &BatchSink, force: bool) {
+    let mut batcher = pending.lock().unwrap();
+    let batch = if force {
+        batcher.flush()
+    } else {
+        batcher.flush_if_due(Instant::now())
+    };
+    if let Some(batch) = batch {
+        sink.send(batch);
+    }
+}
+
 /// 读一条管道并按批发出。读到 EOF（进程结束）时把剩余的行冲出去。
+///
+/// 冲批不能只由读到的行驱动：读管道是阻塞的，而一个突发输出的最后几行落在时间窗内、
+/// 之后进程又安静下来时（dev server 的启动横幅就是这样），没有新行进来它们会一直压在内存里，
+/// 界面上表现成「日志停在某一行，后面再没有了」。所以这里另起一个到点就冲的线程；
+/// 进程结束（EOF）后它随 `finished` 退出，不会给每个会话留一颗常驻心跳。
 fn pipe_lines(app: AppHandle, session_id: String, stream: &'static str, pipe: impl Read + Send + 'static) {
+    let sink = Arc::new(BatchSink { app, session_id, stream });
+    let pending = Arc::new(Mutex::new(LineBatcher::new()));
+    let finished = Arc::new(AtomicBool::new(false));
+
+    {
+        let pending = Arc::clone(&pending);
+        let finished = Arc::clone(&finished);
+        let sink = Arc::clone(&sink);
+        std::thread::spawn(move || {
+            while !finished.load(Ordering::Relaxed) {
+                std::thread::sleep(BATCH_WINDOW);
+                flush_locked(&pending, &sink, false);
+            }
+            // 收尾与 reader 那边同一条路，谁先到都行（冲完就是空批）
+            flush_locked(&pending, &sink, true);
+        });
+    }
+
     std::thread::spawn(move || {
         let reader = BufReader::new(pipe);
-        let mut batcher = LineBatcher::new();
-
-        let emit_batch = |batch: Vec<String>| {
-            let lines: Vec<serde_json::Value> = batch
-                .into_iter()
-                .map(|text| serde_json::json!({ "stream": stream, "text": text }))
-                .collect();
-            let _ = app.emit(
-                "session:lines",
-                serde_json::json!({ "sessionId": session_id, "lines": lines }),
-            );
-        };
 
         for line in reader.lines() {
             let text = match line {
                 Ok(text) => text,
-                // 读不动了（进程被杀、编码异常）就停，不是错误
+                // 非法 UTF-8 只丢这一行：Windows 上子进程按本地代码页（中文系统是 GBK）输出时
+                // 很常见，早前这里直接 break，结果是整条会话的日志从此消失
+                Err(err) if err.kind() == ErrorKind::InvalidData => continue,
+                // 真读不动了（进程被杀、管道断开）才停：这类错误会一直重现，继续读只是空转
                 Err(_) => break,
             };
+
+            let mut batcher = pending.lock().unwrap();
             if let Some(batch) = batcher.push(text) {
-                emit_batch(batch);
+                sink.send(batch);
             }
         }
 
         // 收尾：最后不足一批的几行不能丢
-        if let Some(batch) = batcher.flush() {
-            emit_batch(batch);
-        }
+        flush_locked(&pending, &sink, true);
+        finished.store(true, Ordering::Relaxed);
     });
 }
 
@@ -333,6 +396,36 @@ mod tests {
 
         assert_eq!(batcher.flush(), Some(vec!["only".to_string()]));
         assert_eq!(batcher.flush(), None, "冲过一次之后没有剩余");
+    }
+
+    /// 没有新行进来时，时间窗一到也要把攒着的行交出去。
+    ///
+    /// 钉的是「dev server 启动横幅只显示一半」那个 bug：早前冲批只由 `push` 驱动，
+    /// 一个突发输出的最后几行落在窗口内、之后进程又安静下来，它们就一直压在内存里不上去。
+    #[test]
+    fn flushes_when_the_window_elapses_without_new_lines() {
+        let mut batcher = LineBatcher::new();
+        let start = Instant::now();
+
+        assert!(batcher.push_at("banner".to_string(), start).is_none());
+        assert!(
+            batcher
+                .flush_if_due(start + BATCH_WINDOW - Duration::from_millis(1))
+                .is_none(),
+            "窗口没到就不该交出"
+        );
+
+        assert_eq!(
+            batcher.flush_if_due(start + BATCH_WINDOW),
+            Some(vec!["banner".to_string()]),
+            "窗口到了就该把攒着的行交出去"
+        );
+        assert!(
+            batcher
+                .flush_if_due(start + BATCH_WINDOW + Duration::from_millis(1))
+                .is_none(),
+            "同一批不该重复交出去"
+        );
     }
 
     /// 等子进程退出期间，整张会话表必须还是能拿到的。

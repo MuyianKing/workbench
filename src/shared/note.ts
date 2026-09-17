@@ -382,6 +382,36 @@ export function pushNoteHistory(history: unknown, dir: unknown): string[] {
   return sanitizeNoteHistory([target, ...sanitizeNoteHistory(history)])
 }
 
+/** 目录树展开清单的上限：足够摊开一整个笔记本的层级，再多只会让数据文件变胖 */
+export const NOTE_TREE_EXPANDED_MAX = 64
+
+/**
+ * 收敛「目录树里摊开了哪几层」：相对笔记根的**文件夹**路径。
+ *
+ * 与「最近打开」同一套做法：分隔符统一、去重不看大小写（Windows 上 `工作` 与 `工作/`
+ * 指的是同一个目录）、超上限的部分整段丢掉。多一道：含 `..` 的项直接丢掉 ——
+ * 那个路径不属于这个笔记本，留着永远匹配不上任何一个节点。
+ *
+ * 相对路径只在**当前这个笔记本**里有意义，所以换笔记本时清空（见 stores/notes.ts）。
+ */
+export function sanitizeNoteTreeExpanded(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return []
+
+  const seen = new Set<string>()
+  const list: string[] = []
+  for (const item of raw) {
+    const rel = normalizeRel(item)
+    if (!rel || rel.split('/').includes('..')) continue
+
+    const key = rel.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    list.push(rel)
+    if (list.length >= NOTE_TREE_EXPANDED_MAX) break
+  }
+  return list
+}
+
 /** 删掉清单里的一条（历史记录可以删）；本来就不在里面时原样返回 */
 export function removeFromNoteHistory(history: unknown, dir: unknown): string[] {
   const target = sanitizeNoteRoot(dir).toLowerCase()

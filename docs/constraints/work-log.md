@@ -13,3 +13,7 @@
   `html: false` 转义原文里的标签、`linkify` 认裸地址、`breaks` 让单个换行就是 `<br>`；链接一律 `target="_blank"`，且点击在
   [MarkdownView.vue](../../src/renderer/src/components/MarkdownView.vue) 里被接管交给 `openExternal` —— 界面是个 WebView，
   点 `<a>` 默认会把应用自己导航走。**别再自己手写解析器或引第二个 markdown 库。**
+- **时间范围与排序维度是「行为习惯」，住在数据文件里**（设置里的 `workRange` / `workSort`，收敛用 `sanitizeWorkRange` /
+  `sanitizeWorkSort`）：上次看的那一档，下次打开还停在那儿。它们**不进 theme.json**（那张白名单里的项会被同步到别的机器，
+  见 [ipc-and-state.md](ipc-and-state.md)）。同一排的「只看待办」**刻意不记**：它是临时的镜片，记住了会让下次打开的时间轴
+  莫名其妙少一半 —— 与项目页不记关键词、不记分组筛选是同一条口径。

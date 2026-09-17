@@ -11,7 +11,6 @@ import {
   imageRepoPath,
   imageScopeDir,
   parseImageRemote,
-  sanitizeImageBaseUrl,
   sanitizeImageDir,
   sanitizeImageRepo,
   sortImageAssets,
@@ -40,12 +39,6 @@ describe('仓库地址与目录的收敛', () => {
     expect(sanitizeImageDir('images\\notes')).toBe('images/notes')
     expect(sanitizeImageDir('../外面')).toBe('外面')
     expect(sanitizeImageDir('  ')).toBe('')
-  })
-
-  it('访问地址前缀去掉末尾斜杠，含空白当没填', () => {
-    expect(sanitizeImageBaseUrl('https://cdn.example.com/pics/')).toBe('https://cdn.example.com/pics')
-    expect(sanitizeImageBaseUrl('https://cdn.example.com/a b')).toBe('')
-    expect(sanitizeImageBaseUrl(undefined)).toBe('')
   })
 })
 
@@ -84,13 +77,8 @@ describe('文件名', () => {
 
     const nested = imageRepoPath('notes/images', '20260916-104512-ab12cd34.png')
     expect(
-      imageRawUrl({
-        repo: 'git@github.com:me/pics.git',
-        branch: 'main',
-        path: nested,
-        baseUrl: 'https://cdn.example.com/pics'
-      })
-    ).toBe('https://cdn.example.com/pics/notes/images/20260916-104512-ab12cd34.png')
+      imageRawUrl({ repo: 'git@github.com:me/pics.git', branch: 'main', path: nested })
+    ).toBe('https://raw.githubusercontent.com/me/pics/main/notes/images/20260916-104512-ab12cd34.png')
   })
 })
 
@@ -124,7 +112,7 @@ describe('这台机器上这个笔记本那一层', () => {
   it('两层拼起来就是素材目录；缺哪一层都给空串', () => {
     const notebook = imageNotebookKey('E:\\Notes')
     expect(imageScopeDir('images', DEVICE, 'E:\\Notes')).toBe(`images/${DEVICE}/${notebook}`)
-    // 图片目录留空 = 只有设备与笔记本两层
+    // 目录传空串 = 只有设备与笔记本两层（应用里固定传 NOTE_IMAGE_DIR，空串只是这个函数的边界）
     expect(imageScopeDir('', DEVICE, 'E:\\Notes')).toBe(`${DEVICE}/${notebook}`)
     // 缺设备标识 / 没打开笔记本：空串，调用方据此报错而不是退回上一层
     expect(imageScopeDir('images', '', 'E:\\Notes')).toBe('')
@@ -200,17 +188,12 @@ describe('访问地址', () => {
     ).toBe('https://gitlab.com/muyian/pics/-/raw/main/images/a.png')
   })
 
-  it('用户填了前缀就用它（自建托管 / 对象存储镜像 / Pages 都靠这一条）', () => {
+  it('三家以外的仓库给空串，不拼一个点不开的地址', () => {
     expect(
-      imageRawUrl({
-        repo: 'git@git.example.com:team/pics.git',
-        branch: 'main',
-        path: 'images/a.png',
-        baseUrl: 'https://cdn.example.com/pics/'
-      })
-    ).toBe('https://cdn.example.com/pics/images/a.png')
+      imageRawUrl({ repo: 'git@git.example.com:team/pics.git', branch: 'main', path: 'images/a.png' })
+    ).toBe('')
 
-    // 本地路径当远端的测试仓库（推不出托管方）：没填前缀就是空串，界面据此提示
+    // 本地路径当远端的测试仓库，一样认不出托管方
     expect(
       imageRawUrl({ repo: 'C:/tmp/images.git', branch: 'main', path: 'images/a.png' })
     ).toBe('')
@@ -302,16 +285,5 @@ describe('素材管理：谁还在用', () => {
       branch: 'main'
     })
     expect(asset.url).toBe('')
-  })
-
-  it('填了访问地址前缀时按它拼（自建托管 / 图床镜像）', () => {
-    const [asset] = buildImageAssets({
-      images: [images[0]],
-      texts: [],
-      repo: 'https://git.example.com/me/pics.git',
-      branch: 'main',
-      baseUrl: 'https://cdn.example.com/pics/'
-    })
-    expect(asset.url).toBe('https://cdn.example.com/pics/images/20260916-104512-ab12cd34.png')
   })
 })

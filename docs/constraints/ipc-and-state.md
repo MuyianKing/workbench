@@ -45,6 +45,15 @@
   不要缓存写死。
 - 数据结构变更要同步落盘的 sanitize（[persisted-data.ts](../../src/shared/persisted-data.ts) 的 `sanitizeSettings` / `parseData`），
   老数据文件缺字段须有默认值，不留未收敛的 `undefined`。
+- **设置项先分清是「外观」还是「行为习惯」，落点完全不同**：
+  - **外观**（明暗、主题色、顶部样式、卡片不透明度、终端高度、程序名、背景、导航菜单、首页布局、笔记树宽度）
+    住 `theme.json`，判据是它在 [appearance.ts](../../src/shared/appearance.ts) 的 `APPEARANCE_SETTING_KEYS` 里
+    —— **进这张白名单就等于「会被整份同步到另一台机器」**，所以只放「这台机器该长成什么样」的项；
+  - **行为习惯**（`activeView`、`projectSort`、`workRange` / `workSort`、`noteTreeExpanded`）与
+    本机路径 / 凭据（数据目录、快捷键、开机自启、三个同步仓库地址、`noteDir`）住 `workbench-data.json`。
+    判据是「换台机器还成不成立」：「我上一眼在看什么」「我的笔记在哪个盘」换台机器就没了，
+    同步过去只会把那边正看的东西顶掉。
+  不确定时的口径：**它是「界面长什么样」还是「我上次用到哪儿」** —— 后者一律留数据文件。
 - 给项目加可编辑字段时，除了 `Project` / `ProjectPatch`，还要把它加进 store 里的 `editableOf`
   （[stores/projects.ts](../../src/renderer/src/stores/projects.ts)）：项目是就地改 `projects.value` 的，落盘靠那条「与快照比对后推
   差异」的 watch，`editableOf` 就是它认得的那份字段清单 —— 漏加的表现是界面上改完看着生效、重启后回到旧值。

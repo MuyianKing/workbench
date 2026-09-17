@@ -10,7 +10,8 @@ import {
   monthLabels,
   pruneDays,
   sanitizeActivity,
-  startOfWeek
+  startOfWeek,
+  streakOf
 } from './activity'
 
 /** 固定的「今天」，避免测试跑到跨天/跨年就失效 */
@@ -181,5 +182,28 @@ describe('monthLabels', () => {
     expect(labels).toHaveLength(ACTIVITY_WEEKS)
     expect(labels.filter(Boolean).length).toBeGreaterThanOrEqual(11)
     for (const label of labels.filter(Boolean)) expect(label).toMatch(/^\d{1,2}月$/)
+  })
+})
+
+/**
+ * streakOf 单独导出是为了首页那一行：它只要这一个数，不值得为它铺一遍 371 格的日历
+ * （见 HomeGreeting.vue）。日历那边的用例同样覆盖了这套语义，这里钉的是它的入口本身。
+ */
+describe('streakOf', () => {
+  it('今天跑过就从今天往前数', () => {
+    expect(streakOf({ [TODAY_KEY]: 1, '2026-09-09': 2, '2026-09-08': 1 }, TODAY)).toBe(3)
+  })
+
+  it('今天还没跑则从昨天数起，不算断', () => {
+    expect(streakOf({ '2026-09-09': 1, '2026-09-08': 1 }, TODAY)).toBe(2)
+  })
+
+  it('昨天也没跑就没有连续', () => {
+    expect(streakOf({ '2026-09-01': 1 }, TODAY)).toBe(0)
+    expect(streakOf({}, TODAY)).toBe(0)
+  })
+
+  it('中间断掉只数到断点', () => {
+    expect(streakOf({ [TODAY_KEY]: 1, '2026-09-09': 1, '2026-09-07': 1 }, TODAY)).toBe(2)
   })
 })

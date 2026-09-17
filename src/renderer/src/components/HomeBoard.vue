@@ -13,9 +13,10 @@ import { computed, ref } from 'vue'
 import type { Component, CSSProperties } from 'vue'
 import {
   COLUMN_IDS,
-  cardIdsInColumn,
+  HOME_CARD_LABELS,
   cardPlaceholderHeight,
   clampColumnWidth,
+  visibleCardIdsInColumn,
   type CardGrab,
   type ColumnId,
   type HomeCardId,
@@ -37,24 +38,28 @@ import TodayWorkPanel from '@/components/TodayWorkPanel.vue'
 const store = useProjectsStore()
 const settings = useSettingsStore()
 
-/** 八块卡片的固定清单：id 对应 theme.json，title 用于编辑态的标签 */
-const CARDS: Record<HomeCardId, { title: string; component: Component }> = {
-  activity: { title: '活跃度', component: ActivityGraph },
-  token: { title: 'Token 用量', component: TokenPanel },
-  system: { title: '系统状态', component: SystemPanel },
-  recent: { title: '最近使用', component: RecentPanel },
-  actions: { title: '快捷操作', component: ActionsPanel },
-  quick: { title: '快捷启动', component: QuickLaunch },
-  commands: { title: '命令', component: CommandPanel },
-  work: { title: '今日完成', component: TodayWorkPanel }
+/** 八块卡片各自画什么；名字取自 shared 的 HOME_CARD_LABELS（设置里的卡片清单也用它） */
+const CARDS: Record<HomeCardId, Component> = {
+  activity: ActivityGraph,
+  token: TokenPanel,
+  system: SystemPanel,
+  recent: RecentPanel,
+  actions: ActionsPanel,
+  quick: QuickLaunch,
+  commands: CommandPanel,
+  work: TodayWorkPanel
 }
 
 const editing = computed(() => store.layoutEditing)
 
 // ---------- 栏与卡片 ----------
 
+/**
+ * 这一栏要画的卡片：设置里关掉的整块不出现（位置与高度都留着，再打开时回到原处）。
+ * 编辑态也一样不画 —— 能拖的只有看得见的那些，摆位不会摆到一块自己看不见的卡片上。
+ */
 function cardsIn(column: ColumnId): HomeCardId[] {
-  return cardIdsInColumn(settings.themeConfig.cards, column)
+  return visibleCardIdsInColumn(settings.themeConfig.cards, column)
 }
 
 /** 平时空栏不渲染；编辑时三栏都在，好把卡片拖进去 */
@@ -267,10 +272,9 @@ function onToggleMode(id: HomeCardId): void {
 
           <BoardCard
             :id="id"
-            :title="CARDS[id].title"
+            :title="HOME_CARD_LABELS[id]"
             :mode="settings.themeConfig.cards[id].mode"
             :height="settings.themeConfig.cards[id].height"
-            :step="settings.gridStep"
             :editing="editing"
             :floating-style="drag?.id === id ? floatingStyle : null"
             @grab="beginDrag"
@@ -278,7 +282,7 @@ function onToggleMode(id: HomeCardId): void {
             @resize="settings.setCardHeight"
             @commit="() => void settings.commitCards()"
           >
-            <component :is="CARDS[id].component" />
+            <component :is="CARDS[id]" />
           </BoardCard>
         </template>
 

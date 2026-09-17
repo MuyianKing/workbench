@@ -12,7 +12,7 @@ import {
 import { DRAG_MIME } from '@/drag-mime'
 import { formatClock, formatDurationMs } from '@/format'
 import { sanitizeProjectColor, projectColorVar } from '@shared/project-color'
-import { STATUS_META, isBusyStatus } from '@/status'
+import { statusMeta, isBusyStatus } from '@/status'
 import { useProjectsStore } from '@/stores/projects'
 import { useTerminalStore } from '@/stores/terminal'
 import type { Project, ProjectStatus } from '@/types'
@@ -30,7 +30,9 @@ const status = computed<ProjectStatus>(() => runtime.value?.status ?? 'idle')
 const pathValid = computed(() => store.isPathValid(props.project.id))
 /** 目录失效优先于运行态展示，避免对着一张点了必然失败的卡片操作 */
 const meta = computed(() =>
-  pathValid.value ? STATUS_META[status.value] : { label: '路径无效', tone: 'fail' }
+  pathValid.value
+    ? statusMeta(status.value, runtime.value?.kind)
+    : { label: '路径无效', tone: 'fail' }
 )
 const pm = computed(() => store.resolvedPm(props.project))
 const isBusy = computed(() => isBusyStatus(status.value))
@@ -45,7 +47,7 @@ const colorVar = computed(() => {
   return color ? projectColorVar(color) : 'var(--border-strong)'
 })
 
-/** 运行中显示已运行时长，打包成功显示本次耗时 */
+/** 运行 / 打包中显示已运行时长，命令结束后显示本次耗时 */
 const elapsed = computed(() => {
   const rt = runtime.value
   if (!rt) return ''
@@ -61,6 +63,7 @@ const elapsed = computed(() => {
   return ''
 })
 
+/** 结束（正常退出）后给的才是本次总耗时，跑着的给的是还在走的那段 */
 const elapsedLabel = computed(() => (status.value === 'success' ? '耗时' : '已运行'))
 
 function open(): void {

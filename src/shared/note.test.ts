@@ -22,9 +22,11 @@ import {
   sanitizeNoteHistory,
   sanitizeNoteName,
   sanitizeNoteRoot,
+  sanitizeNoteTreeExpanded,
   sortNoteNodes,
   uniqueNoteName,
   NOTE_HISTORY_MAX,
+  NOTE_TREE_EXPANDED_MAX,
   type NoteEntry,
   type NoteNode
 } from './note'
@@ -269,5 +271,33 @@ describe('笔记仓库地址', () => {
     expect(sanitizeNoteRepo('https://github.com/me/my notes')).toBe('')
     expect(sanitizeNoteRepo('--upload-pack=evil')).toBe('')
     expect(sanitizeNoteRepo('x'.repeat(400))).toBe('')
+  })
+})
+
+describe('目录树的展开清单', () => {
+  it('分隔符统一、去掉空段与末尾分隔符', () => {
+    expect(sanitizeNoteTreeExpanded(['工作\\周报\\'])).toEqual(['工作/周报'])
+    expect(sanitizeNoteTreeExpanded(['工作//周报'])).toEqual(['工作/周报'])
+  })
+
+  it('去重不看大小写（Windows 上就是同一个目录）', () => {
+    expect(sanitizeNoteTreeExpanded(['Work', 'work'])).toEqual(['Work'])
+    expect(sanitizeNoteTreeExpanded(['工作/', '工作'])).toEqual(['工作'])
+  })
+
+  /** 相对路径只在这个笔记本里有意义，越界的项留着永远匹配不上任何一个节点 */
+  it('丢掉空串与含 .. 的项', () => {
+    expect(sanitizeNoteTreeExpanded(['', '   ', '../别处', '工作/../秘密', '工作'])).toEqual(['工作'])
+  })
+
+  it('非数组与非字符串一律当空', () => {
+    expect(sanitizeNoteTreeExpanded(undefined)).toEqual([])
+    expect(sanitizeNoteTreeExpanded('工作')).toEqual([])
+    expect(sanitizeNoteTreeExpanded([1, null, {}, '工作'])).toEqual(['工作'])
+  })
+
+  it('超过上限的部分整段丢掉', () => {
+    const many = Array.from({ length: NOTE_TREE_EXPANDED_MAX + 10 }, (_, i) => `目录${i}`)
+    expect(sanitizeNoteTreeExpanded(many)).toHaveLength(NOTE_TREE_EXPANDED_MAX)
   })
 })

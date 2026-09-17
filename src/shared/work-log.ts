@@ -127,6 +127,30 @@ export function isWorkRange(value: unknown): value is WorkRange {
   return typeof value === 'string' && (WORK_RANGES as readonly string[]).includes(value)
 }
 
+/**
+ * 默认档位：范围「今天」、维度「按时间」—— 与工作页原本的初始取值一致
+ * （记流水账最常看的就是今天）。
+ *
+ * 这两个是**设置项**（数据文件里的 `workRange` / `workSort`，见 types.ts 的
+ * 「行为记忆」那一段）：上次看的那一档，下次打开还停在那儿。
+ */
+export const WORK_RANGE_DEFAULT: WorkRange = 'today'
+export const WORK_SORT_DEFAULT: WorkSort = 'time'
+
+/**
+ * 认不出来的一律回默认。
+ *
+ * 这一项会被写回界面上的选中值（分段控件与下拉），留一个认不出的值在那儿，
+ * 控件会是「一个都没选中」的样子。
+ */
+export function sanitizeWorkRange(value: unknown): WorkRange {
+  return isWorkRange(value) ? value : WORK_RANGE_DEFAULT
+}
+
+export function sanitizeWorkSort(value: unknown): WorkSort {
+  return isWorkSort(value) ? value : WORK_SORT_DEFAULT
+}
+
 export function emptyWorkLog(): WorkLogFile {
   return { version: WORK_LOG_VERSION, entries: [] }
 }

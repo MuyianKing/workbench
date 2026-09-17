@@ -29,6 +29,8 @@ import {
   groupByProject,
   isWorkSort,
   paginate,
+  sanitizeWorkRange,
+  sanitizeWorkSort,
   timelineOf,
   toggleWorkLogStatus,
   type WorkLogEntry,
@@ -36,20 +38,37 @@ import {
   type WorkSort
 } from '@shared/work-log'
 import { useProjectsStore } from '@/stores/projects'
+import { useSettingsStore } from '@/stores/settings'
 import WorkLogCard from '@/components/WorkLogCard.vue'
 import WorkLogDialog from '@/components/WorkLogDialog.vue'
 
 const store = useProjectsStore()
+const settings = useSettingsStore()
 
 const entries = ref<WorkLogEntry[]>([])
 const loading = ref(true)
 /** 读盘失败与「一条都还没写过」是两回事，不能都显示成空列表 */
 const loadError = ref('')
-const range = ref<WorkRange>('today')
+const range = ref<WorkRange>(sanitizeWorkRange(settings.settings.workRange))
 /** 时间范围的选项：Element Plus 的分段控件要 { label, value }，标签表在 shared 里 */
 const rangeOptions = WORK_RANGES.map((value) => ({ label: WORK_RANGE_LABELS[value], value }))
 /** 排序维度：按时间（天为轴）或按项目（项目为轴） */
-const sort = ref<WorkSort>('time')
+const sort = ref<WorkSort>(sanitizeWorkSort(settings.settings.workSort))
+
+/** 设置是异步载入的、数据目录还可能整份换掉，所以这两项要跟着核一遍 */
+watch(
+  () => settings.settings.workRange,
+  (value) => {
+    range.value = sanitizeWorkRange(value)
+  }
+)
+
+watch(
+  () => settings.settings.workSort,
+  (value) => {
+    sort.value = sanitizeWorkSort(value)
+  }
+)
 /** 只看待办：把已完成的筛掉（默认关） */
 const todoOnly = ref(false)
 const page = ref(1)
@@ -142,6 +161,25 @@ const groups = computed(() =>
 const total = computed(() => sections.value.reduce((sum, group) => sum + group.entries.length, 0))
 
 /**
+ * 空态里那句「最近一次是……」。空串表示**整份日志一条都没有**，与「这段时间没有」不是一回事。
+ *
+ * 数的是整份 `entries`（不受范围与筛选影响），所以空态里拿到的必定是范围之外的那一天 ——
+ * 这正是它的用处：只说「本月还没有记录」，用户分不清是自己没记、还是记录丢了。
+ * 日期键是 YYYY-MM-DD，直接比字符串就是比先后。
+ */
+const lastLoggedText = computed(() => {
+  const latest = entries.value.reduce(
+    (max, entry) => (entry.date > max ? entry.date : max),
+    ''
+  )
+  if (!latest) return ''
+
+  // 近几天说「昨天 / 前天」比报日期更像人话，再远就报日期（dayMeta 自己就是这套口径）
+  const meta = dayMeta(latest, now.value)
+  return meta.relative || meta.title
+})
+
+/**
  * 当前范围里的待办条数：筛选标签上那个数字。
  * 从**全部**记录里数（不受筛选影响），否则一打开筛选它自己就归零了。
  */
@@ -156,6 +194,17 @@ const todoCount = computed(
 /** 换范围、换维度或开关筛选后回到第一页，否则会停在一个新视图里并不存在的页码上 */
 watch([range, sort, todoOnly], () => {
   page.value = 1
+})
+
+/**
+ * 范围与维度是**行为记忆**（见 shared/types.ts 的那一段）：初值来自设置，改了写回去，
+ * 下次打开还停在上一眼看的那一档，不必每次重新拉一遍。
+ *
+ * 「只看待办」不进去：它是一个临时的镜片（想找一件事时才戴），记住了反而会让
+ * 下次打开的时间轴莫名其妙地少一半 —— 与项目页不记关键词是同一条口径。
+ */
+watch([range, sort], () => {
+  void settings.updateSettings({ workRange: range.value, workSort: sort.value })
 })
 
 function pickSort(value: string): void {
@@ -330,6 +379,13 @@ async function remove(entry: WorkLogEntry): Promise<void> {
         <p>{{ WORK_RANGE_LABELS[range] }}{{ todoOnly ? '没有待办' : '还没有记录' }}</p>
         <p class="empty__hint">
           <template v-if="todoOnly">这个范围里的记录都已完成。</template>
+          <!--
+            有记录、只是不在这段时间里：把「最近一次是哪天」说出来。
+            只说「还没有记录」会让人以为东西丢了，而此刻真正要知道的是这个。
+          -->
+          <template v-else-if="lastLoggedText">
+            最近一次是{{ lastLoggedText }}，点右上角「记一条」写下做了什么。
+          </template>
           <template v-else>
             点右上角「记一条」写下做了什么；一天可以记多条，记录只保存在本机。
           </template>

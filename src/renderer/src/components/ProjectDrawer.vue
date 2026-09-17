@@ -408,7 +408,7 @@ async function removeProject(): Promise<void> {
       <div class="drawer__status">
         <span class="pill" :class="`tone-${tone}`">
           <i class="pill__dot" />
-          {{ pathValid ? statusLabel(status) : '路径无效' }}
+          {{ pathValid ? statusLabel(status, runtime?.kind) : '路径无效' }}
         </span>
         <span v-if="runtime?.pid" class="mono drawer__pid">PID {{ runtime.pid }}</span>
         <el-button

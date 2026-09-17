@@ -11,7 +11,7 @@ import { captureThemeFile, sanitizeThemeFile } from './sync-config'
 
 describe('打包一份要推上去的配置', () => {
   it('就是本机 theme.json 的整份内容加一层设备信封', () => {
-    const theme = sanitizeTheme({ ...DEFAULT_THEME, gridStep: 4, leftWidth: 320 })
+    const theme = sanitizeTheme({ ...DEFAULT_THEME, cardGap: 14, leftWidth: 320 })
     const file = captureThemeFile('dev-1', ' 办公室 ', theme)
 
     expect(file.device).toBe('dev-1')

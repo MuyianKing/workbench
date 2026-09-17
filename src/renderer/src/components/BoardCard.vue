@@ -25,7 +25,6 @@ const props = defineProps<{
   title: string
   mode: CardMode
   height: number
-  step: number
   editing: boolean
   floatingStyle: CSSProperties | null
 }>()
@@ -83,7 +82,7 @@ function onResizeDown(event: PointerEvent): void {
       emit(
         'resize',
         props.id,
-        resizeCardHeight(startHeight, moveEvent.clientY - start.y, props.step, CARD_HEIGHT_MIN[props.id])
+        resizeCardHeight(startHeight, moveEvent.clientY - start.y, CARD_HEIGHT_MIN[props.id])
       )
     },
     onEnd: () => emit('commit')

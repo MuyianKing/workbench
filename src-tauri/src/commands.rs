@@ -279,6 +279,33 @@ pub fn window_is_maximized(window: WebviewWindow) -> bool {
     window.is_maximized().unwrap_or(false)
 }
 
+/// 程序名称，落在系统自己画的两处：**窗口标题**（任务栏悬停提示）与**托盘提示**。
+/// 自绘的那条标题栏归渲染层，这里只管系统这两处 —— 少了它，改完名字任务栏上还是
+/// 构建时那个名字，两边对不上。
+///
+/// 名称的收敛（去首尾空白、空串回默认名、截断到上限）在 `shared/app-name.ts`，
+/// 到这里的一定是已经收好的值：两端各写一份判定迟早会分叉（那个文件的注释也是这么说的）。
+///
+/// 做成命令而不是启动时读一次 theme.json：设置里改完要立刻生效。
+/// 启动那一次由渲染层同一个 watch 补上，而窗口要到页面加载完才显示（见 create_main_window），
+/// 中间那一下本来也看不见。
+#[tauri::command]
+pub fn set_app_name(window: WebviewWindow, app: AppHandle, name: String) {
+    let _ = window.set_title(&name);
+    if let Some(tray) = app.tray_by_id("main") {
+        let _ = tray.set_tooltip(Some(name.as_str()));
+    }
+}
+
+/// 应用自身的版本号（「关于」那一屏要显示）。
+///
+/// 取自 `tauri.conf.json` 编译期内嵌的那一份，与安装包、`package.json` 同一个来源 ——
+/// 界面上不写死，免得改了版本号只有一处忘。
+#[tauri::command]
+pub fn app_version(app: AppHandle) -> String {
+    app.package_info().version.to_string()
+}
+
 // ---------- Token 用量 ----------
 
 #[tauri::command(async)]

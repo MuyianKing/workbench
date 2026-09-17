@@ -10,7 +10,8 @@
  */
 import { computed, ref } from 'vue'
 import { ArrowDown, FolderOpened } from '@element-plus/icons-vue'
-import { UNGROUPED, useProjectsStore, type SortBy } from '@/stores/projects'
+import { UNGROUPED, useProjectsStore } from '@/stores/projects'
+import { isProjectSort, type ProjectSort } from '@shared/project-sort'
 import { moveToPosition } from '@shared/reorder'
 import { DRAG_MIME } from '@/drag-mime'
 import GroupManageDialog from '@/components/GroupManageDialog.vue'
@@ -22,7 +23,7 @@ const dragOverKey = ref<string | null>(null)
 /** 正在拖动哪个分组标签（拖动分组 = 排序，和拖卡片 = 归类是两回事） */
 const draggingGroup = ref<string | null>(null)
 
-const sortLabels: Record<SortBy, string> = {
+const sortLabels: Record<ProjectSort, string> = {
   recent: '最近使用',
   name: '项目名称',
   created: '添加时间'
@@ -117,8 +118,8 @@ function onDrop(key: string, event: DragEvent): void {
 }
 
 function pickSort(key: string): void {
-  // 走 store action 而不是直接赋值，非法值不会被写进 sortBy
-  if (key === 'recent' || key === 'name' || key === 'created') store.setSortBy(key)
+  // 走 store action 而不是直接赋值，非法值不会被写进 sortBy；取值表在 shared/project-sort.ts
+  if (isProjectSort(key)) store.setSortBy(key)
 }
 </script>
 

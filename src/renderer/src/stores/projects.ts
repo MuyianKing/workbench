@@ -21,7 +21,8 @@ import {
   projectMatchesKeyword,
   type SearchGroup
 } from '@shared/search'
-import { sanitizeViewId, type ViewId } from '@shared/views'
+import { fallbackView, sanitizeViewId, type ViewId } from '@shared/views'
+import { sanitizeProjectSort, type ProjectSort } from '@shared/project-sort'
 import type {
   ActivityCounts,
   AddProjectInput,
@@ -30,7 +31,7 @@ import type {
   ProjectGroup,
   ProjectPatch
 } from '@/types'
-import { STATUS_META } from '@/status'
+import { statusLabel } from '@/status'
 import { notifyError, notifySuccess, notifyWarning, confirmAction } from '@/notify'
 import { useSettingsStore } from './settings'
 import { useTerminalStore, RUNNING_STATUS, type ProcessTarget } from './terminal'
@@ -40,9 +41,6 @@ import { useAuthStore } from './auth'
 
 /** 未分组项目在筛选栏里的伪分组 id */
 export const UNGROUPED = 'ungrouped'
-
-/** 项目列表的排序方式，筛选栏下拉可选 */
-export type SortBy = 'recent' | 'name' | 'created'
 
 /** 今天 00:00 的时间戳（本地时区） */
 function startOfToday(): number {
@@ -67,7 +65,23 @@ export const useProjectsStore = defineStore('projects', () => {
 
   const keyword = ref('')
   const groupFilter = ref<string>('all')
-  const sortBy = ref<SortBy>('recent')
+
+  /**
+   * 排序方式（行为记忆）：初值来自设置，之后跟着设置走。
+   *
+   * 设置是异步载入的、数据目录还可能被整份换掉，所以这里要核一遍 ——
+   * 与下面 activeView 是同一条路。它**不是**「这台机器长什么样」的配置，
+   * 所以住在数据文件里、不进 theme.json（见 shared/types.ts 的那一段）。
+   */
+  const sortBy = ref<ProjectSort>(sanitizeProjectSort(settingsStore.settings.projectSort))
+
+  watch(
+    () => settingsStore.settings.projectSort,
+    (value) => {
+      sortBy.value = sanitizeProjectSort(value)
+    },
+    { immediate: true }
+  )
 
   /**
    * 从搜索结果跳过来时要点名的那张项目卡（画一圈定位环、滚到它）。
@@ -91,8 +105,16 @@ export const useProjectsStore = defineStore('projects', () => {
     groupFilter.value = value
   }
 
-  function setSortBy(value: SortBy): void {
+  /**
+   * 换排序方式：就地生效并落盘（下次打开还停在这一档）。
+   *
+   * 与切页写 activeView 同一条路 —— 顺序会立刻重排，写入在后台跑，
+   * 失败由 updateSettings 统一提示。相同值直接返回：不值得为一次没变化的点击写一次文件。
+   */
+  function setSortBy(value: ProjectSort): void {
+    if (value === sortBy.value) return
     sortBy.value = value
+    void settingsStore.updateSettings({ projectSort: value })
   }
 
   const drawerProjectId = ref<string | null>(null)
@@ -123,13 +145,34 @@ export const useProjectsStore = defineStore('projects', () => {
     { immediate: true }
   )
 
-  /** 是否处于首页布局编辑态：由设置里的「布局调整」进入，画布上的「完成」退出 */
+  /**
+   * 当前页被设置里关掉之后退到第一页可见的。
+   *
+   * 盯的是「关掉了哪几页」这个字符串而不是那个数组本身：设置在别处每改一项都会换掉整个
+   * settings 对象（数组也是新的），按引用比会每次都被唤起来 —— 那样连搜索跳转
+   * （jumpToProject 会把当前页设成项目页）也会被立刻弹回去，看起来像点了没反应。
+   * 只在**关掉的那几页真的变了**、且当前页正好在其中时才换页，这才是用户刚做完的那个动作。
+   */
+  watch(
+    () => settingsStore.settings.hiddenViews.join(','),
+    () => {
+      const hidden = settingsStore.settings.hiddenViews
+      if (!hidden.includes(activeView.value)) return
+
+      const next = fallbackView(hidden)
+      applyView(next)
+      void settingsStore.updateSettings({ activeView: next })
+    },
+    { immediate: true }
+  )
+
+  /** 是否处于首页布局编辑态：由首页顶栏那颗「编辑布局」进入，画布上的「完成」退出 */
   const layoutEditing = ref(false)
 
   function setLayoutEditing(value: boolean): void {
     layoutEditing.value = value
-    // 布局只有首页有得编辑（设置里那个入口不区分当前页），进编辑态先切回首页，
-    // 免得顶栏变成了编辑条、面前却没有画布
+    // 布局只有首页有得编辑（入口在首页顶栏，但键盘 / 以后别的入口不一定，这里统一兜住），
+    // 进编辑态先切回首页，免得顶栏变成了编辑条、面前却没有画布
     if (value && activeView.value !== 'home') {
       applyView('home')
       void settingsStore.updateSettings({ activeView: 'home' })
@@ -785,7 +828,8 @@ export const useProjectsStore = defineStore('projects', () => {
   /** 搜索结果那行尾部的小字：与卡片上的状态标签同一口径（目录失效优先） */
   function searchDetailOf(project: Project): string {
     if (!isPathValid(project.id)) return '路径无效'
-    return STATUS_META[terminal.runtimes[project.id]?.status ?? 'idle'].label
+    const rt = terminal.runtimes[project.id]
+    return statusLabel(rt?.status ?? 'idle', rt?.kind)
   }
 
   /**

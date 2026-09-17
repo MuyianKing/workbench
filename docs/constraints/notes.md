@@ -31,6 +31,11 @@ true、清单里不能放选中项自己）只在那里写清楚了，下面不�
   磁盘上并不存在的位置。
 - 口径都在 [note.ts](../../src/shared/note.ts) 的纯函数里：文件夹排在文件前面、同层按名字排（`buildNoteTree`，带 `numeric` 的排序规则）；
   只收 `.md` / `.markdown`。
+- **展开态由笔记页持有并落盘**（设置里的 `noteTreeExpanded`，纯函数 `sanitizeNoteTreeExpanded`）：`el-tree` 的节点每次重建都会丢掉展开态，
+  所以清单要一路恢复回去；**`NoteTree` 是 `expanded` 进、`update:expanded` 出，自己不留副本** —— 组件里再存一份就有了两份状态，
+  「收起一层」会与上层那份打架。清单存的是**相对笔记根的文件夹路径**（就是节点的 `id`），所以**换笔记本时必须清空**
+  （见 `stores/notes.ts` 的 `setRoot`）：相对路径在另一个笔记本里指的是完全不同的东西。
+  收起某一支时若被自己那份清单顶回来，看 NoteTree.vue 顶部关于 `auto-expand-parent` 的注释。
 - **扫描时有一份忽略名单**（`notes.rs` 的 `IGNORED_DIRS`）：点开头的一律跳（`.git`、`.obsidian`、`.vscode`、`.idea`…），外加
   `node_modules` / `dist` / `build` / `out` / `target` / `coverage` 这些不由点的噪音目录整棵不走 —— 它们动辄几万个文件，笔记也不会住在
   里面。代价是用户真有一个叫 `build` 的目录装笔记时看不见它；要么改名单，要么那个目录换个名字，**别把名单悄悄删掉**。
@@ -57,15 +62,15 @@ true、清单里不能放选中项自己）只在那里写清楚了，下面不�
 ## 图片（粘贴上传）
 
 - 笔记本里**不放图片文件**，正文里只有一条外链，于是笔记搬到哪台机器、用哪个编辑器打开都成立。落点是**三层**：
-  `<设置里的图片目录>/<本机设备>/<笔记本>/<文件名>`，后两层由 [note-image.ts](../../src/shared/note-image.ts) 的 `imageScopeDir` 现算
-  —— 上传 / 列清单 / 删图三条通道用的是同一个算法，**别在某一处另写一份路径拼法**（这三层也是素材管理成立的前提）。链路是
+  `<images>/<本机设备>/<笔记本>/<文件名>`（第一层是 [note-image.ts](../../src/shared/note-image.ts) 的 `NOTE_IMAGE_DIR`，不给用户配），
+  后两层由同一份代码的 `imageScopeDir` 现算 —— 上传 / 列清单 / 删图三条通道用的是同一个算法，**别在某一处另写一份路径拼法**（这三层也是素材管理成立的前提）。链路是
   NoteEditor 的 `uploadImages` → `workbench/note.ts` 的 `uploadNoteImage` → `sync.rs` 的 `publish_image`。
 - 七条不能破：
   1. **`upload.handler` 必须配着**。不配的话 Vditor 会把图片读成 base64 直接内联进正文，几篇带图的笔记就能把 `.md` 撑成几兆；
   2. **handler 返回字符串等于报错**，成功时必须返回 `null` 并自己 `insertValue`（别指望它替你把 markdown 插进去）；
   3. **图片仓库地址留空时只是提示**，不退回内联、也不发任何请求：这是联网边界上的出口之一，必须由用户显式开出来；
-  4. **访问地址由 TS 拼**（`imageRawUrl`），Rust 只回「仓库里的路径 + 分支」。GitHub / Gitee / GitLab 三家自动认，其余（自建 GitLab /
-     Gitea、图床镜像、Pages）要用户填「访问地址前缀」—— 拼不出来时**不要**往正文里插一个点不开的地址，如实告诉用户去填；
+  4. **访问地址由 TS 拼**（`imageRawUrl`），Rust 只回「仓库里的路径 + 分支」。GitHub / Gitee / GitLab 三家自动认，**其余一律拼不出来**
+     （`url` 是空串）—— 那时**不要**往正文里插一个点不开的地址，如实说明这个仓库推不出访问地址；
   5. **设备标识拿不到、或者没打开笔记本时如实报错，不要退回上一层目录去传** —— 退回等于让所有机器、所有笔记本的图混进同一层，素材
      管理里那列「未引用」立刻变成假数字。Rust 侧只做最后一道把关（`image_relative_path`：名字里带分隔符或 `..` 就能写到克隆目录外面去）；
   6. 文件名（时间戳 + 随机段，`imageFileName`）与**整条子目录**都由 TS 算好，Rust 只校验边界；

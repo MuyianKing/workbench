@@ -12,10 +12,12 @@
 import { computed } from 'vue'
 import type { Component } from 'vue'
 import { Notebook, FolderOpened, Grid, Document } from '@element-plus/icons-vue'
-import { VIEW_IDS, VIEW_LABELS, type ViewId } from '@shared/views'
+import { VIEW_LABELS, visibleViews, type ViewId } from '@shared/views'
 import { useProjectsStore } from '@/stores/projects'
+import { useSettingsStore } from '@/stores/settings'
 
 const store = useProjectsStore()
+const settings = useSettingsStore()
 
 /** 每个页面一个图标；新增页面时这里会因缺 key 而报类型错，不会漏配 */
 const ICONS: Record<ViewId, Component> = {
@@ -27,6 +29,12 @@ const ICONS: Record<ViewId, Component> = {
 
 const active = computed(() => store.activeView)
 
+/**
+ * 显示哪几项由设置里的「导航菜单」决定（关掉的页整项不出现，见 shared/views.ts）。
+ * 顺序永远是 VIEW_IDS 的顺序：关掉哪几项不影响剩下几项的先后。
+ */
+const items = computed(() => visibleViews(settings.settings.hiddenViews))
+
 function select(id: ViewId): void {
   void store.setActiveView(id)
 }
@@ -35,7 +43,7 @@ function select(id: ViewId): void {
 <template>
   <nav class="nav">
     <button
-      v-for="id in VIEW_IDS"
+      v-for="id in items"
       :key="id"
       class="nav__item"
       :class="{ 'is-active': active === id }"

@@ -6,7 +6,7 @@
  * 磁盘 IO、路径、防抖落盘不在这里 —— 那些各自留在宿主侧。
  *
  * **这里只管「换台机器就不成立」的那些设置**：程序名称、明暗、主题色、顶部样式、卡片不透明度、
- * 终端高度、工作区背景与首页布局都住在 theme.json 里（见 appearance.ts 的文件头），
+ * 终端高度、工作区背景、导航菜单显示哪几页与首页布局都住在 theme.json 里（见 appearance.ts 的文件头），
  * 同步时整份 theme.json 就是带走的那份配置。
  */
 import { DEFAULT_STORED_SETTINGS, stripAppearance } from './appearance'
@@ -16,11 +16,18 @@ import { sanitizeQuickApps } from './quick-launch'
 import { sanitizeIconCache } from './icon-cache'
 import { DEFAULT_SETTINGS, type PersistedData, type StoredSettings } from './types'
 import { clampTerminalButtonTop } from './terminal-dock'
-import { sanitizeNoteHistory, sanitizeNoteRepo, sanitizeNoteRoot } from './note'
-import { sanitizeImageBaseUrl, sanitizeImageDir, sanitizeImageRepo } from './note-image'
+import {
+  sanitizeNoteHistory,
+  sanitizeNoteRepo,
+  sanitizeNoteRoot,
+  sanitizeNoteTreeExpanded
+} from './note'
+import { sanitizeImageRepo } from './note-image'
 import { sanitizeSyncRepo } from './token-usage'
 import { pruneDays, sanitizeActivity } from './activity'
 import { sanitizeViewId } from './views'
+import { sanitizeProjectSort } from './project-sort'
+import { sanitizeWorkRange, sanitizeWorkSort } from './work-log'
 
 export function emptyData(): PersistedData {
   return {
@@ -40,7 +47,7 @@ export function emptyData(): PersistedData {
  * 设置项来自磁盘，可能是旧版本写的或是被手工改过的，逐项收敛到合法取值。
  * 缺失的字段（老版本数据文件没有 settings）直接落到默认值。
  *
- * 外观那一批（appName、theme、terminalHeight、背景、主题色、顶部样式、卡片不透明度）
+ * 外观那一批（appName、theme、terminalHeight、背景、主题色、顶部样式、卡片不透明度、hiddenViews）
  * 现在住在 theme.json，这里**一律摘掉**：留着它们会成为第二份真源，
  * 而且适配层读设置时会把主题文件里的值合过来（见 mergeSettingsAppearance），
  * 数据文件里的那份永远不会被采纳 —— 只会让下一个看代码的人困惑。
@@ -65,6 +72,14 @@ export function sanitizeSettings(raw: unknown): StoredSettings {
   value.tokenSyncRepo = sanitizeSyncRepo(value.tokenSyncRepo)
   // 上次停留的页面：老数据文件里没有，认不出来的值回首页
   value.activeView = sanitizeViewId(value.activeView)
+  // 行为记忆那几项（上次看的是哪一档 / 怎么排的 / 目录树摊开了哪几层）：
+  // 老数据文件里都没有，认不出来的一律回默认 —— 它们会被写回界面上的选中值，
+  // 留一个控件认不出的值在那儿，界面会是「一个都没选中」的样子
+  value.projectSort = sanitizeProjectSort(value.projectSort)
+  value.workRange = sanitizeWorkRange(value.workRange)
+  value.workSort = sanitizeWorkSort(value.workSort)
+  // 摊开的文件夹：路径要拿去和树里的节点比对，得先统一分隔符、去掉越界的项
+  value.noteTreeExpanded = sanitizeNoteTreeExpanded(value.noteTreeExpanded)
   // 用账号 token 授权同步：老数据文件里没有这个字段。（已登录但关掉它 = 退回系统 git 凭据）
   value.useAccountForSync = value.useAccountForSync !== false
   // 同步时是否连主题文件一起写进仓库：老数据文件里没有，默认开
@@ -81,11 +96,9 @@ export function sanitizeSettings(raw: unknown): StoredSettings {
   // 笔记仓库地址：老数据文件里没有，默认空串（不同步）。认不出的一律按没填处理 ——
   // 与 Token 同步仓库同一个道理：留着一个每次同步都失败的地址在那儿反复重试，不如关掉
   value.noteSyncRepo = sanitizeNoteRepo(value.noteSyncRepo)
-  // 图片仓库三项：老数据文件里没有，默认未配置 / images / 自动推导。
-  // 地址那一项与 Token 同步仓库同一条口径（含空白、以 `-` 开头的一律当没填）
+  // 图片仓库地址：老数据文件里没有，默认未配置。
+  // 与 Token 同步仓库同一条口径（含空白、以 `-` 开头的一律当没填）
   value.noteImageRepo = sanitizeImageRepo(value.noteImageRepo)
-  value.noteImageDir = sanitizeImageDir(value.noteImageDir)
-  value.noteImageBaseUrl = sanitizeImageBaseUrl(value.noteImageBaseUrl)
   // 这个字段的开发期名字，存的是「绝对值、没有跟随终端这一档」。它只出现在未发布的中间版本里，
   // 而那个值会把「跟随终端」这档永远盖住 —— 清掉，免得它一直写回数据文件当第二份真源。
   delete (value as unknown as Record<string, unknown>).terminalDockTop

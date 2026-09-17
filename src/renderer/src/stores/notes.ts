@@ -173,7 +173,10 @@ export const useNotesStore = defineStore('notes', () => {
 
     return settings.updateSettings({
       noteDir: target,
-      noteDirs: pushNoteHistory(settings.settings.noteDirs, target)
+      noteDirs: pushNoteHistory(settings.settings.noteDirs, target),
+      // 目录树的展开态只对上一个笔记本成立：清单里存的是相对路径，换到另一个笔记本
+      // 就指向完全不同的东西了。一起清掉，新笔记本从收起状态开始
+      noteTreeExpanded: []
     })
   }
 

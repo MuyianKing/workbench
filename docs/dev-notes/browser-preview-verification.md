@@ -58,7 +58,18 @@ window.workbench = new Proxy(
 两个细节：
 
 - 把错误也暴露到标题上（`document.title = 'MOCK-ERR: ' + err.message`），
-  这样截图里就能看见 mock 本身挂了，不会误判成界面问题
+  这样截图里就能看见 mock 本身挂了，不会误判成界面问题。
+  顺手把**那条已知异常**滤掉再判：纯浏览器里 `initState()` 那条 `Tauri 运行时不可用` 必定出现
+  （见下面「已知的坑」），把它当成 mock 出错会让每一张截图都判失败；
+- 假的桩**必须落在 `dist` 里**、而且要在 `<title>` 之后、所有脚本之前，以**经典脚本**引入：
+  - 放在工作区根目录（而不是 dist）是个很隐蔽的错：静态服务只服务 dist，页面加载它是 404，
+    而现象是「页面正常出来了、外观全是默认值」，很容易顺着 `getBootstrap` 找；
+  - 只靠「经典脚本先于 deferred 模块执行」也能成立，但那是个藏在规范里的前提 ——
+    写在模块脚本前面谁都看得出来，而且 `dist/index.html` 是每次 build 重新生成的，
+    注入脚本必须**幂等**（带 `<head>` 里那句判断，别重复插）；
+- 起浏览器之前先自己 `fetch` 一遍 `/` 与桩文件、断言 200：页面 404 时无头那边只会得到一张空白，
+  而现象会指向完全无关的地方。判据还是那条老的 —— `document.documentElement.dataset.theme` 是空的
+  就说明 `getBootstrap` 没生效（HTML 里有那行标签不代表文件真的在）；
 - 假的内置壁纸清单要和 `resources/backgrounds/` 保持一致，并把原图拷进 `dist`；
   缩略图按 Rust 侧 `imaging.rs` 的做法压到 360 宽，别拿几兆的原图铺设置面板
 
@@ -216,13 +227,22 @@ writeFileSync(outPng, Buffer.from(shot.result.data, 'base64'))
   定位到具体元素（连同它的伪元素：`getComputedStyle(el, '::before').content`）之后，
   先注入一条探针 CSS 改一个变量、再量一次数字，比来回改组件重编快得多 ——
   本次就是靠它认出 Vditor 收起态代码块那两行空档来自「零尺寸 inline 标记撑起的行盒」
-- **结束时要杀整个进程组**（`process.kill(-child.pid)`，配合 `detached: true`），
-  否则无头 Edge 会残留。残留的不只是几兆内存：**调试端口也被它占着**，下一次跑同一个端口的脚本
-  会连上那个**上一轮的**页面（`/json/list` 里照样有 target），于是量到的是旧页面的数字、
-  或者干脆卡在那里不出结果。起进程前先确认端口空着（`netstat -ano | grep LISTENING | grep :<port>`），
-  连之前筛 `t.url === 'about:blank'`；真清理时按命令行认人最稳：
-  `Get-CimInstance Win32_Process -Filter "Name='msedge.exe'" | Where-Object { $_.CommandLine -like '*wb-edge-*' }`
-  （只会命中这套流程起的无头实例，不会碰到用户自己的 Edge）
+- **结束时要杀整个进程组**：不建议用 `process.kill(-child.pid)` —— Windows 上它直接 `ESRCH`
+  （进程组不是这么用的），而**没杀掉的那个实例会污染下一轮**：调试端口被它占着，
+  下一次跑同一个端口的脚本会连上那个**上一轮的**页面（`/json/list` 里照样有 target），
+  于是量到的是旧页面的数字、或者像这次一样连到一个 `edge://` 内部页，现象指向完全无关的地方。
+  可靠的做法两条一起上：
+  1. **收尾用 `taskkill /F /T /PID <pid>`**（`spawn` 一个 taskkill、等它 exit）；
+  2. **起浏览器之前先查那一个端口**，被占就按命令行认人清掉 ——
+     `Get-CimInstance Win32_Process -Filter "Name='msedge.exe'"` 里筛
+     `CommandLine -like '*--remote-debugging-port=<端口>*'`，再逐个 `taskkill /F /T`。
+     按端口认人只会命中这套流程起的无头实例，不会碰到用户自己的 Edge。清完再验一次端口空了没有。
+- **`/json/list` 里挑 target 要挑准**：无头 Edge 起来时会带一串 `background_page`（扩展）和一个
+  `about:blank` 页面，`edge://` 内部页也可能混进来。先筛 `type === 'page' && url === 'about:blank'`，
+  再退回 `type === 'page' && /^https?:/`；把整张清单打出来，连错了当场就能看见。
+- **裁图坐标必须来自 `getBoundingClientRect`，不要手写**：猜的坐标裁到的是顶栏的搜索框，
+  对着「新加的那一行不好看」能研究半天。写一个「按选择器实测盒子 + 一圈留白」的辅助函数，
+  需要挑「含某个子元素的卡片」时用 `article.panel:has(.graph__stats)` 这类 `:has()` 选择器。
 
 ## 调试探针：一次只改一个变量
 
@@ -250,6 +270,45 @@ const lum = (rgb) => rgb.map((c) => {
 ```
 
 把场景做成矩阵（暗 / 亮 × 有无主题色 × 文字取色模式），一次跑完输出一张对照表。
+
+**背景不是纯色时，`getComputedStyle` 答不了这个问题** —— 这个应用里这种情况很常见：
+画布是「壁纸 + 蒙版」的合成，卡片又是 60% 不透明度的底色叠在上面（设置里的「卡片不透明度」），
+背景究竟是多少只能看最终像素。办法是让页面自己解码一张截图：
+
+```js
+// 1. 先截一条**没有文字**的窄带（背景）—— 空白的来源可以量，别从文字所在的那一行取
+// 2. 把这张 PNG 的 base64 交给页面，用 canvas 取平均色
+const cap = await send('Page.captureScreenshot', { format: 'png', clip: strip })
+await send('Runtime.evaluate', { expression: `(async () => {
+  const img = new Image(); img.src = 'data:image/png;base64,${cap.result.data}'
+  await img.decode()
+  const c = document.createElement('canvas'); c.width = img.width; c.height = img.height
+  const ctx = c.getContext('2d'); ctx.drawImage(img, 0, 0)
+  const d = ctx.getImageData(0, 0, img.width, img.height).data
+  let r = 0, g = 0, b = 0, n = 0
+  for (let i = 0; i < d.length; i += 4) { r += d[i]; g += d[i+1]; b += d[i+2]; n += 1 }
+  return [Math.round(r/n), Math.round(g/n), Math.round(b/n)]
+})()`, awaitPromise: true, returnByValue: true })
+// 3. 文字色仍取 getComputedStyle，两边算 WCAG
+```
+
+取「没有文字的那条带」有个现成的落点：容器自己的 `padding`（例如首页那一行与画布上沿之间的
+`--card-gap`）或卡片底部那段留白 —— 用 `getBoundingClientRect` 把它的位置算出来交给 `clip`。
+
+顺带一个结论（2026-09 量过，也是这一节的来源）：**「主题极性与壁纸亮度相反」那一组会塌**。
+蒙版是「画布色 + `1 - 图片浓淡`」的 alpha（默认浓淡 55 → alpha 0.45），深色壁纸配亮色主题时
+画布合成出来是中灰 —— 而**中灰底上没有任何文字色是清楚的**：深色字实测 1.9:1，
+要够 4.5:1 得用近白字（那在亮色主题里等于换了套主题）。所以这不是「换个令牌」能修的，
+必须让底衬本身回到主题这一侧。两条对它有效的做法，两条都已落地：
+
+- **别让文字直接铺在画布上**：给这类文字一副跟卡片同一套 `--card-alpha` 的底衬
+  （首页那一行就是这么做的）。好处是可读性交给用户已经熟悉的那个滑块，和界面上其余文字同一档待遇。
+  注意卡片本身也是 60% 底色，所以**卡片上的次要文字同样会塌**（实测 1.86:1）——
+  把「卡片不透明度」拉到 100% 就全好了（实测同一处 6:1），这是那个滑块的固有取舍，不是令牌写错。
+- **两套主题的 ink 阶梯要用同一条标尺量**：亮色那套原先的 `--ink-3` 在**纯白卡片上**也只有
+  3.15:1、在画布上 2.83:1（暗色那套是 4.8~5.3），也就是说不用挂壁纸就已经不到 AA 了。
+  修法是把三档一起按对比度重定（只压暗最低那档会让它贴到上一档、三档塌成两档）。
+  判据用数字：亮色修完是 17.4 / 10.0 / 5.7，暗色是 15 / 9.4 / 5.1。
 
 **关键**：探针里复算主题色的算法（`mix` 混色、`inkOf` 取字色）必须和
 [`src/shared/accent-color.ts`](../../src/shared/accent-color.ts) 里真实实现**同源照抄**，
@@ -329,6 +388,11 @@ const lum = (rgb) => rgb.map((c) => {
 - **v-html 里的列表看不见圆点**：global.css 的 reset 把 `ul / ol` 的 `list-style` 清成了 none
   （那是给界面自己的布局列表定的），markdown 正文渲染出来后同样吃这条规则 ——
   在展示组件的 `:deep()` 里把 `list-style` 写回来（disc / decimal），否则有序列表看着像没有序号。
+- **整页桩漏了某个通道时，症状是「某一块卡片只剩外壳」**：`[data-card-id]` 那层容器在，
+  组件自己的根节点（例如快捷启动的 `.launch`）却不在 DOM 里 —— 说明那个组件在首次渲染时抛了
+  （Vue 把错误吞进 console.error，所以 `document.title` 上那条错误钩子也接不到，页面看着毫无异常）。
+  **先回真实应用确认那一格是不是好的**，再决定要不要查组件：本次就是这样发现是桩的问题
+  （换一份数据喂进去照样是空壳，而真实应用里那五个图标都在）。别顺着组件代码找。
 - **浏览器预览只覆盖渲染层一半**：涉及文件系统、子进程、图像解码的都在 Rust 侧，回 `cargo test` 或真应用里验。
 - **产物要用 http 打开，别用 `file://`**：Chromium 会按 CORS 拦掉 `file://` 下的
   `<script type="module">`，页面一片空白、控制台外没有任何迹象。在截图脚本里起一个十几行的

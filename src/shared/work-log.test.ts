@@ -2,6 +2,10 @@ import { describe, expect, it } from 'vitest'
 import {
   DELETED_PROJECT_ID,
   WORK_PAGE_DAYS,
+  WORK_RANGES,
+  WORK_RANGE_DEFAULT,
+  WORK_SORTS,
+  WORK_SORT_DEFAULT,
   completedEntriesOn,
   createWorkLogEntry,
   dayMeta,
@@ -12,6 +16,8 @@ import {
   patchWorkLogEntry,
   rangeBounds,
   sanitizeWorkLogStatus,
+  sanitizeWorkRange,
+  sanitizeWorkSort,
   timelineOf,
   toggleWorkLogStatus,
   type WorkLogEntry,
@@ -347,5 +353,28 @@ describe('dayMeta', () => {
     expect(dayMeta('2026-09-14', NOW).relative).toBe('昨天')
     expect(dayMeta('2026-09-13', NOW).relative).toBe('前天')
     expect(dayMeta('2026-09-01', NOW).relative).toBe('')
+  })
+})
+
+describe('范围与维度作为设置项', () => {
+  it('默认档位与工作页原本的初始取值一致', () => {
+    expect(WORK_RANGE_DEFAULT).toBe('today')
+    expect(WORK_SORT_DEFAULT).toBe('time')
+  })
+
+  it('认得出的取值原样留下', () => {
+    for (const value of WORK_RANGES) expect(sanitizeWorkRange(value)).toBe(value)
+    for (const value of WORK_SORTS) expect(sanitizeWorkSort(value)).toBe(value)
+  })
+
+  /** 这两个值会被写回分段控件与下拉的选中值，认不出的值在那儿会让控件一个都不选中 */
+  it('认不出的一律回默认', () => {
+    expect(sanitizeWorkRange('quarter')).toBe(WORK_RANGE_DEFAULT)
+    expect(sanitizeWorkRange(undefined)).toBe(WORK_RANGE_DEFAULT)
+    expect(sanitizeWorkRange(null)).toBe(WORK_RANGE_DEFAULT)
+    expect(sanitizeWorkRange(7)).toBe(WORK_RANGE_DEFAULT)
+    expect(sanitizeWorkSort('status')).toBe(WORK_SORT_DEFAULT)
+    expect(sanitizeWorkSort(undefined)).toBe(WORK_SORT_DEFAULT)
+    expect(sanitizeWorkSort({})).toBe(WORK_SORT_DEFAULT)
   })
 })

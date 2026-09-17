@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { VIEW_IDS, VIEW_LABELS, isViewId, sanitizeViewId } from '@shared/views'
+import {
+  VIEW_IDS,
+  VIEW_LABELS,
+  fallbackView,
+  isViewId,
+  sanitizeHiddenViews,
+  sanitizeViewId,
+  visibleViews
+} from '@shared/views'
 
 describe('页面 id', () => {
   it('每个 id 都有名字，否则导航栏会出现空白项', () => {
@@ -20,5 +28,32 @@ describe('页面 id', () => {
     expect(sanitizeViewId('nope')).toBe('home')
     expect(sanitizeViewId({ home: true })).toBe('home')
     expect(sanitizeViewId('projects')).toBe('projects')
+  })
+})
+
+describe('导航栏显示哪几页', () => {
+  it('只记「关掉了哪些」：认不出来的、重复的、不是数组的一律丢掉', () => {
+    // 老主题文件里没有这个字段 = 一页都没关
+    expect(sanitizeHiddenViews(undefined)).toEqual([])
+    expect(sanitizeHiddenViews('notes')).toEqual([])
+    expect(sanitizeHiddenViews(['notes', 'notes', 'settings', 42, null])).toEqual(['notes'])
+  })
+
+  it('剩下哪几页永远按 VIEW_IDS 的顺序（关掉哪几项不影响其余项的先后）', () => {
+    expect(visibleViews([])).toEqual([...VIEW_IDS])
+    expect(visibleViews(['home', 'work'])).toEqual(['projects', 'notes'])
+  })
+
+  it('至少留一页：全关掉时把首页留下，界面上不会一个入口都不剩', () => {
+    expect(sanitizeHiddenViews([...VIEW_IDS])).toEqual(['projects', 'work', 'notes'])
+    expect(visibleViews(sanitizeHiddenViews([...VIEW_IDS]))).toEqual(['home'])
+  })
+
+  it('当前页被关掉之后退到第一页可见的', () => {
+    expect(fallbackView(['home'])).toBe('projects')
+    expect(fallbackView(['home', 'projects', 'work'])).toBe('notes')
+    expect(fallbackView([])).toBe('home')
+    // 防御：真的把四页都关掉时也不能返回 undefined（正常到不了这里）
+    expect(fallbackView([...VIEW_IDS])).toBe('home')
   })
 })

@@ -17,10 +17,12 @@
  *      它那套「当前节点」是它自己的概念，与「编辑器里打开的是哪一篇」是两回事，
  *      两套状态叠在一起会出现「高亮在一处、编辑器在另一处」）；
  *   4. **展开态跟着选中项走**：每次数据换成新对象时 `el-tree` 会重建节点、丢掉展开态，
- *      所以展开的 id 存在这里，以 `default-expanded-keys` 的形式交给它重建时恢复。
+ *      所以展开的 id 以 `default-expanded-keys` 的形式交给它重建时恢复。
  *
  * 增删改本身由上层执行（那是跨组件的联动：改完要重新扫、要接着认当前打开的那一篇），
- * 这一层只把「想做什么」报上去。
+ * 这一层只把「想做什么」报上去。**展开态也一样**：这里是 `expanded` 进、`update:expanded` 出，
+ * 自己不留一份副本 —— 上层要拿它落盘（见 NotesView 的 expandedKeys），
+ * 组件里再存一份就变成「两份状态谁说了算」。
  */
 import { nextTick, onBeforeUnmount, onMounted, ref, watch, type Component } from 'vue'
 import { Document, Folder, FolderAdd, Plus } from '@element-plus/icons-vue'
@@ -40,6 +42,14 @@ const props = defineProps<{
   activeRel: string
   /** 至少成功扫过一次：空态提示据此决定要不要说「这里还没有笔记」 */
   loaded: boolean
+  /**
+   * 展开着的节点 id（就是各自的 `rel`）。
+   *
+   * 由上层持有并落盘（设置里的 `noteTreeExpanded`，见 shared/types.ts）：
+   * 上次摊开的那几层，下次进来还是摊开的。数组而不是 Set ——
+   * `default-expanded-keys` 要的就是数组。
+   */
+  expanded: string[]
 }>()
 
 const emit = defineEmits<{
@@ -48,16 +58,17 @@ const emit = defineEmits<{
   rename: [rel: string]
   remove: [rel: string]
   move: [payload: { rel: string; targetDir: string }]
+  'update:expanded': [value: string[]]
 }>()
 
 /** el-tree 认的字段名：数据里叫 name / children */
 const TREE_PROPS = { label: 'name', children: 'children' } as const
 
 /**
- * 展开着的节点 id。数组而不是 Set：`default-expanded-keys` 要的是数组。
+ * 展开 / 收起都只是把下一份清单报上去，状态本身在上层。
  *
- * 顶层文件夹**默认收起**：笔记本里通常就那么几个目录，一进来全展开反而把树拉得很长。
- * 选中项所在的几层会在下面那条 watch 里被展开。
+ * 顶层文件夹**默认收起**：笔记本里通常就那么几个目录，一进来全展开反而把树拉得很长，
+ * 所以落盘的清单一开始是空的。选中项所在的几层会在下面那条 watch 里被展开。
  *
  * `:auto-expand-parent="false"` 是这个清单能当真的前提：`el-tree` 的
  * `setDefaultExpandedKeys` 对清单里的每个 id 都调 `node.expand(null, autoExpandParent)`，
@@ -66,15 +77,16 @@ const TREE_PROPS = { label: 'name', children: 'children' } as const
  * 下一次清单变化（收起本身就改它）就会由**子孙**把它重新顶开：选中项所在的那一支
  * 怎么点都收不起来，别处却正常（踩过）。祖先本来就是我们显式放进清单的，用不着它代劳。
  */
-const expandedKeys = ref<string[]>([])
-
 function expand(ids: string[]): void {
-  const next = new Set([...expandedKeys.value, ...ids])
-  expandedKeys.value = [...next]
+  const next = new Set([...props.expanded, ...ids])
+  emit('update:expanded', [...next])
 }
 
 function collapse(id: string): void {
-  expandedKeys.value = expandedKeys.value.filter((item) => item !== id)
+  emit(
+    'update:expanded',
+    props.expanded.filter((item) => item !== id)
+  )
 }
 
 /**
@@ -298,7 +310,7 @@ onBeforeUnmount(() => window.removeEventListener('dragend', onDragEnd))
       :props="TREE_PROPS"
       node-key="id"
       :indent="14"
-      :default-expanded-keys="expandedKeys"
+      :default-expanded-keys="expanded"
       :auto-expand-parent="false"
       :expand-on-click-node="true"
       :highlight-current="false"

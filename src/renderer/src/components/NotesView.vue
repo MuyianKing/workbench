@@ -41,6 +41,20 @@ const store = useNotesStore()
 const settings = useSettingsStore()
 
 /**
+ * 目录树的展开态（行为记忆）：状态住在设置里，这一层只做「读出来 / 写回去」。
+ *
+ * 树自己不留第二份（见 NoteTree 的文件头）：上次摊开的那几层下次进来还是摊开的。
+ * 只对当前这个笔记本成立 —— 换笔记本时由 notes store 的 setRoot 清空，
+ * 因为相对路径在另一个笔记本里指的是完全不同的东西。
+ */
+const expandedKeys = computed<string[]>({
+  get: () => settings.settings.noteTreeExpanded,
+  set: (value) => {
+    void settings.updateSettings({ noteTreeExpanded: value })
+  }
+})
+
+/**
  * 起名字的那个弹窗：新建与重命名共用。
  *
  * `mode` 决定提交后走哪条路 —— 两者的差别只有「落在哪个文件夹」和「报什么错」，
@@ -310,6 +324,7 @@ function onResizeDown(event: PointerEvent): void {
 
         <NoteTree
           v-else
+          v-model:expanded="expandedKeys"
           :nodes="store.nodes"
           :active-rel="store.activeRel"
           :loaded="store.loaded && !store.loading"

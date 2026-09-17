@@ -10,15 +10,15 @@
  * 地址是**外链**：图片存在用户自己的仓库里，笔记文件里只有一个链接，
  * 于是笔记本搬到别的机器上、用别的编辑器打开，图照样在。
  *
- * 图片进仓库的落点是**三层**：`<图片目录>/<设备>/<笔记本>/<文件名>`。
+ * 图片进仓库的落点是**三层**：`<images>/<设备>/<笔记本>/<文件名>`。
  * 后两层是「素材管理只看自己这一份」的前提：图片仓库是全机器共用的一份，
  * 而「这张图有没有人用」只有**某一个笔记本**说得清（见 buildImageAssets）——
  * 不分层的话面板里那列「未引用」混着别的笔记本与别的机器传上来的图，
  * 看着能删、删了却会裂图。两层的算法都在这里（`imageScopeDir`），有单测护着。
  */
 
-/** 图片在仓库里的默认子目录 */
-export const NOTE_IMAGE_DEFAULT_DIR = 'images'
+/** 图片在仓库里的那层目录：定死的一层，用户不用配（它下面才是设备与笔记本两层） */
+export const NOTE_IMAGE_DIR = 'images'
 
 /** 单张图片的大小上限。剪切板里的截图通常几百 KB，这里拦的是误贴的大文件 */
 export const NOTE_IMAGE_MAX_BYTES = 20 * 1024 * 1024
@@ -43,8 +43,6 @@ const MIME_EXTENSIONS: Record<string, string> = {
 export interface NoteImageUploadInput {
   /** 图片仓库地址（设置里的那个） */
   repo: string
-  /** 图片在仓库里的基础目录（设置里的那个），设备与笔记本两层由它往下拼 */
-  dir: string
   /**
    * 当前笔记本（笔记文件夹的绝对路径）：图片落进仓库的哪一层由它算出来。
    *
@@ -52,8 +50,6 @@ export interface NoteImageUploadInput {
    * 所以「哪台机器、哪个笔记本」必须由调用方如实带进来，适配层不缓存它。
    */
   root: string
-  /** 访问地址前缀（可选覆盖，见 sanitizeImageBaseUrl） */
-  baseUrl?: string
   /** 文件名（含后缀），由调用方用 `imageFileName` 算好 */
   name: string
   /** 整张图的 base64 */
@@ -95,19 +91,6 @@ export function sanitizeImageDir(raw: unknown): string {
     .map((part) => part.trim())
     .filter((part) => part && part !== '.' && part !== '..')
     .join('/')
-}
-
-/**
- * 收敛「访问地址前缀」（可选）：末尾的斜杠去掉，中间有空白就当没填。
- *
- * 这一项是给推不出地址的仓库准备的（自建 GitLab / Gitea、对象存储镜像、
- * 或者仓库本身的 GitHub Pages）—— 自动推导只认三家公开托管。
- */
-export function sanitizeImageBaseUrl(raw: unknown): string {
-  if (typeof raw !== 'string') return ''
-  const value = raw.trim().replace(/\/+$/, '')
-  if (!value || value.length > REPO_MAX_LENGTH || /\s/.test(value)) return ''
-  return value
 }
 
 /** 图片后缀（不带点）：按 mime 认，认不出来按 png */
@@ -234,7 +217,7 @@ export function imageNotebookKey(root: string): string {
 }
 
 /**
- * 这台机器上这个笔记本的素材目录：`<图片目录>/<设备>/<笔记本>`（图片目录留空就是两层）。
+ * 这台机器上这个笔记本的素材目录：`<NOTE_IMAGE_DIR>/<设备>/<笔记本>`（目录传空串就是两层）。
  *
  * 上传、列清单、删图三条通道**都用它**算落点，于是素材管理看到的正好是「这个笔记本自己的图」，
  * 面板里那列「未引用」才真的可以照它删。
@@ -297,27 +280,19 @@ export function parseImageRemote(repo: string): ImageRemote | null {
 /**
  * 图片的访问地址（markdown 里用的那个）。
  *
- * 顺序是：**用户填的前缀优先**，其次按仓库地址推导（只认 GitHub / Gitee / GitLab 三家公开托管，
- * 它们的 raw 地址规则各不相同且都是长期稳定的），都拿不到就返回空串 ——
- * 那时调用方要给一句「请在设置里填访问地址前缀」，而不是插一个点不开的地址进正文。
+ * 只认 GitHub / Gitee / GitLab 三家公开托管（它们的 raw 地址规则各不相同且都是长期稳定的），
+ * 认不出的仓库返回空串 —— 那时调用方要给一句「这个仓库推不出访问地址」，
+ * 而不是插一个点不开的地址进正文。
  *
  * 每一段都做百分号编码：目录名可能是中文，而 markdown 的链接里出现空格就直接断了。
  */
-export function imageRawUrl(input: {
-  repo: string
-  branch: string
-  path: string
-  baseUrl?: string
-}): string {
+export function imageRawUrl(input: { repo: string; branch: string; path: string }): string {
   const path = input.path
     .split('/')
     .filter(Boolean)
     .map((part) => encodeURIComponent(part))
     .join('/')
   if (!path) return ''
-
-  const override = sanitizeImageBaseUrl(input.baseUrl ?? '')
-  if (override) return `${override}/${path}`
 
   const remote = parseImageRemote(input.repo)
   if (!remote) return ''
@@ -366,12 +341,11 @@ export interface NoteImageAsset extends NoteImage {
 }
 
 /**
- * 列出图片仓库的入参：配置由调用方从设置里带过来（适配层不缓存设置），
+ * 列出图片仓库的入参：仓库地址由调用方从设置里带过来（适配层不缓存设置），
  * 当前笔记本由调用方逐次带进来 —— **列的是「这台机器上这个笔记本」那一层**（见 imageScopeDir）。
  */
 export interface NoteImageListInput {
   repo: string
-  dir: string
   /** 当前笔记本（空串 = 还没打开笔记本，调用方要挡住，不要退回上一层） */
   root: string
   useAccount?: boolean
@@ -456,7 +430,6 @@ export function buildImageAssets(input: {
   texts: readonly string[]
   repo: string
   branch: string
-  baseUrl?: string
 }): NoteImageAsset[] {
   const lowered = input.texts.map((text) => text.toLowerCase())
 
@@ -465,12 +438,7 @@ export function buildImageAssets(input: {
     name: image.name,
     size: Math.max(0, Math.round(image.size)),
     refs: countInLowered(lowered, image.name),
-    url: imageRawUrl({
-      repo: input.repo,
-      branch: input.branch,
-      path: image.path,
-      baseUrl: input.baseUrl
-    })
+    url: imageRawUrl({ repo: input.repo, branch: input.branch, path: image.path })
   }))
 }
 

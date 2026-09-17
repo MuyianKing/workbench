@@ -44,7 +44,9 @@
 - Rust 依赖的判据是**不新增编译单元**，不是「不新增 crate 名」：先 `cargo tree -e normal -i <crate>` 确认它已经在图里；不要引
   `reqwest`、`git2`、`sysinfo` 这类会拉进整套栈的 native / 运行时依赖。
 - 唯一需要用户预装的外部程序是 **git**，只在 `sync.rs` 的三处同步用：直启 `git.exe`（`proc::run_direct`），**不要**经 `cmd /C`；
-  子进程一律带 `GIT_TERMINAL_PROMPT=0`；超时与失败收敛成给用户看的提示。别处不新增这类外部依赖。
+  子进程一律带 `GIT_TERMINAL_PROMPT=0` 与 `-c core.quotepath=false`（前者：没有终端可问，挂着只会等超时；后者：git 默认把非 ASCII
+  路径转义成八进制，中文文件名在冲突提示里会变成乱码，而它是个每台机器都可能不同的全局项）；超时与失败收敛成给用户看的提示。
+  别处不新增这类外部依赖。
 - 测试用 Vitest（渲染层与 `src/shared`）+ `cargo test`（写在同文件的 `#[cfg(test)] mod tests`）。**TypeScript 与 vue-tsc 的版本不要动**：
   升到 TS 7 会让 `npm run typecheck` 直接不可用。
 - 仅 Windows，不做 macOS / Linux 适配。
