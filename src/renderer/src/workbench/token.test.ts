@@ -11,7 +11,7 @@
  * 自动同步在后台跑，断言推送内容前要先 `flushBackgroundSync()`。
  */
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { THEME_VERSION } from '@shared/theme'
+import { DEFAULT_THEME, THEME_VERSION } from '@shared/theme'
 
 /** 用例里的同步仓库地址（桩数据按它分仓库存放分片） */
 const REPO = 'git@example.com:me/sync.git'
@@ -889,11 +889,9 @@ describe('外观配置单独同步', () => {
 
       // 拖一下布局（改栏宽）：真的变了，时间戳记的是**变化**那一刻，不是推送那一刻
       state.updateThemeConfig({
-        columns: [
-          { id: 'col-1', width: 320 },
-          { id: 'col-2', width: null },
-          { id: 'col-3', width: 294 }
-        ]
+        columns: DEFAULT_THEME.columns.map((column) =>
+          column.id === 'col-1' ? { ...column, width: 320 } : column
+        )
       })
       const layoutChangedAt = Date.now()
       vi.setSystemTime(new Date(2026, 8, 14, 12, 0, 0))

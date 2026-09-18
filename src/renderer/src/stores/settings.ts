@@ -15,16 +15,20 @@ import {
   DEFAULT_THEME,
   addColumn as addColumnTo,
   clampCardGap,
-  clampCardHeight,
   clampColumnWidth,
   clampNoteTreeWidth,
+  clampRowHeight,
   moveCard as placeCard,
   removeColumn as removeColumnFrom,
+  rowHeightMin,
+  rowOf,
   sanitizeTheme,
   setColumnWidths as placeColumnWidths,
   type CardPlacement,
   type ColumnId,
   type HomeCardId,
+  type RowId,
+  type RowTarget,
   type ThemeConfig
 } from '@shared/theme'
 import { clampBackgroundOpacity, sanitizeVeilColor } from '@shared/workspace-background'
@@ -398,10 +402,10 @@ export const useSettingsStore = defineStore('settings', () => {
   /**
    * 首页的分栏布局（theme.json：外观 + 布局都在这个文件里）。
    *
-   * 与终端高度同一套做法：拖动栏宽 / 卡片高度时只改这个 ref 让布局跟手，
+   * 与终端高度同一套做法：拖动栏宽 / 行高时只改这个 ref 让布局跟手，
    * 松手才整份落盘，免得每动一格就写一次文件。
    *
-   * 只读它的布局字段（cards / 栏宽 / 间距）。改成外观那几项走的是 `settings`：
+   * 只读它的布局字段（cards / 栏与行 / 间距）。改成外观那几项走的是 `settings`：
    * 适配层在那边把两份合起来，这里的 `appearance` 可能比适配层旧一拍 ——
    * 无妨，因为每次落盘都是把补丁交给适配层、由它并到自己那份权威值上（见 workbench/state.ts）。
    */
@@ -423,28 +427,38 @@ export const useSettingsStore = defineStore('settings', () => {
     return true
   }
 
-  /** 把一块卡片挪到某栏的第 index 位：本地先跟手，随即落盘（拖放是一次性动作） */
-  async function moveCard(id: HomeCardId, column: CardPlacement['column'], index: number): Promise<void> {
-    themeConfig.value.cards = placeCard(themeConfig.value.cards, id, column, index)
-    await saveThemeConfig({ cards: themeConfig.value.cards })
+  /**
+   * 把一块卡片挪到落点上（拖放收手时走它）：本地先跟手，随即落盘。
+   *
+   * 行清单也一起换 —— 「另起一行」会多出一行、卡片被搬空的那一行会跟着没了
+   * （见 shared/theme.ts 的 moveCard），所以这两份必须同一次写下去。
+   */
+  async function moveCard(id: HomeCardId, target: RowTarget): Promise<void> {
+    const moved = placeCard(themeConfig.value.cards, themeConfig.value.columns, id, target)
+    themeConfig.value.cards = moved.cards
+    themeConfig.value.columns = moved.columns
+    await saveThemeConfig({ cards: moved.cards, columns: moved.columns })
   }
 
-  /** 拖动下边缘改高度：过程中只改本地 */
-  function setCardHeight(id: HomeCardId, height: number): void {
-    themeConfig.value.cards[id].height = clampCardHeight(height, id)
+  /** 拖动行下边缘改高度：过程中只改本地，松手时由 commitColumns 落盘 */
+  function setRowHeight(id: RowId, height: number): void {
+    const row = rowOf(themeConfig.value.columns, id)
+    if (!row) return
+    row.height = clampRowHeight(height, rowHeightMin(themeConfig.value.cards, id))
   }
 
-  /** 切换高度模式（固定 / 自适应）；一次性动作，切完直接落盘 */
-  async function toggleCardMode(id: HomeCardId): Promise<void> {
-    const card = themeConfig.value.cards[id]
-    card.mode = card.mode === 'flex' ? 'fixed' : 'flex'
-    await commitCards()
+  /** 切换一行的高度模式（固定 / 自适应）；一次性动作，切完直接落盘 */
+  async function toggleRowMode(id: RowId): Promise<void> {
+    const row = rowOf(themeConfig.value.columns, id)
+    if (!row) return
+    row.mode = row.mode === 'flex' ? 'fixed' : 'flex'
+    await commitColumns()
   }
 
   /**
    * 关掉 / 打开首页的某一块卡片。
    *
-   * 关掉只是不画它：栏内位置与高度都留着，再打开时回到原来那一格（见 shared/theme.ts）。
+   * 关掉只是不画它：它那一行与行内的位置都留着，再打开时回到原来那一格（见 shared/theme.ts）。
    * 与拖动落盘走同一条路（commitCards）：整份送出去，免得别的卡片停在旧快照。
    */
   async function setCardVisible(id: HomeCardId, visible: boolean): Promise<void> {
@@ -478,16 +492,24 @@ export const useSettingsStore = defineStore('settings', () => {
     themeConfig.value.columns = placeColumnWidths(themeConfig.value.columns, widths)
   }
 
-  /** 松手落盘栏：整份送出去（拆 / 收 / 改宽都走它，免得只更新一栏） */
+  /**
+   * 松手落盘栏（连行一起）：整份送出去 —— 拆栏 / 收栏 / 改栏宽 / 改行高都走它，
+   * 免得只更新一栏。行是栏的一部分，所以行高与行的高度模式也落在这一份里。
+   */
   async function commitColumns(): Promise<void> {
-    await saveThemeConfig({ columns: themeConfig.value.columns.map((column) => ({ ...column })) })
+    await saveThemeConfig({
+      columns: themeConfig.value.columns.map((column) => ({
+        ...column,
+        rows: column.rows.map((row) => ({ ...row }))
+      }))
+    })
   }
 
   /**
    * 切换某一栏的宽度模式：自适应 ↔ 固定。
    *
    * 固定时取它此刻的显示宽度（由画布量了传进来）：切换前后那一栏的宽度看起来不动，
-   * 用户只是把「当前这个宽度」钉住了 —— 与卡片那颗「固定 / 自适应」同一个做法。
+   * 用户只是把「当前这个宽度」钉住了 —— 与行上那颗「固定 / 自适应」同一个做法。
    */
   async function toggleColumnMode(id: ColumnId, currentWidth: number): Promise<void> {
     const column = themeConfig.value.columns.find((item) => item.id === id)
@@ -507,7 +529,7 @@ export const useSettingsStore = defineStore('settings', () => {
     await commitColumns()
   }
 
-  /** 收掉一栏：栏里的卡片并到相邻那一栏；只剩一栏时不动 */
+  /** 收掉一栏：栏里的行整条并到相邻那一栏；只剩一栏时不动 */
   async function removeColumn(id: ColumnId): Promise<void> {
     const removed = removeColumnFrom(themeConfig.value.cards, themeConfig.value.columns, id)
     if (!removed) return
@@ -517,14 +539,14 @@ export const useSettingsStore = defineStore('settings', () => {
     await saveThemeConfig({ columns: removed.columns, cards: removed.cards })
   }
 
-  /** 卡片间距是设置项，改完立即落盘（栏间、栏内卡片、项目卡网格同时生效） */
+  /** 卡片间距是设置项，改完立即落盘（栏间、行间、行内卡片、项目卡网格同时生效） */
   async function setCardGap(value: number): Promise<void> {
     const next = clampCardGap(value)
     themeConfig.value.cardGap = next
     await saveThemeConfig({ cardGap: next })
   }
 
-  /** 恢复默认布局；栏数 / 栏宽 / 栏内位置 / 高度 / 间距 / 关掉的卡片全部回到默认 */
+  /** 恢复默认布局；栏数 / 栏宽 / 行数与行高 / 卡片位置 / 间距 / 关掉的卡片全部回到默认 */
   async function resetLayout(): Promise<void> {
     const fallback = sanitizeTheme(DEFAULT_THEME)
     themeConfig.value = fallback
@@ -670,8 +692,8 @@ export const useSettingsStore = defineStore('settings', () => {
     cardGap,
     applyThemeConfig,
     moveCard,
-    setCardHeight,
-    toggleCardMode,
+    setRowHeight,
+    toggleRowMode,
     setCardVisible,
     commitCards,
     setColumnWidths,

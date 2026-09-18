@@ -1095,7 +1095,13 @@ export interface WorkbenchApi {
   build: (id: string, script: string) => Promise<Result<null>>
   /** 执行项目配置里的第 index 条自定义命令 */
   runCustom: (id: string, index: number) => Promise<Result<null>>
-  stop: (id: string) => Promise<Result<null>>
+  /**
+   * 停止项目当前在跑的那条命令。
+   *
+   * 一个项目可以同时挂着几条会话（dev server 在跑、又点了一次打包），`kind` 就是「界面此刻
+   * 显示的是哪一类」—— 给了就只停那一条，不给才退回「在跑的任意一条」。
+   */
+  stop: (id: string, kind?: TerminalKind) => Promise<Result<null>>
   /**
    * 同步取一份首屏快照（见 BootstrapSnapshot）。
    * 渲染层在 mount 之前调用，让第一帧就是用户设置的样子，而不是先默认再切换。

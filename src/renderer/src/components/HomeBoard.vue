@@ -1,14 +1,17 @@
 <script setup lang="ts">
 /**
- * 首页布局画布：若干栏并排，卡片在栏内从上往下排、宽度铺满整栏。
+ * 首页布局画布：若干栏并排，每栏里若干行上下摞，行里的卡片横向平分这一栏的宽度。
  *
- * 栏数是自己定的（编辑态里 ＋ 在右边拆一栏、✕ 收掉本栏，见 shared/theme.ts 的 HomeColumn）：
- * 每栏宽度要么是一个像素值，要么是「自适应」（与其余自适应栏平分剩余宽度）。
- * 卡片高度分固定 / 自适应两种模式，栏清单、栏内顺序、卡片属于哪一栏都落在 theme.json 里。
+ * 栏数与行数都是自己定的（编辑态里 ＋ 在右边拆一栏、✕ 收掉本栏；行则靠拖动分出来，
+ * 见 shared/theme.ts 的 HomeColumn / HomeRow）：每栏宽度要么是一个像素值，要么是「自适应」
+ * （与其余自适应栏平分剩余宽度），行高同样是固定像素 / 自适应两种。
+ * 卡片落在哪一行、行内第几位都落在 theme.json 里。
  * 空栏平时不渲染（不占地方），编辑时才把所有栏都摆出来，好把卡片拖进去。
  *
  * 拖拽用指针事件，而且拖的就是卡片本身：超过阈值后卡片转为 position: fixed 跟着指针走，
- * 原位置不留下任何残影，落点处只留一段与卡片等高的空隙（不画框）。
+ * 原位置不留下任何残影，落点处只留一段与卡片等大的空隙（不画框）。
+ * 落点判两维：落在某张卡片的**上 / 下缘**＝在那一行旁边另起一行，落在**中间**＝并进这一行、
+ * 按左右换位 —— 于是「中栏上面一张宽卡、下面三张并排」拖得出来，不必再设「拆行」按钮。
  */
 import { computed, ref } from 'vue'
 import type { Component, CSSProperties } from 'vue'
@@ -17,18 +20,26 @@ import {
   COLUMN_COUNT_MIN,
   COLUMN_WIDTH_DEFAULT,
   HOME_CARD_LABELS,
-  cardPlaceholderHeight,
+  columnHasVisibleCards,
+  columnOfRow,
   resizeColumnPair,
-  visibleCardIdsInColumn,
+  rowBoxHeight,
+  rowHeightMin,
+  rowOf,
+  visibleCardIdsInRow,
   type CardGrab,
   type ColumnId,
   type HomeCardId,
-  type HomeColumn
+  type HomeColumn,
+  type HomeRow,
+  type RowId,
+  type RowTarget
 } from '@shared/theme'
 import { useProjectsStore } from '@/stores/projects'
 import { startPointerDrag } from '@/composables/use-pointer-drag'
 import { useSettingsStore } from '@/stores/settings'
 import BoardCard from '@/components/BoardCard.vue'
+import BoardRow from '@/components/BoardRow.vue'
 import ActivityGraph from '@/components/ActivityGraph.vue'
 import TokenPanel from '@/components/TokenPanel.vue'
 import SystemPanel from '@/components/SystemPanel.vue'
@@ -57,22 +68,26 @@ const CARDS: Record<HomeCardId, Component> = {
 
 const editing = computed(() => store.layoutEditing)
 
-// ---------- 栏与卡片 ----------
+// ---------- 栏 / 行 / 卡片 ----------
+
+const columns = computed<HomeColumn[]>(() => settings.themeConfig.columns)
+const cards = computed(() => settings.themeConfig.cards)
 
 /**
- * 这一栏要画的卡片：设置里关掉的整块不出现（位置与高度都留着，再打开时回到原处）。
- * 编辑态也一样不画 —— 能拖的只有看得见的那些，摆位不会摆到一块自己看不见的卡片上。
+ * 一栏里要画的行：**连它在栏里的下标一起**给出来 —— 落点、占位都按那个下标算，
+ * 而卡片全被关掉的行不画（位置留着，再打开时回到原处），两者的序号因此对不齐。
  */
-function cardsIn(column: ColumnId): HomeCardId[] {
-  return visibleCardIdsInColumn(settings.themeConfig.cards, column)
+function renderRows(column: HomeColumn): Array<{ row: HomeRow; index: number }> {
+  return column.rows
+    .map((row, index) => ({ row, index }))
+    .filter(({ row }) => visibleCardIdsInRow(cards.value, row.id).length > 0)
 }
-
-/** 栏清单（顺序就是画布上从左到右的顺序） */
-const columns = computed<HomeColumn[]>(() => settings.themeConfig.columns)
 
 /** 平时空栏不渲染；编辑时所有栏都在，好把卡片拖进去、也好拆拆收收 */
 const visibleColumns = computed<HomeColumn[]>(() =>
-  editing.value ? columns.value : columns.value.filter((column) => cardsIn(column.id).length > 0)
+  editing.value
+    ? columns.value
+    : columns.value.filter((column) => columnHasVisibleCards(cards.value, column))
 )
 
 /** 每栏占多宽：有像素宽度的按像素，自适应的与其余自适应栏平分剩下的宽度 */
@@ -126,10 +141,17 @@ function seamTitle(index: number): string {
     : `拖动调整第 ${index + 2} 栏的宽度`
 }
 
-// ---------- 指针拖拽换栏 / 换位 ----------
+// ---------- 指针拖拽：换行 / 换栏 / 换位 ----------
 
 /** 位移超过这个距离才算拖动，避免点一下没动也触发一次落盘 */
 const DRAG_THRESHOLD = 4
+
+/**
+ * 上下缘那一带占一行高度的比例（最多 EDGE_MAX_PX）：落在这一带＝另起一行，
+ * 落在中间＝并进这一行。行矮的时候按比例收，高的时候封顶，免得一行里只剩中间一小条能并排。
+ */
+const EDGE_RATIO = 0.3
+const EDGE_MAX_PX = 40
 
 interface DragState {
   id: HomeCardId
@@ -149,14 +171,15 @@ interface DragState {
 }
 
 const drag = ref<DragState | null>(null)
-const dropTarget = ref<{ column: ColumnId; index: number } | null>(null)
+const dropTarget = ref<RowTarget | null>(null)
 /** 正在拖宽度的那几栏（拖动期间高亮它们，改的是哪几栏一眼看得出来） */
 const resizingColumns = ref<ColumnId[]>([])
 
 function beginDrag(id: HomeCardId, grab: CardGrab): void {
   if (!editing.value) return
 
-  const column = settings.themeConfig.cards[id].column
+  const placement = cards.value[id]
+  const column = columnOfRow(columns.value, placement.row)
   drag.value = {
     id,
     startX: grab.x,
@@ -169,7 +192,14 @@ function beginDrag(id: HomeCardId, grab: CardGrab): void {
     height: grab.height,
     moved: false
   }
-  dropTarget.value = { column, index: cardsIn(column).indexOf(id) }
+  dropTarget.value = column
+    ? {
+        column: column.id,
+        rowIndex: column.rows.findIndex((row) => row.id === placement.row),
+        newRow: false,
+        index: visibleCardIdsInRow(cards.value, placement.row).indexOf(id)
+      }
+    : null
 
   // 起点用卡片上按下时记下的坐标（BoardCard 已经量过位置，这里只借它当原点）
   startPointerDrag({
@@ -193,37 +223,75 @@ function onDragMove(event: PointerEvent): void {
     state.moved = true
   }
 
-  // 指针下面是哪一栏（浮层已经 pointer-events: none，不会挡住判定）
-  const under = document.elementFromPoint(event.clientX, event.clientY)
-  const columnEl = under?.closest<HTMLElement>('.col')
-  const column = columnEl?.dataset.column as ColumnId | undefined
-  if (!columnEl || !column) return
+  // 指针下面是哪一栏哪一行（浮层已经 pointer-events: none，不会挡住判定）
+  const target = targetAt(event.clientX, event.clientY)
+  if (target) dropTarget.value = target
+}
 
-  dropTarget.value = { column, index: indexAt(columnEl, event.clientY) }
+/** 指针落在哪儿：先认栏，再在该栏画出来的那些行里认「哪一行、落的哪儿」 */
+function targetAt(x: number, y: number): RowTarget | null {
+  const under = document.elementFromPoint(x, y)
+  const columnEl = under?.closest<HTMLElement>('.col')
+  const columnId = columnEl?.dataset.column as ColumnId | undefined
+  if (!columnEl || !columnId) return null
+
+  const column = columns.value.find((item) => item.id === columnId)
+  if (!column) return null
+
+  const dragged = drag.value?.id
+  // 按 data-row 认行（行的类名是 .board-row，那是它自己的样式；这里要的是「哪一行」这个身份）
+  const rows = [...columnEl.querySelectorAll<HTMLElement>('[data-row]')]
+
+  // 这一栏一行都没画（卡片被关光了）：落点就是往这一栏末尾加一行
+  if (!rows.length) return { column: columnId, rowIndex: column.rows.length, newRow: true, index: 0 }
+
+  for (const rowEl of rows) {
+    const rect = rowEl.getBoundingClientRect()
+    const rowIndex = Number(rowEl.dataset.rowIndex)
+
+    // 落在这一行上面（含行与行之间那条缝）：在它前面另起一行
+    if (y < rect.top) return { column: columnId, rowIndex, newRow: true, index: 0 }
+    if (y > rect.bottom) continue
+
+    const edge = Math.min(rect.height * EDGE_RATIO, EDGE_MAX_PX)
+    if (y < rect.top + edge) return { column: columnId, rowIndex, newRow: true, index: 0 }
+    if (y > rect.bottom - edge) {
+      return { column: columnId, rowIndex: rowIndex + 1, newRow: true, index: 0 }
+    }
+    return { column: columnId, rowIndex, newRow: false, index: indexInRow(rowEl, x, dragged) }
+  }
+
+  // 落在所有行下面（这一栏还没占满高度）：并到最后一行的末尾，与老版拖到栏底一样
+  const last = rows[rows.length - 1]
+  return {
+    column: columnId,
+    rowIndex: Number(last.dataset.rowIndex),
+    newRow: false,
+    index: indexInRow(last, x, dragged)
+  }
 }
 
 /**
- * 落点位置：按指针落在该栏哪张卡片的上半 / 下半决定插到它前面还是后面。
+ * 行内插入位次：按指针落在该行哪张卡片的左半 / 右半。
  * 被拖的那张要排掉（它已经脱离文档流），占位空隙推开的位移也要减掉，
  * 否则指针停在分界线上时会出现「空隙推走卡片 → 落点回退」的抖动。
  */
-function indexAt(container: HTMLElement, clientY: number): number {
-  const id = drag.value?.id
-  const cards = [...container.querySelectorAll<HTMLElement>('[data-card-id]')].filter(
-    (el) => el.dataset.cardId !== id
+function indexInRow(container: HTMLElement, x: number, dragged: HomeCardId | undefined): number {
+  const rowCards = [...container.querySelectorAll<HTMLElement>('[data-card-id]')].filter(
+    (el) => el.dataset.cardId !== dragged
   )
 
-  const gap = container.querySelector<HTMLElement>('.col__gap')
+  const gap = container.querySelector<HTMLElement>('.row__gap')
   const gapIndex = gap ? Number(gap.dataset.gapIndex) : -1
-  // 空隙高度 + 它与相邻卡片之间的 flex 间距，都要从卡片位置上减掉（间距与 .col 的 gap 同源）
-  const shift = gap ? gap.getBoundingClientRect().height + settings.cardGap : 0
+  // 空隙宽度 + 它与相邻卡片之间的间距，都要从卡片位置上减掉（间距与 .row 的 gap 同源）
+  const shift = gap ? gap.getBoundingClientRect().width + settings.cardGap : 0
 
-  for (let i = 0; i < cards.length; i += 1) {
-    const rect = cards[i].getBoundingClientRect()
-    const top = shift && i >= gapIndex ? rect.top - shift : rect.top
-    if (clientY < top + rect.height / 2) return i
+  for (let i = 0; i < rowCards.length; i += 1) {
+    const rect = rowCards[i].getBoundingClientRect()
+    const left = shift && i >= gapIndex ? rect.left - shift : rect.left
+    if (x < left + rect.width / 2) return i
   }
-  return cards.length
+  return rowCards.length
 }
 
 function endDrag(last: PointerEvent | null): void {
@@ -234,7 +302,7 @@ function endDrag(last: PointerEvent | null): void {
   dropTarget.value = null
 
   // last 为 null 表示被取消了（Esc / 系统接管）：不落盘
-  if (state?.moved && last && target) void settings.moveCard(state.id, target.column, target.index)
+  if (state?.moved && last && target) void settings.moveCard(state.id, target)
 }
 
 /** 拖起来的那张卡片：脱离文档流，跟着指针走 */
@@ -251,21 +319,66 @@ const floatingStyle = computed<CSSProperties | null>(() => {
   }
 })
 
-/** 落点空隙插在这一栏的第几张卡片之前（等于末尾时插在最后） */
-function gapRenderIndex(column: ColumnId): number | null {
-  const state = drag.value
-  if (!state?.moved || !dropTarget.value) return null
-  if (dropTarget.value.column !== column) return null
+// ---------- 落点占位 ----------
 
-  // 落点序号是按「不含被拖卡片」的列表算的，映射回渲染序时要把它自己那一格让开
-  const own = cardsIn(column).indexOf(state.id)
-  return dropTarget.value.index + (own !== -1 && dropTarget.value.index >= own ? 1 : 0)
+/** 画布上的一格：一行，或者「拖动要新开的那一行」占位 */
+type Slot =
+  | { kind: 'row'; key: string; row: HomeRow; index: number; cards: HomeCardId[]; gapIndex: number | null }
+  | { kind: 'newRow'; key: string; height: number }
+
+/**
+ * 新开一行的占位有多高：那一行跟着被拖的卡片走（它原来多高，新行就多高），
+ * 所以占位块与松手后的结果一般大，不会跳一下。
+ */
+const newRowHeight = computed(() => {
+  const id = drag.value?.id
+  if (!id) return 0
+  const row = rowOf(columns.value, cards.value[id].row)
+  if (!row) return 0
+  return rowBoxHeight(row, rowHeightMin(cards.value, row.id))
+})
+
+/**
+ * 一栏在画布上要画的东西：它画得出来的那些行，外加（要新开一行时）那一行的占位。
+ * 占位插在「第一个下标不小于落点下标」的那一行前面 —— 落点算的是栏里的行下标，
+ * 而卡片被关光的那种行不画，两边对不齐时以落点为准。
+ */
+function slotsOf(column: HomeColumn): Slot[] {
+  const target = dropTarget.value
+  const asNew = drag.value?.moved === true && target?.newRow === true && target.column === column.id
+  const slots: Slot[] = []
+  let placed = false
+
+  for (const { row, index } of renderRows(column)) {
+    if (asNew && !placed && target && target.rowIndex <= index) {
+      slots.push({ kind: 'newRow', key: `new-${column.id}`, height: newRowHeight.value })
+      placed = true
+    }
+    const ids = visibleCardIdsInRow(cards.value, row.id)
+    slots.push({
+      kind: 'row',
+      key: row.id,
+      row,
+      index,
+      cards: ids,
+      gapIndex: gapRenderIndex(index, ids)
+    })
+  }
+
+  if (asNew && !placed) slots.push({ kind: 'newRow', key: `new-${column.id}`, height: newRowHeight.value })
+  return slots
 }
 
-const gapHeight = computed(() => {
-  const id = drag.value?.id
-  return id ? cardPlaceholderHeight(id, settings.themeConfig.cards[id]) : 0
-})
+/** 落点空隙插在这一行的第几张卡片之前（等于末尾时插在最后）；不在这一行就是 null */
+function gapRenderIndex(index: number, ids: HomeCardId[]): number | null {
+  const target = dropTarget.value
+  const dragged = drag.value?.id
+  if (drag.value?.moved !== true || !target || target.newRow || target.rowIndex !== index) return null
+
+  // 落点序号是按「不含被拖卡片」的列表算的，映射回渲染序时要把它自己那一格让开
+  const own = dragged ? ids.indexOf(dragged) : -1
+  return target.index + (own !== -1 && target.index >= own ? 1 : 0)
+}
 
 // ---------- 栏宽拖动 ----------
 
@@ -334,7 +447,7 @@ function addColumnAfter(column: HomeColumn): void {
   void settings.addColumn(column.id)
 }
 
-/** 收栏：栏里的卡片并到相邻那一栏（只剩一栏时按钮是禁用的） */
+/** 收栏：栏里的行整条并到相邻那一栏（只剩一栏时按钮是禁用的） */
 function removeColumn(column: HomeColumn): void {
   void settings.removeColumn(column.id)
 }
@@ -345,8 +458,8 @@ function toggleColumnMode(column: HomeColumn): void {
   void settings.toggleColumnMode(column.id, current)
 }
 
-function onToggleMode(id: HomeCardId): void {
-  void settings.toggleCardMode(id)
+function onToggleRowMode(id: RowId): void {
+  void settings.toggleRowMode(id)
 }
 </script>
 
@@ -388,47 +501,60 @@ function onToggleMode(id: HomeCardId): void {
             class="colhead__btn"
             type="button"
             :disabled="columns.length <= COLUMN_COUNT_MIN"
-            title="收掉这一栏，栏里的卡片并到相邻那一栏"
+            title="收掉这一栏，栏里的行并到相邻那一栏"
             @click="removeColumn(column)"
           >
             ✕
           </button>
         </div>
 
-        <div class="col" :class="{ 'is-empty': !cardsIn(column.id).length }" :data-column="column.id">
-          <template v-for="(id, cardIndex) in cardsIn(column.id)" :key="id">
+        <div class="col" :class="{ 'is-empty': !renderRows(column).length }" :data-column="column.id">
+          <template v-for="slot in slotsOf(column)" :key="slot.key">
+            <!-- 落点要新开一行：占一整行的空位（高度就是那一行将继承的高度） -->
             <div
-              v-if="gapRenderIndex(column.id) === cardIndex"
+              v-if="slot.kind === 'newRow'"
               class="col__gap"
-              :data-gap-index="dropTarget?.index ?? 0"
-              :style="{ height: `${gapHeight}px` }"
+              :style="{ height: `${slot.height}px` }"
             />
 
-            <BoardCard
-              :id="id"
-              :title="HOME_CARD_LABELS[id]"
-              :mode="settings.themeConfig.cards[id].mode"
-              :height="settings.themeConfig.cards[id].height"
+            <BoardRow
+              v-else
+              :row="slot.row"
+              :index="slot.index"
+              :min="rowHeightMin(cards, slot.row.id)"
               :editing="editing"
-              :floating-style="drag?.id === id ? floatingStyle : null"
-              @grab="beginDrag"
-              @toggle-mode="onToggleMode"
-              @resize="settings.setCardHeight"
-              @commit="() => void settings.commitCards()"
+              @resize="settings.setRowHeight"
+              @toggle-mode="onToggleRowMode"
+              @commit="() => void settings.commitColumns()"
             >
-              <component :is="CARDS[id]" />
-            </BoardCard>
+              <template v-for="(id, cardIndex) in slot.cards" :key="id">
+                <span
+                  v-if="slot.gapIndex === cardIndex"
+                  class="row__gap"
+                  :data-gap-index="dropTarget?.index ?? 0"
+                />
+
+                <BoardCard
+                  :id="id"
+                  :title="HOME_CARD_LABELS[id]"
+                  :editing="editing"
+                  :floating-style="drag?.id === id ? floatingStyle : null"
+                  @grab="beginDrag"
+                >
+                  <component :is="CARDS[id]" />
+                </BoardCard>
+              </template>
+
+              <span
+                v-if="slot.gapIndex === slot.cards.length"
+                class="row__gap"
+                :data-gap-index="dropTarget?.index ?? 0"
+              />
+            </BoardRow>
           </template>
 
-          <div
-            v-if="gapRenderIndex(column.id) === cardsIn(column.id).length"
-            class="col__gap"
-            :data-gap-index="dropTarget?.index ?? 0"
-            :style="{ height: `${gapHeight}px` }"
-          />
-
           <!-- 编辑态的空栏也要看得见，否则卡片没地方拖 -->
-          <div v-if="editing && !cardsIn(column.id).length" class="col__empty">
+          <div v-if="editing && !renderRows(column).length" class="col__empty">
             第 {{ index + 1 }} 栏为空<br />把卡片拖到这里
           </div>
         </div>
@@ -469,8 +595,8 @@ function onToggleMode(id: HomeCardId): void {
 
 /*
  * 一栏两截：栏头（只有编辑态有，拆 / 收 / 切宽度在那儿）+ 栏本身。
- * 栏本身撑满剩下的高度，栏内再自己排：固定高度的卡片按像素、自适应卡片吃掉剩余高度。
- * 内容超出时由栏自己滚，这样 flex 卡片才有「剩余高度」可分。
+ * 栏本身撑满剩下的高度，栏内再自己排：固定高度的行按像素、自适应行吃掉剩余高度。
+ * 内容超出时由栏自己滚，这样 flex 行才有「剩余高度」可分。
  */
 .board__columns {
   position: relative;
@@ -542,7 +668,7 @@ function onToggleMode(id: HomeCardId): void {
   text-overflow: ellipsis;
 }
 
-/* 与卡片右上角那颗「固定高度 / 自适应」同一种小药丸 */
+/* 与行右上角那颗「固定高度 / 自适应」同一种小药丸 */
 .colhead__btn {
   flex-shrink: 0;
   padding: 2px 8px;
@@ -587,18 +713,26 @@ function onToggleMode(id: HomeCardId): void {
 }
 
 /*
- * 落点空隙：不画任何东西，只把位置空出来（等于卡片会被放下的地方）。
+ * 落点空隙：不画任何东西，只把位置空出来。
  * 拖动中的卡片本身就跟着指针，所以这里再画一个框就是重复表达了。
+ *
+ * 栏里那条（另起一行）是纵向的一块，行里那条（并进这一行）是横向的一格 ——
+ * 后者与卡片平分宽度，所以松手之后卡片占的位置与空隙一般大。
  */
 .col__gap {
   flex-shrink: 0;
+}
+
+.row__gap {
+  flex: 1 1 0;
+  min-width: 0;
 }
 
 /* ---------- 缝线上的宽度手柄 ---------- */
 /*
  * 一条缝一颗（见 seamHandles），挂在这条缝左边那一栏的右边界上。热区是缝线里一条通高的窄条
  * —— 缝线上任意位置都能拖，改的是这条边界（两边都固定时两栏一起变）。
- * 看得见的只有正中间那个小竖条：卡片下沿的高度把手（34×8）旋转 90°，常显，不用 hover 才画出来。
+ * 看得见的只有正中间那个小竖条：行下沿的高度把手（34×8）旋转 90°，常显，不用 hover 才画出来。
  * 竖条宽 8px，窄于栏间空隙，两端都落在缝线里，不会压到两侧卡片。
  */
 .col__resizer {

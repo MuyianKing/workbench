@@ -777,7 +777,7 @@ const networkBounds: Array<{ title: string; detail: string }> = [
             <div class="row">
               <div class="row__text">
                 <span class="row__label">卡片间距</span>
-                <span class="row__hint">卡片之间与页面四周的留白（px）。</span>
+                <span class="row__hint">卡片之间（行间与行内）与页面四周的留白（px）。</span>
               </div>
               <el-input-number
                 class="number-input"
@@ -795,7 +795,7 @@ const networkBounds: Array<{ title: string; detail: string }> = [
               <div class="row__text">
                 <span class="row__label">首页上显示哪些卡片</span>
                 <span class="row__hint">
-                  关掉的卡片不画在首页上；它在栏内的位置与高度都留着，再打开时回到原处。
+                  关掉的卡片不画在首页上；它在行里的位置与那一行的高度都留着，再打开时回到原处。
                 </span>
               </div>
             </div>

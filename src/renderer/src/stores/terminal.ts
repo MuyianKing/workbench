@@ -584,7 +584,9 @@ export const useTerminalStore = defineStore('terminal', () => {
   ): Promise<boolean> {
     const rt = runtimes[target.id]
 
-    if (rt?.external && rt.port) {
+    // 按端口结束的前提是「界面此刻显示的就是那条外部服务」。运行态已经翻成打包 / 安装时，
+    // 旁边还留着的 dev server 不该被这颗「停止」干掉 —— 那一类是 Workbench 自己的会话，有句柄，走下面的 stop()。
+    if (rt?.external && rt.port && rt.status === 'running') {
       const agreed = await confirmAction(
         `将结束【${target.name}】占用【${rt.port}】端口。确定吗？`,
         '结束外部进程',

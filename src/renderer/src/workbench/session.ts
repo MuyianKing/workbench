@@ -232,6 +232,14 @@ async function run(input: RunInput): Promise<Result<null>> {
       ...(createdAt === null ? {} : { processCreatedAt: createdAt }),
       ...(ownerCreated === null ? {} : { ownerCreatedAt: ownerCreated })
     })
+    // 活跃度只认「启动 / 打包」这两种主动操作，且记在进程真起来这一刻（见 state.recordActivity）
+    if (input.kind === 'start' || input.kind === 'build') state.recordActivity()
+    // 跑过一次就算用过这个项目：项目卡与首页「最近使用」按它排序，
+    // 而这条 projectChanged 推送同时是渲染层重新拉活跃度计数的时机（首页的图因此当场变深）
+    if (input.kind !== 'command') {
+      const touched = state.touchProject(input.projectId)
+      if (touched) emit('projectChanged', touched)
+    }
     return ok(null)
   } catch (error) {
     const message = reason(error, '启动失败')
@@ -420,10 +428,17 @@ async function stopTerminal(terminal: string): Promise<Result<null>> {
   }
 }
 
-/** 停止某个项目当前在跑的那条命令（启动 / 打包 / 自定义都会命中） */
-export function stopOwner(projectId: string): Promise<Result<null>> {
-  const target = [...live.values()].find((meta) => meta.projectId === projectId)
-  if (!target) return Promise.resolve(fail('该项目当前没有在运行的命令'))
+/**
+ * 停止某个项目当前在跑的那条命令。
+ *
+ * 一个项目可以同时挂着几条会话（dev server 在跑、又点了一次打包），所以给了 `kind`
+ * 就只停那一类 —— 卡片上写着「打包中」，那颗「停止」就得停掉打包，而不是最先起的那条。
+ * 没给、或那一类已经不在了（界面比实际慢一拍），才退回「在跑的任意一条」。
+ */
+export function stopOwner(projectId: string, kind?: TerminalKind): Promise<Result<null>> {
+  const owned = [...live.values()].filter((meta) => meta.projectId === projectId)
+  if (!owned.length) return Promise.resolve(fail('该项目当前没有在运行的命令'))
+  const target = owned.find((meta) => meta.kind === kind) ?? owned[0]
   return stopTerminal(target.terminal)
 }
 

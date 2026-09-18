@@ -655,7 +655,9 @@ export const useProjectsStore = defineStore('projects', () => {
     const project = findProject(id)
     if (!project) return Promise.resolve(false)
 
-    return terminal.stopTarget(targetOf(project), () => window.workbench.stop(id))
+    // 卡片显示的是哪一类操作就停哪一类：一个项目可以同时挂着 dev server 和一次打包
+    const kind = terminal.runtimeOf(id).kind
+    return terminal.stopTarget(targetOf(project), () => window.workbench.stop(id, kind))
   }
 
   /** 检测项目是否已经在运行（判据是端口占用，实现见 terminal store） */
@@ -696,7 +698,7 @@ export const useProjectsStore = defineStore('projects', () => {
         // 外部进程没有退出事件可等，结束成功与否看 stop 的返回值
         if (!(await stop(id))) return
       } else {
-        await window.workbench.stop(id)
+        await window.workbench.stop(id, rt.kind)
         if (!(await terminal.waitForIdle(id))) {
           notifyError('停止超时，请稍后再试')
           return

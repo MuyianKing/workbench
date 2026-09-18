@@ -8,6 +8,7 @@
  * 适配层的 invoke 只认 `__TAURI_INTERNALS__.invoke`，`fs_exists` 一律回 true 就够这几条用例用了。
  */
 import { beforeAll, describe, expect, it } from 'vitest'
+import { dayKey } from '@shared/activity'
 
 /** 记下每个通道与它的入参：迁移有没有真的落盘，只能从这里看 */
 const calls: Array<{ command: string; args?: Record<string, unknown> }> = []
@@ -98,5 +99,29 @@ describe('老数据的搬家', () => {
 
     expect(state.settings().accentColor).toBe('#22c55e')
     expect(calls.some((item) => item.command === 'theme_save')).toBe(false)
+  })
+})
+
+/**
+ * 首页那张贡献图的计数全靠这一步。
+ *
+ * 迁 Tauri 时它从主进程 store 挪进适配层，漏掉过一次：症状不是报错，而是图上的格子
+ * 从此不再变深。所以这里两样都要盯 —— 当天加了次数，而且真的落了盘。
+ */
+describe('活跃度计数', () => {
+  it('每记一次当天加一，并且跟着落盘', async () => {
+    rawData = { projects: [], activity: {} }
+    rawTheme = { version: 2, cards: {} }
+    calls.length = 0
+    await state.initState()
+
+    state.recordActivity()
+    state.recordActivity()
+
+    const today = dayKey(Date.now())
+    expect(state.activityCounts()?.[today]).toBe(2)
+    const saved = calls.filter((item) => item.command === 'data_save').pop()
+    const dumped = saved?.args?.value as { activity?: Record<string, number> } | undefined
+    expect(dumped?.activity?.[today]).toBe(2)
   })
 })

@@ -1,55 +1,32 @@
 <script setup lang="ts">
 /**
- * 布局里的一块卡片：负责自己的高度与下边缘缩放，整个卡片区域都是拖动手柄。
+ * 布局里的一块卡片：本体 + 编辑态的卡片名，整块区域都是拖动手柄。
  *
- * 宽度不用管 —— 它永远铺满所在栏。高度有两种模式：fixed 用像素值，flex 相当于 flex:1，
- * 吃掉所在栏剩下的高度（自适应）。平时它就是一块普通容器，内容该怎么点还怎么点；
- * 编辑态下内容整体 pointer-events: none，所以从卡片任意位置按下都能开始拖动。
+ * 宽度与高度都不归它管：宽度由所在的那一行平分（一行几张就一人一份），高度跟着那一行走
+ * （见 BoardRow）—— 所以它比过去薄了一层，只剩下「画内容」与「按下即拖动」两件事。
+ * 平时它就是一块普通容器，内容该怎么点还怎么点；编辑态下内容整体 pointer-events: none，
+ * 所以从卡片任意位置按下都能开始拖动。
  *
  * 拖动过程中这张卡片自己就是预览：HomeBoard 把 floatingStyle（position: fixed 跟着指针）
  * 传下来，它就脱离文档流跟手移动 —— 原位置不留任何东西，也不会出现第二份副本。
  */
 import { computed } from 'vue'
 import type { CSSProperties } from 'vue'
-import { startPointerDrag } from '@/composables/use-pointer-drag'
-import {
-  CARD_HEIGHT_MIN,
-  resizeCardHeight,
-  type CardGrab,
-  type CardMode,
-  type HomeCardId
-} from '@shared/theme'
+import type { CardGrab, HomeCardId } from '@shared/theme'
 
 const props = defineProps<{
   id: HomeCardId
   title: string
-  mode: CardMode
-  height: number
   editing: boolean
   floatingStyle: CSSProperties | null
 }>()
 
 const emit = defineEmits<{
   grab: [id: HomeCardId, grab: CardGrab]
-  toggleMode: [id: HomeCardId]
-  resize: [id: HomeCardId, height: number]
-  commit: []
 }>()
 
-/**
- * 固定高度写成 flex-basis，自适应写成 flex:1。
- * 用 flex 而不是 height，是为了让固定高度在空间不够时不参与压缩、由栏自己滚。
- */
-const frameStyle = computed<CSSProperties>(() =>
-  props.mode === 'flex'
-    ? { flex: '1 1 0', minHeight: `${CARD_HEIGHT_MIN[props.id]}px` }
-    : { flex: `0 0 ${props.height}px` }
-)
-
 /** 浮层样式由 HomeBoard 给；还没真正拖起来（没超过阈值）时按普通卡片排布 */
-const style = computed<CSSProperties>(() => props.floatingStyle ?? frameStyle.value)
-
-// ---------- 抓起来（整个卡片区域） ----------
+const style = computed<CSSProperties>(() => props.floatingStyle ?? {})
 
 function onCardPointerDown(event: PointerEvent): void {
   if (!props.editing || event.button !== 0) return
@@ -65,35 +42,12 @@ function onCardPointerDown(event: PointerEvent): void {
     height: rect.height
   })
 }
-
-// ---------- 高度缩放 ----------
-
-function onResizeDown(event: PointerEvent): void {
-  if (!props.editing || props.mode === 'flex' || event.button !== 0) return
-  event.preventDefault()
-  event.stopPropagation()
-
-  const startHeight = props.height
-
-  // 跟手与收手（含系统取消指针）交给 composable：这里只换算高度
-  startPointerDrag({
-    start: { x: event.clientX, y: event.clientY },
-    onMove: (moveEvent, start) => {
-      emit(
-        'resize',
-        props.id,
-        resizeCardHeight(startHeight, moveEvent.clientY - start.y, CARD_HEIGHT_MIN[props.id])
-      )
-    },
-    onEnd: () => emit('commit')
-  })
-}
 </script>
 
 <template>
   <div
     class="board-card"
-    :class="{ 'is-editing': editing, 'is-floating': !!floatingStyle, 'is-flex': mode === 'flex' }"
+    :class="{ 'is-editing': editing, 'is-floating': !!floatingStyle }"
     :style="style"
     :data-card-id="id"
     @pointerdown="onCardPointerDown"
@@ -102,30 +56,8 @@ function onResizeDown(event: PointerEvent): void {
       <slot />
     </div>
 
-    <template v-if="editing">
-      <!-- 左上角：卡片名，整块区域按下即可拖动 -->
-      <span class="board-card__label">{{ title }}</span>
-
-      <!-- 右上角：固定高度 / 自适应切换 -->
-      <button
-        class="board-card__mode"
-        type="button"
-        :title="mode === 'flex' ? '当前自适应高度，点一下改为固定高度' : '当前固定高度，点一下改为自适应'"
-        @pointerdown.stop
-        @click.stop="emit('toggleMode', id)"
-      >
-        <template v-if="mode === 'flex'">自适应</template>
-        <template v-else>{{ height }}px</template>
-      </button>
-
-      <!-- 只有固定高度才需要手动拉高度 -->
-      <span
-        v-if="mode === 'fixed'"
-        class="board-card__resize"
-        :title="`拖动调整${title}的高度`"
-        @pointerdown="onResizeDown"
-      />
-    </template>
+    <!-- 编辑态：卡片名。整块区域按下即可拖动，所以它只是个标记，不吃指针 -->
+    <span v-if="editing" class="board-card__label">{{ title }}</span>
   </div>
 </template>
 
@@ -134,6 +66,8 @@ function onResizeDown(event: PointerEvent): void {
   position: relative;
   display: flex;
   flex-direction: column;
+  /* 一行里的卡片平分宽度：几张卡片就是几个等份（只有一张时它独占整行） */
+  flex: 1 1 0;
   min-width: 0;
   min-height: 0;
   /* 编辑态整块都是拖动热区 */
@@ -168,7 +102,7 @@ function onResizeDown(event: PointerEvent): void {
 /**
  * 拖起来的那一张：脱离文档流跟着指针走，所以原位置不留东西。
  * pointer-events: none 是必须的 —— 否则 elementFromPoint 只会照到它自己，
- * 落点判断会一直停在原来那一栏。
+ * 落点判断会一直停在原来那一行。
  */
 .board-card.is-floating {
   z-index: 200;
@@ -182,7 +116,6 @@ function onResizeDown(event: PointerEvent): void {
   box-shadow: 0 14px 34px rgba(0, 0, 0, 0.55);
 }
 
-/* ---------- 标签与模式按钮 ---------- */
 .board-card__label {
   position: absolute;
   top: 6px;
@@ -196,52 +129,5 @@ function onResizeDown(event: PointerEvent): void {
   line-height: 16px;
   white-space: nowrap;
   pointer-events: none;
-}
-
-.board-card__mode {
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  z-index: 3;
-  padding: 2px 8px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--r-pill);
-  background: var(--bg-surface);
-  color: var(--ink-2);
-  font-family: var(--font-mono);
-  font-size: var(--fs-micro);
-  line-height: 16px;
-  cursor: pointer;
-}
-
-.board-card__mode:hover {
-  border-color: var(--ink);
-  color: var(--ink);
-}
-
-/* 自适应时按钮实心，一眼看出这块在吃剩余高度 */
-.board-card.is-flex .board-card__mode {
-  border-color: transparent;
-  background: var(--ink);
-  color: var(--ink-inverse);
-}
-
-/* ---------- 下边缘的高度把手 ---------- */
-.board-card__resize {
-  position: absolute;
-  left: 50%;
-  bottom: -4px;
-  z-index: 2;
-  width: 34px;
-  height: 8px;
-  transform: translateX(-50%);
-  border: 1px solid var(--ink);
-  border-radius: var(--r-pill);
-  background: var(--bg-surface);
-  cursor: ns-resize;
-}
-
-.board-card__resize:hover {
-  background: var(--ink);
 }
 </style>

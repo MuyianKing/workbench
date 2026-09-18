@@ -25,6 +25,7 @@ import type {
   InstallablePackageManager,
   Project,
   Result,
+  TerminalKind,
   ThemeConfig,
   WindowState,
   WorkbenchApi
@@ -432,7 +433,7 @@ function createApi(): WorkbenchApi {
       withProject(id, (project) => session.buildProject(project, script)),
     runCustom: (id: string, index: number) =>
       withProject(id, (project) => session.runCustom(project, index)),
-    stop: (id: string) => session.stopOwner(id),
+    stop: (id: string, kind?: TerminalKind) => session.stopOwner(id, kind),
     startCommand: (id: string) => withCommand(id, (entry) => session.startCommand(entry)),
     stopCommand: (id: string) => session.stopCommand(id),
 

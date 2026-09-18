@@ -20,7 +20,7 @@ import {
   splitSettingsPatch,
   stripAppearance
 } from './appearance'
-import { DEFAULT_THEME, sanitizeTheme } from './theme'
+import { DEFAULT_THEME, columnIds, columnOfRow, rowOf, sanitizeTheme } from './theme'
 
 function settings(patch: Partial<AppSettings> = {}): AppSettings {
   return { ...DEFAULT_SETTINGS, ...patch }
@@ -190,7 +190,7 @@ describe('老数据搬家', () => {
 describe('theme.json 的整份收敛', () => {
   it('老主题文件（没有外观、没有时间戳）也能读进来，布局不动', () => {
     const legacy = {
-      version: DEFAULT_THEME.version,
+      version: 3,
       cardGap: 14,
       columns: [
         { id: 'col-1', width: 320 },
@@ -201,11 +201,15 @@ describe('theme.json 的整份收敛', () => {
     const theme = sanitizeTheme(legacy)
 
     expect(theme.cardGap).toBe(14)
-    expect(theme.columns).toEqual([
-      { id: 'col-1', width: 320 },
-      { id: 'col-2', width: null }
-    ])
-    expect(theme.cards.quick.column).toBe('col-2')
+    expect(columnIds(theme.columns)).toEqual(['col-1', 'col-2'])
+    expect(theme.columns.map((column) => column.width)).toEqual([320, null])
+    // 卡片挪到了「行」这一层，老结构里那份高度与模式一样带了过来
+    expect(columnOfRow(theme.columns, theme.cards.quick.row)?.id).toBe('col-2')
+    expect(rowOf(theme.columns, theme.cards.quick.row)).toEqual({
+      id: theme.cards.quick.row,
+      mode: 'fixed',
+      height: 120
+    })
     expect(theme.appearance).toEqual(DEFAULT_APPEARANCE)
     expect(theme.updatedAt).toBe(0)
   })

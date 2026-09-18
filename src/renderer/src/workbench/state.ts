@@ -11,6 +11,7 @@
  */
 import { withSessionRecorded, withoutSession } from '@shared/orphan'
 import { emptyData, parseData, sanitizeSettings } from '@shared/persisted-data'
+import { bumpDay, pruneDays } from '@shared/activity'
 import {
   mergeSettingsAppearance,
   migrateAppearanceIntoTheme,
@@ -260,6 +261,20 @@ export function persistProjects(): void {
   persist()
 }
 
+/**
+ * 记一次「这个项目刚被用过」：卡片与首页「最近使用」都按这个时间排。
+ *
+ * 返回改过的那一份给调用方去广播（没有这个项目就回 null），
+ * 广播本身不归这里管 —— 事件是适配层那一侧的事。
+ */
+export function touchProject(id: string, at = Date.now()): Project | null {
+  const target = data.projects.find((project) => project.id === id)
+  if (!target) return null
+  target.lastUsedAt = at
+  persist()
+  return copy(target)
+}
+
 // ---------- 分组 ----------
 
 export function createGroup(name: string): ProjectGroup {
@@ -295,6 +310,19 @@ export function reorderGroups(ids: string[]): void {
 
 export function activityCounts(): PersistedData['activity'] {
   return copy(data.activity ?? {})
+}
+
+/**
+ * 用户每点一次「启动」或「打包」，就往当天的格子里记一次。
+ *
+ * 只认这两种主动操作：安装依赖、自定义命令，以及停止 / 强制结束 / 启动失败都不算 ——
+ * 图回答的是「主动跑了多少次」，不是「进程收尾了几次」。
+ * 图只画最近一年，顺手裁掉更旧的计数，数据文件才不会跟着使用年限一直长。
+ */
+export function recordActivity(): void {
+  const now = Date.now()
+  data.activity = pruneDays(bumpDay(data.activity ?? {}, now), now)
+  persist()
 }
 
 // ---------- 快捷启动 ----------

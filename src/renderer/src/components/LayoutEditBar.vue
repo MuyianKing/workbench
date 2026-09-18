@@ -20,7 +20,7 @@ const settings = useSettingsStore()
     <span class="layoutbar__tag">布局编辑</span>
     <!-- 整句就是一行（nowrap）：源码里别在句子中间换行，中文之间会多出一个空格 -->
     <span class="layoutbar__hint">
-      拖卡片换栏换序；卡片右上角切高度固定 / 自适应；栏头 ＋ 拆栏、✕ 收栏、那颗切栏宽的自适应与固定；拖两栏之间的竖线改栏宽（两栏都固定就一起变）· 间距
+      拖卡片换栏换行换序（落在卡片中间＝并进这一行、左右换位，落在上 / 下缘＝另起一行）；行右上角切高度固定 / 自适应、下缘那颗拉行高；栏头 ＋ 拆栏、✕ 收栏、那颗切栏宽的自适应与固定；拖两栏之间的竖线改栏宽（两栏都固定就一起变）· 间距
       <b class="mono">{{ settings.cardGap }}px</b>
     </span>
     <div class="layoutbar__tools">

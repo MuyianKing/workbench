@@ -380,8 +380,10 @@ body.is-resizing-notes-tree * {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  /* dl 默认带 1em 上下外边距，不清掉会比旁边用 ul 的面板多出两截留白 */
-  margin: 0;
+  /* dl 默认带 1em 上下外边距，不清掉会比旁边用 ul 的面板多出两截留白。
+     只清上下：写成 margin 简写会把 .panel__scroll 那个出血用的负右 margin 一起归零，
+     右 padding 却还留着 —— 于是内容比标题行、页脚矮进去一截，卡片右侧静出一条空白。 */
+  margin-block: 0;
   font-size: var(--fs-meta);
 }
 

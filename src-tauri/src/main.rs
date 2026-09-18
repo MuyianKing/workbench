@@ -237,8 +237,19 @@ fn request_quit(app: &AppHandle) {
     let (tx, rx) = channel::<String>();
     *app.state::<PendingQuit>().0.lock().unwrap() = Some(tx);
 
+    // 唤出窗口之前的状态（可见 / 最小化），取消退出时照着还原
+    let mut before_show: Option<(bool, bool)> = None;
+
     if let Some(window) = main_window(app) {
+        // 这个框是应用内的弹窗，不是系统消息框：窗口收在托盘里、最小化或压在别的程序后面时，
+        // 弹了也没人看得见，而这边还要等 60 秒超时才按「直接退出」收场 —— 先把窗口唤到最前再推事件。
+        let was = (
+            window.is_visible().unwrap_or(false),
+            window.is_minimized().unwrap_or(false),
+        );
+        show_main_window(app);
         let _ = window.emit("app:quit-confirm", json!({ "count": active.len() }));
+        before_show = Some(was);
     }
 
     // 等渲染层回传选择。等待放到独立线程里 —— 菜单事件是在主线程派发的，
@@ -252,7 +263,19 @@ fn request_quit(app: &AppHandle) {
         *handle.state::<PendingQuit>().0.lock().unwrap() = None;
 
         match choice.as_str() {
-            "cancel" => return,
+            "cancel" => {
+                // 不退了就把窗口放回唤出之前的样子：一次没退成，不该把藏在托盘里的窗口留在桌面上
+                match before_show {
+                    Some((false, _)) => hide_main_window(&handle),
+                    Some((true, true)) => {
+                        if let Some(window) = main_window(&handle) {
+                            let _ = window.minimize();
+                        }
+                    }
+                    _ => {}
+                }
+                return;
+            }
             "stop" => session::stop_all(&handle),
             // "direct"：进程留在后台，交给下次启动的残留清理（reap）
             _ => {}
