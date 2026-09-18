@@ -191,12 +191,9 @@ export const CARD_HEIGHT_MAX = 4000
 /**
  * 每块卡片的高度下限。
  *
- * 定得比较小：卡片内部该滚的都滚（快捷操作 / 快捷启动 / 明细行），
+ * 定得比较小：卡片内部该滚的都滚（最近使用 / 快捷操作 / 快捷启动 / 明细行），
  * 拖到很矮时大不了只剩标题加一行，不会把卡片压成一条没有意义的细边。
  * 真正的物理下限是「面板标题 + 上下内边距」那一圈，约 64px。
- *
- * 「最近使用」是例外：里面排的是**整张项目卡**（155px 起），下限得够放下一整张，
- * 否则一拖矮就永远只看得到半张卡 —— 而这个面板的全部内容就是那些卡。
  */
 export const CARD_HEIGHT_MIN: Record<HomeCardId, number> = {
   // 比别的卡片高 20：图下方那行统计（连续 / 最长 / 活跃天数 / 单日峰值）也要占一行，
@@ -204,8 +201,9 @@ export const CARD_HEIGHT_MIN: Record<HomeCardId, number> = {
   activity: 130,
   token: 160,
   system: 88,
-  // 面板头（标题 + 上下内边距）约 52px + 一张项目卡 155px，留几像素余量
-  recent: 220,
+  // 里面是整张项目卡（155px 起），但这张卡不画面板壳、内容本来就滚：
+  // 拖到 100 也读得下去（露出小半张，剩下的滚），不为它另定一条高下限
+  recent: 100,
   actions: 76,
   quick: 76,
   commands: 90,
@@ -229,8 +227,8 @@ export const DEFAULT_THEME: ThemeConfig = {
   columns: DEFAULT_COLUMNS,
   noteTreeWidth: NOTE_TREE_WIDTH_DEFAULT,
   cards: {
-    /* 最近使用：一张项目卡 155px + 面板头 52px，再露出下一张的边 —— 「下面还有」这件事
-       得看得见，否则用户不会想到去滚它（这一列的卡是按最近使用时间往下排的） */
+    /* 最近使用：一张项目卡 155px + 一条卡片间距，再露出下一张小半张 —— 「下面还有」
+       这件事得看得见，否则用户不会想到去滚它（这一列的卡是按最近使用时间往下排的） */
     recent: { column: 'col-1', order: 0, mode: 'fixed', height: 240, hidden: false },
     quick: { column: 'col-1', order: 1, mode: 'fixed', height: 98, hidden: false },
     /* 系统状态：node / 包管理器 / nvm / nrm 四行 + 贴底的数据目录，

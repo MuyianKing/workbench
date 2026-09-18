@@ -171,11 +171,10 @@ describe('sanitizeTheme', () => {
   })
 
   it('更早的版本（v1）也照样翻：认不出的卡片由默认布局补上，不会整份回默认', () => {
-    // 高度取 260：「最近使用」的下限是 220，用它才能证明老文件里的值原样留着（而不是被夹住或回默认）
-    const result = sanitizeTheme({ version: 1, leftWidth: 300, cards: { recent: { column: 'left', order: 0, height: 260 } } })
+    const result = sanitizeTheme({ version: 1, leftWidth: 300, cards: { recent: { column: 'left', order: 0, height: 200 } } })
 
     expect(result.columns[0]).toEqual({ id: 'col-1', width: 300 })
-    expect(result.cards.recent).toMatchObject({ column: 'col-1', height: 260 })
+    expect(result.cards.recent).toMatchObject({ column: 'col-1', height: 200 })
   })
 
   /** 笔记页左栏宽度是后加的字段：老主题文件里没有它，得补默认值而不是当成 0 */
