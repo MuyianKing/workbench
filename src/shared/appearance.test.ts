@@ -192,15 +192,20 @@ describe('theme.json 的整份收敛', () => {
     const legacy = {
       version: DEFAULT_THEME.version,
       cardGap: 14,
-      leftWidth: 320,
-      rightWidth: 260,
-      cards: { quick: { column: 'center', order: 0, mode: 'fixed', height: 120 } }
+      columns: [
+        { id: 'col-1', width: 320 },
+        { id: 'col-2', width: null }
+      ],
+      cards: { quick: { column: 'col-2', order: 0, mode: 'fixed', height: 120 } }
     }
     const theme = sanitizeTheme(legacy)
 
     expect(theme.cardGap).toBe(14)
-    expect(theme.leftWidth).toBe(320)
-    expect(theme.cards.quick.column).toBe('center')
+    expect(theme.columns).toEqual([
+      { id: 'col-1', width: 320 },
+      { id: 'col-2', width: null }
+    ])
+    expect(theme.cards.quick.column).toBe('col-2')
     expect(theme.appearance).toEqual(DEFAULT_APPEARANCE)
     expect(theme.updatedAt).toBe(0)
   })

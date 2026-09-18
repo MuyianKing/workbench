@@ -113,6 +113,12 @@ onMounted(() => {
 .app {
   height: 100%;
   display: grid;
+  /**
+   * 一列 `minmax(0, 1fr)`：**不许里面的内容把这一列顶宽**。
+   * 顶栏里有不换行的长内容（布局编辑那行提示语），列宽交给内容决定的话，窗口一窄整条顶栏
+   * 就横着溢出窗外，右侧那几颗按钮一起被推出去、点都点不着。下面 `.shell` 同理。
+   */
+  grid-template-columns: minmax(0, 1fr);
   /* 顶部整条栏（标题栏 + 搜索栏通宽）/ 下面「导航栏 + 内容列」*/
   grid-template-rows: auto minmax(0, 1fr);
   overflow: hidden;
@@ -159,6 +165,8 @@ onMounted(() => {
  */
 .topbar {
   display: grid;
+  /* 同上：里面的东西再长也不许把这一列顶宽（否则顶栏会溢出窗外） */
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: var(--h-titlebar) var(--h-header);
   min-width: 0;
   /* 通宽：导航栏是从它下沿才开始的一列，不在这一层 */

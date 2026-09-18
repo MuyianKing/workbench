@@ -18,9 +18,9 @@ const settings = useSettingsStore()
 <template>
   <div class="layoutbar">
     <span class="layoutbar__tag">布局编辑</span>
+    <!-- 整句就是一行（nowrap）：源码里别在句子中间换行，中文之间会多出一个空格 -->
     <span class="layoutbar__hint">
-      拖动卡片可在三栏之间移动、调整栏内顺序；卡片右上角切换「固定高度 / 自适应」，
-      固定高度可拖下沿改高；拖两栏之间的竖线改栏宽 · 卡片间距
+      拖卡片换栏换序；卡片右上角切高度固定 / 自适应；栏头 ＋ 拆栏、✕ 收栏、那颗切栏宽的自适应与固定；拖两栏之间的竖线改栏宽（两栏都固定就一起变）· 间距
       <b class="mono">{{ settings.cardGap }}px</b>
     </span>
     <div class="layoutbar__tools">

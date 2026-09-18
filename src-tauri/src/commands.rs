@@ -58,6 +58,7 @@ pub fn load_all() {
     theme_store().load();
     token_store().load();
     work_log_store().load();
+    crate::ai_news::ai_news_store().load();
 }
 
 /// 退出前同步落盘，防止防抖窗口内的改动丢失
@@ -66,6 +67,7 @@ pub fn flush_all() {
     theme_store().flush_sync();
     token_store().flush_sync();
     work_log_store().flush_sync();
+    crate::ai_news::ai_news_store().flush_sync();
 }
 
 // ---------- 数据文件 ----------

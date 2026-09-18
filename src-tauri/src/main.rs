@@ -1,6 +1,7 @@
 // 发布态不要额外的控制台窗口
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod ai_news;
 mod commands;
 mod credentials;
 mod encoding;
@@ -298,6 +299,13 @@ fn main() {
             commands::token_save,
             commands::work_log_load,
             commands::work_log_save,
+            ai_news::ai_news_load,
+            ai_news::ai_news_save,
+            ai_news::ai_news_fetch,
+            ai_news::ai_news_article,
+            ai_news::ai_news_sources,
+            ai_news::ai_news_token_set,
+            ai_news::ai_news_token_clear,
             commands::note_scan,
             commands::note_read,
             commands::note_write,

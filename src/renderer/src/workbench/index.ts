@@ -43,6 +43,7 @@ import * as session from './session'
 import * as state from './state'
 import * as system from './system'
 import * as workLog from './work-log'
+import * as aiNews from './ai-news'
 import { getTokenUsage, getTokenUsageSnapshot, listSyncDevices, syncTokenUsage } from './token'
 
 /**
@@ -288,6 +289,14 @@ function createApi(): WorkbenchApi {
     updateWorkLog: (id: string, patch: Parameters<WorkbenchApi['updateWorkLog']>[1]) =>
       workLog.updateWorkLog(id, patch),
     removeWorkLog: (id: string) => workLog.removeWorkLog(id),
+
+    // ---------- AI 热点（本地缓存 + 用户勾选的热点源） ----------
+    getAiNews: () => aiNews.getAiNews(),
+    refreshAiNews: () => aiNews.refreshAiNews(),
+    loadAiNewsArticle: (url: string) => aiNews.loadAiNewsArticle(url),
+    aiNewsSources: () => aiNews.aiNewsSources(),
+    setAiNewsToken: (token: string) => aiNews.setAiNewsToken(token),
+    clearAiNewsToken: () => aiNews.clearAiNewsToken(),
 
     // ---------- 笔记（用户自己挑的一个文件夹里的 markdown 文件） ----------
     listNotes: (root: string) => note.listNotes(root),

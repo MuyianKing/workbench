@@ -17,6 +17,9 @@ pub const THEME_FILE: &str = "theme.json";
 /// 工作日志（见 shared/work-log.ts）。**只在本机**：它不进同步仓库，
 /// 但跟着数据目录走 —— 用户换数据目录时，自己写过的日志不该落在原地。
 pub const WORK_LOG_FILE: &str = "work-log.json";
+/// AI 热点缓存（见 shared/ai-news.ts）。与工作日志同一待遇：只在本机、不进同步仓库，
+/// 但跟着数据目录走（它是「上次拉回来的那批热点」，换目录不该把它丢在旧位置）。
+pub const AI_NEWS_FILE: &str = "ai-news.json";
 /// **旧版**笔记数据文件（一棵「文件夹 + 笔记」的 JSON 树）。
 ///
 /// 笔记现在就是用户自己挑的那个文件夹里的 .md 文件（见 notes.rs），这份文件不再读写；
@@ -78,6 +81,10 @@ pub fn token_file() -> PathBuf {
 
 pub fn work_log_file() -> PathBuf {
     data_dir().join(WORK_LOG_FILE)
+}
+
+pub fn ai_news_file() -> PathBuf {
+    data_dir().join(AI_NEWS_FILE)
 }
 
 /// 旧版笔记数据文件的落点（只给数据目录迁移用，见 LEGACY_NOTE_FILE 的说明）
@@ -152,6 +159,8 @@ pub fn migrate_data_dir(dir: &str, current: &serde_json::Value) -> Result<(), St
     let _ = std::fs::copy(theme_file(), target_dir.join(THEME_FILE));
     // 工作日志也是本地数据：它不进同步仓库，但数据目录一换就该跟着走
     let _ = std::fs::copy(work_log_file(), target_dir.join(WORK_LOG_FILE));
+    // AI 热点缓存同理：只在本机的拉取结果，换数据目录不该丢在旧位置
+    let _ = std::fs::copy(ai_news_file(), target_dir.join(AI_NEWS_FILE));
     // 旧版笔记文件（不再读写）顺手带走：用户盘上可能只有这一份历史笔记
     let _ = std::fs::copy(legacy_note_file(), target_dir.join(LEGACY_NOTE_FILE));
 

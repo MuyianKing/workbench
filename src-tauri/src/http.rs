@@ -16,7 +16,7 @@ use windows_sys::Win32::Networking::WinHttp::{
     WinHttpAddRequestHeaders, WinHttpCloseHandle, WinHttpConnect, WinHttpOpen, WinHttpOpenRequest,
     WinHttpQueryDataAvailable, WinHttpQueryHeaders, WinHttpReadData, WinHttpReceiveResponse,
     WinHttpSendRequest, WinHttpSetTimeouts, WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
-    WINHTTP_ADDREQ_FLAG_ADD, WINHTTP_FLAG_SECURE, WINHTTP_QUERY_FLAG_NUMBER,
+    WINHTTP_ADDREQ_FLAG_ADD, WINHTTP_FLAG_SECURE, WINHTTP_QUERY_ETAG, WINHTTP_QUERY_FLAG_NUMBER,
     WINHTTP_QUERY_STATUS_CODE,
 };
 
@@ -40,6 +40,8 @@ pub struct Response {
     /// 原始字节。JSON 走 `text()`，图片（头像）直接读这个 ——
     /// 用 `String::from_utf8_lossy` 收二进制会把字节改掉，解出来的图是坏的。
     pub body: Vec<u8>,
+    /// 响应头里的 ETag（条件请求的增量校验用）。服务端没给时是 None。
+    pub etag: Option<String>,
 }
 
 impl Response {
@@ -155,6 +157,36 @@ pub fn request(
         check_bool(queried, "读取状态码失败")?;
         let status = status as u16;
 
+        // ETag：条件请求的依据。查询要一块缓冲，WinHTTP 需要先问一次尺寸。
+        // 这一处失败不算请求失败 —— 服务端没给 ETag 是常有的事，返回 None 交给调用方。
+        let mut etag = None;
+        let mut etag_size: u32 = 0;
+        let _ = WinHttpQueryHeaders(
+            request.0,
+            WINHTTP_QUERY_ETAG,
+            std::ptr::null(),
+            std::ptr::null_mut(),
+            &mut etag_size,
+            std::ptr::null_mut(),
+        );
+        if etag_size > 0 {
+            // WINHTTP_QUERY_ETAG 返回的是宽字符，长度按字节给（含结尾的 0）
+            let mut buffer = vec![0u16; etag_size as usize];
+            let mut length = etag_size;
+            let found = WinHttpQueryHeaders(
+                request.0,
+                WINHTTP_QUERY_ETAG,
+                std::ptr::null(),
+                buffer.as_mut_ptr() as *mut c_void,
+                &mut length,
+                std::ptr::null_mut(),
+            );
+            if found > 0 && length >= 2 {
+                // 去掉结尾的 0 再按 UTF-16 收；从 WinHTTP 压回来的值默认就是完整一头的
+                etag = Some(utf16_to_string(&buffer));
+            }
+        }
+
         let mut bytes: Vec<u8> = Vec::new();
         loop {
             let mut available: u32 = 0;
@@ -184,8 +216,22 @@ pub fn request(
             }
         }
 
-        Ok(Response { status, body: bytes })
+        Ok(Response {
+            status,
+            body: bytes,
+            etag,
+        })
     }
+}
+
+/// WinHTTP 查头返回的宽字符缓冲 → UTF-8 String。按第一个 0 截断，
+/// 防服务端压回来的缓冲在文本后面还带一段没清干净的尾巴。
+fn utf16_to_string(buffer: &[u16]) -> String {
+    let len = buffer
+        .iter()
+        .position(|&unit| unit == 0)
+        .unwrap_or(buffer.len());
+    String::from_utf16_lossy(&buffer[..len])
 }
 
 /// WinHTTP 的句柄返回值：空句柄即失败，原因在 `GetLastError` 里。

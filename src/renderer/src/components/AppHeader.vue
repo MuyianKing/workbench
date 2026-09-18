@@ -219,6 +219,9 @@ onUnmounted(() => window.removeEventListener('keydown', onGlobalKeydown))
   display: flex;
   align-items: center;
   gap: var(--sp-6);
+  /* 搜索位里是不换行的长内容（布局编辑那行提示语）：不限住的话窗口一窄它就撑宽整条顶栏，
+     把右侧那几颗按钮推出窗外 —— 这一行自己能被压窄，压窄后由提示语自己去省略 */
+  min-width: 0;
   padding: 0 var(--sp-5);
   background: var(--bg-surface);
   border-bottom: 1px solid var(--border);

@@ -1,8 +1,9 @@
 /**
- * 主题文件（theme.json）的数据结构、收敛规则与纯计算：**外观设置 + 首页三栏布局**。
+ * 主题文件（theme.json）的数据结构、收敛规则与纯计算：**外观设置 + 首页分栏布局**。
  *
- * 首页分成左中右三栏：左右两栏宽度可调，中间那栏 flex:1 吃掉剩余宽度。
- * 八块卡片各自属于某一栏，在栏内按 order 从上到下排列、宽度铺满整栏，高度各自可调；
+ * 首页分成若干栏（栏数自己定，编辑态里拆 / 收，见 HomeColumn）：每栏宽度可以是固定像素，
+ * 也可以是「自适应」（与其余自适应栏平分剩余宽度）。
+ * 九块卡片各自属于某一栏，在栏内按 order 从上到下排列、宽度铺满整栏，高度各自可调；
  * 没有卡片的栏在平时不渲染（编辑时才显示出来，好把卡片拖进去）。
  * 每块卡片还能单独关掉（`hidden`，在设置里勾选）：关掉只是不画它，栏内位置与高度都留着。
  *
@@ -15,7 +16,7 @@
  */
 import { DEFAULT_APPEARANCE, sanitizeAppearanceSettings, type AppearanceSettings } from './appearance'
 
-/** 首页八块卡片的稳定 id；数组顺序也是同栏同 order 时的兜底排序 */
+/** 首页九块卡片的稳定 id；数组顺序也是同栏同 order 时的兜底排序 */
 export const HOME_CARD_IDS = [
   'activity',
   'token',
@@ -24,7 +25,8 @@ export const HOME_CARD_IDS = [
   'actions',
   'quick',
   'commands',
-  'work'
+  'work',
+  'news'
 ] as const
 
 export type HomeCardId = (typeof HOME_CARD_IDS)[number]
@@ -41,16 +43,23 @@ export const HOME_CARD_LABELS: Record<HomeCardId, string> = {
   actions: '快捷操作',
   quick: '快捷启动',
   commands: '命令',
-  work: '今日完成'
+  work: '今日完成',
+  news: 'AI 热点'
 }
 
-/** 三栏；center 没有固定宽度，永远吃掉剩余空间 */
-export const COLUMN_IDS = ['left', 'center', 'right'] as const
-export type ColumnId = (typeof COLUMN_IDS)[number]
+/**
+ * 首页的一栏。
+ *
+ * `width` 是这一栏的像素宽度，`null` 表示**自适应** —— 它与其余自适应栏平分剩余宽度
+ * （编辑态里点栏头那颗按钮切换，拖两栏之间的竖线改的是左边那一栏的宽度）。
+ */
+export interface HomeColumn {
+  id: string
+  width: number | null
+}
 
-/** 只有这两栏有固定宽度 */
-export const SIDE_COLUMN_IDS = ['left', 'right'] as const
-export type SideColumnId = (typeof SIDE_COLUMN_IDS)[number]
+/** 栏 id：稳定、无语义（`col-1` …）—— 卡片靠它认自己属于哪一栏，所以别把它当序号读 */
+export type ColumnId = string
 
 /** 抓取卡片那一刻的指针位置与卡片盒子，拖动跟手时用 */
 export interface CardGrab {
@@ -94,10 +103,11 @@ export interface ThemeConfig {
    * 让首页所有卡片之间的留白保持一致。
    */
   cardGap: number
-  /** 左栏宽度（px） */
-  leftWidth: number
-  /** 右栏宽度（px） */
-  rightWidth: number
+  /**
+   * 首页的栏，从左到右。栏数是自己定的（至少一栏、至多 COLUMN_COUNT_MAX），
+   * 卡片用 `column` 引用其中某一栏的 id。
+   */
+  columns: HomeColumn[]
   /** 笔记页左栏（目录树）的宽度（px）：在那一页里左右拖动分隔条调整，与首页栏宽同一套做法 */
   noteTreeWidth: number
   cards: Record<HomeCardId, CardPlacement>
@@ -116,18 +126,18 @@ export interface ThemeConfig {
   updatedAt: number
 }
 
-export function isColumnId(value: unknown): value is ColumnId {
-  return COLUMN_IDS.includes(value as ColumnId)
-}
-
 /**
  * 配置结构的版本号。
  *
  * v1 → v2：卡片清单里移除了「项目列表」（它连筛选标签一起搬去了项目页）。
  * 老文件里那张卡所在的栏会因此空出来，而空栏不渲染 —— 剩下的栏会挤在左边、右边空一大片，
  * 比丢掉一次自定义摆放更难看。所以版本对不上时整份回到默认布局（见 sanitizeTheme）。
+ *
+ * v2 → v3：固定的左中右三栏换成一份可自由拆分的栏清单（`columns`）。
+ * 这一次**不重置**：老的三栏能一字不差地翻过来（见 migrateLegacyLayout），
+ * 用户摆过的位置、调过的栏宽都留着。
  */
-export const THEME_VERSION = 2
+export const THEME_VERSION = 3
 
 /**
  * 卡片间距的可配区间（px）。
@@ -138,13 +148,32 @@ export const CARD_GAP_MAX = 40
 export const CARD_GAP_DEFAULT = 10
 
 /**
- * 侧栏宽度区间。
- * 下限要放得下「系统状态 / 最近使用」里那几行信息，上限只防手改数据把中间栏挤没。
+ * 栏宽区间（只对固定宽度的栏有效）。
+ *
+ * 下限要放得下「系统状态 / 最近使用」里那几行信息。
+ * 上限**只防离谱数据**（手改出一串 8 位数的宽度），不是「最大就这么宽」：宽屏上一个自适应栏
+ * 本来就有一两千像素，用户把缝线拖一下就把它钉成固定宽度 —— 上限卡在 720 的话，
+ * 那一下会把它硬拽回 720（栏里内容跟着重排），看着像点坏了。
  */
 export const COLUMN_WIDTH_MIN = 220
-export const COLUMN_WIDTH_MAX = 720
-export const LEFT_WIDTH_DEFAULT = 290
-export const RIGHT_WIDTH_DEFAULT = 294
+export const COLUMN_WIDTH_MAX = 1600
+/** 认不出宽度时用的兜底宽度（固定宽度的默认值） */
+export const COLUMN_WIDTH_DEFAULT = 260
+
+/** 首页的栏数区间：一栏也要留着（卡片总得有地方放），上限是「再多每栏都放不下东西」 */
+export const COLUMN_COUNT_MIN = 1
+export const COLUMN_COUNT_MAX = 6
+
+/**
+ * 默认三栏的骨架：左栏 290 固定、中栏自适应、右栏 294 固定
+ * —— 与 v2 那套「左 / 中 / 右」的默认宽度一致，升级时看起来什么都没变。
+ * （宽度是写在这里的引用数据，改动时下面 DEFAULT_THEME 的卡片摆放不必跟着动）
+ */
+const DEFAULT_COLUMNS: HomeColumn[] = [
+  { id: 'col-1', width: 290 },
+  { id: 'col-2', width: null },
+  { id: 'col-3', width: 294 }
+]
 
 /**
  * 笔记页左栏（目录树）的宽度区间。
@@ -176,13 +205,15 @@ export const CARD_HEIGHT_MIN: Record<HomeCardId, number> = {
   actions: 76,
   quick: 76,
   commands: 90,
-  work: 88
+  work: 88,
+  // AI 热点是名单卡：一条一行（标题 + 来源），太矮就只剩一行标题了
+  news: 120
 }
 
 /**
- * 默认布局（按当前配置固化）：左栏从上到下是四张竖着排的清单卡（最近使用、快捷启动、
- * 系统状态），最底下是吃剩余高度的命令；中栏整栏给两张吃宽度的图表（活跃度、Token 用量）；
- * 右栏上面是快捷操作、下面「今日完成」吃掉剩余高度。
+ * 默认布局（按当前配置固化）：第一栏（左）从上到下是四张竖着排的清单卡（最近使用、快捷启动、
+ * 系统状态），最底下是吃剩余高度的命令；第二栏（中，自适应）整栏给两张吃宽度的图表
+ * （活跃度、Token 用量）；第三栏（右）上面是快捷操作、下面「今日完成」吃掉剩余高度。
  *
  * 中栏以前整栏是项目列表，它搬去「项目」页之后中栏空了出来（空栏不渲染 = 默认变两栏、中间空一大片），
  * 所以把两张大图挪了进来 —— 它们是这套卡片里最需要宽度的。
@@ -190,21 +221,23 @@ export const CARD_HEIGHT_MIN: Record<HomeCardId, number> = {
 export const DEFAULT_THEME: ThemeConfig = {
   version: THEME_VERSION,
   cardGap: CARD_GAP_DEFAULT,
-  leftWidth: LEFT_WIDTH_DEFAULT,
-  rightWidth: RIGHT_WIDTH_DEFAULT,
+  columns: DEFAULT_COLUMNS,
   noteTreeWidth: NOTE_TREE_WIDTH_DEFAULT,
   cards: {
-    recent: { column: 'left', order: 0, mode: 'fixed', height: 155, hidden: false },
-    quick: { column: 'left', order: 1, mode: 'fixed', height: 98, hidden: false },
+    recent: { column: 'col-1', order: 0, mode: 'fixed', height: 155, hidden: false },
+    quick: { column: 'col-1', order: 1, mode: 'fixed', height: 98, hidden: false },
     /* 系统状态：node / 包管理器 / nvm / nrm 四行 + 贴底的数据目录，
        170 是四行刚好放全的高度（147 是按三行定的，加一行后明细区会被挤进滚动） */
-    system: { column: 'left', order: 2, mode: 'fixed', height: 170, hidden: false },
-    commands: { column: 'left', order: 3, mode: 'flex', height: 90, hidden: false },
-    activity: { column: 'center', order: 0, mode: 'flex', height: 240, hidden: false },
-    token: { column: 'center', order: 1, mode: 'flex', height: 240, hidden: false },
-    actions: { column: 'right', order: 0, mode: 'fixed', height: 224, hidden: false },
+    system: { column: 'col-1', order: 2, mode: 'fixed', height: 170, hidden: false },
+    commands: { column: 'col-1', order: 3, mode: 'flex', height: 90, hidden: false },
+    activity: { column: 'col-2', order: 0, mode: 'flex', height: 240, hidden: false },
+    token: { column: 'col-2', order: 1, mode: 'flex', height: 240, hidden: false },
+    actions: { column: 'col-3', order: 0, mode: 'fixed', height: 224, hidden: false },
     // 今日完成：条目数不确定，让它吃掉右栏剩下的高度、在里面自己滚
-    work: { column: 'right', order: 1, mode: 'flex', height: 200, hidden: false }
+    work: { column: 'col-3', order: 1, mode: 'flex', height: 200, hidden: false },
+    // AI 热点：名单卡，固定高度。240 是按「一屏六条、且不留半截行」定的 ——
+    // 200 时只放得下四条出头，最后一条被切一半，看着像没做完
+    news: { column: 'col-3', order: 2, mode: 'fixed', height: 240, hidden: false }
   },
   // 外观的默认值只有一处口径（数据文件那份设置的默认值，见 appearance.ts）
   appearance: DEFAULT_APPEARANCE,
@@ -223,12 +256,135 @@ export function clampCardGap(value: unknown): number {
   return Math.min(CARD_GAP_MAX, Math.max(CARD_GAP_MIN, Math.round(value)))
 }
 
-/** 收敛侧栏宽度；非法值回退到 fallback */
+/** 收敛栏宽；非法值回退到 fallback */
 export function clampColumnWidth(value: unknown, fallback: number): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
     return Math.min(COLUMN_WIDTH_MAX, Math.max(COLUMN_WIDTH_MIN, Math.round(fallback)))
   }
   return Math.min(COLUMN_WIDTH_MAX, Math.max(COLUMN_WIDTH_MIN, Math.round(value)))
+}
+
+/** 收敛一栏的宽度：null（自适应）原样留着，其余夹到区间；认不出来的按自适应处理 */
+export function sanitizeColumnWidth(value: unknown): number | null {
+  if (value === null || value === undefined) return null
+  return clampColumnWidth(value, COLUMN_WIDTH_DEFAULT)
+}
+
+/**
+ * 收敛整份栏清单：丢掉认不出的（没有 id、id 重复），超出上限的截掉，一栏都不剩时用默认三栏。
+ *
+ * 这里**不管**卡片引用的是不是不存在的栏 —— 那是 sanitizeCardPlacement 的事
+ * （卡片得自己落到一栏里去，而不是让这些栏为它让位）。
+ */
+export function sanitizeColumns(raw: unknown): HomeColumn[] {
+  const input = Array.isArray(raw) ? raw : []
+  const columns: HomeColumn[] = []
+  const seen = new Set<string>()
+
+  for (const item of input) {
+    if (columns.length >= COLUMN_COUNT_MAX) break
+    const column = (item ?? {}) as Partial<HomeColumn>
+    const id = typeof column.id === 'string' ? column.id.trim() : ''
+    if (!id || seen.has(id)) continue
+    seen.add(id)
+    columns.push({ id, width: sanitizeColumnWidth(column.width) })
+  }
+
+  // 一栏都没有（老文件、手改坏了）就摆默认那三栏，别让首页没有落脚的地方
+  return columns.length ? columns : DEFAULT_COLUMNS.map((column) => ({ ...column }))
+}
+
+/** 栏的 id 清单，按当前顺序 */
+export function columnIds(columns: HomeColumn[]): string[] {
+  return columns.map((column) => column.id)
+}
+
+/** 认不认得出这一栏 */
+export function isColumnId(columns: HomeColumn[], value: unknown): value is ColumnId {
+  return typeof value === 'string' && columns.some((column) => column.id === value)
+}
+
+/** 新栏的 id：从 col-1 起找第一个没用过的（收掉一栏再拆，不会和现有的撞上） */
+function nextColumnId(columns: HomeColumn[]): string {
+  const used = new Set(columnIds(columns))
+  for (let n = 1; ; n += 1) {
+    const id = `col-${n}`
+    if (!used.has(id)) return id
+  }
+}
+
+/**
+ * 在某一栏右边拆出一栏：宽度跟着被拆的那一栏 —— 它是自适应的，新栏也自适应（两栏平分剩下的宽度）；
+ * 它是固定宽度，新栏就一样宽。到上限（COLUMN_COUNT_MAX）或认不出 afterId 时原样返回。
+ */
+export function addColumn(columns: HomeColumn[], afterId: ColumnId): HomeColumn[] {
+  const at = columns.findIndex((column) => column.id === afterId)
+  if (at === -1 || columns.length >= COLUMN_COUNT_MAX) return columns
+
+  const next = columns.map((column) => ({ ...column }))
+  next.splice(at + 1, 0, { id: nextColumnId(columns), width: columns[at].width })
+  return next
+}
+
+/**
+ * 拖两栏之间那条缝：左栏 +dx、右栏 -dx，**两栏宽度之和不变** —— 拖的是那条边界，不是某一栏。
+ *
+ * 两栏都夹在宽度区间里：哪一边先撞到上下限，两栏就一起停住（和守得住，也不会一边越界、
+ * 另一边还接着变）。取整落到整数像素，免得缝线上出现半像素的错位。
+ *
+ * 数据极端到「这个和根本放不下两栏的下限」（手改出来的）时原样返回，不动它。
+ */
+export function resizeColumnPair(left: number, right: number, dx: number): [number, number] {
+  const sum = Math.round(left) + Math.round(right)
+  const lo = Math.max(COLUMN_WIDTH_MIN, sum - COLUMN_WIDTH_MAX)
+  const hi = Math.min(COLUMN_WIDTH_MAX, sum - COLUMN_WIDTH_MIN)
+  if (lo > hi) return [Math.round(left), Math.round(right)]
+
+  const next = Math.min(hi, Math.max(lo, Math.round(left + dx)))
+  return [next, sum - next]
+}
+
+/**
+ * 改一栏或几栏的宽度（拖一条缝会同时给左右两栏，所以收的是一份清单）。
+ *
+ * 没列在里面的栏原样留着（只换新对象）；给了的夹到区间。
+ * 拖动过程中每一帧都会调它，所以返回的是新数组，不改传进来的那份。
+ */
+export function setColumnWidths(
+  columns: HomeColumn[],
+  widths: Record<ColumnId, number>
+): HomeColumn[] {
+  return columns.map((column) =>
+    column.id in widths
+      ? {
+          ...column,
+          width: clampColumnWidth(widths[column.id], column.width ?? COLUMN_WIDTH_DEFAULT)
+        }
+      : { ...column }
+  )
+}
+
+/**
+ * 收掉一栏：栏里的卡片并到相邻那一栏（左边有就并到左边，没有就并到右边，保持原来的先后顺序）。
+ * 只剩一栏时返回 null —— 首页总得留一栏给卡片落脚。
+ */
+export function removeColumn(
+  cards: Record<HomeCardId, CardPlacement>,
+  columns: HomeColumn[],
+  id: ColumnId
+): { columns: HomeColumn[]; cards: Record<HomeCardId, CardPlacement> } | null {
+  const at = columns.findIndex((column) => column.id === id)
+  if (at === -1 || columns.length <= COLUMN_COUNT_MIN) return null
+
+  const target = columns[at - 1] ?? columns[at + 1]
+  if (!target) return null
+
+  let next = cards
+  for (const cardId of cardIdsInColumn(cards, id)) {
+    next = moveCard(next, cardId, target.id, cardIdsInColumn(next, target.id).length)
+  }
+
+  return { columns: columns.filter((column) => column.id !== id), cards: next }
 }
 
 /** 收敛笔记页左栏宽度；非法值回到默认宽度 */
@@ -249,13 +405,21 @@ function finiteOr(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback
 }
 
-/** 收敛单块卡片：栏认不出来回默认，高度夹到区间，order 先原样留着（后面统一重排） */
-export function sanitizeCardPlacement(value: unknown, id: HomeCardId): CardPlacement {
+/**
+ * 收敛单块卡片：栏认不出来先看默认布局里的那一栏还在不在，不在就落到第一栏；
+ * 高度夹到区间，order 先原样留着（后面统一重排）。
+ */
+export function sanitizeCardPlacement(
+  value: unknown,
+  id: HomeCardId,
+  columns: HomeColumn[]
+): CardPlacement {
   const fallback = DEFAULT_THEME.cards[id]
   const input = (value ?? {}) as Partial<CardPlacement>
+  const wanted = isColumnId(columns, input.column) ? input.column : fallback.column
 
   return {
-    column: isColumnId(input.column) ? input.column : fallback.column,
+    column: isColumnId(columns, wanted) ? wanted : columns[0].id,
     order: Math.round(finiteOr(input.order, fallback.order)),
     mode: sanitizeCardMode(input.mode, fallback.mode),
     height: clampCardHeight(input.height, id),
@@ -271,7 +435,9 @@ export function normalizeOrder(
   const next = {} as Record<HomeCardId, CardPlacement>
   for (const id of HOME_CARD_IDS) next[id] = { ...cards[id] }
 
-  for (const column of COLUMN_IDS) {
+  // 要收拾的就是卡片实际落到的那些栏，栏清单本身不必参与
+  const columns = [...new Set(HOME_CARD_IDS.map((id) => next[id].column))]
+  for (const column of columns) {
     HOME_CARD_IDS.filter((id) => next[id].column === column)
       .sort(
         (a, b) =>
@@ -285,11 +451,54 @@ export function normalizeOrder(
   return next
 }
 
+/** 老版那三栏的 id：v2 的卡片就是这么认栏的（见 migrateLegacyLayout） */
+const LEGACY_COLUMN_IDS: Record<string, string> = {
+  left: 'col-1',
+  center: 'col-2',
+  right: 'col-3'
+}
+
+/** 老文件里的栏宽：是数字就用它，认不出来的回默认（区间由 sanitizeColumns 再收一次） */
+function legacyWidth(value: unknown, fallback: number | null): number | null {
+  return fallback === null ? null : finiteOr(value, fallback)
+}
+
+/**
+ * v2 及更早的 theme.json：那时首页固定是左中右三栏，左右两栏各存一个像素宽度、中间那栏自适应，
+ * 卡片用 'left' / 'center' / 'right' 认自己的栏。
+ *
+ * 这里把它翻成通用的栏清单（三栏一字不差地搬过来），所以 v2 → v3 不会把用户的摆放清掉 ——
+ * 与 v1 → v2 那种「卡片清单变了，只能整份回默认」不是一回事。
+ *
+ * 返回的是**还没收敛**的原始数据（宽度可能是任何东西），交给下面同一条收敛路径。
+ */
+function migrateLegacyLayout(input: Record<string, unknown>): Record<string, unknown> {
+  const rawCards = (input.cards ?? {}) as Record<string, { column?: unknown } | undefined>
+  const cards: Record<string, unknown> = {}
+  for (const [id, placement] of Object.entries(rawCards)) {
+    cards[id] = placement
+      ? { ...placement, column: LEGACY_COLUMN_IDS[String(placement.column)] ?? placement.column }
+      : placement
+  }
+
+  return {
+    ...input,
+    version: THEME_VERSION,
+    columns: [
+      { id: 'col-1', width: legacyWidth(input.leftWidth, DEFAULT_COLUMNS[0].width) },
+      { id: 'col-2', width: null },
+      { id: 'col-3', width: legacyWidth(input.rightWidth, DEFAULT_COLUMNS[2].width) }
+    ],
+    cards
+  }
+}
+
 /**
  * 整份收敛：缺哪块补哪块，认不出来的值一律回到默认布局，最后把 order 排连续。
  *
- * 版本对不上时整份回到默认布局（见 THEME_VERSION）：卡片清单变过，老布局按原样套用会缺一块。
- * 走的是同一条收敛路径（每个字段都新造对象），所以不会改到 DEFAULT_THEME 那份常量。
+ * 版本对不上时先走一遍迁移（见 migrateLegacyLayout）：老的三栏翻成栏清单，用户的摆放留着；
+ * 翻不出东西来的（空对象、随手写的 JSON）就等同于回到默认布局 —— 缺的都由下面逐项补齐。
+ * 两条路走的是同一条收敛路径（每个字段都新造对象），所以不会改到 DEFAULT_THEME 那份常量。
  *
  * **往里加一块卡片不必动版本号**：老文件里缺的那块会按默认布局补上（见 sanitizeCardPlacement），
  * 用户自己摆过的位置一并留着。反过来，把某块从清单里拿掉才要动版本 —— 老布局会在它原来那一栏
@@ -299,17 +508,17 @@ export function normalizeOrder(
  */
 export function sanitizeTheme(raw: unknown): ThemeConfig {
   const input = (raw ?? {}) as Partial<ThemeConfig>
-  const base = input.version === THEME_VERSION ? input : DEFAULT_THEME
+  const base = input.version === THEME_VERSION ? input : migrateLegacyLayout(input)
+  const columns = sanitizeColumns(base.columns)
   const rawCards = (base.cards ?? {}) as Partial<Record<HomeCardId, CardPlacement>>
 
   const cards = {} as Record<HomeCardId, CardPlacement>
-  for (const id of HOME_CARD_IDS) cards[id] = sanitizeCardPlacement(rawCards[id], id)
+  for (const id of HOME_CARD_IDS) cards[id] = sanitizeCardPlacement(rawCards[id], id, columns)
 
   return {
     version: THEME_VERSION,
     cardGap: clampCardGap(base.cardGap),
-    leftWidth: clampColumnWidth(base.leftWidth, LEFT_WIDTH_DEFAULT),
-    rightWidth: clampColumnWidth(base.rightWidth, RIGHT_WIDTH_DEFAULT),
+    columns,
     // 后加的字段：老主题文件里没有，补默认宽度（与 appearance 同理，不能因此去动上面的版本判定）
     noteTreeWidth: clampNoteTreeWidth(base.noteTreeWidth),
     cards: normalizeOrder(keepOneVisible(cards)),
@@ -353,9 +562,8 @@ function layoutSignature(layout: ThemeConfig): string {
   return [
     layout.version,
     layout.cardGap,
-    layout.leftWidth,
-    layout.rightWidth,
     layout.noteTreeWidth,
+    layout.columns.map((column) => `${column.id}:${column.width ?? 'flex'}`).join(','),
     HOME_CARD_IDS.map((id) => {
       const card = layout.cards[id]
       return `${id}:${card.column}/${card.order}/${card.mode}/${card.height}/${card.hidden}`

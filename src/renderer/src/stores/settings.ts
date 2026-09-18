@@ -1,5 +1,5 @@
 /**
- * 设置与外观：明暗、主题色、工作区背景、卡片浓度，以及首页三栏布局。
+ * 设置与外观：明暗、主题色、工作区背景、卡片浓度，以及首页的分栏布局。
  *
  * 这些都在 `theme.json` + 数据文件的 settings 里（见 shared/appearance.ts 的白名单），
  * 适配层已经把两份合成一份完整的 `AppSettings`，所以这一层只认一个 `settings`。
@@ -11,16 +11,20 @@
 import { computed, ref, watch } from 'vue'
 import { defineStore } from 'pinia'
 import {
+  COLUMN_WIDTH_DEFAULT,
   DEFAULT_THEME,
+  addColumn as addColumnTo,
   clampCardGap,
   clampCardHeight,
   clampColumnWidth,
   clampNoteTreeWidth,
   moveCard as placeCard,
+  removeColumn as removeColumnFrom,
   sanitizeTheme,
+  setColumnWidths as placeColumnWidths,
   type CardPlacement,
+  type ColumnId,
   type HomeCardId,
-  type SideColumnId,
   type ThemeConfig
 } from '@shared/theme'
 import { clampBackgroundOpacity, sanitizeVeilColor } from '@shared/workspace-background'
@@ -392,7 +396,7 @@ export const useSettingsStore = defineStore('settings', () => {
   // ---------- 首页布局 ----------
 
   /**
-   * 首页三栏布局（theme.json：外观 + 布局都在这个文件里）。
+   * 首页的分栏布局（theme.json：外观 + 布局都在这个文件里）。
    *
    * 与终端高度同一套做法：拖动栏宽 / 卡片高度时只改这个 ref 让布局跟手，
    * 松手才整份落盘，免得每动一格就写一次文件。
@@ -469,20 +473,48 @@ export const useSettingsStore = defineStore('settings', () => {
     await saveThemeConfig({ noteTreeWidth: themeConfig.value.noteTreeWidth })
   }
 
-  /** 拖动分栏边界改栏宽：过程中只改本地 */
-  function setColumnWidth(side: SideColumnId, width: number): void {
-    const fallback = side === 'left' ? themeConfig.value.leftWidth : themeConfig.value.rightWidth
-    const next = clampColumnWidth(width, fallback)
-    if (side === 'left') themeConfig.value.leftWidth = next
-    else themeConfig.value.rightWidth = next
+  /** 拖动分栏边界：一次给出那一条缝上要改的栏与新宽度（两栏一起改），过程中只改本地 */
+  function setColumnWidths(widths: Record<ColumnId, number>): void {
+    themeConfig.value.columns = placeColumnWidths(themeConfig.value.columns, widths)
   }
 
-  /** 松手落盘栏宽 */
+  /** 松手落盘栏：整份送出去（拆 / 收 / 改宽都走它，免得只更新一栏） */
   async function commitColumns(): Promise<void> {
-    await saveThemeConfig({
-      leftWidth: themeConfig.value.leftWidth,
-      rightWidth: themeConfig.value.rightWidth
-    })
+    await saveThemeConfig({ columns: themeConfig.value.columns.map((column) => ({ ...column })) })
+  }
+
+  /**
+   * 切换某一栏的宽度模式：自适应 ↔ 固定。
+   *
+   * 固定时取它此刻的显示宽度（由画布量了传进来）：切换前后那一栏的宽度看起来不动，
+   * 用户只是把「当前这个宽度」钉住了 —— 与卡片那颗「固定 / 自适应」同一个做法。
+   */
+  async function toggleColumnMode(id: ColumnId, currentWidth: number): Promise<void> {
+    const column = themeConfig.value.columns.find((item) => item.id === id)
+    if (!column) return
+
+    column.width =
+      column.width === null ? clampColumnWidth(currentWidth, COLUMN_WIDTH_DEFAULT) : null
+    await commitColumns()
+  }
+
+  /** 在某一栏右边拆出一栏（宽度跟着它）；到栏数上限时不动 */
+  async function addColumn(afterId: ColumnId): Promise<void> {
+    const next = addColumnTo(themeConfig.value.columns, afterId)
+    if (next === themeConfig.value.columns) return
+
+    themeConfig.value.columns = next
+    await commitColumns()
+  }
+
+  /** 收掉一栏：栏里的卡片并到相邻那一栏；只剩一栏时不动 */
+  async function removeColumn(id: ColumnId): Promise<void> {
+    const removed = removeColumnFrom(themeConfig.value.cards, themeConfig.value.columns, id)
+    if (!removed) return
+
+    themeConfig.value.columns = removed.columns
+    themeConfig.value.cards = removed.cards
+    await saveThemeConfig({ columns: removed.columns, cards: removed.cards })
   }
 
   /** 卡片间距是设置项，改完立即落盘（栏间、栏内卡片、项目卡网格同时生效） */
@@ -492,14 +524,13 @@ export const useSettingsStore = defineStore('settings', () => {
     await saveThemeConfig({ cardGap: next })
   }
 
-  /** 恢复默认布局；栏宽 / 栏内位置 / 高度 / 间距 / 关掉的卡片全部回到默认 */
+  /** 恢复默认布局；栏数 / 栏宽 / 栏内位置 / 高度 / 间距 / 关掉的卡片全部回到默认 */
   async function resetLayout(): Promise<void> {
     const fallback = sanitizeTheme(DEFAULT_THEME)
     themeConfig.value = fallback
     await saveThemeConfig({
       cardGap: fallback.cardGap,
-      leftWidth: fallback.leftWidth,
-      rightWidth: fallback.rightWidth,
+      columns: fallback.columns,
       cards: fallback.cards
     })
   }
@@ -643,8 +674,11 @@ export const useSettingsStore = defineStore('settings', () => {
     toggleCardMode,
     setCardVisible,
     commitCards,
-    setColumnWidth,
+    setColumnWidths,
     commitColumns,
+    toggleColumnMode,
+    addColumn,
+    removeColumn,
     setNoteTreeWidth,
     commitNoteTreeWidth,
     setCardGap,
