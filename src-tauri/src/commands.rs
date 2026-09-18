@@ -438,6 +438,12 @@ pub fn open_external(url: String) -> Result<(), String> {
     system::open_external(&url)
 }
 
+/// 在 VS Code 里打开目录。要等 ShellExecute 返回（它得先把 VS Code 叫起来），所以走 async 上下文。
+#[tauri::command(async)]
+pub fn open_in_vscode(path: String) -> Result<(), String> {
+    system::open_in_vscode(&path)
+}
+
 /// 探测 `<bin> --version`：可用返回版本串，不可用返回 null。
 /// 包管理器检测与 Node 版本探测都走它。
 ///

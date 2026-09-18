@@ -162,9 +162,12 @@ export const CARD_HEIGHT_MAX = 4000
 /**
  * 每块卡片的高度下限。
  *
- * 定得比较小：卡片内部该滚的都滚（最近使用 / 快捷操作 / 快捷启动 / 明细行），
+ * 定得比较小：卡片内部该滚的都滚（快捷操作 / 快捷启动 / 明细行），
  * 拖到很矮时大不了只剩标题加一行，不会把卡片压成一条没有意义的细边。
  * 真正的物理下限是「面板标题 + 上下内边距」那一圈，约 64px。
+ *
+ * 「最近使用」是例外：里面排的是**整张项目卡**（155px 起），下限得够放下一整张，
+ * 否则一拖矮就永远只看得到半张卡 —— 而这个面板的全部内容就是那些卡。
  */
 export const CARD_HEIGHT_MIN: Record<HomeCardId, number> = {
   // 比别的卡片高 20：图下方那行统计（连续 / 最长 / 活跃天数 / 单日峰值）也要占一行，
@@ -172,7 +175,8 @@ export const CARD_HEIGHT_MIN: Record<HomeCardId, number> = {
   activity: 130,
   token: 160,
   system: 88,
-  recent: 88,
+  // 面板头（标题 + 上下内边距）约 52px + 一张项目卡 155px，留几像素余量
+  recent: 220,
   actions: 76,
   quick: 76,
   commands: 90,
@@ -181,7 +185,8 @@ export const CARD_HEIGHT_MIN: Record<HomeCardId, number> = {
 
 /**
  * 默认布局（按当前配置固化）：左栏从上到下是四张竖着排的清单卡（最近使用、快捷启动、
- * 系统状态），最底下是吃剩余高度的命令；中栏整栏给两张吃宽度的图表（活跃度、Token 用量）；
+ * 系统状态），最底下是吃剩余高度的命令 —— 「最近使用」那张里排的是整张项目卡，
+ * 所以它是这几张里最高的；中栏整栏给两张吃宽度的图表（活跃度、Token 用量）；
  * 右栏上面是快捷操作、下面「今日完成」吃掉剩余高度。
  *
  * 中栏以前整栏是项目列表，它搬去「项目」页之后中栏空了出来（空栏不渲染 = 默认变两栏、中间空一大片），
@@ -194,7 +199,9 @@ export const DEFAULT_THEME: ThemeConfig = {
   rightWidth: RIGHT_WIDTH_DEFAULT,
   noteTreeWidth: NOTE_TREE_WIDTH_DEFAULT,
   cards: {
-    recent: { column: 'left', order: 0, mode: 'fixed', height: 155, hidden: false },
+    /* 最近使用：一张项目卡 155px + 面板头 52px，再露出下一张的边 —— 「下面还有」这件事
+       得看得见，否则用户不会想到去滚它（这一列的卡是按最近使用时间往下排的） */
+    recent: { column: 'left', order: 0, mode: 'fixed', height: 240, hidden: false },
     quick: { column: 'left', order: 1, mode: 'fixed', height: 98, hidden: false },
     /* 系统状态：node / 包管理器 / nvm / nrm 四行 + 贴底的数据目录，
        170 是四行刚好放全的高度（147 是按三行定的，加一行后明细区会被挤进滚动） */

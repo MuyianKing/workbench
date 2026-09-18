@@ -1,57 +1,21 @@
 <script setup lang="ts">
 /**
- * 首页「最近使用」卡片：按 lastUsedAt 排出的最近几个项目。
+ * 首页「最近使用」卡片：按 lastUsedAt 排出的最近几个项目，一个项目就是项目页上那张项目卡
+ * （启动 / 停止 / 打包 / 检测 / 安装 / 「⋯」菜单都在这儿，不用先跳去项目页）。
  *
- * 一行小字说清这个项目现在什么情况：跑着就显示端口，没跑就显示上次用到什么时候。
+ * 排布跟着面板宽度走：放得下一列就一列、放得下两列就两列（网格下限与项目页同一个 302px，
+ * 所以每张卡都不会被压得跟项目页长得不一样）；再窄下去卡片自己会换行（见 ProjectCard）。
+ *
  * 项目一个都没有时给一句空状态，免得卡片里是一片空白。
  */
 import { computed } from 'vue'
-import { formatRelative } from '@/format'
-import { STATUS_META, statusLabel } from '@/status'
 import { useProjectsStore } from '@/stores/projects'
-import { useTerminalStore } from '@/stores/terminal'
-import type { Project, ProjectStatus } from '@/types'
+import ProjectCard from '@/components/ProjectCard.vue'
 
 const store = useProjectsStore()
-const terminal = useTerminalStore()
 
 /** 卡片高度有限，列表截断到一屏左右 */
 const RECENT_LIMIT = 5
-
-function statusOf(project: Project): ProjectStatus {
-  return terminal.runtimeOf(project.id).status
-}
-
-/** 文案与卡片同一口径：「正常退出」只有打包才叫「打包成功」（见 status.ts 的 statusLabel） */
-function labelOf(project: Project): string {
-  const rt = terminal.runtimeOf(project.id)
-  return statusLabel(rt.status, rt.kind)
-}
-
-function toneOf(project: Project): string {
-  return store.isPathValid(project.id) ? STATUS_META[statusOf(project)].tone : 'fail'
-}
-
-function isRunning(project: Project): boolean {
-  return statusOf(project) === 'running'
-}
-
-function canStart(project: Project): boolean {
-  return statusOf(project) === 'idle' && store.isPathValid(project.id) && !!project.scripts.serve
-}
-
-/** 启动按钮为什么是灰的，鼠标停上去能看到原因 */
-function startHint(project: Project): string {
-  if (!store.isPathValid(project.id)) return '项目目录不存在，先重新定位'
-  if (!project.scripts.serve) return '未配置启动命令'
-  return '启动开发服务'
-}
-
-function metaOf(project: Project): string {
-  const port = terminal.runtimeOf(project.id).port
-  // 最近使用的时间要跟着秒针走，所以传 store.clock（它每秒跳一次）
-  return port ? `:${port}` : formatRelative(project.lastUsedAt, store.clock)
-}
 
 const recent = computed(() =>
   store.projects
@@ -68,156 +32,32 @@ const recent = computed(() =>
       <span class="panel__count mono">{{ recent.length }}</span>
     </header>
 
-    <ul v-if="recent.length" class="rows panel__scroll">
-      <li v-for="project in recent" :key="project.id">
-        <!-- 整行可点开详情；项目名是个真按钮，键盘 Tab 也能到 -->
-        <div class="row" @click="store.openDrawer(project.id)">
-          <i class="dot" :class="`tone-${toneOf(project)}`" aria-hidden="true" />
-          <button class="row__name truncate" type="button" :title="project.path">
-            {{ project.name }}
-          </button>
-          <span class="row__meta mono truncate">{{ metaOf(project) }}</span>
-
-          <button
-            v-if="isRunning(project)"
-            class="row__act"
-            type="button"
-            @click.stop="store.stop(project.id)"
-          >
-            停止
-          </button>
-          <button
-            v-else-if="statusOf(project) === 'idle'"
-            class="row__act"
-            type="button"
-            :title="startHint(project)"
-            :disabled="!canStart(project)"
-            @click.stop="store.start(project.id)"
-          >
-            启动
-          </button>
-          <span v-else class="row__act is-static" :class="`tone-${toneOf(project)}`">
-            {{ labelOf(project) }}
-          </span>
-        </div>
-      </li>
-    </ul>
+    <div v-if="recent.length" class="recent panel__scroll">
+      <ProjectCard v-for="project in recent" :key="project.id" :project="project" />
+    </div>
 
     <p v-else class="panel__empty">还没有项目<br />添加一个项目后，最近用过的会排在这里。</p>
   </article>
 </template>
 
 <style scoped>
-
-.rows {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+/**
+ * 排得下几张就几列：auto-fill 按面板实际宽度算列数，卡片宽度跟着摊开（拖栏宽、把这张卡
+ * 拖到中栏，都会重新算）。下限取项目页网格那个 302px —— 它同时也是项目卡的设计宽度，
+ * 低于它卡片内部就要开始换行了；min(302px, 100%) 是为了栏宽被拖到 302 以下时不横向溢出。
+ */
+.recent {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(302px, 100%), 1fr));
+  /* 与项目页网格、首页各卡片同一个间距配置 */
+  gap: var(--card-gap, 10px);
+  align-content: start;
+  /* 卡片各自按内容定高：同排里某张换行了，别让旁边那张被拉高、底下空出一截 */
+  align-items: start;
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
-}
-
-.row {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  min-width: 0;
-  /* 只留上下：左右缩进会让整行和面板标题、右上角计数对不齐 */
-  padding: 5px 0;
-  border-radius: var(--r-sm);
-  cursor: pointer;
-}
-
-.row:hover {
-  background: var(--bg-subtle);
-}
-
-.dot {
-  flex-shrink: 0;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--st-idle);
-}
-
-.dot.tone-run {
-  background: var(--st-run);
-}
-
-.dot.tone-ok {
-  background: var(--st-ok);
-}
-
-.dot.tone-fail {
-  background: var(--st-fail);
-}
-
-.row__name {
-  flex: 1 1 auto;
-  min-width: 0;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  text-align: left;
-  font-family: inherit;
-  font-size: var(--fs-body);
-  font-weight: 500;
-  color: var(--ink);
-  cursor: pointer;
-}
-
-.row__meta {
-  flex-shrink: 1;
-  max-width: 46%;
-  font-size: var(--fs-micro);
-  color: var(--ink-3);
-}
-
-.row__act {
-  /* 按钮和状态文字共用这个盒子：自己居中，别指望 <button> 的默认行为 */
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  height: 22px;
-  padding: 0 8px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-sm);
-  background: var(--bg-surface);
-  color: var(--ink-2);
-  font-size: var(--fs-micro);
-  cursor: pointer;
-  transition: border-color 0.15s ease, color 0.15s ease;
-}
-
-.row__act:hover:not(:disabled) {
-  border-color: var(--ink);
-  color: var(--ink);
-}
-
-.row__act:disabled {
-  cursor: default;
-  opacity: 0.45;
-}
-
-/* 不能点的时候它就是一句状态文字，按状态上色（和卡片的状态灯一个语义） */
-.row__act.is-static {
-  padding: 0;
-  border-color: transparent;
-  background: transparent;
-  color: var(--ink-3);
-}
-
-.row__act.is-static.tone-run {
-  color: var(--st-run);
-}
-
-.row__act.is-static.tone-ok {
-  color: var(--st-ok);
-}
-
-.row__act.is-static.tone-fail {
-  color: var(--st-fail);
+  /* 给卡片悬停时那 1px 的上浮留出位置：滚动容器会在自己的 padding 盒上把外溢裁掉 */
+  padding-top: 1px;
 }
 </style>

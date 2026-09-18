@@ -47,6 +47,8 @@
   子进程一律带 `GIT_TERMINAL_PROMPT=0` 与 `-c core.quotepath=false`（前者：没有终端可问，挂着只会等超时；后者：git 默认把非 ASCII
   路径转义成八进制，中文文件名在冲突提示里会变成乱码，而它是个每台机器都可能不同的全局项）；超时与失败收敛成给用户看的提示。
   别处不新增这类外部依赖。
+- VS Code 是唯一**可选**的外部程序，只服务项目卡的「在 VS Code 中打开」：走它自己注册的 `vscode://` 协议（`system.rs` 的
+  `open_in_vscode`），不去找 `Code.exe` 的安装路径；没装只影响那一个菜单项，不要照着再引别的编辑器。
 - 测试用 Vitest（渲染层与 `src/shared`）+ `cargo test`（写在同文件的 `#[cfg(test)] mod tests`）。**TypeScript 与 vue-tsc 的版本不要动**：
   升到 TS 7 会让 `npm run typecheck` 直接不可用。
 - 仅 Windows，不做 macOS / Linux 适配。

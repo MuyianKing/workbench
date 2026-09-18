@@ -1,13 +1,16 @@
-//! 系统能力：端口检测、结束进程树、在资源管理器中定位、用系统程序打开链接。
+//! 系统能力：端口检测、结束进程树、在资源管理器中定位、用系统程序打开链接、在 VS Code 里打开目录。
 //!
 //! 端口到进程的翻译走 Win32 的 TCP 表（`GetExtendedTcpTable`），不再 shell 出去解析
 //! `netstat` / `tasklist` 的文本输出 —— 见 `find_pid_by_port` 上方的说明。
 
+use percent_encoding::{utf8_percent_encode, AsciiSet, CONTROLS};
 use serde_json::{json, Value};
 use std::net::{SocketAddr, TcpStream};
 use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
+
+use crate::encoding::wide;
 
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
@@ -157,6 +160,86 @@ pub fn open_path(path: &str) -> Result<(), String> {
     tauri_plugin_opener::open_path(path, None::<&str>).map_err(|err| err.to_string())
 }
 
+/// VS Code 的 URL 里保持原样的 ASCII：RFC 3986 的 unreserved（字母数字与 `-._~`）之外，
+/// 再留两个分隔符 —— `/` 是路径分隔符，`:` 只可能跟在盘符后面（Windows 文件名里禁用冒号）。
+/// 其余一律转义：路径里的空格、`#`、`?`、`%` 不转义就会被对面按 URL 语义拆开，解析成另一个路径。
+const URI_PATH: &AsciiSet = &CONTROLS
+    .add(b' ')
+    .add(b'!')
+    .add(b'"')
+    .add(b'#')
+    .add(b'$')
+    .add(b'%')
+    .add(b'&')
+    .add(b'\'')
+    .add(b'(')
+    .add(b')')
+    .add(b'*')
+    .add(b'+')
+    .add(b',')
+    .add(b';')
+    .add(b'<')
+    .add(b'=')
+    .add(b'>')
+    .add(b'?')
+    .add(b'@')
+    .add(b'[')
+    .add(b'\\')
+    .add(b']')
+    .add(b'^')
+    .add(b'`')
+    .add(b'{')
+    .add(b'|')
+    .add(b'}');
+
+/// 目录路径 → VS Code 的 URL（文件与目录的写法只差结尾那个 `/`，见 VS Code 的 URL 文档）。
+///
+/// 反斜杠要先换成 `/`，否则整个路径会被当成一串转义；结尾补 `/` 是「这是个目录」的写法，
+/// 只留盘符（`F:\`）时补完就是 `vscode://file/F:/`，不会被削成空路径。
+fn vscode_uri(path: &str) -> String {
+    let normalized = path.replace('\\', "/");
+    let body = utf8_percent_encode(normalized.trim_end_matches('/'), URI_PATH);
+    format!("vscode://file/{body}/")
+}
+
+/// 在 VS Code 里打开一个目录。
+///
+/// 认的是 VS Code 自己注册的 `vscode://` 协议，而不是去找 `Code.exe` 或 PATH 里的 `code`：
+/// 它装到哪个盘（本机就装在 D 盘）、PATH 里有没有那个 `code`，都由用户装的时候定，
+/// 只有协议处理器是「这台机器现在用哪个 VS Code」的可靠答案。
+/// 没装、或协议没有关联程序时 ShellExecute 直接给错误码（31 = 没有关联），这里翻成一句人话 ——
+/// 静默无反应是这类动作最难排查的形态。
+pub fn open_in_vscode(path: &str) -> Result<(), String> {
+    use windows_sys::Win32::UI::Shell::ShellExecuteW;
+    use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+
+    if !Path::new(path).is_dir() {
+        return Err(format!("目录不存在或已被移动：{path}"));
+    }
+
+    let operation = wide("open");
+    let target = wide(&vscode_uri(path));
+    // 返回值是个 HINSTANCE 形状的整数：大于 32 才算成功，其余是错误码（文档给的 0/2/3/5/…）
+    let outcome = unsafe {
+        ShellExecuteW(
+            std::ptr::null_mut(),
+            operation.as_ptr(),
+            target.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            SW_SHOWNORMAL,
+        )
+    } as isize;
+
+    if outcome > 32 {
+        Ok(())
+    } else if outcome == 31 {
+        Err("没能打开 VS Code：这台机器上没有它的 vscode:// 关联程序，请确认已经安装".to_string())
+    } else {
+        Err(format!("打开 VS Code 失败（ShellExecute 返回 {outcome}）"))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -198,5 +281,28 @@ mod tests {
     fn unknown_pid_has_no_name() {
         // 4 在 Windows 上不会是一个用户进程
         assert!(process_name_of(4).is_none());
+    }
+
+    /// 目录 → VS Code 的 URL：反斜杠换成正斜杠、盘符留着、结尾补一个表示目录的 `/`。
+    #[test]
+    fn vscode_uri_keeps_the_drive_and_marks_a_directory() {
+        assert_eq!(
+            vscode_uri(r"F:\projects\workbench"),
+            "vscode://file/F:/projects/workbench/"
+        );
+        // 已经是正斜杠的路径不该被改坏，结尾那个 `/` 也只补一个
+        assert_eq!(vscode_uri("F:/projects/blog/"), "vscode://file/F:/projects/blog/");
+        // 只有盘符时不能被 trim 削成空路径
+        assert_eq!(vscode_uri(r"F:\"), "vscode://file/F:/");
+    }
+
+    /// 路径里的空格与非 ASCII 按 UTF-8 百分号转义，`#` / `?` 这类会把 URL 拆开的字符也要转义
+    #[test]
+    fn vscode_uri_escapes_what_would_break_the_url() {
+        assert_eq!(
+            vscode_uri(r"F:\项目\我的 项目"),
+            "vscode://file/F:/%E9%A1%B9%E7%9B%AE/%E6%88%91%E7%9A%84%20%E9%A1%B9%E7%9B%AE/"
+        );
+        assert_eq!(vscode_uri("F:/a#b?c"), "vscode://file/F:/a%23b%3Fc/");
     }
 }

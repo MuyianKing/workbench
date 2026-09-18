@@ -1007,6 +1007,16 @@ export interface WorkbenchApi {
   /** 停止一条命令；已在应用外跑着的那种只能按端口结束，由渲染层先确认 */
   stopCommand: (id: string) => Promise<Result<null>>
   reveal: (targetPath: string) => Promise<Result<null>>
+  /**
+   * 在 VS Code 里打开目录。
+   *
+   * 走 VS Code 自己注册的 `vscode://` 协议（Rust 侧直接 ShellExecute），不去猜 `Code.exe`
+   * 装在哪 —— 装到哪个盘、PATH 里有没有 `code` 都由安装时定，只有协议处理器才是
+   * 「这台机器现在用哪个 VS Code」的可靠答案；路径按 URL 规则转义（空格、中文、`#`），
+   * 结尾那个 `/` 表示这是个目录。没装（协议没有关联程序）时按 ShellExecute 的错误码
+   * 给出提示，而不是点了没反应。
+   */
+  openInVSCode: (path: string) => Promise<Result<null>>
   /** 用系统默认浏览器打开 http(s) 链接 */
   openExternal: (url: string) => Promise<Result<null>>
   checkPackageManagers: () => Promise<PackageManagerStatus>

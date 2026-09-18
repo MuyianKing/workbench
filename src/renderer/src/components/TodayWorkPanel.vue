@@ -149,7 +149,7 @@ function openWorkView(): void {
 
 /**
  * 一行：项目标签 + 正文。左右不留内边距 —— 标签的左沿与面板标题对齐，
- * 行距靠上下 padding 给（与「最近使用」那张卡片同一套）。
+ * 行距因此只能靠上下 padding 给。
  */
 .row {
   display: flex;

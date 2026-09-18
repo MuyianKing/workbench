@@ -338,6 +338,7 @@ fn main() {
             commands::kill_port_process,
             commands::reveal,
             commands::open_external,
+            commands::open_in_vscode,
             commands::probe_version,
             commands::run_command,
             commands::spawn_session,

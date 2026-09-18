@@ -450,6 +450,9 @@ function createApi(): WorkbenchApi {
       void invoke('reveal', { path: targetPath })
       return Promise.resolve(ok(null))
     },
+    // 这条**要**等结果：没装 VS Code 时 ShellExecute 会失败，得把原因说出来
+    openInVSCode: (path: string) =>
+      guard(invoke<null>('open_in_vscode', { path }), '打开 VS Code 失败'),
     openExternal: (url: string) =>
       guard(invoke<null>('open_external', { url }), '打开链接失败'),
 

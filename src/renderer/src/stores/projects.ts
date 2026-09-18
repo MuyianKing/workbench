@@ -711,6 +711,11 @@ export const useProjectsStore = defineStore('projects', () => {
     if (!result.ok) notifyError(result.error ?? '打开目录失败')
   }
 
+  async function openInVSCode(targetPath: string): Promise<void> {
+    const result = await window.workbench.openInVSCode(targetPath)
+    if (!result.ok) notifyError(result.error ?? '打开 VS Code 失败')
+  }
+
   // ---------- 路径有效性 ----------
 
   /** 未检查过的项目按有效处理，避免首帧误禁用 */
@@ -899,6 +904,7 @@ export const useProjectsStore = defineStore('projects', () => {
     detect,
     runCustom,
     reveal,
+    openInVSCode,
     isPathValid,
     refreshPaths,
     relocate,
