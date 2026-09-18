@@ -7,6 +7,13 @@ import { TERMINAL_BUTTON_TOP_DEFAULT } from './terminal-dock'
 import { CARD_OPACITY_DEFAULT } from './card-opacity'
 import { BACKGROUND_OPACITY_DEFAULT } from './workspace-background'
 import { builtinReference } from './wallpaper'
+import { AI_NEWS_DEFAULT_SOURCES } from './ai-news'
+import type {
+  AiNewsArticle,
+  AiNewsRefreshResult,
+  AiNewsSourcesPayload,
+  AiNewsView
+} from './ai-news'
 import type { AppearanceSettingKey } from './appearance'
 import type { SyncDeviceInfo } from './sync-config'
 import type { ActivityCounts } from './activity'
@@ -38,6 +45,16 @@ import {
 
 /** 活跃度计数、首页布局、同步的其它设备也走这里导出，渲染层统一从 @/types 取类型 */
 export type { ActivityCounts, ThemeConfig, SyncDeviceInfo }
+export type {
+  AiNewsArticle,
+  AiNewsCache,
+  AiNewsItem,
+  AiNewsRefreshResult,
+  AiNewsSourceInfo,
+  AiNewsSourceStatus,
+  AiNewsSourcesPayload,
+  AiNewsView
+} from './ai-news'
 export type { TokenUsageResult } from './token-usage'
 export type { ProjectColor } from './project-color'
 export type { WorkLogEntry, WorkLogInput, WorkLogPatch } from './work-log'
@@ -421,6 +438,16 @@ export interface AppSettings {
    * 指的是完全不同的东西。与 `noteDir` 一样只在本机成立，不参与同步。
    */
   noteTreeExpanded: string[]
+  /**
+   * 首页「AI 热点」卡片启用了哪些源（源 id 清单，清单本身在 Rust 的 `SOURCES` 里）。
+   *
+   * 存「启用了哪些」而不是「关掉了哪些」：这是一个**联网出口**，将来加一个新源时，
+   * 老配置里没有它就不该悄悄开始发请求 —— 新源对所有人默认是关的，要用户自己去勾。
+   * 认不出的 id 由适配层跳过（源清单是 Rust 的事，这里的字符串不参与校验）。
+   *
+   * 空数组是合法的：用户可以不看热点，卡片会显示「去设置里勾一个源」的引导。
+   */
+  aiNewsSources: string[]
   /**
    * 同步时是否把本机的外观配置一起写进分片（默认开启）。
    *
@@ -937,6 +964,34 @@ export interface WorkbenchApi {
   updateWorkLog: (id: string, patch: WorkLogPatch) => Promise<Result<WorkLogEntry>>
   removeWorkLog: (id: string) => Promise<Result<null>>
   /**
+   * AI 热点：读本地缓存（`ai-news.json`）的合并视图。**不联网** —— 只回上次拉回来的那份。
+   * 卡片首屏先走它：有内容就直接摆出来，再交给 refreshAiNews 后台更新。
+   */
+  getAiNews: () => Promise<Result<AiNewsView>>
+  /**
+   * AI 热点：按缓存策略刷新到期的源（见 shared/ai-news.ts）。**可能出网** ——
+   * 只拉「已启用、配好了凭据、且到了各自的 nextFetchAt」的源；都没到期就原样回缓存。
+   * 每个源各自退避，一个源失败不影响别的源，失败说明逐条放在 notes 里。
+   */
+  refreshAiNews: () => Promise<Result<AiNewsRefreshResult>>
+  /**
+   * AI 热点站内阅读：抓一条热点的正文页并提取段落。**会出网，且只在用户点开那条时才调**。
+   *
+   * 只允许抓热点源自己的域名（Rust 侧按后缀白名单核过，`ai_news.rs` 的 `article_hosts`）；
+   * 页面脚本不会被执行 —— 提出来的是纯文本段落。提不出正文时返回失败，
+   * 界面降级成「标题 + 导语 + 在浏览器中打开」。
+   */
+  loadAiNewsArticle: (url: string) => Promise<Result<AiNewsArticle>>
+  /**
+   * AI 热点：内置源清单（id / 名字 / 会访问的地址 / 是否需要 token / 建议刷新间隔）
+   * 加「那个需要 token 的源配没配」。设置界面靠它列出源来，界面因此能如实显示访问地址。
+   */
+  aiNewsSources: () => Promise<Result<AiNewsSourcesPayload>>
+  /** 保存机器之心 RSS token（设置界面填的那一次；空值被 Rust 侧拒绝） */
+  setAiNewsToken: (token: string) => Promise<Result<null>>
+  /** 清掉机器之心 RSS token（设置界面的「清除」） */
+  clearAiNewsToken: () => Promise<Result<null>>
+  /**
    * 笔记：**用户自己挑的一个文件夹**里的目录树（文件夹 + markdown 文件）。
    *
    * 笔记不再有数据文件：它就是这个目录里的 `.md` 文件（见 shared/note.ts 的文件头），
@@ -1299,6 +1354,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   workRange: WORK_RANGE_DEFAULT,
   workSort: WORK_SORT_DEFAULT,
   noteTreeExpanded: [],
+  // 首页「AI 热点」默认开这个免费中文源（id 与 Rust 的 SOURCES 对齐，
+  // 那边有一条单测盯着它必须存在且 needs_token 为 false）
+  aiNewsSources: [...AI_NEWS_DEFAULT_SOURCES],
   syncAppearance: true,
   useAccountForSync: true
 }

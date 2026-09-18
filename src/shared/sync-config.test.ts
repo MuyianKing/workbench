@@ -6,12 +6,20 @@
  * 连设备 id 都没有的，一律不能采用（用 null 表达，界面上那颗按钮也就点不动）。
  */
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_THEME, THEME_VERSION, sanitizeTheme } from './theme'
+import { COLUMN_WIDTH_MAX, DEFAULT_THEME, THEME_VERSION, sanitizeTheme } from './theme'
 import { captureThemeFile, sanitizeThemeFile } from './sync-config'
 
 describe('打包一份要推上去的配置', () => {
   it('就是本机 theme.json 的整份内容加一层设备信封', () => {
-    const theme = sanitizeTheme({ ...DEFAULT_THEME, cardGap: 14, leftWidth: 320 })
+    const theme = sanitizeTheme({
+      ...DEFAULT_THEME,
+      cardGap: 14,
+      columns: [
+        { id: 'col-1', width: 320 },
+        { id: 'col-2', width: null },
+        { id: 'col-3', width: 294 }
+      ]
+    })
     const file = captureThemeFile('dev-1', ' 办公室 ', theme)
 
     expect(file.device).toBe('dev-1')
@@ -50,13 +58,16 @@ describe('读一份别人推上来的配置', () => {
       name: '书房',
       theme: {
         version: THEME_VERSION,
-        leftWidth: 99999,
+        columns: [
+          { id: 'col-1', width: 99999 },
+          { id: 'col-2', width: null }
+        ],
         updatedAt: 99,
         appearance: { accentColor: 'red', cardOpacity: 999, topBarStyle: 'rainbow' }
       }
     })
 
-    expect(file?.theme?.leftWidth).toBeLessThanOrEqual(720)
+    expect(file?.theme?.columns[0].width).toBeLessThanOrEqual(COLUMN_WIDTH_MAX)
     expect(file?.theme?.appearance.accentColor).toBe('')
     expect(file?.theme?.appearance.cardOpacity).toBe(100)
     expect(file?.theme?.appearance.topBarStyle).toBe(DEFAULT_THEME.appearance.topBarStyle)

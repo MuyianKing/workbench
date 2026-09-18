@@ -24,7 +24,8 @@ import {
 import { builtinIdOf } from '@shared/wallpaper'
 import { CARD_OPACITY_MAX, CARD_OPACITY_MIN } from '@shared/card-opacity'
 import { formatRelative } from '@/format'
-import type { AppSettings, SyncDeviceInfo, ThemeSource, TopBarStyle } from '@/types'
+import { notifyError, notifySuccess } from '@/notify'
+import type { AiNewsSourceInfo, AppSettings, SyncDeviceInfo, ThemeSource, TopBarStyle } from '@/types'
 import type { ThemeOrigin } from '@/theme-transition'
 
 const props = defineProps<{ modelValue: boolean }>()
@@ -267,6 +268,72 @@ function commitImageRepo(): void {
   save({ noteImageRepo: imageRepoDraft.value })
 }
 
+// ---------- AI 热点（热点源开关 + 机器之心 token） ----------
+
+/**
+ * 热点源清单与 token 状态。
+ *
+ * 清单**从 Rust 侧取**（那边是唯一真源，地址也在那儿）：界面因此能如实列出「会访问哪个地址」，
+ * 加源时只改 Rust 一处。token 只报「配没配」，本身不回渲染层。
+ */
+const aiNewsSourceList = ref<AiNewsSourceInfo[]>([])
+const aiNewsTokenReady = ref(false)
+const aiNewsTokenDraft = ref('')
+const aiNewsTokenBusy = ref(false)
+
+/** 已启用的源：读的是设置里那份 id 清单（store 已收敛过） */
+function aiNewsSourceEnabled(id: string): boolean {
+  return settings.settings.aiNewsSources.includes(id)
+}
+
+async function loadAiNewsSources(): Promise<void> {
+  const result = await window.workbench.aiNewsSources()
+  if (result.ok && result.data) {
+    aiNewsSourceList.value = result.data.sources
+    aiNewsTokenReady.value = result.data.tokenConfigured
+  }
+}
+
+/** 勾 / 取消一个源：改动即落盘（设置里的清单是「启用了哪些」） */
+function toggleAiNewsSource(id: string, value: boolean | string | number): void {
+  const current = settings.settings.aiNewsSources
+  const next = value === true ? [...new Set([...current, id])] : current.filter((item) => item !== id)
+  save({ aiNewsSources: next })
+}
+
+async function commitAiNewsToken(): Promise<void> {
+  const token = aiNewsTokenDraft.value.trim()
+  if (!token) return
+  aiNewsTokenBusy.value = true
+  try {
+    const result = await window.workbench.setAiNewsToken(token)
+    if (result.ok) {
+      aiNewsTokenDraft.value = ''
+      aiNewsTokenReady.value = true
+      notifySuccess('已保存机器之心 RSS token')
+    } else {
+      notifyError(result.error ?? '保存 token 失败')
+    }
+  } finally {
+    aiNewsTokenBusy.value = false
+  }
+}
+
+async function clearAiNewsToken(): Promise<void> {
+  aiNewsTokenBusy.value = true
+  try {
+    const result = await window.workbench.clearAiNewsToken()
+    if (result.ok) {
+      aiNewsTokenReady.value = false
+      notifySuccess('已清除机器之心 RSS token')
+    } else {
+      notifyError(result.error ?? '清除 token 失败')
+    }
+  } finally {
+    aiNewsTokenBusy.value = false
+  }
+}
+
 /**
  * 主题切换的扩散起点：记按下位置，切换动画就从那颗按钮长出来。
  * 用 pointerdown 是因为它一定早于 radio 的 change；键盘切换没有按下位置，交给 store 从中心扩散。
@@ -413,8 +480,11 @@ async function loadAppVersion(): Promise<void> {
  */
 watch([visible, activeTab], ([open, tab]) => {
   if (!open) return
-  if (tab === 'general') void settings.loadSyncDevices()
-  else if (tab === 'about' && appVersion.value === APP_VERSION_PENDING) void loadAppVersion()
+  if (tab === 'general') {
+    void settings.loadSyncDevices()
+    // AI 热点源清单 + token 状态（清单在 Rust 侧，token 只报配没配）
+    void loadAiNewsSources()
+  } else if (tab === 'about' && appVersion.value === APP_VERSION_PENDING) void loadAppVersion()
 })
 
 /** 打开数据目录：与项目卡那颗「打开目录」同一条通道，失败时把原因说出来 */
@@ -450,6 +520,11 @@ const networkBounds: Array<{ title: string; detail: string }> = [
   {
     title: '命令执行',
     detail: 'npm install、dev server 这些是你自己那条命令在上网，不属于应用的行为。'
+  },
+  {
+    title: 'AI 热点',
+    detail:
+      '只有在设置里勾了热点源、且到了那个源自己的刷新间隔，才会 GET 它；地址是内置白名单（量子位、机器之心，只放中文源），只读不传任何数据。'
   }
 ]
 </script>
@@ -918,6 +993,74 @@ const networkBounds: Array<{ title: string; detail: string }> = [
             </div>
           </div>
 
+          <!--
+            AI 热点：首页「AI 热点」卡片的数据源。清单来自 Rust 侧的源白名单（那边是唯一真源），
+            这里如实列出每个源**会访问哪个地址** —— 联网边界才谈得上「用户可以自己核对」。
+            每个源各自按自己的间隔刷新、各自退避，一个源失败不影响别的源。
+          -->
+          <div class="block">
+            <h3 class="block__title">AI 热点</h3>
+
+            <p class="row__hint ai-news__lead">
+              首页「AI 热点」卡片从下面这些源取内容，只放中文源。每个源有各自的刷新间隔，
+              被限流或失败时会自己往后推，不影响其他源。
+            </p>
+
+            <div v-for="source in aiNewsSourceList" :key="source.id" class="row ai-news__row">
+              <div class="row__text">
+                <span class="row__label">{{ source.name }}</span>
+                <span class="row__hint">{{ source.note }}</span>
+                <span class="row__hint mono truncate ai-news__url" :title="source.url">
+                  {{ source.url }}
+                </span>
+              </div>
+              <el-switch
+                :model-value="aiNewsSourceEnabled(source.id)"
+                size="small"
+                @update:model-value="(value: unknown) => toggleAiNewsSource(source.id, Boolean(value))"
+              />
+            </div>
+
+            <!-- token 只有需要它的源才谈得上：没启用机器之心时不必拿这一格烦人 -->
+            <div v-if="aiNewsSourceList.some((source) => source.needsToken)" class="row row--stack">
+              <div class="row__text">
+                <span class="row__label">机器之心 RSS token</span>
+                <span class="row__hint">
+                  只有「机器之心」这个源需要。填一次保存到本机（Windows 凭据管理器），
+                  不落数据文件、也不进仓库。
+                </span>
+              </div>
+
+              <div class="ai-token">
+                <el-input
+                  v-model="aiNewsTokenDraft"
+                  class="ai-token__input"
+                  size="small"
+                  type="password"
+                  show-password
+                  spellcheck="false"
+                  placeholder="sk-…"
+                  @keyup.enter="commitAiNewsToken"
+                />
+                <el-button size="small" :loading="aiNewsTokenBusy" @click="commitAiNewsToken">
+                  保存
+                </el-button>
+                <el-button
+                  v-if="aiNewsTokenReady"
+                  size="small"
+                  :disabled="aiNewsTokenBusy"
+                  @click="clearAiNewsToken"
+                >
+                  清除
+                </el-button>
+              </div>
+
+              <span class="row__hint">
+                {{ aiNewsTokenReady ? '✓ 已配置' : '未配置 —— 勾了机器之心也不会去请求它' }}
+              </span>
+            </div>
+          </div>
+
 
           <!--
             账号与同步同属一块：同步的凭据来自账号，所以没登录时下面几行整个不出现 ——
@@ -1080,7 +1223,7 @@ const networkBounds: Array<{ title: string; detail: string }> = [
             <h3 class="block__title">联网</h3>
 
             <p class="about__lead">
-              默认不联网、不上报任何数据。对外发请求的只有下面五处，且都由你自己开出来：
+              默认不联网、不上报任何数据。对外发请求的只有下面六处，且都由你自己开出来：
             </p>
 
             <ul class="bounds">
@@ -1091,9 +1234,9 @@ const networkBounds: Array<{ title: string; detail: string }> = [
             </ul>
 
             <p class="about__lead">
-              五处都不经过任何第三方服务：三处 git 同步发往你自己填的那三个仓库，登录走两家平台官方的
-              OAuth 接口，没有自建服务端。笔记页带文档级的 no-referrer，打开的笔记不会把自己的来源地址
-              送给图片服务器。
+              六处都不经过任何第三方服务：三处 git 同步发往你自己填的那三个仓库，账号登录走两家平台官方的
+              OAuth 接口，AI 热点只 GET 上面那几个公开源（地址在设置里逐个列着），且没有自建服务端。
+              笔记页带文档级的 no-referrer，打开的笔记不会把自己的来源地址送给图片服务器。
             </p>
           </div>
         </section>
@@ -1607,6 +1750,44 @@ const networkBounds: Array<{ title: string; detail: string }> = [
   flex-shrink: 0;
   font-size: var(--fs-micro);
   color: var(--ink-3);
+}
+
+/* ---------- AI 热点（热点源开关 + token） ---------- */
+/* 一段说明文字，独立成行：它管的是下面整张清单，不是某一行的小字 */
+.ai-news__lead {
+  margin: 0 0 var(--sp-2);
+}
+
+/* 一个源一行：左边是名字 / 说明 / 会访问的地址，右边是开关 */
+.ai-news__row {
+  align-items: flex-start;
+  gap: var(--sp-2);
+}
+
+.ai-news__row .row__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* 地址用等宽字、单行截断（将来若加带一长串参数的源，这里也不会把行撑开），全文在 title 里 */
+.ai-news__url {
+  display: block;
+  max-width: 100%;
+  color: var(--ink-3);
+}
+
+/* 一行：输入框 + 保存 / 清除两颗按钮。输入框吃剩余宽度，按钮各自收窄 */
+.ai-token {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+}
+
+.ai-token__input {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 /* ---------- 关于 ---------- */

@@ -39,7 +39,7 @@
 
 - 落盘全在 Rust 侧（`store.rs`：300ms 防抖 + 临时文件 rename + 退出前同步落盘）。数据文件分工：`workbench-data.json`（项目 /
   快捷启动 / 命令 + 与本机绑定的设置，含笔记文件夹 `noteDir`）、`theme.json`（外观 + 首页布局）、`token-usage.json`、
-  `work-log.json`（只在本机）；目录指针 `data-location.json` 与设备标识 `device.json` 固定在 `%APPDATA%/Workbench/`。
+  `work-log.json` 与 `ai-news.json`（都只在本机）；目录指针 `data-location.json` 与设备标识 `device.json` 固定在 `%APPDATA%/Workbench/`。
 - **数据目录必须与 Electron 版一致（`%APPDATA%\Workbench`）**：不要图省事改用 Tauri 的 `app_config_dir()`（它按 identifier 生成
   `%APPDATA%\com.muyian.workbench`，换位置用户就等于丢了项目列表）；路径一律经 `paths.rs` 的 `data_dir()` / `data_file()` 现取，
   不要缓存写死。
@@ -49,7 +49,7 @@
   - **外观**（明暗、主题色、顶部样式、卡片不透明度、终端高度、程序名、背景、导航菜单、首页布局、笔记树宽度）
     住 `theme.json`，判据是它在 [appearance.ts](../../src/shared/appearance.ts) 的 `APPEARANCE_SETTING_KEYS` 里
     —— **进这张白名单就等于「会被整份同步到另一台机器」**，所以只放「这台机器该长成什么样」的项；
-  - **行为习惯**（`activeView`、`projectSort`、`workRange` / `workSort`、`noteTreeExpanded`）与
+  - **行为习惯**（`activeView`、`projectSort`、`workRange` / `workSort`、`noteTreeExpanded`、`aiNewsSources`）与
     本机路径 / 凭据（数据目录、快捷键、开机自启、三个同步仓库地址、`noteDir`）住 `workbench-data.json`。
     判据是「换台机器还成不成立」：「我上一眼在看什么」「我的笔记在哪个盘」换台机器就没了，
     同步过去只会把那边正看的东西顶掉。

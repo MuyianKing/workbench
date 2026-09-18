@@ -62,3 +62,26 @@ export function formatRelative(timestamp: number | undefined, now: number): stri
   if (diff < 30 * day) return `${Math.floor(diff / day)} 天前`
   return `${Math.floor(diff / (30 * day))} 个月前`
 }
+
+/**
+ * 列表里一条内容的发布时间：**今天给 `HH:mm`，更早给 `MM-DD`**。
+ *
+ * 与 `formatRelative` 的分工：那个要说「多久以前」（跟着时钟走，得每秒/每分钟重算），
+ * 而这个说的是「什么时候发的」，一天之内不会变 —— 窄卡片里右侧那一列很短，
+ * 省一次时钟依赖、也省几个像素给标题。
+ */
+export function formatListTime(timestamp: number, now: number): string {
+  if (!timestamp) return ''
+
+  const date = new Date(timestamp)
+  const base = new Date(now)
+  const pad = (n: number): string => String(n).padStart(2, '0')
+  const sameDay =
+    date.getFullYear() === base.getFullYear() &&
+    date.getMonth() === base.getMonth() &&
+    date.getDate() === base.getDate()
+
+  return sameDay
+    ? `${pad(date.getHours())}:${pad(date.getMinutes())}`
+    : `${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+}

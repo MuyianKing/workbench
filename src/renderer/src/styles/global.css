@@ -944,6 +944,37 @@ body.is-resizing-notes-tree * {
 }
 
 /**
+ * 站内阅读弹窗（components/NewsArticleDialog.vue 上的 class）。
+ *
+ * 头与脚是 EP 自己生成的元素，scoped 样式够不着，所以形状写在这里。三点考虑：
+ * 1. **标题可能很长**（新闻标题二三十个字），要允许折行并把行高给足 —— EP 默认是单行；
+ * 2. 头与正文之间画一条分隔线：标题与正文是两件事，长文尤其需要这条分界；
+ * 3. 弹窗**不设固定高度**：正文长短差别很大（十来段的短讯 vs 上百段的长文），
+ *    让它按内容长、到视口上限后由正文自己滚（`.el-dialog` 的 max-height 与 flex 已在上面定好）。
+ */
+.el-dialog.article-dialog .el-dialog__header {
+  padding: var(--sp-5) var(--sp-5) var(--sp-3);
+  margin-right: 24px;
+  border-bottom: 1px solid var(--border);
+}
+
+.el-dialog.article-dialog .el-dialog__title {
+  display: block;
+  font-size: var(--fs-title);
+  font-weight: 600;
+  line-height: 1.5;
+  color: var(--ink);
+}
+
+.el-dialog.article-dialog .el-dialog__body {
+  padding: var(--sp-4) var(--sp-5) 0;
+}
+
+.el-dialog.article-dialog .el-dialog__footer {
+  padding: var(--sp-4) var(--sp-5) var(--sp-5);
+}
+
+/**
  * 确认框同理：内容多了滚动，别把按钮挤出可视区。
  *
  * 但改成 flex 就顺手拆了 Element Plus 的居中：它是靠 .el-overlay-message-box 的

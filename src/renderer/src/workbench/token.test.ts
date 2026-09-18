@@ -11,6 +11,7 @@
  * 自动同步在后台跑，断言推送内容前要先 `flushBackgroundSync()`。
  */
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { THEME_VERSION } from '@shared/theme'
 
 /** 用例里的同步仓库地址（桩数据按它分仓库存放分片） */
 const REPO = 'git@example.com:me/sync.git'
@@ -887,11 +888,17 @@ describe('外观配置单独同步', () => {
       expect(themeIn(1)?.updatedAt).toBe(0)
 
       // 拖一下布局（改栏宽）：真的变了，时间戳记的是**变化**那一刻，不是推送那一刻
-      state.updateThemeConfig({ leftWidth: 320 })
+      state.updateThemeConfig({
+        columns: [
+          { id: 'col-1', width: 320 },
+          { id: 'col-2', width: null },
+          { id: 'col-3', width: 294 }
+        ]
+      })
       const layoutChangedAt = Date.now()
       vi.setSystemTime(new Date(2026, 8, 14, 12, 0, 0))
       await token.syncTokenUsage(REPO)
-      expect(themeIn(2)?.leftWidth).toBe(320)
+      expect((themeIn(2)?.columns as Array<{ width: unknown }>)[0].width).toBe(320)
       expect(themeIn(2)?.updatedAt).toBe(layoutChangedAt)
 
       // 改外观（主题色）同理：它和布局在同一个文件里，一样刷新时间戳
@@ -918,11 +925,16 @@ describe('外观配置单独同步', () => {
     ]
     // 只有「办公室」推了配置（另一台关掉了外观同步），而且它那份配置比分片新
     remoteConfigs[REPO] = [
-      { device: 'dev-local', name: '本机', theme: { version: 2, updatedAt: 1 } },
+      { device: 'dev-local', name: '本机', theme: { version: THEME_VERSION, updatedAt: 1 } },
       {
         device: 'dev-older',
         name: '办公室',
-        theme: { version: 2, cards: {}, appearance: { accentColor: '#ef4444' }, updatedAt: 300 }
+        theme: {
+          version: THEME_VERSION,
+          cards: {},
+          appearance: { accentColor: '#ef4444' },
+          updatedAt: 300
+        }
       }
     ]
 
