@@ -25,7 +25,7 @@ import { builtinIdOf } from '@shared/wallpaper'
 import { CARD_OPACITY_MAX, CARD_OPACITY_MIN } from '@shared/card-opacity'
 import { formatRelative } from '@/format'
 import { notifyError, notifySuccess } from '@/notify'
-import type { AiNewsSourceInfo, AppSettings, SyncDeviceInfo, ThemeSource, TopBarStyle } from '@/types'
+import type { AppSettings, SyncDeviceInfo, ThemeSource, TopBarStyle } from '@/types'
 import type { ThemeOrigin } from '@/theme-transition'
 
 const props = defineProps<{ modelValue: boolean }>()
@@ -44,11 +44,6 @@ const visible = computed({
 const accountVisible = ref(false)
 const account = computed(() => auth.status?.account ?? null)
 
-/** el-switch 的 model-value 是联合类型（开了 string/number 取值时），这里只要布尔 */
-function setUseAccountForSync(value: boolean | string | number): void {
-  save({ useAccountForSync: value === true })
-}
-
 /**
  * 左侧菜单四屏：外观（看起来什么样：主题、背景、顶部样式与首页画布的布局）、
  * 菜单（左侧导航栏上留哪几页）、通用（程序、快捷键、启动、数据目录、账号与同步）、
@@ -65,6 +60,9 @@ const tabs: Array<{ value: SettingsTab; label: string }> = [
 ]
 
 const activeTab = ref<SettingsTab>('appearance')
+
+/** 除首页以外的页：首页在「菜单」那一屏里要连它那九块卡片一起画（父子关系） */
+const otherViews = VIEW_IDS.filter((id) => id !== 'home')
 
 const themes: Array<{ value: ThemeSource; label: string }> = [
   { value: 'system', label: '跟随系统' },
@@ -180,11 +178,6 @@ function commitSyncRepo(): void {
   save({ tokenSyncRepo: syncRepoDraft.value })
 }
 
-/** el-switch 的 model-value 可能是联合类型，这里只要布尔 */
-function setSyncAppearance(value: boolean | string | number): void {
-  save({ syncAppearance: value === true })
-}
-
 /**
  * 应用另一台机器的配置。
  *
@@ -205,11 +198,17 @@ async function applyAppearance(device: SyncDeviceInfo): Promise<void> {
   await settings.applySyncAppearance(device.id)
 }
 
-/** 手动同步一次，再把设备列表重新读一遍（列表是上一次同步取回来的样子） */
-async function syncNow(): Promise<void> {
+/**
+ * 手动同步一次**外观配置**，再把设备列表重新读一遍（列表是上一次同步取回来的样子）。
+ *
+ * 只推 / 拉 `config/` 那一份，用量分片一概不碰 —— 那是 Token 面板那颗同步按钮的事，
+ * 它有自己的自动节流（见 workbench/token.ts 的 runSync）。两处能分开，靠的就是
+ * `token_sync_config` 与 `token_sync_publish` 是两条通道。
+ */
+async function syncAppearanceNow(): Promise<void> {
   syncing.value = true
   try {
-    await settings.syncNow()
+    await settings.syncAppearanceNow()
   } finally {
     syncing.value = false
     await settings.loadSyncDevices()
@@ -221,9 +220,10 @@ const syncing = ref(false)
 
 /** 设备列表里的相对时间：打开设置时算一次就够，不必为它挂定时器 */
 function deviceUpdatedText(device: SyncDeviceInfo): string {
+  const prefix = device.self ? '本机 · ' : ''
   return device.theme
-    ? `更新于 ${formatRelative(device.updatedAt, Date.now())}`
-    : '没有配置'
+    ? `${prefix}更新于 ${formatRelative(device.updatedAt, Date.now())}`
+    : `${prefix}没有配置`
 }
 
 function save(patch: Partial<AppSettings>): void {
@@ -251,6 +251,27 @@ function commitNoteRepo(): void {
   save({ noteSyncRepo: noteRepoDraft.value })
 }
 
+// ---------- 技能目录 ----------
+
+/*
+ * 技能（skill）在笔记仓库里的子目录：与仓库地址一样先落草稿、失焦或回车时才提交。
+ * 它在外观白名单里（theme.json），会跟着配置同步到另一台机器 —— 仓库结构约定要两边一致。
+ */
+const skillDirDraft = ref('')
+
+watch(
+  () => settings.settings.skillSyncDir,
+  (value) => {
+    skillDirDraft.value = value
+  },
+  { immediate: true }
+)
+
+function commitSkillDir(): void {
+  if (skillDirDraft.value === settings.settings.skillSyncDir) return
+  save({ skillSyncDir: skillDirDraft.value })
+}
+
 // ---------- 笔记图片 ----------
 
 const imageRepoDraft = ref('')
@@ -266,72 +287,6 @@ watch(
 function commitImageRepo(): void {
   if (imageRepoDraft.value === settings.settings.noteImageRepo) return
   save({ noteImageRepo: imageRepoDraft.value })
-}
-
-// ---------- AI 热点（热点源开关 + 机器之心 token） ----------
-
-/**
- * 热点源清单与 token 状态。
- *
- * 清单**从 Rust 侧取**（那边是唯一真源，地址也在那儿）：界面因此能如实列出「会访问哪个地址」，
- * 加源时只改 Rust 一处。token 只报「配没配」，本身不回渲染层。
- */
-const aiNewsSourceList = ref<AiNewsSourceInfo[]>([])
-const aiNewsTokenReady = ref(false)
-const aiNewsTokenDraft = ref('')
-const aiNewsTokenBusy = ref(false)
-
-/** 已启用的源：读的是设置里那份 id 清单（store 已收敛过） */
-function aiNewsSourceEnabled(id: string): boolean {
-  return settings.settings.aiNewsSources.includes(id)
-}
-
-async function loadAiNewsSources(): Promise<void> {
-  const result = await window.workbench.aiNewsSources()
-  if (result.ok && result.data) {
-    aiNewsSourceList.value = result.data.sources
-    aiNewsTokenReady.value = result.data.tokenConfigured
-  }
-}
-
-/** 勾 / 取消一个源：改动即落盘（设置里的清单是「启用了哪些」） */
-function toggleAiNewsSource(id: string, value: boolean | string | number): void {
-  const current = settings.settings.aiNewsSources
-  const next = value === true ? [...new Set([...current, id])] : current.filter((item) => item !== id)
-  save({ aiNewsSources: next })
-}
-
-async function commitAiNewsToken(): Promise<void> {
-  const token = aiNewsTokenDraft.value.trim()
-  if (!token) return
-  aiNewsTokenBusy.value = true
-  try {
-    const result = await window.workbench.setAiNewsToken(token)
-    if (result.ok) {
-      aiNewsTokenDraft.value = ''
-      aiNewsTokenReady.value = true
-      notifySuccess('已保存机器之心 RSS token')
-    } else {
-      notifyError(result.error ?? '保存 token 失败')
-    }
-  } finally {
-    aiNewsTokenBusy.value = false
-  }
-}
-
-async function clearAiNewsToken(): Promise<void> {
-  aiNewsTokenBusy.value = true
-  try {
-    const result = await window.workbench.clearAiNewsToken()
-    if (result.ok) {
-      aiNewsTokenReady.value = false
-      notifySuccess('已清除机器之心 RSS token')
-    } else {
-      notifyError(result.error ?? '清除 token 失败')
-    }
-  } finally {
-    aiNewsTokenBusy.value = false
-  }
 }
 
 /**
@@ -472,7 +427,7 @@ async function loadAppVersion(): Promise<void> {
 }
 
 /**
- * 通用那一屏里的「从别的机器取外观」要一份设备列表。
+ * 外观那一屏里的「从别的机器取外观」要一份设备列表。
  * 读的是上一次同步取回的仓库快照（不联网），所以每次切到这一屏都重读一遍最省心 ——
  * 用户很可能刚从首页点过同步按钮再进来。
  *
@@ -480,16 +435,14 @@ async function loadAppVersion(): Promise<void> {
  */
 watch([visible, activeTab], ([open, tab]) => {
   if (!open) return
-  if (tab === 'general') {
+  if (tab === 'appearance') {
     void settings.loadSyncDevices()
-    // AI 热点源清单 + token 状态（清单在 Rust 侧，token 只报配没配）
-    void loadAiNewsSources()
   } else if (tab === 'about' && appVersion.value === APP_VERSION_PENDING) void loadAppVersion()
 })
 
 /** 打开数据目录：与项目卡那颗「打开目录」同一条通道，失败时把原因说出来 */
 async function openDataDir(): Promise<void> {
-  const dir = environment.dataLocation?.dir
+  const dir = environment.dataDir
   if (!dir) return
 
   const result = await window.workbench.reveal(dir)
@@ -524,7 +477,7 @@ const networkBounds: Array<{ title: string; detail: string }> = [
   {
     title: 'AI 热点',
     detail:
-      '只有在设置里勾了热点源、且到了那个源自己的刷新间隔，才会 GET 它；地址是内置白名单（量子位、机器之心，只放中文源），只读不传任何数据。'
+      '首页画着「AI 热点」卡片时才会去 GET 它，且要到了那个源自己的刷新间隔（地址是内置白名单，只放中文源），只读不传任何数据。'
   }
 ]
 </script>
@@ -564,6 +517,48 @@ const networkBounds: Array<{ title: string; detail: string }> = [
       <div class="settings__body">
         <!-- 外观：主题、背景、顶部样式，以及首页画布的布局 -->
         <section v-show="activeTab === 'appearance'" class="pane">
+          <!--
+            从别的机器取外观：列表来自上一次同步取回的仓库快照（纯本地读，不联网），
+            「应用」是唯一的采用入口 —— 本机这份配置仍然留在仓库里，随时可以再取回来。
+            放在这一屏的最上面：它就是「这一屏该长什么样」的另一个来源。
+            「同步一次」只推本机这一份配置、并把别的机器的新配置读回来，不碰用量分片
+            （用量归 Token 面板那颗同步按钮，那边还有一小时一轮的自动同步）。
+          -->
+          <div v-if="settings.settings.tokenSyncRepo" class="block">
+            <!-- 同步是「整块一起动」，所以按钮跟着标题走：放到底部会与列表最后一项混在一起 -->
+            <div class="block__head">
+              <h3 class="block__title">从别的机器取外观</h3>
+              <el-button size="small" :loading="syncing" @click="syncAppearanceNow">
+                同步一次
+              </el-button>
+            </div>
+
+            <div class="row row--stack">
+              <div class="row__text">
+                <span class="row__hint">
+                  「应用」会把本机的外观与首页布局整份换成对方那一套，本机这份仍留在仓库里。
+                </span>
+              </div>
+
+              <div class="devices">
+                <!-- 本机也列出来（标「本机」）：它那份照常可「应用」，相当于取回上次推送时的外观 -->
+                <div v-for="device in settings.syncDevices" :key="device.id" class="device">
+                  <span class="device__name truncate" :title="device.name">
+                    <span v-if="device.self" class="device__self">本机</span>{{ device.name }}
+                  </span>
+                  <span class="device__time">{{ deviceUpdatedText(device) }}</span>
+                  <el-button size="small" :disabled="!device.theme" @click="applyAppearance(device)">
+                    应用
+                  </el-button>
+                </div>
+
+                <span v-if="!settings.syncDevices.length" class="row__hint">
+                  还没有别的机器：在另一台机器上填同一个仓库并同步一次。
+                </span>
+              </div>
+            </div>
+          </div>
+
           <!-- 这一组就是导航项本身，不再另起小标题 -->
           <div class="block">
             <div class="row">
@@ -768,11 +763,6 @@ const networkBounds: Array<{ title: string; detail: string }> = [
                 <span class="slider__value mono">{{ settings.cardOpacity }}%</span>
               </div>
             </div>
-          </div>
-
-          <!-- 布局编辑的入口只在首页顶栏（那颗「编辑布局」），这里不再放第二个 -->
-          <div class="block">
-            <h3 class="block__title">首页布局</h3>
 
             <div class="row">
               <div class="row__text">
@@ -790,17 +780,30 @@ const networkBounds: Array<{ title: string; detail: string }> = [
                 @change="changeCardGap"
               />
             </div>
+          </div>
+        </section>
 
-            <div class="row">
-              <div class="row__text">
-                <span class="row__label">首页上显示哪些卡片</span>
-                <span class="row__hint">
-                  关掉的卡片不画在首页上；它在行里的位置与那一行的高度都留着，再打开时回到原处。
-                </span>
-              </div>
+        <!-- 菜单：应用自己的入口留哪几个（与「这一页长什么样」无关，所以单独一屏） -->
+        <section v-show="activeTab === 'menu'" class="pane">
+          <div class="block">
+            <h3 class="block__title">左侧导航栏</h3>
+
+            <!--
+              首页那一页自带九块卡片（卡片只属于首页），所以它的开关下面挂一层子项：
+              父子关系一眼看得出来 —— 上面那一页关掉，卡片跟着一起从首页上消失。
+              两块清单都至少留一项：最后一个开关是禁用的（页面留首页，卡片留第一块）。
+            -->
+            <div class="pick">
+              <span class="pick__name">首页</span>
+              <el-switch
+                :model-value="!hiddenViews.includes('home')"
+                size="small"
+                :disabled="isOnlyVisible(VIEW_IDS, hiddenViews, 'home')"
+                @update:model-value="(value: unknown) => setViewVisible('home', Boolean(value))"
+              />
             </div>
 
-            <div class="picks">
+            <div class="picks picks--nested">
               <div v-for="id in HOME_CARD_IDS" :key="id" class="pick">
                 <span class="pick__name">{{ HOME_CARD_LABELS[id] }}</span>
                 <el-switch
@@ -811,26 +814,9 @@ const networkBounds: Array<{ title: string; detail: string }> = [
                 />
               </div>
             </div>
-          </div>
-        </section>
-
-        <!-- 菜单：应用自己的入口留哪几个（与「这一页长什么样」无关，所以单独一屏） -->
-        <section v-show="activeTab === 'menu'" class="pane">
-          <div class="block">
-            <h3 class="block__title">左侧导航栏</h3>
-
-            <div class="row">
-              <div class="row__text">
-                <span class="row__label">显示哪些页</span>
-                <span class="row__hint">
-                  关掉的页不出现在左侧导航栏上；至少留一个（全关掉时首页会留下）。
-                  当前页被关掉会先退到第一页还开着的。
-                </span>
-              </div>
-            </div>
 
             <div class="picks">
-              <div v-for="id in VIEW_IDS" :key="id" class="pick">
+              <div v-for="id in otherViews" :key="id" class="pick">
                 <span class="pick__name">{{ VIEW_LABELS[id] }}</span>
                 <el-switch
                   :model-value="!hiddenViews.includes(id)"
@@ -843,7 +829,7 @@ const networkBounds: Array<{ title: string; detail: string }> = [
           </div>
         </section>
 
-        <!-- 通用：程序本身、窗口与托盘、启动退出、数据目录、账号与同步（登录后才出现同步那几项） -->
+        <!-- 通用：程序（名称 / 快捷键 / 开机自启）、笔记（三个仓库与目录）、账号与同步 -->
         <section v-show="activeTab === 'general'" class="pane">
           <div class="block">
             <h3 class="block__title">程序</h3>
@@ -866,10 +852,6 @@ const networkBounds: Array<{ title: string; detail: string }> = [
                 @change="commitAppName"
               />
             </div>
-          </div>
-
-          <div class="block">
-            <h3 class="block__title">窗口与托盘</h3>
 
             <div class="row">
               <div class="row__text">
@@ -897,10 +879,6 @@ const networkBounds: Array<{ title: string; detail: string }> = [
               </button>
               <span class="row__hint row__hint--tight">点击后直接按组合键即可替换（Esc 放弃需重开）</span>
             </div>
-          </div>
-
-          <div class="block">
-            <h3 class="block__title">启动与退出</h3>
 
             <div class="row">
               <div class="row__text">
@@ -918,30 +896,10 @@ const networkBounds: Array<{ title: string; detail: string }> = [
             </div>
           </div>
 
-          <div class="block">
-            <h3 class="block__title">数据存储</h3>
-
-            <div class="row row--stack">
-              <div class="row__text">
-                <span class="row__label">数据目录</span>
-                <span class="row__hint">
-                  {{ settings.settings.appName }} 的东西都放这个目录里，换位置会把当前数据整体搬过去。
-                </span>
-              </div>
-              <div class="path__actions">
-                <p class="path mono truncate" :title="environment.dataLocation?.dir">
-                  {{ environment.dataLocation?.dir ?? '读取中…' }}
-                </p>
-                <el-button size="small" :icon="FolderOpened" @click="environment.changeDataDir()">
-                  更改目录
-                </el-button>
-              </div>
-            </div>
-          </div>
-
           <!--
-            笔记本身同步：同步的就是**当前那个笔记文件夹**（在笔记页左栏底部挑，这里不重复显示），
-            与图片那条路一样，地址留空 = 关掉这个功能（笔记页那颗按钮点了只会得到一句提示）。
+            笔记这一块管三件事：笔记本身的同步、图片往哪儿推、技能库在仓库里的哪一层。
+            前两项都是「填了地址才成立」的 git 仓库（留空 = 关掉那个功能，笔记页那颗按钮点了只会得到一句提示），
+            笔记文件夹本身在笔记页左栏底部挑，这里不重复显示。
           -->
           <div class="block">
             <h3 class="block__title">笔记</h3>
@@ -952,7 +910,7 @@ const networkBounds: Array<{ title: string; detail: string }> = [
                 <span class="row__hint">
                   笔记页左栏底部那颗同步按钮会把当前笔记本当成一个 git 工作区：提交本机改动、
                   拉回别处的改动（第一次同步会在那个文件夹里 git init 并接上这个地址）。
-                  留空就是不同步。用账号授权同步的开关同样管这里；没登录就用系统里 git 配好的凭据。
+                  留空就是不同步。凭据跟着账号走：登录过就用账号的 token，没登录就用系统里 git 配好的。
                 </span>
               </div>
               <el-input
@@ -963,24 +921,20 @@ const networkBounds: Array<{ title: string; detail: string }> = [
                 @change="commitNoteRepo"
               />
             </div>
-          </div>
 
-          <!--
-            笔记里的图片：粘贴的图片推到用户自己的一个 git 仓库里，正文里只留一个外链。
-            地址由仓库地址推导（GitHub / Gitee / GitLab 三家自动认，其余推不出来），
-            而落在仓库的哪一层是定死的（`images/<设备>/<笔记本>`，见 shared/note-image.ts），
-            所以这一块要填的只有一样：往哪个仓库推。
-          -->
-          <div class="block">
-            <h3 class="block__title">笔记图片</h3>
-
+            <!--
+              笔记里的图片：粘贴的图片推到用户自己的一个 git 仓库里，正文里只留一个外链。
+              地址由仓库地址推导（GitHub / Gitee / GitLab 三家自动认，其余推不出来），
+              而落在仓库的哪一层是定死的（`images/<设备>/<笔记本>`，见 shared/note-image.ts），
+              所以这一项要填的只有一样：往哪个仓库推。
+            -->
             <div class="row row--stack">
               <div class="row__text">
                 <span class="row__label">图片仓库</span>
                 <span class="row__hint">
                   往笔记里粘贴图片时推进这个仓库，正文里只留一个链接（留空则粘贴时提示）。
                   图片落在仓库的 images/&lt;本机设备&gt;/&lt;笔记本&gt; 下；
-                  凭据跟着下面的「用这个账号授权同步」开关走。
+                  凭据跟着账号走：登录过就用账号的 token，没登录就用系统里 git 配好的。
                 </span>
               </div>
               <el-input
@@ -991,80 +945,33 @@ const networkBounds: Array<{ title: string; detail: string }> = [
                 @change="commitImageRepo"
               />
             </div>
-          </div>
 
-          <!--
-            AI 热点：首页「AI 热点」卡片的数据源。清单来自 Rust 侧的源白名单（那边是唯一真源），
-            这里如实列出每个源**会访问哪个地址** —— 联网边界才谈得上「用户可以自己核对」。
-            每个源各自按自己的间隔刷新、各自退避，一个源失败不影响别的源。
-          -->
-          <div class="block">
-            <h3 class="block__title">AI 热点</h3>
-
-            <p class="row__hint ai-news__lead">
-              首页「AI 热点」卡片从下面这些源取内容，只放中文源。每个源有各自的刷新间隔，
-              被限流或失败时会自己往后推，不影响其他源。
-            </p>
-
-            <div v-for="source in aiNewsSourceList" :key="source.id" class="row ai-news__row">
+            <!--
+              技能（skill）的库位置：它就住在上面那个笔记仓库的这一层子目录里，
+              每次增删改自动提交一版（版本历史就是 git 历史），同步跟着笔记一起走。
+              路径跟着配置同步 —— 两台机器要落在同一层才互相看得见对方的技能。
+            -->
+            <div class="row row--stack">
               <div class="row__text">
-                <span class="row__label">{{ source.name }}</span>
-                <span class="row__hint">{{ source.note }}</span>
-                <span class="row__hint mono truncate ai-news__url" :title="source.url">
-                  {{ source.url }}
+                <span class="row__label">技能目录</span>
+                <span class="row__hint">
+                  技能页的技能放在笔记仓库的这个子目录里（默认 skills）。改个名字不会搬动已有的技能，
+                  下一台机器会跟着配置用同一路径。清空或填了不合法的名字会回到默认值。
                 </span>
               </div>
-              <el-switch
-                :model-value="aiNewsSourceEnabled(source.id)"
+              <el-input
+                v-model="skillDirDraft"
                 size="small"
-                @update:model-value="(value: unknown) => toggleAiNewsSource(source.id, Boolean(value))"
+                spellcheck="false"
+                placeholder="skills"
+                @change="commitSkillDir"
               />
             </div>
-
-            <!-- token 只有需要它的源才谈得上：没启用机器之心时不必拿这一格烦人 -->
-            <div v-if="aiNewsSourceList.some((source) => source.needsToken)" class="row row--stack">
-              <div class="row__text">
-                <span class="row__label">机器之心 RSS token</span>
-                <span class="row__hint">
-                  只有「机器之心」这个源需要。填一次保存到本机（Windows 凭据管理器），
-                  不落数据文件、也不进仓库。
-                </span>
-              </div>
-
-              <div class="ai-token">
-                <el-input
-                  v-model="aiNewsTokenDraft"
-                  class="ai-token__input"
-                  size="small"
-                  type="password"
-                  show-password
-                  spellcheck="false"
-                  placeholder="sk-…"
-                  @keyup.enter="commitAiNewsToken"
-                />
-                <el-button size="small" :loading="aiNewsTokenBusy" @click="commitAiNewsToken">
-                  保存
-                </el-button>
-                <el-button
-                  v-if="aiNewsTokenReady"
-                  size="small"
-                  :disabled="aiNewsTokenBusy"
-                  @click="clearAiNewsToken"
-                >
-                  清除
-                </el-button>
-              </div>
-
-              <span class="row__hint">
-                {{ aiNewsTokenReady ? '✓ 已配置' : '未配置 —— 勾了机器之心也不会去请求它' }}
-              </span>
-            </div>
           </div>
 
-
           <!--
-            账号与同步同属一块：同步的凭据来自账号，所以没登录时下面几行整个不出现 ——
-            数据全部留在本机（地址等设置不丢，登录回来接着用）。
+            账号这一块只剩登录状态与同步仓库地址（从别的机器取外观已挪到「外观」那一屏）。
+            没登录时地址那一行不出现 —— 数据全部留在本机，登录回来接着用。
           -->
           <div class="block">
             <h3 class="block__title">账号</h3>
@@ -1073,7 +980,8 @@ const networkBounds: Array<{ title: string; detail: string }> = [
               <div class="row__text">
                 <span class="row__label">登录状态</span>
                 <span class="row__hint">
-                  登录后可把用量与外观同步到多台机器；不登录则只用本机数据。
+                  登录后同步就用这个账号的 token 授权（私有仓库省掉先配 git 凭据）；
+                  不登录也能同步，走系统里 git 配好的那一套。
                 </span>
               </div>
               <el-button size="small" @click="accountVisible = true">
@@ -1082,17 +990,6 @@ const networkBounds: Array<{ title: string; detail: string }> = [
             </div>
 
             <template v-if="account">
-              <div class="row">
-                <div class="row__text">
-                  <span class="row__label">用这个账号授权同步</span>
-                  <span class="row__hint">关掉则改用系统里 git 配好的凭据。</span>
-                </div>
-                <el-switch
-                  :model-value="settings.settings.useAccountForSync"
-                  @update:model-value="setUseAccountForSync"
-                />
-              </div>
-
               <div class="row row--stack">
                 <div class="row__text">
                   <span class="row__label">同步仓库</span>
@@ -1108,49 +1005,6 @@ const networkBounds: Array<{ title: string; detail: string }> = [
                   @change="commitSyncRepo"
                 />
               </div>
-
-              <div class="row">
-                <div class="row__text">
-                  <span class="row__label">同步外观配置</span>
-                  <span class="row__hint">连同外观与首页布局一起同步；只同步用量数字就关掉。</span>
-                </div>
-                <el-switch
-                  :model-value="settings.settings.syncAppearance"
-                  @update:model-value="setSyncAppearance"
-                />
-              </div>
-
-              <!-- 别台机器的外观：列表来自上一次同步取回的仓库快照，「应用」是唯一的采用入口 -->
-              <div v-if="settings.settings.tokenSyncRepo" class="row row--stack">
-                <div class="row__text">
-                  <span class="row__label">从别的机器取外观</span>
-                  <span class="row__hint">
-                    「应用」会把本机的外观与首页布局整份换成对方那一套，本机这份仍留在仓库里。
-                  </span>
-                </div>
-
-                <div class="devices">
-                  <div v-for="device in settings.syncDevices" :key="device.id" class="device">
-                    <span class="device__name truncate" :title="device.name">{{ device.name }}</span>
-                    <span class="device__time">{{ deviceUpdatedText(device) }}</span>
-                    <el-button
-                      size="small"
-                      :disabled="!device.theme"
-                      @click="applyAppearance(device)"
-                    >
-                      应用
-                    </el-button>
-                  </div>
-
-                  <span v-if="!settings.syncDevices.length" class="row__hint">
-                    还没有别的机器：在另一台机器上填同一个仓库并同步一次。
-                  </span>
-                </div>
-
-                <div class="path__actions">
-                  <el-button size="small" :loading="syncing" @click="syncNow">同步一次</el-button>
-                </div>
-              </div>
             </template>
           </div>
         </section>
@@ -1158,7 +1012,7 @@ const networkBounds: Array<{ title: string; detail: string }> = [
         <!--
           关于：这个应用是什么、数据住在哪、什么时候才会联网。
           全是「如实说明」那一套 —— 没有宣传语，也没有一个数字是编出来的。
-          这里不做第二份可编辑入口：数据目录与账号的开关都在「通用」那一屏，这一屏只读地摆出当前值。
+          这里不做第二份可编辑入口：账号与同步仓库都在「通用」那一屏，这一屏只读地摆出当前值。
         -->
         <section v-show="activeTab === 'about'" class="pane">
           <div class="block">
@@ -1182,17 +1036,17 @@ const networkBounds: Array<{ title: string; detail: string }> = [
               <div class="row__text">
                 <span class="row__label">数据目录</span>
                 <span class="row__hint">
-                  项目列表、设置、用量快照与工作日志都在这里；换位置在「通用」那一屏。
+                  项目列表、设置、用量快照与工作日志都在这里；位置固定，不跟着任何设置走。
                 </span>
               </div>
               <div class="path__actions">
-                <p class="path mono truncate" :title="environment.dataLocation?.dir">
-                  {{ environment.dataLocation?.dir ?? '读取中…' }}
+                <p class="path mono truncate" :title="environment.dataDir">
+                  {{ environment.dataDir || '读取中…' }}
                 </p>
                 <el-button
                   size="small"
                   :icon="FolderOpened"
-                  :disabled="!environment.dataLocation"
+                  :disabled="!environment.dataDir"
                   @click="openDataDir"
                 >
                   打开目录
@@ -1235,7 +1089,7 @@ const networkBounds: Array<{ title: string; detail: string }> = [
 
             <p class="about__lead">
               六处都不经过任何第三方服务：三处 git 同步发往你自己填的那三个仓库，账号登录走两家平台官方的
-              OAuth 接口，AI 热点只 GET 上面那几个公开源（地址在设置里逐个列着），且没有自建服务端。
+              OAuth 接口，AI 热点只 GET 内置白名单里的那个公开源（源站自己的域名），且没有自建服务端。
               笔记页带文档级的 no-referrer，打开的笔记不会把自己的来源地址送给图片服务器。
             </p>
           </div>
@@ -1260,7 +1114,7 @@ const networkBounds: Array<{ title: string; detail: string }> = [
   /*
    * 弹窗里所有 small 控件统一 28px 高。global.css 把 small 按钮定成 28px，而 EP 的输入框 /
    * 数字框 / 取色器走自己的 --el-component-size-small（24px），不改就会同列一个高一个矮
-   * （首页布局那列：按钮 28、两个数字框 24，一眼看出错位）。只影响输入类控件，开关与单选不受影响。
+   * （间距那一行：数字框 24 挨着别的按钮 28，一眼看出错位）。只影响输入类控件，开关与单选不受影响。
    */
   --el-component-size-small: 28px;
 }
@@ -1338,6 +1192,22 @@ const networkBounds: Array<{ title: string; detail: string }> = [
   font-size: var(--fs-body);
   font-weight: 600;
   color: var(--ink);
+}
+
+/**
+ * 带动作的区块标题：动作放在右上角，与它管辖的那一块内容在同一行上。
+ * 标题自己的下边距由这一行统一给，免得两处叠加出双倍间距。
+ */
+.block__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-3);
+}
+
+.block__head .block__title {
+  margin-bottom: 0;
 }
 
 .row {
@@ -1494,8 +1364,8 @@ const networkBounds: Array<{ title: string; detail: string }> = [
 }
 
 /**
- * 开关清单（菜单那一屏的导航栏、外观那一屏的首页卡片）：说明文字下面一格一项，一行放两个 ——
- * 四项、八项各占两行，不至于把这一屏撑出一整屏高。
+ * 开关清单（菜单那一屏的导航栏，以及首页那一页下面挂的卡片）：一格一项，一行放两个 ——
+ * 四项、九项各占两三行，不至于把这一屏撑出一整屏高。
  * 每项是一小块浅底，名字在左、开关贴右，与上面那些 row 的行内控件同一个右边缘。
  */
 .picks {
@@ -1520,6 +1390,17 @@ const networkBounds: Array<{ title: string; detail: string }> = [
 .pick__name {
   font-size: var(--fs-meta);
   color: var(--ink);
+}
+
+/**
+ * 首页那一页下面的那层卡片：子项缩进 + 一条竖线，父子关系不用读文字就看得出；
+ * 卡片自己仍是两列的小块，不额外撑高（见 .picks 那条注释）。
+ */
+.picks--nested {
+  margin-top: var(--sp-2);
+  margin-left: var(--sp-4);
+  padding-left: var(--sp-3);
+  border-left: 2px solid var(--border);
 }
 
 /**
@@ -1703,7 +1584,7 @@ const networkBounds: Array<{ title: string; detail: string }> = [
 }
 
 /* ---------- 数据位置 ---------- */
-/* 路径与「更改目录」同一行：路径占满剩下的宽度并自己截断，min-width 是截断生效的前提 */
+/* 路径与旁边那颗按钮同一行：路径占满剩下的宽度并自己截断，min-width 是截断生效的前提 */
 .path {
   flex: 1;
   min-width: 0;
@@ -1752,42 +1633,15 @@ const networkBounds: Array<{ title: string; detail: string }> = [
   color: var(--ink-3);
 }
 
-/* ---------- AI 热点（热点源开关 + token） ---------- */
-/* 一段说明文字，独立成行：它管的是下面整张清单，不是某一行的小字 */
-.ai-news__lead {
-  margin: 0 0 var(--sp-2);
-}
-
-/* 一个源一行：左边是名字 / 说明 / 会访问的地址，右边是开关 */
-.ai-news__row {
-  align-items: flex-start;
-  gap: var(--sp-2);
-}
-
-.ai-news__row .row__text {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-/* 地址用等宽字、单行截断（将来若加带一长串参数的源，这里也不会把行撑开），全文在 title 里 */
-.ai-news__url {
-  display: block;
-  max-width: 100%;
-  color: var(--ink-3);
-}
-
-/* 一行：输入框 + 保存 / 清除两颗按钮。输入框吃剩余宽度，按钮各自收窄 */
-.ai-token {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  width: 100%;
-}
-
-.ai-token__input {
-  flex: 1 1 auto;
-  min-width: 0;
+/* 「本机」小标记：跟着机器名走，用状态色里最中性的一道描边区别于别的机器 */
+.device__self {
+  display: inline-block;
+  margin-right: var(--sp-2);
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  font-size: var(--fs-micro);
+  color: var(--ink-2);
 }
 
 /* ---------- 关于 ---------- */

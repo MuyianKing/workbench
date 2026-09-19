@@ -217,8 +217,7 @@ export async function uploadNoteImage(
       repo,
       dir: scope.data,
       name: input.name,
-      data: input.data,
-      useAccount: input.useAccount === true
+      data: input.data
     }),
     '上传图片失败'
   )
@@ -253,8 +252,7 @@ export async function listNoteImages(input: NoteImageListInput): Promise<Result<
   const result = await guard(
     invoke<{ branch?: unknown; files?: unknown }>('note_images_list', {
       repo,
-      dir: scope.data,
-      useAccount: input.useAccount === true
+      dir: scope.data
     }),
     '读取图片仓库失败'
   )
@@ -312,8 +310,7 @@ export async function deleteNoteImages(
     invoke<Partial<NoteImageDeleted>>('note_images_delete', {
       repo,
       dir: scope.data,
-      paths,
-      useAccount: input.useAccount === true
+      paths
     }),
     '删除图片失败'
   )
@@ -372,11 +369,7 @@ export async function syncNotes(input: NoteSyncInput): Promise<Result<NoteSyncSu
   if (!dir) return fail('还没有选择笔记文件夹')
 
   const result = await guard(
-    invoke<Partial<NoteSyncSummary>>('note_sync', {
-      repo,
-      dir,
-      useAccount: input.useAccount === true
-    }),
+    invoke<Partial<NoteSyncSummary>>('note_sync', { repo, dir }),
     '同步笔记失败'
   )
   if (!result.ok || !result.data) return fail(result.error ?? '同步笔记失败')

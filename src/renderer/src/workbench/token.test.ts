@@ -6,12 +6,14 @@
  *  - 别人的分片根本没读进来（同步分支挑错就是这个症状，见 sync.rs 的 sync_branch）。
  *
  * 跑在 node 环境里，没有 window，所以在导入前先补一个假的 Tauri 桥：
- * 按命令名回不同的桩数据，`token_sync_publish` 顺手把「仓库」里的分片更新一下。
+ * 按命令名回不同的桩数据，`token_sync_publish` / `token_sync_config` 各自顺手把「仓库」里
+ * 对应的那个目录更新一下（用量分片与外观配置是两个出口，见 sync.rs 的 publish_at）。
  * 模块级的同步节流状态要清干净，所以每条用例都用 `vi.resetModules()` 重新导入一次适配层。
  * 自动同步在后台跑，断言推送内容前要先 `flushBackgroundSync()`。
  */
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_THEME, THEME_VERSION } from '@shared/theme'
+import type { TokenDays } from '@shared/token-usage'
 
 /** 用例里的同步仓库地址（桩数据按它分仓库存放分片） */
 const REPO = 'git@example.com:me/sync.git'
@@ -30,6 +32,8 @@ let remotes: Record<string, unknown[]> = {}
 /** 同一个仓库的 config/ 目录：按仓库地址分开装各台机器推上来的配置 */
 let remoteConfigs: Record<string, unknown[]> = {}
 let published: Array<Record<string, unknown>> = []
+/** 落盘次数：用来钉「内容没变就不该重写磁盘那份」 */
+let saveCount = 0
 let failPublish = false
 /** 推送卡住不回（验「同步不挡出数」用） */
 let hangPublish = false
@@ -62,6 +66,12 @@ let workbuddy: { found: boolean; sessions: Array<{ path: string; mtimeMs: number
   sessions: []
 }
 let workbuddyText: Record<string, string> = {}
+/** Qoder：`token_qoder_sessions` 回的清单，以及按路径取内容的桩会话正文（只有额度，没有 token） */
+let qoder: { found: boolean; sessions: Array<{ path: string; mtimeMs: number; size: number }> } = {
+  found: false,
+  sessions: []
+}
+let qoderText: Record<string, string> = {}
 
 /** 今天（本地时区）——快照只保留最近一年，用例里的日期必须落在窗口内 */
 function today(): string {
@@ -90,6 +100,7 @@ beforeAll(() => {
           case 'token_load':
             return Promise.resolve(localFile)
           case 'token_save':
+            saveCount += 1
             localFile = args?.value
             return Promise.resolve(null)
           case 'token_zcode_rows':
@@ -99,8 +110,8 @@ beforeAll(() => {
           case 'fs_read_text': {
             const path = String((args as { path?: unknown })?.path ?? '')
             textReads.push(path)
-            // CodeBuddy 与 WorkBuddy 都是「列清单 + 自己读文件」，共用一个读取桩
-            const text = workbuddyText[path] ?? codebuddyText[path]
+            // CodeBuddy / WorkBuddy / Qoder 都是「列清单 + 自己读文件」，共用一个读取桩
+            const text = workbuddyText[path] ?? qoderText[path] ?? codebuddyText[path]
             if (typeof text !== 'string') return Promise.reject('文件读不了')
             return Promise.resolve(text)
           }
@@ -108,6 +119,8 @@ beforeAll(() => {
             return Promise.resolve(dsh)
           case 'token_workbuddy_sessions':
             return Promise.resolve(workbuddy)
+          case 'token_qoder_sessions':
+            return Promise.resolve(qoder)
           case 'token_zstd_decode': {
             const path = String((args as { path?: unknown })?.path ?? '')
             dshDecodes.push(path)
@@ -121,17 +134,24 @@ beforeAll(() => {
             const repo = String(args?.repo ?? '')
             // 推送这路会顺带建好 / 拉新克隆（见 sync.rs 的 ensure_clone），克隆从此属于这个仓库
             cloneRepo = repo
-            // 仓库里自己那两份被覆盖，别人那份原样留着。config 给 null 表示关掉了外观同步，
-            // 对应的文件在仓库里要被删掉（见 sync.rs 的 publish_at）
+            // 用量那条出口**只有分片**：仓库里自己那份被覆盖，别人那份原样留着
             const others = (remotes[repo] ?? []).filter(
               (item) => (item as { device?: string }).device !== args?.device
             )
             remotes[repo] = [...others, args?.shard]
-
-            const otherConfigs = (remoteConfigs[repo] ?? []).filter(
+            return Promise.resolve({ changed: true, pushed: true, log: '' })
+          }
+          case 'token_sync_config': {
+            // 外观那条出口（设置 → 外观 →「同步一次」）：只写 config/，用量分片一概不碰
+            if (hangPublish) return new Promise(() => {})
+            if (failPublish) return Promise.reject('仓库推不上去')
+            published.push(args ?? {})
+            const repo = String(args?.repo ?? '')
+            cloneRepo = repo
+            const others = (remoteConfigs[repo] ?? []).filter(
               (item) => (item as { device?: string }).device !== args?.device
             )
-            remoteConfigs[repo] = args?.config ? [...otherConfigs, args.config] : otherConfigs
+            remoteConfigs[repo] = [...others, args?.config]
             return Promise.resolve({ changed: true, pushed: true, log: '' })
           }
           case 'token_sync_shards': {
@@ -158,6 +178,7 @@ beforeEach(() => {
   remotes = {}
   remoteConfigs = {}
   published = []
+  saveCount = 0
   failPublish = false
   hangPublish = false
   cloneRepo = ''
@@ -170,6 +191,8 @@ beforeEach(() => {
   dshDecodes = []
   workbuddy = { found: false, sessions: [] }
   workbuddyText = {}
+  qoder = { found: false, sessions: [] }
+  qoderText = {}
 })
 
 /**
@@ -262,6 +285,44 @@ function addWorkbuddySession(name: string, text: string, mtimeMs = Date.now()): 
   return item
 }
 
+/**
+ * 一条真实形状的 Qoder 会话正文：一行一个 JSON 事件，assistant 那一行带 usage。
+ * token 那几项**照实写成 0**（Qoder 不产生 token 计数），只有 credits 有值。
+ */
+function qoderSession(credits = 0.78379939, at = new Date().toISOString()): string {
+  return JSON.stringify({
+    type: 'assistant',
+    sessionId: 'c5ef1c9b-ba57-4e60-a9de-9f4dcfc24215',
+    timestamp: at,
+    message: {
+      id: 'msg_01',
+      role: 'assistant',
+      model: 'qfmodel',
+      usage: {
+        input_tokens: 0,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 0,
+        output_tokens: 0,
+        credits,
+        original_credits: credits,
+        billable: false
+      }
+    }
+  })
+}
+
+/** 挂上一个 Qoder 会话正文，并返回它进清单的那一项 */
+function addQoderSession(name: string, text: string, mtimeMs = Date.now()): {
+  path: string
+  mtimeMs: number
+  size: number
+} {
+  const item = { path: `C:\\.qoder-cn\\${name}`, mtimeMs, size: text.length }
+  qoder = { found: true, sessions: [...qoder.sessions, item] }
+  qoderText[item.path] = text
+  return item
+}
+
 /** 重新导入适配层：模块级的同步节流状态（lastSyncAt / remoteShards）必须归零 */
 function freshToken(): Promise<typeof import('./token')> {
   vi.resetModules()
@@ -322,7 +383,7 @@ describe('多机合并', () => {
     await token.getTokenUsage({ repo: '' })
 
     const saved = localFile as { version: number; device: string; name: string }
-    expect(saved.version).toBe(6)
+    expect(saved.version).toBe(7)
     expect(saved.device).toBe('dev-local')
     expect(saved.name).toBe('本机')
   })
@@ -340,6 +401,48 @@ describe('多机合并', () => {
     expect(result.sync.enabled).toBe(false)
     expect(result.sync.devices).toEqual([])
     expect(published).toHaveLength(0)
+  })
+
+  /**
+   * 这个入口每分钟被轮询调一次，而落盘是「整份 pretty JSON + 临时文件 + rename」。
+   * 内容一致还写就是每分钟白写一次盘；但**该写的一次也不能少** —— 少一次就是老数据
+   * 永远升不上来，或者实读到的数字没落盘、下次启动又回到旧值。
+   */
+  it('内容没变时不重写磁盘那份', async () => {
+    const day = today()
+    rows = [{ day, model: 'glm-5', input: 10, cacheRead: 0, requests: 1 }]
+
+    const token = await freshToken()
+    // 第一轮：磁盘上什么都没有，必须写
+    await token.getTokenUsage({ repo: '' })
+    expect(saveCount).toBe(1)
+
+    // 第二轮：实读结果与刚写下的那份逐字相同，不该再写
+    await token.getTokenUsage({ repo: '' })
+    expect(saveCount).toBe(1)
+
+    // 第三轮：实读多了一条，必须写
+    rows = [{ day, model: 'glm-5', input: 25, cacheRead: 0, requests: 2 }]
+    await token.getTokenUsage({ repo: '' })
+    expect(saveCount).toBe(2)
+  })
+
+  it('老版本的分片即使计数没变也会写回，让老结构升上来', async () => {
+    const day = today()
+    // v3 的旧文件：没有 device / name，版本号也旧
+    localFile = {
+      version: 3,
+      updatedAt: 0,
+      sources: { zcode: { days: { [day]: { 'glm-5': { inputTokens: 10, requests: 1 } } } } }
+    }
+    rows = [{ day, model: 'glm-5', input: 10, cacheRead: 0, requests: 1 }]
+
+    const token = await freshToken()
+    await token.getTokenUsage({ repo: '' })
+
+    const saved = localFile as { version: number; device: string }
+    expect(saved.version).toBe(7)
+    expect(saved.device).toBe('dev-local')
   })
 })
 
@@ -653,6 +756,56 @@ describe('WorkBuddy(会话正文)', () => {
   })
 })
 
+describe('Qoder(会话正文里的额度)', () => {
+  it('额度算进 qoder 这个来源，token 几项照上游的 0 落着', async () => {
+    addQoderSession('F--projects-workbench/c5ef1c9b.jsonl', qoderSession(0.78379939))
+
+    const token = await freshToken()
+    const result = await token.getTokenUsage({ repo: '' })
+
+    const counters = result.data.sources.qoder.days[today()]['qfmodel']
+    expect(counters.credits).toBeCloseTo(0.78379939, 9)
+    expect(counters.requests).toBe(1)
+    // 不能顺手把额度折算成 token：真这么干，tokens 口径下就多了一份编出来的数
+    expect(counters.inputTokens).toBe(0)
+    expect(counters.outputTokens).toBe(0)
+    expect(result.sourceErrors.qoder).toBeUndefined()
+  })
+
+  it('没装 Qoder 就安静跳过：不算读取失败，也不留空来源', async () => {
+    const token = await freshToken()
+    const result = await token.getTokenUsage({ repo: '' })
+
+    expect(result.data.sources.qoder).toBeUndefined()
+    expect(result.sourceErrors.qoder).toBeUndefined()
+    expect(textReads).toHaveLength(0)
+  })
+
+  it('额度是小数，落盘再读回来不会被收敛成 0', async () => {
+    addQoderSession('F--projects-workbench/c5ef1c9b.jsonl', qoderSession(0.078367718))
+
+    const token = await freshToken()
+    await token.getTokenUsage({ repo: '' })
+
+    // 落盘的这份分片要原样带小数：快照与同步分片都是它，
+    // 一旦在这一层取整，界面上一天的额度就会变成 0（sanitize 那边同理）
+    const saved = localFile as { sources: Record<string, { days: TokenDays }> }
+    expect(saved.sources.qoder.days[today()]['qfmodel'].credits).toBeCloseTo(0.078367718, 9)
+  })
+
+  it('单个会话读不了不影响其余会话', async () => {
+    addQoderSession('good/c5ef1c9b.jsonl', qoderSession(2))
+    const broken = addQoderSession('broken/c5ef1c9b.jsonl', 'x')
+    delete qoderText[broken.path]
+
+    const token = await freshToken()
+    const result = await token.getTokenUsage({ repo: '' })
+
+    expect(result.data.sources.qoder.days[today()]['qfmodel'].credits).toBe(2)
+    expect(result.sourceErrors.qoder).toBeUndefined()
+  })
+})
+
 describe('换同步仓库', () => {
   const OTHER = 'https://gitee.com/me/other.git'
 
@@ -810,20 +963,22 @@ describe('同步节流', () => {
 })
 
 /**
- * 外观配置作为**单独一个文件**推上去（见 shared/sync-config.ts）。
+ * 用量与外观是**两个独立的出口**（见 sync.rs 的 publish_at）：用量那条
+ * （面板按钮 + 一小时一轮的自动同步）只推 `token-usage/`，外观那条
+ * （设置 → 外观 →「同步一次」）只推 `config/`。两边各写自己那一个文件、都是单写者，
+ * 分开推不会打架 —— 这里盯的正是「谁也没顺手把对方那份带上」。
  *
- * 这里盯的是三件只看结果看不出来的事：推上去的确实是本机 theme.json 的整份内容、
- * 关掉开关之后有没有真的从仓库里删掉、以及时间戳跟不跟着内容走
- * —— 漏了最后一条，外观一动就会在两处之间来回推同一份内容。
+ * 另外两件只看结果看不出来的事：推上去的确实是本机 theme.json 的整份内容，
+ * 以及时间戳跟不跟着内容走 —— 漏了最后一条，外观一动就会在两处之间来回推同一份内容。
  */
-describe('外观配置单独同步', () => {
-  /** 断言用的那份配置：只看它的 theme */
+describe('用量与外观是两个独立的出口', () => {
+  /** 第 index 次推送里那份配置的 theme */
   function themeIn(index = 0): Record<string, unknown> | null {
     const config = published[index]?.config as { theme?: unknown } | undefined
     return (config?.theme ?? null) as Record<string, unknown> | null
   }
 
-  it('默认把本机 theme.json 整份推上去', async () => {
+  it('用量同步只推分片：自动那轮与面板按钮都不带外观', async () => {
     const day = today()
     localFile = shard('dev-local', 10, day)
     rows = [{ day, model: 'glm-5', input: 10, cacheRead: 0, requests: 1 }]
@@ -833,36 +988,35 @@ describe('外观配置单独同步', () => {
     await flushBackgroundSync()
 
     expect(published).toHaveLength(1)
-    const config = published[0].config as { device?: string; name?: string } | null
-    expect(config?.device).toBe('dev-local')
-    // 外观与布局都在这一份里：它们本来就是同一个文件的两半
-    expect(themeIn()?.appearance).toBeTruthy()
-    expect(themeIn()?.cards).toBeTruthy()
+    expect(published[0].shard).toBeTruthy()
+    expect(published[0].config).toBeUndefined()
+    expect(remoteConfigs[REPO] ?? []).toHaveLength(0)
+
+    // 手动那一次（面板上的同步按钮）同理：用量那条出口没有「顺手推外观」这回事
+    await token.syncTokenUsage(REPO)
+    expect(published).toHaveLength(2)
+    expect(published[1].config).toBeUndefined()
+    expect(remoteConfigs[REPO] ?? []).toHaveLength(0)
   })
 
-  it('关掉开关之后不推配置，已经在仓库里的那份也会被删掉', async () => {
+  it('外观同步只推配置：整份 theme.json，且不碰用量分片', async () => {
     const day = today()
     localFile = shard('dev-local', 10, day)
     rows = [{ day, model: 'glm-5', input: 10, cacheRead: 0, requests: 1 }]
 
-    vi.resetModules()
-    const state = await import('./state')
-    const token = await import('./token')
+    const token = await freshToken()
+    const result = await token.syncThemeConfig(REPO)
+    expect(result.ok).toBe(true)
 
-    // 先开着推一次，仓库里就有了
-    await token.getTokenUsage({ repo: REPO })
-    await flushBackgroundSync()
-    expect(remoteConfigs[REPO]).toHaveLength(1)
-
-    state.updateSettings({ syncAppearance: false })
-    await token.syncTokenUsage(REPO)
-    expect(published[1].config).toBeNull()
-    expect(remoteConfigs[REPO]).toHaveLength(0)
-
-    // 再打开：配置又推上去了（删掉只是「这次不推」，不是把本机的设置一起清掉）
-    state.updateSettings({ syncAppearance: true })
-    await token.syncTokenUsage(REPO)
-    expect(remoteConfigs[REPO]).toHaveLength(1)
+    expect(published).toHaveLength(1)
+    expect(published[0].shard).toBeUndefined()
+    const config = published[0].config as { device?: string } | undefined
+    expect(config?.device).toBe('dev-local')
+    // 外观与布局都在这一份里：它们本来就是同一个文件的两半
+    expect(themeIn()?.appearance).toBeTruthy()
+    expect(themeIn()?.cards).toBeTruthy()
+    // 用量分片一个都没动（这正是「两个出口」的意思）
+    expect(remotes[REPO] ?? []).toHaveLength(0)
   })
 
   it('改了外观才有新时间戳：内容没变时推上去的还是同一份', async () => {
@@ -873,18 +1027,16 @@ describe('外观配置单独同步', () => {
       localFile = shard('dev-local', 10, day)
       rows = [{ day, model: 'glm-5', input: 10, cacheRead: 0, requests: 1 }]
 
-      vi.resetModules()
+      const token = await freshToken()
       const state = await import('./state')
-      const token = await import('./token')
 
-      await token.getTokenUsage({ repo: REPO })
-      await flushBackgroundSync()
+      await token.syncThemeConfig(REPO)
       // 从没改过外观（这是默认主题）：时间未知，记 0
-      expect(themeIn()?.updatedAt).toBe(0)
+      expect(themeIn(0)?.updatedAt).toBe(0)
 
       // 什么都没改：还是 0 —— 时间戳不因为「又同步了一轮」而刷新，否则每轮都会推一次新内容
       vi.setSystemTime(new Date(2026, 8, 14, 11, 0, 0))
-      await token.syncTokenUsage(REPO)
+      await token.syncThemeConfig(REPO)
       expect(themeIn(1)?.updatedAt).toBe(0)
 
       // 拖一下布局（改栏宽）：真的变了，时间戳记的是**变化**那一刻，不是推送那一刻
@@ -895,7 +1047,7 @@ describe('外观配置单独同步', () => {
       })
       const layoutChangedAt = Date.now()
       vi.setSystemTime(new Date(2026, 8, 14, 12, 0, 0))
-      await token.syncTokenUsage(REPO)
+      await token.syncThemeConfig(REPO)
       expect((themeIn(2)?.columns as Array<{ width: unknown }>)[0].width).toBe(320)
       expect(themeIn(2)?.updatedAt).toBe(layoutChangedAt)
 
@@ -903,7 +1055,7 @@ describe('外观配置单独同步', () => {
       state.updateSettings({ accentColor: '#ef4444' })
       const colorChangedAt = Date.now()
       vi.setSystemTime(new Date(2026, 8, 14, 13, 0, 0))
-      await token.syncTokenUsage(REPO)
+      await token.syncThemeConfig(REPO)
       const appearance = themeIn(3)?.appearance as { accentColor?: string } | undefined
       expect(appearance?.accentColor).toBe('#ef4444')
       expect(themeIn(3)?.updatedAt).toBe(colorChangedAt)
@@ -912,7 +1064,14 @@ describe('外观配置单独同步', () => {
     }
   })
 
-  it('列设备时两个目录按设备 id 配对，排除本机，最近动过的在前', async () => {
+  it('没填仓库地址时如实报错，什么都不推', async () => {
+    const token = await freshToken()
+    const result = await token.syncThemeConfig('   ')
+    expect(result.ok).toBe(false)
+    expect(published).toHaveLength(0)
+  })
+
+  it('列设备时两个目录按设备 id 配对，本机标出来但别的机器排前，最近动过的在前', async () => {
     const day = today()
     localFile = shard('dev-local', 10, day)
     rows = [{ day, model: 'glm-5', input: 10, cacheRead: 0, requests: 1 }]
@@ -921,7 +1080,7 @@ describe('外观配置单独同步', () => {
       { ...shard('dev-older', 20, day), name: '办公室', updatedAt: 100 },
       { ...shard('dev-newer', 30, day), name: '笔记本', updatedAt: 200 }
     ]
-    // 只有「办公室」推了配置（另一台关掉了外观同步），而且它那份配置比分片新
+    // 只有「办公室」点过外观那次的「同步一次」（其余机器只同步用量），而且它那份配置比分片新
     remoteConfigs[REPO] = [
       { device: 'dev-local', name: '本机', theme: { version: THEME_VERSION, updatedAt: 1 } },
       {
@@ -943,12 +1102,16 @@ describe('外观配置单独同步', () => {
     const devices = await token.listSyncDevices(REPO)
 
     // 时间取两份里较新的那个：办公室的配置（300）比它的分片（100）新，所以它排到了最前面
-    expect(devices.map((item) => item.id)).toEqual(['dev-older', 'dev-newer'])
+    expect(devices.map((item) => item.id)).toEqual(['dev-older', 'dev-newer', 'dev-local'])
     expect(devices[0].updatedAt).toBe(300)
     expect(devices[0].name).toBe('办公室')
     expect(devices[0].theme?.appearance.accentColor).toBe('#ef4444')
     // 没推配置的那台仍然列出来（只有用量分片），只是没有可用的配置
     expect(devices[1].theme).toBeNull()
+    // 本机也列出来（标了 self，界面上不可「应用」），它那份配置照常收敛后带出来
+    expect(devices[2].self).toBe(true)
+    expect(devices[2].name).toBe('本机')
+    expect(devices.slice(0, 2).every((item) => !item.self)).toBe(true)
   })
 
   it('没填仓库地址时一台设备都不列', async () => {

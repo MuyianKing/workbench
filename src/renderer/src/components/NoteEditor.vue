@@ -267,8 +267,7 @@ async function uploadImages(files: File[]): Promise<string | null> {
         repo: settings.settings.noteImageRepo,
         root: props.root,
         name: imageFileName({ mime: file.type }),
-        data,
-        useAccount: settings.settings.useAccountForSync
+        data
       })
       if (!result.ok || !result.data) return result.error ?? '上传图片失败'
 

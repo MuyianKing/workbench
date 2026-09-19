@@ -6,7 +6,7 @@
  * 它自己就是滚动体：占据工具条以下的全部高度，四周的内边距取卡片间距，
  * 项目再多也在这一层滚，不把页面撑高。
  */
-import { Plus } from '@element-plus/icons-vue'
+import { Plus, Search } from '@element-plus/icons-vue'
 import { useProjectsStore } from '@/stores/projects'
 import ProjectCard from '@/components/ProjectCard.vue'
 import WelcomePanel from '@/components/WelcomePanel.vue'
@@ -14,7 +14,6 @@ import WelcomePanel from '@/components/WelcomePanel.vue'
 const store = useProjectsStore()
 
 function clearFilter(): void {
-  store.keyword = ''
   store.setGroupFilter('all')
 }
 </script>
@@ -23,12 +22,7 @@ function clearFilter(): void {
   <div class="projects">
     <template v-if="store.projects.length">
       <div v-if="store.filteredProjects.length" class="grid">
-        <ProjectCard
-          v-for="p in store.filteredProjects"
-          :key="p.id"
-          :project="p"
-          :highlight="store.focusProjectId === p.id"
-        />
+        <ProjectCard v-for="p in store.filteredProjects" :key="p.id" :project="p" />
 
         <button class="add-tile" type="button" @click="store.openAddDialog()">
           <el-icon class="add-tile__icon"><Plus /></el-icon>
@@ -38,8 +32,9 @@ function clearFilter(): void {
       </div>
 
       <div v-else class="nomatch">
-        <p class="nomatch__title">没有匹配的项目</p>
-        <p class="nomatch__desc">换个关键词，或切换到其他分组看看。</p>
+        <el-icon class="empty__icon"><Search /></el-icon>
+        <p class="nomatch__title">这个分组下没有项目</p>
+        <p class="nomatch__desc">切回「全部」分组，或先给项目归类。</p>
         <el-button size="small" @click="clearFilter">清除筛选条件</el-button>
       </div>
     </template>

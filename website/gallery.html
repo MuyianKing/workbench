@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Workbench 官网 · 十种风格</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: system-ui, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif; background: #151a21; color: #e8edf4; min-height: 100vh; padding: 64px 24px; }
+.wrap { max-width: 980px; margin: 0 auto; }
+h1 { font-size: clamp(28px, 5vw, 44px); letter-spacing: -.02em; }
+p.lead { color: #8a95a4; margin: 14px 0 48px; font-size: 15px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px; }
+a.card {
+  display: block; border: 1px solid #2b323d; border-radius: 14px;
+  background: #1b212a; padding: 26px; text-decoration: none; color: inherit;
+  transition: transform .25s cubic-bezier(.22,.8,.3,1), border-color .25s;
+}
+a.card:hover { transform: translateY(-5px); border-color: #3fb37f; }
+a.card b { display: block; font-size: 18px; margin-bottom: 8px; }
+a.card span { display: block; font-size: 13px; color: #8a95a4; line-height: 1.7; }
+.swatch { display: flex; gap: 5px; margin-bottom: 16px; }
+.swatch i { width: 22px; height: 22px; border-radius: 5px; border: 1px solid rgba(255,255,255,.14); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Workbench 官网 · 十种风格</h1>
+  <p class="lead">同一个产品，十套完全不同的设计语言。每套有自己的排版骨架、配色与背景动画，全部无渐变。右下角浮标可在十套之间随时切换。</p>
+  <div class="grid">
+    <a class="card" href="index.html">
+      <div class="swatch"><i style="background:#151a21"></i><i style="background:#e8edf4"></i><i style="background:#3fb37f"></i><i style="background:#e0a23a"></i></div>
+      <b>一 · 工程编辑部</b>
+      <span>暗色发丝线网格、不等宽 bento、双层景深粒子 + 数据包脉冲。当前主版本。</span>
+    </a>
+    <a class="card" href="styles/s2-swiss.html">
+      <div class="swatch"><i style="background:#f2f2f0"></i><i style="background:#131313"></i><i style="background:#d83a2e"></i></div>
+      <b>二 · 瑞士国际主义</b>
+      <span>亮纸面、12 栏网格、超大 Helvetica、大红强调；红色扫描波点亮的点阵背景。</span>
+    </a>
+    <a class="card" href="styles/s3-terminal.html">
+      <div class="swatch"><i style="background:#060a06"></i><i style="background:#52e08a"></i><i style="background:#e0a23a"></i></div>
+      <b>三 · 终端 CRT</b>
+      <span>黑绿等宽、开机自检、打字机标题、man page 式模块清单；代码雨 + 扫描线。</span>
+    </a>
+    <a class="card" href="styles/s4-magazine.html">
+      <div class="swatch"><i style="background:#fbfbfa"></i><i style="background:#1a1a1e"></i><i style="background:#2742c8"></i></div>
+      <b>四 · 衬线杂志</b>
+      <span>纸白刊头、宋体大标题、双栏正文 + 首字下沉、图版与引文页；巨型轮廓字母漂移。</span>
+    </a>
+    <a class="card" href="styles/s5-brutalist.html">
+      <div class="swatch"><i style="background:#ffffff"></i><i style="background:#0e0e0e"></i><i style="background:#ffd400"></i><i style="background:#2b4bff"></i></div>
+      <b>五 · 新粗野主义</b>
+      <span>粗黑边、硬阴影、三原色块、歪斜贴墙的截图、跑马灯；实心几何块漂浮背景。</span>
+    </a>
+    <a class="card" href="styles/s6-guofeng.html">
+      <div class="swatch"><i style="background:#f4efe4"></i><i style="background:#23201b"></i><i style="background:#a3362c"></i><i style="background:#3d4a5c"></i></div>
+      <b>六 · 国风水墨</b>
+      <span>宣纸底、竖排楷体大标题、朱砂印章、约法六章；墨晕涟漪 + 远山剪影漂移。</span>
+    </a>
+    <a class="card" href="styles/s7-blueprint.html">
+      <div class="swatch"><i style="background:#0a3473"></i><i style="background:#d6e7ff"></i><i style="background:#ffd23f"></i></div>
+      <b>七 · 工程蓝图</b>
+      <span>蓝底白线制图、图签栏、规格表与尺寸标注；网格上巡画的十字光标留下标尺。</span>
+    </a>
+    <a class="card" href="styles/s8-pixel.html">
+      <div class="swatch"><i style="background:#181820"></i><i style="background:#4cd470"></i><i style="background:#ffd83d"></i><i style="background:#ef6d6d"></i></div>
+      <b>八 · 像素复古</b>
+      <span>8-bit 调色、HUD 血条、背包格子、护甲清单；俄罗斯方块式像素块缓落。</span>
+    </a>
+    <a class="card" href="styles/s9-bauhaus.html">
+      <div class="swatch"><i style="background:#f4f1ea"></i><i style="background:#d8352a"></i><i style="background:#f2b705"></i><i style="background:#1f4bd8"></i></div>
+      <b>九 · 包豪斯</b>
+      <span>点线面构成主义、红黄蓝几何编号、色块托底图版；几何件旋转漂浮背景。</span>
+    </a>
+    <a class="card" href="styles/s10-riso.html">
+      <div class="swatch"><i style="background:#f6f4ef"></i><i style="background:#e8336d"></i><i style="background:#2456d6"></i></div>
+      <b>十 · Riso 孔版</b>
+      <span>荧光粉 + 电光蓝双色套印、错位重影标题、样张叠色框；颗粒噪点与色版呼吸。</span>
+    </a>
+  </div>
+</div>
+</body>
+</html>

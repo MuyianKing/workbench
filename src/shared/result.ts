@@ -18,7 +18,7 @@ export function fail<T = never>(error: string): Result<T> {
 /**
  * 把「可能抛错的操作」收敛成 Result。
  * 主进程 handler 里 reject 会让渲染层的 invoke 变成未处理异常，凡是有抛错风险的操作
- * （打开资源管理器、结束端口进程、启动快捷程序、迁移数据目录）都该包一层。
+ * （打开资源管理器、结束端口进程、启动快捷程序）都该包一层。
  */
 export async function toResult<T>(fn: () => Promise<T>): Promise<Result<T>> {
   try {

@@ -165,7 +165,7 @@ const DOCK_MARGIN = 10
 /** 面板自己的下外边距（tokens 里的 --sp-2）：算「面板纵向中线」时要用 */
 const PANEL_MARGIN = 8
 
-/** 顶栏（标题栏 + 搜索栏）占掉的高度：按钮最多贴到它下面 */
+/** 顶栏（标题栏 + 欢迎语）占掉的高度：按钮最多贴到它下面 */
 const DOCK_TOP_LIMIT = 100
 
 /** 拖动中的临时位置：只影响渲染，松手才写进设置（与面板高度同一套做法） */
@@ -284,11 +284,23 @@ function expandFromDock(): void {
  */
 const allLines = computed<LogLine[]>(() => terminal.activeLogs)
 
-const omitted = computed(() => Math.max(0, allLines.value.length - RENDER_LIMIT))
+/**
+ * 渲染起点，**刻意对齐到 CHUNK_SIZE 的整数倍**（所以 RENDER_LIMIT 也取它的整数倍）。
+ *
+ * 分块的 key 取 `chunk[0].id`，起点只要动一行，所有分块的 key 就同时落空 ——
+ * Vue 找不到可复用的节点，只能把整屏卸了重建，正好抵消掉下面分块想省下的那部分。
+ * 对齐之后只有整个分块滚出窗口时起点才跳一次，稳态下每帧只增删一个分块。
+ */
+const start = computed(() => {
+  const total = allLines.value.length
+  if (total <= RENDER_LIMIT) return 0
+  return Math.floor((total - RENDER_LIMIT) / CHUNK_SIZE) * CHUNK_SIZE
+})
 
-const lines = computed(() =>
-  omitted.value ? allLines.value.slice(-RENDER_LIMIT) : allLines.value
-)
+/** 省略了几行（截断的起点就是省略的行数） */
+const omitted = computed(() => start.value)
+
+const lines = computed(() => (start.value ? allLines.value.slice(start.value) : allLines.value))
 
 const chunks = computed(() => {
   const list = lines.value

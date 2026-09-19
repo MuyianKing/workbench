@@ -66,7 +66,15 @@ const FRAMEWORK_RULES: Array<[string, string]> = [
 
 const OUTPUT_DIR_CANDIDATES = ['dist', 'dist_electron', 'build', 'out', 'docs/.vitepress/dist']
 
-const SCRIPT_NAME_RE = /^[A-Za-z0-9_:.-]+$/
+/**
+ * 脚本名白名单。首字符限定为字母 / 数字 / 下划线，于是 `-rf`（会被包管理器当成选项）
+ * 与 `..` 这类名字直接被挡在外面；名字最终拼成 `<包管理器> run <名>` 交给 `cmd /C`，
+ * `&` `|` `;` 漏进去就是第二条命令。
+ *
+ * 比白名单更聪明的做法是转义，但脚本名来自 package.json，谁也无法穷举 cmd 的引用规则 ——
+ * 只放行「长得像脚本名」的那些，剩下的让用户用自定义命令（整行原文）自己写。
+ */
+const SCRIPT_NAME_RE = /^[A-Za-z0-9_][A-Za-z0-9_:.-]*$/
 
 /** 脚本名必须由调用方校验后再拼进命令行，避免注入 */
 export function isValidScriptName(name: string): boolean {
@@ -284,9 +292,16 @@ export async function scanProject(scan: ScanFs, dirPath: string): Promise<ScanRe
   const deps = { ...(pkg.dependencies ?? {}), ...(pkg.devDependencies ?? {}) }
   const { pm, lockFile } = await detectPackageManager(scan, dirPath)
   const outputDir = await detectOutputDir(scan, dirPath)
+  // 名字不合规的脚本一律不进候选：这个目录可能是别人给的仓库，package.json 不由我们写
   const serve = pickServe(scripts)
+  const serveScript = serve && isValidScriptName(serve) ? serve : undefined
   const nodeRequirement = await detectNodeRequirement(scan, dirPath, pkg.engines?.node)
-  const { tool, guess } = await detectDevPort(scan, dirPath, deps, serve ? scripts[serve] : undefined)
+  const { tool, guess } = await detectDevPort(
+    scan,
+    dirPath,
+    deps,
+    serveScript ? scripts[serveScript] : undefined
+  )
 
   return {
     ok: true,
@@ -295,8 +310,8 @@ export async function scanProject(scan: ScanFs, dirPath: string): Promise<ScanRe
     framework: detectFramework(deps),
     detectedPackageManager: pm,
     lockFile,
-    serve,
-    build: pickBuild(scripts),
+    serve: serveScript,
+    build: pickBuild(scripts).filter(isValidScriptName),
     allScripts: Object.keys(scripts),
     outputDir,
     enginesNode: nodeRequirement.value,

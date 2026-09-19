@@ -15,6 +15,7 @@ import { ElMessageBox } from 'element-plus'
 import {
   Loading,
   MoreFilled,
+  Operation,
   Plus,
   Search,
   VideoPause,
@@ -118,7 +119,10 @@ async function remove(item: CommandEntry): Promise<void> {
     </el-tooltip>
 
     <div class="commands__body panel__scroll">
-      <p v-if="!commands.length" class="panel__empty">还没有命令<br />点右上角的 + 添加</p>
+      <p v-if="!commands.length" class="panel__empty">
+        <el-icon class="empty__icon"><Operation /></el-icon>
+        还没有命令<br />点右上角的 + 添加
+      </p>
 
       <ul v-else class="commands__list">
         <li

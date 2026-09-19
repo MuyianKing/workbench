@@ -130,7 +130,7 @@ export const useTerminalStore = defineStore('terminal', () => {
    */
   const terminalButtonTop = ref(DEFAULT_SETTINGS.terminalButtonTop)
 
-  // 设置是异步载入的（也随时可能被设置窗口 / 数据目录迁移改写），跟着它同步一次
+  // 设置是异步载入的（也随时可能被设置窗口改写），跟着它同步一次
   watch(
     () => settingsStore.settings.terminalHeight,
     (value) => {
@@ -276,7 +276,7 @@ export const useTerminalStore = defineStore('terminal', () => {
   /** 往系统终端补一行输出；走批量通道，与项目日志同一套节奏 */
   function appendSystemLog(text: string, stream: LogLine['stream'] = 'out'): void {
     if (!terminals[SYSTEM_PM_TERMINAL]) return
-    pendingLogs.push({
+    pushPending({
       terminal: SYSTEM_PM_TERMINAL,
       projectId: '',
       stream,
@@ -320,6 +320,25 @@ export const useTerminalStore = defineStore('terminal', () => {
    */
   const pendingLogs: ProcessLogEvent[] = []
   let flushScheduled = false
+  let flushTimer: number | null = null
+
+  /**
+   * 攒着的日志上限。
+   *
+   * 窗口最小化到托盘时 rAF 停摆、定时器也被浏览器降到每分钟一次，这期间高产的
+   * dev server 能攒下几万条事件；恢复窗口时那一次整批 flush 要在主线程上全建一遍，
+   * 界面会卡住。环形缓冲本来只保留最近 5000 行，所以超了整段丢最旧的即可。
+   */
+  const PENDING_LIMIT = 20000
+  const PENDING_DROP = 5000
+
+  /** 定时兜底的间隔：正常一帧内 rAF 就把它冲掉了，这个值只在 rAF 不来时才有意义 */
+  const FLUSH_FALLBACK_MS = 200
+
+  function pushPending(event: ProcessLogEvent): void {
+    if (pendingLogs.length >= PENDING_LIMIT) pendingLogs.splice(0, PENDING_DROP)
+    pendingLogs.push(event)
+  }
 
   function dropPendingOf(key: string): void {
     for (let i = pendingLogs.length - 1; i >= 0; i -= 1) {
@@ -331,10 +350,16 @@ export const useTerminalStore = defineStore('terminal', () => {
     if (flushScheduled) return
     flushScheduled = true
     requestAnimationFrame(flushLogs)
+    // 兜底：窗口藏在托盘里时 Chromium 不再给 rAF，只等它日志就永远不落进缓冲
+    flushTimer = window.setTimeout(flushLogs, FLUSH_FALLBACK_MS)
   }
 
   function flushLogs(): void {
     flushScheduled = false
+    if (flushTimer !== null) {
+      window.clearTimeout(flushTimer)
+      flushTimer = null
+    }
     if (!pendingLogs.length) return
 
     const batch = pendingLogs.splice(0, pendingLogs.length)
@@ -373,7 +398,7 @@ export const useTerminalStore = defineStore('terminal', () => {
 
     for (const event of events) {
       if (terminals[event.terminal]) {
-        pendingLogs.push(event)
+        pushPending(event)
         continue
       }
 
@@ -385,7 +410,7 @@ export const useTerminalStore = defineStore('terminal', () => {
       const fallback = terminalOrder.value
         .map((key) => terminals[key])
         .find((item) => item && item.projectId === event.projectId)
-      if (fallback) pendingLogs.push({ ...event, terminal: fallback.key })
+      if (fallback) pushPending({ ...event, terminal: fallback.key })
     }
 
     if (pendingLogs.length) scheduleFlush()

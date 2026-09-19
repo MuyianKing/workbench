@@ -342,6 +342,22 @@ body.is-resizing-notes-tree * {
   color: var(--ink-3);
 }
 
+/**
+ * 空态文字上方那枚淡淡的图标：给空荡的画面一个视觉锚点。
+ * 它只当点缀，不表达状态（状态归彩色那套令牌管），所以压到 --ink-3 再淡一档；
+ * 整页的空态（工作页、笔记 intro）体量大，给 40px，面板内的（今日完成、命令这些）给 26px。
+ */
+.empty__icon {
+  font-size: 40px;
+  color: var(--ink-3);
+  opacity: 0.5;
+}
+
+.panel__empty .empty__icon {
+  font-size: 26px;
+  margin-bottom: 2px;
+}
+
 /* 面板里没内容时的居中说明（例如还没跑过任何命令） */
 .panel__empty {
   display: flex;
@@ -721,25 +737,9 @@ body.is-resizing-notes-tree * {
 /* ---------- 壁纸上的控件（glass / clear 两档才需要） ---------- */
 
 /*
- * band 那一档的顶部是实底白，控件用组件自己的样子最清楚：搜索框取面底、按钮是白底方砖，
- * 因为半透明药丸铺在白色上等于看不见。下面这两条只在壁纸透出来的两档生效。
+ * band 那一档的顶部是实底白，控件用组件自己的样子最清楚：按钮是白底方砖，
+ * 因为半透明药丸铺在白色上等于看不见。下面这条只在壁纸透出来的两档生效。
  */
-
-/* 搜索框：半透明药丸，底色跟着主题走（写死白色在暗色下会糊成一块亮灰） */
-.app.top-glass .header .search,
-.app.top-clear .header .search {
-  background: color-mix(in srgb, var(--bg-surface) 64%, transparent);
-  border-color: color-mix(in srgb, var(--border-strong) 40%, transparent);
-  backdrop-filter: blur(12px) saturate(1.4);
-  /* 药丸上沿同样给一点高光，和玻璃带是同一套material */
-  box-shadow: inset 0 1px 0 var(--glass-edge);
-}
-
-.app.top-glass .header .search:focus-within,
-.app.top-clear .header .search:focus-within {
-  background: var(--bg-surface);
-  border-color: var(--border-strong);
-}
 
 /* 右上角三个工具按钮：去掉白底方砖，只留图标，悬停才浮出一层浅底 */
 .app.top-glass .header .icon-btn,
@@ -930,6 +930,51 @@ body.is-resizing-notes-tree * {
 }
 
 /**
+ * 技能详情弹窗（components/SkillDetailDialog.vue 上的 class，正文另挂 body-class）：
+ * 宽 1200px 的大编辑框，同样要一个确定的高度 —— 头部 / 动作行 / 保存行固定，
+ * 中间的编辑区自己滚（正文不滚，滚动条落在编辑区上，保存按钮永远不会被滚走）。
+ * 与 settings-dialog 同一条上界口径：窗口压到最小时弹窗跟着矮下去。
+ */
+.el-dialog.skill-dialog {
+  /* EP 新版弹窗的本体自带 16px 内边距，这里清零 —— 间距由内容自己给一份就够了，
+     不清的话本体 16px + 内容 16px 叠成 32px，四周看着空一截 */
+  padding: 0;
+  height: min(820px, calc(100vh - var(--h-titlebar) - 48px));
+}
+
+/**
+ * 无头弹窗：标题与关闭按钮由内容自己画（.detail__head），EP 的 header 整行不渲染 ——
+ * el-dialog 没有 el-drawer 那个 with-header 开关，只有 CSS 能把它摘掉
+ * （写 :show-header 这类属性是无效的，EP 会照常渲染出它的关闭按钮，和自绘的叠成两个）。
+ */
+.el-dialog.skill-dialog .el-dialog__header {
+  display: none;
+}
+
+/**
+ * 正文内边距清零：内容自己带（.detail 的 padding），间距由组件自己说了算；
+ * overflow 也要收掉 —— 要滚的是中间的编辑区，不是整个正文。
+ */
+.el-dialog__body.skill-dialog__body {
+  padding: 0;
+  overflow: hidden;
+}
+
+/**
+ * 技能对比弹窗（components/SkillCompareDialog.vue 上的 class，正文另挂 body-class）：
+ * 高度与详情弹窗同一条口径 —— 同一个定高公式，两栏对比区吃掉「标题 / 说明 / 按钮行」
+ * 之外的剩余高度。与详情弹窗一样收掉 EP 正文的内边距（内容自己带）与整窗滚动。
+ */
+.el-dialog.skill-compare-dialog {
+  height: min(820px, calc(100vh - var(--h-titlebar) - 48px));
+}
+
+.el-dialog__body.skill-compare-dialog__body {
+  padding: 0;
+  overflow: hidden;
+}
+
+/**
  * 账号弹窗：内容短，而且**没有页脚**（关闭靠右上角的 ×）。
  *
  * EP 的默认正文内边距是按「下面还有一个按钮行」留的，照搬过来底部会空出一大块，
@@ -948,16 +993,37 @@ body.is-resizing-notes-tree * {
 /**
  * 站内阅读弹窗（components/NewsArticleDialog.vue 上的 class）。
  *
- * 头与脚是 EP 自己生成的元素，scoped 样式够不着，所以形状写在这里。三点考虑：
+ * 头与脚是 EP 自己生成的元素，scoped 样式够不着，所以形状写在这里。四点考虑：
  * 1. **标题可能很长**（新闻标题二三十个字），要允许折行并把行高给足 —— EP 默认是单行；
  * 2. 头与正文之间画一条分隔线：标题与正文是两件事，长文尤其需要这条分界；
  * 3. 弹窗**不设固定高度**：正文长短差别很大（十来段的短讯 vs 上百段的长文），
- *    让它按内容长、到视口上限后由正文自己滚（`.el-dialog` 的 max-height 与 flex 已在上面定好）。
+ *    让它按内容长、到视口上限后由正文自己滚（`.el-dialog` 的 max-height 与 flex 已在上面定好）；
+ * 4. 弹窗本体的内边距**清零**：EP 给 `.el-dialog` 自带 16px，叠在头 / 正文 / 脚各自的内边距上，
+ *    上下各多出一截没有内容的空带（标题离顶边 36px、按钮离底边也 36px）。清掉之后间距只由
+ *    下面那三条说了算，上下各 16px，与左右同一条口径（技能弹窗是同一条做法）。
  */
+.el-dialog.article-dialog {
+  padding: 0;
+}
+
 .el-dialog.article-dialog .el-dialog__header {
-  padding: var(--sp-5) var(--sp-5) var(--sp-3);
+  padding: var(--sp-4) var(--sp-5) var(--sp-3);
   margin-right: 24px;
   border-bottom: 1px solid var(--border);
+}
+
+/**
+ * 关闭按钮与标题**首行**对齐。
+ *
+ * EP 把 × 摆在一个 `top: 0; right: 0` 的 48×48 方块里，也就是贴着弹窗内容区的上沿；
+ * 而标题还要往下压一个头部上内边距，于是 × 看着明显高于标题。这里把方块整体下移，
+ * 让它的中心正好落在标题首行的中线上 —— 方块本身不动，点击区域还是原来那 48px。
+ *
+ * 算式：头部上内边距 + 首行中线（字号 × 行高 1.5 ÷ 2）− 方块自身高度的一半。
+ * 改 `.el-dialog__title` 的行高时要一起改这里的 1.5，否则又会错开。
+ */
+.el-dialog.article-dialog .el-dialog__headerbtn {
+  top: calc(var(--sp-4) + var(--fs-title) * 0.75 - 24px);
 }
 
 .el-dialog.article-dialog .el-dialog__title {
@@ -973,7 +1039,7 @@ body.is-resizing-notes-tree * {
 }
 
 .el-dialog.article-dialog .el-dialog__footer {
-  padding: var(--sp-4) var(--sp-5) var(--sp-5);
+  padding: var(--sp-3) var(--sp-5) var(--sp-4);
 }
 
 /**

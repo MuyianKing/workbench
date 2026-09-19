@@ -115,6 +115,8 @@ export function collectCodeBuddyLogText(text: string, state: CodeBuddyParseState
       reasoningTokens: finite(usage.thinkingTokens),
       cacheReadTokens: cacheRead,
       cacheWriteTokens: finite(usage.cachedWriteTokens),
+      // CodeBuddy 的日志里只有 token 计数，没有额度这一项
+      credits: 0,
       requests: 1
     }
     const modelDays = (days[dateMatch[1]] ??= {})

@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Workbench · 风格十：Riso 孔版印刷</title>
+<link rel="stylesheet" href="../gallery.css">
+<style>
+/* ============ Riso 孔版：荧光粉 + 电光蓝双色套印、颗粒错位 ============ */
+:root {
+  --paper: #f6f4ef;
+  --ink: #1c1a17;
+  --pink: #e8336d;      /* riso fluorescent pink */
+  --blue: #2456d6;      /* riso federal blue */
+  --pink-soft: rgba(232, 51, 109, .12);
+  --blue-soft: rgba(36, 86, 214, .12);
+  --sans: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --serif: Georgia, 'Noto Serif SC', 'Songti SC', serif;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body { font-family: var(--sans); background: var(--paper); color: var(--ink); line-height: 1.85; overflow-x: hidden; }
+canvas#grain { position: fixed; inset: 0; z-index: 0; pointer-events: none; }
+.wrap { position: relative; z-index: 1; max-width: 1060px; margin: 0 auto; padding: 0 clamp(18px, 4vw, 44px); }
+
+/* 套印错位标题的通用类：粉色副本偏移 */
+.overprint { position: relative; display: inline-block; }
+.overprint::before {
+  content: attr(data-t);
+  position: absolute; inset: 0;
+  color: var(--pink);
+  transform: translate(4px, -4px);
+  z-index: -1;
+  transition: transform .3s cubic-bezier(.22,.8,.3,1);
+}
+.overprint:hover::before { transform: translate(7px, -7px); }
+
+/* 报头 */
+.head { display: flex; justify-content: space-between; align-items: center; padding: 24px 0; border-bottom: 2px solid var(--ink); font-size: 12.5px; letter-spacing: .12em; }
+.head .no { color: var(--blue); font-weight: 700; }
+
+/* 首屏 */
+.hero { padding: 88px 0 72px; border-bottom: 2px solid var(--ink); position: relative; }
+.hero .tag { display: inline-block; background: var(--blue); color: var(--paper); font-size: 12.5px; letter-spacing: .22em; padding: 5px 14px; margin-bottom: 28px; }
+.hero h1 { font-family: var(--serif); font-size: clamp(40px, 7.4vw, 88px); line-height: 1.16; font-weight: 700; letter-spacing: -.01em; }
+.hero h1 .b { color: var(--blue); }
+.hero .sub { margin-top: 30px; max-width: 56ch; font-size: 16px; color: #3a362f; }
+.hero .cta { margin-top: 40px; display: flex; gap: 18px; flex-wrap: wrap; }
+.btn { display: inline-block; font-size: 15px; font-weight: 700; letter-spacing: .04em; padding: 13px 30px; border: 2px solid var(--ink); position: relative; transition: transform .2s cubic-bezier(.22,.8,.3,1); }
+.btn:hover { transform: translate(-2px, -2px); }
+.btn.pink { background: var(--pink); border-color: var(--pink); color: #fff; box-shadow: 5px 5px 0 var(--ink); }
+.btn.pink:hover { box-shadow: 7px 7px 0 var(--ink); }
+.btn.blue { background: var(--blue); border-color: var(--blue); color: #fff; box-shadow: 5px 5px 0 var(--ink); }
+.btn.blue:hover { box-shadow: 7px 7px 0 var(--ink); }
+.hero .stamp { position: absolute; right: 0; top: 80px; width: 130px; height: 130px; border: 3px solid var(--pink); border-radius: 999px; display: grid; place-items: center; color: var(--pink); font-weight: 800; font-size: 15px; text-align: center; transform: rotate(-14deg); line-height: 1.5; letter-spacing: .1em; opacity: .85; }
+
+/* 区块 */
+.sec { padding: 76px 0; border-bottom: 2px solid var(--ink); }
+.sec-head { margin-bottom: 44px; }
+.sec-head h2 { font-family: var(--serif); font-size: clamp(28px, 4.4vw, 46px); font-weight: 700; }
+
+/* 模块：双色清单 */
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 56px; }
+.row { display: grid; grid-template-columns: 44px 1fr; gap: 14px; padding: 20px 4px; border-bottom: 1.5px dashed rgba(28,26,23,.35); transition: background .2s; }
+.row:hover { background: var(--pink-soft); }
+.row:nth-child(even):hover { background: var(--blue-soft); }
+.row .n { font-family: var(--serif); font-size: 22px; font-weight: 700; color: var(--blue); }
+.row:nth-child(even) .n { color: var(--pink); }
+.row h3 { font-size: 16.5px; font-weight: 750; }
+.row p { font-size: 13.5px; color: #45403a; }
+
+/* 截图：双色叠印框 */
+.prints { display: grid; grid-template-columns: 1fr 1fr; gap: 48px; }
+.print { position: relative; }
+.print img { width: 100%; display: block; border: 2px solid var(--ink); position: relative; z-index: 1; background: #fff; }
+.print::before { content: ''; position: absolute; inset: 14px -14px -14px 14px; background: var(--pink); opacity: .55; z-index: 0; transition: inset .3s cubic-bezier(.22,.8,.3,1); }
+.print:nth-child(even)::before { background: var(--blue); inset: -14px 14px 14px -14px; }
+.print:hover::before { opacity: .8; }
+.print figcaption { margin-top: 12px; font-size: 12.5px; font-weight: 700; letter-spacing: .1em; }
+.print figcaption span { color: var(--pink); }
+.print:nth-child(even) figcaption span { color: var(--blue); }
+
+/* 隐私 */
+.exit-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px 44px; }
+.exit { display: flex; gap: 14px; align-items: baseline; padding: 14px 0; border-bottom: 1.5px solid rgba(28,26,23,.2); font-size: 14px; }
+.exit b { min-width: 6.5em; font-weight: 750; }
+.exit .led { width: 11px; height: 11px; border-radius: 999px; background: var(--pink); flex: none; transform: translateY(1px); box-shadow: 0 0 0 3px var(--pink-soft); }
+.exit:nth-child(even) .led { background: var(--blue); box-shadow: 0 0 0 3px var(--blue-soft); }
+.exit span { color: #45403a; font-size: 13.5px; }
+.foot-strip { margin-top: 36px; background: var(--ink); color: var(--paper); font-size: 13px; letter-spacing: .14em; padding: 12px 18px; display: inline-block; }
+.foot-strip b { color: var(--pink); }
+
+footer { display: flex; justify-content: space-between; padding: 28px 0 46px; font-size: 12.5px; letter-spacing: .1em; color: #45403a; flex-wrap: wrap; }
+
+.rv { opacity: 0; transform: translateY(16px); transition: opacity .7s cubic-bezier(.22,.8,.3,1), transform .7s cubic-bezier(.22,.8,.3,1); }
+.rv.in { opacity: 1; transform: none; }
+@media (prefers-reduced-motion: reduce) { .rv { opacity: 1; transform: none; transition: none; } *, *::before, *::after { animation: none !important; } }
+@media (max-width: 820px) { .grid2, .prints, .exit-grid { grid-template-columns: 1fr; } .hero .stamp { display: none; } }
+</style>
+</head>
+<body>
+<canvas id="grain" aria-hidden="true"></canvas>
+<div class="wrap">
+
+<div class="head">
+  <span>WORKBENCH 印刷所</span>
+  <span class="no">EDITION 02 · 双色套印</span>
+  <span>FLUO PINK / FEDERAL BLUE</span>
+</div>
+
+<section class="hero">
+  <span class="stamp">零<br>遥测<br>认证</span>
+  <p class="tag">LOCAL-FIRST · WINDOWS</p>
+  <h1><span class="overprint" data-t="一个窗口，">一个窗口，</span><br><span class="overprint b" data-t="管好开发日常。">管好<span class="b">开发日常</span>。</span></h1>
+  <p class="sub">项目、工作日志、笔记与 AI 用量印在同一张纸上：一键装依赖、启动、打包，输出实时可见。数据全在 %APPDATA%\Workbench，默认不联网。</p>
+  <div class="cta">
+    <a class="btn pink" href="#download">取一份印刷品</a>
+    <a class="btn blue" href="#modules">看九个版位</a>
+  </div>
+</section>
+
+<section class="sec" id="modules">
+  <div class="sec-head"><h2 class="overprint" data-t="九个版位">九个版位</h2></div>
+  <div class="grid2">
+    <div class="row rv"><span class="n">01</span><div><h3>首页工作台</h3><p>九块卡片随拖随存，位置与行划分实时落盘。</p></div></div>
+    <div class="row rv"><span class="n">02</span><div><h3>项目管理</h3><p>读 package.json 识框架与包管理器，分组排序标识色。</p></div></div>
+    <div class="row rv"><span class="n">03</span><div><h3>一键操作</h3><p>装 / 启 / 打包 / 停 / 重启，端口被占时点名占用者。</p></div></div>
+    <div class="row rv"><span class="n">04</span><div><h3>终端面板</h3><p>一类操作一个 Tab，停止按进程树收干净。</p></div></div>
+    <div class="row rv"><span class="n">05</span><div><h3>工作日志</h3><p>按天分组时间轴，可挂项目标待办，只留本机。</p></div></div>
+    <div class="row rv"><span class="n">06</span><div><h3>笔记</h3><p>文件夹即笔记本，树状映射，边写边存，可随 git 同步。</p></div></div>
+    <div class="row rv"><span class="n">07</span><div><h3>技能</h3><p>版本即 git 历史，一键装进项目的 .agents/skills/。</p></div></div>
+    <div class="row rv"><span class="n">08</span><div><h3>Coding 用量</h3><p>诸家 AI 工具 token 消耗，日 / 周 / 月趋势占比。</p></div></div>
+    <div class="row rv" style="grid-column: 1 / -1;"><span class="n">09</span><div><h3>账号与系统集成</h3><p>GitHub / Gitee OAuth 登录，凭据进 Windows 凭据管理器；快捷键、托盘、自启、目录迁移。</p></div></div>
+  </div>
+</section>
+
+<section class="sec" id="tour">
+  <div class="sec-head"><h2 class="overprint" data-t="四张样张">四张样张</h2></div>
+  <div class="prints">
+    <figure class="print rv"><img src="../assets/home.png" alt="首页截图" loading="lazy"><figcaption><span>PLATE 01</span> · 首页看板</figcaption></figure>
+    <figure class="print rv"><img src="../assets/projects.png" alt="项目页截图" loading="lazy"><figcaption><span>PLATE 02</span> · 项目总览</figcaption></figure>
+    <figure class="print rv"><img src="../assets/worklog.png" alt="工作日志截图" loading="lazy"><figcaption><span>PLATE 03</span> · 工作日志</figcaption></figure>
+    <figure class="print rv"><img src="../assets/settings.png" alt="设置页截图" loading="lazy"><figcaption><span>PLATE 04</span> · 设置</figcaption></figure>
+  </div>
+</section>
+
+<section class="sec" id="privacy">
+  <div class="sec-head"><h2 class="overprint" data-t="油墨成分说明">油墨成分说明</h2></div>
+  <div class="exit-grid">
+    <div class="exit rv"><span class="led"></span><b>用量同步</b><span>可选。只推模型名与计数，往你自己填的 git 仓库。</span></div>
+    <div class="exit rv"><span class="led"></span><b>笔记图片</b><span>可选。图片推到你配置的仓库，正文只留外链。</span></div>
+    <div class="exit rv"><span class="led"></span><b>笔记同步</b><span>可选。点了按钮，才与仓库对齐一次。</span></div>
+    <div class="exit rv"><span class="led"></span><b>账号登录</b><span>只在点登录时访问 GitHub / Gitee 授权接口。</span></div>
+    <div class="exit rv"><span class="led"></span><b>命令执行</b><span>你跑的 npm / dev server，不是应用的行为。</span></div>
+    <div class="exit rv"><span class="led"></span><b>AI 热点</b><span>只读内置中文源白名单，只读不上报。</span></div>
+  </div>
+  <p class="foot-strip">本印刷品 <b>不含遥测成分</b> · 六个出口默认全关 · 数据固定本机</p>
+</section>
+
+<section class="sec" id="download" style="border-bottom:none;">
+  <div class="sec-head"><h2 class="overprint" data-t="订阅印刷">订阅印刷</h2></div>
+  <div class="cta" style="margin-top:0;">
+    <a class="btn pink" href="../index.html">下载 Windows 安装包</a>
+    <a class="btn blue" href="https://github.com/MuyianKing/workbench" target="_blank" rel="noopener">GitHub 源码</a>
+  </div>
+  <p style="margin-top:24px; font-size:13.5px; color:#45403a;">从源码跑：git clone → npm install → npm run dev。需 Windows + Node.js + Rust MSVC。</p>
+</section>
+
+<footer>
+  <span>WORKBENCH 印刷所 · 本地优先</span>
+  <span>PRINTED LOCALLY · NO TELEMETRY</span>
+</footer>
+
+</div>
+
+<script>
+// 背景：Riso 颗粒噪点缓缓流动 + 两张大色版错位呼吸
+(function () {
+  var c = document.getElementById('grain'), x = c.getContext('2d');
+  var w, h, t = 0;
+  function size() { w = innerWidth; h = innerHeight; c.width = w; c.height = h; }
+  addEventListener('resize', size); size();
+  var dots = [];
+  function seed() {
+    dots = [];
+    var n = Math.min(900, Math.round(w * h / 2600));
+    for (var i = 0; i < n; i++) {
+      dots.push({ x: Math.random() * w, y: Math.random() * h, r: Math.random() * 1.6 + .4,
+        col: Math.random() < .5 ? '232,51,109' : '36,86,214', a: Math.random() * .10 + .02, ph: Math.random() * 6.28 });
+    }
+  }
+  seed();
+  addEventListener('resize', seed);
+  var stop = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  function frame() {
+    t += .016;
+    x.clearRect(0, 0, w, h);
+    // 两张色版：错位的巨大圆形底墨
+    var bx = w * .82 + Math.sin(t * .3) * 14, by = h * .18 + Math.cos(t * .22) * 10;
+    x.globalAlpha = .05; x.fillStyle = '#e8336d';
+    x.beginPath(); x.arc(bx, by, Math.min(w, h) * .34, 0, 6.28); x.fill();
+    x.fillStyle = '#2456d6';
+    x.beginPath(); x.arc(bx - 18, by + 14, Math.min(w, h) * .34, 0, 6.28); x.fill();
+    var cx2 = w * .12 + Math.cos(t * .26) * 12, cy2 = h * .78 + Math.sin(t * .31) * 12;
+    x.fillStyle = '#2456d6'; x.globalAlpha = .045;
+    x.beginPath(); x.arc(cx2, cy2, Math.min(w, h) * .3, 0, 6.28); x.fill();
+    x.fillStyle = '#e8336d'; x.globalAlpha = .04;
+    x.beginPath(); x.arc(cx2 + 14, cy2 - 10, Math.min(w, h) * .3, 0, 6.28); x.fill();
+    // 颗粒
+    for (var i = 0; i < dots.length; i++) {
+      var d = dots[i];
+      x.globalAlpha = d.a * (.6 + .4 * Math.sin(t * 2 + d.ph));
+      x.fillStyle = 'rgb(' + d.col + ')';
+      x.fillRect(d.x, d.y, d.r, d.r);
+    }
+    x.globalAlpha = 1;
+    if (!stop) requestAnimationFrame(frame);
+  }
+  frame();
+})();
+
+var io = new IntersectionObserver(function (es) { es.forEach(function (e) { if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); } }); }, { threshold: .12 });
+document.querySelectorAll('.rv').forEach(function (el) { io.observe(el); });
+addEventListener('load', function () { setTimeout(function () { document.querySelectorAll('.rv').forEach(function (el) { el.classList.add('in'); }); }, 2500); });
+</script>
+<script src="../switcher.js"></script>
+</body>
+</html>

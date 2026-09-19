@@ -13,6 +13,7 @@
  * 项目一个都没有时给一句空状态，免得面板里是一片空白。
  */
 import { computed } from 'vue'
+import { Clock } from '@element-plus/icons-vue'
 import { useProjectsStore } from '@/stores/projects'
 import ProjectCard from '@/components/ProjectCard.vue'
 
@@ -35,7 +36,10 @@ const recent = computed(() =>
       <ProjectCard v-for="project in recent" :key="project.id" :project="project" />
     </div>
 
-    <p v-else class="panel__empty">还没有项目<br />添加一个项目后，最近用过的会排在这里。</p>
+    <p v-else class="panel__empty">
+      <el-icon class="empty__icon"><Clock /></el-icon>
+      还没有项目<br />添加一个项目后，最近用过的会排在这里。
+    </p>
   </article>
 </template>
 

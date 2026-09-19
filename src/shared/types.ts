@@ -7,13 +7,7 @@ import { TERMINAL_BUTTON_TOP_DEFAULT } from './terminal-dock'
 import { CARD_OPACITY_DEFAULT } from './card-opacity'
 import { BACKGROUND_OPACITY_DEFAULT } from './workspace-background'
 import { builtinReference } from './wallpaper'
-import { AI_NEWS_DEFAULT_SOURCES } from './ai-news'
-import type {
-  AiNewsArticle,
-  AiNewsRefreshResult,
-  AiNewsSourcesPayload,
-  AiNewsView
-} from './ai-news'
+import type { AiNewsArticle, AiNewsRefreshResult, AiNewsSourceInfo, AiNewsView } from './ai-news'
 import type { AppearanceSettingKey } from './appearance'
 import type { SyncDeviceInfo } from './sync-config'
 import type { ActivityCounts } from './activity'
@@ -24,6 +18,15 @@ import type { ThemeConfig } from './theme'
 import type { TokenUsageResult } from './token-usage'
 import type { ViewId } from './views'
 import type { NoteChange, NoteCreateInput, NoteNode, NoteSyncInput, NoteSyncSummary } from './note'
+import { SKILL_SYNC_DIR_DEFAULT } from './skills'
+import type {
+  SkillCommit,
+  SkillCompareFile,
+  SkillCreateInput,
+  SkillEntry,
+  SkillFileInfo,
+  SkillInstalledScan
+} from './skills'
 import type {
   NoteImageDeleteInput,
   NoteImageDeleted,
@@ -51,12 +54,11 @@ export type {
   AiNewsItem,
   AiNewsRefreshResult,
   AiNewsSourceInfo,
-  AiNewsSourceStatus,
-  AiNewsSourcesPayload,
   AiNewsView
 } from './ai-news'
 export type { TokenUsageResult } from './token-usage'
 export type { ProjectColor } from './project-color'
+export type { SkillCommit, SkillCreateInput, SkillEntry, SkillFileInfo, SkillInstalledScan } from './skills'
 export type { WorkLogEntry, WorkLogInput, WorkLogPatch } from './work-log'
 export type {
   NoteChange,
@@ -106,7 +108,7 @@ export type ThemeSource = 'system' | 'light' | 'dark'
 export type EffectiveTheme = 'light' | 'dark'
 
 /**
- * 顶部三条栏（标题栏 / 搜索栏 / 筛选栏）的样式。
+ * 顶部三条栏（标题栏 / 欢迎语 / 筛选栏）的样式。
  *
  * 壁纸现在铺满整个窗口，这三条栏就有了三种处理方式；取值同时用于落盘收敛与设置界面，
  * 所以放在 shared 里当唯一口径。
@@ -299,7 +301,7 @@ export interface AppSettings {
   appName: string
   /** 开机自启，默认开启 */
   launchAtLogin: boolean
-  /** 主题，默认暗色 */
+  /** 主题，默认亮色 */
   theme: ThemeSource
   /** 全局快捷键是否启用 */
   hotkeyEnabled: boolean
@@ -389,6 +391,17 @@ export interface AppSettings {
    */
   noteImageRepo: string
   /**
+   * 技能（skill）在**笔记仓库里**的子目录，默认 `skills`。
+   *
+   * 技能库就是笔记文件夹下的这一层（`<noteDir>/<skillSyncDir>/<技能>/SKILL.md`）：
+   * 版本管理就是那个仓库的提交历史（每次增删改自动提交一次），推到远端跟着笔记同步走 ——
+   * 所以它不是新的网络出口，只是笔记仓库里的另一种内容。
+   * 这个路径**进 theme.json**（见 appearance.ts 的白名单）：它不是「界面长什么样」，
+   * 但它是仓库结构约定 —— 两台机器要落在同一层才互相看得见对方的技能，
+   * 带着配置一起同步过去正好保证这一点。
+   */
+  skillSyncDir: string
+  /**
    * Token 用量同步仓库地址（git 远程地址），空串表示不同步。
    *
    * 多台机器各自把「本机分片」推到这一个仓库里，读的时候全量合并 ——
@@ -438,37 +451,11 @@ export interface AppSettings {
    * 指的是完全不同的东西。与 `noteDir` 一样只在本机成立，不参与同步。
    */
   noteTreeExpanded: string[]
-  /**
-   * 首页「AI 热点」卡片启用了哪些源（源 id 清单，清单本身在 Rust 的 `SOURCES` 里）。
-   *
-   * 存「启用了哪些」而不是「关掉了哪些」：这是一个**联网出口**，将来加一个新源时，
-   * 老配置里没有它就不该悄悄开始发请求 —— 新源对所有人默认是关的，要用户自己去勾。
-   * 认不出的 id 由适配层跳过（源清单是 Rust 的事，这里的字符串不参与校验）。
-   *
-   * 空数组是合法的：用户可以不看热点，卡片会显示「去设置里勾一个源」的引导。
-   */
-  aiNewsSources: string[]
-  /**
-   * 同步时是否把本机的外观配置一起写进分片（默认开启）。
-   *
-   * 外观＝明暗、主题色、顶部样式、卡片不透明度、终端高度、程序名称、工作区背景（只带内置壁纸）、
-   * 导航菜单显示哪几页与首页布局，见 shared/appearance.ts。关掉之后本机分片里那一项会被清掉（下一次同步时提交），
-   * 别的机器也就取不到这份配置了 —— 只同步用量数字的场景留给这个开关。
-   */
-  syncAppearance: boolean
-  /**
-   * 登录之后，是否用这个账号的 token 去授权 Token 同步（默认开启）。
-   *
-   * 关掉就退回「用系统里 git 自己配好的凭据」那条老路。**这条退路必须留着**：
-   * 账号 token 会过期、会被撤销，如果同步只剩它一条路，token 一失效，
-   * 原本一直好用的同步也跟着一起坏掉。
-   */
-  useAccountForSync: boolean
 }
 
 /**
  * `workbench-data.json` 里真正落盘的那部分设置：外观与首页布局都住在 `theme.json`（见 appearance.ts）。
- * 同步时带走的也是后面那一份 —— 这里的快捷键、开机自启、数据目录、仓库地址换台机器就不成立。
+ * 同步时带走的也是后面那一份 —— 这里的快捷键、开机自启、仓库地址换台机器就不成立。
  */
 export type StoredSettings = Omit<AppSettings, AppearanceSettingKey>
 
@@ -920,6 +907,11 @@ export interface WorkbenchApi {
    */
   syncTokenUsage: () => Promise<Result<TokenUsageResult>>
   /**
+   * 只同步外观配置（设置 → 外观 →「同步一次」）：把本机 theme.json 整份推上去、
+   * 把别的机器的读回来 —— 不实读用量、不推分片，与 syncTokenUsage 互不相干。
+   */
+  syncThemeConfig: () => Promise<Result<{ changed: boolean }>>
+  /**
    * 同步仓库里**别的机器**（各自的外观配置快照一起带回来）。
    *
    * 只读本地那份克隆，不联网、也不推东西，所以设置界面打开时随时可以问；
@@ -983,14 +975,11 @@ export interface WorkbenchApi {
    */
   loadAiNewsArticle: (url: string) => Promise<Result<AiNewsArticle>>
   /**
-   * AI 热点：内置源清单（id / 名字 / 会访问的地址 / 是否需要 token / 建议刷新间隔）
-   * 加「那个需要 token 的源配没配」。设置界面靠它列出源来，界面因此能如实显示访问地址。
+   * AI 热点：内置源清单（id / 名字 / 载荷格式 / 建议刷新间隔）。
+   *
+   * 不给地址：地址只住在宿主侧的白名单里，渲染层连一个能出网的字符串都拿不到。
    */
-  aiNewsSources: () => Promise<Result<AiNewsSourcesPayload>>
-  /** 保存机器之心 RSS token（设置界面填的那一次；空值被 Rust 侧拒绝） */
-  setAiNewsToken: (token: string) => Promise<Result<null>>
-  /** 清掉机器之心 RSS token（设置界面的「清除」） */
-  clearAiNewsToken: () => Promise<Result<null>>
+  aiNewsSources: () => Promise<Result<AiNewsSourceInfo[]>>
   /**
    * 笔记：**用户自己挑的一个文件夹**里的目录树（文件夹 + markdown 文件）。
    *
@@ -1057,6 +1046,79 @@ export interface WorkbenchApi {
    * 一张还在用的图当成没人引用。
    */
   scanNoteTexts: (root: string) => Promise<Result<NoteTextScan>>
+  // ---------- 技能（住在笔记仓库的一个子目录里，见 shared/skills.ts） ----------
+  /**
+   * 列出技能库里的技能：Rust 回 id / 文件数 / SKILL.md 原文，名字与描述由适配层解析。
+   * 技能库还不存在（第一次用）时是空数组，不是错误。
+   */
+  listSkills: (root: string, dir: string) => Promise<Result<SkillEntry[]>>
+  /** 新建技能：建目录 + 写 SKILL.md 骨架 + 在笔记仓库里提交一次 */
+  createSkill: (root: string, dir: string, input: SkillCreateInput) => Promise<Result<null>>
+  /**
+   * 保存技能里的一个文件；**保存 SKILL.md（清单）时有必经的 version 门槛**
+   * （frontmatter 必须带语义化 version），附属文件没有这一关。
+   * 内容真的变了才产生一次版本提交，提交信息带版本号（清单）或文件路径（附属文件）。
+   */
+  saveSkillFile: (
+    root: string,
+    dir: string,
+    id: string,
+    rel: string,
+    content: string
+  ) => Promise<Result<null>>
+  /** 删除技能（整棵目录），并提交这次删除 */
+  removeSkill: (root: string, dir: string, id: string) => Promise<Result<null>>
+  /** 从本机一个文件夹导入技能（复制进技能库），并提交 */
+  importSkill: (root: string, dir: string, source: string, id: string) => Promise<Result<null>>
+  /** 某个技能的版本历史（就是它在笔记仓库里的提交记录，新的在前） */
+  skillHistory: (root: string, dir: string, id: string, limit?: number) => Promise<Result<SkillCommit[]>>
+  /** 把某个技能恢复到指定版本（旧版内容检出并提交一次恢复记录） */
+  restoreSkill: (root: string, dir: string, id: string, hash: string) => Promise<Result<null>>
+  /**
+   * 某一版与现在这一份的逐文件对比（恢复之前先看清差异）：适配层把 Rust 回来的两侧拼成
+   * 对比弹窗认的那份清单 —— base = 现在库里的内容、incoming = 那一版的内容，
+   * 文件取两侧的**并集**（那一版有、现在删掉的同样是差异）。形状与「项目副本 vs 库」完全一致。
+   */
+  compareSkillVersion: (
+    root: string,
+    dir: string,
+    id: string,
+    hash: string
+  ) => Promise<Result<SkillCompareFile[]>>
+  /**
+   * 把技能安装到指定项目（复制到 `<项目>/.agents/skills/<id>/`）。
+   * 目标已存在且未给 overwrite 时返回失败 —— 界面确认过「要覆盖」再带 overwrite 重调。
+   */
+  installSkill: (
+    root: string,
+    dir: string,
+    id: string,
+    projectDir: string,
+    overwrite: boolean
+  ) => Promise<Result<null>>
+  /**
+   * 各个项目里这份技能的 SKILL.md 副本（**只读**）：详情页拿它与库中的内容比对，
+   * 找出「项目里补充优化过」的版本。没装（或读不出来）的项目带回 null 内容 ——
+   * null 不能当新版本采用；比对口径（换行归一、与库中哪个版本比）在渲染层。
+   */
+  /**
+   * 库与各项目副本的**全部文本文件**（只读扫描）：详情页据此判定「有没有更新」并在
+   * 切换文件时弹对比。SKILL.md 按 version 比较判定，附属文件按内容比对 —— 口径在渲染层
+   * （shared/skills.ts 的 compareSkillVersions）；二进制（content 为 null）不参与比对。
+   */
+  scanSkillCopies: (
+    root: string,
+    dir: string,
+    id: string,
+    projectDirs: string[]
+  ) => Promise<Result<SkillInstalledScan>>
+  /**
+   * 技能目录里的全部文件（相对路径 + 字节数）：一个技能往往不止 SKILL.md，
+   * 脚本 / 模板 / 子文档都是技能的一部分。点开头的项不进清单。
+   */
+  listSkillFiles: (root: string, dir: string, id: string) => Promise<Result<SkillFileInfo[]>>
+  /** 读技能里的一个文件（任意文本文件；二进制读不出文本时如实失败） */
+  readSkillFile: (root: string, dir: string, id: string, rel: string) => Promise<Result<string>>
   /** 启动一条命令；进程由 Workbench 接管，日志进底部终端 */
   startCommand: (id: string) => Promise<Result<null>>
   /** 停止一条命令；已在应用外跑着的那种只能按端口结束，由渲染层先确认 */
@@ -1119,12 +1181,8 @@ export interface WorkbenchApi {
   getThemeConfig: () => Promise<ThemeConfig>
   /** 合并保存首页布局；返回收敛后的最终值 */
   updateThemeConfig: (patch: Partial<ThemeConfig>) => Promise<Result<ThemeConfig>>
-  /** 项目数据文件所在目录（含是否为默认位置） */
-  getDataLocation: () => Promise<DataLocation>
-  /** 选择新的数据目录；目标已存在数据文件时返回冲突而不是直接覆盖 */
-  pickDataDir: () => Promise<DataLocationPick>
-  /** 迁移：把当前数据写到新目录并切过去 */
-  migrateDataDir: (dir: string) => Promise<Result<DataLocation>>
+  /** 数据目录：固定 `%APPDATA%\Workbench\data`，界面只用来如实显示数据放在哪儿 */
+  getDataDir: () => Promise<string>
   /**
    * 账号登录状态：能不能登录、回调地址、已登录哪些平台。
    * **不返回任何 token** —— 它在 Rust 侧，渲染层碰不到（见 AccountProfile）。
@@ -1163,8 +1221,6 @@ export interface WorkbenchApi {
   onTheme: (fn: (theme: EffectiveTheme) => void) => () => void
   /** 包管理器安装过程中的输出，一行一行推过来 */
   onPmInstallLog: (fn: (e: PmInstallLogEvent) => void) => () => void
-  /** 数据目录切换后，渲染层需要整份重新加载 */
-  onDataReload: (fn: () => void) => () => void
   /**
    * 后台的 Token 自动同步跑完一轮（成功失败都算）。
    *
@@ -1200,21 +1256,6 @@ export interface WorkbenchApi {
 /** 自绘标题栏需要知道的窗口状态 */
 export interface WindowState {
   maximized: boolean
-}
-
-/** 数据文件位置信息 */
-export interface DataLocation {
-  dir: string
-  file: string
-  /** 是否是应用默认目录（userData） */
-  isDefault: boolean
-}
-
-export interface DataLocationPick {
-  /** 用户取消选择时为 null */
-  dir: string | null
-  /** 目标目录里已经有 workbench-data.json */
-  conflict: boolean
 }
 
 /** 退出确认的结果：停止所有项目再退 / 保留项目直接退 / 取消（不退出） */
@@ -1280,9 +1321,7 @@ export const IPC = {
   getThemeConfig: 'theme:get',
   updateThemeConfig: 'theme:update',
   eventThemeConfig: 'theme:changed',
-  getDataLocation: 'data:location',
-  pickDataDir: 'data:pick-dir',
-  migrateDataDir: 'data:migrate',
+  getDataDir: 'data:dir',
   install: 'process:install',
   start: 'process:start',
   build: 'process:build',
@@ -1296,7 +1335,6 @@ export const IPC = {
   eventSettings: 'settings:changed',
   eventTheme: 'settings:theme',
   eventPmInstallLog: 'system:pm-install-log',
-  eventDataReload: 'data:reload',
   getBootstrap: 'app:bootstrap',
   eventQuitConfirm: 'app:quit-confirm',
   quitConfirmRespond: 'app:quit-confirm-respond',
@@ -1321,7 +1359,6 @@ export type BroadcastChannel =
   | typeof IPC.eventSettings
   | typeof IPC.eventTheme
   | typeof IPC.eventPmInstallLog
-  | typeof IPC.eventDataReload
   | typeof IPC.eventThemeConfig
   | typeof IPC.eventQuitConfirm
   | typeof IPC.eventWindowState
@@ -1336,12 +1373,12 @@ export type BroadcastChannel =
 export const DEFAULT_SETTINGS: AppSettings = {
   appName: APP_NAME_DEFAULT,
   launchAtLogin: true,
-  theme: 'dark',
+  theme: 'light',
   hotkeyEnabled: true,
   hotkey: 'Control+M',
   terminalHeight: TERMINAL_HEIGHT_DEFAULT,
   terminalButtonTop: TERMINAL_BUTTON_TOP_DEFAULT,
-  workspaceBackground: builtinReference('二次元美女'),
+  workspaceBackground: builtinReference('五星红旗'),
   workspaceBackgroundOpacity: BACKGROUND_OPACITY_DEFAULT,
   workspaceBackgroundVeil: '',
   accentColor: ACCENT_COLOR_DEFAULT,
@@ -1352,6 +1389,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   noteDirs: [],
   noteSyncRepo: '',
   noteImageRepo: '',
+  skillSyncDir: SKILL_SYNC_DIR_DEFAULT,
   tokenSyncRepo: '',
   activeView: 'home',
   hiddenViews: [],
@@ -1359,10 +1397,5 @@ export const DEFAULT_SETTINGS: AppSettings = {
   projectSort: PROJECT_SORT_DEFAULT,
   workRange: WORK_RANGE_DEFAULT,
   workSort: WORK_SORT_DEFAULT,
-  noteTreeExpanded: [],
-  // 首页「AI 热点」默认开这个免费中文源（id 与 Rust 的 SOURCES 对齐，
-  // 那边有一条单测盯着它必须存在且 needs_token 为 false）
-  aiNewsSources: [...AI_NEWS_DEFAULT_SOURCES],
-  syncAppearance: true,
-  useAccountForSync: true
+  noteTreeExpanded: []
 }

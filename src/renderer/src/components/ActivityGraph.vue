@@ -8,7 +8,7 @@
  * 只算用户主动发起的启动与打包：安装依赖、自定义命令、停止与失败都不计入 ——
  * 活跃度回答的是「这段时间用得勤不勤」，不是「跑得顺不顺」。
  */
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onActivated, ref } from 'vue'
 import { useProjectsStore } from '@/stores/projects'
 import { buildActivityCalendar, monthLabels, type ActivityDay } from '@shared/activity'
 
@@ -27,7 +27,13 @@ function scrollToLatest(): void {
   if (el) el.scrollLeft = el.scrollWidth
 }
 
-onMounted(() => void nextTick(scrollToLatest))
+/**
+ * 用 onActivated 而不是 onMounted：首页被 KeepAlive 包着，切走的页面 DOM 会被整个摘下、
+ * 切回时再插回去，元素的横向滚动位置就在这一摘一插之间被浏览器重置回最左，
+ * 而 onMounted 只在首次挂载跑一次。onActivated 首次挂载同样触发，每次回到首页都会
+ * 再跑一遍，正好把两种情况都接住。
+ */
+onActivated(() => void nextTick(scrollToLatest))
 
 /** 一列从上到下是周日到周六，只在周一 / 周三 / 周五标一下（GitHub 的做法） */
 const WEEKDAY_LABELS = ['', 'Mon', '', 'Wed', '', 'Fri', '']
@@ -255,7 +261,7 @@ function tipOf(day: ActivityDay): string {
   margin-top: -5px;
   padding-bottom: var(--sp-2);
   font-size: var(--fs-meta);
-  justify-content:center;
+  justify-content: space-between;
 }
 
 .graph__stats .stat {

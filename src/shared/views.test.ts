@@ -41,11 +41,11 @@ describe('导航栏显示哪几页', () => {
 
   it('剩下哪几页永远按 VIEW_IDS 的顺序（关掉哪几项不影响其余项的先后）', () => {
     expect(visibleViews([])).toEqual([...VIEW_IDS])
-    expect(visibleViews(['home', 'work'])).toEqual(['projects', 'notes'])
+    expect(visibleViews(['home', 'work'])).toEqual(['projects', 'notes', 'skills'])
   })
 
   it('至少留一页：全关掉时把首页留下，界面上不会一个入口都不剩', () => {
-    expect(sanitizeHiddenViews([...VIEW_IDS])).toEqual(['projects', 'work', 'notes'])
+    expect(sanitizeHiddenViews([...VIEW_IDS])).toEqual(['projects', 'work', 'notes', 'skills'])
     expect(visibleViews(sanitizeHiddenViews([...VIEW_IDS]))).toEqual(['home'])
   })
 
@@ -53,7 +53,7 @@ describe('导航栏显示哪几页', () => {
     expect(fallbackView(['home'])).toBe('projects')
     expect(fallbackView(['home', 'projects', 'work'])).toBe('notes')
     expect(fallbackView([])).toBe('home')
-    // 防御：真的把四页都关掉时也不能返回 undefined（正常到不了这里）
+    // 防御：真的把每一页都关掉时也不能返回 undefined（正常到不了这里）
     expect(fallbackView([...VIEW_IDS])).toBe('home')
   })
 })

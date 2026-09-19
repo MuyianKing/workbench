@@ -180,11 +180,10 @@ pub fn note_image_upload(
     dir: String,
     name: String,
     data: String,
-    use_account: bool,
 ) -> Result<Value, String> {
     let bytes = crate::encoding::base64_decode(&data)
         .ok_or_else(|| "图片数据读不出来（base64 解不开）".to_string())?;
-    crate::sync::publish_image(&repo, &dir, &name, &bytes, use_account)
+    crate::sync::publish_image(&repo, &dir, &name, &bytes)
 }
 
 /// 素材管理：图片仓库里现有的图（顺手把本地克隆拉到最新）。
@@ -192,21 +191,16 @@ pub fn note_image_upload(
 /// 只回仓库里那个图片子目录中的图片文件；「谁被引用了多少次」由渲染层拿笔记正文去算
 /// （那是纯计算，见 shared/note-image.ts）。
 #[tauri::command(async)]
-pub fn note_images_list(repo: String, dir: String, use_account: bool) -> Result<Value, String> {
-    crate::sync::list_images(&repo, &dir, use_account)
+pub fn note_images_list(repo: String, dir: String) -> Result<Value, String> {
+    crate::sync::list_images(&repo, &dir)
 }
 
 /// 素材管理：批量删掉仓库里的图片（一次提交、一次推送）。
 ///
 /// `paths` 是列表回来的那种「仓库内相对路径」，越界与非法路径在 sync.rs 里逐条挡住。
 #[tauri::command(async)]
-pub fn note_images_delete(
-    repo: String,
-    dir: String,
-    paths: Vec<String>,
-    use_account: bool,
-) -> Result<Value, String> {
-    crate::sync::delete_images(&repo, &dir, &paths, use_account)
+pub fn note_images_delete(repo: String, dir: String, paths: Vec<String>) -> Result<Value, String> {
+    crate::sync::delete_images(&repo, &dir, &paths)
 }
 
 /// 笔记本里所有笔记的正文（引用计数用）：只读盘、不做任何过滤与统计
@@ -220,34 +214,97 @@ pub fn note_scan_texts(root: String) -> Result<Value, String> {
 /// 与另一个仓库（图片）一样，凭据要么是已登录账号的 token、要么是系统里 git 配好的那一套；
 /// 冲突与「文件夹里还留着半截 rebase」这类情况一律收敛成一句给用户看的话，见 sync::sync_notes。
 #[tauri::command(async)]
-pub fn note_sync(repo: String, dir: String, use_account: bool) -> Result<Value, String> {
-    crate::sync::sync_notes(&repo, &dir, use_account)
+pub fn note_sync(repo: String, dir: String) -> Result<Value, String> {
+    crate::sync::sync_notes(&repo, &dir)
 }
 
-#[tauri::command]
-pub fn data_location() -> Value {
-    let custom = paths::custom_dir();
-    json!({
-        "dir": paths::data_dir().to_string_lossy(),
-        "file": paths::data_file().to_string_lossy(),
-        "isDefault": custom.is_none(),
-    })
-}
+// ---------- 技能（skill：住在笔记仓库的一个子目录里，见 skills.rs） ----------
+//
+// 六条全是实打实的磁盘读写（还有本地 git 调用），一律异步。
+// 名字的合法性在这里再挡一道（skills.rs 的 require_id / rel_of），
+// 但「叫什么、装到哪」由渲染层决定 —— 这一层只认路径与动作。
 
-#[tauri::command]
-pub fn data_file_exists_in(dir: String) -> bool {
-    paths::data_file_exists_in(&dir)
-}
-
-/// 迁移数据目录要真搬文件，不能挡在主线程上
+/// 技能库里的技能（id / 文件数 / SKILL.md 原文）；名字与描述由渲染层解析
 #[tauri::command(async)]
-pub fn data_migrate(dir: String) -> Result<(), String> {
-    // 先把当前内存态同步落盘，迁移走的才是最新数据（主题文件与工作日志也在搬运行列里）
-    data_store().flush_sync();
-    theme_store().flush_sync();
-    token_store().flush_sync();
-    work_log_store().flush_sync();
-    paths::migrate_data_dir(&dir, &data_store().get())
+pub fn skill_list(root: String, dir: String) -> Result<Vec<Value>, String> {
+    crate::skills::list(&root, &dir)
+}
+
+/// 把技能库下的当前改动提交一次（内容没变、还不是仓库都不报错，见 skills::commit）
+#[tauri::command(async)]
+pub fn skill_commit(root: String, dir: String, message: String) -> Result<Value, String> {
+    crate::skills::commit(&root, &dir, &message)
+}
+
+/// 某个技能的版本历史（它在笔记仓库里的提交记录，新的在前）
+#[tauri::command(async)]
+pub fn skill_history(
+    root: String,
+    dir: String,
+    id: String,
+    limit: Option<usize>,
+) -> Result<Vec<Value>, String> {
+    crate::skills::history(&root, &dir, &id, limit)
+}
+
+/// 恢复到指定版本（旧版内容检出并提交一次恢复记录）
+#[tauri::command(async)]
+pub fn skill_restore(root: String, dir: String, id: String, hash: String) -> Result<Value, String> {
+    crate::skills::restore(&root, &dir, &id, &hash)
+}
+
+/// 版本对比：某个版本里这个技能的全部文件 + 工作区里现在的那份（两侧同一种形状），
+/// 「版本历史」里点「对比」时走它 —— 恢复之前先看清楚改了什么
+#[tauri::command(async)]
+pub fn skill_version_compare(
+    root: String,
+    dir: String,
+    id: String,
+    hash: String,
+) -> Result<Value, String> {
+    crate::skills::version_compare(&root, &dir, &id, &hash)
+}
+
+/// 从本机一个文件夹把技能导入技能库（复制，同名已存在时报错）
+#[tauri::command(async)]
+pub fn skill_import(root: String, dir: String, source: String, id: String) -> Result<Value, String> {
+    crate::skills::import_skill(&root, &dir, &source, &id)
+}
+
+/// 把技能安装到指定项目（`<项目>/.agents/skills/<id>/`）；目标已存在且未确认覆盖时报错
+#[tauri::command(async)]
+pub fn skill_install(
+    root: String,
+    dir: String,
+    id: String,
+    project_dir: String,
+    overwrite: bool,
+) -> Result<Value, String> {
+    crate::skills::install(&root, &dir, &id, &project_dir, overwrite)
+}
+
+/// 库与各项目副本的全部文本文件（只读）：渲染层比对「项目里有没有要更新回来的内容」
+#[tauri::command(async)]
+pub fn skill_installed_versions(
+    root: String,
+    dir: String,
+    id: String,
+    project_dirs: Vec<String>,
+) -> Result<Value, String> {
+    crate::skills::installed_versions(&root, &dir, &id, &project_dirs)
+}
+
+/// 技能目录里的全部文件（相对路径 + 字节数）：多文件编辑的清单
+#[tauri::command(async)]
+pub fn skill_files(root: String, dir: String, id: String) -> Result<Vec<Value>, String> {
+    crate::skills::files(&root, &dir, &id)
+}
+
+/// 数据目录。**固定一个位置**（`%APPDATA%\Workbench\data`，见 paths.rs 的文件头），
+/// 这里只是把它报给界面 —— 设置里「关于」那一屏要如实显示数据放在哪儿。
+#[tauri::command]
+pub fn data_dir() -> String {
+    paths::data_dir().to_string_lossy().into_owned()
 }
 
 // ---------- 窗口控制 ----------
@@ -350,20 +407,31 @@ pub fn token_workbuddy_sessions() -> Result<Value, String> {
     token::workbuddy_session_files()
 }
 
-/// 把本机那两个文件（用量快照 + 主题配置）写进同步仓库并推送；返回 `{ changed, pushed, log }`。
-///
-/// `config` 为 null 表示这次不同步配置（设置里的开关关着），仓库里自己那份会被删掉。
-/// `use_account` 由渲染层按设置传进来：为真时用已登录账号的 token 授权（见 oauth::git_envs），
-/// 为假就照旧走系统里 git 自己配好的凭据。
+/// Qoder 的会话正文清单（路径 / 修改时间 / 大小），不含内容 —— 与 WorkBuddy 同款：
+/// 正文自己读回来解析，只是它解析出来的是额度（credits）而不是 token。
 #[tauri::command(async)]
-pub fn token_sync_publish(
-    repo: String,
-    device: String,
-    shard: Value,
-    config: Option<Value>,
-    use_account: bool,
-) -> Result<Value, String> {
-    crate::sync::publish(&repo, &device, &shard, config.as_ref(), use_account)
+pub fn token_qoder_sessions() -> Result<Value, String> {
+    token::qoder_session_files()
+}
+
+/// 把本机的用量快照写进同步仓库并推送（**只推用量**，外观配置走 `token_sync_config`）；
+/// 返回 `{ changed, pushed, log }`。
+///
+/// 这里刻意**没有** config 参数：两个目录各是一个出口，用量这条通道碰不到 `config/` ——
+/// 留一个可选参数在这儿，等于让「用量同步顺手把外观也推了」再次成为可能。
+///
+/// 凭据要么是已登录账号的 token、要么是系统里 git 配好的那一套（见 oauth::git_credentials）。
+#[tauri::command(async)]
+pub fn token_sync_publish(repo: String, device: String, shard: Value) -> Result<Value, String> {
+    crate::sync::publish(&repo, &device, Some(&shard), None)
+}
+
+/// 把本机的外观配置（theme.json 整份副本）单独写进同步仓库并推送；
+/// 设置界面「从别的机器取外观」旁的「同步一次」走它（且只有它 —— 没有自动同步）。
+/// 返回 `{ changed, pushed, log }`。
+#[tauri::command(async)]
+pub fn token_sync_config(repo: String, device: String, config: Value) -> Result<Value, String> {
+    crate::sync::publish_config(&repo, &device, &config)
 }
 
 /// 读同步仓库里各台机器的两个文件（原始 JSON，收敛与合并由渲染层负责）。

@@ -180,20 +180,21 @@ describe('sanitizeTheme', () => {
     expect(result.columns.map((column) => column.width)).toEqual([420, null, 380])
     expect(result.cardGap).toBe(30)
 
-    // 左栏四张卡各占一行，高度与模式就是它们原来那一份
+    // 左栏剩下五张卡各占一行（命令被老文件挪去了右栏），高度与模式就是它们原来那一份
     expect(result.columns[0].rows).toEqual([
-      { id: 'row-1', mode: 'fixed', height: 240 },
-      { id: 'row-2', mode: 'fixed', height: 98 },
-      { id: 'row-3', mode: 'fixed', height: 170 }
+      { id: 'row-1', mode: 'fixed', height: 183 },
+      { id: 'row-2', mode: 'fixed', height: 103 },
+      { id: 'row-3', mode: 'fixed', height: 170 },
+      { id: 'row-4', mode: 'fixed', height: 198 },
+      { id: 'row-5', mode: 'flex', height: 727 }
     ])
-    // 挪到右栏的命令排在最前面（老文件里它 order 0，与快捷操作并列时按卡片清单的顺序）
+    // 挪到右栏的命令夹在 Token 用量与 AI 热点之间（老文件里 order 0，与 Token 用量并列时按卡片清单的顺序）
     expect(result.columns[2].rows).toEqual([
-      { id: 'row-6', mode: 'fixed', height: 224 },
-      { id: 'row-7', mode: 'flex', height: 300 },
-      { id: 'row-8', mode: 'flex', height: 200 },
-      { id: 'row-9', mode: 'fixed', height: 240 }
+      { id: 'row-7', mode: 'flex', height: 727 },
+      { id: 'row-8', mode: 'flex', height: 300 },
+      { id: 'row-9', mode: 'fixed', height: 345 }
     ])
-    expect(result.cards.commands).toEqual({ row: 'row-7', order: 0, hidden: false })
+    expect(result.cards.commands).toEqual({ row: 'row-8', order: 0, hidden: false })
   })
 
   it('更早的版本（v1 / v2）也照样翻：认不出的卡片由默认布局补上，不会整份回默认', () => {
@@ -358,9 +359,9 @@ describe('sanitizeTheme', () => {
 
   it('默认布局：三栏各自的行高与模式，一张卡片一行', () => {
     expect(DEFAULT_THEME.columns.map((column) => [column.id, column.width])).toEqual([
-      ['col-1', 290],
+      ['col-1', 373],
       ['col-2', null],
-      ['col-3', 294]
+      ['col-3', 345]
     ])
     expect(rowIds(DEFAULT_THEME.columns)).toEqual([
       'row-1',
@@ -373,15 +374,16 @@ describe('sanitizeTheme', () => {
       'row-8',
       'row-9'
     ])
-    expect(cardIdsInRow(DEFAULT_THEME.cards, 'row-1')).toEqual(['recent'])
-    expect(cardIdsInRow(DEFAULT_THEME.cards, 'row-5')).toEqual(['activity'])
-    expect(cardIdsInRow(DEFAULT_THEME.cards, 'row-7')).toEqual(['actions'])
-    // 中栏两张图表、左栏命令、右栏今日完成各占一行 flex，吃掉所在栏剩余高度
-    expect(rowOf(DEFAULT_THEME.columns, 'row-5')?.mode).toBe('flex')
+    expect(cardIdsInRow(DEFAULT_THEME.cards, 'row-1')).toEqual(['activity'])
+    expect(cardIdsInRow(DEFAULT_THEME.cards, 'row-7')).toEqual(['recent'])
+    expect(cardIdsInRow(DEFAULT_THEME.cards, 'row-8')).toEqual(['token'])
+    expect(cardIdsInRow(DEFAULT_THEME.cards, 'row-9')).toEqual(['news'])
+    // 左栏的今日完成、中栏的最近使用、右栏的 Token 用量各占一行 flex，吃掉所在栏剩余高度
+    expect(rowOf(DEFAULT_THEME.columns, 'row-1')?.mode).toBe('fixed')
     expect(rowOf(DEFAULT_THEME.columns, 'row-6')?.mode).toBe('flex')
-    expect(rowOf(DEFAULT_THEME.columns, 'row-4')?.mode).toBe('flex')
+    expect(rowOf(DEFAULT_THEME.columns, 'row-7')?.mode).toBe('flex')
     expect(rowOf(DEFAULT_THEME.columns, 'row-8')?.mode).toBe('flex')
-    expect(rowOf(DEFAULT_THEME.columns, 'row-7')?.mode).toBe('fixed')
+    expect(rowOf(DEFAULT_THEME.columns, 'row-9')?.mode).toBe('fixed')
   })
 })
 

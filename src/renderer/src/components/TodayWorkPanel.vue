@@ -11,6 +11,7 @@
  * 去掉标记后一行显示，悬停给全文，要读全貌就点进去。
  */
 import { computed, onActivated, onMounted, ref } from 'vue'
+import { Finished } from '@element-plus/icons-vue'
 import { dayKey } from '@shared/activity'
 import { markdownToPlainText } from '@shared/markdown'
 import { sanitizeProjectColor } from '@shared/project-color'
@@ -115,6 +116,7 @@ function openWorkView(): void {
     <p v-else-if="loading" class="panel__empty">正在读取工作日志…</p>
 
     <p v-else-if="!rows.length" class="panel__empty">
+      <el-icon class="empty__icon"><Finished /></el-icon>
       今天还没有完成的记录<br />在「工作」页记一条，做完的会出现在这里。
     </p>
 

@@ -4,9 +4,9 @@
 //! （Credential Manager / SSH key）。代价是本机要装 git。
 //!
 //! **登录账号是可选的一条捷径**：登录过 GitHub / Gitee 之后，可以把那个 token 变成一条
-//! host 限定的请求头交给 git（见 `oauth::git_envs`），私有仓库就不必先手工配好凭据了。
-//! 没登录、或设置里关掉了这个开关，就退回系统凭据 —— 两条路都要留着：
-//! token 失效时如果只剩它一条路，原本能用的同步也会跟着坏掉。
+//! host 限定的请求头交给 git（见 `oauth::git_credentials`，过期前会先续期），私有仓库就不必先手工配好凭据了。
+//! 没登录、或登出之后，就退回系统凭据 —— 两条路都要留着：token 过期又续不上时如果只剩它一条路，
+//! 原本能用的同步也会跟着坏掉（所以那种凭据干脆不注入，见 `set_git_auth`）。
 //!
 //! **仓库布局（两个目录，各管一件事）**：
 //!   `token-usage/<设备id>.json` —— 这台机器的用量快照（只增不减的计数）
@@ -56,19 +56,31 @@ const GIT_ENVS: [(&str, &str); 1] = [("GIT_TERMINAL_PROMPT", "0")];
 const GIT_GLOBAL_ARGS: [&str; 2] = ["-c", "core.quotepath=false"];
 
 thread_local! {
-    /// 本次 git 调用额外要带的 git 配置（host 限定的 Authorization 头，见 `oauth::git_envs`）。
+    /// 本次 git 调用额外要带的 git 配置（host 限定的 Authorization 头，见 `oauth::git_credentials`）。
     ///
     /// **为什么走 thread-local 而不是逐层传参**：这个值只有最底下的 `run()` 用得到，
     /// 而中间那七八个 git 辅助函数（`ensure_clone` / `sync_branch` / `checkout_branch` …）
     /// 与凭据毫无关系，为它改一长串签名并不划算。同步流程从头到尾是同步调用，
     /// 每个入口显式设一次，不会跨线程串味。
     static GIT_AUTH: RefCell<Vec<(String, String)>> = const { RefCell::new(Vec::new()) };
+
+    /// 账号凭据这次如果有讲究（过期没续上 / 注入了但可能已失效），失败信息里补上这一句。
+    /// 只有 `describe` 用得到，同样是本次调用的事，跟 GIT_AUTH 一起设、一起清。
+    static GIT_AUTH_HINT: RefCell<Option<String>> = const { RefCell::new(None) };
 }
 
-/// 设定本次同步用的凭据。空表表示照旧走系统 git 凭据。
-fn set_git_auth(use_account: bool) {
-    let envs = if use_account { oauth::git_envs() } else { Vec::new() };
+/// 设定本次同步用的凭据：过期的先续期，续不上的那一支不会被注入（见 `oauth::git_credentials`）。
+/// 空表表示照旧走系统 git 凭据。
+fn set_git_auth() {
+    let (envs, hint) = oauth::git_credentials();
     GIT_AUTH.with(|slot| *slot.borrow_mut() = envs);
+    GIT_AUTH_HINT.with(|slot| *slot.borrow_mut() = hint);
+}
+
+/// 不碰网络的流程（全是本地 git 命令）用这个：显式清掉，不继承同线程上一次留下的凭据。
+fn clear_git_auth() {
+    GIT_AUTH.with(|slot| slot.borrow_mut().clear());
+    GIT_AUTH_HINT.with(|slot| *slot.borrow_mut() = None);
 }
 
 /// 本机设备标识：没有就生成一份落盘。id 一旦生成不再变，分片文件名就是它。
@@ -116,26 +128,25 @@ fn host_name() -> String {
         .unwrap_or_else(|| "本机".to_string())
 }
 
-/// 写本机那两个文件（用量 + 配置）→ 提交 → 推送。返回 `{ changed, pushed, log }`（log 只用于排查）。
+/// 写本机在同步仓库里的文件（用量、配置各自可选）→ 提交 → 推送。返回 `{ changed, pushed, log }`。
 ///
-/// `config` 为 `None` 表示「这台机器不同步配置」（设置里的开关关着）：仓库里自己那份会被删掉，
-/// 一并进这次提交 —— 「不同步外观」就该是仓库里没有它，而不是留着一份越放越旧的副本。
-/// `use_account` 为真时用已登录账号的 token 授权，否则走系统 git 凭据。
+/// 用量与配置是**两个独立的出口**：用量同步（自动 + 面板按钮）只推分片；
+/// 外观配置由设置界面「同步一次」单独推（`publish_config`）。两个目录都是单写者
+/// （各台机器只写自己那份），分开推不会打架；`usage` 与 `config` 至少要给一个，
+/// 传 `None` 的那个这次完全不碰。
 pub fn publish(
     repo: &str,
     device: &str,
-    usage: &Value,
+    usage: Option<&Value>,
     config: Option<&Value>,
-    use_account: bool,
 ) -> Result<Value, String> {
-    publish_at(
-        &paths::token_sync_dir(),
-        repo,
-        device,
-        usage,
-        config,
-        use_account,
-    )
+    publish_at(&paths::token_sync_dir(), repo, device, usage, config)
+}
+
+/// 只推外观配置（设置界面「同步一次」走它）：拉 → 写 config/ 那一份 → 提交 → 推送。
+/// 推完本地克隆就是最新的，渲染层随后用 `read_shards` 把设备列表刷新。
+pub fn publish_config(repo: &str, device: &str, config: &Value) -> Result<Value, String> {
+    publish_at(&paths::token_sync_dir(), repo, device, None, Some(config))
 }
 
 /// 同上，克隆目录由调用方给（单测用临时目录跑真实的 git 流程）。
@@ -143,12 +154,14 @@ fn publish_at(
     clone_dir: &Path,
     repo: &str,
     device: &str,
-    usage: &Value,
+    usage: Option<&Value>,
     config: Option<&Value>,
-    use_account: bool,
 ) -> Result<Value, String> {
+    if usage.is_none() && config.is_none() {
+        return Err("没有要同步的内容".into());
+    }
     // 必须在任何 git 调用之前设好：下面的 ensure_clone 就要走网络
-    set_git_auth(use_account);
+    set_git_auth();
     let (dir, branch) = ensure_clone(clone_dir, repo)?;
     let mut log: Vec<String> = Vec::new();
 
@@ -156,27 +169,14 @@ fn publish_at(
     let usage_relative = format!("{}/{safe}.json", paths::TOKEN_USAGE_DIR);
     let config_relative = format!("{}/{safe}.json", paths::CONFIG_DIR);
 
-    write_json(&dir.join(&usage_relative), usage)?;
-
-    // 配置那份可能写、可能删、也可能本来就没有（从没推过配置的机器）。
-    // **先记下它原来在不在**：删掉之后 exists() 就是 false 了，而「删过一个文件」同样要进这次提交 ——
-    // 漏掉它的话仓库里那份配置会一直留着，工作区里还多出一个永远没被提交的删除。
-    let config_file = dir.join(&config_relative);
-    let had_config = config_file.exists();
-    match config {
-        Some(value) => write_json(&config_file, value)?,
-        None => {
-            if had_config {
-                std::fs::remove_file(&config_file).map_err(|err| format!("删除配置失败: {err}"))?;
-            }
-        }
+    // 这次推哪几个文件就 add / diff 哪几个：用量同步碰不到 config/，外观同步碰不到 token-usage/
+    let mut staged: Vec<&str> = Vec::new();
+    if usage.is_some() {
+        write_json(&dir.join(&usage_relative), usage.unwrap())?;
+        staged.push(usage_relative.as_str());
     }
-    let touches_config = config.is_some() || had_config;
-
-    // 一次提交带上这两个文件：它们是「这台机器的一份状态」，分开提交只会让历史里多出
-    // 两条语义相同的记录。没写也没删配置时不提它 —— `git add` 一个不存在的路径会直接报错。
-    let mut staged = vec![usage_relative.as_str()];
-    if touches_config {
+    if config.is_some() {
+        write_json(&dir.join(&config_relative), config.unwrap())?;
         staged.push(config_relative.as_str());
     }
     let mut add_args: Vec<&str> = vec!["add", "-A", "--"];
@@ -242,9 +242,8 @@ pub fn publish_image(
     dir: &str,
     name: &str,
     bytes: &[u8],
-    use_account: bool,
 ) -> Result<Value, String> {
-    publish_image_at(&paths::image_sync_dir(), repo, dir, name, bytes, use_account)
+    publish_image_at(&paths::image_sync_dir(), repo, dir, name, bytes)
 }
 
 /// 同上，克隆目录由调用方给（单测用临时目录跑真实 git 流程）
@@ -254,7 +253,6 @@ fn publish_image_at(
     dir: &str,
     name: &str,
     bytes: &[u8],
-    use_account: bool,
 ) -> Result<Value, String> {
     let repo = repo.trim();
     if repo.is_empty() {
@@ -265,7 +263,7 @@ fn publish_image_at(
     }
 
     // 必须在任何 git 调用之前设好：下面的 ensure_clone 就要走网络
-    set_git_auth(use_account);
+    set_git_auth();
     let relative = image_relative_path(dir, name)?;
     let (dir_path, branch) = ensure_clone(clone_dir, repo)?;
 
@@ -314,21 +312,20 @@ fn publish_image_at(
 ///
 /// 与上传一样，配置为空是「还没设」而不是「空仓库」：那种情况要报错，
 /// 界面才能提示去哪儿填，而不是显示成「一张图都没有」。
-pub fn list_images(repo: &str, dir: &str, use_account: bool) -> Result<Value, String> {
-    list_images_at(&paths::image_sync_dir(), repo, dir, use_account)
+pub fn list_images(repo: &str, dir: &str) -> Result<Value, String> {
+    list_images_at(&paths::image_sync_dir(), repo, dir)
 }
 
 fn list_images_at(
     clone_dir: &Path,
     repo: &str,
     dir: &str,
-    use_account: bool,
 ) -> Result<Value, String> {
     let clean = require_image_repo(repo)?;
     let clean_dir = normalize_image_dir(dir)?;
 
     // 必须在任何 git 调用之前设好：ensure_clone 要走网络
-    set_git_auth(use_account);
+    set_git_auth();
     let (root, branch) = ensure_clone(clone_dir, &clean)?;
 
     let base = if clean_dir.is_empty() {
@@ -375,9 +372,8 @@ pub fn delete_images(
     repo: &str,
     dir: &str,
     paths: &[String],
-    use_account: bool,
 ) -> Result<Value, String> {
-    delete_images_at(&paths::image_sync_dir(), repo, dir, paths, use_account)
+    delete_images_at(&paths::image_sync_dir(), repo, dir, paths)
 }
 
 fn delete_images_at(
@@ -385,14 +381,13 @@ fn delete_images_at(
     repo: &str,
     dir: &str,
     paths: &[String],
-    use_account: bool,
 ) -> Result<Value, String> {
     let clean = require_image_repo(repo)?;
     if paths.is_empty() {
         return Err("没有选中要删除的图片".into());
     }
 
-    set_git_auth(use_account);
+    set_git_auth();
     let (root, branch) = ensure_clone(clone_dir, &clean)?;
 
     let mut removed: Vec<String> = Vec::new();
@@ -490,7 +485,7 @@ fn normalize_image_dir(dir: &str) -> Result<String, String> {
 }
 
 /// 一个「正常的路径段」：非空、不是 `.` / `..`、不带分隔符与 Windows 上的非法字符
-fn is_plain_segment(part: &str) -> bool {
+pub fn is_plain_segment(part: &str) -> bool {
     !part.is_empty()
         && part != "."
         && part != ".."
@@ -558,7 +553,7 @@ fn image_repo_path(dir: &str, rel: &str) -> Result<String, String> {
 ///      笔记是文字，自动挑一边就是悄悄改掉人家的内容；
 ///   4. 文件夹里留着**别人没做完的 rebase / merge** 时拒绝动手：那是用户的现场，
 ///      我们既不该在 detach 的 HEAD 上提交，也不该替他 abort。
-pub fn sync_notes(repo: &str, dir: &str, use_account: bool) -> Result<Value, String> {
+pub fn sync_notes(repo: &str, dir: &str) -> Result<Value, String> {
     let repo = repo.trim();
     if repo.is_empty() {
         return Err("还没有配置笔记仓库（设置 → 笔记）".into());
@@ -580,7 +575,7 @@ pub fn sync_notes(repo: &str, dir: &str, use_account: bool) -> Result<Value, Str
     }
 
     // 必须在任何 git 调用之前设好：下面的 fetch / pull / push 都要走网络
-    set_git_auth(use_account);
+    set_git_auth();
 
     let mut log: Vec<String> = Vec::new();
     let was_empty = head_of(&root).is_empty();
@@ -795,7 +790,7 @@ fn push_notes(root: &Path, branch: &str, log: &mut Vec<String>) -> Result<(), St
 ///
 /// 与 `rev-parse --abbrev-ref HEAD` 不同，这一条在「没有提交」时是**真的失败**，
 /// 于是能被当成「本地还没有任何东西」的判据（那个名字在空仓库里照样报得出来，见 `sync_branch`）。
-fn head_of(root: &Path) -> String {
+pub fn head_of(root: &Path) -> String {
     run_git(&["rev-parse", "HEAD"], Some(root), GIT_TIMEOUT).unwrap_or_default()
 }
 
@@ -842,8 +837,8 @@ pub fn read_shards(repo: &str) -> Result<SyncFiles, String> {
 /// 同上的实体：克隆目录可注入（单测用临时目录跑真实 git）
 fn read_shards_for(dir: &Path, repo: &str) -> Result<SyncFiles, String> {
     // 这一路只碰本地（核对 origin 是本地命令，文件是读文件），不需要凭据。
-    // 显式清空是为了不继承同线程上一次 publish 留下的凭据。
-    set_git_auth(false);
+    // 清掉而不是设一遍：设置那一版会去续期账号 token（要走网络），而这里本来就不需要它。
+    clear_git_auth();
 
     let empty = SyncFiles {
         usage: Vec::new(),
@@ -1044,7 +1039,7 @@ fn push(dir: &Path, branch: &str) -> Result<String, String> {
 }
 
 /// 跑一条 git 命令；失败时把 git 自己的话带回去当提示。
-fn run_git(args: &[&str], cwd: Option<&Path>, timeout: Duration) -> Result<String, String> {
+pub fn run_git(args: &[&str], cwd: Option<&Path>, timeout: Duration) -> Result<String, String> {
     let outcome = run(args, cwd, timeout)?;
 
     if outcome.timed_out {
@@ -1057,7 +1052,7 @@ fn run_git(args: &[&str], cwd: Option<&Path>, timeout: Duration) -> Result<Strin
 }
 
 /// 只看退出码，不看输出。用于「有没有改动 / 有没有远端分支」这类判断题。
-fn run_git_quiet(args: &[&str], cwd: &Path) -> bool {
+pub fn run_git_quiet(args: &[&str], cwd: &Path) -> bool {
     matches!(run(args, Some(cwd), GIT_TIMEOUT), Ok(outcome) if outcome.ok())
 }
 
@@ -1081,7 +1076,8 @@ fn run(args: &[&str], cwd: Option<&Path>, timeout: Duration) -> Result<proc::Out
 
 /// 失败提示：git 的话主要落在 stderr（凭据、权限、非快进…），整段带回去太长，
 /// 只留最后几行 —— 真正的原因在靠后那几行，前面多是 "Cloning into..." 这类过程输出。
-fn describe(command: &str, outcome: &proc::Outcome) -> String {
+/// 认证被拒时再补一句账号那边怎么办（见 `auth_note`）。
+pub(crate) fn describe(command: &str, outcome: &proc::Outcome) -> String {
     let detail = if outcome.stderr.trim().is_empty() {
         outcome.stdout.trim()
     } else {
@@ -1098,7 +1094,47 @@ fn describe(command: &str, outcome: &proc::Outcome) -> String {
         lines.join("；")
     };
 
-    format!("git {command} 失败: {text}")
+    let mut message = format!("git {command} 失败: {text}");
+    if let Some(note) = auth_note(&text) {
+        message.push_str("；");
+        message.push_str(&note);
+    }
+    message
+}
+
+/// 账号凭据那边要不要补一句话。
+///
+/// **为什么要按 git 的输出猜**：git 只报得出「HTTP 403」这种传输层的结果，看不出这是账号
+/// 凭据的问题；而账号凭据是我们自己塞进去的（`set_git_auth`），所以只有这里知道该不该解释。
+/// 两个条件同时成立才补：这次真的注入了账号凭据，且 git 的话看着像认证被拒 ——
+/// 用系统凭据的那次失败、以及网络超时之类，都不该被这段话说成「重新登录」。
+fn auth_note(detail: &str) -> Option<String> {
+    let injected = GIT_AUTH.with(|slot| !slot.borrow().is_empty());
+    if !injected || !looks_like_auth_failure(detail) {
+        return None;
+    }
+    GIT_AUTH_HINT.with(|slot| slot.borrow().clone())
+}
+
+/// 认证失败在 git 输出里长什么样。
+///
+/// Gitee 的过期 token 是 `403` + `Oauth: Access token is expired`；GitHub 是
+/// `403` / `Authentication failed`；系统里没有可用凭据时是 `could not read Username`。
+/// 刻意不收 `repository not found`：那多半是地址写错了，把用户往「重新登录」上带更糟。
+fn looks_like_auth_failure(detail: &str) -> bool {
+    const NEEDLES: [&str; 8] = [
+        "401",
+        "403",
+        "authentication failed",
+        "access token is expired",
+        "invalid username or password",
+        "could not read username",
+        "could not read password",
+        "permission denied",
+    ];
+
+    let lowered = detail.to_ascii_lowercase();
+    NEEDLES.iter().any(|needle| lowered.contains(needle))
 }
 
 /// 分片文件名与提交信息里能用的字符：只留字母数字和 `-` `_`。
@@ -1221,7 +1257,7 @@ mod tests {
         let theme = json!({ "device": "dev-z", "name": "Z", "theme": { "version": 2, "updatedAt": 1 } });
 
         // 克隆里现在装的是 A 的那两份文件
-        publish_at(&clone, &repo_a, "dev-z", &shard, Some(&theme), false).unwrap();
+        publish_at(&clone, &repo_a, "dev-z", Some(&shard), Some(&theme)).unwrap();
 
         // 地址还是 A：读得到；换成 B：一个都不返回（老仓库的文件不能当成最新的展示出来）
         let files = read_shards_for(&clone, &repo_a).unwrap();
@@ -1279,13 +1315,13 @@ mod tests {
         let theme_a = json!({ "device": "dev-a", "name": "A", "theme": { "version": 2, "updatedAt": 1 } });
         let theme_b = json!({ "device": "dev-b", "name": "B", "theme": { "version": 2, "updatedAt": 2 } });
 
-        let first = publish_at(&clone_a, &repo, "dev-a", &shard_a, Some(&theme_a), false).unwrap();
+        let first = publish_at(&clone_a, &repo, "dev-a", Some(&shard_a), Some(&theme_a)).unwrap();
         assert_eq!(first["changed"], json!(true));
         assert_eq!(first["pushed"], json!(true));
 
         // 第二台机器在另一端：它的克隆会落在「远端 HEAD 不存在」的状态上。
         // 分支挑错了这里就会另起一个分支，下面那句读分片就会缺一台机器。
-        let second = publish_at(&clone_b, &repo, "dev-b", &shard_b, Some(&theme_b), false).unwrap();
+        let second = publish_at(&clone_b, &repo, "dev-b", Some(&shard_b), Some(&theme_b)).unwrap();
         assert_eq!(second["changed"], json!(true));
 
         let read = read_shards_for(&clone_b, &repo).unwrap();
@@ -1309,21 +1345,33 @@ mod tests {
         );
 
         // 内容没变就不该产生提交：自动同步一小时一轮，否则仓库里全是空提交
-        let again = publish_at(&clone_a, &repo, "dev-a", &shard_a, Some(&theme_a), false).unwrap();
+        let again = publish_at(&clone_a, &repo, "dev-a", Some(&shard_a), Some(&theme_a)).unwrap();
         assert_eq!(again["changed"], json!(false));
         let count = run_git(&["rev-list", "--count", "HEAD"], Some(&clone_a), GIT_TIMEOUT).unwrap();
         assert_eq!(count, "2", "不该为空提交再增一条");
 
-        // 关掉外观同步（config 给 None）：仓库里自己那份配置要被删掉，并作为一次改动提交出去
-        let dropped = publish_at(&clone_a, &repo, "dev-a", &shard_a, None, false).unwrap();
-        assert_eq!(dropped["changed"], json!(true), "删掉配置也是一次要提交的改动");
-        assert!(!clone_a.join("config").join("dev-a.json").exists());
+        // 只推用量（config 给 None）：完全不碰 config/ —— 用量与外观是两个独立的出口
+        let usage_only = publish_at(&clone_a, &repo, "dev-a", Some(&shard_a), None).unwrap();
+        assert_eq!(usage_only["changed"], json!(false));
+        assert!(clone_a.join("config").join("dev-a.json").exists(), "配置不该被动到");
         let read = read_shards_for(&clone_a, &repo).unwrap();
-        assert_eq!(devices(&read.config), vec!["dev-b".to_string()], "只剩另一台机器的配置");
+        assert_eq!(
+            devices(&read.config),
+            vec!["dev-a".to_string(), "dev-b".to_string()],
+            "两台机器的配置都还在"
+        );
 
-        // 第二次给 None 就无事可做了：文件已经不在，不该每轮都提交一次「删了个不存在的东西」
-        let stable = publish_at(&clone_a, &repo, "dev-a", &shard_a, None, false).unwrap();
-        assert_eq!(stable["changed"], json!(false));
+        // 只推配置（publish_config 那条路）：用量分片也不该被动到
+        let theme_a2 = json!({ "device": "dev-a", "name": "A", "theme": { "version": 2, "updatedAt": 9 } });
+        let config_only = publish_at(&clone_a, &repo, "dev-a", None, Some(&theme_a2)).unwrap();
+        assert_eq!(config_only["changed"], json!(true));
+        let read = read_shards_for(&clone_a, &repo).unwrap();
+        let usage_a = read
+            .usage
+            .iter()
+            .find(|item| item.get("device").and_then(Value::as_str) == Some("dev-a"))
+            .unwrap();
+        assert_eq!(usage_a["updatedAt"], json!(1), "用量分片保持原样");
 
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -1368,11 +1416,11 @@ mod tests {
         };
 
         // 先在 A 上同步，并让另一台机器（dev-z）的文件也进了这个克隆
-        publish_at(&clone, &repo_a, "dev-z", &shard("dev-z"), None, false).unwrap();
+        publish_at(&clone, &repo_a, "dev-z", Some(&shard("dev-z")), None).unwrap();
         assert_eq!(read_shards_for(&clone, &repo_a).unwrap().usage.len(), 1);
 
         // 换到 B
-        publish_at(&clone, &repo_b, "dev-a", &shard("dev-a"), None, false).unwrap();
+        publish_at(&clone, &repo_b, "dev-a", Some(&shard("dev-a")), None).unwrap();
 
         let read = read_shards_for(&clone, &repo_b).unwrap();
         let found: Vec<String> = read
@@ -1521,7 +1569,6 @@ mod tests {
             "images",
             "20260916-104512-ab12cd34.png",
             &bytes,
-            false,
         )
         .unwrap();
         assert_eq!(published["path"], json!("images/20260916-104512-ab12cd34.png"));
@@ -1569,7 +1616,6 @@ mod tests {
             "images",
             "20260916-104512-ab12cd34.png",
             &bytes,
-            false,
         )
         .unwrap();
         assert_eq!(second["changed"], json!(false));
@@ -1577,7 +1623,7 @@ mod tests {
         assert_eq!(count, "1", "内容没变时不该多出提交");
 
         // 没填仓库地址时给一句能看懂的话，而不是去 git 那里报一堆参数错误
-        assert!(publish_image_at(&clone, "  ", "images", "a.png", &bytes, false).is_err());
+        assert!(publish_image_at(&clone, "  ", "images", "a.png", &bytes).is_err());
 
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -1625,12 +1671,12 @@ mod tests {
         let elsewhere = "images/6f1e2d3c-4b5a/别的-0b1c2d3e";
         let other = "20260916-104511-00000000.png";
 
-        publish_image_at(&clone, &repo, scope, drop, &bytes, false).unwrap();
-        publish_image_at(&clone, &repo, scope, keep, &bytes, false).unwrap();
-        publish_image_at(&clone, &repo, elsewhere, other, &bytes, false).unwrap();
+        publish_image_at(&clone, &repo, scope, drop, &bytes).unwrap();
+        publish_image_at(&clone, &repo, scope, keep, &bytes).unwrap();
+        publish_image_at(&clone, &repo, elsewhere, other, &bytes).unwrap();
 
         // 列出来的就是这一层里那两张（含大小）
-        let listed = list_images_at(&clone, &repo, scope, false).unwrap();
+        let listed = list_images_at(&clone, &repo, scope).unwrap();
         let files = listed["files"].as_array().unwrap();
         assert_eq!(files.len(), 2, "列出来的是: {files:?}");
         assert_eq!(files[0]["path"], json!(format!("{scope}/{drop}")));
@@ -1649,7 +1695,7 @@ mod tests {
             // 图片目录底下那张（改版前的老位置）：不属于任何一层
             format!("images/{keep}"),
         ] {
-            let rejected = delete_images_at(&clone, &repo, scope, &[bad.clone()], false);
+            let rejected = delete_images_at(&clone, &repo, scope, &[bad.clone()]);
             assert!(rejected.is_err(), "这条路径本该被拒掉: {bad}");
         }
 
@@ -1660,7 +1706,6 @@ mod tests {
             &repo,
             scope,
             &[format!("{scope}/{drop}"), missing.clone()],
-            false,
         )
         .unwrap();
         assert_eq!(removed["deleted"], json!(1));
@@ -1696,15 +1741,15 @@ mod tests {
         );
 
         // 再删一次同一张（已经不在）：不该产生空提交
-        let gone = delete_images_at(&clone, &repo, scope, &[format!("{scope}/{drop}")], false).unwrap();
+        let gone = delete_images_at(&clone, &repo, scope, &[format!("{scope}/{drop}")]).unwrap();
         assert_eq!(gone["deleted"], json!(0));
         assert_eq!(gone["changed"], json!(false));
         let count = run_git(&["rev-list", "--count", "--all"], Some(&remote), GIT_TIMEOUT).unwrap();
         assert_eq!(count, "4", "三张图各一条提交 + 删图一条，不该多出空提交");
 
         // 一张都没选 / 没配仓库：各给一句能看懂的话
-        assert!(delete_images_at(&clone, &repo, scope, &[], false).is_err());
-        assert!(list_images_at(&clone, "  ", scope, false).is_err());
+        assert!(delete_images_at(&clone, &repo, scope, &[]).is_err());
+        assert!(list_images_at(&clone, "  ", scope).is_err());
 
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -1747,13 +1792,13 @@ mod tests {
 
         // A：笔记本里先有一篇，第一次同步应该就地 init、提交、推上去
         std::fs::write(a.join("周报.md"), "本周：写同步\n").unwrap();
-        let first = sync_notes(&repo, a_path, false).unwrap();
+        let first = sync_notes(&repo, a_path).unwrap();
         assert_eq!(first["files"], json!(1), "本机那一篇该被提交: {first:?}");
         assert_eq!(first["received"], json!(false), "远端本来是空的: {first:?}");
         assert!(a.join(".git").exists(), "首次同步该把文件夹变成仓库");
 
         // B：一个**还没 init** 的文件夹 + 远端已经有 main —— 跟着远端那个分支走，把笔记落下来
-        let second = sync_notes(&repo, b_path, false).unwrap();
+        let second = sync_notes(&repo, b_path).unwrap();
         assert_eq!(second["received"], json!(true), "第一次同步该说「拉回来了」: {second:?}");
         assert_eq!(second["files"], json!(0), "B 自己没有改动: {second:?}");
         assert_eq!(second["branch"], json!("main"));
@@ -1761,23 +1806,23 @@ mod tests {
 
         // B 写一篇新的推上去 → A 拉得到（不只是「能推」，是两边真的走得通）
         std::fs::write(b.join("随手记.md"), "B 写的\n").unwrap();
-        sync_notes(&repo, b_path, false).unwrap();
-        let third = sync_notes(&repo, a_path, false).unwrap();
+        sync_notes(&repo, b_path).unwrap();
+        let third = sync_notes(&repo, a_path).unwrap();
         assert_eq!(third["received"], json!(true), "A 该拿到 B 那一篇: {third:?}");
         assert!(a.join("随手记.md").is_file());
 
         // 同一个仓库换个写法（Windows 上 `C:/a/b` 与 `C:\a\b` 是同一处）：得认出来是同一个，
         // 不能报「已经连着另一个仓库」—— 用户完全可能把地址换个写法填进来（踩过）
         let slashed = repo.replace('\\', "/");
-        let rewritten = sync_notes(&slashed, a_path, false).unwrap();
+        let rewritten = sync_notes(&slashed, a_path).unwrap();
         assert_eq!(rewritten["files"], json!(0), "换个写法还是同一个仓库: {rewritten:?}");
 
         // 两边改同一篇 → 后同步的那台：如实报错、rebase 中止、本地提交与工作区都还在
         std::fs::write(a.join("周报.md"), "A 改的\n").unwrap();
         std::fs::write(b.join("周报.md"), "B 改的\n").unwrap();
-        sync_notes(&repo, a_path, false).unwrap();
+        sync_notes(&repo, a_path).unwrap();
 
-        let conflict = sync_notes(&repo, b_path, false).unwrap_err();
+        let conflict = sync_notes(&repo, b_path).unwrap_err();
         assert!(
             conflict.contains("周报.md"),
             "冲突提示里要点出是哪一篇: {conflict}"
@@ -1797,7 +1842,7 @@ mod tests {
             "B 这边的三笔（A 那一篇 + B 的随手记 + 这次的改动）都要留着"
         );
         // 再同步一次：不会说「有一次没做完的 rebase」，还是同一句冲突提示（说明现场是干净的）
-        let again = sync_notes(&repo, b_path, false).unwrap_err();
+        let again = sync_notes(&repo, b_path).unwrap_err();
         assert!(again.contains("周报.md"), "{again}");
 
         // 连着别的仓库的文件夹：只报错，origin 一个字都不改
@@ -1810,15 +1855,55 @@ mod tests {
             GIT_TIMEOUT,
         )
         .unwrap();
-        let mismatch = sync_notes(&repo, other.to_str().unwrap(), false).unwrap_err();
+        let mismatch = sync_notes(&repo, other.to_str().unwrap()).unwrap_err();
         assert!(mismatch.contains("另一个仓库"), "{mismatch}");
         let kept = run_git(&["remote", "get-url", "origin"], Some(&other), GIT_TIMEOUT).unwrap();
         assert_eq!(kept, "https://example.com/other.git");
 
         // 没配地址 / 文件夹不在：各给一句能看懂的话
-        assert!(sync_notes("  ", a_path, false).is_err());
-        assert!(sync_notes(&repo, root.join("没有这个目录").to_str().unwrap(), false).is_err());
+        assert!(sync_notes("  ", a_path).is_err());
+        assert!(sync_notes(&repo, root.join("没有这个目录").to_str().unwrap()).is_err());
 
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// 账号凭据被服务端拒了的时候，错误信息要补一句「账号那边怎么办」。
+    ///
+    /// 现场就是这样：Gitee 的过期 token 回的是 403（不是 401），git 因此连系统凭据都不问，
+    /// 用户只看到一句 HTTP 403 —— 不提账号，没人会想到该去重新登录。
+    #[test]
+    fn auth_failures_get_an_actionable_note() {
+        let outcome = |stderr: &str| crate::proc::Outcome {
+            status: Some(128),
+            timed_out: false,
+            stdout: String::new(),
+            stderr: stderr.to_string(),
+        };
+        let expired = "remote: [session-b543c8a5] Oauth: Access token is expired\n\
+                       fatal: unable to access 'https://gitee.com/me/notes.git/': \
+                       The requested URL returned error: 403";
+        let note = "Gitee 的登录凭据已过期，这次同步没有使用它";
+
+        // 注入了账号凭据 + 认证被拒 → 补上那一句，git 自己的话也留着
+        GIT_AUTH.with(|slot| {
+            *slot.borrow_mut() = vec![("GIT_CONFIG_COUNT".to_string(), "1".to_string())]
+        });
+        GIT_AUTH_HINT.with(|slot| *slot.borrow_mut() = Some(note.to_string()));
+        let message = describe("pull", &outcome(expired));
+        assert!(message.contains("403"), "git 自己的话要留着：{message}");
+        assert!(message.contains(note), "要补上账号那边怎么办：{message}");
+
+        // 连不上、超时这类失败与凭据无关，不该被说成「重新登录」
+        let offline = describe(
+            "pull",
+            &outcome("fatal: unable to access 'https://gitee.com/me/notes.git/': Failed to connect to gitee.com port 443"),
+        );
+        assert!(!offline.contains(note), "连不上跟凭据没关系：{offline}");
+
+        // 这一路没注入账号凭据（走的是系统 git 凭据）：账号这边不该插话，哪怕 git 报的是 403
+        clear_git_auth();
+        GIT_AUTH_HINT.with(|slot| *slot.borrow_mut() = Some(note.to_string()));
+        let external = describe("push", &outcome("error: The requested URL returned error: 403"));
+        assert!(!external.contains(note), "系统凭据的失败不该甩给账号：{external}");
     }
 }

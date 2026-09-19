@@ -1,0 +1,28 @@
+/* 风格切换浮标：右下角一颗小圆钮，展开五个风格入口 */
+.wb-switcher { position: fixed; right: 18px; bottom: 18px; z-index: 999; font-family: system-ui, 'Segoe UI', 'Microsoft YaHei', sans-serif; }
+.wb-switcher .wb-toggle {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 16px; border-radius: 999px;
+  border: 1px solid rgba(128, 128, 128, .5);
+  background: rgba(20, 22, 26, .82); color: #e8edf4;
+  font-size: 13px; font-weight: 600; cursor: pointer;
+  backdrop-filter: blur(8px);
+  transition: transform .2s cubic-bezier(.22,.8,.3,1);
+}
+.wb-switcher .wb-toggle:hover { transform: translateY(-2px); }
+.wb-switcher .wb-list {
+  position: absolute; right: 0; bottom: 52px;
+  display: none; flex-direction: column; gap: 4px;
+  min-width: 230px; padding: 8px;
+  border-radius: 12px; border: 1px solid rgba(128, 128, 128, .4);
+  background: rgba(20, 22, 26, .92); backdrop-filter: blur(8px);
+}
+.wb-switcher.open .wb-list { display: flex; }
+.wb-switcher .wb-list a {
+  display: flex; justify-content: space-between; gap: 12px;
+  padding: 9px 12px; border-radius: 8px;
+  color: #cfd6e0; text-decoration: none; font-size: 13px;
+}
+.wb-switcher .wb-list a:hover { background: rgba(255, 255, 255, .08); color: #fff; }
+.wb-switcher .wb-list a.cur { color: #3fb37f; font-weight: 700; }
+.wb-switcher .wb-list a span { opacity: .65; font-size: 12px; }

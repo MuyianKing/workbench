@@ -4,7 +4,7 @@
  * 这些项住在主题文件 `theme.json` 里（和首页布局同一个文件），不跟 `workbench-data.json` 混：
  *  - 它们与布局是同一类东西（都是「界面长什么样」），一起读一起写正好；
  *  - 同步时整份 theme.json 就是一台机器要带给另一台机器的那份配置（见 sync-config.ts）；
- *  - 反过来，快捷键 / 开机自启 / 数据目录 / 同步仓库地址这些换台机器就不成立，留在数据文件里，
+ *  - 反过来，快捷键 / 开机自启 / 同步仓库地址这些换台机器就不成立，留在数据文件里，
  *    天然不会被同步带过去 —— 把仓库地址同步到另一台机器等于让它往一个它没填过的地址推东西。
  *
  * 渲染层仍然看到**一份完整的 `AppSettings`**（外观那几项照旧在里面）：适配层在读的时候把
@@ -18,6 +18,7 @@
 import { sanitizeAccentColor, sanitizeAccentInkMode, type AccentInkMode } from './accent-color'
 import { sanitizeAppName } from './app-name'
 import { clampCardOpacity } from './card-opacity'
+import { sanitizeSkillSyncDir } from './skills'
 import { clampTerminalHeight } from './terminal-height'
 import {
   DEFAULT_SETTINGS,
@@ -34,7 +35,7 @@ import { sanitizeHiddenViews, type ViewId } from './views'
  * 住在 theme.json 里的设置项，也是「一台机器要带给另一台机器」的那份配置。
  *
  * **不在**这里的都是有意的：开机自启、全局快捷键是每台机器各自适配系统的东西，
- * 数据目录与同步仓库地址更是只对本机成立；项目列表、快捷启动、独立命令那些带本机路径的数据同理。
+ * 同步仓库地址更是只对本机成立；项目列表、快捷启动、独立命令那些带本机路径的数据同理。
  */
 export const APPEARANCE_SETTING_KEYS = [
   'appName',
@@ -47,7 +48,13 @@ export const APPEARANCE_SETTING_KEYS = [
   'accentInk',
   'topBarStyle',
   'cardOpacity',
-  'hiddenViews'
+  'hiddenViews',
+  /**
+   * 技能在笔记仓库里的子目录（见 shared/skills.ts）。它不是「界面长什么样」，
+   * 但它是仓库结构约定：两台机器的技能要落在同一层才互相看得见，
+   * 所以跟着配置一起同步过去，比各配各的然后互相找不到强。
+   */
+  'skillSyncDir'
 ] as const
 
 export type AppearanceSettingKey = (typeof APPEARANCE_SETTING_KEYS)[number]
@@ -67,6 +74,8 @@ export interface AppearanceSettings {
   cardOpacity: number
   /** 左侧导航栏上关掉的页（见 views.ts）：这是「导航栏长什么样」，同样是配置而不是机器状态 */
   hiddenViews: ViewId[]
+  /** 技能在笔记仓库里的子目录（见 shared/skills.ts）：仓库结构约定，两台机器要一致 */
+  skillSyncDir: string
 }
 
 const THEME_SOURCES: readonly ThemeSource[] = ['system', 'light', 'dark']
@@ -103,7 +112,8 @@ export function sanitizeAppearanceSettings(raw: unknown): AppearanceSettings {
     accentInk: sanitizeAccentInkMode(value.accentInk),
     topBarStyle: sanitizeTopBarStyle(value.topBarStyle),
     cardOpacity: clampCardOpacity(value.cardOpacity),
-    hiddenViews: sanitizeHiddenViews(value.hiddenViews)
+    hiddenViews: sanitizeHiddenViews(value.hiddenViews),
+    skillSyncDir: sanitizeSkillSyncDir(value.skillSyncDir)
   }
 }
 

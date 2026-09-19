@@ -33,6 +33,7 @@ import {
   type NoteNode,
   type NoteSyncSummary
 } from '@shared/note'
+import { withoutSkillDir } from '@shared/skills'
 import { notifyError } from '@/notify'
 import { useSettingsStore } from '@/stores/settings'
 
@@ -132,7 +133,9 @@ export const useNotesStore = defineStore('notes', () => {
       return
     }
 
-    nodes.value = result.data
+    // 技能库住在同一个文件夹里（设置里的 skillSyncDir），但它有自己的页面：
+    // 树里再挂一份只会让人以为它也是笔记（在那里改名删除不会留下技能的版本提交），整层藏掉
+    nodes.value = withoutSkillDir(result.data, settings.settings.skillSyncDir)
     loaded.value = true
     ready = true
 
@@ -327,11 +330,7 @@ export const useNotesStore = defineStore('notes', () => {
     syncing.value = true
     syncError.value = ''
     try {
-      const result = await window.workbench.syncNotes({
-        repo,
-        dir: current,
-        useAccount: settings.settings.useAccountForSync
-      })
+      const result = await window.workbench.syncNotes({ repo, dir: current })
       if (!result.ok || !result.data) {
         syncError.value = result.error ?? '同步笔记失败'
         return null

@@ -7,6 +7,7 @@
 import { parsePortFromLog } from '@shared/dev-port'
 import { cleanLogLine } from '@shared/ansi'
 import { fail, ok } from '@shared/result'
+import { isValidScriptName } from '@shared/scanner'
 import { terminalKey } from '@shared/terminal-key'
 import type {
   CommandEntry,
@@ -347,6 +348,9 @@ export function installSessionListeners(): void {
 export function startProject(project: Project): Promise<Result<null>> {
   const script = project.scripts.serve
   if (!script) return Promise.resolve(fail('该项目没有可用的启动脚本'))
+  if (!isValidScriptName(script)) {
+    return Promise.resolve(fail(`启动脚本名不合法，已阻止执行：${script}`))
+  }
 
   const line = `${packageManagerOf(project)} run ${script}`
   return run({
@@ -361,6 +365,11 @@ export function startProject(project: Project): Promise<Result<null>> {
 }
 
 export function buildProject(project: Project, script: string): Promise<Result<null>> {
+  // 项目是早先存下来的话，scripts 里可能留着加项目那会儿没挡住的旧名字
+  if (!isValidScriptName(script)) {
+    return Promise.resolve(fail(`打包脚本名不合法，已阻止执行：${script}`))
+  }
+
   const line = `${packageManagerOf(project)} run ${script}`
   return run({
     projectId: project.id,

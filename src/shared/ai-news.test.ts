@@ -1,5 +1,5 @@
 /**
- * ai-news 纯逻辑的单测：三种载荷解析、缓存收敛（含 v1 迁移）、每源退避与合并视图。
+ * ai-news 纯逻辑的单测：三种载荷解析、缓存收敛、每源退避与合并视图。
  */
 import { describe, expect, it } from 'vitest'
 import {
@@ -27,31 +27,31 @@ import {
   type AiNewsItem
 } from './ai-news'
 
-/** 机器之心风格的 RSS 2.0（CDATA 被实体转义过——实测就是这样） */
+/** 一份 RSS 2.0：摘要用 CDATA 包着，且**被实体转义过**（真实 feed 里两种写法都见过） */
 const SAMPLE_RSS = `<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/">
   <channel>
-    <title>机器之心</title>
+    <title>量子位</title>
     <item>
       <title>第一篇：AI 的下一站</title>
       <description>&lt;![CDATA[摘要 &amp; 引号 &quot;测试&quot;]]&gt;</description>
       <pubDate>Fri, 18 Sep 2026 15:56:50 +0800</pubDate>
       <guid isPermaLink="false">ItemOne-guid</guid>
-      <link>https://www.jiqizhixin.com/articles/20260918-1</link>
-      <source>机器之心</source>
+      <link>https://www.qbitai.com/2026/09/1.html</link>
+      <source>量子位</source>
     </item>
     <item>
       <title>第二篇：Agent 时代</title>
       <description>&lt;![CDATA[纯文本摘要，没有 HTML]]&gt;</description>
       <pubDate>Thu, 17 Sep 2026 09:00:00 +0800</pubDate>
       <guid isPermaLink="false">ItemTwo-guid</guid>
-      <link>https://www.jiqizhixin.com/articles/20260917-2</link>
+      <link>https://www.qbitai.com/2026/09/2.html</link>
     </item>
     <item>
       <title>无时间条目</title>
       <description>普通文本没有 CDATA</description>
       <guid isPermaLink="false">ItemThree-guid</guid>
-      <link>https://www.jiqizhixin.com/articles/20260916-3</link>
+      <link>https://www.qbitai.com/2026/09/3.html</link>
     </item>
   </channel>
 </rss>`
@@ -116,7 +116,7 @@ describe('parseRss', () => {
     expect(first.summary).toBe('摘要 & 引号 "测试"')
     expect(first.pubDate).toBe(new Date('2026-09-18T15:56:50+08:00').getTime())
     expect(first.guid).toBe('ItemOne-guid')
-    expect(first.source).toBe('机器之心')
+    expect(first.source).toBe('量子位')
   })
 
   it('guid 缺省时回落 link', () => {
@@ -362,7 +362,7 @@ describe('sanitizeAiNewsCache', () => {
     expect(cache.sources.s.items).toHaveLength(1)
   })
 
-  it('v1 单源结构搬进 sources.jiqizhixin，内容不丢', () => {
+  it('v1 那个单源时代的顶层结构不再迁移，直接当空缓存', () => {
     const cache = sanitizeAiNewsCache({
       version: 1,
       updatedAt: 777,
@@ -371,16 +371,8 @@ describe('sanitizeAiNewsCache', () => {
       failCount: 1,
       items: [{ guid: 'g1', title: '旧缓存的一条', link: 'https://x.com/1', pubDate: 5 }]
     })
-    const state = cache.sources.jiqizhixin
+    // 那些内容只属于已经撤掉的源，搬进来也没有地方能显示
     expect(cache.version).toBe(2)
-    expect(state.updatedAt).toBe(777)
-    expect(state.etag).toBe('W/"old"')
-    expect(state.nextFetchAt).toBe(888)
-    expect(state.items[0].title).toBe('旧缓存的一条')
-  })
-
-  it('v1 且从来没有内容时不会凭空造出一个源', () => {
-    const cache = sanitizeAiNewsCache({ version: 1, updatedAt: 0, items: [] })
     expect(cache.sources).toEqual({})
   })
 })
@@ -432,7 +424,7 @@ describe('每源调度策略', () => {
 })
 
 describe('合并视图', () => {
-  it('只并启用源，按时间从新到旧', () => {
+  it('只并清单里给出的源，按时间从新到旧', () => {
     const cache = cacheOf({
       qbitai: [item('量子位旧', 100), item('量子位新', 300)],
       hf: [item('HF 中', 200)]
@@ -441,12 +433,13 @@ describe('合并视图', () => {
     expect(merged.map((i) => i.title)).toEqual(['量子位新', 'HF 中', '量子位旧'])
   })
 
-  it('没启用的源不出现', () => {
+  it('没列在清单里的源不出现（撤掉的源留在旧缓存里那份也不并）', () => {
     const cache = cacheOf({ qbitai: [item('量子位', 100)], hf: [item('HF', 200)] })
     expect(mergedItems(cache, ['hf']).map((i) => i.title)).toEqual(['HF'])
+    expect(mergedItems(cache, ['qbitai']).map((i) => i.title)).toEqual(['量子位'])
   })
 
-  it('同一个链接在多源出现时先去重（按启用顺序先到先得）', () => {
+  it('同一个链接在多源出现时先去重（按清单顺序先到先得）', () => {
     const dup: AiNewsItem = { guid: 'g', title: '同一条', link: 'https://x.com/same', pubDate: 100, summary: '', source: 'A' }
     const cache = cacheOf({ qbitai: [dup], hf: [{ ...dup, source: 'B' }] })
     const merged = mergedItems(cache, ['qbitai', 'hf'])
@@ -464,7 +457,7 @@ describe('合并视图', () => {
     expect(mergedItems(emptyAiNewsCache(), ['qbitai'])).toEqual([])
   })
 
-  it('最近更新时间取启用源里最大的那个', () => {
+  it('最近更新时间取清单里最大的那个', () => {
     const cache = cacheOf({ qbitai: [], hf: [] })
     cache.sources.qbitai.updatedAt = 500
     cache.sources.hf.updatedAt = 900

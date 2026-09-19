@@ -139,7 +139,7 @@ export const useSettingsStore = defineStore('settings', () => {
 
   /**
    * 设置里一改就跟着落地：主题没变时 applyTheme 会直接返回，所以挑色后的落点是这条 watch。
-   * 首次加载、别的窗口改设置、数据目录迁移推回来的整份设置也都经它。
+   * 首次加载、别的窗口改设置推回来的整份设置也都经它。
    */
   watch([() => settings.value.accentColor, () => settings.value.accentInk], applyAccentColor, {
     immediate: true
@@ -200,7 +200,7 @@ export const useSettingsStore = defineStore('settings', () => {
     return updateSettings({ theme: next }, origin)
   }
 
-  /** 顶部三条栏的样式（标题栏 / 搜索栏 / 筛选栏怎么跟壁纸叠） */
+  /** 顶部三条栏的样式（标题栏 / 欢迎语 / 筛选栏怎么跟壁纸叠） */
   async function setTopBarStyle(style: TopBarStyle): Promise<boolean> {
     if (!TOP_BAR_STYLES.includes(style)) return false
     if (style === settings.value.topBarStyle) return true
@@ -315,7 +315,7 @@ export const useSettingsStore = defineStore('settings', () => {
     return true
   }
 
-  // 设置是异步载入的，也可能被设置窗口改写（甚至被数据目录迁移整份换掉），跟着它同步
+  // 设置是异步载入的，也可能被设置窗口改写，跟着它同步
   watch(() => settings.value.workspaceBackground, (value) => void applyBackground(value), {
     immediate: true
   })
@@ -598,15 +598,13 @@ export const useSettingsStore = defineStore('settings', () => {
   }
 
   /**
-   * 手动同步一次 Token 用量（绕过自动同步的节流）。
+   * 手动同步一次 Token 用量（面板上的同步按钮）：绕过自动同步的节流，
+   * **只推拉用量分片、不碰外观配置** —— 外观走下面的 syncAppearanceNow。
    *
-   * 首页的 Token 卡片与设置里的同步按钮共用这一份 —— 拆开之前是两段各自处理
-   * 「回包失败 / 同步失败 / 成功」三种分支的重复实现，提示口径还略有出入。
    * 自动同步在后台跑、失败只体现在状态点上，手动点的这一次必须把原因说清楚。
-   *
    * 返回后端结果，让调用方按需再取数字（Token 卡片拿到后会立刻重算展示）。
    */
-  async function syncNow(): Promise<Result<TokenUsageResult> | null> {
+  async function syncUsageNow(): Promise<Result<TokenUsageResult> | null> {
     try {
       const result = await window.workbench.syncTokenUsage()
       if (!result.ok) {
@@ -622,6 +620,25 @@ export const useSettingsStore = defineStore('settings', () => {
       // 版本不一致、后端没起来都可能走到这里：说一声比按钮转完圈什么都不发生强
       notifyError(err instanceof Error ? err.message : '同步失败')
       return null
+    }
+  }
+
+  /**
+   * 手动同步一次外观配置（设置 → 外观 →「同步一次」）：推本机 theme.json、拉回别的机器的。
+   * 与用量同步互不相干 —— 不实读用量、不推分片。
+   */
+  async function syncAppearanceNow(): Promise<boolean> {
+    try {
+      const result = await window.workbench.syncThemeConfig()
+      if (!result.ok) {
+        notifyError(result.error ?? '同步外观配置失败')
+        return false
+      }
+      notifySuccess('外观配置已同步')
+      return true
+    } catch (err) {
+      notifyError(err instanceof Error ? err.message : '同步外观配置失败')
+      return false
     }
   }
 
@@ -709,7 +726,8 @@ export const useSettingsStore = defineStore('settings', () => {
     syncDevices,
     loadSyncDevices,
     applySyncAppearance,
-    syncNow,
+    syncUsageNow,
+    syncAppearanceNow,
     // 生命周期
     loadAppearance,
     installListeners

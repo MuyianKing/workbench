@@ -221,15 +221,21 @@ pub fn workbuddy_session_files() -> Result<Value, String> {
 }
 
 fn workbuddy_sessions_in(root: &std::path::Path) -> Result<Value, String> {
+    jsonl_sessions_in(root, "WorkBuddy")
+}
+
+/// 会话正文清单：`{ found, root, sessions: [{ path, mtimeMs, size }] }`，不读文件内容。
+///
+/// WorkBuddy 与 Qoder 是同一套布局（`projects/<项目>/<会话 id>.jsonl`），所以共用这一段。
+/// 只下探两层：这一层才是会话正文，更深的位置没有实测过的用量来源，
+/// 多收一份就可能把同一次调用算两遍（子会话正文的用量是不是已经并进主正文，没有把握）。
+fn jsonl_sessions_in(root: &std::path::Path, label: &str) -> Result<Value, String> {
     if !root.is_dir() {
         return Ok(json!({ "found": false, "root": root.to_string_lossy(), "sessions": [] }));
     }
-    std::fs::read_dir(root).map_err(|err| format!("WorkBuddy 会话目录读取失败: {err}"))?;
+    std::fs::read_dir(root).map_err(|err| format!("{label}会话目录读取失败: {err}"))?;
 
     let mut sessions = Vec::new();
-    // 目录结构是 projects/<项目>/<会话 id>.jsonl；项目目录读不了只少一个项目。
-    // 只下探这一层：这一层才是会话正文，更深的位置没有实测过的用量来源，
-    // 多收一份就可能把同一次调用算两遍（子会话正文的用量是不是已经并进主正文，没有把握）。
     for entry in WalkDir::new(root)
         .min_depth(2)
         .max_depth(2)
@@ -256,6 +262,48 @@ fn workbuddy_sessions_in(root: &std::path::Path) -> Result<Value, String> {
     }
 
     Ok(json!({ "found": true, "root": root.to_string_lossy(), "sessions": sessions }))
+}
+
+// ---------- Qoder(~/.qoder-cn/projects) ----------
+//
+// 同样只做「列文件」：Qoder 把每次请求扣掉的额度写在会话文件里
+// （`projects/<项目>/<会话 id>.jsonl`，一行一个 JSON 事件），正文没有压缩，
+// 读取与解析都在 TS 侧（shared/qoder-log.ts）。
+//
+// 它**没有 token 计数可读**：会话文件与 CLI 日志里的 input_tokens / output_tokens 恒为 0
+// （Qoder 自己的上下文快照里写着 `tokenCountsAvailable: false`，用量面板是问服务端的），
+// 本地唯一能读到的用量就是 credits —— 所以这个来源只喂 credits 口径。
+
+/// Qoder 的数据目录：国内版是 `~/.qoder-cn`，国际版没有 `-cn` 后缀，两个都试。
+/// 环境变量出口与其它来源同理，给装在别处的人留一条路。
+pub fn qoder_data_roots() -> Vec<PathBuf> {
+    if let Some(dir) = std::env::var("QODER_DATA_DIR")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    {
+        return vec![PathBuf::from(dir)];
+    }
+
+    vec![home_dir().join(".qoder-cn"), home_dir().join(".qoder")]
+}
+
+/// 会话文件清单：`{ found, root, sessions: [{ path, mtimeMs, size }] }`，不读文件内容。
+///
+/// `found` 为 false 表示这台机器没有 Qoder，调用方安静跳过这个来源。
+pub fn qoder_session_files() -> Result<Value, String> {
+    // 认「projects 在不在」而不是「home 在不在」：~/.qoder 可能只装了浏览器连接器那个目录
+    let roots = qoder_data_roots();
+    let root = roots
+        .iter()
+        .map(|home| home.join("projects"))
+        .find(|projects| projects.is_dir())
+        .unwrap_or_else(|| roots[0].join("projects"));
+    qoder_sessions_in(&root)
+}
+
+fn qoder_sessions_in(root: &std::path::Path) -> Result<Value, String> {
+    jsonl_sessions_in(root, "Qoder")
 }
 
 fn modified_ms(meta: &std::fs::Metadata) -> u64 {
@@ -656,6 +704,105 @@ mod tests {
 
         // 默认 home 是 ~/.workbuddy，不是 Electron 的 %APPDATA%/WorkBuddy
         assert!(workbuddy_home().ends_with(".workbuddy"));
+    }
+
+    /// 没装 Qoder 时 found=false、不是错误（界面上安静跳过，不点亮「来源不可用」）
+    #[test]
+    fn a_missing_qoder_install_is_not_an_error() {
+        let missing = std::env::temp_dir().join("wb-qoder-does-not-exist");
+        let value = qoder_sessions_in(&missing).unwrap();
+
+        assert_eq!(value["found"], json!(false));
+        assert!(value["sessions"].as_array().unwrap().is_empty());
+
+        // 两个候选数据目录都要列出来：国内版在前（本机装的是它），国际版没有 -cn 后缀
+        let roots = qoder_data_roots();
+        assert_eq!(roots.len(), 2);
+        assert!(roots[0].ends_with(".qoder-cn"));
+        assert!(roots[1].ends_with(".qoder"));
+    }
+
+    /// 会话正文的收集与 WorkBuddy 共用一段，这里只核对 Qoder 那条路也收得对、且不收侧车
+    #[test]
+    fn collects_qoder_sessions_and_skips_sidecars() {
+        let root = std::env::temp_dir().join(format!("wb-qoder-{}", uuid::Uuid::new_v4()));
+        let project = root.join("F--projects-workbench");
+        std::fs::create_dir_all(project.join("nested")).unwrap();
+
+        std::fs::write(project.join("c5ef1c9b.jsonl"), "{}\n").unwrap();
+        std::fs::write(project.join("c5ef1c9b.meta.json"), "{}").unwrap();
+        std::fs::write(project.join("nested/deep.jsonl"), "{}").unwrap();
+
+        let value = qoder_sessions_in(&root).unwrap();
+        assert_eq!(value["found"], json!(true));
+
+        let sessions = value["sessions"].as_array().unwrap();
+        assert_eq!(sessions.len(), 1, "只该收到项目目录下那一个会话正文");
+        let path = sessions[0]["path"].as_str().unwrap();
+        assert!(path.ends_with("c5ef1c9b.jsonl"), "收到的是 {path}");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// 环境相关诊断：真读本机的 Qoder 会话，核对额度那两个字段还在。
+    ///
+    /// 用例里的会话正文是自己造的，而真实正文长什么样只有这台机器知道 ——
+    /// Qoder 一改存放位置或字段名（`message.usage.credits`），这个来源就会静默变成 0 条记录，
+    /// 界面上和「没用过」长得一模一样。换机器 / Qoder 升级后跑一次：
+    /// `cargo test -- --ignored --nocapture`
+    #[test]
+    #[ignore = "环境相关诊断：cargo test -- --ignored --nocapture"]
+    fn diagnose_real_qoder_sessions() {
+        for home in qoder_data_roots() {
+            let root = home.join("projects");
+            println!("数据目录: {} -> {}", home.display(), if root.is_dir() { "在" } else { "不在" });
+            let Ok(value) = qoder_sessions_in(&root) else {
+                println!("  列文件失败");
+                continue;
+            };
+            let sessions = value["sessions"].as_array().cloned().unwrap_or_default();
+            println!("  {} 个会话正文", sessions.len());
+
+            let mut lines = 0usize;
+            let mut with_credits = 0usize;
+            let mut credits = 0f64;
+            let mut zero_tokens = 0usize;
+            let mut models: Vec<String> = Vec::new();
+            for session in &sessions {
+                let path = session["path"].as_str().unwrap_or("");
+                let Ok(text) = std::fs::read_to_string(path) else {
+                    continue;
+                };
+                for line in text.lines() {
+                    lines += 1;
+                    let Ok(event) = serde_json::from_str::<Value>(line) else {
+                        continue;
+                    };
+                    if event["type"] != json!("assistant") {
+                        continue;
+                    }
+                    if let Some(model) = event["message"]["model"].as_str() {
+                        if !models.iter().any(|item| item == model) {
+                            models.push(model.to_string());
+                        }
+                    }
+                    // 口径核实：Qoder 的 token 计数恒为 0，额度在 credits 那一个字段上
+                    if event["message"]["usage"]["input_tokens"].as_i64() == Some(0) {
+                        zero_tokens += 1;
+                    }
+                    if let Some(value) = event["message"]["usage"]["credits"].as_f64() {
+                        if value > 0.0 {
+                            with_credits += 1;
+                            credits += value;
+                        }
+                    }
+                }
+            }
+            println!(
+                "  共 {lines} 行, assistant 里 input_tokens 为 0 的 {zero_tokens} 条, 带 credits 的 {with_credits} 条, 合计 {credits:.4} 个额度"
+            );
+            println!("  模型: {}", models.join(", "));
+        }
     }
 
     /// 环境相关诊断：真读本机的 WorkBuddy 会话正文，核对解析规则的前提。

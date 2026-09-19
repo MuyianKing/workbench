@@ -1,7 +1,7 @@
 //! Windows 凭据管理器读写。access_token 落在这里，不落 JSON。
 //!
-//! **为什么不落 `workbench-data.json`**：那是明文 JSON，还会跟着「数据目录迁移」被复制到
-//! 网盘或共享盘上。凭据管理器走 DPAPI，按当前 Windows 用户加密，文件被拷走也解不开。
+//! **为什么不落 `workbench-data.json`**：那是数据目录里的明文 JSON，能打开那个目录的人
+//! 就能读到它。凭据管理器走 DPAPI，按当前 Windows 用户加密，文件被拷走也解不开。
 //!
 //! 一个 provider 一条记录，目标名 `Workbench/<provider>/token`。删掉应用也不会带走它 ——
 //! 用户能在「控制面板 → 凭据管理器 → Windows 凭据」里看到并手工清除。

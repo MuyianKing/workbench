@@ -13,7 +13,7 @@ export const CARD_OPACITY_MIN = 20
 export const CARD_OPACITY_MAX = 100
 
 /** 默认不透明度：按当前配置固化的一档，卡片半透、壁纸从底下透出来 */
-export const CARD_OPACITY_DEFAULT = 60
+export const CARD_OPACITY_DEFAULT = 55
 
 /** 收敛到合法区间；不是有限数字（缺失 / null / 字符串 / NaN）一律回到默认值 */
 export function clampCardOpacity(value: unknown): number {

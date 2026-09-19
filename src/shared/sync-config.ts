@@ -9,7 +9,7 @@
  * （两台机器互相自动采用对方的配置会来回覆盖、永远收敛不了）。时间戳取自 theme.updatedAt ——
  * 那是这台机器上外观最后一次真的变化的时间，不是「推送到仓库」的时间。
  */
-import { THEME_VERSION, sanitizeTheme, type ThemeConfig } from './theme'
+import { sanitizeTheme, type ThemeConfig } from './theme'
 
 /** 仓库里一台机器的那份配置 */
 export interface ThemeFile {
@@ -19,7 +19,8 @@ export interface ThemeFile {
   name: string
   /**
    * 那台机器的 theme.json 内容。
-   * 版本对不上时为 null：那种文件整份收敛回默认布局，套到本机等于把用户的摆放清掉。
+   * 认不出（缺 theme、手改坏了）时经 sanitizeTheme 收敛，版本旧的先走迁移；
+   * 完全没有 theme 字段时为 null。
    */
   theme: ThemeConfig | null
 }
@@ -45,11 +46,13 @@ export function sanitizeThemeFile(raw: unknown): ThemeFile | null {
   if (!device) return null
 
   const theme = input.theme as { version?: unknown } | undefined
-  const usable = theme && typeof theme === 'object' && theme.version === THEME_VERSION
+  const usable = theme && typeof theme === 'object'
 
   return {
     device,
     name: typeof input.name === 'string' ? input.name.trim() : '',
+    // 版本对不上的交给 sanitizeTheme 走迁移（v3 及更早的一维布局能原样翻成行清单），
+    // 不是老版本的一律回默认布局收敛 —— 两条路都在 sanitizeTheme 里，这里不再单独拦
     theme: usable ? sanitizeTheme(theme) : null
   }
 }
@@ -67,4 +70,9 @@ export interface SyncDeviceInfo {
   updatedAt: number
   /** 可采用的配置（整份 theme.json）；对方没推配置、或那份配置的版本对不上时为 null */
   theme: ThemeConfig | null
+  /**
+   * 这一条是不是本机自己。设置界面的「从别的机器取外观」把本机也列出来（标「本机」），
+   * 它那份照常可「应用」—— 相当于取回本机上次推送时的外观（比如误改了布局想退回去）。
+   */
+  self?: boolean
 }

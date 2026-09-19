@@ -15,6 +15,7 @@ mod oauth;
 mod paths;
 mod proc;
 mod session;
+mod skills;
 mod store;
 mod sync;
 mod system;
@@ -327,8 +328,6 @@ fn main() {
             ai_news::ai_news_fetch,
             ai_news::ai_news_article,
             ai_news::ai_news_sources,
-            ai_news::ai_news_token_set,
-            ai_news::ai_news_token_clear,
             commands::note_scan,
             commands::note_read,
             commands::note_write,
@@ -341,9 +340,16 @@ fn main() {
             commands::note_images_delete,
             commands::note_scan_texts,
             commands::note_sync,
-            commands::data_location,
-            commands::data_file_exists_in,
-            commands::data_migrate,
+            commands::skill_list,
+            commands::skill_commit,
+            commands::skill_history,
+            commands::skill_restore,
+            commands::skill_version_compare,
+            commands::skill_import,
+            commands::skill_install,
+            commands::skill_installed_versions,
+            commands::skill_files,
+            commands::data_dir,
             commands::window_minimize,
             commands::window_toggle_maximize,
             commands::window_close,
@@ -355,8 +361,10 @@ fn main() {
             commands::token_codebuddy_files,
             commands::token_dsh_sessions,
             commands::token_workbuddy_sessions,
+            commands::token_qoder_sessions,
             commands::token_device,
             commands::token_sync_publish,
+            commands::token_sync_config,
             commands::token_sync_shards,
             commands::auth_status,
             commands::auth_refresh_account,

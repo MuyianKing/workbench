@@ -15,14 +15,19 @@
 //!
 //! **token 落到哪**：Windows 凭据管理器（见 credentials.rs），同样不进渲染层 ——
 //! 前端拿到的只有登录名 / 昵称 / 头像。同步时由 sync.rs 直接取用。
+//!
+//! **access_token 是会过期的**：Gitee 官方写明的有效期是一天，GitHub 默认不过期（应用上
+//! 开了过期才有）。所以凭据里连 refresh_token 与到期时刻一起存（`TokenSet`），同步之前先看
+//! 要不要续期（`git_credentials`）；续期换来的新 refresh_token 必须落盘 —— Gitee 是轮换的，
+//! 旧的那张随即作废，还用旧的等于把这条路走死。
 
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::sync::{Mutex, OnceLock};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use percent_encoding::{utf8_percent_encode, AsciiSet, CONTROLS};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use url::Url;
 
@@ -46,13 +51,17 @@ const CALLBACK_WRITE_TIMEOUT: Duration = Duration::from_secs(2);
 /// build.rs 注入的凭据。文件缺失时注入的是模板（值全空），见 oauth.example.json。
 const EMBEDDED: &str = include_str!(concat!(env!("OUT_DIR"), "/oauth.json"));
 
+/// 提前多久算「该续期了」。一次同步要走 pull / push 好几条网络命令，卡在到期的那一秒上
+/// 会让这一次半途失败，所以宁可早一点换。
+const EXPIRY_SKEW: u64 = 60;
+
 pub struct Provider {
     pub id: &'static str,
     pub label: &'static str,
     /// 授权页所在的 host
     auth_host: &'static str,
     authorize_path: &'static str,
-    /// 用授权码换 token 的端点
+    /// 用授权码换 token、以及续期用的端点
     token_path: &'static str,
     /// 用户信息接口
     api_host: &'static str,
@@ -65,6 +74,9 @@ pub struct Provider {
     git_user: &'static str,
     /// git 仓库的 host，用于生成 host 限定的 extraheader
     git_host: &'static str,
+    /// 回包没给 `expires_in` 时按这个有效期算。Gitee 写明是一天；GitHub 的 token 默认
+    /// 不过期，那时回包也不带 `expires_in`，所以是 None = 不知道，一直用下去。
+    default_ttl: Option<u64>,
 }
 
 pub const PROVIDERS: [Provider; 2] = [
@@ -81,6 +93,9 @@ pub const PROVIDERS: [Provider; 2] = [
         pkce: true,
         git_user: "x-access-token",
         git_host: "github.com",
+        // 过期要在 GitHub 的应用设置里手工打开（打开后是 8 小时），默认关着 ——
+        // 真开了的话回包会带 expires_in，走的是上面那条通用逻辑
+        default_ttl: None,
     },
     Provider {
         id: "gitee",
@@ -95,6 +110,9 @@ pub const PROVIDERS: [Provider; 2] = [
         pkce: false,
         git_user: "oauth2",
         git_host: "gitee.com",
+        // 官方文档写明有效期一天，而且续期那一步的前提就是「access_token 过期了」，
+        // 所以这里兜着：回包真没带 expires_in 时，凭据也不会变成一张永远不知道何时该换的票
+        default_ttl: Some(86_400),
     },
 ];
 
@@ -507,15 +525,33 @@ fn complete(provider: &'static Provider, code: &str, verifier: Option<&str>) -> 
         Err(err) => return json!({ "status": "failed", "error": err }),
     };
 
-    let payload: Value = match serde_json::from_str(&response.text()) {
-        Ok(value) => value,
-        Err(_) => {
-            return json!({
-                "status": "failed",
-                "error": format!("{} 返回了看不懂的内容（HTTP {}）", provider.label, response.status)
-            })
-        }
+    let tokens = match token_payload(provider, &response) {
+        Ok(tokens) => tokens,
+        Err(err) => return json!({ "status": "failed", "error": err }),
     };
+
+    // 先落盘再拉资料：token 已经拿到了，这一步失败也不该让它白拿
+    if let Err(err) = save(provider, &tokens) {
+        return json!({ "status": "failed", "error": err });
+    }
+
+    match fetch_account(provider, &tokens.access_token) {
+        Ok(account) => json!({ "status": "ok", "account": account }),
+        Err(err) => json!({ "status": "failed", "error": err }),
+    }
+}
+
+/// 解析 token 端点的回包。换授权码与续期两处的回包形状一致，所以只写这一份。
+///
+/// 到期时刻 = 现在 + `expires_in`；回包没给就用 `provider.default_ttl`（只有 Gitee 有）。
+/// 两样都没有（GitHub 默认不过期）就是 None —— 那是「不知道会过期」，不是「已经过期」。
+fn token_payload(provider: &Provider, response: &http::Response) -> Result<TokenSet, String> {
+    let payload: Value = serde_json::from_str(&response.text()).map_err(|_| {
+        format!(
+            "{} 返回了看不懂的内容（HTTP {}）",
+            provider.label, response.status
+        )
+    })?;
 
     // 两家的失败回包都是 { error, error_description }
     if let Some(error) = payload.get("error").and_then(Value::as_str) {
@@ -532,25 +568,35 @@ fn complete(provider: &'static Provider, code: &str, verifier: Option<&str>) -> 
         };
         let message = format!("{} 拒绝了授权：{detail}{hint}", provider.label);
         eprintln!("[workbench] {message}");
-        return json!({ "status": "failed", "error": message });
+        return Err(message);
     }
 
-    let Some(token) = payload.get("access_token").and_then(Value::as_str) else {
-        return json!({
-            "status": "failed",
-            "error": format!("{} 没有返回 access_token（HTTP {}）", provider.label, response.status)
-        });
-    };
+    let access_token = payload
+        .get("access_token")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            format!(
+                "{} 没有返回 access_token（HTTP {}）",
+                provider.label, response.status
+            )
+        })?
+        .to_string();
 
-    // 先落盘再拉资料：token 已经拿到了，这一步失败也不该让它白拿
-    if let Err(err) = credentials::store(provider.id, token) {
-        return json!({ "status": "failed", "error": err });
-    }
+    let ttl = payload
+        .get("expires_in")
+        .and_then(Value::as_u64)
+        .or(provider.default_ttl);
 
-    match fetch_account(provider, token) {
-        Ok(account) => json!({ "status": "ok", "account": account }),
-        Err(err) => json!({ "status": "failed", "error": err }),
-    }
+    Ok(TokenSet {
+        access_token,
+        refresh_token: payload
+            .get("refresh_token")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string),
+        expires_at: ttl.map(|seconds| now_unix().saturating_add(seconds)),
+    })
 }
 
 /// 拉账号信息。token 只在这里当参数用，不会出现在返回值里。
@@ -748,6 +794,147 @@ fn parse_callback_url(pasted: &str) -> Option<(String, String)> {
     Some((find("code")?, find("state").unwrap_or_default()))
 }
 
+// ---------- 凭据：存取、有效期与续期 ----------
+
+/// 一次授权拿到的全部机密，存进凭据管理器时就是它的 JSON。
+///
+/// **为什么不是裸 token 串**：access_token 会过期、续期还要 refresh_token —— 三样不放在一起，
+/// 迟早出现「换了 token 却没换续期票」这种对不上的状态。老版本存的是裸 token，
+/// `parse` 按「有 token、但不知道有效期」兼容读出来。
+#[derive(Debug, Default, Clone, Deserialize, Serialize)]
+struct TokenSet {
+    access_token: String,
+    /// 续期用的凭据。Gitee 一定会给（而且是轮换的）；GitHub 只在对应用开了 token 过期时才给。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    refresh_token: Option<String>,
+    /// 失效时刻（Unix 秒）。None = 服务端没说，当作不会过期。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    expires_at: Option<u64>,
+}
+
+impl TokenSet {
+    /// 认不出 JSON 就按老格式处理：整串就是 access_token。
+    fn parse(raw: &str) -> TokenSet {
+        serde_json::from_str::<TokenSet>(raw)
+            .ok()
+            .filter(|set| !set.access_token.is_empty())
+            .unwrap_or_else(|| TokenSet {
+                access_token: raw.trim().to_string(),
+                ..TokenSet::default()
+            })
+    }
+
+    /// 该不该续期。留 `EXPIRY_SKEW` 的余量：一次同步要跑好几条网络命令，卡在到期那一秒上
+    /// 会让这一次半途失败。
+    fn needs_renew(&self, now: u64) -> bool {
+        self.expires_at
+            .is_some_and(|at| at <= now.saturating_add(EXPIRY_SKEW))
+    }
+}
+
+fn now_unix() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs())
+        .unwrap_or(0)
+}
+
+fn load(provider: &Provider) -> Option<TokenSet> {
+    credentials::read(provider.id).map(|raw| TokenSet::parse(&raw))
+}
+
+fn save(provider: &Provider, tokens: &TokenSet) -> Result<(), String> {
+    let text = serde_json::to_string(tokens).map_err(|err| format!("凭据序列化失败: {err}"))?;
+    credentials::store(provider.id, &text)
+}
+
+/// 取一组**当前可用**的凭据：过期就先续期，并把新的落盘。
+///
+/// 别处不要直接 `credentials::read` —— 读回来的是上面那个 JSON 包装，拿去当 token 用
+/// 等于把这段 JSON 当凭据发出去。
+fn usable_tokens(provider: &'static Provider) -> Result<TokenSet, String> {
+    let raw = credentials::read(provider.id).ok_or_else(|| format!("尚未登录 {}", provider.label))?;
+    let tokens = TokenSet::parse(&raw);
+    if !tokens.needs_renew(now_unix()) {
+        return Ok(tokens);
+    }
+
+    let fresh = renew(provider, &tokens)
+        .map_err(|err| format!("{} 的登录凭据已过期，续期也没成：{err}", provider.label))?;
+    if let Err(err) = save(provider, &fresh) {
+        // 存不进去时这一份本次仍然能用（同步照跑），所以只记一行日志，不把同步打断
+        eprintln!("[workbench] 续期拿到的凭据没能落盘（{err}），下次同步会再试一次");
+    }
+    Ok(fresh)
+}
+
+/// 用 refresh_token 换一组新凭据。
+///
+/// 端点就是换授权码用的那个，参数形状两家一致，所以只有这一份实现。
+/// **refresh_token 是轮换的**：Gitee 每次续期都会给一张新的、旧的那张随即作废，
+/// 所以回包里的必须落盘（由调用方 `save`）；回包没给新的才留用旧的。
+fn renew(provider: &'static Provider, tokens: &TokenSet) -> Result<TokenSet, String> {
+    let Some(refresh) = tokens.refresh_token.as_deref() else {
+        return Err(
+            "这条凭据里没有 refresh_token（早期版本只存了 access_token），\
+             在设置 → 账号里重新登录一次就能拿到"
+                .to_string(),
+        );
+    };
+    let config = config_of(provider)?;
+
+    let params: Vec<(&str, String)> = vec![
+        ("grant_type", "refresh_token".to_string()),
+        ("refresh_token", refresh.to_string()),
+        ("client_id", config.client_id.clone()),
+        ("client_secret", config.client_secret.clone()),
+    ];
+    let response = http::request(
+        "POST",
+        provider.auth_host,
+        provider.token_path,
+        &[
+            ("Accept", "application/json"),
+            ("Content-Type", "application/x-www-form-urlencoded"),
+            ("User-Agent", "Workbench"),
+        ],
+        Some(&encode_pairs(&params)),
+    )?;
+
+    let mut fresh = token_payload(provider, &response)?;
+    if fresh.refresh_token.is_none() {
+        fresh.refresh_token = tokens.refresh_token.clone();
+    }
+    Ok(fresh)
+}
+
+/// 把凭据拼成给 git 用的环境变量。
+///
+/// **键必须带 URL 前缀**（`http.https://github.com/.extraheader` 而不是 `http.extraheader`）：
+/// 后者是全局的，git 会把 token 发给**任何**远端地址 —— 同步仓库填了别的域名时就泄露了。
+///
+/// 走 `GIT_CONFIG_*` 环境变量而不是 `-c` 参数：`-c` 会出现在进程命令行里，同机其他进程看得见；
+/// 也不会落进 `.git/config`（那会把 token 写进同步仓库的本地副本）。
+fn envs_for(tokens: &[(&Provider, TokenSet)]) -> Vec<(String, String)> {
+    if tokens.is_empty() {
+        return Vec::new();
+    }
+
+    let mut envs = vec![("GIT_CONFIG_COUNT".to_string(), tokens.len().to_string())];
+    for (index, (provider, set)) in tokens.iter().enumerate() {
+        let basic = base64(format!("{}:{}", provider.git_user, set.access_token).as_bytes());
+        envs.push((
+            format!("GIT_CONFIG_KEY_{index}"),
+            format!("http.https://{}/.extraheader", provider.git_host),
+        ));
+        envs.push((
+            format!("GIT_CONFIG_VALUE_{index}"),
+            format!("Authorization: Basic {basic}"),
+        ));
+    }
+    envs
+}
+
 // ---------- 对外状态 ----------
 
 /// 已登录的 provider 列表（凭据管理器里有 token 的那些）
@@ -769,12 +956,12 @@ pub fn status() -> Value {
     })
 }
 
-/// 重新拉一次账号信息（启动时刷新头像用）
+/// 重新拉一次账号信息（启动时刷新头像用）。
+/// 凭据过期会先续期，所以这里不能自己去读凭据管理器（读到的是 JSON 包装，不是 token）。
 pub fn refresh_account(provider_id: &str) -> Result<Value, String> {
     let provider = provider_of(provider_id)?;
-    let token = credentials::read(provider.id)
-        .ok_or_else(|| format!("尚未登录 {}", provider.label))?;
-    fetch_account(provider, &token)
+    let tokens = usable_tokens(provider)?;
+    fetch_account(provider, &tokens.access_token)
 }
 
 pub fn logout(provider_id: &str) -> Result<(), String> {
@@ -782,37 +969,66 @@ pub fn logout(provider_id: &str) -> Result<(), String> {
     credentials::remove(provider.id)
 }
 
-/// 给 git 用的环境变量：把已登录账号的 token 变成一条 **host 限定**的请求头。
+/// 同步前把凭据准备好：返回（注入 git 的环境变量，以及失败时补给用户的一句话）。
 ///
-/// **必须带 URL 前缀**（`http.https://github.com/.extraheader` 而不是 `http.extraheader`）：
-/// 后者是全局的，git 会把 token 发给**任何**远端地址 —— 同步仓库填了别的域名时就泄露了。
+/// 走到这里才动网络：只有凭据真的到期了才去续期，平时是纯本地的判断。
 ///
-/// 走 `GIT_CONFIG_*` 环境变量而不是 `-c` 参数：`-c` 会出现在进程命令行里，同机其他进程看得见；
-/// 也不会落进 `.git/config`（那会把 token 写进同步仓库的本地副本）。
-pub fn git_envs() -> Vec<(String, String)> {
-    let mut entries: Vec<(String, String)> = Vec::new();
+/// **过期又续不上的一律不注入**。过期的 OAuth token 让 Gitee 回的是 403（不是 401，
+/// 见 sync.rs 的 `looks_like_auth_failure`），git 因此不会去问系统凭据 —— 本来能成的同步
+/// （公开仓库、或系统里本来就配好了凭据）会跟着一起挂掉。一支坏 token 还不如一支都没有。
+///
+/// 提示分两种，都只在 git 因认证失败时才被 sync.rs 用上（凭据正常时它不会打扰用户）：
+/// 一种是「有凭据但这次没注入」（上面那种），另一种是「注入了、但可能已经失效」。
+pub fn git_credentials() -> (Vec<(String, String)>, Option<String>) {
+    let now = now_unix();
+    let mut usable: Vec<(&Provider, TokenSet)> = Vec::new();
+    let mut skipped: Vec<String> = Vec::new();
 
     for provider in PROVIDERS.iter() {
-        let Some(token) = credentials::read(provider.id) else {
+        let Some(tokens) = load(provider) else {
             continue;
         };
-        let basic = base64(format!("{}:{}", provider.git_user, token).as_bytes());
-        entries.push((
-            format!("http.https://{}/.extraheader", provider.git_host),
-            format!("Authorization: Basic {basic}"),
+        if !tokens.needs_renew(now) {
+            usable.push((provider, tokens));
+            continue;
+        }
+
+        match renew(provider, &tokens) {
+            Ok(fresh) => {
+                if let Err(err) = save(provider, &fresh) {
+                    eprintln!("[workbench] 续期拿到的凭据没能落盘（{err}），下次同步会再试一次");
+                }
+                usable.push((provider, fresh));
+            }
+            Err(err) => {
+                eprintln!("[workbench] {} 的登录凭据续期失败：{err}", provider.label);
+                skipped.push(format!("{}（{err}）", provider.label));
+            }
+        }
+    }
+
+    (envs_for(&usable), hint_for(&usable, &skipped))
+}
+
+/// 给用户的那句话。**不注入任何凭据时是 None** —— 那时同步走的是系统 git 凭据，
+/// 账号这边没资格解释别人的失败。
+fn hint_for(usable: &[(&Provider, TokenSet)], skipped: &[String]) -> Option<String> {
+    if !skipped.is_empty() {
+        // 不去猜原因是网络还是凭据本身（上面那句已经原样带上了）：两种情况都是「下次同步会再试」，
+        // 而凭据本身的问题（比如没有 refresh_token）在原因里已经写清怎么办了
+        return Some(format!(
+            "{} 的登录凭据已过期，这次同步没有使用它（下一次同步会再试一次续期）",
+            skipped.join("、")
         ));
     }
-
-    if entries.is_empty() {
-        return Vec::new();
+    if usable.is_empty() {
+        return None;
     }
-
-    let mut envs = vec![("GIT_CONFIG_COUNT".to_string(), entries.len().to_string())];
-    for (index, (key, value)) in entries.into_iter().enumerate() {
-        envs.push((format!("GIT_CONFIG_KEY_{index}"), key));
-        envs.push((format!("GIT_CONFIG_VALUE_{index}"), value));
-    }
-    envs
+    Some(
+        "本次同步用的是登录账号的凭据，认证失败通常意味着它已经失效：\
+         在设置 → 账号里退出后重新登录即可"
+            .to_string(),
+    )
 }
 
 #[cfg(test)]
@@ -1033,40 +1249,18 @@ mod tests {
         assert!(validate(&PROVIDERS[0], ok_config).is_ok());
     }
 
-    /// git 凭据注入：必须是 host 限定的，且字段编号要对得上 GIT_CONFIG_COUNT
+    /// git 凭据注入：必须是 host 限定的，且字段编号要对得上 GIT_CONFIG_COUNT。
+    ///
+    /// 直接喂 `envs_for` 一组构造出来的凭据，**不碰真实凭据管理器** —— 原先这条用例是往
+    /// `Workbench/<provider>/token` 里写两条假的再还原，跑一次测试就在本机登录状态上动一次手
+    /// （写不进去还得跳过，结论会随环境变）。
     #[test]
     fn git_envs_are_host_scoped_and_indexed() {
-        // 先存两条假的来验「键怎么拼」，跑完要**原样还原**：这台机器上可能真的登录着，
-        // 直接删掉这两个键等于跑一次测试就把人登出了（原先就是 store 完再 remove）。
-        let backup: Vec<(&str, Option<String>)> = PROVIDERS
-            .iter()
-            .map(|provider| (provider.id, credentials::read(provider.id)))
-            .collect();
-        let restore = |backup: &Vec<(&str, Option<String>)>| {
-            for (id, token) in backup {
-                match token {
-                    Some(value) => {
-                        let _ = credentials::store(id, value);
-                    }
-                    None => {
-                        let _ = credentials::remove(id);
-                    }
-                }
-            }
-        };
-
-        // 凭据管理器偶发写不进去（系统策略、别的进程正占着它），那属于环境问题：
-        // 这条用例要验的是「键怎么拼」，不该被存储层的可用性带偏 —— 写不进去就跳过，
-        // 否则整包并行跑的时候会偶尔红一次（踩过：GIT_CONFIG_COUNT 变成 1）。
-        let stored = credentials::store("github", "fake-token-for-test").is_ok()
-            && credentials::store("gitee", "fake-token-for-test").is_ok();
-        let envs = git_envs();
-        restore(&backup);
-
-        if !stored {
-            println!("跳过：本机凭据管理器写不进去");
-            return;
-        }
+        let sets = [
+            (&PROVIDERS[0], TokenSet::parse("fake-token-for-test")),
+            (&PROVIDERS[1], TokenSet::parse("fake-token-for-test")),
+        ];
+        let envs = envs_for(&sets);
 
         let value = |key: &str| {
             envs.iter()
@@ -1093,6 +1287,86 @@ mod tests {
         assert_eq!(
             value("GIT_CONFIG_VALUE_1").unwrap(),
             format!("Authorization: Basic {}", base64(b"oauth2:fake-token-for-test"))
+        );
+
+        // 一支都没有时什么都不注入，让 git 照旧走系统凭据
+        assert!(envs_for(&[]).is_empty());
+    }
+
+    /// 凭据的两种存法都要读得回来：老版本存的裸 token、以及现在这套 JSON。
+    /// 认错了就是把 JSON 当 token 发出去，或者把老 token 当成解析失败丢掉（用户被动登出）。
+    #[test]
+    fn reads_both_the_legacy_and_the_current_credential() {
+        let legacy = TokenSet::parse("  legacy-token  ");
+        assert_eq!(legacy.access_token, "legacy-token", "老格式要能读出来");
+        assert_eq!(legacy.refresh_token, None);
+        assert_eq!(legacy.expires_at, None, "不知道有效期就该当作不过期，而不是立刻续期");
+
+        // 一段合法的 JSON 但里面没有 access_token（写坏了 / 别的程序留下的）同样按裸 token 收，
+        // 反正它在 git 那边也只会失败，至少不要静默把人登出
+        let broken = TokenSet::parse("{\"refresh_token\":\"r\"}");
+        assert_eq!(broken.access_token, "{\"refresh_token\":\"r\"}");
+
+        let json = serde_json::to_string(&TokenSet {
+            access_token: "at".to_string(),
+            refresh_token: Some("rt".to_string()),
+            expires_at: Some(1_800_000_000),
+        })
+        .unwrap();
+        let parsed = TokenSet::parse(&json);
+        assert_eq!(parsed.access_token, "at");
+        assert_eq!(parsed.refresh_token.as_deref(), Some("rt"));
+        assert_eq!(parsed.expires_at, Some(1_800_000_000));
+
+        // 没有 refresh_token 时那个键干脆不写出来：凭据管理器里的内容越短越不容易撞上长度上限
+        let minimal = serde_json::to_string(&TokenSet::parse("t")).unwrap();
+        assert_eq!(minimal, "{\"access_token\":\"t\"}");
+    }
+
+    /// 续期只看有效期，且要提前一点（EXPIRY_SKEW）算过期 —— 卡在到期那一秒上，
+    /// 一次要跑好几条网络命令的同步会半途失败。
+    #[test]
+    fn renews_a_token_that_is_about_to_expire() {
+        let at = |expires_at: Option<u64>| TokenSet {
+            access_token: "t".to_string(),
+            refresh_token: Some("r".to_string()),
+            expires_at,
+        };
+
+        assert!(!at(None).needs_renew(1_000), "没有有效期就是不知道，别去续");
+        assert!(!at(Some(1_000 + EXPIRY_SKEW + 1)).needs_renew(1_000));
+        assert!(at(Some(1_000 + EXPIRY_SKEW)).needs_renew(1_000), "余量之内就该续");
+        assert!(at(Some(1_000)).needs_renew(1_000));
+        assert!(at(Some(500)).needs_renew(1_000), "早就过期了当然也要续");
+    }
+
+    /// 老凭据（只有 access_token）续不了，但错误信息要直接说清怎么办，
+    /// 而且**不能因此发起网络请求** —— 这一步在同步流程里，报错要当场给。
+    #[test]
+    fn refuses_to_renew_a_credential_without_a_refresh_token() {
+        let legacy = TokenSet::parse("legacy-token");
+        let err = renew(&PROVIDERS[1], &legacy).unwrap_err();
+        assert!(err.contains("refresh_token"), "要说清缺的是什么：{err}");
+        assert!(err.contains("重新登录"), "要告诉用户怎么办：{err}");
+    }
+
+    /// 两句话都对不上号的时候，宁可不说：没注入账号凭据时，账号这边解释不了别的失败。
+    #[test]
+    fn hints_are_only_given_when_there_is_something_to_say() {
+        let tokens = TokenSet::parse("t");
+        let injected = [(&PROVIDERS[1], tokens)];
+
+        assert_eq!(hint_for(&[], &[]), None);
+
+        let usable = hint_for(&injected, &[]).unwrap();
+        assert!(usable.contains("重新登录"), "注入了可能是坏的凭据时要说怎么办：{usable}");
+
+        let skipped = hint_for(&[], &["Gitee（没有 refresh_token）".to_string()]).unwrap();
+        assert!(skipped.contains("没有 refresh_token"), "要说清是哪一支、为什么：{skipped}");
+        assert!(skipped.contains("没有使用它"), "要说清这次没注入：{skipped}");
+        assert!(
+            hint_for(&injected, &["Gitee（x）".to_string()]).unwrap().contains("没有使用它"),
+            "有跳过的那一支时，说法要以「没注入」为准"
         );
     }
 }

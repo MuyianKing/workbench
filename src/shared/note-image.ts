@@ -54,8 +54,6 @@ export interface NoteImageUploadInput {
   name: string
   /** 整张图的 base64 */
   data: string
-  /** 是否用已登录账号的 token 授权（私有仓库用；关掉就走系统 git 凭据） */
-  useAccount?: boolean
 }
 
 /** 上传的结果：图片进了仓库的哪里，以及怎么访问它 */
@@ -181,7 +179,7 @@ function shortHash(text: string): string {
 }
 
 /**
- * 设备那一段：本机的设备标识（`%APPDATA%/Workbench/device.json`，与 Token 分片同一个 id），
+ * 设备那一段：本机的设备标识（`%APPDATA%/Workbench/data/device.json`，与 Token 分片同一个 id），
  * 收敛成一段目录名。
  *
  * 空串表示拿不到标识：那时**不要**退回上一层去上传 / 列图 / 删图 ——
@@ -348,7 +346,6 @@ export interface NoteImageListInput {
   repo: string
   /** 当前笔记本（空串 = 还没打开笔记本，调用方要挡住，不要退回上一层） */
   root: string
-  useAccount?: boolean
 }
 
 /** 列表的结果：分支（拼访问地址要用）+ 图片清单 */

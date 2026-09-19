@@ -153,11 +153,7 @@ async function scan(): Promise<void> {
     const textsTask: Promise<Result<NoteTextScan>> = window.workbench.scanNoteTexts(root)
 
     const [images, texts] = await Promise.all([
-      window.workbench.listNoteImages({
-        repo,
-        root,
-        useAccount: settings.settings.useAccountForSync
-      }),
+      window.workbench.listNoteImages({ repo, root }),
       textsTask
     ])
 
@@ -237,8 +233,7 @@ async function remove(): Promise<void> {
   const deleted = await window.workbench.deleteNoteImages({
     repo,
     root: props.root,
-    paths: targets.map((asset) => asset.path),
-    useAccount: settings.settings.useAccountForSync
+    paths: targets.map((asset) => asset.path)
   })
   if (!deleted.ok || !deleted.data) {
     notifyError(deleted.error ?? '删除图片失败')

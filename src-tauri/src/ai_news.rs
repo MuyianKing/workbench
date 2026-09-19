@@ -1,9 +1,9 @@
-//! AI 行业每日热点（首页「AI 热点」卡片）：热点源白名单、拉取与凭据。
+//! AI 行业每日热点（首页「AI 热点」卡片）：热点源白名单与拉取。
 //!
-//! **联网边界（重要）**：这一组出口都由用户显式开启，而且**地址写在下面的 `SOURCES` 里**——
-//! 渲染层只能报源 id，拼不出任意 URL，所以「应用会访问哪儿」是一份看得完的清单。
-//! 默认启用的两个源（量子位、Hugging Face 每日论文）都免费、不需要 token；
-//! 需要 token 的源（机器之心）由用户自己填，token 落在 Windows 凭据管理器里、不进任何 JSON。
+//! **联网边界（重要）**：这个出口**只在首页真的画着那张卡片、且到了该源自己的刷新间隔**时才走
+//! （卡片被关掉就不渲染，也就不会去取）；地址写在下面的 `SOURCES` 里 —— 渲染层只能报源 id、
+//! 拼不出任意 URL，所以「应用会访问哪儿」是一份看得完的清单。清单里只收**免费、不需要凭据**的中文源
+//! （曾经有过 Hugging Face 每日论文、arXiv cs.AI 两个英文源与一个需要用户填 token 的机器之心，都按要求撤掉了）。
 //!
 //! **职责分工与项目约定一致**：这一层只做「取原始数据（带 ETag 条件请求）/ 落盘 / 调系统能力」，
 //! 解析、去重、排序、每源缓存与退避策略全在 TS 侧（`src/shared/ai-news.ts`，那边有单测、
@@ -14,7 +14,6 @@ use serde::Serialize;
 use serde_json::Value;
 use std::sync::OnceLock;
 
-use crate::credentials;
 use crate::http;
 use crate::paths;
 use crate::store::JsonStore;
@@ -27,14 +26,8 @@ struct SourceSpec {
     url: &'static str,
     /// 载荷格式，与 `src/shared/ai-news.ts` 的 `AiNewsSourceFormat` 对齐
     format: &'static str,
-    /// 是否需要用户填 token 才能用
-    needs_token: bool,
     /// 建议的刷新间隔（毫秒）
     ttl_ms: u64,
-    /// 设置界面里的一句说明
-    note: &'static str,
-    /// 需要 token 的源用哪条凭据（别的源为 None）
-    credential: Option<&'static str>,
     /// 站内阅读允许抓的正文域名（后缀匹配，带不带 `www.` 都认）。
     ///
     /// 这是**第二道白名单**：正文地址来自各源的 feed，但 feed 的内容不受我们控制，
@@ -48,49 +41,23 @@ struct SourceSpec {
 /// **只放中文源**：这张卡片挂在中文界面上，混进英文标题读起来是两种东西
 /// （曾经有过 Hugging Face 每日论文与 arXiv cs.AI 两个英文源，按要求撤掉了）。
 ///
-/// **顺序就是合并视图里同一条新闻的去重优先级**（先到先得），所以中文源排在前面。
+/// **顺序就是合并视图里同一条新闻的去重优先级**（先到先得）。
 /// 加源时只改这里：`src/shared/ai-news.ts` 不需要跟着改（它按 format 分发解析器）。
-const SOURCES: &[SourceSpec] = &[
-    SourceSpec {
-        id: "qbitai",
-        name: "量子位",
-        url: "https://www.qbitai.com/feed",
-        format: "rss",
-        needs_token: false,
-        // 中文 AI 媒体，一天更新多次；实测连打 5 次无任何限流
-        ttl_ms: 3 * 60 * 60 * 1000,
-        note: "中文 AI 媒体，免费、无需 token",
-        credential: None,
-        article_hosts: &["qbitai.com"],
-    },
-    SourceSpec {
-        id: "jiqizhixin",
-        name: "机器之心",
-        url: "https://mcp.applications.jiqizhixin.com/rss",
-        format: "rss",
-        needs_token: true,
-        // 服务端响应头声明内容按天更新，且配额很紧（实测第二次请求就 429）
-        ttl_ms: 24 * 60 * 60 * 1000,
-        note: "需要填 RSS token，配额有限（按天算），内容按天更新",
-        credential: Some("jiqizhixin-rss"),
-        // 会员文落在 pro. 子域，所以两个域名都算
-        article_hosts: &["jiqizhixin.com"],
-    },
-];
+const SOURCES: &[SourceSpec] = &[SourceSpec {
+    id: "qbitai",
+    name: "量子位",
+    url: "https://www.qbitai.com/feed",
+    format: "rss",
+    // 中文 AI 媒体，一天更新多次；实测连打 5 次无任何限流
+    ttl_ms: 3 * 60 * 60 * 1000,
+    article_hosts: &["qbitai.com"],
+}];
 
 /// `ai-news.json` 的去抖存储：与工作日志同一待遇（只在本机，不进同步仓库）
 static AI_NEWS: OnceLock<JsonStore> = OnceLock::new();
 
 pub fn ai_news_store() -> &'static JsonStore {
     AI_NEWS.get_or_init(|| JsonStore::new(paths::ai_news_file, "保存 AI 热点"))
-}
-
-/// 需要 token 的源用的那条凭据。
-///
-/// 目前只有机器之心一个需要 token，所以「哪条凭据」是唯一的；将来多一个这样的源，
-/// 这里要改成按源 id 取凭据，命令也得跟着带上源 id。
-fn token_credential() -> Option<&'static str> {
-    SOURCES.iter().find_map(|source| source.credential)
 }
 
 // ---------- 数据文件 ----------
@@ -108,72 +75,34 @@ pub fn ai_news_save(value: Value) {
 
 // ---------- 源清单 ----------
 
-/// 送到渲染层的源信息（字段名与 `shared/ai-news.ts` 的 `AiNewsSourceInfo` 一致）
+/// 送到渲染层的源信息（字段名与 `shared/ai-news.ts` 的 `AiNewsSourceInfo` 一致）。
+///
+/// **不带地址**：拉取时宿主自己查 `SOURCES`，渲染层只报 id 就够 ——
+/// 它因此拿不到一个能出网的字符串，这一条是那道联网边界的一半。
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AiNewsSourceInfo {
     id: String,
     name: String,
-    url: String,
     format: String,
-    needs_token: bool,
     ttl_ms: u64,
-    note: String,
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AiNewsSourcesPayload {
-    sources: Vec<AiNewsSourceInfo>,
-    /// 那个需要 token 的源有没有配好（只报有没有，**绝不把 token 带出本进程**）
-    token_configured: bool,
-}
-
-/// 源清单 + token 状态。设置界面与适配层都问它，界面因此能如实列出「会访问哪些地址」。
+/// 源清单。适配层问它来知道「有哪些源、各自的刷新间隔与载荷格式」。
 #[tauri::command]
-pub fn ai_news_sources() -> AiNewsSourcesPayload {
-    AiNewsSourcesPayload {
-        sources: SOURCES
-            .iter()
-            .map(|source| AiNewsSourceInfo {
-                id: source.id.to_string(),
-                name: source.name.to_string(),
-                url: source.url.to_string(),
-                format: source.format.to_string(),
-                needs_token: source.needs_token,
-                ttl_ms: source.ttl_ms,
-                note: source.note.to_string(),
-            })
-            .collect(),
-        token_configured: token_credential()
-            .map(|name| credentials::read(name).is_some())
-            .unwrap_or(false),
-    }
+pub fn ai_news_sources() -> Vec<AiNewsSourceInfo> {
+    SOURCES
+        .iter()
+        .map(|source| AiNewsSourceInfo {
+            id: source.id.to_string(),
+            name: source.name.to_string(),
+            format: source.format.to_string(),
+            ttl_ms: source.ttl_ms,
+        })
+        .collect()
 }
 
 // ---------- 凭据 ----------
-
-/// 保存 / 覆盖 token（设置界面里填的那一次）。
-#[tauri::command]
-pub fn ai_news_token_set(token: String) -> Result<(), String> {
-    let token = token.trim();
-    if token.is_empty() {
-        return Err("token 不能为空".into());
-    }
-    let Some(name) = token_credential() else {
-        return Err("当前没有需要 token 的热点源".into());
-    };
-    credentials::store(name, token)
-}
-
-/// 清掉 token（设置界面的「清除」）。
-#[tauri::command]
-pub fn ai_news_token_clear() -> Result<(), String> {
-    match token_credential() {
-        Some(name) => credentials::remove(name),
-        None => Ok(()),
-    }
-}
 
 // ---------- 拉取 ----------
 
@@ -188,10 +117,10 @@ pub struct AiNewsFetchResult {
     pub etag: String,
 }
 
-/// 拉一个源。**会出网**：调用方必须先确认该源是启用且可用的（缺 token 时这里直接失败，不发请求）。
+/// 拉一个源。**会出网**：调用方只在「卡片画着、且到了这个源自己的刷新间隔」时才调它。
 ///
 /// `etag` 是上一次成功拉取时存下的条件请求标记：带 `If-None-Match` 后，服务端内容没变
-/// 会回 304 而不是一整份正文 —— 省流量，也少一次对源站配额的消耗。
+/// 会回 304 而不是一整份正文 —— 省流量，也少一次对源站的消耗。
 #[tauri::command(async)]
 pub fn ai_news_fetch(source_id: String, etag: String) -> Result<AiNewsFetchResult, String> {
     let source = SOURCES
@@ -199,24 +128,7 @@ pub fn ai_news_fetch(source_id: String, etag: String) -> Result<AiNewsFetchResul
         .find(|source| source.id == source_id)
         .ok_or_else(|| format!("未知的热点源：{source_id}"))?;
 
-    // 需要 token 的源：从凭据管理器现取现拼，token 不出本进程
-    let mut url = source.url.to_string();
-    if source.needs_token {
-        let Some(name) = source.credential else {
-            return Err(format!("热点源「{}」没有配凭据", source.name));
-        };
-        let Some(token) = credentials::read(name) else {
-            return Err(format!(
-                "还没配置「{}」的 token。打开设置，在「通用 → AI 热点」里填一次。",
-                source.name
-            ));
-        };
-        let separator = if url.contains('?') { '&' } else { '?' };
-        let encoded: String = form_urlencoded::byte_serialize(token.as_bytes()).collect();
-        url = format!("{url}{separator}token={encoded}");
-    }
-
-    let (host, path) = split_url(&url)?;
+    let (host, path) = split_url(source.url)?;
     let mut headers = vec![("User-Agent", "Workbench")];
     if !etag.is_empty() {
         headers.push(("If-None-Match", etag.as_str()));
@@ -303,28 +215,10 @@ mod tests {
         }
     }
 
-    /// 需要 token 的源必须声明用哪条凭据；不需要的则不该有
+    /// 清单非空：一个源都不剩的话这张卡片就没有内容可拉，多半是误删
     #[test]
-    fn token_sources_declare_a_credential() {
-        for source in SOURCES {
-            assert_eq!(
-                source.needs_token,
-                source.credential.is_some(),
-                "源 {} 的 needs_token 与 credential 对不上",
-                source.id
-            );
-        }
-    }
-
-    /// 默认启用的源必须是免费、无需 token 的（否则装完就撞上「缺 token」）。
-    /// 这份 id 必须与 `shared/ai-news.ts` 的 `AI_NEWS_DEFAULT_SOURCES` 一致 ——
-    /// 清单改名而那边忘了改，这条会在 `cargo test` 里当场报出来。
-    #[test]
-    fn default_source_exists_and_needs_no_token() {
-        for id in ["qbitai"] {
-            let source = SOURCES.iter().find(|source| source.id == id).expect("默认源不见了");
-            assert!(!source.needs_token, "默认源 {id} 不该需要 token");
-        }
+    fn list_is_never_empty() {
+        assert!(!SOURCES.is_empty(), "热点源清单被清空了");
     }
 
     /// 卡片只放中文源：英文源撤掉之后不该有人偷偷加回来
@@ -353,13 +247,6 @@ mod tests {
         let (host, path) = split_url("https://example.com/api/feed?limit=30&sort=hot").unwrap();
         assert_eq!(host, "example.com");
         assert_eq!(path, "/api/feed?limit=30&sort=hot");
-    }
-
-    /// 空 token 会被拦下，绝不写进凭据管理器
-    #[test]
-    fn empty_token_is_rejected() {
-        assert!(ai_news_token_set("".into()).is_err());
-        assert!(ai_news_token_set("   ".into()).is_err());
     }
 
     /// 未知源 id 直接报错，不会去访问任何地址
@@ -394,8 +281,6 @@ mod tests {
     fn article_hosts_are_allowlisted_strictly() {
         assert!(is_article_host_allowed("qbitai.com"));
         assert!(is_article_host_allowed("www.qbitai.com"));
-        assert!(is_article_host_allowed("pro.jiqizhixin.com"));
-        assert!(is_article_host_allowed("www.jiqizhixin.com"));
 
         // 后缀拼接不算：evil-qbitai.com / qbitai.com.evil.com 都不是源站的域名
         assert!(!is_article_host_allowed("evil-qbitai.com"));

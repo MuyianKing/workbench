@@ -19,7 +19,7 @@
  */
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { CaretBottom, Close, FolderOpened, Picture, Refresh, RefreshRight } from '@element-plus/icons-vue'
+import { CaretBottom, Close, Document, EditPen, FolderOpened, Notebook, Picture, Refresh, RefreshRight } from '@element-plus/icons-vue'
 import {
   countNodes,
   findNoteNode,
@@ -299,6 +299,7 @@ function onResizeDown(event: PointerEvent): void {
     <!-- 还没选文件夹：整页只说一件事 —— 先挑一个文件夹当笔记本 -->
     <div v-if="!store.root" class="notes__intro panel">
       <div class="empty">
+        <el-icon class="empty__icon"><Notebook /></el-icon>
         <p>笔记就是这个文件夹里的 markdown 文件。</p>
         <p class="empty__hint">
           选一个文件夹当笔记本：里面的目录结构会直接变成左边的目录树，
@@ -489,10 +490,12 @@ function onResizeDown(event: PointerEvent): void {
             <p class="empty__hint">在左栏里选中一篇笔记打开，或者右击它往里面新建。</p>
           </template>
           <template v-else-if="!store.noteCount">
+            <el-icon class="empty__icon"><EditPen /></el-icon>
             <p>这个文件夹里还没有笔记。</p>
             <p class="empty__hint">在左栏里右击新建一篇，写下第一行。</p>
           </template>
           <template v-else>
+            <el-icon class="empty__icon"><Document /></el-icon>
             <p>从左边选一篇笔记打开。</p>
             <p class="empty__hint">标题栏右侧那句会显示它最后一次改动的时间。</p>
           </template>

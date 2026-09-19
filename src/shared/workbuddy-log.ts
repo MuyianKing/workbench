@@ -99,6 +99,8 @@ export function collectWorkBuddySessionText(text: string, days: TokenDays): void
       cacheReadTokens: cacheRead,
       // WorkBuddy 的用量里没有缓存写入这一项，不编造
       cacheWriteTokens: 0,
+      // 也没有额度这一项
+      credits: 0,
       // 一条 usage 记的就是一次请求；字段缺失或非法时也按一次算
       requests: requests > 0 ? requests : 1
     }

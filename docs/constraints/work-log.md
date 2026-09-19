@@ -7,8 +7,7 @@
 `src/shared/markdown.ts`（渲染）、`src/renderer/src/components/MarkdownView.vue`（点击接管）。
 
 - **只在本机、不进同步仓库**：它不写进 `workbench-data.json`，而是单独一份 `work-log.json`，也不随同步走 —— 工作内容是最贴近
-  个人记录的东西，多机合并没有成立的口径（不像用量数字那样可相加）。数据目录迁移时它跟着搬（`paths.rs` 的 `migrate_data_dir`），
-  别为了「顺手统一」把它塞进同步或主数据文件。
+  个人记录的东西，多机合并没有成立的口径（不像用量数字那样可相加）。别为了「顺手统一」把它塞进同步或主数据文件。
 - **正文按 markdown 渲染，解析用 markdown-it**（[markdown.ts](../../src/shared/markdown.ts)，唯一新增的前端运行时依赖）：
   `html: false` 转义原文里的标签、`linkify` 认裸地址、`breaks` 让单个换行就是 `<br>`；链接一律 `target="_blank"`，且点击在
   [MarkdownView.vue](../../src/renderer/src/components/MarkdownView.vue) 里被接管交给 `openExternal` —— 界面是个 WebView，

@@ -155,6 +155,17 @@ pub fn spawn(
         };
         let code = wait_for_exit(&session);
 
+        // 进程没了就把自己从表里摘掉。留着的话有两个后果：退出确认框里的「还有几个在跑」
+        // 是启动以来的总数（永远不为 0），而退出收尾会拿这些陈旧 pid 去 taskkill /T /F ——
+        // PID 被系统回收复用时，杀的是别人的进程树。
+        // 按 Arc 身份比对而不是直接 remove(&id)：同名的下一次会话可能已经入表了。
+        {
+            let mut map = state.0.lock().unwrap();
+            if map.get(&id).is_some_and(|entry| Arc::ptr_eq(entry, &session)) {
+                map.remove(&id);
+            }
+        }
+
         let _ = handle.emit(
             "session:exit",
             serde_json::json!({ "sessionId": id, "code": code }),
@@ -326,6 +337,12 @@ pub fn stop(app: &AppHandle, session_id: &str) -> Result<(), String> {
         return Err("该会话已经不在运行".to_string());
     };
 
+    // 进程可能刚退出、等待线程还没来得及把它摘掉；这时对着旧 pid 下手同样可能误伤
+    // （PID 复用）。已经死了就当停好了 —— session:exit 随后就到，界面会回到空闲。
+    if crate::proc::process_created_at(pid).is_none() {
+        return Ok(());
+    }
+
     crate::proc::kill_process_tree(pid)
 }
 
@@ -338,6 +355,11 @@ pub fn stop_all(app: &AppHandle) {
     };
 
     for pid in pids {
+        // 表里正常只剩在跑的会话（等待线程退出时就摘了），但 taskkill /T /F 不可逆，
+        // 下手前再核一次这个 PID 是否真的还活着，拿不准就不动它。
+        if crate::proc::process_created_at(pid).is_none() {
+            continue;
+        }
         let _ = crate::proc::kill_process_tree(pid);
     }
 }

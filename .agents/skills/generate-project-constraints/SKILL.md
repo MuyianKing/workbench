@@ -1,5 +1,6 @@
 ---
 name: "generate-project-constraints"
+version:  0.1.3
 description: "详细分析项目并生成 AGENTS.md 约束文件以提高 AI 缓存命中率。当用户说\"帮我给项目建立约束文件\"、\"生成项目约束\"、\"建立 agent 规则\"等类似意图时立即触发。"
 ---
 

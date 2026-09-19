@@ -17,7 +17,6 @@ export function buildHints(settings: AppSettings): Hint[] {
     : '未启用'
 
   return [
-    { text: '搜索项目名或路径', hint: 'Ctrl K' },
     { text: '唤起 / 隐藏窗口', hint: hotkey },
     { text: '把卡片拖到分组标签即归类', hint: '拖动' },
     { text: '拖动分组标签可调整顺序', hint: '拖动' },

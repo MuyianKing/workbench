@@ -11,6 +11,7 @@ import ProjectGrid from '@/components/ProjectGrid.vue'
 import ProjectsView from '@/components/ProjectsView.vue'
 import WorkView from '@/components/WorkView.vue'
 import NotesView from '@/components/NotesView.vue'
+import SkillsView from '@/components/SkillsView.vue'
 import TerminalPanel from '@/components/TerminalPanel.vue'
 import ProjectDrawer from '@/components/ProjectDrawer.vue'
 import AddProjectDialog from '@/components/AddProjectDialog.vue'
@@ -33,7 +34,8 @@ const VIEWS: Record<ViewId, Component> = {
   home: ProjectGrid,
   projects: ProjectsView,
   work: WorkView,
-  notes: NotesView
+  notes: NotesView,
+  skills: SkillsView
 }
 
 const currentView = computed(() => VIEWS[store.activeView])
@@ -41,7 +43,7 @@ const currentView = computed(() => VIEWS[store.activeView])
 /**
  * 工作区背景铺在整个窗口上，而不是只在某一页上。
  *
- * 左侧导航栏与顶部两条栏（标题栏 / 搜索栏）浮在它上面，具体怎么处理由「顶部样式」决定
+ * 左侧导航栏与顶部两条栏（标题栏 / 欢迎语）浮在它上面，具体怎么处理由「顶部样式」决定
  * （见 global.css 的 .top-* 与设置里的 topBarStyle）：壁纸因此能从窗口顶边一路铺下来，
  * 而不是在工具栏下沿突然开始。
  *
@@ -119,7 +121,7 @@ onMounted(() => {
    * 就横着溢出窗外，右侧那几颗按钮一起被推出去、点都点不着。下面 `.shell` 同理。
    */
   grid-template-columns: minmax(0, 1fr);
-  /* 顶部整条栏（标题栏 + 搜索栏通宽）/ 下面「导航栏 + 内容列」*/
+  /* 顶部整条栏（标题栏 + 欢迎语通宽）/ 下面「导航栏 + 内容列」*/
   grid-template-rows: auto minmax(0, 1fr);
   overflow: hidden;
 
@@ -172,10 +174,10 @@ onMounted(() => {
   /* 通宽：导航栏是从它下沿才开始的一列，不在这一层 */
   /**
    * 抬到页面内容之上。必须显式抬这一手：
-   * 「毛玻璃」那档的 backdrop-filter 会给 .topbar 造一个层叠上下文，里面那张搜索结果面板的
-   * z-index 就只在这个上下文里比大小了 —— 而画布里的卡片是定位元素（position: relative、
-   * z-index: auto，见 BoardCard / ProjectCard），按树序排在 .topbar 之后，于是卡片整块盖在
-   * 面板上面。卡片本身还是半透明的（卡片不透明度），两层就叠成「面板透底」的样子。
+   * 「毛玻璃」那档的 backdrop-filter 会给 .topbar 造一个层叠上下文，而画布上的卡片是
+   * 定位元素（position: relative、z-index: auto，见 BoardCard / ProjectCard），按树序
+   * 排在 .topbar 之后 —— 不抬的话，卡片整块会盖在顶栏上面；卡片本身还是半透明的
+   * （卡片不透明度），两层就叠成「顶栏透底」的样子。
    */
   position: relative;
   z-index: 10;

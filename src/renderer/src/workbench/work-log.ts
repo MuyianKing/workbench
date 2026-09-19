@@ -120,17 +120,3 @@ export async function removeWorkLog(id: string): Promise<Result<null>> {
     return fail(reasonOf(error, '删除工作日志失败'))
   }
 }
-
-// ---------- 数据目录迁移 ----------
-
-/** 迁移前把内存态同步落盘：否则 Rust 搬走的是上一次写盘时的样子 */
-export async function flush(): Promise<void> {
-  if (loaded) await invoke('work_log_save', { value: file })
-}
-
-/** 迁移之后丢掉内存里那份 —— 它读的是旧目录的文件 */
-export function reset(): void {
-  file = emptyWorkLog()
-  loaded = false
-  pending = null
-}

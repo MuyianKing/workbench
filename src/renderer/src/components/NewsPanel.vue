@@ -1,21 +1,21 @@
 <script setup lang="ts">
 /**
- * 首页「AI 热点」卡片：多个热点源的合并列表，一条一行（标题 + 时间），点击跳原文。
+ * 首页「AI 热点」卡片：内置热点源的合并列表，一条一行（标题 + 时间），点击跳原文。
  *
  * **这一行只放「每行都不一样」的东西**：标题与发布时间。
- * 来源名只在**同一屏里真的混着多个源**时才出现 —— 只开量子位时它十行都是同一句话，
+ * 来源名只在**同一屏里真的混着多个源**时才出现 —— 只有一个源时它十行都是同一句话，
  * 既占掉本来就不够的标题宽度，还会被挤成「量…」（第一版就是这么难看的）。
  * 页脚同理：只有一个源时不再写「1 个源」。
  *
  * **数据流**：先读本地缓存（`getAiNews`，不联网）把上次的内容摆出来，再按各源自己的
- * 节奏后台刷新（`refreshAiNews`：只有已勾选、且到了各自刷新间隔的源才真发请求）。
+ * 节奏后台刷新（`refreshAiNews`：只有到了各自刷新间隔的源才真发请求）。
  * 某个源失败时**只影响它自己** —— 别的源的内容照旧显示，失败原因落在列表下面那行小字里。
  *
  * **联网边界**：这里不拼任何地址，只报源 id；源清单与地址都在 Rust 侧的 `SOURCES` 里。
- * 卡片自己不弹表单，勾选源与填 token 都在设置里（见空态引导）。
+ * 卡片自己不弹表单，看或不看热点就是这张卡片在不在首页上（设置 → 菜单 → 首页下面那层卡片）。
  */
 import { computed, nextTick, onMounted, onActivated, ref, watch } from 'vue'
-import { Refresh } from '@element-plus/icons-vue'
+import { Collection, Refresh } from '@element-plus/icons-vue'
 import { formatListTime, formatTimestamp } from '@/format'
 import NewsArticleDialog from '@/components/NewsArticleDialog.vue'
 import type { AiNewsItem, AiNewsView } from '@/types'
@@ -82,8 +82,7 @@ onMounted(async () => {
 
 /**
  * 切回首页时按策略再试一次（KeepAlive 下卡片不会重新挂载）：跨了刷新间隔、
- * 上次失败退避到期、刚在设置里勾了新源或配好 token，都可能让这次「该拉了」。
- * 首次挂载那次由 onMounted 承担，免得启动时连拉两遍。
+ * 上次失败退避到期，都可能让这次「该拉了」。首次挂载那次由 onMounted 承担，免得启动时连拉两遍。
  */
 let activatedOnce = false
 onActivated(() => {
@@ -168,25 +167,10 @@ const footer = computed(() => {
 })
 
 /**
- * 空态文案：把「为什么没有内容」说清楚 —— 一个源都没勾 / 勾了但缺 token / 正在拉。
- * 三种情况用户要做的事完全不同，混成一句「暂无数据」等于什么都没说。
+ * 空态文案：读盘还没回来时不说「还没有热点」——「正在读」与「真的没内容」是两回事，
+ * 用户要做的事也不同（等一等 vs 等源那边更新）。
  */
-const emptyHint = computed(() => {
-  const data = view.value
-  if (!data) return '正在读取…'
-
-  const enabled = data.sources.filter((source) => source.enabled)
-  if (!enabled.length) {
-    return '还没有启用任何热点源\n在设置 → 通用 → AI 热点里勾一个'
-  }
-
-  const missingToken = enabled.filter((source) => source.needsToken && !source.hasToken)
-  if (missingToken.length === enabled.length) {
-    return `${missingToken.map((source) => source.name).join('、')} 需要 token\n在设置 → 通用 → AI 热点里填一次`
-  }
-
-  return '正在获取热点…'
-})
+const emptyHint = computed(() => (view.value ? '正在获取热点…' : '正在读取…'))
 </script>
 
 <template>
@@ -227,7 +211,10 @@ const emptyHint = computed(() => {
       </footer>
     </template>
 
-    <p v-else-if="readOnce" class="panel__empty">{{ emptyHint }}</p>
+    <p v-else-if="readOnce" class="panel__empty">
+      <el-icon class="empty__icon"><Collection /></el-icon>
+      {{ emptyHint }}
+    </p>
 
     <!-- 站内阅读：点一行打开它，正文由它自己抓（见 NewsArticleDialog） -->
     <NewsArticleDialog v-model="articleOpen" :item="selected" />

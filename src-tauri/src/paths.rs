@@ -1,32 +1,28 @@
-//! 路径解析：数据目录、指针文件、各数据文件名。
+//! 路径解析：数据目录与各数据文件名。
 //!
-//! 关键约定：数据目录必须与 Electron 版一致（`%APPDATA%\Workbench`）。
+//! 关键约定：数据文件固定放在 `%APPDATA%\Workbench\data`。
+//! 根目录 `%APPDATA%\Workbench` 是迁到 Tauri 之前的 Electron 版留下的 Chromium 配置目录
+//! （`Cache` / `GPUCache` / `DIPS` / `Preferences` 那一堆），数据文件收在 `data` 子目录里，两边不混。
 //! 不能图省事用 Tauri 的 `app_config_dir()` —— 它按 identifier 生成
 //! `%APPDATA%\com.muyian.workbench`，换了位置用户就等于「丢了」项目列表。
 
 use std::path::{Path, PathBuf};
 
-/// 数据目录指针：只放一个路径。固定放在用户数据根目录下，
-/// 不能把「数据目录」存进 workbench-data.json 自己 —— 那样就得先知道文件在哪才能知道文件在哪。
-const POINTER_FILE: &str = "data-location.json";
 pub const DATA_FILE: &str = "workbench-data.json";
 /// Token 用量快照（改名前的 `token-data.json`，启动时由 `migrate_legacy_files` 搬过来）
 pub const TOKEN_USAGE_FILE: &str = "token-usage.json";
 /// 主题文件：外观设置 + 首页布局（见 shared/theme.ts）
 pub const THEME_FILE: &str = "theme.json";
-/// 工作日志（见 shared/work-log.ts）。**只在本机**：它不进同步仓库，
-/// 但跟着数据目录走 —— 用户换数据目录时，自己写过的日志不该落在原地。
+/// 工作日志（见 shared/work-log.ts）。**只在本机**：不进同步仓库、也不进任何云端
 pub const WORK_LOG_FILE: &str = "work-log.json";
-/// AI 热点缓存（见 shared/ai-news.ts）。与工作日志同一待遇：只在本机、不进同步仓库，
-/// 但跟着数据目录走（它是「上次拉回来的那批热点」，换目录不该把它丢在旧位置）。
+/// AI 热点缓存（见 shared/ai-news.ts）。与工作日志同一待遇：只在本机、不进同步仓库
 pub const AI_NEWS_FILE: &str = "ai-news.json";
-/// **旧版**笔记数据文件（一棵「文件夹 + 笔记」的 JSON 树）。
-///
-/// 笔记现在就是用户自己挑的那个文件夹里的 .md 文件（见 notes.rs），这份文件不再读写；
-/// 保留它只是为了迁移数据目录时把这个历史文件一起带走，不把用户盘上唯一的旧副本落下。
-pub const LEGACY_NOTE_FILE: &str = "note-data.json";
+/// 数据目录名：数据文件都收在它下面（见文件头的约定）
+const DATA_SUBDIR: &str = "data";
 /// 改名前的用量快照文件名，只在一次性搬家时用得上
 const LEGACY_TOKEN_DATA_FILE: &str = "token-data.json";
+/// 改名前的笔记文件名（旧版那棵 JSON 树）。应用早就不再读写它，搬家时顺手跟着挪个位置
+const LEGACY_NOTE_DATA_FILE: &str = "note-data.json";
 /// 本机设备标识（Token 同步用）
 const DEVICE_FILE: &str = "device.json";
 /// Token 同步仓库的本地克隆目录名
@@ -38,6 +34,18 @@ pub(crate) const TOKEN_USAGE_DIR: &str = "token-usage";
 /// 克隆里放**配置**的子目录名：一台机器一份 theme.json 的副本（见 shared/sync-config.ts）
 pub(crate) const CONFIG_DIR: &str = "config";
 
+/// 老版本直接写在用户数据根目录下的那批文件：搬家清单（见 `relocate_root_files_in`）
+const ROOT_FILES: &[&str] = &[
+    DATA_FILE,
+    THEME_FILE,
+    TOKEN_USAGE_FILE,
+    WORK_LOG_FILE,
+    AI_NEWS_FILE,
+    DEVICE_FILE,
+    LEGACY_TOKEN_DATA_FILE,
+    LEGACY_NOTE_DATA_FILE,
+];
+
 /// 用户数据根目录，等价于 Electron 的 `getAppData`。
 pub fn user_data_dir() -> PathBuf {
     match std::env::var_os("APPDATA") {
@@ -47,24 +55,10 @@ pub fn user_data_dir() -> PathBuf {
     }
 }
 
-fn pointer_path() -> PathBuf {
-    user_data_dir().join(POINTER_FILE)
-}
-
-/// 用户在设置里迁移过的数据目录；指针缺失或损坏时回落默认目录（不影响启动）。
-pub fn custom_dir() -> Option<PathBuf> {
-    let text = std::fs::read_to_string(pointer_path()).ok()?;
-    let value: serde_json::Value = serde_json::from_str(&text).ok()?;
-    let dir = value.get("dir")?.as_str()?.trim().to_string();
-    if dir.is_empty() {
-        None
-    } else {
-        Some(PathBuf::from(dir))
-    }
-}
-
+/// 数据目录：用户数据根目录下的 `data`。**固定就是它**：数据文件不跟着任何设置走，
+/// 换机器 / 重装都落在同一个地方（见文件头的约定）。
 pub fn data_dir() -> PathBuf {
-    custom_dir().unwrap_or_else(user_data_dir)
+    user_data_dir().join(DATA_SUBDIR)
 }
 
 pub fn data_file() -> PathBuf {
@@ -87,22 +81,50 @@ pub fn ai_news_file() -> PathBuf {
     data_dir().join(AI_NEWS_FILE)
 }
 
-/// 旧版笔记数据文件的落点（只给数据目录迁移用，见 LEGACY_NOTE_FILE 的说明）
-pub fn legacy_note_file() -> PathBuf {
-    data_dir().join(LEGACY_NOTE_FILE)
+/// 一次性的本地搬家，启动时跑一次（commands.rs 的 `load_all`，必须早于任何 store 载入）：
+/// 1. 老版本的数据文件直接写在根目录下，现在收进 `data/`；
+/// 2. 用量快照从 `token-data.json` 改名成 `token-usage.json`。
+///
+/// 顺序不能反：改名那一步得在文件都已经落进新目录之后做。
+/// 之所以要走这一步：只改 `data_dir()` 而不搬文件，启动时读到的是空文件，
+/// 面板上就是「项目列表全没了」，而下一次落盘又会把空数据写回去。
+pub fn migrate_legacy_files() {
+    let dir = data_dir();
+    if let Err(err) = std::fs::create_dir_all(&dir) {
+        eprintln!("[workbench] 数据目录创建失败（{err}）");
+        return;
+    }
+    relocate_root_files_in(&user_data_dir(), &dir);
+    rename_legacy_token_file_in(&dir);
+}
+
+/// 根目录 → `data/`，只补空缺：**新位置已经有这份文件时绝不用根目录那份盖掉**。
+///
+/// 理由是根目录里还能冒出数据文件只有一种可能 —— 老版本（数据已经搬走、它读到的是空的）
+/// 又跑了一次，写回去的是默认值；拿它盖掉 `data/` 里的真数据等于把用户的项目列表清空。
+/// 那份多余的副本一律不动，要删由用户自己删（与上面那个改名同一条口径）。
+///
+/// 目录可注入（单测用临时目录跑）。
+fn relocate_root_files_in(root: &Path, dir: &Path) {
+    for name in ROOT_FILES {
+        let from = root.join(name);
+        if !from.is_file() {
+            continue;
+        }
+        let to = dir.join(name);
+        if to.exists() {
+            continue;
+        }
+        if let Err(err) = std::fs::rename(&from, &to) {
+            eprintln!("[workbench] 数据文件搬家失败（{name}: {err}），下次启动再试");
+        }
+    }
 }
 
 /// 一次性的本地改名：用量快照从 `token-data.json` 换成 `token-usage.json`。
 ///
-/// 只改文件名、不动内容，所以攒下的历史原样留着。必须在任何 store 载入之前跑
-/// （见 commands.rs 的 `load_all`），否则会先按新名字读到一个空文件，
-/// 面板上就是「历史突然没了」，而下一次落盘又会把空数据写回去。
-pub fn migrate_legacy_files() {
-    migrate_legacy_files_in(&data_dir());
-}
-
-/// 上者的实体，目录可注入（单测用临时目录跑）
-pub(crate) fn migrate_legacy_files_in(dir: &Path) {
+/// 只改文件名、不动内容，所以攒下的历史原样留着。目录可注入（单测用临时目录跑）。
+fn rename_legacy_token_file_in(dir: &Path) {
     let target = dir.join(TOKEN_USAGE_FILE);
     let legacy = dir.join(LEGACY_TOKEN_DATA_FILE);
     // 新文件已经在了（已经升级过）或旧文件本来就没有（全新安装）：都不动
@@ -126,73 +148,39 @@ pub fn image_sync_dir() -> PathBuf {
     user_data_dir().join(IMAGE_SYNC_DIR)
 }
 
-/// 本机设备标识（Token 同步用）。机器本地生成，**不随数据目录迁移、也不进同步仓库**：
+/// 本机设备标识（Token 同步用）。机器本地生成，**不进同步仓库**：
 /// 两台机器拿到同一个 id 就会往同一个分片文件里写，互相覆盖且不会有任何报错。
-/// 放在 user_data_dir 而不是数据目录里，正是因为用户可能把数据目录指到别处（甚至是网盘）。
+/// 与数据文件同目录，但它只属于这台机器（同步时按设备分片，见 sync.rs）。
 pub fn device_file() -> PathBuf {
-    user_data_dir().join(DEVICE_FILE)
-}
-
-/// 目标目录里是否已经有数据文件（迁移前要拦一下，避免覆盖别人的数据）。
-pub fn data_file_exists_in(dir: &str) -> bool {
-    !dir.trim().is_empty() && PathBuf::from(dir.trim()).join(DATA_FILE).exists()
-}
-
-/// 把数据搬到新目录并切过去。写的是内存里的当前数据，所以调用前必须已经加载过。
-pub fn migrate_data_dir(dir: &str, current: &serde_json::Value) -> Result<(), String> {
-    let target = dir.trim();
-    if target.is_empty() {
-        return Err("目录为空".into());
-    }
-
-    let target_dir = PathBuf::from(target);
-    std::fs::create_dir_all(&target_dir).map_err(|e| format!("创建目录失败: {e}"))?;
-    std::fs::write(
-        target_dir.join(DATA_FILE),
-        serde_json::to_string_pretty(current).map_err(|e| e.to_string())?,
-    )
-    .map_err(|e| format!("写入数据文件失败: {e}"))?;
-
-    // 用量快照与主数据同目录，迁移时一并带走（还没有就跳过）
-    let _ = std::fs::copy(token_file(), target_dir.join(TOKEN_USAGE_FILE));
-    // 主题文件同理：首页布局与外观设置都在里面，漏掉这一份等于把用户的摆放和配色清掉
-    let _ = std::fs::copy(theme_file(), target_dir.join(THEME_FILE));
-    // 工作日志也是本地数据：它不进同步仓库，但数据目录一换就该跟着走
-    let _ = std::fs::copy(work_log_file(), target_dir.join(WORK_LOG_FILE));
-    // AI 热点缓存同理：只在本机的拉取结果，换数据目录不该丢在旧位置
-    let _ = std::fs::copy(ai_news_file(), target_dir.join(AI_NEWS_FILE));
-    // 旧版笔记文件（不再读写）顺手带走：用户盘上可能只有这一份历史笔记
-    let _ = std::fs::copy(legacy_note_file(), target_dir.join(LEGACY_NOTE_FILE));
-
-    std::fs::write(
-        pointer_path(),
-        serde_json::to_string_pretty(&serde_json::json!({ "dir": target })).unwrap(),
-    )
-    .map_err(|e| format!("写入指针文件失败: {e}"))?;
-
-    Ok(())
+    data_dir().join(DEVICE_FILE)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    /// 每个用例一个独立的临时目录，别和真实数据目录撞上
+    fn temp_dir() -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("wb-paths-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
     /// 老名字的用量快照要能搬到新名字上，历史不能丢
     #[test]
     fn legacy_token_file_is_renamed_once() {
-        let dir = std::env::temp_dir().join(format!("wb-paths-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = temp_dir();
 
         let legacy = dir.join(LEGACY_TOKEN_DATA_FILE);
         std::fs::write(&legacy, r#"{"version":5,"sources":{}}"#).unwrap();
 
-        migrate_legacy_files_in(&dir);
+        rename_legacy_token_file_in(&dir);
         assert!(!legacy.exists());
         assert!(!std::fs::read_to_string(dir.join(TOKEN_USAGE_FILE)).unwrap().is_empty());
 
         // 再跑一次不动新文件：重启时这一步每次都会走到
         let before = std::fs::read_to_string(dir.join(TOKEN_USAGE_FILE)).unwrap();
-        migrate_legacy_files_in(&dir);
+        rename_legacy_token_file_in(&dir);
         assert_eq!(std::fs::read_to_string(dir.join(TOKEN_USAGE_FILE)).unwrap(), before);
 
         let _ = std::fs::remove_dir_all(&dir);
@@ -201,12 +189,58 @@ mod tests {
     /// 没有旧文件（全新安装）时什么都不做，也不能报错
     #[test]
     fn renaming_without_a_legacy_file_is_a_noop() {
-        let dir = std::env::temp_dir().join(format!("wb-paths-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = temp_dir();
 
-        migrate_legacy_files_in(&dir);
+        rename_legacy_token_file_in(&dir);
         assert!(!dir.join(TOKEN_USAGE_FILE).exists());
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 老版本写在根目录下的数据文件要整体搬进 `data/`，根目录那边不留副本
+    #[test]
+    fn root_files_move_into_the_data_dir() {
+        let root = temp_dir();
+        let data = root.join(DATA_SUBDIR);
+        std::fs::create_dir_all(&data).unwrap();
+
+        for name in [DATA_FILE, THEME_FILE, WORK_LOG_FILE, AI_NEWS_FILE, DEVICE_FILE] {
+            std::fs::write(root.join(name), r#"{"a":1}"#).unwrap();
+        }
+        // 不认识的邻居一律不碰：根目录里还有 Electron 版那堆 Chromium 文件
+        std::fs::write(root.join("Preferences"), "x").unwrap();
+
+        relocate_root_files_in(&root, &data);
+
+        for name in [DATA_FILE, THEME_FILE, WORK_LOG_FILE, AI_NEWS_FILE, DEVICE_FILE] {
+            assert!(data.join(name).exists(), "{name} 应该已经搬进 data/");
+            assert!(!root.join(name).exists(), "{name} 不该再留在根目录");
+        }
+        assert!(root.join("Preferences").exists());
+        assert_eq!(std::fs::read_to_string(data.join(DATA_FILE)).unwrap(), r#"{"a":1}"#);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// 搬过之后老版本又跑了一次（它读到的是空的，往根目录写回一份默认值）：
+    /// `data/` 里那份真数据不能被盖掉，根目录那份也不动
+    #[test]
+    fn an_existing_data_file_is_never_overwritten_from_the_root() {
+        let root = temp_dir();
+        let data = root.join(DATA_SUBDIR);
+        std::fs::create_dir_all(&data).unwrap();
+
+        std::fs::write(data.join(DATA_FILE), r#"{"from":"data"}"#).unwrap();
+        std::fs::write(root.join(DATA_FILE), r#"{"from":"root"}"#).unwrap();
+
+        relocate_root_files_in(&root, &data);
+
+        assert_eq!(
+            std::fs::read_to_string(data.join(DATA_FILE)).unwrap(),
+            r#"{"from":"data"}"#
+        );
+        assert!(root.join(DATA_FILE).exists(), "根目录那份留给用户自己删");
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

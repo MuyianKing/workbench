@@ -24,6 +24,7 @@
 import {
   CODEBUDDY_SOURCE_ID,
   DSH_SOURCE_ID,
+  QODER_SOURCE_ID,
   TOKEN_DATA_VERSION,
   TOKEN_KEEP_DAYS,
   WORKBUDDY_SOURCE_ID,
@@ -33,6 +34,7 @@ import {
   mergeDays,
   pruneTokenDays,
   sameDays,
+  sameShardContent,
   sanitizeShard,
   sanitizeSyncRepo,
   sumDays,
@@ -52,9 +54,12 @@ import {
 } from '@shared/sync-config'
 import { collectCodeBuddyLogText, createCodeBuddyParseState } from '@shared/codebuddy-log'
 import { collectDshSessionText } from '@shared/dsh-log'
+import { collectQoderSessionText } from '@shared/qoder-log'
 import { collectWorkBuddySessionText } from '@shared/workbuddy-log'
-import { invoke } from './bridge'
+import { invoke, guard } from './bridge'
 import { emit } from './events'
+import { fail, ok } from '@shared/result'
+import type { Result } from '@shared/types'
 import * as state from './state'
 
 /** Rust 侧 `token_zcode_rows` 回来的行：SUM 在无数据时是 NULL，所以全部可空 */
@@ -85,6 +90,8 @@ function toCounters(row: UsageRow): TokenCounters {
     reasoningTokens: finite(row.reasoning),
     cacheReadTokens: cacheRead,
     cacheWriteTokens: finite(row.cacheWrite),
+    // ZCode 的库里只有 token 计数，没有额度这一项
+    credits: 0,
     requests: finite(row.requests)
   }
 }
@@ -332,13 +339,91 @@ async function readWorkBuddyLive(): Promise<LiveRead> {
   return { ok: true, days }
 }
 
+// ---------- Qoder(~/.qoder-cn/projects) ----------
+
+/** `token_qoder_sessions` 回来的一项 */
+interface QoderSessionFile {
+  path: string
+  mtimeMs: number
+  size: number
+}
+
+/**
+ * 每个会话文件的解析结果，key 是路径。
+ *
+ * 与 WorkBuddy / DSH 同样**按文件**缓存：每一行都自带时间、模型与额度
+ * （见 shared/qoder-log.ts），文件之间互不依赖，只重解变化的那些就够。
+ */
+const qoderCache = new Map<string, { mtimeMs: number; size: number; days: TokenDays }>()
+
+/**
+ * 实读 Qoder。清单由 Rust 给（很便宜），正文按路径读回来自己解析 ——
+ * 正文没有压缩，不用像 DSH 那样再回 Rust 解码一趟。
+ *
+ * 它报的是**额度**不是 token：Qoder 的客户端不产生 token 计数，
+ * 所以这份 days 里只有 credits 有值，面板在 credits 口径下才显示它。
+ */
+async function readQoderLive(): Promise<LiveRead> {
+  let listing: { found?: unknown; sessions?: unknown }
+  try {
+    listing = await invoke<{ found?: unknown; sessions?: unknown }>('token_qoder_sessions')
+  } catch (error) {
+    return { ok: false, error: reasonOf(error, '读取 Qoder 会话目录失败') }
+  }
+
+  // 没装就安静跳过（与 CodeBuddy / DSH / WorkBuddy 同一约定）
+  if (listing?.found !== true) return { ok: false, missing: true, error: '' }
+
+  const cutoff = Date.now() - (TOKEN_KEEP_DAYS - 1) * 86_400_000
+  const sessions = (Array.isArray(listing.sessions) ? listing.sessions : [])
+    .map((item) => item as Partial<QoderSessionFile>)
+    .filter(
+      (item): item is QoderSessionFile =>
+        typeof item.path === 'string' &&
+        typeof item.mtimeMs === 'number' &&
+        typeof item.size === 'number'
+    )
+    // 快照只留最近一年，更早的会话里不可能有窗口内的记录
+    .filter((item) => item.mtimeMs >= cutoff)
+
+  let days: TokenDays = {}
+  const alive = new Set<string>()
+
+  for (const session of sessions) {
+    alive.add(session.path)
+    let cached = qoderCache.get(session.path)
+
+    if (!cached || cached.mtimeMs !== session.mtimeMs || cached.size !== session.size) {
+      try {
+        const parsed: TokenDays = {}
+        collectQoderSessionText(await invoke<string>('fs_read_text', { path: session.path }), parsed)
+        cached = { mtimeMs: session.mtimeMs, size: session.size, days: parsed }
+        qoderCache.set(session.path, cached)
+      } catch {
+        // 单个会话读不了（被占用 / 编码异常）只少这一个，不影响其余
+        qoderCache.delete(session.path)
+        continue
+      }
+    }
+
+    days = sumDays(days, cached.days)
+  }
+
+  // 会话被清理掉的就从缓存里摘掉，不然内存里会一直留着它们
+  for (const path of [...qoderCache.keys()]) {
+    if (!alive.has(path)) qoderCache.delete(path)
+  }
+
+  return { ok: true, days }
+}
+
 // ---------- 本机设备标识 ----------
 
 /** 本机设备标识只问一次：它落盘后就不再变，而面板每 60 秒就会走一次这条路 */
 let device: { id: string; name: string } | null = null
 
 /**
- * 本机设备标识（`%APPDATA%/Workbench/device.json`，没有就现生成一份）。
+ * 本机设备标识（`%APPDATA%/Workbench/data/device.json`，没有就现生成一份）。
  *
  * 除了 Token 分片，笔记图片的落点也要用它（见 `workbench/note.ts` 的 `imageScope`），
  * 所以这里是导出的：它描述的是「这台机器」，不是「Token 面板」。
@@ -502,16 +587,9 @@ async function runSync(repo: string, shard: TokenShard): Promise<void> {
     await invoke('token_sync_publish', {
       repo,
       device: shard.device,
-      shard,
-      // 主题文件整份作为这台机器的配置推上去（见 shared/sync-config.ts）。
-      // 关掉那个开关时给 null：Rust 那边会把仓库里自己那份配置删掉 ——
-      // 「不同步外观」就该是仓库里没有它，而不是留着一份越放越旧的副本
-      config: state.settings().syncAppearance
-        ? captureThemeFile(shard.device, shard.name, state.themeConfig())
-        : null,
-      // 登录过就默认用账号的 token 授权（省掉先手工给 git 配凭据）；
-      // 设置里关掉这个开关就退回系统凭据 —— token 失效时那条路还得能用
-      useAccount: state.settings().useAccountForSync
+      shard
+      // 这里**只推用量**（外观配置由设置界面「同步一次」走 token_sync_config 单独推）：
+      // 两个目录各管一件事，自动同步一小时一轮也不必每次都带上外观
     })
   } catch (error) {
     errors.push(reasonOf(error, '同步失败'))
@@ -565,21 +643,23 @@ export async function getTokenUsage(options: {
   const repo = sanitizeSyncRepo(options.repo)
   // 先取设备标识:v3 老文件里没有设备信息,收敛时要用它补齐(见 sanitizeShard 的 fallback)
   const { id, name } = await localDevice()
-  const local = sanitizeShard(await invoke<unknown>('token_load'), { device: id, name })
+  const rawLocal = await invoke<unknown>('token_load')
+  const local = sanitizeShard(rawLocal, { device: id, name })
 
   // 各来源互不依赖,并行读:都是本地读取,串起来白等
   const sourcesRead = Promise.all([
     readZcodeLive(),
     readCodeBuddyLive(),
     readDshLive(),
-    readWorkBuddyLive()
+    readWorkBuddyLive(),
+    readQoderLive()
   ])
 
   // 别人的分片同样是本地读（克隆目录），也并行：首屏就带上别的机器，
   // 而不是等这一轮的 git 走完 —— 换仓库后才读得到新仓库的分片，所以按 shardsRepo 判断一次就够
   const shardsRead = syncLocalShards(repo, id)
 
-  const [zcodeLive, codebuddyLive, dshLive, workbuddyLive] = await sourcesRead
+  const [zcodeLive, codebuddyLive, dshLive, workbuddyLive, qoderLive] = await sourcesRead
   await shardsRead
 
   const sources = { ...local.sources }
@@ -592,7 +672,8 @@ export async function getTokenUsage(options: {
     { id: ZCODE_SOURCE_ID, read: zcodeLive },
     { id: CODEBUDDY_SOURCE_ID, read: codebuddyLive },
     { id: DSH_SOURCE_ID, read: dshLive },
-    { id: WORKBUDDY_SOURCE_ID, read: workbuddyLive }
+    { id: WORKBUDDY_SOURCE_ID, read: workbuddyLive },
+    { id: QODER_SOURCE_ID, read: qoderLive }
   ]) {
     if (!read.ok) {
       // missing 是「这台机器上没装这个工具」,不算读取失败,只是没有这个来源
@@ -616,7 +697,14 @@ export async function getTokenUsage(options: {
     updatedAt: changed ? now : local.updatedAt,
     sources
   }
-  await invoke('token_save', { value: shard })
+  // 该不该落盘：计数变了要写；计数没变但磁盘上那份还没收敛过（老版本号、缺设备信息）
+  // 也要写 —— sanitizeShard 只把补齐的结果留在内存里，不写回去的话老文件永远升不上来。
+  //
+  // 跳过写盘的理由：这个入口每分钟被轮询调一次，而落盘是「整份 pretty JSON + 临时文件
+  // + rename」，没变也写就是每分钟白写一次盘（应用开着一整天 = 1440 次）。
+  if (changed || !sameShardContent(rawLocal, shard)) {
+    await invoke('token_save', { value: shard })
+  }
 
   // 换仓库（或首次）之后的这一轮立刻走，不必等节流窗口过去；Rust 那边发现克隆指向的不是
   // 这个仓库会重新克隆，读分片时也会核对仓库归属 —— 详见 sync.rs 的 ensure_clone / read_shards
@@ -677,13 +765,46 @@ export async function syncTokenUsage(repo: string): Promise<TokenUsageResult> {
 }
 
 /**
+ * 只同步外观配置（设置界面「从别的机器取外观」旁的「同步一次」）：
+ * 把本机 theme.json 整份推上去（Rust 侧 `token_sync_config`），再把克隆里别人的配置读回来。
+ * 与用量同步互不相干 —— 它不实读用量、不推分片，用量这边也不碰配置。
+ */
+export async function syncThemeConfig(repo: string): Promise<Result<{ changed: boolean }>> {
+  const target = sanitizeSyncRepo(repo)
+  if (!target) return fail('还没有配置同步仓库（设置 → 通用 → 账号）')
+
+  const { id, name } = await localDevice()
+  if (!id) return fail('拿不到本机设备标识，无法同步')
+
+  const result = await guard(
+    invoke<Partial<{ changed: boolean }>>('token_sync_config', {
+      repo: target,
+      device: id,
+      config: captureThemeFile(id, name, state.themeConfig())
+    }),
+    '同步外观配置失败'
+  )
+  if (!result.ok) return fail(result.error ?? '同步外观配置失败')
+
+  // 推完克隆就是最新的：把别人的分片与配置重读一遍，设备列表立刻反映出来；
+  // 读不回来只当列表还是旧样子，推送本身是成功的
+  try {
+    await readRemoteShards(target, id)
+  } catch {
+    // 忽略：列表留在上一次的样子
+  }
+  return ok({ changed: result.data?.changed === true })
+}
+
+/**
  * 同步仓库里别的机器（含各自那份配置），按「最近动过的在前」排序。
  *
  * 只读本地那份克隆（Rust 侧 `token_sync_shards` 不联网、不推东西），所以设置界面打开时
  * 随时可以问；内容就是上一次同步取回来的样子。地址没填、或还没同步过时是空数组。
  *
- * 本机那份要按 device 排除掉：设置界面的用途是「取别人的配置」，把自己列进去
- * 只会让人以为多了一台机器（同一份分片已经在面板的「同步设备」里露过一次脸了）。
+ * 列表里**包含本机自己**（标了 `self`）：它那份照常可「应用」，相当于取回本机上次推送
+ * 时的外观；面板的「同步设备」仍按 device 排除掉本机：同一份分片已经在那儿露过一次脸了，
+ * 列进去只会让人以为多了一台机器。
  */
 export async function listSyncDevices(repo: string): Promise<SyncDeviceInfo[]> {
   const target = sanitizeSyncRepo(repo)
@@ -694,7 +815,7 @@ export async function listSyncDevices(repo: string): Promise<SyncDeviceInfo[]> {
   const { shards, configs } = parseFiles(files ?? {})
 
   return pairDevices(
-    shards.filter((item) => item.device && item.device !== id),
-    configs.filter((file) => file.device !== id)
-  )
+    shards.filter((item) => item.device),
+    configs
+  ).map((device) => (device.id === id ? { ...device, self: true } : device))
 }

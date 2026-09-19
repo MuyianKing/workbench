@@ -1,5 +1,5 @@
 /**
- * 项目与分组：列表、筛选排序、搜索、抽屉与「添加项目」，以及项目的启停打包。
+ * 项目与分组：列表、筛选排序、抽屉与「添加项目」，以及项目的启停打包。
  *
  * 这个 store 曾经有 2600 行、装下十来个不相干的领域。现在按领域拆开之后，
  * 这里只剩「项目」本身，其余各归各家：
@@ -15,12 +15,6 @@
 import { computed, ref, watch } from 'vue'
 import { defineStore } from 'pinia'
 import { backfillProjectColors as backfillColors } from '@shared/project-color'
-import {
-  PROJECT_HIT_LIMIT,
-  searchProjects,
-  projectMatchesKeyword,
-  type SearchGroup
-} from '@shared/search'
 import { fallbackView, sanitizeViewId, type ViewId } from '@shared/views'
 import { sanitizeProjectSort, type ProjectSort } from '@shared/project-sort'
 import type {
@@ -31,7 +25,6 @@ import type {
   ProjectGroup,
   ProjectPatch
 } from '@/types'
-import { statusLabel } from '@/status'
 import { notifyError, notifySuccess, notifyWarning, confirmAction } from '@/notify'
 import { useSettingsStore } from './settings'
 import { useTerminalStore, RUNNING_STATUS, type ProcessTarget } from './terminal'
@@ -63,7 +56,6 @@ export const useProjectsStore = defineStore('projects', () => {
   /** 按天聚合的命令执行次数，首页活跃度图的数据源；每次执行结束后由主进程推着刷新 */
   const activity = ref<ActivityCounts>({})
 
-  const keyword = ref('')
   const groupFilter = ref<string>('all')
 
   /**
@@ -81,23 +73,6 @@ export const useProjectsStore = defineStore('projects', () => {
       sortBy.value = sanitizeProjectSort(value)
     },
     { immediate: true }
-  )
-
-  /**
-   * 从搜索结果跳过来时要点名的那张项目卡（画一圈定位环、滚到它）。
-   *
-   * 一次性提示：筛选条件一变就作废 —— 用户已经在自己筛了，还留着上一轮的环
-   * 只会让人以为「这张卡有什么特别」。sync 是必须的：jumpToProject 会在同一次
-   * 同步流程里先复位分组、再写这个值，异步的 watcher 会把刚写进去的值又清掉。
-   */
-  const focusProjectId = ref<string | null>(null)
-
-  watch(
-    [keyword, groupFilter],
-    () => {
-      focusProjectId.value = null
-    },
-    { flush: 'sync' }
   )
 
   /** 筛选/排序状态只经 action 变更，模板里不再直接赋值，非法值也无从写进来 */
@@ -149,9 +124,8 @@ export const useProjectsStore = defineStore('projects', () => {
    * 当前页被设置里关掉之后退到第一页可见的。
    *
    * 盯的是「关掉了哪几页」这个字符串而不是那个数组本身：设置在别处每改一项都会换掉整个
-   * settings 对象（数组也是新的），按引用比会每次都被唤起来 —— 那样连搜索跳转
-   * （jumpToProject 会把当前页设成项目页）也会被立刻弹回去，看起来像点了没反应。
-   * 只在**关掉的那几页真的变了**、且当前页正好在其中时才换页，这才是用户刚做完的那个动作。
+   * settings 对象（数组也是新的），按引用比会每次都被唤起来。只在**关掉的那几页真的变了**、
+   * 且当前页正好在其中时才换页，用户主动的切页（导航栏、布局编辑切回首页）照旧过得去。
    */
   watch(
     () => settingsStore.settings.hiddenViews.join(','),
@@ -189,31 +163,7 @@ export const useProjectsStore = defineStore('projects', () => {
     if (value === activeView.value) return
 
     applyView(value)
-    focusProjectId.value = null
     await settingsStore.updateSettings({ activeView: value })
-  }
-
-  /**
-   * 从搜索结果跳到一个项目：切到项目页、把那张卡圈出来并滚进视野，**不带筛选**。
-   *
-   * 跳过去看到的是一份完整列表 + 一个定位环，而不是「按刚才那个词筛过一遍」的列表，
-   * 所以两处筛选都要复位：
-   *  - 关键词：搜索框与项目页的筛选是同一个值，不清掉的话页面照样是按它筛过的；
-   *  - 分组：matchesFilter 在非「全部」的分组下会直接忽略关键词（先按分组 return），
-   *    不清掉的话用户停在某个分组上时，目标项目可能根本不在列表里 —— 环就没地方可挂。
-   * `focusProjectId` 要在两者之后写：它被这两个值的同步 watcher 清掉（见它的注释）。
-   */
-  function jumpToProject(id: string): void {
-    if (!findProject(id)) return
-
-    keyword.value = ''
-    groupFilter.value = 'all'
-    focusProjectId.value = id
-
-    if (activeView.value !== 'projects') {
-      applyView('projects')
-      void settingsStore.updateSettings({ activeView: 'projects' })
-    }
   }
 
   /**
@@ -274,11 +224,9 @@ export const useProjectsStore = defineStore('projects', () => {
 
     // 主进程更新了项目（执行记录、最近使用时间），同步回本地列表
     window.workbench.onProjectChanged(onProjectChanged)
-    // 数据目录切换后整份重新加载：项目 ID 可能整套换掉，旧终端与选中态都不再成立
-    window.workbench.onDataReload(() => void reloadAfterDataMove())
   }
 
-  /** 拉一次项目 / 分组 / 设置 / 数据位置 */
+  /** 拉一次项目 / 分组 / 设置 / 数据目录 */
   async function loadData(): Promise<void> {
     const data = await window.workbench.listProjects()
     projects.value = data.projects
@@ -287,12 +235,12 @@ export const useProjectsStore = defineStore('projects', () => {
 
     // 外观先落地。主题与首页布局决定界面长什么样，必须排在一串与外观无关的调用前面 ——
     // 排到后面的话，用户会先看见默认外观、几十到几百毫秒后才被换成自己的设置。
-    // 首屏快照是启动那一瞬的值（数据目录可能在启动后被换过），所以这里仍照当前值核一遍。
+    // 首屏快照是启动那一瞬的值，所以这里仍照当前值核一遍。
     await settingsStore.loadAppearance()
 
     // 其余与外观无关，并行拉完即可。
     const [, counts] = await Promise.all([
-      environment.loadLocation(),
+      environment.loadDataDir(),
       window.workbench.getActivity(),
       catalog.refreshQuickApps(),
       catalog.refreshCommands()
@@ -301,24 +249,9 @@ export const useProjectsStore = defineStore('projects', () => {
     for (const item of catalog.commands) terminal.runtimeOf(item.id)
   }
 
-  /** 重新拉一次活跃度计数（命令跑完、数据目录切换后调用） */
+  /** 重新拉一次活跃度计数（命令跑完后调用） */
   async function refreshActivity(): Promise<void> {
     activity.value = await window.workbench.getActivity()
-  }
-
-  async function reloadAfterDataMove(): Promise<void> {
-    terminal.resetAll()
-    drawerProjectId.value = null
-    catalog.reset()
-
-    await loadData()
-    for (const project of projects.value) terminal.runtimeOf(project.id)
-    snapshotProjects()
-    // 换过来的数据目录里可能是一份没有标识色的老数据（与 init 同一条顺序）
-    backfillProjectColors()
-    await refreshPaths()
-    await detectAll()
-    await catalog.detectAllCommands()
   }
 
   /** 主进程更新了项目（执行记录、最近使用时间），同步回本地列表 */
@@ -425,7 +358,6 @@ export const useProjectsStore = defineStore('projects', () => {
     delete pathValidity.value[id]
     terminal.dropTerminalsOf(id)
     if (drawerProjectId.value === id) drawerProjectId.value = null
-    if (focusProjectId.value === id) focusProjectId.value = null
     notifySuccess('已从列表移除')
   }
 
@@ -783,12 +715,12 @@ export const useProjectsStore = defineStore('projects', () => {
     () => projects.value.filter((p) => terminal.runtimes[p.id]?.status === 'running').length
   )
 
-  /** 关键词口径与搜索结果共用一份实现（见 shared/search.ts），两边各写一套就会对不上 */
+  /** 分组筛选：「全部」不筛；其余按运行状态或所属分组归拣 */
   function matchesFilter(project: Project): boolean {
+    if (groupFilter.value === 'all') return true
     if (groupFilter.value === 'running') return terminal.runtimes[project.id]?.status === 'running'
     if (groupFilter.value === UNGROUPED) return !project.groupId
-    if (groupFilter.value !== 'all') return project.groupId === groupFilter.value
-    return projectMatchesKeyword(project, keyword.value)
+    return project.groupId === groupFilter.value
   }
 
   /**
@@ -818,7 +750,7 @@ export const useProjectsStore = defineStore('projects', () => {
     { immediate: true, flush: 'sync' }
   )
 
-  /** 按展示顺序排好的全部项目（不筛）；搜索结果与筛选列表都从它出发 */
+  /** 按展示顺序排好的全部项目（不筛）；筛选列表从它出发 */
   const orderedProjects = computed(() => {
     const byId = new Map(projects.value.map((p) => [p.id, p]))
     const list: Project[] = []
@@ -829,32 +761,8 @@ export const useProjectsStore = defineStore('projects', () => {
     return list
   })
 
-  /** 顺序取快照，筛选仍然实时生效（运行状态、关键词、分组都是即时反映的） */
+  /** 顺序取快照，筛选仍然实时生效（运行状态、分组都是即时反映的） */
   const filteredProjects = computed(() => orderedProjects.value.filter(matchesFilter))
-
-  /** 搜索结果那行尾部的小字：与卡片上的状态标签同一口径（目录失效优先） */
-  function searchDetailOf(project: Project): string {
-    if (!isPathValid(project.id)) return '路径无效'
-    const rt = terminal.runtimes[project.id]
-    return statusLabel(rt?.status ?? 'idle', rt?.kind)
-  }
-
-  /**
-   * 顶部搜索框的结果，按来源分组。
-   *
-   * 今天只有「项目」一个来源（面板此时不画分组标题，画了像半成品）；
-   * 以后接进命令 / 快捷启动，就是往这个数组里多塞一组，面板本身不用改。
-   * 没有命中就不返回任何组 —— 面板据此判断「弹不弹」。
-   */
-  const searchGroups = computed<SearchGroup[]>(() => {
-    const group = searchProjects(
-      orderedProjects.value,
-      keyword.value,
-      PROJECT_HIT_LIMIT,
-      searchDetailOf
-    )
-    return group.hits.length ? [group] : []
-  })
 
   const drawerProject = computed(() =>
     drawerProjectId.value ? findProject(drawerProjectId.value) ?? null : null
@@ -868,13 +776,10 @@ export const useProjectsStore = defineStore('projects', () => {
     activity,
     clock,
     dayStart,
-    keyword,
     groupFilter,
     sortBy,
     setGroupFilter,
     setSortBy,
-    focusProjectId,
-    searchGroups,
     filteredProjects,
     runningCount,
     drawerProjectId,
@@ -885,7 +790,6 @@ export const useProjectsStore = defineStore('projects', () => {
     activeView,
     setActiveView,
     applyView,
-    jumpToProject,
     layoutEditing,
     setLayoutEditing,
     init,

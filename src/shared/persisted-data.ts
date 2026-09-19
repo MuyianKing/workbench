@@ -10,7 +10,6 @@
  * 同步时整份 theme.json 就是带走的那份配置。
  */
 import { DEFAULT_STORED_SETTINGS, stripAppearance } from './appearance'
-import { sanitizeAiNewsSources } from './ai-news'
 import { sanitizeAccount } from './auth'
 import { sanitizeCommands } from './command'
 import { sanitizeQuickApps } from './quick-launch'
@@ -81,14 +80,6 @@ export function sanitizeSettings(raw: unknown): StoredSettings {
   value.workSort = sanitizeWorkSort(value.workSort)
   // 摊开的文件夹：路径要拿去和树里的节点比对，得先统一分隔符、去掉越界的项
   value.noteTreeExpanded = sanitizeNoteTreeExpanded(value.noteTreeExpanded)
-  // 首页「AI 热点」启用了哪些源：老数据文件里没有这个字段，落到默认那个免费中文源。
-  // 只做形状收敛（去空白 / 去重 / 截断），认不出的 id 留给适配层跳过 ——
-  // 源清单在 Rust 侧，这里若跟着维护一份 id 白名单，加源时就得改两处
-  value.aiNewsSources = sanitizeAiNewsSources(value.aiNewsSources)
-  // 用账号 token 授权同步：老数据文件里没有这个字段。（已登录但关掉它 = 退回系统 git 凭据）
-  value.useAccountForSync = value.useAccountForSync !== false
-  // 同步时是否连主题文件一起写进仓库：老数据文件里没有，默认开
-  value.syncAppearance = value.syncAppearance !== false
   // 终端收起后那颗悬浮按钮的位置：老数据文件里没有这个字段，默认 null（跟随终端面板）。
   // 它落在视口外面的话用户再也够不着这颗按钮，必须在这里拦住
   value.terminalButtonTop = clampTerminalButtonTop(value.terminalButtonTop)

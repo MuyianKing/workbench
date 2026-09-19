@@ -8,7 +8,6 @@
 import { ref } from 'vue'
 import { defineStore } from 'pinia'
 import type {
-  DataLocation,
   InstallableGlobalTool,
   InstallablePackageManager,
   NrmStatus,
@@ -32,7 +31,11 @@ export const useEnvironmentStore = defineStore('environment', () => {
   const nrm = ref<NrmStatus | null>(null)
   /** 正在切换的镜像名，null 表示空闲 */
   const nrmSwitching = ref<string | null>(null)
-  const dataLocation = ref<DataLocation | null>(null)
+  /**
+   * 数据目录：固定在 `%APPDATA%\Workbench\data`（宿主侧唯一真源）。
+   * 界面只在「关于」那一屏如实显示它 —— 没有「换目录」这回事。
+   */
+  const dataDir = ref('')
 
   /** 重新探测包管理器。装上东西之后界面上那一列状态就靠它刷新 */
   async function refreshPackageManagers(): Promise<void> {
@@ -56,8 +59,8 @@ export const useEnvironmentStore = defineStore('environment', () => {
     void refreshNrm()
   }
 
-  async function loadLocation(): Promise<void> {
-    dataLocation.value = await window.workbench.getDataLocation()
+  async function loadDataDir(): Promise<void> {
+    dataDir.value = await window.workbench.getDataDir()
   }
 
   /**
@@ -170,30 +173,6 @@ export const useEnvironmentStore = defineStore('environment', () => {
     }
   }
 
-  /**
-   * 更换项目数据目录。
-   * 由主进程把当前数据写过去并改指针，然后广播 data-reload 让这边整份重载。
-   */
-  async function changeDataDir(): Promise<boolean> {
-    const picked = await window.workbench.pickDataDir()
-    if (!picked.dir) return false
-
-    if (picked.conflict) {
-      notifyError('该目录里已经有 workbench-data.json，请换一个空目录')
-      return false
-    }
-
-    const result = await window.workbench.migrateDataDir(picked.dir)
-    if (!result.ok || !result.data) {
-      notifyError(result.error ?? '迁移数据失败')
-      return false
-    }
-
-    dataLocation.value = result.data
-    notifySuccess(`数据目录已切换到 ${result.data.dir}`)
-    return true
-  }
-
   /** 安装过程的那一行 npm 输出由主进程推过来（完整过程进终端由 terminal store 订阅） */
   function installListeners(): void {
     window.workbench.onPmInstallLog((event) => {
@@ -208,18 +187,17 @@ export const useEnvironmentStore = defineStore('environment', () => {
     nvm,
     nrm,
     nrmSwitching,
-    dataLocation,
+    dataDir,
     refreshPackageManagers,
     refreshNvm,
     refreshNrm,
     refreshAll,
-    loadLocation,
+    loadDataDir,
     installedNodeVersion,
     installGlobalTool,
     installPackageManager,
     installNrm,
     useNrmRegistry,
-    changeDataDir,
     installListeners
   }
 })

@@ -44,7 +44,7 @@ export type HomeCardId = (typeof HOME_CARD_IDS)[number]
  */
 export const HOME_CARD_LABELS: Record<HomeCardId, string> = {
   activity: '活跃度',
-  token: 'Token 用量',
+  token: 'Coding 用量',
   system: '系统状态',
   recent: '最近使用',
   actions: '快捷操作',
@@ -246,18 +246,17 @@ export const NOTE_TREE_WIDTH_MAX = 520
 export const NOTE_TREE_WIDTH_DEFAULT = 232
 
 /**
- * 默认布局（按当前配置固化）：第一栏（左）从上到下是四张竖着排的清单卡（最近使用、快捷启动、
- * 系统状态），最底下是吃剩余高度的命令 —— 「最近使用」那张里排的是整张项目卡，
- * 所以它是这几张里最高的；第二栏（中，自适应）整栏给两张吃宽度的图表（活跃度、Token 用量）；
- * 第三栏（右）上面是快捷操作、下面「今日完成」吃掉剩余高度。
+ * 默认布局（按当前配置固化）。
  *
- * 中栏以前整栏是项目列表，它搬去「项目」页之后中栏空了出来（空栏不渲染 = 默认变两栏、中间空一大片），
- * 所以把两张大图挪了进来 —— 它们是这套卡片里最需要宽度的。
+ * 第一栏（左，373 固定）自上而下是活跃度、快捷启动、系统状态、快捷操作、命令五张定高卡，
+ * 最底下是吃剩余高度的今日完成（条目数不确定，在卡内自己滚）；第二栏（中，自适应）整栏留给
+ * 最近使用 —— 那张里排的是整张项目卡，宽度富余时读起来最舒服；第三栏（右，345 固定）上面是
+ * 吃剩余高度的 Coding 用量，下面是固定高度的 AI 热点（名单卡，条目多了在卡内滚）。
  *
  * **行 id 是顺次编号的（row-1 … row-9），不是随手起的**：认不出来的老文件整份回默认布局，
  * 而那条路要先按「一张卡片一行」把老布局翻一遍（见 migrateLegacyLayout），翻出来的行 id
- * 就是这个顺序（左栏四行、中栏两行、右栏三行）。两边对不上，`sanitizeTheme(null)` 就不再等于
- * 这一份默认布局了（sanitizeTheme 那条用例盯着这件事）。
+ * 就是这个顺序 —— 它是**按栏、再按行**顺次下来的（左栏六行、中栏一行、右栏两行）。
+ * 两边对不上，`sanitizeTheme(null)` 就不再等于这一份默认布局了（sanitizeTheme 那条用例盯着这件事）。
  */
 export const DEFAULT_THEME: ThemeConfig = {
   version: THEME_VERSION,
@@ -265,49 +264,48 @@ export const DEFAULT_THEME: ThemeConfig = {
   columns: [
     {
       id: 'col-1',
-      width: 290,
+      width: 373,
       rows: [
-        /* 最近使用：一张项目卡 155px + 一条卡片间距，再露出下一张小半张 —— 「下面还有」
-           这件事得看得见，否则用户不会想到去滚它（这一栏的卡是按最近使用时间往下排的） */
-        { id: 'row-1', mode: 'fixed', height: 240 },
-        { id: 'row-2', mode: 'fixed', height: 98 },
-        /* 系统状态：node / 包管理器 / nvm / nrm 四行 + 贴底的数据目录，
-           170 是四行刚好放全的高度（147 是按三行定的，加一行后明细区会被挤进滚动） */
+        { id: 'row-1', mode: 'fixed', height: 183 },
+        { id: 'row-2', mode: 'fixed', height: 103 },
+        /* 系统状态：node / 包管理器 / nvm / nrm 四行。
+           170 是四行放全的高度（147 是按三行定的，加一行后明细区会被挤进滚动） */
         { id: 'row-3', mode: 'fixed', height: 170 },
-        { id: 'row-4', mode: 'flex', height: 90 }
+        { id: 'row-4', mode: 'fixed', height: 198 },
+        { id: 'row-5', mode: 'fixed', height: 90 },
+        // 今日完成：条目数不确定，让它吃掉这一栏剩下的高度、在里面自己滚
+        { id: 'row-6', mode: 'flex', height: 727 }
       ]
     },
     {
       id: 'col-2',
       width: null,
       rows: [
-        { id: 'row-5', mode: 'flex', height: 240 },
-        { id: 'row-6', mode: 'flex', height: 240 }
+        /* 最近使用：一张项目卡 155px + 一条卡片间距，再露出下一张小半张 —— 「下面还有」
+           这件事得看得见，否则用户不会想到去滚它（这一栏的卡是按最近使用时间往下排的） */
+        { id: 'row-7', mode: 'flex', height: 157 }
       ]
     },
     {
       id: 'col-3',
-      width: 294,
+      width: 345,
       rows: [
-        { id: 'row-7', mode: 'fixed', height: 224 },
-        // 今日完成：条目数不确定，让它吃掉右栏剩下的高度、在里面自己滚
-        { id: 'row-8', mode: 'flex', height: 200 },
-        // AI 热点：名单卡，固定高度。240 是按「一屏六条、且不留半截行」定的 ——
-        // 200 时只放得下四条出头，最后一条被切一半，看着像没做完
-        { id: 'row-9', mode: 'fixed', height: 240 }
+        { id: 'row-8', mode: 'flex', height: 727 },
+        // AI 热点：名单卡，固定高度（条目多了在卡内滚）
+        { id: 'row-9', mode: 'fixed', height: 345 }
       ]
     }
   ],
   noteTreeWidth: NOTE_TREE_WIDTH_DEFAULT,
   cards: {
-    recent: { row: 'row-1', order: 0, hidden: false },
+    activity: { row: 'row-1', order: 0, hidden: false },
     quick: { row: 'row-2', order: 0, hidden: false },
     system: { row: 'row-3', order: 0, hidden: false },
-    commands: { row: 'row-4', order: 0, hidden: false },
-    activity: { row: 'row-5', order: 0, hidden: false },
-    token: { row: 'row-6', order: 0, hidden: false },
-    actions: { row: 'row-7', order: 0, hidden: false },
-    work: { row: 'row-8', order: 0, hidden: false },
+    actions: { row: 'row-4', order: 0, hidden: false },
+    commands: { row: 'row-5', order: 0, hidden: false },
+    work: { row: 'row-6', order: 0, hidden: false },
+    recent: { row: 'row-7', order: 0, hidden: false },
+    token: { row: 'row-8', order: 0, hidden: false },
     news: { row: 'row-9', order: 0, hidden: false }
   },
   // 外观的默认值只有一处口径（数据文件那份设置的默认值，见 appearance.ts）
@@ -748,7 +746,7 @@ function legacyCards(raw: unknown): Record<string, Record<string, unknown>> {
  * 于是「整份认不出来」与「只缺一块」走的是同一条路：空对象翻出来就是默认布局。
  *
  * 返回的是**还没收敛**的原始数据（宽度、高度可能是任何东西），交给下面同一条收敛路径。
- * 行 id 顺着列出来（左栏四行、中栏两行、右栏三行 …… 见 DEFAULT_THEME 的注释）。
+ * 行 id 顺着列出来（左栏六行、中栏一行、右栏两行 …… 见 DEFAULT_THEME 的注释）。
  */
 function migrateLegacyLayout(input: Record<string, unknown>): Record<string, unknown> {
   // 只取栏骨架：老文件里本来就没有「行」这一层，那些行接下来按一卡一行现铺

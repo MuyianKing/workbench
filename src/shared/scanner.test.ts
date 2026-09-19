@@ -82,6 +82,14 @@ describe('isValidScriptName', () => {
     expect(isValidScriptName('dev | more')).toBe(false)
     expect(isValidScriptName('')).toBe(false)
   })
+
+  it('挡掉会被当成选项或路径的名字', () => {
+    expect(isValidScriptName('-rf')).toBe(false)
+    expect(isValidScriptName('--watch')).toBe(false)
+    expect(isValidScriptName('..')).toBe(false)
+    expect(isValidScriptName('.hidden')).toBe(false)
+    expect(isValidScriptName('build:x&calc')).toBe(false)
+  })
 })
 
 describe('pickServe', () => {
@@ -266,6 +274,21 @@ describe('scanProject', () => {
 
     expect(scan.enginesNode).toBe('v18.16.0')
     expect(scan.nodeRequirementFrom).toBe('nvmrc')
+  })
+
+  // 这两个名字最终会拼成 `<包管理器> run <名>` 交给 cmd /C，所以不合规的一律不进候选
+  it('名字带 shell 元字符的 build 不进候选', async () => {
+    const dir = makeProject({ scripts: { build: 'vite build', 'build:x&calc': 'calc' } })
+    const scan = await scanProject(nodeFs, dir)
+
+    expect(scan.build).toEqual(['build'])
+  })
+
+  it('名字带 shell 元字符的启动脚本视为没有可用脚本', async () => {
+    const dir = makeProject({ scripts: { 'dev:web|calc': 'calc' } })
+    const scan = await scanProject(nodeFs, dir)
+
+    expect(scan.serve).toBeUndefined()
   })
 
   it('目录不存在时直接报错', async () => {

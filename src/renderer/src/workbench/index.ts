@@ -19,8 +19,6 @@ import type {
   BackgroundImage,
   BuiltinWallpaper,
   CommandEntry,
-  DataLocation,
-  DataLocationPick,
   EffectiveTheme,
   InstallablePackageManager,
   Project,
@@ -41,11 +39,12 @@ import * as orphan from './orphan'
 import * as quick from './quick-launch'
 import * as scanner from './scanner'
 import * as session from './session'
+import * as skill from './skill'
 import * as state from './state'
 import * as system from './system'
 import * as workLog from './work-log'
 import * as aiNews from './ai-news'
-import { getTokenUsage, getTokenUsageSnapshot, listSyncDevices, syncTokenUsage } from './token'
+import { getTokenUsage, getTokenUsageSnapshot, listSyncDevices, syncThemeConfig, syncTokenUsage } from './token'
 
 /**
  * 把设置里的 system 解析成实际明暗
@@ -291,13 +290,10 @@ function createApi(): WorkbenchApi {
       workLog.updateWorkLog(id, patch),
     removeWorkLog: (id: string) => workLog.removeWorkLog(id),
 
-    // ---------- AI 热点（本地缓存 + 用户勾选的热点源） ----------
+    // ---------- AI 热点（本地缓存 + 宿主侧的内置源白名单） ----------
     getAiNews: () => aiNews.getAiNews(),
     refreshAiNews: () => aiNews.refreshAiNews(),
     loadAiNewsArticle: (url: string) => aiNews.loadAiNewsArticle(url),
-    aiNewsSources: () => aiNews.aiNewsSources(),
-    setAiNewsToken: (token: string) => aiNews.setAiNewsToken(token),
-    clearAiNewsToken: () => aiNews.clearAiNewsToken(),
 
     // ---------- 笔记（用户自己挑的一个文件夹里的 markdown 文件） ----------
     listNotes: (root: string) => note.listNotes(root),
@@ -318,6 +314,29 @@ function createApi(): WorkbenchApi {
       note.deleteNoteImages(input),
     scanNoteTexts: (root: string) => note.scanNoteTexts(root),
 
+    // ---------- 技能（住在笔记仓库的一个子目录里，见 shared/skills.ts） ----------
+    listSkills: (root: string, dir: string) => skill.listSkills(root, dir),
+    createSkill: (root: string, dir: string, input: Parameters<WorkbenchApi['createSkill']>[2]) =>
+      skill.createSkill(root, dir, input),
+    saveSkillFile: (root: string, dir: string, id: string, rel: string, content: string) =>
+      skill.saveSkillFile(root, dir, id, rel, content),
+    listSkillFiles: (root: string, dir: string, id: string) => skill.listSkillFiles(root, dir, id),
+    readSkillFile: (root: string, dir: string, id: string, rel: string) =>
+      skill.readSkillFile(root, dir, id, rel),
+    removeSkill: (root: string, dir: string, id: string) => skill.removeSkill(root, dir, id),
+    importSkill: (root: string, dir: string, source: string, id: string) =>
+      skill.importSkill(root, dir, source, id),
+    skillHistory: (root: string, dir: string, id: string, limit?: number) =>
+      skill.skillHistory(root, dir, id, limit),
+    restoreSkill: (root: string, dir: string, id: string, hash: string) =>
+      skill.restoreSkill(root, dir, id, hash),
+    compareSkillVersion: (root: string, dir: string, id: string, hash: string) =>
+      skill.compareSkillVersion(root, dir, id, hash),
+    installSkill: (root: string, dir: string, id: string, projectDir: string, overwrite: boolean) =>
+      skill.installSkill(root, dir, id, projectDir, overwrite),
+    scanSkillCopies: (root: string, dir: string, id: string, projectDirs: string[]) =>
+      skill.scanSkillCopies(root, dir, id, projectDirs),
+
     // ---------- 统计 ----------
     getActivity: () => Promise.resolve(state.activityCounts()),
     /**
@@ -328,8 +347,10 @@ function createApi(): WorkbenchApi {
     /** 首屏先手：只读本地那份快照，实读结果随后覆盖它（见 shared/types.ts 的说明） */
     getTokenUsageSnapshot: () =>
       guard(getTokenUsageSnapshot({ repo: syncRepo() }), '读取 token 快照失败'),
-    /** 手动同步：绕过自动同步的节流（面板上的同步按钮） */
+    /** 手动同步：绕过自动同步的节流（面板上的同步按钮），只推拉用量分片 */
     syncTokenUsage: () => guard(syncTokenUsage(syncRepo()), '同步 token 用量失败'),
+    /** 只同步外观配置（设置 → 外观 →「同步一次」）：推本机 theme.json、拉回别的机器的 */
+    syncThemeConfig: () => guard(syncThemeConfig(syncRepo()), '同步外观配置失败'),
     /**
      * 仓库里的其它机器（含各自的外观配置），设置界面「从别的机器取外观」用。
      * 与上面两个同理，地址从设置现取：用户刚填完就该看到新仓库里的机器。
@@ -414,16 +435,7 @@ function createApi(): WorkbenchApi {
     },
 
     // ---------- 数据目录 ----------
-    getDataLocation: () => state.dataLocation(),
-    pickDataDir: async (): Promise<DataLocationPick> => {
-      const dir = await openDialog({ directory: true, multiple: false, title: '选择数据目录' })
-      if (!dir) return { dir: null, conflict: false }
-      // 目标目录已有数据文件时返回冲突而不是直接覆盖
-      const conflict = await invoke<boolean>('data_file_exists_in', { dir })
-      return { dir, conflict }
-    },
-    migrateDataDir: (dir: string) =>
-      guard(state.migrateDataDir(dir).then(() => state.dataLocation()), '迁移数据目录失败'),
+    getDataDir: () => state.dataDir(),
 
     // ---------- 进程：项目十件事 ----------
     // 起什么命令由这里决定（后端只认整行命令），所以项目查找也要在这一层做
@@ -516,7 +528,6 @@ function createApi(): WorkbenchApi {
       events.subscribe('settingsChanged', handler),
     onTheme: (handler: Parameters<WorkbenchApi['onTheme']>[0]) =>
       events.subscribe('theme', handler),
-    onDataReload: (handler: () => void) => events.subscribe('dataReload', handler),
 
     onQuickApps: (handler: Parameters<WorkbenchApi['onQuickApps']>[0]) =>
       events.subscribe('quickApps', handler),

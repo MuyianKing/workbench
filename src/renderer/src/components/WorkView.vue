@@ -13,7 +13,7 @@
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowDown, Plus } from '@element-plus/icons-vue'
+import { ArrowDown, Memo, Plus } from '@element-plus/icons-vue'
 import { addDays, dayKey } from '@shared/activity'
 import { markdownToPlainText } from '@shared/markdown'
 import { projectColorVar, sanitizeProjectColor, type ProjectColor } from '@shared/project-color'
@@ -310,7 +310,7 @@ async function remove(entry: WorkLogEntry): Promise<void> {
 
 <template>
   <main class="work-view">
-    <!-- 工具条与项目页那条同款（底色由 global.css 按顶部样式给），搜索栏以下的第一条 -->
+    <!-- 工具条与项目页那条同款（底色由 global.css 按顶部样式给），顶栏以下的第一条 -->
     <div class="filter">
       <div class="filter__head">
         <el-segmented
@@ -376,6 +376,7 @@ async function remove(entry: WorkLogEntry): Promise<void> {
       </div>
 
       <div v-else-if="!total" class="empty">
+        <el-icon class="empty__icon"><Memo /></el-icon>
         <p>{{ WORK_RANGE_LABELS[range] }}{{ todoOnly ? '没有待办' : '还没有记录' }}</p>
         <p class="empty__hint">
           <template v-if="todoOnly">这个范围里的记录都已完成。</template>
@@ -428,8 +429,12 @@ async function remove(entry: WorkLogEntry): Promise<void> {
       </section>
     </div>
 
-    <!-- 分页按「栏」走：时间维度就是每页 7 天，项目维度是每页 7 个项目 -->
-    <footer class="work-view__foot">
+    <!--
+      分页按「栏」走：时间维度就是每页 7 天，项目维度是每页 7 个项目。
+      这段时间一条记录都没有时整条不画 —— 空态居中那两行字就是全部，再摆一排
+      「每页 7 天 · 共 0 天 / 0 条」和一颗孤零零的「1」，等于什么都没说。
+    -->
+    <footer v-if="total" class="work-view__foot">
       <span class="foot__hint">
         每页 {{ WORK_PAGE_DAYS }} {{ sort === 'time' ? '天' : '个项目' }} · 共
         {{ sections.length }} {{ sort === 'time' ? '天' : '个项目' }} / {{ total }} 条
@@ -596,6 +601,7 @@ async function remove(entry: WorkLogEntry): Promise<void> {
 
 /**
  * 页脚：左边一句「每页几栏 / 共几条」，右边分页器。
+ * 只在有记录时渲染（模板里 v-if="total"）：空态时它是一排无意义的「共 0 条」。
  * 左右留白走全局间距令牌（--sp-*），与页内其它地方同一个口径；上下另留一档呼吸。
  */
 .work-view__foot {

@@ -144,7 +144,7 @@ WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="--remote-debugging-port=9222" npm run dev
   （项目里的路径工具本来就会归一方向），`\\` 在两层引号之后很可能变成别的字符，
   那时量到的「相对路径没生效」其实是路径串本身就不是你想的那样
 - **要动设置又不想污染自己的配置，就把整个 `APPDATA` 指到临时目录再起应用**：
-  `APPDATA='C:\Users\...\Temp\wb-smoke' npm run dev`。数据目录是 `%APPDATA%\Workbench`
+  `APPDATA='C:\Users\...\Temp\wb-smoke' npm run dev`。数据目录是 `%APPDATA%\Workbench\data`
   （**不是 `%APPDATA%` 本身**），所以这一下连项目列表、设置、笔记文件夹一起隔离了；
   想从某个状态起步（例如「已经选好笔记文件夹」）就先把 `workbench-data.json` 写进去再启动 ——
   比在页面上找入口省事，也不用像上一节那样记着「测完还原」。收尾时连临时目录一起删掉。
@@ -296,7 +296,7 @@ await send('Runtime.evaluate', { expression: `(async () => {
 `--card-gap`）或卡片底部那段留白 —— 用 `getBoundingClientRect` 把它的位置算出来交给 `clip`。
 
 顺带一个结论（2026-09 量过，也是这一节的来源）：**「主题极性与壁纸亮度相反」那一组会塌**。
-蒙版是「画布色 + `1 - 图片浓淡`」的 alpha（默认浓淡 55 → alpha 0.45），深色壁纸配亮色主题时
+蒙版是「画布色 + `1 - 图片浓淡`」的 alpha（默认浓淡 35 → alpha 0.65），深色壁纸配亮色主题时
 画布合成出来是中灰 —— 而**中灰底上没有任何文字色是清楚的**：深色字实测 1.9:1，
 要够 4.5:1 得用近白字（那在亮色主题里等于换了套主题）。所以这不是「换个令牌」能修的，
 必须让底衬本身回到主题这一侧。两条对它有效的做法，两条都已落地：
@@ -433,7 +433,7 @@ await send('Runtime.evaluate', { expression: `(async () => {
 - **截图按"当时在调什么"命名，成对的用 `-before` / `-after`**。这是给当时的自己看的，
   反正是用完即删，别花心思整理成体系。
 - **按约定直接返回结构的通道，桩里不能再套一层 `Result`**：`listProjects` / `getSettings` /
-  `getThemeConfig` / `getDataLocation` / `getActivity` / `listQuickApps` / `listCommands` /
+  `getThemeConfig` / `getDataDir` / `getActivity` / `listQuickApps` / `listCommands` /
   `checkPackageManagers` / `getNvmStatus` / `getNrmStatus` / `authStatus` / `listWallpapers` 都是
   直接给数据（见 types.ts 的 WorkbenchApi），照着别的通道写成 `{ ok: true, data: … }` 的话，
   `loadData()` 里 `data.projects` 就是 `undefined`，报出来的是某个 computed 里的

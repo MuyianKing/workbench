@@ -1,6 +1,11 @@
 /**
- * Token 用量统计:从 AI 编程工具本地的数据库里读取模型请求的 token 计数,
+ * 用量统计:从 AI 编程工具本地的数据库/日志里读取模型请求的计数,
  * 按「工具 → 天 → 模型」聚合后落盘快照,首页面板据此画趋势与占比。
+ *
+ * 计数有两套口径(见 UsageAxis):token 计数,与按额度记账的工具报的 credits
+ * (目前只有 Qoder)。两者量纲不同,面板上一次只画一个,切换即换一套数字;
+ * 但它们**共用这一份快照与同一套合并规则** —— 分片仍是「一台机器一个文件」,
+ * 不必为了多一个口径再开一份数据文件。
  *
  * 原始明细不复制:上游工具(ZCode 等)自己的数据库就是明细账本,Workbench 只保留
  * 一层按天聚合的快照 —— 上游会清理旧会话,没有快照长期趋势就无从谈起。
@@ -35,21 +40,39 @@ export const CODEBUDDY_SOURCE_ID = 'codebuddy'
 /** 接入来源:WorkBuddy(读它会话正文里每次模型调用自带的 usage 记录) */
 export const WORKBUDDY_SOURCE_ID = 'workbuddy'
 
+/**
+ * 接入来源:Qoder(读它会话文件里每次请求的 credits)。
+ *
+ * 它**只有额度、没有 token**:Qoder 的客户端压根不产生 token 计数
+ * (会话文件与 CLI 日志里的 input_tokens/output_tokens 恒为 0,它自己的上下文快照里
+ * 也写着 `tokenCountsAvailable: false`),本地能读到的只有每条请求的 `credits`。
+ * 所以这个来源只落在 credits 这一个字段上,在 tokens 口径下它整个不出现。
+ */
+export const QODER_SOURCE_ID = 'qoder'
+
 /** 接入工具的界面名;将来新增工具在这里登记 */
 export const SOURCE_LABELS: Record<string, string> = {
   [ZCODE_SOURCE_ID]: 'ZCode',
   [DSH_SOURCE_ID]: 'DeepSeek Harness',
   [CODEBUDDY_SOURCE_ID]: 'CodeBuddy',
-  [WORKBUDDY_SOURCE_ID]: 'WorkBuddy'
+  [WORKBUDDY_SOURCE_ID]: 'WorkBuddy',
+  [QODER_SOURCE_ID]: 'Qoder'
 }
 
-/** 一组 token 计数(某个工具某天某模型的合计) */
+/** 一组计数(某个工具某天某模型的合计) */
 export interface TokenCounters {
   inputTokens: number
   outputTokens: number
   reasoningTokens: number
   cacheReadTokens: number
   cacheWriteTokens: number
+  /**
+   * 额度消耗(Qoder 那种按 credits 记账的工具)。
+   *
+   * 它与上面五类 token 计数**不是一个量纲**,永远不参与 totalTokens ——
+   * 面板上按口径(UsageAxis)二选一展示,谁也加不到谁头上。
+   */
+  credits: number
   /** 产生这些计数的模型请求次数 */
   requests: number
 }
@@ -66,7 +89,7 @@ export interface TokenSourceSnapshot {
  * 一台机器的用量快照:既是本机 token-usage.json 的落盘结构,也是同步仓库里的一份设备分片。
  *
  * device 是机器本地生成的 id(见 Rust 的 paths::device_file),分片文件名就是它。
- * 它**绝不随数据目录迁移、也不进同步仓库** —— 两台机器拿到同一个 id 就会互相覆盖,
+ * 它**绝不进同步仓库** —— 两台机器拿到同一个 id 就会互相覆盖,
  * 表现成「数据永远只有一台机器的」,而且没有任何报错。
  *
  * 外观配置**不在这里**:它是 theme.json 的整份内容,按同样的「一台机器一个文件」布局
@@ -161,15 +184,17 @@ export const TOKEN_KEEP_DAYS = 53 * 7
  * v4:包一层设备信息(device / name),逐日计数与 v3 完全一致。
  * v5:多带一份外观配置(appearance),逐日计数与 v4 完全一致。
  * v6:外观搬去 config/ 目录,这个文件只剩用量 —— 逐日计数与 v5 完全一致。
+ * v7:计数里多一个 credits 字段(额度型工具),token 口径与 v6 完全一致 ——
+ *     v6 的文件读进来时 credits 一律是 0,历史照常留住,下一次实读就把额度补上。
  *
  * 读取时**不能**按「版本不等就整份弃用」处理:v1→v2→v3 是口径修正,弃掉之后能从上游实读自愈;
  * 而 v4 起文件里装着**别的机器**的历史,弃掉就再也读不回来(那台机器不开机就不会重写分片)。
  * 所以兼容版本显式列进下面这张表,新增口径版本要手工往里加,别写成 `version >= 3`。
  */
-export const TOKEN_DATA_VERSION = 6
+export const TOKEN_DATA_VERSION = 7
 
 /** 能安全读进来的版本:这几版之间的逐日计数口径相同,多带一份外观、或是把外观搬走都不改变计数 */
-export const TOKEN_DATA_COMPATIBLE_VERSIONS: readonly number[] = [3, 4, 5, 6]
+export const TOKEN_DATA_COMPATIBLE_VERSIONS: readonly number[] = [3, 4, 5, 6, 7]
 
 const DATE_KEY = /^\d{4}-\d{2}-\d{2}$/
 
@@ -184,6 +209,7 @@ export function emptyCounters(): TokenCounters {
     reasoningTokens: 0,
     cacheReadTokens: 0,
     cacheWriteTokens: 0,
+    credits: 0,
     requests: 0
   }
 }
@@ -199,6 +225,20 @@ export function totalTokens(counters: TokenCounters): number {
   )
 }
 
+/**
+ * 面板上的两个口径:token 计数,或额度。
+ *
+ * 两者量纲不同,既不能相加、也不能画在同一根轴上 —— 面板一次只画一个口径,
+ * 切换口径就是换一套数字(总览、趋势、占比都跟着换),这也正是「工具占比」在
+ * 两个口径下会给出不同名单的原因(Qoder 只出现在 credits 里)。
+ */
+export type UsageAxis = 'tokens' | 'credits'
+
+/** 一个口径下这组计数的用量;tokens 是五类之和,credits 就是那一项 */
+export function axisTotal(counters: TokenCounters, axis: UsageAxis): number {
+  return axis === 'credits' ? counters.credits : totalTokens(counters)
+}
+
 /** 合计两组计数:跨模型 / 跨天求和用 */
 export function addCounters(a: TokenCounters, b: TokenCounters): TokenCounters {
   return {
@@ -207,6 +247,7 @@ export function addCounters(a: TokenCounters, b: TokenCounters): TokenCounters {
     reasoningTokens: a.reasoningTokens + b.reasoningTokens,
     cacheReadTokens: a.cacheReadTokens + b.cacheReadTokens,
     cacheWriteTokens: a.cacheWriteTokens + b.cacheWriteTokens,
+    credits: a.credits + b.credits,
     requests: a.requests + b.requests
   }
 }
@@ -219,6 +260,7 @@ export function maxCounters(a: TokenCounters, b: TokenCounters): TokenCounters {
     reasoningTokens: Math.max(a.reasoningTokens, b.reasoningTokens),
     cacheReadTokens: Math.max(a.cacheReadTokens, b.cacheReadTokens),
     cacheWriteTokens: Math.max(a.cacheWriteTokens, b.cacheWriteTokens),
+    credits: Math.max(a.credits, b.credits),
     requests: Math.max(a.requests, b.requests)
   }
 }
@@ -234,9 +276,9 @@ function sanitizeCounters(raw: unknown): TokenCounters {
   const out = emptyCounters()
   for (const key of Object.keys(out) as Array<keyof TokenCounters>) {
     const value = input[key]
-    if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
-      out[key] = Math.floor(value)
-    }
+    if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) continue
+    // credits 是小数记账(一条请求不到 1 个额度是常态),取整会把它抹成 0 —— 唯一不取整的字段
+    out[key] = key === 'credits' ? value : Math.floor(value)
   }
   return out
 }
@@ -354,6 +396,40 @@ export function sameDays(a: TokenDays, b: TokenDays): boolean {
         if (l[key] !== r[key]) return false
       }
     }
+  }
+  return true
+}
+
+/**
+ * 磁盘上那份(raw)与「这次要写的分片」是否已经一致 —— 决定这一轮要不要落盘。
+ *
+ * 只看计数是不够的:v3 那种缺 device / name 的老文件,以及所有旧版本号的文件,
+ * 读进来时由 sanitizeShard 在**内存里**补齐,不写回去的话永远升不上来(老数据会一直
+ * 以旧结构留在磁盘上)。反过来,内容一致时也不该写 —— 用量面板每 60 秒实读一轮,
+ * 每轮都整份重写一遍 JSON 是白费的 I/O。
+ *
+ * 键序不参与比较:两份 JSON 的键序不同不代表内容不同,而这个比较要稳定到
+ * 「写回去再读出来一定判等」,否则会退化成每轮都写。
+ */
+export function sameShardContent(a: unknown, b: unknown): boolean {
+  if (a === b) return true
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false
+  if (Array.isArray(a) || Array.isArray(b)) return false
+
+  const left = a as Record<string, unknown>
+  const right = b as Record<string, unknown>
+  const keys = Object.keys(left)
+  if (keys.length !== Object.keys(right).length) return false
+
+  for (const key of keys) {
+    if (!Object.hasOwn(right, key)) return false
+    const l = left[key]
+    const r = right[key]
+    if (typeof l === 'object' && typeof r === 'object' && l !== null && r !== null) {
+      if (!sameShardContent(l, r)) return false
+      continue
+    }
+    if (l !== r) return false
   }
   return true
 }
@@ -622,16 +698,23 @@ export function shareByModel(days: TokenDays, fromKey: string, toKey: string): T
     .sort((a, b) => totalTokens(b.counters) - totalTokens(a.counters))
 }
 
-/** 区间内按工具合计(整个 sources 层),按总量从大到小 */
+/**
+ * 区间内按工具合计(整个 sources 层),按当前口径从大到小。
+ *
+ * 只收这个口径下真有数的工具:两个口径互不替代,一边有数不代表另一边也算它一份。
+ * (早先还允许「请求次数 > 0 但计数为 0」的工具露一行,现在不行了 ——
+ * Qoder 在 tokens 口径下正是这副样子:请求次数一堆、token 全是 0。)
+ */
 export function shareBySource(
   data: TokenDataFile,
   fromKey: string,
-  toKey: string
+  toKey: string,
+  axis: UsageAxis
 ): TokenShare[] {
   return Object.entries(data.sources)
     .map(([key, source]) => ({ key, counters: sumRange(source.days, fromKey, toKey) }))
-    .filter((share) => totalTokens(share.counters) > 0 || share.counters.requests > 0)
-    .sort((a, b) => totalTokens(b.counters) - totalTokens(a.counters))
+    .filter((share) => axisTotal(share.counters, axis) > 0)
+    .sort((a, b) => axisTotal(b.counters, axis) - axisTotal(a.counters, axis))
 }
 
 // ---------- 时间维度预设 ----------
@@ -697,17 +780,38 @@ function lastMonthRange(now: number | Date): { fromKey: string; toKey: string } 
 
 // ---------- 展示 ----------
 
+/** 去掉小数末尾的 0(7.60 → 7.6,7.00 → 7);两个数字格式化函数共用 */
+function trimZeroes(text: string): string {
+  return text.replace(/\.0+$/, '').replace(/(\.\d)0$/, '$1')
+}
+
 /** token 数的中文数量级短写法:6.92亿 / 4380万 / 7.6万;非法与非正数归零 */
 export function formatTokens(value: number): string {
   const n = Number(value)
   if (!Number.isFinite(n) || n <= 0) return '0'
   const trim = (v: number): string => {
     const text = v >= 100 ? Math.round(v).toString() : v >= 10 ? v.toFixed(1) : v.toFixed(2)
-    return text.replace(/\.0+$/, '').replace(/(\.\d)0$/, '$1')
+    return trimZeroes(text)
   }
   if (n >= 1e8) return `${trim(n / 1e8)}亿`
   if (n >= 1e4) return `${trim(n / 1e4)}万`
   return String(Math.round(n))
+}
+
+/**
+ * 额度(credits)的短写法。
+ *
+ * 与 token 那套的区别在**小数位**:token 动辄上万、取整就够,而额度是小数记账
+ * (实测一条请求 0.078 ~ 6.14),一律取整会把一整天的消耗抹成 0 ——
+ * 所以 1 以下留两位、1 到 100 留一位,上百才取整;上万再走「万」。
+ */
+export function formatCredits(value: number): string {
+  const n = Number(value)
+  if (!Number.isFinite(n) || n <= 0) return '0'
+  if (n >= 1e4) return `${trimZeroes(n >= 1e6 ? (n / 1e4).toFixed(0) : (n / 1e4).toFixed(1))}万`
+  if (n >= 100) return String(Math.round(n))
+  if (n >= 1) return trimZeroes(n.toFixed(1))
+  return n.toFixed(2)
 }
 
 /** 占比百分数:大于 0 但不足 1% 显示 <1%(四舍五入成 1% 会高估),其余取整数 */

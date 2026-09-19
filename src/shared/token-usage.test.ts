@@ -2,12 +2,14 @@ import { describe, expect, it } from 'vitest'
 import {
   addCounters,
   sumDays,
+  axisTotal,
   bucketRangeOf,
   buildSeriesRange,
   cacheHitRate,
   combineShards,
   emptyCounters,
   flattenSources,
+  formatCredits,
   formatPercent,
   formatTokens,
   isDateKey,
@@ -17,6 +19,8 @@ import {
   presetLabel,
   pruneTokenDays,
   resolvePresetRange,
+  sameDays,
+  sameShardContent,
   sanitizeShard,
   shareByModel,
   shareBySource,
@@ -64,6 +68,46 @@ describe('计数运算', () => {
         counters({ inputTokens: 1, outputTokens: 2, reasoningTokens: 3, cacheReadTokens: 4, cacheWriteTokens: 5, requests: 99 })
       )
     ).toBe(15)
+  })
+
+  it('totalTokens 不含 credits:那是另一个量纲,加进来数字就没法看了', () => {
+    expect(totalTokens(counters({ inputTokens: 1, credits: 999 }))).toBe(1)
+  })
+
+  it('credits 照常参与求和与取大,且不取整', () => {
+    expect(addCounters(counters({ credits: 0.4 }), counters({ credits: 0.35 })).credits).toBeCloseTo(
+      0.75,
+      9
+    )
+    expect(maxCounters(counters({ credits: 0.4 }), counters({ credits: 0.35 })).credits).toBe(0.4)
+  })
+
+  it('axisTotal 按口径取数:tokens 是五类之和,credits 就是那一项', () => {
+    const value = counters({
+      inputTokens: 10,
+      outputTokens: 2,
+      cacheReadTokens: 3,
+      credits: 1.5
+    })
+    expect(axisTotal(value, 'tokens')).toBe(15)
+    expect(axisTotal(value, 'credits')).toBe(1.5)
+    // 没有 token 的那一边是 0,而不是把另一边的数顶上来
+    expect(axisTotal(counters({ credits: 8 }), 'tokens')).toBe(0)
+    expect(axisTotal(counters({ inputTokens: 8 }), 'credits')).toBe(0)
+  })
+
+  it('formatCredits 保小数:额度是小数记账,取整会把一天的消耗抹成 0', () => {
+    expect(formatCredits(0)).toBe('0')
+    expect(formatCredits(-1)).toBe('0')
+    expect(formatCredits(NaN)).toBe('0')
+    // 1 以下留两位,1 到 100 留一位,上百取整
+    expect(formatCredits(0.078367718)).toBe('0.08')
+    expect(formatCredits(0.78379939)).toBe('0.78')
+    expect(formatCredits(6.140525885)).toBe('6.1')
+    expect(formatCredits(7)).toBe('7')
+    expect(formatCredits(82.525215542)).toBe('82.5')
+    expect(formatCredits(523.4)).toBe('523')
+    expect(formatCredits(12_345)).toBe('1.2万')
   })
 
   it('formatTokens 用中文数量级短写法,非法与非正数归零', () => {
@@ -124,6 +168,30 @@ describe('落盘收敛', () => {
     expect(clean.sources.zcode.days['2026-09-14']['glm-5'].inputTokens).toBe(0)
   })
 
+  it('credits 不取整,其余字段照旧取整', () => {
+    // 一条请求不到 1 个额度是常态:这里一取整,落盘再读回来就全成 0 了
+    const clean = sanitizeShard({
+      version: 7,
+      sources: { qoder: { days: { '2026-09-13': { qfmodel: { credits: 0.78379939, requests: 2.9 } } } } }
+    })
+
+    const counters = clean.sources.qoder.days['2026-09-13'].qfmodel
+    expect(counters.credits).toBeCloseTo(0.78379939, 9)
+    expect(counters.requests).toBe(2)
+  })
+
+  it('v6 老分片照常读进来,那时候还没有额度,credits 落 0', () => {
+    const shard = sanitizeShard({
+      version: 6,
+      device: 'dev-1',
+      name: '办公室',
+      sources: { zcode: { days: { '2026-09-13': { 'glm-5': { inputTokens: 10 } } } } }
+    })
+
+    expect(shard.sources.zcode.days['2026-09-13']['glm-5'].credits).toBe(0)
+    expect(shard.sources.zcode.days['2026-09-13']['glm-5'].inputTokens).toBe(10)
+  })
+
   it('v3 老文件照常读进来,设备信息由 fallback 补齐', () => {
     const shard = sanitizeShard(
       {
@@ -135,7 +203,7 @@ describe('落盘收敛', () => {
     )
 
     // 口径没变,历史必须留住 —— 这里要是整份弃用,用户攒下的一年快照就没了
-    expect(shard.version).toBe(6)
+    expect(shard.version).toBe(7)
     expect(shard.device).toBe('dev-1')
     expect(shard.name).toBe('办公室')
     expect(shard.sources.zcode.days['2026-09-13']['glm-5'].inputTokens).toBe(10)
@@ -153,7 +221,7 @@ describe('落盘收敛', () => {
       appearance: { settings: { theme: 'light' } }
     })
 
-    expect(shard.version).toBe(6)
+    expect(shard.version).toBe(7)
     expect(shard).not.toHaveProperty('appearance')
   })
 
@@ -173,7 +241,7 @@ describe('落盘收敛', () => {
       sources: { zcode: { days: { '2026-09-13': { zhipu: { 'glm-5': { inputTokens: 10 } } } } } }
     }
     expect(sanitizeShard(v1)).toEqual({
-      version: 6,
+      version: 7,
       device: '',
       name: '',
       updatedAt: 0,
@@ -182,7 +250,7 @@ describe('落盘收敛', () => {
   })
 
   it('sanitizeShard 对 null / 数组 / 数字等整份坏数据回空分片', () => {
-    const empty = { version: 6, device: '', name: '', updatedAt: 0, sources: {} }
+    const empty = { version: 7, device: '', name: '', updatedAt: 0, sources: {} }
     expect(sanitizeShard(null)).toEqual(empty)
     expect(sanitizeShard([1, 2])).toEqual(empty)
     expect(sanitizeShard(42)).toEqual(empty)
@@ -450,10 +518,29 @@ describe('周期与聚合', () => {
       }
     })
 
-    const shares = shareBySource(data, '2026-09-01', '2026-09-30')
+    const shares = shareBySource(data, '2026-09-01', '2026-09-30', 'tokens')
     expect(shares.map((share) => share.key)).toEqual(['claude', 'zcode'])
     expect(shares[0].counters.inputTokens).toBe(30)
     expect(shares[1].counters.outputTokens).toBe(2)
+  })
+
+  it('shareBySource 按口径分家:Qoder 只在 credits 里,别的工具只在 tokens 里', () => {
+    const data = sanitizeShard({
+      version: 7,
+      sources: {
+        zcode: { days: { '2026-09-13': { 'glm-5': { inputTokens: 10 } } } },
+        // Qoder 只有额度:请求次数一堆、token 全是 0 —— 它不该出现在 tokens 那张榜上
+        qoder: { days: { '2026-09-13': { qfmodel: { credits: 8.5, requests: 20 } } } }
+      }
+    })
+
+    expect(shareBySource(data, '2026-09-01', '2026-09-30', 'tokens').map((s) => s.key)).toEqual([
+      'zcode'
+    ])
+
+    const credits = shareBySource(data, '2026-09-01', '2026-09-30', 'credits')
+    expect(credits.map((s) => s.key)).toEqual(['qoder'])
+    expect(credits[0].counters.credits).toBe(8.5)
   })
 })
 
@@ -503,5 +590,57 @@ describe('时间维度预设', () => {
     for (const option of TOKEN_RANGE_PRESETS) {
       expect(presetLabel(option.key)).toBe(option.label)
     }
+  })
+})
+
+/**
+ * 「这一轮要不要落盘」的判据。
+ *
+ * 面板每 60 秒实读一轮，每轮都整份重写 JSON 是白费的 I/O；但该写的一次也不能少 ——
+ * 少一次就是老结构永远升不上来（sanitizeShard 只把补齐的结果留在内存里）。
+ * 所以这个比较必须**稳定到「写回去再读出来一定判等」**，否则退化成每轮都写。
+ */
+describe('落盘判据', () => {
+  it('内容一致判等，键序不同也算一致', () => {
+    const a = { version: 7, device: 'd1', sources: { zcode: { days: {} } } }
+    const b = { sources: { zcode: { days: {} } }, device: 'd1', version: 7 }
+    expect(sameShardContent(a, b)).toBe(true)
+  })
+
+  it('版本号、设备名、任一计数不同都判不等', () => {
+    const base = { version: 7, device: 'd1', sources: { zcode: { days: {} } } }
+    expect(sameShardContent(base, { ...base, version: 3 })).toBe(false)
+    expect(sameShardContent(base, { ...base, device: 'd2' })).toBe(false)
+    expect(
+      sameShardContent(base, { version: 7, device: 'd1', sources: { zcode: { days: {} }, qoder: { days: {} } } })
+    ).toBe(false)
+  })
+
+  it('多一个键、少一个键都判不等', () => {
+    expect(sameShardContent({ a: 1 }, { a: 1, b: 2 })).toBe(false)
+    expect(sameShardContent({ a: 1, b: 2 }, { a: 1 })).toBe(false)
+  })
+
+  it('null 与非对象一律判不等，不抛错', () => {
+    expect(sameShardContent(null, { a: 1 })).toBe(false)
+    expect(sameShardContent({ a: 1 }, null)).toBe(false)
+    expect(sameShardContent(undefined, {})).toBe(false)
+    expect(sameShardContent({ a: 1 }, 'x')).toBe(false)
+    // 磁盘上什么都没有（首次运行）与空对象也不等价：那份得写下去
+    expect(sameShardContent(null, null)).toBe(true)
+  })
+
+  it('落盘再读回来判等，不会每轮都写', () => {
+    const shard = sanitizeShard(
+      {
+        version: 7,
+        updatedAt: 123,
+        sources: { zcode: { days: { '2026-09-13': { 'glm-5': { inputTokens: 10, requests: 2 } } } } }
+      },
+      { device: 'dev-local', name: '本机' }
+    )
+    // 序列化再解析一遍，模拟「写盘 → 下次启动读回来」这一圈
+    const roundTripped: unknown = JSON.parse(JSON.stringify(shard))
+    expect(sameShardContent(roundTripped, shard)).toBe(true)
   })
 })

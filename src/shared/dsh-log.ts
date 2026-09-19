@@ -77,6 +77,8 @@ export function collectDshSessionText(text: string, days: TokenDays): void {
       reasoningTokens: finite(usage.reasoningTokens),
       cacheReadTokens: finite(usage.cacheReadTokens),
       cacheWriteTokens: 0,
+      // DSH 的 usage 里只有 token 计数，没有额度这一项
+      credits: 0,
       requests: 1
     }
 

@@ -10,18 +10,22 @@
  * 渲染层就只能报 id、不能自己拼任意 URL —— 联网边界因此收得住（见 AGENTS.md 第 1 节）。
  *
  * **缓存策略**（每个源独立）：
- *   - 成功 → `nextFetchAt = now + 该源的刷新间隔`（量子位 3 小时、HF 论文 6 小时、机器之心 24 小时）
+ *   - 成功 → `nextFetchAt = now + 该源的刷新间隔`（间隔见 Rust 侧 `SOURCES` 里每个源自己的 ttl）
  *   - 条件请求（`If-None-Match`）拿到 304 → 内容没变，只续期，不重新解析
  *   - 429 / 网络失败 → 指数退避（5 分钟起、2 小时封顶），失败次数成功后清零
  *
  * **落点分工**：Rust 只负责「按源白名单拉原始文本（带 ETag 条件请求）+ 把这份 JSON 安全读写到磁盘」；
  * 解析、收敛、退避、去重、排序都在这里，于是这些规则能被单测直接覆盖。
  *
- * 缓存文件在数据目录（`ai-news.json`），与工作日志一样**只在本机**：不进同步仓库，
- * 但跟着数据目录走（迁移数据目录时一起搬）。
+ * 缓存文件在数据目录（`ai-news.json`），与工作日志一样**只在本机**：不进同步仓库。
  */
 
-/** 文件口径版本。v1 = 单源（机器之心）时代的结构，读到时会自动搬进 sources 里 */
+/**
+ * 文件口径版本。
+ *
+ * v1 是单源时代的顶层结构（`items / etag / nextFetchAt` 都在顶层），那个源已经撤掉，
+ * 所以读到 v1 就当成空缓存：里面的内容本来也没有地方能显示了，下次按清单重拉一遍即可。
+ */
 export const AI_NEWS_VERSION = 2
 
 /** 单个源最多保留的条数（解析完先截断再落盘） */
@@ -37,7 +41,7 @@ export const AI_NEWS_BACKOFF_MAX_MS = 2 * 60 * 60 * 1000
  * 一个热点源的载荷格式，决定用哪个解析器。
  *
  * 这是**源清单的扩展点**：加一个源时，Rust 侧在 `SOURCES` 里声明它的 format，
- * 适配层按这里分发、不用改。当前清单里的源（量子位、机器之心）都是 `rss` ——
+ * 适配层按这里分发、不用改。当前清单里的源（量子位）是 `rss` ——
  * `atom` 与 `json-hf-papers` 两个分支是给「将来加非 RSS 源」留下的能力
  * （它们原本服务 Hugging Face 每日论文与 arXiv，那两个英文源已按要求撤掉）。
  */
@@ -46,20 +50,15 @@ export type AiNewsSourceFormat = 'rss' | 'atom' | 'json-hf-papers'
 /**
  * 源清单里的一项（Rust 侧的源白名单经 `ai_news_sources` 命令送过来）。
  *
- * `url` 也带过来是**有意**的：设置界面要如实显示「这个源会 GET 哪个地址」，
- * 联网边界才谈得上「用户可以自己核对」。
+ * **不带地址**：地址留在宿主侧的白名单里就够用了（拉取时那边自己查表），
+ * 渲染层拿到的只有 id、格式与刷新间隔 —— 它连一个能出网的字符串都拼不出来。
  */
 export interface AiNewsSourceInfo {
   id: string
   name: string
-  url: string
   format: AiNewsSourceFormat
-  /** 需要用户填 token 才能用（当前只有机器之心） */
-  needsToken: boolean
   /** 建议的刷新间隔（毫秒）：成功拉取后隔这么久再拉下一次 */
   ttlMs: number
-  /** 设置界面里那一行说明（免费与否、要不要 token、内容多久更新一次） */
-  note: string
 }
 
 /** 一条热点新闻（解析 / 收敛后落盘的样子） */
@@ -97,43 +96,22 @@ export interface AiNewsCache {
   sources: Record<string, AiNewsSourceState>
 }
 
-/** 源清单命令的返回：清单本身 + 那个需要 token 的源配没配 */
-export interface AiNewsSourcesPayload {
-  sources: AiNewsSourceInfo[]
-  tokenConfigured: boolean
-}
-
-/** 界面需要的单源状态（缓存状态 + 清单信息 + 是否启用/配了 token） */
-export interface AiNewsSourceStatus {  id: string
-  name: string
-  url: string
-  needsToken: boolean
-  hasToken: boolean
-  enabled: boolean
-  updatedAt: number
-  nextFetchAt: number
-  failCount: number
-  lastError: string
-  itemCount: number
-}
-
-/** 界面要的那一份：合并好的条目 + 各源状态 */
+/** 界面要的那一份：合并好的条目 + 最近一次成功更新的时间 */
 export interface AiNewsView {
   items: AiNewsItem[]
-  /** 启用源里最近一次成功更新的时间；全都没更新过就是 0 */
+  /** 最近一次成功更新的时间；还没拉到过就是 0 */
   updatedAt: number
-  sources: AiNewsSourceStatus[]
 }
 
 /** 一次「刷新」的结果 */
 export interface AiNewsRefreshResult {
   view: AiNewsView
   /**
-   * true = 至少有一个源真的发了请求；false = 都没有到期（或被 token 挡住），
+   * true = 至少有一个源真的发了请求；false = 都还没到期，
    * 界面据此提示「还没到下次刷新时间」，而不是假装刷成功。
    */
   refreshed: boolean
-  /** 这次刷新中值得说一句的事（某个源失败 / 被限流 / 缺 token），逐条给界面 */
+  /** 这次刷新中值得说一句的事（某个源失败 / 被限流），逐条给界面 */
   notes: string[]
 }
 
@@ -149,39 +127,6 @@ export function emptyAiNewsCache(): AiNewsCache {
   return { version: AI_NEWS_VERSION, sources: {} }
 }
 
-/**
- * 默认启用的源。**只有中文源** —— 这张卡片挂在中文界面上，不混英文内容
- * （曾经默认开着 Hugging Face 每日论文与 arXiv cs.AI 两个英文源，按要求撤掉了）。
- *
- * 这份 id 清单与 Rust 的 `SOURCES` 是一份约定，那边有单测盯着它必须存在
- * 且 `needs_token` 为 false —— 清单改名而这边忘了改，会在 `cargo test` 里当场报出来。
- */
-export const AI_NEWS_DEFAULT_SOURCES = ['qbitai'] as const
-
-/** 启用源清单的上限：源就那么几个，防手改数据文件塞进一个超长数组 */
-export const AI_NEWS_SOURCES_MAX = 8
-
-/**
- * 收敛「启用了哪些源」。
- *
- * 只做形状收敛（去空白 / 去重 / 截断），**不校验 id 是否存在** —— 源清单在 Rust 侧，
- * 认不出的 id 由适配层跳过。缺字段（老数据文件）落到默认那两个；显式给空数组就是「都不看」。
- */
-export function sanitizeAiNewsSources(value: unknown): string[] {
-  if (!Array.isArray(value)) return [...AI_NEWS_DEFAULT_SOURCES]
-
-  const seen = new Set<string>()
-  const sources: string[] = []
-  for (const entry of value) {
-    if (typeof entry !== 'string') continue
-    const id = entry.trim()
-    if (!id || seen.has(id)) continue
-    seen.add(id)
-    sources.push(id)
-    if (sources.length >= AI_NEWS_SOURCES_MAX) break
-  }
-  return sources
-}
 export function emptySourceState(): AiNewsSourceState {
   return { updatedAt: 0, etag: '', nextFetchAt: 0, failCount: 0, lastError: '', items: [] }
 }
@@ -334,8 +279,8 @@ function atomHref(block: string): string {
 /**
  * 取某标签在块里的第一次出现的内容。
  *
- * 机器之心的 RSS 里，CDATA 是**实体转义过**的（`<description>&lt;![CDATA[…]]&gt;</description>`），
- * 所以顺序是：先剥字面 CDATA，再解实体（让转义过的 CDATA 标记现形），再剥一次。
+ * CDATA 有两种写法：字面 CDATA 与**实体转义过的 CDATA**（`<description>&lt;![CDATA[…]]&gt;</description>`，
+ * 真实 feed 里两种都见过），所以顺序是：先剥字面 CDATA，再解实体（让转义过的 CDATA 标记现形），再剥一次。
  * 三种形态（字面 CDATA / 转义 CDATA / 纯文本）都走同一遍。
  */
 function tagText(block: string, tag: string): string {
@@ -595,33 +540,13 @@ function sanitizeSourceState(value: unknown): AiNewsSourceState {
 /**
  * 收敛磁盘上读回的缓存：老文件缺字段补默认，认不出来的值回落，防止手改坏的数据进界面。
  *
- * **v1 迁移**：v1 是单源时代（只有机器之心）的结构，`items / etag / nextFetchAt` 都在顶层。
- * 读到它就把这些值搬进 `sources['jiqizhixin']` —— 用户已经拉回来的那批内容不会白丢，
- * 也就不会因为升级而立刻多打一次那个配额很紧的接口。
+ * **v1 那个单源时代的顶层结构（`items / etag` 都在顶层）不再迁移**：它的内容只属于那个
+ * 已经撤掉的源，搬进来也没有地方能显示 —— 直接当空缓存，按当前清单重拉一遍就是了。
  */
 export function sanitizeAiNewsCache(raw: unknown): AiNewsCache {
   const input = (raw ?? {}) as Partial<AiNewsCache> & Record<string, unknown>
 
-  // v1：没有 sources，字段都在顶层
-  if (!input.sources || typeof input.sources !== 'object') {
-    const legacyItems = Array.isArray(input.items) ? input.items : []
-    const hasLegacy = legacyItems.length > 0 || finiteNumber(input.updatedAt, 0) > 0
-    if (!hasLegacy) return emptyAiNewsCache()
-
-    return {
-      version: AI_NEWS_VERSION,
-      sources: {
-        jiqizhixin: sanitizeSourceState({
-          updatedAt: input.updatedAt,
-          etag: input.etag,
-          nextFetchAt: input.nextFetchAt,
-          failCount: input.failCount,
-          lastError: input.lastError,
-          items: legacyItems
-        })
-      }
-    }
-  }
+  if (!input.sources || typeof input.sources !== 'object') return emptyAiNewsCache()
 
   const sources: Record<string, AiNewsSourceState> = {}
   for (const [id, value] of Object.entries(input.sources as Record<string, unknown>)) {
@@ -696,19 +621,20 @@ export function applySourceFailure(
 // ---------- 合并视图 ----------
 
 /**
- * 把启用源的内容并成一份列表：按链接（退到 guid）去重、按时间从新到旧、截断到总上限。
+ * 把清单里的源的内容并成一份列表：按链接（退到 guid）去重、按时间从新到旧、截断到总上限。
  *
- * 去重时**先到先得**（按 `enabledIds` 的顺序），所以源的先后就是同一件事的优先级。
+ * `sourceIds` 给的是**清单顺序**（Rust 侧 `SOURCES` 的顺序），去重**先到先得**，
+ * 所以源的先后就是同一件事的优先级；清单里没有的 id（撤掉的源留在旧缓存里的那份）不并。
  */
 export function mergedItems(
   cache: AiNewsCache,
-  enabledIds: string[],
+  sourceIds: string[],
   max: number = AI_NEWS_MERGED_MAX
 ): AiNewsItem[] {
   const seen = new Set<string>()
   const merged: AiNewsItem[] = []
 
-  for (const id of enabledIds) {
+  for (const id of sourceIds) {
     for (const item of cache.sources[id]?.items ?? []) {
       const key = item.link || item.guid || item.title
       if (!key || seen.has(key)) continue
@@ -720,10 +646,10 @@ export function mergedItems(
   return merged.sort((a, b) => b.pubDate - a.pubDate).slice(0, max)
 }
 
-/** 启用源里最近一次成功更新的时间（页脚「更新于」用它） */
-export function latestUpdatedAt(cache: AiNewsCache, enabledIds: string[]): number {
+/** 清单里这些源最近一次成功更新的时间（页脚「更新于」用它） */
+export function latestUpdatedAt(cache: AiNewsCache, sourceIds: string[]): number {
   let latest = 0
-  for (const id of enabledIds) {
+  for (const id of sourceIds) {
     const updatedAt = cache.sources[id]?.updatedAt ?? 0
     if (updatedAt > latest) latest = updatedAt
   }

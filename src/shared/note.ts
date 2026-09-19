@@ -181,8 +181,6 @@ export interface NoteSyncInput {
    * （还没有仓库时就地 `git init` 并接上 `repo`）。空串 = 还没选文件夹。
    */
   dir: string
-  /** 是否用已登录账号的 token 授权（私有仓库用；关掉就走系统 git 凭据） */
-  useAccount?: boolean
 }
 
 /** 一次同步的结果 */

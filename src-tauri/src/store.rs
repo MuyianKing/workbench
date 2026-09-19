@@ -124,6 +124,14 @@ fn write_file(path: PathBuf, label: &str, inner: &Arc<Mutex<Inner>>) {
         }
     };
 
+    // 数据目录可能还没建起来（首次启动，或用户手工删过）：不建好这一步只会静默失败
+    if let Some(parent) = path.parent() {
+        if let Err(err) = std::fs::create_dir_all(parent) {
+            eprintln!("[workbench] {label}失败: {err}");
+            return;
+        }
+    }
+
     let tmp = path.with_extension("json.tmp");
     if let Err(err) = std::fs::write(&tmp, text).and_then(|_| std::fs::rename(&tmp, &path)) {
         eprintln!("[workbench] {label}失败: {err}");

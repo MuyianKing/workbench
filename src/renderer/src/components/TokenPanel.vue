@@ -1,9 +1,15 @@
 <script setup lang="ts">
 /**
- * 首页「Token 用量」卡片:读各 AI 工具(ZCode)本地用量库的按天聚合快照,
- * 画 今日/本周/本月 概览、趋势条形图与模型/工具占比。
+ * 首页「Coding 用量」卡片:读各 AI 工具本地用量数据(ZCode / DeepSeek Harness / CodeBuddy /
+ * WorkBuddy / Qoder)的按天聚合快照,画 今日/本周/本月 概览、趋势条形图与模型/工具占比。
+ *
+ * 计数有两个口径(见 @shared/token-usage 的 UsageAxis):token 计数,与按额度记账的工具
+ * 报的 credits(Qoder)。标题行右侧的分段控件切换,一次只画一个 —— 两者量纲不同,
+ * 相加或同轴都没有意义;切口径即换一整套数字,有数的那几天也可能不同,所以窗口要重新收敛。
+ * credits 那边不画模型占比(那一维在额度上没有意义,见 showModels),只留工具占比。
+ *
  * 趋势窗口由头部的预设下拉给出(默认「本月」,与 DeepSeek 用量页同款:
- * 近 7 天 / 近 30 天 / 本月 / 上月 / 自定义;可选的日子限于快照里有记录的那段),
+ * 近 7 天 / 近 30 天 / 本月 / 上月 / 自定义;可选的日子限于当前口径下有记录的那段),
  * 右侧 天/周/月 页签只切换柱子的分桶宽度,窗口本身不变;
  * 占比默认统计整个窗口(全部);点击某根柱子则把占比切到那个桶(那天/那周/那月),再点一下回到全部。
  *
@@ -14,15 +20,17 @@
  * 缓存读取通常占九成以上,构成拆分收在悬停里,总量数字才不会因缓存命中波动而误导。
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { CaretRight, Connection, Refresh } from '@element-plus/icons-vue'
+import { CaretRight, Connection, Histogram, Refresh } from '@element-plus/icons-vue'
 import TokenRangePicker from '@/components/TokenRangePicker.vue'
 import { useSettingsStore } from '@/stores/settings'
 import {
   SOURCE_LABELS,
+  axisTotal,
   bucketRangeOf,
   buildSeriesRange,
   emptyCounters,
   flattenSources,
+  formatCredits,
   formatPercent,
   formatTokens,
   resolvePresetRange,
@@ -35,7 +43,8 @@ import {
   type TokenCounters,
   type TokenGranularity,
   type TokenRangePreset,
-  type TokenUsageResult
+  type TokenUsageResult,
+  type UsageAxis
 } from '@shared/token-usage'
 import { dayKey } from '@shared/activity'
 import { formatRelative } from '@/format'
@@ -47,10 +56,23 @@ const GRANULARITIES: Array<{ key: TokenGranularity; label: string }> = [
   { key: 'month', label: '月' }
 ]
 
+/**
+ * 两个口径:token 计数,与按额度记账的工具(Qoder)报的 credits。
+ *
+ * 一次只画一个:两者量纲不同,相加或同轴都没有意义。默认 tokens ——
+ * 那是这个面板一直以来的样子,credits 是后来的、只有用 Qoder 的人才有的那一份。
+ */
+const AXES: Array<{ key: UsageAxis; label: string }> = [
+  { key: 'tokens', label: 'Tokens' },
+  { key: 'credits', label: 'Credits' }
+]
+
 const settings = useSettingsStore()
 const result = ref<TokenUsageResult | null>(null)
 const loading = ref(false)
 const granularity = ref<TokenGranularity>('day')
+/** 当前口径;切换即换一整套数字(总览、趋势、占比都跟着走) */
+const axis = ref<UsageAxis>('tokens')
 /** 生效的时间维度档位;日历上选过区间后即为 custom */
 const rangePreset = ref<TokenRangePreset>('thisMonth')
 /** 趋势窗口的起止日期(本地日期键,含两端);空串表示还没拿到数据 */
@@ -104,13 +126,13 @@ async function boot(): Promise<void> {
  * 手动同步一次。
  *
  * 同步本身（以及「失败原因怎么说」）走 settings store 里那一份共用实现 ——
- * 设置界面里那颗同步按钮用的是同一个 action，两处再各写一套分支迟早会分叉。
- * 这里只管界面态：转圈、以及把同步回来的数字立刻显示出来。
+ * 那颗按钮推拉的是**用量分片**，外观配置是设置界面另一颗按钮的事（`syncAppearanceNow`），
+ * 两处再各写一套分支迟早会分叉。这里只管界面态：转圈、以及把同步回来的数字立刻显示出来。
  */
 async function syncNow(): Promise<void> {
   syncing.value = true
   try {
-    const res = await settings.syncNow()
+    const res = await settings.syncUsageNow()
     if (res?.ok && res.data) applyResult(res)
   } finally {
     syncing.value = false
@@ -140,7 +162,38 @@ const sourceErrorText = computed(() =>
     .join(';')
 )
 const updatedAt = computed(() => result.value?.data.updatedAt ?? 0)
-const hasData = computed(() => Object.keys(days.value).length > 0)
+
+/** 一组计数在当前口径下的量:面板上每个数字都从这里出,免得某处漏了换算 */
+function amount(counters: TokenCounters): number {
+  return axisTotal(counters, axis.value)
+}
+
+/** 某一天在当前口径下有没有数(日期下限与空态都按它判) */
+function dayHasData(models: Record<string, TokenCounters>): boolean {
+  return Object.values(models).some((counters) => amount(counters) > 0)
+}
+
+/** 一组计数在当前口径下的显示文字:token 走数量级短写法,额度走小数 */
+function formatCounters(counters: TokenCounters): string {
+  const value = amount(counters)
+  return axis.value === 'credits' ? formatCredits(value) : formatTokens(value)
+}
+
+/**
+ * 模型占比只在 tokens 口径下画。
+ *
+ * credits 那边按模型拆没有意义 —— Qoder 的会话里模型名只有上游的内部别名(`qfmodel`),
+ * 拆出来是一行看不出任何东西的明细,不如把地方让给工具占比。
+ */
+const showModels = computed(() => axis.value === 'tokens')
+
+/**
+ * 当前口径下有没有数据。
+ *
+ * 不能只看「快照里有没有天数」:有 token 记录不代表有额度记录,
+ * 反过来也一样 —— 只看天数的话,切到没数据的那个口径会画出一片空图,而不是空态。
+ */
+const hasData = computed(() => Object.values(days.value).some(dayHasData))
 
 // ---------- 同步状态 ----------
 
@@ -182,8 +235,16 @@ const statusTitle = computed(() => {
 
 const statusFail = computed(() => Boolean(sourceErrorText.value || syncError.value))
 
-/** 快照里最早的一天:日历与预设的可选下限(再往前没有记录,选了只会是一片空白) */
-const earliestKey = computed(() => Object.keys(days.value).sort()[0] ?? todayKey.value)
+/**
+ * 当前口径下最早有数的那天:日历与预设的可选下限(再往前没有记录,选了只会是一片空白)。
+ * 按口径算 —— Qoder 的额度只有这两天的记录时,credits 那张图的日历不该让人选到半年前。
+ */
+const earliestKey = computed(
+  () =>
+    Object.keys(days.value)
+      .filter((date) => dayHasData(days.value[date]))
+      .sort()[0] ?? todayKey.value
+)
 
 /**
  * 把趋势窗口收敛回可选范围:终点不晚于今天,起点不早于快照最早那天。
@@ -256,6 +317,17 @@ watch([granularity, fromKey, toKey], () => {
   selectedBucketIndex.value = null
 })
 
+/**
+ * 换口径:数字整套都变了,展开的行与选中的柱子都属于上一个口径,一并作废;
+ * 窗口按新口径重新收敛 —— 两个口径有数的那几天不一定一样(见 earliestKey)。
+ */
+watch(axis, () => {
+  selectedBucketIndex.value = null
+  expandedModel.value = null
+  expandedTool.value = null
+  clampRange()
+})
+
 /** 趋势序列:按当前粒度把窗口内的天级数据分桶,没有数据的桶补零 */
 const series = computed(() =>
   buildSeriesRange(days.value, granularity.value, fromKey.value, toKey.value)
@@ -292,13 +364,13 @@ function isSelected(index: number): boolean {
 }
 
 const maxBucketTotal = computed(() =>
-  Math.max(1, ...series.value.buckets.map((bucket) => totalTokens(bucket.counters)))
+  Math.max(1, ...series.value.buckets.map((bucket) => amount(bucket.counters)))
 )
 
 function barHeight(bucket: { counters: TokenCounters }): string {
   // 没有数据的桶给一根 2px 的小柱,图不至于大片留白;颜色更淡,与真数据区分
-  if (totalTokens(bucket.counters) === 0) return '2px'
-  return `${Math.max(2, (totalTokens(bucket.counters) / maxBucketTotal.value) * 100)}%`
+  if (amount(bucket.counters) === 0) return '2px'
+  return `${Math.max(2, (amount(bucket.counters) / maxBucketTotal.value) * 100)}%`
 }
 
 // ---------- 占比 ----------
@@ -306,19 +378,19 @@ function barHeight(bucket: { counters: TokenCounters }): string {
 const models = computed(() =>
   shareByModel(days.value, activeRange.value.fromKey, activeRange.value.toKey).slice(0, 5)
 )
-/** 工具占比:按参考样式逐工具一行,行下一条细条表示份额 */
+/** 工具占比:按参考样式逐工具一行,行下一条细条表示份额;只列当前口径下真有数的工具 */
 const sources = computed(() =>
   result.value
-    ? shareBySource(result.value.data, activeRange.value.fromKey, activeRange.value.toKey)
+    ? shareBySource(result.value.data, activeRange.value.fromKey, activeRange.value.toKey, axis.value)
     : []
 )
 
 const maxSourceTotal = computed(() =>
-  Math.max(1, totalTokens(sources.value[0]?.counters ?? emptyCounters()))
+  Math.max(1, amount(sources.value[0]?.counters ?? emptyCounters()))
 )
 
 function sourceWidth(counters: TokenCounters): string {
-  return `${(totalTokens(counters) / maxSourceTotal.value) * 100}%`
+  return `${(amount(counters) / maxSourceTotal.value) * 100}%`
 }
 
 const maxModelTotal = computed(() => Math.max(1, totalTokens(models.value[0]?.counters ?? emptyCounters())))
@@ -334,6 +406,8 @@ function toggleModel(key: string): void {
 const expandedTool = ref<string | null>(null)
 
 function toggleTool(key: string): void {
+  // credits 口径下工具没有可展开的东西(展开出来是模型,而那一维在那边没意义,见 showModels)
+  if (!showModels.value) return
   expandedTool.value = expandedTool.value === key ? null : key
 }
 
@@ -378,9 +452,17 @@ function detailWidth(value: number, max: number): string {
 </script>
 
 <template>
-  <article class="panel">
+  <article class="panel" aria-label="Coding 用量">
     <header class="panel__head">
-      <span class="eyebrow">Token 用量</span>
+      <!-- 口径切换:token 计数与额度是两套量纲,一次只画一个(见 UsageAxis)。
+           卡片名不在这儿画 —— 编辑态由 BoardCard 标出来,这里只留控件 -->
+      <el-segmented
+        v-model="axis"
+        class="head__axis"
+        :options="AXES"
+        :props="{ label: 'label', value: 'key' }"
+        aria-label="用量口径"
+      />
       <!-- 底部的更新时间与状态点合并到标题行右侧,与刷新按钮同一条 flex 中线对齐 -->
       <span class="head__meta" :title="statusTitle">
         <i class="head__dot" :class="statusFail ? 'is-fail' : 'is-ok'" aria-hidden="true" />
@@ -416,15 +498,15 @@ function detailWidth(value: number, max: number): string {
       <div class="topline">
         <div class="top">
           <i>今日</i>
-          <b class="mono">{{ formatTokens(totalTokens(today)) }}</b>
+          <b class="mono">{{ formatCounters(today) }}</b>
         </div>
         <div class="top">
           <i>本周</i>
-          <b class="mono">{{ formatTokens(totalTokens(thisWeek)) }}</b>
+          <b class="mono">{{ formatCounters(thisWeek) }}</b>
         </div>
         <div class="top">
           <i>本月</i>
-          <b class="mono">{{ formatTokens(totalTokens(thisMonth)) }}</b>
+          <b class="mono">{{ formatCounters(thisMonth) }}</b>
         </div>
       </div>
 
@@ -460,18 +542,22 @@ function detailWidth(value: number, max: number): string {
             :key="bucket.key"
             placement="top"
             :show-after="120"
-            :disabled="totalTokens(bucket.counters) === 0"
+            :disabled="amount(bucket.counters) === 0"
           >
             <template #content>
               <!-- 一行一个口径:输入那行是「缓存命中 / 全部输入 / 命中率」三段,
-                   与展开模型时的构成、下方的占比用的都是同一套口径 -->
+                   与展开模型时的构成、下方的占比用的都是同一套口径。
+                   额度的柱子上没有这几段可拆,就只报这一口径的总数。 -->
               <div class="token-tip mono">
                 <p class="token-tip__title">{{ bucket.label }}</p>
-                <p>
-                  输入：{{ formatTokens(bucket.counters.cacheReadTokens) }}/{{ formatTokens(inputTotal(bucket.counters)) }}/{{ hitRateLabel(bucket.counters) }}
-                </p>
-                <p>输出：{{ formatTokens(bucket.counters.outputTokens) }}</p>
-                <p>思考：{{ formatTokens(bucket.counters.reasoningTokens) }}</p>
+                <template v-if="showModels">
+                  <p>
+                    输入：{{ formatTokens(bucket.counters.cacheReadTokens) }}/{{ formatTokens(inputTotal(bucket.counters)) }}/{{ hitRateLabel(bucket.counters) }}
+                  </p>
+                  <p>输出：{{ formatTokens(bucket.counters.outputTokens) }}</p>
+                  <p>思考：{{ formatTokens(bucket.counters.reasoningTokens) }}</p>
+                </template>
+                <p v-else>额度：{{ formatCredits(bucket.counters.credits) }}</p>
                 <p>请求：{{ bucket.counters.requests }} 次</p>
               </div>
             </template>
@@ -485,7 +571,7 @@ function detailWidth(value: number, max: number): string {
             >
               <i
                 class="bar"
-                :class="{ 'is-empty': totalTokens(bucket.counters) === 0 }"
+                :class="{ 'is-empty': amount(bucket.counters) === 0 }"
                 :style="{ height: barHeight(bucket) }"
               />
             </button>
@@ -493,7 +579,7 @@ function detailWidth(value: number, max: number): string {
         </div>
       </div>
 
-      <div class="share">
+      <div v-if="showModels" class="share">
         <div class="share__head">
           模型占比
           <span>{{ shareRangeLabel }} · 点击行看构成</span>
@@ -508,7 +594,7 @@ function detailWidth(value: number, max: number): string {
             <div class="source__line">
               <span class="source__name mono" :title="m.key">{{ m.key }}</span>
               <span class="source__num mono">
-                {{ formatTokens(totalTokens(m.counters)) }}
+                {{ formatCounters(m.counters) }}
                 <el-icon class="share__chevron" :class="{ 'is-open': expandedModel === m.key }">
                   <CaretRight />
                 </el-icon>
@@ -537,19 +623,24 @@ function detailWidth(value: number, max: number): string {
       <div class="share">
         <div class="share__head">
           工具占比
-          <span>{{ shareRangeLabel }} · 点击行看模型</span>
+          <span>{{ shareRangeLabel }}{{ showModels ? ' · 点击行看模型' : '' }}</span>
         </div>
         <template v-for="s in sources" :key="s.key">
           <button
             type="button"
-            class="tool tool--toggle"
+            class="tool"
+            :class="{ 'tool--toggle': showModels }"
             :aria-expanded="expandedTool === s.key"
             @click="toggleTool(s.key)"
           >
             <span class="tool__name" :title="s.key">{{ SOURCE_LABELS[s.key] ?? s.key }}</span>
             <span class="tool__track"><i :style="{ width: sourceWidth(s.counters) }" /></span>
-            <span class="tool__num mono">{{ formatTokens(totalTokens(s.counters)) }}</span>
-            <el-icon class="share__chevron" :class="{ 'is-open': expandedTool === s.key }">
+            <span class="tool__num mono">{{ formatCounters(s.counters) }}</span>
+            <el-icon
+              v-if="showModels"
+              class="share__chevron"
+              :class="{ 'is-open': expandedTool === s.key }"
+            >
               <CaretRight />
             </el-icon>
           </button>
@@ -577,7 +668,13 @@ function detailWidth(value: number, max: number): string {
         <p>正在读取用量…</p>
         <p class="empty__hint">首次读取要解析各工具的本地日志,稍等一下</p>
       </template>
+      <template v-else-if="axis === 'credits'">
+        <el-icon class="empty__icon"><Histogram /></el-icon>
+        <p>暂无额度记录</p>
+        <p class="empty__hint">在 Qoder 里跑过对话后,这里会出现按天的额度消耗</p>
+      </template>
       <template v-else>
+        <el-icon class="empty__icon"><Histogram /></el-icon>
         <p>暂无 Token 用量记录</p>
         <p class="empty__hint">在 ZCode / DeepSeek Harness / CodeBuddy / WorkBuddy 里跑过对话后,这里会出现按天的统计</p>
       </template>
@@ -605,11 +702,17 @@ function detailWidth(value: number, max: number): string {
 }
 
 /*
- * 标题行:eyebrow 用 margin-right:auto 吃掉剩余空间,把「更新于 + 刷新」推到最右;
- * 三个元素同在 .panel__head 的 flex 中线上(绝对定位那版各对各的,差出一两像素)。
+ * 标题行:只剩口径切换与右侧那行状态 —— 卡片名不在这儿画(编辑态由 BoardCard 标出)。
+ * 口径切换用 margin-right:auto 吃掉剩余空间,把「更新于 + 刷新」推到最右;
+ * 卡片窄的时候先让那行更新时间收没(它自带 min-width:0),口径切换与两颗按钮留着。
  */
-.eyebrow {
+.head__axis.el-segmented {
   margin-right: auto;
+  font-size: var(--fs-micro);
+}
+
+.head__axis :deep(.el-segmented__item) {
+  padding: 1px 8px;
 }
 
 .head__refresh {
@@ -944,26 +1047,31 @@ function detailWidth(value: number, max: number): string {
   background: var(--ink);
 }
 
-/* ---------- 工具占比:单行紧凑样式(名称左、行内细条、数值右),点击展开该工具的模型 ---------- */
+/* ---------- 工具占比:单行紧凑样式(名称左、行内细条、数值右),tokens 口径下点击展开该工具的模型 ---------- */
 
+/*
+ * 这一行始终是按钮(tokens 口径下可点开,credits 口径下不可点),所以按钮的默认外观
+ * **统一在这里抹掉**,别放进 `.tool--toggle` —— 放进去了,credits 那一档不加那个类,
+ * 就会露出浏览器默认的灰底方块(踩过一次:额度那一屏只有 Qoder 一行,一眼就能看见)。
+ */
 .tool {
   display: flex;
   align-items: center;
   gap: var(--sp-2);
   min-width: 0;
+  width: 100%;
   /* 行与行之间留半步,行间不至于黏成一坨 */
   padding: var(--sp-1) 0;
-}
-
-/* 可点击展开的工具行:按钮重置成普通行,hover 给一点反馈 */
-.tool--toggle {
-  width: 100%;
   border: 0;
   background: transparent;
   font-family: inherit;
   font-size: inherit;
   color: inherit;
   text-align: left;
+}
+
+/* 可点开的那一档:鼠标形状与 hover 反馈 */
+.tool--toggle {
   cursor: pointer;
   border-radius: var(--r-sm);
 }

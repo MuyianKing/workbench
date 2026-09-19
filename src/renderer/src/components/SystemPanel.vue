@@ -1,26 +1,23 @@
 <script setup lang="ts">
 /**
- * 首页「系统状态」卡片：node / 包管理器 / nvm / nrm，以及数据目录。
- * 内容顶在上沿、数据目录贴在下沿（panel__foot 的 margin-top: auto），卡片拉高也不会散。
+ * 首页「系统状态」卡片：node / 包管理器 / nvm / nrm。
+ * 内容顶在上沿，卡片被拖矮时明细行自己滚。
  *
  * 包管理器与 nrm 这两行是本机环境的动作入口：没装的点一下走 npm 全局安装，
  * 安装过程把最后一行输出顶在明细下面，完整日志仍然在底部终端里；
  * nrm 装好之后那一行还是个镜像源开关 —— 值就是当前用的源，点开换一个。
  */
 import { computed } from 'vue'
-import { ArrowDown, FolderOpened, Refresh } from '@element-plus/icons-vue'
+import { ArrowDown, Refresh } from '@element-plus/icons-vue'
 import { PACKAGE_MANAGERS, type PackageManagerKey } from '@/managers'
-import { useProjectsStore } from '@/stores/projects'
 import { useEnvironmentStore } from '@/stores/environment'
 import type { InstallablePackageManager, NrmRegistry } from '@/types'
 
-const store = useProjectsStore()
 const environment = useEnvironmentStore()
 
 const managers = PACKAGE_MANAGERS
 
 const nodeVersion = computed(() => environment.packageManagers?.node || '未检测到')
-const dataDir = computed(() => environment.dataLocation?.dir ?? '')
 
 function available(key: PackageManagerKey): boolean {
   return environment.packageManagers?.[key] ?? false
@@ -218,19 +215,11 @@ function refresh(): void {
     <p v-if="environment.pmInstalling" class="pm-log mono truncate" :title="environment.pmInstallLog">
       {{ environment.pmInstallLog || '正在通过 npm 安装…' }}
     </p>
-
-    <div class="panel__foot">
-      <el-icon class="foot__icon"><FolderOpened /></el-icon>
-      <span class="foot__path mono truncate" :title="dataDir">{{ dataDir || '—' }}</span>
-      <button v-if="dataDir" class="panel__link" type="button" @click="store.reveal(dataDir)">
-        打开
-      </button>
-    </div>
   </article>
 </template>
 
 <style scoped>
-/* 卡片被拖矮时明细行自己滚，数据目录那一行始终贴在卡片底部 */
+/* 卡片被拖矮时明细行自己滚 */
 .facts {
   flex: 1 1 auto;
   min-height: 0;
@@ -394,18 +383,5 @@ function refresh(): void {
   max-width: 220px;
   color: var(--ink-3);
   font-size: var(--fs-micro);
-}
-
-.foot__icon {
-  flex-shrink: 0;
-  font-size: 12px;
-  color: var(--ink-3);
-}
-
-.foot__path {
-  flex: 1;
-  min-width: 0;
-  font-size: var(--fs-micro);
-  color: var(--ink-3);
 }
 </style>

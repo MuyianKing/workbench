@@ -26,7 +26,6 @@ import type {
   CommandEntry,
   CommandInput,
   CommandPatch,
-  DataLocation,
   IconCacheEntry,
   PersistedData,
   Project,
@@ -496,22 +495,7 @@ export function dropSession(pid: number): void {
 
 // ---------- 数据目录 ----------
 
-export async function dataLocation(): Promise<DataLocation> {
-  return invoke<DataLocation>('data_location')
-}
-
-export async function dataFileExistsIn(dir: string): Promise<boolean> {
-  return invoke<boolean>('data_file_exists_in', { dir })
-}
-
-/** 迁移数据目录：先把内存态落盘，再让 Rust 搬文件并改写指针 */
-export async function migrateDataDir(dir: string): Promise<void> {
-  await invoke('data_save', { value: data })
-  await invoke('theme_save', { value: theme })
-  // 工作日志是另一份文件，但它同属本地数据：不先落盘，Rust 搬走的是上一次写盘时的样子。
-  // 笔记不必在这里落盘 —— 它本来就是磁盘上的文件、没有内存副本（见 workbench/note.ts）
-  await workLog.flush()
-  await invoke('data_migrate', { dir })
-  // 搬完丢掉内存里那份日志：它来自旧目录，下次进对应页面会从新目录重新读
-  workLog.reset()
+/** 数据目录固定在 `%APPDATA%\Workbench\data`（宿主侧唯一真源），这里只是问一次给界面显示 */
+export async function dataDir(): Promise<string> {
+  return invoke<string>('data_dir')
 }

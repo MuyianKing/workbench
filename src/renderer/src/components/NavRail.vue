@@ -5,13 +5,13 @@
  * 换页不用路由（项目不引入 Vue Router）：点一下就是把 store 里的 activeView 换掉，
  * App.vue 用 <KeepAlive><component :is> 渲染对应页面，所以这里没有任何"跳转"逻辑。
  *
- * 它从顶栏（标题栏 + 搜索栏）下沿起，做成一张卡片浮在画布上 —— 和首页那些面板同一副外壳，
+ * 它从顶栏（标题栏 + 欢迎语）下沿起，做成一张卡片浮在画布上 —— 和首页那些面板同一副外壳，
  * 四周留出与卡片之间一致的间距。这里不加 data-tauri-drag-region：它和面板一样是画布上的卡片，
  * 拖窗口是标题栏的事（在面板上按空白处也不会拖窗口，两边保持一致）。
  */
 import { computed } from 'vue'
 import type { Component } from 'vue'
-import { Notebook, FolderOpened, Grid, Document } from '@element-plus/icons-vue'
+import { Notebook, FolderOpened, Grid, Document, MagicStick } from '@element-plus/icons-vue'
 import { VIEW_LABELS, visibleViews, type ViewId } from '@shared/views'
 import { useProjectsStore } from '@/stores/projects'
 import { useSettingsStore } from '@/stores/settings'
@@ -24,7 +24,8 @@ const ICONS: Record<ViewId, Component> = {
   home: Grid,
   projects: FolderOpened,
   work: Notebook,
-  notes: Document
+  notes: Document,
+  skills: MagicStick
 }
 
 const active = computed(() => store.activeView)
@@ -72,7 +73,7 @@ function select(id: ViewId): void {
   min-height: 0;
   overflow-y: auto;
   /* 上 / 左 / 下留白与卡片间距同源，右边靠内容列自己的内边距让开 */
-  margin: var(--card-gap, 10px) 0 var(--card-gap, 10px) var(--card-gap, 10px);
+  margin: 0 0 var(--card-gap, 10px) var(--card-gap, 10px);
   padding: 8px;
   background: rgba(var(--bg-surface-rgb), var(--card-alpha, 1));
   border: 1px solid var(--border);
