@@ -35,6 +35,7 @@ import {
 } from '@shared/note-image'
 import type { Result } from '@shared/types'
 import { formatBytes, formatRelative } from '@/format'
+import AppDialog from '@/components/AppDialog.vue'
 import { confirmAction, notifyError, notifySuccess } from '@/notify'
 import { useSettingsStore } from '@/stores/settings'
 
@@ -252,12 +253,12 @@ async function remove(): Promise<void> {
 </script>
 
 <template>
-  <el-dialog
+  <!-- penetrable：对着图片清单删东西时，正文还要看得见（见 AppDialog.vue） -->
+  <AppDialog
     :model-value="modelValue"
     title="素材管理"
     width="min(780px, calc(100vw - 80px))"
-    :close-on-click-modal="false"
-    append-to-body
+    penetrable
     @update:model-value="(open: boolean) => emit('update:modelValue', open)"
   >
     <!-- 没配仓库：这一页没什么可管的，说清楚去哪儿配 -->
@@ -380,7 +381,7 @@ async function remove(): Promise<void> {
         </el-button>
       </div>
     </template>
-  </el-dialog>
+  </AppDialog>
 </template>
 
 <style scoped>

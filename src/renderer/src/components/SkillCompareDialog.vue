@@ -19,6 +19,7 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { buildDiffRows } from '@shared/text-diff'
 import { type SkillCompareFile } from '@shared/skills'
+import AppDialog from '@/components/AppDialog.vue'
 import { confirmAction } from '@/notify'
 import { useSkillsStore } from '@/stores/skills'
 
@@ -162,14 +163,13 @@ async function restoreVersion(): Promise<void> {
 </script>
 
 <template>
-  <el-dialog
+  <AppDialog
     v-model="visible"
     class="skill-compare-dialog"
     body-class="skill-compare-dialog__body"
     :title="`对比 · ${currentRel} · ${skillName}`"
     width="min(1200px, calc(100vw - 80px))"
     align-center
-    append-to-body
   >
     <div class="cmp">
       <!-- 文件条：库里全部文件，点哪个看哪个的差异；圆点 = 项目里动过 -->
@@ -236,7 +236,7 @@ async function restoreVersion(): Promise<void> {
         </el-button>
       </footer>
     </div>
-  </el-dialog>
+  </AppDialog>
 </template>
 
 <style scoped>

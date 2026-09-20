@@ -7,6 +7,7 @@
  */
 import { computed, ref, watch } from 'vue'
 import { SKILL_INSTALL_DIR } from '@shared/skills'
+import AppDialog from '@/components/AppDialog.vue'
 import { confirmAction, notifyError, notifySuccess } from '@/notify'
 import { useProjectsStore } from '@/stores/projects'
 import { useSkillsStore } from '@/stores/skills'
@@ -76,7 +77,7 @@ async function submit(): Promise<void> {
 </script>
 
 <template>
-  <el-dialog v-model="visible" :title="`安装「${skillName}」到项目`" width="520px" append-to-body>
+  <AppDialog v-model="visible" :title="`安装「${skillName}」到项目`" width="520px">
     <div v-if="!projects.projects.length" class="state">
       还没有项目。先把项目加进来，再回来装。
     </div>
@@ -112,7 +113,7 @@ async function submit(): Promise<void> {
         安装
       </el-button>
     </template>
-  </el-dialog>
+  </AppDialog>
 </template>
 
 <style scoped>

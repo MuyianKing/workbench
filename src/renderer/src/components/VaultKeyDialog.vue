@@ -12,6 +12,7 @@
  */
 import { computed } from 'vue'
 import { CopyDocument, Delete, Download, Upload } from '@element-plus/icons-vue'
+import AppDialog from '@/components/AppDialog.vue'
 import { confirmAction, notifyError, notifySuccess } from '@/notify'
 import { useAuthStore } from '@/stores/auth'
 import { useSettingsStore } from '@/stores/settings'
@@ -86,13 +87,7 @@ function importKey(): void {
 </script>
 
 <template>
-  <el-dialog
-    v-model="visible"
-    title="保险库密钥"
-    width="560"
-    append-to-body
-    :close-on-click-modal="false"
-  >
+  <AppDialog v-model="visible" title="保险库密钥" width="560" :close-on-click-modal="false">
     <div class="keys">
       <!-- 保护来自哪里：这一屏存在的理由就是把这句说清楚 -->
       <p class="keys__lead">
@@ -151,7 +146,7 @@ function importKey(): void {
         </el-button>
       </div>
     </div>
-  </el-dialog>
+  </AppDialog>
 </template>
 
 <style scoped>

@@ -15,6 +15,7 @@
  */
 import { computed, ref, watch } from 'vue'
 import { Refresh, TopRight } from '@element-plus/icons-vue'
+import AppDialog from '@/components/AppDialog.vue'
 import { formatTimestamp } from '@/format'
 import type { AiNewsArticle, AiNewsItem } from '@/types'
 
@@ -107,12 +108,11 @@ const paragraphs = computed(() => article.value?.paragraphs ?? [])
 </script>
 
 <template>
-  <el-dialog
+  <AppDialog
     v-model="visible"
     class="article-dialog"
     width="720"
     align-center
-    append-to-body
     :title="item?.title ?? '热点详情'"
     @closed="onClosed"
   >
@@ -154,7 +154,7 @@ const paragraphs = computed(() => article.value?.paragraphs ?? [])
         <el-button size="small" :icon="TopRight" @click="openExternal">在浏览器中打开</el-button>
       </div>
     </template>
-  </el-dialog>
+  </AppDialog>
 </template>
 
 <style scoped>

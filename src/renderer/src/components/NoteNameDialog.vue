@@ -15,6 +15,7 @@
 import { computed, ref, watch } from 'vue'
 import type { InputInstance } from 'element-plus'
 import { NOTE_NAME_MAX, noteNameProblem, type NoteKind } from '@shared/note'
+import AppDialog from '@/components/AppDialog.vue'
 
 const props = defineProps<{
   modelValue: boolean
@@ -75,14 +76,13 @@ function submit(): void {
 </script>
 
 <template>
-  <!-- append-to-body：弹层必须离开 .app 子树，否则会被顶部毛玻璃的 backdrop-filter 连累（见 global.css 弹层一节） -->
-  <el-dialog
+  <!-- penetrable：起名字时多半要回正文里对照一下（见 AppDialog.vue） -->
+  <AppDialog
     v-model="visible"
     :title="title"
     width="420"
     align-center
-    append-to-body
-    :close-on-click-modal="false"
+    penetrable
     @opened="focusInput"
   >
     <el-form class="form" label-position="top" @submit.prevent="submit">
@@ -102,5 +102,5 @@ function submit(): void {
       <el-button @click="visible = false">取消</el-button>
       <el-button type="primary" :disabled="!valid" @click="submit">确定</el-button>
     </template>
-  </el-dialog>
+  </AppDialog>
 </template>

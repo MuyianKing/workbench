@@ -14,6 +14,7 @@ import { SKILL_FILE, type SkillCommit, type SkillCompareFile } from '@shared/ski
 import { formatTimestamp } from '@/format'
 import { confirmAction } from '@/notify'
 import { useSkillsStore } from '@/stores/skills'
+import AppDialog from '@/components/AppDialog.vue'
 import SkillCompareDialog from '@/components/SkillCompareDialog.vue'
 
 const props = defineProps<{ open: boolean; skillId: string; skillName: string }>()
@@ -98,7 +99,7 @@ async function restoreTo(hash: string): Promise<void> {
 </script>
 
 <template>
-  <el-dialog v-model="visible" :title="`版本历史 · ${skillName}`" width="560px" append-to-body>
+  <AppDialog v-model="visible" :title="`版本历史 · ${skillName}`" width="560px">
     <div v-if="loading" class="state">正在读取版本历史…</div>
     <div v-else-if="error" class="state state--error">{{ error }}</div>
     <div v-else-if="!commits.length" class="state">
@@ -150,7 +151,7 @@ async function restoreTo(hash: string): Promise<void> {
       :initial-rel="compareRel"
       @restored="onRestored"
     />
-  </el-dialog>
+  </AppDialog>
 </template>
 
 <style scoped>

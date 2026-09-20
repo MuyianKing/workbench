@@ -8,6 +8,7 @@
 import { computed, reactive, watch } from 'vue'
 import type { FormRules } from 'element-plus'
 import { parsePort } from '@shared/port'
+import AppDialog from '@/components/AppDialog.vue'
 import { useProjectsStore } from '@/stores/projects'
 import { useCatalogStore } from '@/stores/catalog'
 
@@ -87,14 +88,13 @@ async function submit(): Promise<void> {
 </script>
 
 <template>
-  <!-- append-to-body：弹层必须离开 .app 子树，否则会被顶部毛玻璃的 backdrop-filter 连累（见 global.css 弹层一节） -->
-  <el-dialog
+  <!-- penetrable：命令常常是从笔记里抄过来的（见 AppDialog.vue） -->
+  <AppDialog
     v-model="visible"
     :title="title"
     width="520"
     align-center
-    append-to-body
-    :close-on-click-modal="false"
+    penetrable
     @closed="reset"
   >
     <el-form class="form" :model="form" :rules="rules" label-position="top" @submit.prevent>
@@ -132,7 +132,7 @@ async function submit(): Promise<void> {
         {{ editing ? '保存' : '添加' }}
       </el-button>
     </template>
-  </el-dialog>
+  </AppDialog>
 </template>
 
 <style scoped>

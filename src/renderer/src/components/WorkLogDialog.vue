@@ -14,6 +14,7 @@ import { dayKey } from '@shared/activity'
 import { projectColorVar, sanitizeProjectColor } from '@shared/project-color'
 import { WORK_STATUSES, WORK_STATUS_DEFAULT, WORK_STATUS_LABELS } from '@shared/work-log'
 import { useProjectsStore } from '@/stores/projects'
+import AppDialog from '@/components/AppDialog.vue'
 import MarkdownView from '@/components/MarkdownView.vue'
 import type { WorkLogEntry } from '@/types'
 
@@ -134,14 +135,13 @@ async function submit(): Promise<void> {
 </script>
 
 <template>
-  <!-- append-to-body：弹层必须离开 .app 子树，否则会被顶部毛玻璃的 backdrop-filter 连累（见 global.css 弹层一节） -->
-  <el-dialog
+  <!-- penetrable：写记录时常常要回笔记里抄一段（见 AppDialog.vue） -->
+  <AppDialog
     v-model="visible"
     :title="title"
     width="640"
     align-center
-    append-to-body
-    :close-on-click-modal="false"
+    penetrable
     @closed="reset"
   >
     <el-form class="form" :model="form" label-position="top" @submit.prevent>
@@ -240,7 +240,7 @@ async function submit(): Promise<void> {
         {{ editing ? '保存' : '记录' }}
       </el-button>
     </template>
-  </el-dialog>
+  </AppDialog>
 </template>
 
 <style scoped>

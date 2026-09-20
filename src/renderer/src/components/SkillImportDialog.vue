@@ -8,6 +8,7 @@
  */
 import { computed, ref, watch } from 'vue'
 import { noteNameProblem, sanitizeNoteName } from '@shared/note'
+import AppDialog from '@/components/AppDialog.vue'
 import { useSkillsStore } from '@/stores/skills'
 
 const props = defineProps<{ open: boolean }>()
@@ -56,7 +57,7 @@ async function submit(): Promise<void> {
 </script>
 
 <template>
-  <el-dialog v-model="visible" title="导入技能" width="520px" append-to-body>
+  <AppDialog v-model="visible" title="导入技能" width="520px">
     <el-form label-position="top" @submit.prevent>
       <el-form-item label="技能文件夹">
         <div class="pick">
@@ -85,7 +86,7 @@ async function submit(): Promise<void> {
         导入
       </el-button>
     </template>
-  </el-dialog>
+  </AppDialog>
 </template>
 
 <style scoped>

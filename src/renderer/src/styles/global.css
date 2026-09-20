@@ -640,6 +640,20 @@ body.is-resizing-notes-tree * {
   color: var(--el-color-white);
 }
 
+/**
+ * 选中的标签被悬停时，换的是底色，而不是「有没有底色」。
+ *
+ * 上面那条悬停规则比 `.chip.is-active` 多一个伪类，会连它那层实心底色一起顶掉：
+ * 底色没了，字色还留着选中态的反白色 —— 而 `--el-color-white` 在暗色主题下是 #11151b，
+ * 于是鼠标一划过，选中的分组就变成「深底深字」，整个标签看不见（亮色主题同理，
+ * 那里是白字落在近白底上）。这里按 Element Plus 自己给实心标签悬停的做法降一档主色，
+ * 悬停有反馈，两种主题、用户自设的主题色下也都还读得清。
+ * 放它后面才压得住上面那条 —— 两者特异性相同，靠先后定胜负。
+ */
+.chip.is-active:hover {
+  background: var(--el-color-primary-light-3);
+}
+
 .chip__count {
   font-size: var(--fs-micro);
   opacity: 0.6;

@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Close, Plus } from '@element-plus/icons-vue'
 import { moveToPosition } from '@shared/reorder'
+import AppDialog from '@/components/AppDialog.vue'
 import { DRAG_MIME } from '@/drag-mime'
 import { useProjectsStore } from '@/stores/projects'
 import type { ProjectGroup } from '@/types'
@@ -143,8 +144,7 @@ async function onDrop(group: ProjectGroup, event: DragEvent): Promise<void> {
 </script>
 
 <template>
-  <!-- append-to-body：弹层必须离开 .app 子树，否则会被顶部毛玻璃的 backdrop-filter 连累（见 global.css 弹层一节） -->
-  <el-dialog v-model="visible" title="管理分组" width="480" align-center append-to-body>
+  <AppDialog v-model="visible" title="管理分组" width="480" align-center>
     <div class="groups">
       <div v-if="store.sortedGroups.length" class="tags">
         <template v-for="group in store.sortedGroups" :key="group.id">
@@ -208,7 +208,7 @@ async function onDrop(group: ProjectGroup, event: DragEvent): Promise<void> {
     <template #footer>
       <el-button @click="visible = false">完成</el-button>
     </template>
-  </el-dialog>
+  </AppDialog>
 </template>
 
 <style scoped>

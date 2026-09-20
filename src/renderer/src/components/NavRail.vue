@@ -38,6 +38,9 @@ const active = computed(() => store.activeView)
 const items = computed(() => visibleViews(settings.settings.hiddenViews))
 
 function select(id: ViewId): void {
+  // 换页不动弹层：开着的弹框留在原地，切走再切回来还是它，填到一半的输入不丢。
+  // 所以导航栏必须浮在遮罩之上（见样式里那个 z-index）—— 否则弹层开着时这一列点不着，
+  // 用户只能先关掉弹框才能换页。
   void store.setActiveView(id)
 }
 </script>
@@ -73,6 +76,18 @@ function select(id: ViewId): void {
   width: var(--w-nav);
   min-height: 0;
   overflow-y: auto;
+  /**
+   * 抬到所有弹层之上：弹层（el-dialog / el-drawer）的遮罩铺满整窗，弹层开着时
+   * 这一列原本点不着 —— 而换页是最常用的动作，不该被一个开着的弹框锁住
+   * （换页不会收掉弹层，见 select()）。
+   *
+   * 层级取 int32 的上限：Element Plus 弹层的 z-index 是 2000 起步、每开一个弹层 +1 的
+   * 动态值（hooks/use-z-index），写一个「比 2000 大」的常数迟早会被它追平，只有上限追不上。
+   * 代价是弹层宽到压住这一列时（窄窗口下的技能详情弹窗）导航栏盖在它上面 —— 那一列本来
+   * 就是导航栏的地盘，比反过来（点不到菜单）好。
+   */
+  position: relative;
+  z-index: 2147483647;
   /* 上 / 左 / 下留白与卡片间距同源，右边靠内容列自己的内边距让开 */
   margin: 0 0 var(--card-gap, 10px) var(--card-gap, 10px);
   padding: 8px;

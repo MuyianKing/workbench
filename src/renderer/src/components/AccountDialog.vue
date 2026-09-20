@@ -15,6 +15,7 @@ import { computed, ref, watch } from 'vue'
 import { ElMessageBox } from 'element-plus'
 import { Loading, User } from '@element-plus/icons-vue'
 import { AUTH_PROVIDERS, AUTH_PROVIDER_HINTS, AUTH_PROVIDER_LABELS, accountLabel } from '@shared/auth'
+import AppDialog from '@/components/AppDialog.vue'
 import { useAuthStore } from '@/stores/auth'
 import type { AuthProvider } from '@/types'
 
@@ -101,13 +102,12 @@ async function signOut(): Promise<void> {
 </script>
 
 <template>
-  <el-dialog
+  <AppDialog
     v-model="visible"
     class="account-dialog"
     title="账号"
     width="400"
     align-center
-    append-to-body
     :close-on-click-modal="!auth.pending"
     :close-on-press-escape="!auth.pending"
     @closed="onClosed"
@@ -208,7 +208,7 @@ async function signOut(): Promise<void> {
         随时可以在系统里删掉。
       </p>
     </div>
-  </el-dialog>
+  </AppDialog>
 </template>
 
 <style scoped>

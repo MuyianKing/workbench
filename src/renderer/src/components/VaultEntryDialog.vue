@@ -14,6 +14,7 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import type { InputInstance } from 'element-plus'
 import { emptyVaultEntry, vaultEntryProblem, type VaultEntry, type VaultRecord } from '@shared/vault'
+import AppDialog from '@/components/AppDialog.vue'
 
 const visible = defineModel<boolean>('visible', { required: true })
 
@@ -68,12 +69,12 @@ defineExpose({ done: () => (submitting.value = false) })
 </script>
 
 <template>
-  <el-dialog
+  <!-- penetrable：填这条时常常要切到笔记里把密码抄过来（见 AppDialog.vue） -->
+  <AppDialog
     v-model="visible"
     :title="record ? '编辑记录' : '添加记录'"
     width="520"
-    append-to-body
-    :close-on-click-modal="false"
+    penetrable
     @opened="focusName"
   >
     <el-form label-position="top" @submit.prevent>
@@ -126,7 +127,7 @@ defineExpose({ done: () => (submitting.value = false) })
         {{ record ? '保存' : '添加' }}
       </el-button>
     </template>
-  </el-dialog>
+  </AppDialog>
 </template>
 
 <style scoped>

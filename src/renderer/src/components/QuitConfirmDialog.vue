@@ -10,6 +10,7 @@
  */
 import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { WarningFilled } from '@element-plus/icons-vue'
+import AppDialog from '@/components/AppDialog.vue'
 import type { QuitChoice } from '@/types'
 
 const visible = ref(false)
@@ -52,17 +53,17 @@ function onClosed(): void {
 
 <template>
   <!--
-    用 el-dialog 而不是自绘遮罩：遮罩、焦点陷阱、Esc、滚动锁都由它统一处理，
-    与设置 / 添加项目那些弹窗走同一条路（应用里只有这一处曾经自带一层压暗的遮罩，
+    走 AppDialog（也就是 el-dialog）：遮罩、焦点陷阱、Esc、滚动锁都由它统一处理，
+    与设置 / 添加项目那些弹窗同一条路（应用里只有这一处曾经自带一层压暗的遮罩，
     而别处的遮罩是「从标题栏下沿开始、不压暗背景」—— 见 global.css 的弹层一节）。
+    这个框**要挡住背后**（不传 penetrable）：退出是个必须看见的决定，不该让人点着别处把它忘了。
     头部与两个选项仍然自绘：那块「警告徽标 + 两个带说明的选项卡」的版式与它的内容绑得紧，
     el-message-box 装不下。
   -->
-  <el-dialog
+  <AppDialog
     v-model="visible"
     width="440"
     align-center
-    append-to-body
     :show-close="true"
     :close-on-click-modal="false"
     :close-on-press-escape="true"
@@ -97,7 +98,7 @@ function onClosed(): void {
         </span>
       </button>
     </div>
-  </el-dialog>
+  </AppDialog>
 </template>
 
 <style scoped>

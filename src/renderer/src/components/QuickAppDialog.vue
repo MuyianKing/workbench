@@ -8,6 +8,7 @@
 import { computed, reactive, ref, watch } from 'vue'
 import { Monitor } from '@element-plus/icons-vue'
 import { defaultQuickAppName } from '@shared/quick-launch'
+import AppDialog from '@/components/AppDialog.vue'
 import { useProjectsStore } from '@/stores/projects'
 import { useCatalogStore } from '@/stores/catalog'
 
@@ -81,14 +82,13 @@ async function submit(): Promise<void> {
 </script>
 
 <template>
-  <!-- append-to-body：弹层必须离开 .app 子树，否则会被顶部毛玻璃的 backdrop-filter 连累（见 global.css 弹层一节） -->
-  <el-dialog
+  <!-- penetrable：路径常常要回别处看一眼再抄过来（见 AppDialog.vue） -->
+  <AppDialog
     v-model="visible"
     :title="title"
     width="520"
     align-center
-    append-to-body
-    :close-on-click-modal="false"
+    penetrable
     @closed="reset"
   >
     <el-form class="form" :model="form" @submit.prevent>
@@ -133,7 +133,7 @@ async function submit(): Promise<void> {
         {{ editing ? '保存' : '添加' }}
       </el-button>
     </template>
-  </el-dialog>
+  </AppDialog>
 </template>
 
 <style scoped>

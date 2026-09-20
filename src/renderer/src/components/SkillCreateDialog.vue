@@ -7,6 +7,7 @@
  */
 import { computed, reactive, ref, watch } from 'vue'
 import { noteNameProblem } from '@shared/note'
+import AppDialog from '@/components/AppDialog.vue'
 import { useSkillsStore } from '@/stores/skills'
 
 const props = defineProps<{ open: boolean }>()
@@ -45,7 +46,7 @@ async function submit(): Promise<void> {
 </script>
 
 <template>
-  <el-dialog v-model="visible" title="新建技能" width="460px" append-to-body>
+  <AppDialog v-model="visible" title="新建技能" width="460px">
     <el-form label-position="top" @submit.prevent>
       <el-form-item label="名字" :error="idProblem || undefined">
         <el-input
@@ -75,5 +76,5 @@ async function submit(): Promise<void> {
         创建
       </el-button>
     </template>
-  </el-dialog>
+  </AppDialog>
 </template>

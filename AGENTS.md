@@ -92,8 +92,15 @@
   [global.css](src/renderer/src/styles/global.css)。
 - **Element Plus 是全量引入的**（`main.ts` 的 `app.use(ElementPlus)` + 整包 CSS），不要手搓 EP 已有的控件。已定下来的用法：
   分段选择 `el-segmented`；弹窗字段 `el-form` + `el-form-item`（`label-position="top"`，校验失败就地显示，不弹 `ElMessage`）；
-  弹层 `el-dialog` / `el-drawer`（`append-to-body`，**不要自己写遮罩**，`.el-overlay` 统一处理）；图标按钮与关键操作用 `el-tooltip`，
-  纯截断文字的全名用原生 `title`。
+  图标按钮与关键操作用 `el-tooltip`，纯截断文字的全名用原生 `title`。
+- **弹层一律走 [AppDialog.vue](src/renderer/src/components/AppDialog.vue)，不要直接写 `el-dialog`**：`append-to-body`、
+  「挡不挡背后」、可拖动（抓手是标题栏、关掉后位置复位）这几条跨弹层的规矩只写在那里（**不要自己写遮罩**，
+  `.el-overlay` 统一处理）；其余属性与插槽原样透传。
+- 弹层开着时导航栏仍然可用（导航栏浮在遮罩之上，见 [NavRail.vue](src/renderer/src/components/NavRail.vue)）；
+  **换页不关弹层** —— 弹框留在原地，切回来还是它，别在换页路径上加「收弹层」的动作。
+- **填内容的弹层传 `penetrable`（不挡背后）**：密码、工作记录、命令、常用软件、添加项目、起名字、素材管理这几个
+  「要回别处抄一段再填」的弹层都这么开，遮罩只围住弹框自己；代价是没有「点外面关掉」（它们本来就关着）。
+  **确认框（`ElMessageBox`）与退出确认框保持挡住**，设置 / 技能这类不抄内容的弹层也照旧挡点击。
 - 明暗切换经 `theme-transition.ts` 驱动，`<html>` 上同时维护 `data-theme` 与 `.dark`；切换守卫用
   [stores/settings.ts](src/renderer/src/stores/settings.ts) 里的 `appliedTheme` 变量，不读 DOM。
 - 拖动窗口用 `data-tauri-drag-region`：裸属性只认直接按在带属性的那个元素上（子元素要再标一遍），`"deep"` 才是整棵子树；

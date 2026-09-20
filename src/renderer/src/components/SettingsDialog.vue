@@ -24,6 +24,7 @@ import {
 import { builtinIdOf } from '@shared/wallpaper'
 import { CARD_OPACITY_MAX, CARD_OPACITY_MIN } from '@shared/card-opacity'
 import { formatRelative } from '@/format'
+import AppDialog from '@/components/AppDialog.vue'
 import { notifyError, notifySuccess } from '@/notify'
 import type { AppSettings, SyncDeviceInfo, ThemeSource, TopBarStyle } from '@/types'
 import type { ThemeOrigin } from '@/theme-transition'
@@ -485,18 +486,17 @@ const networkBounds: Array<{ title: string; detail: string }> = [
 
 <template>
   <!--
-    append-to-body：弹层必须离开 .app 子树，否则会被顶部毛玻璃的 backdrop-filter 连累（见 global.css 弹层一节）。
     class / body-class：两栏骨架与固定高度都在 global.css 里（见 .el-dialog.settings-dialog）。
     没有 footer：这里的设置都是改完即生效的，留一个「完成」按钮只是关窗用，不如省掉那一条 ——
-    关窗走右上角的 ×、Esc 或点遮罩，三条都是 EP 自带的。
+    关窗走右上角的 ×、Esc 或点遮罩，三条都是 EP 自带的（所以这里要挡住背后、也不传 penetrable：
+    「点遮罩关掉」是这一屏的主要关闭方式）。
   -->
-  <el-dialog
+  <AppDialog
     v-model="visible"
     class="settings-dialog"
     title="设置"
     width="920"
     align-center
-    append-to-body
     body-class="settings-body"
   >
     <div class="settings">
@@ -1098,7 +1098,7 @@ const networkBounds: Array<{ title: string; detail: string }> = [
         </section>
       </div>
     </div>
-  </el-dialog>
+  </AppDialog>
 
   <AccountDialog v-model="accountVisible" />
 </template>

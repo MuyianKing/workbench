@@ -7,7 +7,7 @@
  * .skill-dialog 那一组，scoped 样式够不着 EP 生成的 body 元素）。
  * 内容四周留内边距（--sp-4），正文不再顶着弹窗边。
  *
- * 与项目抽屉、设置弹窗同一个做法（el-dialog、append-to-body）。编辑区就是一份清单原文，
+ * 与项目抽屉、设置弹窗同一个做法（AppDialog，见 components/AppDialog.vue）。编辑区就是一份清单原文，
  * 保存 = 记一个版本（见 stores/skills.ts 的 saveActive）。名字与描述是 frontmatter 解析出来的，
  * 改它们就是改正文本身 —— 保存之后列表会重扫一遍，卡片上的字跟着变。
  *
@@ -18,6 +18,7 @@ import { computed, nextTick, ref, watch } from 'vue'
 import { Close } from '@element-plus/icons-vue'
 import { SKILL_FILE, compareSkillVersions, skillVersionOf, type SkillCompareFile, type SkillInstalledScan } from '@shared/skills'
 import { formatTimestamp } from '@/format'
+import AppDialog from '@/components/AppDialog.vue'
 import { confirmAction, notifySuccess } from '@/notify'
 import { useProjectsStore } from '@/stores/projects'
 import { useSkillsStore } from '@/stores/skills'
@@ -256,15 +257,13 @@ async function removeActive(): Promise<void> {
 </script>
 
 <template>
-  <!-- append-to-body：弹层必须离开 .app 子树，否则会被顶部毛玻璃的 backdrop-filter 连累（见 global.css） -->
   <!-- class / body-class：高度与滚动的分工在 global.css（.el-dialog.skill-dialog 那一组，含隐藏 EP 头部） -->
-  <el-dialog
+  <AppDialog
     v-model="visible"
     class="skill-dialog"
     body-class="skill-dialog__body"
     width="min(1200px, calc(100vw - 80px))"
     align-center
-    append-to-body
     :before-close="requestClose"
   >
     <div v-if="store.activeSkill" class="detail">
@@ -371,7 +370,7 @@ async function removeActive(): Promise<void> {
       :initial-rel="compareRel"
       @applied="onApplied"
     />
-  </el-dialog>
+  </AppDialog>
 </template>
 
 <style scoped>
