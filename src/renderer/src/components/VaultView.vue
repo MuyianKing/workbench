@@ -3,8 +3,9 @@
  * 密码页：一张卡片墙。
  *
  * **它是备忘，不是密码管理器**：一条记录就是「名字 + 密码 + 备注 + 分组」四样，
- * 卡片上摆出来的就是这些 —— 没有用户名 / 网址那些字段，也不生成口令
- * （见 shared/vault.ts 的 VaultEntry）。卡片是**用**的地方：看一眼、复制一下；
+ * 没有用户名 / 网址那些字段，也不生成口令（见 shared/vault.ts 的 VaultEntry）。
+ * **卡片上只摆名字与密码**：备注是一句随手记下的话，长短不定，摊上去这几张卡就高矮不齐、
+ * 整面墙的节奏散掉；它照旧记着，在编辑弹框里看与改。卡片是**用**的地方：看一眼、复制一下；
  * 改是偶尔才做一次的事，收在悬停才显形的那两颗按钮里，添加与编辑都走弹框。
  *
  * 三种样子，按密钥状态走：
@@ -301,8 +302,9 @@ async function lock(): Promise<void> {
                 </header>
 
                 <!--
-                  两行「标签 + 值」：`密码` / `备注` 两个灰字标签把内容锚住，值那一列左边对齐。
-                  没有标签的话，卡片上就是几段各自飘着的字（那是上一版的样子）。
+                  卡片上只有「密码」这一行：灰字标签把值锚住，值那一列左边对齐 ——
+                  没有标签的话，卡片上就是一段飘着的字（那是更早一版的样子）。
+                  **备注不摆在这儿**（见文件头）：长短不一的一句话会把卡片撑成高矮不齐。
                 -->
                 <dl class="rows">
                   <div class="row">
@@ -347,12 +349,6 @@ async function lock(): Promise<void> {
                         </el-tooltip>
                       </span>
                     </dd>
-                  </div>
-
-                  <!-- 备注最多两行：这是「备忘」，那句话往往就是这条记录最要紧的部分 -->
-                  <div v-if="record.notes" class="row">
-                    <dt class="row__label">备注</dt>
-                    <dd class="row__notes" :title="record.notes">{{ record.notes }}</dd>
                   </div>
                 </dl>
               </article>
@@ -728,21 +724,6 @@ async function lock(): Promise<void> {
 /* 包住按钮的那一层：只为让禁用状态下 tooltip 也收得到事件（见模板里的说明） */
 .row__op {
   display: inline-flex;
-}
-
-/* 备注最多两行：写长了截断，悬停看全文（与「今日完成」那张卡同一条口径） */
-.row__notes {
-  display: -webkit-box;
-  flex: 1 1 auto;
-  margin: 0;
-  min-width: 0;
-  overflow: hidden;
-  color: var(--ink-2);
-  font-size: var(--fs-meta);
-  /* 与上面那条带子同高：备注的首行因此和「备注」两个字对齐 */
-  line-height: 22px;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
 }
 
 /* ---------- 空态 ---------- */
