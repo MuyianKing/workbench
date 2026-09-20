@@ -6,33 +6,42 @@
  * 空出来的位置 —— 首屏第一眼先是这句，首页画布也少了一层、整块让给卡片。
  * 顶栏本身有实底，这一行不再需要底衬。
  *
- * 它只说两件已经发生的事：现在是什么时候（一句按时间段的称呼，后面跟着**程序名**），
+ * 它只说两件已经发生的事：现在是什么时候（一句按时间段的称呼，后面跟着**你是谁**），
  * 以及你这些机器上目前的状况（几条从本机数据里现取的实话）。
  * 不打招呼、不问好、不鼓励 —— 那些在这个应用的语气里是噪音（见 AGENTS.md 的「如实说明」）。
  *
- * **称呼后面那个名字是设置里的「程序名称」**（`shared/app-name.ts` 收敛，默认 `MUYIAN`，
- * 与标题栏、托盘提示、窗口标题同一个值）：它是**你给这个程序起的名字**，只有你会设它，
- * 所以「晚上好，MUYIAN」读起来是在叫你。取它而不是取账号昵称有两个理由 ——
- * 它**不一定有**（登录是可选的，没登录时昵称无从谈起，而这一行不该因此少半句），
- * 也**不该在这一行**（账号那一层归顶栏右上角，见下）。
+ * **称呼后面那个名字是当前登录账号的用户名**（`AccountProfile.login`，见 `shared/auth.ts`）：
+ * 这一行是首屏上唯一一处「认得你」，说出来的就该是**此刻登录的那个 git 账号**，
+ * 而不是给程序起的名字。取登录名而不是昵称 —— 昵称是平台上的展示名（可能重名、也可能没填过），
+ * 登录名才是「哪个账号」。
  *
- * 数据全在 projects / settings 两个 store 里，**一次 IPC 都不发**：这一行在首屏上，
- * 为它多等一轮往返不值得（工作日志那种要另读一份文件的数字就不放进来）。
+ * **没登录时回落到设置里的「程序名称」**（`shared/app-name.ts` 收敛，默认 `MUYIAN`，
+ * 与标题栏、托盘提示、窗口标题同一个值）：登录是可选的，而这一行不该因为没登录就少半句。
  *
- * **这里不放头像 / 昵称**：这一行与顶栏右上角那颗头像在同一行上 ——
- * 同一个账号在一条横线上画两遍，看着像画重了。账号入口归那颗头像，
- * 「认得你」由这句话与这几条事实承担（它们说的都是**你**这台机器上的事）。
+ * 数据全在 projects / settings / auth 三个 store 里，**一次 IPC 都不发**：账号状态由
+ * projects store 初始化时问过一次（`refreshAuth`，只读凭据管理器、不联网），这里只读那个结果；
+ * 这一行在首屏上，为它多等一轮往返不值得（工作日志那种要另读一份文件的数字就不放进来）。
+ *
+ * **这里不放头像**：账号入口归顶栏右上角那颗头像，这一行只说事情、只出一个名字。
  */
 import { computed } from 'vue'
 import { dayKey, streakOf } from '@shared/activity'
+import { useAuthStore } from '@/stores/auth'
 import { useProjectsStore } from '@/stores/projects'
 import { useSettingsStore } from '@/stores/settings'
 
 const store = useProjectsStore()
 const settings = useSettingsStore()
+const auth = useAuthStore()
 
-/** 称呼后面那个名字：设置里的程序名称，收敛过所以一定有值（空串回落到默认名） */
-const name = computed(() => settings.settings.appName)
+/** 当前登录的账号；null 表示没登录，或还没问过后端 —— 两种都回落到程序名称 */
+const account = computed(() => auth.status?.account ?? null)
+
+/**
+ * 称呼后面那个名字：登录名优先，没登录用设置里的程序名称。
+ * 两个来源都收敛过（见 shared/auth.ts / shared/app-name.ts），所以一定有值。
+ */
+const name = computed(() => account.value?.login ?? settings.settings.appName)
 
 /**
  * 现在几点。
