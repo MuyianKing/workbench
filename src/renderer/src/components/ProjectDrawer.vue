@@ -82,6 +82,13 @@ function commitName(): void {
   }
 }
 
+/** 「在首页展示」开关：写动作归 store（与项目卡「⋯」菜单同一条路，提示也只有那一处） */
+function toggleHome(value: boolean | string | number): void {
+  const current = project.value
+  if (!current) return
+  store.setHome(current.id, value === true)
+}
+
 /** 从磁盘重新读取 scripts 作为下拉候选，保证是项目真实存在的命令 */
 const allScripts = ref<string[]>([])
 
@@ -558,6 +565,15 @@ async function removeProject(): Promise<void> {
             <p class="field__hint">
               用来在项目卡与工作日志里区分项目；新加的项目会自动取一个还没用过的主题色。
             </p>
+          </div>
+
+          <!--
+            走 store 的 action 而不是 v-model 直接改：首页那张卡上关掉这一项，卡片会立刻消失，
+            与「⋯」菜单共用同一条路才有那句说明（见 store 的 setHome）。
+          -->
+          <div class="field field--row">
+            <label class="field__label">在首页展示</label>
+            <el-switch :model-value="project.home === true" size="small" @change="toggleHome" />
           </div>
 
           <div v-if="!pathValid" class="field field__warn">

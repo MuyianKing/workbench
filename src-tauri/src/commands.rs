@@ -50,7 +50,7 @@ pub fn work_log_store() -> &'static JsonStore {
 /// 笔记没有数据文件：它就是用户挑的那个文件夹里的 .md 文件（见 notes.rs），
 /// 所以这里没有第五份 JsonStore，也没有 load / save / flush。
 
-/// 启动时载入四份数据（原始 JSON；收敛由 TS 侧负责）
+/// 启动时载入各份数据（原始 JSON；收敛由 TS 侧负责）
 pub fn load_all() {
     // 先做一次性的文件改名：必须早于 token_store().load()，否则会先按新名字读到空文件
     paths::migrate_legacy_files();
@@ -59,6 +59,7 @@ pub fn load_all() {
     token_store().load();
     work_log_store().load();
     crate::ai_news::ai_news_store().load();
+    crate::vault::vault_store().load();
 }
 
 /// 退出前同步落盘，防止防抖窗口内的改动丢失
@@ -68,6 +69,7 @@ pub fn flush_all() {
     token_store().flush_sync();
     work_log_store().flush_sync();
     crate::ai_news::ai_news_store().flush_sync();
+    crate::vault::vault_store().flush_sync();
 }
 
 // ---------- 数据文件 ----------

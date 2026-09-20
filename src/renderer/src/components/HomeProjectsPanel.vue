@@ -1,44 +1,49 @@
 <script setup lang="ts">
 /**
- * 首页「最近使用」卡片：按 lastUsedAt 排出的最近几个项目，一个项目就是项目页上那张项目卡
- * （启动 / 停止 / 打包 / 检测 / 安装 / 「⋯」菜单都在这儿，不用先跳去项目页）。
+ * 首页「我的项目」卡片：只画**勾了「在首页展示」**的那些项目（见 Project.home），
+ * 一个项目就是项目页上那张项目卡（启动 / 停止 / 打包 / 检测 / 安装 / 「⋯」菜单都在卡上，
+ * 不用先跳去项目页）。
+ *
+ * 顺序取自项目页的展示顺序（store 的 `homeProjects`）—— 这是一份挑出来的名单，
+ * 用户按什么顺序摆的项目页，首页就照着来。原先这里按 `lastUsedAt` 排最近三个：
+ * 一是「最近用过」由用户挑、不用猜，二是按时间排意味着每启动一次卡片就换个位置。
  *
  * 排布跟着面板宽度走：放得下一列就一列、放得下两列就两列（网格下限与项目页同一个 302px，
  * 所以每张卡都不会被压得跟项目页长得不一样）；再窄下去卡片自己会换行（见 ProjectCard）。
  *
  * **这张卡不画标题行，也不画面板壳**：里面装的就是项目卡本身，再套一层背景、边框与内边距，
- * 等于把「卡片」画了两遍，还把那几张项目卡往里挤。整块看上去就是三张项目卡直接摆在画布上；
+ * 等于把「卡片」画了两遍，还把那几张项目卡往里挤。整块看上去就是几张项目卡直接摆在画布上；
  * 卡叫什么在编辑态的卡标签与设置里的卡片清单里都看得到（见 theme.ts 的 HOME_CARD_LABELS）。
  *
- * 项目一个都没有时给一句空状态，免得面板里是一片空白。
+ * 空状态分两种：一个项目都还没有，和有项目但一个都没勾 —— 后者要说清楚去哪儿勾，
+ * 否则用户对着这张卡只会以为它坏了。
  */
 import { computed } from 'vue'
-import { Clock } from '@element-plus/icons-vue'
+import { Collection } from '@element-plus/icons-vue'
 import { useProjectsStore } from '@/stores/projects'
 import ProjectCard from '@/components/ProjectCard.vue'
 
 const store = useProjectsStore()
 
-/** 只排三张：这块没有壳，再长就成了一列没边界的卡片墙，把首页其余卡片挤没了 */
-const RECENT_LIMIT = 3
-
-const recent = computed(() =>
-  store.projects
-    .slice()
-    .sort((a, b) => (b.lastUsedAt ?? 0) - (a.lastUsedAt ?? 0))
-    .slice(0, RECENT_LIMIT)
-)
+const projects = computed(() => store.homeProjects)
 </script>
 
 <template>
   <article class="panel">
-    <div v-if="recent.length" class="recent panel__scroll">
-      <ProjectCard v-for="project in recent" :key="project.id" :project="project" />
+    <div v-if="projects.length" class="projects panel__scroll">
+      <ProjectCard v-for="project in projects" :key="project.id" :project="project" />
     </div>
 
     <p v-else class="panel__empty">
-      <el-icon class="empty__icon"><Clock /></el-icon>
-      还没有项目<br />添加一个项目后，最近用过的会排在这里。
+      <el-icon class="empty__icon"><Collection /></el-icon>
+      <template v-if="store.projects.length">
+        还没有放到首页的项目<br />
+        在项目卡的「⋯」菜单或项目详情里打开「在首页展示」。
+      </template>
+      <template v-else>
+        还没有项目<br />
+        添加项目时勾上「在首页展示」，它就会出现在这里。
+      </template>
     </p>
   </article>
 </template>
@@ -72,7 +77,7 @@ const recent = computed(() =>
  * 拖到中栏，都会重新算）。下限取项目页网格那个 302px —— 它同时也是项目卡的设计宽度，
  * 低于它卡片内部就要开始换行了；min(302px, 100%) 是为了栏宽被拖到 302 以下时不横向溢出。
  */
-.recent {
+.projects {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(min(302px, 100%), 1fr));
   /* 与项目页网格、首页各卡片同一个间距：设置里的「卡片间距」（--card-gap 由 App.vue 写在 .app 上） */

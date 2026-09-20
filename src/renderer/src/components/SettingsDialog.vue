@@ -455,8 +455,9 @@ async function openDataDir(): Promise<void> {
  */
 const networkBounds: Array<{ title: string; detail: string }> = [
   {
-    title: 'Token 用量同步',
-    detail: '默认关闭：要在设置里登录账号并填一个你自己的 git 仓库，才会推拉那个仓库。'
+    title: '同步仓库（Token 用量 / 外观 / 密码保险库）',
+    detail:
+      '默认关闭：要在设置里登录账号并填一个你自己的 git 仓库，才会推拉那个仓库。密码保险库也走它（vault/vault.json），推上去的只有密文。'
   },
   {
     title: '账号登录',
@@ -1036,7 +1037,8 @@ const networkBounds: Array<{ title: string; detail: string }> = [
               <div class="row__text">
                 <span class="row__label">数据目录</span>
                 <span class="row__hint">
-                  项目列表、设置、用量快照与工作日志都在这里；位置固定，不跟着任何设置走。
+                  项目列表、设置、用量快照、工作日志与密码保险库都在这里；位置固定，不跟着任何设置走。
+                  保险库那份 <span class="mono">vault.json</span> 里只有密文，密钥在 Windows 凭据管理器里。
                 </span>
               </div>
               <div class="path__actions">

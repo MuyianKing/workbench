@@ -39,7 +39,8 @@
 
 - 落盘全在 Rust 侧（`store.rs`：300ms 防抖 + 临时文件 rename + 退出前同步落盘）。数据文件分工：`workbench-data.json`（项目 /
   快捷启动 / 命令 + 与本机绑定的设置，含笔记文件夹 `noteDir`）、`theme.json`（外观 + 首页布局）、`token-usage.json`、
-  `work-log.json` 与 `ai-news.json`（都只在本机），加上设备标识 `device.json` —— 全都在 `%APPDATA%/Workbench/data/` 下
+  `work-log.json` 与 `ai-news.json`（都只在本机）、`vault.json`（密码保险库，**里面只有密文**，
+  密钥在 Windows 凭据管理器里，见 [vault.md](vault.md)），加上设备标识 `device.json` —— 全都在 `%APPDATA%/Workbench/data/` 下
   （根目录 `%APPDATA%/Workbench` 是 Electron 版留下的 Chromium 配置目录；老版本也把数据文件写在那儿，启动时由 `migrate_legacy_files` 搬进 `data/`）。
   **技能没有数据文件**：技能库就是笔记文件夹下的一个子目录（设置里的 `skillSyncDir`，默认 `skills`），
   磁盘上的文件就是数据本身（见 [skills.ts](../../src/shared/skills.ts) 的文件头）。

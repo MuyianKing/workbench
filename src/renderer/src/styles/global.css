@@ -299,6 +299,12 @@ body.is-resizing-notes-tree * {
   width: 100%;
 }
 
+/** 一行里「控件 + 旁边的按钮」要横向铺满：同样是 flex 行的子项，不给宽度就只缩到
+    控件自身的固有宽度（输入框会退回默认的 20 字符宽，右边空出一大块） */
+.form .field__row {
+  width: 100%;
+}
+
 .panel__foot {
   display: flex;
   align-items: center;

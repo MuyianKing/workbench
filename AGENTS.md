@@ -42,6 +42,7 @@
   只读不上报；白名单里只收免费、不需要凭据的中文源，用户不想看就把那张卡片关掉；**站内阅读**是同一个出口的
   延伸：用户点开某一条时才去抓那篇正文，域名另有一道 `article_hosts` 白名单卡着 —— 只认源站自己的域名与它的子域，
   页面脚本不执行、只取正文文本）。不要新增网络出口、不往任何第三方服务发数据；笔记里的外链图片不算新出口；
+  密码保险库也不算 —— 它推的是**用量同步那个仓库**的另一个目录（`vault/vault.json`），推上去的只有密文；
   登录内嵌的 client_id/secret 是这条边界唯一一次放宽。
 - 引新前端依赖先看它会不会在**运行时**去取外面的资源（Vditor 就是这类：资源按 `options.cdn` 取，默认指 unpkg）—— 这类要么把资源
   随包带一份、要么别引。
@@ -112,6 +113,7 @@
 | 工作日志 | [constraints/work-log.md](docs/constraints/work-log.md) |
 | 笔记（正文 / 图片 / 素材 / 笔记同步） | [constraints/notes.md](docs/constraints/notes.md) |
 | 用量与外观同步、账号登录 | [constraints/sync-and-auth.md](docs/constraints/sync-and-auth.md) |
+| 密码保险库（密钥 / 加解密 / 多机共写一份文件） | [constraints/vault.md](docs/constraints/vault.md) |
 
 ## 6. Agent 操作与验证
 

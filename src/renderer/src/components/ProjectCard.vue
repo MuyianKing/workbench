@@ -109,6 +109,8 @@ function onMore(command: string): void {
   else if (command === 'vscode') void store.openInVSCode(props.project.path)
   else if (command === 'relocate') void store.relocate(id)
   else if (command === 'drawer') store.openDrawer(id)
+  // 首页展示开关：在首页那张卡上关掉它，这张卡会立刻消失（store 里给了说明的那句提示）
+  else if (command === 'home') store.setHome(id, !props.project.home)
   // 确认框在 store 里（项目卡与详情抽屉共用同一句）
   else if (command === 'remove') void store.removeProject(id)
 }
@@ -273,6 +275,10 @@ function onMore(command: string): void {
         <template #dropdown>
           <el-dropdown-menu>
             <el-dropdown-item command="drawer">查看详情</el-dropdown-item>
+            <!-- 一行菜单项，标签跟着当前状态翻：在首页那张卡上点它就是把自己撤下来 -->
+            <el-dropdown-item command="home">
+              {{ project.home ? '从首页移除' : '在首页展示' }}
+            </el-dropdown-item>
             <el-dropdown-item v-if="pathValid" command="vscode">在 VS Code 中打开</el-dropdown-item>
             <el-dropdown-item v-if="pathValid" command="reveal">打开项目目录</el-dropdown-item>
             <el-dropdown-item v-else command="relocate">重新定位…</el-dropdown-item>
@@ -483,7 +489,7 @@ function onMore(command: string): void {
 .card__meta {
   display: flex;
   align-items: center;
-  /* 宽卡片一行放得下，窄卡片（首页「最近使用」里那些）就整项换行，别把字挤没 */
+  /* 宽卡片一行放得下，窄卡片（首页「我的项目」里那些）就整项换行，别把字挤没 */
   flex-wrap: wrap;
   gap: var(--sp-2);
   /* 介于正文与 micro 之间：比路径小半档，又比原来的 10.5px 易读（定高组合之一） */
@@ -517,7 +523,7 @@ function onMore(command: string): void {
   /**
    * 一行放不下就整颗控件换行，绝不被压窄（压窄的后果见下面 .card__actions > *）。
    * 项目页的卡片永远够宽（网格下限 302px），这条是给嵌在别处的窄卡片兜底的 ——
-   * 首页「最近使用」面板里那些只有两百多像素，栏宽再拖窄一点就放不下了。
+   * 首页「我的项目」面板里那些只有两百多像素，栏宽再拖窄一点就放不下了。
    */
   flex-wrap: wrap;
   /* 比 --sp-1 再省 1px：运行态这排有 6 个控件，要放进最窄（302px）的卡片 */

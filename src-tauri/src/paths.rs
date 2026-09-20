@@ -17,6 +17,12 @@ pub const THEME_FILE: &str = "theme.json";
 pub const WORK_LOG_FILE: &str = "work-log.json";
 /// AI 热点缓存（见 shared/ai-news.ts）。与工作日志同一待遇：只在本机、不进同步仓库
 pub const AI_NEWS_FILE: &str = "ai-news.json";
+/// 密码保险库（见 shared/vault.ts）。**文件本身只有密文**：明文从不落盘，
+/// 本机这把密钥在 Windows 凭据管理器里（见 vault.rs），仓库里那份在 `vault/vault.json`
+pub const VAULT_FILE: &str = "vault.json";
+/// 克隆里放**保险库**的子目录名。与用量 / 配置那两个目录最大的不同：那份文件是所有机器**共写**的
+/// （用户的要求：所有设备公用一个文件），所以合并规则必须自己定死，见 shared/vault.ts
+pub(crate) const VAULT_DIR: &str = "vault";
 /// 数据目录名：数据文件都收在它下面（见文件头的约定）
 const DATA_SUBDIR: &str = "data";
 /// 改名前的用量快照文件名，只在一次性搬家时用得上
@@ -79,6 +85,12 @@ pub fn work_log_file() -> PathBuf {
 
 pub fn ai_news_file() -> PathBuf {
     data_dir().join(AI_NEWS_FILE)
+}
+
+/// 本机那份保险库（密文）。仓库里那份由同步流程读写（见 vault.rs），
+/// 这一份是离线的落点：没登录、没填仓库地址时照样能建库、能读写条目。
+pub fn vault_file() -> PathBuf {
+    data_dir().join(VAULT_FILE)
 }
 
 /// 一次性的本地搬家，启动时跑一次（commands.rs 的 `load_all`，必须早于任何 store 载入）：

@@ -378,7 +378,7 @@ describe('sanitizeTheme', () => {
     expect(cardIdsInRow(DEFAULT_THEME.cards, 'row-7')).toEqual(['recent'])
     expect(cardIdsInRow(DEFAULT_THEME.cards, 'row-8')).toEqual(['token'])
     expect(cardIdsInRow(DEFAULT_THEME.cards, 'row-9')).toEqual(['news'])
-    // 左栏的今日完成、中栏的最近使用、右栏的 Token 用量各占一行 flex，吃掉所在栏剩余高度
+    // 左栏的今日完成、中栏的我的项目、右栏的 Token 用量各占一行 flex，吃掉所在栏剩余高度
     expect(rowOf(DEFAULT_THEME.columns, 'row-1')?.mode).toBe('fixed')
     expect(rowOf(DEFAULT_THEME.columns, 'row-6')?.mode).toBe('flex')
     expect(rowOf(DEFAULT_THEME.columns, 'row-7')?.mode).toBe('flex')

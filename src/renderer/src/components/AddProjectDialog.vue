@@ -17,7 +17,9 @@ const form = reactive({
   serve: undefined as string | undefined,
   build: [] as string[],
   /** 监听端口先按字符串收，提交时再校验；空串表示不检测 */
-  port: ''
+  port: '',
+  /** 是否放到首页展示（见 Project.home）；默认不勾 —— 首页是挑出来的一份名单 */
+  home: false
 })
 
 const scan = ref<ScanResult | null>(null)
@@ -175,6 +177,7 @@ function reset(): void {
   form.serve = undefined
   form.build = []
   form.port = ''
+  form.home = false
   scan.value = null
   scanError.value = ''
   scanning.value = false
@@ -199,7 +202,8 @@ async function submit(): Promise<void> {
     build: form.build,
     defaultBuild: form.build[0],
     port: rawPort ? parsePort(rawPort) : null,
-    allowInvalid: allowInvalid.value
+    allowInvalid: allowInvalid.value,
+    home: form.home
   })
 
   if (added) visible.value = false
@@ -269,7 +273,10 @@ async function submit(): Promise<void> {
           </div>
         </el-form-item>
 
-        <el-checkbox v-if="parseFailed" v-model="allowInvalid" class="allow">
+        <!-- 首页那张项目卡只画勾了这一项的项目，所以这里默认不勾（见 Project.home） -->
+        <el-checkbox v-model="form.home" class="option">在首页展示</el-checkbox>
+
+        <el-checkbox v-if="parseFailed" v-model="allowInvalid" class="option">
           以「仅管理目录」方式加入（不执行命令）
         </el-checkbox>
 
@@ -374,11 +381,12 @@ async function submit(): Promise<void> {
   margin-bottom: var(--sp-1);
 }
 
-.allow {
+/** 两个勾选项（在首页展示 / 仅管理目录）：只占自己那点宽度，别被 .form 拉成整行 */
+.option {
   align-self: flex-start;
 }
 
-.allow :deep(.el-checkbox__label) {
+.option :deep(.el-checkbox__label) {
   font-size: var(--fs-body);
 }
 

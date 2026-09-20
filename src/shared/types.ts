@@ -16,6 +16,7 @@ import type { ProjectColor } from './project-color'
 import { PROJECT_SORT_DEFAULT, type ProjectSort } from './project-sort'
 import type { ThemeConfig } from './theme'
 import type { TokenUsageResult } from './token-usage'
+import type { VaultEntry, VaultRecord } from './vault'
 import type { ViewId } from './views'
 import type { NoteChange, NoteCreateInput, NoteNode, NoteSyncInput, NoteSyncSummary } from './note'
 import { SKILL_SYNC_DIR_DEFAULT } from './skills'
@@ -184,6 +185,14 @@ export interface Project {
    */
   nodeVersion?: string
   groupId?: string
+  /**
+   * 在首页展示：首页那张项目卡（我的项目）**只画勾了这一项的项目**。
+   *
+   * 缺省与老数据（没有这个字段）都是「不展示」—— 首页是挑出来的一份，
+   * 不是全量列表照搬（全量在项目页）。开关有三处：添加项目时勾、项目卡「⋯」菜单、
+   * 详情抽屉「基本信息」。
+   */
+  home?: boolean
   order: number
   createdAt: number
   lastUsedAt?: number
@@ -463,6 +472,59 @@ export type StoredSettings = Omit<AppSettings, AppearanceSettingKey>
 export type AuthProvider = 'github' | 'gitee'
 
 /**
+ * 保险库密钥的状态。
+ *
+ * **这里没有密钥本身**：`fingerprint` 是公钥的摘要（`A1B2-C3D4-E5F6` 那种），
+ * 用来核对两台机器拿的是不是同一把；对不上时界面会说「该重新导出一次密钥」。
+ * 私钥只在本机内存与 Windows 凭据管理器之间走（那一条 `vault_key_write` 通道），
+ * 除此之外任何地方都拿不到它。
+ */
+export interface VaultKeyState {
+  /** 这台机器上有没有一把密钥（凭据管理器里那条记录在不在） */
+  exists: boolean
+  /** 密钥这会儿在不在内存里。锁上之后要重新解锁才看得到条目 */
+  unlocked: boolean
+  /** 公钥指纹；没解锁时是空串（它得先有公钥才算得出来） */
+  fingerprint: string
+}
+
+/**
+ * 推给仓库的结果。
+ *
+ * `pushed: false` **不是失败**：那是「远端在这一轮里被另一台机器推过」，
+ * 携带回来的 `remote` 是要重新合进去的那一份，适配层会自动重走一遍。
+ */
+export interface VaultPushOutcome {
+  pushed: boolean
+  /** 远端现在的那份（没推成时交回来，推成了就是刚写上去那份） */
+  remote: unknown
+  /** 没推成时 git 的那句话，只用于排查 */
+  reason?: string
+}
+
+/** 解开本机那份的结果：条目 + 两类读不出来的条数 */
+export interface VaultLoaded {
+  records: VaultRecord[]
+  /** 本机解不开的条数（仓库里那份是用别的密钥加的密时，这里会等于它的条数） */
+  unreadable: number
+  /** 文件里认不出来被丢掉的条数 */
+  dropped: number
+  /** 最近一次改动时刻（毫秒） */
+  updatedAt: number
+}
+
+/** 一轮同步之后的结果：解开的内容 + 这次同步的实情 */
+export interface VaultSyncOutcome extends VaultLoaded {
+  /** 合并时远端那份里有几条 */
+  remoteItems: number
+  /** 走了几遍才落定（远端一直被改时大于 1） */
+  rounds: number
+  /** 仓库里那份与本机这把密钥对不上 —— 界面必须如实说一句，否则「同步成功却没多出东西」说不通 */
+  keyMismatch: boolean
+}
+
+
+/**
  * 登录后的账号资料。
  *
  * **这里没有 token，也永远不会有**：token 只在 Rust 侧流转，落在 Windows 凭据管理器里
@@ -665,6 +727,8 @@ export interface AddProjectInput {
   port?: number | null
   /** package.json 解析失败时，是否以「仅管理目录」的方式加入 */
   allowInvalid?: boolean
+  /** 加入后是否放到首页展示（见 Project.home）；缺省不展示 */
+  home?: boolean
 }
 
 /** 可编辑的项目配置项 */
@@ -680,6 +744,8 @@ export interface ProjectPatch {
   groupId?: string
   /** 标识色（见 Project.color） */
   color?: ProjectColor
+  /** 是否在首页展示（见 Project.home） */
+  home?: boolean
 }
 
 /**
@@ -1119,6 +1185,50 @@ export interface WorkbenchApi {
   listSkillFiles: (root: string, dir: string, id: string) => Promise<Result<SkillFileInfo[]>>
   /** 读技能里的一个文件（任意文本文件；二进制读不出文本时如实失败） */
   readSkillFile: (root: string, dir: string, id: string, rel: string) => Promise<Result<string>>
+  // ---------- 密码保险库（见 shared/vault.ts） ----------
+  /**
+   * 密钥状态：这台机器上有没有一把密钥、这会儿解没解锁、公钥指纹是多少。
+   *
+   * **不返回密钥本身**。保险库的私钥存在 Windows 凭据管理器里（Rust 的 `vault.rs`），
+   * 加解密在渲染层做（WebView2 自带 WebCrypto，而 Rust 侧引任何一套密码学库都会新增成片的
+   * 编译单元，见 AGENTS.md 第 1 节），所以它是全项目唯一一处机密过 IPC 的地方。
+   */
+  vaultKeyState: () => Promise<Result<VaultKeyState>>
+  /** 现生成一把密钥并落进凭据管理器；已有密钥时 `replace` 为假则不动它（换密钥等于把现有条目全作废） */
+  vaultCreateKey: (replace: boolean) => Promise<Result<VaultKeyState>>
+  /** 把密钥取进内存。密钥就存在本机，所以这里没有口令校验这一层 —— 能打开程序就说明过了 Windows 登录 */
+  vaultUnlock: () => Promise<Result<VaultKeyState>>
+  /** 把内存里那把丢掉（不动凭据管理器） */
+  vaultLock: () => Promise<Result<VaultKeyState>>
+  /**
+   * 把本机密钥导出成一个文件：自己弹「另存为」，再写进去。
+   * 返回 false 表示用户在对话框里取消了 —— 那不是失败，界面不该报错。
+   */
+  vaultExportKey: () => Promise<Result<boolean>>
+  /**
+   * 从一个导出的密钥文件导入：自己弹文件选择框，读回来存进凭据管理器。
+   * 返回 false 表示用户取消了。
+   */
+  vaultImportKeyFile: () => Promise<Result<boolean>>
+  /** 忘掉本机密钥。**不动仓库里那份数据**，所以界面上必须先确认一次 */
+  vaultForgetKey: () => Promise<Result<VaultKeyState>>
+  /** 解开本机那份里的全部条目（解密在渲染层，明文只在内存里） */
+  vaultLoad: () => Promise<Result<VaultLoaded>>
+  /** 新增 / 改动一条：**只重封这一条**，其余密文原样留着 */
+  vaultSaveEntry: (id: string, entry: VaultEntry) => Promise<Result<VaultRecord>>
+  /** 删一条：留下一个墓碑，让别的机器别把它复活 */
+  vaultRemoveEntry: (id: string) => Promise<Result<null>>
+  /**
+   * 同步一轮：拉回远端 → 与本机那份合并 → 落盘 → 推上去。
+   *
+   * 远端那份是所有机器**共写**的一份文件（用户的要求），所以合并规则必须自己定死
+   * （见 shared/vault.ts 的 mergeVaultItems）—— 同一个文件的两种改法**不交给 git**，
+   * 否则只会留下一堆冲突标记。远端在同步途中被别的机器改过时，这一轮会自动重走。
+   * 与其余几条同步一样，没登录就没有同步（仓库地址由适配层按登录状态给）。
+   */
+  vaultSync: () => Promise<Result<VaultSyncOutcome>>
+  /** 仓库里那份与本机这把密钥对不对得上：`none` / `match` / `mismatch` */
+  vaultRemoteKeyStatus: () => Promise<Result<'none' | 'match' | 'mismatch'>>
   /** 启动一条命令；进程由 Workbench 接管，日志进底部终端 */
   startCommand: (id: string) => Promise<Result<null>>
   /** 停止一条命令；已在应用外跑着的那种只能按端口结束，由渲染层先确认 */

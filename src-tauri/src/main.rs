@@ -20,6 +20,7 @@ mod store;
 mod sync;
 mod system;
 mod token;
+mod vault;
 
 use serde_json::{json, Value};
 use std::sync::mpsc::{channel, Sender};
@@ -404,6 +405,15 @@ fn main() {
             commands::fs_stat_mtime,
             commands::fs_list_dir,
             commands::list_wallpapers,
+            vault::vault_load,
+            vault::vault_save,
+            vault::vault_key_read,
+            vault::vault_key_write,
+            vault::vault_key_clear,
+            vault::vault_key_export,
+            vault::vault_key_import,
+            vault::vault_pull,
+            vault::vault_push,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
@@ -432,17 +442,16 @@ fn main() {
         })
         .build(tauri::generate_context!())
         .expect("Workbench 初始化失败")
-        .run(|app, event| match event {
+        .run(|_app, event| match event {
             // 退出前同步落盘，防止防抖窗口内的改动丢失
             tauri::RunEvent::ExitRequested { .. } => {
                 commands::flush_all();
             }
-            // 再把本次会话起的进程按树收掉，避免 dev server 残留占着端口
-            // （待补：Electron 版在还有项目在跑时会先弹窗问「结束全部 / 直接退出 / 取消」，
-            //   现在是无条件结束，等于只保留了其中一种选择）
-            tauri::RunEvent::Exit => {
-                session::stop_all(app);
-            }
+            // 这里**不收进程**：收不收是托盘退出确认里那个选择的事，而选择在 request_quit 里
+            // 就已经执行完了 —— 「结束全部进程并退出」当场按进程树收完才退，「直接退出」把进程
+            // 留在后台，交给下次启动的残留清理。从前这里无条件调 stop_all，而 RunEvent::Exit
+            // 是所有退出路径的必经之处（`AppHandle::exit` 就会走到），挡在这儿等于把选择抹平：
+            // 选「直接退出」的也一样被收掉。
             _ => {}
         });
 }

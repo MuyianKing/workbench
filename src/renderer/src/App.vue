@@ -12,6 +12,7 @@ import ProjectsView from '@/components/ProjectsView.vue'
 import WorkView from '@/components/WorkView.vue'
 import NotesView from '@/components/NotesView.vue'
 import SkillsView from '@/components/SkillsView.vue'
+import VaultView from '@/components/VaultView.vue'
 import TerminalPanel from '@/components/TerminalPanel.vue'
 import ProjectDrawer from '@/components/ProjectDrawer.vue'
 import AddProjectDialog from '@/components/AddProjectDialog.vue'
@@ -35,7 +36,8 @@ const VIEWS: Record<ViewId, Component> = {
   projects: ProjectsView,
   work: WorkView,
   notes: NotesView,
-  skills: SkillsView
+  skills: SkillsView,
+  vault: VaultView
 }
 
 const currentView = computed(() => VIEWS[store.activeView])

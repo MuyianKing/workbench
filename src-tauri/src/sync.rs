@@ -32,7 +32,7 @@ use crate::proc;
 
 /// 单次 git 操作的超时。push / pull 要走网络，给足时间；到点还没回就当失败 ——
 /// 界面上「同步失败 + 原因」比一直转圈有用得多。
-const GIT_TIMEOUT: Duration = Duration::from_secs(60);
+pub(crate) const GIT_TIMEOUT: Duration = Duration::from_secs(60);
 /// 首次克隆可能要拉完整的仓库历史，宽一些
 const CLONE_TIMEOUT: Duration = Duration::from_secs(120);
 
@@ -71,7 +71,7 @@ thread_local! {
 
 /// 设定本次同步用的凭据：过期的先续期，续不上的那一支不会被注入（见 `oauth::git_credentials`）。
 /// 空表表示照旧走系统 git 凭据。
-fn set_git_auth() {
+pub(crate) fn set_git_auth() {
     let (envs, hint) = oauth::git_credentials();
     GIT_AUTH.with(|slot| *slot.borrow_mut() = envs);
     GIT_AUTH_HINT.with(|slot| *slot.borrow_mut() = hint);
@@ -795,7 +795,7 @@ pub fn head_of(root: &Path) -> String {
 }
 
 /// 文件夹里正处在一次 rebase 中途吗
-fn in_rebase(root: &Path) -> bool {
+pub(crate) fn in_rebase(root: &Path) -> bool {
     root.join(".git").join("rebase-merge").exists()
         || root.join(".git").join("rebase-apply").exists()
         || run_git_quiet(&["rev-parse", "--verify", "--quiet", "REBASE_HEAD"], root)
@@ -889,7 +889,7 @@ fn read_dir_json(dir: &Path) -> Result<Vec<Value>, String> {
 /// 克隆的工作区里带着**上一个仓库**的别人的分片文件，只换 origin 的话那些文件还在，
 /// 读分片时会把上一个仓库的数据当成最新合进来（数字看着正常，其实来自另一个仓库）；
 /// 而且两个仓库的历史通常无关，pull 也会直接失败。克隆目录只是缓存，删掉没有损失。
-fn ensure_clone(dir: &Path, repo: &str) -> Result<(PathBuf, String), String> {
+pub(crate) fn ensure_clone(dir: &Path, repo: &str) -> Result<(PathBuf, String), String> {
     if dir.join(".git").is_dir() && !clone_matches(dir, repo) {
         std::fs::remove_dir_all(dir).map_err(|err| format!("切换仓库时清理旧克隆失败: {err}"))?;
     }
@@ -1056,7 +1056,7 @@ pub fn run_git_quiet(args: &[&str], cwd: &Path) -> bool {
     matches!(run(args, Some(cwd), GIT_TIMEOUT), Ok(outcome) if outcome.ok())
 }
 
-fn run(args: &[&str], cwd: Option<&Path>, timeout: Duration) -> Result<proc::Outcome, String> {
+pub(crate) fn run(args: &[&str], cwd: Option<&Path>, timeout: Duration) -> Result<proc::Outcome, String> {
     // `-c` 是 git 的**全局**选项，必须排在子命令前面，所以在这里拼 ——
     // 让每个调用方自己带的话，早晚有一条命令忘掉
     let mut all: Vec<&str> = GIT_GLOBAL_ARGS.to_vec();

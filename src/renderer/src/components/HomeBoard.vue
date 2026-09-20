@@ -43,7 +43,7 @@ import BoardRow from '@/components/BoardRow.vue'
 import ActivityGraph from '@/components/ActivityGraph.vue'
 import TokenPanel from '@/components/TokenPanel.vue'
 import SystemPanel from '@/components/SystemPanel.vue'
-import RecentPanel from '@/components/RecentPanel.vue'
+import HomeProjectsPanel from '@/components/HomeProjectsPanel.vue'
 import ActionsPanel from '@/components/ActionsPanel.vue'
 import QuickLaunch from '@/components/QuickLaunch.vue'
 import CommandPanel from '@/components/CommandPanel.vue'
@@ -58,7 +58,7 @@ const CARDS: Record<HomeCardId, Component> = {
   activity: ActivityGraph,
   token: TokenPanel,
   system: SystemPanel,
-  recent: RecentPanel,
+  recent: HomeProjectsPanel,
   actions: ActionsPanel,
   quick: QuickLaunch,
   commands: CommandPanel,

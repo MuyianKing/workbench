@@ -305,6 +305,21 @@ export const useProjectsStore = defineStore('projects', () => {
     notifySuccess(groupId ? `已移入「${groupName(groupId)}」` : '已移出分组')
   }
 
+  /**
+   * 切换「在首页展示」（项目卡「⋯」菜单与详情抽屉共用）。
+   *
+   * 就地改后同样交给深度 watch 落盘；给一句提示是因为**在首页那张卡上关掉它，卡片会立刻消失**，
+   * 没有这句话就成了「点了它自己没了」。写成 false 也会被 editableOf 收成「字段不存在」。
+   */
+  function setHome(id: string, value: boolean): void {
+    const project = findProject(id)
+    if (!project) return
+    if ((project.home === true) === value) return
+
+    project.home = value
+    notifySuccess(value ? `「${project.name}」已放到首页` : `「${project.name}」已从首页移除`)
+  }
+
   async function addProject(input: AddProjectInput): Promise<boolean> {
     // IPC 走结构化克隆，reactive 代理无法被克隆，跨进程前先转成普通对象
     const payload: AddProjectInput = {
@@ -316,7 +331,9 @@ export const useProjectsStore = defineStore('projects', () => {
       defaultBuild: input.defaultBuild,
       port: input.port,
       // 「仅管理目录」的放行标志，漏掉它会让勾选项静默失效
-      allowInvalid: input.allowInvalid
+      allowInvalid: input.allowInvalid,
+      // 同上：漏掉它勾了「在首页展示」也会静默失效
+      home: input.home === true
     }
 
     const result = await window.workbench.addProject(payload)
@@ -442,7 +459,9 @@ export const useProjectsStore = defineStore('projects', () => {
       nodeVersion: project.nodeVersion ?? '',
       port: project.port ?? null,
       groupId: project.groupId,
-      color: project.color
+      color: project.color,
+      // 同上，落盘口径统一成「不展示 = 没有这个字段」，界面写成 false 也在这里收掉
+      home: project.home === true || undefined
     }
   }
 
@@ -764,6 +783,14 @@ export const useProjectsStore = defineStore('projects', () => {
   /** 顺序取快照，筛选仍然实时生效（运行状态、分组都是即时反映的） */
   const filteredProjects = computed(() => orderedProjects.value.filter(matchesFilter))
 
+  /**
+   * 首页「我的项目」那张卡排的项目：勾了「在首页展示」的那些。
+   *
+   * 顺序就是项目页的展示顺序（`orderedProjects`），不是最近使用时间 —— 这是一份**挑出来的**
+   * 名单，用户按什么顺序摆的项目页，首页就照着来；按时间排的话每启动一次卡片就会跳位置。
+   */
+  const homeProjects = computed(() => orderedProjects.value.filter((p) => p.home === true))
+
   const drawerProject = computed(() =>
     drawerProjectId.value ? findProject(drawerProjectId.value) ?? null : null
   )
@@ -781,6 +808,7 @@ export const useProjectsStore = defineStore('projects', () => {
     setGroupFilter,
     setSortBy,
     filteredProjects,
+    homeProjects,
     runningCount,
     drawerProjectId,
     drawerProject,
@@ -797,6 +825,7 @@ export const useProjectsStore = defineStore('projects', () => {
     addProject,
     removeProject,
     assignGroup,
+    setHome,
     reorderGroups,
     createGroup,
     renameGroup,

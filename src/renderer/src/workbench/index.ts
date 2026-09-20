@@ -42,6 +42,7 @@ import * as session from './session'
 import * as skill from './skill'
 import * as state from './state'
 import * as system from './system'
+import * as vault from './vault'
 import * as workLog from './work-log'
 import * as aiNews from './ai-news'
 import { getTokenUsage, getTokenUsageSnapshot, listSyncDevices, syncThemeConfig, syncTokenUsage } from './token'
@@ -78,6 +79,15 @@ async function openDialog(options: Record<string, unknown>): Promise<string | nu
   if (typeof selected === 'string') return selected
   if (Array.isArray(selected)) return selected[0] ?? null
   return null
+}
+
+/**
+ * 「另存为」对话框（保险库密钥导出用）。与 openDialog 同一个理由：直接调插件命令，
+ * 不引 @tauri-apps/plugin-dialog 包。用户在对话框里取消时返回 null。
+ */
+async function saveDialog(options: Record<string, unknown>): Promise<string | null> {
+  const selected = await invoke<string | null>('plugin:dialog|save', { options })
+  return typeof selected === 'string' && selected.trim() ? selected : null
 }
 
 const IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'webp', 'bmp', 'gif']
@@ -207,6 +217,8 @@ function createApi(): WorkbenchApi {
         port,
         autoOpenExplorer: true,
         manageOnly: manageOnly || undefined,
+        // 首页展示：只有界面明确勾了才写 true —— 缺省与老项目都是不展示（见 Project.home）
+        home: input.home === true || undefined,
         groupId: input.groupId,
         order: state.projects().length,
         createdAt: Date.now(),
@@ -323,6 +335,49 @@ function createApi(): WorkbenchApi {
     listSkillFiles: (root: string, dir: string, id: string) => skill.listSkillFiles(root, dir, id),
     readSkillFile: (root: string, dir: string, id: string, rel: string) =>
       skill.readSkillFile(root, dir, id, rel),
+
+    // ---------- 密码保险库 ----------
+    // 密钥与条目都在适配层那边（workbench/vault.ts）：Rust 只管落盘、凭据管理器与 git。
+    // 同步仓库地址与其余几条同步同一个入口 —— 没登录一律当没填（见 syncRepo 的说明）。
+    vaultKeyState: () => vault.keyState(),
+    vaultCreateKey: (replace: boolean) => vault.createKey(replace),
+    vaultUnlock: () => vault.unlock(),
+    vaultLock: () => Promise.resolve(vault.lock()),
+    // 导出 / 导入都自己弹对话框：密钥是一段三百来字符的 base64，让人手抄错一个字符的后果
+    // 是另一台机器上一条都解不开，所以只走文件这条路（取消返回 false，不是失败）
+    vaultExportKey: async (): Promise<Result<boolean>> => {
+      const path = await saveDialog({
+        title: '导出保险库密钥',
+        defaultPath: 'workbench-vault-key.txt',
+        filters: [{ name: '密钥文件', extensions: ['txt'] }]
+      })
+      if (!path) return ok(false)
+
+      const written = await vault.exportKey(path)
+      return written.ok ? ok(true) : fail(written.error ?? '导出密钥失败')
+    },
+    vaultImportKeyFile: async (): Promise<Result<boolean>> => {
+      const path = await openDialog({
+        directory: false,
+        multiple: false,
+        title: '选择密钥文件',
+        filters: [
+          { name: '密钥文件', extensions: ['txt'] },
+          { name: '全部文件', extensions: ['*'] }
+        ]
+      })
+      if (!path) return ok(false)
+
+      const imported = await vault.importKeyFile(path)
+      return imported.ok ? ok(true) : fail(imported.error ?? '导入密钥失败')
+    },
+    vaultForgetKey: () => vault.forgetKey(),
+    vaultLoad: () => vault.load(),
+    vaultSaveEntry: (id: string, entry: Parameters<WorkbenchApi['vaultSaveEntry']>[1]) =>
+      vault.save({ id, entry }),
+    vaultRemoveEntry: (id: string) => vault.remove(id),
+    vaultSync: () => vault.sync(syncRepo()),
+    vaultRemoteKeyStatus: () => vault.remoteKeyStatus(syncRepo()),
     removeSkill: (root: string, dir: string, id: string) => skill.removeSkill(root, dir, id),
     importSkill: (root: string, dir: string, source: string, id: string) =>
       skill.importSkill(root, dir, source, id),
