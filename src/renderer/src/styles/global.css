@@ -1016,6 +1016,16 @@ body.is-resizing-notes-tree * {
 }
 
 /**
+ * 样式详情弹窗（components/StyleDetailDialog.vue 上的 class）：
+ * 八段样张是竖向流水，要滚的就是正文本身（头部固定），所以这里只需要一个确定的高度 ——
+ * 正文的高度由「弹窗定高 − 头」算出来，只给 max-height 的话正文拿不到滚动所需的高度，
+ * 超出的部分会被整块裁掉、滚都滚不到。上界同样跟着窗口走。
+ */
+.el-dialog.style-dialog {
+  height: min(840px, calc(100vh - var(--h-titlebar) - 48px));
+}
+
+/**
  * 账号弹窗：内容短，而且**没有页脚**（关闭靠右上角的 ×）。
  *
  * EP 的默认正文内边距是按「下面还有一个按钮行」留的，照搬过来底部会空出一大块，

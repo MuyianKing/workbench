@@ -11,7 +11,7 @@
  */
 import { computed } from 'vue'
 import type { Component } from 'vue'
-import { Notebook, FolderOpened, Grid, Document, MagicStick, Key } from '@element-plus/icons-vue'
+import { Notebook, FolderOpened, Grid, Document, MagicStick, Key, Brush } from '@element-plus/icons-vue'
 import { VIEW_LABELS, visibleViews, type ViewId } from '@shared/views'
 import { useProjectsStore } from '@/stores/projects'
 import { useSettingsStore } from '@/stores/settings'
@@ -26,7 +26,8 @@ const ICONS: Record<ViewId, Component> = {
   work: Notebook,
   notes: Document,
   skills: MagicStick,
-  vault: Key
+  vault: Key,
+  styles: Brush
 }
 
 const active = computed(() => store.activeView)
@@ -88,7 +89,7 @@ function select(id: ViewId): void {
    */
   position: relative;
   z-index: 2147483647;
-  /* 上 / 左 / 下留白与卡片间距同源，右边靠内容列自己的内边距让开 */
+  /* 左 / 下留白与卡片间距同源（顶边那一份由 .shell 按顶部样式给，见 global.css），右边靠内容列自己的内边距让开 */
   margin: 0 0 var(--card-gap, 10px) var(--card-gap, 10px);
   padding: 8px;
   background: rgba(var(--bg-surface-rgb), var(--card-alpha, 1));

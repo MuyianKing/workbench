@@ -12,7 +12,7 @@
  * 这里只记**被关掉的那些**，新加一页时不必去改谁的数据文件，它就自然出现在导航栏上。
  */
 
-export const VIEW_IDS = ['home', 'projects', 'work', 'notes', 'skills', 'vault'] as const
+export const VIEW_IDS = ['home', 'projects', 'work', 'notes', 'skills', 'vault', 'styles'] as const
 
 export type ViewId = (typeof VIEW_IDS)[number]
 
@@ -23,7 +23,8 @@ export const VIEW_LABELS: Record<ViewId, string> = {
   work: '工作',
   notes: '笔记',
   skills: '技能',
-  vault: '密码'
+  vault: '密码',
+  styles: '样式'
 }
 
 export function isViewId(value: unknown): value is ViewId {
