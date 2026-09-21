@@ -495,3 +495,59 @@ export function noteDropAllowed(
   if (target.kind !== 'folder') return false
   return parentRel(drag.rel) !== normalizeRel(target.rel)
 }
+
+// ---------- 正文里的链接 ----------
+
+/** 带协议头的地址（`https:` / `mailto:` / `file:`…）：那些不是本笔记本里的路径 */
+const LINK_SCHEME = /^[A-Za-z][A-Za-z0-9+.-]*:/
+
+/** 百分号编码解回原文；解不开（半截编码、名字里真的带 `%`）时按原样用 */
+function decodeHref(path: string): string {
+  try {
+    return decodeURIComponent(path)
+  } catch {
+    return path
+  }
+}
+
+/**
+ * 正文里的一个链接指向本笔记本里的哪一篇笔记；不是笔记链接时返回空串。
+ *
+ * 认的是**相对这一篇所在文件夹**的写法：`[标题](./别的.md)`、`[标题](../别的.md)`、
+ * `[标题](归档/别的.md)`、`[标题](别的.md)` 都算，从笔记本根写起的 `/别的.md` 也算。
+ * `#小节` 与 `?x` 那两截先切掉，百分号编码按文件名解回来（从浏览器或别的编辑器里
+ * 抄来的链接多半是编码过的，`%E5%91%A8%E6%8A%A5.md` 就是 `周报.md`）。
+ *
+ * 三条边界：
+ *   - 带协议头的（`https:` / `mailto:`…）与 `#` 开头的锚点不算：前者交给系统浏览器，
+ *     后者指的是这一篇自己；
+ *   - `..` 可以往上走，但越过笔记本根就不是这个笔记本里的东西了，返回空串；
+ *   - 目标必须是 `.md` / `.markdown`（文件夹、图片、别的附件都跳不过去）。
+ *
+ * 只算路径，**不问那一篇在不在**：在不在得拿树去查，而树在调用方手上。
+ */
+export function resolveNoteLink(href: unknown, fromRel: string): string {
+  if (typeof href !== 'string') return ''
+
+  const raw = href.trim()
+  if (!raw || raw.startsWith('#') || LINK_SCHEME.test(raw)) return ''
+
+  const path = decodeHref(raw.split('#')[0].split('?')[0]).replace(/\\/g, '/')
+  // 从笔记本根写起的（`/别的.md`）：基准是笔记本本身，不是这一篇所在的文件夹 ——
+  // 按当前文件夹解析会在「两边都有同名的一篇」时悄悄跳到不对的那一篇上去
+  const base = path.startsWith('/') ? '' : parentRel(fromRel)
+  const parts = base ? base.split('/') : []
+
+  for (const part of normalizeRel(path).split('/')) {
+    if (!part) continue
+    if (part !== '..') {
+      parts.push(part)
+      continue
+    }
+    if (!parts.length) return ''
+    parts.pop()
+  }
+
+  const rel = parts.join('/')
+  return isNoteFile(rel) ? rel : ''
+}

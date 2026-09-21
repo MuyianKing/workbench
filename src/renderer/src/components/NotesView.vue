@@ -232,6 +232,26 @@ function onContentChange(payload: { rel: string; content: string }): void {
   void store.saveContent(payload.rel, payload.content)
 }
 
+/**
+ * 正文里点了一个指向别的笔记的链接：跳到那一篇。
+ *
+ * 路径已经在编辑器里解析好了（见 shared/note.ts 的 `resolveNoteLink`），这里只管打开：
+ * 树上没有就先**重扫一遍**再看 —— 目标可能是刚在应用外面写下的（别的编辑器、同步拉回来的），
+ * 而树只信磁盘。还没有就如实说找不到，**不把选中项切到一个不存在的路径上**：
+ * 那样右栏会显示成「『』是文件夹」这种看不出所以然的话。
+ *
+ * 跳过去之后的展开与高亮交给 store 的 select（与在左栏点一下是同一条路）。
+ */
+async function openNoteLink(rel: string): Promise<void> {
+  if (!findNoteNode(store.nodes, rel)) await store.reload()
+  if (!findNoteNode(store.nodes, rel)) {
+    ElMessage.warning(`找不到这篇笔记：${rel}`)
+    return
+  }
+
+  store.select(rel)
+}
+
 /** 编辑器实例：同步前后要借它一双手（先把攒着的那一份交出去 / 换掉远端改过的那一篇） */
 const editorRef = ref<InstanceType<typeof NoteEditor> | null>(null)
 
@@ -470,6 +490,7 @@ function onResizeDown(event: PointerEvent): void {
           :root="store.root"
           :theme="settings.effectiveTheme"
           @change="onContentChange"
+          @open="openNoteLink"
         />
 
         <div v-else class="empty notes__hint">
