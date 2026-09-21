@@ -42,8 +42,8 @@
   `work-log.json` 与 `ai-news.json`（都只在本机）、`vault.json`（密码保险库，**里面只有密文**，
   密钥在 Windows 凭据管理器里，见 [vault.md](vault.md)），加上设备标识 `device.json` —— 全都在 `%APPDATA%/Workbench/data/` 下
   （根目录 `%APPDATA%/Workbench` 是 Electron 版留下的 Chromium 配置目录；老版本也把数据文件写在那儿，启动时由 `migrate_legacy_files` 搬进 `data/`）。
-  **技能没有数据文件**：技能库就是笔记文件夹下的一个子目录（设置里的 `skillSyncDir`，默认 `skills`），
-  磁盘上的文件就是数据本身（见 [skills.ts](../../src/shared/skills.ts) 的文件头）。
+  **技能没有数据文件**：技能库是用户挑的一个目录（设置里的 `skillDir`，与笔记文件夹互不相干），
+  磁盘上的文件就是数据本身；它在哪个仓库里由 `skills.rs` 的 `state` 从那个目录往上找。
 - **数据目录固定 `%APPDATA%\Workbench\data`**（根目录 `%APPDATA%\Workbench` 是 Electron 版留下的 Chromium 配置目录，
   数据文件收进 `data` 子目录，两边不混），**没有「换目录」这回事**：不要图省事改用 Tauri 的
   `app_config_dir()`（它按 identifier 生成 `%APPDATA%\com.muyian.workbench`，换了位置用户就等于丢了项目列表）；
@@ -51,13 +51,15 @@
 - 数据结构变更要同步落盘的 sanitize（[persisted-data.ts](../../src/shared/persisted-data.ts) 的 `sanitizeSettings` / `parseData`），
   老数据文件缺字段须有默认值，不留未收敛的 `undefined`。
 - **设置项先分清是「外观」还是「行为习惯」，落点完全不同**：
-  - **外观**（明暗、主题色、顶部样式、卡片不透明度、终端高度、程序名、背景、导航菜单、首页布局、笔记树宽度、技能目录）住
+  - **外观**（明暗、主题色、顶部样式、卡片不透明度、终端高度、程序名、背景、导航菜单、首页布局、笔记树宽度）住
     `theme.json`，判据是它在 [appearance.ts](../../src/shared/appearance.ts) 的 `APPEARANCE_SETTING_KEYS` 里
     —— **进这张白名单就等于「会被整份同步到另一台机器」**，所以只放「这台机器该长成什么样」的项；
-    技能目录（`skillSyncDir`）是唯一的例外口径：它不是界面长相，而是**仓库结构约定**
-    （两台机器的技能要落在笔记仓库的同一层，见 shared/skills.ts），跟着配置同步正好保证一致；
+    **没有例外**：技能库在哪儿不是「界面长什么样」，它是**本机的一个目录**
+    （设置里的 `skillDir`，住 `workbench-data.json`，与 `noteDir` 同一类），
+    也不再有「技能放在仓库哪一层」这种配置；
   - **行为习惯**（`activeView`、`projectSort`、`workRange` / `workSort`、`noteTreeExpanded`）与
-    本机路径 / 凭据（快捷键、开机自启、三个同步仓库地址、`noteDir`）住 `workbench-data.json`。
+    本机路径 / 凭据（快捷键、开机自启、两个同步仓库地址 —— 用量与图片；**笔记与技能那两个仓库的地址
+    都不在设置里**：它们跟着各自那个文件夹的 `origin` 走、`noteDir`、`skillDir`）住 `workbench-data.json`。
     判据是「换台机器还成不成立」：「我上一眼在看什么」「我的笔记在哪个盘」换台机器就没了，
     同步过去只会把那边正看的东西顶掉。
   不确定时的口径：**它是「界面长什么样」还是「我上次用到哪儿」** —— 后者一律留数据文件。

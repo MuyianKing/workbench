@@ -19,7 +19,6 @@ import {
   pushNoteHistory,
   removeFromNoteHistory,
   resolveNoteLink,
-  sanitizeNoteRepo,
   sanitizeNoteHistory,
   sanitizeNoteName,
   sanitizeNoteRoot,
@@ -304,20 +303,6 @@ describe('打开过的笔记本', () => {
   it('删一条只删这一条', () => {
     expect(removeFromNoteHistory(['D:\\甲', 'D:\\乙'], 'D:\\甲')).toEqual(['D:\\乙'])
     expect(removeFromNoteHistory(['D:\\甲'], 'D:\\没有它')).toEqual(['D:\\甲'])
-  })
-})
-
-describe('笔记仓库地址', () => {
-  it('去掉首尾空白，认不出的当没填（等于关掉同步）', () => {
-    expect(sanitizeNoteRepo('  git@github.com:me/notes.git ')).toBe('git@github.com:me/notes.git')
-    expect(sanitizeNoteRepo('https://gitee.com/me/notes')).toBe('https://gitee.com/me/notes')
-    expect(sanitizeNoteRepo('')).toBe('')
-    expect(sanitizeNoteRepo('   ')).toBe('')
-    expect(sanitizeNoteRepo(undefined)).toBe('')
-    // 这个值最终是一条 git 命令行参数：含空白会被拆成两个参数，以 `-` 开头会被当成选项
-    expect(sanitizeNoteRepo('https://github.com/me/my notes')).toBe('')
-    expect(sanitizeNoteRepo('--upload-pack=evil')).toBe('')
-    expect(sanitizeNoteRepo('x'.repeat(400))).toBe('')
   })
 })
 

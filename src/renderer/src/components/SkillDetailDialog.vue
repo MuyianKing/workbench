@@ -111,7 +111,7 @@ async function checkUpdates(): Promise<void> {
   try {
     const result: { ok: boolean; data?: SkillInstalledScan; error?: string } =
       await window.workbench.scanSkillCopies(
-        store.root,
+        store.gitRoot,
         store.dir,
         id,
         projects.projects.map((project) => project.path)
@@ -212,6 +212,18 @@ async function save(): Promise<void> {
 
 /** 当前编辑的是不是清单文件（version 门槛只对它） */
 const isMainFile = computed(() => store.activeFile === SKILL_FILE)
+
+/**
+ * 版本那一句的补充：**「有没有仓库」与「有没有远端」是两件事**，别混成一句。
+ *
+ * 记不记版本看的是**技能库所在的仓库**（从技能库目录往上找到的那个）；
+ * 没有仓库时提交根本没发生（`skills.rs` 的 commit 直接返回 `changed: false`）——
+ * 那不是「版本只留本机」，是**没有版本**。
+ */
+const versionHint = computed(() => {
+  if (!store.hasVersions) return '；技能库还不在 git 仓库里：改完没有版本'
+  return store.remoteUrl ? '' : '；版本只留本机（它所在的仓库还没连远端）'
+})
 
 /** 切换文件后把编辑区滚回顶部：上一个文件看到一半的位置对下一个文件没有意义 */
 const editorRef = ref<HTMLTextAreaElement | null>(null)
@@ -338,9 +350,7 @@ async function removeActive(): Promise<void> {
         <span class="detail__hint">
           {{ isMainFile
             ? '保存 = 记一个版本（frontmatter 需带语义化 version，如 1.0.0）'
-            : '保存附属文件 = 记一个版本' }}{{
-            store.repoConfigured ? '' : '；还没配笔记仓库：版本只留本机，也不会同步'
-          }}
+            : '保存附属文件 = 记一个版本' }}{{ versionHint }}
         </span>
         <span v-if="store.saveError" class="detail__error">{{ store.saveError }}</span>
         <span v-else class="detail__saved">{{ savedText }}</span>

@@ -20,11 +20,11 @@ import {
   noteFileName,
   noteNameProblem,
   sanitizeNoteName,
-  sanitizeNoteRepo,
   type NoteChange,
   type NoteCreateInput,
   type NoteEntry,
   type NoteNode,
+  type NoteRepoState,
   type NoteSyncInput,
   type NoteSyncSummary
 } from '@shared/note'
@@ -352,24 +352,22 @@ export async function scanNoteTexts(root: string): Promise<Result<NoteTextScan>>
 // ---------- 与远端同步 ----------
 
 /**
- * 把当前笔记本与远端对齐一次（提交 → 拉 → 推）。
+ * 把当前笔记本与**它自己连着的那个仓库**对齐一次（提交 → 拉 → 推）。
  *
- * 与粘贴上传那条一样带着仓库地址，但**没有克隆目录**：跑 git 的地方就是 `dir` 这个文件夹本身
- * ——还不是仓库时就地在它里面 `git init` 并接上 `repo`（见 Rust 侧 `sync::sync_notes`）。
- * 所以这里只收敛参数与结果形状：谁先改的、撞上哪几篇，都是 git 说了算。
+ * 地址不从这里下去：同步到哪儿就是 `dir` 自己 `remote origin` 指着的那个地方，
+ * 是 git 说了算的（见 shared/note.ts 的 NoteRepoState）。所以这里只带目录，
+ * 收敛参数与结果形状：谁先改的、撞上哪几篇，都是 git 说了算。
  *
  * 冲突**不算失败得莫名其妙**：Rust 那边会中止这次 rebase（本地那笔提交留着）并把冲突的文件名
- * 写进错误里，界面照原样显示给用户即可（见 NotesView 的同步按钮）。
+ * 写进错误里，界面照原样显示给用户即可（见 NotesView 的同步按钮）。不是仓库、没有远端
+ * 同样是一句说清楚的话，不是异常。
  */
 export async function syncNotes(input: NoteSyncInput): Promise<Result<NoteSyncSummary>> {
-  const repo = sanitizeNoteRepo(input.repo)
-  if (!repo) return fail('还没有配置笔记仓库（设置 → 笔记）')
-
   const dir = rootArg(input.dir)
   if (!dir) return fail('还没有选择笔记文件夹')
 
   const result = await guard(
-    invoke<Partial<NoteSyncSummary>>('note_sync', { repo, dir }),
+    invoke<Partial<NoteSyncSummary>>('note_sync', { dir }),
     '同步笔记失败'
   )
   if (!result.ok || !result.data) return fail(result.error ?? '同步笔记失败')
@@ -382,5 +380,28 @@ export async function syncNotes(input: NoteSyncInput): Promise<Result<NoteSyncSu
         : 0,
     received: result.data.received === true,
     log: typeof result.data.log === 'string' ? result.data.log : ''
+  })
+}
+
+/**
+ * 探一个文件夹的 git 状态：有没有仓库、origin 是什么。
+ *
+ * 只影响界面（给不给同步入口、同步到哪儿），所以**探不到就算探不到**：
+ * 目录不存在之类的情形回一个「什么都没有」的默认值，让上层照「本机笔记」处理，
+ * 而不是把整页打成错误态 —— 一个还没选过的目录不该让笔记页报错。
+ */
+export async function noteRepoState(dir: string): Promise<Result<NoteRepoState>> {
+  const target = rootArg(dir)
+  if (!target) return ok({ isRepo: false, origin: '' })
+
+  const result = await guard(
+    invoke<Partial<NoteRepoState>>('note_repo_state', { dir: target }),
+    '探测笔记仓库失败'
+  )
+  if (!result.ok || !result.data) return fail(result.error ?? '探测笔记仓库失败')
+
+  return ok({
+    isRepo: result.data.isRepo === true,
+    origin: typeof result.data.origin === 'string' ? result.data.origin : ''
   })
 }

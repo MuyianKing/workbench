@@ -318,6 +318,7 @@ function createApi(): WorkbenchApi {
     moveNote: (root: string, rel: string, targetDir: string) =>
       note.moveNote(root, rel, targetDir),
     syncNotes: (input: Parameters<WorkbenchApi['syncNotes']>[0]) => note.syncNotes(input),
+    noteRepoState: (dir: string) => note.noteRepoState(dir),
     uploadNoteImage: (input: Parameters<WorkbenchApi['uploadNoteImage']>[0]) =>
       note.uploadNoteImage(input),
     listNoteImages: (input: Parameters<WorkbenchApi['listNoteImages']>[0]) =>
@@ -328,6 +329,8 @@ function createApi(): WorkbenchApi {
 
     // ---------- 技能（住在笔记仓库的一个子目录里，见 shared/skills.ts） ----------
     listSkills: (root: string, dir: string) => skill.listSkills(root, dir),
+    skillState: (dir: string) => skill.skillState(dir),
+    skillSync: (root: string, dir: string) => skill.skillSync(root, dir),
     createSkill: (root: string, dir: string, input: Parameters<WorkbenchApi['createSkill']>[2]) =>
       skill.createSkill(root, dir, input),
     saveSkillFile: (root: string, dir: string, id: string, rel: string, content: string) =>

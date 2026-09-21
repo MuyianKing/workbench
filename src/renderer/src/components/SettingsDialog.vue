@@ -231,48 +231,6 @@ function save(patch: Partial<AppSettings>): void {
   void settings.updateSettings(patch)
 }
 
-// ---------- 笔记仓库 ----------
-
-/*
- * 与下面那三个图片输入框同一条做法：先落草稿、失焦或回车时才提交（地址是逐字符敲进去的），
- * 提交后由 store 收敛（去空白、认不出的当没填），回推的值会盖掉草稿。
- */
-const noteRepoDraft = ref('')
-
-watch(
-  () => settings.settings.noteSyncRepo,
-  (value) => {
-    noteRepoDraft.value = value
-  },
-  { immediate: true }
-)
-
-function commitNoteRepo(): void {
-  if (noteRepoDraft.value === settings.settings.noteSyncRepo) return
-  save({ noteSyncRepo: noteRepoDraft.value })
-}
-
-// ---------- 技能目录 ----------
-
-/*
- * 技能（skill）在笔记仓库里的子目录：与仓库地址一样先落草稿、失焦或回车时才提交。
- * 它在外观白名单里（theme.json），会跟着配置同步到另一台机器 —— 仓库结构约定要两边一致。
- */
-const skillDirDraft = ref('')
-
-watch(
-  () => settings.settings.skillSyncDir,
-  (value) => {
-    skillDirDraft.value = value
-  },
-  { immediate: true }
-)
-
-function commitSkillDir(): void {
-  if (skillDirDraft.value === settings.settings.skillSyncDir) return
-  save({ skillSyncDir: skillDirDraft.value })
-}
-
 // ---------- 笔记图片 ----------
 
 const imageRepoDraft = ref('')
@@ -898,30 +856,13 @@ const networkBounds: Array<{ title: string; detail: string }> = [
           </div>
 
           <!--
-            笔记这一块管三件事：笔记本身的同步、图片往哪儿推、技能库在仓库里的哪一层。
-            前两项都是「填了地址才成立」的 git 仓库（留空 = 关掉那个功能，笔记页那颗按钮点了只会得到一句提示），
-            笔记文件夹本身在笔记页左栏底部挑，这里不重复显示。
+            笔记这一块管两件事：图片往哪儿推、技能库在仓库里的哪一层。
+            笔记**本身**那个 git 仓库不在这里，也没有这个地方：同步到哪儿由那个文件夹自己连着的
+            远端决定（见 shared/note.ts 的 NoteRepoState），没仓库的文件夹就是本机的笔记 ——
+            应用既不替用户 init、也不替他接远端。笔记文件夹本身在笔记页左栏底部挑，这里不重复显示。
           -->
           <div class="block">
             <h3 class="block__title">笔记</h3>
-
-            <div class="row row--stack">
-              <div class="row__text">
-                <span class="row__label">笔记仓库</span>
-                <span class="row__hint">
-                  笔记页左栏底部那颗同步按钮会把当前笔记本当成一个 git 工作区：提交本机改动、
-                  拉回别处的改动（第一次同步会在那个文件夹里 git init 并接上这个地址）。
-                  留空就是不同步。凭据跟着账号走：登录过就用账号的 token，没登录就用系统里 git 配好的。
-                </span>
-              </div>
-              <el-input
-                v-model="noteRepoDraft"
-                size="small"
-                spellcheck="false"
-                placeholder="git@github.com:you/notes.git"
-                @change="commitNoteRepo"
-              />
-            </div>
 
             <!--
               笔记里的图片：粘贴的图片推到用户自己的一个 git 仓库里，正文里只留一个外链。
@@ -948,26 +889,11 @@ const networkBounds: Array<{ title: string; detail: string }> = [
             </div>
 
             <!--
-              技能（skill）的库位置：它就住在上面那个笔记仓库的这一层子目录里，
-              每次增删改自动提交一版（版本历史就是 git 历史），同步跟着笔记一起走。
-              路径跟着配置同步 —— 两台机器要落在同一层才互相看得见对方的技能。
+              技能（skill）没有设置项：技能库是**它自己的一个目录**（技能页那颗「选择技能文件夹」挑的），
+              与上面那个笔记文件夹互不相干 —— 可以正好是同一处，也可以各有各的仓库。
+              所以这里既没有「技能目录」也没有「它在仓库哪一层」：那一层由磁盘决定
+              （从技能库目录往上找最近的 `.git`，见 shared/skills.ts 的 SkillLibraryState）。
             -->
-            <div class="row row--stack">
-              <div class="row__text">
-                <span class="row__label">技能目录</span>
-                <span class="row__hint">
-                  技能页的技能放在笔记仓库的这个子目录里（默认 skills）。改个名字不会搬动已有的技能，
-                  下一台机器会跟着配置用同一路径。清空或填了不合法的名字会回到默认值。
-                </span>
-              </div>
-              <el-input
-                v-model="skillDirDraft"
-                size="small"
-                spellcheck="false"
-                placeholder="skills"
-                @change="commitSkillDir"
-              />
-            </div>
           </div>
 
           <!--

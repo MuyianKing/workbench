@@ -18,7 +18,6 @@ import { DEFAULT_SETTINGS, type PersistedData, type StoredSettings } from './typ
 import { clampTerminalButtonTop } from './terminal-dock'
 import {
   sanitizeNoteHistory,
-  sanitizeNoteRepo,
   sanitizeNoteRoot,
   sanitizeNoteTreeExpanded
 } from './note'
@@ -89,9 +88,12 @@ export function sanitizeSettings(raw: unknown): StoredSettings {
   // 打开过的笔记本清单（笔记页左栏底部的「最近打开」）：老数据文件里没有，默认空；
   // 手工改坏过、重复、超上限的都在这里收敛
   value.noteDirs = sanitizeNoteHistory(value.noteDirs)
-  // 笔记仓库地址：老数据文件里没有，默认空串（不同步）。认不出的一律按没填处理 ——
-  // 与 Token 同步仓库同一个道理：留着一个每次同步都失败的地址在那儿反复重试，不如关掉
-  value.noteSyncRepo = sanitizeNoteRepo(value.noteSyncRepo)
+  // 技能库目录（本机挑的一个目录）：老数据文件里没有，默认空串 = 还没选过。
+  // 与笔记文件夹同一条收敛（去空白与末尾分隔符、盘根留住分隔符）—— 它要拿去拼文件路径
+  value.skillDir = sanitizeNoteRoot(value.skillDir)
+  // 笔记仓库地址已废弃：同步现在只看那个文件夹自己的 `origin`（见 shared/note.ts 的 NoteRepoState），
+  // 地址不再进设置。旧数据文件里存着它，不主动清掉的话它会一直被写回，看着像还有人在用它。
+  delete (value as unknown as Record<string, unknown>).noteSyncRepo
   // 图片仓库地址：老数据文件里没有，默认未配置。
   // 与 Token 同步仓库同一条口径（含空白、以 `-` 开头的一律当没填）
   value.noteImageRepo = sanitizeImageRepo(value.noteImageRepo)

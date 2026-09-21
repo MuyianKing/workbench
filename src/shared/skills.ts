@@ -1,15 +1,16 @@
 /**
- * 技能（skill）：住在**笔记仓库的一个子目录**里的一批可安装技能。
+ * 技能（skill）：**技能库是它自己的一个目录**，里面是一批可安装的技能。
  *
- * 技能与笔记是同一类东西 —— 几份 markdown 加随带的小文件，所以不另设仓库、不另开网络出口：
- * 技能库就是笔记文件夹（设置里的 `noteDir`）下面的一个子目录（`skillSyncDir`，默认 `skills`），
- * 每次增删改都在那个仓库里提交一次 —— **版本管理就是 git 提交历史**，恢复到某个版本就是
- * `git checkout <hash> -- <目录>`。推到远端仍然只走笔记页那颗同步按钮（sync_notes），网络
- * 行为与笔记完全一致：不点同步就只在本机。
+ * 技能与笔记是同一类东西（几份 markdown 加随带的小文件），但**两者互不相干**：
+ * 技能库是用户在技能页挑的那个目录（设置里的 `skillDir`），可能是任意一处 ——
+ * 正好是某个笔记本文件夹、某个仓库里的一层，或者一个专门的技能仓库，都可能。
+ * 每次增删改都在它所在的仓库里提交一次 —— **版本管理就是 git 提交历史**，
+ * 恢复到某个版本就是 `git checkout <hash> -- <目录>`；推上去用技能页那颗同步按钮
+ * （Rust 侧 `skills::sync`：只提交技能库那一层，再拉、再推它所在的那个仓库）。
  *
- * 「同步到别的机器」因此免费成立：同一个笔记仓库的另一台机器拉下来就有这些技能。
- * 唯一要两边一致的只有「技能放在仓库的哪一层」，所以 `skillSyncDir` 住 theme.json（外观白名单），
- * 随配置一起同步 —— 一边改了路径另一边就找不到技能了。
+ * 「它在哪个仓库里」**不由这里猜、也不用配**：从技能库目录开始看有没有 `.git`，没有就往上找
+ * （Rust 侧 `skills::state`）。`SkillLibraryState` 就是那件事的形状，各条技能通道拿的正是它给的
+ * 「仓库根 + 库在里面的相对路径」这两样 —— **库自己就是仓库根**时那个相对路径是空串。
  *
  * 一个技能 = 技能库下的一个子目录，里面有一份 `SKILL.md`（frontmatter 的 name / description
  * 就是它的名字与描述 —— **自动提取**，不用另外登记）。安装到项目 = 把整个目录复制到
@@ -19,36 +20,61 @@
  * 渲染层（workbench/skill.ts + stores/skills.ts）。放 shared 是为了让「frontmatter 怎么认、
  * 路径怎么拼」有单测、改起来不用重编 Rust。
  */
-import { joinRel, normalizeRel, sanitizeNoteName, type NoteNode } from './note'
+import {
+  joinRel,
+  normalizeRel,
+  sanitizeNoteName,
+  type NoteNode,
+  type NoteSyncSummary
+} from './note'
 
 /** 技能的清单文件：frontmatter 里带 name / description，正文是给 agent 看的用法说明 */
 export const SKILL_FILE = 'SKILL.md'
 
-/** 技能在笔记仓库里的默认子目录（设置里的 `skillSyncDir` 留空 / 认不出时落回它） */
-export const SKILL_SYNC_DIR_DEFAULT = 'skills'
-
 /** 安装到项目时落在项目下的这个目录（各 agent 通用的项目级技能目录约定） */
 export const SKILL_INSTALL_DIR = '.agents/skills'
 
-/** 技能库路径的上限：它只是仓库里的一个子目录，长得离谱的值按没配置处理 */
+/** 技能库路径的上限：它只是仓库里的一条相对路径，长得离谱的值按认不出处理 */
 const SKILL_DIR_MAX = 120
 
 /**
- * 收敛「技能在笔记仓库里的子目录」：统一分隔符、逐段按文件名规矩清洗、挡住 `..`。
+ * 技能库与它的仓库：**从技能库目录开始看有没有 `.git`，没有就往上找最近的**（Rust 侧探好带过来）。
  *
- * 空串**回落默认**而不是表示「放仓库根」：技能库要是仓库根，整个笔记仓库都会被当成技能。
- * 多段允许（`AI/skills` 这种仓库里已有的层级），每一段都要是合法的文件名。
+ * `repo` 是那个仓库根（一路上去都没有就是技能库目录自己），`libraryRel` 是技能库相对它的路径
+ * （技能库就是仓库根时是空串）—— 两者一起交给各条技能通道：文件操作在 `<repo>/<libraryRel>` 下，
+ * git 在 `repo` 里跑。
+ */
+export interface SkillLibraryState {
+  /** 仓库根（绝对路径）；没有仓库时就是技能库目录自己 */
+  repo: string
+  /** 技能库相对 `repo` 的路径；技能库就是仓库根时是空串 */
+  libraryRel: string
+  /** 那个仓库有没有 `.git` —— 有没有它决定「改完记不记版本」 */
+  hasGit: boolean
+  /** 那个仓库的 origin；没连远端时是空串（能记版本、推不出去） */
+  origin: string
+}
+
+/** 技能页同步一次的摘要：与笔记同步是同一个机制，形状也一样 */
+export type SkillSyncSummary = NoteSyncSummary
+
+/**
+ * 收敛「技能库在仓库里的相对路径」：统一分隔符、逐段按文件名规矩清洗、挡住 `..`，认不出的回空串。
+ *
+ * 它守的是**从磁盘上找出来的那个仓库根**：`rel` 由真实路径一段段拼出来，但接下来要去拼文件路径
+ * 与 git pathspec，所以过一遍闸。**空串是合法的**：技能库自己就是仓库根（专门的技能仓库），
+ * 那时它就是这个空串。
  */
 export function sanitizeSkillSyncDir(raw: unknown): string {
   const rel = normalizeRel(raw)
-  if (!rel) return SKILL_SYNC_DIR_DEFAULT
+  if (!rel) return ''
 
   const parts = rel.split('/').map((part) => sanitizeNoteName(part))
-  // 有哪一段清洗后为空（纯点、纯符号）就整体回默认：拼出来的路径已经不是用户写的那个了
-  if (parts.some((part) => !part)) return SKILL_SYNC_DIR_DEFAULT
+  // 有哪一段清洗后为空（纯点、纯符号）就整条作废：拼出来的路径已经不是磁盘上那个了
+  if (parts.some((part) => !part)) return ''
 
   const cleaned = parts.join('/')
-  return cleaned.length <= SKILL_DIR_MAX ? cleaned : SKILL_SYNC_DIR_DEFAULT
+  return cleaned.length <= SKILL_DIR_MAX ? cleaned : ''
 }
 
 /** 列表里的一项：名字与描述从 SKILL.md 的 frontmatter 提取（自动，不用登记） */
@@ -371,4 +397,29 @@ export function withoutSkillDir(nodes: readonly NoteNode[], dir: string): NoteNo
   const rel = normalizeRel(dir)
   if (!rel || rel.includes('/')) return [...nodes]
   return nodes.filter((node) => node.rel !== rel)
+}
+
+/**
+ * 技能库落在**笔记本里**的相对路径；不在笔记本里时返回空串（`withoutSkillDir` 收它）。
+ *
+ * 技能库与笔记本是各自挑的目录、互不相干，所以这里只能按路径比：逐段比
+ * （不按字符串前缀 —— 否则 `C:\a\b` 会把 `C:\a\bc` 也算进去），大小写不敏感
+ * （Windows 上同一个目录），返回的是**库那一段的原样写法**。
+ * 两边相同、或笔记本比库还深时是空串：那时什么都不藏（藏了就是把整个笔记本藏了）。
+ */
+export function libraryInNotebook(libraryDir: unknown, notebookDir: unknown): string {
+  const library = splitRoot(libraryDir)
+  const notebook = splitRoot(notebookDir)
+  if (!library.length || !notebook.length || notebook.length >= library.length) return ''
+
+  for (let index = 0; index < notebook.length; index += 1) {
+    if (notebook[index].toLowerCase() !== library[index].toLowerCase()) return ''
+  }
+  return library.slice(notebook.length).join('/')
+}
+
+/** 把一条绝对路径切成有内容的段（两种分隔符都认） */
+function splitRoot(raw: unknown): string[] {
+  if (typeof raw !== 'string') return []
+  return raw.split(/[\\/]+/).filter((part) => part && part !== '.')
 }

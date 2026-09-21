@@ -18,15 +18,23 @@ import type { ThemeConfig } from './theme'
 import type { TokenUsageResult } from './token-usage'
 import type { VaultEntry, VaultRecord } from './vault'
 import type { ViewId } from './views'
-import type { NoteChange, NoteCreateInput, NoteNode, NoteSyncInput, NoteSyncSummary } from './note'
-import { SKILL_SYNC_DIR_DEFAULT } from './skills'
+import type {
+  NoteChange,
+  NoteCreateInput,
+  NoteNode,
+  NoteRepoState,
+  NoteSyncInput,
+  NoteSyncSummary
+} from './note'
 import type {
   SkillCommit,
   SkillCompareFile,
   SkillCreateInput,
   SkillEntry,
   SkillFileInfo,
-  SkillInstalledScan
+  SkillInstalledScan,
+  SkillLibraryState,
+  SkillSyncSummary
 } from './skills'
 import type {
   NoteImageDeleteInput,
@@ -59,7 +67,15 @@ export type {
 } from './ai-news'
 export type { TokenUsageResult } from './token-usage'
 export type { ProjectColor } from './project-color'
-export type { SkillCommit, SkillCreateInput, SkillEntry, SkillFileInfo, SkillInstalledScan } from './skills'
+export type {
+  SkillCommit,
+  SkillCreateInput,
+  SkillEntry,
+  SkillFileInfo,
+  SkillInstalledScan,
+  SkillLibraryState,
+  SkillSyncSummary
+} from './skills'
 export type { WorkLogEntry, WorkLogInput, WorkLogPatch } from './work-log'
 export type {
   NoteChange,
@@ -68,6 +84,7 @@ export type {
   NoteEntry,
   NoteKind,
   NoteNode,
+  NoteRepoState,
   NoteSyncInput,
   NoteSyncSummary
 } from './note'
@@ -378,17 +395,6 @@ export interface AppSettings {
    */
   noteDirs: string[]
   /**
-   * 笔记本身同步到哪个 git 仓库。空串 = 不同步（笔记页那颗同步按钮就是它的开关）。
-   *
-   * 与另外三处地址（Token 同步、图片仓库）都不同：这里**没有克隆目录**，
-   * 同步的就是当前那个笔记文件夹本身 —— 首次同步会在它里面 `git init` 并接上这个地址，
-   * 之后提交 / 拉取 / 推送都在那个文件夹里跑（见 sync.rs 的 `sync_notes`）。
-   * 于是「笔记就是磁盘上那些 .md」这条不变：换台机器 clone 下来接着写就是同一份东西。
-   * 也是**新的一个出网口子**：只有填了地址、且用户点了同步，才会走一次 git，
-   * 目标就是用户自己填的那个仓库（不经过任何第三方服务）。
-   */
-  noteSyncRepo: string
-  /**
    * 笔记里粘贴的图片推到哪个 git 仓库。空串 = 未配置（粘贴时会提示去哪儿填）。
    *
    * 这是个**新的出网口子，且由用户显式开出来**：只有填了地址、且用户真的粘贴了图片，
@@ -400,16 +406,15 @@ export interface AppSettings {
    */
   noteImageRepo: string
   /**
-   * 技能（skill）在**笔记仓库里**的子目录，默认 `skills`。
+   * 技能库目录（用户自己挑的一个目录）：技能就是它下面的一个个子目录（每个带一份 SKILL.md）。
    *
-   * 技能库就是笔记文件夹下的这一层（`<noteDir>/<skillSyncDir>/<技能>/SKILL.md`）：
-   * 版本管理就是那个仓库的提交历史（每次增删改自动提交一次），推到远端跟着笔记同步走 ——
-   * 所以它不是新的网络出口，只是笔记仓库里的另一种内容。
-   * 这个路径**进 theme.json**（见 appearance.ts 的白名单）：它不是「界面长什么样」，
-   * 但它是仓库结构约定 —— 两台机器要落在同一层才互相看得见对方的技能，
-   * 带着配置一起同步过去正好保证这一点。
+   * 与 `noteDir` 是同一类东西、**互不相干**：可以正好是某个笔记本文件夹、某个仓库的一部分，
+   * 也可以是一个专门的技能仓库（那时它自己就是仓库根）。哪个仓库负责它的版本与同步
+   * **由磁盘决定**：从它开始看有没有 `.git`，没有就往上找最近的（见 shared/skills.ts 的
+   * `SkillLibraryState`）—— 所以这里没有「技能目录是仓库里哪一层」这种配置，也没有默认值：
+   * 空串 = 还没选过，技能页显示引导。只对本机成立，进数据文件、不参与外观同步。
    */
-  skillSyncDir: string
+  skillDir: string
   /**
    * Token 用量同步仓库地址（git 远程地址），空串表示不同步。
    *
@@ -1071,13 +1076,22 @@ export interface WorkbenchApi {
   /** 把一篇移进某个文件夹（拖动）；targetDir 为空串表示移到笔记根 */
   moveNote: (root: string, rel: string, targetDir: string) => Promise<Result<NoteChange>>
   /**
-   * 笔记同步：把**当前这个笔记文件夹**与用户配置的仓库对齐（提交 → pull --rebase → 推送）。
+   * 笔记同步：把**当前这个笔记文件夹**与它自己的 `origin` 对齐（提交 → pull --rebase → 推送）。
    *
-   * 与用量 / 图片那两处同步的区别是它没有克隆目录：跑 git 的地方就是用户自己的文件夹，
-   * 还不是仓库时就地 `git init` 并接上配置里的地址（已经指向别的仓库时如实报错，不改它的 origin）。
+   * 远端不在设置里 —— 同步到哪儿就是这个文件夹自己连着的那个仓库。所以这里既不 `git init`
+   * 也不接远端：不是仓库、或者没有 origin，都按失败如实报回去（见 shared/note.ts 的 NoteRepoState）。
+   * 与用量 / 图片那两处同步的区别是它没有克隆目录：跑 git 的地方就是用户自己的文件夹。
    * 撞上冲突**不替用户挑边**：中止 rebase、把本地那笔提交留着，把冲突的文件名带回来让用户手工处理。
    */
   syncNotes: (input: NoteSyncInput) => Promise<Result<NoteSyncSummary>>
+  /**
+   * 探测一个笔记文件夹的 git 状态：有没有仓库、origin 是什么。
+   *
+   * 只读、不落盘：它在界面上决定「给不给同步入口」与「同步到哪儿」两句提示，
+   * 而这两件事随时会被用户在终端里改掉（`git init` / `git remote add`），存进设置就又有了第二份真源。
+   * 不是仓库**不是错误** —— 没仓库的笔记就是本机的笔记，探回来 `isRepo: false` 照常返回。
+   */
+  noteRepoState: (dir: string) => Promise<Result<NoteRepoState>>
   /**
    * 上传一张图片（笔记里粘贴的图片走这条路）：推到设置的图片仓库，回来的是**可直接用的访问地址**。
    *
@@ -1118,6 +1132,23 @@ export interface WorkbenchApi {
    * 技能库还不存在（第一次用）时是空数组，不是错误。
    */
   listSkills: (root: string, dir: string) => Promise<Result<SkillEntry[]>>
+  /**
+   * 技能库与它的仓库：**从选中的技能库目录开始看有没有 `.git`，没有就往上找最近的**。
+   *
+   * 回的 `repo` / `libraryRel` 就是后面每条技能通道要用的那两个值（`<repo>/<libraryRel>`
+   * 才是技能库本身；库自己就是仓库根时 `libraryRel` 是空串）。
+   * 目录不在时如实报错 —— 界面据此提示「重新选一个技能文件夹」。
+   */
+  skillState: (dir: string) => Promise<Result<SkillLibraryState>>
+  /**
+   * 同步技能库所在的仓库：**先提交技能库那一层**，再拉、再推（见 Rust 侧 `skills::sync`）。
+   *
+   * 与 `syncNotes` 的区别只在提交范围：那边提交整个笔记本（笔记就是这个文件夹），
+   * 这边只提交技能库 —— 技能库可能住在别人的仓库里（往上找到的那个），
+   * 一次同步把那个仓库的其他改动一起提交走是不能接受的。
+   * 不在仓库里、没连远端都只如实报一句带解决办法的话；推的是整条分支（git 没有「半个分支」）。
+   */
+  skillSync: (root: string, dir: string) => Promise<Result<SkillSyncSummary>>
   /** 新建技能：建目录 + 写 SKILL.md 骨架 + 在笔记仓库里提交一次 */
   createSkill: (root: string, dir: string, input: SkillCreateInput) => Promise<Result<null>>
   /**
@@ -1497,9 +1528,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   cardOpacity: CARD_OPACITY_DEFAULT,
   noteDir: '',
   noteDirs: [],
-  noteSyncRepo: '',
   noteImageRepo: '',
-  skillSyncDir: SKILL_SYNC_DIR_DEFAULT,
+  skillDir: '',
   tokenSyncRepo: '',
   activeView: 'home',
   hiddenViews: [],

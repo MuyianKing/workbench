@@ -60,8 +60,9 @@ fn is_ignored_dir(name: &str) -> bool {
         .any(|ignored| name.eq_ignore_ascii_case(ignored))
 }
 
-/// 这个条目要不要连子树一起跳过
-fn is_skipped_entry(name: &str, is_dir: bool) -> bool {
+/// 这个条目要不要连子树一起跳过。技能库辨认（`skills::dirs`）也用它 ——
+/// 「哪些目录是噪音」只该有一份名单，两处各写一份迟早会分叉。
+pub(crate) fn is_skipped_entry(name: &str, is_dir: bool) -> bool {
     if is_hidden(name) {
         return true;
     }

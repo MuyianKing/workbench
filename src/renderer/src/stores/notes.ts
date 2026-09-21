@@ -31,9 +31,10 @@ import {
   type NoteCreateInput,
   type NoteDocument,
   type NoteNode,
+  type NoteRepoState,
   type NoteSyncSummary
 } from '@shared/note'
-import { withoutSkillDir } from '@shared/skills'
+import { libraryInNotebook, withoutSkillDir } from '@shared/skills'
 import { notifyError } from '@/notify'
 import { useSettingsStore } from '@/stores/settings'
 
@@ -78,9 +79,15 @@ export const useNotesStore = defineStore('notes', () => {
   const savedAt = ref(0)
   /** 正在与远端同步一次（那颗按钮转圈、并挡住重复点击） */
   const syncing = ref(false)
-  /** 上一次同步失败的原因；没配地址也走这里（界面拿它提示） */
+  /** 上一次同步失败的原因（不是仓库、没连远端、git 的话、冲突的文件名都在这）；界面拿它提示 */
   const syncError = ref('')
-
+  /**
+   * 这个文件夹的 git 状态：**探出来的，不落盘**（`null` = 还没探过）。
+   *
+   * 它取代了原来那个「笔记仓库地址」设置项：同步到哪儿由文件夹自己连着的远端决定，
+   * 存进设置就又有了第二份真源（用户随时能在终端里改掉它）。
+   */
+  const repoState = ref<NoteRepoState | null>(null)
   /** 进过页面没有：设置是在页面之外被改的（别的窗口 / 迁移），没进过页面就不必跟着扫 */
   let started = false
   let ready = false
@@ -88,10 +95,25 @@ export const useNotesStore = defineStore('notes', () => {
   /** 扫描与打开各自的令牌：慢一步回来的结果直接丢掉 */
   let scanJob = 0
   let openJob = 0
+  /** 探测仓库的令牌：换文件夹时慢一步回来的那次探测不许覆盖新的 */
+  let repoJob = 0
   /** 最近一次正文落盘；同步前要等它落地（见 waitForWrites） */
   let writing: Promise<void> = Promise.resolve()
 
   const noteCount = computed(() => countNotes(nodes.value))
+  /** 同步入口的显示条件：**是仓库才给**。没仓库的文件夹就是本机的笔记，一点痕迹都不留 */
+  const canSync = computed(() => repoState.value?.isRepo === true)
+  /** 同步到哪儿：这个文件夹自己的 origin；没连远端时是空串 */
+  const remoteUrl = computed(() => repoState.value?.origin ?? '')
+  /**
+   * 技能库落在**这个笔记本里**的相对路径（不在里面时是空串）：笔记树按它把技能库整层藏掉。
+   *
+   * 两边都是各自挑的目录、互不相干（见 shared/skills.ts 的文件头），所以只能按路径算 ——
+   * 库正好是笔记本里的一层时藏它（SKILL.md 有自己的页面），在别处时树里本来就没有它。
+   */
+  const skillDirInNotebook = computed(() =>
+    libraryInNotebook(settings.settings.skillDir, root.value)
+  )
   /** 选中项从最外层到自身的链；界面拿它写「它在哪一层」与面包屑 */
   const activeChain = computed(() =>
     activeRel.value ? noteChain(nodes.value, activeRel.value) : []
@@ -105,6 +127,31 @@ export const useNotesStore = defineStore('notes', () => {
     loadError.value = ''
     openError.value = ''
     saveError.value = ''
+    repoState.value = null
+  }
+
+  /**
+   * 重新探一次这个文件夹的 git 状态：有没有仓库、`origin` 是谁（本地两条 git，很便宜）。
+   *
+   * 探的时机是「重新读一遍这个文件夹」的那几处（`reload`：进页面、换文件夹、点刷新）
+   * 与每次同步之后 —— **同步之后也探**是为了让界面跟上：用户在终端里刚补上 origin
+   * 或是刚 `git init`，回来点一下刷新就该看到新的状态，不必重启。
+   *
+   * 探不出来（目录不在了、git 调用失败）**不算错误**：按「本机的笔记」处理 ——
+   * 一个刚被拔掉的网盘不该把整页打成错误态，何况这个结果只决定界面给不给入口。
+   */
+  async function probeRepo(): Promise<void> {
+    const current = root.value
+    if (!current) {
+      repoState.value = null
+      return
+    }
+
+    const job = (repoJob += 1)
+    const result = await window.workbench.noteRepoState(current)
+    if (job !== repoJob) return
+
+    repoState.value = result.ok && result.data ? result.data : { isRepo: false, origin: '' }
   }
 
   /**
@@ -120,6 +167,8 @@ export const useNotesStore = defineStore('notes', () => {
       return
     }
 
+    void probeRepo()
+
     const job = (scanJob += 1)
     loading.value = true
     loadError.value = ''
@@ -133,9 +182,10 @@ export const useNotesStore = defineStore('notes', () => {
       return
     }
 
-    // 技能库住在同一个文件夹里（设置里的 skillSyncDir），但它有自己的页面：
-    // 树里再挂一份只会让人以为它也是笔记（在那里改名删除不会留下技能的版本提交），整层藏掉
-    nodes.value = withoutSkillDir(result.data, settings.settings.skillSyncDir)
+    // 技能库正好落在这个笔记本里时把它整层藏掉：技能有自己的页面，树里再挂一份只会让人
+    // 以为它也是笔记（在那里改名删除不会留下技能的版本提交）。库在别处时这里算出来是空串，
+    // 什么都不藏 —— 两个目录互不相干，谁也不必为对方让路
+    nodes.value = withoutSkillDir(result.data, skillDirInNotebook.value)
     loaded.value = true
     ready = true
 
@@ -195,8 +245,9 @@ export const useNotesStore = defineStore('notes', () => {
     })
   }
 
-  // 设置里的笔记文件夹一改就重新扫（首次选的目录、换一个目录、清空都走这里）
-  watch(root, () => {
+  // 设置里的笔记文件夹一改就重新扫（首次选的目录、换一个目录、清空都走这里）；
+  // 技能库目录也盯着 —— 它变了，树里该藏的那一层就变了
+  watch([root, () => settings.settings.skillDir], () => {
     if (!started) return
     ready = false
     void reload()
@@ -313,14 +364,9 @@ export const useNotesStore = defineStore('notes', () => {
    *     下一次输入就会以旧内容为准把远端那份盖回去。换内容这件事本身由界面转达给编辑器
    *     （见返回的 activeChanged），store 不直接碰编辑器实例。
    *
-   * 返回 null 表示这次没成，原因在 `syncError` 里（没配地址、git 的话、冲突的文件名都在那）。
+   * 返回 null 表示这次没成，原因在 `syncError` 里（不是仓库、没连远端、git 的话、冲突的文件名都在那）。
    */
   async function syncNotes(): Promise<NoteSyncOutcome | null> {
-    const repo = settings.settings.noteSyncRepo
-    if (!repo) {
-      syncError.value = '还没有配置笔记仓库（设置 → 笔记）'
-      return null
-    }
     const current = root.value
     if (!current) {
       syncError.value = '还没有选择笔记文件夹'
@@ -330,9 +376,11 @@ export const useNotesStore = defineStore('notes', () => {
     syncing.value = true
     syncError.value = ''
     try {
-      const result = await window.workbench.syncNotes({ repo, dir: current })
+      const result = await window.workbench.syncNotes({ dir: current })
       if (!result.ok || !result.data) {
         syncError.value = result.error ?? '同步笔记失败'
+        // 常见的一种失败是「用户刚在终端里补上 origin」：再探一次，让按钮旁边的提示跟上
+        void probeRepo()
         return null
       }
 
@@ -477,8 +525,13 @@ export const useNotesStore = defineStore('notes', () => {
     savedAt,
     syncing,
     syncError,
+    repoState,
+    canSync,
+    remoteUrl,
+    skillDirInNotebook,
     init,
     reload,
+    probeRepo,
     setRoot,
     forgetRoot,
     select,
