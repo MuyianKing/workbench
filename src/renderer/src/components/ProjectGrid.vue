@@ -21,11 +21,12 @@ import HomeBoard from '@/components/HomeBoard.vue'
   display: flex;
   flex-direction: column;
   /*
-   * 外圈留白与卡片间距同源：设置里改「卡片间距」，页面外圈的空隙跟着变。
-   * 顶边比其余三边少 10px：紧挨着顶栏，不需要一整份间距。
-   * 顶边钳到 0：负内边距是非法值，会把整条 padding 声明一起作废。
+   * 左右与下边的留白与卡片间距同源：设置里改「卡片间距」，页面外圈的空隙跟着变。
+   * **顶边一份不给自己加**：顶栏下面那条缝归 .shell 管（见 global.css「顶栏与内容之间那条缝」）——
+   * 透明那一档顶栏没有可见的边，内容顶到它下沿正好；正常 / 毛玻璃两档由 .shell 留一份间距。
+   * 这里再补一份，那两档就成了两倍。
    */
-  padding: max(0px, calc(var(--card-gap, 14px) - 10px)) var(--card-gap, 14px) var(--card-gap, 14px);
+  padding: 0 var(--card-gap, 14px) var(--card-gap, 14px);
   min-height: 0;
   /*
    * 页面本身不滚：三栏各自撑满可用高度、需要时自己滚，
