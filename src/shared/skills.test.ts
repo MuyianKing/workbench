@@ -3,6 +3,7 @@ import {
   SKILL_VERSION_DEFAULT,
   compareSkillVersions,
   hasSkillFrontmatter,
+  libraryInNotebook,
   mergeVersionCopies,
   parseSkillFrontmatter,
   sanitizeSkillSyncDir,
@@ -136,11 +137,10 @@ describe('yamlScalar / skillMdTemplate', () => {
 })
 
 describe('sanitizeSkillSyncDir', () => {
-  it('空与认不出的一律回默认', () => {
-    expect(sanitizeSkillSyncDir('')).toBe('skills')
-    expect(sanitizeSkillSyncDir('   ')).toBe('skills')
-    expect(sanitizeSkillSyncDir(undefined)).toBe('skills')
-    expect(sanitizeSkillSyncDir('..')).toBe('skills')
+  it('空串是合法的（技能库自己就是仓库根），只规范化写法', () => {
+    expect(sanitizeSkillSyncDir('')).toBe('')
+    expect(sanitizeSkillSyncDir('   ')).toBe('')
+    expect(sanitizeSkillSyncDir(undefined)).toBe('')
   })
 
   it('统一分隔符、逐段清洗、保留多段', () => {
@@ -149,8 +149,37 @@ describe('sanitizeSkillSyncDir', () => {
     expect(sanitizeSkillSyncDir('a//b')).toBe('a/b')
   })
 
-  it('清洗后为空的段让整条回到默认', () => {
-    expect(sanitizeSkillSyncDir('skills/???')).toBe('skills')
+  it('挡住越界与认不出的值（它们接下来要去拼文件路径与 git pathspec）', () => {
+    expect(sanitizeSkillSyncDir('..')).toBe('')
+    expect(sanitizeSkillSyncDir('skills/../../x')).toBe('')
+    // 清洗后为空的段让整条作废：拼出来的路径已经不是磁盘上那个了
+    expect(sanitizeSkillSyncDir('skills/???')).toBe('')
+    const long = `${'x'.repeat(60)}/${'y'.repeat(60)}/${'z'.repeat(60)}`
+    expect(sanitizeSkillSyncDir(long)).toBe('')
+  })
+})
+
+describe('libraryInNotebook', () => {
+  it('技能库在笔记本里：给出它相对笔记本的路径（两种分隔符都认）', () => {
+    expect(libraryInNotebook('D:/notes/agent-knowledge/skills', 'D:/notes')).toBe(
+      'agent-knowledge/skills'
+    )
+    expect(libraryInNotebook('D:\\notes\\skills', 'D:/notes')).toBe('skills')
+    expect(libraryInNotebook('D:/notes/skills/', 'D:/notes')).toBe('skills')
+  })
+
+  it('大小写不敏感（Windows 上同一个目录），返回库里那一段的原样写法', () => {
+    expect(libraryInNotebook('d:/Notes/Skills', 'D:/notes')).toBe('Skills')
+  })
+
+  it('不在笔记本里 / 就是笔记本自己 / 比笔记本还浅：都回空串（什么都不藏）', () => {
+    expect(libraryInNotebook('E:/skills', 'D:/notes')).toBe('')
+    expect(libraryInNotebook('D:/notes', 'D:/notes')).toBe('')
+    expect(libraryInNotebook('D:/', 'D:/notes')).toBe('')
+    // 只是名字像，不是祖先关系
+    expect(libraryInNotebook('D:/notes2/skills', 'D:/notes')).toBe('')
+    expect(libraryInNotebook('', 'D:/notes')).toBe('')
+    expect(libraryInNotebook('D:/notes/skills', '')).toBe('')
   })
 })
 

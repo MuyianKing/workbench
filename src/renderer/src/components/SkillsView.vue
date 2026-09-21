@@ -2,11 +2,15 @@
 /**
  * 技能页：卡片网格铺开技能库，点一张卡片打开详情弹窗（编辑 / 安装 / 历史 / 删除都在那里）。
  *
- * 技能库住在**笔记文件夹**下的一个子目录里（设置里的 `skillSyncDir`，默认 `skills`），
+ * 技能库就是**你挑的那个文件夹**（与笔记文件夹互不相干：两边各自挑各自的，可以正好是同一处、
+ * 同一个仓库，也可以不是）；它会落在哪个仓库里由磁盘决定 —— 从那个目录开始看有没有 `.git`，
+ * 没有就往上找最近的（见 shared/skills.ts 的 `SkillLibraryState`）。
  * 版本管理就是那个仓库的提交历史 —— 每次保存、新建、删除、导入都会记一笔，
- * 「同步」按钮走的也是笔记同步那颗按钮的同一条通道（同一个仓库，一次带上两者）。
+ * 「同步」按钮推的也是那个仓库（只提交技能库那一层，再拉、再推），
+ * 而它只在这个仓库有远端时出现。
  * 所以这一页有两种空态：
- *   - **还没选笔记文件夹**：整页只有一句引导与那颗按钮 —— 没有文件夹技能就没地方放；
+ *   - **还没选技能库目录**（或那个目录已经不在了）：整页只有标题与一颗按钮 ——
+ *     说明不写在这儿（要同步就先 clone 之类的在文档里），页面只提醒挑一个文件夹；
  *   - **文件夹里还没有技能**：网格处给「新建 / 导入」两个入口，任何状态下都找得到门。
  *
  * 卡片只负责展示（名字、描述、文件数，全部来自 SKILL.md 的自动解析）与「点开它」，
@@ -16,7 +20,6 @@
 import { computed, onMounted, ref } from 'vue'
 import { FolderOpened, Plus, Refresh, RefreshRight, Upload } from '@element-plus/icons-vue'
 import type { SkillEntry } from '@shared/skills'
-import { useNotesStore } from '@/stores/notes'
 import { useSkillsStore } from '@/stores/skills'
 import SkillCard from '@/components/SkillCard.vue'
 import SkillDetailDialog from '@/components/SkillDetailDialog.vue'
@@ -25,16 +28,21 @@ import SkillImportDialog from '@/components/SkillImportDialog.vue'
 import SkillInstallDialog from '@/components/SkillInstallDialog.vue'
 
 const store = useSkillsStore()
-const notes = useNotesStore()
 
 onMounted(() => {
   void store.init()
 })
 
-/** 还没选笔记文件夹时的引导：选好它技能就有了安身之处（与笔记页选的是同一个文件夹） */
+/**
+ * 挑一个技能库目录：**技能库就是它**（里面的每个子目录带一份 SKILL.md 就是一个技能）。
+ *
+ * 与笔记文件夹互不相干 —— 可以正好是某个笔记本、某个仓库里的一层，也可以是一个专门的技能仓库；
+ * 换目录**不搬动任何文件**，只是换个地方看技能。它落在哪个仓库里由磁盘决定
+ * （从这里往上找最近的 `.git`），所以这里不需要问「放仓库哪一层」。
+ */
 async function pickRoot(): Promise<void> {
-  const picked = await window.workbench.pickDirectory('选择笔记文件夹')
-  if (picked) await notes.setRoot(picked)
+  const picked = await window.workbench.pickDirectory('选择技能文件夹')
+  if (picked) await store.setRoot(picked)
 }
 
 const createOpen = ref(false)
@@ -50,6 +58,31 @@ const installId = ref('')
 const installName = computed(() => {
   const skill = store.skills.find((item) => item.id === installId.value)
   return skill?.name ?? installId.value
+})
+
+/**
+ * 同步按钮的提示：**同步到哪儿先说清楚**。
+ *
+ * 技能库与笔记是两条互不相干的线（可以正好在同一个仓库里，也可能各有一个），
+ * 所以这颗按钮说的一律是「技能库所在的那个仓库」，别提笔记那边。
+ */
+const syncTitle = computed(() =>
+  store.remoteUrl
+    ? `提交技能库的改动、拉回别处的改动：同步到 ${store.remoteUrl}`
+    : '技能库所在的仓库还没连远端'
+)
+
+/**
+ * 库位置那行字的悬停提示：**完整路径 + 它的仓库**。
+ *
+ * 位置是用户自己挑的（技能页那颗「选择技能文件夹」），仓库是从那儿往上找出来的 ——
+ * 两样都得摆出来：技能到底在哪儿、版本与同步跟着哪个仓库走。
+ */
+const locTitle = computed(() => {
+  const lines = [store.root]
+  if (store.gitRoot && store.dir) lines.push(`在仓库里：${store.gitRoot}`)
+  if (store.hasVersions && !store.remoteUrl) lines.push('这个仓库还没连远端：版本只留本机')
+  return lines.join('\n')
 })
 
 /** 点开一张卡片：先读它的 SKILL.md，再拉开详情弹窗（编辑区读着的时候是「正在读取」） */
@@ -72,15 +105,17 @@ function installActive(): void {
 
 <template>
   <main class="skills-view">
-    <!-- 还没选笔记文件夹：整页引导，不给任何操作入口 -->
-    <div v-if="!store.root" class="guide panel">
+    <!--
+      还没选技能库目录（或者它已经不在磁盘上了）：只有标题与那颗按钮 ——
+      说明不写在这里（想同步就先自己 clone 之类的在文档里），页面只提醒挑一个文件夹。
+      目录不在时那行原因是必须的：不说的话这一页看着就像「技能没了」。
+    -->
+    <div v-if="!store.root || store.stateError" class="guide panel">
       <h2 class="guide__title">技能</h2>
-      <p class="guide__text">
-        技能库住在你的笔记文件夹里（笔记仓库的一个子目录）：改动的每一版都由 git 记着，
-        配好笔记仓库就能同步到别的机器，还能一键安装到各个项目下。
-        先选好笔记文件夹，技能就有了安身之处。
-      </p>
-      <el-button type="primary" :icon="FolderOpened" @click="pickRoot">选择笔记文件夹</el-button>
+      <p v-if="store.stateError" class="guide__text">{{ store.stateError }}</p>
+      <el-button type="primary" :icon="FolderOpened" @click="pickRoot">
+        {{ store.root ? '换一个技能文件夹' : '选择技能文件夹' }}
+      </el-button>
     </div>
 
     <template v-else>
@@ -89,28 +124,33 @@ function installActive(): void {
         <div class="filter__head">
           <div class="head">
             <h2 class="head__title">技能</h2>
-            <span class="head__loc mono" :title="`${store.root}\\${store.dir}`">
+            <span class="head__loc mono" :title="locTitle">
               {{ store.locationText }}
             </span>
           </div>
         </div>
         <div class="filter__tools">
           <el-button size="small" :icon="Upload" @click="importOpen = true">导入</el-button>
-          <el-tooltip
-            content="提交本机改动、拉回别处的改动（与笔记同步是同一个仓库）"
-            placement="bottom"
-          >
+          <el-tooltip v-if="store.canSync" :content="syncTitle" placement="bottom">
             <el-button
               size="small"
               :icon="RefreshRight"
               :loading="store.syncing"
-              :disabled="!store.repoConfigured"
               @click="store.syncNow()"
             >
               同步
             </el-button>
           </el-tooltip>
-          <el-button size="small" :icon="Refresh" :loading="store.loading" @click="store.reload()" />
+          <el-button
+            size="small"
+            :icon="Refresh"
+            :loading="store.loading"
+            @click="store.reload()"
+          />
+          <!-- 换一个技能文件夹：与笔记页左栏底部那颗同一个做法（图标 + 悬停说明） -->
+          <el-tooltip content="换一个技能文件夹" placement="bottom">
+            <el-button size="small" :icon="FolderOpened" @click="pickRoot" />
+          </el-tooltip>
         </div>
       </div>
 
@@ -170,7 +210,7 @@ function installActive(): void {
   padding: var(--card-gap, 10px);
 }
 
-/* 没选笔记文件夹时的引导 */
+/* 还没选技能库目录时的引导（只有标题与那颗按钮） */
 .guide {
   align-items: center;
   justify-content: center;

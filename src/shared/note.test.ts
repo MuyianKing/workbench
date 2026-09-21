@@ -18,7 +18,7 @@ import {
   relName,
   pushNoteHistory,
   removeFromNoteHistory,
-  sanitizeNoteRepo,
+  resolveNoteLink,
   sanitizeNoteHistory,
   sanitizeNoteName,
   sanitizeNoteRoot,
@@ -233,6 +233,52 @@ describe('拖动', () => {
   })
 })
 
+describe('正文里的链接', () => {
+  it('相对的是这一篇所在的文件夹，几种写法都认', () => {
+    expect(resolveNoteLink('./别的.md', '周报.md')).toBe('别的.md')
+    expect(resolveNoteLink('别的.md', '周报.md')).toBe('别的.md')
+    expect(resolveNoteLink('./别的.md', '归档/周报.md')).toBe('归档/别的.md')
+    expect(resolveNoteLink('子/深的.md', '归档/周报.md')).toBe('归档/子/深的.md')
+    expect(resolveNoteLink('./别的.markdown', '周报.md')).toBe('别的.markdown')
+    // 从笔记本根写起的写法（几个平台上都有人这么写）
+    expect(resolveNoteLink('/别的.md', '归档/周报.md')).toBe('别的.md')
+    // 反斜杠是 Windows 上的写法，一并当分隔符
+    expect(resolveNoteLink('.\\归档\\别的.md', '周报.md')).toBe('归档/别的.md')
+  })
+
+  it('.. 可以往上走，越过笔记本根就不是这里的笔记了', () => {
+    expect(resolveNoteLink('../外面的.md', '归档/周报.md')).toBe('外面的.md')
+    expect(resolveNoteLink('../子/深的.md', '归档/周报.md')).toBe('子/深的.md')
+    expect(resolveNoteLink('../归档/别的.md', '归档/周报.md')).toBe('归档/别的.md')
+    expect(resolveNoteLink('../../外面.md', '归档/周报.md')).toBe('')
+    expect(resolveNoteLink('./../别处.md', '周报.md')).toBe('')
+  })
+
+  it('切掉锚点与查询串，百分号编码解回文件名', () => {
+    expect(resolveNoteLink('./别的.md#小节', '周报.md')).toBe('别的.md')
+    expect(resolveNoteLink('./别的.md?raw=true', '周报.md')).toBe('别的.md')
+    expect(resolveNoteLink('%E5%91%A8%E6%8A%A5.md', '别的.md')).toBe('周报.md')
+    expect(resolveNoteLink('./%E5%BD%92%E6%A1%A3/%E5%91%A8%E6%8A%A5.md', '别的.md')).toBe(
+      '归档/周报.md'
+    )
+    // 解不开的编码（半截的、或者文件名里真的带 %）按原样用，别把链接整个丢掉
+    expect(resolveNoteLink('./50%.md', '别的.md')).toBe('50%.md')
+  })
+
+  it('外部地址、锚点、非笔记的目标一律不算', () => {
+    expect(resolveNoteLink('https://example.com/别的.md', '周报.md')).toBe('')
+    expect(resolveNoteLink('mailto:me@example.com', '周报.md')).toBe('')
+    expect(resolveNoteLink('C:\\笔记\\别的.md', '周报.md')).toBe('')
+    expect(resolveNoteLink('#小节', '周报.md')).toBe('')
+    expect(resolveNoteLink('./配图.png', '周报.md')).toBe('')
+    expect(resolveNoteLink('./子目录/', '周报.md')).toBe('')
+    expect(resolveNoteLink('./子目录', '周报.md')).toBe('')
+    expect(resolveNoteLink('', '周报.md')).toBe('')
+    expect(resolveNoteLink('   ', '周报.md')).toBe('')
+    expect(resolveNoteLink(undefined, '周报.md')).toBe('')
+  })
+})
+
 describe('打开过的笔记本', () => {
   it('收敛掉空的、重复的与超上限的', () => {
     expect(sanitizeNoteHistory('不是数组')).toEqual([])
@@ -257,20 +303,6 @@ describe('打开过的笔记本', () => {
   it('删一条只删这一条', () => {
     expect(removeFromNoteHistory(['D:\\甲', 'D:\\乙'], 'D:\\甲')).toEqual(['D:\\乙'])
     expect(removeFromNoteHistory(['D:\\甲'], 'D:\\没有它')).toEqual(['D:\\甲'])
-  })
-})
-
-describe('笔记仓库地址', () => {
-  it('去掉首尾空白，认不出的当没填（等于关掉同步）', () => {
-    expect(sanitizeNoteRepo('  git@github.com:me/notes.git ')).toBe('git@github.com:me/notes.git')
-    expect(sanitizeNoteRepo('https://gitee.com/me/notes')).toBe('https://gitee.com/me/notes')
-    expect(sanitizeNoteRepo('')).toBe('')
-    expect(sanitizeNoteRepo('   ')).toBe('')
-    expect(sanitizeNoteRepo(undefined)).toBe('')
-    // 这个值最终是一条 git 命令行参数：含空白会被拆成两个参数，以 `-` 开头会被当成选项
-    expect(sanitizeNoteRepo('https://github.com/me/my notes')).toBe('')
-    expect(sanitizeNoteRepo('--upload-pack=evil')).toBe('')
-    expect(sanitizeNoteRepo('x'.repeat(400))).toBe('')
   })
 })
 

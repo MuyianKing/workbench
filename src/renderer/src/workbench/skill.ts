@@ -30,13 +30,20 @@ import {
   type SkillEntry,
   type SkillFileCopy,
   type SkillFileInfo,
-  type SkillInstalledScan
+  type SkillInstalledScan,
+  type SkillLibraryState,
+  type SkillSyncSummary
 } from '@shared/skills'
 import { fail, ok } from '@shared/result'
 import type { Result } from '@shared/types'
 import { guard, invoke } from './bridge'
 
-/** 技能库目录的收敛：调用方带来的是设置里的值，这里按同一条口径再收一次 */
+/**
+ * 技能库在仓库里的相对路径：调用方带来的是从磁盘上找出来的那个（`skillState` 给的），
+ * 这里只按同一条口径再收一次 —— 它接下来要拼文件路径与 git pathspec。
+ *
+ * **空串照原样传下去**：技能库自己就是仓库根（专门的技能仓库）时就是这个空串。
+ */
 function dirArg(dir: string): string {
   return sanitizeSkillSyncDir(dir)
 }
@@ -73,6 +80,58 @@ export async function listSkills(root: string, dir: string): Promise<Result<Skil
     .map((raw) => toSkillEntry(raw))
     .filter((entry): entry is SkillEntry => entry !== null)
   return ok(entries)
+}
+
+/**
+ * 技能库与它的仓库（从技能库目录往上找最近的 `.git`）。
+ *
+ * 回的 `repo` / `libraryRel` 是后面每条通道要用的那两个值（`<repo>/<libraryRel>` 才是库本身）。
+ * 目录不在时如实失败：界面据此提示「重新选一个技能文件夹」，而不是把整页打成空技能库。
+ */
+export async function skillState(dir: string): Promise<Result<SkillLibraryState>> {
+  const target = dir.trim()
+  if (!target) return fail('还没有选择技能库目录')
+
+  const result = await guard(
+    invoke<Partial<SkillLibraryState>>('skill_state', { dir: target }),
+    '读取技能库失败'
+  )
+  if (!result.ok || !result.data) return fail(result.error ?? '读取技能库失败')
+
+  return ok({
+    repo: typeof result.data.repo === 'string' ? result.data.repo : '',
+    libraryRel: sanitizeSkillSyncDir(result.data.libraryRel ?? ''),
+    hasGit: result.data.hasGit === true,
+    origin: typeof result.data.origin === 'string' ? result.data.origin : ''
+  })
+}
+
+/**
+ * 同步技能库所在的仓库：先提交技能库那一层，再拉、再推。
+ *
+ * 与笔记同步那条的区别只在提交范围（那边是整个笔记本），其余一模一样：
+ * 冲突**不替用户挑边**（Rust 会中止这次 rebase、把冲突的文件名带回来），
+ * 不是仓库、没连远端都是一句能看懂的话。
+ */
+export async function skillSync(root: string, dir: string): Promise<Result<SkillSyncSummary>> {
+  const current = root.trim()
+  if (!current) return fail('技能库还不在 git 仓库里')
+
+  const result = await guard(
+    invoke<Partial<SkillSyncSummary>>('skill_sync', { root: current, dir: dirArg(dir) }),
+    '同步技能失败'
+  )
+  if (!result.ok || !result.data) return fail(result.error ?? '同步技能失败')
+
+  return ok({
+    branch: typeof result.data.branch === 'string' ? result.data.branch : '',
+    files:
+      typeof result.data.files === 'number' && Number.isFinite(result.data.files)
+        ? result.data.files
+        : 0,
+    received: result.data.received === true,
+    log: typeof result.data.log === 'string' ? result.data.log : ''
+  })
 }
 
 /** 新建技能：建目录 → 写 SKILL.md 骨架 → 提交第一版 */

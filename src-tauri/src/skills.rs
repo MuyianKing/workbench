@@ -1,24 +1,27 @@
-//! 技能（skill）管理：技能库住在**笔记仓库的一个子目录**里，版本就是 git 提交历史。
+//! 技能（skill）管理：技能库是**它自己的一个目录**（用户选的），版本就是 git 提交历史。
 //!
-//! 技能与笔记是同一类东西 —— 几份 markdown 加随带的小文件 —— 所以不另设仓库、不另开凭据，
-//! 每个技能就是笔记仓库里 `<技能库>/<技能名>/` 下的一个目录（技能库的相对路径由渲染层带来，
-//! 是设置里可配置的那一项；默认 `skills`）。增删改都在那个仓库里提交一次，git 的历史因此
-//! 就是技能的版本历史；推到远端仍然只走笔记同步（`sync_notes`），这里**不出网络**：
-//! 全部 git 调用都是本地的（`git log` / `checkout` / `commit`），不设凭据、不碰远端。
+//! 技能库与笔记文件夹**互不相干**：各自一个目录，可以正好是同一处、也可能各有各的仓库 ——
+//! 这里只认渲染层带下来的「仓库根 + 库在里面的相对路径」（见 `state`），
+//! 从不假设它与某个笔记本有关系。每个技能就是技能库下 `<技能名>/` 里的一个目录。
+//! 增删改都在那个仓库里提交一次，git 的历史因此就是技能的版本历史；
+//! 推上去走 `sync`（技能页那颗同步按钮），它**只提交技能库那一层**再拉推那个仓库。
 //!
 //! 与 sync.rs 的分工一致：这里只做「跑 git / 复制文件」，技能叫什么名字、frontmatter 里
 //! 写了什么、安装到哪个项目，都由渲染层决定（见 shared/skills.ts）。因此对入参只有两道把关：
 //! 名字必须是一个「正常的路径段」（拼出来的路径不许越过笔记根），笔记根必须真实存在。
 //!
-//! 笔记文件夹还不是 git 仓库时（用户没配笔记仓库同步）技能照常增删改 —— 本地文件操作
-//! 照做，提交与历史这类「版本」动作如实返回「没有产生版本」，不把它当错误拦住别人。
+//! 技能库不在任何 git 仓库里时，技能照常增删改 —— 本地文件操作照做，
+//! 提交与历史这类「版本」动作如实返回「没有产生版本」，不把它当错误拦住别人。
 
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use walkdir::WalkDir;
 
-use crate::sync::{describe, head_of, is_plain_segment, run_git, run_git_quiet};
+use crate::sync::{
+    busy_message, current_branch, describe, ensure_commit_identity, head_of, host_name,
+    is_plain_segment, pull_with_rebase, push_with_retry, run_git, run_git_quiet, set_git_auth,
+};
 
 /// 技能清单文件：没有它的目录不算技能，装不进项目（渲染层负责提示，这里挡最后一道）
 pub(crate) const SKILL_MD: &str = "SKILL.md";
@@ -30,21 +33,22 @@ const GIT_TIMEOUT: Duration = Duration::from_secs(30);
 const HISTORY_LIMIT_DEFAULT: usize = 50;
 const HISTORY_LIMIT_MAX: usize = 200;
 
-/// 笔记根必须存在：技能库就住在它里面，根都不在的话后面每一步都没意义
+/// 这个根必须存在：各条技能通道拿的是**仓库根**（或者没仓库时就是技能库目录自己），
+/// 它不在的话后面每一步（拼路径、跑 git）都没意义。
 fn workspace_of(root: &str) -> Result<PathBuf, String> {
     let root = root.trim();
     if root.is_empty() {
-        return Err("还没有选择笔记文件夹".into());
+        return Err("还没有选择技能库目录".into());
     }
     let base = PathBuf::from(root);
     if !base.is_dir() {
-        return Err(format!("找不到笔记文件夹：{root}"));
+        return Err(format!("找不到技能库所在的目录：{root}"));
     }
     Ok(base)
 }
 
-/// 收敛技能库的相对目录（渲染层已经收敛过，这里再挡一道）：逐段必须是普通名字，
-/// 空串（= 仓库根）不收 —— 技能库要是仓库根，整个笔记仓库都会被当成技能。
+/// 收敛技能库的相对目录（渲染层已经收敛过，这里再挡一道）：逐段必须是普通名字。
+/// **空串是合法的**：技能库自己就是仓库根（一个专门的技能仓库），返回 `""`。
 /// 返回仓库内的相对路径写法（`/` 分隔），既能 join 也能直接当 git 的 pathspec。
 fn rel_of(dir: &str) -> Result<String, String> {
     let raw = dir.trim().replace('\\', "/");
@@ -59,9 +63,7 @@ fn rel_of(dir: &str) -> Result<String, String> {
         }
         parts.push(part);
     }
-    if parts.is_empty() {
-        return Err("技能目录不能是仓库根目录".into());
-    }
+    // 空串是合法的：技能库自己就是仓库根（选一个专门的技能仓库当库时就是这样）
     Ok(parts.join("/"))
 }
 
@@ -138,6 +140,145 @@ pub fn list(root: &str, dir: &str) -> Result<Vec<Value>, String> {
     Ok(out)
 }
 
+// ---------- 技能库与它的仓库 ----------
+
+/// 技能库的仓库：**从选中的技能库目录开始看有没有 `.git`，没有就往上找最近的**。
+///
+/// 回 `{ repo, libraryRel, hasGit, origin }`：
+///   - `repo` 是那个仓库根（一路上去都没有就是技能库目录自己）；
+///   - `libraryRel` 是技能库相对仓库根的路径（技能库就是仓库根时是空串）；
+///   - `hasGit` 有没有仓库（决定「改完记不记版本」，与有没有远端是两件事）；
+///   - `origin` 是那个仓库的远端地址（没有就是空串）。
+///
+/// 各条技能通道拿的就是这两个值：文件操作落在 `<repo>/<libraryRel>` 下，git 在 `repo` 里跑。
+/// 技能库与笔记文件夹**互不相干**（可能是同一个目录、也可能各有各的仓库）：这里只看选中的那个目录。
+pub fn state(dir: &str) -> Result<Value, String> {
+    let library = workspace_of(dir)?;
+    let repo = repo_root_of(&library);
+    let origin = if repo.join(".git").exists() {
+        run_git(&["remote", "get-url", "origin"], Some(&repo), GIT_TIMEOUT)
+            .map(|text| text.trim().to_string())
+            .unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    Ok(json!({
+        "repo": repo.to_string_lossy(),
+        "libraryRel": rel_under(&repo, &library),
+        // 有没有 git 决定「改完记不记版本」；有 git 但 origin 为空只决定「推不推得出去」
+        "hasGit": repo.join(".git").exists(),
+        "origin": origin,
+    }))
+}
+
+/// 从这一层开始、往上找到最近的那个有 `.git` 的目录；一路上去都没有就是它自己
+/// （`.git` 是目录或文件都算 —— worktree / 子模块；与 `sync.rs` 的 `repo_state` 同一口径，
+/// 区别只是它会往上找：技能库往往就住在某个仓库的里面一层）。
+fn repo_root_of(library: &Path) -> PathBuf {
+    let mut current = Some(library.to_path_buf());
+    let mut steps = 0;
+    while let Some(dir) = current {
+        if dir.join(".git").exists() {
+            return dir;
+        }
+        // 8 层足够深了（`E:\c\d\e` 这种），再往上不是项目而是盘根一类的公共目录
+        if steps >= 8 {
+            break;
+        }
+        steps += 1;
+        current = dir.parent().filter(|parent| *parent != dir).map(Path::to_path_buf);
+    }
+    library.to_path_buf()
+}
+
+/// `path` 相对 `base` 的路径写法（`/` 分隔）；`base` 不是 `path` 的祖先时是空串
+fn rel_under(base: &Path, path: &Path) -> String {
+    let Ok(rest) = path.strip_prefix(base) else {
+        return String::new();
+    };
+    let parts: Vec<String> = rest
+        .components()
+        .filter_map(|part| match part {
+            std::path::Component::Normal(name) => Some(name.to_string_lossy().into_owned()),
+            // 基准就是 path 自己（strip_prefix 给出空路径）时没有这一段；其余（`.`、`..`）不算普通名字
+            _ => None,
+        })
+        .collect();
+    parts.join("/")
+}
+
+/// 库里的某个技能在仓库里的相对路径：`<库>/<id>`；技能库就是仓库根时就是 `<id>`
+fn skill_path(rel: &str, id: &str) -> String {
+    if rel.is_empty() {
+        id.to_string()
+    } else {
+        format!("{rel}/{id}")
+    }
+}
+
+/// 库自己在仓库里的 pathspec：技能库就是仓库根时用 `.`（git 里它表示整棵树）
+fn library_spec(rel: &str) -> &str {
+    if rel.is_empty() {
+        "."
+    } else {
+        rel
+    }
+}
+
+// ---------- 同步（把技能库所在的仓库对齐一次） ----------
+
+/// 同步技能库所在的仓库：**先提交技能库那一层**，再 `pull --rebase`、`push`。
+///
+/// 与 `sync_notes` 的区别只在提交范围：那边提交的是「整个笔记本」（笔记的语义就是那个文件夹），
+/// 这边**只 `add` 技能库** —— 技能库可能住在别人的仓库里（往上找到的那个），一次同步把那个仓库的
+/// 其他改动一起提交走是不能接受的。拉与推仍然是整条分支（git 没有「半个分支」这回事），
+/// 那是这个仓库自己的节奏，与用户在它里面正常用 git 是同一件事。
+///
+/// 不是仓库、没连远端都只如实报一句带解决办法的话：技能在本地照样能增删改（文件操作不走这里）。
+/// 分支按仓库当前站着的那个走；撞上冲突不替用户挑边（中止这次 rebase、把冲突的文件名报回去）。
+pub fn sync(root: &str, dir: &str) -> Result<Value, String> {
+    let workspace = workspace_of(root)?;
+    // 入参先验一遍（拼路径与 git 参数前的那道闸）：错误要在动网络之前出来
+    rel_of(dir)?;
+    if !workspace.join(".git").exists() {
+        return Err(
+            "技能库不在 git 仓库里：改动的版本不会被记录，也没法同步（把它放进一个仓库里就有版本了）"
+                .into(),
+        );
+    }
+    if !run_git_quiet(&["remote", "get-url", "origin"], &workspace) {
+        return Err(
+            "技能库所在的仓库还没连远端：在它里面跑 `git remote add origin <地址>` 就能同步".into(),
+        );
+    }
+    if let Some(message) = busy_message(&workspace, "技能库所在的仓库") {
+        return Err(message);
+    }
+
+    // 必须在任何 git 调用之前设好：下面的 pull / push 都要走网络
+    set_git_auth();
+
+    let mut log: Vec<String> = Vec::new();
+    let committed = commit(root, dir, &format!("skills: {}", host_name()))?;
+    let branch = current_branch(&workspace)?;
+    let before = head_of(&workspace);
+    pull_with_rebase(&workspace, &branch, &mut log)?;
+    let received = before != head_of(&workspace);
+    // 一份提交都没有（远端也空）：没有可推的，如实回一个「什么都没做」的结果
+    if !head_of(&workspace).is_empty() {
+        push_with_retry(&workspace, &branch, &mut log)?;
+    }
+
+    Ok(json!({
+        "branch": branch,
+        "files": committed["files"],
+        "received": received,
+        "log": log.join("
+"),
+    }))
+}
+
 // ---------- 版本（提交 / 历史 / 恢复） ----------
 
 /// 把技能库下的当前改动提交一次（只 add 这一个子目录，用户没提交的笔记不捎带）。
@@ -146,23 +287,31 @@ pub fn list(root: &str, dir: &str) -> Result<Vec<Value>, String> {
 /// 「没产生版本」与「提交失败」是两回事，只有后者才该打断用户。
 /// 注意拦的是「不是仓库」而不是「还没有提交」：第一笔技能提交恰恰发生在空仓库上，
 /// 拦错了它就永远记不上第一版。提交信息由渲染层拼好（`skill: <id> 动作`），这里只兜一个空串的底。
+///
+/// 提交身份得在这里兜一道：技能这条路**不经过同步**（有仓库没远端、用户干脆不同步都照样提交），
+/// 所以不能指望同步顺手把 `user.email` 写进去 —— 没配过全局 git 身份的用户会看到
+/// git 那句 "Please tell me who you are"，而那是他自己没法从界面里修的。
 pub fn commit(root: &str, dir: &str, message: &str) -> Result<Value, String> {
     let workspace = workspace_of(root)?;
     let rel = rel_of(dir)?;
     if !workspace.join(&rel).exists() || !workspace.join(".git").exists() {
-        return Ok(json!({ "changed": false }));
+        return Ok(json!({ "changed": false, "files": 0 }));
     }
 
-    run_git(&["add", "-A", "--", &rel], Some(&workspace), GIT_TIMEOUT)?;
+    ensure_commit_identity(&workspace)?;
+    let spec = library_spec(&rel);
+    run_git(&["add", "-A", "--", spec], Some(&workspace), GIT_TIMEOUT)?;
     // 退出码 1 = 有暂存改动；没改动就不产生空提交（自动保存类调用会反复走到这里）
-    if run_git_quiet(&["diff", "--cached", "--quiet", "--", &rel], &workspace) {
-        return Ok(json!({ "changed": false }));
+    if run_git_quiet(&["diff", "--cached", "--quiet", "--", spec], &workspace) {
+        return Ok(json!({ "changed": false, "files": 0 }));
     }
 
+    let names = run_git(&["diff", "--cached", "--name-only", "--", spec], Some(&workspace), GIT_TIMEOUT)?;
+    let files = names.lines().filter(|line| !line.trim().is_empty()).count();
     let message = message.trim();
-    let message = if message.is_empty() { "skill: 更新" } else { message };
+    let message = message.is_empty().then_some("skill: 更新").unwrap_or(message);
     run_git(&["commit", "-m", message], Some(&workspace), GIT_TIMEOUT)?;
-    Ok(json!({ "changed": true }))
+    Ok(json!({ "changed": true, "files": files }))
 }
 
 /// 某个技能的提交历史（新的在前）。不是仓库、目录从未提交过都是空表 ——
@@ -177,7 +326,7 @@ pub fn history(root: &str, dir: &str, id: &str, limit: Option<usize>) -> Result<
 
     let limit = limit.unwrap_or(HISTORY_LIMIT_DEFAULT).clamp(1, HISTORY_LIMIT_MAX);
     let limit = limit.to_string();
-    let path = format!("{rel}/{id}");
+    let path = skill_path(&rel, &id);
     let text = run_git(
         // %x1f 是单元分隔符：提交说明里什么字符都可能出现，用它切开不会撞
         &["log", "-n", &limit, "--format=%H%x1f%at%x1f%s", "--", &path],
@@ -220,7 +369,7 @@ pub fn restore(root: &str, dir: &str, id: &str, hash: &str) -> Result<Value, Str
         return Err("笔记文件夹还不是 git 仓库，没有可恢复的版本".into());
     }
 
-    let path = format!("{rel}/{id}");
+    let path = skill_path(&rel, &id);
     let _ = run_git(
         &["rm", "-r", "--force", "--quiet", "--", &path],
         Some(&workspace),
@@ -266,7 +415,7 @@ pub fn version_compare(root: &str, dir: &str, id: &str, hash: &str) -> Result<Va
         return Err("笔记文件夹还不是 git 仓库，没有可比的历史版本".into());
     }
 
-    let path = format!("{rel}/{id}");
+    let path = skill_path(&rel, &id);
     Ok(json!({
         "current": read_text_files(&workspace.join(&rel).join(&id)),
         "version": read_commit_files(&workspace, &path, hash)?,
@@ -751,14 +900,15 @@ mod tests {
         std::fs::create_dir_all(plain.join("skills/alpha")).unwrap();
         let root = plain.to_string_lossy().into_owned();
 
-        // 没配笔记仓库同步（还不是 git 仓库）：文件操作照常，版本动作如实说「没有」
+        // 不在任何 git 仓库里：文件操作照常，版本动作如实说「没有」
         assert_eq!(commit(&root, "skills", "skill: alpha 新建").unwrap()["changed"], json!(false));
         assert!(history(&root, "skills", "alpha", None).unwrap().is_empty());
 
         // 目录不存在同样不是错误（第一次用）
         assert_eq!(commit(&root, "不存在", "x").unwrap()["changed"], json!(false));
         assert!(list(&root, "不存在").unwrap().is_empty());
-        assert!(list(&root, "").is_err(), "技能目录不能是仓库根");
+        // 空 rel = 技能库自己就是仓库根（专门的技能仓库）：列的就是这个根下的条目
+        assert!(list(&plain.join("skills").to_string_lossy(), "").is_ok());
 
         cleanup(&plain);
     }
@@ -912,7 +1062,67 @@ mod tests {
         assert!(require_id("  ").is_err());
         assert_eq!(rel_of("skills").unwrap(), "skills");
         assert_eq!(rel_of(" AI\\skills ").unwrap(), "AI/skills");
-        assert!(rel_of("").is_err());
+        // 空串是合法的：技能库自己就是仓库根
+        assert!(rel_of("").unwrap().is_empty());
         assert!(rel_of("skills/../../x").is_err());
+    }
+
+    /// 技能库与它的仓库：**从技能库目录开始看有没有 `.git`，没有就往上找最近的**。
+    ///
+    /// 技能库与笔记文件夹互不相干，所以这里只看那个目录自己往上 —— 判断依据只有 `.git` 的位置，
+    /// 与「它是不是某个笔记本」无关。
+    #[test]
+    fn state_walks_up_from_the_library_to_its_repo() {
+        let root = std::env::temp_dir().join(format!("wb-skills-state-{}", uuid::Uuid::new_v4()));
+        let library = root.join("仓库").join("agent-knowledge").join("skills");
+        std::fs::create_dir_all(&library).unwrap();
+        let library_text = library.to_string_lossy().into_owned();
+        write(&library, "alpha/SKILL.md", "---
+name: A
+---
+");
+
+        // 上面还没有仓库：仓库就是技能库目录自己，库相对它自己是空串
+        let found = state(&library_text).unwrap();
+        assert_eq!(found["repo"], json!(library_text), "{found:?}");
+        assert_eq!(found["libraryRel"], json!(""), "{found:?}");
+        assert_eq!(found["origin"], json!(""), "{found:?}");
+
+        // 挂上仓库（`.git` 存在就算）：往上找到它，库相对它是那几层路径
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        let found = state(&library_text).unwrap();
+        assert_eq!(found["repo"], json!(root.to_string_lossy()), "{found:?}");
+        assert_eq!(found["libraryRel"], json!("仓库/agent-knowledge/skills"), "{found:?}");
+
+        // 技能库**自己**是仓库根时（专门的技能仓库）：rel 是空串 —— 各条通道要照这个干活
+        std::fs::create_dir_all(library.join(".git")).unwrap();
+        let found = state(&library_text).unwrap();
+        assert_eq!(found["repo"], json!(library_text), "最近的优先: {found:?}");
+        assert_eq!(found["libraryRel"], json!(""), "{found:?}");
+
+        // 目录不在：如实报错（界面据此提示「重新选一个技能文件夹」）
+        assert!(state(root.join("没有这个目录").to_str().unwrap()).is_err());
+
+        cleanup(&root);
+    }
+
+    /// 技能库就是仓库根（空 rel）时，路径与 pathspec 那两处换算
+    #[test]
+    fn an_empty_library_rel_means_the_repo_root_itself() {
+        assert!(rel_of("").unwrap().is_empty());
+        assert_eq!(skill_path("", "alpha"), "alpha");
+        assert_eq!(skill_path("agent-knowledge/skills", "alpha"), "agent-knowledge/skills/alpha");
+        assert_eq!(library_spec(""), ".");
+        assert_eq!(library_spec("agent-knowledge/skills"), "agent-knowledge/skills");
+    }
+
+    /// 相对路径换算的两个边界：锚根就是路径自己（空串）、以及不是祖先时不给一个假路径
+    #[test]
+    fn rel_under_returns_empty_outside_the_base() {
+        let base = PathBuf::from(r"E:\a\b");
+        assert_eq!(rel_under(&base, &base.join("c").join("d")), "c/d");
+        assert_eq!(rel_under(&base, &base), "");
+        assert_eq!(rel_under(&base, &PathBuf::from(r"E:\a\x")), "");
+        assert_eq!(rel_under(&base, &PathBuf::from(r"E:\a")), "");
     }
 }

@@ -385,6 +385,13 @@ await send('Runtime.evaluate', { expression: `(async () => {
   截图上像「工具条被挤扁」，其实只是排版没生效。**判据是 `getComputedStyle(el).display` +
   `getBoundingClientRect()`，别照着截图猜**（用探针脚本把工具条各级节点的盒子打出来最快）。
   结论是共用外壳（`.panel`、`.facts`、`.filter` 这类）一律写进 global.css，谁都不当「规矩的出处」。
+- **弹窗表单漏了 `label-position="top"` 时，症状是「标签像嵌在控件里、两行输入框对不齐」**：
+  `el-form` 默认 `label-position="right"`，`.el-form-item` 又是 `display: flex`，标签于是横排在控件左边；
+  而 global.css 的「弹窗表单」一节是按「标签在上」写的（`.el-form-item__label` 的 `padding` 清成了 0），
+  横排时标签正好贴住控件左缘。2026-09 量「添加常用软件」：标签与预览卡左缘 436、两个输入框被标签推到 460，
+  其中带「浏览」按钮那行的输入框只有 379 宽、另一行 464 —— 右缘差 85px，看着就是「这个弹窗没排过版」。
+  判据是 `document.querySelector('.el-form--label-top')` 是不是 null（漏了属性时 form 的类是
+  `el-form--label-right`），别照着截图猜字号或间距。**弹窗字段一律带这个属性**，见 AGENTS.md 第 4 节。
 - **v-html 里的列表看不见圆点**：global.css 的 reset 把 `ul / ol` 的 `list-style` 清成了 none
   （那是给界面自己的布局列表定的），markdown 正文渲染出来后同样吃这条规则 ——
   在展示组件的 `:deep()` 里把 `list-style` 写回来（disc / decimal），否则有序列表看着像没有序号。

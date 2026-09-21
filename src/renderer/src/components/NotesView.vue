@@ -232,14 +232,41 @@ function onContentChange(payload: { rel: string; content: string }): void {
   void store.saveContent(payload.rel, payload.content)
 }
 
+/**
+ * 正文里点了一个指向别的笔记的链接：跳到那一篇。
+ *
+ * 路径已经在编辑器里解析好了（见 shared/note.ts 的 `resolveNoteLink`），这里只管打开：
+ * 树上没有就先**重扫一遍**再看 —— 目标可能是刚在应用外面写下的（别的编辑器、同步拉回来的），
+ * 而树只信磁盘。还没有就如实说找不到，**不把选中项切到一个不存在的路径上**：
+ * 那样右栏会显示成「『』是文件夹」这种看不出所以然的话。
+ *
+ * 跳过去之后的展开与高亮交给 store 的 select（与在左栏点一下是同一条路）。
+ */
+async function openNoteLink(rel: string): Promise<void> {
+  if (!findNoteNode(store.nodes, rel)) await store.reload()
+  if (!findNoteNode(store.nodes, rel)) {
+    ElMessage.warning(`找不到这篇笔记：${rel}`)
+    return
+  }
+
+  store.select(rel)
+}
+
 /** 编辑器实例：同步前后要借它一双手（先把攒着的那一份交出去 / 换掉远端改过的那一篇） */
 const editorRef = ref<InstanceType<typeof NoteEditor> | null>(null)
 
-/** 没配仓库时那颗按钮的提示：点下去只会得到一句「去哪儿配」，那就先写在提示里 */
+/**
+ * 同步按钮的提示：**同步到哪儿先说清楚**。
+ *
+ * 地址不是用户在这里填的，而是这个文件夹自己连着的远端 —— 文件夹里任何一个 origin 都会被
+ * 当成笔记仓库（用户可能早先为别的用途连过一个），所以这一句不能省。
+ * 有仓库但还没连远端时也照实说：那颗按钮仍然点得动，点下去 Rust 会报一句带解决办法的话，
+ * 这样用户在终端里补上 origin 之后不必重启 —— 这也是它不禁用的原因。
+ */
 const syncTitle = computed(() =>
-  settings.settings.noteSyncRepo
-    ? '与远端同步（提交本机改动、拉回别处的改动）'
-    : '同步笔记（先到设置 → 笔记里填仓库地址）'
+  store.remoteUrl
+    ? `同步到 ${store.remoteUrl}（提交本机改动、拉回别处的改动）`
+    : '这个文件夹是 git 仓库，但还没连远端仓库'
 )
 
 /**
@@ -252,7 +279,7 @@ const syncTitle = computed(() =>
  *  3. 回来若远端改过打开着的那一篇，**把新正文塞回编辑器** —— 否则编辑器手上是旧的，
  *     下一次输入就会以旧内容为准把远端那份盖回去。
  *
- * 失败一律是「说清楚」而不是静默：没配地址、git 报的错、冲突的那几个文件名都在里面。
+ * 失败一律是「说清楚」而不是静默：不是仓库、没连远端、git 报的错、冲突的那几个文件名都在里面。
  */
 async function syncNow(): Promise<void> {
   editorRef.value?.flushAll()
@@ -406,7 +433,8 @@ function onResizeDown(event: PointerEvent): void {
               {{ store.noteCount }} 篇笔记
             </span>
             <span class="notes__tools">
-              <el-tooltip :content="syncTitle" placement="top">
+              <!-- 没仓库的文件夹就是本机的笔记：这颗按钮连同它的提示一起不出现 -->
+              <el-tooltip v-if="store.canSync" :content="syncTitle" placement="top">
                 <el-button size="small" text :disabled="store.syncing" @click="syncNow">
                   <el-icon :class="{ 'is-loading': store.syncing }"><RefreshRight /></el-icon>
                 </el-button>
@@ -470,6 +498,7 @@ function onResizeDown(event: PointerEvent): void {
           :root="store.root"
           :theme="settings.effectiveTheme"
           @change="onContentChange"
+          @open="openNoteLink"
         />
 
         <div v-else class="empty notes__hint">

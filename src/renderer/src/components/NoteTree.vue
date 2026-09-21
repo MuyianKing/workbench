@@ -17,7 +17,8 @@
  *      它那套「当前节点」是它自己的概念，与「编辑器里打开的是哪一篇」是两回事，
  *      两套状态叠在一起会出现「高亮在一处、编辑器在另一处」）；
  *   4. **展开态跟着选中项走**：每次数据换成新对象时 `el-tree` 会重建节点、丢掉展开态，
- *      所以展开的 id 以 `default-expanded-keys` 的形式交给它重建时恢复。
+ *      所以展开的 id 以 `default-expanded-keys` 的形式交给它重建时恢复；
+ *      顺带把选中项那一行滚进视野（正文里的笔记链接跳过来时，它在树里多半在视野外）。
  *
  * 增删改本身由上层执行（那是跨组件的联动：改完要重新扫、要接着认当前打开的那一篇），
  * 这一层只把「想做什么」报上去。**展开态也一样**：这里是 `expanded` 进、`update:expanded` 出，
@@ -34,6 +35,9 @@ import {
   type NoteNode
 } from '@shared/note'
 import { useFloatingDismiss } from '@/composables/use-floating-dismiss'
+
+/** 树容器：把选中项滚进视野时要在这里面找它那一行 */
+const treeRoot = ref<HTMLDivElement | null>(null)
 
 const props = defineProps<{
   /** 笔记本里的顶层条目（文件夹在前、同层按名字，顺序由后端 + shared 定下） */
@@ -90,8 +94,31 @@ function collapse(id: string): void {
 }
 
 /**
- * 折叠状态跟着选中项走：选中一篇笔记（不管是自己点的还是刚新建出来的）就把
- * **它所在的那几层**文件夹展开 —— 否则会出现「编辑器里打开了某一篇，左栏里却找不到它」。
+ * 把选中项那一行滚进视野。
+ *
+ * 左栏只是一条窄栏，树长起来就得滚：正文里点一条指向别的笔记的链接跳过去时，
+ * 目标那一行多半在视野外面 —— 展开了却看不见它，跳转就像只换了一半。
+ *
+ * 展开祖先那几层是一条**异步链路**（这里 emit 出去 → 上层落盘进设置 → 回推成 prop →
+ * `el-tree` 重建节点 → 那一行才进 DOM），所以不能等一拍就找。隔几帧找一次，找到就停；
+ * 几次都没出现就算了（那是目标根本不在树里，上层已经另有一句提示）。
+ *
+ * `block: 'nearest'`：本来就看得见的行一点都不动 —— 自己点树上的行时表现与以前一模一样。
+ */
+async function revealActive(): Promise<void> {
+  const STEP = 40
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    await new Promise((resolve) => window.setTimeout(resolve, STEP))
+    const element = treeRoot.value?.querySelector('.node.is-active')
+    if (!element) continue
+    element.scrollIntoView({ block: 'nearest' })
+    return
+  }
+}
+
+/**
+ * 折叠状态跟着选中项走：选中一篇笔记（不管是自己点的、刚新建出来的，还是正文里的链接跳过来的）
+ * 就把**它所在的那几层**文件夹展开 —— 否则会出现「编辑器里打开了某一篇，左栏里却找不到它」。
  *
  * 末尾那个（选中项自己）要摘掉：选中一个文件夹时用不着把它自己撑开，反过来，
  * 点一行同时会切换展开态（`expand-on-click-node`）—— 选中的正是这一行时，
@@ -107,6 +134,7 @@ watch(
         .slice(0, -1)
         .map((node) => node.id)
     )
+    void revealActive()
   },
   { immediate: true }
 )
@@ -297,6 +325,7 @@ onBeforeUnmount(() => window.removeEventListener('dragend', onDragEnd))
 
 <template>
   <div
+    ref="treeRoot"
     class="tree"
     :class="{ 'is-root-drop': rootDrop }"
     @contextmenu="openRootMenu"
@@ -418,12 +447,21 @@ onBeforeUnmount(() => window.removeEventListener('dragend', onDragEnd))
   box-shadow: inset 0 0 0 1px var(--border-strong);
 }
 
+/**
+ * 滚动条贴到卡片右缘，而不是缩在卡片那 16px 内边距里（与 global.css 的 `.panel__scroll` 同一条口径）：
+ * 负右 margin 把滚动容器出血到卡片边缘，等宽的右 padding 把树的位置兜回来 ——
+ * 行宽与之前**一模一样**，只是滚动条挪到了最右边。
+ *
+ * 没有直接挂 `.panel__scroll`：那个类的 padding-right 会被下面这条 `padding` 缩写压掉
+ * （scoped 规则多一个属性选择器，优先级更高），所以两个值写在一处。
+ * `padding` 其余三边仍然是 0（el-tree 的容器自带内边距，去掉才与外层卡片对齐）。
+ */
 .tree__body {
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
-  /* 树的容器自带内边距，这里去掉一层，让它与外层卡片对齐 */
-  padding: 0;
+  margin-right: calc(-1 * var(--sp-4));
+  padding: 0 var(--sp-4) 0 0;
   background: transparent;
 }
 

@@ -18,7 +18,6 @@
 import { sanitizeAccentColor, sanitizeAccentInkMode, type AccentInkMode } from './accent-color'
 import { sanitizeAppName } from './app-name'
 import { clampCardOpacity } from './card-opacity'
-import { sanitizeSkillSyncDir } from './skills'
 import { clampTerminalHeight } from './terminal-height'
 import {
   DEFAULT_SETTINGS,
@@ -48,13 +47,7 @@ export const APPEARANCE_SETTING_KEYS = [
   'accentInk',
   'topBarStyle',
   'cardOpacity',
-  'hiddenViews',
-  /**
-   * 技能在笔记仓库里的子目录（见 shared/skills.ts）。它不是「界面长什么样」，
-   * 但它是仓库结构约定：两台机器的技能要落在同一层才互相看得见，
-   * 所以跟着配置一起同步过去，比各配各的然后互相找不到强。
-   */
-  'skillSyncDir'
+  'hiddenViews'
 ] as const
 
 export type AppearanceSettingKey = (typeof APPEARANCE_SETTING_KEYS)[number]
@@ -74,8 +67,6 @@ export interface AppearanceSettings {
   cardOpacity: number
   /** 左侧导航栏上关掉的页（见 views.ts）：这是「导航栏长什么样」，同样是配置而不是机器状态 */
   hiddenViews: ViewId[]
-  /** 技能在笔记仓库里的子目录（见 shared/skills.ts）：仓库结构约定，两台机器要一致 */
-  skillSyncDir: string
 }
 
 const THEME_SOURCES: readonly ThemeSource[] = ['system', 'light', 'dark']
@@ -112,8 +103,7 @@ export function sanitizeAppearanceSettings(raw: unknown): AppearanceSettings {
     accentInk: sanitizeAccentInkMode(value.accentInk),
     topBarStyle: sanitizeTopBarStyle(value.topBarStyle),
     cardOpacity: clampCardOpacity(value.cardOpacity),
-    hiddenViews: sanitizeHiddenViews(value.hiddenViews),
-    skillSyncDir: sanitizeSkillSyncDir(value.skillSyncDir)
+    hiddenViews: sanitizeHiddenViews(value.hiddenViews)
   }
 }
 

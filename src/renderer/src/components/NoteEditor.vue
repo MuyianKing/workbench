@@ -11,8 +11,10 @@
  *      而这个应用默认不联网，所以 `cdn` 指向随包带的那一份（见下面的 VDITOR_CDN）。
  *   2. **写盘归我们**。关掉 Vditor 自带的 localStorage 缓存，输入防抖后把原文交给上层，
  *      由 store → 适配层 → Rust 写回那个 .md 文件。
- *   3. **链接不能把界面导航走**。界面是个 WebView，点正文里的 `<a>` 会把自己替换掉，
- *      所以在这里接管点击、交给系统浏览器（与 MarkdownView 同一条出口）。
+ *   3. **链接归我们管**：**按住 Ctrl 点**才打开 —— 外部地址交给系统浏览器（与 MarkdownView
+ *      同一条出口），指向另一篇笔记的相对链接（`[标题](./别的.md)`）报给上层去打开；普通点击
+ *      什么都不做（写东西时误点不该换掉这一篇）。三件要知道的事 —— 只有 Ctrl 那一下才算、
+ *      IR 模式下的链接不是 `<a>`、Vditor 默认还会自己 `window.open` —— 见 onClick 那一段。
  *   4. **动作从右键菜单走**。工具带整条藏起来了（样式里 `display: none`），
  *      它那套动作改成菜单里的项（NoteContextMenu），菜单点一项、这里去点工具带上那颗按钮。
  *
@@ -28,7 +30,8 @@ import { Loading } from '@element-plus/icons-vue'
 import Vditor from 'vditor'
 import 'vditor/dist/index.css'
 import { imageFileName, imageMarkdown, NOTE_IMAGE_MAX_BYTES } from '@shared/note-image'
-import type { NoteDocument } from '@shared/note'
+import { resolveNoteLink, type NoteDocument } from '@shared/note'
+import { notifyWarning } from '@/notify'
 import { useSettingsStore } from '@/stores/settings'
 import NoteContextMenu from '@/components/NoteContextMenu.vue'
 
@@ -53,6 +56,13 @@ const emit = defineEmits<{
    * 而那一刻上层的选中项已经是新的一篇了（按选中项取就会把上一篇的正文写进刚点开的那一篇）。
    */
   change: [payload: { rel: string; content: string }]
+  /**
+   * 正文里点了一个指向**本笔记本里另一篇笔记**的链接（`[标题](./别的.md)`）：请上层打开它。
+   *
+   * 这里只做到「链接指向哪一篇」（相对路径的解析是纯函数，见 shared/note.ts 的 resolveNoteLink）；
+   * 那一篇在不在、要不要重扫一遍树、跳过去之后选中谁，都是上层的事。
+   */
+  open: [rel: string]
 }>()
 
 /** 图片仓库等配置住在设置里；这一页只为粘贴图片读它 */
@@ -182,21 +192,51 @@ function load(node: NoteDocument): void {
 }
 
 /**
- * 正文里的链接交给系统浏览器。
+ * 正文里的链接：**按住 Ctrl 点的那一下**才打开 —— 外部地址交给系统浏览器，
+ * 指向另一篇笔记的就在应用里跳过去。
  *
- * 无论打不打得开都要 `preventDefault`：Vditor 给正文里的链接写了 `target="_blank"`，
- * 在 WebView 里那是弹一个（WebView2 自己的）新窗口，界面就此跑偏。
+ * 普通点击一律不打开（Typora / VS Code 那一套）：这一页是拿来写东西的，点正文里的一处
+ * 本来是「把光标挪过去」，顺手把打开着的那一篇换掉、或者弹出一个浏览器，都很打扰。
+ * 光标正落在链接里（IR 把它展开成 `[文字](地址)` 的原文、正在改它）时也照这个来。
+ *
+ * **IR 模式下的链接不是一个 `<a>`**：lute 把 `[文字](地址)` 渲染成
+ * `<span data-type="a" class="vditor-ir__node">`，文字在里面的 `.vditor-ir__link`，
+ * 地址在 `.vditor-ir__marker--link`（收起时那颗 marker 宽高都是 0，只是看不见）。
+ * 所以这里按 `data-type` 找节点 —— 写成 `closest('a')` 一个都匹配不上。
+ *
+ * 读地址、按「这一篇」解析目标（用 `editingRel` 而不是 `props.note.rel`：编辑器里
+ * 现在这份正文属于哪一篇，它说了算），都只在这里做一次。
  */
 async function onClick(event: MouseEvent): Promise<void> {
-  const anchor = (event.target as HTMLElement | null)?.closest('a')
-  if (!anchor) return
+  const node = (event.target as HTMLElement | null)?.closest('[data-type="a"]')
+  if (!(node instanceof HTMLElement)) return
 
+  // IR 下这条链接不是 `<a>`、本来没有默认动作；预览 / 所见即所得模式渲染的是真 `<a>`，
+  // 那两处这一下会把界面导航走，所以照旧拦掉
   event.preventDefault()
-  const href = anchor.getAttribute('href') ?? ''
-  if (!/^(https?:|mailto:)/i.test(href)) return
 
-  const result = await window.workbench.openExternal(href)
-  if (!result.ok) console.warn('[workbench] 打开链接失败', result.error)
+  // 没按 Ctrl 就是一次普通点击：什么都不做（光标归 Vditor 管）
+  if (!event.ctrlKey) return
+
+  const href = node.querySelector(':scope > .vditor-ir__marker--link')?.textContent ?? ''
+  if (/^(https?:|mailto:)/i.test(href)) {
+    const result = await window.workbench.openExternal(href)
+    if (!result.ok) console.warn('[workbench] 打开链接失败', result.error)
+    return
+  }
+
+  // 相对链接里认得的是「指向本笔记本里的一篇」那种：相对的是这一篇所在的文件夹
+  const rel = resolveNoteLink(href, editingRel)
+  if (rel) {
+    emit('open', rel)
+    return
+  }
+
+  // 剩下的（图片、附件、别的相对路径）没有能去的地方 —— 如实说一句，别让这一次点击
+  // 看着像坏了。`#锚点` 指的是这一篇自己，不必说（引用式链接 Vditor 自己也不打开，跟着它）
+  if (href && !href.startsWith('#')) {
+    notifyWarning('这个链接跳不过去：只有 .md / .markdown 的笔记能打开')
+  }
 }
 
 /** 右键菜单的落点（视口坐标）；null 表示没开 */
@@ -325,8 +365,9 @@ onMounted(() => {
     minHeight: 240,
     icon: 'ant',
     lang: 'zh_CN',
-    // 工具带藏起来之后，界面上没有别的入口提示「格式在哪」，所以在这里说一句
-    placeholder: '写点什么…markdown 直接写；图片粘贴即上传，格式走右键菜单',
+    // 工具带藏起来之后，界面上没有别的入口提示「格式在哪」，所以在这里说一句；
+    // 「Ctrl+点击」也一样 —— 那一下是隐形的，不写在这儿就没人知道
+    placeholder: '写点什么…markdown 直接写；图片粘贴即上传，格式走右键菜单；Ctrl+点击链接可打开',
     // 缓存与落盘都归我们：Vditor 自带的那份存在 localStorage 里，会与磁盘上的 .md 打架
     cache: { enable: false },
     counter: { enable: false },
@@ -349,6 +390,16 @@ onMounted(() => {
       theme: { current: isDark() ? 'dark' : 'light' },
       hljs: { enable: true, lineNumber: false, style: isDark() ? 'github-dark' : 'github' }
     },
+    /**
+     * 链接**不交给 Vditor 打开**。
+     *
+     * 它默认（`link.isOpen`）在点击链接时自己 `window.open(地址)`（见它 IR 的 click 处理）——
+     * 那一下我们拦不住：`preventDefault` 拦的是浏览器的默认动作，拦不住一个已经发出去的
+     * `window.open`。于是外链会多弹一个窗口，而笔记之间那种相对链接在 WebView 里根本取不到
+     * 东西（应用不是一个网站，`./别的.md` 那个地址不存在），弹出来只会是一个错误页。
+     * 关掉之后点击全归下面那个 onClick，Vditor 那一段只剩一次 `return`。
+     */
+    link: { isOpen: false },
     toolbar: TOOLBAR,
     input: (value) => schedule(value)
   })

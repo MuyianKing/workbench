@@ -120,7 +120,7 @@ fn write_device(id: &str) -> Result<(), String> {
 }
 
 /// 设备名：默认就是主机名（Windows 的计算机名不带空格、不带中文，正好能直接当标签和提交信息）
-fn host_name() -> String {
+pub(crate) fn host_name() -> String {
     std::env::var("COMPUTERNAME")
         .ok()
         .map(|value| value.trim().to_string())
@@ -543,22 +543,19 @@ fn image_repo_path(dir: &str, rel: &str) -> Result<String, String> {
 /// 里管的缓存，这边同步的就是用户那个文件夹 —— 于是「笔记就是磁盘上那些 `.md`」这条不变：
 /// 换台机器 `git clone` 下来、拿别的编辑器接着写，还是同一份东西，应用只是替它跑几条 git 命令。
 ///
-/// 四件必须说清楚的事：
-///   1. **还不是仓库时就地 `git init`**：用户填了地址又点了同步，这件事本身就是「把笔记放进一个
-///      git 仓库」。但**已经连着别的仓库时如实报错、不动它的 origin** —— 悄悄改地址等于把用户的
-///      笔记推到一个他没选的地方（与 `ensure_clone` 那边相反：那边是应用自己的缓存，可以随便删）；
-///   2. **先提交本机的改动**，再拉、再推。顺序反了的话工作区里的改动会挡住 rebase，
+/// **同步到哪儿不由应用决定**：就是这个文件夹自己 `remote origin` 指的地址。应用既不 `git init`
+/// 也不替用户 `remote add` —— 没有仓库的文件夹就是本机的笔记，不同步；想同步就自己先 clone
+/// 或 `git init` + `remote add origin`（这也顺带保住了「悄悄把笔记推到用户没选的地方」这条禁令：
+/// 应用手里根本没有可以改 origin 的代码路径）。
+///
+/// 三件必须说清楚的事：
+///   1. **先提交本机的改动**，再拉、再推。顺序反了的话工作区里的改动会挡住 rebase，
 ///      而「还没提的那一份」在冲突里没有落脚点，撤回来就没了；
-///   3. **冲突不替用户挑边**：中止这次 rebase（本地那笔提交留着）、把冲突的文件名如实报回去。
+///   2. **冲突不替用户挑边**：中止这次 rebase（本地那笔提交留着）、把冲突的文件名如实报回去。
 ///      笔记是文字，自动挑一边就是悄悄改掉人家的内容；
-///   4. 文件夹里留着**别人没做完的 rebase / merge** 时拒绝动手：那是用户的现场，
+///   3. 文件夹里留着**别人没做完的 rebase / merge** 时拒绝动手：那是用户的现场，
 ///      我们既不该在 detach 的 HEAD 上提交，也不该替他 abort。
-pub fn sync_notes(repo: &str, dir: &str) -> Result<Value, String> {
-    let repo = repo.trim();
-    if repo.is_empty() {
-        return Err("还没有配置笔记仓库（设置 → 笔记）".into());
-    }
-
+pub fn sync_notes(dir: &str) -> Result<Value, String> {
     let dir = dir.trim();
     if dir.is_empty() {
         return Err("还没有选择笔记文件夹".into());
@@ -567,11 +564,17 @@ pub fn sync_notes(repo: &str, dir: &str) -> Result<Value, String> {
     if !root.is_dir() {
         return Err(format!("找不到笔记文件夹：{dir}"));
     }
-    if in_rebase(&root) {
-        return Err("这个笔记文件夹里还有一次没做完的 rebase：先手工处理完（`git rebase --continue` 或 `git rebase --abort`）再同步".into());
+    // `.git` 是个目录（普通仓库）也可能是个文件（worktree / 子模块），两种都算「已经是仓库」。
+    // 判据只看这个文件夹自己：`rev-parse --show-toplevel` 指到别处也不采用 —— 见 commit_notes 里
+    // `add -A` 不带 pathspec 的后果，在别人的仓库子目录里跑一次就会把整个仓库提交走
+    if !root.join(".git").exists() {
+        return Err("这个笔记文件夹还不是 git 仓库：笔记只在本机。想同步就先把它做成仓库（`git init` 后接上远端，或直接 clone 一个下来）".into());
     }
-    if run_git_quiet(&["rev-parse", "--verify", "--quiet", "MERGE_HEAD"], &root) {
-        return Err("这个笔记文件夹里还有一次没做完的合并：先手工处理完再同步".into());
+    if !run_git_quiet(&["remote", "get-url", "origin"], &root) {
+        return Err("这个笔记文件夹还没连远端仓库：在它里面跑 `git remote add origin <地址>` 就能同步".into());
+    }
+    if let Some(message) = busy_message(&root, "这个笔记文件夹") {
+        return Err(message);
     }
 
     // 必须在任何 git 调用之前设好：下面的 fetch / pull / push 都要走网络
@@ -579,7 +582,7 @@ pub fn sync_notes(repo: &str, dir: &str) -> Result<Value, String> {
 
     let mut log: Vec<String> = Vec::new();
     let was_empty = head_of(&root).is_empty();
-    prepare_notes_repo(&root, repo)?;
+    ensure_commit_identity(&root)?;
 
     // 先看看远端有什么：分支要按它来定。拉不动不算错（空仓库、没网都走这条）——
     // 真正的失败留给下面那几步，那里的报错更说得清原因
@@ -589,7 +592,7 @@ pub fn sync_notes(repo: &str, dir: &str) -> Result<Value, String> {
         }
     }
 
-    let branch = note_branch(&root)?;
+    let branch = current_branch(&root)?;
     // 刚接上远端的分支（本地本来还没有提交，这一步之后站上去了）：远端那一批就是这次取下来的
     let adopted_remote = was_empty && !head_of(&root).is_empty();
 
@@ -603,13 +606,13 @@ pub fn sync_notes(repo: &str, dir: &str) -> Result<Value, String> {
      * 最需要被说一句「拉回来了」的时候。
      */
     let before_pull = head_of(&root);
-    pull_notes(&root, &branch, &mut log)?;
+    pull_with_rebase(&root, &branch, &mut log)?;
     let received = adopted_remote || before_pull != head_of(&root);
 
     // 一份提交都没有（笔记本是空的、远端也空）：没有可推的，如实回一个「什么都没做」的结果，
     // 不然 `git push` 会报一句「refspec 匹配不上任何东西」，看着像出错
     if !head_of(&root).is_empty() {
-        push_notes(&root, &branch, &mut log)?;
+        push_with_retry(&root, &branch, &mut log)?;
     }
 
     Ok(json!({
@@ -620,31 +623,43 @@ pub fn sync_notes(repo: &str, dir: &str) -> Result<Value, String> {
     }))
 }
 
-/// 让这个文件夹成为一个连到 `repo` 的仓库：没有仓库就地 init，没有 origin 就接上，
-/// 连着**别的**仓库就报错（那是个人的文件夹，不能替他把 origin 改掉）。
-fn prepare_notes_repo(root: &Path, repo: &str) -> Result<(), String> {
-    // `.git` 是个目录（普通仓库）也可能是个文件（worktree / 子模块），两种都算「已经是仓库」
+/// 笔记文件夹的 git 状态：有没有仓库、origin 是什么。界面拿它决定给不给同步入口、同步到哪儿。
+///
+/// 只看这个文件夹自己（`.git` 在它里面）。**不放宽成「它在某个仓库里」**：那会把这个文件夹
+/// 当成外层仓库的工作区，而 `commit_notes` 的 `add -A` 不带 pathspec —— 一次同步就会提交、
+/// 推送整棵外层工作树。判据与 `sync_notes` 入口那两道完全一致，两处别各拍一个。
+///
+/// 不是仓库**不是错误**：没仓库的笔记就是本机的笔记，回 `isRepo: false` 照常返回
+/// （调用方也是按「探不到就按本机笔记处理」用的，别把它变成一页错误）。
+pub fn repo_state(dir: &str) -> Result<Value, String> {
+    let dir = dir.trim();
+    if dir.is_empty() {
+        return Err("还没有选择笔记文件夹".into());
+    }
+    let root = PathBuf::from(dir);
+    if !root.is_dir() {
+        return Err(format!("找不到笔记文件夹：{dir}"));
+    }
+
     if !root.join(".git").exists() {
-        run_git(&["init", "--quiet"], Some(root), GIT_TIMEOUT)?;
+        return Ok(json!({ "isRepo": false, "origin": "" }));
     }
 
-    if run_git_quiet(&["remote", "get-url", "origin"], root) {
-        if !same_remote(root, repo) {
-            let current =
-                run_git(&["remote", "get-url", "origin"], Some(root), GIT_TIMEOUT).unwrap_or_default();
-            return Err(format!(
-                "这个笔记文件夹已经连着另一个仓库（{}），与设置里填的 {} 不是同一个。要换过来，请在这个文件夹里自己跑 `git remote set-url origin <新地址>`。",
-                current.trim(),
-                repo
-            ));
-        }
-    } else {
-        run_git(&["remote", "add", "origin", repo], Some(root), GIT_TIMEOUT)?;
-    }
+    // 纯本地只读，不注入凭据（`set_git_auth` 只给要出网的那几步用）
+    let origin = run_git(&["remote", "get-url", "origin"], Some(&root), GIT_TIMEOUT)
+        .map(|text| text.trim().to_string())
+        .unwrap_or_default();
 
-    // 提交是应用替用户产生的：他没配过 git 身份时给一个兜底，否则 commit 会直接失败。
-    // 只写这个仓库的本地配置（`--local` 是默认），用户自己的全局身份一概不动 ——
-    // 配过就照他的身份提交（这一条与 ensure_clone 那个应用自己的克隆不同）
+    Ok(json!({ "isRepo": true, "origin": origin }))
+}
+
+/// 提交是应用替用户产生的：他没配过 git 身份时给一个兜底，否则 commit 会直接失败。
+/// 只写这个仓库的本地配置（`--local` 是默认），用户自己的全局身份一概不动 ——
+/// 配过就照他的身份提交（与 `ensure_clone` 那个应用自己的克隆不同）。
+///
+/// 凡是要产生提交的地方都得先走一遍：笔记同步、以及 `skills.rs` 那边每次技能改动的自动提交。
+/// （技能那条路**不一定**经过同步 —— 有仓库没远端、或者用户根本不同步时，提交照样发生。）
+pub(crate) fn ensure_commit_identity(root: &Path) -> Result<(), String> {
     if !run_git_quiet(&["config", "user.email"], root) {
         run_git(&["config", "user.email", "workbench@localhost"], Some(root), GIT_TIMEOUT)?;
         run_git(&["config", "user.name", "Workbench"], Some(root), GIT_TIMEOUT)?;
@@ -653,45 +668,12 @@ fn prepare_notes_repo(root: &Path, repo: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// 这个文件夹的 origin 与设置里填的是不是同一个仓库。
-///
-/// 先按 `clone_matches` 那条口径比（去尾斜杠与 `.git`）；**本地路径**再多走一步：
-/// Windows 上 `C:/a/b` 与 `C:\a\b` 是同一个目录，字符串却不一样，而笔记仓库完全可能
-/// 就是本机或网盘上的一个裸仓库 —— 不放宽的话，用户把地址换一种写法填进来就会被
-/// 「已经连着另一个仓库」挡在门外（这条是实测踩到的，不是设想）。
-/// 网络地址（https / ssh / scp 那种）仍然按原样比，自建服务器的路径可能区分大小写。
-fn same_remote(root: &Path, repo: &str) -> bool {
-    if clone_matches(root, repo) {
-        return true;
-    }
-
-    let current = run_git(&["remote", "get-url", "origin"], Some(root), GIT_TIMEOUT).unwrap_or_default();
-    match (local_path_key(&current), local_path_key(repo)) {
-        (Some(left), Some(right)) => left == right,
-        _ => false,
-    }
-}
-
-/// 本地路径远端的归一化写法：统一分隔符、统一大小写，于是同一个目录的各种写法落在同一个串上。
-/// 不是本地路径（URL / scp 那种）时返回 None —— 那些必须按原样比。
-fn local_path_key(raw: &str) -> Option<String> {
-    let value = normalize_repo(raw);
-    let looks_local = value.starts_with('/')
-        || value.starts_with("\\\\")
-        // 盘符开头（`C:`）：`git@host:path` 的第二字符不是冒号，不会被认成路径
-        || value.as_bytes().get(1) == Some(&b':');
-    if !looks_local {
-        return None;
-    }
-    Some(value.replace('\\', "/").to_lowercase())
-}
-
 /// 同步用哪个分支。
 /// 这是**用户的**工作区：已经有提交时就按它当前站着的分支走 —— 他在自己文件夹里切过分支、
 /// 或者在别的分支上写东西，应用不该把他切回去。还没有提交（刚 init 出来的）才交给
 /// `sync_branch`：跟着远端已有的分支走，远端一个分支都没有（真·空仓库）才新建 main ——
 /// 与另外两处同步同一条口径（那里记着 `rev-parse --abbrev-ref HEAD` 会骗人的原因）。
-fn note_branch(root: &Path) -> Result<String, String> {
+pub(crate) fn current_branch(root: &Path) -> Result<String, String> {
     if !head_of(root).is_empty() {
         if let Ok(name) = run_git(&["symbolic-ref", "--short", "HEAD"], Some(root), GIT_TIMEOUT) {
             let name = name.trim();
@@ -732,7 +714,7 @@ fn commit_notes(root: &Path, log: &mut Vec<String>) -> Result<usize, String> {
 /// **只有这次是我们起的 rebase 才中止**：文件夹里本来就留着一次没做完的 rebase 时，
 /// 那是用户的现场，替他 abort 等于扔掉他手上的半成品（`sync_notes` 在入口已经拦了一道，
 /// 这里再判一次是因为中间还隔着 fetch 与 commit 两个可能出错的步骤）。
-fn pull_notes(root: &Path, branch: &str, log: &mut Vec<String>) -> Result<(), String> {
+pub(crate) fn pull_with_rebase(root: &Path, branch: &str, log: &mut Vec<String>) -> Result<(), String> {
     // 远端还没有这个分支（第一次推送之前）就没东西可拉
     let remote_ref = format!("refs/remotes/origin/{branch}");
     if !run_git_quiet(&["rev-parse", "--verify", "--quiet", &remote_ref], root) {
@@ -777,13 +759,29 @@ fn pull_notes(root: &Path, branch: &str, log: &mut Vec<String>) -> Result<(), St
 }
 
 /// 推上去；推不动（远端在拉之后又动了）时再拉一次 rebase 重试 —— 与另外两处同步同一个套路。
-fn push_notes(root: &Path, branch: &str, log: &mut Vec<String>) -> Result<(), String> {
+pub(crate) fn push_with_retry(root: &Path, branch: &str, log: &mut Vec<String>) -> Result<(), String> {
     if let Err(err) = push(root, branch) {
         log.push(err);
-        pull_notes(root, branch, log)?;
+        pull_with_rebase(root, branch, log)?;
         log.push(push(root, branch)?);
     }
     Ok(())
+}
+
+/// 这个工作区里还留着半截 rebase / 合并时，回一句给用户看的话（否则 None）。
+///
+/// 那是**用户的现场**：既不该在 detach 的 HEAD 上提交，也不该替他 abort —— 同步入口一律先问它。
+/// `subject` 是称呼这个工作区的说法（「这个笔记文件夹」/「技能库所在的仓库」），两处同步共用。
+pub(crate) fn busy_message(root: &Path, subject: &str) -> Option<String> {
+    if in_rebase(root) {
+        return Some(format!(
+            "{subject}里还有一次没做完的 rebase：先手工处理完（`git rebase --continue` 或 `git rebase --abort`）再同步"
+        ));
+    }
+    if run_git_quiet(&["rev-parse", "--verify", "--quiet", "MERGE_HEAD"], root) {
+        return Some(format!("{subject}里还有一次没做完的合并：先手工处理完再同步"));
+    }
+    None
 }
 
 /// 当前 HEAD 的提交号；还没有提交（刚 init 出来的空仓库）时是空串。
@@ -1158,22 +1156,32 @@ fn safe_name(device: &str) -> String {
 mod tests {
     use super::*;
 
-    /// 本地路径远端按「不分大小写、不分分隔符」比；网络地址仍归 `normalize_repo` 那条严口径管
+    /// 本地路径远端按「不分大小写、不分分隔符」比 —— 这条口径现在只服务应用自己的克隆目录
+    /// （用量 / 图片同步那边），笔记那边已经没有「设置里的地址 vs 磁盘上的地址」要比了。
     #[test]
-    fn local_remote_paths_compare_loosely() {
-        assert_eq!(
-            local_path_key(r"C:\Users\me\notes.git"),
-            local_path_key("c:/users/me/notes.git")
-        );
-        assert_eq!(
-            local_path_key("C:/a/b/"),
-            local_path_key(r"C:\a\b"),
-            "尾斜杠该被 normalize_repo 去掉"
-        );
-        assert!(local_path_key("https://github.com/a/b").is_none());
-        assert!(local_path_key("git@github.com:a/b.git").is_none());
-        // 盘符开头才当路径：`git@host:path` 的第二字符不是冒号
-        assert!(local_path_key("https://host/A/b").is_none());
+    fn clone_matches_forgets_case_and_slashes() {
+        if proc::probe_version("git").is_none() {
+            eprintln!("跳过：本机没有 git");
+            return;
+        }
+
+        let dir = std::env::temp_dir().join(format!("wb-clone-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        run_git(&["init", "--quiet"], Some(&dir), GIT_TIMEOUT).unwrap();
+        run_git(
+            &["remote", "add", "origin", "https://github.com/a/b.git"],
+            Some(&dir),
+            GIT_TIMEOUT,
+        )
+        .unwrap();
+
+        assert!(clone_matches(&dir, "https://github.com/a/b"));
+        assert!(clone_matches(&dir, "  https://github.com/a/b/  "), "尾斜杠该被 normalize_repo 去掉");
+        assert!(!clone_matches(&dir, "https://github.com/a/c"));
+        assert!(!clone_matches(&dir, "https://gitee.com/a/b"));
+        assert!(!clone_matches(&dir, "https://host/A/b"), "网络地址区分大小写");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// 读一篇笔记的正文，换行统一成 LF 再比。
@@ -1758,7 +1766,11 @@ mod tests {
     ///
     /// 钉住五件事：首次同步就地 init 并把地址接上、本机改动提交后推得出去、另一台空文件夹
     /// 拉得到、**撞上冲突时中止 rebase 而不是替用户挑一边**（本地那笔提交与工作区都要保住）、
-    /// 以及文件夹连着别的仓库时只报错、不动它的 origin。
+    /// 以及「不是仓库 / 有仓库没连远端」两种不肯动手的情形。
+    ///
+    /// 仓库与远端一律由测试自己建（`git init` + `remote add` / `git clone`）—— 应用不再替用户做这两步，
+    /// 这也正是新的边界：没有仓库的文件夹就是本机的笔记。所以这个测试同时钉住「应用一个字都不写进
+    /// 用户的 git 配置」这件事的反面：它只在 `origin` 上干活。
     #[test]
     fn syncs_notes_between_two_machines() {
         if proc::probe_version("git").is_none() {
@@ -1770,7 +1782,6 @@ mod tests {
         let remote = root.join("notes.git");
         let (a, b) = (root.join("machine-a"), root.join("machine-b"));
         std::fs::create_dir_all(&a).unwrap();
-        std::fs::create_dir_all(&b).unwrap();
 
         let init = proc::run_direct(
             "git",
@@ -1790,15 +1801,19 @@ mod tests {
         let a_path = a.to_str().unwrap();
         let b_path = b.to_str().unwrap();
 
-        // A：笔记本里先有一篇，第一次同步应该就地 init、提交、推上去
+        // A：笔记本里先有一篇，自己接上远端之后第一次同步 → 提交、推上去
         std::fs::write(a.join("周报.md"), "本周：写同步\n").unwrap();
-        let first = sync_notes(&repo, a_path).unwrap();
+        run_git(&["init", "--quiet"], Some(&a), GIT_TIMEOUT).unwrap();
+        run_git(&["remote", "add", "origin", &repo], Some(&a), GIT_TIMEOUT).unwrap();
+        let first = sync_notes(a_path).unwrap();
         assert_eq!(first["files"], json!(1), "本机那一篇该被提交: {first:?}");
         assert_eq!(first["received"], json!(false), "远端本来是空的: {first:?}");
-        assert!(a.join(".git").exists(), "首次同步该把文件夹变成仓库");
 
-        // B：一个**还没 init** 的文件夹 + 远端已经有 main —— 跟着远端那个分支走，把笔记落下来
-        let second = sync_notes(&repo, b_path).unwrap();
+        // B：一个**还没有提交**的仓库 + 远端已经有 main —— 跟着远端那个分支走，把笔记落下来
+        std::fs::create_dir_all(&b).unwrap();
+        run_git(&["init", "--quiet"], Some(&b), GIT_TIMEOUT).unwrap();
+        run_git(&["remote", "add", "origin", &repo], Some(&b), GIT_TIMEOUT).unwrap();
+        let second = sync_notes(b_path).unwrap();
         assert_eq!(second["received"], json!(true), "第一次同步该说「拉回来了」: {second:?}");
         assert_eq!(second["files"], json!(0), "B 自己没有改动: {second:?}");
         assert_eq!(second["branch"], json!("main"));
@@ -1806,23 +1821,17 @@ mod tests {
 
         // B 写一篇新的推上去 → A 拉得到（不只是「能推」，是两边真的走得通）
         std::fs::write(b.join("随手记.md"), "B 写的\n").unwrap();
-        sync_notes(&repo, b_path).unwrap();
-        let third = sync_notes(&repo, a_path).unwrap();
+        sync_notes(b_path).unwrap();
+        let third = sync_notes(a_path).unwrap();
         assert_eq!(third["received"], json!(true), "A 该拿到 B 那一篇: {third:?}");
         assert!(a.join("随手记.md").is_file());
-
-        // 同一个仓库换个写法（Windows 上 `C:/a/b` 与 `C:\a\b` 是同一处）：得认出来是同一个，
-        // 不能报「已经连着另一个仓库」—— 用户完全可能把地址换个写法填进来（踩过）
-        let slashed = repo.replace('\\', "/");
-        let rewritten = sync_notes(&slashed, a_path).unwrap();
-        assert_eq!(rewritten["files"], json!(0), "换个写法还是同一个仓库: {rewritten:?}");
 
         // 两边改同一篇 → 后同步的那台：如实报错、rebase 中止、本地提交与工作区都还在
         std::fs::write(a.join("周报.md"), "A 改的\n").unwrap();
         std::fs::write(b.join("周报.md"), "B 改的\n").unwrap();
-        sync_notes(&repo, a_path).unwrap();
+        sync_notes(a_path).unwrap();
 
-        let conflict = sync_notes(&repo, b_path).unwrap_err();
+        let conflict = sync_notes(b_path).unwrap_err();
         assert!(
             conflict.contains("周报.md"),
             "冲突提示里要点出是哪一篇: {conflict}"
@@ -1842,27 +1851,82 @@ mod tests {
             "B 这边的三笔（A 那一篇 + B 的随手记 + 这次的改动）都要留着"
         );
         // 再同步一次：不会说「有一次没做完的 rebase」，还是同一句冲突提示（说明现场是干净的）
-        let again = sync_notes(&repo, b_path).unwrap_err();
+        let again = sync_notes(b_path).unwrap_err();
         assert!(again.contains("周报.md"), "{again}");
 
-        // 连着别的仓库的文件夹：只报错，origin 一个字都不改
-        let other = root.join("machine-c");
-        std::fs::create_dir_all(&other).unwrap();
-        run_git(&["init", "--quiet"], Some(&other), GIT_TIMEOUT).unwrap();
-        run_git(
-            &["remote", "add", "origin", "https://example.com/other.git"],
-            Some(&other),
-            GIT_TIMEOUT,
-        )
-        .unwrap();
-        let mismatch = sync_notes(&repo, other.to_str().unwrap()).unwrap_err();
-        assert!(mismatch.contains("另一个仓库"), "{mismatch}");
-        let kept = run_git(&["remote", "get-url", "origin"], Some(&other), GIT_TIMEOUT).unwrap();
-        assert_eq!(kept, "https://example.com/other.git");
+        // 还不是仓库的文件夹：不动手，也不顺手 init（这是新的边界 —— 应用不再创建仓库）
+        let plain = root.join("machine-c");
+        std::fs::create_dir_all(&plain).unwrap();
+        std::fs::write(plain.join("本地笔记.md"), "只在本机\n").unwrap();
+        let not_repo = sync_notes(plain.to_str().unwrap()).unwrap_err();
+        assert!(not_repo.contains("还不是 git 仓库"), "{not_repo}");
+        assert!(!plain.join(".git").exists(), "只报错，不该顺手 init：{not_repo}");
 
-        // 没配地址 / 文件夹不在：各给一句能看懂的话
-        assert!(sync_notes("  ", a_path).is_err());
-        assert!(sync_notes(&repo, root.join("没有这个目录").to_str().unwrap()).is_err());
+        // 有仓库、但没连远端：也不动手（应用不再替用户 remote add）
+        let orphan = root.join("machine-d");
+        std::fs::create_dir_all(&orphan).unwrap();
+        run_git(&["init", "--quiet"], Some(&orphan), GIT_TIMEOUT).unwrap();
+        let no_remote = sync_notes(orphan.to_str().unwrap()).unwrap_err();
+        assert!(no_remote.contains("还没连远端"), "{no_remote}");
+
+        // 空的目录参数 / 文件夹不在：各给一句能看懂的话
+        assert!(sync_notes("  ").is_err());
+        assert!(sync_notes(root.join("没有这个目录").to_str().unwrap()).is_err());
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// 探测只看**这个文件夹自己**有没有 `.git`，以及它的 origin 是谁。
+    ///
+    /// 这一条是核心边界：不放宽成「它处在某个仓库里」—— 那会把外层仓库当成笔记仓库，
+    /// 而同步用的是 `add -A` 不带 pathspec（等于整棵工作树）。
+    #[test]
+    fn repo_state_looks_at_the_folder_itself() {
+        let root = std::env::temp_dir().join(format!("wb-repo-state-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+
+        // 文件夹不在：如实报错（调用方会把它当成「没法同步」，不是一页错误）
+        assert!(repo_state("  ").is_err());
+        assert!(repo_state(root.join("没有这个目录").to_str().unwrap()).is_err());
+
+        // 没有 .git：本机的笔记
+        let plain = root.join("plain");
+        std::fs::create_dir_all(&plain).unwrap();
+        let state = repo_state(plain.to_str().unwrap()).unwrap();
+        assert_eq!(state["isRepo"], json!(false));
+        assert_eq!(state["origin"], json!(""));
+
+        // 有 .git 但没连远端：是仓库（提交照旧），只是不能同步
+        let bare = root.join("bare");
+        std::fs::create_dir_all(bare.join(".git")).unwrap();
+        let state = repo_state(bare.to_str().unwrap()).unwrap();
+        assert_eq!(state["isRepo"], json!(true));
+        assert_eq!(state["origin"], json!(""));
+
+        if proc::probe_version("git").is_none() {
+            eprintln!("跳过：本机没有 git");
+            let _ = std::fs::remove_dir_all(&root);
+            return;
+        }
+
+        // 真仓库：origin 原样读回来（本地路径写法不归一 —— 显示给用户看的就是 git 里存的那份）
+        let real = root.join("real");
+        std::fs::create_dir_all(&real).unwrap();
+        run_git(&["init", "--quiet"], Some(&real), GIT_TIMEOUT).unwrap();
+        let target = root.join("notes.git");
+        let target_text = target.to_string_lossy().into_owned();
+        run_git(&["remote", "add", "origin", &target_text], Some(&real), GIT_TIMEOUT).unwrap();
+        let state = repo_state(real.to_str().unwrap()).unwrap();
+        assert_eq!(state["isRepo"], json!(true));
+        assert_eq!(state["origin"], json!(target_text), "{state:?}");
+
+        // 仓库里的一个子目录：它自己没有 `.git`，所以是「本机的笔记」——
+        // 绝不能因为处在仓库里就被当成那个仓库的一部分（`add -A` 会把整棵工作树带走）
+        let nested = real.join("子目录");
+        std::fs::create_dir_all(&nested).unwrap();
+        let state = repo_state(nested.to_str().unwrap()).unwrap();
+        assert_eq!(state["isRepo"], json!(false), "子目录不算仓库: {state:?}");
+        assert_eq!(state["origin"], json!(""), "{state:?}");
 
         let _ = std::fs::remove_dir_all(&root);
     }

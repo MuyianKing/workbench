@@ -91,7 +91,7 @@ async function submit(): Promise<void> {
     penetrable
     @closed="reset"
   >
-    <el-form class="form" :model="form" @submit.prevent>
+    <el-form class="form" :model="form" label-position="top" @submit.prevent>
       <el-form-item label="程序">
         <div class="field__stack">
           <div class="field__row">

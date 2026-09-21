@@ -211,13 +211,20 @@ pub fn note_scan_texts(root: String) -> Result<Value, String> {
     crate::notes::scan_texts(&root)
 }
 
-/// 笔记同步：把**这个笔记文件夹本身**与用户配置的仓库对齐（提交 → pull --rebase → 推送）。
+/// 笔记同步：把**这个笔记文件夹本身**与它自己的 `origin` 对齐（提交 → pull --rebase → 推送）。
 ///
+/// 远端不在参数里 —— 同步到哪儿就是这个文件夹连着的那个仓库（见 sync::sync_notes）。
 /// 与另一个仓库（图片）一样，凭据要么是已登录账号的 token、要么是系统里 git 配好的那一套；
-/// 冲突与「文件夹里还留着半截 rebase」这类情况一律收敛成一句给用户看的话，见 sync::sync_notes。
+/// 冲突与「文件夹里还留着半截 rebase」这类情况一律收敛成一句给用户看的话。
 #[tauri::command(async)]
-pub fn note_sync(repo: String, dir: String) -> Result<Value, String> {
-    crate::sync::sync_notes(&repo, &dir)
+pub fn note_sync(dir: String) -> Result<Value, String> {
+    crate::sync::sync_notes(&dir)
+}
+
+/// 探测笔记文件夹的 git 状态（有没有仓库、origin 是什么）：只读，界面拿它决定给不给同步入口
+#[tauri::command(async)]
+pub fn note_repo_state(dir: String) -> Result<Value, String> {
+    crate::sync::repo_state(&dir)
 }
 
 // ---------- 技能（skill：住在笔记仓库的一个子目录里，见 skills.rs） ----------
@@ -230,6 +237,19 @@ pub fn note_sync(repo: String, dir: String) -> Result<Value, String> {
 #[tauri::command(async)]
 pub fn skill_list(root: String, dir: String) -> Result<Vec<Value>, String> {
     crate::skills::list(&root, &dir)
+}
+
+/// 技能库与它的仓库：从选中的技能库目录往上找最近的 `.git`（见 skills::state）。
+/// 回的 `repo` / `libraryRel` 就是后面每条技能通道要用的那两个值
+#[tauri::command(async)]
+pub fn skill_state(dir: String) -> Result<Value, String> {
+    crate::skills::state(&dir)
+}
+
+/// 同步技能库所在的仓库：只提交技能库那一层，再拉、再推（见 skills::sync）
+#[tauri::command(async)]
+pub fn skill_sync(root: String, dir: String) -> Result<Value, String> {
+    crate::skills::sync(&root, &dir)
 }
 
 /// 把技能库下的当前改动提交一次（内容没变、还不是仓库都不报错，见 skills::commit）

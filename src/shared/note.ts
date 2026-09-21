@@ -17,8 +17,9 @@
  * （`noteDirs`，笔记页左栏底部的「最近打开」）。两个都只对本机成立、不参与同步。
  *
  * 这里说的「同步」是把**那个文件夹本身当成一个 git 工作区**（提交 / 拉取 / 推送都在它里面跑，
- * 见 `src-tauri/src/sync.rs` 的 `sync_notes`）：所以在不在别的机器上，只取决于用户填的那个
- * 仓库地址（设置里的 `noteSyncRepo`，空串 = 不同步）。这一份里只有地址的收敛规则与结果形状。
+ * 见 `src-tauri/src/sync.rs` 的 `sync_notes`）：所以在不在别的机器上，只取决于**那个文件夹自己
+ * 有没有 git 仓库、有没有连远端** —— 应用不创建仓库、也不替用户接远端，没仓库的文件夹就是
+ * 本机的笔记。地址不在设置里，`NoteRepoState` 就是这件事的形状。
  */
 
 /** 算作笔记的后缀。编辑器写出来的是 `.md`，`.markdown` 是照顾别处写下的文件 */
@@ -154,31 +155,27 @@ export function noteRootName(root: string): string {
   return parts.length ? parts[parts.length - 1] : clean
 }
 
-/** 笔记仓库地址上限，与 Token 同步仓库 / 图片仓库同一个口径 */
-const NOTE_REPO_MAX_LENGTH = 300
-
 /**
- * 收敛笔记仓库地址：去掉首尾空白，**空串表示不同步**（设置里它就是这个开关）。
+ * 笔记文件夹的 git 状态：探测出来的、不落盘 —— 它随时可能被用户在终端里改掉，
+ * 存进设置就又有了第二份真源（这一份取代的就是原来那个手填的仓库地址）。
  *
- * 与 Token 同步仓库（`sanitizeSyncRepo`）逐字同一条口径，理由也一样：
- * 这个值最终会被当成 git 的命令行参数 —— 含空白的地址会被 Windows 的 shell 词法拆成两个，
- * 以 `-` 开头的会被 git 当成选项。认不出来的一律按没填处理（等于关掉同步），
- * 而不是留一个每次都失败的值在那儿。
+ * 「是仓库」的判据只有一条：**这个文件夹自己有 `.git`**（目录或文件都算）。
+ * 不放宽成「它处在某个仓库里」：`commit_notes` 是 `git add -A` 且不带 pathspec，
+ * 那在现代 git 里等于整棵工作树 —— 笔记本夹在别人的仓库子目录里时，一次同步就会把
+ * 那个仓库里的东西一起提交并推走。
  */
-export function sanitizeNoteRepo(raw: unknown): string {
-  if (typeof raw !== 'string') return ''
-  const value = raw.trim()
-  if (!value || value.length > NOTE_REPO_MAX_LENGTH) return ''
-  if (/\s/.test(value) || value.startsWith('-')) return ''
-  return value
+export interface NoteRepoState {
+  /** 这个文件夹自己有 git 仓库吗 */
+  isRepo: boolean
+  /** origin 的地址；没有远端（或根本没仓库）时是空串 */
+  origin: string
 }
 
-/** 同步一次要带的东西：地址由调用方从设置里给（适配层不缓存设置） */
+/** 同步一次要带的东西：要同步哪个文件夹。远端地址不在这里 —— 它就是那个文件夹的 `origin` */
 export interface NoteSyncInput {
-  repo: string
   /**
-   * 要同步的笔记本：**就是磁盘上那个文件夹本身**，应用在它里面跑 git
-   * （还没有仓库时就地 `git init` 并接上 `repo`）。空串 = 还没选文件夹。
+   * 要同步的笔记本：**就是磁盘上那个文件夹本身**，应用在它里面跑 git。
+   * 空串 = 还没选文件夹；不是仓库 / 没连远端都按失败如实报回去。
    */
   dir: string
 }
@@ -494,4 +491,60 @@ export function noteDropAllowed(
   if (drag.kind !== 'note') return false
   if (target.kind !== 'folder') return false
   return parentRel(drag.rel) !== normalizeRel(target.rel)
+}
+
+// ---------- 正文里的链接 ----------
+
+/** 带协议头的地址（`https:` / `mailto:` / `file:`…）：那些不是本笔记本里的路径 */
+const LINK_SCHEME = /^[A-Za-z][A-Za-z0-9+.-]*:/
+
+/** 百分号编码解回原文；解不开（半截编码、名字里真的带 `%`）时按原样用 */
+function decodeHref(path: string): string {
+  try {
+    return decodeURIComponent(path)
+  } catch {
+    return path
+  }
+}
+
+/**
+ * 正文里的一个链接指向本笔记本里的哪一篇笔记；不是笔记链接时返回空串。
+ *
+ * 认的是**相对这一篇所在文件夹**的写法：`[标题](./别的.md)`、`[标题](../别的.md)`、
+ * `[标题](归档/别的.md)`、`[标题](别的.md)` 都算，从笔记本根写起的 `/别的.md` 也算。
+ * `#小节` 与 `?x` 那两截先切掉，百分号编码按文件名解回来（从浏览器或别的编辑器里
+ * 抄来的链接多半是编码过的，`%E5%91%A8%E6%8A%A5.md` 就是 `周报.md`）。
+ *
+ * 三条边界：
+ *   - 带协议头的（`https:` / `mailto:`…）与 `#` 开头的锚点不算：前者交给系统浏览器，
+ *     后者指的是这一篇自己；
+ *   - `..` 可以往上走，但越过笔记本根就不是这个笔记本里的东西了，返回空串；
+ *   - 目标必须是 `.md` / `.markdown`（文件夹、图片、别的附件都跳不过去）。
+ *
+ * 只算路径，**不问那一篇在不在**：在不在得拿树去查，而树在调用方手上。
+ */
+export function resolveNoteLink(href: unknown, fromRel: string): string {
+  if (typeof href !== 'string') return ''
+
+  const raw = href.trim()
+  if (!raw || raw.startsWith('#') || LINK_SCHEME.test(raw)) return ''
+
+  const path = decodeHref(raw.split('#')[0].split('?')[0]).replace(/\\/g, '/')
+  // 从笔记本根写起的（`/别的.md`）：基准是笔记本本身，不是这一篇所在的文件夹 ——
+  // 按当前文件夹解析会在「两边都有同名的一篇」时悄悄跳到不对的那一篇上去
+  const base = path.startsWith('/') ? '' : parentRel(fromRel)
+  const parts = base ? base.split('/') : []
+
+  for (const part of normalizeRel(path).split('/')) {
+    if (!part) continue
+    if (part !== '..') {
+      parts.push(part)
+      continue
+    }
+    if (!parts.length) return ''
+    parts.pop()
+  }
+
+  const rel = parts.join('/')
+  return isNoteFile(rel) ? rel : ''
 }
