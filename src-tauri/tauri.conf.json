@@ -29,6 +29,8 @@
     "windows": {
       "nsis": {
         "installMode": "currentUser",
+        "installerIcon": "icon.ico",
+        "uninstallerIcon": "icon.ico",
         "languages": ["SimpChinese", "English"]
       }
     }
