@@ -104,14 +104,26 @@ function collapse(id: string): void {
  * 几次都没出现就算了（那是目标根本不在树里，上层已经另有一句提示）。
  *
  * `block: 'nearest'`：本来就看得见的行一点都不动 —— 自己点树上的行时表现与以前一模一样。
+ *
+ * 横向则一律不许动（下面那段回零）：`inline` 也是 `nearest`，选中的那行只要稍微越出容器右缘，
+ * 浏览器就会把中间那些 `overflow: hidden` 的折叠容器横着滚一截 —— 它们没有滚动条、用户也不会去滚，
+ * 于是那一支永久左移、底色块与文字错位（踩过；溢出的来源见样式里 `el-dropdown` 那条 min-width）。
+ * 只认 `.tree__body` 这一层：它是给人滚的视口，它的横向位置不归这里管。
  */
 async function revealActive(): Promise<void> {
   const STEP = 40
   for (let attempt = 0; attempt < 8; attempt += 1) {
     await new Promise((resolve) => window.setTimeout(resolve, STEP))
-    const element = treeRoot.value?.querySelector('.node.is-active')
+    const element = treeRoot.value?.querySelector<HTMLElement>('.node.is-active')
     if (!element) continue
+
+    const viewport = treeRoot.value?.querySelector<HTMLElement>('.tree__body')
+    if (!viewport) return
+
     element.scrollIntoView({ block: 'nearest' })
+    for (let node = element.parentElement; node && node !== viewport; node = node.parentElement) {
+      if (node.scrollLeft !== 0) node.scrollLeft = 0
+    }
     return
   }
 }
@@ -469,6 +481,22 @@ onBeforeUnmount(() => window.removeEventListener('dragend', onDragEnd))
 .tree__body :deep(.el-tree-node__content) {
   height: 28px;
   border-radius: var(--r-sm);
+}
+
+/**
+ * 名字那一栏得真的能被压缩，否则 `.node__name` 上的 ellipsis 是摆设。
+ *
+ * 右键菜单套在标签外面（`el-dropdown`），它的根 div 是行盒的 flex 子项、`min-width`
+ * 默认 `auto` —— 而那一边的 min-content 是整个名字的宽度（`.node__name` 是 nowrap，
+ * `overflow: hidden` 只让它的自动最小尺寸归零、不改内禀宽度），于是它一步都不肯让，
+ * 长名字直接溢出行盒：名字自己的宽度没被压过，省略号永远不触发，看着就是被硬裁一刀。
+ *
+ * 代价不止难看：溢出的内容让每一层折叠容器（`el-tree-node__children` 是 `overflow: hidden`
+ * 的滚动容器）都变得可横向滚动，而「把选中项滚进视野」会顺手把它们滚一截 ——
+ * 那一支从此整体左移，底色块与文字错位，且再也回不去（见 revealActive）。
+ */
+.tree__body :deep(.el-tree-node__content > .el-dropdown) {
+  min-width: 0;
 }
 
 .tree__body :deep(.el-tree-node__content:hover) {

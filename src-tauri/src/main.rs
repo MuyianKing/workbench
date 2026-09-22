@@ -4,6 +4,7 @@
 mod ai_news;
 mod commands;
 mod credentials;
+mod design;
 mod encoding;
 mod http;
 mod icon;
@@ -407,6 +408,7 @@ fn main() {
             commands::fs_is_dir,
             commands::fs_stat_mtime,
             commands::fs_list_dir,
+            commands::design_write,
             commands::list_wallpapers,
             vault::vault_load,
             vault::vault_save,

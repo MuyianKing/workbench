@@ -1,55 +1,79 @@
 <script setup lang="ts">
 /**
- * 样式卡片：网格里的一块，与技能卡 / 项目卡同一副外壳（同样的圆角、投影、不透明度跟随）。
+ * 样式卡片：网格里的一块，卡面就是这套设计的一小张页面。
  *
- * 卡面不用截图（上游那套预览页本身是英文的，与「界面全中文」冲突），而是**用它自己的 token 现画**：
- * 顶上一条按它挑好的色条，名字按它的字重与字距排，角标给出明暗与色系。
- * 字号固定在小一号上 —— 品牌真实的 display 字号（48–96px）摆不进卡片，那部分留给详情弹窗。
+ * **卡面不铺应用底色，铺的是这套设计自己的画布色** —— 颜色、字阶、按钮都取它的 token，
+ * 所以网格扫过去是 74 种风格的并排（浅色系一片浅底、深色系一片深底），而不是 74 段读完
+ * 才知道差别的文字简介；完整的示例页面在详情弹窗的「预览」档里。
+ *
+ * 卡面只放首屏那一小段（导航 / 眉题 / 标题 / 副文案 / 按钮），文案与详情里那整页是同一份
+ * （见 shared/design-demo.ts 的 `buildDesignDemo`），底部一行留作检索用的元信息 ——
+ * 那行的文字色必须取这套设计的次文字色，深色画布上才读得出来。
  *
  * 整卡可点、可键盘操作，与 SkillCard 同一条交互（role=button + Enter/Space）。
  */
 import { computed } from 'vue'
-import type { CSSProperties } from 'vue'
-import {
-  designStyleFamily,
-  safeCssValue,
-  THEME_LABELS,
-  typographyScale,
-  type DesignStyle
-} from '@shared/design-styles'
+import type { DesignStyle } from '@shared/design-styles'
+import { CARD_TYPE, buildDesignDemo, buttonCss, typeCss } from '@shared/design-demo'
+import { designStyleFamily, safeCssValue, THEME_LABELS } from '@shared/design-styles'
 
 const props = defineProps<{ design: DesignStyle }>()
 const emit = defineEmits<{ (event: 'open'): void }>()
+
+const demo = computed(() => buildDesignDemo(props.design))
 
 /** 卡片上的角标：浅色 · 红 */
 const badge = computed(
   () => `${THEME_LABELS[props.design.theme]} · ${designStyleFamily(props.design)}`
 )
 
-/**
- * 名字借用这套设计的最大字阶：字体名多半没装（品牌专有字体），会回落到系统字体，
- * 但字重与字距是能看出来的，那正是「一套设计的字体气质」最省事的那部分。
- */
-const nameStyle = computed<CSSProperties>(() => {
-  const largest = typographyScale(props.design)[0]?.[1]
+const componentCount = computed(() => Object.keys(props.design.components).length)
+
+/** 这套设计的调色板走 CSS 变量，样式表里就只用 var() */
+const rootStyle = computed<Record<string, string>>(() => {
+  const { palette } = demo.value
   return {
-    fontFamily: safeCssValue(largest?.fontFamily),
-    fontWeight: safeCssValue(largest?.fontWeight),
-    letterSpacing: safeCssValue(largest?.letterSpacing)
+    '--card-canvas': palette.canvas,
+    '--card-ink': palette.ink,
+    '--card-muted': palette.muted,
+    '--card-hairline': palette.hairline,
+    '--card-accent': palette.accent
   }
 })
 
-const stats = computed(() => {
-  const { colors, typography, components } = props.design
-  return `${Object.keys(colors).length} 色 · ${Object.keys(typography).length} 字阶 · ${
-    Object.keys(components).length
-  } 组件`
-})
+const brandStyle = computed(() => ({
+  ...typeCss(demo.value.small, CARD_TYPE.brand),
+  fontWeight: safeCssValue(demo.value.small?.fontWeight) ?? '600'
+}))
+
+const linkStyle = computed(() => ({ ...typeCss(demo.value.small, 11), color: 'var(--card-muted)' }))
+
+const eyebrowStyle = computed(() => ({
+  ...typeCss(demo.value.small, 10),
+  color: 'var(--card-accent)',
+  letterSpacing: safeCssValue(demo.value.small?.letterSpacing) ?? '0.08em'
+}))
+
+const titleStyle = computed(() => ({ ...typeCss(demo.value.hero, CARD_TYPE.title), color: 'var(--card-ink)' }))
+
+const subtitleStyle = computed(() => ({
+  ...typeCss(demo.value.body, CARD_TYPE.text),
+  color: 'var(--card-muted)'
+}))
+
+const primaryStyle = computed(() =>
+  buttonCss(demo.value.primary, demo.value.metrics.buttonRadius, CARD_TYPE.button, CARD_TYPE.buttonHeight)
+)
+
+const secondaryStyle = computed(() =>
+  buttonCss(demo.value.secondary, demo.value.metrics.buttonRadius, CARD_TYPE.button, CARD_TYPE.buttonHeight)
+)
 </script>
 
 <template>
   <article
     class="card"
+    :style="rootStyle"
     role="button"
     tabindex="0"
     :aria-label="`查看 ${design.title} 的设计样式`"
@@ -57,26 +81,28 @@ const stats = computed(() => {
     @keydown.enter.prevent="emit('open')"
     @keydown.space.prevent="emit('open')"
   >
-    <!-- 色条：上游按这套设计挑好的代表色，等分铺满卡宽 -->
-    <div class="card__strip" aria-hidden="true">
-      <i v-for="(color, index) in design.strip" :key="`${color}-${index}`" :style="{ background: color }" />
+    <!-- 一行的导航：主色标志、品牌名、一个次级链接 -->
+    <div class="card__nav">
+      <i class="card__dot" aria-hidden="true" />
+      <span class="card__brand" :style="brandStyle" :title="design.title">{{ design.title }}</span>
+      <span class="card__link" :style="linkStyle">{{ demo.copy.nav[1] }}</span>
     </div>
 
-    <div class="card__body">
-      <div class="card__head">
-        <h3 class="card__name" :style="nameStyle" :title="design.title">{{ design.title }}</h3>
-        <span class="card__badge">{{ badge }}</span>
-      </div>
-
-      <p class="card__meta">
-        <span class="card__category">{{ design.category }}</span>
-        <span v-if="design.font" class="card__font mono" :title="`展示字体：${design.font}`">{{ design.font }}</span>
-      </p>
-
-      <p class="card__desc">{{ design.description }}</p>
-
-      <p class="card__stats mono">{{ stats }}</p>
+    <!-- 首屏那一小段：眉题、标题、副文案、按钮 -->
+    <p class="card__eyebrow" :style="eyebrowStyle">{{ demo.copy.eyebrow }}</p>
+    <h3 class="card__title" :style="titleStyle">{{ demo.copy.title }}</h3>
+    <p class="card__subtitle" :style="subtitleStyle">{{ demo.copy.subtitle }}</p>
+    <div class="card__actions">
+      <span class="card__button" :style="primaryStyle">{{ demo.copy.primary }}</span>
+      <span class="card__button card__button--quiet" :style="secondaryStyle">{{ demo.copy.secondary }}</span>
     </div>
+
+    <!-- 元信息：给检索用，不是样张的一部分 -->
+    <footer class="card__meta">
+      <span>{{ badge }}</span>
+      <span class="card__category">{{ design.category }}</span>
+      <span class="card__count">{{ componentCount }} 组件</span>
+    </footer>
   </article>
 </template>
 
@@ -84,8 +110,9 @@ const stats = computed(() => {
 .card {
   display: flex;
   flex-direction: column;
-  padding: 0;
-  background: rgba(var(--bg-surface-rgb), var(--card-alpha, 1));
+  /* 底部不留内边距：元信息那行自己铺到卡片边缘（见 .card__meta 的负边距） */
+  padding: 12px 14px 0;
+  background: var(--card-canvas);
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
   box-shadow: var(--shadow-card);
@@ -105,86 +132,96 @@ const stats = computed(() => {
   outline-offset: 2px;
 }
 
-.card__strip {
+.card__nav {
   display: flex;
-  height: 10px;
-  flex-shrink: 0;
-}
-
-.card__strip i {
-  flex: 1;
-  min-width: 0;
-}
-
-.card__body {
-  display: flex;
-  flex-direction: column;
+  align-items: center;
   gap: 7px;
-  padding: var(--sp-3) var(--sp-4) var(--sp-4);
   min-width: 0;
 }
 
-.card__head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--sp-2);
-  min-width: 0;
+.card__dot {
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  border-radius: 2px;
+  background: var(--card-accent);
 }
 
-.card__name {
-  margin: 0;
+.card__brand {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--ink);
-  font-size: 20px;
-  line-height: 1.2;
 }
 
-.card__badge {
+.card__link {
+  margin-left: auto;
   flex-shrink: 0;
-  color: var(--ink-3);
-  font-size: var(--fs-micro);
+}
+
+.card__eyebrow {
+  margin: 10px 0 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.card__title {
+  margin: 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+.card__subtitle {
+  margin: 4px 0 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.card__actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.card__button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+/* 次按钮规格自带描边时用它的（内联样式在先）；没描边时这里补一条这套设计的分隔线色 */
+.card__button--quiet {
+  border-color: var(--card-hairline);
 }
 
 .card__meta {
   display: flex;
   align-items: center;
-  gap: var(--sp-3);
-  margin: 0;
-  min-width: 0;
-  color: var(--ink-3);
+  gap: 8px;
+  margin: 12px -14px 0;
+  padding: 8px 14px;
+  border-top: 1px solid var(--card-hairline);
+  color: var(--card-muted);
   font-size: var(--fs-micro);
 }
 
 .card__category {
-  flex-shrink: 0;
-}
-
-.card__font {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.card__desc {
-  margin: 0;
-  color: var(--ink-2);
-  font-size: var(--fs-meta);
-  line-height: 1.6;
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
-  overflow: hidden;
-}
-
-.card__stats {
-  margin: 2px 0 0;
-  color: var(--ink-3);
-  font-size: var(--fs-micro);
+.card__count {
+  margin-left: auto;
+  flex-shrink: 0;
 }
 </style>

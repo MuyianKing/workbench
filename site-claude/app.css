@@ -1,0 +1,1376 @@
+/**
+ * 应用窗口配图
+ *
+ * 官网上那四张应用窗口不是截图，而是照着应用界面重画的 —— 原截图带着个人壁纸，放进落地页太吵，
+ * 而且改不了；重画还能同时给出亮 / 暗两套（应用默认暗色）。它们用本项目选定的设计规范
+ * （根目录 DESIGN.md）的色值重画：颜色一律取规范里的角色色 ——
+ *   亮色窗口：窗口底 = 表面·柔和、卡片 = 画布、选中 = 表面·奶油·加重、细线 = hairline、
+ *             文字 = ink / body / muted、状态色 = success / warning / error / muted-soft
+ *   暗色窗口：窗口底 = 表面·深色·柔和、卡片与标题栏 = 表面·深色·抬升、文字 = on-dark / on-dark-soft
+ * 圆角取规范的 4 / 6 / 8 / 12 / 16 五档，字号取规范的 12 / 13 / 14 / 16 档（等宽部分用 code 档 14px）。
+ *
+ * **尺寸是配图自己的几何**：窗口 1160×742（HTML 上写死的 --w / --h）、标题栏 36px、顶栏 64px、
+ * 导航栏 88px、搜索框 30px、卡片按钮 26px —— 这些是「画出来的那个界面」的比例，不是落地页的
+ * 排版值，所以不受规范的间距阶梯约束（照真实应用的比例画，看起来才是那个应用）。
+ * 落地页自己的按钮、卡片、标签页则完全按规范「组件」一节的规格来，见 styles.css。
+ *
+ * 缩放：每个窗口按固有像素尺寸画，容器用 aspect-ratio 预留高度挡住塌陷，
+ * 再由 main.js 写一个 --s 整体 transform: scale()。aspect-ratio 只吃纯数字，
+ * 所以 --w / --h 不能带单位，用到时现乘 1px。
+ */
+
+/* ---------- 令牌：应用界面的角色 → 规范的色值 ---------- */
+.win {
+  /* 文字：规范的 caption(13px) / caption-uppercase 的字号(12px) / body-sm(14px) / title-sm(16px) */
+  --ap-fs-meta: 12px;
+  --ap-fs-body: 13px;
+  --ap-fs-lead: 14px;
+  --ap-fs-title: 16px;
+
+  --ap-canvas: var(--surface-soft);
+  --ap-surface: var(--canvas);
+  --ap-rail: var(--canvas);
+  --ap-subtle: var(--surface-soft);
+  --ap-inset: var(--surface-card);
+  --ap-selected: var(--surface-cream-strong);
+  --ap-border: var(--hairline);
+  --ap-border-2: var(--hairline-soft);
+
+  --ap-ink: var(--ink);
+  --ap-ink-2: var(--body);
+  --ap-ink-3: var(--muted);
+
+  --ap-idle: var(--muted-soft);
+  --ap-run: var(--warning);
+  --ap-ok: var(--success);
+  --ap-fail: var(--error);
+
+  --ap-h-titlebar: 36px;
+  --ap-h-header: 64px;
+  --ap-w-rail: 88px;
+}
+
+.win[data-theme='dark'] {
+  --ap-canvas: var(--surface-dark-soft);
+  --ap-surface: var(--surface-dark-elevated);
+  --ap-rail: var(--surface-dark-soft);
+  --ap-subtle: var(--surface-dark-elevated);
+  --ap-inset: var(--surface-dark-elevated);
+  --ap-selected: var(--surface-dark-elevated);
+  --ap-border: var(--surface-dark-elevated);
+  --ap-border-2: var(--surface-dark-elevated);
+
+  --ap-ink: var(--on-dark);
+  --ap-ink-2: var(--on-dark-soft);
+  --ap-ink-3: var(--on-dark-soft);
+
+  --ap-idle: var(--on-dark-soft);
+}
+
+/* ---------- 画布 ---------- */
+.stage {
+  position: relative;
+  width: 100%;
+  max-width: calc(var(--w) * 1px);
+  aspect-ratio: var(--w) / var(--h);
+  margin-inline: auto;
+}
+
+.stage .win {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: top left;
+  transform: scale(var(--s, 1));
+}
+
+/* ---------- 窗口外壳 ---------- */
+.win {
+  display: flex;
+  flex-direction: column;
+  width: calc(var(--w) * 1px);
+  height: calc(var(--h) * 1px);
+  overflow: hidden;
+  border-radius: var(--r-xl);
+  background: var(--ap-canvas);
+  color: var(--ap-ink);
+  font-family: var(--font-sans);
+  font-size: var(--ap-fs-body);
+  font-weight: 400;
+  line-height: 1.4;
+  /* 窗口是「截图」，不能受落地页排版影响：首屏是居中的、字距也调过，
+     这两样会顺着继承钻进配图，把应用自己的对齐与字距带偏 */
+  text-align: left;
+  letter-spacing: normal;
+  user-select: none;
+  box-shadow: 0 1px 2px rgba(20, 20, 19, 0.05), 0 24px 48px -28px rgba(20, 20, 19, 0.3);
+}
+
+/* 亮色窗口在浅底上要靠一圈细线才立得住 */
+.win[data-theme='light'] {
+  box-shadow: 0 0 0 1px var(--hairline), 0 1px 2px rgba(20, 20, 19, 0.04),
+    0 24px 48px -28px rgba(20, 20, 19, 0.26);
+}
+
+/* 标题栏：左侧品牌 + 右侧自绘窗口按钮 */
+.win .win__bar {
+  display: flex;
+  align-items: center;
+  flex: none;
+  height: var(--ap-h-titlebar);
+  padding-left: var(--sp-sm);
+  background: var(--ap-surface);
+  border-bottom: 1px solid var(--ap-border);
+}
+
+.win .win__mark {
+  font-family: var(--font-mono);
+  font-size: var(--ap-fs-meta);
+  color: var(--ap-ink-2);
+  letter-spacing: -0.04em;
+}
+
+.win .win__appname {
+  margin-left: var(--sp-xs);
+  font-family: var(--font-mono);
+  font-size: var(--ap-fs-meta);
+  letter-spacing: 0.14em;
+  color: var(--ap-ink);
+}
+
+.win .win__drag {
+  flex: 1;
+  height: 100%;
+}
+
+.win .win__ctrls {
+  display: flex;
+  align-items: center;
+  height: 100%;
+}
+
+.win .win__ctrl {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 100%;
+  color: var(--ap-ink-2);
+}
+
+.win .win__ctrl--min::before {
+  content: '';
+  width: 10px;
+  height: 1px;
+  background: currentColor;
+}
+
+.win .win__ctrl--max::before {
+  content: '';
+  width: 9px;
+  height: 9px;
+  border: 1px solid currentColor;
+}
+
+.win .win__ctrl--close::before,
+.win .win__ctrl--close::after {
+  content: '';
+  position: absolute;
+  width: 11px;
+  height: 1px;
+  background: currentColor;
+}
+
+.win .win__ctrl--close::before {
+  transform: rotate(45deg);
+}
+
+.win .win__ctrl--close::after {
+  transform: rotate(-45deg);
+}
+
+/* 顶栏：搜索框 + 右侧小图标 */
+.win .win__top {
+  display: flex;
+  align-items: center;
+  flex: none;
+  gap: var(--sp-sm);
+  height: var(--ap-h-header);
+  padding: 0 var(--sp-md);
+}
+
+.win .field {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-xs);
+  flex: 1;
+  max-width: 430px;
+  height: 30px;
+  padding: 0 var(--sp-sm);
+  border: 1px solid var(--ap-border);
+  border-radius: var(--r-md);
+  background: var(--ap-surface);
+  color: var(--ap-ink-3);
+  font-size: var(--ap-fs-body);
+  line-height: 1.4;
+}
+
+.win .field .ic {
+  width: 14px;
+  height: 14px;
+}
+
+.win .field kbd,
+.win .act kbd {
+  margin-left: auto;
+  padding: 0 var(--sp-xxs);
+  border: 1px solid var(--ap-border);
+  border-radius: var(--r-xs);
+  background: var(--ap-subtle);
+  color: var(--ap-ink-3);
+  font-family: var(--font-sans);
+  font-size: var(--ap-fs-meta);
+}
+
+.win .win__tools {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-md);
+  margin-left: auto;
+  color: var(--ap-ink-2);
+}
+
+.win .win__tools .ic {
+  width: 15px;
+  height: 15px;
+}
+
+.win .avatar {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--r-pill);
+  background: var(--ap-inset);
+  color: var(--ap-ink-2);
+}
+
+.win .avatar .ic {
+  width: 13px;
+  height: 13px;
+}
+
+/* ---------- 主体：导航栏 + 内容 ---------- */
+.win .win__body {
+  display: flex;
+  flex: 1;
+  gap: var(--sp-sm);
+  min-height: 0;
+  padding: 0 var(--sp-sm) var(--sp-sm);
+}
+
+.win .win__body--full {
+  padding-top: var(--sp-sm);
+}
+
+.win .rail {
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  gap: var(--sp-xxs);
+  width: var(--ap-w-rail);
+  padding: var(--sp-xs);
+  border: 1px solid var(--ap-border);
+  border-radius: var(--r-lg);
+  background: var(--ap-rail);
+}
+
+.win .rail__i {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-xxs);
+  height: 54px;
+  border-radius: var(--r-md);
+  color: var(--ap-ink-2);
+  font-size: var(--ap-fs-meta);
+}
+
+.win .rail__i b {
+  font-weight: inherit;
+  line-height: 1;
+}
+
+.win .rail__i.is-on {
+  background: var(--ap-selected);
+  color: var(--ap-ink);
+  font-weight: 500;
+}
+
+/* 暗色窗口里那一项用白底 + 深色字：暗面最深只到 #252320，压在同色左右的窗口底上几乎看不出选中 */
+.win[data-theme='dark'] .rail__i.is-on {
+  background: var(--on-dark);
+  color: var(--ink);
+}
+
+.win .ric {
+  width: 17px;
+  height: 17px;
+}
+
+/* ---------- 首页：三栏卡片画布 ---------- */
+.win .canvas {
+  display: grid;
+  flex: 1;
+  gap: var(--sp-xs);
+  min-width: 0;
+  grid-template-columns: 0.86fr 1.24fr 0.86fr;
+}
+
+.win .col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-xs);
+  min-width: 0;
+}
+
+.win .card {
+  padding: var(--sp-sm);
+  border: 1px solid var(--ap-border);
+  border-radius: var(--r-lg);
+  background: var(--ap-surface);
+}
+
+.win .card__hd {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-xs);
+  margin-bottom: var(--sp-xs);
+}
+
+.win .card__hd h4 {
+  font-size: var(--ap-fs-body);
+  font-weight: 500;
+}
+
+.win .card__meta {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-xxs);
+  margin-left: auto;
+  color: var(--ap-ink-3);
+  font-size: var(--ap-fs-meta);
+}
+
+.win .card__meta .ic {
+  width: 12px;
+  height: 12px;
+}
+
+/* 活跃度日历 */
+.win .heat__months {
+  display: flex;
+  justify-content: space-between;
+  padding-left: 26px;
+  margin-bottom: var(--sp-xxs);
+  color: var(--ap-ink-3);
+  font-size: var(--ap-fs-meta);
+}
+
+.win .heat {
+  display: flex;
+  gap: var(--sp-xxs);
+  overflow: hidden;
+}
+
+.win .heat__days {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  flex: none;
+  color: var(--ap-ink-3);
+  font-size: var(--ap-fs-meta);
+  line-height: 1;
+}
+
+.win .heat__days span {
+  height: 10px;
+}
+
+.win .heat__grid {
+  display: grid;
+  flex: 1;
+  grid-template-rows: repeat(7, 9px);
+  grid-auto-flow: column;
+  grid-auto-columns: 9px;
+  gap: var(--sp-xxs);
+  min-width: 0;
+  overflow: hidden;
+}
+
+.win .heat__grid i {
+  /* 格子只有 9px，圆角取 2px —— 这是配图的格子尺寸，不是组件圆角 */
+  border-radius: 2px;
+  background: var(--ap-subtle);
+}
+
+.win .heat__grid i[data-l='1'] {
+  background: var(--surface-cream-strong);
+}
+
+.win .heat__grid i[data-l='2'] {
+  background: var(--muted-soft);
+}
+
+.win .heat__grid i[data-l='3'] {
+  background: var(--muted);
+}
+
+.win .heat__grid i[data-l='4'] {
+  background: var(--ap-ink);
+}
+
+/* 列表行 */
+.win .rows {
+  display: flex;
+  flex-direction: column;
+}
+
+.win .row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-xs);
+  padding: var(--sp-xs) 0;
+}
+
+.win .row + .row {
+  border-top: 1px solid var(--ap-border-2);
+}
+
+.win .row__t {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.win .row__m {
+  margin-left: auto;
+  color: var(--ap-ink-3);
+  font-size: var(--ap-fs-meta);
+  white-space: nowrap;
+}
+
+.win .dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: var(--r-pill);
+  background: var(--ap-idle);
+}
+
+.win .dot--a {
+  background: var(--primary);
+}
+.win .dot--b {
+  background: var(--ap-fail);
+}
+.win .dot--c {
+  background: var(--ap-ok);
+}
+.win .dot--d {
+  background: var(--ap-run);
+}
+.win .dot--e {
+  background: var(--accent-teal);
+}
+.win .dot--f {
+  background: var(--accent-amber);
+}
+
+/* 快捷启动 */
+.win .apps {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: var(--sp-xs);
+}
+
+.win .app {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 1;
+  border-radius: var(--r-md);
+  color: var(--on-primary);
+  font-size: var(--ap-fs-lead);
+}
+
+.win .app--a {
+  background: var(--primary);
+}
+.win .app--b {
+  background: var(--body-strong);
+}
+.win .app--c {
+  background: var(--accent-teal);
+}
+.win .app--d {
+  background: var(--accent-amber);
+}
+.win .app--e {
+  background: var(--error);
+}
+.win .app--f {
+  background: var(--muted);
+}
+
+/* 键值行 */
+.win .kv {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-xs);
+  padding: var(--sp-xxs) 0;
+}
+
+.win .kv > span {
+  flex: none;
+  width: 62px;
+  color: var(--ap-ink-3);
+  font-size: var(--ap-fs-meta);
+}
+
+.win .kv > b {
+  font-weight: 400;
+}
+
+.win .tags {
+  display: flex;
+  gap: var(--sp-xxs);
+  font-weight: 400;
+}
+
+.win .tag {
+  padding: 0 var(--sp-xs);
+  border-radius: var(--r-sm);
+  background: var(--ap-inset);
+  color: var(--ap-ink-2);
+  font-size: var(--ap-fs-meta);
+  font-style: normal;
+  line-height: 1.6;
+  white-space: nowrap;
+}
+
+.win .tag--on {
+  background: var(--ap-selected);
+  color: var(--ap-ink);
+}
+
+.win .tag--p {
+  background: color-mix(in srgb, var(--primary) 16%, transparent);
+  color: var(--ap-ink);
+}
+
+.win .tag--b {
+  background: color-mix(in srgb, var(--error) 14%, transparent);
+  color: var(--ap-ink);
+}
+
+.win .tag--c {
+  background: color-mix(in srgb, var(--success) 18%, transparent);
+  color: var(--ap-ink);
+}
+
+/* TOKEN 用量 */
+.win .stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--sp-xs);
+  margin-bottom: var(--sp-xs);
+}
+
+.win .stat {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-xxs);
+  padding: var(--sp-xs) var(--sp-sm);
+  border-radius: var(--r-md);
+  background: var(--ap-subtle);
+}
+
+.win .stat__k {
+  color: var(--ap-ink-3);
+  font-size: var(--ap-fs-meta);
+}
+
+.win .stat b {
+  font-size: var(--ap-fs-title);
+  font-weight: 500;
+}
+
+.win .segbar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-xxs);
+  margin-bottom: var(--sp-xs);
+  color: var(--ap-ink-3);
+  font-size: var(--ap-fs-meta);
+}
+
+.win .segbar em {
+  margin-left: auto;
+  font-style: normal;
+}
+
+.win .seg {
+  padding: var(--sp-xxs) var(--sp-xs);
+  border-radius: var(--r-sm);
+  font-size: var(--ap-fs-meta);
+}
+
+.win .seg--on {
+  background: var(--ap-selected);
+  color: var(--ap-ink);
+}
+
+.win .segbar--sm .seg {
+  padding: 0 var(--sp-xs);
+}
+
+.win .bars {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--sp-xxs);
+  height: 62px;
+}
+
+.win .bars i {
+  flex: 1;
+  height: calc(var(--v) * 100%);
+  border-radius: var(--r-xs) var(--r-xs) 0 0;
+  background: var(--ap-ink);
+}
+
+.win .bars__cap {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-xs);
+  margin: var(--sp-sm) 0 var(--sp-xs);
+  font-size: var(--ap-fs-meta);
+  font-weight: 500;
+}
+
+.win .bars__cap span {
+  color: var(--ap-ink-3);
+  font-weight: 400;
+}
+
+.win .meter {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-xs);
+  padding: var(--sp-xxs) 0;
+  font-size: var(--ap-fs-meta);
+}
+
+.win .meter__t {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.win .meter__v {
+  margin-left: auto;
+  color: var(--ap-ink-3);
+}
+
+.win .meter i {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: calc(var(--v) * 100%);
+  height: 2px;
+  border-radius: var(--r-xs);
+  background: var(--primary);
+}
+
+/* 快捷操作 */
+.win .act {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-xs);
+  padding: var(--sp-xs) 0;
+  color: var(--ap-ink-2);
+  font-size: var(--ap-fs-meta);
+}
+
+.win .act + .act {
+  border-top: 1px solid var(--ap-border-2);
+}
+
+.win .hint {
+  margin-top: var(--sp-xs);
+  color: var(--ap-ink-3);
+  font-size: var(--ap-fs-meta);
+}
+
+.win .chip {
+  margin-left: auto;
+  padding: 0 var(--sp-xs);
+  border-radius: var(--r-sm);
+  background: var(--ap-selected);
+  color: var(--ap-ink);
+  font-size: var(--ap-fs-meta);
+  font-style: normal;
+  line-height: 1.6;
+}
+
+/* ---------- 项目页 / 技能页 / 密码页的共用外壳 ---------- */
+.win .pane {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  gap: var(--sp-sm);
+  min-width: 0;
+}
+
+.win .pane__bar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-xs);
+  flex: none;
+  flex-wrap: nowrap;
+  overflow: hidden;
+}
+
+.win .pane__sp {
+  flex: 1;
+}
+
+.win .filt {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-xxs);
+  padding: var(--sp-xxs) var(--sp-sm);
+  border-radius: var(--r-sm);
+  color: var(--ap-ink-2);
+  font-size: var(--ap-fs-meta);
+  white-space: nowrap;
+}
+
+.win .filt:first-child,
+.win .filt:first-child i {
+  background: var(--ap-selected);
+  color: var(--ap-ink);
+}
+
+.win .filt i {
+  font-style: normal;
+  padding: 0 var(--sp-xxs);
+  border-radius: var(--r-xs);
+  background: var(--ap-subtle);
+  color: var(--ap-ink-2);
+}
+
+.win .filt b {
+  font-weight: 400;
+  opacity: 0.6;
+}
+
+.win .ghostbtn {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-xxs);
+  padding: var(--sp-xxs) var(--sp-sm);
+  border: 1px solid var(--ap-border);
+  border-radius: var(--r-sm);
+  background: var(--ap-surface);
+  color: var(--ap-ink-2);
+  font-size: var(--ap-fs-meta);
+  white-space: nowrap;
+}
+
+.win .ghostbtn--sm {
+  padding: 0 var(--sp-xs);
+  line-height: 1.6;
+}
+
+.win .ghostbtn .ic {
+  width: 12px;
+  height: 12px;
+}
+
+.win .fpri {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-xxs);
+  color: var(--ap-ink-3);
+  font-family: var(--font-mono);
+  font-size: var(--ap-fs-meta);
+  white-space: nowrap;
+}
+
+.win .fpri .ic {
+  width: 12px;
+  height: 12px;
+}
+
+/* 项目卡 */
+.win .pgrid {
+  display: grid;
+  flex: 1;
+  align-content: start;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--sp-sm);
+  min-height: 0;
+  overflow: hidden;
+}
+
+.win .pcard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-xs);
+  padding: var(--sp-sm);
+  border: 1px solid var(--ap-border);
+  border-radius: var(--r-lg);
+  background: var(--ap-surface);
+}
+
+.win .pcard__hd {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-xs);
+}
+
+.win .pcard__hd h5 {
+  overflow: hidden;
+  font-size: var(--ap-fs-body);
+  font-weight: 500;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.win .pcard__p {
+  overflow: hidden;
+  color: var(--ap-ink-3);
+  font-family: var(--font-mono);
+  font-size: var(--ap-fs-meta);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.win .pcard__m {
+  color: var(--ap-ink-2);
+  font-size: var(--ap-fs-meta);
+}
+
+.win .pcard__ft {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-xs);
+  margin-top: auto;
+}
+
+.win .st {
+  margin-left: auto;
+  padding: 0 var(--sp-xs);
+  border-radius: var(--r-sm);
+  font-size: var(--ap-fs-meta);
+  font-style: normal;
+  line-height: 1.6;
+  white-space: nowrap;
+  background: var(--ap-inset);
+  color: var(--ap-ink-3);
+}
+
+.win .st--run {
+  background: color-mix(in srgb, var(--ap-run) 22%, transparent);
+  color: var(--ap-run);
+}
+
+.win .st--build {
+  background: color-mix(in srgb, var(--ap-run) 22%, transparent);
+  color: var(--ap-run);
+}
+
+.win .st--fail {
+  background: color-mix(in srgb, var(--ap-fail) 20%, transparent);
+  color: var(--ap-fail);
+}
+
+.win .st--ok {
+  background: color-mix(in srgb, var(--ap-ok) 22%, transparent);
+  color: var(--ap-ok);
+}
+
+.win .ibtn {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--ap-border);
+  border-radius: var(--r-sm);
+  color: var(--ap-ink-2);
+}
+
+.win .ibtn .ic {
+  width: 13px;
+  height: 13px;
+}
+
+.win .btn--mini {
+  height: 26px;
+  padding: 0 var(--sp-sm);
+  border: 1px solid var(--ap-border);
+  border-radius: var(--r-sm);
+  background: var(--ap-subtle);
+  color: var(--ap-ink-2);
+  font-size: var(--ap-fs-meta);
+  font-weight: 400;
+  line-height: 1.6;
+}
+
+/* 项目卡上的主操作 = 规范的主色，这是这套配图里唯一大面积用主色的地方 */
+.win .pcard__ft .btn--mini:first-child {
+  border-color: transparent;
+  background: var(--primary);
+  color: var(--on-primary);
+}
+
+.win .btn--stop {
+  background: var(--ap-fail);
+  color: var(--on-primary);
+}
+
+.win .is-busy {
+  background: var(--ap-run);
+  color: var(--on-primary);
+}
+
+.win .ic--down {
+  transform: rotate(90deg);
+}
+
+.win .pcard--add {
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-xs);
+  border-style: dashed;
+  background: var(--ap-subtle);
+  color: var(--ap-ink-2);
+}
+
+.win .pcard__plus {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--ap-border);
+  border-radius: var(--r-md);
+  color: var(--primary);
+}
+
+.win .pcard--add b {
+  font-size: var(--ap-fs-body);
+  font-weight: 500;
+}
+
+.win .pcard--add em {
+  color: var(--ap-ink-3);
+  font-size: var(--ap-fs-meta);
+  font-style: normal;
+}
+
+/* ---------- 终端面板：应用里恒为深色 ---------- */
+.win .term {
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  height: 168px;
+  margin: 0 var(--sp-sm) var(--sp-sm);
+  border-radius: var(--r-lg);
+  background: var(--surface-dark);
+  color: var(--on-dark);
+  overflow: hidden;
+}
+
+.win .term__bar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  flex: none;
+  height: 34px;
+  padding: 0 var(--sp-sm);
+  border-bottom: 1px solid var(--surface-dark-elevated);
+}
+
+.win .term__tabs {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-xxs);
+}
+
+.win .term__tab {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-xxs);
+  padding: 0 var(--sp-sm);
+  border-radius: var(--r-sm);
+  color: var(--on-dark-soft);
+  font-size: var(--ap-fs-meta);
+  font-style: normal;
+  line-height: 1.8;
+}
+
+.win .term__tab i {
+  color: var(--muted-soft);
+  font-style: normal;
+}
+
+.win .term__tab.is-on {
+  background: var(--surface-dark-elevated);
+  color: var(--on-dark);
+}
+
+.win .term__tools {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  margin-left: auto;
+  color: var(--on-dark-soft);
+  font-size: var(--ap-fs-meta);
+}
+
+.win .term__tools i {
+  font-style: normal;
+}
+
+.win .term__log {
+  flex: 1;
+  padding: var(--sp-sm) var(--sp-md);
+  font-family: var(--font-mono);
+  font-size: var(--ap-fs-body);
+  line-height: 1.6;
+  overflow: hidden;
+}
+
+.win .term__log b {
+  color: var(--primary);
+  font-weight: 400;
+}
+
+.win .term__log .dim {
+  color: var(--on-dark-soft);
+}
+
+.win .term__log .url {
+  color: var(--accent-teal);
+}
+
+/* 滚进视口时逐行亮起（脚本先挂 is-anim 藏好，再挂 is-in 放行） */
+.win .term__log.is-anim p {
+  opacity: 0;
+  transform: translateY(4px);
+}
+
+.win .term__log.is-in p {
+  opacity: 1;
+  transform: none;
+  transition: opacity 0.34s var(--ease), transform 0.34s var(--ease);
+}
+
+.win .term__log.is-in p:nth-child(2) {
+  transition-delay: 0.12s;
+}
+
+.win .term__log.is-in p:nth-child(3) {
+  transition-delay: 0.24s;
+}
+
+.win .term__log.is-in p:nth-child(4) {
+  transition-delay: 0.36s;
+}
+
+.win .term__log.is-in p:nth-child(5) {
+  transition-delay: 0.48s;
+}
+
+.win .term__log.is-in p:nth-child(6) {
+  transition-delay: 0.6s;
+}
+
+.win .term__log.is-in p:nth-child(7) {
+  transition-delay: 0.72s;
+}
+
+/* ---------- 笔记页：目录树 + 编辑器 ---------- */
+.win .notes {
+  display: flex;
+  flex: 1;
+  gap: var(--sp-sm);
+  min-width: 0;
+}
+
+.win .tree {
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  width: 240px;
+  padding: var(--sp-sm);
+  border: 1px solid var(--ap-border);
+  border-radius: var(--r-lg);
+  background: var(--ap-surface);
+}
+
+.win .tree__hd {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-xs);
+  margin-bottom: var(--sp-xs);
+}
+
+.win .tree__hd b {
+  font-size: var(--ap-fs-body);
+  font-weight: 500;
+}
+
+.win .tree__hd .ghostbtn {
+  margin-left: auto;
+}
+
+.win .tree__l {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.win .tree__l li {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-xs);
+  padding: var(--sp-xxs) var(--sp-xs);
+  border-radius: var(--r-sm);
+  color: var(--ap-ink-2);
+  font-size: var(--ap-fs-body);
+  white-space: nowrap;
+}
+
+.win .tree__l li.lvl {
+  padding-left: var(--sp-lg);
+}
+
+.win .tree__l li.is-on {
+  background: var(--ap-selected);
+  color: var(--ap-ink);
+}
+
+.win .tree__l .ic {
+  width: 13px;
+  height: 13px;
+  color: var(--ap-ink-3);
+}
+
+.win .tree__l .ic--f {
+  transform: rotate(90deg);
+}
+
+.win .tree__ft {
+  display: flex;
+  gap: var(--sp-xs);
+  margin-top: var(--sp-xs);
+  padding-top: var(--sp-xs);
+  border-top: 1px solid var(--ap-border-2);
+}
+
+.win .editor {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  padding: var(--sp-lg) var(--sp-xl);
+  border: 1px solid var(--ap-border);
+  border-radius: var(--r-lg);
+  background: var(--ap-surface);
+  overflow: hidden;
+}
+
+.win .editor__bar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  flex: none;
+  margin-bottom: var(--sp-md);
+}
+
+.win .editor__bar em {
+  margin-left: auto;
+  color: var(--ap-ink-3);
+  font-size: var(--ap-fs-meta);
+  font-style: normal;
+}
+
+.win .editor__doc {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  color: var(--ap-ink-2);
+  font-size: var(--ap-fs-body);
+}
+
+.win .editor__doc h3 {
+  margin-bottom: var(--sp-xs);
+  color: var(--ap-ink);
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 400;
+  line-height: 1.3;
+}
+
+.win .editor__doc h4 {
+  margin: var(--sp-md) 0 var(--sp-xs);
+  color: var(--ap-ink);
+  font-size: var(--ap-fs-lead);
+  font-weight: 500;
+}
+
+.win .editor__doc ul {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-xxs);
+}
+
+.win .editor__doc li {
+  position: relative;
+  padding-left: var(--sp-md);
+}
+
+.win .editor__doc li::before {
+  content: '';
+  position: absolute;
+  top: 7px;
+  left: var(--sp-xs);
+  width: 4px;
+  height: 4px;
+  border-radius: var(--r-pill);
+  background: var(--primary);
+}
+
+.win .editor__doc .dim {
+  color: var(--ap-ink-3);
+  font-size: var(--ap-fs-meta);
+}
+
+.win .editor__doc code {
+  padding: 0 var(--sp-xxs);
+  border-radius: var(--r-xs);
+  background: var(--ap-subtle);
+  font-size: var(--ap-fs-meta);
+}
+
+.win .editor__doc pre {
+  margin: var(--sp-xs) 0;
+  padding: var(--sp-xs) var(--sp-sm);
+  border-radius: var(--r-md);
+  background: var(--surface-dark);
+  color: var(--on-dark);
+  font-family: var(--font-mono);
+  font-size: var(--ap-fs-body);
+  line-height: 1.6;
+}
+
+.win .editor__doc pre code {
+  padding: 0;
+  background: none;
+  color: inherit;
+  font-size: inherit;
+}
+
+.win .shot {
+  display: grid;
+  place-items: center;
+  height: 64px;
+  margin-top: var(--sp-sm);
+  border: 1px dashed var(--ap-border);
+  border-radius: var(--r-md);
+  color: var(--ap-ink-3);
+  font-size: var(--ap-fs-meta);
+}
+
+/* ---------- 密码页 ---------- */
+.win .vgrid {
+  display: grid;
+  flex: 1;
+  align-content: start;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--sp-sm);
+  min-height: 0;
+  overflow: hidden;
+}
+
+.win .vcard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-xs);
+  padding: var(--sp-sm);
+  border: 1px solid var(--ap-border);
+  border-radius: var(--r-lg);
+  background: var(--ap-surface);
+}
+
+.win .vcard header {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-xs);
+}
+
+.win .vcard h5 {
+  overflow: hidden;
+  font-size: var(--ap-fs-body);
+  font-weight: 500;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.win .vcard__pw {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-xxs);
+  padding: var(--sp-xs);
+  border-radius: var(--r-md);
+  background: var(--ap-subtle);
+  font-family: var(--font-mono);
+  font-size: var(--ap-fs-body);
+}
+
+.win .vcard__pw > span:first-child {
+  margin-right: auto;
+  letter-spacing: 0.1em;
+}
+
+.win .vcard__pw .ibtn {
+  width: 22px;
+  height: 22px;
+  border-color: transparent;
+  background: transparent;
+}
+
+.win .vcard__pw .ibtn .ic {
+  width: 13px;
+  height: 13px;
+}
+
+.win .vcard__n {
+  color: var(--ap-ink-3);
+  font-size: var(--ap-fs-meta);
+}
+
+/* ---------- 其余细节 ---------- */
+.win .seg,
+.win .chip,
+.win .tag,
+.win .st,
+.win .filt,
+.win .term__tab {
+  font-style: normal;
+}

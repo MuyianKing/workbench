@@ -73,6 +73,10 @@
 - 随包带的第三方静态资源放 `src/renderer/public/`；引用用相对基址（`import.meta.env.BASE_URL`），不写死 `/xxx`。
 - OAuth 凭据来自 `src-tauri/oauth.local.json`（`build.rs` 注入后 `include_str!`）：**不入库**（模板 `oauth.example.json`），
   缺它照样能编译，只是登录按钮显示「未内置凭据」。
+- 官网 `site/` 是独立静态站：无构建、无依赖，不进 `npm run typecheck` 与打包流程；页面上那几张应用配图是照
+  [tokens.css](src/renderer/src/styles/tokens.css) 重画的（改了令牌要一起改）。`site-claude/` 是同一套内容的第二版，
+  照根目录 [DESIGN.md](DESIGN.md) 那套规范画：**独立于 tokens.css**（要改的是 DESIGN.md），配图的尺寸照应用比例、
+  颜色圆角照规范。两份的细节都见架构文档的「官网」一节。
 - 文档分工：[README.md](README.md) 给概览与上手；架构文档是功能与架构事实的唯一真源；本文件写跨模块约束；
   [docs/constraints/](docs/constraints/) 写模块细则；`docs/dev-notes/` 写动手方法与踩坑。
 

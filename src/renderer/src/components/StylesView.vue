@@ -9,7 +9,7 @@
  * 2. **不用截图缩略图**：上游那套预览页本身是英文的，与「界面全中文」冲突。卡片与详情全部用它自己的
  *    token 现画 —— 这也是「原版 / 生成」那套预览来源筛选自然消失的原因：只有一种画法了。
  * 3. **筛选分两层**：明暗是三档互斥的刻度，用分段控件摆在工具带上；分类与色系是并列的多档，
- *    用带计数的标签铺在下面一行。两条都由数据现算，所以不会有点了没结果的空档。
+ *    用带计数的标签各占一行铺在下面。两条都由数据现算，所以不会有点了没结果的空档。
  */
 import { computed, onMounted, ref } from 'vue'
 import { Search } from '@element-plus/icons-vue'
@@ -112,31 +112,35 @@ const failed = computed(() => !store.loaded && !store.loading && Boolean(store.l
       </div>
     </div>
 
-    <!-- 分类与色系：并列的多档，各自带计数。一条横向可滚，窄窗口下不挤成一团 -->
+    <!-- 分类与色系：并列的多档，各自带计数。两组各占一行，组内窄了才换行 -->
     <div class="chipbar">
-      <span class="eyebrow">分类</span>
-      <button
-        v-for="chip in categoryChips"
-        :key="chip.key"
-        class="chip"
-        :class="{ 'is-active': store.category === chip.key }"
-        type="button"
-        @click="store.setCategory(chip.key)"
-      >
-        {{ chip.label }}<span class="chip__count mono">{{ chip.count }}</span>
-      </button>
+      <div class="chipbar__row">
+        <span class="eyebrow">分类</span>
+        <button
+          v-for="chip in categoryChips"
+          :key="chip.key"
+          class="chip"
+          :class="{ 'is-active': store.category === chip.key }"
+          type="button"
+          @click="store.setCategory(chip.key)"
+        >
+          {{ chip.label }}<span class="chip__count mono">{{ chip.count }}</span>
+        </button>
+      </div>
 
-      <span class="eyebrow chipbar__gap">色系</span>
-      <button
-        v-for="chip in familyChips"
-        :key="chip.key"
-        class="chip"
-        :class="{ 'is-active': store.family === chip.key }"
-        type="button"
-        @click="store.setFamily(chip.key)"
-      >
-        {{ chip.label }}<span class="chip__count mono">{{ chip.count }}</span>
-      </button>
+      <div class="chipbar__row">
+        <span class="eyebrow">色系</span>
+        <button
+          v-for="chip in familyChips"
+          :key="chip.key"
+          class="chip"
+          :class="{ 'is-active': store.family === chip.key }"
+          type="button"
+          @click="store.setFamily(chip.key)"
+        >
+          {{ chip.label }}<span class="chip__count mono">{{ chip.count }}</span>
+        </button>
+      </div>
     </div>
 
     <div class="styles-view__scroll">
@@ -214,25 +218,22 @@ const failed = computed(() => !store.loaded && !store.loading && Boolean(store.l
 }
 
 /*
- * 分类与色系那一行。横向可滚：两组合起来最多二十来个标签，
- * 窄窗口下宁可让它滚，也不要折成两行把下面的卡片挤走。
+ * 分类与色系两组各占一行。两组原先挤在一条横向可滚的横排里，
+ * 窄窗口下色系整组被推到可视区外，只剩一条滚动条 —— 筛选条件得先看得见才用得起来。
  */
 .chipbar {
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: var(--sp-2);
   padding: 0 var(--sp-5);
-  overflow-x: auto;
-  scrollbar-width: thin;
 }
 
-.chipbar > * {
-  flex-shrink: 0;
-}
-
-/* 第二组与第一组之间留一段，比标签之间的间距大一档 */
-.chipbar__gap {
-  margin-left: var(--sp-4);
+/* 组内放不下就换行：宁可让这一组多占一行，也不把标签藏到滚动条后面 */
+.chipbar__row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
 }
 
 .styles-view__scroll {

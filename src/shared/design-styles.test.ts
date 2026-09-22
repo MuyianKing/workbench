@@ -13,12 +13,15 @@ import {
   componentSamples,
   componentStyle,
   designStyleHaystack,
+  expandTokenRefs,
   familyCounts,
   filterDesignStyles,
   groupComponents,
   hueOf,
   inkOn,
   isColorValue,
+  lineHeightCss,
+  mixHex,
   numericScale,
   parseHex,
   resolveTokenRef,
@@ -174,6 +177,83 @@ describe('token 引用展开', () => {
     const broken = componentStyle({ backgroundColor: '{colors.nope}' }, style)
     expect(broken.background).toBeUndefined()
     expect(broken.color).toBeUndefined()
+  })
+
+  it('整条 border 与夹在值里的引用都展开得出来', () => {
+    const styleWithBorder = componentStyle({ border: '2px solid {colors.primary}' }, style)
+    expect(styleWithBorder.border).toBe('2px solid #ff0000')
+
+    const padded = componentStyle({ padding: '{spacing.sm} {spacing.lg}' }, style)
+    expect(padded.padding).toBe('12px 24px')
+
+    // 有一条展不开就整串不画，不留半截值
+    const partial = componentStyle({ padding: '{spacing.sm} {spacing.nope}' }, style)
+    expect(partial.padding).toBeUndefined()
+  })
+})
+
+// ---------------------------------------------------------------- 引用展开与混色
+
+describe('内嵌引用展开', () => {
+  const style = makeStyle()
+
+  it('展开夹在值中间的引用', () => {
+    expect(expandTokenRefs('{spacing.sm} {spacing.lg}', style)).toBe('12px 24px')
+    expect(expandTokenRefs('2px solid {colors.primary}', style)).toBe('2px solid #ff0000')
+    expect(expandTokenRefs('{rounded.pill}', style)).toBe('9999px')
+  })
+
+  it('不含引用的值原样回，字阶引用（不是单值）展不开', () => {
+    expect(expandTokenRefs('12px 20px', style)).toBe('12px 20px')
+    expect(expandTokenRefs('{typography.body-md}', style)).toBeUndefined()
+    expect(expandTokenRefs('{colors.nope}', style)).toBeUndefined()
+    expect(expandTokenRefs(undefined, style)).toBeUndefined()
+    expect(expandTokenRefs('  ', style)).toBeUndefined()
+  })
+})
+
+describe('混色', () => {
+  it('两个 hex 之间线性插值，比例夹在 0–1', () => {
+    expect(mixHex('#000000', '#ffffff', 0)).toBe('#000000')
+    expect(mixHex('#000000', '#ffffff', 1)).toBe('#ffffff')
+    expect(mixHex('#000000', '#ffffff', 0.5)).toBe('#808080')
+    expect(mixHex('#000000', '#ffffff', 2)).toBe('#ffffff')
+  })
+
+  it('认不出 hex 时原样回第一个值', () => {
+    expect(mixHex('rgba(0,0,0,0.5)', '#ffffff', 0.5)).toBe('rgba(0,0,0,0.5)')
+  })
+})
+
+describe('行高归一化', () => {
+  it('不带单位的像素行高按字号换算成倍数', () => {
+    expect(lineHeightCss('64', '64px')).toBe('1')
+    expect(lineHeightCss('48', '40px')).toBe('1.2')
+    expect(lineHeightCss('36', '24px')).toBe('1.5')
+    expect(lineHeightCss('28.8', '24px')).toBe('1.2')
+  })
+
+  it('本来就是倍数的原样放行，倍数过大过小都收到 0.8–2', () => {
+    expect(lineHeightCss('1.2', '24px')).toBe('1.2')
+    expect(lineHeightCss('2.41', '14px')).toBe('2.41')
+    expect(lineHeightCss('0.8', '107px')).toBe('0.8')
+    expect(lineHeightCss('96', '12px')).toBe('2')
+    expect(lineHeightCss('6', '24px')).toBe('0.8')
+  })
+
+  it('带单位的像素行高同样换算（字号收敛之后，绝对行高会让比例失真）', () => {
+    expect(lineHeightCss('36px', '24px')).toBe('1.5')
+    expect(lineHeightCss('64px', '16px')).toBe('2')
+    expect(lineHeightCss('20px', '16px')).toBe('1.25')
+  })
+
+  it('关键字与其它单位原样回，算不出来的不画', () => {
+    expect(lineHeightCss('normal', '16px')).toBe('normal')
+    expect(lineHeightCss('1.2em', '16px')).toBe('1.2em')
+    expect(lineHeightCss(undefined, '16px')).toBeUndefined()
+    // 像素写法但缺字号：换算不出倍数，宁可不画
+    expect(lineHeightCss('64', undefined)).toBeUndefined()
+    expect(lineHeightCss('url(evil)', '16px')).toBeUndefined()
   })
 })
 

@@ -133,7 +133,7 @@ export const useProjectsStore = defineStore('projects', () => {
       const hidden = settingsStore.settings.hiddenViews
       if (!hidden.includes(activeView.value)) return
 
-      const next = fallbackView(hidden)
+      const next = fallbackView(hidden, settingsStore.settings.viewOrder)
       applyView(next)
       void settingsStore.updateSettings({ activeView: next })
     },

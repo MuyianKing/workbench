@@ -32,6 +32,7 @@ import { assetUrl, guard, hasTauri, invoke, listen, notPorted } from './bridge'
 import { emit } from './events'
 import * as events from './events'
 import * as auth from './auth'
+import * as design from './design'
 import * as note from './note'
 import * as nrm from './nrm'
 import * as nvm from './nvm'
@@ -554,6 +555,9 @@ function createApi(): WorkbenchApi {
       void invoke('set_app_name', { name })
     },
     getAppVersion: () => invoke<string>('app_version').catch(() => '—'),
+
+    // ---------- 样式参考库（token 是随包静态资源，导出到项目时只往后端递内容） ----------
+    writeDesign: (projectDir: string, content: string) => design.writeDesign(projectDir, content),
 
     // ---------- 账号 ----------
     // 换 token、回环监听、凭据落盘都在 Rust 侧；这里只驱动轮询并落显示资料，

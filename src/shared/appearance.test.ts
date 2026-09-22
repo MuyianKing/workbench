@@ -133,6 +133,23 @@ describe('按落点拆一份设置补丁', () => {
     expect(sanitizeAppearanceSettings({ hiddenViews: 'notes' }).hiddenViews).toEqual([])
   })
 
+  it('导航栏顺序同样算外观，也要收敛成一个完整排列', () => {
+    const { appearance } = splitSettingsPatch({ viewOrder: ['notes', 'home'] })
+    expect(appearance).toEqual({ viewOrder: ['notes', 'home'] })
+
+    // 认不出来的丢掉，落下的按默认顺序补到末尾；不是数组就回默认
+    expect(sanitizeAppearanceSettings({ viewOrder: ['notes', 'nope', 'home'] }).viewOrder).toEqual([
+      'notes',
+      'home',
+      'projects',
+      'work',
+      'skills',
+      'vault',
+      'styles'
+    ])
+    expect(sanitizeAppearanceSettings({ viewOrder: 'notes' }).viewOrder.length).toBe(7)
+  })
+
   it('合回来的设置与拆之前一致', () => {
     const before = settings({ accentColor: '#ef4444', hotkey: 'Control+J', terminalHeight: 250 })
     const patch = { accentColor: '#22c55e', terminalHeight: 320 } as Partial<AppSettings>

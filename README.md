@@ -82,6 +82,8 @@ Token 同步只推模型名与计数，**不含对话内容**；工作日志刻�
 
 ## 文档
 
+- [官网](site/index.html)：项目的落地页（独立静态站，无构建无依赖，双击就能看）
+- [官网 · Claude 规范版](site-claude/index.html)：同一套内容的第二版，照 [DESIGN.md](DESIGN.md) 那套设计规范画
 - [功能与架构](docs/features-and-architecture.md)：每项功能怎么做的、为什么这么做，数据落在哪
 - [开发笔记](docs/dev-notes/)：构建性能、浏览器里做视觉验证的动手方法
 - [模块约束](docs/constraints/)：各模块不能破的硬约束（通道与落盘、终端、工作日志、笔记、同步与账号、密码保险库）

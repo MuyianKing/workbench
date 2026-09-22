@@ -224,6 +224,17 @@ export const useSettingsStore = defineStore('settings', () => {
   }
 
   /**
+   * 左侧导航栏的显示顺序（设置里拖动排序收手时落盘）。
+   *
+   * 与 setViewVisible 同一条路：这一项也在外观白名单里，实际落在 theme.json。
+   * 排列的完整性由收敛兜底（见 shared/views.ts 的 sanitizeViewOrder），这里只管把用户
+   * 拖出来的那份送出去。
+   */
+  async function setViewOrder(order: ViewId[]): Promise<boolean> {
+    return updateSettings({ viewOrder: order })
+  }
+
+  /**
    * 主题色：交互态与主按钮用的颜色，空串表示回到默认的中性色。
    * 只影响 Element Plus 的主色一族与全局焦点环，状态色和终端不动。
    */
@@ -690,6 +701,7 @@ export const useSettingsStore = defineStore('settings', () => {
     setAccentColor,
     setAccentInk,
     setViewVisible,
+    setViewOrder,
     // 背景
     backgroundImage,
     backgroundName,

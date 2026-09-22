@@ -4,8 +4,10 @@ import {
   VIEW_LABELS,
   fallbackView,
   isViewId,
+  orderedViews,
   sanitizeHiddenViews,
   sanitizeViewId,
+  sanitizeViewOrder,
   visibleViews
 } from '@shared/views'
 
@@ -62,5 +64,39 @@ describe('导航栏显示哪几页', () => {
     expect(fallbackView([])).toBe('home')
     // 防御：真的把每一页都关掉时也不能返回 undefined（正常到不了这里）
     expect(fallbackView([...VIEW_IDS])).toBe('home')
+  })
+})
+
+describe('导航栏的顺序', () => {
+  it('收敛成一个完整排列：认不出来的、重复的丢掉，落下的按默认顺序补到末尾', () => {
+    // 老主题文件里没有这个字段 = 默认顺序
+    expect(sanitizeViewOrder(undefined)).toEqual([...VIEW_IDS])
+    expect(sanitizeViewOrder('notes')).toEqual([...VIEW_IDS])
+    expect(sanitizeViewOrder(['notes', 'nope', 'notes', 'home'])).toEqual([
+      'notes',
+      'home',
+      'projects',
+      'work',
+      'skills',
+      'vault',
+      'styles'
+    ])
+  })
+
+  it('显示的页按排好的顺序走，关掉的整项不出现', () => {
+    const order = sanitizeViewOrder(['work', 'home', 'notes'])
+    expect(orderedViews([], order)).toEqual(['work', 'home', 'notes', 'projects', 'skills', 'vault', 'styles'])
+    expect(orderedViews(['work', 'skills', 'vault', 'styles', 'projects'], order)).toEqual([
+      'home',
+      'notes'
+    ])
+    // 不带顺序参数时就是老行为：按 VIEW_IDS 的默认顺序
+    expect(orderedViews(['home', 'work'])).toEqual(['projects', 'notes', 'skills', 'vault', 'styles'])
+  })
+
+  it('退回页按顺序数过去第一页可见的（不是默认顺序里的第一页）', () => {
+    const order = sanitizeViewOrder(['work', 'notes', 'home'])
+    expect(fallbackView(['home'], order)).toBe('work')
+    expect(fallbackView([], order)).toBe('work')
   })
 })

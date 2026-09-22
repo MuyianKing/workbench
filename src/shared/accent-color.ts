@@ -3,12 +3,17 @@
  *
  * 界面默认是灰度的：Element Plus 的主色（--el-color-primary 一族）走 tokens.css 里那对
  * 「亮色近黑、暗色近白」的中性值，界面里唯一的彩色留给运行状态。用户可以在设置里挑一个
- * 主题色，它只接管交互态 —— 开关、单选、滑块、复选、聚焦环与主按钮 —— 状态色（--st-*）
+ * 主题色，它只接管交互态 —— 开关、单选、滑块、复选、聚焦环、主按钮，以及**选中块的底色**
+ * （--bg-selected：左侧导航栏的当前项与各处列表的选中行都取它）—— 状态色（--st-*）
  * 与终端（--term-*）不受影响。
  *
  * Element Plus 不认「一个主色」，它要一整族派生的变量（light-3/5/7/8/9、dark-2，
  * 以及铺在主色上的文字色）。这里按官方那套配色公式算出来：亮色主题往白里混，
  * 暗色主题往画布色里混，dark-2 反过来。
+ *
+ * 选中块的底色不算 Element Plus 的事，是应用自己的令牌（tokens.css 里那档中性灰），
+ * 但配了主题色就要跟着走 —— 否则「主题色只接管交互态」这句话里那个「选中」是空的。
+ * 用的还是同一条混色公式，只是比例另有一档（见 SELECTED_BLEND_*）。
  *
  * 铺在主色上的文字色按主题色的深浅自动挑（红底白字、浅灰底黑字，见 inkOnAccent），
  * 用户也可以在设置里手动指定黑白。
@@ -47,7 +52,8 @@ export const ACCENT_VARIABLE_NAMES = [
   '--el-color-primary-light-8',
   '--el-color-primary-light-9',
   '--el-color-primary-dark-2',
-  '--el-color-white'
+  '--el-color-white',
+  '--bg-selected'
 ] as const
 
 export type AccentVariableName = (typeof ACCENT_VARIABLE_NAMES)[number]
@@ -78,6 +84,19 @@ const DARK_BLEND = '#1b212a'
 
 /** 亮色主题下 light-N 往白里混，跟 Element Plus 一致 */
 const LIGHT_BLEND = '#ffffff'
+
+/**
+ * 选中块底色（--bg-selected）里主色还剩多少。
+ *
+ * 亮色下混到只剩两成：出来的色阶与 tokens.css 那档中性灰（#dde1e7）几乎同亮，
+ * 所以「比面底色高一档」这件事没变，只是那一档挂上了主色的色相。
+ *
+ * 暗色下要留得更多：面底色本来就深，照亮色那个比例混会贴回背景上、等于没画
+ * —— tokens.css 那条注释说的就是这个坑。那边的中性值（#3b4552）是手调出来的，
+ * 这边只能靠比例算，0.55 算出来与它深浅相当。
+ */
+const SELECTED_BLEND_LIGHT = 0.8
+const SELECTED_BLEND_DARK = 0.55
 
 /** 主题色太亮时铺在上面的字要换成这个深色，否则白字看不清 */
 const DARK_INK = '#11151b'
@@ -172,6 +191,7 @@ export function inkOnAccent(color: string, mode: AccentInkMode = ACCENT_INK_DEFA
  * theme 决定往哪边混：亮色主题的 light-N 往白里混（浅底上的悬停底色），
  * 暗色主题往画布色里混（深底上的悬停底色），dark-2 则始终往对比度更高的一边混。
  * inkMode 决定铺在主色上的文字色（见 inkOnAccent）。
+ * 选中块底色（--bg-selected）走的是同一条混色、另一个比例（见 SELECTED_BLEND_*）。
  */
 export function accentVariables(
   color: unknown,
@@ -183,6 +203,7 @@ export function accentVariables(
 
   const blend = theme === 'dark' ? DARK_BLEND : LIGHT_BLEND
   const deep = theme === 'dark' ? WHITE : '#000000'
+  const selected = theme === 'dark' ? SELECTED_BLEND_DARK : SELECTED_BLEND_LIGHT
 
   return {
     '--el-color-primary': hex,
@@ -192,6 +213,7 @@ export function accentVariables(
     '--el-color-primary-light-8': mixHex(hex, blend, 0.8),
     '--el-color-primary-light-9': mixHex(hex, blend, 0.9),
     '--el-color-primary-dark-2': mixHex(hex, deep, 0.2),
-    '--el-color-white': inkOnAccent(hex, inkMode)
+    '--el-color-white': inkOnAccent(hex, inkMode),
+    '--bg-selected': mixHex(hex, blend, selected)
   }
 }

@@ -70,6 +70,13 @@ body.is-resizing-notes-tree * {
   user-select: none !important;
 }
 
+/* 设置里拖动导航项排序：重排清单而不是跟手搬一块，指针游走在清单上，同样全局兜住 */
+body.is-sorting-views,
+body.is-sorting-views * {
+  cursor: grabbing !important;
+  user-select: none !important;
+}
+
 /* ---------- 主题切换动效 ---------- */
 
 /**
@@ -1016,13 +1023,25 @@ body.is-resizing-notes-tree * {
 }
 
 /**
- * 样式详情弹窗（components/StyleDetailDialog.vue 上的 class）：
- * 八段样张是竖向流水，要滚的就是正文本身（头部固定），所以这里只需要一个确定的高度 ——
+ * 样式详情弹窗（components/StyleDetailDialog.vue 上的 class）：两档（预览 / 规格）都是竖向流水，
+ * 要滚的就是正文本身（头部固定），所以这里只需要一个确定的高度 ——
  * 正文的高度由「弹窗定高 − 头」算出来，只给 max-height 的话正文拿不到滚动所需的高度，
  * 超出的部分会被整块裁掉、滚都滚不到。上界同样跟着窗口走。
+ *
+ * 头部与正文的内边距归零：头部是自绘的（标题 + 预览/规格切换），预览档要整页铺满
+ * （示例页面自带画布色，四周留一条弹窗底色会像贴上去的），规格档的内边距由内容自己给。
+ * 这几个都是 EP 生成的元素，scoped 样式够不着，所以写在全局这里。
  */
 .el-dialog.style-dialog {
   height: min(840px, calc(100vh - var(--h-titlebar) - 48px));
+  padding: 0;
+  overflow: hidden;
+}
+
+.el-dialog.style-dialog .el-dialog__header,
+.el-dialog.style-dialog .el-dialog__body {
+  padding: 0;
+  margin: 0;
 }
 
 /**

@@ -139,6 +139,23 @@ export function inkOn(background: string): string {
   return relativeLuminance(background) > 0.45 ? '#11151b' : '#ffffff'
 }
 
+/**
+ * 两个 hex 之间线性插值：`t=0` 取 a，`t=1` 取 b。
+ *
+ * 样例页面的兜底色（卡片底 / 次文字 / 分隔线）靠它从画布色与文字色之间现调 ——
+ * 缺这些 token 的设计不必另拍一套写死的颜色，导出的深浅也是跟着这套设计走的。
+ * 认不出 hex 时原样回 a（与 `parseHex` 一样，坏数据不抛错）。
+ */
+export function mixHex(a: string, b: string, t: number): string {
+  const from = parseHex(a)
+  const to = parseHex(b)
+  if (!from || !to) return a
+  const ratio = Math.min(1, Math.max(0, t))
+  const channel = (x: number, y: number): number => Math.round(x + (y - x) * ratio)
+  const hex = (value: number): string => value.toString(16).padStart(2, '0')
+  return `#${hex(channel(from.r, to.r))}${hex(channel(from.g, to.g))}${hex(channel(from.b, to.b))}`
+}
+
 /** 色相（0–360），灰阶回 -1 */
 export function hueOf(hex: string): number {
   const rgb = parseHex(hex)
@@ -230,6 +247,41 @@ export function typographyRef(
   return style.typography[matched[2]]
 }
 
+const REF_INLINE_RE = /\{([a-zA-Z]+)\.([^}]+)\}/g
+
+/**
+ * 把值里嵌着的引用一并展开 —— `{spacing.sm} {spacing.md}` → `8px 12px`。
+ * 与 `resolveTokenRef` 的差别是它认「引用夹在别的值中间」这种写法：组件规格的 `padding` 与
+ * `border` 大量是这么写的，整串比对认不出来，会让按钮丢掉内边距、卡片丢掉描边。
+ * 有一条展不开就整串回 undefined（宁可不画，也不把 `{colors.x}` 写进样式表）。
+ */
+export function expandTokenRefs(
+  value: unknown,
+  style: Pick<DesignStyle, 'colors' | 'typography' | 'rounded' | 'spacing'>
+): string | undefined {
+  if (typeof value !== 'string') return undefined
+  const text = value.trim()
+  if (!text) return undefined
+  if (!text.includes('{')) return text
+  let failed = false
+  const expanded = text.replace(REF_INLINE_RE, (_, block: string, key: string) => {
+    const resolved =
+      block === 'colors'
+        ? style.colors[key]
+        : block === 'rounded'
+          ? style.rounded[key]
+          : block === 'spacing'
+            ? style.spacing[key]
+            : undefined
+    if (!resolved) {
+      failed = true
+      return ''
+    }
+    return resolved
+  })
+  return failed ? undefined : expanded.trim() || undefined
+}
+
 /** 只放行看起来像 CSS 值的短字符串，挡住 `url(...)`、分号、花括号这类会改变样式表结构的输入 */
 export function safeCssValue(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined
@@ -238,6 +290,31 @@ export function safeCssValue(value: unknown): string | undefined {
   if (/[<>;{}]/.test(text)) return undefined
   if (/url\s*\(|expression|javascript:/i.test(text)) return undefined
   return text
+}
+
+/**
+ * 行高归一化。上游的 `lineHeight` 有三种写法：倍数（`1.2`、`2.41`）、**不带单位的像素值**
+ * （`64`、`28.8`，本意是「64px 行高」）与带单位的像素值（`36px`）。后两种都要按字号换算成倍数：
+ * 不带单位的直接绑上去会被 CSS 读成倍数 —— `line-height: 64` 是「字号的 64 倍」，
+ * 一个标题能撑出上千像素高（Mastercard 的标题就是这么变成 1216px 的）；带单位的虽然不会撑爆，
+ * 但字号被收敛过（卡片里 64px 的标题只有 19px），绝对行高会让比例失真。倍数收在 0.8–2。
+ * 关键字（`normal`）与其它单位（`1.2em`）原样放行，交给 CSS 自己解释。
+ */
+export function lineHeightCss(raw: unknown, fontSize: unknown): string | undefined {
+  const value = safeCssValue(raw)
+  if (!value) return undefined
+  const asRatio = (pixels: number): string | undefined => {
+    const size = Number(/([\d.]+)/.exec(typeof fontSize === 'string' ? fontSize : '')?.[1] ?? '')
+    if (!Number.isFinite(size) || size <= 0) return undefined
+    return String(Math.min(2, Math.max(0.8, Math.round((pixels / size) * 100) / 100)))
+  }
+  const withUnit = /^([\d.]+)px$/.exec(value)
+  if (withUnit) return asRatio(Number(withUnit[1]))
+  const number = Number(value)
+  if (!Number.isFinite(number)) return value
+  // 3 是数据里的安全分界：倍数写法最大 2.41，像素写法最小 14
+  if (number <= 3) return String(number)
+  return asRatio(number)
 }
 
 /** 一个组件渲染到界面上的最终样式（值都已展开、已收敛） */
@@ -255,25 +332,28 @@ export interface ComponentStyle {
 
 /** 把一条组件规格展开成可直接绑到 :style 的对象；缺 textColor 时按底色自动定黑白字 */
 export function componentStyle(token: DesignComponentToken, style: DesignStyle): ComponentStyle {
-  const background = safeCssValue(resolveTokenRef(token.backgroundColor, style))
+  const background = safeCssValue(expandTokenRefs(token.backgroundColor, style))
   // 没给字色时按底色自动定黑白。只有认得出 hex 才敢算对比度：`rgba(...)` 算不出亮度，
   // 硬猜会把白字放到浅底上。
   const color =
-    safeCssValue(resolveTokenRef(token.textColor, style)) ??
+    safeCssValue(expandTokenRefs(token.textColor, style)) ??
     (background && parseHex(background) ? inkOn(background) : undefined)
-  const borderColor = safeCssValue(resolveTokenRef(token.borderColor, style))
-  const borderWidth = safeCssValue(token.borderWidth)
-  const borderStyle = safeCssValue(token.borderStyle) ?? (borderWidth ? 'solid' : undefined)
-  const border = borderColor ? `${borderWidth ?? '1px'} ${borderStyle ?? 'solid'} ${borderColor}` : undefined
+  const borderColor = safeCssValue(expandTokenRefs(token.borderColor, style))
+  const borderWidth = safeCssValue(expandTokenRefs(token.borderWidth, style))
+  const borderStyle = safeCssValue(expandTokenRefs(token.borderStyle, style)) ?? (borderWidth ? 'solid' : undefined)
+  // 有的规格把描边整条写在 `border` 里（`2px solid {colors.ink-deep}`），能展开就用它
+  const border =
+    safeCssValue(expandTokenRefs(token.border, style)) ??
+    (borderColor ? `${borderWidth ?? '1px'} ${borderStyle ?? 'solid'} ${borderColor}` : undefined)
   return {
     background,
     color,
     border: safeCssValue(border),
-    borderRadius: safeCssValue(resolveTokenRef(token.rounded, style)),
-    padding: safeCssValue(token.padding),
-    height: safeCssValue(token.height ?? token.size),
-    width: safeCssValue(token.width),
-    boxShadow: safeCssValue(token.boxShadow),
+    borderRadius: safeCssValue(expandTokenRefs(token.rounded, style)),
+    padding: safeCssValue(expandTokenRefs(token.padding, style)),
+    height: safeCssValue(expandTokenRefs(token.height ?? token.size, style)),
+    width: safeCssValue(expandTokenRefs(token.width, style)),
+    boxShadow: safeCssValue(expandTokenRefs(token.boxShadow, style)),
     font: typographyRef(token.typography, style)
   }
 }

@@ -19,6 +19,7 @@ use std::path::PathBuf;
 use std::sync::OnceLock;
 use tauri::{AppHandle, Manager, WebviewWindow};
 
+use crate::design;
 use crate::paths;
 use crate::store::JsonStore;
 use crate::system;
@@ -799,6 +800,13 @@ pub fn fs_list_dir(path: String) -> Result<Vec<Value>, String> {
     Ok(out)
 }
 
+/// 把一套设计规范写到项目根目录的 DESIGN.md。
+/// 内容由渲染层按 token 现生成（见 shared/design-export.ts），这一侧只落盘；
+/// 目标固定是 `<项目根>/DESIGN.md`，同名覆盖，回执里说明原本是否已有这个文件。
+#[tauri::command(async)]
+pub fn design_write(project_dir: String, content: String) -> Result<design::WriteOutcome, String> {
+    crate::design::write(&project_dir, &content)
+}
 
 /// 内置壁纸目录：打包后走 resource_dir，开发态直接读仓库里的目录
 /// （开发态资源不经过打包流程，不会出现在 target 下面）。

@@ -24,8 +24,9 @@ export function reorderById<T extends { id: string }>(items: T[], ids: string[])
  *
  * 两个 id 都得在顺序里：缺一个，或本来就在同一位置，说明这次拖动没改变任何东西，
  * 返回 null 让调用方跳过那次落盘。返回新数组，不动传入的。
+ * 顺序里的元素类型跟着传进来的数组走（导航栏顺序那种联合类型照原样留着）。
  */
-export function moveToPosition(ids: string[], fromId: string, toId: string): string[] | null {
+export function moveToPosition<T extends string>(ids: T[], fromId: T, toId: T): T[] | null {
   const from = ids.indexOf(fromId)
   const to = ids.indexOf(toId)
   if (from === -1 || to === -1 || from === to) return null

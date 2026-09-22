@@ -12,7 +12,7 @@
 import { computed } from 'vue'
 import type { Component } from 'vue'
 import { Notebook, FolderOpened, Grid, Document, MagicStick, Key, Brush } from '@element-plus/icons-vue'
-import { VIEW_LABELS, visibleViews, type ViewId } from '@shared/views'
+import { VIEW_LABELS, orderedViews, type ViewId } from '@shared/views'
 import { useProjectsStore } from '@/stores/projects'
 import { useSettingsStore } from '@/stores/settings'
 
@@ -33,10 +33,12 @@ const ICONS: Record<ViewId, Component> = {
 const active = computed(() => store.activeView)
 
 /**
- * 显示哪几项由设置里的「导航菜单」决定（关掉的页整项不出现，见 shared/views.ts）。
- * 顺序永远是 VIEW_IDS 的顺序：关掉哪几项不影响剩下几项的先后。
+ * 显示哪几项、按什么先后，都由设置里的「菜单」决定（关掉的页整项不出现，
+ * 顺序是用户在设置里拖出来的，见 shared/views.ts 的 orderedViews）。
  */
-const items = computed(() => visibleViews(settings.settings.hiddenViews))
+const items = computed(() =>
+  orderedViews(settings.settings.hiddenViews, settings.settings.viewOrder)
+)
 
 function select(id: ViewId): void {
   // 换页不动弹层：开着的弹框留在原地，切走再切回来还是它，填到一半的输入不丢。
@@ -123,7 +125,8 @@ function select(id: ViewId): void {
   color: var(--ink);
 }
 
-/* 当前项用 --bg-selected：它比面底色明确高一档，一眼看得出现在在哪一屏 */
+/* 当前项用 --bg-selected：它比面底色明确高一档，一眼看得出现在在哪一屏。
+   配了主题色时这一档会跟着变成主色的浅底（见 accent-color.ts），没配就是令牌里那档中性灰。 */
 .nav__item.is-active {
   background: var(--bg-selected);
   color: var(--ink);

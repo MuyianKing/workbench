@@ -136,6 +136,20 @@ describe('accentVariables', () => {
     expect(relativeLuminance(varOf(vars, '--el-color-primary-dark-2'))).toBeLessThan(primary)
   })
 
+  it('选中块底色跟着主色走，且仍是一档看得见的高一档', () => {
+    const primary = ACCENT_PRESETS[0]
+    const light = varOf(accentVariables(primary, 'light'), '--bg-selected')
+    const dark = varOf(accentVariables(primary, 'dark'), '--bg-selected')
+
+    // 换个主色就换个底色 —— 这正是「选中块跟着主题色」要看的效果
+    expect(light).not.toBe(varOf(accentVariables(ACCENT_PRESETS[1], 'light'), '--bg-selected'))
+
+    // 亮色下比主色浅（白底上仍与中性灰那一档同量级，没有化成白板）、暗色下比主色深
+    expect(relativeLuminance(light)).toBeGreaterThan(relativeLuminance(primary))
+    expect(relativeLuminance(light)).toBeLessThan(0.9)
+    expect(relativeLuminance(dark)).toBeLessThan(relativeLuminance(primary))
+  })
+
   it('暗色主题反过来：浅色档往画布色里压，dark-2 提亮', () => {
     const primary = relativeLuminance(ACCENT_PRESETS[0])
     const vars = accentVariables(ACCENT_PRESETS[0], 'dark')

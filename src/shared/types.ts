@@ -17,7 +17,7 @@ import { PROJECT_SORT_DEFAULT, type ProjectSort } from './project-sort'
 import type { ThemeConfig } from './theme'
 import type { TokenUsageResult } from './token-usage'
 import type { VaultEntry, VaultRecord } from './vault'
-import type { ViewId } from './views'
+import { VIEW_IDS, type ViewId } from './views'
 import type {
   NoteChange,
   NoteCreateInput,
@@ -444,6 +444,14 @@ export interface AppSettings {
    * 「这台机器上次停在哪儿」跟配置不是一回事。
    */
   hiddenViews: ViewId[]
+  /**
+   * 左侧导航栏的**显示顺序**（一个 ViewId 的排列，见 shared/views.ts 的 sanitizeViewOrder）。
+   *
+   * 与 `hiddenViews` 同一批：都是「导航栏长什么样」的配置，住在 theme.json 里、跟着外观
+   * 同步走。收敛保证它恰好是全部页面的一个排列（落下的补到末尾），老文件没有这个字段
+   * 时就是 VIEW_IDS 的默认顺序。
+   */
+  viewOrder: ViewId[]
   /**
    * 项目页的排序方式（见 shared/project-sort.ts）。
    *
@@ -943,6 +951,12 @@ export interface BootstrapSnapshot {
   themeConfig: ThemeConfig
 }
 
+/** 写 DESIGN.md 的回执：落在哪、原本是否已有这个文件（据此换提示文案） */
+export interface DesignWriteOutcome {
+  path: string
+  existed: boolean
+}
+
 /** `window.workbench` 向渲染层暴露的 API（由适配层实现） */
 export interface WorkbenchApi {
   versions: { node: string; chrome: string }
@@ -1392,6 +1406,15 @@ export interface WorkbenchApi {
   setAppName: (name: string) => void
   /** 应用自身的版本号（「关于」那一屏显示）；取不到时由适配层给一个占位 */
   getAppVersion: () => Promise<string>
+
+  // ---------- 样式参考库（74 套设计语言的 token 是随包静态资源，见 shared/design-export.ts） ----------
+  /**
+   * 把一套设计规范写到项目根目录的 DESIGN.md。
+   *
+   * 内容是渲染层按 token 现生成的 markdown，这里只负责落盘：目标固定是 `<项目根>/DESIGN.md`，
+   * 同名覆盖，回来告诉你原本有没有这个文件（界面据此换提示文案）。
+   */
+  writeDesign: (projectDir: string, content: string) => Promise<Result<DesignWriteOutcome>>
 }
 
 /** 自绘标题栏需要知道的窗口状态 */
@@ -1533,6 +1556,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   tokenSyncRepo: '',
   activeView: 'home',
   hiddenViews: [],
+  viewOrder: [...VIEW_IDS],
   // 行为记忆：第一次打开时就是这几个默认档，之后记住用户自己选的那一档
   projectSort: PROJECT_SORT_DEFAULT,
   workRange: WORK_RANGE_DEFAULT,

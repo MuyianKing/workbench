@@ -28,7 +28,7 @@ import {
   type TopBarStyle
 } from './types'
 import { clampBackgroundOpacity, sanitizeBackgroundPath, sanitizeVeilColor } from './workspace-background'
-import { sanitizeHiddenViews, type ViewId } from './views'
+import { sanitizeHiddenViews, sanitizeViewOrder, type ViewId } from './views'
 
 /**
  * 住在 theme.json 里的设置项，也是「一台机器要带给另一台机器」的那份配置。
@@ -47,7 +47,8 @@ export const APPEARANCE_SETTING_KEYS = [
   'accentInk',
   'topBarStyle',
   'cardOpacity',
-  'hiddenViews'
+  'hiddenViews',
+  'viewOrder'
 ] as const
 
 export type AppearanceSettingKey = (typeof APPEARANCE_SETTING_KEYS)[number]
@@ -67,6 +68,8 @@ export interface AppearanceSettings {
   cardOpacity: number
   /** 左侧导航栏上关掉的页（见 views.ts）：这是「导航栏长什么样」，同样是配置而不是机器状态 */
   hiddenViews: ViewId[]
+  /** 左侧导航栏的显示顺序（见 views.ts）：与 hiddenViews 同属「导航栏长什么样」 */
+  viewOrder: ViewId[]
 }
 
 const THEME_SOURCES: readonly ThemeSource[] = ['system', 'light', 'dark']
@@ -103,7 +106,8 @@ export function sanitizeAppearanceSettings(raw: unknown): AppearanceSettings {
     accentInk: sanitizeAccentInkMode(value.accentInk),
     topBarStyle: sanitizeTopBarStyle(value.topBarStyle),
     cardOpacity: clampCardOpacity(value.cardOpacity),
-    hiddenViews: sanitizeHiddenViews(value.hiddenViews)
+    hiddenViews: sanitizeHiddenViews(value.hiddenViews),
+    viewOrder: sanitizeViewOrder(value.viewOrder)
   }
 }
 

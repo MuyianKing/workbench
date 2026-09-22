@@ -1,0 +1,770 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Workbench —— 一个窗口，装下整天的开发</title>
+<meta name="description" content="Workbench 是一个跑在 Windows 上的本地开发工作台：管项目、记工作、写笔记、看 AI 用量。一键装依赖、启动、打包，输出实时可见。数据都在你自己的硬盘里，默认不联网。" />
+<meta name="theme-color" content="#ffffff" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231d1d1f'/%3E%3Ctext x='16' y='22' font-family='monospace' font-size='16' fill='%23fff' text-anchor='middle'%3E%E2%80%BA_%3C/text%3E%3C/svg%3E" />
+<link rel="stylesheet" href="styles.css" />
+<link rel="stylesheet" href="app.css" />
+</head>
+<body>
+
+<!-- ============ 图标 ============ -->
+<svg class="sprite" aria-hidden="true" focusable="false"><defs>
+  <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="7" height="7" rx="1.6"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.6"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.6"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.6"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3.5 7.2a2 2 0 0 1 2-2h3.1a2 2 0 0 1 1.5.7l1 1.2h6.4a2 2 0 0 1 2 2v7.7a2 2 0 0 1-2 2h-12a2 2 0 0 1-2-2z"/></symbol>
+  <symbol id="i-work" viewBox="0 0 24 24"><rect x="4.5" y="3.5" width="15" height="17" rx="2"/><path d="M8.5 3.5v17"/><path d="M12 8h4M12 11.5h4M12 15h2.5"/></symbol>
+  <symbol id="i-note" viewBox="0 0 24 24"><path d="M6 3.5h7.5L19 9v11.5H6z"/><path d="M13.2 3.6V9H19"/><path d="M9 13h6M9 16.2h4"/></symbol>
+  <symbol id="i-wand" viewBox="0 0 24 24"><path d="M4 20 15 9"/><path d="m14.2 5.2.9 2.1 2.1.9-2.1.9-.9 2.1-.9-2.1-2.1-.9 2.1-.9z"/><path d="M19.5 13.5v3M18 15h3"/></symbol>
+  <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8.6" cy="8.6" r="4.1"/><path d="m11.5 11.5 8 8"/><path d="m17 17 2-2 1.6 1.6"/></symbol>
+  <symbol id="i-brush" viewBox="0 0 24 24"><path d="M18.4 4.6a2 2 0 0 1 2.8 2.8l-8.1 8.1-4.6 1.8 1.8-4.6z"/><path d="M6.5 17.5c-1.3 1.3-1.4 3-2.5 3.7 1.9.9 4.4.3 5.3-1.3"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.8" cy="10.8" r="6.3"/><path d="m15.5 15.5 4 4"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M7.5 5.2 18 12 7.5 18.8z"/></symbol>
+  <symbol id="i-box" viewBox="0 0 24 24"><path d="M12 3.2 20 7.6v8.8L12 20.8 4 16.4V7.6z"/><path d="M4 7.6 12 12l8-4.4M12 12v8.8"/></symbol>
+  <symbol id="i-down" viewBox="0 0 24 24"><path d="M12 4.5v11"/><path d="m7.5 11.5 4.5 4.5 4.5-4.5"/><path d="M5 19.5h14"/></symbol>
+  <symbol id="i-dots" viewBox="0 0 24 24"><circle cx="6" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="18" cy="12" r="1.5"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8.5" y="8.5" width="11" height="11" rx="2"/><path d="M15.5 5.5H6a1.5 1.5 0 0 0-1.5 1.5v9"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2.5 12S6 5.8 12 5.8 21.5 12 21.5 12 18 18.2 12 18.2 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.8"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 5.5v5h-5"/><path d="M19.2 10.5a7.6 7.6 0 1 0 .6 4.6"/></symbol>
+  <symbol id="i-star" viewBox="0 0 24 24"><path d="m12 4 2.3 5.3 5.7.5-4.3 3.8 1.3 5.6L12 16.4 7 19.2l1.3-5.6L4 9.8l5.7-.5z"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 7.5V12l3 2"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M18.4 5.6 17 7M7 17l-1.4 1.4"/></symbol>
+  <symbol id="i-cog" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3.5v2M12 18.5v2M20.5 12h-2M5.5 12h-2M18 6l-1.4 1.4M7.4 16.6 6 18M18 18l-1.4-1.4M7.4 7.4 6 6"/></symbol>
+  <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="9" r="3.6"/><path d="M5.5 19.5a6.5 6.5 0 0 1 13 0"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5.5v13M5.5 12h13"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 24 24"><path d="m9 5.5 6.5 6.5L9 18.5"/></symbol>
+  <symbol id="i-sync" viewBox="0 0 24 24"><path d="M4 9.5A8 8 0 0 1 18.6 6.4"/><path d="M20 14.5A8 8 0 0 1 5.4 17.6"/><path d="M18 3.5v3.5h-3.5M6 20.5V17h3.5"/></symbol>
+  <symbol id="i-pin" viewBox="0 0 24 24"><path d="M4.5 20V10M4.5 14.5h9a5 5 0 0 0 5-5V5.5"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="10.5" width="14" height="9.5" rx="2"/><path d="M8.2 10.5V7.8a3.8 3.8 0 0 1 7.6 0v2.7"/></symbol>
+</defs></svg>
+
+<!-- ============ 顶部导航 ============ -->
+<header class="nav" id="nav">
+  <div class="nav__inner">
+    <a class="nav__brand" href="#top" aria-label="Workbench 首页">
+      <span class="nav__mark" aria-hidden="true">&rsaquo;_</span>
+      <span class="nav__name">Workbench</span>
+    </a>
+    <nav class="nav__links" aria-label="站点导航">
+      <a href="#workspace">首页工作台</a>
+      <a href="#run">运行与终端</a>
+      <a href="#notes">笔记与技能</a>
+      <a href="#vault">密码保险库</a>
+      <a href="#privacy">隐私</a>
+      <a href="#spec">技术规格</a>
+    </nav>
+    <div class="nav__end">
+      <a class="pill pill--sm" href="https://github.com/MuyianKing/workbench" target="_blank" rel="noreferrer noopener">在 GitHub 上获取</a>
+    </div>
+  </div>
+</header>
+
+<main id="top">
+
+  <!-- ============ 首屏 ============ -->
+  <section class="hero">
+    <div class="hero__copy reveal">
+      <p class="eyebrow">Workbench&nbsp;·&nbsp;Windows</p>
+      <h1 class="hero__title">一个窗口，<br />装下整天的开发。</h1>
+      <p class="hero__sub">管项目、记工作、写笔记、看 AI&nbsp;用量。<br />一键装依赖、启动、打包，输出实时可见。<br />数据都在你自己的硬盘里，默认不联网。</p>
+      <div class="hero__cta">
+        <a class="pill" href="https://github.com/MuyianKing/workbench" target="_blank" rel="noreferrer noopener">在 GitHub 上获取</a>
+        <a class="link-arrow" href="#workspace">看看能做什么<svg class="ic" aria-hidden="true"><use href="#i-chev"/></svg></a>
+      </div>
+      <p class="hero__note">不向任何第三方上报数据 · 需要 Windows 10 / 11</p>
+    </div>
+
+    <!-- 应用窗口：首页工作台（暗色，默认主题） -->
+    <div class="stage reveal" data-stage style="--w:1160;--h:742" role="img"
+         aria-label="Workbench 首页示意图：可自由布局的卡片工作台，含活跃度日历、Coding 用量趋势、最近使用、快捷启动、系统状态、快捷操作与今日完成">
+      <div class="win" data-theme="dark" aria-hidden="true">
+        <div class="win__bar">
+          <span class="win__mark" aria-hidden="true">&rsaquo;_</span>
+          <span class="win__appname">MUYIAN</span>
+          <span class="win__drag"></span>
+          <span class="win__ctrls" aria-hidden="true">
+            <i class="win__ctrl win__ctrl--min"></i>
+            <i class="win__ctrl win__ctrl--max"></i>
+            <i class="win__ctrl win__ctrl--close"></i>
+          </span>
+        </div>
+        <div class="win__top">
+          <span class="field"><svg class="ic" aria-hidden="true"><use href="#i-search"/></svg><span class="field__ph">搜索项目名或路径</span><kbd>Ctrl K</kbd></span>
+          <span class="win__tools">
+            <svg class="ic" aria-hidden="true"><use href="#i-grid"/></svg>
+            <svg class="ic" aria-hidden="true"><use href="#i-sun"/></svg>
+            <svg class="ic" aria-hidden="true"><use href="#i-cog"/></svg>
+            <span class="avatar"><svg class="ic" aria-hidden="true"><use href="#i-user"/></svg></span>
+          </span>
+        </div>
+        <div class="win__body">
+          <nav class="rail" aria-label="应用导航（示意）">
+            <span class="rail__i is-on"><svg class="ric" aria-hidden="true"><use href="#i-grid"/></svg><b>首页</b></span>
+            <span class="rail__i"><svg class="ric" aria-hidden="true"><use href="#i-folder"/></svg><b>项目</b></span>
+            <span class="rail__i"><svg class="ric" aria-hidden="true"><use href="#i-work"/></svg><b>工作</b></span>
+            <span class="rail__i"><svg class="ric" aria-hidden="true"><use href="#i-note"/></svg><b>笔记</b></span>
+            <span class="rail__i"><svg class="ric" aria-hidden="true"><use href="#i-wand"/></svg><b>技能</b></span>
+            <span class="rail__i"><svg class="ric" aria-hidden="true"><use href="#i-key"/></svg><b>密码</b></span>
+            <span class="rail__i"><svg class="ric" aria-hidden="true"><use href="#i-brush"/></svg><b>样式</b></span>
+          </nav>
+
+          <div class="canvas">
+            <!-- 栏 1 -->
+            <div class="col col--1">
+              <section class="card">
+                <header class="card__hd"><h4>活跃度</h4><span class="card__meta">过去一年共 4 次执行</span></header>
+                <div class="heat__months"><span>5月</span><span>6月</span><span>7月</span><span>8月</span><span>9月</span></div>
+                <div class="heat">
+                  <div class="heat__days"><span>Mon</span><span>Wed</span><span>Fri</span></div>
+                  <div class="heat__grid" data-heatmap="147"></div>
+                </div>
+              </section>
+
+              <section class="card">
+                <header class="card__hd"><h4>最近使用</h4><span class="card__meta">5</span></header>
+                <ul class="rows">
+                  <li class="row"><i class="dot dot--blue"></i><span class="row__t">车辆预约</span><span class="row__m">2 小时前</span><em class="chip chip--go">启动</em></li>
+                  <li class="row"><i class="dot dot--red"></i><span class="row__t">ICU</span><span class="row__m">1 天前</span><em class="chip chip--go">启动</em></li>
+                  <li class="row"><i class="dot dot--green"></i><span class="row__t">anes-page</span><span class="row__m">1 天前</span><em class="chip chip--go">启动</em></li>
+                </ul>
+              </section>
+
+              <section class="card">
+                <header class="card__hd"><h4>快捷启动</h4><span class="card__meta"><svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg></span></header>
+                <div class="apps">
+                  <span class="app app--blue">V</span>
+                  <span class="app app--gray">⌘</span>
+                  <span class="app app--teal">G</span>
+                  <span class="app app--violet">✱</span>
+                  <span class="app app--rose">◐</span>
+                  <span class="app app--slate">T</span>
+                </div>
+              </section>
+
+              <section class="card">
+                <header class="card__hd"><h4>系统状态</h4><span class="card__meta"><svg class="ic" aria-hidden="true"><use href="#i-refresh"/></svg></span></header>
+                <div class="kv"><span>node</span><b>v24.15.0</b></div>
+                <div class="kv"><span>包管理器</span><b class="tags"><i class="tag tag--on">npm</i><i class="tag tag--on">pnpm</i><i class="tag tag--on">yarn</i></b></div>
+                <div class="kv"><span>nvm</span><b>已装 4 个 · 当前 24.15.0</b></div>
+                <div class="kv"><span>npm 源</span><b class="tags"><i class="tag tag--on">taobao</i></b></div>
+              </section>
+            </div>
+
+            <!-- 栏 2（宽） -->
+            <div class="col col--2">
+              <section class="card">
+                <header class="card__hd"><h4>TOKEN 用量</h4><span class="card__meta"><i class="dot dot--ok"></i>更新于刚刚<svg class="ic" aria-hidden="true"><use href="#i-refresh"/></svg></span></header>
+                <div class="stats">
+                  <div class="stat"><span class="stat__k">今日</span><b>5.16 亿</b></div>
+                  <div class="stat"><span class="stat__k">本周</span><b>10.5 亿</b></div>
+                  <div class="stat"><span class="stat__k">本月</span><b>20.7 亿</b></div>
+                </div>
+                <div class="segbar"><span class="seg seg--on">天</span><span class="seg">周</span><span class="seg">月</span><em>9/1 – 9/15</em></div>
+                <div class="bars" role="img" aria-label="用量趋势示意">
+                  <i style="--v:.30"></i><i style="--v:.46"></i><i style="--v:.24"></i><i style="--v:.58"></i><i style="--v:.40"></i>
+                  <i style="--v:.72"></i><i style="--v:.35"></i><i style="--v:.52"></i><i style="--v:.88"></i><i style="--v:.44"></i>
+                  <i style="--v:.62"></i><i style="--v:1"></i><i style="--v:.50"></i><i style="--v:.68"></i><i style="--v:.38"></i>
+                </div>
+                <p class="bars__cap">模型占比<span>9/1 – 9/15 · 点击行看模型</span></p>
+                <div class="meter"><span class="meter__t">deepseek-v4.1-flash</span><span class="meter__v">16.3 亿</span><i style="--v:1"></i></div>
+                <div class="meter"><span class="meter__t">deepseek-flash</span><span class="meter__v">1.34 亿</span><i style="--v:.09"></i></div>
+                <div class="meter"><span class="meter__t">GLM-5.3-Flash</span><span class="meter__v">1.21 亿</span><i style="--v:.08"></i></div>
+                <p class="bars__cap">工具占比<span>9/1 – 9/15 · 点击行看工具</span></p>
+                <div class="meter"><span class="meter__t">ZCode</span><span class="meter__v">17 亿</span><i style="--v:.84"></i></div>
+                <div class="meter"><span class="meter__t">DeepSeek Harness</span><span class="meter__v">2.81 亿</span><i style="--v:.14"></i></div>
+              </section>
+            </div>
+
+            <!-- 栏 3 -->
+            <div class="col col--3">
+              <section class="card">
+                <header class="card__hd"><h4>快捷操作</h4></header>
+                <div class="act"><span>搜索项目名或路径</span><kbd>Ctrl K</kbd></div>
+                <div class="act"><span>唤起 / 隐藏窗口</span><kbd>Ctrl + Shift + M</kbd></div>
+                <div class="act"><span>把卡片拖到分组标签即归类</span><em class="chip">拖动</em></div>
+                <p class="hint">主题、托盘、开机自启都在右上角的设置里。</p>
+              </section>
+              <section class="card">
+                <header class="card__hd"><h4>今日完成</h4><span class="card__meta">4</span></header>
+                <ul class="rows">
+                  <li class="row"><em class="tag tag--blue">车辆预约</em><span class="row__t">测试</span></li>
+                  <li class="row"><em class="tag tag--blue">车辆预约</em><span class="row__t">快递物流配送功能中，增加快递公司 输入栏在…</span></li>
+                  <li class="row"><em class="tag tag--red">ICU</em><span class="row__t">测试</span></li>
+                  <li class="row"><em class="tag tag--green">anes-page</em><span class="row__t">测试 md 测试</span></li>
+                </ul>
+              </section>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 首页工作台：可拖拽演示 ============ -->
+  <section class="sec sec--gray" id="workspace">
+    <div class="wrap">
+      <p class="eyebrow reveal">首页工作台</p>
+      <h2 class="h2 reveal">九块卡片，<br />随拖随存。</h2>
+      <p class="lede reveal">布局是两层：先分栏，栏里排行，行里摆卡片。1 到 6 栏自己拆，栏宽与行高要么给像素、要么交给它自适应；拖到另一张卡片的上／下缘就另起一行，拖到中间就并进这一行、几张并排平分栏宽。行里不留空位。不看的，在设置里关掉。</p>
+    </div>
+
+    <div class="wrap reveal">
+      <div class="lab" id="lab" role="group" aria-label="首页布局的可拖动示例">
+        <div class="lab__bar">
+          <span class="lab__hint"><svg class="ic" aria-hidden="true"><use href="#i-grid"/></svg>编辑模式 · 拖动卡片换位置</span>
+          <span class="lab__col">栏宽 <i>373</i> · 自适应 · <i>345</i></span>
+        </div>
+        <div class="lab__grid" id="labGrid">
+          <article class="lab__c lab__c--a" data-card>
+            <header><i class="dot dot--blue"></i>活跃度</header>
+            <div class="lab__heat" data-heatmap="119"></div>
+          </article>
+          <article class="lab__c lab__c--b" data-card>
+            <header><i class="dot dot--ok"></i>TOKEN 用量</header>
+            <div class="lab__bars"><i style="--v:.4"></i><i style="--v:.7"></i><i style="--v:.5"></i><i style="--v:1"></i><i style="--v:.6"></i><i style="--v:.8"></i></div>
+          </article>
+          <article class="lab__c lab__c--c" data-card>
+            <header><i class="dot dot--amber"></i>系统状态</header>
+            <div class="lab__lines"><i></i><i></i><i></i></div>
+          </article>
+          <article class="lab__c lab__c--d" data-card>
+            <header><i class="dot dot--red"></i>今日完成</header>
+            <div class="lab__lines"><i></i><i></i></div>
+          </article>
+          <article class="lab__c lab__c--e" data-card>
+            <header><i class="dot dot--green"></i>我的项目</header>
+            <div class="lab__lines"><i></i><i></i><i></i></div>
+          </article>
+          <article class="lab__c lab__c--f" data-card>
+            <header><i class="dot dot--blue"></i>命令</header>
+            <div class="lab__code">npx @deepseek-ai/dsh web</div>
+          </article>
+        </div>
+        <p class="lab__tip">这张小画布可以真的拖 —— 松手就换位。</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 一键操作 + 终端 ============ -->
+  <section class="sec" id="run">
+    <div class="wrap">
+      <p class="eyebrow reveal">项目管理 · 一键操作</p>
+      <h2 class="h2 reveal">从选目录到跑起来，<br />只要点一下。</h2>
+      <p class="lede reveal">选中一个目录，它就去读 <code>package.json</code>：认出框架、全部 scripts、锁文件与包管理器。启动命令按 <code>serve</code> &gt; <code>dev</code> &gt; <code>start</code> 的约定预选好，包管理器按锁文件判定。剩下的就是按钮。</p>
+    </div>
+
+    <div class="stage reveal" data-stage style="--w:1160;--h:690" role="img"
+         aria-label="Workbench 项目页示意图：项目卡网格与底部终端面板，卡片上分别是空闲、运行中、打包中、失败、打包成功五种状态">
+      <div class="win" data-theme="light" aria-hidden="true">
+        <div class="win__bar">
+          <span class="win__mark" aria-hidden="true">&rsaquo;_</span>
+          <span class="win__appname">MUYIAN</span>
+          <span class="win__drag"></span>
+          <span class="win__ctrls" aria-hidden="true">
+            <i class="win__ctrl win__ctrl--min"></i><i class="win__ctrl win__ctrl--max"></i><i class="win__ctrl win__ctrl--close"></i>
+          </span>
+        </div>
+        <div class="win__top">
+          <span class="field"><svg class="ic" aria-hidden="true"><use href="#i-search"/></svg><span class="field__ph">搜索项目名或路径</span><kbd>Ctrl K</kbd></span>
+          <span class="win__tools"><svg class="ic"><use href="#i-grid"/></svg><svg class="ic"><use href="#i-sun"/></svg><svg class="ic"><use href="#i-cog"/></svg><span class="avatar"><svg class="ic"><use href="#i-user"/></svg></span></span>
+        </div>
+        <div class="win__body">
+          <nav class="rail">
+            <span class="rail__i"><svg class="ric"><use href="#i-grid"/></svg><b>首页</b></span>
+            <span class="rail__i is-on"><svg class="ric"><use href="#i-folder"/></svg><b>项目</b></span>
+            <span class="rail__i"><svg class="ric"><use href="#i-work"/></svg><b>工作</b></span>
+            <span class="rail__i"><svg class="ric"><use href="#i-note"/></svg><b>笔记</b></span>
+            <span class="rail__i"><svg class="ric"><use href="#i-wand"/></svg><b>技能</b></span>
+            <span class="rail__i"><svg class="ric"><use href="#i-key"/></svg><b>密码</b></span>
+            <span class="rail__i"><svg class="ric"><use href="#i-brush"/></svg><b>样式</b></span>
+          </nav>
+          <div class="pane">
+            <div class="pane__bar">
+              <span class="filt"><i>全部</i><b>5</b></span>
+              <span class="filt">未分组 <b>1</b></span>
+              <span class="filt">久沐 <b>3</b></span>
+              <span class="filt">玩具 <b>1</b></span>
+              <span class="pane__sp"></span>
+              <span class="ghostbtn"><svg class="ic"><use href="#i-pin"/></svg>分组管理</span>
+              <span class="ghostbtn">排序：最近使用<svg class="ic ic--down"><use href="#i-chev"/></svg></span>
+            </div>
+            <div class="pgrid">
+              <article class="pcard">
+                <header class="pcard__hd"><i class="dot dot--blue"></i><h5>车辆预约</h5><em class="st st--idle">空闲</em></header>
+                <p class="pcard__p">E:\svn-projects\车辆预约系统\code\web</p>
+                <p class="pcard__m">npm</p>
+                <footer class="pcard__ft">
+                  <b class="btn btn--p"><svg class="ic"><use href="#i-play"/></svg>启动</b>
+                  <span class="btn">打包<svg class="ic ic--down"><use href="#i-chev"/></svg></span>
+                  <span class="ibtn"><svg class="ic"><use href="#i-search"/></svg></span>
+                  <span class="ibtn"><svg class="ic"><use href="#i-down"/></svg></span>
+                  <span class="ibtn"><svg class="ic"><use href="#i-dots"/></svg></span>
+                </footer>
+              </article>
+
+              <article class="pcard">
+                <header class="pcard__hd"><i class="dot dot--red"></i><h5>ICU</h5><em class="st st--run">运行中</em></header>
+                <p class="pcard__p">E:\git-projects\ICU2.0\code\ICU</p>
+                <p class="pcard__m">npm · localhost:5274</p>
+                <footer class="pcard__ft">
+                  <b class="btn btn--stop">停止</b>
+                  <span class="btn">打包<svg class="ic ic--down"><use href="#i-chev"/></svg></span>
+                  <span class="ibtn"><svg class="ic"><use href="#i-search"/></svg></span>
+                  <span class="ibtn"><svg class="ic"><use href="#i-down"/></svg></span>
+                  <span class="ibtn"><svg class="ic"><use href="#i-dots"/></svg></span>
+                </footer>
+              </article>
+
+              <article class="pcard">
+                <header class="pcard__hd"><i class="dot dot--green"></i><h5>anes-page</h5><em class="st st--build">打包中</em></header>
+                <p class="pcard__p">E:\git-projects\anes\code\anes-page</p>
+                <p class="pcard__m">npm · node 26.4.0</p>
+                <footer class="pcard__ft">
+                  <b class="btn btn--p is-busy">打包中</b>
+                  <span class="ibtn"><svg class="ic"><use href="#i-search"/></svg></span>
+                  <span class="ibtn"><svg class="ic"><use href="#i-down"/></svg></span>
+                  <span class="ibtn"><svg class="ic"><use href="#i-dots"/></svg></span>
+                </footer>
+              </article>
+
+              <article class="pcard">
+                <header class="pcard__hd"><i class="dot dot--amber"></i><h5>门口屏</h5><em class="st st--fail">失败</em></header>
+                <p class="pcard__p">E:\git-projects\doorScreen\door-a…</p>
+                <p class="pcard__m">pnpm</p>
+                <footer class="pcard__ft">
+                  <b class="btn btn--p"><svg class="ic"><use href="#i-play"/></svg>启动</b>
+                  <span class="btn">打包<svg class="ic ic--down"><use href="#i-chev"/></svg></span>
+                  <span class="ibtn"><svg class="ic"><use href="#i-search"/></svg></span>
+                  <span class="ibtn"><svg class="ic"><use href="#i-down"/></svg></span>
+                  <span class="ibtn"><svg class="ic"><use href="#i-dots"/></svg></span>
+                </footer>
+              </article>
+
+              <article class="pcard">
+                <header class="pcard__hd"><i class="dot dot--blue"></i><h5>workbench</h5><em class="st st--ok">打包成功</em></header>
+                <p class="pcard__p">E:\muyian\Workbench</p>
+                <p class="pcard__m">npm</p>
+                <footer class="pcard__ft">
+                  <b class="btn btn--p"><svg class="ic"><use href="#i-play"/></svg>启动</b>
+                  <span class="btn">打包<svg class="ic ic--down"><use href="#i-chev"/></svg></span>
+                  <span class="ibtn"><svg class="ic"><use href="#i-search"/></svg></span>
+                  <span class="ibtn"><svg class="ic"><use href="#i-down"/></svg></span>
+                  <span class="ibtn"><svg class="ic"><use href="#i-dots"/></svg></span>
+                </footer>
+              </article>
+
+              <article class="pcard pcard--add">
+                <span class="pcard__plus"><svg class="ic"><use href="#i-plus"/></svg></span>
+                <b>添加项目</b>
+                <em>选择项目目录</em>
+              </article>
+            </div>
+          </div>
+        </div>
+
+        <!-- 终端面板 -->
+        <div class="term">
+          <div class="term__bar">
+            <span class="term__tabs">
+              <em class="tab is-on">启动<i>ICU</i></em>
+              <em class="tab">打包</em>
+              <em class="tab">安装依赖</em>
+            </span>
+            <span class="term__tools"><i>停止</i><i>清空</i><i>收起</i></span>
+          </div>
+          <div class="term__log" data-log>
+            <p><b>$</b> npm run dev</p>
+            <p><b>&gt;</b> ICU@2.0.0 dev</p>
+            <p><b>&gt;</b> vite</p>
+            <p class="dim">  VITE v8.3.0  ready in 412 ms</p>
+            <p>  ➜  Local:   <span class="url">http://localhost:5274/</span></p>
+            <p>  ➜  Network: <span class="url">http://192.168.1.24:5274/</span></p>
+            <p class="dim">  前面 4821 行已省略</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="wrap">
+      <ul class="facts reveal">
+        <li><b>打包完自动打开产物目录</b><span>探测顺序是：手动配置 → <code>outDir</code> → <code>dist</code> 等常见目录 → 项目根目录。也可以按项目关掉。</span></li>
+        <li><b>端口被占，直接告诉你谁占的</b><span>启动前发现端口占用，报出占用者名称与 PID，可以一键结束它再重试。</span></li>
+        <li><b>一个操作一个 Tab</b><span>启动、打包、安装依赖各占一个终端，输出互不覆盖；每个保留最近 5000 行，按进程树收干净。面板能收进窗口右缘那颗悬浮按钮。</span></li>
+        <li><b>颜色即状态</b><span>灰是空闲、黄是运行或打包中、绿是正常退出、红是失败 —— 整个界面是灰度的，彩色只用来表达运行状态。</span></li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ============ 笔记与技能 ============ -->
+  <section class="sec sec--gray" id="notes">
+    <div class="wrap">
+      <p class="eyebrow reveal">笔记 · 技能</p>
+      <h2 class="h2 reveal">你的笔记，<br />本来就是一堆 .md 文件。</h2>
+      <p class="lede reveal">选一个本机文件夹当笔记本，里面的目录结构直接变成左边的目录树，正文就是那个文件夹里的 <code>.md</code>。应用没有笔记数据文件 —— 拿 VS&nbsp;Code 或 Typora 直接改也一样，换台机器 <code>git clone</code> 接着写。粘贴的图片传进你自己的图片仓库，正文里只留一条外链。</p>
+    </div>
+
+    <div class="duo">
+      <figure class="stage reveal" data-stage style="--w:940;--h:600">
+        <div class="win" data-theme="light" aria-hidden="true">
+          <div class="win__bar">
+            <span class="win__mark">&rsaquo;_</span><span class="win__appname">MUYIAN</span><span class="win__drag"></span>
+            <span class="win__ctrls"><i class="win__ctrl win__ctrl--min"></i><i class="win__ctrl win__ctrl--max"></i><i class="win__ctrl win__ctrl--close"></i></span>
+          </div>
+          <div class="win__body win__body--full">
+            <nav class="rail">
+              <span class="rail__i"><svg class="ric"><use href="#i-grid"/></svg><b>首页</b></span>
+              <span class="rail__i"><svg class="ric"><use href="#i-folder"/></svg><b>项目</b></span>
+              <span class="rail__i"><svg class="ric"><use href="#i-work"/></svg><b>工作</b></span>
+              <span class="rail__i is-on"><svg class="ric"><use href="#i-note"/></svg><b>笔记</b></span>
+              <span class="rail__i"><svg class="ric"><use href="#i-wand"/></svg><b>技能</b></span>
+              <span class="rail__i"><svg class="ric"><use href="#i-key"/></svg><b>密码</b></span>
+              <span class="rail__i"><svg class="ric"><use href="#i-brush"/></svg><b>样式</b></span>
+            </nav>
+            <div class="notes">
+              <aside class="tree">
+                <header class="tree__hd"><b>notes</b><span class="ghostbtn ghostbtn--sm"><svg class="ic"><use href="#i-sync"/></svg>同步</span></header>
+                <ul class="tree__l">
+                  <li class="is-dir is-open"><svg class="ic ic--f"><use href="#i-chev"/></svg><svg class="ic"><use href="#i-folder"/></svg>工作</li>
+                  <li class="lvl"><svg class="ic"><use href="#i-note"/></svg>周报 9月.md</li>
+                  <li class="lvl"><svg class="ic"><use href="#i-note"/></svg>接口清单.md</li>
+                  <li class="is-dir is-open"><svg class="ic ic--f"><use href="#i-chev"/></svg><svg class="ic"><use href="#i-folder"/></svg>项目</li>
+                  <li class="lvl"><svg class="ic"><use href="#i-note"/></svg>车辆预约.md</li>
+                  <li class="lvl is-on"><svg class="ic"><use href="#i-note"/></svg>ICU 改造.md</li>
+                  <li class="lvl"><svg class="ic"><use href="#i-note"/></svg>anes-page.md</li>
+                  <li class="is-dir"><svg class="ic ic--f"><use href="#i-chev"/></svg><svg class="ic"><use href="#i-folder"/></svg>随手记</li>
+                  <li class="is-dir"><svg class="ic ic--f"><use href="#i-chev"/></svg><svg class="ic"><use href="#i-folder"/></svg>素材</li>
+                  <li><svg class="ic"><use href="#i-note"/></svg>README.md</li>
+                </ul>
+                <footer class="tree__ft"><span class="ghostbtn ghostbtn--sm">notes</span><span class="ghostbtn ghostbtn--sm">素材管理</span></footer>
+              </aside>
+              <div class="editor">
+                <div class="editor__bar"><span class="segbar segbar--sm"><span class="seg seg--on">即时</span><span class="seg">分屏</span><span class="seg">预览</span></span><em>已保存 · 600ms 防抖</em></div>
+                <div class="editor__doc">
+                  <h3>ICU 改造</h3>
+                  <p class="dim">2026-09-16 · 关联项目 <em class="tag tag--red">ICU</em></p>
+                  <h4>要做的</h4>
+                  <ul>
+                    <li>列表页改成虚拟滚动</li>
+                    <li>接入 <code>@deepseek-ai/dsh</code> 的本地命令面板</li>
+                    <li>把打包产物目录固定到 <code>out/</code></li>
+                  </ul>
+                  <h4>试过的</h4>
+                  <pre><code>npm run build &amp;&amp; npm run dist</code></pre>
+                  <p>端口被 <b>5274</b> 占住那次，是上一个 dev server 没退干净。</p>
+                  <figure class="shot"><span>粘贴的图片走你自己的图片仓库</span></figure>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <figcaption>笔记本就是磁盘上一个文件夹，正文就是里面的 <code>.md</code> —— 左边是目录树，右边是编辑器。</figcaption>
+      </figure>
+
+      <figure class="stage reveal" data-stage style="--w:940;--h:600">
+        <div class="win" data-theme="dark" aria-hidden="true">
+          <div class="win__bar">
+            <span class="win__mark">&rsaquo;_</span><span class="win__appname">MUYIAN</span><span class="win__drag"></span>
+            <span class="win__ctrls"><i class="win__ctrl win__ctrl--min"></i><i class="win__ctrl win__ctrl--max"></i><i class="win__ctrl win__ctrl--close"></i></span>
+          </div>
+          <div class="win__body win__body--full">
+            <nav class="rail">
+              <span class="rail__i"><svg class="ric"><use href="#i-grid"/></svg><b>首页</b></span>
+              <span class="rail__i"><svg class="ric"><use href="#i-folder"/></svg><b>项目</b></span>
+              <span class="rail__i"><svg class="ric"><use href="#i-work"/></svg><b>工作</b></span>
+              <span class="rail__i"><svg class="ric"><use href="#i-note"/></svg><b>笔记</b></span>
+              <span class="rail__i is-on"><svg class="ric"><use href="#i-wand"/></svg><b>技能</b></span>
+              <span class="rail__i"><svg class="ric"><use href="#i-key"/></svg><b>密码</b></span>
+              <span class="rail__i"><svg class="ric"><use href="#i-brush"/></svg><b>样式</b></span>
+            </nav>
+            <div class="pane">
+              <div class="pane__bar">
+                <span class="filt"><i>全部</i><b>12</b></span>
+                <span class="pane__sp"></span>
+                <span class="ghostbtn"><svg class="ic"><use href="#i-sync"/></svg>同步技能库</span>
+              </div>
+              <div class="sgrid">
+                <article class="scard">
+                  <header><h5>tauri-app-store</h5><em class="ver">1.0.0</em></header>
+                  <p>用 Tauri v2 store 插件做键值持久化，含懒加载与迁移。</p>
+                  <footer><span>3 个文件</span><span class="ghostbtn ghostbtn--sm">安装到项目</span></footer>
+                </article>
+                <article class="scard">
+                  <header><h5>design-review</h5><em class="ver">2.4.1</em></header>
+                  <p>按视觉验收标准逐页过一遍渲染结果，输出问题清单。</p>
+                  <footer><span>5 个文件</span><span class="ghostbtn ghostbtn--sm">安装到项目</span></footer>
+                </article>
+                <article class="scard">
+                  <header><h5>commit-style</h5><em class="ver">1.2.0</em></header>
+                  <p>沿用仓库既有的中文提交风格，先看 diff 再写提交信息。</p>
+                  <footer><span>2 个文件</span><span class="ghostbtn ghostbtn--sm">安装到项目</span></footer>
+                </article>
+                <article class="scard">
+                  <header><h5>rust-cfg-test</h5><em class="ver">0.3.2</em></header>
+                  <p>Rust 项目改完要同时跑 <code>cargo test</code> 与 <code>cargo build</code>。</p>
+                  <footer><span>2 个文件</span><span class="ghostbtn ghostbtn--sm">安装到项目</span></footer>
+                </article>
+                <article class="scard">
+                  <header><h5>ipc-contract</h5><em class="ver">1.4.3</em></header>
+                  <p>新增通道先对齐契约：一律返回 <code>Result&lt;T&gt;</code>，不 reject。</p>
+                  <footer><span>4 个文件</span><span class="ghostbtn ghostbtn--sm">安装到项目</span></footer>
+                </article>
+                <article class="scard">
+                  <header><h5>ui-tokens</h5><em class="ver">0.9.0</em></header>
+                  <p>界面只用设计令牌，不写死色值；彩色只表达运行状态。</p>
+                  <footer><span>2 个文件</span><span class="ghostbtn ghostbtn--sm">安装到项目</span></footer>
+                </article>
+              </div>
+              <div class="diffcard">
+                <header class="diffcard__hd"><b>版本历史</b><span class="dim">提交历史即版本</span></header>
+                <div class="diff">
+                  <p class="diff__m">@@ -3,6 +3,7 @@</p>
+                  <p class="diff__l"><i>3</i><span class="del">version: 2.4.0</span></p>
+                  <p class="diff__l"><i>4</i><span class="add">version: 2.4.1</span></p>
+                  <p class="diff__l"><i>5</i><span class="ctx">description: 按视觉验收标准逐页过一遍渲染结果</span></p>
+                  <p class="diff__l"><i>6</i><span class="ctx">  输出问题清单</span></p>
+                  <p class="diff__l"><i>7</i><span class="del">allowed-tools: Read, Edit</span></p>
+                  <p class="diff__l"><i>8</i><span class="add">allowed-tools: Read, Edit, Bash</span></p>
+                  <p class="diff__l"><i>9</i><span class="ctx">---</span></p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <figcaption>技能的版本就是 git 历史，可随时恢复，也能一键装进项目的 <code>.agents/skills/</code> —— 下面是逐行的版本对比。</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <!-- ============ 密码保险库（反白段） ============ -->
+  <section class="sec sec--dark" id="vault">
+    <div class="wrap">
+      <p class="eyebrow reveal">密码保险库</p>
+      <h2 class="h2 reveal">密码留在本机，<br />密文才上仓库。</h2>
+      <p class="lede reveal">一把 ECDH P-256 密钥对，每条记录单独走一次 ECIES：临时密钥对 → ECDH → HKDF-SHA256 → AES-256-GCM。临时密钥每次现生成，同一条正文加密两遍，密文完全不同。私钥只存在本机的 Windows 凭据管理器里 —— 有公钥就能往里写，没有私钥谁也读不出来。</p>
+    </div>
+
+    <div class="wrap reveal">
+      <ol class="chain" aria-label="加密链路">
+        <li><b>临时密钥对</b><span>每次现生成</span></li>
+        <li><b>ECDH P-256</b><span>与公钥求共享秘密</span></li>
+        <li><b>HKDF-SHA256</b><span>派生出会话密钥</span></li>
+        <li><b>AES-256-GCM</b><span>加密这一条正文</span></li>
+      </ol>
+    </div>
+
+    <div class="stage reveal" data-stage style="--w:1080;--h:470" role="img"
+         aria-label="Workbench 密码保险库示意图：按分组筛选的卡片墙，每张卡是名字、遮住的密码、备注与复制查看按钮">
+      <div class="win" data-theme="dark" aria-hidden="true">
+        <div class="win__bar">
+          <span class="win__mark">&rsaquo;_</span><span class="win__appname">MUYIAN</span><span class="win__drag"></span>
+          <span class="win__ctrls"><i class="win__ctrl win__ctrl--min"></i><i class="win__ctrl win__ctrl--max"></i><i class="win__ctrl win__ctrl--close"></i></span>
+        </div>
+        <div class="win__body win__body--full">
+          <nav class="rail">
+            <span class="rail__i"><svg class="ric"><use href="#i-grid"/></svg><b>首页</b></span>
+            <span class="rail__i"><svg class="ric"><use href="#i-folder"/></svg><b>项目</b></span>
+            <span class="rail__i"><svg class="ric"><use href="#i-work"/></svg><b>工作</b></span>
+            <span class="rail__i"><svg class="ric"><use href="#i-note"/></svg><b>笔记</b></span>
+            <span class="rail__i"><svg class="ric"><use href="#i-wand"/></svg><b>技能</b></span>
+            <span class="rail__i is-on"><svg class="ric"><use href="#i-key"/></svg><b>密码</b></span>
+            <span class="rail__i"><svg class="ric"><use href="#i-brush"/></svg><b>样式</b></span>
+          </nav>
+          <div class="pane">
+            <div class="pane__bar">
+              <span class="filt"><i>全部</i><b>10</b></span>
+              <span class="filt">服务器</span>
+              <span class="filt">数据库</span>
+              <span class="filt">第三方</span>
+              <span class="pane__sp"></span>
+              <span class="fpri"><svg class="ic"><use href="#i-lock"/></svg>指纹 A1B2-C3D4-E5F6</span>
+            </div>
+            <div class="vgrid">
+              <article class="vcard">
+                <header><i class="dot dot--blue"></i><h5>生产数据库</h5></header>
+                <p class="vcard__pw"><span>••••••••</span><span class="ibtn"><svg class="ic"><use href="#i-eye"/></svg></span><span class="ibtn"><svg class="ic"><use href="#i-copy"/></svg></span></p>
+                <p class="vcard__n">只有内网能连，走跳板机</p>
+              </article>
+              <article class="vcard">
+                <header><i class="dot dot--green"></i><h5>对象存储 AK</h5></header>
+                <p class="vcard__pw"><span>••••••••</span><span class="ibtn"><svg class="ic"><use href="#i-eye"/></svg></span><span class="ibtn"><svg class="ic"><use href="#i-copy"/></svg></span></p>
+                <p class="vcard__n">图片仓库用的那个</p>
+              </article>
+              <article class="vcard">
+                <header><i class="dot dot--amber"></i><h5>门口屏后台</h5></header>
+                <p class="vcard__pw"><span>••••••••</span><span class="ibtn"><svg class="ic"><use href="#i-eye"/></svg></span><span class="ibtn"><svg class="ic"><use href="#i-copy"/></svg></span></p>
+                <p class="vcard__n">账号在甲方那边</p>
+              </article>
+              <article class="vcard">
+                <header><i class="dot dot--red"></i><h5>SVN 账号</h5></header>
+                <p class="vcard__pw"><span>••••••••</span><span class="ibtn"><svg class="ic"><use href="#i-eye"/></svg></span><span class="ibtn"><svg class="ic"><use href="#i-copy"/></svg></span></p>
+                <p class="vcard__n">车辆预约那个仓库</p>
+              </article>
+              <article class="vcard">
+                <header><i class="dot dot--blue"></i><h5>跳板机</h5></header>
+                <p class="vcard__pw"><span>••••••••</span><span class="ibtn"><svg class="ic"><use href="#i-eye"/></svg></span><span class="ibtn"><svg class="ic"><use href="#i-copy"/></svg></span></p>
+                <p class="vcard__n">先连它才能到内网</p>
+              </article>
+              <article class="vcard">
+                <header><i class="dot dot--green"></i><h5>阿里云 RAM</h5></header>
+                <p class="vcard__pw"><span>••••••••</span><span class="ibtn"><svg class="ic"><use href="#i-eye"/></svg></span><span class="ibtn"><svg class="ic"><use href="#i-copy"/></svg></span></p>
+                <p class="vcard__n">只读那个子账号</p>
+              </article>
+              <article class="vcard">
+                <header><i class="dot dot--amber"></i><h5>指纹打卡</h5></header>
+                <p class="vcard__pw"><span>••••••••</span><span class="ibtn"><svg class="ic"><use href="#i-eye"/></svg></span><span class="ibtn"><svg class="ic"><use href="#i-copy"/></svg></span></p>
+                <p class="vcard__n">行政那边给的初始码</p>
+              </article>
+              <article class="vcard">
+                <header><i class="dot dot--red"></i><h5>企业微信后台</h5></header>
+                <p class="vcard__pw"><span>••••••••</span><span class="ibtn"><svg class="ic"><use href="#i-eye"/></svg></span><span class="ibtn"><svg class="ic"><use href="#i-copy"/></svg></span></p>
+                <p class="vcard__n">应用管理用</p>
+              </article>
+              <article class="vcard">
+                <header><i class="dot dot--green"></i><h5>测试库</h5></header>
+                <p class="vcard__pw"><span>••••••••</span><span class="ibtn"><svg class="ic"><use href="#i-eye"/></svg></span><span class="ibtn"><svg class="ic"><use href="#i-copy"/></svg></span></p>
+                <p class="vcard__n">跟生产同结构，随便删</p>
+              </article>
+              <article class="vcard">
+                <header><i class="dot dot--blue"></i><h5>公司 VPN</h5></header>
+                <p class="vcard__pw"><span>••••••••</span><span class="ibtn"><svg class="ic"><use href="#i-eye"/></svg></span><span class="ibtn"><svg class="ic"><use href="#i-copy"/></svg></span></p>
+                <p class="vcard__n">换了设备要重新绑</p>
+              </article>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="wrap">
+      <ul class="facts facts--dark reveal">
+        <li><b>多条机器共写一份文件</b><span>密文放在同步仓库的 <code>vault/vault.json</code>，所有设备公用一个。按 id 取并集、每条取改动时间新的那份 —— 两台机器同时改也不用人工挑边，结果逐字节一样。</span></li>
+        <li><b>露出去的只有信封</b><span>正文是密文，明文只有条目条数、改动时刻、设备 id 和被删的 id。删除留墓碑，墓碑约 90 字节，永不清理。</span></li>
+        <li><b>不是密码管理器</b><span>一条记录就是名字、密码、备注加一个分组。没有用户名与网址字段，也不生成口令。卡片上那排点是固定八度 —— 真实长度也是信息。</span></li>
+        <li><b>没有主口令这一层</b><span>钥匙是 Windows 凭据管理器里的那把私钥。另一台机器靠导出／导入密钥文件接进来，换密钥必须走重新接管。</span></li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ============ Coding 用量 ============ -->
+  <section class="sec" id="usage">
+    <div class="wrap">
+      <p class="eyebrow reveal">Coding 用量</p>
+      <h2 class="h2 reveal">你今天烧了多少 token，<br />它比你先知道。</h2>
+      <p class="lede reveal">直接读本机那几个工具落下的记录，不拦截、不埋点：ZCode 的 sqlite、DeepSeek Harness 的会话帧、CodeBuddy 的扩展日志、WorkBuddy 的会话正文、Qoder 的额度。token 与额度是两个口径，不能相加，也不画在同一根轴上。</p>
+    </div>
+
+    <div class="wrap reveal">
+      <div class="srcs">
+        <span class="src"><b>ZCode</b><em>~/.zcode/cli/db/db.sqlite</em></span>
+        <span class="src"><b>DeepSeek Harness</b><em>~/.dsh/sessions</em></span>
+        <span class="src"><b>CodeBuddy</b><em>%APPDATA%/CodeBuddy CN/logs</em></span>
+        <span class="src"><b>WorkBuddy</b><em>~/.workbuddy/projects</em></span>
+        <span class="src"><b>Qoder</b><em>~/.qoder-cn/projects</em></span>
+      </div>
+
+      <ul class="facts facts--tight">
+        <li><b>四个窗口随时切</b><span>近 7 天、近 30 天、本月、上月，或者自己框一个双月区间。</span></li>
+        <li><b>多机用量相加</b><span>每台机器一个文件、单写者，分片内部取较大者、分片之间相加；后台每小时自己同步一次。</span></li>
+        <li><b>只留一年</b><span>快照按天聚合落盘，超过一年的直接丢掉，不会越滚越大。</span></li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ============ 隐私 ============ -->
+  <section class="sec sec--gray" id="privacy">
+    <div class="wrap">
+      <p class="eyebrow reveal">隐私</p>
+      <h2 class="h2 reveal">默认不联网。<br />出口只有六个，<br />而且都得你自己开。</h2>
+      <p class="lede reveal">没有自建服务端，不向任何第三方上报数据。应用对外发请求的地方，全部列在下面 —— 每一处都默认关闭，也都由你显式打开。</p>
+    </div>
+
+    <div class="wrap reveal">
+      <ol class="exits">
+        <li><b>用量同步</b><span>发往你自己填的那个 git 仓库</span><em>默认关闭</em></li>
+        <li><b>账号登录</b><span>只打 GitHub / Gitee 的 OAuth 接口，点登录时才走</span><em>默认关闭</em></li>
+        <li><b>笔记图片上传</b><span>只有填了图片仓库并真的粘贴了图片才推一次</span><em>默认关闭</em></li>
+        <li><b>笔记本身的同步</b><span>前提是那个文件夹自己连了远端，且只有你点同步才跑</span><em>默认关闭</em></li>
+        <li><b>技能库同步</b><span>也是你自己那个仓库，同样要手动点</span><em>默认关闭</em></li>
+        <li><b>AI 热点</b><span>只 GET 宿主侧白名单里的公开源，只读不上报；不想看就把那张卡片关掉</span><em>默认关闭</em></li>
+      </ol>
+      <p class="after">命令执行本身会联网（<code>npm install</code>、dev server 之类），但那不属于应用的行为。</p>
+    </div>
+
+    <div class="wrap reveal">
+      <div class="pillars">
+        <article>
+          <h3>数据落在写死的地方</h3>
+          <p><code>%APPDATA%\Workbench\data\</code>，不跟着任何设置走。项目与设置、用量快照、工作日志、设备标识、保险库密文都在这一处。</p>
+        </article>
+        <article>
+          <h3>凭据不进数据文件</h3>
+          <p>登录 token 与保险库私钥都在 Windows 凭据管理器里 —— 打开「控制面板 → 凭据管理器」就能看见，也能手工删掉。</p>
+        </article>
+        <article>
+          <h3>不同步的就是不同步</h3>
+          <p>工作日志只在本机：不写进数据文件、也不随同步走。用量同步只推模型名与计数，不含任何对话内容。</p>
+        </article>
+        <article>
+          <h3>笔记不进应用的库</h3>
+          <p>笔记就是你自己那个文件夹。应用既不复制它，也不把它写进任何数据文件。</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 技术规格 ============ -->
+  <section class="sec" id="spec">
+    <div class="wrap">
+      <p class="eyebrow reveal">技术规格</p>
+      <h2 class="h2 reveal">后端刻意做薄。</h2>
+      <p class="lede reveal">后端只提供「取原始数据 / 落盘 / 调系统能力」，合并、排序、状态机、命令构造这些业务语义都在渲染层的适配层里 —— 所以绝大多数改动仍是秒级热更新，只有动到系统能力才重编 Rust（实测增量 4~15 秒）。</p>
+    </div>
+
+    <div class="wrap reveal">
+      <dl class="spec">
+        <div><dt>桌面框架</dt><dd>Tauri 2（Windows 上走系统 WebView2，不随包附带 Chromium）</dd></div>
+        <div><dt>后端</dt><dd>Rust —— 窗口 / 托盘 / 单实例、子进程与日志、文件与 sqlite、系统能力</dd></div>
+        <div><dt>前端</dt><dd>Vue 3（组合式 API + <code>&lt;script setup&gt;</code>）+ Element Plus + Pinia</dd></div>
+        <div><dt>构建</dt><dd>Vite 8（渲染层，打包器是 rolldown）+ cargo / Tauri CLI</dd></div>
+        <div><dt>持久化</dt><dd>本地 JSON，Rust 侧防抖落盘，临时文件 + rename —— 断电不留半篇</dd></div>
+        <div><dt>打包</dt><dd>NSIS 安装包（Windows x64），单用户、可选安装目录；卸载时保留数据文件</dd></div>
+        <div><dt>系统要求</dt><dd>Windows 10 / 11</dd></div>
+        <div><dt>外部依赖</dt><dd>唯一需要预装的是 git，只在两处同步里用得上。VS Code 是可选项，只服务项目卡的「在 VS Code 中打开」</dd></div>
+      </dl>
+    </div>
+  </section>
+
+  <!-- ============ 结尾 CTA ============ -->
+  <section class="cta">
+    <div class="wrap reveal">
+      <h2 class="cta__t">装上一个，<br />少开三个窗口。</h2>
+      <p class="cta__s">仓库目前还没有发布版安装包，从源码构建即可：<code>npm install</code> 之后跑 <code>npm run dist</code>，产出 NSIS 安装包。</p>
+      <div class="cta__b">
+        <a class="pill" href="https://github.com/MuyianKing/workbench" target="_blank" rel="noreferrer noopener">在 GitHub 上获取</a>
+        <a class="link-arrow link-arrow--inv" href="#top">回到顶部<svg class="ic"><use href="#i-chev"/></svg></a>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="foot">
+  <div class="wrap foot__in">
+    <span class="foot__b"><span class="nav__mark">&rsaquo;_</span>Workbench</span>
+    <nav class="foot__links">
+      <a href="https://github.com/MuyianKing/workbench" target="_blank" rel="noreferrer noopener">GitHub</a>
+      <a href="#workspace">首页工作台</a>
+      <a href="#run">运行与终端</a>
+      <a href="#notes">笔记与技能</a>
+      <a href="#vault">密码保险库</a>
+      <a href="#privacy">隐私</a>
+    </nav>
+    <p class="foot__c">一个跑在 Windows 上的本地开发工作台。数据都在你自己的硬盘里。</p>
+  </div>
+</footer>
+
+<script src="main.js"></script>
+</body>
+</html>

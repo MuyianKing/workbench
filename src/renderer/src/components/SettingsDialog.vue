@@ -23,8 +23,10 @@ import {
 } from '@shared/workspace-background'
 import { builtinIdOf } from '@shared/wallpaper'
 import { CARD_OPACITY_MAX, CARD_OPACITY_MIN } from '@shared/card-opacity'
+import { moveToPosition } from '@shared/reorder'
 import { formatRelative } from '@/format'
 import AppDialog from '@/components/AppDialog.vue'
+import { startPointerDrag } from '@/composables/use-pointer-drag'
 import { notifyError, notifySuccess } from '@/notify'
 import type { AppSettings, SyncDeviceInfo, ThemeSource, TopBarStyle } from '@/types'
 import type { ThemeOrigin } from '@/theme-transition'
@@ -61,9 +63,6 @@ const tabs: Array<{ value: SettingsTab; label: string }> = [
 ]
 
 const activeTab = ref<SettingsTab>('appearance')
-
-/** 除首页以外的页：首页在「菜单」那一屏里要连它那九块卡片一起画（父子关系） */
-const otherViews = VIEW_IDS.filter((id) => id !== 'home')
 
 const themes: Array<{ value: ThemeSource; label: string }> = [
   { value: 'system', label: '跟随系统' },
@@ -292,6 +291,122 @@ const hiddenCards = computed(() =>
 
 function setCardVisible(id: HomeCardId, visible: boolean): void {
   void settings.setCardVisible(id, visible)
+}
+
+// ---------- 导航栏拖动排序 ----------
+
+/**
+ * 菜单那一屏的导航项可以按住拖动换位（顺序落盘在 viewOrder，见 shared/views.ts）。
+ *
+ * 首页不参与这一组：它是默认页、也是布局编辑的落点，钉在导航栏最上面（与它的九块卡片
+ * 父子相连地画在清单开头）；下面这组排的是除它以外的页。
+ *
+ * 拖动是「跟手重排、收手落盘」：过程中只改本地那份 dragOrder 让清单实时换位，
+ * 松手才送 store，Esc（或没动过）就地丢弃 —— 与首页卡片拖动、栏宽拖动同一套做法。
+ */
+const dragOrder = ref<ViewId[] | null>(null)
+const draggingView = ref<ViewId | null>(null)
+
+/** 清单按什么顺序画：拖动期间用本地那份，平时跟设置走 */
+const sortableViews = computed<ViewId[]>(() => {
+  const visible = settings.settings.viewOrder.filter((id) => id !== 'home')
+  return dragOrder.value ?? visible
+})
+
+const picksEl = ref<HTMLElement | null>(null)
+
+/**
+ * 拖动开始时算出的那几个**槽位**（网格里每一格的位置与大小），下标与 dragOrder 一一对应。
+ *
+ * 落点必须按槽位算，不能按「指针底下现在是哪一项」算：换位动画期间元素是滑过去的，
+ * 指针下面那一刻可能还压着旧的那一项，于是刚换过去又换回来，清单会来回横跳。
+ *
+ * 槽位由容器位置 + 布局尺寸推出来，而不是量每一项的 getBoundingClientRect ——
+ * 后者在动画期间拿到的是「飞在半路」的位置。容器自己的 rect 与 offsetWidth / Height
+ * 都是布局值，不受 transform 影响，所以量一次、整次拖动都准。
+ */
+let slotRects: Array<{ left: number; top: number; width: number; height: number }> = []
+
+function measureSlots(count: number): void {
+  const el = picksEl.value
+  const first = el?.querySelector<HTMLElement>('.pick--sortable')
+  if (!el || !first) {
+    slotRects = []
+    return
+  }
+
+  const style = getComputedStyle(el)
+  const columnGap = Number.parseFloat(style.columnGap) || 0
+  const rowGap = Number.parseFloat(style.rowGap) || 0
+  const box = el.getBoundingClientRect()
+  const width = first.offsetWidth
+  const height = first.offsetHeight
+  // 一格占多宽由网格列数决定（现在是两列），不写死：容器宽度里塞得下几列就算几列
+  const columns = Math.max(1, Math.round((box.width + columnGap) / (width + columnGap)))
+
+  slotRects = Array.from({ length: count }, (_, index) => ({
+    left: box.left + (index % columns) * (width + columnGap),
+    top: box.top + Math.floor(index / columns) * (height + rowGap),
+    width,
+    height
+  }))
+}
+
+/** 指针落在第几个槽位：落在格子里就是它，落在格子之间的缝里取中心最近的那个 */
+function slotAt(x: number, y: number): number {
+  let nearest = 0
+  let nearestDistance = Infinity
+
+  slotRects.forEach((rect, index) => {
+    const inside =
+      x >= rect.left && x <= rect.left + rect.width && y >= rect.top && y <= rect.top + rect.height
+    const dx = x - (rect.left + rect.width / 2)
+    const dy = y - (rect.top + rect.height / 2)
+    const distance = inside ? 0 : dx * dx + dy * dy
+    if (distance < nearestDistance) {
+      nearestDistance = distance
+      nearest = index
+    }
+  })
+
+  return nearest
+}
+
+function beginViewDrag(event: PointerEvent, id: ViewId): void {
+  // 开关自己要点按：从它上面起手不算拖动
+  if ((event.target as HTMLElement).closest('.el-switch')) return
+
+  const original = [...sortableViews.value]
+  measureSlots(original.length)
+  draggingView.value = id
+  dragOrder.value = original
+
+  startPointerDrag({
+    start: { x: event.clientX, y: event.clientY },
+    bodyClass: 'is-sorting-views',
+    onMove(moveEvent) {
+      const order = dragOrder.value
+      if (!order || slotRects.length !== order.length) return
+
+      // 挪到指针所在槽位「现在」装的那一项的位置上；那已经是自己时就什么都不做（不横跳）
+      const target = order[slotAt(moveEvent.clientX, moveEvent.clientY)]
+      if (!target) return
+      dragOrder.value = moveToPosition(order, id, target) ?? order
+    },
+    onEnd(_last, cancelled) {
+      const final = dragOrder.value
+      draggingView.value = null
+      slotRects = []
+      if (cancelled || !final || final.join(',') === original.join(',')) {
+        dragOrder.value = null
+        return
+      }
+      // 本地顺序先留着，等设置回推再撒手：落盘走一趟 IPC，先清掉的话清单会闪回旧顺序一瞬
+      void settings.setViewOrder(['home', ...final]).then(() => {
+        if (dragOrder.value === final) dragOrder.value = null
+      })
+    }
+  })
 }
 
 // ---------- 快捷键 ----------
@@ -746,6 +861,7 @@ const networkBounds: Array<{ title: string; detail: string }> = [
         <section v-show="activeTab === 'menu'" class="pane">
           <div class="block">
             <h3 class="block__title">左侧导航栏</h3>
+            <p class="row__hint menu-hint">按住一项拖动可调整它在导航栏上的先后；首页固定在最上面。</p>
 
             <!--
               首页那一页自带九块卡片（卡片只属于首页），所以它的开关下面挂一层子项：
@@ -774,16 +890,29 @@ const networkBounds: Array<{ title: string; detail: string }> = [
               </div>
             </div>
 
-            <div class="picks">
-              <div v-for="id in otherViews" :key="id" class="pick">
-                <span class="pick__name">{{ VIEW_LABELS[id] }}</span>
-                <el-switch
-                  :model-value="!hiddenViews.includes(id)"
-                  size="small"
-                  :disabled="isOnlyVisible(VIEW_IDS, hiddenViews, id)"
-                  @update:model-value="(value: unknown) => setViewVisible(id, Boolean(value))"
-                />
-              </div>
+            <!--
+              除首页以外的页：这一组可以按住拖动换位（落点按槽位算，见 beginViewDrag）。
+              TransitionGroup 不加 tag：它只负责在重排时给移动的那几项挂 -move 类（见样式），
+              网格容器仍是外面那个 .picks。
+            -->
+            <div ref="picksEl" class="picks">
+              <TransitionGroup name="pick">
+                <div
+                  v-for="id in sortableViews"
+                  :key="id"
+                  class="pick pick--sortable"
+                  :class="{ 'is-dragging': draggingView === id }"
+                  @pointerdown="beginViewDrag($event, id)"
+                >
+                  <span class="pick__name">{{ VIEW_LABELS[id] }}</span>
+                  <el-switch
+                    :model-value="!hiddenViews.includes(id)"
+                    size="small"
+                    :disabled="isOnlyVisible(VIEW_IDS, hiddenViews, id)"
+                    @update:model-value="(value: unknown) => setViewVisible(id, Boolean(value))"
+                  />
+                </div>
+              </TransitionGroup>
             </div>
           </div>
         </section>
@@ -1318,6 +1447,39 @@ const networkBounds: Array<{ title: string; detail: string }> = [
 .pick__name {
   font-size: var(--fs-meta);
   color: var(--ink);
+}
+
+/* 提示行：标题与清单之间的那道间距由标题自己的下边距给，这里不再叠一层 */
+.menu-hint {
+  margin: 0 0 var(--sp-2);
+}
+
+/**
+ * 可拖的导航项：抓手光标说明「这一块能按住拖」；
+ * 拖动中的那块浮起来（描边加重 + 卡片投影），跟手重排时好认出它落在哪。
+ */
+.pick--sortable {
+  cursor: grab;
+}
+
+.pick--sortable.is-dragging {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-card);
+}
+
+/**
+ * 换位时「滑过去」而不是「跳过去」：TransitionGroup 重排时会给移动的那几项挂上
+ * .pick-move，Vue 自己算好位移差（FLIP），这里只给一条 transform 过渡。
+ * 拖动中会连着换好几次位，时长压到 140ms —— 再长会跟不上手。
+ */
+.pick-move {
+  transition: transform 0.14s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pick-move {
+    transition: none;
+  }
 }
 
 /**

@@ -1,23 +1,29 @@
 <script setup lang="ts">
 /**
- * 样式详情弹窗：一套设计语言的样张，全部用它自己的 token 现画。
+ * 样式详情弹窗：一套设计语言分两档看。
  *
- * **没有 iframe、没有截图**。上游给的那套 `preview.html` 是英文页面，塞进来就等于把英文又请回界面；
- * 这里改成按 token 现渲染八段 —— 配色 / 字体 / 按钮 / 卡片 / 表单 / 版式 / 间距 / 圆角，
- * 颜色、字体、圆角、内边距、高度都取它自己的值，所以看到的是这套设计的真实比例关系，
- * 而不是一张图。
+ *  1. **预览**（默认）：一整个中文的示例页面（StyleDemo.vue）—— 导航、首屏、功能卡、数据带、
+ *     行动横幅、页脚，颜色字阶圆角都取这套设计自己的值。点开第一眼看到的是「这套设计用起来
+ *     是什么样」，而不是零件清单。
+ *  2. **规格**：下面这八段 token 陈列（配色 / 字体 / 按钮 / 卡片 / 表单 / 版式 / 间距 / 圆角），
+ *     点一下就复制色值或变量名 —— 预览给的是整体印象，规格给的是能抄走的值。
+ *
+ * **没有 iframe、没有截图**：上游给的那套 `preview.html` 是英文页面，塞进来就等于把英文又请回
+ * 界面。两档都在 Vue 里现渲染，所以整页 demo 也全是中文。
  *
  * 三段要留意的地方：
  *
  * 1. **值必须经 `componentStyle` 展开**：组件规格里写的是 `{colors.primary}` 这种引用，
- *    展开不出来时宁可不画（见 shared/design-styles.ts 的 `resolveTokenRef`）。
+ *    展开不出来时宁可不画（见 shared/design-styles.ts 的 `expandTokenRefs`）。
  * 2. **字体多半是品牌专有字体，本机没装**，会回落到系统字体 —— 字号、字重、字距、
  *    行高这些比例仍然是真的，界面不假装它是原字体。
- * 3. **三个品牌（lamborghini / runwayml / tesla）上游没给组件规格**，三段样张自然为空，
- *    这里如实说明一句，不留白板。
+ * 3. **三个品牌（lamborghini / runwayml / tesla）上游没给组件规格**，规格档的组件段如实说明
+ *    一句、预览档的按钮按主色现画，都不留白板。
  */
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import AppDialog from '@/components/AppDialog.vue'
+import StyleApplyDialog from '@/components/StyleApplyDialog.vue'
+import StyleDemo from '@/components/StyleDemo.vue'
 import { notifyError, notifySuccess } from '@/notify'
 import {
   COLOR_GROUPS,
@@ -30,6 +36,7 @@ import {
   designStyleFamily,
   inkOn,
   isColorValue,
+  lineHeightCss,
   numericScale,
   roundedLabel,
   safeCssValue,
@@ -40,6 +47,7 @@ import {
   type DesignStyle,
   type DesignTypeToken
 } from '@shared/design-styles'
+import { clampFontSize, clampPadding } from '@shared/design-demo'
 
 const props = defineProps<{ open: boolean; design: DesignStyle | null }>()
 const emit = defineEmits<{ (event: 'update:open', value: boolean): void }>()
@@ -48,6 +56,22 @@ const visible = computed({
   get: () => props.open,
   set: (value) => emit('update:open', value)
 })
+
+/** 打开、或换成另一套设计时回到「预览」档 —— 每次点开都先看页面 */
+const view = ref<'preview' | 'spec'>('preview')
+const viewOptions = [
+  { label: '预览', value: 'preview' as const },
+  { label: '规格', value: 'spec' as const }
+]
+watch(
+  () => [props.open, props.design],
+  () => {
+    view.value = 'preview'
+  }
+)
+
+/** 「应用到项目」的二级弹层；详情弹窗不关，回来还是这一档 */
+const applyOpen = ref(false)
 
 const title = computed(() => props.design?.title ?? '')
 const badge = computed(() =>
@@ -107,16 +131,9 @@ interface TypeRow {
   sample: string
 }
 
-/** 字号上限 44px：再大就把每一行撑成一张屏，弹窗里看不出层次 */
-function clampSize(raw: string | undefined, max: number): string | undefined {
-  const matched = raw ? /([\d.]+)/.exec(raw) : null
-  if (!matched) return safeCssValue(raw)
-  const value = Number(matched[1])
-  return value > max ? `${max}px` : `${Math.round(value)}px`
-}
-
+/** 字号上限 44px：再大就把每一行撑成一张屏，弹窗里看不出层次（收敛规则见 shared/design-demo.ts） */
 function typeRow(style: DesignStyle, key: string, token: DesignTypeToken): TypeRow {
-  const size = clampSize(token.fontSize, 44)
+  const size = clampFontSize(token.fontSize, 44)
   const parts = [token.fontSize, token.fontWeight ? `字重 ${token.fontWeight}` : '']
   if (token.lineHeight) parts.push(`行高 ${token.lineHeight}`)
   if (token.letterSpacing) parts.push(`字距 ${token.letterSpacing}`)
@@ -129,7 +146,9 @@ function typeRow(style: DesignStyle, key: string, token: DesignTypeToken): TypeR
       fontFamily: safeCssValue(token.fontFamily),
       fontSize: size,
       fontWeight: safeCssValue(token.fontWeight),
-      lineHeight: safeCssValue(token.lineHeight),
+      // 行高要先归一化：上游有的把像素行高写成不带单位的数字（`64`），
+      // 直接绑上去会被读成「字号的 64 倍」（见 shared/design-styles.ts 的 lineHeightCss）
+      lineHeight: lineHeightCss(token.lineHeight, token.fontSize),
       letterSpacing: safeCssValue(token.letterSpacing)
     }),
     sample: big ? '设计样式预览' : '这是一段正文示例文字，用来看行距与字距。'
@@ -158,15 +177,7 @@ const SAMPLE_TEXT: Record<ComponentGroup, string> = {
   版式: '版式元素'
 }
 
-/** 样张内边距收一收：上游有 `96px` 这种首屏级内边距，照搬会把弹窗撑爆 */
-function clampPadding(raw: string | undefined): string | undefined {
-  const value = safeCssValue(raw)
-  if (!value) return undefined
-  return value.replace(/([\d.]+)px/g, (_, number: string) =>
-    `${Math.min(32, Math.round(Number(number)))}px`
-  )
-}
-
+/** 样张内边距收一收：上游有 `96px` 这种首屏级内边距，照搬会把弹窗撑爆（见 shared/design-demo.ts） */
 function toSample(style: DesignStyle, key: string, group: ComponentGroup): Sample {
   const resolved = componentStyle(style.components[key] ?? {}, style)
   return {
@@ -180,7 +191,7 @@ function toSample(style: DesignStyle, key: string, group: ComponentGroup): Sampl
       padding: clampPadding(resolved.padding),
       boxShadow: resolved.boxShadow,
       fontFamily: safeCssValue(resolved.font?.fontFamily),
-      fontSize: clampSize(resolved.font?.fontSize, 18),
+      fontSize: clampFontSize(resolved.font?.fontSize, 18),
       fontWeight: safeCssValue(resolved.font?.fontWeight),
       letterSpacing: safeCssValue(resolved.font?.letterSpacing)
     }),
@@ -235,9 +246,24 @@ const canvas = computed(() => props.design?.canvas ?? '')
 </script>
 
 <template>
-  <AppDialog v-model="visible" class="style-dialog" width="980px" :title="title">
+  <AppDialog v-model="visible" class="style-dialog" width="min(1120px, 94vw)">
+    <template #header>
+      <div class="dialog-head">
+        <h3 class="dialog-head__title">{{ title }}</h3>
+        <el-segmented v-model="view" :options="viewOptions" size="small" aria-label="查看方式" />
+        <el-button size="small" type="primary" :disabled="!design" @click="applyOpen = true">
+          应用到项目
+        </el-button>
+      </div>
+    </template>
+
     <template v-if="design">
-      <p class="lede">
+      <!-- 预览档：一整个示例页面 -->
+      <StyleDemo v-if="view === 'preview'" :design="design" />
+
+      <!-- 规格档：八段 token 陈列，色块与变量名点一下就复制 -->
+      <div v-else class="spec">
+        <p class="lede">
         <span class="lede__badge">{{ badge }}</span>
         <button v-if="canvas" class="lede__color" type="button" @click="copy(canvas, '画布色')">
           画布 <i :style="{ background: canvas }" /> <span class="mono">{{ canvas }}</span>
@@ -370,11 +396,44 @@ const canvas = computed(() => props.design?.canvas ?? '')
           </div>
         </div>
       </section>
+      </div>
     </template>
   </AppDialog>
+
+  <!-- 二级弹层：选一个项目，把规范写进去 + 提示词进剪贴板（详情弹窗不关，用户回来还能看规格） -->
+  <StyleApplyDialog v-model:open="applyOpen" :design="design" />
 </template>
 
 <style scoped>
+/*
+ * 弹窗本体的定高与内边距在 global.css 的 `.el-dialog.style-dialog`（EP 生成的头部与正文元素
+ * scoped 样式够不着）。这里是头部与规格档自己的内容。
+ */
+.dialog-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  /* 右侧留出关闭按钮的位置（EP 的关闭按钮绝对定位在右上角） */
+  padding: 13px 52px 13px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.dialog-head__title {
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink);
+  font-size: var(--fs-body);
+}
+
+/* 规格档的内边距原本由弹窗本体给，本体清零后在这里补回来 */
+.spec {
+  padding: var(--sp-4) var(--sp-5);
+}
+
 .lede {
   display: flex;
   align-items: center;
