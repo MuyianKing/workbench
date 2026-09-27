@@ -24,6 +24,7 @@ import { useProjectsStore } from '@/stores/projects'
 import { useSkillsStore } from '@/stores/skills'
 import SkillHistoryDialog from '@/components/SkillHistoryDialog.vue'
 import SkillCompareDialog from '@/components/SkillCompareDialog.vue'
+import SkillFileTabs from '@/components/SkillFileTabs.vue'
 
 const props = defineProps<{ open: boolean }>()
 const emit = defineEmits<{
@@ -316,21 +317,13 @@ async function removeActive(): Promise<void> {
       </div>
 
       <!-- 文件条：一个技能往往不止 SKILL.md（脚本 / 模板 / 子文档），点哪个编辑哪个 -->
-      <div v-if="store.files.length > 1" class="detail__files" role="tablist" aria-label="技能文件">
-        <button
-          v-for="file in store.files"
-          :key="file.rel"
-          class="detail__file mono"
-          :class="{ 'is-active': store.activeFile === file.rel }"
-          type="button"
-          role="tab"
-          :aria-selected="store.activeFile === file.rel"
-          :title="file.rel"
-          @click="switchFile(file.rel)"
-        >
-          {{ file.rel }}
-        </button>
-      </div>
+      <SkillFileTabs
+        v-if="store.files.length > 1"
+        :files="store.files"
+        :active-rel="store.activeFile"
+        label="技能文件"
+        @select="switchFile"
+      />
 
       <div class="detail__editor">
         <div v-if="store.contentLoading" class="detail__state">正在读取…</div>
@@ -424,43 +417,6 @@ async function removeActive(): Promise<void> {
 .detail__actions {
   display: flex;
   gap: var(--sp-2);
-}
-
-/* 文件条：横向滚动的一排文件名（附属文件多时也不撑破弹窗） */
-.detail__files {
-  display: flex;
-  gap: 2px;
-  min-width: 0;
-  overflow-x: auto;
-  padding-bottom: 2px;
-  flex-shrink: 0;
-}
-
-.detail__file {
-  flex-shrink: 0;
-  max-width: 240px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  padding: 4px 10px;
-  border: 1px solid transparent;
-  border-radius: var(--r-md);
-  background: transparent;
-  color: var(--ink-3);
-  font-size: var(--fs-micro);
-  text-align: left;
-  cursor: pointer;
-}
-
-.detail__file:hover {
-  background: var(--bg-inset);
-  color: var(--ink-2);
-}
-
-.detail__file.is-active {
-  background: var(--bg-selected);
-  border-color: var(--border);
-  color: var(--ink);
 }
 
 /* 项目更新的提示条：夹在动作行与编辑区之间，有更新才出现 */

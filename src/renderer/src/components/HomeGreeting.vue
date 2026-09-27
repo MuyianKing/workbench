@@ -33,11 +33,13 @@ import { useAuthStore } from '@/stores/auth'
 import { useProjectsStore } from '@/stores/projects'
 import { useSettingsStore } from '@/stores/settings'
 import { useWeatherStore } from '@/stores/weather'
+import { useWallClock } from '@/composables/use-wall-clock'
 
 const store = useProjectsStore()
 const settings = useSettingsStore()
 const auth = useAuthStore()
 const weather = useWeatherStore()
+const { clock, dayStart } = useWallClock()
 
 /** 当前登录的账号；null 表示没登录，或还没问过后端 —— 两种都回落到程序名称 */
 const account = computed(() => auth.status?.account ?? null)
@@ -51,11 +53,11 @@ const name = computed(() => account.value?.login ?? settings.settings.appName)
 /**
  * 现在几点。
  *
- * 先取整数再往下传：store.clock 每秒变一次，这个 computed 也就每秒重算一次，
+ * 先取整数再往下传：clock 每秒变一次，这个 computed 也就每秒重算一次，
  * 但算出来的值一天只变 6 次 —— Vue 的 computed 按值决定要不要通知下游，
  * 所以依赖它的模板并不会被每秒叫醒（与活跃度图绕开 clock 是同一个考虑）。
  */
-const hour = computed(() => new Date(store.clock).getHours())
+const hour = computed(() => new Date(clock.value).getHours())
 
 /**
  * 深夜。与 greeting 的最后一档同一个判据：凌晨四点那句「早上好」是不对的，
@@ -76,10 +78,10 @@ const greeting = computed(() => {
 })
 
 /** 今天跑过几次（命令开跑那天计数，见 shared/activity.ts） */
-const todayCount = computed(() => store.activity[dayKey(store.dayStart)] ?? 0)
+const todayCount = computed(() => store.activity[dayKey(dayStart.value)] ?? 0)
 
 /** 连着用了多少天：今天还没动手也不算断，从昨天数起 */
-const streak = computed(() => streakOf(store.activity, new Date(store.dayStart)))
+const streak = computed(() => streakOf(store.activity, new Date(dayStart.value)))
 
 /** 外面的实况（`多云 19°`）：没填城市、还没取到、或取失败了都是空串 —— 那一段就不画 */
 const weatherText = computed(() => (weather.view ? formatWeatherView(weather.view) : ''))

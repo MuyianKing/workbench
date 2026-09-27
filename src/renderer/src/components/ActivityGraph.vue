@@ -10,10 +10,12 @@
  */
 import { computed, nextTick, onActivated, ref } from 'vue'
 import { useProjectsStore } from '@/stores/projects'
+import { useWallClock } from '@/composables/use-wall-clock'
 import PanelLoading from '@/components/PanelLoading.vue'
 import { buildActivityCalendar, monthLabels, type ActivityDay } from '@shared/activity'
 
 const store = useProjectsStore()
+const { dayStart } = useWallClock()
 
 /** 横向滚动容器：默认要停在最右，先看到今天 */
 const scrollEl = ref<HTMLElement | null>(null)
@@ -40,10 +42,10 @@ onActivated(() => void nextTick(scrollToLatest))
 const WEEKDAY_LABELS = ['', 'Mon', '', 'Wed', '', 'Fri', '']
 
 /**
- * 横轴末端是今天，所以拿 store.dayStart（今天 00:00，跨天变一次）当基准 ——
+ * 横轴末端是今天，所以拿 dayStart（今天 00:00，跨天变一次）当基准 ——
  * 用每秒跳的 clock 的话，371 个格子会被每秒重铺一遍。
  */
-const calendar = computed(() => buildActivityCalendar(store.activity, store.dayStart))
+const calendar = computed(() => buildActivityCalendar(store.activity, dayStart.value))
 const months = computed(() => monthLabels(calendar.value.weeks))
 
 function tipOf(day: ActivityDay): string {

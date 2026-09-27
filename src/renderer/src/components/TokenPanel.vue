@@ -14,12 +14,13 @@
  * 占比默认统计整个窗口(全部);点击某根柱子则把占比切到那个桶(那天/那周/那月),再点一下回到全部。
  *
  * 数据是主进程「实读 + max 合并进快照」后的结果,这里不做任何持久化,只拉取与展示:
- * 挂载时**先出本地那份快照**、再实读覆盖它(boot),之后每分钟刷新(与主进程的落盘节奏一致),
+ * 挂载时**先出本地那份快照**、再实读覆盖它(boot),之后每分钟刷新(与主进程的落盘节奏一致,
+ * 轮询只在首页可见时跑 —— 见 startPolling),
  * 「⋯」外还有标题栏右侧的手动刷新按钮(与系统状态卡片同款)。后台的自动同步跑完还会广播一次,
  * 收到也重取 —— 同步不挡出数,别的机器的新数据靠这一下补上。
  * 缓存读取通常占九成以上,构成拆分收在悬停里,总量数字才不会因缓存命中波动而误导。
  */
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue'
 import { CaretRight, Connection, Histogram, Refresh } from '@element-plus/icons-vue'
 import TokenRangePicker from '@/components/TokenRangePicker.vue'
 import PanelLoading from '@/components/PanelLoading.vue'
@@ -143,16 +144,35 @@ async function syncNow(): Promise<void> {
 onMounted(() => {
   // 先出本地快照，再实读（boot 内部按顺序来，理由见它上面那段注释）
   void boot()
+})
+
+/**
+ * 轮询与同步广播只跟着「这张卡看得见」走。
+ *
+ * 首页在 KeepAlive 里，切去别的页只是 deactivated、不卸载 —— 定时器若只等卸载才清，
+ * 应用开一整天就是一整天的每分钟后台读盘，不管用户在不在看。onActivated 在首次挂载时
+ * 也会走一次（onMounted 之后），所以这里与 onMounted 分工：boot 只做一次，轮询由它起。
+ */
+function startPolling(): void {
+  if (timer !== null) return
   timer = window.setInterval(() => void refresh(), 60_000)
   // 后台的自动同步跑完会广播一次：新读回的别人的分片立刻显示出来，
   // 不必干等到下一个轮询周期（首屏用的是上一次同步时读回的那一份）
   unsubscribe = window.workbench.onTokenSynced(() => void refresh())
-})
+}
 
-onBeforeUnmount(() => {
-  if (timer) window.clearInterval(timer)
+function stopPolling(): void {
+  if (timer !== null) {
+    window.clearInterval(timer)
+    timer = null
+  }
   unsubscribe?.()
-})
+  unsubscribe = null
+}
+
+onActivated(startPolling)
+onDeactivated(stopPolling)
+onBeforeUnmount(stopPolling)
 
 const days = computed(() => (result.value ? flattenSources(result.value.data) : {}))
 const todayKey = computed(() => dayKey(nowTick.value))

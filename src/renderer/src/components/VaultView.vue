@@ -173,11 +173,11 @@ async function lock(): Promise<void> {
           另一台机器要用同一个保险库，把密钥导出成文件带过去导入一次即可。
         </p>
         <div class="vault__intro-actions">
-          <el-button type="primary" @click="store.createKey(false)">
+          <el-button type="primary" :loading="store.creating" @click="store.createKey(false)">
             <el-icon><Plus /></el-icon>
             创建保险库
           </el-button>
-          <el-button @click="store.importKeyFile()">
+          <el-button :disabled="store.creating" @click="store.importKeyFile()">
             <el-icon><Document /></el-icon>
             导入密钥文件
           </el-button>

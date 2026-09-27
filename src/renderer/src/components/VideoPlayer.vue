@@ -32,18 +32,18 @@ import {
 import type { VideoNode } from '@shared/video'
 import { useVideoStore } from '@/stores/video'
 import { useSettingsStore } from '@/stores/settings'
-import { useProjectsStore } from '@/stores/projects'
+import { useNavStore } from '@/stores/nav'
 import { startPointerDrag } from '@/composables/use-pointer-drag'
 import { useVideoStageHost } from '@/composables/use-video-stage'
 
 const store = useVideoStore()
 const settings = useSettingsStore()
-const projects = useProjectsStore()
+const nav = useNavStore()
 
 const stageHost = useVideoStageHost()
 
 /** 在视频页：内嵌（传送进画布）；不在：悬浮小窗。传送的开 / 关就是它 */
-const inline = computed(() => projects.activeView === 'video')
+const inline = computed(() => nav.activeView === 'video')
 /** 小窗显示没有：不在视频页且手上还有视频（播的、暂停的都算 —— 小窗是遥控器也是画面） */
 const floating = computed(() => !inline.value && !!store.active)
 
@@ -326,7 +326,7 @@ function onGripDown(event: PointerEvent, edge: 'left' | 'right'): void {
 
 /** 悬浮窗上的「回到视频页」：切回去，小窗内容原地传送进画布 */
 function backToVideoView(): void {
-  projects.setActiveView('video')
+  void nav.setActiveView('video')
 }
 
 /** 悬浮窗上的关闭 = 停止播放：active 清掉，小窗随它一起消失 */

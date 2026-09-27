@@ -23,10 +23,12 @@ import QuickAppDialog from '@/components/QuickAppDialog.vue'
 import CommandDialog from '@/components/CommandDialog.vue'
 import QuitConfirmDialog from '@/components/QuitConfirmDialog.vue'
 import { useProjectsStore } from '@/stores/projects'
+import { useNavStore } from '@/stores/nav'
 import { useSettingsStore } from '@/stores/settings'
 import { useWeatherStore } from '@/stores/weather'
 
 const store = useProjectsStore()
+const nav = useNavStore()
 const settings = useSettingsStore()
 // 天气是顶栏问候语旁那一小段实况：启动时取一次、之后按自己的间隔续（只在填了城市时才出网）
 const weather = useWeatherStore()
@@ -48,7 +50,7 @@ const VIEWS: Record<ViewId, Component> = {
   video: VideoView
 }
 
-const currentView = computed(() => VIEWS[store.activeView])
+const currentView = computed(() => VIEWS[nav.activeView])
 
 /**
  * 工作区背景铺在整个窗口上，而不是只在某一页上。

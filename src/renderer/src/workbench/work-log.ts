@@ -20,7 +20,7 @@ import {
 } from '@shared/work-log'
 import { fail, ok } from '@shared/result'
 import type { Result } from '@shared/types'
-import { invoke } from './bridge'
+import { errorText, invoke } from './bridge'
 
 let file: WorkLogFile = emptyWorkLog()
 let loaded = false
@@ -57,19 +57,13 @@ function copy<T>(value: T): T {
   return structuredClone(value)
 }
 
-function reasonOf(error: unknown, fallback: string): string {
-  if (typeof error === 'string' && error.trim()) return error
-  if (error instanceof Error && error.message) return error.message
-  return fallback
-}
-
 /** 整份列表（新的在前由界面侧的 timelineOf 决定，这里不排序） */
 export async function listWorkLogs(): Promise<Result<WorkLogEntry[]>> {
   try {
     await ensureLoaded()
     return ok(copy(file.entries))
   } catch (error) {
-    return fail(reasonOf(error, '读取工作日志失败'))
+    return fail(errorText(error, '读取工作日志失败'))
   }
 }
 
@@ -84,7 +78,7 @@ export async function addWorkLog(input: WorkLogInput): Promise<Result<WorkLogEnt
     persist()
     return ok(copy(entry))
   } catch (error) {
-    return fail(reasonOf(error, '保存工作日志失败'))
+    return fail(errorText(error, '保存工作日志失败'))
   }
 }
 
@@ -103,7 +97,7 @@ export async function updateWorkLog(
     persist()
     return ok(copy(next))
   } catch (error) {
-    return fail(reasonOf(error, '更新工作日志失败'))
+    return fail(errorText(error, '更新工作日志失败'))
   }
 }
 
@@ -117,6 +111,6 @@ export async function removeWorkLog(id: string): Promise<Result<null>> {
     }
     return ok(null)
   } catch (error) {
-    return fail(reasonOf(error, '删除工作日志失败'))
+    return fail(errorText(error, '删除工作日志失败'))
   }
 }

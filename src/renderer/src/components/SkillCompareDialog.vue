@@ -20,8 +20,8 @@ import { computed, nextTick, ref, watch } from 'vue'
 import { buildDiffRows } from '@shared/text-diff'
 import { type SkillCompareFile } from '@shared/skills'
 import AppDialog from '@/components/AppDialog.vue'
-import { confirmAction } from '@/notify'
 import { useSkillsStore } from '@/stores/skills'
+import SkillFileTabs from '@/components/SkillFileTabs.vue'
 
 const props = defineProps<{
   open: boolean
@@ -114,6 +114,8 @@ const actionDisabledHint = computed(() =>
 
 /** 文件条上的圆点：两侧内容不同（含某一侧没有的）才标 —— 找「动过」的文件全靠它 */
 const isDiff = (file: SkillCompareFile): boolean => file.base !== file.incoming
+/** 挂圆点的那些 rel（文件条组件按它标注，见 SkillFileTabs） */
+const diffRels = computed(() => props.files.filter(isDiff).map((file) => file.rel))
 
 const applying = ref(false)
 const error = ref('')
@@ -142,21 +144,12 @@ async function apply(): Promise<void> {
 }
 
 /**
- * 恢复到所选版本。先确认 —— 它替换的是整个技能目录，不是当前这一个文件。
- * 恢复本身也是一次提交，现在这份内容留在历史里，随时能再恢复回来。
- *
- * 失败原因由 store 弹出来（那边才知道 git 说了什么），这里只管成功之后把这一层收掉。
+ * 恢复到所选版本：确认框收在 store（restoreWithConfirm，与历史列表共用同一句），
+ * 这里只管成功之后把这一层收掉。失败原因由 store 弹出来（那边才知道 git 说了什么）。
  */
 async function restoreVersion(): Promise<void> {
-  const confirmed = await confirmAction(
-    '这个技能的文件会变回所选版本的样子。恢复本身也是一次提交，现在的内容留在历史里，随时能再恢复回来。',
-    '恢复到这个版本？',
-    { confirmButtonText: '恢复' }
-  )
-  if (!confirmed) return
-
   applying.value = true
-  const done = await store.restore(props.skillId, props.versionHash ?? '')
+  const done = await store.restoreWithConfirm(props.skillId, props.versionHash ?? '')
   applying.value = false
   if (done) emit('restored')
 }
@@ -173,22 +166,14 @@ async function restoreVersion(): Promise<void> {
   >
     <div class="cmp">
       <!-- 文件条：库里全部文件，点哪个看哪个的差异；圆点 = 项目里动过 -->
-      <div v-if="files.length > 1" class="cmp__files" role="tablist" aria-label="对比文件">
-        <button
-          v-for="file in files"
-          :key="file.rel"
-          class="cmp__file mono"
-          :class="{ 'is-active': currentRel === file.rel }"
-          type="button"
-          role="tab"
-          :aria-selected="currentRel === file.rel"
-          :title="file.rel"
-          @click="currentRel = file.rel"
-        >
-          <i v-if="isDiff(file)" class="cmp__dot" aria-hidden="true" />
-          {{ file.rel }}
-        </button>
-      </div>
+      <SkillFileTabs
+        v-if="files.length > 1"
+        :files="files"
+        :active-rel="currentRel"
+        label="对比文件"
+        :marked-rels="diffRels"
+        @select="(rel: string) => (currentRel = rel)"
+      />
 
       <!-- 栏头：左右各自醒目标出身份（与下方差异表的红/绿同一语义） -->
       <div class="cmp__heads">
@@ -250,54 +235,7 @@ async function restoreVersion(): Promise<void> {
   padding: var(--sp-4);
 }
 
-/* 文件条：横向滚动的一排文件名（与详情弹窗的文件条同一副样子） */
-.cmp__files {
-  display: flex;
-  gap: 2px;
-  min-width: 0;
-  overflow-x: auto;
-  padding-bottom: 2px;
-  flex-shrink: 0;
-}
-
-.cmp__file {
-  position: relative;
-  flex-shrink: 0;
-  max-width: 240px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  padding: 4px 10px 4px 18px;
-  border: 1px solid transparent;
-  border-radius: var(--r-md);
-  background: transparent;
-  color: var(--ink-3);
-  font-size: var(--fs-micro);
-  text-align: left;
-  cursor: pointer;
-}
-
-.cmp__file:hover {
-  background: var(--bg-inset);
-  color: var(--ink-2);
-}
-
-.cmp__file.is-active {
-  background: var(--bg-selected);
-  border-color: var(--border);
-  color: var(--ink);
-}
-
-/* 差异圆点：左上角一枚，标出「项目里动过」的文件 */
-.cmp__dot {
-  position: absolute;
-  top: 7px;
-  left: 8px;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--st-run);
-}
+/* 文件条本体在 SkillFileTabs（与详情弹窗共用同一副），差异圆点由 markedRels 驱动 */
 
 /* 栏头：与差异表的两栏对齐（表格每侧恰为一半宽），badge 悬在代码列上方；
    左红右绿与行底色同一语义 —— 左边是「将被覆盖的」，右边是「要采纳的」 */

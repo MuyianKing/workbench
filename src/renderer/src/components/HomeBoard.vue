@@ -36,6 +36,7 @@ import {
   type RowTarget
 } from '@shared/theme'
 import { useProjectsStore } from '@/stores/projects'
+import { useNavStore } from '@/stores/nav'
 import { startPointerDrag } from '@/composables/use-pointer-drag'
 import { useSettingsStore } from '@/stores/settings'
 import BoardCard from '@/components/BoardCard.vue'
@@ -51,6 +52,7 @@ import TodayWorkPanel from '@/components/TodayWorkPanel.vue'
 import NewsPanel from '@/components/NewsPanel.vue'
 
 const store = useProjectsStore()
+const nav = useNavStore()
 const settings = useSettingsStore()
 
 /** 九块卡片各自画什么；名字取自 shared 的 HOME_CARD_LABELS（设置里的卡片清单也用它） */
@@ -66,7 +68,7 @@ const CARDS: Record<HomeCardId, Component> = {
   news: NewsPanel
 }
 
-const editing = computed(() => store.layoutEditing)
+const editing = computed(() => nav.layoutEditing)
 
 // ---------- 栏 / 行 / 卡片 ----------
 

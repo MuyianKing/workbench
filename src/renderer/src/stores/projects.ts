@@ -5,9 +5,11 @@
  * 这里只剩「项目」本身，其余各归各家：
  *   - 终端 / 运行态 / 日志 → `terminal.ts`
  *   - 设置 / 外观 / 首页布局 → `settings.ts`
+ *   - 当前页 / 导航 → `nav.ts`
  *   - 包管理器 / nvm / nrm / 数据目录 → `environment.ts`
  *   - 快捷启动 / 命令 → `catalog.ts`
  *   - 账号 → `auth.ts`
+ *   - 每秒时钟 / 「今天 00:00」 → `composables/use-wall-clock.ts`
  *
  * 它同时是**启动编排的落点**（`init`）：各 store 的事件订阅、首屏取数与几项后台探测
  * 都在这里按顺序发起，因为它们之间的先后顺序是有讲究的（外观必须先落地）。
@@ -15,7 +17,6 @@
 import { computed, ref, watch } from 'vue'
 import { defineStore } from 'pinia'
 import { backfillProjectColors as backfillColors } from '@shared/project-color'
-import { fallbackView, sanitizeViewId, type ViewId } from '@shared/views'
 import { sanitizeProjectSort, type ProjectSort } from '@shared/project-sort'
 import type {
   ActivityCounts,
@@ -34,13 +35,6 @@ import { useAuthStore } from './auth'
 
 /** 未分组项目在筛选栏里的伪分组 id */
 export const UNGROUPED = 'ungrouped'
-
-/** 今天 00:00 的时间戳（本地时区） */
-function startOfToday(): number {
-  const date = new Date()
-  date.setHours(0, 0, 0, 0)
-  return date.getTime()
-}
 
 export const useProjectsStore = defineStore('projects', () => {
   const settingsStore = useSettingsStore()
@@ -62,7 +56,7 @@ export const useProjectsStore = defineStore('projects', () => {
    * 排序方式（行为记忆）：初值来自设置，之后跟着设置走。
    *
    * 设置是异步载入的、数据目录还可能被整份换掉，所以这里要核一遍 ——
-   * 与下面 activeView 是同一条路。它**不是**「这台机器长什么样」的配置，
+   * 与 nav store 的 activeView 是同一条路。它**不是**「这台机器长什么样」的配置，
    * 所以住在数据文件里、不进 theme.json（见 shared/types.ts 的那一段）。
    */
   const sortBy = ref<ProjectSort>(sanitizeProjectSort(settingsStore.settings.projectSort))
@@ -102,84 +96,6 @@ export const useProjectsStore = defineStore('projects', () => {
   function closeAddDialog(): void {
     addDialogVisible.value = false
   }
-
-  /**
-   * 当前页（左侧导航栏的当前项）。
-   *
-   * 不引入 Vue Router：换页就是换这个 id，App.vue 用 <KeepAlive><component :is> 渲染，
-   * 各页的滚动位置由 KeepAlive 保住。值会落盘，重启后回到上次那一页。
-   */
-  const activeView = ref<ViewId>(sanitizeViewId(settingsStore.settings.activeView))
-
-  // 设置是异步载入的，跟着它核一遍
-  watch(
-    () => settingsStore.settings.activeView,
-    (value) => {
-      activeView.value = sanitizeViewId(value)
-    },
-    { immediate: true }
-  )
-
-  /**
-   * 当前页被设置里关掉之后退到第一页可见的。
-   *
-   * 盯的是「关掉了哪几页」这个字符串而不是那个数组本身：设置在别处每改一项都会换掉整个
-   * settings 对象（数组也是新的），按引用比会每次都被唤起来。只在**关掉的那几页真的变了**、
-   * 且当前页正好在其中时才换页，用户主动的切页（导航栏、布局编辑切回首页）照旧过得去。
-   */
-  watch(
-    () => settingsStore.settings.hiddenViews.join(','),
-    () => {
-      const hidden = settingsStore.settings.hiddenViews
-      if (!hidden.includes(activeView.value)) return
-
-      const next = fallbackView(hidden, settingsStore.settings.viewOrder)
-      applyView(next)
-      void settingsStore.updateSettings({ activeView: next })
-    },
-    { immediate: true }
-  )
-
-  /** 是否处于首页布局编辑态：由首页顶栏那颗「编辑布局」进入，画布上的「完成」退出 */
-  const layoutEditing = ref(false)
-
-  function setLayoutEditing(value: boolean): void {
-    layoutEditing.value = value
-    // 布局只有首页有得编辑（入口在首页顶栏，但键盘 / 以后别的入口不一定，这里统一兜住），
-    // 进编辑态先切回首页，免得顶栏变成了编辑条、面前却没有画布
-    if (value && activeView.value !== 'home') {
-      applyView('home')
-      void settingsStore.updateSettings({ activeView: 'home' })
-    }
-  }
-
-  /** 切页的共同部分：布局编辑只对首页画布有意义，切走时收掉 */
-  function applyView(value: ViewId): void {
-    activeView.value = value
-    if (value !== 'home') layoutEditing.value = false
-  }
-
-  async function setActiveView(value: ViewId): Promise<void> {
-    if (value === activeView.value) return
-
-    applyView(value)
-    await settingsStore.updateSettings({ activeView: value })
-  }
-
-  /**
-   * 驱动运行时长的时钟，以及「今天 00:00」。
-   *
-   * dayStart 只在跨天时变一次 —— 活跃度图的横轴末端是今天，
-   * 每秒重铺 371 个格子没必要，跨过零点重算一次就够。
-   */
-  const clock = ref(Date.now())
-  const dayStart = ref(startOfToday())
-  window.setInterval(() => {
-    const now = Date.now()
-    clock.value = now
-    const today = startOfToday()
-    if (today !== dayStart.value) dayStart.value = today
-  }, 1000)
 
   // ---------- 初始化 ----------
 
@@ -371,7 +287,7 @@ export const useProjectsStore = defineStore('projects', () => {
     }
     const index = projects.value.findIndex((p) => p.id === id)
     if (index !== -1) projects.value.splice(index, 1)
-    delete terminal.runtimes[id]
+    terminal.forgetRuntime(id)
     delete pathValidity.value[id]
     terminal.dropTerminalsOf(id)
     if (drawerProjectId.value === id) drawerProjectId.value = null
@@ -801,8 +717,6 @@ export const useProjectsStore = defineStore('projects', () => {
     sortedGroups,
     ready,
     activity,
-    clock,
-    dayStart,
     groupFilter,
     sortBy,
     setGroupFilter,
@@ -815,11 +729,6 @@ export const useProjectsStore = defineStore('projects', () => {
     addDialogVisible,
     openAddDialog,
     closeAddDialog,
-    activeView,
-    setActiveView,
-    applyView,
-    layoutEditing,
-    setLayoutEditing,
     init,
     findProject,
     addProject,

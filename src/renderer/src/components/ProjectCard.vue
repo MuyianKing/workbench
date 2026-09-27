@@ -15,6 +15,7 @@ import { sanitizeProjectColor, projectColorVar } from '@shared/project-color'
 import { statusMeta, isBusyStatus } from '@/status'
 import { useProjectsStore } from '@/stores/projects'
 import { useTerminalStore } from '@/stores/terminal'
+import { useWallClock } from '@/composables/use-wall-clock'
 import type { Project, ProjectStatus } from '@/types'
 
 const props = defineProps<{
@@ -22,6 +23,7 @@ const props = defineProps<{
 }>()
 const store = useProjectsStore()
 const terminal = useTerminalStore()
+const { clock } = useWallClock()
 
 const runtime = computed(() => terminal.runtimeOf(props.project.id))
 const status = computed<ProjectStatus>(() => runtime.value?.status ?? 'idle')
@@ -50,10 +52,10 @@ const elapsed = computed(() => {
   const rt = runtime.value
   if (!rt) return ''
   if (status.value === 'running' && rt.startedAt) {
-    return formatClock(store.clock - rt.startedAt)
+    return formatClock(clock.value - rt.startedAt)
   }
   if (status.value === 'building' && rt.startedAt) {
-    return formatClock(store.clock - rt.startedAt)
+    return formatClock(clock.value - rt.startedAt)
   }
   if (status.value === 'success' && rt.durationMs) {
     return formatDurationMs(rt.durationMs)

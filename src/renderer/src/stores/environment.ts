@@ -99,23 +99,23 @@ export const useEnvironmentStore = defineStore('environment', () => {
   async function installGlobalTool(tool: InstallableGlobalTool): Promise<boolean> {
     if (pmInstalling.value) return false
 
-    const target = terminal.openSystemTerminal(`安装 ${tool}`)
+    terminal.openSystemTerminal(`安装 ${tool}`)
     // 同一轮接一轮地装不同的包时，日志从零开始，别把上一次的输出混进来
     terminal.clearTerminalLogs(SYSTEM_PM_TERMINAL)
 
     const startedAt = Date.now()
-    target.status = 'installing'
-    target.currentCommand = `npm install -g ${tool}`
-    target.startedAt = startedAt
+    // 终端状态的写入口收在 terminal store 的这个 action 里（系统终端不走主进程的状态事件）
+    terminal.setSystemTerminalStatus('installing', {
+      currentCommand: `npm install -g ${tool}`,
+      startedAt
+    })
     terminal.appendSystemLog(`npm install -g ${tool}`, 'cmd')
 
     pmInstalling.value = tool
     pmInstallLog.value = ''
 
     const settle = (status: 'success' | 'failed', note?: string): void => {
-      target.status = status
-      target.startedAt = undefined
-      target.durationMs = Date.now() - startedAt
+      terminal.setSystemTerminalStatus(status, { startedAt: undefined, durationMs: Date.now() - startedAt })
       if (note) terminal.appendSystemLog(note, status === 'failed' ? 'err' : 'sys')
     }
 

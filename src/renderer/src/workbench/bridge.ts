@@ -106,6 +106,19 @@ export async function guard<T>(task: Promise<T>, fallback: string): Promise<Resu
   }
 }
 
+/**
+ * 把捕获到的失败值变成给人看的一句话 —— `guard` 的伴生函数,给不走 `guard` 的
+ * try/catch 调用点用。语义与它一致:命令返回 `Err(String)` 时 Tauri 直接拿那个字符串
+ * reject,所以字符串先取;渲染层自己抛的 Error 取 message;两者都拿不到就落
+ * 调用方给的兜底文案。以前这段判断在各个适配模块里各写一份(还有两种顺序,
+ * 「Error 优先」的那几份会把 Rust 的原文吞成泛化文案),现在收敛在这里。
+ */
+export function errorText(error: unknown, fallback: string): string {
+  if (typeof error === 'string' && error.trim()) return error
+  if (error instanceof Error && error.message) return error.message
+  return fallback
+}
+
 /** 已经报过「尚未移植」的通道，避免同一个警告刷满控制台 */
 const warned = new Set<string>()
 /**

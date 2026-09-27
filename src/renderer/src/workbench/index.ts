@@ -28,7 +28,7 @@ import type {
   WindowState,
   WorkbenchApi
 } from '@shared/types'
-import { assetUrl, guard, hasTauri, invoke, listen, notPorted } from './bridge'
+import { assetUrl, errorText, guard, hasTauri, invoke, listen, notPorted } from './bridge'
 import { emit } from './events'
 import * as events from './events'
 import * as auth from './auth'
@@ -55,10 +55,6 @@ import { getTokenUsage, getTokenUsageSnapshot, listSyncDevices, syncThemeConfig,
 function resolveTheme(theme: AppSettings['theme']): EffectiveTheme {
   if (theme === 'light' || theme === 'dark') return theme
   return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
-}
-
-function reasonOf(error: unknown, fallback: string): string {
-  return error instanceof Error ? error.message : fallback
 }
 
 /**
@@ -471,7 +467,7 @@ function createApi(): WorkbenchApi {
         await invoke('allow_background', { path: target })
         return ok({ path, name: target.split(/[\\/]/).pop() ?? target, url: assetUrl(target) })
       } catch (error) {
-        return fail(reasonOf(error, '读取背景图失败'))
+        return fail(errorText(error, '读取背景图失败'))
       }
     },
 

@@ -86,10 +86,9 @@ const locTitle = computed(() => {
   return lines.join('\n')
 })
 
-/** 点开一张卡片：先读它的 SKILL.md，再拉开详情弹窗（编辑区读着的时候是「正在读取」） */
-function openDetail(skill: SkillEntry): void {
-  void store.select(skill.id)
-  detailOpen.value = true
+/** 点开一张卡片：先读它的 SKILL.md，读成了才拉开详情弹窗（编辑区读着的时候是「正在读取」） */
+async function openDetail(skill: SkillEntry): Promise<void> {
+  if (await store.select(skill.id)) detailOpen.value = true
 }
 
 function openInstall(skill: SkillEntry): void {

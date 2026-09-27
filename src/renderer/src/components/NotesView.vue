@@ -15,11 +15,12 @@
  * 与其它页面一样，它是导航栏上的一项（见 shared/views.ts），换页由 App.vue 的
  * `<KeepAlive><component :is>` 负责 —— 切走再回来时编辑器还是刚才那一篇、光标位置也还在。
  * 数据与动作都在 store 里，这一层负责编排：谁被选中、什么时候弹起名字的弹窗、
- * 增删改的确认与提示。树在 NoteTree，正文编辑在 NoteEditor。
+ * 增删改的确认与提示。树在 NoteTree，正文编辑在 NoteEditor，
+ * 左栏底部那一行与分隔条是 RecentRoots / PanelResizer（与视频页共用）。
  */
-import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { CaretBottom, Close, Document, EditPen, FolderOpened, Notebook, Picture, Refresh, RefreshRight } from '@element-plus/icons-vue'
+import { Document, EditPen, FolderOpened, Notebook, Picture, Refresh, RefreshRight } from '@element-plus/icons-vue'
 import {
   countNodes,
   findNoteNode,
@@ -29,7 +30,6 @@ import {
 } from '@shared/note'
 import { formatTimestamp } from '@/format'
 import { confirmAction } from '@/notify'
-import { startPointerDrag } from '@/composables/use-pointer-drag'
 import { useNotesStore } from '@/stores/notes'
 import { useSettingsStore } from '@/stores/settings'
 import NoteTree from '@/components/NoteTree.vue'
@@ -37,6 +37,8 @@ import PanelLoading from '@/components/PanelLoading.vue'
 import NoteEditor from '@/components/NoteEditor.vue'
 import NoteNameDialog from '@/components/NoteNameDialog.vue'
 import NoteAssetsDialog from '@/components/NoteAssetsDialog.vue'
+import RecentRoots from '@/components/RecentRoots.vue'
+import PanelResizer from '@/components/PanelResizer.vue'
 
 const store = useNotesStore()
 const settings = useSettingsStore()
@@ -113,34 +115,9 @@ const bodyStyle = computed(() => ({
 /** 素材管理那个面板：当前笔记本在这台机器上传过哪些图、谁还在用（见 NoteAssetsDialog） */
 const assetsOpen = ref(false)
 
-/** 「最近打开」那份浮层开着没有（挂在笔记本名那颗按钮上，见模板） */
-const historyOpen = ref(false)
-
-/**
- * 那份浮层的宽度：**与左栏的菜单区一样宽**（就是底部这一行的宽度）。
- *
- * 现量而不是按左栏宽度减内边距算：内边距是设计令牌（`--sp-4`），
- * 在 JS 里再抄一遍就等于多了一处会过期的事实。
- * 量的是这一行自己的 `clientWidth` —— 它铺满菜单区，且自己不带内边距。
- */
-const metaRef = ref<HTMLElement | null>(null)
-const historyWidth = ref(200)
-
-function measureHistoryWidth(): void {
-  const width = metaRef.value?.clientWidth ?? 0
-  if (width > 0) historyWidth.value = Math.round(width)
-}
-
 onMounted(() => {
   void store.init()
-  void nextTick(measureHistoryWidth)
 })
-
-// 左栏宽度可以拖、笔记本也可能刚选上（这一行这时才渲染出来）：宽度跟着重新量一次
-watch(
-  [() => store.root, () => settings.themeConfig.noteTreeWidth],
-  () => void nextTick(measureHistoryWidth)
-)
 
 /** 第一次进来（或想换一个目录）时挑文件夹；取消就什么都不做 */
 async function chooseFolder(): Promise<void> {
@@ -150,15 +127,8 @@ async function chooseFolder(): Promise<void> {
   if (await store.setRoot(picked)) ElMessage.success('笔记本已切换')
 }
 
-/**
- * 从「最近打开」里换一个笔记本；点的是当前这个就什么都不做。
- *
- * 换完把浮层收起来：这一下的事已经做完了，留着它只会挡着下面的树
- * （删记录那颗叉不关 —— 那是可能连着点几次的动作）。
- */
-function openRecent(dir: string): void {
-  historyOpen.value = false
-  if (dir === store.root) return
+/** 从「最近打开」里换一个笔记本（当前的那条 RecentRoots 自己拦下了） */
+function openRecentRoot(dir: string): void {
   void store.setRoot(dir)
 }
 
@@ -303,23 +273,6 @@ function syncDoneText(summary: NoteSyncSummary): string {
   if (summary.received) parts.push('拉回了远端的改动')
   return parts.length ? `已同步（${parts.join('、')}）` : '已同步，两边都没有新改动'
 }
-
-/** 拖左栏右沿改宽度：跟手与收手的解绑交给 composable，松手才落盘 */
-function onResizeDown(event: PointerEvent): void {
-  if (event.button !== 0) return
-  event.preventDefault()
-
-  const startWidth = settings.themeConfig.noteTreeWidth
-  startPointerDrag({
-    start: { x: event.clientX, y: event.clientY },
-    // 拖过正文（Vditor 里是可选中文字）时别把正文选起来、光标也别变成文本光标
-    bodyClass: 'is-resizing-notes-tree',
-    onMove: (moveEvent, start) => {
-      settings.setNoteTreeWidth(startWidth + (moveEvent.clientX - start.x))
-    },
-    onEnd: () => void settings.commitNoteTreeWidth()
-  })
-}
 </script>
 
 <template>
@@ -368,104 +321,48 @@ function onResizeDown(event: PointerEvent): void {
           底部：笔记本是哪个目录 + 最近打开的那几个（原顶部工具条右侧那一组搬到这里）。
           放在树的下面而不是顶上：进这一页要做的第一件事是找文件，不是找设置。
         -->
-        <footer class="notes__foot">
-          <!-- ref 只为一件事：量出这一行有多宽，好让「最近打开」那份浮层与它等宽、左缘对齐 -->
-          <div ref="metaRef" class="notes__meta">
-            <!--
-              笔记本名是一颗按钮：点开「最近打开」那份浮层（往上弹 —— 它就在面板最底下）。
-              旁边那颗小箭头是提示，展开时翻过来。没有历史记录时不摆浮层，名字就是一行字。
-            -->
-            <el-popover
-              v-if="store.recentRoots.length"
-              v-model:visible="historyOpen"
-              trigger="click"
-              placement="top-start"
-              :width="historyWidth"
-              :offset="8"
-            >
-              <template #reference>
-                <button class="notes__root-btn" type="button" :title="store.root">
-                  <span class="notes__root truncate">{{ store.rootName }}</span>
-                  <el-icon class="notes__caret" :class="{ 'is-open': historyOpen }">
-                    <CaretBottom />
-                  </el-icon>
-                </button>
-              </template>
-
-              <div class="notes__history">
-                <p class="notes__history-title">最近打开</p>
-                <ul class="notes__history-list scrollbar">
-                  <li
-                    v-for="dir in store.recentRoots"
-                    :key="dir"
-                    class="notes__history-item"
-                    :class="{ 'is-current': dir === store.root }"
-                  >
-                    <button
-                      class="notes__history-open"
-                      type="button"
-                      :title="dir"
-                      :disabled="dir === store.root"
-                      @click="openRecent(dir)"
-                    >
-                      <span class="truncate">{{ noteRootName(dir) }}</span>
-                    </button>
-                    <el-tooltip content="从历史记录里删掉" placement="top">
-                      <button
-                        class="notes__history-remove"
-                        type="button"
-                        aria-label="从历史记录里删掉"
-                        @click="store.forgetRoot(dir)"
-                      >
-                        <el-icon><Close /></el-icon>
-                      </button>
-                    </el-tooltip>
-                  </li>
-                </ul>
-              </div>
-            </el-popover>
-
-            <!-- 一个历史记录都没有：名字只是一行字，点了也没东西可弹 -->
-            <span v-else class="notes__root is-plain truncate" :title="store.root">
-              {{ store.rootName }}
-            </span>
-
-            <span class="notes__count" :title="`${store.noteCount} 篇笔记`">
-              {{ store.noteCount }} 篇笔记
-            </span>
-            <span class="notes__tools">
-              <!-- 没仓库的文件夹就是本机的笔记：这颗按钮连同它的提示一起不出现 -->
-              <el-tooltip v-if="store.canSync" :content="syncTitle" placement="top">
-                <el-button size="small" text :disabled="store.syncing" @click="syncNow">
-                  <el-icon :class="{ 'is-loading': store.syncing }"><RefreshRight /></el-icon>
-                </el-button>
-              </el-tooltip>
-              <el-tooltip content="重新读取文件夹" placement="top">
-                <el-button size="small" text :disabled="store.loading" @click="store.reload()">
-                  <el-icon><Refresh /></el-icon>
-                </el-button>
-              </el-tooltip>
-              <el-tooltip content="换一个文件夹" placement="top">
-                <el-button size="small" text @click="chooseFolder">
-                  <el-icon><FolderOpened /></el-icon>
-                </el-button>
-              </el-tooltip>
-              <el-tooltip content="素材管理（这个笔记本传的图片）" placement="top">
-                <el-button size="small" text @click="assetsOpen = true">
-                  <el-icon><Picture /></el-icon>
-                </el-button>
-              </el-tooltip>
-            </span>
-          </div>
-
-        </footer>
+        <RecentRoots
+          :root="store.root"
+          :root-name="store.rootName"
+          :count-text="`${store.noteCount} 篇笔记`"
+          :roots="store.recentRoots"
+          :tree-width="settings.themeConfig.noteTreeWidth"
+          :name-of="noteRootName"
+          @open="openRecentRoot"
+          @forget="(dir: string) => store.forgetRoot(dir)"
+        >
+          <template #tools>
+            <!-- 没仓库的文件夹就是本机的笔记：这颗按钮连同它的提示一起不出现 -->
+            <el-tooltip v-if="store.canSync" :content="syncTitle" placement="top">
+              <el-button size="small" text :disabled="store.syncing" @click="syncNow">
+                <el-icon :class="{ 'is-loading': store.syncing }"><RefreshRight /></el-icon>
+              </el-button>
+            </el-tooltip>
+            <el-tooltip content="重新读取文件夹" placement="top">
+              <el-button size="small" text :disabled="store.loading" @click="store.reload()">
+                <el-icon><Refresh /></el-icon>
+              </el-button>
+            </el-tooltip>
+            <el-tooltip content="换一个文件夹" placement="top">
+              <el-button size="small" text @click="chooseFolder">
+                <el-icon><FolderOpened /></el-icon>
+              </el-button>
+            </el-tooltip>
+            <el-tooltip content="素材管理（这个笔记本传的图片）" placement="top">
+              <el-button size="small" text @click="assetsOpen = true">
+                <el-icon><Picture /></el-icon>
+              </el-button>
+            </el-tooltip>
+          </template>
+        </RecentRoots>
       </aside>
 
       <!-- 两栏之间的分隔条：热区是一条通高的窄条，看得见的只有正中间那个小竖条 -->
-      <span
-        class="notes__resizer"
-        title="拖动调整目录树宽度"
-        @pointerdown="onResizeDown"
+      <PanelResizer
+        :width="settings.themeConfig.noteTreeWidth"
+        body-class="is-resizing-notes-tree"
+        @move="settings.setNoteTreeWidth"
+        @end="() => void settings.commitNoteTreeWidth()"
       />
 
       <section class="notes__editor panel">
@@ -579,49 +476,6 @@ function onResizeDown(event: PointerEvent): void {
   min-height: 0;
 }
 
-/* 两栏之间的分隔条：热区通高，看得见的只有正中间那个小竖条（与首页栏宽把手同款） */
-.notes__resizer {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  z-index: 10;
-  width: 10px;
-  cursor: ew-resize;
-  /* 落点：外框内边距 + 左栏宽度 + 缝线正中，再往回让半个热区（本容器的定位原点是内边距外沿） */
-  left: calc(var(--card-gap, 10px) + var(--tree-w, 232px) + var(--card-gap, 10px) / 2 - 5px);
-}
-
-/**
- * 把手**平时不显示**，指针落到缝线上才露出来：它是一条 10px 热区上的装饰，
- * 常显就是给每一屏都添一道竖线（这一页左栏本来就是一条窄栏，多一个竖条更挤）。
- * 拖动期间（body 上挂着 is-resizing-notes-tree）指针可能已经离开缝线，那时也得亮着 ——
- * 否则拖到一半把手自己没了，看着像拖动断了。
- */
-.notes__resizer::after {
-  content: '';
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 8px;
-  height: 34px;
-  transform: translate(-50%, -50%);
-  border: 1px solid var(--ink);
-  border-radius: var(--r-pill);
-  background: var(--bg-surface);
-  opacity: 0;
-  transition: opacity 0.15s ease, background 0.15s ease;
-}
-
-/* 指针落到缝线上就把小竖条填实，提示这条缝可以拖 */
-.notes__resizer:hover::after {
-  background: var(--ink);
-}
-
-.notes__resizer:hover::after,
-body.is-resizing-notes-tree .notes__resizer::after {
-  opacity: 1;
-}
-
 .notes__error {
   margin: 0;
   font-size: var(--fs-meta);
@@ -631,203 +485,6 @@ body.is-resizing-notes-tree .notes__resizer::after {
 .notes__error-actions {
   display: flex;
   gap: var(--sp-2);
-}
-
-/* ---------- 左栏底部：笔记本 + 最近打开 ---------- */
-
-/**
- * 钉在卡片底部：树上边吃掉剩余高度，这一段多长都不会被挤走。
- * 上面那道分隔线把它与树分开 —— 两者说的是不同的事（这一页的内容 / 这是哪个笔记本）。
- */
-.notes__foot {
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-2);
-  padding-top: var(--sp-2);
-  border-top: 1px solid var(--border);
-}
-
-.notes__meta {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  min-width: 0;
-}
-
-/* 笔记本名：点开「最近打开」那颗按钮（没有历史记录时是一行字，不带按钮外观） */
-.notes__root-btn {
-  flex: 1 1 auto;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: var(--sp-1);
-  /* 不带横向内边距：按钮的左缘就是菜单区的左缘 —— 名字与树的缩进对齐，
-     浮层（挂在它上面、placement=top-start）的左缘也因此与菜单对齐 */
-  padding: 2px 0;
-  background: transparent;
-  border: 0;
-  border-radius: var(--r-sm);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-.notes__root-btn:hover,
-.notes__root-btn[aria-expanded='true'] {
-  background: var(--bg-subtle);
-}
-
-.notes__root {
-  flex: 1 1 auto;
-  min-width: 0;
-  font-size: var(--fs-meta);
-  font-weight: 600;
-  color: var(--ink-2);
-}
-
-/* 「点这儿还有一份清单」的提示：展开时翻过来 */
-.notes__caret {
-  flex-shrink: 0;
-  font-size: 12px;
-  color: var(--ink-3);
-  transition: color 0.15s ease, transform 0.15s ease;
-}
-
-.notes__root-btn:hover .notes__caret {
-  color: var(--ink-2);
-}
-
-.notes__caret.is-open {
-  color: var(--ink-2);
-  transform: rotate(180deg);
-}
-
-/**
- * 这一行的宽度是抢出来的：笔记本名最要紧，篇数其次，三颗按钮各自有固定宽度。
- * 所以篇数允许被挤掉（截断 + 悬停看全），名字不跟着一起缩 ——
- * 两边都按默认的 flex-shrink: 1 分，名字会被挤成「N…」，那这一行就白留了。
- */
-.notes__count {
-  flex: 0 100 auto;
-  min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  font-size: var(--fs-micro);
-  color: var(--ink-3);
-}
-
-.notes__tools {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-}
-
-/* 三颗图标按钮：挨在一起（EP 的 text 按钮自带左外边距），内边距也收窄 ——
-   这一行本来就窄，按钮占的每一像素都是从笔记本名那里拿走的 */
-.notes__tools :deep(.el-button + .el-button) {
-  margin-left: 0;
-}
-
-.notes__tools :deep(.el-button) {
-  height: 22px;
-  padding: 0 4px;
-}
-
-/**
- * 「最近打开」是一份**往上弹的浮层**（挂在笔记本名那颗按钮上，见模板）。
- *
- * 不做成常显的一行：左栏本来就窄，这几个目录几天也不换一次，常显要吃掉大半屏的高度 ——
- * 收进浮层里，那段高度就还给树了。浮层内容被 Teleport 到 body，不受卡片裁剪的影响。
- */
-.notes__history {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-1);
-  min-height: 0;
-}
-
-.notes__history-title {
-  margin: 0;
-  font-size: var(--fs-micro);
-  color: var(--ink-3);
-}
-
-/* 历史记录最多 6 条，正常不会滚；给个上限免得这里把树挤没 */
-.notes__history-list {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  max-height: 132px;
-  overflow-y: auto;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.notes__history-item {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-1);
-  min-width: 0;
-  border-radius: var(--r-sm);
-}
-
-.notes__history-item:hover {
-  background: var(--bg-inset);
-}
-
-.notes__history-open {
-  flex: 1 1 auto;
-  min-width: 0;
-  padding: 3px var(--sp-2);
-  background: transparent;
-  border: 0;
-  border-radius: var(--r-sm);
-  font: inherit;
-  font-size: var(--fs-meta);
-  color: var(--ink-2);
-  text-align: left;
-  cursor: pointer;
-}
-
-.notes__history-open:hover {
-  color: var(--ink);
-}
-
-/* 当前打开的那个不给点（点它等于什么都不做），但要看得见是哪一条 */
-.notes__history-item.is-current .notes__history-open {
-  color: var(--ink);
-  font-weight: 600;
-  cursor: default;
-}
-
-.notes__history-remove {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  margin-right: 2px;
-  padding: 0;
-  background: transparent;
-  border: 0;
-  border-radius: var(--r-sm);
-  color: var(--ink-3);
-  cursor: pointer;
-  /* 平时不显眼，指到这一行才露出来：它是次要动作，不该与「打开」抢注意力 */
-  opacity: 0;
-}
-
-.notes__history-item:hover .notes__history-remove {
-  opacity: 1;
-}
-
-.notes__history-remove:hover {
-  color: var(--ink);
-  background: var(--bg-subtle);
 }
 
 .notes__editor {

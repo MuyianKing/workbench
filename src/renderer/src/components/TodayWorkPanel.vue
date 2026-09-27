@@ -17,10 +17,14 @@ import { markdownToPlainText } from '@shared/markdown'
 import { sanitizeProjectColor } from '@shared/project-color'
 import { completedEntriesOn, type WorkLogEntry } from '@shared/work-log'
 import { useProjectsStore } from '@/stores/projects'
+import { useNavStore } from '@/stores/nav'
+import { useWallClock } from '@/composables/use-wall-clock'
 import PanelLoading from '@/components/PanelLoading.vue'
 import ProjectTag from '@/components/ProjectTag.vue'
 
 const store = useProjectsStore()
+const nav = useNavStore()
+const { dayStart } = useWallClock()
 
 const entries = ref<WorkLogEntry[]>([])
 const loading = ref(true)
@@ -58,10 +62,10 @@ onActivated(() => {
 })
 
 /**
- * 「今天」的日期键。取 store.dayStart（跨过午夜时才变一次）而不是 Date.now()：
+ * 「今天」的日期键。取 dayStart（跨过午夜时才变一次）而不是 Date.now()：
  * 依赖每秒跳动的时钟会让这一列每秒重算一遍，而它一天只可能变一次。
  */
-const today = computed(() => dayKey(store.dayStart))
+const today = computed(() => dayKey(dayStart.value))
 
 const projects = computed(() => new Map(store.projects.map((item) => [item.id, item])))
 
@@ -97,7 +101,7 @@ const rows = computed<PanelRow[]>(() =>
 
 /** 点一行 = 去「工作」页看全貌（时间、正文与编辑都在那边） */
 function openWorkView(): void {
-  void store.setActiveView('work')
+  void nav.setActiveView('work')
 }
 </script>
 

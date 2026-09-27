@@ -23,7 +23,6 @@
  * **没打开笔记本时这一页什么都不列**：退回上一层目录去列图，等于把别的笔记本的图当成可删的。
  */
 import { computed, ref, watch } from 'vue'
-import { ElMessage } from 'element-plus'
 import { Picture, Refresh } from '@element-plus/icons-vue'
 import {
   buildImageAssets,
@@ -70,6 +69,8 @@ interface ScanResult {
 let cached: ScanResult | null = null
 
 const scanning = ref(false)
+/** 删除进行中：删除是一次提交 + 一次推送，几秒很正常，期间按钮要转圈禁点 */
+const deleting = ref(false)
 const result = ref<ScanResult | null>(null)
 const error = ref('')
 
@@ -231,24 +232,29 @@ async function remove(): Promise<void> {
     '这些图只来自当前笔记本，引用次数也只数了它；要是这个地址被你抄到别处用过，那里会裂图。'
   if (!(await confirmAction(`${detail}${hint}`, '删除', { confirmButtonText: '删除' }))) return
 
-  const deleted = await window.workbench.deleteNoteImages({
-    repo,
-    root: props.root,
-    paths: targets.map((asset) => asset.path)
-  })
-  if (!deleted.ok || !deleted.data) {
-    notifyError(deleted.error ?? '删除图片失败')
-    return
-  }
+  deleting.value = true
+  try {
+    const deleted = await window.workbench.deleteNoteImages({
+      repo,
+      root: props.root,
+      paths: targets.map((asset) => asset.path)
+    })
+    if (!deleted.ok || !deleted.data) {
+      notifyError(deleted.error ?? '删除图片失败')
+      return
+    }
 
-  selected.value = []
-  notifySuccess(
-    deleted.data.deleted
-      ? `已删除 ${deleted.data.deleted} 张图片`
-      : '这些图片已经不在仓库里了'
-  )
-  // 删完立刻重数一遍：清单与引用次数都要跟着磁盘上真实的样子走
-  await scan()
+    selected.value = []
+    notifySuccess(
+      deleted.data.deleted
+        ? `已删除 ${deleted.data.deleted} 张图片`
+        : '这些图片已经不在仓库里了'
+    )
+    // 删完立刻重数一遍：清单与引用次数都要跟着磁盘上真实的样子走
+    await scan()
+  } finally {
+    deleting.value = false
+  }
 }
 </script>
 
@@ -373,8 +379,8 @@ async function remove(): Promise<void> {
         <el-button
           type="danger"
           size="small"
-          :disabled="!selected.length || scanning"
-          :loading="scanning"
+          :disabled="!selected.length || scanning || deleting"
+          :loading="deleting"
           @click="remove"
         >
           {{ selected.length ? `删除 ${selected.length} 张` : '删除' }}

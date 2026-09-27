@@ -15,18 +15,12 @@ import {
 } from '@shared/weather'
 import { fail, ok } from '@shared/result'
 import type { Result } from '@shared/types'
-import { guard, invoke } from './bridge'
+import { errorText, guard, invoke } from './bridge'
 
 /** Rust 回来的原始取数结果（与 weather.rs 的 WeatherFetchResult 一致） */
 interface WeatherFetchResult {
   status: number
   body: string
-}
-
-function reasonOf(error: unknown, fallback: string): string {
-  if (typeof error === 'string' && error.trim()) return error
-  if (error instanceof Error && error.message) return error.message
-  return fallback
 }
 
 /**
@@ -44,7 +38,7 @@ export async function geocodeCity(city: string): Promise<Result<WeatherGeo>> {
     if (!geo) return fail(`没找到「${city}」，看看是不是这个名字的另一种写法`)
     return ok(geo)
   } catch (error) {
-    return fail(reasonOf(error, '查询城市失败'))
+    return fail(errorText(error, '查询城市失败'))
   }
 }
 

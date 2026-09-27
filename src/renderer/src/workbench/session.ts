@@ -18,7 +18,7 @@ import type {
   TerminalKind,
   TerminalOpenEvent
 } from '@shared/types'
-import { invoke, listen } from './bridge'
+import { errorText, invoke, listen } from './bridge'
 import { emit } from './events'
 import { outputDirOf } from './scanner'
 import * as state from './state'
@@ -86,10 +86,6 @@ export async function abortDetached(sessionId: string): Promise<void> {
   } catch {
     // 已经自己结束了：这里只是清理，不必把失败抛给调用方
   }
-}
-
-function reason(error: unknown, fallback: string): string {
-  return error instanceof Error ? error.message : fallback
 }
 
 /** 本应用进程的 PID 与创建时间：会话记录里的 ownerPid / ownerCreatedAt，只问一次 */
@@ -243,7 +239,7 @@ async function run(input: RunInput): Promise<Result<null>> {
     }
     return ok(null)
   } catch (error) {
-    const message = reason(error, '启动失败')
+    const message = errorText(error, '启动失败')
     live.delete(meta.terminal)
     pushLog(meta, 'err', message)
     emitStatus(meta, 'failed', { exitCode: null })
@@ -433,7 +429,7 @@ async function stopTerminal(terminal: string): Promise<Result<null>> {
     return ok(null)
   } catch (error) {
     meta.stopping = false
-    return fail(reason(error, '停止失败'))
+    return fail(errorText(error, '停止失败'))
   }
 }
 
@@ -459,9 +455,4 @@ export function stopCommand(entryId: string): Promise<Result<null>> {
 /** 清空某个终端的显示（后端无事可做，纯界面动作） */
 export function clearTerminal(terminal: string): void {
   emit<{ terminal: string }>('clear', { terminal })
-}
-
-/** 供退出收尾：结束所有还活着的会话 */
-export function stopAll(): Promise<void> {
-  return invoke('active_sessions').then(async () => undefined)
 }

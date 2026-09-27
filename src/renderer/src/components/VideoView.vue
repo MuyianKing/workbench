@@ -15,18 +15,19 @@
  *
  * 换页由 App.vue 的 KeepAlive 负责 —— 切走的页面留在内存里，播放器也在全局
  * 单例里接着播。数据与动作都在 store 里，这一层负责编排：谁被选中、什么时候弹
- * 「最近打开」。
+ * 「最近打开」。左栏底部那一行与分隔条是 RecentRoots / PanelResizer（与笔记页共用）。
  */
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { CaretBottom, Check, Close, Expand, Fold, FolderOpened, Refresh, VideoPlay } from '@element-plus/icons-vue'
+import { CaretBottom, Check, Expand, Fold, FolderOpened, Refresh, VideoPlay } from '@element-plus/icons-vue'
 import { findVideoNode, videoRootName, VIDEO_RATES, VIDEO_SEEK_SECONDS } from '@shared/video'
 import { useVideoStore } from '@/stores/video'
 import { useSettingsStore } from '@/stores/settings'
-import { startPointerDrag } from '@/composables/use-pointer-drag'
 import { setVideoStageHost } from '@/composables/use-video-stage'
 import VideoTree from '@/components/VideoTree.vue'
 import PanelLoading from '@/components/PanelLoading.vue'
+import RecentRoots from '@/components/RecentRoots.vue'
+import PanelResizer from '@/components/PanelResizer.vue'
 
 const store = useVideoStore()
 const settings = useSettingsStore()
@@ -63,23 +64,6 @@ const treeWidthStyle = computed(() => ({
   '--tree-w': `${settings.themeConfig.videoTreeWidth}px`
 }))
 
-/** 拖两栏之间那条缝改左栏宽度；收起状态下没有那条缝，也就无从拖起 */
-function onResizeDown(event: PointerEvent): void {
-  if (treeCollapsed.value || event.button !== 0) return
-  event.preventDefault()
-
-  const startWidth = settings.themeConfig.videoTreeWidth
-  startPointerDrag({
-    start: { x: event.clientX, y: event.clientY },
-    // 拖过播放画布（里面是媒体控件）时别把指针样式与文本选择丢给它们
-    bodyClass: 'is-resizing-video-tree',
-    onMove: (moveEvent, start) => {
-      settings.setVideoTreeWidth(startWidth + (moveEvent.clientX - start.x))
-    },
-    onEnd: () => void settings.commitVideoTreeWidth()
-  })
-}
-
 /** 正在扫描：右栏据此说一句「正在读取」，而不是显示成「这个文件夹里什么都没有」 */
 const scanning = computed(() => store.loading && !store.loaded)
 
@@ -107,11 +91,6 @@ const activeNode = computed(() => (store.activeRel ? findVideoNode(store.nodes, 
  */
 const stageRef = ref<HTMLElement | null>(null)
 
-/** 树上点视频是用户自己在挑：选中 + 开播是 store.select 一条路（播完自动接续归播放器管） */
-function onTreeSelect(rel: string): void {
-  store.select(rel)
-}
-
 onMounted(() => {
   // 宿主先注册（模板 ref 这时已就位），再让 store 扫描并接上「上次打开的视频」
   setVideoStageHost(stageRef.value)
@@ -128,39 +107,10 @@ async function chooseFolder(): Promise<void> {
   if (await store.setRoot(picked)) ElMessage.success('视频目录已切换')
 }
 
-/**
- * 从「最近打开」里换一个目录；点的是当前这个就什么都不做。
- * 换完把浮层收起来：这一下的事已经做完了，留着它只会挡着下面的树。
- */
-function openRecent(dir: string): void {
-  historyOpen.value = false
-  if (dir === store.root) return
+/** 从「最近打开」里换一个目录（当前的那条 RecentRoots 自己拦下了） */
+function openRecentRoot(dir: string): void {
   void store.setRoot(dir)
 }
-
-/** 「最近打开」那份浮层开着没有（挂在目录名那颗按钮上） */
-const historyOpen = ref(false)
-
-/**
- * 那份浮层的宽度：**与左栏的菜单区一样宽**（就是底部这一行的宽度）。
- * 现量而不是按左栏宽度减内边距算：内边距是设计令牌（`--sp-4`），
- * 在 JS 里再抄一遍就等于多了一处会过期的事实。
- */
-const metaRef = ref<HTMLElement | null>(null)
-const historyWidth = ref(200)
-
-function measureHistoryWidth(): void {
-  const width = metaRef.value?.clientWidth ?? 0
-  if (width > 0) historyWidth.value = Math.round(width)
-}
-
-onMounted(() => void nextTick(measureHistoryWidth))
-
-// 左栏宽度可以拖（底部这一行的实际宽度跟着变）、目录刚选上时这一行才渲染出来：跟着重新量一次
-watch(
-  [() => store.root, () => settings.themeConfig.videoTreeWidth],
-  () => void nextTick(measureHistoryWidth)
-)
 </script>
 
 <template>
@@ -198,96 +148,45 @@ watch(
           :nodes="store.nodes"
           :active-rel="store.activeRel"
           :loaded="store.loaded && !store.loading"
-          @select="onTreeSelect"
+          @select="store.select"
         />
 
         <!--
           底部：目录是哪个 + 最近打开的那几个（与笔记页同一副布局）。
           放在树的下面而不是顶上：进这一页要做的第一件事是找视频，不是找设置。
         -->
-        <footer class="video__foot">
-          <div ref="metaRef" class="video__meta">
-            <!-- 目录名是一颗按钮：点开「最近打开」那份浮层（往上弹）。没有历史记录时不摆浮层 -->
-            <el-popover
-              v-if="store.recentRoots.length"
-              v-model:visible="historyOpen"
-              trigger="click"
-              placement="top-start"
-              :width="historyWidth"
-              :offset="8"
-            >
-              <template #reference>
-                <button class="video__root-btn" type="button" :title="store.root">
-                  <span class="video__root truncate">{{ store.rootName }}</span>
-                  <el-icon class="video__caret" :class="{ 'is-open': historyOpen }">
-                    <CaretBottom />
-                  </el-icon>
-                </button>
-              </template>
-
-              <div class="video__history">
-                <p class="video__history-title">最近打开</p>
-                <ul class="video__history-list scrollbar">
-                  <li
-                    v-for="dir in store.recentRoots"
-                    :key="dir"
-                    class="video__history-item"
-                    :class="{ 'is-current': dir === store.root }"
-                  >
-                    <button
-                      class="video__history-open"
-                      type="button"
-                      :title="dir"
-                      :disabled="dir === store.root"
-                      @click="openRecent(dir)"
-                    >
-                      <span class="truncate">{{ videoRootName(dir) }}</span>
-                    </button>
-                    <el-tooltip content="从历史记录里删掉" placement="top">
-                      <button
-                        class="video__history-remove"
-                        type="button"
-                        aria-label="从历史记录里删掉"
-                        @click="store.forgetRoot(dir)"
-                      >
-                        <el-icon><Close /></el-icon>
-                      </button>
-                    </el-tooltip>
-                  </li>
-                </ul>
-              </div>
-            </el-popover>
-
-            <!-- 一个历史记录都没有：名字只是一行字，点了也没东西可弹 -->
-            <span v-else class="video__root is-plain truncate" :title="store.root">
-              {{ store.rootName }}
-            </span>
-
-            <span class="video__count" :title="`${store.videoCount} 个视频`">
-              {{ store.videoCount }} 个视频
-            </span>
-            <span class="video__tools">
-              <el-tooltip content="重新读取文件夹" placement="top">
-                <el-button size="small" text :disabled="store.loading" @click="store.reload()">
-                  <el-icon><Refresh /></el-icon>
-                </el-button>
-              </el-tooltip>
-              <el-tooltip content="换一个文件夹" placement="top">
-                <el-button size="small" text @click="chooseFolder">
-                  <el-icon><FolderOpened /></el-icon>
-                </el-button>
-              </el-tooltip>
-            </span>
-          </div>
-        </footer>
+        <RecentRoots
+          :root="store.root"
+          :root-name="store.rootName"
+          :count-text="`${store.videoCount} 个视频`"
+          :roots="store.recentRoots"
+          :tree-width="settings.themeConfig.videoTreeWidth"
+          :name-of="videoRootName"
+          @open="openRecentRoot"
+          @forget="(dir: string) => store.forgetRoot(dir)"
+        >
+          <template #tools>
+            <el-tooltip content="重新读取文件夹" placement="top">
+              <el-button size="small" text :disabled="store.loading" @click="store.reload()">
+                <el-icon><Refresh /></el-icon>
+              </el-button>
+            </el-tooltip>
+            <el-tooltip content="换一个文件夹" placement="top">
+              <el-button size="small" text @click="chooseFolder">
+                <el-icon><FolderOpened /></el-icon>
+              </el-button>
+            </el-tooltip>
+          </template>
+        </RecentRoots>
       </aside>
 
       <!-- 两栏之间的分隔条：热区是一条通高的窄条，看得见的只有正中间那个小竖条（与笔记页同款） -->
-      <span
+      <PanelResizer
         v-show="!treeCollapsed"
-        class="video__resizer"
-        title="拖动调整目录树宽度"
-        @pointerdown="onResizeDown"
+        :width="settings.themeConfig.videoTreeWidth"
+        body-class="is-resizing-video-tree"
+        @move="settings.setVideoTreeWidth"
+        @end="() => void settings.commitVideoTreeWidth()"
       />
 
       <section class="video__player panel">
@@ -346,7 +245,7 @@ watch(
         <div class="video__canvas">
           <!--
             传送宿主：播放器本体（VideoPlayer，全局单例）在视频页时落到这里。
-            宿主铺满画布、平时不接事件（pointer-events: none，见样式）—— 下面的空态
+            宿主铺满画布、平时**不接事件**（pointer-events: none，见样式）—— 下面的空态
             提示与它的按钮照常点得到；播放器传送进来后由自己把事件要回去。
           -->
           <div ref="stageRef" class="video__stage" />
@@ -412,7 +311,7 @@ watch(
 
 /**
  * 左树右播放器。左栏宽度是 theme.json 里的 videoTreeWidth（经 --tree-w 挂进来，见
- * .video__side），两栏之间那条缝可以左右拖（.video__resizer 就是因此需要 relative 定位）；
+ * .video__side），两栏之间那条缝可以左右拖（分隔条因此需要 relative 定位）；
  * 播放器那一边吃掉剩余宽度。两栏各是一张卡片（.panel 那副外壳）；
  * **顶边一份不给自己加**：顶栏下面那条缝归 .shell 管（见 global.css），与首页同款。
  */
@@ -486,47 +385,6 @@ watch(
   color: var(--ink-2);
 }
 
-/* ---------- 两栏之间的分隔条（与笔记页同款） ---------- */
-
-/* 热区通高，看得见的只有正中间那个小竖条；落点：外框内边距 + 左栏宽度 + 栏间留白正中 */
-.video__resizer {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  z-index: 10;
-  width: 10px;
-  cursor: ew-resize;
-  left: calc(var(--card-gap, 10px) + var(--tree-w, 264px) + var(--card-gap, 10px) / 2 - 5px);
-}
-
-/**
- * 把手平时不显示，指针落到缝线上才露出来（常显就是给这一页添一道竖线）。
- * 拖动期间指针可能已经离开缝线，那时也得亮着 —— 否则拖到一半把手自己没了，看着像拖动断了。
- */
-.video__resizer::after {
-  content: '';
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 8px;
-  height: 34px;
-  transform: translate(-50%, -50%);
-  border: 1px solid var(--ink);
-  border-radius: var(--r-pill);
-  background: var(--bg-surface);
-  opacity: 0;
-  transition: opacity 0.15s ease, background 0.15s ease;
-}
-
-.video__resizer:hover::after {
-  background: var(--ink);
-}
-
-.video__resizer:hover::after,
-body.is-resizing-video-tree .video__resizer::after {
-  opacity: 1;
-}
-
 /* 拖动期间别让 0.2s 的宽度过渡跟手作对：每一帧都在改目标值，过渡只会让它拖泥带水 */
 body.is-resizing-video-tree .video__side {
   transition: none;
@@ -535,180 +393,6 @@ body.is-resizing-video-tree .video__side {
 .video__error-actions {
   display: flex;
   gap: var(--sp-2);
-}
-
-/* ---------- 左栏底部：目录 + 最近打开（与笔记页同一副样子） ---------- */
-
-.video__foot {
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-2);
-  padding-top: var(--sp-2);
-  border-top: 1px solid var(--border);
-}
-
-.video__meta {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  min-width: 0;
-}
-
-.video__root-btn {
-  flex: 1 1 auto;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: var(--sp-1);
-  padding: 2px 0;
-  background: transparent;
-  border: 0;
-  border-radius: var(--r-sm);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-.video__root-btn:hover,
-.video__root-btn[aria-expanded='true'] {
-  background: var(--bg-subtle);
-}
-
-.video__root {
-  flex: 1 1 auto;
-  min-width: 0;
-  font-size: var(--fs-meta);
-  font-weight: 600;
-  color: var(--ink-2);
-}
-
-.video__caret {
-  flex-shrink: 0;
-  font-size: 12px;
-  color: var(--ink-3);
-  transition: color 0.15s ease, transform 0.15s ease;
-}
-
-.video__root-btn:hover .video__caret {
-  color: var(--ink-2);
-}
-
-.video__caret.is-open {
-  color: var(--ink-2);
-  transform: rotate(180deg);
-}
-
-.video__count {
-  flex: 0 100 auto;
-  min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  font-size: var(--fs-micro);
-  color: var(--ink-3);
-}
-
-.video__tools {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-}
-
-.video__tools :deep(.el-button + .el-button) {
-  margin-left: 0;
-}
-
-.video__tools :deep(.el-button) {
-  height: 22px;
-  padding: 0 4px;
-}
-
-.video__history {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-1);
-  min-height: 0;
-}
-
-.video__history-title {
-  margin: 0;
-  font-size: var(--fs-micro);
-  color: var(--ink-3);
-}
-
-.video__history-list {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  max-height: 132px;
-  overflow-y: auto;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.video__history-item {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-1);
-  min-width: 0;
-  border-radius: var(--r-sm);
-}
-
-.video__history-item:hover {
-  background: var(--bg-inset);
-}
-
-.video__history-open {
-  flex: 1 1 auto;
-  min-width: 0;
-  padding: 3px var(--sp-2);
-  background: transparent;
-  border: 0;
-  border-radius: var(--r-sm);
-  font: inherit;
-  font-size: var(--fs-meta);
-  color: var(--ink-2);
-  text-align: left;
-  cursor: pointer;
-}
-
-.video__history-open:hover {
-  color: var(--ink);
-}
-
-.video__history-item.is-current .video__history-open {
-  color: var(--ink);
-  font-weight: 600;
-  cursor: default;
-}
-
-.video__history-remove {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  margin-right: 2px;
-  padding: 0;
-  background: transparent;
-  border: 0;
-  border-radius: var(--r-sm);
-  color: var(--ink-3);
-  cursor: pointer;
-  /* 平时不显眼，指到这一行才露出来：它是次要动作，不该与「打开」抢注意力 */
-  opacity: 0;
-}
-
-.video__history-item:hover .video__history-remove {
-  opacity: 1;
-}
-
-.video__history-remove:hover {
-  color: var(--ink);
-  background: var(--bg-subtle);
 }
 
 /* ---------- 右栏：播放器 ---------- */

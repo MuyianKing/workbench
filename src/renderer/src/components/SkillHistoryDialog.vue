@@ -12,7 +12,6 @@
 import { computed, ref, watch } from 'vue'
 import { SKILL_FILE, type SkillCommit, type SkillCompareFile } from '@shared/skills'
 import { formatTimestamp } from '@/format'
-import { confirmAction } from '@/notify'
 import { useSkillsStore } from '@/stores/skills'
 import AppDialog from '@/components/AppDialog.vue'
 import SkillCompareDialog from '@/components/SkillCompareDialog.vue'
@@ -84,15 +83,9 @@ function onRestored(): void {
 }
 
 async function restoreTo(hash: string): Promise<void> {
-  const confirmed = await confirmAction(
-    '这个技能的文件会变回所选版本的样子。恢复本身也是一次提交，现在的内容留在历史里，随时能再恢复回来。',
-    '恢复到这个版本？',
-    { confirmButtonText: '恢复' }
-  )
-  if (!confirmed) return
-
+  // 确认框收在 store 里（restoreWithConfirm）：与差异弹窗「恢复到这个版本」共用同一句话
   restoring.value = hash
-  const restored = await store.restore(props.skillId, hash)
+  const restored = await store.restoreWithConfirm(props.skillId, hash)
   restoring.value = ''
   if (restored) visible.value = false
 }
@@ -103,8 +96,8 @@ async function restoreTo(hash: string): Promise<void> {
     <div v-if="loading" class="state">正在读取版本历史…</div>
     <div v-else-if="error" class="state state--error">{{ error }}</div>
     <div v-else-if="!commits.length" class="state">
-      还没有版本。保存过的每一版都会记在这里（前提是笔记文件夹是个 git 仓库 ——
-      在设置里配好笔记仓库并同步一次就有了）。
+      还没有版本。保存过的每一版都会记在这里（前提是技能库所在的文件夹在一个 git 仓库里 ——
+      从技能库目录往上找到 .git 就有版本，换一个文件夹或给它配好仓库后重新扫描即可）。
     </div>
     <ul v-else class="commits">
       <li v-for="commit in commits" :key="commit.hash" class="commits__item">

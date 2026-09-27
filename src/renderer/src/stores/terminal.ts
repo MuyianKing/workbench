@@ -179,6 +179,11 @@ export const useTerminalStore = defineStore('terminal', () => {
     return runtimes[id]
   }
 
+  /** 目标（项目 / 独立命令）被移除时连带清掉它的运行态；直写另一个 store 的对象要经这里 */
+  function forgetRuntime(id: string): void {
+    delete runtimes[id]
+  }
+
   /** 等一个目标离开运行态（重启时用，避免 stop 之后立刻 start 撞上「已有命令在执行中」） */
   function waitForIdle(id: string, timeoutMs = 8000): Promise<boolean> {
     return new Promise((resolve) => {
@@ -284,6 +289,29 @@ export const useTerminalStore = defineStore('terminal', () => {
       time: new Date().toLocaleTimeString('zh-CN', { hour12: false })
     })
     scheduleFlush()
+  }
+
+  /**
+   * 报告系统终端的状态（environment store 安装全局包时调用）。
+   *
+   * 系统终端不经过主进程的状态事件，它的 status / 当前命令 / 起止只能由渲染层这边写；
+   * 写入口收敛在这一个 action 里 —— 字段口径与 onStatus 的终端级状态一致，
+   * 只覆盖调用方给到的字段（收尾时不带 currentCommand，那行命令还该留在 Tab 上）。
+   */
+  function setSystemTerminalStatus(
+    status: ProcessStatusEvent['status'],
+    fields: {
+      currentCommand?: string
+      startedAt?: number | undefined
+      durationMs?: number
+    } = {}
+  ): void {
+    const target = terminals[SYSTEM_PM_TERMINAL]
+    if (!target) return
+    target.status = status
+    if ('currentCommand' in fields) target.currentCommand = fields.currentCommand
+    if ('startedAt' in fields) target.startedAt = fields.startedAt
+    if ('durationMs' in fields) target.durationMs = fields.durationMs
   }
 
   function onTerminalOpen(event: TerminalOpenEvent): void {
@@ -497,15 +525,6 @@ export const useTerminalStore = defineStore('terminal', () => {
     }
   }
 
-  /** 数据目录被整份换掉时清空：旧的 id 与选中态都不再成立 */
-  function resetAll(): void {
-    for (const key of Object.keys(runtimes)) delete runtimes[key]
-    for (const key of [...terminalOrder.value]) delete terminals[key]
-    terminalOrder.value = []
-    activeTerminal.value = null
-    terminalCollapsed.value = true
-  }
-
   // ---------- 端口：检测运行状态 / 停止 ----------
 
   /**
@@ -681,6 +700,7 @@ export const useTerminalStore = defineStore('terminal', () => {
     // 运行态
     runtimes,
     runtimeOf,
+    forgetRuntime,
     waitForIdle,
     // 终端
     terminals,
@@ -706,11 +726,11 @@ export const useTerminalStore = defineStore('terminal', () => {
     ensureTerminal,
     openSystemTerminal,
     appendSystemLog,
+    setSystemTerminalStatus,
     closeTerminal,
     focusTerminal,
     clearTerminalLogs,
     dropTerminalsOf,
-    resetAll,
     installListeners,
     // 端口
     ensurePortFree,

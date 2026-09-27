@@ -8,11 +8,22 @@
  * 进入 / 退出因此都发生在同一处。
  */
 import { Refresh, Select } from '@element-plus/icons-vue'
-import { useProjectsStore } from '@/stores/projects'
+import { useNavStore } from '@/stores/nav'
 import { useSettingsStore } from '@/stores/settings'
+import { confirmAction } from '@/notify'
 
-const store = useProjectsStore()
+const store = useNavStore()
 const settings = useSettingsStore()
+
+/** 恢复默认不可逆（栏数、栏宽、摆放整份重置，没有撤回），必须先问一句 */
+async function resetLayout(): Promise<void> {
+  const ok = await confirmAction(
+    '当前的栏数、栏宽与卡片摆放会被整份换成默认布局，无法恢复。',
+    '恢复默认布局？',
+    { confirmButtonText: '恢复默认' }
+  )
+  if (ok) await settings.resetLayout()
+}
 </script>
 
 <template>
@@ -24,7 +35,7 @@ const settings = useSettingsStore()
       <b class="mono">{{ settings.cardGap }}px</b>
     </span>
     <div class="layoutbar__tools">
-      <el-button size="small" :icon="Refresh" @click="settings.resetLayout()">恢复默认</el-button>
+      <el-button size="small" :icon="Refresh" @click="resetLayout">恢复默认</el-button>
       <el-button
         size="small"
         type="primary"

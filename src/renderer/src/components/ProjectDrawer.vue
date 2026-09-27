@@ -24,6 +24,7 @@ import {
 import { relativeToProject, resolveWithinProject } from '@shared/project-path'
 import { formatDurationOrDash, formatTimestamp } from '@/format'
 import { STATUS_META, isBusyStatus, statusLabel } from '@/status'
+import { useDraftField } from '@/composables/use-draft-field'
 import { useProjectsStore } from '@/stores/projects'
 import { useSettingsStore } from '@/stores/settings'
 import { useTerminalStore } from '@/stores/terminal'
@@ -57,14 +58,9 @@ const isRunning = computed(() => status.value === 'running')
 const pathValid = computed(() => (project.value ? store.isPathValid(project.value.id) : true))
 
 /** 显示名先落在本地草稿，回车或失焦才提交，避免半截名字被写进磁盘 */
-const nameDraft = ref('')
-
-watch(
-  () => project.value?.id,
-  () => {
-    nameDraft.value = project.value?.name ?? ''
-  },
-  { immediate: true }
+const nameDraft = useDraftField(
+  () => project.value?.id ?? '',
+  () => project.value?.name ?? ''
 )
 
 function commitName(): void {
@@ -251,14 +247,9 @@ function runCustom(index: number): void {
 // ---------- 监听端口 ----------
 
 /** 端口先进草稿，失焦或回车才提交，避免把半截数字写进配置 */
-const portDraft = ref('')
-
-watch(
-  () => project.value?.id,
-  () => {
-    portDraft.value = project.value?.port ? String(project.value.port) : ''
-  },
-  { immediate: true }
+const portDraft = useDraftField(
+  () => project.value?.id ?? '',
+  () => (project.value?.port ? String(project.value.port) : '')
 )
 
 function commitPort(): void {

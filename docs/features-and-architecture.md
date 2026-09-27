@@ -57,7 +57,7 @@
   全关掉的补丁在 `sanitizeHiddenViews` 里被拦下（留下首页），设置界面上最后一颗开关是禁用的，
   否则界面上一个入口都不剩；**关掉只是从导航栏收起来，不是删掉这一页** ——
   当前页被关掉时退到导航顺序里第一页可见的，而用户主动的切页照旧过得去
-  （那条 watch 只认「关掉的清单变了」，不认当前页变了，见 stores/projects.ts）
+  （那条 watch 只认「关掉的清单变了」，不认当前页变了，见 stores/nav.ts）
 - 这两项都住在 `theme.json` 里（与明暗、布局同属「界面长什么样」，见下），同步时跟着整份配置一起到
   另一台机器；而「上次停在哪一页」的 `activeView` 留在数据文件里 —— 那是机器状态，不是配置
 - **整条导航栏可以收起来**（顶栏右上角那颗折叠按钮，`AppSettings.navHidden`）：收起后内容列占满整行，
@@ -1162,10 +1162,12 @@ src/renderer/src/        Vue 应用（组件 / Pinia store / 设计令牌）
   components/            公共与页面组件
   composables/           跨组件复用的交互骨架（use-pointer-drag：拖拽的起手 / 收手 / Esc 取消 /
                          解绑；use-floating-dismiss：浮层的收起；use-video-stage：画中画
-                         传送宿主的注册。各处共用，都带单测）
+                         传送宿主的注册；use-wall-clock：每秒时钟与「今天 00:00」的模块级单例；
+                         use-draft-field：设置 / 抽屉的草稿字段。拖拽与浮层那几个带单测）
   notify.ts              非组件代码「说一句话 / 问一句」的唯一出口（可被测试顶替）
   stores/                跨组件状态，按领域分文件：
     projects.ts          项目、分组、筛选排序、抽屉；也是启动编排的落点（init）
+    nav.ts               当前页（activeView）与首页布局编辑态：壳层状态，与项目无关
     terminal.ts          终端、运行态、日志缓冲；检测与停止的统一实现在这里
     settings.ts          设置、外观（主题 / 主题色 / 背景）、首页布局、别台机器的外观
     environment.ts       包管理器、nvm、nrm、数据目录

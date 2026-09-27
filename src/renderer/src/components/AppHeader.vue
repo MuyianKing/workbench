@@ -9,7 +9,7 @@
 import { computed, ref } from 'vue'
 import { Expand, Fold, Grid, Moon, Setting, Sunny, User } from '@element-plus/icons-vue'
 import { accountLabel } from '@shared/auth'
-import { useProjectsStore } from '@/stores/projects'
+import { useNavStore } from '@/stores/nav'
 import { useSettingsStore } from '@/stores/settings'
 import { useAuthStore } from '@/stores/auth'
 import SettingsDialog from '@/components/SettingsDialog.vue'
@@ -17,7 +17,7 @@ import AccountDialog from '@/components/AccountDialog.vue'
 import LayoutEditBar from '@/components/LayoutEditBar.vue'
 import HomeGreeting from '@/components/HomeGreeting.vue'
 
-const store = useProjectsStore()
+const store = useNavStore()
 const settings = useSettingsStore()
 const auth = useAuthStore()
 const settingsVisible = ref(false)

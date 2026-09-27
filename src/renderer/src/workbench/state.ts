@@ -256,10 +256,6 @@ export async function checkProjectPaths(): Promise<Record<string, boolean>> {
   return Object.fromEntries(entries)
 }
 
-export function persistProjects(): void {
-  persist()
-}
-
 /**
  * 记一次「这个项目刚被用过」：卡片与首页「最近使用」都按这个时间排。
  *

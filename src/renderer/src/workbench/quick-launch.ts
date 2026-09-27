@@ -7,13 +7,9 @@
 import { fail, ok } from '@shared/result'
 import { iconCacheHit } from '@shared/icon-cache'
 import type { Result } from '@shared/types'
-import { invoke } from './bridge'
+import { errorText, invoke } from './bridge'
 import { emit } from './events'
 import * as state from './state'
-
-function reason(error: unknown, fallback: string): string {
-  return error instanceof Error ? error.message : fallback
-}
 
 // ---------- 启动 ----------
 
@@ -37,7 +33,7 @@ export async function launch(id: string): Promise<Result<null>> {
   try {
     await invoke('open_path', { path: target })
   } catch (error) {
-    return fail(reason(error, '启动失败'))
+    return fail(errorText(error, '启动失败'))
   }
 
   // 记下最近使用时间，并把整份列表推回界面（与 Electron 版一致）
@@ -86,7 +82,7 @@ export async function icon(target: string): Promise<Result<string>> {
   try {
     dataUrl = await invoke<string>('extract_icon', { source })
   } catch (error) {
-    return fail(reason(error, '取不到这个程序的图标'))
+    return fail(errorText(error, '取不到这个程序的图标'))
   }
 
   remember(key, dataUrl)

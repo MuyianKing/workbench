@@ -27,7 +27,7 @@ import {
 } from '@shared/ai-news'
 import { fail, ok } from '@shared/result'
 import type { Result } from '@shared/types'
-import { invoke } from './bridge'
+import { errorText, invoke } from './bridge'
 
 /** 问一次源清单。它只读宿主侧的白名单，不走网络，所以每次刷新都现问一遍 */
 async function loadSources(): Promise<AiNewsSourceInfo[]> {
@@ -41,12 +41,6 @@ async function loadCache(): Promise<AiNewsCache> {
 
 async function saveCache(cache: AiNewsCache): Promise<void> {
   await invoke('ai_news_save', { value: cache })
-}
-
-function reasonOf(error: unknown, fallback: string): string {
-  if (typeof error === 'string' && error.trim()) return error
-  if (error instanceof Error && error.message) return error.message
-  return fallback
 }
 
 /**
@@ -69,7 +63,7 @@ export async function getAiNews(): Promise<Result<AiNewsView>> {
     const [cache, sources] = await Promise.all([loadCache(), loadSources()])
     return ok(buildView(cache, sources))
   } catch (error) {
-    return fail(reasonOf(error, '读取 AI 热点缓存失败'))
+    return fail(errorText(error, '读取 AI 热点缓存失败'))
   }
 }
 
@@ -136,7 +130,7 @@ export async function refreshAiNews(): Promise<Result<AiNewsRefreshResult>> {
           cache.sources[source.id] = applySourceFailure(current, now, message)
           return { fired: true, error: message }
         } catch (error) {
-          const message = `${source.name}：${reasonOf(error, '拉取失败')}`
+          const message = `${source.name}：${errorText(error, '拉取失败')}`
           cache.sources[source.id] = applySourceFailure(current, now, message)
           return { fired: true, error: message }
         }
@@ -156,7 +150,7 @@ export async function refreshAiNews(): Promise<Result<AiNewsRefreshResult>> {
       notes
     })
   } catch (error) {
-    return fail(reasonOf(error, '刷新 AI 热点失败'))
+    return fail(errorText(error, '刷新 AI 热点失败'))
   }
 }
 
@@ -178,6 +172,6 @@ export async function loadAiNewsArticle(url: string): Promise<Result<AiNewsArtic
     }
     return ok(article)
   } catch (error) {
-    return fail(reasonOf(error, '抓取原文失败'))
+    return fail(errorText(error, '抓取原文失败'))
   }
 }

@@ -13,10 +13,10 @@ import { computed } from 'vue'
 import type { Component } from 'vue'
 import { Notebook, FolderOpened, Grid, Document, MagicStick, Key, Brush, VideoPlay } from '@element-plus/icons-vue'
 import { VIEW_LABELS, orderedViews, type ViewId } from '@shared/views'
-import { useProjectsStore } from '@/stores/projects'
+import { useNavStore } from '@/stores/nav'
 import { useSettingsStore } from '@/stores/settings'
 
-const store = useProjectsStore()
+const store = useNavStore()
 const settings = useSettingsStore()
 
 /** 每个页面一个图标；新增页面时这里会因缺 key 而报类型错，不会漏配 */

@@ -271,7 +271,7 @@ export const useCatalogStore = defineStore('catalog', () => {
     }
 
     commands.value = commands.value.filter((item) => item.id !== id)
-    delete terminal.runtimes[id]
+    terminal.forgetRuntime(id)
     terminal.dropTerminalsOf(id)
     notifySuccess(entry ? `已删除 ${entry.name}` : '已删除')
   }
@@ -322,11 +322,6 @@ export const useCatalogStore = defineStore('catalog', () => {
     await Promise.all(targets.map((item) => detectCommand(item.id, { silent: true })))
   }
 
-  /** 清空（数据目录被整份换掉时用） */
-  function reset(): void {
-    commands.value = []
-  }
-
   /** 启动常用软件后主进程会推整份列表（最近使用时间变了），失效标记也一并刷新 */
   function installListeners(): void {
     window.workbench.onQuickApps(applyQuickApps)
@@ -364,7 +359,6 @@ export const useCatalogStore = defineStore('catalog', () => {
     stopCommand,
     detectCommand,
     detectAllCommands,
-    reset,
     installListeners
   }
 })

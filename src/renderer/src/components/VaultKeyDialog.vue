@@ -139,8 +139,8 @@ function importKey(): void {
 
       <!-- 两件不可逆的事收在最下面：它们不该跟上面那几颗按钮混在一起 -->
       <div class="keys__danger">
-        <el-button size="small" @click="replaceKey">换一把新密钥</el-button>
-        <el-button size="small" type="danger" plain @click="forgetKey">
+        <el-button size="small" :loading="store.creating" @click="replaceKey">换一把新密钥</el-button>
+        <el-button size="small" type="danger" plain :disabled="store.creating" @click="forgetKey">
           <el-icon><Delete /></el-icon>
           清除本机密钥
         </el-button>

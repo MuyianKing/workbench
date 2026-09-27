@@ -62,6 +62,8 @@ export const useVaultStore = defineStore('vault', () => {
   const loading = ref(false)
   const saving = ref(false)
   const syncing = ref(false)
+  /** 建密钥 / 换密钥进行中：全部条目要重新加密一遍再落盘，期间按钮必须转圈禁点 */
+  const creating = ref(false)
   /** 上一次同步的说明（成功那句 / 失败那句），显示在工具带右侧 */
   const syncNote = ref('')
   const syncFailed = ref(false)
@@ -182,18 +184,23 @@ export const useVaultStore = defineStore('vault', () => {
 
   /** 建一把新密钥。`replace` 为真时会先把现有条目全作废，所以调用方必须先确认 */
   async function createKey(replace: boolean): Promise<boolean> {
-    const result = await window.workbench.vaultCreateKey(replace)
-    if (!result.ok) {
-      notifyError(result.error ?? '创建密钥失败')
-      return false
+    creating.value = true
+    try {
+      const result = await window.workbench.vaultCreateKey(replace)
+      if (!result.ok) {
+        notifyError(result.error ?? '创建密钥失败')
+        return false
+      }
+      clearRemoteVerdict()
+      keyExists.value = result.data!.exists
+      unlocked.value = result.data!.unlocked
+      fingerprint.value = result.data!.fingerprint
+      await reload()
+      notifySuccess(replace ? '已经换上一把新密钥' : '保险库已经建好')
+      return true
+    } finally {
+      creating.value = false
     }
-    clearRemoteVerdict()
-    keyExists.value = result.data!.exists
-    unlocked.value = result.data!.unlocked
-    fingerprint.value = result.data!.fingerprint
-    await reload()
-    notifySuccess(replace ? '已经换上一把新密钥' : '保险库已经建好')
-    return true
   }
 
   /** 导入一把别处导出的密钥：自己弹文件选择框，用户取消时什么都不做 */
@@ -323,6 +330,7 @@ export const useVaultStore = defineStore('vault', () => {
     loading,
     saving,
     syncing,
+    creating,
     syncNote,
     syncFailed,
     keyMismatch,

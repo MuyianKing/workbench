@@ -56,7 +56,7 @@ import { collectCodeBuddyLogText, createCodeBuddyParseState } from '@shared/code
 import { collectDshSessionText } from '@shared/dsh-log'
 import { collectQoderSessionText } from '@shared/qoder-log'
 import { collectWorkBuddySessionText } from '@shared/workbuddy-log'
-import { invoke, guard } from './bridge'
+import { errorText, guard, invoke } from './bridge'
 import { emit } from './events'
 import { fail, ok } from '@shared/result'
 import type { Result } from '@shared/types'
@@ -111,14 +111,8 @@ async function readZcodeLive(): Promise<LiveRead> {
     }
     return { ok: true, days }
   } catch (error) {
-    return { ok: false, error: reasonOf(error, '读取 ZCode 用量失败') }
+    return { ok: false, error: errorText(error, '读取 ZCode 用量失败') }
   }
-}
-
-function reasonOf(error: unknown, fallback: string): string {
-  if (typeof error === 'string' && error.trim()) return error
-  if (error instanceof Error && error.message) return error.message
-  return fallback
 }
 
 // ---------- CodeBuddy(IDE 扩展日志) ----------
@@ -148,7 +142,7 @@ async function readCodeBuddyLive(): Promise<LiveRead> {
   try {
     listing = await invoke<{ found?: unknown; files?: unknown }>('token_codebuddy_files')
   } catch (error) {
-    return { ok: false, error: reasonOf(error, '读取 CodeBuddy 日志失败') }
+    return { ok: false, error: errorText(error, '读取 CodeBuddy 日志失败') }
   }
 
   // 没装就安静跳过：这台机器上没有这个工具是常态，
@@ -210,7 +204,7 @@ async function readDshLive(): Promise<LiveRead> {
   try {
     listing = await invoke<{ found?: unknown; sessions?: unknown }>('token_dsh_sessions')
   } catch (error) {
-    return { ok: false, error: reasonOf(error, '读取 DSH 会话目录失败') }
+    return { ok: false, error: errorText(error, '读取 DSH 会话目录失败') }
   }
 
   // 没装就安静跳过（与 CodeBuddy 同一约定）
@@ -287,7 +281,7 @@ async function readWorkBuddyLive(): Promise<LiveRead> {
   try {
     listing = await invoke<{ found?: unknown; sessions?: unknown }>('token_workbuddy_sessions')
   } catch (error) {
-    return { ok: false, error: reasonOf(error, '读取 WorkBuddy 会话目录失败') }
+    return { ok: false, error: errorText(error, '读取 WorkBuddy 会话目录失败') }
   }
 
   // 没装就安静跳过（与 CodeBuddy / DSH 同一约定）
@@ -368,7 +362,7 @@ async function readQoderLive(): Promise<LiveRead> {
   try {
     listing = await invoke<{ found?: unknown; sessions?: unknown }>('token_qoder_sessions')
   } catch (error) {
-    return { ok: false, error: reasonOf(error, '读取 Qoder 会话目录失败') }
+    return { ok: false, error: errorText(error, '读取 Qoder 会话目录失败') }
   }
 
   // 没装就安静跳过（与 CodeBuddy / DSH / WorkBuddy 同一约定）
@@ -592,13 +586,13 @@ async function runSync(repo: string, shard: TokenShard): Promise<void> {
       // 两个目录各管一件事，自动同步一小时一轮也不必每次都带上外观
     })
   } catch (error) {
-    errors.push(reasonOf(error, '同步失败'))
+    errors.push(errorText(error, '同步失败'))
   }
 
   try {
     await readRemoteShards(repo, shard.device)
   } catch (error) {
-    errors.push(reasonOf(error, '读取同步分片失败'))
+    errors.push(errorText(error, '读取同步分片失败'))
   }
 
   lastSyncError = errors.join('；')

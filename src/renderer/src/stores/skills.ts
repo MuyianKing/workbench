@@ -30,7 +30,7 @@ import {
   type SkillLibraryState
 } from '@shared/skills'
 import type { Result } from '@/types'
-import { notifyError, notifySuccess } from '@/notify'
+import { notifyError, notifySuccess, confirmAction } from '@/notify'
 import { useSettingsStore } from '@/stores/settings'
 
 export const useSkillsStore = defineStore('skills', () => {
@@ -233,8 +233,12 @@ export const useSkillsStore = defineStore('skills', () => {
     return settings.updateSettings({ skillDir: target })
   }
 
-  /** 打开一个技能的 SKILL.md。慢一步回来的旧结果直接丢掉（连点两行时各回各的） */
-  async function select(id: string): Promise<void> {
+  /**
+   * 打开一个技能的 SKILL.md。慢一步回来的旧结果直接丢掉（连点两行时各回各的）。
+   * 回来的是**这一枝有没有读成**：读不出来时这里就收场并提示，调用方不要再拉开详情弹窗
+   * —— 弹窗内容全挂在 activeSkill 上，读失败还拉开就是一个空壳。
+   */
+  async function select(id: string): Promise<boolean> {
     activeId.value = id
     activeFile.value = SKILL_FILE
     saveError.value = ''
@@ -244,14 +248,17 @@ export const useSkillsStore = defineStore('skills', () => {
     const result = await window.workbench.readNote(gitRoot.value, skillFileRel(dir.value, id))
     if (activeId.value === id) void loadFiles()
     contentLoading.value = false
-    if (activeId.value !== id) return
+    if (activeId.value !== id) return false
 
     if (!result.ok || result.data === undefined) {
       closeActive()
-      saveError.value = result.error ?? '读取 SKILL.md 失败'
-      return
+      const message = result.error ?? '读取 SKILL.md 失败'
+      saveError.value = message
+      notifyError(message)
+      return false
     }
     content.value = result.data
+    return true
   }
 
   /**
@@ -378,6 +385,23 @@ export const useSkillsStore = defineStore('skills', () => {
   }
 
   /**
+   * 带确认的恢复 —— 历史列表的「恢复」与差异弹窗的「恢复到这个版本」两个入口共用这一句。
+   *
+   * 确认框里两件事必须说全：恢复替换的是**整个技能目录**（不是当前看的那一个文件），
+   * 以及恢复本身也是一次提交、现在的内容留在历史里随时能回来 —— 只说「恢复？」的话，
+   * 用户按下去才知道整个目录都变了。失败原因由 restore 弹出来。
+   */
+  async function restoreWithConfirm(id: string, hash: string): Promise<boolean> {
+    const confirmed = await confirmAction(
+      '这个技能的文件会变回所选版本的样子。恢复本身也是一次提交，现在的内容留在历史里，随时能再恢复回来。',
+      '恢复到这个版本？',
+      { confirmButtonText: '恢复' }
+    )
+    if (!confirmed) return false
+    return restore(id, hash)
+  }
+
+  /**
    * 安装到项目。结果原样交回弹窗：目标已存在时 Rust 的错误是「已安装」，
    * 弹窗拿它去问「要不要覆盖」，确认后带 overwrite 重调。
    */
@@ -468,6 +492,7 @@ export const useSkillsStore = defineStore('skills', () => {
     history,
     versionCompare,
     restore,
+    restoreWithConfirm,
     install,
     syncNow,
     reveal
