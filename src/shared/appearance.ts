@@ -48,7 +48,8 @@ export const APPEARANCE_SETTING_KEYS = [
   'topBarStyle',
   'cardOpacity',
   'hiddenViews',
-  'viewOrder'
+  'viewOrder',
+  'navHidden'
 ] as const
 
 export type AppearanceSettingKey = (typeof APPEARANCE_SETTING_KEYS)[number]
@@ -70,6 +71,8 @@ export interface AppearanceSettings {
   hiddenViews: ViewId[]
   /** 左侧导航栏的显示顺序（见 views.ts）：与 hiddenViews 同属「导航栏长什么样」 */
   viewOrder: ViewId[]
+  /** 左侧导航栏整条收起来了吗（顶栏右上角的折叠按钮）：与 hiddenViews 同属「导航栏长什么样」 */
+  navHidden: boolean
 }
 
 const THEME_SOURCES: readonly ThemeSource[] = ['system', 'light', 'dark']
@@ -107,7 +110,9 @@ export function sanitizeAppearanceSettings(raw: unknown): AppearanceSettings {
     topBarStyle: sanitizeTopBarStyle(value.topBarStyle),
     cardOpacity: clampCardOpacity(value.cardOpacity),
     hiddenViews: sanitizeHiddenViews(value.hiddenViews),
-    viewOrder: sanitizeViewOrder(value.viewOrder)
+    viewOrder: sanitizeViewOrder(value.viewOrder),
+    // 收起与否只在明确写了 true 时才认（老主题文件里没有这个字段 = 展开），与卡片的 hidden 同一口径
+    navHidden: value.navHidden === true
   }
 }
 

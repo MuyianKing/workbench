@@ -16,6 +16,7 @@ import { moveToPosition } from '@shared/reorder'
 import { DRAG_MIME } from '@/drag-mime'
 import { useProjectsStore } from '@/stores/projects'
 import { useCatalogStore } from '@/stores/catalog'
+import PanelLoading from '@/components/PanelLoading.vue'
 import type { QuickApp } from '@/types'
 
 const store = useProjectsStore()
@@ -123,7 +124,10 @@ function onDrop(app: QuickApp): void {
     </el-tooltip>
 
     <div class="launch__body panel__scroll">
-      <p v-if="!apps.length" class="launch__empty">还没有常用软件，点右上角的 + 添加</p>
+      <!-- 首次取数没回来前不说「还没有」：还没问到与真的没有是两回事 -->
+      <PanelLoading v-if="!store.ready" text="正在读取常用软件…" />
+
+      <p v-else-if="!apps.length" class="launch__empty">还没有常用软件，点右上角的 + 添加</p>
 
       <ul v-else class="launch__list">
         <li

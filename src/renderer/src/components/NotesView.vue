@@ -33,6 +33,7 @@ import { startPointerDrag } from '@/composables/use-pointer-drag'
 import { useNotesStore } from '@/stores/notes'
 import { useSettingsStore } from '@/stores/settings'
 import NoteTree from '@/components/NoteTree.vue'
+import PanelLoading from '@/components/PanelLoading.vue'
 import NoteEditor from '@/components/NoteEditor.vue'
 import NoteNameDialog from '@/components/NoteNameDialog.vue'
 import NoteAssetsDialog from '@/components/NoteAssetsDialog.vue'
@@ -506,9 +507,7 @@ function onResizeDown(event: PointerEvent): void {
             <p>读不出这个文件夹。</p>
             <p class="empty__hint">{{ store.loadError }}</p>
           </template>
-          <template v-else-if="scanning">
-            <p>正在读取笔记…</p>
-          </template>
+          <PanelLoading v-else-if="scanning" text="正在读取笔记…" />
           <template v-else-if="store.openError">
             <p>这一篇打不开。</p>
             <p class="empty__hint">{{ store.openError }}</p>
@@ -563,6 +562,9 @@ function onResizeDown(event: PointerEvent): void {
  * 两栏各是一张卡片（.panel 那副外壳，写在 global.css），间距与别处同源 ——
  * 左栏宽度跟着 theme.json 里的 noteTreeWidth 走（拖动分隔条改它）、右栏吃掉剩余宽度；
  * 两栏各自滚，谁也不把谁撑高。
+ *
+ * **顶边一份不给自己加**：顶栏下面那条缝归 .shell 管（见 global.css「顶栏与内容之间那条缝」），
+ * 与首页同款 —— 这里再补一份，正常 / 毛玻璃两档就成了两倍。
  */
 .notes__body {
   position: relative;
@@ -570,7 +572,7 @@ function onResizeDown(event: PointerEvent): void {
   gap: var(--card-gap, 10px);
   min-width: 0;
   min-height: 0;
-  padding: var(--card-gap, 10px);
+  padding: 0 var(--card-gap, 10px) var(--card-gap, 10px);
 }
 
 .notes__side {

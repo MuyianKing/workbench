@@ -22,6 +22,14 @@
  * 边界与吸附规则，否则一个手改过的 theme.json 就能把栏宽撑爆、或者拖出一个负高度。
  */
 import { DEFAULT_APPEARANCE, sanitizeAppearanceSettings, type AppearanceSettings } from './appearance'
+import {
+  VIDEO_FLOAT_SIZE_DEFAULT,
+  VIDEO_FLOAT_X_DEFAULT,
+  VIDEO_FLOAT_Y_DEFAULT,
+  clampVideoFloatHeight,
+  clampVideoFloatPercent,
+  clampVideoFloatWidth
+} from './video'
 
 /** 首页九块卡片的稳定 id；数组顺序也是同栏同行时的兜底排序 */
 export const HOME_CARD_IDS = [
@@ -144,6 +152,24 @@ export interface ThemeConfig {
   columns: HomeColumn[]
   /** 笔记页左栏（目录树）的宽度（px）：在那一页里左右拖动分隔条调整，与首页栏宽同一套做法 */
   noteTreeWidth: number
+  /**
+   * 视频页左栏（目录树）收起没有：收起后播放器占满整行，入口在播放器头部那颗按钮上。
+   * 与笔记树宽度同属「这一页长什么样」，住主题文件；收起**不是卸载** —— 摊开的那几层
+   * 与「上次打开的视频」都在数据文件里，不跟着丢。
+   */
+  videoTreeCollapsed: boolean
+  /** 视频页左栏（目录树）的宽度（px）：两栏之间那条缝可以左右拖，与笔记树宽度同一套做法 */
+  videoTreeWidth: number
+  /**
+   * 画中画悬浮小窗的位置与尺寸（见 shared/video.ts）：切到别的页时正播的视频
+   * 缩成的那只小窗，拖过 / 缩过就记下来，下次还是那个地方、那个大小。
+   * 位置存**视口百分比**（左上角的落点），换机器、拉窗口都还停在差不多的地方；
+   * 尺寸存像素。边界与默认值在 shared/video.ts，渲染时按当前视口再 clamp 一次。
+   */
+  videoFloatX: number
+  videoFloatY: number
+  videoFloatW: number
+  videoFloatH: number
   cards: Record<HomeCardId, CardPlacement>
   /**
    * 外观设置（见 appearance.ts）：这一批也住在主题文件里，和布局一起构成
@@ -248,6 +274,16 @@ export const NOTE_TREE_WIDTH_MAX = 520
 export const NOTE_TREE_WIDTH_DEFAULT = 232
 
 /**
+ * 视频页左栏（目录树）的宽度区间。
+ *
+ * 下限要放得下树行与底部「目录名 + 计数 + 按钮」那行，上限只防手改数据把播放器挤没。
+ * 默认 264 是「可以拖」之前的定宽 —— 老用户拖之前看到的还是原来那个宽度。
+ */
+export const VIDEO_TREE_WIDTH_MIN = 180
+export const VIDEO_TREE_WIDTH_MAX = 520
+export const VIDEO_TREE_WIDTH_DEFAULT = 264
+
+/**
  * 默认布局（按当前配置固化）。
  *
  * 第一栏（左，373 固定）自上而下是活跃度、快捷启动、系统状态、快捷操作、命令五张定高卡，
@@ -299,6 +335,13 @@ export const DEFAULT_THEME: ThemeConfig = {
     }
   ],
   noteTreeWidth: NOTE_TREE_WIDTH_DEFAULT,
+  videoTreeCollapsed: false,
+  videoTreeWidth: VIDEO_TREE_WIDTH_DEFAULT,
+  // 画中画小窗：还没拖过就落在右上角（渲染时按视口与小窗尺寸 clamp）、默认尺寸
+  videoFloatX: VIDEO_FLOAT_X_DEFAULT,
+  videoFloatY: VIDEO_FLOAT_Y_DEFAULT,
+  videoFloatW: VIDEO_FLOAT_SIZE_DEFAULT.width,
+  videoFloatH: VIDEO_FLOAT_SIZE_DEFAULT.height,
   cards: {
     activity: { row: 'row-1', order: 0, hidden: false },
     quick: { row: 'row-2', order: 0, hidden: false },
@@ -600,6 +643,13 @@ export function clampNoteTreeWidth(value: unknown): number {
   return Math.min(NOTE_TREE_WIDTH_MAX, Math.max(NOTE_TREE_WIDTH_MIN, base))
 }
 
+/** 收敛视频页左栏宽度（与笔记树同一条规矩）；非法值回到默认宽度 */
+export function clampVideoTreeWidth(value: unknown): number {
+  const fallback = VIDEO_TREE_WIDTH_DEFAULT
+  const base = typeof value === 'number' && Number.isFinite(value) ? Math.round(value) : fallback
+  return Math.min(VIDEO_TREE_WIDTH_MAX, Math.max(VIDEO_TREE_WIDTH_MIN, base))
+}
+
 function finiteOr(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback
 }
@@ -828,6 +878,15 @@ export function sanitizeTheme(raw: unknown): ThemeConfig {
     columns: kept,
     // 后加的字段：老主题文件里没有，补默认宽度（与 appearance 同理，不能因此去动上面的版本判定）
     noteTreeWidth: clampNoteTreeWidth(base.noteTreeWidth),
+    // 同上：老主题文件里没有，默认不收起
+    videoTreeCollapsed: base.videoTreeCollapsed === true,
+    // 同上：老主题文件里没有，补默认宽度
+    videoTreeWidth: clampVideoTreeWidth(base.videoTreeWidth),
+    // 同上：老主题文件里没有，小窗回到默认位置（右上角）与默认尺寸
+    videoFloatX: clampVideoFloatPercent(base.videoFloatX, VIDEO_FLOAT_X_DEFAULT),
+    videoFloatY: clampVideoFloatPercent(base.videoFloatY, VIDEO_FLOAT_Y_DEFAULT),
+    videoFloatW: clampVideoFloatWidth(base.videoFloatW),
+    videoFloatH: clampVideoFloatHeight(base.videoFloatH),
     cards: normalizeOrder(keepOneVisible(cards)),
     // 外观是后加的字段：老主题文件里没有，缺了就补默认（**不能**因为它去动上面的版本判定，
     // 否则升级一次就会把用户的布局整份清掉）
@@ -884,6 +943,11 @@ function layoutSignature(layout: ThemeConfig): string {
     layout.version,
     layout.cardGap,
     layout.noteTreeWidth,
+    layout.videoTreeWidth,
+    layout.videoFloatX,
+    layout.videoFloatY,
+    layout.videoFloatW,
+    layout.videoFloatH,
     layout.columns
       .map(
         (column) =>

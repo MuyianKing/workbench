@@ -18,6 +18,7 @@ import { computed, nextTick, onMounted, onActivated, ref, watch } from 'vue'
 import { Collection, Refresh } from '@element-plus/icons-vue'
 import { formatListTime, formatTimestamp } from '@/format'
 import NewsArticleDialog from '@/components/NewsArticleDialog.vue'
+import PanelLoading from '@/components/PanelLoading.vue'
 import type { AiNewsItem, AiNewsView } from '@/types'
 
 const view = ref<AiNewsView | null>(null)
@@ -165,12 +166,6 @@ const footer = computed(() => {
   const updatedAt = view.value?.updatedAt ?? 0
   return updatedAt ? `更新于 ${formatTimestamp(updatedAt)}` : '还没有更新过'
 })
-
-/**
- * 空态文案：读盘还没回来时不说「还没有热点」——「正在读」与「真的没内容」是两回事，
- * 用户要做的事也不同（等一等 vs 等源那边更新）。
- */
-const emptyHint = computed(() => (view.value ? '正在获取热点…' : '正在读取…'))
 </script>
 
 <template>
@@ -203,18 +198,25 @@ const emptyHint = computed(() => (view.value ? '正在获取热点…' : '正在
         </li>
       </ul>
 
-      <!-- 逐源失败 / 未到时间：一行小字，不挡住已有内容，排在页脚之上 -->
-      <p v-if="hint" class="panel__note truncate" :title="hint">{{ hint }}</p>
-
       <footer class="panel__foot">
         <span class="mono">{{ footer }}</span>
       </footer>
     </template>
 
-    <p v-else-if="readOnce" class="panel__empty">
+    <!--
+      读盘还没回来、或后台刷新还在跑：转个圈说一声，别让这张卡一片空白，
+      也不知道是在加载还是坏了。
+    -->
+    <PanelLoading v-else-if="!readOnce || refreshing" text="正在获取热点…" />
+
+    <!-- 读过了也刷新过了还是空：才是真的没有 -->
+    <p v-else class="panel__empty">
       <el-icon class="empty__icon"><Collection /></el-icon>
-      {{ emptyHint }}
+      暂时没有热点
     </p>
+
+    <!-- 逐源失败 / 未到时间：一行小字，不挡住已有内容。哪个源挂了这件事在任何状态下都得说出来 -->
+    <p v-if="hint" class="panel__note truncate" :title="hint">{{ hint }}</p>
 
     <!-- 站内阅读：点一行打开它，正文由它自己抓（见 NewsArticleDialog） -->
     <NewsArticleDialog v-model="articleOpen" :item="selected" />

@@ -21,6 +21,7 @@
 import { computed } from 'vue'
 import { Collection } from '@element-plus/icons-vue'
 import { useProjectsStore } from '@/stores/projects'
+import PanelLoading from '@/components/PanelLoading.vue'
 import ProjectCard from '@/components/ProjectCard.vue'
 
 const store = useProjectsStore()
@@ -30,7 +31,10 @@ const projects = computed(() => store.homeProjects)
 
 <template>
   <article class="panel">
-    <div v-if="projects.length" class="projects panel__scroll">
+    <!-- 启动首帧不说「还没有项目」：列表还在路上，与真的一个都没有是两回事 -->
+    <PanelLoading v-if="!store.ready" text="正在读取项目…" />
+
+    <div v-else-if="projects.length" class="projects panel__scroll">
       <ProjectCard v-for="project in projects" :key="project.id" :project="project" />
     </div>
 

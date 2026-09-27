@@ -43,7 +43,14 @@ describe('导航栏显示哪几页', () => {
 
   it('剩下哪几页永远按 VIEW_IDS 的顺序（关掉哪几项不影响其余项的先后）', () => {
     expect(visibleViews([])).toEqual([...VIEW_IDS])
-    expect(visibleViews(['home', 'work'])).toEqual(['projects', 'notes', 'skills', 'vault', 'styles'])
+    expect(visibleViews(['home', 'work'])).toEqual([
+      'projects',
+      'notes',
+      'skills',
+      'vault',
+      'styles',
+      'video'
+    ])
   })
 
   it('至少留一页：全关掉时把首页留下，界面上不会一个入口都不剩', () => {
@@ -53,7 +60,8 @@ describe('导航栏显示哪几页', () => {
       'notes',
       'skills',
       'vault',
-      'styles'
+      'styles',
+      'video'
     ])
     expect(visibleViews(sanitizeHiddenViews([...VIEW_IDS]))).toEqual(['home'])
   })
@@ -79,19 +87,37 @@ describe('导航栏的顺序', () => {
       'work',
       'skills',
       'vault',
-      'styles'
+      'styles',
+      'video'
     ])
   })
 
   it('显示的页按排好的顺序走，关掉的整项不出现', () => {
     const order = sanitizeViewOrder(['work', 'home', 'notes'])
-    expect(orderedViews([], order)).toEqual(['work', 'home', 'notes', 'projects', 'skills', 'vault', 'styles'])
+    expect(orderedViews([], order)).toEqual([
+      'work',
+      'home',
+      'notes',
+      'projects',
+      'skills',
+      'vault',
+      'styles',
+      'video'
+    ])
     expect(orderedViews(['work', 'skills', 'vault', 'styles', 'projects'], order)).toEqual([
       'home',
-      'notes'
+      'notes',
+      'video'
     ])
     // 不带顺序参数时就是老行为：按 VIEW_IDS 的默认顺序
-    expect(orderedViews(['home', 'work'])).toEqual(['projects', 'notes', 'skills', 'vault', 'styles'])
+    expect(orderedViews(['home', 'work'])).toEqual([
+      'projects',
+      'notes',
+      'skills',
+      'vault',
+      'styles',
+      'video'
+    ])
   })
 
   it('退回页按顺序数过去第一页可见的（不是默认顺序里的第一页）', () => {

@@ -21,18 +21,23 @@
  * 数据全在 projects / settings / auth 三个 store 里，**一次 IPC 都不发**：账号状态由
  * projects store 初始化时问过一次（`refreshAuth`，只读凭据管理器、不联网），这里只读那个结果；
  * 这一行在首屏上，为它多等一轮往返不值得（工作日志那种要另读一份文件的数字就不放进来）。
+ * 唯一的例外是天气（weather store）：它自己在后台按间隔取（设置里填了城市才会出网），
+ * 这里只读已经取回来的值 —— 取到就多说一句外面的实况，没取到就少一句，问候语不等它。
  *
  * **这里不放头像**：账号入口归顶栏右上角那颗头像，这一行只说事情、只出一个名字。
  */
 import { computed } from 'vue'
 import { dayKey, streakOf } from '@shared/activity'
+import { formatWeatherView } from '@shared/weather'
 import { useAuthStore } from '@/stores/auth'
 import { useProjectsStore } from '@/stores/projects'
 import { useSettingsStore } from '@/stores/settings'
+import { useWeatherStore } from '@/stores/weather'
 
 const store = useProjectsStore()
 const settings = useSettingsStore()
 const auth = useAuthStore()
+const weather = useWeatherStore()
 
 /** 当前登录的账号；null 表示没登录，或还没问过后端 —— 两种都回落到程序名称 */
 const account = computed(() => auth.status?.account ?? null)
@@ -76,8 +81,13 @@ const todayCount = computed(() => store.activity[dayKey(store.dayStart)] ?? 0)
 /** 连着用了多少天：今天还没动手也不算断，从昨天数起 */
 const streak = computed(() => streakOf(store.activity, new Date(store.dayStart)))
 
+/** 外面的实况（`多云 19°`）：没填城市、还没取到、或取失败了都是空串 —— 那一段就不画 */
+const weatherText = computed(() => (weather.view ? formatWeatherView(weather.view) : ''))
+
 /**
  * 今天这一行实话：只说非零的那些。
+ *
+ * 天气排在最前（它在说「此刻」，后面的在说「今天」）。其余的：
  *
  * 「连续 1 天」刻意不显示 —— 第一次用就是这个数，摆在首页像在自我表扬；
  * 从第 2 天起它才真的是一条「你一直在做」的信息。三条都为零时整段不画，
@@ -88,6 +98,7 @@ const streak = computed(() => streakOf(store.activity, new Date(store.dayStart))
  */
 const facts = computed(() => {
   const parts: string[] = []
+  if (weatherText.value) parts.push(weatherText.value)
   if (store.runningCount) {
     parts.push(isNight.value ? `${store.runningCount} 个项目还在跑` : `${store.runningCount} 个项目在跑`)
   }

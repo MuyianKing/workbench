@@ -23,10 +23,12 @@ import {
 } from './note'
 import { sanitizeImageRepo } from './note-image'
 import { sanitizeSyncRepo } from './token-usage'
+import { sanitizeWeatherCity } from './weather'
 import { pruneDays, sanitizeActivity } from './activity'
 import { sanitizeViewId } from './views'
 import { sanitizeProjectSort } from './project-sort'
 import { sanitizeWorkRange, sanitizeWorkSort } from './work-log'
+import { sanitizeVideoHistory, sanitizeVideoLastRel, sanitizeVideoRoot, sanitizeVideoTreeExpanded } from './video'
 
 export function emptyData(): PersistedData {
   return {
@@ -94,9 +96,17 @@ export function sanitizeSettings(raw: unknown): StoredSettings {
   // 笔记仓库地址已废弃：同步现在只看那个文件夹自己的 `origin`（见 shared/note.ts 的 NoteRepoState），
   // 地址不再进设置。旧数据文件里存着它，不主动清掉的话它会一直被写回，看着像还有人在用它。
   delete (value as unknown as Record<string, unknown>).noteSyncRepo
+  // 天气城市：老数据文件里没有，默认空串 = 不显示、不联网。空白与超长在这里收敛
+  value.weatherCity = sanitizeWeatherCity(value.weatherCity)
   // 图片仓库地址：老数据文件里没有，默认未配置。
   // 与 Token 同步仓库同一条口径（含空白、以 `-` 开头的一律当没填）
   value.noteImageRepo = sanitizeImageRepo(value.noteImageRepo)
+  // 视频文件夹与打开过的目录、目录树的展开态、上次打开的视频：老数据文件里都没有，
+  // 默认空 / 空清单。收敛与笔记那几样各是同一条（它们都只是「本机的一个目录」+ 一份相对路径）
+  value.videoDir = sanitizeVideoRoot(value.videoDir)
+  value.videoDirs = sanitizeVideoHistory(value.videoDirs)
+  value.videoTreeExpanded = sanitizeVideoTreeExpanded(value.videoTreeExpanded)
+  value.videoLastRel = sanitizeVideoLastRel(value.videoLastRel)
   // 这个字段的开发期名字，存的是「绝对值、没有跟随终端这一档」。它只出现在未发布的中间版本里，
   // 而那个值会把「跟随终端」这档永远盖住 —— 清掉，免得它一直写回数据文件当第二份真源。
   delete (value as unknown as Record<string, unknown>).terminalDockTop

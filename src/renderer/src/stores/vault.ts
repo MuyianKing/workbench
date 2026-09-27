@@ -43,6 +43,11 @@ export const useVaultStore = defineStore('vault', () => {
   /** 这台机器上有没有密钥（凭据管理器里那条记录在不在） */
   const keyExists = ref(false)
   const unlocked = ref(false)
+  /**
+   * 密钥状态问过没有：`keyExists` 初值是 false，状态查询又是异步的 ——
+   * 没这个标志的话，进页面先闪一帧「创建保险库」的引导再跳成真的样子。
+   */
+  const keyChecked = ref(false)
   /** 公钥指纹（`A1B2-C3D4-E5F6`）：核对两台机器拿的是不是同一把密钥 */
   const fingerprint = ref('')
 
@@ -119,14 +124,18 @@ export const useVaultStore = defineStore('vault', () => {
 
   /** 问一次密钥状态（进页面时、以及每个动作之后） */
   async function refreshKey(): Promise<void> {
-    const result = await window.workbench.vaultKeyState()
-    if (!result.ok) {
-      notifyError(result.error ?? '读取密钥状态失败')
-      return
+    try {
+      const result = await window.workbench.vaultKeyState()
+      if (!result.ok) {
+        notifyError(result.error ?? '读取密钥状态失败')
+        return
+      }
+      keyExists.value = result.data!.exists
+      unlocked.value = result.data!.unlocked
+      fingerprint.value = result.data!.fingerprint
+    } finally {
+      keyChecked.value = true
     }
-    keyExists.value = result.data!.exists
-    unlocked.value = result.data!.unlocked
-    fingerprint.value = result.data!.fingerprint
   }
 
   /** 解锁并读出全部条目 */
@@ -304,6 +313,7 @@ export const useVaultStore = defineStore('vault', () => {
   return {
     account,
     keyExists,
+    keyChecked,
     unlocked,
     fingerprint,
     records,

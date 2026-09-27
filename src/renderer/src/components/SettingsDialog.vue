@@ -23,6 +23,7 @@ import {
 } from '@shared/workspace-background'
 import { builtinIdOf } from '@shared/wallpaper'
 import { CARD_OPACITY_MAX, CARD_OPACITY_MIN } from '@shared/card-opacity'
+import { WEATHER_CITY_MAX } from '@shared/weather'
 import { moveToPosition } from '@shared/reorder'
 import { formatRelative } from '@/format'
 import AppDialog from '@/components/AppDialog.vue'
@@ -245,6 +246,26 @@ watch(
 function commitImageRepo(): void {
   if (imageRepoDraft.value === settings.settings.noteImageRepo) return
   save({ noteImageRepo: imageRepoDraft.value })
+}
+
+// ---------- 天气 ----------
+
+/**
+ * 天气城市的草稿：与程序名称同一套（失焦 / 回车才提交，收敛后的值回推草稿）。
+ * 留空提交 = 关闭这条出口 —— 收敛会把空白压成空串。
+ */
+const weatherCityDraft = ref('')
+watch(
+  () => settings.settings.weatherCity,
+  (value) => {
+    weatherCityDraft.value = value
+  },
+  { immediate: true }
+)
+
+function commitWeatherCity(): void {
+  if (weatherCityDraft.value === settings.settings.weatherCity) return
+  save({ weatherCity: weatherCityDraft.value })
 }
 
 /**
@@ -524,7 +545,7 @@ async function openDataDir(): Promise<void> {
 }
 
 /**
- * 联网边界：**这个应用默认不联网**，出口只有这五处，且都由用户自己开出来
+ * 联网边界：**这个应用默认不联网**，出口只有这几处，且都由用户自己开出来
  * （与架构文档「数据与隐私」那一节同源 —— 改了一边就要改另一边）。
  */
 const networkBounds: Array<{ title: string; detail: string }> = [
@@ -553,6 +574,11 @@ const networkBounds: Array<{ title: string; detail: string }> = [
     title: 'AI 热点',
     detail:
       '首页画着「AI 热点」卡片时才会去 GET 它，且要到了那个源自己的刷新间隔（地址是内置白名单，只放中文源），只读不传任何数据。'
+  },
+  {
+    title: '实时天气',
+    detail:
+      '只有设置里填了天气城市才会去取（每半小时一次），地址是内置白名单里的两台主机 —— 城市名检索走 OpenStreetMap 的公开接口、实况走 Open-Meteo，都免费且只读；城市名会出现在请求里。'
   }
 ]
 </script>
@@ -985,6 +1011,34 @@ const networkBounds: Array<{ title: string; detail: string }> = [
           </div>
 
           <!--
+            天气：顶栏问候语旁那一小段实况（`多云 19°`）。只有一个配置项：城市名 ——
+            留空就是整条出口关闭，与两个同步仓库「留空即关闭」同一条规矩。
+          -->
+          <div class="block">
+            <h3 class="block__title">天气</h3>
+
+            <div class="row">
+              <div class="row__text">
+                <span class="row__label">城市</span>
+                <span class="row__hint">
+                  顶栏问候语旁显示当地的实时天气，每半小时更新一次；留空则不显示、也不联网。
+                  城市名会作为查询串发出去：查经纬度走 OpenStreetMap 的公开检索，取实况走
+                  Open-Meteo 的免费接口 —— 两处都免费、不需要凭据（如「上海」「常州」）。
+                </span>
+              </div>
+              <el-input
+                v-model="weatherCityDraft"
+                class="name-input"
+                size="small"
+                :maxlength="WEATHER_CITY_MAX"
+                spellcheck="false"
+                placeholder="城市名，如 上海"
+                @change="commitWeatherCity"
+              />
+            </div>
+          </div>
+
+          <!--
             笔记这一块管两件事：图片往哪儿推、技能库在仓库里的哪一层。
             笔记**本身**那个 git 仓库不在这里，也没有这个地方：同步到哪儿由那个文件夹自己连着的
             远端决定（见 shared/note.ts 的 NoteRepoState），没仓库的文件夹就是本机的笔记 ——
@@ -1134,7 +1188,7 @@ const networkBounds: Array<{ title: string; detail: string }> = [
             <h3 class="block__title">联网</h3>
 
             <p class="about__lead">
-              默认不联网、不上报任何数据。对外发请求的只有下面六处，且都由你自己开出来：
+              默认不联网、不上报任何数据。对外发请求的只有下面七处，且都由你自己开出来：
             </p>
 
             <ul class="bounds">
@@ -1145,8 +1199,10 @@ const networkBounds: Array<{ title: string; detail: string }> = [
             </ul>
 
             <p class="about__lead">
-              六处都不经过任何第三方服务：三处 git 同步发往你自己填的那三个仓库，账号登录走两家平台官方的
-              OAuth 接口，AI 热点只 GET 内置白名单里的那个公开源（源站自己的域名），且没有自建服务端。
+              七处都没有自建服务端：三处 git 同步发往你自己填的那三个仓库，账号登录走两家平台官方的
+              OAuth 接口，AI 热点只 GET 内置白名单里的那个公开源（源站自己的域名），天气只 GET
+              两台白名单主机（城市名检索走 OpenStreetMap 的公开接口、实况走 Open-Meteo），
+              发出去的只有你填的城市名。
               笔记页带文档级的 no-referrer，打开的笔记不会把自己的来源地址送给图片服务器。
             </p>
           </div>

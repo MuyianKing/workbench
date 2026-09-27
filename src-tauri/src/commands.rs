@@ -228,6 +228,27 @@ pub fn note_repo_state(dir: String) -> Result<Value, String> {
     crate::sync::repo_state(&dir)
 }
 
+// ---------- 视频（用户自己挑的一个文件夹里的 MP4，见 video.rs） ----------
+//
+// 扫描是实打实的磁盘遍历，异步；授权要读一次文件头，同样异步。
+
+/// 递归列出视频文件夹（平铺的清单：文件夹 + MP4 文件，带字节数）；树由渲染层组
+#[tauri::command(async)]
+pub fn video_scan(root: String) -> Result<Vec<Value>, String> {
+    crate::video::scan(&root)
+}
+
+/// 把一个视频交给 webview 播放（asset 协议）：核过它确实是 MP4 再按**单个文件**授权。
+/// 与 allow_background 同一条边界 —— tauri.conf.json 的 assetProtocol.scope 保持为空，
+/// 授权一律在运行时按文件给。
+#[tauri::command(async)]
+pub fn allow_video(app: AppHandle, path: String) -> Result<(), String> {
+    crate::video::allow(&path)?;
+    app.asset_protocol_scope()
+        .allow_file(&path)
+        .map_err(|err| format!("无法把这个视频交给界面播放：{err}"))
+}
+
 // ---------- 技能（skill：住在笔记仓库的一个子目录里，见 skills.rs） ----------
 //
 // 六条全是实打实的磁盘读写（还有本地 git 调用），一律异步。

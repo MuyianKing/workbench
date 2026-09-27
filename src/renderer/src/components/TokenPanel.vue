@@ -22,6 +22,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { CaretRight, Connection, Histogram, Refresh } from '@element-plus/icons-vue'
 import TokenRangePicker from '@/components/TokenRangePicker.vue'
+import PanelLoading from '@/components/PanelLoading.vue'
 import { useSettingsStore } from '@/stores/settings'
 import {
   SOURCE_LABELS,
@@ -663,12 +664,14 @@ function detailWidth(value: number, max: number): string {
 
     <!-- 空态分两种:实读还没回来时是「读取中」,回来过才是「确实没有」——
          把前者说成后者,有数据的用户会以为自己的记录没了 -->
+    <PanelLoading
+      v-else-if="!readOnce"
+      text="正在读取用量…"
+      hint="首次读取要解析各工具的本地日志，稍等一下"
+    />
+
     <div v-else class="empty">
-      <template v-if="!readOnce">
-        <p>正在读取用量…</p>
-        <p class="empty__hint">首次读取要解析各工具的本地日志,稍等一下</p>
-      </template>
-      <template v-else-if="axis === 'credits'">
+      <template v-if="axis === 'credits'">
         <el-icon class="empty__icon"><Histogram /></el-icon>
         <p>暂无额度记录</p>
         <p class="empty__hint">在 Qoder 里跑过对话后,这里会出现按天的额度消耗</p>

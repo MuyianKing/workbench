@@ -18,6 +18,7 @@ import {
   clampColumnWidth,
   clampNoteTreeWidth,
   clampRowHeight,
+  clampVideoTreeWidth,
   moveCard as placeCard,
   removeColumn as removeColumnFrom,
   rowHeightMin,
@@ -35,6 +36,7 @@ import { clampBackgroundOpacity, sanitizeVeilColor } from '@shared/workspace-bac
 import { clampCardOpacity } from '@shared/card-opacity'
 import { sanitizeAccentColor, sanitizeAccentInkMode, type AccentInkMode } from '@shared/accent-color'
 import type { ViewId } from '@shared/views'
+import { clampVideoFloatHeight, clampVideoFloatPercent, clampVideoFloatWidth } from '@shared/video'
 import {
   DEFAULT_SETTINGS,
   TOP_BAR_STYLES,
@@ -232,6 +234,17 @@ export const useSettingsStore = defineStore('settings', () => {
    */
   async function setViewOrder(order: ViewId[]): Promise<boolean> {
     return updateSettings({ viewOrder: order })
+  }
+
+  /**
+   * 收起 / 展开左侧导航栏整条（顶栏右上角那颗折叠按钮）。
+   *
+   * 与 setViewVisible 同一条路：这一项也在外观白名单里，实际落在 theme.json。
+   * 收起只是不画那一列（App.vue 按 navHidden 决定渲染），换页入口仍在顶栏按钮上。
+   */
+  async function setNavVisible(visible: boolean): Promise<boolean> {
+    if (settings.value.navHidden === !visible) return true
+    return updateSettings({ navHidden: !visible })
   }
 
   /**
@@ -498,6 +511,47 @@ export const useSettingsStore = defineStore('settings', () => {
     await saveThemeConfig({ noteTreeWidth: themeConfig.value.noteTreeWidth })
   }
 
+  /**
+   * 视频页左栏（目录树）收起 / 展开：收起只是不画那一列，播放器占满整行，
+   * 入口在播放器头部那颗按钮上。落 theme.json（与笔记树宽度同属「这一页长什么样」）。
+   */
+  async function setVideoTreeCollapsed(collapsed: boolean): Promise<boolean> {
+    if (themeConfig.value.videoTreeCollapsed === collapsed) return true
+    return saveThemeConfig({ videoTreeCollapsed: collapsed })
+  }
+
+  /**
+   * 视频页左栏（目录树）宽度：与笔记树同一套做法 —— 拖动时只改本地让界面跟手，
+   * 松手才整份落盘（它也在 theme.json 里）。
+   */
+  function setVideoTreeWidth(width: number): void {
+    themeConfig.value.videoTreeWidth = clampVideoTreeWidth(width)
+  }
+
+  async function commitVideoTreeWidth(): Promise<void> {
+    await saveThemeConfig({ videoTreeWidth: themeConfig.value.videoTreeWidth })
+  }
+
+  /**
+   * 画中画悬浮小窗的位置与尺寸：与视频树宽同一套做法 —— 拖动 / 缩放时只改本地让界面跟手，
+   * 松手才整份落盘（四个字段一起送，theme.json 一份快照一次写完）。
+   */
+  function setVideoFloatGeometry(geometry: { x: number; y: number; w: number; h: number }): void {
+    themeConfig.value.videoFloatX = clampVideoFloatPercent(geometry.x)
+    themeConfig.value.videoFloatY = clampVideoFloatPercent(geometry.y)
+    themeConfig.value.videoFloatW = clampVideoFloatWidth(geometry.w)
+    themeConfig.value.videoFloatH = clampVideoFloatHeight(geometry.h)
+  }
+
+  async function commitVideoFloatGeometry(): Promise<void> {
+    await saveThemeConfig({
+      videoFloatX: themeConfig.value.videoFloatX,
+      videoFloatY: themeConfig.value.videoFloatY,
+      videoFloatW: themeConfig.value.videoFloatW,
+      videoFloatH: themeConfig.value.videoFloatH
+    })
+  }
+
   /** 拖动分栏边界：一次给出那一条缝上要改的栏与新宽度（两栏一起改），过程中只改本地 */
   function setColumnWidths(widths: Record<ColumnId, number>): void {
     themeConfig.value.columns = placeColumnWidths(themeConfig.value.columns, widths)
@@ -702,6 +756,7 @@ export const useSettingsStore = defineStore('settings', () => {
     setAccentInk,
     setViewVisible,
     setViewOrder,
+    setNavVisible,
     // 背景
     backgroundImage,
     backgroundName,
@@ -732,6 +787,11 @@ export const useSettingsStore = defineStore('settings', () => {
     removeColumn,
     setNoteTreeWidth,
     commitNoteTreeWidth,
+    setVideoTreeWidth,
+    commitVideoTreeWidth,
+    setVideoTreeCollapsed,
+    setVideoFloatGeometry,
+    commitVideoFloatGeometry,
     setCardGap,
     resetLayout,
     // 别台机器的外观

@@ -25,6 +25,9 @@ function available(key: PackageManagerKey): boolean {
   return environment.packageManagers?.[key] ?? false
 }
 
+/** 探测还没回来时不把环境说成「未检测到」：还没问到与没装是两回事 */
+const pmProbing = computed(() => !environment.packageManagers && environment.probing)
+
 const steps = [
   {
     no: '01',
@@ -92,7 +95,9 @@ const hints = computed(() => buildHints(settings.settings))
         <dl class="facts">
           <div class="fact">
             <dt>node</dt>
-            <dd class="mono">{{ environment.packageManagers?.node || '未检测到' }}</dd>
+            <dd class="mono">
+              {{ environment.packageManagers?.node || (environment.probing ? '检测中…' : '未检测到') }}
+            </dd>
           </div>
           <div class="fact">
             <dt>chromium</dt>
@@ -102,7 +107,9 @@ const hints = computed(() => buildHints(settings.settings))
 
         <div class="panel__foot">
           <span class="eyebrow">包管理器</span>
-          <span class="pms">
+          <!-- 探测没回来前不画「未安装」的圆点：那只是还没问到 -->
+          <span v-if="pmProbing" class="pms">检测中…</span>
+          <span v-else class="pms">
             <span
               v-for="m in managers"
               :key="m.key"

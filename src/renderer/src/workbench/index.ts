@@ -44,6 +44,7 @@ import * as skill from './skill'
 import * as state from './state'
 import * as system from './system'
 import * as vault from './vault'
+import * as video from './video'
 import * as workLog from './work-log'
 import * as aiNews from './ai-news'
 import { getTokenUsage, getTokenUsageSnapshot, listSyncDevices, syncThemeConfig, syncTokenUsage } from './token'
@@ -327,6 +328,10 @@ function createApi(): WorkbenchApi {
     deleteNoteImages: (input: Parameters<WorkbenchApi['deleteNoteImages']>[0]) =>
       note.deleteNoteImages(input),
     scanNoteTexts: (root: string) => note.scanNoteTexts(root),
+
+    // ---------- 视频（用户自己挑的一个文件夹里的 MP4） ----------
+    listVideos: (root: string) => video.listVideos(root),
+    loadVideo: (root: string, rel: string) => video.loadVideo(root, rel),
 
     // ---------- 技能（住在笔记仓库的一个子目录里，见 shared/skills.ts） ----------
     listSkills: (root: string, dir: string) => skill.listSkills(root, dir),

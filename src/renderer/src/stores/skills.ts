@@ -173,14 +173,18 @@ export const useSkillsStore = defineStore('skills', () => {
       reset()
       return
     }
+
+    // loading 从探测仓库那一步就置位：探测同样要走一次 IPC，慢的时候
+    // 不能让页面落进「还没有技能」的空态 —— 那是在撒谎，技能只是还没扫到。
+    loading.value = true
+    loadError.value = ''
     await probeState()
     if (!gitRoot.value) {
+      loading.value = false
       reset()
       return
     }
 
-    loading.value = true
-    loadError.value = ''
     const result = await window.workbench.listSkills(gitRoot.value, dir.value)
     loading.value = false
 

@@ -26,6 +26,7 @@ import type {
   NoteSyncInput,
   NoteSyncSummary
 } from './note'
+import type { VideoNode, VideoSource } from './video'
 import type {
   SkillCommit,
   SkillCompareFile,
@@ -99,6 +100,7 @@ export type {
   NoteImageUploadInput,
   NoteTextScan
 } from './note-image'
+export type { VideoNode, VideoSource } from './video'
 
 export type ProjectStatus = 'idle' | 'installing' | 'running' | 'building' | 'success' | 'failed'
 
@@ -416,6 +418,15 @@ export interface AppSettings {
    */
   skillDir: string
   /**
+   * 天气城市名：顶栏问候语旁显示当地实时天气，空串表示不显示（也就不联网）。
+   *
+   * 这是**第七个联网出口、且由用户显式开启**：填了城市才会按间隔去取 Open-Meteo 的
+   * 免费接口（白名单见 src-tauri/src/weather.rs），城市名会作为查询串发出去 ——
+   * 这是这条出口唯一发送的用户内容。只对本机成立，进数据文件、不参与外观同步。
+   * 取值由 shared/weather.ts 的 sanitizeWeatherCity 收敛。
+   */
+  weatherCity: string
+  /**
    * Token 用量同步仓库地址（git 远程地址），空串表示不同步。
    *
    * 多台机器各自把「本机分片」推到这一个仓库里，读的时候全量合并 ——
@@ -453,6 +464,14 @@ export interface AppSettings {
    */
   viewOrder: ViewId[]
   /**
+   * 左侧导航栏整条**收起来**了吗（顶栏右上角那颗折叠按钮切换）。
+   *
+   * 与 `hiddenViews` 同属「导航栏长什么样」，住在 theme.json 里跟着外观同步走；
+   * 收起来只是不画这一列，页面照常可以从顶栏按钮换。收敛只在明确写了 true 时才认
+   * （老主题文件里没有这个字段 = 展开）。
+   */
+  navHidden: boolean
+  /**
    * 项目页的排序方式（见 shared/project-sort.ts）。
    *
    * 从这里开始这几项是**行为记忆**：记的不是界面长什么样，而是「你习惯怎么看」——
@@ -473,6 +492,34 @@ export interface AppSettings {
    * 指的是完全不同的东西。与 `noteDir` 一样只在本机成立，不参与同步。
    */
   noteTreeExpanded: string[]
+  /**
+   * 视频文件夹（用户自己挑的一个目录）：视频页的目录树就是它里面的 `.mp4` 文件。
+   *
+   * 与 `noteDir` / `skillDir` 同一类：本机的一个目录，进数据文件、不参与外观同步；
+   * 空串表示还没选过 —— 视频页据此显示「先选一个文件夹」的引导。
+   * 收敛与 `noteDir` 同一条（见 shared/video.ts 的 `sanitizeVideoRoot`）。
+   */
+  videoDir: string
+  /**
+   * 打开过的视频目录（最近打开的在最前面，最多 `VIDEO_HISTORY_MAX` 条）。
+   *
+   * 视频页左栏底部那份「最近打开」的来源，与 `noteDirs` 同一条口径。
+   */
+  videoDirs: string[]
+  /**
+   * 视频页目录树里**摊开的那几层文件夹**（相对视频根的路径）。
+   *
+   * 与 `noteTreeExpanded` 同一条口径：只对当前这个目录成立，换目录时清空。
+   */
+  videoTreeExpanded: string[]
+  /**
+   * **上次打开的视频**（相对视频根的路径）：进视频页时直接接上播放。
+   *
+   * 只对当前这个目录成立 —— 换目录时清空（相对路径在另一个目录里指的是别的东西）；
+   * 文件被删掉 / 改名后在下次进页面时发现树里没有它，顺手清掉。与 `noteTreeExpanded`
+   * 同一批行为记忆：本机成立、进数据文件、不参与外观同步。
+   */
+  videoLastRel: string
 }
 
 /**
@@ -1140,6 +1187,23 @@ export interface WorkbenchApi {
    * 一张还在用的图当成没人引用。
    */
   scanNoteTexts: (root: string) => Promise<Result<NoteTextScan>>
+  // ---------- 视频（用户自己挑的一个文件夹里的 MP4） ----------
+  /**
+   * 视频：**用户自己挑的一个文件夹**里的目录树（文件夹 + MP4 文件）。
+   *
+   * 与笔记同一条分工：平铺清单由 Rust 扫出来，树由渲染层组（shared/video.ts）。
+   * root 每次带下去 —— 用户换了文件夹，同一份树就换了来源。
+   */
+  listVideos: (root: string) => Promise<Result<VideoNode[]>>
+  /**
+   * 打开一个视频：把**这一个文件**的读取权限授给 asset 协议，回来的是可直接给
+   * `<video>` 的地址（webview 自己按文件读，协议自带 Range，拖进度条不用整份下完）。
+   *
+   * 授权按文件给，与工作区背景图同一条边界 —— tauri.conf.json 的 `assetProtocol.scope`
+   * 保持为空，往里写 `**` 等于把整块磁盘敞开给渲染层读。
+   * 坏文件（读不出 MP4 文件头的）在这里如实报错，不交给界面静默黑屏。
+   */
+  loadVideo: (root: string, rel: string) => Promise<Result<VideoSource>>
   // ---------- 技能（住在笔记仓库的一个子目录里，见 shared/skills.ts） ----------
   /**
    * 列出技能库里的技能：Rust 回 id / 文件数 / SKILL.md 原文，名字与描述由适配层解析。
@@ -1553,13 +1617,19 @@ export const DEFAULT_SETTINGS: AppSettings = {
   noteDirs: [],
   noteImageRepo: '',
   skillDir: '',
+  weatherCity: '',
   tokenSyncRepo: '',
   activeView: 'home',
   hiddenViews: [],
   viewOrder: [...VIEW_IDS],
+  navHidden: false,
   // 行为记忆：第一次打开时就是这几个默认档，之后记住用户自己选的那一档
   projectSort: PROJECT_SORT_DEFAULT,
   workRange: WORK_RANGE_DEFAULT,
   workSort: WORK_SORT_DEFAULT,
-  noteTreeExpanded: []
+  noteTreeExpanded: [],
+  videoDir: '',
+  videoDirs: [],
+  videoTreeExpanded: [],
+  videoLastRel: ''
 }

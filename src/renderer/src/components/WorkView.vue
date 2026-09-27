@@ -41,6 +41,7 @@ import { useProjectsStore } from '@/stores/projects'
 import { useSettingsStore } from '@/stores/settings'
 import WorkLogCard from '@/components/WorkLogCard.vue'
 import WorkLogDialog from '@/components/WorkLogDialog.vue'
+import PanelLoading from '@/components/PanelLoading.vue'
 
 const store = useProjectsStore()
 const settings = useSettingsStore()
@@ -371,9 +372,7 @@ async function remove(entry: WorkLogEntry): Promise<void> {
         <el-button size="small" @click="load()">重试</el-button>
       </div>
 
-      <div v-else-if="loading" class="empty">
-        <p>正在读取工作日志…</p>
-      </div>
+      <PanelLoading v-else-if="loading" text="正在读取工作日志…" />
 
       <div v-else-if="!total" class="empty">
         <el-icon class="empty__icon"><Memo /></el-icon>

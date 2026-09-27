@@ -21,6 +21,7 @@ import {
   type FamilyFilter,
   type ThemeFilter
 } from '@shared/design-styles'
+import PanelLoading from '@/components/PanelLoading.vue'
 import StyleCard from '@/components/StyleCard.vue'
 import StyleDetailDialog from '@/components/StyleDetailDialog.vue'
 import { useStylesStore } from '@/stores/styles'
@@ -145,7 +146,7 @@ const failed = computed(() => !store.loaded && !store.loading && Boolean(store.l
 
     <div class="styles-view__scroll">
       <div v-if="store.loading && !store.loaded" class="empty">
-        <p>正在读取样式清单…</p>
+        <PanelLoading text="正在读取样式清单…" />
       </div>
 
       <div v-else-if="failed" class="empty">

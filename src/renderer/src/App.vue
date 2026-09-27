@@ -14,6 +14,8 @@ import NotesView from '@/components/NotesView.vue'
 import SkillsView from '@/components/SkillsView.vue'
 import VaultView from '@/components/VaultView.vue'
 import StylesView from '@/components/StylesView.vue'
+import VideoView from '@/components/VideoView.vue'
+import VideoPlayer from '@/components/VideoPlayer.vue'
 import TerminalPanel from '@/components/TerminalPanel.vue'
 import ProjectDrawer from '@/components/ProjectDrawer.vue'
 import AddProjectDialog from '@/components/AddProjectDialog.vue'
@@ -22,9 +24,12 @@ import CommandDialog from '@/components/CommandDialog.vue'
 import QuitConfirmDialog from '@/components/QuitConfirmDialog.vue'
 import { useProjectsStore } from '@/stores/projects'
 import { useSettingsStore } from '@/stores/settings'
+import { useWeatherStore } from '@/stores/weather'
 
 const store = useProjectsStore()
 const settings = useSettingsStore()
+// 天气是顶栏问候语旁那一小段实况：启动时取一次、之后按自己的间隔续（只在填了城市时才出网）
+const weather = useWeatherStore()
 
 /**
  * 页面清单：id 在 shared/views.ts 里登记，这里给出对应的组件。
@@ -39,7 +44,8 @@ const VIEWS: Record<ViewId, Component> = {
   notes: NotesView,
   skills: SkillsView,
   vault: VaultView,
-  styles: StylesView
+  styles: StylesView,
+  video: VideoView
 }
 
 const currentView = computed(() => VIEWS[store.activeView])
@@ -79,6 +85,7 @@ const appStyle = computed(() => {
 
 onMounted(() => {
   void store.init()
+  weather.start()
 })
 </script>
 
@@ -93,7 +100,8 @@ onMounted(() => {
       <AppHeader />
     </div>
 
-    <!-- 导航栏从顶栏下沿起、一直到底；终端留在内容列里，不横跨导航栏 -->
+    <!-- 导航栏从顶栏下沿起、一直到底；终端留在内容列里，不横跨导航栏。
+         收起 / 展开由顶栏的折叠按钮驱动（外观设置 navHidden），过渡动画在 NavRail 自己身上 -->
     <div class="shell">
       <NavRail />
 
@@ -112,6 +120,12 @@ onMounted(() => {
     <QuickAppDialog />
     <CommandDialog />
     <QuitConfirmDialog />
+
+    <!--
+      视频播放器本体是全局单例（与终端面板同一层、不随换页切换）：在视频页时它传送进
+      视频页的画布，切到别的页就缩成悬浮小窗（画中画）继续播 —— 元素不重建，播放不断。
+    -->
+    <VideoPlayer />
   </div>
 </template>
 

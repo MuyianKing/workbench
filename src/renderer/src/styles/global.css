@@ -70,10 +70,31 @@ body.is-resizing-notes-tree * {
   user-select: none !important;
 }
 
+/* 拖视频页那条左右分隔条：与笔记页同一条缝、同一副兜法（指针会扫过播放画布） */
+body.is-resizing-video-tree,
+body.is-resizing-video-tree * {
+  cursor: ew-resize !important;
+  user-select: none !important;
+}
+
 /* 设置里拖动导航项排序：重排清单而不是跟手搬一块，指针游走在清单上，同样全局兜住 */
 body.is-sorting-views,
 body.is-sorting-views * {
   cursor: grabbing !important;
+  user-select: none !important;
+}
+
+/* 拖画中画悬浮小窗：手柄条整条都是抓手，指针会扫过笔记正文（Vditor 可选中文字） */
+body.is-dragging-video-float,
+body.is-dragging-video-float * {
+  cursor: move !important;
+  user-select: none !important;
+}
+
+/* 拖画中画小窗的缩放手柄：同上，光标一直是「正在改大小」 */
+body.is-resizing-video-float,
+body.is-resizing-video-float * {
+  cursor: nwse-resize !important;
   user-select: none !important;
 }
 

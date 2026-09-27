@@ -27,6 +27,7 @@
  */
 import { nextTick, onBeforeUnmount, onMounted, ref, watch, type Component } from 'vue'
 import { Document, Folder, FolderAdd, Plus } from '@element-plus/icons-vue'
+import PanelLoading from '@/components/PanelLoading.vue'
 import {
   noteChain,
   noteDropAllowed,
@@ -394,6 +395,9 @@ onBeforeUnmount(() => window.removeEventListener('dragend', onDragEnd))
         </el-dropdown>
       </template>
     </el-tree>
+
+    <!-- 首次扫盘还没回来：左栏先说一声，别让人对着半屏空白猜在干什么 -->
+    <PanelLoading v-if="!loaded && !nodes.length" text="正在读取笔记…" />
 
     <!-- 一篇都没有：直接给两颗按钮，别让人对着空白猜「怎么开始」 -->
     <div v-if="loaded && !nodes.length" class="tree__empty">

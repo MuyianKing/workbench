@@ -145,9 +145,10 @@ describe('按落点拆一份设置补丁', () => {
       'work',
       'skills',
       'vault',
-      'styles'
+      'styles',
+      'video'
     ])
-    expect(sanitizeAppearanceSettings({ viewOrder: 'notes' }).viewOrder.length).toBe(7)
+    expect(sanitizeAppearanceSettings({ viewOrder: 'notes' }).viewOrder.length).toBe(8)
   })
 
   it('合回来的设置与拆之前一致', () => {

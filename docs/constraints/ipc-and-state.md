@@ -17,9 +17,11 @@
   注册。渲染层→主进程的单向事件走适配层的 `events.ts` 广播。
 - **数组 / 对象形状的取值接口必须真实现，绝不能落到「尚未移植」兜底**：兜底返回的是 `Result` 对象，store 会把它当数组遍历、
   直接抛错并把整条 `init()` 打断，表现成完全无关的功能失灵（`listQuickApps` / `listCommands` 就这么让「系统状态」一直没数据）。
-- 渲染层不直接访问 Node / 文件系统 / WebView 宿主能力，一切经 `window.workbench`。**唯一例外是工作区背景图**：让 webview 按
-  文件直接加载（asset 协议，URL 由适配层的 `assetUrl()` 转出），读取权限一律在 Rust 侧按**单个文件**授予（`commands.rs` 的
-  `allow_background`），`tauri.conf.json` 的 `assetProtocol.scope` 必须保持为空 —— 往里写 `**` 等于把整块磁盘敞开给渲染层读。
+- 渲染层不直接访问 Node / 文件系统 / WebView 宿主能力，一切经 `window.workbench`。**唯一的例外
+  是「大文件交给 webview 按文件读」的两处**：工作区背景图与视频播放 —— 让 webview 按 asset 协议
+  自己加载（URL 由适配层的 `assetUrl()` 转出），读取权限一律在 Rust 侧按**单个文件**授予
+  （`commands.rs` 的 `allow_background` / `allow_video`，后者先核后缀与 MP4 文件头再放行），
+  `tauri.conf.json` 的 `assetProtocol.scope` 必须保持为空 —— 往里写 `**` 等于把整块磁盘敞开给渲染层读。
 - 后端只做「取原始数据 / 落盘 / 调系统能力」；合并、排序、修剪、状态机、命令构造这些业务语义留在 TS 适配层（改动因此走 Vite
   的秒级热更新，不必重编 Rust）。少数通道按约定直接返回具体结构而非 `Result`：`checkPort`、`listProjects`、`getNvmStatus`、
   `listWallpapers`、`checkPackageManagers`。
@@ -60,6 +62,8 @@
   - **行为习惯**（`activeView`、`projectSort`、`workRange` / `workSort`、`noteTreeExpanded`）与
     本机路径 / 凭据（快捷键、开机自启、两个同步仓库地址 —— 用量与图片；**笔记与技能那两个仓库的地址
     都不在设置里**：它们跟着各自那个文件夹的 `origin` 走、`noteDir`、`skillDir`）住 `workbench-data.json`。
+    天气城市 `weatherCity` 也在这一边：它是「这台机器上的人住哪儿」，不是「界面长什么样」，
+    而且它管着一条联网出口的开关（留空即关闭），不该被同步顶掉。
     判据是「换台机器还成不成立」：「我上一眼在看什么」「我的笔记在哪个盘」换台机器就没了，
     同步过去只会把那边正看的东西顶掉。
   不确定时的口径：**它是「界面长什么样」还是「我上次用到哪儿」** —— 后者一律留数据文件。

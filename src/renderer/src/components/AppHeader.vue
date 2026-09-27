@@ -7,7 +7,7 @@
  * 进出编辑态画布不会上下跳，而那颗「编辑布局」按钮本来就在这一行的右端。
  */
 import { computed, ref } from 'vue'
-import { Grid, Moon, Setting, Sunny, User } from '@element-plus/icons-vue'
+import { Expand, Fold, Grid, Moon, Setting, Sunny, User } from '@element-plus/icons-vue'
 import { accountLabel } from '@shared/auth'
 import { useProjectsStore } from '@/stores/projects'
 import { useSettingsStore } from '@/stores/settings'
@@ -41,6 +41,14 @@ const isDark = computed(() => settings.effectiveTheme === 'dark')
 function toggleTheme(event: MouseEvent): void {
   void settings.toggleTheme({ x: event.clientX, y: event.clientY })
 }
+
+/** 左侧导航栏收起了吗：图标画的是「点下去会切到哪一边」，展开时画收起的那支 */
+const navHidden = computed(() => settings.settings.navHidden)
+
+/** 收起 / 展开左侧导航栏：状态落在外观设置里（theme.json），重启后保持 */
+function toggleNav(): void {
+  void settings.setNavVisible(navHidden.value)
+}
 </script>
 
 <template>
@@ -50,6 +58,14 @@ function toggleTheme(event: MouseEvent): void {
     <HomeGreeting v-else />
 
     <div class="actions">
+      <el-button
+        class="icon-btn"
+        :icon="navHidden ? Expand : Fold"
+        :title="navHidden ? '显示菜单' : '隐藏菜单'"
+        :aria-label="navHidden ? '显示菜单' : '隐藏菜单'"
+        @click="toggleNav"
+      />
+
       <el-button
         v-if="showLayoutButton"
         class="icon-btn"

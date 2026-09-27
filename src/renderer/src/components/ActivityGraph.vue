@@ -10,6 +10,7 @@
  */
 import { computed, nextTick, onActivated, ref } from 'vue'
 import { useProjectsStore } from '@/stores/projects'
+import PanelLoading from '@/components/PanelLoading.vue'
 import { buildActivityCalendar, monthLabels, type ActivityDay } from '@shared/activity'
 
 const store = useProjectsStore()
@@ -58,51 +59,61 @@ function tipOf(day: ActivityDay): string {
   <article class="panel" style="padding-bottom:0">
     <header class="panel__head">
       <span class="eyebrow">活跃度</span>
-      <span class="graph__total mono">过去一年共 {{ calendar.total }} 次执行</span>
+      <span class="graph__total mono">
+        {{ store.ready ? `过去一年共 ${calendar.total} 次执行` : '读取中…' }}
+      </span>
     </header>
 
-    <div class="graph">
-      <div class="graph__dows" aria-hidden="true">
-        <span v-for="(label, i) in WEEKDAY_LABELS" :key="i" class="graph__dow">
-          {{ label }}
-        </span>
-      </div>
+    <!--
+      首次取数没回来前不画格子：371 个空格摆在那就是「这一年一次都没跑过」，
+      是一句错话 —— 先说一声正在读。
+    -->
+    <PanelLoading v-if="!store.ready" text="正在读取活跃度…" />
 
-      <div ref="scrollEl" class="graph__scroll">
-        <div class="graph__months">
-          <span v-for="(label, i) in months" :key="i" class="graph__month">{{ label }}</span>
+    <template v-else>
+      <div class="graph">
+        <div class="graph__dows" aria-hidden="true">
+          <span v-for="(label, i) in WEEKDAY_LABELS" :key="i" class="graph__dow">
+            {{ label }}
+          </span>
         </div>
 
-        <div
-          class="graph__grid"
-          role="img"
-          :aria-label="`过去一年共 ${calendar.total} 次命令执行`"
-        >
-          <div v-for="(week, wi) in calendar.weeks" :key="wi" class="graph__week">
-            <i
-              v-for="day in week.days"
-              :key="day.date"
-              class="cell"
-              :class="[`is-${day.level}`, { 'is-future': day.future }]"
-              :title="tipOf(day)"
-            />
+        <div ref="scrollEl" class="graph__scroll">
+          <div class="graph__months">
+            <span v-for="(label, i) in months" :key="i" class="graph__month">{{ label }}</span>
+          </div>
+
+          <div
+            class="graph__grid"
+            role="img"
+            :aria-label="`过去一年共 ${calendar.total} 次命令执行`"
+          >
+            <div v-for="(week, wi) in calendar.weeks" :key="wi" class="graph__week">
+              <i
+                v-for="day in week.days"
+                :key="day.date"
+                class="cell"
+                :class="[`is-${day.level}`, { 'is-future': day.future }]"
+                :title="tipOf(day)"
+              />
+            </div>
           </div>
         </div>
       </div>
-    </div>
 
-    <!--
-      下方一行：连续 / 最长 / 活跃天数 / 单日峰值。
-      这四个数与上面的格子同源（同一个 calendar），回答的是「这一年怎么样」——
-      上面那行总数只说「跑了多少次」，说不出一段段连着用的日子。
-      一条记录都没有时整行不画：四个 0 摆在那里没有任何信息量。
-    -->
-    <p v-if="calendar.total" class="graph__stats">
-      <span class="stat"><i>连续</i><b class="mono">{{ calendar.streak }} 天</b></span>
-      <span class="stat"><i>最长</i><b class="mono">{{ calendar.bestStreak }} 天</b></span>
-      <span class="stat"><i>活跃</i><b class="mono">{{ calendar.activeDays }} 天</b></span>
-      <span class="stat"><i>单日最多</i><b class="mono">{{ calendar.max }} 次</b></span>
-    </p>
+      <!--
+        下方一行：连续 / 最长 / 活跃天数 / 单日峰值。
+        这四个数与上面的格子同源（同一个 calendar），回答的是「这一年怎么样」——
+        上面那行总数只说「跑了多少次」，说不出一段段连着用的日子。
+        一条记录都没有时整行不画：四个 0 摆在那里没有任何信息量。
+      -->
+      <p v-if="calendar.total" class="graph__stats">
+        <span class="stat"><i>连续</i><b class="mono">{{ calendar.streak }} 天</b></span>
+        <span class="stat"><i>最长</i><b class="mono">{{ calendar.bestStreak }} 天</b></span>
+        <span class="stat"><i>活跃</i><b class="mono">{{ calendar.activeDays }} 天</b></span>
+        <span class="stat"><i>单日最多</i><b class="mono">{{ calendar.max }} 次</b></span>
+      </p>
+    </template>
   </article>
 </template>
 

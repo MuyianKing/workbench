@@ -16,12 +16,16 @@ import {
   ROW_HEIGHT_MAX,
   ROW_HEIGHT_MIN_DEFAULT,
   THEME_VERSION,
+  VIDEO_TREE_WIDTH_DEFAULT,
+  VIDEO_TREE_WIDTH_MAX,
+  VIDEO_TREE_WIDTH_MIN,
   addColumn,
   cardIdsInRow,
   clampCardGap,
   clampColumnWidth,
   clampNoteTreeWidth,
   clampRowHeight,
+  clampVideoTreeWidth,
   columnHasVisibleCards,
   columnIds,
   columnOfRow,
@@ -222,6 +226,20 @@ describe('sanitizeTheme', () => {
       NOTE_TREE_WIDTH_MIN
     )
     expect(sanitizeTheme({ version: THEME_VERSION, noteTreeWidth: 300 }).noteTreeWidth).toBe(300)
+  })
+
+  /** 视频页左栏宽度同是后加的字段：缺省补默认值（也是拖动前那个 264 的定宽），越界收敛 */
+  it('视频页左栏宽度缺省用默认值，越界收敛', () => {
+    expect(sanitizeTheme({}).videoTreeWidth).toBe(VIDEO_TREE_WIDTH_DEFAULT)
+    expect(clampVideoTreeWidth(undefined)).toBe(VIDEO_TREE_WIDTH_DEFAULT)
+    expect(clampVideoTreeWidth('宽一点')).toBe(VIDEO_TREE_WIDTH_DEFAULT)
+    expect(sanitizeTheme({ version: THEME_VERSION, videoTreeWidth: 9999 }).videoTreeWidth).toBe(
+      VIDEO_TREE_WIDTH_MAX
+    )
+    expect(sanitizeTheme({ version: THEME_VERSION, videoTreeWidth: 1 }).videoTreeWidth).toBe(
+      VIDEO_TREE_WIDTH_MIN
+    )
+    expect(sanitizeTheme({ version: THEME_VERSION, videoTreeWidth: 300 }).videoTreeWidth).toBe(300)
   })
 
   it('卡片间距缺省用默认值，越界收敛', () => {

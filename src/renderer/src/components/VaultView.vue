@@ -35,6 +35,7 @@ import {
 import type { VaultEntry, VaultRecord } from '@shared/vault'
 import { confirmAction, notifyError, notifySuccess } from '@/notify'
 import { useVaultStore } from '@/stores/vault'
+import PanelLoading from '@/components/PanelLoading.vue'
 import VaultEntryDialog from '@/components/VaultEntryDialog.vue'
 import VaultKeyDialog from '@/components/VaultKeyDialog.vue'
 
@@ -153,8 +154,14 @@ async function lock(): Promise<void> {
 
 <template>
   <main class="vault">
+    <!--
+      密钥状态还没问到：先说一声。keyExists 初值是 false 而查询是异步的，
+      不挡这一下的话页面会先闪一帧「创建保险库」的引导再跳成真的样子。
+    -->
+    <PanelLoading v-if="!store.keyChecked" text="正在读取保险库状态…" />
+
     <!-- 还没有密钥：这一页的入口只有两条 —— 建一把，或从另一台机器导入 -->
-    <div v-if="!store.keyExists" class="vault__intro panel">
+    <div v-else-if="!store.keyExists" class="vault__intro panel">
       <div class="empty">
         <el-icon class="empty__icon"><Key /></el-icon>
         <p>保险库要用一把密钥才能建起来。</p>

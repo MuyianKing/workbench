@@ -22,6 +22,8 @@ mod sync;
 mod system;
 mod token;
 mod vault;
+mod video;
+mod weather;
 
 use serde_json::{json, Value};
 use std::sync::mpsc::{channel, Sender};
@@ -330,6 +332,8 @@ fn main() {
             ai_news::ai_news_fetch,
             ai_news::ai_news_article,
             ai_news::ai_news_sources,
+            weather::weather_geocode,
+            weather::weather_forecast,
             commands::note_scan,
             commands::note_read,
             commands::note_write,
@@ -343,6 +347,8 @@ fn main() {
             commands::note_scan_texts,
             commands::note_sync,
             commands::note_repo_state,
+            commands::video_scan,
+            commands::allow_video,
             commands::skill_list,
             commands::skill_state,
             commands::skill_sync,

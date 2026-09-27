@@ -32,6 +32,13 @@ export const useEnvironmentStore = defineStore('environment', () => {
   /** 正在切换的镜像名，null 表示空闲 */
   const nrmSwitching = ref<string | null>(null)
   /**
+   * 首屏那轮探测还在不在跑：三项都要起子进程 / 扫目录，几百毫秒到几秒才回来，
+   * 期间「null」的意思是「还没问到」而不是「没装」—— 界面靠它把两种情况分开。
+   * 初值就是 true：探测从应用一起来就开始（refreshAll 排在 loadData 之后才发出，
+   * 但那几秒里「还没问到」这个事实已经成立），第一轮 refreshAll 完成后才落回 false。
+   */
+  const probing = ref(true)
+  /**
    * 数据目录：固定在 `%APPDATA%\Workbench\data`（宿主侧唯一真源）。
    * 界面只在「关于」那一屏如实显示它 —— 没有「换目录」这回事。
    */
@@ -54,9 +61,10 @@ export const useEnvironmentStore = defineStore('environment', () => {
 
   /** 首屏三项探测一起跑（各自要起子进程 / 扫目录，不挡首屏） */
   function refreshAll(): void {
-    void refreshPackageManagers()
-    void refreshNvm()
-    void refreshNrm()
+    probing.value = true
+    void Promise.allSettled([refreshPackageManagers(), refreshNvm(), refreshNrm()]).then(() => {
+      probing.value = false
+    })
   }
 
   async function loadDataDir(): Promise<void> {
@@ -187,6 +195,7 @@ export const useEnvironmentStore = defineStore('environment', () => {
     nvm,
     nrm,
     nrmSwitching,
+    probing,
     dataDir,
     refreshPackageManagers,
     refreshNvm,

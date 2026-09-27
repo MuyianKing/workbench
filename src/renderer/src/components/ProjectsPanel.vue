@@ -8,6 +8,7 @@
  */
 import { Plus, Search } from '@element-plus/icons-vue'
 import { useProjectsStore } from '@/stores/projects'
+import PanelLoading from '@/components/PanelLoading.vue'
 import ProjectCard from '@/components/ProjectCard.vue'
 import WelcomePanel from '@/components/WelcomePanel.vue'
 
@@ -20,7 +21,10 @@ function clearFilter(): void {
 
 <template>
   <div class="projects">
-    <template v-if="store.projects.length">
+    <!-- 首帧不说「开始使用」：列表还在路上，闪一下引导再跳成网格像是页面坏了 -->
+    <PanelLoading v-if="!store.ready" class="loading-page" text="正在读取项目…" />
+
+    <template v-else-if="store.projects.length">
       <div v-if="store.filteredProjects.length" class="grid">
         <ProjectCard v-for="p in store.filteredProjects" :key="p.id" :project="p" />
 
@@ -51,6 +55,12 @@ function clearFilter(): void {
   overflow: auto;
   /* 四周留白与卡片间距同源（--card-gap 由 .app 统一给），设置里改「卡片间距」，外圈跟着变 */
   padding: var(--card-gap, 10px);
+}
+
+/* ---------- 加载态 ---------- */
+/* 滚动区不是 flex 容器，flex:1 不生效：给个最小高度让转圈居中站住，别缩在左上角 */
+.loading-page {
+  min-height: 200px;
 }
 
 /* ---------- 卡片网格 ---------- */

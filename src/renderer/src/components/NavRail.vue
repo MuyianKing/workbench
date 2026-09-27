@@ -11,7 +11,7 @@
  */
 import { computed } from 'vue'
 import type { Component } from 'vue'
-import { Notebook, FolderOpened, Grid, Document, MagicStick, Key, Brush } from '@element-plus/icons-vue'
+import { Notebook, FolderOpened, Grid, Document, MagicStick, Key, Brush, VideoPlay } from '@element-plus/icons-vue'
 import { VIEW_LABELS, orderedViews, type ViewId } from '@shared/views'
 import { useProjectsStore } from '@/stores/projects'
 import { useSettingsStore } from '@/stores/settings'
@@ -27,7 +27,8 @@ const ICONS: Record<ViewId, Component> = {
   notes: Document,
   skills: MagicStick,
   vault: Key,
-  styles: Brush
+  styles: Brush,
+  video: VideoPlay
 }
 
 const active = computed(() => store.activeView)
@@ -49,7 +50,7 @@ function select(id: ViewId): void {
 </script>
 
 <template>
-  <nav class="nav">
+  <nav class="nav" :class="{ 'is-hidden': settings.settings.navHidden }">
     <button
       v-for="id in items"
       :key="id"
@@ -78,7 +79,9 @@ function select(id: ViewId): void {
   gap: 2px;
   width: var(--w-nav);
   min-height: 0;
+  /* 收起动画期间按钮比内容盒宽：横向一律裁掉，竖向照旧在卡片内滚动 */
   overflow-y: auto;
+  overflow-x: hidden;
   /**
    * 抬到所有弹层之上：弹层（el-dialog / el-drawer）的遮罩铺满整窗，弹层开着时
    * 这一列原本点不着 —— 而换页是最常用的动作，不该被一个开着的弹框锁住
@@ -99,6 +102,50 @@ function select(id: ViewId): void {
   border-radius: var(--r-lg);
   box-shadow: var(--shadow-card);
   user-select: none;
+  /**
+   * 收起 / 展开的过渡（顶栏折叠按钮 → 设置里的 navHidden，见 is-hidden）：
+   * 宽、左留白、左右内边距与边框一起动，.shell 的 auto 列跟着每一帧重排，
+   * 内容列就是在这 0.2s 里被让出来 / 收回去的。visibility 不占时长：
+   * 展开方向立即生效，收起方向由 is-hidden 里那条带延时的声明接管。
+   */
+  --nav-inner: calc(var(--w-nav) - 16px - 2px); /* 内容盒宽：减去左右 padding(8×2) 与边框(1×2) */
+  transition:
+    width 0.2s ease,
+    margin-left 0.2s ease,
+    padding-left 0.2s ease,
+    padding-right 0.2s ease,
+    border-left-width 0.2s ease,
+    border-right-width 0.2s ease,
+    opacity 0.2s ease,
+    visibility 0s;
+}
+
+/**
+ * 收起态：全部盒子尺寸归零（border-box 下宽 < padding + 边框时外尺寸由后者兜底，
+ * 所以四项一起过渡才不会在收尾时蹦一下），到最后外壳一点不占 —— 不用卸载、没有跳变。
+ */
+.nav.is-hidden {
+  width: 0;
+  margin-left: 0;
+  padding-left: 0;
+  padding-right: 0;
+  border-left-width: 0;
+  border-right-width: 0;
+  opacity: 0;
+  /* 收的过程连纵向滚动条一起去掉；展开时回到 auto，菜单长出来才滚 */
+  overflow: hidden;
+  visibility: hidden;
+  pointer-events: none;
+  /* visibility 拖到动画走完再生效：淡出全程可见，收完之后按钮也不进 Tab 序 */
+  transition:
+    width 0.2s ease,
+    margin-left 0.2s ease,
+    padding-left 0.2s ease,
+    padding-right 0.2s ease,
+    border-left-width 0.2s ease,
+    border-right-width 0.2s ease,
+    opacity 0.2s ease,
+    visibility 0s 0.2s;
 }
 
 .nav__item {
@@ -108,6 +155,9 @@ function select(id: ViewId): void {
   justify-content: center;
   gap: 5px;
   height: 54px;
+  /* 平时被拉伸撑满内容盒；收起动画里内容盒一路缩到 0，钉住下限按钮才不会被挤到换行
+     （超出部分由 .nav 的 overflow-x 裁掉） */
+  min-width: var(--nav-inner);
   padding: 0;
   border: 0;
   border-radius: var(--r-md);

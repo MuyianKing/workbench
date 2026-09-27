@@ -17,7 +17,19 @@ const environment = useEnvironmentStore()
 
 const managers = PACKAGE_MANAGERS
 
-const nodeVersion = computed(() => environment.packageManagers?.node || '未检测到')
+/**
+ * 探测还没回来时「null」的意思是「还没问到」，不能画成「未检测到」：
+ * 三项都要起子进程，几百毫秒到几秒才回来，这段时间各行的值先说「检测中…」。
+ */
+const nodeVersion = computed(() => {
+  if (!environment.packageManagers) return environment.probing ? '检测中…' : '未检测到'
+  return environment.packageManagers.node || '未检测到'
+})
+
+/** 包管理器那一行：探测没回来前不画成三个「安装」按钮（点了也白点，结果还是错的） */
+const pmLabel = computed(() =>
+  environment.packageManagers ? '' : environment.probing ? '检测中…' : '未检测到'
+)
 
 function available(key: PackageManagerKey): boolean {
   return environment.packageManagers?.[key] ?? false
@@ -34,7 +46,8 @@ async function install(key: PackageManagerKey): Promise<void> {
 
 const nvmLabel = computed(() => {
   const nvm = environment.nvm
-  if (!nvm?.available) return '未检测到'
+  if (!nvm) return environment.probing ? '检测中…' : '未检测到'
+  if (!nvm.available) return '未检测到'
   return nvm.current
     ? `已装 ${nvm.versions.length} 个 · 当前 ${nvm.current}`
     : `已装 ${nvm.versions.length} 个版本`
@@ -53,7 +66,7 @@ const nrmRegistries = computed(() => environment.nrm?.registries ?? [])
  */
 const nrmLabel = computed(() => {
   const nrm = environment.nrm
-  if (!nrm) return '检测中…'
+  if (!nrm) return environment.probing ? '检测中…' : '未检测到'
   if (!nrm.available) return '未安装'
   if (!nrm.registries.length) return nrm.version ? `已安装 v${nrm.version}` : '已安装'
   return nrm.current ?? '未识别'
@@ -62,7 +75,7 @@ const nrmLabel = computed(() => {
 /** 悬停提示：版本、镜像地址，以及为什么读不出清单 */
 const nrmTip = computed(() => {
   const nrm = environment.nrm
-  if (!nrm) return '正在检测 nrm'
+  if (!nrm) return environment.probing ? '正在检测 nrm' : '没有检测到 nrm'
   if (!nrm.available) return '通过 npm 全局安装 nrm（npm 镜像源管理器）'
   const current = nrmRegistries.value.find((item) => item.name === nrm.current)
   return [
@@ -116,30 +129,34 @@ function refresh(): void {
       <div class="fact">
         <dt>包管理器</dt>
         <dd class="pms">
-          <template v-for="m in managers" :key="m.key">
-            <span v-if="available(m.key)" class="pm" :title="`${m.label} 可用`">
-              <i class="pm__dot is-ok" aria-hidden="true" />
-              {{ m.label }}
-            </span>
+          <!-- 探测没回来前先占位：null 画成三个「安装」按钮的话，点下去是白点 -->
+          <span v-if="!environment.packageManagers" class="pm">{{ pmLabel }}</span>
+          <template v-else>
+            <template v-for="m in managers" :key="m.key">
+              <span v-if="available(m.key)" class="pm" :title="`${m.label} 可用`">
+                <i class="pm__dot is-ok" aria-hidden="true" />
+                {{ m.label }}
+              </span>
 
-            <!-- 未安装且能装：整块就是按钮，末尾那颗「安装」标签是点击提示 -->
-            <button
-              v-else-if="m.installable"
-              class="pm pm--install"
-              type="button"
-              :disabled="!!environment.pmInstalling"
-              :title="installing(m.key) ? `正在安装 ${m.label}` : `通过 npm 全局安装 ${m.label}`"
-              @click="install(m.key)"
-            >
-              <i class="pm__dot is-off" aria-hidden="true" />
-              {{ m.label }}
-              <span class="pm__act">{{ installing(m.key) ? '安装中' : '安装' }}</span>
-            </button>
+              <!-- 未安装且能装：整块就是按钮，末尾那颗「安装」标签是点击提示 -->
+              <button
+                v-else-if="m.installable"
+                class="pm pm--install"
+                type="button"
+                :disabled="!!environment.pmInstalling"
+                :title="installing(m.key) ? `正在安装 ${m.label}` : `通过 npm 全局安装 ${m.label}`"
+                @click="install(m.key)"
+              >
+                <i class="pm__dot is-off" aria-hidden="true" />
+                {{ m.label }}
+                <span class="pm__act">{{ installing(m.key) ? '安装中' : '安装' }}</span>
+              </button>
 
-            <span v-else class="pm" title="npm 随 Node.js 分发，请重新安装 Node.js">
-              <i class="pm__dot is-off" aria-hidden="true" />
-              {{ m.label }}
-            </span>
+              <span v-else class="pm" title="npm 随 Node.js 分发，请重新安装 Node.js">
+                <i class="pm__dot is-off" aria-hidden="true" />
+                {{ m.label }}
+              </span>
+            </template>
           </template>
         </dd>
       </div>

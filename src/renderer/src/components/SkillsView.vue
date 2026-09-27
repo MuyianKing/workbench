@@ -21,6 +21,7 @@ import { computed, onMounted, ref } from 'vue'
 import { FolderOpened, Plus, Refresh, RefreshRight, Upload } from '@element-plus/icons-vue'
 import type { SkillEntry } from '@shared/skills'
 import { useSkillsStore } from '@/stores/skills'
+import PanelLoading from '@/components/PanelLoading.vue'
 import SkillCard from '@/components/SkillCard.vue'
 import SkillDetailDialog from '@/components/SkillDetailDialog.vue'
 import SkillCreateDialog from '@/components/SkillCreateDialog.vue'
@@ -159,7 +160,7 @@ function installActive(): void {
       <div class="skills-view__scroll">
         <!-- 还没有技能：入口就在空态里，任何状态下都找得到门 -->
         <div v-if="store.loading && !store.loaded" class="empty panel">
-          <p class="empty__text">正在读取技能…</p>
+          <PanelLoading text="正在读取技能…" />
         </div>
         <div v-else-if="store.loadError" class="empty panel">
           <p class="empty__text">{{ store.loadError }}</p>

@@ -25,6 +25,7 @@ import { commandStatusLabel, statusTone } from '@/status'
 import { useProjectsStore } from '@/stores/projects'
 import { useTerminalStore } from '@/stores/terminal'
 import { useCatalogStore } from '@/stores/catalog'
+import PanelLoading from '@/components/PanelLoading.vue'
 import type { CommandEntry, ProjectStatus } from '@/types'
 
 const store = useProjectsStore()
@@ -119,7 +120,10 @@ async function remove(item: CommandEntry): Promise<void> {
     </el-tooltip>
 
     <div class="commands__body panel__scroll">
-      <p v-if="!commands.length" class="panel__empty">
+      <!-- 首次取数没回来前不说「还没有」：还没问到与真的没有是两回事 -->
+      <PanelLoading v-if="!store.ready" text="正在读取命令…" />
+
+      <p v-else-if="!commands.length" class="panel__empty">
         <el-icon class="empty__icon"><Operation /></el-icon>
         还没有命令<br />点右上角的 + 添加
       </p>

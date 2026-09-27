@@ -17,6 +17,7 @@ import { markdownToPlainText } from '@shared/markdown'
 import { sanitizeProjectColor } from '@shared/project-color'
 import { completedEntriesOn, type WorkLogEntry } from '@shared/work-log'
 import { useProjectsStore } from '@/stores/projects'
+import PanelLoading from '@/components/PanelLoading.vue'
 import ProjectTag from '@/components/ProjectTag.vue'
 
 const store = useProjectsStore()
@@ -113,7 +114,7 @@ function openWorkView(): void {
       <button class="panel__link" type="button" @click="load">重试</button>
     </div>
 
-    <p v-else-if="loading" class="panel__empty">正在读取工作日志…</p>
+    <PanelLoading v-else-if="loading" text="正在读取工作日志…" />
 
     <p v-else-if="!rows.length" class="panel__empty">
       <el-icon class="empty__icon"><Finished /></el-icon>
