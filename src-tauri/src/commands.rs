@@ -344,6 +344,91 @@ pub fn skill_files(root: String, dir: String, id: String) -> Result<Vec<Value>, 
     crate::skills::files(&root, &dir, &id)
 }
 
+// ---------- 知识库（用户在别处维护的独立项目，见 kb.rs） ----------
+//
+// 清单与正文读取是只读的；写只有一处 —— 重建目录与索引（生成物，脚本的活）。
+// 条目的内容**不由应用直接写**：那是 AI 助手驱动 Pi 在那个目录里干的（见 ai.rs）。
+// 同步与仓库探测不走新命令 —— note_sync / note_repo_state 本来就是「对任意文件夹、
+// 认它自己的 origin」的通用实现，渲染层带着知识库目录直接调。
+
+/// 列目录（平铺清单，**任意后缀** —— 原始资料可能是 pdf / docx 任何东西）；前缀拆分由渲染层做
+#[tauri::command(async)]
+pub fn kb_scan(root: String) -> Result<Vec<Value>, String> {
+    crate::kb::scan(&root)
+}
+
+/// 读一个文件的文本（条目正文 / index.json）
+#[tauri::command(async)]
+pub fn kb_read(root: String, rel: String) -> Result<String, String> {
+    crate::kb::read(&root, &rel)
+}
+
+/// 重建 `kb/_catalog.md` 与 `index/index.json`（输出与仓库自己的脚本逐字节一致）。
+/// `generated_at` 由渲染层给：脚本用的是本机时区的今天，只有渲染层知道本机的今天。
+#[tauri::command(async)]
+pub fn kb_index_build(root: String, generated_at: String) -> Result<Value, String> {
+    crate::kb::index_build(&root, &generated_at)
+}
+
+// ---------- AI 助手（驱动本机的 Pi 整理知识库，见 ai.rs） ----------
+//
+// 这一组是全应用唯一会「写知识库内容」的地方，而且写的人是那个子进程、不是应用自己。
+// 密钥与提示词都不经过渲染层：渲染层只报「用哪个提供方、什么模型、提示词是什么」，
+// 取密钥与写提示词文件都在 Rust 侧（见 ai.rs 的文件头）。
+
+/// 探测 AI 运行时：内置的 Pi（resources/pi）优先，退回 PATH 上的全局 pi。
+/// 渲染层拿它决定 AI 助手页给哪种提示、命令怎么拼（内置时用 node 直跑 cli.js）。
+#[tauri::command(async)]
+pub fn ai_runtime(app: AppHandle) -> Value {
+    crate::ai::runtime(&app)
+}
+
+/// 写自定义端点的 models.json（设置页保存「模型配置」时调；细则见 ai.rs 的 provider_write）。
+/// 密钥不进这份文件 —— models.json 里只有 `$WORKBENCH_AI_KEY` 的环境变量引用。
+#[tauri::command(async)]
+pub fn ai_provider_write(
+    provider: String,
+    base_url: String,
+    api: String,
+    models: Vec<String>,
+) -> Result<(), String> {
+    crate::ai::provider_write(&provider, &base_url, &api, &models)
+}
+
+/// 跑一次整理。输出与退出照旧走 `session:lines` / `session:exit`，
+/// 渲染层按会话 id 前缀 `ai:` 接住（它不属于任何项目终端）。
+#[tauri::command(async)]
+pub fn ai_run(
+    app: AppHandle,
+    session_id: String,
+    dir: String,
+    prompt: String,
+    program: String,
+    args: Vec<String>,
+    provider: String,
+    model: String,
+) -> Result<u32, String> {
+    crate::ai::run(&app, session_id, dir, prompt, program, args, provider, model)
+}
+
+/// 存 / 覆盖某个提供方的 API Key（进 Windows 凭据管理器，不回显、不落 JSON）
+#[tauri::command(async)]
+pub fn ai_key_save(provider: String, secret: String) -> Result<(), String> {
+    crate::ai::key_save(&provider, &secret)
+}
+
+/// 这个提供方配过 Key 没有（只回有没有，界面显示「已配置 / 未配置」）
+#[tauri::command(async)]
+pub fn ai_key_state(provider: String) -> Result<bool, String> {
+    crate::ai::key_state(&provider)
+}
+
+/// 清掉某个提供方的 Key
+#[tauri::command(async)]
+pub fn ai_key_clear(provider: String) -> Result<(), String> {
+    crate::ai::key_clear(&provider)
+}
+
 /// 数据目录。**固定一个位置**（`%APPDATA%\Workbench\data`，见 paths.rs 的文件头），
 /// 这里只是把它报给界面 —— 设置里「关于」那一屏要如实显示数据放在哪儿。
 #[tauri::command]
@@ -592,6 +677,8 @@ pub fn run_command(program: String, args: Vec<String>, timeout_ms: u64) -> Value
 /// 起一条命令（整行交 shell 执行），返回子进程 pid。
 /// 输出与退出经 `session:lines` / `session:exit` 两个事件回推，
 /// 映射成渲染层认识的事件形状由适配层负责。
+///
+/// 环境变量参数传空：注入能力只留给 Rust 内部的调用方（AI 那条命令要带密钥，见 ai.rs）。
 #[tauri::command]
 pub fn spawn_session(
     app: AppHandle,
@@ -600,7 +687,7 @@ pub fn spawn_session(
     cwd: Option<String>,
     path_prepend: Option<String>,
 ) -> Result<u32, String> {
-    crate::session::spawn(&app, session_id, line, cwd, path_prepend)
+    crate::session::spawn(&app, session_id, line, cwd, path_prepend, &[])
 }
 
 // ---------- nvm ----------

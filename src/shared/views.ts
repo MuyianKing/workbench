@@ -13,7 +13,7 @@
  * 谁的数据文件，它就自然出现在导航栏上（排在末尾）。
  */
 
-export const VIEW_IDS = ['home', 'projects', 'work', 'notes', 'skills', 'vault', 'styles', 'video'] as const
+export const VIEW_IDS = ['home', 'projects', 'work', 'notes', 'skills', 'kb', 'ai', 'vault', 'styles', 'video'] as const
 
 export type ViewId = (typeof VIEW_IDS)[number]
 
@@ -24,6 +24,8 @@ export const VIEW_LABELS: Record<ViewId, string> = {
   work: '工作',
   notes: '笔记',
   skills: '技能',
+  kb: '知识库',
+  ai: 'AI 助手',
   vault: '密码',
   styles: '样式',
   video: '视频'

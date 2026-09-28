@@ -47,6 +47,8 @@ describe('导航栏显示哪几页', () => {
       'projects',
       'notes',
       'skills',
+      'kb',
+      'ai',
       'vault',
       'styles',
       'video'
@@ -59,6 +61,8 @@ describe('导航栏显示哪几页', () => {
       'work',
       'notes',
       'skills',
+      'kb',
+      'ai',
       'vault',
       'styles',
       'video'
@@ -86,6 +90,8 @@ describe('导航栏的顺序', () => {
       'projects',
       'work',
       'skills',
+      'kb',
+      'ai',
       'vault',
       'styles',
       'video'
@@ -100,6 +106,8 @@ describe('导航栏的顺序', () => {
       'notes',
       'projects',
       'skills',
+      'kb',
+      'ai',
       'vault',
       'styles',
       'video'
@@ -107,6 +115,8 @@ describe('导航栏的顺序', () => {
     expect(orderedViews(['work', 'skills', 'vault', 'styles', 'projects'], order)).toEqual([
       'home',
       'notes',
+      'kb',
+      'ai',
       'video'
     ])
     // 不带顺序参数时就是老行为：按 VIEW_IDS 的默认顺序
@@ -114,6 +124,8 @@ describe('导航栏的顺序', () => {
       'projects',
       'notes',
       'skills',
+      'kb',
+      'ai',
       'vault',
       'styles',
       'video'

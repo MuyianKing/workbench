@@ -12,6 +12,8 @@ import ProjectsView from '@/components/ProjectsView.vue'
 import WorkView from '@/components/WorkView.vue'
 import NotesView from '@/components/NotesView.vue'
 import SkillsView from '@/components/SkillsView.vue'
+import KbView from '@/components/KbView.vue'
+import AiView from '@/components/AiView.vue'
 import VaultView from '@/components/VaultView.vue'
 import StylesView from '@/components/StylesView.vue'
 import VideoView from '@/components/VideoView.vue'
@@ -45,6 +47,8 @@ const VIEWS: Record<ViewId, Component> = {
   work: WorkView,
   notes: NotesView,
   skills: SkillsView,
+  kb: KbView,
+  ai: AiView,
   vault: VaultView,
   styles: StylesView,
   video: VideoView

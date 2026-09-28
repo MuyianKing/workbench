@@ -9,3 +9,5 @@ dist
 .preview/**
 # Vditor 的静态资源：构建前从 node_modules 复制过来（见 scripts/sync-vditor-assets.mjs），不进版本库
 src/renderer/public/vditor/
+# Pi 的内置运行时：构建前由 scripts/vendor-pi.mjs 生成（瘦身方案见 constraints/ai.md），不进版本库
+resources/pi/

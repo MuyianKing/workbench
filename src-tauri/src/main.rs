@@ -1,6 +1,7 @@
 // 发布态不要额外的控制台窗口
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod ai;
 mod ai_news;
 mod commands;
 mod credentials;
@@ -9,6 +10,7 @@ mod encoding;
 mod http;
 mod icon;
 mod imaging;
+mod kb;
 mod nrm;
 mod notes;
 mod nvm;
@@ -360,6 +362,15 @@ fn main() {
             commands::skill_install,
             commands::skill_installed_versions,
             commands::skill_files,
+            commands::kb_scan,
+            commands::kb_read,
+            commands::kb_index_build,
+            commands::ai_runtime,
+            commands::ai_provider_write,
+            commands::ai_run,
+            commands::ai_key_save,
+            commands::ai_key_state,
+            commands::ai_key_clear,
             commands::data_dir,
             commands::window_minimize,
             commands::window_toggle_maximize,

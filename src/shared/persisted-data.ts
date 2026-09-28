@@ -24,6 +24,12 @@ import {
 import { sanitizeImageRepo } from './note-image'
 import { sanitizeSyncRepo } from './token-usage'
 import { sanitizeWeatherCity } from './weather'
+import {
+  sanitizeAiApiFormat,
+  sanitizeAiBaseUrl,
+  sanitizeAiModels,
+  sanitizeAiName
+} from './ai'
 import { pruneDays, sanitizeActivity } from './activity'
 import { sanitizeViewId } from './views'
 import { sanitizeProjectSort } from './project-sort'
@@ -93,6 +99,17 @@ export function sanitizeSettings(raw: unknown): StoredSettings {
   // 技能库目录（本机挑的一个目录）：老数据文件里没有，默认空串 = 还没选过。
   // 与笔记文件夹同一条收敛（去空白与末尾分隔符、盘根留住分隔符）—— 它要拿去拼文件路径
   value.skillDir = sanitizeNoteRoot(value.skillDir)
+  // 知识库文件夹（本机挑的一个目录，一个独立项目的根）：老数据文件里没有，默认空串 = 还没选过。
+  // 与笔记 / 技能同一条收敛 —— 它同样要拿去拼文件路径
+  value.kbDir = sanitizeNoteRoot(value.kbDir)
+  // AI 助手的模型配置（自定义端点）：老数据文件里没有，默认空 = 还没配置。
+  // 提供方名会进凭据名与 models.json 的键、Base URL 会进配置文件，两者都先过一遍收敛
+  value.aiProviderName = sanitizeAiName(value.aiProviderName)
+  value.aiBaseUrl = sanitizeAiBaseUrl(value.aiBaseUrl)
+  value.aiApiFormat = sanitizeAiApiFormat(value.aiApiFormat)
+  value.aiModels = sanitizeAiModels(value.aiModels)
+  // AI 助手的工作目录（本机挑的一个目录）：与笔记 / 技能 / 知识库同一条收敛 —— 它要拿去拼路径
+  value.aiWorkDir = sanitizeNoteRoot(value.aiWorkDir)
   // 笔记仓库地址已废弃：同步现在只看那个文件夹自己的 `origin`（见 shared/note.ts 的 NoteRepoState），
   // 地址不再进设置。旧数据文件里存着它，不主动清掉的话它会一直被写回，看着像还有人在用它。
   delete (value as unknown as Record<string, unknown>).noteSyncRepo

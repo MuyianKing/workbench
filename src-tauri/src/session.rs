@@ -90,14 +90,58 @@ fn shell_command(line: &str) -> Command {
 
 /// 起一条命令。`line` 是交给 shell 的整行原文，`cwd` 为空则用当前进程的工作目录。
 /// `path_prepend` 用于项目指定了 nvm 版本时把该版本目录前置到 PATH。
+///
+/// `envs` 是**追加**到子进程的环境变量（AI 那条命令要带密钥与「别去联网查更新」两个开关，
+/// 见 ai.rs）。它只对 Rust 内部调用方开放：渲染层那条 `spawn_session` 传空切片 ——
+/// 于是任何一个来自界面的命令都拿不到注入能力，密钥也就不会经过渲染层。
 pub fn spawn(
     app: &AppHandle,
     session_id: String,
     line: String,
     cwd: Option<String>,
     path_prepend: Option<String>,
+    envs: &[(String, String)],
 ) -> Result<u32, String> {
-    let mut cmd = shell_command(&line);
+    spawn_cmd(
+        app,
+        session_id,
+        shell_command(&line),
+        cwd,
+        path_prepend,
+        envs,
+    )
+}
+
+/// 直启形态：程序 + 参数数组，**不经 `cmd /C` 的整行解析**。
+///
+/// 与 `proc::run_direct` 存在的理由同一条（git 为什么直启）：整行交给 cmd 时，
+/// 行内层引号会被 cmd 的引号剥离规则拆坏 —— 现有终端命令（npm run dev 这类）没有
+/// 内层引号所以从没踩过；AI 那条命令的 cli.js 路径带引号，必须走这里。
+pub fn spawn_args(
+    app: &AppHandle,
+    session_id: String,
+    program: String,
+    args: &[String],
+    cwd: Option<String>,
+    path_prepend: Option<String>,
+    envs: &[(String, String)],
+) -> Result<u32, String> {
+    let mut cmd = Command::new(&program);
+    cmd.args(args);
+    #[cfg(windows)]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    spawn_cmd(app, session_id, cmd, cwd, path_prepend, envs)
+}
+
+/// `spawn` / `spawn_args` 共用的后一半：环境注入、入表、读管道、等退出。
+fn spawn_cmd(
+    app: &AppHandle,
+    session_id: String,
+    mut cmd: Command,
+    cwd: Option<String>,
+    path_prepend: Option<String>,
+    envs: &[(String, String)],
+) -> Result<u32, String> {
     cmd.stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -119,6 +163,11 @@ pub fn spawn(
         if let Ok(joined) = std::env::join_paths(paths) {
             cmd.env("PATH", joined);
         }
+    }
+
+    // 追加的变量放在 PATH 之后：它们只补本次运行要带的东西，不参与 PATH 的拼装
+    for (key, value) in envs {
+        cmd.env(key, value);
     }
 
     let mut child = cmd.spawn().map_err(|err| format!("启动失败: {err}"))?;

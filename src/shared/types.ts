@@ -37,6 +37,8 @@ import type {
   SkillLibraryState,
   SkillSyncSummary
 } from './skills'
+import type { KbRepoState, KbScanEntry, KbSyncInput, KbSyncSummary } from './kb'
+import type { AiModelEntry } from './ai'
 import type {
   NoteImageDeleteInput,
   NoteImageDeleted,
@@ -77,6 +79,17 @@ export type {
   SkillLibraryState,
   SkillSyncSummary
 } from './skills'
+export type {
+  KbEntryMeta,
+  KbIndexInfo,
+  KbRawItem,
+  KbRawStatus,
+  KbRepoState,
+  KbScanEntry,
+  KbStats,
+  KbSyncInput,
+  KbSyncSummary
+} from './kb'
 export type { WorkLogEntry, WorkLogInput, WorkLogPatch } from './work-log'
 export type {
   NoteChange,
@@ -417,6 +430,45 @@ export interface AppSettings {
    * 空串 = 还没选过，技能页显示引导。只对本机成立，进数据文件、不参与外观同步。
    */
   skillDir: string
+  /**
+   * 知识库文件夹（用户自己挑的一个目录）：**一个独立项目的根** —— `data/raw/` 放原始资料、
+   * `kb/` 放整理好的条目、`index/index.json` 由「重建索引」生成（布局见 shared/kb.ts 的
+   * 常量与 docs 的「知识库」一节）。
+   *
+   * 读是只读的，写只有两处、且都由用户点出来：AI 助手里那一轮整理（真正写文件的是 Pi，
+   * 应用只递提示词与密钥）与重建索引（生成物）。与 `noteDir` / `skillDir` 同一类：
+   * 空串 = 还没选过（知识库页与 AI 助手都显示引导），只对本机成立，进数据文件、不参与外观同步。
+   */
+  kbDir: string
+  /**
+   * AI 助手的提供方名（自定义端点的键名）：进凭据管理器的目标名（`ai/<名称>/token`）、
+   * Pi 的 `models.json` 里的提供方键、以及模型寻址的前缀。
+   * 空串 = 还没配置。收紧规则见 shared/ai.ts 的 sanitizeAiName（小写字母 / 数字 / 连字符）。
+   */
+  aiProviderName: string
+  /**
+   * AI 助手的 Base URL：支持 OpenAI 兼容或 Anthropic 兼容的端点（网关、中转、
+   * 本地服务都算）。形状在保存时校验（http(s):// 开头），见 shared/ai.ts 的 sanitizeAiBaseUrl。
+   */
+  aiBaseUrl: string
+  /**
+   * API 形态：`openai-completions`（/chat/completions）或 `anthropic-messages`（/v1/messages），
+   * 取值收敛在 shared/ai.ts 的 sanitizeAiApiFormat。它写进 models.json 的 `api` 字段。
+   */
+  aiApiFormat: string
+  /**
+   * 模型清单（可启停）：启用的那些才进 models.json，跑的是**第一个启用的**。
+   * 收敛（去重、限量、形状）见 shared/ai.ts 的 sanitizeAiModels。
+   */
+  aiModels: AiModelEntry[]
+  /**
+   * AI 助手的工作目录（用户自己挑的一个目录）：子进程就在它里面干活，提示词里也写明。
+   *
+   * 与知识库的 `kbDir` **互不相干** —— 这一页是通用的 agent 控制台，处理知识库只是
+   * 「把目录指到那个仓库、写一条照它规范整理的指令」的一种用法。
+   * 空串 = 还没选过（页面显示引导）。收敛与笔记 / 技能目录同一条（sanitizeNoteRoot）。
+   */
+  aiWorkDir: string
   /**
    * 天气城市名：顶栏问候语旁显示当地实时天气，空串表示不显示（也就不联网）。
    *
@@ -1005,6 +1057,32 @@ export interface DesignWriteOutcome {
 }
 
 /** `window.workbench` 向渲染层暴露的 API（由适配层实现） */
+/**
+ * 一次 AI 整理任务的入参（`aiRun`）。
+ *
+ * `program` 与 `args` 由渲染层的纯函数拼（shared/ai.ts 的 piLaunch，有单测）：
+ * 直启 `node <内置 cli.js>` 或全局 `pi`，**不经 cmd 的整行解析** —— 行内层引号会被
+ * cmd 的引号剥离规则拆坏（踩过）。提示词也不在这里：Rust 写进临时文件后以 Pi 的
+ * `@文件` 语法追加在最后一个参数上。**密钥也不在这里** —— 它在凭据管理器里，
+ * Rust 按提供方名取出来注入环境变量（见 src-tauri/src/ai.rs）。
+ */
+export interface AiRunInput {
+  /** 会话 id（`ai:` 开头）：输出与退出靠它回到这个页面 */
+  sessionId: string
+  /** 知识库根目录（子进程的工作目录，也是提示词里写明的那个目录） */
+  dir: string
+  /** 整理提示词全文 */
+  prompt: string
+  /** 要直启的程序：`node`（内置模式）或 `pi`（全局退路） */
+  program: string
+  /** 参数数组（不含提示词；Rust 会把 `@<提示词文件>` 追加在末尾） */
+  args: string[]
+  /** 提供方名（取密钥的凭据名，也是模型寻址的前缀 `提供方/模型`） */
+  provider: string
+  /** 模型 id（第一个启用的那个） */
+  model: string
+}
+
 export interface WorkbenchApi {
   versions: { node: string; chrome: string }
   /**
@@ -1294,6 +1372,33 @@ export interface WorkbenchApi {
   listSkillFiles: (root: string, dir: string, id: string) => Promise<Result<SkillFileInfo[]>>
   /** 读技能里的一个文件（任意文本文件；二进制读不出文本时如实失败） */
   readSkillFile: (root: string, dir: string, id: string, rel: string) => Promise<Result<string>>
+  // ---------- 知识库（用户在别处维护的独立项目，见 shared/kb.ts） ----------
+  /**
+   * 扫描知识库文件夹：**平铺清单**（文件夹 + 任意后缀的文件，带修改时间），树与「哪些是
+   * 原始数据、哪些是条目」的拆分在渲染层（shared/kb.ts 的前缀规则）。
+   *
+   * 读是只读的；写只有两处：AI 助手那一轮整理（写的人是 Pi，见下面的 AI 段）与重建索引
+   * （生成物）。每条通道都带上 root，与笔记同一套原因：用户换了文件夹，来源就换了。
+   */
+  kbScan: (root: string) => Promise<Result<KbScanEntry[]>>
+  /** 读知识库里的一个文件文本（条目正文 / index.json）；越界路径由 Rust 侧挡住 */
+  kbRead: (root: string, rel: string) => Promise<Result<string>>
+  /**
+   * 重建 `kb/_catalog.md` 与 `index/index.json`（输出与仓库自己的脚本逐字节一致，
+   * 换行都跟着写成 CRLF）。`generatedAt` 由渲染层按本机时区算（shared/kb.ts 的 todayIsoDate）。
+   */
+  kbIndexBuild: (root: string, generatedAt: string) => Promise<Result<{ count: number }>>
+  /**
+   * 知识库与**它自己连着的那个仓库**对齐一次（提交 → 拉 → 推）。
+   *
+   * 与笔记同步同一条通道、同一条边界：远端就是 `dir` 自己的 `origin`，不由参数指定；
+   * 仓库没连远端时调用就是一句说清楚原因的失败 —— 界面在那之前根本不显示这颗按钮。
+   */
+  kbSync: (input: KbSyncInput) => Promise<Result<KbSyncSummary>>
+  /** 探测知识库文件夹的 git 状态（只读）：界面拿它决定给不给同步入口、同步到哪儿 */
+  kbRepoState: (dir: string) => Promise<Result<KbRepoState>>
+  // AI 助手那几条不在这里：会话类通道（要回传进程输出、要按会话 id 认领事件）一直住在
+  // 适配层，与 spawn_session / stop_session 同一条路子 —— 见 workbench/ai.ts 的 aiRun。
   // ---------- 密码保险库（见 shared/vault.ts） ----------
   /**
    * 密钥状态：这台机器上有没有一把密钥、这会儿解没解锁、公钥指纹是多少。
@@ -1617,6 +1722,12 @@ export const DEFAULT_SETTINGS: AppSettings = {
   noteDirs: [],
   noteImageRepo: '',
   skillDir: '',
+  kbDir: '',
+  aiProviderName: '',
+  aiBaseUrl: '',
+  aiApiFormat: '',
+  aiModels: [],
+  aiWorkDir: '',
   weatherCity: '',
   tokenSyncRepo: '',
   activeView: 'home',

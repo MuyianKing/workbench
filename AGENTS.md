@@ -36,16 +36,19 @@
 ## 1. 项目边界
 
 - 定位：Windows 桌面应用（Tauri 2 + WebView2），一个窗口里管项目、记工作、写笔记、看 AI 用量；包管理器固定 npm，`Cargo.lock` 要提交。
-- **联网边界：默认不联网、不上报任何数据；出口只有七个，且都由用户显式开启**：用户自己填的两个 git 仓库（用量同步、笔记图片，
+- **联网边界：默认不联网、不上报任何数据；出口只有八个，且都由用户显式开启**：用户自己填的两个 git 仓库（用量同步、笔记图片，
   留空即关闭）与**笔记自己那个仓库**（地址不在设置里 —— 跟着那个笔记文件夹的 `origin` 走，且只有用户点了同步才会跑一次 git；
-  没仓库的文件夹就是本机的笔记，应用既不 `git init` 也不替用户接远端）、账号登录与 token 到期续期（都只打 GitHub / Gitee 的 OAuth 接口）、命令执行本身、AI 热点（源地址是 Rust 侧
+  没仓库的文件夹就是本机的笔记，应用既不 `git init` 也不替用户接远端；**知识库**（`kbDir` 指向的那个
+  独立项目）的同步走同一条路 —— 推它自己连的 `origin`，同样只在点同步时跑一次 git，应用不写它的内容）、账号登录与 token 到期续期（都只打 GitHub / Gitee 的 OAuth 接口）、命令执行本身、AI 热点（源地址是 Rust 侧
   `ai_news.rs` 的 `SOURCES` 白名单，渲染层只能报源 id、拿不到任何地址；卡片画在首页上且到了该源自己的刷新间隔才 GET，
   只读不上报；白名单里只收免费、不需要凭据的中文源，用户不想看就把那张卡片关掉；**站内阅读**是同一个出口的
   延伸：用户点开某一条时才去抓那篇正文，域名另有一道 `article_hosts` 白名单卡着 —— 只认源站自己的域名与它的子域，
   页面脚本不执行、只取正文文本）、实时天气（设置里的 `weatherCity` 填了城市才会取，留空即关闭；主机名白名单是 Rust 侧
   `weather.rs` 里那**两个**，各管一段 —— 城市名检索走 OpenStreetMap 的公开 Nominatim 接口
   （Open-Meteo 自带的检索对部分中文名匹配不上，实测「常州」搜不到）、实况走 Open-Meteo 的
-  forecast；**城市名会作为查询串发出去**，这是这条出口唯一的用户内容）。
+  forecast；**城市名会作为查询串发出去**，这是这条出口唯一的用户内容）、AI 助手（一个自定义端点：Base URL / API 形态 / 模型 /
+  API Key 四样都配齐且用户点了「开始」才会走；请求由那个子进程直接发，**它在那个目录里读到的内容会发给你自己配的那个端点**，
+  配置的形状与收敛在 `src/shared/ai.ts`）。
   不要新增网络出口、不往任何第三方服务发数据；笔记里的外链图片不算新出口；
   密码保险库也不算 —— 它推的是**用量同步那个仓库**的另一个目录（`vault/vault.json`），推上去的只有密文；
   登录内嵌的 client_id/secret 是这条边界唯一一次放宽。
@@ -62,6 +65,11 @@
   别处不新增这类外部依赖。
 - VS Code 是唯一**可选**的外部程序，只服务项目卡的「在 VS Code 中打开」：走它自己注册的 `vscode://` 协议（`system.rs` 的
   `open_in_vscode`），不去找 `Code.exe` 的安装路径；没装只影响那一个菜单项，不要照着再引别的编辑器。
+- **Pi**（开源编码 Agent）只服务 AI 助手页（一个通用控制台：用户挑工作目录、写指令，它去干活）：**随包内置** —— `scripts/vendor-pi.mjs` 在构建 / 开发前
+  生成瘦身的 `resources/pi/`（钉死版本、删掉运行时用不到的云厂商 SDK，细则见 [constraints/ai.md](docs/constraints/ai.md)），
+  Node 用系统里的（≥ 22.19，门槛判定在 `shared/ai.ts`）。跑它时子进程必须带 `PI_TELEMETRY=0` 与 `PI_SKIP_VERSION_CHECK=1`（它默认会
+  报遥测、并向 pi.dev 查最新版本 —— 那两条不在任何已登记的出口里），密钥只经环境变量给，**进程直启不经 `cmd /C`**（行内层引号会被
+  cmd 拆坏，见 session.rs 的 `spawn_args`）。别照着再引别的 Agent。
 - 测试用 Vitest（渲染层与 `src/shared`）+ `cargo test`（写在同文件的 `#[cfg(test)] mod tests`）。**TypeScript 与 vue-tsc 的版本不要动**：
   升到 TS 7 会让 `npm run typecheck` 直接不可用。
 - 仅 Windows，不做 macOS / Linux 适配。
@@ -131,6 +139,8 @@
 | 终端、子进程会话与日志 | [constraints/terminal.md](docs/constraints/terminal.md) |
 | 工作日志 | [constraints/work-log.md](docs/constraints/work-log.md) |
 | 笔记（正文 / 图片 / 素材 / 笔记同步） | [constraints/notes.md](docs/constraints/notes.md) |
+| 知识库（原始数据 / 条目 / 索引状态与重建 / 同步） | [constraints/kb.md](docs/constraints/kb.md) |
+| AI 助手（驱动本机 Pi 整理知识库 / 模型与密钥 / 提示词与出口） | [constraints/ai.md](docs/constraints/ai.md) |
 | 用量与外观同步、账号登录 | [constraints/sync-and-auth.md](docs/constraints/sync-and-auth.md) |
 | 密码保险库（密钥 / 加解密 / 多机共写一份文件） | [constraints/vault.md](docs/constraints/vault.md) |
 

@@ -24,7 +24,8 @@
     "targets": ["nsis"],
     "icon": ["icon.ico"],
     "resources": {
-      "../resources/backgrounds": "backgrounds"
+      "../resources/backgrounds": "backgrounds",
+      "../resources/pi": "pi"
     },
     "windows": {
       "nsis": {

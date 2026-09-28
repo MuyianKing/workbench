@@ -30,9 +30,11 @@ import type {
 } from '@shared/types'
 import { assetUrl, errorText, guard, hasTauri, invoke, listen, notPorted } from './bridge'
 import { emit } from './events'
+import * as ai from './ai'
 import * as events from './events'
 import * as auth from './auth'
 import * as design from './design'
+import * as kb from './kb'
 import * as note from './note'
 import * as nrm from './nrm'
 import * as nvm from './nvm'
@@ -397,6 +399,17 @@ function createApi(): WorkbenchApi {
     scanSkillCopies: (root: string, dir: string, id: string, projectDirs: string[]) =>
       skill.scanSkillCopies(root, dir, id, projectDirs),
 
+    // ---------- 知识库（用户在别处维护的独立项目，见 workbench/kb.ts） ----------
+    kbScan: (root: string) => kb.kbScan(root),
+    kbRead: (root: string, rel: string) => kb.kbRead(root, rel),
+    // 目录与索引的重建由应用自己做（对齐仓库脚本的输出）；内容由 AI 助手那一轮写入
+    kbIndexBuild: (root: string, generatedAt: string) => kb.kbIndexBuild(root, generatedAt),
+    // 同步与仓库探测复用笔记那两条通用通道（对任意文件夹、认它自己的 origin），技能页同款
+    kbSync: (input: Parameters<WorkbenchApi['kbSync']>[0]) => kb.kbSync(input),
+    kbRepoState: (dir: string) => kb.kbRepoState(dir),
+    // AI 助手那几条不在这里：它们要回传进程输出、按会话 id 认领事件，
+    // 与 spawn_session 同一条路子住在适配层（见 workbench/ai.ts）
+
     // ---------- 统计 ----------
     getActivity: () => Promise.resolve(state.activityCounts()),
     /**
@@ -626,8 +639,9 @@ function createApi(): WorkbenchApi {
 /** 只在 Tauri 里接管；浏览器预览（vite.preview）下没有后端，保持 undefined 让调用方走退化路径 */
 export function installTauriWorkbench(): void {
   if (!hasTauri()) return
-  // 先接上后端的原始事件（日志 / 退出），再暴露 API：否则第一帧产生的日志会丢
+  // 先接上后端的原始事件（日志 / 退出 / AI 的事件流），再暴露 API：否则第一帧产生的日志会丢
   session.installSessionListeners()
+  ai.installAiListeners()
   // 退出确认：后端问「还有项目在跑，要不要先停掉」，转成渲染层认识的事件
   listen<{ count: number }>('app:quit-confirm', (payload) => events.emit('quitConfirm', payload))
   window.workbench = createApi()

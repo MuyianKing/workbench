@@ -6,7 +6,7 @@
   "description": "前端开发工作台：管项目、记工作、看 AI 用量",
   "author": "muyian",
   "scripts": {
-    "dev": "tauri dev",
+    "dev": "node scripts/vendor-pi.mjs && tauri dev",
     "build": "tauri build",
     "dev:renderer": "vite",
     "build:renderer": "vite build",
@@ -15,8 +15,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "icons": "node scripts/make-icons.mjs",
-    "dist": "tauri build",
-    "dist:dir": "tauri build --no-bundle"
+    "vendor:pi": "node scripts/vendor-pi.mjs",
+    "dist": "node scripts/vendor-pi.mjs && tauri build",
+    "dist:dir": "node scripts/vendor-pi.mjs && tauri build --no-bundle"
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.1",
