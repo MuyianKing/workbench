@@ -305,8 +305,15 @@ function openRecentRoot(dir: string): void {
   min-height: 0;
 }
 
+/**
+ * 还没选文件夹时的整页引导：它同样是一张卡片，四周留白与别处同源 —— 左右与下边距取
+ * `--card-gap`（设置里的「卡片间距」，与卡片墙、导航栏那张卡同一口径）。少了这一圈，
+ * 这张卡会一直通到导航栏右缘与窗口底边，「没留白」就是这么来的。
+ * **上边距必须是 0**：顶栏下面那条缝归 .shell 管（见 global.css），这里再补一份就比导航栏低一截。
+ */
 .video__intro {
   min-height: 0;
+  margin: 0 var(--card-gap, 10px) var(--card-gap, 10px);
 }
 
 /**

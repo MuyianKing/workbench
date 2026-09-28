@@ -87,9 +87,10 @@ watch(
 // ---------- 播完自动接下去 ----------
 
 /**
- * 一部播完（`ended`），树里还有下一个就摆出浮层、倒数 `VIDEO_NEXT_SECONDS` 秒后切过去；
- * 这一部就是最后一个（或它根本不在树里）时什么都不做，画面停在原地。
- * 浮层跟着播放器走：悬浮小窗里播完一样接得下去，笔记照写、下一部自动开。
+ * 一部播完（`ended`），树里还有下一个就在画布上压暗一层、摆出倒计时卡片，
+ * 倒数 `VIDEO_NEXT_SECONDS` 秒后切过去；这一部就是最后一个（或它根本不在树里）时
+ * 什么都不做，画面停在原地。卡片跟着播放器走：悬浮小窗里播完一样接得下去，
+ * 笔记照写、下一部自动开。
  */
 const upNext = ref<VideoNode | null>(null)
 /** 倒计时还剩几秒；upNext 为 null 时它没有意义 */
@@ -106,6 +107,16 @@ function clearUpNext(): void {
   upNextLeft.value = 0
 }
 
+/**
+ * 切到下一个：倒计时到点与卡片上那颗「立即播放」共用这一条 —— 先收浮层再 select，
+ * 与点树上的视频是同一条路（连播的下一部直接出声）。
+ */
+function goUpNext(): void {
+  const target = upNext.value
+  clearUpNext()
+  if (target) store.select(target.rel)
+}
+
 function onEnded(): void {
   const current = store.active
   if (!current) return
@@ -118,9 +129,7 @@ function onEnded(): void {
   upNextTimer = setInterval(() => {
     upNextLeft.value -= 1
     if (upNextLeft.value > 0) return
-    const target = upNext.value
-    clearUpNext()
-    if (target) store.select(target.rel)
+    goUpNext()
   }, 1000)
 }
 
@@ -406,17 +415,23 @@ function closePlayer(): void {
         ></video>
 
         <!--
-          播完接下去的倒计时浮层：与视频同进退（传送时跟着元素一起搬），到点走
-          store.select 切过去 —— 与点树上的视频是同一条路。悬浮时它照常出现在小窗里
+          播完接下去的倒计时浮层（压暗层 + 卡片）：与视频同进退（传送时跟着元素一起搬），
+          到点与卡片上的「立即播放」都走 goUpNext 切过去 —— 与点树上的视频是同一条路。
+          悬浮时它照常出现在小窗里
         -->
         <div v-if="upNext" class="vplayer__next" role="status">
-          <p class="vplayer__next-title">即将进入下一个视频</p>
-          <p class="vplayer__next-name" :title="upNext.name">{{ upNext.name }}</p>
-          <div class="vplayer__next-actions">
-            <span class="vplayer__next-left">{{ upNextLeft }} 秒后自动播放</span>
-            <el-button size="small" @click="cancelUpNext">取消</el-button>
+          <div class="vplayer__next-card">
+            <div class="vplayer__next-head">
+              <span class="vplayer__next-label">即将进入下一个视频</span>
+              <span class="vplayer__next-left">{{ upNextLeft }} 秒后自动播放</span>
+            </div>
+            <p class="vplayer__next-name" :title="upNext.name">{{ upNext.name }}</p>
+            <div class="vplayer__next-actions">
+              <el-button size="small" type="primary" @click="goUpNext">立即播放</el-button>
+              <el-button size="small" @click="cancelUpNext">取消</el-button>
+            </div>
+            <span class="vplayer__next-bar" :style="{ animationDuration: `${VIDEO_NEXT_SECONDS}s` }" />
           </div>
-          <span class="vplayer__next-bar" :style="{ animationDuration: `${VIDEO_NEXT_SECONDS}s` }" />
         </div>
       </div>
 
@@ -581,31 +596,84 @@ function closePlayer(): void {
   outline: none;
 }
 
-/* ---------- 播完接下去的倒计时浮层（与视频页时代同一副样子） ---------- */
+/* ---------- 播完接下去的倒计时浮层 ---------- */
 
+/**
+ * 两块：铺满画布的一层压暗 + 居中的卡片。
+ *
+ * 压暗这一层是「一眼看得见」的来源：视频停在最后一帧时画面往往还亮着，卡片直接贴上去
+ * 会糊在画面里（原先就是这个样子）；先把画面压下去，卡片才立得起来 —— 一块实底 + 一级
+ * 阴影在压暗的画面上是一层清清楚楚的浮层。
+ *
+ * **这一层不接事件**（pointer-events: none，卡片自己再把事件要回来）：下面的原生控件
+ * 照常能点 —— 点重播 / 拖进度条是「用户接手了」的信号（见 <video> 上的 play / seeking），
+ * 遮罩拦下来的话这两条出口就断了。
+ *
+ * 居中用「容器 margin: auto」而不是 align-items: center：悬浮小窗最小只有 240×135
+ * （画布剩一百来像素高），卡片装不下时 align-items: center 会把上下两头一起切掉；
+ * margin: auto 至少把标签与名字留在看得见的上沿。滚动条不画（指针压根进不来）。
+ */
 .vplayer__next {
   position: absolute;
-  left: 50%;
-  top: 45%;
-  transform: translate(-50%, -50%);
+  inset: 0;
   z-index: 5;
   display: flex;
+  padding: var(--sp-2);
+  background: color-mix(in srgb, var(--term-bg) 62%, transparent);
+  overflow: auto;
+  scrollbar-width: none;
+  pointer-events: none;
+  animation: vplayer-next-veil 0.15s ease-out;
+}
+
+.vplayer__next::-webkit-scrollbar {
+  display: none;
+}
+
+/**
+ * 卡片本身：三行 + 底缘一条进度线，行距按最小的小窗（画布一百来像素高）也放得下定。
+ * 内容一律左对齐 —— 居中的三行在窄卡片里会显得散（同一句话在宽窄两种窗口下都要收得住）。
+ */
+.vplayer__next-card {
+  position: relative;
+  display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: var(--sp-2);
-  width: min(280px, calc(100% - 2 * var(--sp-5)));
-  padding: var(--sp-4) var(--sp-5) var(--sp-3);
+  gap: var(--sp-1);
+  width: min(320px, 100%);
+  margin: auto;
+  padding: var(--sp-2) var(--sp-3);
   background: var(--bg-surface);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
   box-shadow: var(--shadow-pop);
   overflow: hidden;
+  pointer-events: auto;
+  animation: vplayer-next-in 0.18s ease-out;
 }
 
-.vplayer__next-title {
-  margin: 0;
+/* 标签与秒数同一行：左边说「接下来是什么事」，右边是那个一直在动的数字 */
+.vplayer__next-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+}
+
+.vplayer__next-label {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
   font-size: var(--fs-micro);
   color: var(--ink-3);
+}
+
+/* 秒数：倒计时是这个浮层里唯一「在动」的东西，用进行色（--st-run）标出来 */
+.vplayer__next-left {
+  flex-shrink: 0;
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  color: var(--st-run);
+  font-variant-numeric: tabular-nums;
 }
 
 .vplayer__next-name {
@@ -622,35 +690,53 @@ function closePlayer(): void {
 .vplayer__next-actions {
   display: flex;
   align-items: center;
-  gap: var(--sp-3);
+  gap: var(--sp-2);
 }
 
-.vplayer__next-left {
-  font-size: var(--fs-meta);
-  color: var(--ink-2);
-  font-variant-numeric: tabular-nums;
-}
-
-/* 底缘那条进度线：照 VIDEO_NEXT_SECONDS 秒匀速收干（时长由模板按常量绑定） */
+/**
+ * 底缘那条进度线：照 VIDEO_NEXT_SECONDS 秒**从左往右拉满**（时长由模板按常量绑定）——
+ * 进度就是「离自动播放还有多久」，走完就切下一个。
+ */
 .vplayer__next-bar {
   position: absolute;
   left: 0;
   right: 0;
   bottom: 0;
-  height: 2px;
-  background: var(--ink-3);
+  height: 3px;
+  background: var(--st-run);
   transform-origin: left;
-  animation-name: video-next-drain;
+  animation-name: vplayer-next-fill;
   animation-timing-function: linear;
   animation-fill-mode: forwards;
 }
 
-@keyframes video-next-drain {
+@keyframes vplayer-next-fill {
   from {
-    transform: scaleX(1);
+    transform: scaleX(0);
   }
   to {
-    transform: scaleX(0);
+    transform: scaleX(1);
+  }
+}
+
+/* 压暗层淡入、卡片轻轻上浮一下：这一下是用来把视线叫过来的 */
+@keyframes vplayer-next-veil {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes vplayer-next-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
   }
 }
 

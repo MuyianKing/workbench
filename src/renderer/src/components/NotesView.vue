@@ -449,8 +449,13 @@ function syncDoneText(summary: NoteSyncSummary): string {
   min-height: 0;
 }
 
+/**
+ * 还没选文件夹时的整页引导：与视频页同一副样子，四周留白也同源 —— 左右与下边距取
+ * `--card-gap`（设置里的「卡片间距」）；**上边距 0**，顶栏下面那条缝归 .shell 管（见 global.css）。
+ */
 .notes__intro {
   min-height: 0;
+  margin: 0 var(--card-gap, 10px) var(--card-gap, 10px);
 }
 
 /**

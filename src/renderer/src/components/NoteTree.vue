@@ -10,7 +10,8 @@
  * 这里只补它没有的四件：
  *   1. **拖动**：文件拖进文件夹，或拖到树下面的**空白区**（= 移回最外层）。
  *      能不能落由 shared/note.ts 的 `noteDropAllowed` 说了算，这里只把它接到 el-tree 的回调上；
- *   2. **右键菜单**：节点上是新建笔记 / 新建文件夹 / 重命名 / 删除；
+ *   2. **右键菜单**：节点行上是新建笔记 / 新建文件夹 / 重命名 / 删除（触发区盖住整行，
+ *      见样式里 el-dropdown 那两条，所以行尾的空白也算这一行）；
  *      落在空白区时只有前两项，且一律落在笔记本根目录 —— 顶部那条工具条去掉之后，
  *      新建就只剩右键与空态里那两颗按钮这两条路；
  *   3. **节点样式**：文件夹与笔记两副图标、选中态（自己画，不用 `highlight-current`：
@@ -193,7 +194,7 @@ const rootPos = ref({ left: 0, top: 0 })
 /**
  * 空白区（树下面那片没有节点的地方）右键：菜单里的新建落在根目录。
  *
- * 落在节点行上时让路 —— 那个事件是给节点自己的菜单的（它挂在更里面，先收到）。
+ * 落在节点行上时让路 —— 那个事件是给节点自己的菜单的（它挂得更深，先收到）。
  */
 async function openRootMenu(event: MouseEvent): Promise<void> {
   const target = event.target as HTMLElement | null
@@ -488,18 +489,27 @@ onBeforeUnmount(() => window.removeEventListener('dragend', onDragEnd))
 }
 
 /**
- * 名字那一栏得真的能被压缩，否则 `.node__name` 上的 ellipsis 是摆设。
+ * 右键菜单那一层要盖住**整行余下的宽度**，不能只盖住名字那几个字。
  *
- * 右键菜单套在标签外面（`el-dropdown`），它的根 div 是行盒的 flex 子项、`min-width`
- * 默认 `auto` —— 而那一边的 min-content 是整个名字的宽度（`.node__name` 是 nowrap，
- * `overflow: hidden` 只让它的自动最小尺寸归零、不改内禀宽度），于是它一步都不肯让，
- * 长名字直接溢出行盒：名字自己的宽度没被压过，省略号永远不触发，看着就是被硬裁一刀。
+ * 行盒吃满整宽，右半边光秃秃的那一截也算「这一行」（资源管理器、VS Code 里右击那里
+ * 弹的都是这一项的菜单）。而 `el-dropdown` 的触发元素是它唯一的子元素 `.node`，
+ * 原先只有内容那么宽：右击行尾的空白既进不了触发区（菜单不弹），冒泡到树的根处理器
+ * 时又被「落在节点行上就让路」挡掉（见 openRootMenu），两边都不管，什么都不出现。
+ * 行盒与 `el-dropdown` 都是 flex 容器，两处 `flex: 1` 把触发区一路撑到行尾
+ * （展开箭头那一小条仍归 el-tree，右键落在上面什么都不弹，与从前一致）。
+ *
+ * `min-width: 0` 是另一半：撑开之后这一层成了有宽度的盒子，名字要能在里面被压缩，
+ * 否则 `.node__name` 上的 ellipsis 是摆设。默认的 `min-width: auto` 在 flex 子项上
+ * 取的是 min-content —— 而 `.node__name` 是 nowrap，`overflow: hidden` 只让它的
+ * 自动最小尺寸归零、不改内禀宽度，于是它一步都不肯让，长名字直接溢出行盒：
+ * 名字自己的宽度没被压过，省略号永远不触发，看着就是被硬裁一刀。
  *
  * 代价不止难看：溢出的内容让每一层折叠容器（`el-tree-node__children` 是 `overflow: hidden`
  * 的滚动容器）都变得可横向滚动，而「把选中项滚进视野」会顺手把它们滚一截 ——
  * 那一支从此整体左移，底色块与文字错位，且再也回不去（见 revealActive）。
  */
 .tree__body :deep(.el-tree-node__content > .el-dropdown) {
+  flex: 1 1 auto;
   min-width: 0;
 }
 
@@ -517,11 +527,14 @@ onBeforeUnmount(() => window.removeEventListener('dragend', onDragEnd))
   background: var(--bg-selected);
 }
 
-/* 图标不参与收缩：名字很长时该被挤掉的是字，不是图标 */
+/* 图标不参与收缩：名字很长时该被挤掉的是字，不是图标。
+   自己也要撑满（触发区就是它，见上面 el-dropdown 那条）—— 它只是 el-dropdown 的
+   子项，不铺开的话右击行尾那一段仍然落在触发区外面。 */
 .node {
   display: flex;
   align-items: center;
   gap: 6px;
+  flex: 1 1 auto;
   min-width: 0;
   height: 100%;
   padding-right: 6px;

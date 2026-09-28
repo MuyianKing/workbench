@@ -562,8 +562,6 @@ body.is-resizing-video-float * {
   align-items: center;
   justify-content: space-between;
   gap: var(--sp-4);
-  padding: 0 var(--sp-5);
-  min-height: var(--h-filter);
   border-bottom: 1px solid var(--border);
   background: var(--bg-canvas);
   flex-shrink: 0;
