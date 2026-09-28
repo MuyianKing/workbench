@@ -14,6 +14,7 @@ import {
   COLUMN_WIDTH_DEFAULT,
   DEFAULT_THEME,
   addColumn as addColumnTo,
+  clampAiTreeWidth,
   clampCardGap,
   clampColumnWidth,
   clampNoteTreeWidth,
@@ -533,6 +534,18 @@ export const useSettingsStore = defineStore('settings', () => {
   }
 
   /**
+   * AI 助手页左栏（项目 → 会话那棵树）宽度：与笔记 / 视频树同一套做法 ——
+   * 拖动时只改本地让界面跟手，松手才整份落盘（它也在 theme.json 里）。
+   */
+  function setAiTreeWidth(width: number): void {
+    themeConfig.value.aiTreeWidth = clampAiTreeWidth(width)
+  }
+
+  async function commitAiTreeWidth(): Promise<void> {
+    await saveThemeConfig({ aiTreeWidth: themeConfig.value.aiTreeWidth })
+  }
+
+  /**
    * 画中画悬浮小窗的位置与尺寸：与视频树宽同一套做法 —— 拖动 / 缩放时只改本地让界面跟手，
    * 松手才整份落盘（四个字段一起送，theme.json 一份快照一次写完）。
    */
@@ -789,6 +802,8 @@ export const useSettingsStore = defineStore('settings', () => {
     commitNoteTreeWidth,
     setVideoTreeWidth,
     commitVideoTreeWidth,
+    setAiTreeWidth,
+    commitAiTreeWidth,
     setVideoTreeCollapsed,
     setVideoFloatGeometry,
     commitVideoFloatGeometry,

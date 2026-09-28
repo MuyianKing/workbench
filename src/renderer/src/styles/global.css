@@ -77,6 +77,13 @@ body.is-resizing-video-tree * {
   user-select: none !important;
 }
 
+/* 拖 AI 助手页那条左右分隔条：与笔记 / 视频页同一副兜法（指针会扫过对话正文） */
+body.is-resizing-ai-tree,
+body.is-resizing-ai-tree * {
+  cursor: ew-resize !important;
+  user-select: none !important;
+}
+
 /* 设置里拖动导航项排序：重排清单而不是跟手搬一块，指针游走在清单上，同样全局兜住 */
 body.is-sorting-views,
 body.is-sorting-views * {
@@ -1168,6 +1175,30 @@ body.is-resizing-video-float * {
  */
 .el-message-box__btns {
   gap: var(--sp-2);
+}
+
+/**
+ * AI composer 的权限下拉（`popper-class="composer-permission-pop"`，见 AiComposer.vue）。
+ * 它跟别处那些下拉不一样：每一条要放下**两行** —— 这一档叫什么、它问不问。
+ * 下拉挂在 body 上（EP 的 select 默认 teleported），组件的 scoped 样式够不着，所以写在这儿。
+ */
+.composer-permission-pop .el-select-dropdown__item {
+  /* EP 默认是写死的一行高（34px），这里自己撑开 */
+  height: auto;
+  padding-top: var(--sp-1);
+  padding-bottom: var(--sp-1);
+  line-height: 1.45;
+}
+
+.composer-permission-pop .composer-permission-label {
+  display: block;
+  color: var(--ink);
+}
+
+.composer-permission-pop .composer-permission-hint {
+  display: block;
+  color: var(--ink-3);
+  font-size: var(--fs-micro);
 }
 
 @media (prefers-reduced-motion: reduce) {

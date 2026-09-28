@@ -47,8 +47,8 @@
   `weather.rs` 里那**两个**，各管一段 —— 城市名检索走 OpenStreetMap 的公开 Nominatim 接口
   （Open-Meteo 自带的检索对部分中文名匹配不上，实测「常州」搜不到）、实况走 Open-Meteo 的
   forecast；**城市名会作为查询串发出去**，这是这条出口唯一的用户内容）、AI 助手（一个自定义端点：Base URL / API 形态 / 模型 /
-  API Key 四样都配齐且用户点了「开始」才会走；请求由那个子进程直接发，**它在那个目录里读到的内容会发给你自己配的那个端点**，
-  配置的形状与收敛在 `src/shared/ai.ts`）。
+  API Key 四样都配齐且用户点了发送才会走；请求由那个子进程直接发，**它在那个目录里读到的内容、以及这一段会话的历史
+  都会发给你自己配的那个端点**，配置的形状与收敛在 `src/shared/ai.ts`）。
   不要新增网络出口、不往任何第三方服务发数据；笔记里的外链图片不算新出口；
   密码保险库也不算 —— 它推的是**用量同步那个仓库**的另一个目录（`vault/vault.json`），推上去的只有密文；
   登录内嵌的 client_id/secret 是这条边界唯一一次放宽。
@@ -57,7 +57,8 @@
 - Rust 依赖的判据是**不新增编译单元**，不是「不新增 crate 名」：先 `cargo tree -e normal -i <crate>` 确认它已经在图里；不要引
   `reqwest`、`git2`、`sysinfo` 这类会拉进整套栈的 native / 运行时依赖。
 - 唯一需要用户预装的外部程序是 **git**，只在两处用它：`sync.rs` 的几处同步与 `skills.rs` 的版本提交 / 同步（外加两条只读探测：
-  笔记文件夹的仓库状态 `repo_state`、技能库所在的仓库 `skills::state`）。直启 `git.exe`（`proc::run_direct`），**不要**经 `cmd /C`；
+  笔记文件夹的仓库状态 `repo_state`（笔记 / 知识库 / AI 助手的工作目录都走它 —— 它本来就是「对任意文件夹、认它自己的
+  `.git` 与 origin」的通用实现；AI 助手页另外拿它回的当前分支说清在哪儿干活）、技能库所在的仓库 `skills::state`）。直启 `git.exe`（`proc::run_direct`），**不要**经 `cmd /C`；
   子进程一律带 `GIT_TERMINAL_PROMPT=0` 与 `-c core.quotepath=false`（前者：没有终端可问，挂着只会等超时；后者：git 默认把非 ASCII
   路径转义成八进制，中文文件名在冲突提示里会变成乱码，而它是个每台机器都可能不同的全局项）；超时与失败收敛成给用户看的提示。
   **应用只在用户自己那两个文件夹（笔记本、技能库）所在的仓库里跑 git，且从不写它们的远端配置**
@@ -65,10 +66,12 @@
   别处不新增这类外部依赖。
 - VS Code 是唯一**可选**的外部程序，只服务项目卡的「在 VS Code 中打开」：走它自己注册的 `vscode://` 协议（`system.rs` 的
   `open_in_vscode`），不去找 `Code.exe` 的安装路径；没装只影响那一个菜单项，不要照着再引别的编辑器。
-- **Pi**（开源编码 Agent）只服务 AI 助手页（一个通用控制台：用户挑工作目录、写指令，它去干活）：**随包内置** —— `scripts/vendor-pi.mjs` 在构建 / 开发前
+- **Pi**（开源编码 Agent）只服务 AI 助手页（一个通用控制台：左栏按项目列会话、右栏跟一段对话，它去干活）：**随包内置** —— `scripts/vendor-pi.mjs` 在构建 / 开发前
   生成瘦身的 `resources/pi/`（钉死版本、删掉运行时用不到的云厂商 SDK，细则见 [constraints/ai.md](docs/constraints/ai.md)），
-  Node 用系统里的（≥ 22.19，门槛判定在 `shared/ai.ts`）。跑它时子进程必须带 `PI_TELEMETRY=0` 与 `PI_SKIP_VERSION_CHECK=1`（它默认会
-  报遥测、并向 pi.dev 查最新版本 —— 那两条不在任何已登记的出口里），密钥只经环境变量给，**进程直启不经 `cmd /C`**（行内层引号会被
+  Node 用系统里的（≥ 22.19，门槛判定在 `shared/ai.ts`）。它跑 **RPC 模式**（提示词与「命令让不让跑」的答复都走子进程的 stdin，
+  两档工具权限见 constraints/ai.md），**一个会话一个进程**（一轮跑完不收：连续对话靠它），会话留档由 Pi 自己写在
+  `data\pi\sessions\`（起进程时传 `--session-id` 与 `--session-dir`，**不要传 `--no-session`**）。跑它时子进程必须带 `PI_TELEMETRY=0`、`PI_SKIP_VERSION_CHECK=1` 与 `PI_OFFLINE=1`（它默认会
+  报遥测、向 pi.dev 查最新版本、RPC 启动时还刷一遍模型目录 —— 那三条不在任何已登记的出口里），密钥只经环境变量给，**进程直启不经 `cmd /C`**（行内层引号会被
   cmd 拆坏，见 session.rs 的 `spawn_args`）。别照着再引别的 Agent。
 - 测试用 Vitest（渲染层与 `src/shared`）+ `cargo test`（写在同文件的 `#[cfg(test)] mod tests`）。**TypeScript 与 vue-tsc 的版本不要动**：
   升到 TS 7 会让 `npm run typecheck` 直接不可用。
@@ -140,7 +143,7 @@
 | 工作日志 | [constraints/work-log.md](docs/constraints/work-log.md) |
 | 笔记（正文 / 图片 / 素材 / 笔记同步） | [constraints/notes.md](docs/constraints/notes.md) |
 | 知识库（原始数据 / 条目 / 索引状态与重建 / 同步） | [constraints/kb.md](docs/constraints/kb.md) |
-| AI 助手（驱动本机 Pi 整理知识库 / 模型与密钥 / 提示词与出口） | [constraints/ai.md](docs/constraints/ai.md) |
+| AI 助手（会话 / 项目 / 驱动本机 Pi / 模型与密钥 / 提示词与出口） | [constraints/ai.md](docs/constraints/ai.md) |
 | 用量与外观同步、账号登录 | [constraints/sync-and-auth.md](docs/constraints/sync-and-auth.md) |
 | 密码保险库（密钥 / 加解密 / 多机共写一份文件） | [constraints/vault.md](docs/constraints/vault.md) |
 
@@ -151,6 +154,8 @@
   其余以 `package.json` 为准，不新增 lint / format 工具。
 - 改了 Rust 要跑 `cargo test` **与 `cargo build`**：`cargo test` 编译的是开着 `cfg(test)` 的那个 bin，被 `#[cfg(test)]` 关起来的东西
   在那边是可见的，拿它当生产代码用时 test 一片绿、build 才报「not found, an item that was configured out」。
+- 动过 `.vue` 的模板（加 / 删 / 挪标签）要顺手跑一次 `npm run build:renderer`：**`npm run typecheck` 查不出模板标签不配平** ——
+  实测 vue-tsc 全绿而 vite 报 `Invalid end tag`、页面白屏，只有真的编译一遍模板才发现得了。
 - **改 Rust 前先关掉正在运行的应用**：exe 被占用会链接失败，而构建失败后跑起来的仍是旧二进制，结论会完全跑偏。
   `tauri build` 与 `tauri dev` 也别同时跑（抢同一个 `target/` 构建锁）。
 - **停掉 `npm run dev` 之后要确认那一串子进程真的都没了**：Windows 上杀掉外层命令不会带走它的子孙。按端口与进程名各查一遍

@@ -25,10 +25,17 @@ import { sanitizeImageRepo } from './note-image'
 import { sanitizeSyncRepo } from './token-usage'
 import { sanitizeWeatherCity } from './weather'
 import {
+  pickAiActiveSession,
   sanitizeAiApiFormat,
   sanitizeAiBaseUrl,
+  sanitizeAiHistory,
+  sanitizeAiModelId,
   sanitizeAiModels,
-  sanitizeAiName
+  sanitizeAiName,
+  sanitizeAiPermission,
+  sanitizeAiSessionId,
+  sanitizeAiSessions,
+  sanitizeAiThinking
 } from './ai'
 import { pruneDays, sanitizeActivity } from './activity'
 import { sanitizeViewId } from './views'
@@ -108,8 +115,24 @@ export function sanitizeSettings(raw: unknown): StoredSettings {
   value.aiBaseUrl = sanitizeAiBaseUrl(value.aiBaseUrl)
   value.aiApiFormat = sanitizeAiApiFormat(value.aiApiFormat)
   value.aiModels = sanitizeAiModels(value.aiModels)
-  // AI 助手的工作目录（本机挑的一个目录）：与笔记 / 技能 / 知识库同一条收敛 —— 它要拿去拼路径
-  value.aiWorkDir = sanitizeNoteRoot(value.aiWorkDir)
+  // 页面上挑的那个模型与思考档位（行为记忆）：老数据文件里没有，默认空串 / 默认档。
+  // 挑的模型不在这里对着清单核对 —— 清单随时可以关停增减，核对放在用它的那一刻
+  // （shared/ai.ts 的 pickAiModel）
+  value.aiRunModel = sanitizeAiModelId(value.aiRunModel)
+  value.aiThinking = sanitizeAiThinking(value.aiThinking)
+  // 工具权限（composer 左边那一栏）：老数据文件里没有，默认自动编辑（命令先问一句）
+  value.aiPermission = sanitizeAiPermission(value.aiPermission)
+  // 用过的指令（新任务那一屏下方那排 chips）：老数据文件里没有，默认空清单。
+  // 去空白、按原文去重、限长限量都在收敛里做
+  value.aiHistory = sanitizeAiHistory(value.aiHistory)
+  // 会话清单与「上次打开的那个」：老数据文件里没有，默认空清单 / 空串。
+  // 会话 id 要拿去当 Pi 的 session-id（字符集是它定的）、目录要拿去拼路径与起进程，
+  // 两样都在收敛里卡住；选中的那个认不出来（被删了）时回最近说过话的那个
+  value.aiSessions = sanitizeAiSessions(value.aiSessions)
+  value.aiActiveSession = pickAiActiveSession(value.aiSessions, sanitizeAiSessionId(value.aiActiveSession))
+  // AI 助手的工作目录已废弃：会话把「在哪个目录里干活」收到了自己身上（一个会话一个目录，
+  // 见 AiSession），再留一个全局的值就是第二份真源 —— 而且它会把上一次的目录一直写回。
+  delete (value as unknown as Record<string, unknown>).aiWorkDir
   // 笔记仓库地址已废弃：同步现在只看那个文件夹自己的 `origin`（见 shared/note.ts 的 NoteRepoState），
   // 地址不再进设置。旧数据文件里存着它，不主动清掉的话它会一直被写回，看着像还有人在用它。
   delete (value as unknown as Record<string, unknown>).noteSyncRepo

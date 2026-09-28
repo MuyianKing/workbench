@@ -395,9 +395,15 @@ pub fn ai_provider_write(
     crate::ai::provider_write(&provider, &base_url, &api, &models)
 }
 
-/// 跑一次整理。输出与退出照旧走 `session:lines` / `session:exit`，
-/// 渲染层按会话 id 前缀 `ai:` 接住（它不属于任何项目终端）。
+/// 在一条会话里跑一轮（会话没在跑就把它起起来）。输出与退出照旧走 `session:lines` /
+/// `session:exit`，渲染层按会话 id 前缀 `ai:` 接住（它不属于任何项目终端）。
+/// 提示词空串 = 只把进程起起来（打开旧会话读历史走这条）。
+///
+/// `permission` 是权限模式（`auto-edit` / `full`，形状在 shared/ai.ts）：自动编辑时
+/// ai.rs 会加载一份 `tool_call` 钩子扩展，模型要执行命令时先回头问一次 —— 那次询问是
+/// stdout 上的 `extension_ui_request`，答复经下面的 `session_write` 回给它。
 #[tauri::command(async)]
+#[allow(clippy::too_many_arguments)]
 pub fn ai_run(
     app: AppHandle,
     session_id: String,
@@ -406,9 +412,18 @@ pub fn ai_run(
     program: String,
     args: Vec<String>,
     provider: String,
-    model: String,
+    permission: String,
 ) -> Result<u32, String> {
-    crate::ai::run(&app, session_id, dir, prompt, program, args, provider, model)
+    crate::ai::run(
+        &app, session_id, dir, prompt, program, args, provider, permission,
+    )
+}
+
+/// 删掉一条会话的留档（Pi 写在数据目录下的会话文件），返回删掉几个。
+/// **渲染层先收进程再调这里**：活着的进程还在往那个文件里写（见 ai.rs 的 session_delete）。
+#[tauri::command(async)]
+pub fn ai_session_delete(session_id: String) -> Result<usize, String> {
+    crate::ai::session_delete(&session_id)
 }
 
 /// 存 / 覆盖某个提供方的 API Key（进 Windows 凭据管理器，不回显、不落 JSON）
@@ -688,6 +703,15 @@ pub fn spawn_session(
     path_prepend: Option<String>,
 ) -> Result<u32, String> {
     crate::session::spawn(&app, session_id, line, cwd, path_prepend, &[])
+}
+
+/// 往一条会话的标准输入写一行 JSON。**目前只有 AI 那条 RPC 通道用得上**：
+/// 提示词由 Rust 侧写（见 ai.rs），扩展问「这条命令让不让跑」时的答复由渲染层写回来
+/// （形状见 shared/ai.ts 的 confirmFrame）。别的会话起进程时给的是 null stdin，
+/// 这里会回一句「这条会话不接受输入」，不会静默丢掉。
+#[tauri::command]
+pub fn session_write(app: AppHandle, session_id: String, line: String) -> Result<(), String> {
+    crate::session::write_stdin(&app, &session_id, &line)
 }
 
 // ---------- nvm ----------

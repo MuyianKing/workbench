@@ -38,7 +38,7 @@ import type {
   SkillSyncSummary
 } from './skills'
 import type { KbRepoState, KbScanEntry, KbSyncInput, KbSyncSummary } from './kb'
-import type { AiModelEntry } from './ai'
+import { AI_PERMISSION_DEFAULT, AI_THINKING_DEFAULT, type AiModelEntry, type AiSession } from './ai'
 import type {
   NoteImageDeleteInput,
   NoteImageDeleted,
@@ -457,18 +457,53 @@ export interface AppSettings {
    */
   aiApiFormat: string
   /**
-   * 模型清单（可启停）：启用的那些才进 models.json，跑的是**第一个启用的**。
+   * 模型清单（可启停）：启用的那些才进 models.json，也就是页面上那个「模型」下拉里能挑的。
    * 收敛（去重、限量、形状）见 shared/ai.ts 的 sanitizeAiModels。
    */
   aiModels: AiModelEntry[]
   /**
-   * AI 助手的工作目录（用户自己挑的一个目录）：子进程就在它里面干活，提示词里也写明。
-   *
-   * 与知识库的 `kbDir` **互不相干** —— 这一页是通用的 agent 控制台，处理知识库只是
-   * 「把目录指到那个仓库、写一条照它规范整理的指令」的一种用法。
-   * 空串 = 还没选过（页面显示引导）。收敛与笔记 / 技能目录同一条（sanitizeNoteRoot）。
+   * 这一轮跑哪个模型：用户在页面上挑的那颗（清单里的 id，行为记忆）。
+   * 空串 = 没挑过，用第一个启用的；挑过的那个被关掉 / 删掉时也回到第一个启用的 ——
+   * 成不成、退回哪一个都在 shared/ai.ts 的 pickAiModel 里定。
    */
-  aiWorkDir: string
+  aiRunModel: string
+  /**
+   * 思考等级：Pi 的 `--thinking` 认的那七档之一（`off` / `minimal` / … / `max`），
+   * 界面上也是一个下拉。收敛在 shared/ai.ts 的 sanitizeAiThinking
+   * （认不出的回它自己的默认档 medium）。
+   */
+  aiThinking: string
+  /**
+   * 工具权限：`auto-edit`（自动编辑，命令先问一句）或 `full`（完全访问，什么都不问），
+   * composer 左边那一栏挑（形状与收敛在 shared/ai.ts 的 AI_PERMISSION_MODES /
+   * sanitizeAiPermission，默认自动编辑）。它交给 Rust 决定加不加载那份确认扩展
+   * （ai.rs **只把 `full` 当「不问」**，认不出的按自动编辑走）—— 问不问是结构上的差别，
+   * 不是「问了然后自动答是」。
+   */
+  aiPermission: string
+  /**
+   * 用过的指令（最新的在前）：AI 助手页新任务那一屏下方那一排 chips 就是它，
+   * 点一下把那段话填回输入框。**是用户自己写过的原文**，页面里不内置任何一类任务的
+   * 提示词（见 docs/constraints/ai.md）；起进程之前记一条（跑没跑起来都算用过）。
+   * 收敛（去空、去重、限长限量）在 shared/ai.ts 的 sanitizeAiHistory。
+   */
+  aiHistory: string[]
+  /**
+   * AI 助手的会话（最新的在前）：一个会话 = **一个工作目录里的一段连续对话**，
+   * 在 AI 助手页左栏那棵两层树上就是「项目 → 会话」里的第二层。
+   *
+   * 这里只存**调度用的那点东西**（id / 目录 / 标题 / 时间），对话本身不在应用的数据文件里
+   * —— 它由 Pi 自己写进会话文件（`%APPDATA%\Workbench\data\pi\sessions\`，同一条 id），
+   * 打开会话时经 RPC 的 `get_messages` 读回来画（见 shared/ai.ts 的 sessionMessagesToLines）。
+   * 收敛（去空、去重、限量）在 shared/ai.ts 的 sanitizeAiSessions。
+   */
+  aiSessions: AiSession[]
+  /**
+   * 左栏上选中的那个会话（行为记忆：换台机器就不成立，所以住这儿而不是主题文件）。
+   * 认不出来的（被删掉的）回最近说过话的那个，一个会话都没有时是空串。
+   * 判定在 shared/ai.ts 的 pickAiActiveSession。
+   */
+  aiActiveSession: string
   /**
    * 天气城市名：顶栏问候语旁显示当地实时天气，空串表示不显示（也就不联网）。
    *
@@ -1058,29 +1093,35 @@ export interface DesignWriteOutcome {
 
 /** `window.workbench` 向渲染层暴露的 API（由适配层实现） */
 /**
- * 一次 AI 整理任务的入参（`aiRun`）。
+ * 一次 AI 任务的入参（`aiRun`）。
  *
  * `program` 与 `args` 由渲染层的纯函数拼（shared/ai.ts 的 piLaunch，有单测）：
  * 直启 `node <内置 cli.js>` 或全局 `pi`，**不经 cmd 的整行解析** —— 行内层引号会被
- * cmd 的引号剥离规则拆坏（踩过）。提示词也不在这里：Rust 写进临时文件后以 Pi 的
- * `@文件` 语法追加在最后一个参数上。**密钥也不在这里** —— 它在凭据管理器里，
- * Rust 按提供方名取出来注入环境变量（见 src-tauri/src/ai.rs）。
+ * cmd 的引号剥离规则拆坏（踩过）。用哪个模型、挂在哪个会话上也在这组参数里
+ * （`--provider` / `--model` / `--session-id`：Pi 不读 PI_MODEL 环境变量，只认参数）。
+ * **提示词不在这里**：Pi 跑 RPC 模式，提示词是 stdin 上的一行 JSON，由 Rust 写进去
+ * （见 src-tauri/src/ai.rs）。**密钥也不在这里** —— 它在凭据管理器里，Rust 按提供方名
+ * 取出来注入环境变量。
  */
 export interface AiRunInput {
-  /** 会话 id（`ai:` 开头）：输出与退出靠它回到这个页面 */
+  /** 子进程会话 id（`ai:<会话 id>`）：输出与退出靠它回到这个会话 */
   sessionId: string
-  /** 知识库根目录（子进程的工作目录，也是提示词里写明的那个目录） */
+  /** 工作目录（子进程的工作目录，也是提示词里写明的那个目录） */
   dir: string
-  /** 整理提示词全文 */
+  /**
+   * 提示词全文（Rust 写成 stdin 的一行 JSON）。**空串 = 只把进程起起来、不发提示词** ——
+   * 打开一个旧会话读历史（`get_messages`）走的就是这条路；同一条会话已经有活着的进程时，
+   * 这一句就是接着聊的那一轮。
+   */
   prompt: string
   /** 要直启的程序：`node`（内置模式）或 `pi`（全局退路） */
   program: string
-  /** 参数数组（不含提示词；Rust 会把 `@<提示词文件>` 追加在末尾） */
+  /** 参数数组（不含提示词；自动编辑时 Rust 会追加 `-e <权限扩展>`） */
   args: string[]
-  /** 提供方名（取密钥的凭据名，也是模型寻址的前缀 `提供方/模型`） */
+  /** 提供方名：取密钥用的凭据名（模型在 args 里） */
   provider: string
-  /** 模型 id（第一个启用的那个） */
-  model: string
+  /** 工具权限模式（shared/ai.ts 的 AI_PERMISSION_MODES；只有 `full` 是「不问」） */
+  permission: string
 }
 
 export interface WorkbenchApi {
@@ -1727,7 +1768,12 @@ export const DEFAULT_SETTINGS: AppSettings = {
   aiBaseUrl: '',
   aiApiFormat: '',
   aiModels: [],
-  aiWorkDir: '',
+  aiRunModel: '',
+  aiThinking: AI_THINKING_DEFAULT,
+  aiPermission: AI_PERMISSION_DEFAULT,
+  aiHistory: [],
+  aiSessions: [],
+  aiActiveSession: '',
   weatherCity: '',
   tokenSyncRepo: '',
   activeView: 'home',

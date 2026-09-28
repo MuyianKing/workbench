@@ -17,9 +17,9 @@
 //! 所以：表锁只借一下就放，子进程句柄自带一把锁（见 `Session` 与 `wait_for_exit`）。
 
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader, ErrorKind, Read};
+use std::io::{BufRead, BufReader, ErrorKind, Read, Write};
 use std::path::PathBuf;
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -41,6 +41,10 @@ pub struct Session {
     /// 子进程句柄。等待线程要握着它一直等到进程退出，所以**单给它一把锁**：
     /// 拿整张表的锁去 `wait()` 的话，子进程活多久整张表就被锁多久（见 `wait_for_exit`）。
     child: Mutex<Child>,
+    /// 子进程的标准输入：只有**要双向说话**的那种会话才有（`spawn_args`，
+    /// 现在只有 AI 那条 RPC 通道：提示词从这儿进去、扩展的确认答复也从这儿回）。
+    /// 终端那类不给 stdin（`Stdio::null()`），表里是 `None` —— 见 `write_stdin`。
+    stdin: Mutex<Option<ChildStdin>>,
     pub pid: u32,
 }
 
@@ -109,14 +113,18 @@ pub fn spawn(
         cwd,
         path_prepend,
         envs,
+        false,
     )
 }
 
-/// 直启形态：程序 + 参数数组，**不经 `cmd /C` 的整行解析**。
+/// 直启形态：程序 + 参数数组，**不经 `cmd /C` 的整行解析**，并给子进程一根**可写的 stdin**。
 ///
-/// 与 `proc::run_direct` 存在的理由同一条（git 为什么直启）：整行交给 cmd 时，
-/// 行内层引号会被 cmd 的引号剥离规则拆坏 —— 现有终端命令（npm run dev 这类）没有
-/// 内层引号所以从没踩过；AI 那条命令的 cli.js 路径带引号，必须走这里。
+/// 与 `proc::run_direct` 存在的理由同一条（git 为什么直启）：整行交给 cmd 时，行内层引号会被
+/// cmd 的引号剥离规则拆坏 —— 现有终端命令（npm run dev 这类）没有内层引号所以从没踩过；
+/// AI 那条命令的 cli.js 路径带引号，必须走这里。
+///
+/// stdin 是给 AI 那条 RPC 通道的：提示词与扩展确认的答复都是一行 JSON（见 ai.rs 的 run）。
+/// 别的会话没人往里写，它们走 `spawn`（shell 那条，stdin 给 null）。
 pub fn spawn_args(
     app: &AppHandle,
     session_id: String,
@@ -130,7 +138,7 @@ pub fn spawn_args(
     cmd.args(args);
     #[cfg(windows)]
     cmd.creation_flags(CREATE_NO_WINDOW);
-    spawn_cmd(app, session_id, cmd, cwd, path_prepend, envs)
+    spawn_cmd(app, session_id, cmd, cwd, path_prepend, envs, true)
 }
 
 /// `spawn` / `spawn_args` 共用的后一半：环境注入、入表、读管道、等退出。
@@ -141,10 +149,14 @@ fn spawn_cmd(
     cwd: Option<String>,
     path_prepend: Option<String>,
     envs: &[(String, String)],
+    piped_stdin: bool,
 ) -> Result<u32, String> {
-    cmd.stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+    if piped_stdin {
+        cmd.stdin(Stdio::piped());
+    } else {
+        cmd.stdin(Stdio::null());
+    }
+    cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
 
     if let Some(dir) = cwd.as_deref().map(str::trim).filter(|dir| !dir.is_empty()) {
         cmd.current_dir(dir);
@@ -175,12 +187,15 @@ fn spawn_cmd(
 
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
+    // 只有 piped 的那条路才有：`Stdio::null()` 时 child.stdin 本来就是 None
+    let stdin = child.stdin.take();
 
     // 先入表再起等待线程：等待线程要能在表里找到它
     {
         let state = app.state::<Sessions>();
         let entry = Arc::new(Session {
             child: Mutex::new(child),
+            stdin: Mutex::new(stdin),
             pid,
         });
         state.0.lock().unwrap().insert(session_id.clone(), entry);
@@ -374,13 +389,19 @@ fn pipe_lines(app: AppHandle, session_id: String, stream: &'static str, pipe: im
     });
 }
 
+/// 这条会话还在不在跑（表里那个进程的 pid）。
+///
+/// AI 那条链路用它决定一件事：**接着聊，还是重新起一个**。会话长驻（一个会话一个进程，
+/// 见 ai.rs 的文件头），同一个 id 上还有活着的进程时，提示词直接写进它的 stdin 就行。
+/// 进程自己退出时等待线程会把它从表里摘掉，所以「表里有」就等于「还活着」。
+pub fn pid_if_alive(app: &AppHandle, session_id: &str) -> Option<u32> {
+    let state = app.state::<Sessions>();
+    session_of(&state, session_id).map(|session| session.pid)
+}
+
 /// 结束一个会话：按进程树杀。真正的退出码由等待线程发出去。
 pub fn stop(app: &AppHandle, session_id: &str) -> Result<(), String> {
-    let pid = {
-        let state = app.state::<Sessions>();
-        let map = state.0.lock().unwrap();
-        map.get(session_id).map(|session| session.pid)
-    };
+    let pid = pid_if_alive(app, session_id);
 
     let Some(pid) = pid else {
         return Err("该会话已经不在运行".to_string());
@@ -393,6 +414,31 @@ pub fn stop(app: &AppHandle, session_id: &str) -> Result<(), String> {
     }
 
     crate::proc::kill_process_tree(pid)
+}
+
+/// 往一条会话的标准输入写一行（自己补 `\n`）。
+///
+/// AI 那条 RPC 通道用它：提示词与「扩展确认」的答复都是一行 JSON（见 ai.rs 的 prompt_frame、
+/// shared/ai.ts 的 confirmFrame）。**只有 `spawn_args` 起的会话能写** ——
+/// 终端与安装那类会话的 stdin 是 null，这里明说一句，不当成写成功了。
+pub fn write_stdin(app: &AppHandle, session_id: &str, line: &str) -> Result<(), String> {
+    let session = {
+        let state = app.state::<Sessions>();
+        session_of(&state, session_id)
+    };
+    let Some(session) = session else {
+        return Err("这一轮已经结束了".to_string());
+    };
+
+    let mut guard = session.stdin.lock().unwrap();
+    let Some(stdin) = guard.as_mut() else {
+        return Err("这条会话不接受输入".to_string());
+    };
+    stdin
+        .write_all(line.as_bytes())
+        .and_then(|_| stdin.write_all(b"\n"))
+        .and_then(|_| stdin.flush())
+        .map_err(|err| format!("写入会话失败：{err}"))
 }
 
 /// 结束所有会话，供退出时收尾
@@ -520,6 +566,7 @@ mod tests {
             "probe".to_string(),
             Arc::new(Session {
                 child: Mutex::new(child),
+                stdin: Mutex::new(None),
                 pid,
             }),
         );
