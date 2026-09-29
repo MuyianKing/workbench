@@ -39,6 +39,12 @@
   `input` 里没有的模型收到的是 `(image omitted: model does not support images)` ——
   所以界面上贴图那道门槛（`AiModelChoice.imageInput`）不是装饰。`get_messages` 读回来的
   用户消息里那段图还在（`{type:'image',data,mimeType}`，那段 base64 就是能直接画的数据 URL）。
+- **瘦身后的树上（2026-09-29）**：删掉那 7 个包、`resources/pi` 只剩 59MB 之后，两条 API 形态
+  （`openai-completions` 打 `/v1/chat/completions` 带 `Authorization: Bearer`、`anthropic-messages`
+  打 `/v1/messages` 带 `x-api-key`）都照常把请求发到假端点，`-e permission.js` 照常加载、
+  confirm 一问一答之后 `bash` 真的跑出结果；models.json 的 `apiKey` 照应用那样写
+  `$WORKBENCH_AI_KEY`（借环境变量插值顺手把这条也验了）。**这两种形态各走哪条路（内联进
+  bundle 还是落到树里）是新版本自己的事，换版本后要重跑。**
 
 **换 Pi 版本后重跑一遍**这些点 —— CLI 与事件协议是外部契约（见
 [constraints/ai.md](../constraints/ai.md) 的文件头）。

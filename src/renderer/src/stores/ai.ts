@@ -31,13 +31,13 @@ import {
   aiSessionTitle,
   confirmFrame,
   formatDuration,
+  formatUsageSummary,
   nodeSatisfiesPi,
   piLaunch,
   piLaunchForDisplay,
   pickAiActiveSession,
   pickAiChoice,
   pickAiThinking,
-  rememberAiInstruction,
   rememberAiSession,
   sanitizeAiApiFormat,
   sanitizeAiBaseUrl,
@@ -57,6 +57,7 @@ import {
   type AiLogLine,
   type AiProvider,
   type AiSession,
+  type AiUsage,
   type PiDelta
 } from '@shared/ai'
 import type { Result } from '@shared/types'
@@ -119,15 +120,20 @@ interface AiRun {
   streamBuffer: string
   streamTimer: ReturnType<typeof setTimeout> | null
   /**
-   * 模型正在想的那一段（`thinking_delta`）：与正文同一套节流，画在对话末尾那块
-   * 「思考中…」里。**一段想完了（`thinking_end`）就落成一行 `kind: 'thinking'`**
-   * （那是面板上收着的那块「思考过程」），这里随之清空。
+   * 模型正在想的那一段（`thinking_delta`）：与正文同一套节流，画在跑着那轮的
+   * 「过程」块末尾（它就是那一刻最新的内容，长在所有已落地行的下面）。
+   * **一段想完了（`thinking_end`）就落成一行 `kind: 'thinking'`**（收进同一块），这里随之清空。
    */
   thinkText: string
   thinkBuffer: string
   thinkTimer: ReturnType<typeof setTimeout> | null
   /** 这一刻正在思考（`thinking_start` / 第一个增量到、到 `thinking_end` 为止） */
   thinking: boolean
+  /**
+   * 这一轮攒下的 token 消耗（每条助手消息的 `usage` 累加，见 onUsage）：收尾时跟在
+   * 「用时 …」旁边落一行（见 noteDuration）。发下一句时清零 —— 那一行是每一轮自己的账。
+   */
+  usage: AiUsage
 }
 
 /** 还没建过运行态时读到的那一份（只读，永远不写进去） */
@@ -149,7 +155,8 @@ const IDLE_RUN: AiRun = Object.freeze({
   thinkText: '',
   thinkBuffer: '',
   thinkTimer: null,
-  thinking: false
+  thinking: false,
+  usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
 })
 
 /**
@@ -210,7 +217,8 @@ export const useAiStore = defineStore('ai', () => {
       thinkText: '',
       thinkBuffer: '',
       thinkTimer: null,
-      thinking: false
+      thinking: false,
+      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
     }
     runs.set(sessionId, created)
     // 回**代理**而不是 created 本体：reactive Map 的 get 才会把对象包成响应式代理，
@@ -266,10 +274,6 @@ export const useAiStore = defineStore('ai', () => {
    */
   const creating = ref(false)
 
-  /** 用过的指令（最新的在前，记在设置里）：页面下那排 chips */
-  const history = computed(() => settings.settings.aiHistory)
-  /** 页面上只摆最近这几条 */
-  const recentInstructions = computed(() => history.value.slice(0, 4))
   /** 最近用过的工作目录（挑目录那几处列的就是它）：按树的顺序取，最多三个 */
   const recentDirs = computed(() => groups.value.slice(0, 3).map((group) => group.dir))
 
@@ -714,6 +718,17 @@ export const useAiStore = defineStore('ai', () => {
           run.thinkText = run.thinkBuffer
         }, STREAM_TICK)
       },
+      onUsage: (usage: AiUsage) => {
+        const run = runs.get(sessionId)
+        if (!run) return
+        // 一轮里模型说了好几段（中间隔着工具调用），每段带一份 —— 这里累加成这一轮的
+        run.usage = {
+          input: run.usage.input + usage.input,
+          output: run.usage.output + usage.output,
+          cacheRead: run.usage.cacheRead + usage.cacheRead,
+          cacheWrite: run.usage.cacheWrite + usage.cacheWrite
+        }
+      },
       onConfirm: (confirm: AiConfirm) => {
         const run = runs.get(sessionId)
         if (!run) return
@@ -744,7 +759,7 @@ export const useAiStore = defineStore('ai', () => {
   /**
    * 思考那一段收尾（与 endStream 同一条路子）：`authoritative` 是 `thinking_end` 给的
    * 整块内容（有就以它为准），`keep` 为真时把这一段落成对话里的一行 `kind: 'thinking'`
-   * —— 面板上它是那块**收着的**「思考过程」（跑完自动收起，点开还能看，见 AiThinking.vue）。
+   * —— 面板上它是那块**收着的**「思考过程」（跑完自动收起，点开还能看，见 AiProcess.vue）。
    */
   function endThink(run: AiRun, authoritative = '', keep = false): void {
     if (run.thinkTimer) {
@@ -809,13 +824,10 @@ export const useAiStore = defineStore('ai', () => {
     if (runState.running) return
 
     const launch = launchFor(session)
-    // 记一条用过的指令：**起进程之前**记（跑没跑起来都算用过 —— 「试一次没成功」是最常见的
-    // 情形，那时更需要留个底）。页面下那排 chips 读的就是这份历史。**只有图没有字的那句
-    // 不进历史**（chips 上摆不下一张图），但标题要有一个 —— 标题空着等于「还没说过话」，
-    // 下次打开这段会话就不去读历史了（见 hydrate）
+    // 第一次说话时把标题定下来（左栏上那一行）；之后不再改。**只有图没有字的那句**标题
+    // 记成「（N 张图）」—— 标题空着等于「还没说过话」，下次打开这段会话就不去读历史了
+    // （见 hydrate）
     void settings.updateSettings({
-      aiHistory: rememberAiInstruction(history.value, text),
-      // 第一次说话时把标题定下来（左栏上那一行）；之后不再改
       aiSessions: rememberAiSession(sessions.value, {
         ...session,
         title: session.title || aiSessionTitle(text) || `（${attached.length} 张图）`,
@@ -828,6 +840,8 @@ export const useAiStore = defineStore('ai', () => {
     runState.running = true
     runState.stopping = false
     runState.startedAt = Date.now()
+    // 消耗从零攒起：这一轮自己的账（上一轮的已经跟「用时」落在那一行了）
+    runState.usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
     // 上一轮万一还留着没冲掉的流式尾巴（正常路径下不会有）：这一轮开场前清掉，别串到新话里
     endStream(runState)
     endThink(runState)
@@ -920,12 +934,18 @@ export const useAiStore = defineStore('ai', () => {
   /**
    * 在这一轮末尾补一行「用时 …」：回复长的时候用户就想知道它到底跑了多久
    * （也是「这一轮到这儿完了」的一个安静的句号 —— 那两条进度行不画，见 isTurnMarker）。
+   * 端点报了消耗的话把 token 也带上（`输入 … · 输出 …`，这一轮各段消息累加的账）；
+   * 没报就只有用时 —— 自定义端点不保证都有。
    */
   function noteDuration(run: AiRun): void {
     if (!run.startedAt) return
     const text = formatDuration(Date.now() - run.startedAt)
     run.startedAt = 0
-    run.lines = [...run.lines, { kind: 'duration', text: `用时 ${text}` }]
+    const usage = formatUsageSummary(run.usage)
+    run.lines = [
+      ...run.lines,
+      { kind: 'duration', text: usage ? `用时 ${text} · ${usage}` : `用时 ${text}` }
+    ]
   }
 
   /** 进程退出了（我们收的，或者它自己崩了）：把这一轮的状态收尾 */
@@ -1289,8 +1309,6 @@ export const useAiStore = defineStore('ai', () => {
     activeSession,
     runs,
     instruction,
-    history,
-    recentInstructions,
     recentDirs,
     newDir,
     setNewDir,

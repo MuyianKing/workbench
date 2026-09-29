@@ -474,6 +474,8 @@ export const useKbStore = defineStore('kb', () => {
         },
         // 流式增量不进清洗面板：整段到位时（message_end）自然作为一行出现
         onDelta: () => {},
+        // 消耗只在 AI 助手页的收据上记账（清洗面板没有「用时」那一行）
+        onUsage: () => {},
         onConfirm: (confirm) => {
           if (cleanSessionId !== sessionId) return
           // 「完全访问」不加载权限扩展，确认帧本不该来；真来了（别的扩展源头）还是挡回去，

@@ -3,16 +3,18 @@
  * AI 助手页：一个**通用的 agent 控制台** —— 左栏挑一段会话，右栏跟它说下去。
  *
  * 版式是**左树右对话**（与笔记页、视频页同一副分栏，宽度也住 theme.json 的 `aiTreeWidth`）：
- * 左栏能整栏收起（theme.json 的 `aiTreeCollapsed`，入口浮在右栏左上角，与视频页同一套做法）。
+ * 左栏能整栏收起（theme.json 的 `aiTreeCollapsed`）：收起的开关平常就在左栏底部那一行，
+ * 树收起来之后那一行跟着没了，右栏左上角会浮出一颗「展开」（与视频页同一套做法）。
  *
  *  - **左栏**：项目 → 会话的两层树（`AiSessionTree`）。第一层是项目（一个工作目录），
- *    第二层是那个目录下的会话；行上那两颗按钮是「在这个目录里起一段新的」与「删除」。
+ *    第二层是这个目录下的会话；行上那两颗按钮是「在这个目录里起一段新的」与「删除」。
  *    顶上那颗「+」也是**起一段新的**（不挑目录，接着最近用过的那个）。
+ *    底部那一行是两个不跟会话走的入口：**技能**（装卸与开关的管理弹窗）与**收起整栏**。
  *  - **右栏**：挑中一个会话就是**控制台** —— 上面是这段对话（历史 + 这一轮，自己往下滚），
  *    下面还是那一栏目录与分支 + composer（跑着的时候那颗按钮就是停止）。
  *    没挑中会话时是**起始那一屏**（一段会话都还没有，或者刚点了「+」）：中间就是控制台
- *    那一屏那条 composer，上面是位置那一栏（这一屏由它**挑目录**）、下面是用户自己写过的
- *    指令 —— **一进来就能直接写**，会话在发出第一句时才建（见 stores/ai.ts 的 run）。
+ *    那一屏那条 composer，上面是位置那一栏（这一屏由它**挑目录**）——
+ *    **一进来就能直接写**，会话在发出第一句时才建（见 stores/ai.ts 的 run）。
  *    **两屏都没有顶部工具条**：标题、目录那些要么与导航栏重复、要么下面那一栏已经说了。
  *
  * **页面不摆提示行**（说明、问候、还差什么）：这个应用是给作者自己用的，页面上把控件本身
@@ -23,7 +25,7 @@
  * 模型与档位那两个下拉直接写设置（行为记忆，下次打开还是它）。
  */
 import { computed, onMounted, ref } from 'vue'
-import { Download, Expand, Fold, Plus } from '@element-plus/icons-vue'
+import { Download, Expand, Fold, MagicStick, Plus } from '@element-plus/icons-vue'
 import AiComposer from '@/components/AiComposer.vue'
 import AiSkillDialog from '@/components/AiSkillDialog.vue'
 import AiLocationBar from '@/components/AiLocationBar.vue'
@@ -70,12 +72,6 @@ function toggleTree(): void {
 const runningIds = computed(() =>
   [...ai.runs.entries()].filter(([, run]) => run.running).map(([id]) => id)
 )
-
-/** 历史里那一条在 chip 上怎么显示：压成一行、长了就截断（全文在 tooltip 里，点一下填回去） */
-function chipLabel(text: string): string {
-  const oneLine = text.replace(/\s+/g, ' ').trim()
-  return oneLine.length > 12 ? `${oneLine.slice(0, 12)}…` : oneLine
-}
 </script>
 
 <template>
@@ -105,6 +101,22 @@ function chipLabel(text: string): string {
         @start="ai.startNew"
         @remove="ai.deleteSession"
       />
+
+      <!-- 左栏底部那一行：两个不跟会话走的入口。树自己 flex:1 吃掉剩余高度，这一行永远钉在底下 -->
+      <footer class="side__foot">
+        <el-button class="side__skills" text :icon="MagicStick" @click="skillVisible = true">
+          技能
+        </el-button>
+        <el-tooltip content="收起会话列表" placement="top">
+          <el-button
+            class="side__fold"
+            text
+            :icon="Fold"
+            aria-label="收起会话列表"
+            @click="toggleTree"
+          />
+        </el-tooltip>
+      </footer>
     </aside>
 
     <!-- 两栏之间的分隔条：热区是一条通高的窄条，看得见的只有正中间那个小竖条 -->
@@ -117,12 +129,12 @@ function chipLabel(text: string): string {
     />
 
     <section class="ai-view__main">
-      <!-- 左栏的收起 / 展开入口：树收起来之后这颗按钮是唯一的开关（与视频页播放器头部
-           那颗同一件事，这页两屏都没有头部，就落在右栏的左上角；两屏都看得见它） -->
-      <el-tooltip :content="treeCollapsed ? '展开会话列表' : '收起会话列表'" placement="bottom">
+      <!-- 树收起来之后左栏底部那行跟着没了，这颗浮出的「展开」是唯一的开关（两屏都看得见；
+           树摊开时它不画 —— 收起的开关在左栏底部那一行） -->
+      <el-tooltip v-if="treeCollapsed" content="展开会话列表" placement="bottom">
         <el-button
           class="ai-view__tree-toggle"
-          :icon="treeCollapsed ? Expand : Fold"
+          :icon="Expand"
           :aria-label="treeCollapsed ? '展开会话列表' : '收起会话列表'"
           @click="toggleTree"
         />
@@ -152,7 +164,7 @@ function chipLabel(text: string): string {
         </section>
 
         <AiLocationBar />
-        <AiComposer @configure="modelVisible = true" @skills="skillVisible = true" />
+        <AiComposer @configure="modelVisible = true" />
       </template>
 
       <!-- 起始那一屏：没挑中会话（一段都还没有 / 都删光了 / 刚点了左栏那颗「+」）——
@@ -161,15 +173,13 @@ function chipLabel(text: string): string {
       <div v-else class="landing">
         <div class="landing__box">
           <AiLocationBar />
-          <AiComposer @configure="modelVisible = true" @skills="skillVisible = true" />
+          <AiComposer @configure="modelVisible = true" />
 
-          <!-- 输入框底下这一行：两个都没有时它整条不画 -->
-          <div v-if="!ai.piVersion || ai.recentInstructions.length" class="landing__foot">
-            <!-- 只在没探到 Pi 时才摆这一颗（它随包内置，正常看不到）。控制台那一屏那颗长在
-                 运行面板的顶部通知条上（见 AiRunPanel），这一屏没有那一条，所以在这儿补一颗；
-                 发送那颗按钮按不动时说的就是它（见 stores/ai.ts 的 blocking） -->
+          <!-- 只在没探到 Pi 时才有东西的一行（它随包内置，正常看不到）。控制台那一屏那颗
+               长在运行面板的顶部通知条上（见 AiRunPanel），这一屏没有那一条，所以在这儿
+               补一颗；发送那颗按钮按不动时说的就是它（见 stores/ai.ts 的 blocking） -->
+          <div v-if="!ai.piVersion" class="landing__foot">
             <el-button
-              v-if="!ai.piVersion"
               size="small"
               :icon="Download"
               :loading="ai.installing"
@@ -177,18 +187,6 @@ function chipLabel(text: string): string {
             >
               安装 Pi
             </el-button>
-
-            <!-- 用户自己写过的指令：点一下填回输入框（页面不内置任何预设） -->
-            <el-tooltip
-              v-for="text in ai.recentInstructions"
-              :key="text"
-              :content="text"
-              placement="top"
-            >
-              <el-button size="small" class="landing__chip" @click="ai.instruction = text">
-                {{ chipLabel(text) }}
-              </el-button>
-            </el-tooltip>
           </div>
         </div>
       </div>
@@ -220,6 +218,9 @@ function chipLabel(text: string): string {
 .ai-view__side {
   display: flex;
   flex-direction: column;
+  /* .panel 自带的 12px gap 对这一栏太松（用户拍板去掉）：表头与树贴着排，
+     树与底部那一行的间隔由 .side__foot 自己的 margin 给 */
+  gap: 0;
   /* 宽度住在 theme.json（拖两栏之间那条缝改它）；收起收到 0 —— 见 is-collapsed */
   width: var(--tree-w, 232px);
   min-height: 0;
@@ -270,13 +271,13 @@ body.is-resizing-ai-tree .ai-view__side {
   transition: none;
 }
 
+/* 与树的间隔不在 .panel 的 gap 里给（那一层已归零）—— 这一栏的表头直接贴着树 */
 .side__head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--sp-2);
   flex-shrink: 0;
-  margin-bottom: var(--sp-2);
 }
 
 .side__title {
@@ -291,6 +292,36 @@ body.is-resizing-ai-tree .ai-view__side {
   padding: 0;
 }
 
+/**
+ * 左栏底部那一行：技能的管理入口与收起整栏的开关（右栏的 composer 工具行不再放它们）。
+ * 一条上边线把树与这一行分开 —— 树多矮它都钉在栏底。
+ */
+.side__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  flex-shrink: 0;
+  /* .panel 的 gap 已在这一栏归零，树与这一行的间隔由这条 margin 给 */
+  margin-top: var(--sp-3);
+  padding-top: var(--sp-2);
+  border-top: 1px solid var(--border);
+}
+
+.side__skills {
+  height: 24px;
+  padding: 0 var(--sp-1);
+  color: var(--ink-2);
+  font-size: var(--fs-meta);
+}
+
+.side__fold {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  color: var(--ink-2);
+}
+
 /* 右栏：上面吃剩余高度（对话），下面两行定高（目录栏与 composer）。
    收起左栏的那颗按钮浮在它的左上角，得有定位当参照 */
 .ai-view__main {
@@ -303,9 +334,9 @@ body.is-resizing-ai-tree .ai-view__side {
 }
 
 /**
- * 左栏的收起 / 展开入口：浮在右栏（两屏都是它）的左上角 —— 树收起来之后它是唯一的开关。
- * 滚动的内容会从它底下过：默认变体自带一块实底与一圈边，压着的字不至于读不成行；
- * 比正文略抬一层，别被流式那几行的 relative 抢了点击。
+ * 树收起之后浮出的那颗「展开」：右栏（两屏都是它）的左上角 —— 那会儿左栏底部那行已经
+ * 跟着整栏收到 0 宽里去了，它是唯一的开关。滚动的内容会从它底下过：默认变体自带一块
+ * 实底与一圈边，压着的字不至于读不成行；比正文略抬一层，别被流式那几行的 relative 抢了点击。
  */
 .ai-view__tree-toggle {
   position: absolute;
@@ -328,7 +359,7 @@ body.is-resizing-ai-tree .ai-view__side {
 /* ---------- 起始那一屏 ---------- */
 
 /**
- * 居中的一屏：位置那一栏 + composer + 用过的指令 —— **中间那条 composer 就是主角**
+ * 居中的一屏：位置那一栏 + composer —— **中间那条 composer 就是主角**
  * （与 ZCode 的起始屏同一副样子：一进来就能写），它自己不套卡片，那条输入框本身就是卡片。
  *
  * 竖着居中靠 `.landing__box` 的 `margin: auto 0`，不靠 `justify-content`：窗口拉得很矮、
@@ -352,18 +383,12 @@ body.is-resizing-ai-tree .ai-view__side {
   margin: auto 0;
 }
 
-/* 输入框底下那一行：缺 Pi 那颗与用过的指令并排（居中，一行放不下就换行） */
+/* 输入框底下那一行：只在没探到 Pi 时才出现（那颗「安装 Pi」，居中） */
 .landing__foot {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: var(--sp-2);
   flex-wrap: wrap;
-}
-
-/* 用过的指令：药丸形，比按钮本身矮一档，免得跟上面那张卡片抢注意力 */
-.landing__chip {
-  border-radius: var(--r-pill);
-  color: var(--ink-2);
 }
 </style>

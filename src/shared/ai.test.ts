@@ -1,8 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  AI_HISTORY_MAX,
   AI_IMAGE_TYPES,
-  AI_INSTRUCTION_MAX,
   AI_MODEL_MAX,
   AI_PERMISSION_DEFAULT,
   AI_PERMISSION_MODES,
@@ -28,22 +26,23 @@ import {
   builtinModelMeta,
   confirmFrame,
   formatDuration,
+  formatTokens,
+  formatUsageSummary,
   inferModelMeta,
   nodeSatisfiesPi,
   parsePiConfirm,
   parsePiDelta,
   parsePiEvent,
+  parsePiUsage,
   piLaunch,
   piLaunchForDisplay,
   pickAiActiveSession,
   pickAiChoice,
   pickAiThinking,
-  rememberAiInstruction,
   rememberAiSession,
   sanitizeAiApiFormat,
   sanitizeAiBaseUrl,
   sanitizeAiContext,
-  sanitizeAiHistory,
   sanitizeAiLabel,
   sanitizeAiMaxTokens,
   sanitizeAiModelId,
@@ -497,25 +496,6 @@ describe('模型配置的收敛', () => {
     expect(aiThinkingLabel('xhigh')).toBe('极高')
   })
 
-  it('用过的指令：去空白、按原文去重、去掉过长的，限 20 条', () => {
-    expect(sanitizeAiHistory('x')).toEqual([])
-    expect(sanitizeAiHistory([null, 42, '  ', '整理条目', ' 整理条目 ', '写周报'])).toEqual([
-      '整理条目',
-      '写周报'
-    ])
-    const long = 'x'.repeat(AI_INSTRUCTION_MAX + 1)
-    expect(sanitizeAiHistory([long, '短的'])).toEqual(['短的'])
-    const many = Array.from({ length: 30 }, (_, index) => `第 ${index} 条`)
-    expect(sanitizeAiHistory(many)).toHaveLength(AI_HISTORY_MAX)
-  })
-
-  it('新记一条指令放在最前面；同一条再跑一次不会多出一条', () => {
-    expect(rememberAiInstruction([], ' 整理条目 ')).toEqual(['整理条目'])
-    expect(rememberAiInstruction(['写周报', '整理条目'], '整理条目')).toEqual(['整理条目', '写周报'])
-    expect(rememberAiInstruction(['写周报'], '  ')).toEqual(['写周报'])
-    // 往回填的那条也得收敛：超长的进不去（照样能跑，只是不留档）
-    expect(rememberAiInstruction([], 'x'.repeat(AI_INSTRUCTION_MAX + 1))).toEqual([])
-  })
 })
 
 describe('会话（一个目录里的一段连续对话）', () => {
@@ -663,6 +643,44 @@ describe('对话按轮切（过程 / 答案 / 收据）', () => {
     expect(turns[0].process.map((item) => item.text)).toEqual(['想'])
     expect(turns[1].process).toEqual([])
     expect(turns[1].answer?.text).toBe('答二')
+  })
+
+  it('正文后面跟了工具 / 思考（这轮没跑成，没有再吐正文）：那段正文是旁白，回过程里按序排', () => {
+    const turns = aiTurns([
+      line('user', '生成脚本'),
+      line('thinking', '先分块'),
+      line('text', '脚本较长，我分块写入再合并。'),
+      line('tool', '写入 c1.js'),
+      line('thinking', 'Now chunk2'),
+      line('error', '写入失败'),
+      line('duration', '用时 30 秒')
+    ])
+    // 没有答案可摘 ——「最后说了什么」得是后面没再干活的那段正文
+    expect(turns[0].answer).toBeNull()
+    expect(turns[0].process.map((item) => item.text)).toEqual([
+      '先分块',
+      '脚本较长，我分块写入再合并。',
+      '写入 c1.js',
+      'Now chunk2',
+      '写入失败'
+    ])
+    // 收据只有轮尾那串「用时 …」，报错留在过程里（红才丢不了）
+    expect(turns[0].tail.map((item) => item.text)).toEqual(['用时 30 秒'])
+  })
+
+  it('跑动中（live）不摘答案：整轮都在过程里按时序长，正文落地也不跳出去', () => {
+    const turns = aiTurns(
+      [
+        line('user', '生成脚本'),
+        line('thinking', '想'),
+        line('text', '我先分块写入。'),
+        line('tool', '写入 c1.js')
+      ],
+      true
+    )
+    expect(turns[0].answer).toBeNull()
+    expect(turns[0].process.map((item) => item.kind)).toEqual(['thinking', 'text', 'tool'])
+    expect(turns[0].tail).toEqual([])
   })
 })
 
@@ -920,6 +938,54 @@ describe('事件流的读法', () => {
     expect(delta({ type: 'text_delta', delta: '' })).toBeNull()
     expect(parsePiDelta(JSON.stringify({ type: 'agent_settled' }))).toBeNull()
     expect(parsePiDelta('npm warn 之类的一行')).toBeNull()
+  })
+
+  it('token 消耗：message_end 带的 usage 拆成四个不重叠的桶，别的帧与没报的都不认', () => {
+    const usage = (event: unknown) => parsePiUsage(JSON.stringify(event))
+
+    expect(
+      usage({
+        type: 'message_end',
+        message: {
+          role: 'assistant',
+          content: [],
+          usage: { input: 12, output: 34, cacheRead: 56, cacheWrite: 7, totalTokens: 109, cost: {} }
+        }
+      })
+    ).toEqual({ input: 12, output: 34, cacheRead: 56, cacheWrite: 7 })
+    // @文件 的回显是用户消息，没有消耗
+    expect(
+      usage({
+        type: 'message_end',
+        message: { role: 'user', content: '整段提示词', usage: { input: 9, output: 9 } }
+      })
+    ).toBeNull()
+    // 端点没报（缺字段 / 全 0 / 形状不对）：当没有 —— 收据上就不写这段
+    expect(usage({ type: 'message_end', message: { role: 'assistant', content: [] } })).toBeNull()
+    expect(
+      usage({
+        type: 'message_end',
+        message: { role: 'assistant', content: [], usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } }
+      })
+    ).toBeNull()
+    expect(
+      usage({ type: 'message_end', message: { role: 'assistant', content: [], usage: { input: -5, output: 'x' } } })
+    ).toBeNull()
+    expect(usage({ type: 'agent_settled' })).toBeNull()
+    expect(parsePiUsage('npm warn 之类的一行')).toBeNull()
+  })
+
+  it('token 数的念法与这一轮的消耗摘要（输入含缓存读写，输出单列）', () => {
+    expect(formatTokens(876)).toBe('876')
+    expect(formatTokens(1534)).toBe('1.5k')
+    expect(formatTokens(45_200)).toBe('45k')
+    expect(formatTokens(1_234_567)).toBe('1.2m')
+
+    expect(
+      formatUsageSummary({ input: 1000, output: 1534, cacheRead: 56_000, cacheWrite: 6_000 })
+    ).toBe('输入 63k · 输出 1.5k')
+    // 端点没报：空串 —— 收据上只有「用时」
+    expect(formatUsageSummary({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 })).toBe('')
   })
 
   it('协议里的其余事件丢掉，非 JSON 的行原样留下（还要清控制序列）', () => {

@@ -670,44 +670,6 @@ export function aiPermissionLabel(id: string): string {
   return AI_PERMISSION_MODES.find((mode) => mode.id === id)?.label ?? id
 }
 
-// ---------- 用过的指令（新任务页下方那一排） ----------
-
-/** 指令历史最多留几条 */
-export const AI_HISTORY_MAX = 20
-/** 一条指令最长多少字：更长的多半是把整份文件贴进来了，不进历史（照样能跑） */
-export const AI_INSTRUCTION_MAX = 2000
-
-/**
- * 指令历史的收敛：只留非空、不超长的字符串，按原文去重（保留先出现的那条）、限量。
- * 历史是**用户自己写过的东西**（见下面 rememberAiInstruction 的说明），不是内置模板。
- */
-export function sanitizeAiHistory(value: unknown): string[] {
-  if (!Array.isArray(value)) return []
-  const seen = new Set<string>()
-  const result: string[] = []
-  for (const raw of value) {
-    if (typeof raw !== 'string') continue
-    const text = raw.trim()
-    if (!text || text.length > AI_INSTRUCTION_MAX || seen.has(text)) continue
-    seen.add(text)
-    result.push(text)
-    if (result.length >= AI_HISTORY_MAX) break
-  }
-  return result
-}
-
-/**
- * 记一条用过的指令：最新的排在最前面，重复的只留一条（同一条指令再跑一次不会多出一条），
- * 超出上限的从末尾丢掉。
- *
- * 页面在**起进程之前**调它（跑没跑起来都算用过 —— 不然「试一次没成功」这种最常见的
- * 情形反而记不下来）。留的是用户写过的原文：这一排 chips 是**他自己的历史**，
- * 页面里不内置任何一类任务的提示词（见 docs/constraints/ai.md）。
- */
-export function rememberAiInstruction(history: string[], instruction: string): string[] {
-  return sanitizeAiHistory([instruction, ...history])
-}
-
 // ---------- 会话（一个工作目录里的一段连续对话） ----------
 
 /**
@@ -1102,7 +1064,7 @@ export interface AiLogLine {
    * 一段对话里它与助手说的话要分得开（画法见 AiRunPanel：它靠右、助手的话在左）。
    * `duration` 是一轮跑完时补的那一行「用时 …」—— 它不是对话内容，是这一轮的收据。
    * `thinking` 是模型想的那一段（草稿）：**在对话里画成一块收着的「思考过程」**，
-   * 跑完自动收起、点一下还能展开（见 AiThinking.vue）。
+   * 跑完自动收起、点一下还能展开（见 AiProcess.vue）。
    */
   kind: 'user' | 'info' | 'tool' | 'text' | 'error' | 'done' | 'duration' | 'thinking'
   text: string
@@ -1427,6 +1389,85 @@ export function parsePiDelta(rawLine: string): PiDelta | null {
   return null
 }
 
+// ---------- Token 消耗 ----------
+
+/**
+ * 一条助手消息的 token 消耗（Pi 的 `message_end` 带整条消息，`usage` 长在它上面）。
+ * **四个字段是互不重叠的桶**（pi-ai 拆好了：OpenAI 那套的 `input = prompt_tokens −
+ * 命中缓存 − 缓存写入`）—— 展示时「输入」= input + cacheRead + cacheWrite（对端点来说
+ * 都是收进去的 prompt），「输出」= output（思考 token 已含在内）。
+ */
+export interface AiUsage {
+  input: number
+  output: number
+  cacheRead: number
+  cacheWrite: number
+}
+
+/**
+ * 一行输出里那条助手消息的 token 消耗；不是 `message_end`（或端点没报）返回 null。
+ *
+ * **与 parsePiEvent 各走各的**：一轮里模型可能说了好几段（中间隔着工具调用），每段的
+ * `message_end` 都带一份 usage —— 有的那段压根没有正文（只调了工具），画不出正文行来，
+ * 挂在正文行上就会漏。调用方把多份**累加成这一轮的**（见 stores/ai.ts），收尾时跟在
+ * 「用时 …」旁边落一行。
+ */
+export function parsePiUsage(rawLine: string): AiUsage | null {
+  const line = rawLine.trim()
+  if (!line.startsWith('{')) return null
+
+  let event: Record<string, unknown>
+  try {
+    const parsed: unknown = JSON.parse(line)
+    if (!parsed || typeof parsed !== 'object') return null
+    event = parsed as Record<string, unknown>
+  } catch {
+    return null
+  }
+
+  if (str(event.type) !== 'message_end') return null
+  const message = (event.message ?? {}) as Record<string, unknown>
+  // 用户消息也会触发 message_end（@文件 的回显，见 parsePiEvent），它没有消耗
+  const role = str(message.role)
+  if (role && role !== 'assistant') return null
+  const raw = (message.usage ?? {}) as Record<string, unknown>
+  const field = (key: string): number => {
+    const value = raw[key]
+    return typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.floor(value) : 0
+  }
+  const usage: AiUsage = {
+    input: field('input'),
+    output: field('output'),
+    cacheRead: field('cacheRead'),
+    cacheWrite: field('cacheWrite')
+  }
+  // 四个桶全是 0 = 这个端点没报消耗（自定义端点不保证都有），那就当没有
+  const total = usage.input + usage.output + usage.cacheRead + usage.cacheWrite
+  return total > 0 ? usage : null
+}
+
+/**
+ * token 数怎么念（收据上那点字的量级，不是仪表盘）：一千以内给整数，一万以内给一位小数的
+ * 「k」，再大取整；上百万换「m」。与模型弹窗认 `128k` 那格同一套单位（k / m 都是千进制）。
+ */
+export function formatTokens(value: number): string {
+  const n = Math.max(0, Math.floor(value))
+  if (n < 1000) return String(n)
+  if (n < 10_000) return `${(n / 1000).toFixed(1)}k`
+  if (n < 1_000_000) return `${Math.round(n / 1000)}k`
+  return `${(n / 1_000_000).toFixed(1)}m`
+}
+
+/**
+ * 这一轮的消耗怎么念：`输入 … · 输出 …`。两边都是 0 返回空串 —— 端点没报就不写这段，
+ * 「用时 12 秒」单独待着不难看。
+ */
+export function formatUsageSummary(usage: AiUsage): string {
+  const prompt = usage.input + usage.cacheRead + usage.cacheWrite
+  if (prompt === 0 && usage.output === 0) return ''
+  return `输入 ${formatTokens(prompt)} · 输出 ${formatTokens(usage.output)}`
+}
+
 // ---------- RPC 帧 ----------
 /**
  * 一条命令的应答（RPC 的 `response`）：`get_messages` 这类**要读回数据**的命令靠它。
@@ -1518,13 +1559,17 @@ export function confirmFrame(id: string, confirmed: boolean): string {
 /**
  * 对话按「轮」切开，每轮再切成过程 / 答案 / 收据 —— 面板照它画（见 AiRunPanel.vue）：
  *
- *  - **过程**（`process`）：这一轮里除了最后那段正文以外的全部 —— 想的那几段、工具调用、
- *    报错、以及还没成答案的那些正文。界面上它收成一块「过程」（AiProcess.vue）：
+ *  - **过程**（`process`）：这一轮干活的全部 —— 想的那几段、工具调用、报错、旁白；
+ *    正文后面只要还跟着工具 / 思考行，那段正文也是旁白（「我分块写入再合并」
+ *    然后就去写文件了），跟着留在过程里。界面上它收成一块「过程」（AiProcess.vue）：
  *    一段对话要读的是「我说了什么、它最后说了什么」，中间那些步骤是要查证时才摊开的
  *    （一次读文件、一条命令都占一行，摊着就是一面墙）。
- *  - **答案**（`answer`）：这一轮**最后**那段正文（一轮里模型可能说了好几段，
- *    前面那些都是过程中的旁白）。
- *  - **收据**（`tail`）：答案之后那几行（「用时 …」）—— 留在外面，它是一轮的句号。
+ *  - **答案**（`answer`）：**收尾时**紧挨着收据的那段正文 —— 它后面没再跟工具 / 思考，
+ *    才算「最后说了什么」。`live` 为真（这轮还在跑）时不摘：正文落地也先留在过程里，
+ *    新长出来的思考才会在它**下面**（摘出去的话思考段就压到它头上了，时序倒挂），
+ *    等收尾（`agent_settled`）再弹出去当答案。
+ *  - **收据**（`tail`）：轮尾成串的那几行（「用时 …」，收尾时才落地）—— 留在外面，
+ *    它是一轮的句号。
  *
  * 边界是用户自己写的那句话：一句一轮。
  */
@@ -1537,7 +1582,7 @@ export interface AiTurn {
   tail: AiLogLine[]
 }
 
-export function aiTurns(lines: AiLogLine[]): AiTurn[] {
+export function aiTurns(lines: AiLogLine[], live = false): AiTurn[] {
   const turns: Array<{ index: number; user: AiLogLine | null; rest: AiLogLine[] }> = []
   lines.forEach((line, index) => {
     // 用户那句话开一轮；整条日志的头几行（还没跟谁说过话时的那些注脚）也自成一「轮」
@@ -1548,20 +1593,27 @@ export function aiTurns(lines: AiLogLine[]): AiTurn[] {
   })
 
   return turns.map((turn) => {
-    // 最后那段正文是答案：它前面全是过程，后面是收据
-    let answerAt = -1
-    turn.rest.forEach((line, index) => {
-      if (line.kind === 'text') answerAt = index
-    })
-    if (answerAt < 0) {
-      return { index: turn.index, user: turn.user, process: turn.rest, answer: null, tail: [] }
+    // 收据从轮尾往回收（「用时 …」收尾时才落地，只会成串地待在末尾）；
+    // 紧挨着它的那段正文才是答案，再往前哪怕也是正文，那也是过程中的旁白
+    let tailAt = turn.rest.length
+    while (tailAt > 0 && turn.rest[tailAt - 1].kind === 'duration') tailAt--
+    if (!live && tailAt > 0 && turn.rest[tailAt - 1].kind === 'text') {
+      return {
+        index: turn.index,
+        user: turn.user,
+        process: turn.rest.slice(0, tailAt - 1),
+        answer: turn.rest[tailAt - 1],
+        tail: turn.rest.slice(tailAt)
+      }
     }
+    // 摘不出答案（这轮还在跑 / 正文后面跟着工具或思考 / 压根没有正文）：
+    // 收据以外全部归过程 —— 界面上按时序排在过程块里，正文不再占着「答案」的位置
     return {
       index: turn.index,
       user: turn.user,
-      process: turn.rest.slice(0, answerAt),
-      answer: turn.rest[answerAt],
-      tail: turn.rest.slice(answerAt + 1)
+      process: turn.rest.slice(0, tailAt),
+      answer: null,
+      tail: turn.rest.slice(tailAt)
     }
   })
 }

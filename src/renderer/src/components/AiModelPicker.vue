@@ -403,19 +403,16 @@ function contextText(size: number): string {
 
               <div class="adv__field">
                 <span class="adv__label">能力</span>
-                <div class="adv__ability">
-                  <el-tooltip
-                    content="勾上后截图与图片文件才会真的发给模型（models.json 的 input 带 image）；端点不收图就关掉"
-                    placement="top"
+                <!-- 与思考等级同一排 chips 的样式：亮着 = 能看图（models.json 的 input 带 image） -->
+                <div class="adv__chips">
+                  <button
+                    type="button"
+                    class="adv__chip"
+                    :class="{ 'is-on': entry.imageInput }"
+                    @click="patch(entry, { imageInput: !entry.imageInput })"
                   >
-                    <el-checkbox
-                      :model-value="entry.imageInput"
-                      @change="(value: unknown) => patch(entry, { imageInput: value === true })"
-                    >
-                      图片
-                    </el-checkbox>
-                  </el-tooltip>
-                  <span class="adv__hint">勾上它，模型才看得到自己截的图</span>
+                    图片
+                  </button>
                 </div>
               </div>
             </div>
@@ -681,21 +678,6 @@ function contextText(size: number): string {
   border-color: var(--el-color-primary);
   background: var(--el-color-primary);
   color: var(--el-color-white);
-}
-
-.adv__ability {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-}
-
-.adv__ability :deep(.el-checkbox) {
-  height: auto;
-}
-
-.adv__hint {
-  color: var(--ink-3);
-  font-size: var(--fs-micro);
 }
 
 /* 自定义那一块：**自己是一张底卡**（浅底 + 描边），挂在右栏底下 —— 它和上面的列表

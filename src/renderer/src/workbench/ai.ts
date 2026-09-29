@@ -19,10 +19,12 @@ import {
   parsePiDelta,
   parsePiEvent,
   parsePiResponse,
+  parsePiUsage,
   type AiConfirm,
   type AiFetchedModel,
   type AiLogLine,
   type AiProviderPayload,
+  type AiUsage,
   type PiDelta
 } from '@shared/ai'
 import type { NoteRepoState } from '@shared/note'
@@ -65,6 +67,11 @@ interface RunHandlers {
    * 「思考中…」里 —— 形状见 shared/ai.ts 的 parsePiDelta。
    */
   onDelta: (delta: PiDelta) => void
+  /**
+   * 一条助手消息的 token 消耗（`message_end` 带的 `usage`，形状见 shared/ai.ts 的
+   * parsePiUsage）：按轮累加是 store 的事，这里只把每一条递过去。
+   */
+  onUsage: (usage: AiUsage) => void
   /** 扩展问「这条命令让不让跑」（RPC 的 extension_ui_request）：要用户答一句才往下走 */
   onConfirm: (confirm: AiConfirm) => void
   onExit: (code: number | null) => void
@@ -135,24 +142,15 @@ export function installAiListeners(): void {
       const handlers = runs.get(sessionId)
       if (!handlers) return
       for (const line of lines) {
-        // 先看它是不是某条命令的应答（`get_messages` / `abort` 这些要读结果的命令在等它）：
-        // 配上了就不再当日志画 —— 读回来的数据不是给人看的，成败由等它的那边说
-        const response = parsePiResponse(line.text)
-        if (response && settleRequest(response)) continue
-        // 流式增量：助手正一个字一个字往外吐，接在对话末尾（这条是热路径，排在前面）
-        const delta = parsePiDelta(line.text)
-        if (delta !== null) {
-          handlers.onDelta(delta)
-          continue
+        // **一条帧翻不出来不许连累同批后面的帧**：这里断一下，同一批里排在后面的
+        // agent_settled 就没人处理了 —— 轮次收不了尾，转圈永远停不下来（踩过：
+        // 开发期两份模块先后热更的窗子里，新分流调到旧 handlers 缺的回调就是这一幕）。
+        // 记一条 warn 让问题看得见，然后继续走。
+        try {
+          dispatchLine(handlers, line)
+        } catch (error) {
+          console.warn('[workbench] 处理 Pi 的一帧输出失败', error, line.text.slice(0, 200))
         }
-        // 再看它是不是「扩展要问宿主」的那一帧：那不是日志，是要人答一件事
-        const confirm = parsePiConfirm(line.text)
-        if (confirm) {
-          handlers.onConfirm(confirm)
-          continue
-        }
-        const parsed = parsePiEvent(line.text)
-        if (parsed) handlers.onLine(parsed)
       }
     }
   )
@@ -169,6 +167,31 @@ export function installAiListeners(): void {
     runs.delete(sessionId)
     handlers.onExit(code)
   })
+}
+
+/** 一帧输出走一遍分流：应答 → 流式增量 → 扩展询问 → 消耗与事件行（顺序就是热路径在前的顺序） */
+function dispatchLine(handlers: RunHandlers, line: { stream: string; text: string }): void {
+  // 先看它是不是某条命令的应答（`get_messages` / `abort` 这些要读结果的命令在等它）：
+  // 配上了就不再当日志画 —— 读回来的数据不是给人看的，成败由等它的那边说
+  const response = parsePiResponse(line.text)
+  if (response && settleRequest(response)) return
+  // 流式增量：助手正一个字一个字往外吐，接在对话末尾（这条是热路径，排在前面）
+  const delta = parsePiDelta(line.text)
+  if (delta !== null) {
+    handlers.onDelta(delta)
+    return
+  }
+  // 再看它是不是「扩展要问宿主」的那一帧：那不是日志，是要人答一件事
+  const confirm = parsePiConfirm(line.text)
+  if (confirm) {
+    handlers.onConfirm(confirm)
+    return
+  }
+  // 消耗与正文行同源（同一条 message_end 帧）：先递 usage 再落正文行，两个都要
+  const usage = parsePiUsage(line.text)
+  if (usage) handlers.onUsage(usage)
+  const parsed = parsePiEvent(line.text)
+  if (parsed) handlers.onLine(parsed)
 }
 
 /** 把应答兑现给等它的那条命令；没有在等它的（或不是应答）返回 false */

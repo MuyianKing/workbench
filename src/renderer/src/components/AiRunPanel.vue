@@ -10,8 +10,11 @@
  *    中途那些旁白都在里面 —— 一段对话要读的是「我说了什么、它最后说了什么」，
  *    那些步骤摊着就是一面墙（一次读文件、一条命令各占一行）。跑着的时候那块是摊开的
  *    （标题上转圈说「正在思考… / 正在执行…」），跑完自动收起，点标题随时再摊开；
- *  - **最后那段正文摊在外面**（走 MarkdownView 渲染，没有气泡框）：它常常几屏长，
- *    套个框只会把阅读面积削掉一圈。过程里那些中途的正文照常渲染 markdown，只是跟着过程一起收着；
+ *    **跑着的那轮还没有「答案」** —— 正文后面随时会跟上工具与思考，先摘出去的话，
+ *    新长出来的思考就压在它上面了（时序倒挂），整轮都在块里按时序往下长，收尾才把
+ *    最后那段正文弹出去（见 aiTurns 的 live）；
+ *  - **答案（收尾时最后那段正文）摊在外面**（走 MarkdownView 渲染，没有气泡框）：它常常几屏长，
+ *    套个框只会把阅读面积削掉一圈。过程里那些旁白照常渲染 markdown，只是跟着过程一起收着；
  *  - 过程里的工具行与系统行是**浅灰的窄行**（只有工具行里的路径用等宽），报错走 `--st-fail`；
  *    想的那几段是纯文本（草稿里的半截标记不该被当成排版）。
  *    **轮与轮之间的那两条进度行（开始执行 / 执行结束）不画**（见 stores/ai.ts 的 isTurnMarker）——
@@ -48,8 +51,8 @@ const props = defineProps<{
   lines: AiLogLine[]
   /**
    * 助手正在流式吐出来的那段文字（增量攒到一定间隔才发布一次，见 stores/ai.ts 的 STREAM_TICK）：
-   * 它接在已落地的那几行后面，等整段到了（`message_end`）就换成那一段 —— 开头那半句
-   * 与最终版可能有极小的差别（块与块之间的换行），换过去时以整段为准。
+   * 它画在跑着那轮的过程块末尾（落地也落进块里，不跳位置），等整段到了（`message_end`）
+   * 就换成那一段 —— 开头那半句与最终版可能有极小的差别（块与块之间的换行），换过去时以整段为准。
    */
   streaming: string
   /**
@@ -87,8 +90,8 @@ const shown = computed(() =>
 /** 正在画的那一条（没有就是 null） */
 const confirm = computed(() => props.confirms[0] ?? null)
 
-/** 整条日志按「轮」切开（用户那句 + 过程 + 最后那段正文 + 收据，见 shared/ai.ts 的 aiTurns） */
-const turns = computed(() => aiTurns(shown.value))
+/** 整条日志按「轮」切开（用户那句 + 过程 + 答案 + 收据；跑着的那轮不摘答案，见 shared/ai.ts 的 aiTurns） */
+const turns = computed(() => aiTurns(shown.value, props.running))
 
 /** 还在跑的那一轮是哪一个（它那块「过程」摊着、转着；跑完自动收起） */
 const liveIndex = computed(() => (props.running ? (turns.value[turns.value.length - 1]?.index ?? -1) : -1))
@@ -228,6 +231,13 @@ const hasHead = computed(() => notice.value !== null || !props.piVersion)
             <div v-if="turn.index === liveIndex" class="msg is-thinking">
               <p v-if="thinkingText" class="msg__think is-live">{{ thinkingText }}</p>
             </div>
+
+            <!-- 正在长出来的那段回话：跑着的时候它也是过程的一部分（收尾才定答案），
+                 落地就落在原地不跳；末尾一根小竖条表示它还在写 -->
+            <div v-if="turn.index === liveIndex && streaming" class="msg is-text is-streaming">
+              <MarkdownView :source="streaming" />
+              <span class="msg__caret" aria-hidden="true" />
+            </div>
           </AiProcess>
 
           <!-- 这一轮最后那段正文：这就是答案，摊在外面 -->
@@ -240,12 +250,6 @@ const hasHead = computed(() => notice.value !== null || !props.piVersion)
             <p class="run__meta" :title="line.detail">{{ line.text }}</p>
           </div>
         </template>
-
-        <!-- 正在长出来的那段回话：就是正文，末尾一根小竖条表示它还在写 -->
-        <div v-if="streaming" class="msg is-text is-streaming">
-          <MarkdownView :source="streaming" />
-          <span class="msg__caret" aria-hidden="true" />
-        </div>
 
         <!-- 等确认的那条命令：流程停在这儿，答完 Pi 才往下走（只有「自动编辑」那一档会有） -->
         <div v-if="confirm" class="run__confirm">
@@ -341,6 +345,12 @@ const hasHead = computed(() => notice.value !== null || !props.piVersion)
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+}
+
+/* 第一条贴着顶：面板的内边距就是它的呼吸位，第一条上面不再垫自己的 margin。
+   选择器要比 .msg.is-user 高一级 —— 同为两级时按源序它排在前头，margin 会把这条盖掉 */
+.run__log .msg:first-child {
+  margin-top: 0;
 }
 
 .msg {

@@ -14,33 +14,24 @@
  * 模型看不看得见图不归这里管：贴上的图先留着，发不出去时由发送按钮的悬停说（`blocking`）。
  *
  * **底下那一行按「一排 chip」画，不按表单画**（这是这一页最像工具的地方，照通用客户端
- * 那一排的样子）：三个控件**只挂一个图标**（padlock / chip / 表盘，见下面 template 里那句），
+ * 那一排的样子）：三个控件**只挂一个图标**（锁 / cpu / 表盘，见下面 template 里那句），
  * 不带「权限」「模型」「思考」这样的文字标签 —— 标签是把控件当输入项，一排箭头看下来
  * 全是重复的字；做成**没有边框的浅底 chip**（与位置栏那颗 `.pick__item` 同一副样子），
  * 发送是一颗**圆形实心**的箭头。**别把文字标签加回来、也别给 chip 描边**。
  *
  * 它自己读 store：说一句、换权限、换模型与换档位都是这一页的动作，归它发。**模型管理那个弹层
- * **不归它** —— 弹层挂在页面最外层，所以这里只报一声「要开配置」（技能那颗弹窗同理）。
+ * **不归它** —— 弹层挂在页面最外层，所以这里只报一声「要开配置」（技能的管理入口在左栏
+ * 底部那一行，不在这条输入框上）。
  *
- * **技能**在这条输入框上有一处自己的样子：敲 `/`（或点工具行那颗 chip）出候选那一列，
- * 选中就把 `/skill:名字` 放到最前面 —— Pi 只在文本开头认这条命令（见 shared/ai.ts 的
- * taskPrompt），所以命令必须第一个字，候选那一列也就长在输入框正上方。
+ * **技能**在这条输入框上有一处自己的样子：敲 `/` 出候选那一列，选中就把 `/skill:名字`
+ * 放到最前面 —— Pi 只在文本开头认这条命令（见 shared/ai.ts 的 taskPrompt），所以命令必须
+ * 是第一个字，候选那一列也就长在输入框正上方。
  *
  * 权限那一栏在下拉里给每一档挂一行小字（这一档到底问不问）—— 下拉挂在 body 上，
  * 那两行字的样式在 global.css（`.composer-permission-pop`）。
  */
 import { computed, ref, watch } from 'vue'
-import {
-  Close,
-  Cpu,
-  Lock,
-  MagicStick,
-  Odometer,
-  Setting,
-  Top,
-  Unlock,
-  VideoPause
-} from '@element-plus/icons-vue'
+import { Close, Cpu, Lock, Odometer, Setting, Top, Unlock, VideoPause } from '@element-plus/icons-vue'
 import {
   AI_IMAGE_TYPES,
   AI_PERMISSION_MODES,
@@ -54,7 +45,7 @@ import { notifyWarning } from '@/notify'
 import { useAiStore } from '@/stores/ai'
 import { useAiSkillsStore } from '@/stores/ai-skills'
 
-const emit = defineEmits<{ configure: []; skills: [] }>()
+const emit = defineEmits<{ configure: [] }>()
 
 const ai = useAiStore()
 const skillsStore = useAiSkillsStore()
@@ -144,24 +135,6 @@ function moveSkill(step: number): void {
   if (!skillPickerOpen.value) return
   const count = skillCandidates.value.length
   skillIndex.value = (skillIndex.value + step + count) % count
-}
-
-/**
- * 工具行那颗「技能」：一条是「用技能」（把命令前缀塞进输入框，接着就出候选），
- * 一条是「管理技能」（装卸那两条技能根，弹窗挂在页面上，这里只报一声）。
- */
-function onSkillCommand(command: string): void {
-  if (command === 'manage') {
-    emit('skills')
-    return
-  }
-  void skillsStore.ensure()
-  const text = ai.instruction.trimStart()
-  ai.instruction = text.startsWith(AI_SKILL_COMMAND)
-    ? text
-    : `${AI_SKILL_COMMAND}${text}`
-  skillIndex.value = 0
-  inputRef.value?.focus()
 }
 
 /**
@@ -343,23 +316,6 @@ const sendTitle = computed(() => {
           三个控件都不带 size：一行里得同高。EP 的默认尺寸是 32px（按钮与下拉各有一份
           「小」尺寸实现，下拉那边是写死的 24px，调不成同一个高度），所以统一走默认。
         -->
-        <!--
-          技能：一颗 chip 进两个动作 —— 「用技能」把 `/skill:名字` 塞进输入框（接着就出候选那一列），
-          「管理技能」开那颗装卸技能的弹窗（弹窗挂在页面上，这里只报一声）。
-        -->
-        <el-dropdown trigger="click" @command="onSkillCommand">
-          <button class="composer__skill" type="button" title="技能：挑一个装好的，或者装卸（导入 / 粘地址）">
-            <el-icon><MagicStick /></el-icon>
-          </button>
-          <template #dropdown>
-            <el-dropdown-menu>
-              <el-dropdown-item command="pick" :disabled="!skillsStore.pickable.length" :icon="MagicStick">
-                用技能（/skill:）
-              </el-dropdown-item>
-              <el-dropdown-item command="manage" :icon="Setting">管理技能…</el-dropdown-item>
-            </el-dropdown-menu>
-          </template>
-        </el-dropdown>
         <el-select
           class="composer__model"
           :model-value="ai.activeChoiceKey"
@@ -543,30 +499,6 @@ const sendTitle = computed(() => {
 }
 
 /**
- * 技能那颗 chip：与同行的下拉**同一副样子**（没有边框的浅底），只是它是个按钮 ——
- * 一行里第四种控件，再给它描边就又变成表单了。图标定宽定高，与下拉那一格对得上。
- */
-.composer__skill {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  padding: 0;
-  border: none;
-  border-radius: var(--r-sm);
-  background: var(--bg-inset);
-  color: var(--ink-3);
-  font-size: 16px;
-  cursor: pointer;
-}
-
-.composer__skill:hover {
-  background: var(--bg-selected);
-  color: var(--ink-2);
-}
-
-/**
  * 技能候选那一列：排在输入框上方的一条内嵌面板（不是浮层，见 template 里的说明）。
  * 每行是「名字 + 全局/项目 + 描述」，描述压一行截断。
  */
@@ -588,7 +520,7 @@ const sendTitle = computed(() => {
   gap: var(--sp-2);
   padding: 4px var(--sp-2);
   border: none;
-  border-radius: var(--r-xs);
+  border-radius: var(--r-sm);
   background: none;
   text-align: left;
   cursor: pointer;
@@ -606,18 +538,18 @@ const sendTitle = computed(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--ink-1);
-  font-size: var(--fs-sm);
+  color: var(--ink);
+  font-size: var(--fs-body);
   font-weight: 600;
 }
 
 .skills__tag {
   flex: none;
   padding: 0 6px;
-  border-radius: var(--r-xs);
-  background: var(--bg-surface, var(--bg-1));
+  border-radius: var(--r-sm);
+  background: var(--bg-surface);
   color: var(--ink-3);
-  font-size: var(--fs-xs);
+  font-size: var(--fs-meta);
 }
 
 .skills__desc {
@@ -627,7 +559,7 @@ const sendTitle = computed(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--ink-3);
-  font-size: var(--fs-xs);
+  font-size: var(--fs-meta);
 }
 
 /* 模型那一栏要能放下「提供方/模型 id」，思考那一栏只要放得下「极高」两个字。

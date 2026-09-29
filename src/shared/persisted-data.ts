@@ -28,7 +28,6 @@ import {
   pickAiActiveSession,
   sanitizeAiApiFormat,
   sanitizeAiBaseUrl,
-  sanitizeAiHistory,
   sanitizeAiModelId,
   sanitizeAiModels,
   sanitizeAiName,
@@ -138,9 +137,9 @@ export function sanitizeSettings(raw: unknown): StoredSettings {
   value.aiThinking = sanitizeAiThinking(value.aiThinking)
   // 工具权限（composer 左边那一栏）：老数据文件里没有，默认自动编辑（命令先问一句）
   value.aiPermission = sanitizeAiPermission(value.aiPermission)
-  // 用过的指令（新任务那一屏下方那排 chips）：老数据文件里没有，默认空清单。
-  // 去空白、按原文去重、限长限量都在收敛里做
-  value.aiHistory = sanitizeAiHistory(value.aiHistory)
+  // 用过的指令已废弃：起始那一屏下方那排 chips 去掉了，历史不再进设置。旧数据文件里
+  // 存着它，不主动清掉的话它会一直被写回，看着像还有人在读它
+  delete (value as unknown as Record<string, unknown>).aiHistory
   // 会话清单与「上次打开的那个」：老数据文件里没有，默认空清单 / 空串。
   // 会话 id 要拿去当 Pi 的 session-id（字符集是它定的）、目录要拿去拼路径与起进程，
   // 两样都在收敛里卡住；选中的那个认不出来（被删了）时回最近说过话的那个

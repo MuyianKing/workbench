@@ -473,13 +473,6 @@ export interface AppSettings {
    */
   aiPermission: string
   /**
-   * 用过的指令（最新的在前）：AI 助手页新任务那一屏下方那一排 chips 就是它，
-   * 点一下把那段话填回输入框。**是用户自己写过的原文**，页面里不内置任何一类任务的
-   * 提示词（见 docs/constraints/ai.md）；起进程之前记一条（跑没跑起来都算用过）。
-   * 收敛（去空、去重、限长限量）在 shared/ai.ts 的 sanitizeAiHistory。
-   */
-  aiHistory: string[]
-  /**
    * AI 助手的会话（最新的在前）：一个会话 = **一个工作目录里的一段连续对话**，
    * 在 AI 助手页左栏那棵两层树上就是「项目 → 会话」里的第二层。
    *
@@ -1837,7 +1830,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
   aiDefaultModel: '',
   aiThinking: AI_THINKING_DEFAULT,
   aiPermission: AI_PERMISSION_DEFAULT,
-  aiHistory: [],
   aiSessions: [],
   aiActiveSession: '',
   aiSkillsOff: [],

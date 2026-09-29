@@ -120,6 +120,7 @@
 - **Element Plus 是全量引入的**（`main.ts` 的 `app.use(ElementPlus)` + 整包 CSS），不要手搓 EP 已有的控件。已定下来的用法：
   分段选择 `el-segmented`；弹窗字段 `el-form` + `el-form-item`（`label-position="top"`，校验失败就地显示，不弹 `ElMessage`）；
   图标按钮与关键操作用 `el-tooltip`，纯截断文字的全名用原生 `title`。
+- **界面不写教学式说明**（作者自己用的程序）：原理、机制与自我声明（「应用不内置任何…」「只在下次起进程时生效」这类）写在文档里（constraints/ 与架构文档），界面上只留影响当下操作的文案；「点这里开始」「第一次用？」这类引导一律不加（AI 助手页细则见 constraints/ai.md）。
 - **弹层一律走 [AppDialog.vue](src/renderer/src/components/AppDialog.vue)，不要直接写 `el-dialog`**：`append-to-body`、
   「挡不挡背后」、可拖动（抓手是标题栏、关掉后位置复位）这几条跨弹层的规矩只写在那里（**不要自己写遮罩**，
   `.el-overlay` 统一处理）；其余属性与插槽原样透传。

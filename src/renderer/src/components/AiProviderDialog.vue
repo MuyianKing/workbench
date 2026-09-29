@@ -213,7 +213,8 @@ const title = computed(() => (props.provider ? '编辑 AI 服务' : '添加 AI �
 </script>
 
 <template>
-  <AppDialog v-model="visible" :title="title" width="960px" penetrable>
+  <!-- 1080：模型设置那半栏里的上下文档位（128K…1M 五颗）再对半分就放不下了，窄了必换行 -->
+  <AppDialog v-model="visible" :title="title" width="1080px" penetrable>
     <!-- 第一步：挑服务 -->
     <AiPresetGrid v-if="step === 'pick'" @pick="pickPreset" @custom="pickCustom" />
 
