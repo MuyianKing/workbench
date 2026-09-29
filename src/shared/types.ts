@@ -7,6 +7,7 @@ import { TERMINAL_BUTTON_TOP_DEFAULT } from './terminal-dock'
 import { CARD_OPACITY_DEFAULT } from './card-opacity'
 import { BACKGROUND_OPACITY_DEFAULT } from './workspace-background'
 import { builtinReference } from './wallpaper'
+import type { AiImagePayload } from './ai'
 import type { AiNewsArticle, AiNewsRefreshResult, AiNewsSourceInfo, AiNewsView } from './ai-news'
 import type { AppearanceSettingKey } from './appearance'
 import type { SyncDeviceInfo } from './sync-config'
@@ -37,8 +38,9 @@ import type {
   SkillLibraryState,
   SkillSyncSummary
 } from './skills'
+import type { AiSkillRef } from './pi-skills'
 import type { KbRepoState, KbScanEntry, KbSyncInput, KbSyncSummary } from './kb'
-import { AI_PERMISSION_DEFAULT, AI_THINKING_DEFAULT, type AiModelEntry, type AiSession } from './ai'
+import { AI_PERMISSION_DEFAULT, AI_THINKING_DEFAULT, type AiProvider, type AiSession } from './ai'
 import type {
   NoteImageDeleteInput,
   NoteImageDeleted,
@@ -441,32 +443,21 @@ export interface AppSettings {
    */
   kbDir: string
   /**
-   * AI 助手的提供方名（自定义端点的键名）：进凭据管理器的目标名（`ai/<名称>/token`）、
-   * Pi 的 `models.json` 里的提供方键、以及模型寻址的前缀。
-   * 空串 = 还没配置。收紧规则见 shared/ai.ts 的 sanitizeAiName（小写字母 / 数字 / 连字符）。
+   * AI 助手配过的服务（模型管理弹窗里那一屏）：一个服务 = 名称 + Base URL + API 形态 +
+   * 模型清单（每条带上下文与思考档位）。密钥不在这里 —— 它在 Windows 凭据管理器里
+   * （`ai/<服务 id>/token`），由 Rust 取出来注入子进程的环境变量。
+   *
+   * 停用的服务不进 Pi 的 models.json、也不能当默认模型。形状与收敛（含限量与去重）见
+   * shared/ai.ts 的 AiProvider / sanitizeAiProviders。
    */
-  aiProviderName: string
+  aiProviders: AiProvider[]
   /**
-   * AI 助手的 Base URL：支持 OpenAI 兼容或 Anthropic 兼容的端点（网关、中转、
-   * 本地服务都算）。形状在保存时校验（http(s):// 开头），见 shared/ai.ts 的 sanitizeAiBaseUrl。
+   * 默认模型（模型管理弹窗顶上那一栏）：跑一轮用哪个服务的哪颗模型，行为记忆。
+   * 空串 = 没挑过，用清单里第一个能挑的；挑过的那个被关掉 / 删掉 / 服务被停用时也退到
+   * 那一个 —— 成不成、退回哪一个都在 shared/ai.ts 的 pickAiChoice 里定。
    */
-  aiBaseUrl: string
-  /**
-   * API 形态：`openai-completions`（/chat/completions）或 `anthropic-messages`（/v1/messages），
-   * 取值收敛在 shared/ai.ts 的 sanitizeAiApiFormat。它写进 models.json 的 `api` 字段。
-   */
-  aiApiFormat: string
-  /**
-   * 模型清单（可启停）：启用的那些才进 models.json，也就是页面上那个「模型」下拉里能挑的。
-   * 收敛（去重、限量、形状）见 shared/ai.ts 的 sanitizeAiModels。
-   */
-  aiModels: AiModelEntry[]
-  /**
-   * 这一轮跑哪个模型：用户在页面上挑的那颗（清单里的 id，行为记忆）。
-   * 空串 = 没挑过，用第一个启用的；挑过的那个被关掉 / 删掉时也回到第一个启用的 ——
-   * 成不成、退回哪一个都在 shared/ai.ts 的 pickAiModel 里定。
-   */
-  aiRunModel: string
+  aiDefaultProvider: string
+  aiDefaultModel: string
   /**
    * 思考等级：Pi 的 `--thinking` 认的那七档之一（`off` / `minimal` / … / `max`），
    * 界面上也是一个下拉。收敛在 shared/ai.ts 的 sanitizeAiThinking
@@ -504,6 +495,14 @@ export interface AppSettings {
    * 判定在 shared/ai.ts 的 pickAiActiveSession。
    */
   aiActiveSession: string
+  /**
+   * **关掉的技能**（键是「技能根 + 技能名」，见 shared/pi-skills.ts 的 skillKey）。
+   *
+   * 形状是「被关掉的那些」而不是「开着的那些」：新装进来、别处（技能页、别的 agent）
+   * 放进来的技能默认就是开着的，不需要应用替它们登记一遍；被删掉的技能在这里留一条死键，
+   * 除了占几行什么也不影响。收敛在 shared/pi-skills.ts 的 sanitizeAiSkillsOff。
+   */
+  aiSkillsOff: string[]
   /**
    * 天气城市名：顶栏问候语旁显示当地实时天气，空串表示不显示（也就不联网）。
    *
@@ -1114,6 +1113,12 @@ export interface AiRunInput {
    * 这一句就是接着聊的那一轮。
    */
   prompt: string
+  /**
+   * 这一句附的图（用户贴在输入框里的那些，shape 见 shared/ai.ts 的 AI_IMAGE_TYPES 一段）。
+   * 它们与提示词一起进**同一行** JSON（Pi 的 `prompt` 命令带 `images`）——
+   * 空数组就是没有。**只把进程起起来那趟（prompt 空串）当然是空的。**
+   */
+  images: AiImagePayload[]
   /** 要直启的程序：`node`（内置模式）或 `pi`（全局退路） */
   program: string
   /** 参数数组（不含提示词；自动编辑时 Rust 会追加 `-e <权限扩展>`） */
@@ -1122,6 +1127,12 @@ export interface AiRunInput {
   provider: string
   /** 工具权限模式（shared/ai.ts 的 AI_PERMISSION_MODES；只有 `full` 是「不问」） */
   permission: string
+  /**
+   * 这一轮启用的技能（根 + 技能名，见 shared/pi-skills.ts）：Rust 逐条拼成 `--skill <目录>`
+   * 交给 Pi。**关掉的技能不在里面** —— Pi 这条启动路径不扫任何默认技能目录，
+   * 参数里没有的它就看不见（「没启用」与「不存在」是同一种结果）。
+   */
+  skills: AiSkillRef[]
 }
 
 export interface WorkbenchApi {
@@ -1131,6 +1142,16 @@ export interface WorkbenchApi {
    * title 用于给不同用途换标题（选项目目录 / 选输出目录），不传就是「选择项目目录」。
    */
   pickDirectory: (title?: string) => Promise<string | null>
+  /**
+   * 挑一个文件。
+   *
+   * `filters` 是对话框里的后缀过滤（`[{ name: '技能包', extensions: ['zip'] }]`），
+   * 不传就是「所有文件」。用户取消时回 null —— 那不是失败，调用方不该报错。
+   */
+  pickFile: (
+    title?: string,
+    filters?: Array<{ name: string; extensions: string[] }>
+  ) => Promise<string | null>
   scanProject: (dirPath: string) => Promise<Result<ScanResult>>
   listProjects: () => Promise<{ projects: Project[]; groups: ProjectGroup[] }>
   addProject: (input: AddProjectInput) => Promise<Result<Project>>
@@ -1418,15 +1439,16 @@ export interface WorkbenchApi {
    * 扫描知识库文件夹：**平铺清单**（文件夹 + 任意后缀的文件，带修改时间），树与「哪些是
    * 原始数据、哪些是条目」的拆分在渲染层（shared/kb.ts 的前缀规则）。
    *
-   * 读是只读的；写只有两处：AI 助手那一轮整理（写的人是 Pi，见下面的 AI 段）与重建索引
-   * （生成物）。每条通道都带上 root，与笔记同一套原因：用户换了文件夹，来源就换了。
+   * 读是只读的；写只有一处：重建索引（生成物）。条目的内容由应用编排的清洗写成
+   * （写的人是 Pi，编排见 stores/kb.ts）。每条通道都带上 root，与笔记同一套原因：
+   * 用户换了文件夹，来源就换了。
    */
   kbScan: (root: string) => Promise<Result<KbScanEntry[]>>
   /** 读知识库里的一个文件文本（条目正文 / index.json）；越界路径由 Rust 侧挡住 */
   kbRead: (root: string, rel: string) => Promise<Result<string>>
   /**
-   * 重建 `kb/_catalog.md` 与 `index/index.json`（输出与仓库自己的脚本逐字节一致，
-   * 换行都跟着写成 CRLF）。`generatedAt` 由渲染层按本机时区算（shared/kb.ts 的 todayIsoDate）。
+   * 重建 `kb/_catalog.md` 与 `index/index.json`（索引只由应用生成，格式与既有生成物
+   * 一致、换行写成 CRLF）。`generatedAt` 由渲染层按本机时区算（shared/kb.ts 的 todayIsoDate）。
    */
   kbIndexBuild: (root: string, generatedAt: string) => Promise<Result<{ count: number }>>
   /**
@@ -1438,6 +1460,47 @@ export interface WorkbenchApi {
   kbSync: (input: KbSyncInput) => Promise<Result<KbSyncSummary>>
   /** 探测知识库文件夹的 git 状态（只读）：界面拿它决定给不给同步入口、同步到哪儿 */
   kbRepoState: (dir: string) => Promise<Result<KbRepoState>>
+  // ---------- Pi 的技能（AI 助手页那颗「技能」按钮，见 shared/pi-skills.ts） ----------
+  //
+  // 与上面技能页那组**不是一回事**：那组管的是「技能库 + 装到项目」，这一组管的是
+  // AI 助手页那两条 `.agents/skills`（全局 / 项目）—— 一个技能 = 一个带 SKILL.md 的子目录。
+  // 装进来的东西只落盘：包里的脚本一概不执行（跑不跑是 Pi 自己的事，受权限档管）。
+  /**
+   * 列一个技能根里的技能（`{id, fileCount, skillMd}[]`）。**根不存在就是空表**：
+   * 第一次用、或者这个项目里还没装过技能，都不是错误。
+   */
+  piSkillList: (root: string) => Promise<Result<unknown>>
+  /**
+   * 装一个本地 zip（同名先报错，确认过再带 `overwrite` 重调）。返回落下去的技能名与文件数。
+   */
+  piSkillInstallZip: (
+    root: string,
+    zip: string,
+    id: string | null,
+    overwrite: boolean
+  ) => Promise<Result<unknown>>
+  /**
+   * 装一个本机文件夹（那个文件夹本身就是一个技能：根上要有 SKILL.md）。
+   * **不走 git**：装进用户自己那两个技能根，不替他在他的仓库里提交。
+   */
+  piSkillInstallDir: (
+    root: string,
+    source: string,
+    id: string | null,
+    overwrite: boolean
+  ) => Promise<Result<unknown>>
+  /**
+   * 从用户粘的地址装（GET 一次、跟随跳转）。**这是应用的一条网络出口**：主机由用户给、
+   * 点了才走一次，跳数有上限（见 AGENTS.md 第 1 节的清单与 pi_skills.rs 的文件头）。
+   */
+  piSkillInstallUrl: (
+    root: string,
+    url: string,
+    id: string | null,
+    overwrite: boolean
+  ) => Promise<Result<unknown>>
+  /** 卸掉一个技能（删掉那个技能目录整棵）；界面那一侧先问过一次 */
+  piSkillRemove: (root: string, id: string) => Promise<Result<null>>
   // AI 助手那几条不在这里：会话类通道（要回传进程输出、要按会话 id 认领事件）一直住在
   // 适配层，与 spawn_session / stop_session 同一条路子 —— 见 workbench/ai.ts 的 aiRun。
   // ---------- 密码保险库（见 shared/vault.ts） ----------
@@ -1501,6 +1564,11 @@ export interface WorkbenchApi {
   openInVSCode: (path: string) => Promise<Result<null>>
   /** 用系统默认浏览器打开 http(s) 链接 */
   openExternal: (url: string) => Promise<Result<null>>
+  /**
+   * 用系统默认程序打开一个本地文件（知识库页查看预览不了的原始资料时给出去）。
+   * 与快捷启动同走一条 `open_path` 通道：按 Windows 的文件关联打开，应用不猜程序路径。
+   */
+  openPath: (path: string) => Promise<Result<null>>
   checkPackageManagers: () => Promise<PackageManagerStatus>
   /** 用 npm 全局安装 yarn / pnpm；返回的 status 是装完（或装失败）后重新探测的结果 */
   installPackageManager: (
@@ -1764,16 +1832,15 @@ export const DEFAULT_SETTINGS: AppSettings = {
   noteImageRepo: '',
   skillDir: '',
   kbDir: '',
-  aiProviderName: '',
-  aiBaseUrl: '',
-  aiApiFormat: '',
-  aiModels: [],
-  aiRunModel: '',
+  aiProviders: [],
+  aiDefaultProvider: '',
+  aiDefaultModel: '',
   aiThinking: AI_THINKING_DEFAULT,
   aiPermission: AI_PERMISSION_DEFAULT,
   aiHistory: [],
   aiSessions: [],
   aiActiveSession: '',
+  aiSkillsOff: [],
   weatherCity: '',
   tokenSyncRepo: '',
   activeView: 'home',

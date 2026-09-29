@@ -5,8 +5,9 @@
  * 首页画布的栏宽把手是常显变体、还带「两栏一起改」的耦合逻辑，不在这份里。
  *
  * 定位要求：外层容器 `position: relative`，且要提供 `--tree-w`（当前左栏宽度）——
- * 落点是「外框内边距 + 左栏宽度 + 缝线正中」。宽度跟手只改本地，**落盘归调用方**
- * （`@end`，与首页栏宽把手同一套做法）。
+ * 落点是「外框内边距 + 左栏宽度 + 缝线正中」。四页的外框内边距都是 `--card-gap`
+ * （知识库页的把手挂在两栏那层、那层没有内边距，用 `--resizer-inset: 0px` 覆盖）；
+ * 宽度跟手只改本地，**落盘归调用方**（`@end`，与首页栏宽把手同一套做法）。
  *
  * 拖动经 use-pointer-drag：光标与文本选择由它挂到 body 上的类全局兜住
  * （global.css 的 `body.is-resizing-*`）。emit 的宽度以**按下那一刻**的 props.width
@@ -69,7 +70,10 @@ function onPointerDown(event: PointerEvent): void {
   z-index: 10;
   width: 10px;
   cursor: ew-resize;
-  left: calc(var(--card-gap, 10px) + var(--tree-w, 232px) + var(--card-gap, 10px) / 2 - 5px);
+  left: calc(
+    var(--resizer-inset, var(--card-gap, 10px)) + var(--tree-w, 232px) + var(--card-gap, 10px) / 2 -
+      5px
+  );
 }
 
 /**

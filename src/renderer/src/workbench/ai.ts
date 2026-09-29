@@ -20,7 +20,10 @@ import {
   parsePiEvent,
   parsePiResponse,
   type AiConfirm,
-  type AiLogLine
+  type AiFetchedModel,
+  type AiLogLine,
+  type AiProviderPayload,
+  type PiDelta
 } from '@shared/ai'
 import type { NoteRepoState } from '@shared/note'
 import { fail, ok } from '@shared/result'
@@ -57,10 +60,11 @@ export async function aiRepoState(dir: string): Promise<Result<NoteRepoState>> {
 interface RunHandlers {
   onLine: (line: AiLogLine) => void
   /**
-   * 助手正一个字一个字往外吐（RPC 的 `message_update` › `text_delta`）：界面把它接在
-   * 对话末尾，让回话**流式**长出来，而不是等整段到了才出现（见 shared/ai.ts 的 parsePiDelta）。
+   * 模型正一个字一个字往外吐（RPC 的 `message_update`）：**正文**（`text_delta`）接在
+   * 对话末尾让回话流式长出来，**思考**（`thinking_delta` / `thinking_end`）接在末尾那块
+   * 「思考中…」里 —— 形状见 shared/ai.ts 的 parsePiDelta。
    */
-  onDelta: (delta: string) => void
+  onDelta: (delta: PiDelta) => void
   /** 扩展问「这条命令让不让跑」（RPC 的 extension_ui_request）：要用户答一句才往下走 */
   onConfirm: (confirm: AiConfirm) => void
   onExit: (code: number | null) => void
@@ -92,6 +96,8 @@ export interface AiRuntime {
   node: string
   /** 都没有时的原因（内置那份探测失败的原始输出），排障用，界面不展示 */
   detail: string
+  /** 全局技能根（`%USERPROFILE%\.agents\skills`）：技能弹窗拿它扫列表、拼开关状态。拿不到用户目录时是空串 */
+  skillRoot: string
 }
 
 /**
@@ -108,12 +114,13 @@ export async function aiRuntime(): Promise<AiRuntime> {
       cli: typeof raw.cli === 'string' ? raw.cli : '',
       pi: typeof raw.pi === 'string' ? raw.pi : '',
       node: typeof raw.node === 'string' ? raw.node : '',
-      detail: typeof raw.detail === 'string' ? raw.detail : ''
+      detail: typeof raw.detail === 'string' ? raw.detail : '',
+      skillRoot: typeof raw.skillRoot === 'string' ? raw.skillRoot : ''
     }
   } catch (error) {
     const message = errorText(error, '探测 AI 运行时失败')
     console.warn('[workbench] 探测 AI 运行时失败', error)
-    return { source: 'none', cli: '', pi: '', node: '', detail: message }
+    return { source: 'none', cli: '', pi: '', node: '', detail: message, skillRoot: '' }
   }
 }
 
@@ -189,10 +196,14 @@ export async function aiRun(input: AiRunInput, handlers: RunHandlers): Promise<R
       sessionId: input.sessionId,
       dir: input.dir,
       prompt: input.prompt,
+      // 随这一句贴的图（数据 URL 已拆成 Pi 的 `{data, mimeType}`，见 shared/ai.ts）
+      images: input.images,
       program: input.program,
       args: input.args,
       provider: input.provider,
-      permission: input.permission
+      permission: input.permission,
+      // 这一轮启用的技能（根 + 技能名）：Rust 逐条拼成 `--skill <目录>` 交给 Pi
+      skills: input.skills
     })
     return ok(pid)
   } catch (error) {
@@ -319,19 +330,59 @@ export async function aiKeyClear(provider: string): Promise<Result<null>> {
 }
 
 /**
- * 写自定义端点的 models.json（Pi 的 agent 目录下，`PI_CODING_AGENT_DIR` 指过去的那份）：
- * 设置页保存「模型配置」时调。密钥不进这份文件（里面只有环境变量引用，见 ai.rs）。
+ * 写 AI 服务的 models.json（Pi 的 agent 目录下，`PI_CODING_AGENT_DIR` 指过去的那份）：
+ * 模型管理弹窗里保存 / 增删 / 停用之后调，传的是**当前启用着的那些服务**，整份重写
+ * （停用的不传 —— 它们不该出现在 Pi 那边）。密钥不进这份文件（里面只有环境变量引用）。
  */
-export async function aiProviderWrite(
-  provider: string,
-  baseUrl: string,
-  api: string,
-  models: string[]
-): Promise<Result<null>> {
+export async function aiModelsWrite(providers: AiProviderPayload[]): Promise<Result<null>> {
   try {
-    await invoke('ai_provider_write', { provider, baseUrl, api, models })
+    await invoke('ai_models_write', { providers })
     return ok(null)
   } catch (error) {
     return fail(errorText(error, '写入模型配置失败'))
+  }
+}
+
+/**
+ * 从用户自己那个端点拉一份模型列表（「添加服务」里粘完 Key、或点「获取列表」时调）。
+ * **地址由 baseUrl 与 API 形态推出来**（`{baseUrl}/models`，Anthropic 那套是 `/v1/models`），
+ * 打的是同一个主机、同一把 Key，只是换个路径 —— 这是 AI 那个出口的延伸，不新增出口。
+ * `secret` 传空串表示用凭据管理器里存着的那把（编辑已经保存过的服务时不必重填）。
+ */
+export async function aiModelsFetch(
+  provider: string,
+  baseUrl: string,
+  api: string,
+  secret = ''
+): Promise<Result<AiFetchedModel[]>> {
+  try {
+    const raw = await invoke<unknown[]>('ai_models_fetch', {
+      provider,
+      baseUrl,
+      api,
+      secret
+    })
+    const list = Array.isArray(raw) ? raw : []
+    return ok(
+      list.flatMap((item) => {
+        if (!item || typeof item !== 'object') return []
+        const record = item as Record<string, unknown>
+        const id = typeof record.id === 'string' ? record.id : ''
+        if (!id) return []
+        return [
+          {
+            id,
+            name: typeof record.name === 'string' && record.name ? record.name : id,
+            contextWindow: typeof record.contextWindow === 'number' ? record.contextWindow : 0,
+            // 端点没报就是 0（不是「没有」）
+            maxTokens: typeof record.maxTokens === 'number' ? record.maxTokens : 0,
+            // null = 端点没说（不是「不支持」）
+            reasoning: typeof record.reasoning === 'boolean' ? record.reasoning : null
+          }
+        ]
+      })
+    )
+  } catch (error) {
+    return fail(errorText(error, '获取模型列表失败'))
   }
 }

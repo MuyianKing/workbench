@@ -1,19 +1,17 @@
 /**
  * 知识库（kb）：用户在别处维护的一个独立项目 —— `data/raw/` 放原始资料，`kb/` 放整理好的
- * 条目（frontmatter 的 source 指回原始文件），`index/index.json` 由仓库自己的脚本生成。
+ * 条目（frontmatter 的 source 指回原始文件），`index/index.json` 由应用重建（Rust 侧
+ * kb.rs 的 index_build）。**仓库是纯数据**：没有脚本、没有 Agent 说明文件，清洗由应用
+ * 全程编排（指令在 kb-clean.ts，编排与收尾在 stores/kb.ts）。
  *
- * 应用对知识库**只读**：这里没有写入，也没有「生成」——整理是用户在 ZCode 等 Agent 里做的
- * 事，应用负责的是把「哪些还没入库、哪些原始资料又更新了」算清楚（这些口径都是纯函数，
- * 在这里、有单测），再用一段指令把整理这件事交还给 Agent。Rust 侧（kb.rs）只带事实：
- * 平铺清单（任意后缀、带 mtime）与文件文本。
+ * 应用对条目内容**只读**，写的只有生成物（重建索引）。应用负责的是把「哪些还没入库、
+ * 哪些原始资料又更新了」算清楚（这些口径都是纯函数，在这里、有单测），清洗就按这份清单
+ * 交给内置的 Agent。Rust 侧（kb.rs）只带事实：平铺清单（任意后缀、带 mtime）与文件文本。
  *
  * 「有没有更新」的判据是**文件修改时间**：条目的 source 归一化后与原始文件配对 ——
  * 没有条目指向 = 未入库；原始文件比指向它的条目里最新的那份还新 = 有更新。
  * 它是个启发式：git 操作（checkout / pull）会重写 mtime，但换状态文件、记同步位标
  * 都比它更脆 —— 它不依赖任何额外状态，重启就对得上。口径要换时只改这里。
- *
- * 仓库布局（`data/raw`、`kb`、索引位置）在这里定成常量：它们与知识库仓库自己的
- * `scripts/build_index.py` 是一套约定，改哪边都要一起改。
  */
 import type { NoteRepoState, NoteSyncInput, NoteSyncSummary } from './note'
 
@@ -26,9 +24,9 @@ export type KbRepoState = NoteRepoState
 export const KB_RAW_DIR = 'data/raw'
 /** 条目区（相对知识库根） */
 export const KB_DIR = 'kb'
-/** 机器可读索引（相对知识库根；由仓库的 build_index.py 生成） */
+/** 机器可读索引（相对知识库根；由应用重建，见 kb.rs 的 index_build） */
 export const KB_INDEX_REL = 'index/index.json'
-/** 全库目录：脚本生成、Agent 的导航入口，条目清单里不算它 */
+/** 全库目录：应用重建的生成物、阅读的导航入口，条目清单里不算它 */
 export const KB_CATALOG_NAME = '_catalog.md'
 
 /** 同层按名字排的口径与笔记树一致（数字按值、中文按拼音） */
@@ -59,6 +57,12 @@ export interface KbEntryMeta {
   summary: string
   /** frontmatter 的 source，归一化后（统一 `/` 分隔）；没写是空串 */
   source: string
+  /**
+   * 正文里的**站内链接目标**（原始 href，外部地址与锚点已滤掉）：扫描时逐条读出来存下，
+   * 之后不用再读一遍正文 —— 巡检的孤儿 / 断链与界面的站内跳转都按它算
+   * （认法与解析规则见 [kb-lint.ts](kb-lint.ts) 的 kbEntryLinks / resolveKbLink）。
+   */
+  links: string[]
   mtimeMs: number
 }
 
@@ -224,6 +228,203 @@ export function compareKbRel(a: { rel: string }, b: { rel: string }): number {
   return collator.compare(a.rel, b.rel)
 }
 
+// ---------- 条目树 ----------
+
+/** 条目树的一个节点：目录或条目（左栏「条目」签那棵树的数据形状） */
+export interface KbTreeNode {
+  /**
+   * el-tree 的 node-key，全树唯一：目录是相对 `kb/` 的目录路径（`01-mu-ui组件库`），
+   * 条目是 kb 相对路径（`kb/01-mu-ui组件库/add-button.md`）—— 前缀不同，撞不上。
+   * 展开态记的也是它。
+   */
+  id: string
+  /** 行上显示的名字：目录是目录名，条目是 frontmatter 的 title（没有回落文件名） */
+  name: string
+  kind: 'folder' | 'entry'
+  children: KbTreeNode[]
+  /** 条目节点带上的 frontmatter status（目录节点没有）；界面拿它标「草稿 / 已核对」 */
+  status?: string
+}
+
+/**
+ * 把条目清单按 `kb/` 下的目录结构收成树。
+ *
+ * 条目的 rel 就是它在仓库里的位置（`kb/NN-主题名/xxx.md`），树直接照着它长：
+ * 目录一层层往下、条目挂在所在目录上。目录排在条目前面、同层按名字排
+ * （与笔记树同一副口径）；只在搜索过滤后的清单上再调一次，就能得到「只含匹配项」的树。
+ * 输入是空数组就回空树 —— 「库里还没有条目」与「没搜到」由界面各自说话。
+ */
+export function kbEntryTree(entries: KbEntryMeta[]): KbTreeNode[] {
+  const root: KbTreeNode = { id: '', name: '', kind: 'folder', children: [] }
+
+  for (const entryMeta of entries) {
+    const inner = entryMeta.rel.startsWith(`${KB_DIR}/`)
+      ? entryMeta.rel.slice(KB_DIR.length + 1)
+      : entryMeta.rel
+    const segments = inner.split('/')
+    const name = segments.pop()
+    if (!name) continue
+
+    let parent = root
+    for (const segment of segments) {
+      let folder = parent.children.find((node) => node.kind === 'folder' && node.name === segment)
+      if (!folder) {
+        folder = {
+          id: parent.id ? `${parent.id}/${segment}` : segment,
+          name: segment,
+          kind: 'folder',
+          children: []
+        }
+        parent.children.push(folder)
+      }
+      parent = folder
+    }
+    parent.children.push({
+      id: entryMeta.rel,
+      name: entryMeta.title,
+      kind: 'entry',
+      children: [],
+      status: entryMeta.status
+    })
+  }
+
+  sortKbTree(root.children)
+  return root.children
+}
+
+/** 目录在前、同层按名字（数字按值、中文按拼音，与笔记树同一把 collator），逐层递归。
+ * 条目树（entry）与原始数据树（file）两种节点的公共骨架，收成一把排 */
+interface KbTreeBranch {
+  name: string
+  kind: 'folder' | 'entry' | 'file'
+  children: KbTreeBranch[]
+}
+
+function sortKbTree(nodes: KbTreeBranch[]): void {
+  nodes.sort(
+    (a, b) =>
+      (a.kind === 'folder' ? 0 : 1) - (b.kind === 'folder' ? 0 : 1) || collator.compare(a.name, b.name)
+  )
+  for (const node of nodes) {
+    if (node.children.length) sortKbTree(node.children)
+  }
+}
+
+/** 树里所有目录节点的 id：搜索 / 筛选时整棵树默认摊开用（folder 才有展开态）。
+ * 条目树与原始数据树两份节点形状都吃（只看 id、kind 与 children） */
+export function kbTreeFolderIds<T extends { id: string; kind: 'folder' | 'entry' | 'file'; children: T[] }>(
+  nodes: T[]
+): string[] {
+  const ids: string[] = []
+  for (const node of nodes) {
+    if (node.kind === 'folder') {
+      ids.push(node.id)
+      ids.push(...kbTreeFolderIds(node.children))
+    }
+  }
+  return ids
+}
+
+/**
+ * 一个条目所在的目录链（从最外层排下来，不含条目自己）：选中项换条目时
+ * 把它所在的那几层展开用。条目在 `kb/` 最外层时回空数组（没有上一级可展开）。
+ */
+export function kbFolderChain(rel: string): string[] {
+  const inner = rel.startsWith(`${KB_DIR}/`) ? rel.slice(KB_DIR.length + 1) : rel
+  const segments = inner.split('/')
+  segments.pop()
+
+  const chain: string[] = []
+  let acc = ''
+  for (const segment of segments) {
+    acc = acc ? `${acc}/${segment}` : segment
+    chain.push(acc)
+  }
+  return chain
+}
+
+// ---------- 原始数据树 ----------
+
+/** 原始数据树的一个节点：目录或文件（左栏「原始数据」签那棵树的数据形状） */
+export interface KbRawTreeNode {
+  /**
+   * el-tree 的 node-key，全树唯一：目录是相对 `data/raw` 的目录路径（`mu-ui`），
+   * 文件是完整 rel（`data/raw/mu-ui/button.md`）—— 前缀不同，撞不上。
+   */
+  id: string
+  /** 行上显示的名字：目录是目录名，文件是文件名（带后缀） */
+  name: string
+  kind: 'folder' | 'file'
+  children: KbRawTreeNode[]
+  /** 文件节点带上的原始数据（目录节点没有）：状态、指向它的条目、修改时间都在里面 */
+  item?: KbRawItem
+}
+
+/**
+ * 把原始数据清单按 `data/raw/` 下的目录结构收成树 —— 与条目树（kbEntryTree）同一条路数：
+ * rel 就是它在仓库里的位置，树照着它长，目录在前、同层按名字排；搜索 / 状态筛选
+ * 在过滤后的清单上再调一次，就得到「只含筛出项」的树。空清单回空树，不是错误。
+ */
+export function kbRawTree(items: KbRawItem[]): KbRawTreeNode[] {
+  const root: KbRawTreeNode = { id: '', name: '', kind: 'folder', children: [] }
+
+  for (const item of items) {
+    const inner = item.rel.startsWith(`${KB_RAW_DIR}/`)
+      ? item.rel.slice(KB_RAW_DIR.length + 1)
+      : item.rel
+    const segments = inner.split('/')
+    const name = segments.pop()
+    if (!name) continue
+
+    let parent = root
+    for (const segment of segments) {
+      let folder = parent.children.find((node) => node.kind === 'folder' && node.name === segment)
+      if (!folder) {
+        folder = {
+          id: parent.id ? `${parent.id}/${segment}` : segment,
+          name: segment,
+          kind: 'folder',
+          children: []
+        }
+        parent.children.push(folder)
+      }
+      parent = folder
+    }
+    parent.children.push({ id: item.rel, name: item.name, kind: 'file', children: [], item })
+  }
+
+  sortKbTree(root.children)
+  return root.children
+}
+
+// ---------- 原始数据查看 ----------
+
+/** 原始数据在应用里怎么「看」：markdown 渲染成正文 / 纯文本预览 / 交给系统默认程序 */
+export type KbRawViewKind = 'markdown' | 'text' | 'external'
+
+/** 应用里能就地按纯文本预览的后缀（markdown 单独算一类，不在这里） */
+const KB_RAW_TEXT_EXTS = new Set(['txt', 'json', 'csv', 'log', 'xml', 'html', 'htm', 'yaml', 'yml', 'toml'])
+
+/**
+ * 按文件名给原始数据挑看法：md / markdown 渲染成正文，认得出的文本后缀按纯文本预览，
+ * 剩下的（pdf / docx / 图片…）应用里不预览 —— 就地说明、交给系统默认程序打开。
+ * 没有后缀（含点开头的名字）按交出去算：它多半不是文本。
+ */
+export function kbRawViewKind(name: string): KbRawViewKind {
+  const dot = name.lastIndexOf('.')
+  const ext = dot > 0 ? name.slice(dot + 1).toLowerCase() : ''
+  if (ext === 'md' || ext === 'markdown') return 'markdown'
+  if (KB_RAW_TEXT_EXTS.has(ext)) return 'text'
+  return 'external'
+}
+
+/** 原始数据状态的界面用词：未入库 / 有更新要催，已入库照实说（清单与查看共用这一份） */
+export function kbRawStatusText(status: KbRawStatus): string {
+  if (status === 'pending') return '未入库'
+  if (status === 'stale') return '有更新'
+  return '已入库'
+}
+
 /** 后缀：小写、不带点；没有后缀（含 `.gitignore` 这种点开头的名字）是空串 */
 function extOf(name: string): string {
   const dot = name.lastIndexOf('.')
@@ -276,7 +477,7 @@ function pushEntry(map: Map<string, KbEntryMeta[]>, key: string, entry: KbEntryM
   else map.set(key, [entry])
 }
 
-// ---------- 统计与指令 ----------
+// ---------- 统计 ----------
 
 /** 概览上的几个数：条目总数、草稿数，原始数据总数与其中未入库 / 有更新的两个数 */
 export interface KbStats {
@@ -308,31 +509,12 @@ export function kbTagCounts(entries: KbEntryMeta[]): Array<{ tag: string; count:
     .sort((a, b) => b.count - a.count || collator.compare(a.tag, b.tag))
 }
 
-/**
- * 整理指令：复制给知识库仓库里的 Agent 用的一段话。
- *
- * 整理成什么样是那个仓库自己的规范说了算，这里只交代三件事 —— 去哪儿拿原始数据、
- * 待处理的有多少（一个都没有时也明说，省得 Agent 白跑）、整理完要重建索引。
- * 索引脚本的名字写全：这是仓库自己的约定，Agent 进了仓库照着跑就行。
- */
-export function kbOrganizeInstruction(pending: number, stale: number): string {
-  const counts = [pending > 0 ? `${pending} 个未入库` : '', stale > 0 ? `${stale} 个有更新` : '']
-    .filter(Boolean)
-    .join('、')
-  return [
-    '请整理本知识库 data/raw 下的原始资料：按 kb/00-使用规范/条目格式规范.md 的格式拆分入库到 kb/，',
-    '条目 frontmatter 的 source 填原始文件的相对路径（如 data/raw/xxx.md）。',
-    counts ? `当前待处理：${counts}。` : '当前没有待处理的原始数据。',
-    '完成后运行 py scripts/build_index.py 重建目录与索引。'
-  ].join('\n')
-}
-
 // ---------- 索引 ----------
 
 /**
  * index.json 的解析：只取应用关心的两样（生成日期、条目数）。
  *
- * 认不出的形状（文件不在 / 不是这份脚本写的 / 写坏了）返回 null —— **不是错误**：
+ * 认不出的形状（文件不在 / 不是应用生成的 / 写坏了）返回 null —— **不是错误**：
  * 界面降级成「索引还没生成」，条目清单照常工作（它是扫出来的，不依赖索引）。
  */
 export function parseKbIndex(text: string): KbIndexInfo | null {
@@ -349,10 +531,10 @@ export function parseKbIndex(text: string): KbIndexInfo | null {
 }
 
 /**
- * 本机时区的今天（`YYYY-MM-DD`）：重建索引时写进 `generated_at` 的就是它。
+ * 本机时区的今天（`YYYY-MM-DD`）：重建索引时写进 `generated_at`、清洗时写进提示词的都是它。
  *
- * 口径与仓库脚本的 `date.today()` 一致（本机时区，不是 UTC）—— 所以由渲染层算好交给
- * Rust，而不是让 Rust 自己从时间戳推（那边要么引一个日期库，要么就得自己处理时区）。
+ * 本机时区，不是 UTC —— 由渲染层算好交给 Rust，而不是让 Rust 自己从时间戳推
+ * （那边要么引一个日期库，要么就得自己处理时区）。
  */
 export function todayIsoDate(now: Date = new Date()): string {
   const pad = (value: number): string => String(value).padStart(2, '0')

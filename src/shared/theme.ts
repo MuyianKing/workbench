@@ -172,6 +172,14 @@ export interface ThemeConfig {
   videoFloatH: number
   /** AI 助手页左栏（项目 → 会话那棵树）的宽度（px）：与笔记 / 视频树同一套做法 */
   aiTreeWidth: number
+  /**
+   * AI 助手页左栏收起没有：收起后对话占满整行，入口在对话区左上角那颗按钮上。
+   * 与视频页左栏的收起同属「这一页长什么样」，住主题文件；收起**不是卸载** ——
+   * 宽度与树的展开态都还在，展开回来原样。
+   */
+  aiTreeCollapsed: boolean
+  /** 知识库页左栏（条目 / 原始数据清单）的宽度（px）：与笔记 / 视频树同一套做法 */
+  kbTreeWidth: number
   cards: Record<HomeCardId, CardPlacement>
   /**
    * 外观设置（见 appearance.ts）：这一批也住在主题文件里，和布局一起构成
@@ -296,6 +304,16 @@ export const AI_TREE_WIDTH_MAX = 520
 export const AI_TREE_WIDTH_DEFAULT = 232
 
 /**
+ * 知识库页左栏（条目 / 原始数据清单）的宽度区间。
+ *
+ * 下限要放得下树行与「条目 / 原始数据」那个切换，上限只防手改数据把阅读区挤没。
+ * 与笔记 / AI 树同一个存放处（theme.json）、同一套做法。
+ */
+export const KB_TREE_WIDTH_MIN = 180
+export const KB_TREE_WIDTH_MAX = 520
+export const KB_TREE_WIDTH_DEFAULT = 232
+
+/**
  * 默认布局（按当前配置固化）。
  *
  * 第一栏（左，373 固定）自上而下是活跃度、快捷启动、系统状态、快捷操作、命令五张定高卡，
@@ -355,6 +373,8 @@ export const DEFAULT_THEME: ThemeConfig = {
   videoFloatW: VIDEO_FLOAT_SIZE_DEFAULT.width,
   videoFloatH: VIDEO_FLOAT_SIZE_DEFAULT.height,
   aiTreeWidth: AI_TREE_WIDTH_DEFAULT,
+  aiTreeCollapsed: false,
+  kbTreeWidth: KB_TREE_WIDTH_DEFAULT,
   cards: {
     activity: { row: 'row-1', order: 0, hidden: false },
     quick: { row: 'row-2', order: 0, hidden: false },
@@ -670,6 +690,13 @@ export function clampAiTreeWidth(value: unknown): number {
   return Math.min(AI_TREE_WIDTH_MAX, Math.max(AI_TREE_WIDTH_MIN, base))
 }
 
+/** 收敛知识库页左栏宽度（与笔记 / 视频树同一条规矩）；非法值回到默认宽度 */
+export function clampKbTreeWidth(value: unknown): number {
+  const fallback = KB_TREE_WIDTH_DEFAULT
+  const base = typeof value === 'number' && Number.isFinite(value) ? Math.round(value) : fallback
+  return Math.min(KB_TREE_WIDTH_MAX, Math.max(KB_TREE_WIDTH_MIN, base))
+}
+
 function finiteOr(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback
 }
@@ -909,6 +936,10 @@ export function sanitizeTheme(raw: unknown): ThemeConfig {
     videoFloatH: clampVideoFloatHeight(base.videoFloatH),
     // 同上：老主题文件里没有，补默认宽度
     aiTreeWidth: clampAiTreeWidth(base.aiTreeWidth),
+    // 同上：老主题文件里没有，默认不收起
+    aiTreeCollapsed: base.aiTreeCollapsed === true,
+    // 同上：老主题文件里没有，补默认宽度
+    kbTreeWidth: clampKbTreeWidth(base.kbTreeWidth),
     cards: normalizeOrder(keepOneVisible(cards)),
     // 外观是后加的字段：老主题文件里没有，缺了就补默认（**不能**因为它去动上面的版本判定，
     // 否则升级一次就会把用户的布局整份清掉）
@@ -971,6 +1002,7 @@ function layoutSignature(layout: ThemeConfig): string {
     layout.videoFloatW,
     layout.videoFloatH,
     layout.aiTreeWidth,
+    layout.kbTreeWidth,
     layout.columns
       .map(
         (column) =>

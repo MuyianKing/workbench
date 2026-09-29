@@ -402,6 +402,7 @@ export async function noteRepoState(dir: string): Promise<Result<NoteRepoState>>
 
   return ok({
     isRepo: result.data.isRepo === true,
-    origin: typeof result.data.origin === 'string' ? result.data.origin : ''
+    origin: typeof result.data.origin === 'string' ? result.data.origin : '',
+    branch: typeof result.data.branch === 'string' ? result.data.branch : ''
   })
 }

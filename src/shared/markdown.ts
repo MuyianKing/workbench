@@ -11,7 +11,8 @@
  *    「第一行\n第二行」会被并成一段，写的人看到的和渲染出来的对不上。
  *
  * 另外把链接统一改成新窗口打开，并交出 `target` / `rel`：应用是个 WebView，
- * 点一个 `<a>` 默认会把应用自己导航走（界面直接没了）。
+ * 点一个 `<a>` 默认会把应用自己导航走（界面直接没了）；表格外面包一层滚动容器
+ * （`.md-table`，见下面 table_open / table_close 的说明）。
  */
 import MarkdownIt from 'markdown-it'
 
@@ -34,6 +35,18 @@ md.renderer.rules.link_open = (tokens, idx, options, env, self) => {
 }
 
 /**
+ * 表格外面包一层 `<div class="md-table">`：**宽度由它兜**（`overflow-x: auto`）。
+ * 光给 `<table>` 加边框是不够的 —— 列多 / 名字长的表会照着内容的宽度把卡片撑破
+ * （`.md` 上那条 `overflow-wrap: anywhere` 只会把单元格里的字拆得七零八落）。
+ * 边框、表头底色那些在 MarkdownView 的 `.md-table` 一节里。
+ */
+md.renderer.rules.table_open = (tokens, idx, options, env, self) =>
+  `<div class="md-table">${renderToken(tokens, idx, options, env, self)}`
+
+md.renderer.rules.table_close = (tokens, idx, options, env, self) =>
+  `${renderToken(tokens, idx, options, env, self)}</div>`
+
+/**
  * markdown 原文 → 可以直接插入页面的 HTML 片段（空内容返回空串，不留一个空段落）。
  *
  * 安全性由 markdown-it 保证：`html: false` 转义原文里的标签，它自带的 `validateLink`
@@ -42,6 +55,27 @@ md.renderer.rules.link_open = (tokens, idx, options, env, self) => {
 export function renderMarkdown(source: string): string {
   if (typeof source !== 'string' || !source.trim()) return ''
   return md.render(source)
+}
+
+/**
+ * 原文里的链接目标（`[文字](地址)` 的地址；图片、纯文本里的方括号都不算）。
+ *
+ * 走同一份 token 流：代码块 / 行内代码里的方括号不会被误认成链接，认出来的与渲染出来的
+ * 是同一批。裸地址（`linkify`）与 `<https://…>` 也在里面 —— 调用方按地址自己筛。
+ * 知识库的「谁链到谁」按它算，见 shared/kb-lint.ts 的 kbEntryLinks。
+ */
+export function markdownLinks(source: string): string[] {
+  if (typeof source !== 'string' || !source.trim()) return []
+
+  const hrefs: string[] = []
+  for (const token of md.parse(source, {})) {
+    for (const child of token.children ?? []) {
+      if (child.type !== 'link_open') continue
+      const href = child.attrGet('href')
+      if (typeof href === 'string' && href) hrefs.push(href)
+    }
+  }
+  return hrefs
 }
 
 /**

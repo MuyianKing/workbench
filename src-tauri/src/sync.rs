@@ -650,7 +650,15 @@ pub fn repo_state(dir: &str) -> Result<Value, String> {
         .map(|text| text.trim().to_string())
         .unwrap_or_default();
 
-    Ok(json!({ "isRepo": true, "origin": origin }))
+    // 当前分支：AI 助手页拿它在页面上说清「在哪个分支上干活」。读不出来（刚 init 的空仓库、
+    // detached HEAD）就是空串 —— 界面上那一截不显示，不是错误
+    let branch = match run_git(&["rev-parse", "--abbrev-ref", "HEAD"], Some(&root), GIT_TIMEOUT) {
+        Ok(text) => text.trim().to_string(),
+        Err(_) => String::new(),
+    };
+    let branch = if branch == "HEAD" { String::new() } else { branch };
+
+    Ok(json!({ "isRepo": true, "origin": origin, "branch": branch }))
 }
 
 /// 提交是应用替用户产生的：他没配过 git 身份时给一个兜底，否则 commit 会直接失败。

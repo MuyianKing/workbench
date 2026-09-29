@@ -2,9 +2,13 @@
 /**
  * 左栏那棵会话树：**两层** —— 第一层是项目（一个工作目录），第二层是那个目录下的会话。
  *
- * 每个项目行右边有「新建会话」（悬停才出来）：在那个目录里新起一段对话；每个会话行右边
+ * 每个项目行右边有「起一段新的」（悬停才出来）：**在那个目录里**开一段；每个会话行右边
  * 有「删除」（同样悬停才出）：连同盘上那份对话留档一起删（**确认在 stores/ai.ts 里问**，
  * 这里只报一声）。会话行上那颗小圆点是「正在跑」—— 几个会话可以同时在跑，一眼看出来。
+ *
+ * **「起一段新的」只是把右栏切到起始那一屏**（那一段还没有：挑目录、写第一句都在那一屏，
+ * 会话在发出第一句时才建），所以这里那颗 emit 出去的是「用这个目录起一段」而不是一个已建好的
+ * 会话 —— 没说过话的会话不该在树上占一行。一个都还没有时这一栏按别处那副空态给一句说明。
  *
  * 手写两层列表而不用 `el-tree`：要的就是「固定两层、行上有悬停按钮、展开态自己说了算」
  * 这几样，`el-tree` 的展开 / 选中 / 拖放那一整套在这里都用不上，反而要绕着它的默认行为走
@@ -14,7 +18,7 @@
  * 没必要像笔记树那样落盘。
  */
 import { computed, ref } from 'vue'
-import { CaretRight, ChatLineSquare, Delete, FolderAdd, FolderOpened, Plus } from '@element-plus/icons-vue'
+import { CaretRight, ChatLineSquare, Delete, FolderOpened, Plus } from '@element-plus/icons-vue'
 import type { AiSessionGroup } from '@shared/ai'
 
 const props = defineProps<{
@@ -27,11 +31,9 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   select: [id: string]
-  /** 在这个目录里新建一个会话 */
-  create: [dir: string]
+  /** 在这个目录里起一段新的（右栏切到起始那一屏，会话等第一句发出去才建） */
+  start: [dir: string]
   remove: [id: string]
-  /** 还没有会话时那颗按钮：挑一个目录新建 */
-  pick: []
 }>()
 
 /** 收起来的项目（存「收起来的」而不是「展开的」：项目一多，缺省就是摊开的） */
@@ -54,53 +56,49 @@ const running = computed(() => new Set(props.runningIds))
 
 <template>
   <div class="tree scrollbar">
-    <template v-if="groups.length">
-      <div v-for="group in groups" :key="group.dir" class="tree__group">
-        <!-- 项目那一行：点整行是收起 / 摊开（这一个目录里有哪些会话） -->
-        <div class="row is-project" :title="group.dir" @click="toggle(group.dir)">
-          <el-icon class="row__caret" :class="{ 'is-open': !collapsed.has(group.dir) }">
-            <CaretRight />
-          </el-icon>
-          <el-icon class="row__icon"><FolderOpened /></el-icon>
-          <span class="row__name">{{ group.name }}</span>
-          <el-tooltip content="在这个目录里新建会话" placement="top">
-            <button type="button" class="row__action" @click.stop="emit('create', group.dir)">
-              <el-icon><Plus /></el-icon>
+    <!-- 一个会话都还没有：按别处那副空态给一句说明（起一段在那颗「+」与中间那条
+         composer 上，这儿只把「项目 → 会话」这层关系说清楚） -->
+    <div v-if="!groups.length" class="tree__empty">
+      <p class="tree__empty-title">还没有会话</p>
+      <p class="tree__empty-hint">
+        点上面的「+」开一段新的：一个目录是一个「项目」，它下面可以有好几段对话。
+      </p>
+    </div>
+
+    <div v-for="group in groups" :key="group.dir" class="tree__group">
+      <!-- 项目那一行：点整行是收起 / 摊开（这一个目录里有哪些会话） -->
+      <div class="row is-project" :title="group.dir" @click="toggle(group.dir)">
+        <el-icon class="row__caret" :class="{ 'is-open': !collapsed.has(group.dir) }">
+          <CaretRight />
+        </el-icon>
+        <el-icon class="row__icon"><FolderOpened /></el-icon>
+        <span class="row__name">{{ group.name }}</span>
+        <el-tooltip content="在这个目录里起一段新的" placement="top">
+          <button type="button" class="row__action" @click.stop="emit('start', group.dir)">
+            <el-icon><Plus /></el-icon>
+          </button>
+        </el-tooltip>
+      </div>
+
+      <template v-if="!collapsed.has(group.dir)">
+        <div
+          v-for="session in group.sessions"
+          :key="session.id"
+          class="row is-session"
+          :class="{ 'is-active': session.id === activeId }"
+          :title="session.title || group.dir"
+          @click="emit('select', session.id)"
+        >
+          <el-icon class="row__icon"><ChatLineSquare /></el-icon>
+          <span class="row__name">{{ sessionLabel(session.title) }}</span>
+          <span v-if="running.has(session.id)" class="row__run" aria-hidden="true" />
+          <el-tooltip content="删除这个会话（对话记录一起删掉）" placement="top">
+            <button type="button" class="row__action" @click.stop="emit('remove', session.id)">
+              <el-icon><Delete /></el-icon>
             </button>
           </el-tooltip>
         </div>
-
-        <template v-if="!collapsed.has(group.dir)">
-          <div
-            v-for="session in group.sessions"
-            :key="session.id"
-            class="row is-session"
-            :class="{ 'is-active': session.id === activeId }"
-            :title="session.title || group.dir"
-            @click="emit('select', session.id)"
-          >
-            <el-icon class="row__icon"><ChatLineSquare /></el-icon>
-            <span class="row__name">{{ sessionLabel(session.title) }}</span>
-            <span v-if="running.has(session.id)" class="row__run" aria-hidden="true" />
-            <el-tooltip content="删除这个会话（对话记录一起删掉）" placement="top">
-              <button type="button" class="row__action" @click.stop="emit('remove', session.id)">
-                <el-icon><Delete /></el-icon>
-              </button>
-            </el-tooltip>
-          </div>
-        </template>
-      </div>
-    </template>
-
-    <!-- 一个会话都没有：这里就是入口（挑一个目录 = 建第一个「项目」） -->
-    <div v-else class="tree__empty">
-      <p class="tree__empty-title">还没有会话</p>
-      <el-button size="small" type="primary" :icon="FolderAdd" @click="emit('pick')">
-        新建会话
-      </el-button>
-      <p class="tree__empty-hint">
-        挑一个目录，对话就在它里面干活 —— 一个目录是这里的一个「项目」，它下面可以有好几段对话。
-      </p>
+      </template>
     </div>
   </div>
 </template>
@@ -220,6 +218,7 @@ const running = computed(() => new Set(props.runningIds))
   color: var(--ink);
 }
 
+/* 一个会话都没有时那一块：与笔记树 / 视频树同一副空态（标题一行 + 一句说明，不成块、不描边） */
 .tree__empty {
   display: flex;
   flex-direction: column;

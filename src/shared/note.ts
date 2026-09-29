@@ -169,6 +169,11 @@ export interface NoteRepoState {
   isRepo: boolean
   /** origin 的地址；没有远端（或根本没仓库）时是空串 */
   origin: string
+  /**
+   * 当前分支：只有 AI 助手页在用（它在位置那一栏上说清「在哪个分支上干活」）。
+   * 读不出来时是空串（空仓库、detached HEAD、根本不是仓库）—— 那一截不显示，不算错。
+   */
+  branch?: string
 }
 
 /** 同步一次要带的东西：要同步哪个文件夹。远端地址不在这里 —— 它就是那个文件夹的 `origin` */
