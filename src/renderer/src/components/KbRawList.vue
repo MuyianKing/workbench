@@ -1,21 +1,30 @@
 <script setup lang="ts">
 /**
- * 原始数据清单（左栏「原始数据」签）：data/raw 下的文件与各自的入库状态。
+ * 原始数据树（左栏「原始数据」签）：data/raw 下的文件按目录结构收成的树与各自的入库状态。
  *
  * 状态的口径在 shared/kb.ts（source 配对 + mtime 比较），这里只把结果摆出来：
- * 按状态筛（带计数）、一眼看出哪些等着整理。待处理不为零时底部给一条通往
- * 「复制整理指令」的近路 —— 整理本身仍是 Agent 的事，应用只递话。
+ * 按状态筛（带计数）、一眼看出哪些等着清洗；树由 kbRawTree 从筛过的清单现算
+ * （props 只读，这里不留第二份），文件行还是原来那副两行块 —— 名字 + 后缀一行，
+ * 状态、指向它的条目数与修改时间一行。待处理不为零时底部给一条直达「开始清洗」的
+ * 近路 —— 清洗本身是应用编排的（见 stores/kb.ts），这里只递一手指。
  */
-import { computed, ref } from 'vue'
-import { Tickets } from '@element-plus/icons-vue'
+import { computed, ref, watch } from 'vue'
+import { Document, Folder, MagicStick } from '@element-plus/icons-vue'
 import { formatTimestamp } from '@/format'
-import type { KbRawItem, KbRawStatus } from '@shared/kb'
+import {
+  kbRawStatusText,
+  kbRawTree,
+  kbTreeFolderIds,
+  type KbRawItem,
+  type KbRawStatus,
+  type KbRawTreeNode
+} from '@shared/kb'
 
 const props = defineProps<{
   items: KbRawItem[]
 }>()
 
-const emit = defineEmits<{ 'copy-instruction': [] }>()
+const emit = defineEmits<{ clean: []; open: [rel: string] }>()
 
 type Filter = 'all' | KbRawStatus
 
@@ -25,6 +34,9 @@ const FILTER_LABELS: Record<Filter, string> = {
   stale: '有更新',
   synced: '已入库'
 }
+
+/** el-tree 认的字段名：数据里叫 name / children */
+const TREE_PROPS = { label: 'name', children: 'children' } as const
 
 const filter = ref<Filter>('all')
 
@@ -39,15 +51,43 @@ const filtered = computed(() =>
   filter.value === 'all' ? props.items : props.items.filter((item) => item.status === filter.value)
 )
 
+const tree = computed(() => kbRawTree(filtered.value))
+/** 筛过（非「全部」）就算在过滤中：那份清单只是全库的一角，整树摊开才看得见都剩了谁 */
+const filtering = computed(() => filter.value !== 'all')
+
+/** 用户自己收展的那份（筛选期间不记，见 expand / collapse） */
+const expanded = ref<string[]>([])
+
+/** 筛选时整棵摊开：重建出的树只含筛出项，收着的目录会让「筛到了」看不出来 */
+const expandedKeys = computed(() =>
+  filtering.value ? kbTreeFolderIds(tree.value) : expanded.value
+)
+
+// 首次出数据（重扫后也一样）把顶层目录摊开：树默认全收着的话，
+// 一进来只剩目录名，「哪些等着清洗」就看不出来了
+watch(tree, (nodes) => {
+  if (!filtering.value && !expanded.value.length && nodes.length) {
+    expanded.value = nodes.filter((node) => node.kind === 'folder').map((node) => node.id)
+  }
+})
+
+function expand(id: string): void {
+  if (filtering.value) return
+  expanded.value = [...new Set([...expanded.value, id])]
+}
+
+function collapse(id: string): void {
+  if (filtering.value) return
+  expanded.value = expanded.value.filter((item) => item !== id)
+}
+
+/** 点目录行只是收展（el-tree 自己处理），点文件才算「查看它」（右栏就地预览或给出去） */
+function onNodeClick(data: KbRawTreeNode): void {
+  if (data.kind === 'file') emit('open', data.id)
+}
+
 /** 待处理（未入库 + 有更新）：底部那条近路只在有活儿时出现 */
 const actionable = computed(() => counts.value.pending + counts.value.stale)
-
-/** 状态词：未入库 / 有更新要催，已入库灰下去 */
-const STATUS_TEXT: Record<KbRawStatus, string> = {
-  pending: '未入库',
-  stale: '有更新',
-  synced: '已入库'
-}
 </script>
 
 <template>
@@ -66,6 +106,7 @@ const STATUS_TEXT: Record<KbRawStatus, string> = {
       </button>
     </div>
 
+    <!-- 两种空态分开说：data/raw 里还没有原始资料，和筛出来的没有 -->
     <div v-if="!items.length" class="kb-raw__empty">
       <p>data/raw 里还没有原始资料。把要整理的文件放进去，点一次刷新就能看到。</p>
     </div>
@@ -73,26 +114,58 @@ const STATUS_TEXT: Record<KbRawStatus, string> = {
       <p>没有「{{ FILTER_LABELS[filter] }}」的原始数据。</p>
     </div>
 
-    <ul v-else class="kb-raw__list">
-      <li v-for="item in filtered" :key="item.rel" class="kb-raw__item" :title="item.rel">
-        <span class="kb-raw__head">
-          <span class="kb-raw__name">{{ item.name }}</span>
-          <span v-if="item.ext" class="kb-raw__ext">{{ item.ext }}</span>
+    <el-tree
+      v-else
+      class="kb-raw__body scrollbar"
+      :data="tree"
+      :props="TREE_PROPS"
+      node-key="id"
+      :indent="14"
+      :default-expanded-keys="expandedKeys"
+      :auto-expand-parent="false"
+      :expand-on-click-node="true"
+      :highlight-current="false"
+      @node-click="onNodeClick"
+      @node-expand="(data: KbRawTreeNode) => expand(data.id)"
+      @node-collapse="(data: KbRawTreeNode) => collapse(data.id)"
+    >
+      <template #default="{ data }">
+        <!-- 目录行：与条目树同一副（图标 + 名字，一行） -->
+        <span v-if="data.kind === 'folder'" class="node" :title="data.name">
+          <el-icon class="node__icon"><Folder /></el-icon>
+          <span class="node__name">{{ data.name }}</span>
         </span>
-        <span class="kb-raw__meta">
-          <span class="kb-raw__status" :class="`is-${item.status}`">{{ STATUS_TEXT[item.status] }}</span>
-          <span v-if="item.entryRels.length" class="kb-raw__entries" :title="item.entryRels.join('\n')">
-            {{ item.entryRels.length }} 个条目
-          </span>
-          <span class="kb-raw__time">{{ formatTimestamp(item.mtimeMs) }}</span>
-        </span>
-      </li>
-    </ul>
 
-    <!-- 待处理的近路：递话给 Agent，不替它干活 -->
+        <!-- 文件行：保留原来那副两行块（名字 + 后缀 / 状态 + 条目数 + 时间），点开进右栏查看 -->
+        <span v-else class="raw-item" :title="data.id">
+          <span class="raw-item__head">
+            <el-icon class="raw-item__icon"><Document /></el-icon>
+            <span class="raw-item__name">{{ data.name }}</span>
+            <span v-if="data.item?.ext" class="raw-item__ext">{{ data.item.ext }}</span>
+          </span>
+          <span class="raw-item__meta">
+            <span v-if="data.item" class="raw-item__status" :class="`is-${data.item.status}`">
+              {{ kbRawStatusText(data.item.status) }}
+            </span>
+            <span
+              v-if="data.item?.entryRels.length"
+              class="raw-item__entries"
+              :title="data.item.entryRels.join('\n')"
+            >
+              {{ data.item.entryRels.length }} 个条目
+            </span>
+            <span v-if="data.item" class="raw-item__time">{{ formatTimestamp(data.item.mtimeMs) }}</span>
+          </span>
+        </span>
+      </template>
+    </el-tree>
+
+    <!-- 待处理的近路：一键交给应用的清洗流程 -->
     <div v-if="actionable > 0" class="kb-raw__todo">
-      <span>有 {{ actionable }} 个文件等着整理</span>
-      <el-button size="small" :icon="Tickets" @click="emit('copy-instruction')">复制整理指令</el-button>
+      <span>有 {{ actionable }} 个文件等着清洗</span>
+      <el-button size="small" type="primary" :icon="MagicStick" @click="emit('clean')">
+        开始清洗
+      </el-button>
     </div>
   </div>
 </template>
@@ -124,34 +197,86 @@ const STATUS_TEXT: Record<KbRawStatus, string> = {
   line-height: 1.7;
 }
 
-.kb-raw__list {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  overflow-y: auto;
+/**
+ * 滚动条贴到卡片右缘（与条目树同一条口径）：负右 margin 把滚动容器出血到卡片边缘，
+ * 等宽的右 padding 把树的位置兜回来。
+ */
+.kb-raw__body {
+  flex: 1 1 auto;
   min-height: 0;
+  overflow: auto;
+  margin-right: calc(-1 * var(--sp-4));
+  padding: 0 var(--sp-4) 0 0;
+  background: transparent;
 }
 
-.kb-raw__item {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: var(--sp-2) var(--sp-3);
-  border-radius: var(--r-md);
+/* 文件行是两行块：行盒不再定死 26px，让内容自己撑（目录行自己的 .node 定了 28px） */
+.kb-raw__body :deep(.el-tree-node__content) {
+  height: auto;
+  min-height: 28px;
+  padding-top: 2px;
+  padding-bottom: 2px;
+  border-radius: var(--r-sm);
 }
 
-.kb-raw__item:hover {
+.kb-raw__body :deep(.el-tree-node__content:hover) {
   background: var(--bg-inset);
 }
 
-.kb-raw__head {
+/* ---------- 目录行 ---------- */
+
+.node {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 28px;
+  font-size: var(--fs-body);
+  color: var(--ink-2);
+}
+
+.node__icon {
+  flex-shrink: 0;
+  font-size: 14px;
+  color: var(--ink-3);
+}
+
+.node__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* ---------- 文件行 ---------- */
+
+.raw-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 2px 0;
+  cursor: pointer;
+}
+
+.raw-item__head {
   display: flex;
   align-items: baseline;
   gap: var(--sp-2);
   min-width: 0;
 }
 
-.kb-raw__name {
+.raw-item__icon {
+  flex-shrink: 0;
+  align-self: center;
+  font-size: 14px;
+  color: var(--ink-3);
+}
+
+.raw-item__name {
   flex: 1;
   min-width: 0;
   overflow: hidden;
@@ -161,31 +286,32 @@ const STATUS_TEXT: Record<KbRawStatus, string> = {
   font-size: var(--fs-body);
 }
 
-.kb-raw__ext {
+.raw-item__ext {
   flex-shrink: 0;
   color: var(--ink-3);
   font-size: var(--fs-micro);
   font-family: var(--font-mono);
 }
 
-.kb-raw__meta {
+.raw-item__meta {
   display: flex;
   align-items: baseline;
   gap: var(--sp-3);
+  padding-left: 20px;
 }
 
 /* 彩色在这个界面只表达运行状态，所以入库状态用灰度说话：要催的浓、已完成的淡 */
-.kb-raw__status {
+.raw-item__status {
   flex-shrink: 0;
   color: var(--ink);
   font-size: var(--fs-micro);
 }
 
-.kb-raw__status.is-synced {
+.raw-item__status.is-synced {
   color: var(--ink-3);
 }
 
-.kb-raw__entries {
+.raw-item__entries {
   flex: 1;
   min-width: 0;
   overflow: hidden;
@@ -195,12 +321,14 @@ const STATUS_TEXT: Record<KbRawStatus, string> = {
   font-size: var(--fs-micro);
 }
 
-.kb-raw__time {
+.raw-item__time {
   flex-shrink: 0;
   color: var(--ink-3);
   font-size: var(--fs-micro);
   font-family: var(--font-mono);
 }
+
+/* ---------- 待处理的近路 ---------- */
 
 .kb-raw__todo {
   display: flex;

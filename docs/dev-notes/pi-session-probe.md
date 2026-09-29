@@ -34,6 +34,11 @@
 - `-e <权限扩展>` 与上面这套参数一起用时扩展照常加载：模型要跑命令时 stderr/stdout 上
   来一条 `extension_ui_request`（confirm），回 `{"type":"extension_ui_response","id",confirmed}`
   之后那次工具调用真的往下跑（`tool_execution_end`，`isError:false`）。
+- **贴的图**（2026-09-29 补验）：prompt 那一行带 `images:[{type:"image",data,mimeType}]`
+  时，`input` 里有 `"image"` 的模型收到的是 `image_url` 的**数据 URL**（base64 一字不差）；
+  `input` 里没有的模型收到的是 `(image omitted: model does not support images)` ——
+  所以界面上贴图那道门槛（`AiModelChoice.imageInput`）不是装饰。`get_messages` 读回来的
+  用户消息里那段图还在（`{type:'image',data,mimeType}`，那段 base64 就是能直接画的数据 URL）。
 
 **换 Pi 版本后重跑一遍**这些点 —— CLI 与事件协议是外部契约（见
 [constraints/ai.md](../constraints/ai.md) 的文件头）。

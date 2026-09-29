@@ -36,7 +36,7 @@
 ## 1. 项目边界
 
 - 定位：Windows 桌面应用（Tauri 2 + WebView2），一个窗口里管项目、记工作、写笔记、看 AI 用量；包管理器固定 npm，`Cargo.lock` 要提交。
-- **联网边界：默认不联网、不上报任何数据；出口只有八个，且都由用户显式开启**：用户自己填的两个 git 仓库（用量同步、笔记图片，
+- **联网边界：默认不联网、不上报任何数据；出口只有九个，且都由用户显式开启**：用户自己填的两个 git 仓库（用量同步、笔记图片，
   留空即关闭）与**笔记自己那个仓库**（地址不在设置里 —— 跟着那个笔记文件夹的 `origin` 走，且只有用户点了同步才会跑一次 git；
   没仓库的文件夹就是本机的笔记，应用既不 `git init` 也不替用户接远端；**知识库**（`kbDir` 指向的那个
   独立项目）的同步走同一条路 —— 推它自己连的 `origin`，同样只在点同步时跑一次 git，应用不写它的内容）、账号登录与 token 到期续期（都只打 GitHub / Gitee 的 OAuth 接口）、命令执行本身、AI 热点（源地址是 Rust 侧
@@ -46,9 +46,13 @@
   页面脚本不执行、只取正文文本）、实时天气（设置里的 `weatherCity` 填了城市才会取，留空即关闭；主机名白名单是 Rust 侧
   `weather.rs` 里那**两个**，各管一段 —— 城市名检索走 OpenStreetMap 的公开 Nominatim 接口
   （Open-Meteo 自带的检索对部分中文名匹配不上，实测「常州」搜不到）、实况走 Open-Meteo 的
-  forecast；**城市名会作为查询串发出去**，这是这条出口唯一的用户内容）、AI 助手（一个自定义端点：Base URL / API 形态 / 模型 /
-  API Key 四样都配齐且用户点了发送才会走；请求由那个子进程直接发，**它在那个目录里读到的内容、以及这一段会话的历史
-  都会发给你自己配的那个端点**，配置的形状与收敛在 `src/shared/ai.ts`）。
+  forecast；**城市名会作为查询串发出去**，这是这条出口唯一的用户内容）、AI 助手（用户自己配的 AI 服务：名称 / Base URL / API 形态 /
+  模型 / API Key 都齐且用户点了发送才会走；请求由那个子进程直接发，**它在那个目录里读到的内容、以及这一段会话的历史
+  都会发给你自己配的那个端点**，配置的形状与收敛在 `src/shared/ai.ts`；**同一条出口还包括「拉模型列表」** ——
+  用户在弹窗里粘上 Key / 点「获取列表」时，按他填的 Base URL GET 一次 `/models`，同一个主机同一把 Key，不点就不走）、**装技能**
+  （AI 助手页那颗「技能」按钮里的「粘地址」：地址由用户粘、点了「装上」才走一次 GET，主机不设白名单、跟着跳转最多 5 跳、
+  只收 zip 且超过 64 MB 就停 —— 与「用户自己填的 git 仓库」同一类「地址由用户给」的出口；**只有这一件事需要出网**：
+  导入本地 zip / 导入目录、装卸开关、`--skill` 注入全在本机，见 `pi_skills.rs` 与 `docs/constraints/ai.md`）。
   不要新增网络出口、不往任何第三方服务发数据；笔记里的外链图片不算新出口；
   密码保险库也不算 —— 它推的是**用量同步那个仓库**的另一个目录（`vault/vault.json`），推上去的只有密文；
   登录内嵌的 client_id/secret 是这条边界唯一一次放宽。
@@ -142,7 +146,7 @@
 | 终端、子进程会话与日志 | [constraints/terminal.md](docs/constraints/terminal.md) |
 | 工作日志 | [constraints/work-log.md](docs/constraints/work-log.md) |
 | 笔记（正文 / 图片 / 素材 / 笔记同步） | [constraints/notes.md](docs/constraints/notes.md) |
-| 知识库（原始数据 / 条目 / 索引状态与重建 / 同步） | [constraints/kb.md](docs/constraints/kb.md) |
+| 知识库（原始数据 / 条目 / 一键清洗 / 索引重建 / 同步） | [constraints/kb.md](docs/constraints/kb.md) |
 | AI 助手（会话 / 项目 / 驱动本机 Pi / 模型与密钥 / 提示词与出口） | [constraints/ai.md](docs/constraints/ai.md) |
 | 用量与外观同步、账号登录 | [constraints/sync-and-auth.md](docs/constraints/sync-and-auth.md) |
 | 密码保险库（密钥 / 加解密 / 多机共写一份文件） | [constraints/vault.md](docs/constraints/vault.md) |

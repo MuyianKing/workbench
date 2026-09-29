@@ -37,6 +37,7 @@ import * as design from './design'
 import * as kb from './kb'
 import * as note from './note'
 import * as nrm from './nrm'
+import * as piSkill from './pi-skill'
 import * as nvm from './nvm'
 import * as orphan from './orphan'
 import * as quick from './quick-launch'
@@ -410,6 +411,18 @@ function createApi(): WorkbenchApi {
     // AI 助手那几条不在这里：它们要回传进程输出、按会话 id 认领事件，
     // 与 spawn_session 同一条路子住在适配层（见 workbench/ai.ts）
 
+    // ---------- Pi 的技能（AI 助手页那颗「技能」按钮，见 workbench/pi-skill.ts） ----------
+    // 与上面技能页那组不是一回事：那组管「技能库 + 装到项目 + 版本提交」，
+    // 这一组只管 AI 助手页那两个 `.agents/skills` 根里的目录
+    piSkillList: (root: string) => piSkill.piSkillList(root),
+    piSkillInstallZip: (root: string, zip: string, id: string | null, overwrite: boolean) =>
+      piSkill.piSkillInstallZip(root, zip, id, overwrite),
+    piSkillInstallDir: (root: string, source: string, id: string | null, overwrite: boolean) =>
+      piSkill.piSkillInstallDir(root, source, id, overwrite),
+    piSkillInstallUrl: (root: string, url: string, id: string | null, overwrite: boolean) =>
+      piSkill.piSkillInstallUrl(root, url, id, overwrite),
+    piSkillRemove: (root: string, id: string) => piSkill.piSkillRemove(root, id),
+
     // ---------- 统计 ----------
     getActivity: () => Promise.resolve(state.activityCounts()),
     /**
@@ -538,6 +551,14 @@ function createApi(): WorkbenchApi {
 
     pickDirectory: (title?: string) =>
       openDialog({ directory: true, multiple: false, title: title ?? '选择项目目录' }),
+    // 挑一个文件（技能包那种要按后缀过滤的走这条；取消回 null，不是失败）
+    pickFile: (title?: string, filters?: Array<{ name: string; extensions: string[] }>) =>
+      openDialog({
+        directory: false,
+        multiple: false,
+        title: title ?? '选择文件',
+        ...(filters && filters.length ? { filters } : {})
+      }),
     checkPort: (port: number) => invoke('check_port', { port }),
     killPortProcess: (port: number) =>
       guard(invoke<null>('kill_port_process', { port }), '结束进程失败'),
@@ -550,6 +571,8 @@ function createApi(): WorkbenchApi {
       guard(invoke<null>('open_in_vscode', { path }), '打开 VS Code 失败'),
     openExternal: (url: string) =>
       guard(invoke<null>('open_external', { url }), '打开链接失败'),
+    /** 用系统默认程序打开本地文件（与快捷启动同走 open_path，不新增 Rust 命令） */
+    openPath: (path: string) => guard(invoke<null>('open_path', { path }), '打开文件失败'),
 
     // ---------- 窗口 ----------
     minimizeWindow: () => {

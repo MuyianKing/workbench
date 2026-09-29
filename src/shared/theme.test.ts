@@ -10,6 +10,9 @@ import {
   COLUMN_WIDTH_MIN,
   DEFAULT_THEME,
   HOME_CARD_IDS,
+  KB_TREE_WIDTH_DEFAULT,
+  KB_TREE_WIDTH_MAX,
+  KB_TREE_WIDTH_MIN,
   NOTE_TREE_WIDTH_DEFAULT,
   NOTE_TREE_WIDTH_MAX,
   NOTE_TREE_WIDTH_MIN,
@@ -23,6 +26,7 @@ import {
   cardIdsInRow,
   clampCardGap,
   clampColumnWidth,
+  clampKbTreeWidth,
   clampNoteTreeWidth,
   clampRowHeight,
   clampVideoTreeWidth,
@@ -240,6 +244,20 @@ describe('sanitizeTheme', () => {
       VIDEO_TREE_WIDTH_MIN
     )
     expect(sanitizeTheme({ version: THEME_VERSION, videoTreeWidth: 300 }).videoTreeWidth).toBe(300)
+  })
+
+  /** 知识库页左栏宽度同是后加的字段：缺省补默认值，越界收敛 */
+  it('知识库页左栏宽度缺省用默认值，越界收敛', () => {
+    expect(sanitizeTheme({}).kbTreeWidth).toBe(KB_TREE_WIDTH_DEFAULT)
+    expect(clampKbTreeWidth(undefined)).toBe(KB_TREE_WIDTH_DEFAULT)
+    expect(clampKbTreeWidth('宽一点')).toBe(KB_TREE_WIDTH_DEFAULT)
+    expect(sanitizeTheme({ version: THEME_VERSION, kbTreeWidth: 9999 }).kbTreeWidth).toBe(
+      KB_TREE_WIDTH_MAX
+    )
+    expect(sanitizeTheme({ version: THEME_VERSION, kbTreeWidth: 1 }).kbTreeWidth).toBe(
+      KB_TREE_WIDTH_MIN
+    )
+    expect(sanitizeTheme({ version: THEME_VERSION, kbTreeWidth: 300 }).kbTreeWidth).toBe(300)
   })
 
   it('卡片间距缺省用默认值，越界收敛', () => {

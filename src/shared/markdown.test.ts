@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { markdownToPlainText, renderMarkdown } from './markdown'
+import { markdownLinks, markdownToPlainText, renderMarkdown } from './markdown'
 
 describe('renderMarkdown', () => {
   it('空内容渲染成空串', () => {
@@ -81,6 +81,49 @@ describe('renderMarkdown', () => {
     expect(renderMarkdown('[**重点**](https://example.com)')).toBe(
       '<p><a href="https://example.com" target="_blank" rel="noreferrer noopener"><strong>重点</strong></a></p>\n'
     )
+  })
+
+  it('表格包一层 .md-table（宽度由那层容器兜，边框与网格线看它）', () => {
+    expect(renderMarkdown('| 分类 | 数量 |\n| --- | ---: |\n| 弹窗 | 3 |')).toBe(
+      '<div class="md-table"><table>\n' +
+        '<thead>\n' +
+        '<tr>\n' +
+        '<th>分类</th>\n' +
+        '<th style="text-align:right">数量</th>\n' +
+        '</tr>\n' +
+        '</thead>\n' +
+        '<tbody>\n' +
+        '<tr>\n' +
+        '<td>弹窗</td>\n' +
+        '<td style="text-align:right">3</td>\n' +
+        '</tr>\n' +
+        '</tbody>\n' +
+        '</table>\n</div>'
+    )
+  })
+})
+
+describe('markdownLinks', () => {
+  it('收链接目标，按出现顺序', () => {
+    expect(markdownLinks('见 [弹窗](./dialog.md) 与 [按钮](./button.md)。')).toEqual([
+      './dialog.md',
+      './button.md'
+    ])
+  })
+
+  it('图片与代码里的方括号都不算链接', () => {
+    expect(markdownLinks('![截图](./a.png)')).toEqual([])
+    expect(markdownLinks('`[不是链接](./x.md)`')).toEqual([])
+    expect(markdownLinks('```\n[也不是](./y.md)\n```')).toEqual([])
+  })
+
+  it('裸地址与尖括号地址也在（筛不筛由调用方定）', () => {
+    expect(markdownLinks('见 https://example.com/a')).toEqual(['https://example.com/a'])
+    expect(markdownLinks('<mailto:a@b.c>')).toEqual(['mailto:a@b.c'])
+  })
+
+  it('空内容返回空数组', () => {
+    expect(markdownLinks('  ')).toEqual([])
   })
 })
 

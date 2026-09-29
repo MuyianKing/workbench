@@ -31,12 +31,14 @@ uuid = { version = "1", features = ["v4"] }
 #   - walkdir：递归列目录（token.rs）
 #   - base64（tauri-codegen 已在构建期编译过，运行时是新进二进制的几 KB）：base64 编解码
 #   - sha2：SHA-256 —— 手写密码学不值得，PKCE 的 code_challenge 走它
+#   - flate2：解技能包的 deflate（pi_skills.rs）—— 它在图里是 image → png → flate2
 url = "2"
 percent-encoding = "2"
 form_urlencoded = "1"
 walkdir = "2"
 base64 = "0.23"
 sha2 = "0.11"
+flate2 = "1"
 # 图标抽取直接走 Win32（PrivateExtractIconsW + GDI），不再依赖 PowerShell；
 # Shell / Shell_Common / Storage_FileSystem 是为了 SHGetFileInfoW 与 SHGetPathFromIDListW ——
 # 快捷方式自己不带图标资源，得先靠它们解析到目标程序（见 icon.rs）。
@@ -44,9 +46,12 @@ sha2 = "0.11"
 # 系统代理都由 Windows 提供），access_token 走 Windows 凭据管理器（DPAPI 加密）。
 # IpHelper / WinSock 是端口查询用的：按端口找占用进程走 GetExtendedTcpTable，
 # 不再 shell 出去解析 netstat 的文本输出（见 system.rs）。
+# Globalization 只有一处用：解技能包时把**没带 UTF-8 标志**的条目名按系统 ANSI
+# （中文机器上就是 GBK）解出来（MultiByteToWideChar，见 pi_skills.rs）。
 # 这些路都只给已有依赖加 feature，**不新增任何 crate**。
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
+    "Win32_Globalization",
     "Win32_Graphics_Gdi",
     "Win32_NetworkManagement_IpHelper",
     "Win32_Networking_WinHttp",

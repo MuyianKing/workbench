@@ -17,6 +17,7 @@ import {
   clampAiTreeWidth,
   clampCardGap,
   clampColumnWidth,
+  clampKbTreeWidth,
   clampNoteTreeWidth,
   clampRowHeight,
   clampVideoTreeWidth,
@@ -546,6 +547,27 @@ export const useSettingsStore = defineStore('settings', () => {
   }
 
   /**
+   * AI 助手页左栏（项目 → 会话那棵树）收起 / 展开：收起后对话占满整行，
+   * 入口在对话区左上角那颗按钮上。落 theme.json（与视频树收起同一套做法）。
+   */
+  async function setAiTreeCollapsed(collapsed: boolean): Promise<boolean> {
+    if (themeConfig.value.aiTreeCollapsed === collapsed) return true
+    return saveThemeConfig({ aiTreeCollapsed: collapsed })
+  }
+
+  /**
+   * 知识库页左栏（条目 / 原始数据清单）宽度：与笔记 / 视频树同一套做法 ——
+   * 拖动时只改本地让界面跟手，松手才整份落盘（它也在 theme.json 里）。
+   */
+  function setKbTreeWidth(width: number): void {
+    themeConfig.value.kbTreeWidth = clampKbTreeWidth(width)
+  }
+
+  async function commitKbTreeWidth(): Promise<void> {
+    await saveThemeConfig({ kbTreeWidth: themeConfig.value.kbTreeWidth })
+  }
+
+  /**
    * 画中画悬浮小窗的位置与尺寸：与视频树宽同一套做法 —— 拖动 / 缩放时只改本地让界面跟手，
    * 松手才整份落盘（四个字段一起送，theme.json 一份快照一次写完）。
    */
@@ -804,6 +826,9 @@ export const useSettingsStore = defineStore('settings', () => {
     commitVideoTreeWidth,
     setAiTreeWidth,
     commitAiTreeWidth,
+    setAiTreeCollapsed,
+    setKbTreeWidth,
+    commitKbTreeWidth,
     setVideoTreeCollapsed,
     setVideoFloatGeometry,
     commitVideoFloatGeometry,

@@ -383,21 +383,33 @@ pub fn ai_runtime(app: AppHandle) -> Value {
     crate::ai::runtime(&app)
 }
 
-/// 写自定义端点的 models.json（设置页保存「模型配置」时调；细则见 ai.rs 的 provider_write）。
+/// 写 AI 服务的 models.json（模型管理弹窗里保存 / 增删 / 停用之后调；细则见 ai.rs 的
+/// models_write）。传进来的是**当前启用着的那些服务**，整份重写。
 /// 密钥不进这份文件 —— models.json 里只有 `$WORKBENCH_AI_KEY` 的环境变量引用。
 #[tauri::command(async)]
-pub fn ai_provider_write(
-    provider: String,
+pub fn ai_models_write(providers: Vec<crate::ai::ProviderInput>) -> Result<(), String> {
+    crate::ai::models_write(&providers)
+}
+
+/// 从**用户自己那个端点**拉一份模型列表（「添加服务」里粘完 Key / 点「获取列表」时调）。
+/// `secret` 空串表示用凭据管理器里存着的那把（编辑已经保存过的服务时不必重填）。
+/// 地址由 baseUrl 与 API 形态推出来（`{baseUrl}/models`），见 ai.rs 的 models_url。
+#[tauri::command(async)]
+pub fn ai_models_fetch(
     base_url: String,
     api: String,
-    models: Vec<String>,
-) -> Result<(), String> {
-    crate::ai::provider_write(&provider, &base_url, &api, &models)
+    provider: String,
+    secret: String,
+) -> Result<Vec<Value>, String> {
+    crate::ai::models_fetch(&base_url, &api, &provider, &secret)
 }
 
 /// 在一条会话里跑一轮（会话没在跑就把它起起来）。输出与退出照旧走 `session:lines` /
 /// `session:exit`，渲染层按会话 id 前缀 `ai:` 接住（它不属于任何项目终端）。
 /// 提示词空串 = 只把进程起起来（打开旧会话读历史走这条）。
+///
+/// `images` 是用户随这一句贴的图（形状见 ai.rs 的 `ImageInput`）：与提示词进**同一行**
+/// JSON（Pi 的 `prompt` 命令收 `images`）—— 只有图没有字的一句也算「发了话」。
 ///
 /// `permission` 是权限模式（`auto-edit` / `full`，形状在 shared/ai.ts）：自动编辑时
 /// ai.rs 会加载一份 `tool_call` 钩子扩展，模型要执行命令时先回头问一次 —— 那次询问是
@@ -409,13 +421,15 @@ pub fn ai_run(
     session_id: String,
     dir: String,
     prompt: String,
+    images: Vec<crate::ai::ImageInput>,
     program: String,
     args: Vec<String>,
     provider: String,
     permission: String,
+    skills: Vec<crate::ai::AiSkillRef>,
 ) -> Result<u32, String> {
     crate::ai::run(
-        &app, session_id, dir, prompt, program, args, provider, permission,
+        &app, session_id, dir, prompt, images, program, args, provider, permission, skills,
     )
 }
 
@@ -442,6 +456,58 @@ pub fn ai_key_state(provider: String) -> Result<bool, String> {
 #[tauri::command(async)]
 pub fn ai_key_clear(provider: String) -> Result<(), String> {
     crate::ai::key_clear(&provider)
+}
+
+// ---------- Pi 的技能（AI 助手页那颗「技能」按钮，见 pi_skills.rs）----------
+//
+// 两条技能根（全局 `%USERPROFILE%\.agents\skills`、项目 `<工作目录>\.agents\skills`）由渲染层
+// 各自拼好传进来 —— Rust 这侧只管「在这个根里列 / 装 / 卸」。装进来的东西只落盘：
+// 包里的脚本一概不执行。
+
+/// 一个技能根里的技能（根不存在就是空表）
+#[tauri::command(async)]
+pub fn pi_skill_list(root: String) -> Result<Vec<Value>, String> {
+    crate::pi_skills::list(&root)
+}
+
+/// 装一个本地 zip 到某个技能根（同名先报错，确认过再带 overwrite 重调）
+#[tauri::command(async)]
+pub fn pi_skill_install_zip(
+    root: String,
+    zip: String,
+    id: Option<String>,
+    overwrite: bool,
+) -> Result<Value, String> {
+    crate::pi_skills::install_zip(&root, &zip, id, overwrite)
+}
+
+/// 装一个本地文件夹到某个技能根（那个文件夹本身就是一个技能：根上要有 SKILL.md）。
+/// **不走 git** —— 装进用户目录这件事不该顺手替他在他的仓库里提交一次（见 pi_skills.rs）。
+#[tauri::command(async)]
+pub fn pi_skill_install_dir(
+    root: String,
+    source: String,
+    id: Option<String>,
+    overwrite: bool,
+) -> Result<Value, String> {
+    crate::pi_skills::install_dir(&root, &source, id, overwrite)
+}
+
+/// 从用户粘的地址装（GET 一次、跟随跳转；这是应用的一条出口，见 AGENTS.md 的清单）
+#[tauri::command(async)]
+pub fn pi_skill_install_url(
+    root: String,
+    url: String,
+    id: Option<String>,
+    overwrite: bool,
+) -> Result<Value, String> {
+    crate::pi_skills::install_url(&root, &url, id, overwrite)
+}
+
+/// 卸掉一个技能（删掉那个技能目录整棵；界面那一侧先问过一次）
+#[tauri::command(async)]
+pub fn pi_skill_remove(root: String, id: String) -> Result<(), String> {
+    crate::pi_skills::remove(&root, &id)
 }
 
 /// 数据目录。**固定一个位置**（`%APPDATA%\Workbench\data`，见 paths.rs 的文件头），

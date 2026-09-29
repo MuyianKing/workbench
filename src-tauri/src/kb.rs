@@ -1,12 +1,13 @@
 //! 知识库：用户在别处维护的一个独立项目（原始资料 + 已整理的条目 + 机器可读索引）。
 //!
-//! 应用对知识库是**只读**的：条目怎么写、目录与索引怎么生成，都是那个仓库自己的事
-//! （它带着自己的脚本与 Agent 使用说明，用户在 ZCode 等 Agent 里完成整理）。
-//! 这里只做两件事——扫一份平铺清单与读单个文件的文本。清单**不按扩展名过滤**：
-//! 原始资料可能是 pdf / docx 任何东西，这是它与 `notes::scan` 唯一的差别
-//! （`note_scan` 只回 markdown）。
+//! 仓库是**纯数据**：没有脚本、没有 Agent 说明文件。条目的内容不由应用写 —— 写它的是
+//! 应用编排的清洗（提示词在渲染层 `src/shared/kb-clean.ts`，编排与收尾在 stores/kb.ts，
+//! 走的是 ai.rs 那条通用驱动链路）。这里带三样事实：扫一份平铺清单、读单个文件的文本、
+//! 重建目录与索引（`kb/_catalog.md` 与 `index/index.json`，是生成物、不是内容）。
+//! 清单**不按扩展名过滤**：原始资料可能是 pdf / docx 任何东西，这是它与 `notes::scan`
+//! 唯一的差别（`note_scan` 只回 markdown）。
 //!
-//! 「哪些是原始数据」「有没有更新」这些口径在渲染层的纯函数里（`src/shared/knowledge.ts`），
+//! 「哪些是原始数据」「有没有更新」这些口径在渲染层的纯函数里（`src/shared/kb.ts`），
 //! 那边有单测；与 notes.rs 同一条分工——这里只管把磁盘上的事实带回去。
 //!
 //! 路径边界与 notes.rs 同一条：只认「相对知识库根的路径」，逐段解析挡住 `..` / 盘符 / UNC。
@@ -120,13 +121,13 @@ pub fn read(root: &str, rel: &str) -> Result<String, String> {
 
 // ---------- 索引重建 ----------
 //
-// 这件事本来由知识库仓库自己的 `scripts/build_index.py` 做。搬进应用的理由只有一个：
-// 那个脚本要 Python，而这个应用对用户的外部依赖只有 git 一件（见 AGENTS.md 第 1 节）。
-// 输出与脚本**逐字节对齐** —— 谁最后跑的都不会把对方的成果改回去（除了 generated_at
-// 那一天的日期），用户在两处来回切也不会看到无意义的 diff。
+// 这是应用**唯一直接写知识库的地方**，写的是生成物（`kb/_catalog.md` 与
+// `index/index.json`）、不是内容。索引只由应用生成：仓库转成纯数据后没有别的生成者，
+// 谁都不会把谁的成果改回去。格式保持稳定 —— 字段与顺序就是既有生成物的形状，
+// 一次重建不该让整份文件变成另一副样子。
 
-/// index.json 里的一条。字段与顺序都照脚本的输出写，所以这里用结构体而不是 `json!` 宏：
-/// 宏背后是 BTreeMap，会把键排成字母序，和脚本的 dict 顺序对不上。
+/// index.json 里的一条。字段与顺序固定下来（既有生成物就是这个形状），所以这里用
+/// 结构体而不是 `json!` 宏：宏背后是 BTreeMap，会把键排成字母序。
 #[derive(serde::Serialize)]
 struct IndexEntry {
     path: String,
@@ -153,13 +154,11 @@ struct Parsed<'a> {
     body: &'a str,
 }
 
-/// 极简 frontmatter 解析，与脚本的 `parse_frontmatter` 同一套认法：首行围栏、围栏内每行
-/// 一个 `键: 值`、tags 认 `[a, b]` 列表写法（值一律去一层引号）。多行块标量不认 ——
-/// 仓库的条目规范里没有它。
+/// 极简 frontmatter 解析：首行围栏、围栏内每行一个 `键: 值`、tags 认 `[a, b]` 列表写法
+/// （值一律去一层引号）。多行块标量不认 —— 仓库的条目规范里没有它。
 ///
-/// 一处**有意的偏离**：tags 写成裸标量时，脚本把它当字符串、随后按字符拆成一个个标签
-/// （`for t in "标题"` 逐个字符），这里按「单个标签」处理。规范本来就要求列表写法，
-/// 真碰上也只有这一种输入会不一致。
+/// tags 写成裸标量时按「单个标签」处理，不按字符拆。规范本来就要求列表写法，
+/// 真碰上裸标量也只有这一种解释合理。
 /// 没有可认的 frontmatter：元数据全空、正文就是全文
 fn bare_parsed(body: &str) -> Parsed<'_> {
     Parsed {
@@ -170,7 +169,7 @@ fn bare_parsed(body: &str) -> Parsed<'_> {
 }
 
 fn parse_frontmatter(text: &str) -> Parsed<'_> {
-    // 开头围栏：`---` 之后只能有空白（脚本的正则从行首锚定，这里同样不兼容 BOM）
+    // 开头围栏：`---` 之后只能有空白；带 BOM 的文件第一行不是 `---`，按无 frontmatter 处理
     let first_end = text.find('\n').unwrap_or(text.len());
     if text[..first_end].trim_end() != "---" {
         return bare_parsed(text);
@@ -226,14 +225,14 @@ fn parse_frontmatter(text: &str) -> Parsed<'_> {
         Some(start) => Parsed {
             meta,
             tags,
-            // 脚本把围栏后的空白一并吃掉（正则里的 `\s*`），这里照做
+            // 围栏后的空白一并吃掉
             body: text[start..].trim_start(),
         },
         None => bare_parsed(text),
     }
 }
 
-/// 去一层成对的引号（单双都认，可以混着来，与 Python 的 `strip("'\"")` 同义）
+/// 去一层成对的引号（单双都认，可以混着来）
 fn unquote(value: &str) -> String {
     value.trim_matches(|c| c == '\'' || c == '"').to_string()
 }
@@ -300,11 +299,11 @@ fn index_entry_of(rel: &str, text: &str, stem: &str) -> IndexEntry {
     }
 }
 
-/// 全库目录 `_catalog.md` 的正文：按目录分组，组内按路径排 —— 与脚本的 write_catalog 一致。
-/// 没有标签的行会多出一个空格（脚本的 `"%s %s"` 留下的），这里照样保留。
+/// 全库目录 `_catalog.md` 的正文：按目录分组，组内按路径排。
+/// 没有标签的行会多出一个空格（既有生成物就是这个形状），照样保留。
 fn catalog_text(entries: &[IndexEntry]) -> String {
     let mut lines = vec![
-        "<!-- 本文件由 scripts/build_index.py 自动生成，请勿手改 -->".to_string(),
+        "<!-- 本文件由 Workbench 自动生成，请勿手改 -->".to_string(),
         String::new(),
         "# 知识库目录".to_string(),
         String::new(),
@@ -344,8 +343,8 @@ fn catalog_text(entries: &[IndexEntry]) -> String {
     lines.join("\n")
 }
 
-/// `YYYY-MM-DD`：日期由渲染层按**本机时区**算出来（脚本用的是 `date.today()`，同一条口径），
-/// 这里只校验形状 —— 时区换算不该在 Rust 侧再实现一遍。
+/// `YYYY-MM-DD`：日期由渲染层按**本机时区**算出来，这里只校验形状 —— 时区换算不该
+/// 在 Rust 侧再实现一遍。
 fn is_iso_date(value: &str) -> bool {
     value.len() == 10
         && value.chars().enumerate().all(|(index, c)| match index {
@@ -354,9 +353,8 @@ fn is_iso_date(value: &str) -> bool {
         })
 }
 
-/// 写盘前把换行翻成 CRLF：脚本用的是 Python 的 `write_text`，在 Windows 上是文本模式，
-/// `\n` 会被翻成 `\r\n` —— 仓库里那两个生成物实际就是 CRLF。跟着写才逐字节对得上，
-/// 谁最后跑的都不会把整份文件重写成另一副换行。
+/// 写盘前把换行翻成 CRLF：仓库里那两个生成物实际就是 CRLF，保持这个换行 ——
+/// 一次重建不该把整份文件重写成另一副换行（diff 只该有内容的变化）。
 fn windows_text(text: &str) -> String {
     text.replace('\n', "\r\n")
 }
@@ -390,14 +388,13 @@ pub fn index_build(root: &str, generated_at: &str) -> Result<Value, String> {
             continue;
         }
         let name = entry.file_name().to_string_lossy().into_owned();
-        // 与脚本的 rglob("*.md") 同一条：Windows 上后缀不分大小写；
-        // 脚本自己生成的目录（_catalog.md）不算条目
+        // Windows 上后缀不分大小写；目录生成物（_catalog.md）不算条目
         if !name.to_lowercase().ends_with(".md") || name.eq_ignore_ascii_case("_catalog.md") {
             continue;
         }
         files.push(rel_of(&kb_dir, entry.path()));
     }
-    // 脚本按 Path 排序，在 Windows 上那是**大小写不敏感**的比较，这里照做
+    // 按 Path 排序，在 Windows 上那是**大小写不敏感**的比较
     files.sort_by_key(|rel| rel.to_lowercase());
 
     let mut entries: Vec<IndexEntry> = Vec::new();
@@ -502,7 +499,7 @@ mod tests {
         std::fs::remove_dir_all(&root).unwrap();
     }
 
-    /// frontmatter 与脚本同一套认法：围栏、每行一个键值、tags 列表、引号剥一层
+    /// frontmatter 认法：围栏、每行一个键值、tags 列表、引号剥一层
     #[test]
     fn frontmatter_is_parsed_like_the_script() {
         let text = "---\ntitle: \"带引号\"\ntags: [a, 'b', c d]\nstatus: reviewed\nsummary: 摘要\n---\n# 正文\n";
@@ -512,7 +509,7 @@ mod tests {
         assert_eq!(parsed.meta.get("status").map(String::as_str), Some("reviewed"));
         assert_eq!(parsed.body, "# 正文\n", "围栏与紧随其后的换行都不算正文");
 
-        // tags 写成裸标量：按单个标签处理（脚本会按字符拆，那是个 bug，不跟）
+        // tags 写成裸标量：按单个标签处理，不按字符拆
         assert_eq!(parse_frontmatter("---\ntags: 只有一个\n---\n").tags, vec!["只有一个"]);
 
         // 不是围栏 / 围栏没闭合：都当没有元数据，正文原样
@@ -535,7 +532,7 @@ mod tests {
         assert!(summary.chars().all(|c| c == '字'), "不能把某个字按字节切成两半");
     }
 
-    /// 索引重建：目录与 index.json 的**实际内容**（换行按 CRLF 写盘，与脚本一致）
+    /// 索引重建：目录与 index.json 的**实际内容**（换行按 CRLF 写盘）
     #[test]
     fn index_build_writes_the_catalog_and_index() {
         let root = temp_root("index");
@@ -552,18 +549,18 @@ mod tests {
             "# 裸标题\n\n这是裸条目的第一段。\n\n第二段。\n",
         )
         .unwrap();
-        // 脚本自己的产物不该被当成条目（跑第二遍时它就在那儿了）
+        // 生成物不该被当成条目（跑第二遍时它就在那儿了）
         std::fs::write(root.join("kb/_catalog.md"), "上一轮的目录").unwrap();
 
         let result = index_build(path, "2026-09-28").unwrap();
         assert_eq!(result["count"], 2);
 
         let catalog = std::fs::read_to_string(root.join("kb/_catalog.md")).unwrap();
-        assert!(catalog.contains("\r\n"), "与脚本一致：写盘是 CRLF");
+        assert!(catalog.contains("\r\n"), "写盘是 CRLF");
         assert_eq!(
             catalog.replace("\r\n", "\n"),
             concat!(
-                "<!-- 本文件由 scripts/build_index.py 自动生成，请勿手改 -->\n",
+                "<!-- 本文件由 Workbench 自动生成，请勿手改 -->\n",
                 "\n",
                 "# 知识库目录\n",
                 "\n",
@@ -573,7 +570,7 @@ mod tests {
                 "\n",
                 "## kb/02-另外\n",
                 "\n",
-                // 没有标签的那行多一个空格：脚本的 `"%s %s"` 留下的，照样保留
+                // 没有标签的那行多一个空格（既有生成物的形状），照样保留
                 "- [裸标题](kb/02-另外/裸标题.md)  — 这是裸条目的第一段。\n",
             )
         );
@@ -629,62 +626,5 @@ mod tests {
 
         std::fs::remove_dir_all(&root).unwrap();
         assert!(index_build(path, "2026-09-28").is_err(), "目录不在了就该明说");
-    }
-
-    /// 把一棵目录原样复制到另一处（只给下面那次手工核对用）
-    fn copy_tree(from: &Path, to: &Path) {
-        std::fs::create_dir_all(to).unwrap();
-        for entry in WalkDir::new(from) {
-            let entry = entry.unwrap();
-            let target = to.join(entry.path().strip_prefix(from).unwrap());
-            if entry.file_type().is_dir() {
-                std::fs::create_dir_all(&target).unwrap();
-            } else {
-                std::fs::copy(entry.path(), &target).unwrap();
-            }
-        }
-    }
-
-    /// **手工核对**（`cargo test -- --ignored crosscheck`）：拿这台机器上那份真知识库的
-    /// 一份副本，重建索引，与 `scripts/build_index.py` 的产物逐字节比对。
-    /// 常规测试不跑它 —— 它依赖机器上的具体路径，也不该在别人机器上乱翻文件。
-    #[test]
-    #[ignore = "手工核对：与 Python 脚本的输出逐字节比对"]
-    fn crosscheck_real_kb() {
-        let source = Path::new("E:/muyian/agent");
-        if !source.is_dir() {
-            eprintln!("跳过：这台机器上没有 {} 那份知识库", source.display());
-            return;
-        }
-
-        let copy = temp_root("crosscheck");
-        for dir in ["kb", "index"] {
-            copy_tree(&source.join(dir), &copy.join(dir));
-        }
-        // 日期取成与现有 index.json 同一天，否则比的是日期栏
-        let date = "2026-09-28";
-        let result = index_build(copy.to_str().unwrap(), date).unwrap();
-        eprintln!("重建了 {} 条", result["count"]);
-
-        for rel in ["kb/_catalog.md", "index/index.json"] {
-            let before = std::fs::read(source.join(rel)).unwrap();
-            let after = std::fs::read(copy.join(rel)).unwrap();
-            if before != after {
-                let before_text = String::from_utf8_lossy(&before);
-                let after_text = String::from_utf8_lossy(&after);
-                let first_diff = before_text
-                    .lines()
-                    .zip(after_text.lines())
-                    .position(|(a, b)| a != b);
-                panic!(
-                    "{rel} 与脚本产物不一致：脚本 {} 字节 / 应用 {} 字节，第一处不同在第 {:?} 行",
-                    before.len(),
-                    after.len(),
-                    first_diff
-                );
-            }
-        }
-
-        std::fs::remove_dir_all(&copy).unwrap();
     }
 }

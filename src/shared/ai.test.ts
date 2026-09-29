@@ -1,20 +1,34 @@
 import { describe, expect, it } from 'vitest'
 import {
   AI_HISTORY_MAX,
+  AI_IMAGE_TYPES,
   AI_INSTRUCTION_MAX,
+  AI_MODEL_MAX,
   AI_PERMISSION_DEFAULT,
   AI_PERMISSION_MODES,
   AI_PROMPT_PREFIX,
+  AI_SKILL_COMMAND,
+  AI_PROVIDER_PRESETS,
   AI_SESSION_MAX,
   AI_SESSION_TITLE_MAX,
   AI_THINKING_DEFAULT,
   AI_THINKING_LEVELS,
+  aiModelChoices,
+  aiModelFromId,
+  aiImageAccepted,
+  aiImagePayload,
   aiPermissionLabel,
+  aiProviderPayload,
+  aiProviderReady,
   aiSessionGroups,
+  aiTurns,
   aiSessionTitle,
   aiThinkingLabel,
+  aiThinkingMap,
+  builtinModelMeta,
   confirmFrame,
   formatDuration,
+  inferModelMeta,
   nodeSatisfiesPi,
   parsePiConfirm,
   parsePiDelta,
@@ -22,25 +36,36 @@ import {
   piLaunch,
   piLaunchForDisplay,
   pickAiActiveSession,
-  pickAiModel,
+  pickAiChoice,
+  pickAiThinking,
   rememberAiInstruction,
   rememberAiSession,
   sanitizeAiApiFormat,
   sanitizeAiBaseUrl,
+  sanitizeAiContext,
   sanitizeAiHistory,
+  sanitizeAiLabel,
+  sanitizeAiMaxTokens,
   sanitizeAiModelId,
   sanitizeAiModels,
   sanitizeAiName,
   sanitizeAiPermission,
+  sanitizeAiPreset,
+  sanitizeAiProviders,
   sanitizeAiSessionId,
   sanitizeAiSessions,
   sanitizeAiSessionTitle,
   sanitizeAiThinking,
+  sanitizeAiThinkingLevels,
   sessionMessagesToLines,
+  skillCommandOf,
+  stripSkillCommand,
   taskPrompt,
+  uniqueAiName,
   visibleInstruction,
   writtenEntries,
   type AiLogLine,
+  type AiProvider,
   type AiSession
 } from './ai'
 
@@ -68,38 +93,384 @@ describe('模型配置的收敛', () => {
     expect(sanitizeAiBaseUrl(42)).toBe('')
   })
 
-  it('模型清单去重保序、保留启停状态、限量', () => {
+  it('模型清单：去重保序、保留启停、补齐显示名 / 上下文 / 思考那三样、限量', () => {
     const models = sanitizeAiModels([
       { id: ' deepseek-v4.1-flash ', enabled: true },
       { id: 'mimo-v2.6-flash', enabled: false },
       { id: 'deepseek-v4.1-flash', enabled: false },
       { id: '', enabled: true },
       'not-an-object',
-      null
+      null,
+      // 新的两样：最大输出与「能看图」，老数据文件里没有就按「不知道 / 不能」落
+      { id: 'glm-5.2', maxTokens: 384_000, imageInput: true, maxTokensBogus: 'x' }
     ])
+    // 老数据文件里只有 id 与 enabled：显示名回 id、上下文 0（不知道）、不支持思考
     expect(models).toEqual([
-      { id: 'deepseek-v4.1-flash', enabled: true },
-      { id: 'mimo-v2.6-flash', enabled: false }
+      {
+        id: 'deepseek-v4.1-flash',
+        enabled: true,
+        name: 'deepseek-v4.1-flash',
+        contextWindow: 0,
+        maxTokens: 0,
+        reasoning: false,
+        levels: ['off'],
+        imageInput: false
+      },
+      {
+        id: 'mimo-v2.6-flash',
+        enabled: false,
+        name: 'mimo-v2.6-flash',
+        contextWindow: 0,
+        maxTokens: 0,
+        reasoning: false,
+        levels: ['off'],
+        imageInput: false
+      },
+      {
+        id: 'glm-5.2',
+        enabled: true,
+        name: 'glm-5.2',
+        contextWindow: 0,
+        maxTokens: 384_000,
+        reasoning: false,
+        levels: ['off'],
+        imageInput: true
+      }
     ])
 
     expect(sanitizeAiModels('x')).toEqual([])
     const many = Array.from({ length: 40 }, (_, index) => ({ id: `m${index}`, enabled: true }))
-    expect(sanitizeAiModels(many)).toHaveLength(32)
+    expect(sanitizeAiModels(many)).toHaveLength(AI_MODEL_MAX)
   })
 
-  it('挑的模型在清单里还启用着就用它，没了退回第一个启用的；一个都没启用就是空串', () => {
-    const models = [
-      { id: 'a', enabled: false },
-      { id: 'b', enabled: true },
-      { id: 'c', enabled: true }
+  it('最大输出与上下文同一条口径：非正数、认不出、离谱大都是「不知道」', () => {
+    expect(sanitizeAiMaxTokens(384_000)).toBe(384_000)
+    expect(sanitizeAiMaxTokens('128000')).toBe(128_000)
+    expect(sanitizeAiMaxTokens(0)).toBe(0)
+    expect(sanitizeAiMaxTokens(-4)).toBe(0)
+    expect(sanitizeAiMaxTokens('128k')).toBe(0)
+    expect(sanitizeAiMaxTokens('x')).toBe(0)
+    expect(sanitizeAiMaxTokens(1e12)).toBe(20_000_000)
+  })
+
+  it('上下文只收正数（认不出的、离谱大的都当「不知道」）', () => {
+    expect(sanitizeAiContext(200_000)).toBe(200_000)
+    expect(sanitizeAiContext('128000')).toBe(128_000)
+    expect(sanitizeAiContext(0)).toBe(0)
+    expect(sanitizeAiContext(-1)).toBe(0)
+    expect(sanitizeAiContext('')).toBe(0)
+    expect(sanitizeAiContext(NaN)).toBe(0)
+    expect(sanitizeAiContext(1e12)).toBe(20_000_000)
+  })
+
+  it('不支持思考的模型只有 off 一档；支持时默认给 off..high（xhigh / max 要显式打开）', () => {
+    expect(sanitizeAiThinkingLevels([], false)).toEqual(['off'])
+    expect(sanitizeAiThinkingLevels(['high', 'max'], false)).toEqual(['off'])
+    expect(sanitizeAiThinkingLevels(undefined, true)).toEqual([
+      'off',
+      'minimal',
+      'low',
+      'medium',
+      'high'
+    ])
+    // 按档位表排序、去重、丢掉认不出的
+    expect(sanitizeAiThinkingLevels(['max', 'low', 'low', '疯了'], true)).toEqual(['low', 'max'])
+  })
+
+  it('支持的档位落成 Pi 的 thinkingLevelMap：只写与它默认不一样的那几档', () => {
+    // 全默认（off..high）：与 Pi 自己算出来的一模一样，一个字都不用写
+    expect(
+      aiThinkingMap({
+        id: 'a',
+        enabled: true,
+        name: 'a',
+        contextWindow: 0,
+        maxTokens: 0,
+        reasoning: true,
+        levels: ['off', 'minimal', 'low', 'medium', 'high'],
+        imageInput: false
+      })
+    ).toBeUndefined()
+    // 关掉 minimal、打开 xhigh：一个 null（明说不支持）+ 一个显式打开的档位
+    expect(
+      aiThinkingMap({
+        id: 'a',
+        enabled: true,
+        name: 'a',
+        contextWindow: 0,
+        maxTokens: 0,
+        reasoning: true,
+        levels: ['off', 'low', 'medium', 'high', 'xhigh'],
+        imageInput: false
+      })
+    ).toEqual({ minimal: null, xhigh: 'xhigh' })
+    // 不支持思考的模型整份都不写（Pi 只看 reasoning: false）
+    expect(
+      aiThinkingMap({
+        id: 'a',
+        enabled: true,
+        name: 'a',
+        contextWindow: 0,
+        maxTokens: 0,
+        reasoning: false,
+        levels: ['off'],
+        imageInput: false
+      })
+    ).toBeUndefined()
+  })
+
+  it('思考档位回退：挑的不支持就退默认档，默认档也不支持就退它支持的最高一档', () => {
+    const base = ['off', 'minimal', 'low', 'medium', 'high']
+    expect(pickAiThinking(base, 'high')).toBe('high')
+    expect(pickAiThinking(base, 'max')).toBe('medium')
+    expect(pickAiThinking(['off', 'low'], 'high')).toBe('low')
+    expect(pickAiThinking(['off'], 'high')).toBe('off')
+    expect(pickAiThinking([], 'high')).toBe('off')
+  })
+
+  it('认得出的预设与界面上那个名字', () => {
+    expect(sanitizeAiPreset('deepseek')).toBe('deepseek')
+    expect(sanitizeAiPreset('没这个厂商')).toBe('')
+    expect(AI_PROVIDER_PRESETS.every((preset) => /^https:\/\//.test(preset.baseUrl))).toBe(true)
+    expect(sanitizeAiLabel('  我的   网关 ')).toBe('我的 网关')
+    expect(sanitizeAiLabel('x'.repeat(80))).toHaveLength(40)
+  })
+
+  it('服务 id 重名时排一个后缀上去（后加的不该覆盖先加的）', () => {
+    expect(uniqueAiName('deepseek', [])).toBe('deepseek')
+    expect(uniqueAiName('DeepSeek', ['deepseek'])).toBe('deepseek-2')
+    expect(uniqueAiName('deepseek', ['deepseek', 'deepseek-2'])).toBe('deepseek-3')
+  })
+
+  it('服务清单收敛：认不出的整条丢掉、同 id 去重、限量、缺清单的不留', () => {
+    const providers = sanitizeAiProviders([
+      {
+        id: 'DeepSeek',
+        label: 'DeepSeek',
+        baseUrl: ' https://api.deepseek.com/v1 ',
+        apiFormat: 'openai-completions',
+        preset: 'deepseek',
+        models: [{ id: 'deepseek-chat' }]
+      },
+      { id: 'deepseek', label: '重名的', baseUrl: 'https://x', apiFormat: 'openai-completions', models: [{ id: 'a' }] },
+      { id: 'no-models', baseUrl: 'https://x', apiFormat: 'openai-completions', models: [] },
+      { id: 'bad-url', baseUrl: 'x', apiFormat: 'openai-completions', models: [{ id: 'a' }] },
+      { id: 'bad-api', baseUrl: 'https://x', apiFormat: 'grpc', models: [{ id: 'a' }] },
+      null
+    ])
+    expect(providers).toHaveLength(1)
+    expect(providers[0].id).toBe('deepseek')
+    expect(providers[0].baseUrl).toBe('https://api.deepseek.com/v1')
+    expect(providers[0].preset).toBe('deepseek')
+    expect(providers[0].enabled).toBe(true)
+    expect(providers[0].models).toHaveLength(1)
+
+    expect(sanitizeAiProviders('x')).toEqual([])
+  })
+
+  it('默认模型：启用的服务下启用的模型才挑得到，挑的没了退回第一个', () => {
+    const providers: AiProvider[] = [
+      {
+        id: 'a',
+        label: 'A',
+        baseUrl: 'https://a',
+        apiFormat: 'openai-completions',
+        preset: '',
+        enabled: false,
+        models: [{ id: 'a1', enabled: true, name: 'a1', contextWindow: 0, maxTokens: 0, reasoning: false, levels: ['off'], imageInput: false }]
+      },
+      {
+        id: 'b',
+        label: 'B',
+        baseUrl: 'https://b',
+        apiFormat: 'openai-completions',
+        preset: '',
+        enabled: true,
+        models: [
+          { id: 'b1', enabled: false, name: 'b1', contextWindow: 0, maxTokens: 0, reasoning: false, levels: ['off'], imageInput: false },
+          { id: 'b2', enabled: true, name: 'B 二号', contextWindow: 200_000, maxTokens: 0, reasoning: true, levels: ['off', 'high'], imageInput: true }
+        ]
+      }
     ]
-    expect(pickAiModel(models, 'c')).toBe('c')
-    // 挑的那个被关掉 / 删掉 / 从没挑过：退回第一个启用的
-    expect(pickAiModel(models, 'a')).toBe('b')
-    expect(pickAiModel(models, 'gone')).toBe('b')
-    expect(pickAiModel(models, '')).toBe('b')
-    expect(pickAiModel([{ id: 'a', enabled: false }], 'a')).toBe('')
-    expect(pickAiModel([], 'a')).toBe('')
+    expect(aiModelChoices(providers).map((choice) => choice.key)).toEqual(['b/b2'])
+    expect(aiModelChoices(providers)[0].name).toBe('B 二号')
+    const chosen = pickAiChoice(providers, 'b', 'b2')
+    expect(chosen?.model).toBe('b2')
+    expect(chosen?.providerLabel).toBe('B')
+    expect(chosen?.contextWindow).toBe(200_000)
+    // 「能不能看图」跟着清单走：贴图那道门槛读的就是它（见 AiModelChoice.imageInput）
+    expect(chosen?.imageInput).toBe(true)
+    // 停用的服务 / 停用的模型 / 从没挑过：一律退到第一个能挑的
+    expect(pickAiChoice(providers, 'a', 'a1')?.key).toBe('b/b2')
+    expect(pickAiChoice(providers, 'b', 'b1')?.key).toBe('b/b2')
+    expect(pickAiChoice(providers, '', '')?.key).toBe('b/b2')
+
+    const none = providers.map((provider) => ({ ...provider, enabled: false }))
+    expect(pickAiChoice(none, '', '')).toBeNull()
+  })
+
+  it('一个服务够不够跑：名称 + Base URL + API 形态 + 至少一个启用的模型', () => {
+    const base: AiProvider = {
+      id: 'a',
+      label: 'A',
+      baseUrl: 'https://a',
+      apiFormat: 'openai-completions',
+      preset: '',
+      enabled: true,
+      models: [{ id: 'a1', enabled: true, name: 'a1', contextWindow: 0, maxTokens: 0, reasoning: false, levels: ['off'], imageInput: false }]
+    }
+    expect(aiProviderReady(base)).toBe(true)
+    expect(aiProviderReady({ ...base, id: '' })).toBe(false)
+    expect(aiProviderReady({ ...base, baseUrl: 'a' })).toBe(false)
+    expect(aiProviderReady({ ...base, apiFormat: '' })).toBe(false)
+    expect(aiProviderReady({ ...base, models: [] })).toBe(false)
+    expect(
+      aiProviderReady({ ...base, models: [{ ...base.models[0], enabled: false }] })
+    ).toBe(false)
+  })
+
+  it('交给 Rust 写 models.json 的那份：停用的服务与模型都不进去，思考档位映射在这一步算好', () => {
+    const providers: AiProvider[] = [
+      {
+        id: 'a',
+        label: 'A 家',
+        baseUrl: 'https://a/v1',
+        apiFormat: 'openai-completions',
+        preset: 'deepseek',
+        enabled: true,
+        models: [
+          {
+            id: 'a1',
+            enabled: true,
+            name: 'A 一号',
+            contextWindow: 128_000,
+            maxTokens: 32_768,
+            reasoning: true,
+            levels: ['off', 'low', 'medium', 'high', 'xhigh'],
+            imageInput: true
+          },
+          {
+            id: 'a2',
+            enabled: false,
+            name: 'a2',
+            contextWindow: 0,
+            maxTokens: 0,
+            reasoning: false,
+            levels: ['off'],
+            imageInput: false
+          }
+        ]
+      },
+      {
+        id: 'b',
+        label: 'B 家',
+        baseUrl: 'https://b/v1',
+        apiFormat: 'anthropic-messages',
+        preset: '',
+        enabled: false,
+        models: [
+          { id: 'b1', enabled: true, name: 'b1', contextWindow: 0, maxTokens: 0, reasoning: false, levels: ['off'], imageInput: false }
+        ]
+      },
+      // 清单空的服务（不该进 models.json：Pi 那边会当成一个有凭据但没模型的端点）
+      {
+        id: 'c',
+        label: 'C',
+        baseUrl: 'https://c/v1',
+        apiFormat: 'openai-completions',
+        preset: '',
+        enabled: true,
+        models: []
+      }
+    ]
+
+    expect(aiProviderPayload(providers)).toEqual([
+      {
+        id: 'a',
+        name: 'A 家',
+        baseUrl: 'https://a/v1',
+        api: 'openai-completions',
+        models: [
+          {
+            id: 'a1',
+            name: 'A 一号',
+            contextWindow: 128_000,
+            maxTokens: 32_768,
+            reasoning: true,
+            thinkingLevelMap: { minimal: null, xhigh: 'xhigh' },
+            // 能看图：发的是 Rust 认的 imageInput（它再落成 Pi 的 input: ["text","image"]）
+            imageInput: true
+          }
+        ]
+      }
+    ])
+    expect(aiProviderPayload([])).toEqual([])
+  })
+
+  it('自动认上下文与思考：只认写法确定的家族，认不出留空', () => {
+    expect(inferModelMeta('claude-sonnet-5')).toEqual({ contextWindow: 200_000, reasoning: true })
+    expect(inferModelMeta('gpt-4o-mini')).toEqual({ contextWindow: 128_000, reasoning: false })
+    expect(inferModelMeta('deepseek-reasoner')).toEqual({ contextWindow: 128_000, reasoning: true })
+    expect(inferModelMeta('glm-4.5-air')).toEqual({ contextWindow: 128_000, reasoning: true })
+    expect(inferModelMeta('glm-4-air')).toEqual({ contextWindow: 128_000, reasoning: false })
+    expect(inferModelMeta('kimi-k2-thinking')).toEqual({ contextWindow: 256_000, reasoning: true })
+    expect(inferModelMeta('moonshot-v1-32k')).toEqual({ contextWindow: 32_768, reasoning: false })
+    expect(inferModelMeta('某个没听过的模型')).toEqual({ contextWindow: 0, reasoning: false })
+  })
+
+  it('内置目录：指定厂商优先，其次任意厂商，再认「厂商/模型」后缀；认不出回 null', () => {
+    // deepseek-v4.1-flash 在好几家目录里都有：指定 opencode-go 就认它那份
+    expect(builtinModelMeta('deepseek-v4.1-flash', 'opencode-go')).toEqual({
+      contextWindow: 1_000_000,
+      maxTokens: 384_000,
+      reasoning: true,
+      imageInput: true
+    })
+    // 不指定厂商也认得出（按厂商名排序取第一个，结果稳定），大小写不敏感
+    expect(builtinModelMeta('DeepSeek-V4.1-Flash')?.imageInput).toBe(true)
+    // 目录里是「厂商/模型」前缀键、端点报的是裸 id：认后缀
+    const prefixed = builtinModelMeta('deepseek/deepseek-v4.1-flash')
+    expect(prefixed).not.toBeNull()
+    // 手工填大写也一样认
+    expect(builtinModelMeta('  GLM-5.2  ', 'zai')?.contextWindow).toBe(1_000_000)
+    expect(builtinModelMeta('某个没听过的模型')).toBeNull()
+    expect(builtinModelMeta('')).toBeNull()
+  })
+
+  it('预填四层：端点报了的优先，其次内置目录（含图片能力），再次按名字认', () => {
+    // 端点没报的 deepseek-v4.1-flash：从内置目录把 1M / 384K / 思考 / 图片整个认出来
+    expect(aiModelFromId('deepseek-v4.1-flash', {}, 'opencode-go')).toMatchObject({
+      contextWindow: 1_000_000,
+      maxTokens: 384_000,
+      reasoning: true,
+      imageInput: true
+    })
+    // 端点报了就以端点为准（目录让位）
+    expect(aiModelFromId('没听过的', { contextWindow: 65_536, reasoning: true })).toMatchObject({
+      id: '没听过的',
+      enabled: true,
+      contextWindow: 65_536,
+      maxTokens: 0,
+      reasoning: true,
+      levels: ['off', 'minimal', 'low', 'medium', 'high'],
+      imageInput: false
+    })
+    expect(
+      aiModelFromId('没听过的', { contextWindow: 65_536, reasoning: true }, 'opencode-go')
+    ).toMatchObject({ contextWindow: 65_536, maxTokens: 0 })
+    // 目录里没有的才轮到按名字认（moonshot-v1-32k 只在名字表里）
+    expect(aiModelFromId('moonshot-v1-32k')).toMatchObject({
+      contextWindow: 32_768,
+      maxTokens: 0,
+      reasoning: false,
+      imageInput: false
+    })
+    // 用户明确关掉的图片不被迫开（extra 只会传 true，这里防的是「目录说了算」盖过清单）
+    expect(aiModelFromId('glm-5.2', {}, 'zai')).toMatchObject({
+      contextWindow: 1_000_000,
+      reasoning: true,
+      imageInput: false
+    })
   })
 
   it('挑的模型 id 与清单里每一条同一条收敛（去空白、限长）', () => {
@@ -230,6 +601,71 @@ describe('会话（一个目录里的一段连续对话）', () => {
   })
 })
 
+describe('对话按轮切（过程 / 答案 / 收据）', () => {
+  const line = (kind: AiLogLine['kind'], text: string): AiLogLine => ({ kind, text })
+
+  it('一条都没有就是空的', () => {
+    expect(aiTurns([])).toEqual([])
+  })
+
+  it('一轮 = 用户那句 + 过程 + 最后那段正文 + 收据：过程把思考、工具、报错、中途旁白都收了', () => {
+    const turns = aiTurns([
+      line('user', '把资料整理一下'),
+      line('info', '在 agent 里工作'),
+      line('thinking', '先看目录'),
+      line('tool', '读取 kb/a.md'),
+      line('text', '我先看看目录里有什么。'),
+      line('error', 'read: EISDIR'),
+      line('thinking', '换个工具'),
+      line('tool', '读取 kb/b.md'),
+      line('text', '整理好了，共 3 条。'),
+      line('duration', '用时 12 秒')
+    ])
+
+    expect(turns).toHaveLength(1)
+    expect(turns[0].index).toBe(0)
+    expect(turns[0].user?.text).toBe('把资料整理一下')
+    // 答案只有最后那段；前面那段正文是过程中的旁白
+    expect(turns[0].answer?.text).toBe('整理好了，共 3 条。')
+    expect(turns[0].process.map((item) => item.kind)).toEqual([
+      'info',
+      'thinking',
+      'tool',
+      'text',
+      'error',
+      'thinking',
+      'tool'
+    ])
+    // 「用时 …」留在答案外面（它是一轮的句号）
+    expect(turns[0].tail.map((item) => item.text)).toEqual(['用时 12 秒'])
+  })
+
+  it('没说过话的那一轮（停了一半 / 只读回历史）：整个过程都收着，没有答案', () => {
+    const turns = aiTurns([line('thinking', '嗯'), line('tool', '调用 bash')])
+    expect(turns).toHaveLength(1)
+    expect(turns[0].user).toBeNull()
+    expect(turns[0].answer).toBeNull()
+    expect(turns[0].process).toHaveLength(2)
+    expect(turns[0].tail).toEqual([])
+  })
+
+  it('一句一轮：第二句开新的一轮（index 是那一轮第一行的下标，展开态跟着它稳定）', () => {
+    const turns = aiTurns([
+      line('user', '第一句'),
+      line('thinking', '想'),
+      line('text', '答一'),
+      line('user', '第二句'),
+      line('text', '答二')
+    ])
+    expect(turns).toHaveLength(2)
+    expect(turns.map((turn) => turn.index)).toEqual([0, 3])
+    expect(turns.map((turn) => turn.user?.text)).toEqual(['第一句', '第二句'])
+    expect(turns[0].process.map((item) => item.text)).toEqual(['想'])
+    expect(turns[1].process).toEqual([])
+    expect(turns[1].answer?.text).toBe('答二')
+  })
+})
+
 describe('命令与提示词', () => {
   const selection = { provider: 'opencode-go', model: 'deepseek-v4.1-flash', thinking: 'max' }
   const sessionId = '6f5a1c2e-1111-2222-3333-444455556666'
@@ -353,6 +789,60 @@ describe('事件流的读法', () => {
     })
   })
 
+  it('工具失败的原因从 result 里取（Pi 的事件没有 error 字段）', () => {
+    // 这个事件的形状是 { toolCallId, toolName, result, isError }：原文在 result.content[].text 里
+    expect(
+      parse({
+        type: 'tool_execution_end',
+        toolName: 'read',
+        isError: true,
+        result: { content: [{ type: 'text', text: 'EISDIR: illegal operation on a directory, read' }] }
+      })
+    ).toEqual({ kind: 'error', text: 'read：EISDIR: illegal operation on a directory, read' })
+
+    // 多行原文（「找不到 bash」那种还带一串搜索路径）：窄行只留第一句，全文收进悬停的 detail
+    expect(
+      parse({
+        type: 'tool_execution_end',
+        toolName: 'bash',
+        isError: true,
+        result: {
+          content: [
+            {
+              type: 'text',
+              text: 'No bash shell found. Options:\n  1. Install Git for Windows\n  D:\\Git\\bin\\bash.exe'
+            }
+          ]
+        }
+      })
+    ).toEqual({
+      kind: 'error',
+      text: 'bash：No bash shell found. Options:',
+      detail: 'No bash shell found. Options:\n  1. Install Git for Windows\n  D:\\Git\\bin\\bash.exe'
+    })
+
+    // 只看 result 里的 isError 也算失败（扩展能改这一层）；成功的结果照旧不画
+    expect(
+      parse({
+        type: 'tool_execution_end',
+        toolName: 'bash',
+        result: { content: '没跑起来', isError: true }
+      })
+    ).toEqual({ kind: 'error', text: 'bash：没跑起来' })
+    expect(
+      parse({
+        type: 'tool_execution_end',
+        toolName: 'read',
+        result: { content: [{ type: 'text', text: '文件正文' }] }
+      })
+    ).toBeNull()
+
+    // 失败但结果里一个字都没有：兜底文案还在
+    expect(
+      parse({ type: 'tool_execution_end', toolName: 'bash', isError: true, result: { content: [] } })
+    ).toEqual({ kind: 'error', text: 'bash：工具调用失败' })
+  })
+
   it('助手正文字符串与内容块两种形状都认；用户消息的回显不画', () => {
     expect(parse({ type: 'message_end', message: '汇总：新建 2 条' })).toEqual({
       kind: 'text',
@@ -399,25 +889,35 @@ describe('事件流的读法', () => {
     expect(parsePiEvent('Error: 找不到模型')).toEqual({ kind: 'info', text: 'Error: 找不到模型' })
   })
 
-  it('流式增量：认文本增量（界面按它把回话一段段接出来），别的都不认', () => {
-    expect(
-      parsePiDelta(JSON.stringify({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', contentIndex: 0, delta: '第一段' } }))
-    ).toBe('第一段')
-    // 块的开头与结尾不带新文字（整段的权威版本由 message_end 给）
-    expect(
-      parsePiDelta(JSON.stringify({ type: 'message_update', assistantMessageEvent: { type: 'text_start', contentIndex: 0 } }))
-    ).toBeNull()
-    expect(
-      parsePiDelta(JSON.stringify({ type: 'message_update', assistantMessageEvent: { type: 'text_end', contentIndex: 0, content: '整段' } }))
-    ).toBeNull()
-    // 思考增量不画（与读历史那条路同一条口径）
-    expect(
-      parsePiDelta(JSON.stringify({ type: 'message_update', assistantMessageEvent: { type: 'thinking_delta', delta: '嗯…' } }))
-    ).toBeNull()
+  it('流式增量：正文、思考、以及一段思考的结束（三种），别的都不认', () => {
+    const delta = (event: unknown) =>
+      parsePiDelta(JSON.stringify({ type: 'message_update', assistantMessageEvent: event }))
+
+    expect(delta({ type: 'text_delta', contentIndex: 0, delta: '第一段' })).toEqual({
+      kind: 'text',
+      text: '第一段'
+    })
+    // 思考增量画在末尾那块「思考中…」里（草稿也要看得见）
+    expect(delta({ type: 'thinking_delta', contentIndex: 0, delta: '嗯…' })).toEqual({
+      kind: 'thinking',
+      text: '嗯…'
+    })
+    // 一段思考结束：整块的权威内容跟着它到（界面到这儿把它收成一块「思考过程」）
+    expect(delta({ type: 'thinking_end', contentIndex: 0, content: '想完了\n两行' })).toEqual({
+      kind: 'thinkingEnd',
+      text: '想完了\n两行'
+    })
+    // 被厂商脱敏过的块一个字都没有：也要报一声（调用方靠它把「正在思考」收掉）
+    expect(delta({ type: 'thinking_end', contentIndex: 0, content: '' })).toEqual({
+      kind: 'thinkingEnd',
+      text: ''
+    })
+
+    // 正文块的开头与结尾不带新文字（整段的权威版本由 message_end 给）
+    expect(delta({ type: 'text_start', contentIndex: 0 })).toBeNull()
+    expect(delta({ type: 'text_end', contentIndex: 0, content: '整段' })).toBeNull()
     // 空增量、别的帧、非 JSON 的行都不是增量
-    expect(
-      parsePiDelta(JSON.stringify({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: '' } }))
-    ).toBeNull()
+    expect(delta({ type: 'text_delta', delta: '' })).toBeNull()
     expect(parsePiDelta(JSON.stringify({ type: 'agent_settled' }))).toBeNull()
     expect(parsePiDelta('npm warn 之类的一行')).toBeNull()
   })
@@ -456,12 +956,19 @@ describe('事件流的读法', () => {
 })
 
 describe('打开旧会话：历史消息 → 日志行（续聊的界面从这儿接上）', () => {
-  it('认用户与助手、认工具调用；系统消息与工具结果整条丢掉', () => {
+  it('认用户与助手、认工具调用与思考块；系统消息丢掉，没失败的工具结果也丢掉', () => {
     const lines = sessionMessagesToLines([
       // 系统消息是提示词与工具清单那一堆，不是对话
       { role: 'system', content: '', sections: { cwd: '<cwd>C:\\work</cwd>' }, toolsAdded: [{ name: 'read' }] },
       { role: 'user', content: [{ type: 'text', text: '第一条：你好' }] },
-      { role: 'assistant', content: [{ type: 'text', text: 'pong' }] },
+      {
+        role: 'assistant',
+        content: [
+          // 想的那一段：界面上是一块收着的「思考过程」
+          { type: 'thinking', thinking: '先看看目录里有啥', thinkingSignature: 'opaque' },
+          { type: 'text', text: 'pong' }
+        ]
+      },
       { role: 'toolResult', content: [{ type: 'text', text: '几百行文件原文…' }] },
       {
         role: 'assistant',
@@ -471,11 +978,14 @@ describe('打开旧会话：历史消息 → 日志行（续聊的界面从这�
           { type: 'text', text: '读完了，写了 b.md' }
         ]
       },
+      // 被厂商脱敏过的思考块一个字都没有：不画
+      { role: 'assistant', content: [{ type: 'thinking', thinking: '', redacted: true }] },
       { role: 'user', content: '字符串形状的正文也要认' }
     ])
 
     expect(lines).toEqual([
       { kind: 'user', text: '第一条：你好' },
+      { kind: 'thinking', text: '先看看目录里有啥' },
       { kind: 'text', text: 'pong' },
       { kind: 'tool', text: '读取 kb/a.md' },
       { kind: 'tool', text: '写入 kb/b.md' },
@@ -490,6 +1000,27 @@ describe('打开旧会话：历史消息 → 日志行（续聊的界面从这�
     expect(sessionMessagesToLines([null, 42, { role: 'user' }, { role: 'assistant', content: [] }])).toEqual([])
   })
 
+  it('失败的工具结果在历史里也留一行（成功的原文照旧丢掉，与实时那条同一句话）', () => {
+    const lines = sessionMessagesToLines([
+      { role: 'assistant', content: [{ type: 'toolCall', name: 'bash', arguments: { command: 'ls' } }] },
+      {
+        role: 'toolResult',
+        toolName: 'bash',
+        isError: true,
+        // 落盘的那一份形状：原文在 content 里、isError 长在消息上（句级没有这个字段）
+        content: [{ type: 'text', text: 'No bash shell found. Options:\n  1. Install Git for Windows' }]
+      }
+    ])
+    expect(lines).toEqual([
+      { kind: 'tool', text: '调用 bash' },
+      {
+        kind: 'error',
+        text: 'bash：No bash shell found. Options:',
+        detail: 'No bash shell found. Options:\n  1. Install Git for Windows'
+      }
+    ])
+  })
+
   it('历史里那条用户消息要剥掉提示词脚手架（气泡里只显示用户自己写的那段）', () => {
     const prompt = taskPrompt({ dir: 'E:\\work\\kb', instruction: '你好' })
     expect(visibleInstruction(prompt)).toBe('你好')
@@ -499,6 +1030,44 @@ describe('打开旧会话：历史消息 → 日志行（续聊的界面从这�
     expect(visibleInstruction('  你好  ')).toBe('  你好  ')
     // 只剩脚手架（老数据里可能有这种）就是空串，调用方据此不画那一行
     expect(visibleInstruction(`${AI_PROMPT_PREFIX}E:\\work\\kb`)).toBe('')
+  })
+
+  it('显式调起技能：命令挪到最前面（Pi 只在开头认它），脚手架退到参数位', () => {
+    const prompt = taskPrompt({ dir: 'E:\\work', instruction: '/skill:charts 画个折线图' })
+    expect(prompt).toBe('/skill:charts 你在下面这个目录里工作：E:\\work\n\n画个折线图')
+    // 命令后面没写字也一样成立（命令仍在最前，脚手架在它的参数位）
+    expect(taskPrompt({ dir: 'E:\\work', instruction: '/skill:charts' })).toBe(
+      '/skill:charts 你在下面这个目录里工作：E:\\work'
+    )
+    // 命令不在开头的写法不动它，照老样子拼（Pi 也不认，模型看到的还是原文）
+    expect(taskPrompt({ dir: 'E:\\work', instruction: '看看 /skill:charts' })).toBe(
+      '你在下面这个目录里工作：E:\\work\n\n看看 /skill:charts'
+    )
+  })
+
+  it('技能命令的解析与剥离', () => {
+    expect(skillCommandOf('/skill:charts 画图')).toBe('charts')
+    expect(skillCommandOf('  /skill:通用图表生成器 画图')).toBe('通用图表生成器')
+    expect(skillCommandOf('/skill:charts')).toBe('charts')
+    expect(skillCommandOf('/skill:')).toBe('')
+    expect(skillCommandOf('画图 /skill:charts')).toBe('')
+
+    expect(stripSkillCommand('/skill:charts 画图')).toBe('画图')
+    expect(stripSkillCommand('/skill:charts')).toBe('')
+    expect(stripSkillCommand('  /skill:charts   画图')).toBe('画图')
+    expect(stripSkillCommand('画图')).toBe('画图')
+  })
+
+  it('气泡里那条技能消息：留着技能名、去掉脚手架，来回一趟还是原样', () => {
+    const prompt = taskPrompt({ dir: 'E:\\work', instruction: '/skill:charts 画个折线图' })
+    expect(visibleInstruction(prompt)).toBe('/skill:charts 画个折线图')
+    // 只调了技能、没写别的
+    expect(visibleInstruction(taskPrompt({ dir: 'E:\\work', instruction: '/skill:charts' }))).toBe(
+      '/skill:charts'
+    )
+    // 会话标题要的是「在聊什么」：命令让给气泡，不进标题
+    expect(aiSessionTitle('/skill:charts 画个折线图')).toBe('画个折线图')
+    expect(aiSessionTitle('/skill:charts')).toBe('/skill:charts')
   })
 
   it('打开旧会话：用户那条消息（完整提示词）在对话里只显示原文那一段', () => {
@@ -517,6 +1086,66 @@ describe('打开旧会话：历史消息 → 日志行（续聊的界面从这�
       { role: 'assistant', content: [{ type: 'text', text: '\u001b[31m红字\u001b[0m' }] }
     ])
     expect(lines).toEqual([{ kind: 'text', text: '红字' }])
+  })
+
+  it('用户那句里贴的图：落盘的是 base64，界面上换回数据 URL（只有图没有字的那句也画）', () => {
+    const lines = sessionMessagesToLines([
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: '这两张哪里不一样？' },
+          { type: 'image', data: 'iVBORw0KGgo=', mimeType: 'image/png' },
+          // 少一半的（data 或 mimeType 缺一个）不是一张能画的图，丢掉
+          { type: 'image', data: '', mimeType: 'image/png' }
+        ]
+      },
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: taskPrompt({ dir: 'E:\\work', instruction: '' }) },
+          { type: 'image', data: 'AAAA', mimeType: 'image/jpeg' }
+        ]
+      }
+    ])
+
+    expect(lines).toEqual([
+      {
+        kind: 'user',
+        text: '这两张哪里不一样？',
+        images: ['data:image/png;base64,iVBORw0KGgo=']
+      },
+      // 提示词那行脚手架照剥；剥完没有字，但图在，所以这条还在
+      { kind: 'user', text: '', images: ['data:image/jpeg;base64,AAAA'] }
+    ])
+  })
+})
+
+describe('贴在输入框里的图（随这一句发出去）', () => {
+  it('只收 png / jpeg / webp / gif 这四种（Pi 能直接内联给模型的那几种）', () => {
+    expect(AI_IMAGE_TYPES).toEqual(['image/png', 'image/jpeg', 'image/webp', 'image/gif'])
+    expect(aiImageAccepted('image/png')).toBe(true)
+    expect(aiImageAccepted('IMAGE/JPEG')).toBe(true)
+    // 带参数的 mime（浏览器有时这么报）认前半段
+    expect(aiImageAccepted('image/png;charset=utf-8')).toBe(true)
+    expect(aiImageAccepted('image/bmp')).toBe(false)
+    expect(aiImageAccepted('image/svg+xml')).toBe(false)
+    expect(aiImageAccepted('')).toBe(false)
+  })
+
+  it('数据 URL → Pi 的 {data, mimeType}：取逗号后面那一段，认不出的丢掉', () => {
+    expect(
+      aiImagePayload([
+        { dataUrl: 'data:image/png;base64,iVBORw0KGgo=', mimeType: 'image/png' },
+        { dataUrl: 'data:image/jpeg;base64,AAAA', mimeType: 'image/jpeg' },
+        // 不是数据 URL 的、逗号后面空着的、类型空着的：一律不发（发过去它解析不了）
+        { dataUrl: 'http://example.com/a.png', mimeType: 'image/png' },
+        { dataUrl: 'data:image/png;base64,', mimeType: 'image/png' },
+        { dataUrl: 'data:image/png;base64,AAAA', mimeType: '' }
+      ])
+    ).toEqual([
+      { data: 'iVBORw0KGgo=', mimeType: 'image/png' },
+      { data: 'AAAA', mimeType: 'image/jpeg' }
+    ])
   })
 })
 

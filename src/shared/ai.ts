@@ -8,16 +8,20 @@
  * 命令少一个开关、RPC 帧认错一个字段，都是几行单测就能钉住的事。
  */
 import { noteRootName, sanitizeNoteRoot } from './note'
+import { AI_BUILTIN_MODELS, type AiBuiltinModelEntry } from './ai-builtin-models.generated'
 
 /**
- * 模型配置是**自定义端点**形态（照通用客户端的样子）：一个提供方 = 名称 + Base URL +
- * API 形态 + 密钥 + 模型清单（可启停）。落点分三处：名称 / Base URL / API 形态 / 模型清单
- * 进设置；密钥进 Windows 凭据管理器；Pi 用的那份 models.json 由 Rust 生成
- * （src-tauri/src/ai.rs 的 provider_write —— apiKey 写的是环境变量引用，不落明文）。
+ * 模型配置是**多服务形态**（模型管理弹窗里那一屏）：一个服务 = 名称 + Base URL + API 形态 +
+ * 密钥 + 模型清单（每条可启停，带上下文与思考档位）。落点分三处：名称 / Base URL / API 形态 /
+ * 模型清单进设置；密钥进 Windows 凭据管理器；Pi 用的那份 models.json 由 Rust 生成
+ * （src-tauri/src/ai.rs 的 models_write —— apiKey 写的是环境变量引用，不落明文）。
+ * HTTP 形态只认登记过的那两个（AI_API_FORMATS），厂商预设只填地址（AI_PROVIDER_PRESETS）。
  *
  * 会话（`AiSession`）也在这份里：一个会话 = 一个工作目录里的一段连续对话，与 Pi 自己的
  * 会话文件一一对应 —— 连续多轮与「重启后接着聊」都是它的功劳，不是应用自己攒的上下文。
  */
+
+// ---------- AI 服务（模型管理弹窗里的那些） ----------
 
 /** API 形态：models.json 的 `api` 字段认的 id（两个都来自 Pi 自己的材料，别凭印象加） */
 export interface AiApiFormat {
@@ -30,10 +34,115 @@ export const AI_API_FORMATS: AiApiFormat[] = [
   { id: 'anthropic-messages', label: 'Anthropic Messages（/v1/messages）' }
 ]
 
-/** 清单里的一条模型：enabled 关掉的只是不启用，不删 */
+/**
+ * 清单里的一条模型。**上下文与思考这两样是「端点说 / 认得出就当默认，认不出留空」**：
+ * 用户在模型那一行上能改，改完落进 models.json（见 aiThinkingMap），Pi 拿它决定
+ * 什么时候压缩上下文、以及 `/thinking` 里给哪几档。
+ */
 export interface AiModelEntry {
+  /** 模型 id：端点的叫法（进 models.json 的 `id`，也进 `--model`） */
   id: string
+  /** 启停：关掉的留在清单里（还能再打开），但不进 models.json、也挑不到 */
   enabled: boolean
+  /** 别名：端点给的 name / display_name，用户也能改（界面上怎么叫它；空了回 id） */
+  name: string
+  /** 上下文窗口（token）。**0 = 不知道**：models.json 里不落这个字段，Pi 按它的 128000 兜底 */
+  contextWindow: number
+  /** 最大输出（token）。**0 = 不知道**：models.json 里不落这个字段，Pi 按它的 16384 兜底 */
+  maxTokens: number
+  /** 支持思考（Pi 的 `reasoning`）。false 时只有 `off` 一档，界面也就不给挑档位 */
+  reasoning: boolean
+  /** 支持的思考档位（AI_THINKING_LEVELS 的子集，按档位顺序；见 sanitizeAiThinkingLevels） */
+  levels: string[]
+  /**
+   * 能看图（Pi 的 `input` 带 `"image"`）：工具结果里的截图、read 读的图片才会真的发给模型。
+   * 添加模型时从随包 Pi 的内置目录预填（builtinModelMeta），用户在「高级」面板上能改。
+   */
+  imageInput: boolean
+}
+
+/** 一个服务最多留几个模型（models.json 那一边的上限也是这个数，改要一起改） */
+export const AI_MODEL_MAX = 32
+/** 最多几个服务（弹窗里排得下、models.json 也不会被撑爆） */
+export const AI_PROVIDER_MAX = 12
+
+/**
+ * 一个 AI 服务 = **一个端点 + 一份模型清单**（模型管理弹窗里那一行）。
+ *
+ * 四样东西的落点：id / label / baseUrl / apiFormat / 模型清单进设置，密钥进 Windows
+ * 凭据管理器（`Workbench/ai/<id>/token`），端点本身由 Rust 写成 Pi 的 models.json。
+ */
+export interface AiProvider {
+  /** 端点键名：models.json 的键、凭据名的后缀（`ai/<id>/token`）、`--provider` 的值 */
+  id: string
+  /** 界面上怎么叫（预设的厂商名，或用户自己起的名字） */
+  label: string
+  baseUrl: string
+  apiFormat: string
+  /** 预设的厂商 id（界面拿它画字母头像）；自定义端点空串 */
+  preset: string
+  /** 停用的不进 models.json、也不能当默认模型（留着不用删，改天再打开） */
+  enabled: boolean
+  models: AiModelEntry[]
+}
+
+/**
+ * 预设厂商：**只填地址与 API 形态**，用户粘一把 API Key 就能连上
+ * （模型清单从端点拉，见 Rust 的 `ai_models_fetch`）。
+ *
+ * 收在这里的判据是「地址与形态都没争议」——宁可少列几个。地址写错的代价很实在：
+ * 401 / 404 长得都像「你的 key 不对」。剩下的走「自定义端点」，那张表单的三个字段
+ * （名称 / Base URL / API 形态）本来就是给这种情况准备的。**不内置任何模型清单**
+ * （各家的模型名变得太快，清单由端点自己报）。
+ */
+export interface AiProviderPreset {
+  id: string
+  label: string
+  baseUrl: string
+  apiFormat: string
+}
+
+export const AI_PROVIDER_PRESETS: AiProviderPreset[] = [
+  { id: 'openai', label: 'OpenAI', baseUrl: 'https://api.openai.com/v1', apiFormat: 'openai-completions' },
+  { id: 'anthropic', label: 'Anthropic', baseUrl: 'https://api.anthropic.com', apiFormat: 'anthropic-messages' },
+  {
+    id: 'google',
+    label: 'Google Gemini',
+    baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
+    apiFormat: 'openai-completions'
+  },
+  { id: 'deepseek', label: 'DeepSeek', baseUrl: 'https://api.deepseek.com/v1', apiFormat: 'openai-completions' },
+  { id: 'moonshot', label: '月之暗面 Kimi', baseUrl: 'https://api.moonshot.cn/v1', apiFormat: 'openai-completions' },
+  { id: 'zhipu', label: '智谱 AI', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', apiFormat: 'openai-completions' },
+  { id: 'zai', label: 'Z.AI', baseUrl: 'https://api.z.ai/api/paas/v4', apiFormat: 'openai-completions' },
+  {
+    id: 'dashscope',
+    label: '通义千问',
+    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    apiFormat: 'openai-completions'
+  },
+  { id: 'siliconflow', label: '硅基流动', baseUrl: 'https://api.siliconflow.cn/v1', apiFormat: 'openai-completions' },
+  { id: 'volces', label: '火山方舟', baseUrl: 'https://ark.cn-beijing.volces.com/api/v3', apiFormat: 'openai-completions' },
+  { id: 'minimax', label: 'MiniMax', baseUrl: 'https://api.minimaxi.com/v1', apiFormat: 'openai-completions' },
+  { id: 'xiaomi', label: '小米 MiMo', baseUrl: 'https://api.xiaomimimo.com/v1', apiFormat: 'openai-completions' },
+  { id: 'openrouter', label: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', apiFormat: 'openai-completions' },
+  { id: 'groq', label: 'Groq', baseUrl: 'https://api.groq.com/openai/v1', apiFormat: 'openai-completions' },
+  { id: 'xai', label: 'xAI Grok', baseUrl: 'https://api.x.ai/v1', apiFormat: 'openai-completions' },
+  { id: 'mistral', label: 'Mistral', baseUrl: 'https://api.mistral.ai/v1', apiFormat: 'openai-completions' },
+  { id: 'together', label: 'Together AI', baseUrl: 'https://api.together.xyz/v1', apiFormat: 'openai-completions' },
+  { id: 'fireworks', label: 'Fireworks', baseUrl: 'https://api.fireworks.ai/inference/v1', apiFormat: 'openai-completions' },
+  { id: 'cerebras', label: 'Cerebras', baseUrl: 'https://api.cerebras.ai/v1', apiFormat: 'openai-completions' },
+  { id: 'nvidia', label: 'NVIDIA', baseUrl: 'https://integrate.api.nvidia.com/v1', apiFormat: 'openai-completions' },
+  { id: 'huggingface', label: 'Hugging Face', baseUrl: 'https://router.huggingface.co/v1', apiFormat: 'openai-completions' },
+  { id: 'baseten', label: 'Baseten', baseUrl: 'https://inference.baseten.co/v1', apiFormat: 'openai-completions' },
+  { id: 'opencode-zen', label: 'OpenCode Zen', baseUrl: 'https://opencode.ai/zen/v1', apiFormat: 'openai-completions' },
+  { id: 'opencode-go', label: 'OpenCode Go', baseUrl: 'https://opencode.ai/zen/go/v1', apiFormat: 'openai-completions' }
+]
+
+/** 认得出的预设（认不出的回空串：预设 id 只用来画头像，界面不该显示一个不存在的厂商） */
+export function sanitizeAiPreset(value: unknown): string {
+  if (typeof value !== 'string') return ''
+  return AI_PROVIDER_PRESETS.find((preset) => preset.id === value)?.id ?? ''
 }
 
 /**
@@ -50,6 +159,12 @@ export function sanitizeAiName(value: unknown): string {
     .slice(0, 32)
 }
 
+/** 界面上那个名字的收敛：压成一行、去空白、限长 */
+export function sanitizeAiLabel(value: unknown): string {
+  if (typeof value !== 'string') return ''
+  return value.replace(/\s+/g, ' ').trim().slice(0, 40)
+}
+
 /** API 形态的收敛：认不出的回空串 */
 export function sanitizeAiApiFormat(value: unknown): string {
   if (typeof value !== 'string') return ''
@@ -62,39 +177,426 @@ export function sanitizeAiBaseUrl(value: unknown): string {
   return value.trim().slice(0, 300)
 }
 
+/** 模型 id 的收敛：去空白、限长（与清单里每一条同一条口径） */
+export function sanitizeAiModelId(value: unknown): string {
+  return typeof value === 'string' ? value.trim().slice(0, 120) : ''
+}
+
+/** 上下文窗口的收敛：认不出的、非正数、离谱大的都回 0（= 不知道） */
+export function sanitizeAiContext(value: unknown): number {
+  const size = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(size) || size <= 0) return 0
+  return Math.min(Math.floor(size), 20_000_000)
+}
+
+/** 最大输出的收敛：与上下文同一条口径（非正数 / 离谱大 = 不知道，回 0） */
+export function sanitizeAiMaxTokens(value: unknown): number {
+  return sanitizeAiContext(value)
+}
+
+/** 支持思考的模型默认给哪几档：与 Pi 一致（见 aiThinkingMap 的说明） */
+export const AI_THINKING_BASE_LEVELS = ['off', 'minimal', 'low', 'medium', 'high']
+
 /**
- * 模型清单的收敛：去空白、按 id 去重（保序）、限长限量。
- * enabled 不是能力开关，是「这一条要不要进 models.json」。
+ * 思考档位的收敛：只留下这七档里认得出的、按档位顺序去重。
+ * **不支持思考的模型只有 `off`**（Pi 那边 `getSupportedThinkingLevels` 就是这么算的），
+ * 空清单也按这个默认给，免得界面上一个档位都不剩。
+ */
+export function sanitizeAiThinkingLevels(value: unknown, reasoning: boolean): string[] {
+  if (!reasoning) return ['off']
+  const raw = Array.isArray(value) ? value : AI_THINKING_BASE_LEVELS
+  const wanted = new Set(raw.filter((level): level is string => typeof level === 'string'))
+  const levels = AI_THINKING_LEVELS.filter((level) => wanted.has(level.id)).map((level) => level.id)
+  return levels.length ? levels : [...AI_THINKING_BASE_LEVELS]
+}
+
+/**
+ * 模型清单的收敛：去空白、按 id 去重（保序）、限量；缺的字段补齐（老数据文件里只有
+ * id 与 enabled，上下文与思考那两样按「不知道」落）。
  */
 export function sanitizeAiModels(value: unknown): AiModelEntry[] {
   if (!Array.isArray(value)) return []
   const seen = new Set<string>()
   const result: AiModelEntry[] = []
   for (const raw of value) {
-    const id =
-      raw && typeof raw === 'object' && typeof (raw as { id?: unknown }).id === 'string'
-        ? (raw as { id: string }).id.trim().slice(0, 120)
-        : ''
+    if (!raw || typeof raw !== 'object') continue
+    const record = raw as Record<string, unknown>
+    const id = sanitizeAiModelId(record.id)
     if (!id || seen.has(id)) continue
     seen.add(id)
-    result.push({ id, enabled: (raw as { enabled?: unknown }).enabled !== false })
-    if (result.length >= 32) break
+    const reasoning = record.reasoning === true
+    result.push({
+      id,
+      enabled: record.enabled !== false,
+      name: sanitizeAiLabel(record.name) || id,
+      contextWindow: sanitizeAiContext(record.contextWindow),
+      maxTokens: sanitizeAiMaxTokens(record.maxTokens),
+      reasoning,
+      levels: sanitizeAiThinkingLevels(record.levels, reasoning),
+      imageInput: record.imageInput === true
+    })
+    if (result.length >= AI_MODEL_MAX) break
   }
   return result
 }
 
-/** 模型 id 的收敛：去空白、限长（与清单里每一条同一条口径） */
-export function sanitizeAiModelId(value: unknown): string {
-  return typeof value === 'string' ? value.trim().slice(0, 120) : ''
+/** 一个服务的收敛：认不出的整条丢掉（清单空的、地址不成形的、跑不起来的都不留） */
+export function sanitizeAiProviders(value: unknown): AiProvider[] {
+  if (!Array.isArray(value)) return []
+  const seen = new Set<string>()
+  const result: AiProvider[] = []
+  for (const raw of value) {
+    if (!raw || typeof raw !== 'object') continue
+    const record = raw as Record<string, unknown>
+    const id = sanitizeAiName(record.id)
+    const baseUrl = sanitizeAiBaseUrl(record.baseUrl)
+    const apiFormat = sanitizeAiApiFormat(record.apiFormat)
+    const models = sanitizeAiModels(record.models)
+    if (!id || !/^https?:\/\//.test(baseUrl) || !apiFormat || !models.length || seen.has(id)) continue
+    seen.add(id)
+    result.push({
+      id,
+      label: sanitizeAiLabel(record.label) || id,
+      baseUrl,
+      apiFormat,
+      preset: sanitizeAiPreset(record.preset),
+      enabled: record.enabled !== false,
+      models
+    })
+    if (result.length >= AI_PROVIDER_MAX) break
+  }
+  return result
 }
 
 /**
- * 这一轮跑哪个模型：**用户在页面上挑的那颗**（`chosen`，记在设置里），
- * 它被关掉或删掉时退回清单里第一个启用的；一个都没启用就是空串（界面据此提示）。
+ * 「自动获取」的兜底：端点没报上下文 / 思考时，按模型 id 认一下。
+ *
+ * 规矩是**宁缺毋滥**：只认写法很确定的那些家族，认不出来就留空（上下文 0 = 不写进
+ * models.json、Pi 按 128k 兜底；思考按不支持），由用户在模型那一行上改。
+ * 编一个数字比留空更坏 —— 上下文给大了会在该压缩的时候不压缩。
  */
-export function pickAiModel(models: AiModelEntry[], chosen: string): string {
-  const enabled = models.filter((model) => model.enabled).map((model) => model.id)
-  return enabled.includes(chosen) ? chosen : (enabled[0] ?? '')
+const AI_MODEL_HINTS: Array<{ pattern: RegExp; contextWindow: number; reasoning: boolean }> = [
+  { pattern: /^claude-/, contextWindow: 200_000, reasoning: true },
+  { pattern: /^o[1-9](-|$)/, contextWindow: 200_000, reasoning: true },
+  { pattern: /^gpt-5/, contextWindow: 400_000, reasoning: true },
+  { pattern: /^gpt-oss/, contextWindow: 131_072, reasoning: true },
+  { pattern: /^gpt-4/, contextWindow: 128_000, reasoning: false },
+  { pattern: /^deepseek-(reasoner|r\d|v3\.[12])/, contextWindow: 128_000, reasoning: true },
+  { pattern: /^deepseek/, contextWindow: 128_000, reasoning: false },
+  { pattern: /^gemini-(2\.5|3)/, contextWindow: 1_048_576, reasoning: true },
+  { pattern: /^gemini/, contextWindow: 1_048_576, reasoning: false },
+  { pattern: /^glm-(4\.[5-9]|[5-9])/, contextWindow: 128_000, reasoning: true },
+  { pattern: /^glm-/, contextWindow: 128_000, reasoning: false },
+  { pattern: /^kimi-(k2|k3|latest)/, contextWindow: 256_000, reasoning: true }
+]
+
+/**
+ * 按模型 id 认一下上下文与思考（认不出就是「不知道」）。上下文写在名字里的那种
+ * （`moonshot-v1-8k` / `-32k` / `-128k`）也在这条规则里。
+ *
+ * 它是预填的**最后一层**：Pi 自带的目录认得出的（builtinModelMeta）轮不到它。
+ */
+export function inferModelMeta(id: string): { contextWindow: number; reasoning: boolean } {
+  const name = id.trim().toLowerCase()
+  const moonshot = /^moonshot-v1-(\d+)k$/.exec(name)
+  if (moonshot) return { contextWindow: Number(moonshot[1]) * 1024, reasoning: false }
+  const hint = AI_MODEL_HINTS.find((item) => item.pattern.test(name))
+  return hint
+    ? { contextWindow: hint.contextWindow, reasoning: hint.reasoning }
+    : { contextWindow: 0, reasoning: false }
+}
+
+/** 内置目录里认出来的一条默认值（认不出的字段按「不知道」给 0 / false） */
+export interface AiBuiltinModelMeta {
+  contextWindow: number
+  maxTokens: number
+  reasoning: boolean
+  imageInput: boolean
+}
+
+function toBuiltinMeta(entry: AiBuiltinModelEntry | undefined): AiBuiltinModelMeta | null {
+  if (!entry) return null
+  return {
+    contextWindow: entry.contextWindow ?? 0,
+    maxTokens: entry.maxTokens ?? 0,
+    reasoning: entry.reasoning === true,
+    imageInput: entry.image === true
+  }
+}
+
+/**
+ * 在随包 Pi 自带的模型目录里按 id 认一遍默认值 —— **Pi 跑同一个 id 用的就是这张表**，
+ * 加模型时从它预填，端点没报也不至于把一个视觉模型配成纯文本（图片被 Pi 丢掉，
+ * 模型只会说「我看不了图」）。目录是 vendor 脚本从钉死版本的 Pi 里剪出来的
+ * （ai-builtin-models.generated.ts），应用不连 models.dev、也不拿它当模型清单。
+ *
+ * 认法三步，**更近的认法优先于更宽的**，每一步都先认原样再认小写（手工填 `GLM-5.2`
+ * 也认得出来）：**指定厂商里认 id**（服务的 preset 与目录里的厂商同名时最准）、
+ * **任意厂商里认 id**（按厂商名排序取第一个，结果稳定）、**认「厂商/模型」的后缀**
+ * （OpenRouter 那种目录键带前缀、端点报裸 id 的情形）。都认不着回 null。
+ */
+export function builtinModelMeta(id: string, provider = ''): AiBuiltinModelMeta | null {
+  const raw = sanitizeAiModelId(id)
+  if (!raw) return null
+  const lower = raw.toLowerCase()
+  const keys = raw === lower ? [raw] : [raw, lower]
+  const names = Object.keys(AI_BUILTIN_MODELS).sort()
+
+  if (provider) {
+    const map = AI_BUILTIN_MODELS[provider]
+    if (map) {
+      for (const key of keys) {
+        const hit = toBuiltinMeta(map[key])
+        if (hit) return hit
+      }
+    }
+  }
+  for (const name of names) {
+    const map = AI_BUILTIN_MODELS[name]
+    for (const key of keys) {
+      const hit = toBuiltinMeta(map[key])
+      if (hit) return hit
+    }
+  }
+  for (const name of names) {
+    const map = AI_BUILTIN_MODELS[name]
+    for (const key of keys) {
+      const prefixed = Object.keys(map)
+        .sort()
+        .find((candidate) => candidate.endsWith(`/${key}`))
+      if (prefixed) return toBuiltinMeta(map[prefixed])
+    }
+  }
+  return null
+}
+
+/**
+ * 拉回来的一个模型（Rust 的 `ai_models_fetch` 的应答）：**端点说什么就是什么** ——
+ * 上下文 / 最大输出 / 思考都可能缺（为 0 / 为 null 表示端点没提），
+ * 渲染层拿内置目录与 inferModelMeta 兜底，用户在模型那一行上还能改。
+ */
+export interface AiFetchedModel {
+  id: string
+  name: string
+  contextWindow: number
+  /** 端点没报就是 0（不是「没有」） */
+  maxTokens: number
+  /** null = 端点没说（不是「不支持」） */
+  reasoning: boolean | null
+}
+
+/**
+ * 一步补全清单里新加的一条（端点的应答只带 id 时走它）。
+ *
+ * 每个字段都是「端点报了的优先，其次随包 Pi 的内置目录（`provider` 传服务的 preset id
+ * 能让目录认得更准），再次按名字认一遍，都认不出才是『不知道』」—— 图片能力只有
+ * 前两层（端点不报这个，名字也猜不得）；用户在「高级」面板上都能改。
+ */
+export function aiModelFromId(
+  id: string,
+  extra: Partial<AiModelEntry> = {},
+  provider = ''
+): AiModelEntry {
+  const modelId = sanitizeAiModelId(id)
+  const hint = inferModelMeta(modelId)
+  const builtin = builtinModelMeta(modelId, provider)
+  const reasoning = extra.reasoning ?? builtin?.reasoning ?? hint.reasoning
+  return {
+    id: modelId,
+    enabled: extra.enabled !== false,
+    name: sanitizeAiLabel(extra.name) || modelId,
+    contextWindow:
+      sanitizeAiContext(extra.contextWindow) || builtin?.contextWindow || hint.contextWindow,
+    maxTokens: sanitizeAiMaxTokens(extra.maxTokens) || builtin?.maxTokens || 0,
+    reasoning,
+    levels: sanitizeAiThinkingLevels(extra.levels, reasoning),
+    imageInput: extra.imageInput === true || builtin?.imageInput === true
+  }
+}
+
+/**
+ * 支持的档位 → models.json 的 `thinkingLevelMap`：**只有与 Pi 的默认不一样的那几档才落进去**。
+ *
+ * Pi 的算法（它自己的 `getSupportedThinkingLevels`）：`reasoning` 为真时 off / minimal /
+ * low / medium / high 自动算支持；`xhigh` 与 `max` 必须在 map 里给一个字符串才算支持；
+ * map 里某一档写成 `null` 就是明说不支持。所以这里：
+ *
+ *  - 支持 xhigh / max → 写成它自己那个名字（值就是档位 id —— Pi 拿它当 reasoning_effort
+ *    那类字段的值，两档的名字各家一致）；
+ *  - 不支持的档位 → `null`；
+ *  - 其余不落（省得每次都要跟着 Pi 的默认表对着改）。
+ *
+ * 不支持思考的模型整份 map 都不写（它只看 `reasoning: false`）。
+ */
+export function aiThinkingMap(entry: AiModelEntry): Record<string, string | null> | undefined {
+  if (!entry.reasoning) return undefined
+  const supported = new Set(sanitizeAiThinkingLevels(entry.levels, true))
+  const map: Record<string, string | null> = {}
+  for (const { id } of AI_THINKING_LEVELS) {
+    const extended = id === 'xhigh' || id === 'max'
+    if (supported.has(id)) {
+      // xhigh / max 不写就等于不支持，支持的必须显式写一个值出来了
+      if (extended) map[id] = id
+      continue
+    }
+    // 落回默认的那几档要写成 null 才是「不支持」；扩展档不支持的默认就是不支持，不必写
+    if (!extended) map[id] = null
+  }
+  return Object.keys(map).length ? map : undefined
+}
+
+/**
+ * 思考档位的回退：挑的那一档这个模型不支持时退到默认档（medium），
+ * 默认档也不支持就退到它支持的最高一档；只有 `off` 就是 `off`。
+ * 界面上那个下拉只列支持的档位，存坏的 / 换了模型的值全靠它收敛。
+ */
+export function pickAiThinking(levels: string[], chosen: string): string {
+  // 只有 off 的模型（不支持思考）传进来的就是 ['off']；清单是空的按同一档算
+  const list = sanitizeAiThinkingLevels(levels.length ? levels : ['off'], true)
+  if (list.includes(chosen)) return chosen
+  if (list.includes(AI_THINKING_DEFAULT)) return AI_THINKING_DEFAULT
+  return list[list.length - 1] ?? 'off'
+}
+
+/** 页面上那个「模型」下拉里的一项：一个服务下启用的那颗模型 */
+export interface AiModelChoice {
+  /** 在清单里唯一（`<服务 id>/<模型 id>`）：下拉拿它当值 */
+  key: string
+  provider: string
+  providerLabel: string
+  /** 模型 id（`--model` 就是它） */
+  model: string
+  /** 界面上的显示名（端点给了就用它） */
+  name: string
+  contextWindow: number
+  reasoning: boolean
+  levels: string[]
+  /**
+   * 能看图（Pi 的 `input` 带 `"image"`）：界面上「能不能往这句话里贴图」按它拦 ——
+   * 没勾的模型，Pi 会把图换成一句「图被略去」的占位，用户以为发过去了（见 AI_IMAGE_TYPES）。
+   */
+  imageInput: boolean
+}
+
+/** 能挑的模型：**启用的服务下启用的模型**，按服务清单的顺序排 */
+export function aiModelChoices(providers: AiProvider[]): AiModelChoice[] {
+  const choices: AiModelChoice[] = []
+  for (const provider of providers) {
+    if (!provider.enabled) continue
+    for (const entry of provider.models) {
+      if (!entry.enabled) continue
+      choices.push({
+        key: `${provider.id}/${entry.id}`,
+        provider: provider.id,
+        providerLabel: provider.label || provider.id,
+        model: entry.id,
+        name: entry.name || entry.id,
+        contextWindow: entry.contextWindow,
+        reasoning: entry.reasoning,
+        levels: entry.levels,
+        imageInput: entry.imageInput
+      })
+    }
+  }
+  return choices
+}
+
+/**
+ * 这一轮跑哪个模型：**用户在页面上挑的那颗**（记在设置里），它被关掉 / 删掉 / 服务被停用
+ * 时退回清单里第一个能挑的；一个都没有就是 null（界面据此提示「还没配模型」）。
+ */
+export function pickAiChoice(
+  providers: AiProvider[],
+  provider: string,
+  model: string
+): AiModelChoice | null {
+  const choices = aiModelChoices(providers)
+  return (
+    choices.find((choice) => choice.provider === provider && choice.model === model) ??
+    choices[0] ??
+    null
+  )
+}
+
+/** 一个服务够不够跑：名称 + Base URL + API 形态 + 至少一个启用的模型 */
+export function aiProviderReady(provider: AiProvider): boolean {
+  return (
+    !!sanitizeAiName(provider.id) &&
+    /^https?:\/\//.test(sanitizeAiBaseUrl(provider.baseUrl)) &&
+    !!sanitizeAiApiFormat(provider.apiFormat) &&
+    provider.models.some((entry) => entry.enabled)
+  )
+}
+
+/**
+ * 一个服务在 models.json 里的那份形状（Rust 的 ProviderInput 就是照它收的）。
+ * **字段名两边必须一字不差**（`maxTokens` / `imageInput` / `thinkingLevelMap`）——
+ * 名字对不上 serde 不认识就静默丢弃（踩过：渲染层发 `input: [...]`、Rust 收
+ * `imageInput: bool`，两边单测都是绿的，勾了「图片」却永远写不进 models.json）。
+ */
+export interface AiProviderPayload {
+  id: string
+  name: string
+  baseUrl: string
+  api: string
+  models: Array<{
+    id: string
+    name: string
+    contextWindow: number
+    /** 端点 / 用户都没给就是不带这个字段（Pi 按 16384 兜底） */
+    maxTokens?: number
+    reasoning: boolean
+    thinkingLevelMap?: Record<string, string | null>
+    /** 能看图：Rust 收到真值再落成 Pi 的 `input: ["text","image"]` */
+    imageInput?: boolean
+  }>
+}
+
+/**
+ * 设置里的服务清单 → 交给 Rust 写 models.json 的那份：**停用的服务与停用的模型都不进去**
+ * （Pi 那边看到的清单就是界面上能挑的那些），思考档位映射在这一步算好
+ * （aiThinkingMap —— 那条规则只写一处）。清单空的 / 跑不起来的服务也跳过，
+ * 免得 models.json 里留一个连不上的端点。
+ */
+export function aiProviderPayload(providers: AiProvider[]): AiProviderPayload[] {
+  return providers
+    .filter((provider) => provider.enabled && aiProviderReady(provider))
+    .map((provider) => ({
+      id: sanitizeAiName(provider.id),
+      name: sanitizeAiLabel(provider.label),
+      baseUrl: sanitizeAiBaseUrl(provider.baseUrl),
+      api: sanitizeAiApiFormat(provider.apiFormat),
+      models: provider.models
+        .filter((entry) => entry.enabled)
+        .map((entry) => {
+          const map = aiThinkingMap(entry)
+          return {
+            id: entry.id,
+            name: entry.name,
+            contextWindow: entry.contextWindow,
+            ...(entry.maxTokens > 0 ? { maxTokens: entry.maxTokens } : {}),
+            reasoning: entry.reasoning,
+            ...(map ? { thinkingLevelMap: map } : {}),
+            // 键名是（Rust 的）imageInput，不是 Pi 文件里的 input —— 后者由 Rust 落
+            ...(entry.imageInput ? { imageInput: true } : {})
+          }
+        })
+    }))
+    .filter((provider) => provider.models.length > 0)
+}
+
+/**
+ * 服务 id 的去重：用户连着加两个同名（或者预设重名）时排一个后缀上去
+ * （`deepseek-2`、`deepseek-3`……），免得后加的那个把先加的覆盖掉。
+ */
+export function uniqueAiName(id: string, taken: string[]): string {
+  const base = sanitizeAiName(id) || 'provider'
+  if (!taken.includes(base)) return base
+  for (let index = 2; index < 100; index += 1) {
+    const candidate = `${base}-${index}`.slice(0, 32)
+    if (!taken.includes(candidate)) return candidate
+  }
+  return base
 }
 
 /**
@@ -263,7 +765,10 @@ export function sanitizeAiSessionTitle(value: unknown): string {
  * 只截不猜 —— 不替用户概括，那会让标题与他自己写的那句话对不上。
  */
 export function aiSessionTitle(instruction: string): string {
-  return sanitizeAiSessionTitle(instruction)
+  // 显式调起技能的那一轮：标题要的是「这段在聊什么」，开头那条 `/skill:名字` 是方式不是内容
+  // （只剩命令、后面没写字的那种，照原样当标题）
+  const words = stripSkillCommand(instruction).trim()
+  return sanitizeAiSessionTitle(words || instruction)
 }
 
 /** 一个时间戳字段的收敛：认不出的回 0（排序用得着，不能是 NaN） */
@@ -460,34 +965,132 @@ export interface AiTaskInput {
  */
 export const AI_PROMPT_PREFIX = '你在下面这个目录里工作：'
 
+/** 显式调起一个技能的那条命令的前缀（Pi 自己那条 `/skill:<名字>`，见下） */
+export const AI_SKILL_COMMAND = '/skill:'
+
+/**
+ * 指令开头那条 `/skill:名字` → 那个名字（没有就是空串）。
+ *
+ * Pi 展开这条命令的两个硬条件都在这里体现：**只在文本最开头认**（`_expandSkillCommand` 一来就
+ * `startsWith('/skill:')`），**一次只认一条**（名字取到第一个空白为止，后面整段都是它的参数）。
+ */
+export function skillCommandOf(instruction: string): string {
+  const text = instruction.trimStart()
+  if (!text.startsWith(AI_SKILL_COMMAND)) return ''
+  const match = /^\S+/.exec(text.slice(AI_SKILL_COMMAND.length))
+  return match ? match[0] : ''
+}
+
+/** 去掉开头那条 `/skill:名字` 与它后面的空白（没有就原样返回） */
+export function stripSkillCommand(instruction: string): string {
+  const match = /^\s*\/skill:\S+\s*/.exec(instruction)
+  return match ? instruction.slice(match[0].length) : instruction
+}
+
 /**
  * 提示词 = 工作目录 + 指令原文。
  *
  * 页面是**通用**的：指令由用户写（想整理知识库就照那个仓库的规范写一条），应用不内置
  * 任何一类任务的提示词 —— 内置一份就会有两份（另一份在用户的脑子里 / 别处），
  * 改了一处另一处不知道。这里只管把「你在哪儿工作」说清楚。
+ *
+ * **显式调起技能的那一轮**（指令以 `/skill:名字` 开头，见 AI_SKILL_COMMAND）：命令必须挪到
+ * 整个提示词的最前面 —— Pi 只在开头认它。于是「你在哪儿工作」那句脚手架就退到**命令的参数位**，
+ * 展开出来正好是「技能全文 + 目录说明 + 用户自己写的那段」。不这么摆的话，前面那行脚手架会把
+ * 命令顶到第二位，Pi 不认，整条命令就原样发给模型当普通文本了。
  */
 export function taskPrompt(input: AiTaskInput): string {
   const dir = input.dir.trim()
-  const instruction = input.instruction.trim()
+  const raw = input.instruction.trim()
+  const skill = skillCommandOf(raw)
+  const instruction = skill ? stripSkillCommand(raw).trim() : raw
   const parts = [`${AI_PROMPT_PREFIX}${dir}`]
   if (instruction) parts.push('', instruction)
-  return parts.join('\n')
+  const body = parts.join('\n')
+  return skill ? `${AI_SKILL_COMMAND}${skill} ${body}` : body
 }
 
 /**
- * 落盘的提示词 → 界面上该显示的那一句：**把开头那行脚手架（`你在下面这个目录里工作：…`）
- * 去掉**。用户自己只写了后面那段，前面那行是应用替模型加的背景 —— 读历史时照原样画出来，
- * 他会在自己的气泡里看见一句自己从没写过的话（踩过：一整条气泡里就这一行最显眼）。
- * 没有那行就原样返回（用户手写的、别处粘来的，都别动）。
+ * 落盘的提示词 → 界面上该显示的那一句：**把应用替模型加的那点脚手架去掉** ——
+ * 开头那条 `/skill:名字` 与 `你在下面这个目录里工作：…` 那一行。
+ *
+ * 为什么两条都要剥：读历史时照原样画出来，用户会在自己的气泡里看见一句自己从没写过的话
+ * （踩过：一整条气泡里就这一行最显眼）。**技能名留一半**：那是用户自己的选择，
+ * 屏幕上得看得见 —— 于是 `/skill:名字` 保留、后面那些脚手架去掉。
+ * 两条都没有就原样返回（用户手写的、别处粘来的，都别动）。
  */
 export function visibleInstruction(text: string): string {
+  const skill = skillCommandOf(text)
+  const rest = stripScaffold(skill ? stripSkillCommand(text) : text)
+  if (!skill) return rest
+  return rest ? `${AI_SKILL_COMMAND}${skill} ${rest}` : `${AI_SKILL_COMMAND}${skill}`
+}
+
+/** 去掉开头那行「你在下面这个目录里工作：…」（连同它后面的空行）；没有那行就原样返回 */
+function stripScaffold(text: string): string {
   const trimmed = text.trimStart()
   if (!trimmed.startsWith(AI_PROMPT_PREFIX)) return text
   const rest = trimmed.slice(AI_PROMPT_PREFIX.length)
   const brk = rest.indexOf('\n')
   // 脚手架后面那个空行也一起吃掉，剩下的就是用户写的原文（尾部空白留给调用方去 trim）
   return brk < 0 ? '' : rest.slice(brk + 1).replace(/^\n+/, '')
+}
+
+// ---------- 用户贴在输入框里的图 ----------
+
+/**
+ * 贴在输入框里、要随这一句一起发出去的一张图。
+ *
+ * **存的是数据 URL**（`data:image/png;base64,…`）：缩略图直接拿它当 `src` 显示，
+ * 发出去时再拆成 Pi 认的那两个字段（见 aiImagePayload —— 协议里是 `{type:'image',
+ * data, mimeType}`，base64 不带 `data:` 前缀）。
+ */
+export interface AiImage {
+  dataUrl: string
+  /** `image/png` 那几种（从数据 URL 的头部取，也是 Pi 字段里那个 mimeType） */
+  mimeType: string
+}
+
+/**
+ * 收哪几种图：**Pi 能直接内联给模型的那四种**（它的 `normalizeSupportedImageMimeType`）
+ * —— 其余格式它要么转成 PNG、要么换成一句「图被略去」，不如在贴进来这一刻就说清楚。
+ */
+export const AI_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
+
+/**
+ * 一次最多贴几张：一张 4K 截图的 base64 就是好几 MB，而它们要挤进**同一行** JSON
+ * （Rust 写进子进程的 stdin，见 ai.rs 的 prompt_frame）。
+ */
+export const AI_IMAGE_MAX = 4
+
+/** 这个类型收不收（从剪贴板拿到的 mime 带参数时认前半段） */
+export function aiImageAccepted(mimeType: string): boolean {
+  const base = mimeType.split(';')[0]?.trim().toLowerCase() ?? ''
+  return AI_IMAGE_TYPES.includes(base)
+}
+
+/** 发给 Rust 的一张图（提示词那一行 JSON 里 Pi 的 `ImageContent`，见 ai.rs 的 prompt_frame） */
+export interface AiImagePayload {
+  /** base64：数据 URL 里逗号后面那一段 */
+  data: string
+  mimeType: string
+}
+
+/**
+ * 数据 URL → Pi 那个 `{data, mimeType}` 的形状。**认不出的丢掉**（不是数据 URL 的、
+ * 逗号后面空着的）—— 宁可少发一张，也别发一段它解析不了的东西出去。
+ */
+export function aiImagePayload(images: AiImage[]): AiImagePayload[] {
+  const result: AiImagePayload[] = []
+  for (const image of images) {
+    const comma = image.dataUrl.indexOf(',')
+    if (comma < 0) continue
+    const data = image.dataUrl.slice(comma + 1).trim()
+    const mimeType = image.mimeType.trim()
+    if (!data || !mimeType) continue
+    result.push({ data, mimeType })
+  }
+  return result
 }
 
 // ---------- 子进程的输出 ----------
@@ -498,9 +1101,16 @@ export interface AiLogLine {
    * `user` 是**用户自己写的那几句**（发出去时补一行、打开旧会话时从历史里读回来）：
    * 一段对话里它与助手说的话要分得开（画法见 AiRunPanel：它靠右、助手的话在左）。
    * `duration` 是一轮跑完时补的那一行「用时 …」—— 它不是对话内容，是这一轮的收据。
+   * `thinking` 是模型想的那一段（草稿）：**在对话里画成一块收着的「思考过程」**，
+   * 跑完自动收起、点一下还能展开（见 AiThinking.vue）。
    */
-  kind: 'user' | 'info' | 'tool' | 'text' | 'error' | 'done' | 'duration'
+  kind: 'user' | 'info' | 'tool' | 'text' | 'error' | 'done' | 'duration' | 'thinking'
   text: string
+  /**
+   * 用户贴在这句话里的图（数据 URL，见 AiImage）：**只有 `user` 行会带** ——
+   * 发出去那一刻补进那一行，打开旧会话时从历史里读回来。一句话可以只有图没有字。
+   */
+  images?: string[]
   /** 工具**写下**的文件（相对知识库根）：只有 write / edit 会带，用来汇总「这些条目是新的」 */
   path?: string
   /**
@@ -513,6 +1123,28 @@ export interface AiLogLine {
 /** 去掉控制序列：终端那套清理是给整行用的，这里只清要展示的文本 */
 function clean(text: string): string {
   return text.replace(/\u001b\[[0-9;?]*[ -/]*[@-~]/g, '').trim()
+}
+
+/** 多行原文的头一句：错误行是窄行注脚，全文另收在 `detail` 里（见 failureLine） */
+function firstLine(text: string): string {
+  return text.split('\n')[0].trim()
+}
+
+/**
+ * 失败那一行怎么念：`工具名：原文的头一句`，多行原文收进悬停的 detail（窄行里摆不下，
+ * 「找不到 bash」那种还带一串搜索路径）。**实时那条（`parsePiEvent`）与读历史这条
+ * （`sessionMessagesToLines`）共用它** —— 两处口径要一致，不然同一个失败重开会话就换个说法。
+ *
+ * 原文只从**工具结果**里来：`tool_execution_end` 的形状是
+ * `{ toolCallId, toolName, result, isError }`，压根没有 `error` 字段 —— 只认 error 的话
+ * 三种截然不同的失败（找不到 bash / EISDIR / ENOENT）会显示成同一句兜底文案。
+ */
+function failureLine(name: string, raw: string): AiLogLine {
+  const detail = clean(raw)
+  const reason = detail ? firstLine(detail) : '工具调用失败'
+  const line: AiLogLine = { kind: 'error', text: `${name || '工具'}：${reason}` }
+  if (detail && detail !== reason) line.detail = detail
+  return line
 }
 
 /**
@@ -545,7 +1177,10 @@ function toolVerb(name: string): { verb: string; writes: boolean } {
   }
 }
 
-/** 助手消息的正文：形状可能是字符串，也可能是内容块数组（两种都认） */
+/**
+ * 一段内容的正文：形状可能是字符串，也可能是内容块数组（两种都认）。
+ * 助手消息与工具结果用的是同一种形状（工具结果是 `{ content: [{ type: 'text', text }] }`）。
+ */
 function messageText(message: unknown): string {
   if (typeof message === 'string') return message
   if (!message || typeof message !== 'object') return ''
@@ -566,6 +1201,17 @@ function str(value: unknown): string {
   return typeof value === 'string' ? value : ''
 }
 
+/**
+ * 一张图内容块（`{type:'image', data, mimeType}`）→ 数据 URL；认不出的回空串。
+ * 落盘的是 base64，界面要的是能直接喂给 `<img>` 的那种串。
+ */
+function imageDataUrl(part: Record<string, unknown>): string {
+  const data = str(part.data).trim()
+  const mimeType = str(part.mimeType).trim()
+  if (!data || !mimeType) return ''
+  return `data:${mimeType};base64,${data}`
+}
+
 /** 消息的正文块（有的消息 content 是字符串，有的是块数组：不是数组就是空） */
 function contentParts(message: Record<string, unknown>): Array<Record<string, unknown>> {
   const content = message.content
@@ -580,11 +1226,13 @@ function contentParts(message: Record<string, unknown>): Array<Record<string, un
  * **续聊的界面从这儿接上**：历史在前，之后新的一轮轮往后接。
  *
  * 翻法与实时那条（`parsePiEvent`）刻意保持一致：助手说的话是正文（走 Markdown），
- * 工具调用是窄行，用户自己写的那几句单独一种行（`kind: 'user'`）。两类整条丢掉：
+ * 工具调用是窄行，用户自己写的那几句单独一种行（`kind: 'user'`），**想的那一段**
+ * （`thinking` 块）单独一种行 —— 界面上它是一块收着的「思考过程」。丢掉的：
  *
  *  - **系统消息**：它是提示词、工具清单与工作目录那一堆，不是对话；
- *  - **工具结果的原文**：一次读文件可能几百行，摆进对话里只会把它淹掉（工具调用那一行
- *    已经说了「读了哪个文件」）。
+ *  - **成功的工具结果原文**：一次读文件可能几百行，摆进对话里只会把它淹掉（工具调用那一行
+ *    已经说了「读了哪个文件」）。**失败的那一条不能丢** —— 原文就一句错因，
+ *    重开会话时它没了，用户回头再看就只剩一行「读取 …」（见 failureLine）。
  */
 export function sessionMessagesToLines(messages: unknown): AiLogLine[] {
   if (!Array.isArray(messages)) return []
@@ -597,7 +1245,19 @@ export function sessionMessagesToLines(messages: unknown): AiLogLine[] {
       // 落盘的是完整提示词（含「你在下面这个目录里工作：…」那行脚手架），界面上只显示
       // 用户自己写的原文 —— 见 visibleInstruction
       const text = visibleInstruction(clean(messageText(message))).trim()
-      if (text) lines.push({ kind: 'user', text })
+      // 贴在这句话里的图（发出去时与文字同一条消息）：一句只有图没有字的话照画
+      const images = contentParts(message)
+        .filter((part) => str(part.type) === 'image')
+        .map(imageDataUrl)
+        .filter(Boolean)
+      if (text || images.length) lines.push({ kind: 'user', text, ...(images.length ? { images } : {}) })
+      continue
+    }
+    // 工具结果（落盘的 role 是 toolResult）：只有失败的那条留一行，与实时那条同一句话
+    if (role === 'toolResult') {
+      if (message.isError === true) {
+        lines.push(failureLine(str(message.toolName), messageText(message)))
+      }
       continue
     }
     if (role !== 'assistant') continue
@@ -606,6 +1266,13 @@ export function sessionMessagesToLines(messages: unknown): AiLogLine[] {
       if (type === 'text') {
         const text = clean(str(part.text))
         if (text) lines.push({ kind: 'text', text })
+        continue
+      }
+      // 想的那一段（草稿）：界面上是一块收着的「思考过程」。被厂商脱敏过的块
+      // 一个字都没有，那就不画
+      if (type === 'thinking') {
+        const text = clean(str(part.thinking))
+        if (text) lines.push({ kind: 'thinking', text })
         continue
       }
       if (type !== 'toolCall') continue
@@ -617,7 +1284,6 @@ export function sessionMessagesToLines(messages: unknown): AiLogLine[] {
   }
   return lines
 }
-
 function num(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
@@ -681,11 +1347,14 @@ export function parsePiEvent(rawLine: string): AiLogLine | null {
       return writes && path ? { kind: 'tool', text, path } : { kind: 'tool', text }
     }
     case 'tool_execution_end': {
-      const failed = event.is_error === true || event.isError === true || !!str(event.error)
+      // 失败与否看三处：事件顶层那两个（Pi 会给）、结果里的那一份（扩展可以改这一层，
+      // 见 agent-loop 的 `afterResult.isError ?? isError`），以及老形状里的 error 字段
+      const result = (event.result ?? {}) as Record<string, unknown>
+      const failed =
+        event.is_error === true || event.isError === true || result.isError === true || !!str(event.error)
       if (!failed) return null
-      const name = str(event.toolName) || '工具'
-      const reason = str(event.error) || '工具调用失败'
-      return { kind: 'error', text: `${name}：${reason}` }
+      // 原文先看工具结果（Pi 现在就把原因放在那儿），error 字段只作兜底 —— 见 failureLine
+      return failureLine(str(event.toolName), messageText(event.result) || str(event.error))
     }
     case 'message_update': {
       // 逐字增量不走这里（它接在对话末尾，见 parsePiDelta）；只有出错的事件要留一句
@@ -715,14 +1384,22 @@ export function parsePiEvent(rawLine: string): AiLogLine | null {
 }
 
 /**
- * 一行输出里的**流式增量**：`message_update` 里的 `text_delta` 就是模型刚吐出来的那几个字，
- * 界面按它把助手的回话一段段接出来（见 stores/ai.ts 的 onDelta）。
+ * 一行输出里**正在长出来的那一段**，三种：
  *
- * 只认正文增量：`text_start` / `text_end` 不带新文字（整段由 `message_end` 给权威版本，
- * 见 parsePiEvent），思考增量（`thinking_delta`）也丢掉 —— 与读历史那条路同一条口径
- * （只留用户说的话、助手的正文与工具调用）。不是增量的行返回 null（含非 JSON 的行）。
+ *  - `text`：模型正在写的正文（`text_delta`）；
+ *  - `thinking`：模型正在想的那些（`thinking_delta`）—— 它是草稿，画在对话里但默认收着；
+ *  - `thinkingEnd`：**一段思考到齐了**（`thinking_end` 带着这一整块的权威内容，见 Pi 的
+ *    json.md：增量拼起来只是过程版）。
+ *
+ * 正文的整段仍由 `message_end` 给（那条是整条消息的权威版本，见 parsePiEvent）。
+ * 不是增量的行返回 null（含非 JSON 的行）。
  */
-export function parsePiDelta(rawLine: string): string | null {
+export interface PiDelta {
+  kind: 'text' | 'thinking' | 'thinkingEnd'
+  text: string
+}
+
+export function parsePiDelta(rawLine: string): PiDelta | null {
   const line = rawLine.trim()
   if (!line.startsWith('{')) return null
 
@@ -737,8 +1414,17 @@ export function parsePiDelta(rawLine: string): string | null {
 
   if (str(event.type) !== 'message_update') return null
   const delta = (event.assistantMessageEvent ?? {}) as Record<string, unknown>
-  if (str(delta.type) !== 'text_delta') return null
-  return str(delta.delta) || null
+  const kind = str(delta.type)
+
+  if (kind === 'text_delta' || kind === 'thinking_delta') {
+    const text = str(delta.delta)
+    if (!text) return null
+    return { kind: kind === 'text_delta' ? 'text' : 'thinking', text }
+  }
+  // 一段思考结束：**这一块以它为准**。内容为空也要报一声 —— 调用方靠它把「正在思考」
+  // 那个状态收掉（被厂商脱敏过的块一个字都没有）
+  if (kind === 'thinking_end') return { kind: 'thinkingEnd', text: clean(str(delta.content)) }
+  return null
 }
 
 // ---------- RPC 帧 ----------
@@ -829,7 +1515,58 @@ export function confirmFrame(id: string, confirmed: boolean): string {
   return JSON.stringify({ type: 'extension_ui_response', id, confirmed })
 }
 
-/** 这一轮写下的条目（去重、按路径排）：界面用它说「写入了这些东西」 */
+/**
+ * 对话按「轮」切开，每轮再切成过程 / 答案 / 收据 —— 面板照它画（见 AiRunPanel.vue）：
+ *
+ *  - **过程**（`process`）：这一轮里除了最后那段正文以外的全部 —— 想的那几段、工具调用、
+ *    报错、以及还没成答案的那些正文。界面上它收成一块「过程」（AiProcess.vue）：
+ *    一段对话要读的是「我说了什么、它最后说了什么」，中间那些步骤是要查证时才摊开的
+ *    （一次读文件、一条命令都占一行，摊着就是一面墙）。
+ *  - **答案**（`answer`）：这一轮**最后**那段正文（一轮里模型可能说了好几段，
+ *    前面那些都是过程中的旁白）。
+ *  - **收据**（`tail`）：答案之后那几行（「用时 …」）—— 留在外面，它是一轮的句号。
+ *
+ * 边界是用户自己写的那句话：一句一轮。
+ */
+export interface AiTurn {
+  /** 这一轮的第一行在整条日志里的下标（展开态跟着它走：日志只往后接，它不会变） */
+  index: number
+  user: AiLogLine | null
+  process: AiLogLine[]
+  answer: AiLogLine | null
+  tail: AiLogLine[]
+}
+
+export function aiTurns(lines: AiLogLine[]): AiTurn[] {
+  const turns: Array<{ index: number; user: AiLogLine | null; rest: AiLogLine[] }> = []
+  lines.forEach((line, index) => {
+    // 用户那句话开一轮；整条日志的头几行（还没跟谁说过话时的那些注脚）也自成一「轮」
+    if (line.kind === 'user' || !turns.length) turns.push({ index, user: null, rest: [] })
+    const turn = turns[turns.length - 1]
+    if (line.kind === 'user') turn.user = line
+    else turn.rest.push(line)
+  })
+
+  return turns.map((turn) => {
+    // 最后那段正文是答案：它前面全是过程，后面是收据
+    let answerAt = -1
+    turn.rest.forEach((line, index) => {
+      if (line.kind === 'text') answerAt = index
+    })
+    if (answerAt < 0) {
+      return { index: turn.index, user: turn.user, process: turn.rest, answer: null, tail: [] }
+    }
+    return {
+      index: turn.index,
+      user: turn.user,
+      process: turn.rest.slice(0, answerAt),
+      answer: turn.rest[answerAt],
+      tail: turn.rest.slice(answerAt + 1)
+    }
+  })
+}
+
+/** 这个会话写下的条目（去重、按路径排）：界面用它说「写入了这些东西」 */
 export function writtenEntries(lines: AiLogLine[]): string[] {
   const seen = new Set<string>()
   for (const line of lines) {

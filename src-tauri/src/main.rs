@@ -16,6 +16,7 @@ mod notes;
 mod nvm;
 mod oauth;
 mod paths;
+mod pi_skills;
 mod proc;
 mod session;
 mod skills;
@@ -366,12 +367,18 @@ fn main() {
             commands::kb_read,
             commands::kb_index_build,
             commands::ai_runtime,
-            commands::ai_provider_write,
+            commands::ai_models_write,
+            commands::ai_models_fetch,
             commands::ai_run,
             commands::ai_session_delete,
             commands::ai_key_save,
             commands::ai_key_state,
             commands::ai_key_clear,
+            commands::pi_skill_list,
+            commands::pi_skill_install_zip,
+            commands::pi_skill_install_dir,
+            commands::pi_skill_install_url,
+            commands::pi_skill_remove,
             commands::data_dir,
             commands::window_minimize,
             commands::window_toggle_maximize,

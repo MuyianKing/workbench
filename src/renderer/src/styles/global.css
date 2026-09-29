@@ -84,6 +84,13 @@ body.is-resizing-ai-tree * {
   user-select: none !important;
 }
 
+/* 拖知识库页那条左右分隔条：与笔记 / 视频 / AI 页同一副兜法（指针会扫过正文阅读区） */
+body.is-resizing-kb-tree,
+body.is-resizing-kb-tree * {
+  cursor: ew-resize !important;
+  user-select: none !important;
+}
+
 /* 设置里拖动导航项排序：重排清单而不是跟手搬一块，指针游走在清单上，同样全局兜住 */
 body.is-sorting-views,
 body.is-sorting-views * {

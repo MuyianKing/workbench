@@ -33,15 +33,18 @@ import {
   sanitizeAiModels,
   sanitizeAiName,
   sanitizeAiPermission,
+  sanitizeAiProviders,
   sanitizeAiSessionId,
   sanitizeAiSessions,
-  sanitizeAiThinking
+  sanitizeAiThinking,
+  type AiProvider
 } from './ai'
 import { pruneDays, sanitizeActivity } from './activity'
 import { sanitizeViewId } from './views'
 import { sanitizeProjectSort } from './project-sort'
 import { sanitizeWorkRange, sanitizeWorkSort } from './work-log'
 import { sanitizeVideoHistory, sanitizeVideoLastRel, sanitizeVideoRoot, sanitizeVideoTreeExpanded } from './video'
+import { sanitizeAiSkillsOff } from './pi-skills'
 
 export function emptyData(): PersistedData {
   return {
@@ -109,16 +112,29 @@ export function sanitizeSettings(raw: unknown): StoredSettings {
   // 知识库文件夹（本机挑的一个目录，一个独立项目的根）：老数据文件里没有，默认空串 = 还没选过。
   // 与笔记 / 技能同一条收敛 —— 它同样要拿去拼文件路径
   value.kbDir = sanitizeNoteRoot(value.kbDir)
-  // AI 助手的模型配置（自定义端点）：老数据文件里没有，默认空 = 还没配置。
-  // 提供方名会进凭据名与 models.json 的键、Base URL 会进配置文件，两者都先过一遍收敛
-  value.aiProviderName = sanitizeAiName(value.aiProviderName)
-  value.aiBaseUrl = sanitizeAiBaseUrl(value.aiBaseUrl)
-  value.aiApiFormat = sanitizeAiApiFormat(value.aiApiFormat)
-  value.aiModels = sanitizeAiModels(value.aiModels)
-  // 页面上挑的那个模型与思考档位（行为记忆）：老数据文件里没有，默认空串 / 默认档。
-  // 挑的模型不在这里对着清单核对 —— 清单随时可以关停增减，核对放在用它的那一刻
-  // （shared/ai.ts 的 pickAiModel）
-  value.aiRunModel = sanitizeAiModelId(value.aiRunModel)
+  // AI 助手的模型配置（AI 服务清单）：老数据文件里没有，默认空 = 还没配过。
+  // 更早的版本只有「一个自定义端点」（aiProviderName / aiBaseUrl / aiApiFormat / aiModels
+  // 四样平铺在设置里），这里顺手搬成一条服务 —— 只搬一次，之后那四个字段就清掉了
+  value.aiProviders = sanitizeAiProviders(asRecord(input).aiProviders)
+  if (!value.aiProviders.length) {
+    const legacy = legacyAiProvider(input)
+    if (legacy) value.aiProviders = [legacy]
+  }
+  // 默认模型（行为记忆）：挑的服务 / 模型从不在收敛里对着清单核对 —— 清单随时可以关停增减，
+  // 核对放在用它的那一刻（shared/ai.ts 的 pickAiChoice）
+  const rawDefault = asRecord(input)
+  value.aiDefaultProvider = sanitizeAiName(rawDefault.aiDefaultProvider)
+  value.aiDefaultModel = sanitizeAiModelId(rawDefault.aiDefaultModel)
+  if (!value.aiDefaultProvider && !value.aiDefaultModel && value.aiProviders.length) {
+    // 老版本那一个端点：当时挑的模型就是「唯一那个服务下的」
+    value.aiDefaultProvider = value.aiProviders[0].id
+    value.aiDefaultModel = sanitizeAiModelId(rawDefault.aiRunModel)
+  }
+  // 老版本那一个端点的五个字段（名称 / Base URL / API 形态 / 清单 / 挑的模型）已经搬进
+  // aiProviders 与默认模型：不主动清掉的话它们会被一直写回，看着像还有人在用
+  for (const key of ['aiProviderName', 'aiBaseUrl', 'aiApiFormat', 'aiModels', 'aiRunModel']) {
+    delete (value as unknown as Record<string, unknown>)[key]
+  }
   value.aiThinking = sanitizeAiThinking(value.aiThinking)
   // 工具权限（composer 左边那一栏）：老数据文件里没有，默认自动编辑（命令先问一句）
   value.aiPermission = sanitizeAiPermission(value.aiPermission)
@@ -130,6 +146,9 @@ export function sanitizeSettings(raw: unknown): StoredSettings {
   // 两样都在收敛里卡住；选中的那个认不出来（被删了）时回最近说过话的那个
   value.aiSessions = sanitizeAiSessions(value.aiSessions)
   value.aiActiveSession = pickAiActiveSession(value.aiSessions, sanitizeAiSessionId(value.aiActiveSession))
+  // 关掉的技能（AI 助手页那颗「技能」按钮里那排开关）：老数据文件里没有，默认全开。
+  // 键是「技能根 + 技能名」，认不出的整条丢掉（见 shared/pi-skills.ts 的 skillKey）
+  value.aiSkillsOff = sanitizeAiSkillsOff(value.aiSkillsOff)
   // AI 助手的工作目录已废弃：会话把「在哪个目录里干活」收到了自己身上（一个会话一个目录，
   // 见 AiSession），再留一个全局的值就是第二份真源 —— 而且它会把上一次的目录一直写回。
   delete (value as unknown as Record<string, unknown>).aiWorkDir
@@ -152,6 +171,30 @@ export function sanitizeSettings(raw: unknown): StoredSettings {
   delete (value as unknown as Record<string, unknown>).terminalDockTop
 
   return value
+}
+
+/**
+ * 磁盘上的设置当成一张「字段名 → 未知值」的表来读：收敛用的都是纯函数（自己会看类型），
+ * 而几个已经废弃的字段（AI 那一个端点的五个、closeBehavior 一类）已经不在 StoredSettings 里，
+ * 只能从这张表里对口读。
+ */
+function asRecord(raw: unknown): Record<string, unknown> {
+  return (raw ?? {}) as Record<string, unknown>
+}
+
+/**
+ * 老版本那**一个自定义端点**（`aiProviderName` / `aiBaseUrl` / `aiApiFormat` / `aiModels`
+ * 平铺在设置里的年代）→ 一条服务。四样齐了才搬：半截的配置搬过去本来也跑不起来，
+ * 留在设置里只会让用户以为配过了。
+ */
+function legacyAiProvider(raw: unknown): AiProvider | null {
+  const record = asRecord(raw)
+  const id = sanitizeAiName(record.aiProviderName)
+  const baseUrl = sanitizeAiBaseUrl(record.aiBaseUrl)
+  const apiFormat = sanitizeAiApiFormat(record.aiApiFormat)
+  const models = sanitizeAiModels(record.aiModels)
+  if (!id || !baseUrl || !apiFormat || !models.length) return null
+  return { id, label: id, baseUrl, apiFormat, preset: '', enabled: true, models }
 }
 
 /**

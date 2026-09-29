@@ -653,7 +653,8 @@ pub fn repo_state(dir: &str) -> Result<Value, String> {
 
     // 当前分支：只问 symbolic-ref，**不要**用 `rev-parse --abbrev-ref HEAD`（还没有提交的仓库里
     // 它会回一个 "HEAD"，看着像分支名就叫 HEAD，见 current_branch / sync_branch 那两处注释）。
-    // 分离头指针、或者根本问不出来时空串 —— 界面据此少显示一截，不当成错误。
+    // AI 助手页拿它在页面上说清「在哪个分支上干活」；分离头指针、或者根本问不出来时空串 ——
+    // 界面据此少显示一截，不当成错误。
     let branch = run_git(&["symbolic-ref", "--short", "HEAD"], Some(&root), GIT_TIMEOUT)
         .map(|text| text.trim().to_string())
         .unwrap_or_default();

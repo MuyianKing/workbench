@@ -3,14 +3,17 @@
  * AI 助手页：一个**通用的 agent 控制台** —— 左栏挑一段会话，右栏跟它说下去。
  *
  * 版式是**左树右对话**（与笔记页、视频页同一副分栏，宽度也住 theme.json 的 `aiTreeWidth`）：
+ * 左栏能整栏收起（theme.json 的 `aiTreeCollapsed`，入口浮在右栏左上角，与视频页同一套做法）。
  *
  *  - **左栏**：项目 → 会话的两层树（`AiSessionTree`）。第一层是项目（一个工作目录），
- *    第二层是那个目录下的会话；行上那两颗按钮是「新建会话」与「删除」。顶上那颗
- *    「新建会话」是给「还没有这个项目」用的：挑一个目录就多一个项目。
+ *    第二层是那个目录下的会话；行上那两颗按钮是「在这个目录里起一段新的」与「删除」。
+ *    顶上那颗「+」也是**起一段新的**（不挑目录，接着最近用过的那个）。
  *  - **右栏**：挑中一个会话就是**控制台** —— 上面是这段对话（历史 + 这一轮，自己往下滚），
  *    下面还是那一栏目录与分支 + composer（跑着的时候那颗按钮就是停止）。
- *    一个会话都没挑中时是**新任务那一屏**：一块线稿 + 一句「新任务」+ 新建会话 + 用过的指令。
- *    **这一屏没有顶部工具条**：标题、目录那些要么与导航栏重复、要么下面这一栏已经说了。
+ *    没挑中会话时是**起始那一屏**（一段会话都还没有，或者刚点了「+」）：中间就是控制台
+ *    那一屏那条 composer，上面是位置那一栏（这一屏由它**挑目录**）、下面是用户自己写过的
+ *    指令 —— **一进来就能直接写**，会话在发出第一句时才建（见 stores/ai.ts 的 run）。
+ *    **两屏都没有顶部工具条**：标题、目录那些要么与导航栏重复、要么下面那一栏已经说了。
  *
  * **页面不摆提示行**（说明、问候、还差什么）：这个应用是给作者自己用的，页面上把控件本身
  * 已经说清的事再讲一遍就是噪音。缺什么由 `stores/ai.ts` 的 `blocking` 说，而它只出现在
@@ -20,75 +23,78 @@
  * 模型与档位那两个下拉直接写设置（行为记忆，下次打开还是它）。
  */
 import { computed, onMounted, ref } from 'vue'
-import { Download, FolderAdd, Plus } from '@element-plus/icons-vue'
+import { Download, Expand, Fold, Plus } from '@element-plus/icons-vue'
 import AiComposer from '@/components/AiComposer.vue'
+import AiSkillDialog from '@/components/AiSkillDialog.vue'
 import AiLocationBar from '@/components/AiLocationBar.vue'
 import AiModelDialog from '@/components/AiModelDialog.vue'
 import AiRunPanel from '@/components/AiRunPanel.vue'
 import AiSessionTree from '@/components/AiSessionTree.vue'
 import PanelResizer from '@/components/PanelResizer.vue'
 import { useAiStore } from '@/stores/ai'
+import { useAiSkillsStore } from '@/stores/ai-skills'
 import { useSettingsStore } from '@/stores/settings'
 
 const ai = useAiStore()
+const skills = useAiSkillsStore()
 const settings = useSettingsStore()
 const modelVisible = ref(false)
+const skillVisible = ref(false)
 
 onMounted(() => {
   void ai.init()
+  // 技能那两条根在页面一进来就扫一遍：composer 那颗 chip 与候选那一列都要有东西可挑
+  void skills.ensure()
 })
 
-/** 两栏的宽度：左栏是主题里存的那个值（与笔记 / 视频页同一套做法） */
+/**
+ * 两栏的宽度：左栏是主题里存的那个值（与笔记 / 视频页同一套做法）。列宽用 auto ——
+ * 宽度长在左栏自己身上（见样式），收起时它过渡到 0，auto 这一行跟着缩。
+ */
 const bodyStyle = computed(() => ({
-  gridTemplateColumns: `${settings.themeConfig.aiTreeWidth}px minmax(0, 1fr)`,
+  gridTemplateColumns: 'auto minmax(0, 1fr)',
   '--tree-w': `${settings.themeConfig.aiTreeWidth}px`
 }))
+
+/**
+ * 左栏（会话树）收起没有：落在 theme.json（与视频页左栏的收起同一套做法）。
+ * 收起**不是卸载**：宽度与树的展开态都还在，展开回来原样。
+ */
+const treeCollapsed = computed(() => settings.themeConfig.aiTreeCollapsed)
+
+function toggleTree(): void {
+  void settings.setAiTreeCollapsed(!treeCollapsed.value)
+}
 
 /** 哪几个会话在跑：左栏在那些行上点一颗小圆点（几个会话可以同时在跑） */
 const runningIds = computed(() =>
   [...ai.runs.entries()].filter(([, run]) => run.running).map(([id]) => id)
 )
 
-/** 顶上那颗「新建会话」：最近用过的目录直接建，其余走文件夹对话框 */
-function onNewSession(command: string): void {
-  if (command === 'pick') void ai.pickSessionDir('新建会话：挑一个工作目录')
-  else void ai.createSession(command)
-}
-
 /** 历史里那一条在 chip 上怎么显示：压成一行、长了就截断（全文在 tooltip 里，点一下填回去） */
 function chipLabel(text: string): string {
   const oneLine = text.replace(/\s+/g, ' ').trim()
   return oneLine.length > 12 ? `${oneLine.slice(0, 12)}…` : oneLine
-}
-
-/** 下拉里那一项怎么叫：目录名（完整路径在 title 上） */
-function dirName(dir: string): string {
-  const parts = dir.split(/[\\/]/).filter(Boolean)
-  return parts.length ? parts[parts.length - 1] : dir
 }
 </script>
 
 <template>
   <main class="ai-view" :style="bodyStyle">
     <!-- 左栏：项目 → 会话 -->
-    <aside class="ai-view__side panel">
+    <aside class="ai-view__side panel" :class="{ 'is-collapsed': treeCollapsed }">
       <header class="side__head">
         <span class="side__title">会话</span>
-        <!-- 图标那颗不套 el-tooltip：它的菜单本身就是说明（与项目卡 / 保险库的「⋯」同一副写法） -->
-        <el-dropdown trigger="click" @command="onNewSession">
-          <el-button class="side__new" text :icon="Plus" aria-label="新建会话" @click.stop />
-          <template #dropdown>
-            <el-dropdown-menu>
-              <!-- 最近用过的目录：接着那几段对话在的地方再开一段 -->
-              <el-dropdown-item v-for="dir in ai.recentDirs" :key="dir" :command="dir">
-                {{ dirName(dir) }}
-              </el-dropdown-item>
-              <el-dropdown-item command="pick" :divided="ai.recentDirs.length > 0" :icon="FolderAdd">
-                选择其他目录…
-              </el-dropdown-item>
-            </el-dropdown-menu>
-          </template>
-        </el-dropdown>
+        <!-- 起一段新的：**只是把右栏切到起始那一屏**（挑目录、写第一句都在那儿），
+             不在这儿先建一个空会话 —— 这儿没有菜单，那颗「+」点下去就是那件事本身 -->
+        <el-tooltip content="开一段新的（挑目录、写第一句）" placement="bottom">
+          <el-button
+            class="side__new"
+            text
+            :icon="Plus"
+            aria-label="开一段新的"
+            @click="ai.startNew()"
+          />
+        </el-tooltip>
       </header>
 
       <AiSessionTree
@@ -96,14 +102,14 @@ function dirName(dir: string): string {
         :active-id="ai.activeId"
         :running-ids="runningIds"
         @select="ai.selectSession"
-        @create="ai.createSession"
+        @start="ai.startNew"
         @remove="ai.deleteSession"
-        @pick="ai.pickSessionDir('新建会话：挑一个工作目录')"
       />
     </aside>
 
     <!-- 两栏之间的分隔条：热区是一条通高的窄条，看得见的只有正中间那个小竖条 -->
     <PanelResizer
+      v-show="!treeCollapsed"
       :width="settings.themeConfig.aiTreeWidth"
       body-class="is-resizing-ai-tree"
       @move="settings.setAiTreeWidth"
@@ -111,6 +117,17 @@ function dirName(dir: string): string {
     />
 
     <section class="ai-view__main">
+      <!-- 左栏的收起 / 展开入口：树收起来之后这颗按钮是唯一的开关（与视频页播放器头部
+           那颗同一件事，这页两屏都没有头部，就落在右栏的左上角；两屏都看得见它） -->
+      <el-tooltip :content="treeCollapsed ? '展开会话列表' : '收起会话列表'" placement="bottom">
+        <el-button
+          class="ai-view__tree-toggle"
+          :icon="treeCollapsed ? Expand : Fold"
+          :aria-label="treeCollapsed ? '展开会话列表' : '收起会话列表'"
+          @click="toggleTree"
+        />
+      </el-tooltip>
+
       <!-- 控制台：这段对话 + 底部那一栏目录与同一条 composer -->
       <template v-if="ai.activeSession">
         <section class="ai-view__log panel">
@@ -123,6 +140,8 @@ function dirName(dir: string): string {
             :install-log="ai.installLog"
             :lines="ai.lines"
             :streaming="ai.streaming"
+            :thinking-text="ai.thinkingText"
+            :thinking="ai.thinkingLive"
             :confirms="ai.confirms"
             :exit-code="ai.exitCode"
             :run-error="ai.runError"
@@ -133,96 +152,66 @@ function dirName(dir: string): string {
         </section>
 
         <AiLocationBar />
-        <AiComposer @configure="modelVisible = true" />
+        <AiComposer @configure="modelVisible = true" @skills="skillVisible = true" />
       </template>
 
-      <!-- 新任务：一个会话都没挑中（还没有会话，或者左栏都删光了） -->
+      <!-- 起始那一屏：没挑中会话（一段都还没有 / 都删光了 / 刚点了左栏那颗「+」）——
+           中间就是那条 composer，一进来就能直接写；**会话在发出第一句时才建**
+           （见 stores/ai.ts 的 run），所以上面那条从「挑目录」说起：下一个在哪个目录里干活。 -->
       <div v-else class="landing">
-        <!-- 这一块是自绘的线稿：两张叠着的「纸」，前面那张上有一个提示符 ——
-             只说「这儿是要写指令的地方」，不落实指什么。后面那张拿 mask 裁一下：
-             线稿只有描边、没有底色，不裁的话它的边会从前面那张纸里透出来 -->
-        <div class="hero">
-          <svg class="hero__art" viewBox="0 0 224 148" fill="none" aria-hidden="true">
-            <defs>
-              <mask id="ai-hero-front">
-                <rect width="224" height="148" fill="white" />
-                <rect x="65" y="11" width="149" height="112" rx="12" fill="black" />
-              </mask>
-            </defs>
+        <div class="landing__box">
+          <AiLocationBar />
+          <AiComposer @configure="modelVisible = true" @skills="skillVisible = true" />
 
-            <g mask="url(#ai-hero-front)">
-              <rect x="10.5" y="30.5" width="118" height="86" rx="10" stroke="currentColor" stroke-width="1" />
-              <path d="M28 52h74M28 68h92M28 84h56" stroke="currentColor" stroke-width="1" />
-            </g>
-
-            <rect x="66.5" y="12.5" width="147" height="110" rx="12" stroke="currentColor" stroke-width="1" />
-            <path d="M86 34h96M86 50h64" stroke="currentColor" stroke-width="1" />
-            <path d="M86 92l10 8-10 8" stroke="currentColor" stroke-width="1" />
-            <path d="M106 108h22" stroke="currentColor" stroke-width="1" />
-          </svg>
-
-          <h1 class="hero__title">新任务</h1>
-        </div>
-
-        <!-- 起一段对话：挑一个目录（最近用过的先列出来） -->
-        <el-dropdown trigger="click" @command="onNewSession">
-          <el-button type="primary" :icon="Plus">新建会话</el-button>
-          <template #dropdown>
-            <el-dropdown-menu>
-              <el-dropdown-item v-for="dir in ai.recentDirs" :key="dir" :command="dir">
-                {{ dirName(dir) }}
-              </el-dropdown-item>
-              <el-dropdown-item command="pick" :divided="ai.recentDirs.length > 0" :icon="FolderAdd">
-                选择其他目录…
-              </el-dropdown-item>
-            </el-dropdown-menu>
-          </template>
-        </el-dropdown>
-
-        <!-- 只在没探到 Pi 时才摆这一颗：它随包内置，正常看不到；缺什么不在页面上说，
-             都收在发送按钮的悬停里（见 stores/ai.ts 的 blocking） -->
-        <el-button
-          v-if="!ai.piVersion"
-          size="small"
-          :icon="Download"
-          :loading="ai.installing"
-          @click="ai.installPi()"
-        >
-          安装 Pi
-        </el-button>
-
-        <!-- 用户自己写过的指令：点一下填回输入框（页面不内置任何预设） -->
-        <div v-if="ai.recentInstructions.length" class="history">
-          <el-tooltip
-            v-for="text in ai.recentInstructions"
-            :key="text"
-            :content="text"
-            placement="top"
-          >
-            <el-button size="small" class="history__chip" @click="ai.instruction = text">
-              {{ chipLabel(text) }}
+          <!-- 输入框底下这一行：两个都没有时它整条不画 -->
+          <div v-if="!ai.piVersion || ai.recentInstructions.length" class="landing__foot">
+            <!-- 只在没探到 Pi 时才摆这一颗（它随包内置，正常看不到）。控制台那一屏那颗长在
+                 运行面板的顶部通知条上（见 AiRunPanel），这一屏没有那一条，所以在这儿补一颗；
+                 发送那颗按钮按不动时说的就是它（见 stores/ai.ts 的 blocking） -->
+            <el-button
+              v-if="!ai.piVersion"
+              size="small"
+              :icon="Download"
+              :loading="ai.installing"
+              @click="ai.installPi()"
+            >
+              安装 Pi
             </el-button>
-          </el-tooltip>
+
+            <!-- 用户自己写过的指令：点一下填回输入框（页面不内置任何预设） -->
+            <el-tooltip
+              v-for="text in ai.recentInstructions"
+              :key="text"
+              :content="text"
+              placement="top"
+            >
+              <el-button size="small" class="landing__chip" @click="ai.instruction = text">
+                {{ chipLabel(text) }}
+              </el-button>
+            </el-tooltip>
+          </div>
         </div>
       </div>
     </section>
 
-    <!-- 弹层挂在最外层：两屏都开得出它 -->
+    <!-- 弹层挂在最外层：两屏都开得出它们 -->
     <AiModelDialog v-model="modelVisible" />
+    <AiSkillDialog v-model="skillVisible" />
   </main>
 </template>
 
 <style scoped>
 /**
  * 左树右对话。两栏各是一张卡片（.panel 那副外壳，写在 global.css），间距与别处同源 ——
- * 左栏宽度跟着 theme.json 里的 aiTreeWidth 走（拖动分隔条改它）、右栏吃掉剩余宽度，
- * 两栏各自滚。外框的留白与笔记 / 视频页同一套（左右与下边距取卡片间距，顶边归 .shell 管）。
+ * 左栏宽度跟着 theme.json 里的 aiTreeWidth 走（拖动分隔条改它，那颗收起按钮收它）、
+ * 右栏吃掉剩余宽度，两栏各自滚。外框的留白与笔记 / 视频页同一套（左右与下边距取卡片间距，
+ * 顶边归 .shell 管）。栏间留白挪到左栏的 margin-right 上，不用 grid 的 gap ——
+ * 收起时留白也要跟着收到 0，gap 做不到（与视频页同一套做法）。
  */
 .ai-view {
   position: relative;
   display: grid;
   grid-template-rows: minmax(0, 1fr);
-  gap: var(--card-gap, 10px);
   min-width: 0;
   min-height: 0;
   padding: 0 var(--card-gap, 10px) var(--card-gap, 10px);
@@ -231,8 +220,54 @@ function dirName(dir: string): string {
 .ai-view__side {
   display: flex;
   flex-direction: column;
+  /* 宽度住在 theme.json（拖两栏之间那条缝改它）；收起收到 0 —— 见 is-collapsed */
+  width: var(--tree-w, 232px);
   min-height: 0;
+  margin-right: var(--card-gap, 10px);
   padding: var(--sp-3);
+  /**
+   * 收起 / 展开的过渡（右栏左上角那颗按钮 → theme.json 的 aiTreeCollapsed，见 is-collapsed）：
+   * 宽、右留白、左右内边距与边框一起动。visibility 不占时长：展开方向立即生效，
+   * 收起方向由 is-collapsed 里那条带延时的声明接管。
+   */
+  transition:
+    width 0.2s ease,
+    margin-right 0.2s ease,
+    padding-left 0.2s ease,
+    padding-right 0.2s ease,
+    border-left-width 0.2s ease,
+    border-right-width 0.2s ease,
+    opacity 0.2s ease,
+    visibility 0s;
+}
+
+/** 收起不是卸载：这一栏过渡到 0 宽、淡出，树与展开态原样留在内存里，展开回来还在 */
+.ai-view__side.is-collapsed {
+  width: 0;
+  margin-right: 0;
+  padding-left: 0;
+  padding-right: 0;
+  border-left-width: 0;
+  border-right-width: 0;
+  opacity: 0;
+  /* .panel 自带 overflow: hidden，收的过程中树被裁掉，不会挤出来 */
+  visibility: hidden;
+  pointer-events: none;
+  /* visibility 拖到动画走完再生效：淡出全程可见，收完之后里面的东西也不进 Tab 序 */
+  transition:
+    width 0.2s ease,
+    margin-right 0.2s ease,
+    padding-left 0.2s ease,
+    padding-right 0.2s ease,
+    border-left-width 0.2s ease,
+    border-right-width 0.2s ease,
+    opacity 0.2s ease,
+    visibility 0s 0.2s;
+}
+
+/* 拖动期间别让 0.2s 的宽度过渡跟手作对：每一帧都在改目标值，过渡只会让它拖泥带水 */
+body.is-resizing-ai-tree .ai-view__side {
+  transition: none;
 }
 
 .side__head {
@@ -256,13 +291,30 @@ function dirName(dir: string): string {
   padding: 0;
 }
 
-/* 右栏：上面吃剩余高度（对话），下面两行定高（目录栏与 composer） */
+/* 右栏：上面吃剩余高度（对话），下面两行定高（目录栏与 composer）。
+   收起左栏的那颗按钮浮在它的左上角，得有定位当参照 */
 .ai-view__main {
+  position: relative;
   display: grid;
   grid-template-rows: minmax(0, 1fr) auto auto;
   gap: var(--sp-3);
   min-width: 0;
   min-height: 0;
+}
+
+/**
+ * 左栏的收起 / 展开入口：浮在右栏（两屏都是它）的左上角 —— 树收起来之后它是唯一的开关。
+ * 滚动的内容会从它底下过：默认变体自带一块实底与一圈边，压着的字不至于读不成行；
+ * 比正文略抬一层，别被流式那几行的 relative 抢了点击。
+ */
+.ai-view__tree-toggle {
+  position: absolute;
+  top: var(--sp-2);
+  left: var(--sp-2);
+  z-index: 1;
+  width: 24px;
+  height: 24px;
+  padding: 0;
 }
 
 .ai-view__log {
@@ -273,59 +325,44 @@ function dirName(dir: string): string {
   overflow: hidden;
 }
 
-/* ---------- 新任务那一屏 ---------- */
+/* ---------- 起始那一屏 ---------- */
 
 /**
- * 居中的一屏：线稿 + 一句话 + 新建会话 + 用过的指令。
- * 内容比一屏高时（窗口拉得很矮）从顶上开始排，别把线稿裁掉一半。
+ * 居中的一屏：位置那一栏 + composer + 用过的指令 —— **中间那条 composer 就是主角**
+ * （与 ZCode 的起始屏同一副样子：一进来就能写），它自己不套卡片，那条输入框本身就是卡片。
+ *
+ * 竖着居中靠 `.landing__box` 的 `margin: auto 0`，不靠 `justify-content`：窗口拉得很矮、
+ * 内容比一屏高时，`justify-content: center` 会把顶上那半截永远推出可视区（滚不到），
+ * auto 边距这会儿自动归零，从顶上开始排。
  */
 .landing {
   display: flex;
-  flex: 1;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: var(--sp-4);
   min-height: 0;
   overflow-y: auto;
   padding: var(--sp-4) 0;
 }
 
-.hero {
+.landing__box {
   display: flex;
   flex-direction: column;
-  align-items: center;
   gap: var(--sp-3);
-  max-width: 560px;
-  text-align: center;
+  width: min(100%, 720px);
+  margin: auto 0;
 }
 
-.hero__art {
-  width: 200px;
-  height: auto;
-  /* 线稿是背景性的：只比画布深一点，别抢正文的视线 */
-  color: var(--ink-3);
-  opacity: 0.55;
-}
-
-.hero__title {
-  margin: 0;
-  color: var(--ink);
-  font-size: var(--fs-display);
-  font-weight: 600;
-}
-
-.history {
+/* 输入框底下那一行：缺 Pi 那颗与用过的指令并排（居中，一行放不下就换行） */
+.landing__foot {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: var(--sp-2);
   flex-wrap: wrap;
-  justify-content: center;
-  max-width: 720px;
 }
 
-/* 用过的指令：药丸形，比按钮本身矮一档，免得跟新建会话那颗抢注意力 */
-.history__chip {
+/* 用过的指令：药丸形，比按钮本身矮一档，免得跟上面那张卡片抢注意力 */
+.landing__chip {
   border-radius: var(--r-pill);
   color: var(--ink-2);
 }

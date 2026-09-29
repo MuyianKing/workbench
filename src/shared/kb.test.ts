@@ -11,15 +11,22 @@ import {
   KB_RAW_DIR,
   compareKbRel,
   kbEntryFiles,
-  kbOrganizeInstruction,
+  kbEntryTree,
+  kbFolderChain,
   kbRawFiles,
+  kbRawStatusText,
+  kbRawTree,
+  kbRawViewKind,
   kbStats,
   kbTagCounts,
+  kbTreeFolderIds,
   matchKbRawStatus,
   normalizeKbSource,
   parseKbFrontmatter,
   parseKbIndex,
   type KbEntryMeta,
+  type KbRawItem,
+  type KbRawStatus,
   type KbScanEntry
 } from './kb'
 
@@ -39,6 +46,7 @@ function meta(partial: Partial<KbEntryMeta>): KbEntryMeta {
     updated: '2026-09-28',
     summary: '',
     source: '',
+    links: [],
     mtimeMs: 1000,
     ...partial
   }
@@ -169,7 +177,7 @@ describe('matchKbRawStatus', () => {
   })
 })
 
-describe('统计与指令', () => {
+describe('统计', () => {
   it('kbStats 数对四样', () => {
     const entries = [meta({ status: 'draft' }), meta({ status: 'reviewed' })]
     const raw = matchKbRawStatus(
@@ -192,16 +200,6 @@ describe('统计与指令', () => {
       { tag: 'mu-ui', count: 1 }
     ])
   })
-
-  it('整理指令带得上待处理计数，一个都没有时也明说', () => {
-    const withWork = kbOrganizeInstruction(3, 1)
-    expect(withWork).toContain('3 个未入库')
-    expect(withWork).toContain('1 个有更新')
-    expect(withWork).toContain('py scripts/build_index.py')
-
-    const idle = kbOrganizeInstruction(0, 0)
-    expect(idle).toContain('当前没有待处理的原始数据')
-  })
 })
 
 describe('parseKbIndex', () => {
@@ -217,5 +215,104 @@ describe('parseKbIndex', () => {
     expect(parseKbIndex('not json')).toBeNull()
     expect(parseKbIndex('[]')).toBeNull()
     expect(parseKbIndex('{"generated_at":"2026-09-28"}')).toBeNull()
+  })
+})
+
+describe('kbEntryTree', () => {
+  it('按目录结构收成树：目录一层层往下，条目挂在所在目录上', () => {
+    const tree = kbEntryTree([
+      meta({ rel: 'kb/01-组件库/add-button.md', title: 'MuAddButton' }),
+      meta({ rel: 'kb/00-规范/条目格式.md', title: '条目格式规范' }),
+      meta({ rel: 'kb/01-组件库/嵌套/button.md', title: 'MuButton' })
+    ])
+
+    expect(tree.map((node) => node.id)).toEqual(['00-规范', '01-组件库'])
+    expect(tree[0].children[0]).toMatchObject({ id: 'kb/00-规范/条目格式.md', name: '条目格式规范' })
+    const nested = tree[1].children
+    expect(nested.map((node) => node.id)).toEqual(['01-组件库/嵌套', 'kb/01-组件库/add-button.md'])
+    expect(nested[0].children[0]).toMatchObject({ id: 'kb/01-组件库/嵌套/button.md', kind: 'entry' })
+  })
+
+  it('目录排在条目前面、同层按名字；条目节点带上 status', () => {
+    const tree = kbEntryTree([
+      meta({ rel: 'kb/库/b.md', title: '乙', status: 'draft' }),
+      meta({ rel: 'kb/库/a.md', title: '甲' }),
+      meta({ rel: 'kb/库.md', title: '单文件' })
+    ])
+
+    const folder = tree[0]
+    expect(folder.kind).toBe('folder')
+    expect(folder.children.map((node) => node.name)).toEqual(['甲', '乙'])
+    expect(folder.children[1].status).toBe('draft')
+    expect(tree[1]).toMatchObject({ id: 'kb/库.md', kind: 'entry' })
+  })
+
+  it('空清单回空树；条目直接在 kb 最外层时就是顶层条目', () => {
+    expect(kbEntryTree([])).toEqual([])
+    const tree = kbEntryTree([meta({ rel: 'kb/README.md', title: '说明' })])
+    expect(tree).toHaveLength(1)
+    expect(tree[0]).toMatchObject({ id: 'kb/README.md', kind: 'entry' })
+  })
+})
+
+describe('kbTreeFolderIds / kbFolderChain', () => {
+  it('folderIds 只收目录、逐层都算；chain 从最外层排下来、不含条目自己', () => {
+    const tree = kbEntryTree([
+      meta({ rel: 'kb/01-组件库/嵌套/button.md', title: 'MuButton' }),
+      meta({ rel: 'kb/00-规范/条目格式.md', title: '条目格式规范' })
+    ])
+
+    expect(kbTreeFolderIds(tree)).toEqual(['00-规范', '01-组件库', '01-组件库/嵌套'])
+    expect(kbFolderChain('kb/01-组件库/嵌套/button.md')).toEqual(['01-组件库', '01-组件库/嵌套'])
+    // 最外层的条目没有上一级可展开
+    expect(kbFolderChain('kb/README.md')).toEqual([])
+  })
+})
+
+describe('kbRawTree', () => {
+  /** 造一条原始数据：rel 之外都有默认值 */
+  function raw(rel: string, status: KbRawStatus = 'synced'): KbRawItem {
+    return { rel, name: rel.split('/').pop() ?? rel, ext: 'md', mtimeMs: 1000, status, entryRels: [] }
+  }
+
+  it('按目录结构收成树，文件节点带上 item；目录在前、同层按名字', () => {
+    const tree = kbRawTree([
+      raw('data/raw/mu-ui/button.md'),
+      raw('data/raw/随手记.md', 'pending'),
+      raw('data/raw/mu-ui/子目录/avatar.md', 'stale')
+    ])
+
+    expect(tree.map((node) => node.id)).toEqual(['mu-ui', 'data/raw/随手记.md'])
+    const folder = tree[0]
+    expect(folder.children.map((node) => node.id)).toEqual([
+      'mu-ui/子目录',
+      'data/raw/mu-ui/button.md'
+    ])
+    expect(folder.children[1].item).toMatchObject({ status: 'synced' })
+    expect(folder.children[0].children[0]).toMatchObject({ kind: 'file', name: 'avatar.md' })
+  })
+
+  it('空清单回空树', () => {
+    expect(kbRawTree([])).toEqual([])
+  })
+})
+
+describe('kbRawViewKind / kbRawStatusText', () => {
+  it('md 渲染成正文，认得出的文本后缀按纯文本，其余交出去；没有后缀也交出去', () => {
+    expect(kbRawViewKind('button.md')).toBe('markdown')
+    expect(kbRawViewKind('notes.markdown')).toBe('markdown')
+    expect(kbRawViewKind('随手记.TXT')).toBe('text')
+    for (const name of ['data.json', '结果.csv', 'config.yml', 'a.toml', 'b.log', 'c.xml']) {
+      expect(kbRawViewKind(name)).toBe('text')
+    }
+    for (const name of ['资料.pdf', '说明.docx', '截图.png', 'archive.zip', '.gitignore']) {
+      expect(kbRawViewKind(name)).toBe('external')
+    }
+  })
+
+  it('状态词三种都有', () => {
+    expect(kbRawStatusText('pending')).toBe('未入库')
+    expect(kbRawStatusText('stale')).toBe('有更新')
+    expect(kbRawStatusText('synced')).toBe('已入库')
   })
 })

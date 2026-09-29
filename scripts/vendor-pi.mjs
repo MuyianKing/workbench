@@ -17,7 +17,7 @@
  * 开发态读仓库目录 —— 与内置壁纸同一条路子）。
  */
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -36,6 +36,18 @@ const CLI = join(
   'bundle',
   'cli.js'
 )
+/** Pi 自带的模型目录（models.dev 那份快照，按厂商一个 JSON）；预填表从这儿剪出来 */
+const CATALOG_SOURCE = join(
+  TARGET,
+  'node_modules',
+  '@earendil-works',
+  'pi-ai',
+  'dist',
+  'providers',
+  'data'
+)
+/** 预填表的落点：添加模型时认能力默认值（shared/ai.ts 的 builtinModelMeta），进版本库 */
+const CATALOG_TARGET = join(root, 'src', 'shared', 'ai-builtin-models.generated.ts')
 
 /**
  * 删掉的目录（相对 node_modules）。判据见文件头：只删「运行时已验证不需要」的 ——
@@ -52,8 +64,70 @@ const PRUNE = [
   'web-streams-polyfill'
 ]
 
+/**
+ * Pi 自带的模型目录 → 预填表（`AI_BUILTIN_MODELS`）：每家一份、按模型 id 收**添加模型时
+ * 要认默认值的那四样**（上下文 / 最大输出 / 思考 / 能不能看图），其余（价格、图片尺寸
+ * 上限、各家 API 形态）都不带。这份表进版本库 —— 版本钉死所以内容确定，应用不连
+ * models.dev、也不把目录当「模型清单」（清单仍然由端点自己报，它只管预填字段）。
+ */
+function emitCatalog() {
+  const files = existsSync(CATALOG_SOURCE)
+    ? readdirSync(CATALOG_SOURCE).filter((name) => name.endsWith('.json')).sort()
+    : []
+  if (!files.length) {
+    console.error('[vendor-pi] 找不到 Pi 的内置模型数据（dist/providers/data），目录生成失败')
+    process.exit(1)
+  }
+  const providers = {}
+  for (const file of files) {
+    const raw = JSON.parse(readFileSync(join(CATALOG_SOURCE, file), 'utf8'))
+    const models = {}
+    for (const api of Object.keys(raw).sort()) {
+      for (const id of Object.keys(raw[api] ?? {}).sort()) {
+        const model = raw[api][id] ?? {}
+        models[id] = {
+          ...(Number.isFinite(model.contextWindow) && model.contextWindow > 0
+            ? { contextWindow: model.contextWindow }
+            : {}),
+          ...(Number.isFinite(model.maxTokens) && model.maxTokens > 0
+            ? { maxTokens: model.maxTokens }
+            : {}),
+          ...(model.reasoning === true ? { reasoning: true } : {}),
+          ...(Array.isArray(model.input) && model.input.includes('image') ? { image: true } : {})
+        }
+      }
+    }
+    const provider = file.replace(/\.json$/, '')
+    if (Object.keys(models).length) providers[provider] = models
+  }
+  const header =
+    `/* 由 scripts/vendor-pi.mjs 从内置 Pi（${PI_VERSION}）自带的模型目录生成 —— 勿手改，` +
+    `重跑 npm run vendor:pi 再生。添加模型时的默认值就从这份表认（shared/ai.ts 的 builtinModelMeta）。 */\n`
+  const body =
+    'export interface AiBuiltinModelEntry {\n' +
+    '  contextWindow?: number\n' +
+    '  maxTokens?: number\n' +
+    '  reasoning?: boolean\n' +
+    '  image?: boolean\n' +
+    '}\n\n' +
+    'export const AI_BUILTIN_MODELS: Record<string, Record<string, AiBuiltinModelEntry>> = ' +
+    JSON.stringify(providers) +
+    '\n'
+  // 内容没变就不动文件：每次 dev 启动都重写会让 mtime 一跳、vite 白推一轮 HMR 更新
+  const next = header + body
+  if (existsSync(CATALOG_TARGET) && readFileSync(CATALOG_TARGET, 'utf8') === next) {
+    console.log('[vendor-pi] 内置模型目录没有变化，跳过生成')
+    return
+  }
+  writeFileSync(CATALOG_TARGET, next)
+  console.log(
+    `[vendor-pi] 内置模型目录已生成：${CATALOG_TARGET}（${Object.keys(providers).length} 家）`
+  )
+}
+
 if (existsSync(CLI) && existsSync(STAMP) && readFileSync(STAMP, 'utf8').trim() === PI_VERSION) {
-  console.log(`[vendor-pi] Pi ${PI_VERSION} 已内置，跳过`)
+  emitCatalog()
+  console.log(`[vendor-pi] Pi ${PI_VERSION} 已内置，跳过安装`)
   process.exit(0)
 }
 
@@ -77,4 +151,5 @@ if (!existsSync(CLI)) {
   process.exit(1)
 }
 writeFileSync(STAMP, PI_VERSION)
+emitCatalog()
 console.log(`[vendor-pi] 完成：Pi ${PI_VERSION} 已内置到 resources/pi/`)

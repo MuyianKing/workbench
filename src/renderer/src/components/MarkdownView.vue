@@ -7,16 +7,26 @@
  *
  * 链接的点击在这里接管：应用是个 WebView，点 `<a>` 默认会把界面自己导航走。
  * 走的是项目里那条既有出口 —— `openExternal`（ShellExecute）交给系统默认浏览器。
+ *
+ * `internalLinks` 置真时，非外部地址的链接不再被吞掉、改经 `internal` 事件交给父层
+ * （地址原样交出去，怎么解析归父层：知识库条目阅读按它做站内跳转，见 shared/kb-lint.ts
+ * 的 resolveKbLink）。默认关 —— 工作日志、AI 对话那几处照旧只放行外部地址。
  */
 import { computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import { renderMarkdown } from '@shared/markdown'
 
-const props = defineProps<{ source: string }>()
+const props = defineProps<{
+  source: string
+  /** 站内链接（相对路径）要不要交给父层：真 = emit `internal`，假 = 拦下不处理 */
+  internalLinks?: boolean
+}>()
+
+const emit = defineEmits<{ internal: [href: string] }>()
 
 const html = computed(() => renderMarkdown(props.source))
 
-/** 只有带协议的 http(s) / mailto 才值得交给系统；其余地址拦下但不打开 */
+/** 只有带协议的 http(s) / mailto 才值得交给系统；其余地址拦下，站内的看父层要不要 */
 const OPENABLE = /^(https?:|mailto:)/i
 
 async function onClick(event: MouseEvent): Promise<void> {
@@ -27,10 +37,13 @@ async function onClick(event: MouseEvent): Promise<void> {
   event.preventDefault()
 
   const href = anchor.getAttribute('href') ?? ''
-  if (!OPENABLE.test(href)) return
-
-  const result = await window.workbench.openExternal(href)
-  if (!result.ok) ElMessage.warning(result.error ?? '打开链接失败')
+  if (OPENABLE.test(href)) {
+    const result = await window.workbench.openExternal(href)
+    if (!result.ok) ElMessage.warning(result.error ?? '打开链接失败')
+    return
+  }
+  // 纯锚点（`#某一节`）不是跳文件：不往上交（父层也解析不出它）
+  if (props.internalLinks && href && !href.startsWith('#')) emit('internal', href)
 }
 </script>
 
@@ -129,6 +142,65 @@ async function onClick(event: MouseEvent): Promise<void> {
   padding: 2px 0 2px var(--sp-3);
   border-left: 2px solid var(--border-strong);
   color: var(--ink-2);
+}
+
+/**
+ * 表格：**一圈描边 + 内部网格线 + 表头压一档底色**，外面的 `.md-table` 是渲染时包上的
+ * 那层滚动容器（见 shared/markdown.ts）—— 列多的表在它里面横向滚，不会把卡片撑破。
+ *
+ * **框要贴着表格**：容器是个 block，不给宽度就占满整张卡片，表格缩在左边、右边空出一大条
+ * 只有框没有内容的区域。所以 `width: fit-content`（有多宽占多宽）+ `max-width: 100%`
+ * （宽过卡片时由 `overflow-x` 兜住）。
+ *
+ * 外框与圆角归外面那一层，格子只画内部的线（首行 / 末行 / 首列 / 末列那四条去掉），
+ * 不然外框与格子的线贴在一起会变成一条两像素粗的边。
+ * 线一律取 `--border`（界面上所有描边都是它）。
+ */
+.md :deep(.md-table) {
+  width: fit-content;
+  max-width: 100%;
+  margin: 0 0 6px;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+
+.md :deep(.md-table table) {
+  /* 单元格各自画线、合并成一条：不然相邻两格会画出双线 */
+  border-collapse: collapse;
+  font-size: var(--fs-meta);
+}
+
+.md :deep(.md-table th),
+.md :deep(.md-table td) {
+  padding: 5px var(--sp-3);
+  border: 1px solid var(--border);
+}
+
+.md :deep(.md-table tr > :first-child) {
+  border-left: 0;
+}
+
+.md :deep(.md-table tr > :last-child) {
+  border-right: 0;
+}
+
+.md :deep(.md-table thead tr:first-child > *) {
+  border-top: 0;
+}
+
+.md :deep(.md-table tr:last-child > *) {
+  border-bottom: 0;
+}
+
+.md :deep(.md-table th) {
+  background: var(--bg-inset);
+  font-weight: 600;
+  /* 表头不换行（它是这一列的名字）；原文没写对齐时浏览器默认把 th 居中，
+     与单元格的左对齐对不上 —— 原文写了 `:---:` 那种时 markdown-it 会给行内 style，
+     优先级比这条高，照旧生效 */
+  white-space: nowrap;
+  text-align: left;
 }
 
 .md :deep(a) {
