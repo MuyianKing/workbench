@@ -12,7 +12,7 @@
  * 数据与动作都在 store 里（见 stores/kb.ts），组件只编排界面。
  */
 import { computed, onMounted, ref } from 'vue'
-import { Collection, DocumentAdd, Folder, FolderOpened, Refresh, RefreshRight, Tickets } from '@element-plus/icons-vue'
+import { DocumentAdd, Folder, FolderOpened, Refresh, RefreshRight, Tickets } from '@element-plus/icons-vue'
 import { useKbStore } from '@/stores/kb'
 import PanelLoading from '@/components/PanelLoading.vue'
 import KbEntryList from '@/components/KbEntryList.vue'
@@ -51,17 +51,48 @@ const PANES = [
 </script>
 
 <template>
-  <main class="kb-view">
-    <!-- 还没选知识库文件夹：只有标题、一句说明与那颗按钮 -->
-    <div v-if="!store.root" class="guide panel">
-      <el-icon class="empty__icon"><Collection /></el-icon>
-      <h2 class="guide__title">知识库</h2>
-      <p class="guide__text">
-        指向一个独立的知识库项目文件夹：<span class="mono">data/raw</span> 放原始资料，
-        <span class="mono">kb</span> 放整理好的条目。应用只负责看 ——
-        哪些还没入库、哪些又更新了，整理交给你的 Agent。
-      </p>
-      <el-button type="primary" :icon="FolderOpened" @click="pickRoot">选择知识库文件夹</el-button>
+  <main class="kb-view" :class="{ 'is-intro': !store.root }">
+    <!-- 还没选知识库文件夹：整页只有一块自绘线稿、「知识库」那行标题与那颗按钮，居中浮在画布上、
+         不套卡片；文件夹该怎么摆（data/raw 与 kb）收在按钮的悬停里，不摆在页面上 -->
+    <div v-if="!store.root" class="guide">
+      <div class="guide__hero">
+        <!-- 线稿：三张叠着的纸 —— 后面两张是散页，最前面那张是收好的条目（右上角一枚书签、
+             三条正文线），与 AI 助手页那一屏同一副笔法。后面那两张各拿 mask 裁一下：
+             线稿只有描边、没有底色，不裁的话它们的边会从前面那张纸里透出来 -->
+        <svg class="guide__art" viewBox="0 0 224 148" fill="none" aria-hidden="true">
+          <defs>
+            <mask id="kb-guide-card">
+              <rect width="224" height="148" fill="white" />
+              <rect x="86" y="41" width="107" height="95" rx="11" fill="black" />
+            </mask>
+            <mask id="kb-guide-cards">
+              <rect width="224" height="148" fill="white" />
+              <rect x="86" y="41" width="107" height="95" rx="11" fill="black" />
+              <rect x="58" y="27" width="107" height="95" rx="11" fill="black" />
+            </mask>
+          </defs>
+
+          <g mask="url(#kb-guide-cards)">
+            <rect x="31.5" y="14.5" width="104" height="92" rx="10" stroke="currentColor" stroke-width="1" />
+            <path d="M52 22h78" stroke="currentColor" stroke-width="1" />
+          </g>
+
+          <g mask="url(#kb-guide-card)">
+            <rect x="59.5" y="28.5" width="104" height="92" rx="10" stroke="currentColor" stroke-width="1" />
+            <path d="M76 36h74" stroke="currentColor" stroke-width="1" />
+          </g>
+
+          <rect x="87.5" y="42.5" width="104" height="92" rx="10" stroke="currentColor" stroke-width="1" />
+          <path d="M168 42.5v24l6.5-6.5 6.5 6.5v-24" stroke="currentColor" stroke-width="1" />
+          <path d="M104 76h72M104 92h46M104 108h62" stroke="currentColor" stroke-width="1" />
+        </svg>
+
+        <h2 class="guide__title">知识库</h2>
+      </div>
+
+      <el-tooltip content="选一个独立的知识库项目文件夹：data/raw 放原始资料，kb 放整理好的条目" placement="top">
+        <el-button type="primary" :icon="FolderOpened" @click="pickRoot">选择知识库文件夹</el-button>
+      </el-tooltip>
     </div>
 
     <template v-else>
@@ -189,29 +220,45 @@ const PANES = [
   padding: var(--card-gap, 10px);
 }
 
-/* 还没选文件夹时的引导 */
+/* 整页只剩引导这一块时把三行收成一行：它要吃掉整页高度，居中才有参照。
+   留着三行的话它只占第一行（auto），盒子就内容那么高，看着是「顶在上沿」 */
+.kb-view.is-intro {
+  grid-template-rows: minmax(0, 1fr);
+}
+
+/* 还没选文件夹时的引导：没有卡片底，居中浮在画布上 */
 .guide {
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: var(--sp-4);
-  height: 100%;
+  min-height: 0;
   padding: var(--sp-6);
   text-align: center;
+}
+
+/* 线稿与标题贴成一团，到按钮那一步松一档 —— 与 AI 助手页那一屏同一套节奏 */
+.guide__hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+/* 线稿是背景性的：只比画布深一点，别抢按钮的视线（与 AiView 的 hero 同一条口径） */
+.guide__art {
+  width: 200px;
+  height: auto;
+  color: var(--ink-3);
+  opacity: 0.55;
 }
 
 .guide__title {
   margin: 0;
   color: var(--ink);
-  font-size: var(--fs-title);
-}
-
-.guide__text {
-  max-width: 560px;
-  margin: 0;
-  color: var(--ink-2);
-  font-size: var(--fs-body);
-  line-height: 1.7;
+  font-size: var(--fs-display);
+  font-weight: 600;
 }
 
 /* 工具条上的标题、位置与统计 */

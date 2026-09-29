@@ -81,7 +81,7 @@ export async function kbSync(input: KbSyncInput): Promise<Result<KbSyncSummary>>
  */
 export async function kbRepoState(dir: string): Promise<Result<KbRepoState>> {
   const target = rootArg(dir)
-  if (!target) return ok({ isRepo: false, origin: '' })
+  if (!target) return ok({ isRepo: false, origin: '', branch: '' })
 
   const result = await guard(
     invoke<Partial<KbRepoState>>('note_repo_state', { dir: target }),
@@ -91,7 +91,8 @@ export async function kbRepoState(dir: string): Promise<Result<KbRepoState>> {
 
   return ok({
     isRepo: result.data.isRepo === true,
-    origin: typeof result.data.origin === 'string' ? result.data.origin : ''
+    origin: typeof result.data.origin === 'string' ? result.data.origin : '',
+    branch: typeof result.data.branch === 'string' ? result.data.branch : ''
   })
 }
 

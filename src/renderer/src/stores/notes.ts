@@ -151,7 +151,8 @@ export const useNotesStore = defineStore('notes', () => {
     const result = await window.workbench.noteRepoState(current)
     if (job !== repoJob) return
 
-    repoState.value = result.ok && result.data ? result.data : { isRepo: false, origin: '' }
+    repoState.value =
+      result.ok && result.data ? result.data : { isRepo: false, origin: '', branch: '' }
   }
 
   /**

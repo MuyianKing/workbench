@@ -62,7 +62,7 @@ watch(visible, (open) => {
   void store.refreshKey()
 })
 
-/** 草稿与已保存的设置是否一致：不一致时不让存 Key（凭据名跟着名称走，先把配置落下来） */
+/** 草稿与已保存的设置是否一致：不一致时存 Key 会先把这份配置落下来（凭据名跟着提供方名称走） */
 const dirty = computed(
   () =>
     name.value !== store.providerName ||
@@ -87,10 +87,11 @@ function removeModel(id: string): void {
   models.value = models.value.filter((entry) => entry.id !== id)
 }
 
-async function save(): Promise<void> {
+/** 把草稿落到设置与 Pi 的 models.json：校验失败就地显示、不弹提示，也不关弹层 */
+async function commit(): Promise<boolean> {
   const form = formRef.value
-  if (form && !(await form.validate().catch(() => false))) return
-  if (!enabledCount.value) return
+  if (form && !(await form.validate().catch(() => false))) return false
+  if (!enabledCount.value) return false
 
   saving.value = true
   const saved = await store.saveEndpoint({
@@ -100,12 +101,18 @@ async function save(): Promise<void> {
     models: models.value
   })
   saving.value = false
-  if (saved) visible.value = false
+  return saved
+}
+
+async function save(): Promise<void> {
+  if (await commit()) visible.value = false
 }
 
 async function saveKey(): Promise<void> {
   const secret = keyDraft.value.trim()
   if (!secret) return
+  // 凭据名跟着提供方名称走：草稿还没落库时先存配置，否则密钥会挂到旧名字上
+  if (dirty.value && !(await commit())) return
   const saved = await store.saveKey(secret)
   if (saved) keyDraft.value = ''
 }
@@ -150,14 +157,14 @@ async function clearKey(): Promise<void> {
           v-model="keyDraft"
           type="password"
           show-password
-          :disabled="dirty"
-          :placeholder="dirty ? '先保存上面的配置' : store.keyReady ? '已存好，重填即覆盖' : '粘贴 API Key'"
+          :placeholder="store.keyReady ? '已存好，重填即覆盖' : '粘贴 API Key'"
           @keyup.enter="saveKey"
         />
-        <el-button :disabled="dirty || !keyDraft.trim()" @click="saveKey">保存</el-button>
+        <el-button :disabled="!keyDraft.trim()" @click="saveKey">保存</el-button>
       </div>
       <p class="model__hint">
         存在 Windows 凭据管理器里；Pi 的配置文件里只有一个环境变量引用，不落明文。
+        上面的配置有改动时，点「保存」会先把它存下来 —— 凭据名跟着提供方名称走。
       </p>
     </div>
 
@@ -177,7 +184,7 @@ async function clearKey(): Promise<void> {
       </div>
 
       <p v-if="!models.length" class="model__empty">
-        还没有模型。按提供方的叫法填 id（一个端点下可以有多个，跑的时候用第一个启用的）。
+        还没有模型。按提供方的叫法填 id（一个端点下可以有多个，启用的都会进页面那条「模型」下拉）。
       </p>
       <ul v-else class="model__rows">
         <li v-for="entry in models" :key="entry.id" class="model__row">
@@ -187,8 +194,8 @@ async function clearKey(): Promise<void> {
         </li>
       </ul>
 
-      <p v-if="models.length && !enabledCount" class="model__error">
-        至少要启用一个模型。
+      <p v-if="!enabledCount" class="model__error">
+        至少要启用一个模型（Pi 的 models.json 里得有一个可选的），否则配置与密钥都存不下来。
       </p>
     </div>
 

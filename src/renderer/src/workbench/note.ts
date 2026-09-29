@@ -384,7 +384,7 @@ export async function syncNotes(input: NoteSyncInput): Promise<Result<NoteSyncSu
 }
 
 /**
- * 探一个文件夹的 git 状态：有没有仓库、origin 是什么。
+ * 探一个文件夹的 git 状态：有没有仓库、origin 是什么、当前站在哪个分支。
  *
  * 只影响界面（给不给同步入口、同步到哪儿），所以**探不到就算探不到**：
  * 目录不存在之类的情形回一个「什么都没有」的默认值，让上层照「本机笔记」处理，
@@ -392,7 +392,7 @@ export async function syncNotes(input: NoteSyncInput): Promise<Result<NoteSyncSu
  */
 export async function noteRepoState(dir: string): Promise<Result<NoteRepoState>> {
   const target = rootArg(dir)
-  if (!target) return ok({ isRepo: false, origin: '' })
+  if (!target) return ok({ isRepo: false, origin: '', branch: '' })
 
   const result = await guard(
     invoke<Partial<NoteRepoState>>('note_repo_state', { dir: target }),
@@ -402,6 +402,7 @@ export async function noteRepoState(dir: string): Promise<Result<NoteRepoState>>
 
   return ok({
     isRepo: result.data.isRepo === true,
-    origin: typeof result.data.origin === 'string' ? result.data.origin : ''
+    origin: typeof result.data.origin === 'string' ? result.data.origin : '',
+    branch: typeof result.data.branch === 'string' ? result.data.branch : ''
   })
 }

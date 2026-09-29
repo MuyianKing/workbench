@@ -464,6 +464,26 @@ await send('Runtime.evaluate', { expression: `(async () => {
 - **开着 WebSocket 的 node 脚本不会自己结束**：CDP 的 `WebSocket` 会让事件循环一直有活干，
   于是出错退出时后台任务永远停在「运行中」。收尾放在 `finally` 里：关 ws + `process.kill(-child.pid)` 杀无头浏览器，
   最后 `process.exit()` 兜底。CDP 自己也有超时上限，进程组不杀干净会留一堆无头 Edge 在后台。
+- **只顶替 `window.workbench` 拦不住适配层**：适配层（`workbench/ai.ts`、`system.ts` 这些）
+  直接 `invoke()` → `__TAURI__.core.invoke`，**不吃 `window.workbench` 这一层**。
+  于是「运行时探测」这类只走适配层的通道会一路吃掉拒绝、退回最差的那一档 ——
+  症状是「明明配好了，界面还说 Node 太旧 / 没找到 Pi」。要把这一面也喂上：
+  `window.__TAURI__ = { core: { invoke }, event: { listen } }`，**回的是裸值**（`ai_runtime`
+  回运行时的结构、`ai_key_state` 回布尔），包成 Result 是 `window.workbench` 那一层
+  `guard` 干的 —— 两面各自的形状不同，见 [bridge.ts](../../src/renderer/src/workbench/bridge.ts)。
+  顺手在桩里记一份调用名单（`window.__calls.push(command)`），「点那颗按钮到底发没发出去」就能直接问。
+- **截图一片空白先量几何，别猜渲染**：把 `getBoundingClientRect()` 打出来最快。踩过的是
+  「挂载点排在视口之外」—— 页面上那个空的 `#app` 占着 100% 高度，后加的盒子接在它后面，
+  y 正好等于视口高度，画面只剩 body 底色（DOM 里元素一个不少，`innerText` 也读得到）。
+  同类还有「根盒子高度塌成 0」：`.app` 的高度来自 App.vue 的 scoped 样式，**单挂一个组件时那份样式不在**，
+  给挂载点写 `height: 100vh` 才有的量；设置也是同理，`useSettingsStore().loadAppearance()`
+  得自己 await 一次（真应用里是 `initState()` 干的），否则永远是 `DEFAULT_SETTINGS`、
+  页面停在引导态。
+- **别占默认端口 5274**：它常被上一次会话残留的 `vite preview` 占着（有时是另一个会话正在用的 —— 别杀它）。
+  子目录那一套给自己的 config 写 `preview: { port: 5275, strictPort: true }` 最省事；
+  端口被占时 `strictPort` 会让你立刻看见（不然 `vite preview` 静默换端口，截图脚本照样连上、
+  截到的却是别人那份产物）。收尾按命令行特征清无头 Edge：
+  `Get-CimInstance Win32_Process -Filter "Name='msedge.exe'"` 筛 `CommandLine -like '*wb-edge-*'` 再 `taskkill /F /T`。
 - **右键菜单用 `Input.dispatchMouseEvent` 的 `mousePressed` + `mouseReleased`（`button: 'right'`）开**：
   走的是真指针，`contextmenu` 会照常发出，也顺带把 Chromium 那套「右键落点」的默认行为带上了 ——
   比在页面里合成一个 `contextmenu` 事件更接近用户按下去的样子。菜单项的点击用 `Runtime.evaluate` 里

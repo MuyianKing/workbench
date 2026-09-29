@@ -169,6 +169,12 @@ export interface NoteRepoState {
   isRepo: boolean
   /** origin 的地址；没有远端（或根本没仓库）时是空串 */
   origin: string
+  /**
+   * 当前站在哪个分支上（git 的 `symbolic-ref --short HEAD` 读的）。
+   * 不是仓库、分离头指针、或者读不出来时是空串 —— 少显示一截，不当成错误。
+   * 笔记与知识库那两页不看它（它们只关心同步到哪儿）；**AI 助手页拿它说清在哪儿干活**。
+   */
+  branch: string
 }
 
 /** 同步一次要带的东西：要同步哪个文件夹。远端地址不在这里 —— 它就是那个文件夹的 `origin` */

@@ -623,7 +623,8 @@ pub fn sync_notes(dir: &str) -> Result<Value, String> {
     }))
 }
 
-/// 笔记文件夹的 git 状态：有没有仓库、origin 是什么。界面拿它决定给不给同步入口、同步到哪儿。
+/// 文件夹的 git 状态：有没有仓库、origin 是什么、当前站在哪个分支。
+/// 界面拿它决定给不给同步入口、同步到哪儿（AI 助手那一页另外拿分支说清「在哪儿干活」）。
 ///
 /// 只看这个文件夹自己（`.git` 在它里面）。**不放宽成「它在某个仓库里」**：那会把这个文件夹
 /// 当成外层仓库的工作区，而 `commit_notes` 的 `add -A` 不带 pathspec —— 一次同步就会提交、
@@ -642,7 +643,7 @@ pub fn repo_state(dir: &str) -> Result<Value, String> {
     }
 
     if !root.join(".git").exists() {
-        return Ok(json!({ "isRepo": false, "origin": "" }));
+        return Ok(json!({ "isRepo": false, "origin": "", "branch": "" }));
     }
 
     // 纯本地只读，不注入凭据（`set_git_auth` 只给要出网的那几步用）
@@ -650,7 +651,14 @@ pub fn repo_state(dir: &str) -> Result<Value, String> {
         .map(|text| text.trim().to_string())
         .unwrap_or_default();
 
-    Ok(json!({ "isRepo": true, "origin": origin }))
+    // 当前分支：只问 symbolic-ref，**不要**用 `rev-parse --abbrev-ref HEAD`（还没有提交的仓库里
+    // 它会回一个 "HEAD"，看着像分支名就叫 HEAD，见 current_branch / sync_branch 那两处注释）。
+    // 分离头指针、或者根本问不出来时空串 —— 界面据此少显示一截，不当成错误。
+    let branch = run_git(&["symbolic-ref", "--short", "HEAD"], Some(&root), GIT_TIMEOUT)
+        .map(|text| text.trim().to_string())
+        .unwrap_or_default();
+
+    Ok(json!({ "isRepo": true, "origin": origin, "branch": branch }))
 }
 
 /// 提交是应用替用户产生的：他没配过 git 身份时给一个兜底，否则 commit 会直接失败。
@@ -1876,7 +1884,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// 探测只看**这个文件夹自己**有没有 `.git`，以及它的 origin 是谁。
+    /// 探测只看**这个文件夹自己**有没有 `.git`，以及它的 origin 是谁、当前站在哪个分支。
     ///
     /// 这一条是核心边界：不放宽成「它处在某个仓库里」—— 那会把外层仓库当成笔记仓库，
     /// 而同步用的是 `add -A` 不带 pathspec（等于整棵工作树）。
@@ -1889,12 +1897,13 @@ mod tests {
         assert!(repo_state("  ").is_err());
         assert!(repo_state(root.join("没有这个目录").to_str().unwrap()).is_err());
 
-        // 没有 .git：本机的笔记
+        // 没有 .git：本机的笔记（也就没有分支可说）
         let plain = root.join("plain");
         std::fs::create_dir_all(&plain).unwrap();
         let state = repo_state(plain.to_str().unwrap()).unwrap();
         assert_eq!(state["isRepo"], json!(false));
         assert_eq!(state["origin"], json!(""));
+        assert_eq!(state["branch"], json!(""));
 
         // 有 .git 但没连远端：是仓库（提交照旧），只是不能同步
         let bare = root.join("bare");
@@ -1919,6 +1928,13 @@ mod tests {
         let state = repo_state(real.to_str().unwrap()).unwrap();
         assert_eq!(state["isRepo"], json!(true));
         assert_eq!(state["origin"], json!(target_text), "{state:?}");
+        // 还没有提交也要说得出分支（symbolic-ref 认得起，`rev-parse --abbrev-ref HEAD` 在这儿会回 "HEAD"）
+        let branch = state["branch"].as_str().unwrap_or_default();
+        assert!(!branch.is_empty() && branch != "HEAD", "{state:?}");
+        // 切到别的分支：跟的是当前站着的那个（AI 助手页面上显示的就是它）
+        run_git(&["checkout", "--quiet", "-b", "干活的分支"], Some(&real), GIT_TIMEOUT).unwrap();
+        let state = repo_state(real.to_str().unwrap()).unwrap();
+        assert_eq!(state["branch"], json!("干活的分支"), "{state:?}");
 
         // 仓库里的一个子目录：它自己没有 `.git`，所以是「本机的笔记」——
         // 绝不能因为处在仓库里就被当成那个仓库的一部分（`add -A` 会把整棵工作树带走）
@@ -1927,6 +1943,7 @@ mod tests {
         let state = repo_state(nested.to_str().unwrap()).unwrap();
         assert_eq!(state["isRepo"], json!(false), "子目录不算仓库: {state:?}");
         assert_eq!(state["origin"], json!(""), "{state:?}");
+        assert_eq!(state["branch"], json!(""), "{state:?}");
 
         let _ = std::fs::remove_dir_all(&root);
     }
