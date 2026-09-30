@@ -219,12 +219,7 @@ function openWritten(rel: string): void {
             :active-rel="store.activeRel"
             @select="store.openEntry($event)"
           />
-          <KbRawList
-            v-show="pane === 'raw'"
-            :items="store.rawItems"
-            @clean="store.startClean()"
-            @open="store.openRaw($event)"
-          />
+          <KbRawList v-show="pane === 'raw'" :items="store.rawItems" @open="store.openRaw($event)" />
         </section>
 
         <!-- 两栏之间的分隔条：热区是一条通高的窄条，看得见的只有正中间那个小竖条 -->

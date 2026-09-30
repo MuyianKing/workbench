@@ -2,7 +2,7 @@
 /**
  * 清洗面板（右栏的第三态）：一键清洗的整个过程都在这里看得见。
  *
- * 版式与页面同族：上面是流程与状态（清洗 → 重建索引 → 完成，三步就地推进），中间是
+ * 版式与页面同族：上面是标题与状态一行（跑着的每一步、收场与拦截各有一句），中间是
  * 实时日志 —— 与 AI 助手页同一套事件翻译（parsePiEvent），助手正文走 MarkdownView、
  * 工具与系统行是窄行注脚、想的那一段收成「思考过程」；出错与拦截就地说明，不打断人。
  *
@@ -30,32 +30,6 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{ start: []; stop: []; close: []; 'open-models': []; 'open-entry': [rel: string] }>()
-
-/** 流程的三步：清洗 → 重建索引 → 完成。第几步与各自的状态都从 phase 推 */
-const steps = [
-  { label: '清洗条目', phase: 'cleaning' },
-  { label: '重建索引', phase: 'indexing' },
-  { label: '完成', phase: 'done' }
-] as const
-
-/** 三步各自的状态：没到的 pending、正在的 run、过了的 ok、栽住的 fail */
-function stepState(index: number): 'pending' | 'run' | 'ok' | 'fail' {
-  const order: KbCleanPhase[] = [
-    'idle',
-    'blocked',
-    'cleaning',
-    'indexing',
-    'done',
-    'failed',
-    'cancelled'
-  ]
-  const at = order.indexOf(props.phase)
-  // blocked / idle 还没上流程；failed 栽在它正跑的那一步；cancelled 停在清洗
-  if (props.phase === 'blocked' || props.phase === 'idle') return 'pending'
-  if (props.phase === 'failed') return index < at ? 'ok' : index === at ? 'fail' : 'pending'
-  if (props.phase === 'cancelled') return index === 0 ? 'fail' : 'pending'
-  return index < at ? 'ok' : index === at ? 'run' : 'pending'
-}
 
 /** 顶部那行状态说什么：跑着的每一步、收场与拦截各有一句 */
 const status = computed<{ text: string; kind: 'run' | 'ok' | 'fail' } | null>(() => {
@@ -128,18 +102,6 @@ watch(
         </el-button>
       </div>
       <p v-else-if="phase === 'failed' && error" class="clean__fail">{{ error }}</p>
-
-      <!-- 流程三步：清洗 → 重建索引 → 完成 -->
-      <ol v-else class="clean__steps">
-        <li
-          v-for="(step, index) in steps"
-          :key="step.phase"
-          class="clean__step"
-          :class="`is-${stepState(index)}`"
-        >
-          {{ step.label }}
-        </li>
-      </ol>
     </header>
 
     <div ref="scroller" class="clean__log">
@@ -267,32 +229,6 @@ watch(
   color: var(--st-fail);
   font-size: var(--fs-meta);
   line-height: 1.7;
-}
-
-/* 流程三步：灰度说话 —— 没到的最淡、正在的浓、过了的打钩色、栽住的失败色 */
-.clean__steps {
-  display: flex;
-  gap: var(--sp-4);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.clean__step {
-  color: var(--ink-3);
-  font-size: var(--fs-meta);
-}
-
-.clean__step.is-run {
-  color: var(--st-run);
-}
-
-.clean__step.is-ok {
-  color: var(--st-ok);
-}
-
-.clean__step.is-fail {
-  color: var(--st-fail);
 }
 
 /* 日志区：与 AI 助手页的对话区同一条路数 —— 没有自己的底色，靠行间留白分节 */

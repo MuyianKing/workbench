@@ -5,11 +5,11 @@
  * 状态的口径在 shared/kb.ts（source 配对 + mtime 比较），这里只把结果摆出来：
  * 按状态筛（带计数）、一眼看出哪些等着清洗；树由 kbRawTree 从筛过的清单现算
  * （props 只读，这里不留第二份），文件行还是原来那副两行块 —— 名字 + 后缀一行，
- * 状态、指向它的条目数与修改时间一行。待处理不为零时底部给一条直达「开始清洗」的
- * 近路 —— 清洗本身是应用编排的（见 stores/kb.ts），这里只递一手指。
+ * 状态、指向它的条目数与修改时间一行。清洗由工具条的「开始清洗」发起（应用全程编排，
+ * 见 stores/kb.ts），这里只管把状态摆清楚。
  */
 import { computed, ref, watch } from 'vue'
-import { Document, Folder, MagicStick } from '@element-plus/icons-vue'
+import { Document, Folder } from '@element-plus/icons-vue'
 import { formatTimestamp } from '@/format'
 import {
   kbRawStatusText,
@@ -24,7 +24,7 @@ const props = defineProps<{
   items: KbRawItem[]
 }>()
 
-const emit = defineEmits<{ clean: []; open: [rel: string] }>()
+const emit = defineEmits<{ open: [rel: string] }>()
 
 type Filter = 'all' | KbRawStatus
 
@@ -85,9 +85,6 @@ function collapse(id: string): void {
 function onNodeClick(data: KbRawTreeNode): void {
   if (data.kind === 'file') emit('open', data.id)
 }
-
-/** 待处理（未入库 + 有更新）：底部那条近路只在有活儿时出现 */
-const actionable = computed(() => counts.value.pending + counts.value.stale)
 </script>
 
 <template>
@@ -159,14 +156,6 @@ const actionable = computed(() => counts.value.pending + counts.value.stale)
         </span>
       </template>
     </el-tree>
-
-    <!-- 待处理的近路：一键交给应用的清洗流程 -->
-    <div v-if="actionable > 0" class="kb-raw__todo">
-      <span>有 {{ actionable }} 个文件等着清洗</span>
-      <el-button size="small" type="primary" :icon="MagicStick" @click="emit('clean')">
-        开始清洗
-      </el-button>
-    </div>
   </div>
 </template>
 
@@ -326,18 +315,5 @@ const actionable = computed(() => counts.value.pending + counts.value.stale)
   color: var(--ink-3);
   font-size: var(--fs-micro);
   font-family: var(--font-mono);
-}
-
-/* ---------- 待处理的近路 ---------- */
-
-.kb-raw__todo {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--sp-2);
-  padding: var(--sp-2) var(--sp-3);
-  border-top: 1px solid var(--border);
-  color: var(--ink-2);
-  font-size: var(--fs-meta);
 }
 </style>
