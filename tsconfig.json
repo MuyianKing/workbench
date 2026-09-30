@@ -1,4 +1,25 @@
 {
-  "files": [],
-  "references": [{ "path": "./tsconfig.web.json" }]
+  // 单一 TS 工程：渲染层与全部域包一起检查（vue-tsc 跑这份）。
+  // 域包之间按包名导入（@workbench/<包>），映射到各包的桶文件；包内部仍是相对导入。
+  // 用例文件用 node:fs（vitest 跑在 node 里），由 tsconfig.test.json 单独检查。
+  "include": ["apps/desktop/src/renderer/src/**/*", "packages/*/src/**/*"],
+  "exclude": ["apps/desktop/src/**/*.test.ts", "packages/**/*.test.ts"],
+  "compilerOptions": {
+    "composite": true,
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "jsx": "preserve",
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["apps/desktop/src/renderer/src/*"],
+      "@workbench/*": ["packages/*/src/index.ts"]
+    }
+  }
 }

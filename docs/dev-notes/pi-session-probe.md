@@ -47,4 +47,4 @@
   bundle 还是落到树里）是新版本自己的事，换版本后要重跑。**
 
 **换 Pi 版本后重跑一遍**这些点 —— CLI 与事件协议是外部契约（见
-[constraints/ai.md](../constraints/ai.md) 的文件头）。
+[constraints/ai.md](../modules/ai.md) 的文件头）。

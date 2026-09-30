@@ -5,37 +5,24 @@
   "type": "module",
   "description": "前端开发工作台：管项目、记工作、看 AI 用量",
   "author": "muyian",
+  "packageManager": "pnpm@12.5.1",
   "scripts": {
-    "dev": "node scripts/vendor-pi.mjs && tauri dev",
-    "build": "tauri build",
-    "dev:renderer": "vite",
-    "build:renderer": "vite build",
-    "preview:renderer": "vite --config vite.preview.config.ts",
-    "typecheck": "vue-tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.test.json",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "icons": "node scripts/make-icons.mjs",
-    "vendor:pi": "node scripts/vendor-pi.mjs",
-    "dist": "node scripts/vendor-pi.mjs && tauri build",
-    "dist:dir": "node scripts/vendor-pi.mjs && tauri build --no-bundle"
-  },
-  "dependencies": {
-    "@element-plus/icons-vue": "^2.3.1",
-    "diff": "^9.0.0",
-    "element-plus": "^2.8.8",
-    "markdown-it": "^15.0.2",
-    "pinia": "^4.0.3",
-    "vditor": "^4.0.0",
-    "vue": "^3.5.13"
+    "dev": "pnpm -F @workbench/desktop dev",
+    "build": "pnpm -F @workbench/desktop build",
+    "dev:renderer": "pnpm -F @workbench/desktop dev:renderer",
+    "build:renderer": "pnpm -F @workbench/desktop build:renderer",
+    "preview:renderer": "pnpm -F @workbench/desktop preview:renderer",
+    "typecheck": "vue-tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
+    "test": "pnpm -r test",
+    "test:watch": "pnpm -r --parallel test:watch",
+    "icons": "pnpm -F @workbench/desktop icons",
+    "vendor:pi": "pnpm -F @workbench/desktop vendor:pi",
+    "dist": "pnpm -F @workbench/desktop dist",
+    "dist:dir": "pnpm -F @workbench/desktop dist:dir"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2.11.0",
-    "@types/markdown-it": "^14.2.0",
     "@types/node": "^26.5.1",
-    "@vitejs/plugin-vue": "^6.0.8",
     "typescript": "^5.9.3",
-    "vite": "^8.3.0",
-    "vitest": "^5.0.0",
     "vue-tsc": "^3.3.11"
   }
 }

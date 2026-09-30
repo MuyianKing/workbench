@@ -1,0 +1,47 @@
+{
+  "name": "@workbench/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "前端开发工作台：管项目、记工作、看 AI 用量",
+  "author": "muyian",
+  "scripts": {
+    "dev": "node scripts/vendor-pi.mjs && tauri dev",
+    "build": "tauri build",
+    "dev:renderer": "vite",
+    "build:renderer": "vite build",
+    "preview:renderer": "vite --config vite.preview.config.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "icons": "node scripts/make-icons.mjs",
+    "vendor:pi": "node scripts/vendor-pi.mjs",
+    "dist": "node scripts/vendor-pi.mjs && tauri build",
+    "dist:dir": "node scripts/vendor-pi.mjs && tauri build --no-bundle"
+  },
+  "dependencies": {
+    "@element-plus/icons-vue": "^2.3.1",
+    "@workbench/ai": "workspace:*",
+    "@workbench/appearance": "workspace:*",
+    "@workbench/auth": "workspace:*",
+    "@workbench/core": "workspace:*",
+    "@workbench/kb": "workspace:*",
+    "@workbench/notes": "workspace:*",
+    "@workbench/skills": "workspace:*",
+    "@workbench/terminal": "workspace:*",
+    "@workbench/usage": "workspace:*",
+    "@workbench/vault": "workspace:*",
+    "@workbench/video": "workspace:*",
+    "@workbench/weather": "workspace:*",
+    "@workbench/work-log": "workspace:*",
+    "element-plus": "^2.8.8",
+    "pinia": "^4.0.3",
+    "vditor": "^4.0.0",
+    "vue": "^3.5.13"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.11.0",
+    "@vitejs/plugin-vue": "^6.0.8",
+    "vite": "^8.3.0",
+    "vitest": "^5.0.0"
+  }
+}

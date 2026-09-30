@@ -10,9 +10,9 @@
 
 | 首页 —— 可自由布局的工作台 | 项目 —— 一键启停与打包 |
 |---|---|
-| ![首页](resources/cap/首页.png) | ![项目](resources/cap/项目.png) |
+| ![首页](apps/desktop/resources/cap/首页.png) | ![项目](apps/desktop/resources/cap/项目.png) |
 | 工作 —— 按天分组的工作日志 | 设置 —— 外观 / 菜单 / 通用 / 关于 |
-| ![工作](resources/cap/工作.png) | ![设置](resources/cap/设置.png) |
+| ![工作](apps/desktop/resources/cap/工作.png) | ![设置](apps/desktop/resources/cap/设置.png) |
 
 ## 能做什么
 
@@ -43,19 +43,21 @@
 | 持久化 | 本地 JSON（Rust 侧防抖落盘，临时文件 + rename） |
 | 打包 | Tauri CLI → NSIS 安装包（Windows x64） |
 
-架构上**后端刻意做薄**：它只提供「取原始数据 / 落盘 / 调系统能力」，合并、排序、状态机、命令构造这些业务语义都在渲染层的适配层（`src/renderer/src/workbench/`）里，绝大多数改动因此仍是秒级热更新。
+架构上**后端刻意做薄**：它只提供「取原始数据 / 落盘 / 调系统能力」，合并、排序、状态机、命令构造这些业务语义都在渲染层的适配层（`apps/desktop/src/renderer/src/workbench/`）里，绝大多数改动因此仍是秒级热更新。
+
+仓库是 **pnpm monorepo**：应用自包含在 `apps/desktop/`（渲染层 + Rust + 随包资源 + 构建脚本），跨页面复用的纯逻辑按域拆成 `packages/` 下 13 个 `@workbench/*` 包（core / notes / video / appearance / terminal / kb / skills / ai / usage / work-log / vault / auth / weather），目录细节见[功能与架构](docs/features-and-architecture.md)的「目录结构」。
 
 ## 快速开始
 
-需要 Windows、Node.js 与 Rust stable（`x86_64-pc-windows-msvc`）+ MSVC 生成工具 + Windows SDK。
+需要 Windows、Node.js、pnpm（`npm i -g pnpm` 或 `corepack enable`，版本钉在根 package.json 的 `packageManager`）与 Rust stable（`x86_64-pc-windows-msvc`）+ MSVC 生成工具 + Windows SDK。
 
 ```bash
-npm install
+pnpm install
 
-npm run dev        # 开发态（Rust 后端 + 渲染层热更新）
-npm test           # Vitest 单元测试
-npm run typecheck  # 类型检查
-npm run dist       # 打包出 NSIS 安装包
+pnpm run dev        # 开发态（Rust 后端 + 渲染层热更新）
+pnpm test           # Vitest 单元测试（各包聚合）
+pnpm run typecheck  # 类型检查
+pnpm run dist       # 打包出 NSIS 安装包
 ```
 
 用 Token 多机同步、要让笔记里粘贴的图片自动上传、或者要同步笔记 / 知识库的话，还需要系统里有 `git`
@@ -95,7 +97,7 @@ Token 同步只推模型名与计数，**不含对话内容**；工作日志刻�
 
 - [官网](site/index.html)：项目的落地页（独立静态站，无构建无依赖，双击就能看）
 - [官网 · Claude 规范版](site-claude/index.html)：同一套内容的第二版，照 [DESIGN.md](DESIGN.md) 那套设计规范画
-- [功能与架构](docs/features-and-architecture.md)：每项功能怎么做的、为什么这么做，数据落在哪
+- [功能与架构](docs/features-and-architecture.md)：跨模块的通用事实（壳层、技术栈、目录结构、数据与隐私）与模块索引
+- [模块文档](docs/modules/)：每个模块一份 `<模块>.md` —— 开头「约束」一节是不能破的规矩，后面是实现细节（怎么做的、为什么、数据落在哪）
 - [开发笔记](docs/dev-notes/)：构建性能、浏览器里做视觉验证的动手方法
-- [模块约束](docs/constraints/)：各模块不能破的硬约束（通道与落盘、终端、工作日志、笔记、知识库、AI 助手、同步与账号、密码保险库）
-- [AGENTS.md](AGENTS.md)：工程约束（给 AI 编码 Agent 看的项目规则；跨模块的规矩在这里，按模块的细则在上一条）
+- [AGENTS.md](AGENTS.md)：工程约束（给 AI 编码 Agent 看的项目规则；跨模块的规矩在这里，模块文档的索引在第 5 节）

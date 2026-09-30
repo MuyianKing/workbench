@@ -6,9 +6,9 @@ dist
 .tmp
 .DS_Store
 *.log
-.preview/**
-# Vditor 的静态资源：构建前从 node_modules 复制过来（见 scripts/sync-vditor-assets.mjs），不进版本库
-src/renderer/public/vditor/
+apps/desktop/.preview/**
+# Vditor 的静态资源：构建前从 node_modules 复制过来（见 apps/desktop/scripts/sync-vditor-assets.mjs），不进版本库
+apps/desktop/src/renderer/public/vditor/
 
 # ===== ↑ 以上同步自 .gitignore（「从 .gitignore 同步」只重写以上部分）=====
 .git/

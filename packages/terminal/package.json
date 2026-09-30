@@ -1,0 +1,9 @@
+{
+  "name": "@workbench/terminal",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "devDependencies": { "vitest": "^5.0.0" },
+  "scripts": { "test": "vitest run --passWithNoTests", "test:watch": "vitest --passWithNoTests" }
+}

@@ -1,19 +1,18 @@
 {
-  // 用例文件与 vitest.config.ts 的 include 保持一致：检查的正是会真正跑起来的那批测试。
-  // 后端逻辑（进程会话、日志攒批、进程树终止）现在在 Rust 里，由 cargo test 覆盖。
-  // 另加适配层那份全局声明：`window.workbench` 的类型来自它，用例 import 适配层时要能看见
-  // （它只是类型，不是测试文件，所以 vitest 那边不需要它）。
+  // 用例文件与各包 vitest.config.ts 的 include 保持一致：检查的正是会真正跑起来的那批测试。
+  // 后端逻辑（进程会话、日志攒批、进程树终止）在 Rust 里，由 cargo test 覆盖。
+  // 另加适配层那份全局声明：`window.workbench` 的类型来自它，用例 import 适配层时要能看见。
   "include": [
-    "src/shared/**/*.test.ts",
-    "src/renderer/**/*.test.ts",
-    "src/renderer/src/workbench/global.d.ts"
+    "packages/*/src/**/*.test.ts",
+    "apps/desktop/src/renderer/**/*.test.ts",
+    "apps/desktop/src/renderer/src/workbench/global.d.ts"
   ],
   "compilerOptions": {
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "bundler",
     // DOM 那一份是给 src/renderer 下的用例的：它们要 import 适配层，而适配层用的是 window 这组全局。
-    // 共享层的 DOM 误用照样由 tsconfig.web.json 兜着（那边也有 DOM lib），放宽这里不会漏掉什么
+    // 渲染层的 DOM 误用由 tsconfig.json 兜着，放宽这里不会漏掉什么
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "types": ["node"],
     "strict": true,
@@ -23,8 +22,8 @@
     "resolveJsonModule": true,
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/renderer/src/*"],
-      "@shared/*": ["src/shared/*"]
+      "@/*": ["apps/desktop/src/renderer/src/*"],
+      "@workbench/*": ["packages/*/src/index.ts"]
     }
   }
 }

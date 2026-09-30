@@ -1,9 +1,10 @@
 # AGENTS.md
 
-本文件是 Workbench 的 AI Coding Agent 约束：只写跨模块的硬约束，一行一条，不写解释。按模块的细则在
-[docs/constraints/](docs/constraints/) 下（索引见第 5 节），功能与架构事实见 [features-and-architecture.md](docs/features-and-architecture.md)
-（唯一真源，本文件不重复），动手方法与踩坑见 [docs/dev-notes/](docs/dev-notes/)。第 0 节为跨项目通用约束，
-第 1 节起为本项目专属，冲突时以后者为准。
+本文件是 Workbench 的 AI Coding Agent 约束：只写跨模块的硬约束，一行一条，不写解释。每个模块一份文档，
+在 [docs/modules/](docs/modules/) 下（开头「约束」一节是不能破的规矩、动手前先读，后面是实现细节，索引见第 5 节），
+跨模块的通用事实（壳层、技术栈、目录结构、数据与隐私）在
+[features-and-architecture.md](docs/features-and-architecture.md)，动手方法与踩坑见 [docs/dev-notes/](docs/dev-notes/)。
+第 0 节为跨项目通用约束，第 1 节起为本项目专属，冲突时以后者为准。
 
 ## 0. 通用约束
 
@@ -35,7 +36,9 @@
 
 ## 1. 项目边界
 
-- 定位：Windows 桌面应用（Tauri 2 + WebView2），一个窗口里管项目、记工作、写笔记、看 AI 用量；包管理器固定 npm，`Cargo.lock` 要提交。
+- 定位：Windows 桌面应用（Tauri 2 + WebView2），一个窗口里管项目、记工作、写笔记、看 AI 用量；pnpm workspace monorepo
+  （应用在 `apps/desktop/`，纯逻辑按域拆在 `packages/` 的 13 个 `@workbench/*` 包，见第 2 节），`Cargo.lock` 要提交；
+  例外：`vendor-pi.mjs` 内部装 Pi 仍走 `npm install`（`resources/pi/` 要整树打进安装包，不能用符号链接布局）。
 - **联网边界：默认不联网、不上报任何数据；出口只有九个，且都由用户显式开启**：用户自己填的两个 git 仓库（用量同步、笔记图片，
   留空即关闭）与**笔记自己那个仓库**（地址不在设置里 —— 跟着那个笔记文件夹的 `origin` 走，且只有用户点了同步才会跑一次 git；
   没仓库的文件夹就是本机的笔记，应用既不 `git init` 也不替用户接远端；**知识库**（`kbDir` 指向的那个
@@ -48,11 +51,11 @@
   （Open-Meteo 自带的检索对部分中文名匹配不上，实测「常州」搜不到）、实况走 Open-Meteo 的
   forecast；**城市名会作为查询串发出去**，这是这条出口唯一的用户内容）、AI 助手（用户自己配的 AI 服务：名称 / Base URL / API 形态 /
   模型 / API Key 都齐且用户点了发送才会走；请求由那个子进程直接发，**它在那个目录里读到的内容、以及这一段会话的历史
-  都会发给你自己配的那个端点**，配置的形状与收敛在 `src/shared/ai.ts`；**同一条出口还包括「拉模型列表」** ——
+  都会发给你自己配的那个端点**，配置的形状与收敛在 `packages/ai/src/ai.ts`；**同一条出口还包括「拉模型列表」** ——
   用户在弹窗里粘上 Key / 点「获取列表」时，按他填的 Base URL GET 一次 `/models`，同一个主机同一把 Key，不点就不走）、**装技能**
   （AI 助手页那颗「技能」按钮里的「粘地址」：地址由用户粘、点了「装上」才走一次 GET，主机不设白名单、跟着跳转最多 5 跳、
   只收 zip 且超过 64 MB 就停 —— 与「用户自己填的 git 仓库」同一类「地址由用户给」的出口；**只有这一件事需要出网**：
-  导入本地 zip / 导入目录、装卸开关、`--skill` 注入全在本机，见 `pi_skills.rs` 与 `docs/constraints/ai.md`）。
+  导入本地 zip / 导入目录、装卸开关、`--skill` 注入全在本机，见 `pi_skills.rs` 与 `docs/modules/ai.md`）。
   不要新增网络出口、不往任何第三方服务发数据；笔记里的外链图片不算新出口；
   密码保险库也不算 —— 它推的是**用量同步那个仓库**的另一个目录（`vault/vault.json`），推上去的只有密文；
   登录内嵌的 client_id/secret 是这条边界唯一一次放宽。
@@ -70,108 +73,120 @@
   别处不新增这类外部依赖。
 - VS Code 是唯一**可选**的外部程序，只服务项目卡的「在 VS Code 中打开」：走它自己注册的 `vscode://` 协议（`system.rs` 的
   `open_in_vscode`），不去找 `Code.exe` 的安装路径；没装只影响那一个菜单项，不要照着再引别的编辑器。
-- **Pi**（开源编码 Agent）只服务 AI 助手页（一个通用控制台：左栏按项目列会话、右栏跟一段对话，它去干活）：**随包内置** —— `scripts/vendor-pi.mjs` 在构建 / 开发前
-  生成瘦身的 `resources/pi/`（钉死版本、删掉运行时用不到的云厂商 SDK，细则见 [constraints/ai.md](docs/constraints/ai.md)），
-  Node 用系统里的（≥ 22.19，门槛判定在 `shared/ai.ts`）。它跑 **RPC 模式**（提示词与「命令让不让跑」的答复都走子进程的 stdin，
-  两档工具权限见 constraints/ai.md），**一个会话一个进程**（一轮跑完不收：连续对话靠它），会话留档由 Pi 自己写在
+- **Pi**（开源编码 Agent）只服务 AI 助手页（一个通用控制台：左栏按项目列会话、右栏跟一段对话，它去干活）：**随包内置** —— `apps/desktop/scripts/vendor-pi.mjs` 在构建 / 开发前
+  生成瘦身的 `apps/desktop/resources/pi/`（钉死版本、删掉运行时用不到的云厂商 SDK，细则见 [constraints/ai.md](docs/modules/ai.md)），
+  Node 用系统里的（≥ 22.19，门槛判定在 `packages/ai/src/ai.ts`）。它跑 **RPC 模式**（提示词与「命令让不让跑」的答复都走子进程的 stdin，
+  两档工具权限见 docs/modules/ai.md），**一个会话一个进程**（一轮跑完不收：连续对话靠它），会话留档由 Pi 自己写在
   `data\pi\sessions\`（起进程时传 `--session-id` 与 `--session-dir`，**不要传 `--no-session`**）。跑它时子进程必须带 `PI_TELEMETRY=0`、`PI_SKIP_VERSION_CHECK=1` 与 `PI_OFFLINE=1`（它默认会
   报遥测、向 pi.dev 查最新版本、RPC 启动时还刷一遍模型目录 —— 那三条不在任何已登记的出口里），密钥只经环境变量给，**进程直启不经 `cmd /C`**（行内层引号会被
   cmd 拆坏，见 session.rs 的 `spawn_args`）。别照着再引别的 Agent。
-- 测试用 Vitest（渲染层与 `src/shared`）+ `cargo test`（写在同文件的 `#[cfg(test)] mod tests`）。**TypeScript 与 vue-tsc 的版本不要动**：
-  升到 TS 7 会让 `npm run typecheck` 直接不可用。
+- 测试用 Vitest（13 个域包各自跑自己的用例，根目录 `pnpm test` = `pnpm -r test` 聚合；渲染层用例在 `@workbench/desktop` 包里）
+  + `cargo test`（写在同文件的 `#[cfg(test)] mod tests`）。**TypeScript 与 vue-tsc 的版本不要动**：
+  升到 TS 7 会让 `pnpm run typecheck` 直接不可用。
 - 仅 Windows，不做 macOS / Linux 适配。
 
 ## 2. 文件落位
 
-- 总览：Rust 在 `src-tauri/src/`；渲染层在 `src/renderer/src/`（组件 `components/`、store `stores/`、交互骨架 `composables/`、适配层
-  `workbench/`、设计令牌与全局样式 `styles/`）；两端共用的类型 / 契约 / 纯逻辑在 `src/shared/`。逐文件分工见架构文档的「目录结构」。
-- 别名 `@` → `src/renderer/src`、`@shared` → `src/shared`；单测与被测模块同目录，命名 `*.test.ts`。`src/shared/` 里禁止 import
-  node、Rust 或渲染层代码。
-- 需要文件系统的逻辑把 fs 抽成参数注入（见 [scanner.ts](src/shared/scanner.ts) 的 `ScanFs`）：生产侧走 Rust 命令、测试侧走 `node:fs`。
+- 总览：monorepo。桌面应用自包含在 `apps/desktop/` —— Rust 在 `src-tauri/src/`、渲染层在 `src/renderer/src/`（组件 `components/`、
+  store `stores/`、交互骨架 `composables/`、适配层 `workbench/`、设计令牌与全局样式 `styles/`）、随包资源 `resources/`、构建脚本 `scripts/`；
+  跨页面复用的类型 / 契约 / 纯逻辑按域拆在 `packages/` 的 13 个包里：`core`（平台原语：Result、端口与路径、扫描、命令、快捷启动、
+  图标缓存、日期）、`notes` / `video` / `appearance`（含设计参考库）/ `terminal` / `kb` / `skills` / `ai`（含 Pi 技能与 AI 热点）/
+  `usage`（用量与各 IDE 日志源）/ `work-log` / `vault` / `auth` / `weather`。逐文件分工见架构文档的「目录结构」。
+- 域包之间与应用对域包一律**按包名导入**（`@workbench/<包>`，只走各包 `index.ts` 桶）；解析走 pnpm 的 workspace 软链 + 各包
+  `exports`（TS 源码直出），TS 检查由根目录唯一的 `tsconfig.json` / `tsconfig.test.json` 的 paths 兜底。渲染层内部别名
+  `@` → `apps/desktop/src/renderer/src`（`@shared` 已随拆包删除）。单测与被测模块同目录，命名 `*.test.ts`。
+  域包里禁止 import 渲染层代码与 Rust 侧，node 内置模块不进运行时路径（fs 之类一律注入）。
+- 需要文件系统的逻辑把 fs 抽成参数注入（见 [scanner.ts](packages/core/src/scanner.ts) 的 `ScanFs`）：生产侧走 Rust 命令、测试侧走 `node:fs`。
 - 跨组件复用的拖拽与浮层收起一律用 `composables/` 已有的 `use-pointer-drag` / `use-floating-dismiss`，不要再手写 pointer 事件监听。
-- 随包带的第三方静态资源放 `src/renderer/public/`；引用用相对基址（`import.meta.env.BASE_URL`），不写死 `/xxx`。
-- OAuth 凭据来自 `src-tauri/oauth.local.json`（`build.rs` 注入后 `include_str!`）：**不入库**（模板 `oauth.example.json`），
+- 随包带的第三方静态资源放 `apps/desktop/src/renderer/public/`；引用用相对基址（`import.meta.env.BASE_URL`），不写死 `/xxx`。
+- OAuth 凭据来自 `apps/desktop/src-tauri/oauth.local.json`（`build.rs` 注入后 `include_str!`）：**不入库**（模板 `oauth.example.json`），
   缺它照样能编译，只是登录按钮显示「未内置凭据」。
-- 官网 `site/` 是独立静态站：无构建、无依赖，不进 `npm run typecheck` 与打包流程；页面上那几张应用配图是照
-  [tokens.css](src/renderer/src/styles/tokens.css) 重画的（改了令牌要一起改）。`site-claude/` 是同一套内容的第二版，
+- 官网 `site/` 是独立静态站：无构建、无依赖，不进 `pnpm run typecheck` 与打包流程；页面上那几张应用配图是照
+  [tokens.css](apps/desktop/src/renderer/src/styles/tokens.css) 重画的（改了令牌要一起改）。`site-claude/` 是同一套内容的第二版，
   照根目录 [DESIGN.md](DESIGN.md) 那套规范画：**独立于 tokens.css**（要改的是 DESIGN.md），配图的尺寸照应用比例、
-  颜色圆角照规范。两份的细节都见架构文档的「官网」一节。
-- 文档分工：[README.md](README.md) 给概览与上手；架构文档是功能与架构事实的唯一真源；本文件写跨模块约束；
-  [docs/constraints/](docs/constraints/) 写模块细则；`docs/dev-notes/` 写动手方法与踩坑。
+  颜色圆角照规范。细节见 [docs/modules/site.md](docs/modules/site.md)。
+- 文档分工：[README.md](README.md) 给概览与上手；[docs/modules/](docs/modules/) 每模块一份文档
+  （「约束」一节装硬规矩、后面是实现细节）；[features-and-architecture.md](docs/features-and-architecture.md)
+  装跨模块的通用事实；本文件写跨模块约束的骨架；`docs/dev-notes/` 写动手方法与踩坑。
 
 ## 3. 编码规范
 
 - 全量 TypeScript（`strict: true`）；Vue SFC 一律 `<script setup lang="ts">`，不写 Options API；接口用 `defineProps` / `defineEmits`，props 只读。
-- 命名：文件 kebab-case、类型与接口 PascalCase、函数与变量 camelCase；注释与界面文案用中文。纯逻辑下沉 `src/shared/` 并补单测。
+- 命名：文件 kebab-case、类型与接口 PascalCase、函数与变量 camelCase；注释与界面文案用中文。纯逻辑下沉到对应域包
+  `packages/<域>/src/`（包清单见第 2 节）并补单测。
 - 通道契约、新增通道的步骤、落盘字段的收敛（sanitize / `editableOf` 等）见
-  [docs/constraints/ipc-and-state.md](docs/constraints/ipc-and-state.md)。
+  [docs/modules/ipc-and-state.md](docs/modules/ipc-and-state.md) 的「约束」一节。
 
 ## 4. UI 与样式
 
-- 手写 CSS，不用原子化 CSS；颜色、间距、圆角、字号一律取 [tokens.css](src/renderer/src/styles/tokens.css) 的
+- 手写 CSS，不用原子化 CSS；颜色、间距、圆角、字号一律取 [tokens.css](apps/desktop/src/renderer/src/styles/tokens.css) 的
   `--bg-*` `--ink-*` `--st-*` `--sp-*` `--r-*` `--fs-*`。暗色只在 `:root[data-theme='dark']` 覆盖令牌。
 - 界面主体灰度，彩色只表达运行状态（`--st-run` / `--st-ok` / `--st-fail`）与项目标识色；终端面板始终深色（`--term-*`）。
-- **项目标识色**（[project-color.ts](src/shared/project-color.ts)）：预设色存名字不存色值，自定义色 `#rrggbb` 一律经
+- **项目标识色**（[project-color.ts](packages/core/src/project-color.ts)）：预设色存名字不存色值，自定义色 `#rrggbb` 一律经
   `sanitizeProjectColor()` 收敛；颜色怎么分配只在那一个文件里定义，界面别自己另拍一个。
-- 项目标签统一走 [ProjectTag.vue](src/renderer/src/components/ProjectTag.vue)（`el-tag` + `effect="dark"`），**别自绘浅底同色字标签**；
+- 项目标签统一走 [ProjectTag.vue](apps/desktop/src/renderer/src/components/ProjectTag.vue)（`el-tag` + `effect="dark"`），**别自绘浅底同色字标签**；
   调用方只负责限宽、给 `.el-tag__content` 加 `overflow: hidden`，行盒高度由它兜着。
 - 组件样式写 `<style scoped>`；要穿透 Element Plus 或供多页共用的外壳（`.panel`、`.facts`、`.filter`、`.sort` 等）写进
-  [global.css](src/renderer/src/styles/global.css)。
+  [global.css](apps/desktop/src/renderer/src/styles/global.css)。
 - **Element Plus 是全量引入的**（`main.ts` 的 `app.use(ElementPlus)` + 整包 CSS），不要手搓 EP 已有的控件。已定下来的用法：
   分段选择 `el-segmented`；弹窗字段 `el-form` + `el-form-item`（`label-position="top"`，校验失败就地显示，不弹 `ElMessage`）；
   图标按钮与关键操作用 `el-tooltip`，纯截断文字的全名用原生 `title`。
-- **界面不写教学式说明**（作者自己用的程序）：原理、机制与自我声明（「应用不内置任何…」「只在下次起进程时生效」这类）写在文档里（constraints/ 与架构文档），界面上只留影响当下操作的文案；「点这里开始」「第一次用？」这类引导一律不加（AI 助手页细则见 constraints/ai.md）。
-- **弹层一律走 [AppDialog.vue](src/renderer/src/components/AppDialog.vue)，不要直接写 `el-dialog`**：`append-to-body`、
+- **界面不写教学式说明**（作者自己用的程序）：原理、机制与自我声明（「应用不内置任何…」「只在下次起进程时生效」这类）写在文档里（docs/modules/ 各模块文档），界面上只留影响当下操作的文案；「点这里开始」「第一次用？」这类引导一律不加（AI 助手页细则见 docs/modules/ai.md）。
+- **弹层一律走 [AppDialog.vue](apps/desktop/src/renderer/src/components/AppDialog.vue)，不要直接写 `el-dialog`**：`append-to-body`、
   「挡不挡背后」、可拖动（抓手是标题栏、关掉后位置复位）这几条跨弹层的规矩只写在那里（**不要自己写遮罩**，
   `.el-overlay` 统一处理）；其余属性与插槽原样透传。
-- 弹层开着时导航栏仍然可用（导航栏浮在遮罩之上，见 [NavRail.vue](src/renderer/src/components/NavRail.vue)）；
+- 弹层开着时导航栏仍然可用（导航栏浮在遮罩之上，见 [NavRail.vue](apps/desktop/src/renderer/src/components/NavRail.vue)）；
   **换页不关弹层** —— 弹框留在原地，切回来还是它，别在换页路径上加「收弹层」的动作。
 - **填内容的弹层传 `penetrable`（不挡背后）**：密码、工作记录、命令、常用软件、添加项目、起名字、素材管理这几个
   「要回别处抄一段再填」的弹层都这么开，遮罩只围住弹框自己；代价是没有「点外面关掉」（它们本来就关着）。
   **确认框（`ElMessageBox`）与退出确认框保持挡住**，设置 / 技能这类不抄内容的弹层也照旧挡点击。
 - 明暗切换经 `theme-transition.ts` 驱动，`<html>` 上同时维护 `data-theme` 与 `.dark`；切换守卫用
-  [stores/settings.ts](src/renderer/src/stores/settings.ts) 里的 `appliedTheme` 变量，不读 DOM。
+  [stores/settings.ts](apps/desktop/src/renderer/src/stores/settings.ts) 里的 `appliedTheme` 变量，不读 DOM。
 - 拖动窗口用 `data-tauri-drag-region`：裸属性只认直接按在带属性的那个元素上（子元素要再标一遍），`"deep"` 才是整棵子树；
   **不要再写 `@dblclick` 自己 toggle 一次**；`start_dragging` 必须在
-  [capabilities/default.json](src-tauri/capabilities/default.json) 放行（被 ACL 拦下是静默失效），改完重启应用。
+  [capabilities/default.json](apps/desktop/src-tauri/capabilities/default.json) 放行（被 ACL 拦下是静默失效），改完重启应用。
 
 ## 5. 请求 / 状态 / 配置
 
-跨模块的硬约定只有四类（完整规则见下表的对应文档）：**宿主能力一律经 `window.workbench`**（唯一例外是工作区背景图与视频播放走 asset 协议、
+跨模块的硬约定只有四类（完整规则见下表对应模块文档的「约束」一节，实现细节在同文件「实现」一节）：
+**宿主能力一律经 `window.workbench`**（唯一例外是工作区背景图与视频播放走 asset 协议、
 读取权限在 Rust 侧按单个文件授予）、**通道一律返回 `Result<T>` 不 reject**、**业务语义（合并 / 排序 / 修剪 / 状态机 / 命令构造）
 留在 TS 适配层**、**数据文件与数据目录固定在 `%APPDATA%\Workbench\data`**。其余模块没有额外的硬约束。
 
 | 要动的模块 | 先看 |
 | --- | --- |
-| 通道契约 / store / 持久化 / 数据目录 / 首屏快照 | [constraints/ipc-and-state.md](docs/constraints/ipc-and-state.md) |
-| 终端、子进程会话与日志 | [constraints/terminal.md](docs/constraints/terminal.md) |
-| 工作日志 | [constraints/work-log.md](docs/constraints/work-log.md) |
-| 笔记（正文 / 图片 / 素材 / 笔记同步） | [constraints/notes.md](docs/constraints/notes.md) |
-| 知识库（原始数据 / 条目 / 一键清洗 / 索引重建 / 同步） | [constraints/kb.md](docs/constraints/kb.md) |
-| AI 助手（会话 / 项目 / 驱动本机 Pi / 模型与密钥 / 提示词与出口） | [constraints/ai.md](docs/constraints/ai.md) |
-| 用量与外观同步、账号登录 | [constraints/sync-and-auth.md](docs/constraints/sync-and-auth.md) |
-| 密码保险库（密钥 / 加解密 / 多机共写一份文件） | [constraints/vault.md](docs/constraints/vault.md) |
+| 通道契约 / store / 持久化 / 数据目录 / 首屏快照 | [ipc-and-state](docs/modules/ipc-and-state.md) |
+| 终端、子进程会话与日志 | [terminal](docs/modules/terminal.md) |
+| 工作日志 | [work-log](docs/modules/work-log.md) |
+| 笔记（正文 / 图片 / 素材 / 笔记同步） | [notes](docs/modules/notes.md) |
+| 知识库（原始数据 / 条目 / 一键清洗 / 索引重建 / 同步） | [kb](docs/modules/kb.md) |
+| AI 助手（会话 / 项目 / 驱动本机 Pi / 模型与密钥 / 提示词与出口） | [ai](docs/modules/ai.md) |
+| 用量与外观同步、账号登录 | [sync-and-auth](docs/modules/sync-and-auth.md) |
+| 密码保险库（密钥 / 加解密 / 多机共写一份文件） | [vault](docs/modules/vault.md) |
+
+没有列入表里的模块（首页、项目、技能、样式、视频、快捷启动、官网）也在 [docs/modules/](docs/modules/) 下各有一份文档，
+动手前先看它的「约束」一节。
 
 ## 6. Agent 操作与验证
 
-- 脚本：`npm run typecheck`、`npm test`、`cargo test --manifest-path src-tauri/Cargo.toml`、`npm run dev`、`npm run build`、
-  `npm run build:renderer`、`npm run dev:renderer`、`npm run preview:renderer`（渲染层单独构建到 `.preview/`）、`npm run icons`；
-  其余以 `package.json` 为准，不新增 lint / format 工具。
+- 脚本：`pnpm run typecheck`、`pnpm test`、`cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`、`pnpm run dev`、`pnpm run build`、
+  `pnpm run build:renderer`、`pnpm run dev:renderer`、`pnpm run preview:renderer`（渲染层单独构建到 `.preview/`）、`pnpm run icons`；
+  其余以 `package.json` 为准（根与 `apps/desktop` 各一份），不新增 lint / format 工具。
 - 改了 Rust 要跑 `cargo test` **与 `cargo build`**：`cargo test` 编译的是开着 `cfg(test)` 的那个 bin，被 `#[cfg(test)]` 关起来的东西
   在那边是可见的，拿它当生产代码用时 test 一片绿、build 才报「not found, an item that was configured out」。
-- 动过 `.vue` 的模板（加 / 删 / 挪标签）要顺手跑一次 `npm run build:renderer`：**`npm run typecheck` 查不出模板标签不配平** ——
+- 动过 `.vue` 的模板（加 / 删 / 挪标签）要顺手跑一次 `pnpm run build:renderer`：**`pnpm run typecheck` 查不出模板标签不配平** ——
   实测 vue-tsc 全绿而 vite 报 `Invalid end tag`、页面白屏，只有真的编译一遍模板才发现得了。
 - **改 Rust 前先关掉正在运行的应用**：exe 被占用会链接失败，而构建失败后跑起来的仍是旧二进制，结论会完全跑偏。
   `tauri build` 与 `tauri dev` 也别同时跑（抢同一个 `target/` 构建锁）。
-- **停掉 `npm run dev` 之后要确认那一串子进程真的都没了**：Windows 上杀掉外层命令不会带走它的子孙。按端口与进程名各查一遍
+- **停掉 `pnpm run dev` 之后要确认那一串子进程真的都没了**：Windows 上杀掉外层命令不会带走它的子孙。按端口与进程名各查一遍
   （`netstat -ano | grep LISTENING | grep -E ":(5274|9222)"`、`tasklist | grep -i workbench`），清理用 `taskkill /F /T /PID <pid>`。
 - `cargo test` 卡在链接或执行上时，两种绕法见 [browser-preview-verification.md](docs/dev-notes/browser-preview-verification.md)。
 - 排查 WebView2 里的运行时问题（未捕获异常、控制台警告、接口实际返回值）：用远程调试端口接 CDP 进页面求值，配方同上那份文档。
-- 功能新增或调整后更新 [features-and-architecture.md](docs/features-and-architecture.md)；碰了某个模块的硬约束，就同时更新
-  [docs/constraints/](docs/constraints/) 下对应的那一份。
-- 不提交构建产物与缓存（`out/`、`dist/`、`.preview/`、`*.tsbuildinfo`、`src-tauri/target/`）；
-  **绝不提交 `src-tauri/oauth.local.json`**（client_id / client_secret）。
+- 功能新增或调整后更新对应模块的 `docs/modules/<模块>.md`（约束变了就改「约束」一节）；
+  跨模块的通用事实更新 [features-and-architecture.md](docs/features-and-architecture.md)。
+- 不提交构建产物与缓存（`out/`、`dist/`、`.preview/`、`*.tsbuildinfo`、`apps/desktop/src-tauri/target/`）；
+  **绝不提交 `apps/desktop/src-tauri/oauth.local.json`**（client_id / client_secret）。
 - **视觉验证只在用户明确要求时做**：要做就把渲染层单独跑在浏览器里截图比对，用 `.preview/` 作工作区，
-  **做完删掉整个 `.preview/` 目录**；根目录 `vite.preview.config.ts` 是常驻入口，不要删。
+  **做完删掉整个 `.preview/` 目录**；`apps/desktop/vite.preview.config.ts` 是常驻入口，不要删。
 - 默认不执行 git 提交；用户要求时先看 `git status` / `git diff`，沿用中文提交风格。不硬编码用户数据目录与进程记录；
   不输出或提交任何密钥 / token。

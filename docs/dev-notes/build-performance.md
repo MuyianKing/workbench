@@ -14,7 +14,7 @@
 上表的体积是**当时**量的（功能还少）：同一份配置下现在实测 `workbench.exe` 已是 8,077,312 B。
 `lto` 两档之间的相对结论不受影响，但拿这里的绝对值去复核「某次改动省了多少体积」会得出错误结论。
 
-壁纸（`resources/backgrounds/`，随包安装）才是安装包体积的大头：7 张 4K 原图按接近无损编码，
+壁纸（`apps/desktop/resources/backgrounds/`，随包安装）才是安装包体积的大头：7 张 4K 原图按接近无损编码，
 合计 9.0 MB。按 q85 重编码后是 4.2 MB（分辨率不动，观感差异在默认 0.6 alpha 的蒙版下看不出来）。
 实测安装包 **12,062,079 B → 7,594,154 B（−4.26 MB，−37%）**，同期 `workbench.exe` 8,077,312 → 8,105,472 B
 （功能在长，exe 基本持平）。JPEG 本身 LZMA 压不动，所以壁纸体积几乎 1:1 进安装包，
@@ -22,11 +22,11 @@
 
 两处改动：
 
-- `src-tauri/Cargo.toml` 的 `[profile.release]`：`lto` 由 `true`（fat）改为 `"thin"`，
+- `apps/desktop/src-tauri/Cargo.toml` 的 `[profile.release]`：`lto` 由 `true`（fat）改为 `"thin"`，
   `codegen-units` 由 1 改为 16。fat LTO 会把所有 crate 的 IR 汇进单个 codegen 单元，
   由单个 LLVM 线程做完优化与代码生成，而这一步**改任何一行 Rust 都要整份重付**；
   thin LTO 允许 16 个单元并行，代价是体积涨约一成。
-- 仓库根新增 `.cargo/config.toml`，链接器换成工具链自带的 `rust-lld`。
+- `apps/desktop/.cargo/config.toml`，链接器换成工具链自带的 `rust-lld`。
 
 `strip = true` / `panic = "abort"` / `opt-level = "s"` 保持不动 —— 体积的大头在它们身上，
 拿它们换编译速度不划算。
@@ -36,7 +36,7 @@
 
 ## 完整打包链路
 
-`npm run dist`（即 `tauri build`）依次做三件事：跑 `beforeBuildCommand` 编前端、编 Rust、
+`ppnpm run dist`（即 `tauri build`）依次做三件事：跑 `beforeBuildCommand` 编前端、编 Rust、
 用 makensis 出安装包。实测两次连续打包：
 
 | | 首次（`target/` 里还没有 `custom-protocol` 变体） | 第二次 |
@@ -50,13 +50,13 @@
 Rust 两行与前端用什么打包器无关；**合计两行仍是 vite 7 那次的原值**，
 按新的前端耗时各减去约 5s 才是现在的链路总耗时。
 
-安装包落在 `src-tauri/target/release/bundle/nsis/`。上表那次的体积是 11,012,639 B；
+安装包落在 `apps/desktop/src-tauri/target/release/bundle/nsis/`。上表那次的体积是 11,012,639 B；
 现在功能变多、壁纸也重编码过，**这两个数字只当量级参考**，复核时以实测为准。
 
 几点必须知道：
 
 - **每次 `tauri build` 都会重编 `workbench` 这个最终 crate**，即使一行源码都没改。
-  原因是 `beforeBuildCommand` 重写了 `out/renderer`，而前端产物是在编译期内嵌进二进制的，
+  原因是 `beforeBuildCommand` 重写了 `apps/desktop/out/renderer`，而前端产物是在编译期内嵌进二进制的，
   `tauri-build` 盯着它。所以 release 档位的 LTO 设置**对每一次打包都直接生效** ——
   这也是为什么 fat LTO 改成 thin LTO 的收益在打包链路上是全额兑现的。
 - `tauri build` 实际执行的是
@@ -73,14 +73,14 @@ Rust 两行与前端用什么打包器无关；**合计两行仍是 vite 7 那�
 只有最终 crate 会被重编，这一段的耗时才是每次都要付的那一份。
 
 ```bash
-touch src-tauri/src/main.rs      # 只动 mtime，不改内容
-time cargo build --release --manifest-path src-tauri/Cargo.toml
+touch apps/desktop/src-tauri/src/main.rs   # 只动 mtime，不改内容
+time cargo build --release --manifest-path apps/desktop/src-tauri/Cargo.toml
 ```
 
 cargo 按 mtime 判定新鲜度，所以 `touch` 既触发了重编，又没往仓库里塞任何语义变化。
 对比前后必须用同一条命令、同一个 `touch` 目标，否则量到的不是同一件事。
 （注意上面这条命令量的是 `cargo build` 那个变体；要量打包链路上的那个变体，
-把命令换成 `npm run dist:dir`。）
+把命令换成 `ppnpm run dist:dir`。）
 
 ## 坑
 
@@ -99,18 +99,19 @@ powershell -NoProfile -Command "@(Get-CimInstance Win32_Process -Filter \"Name='
 `AGENTS.md` 里「改 Rust 前先关掉正在运行的应用」原本只讲了 exe 被占用（os error 5），
 并行编译本身也是打包变慢的一大来源。
 
-### `.cargo/config.toml` 必须放仓库根，不能放 `src-tauri/`
+### `.cargo/config.toml` 的位置：`apps/desktop/.cargo/`，别放 `apps/desktop/src-tauri/` 里
 
 cargo 只从**当前工作目录及其父目录**找 `.cargo/config.toml`，与 `--manifest-path` 无关。
-`tauri build` 与手敲 `cargo` 的 cwd 都是仓库根，所以配置得放仓库根；放 `src-tauri/.cargo/`
-下则从仓库根敲命令读不到，而若某条链路恰好以 `src-tauri` 为 cwd 又能读到，
-表现为「dev 生效、打包不生效」这种更难查的样子。
+monorepo 化后配置放在 `apps/desktop/.cargo/`：`tauri build` 与手敲 `cargo` 的 cwd 都在
+`apps/desktop/src-tauri`，向上找正好命中它。别把配置下沉进 `apps/desktop/src-tauri/.cargo/` ——
+那样它也能被读到（cwd 就在那儿），但 app 根这一层才是这条链路上「所有 cargo 入口」
+都覆盖的位置；将来若从别的目录起 cargo，埋深了就会出现「dev 生效、打包不生效」这种更难查的样子。
 
 验证配置有没有被读到不必真跑一遍构建，用 `cargo metadata` 看 `target_directory` 就够
 （临时往配置里加一行 `[build] target-dir = "target-cfgtest"`，看完删掉）：
 
 ```bash
-cargo metadata --manifest-path src-tauri/Cargo.toml --format-version 1 | tr ',' '\n' | grep target_directory
+cargo metadata --manifest-path apps/desktop/src-tauri/Cargo.toml --format-version 1 | tr ',' '\n' | grep target_directory
 ```
 
 ### `rust-lld` 不在 PATH 上，裸名字却能解析

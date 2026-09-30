@@ -8,15 +8,15 @@
 
 `.preview/` 是临时工作区，不是项目资产：
 
-- `.gitignore` 里的 `.preview/**` 会忽略它的全部内容，任何东西都不进版本库
-- **任务完成后直接删掉整个目录**（`rm -rf .preview`）——截图、日志、临时脚本一律不留
+- `.gitignore` 里的 `apps/desktop/.preview/**` 会忽略它的全部内容，任何东西都不进版本库
+- **任务完成后直接删掉整个目录**（`rm -rf apps/desktop/.preview`）——截图、日志、临时脚本一律不留
 - 值得留下的经验写进本文件，不靠保留脚本传递
-- **同时有别的会话在改 UI 时，各用各的子目录**（`.preview/<这次在验什么>/` 里放 `harness/`、
+- **同时有别的会话在改 UI 时，各用各的子目录**（`apps/desktop/.preview/<这次在验什么>/` 里放 `harness/`、
   `dist/`、`shot.mjs`、`out/`，配一份自己的 vite 配置）：`harness/main.ts`、`dist`、`shot.mjs`
   这些路径是共享的，另一个会话一 build 就把你的换掉 —— 症状是「脚本跑完什么都没量到、
   或者量到的是别人那个组件」，别顺着自己的组件找
 
-根目录的 `vite.preview.config.ts` 是常驻入口（挂在 `npm run dev:renderer` 上），不属于工作区，不要删。
+`apps/desktop/vite.preview.config.ts` 是常驻入口（挂在 `ppnpm run dev:renderer` 上），不属于工作区，不要删。
 
 ## 两条验证链路
 
@@ -35,11 +35,11 @@
 `vite.preview.config.ts` 只起 renderer（端口 5274），与构建无关：
 
 ```bash
-npx vite build --config vite.preview.config.ts
-# 产物在 .preview/dist
+cd apps/desktop && npx vite build --config vite.preview.config.ts
+# 产物在 apps/desktop/.preview/dist
 ```
 
-开发态用 `npm run dev:renderer`。注意 vite（7 / 8 都一样）只监听 IPv6 的 `localhost`，脚本里访问 `127.0.0.1:5274`
+开发态用 `ppnpm run dev:renderer`。注意 vite（7 / 8 都一样）只监听 IPv6 的 `localhost`，脚本里访问 `127.0.0.1:5274`
 会被拒（浏览器里打开 http://localhost:5274/ 正常）。
 
 ### 二、喂假数据：顶替 `window.workbench`
@@ -70,7 +70,7 @@ window.workbench = new Proxy(
 - 起浏览器之前先自己 `fetch` 一遍 `/` 与桩文件、断言 200：页面 404 时无头那边只会得到一张空白，
   而现象会指向完全无关的地方。判据还是那条老的 —— `document.documentElement.dataset.theme` 是空的
   就说明 `getBootstrap` 没生效（HTML 里有那行标签不代表文件真的在）；
-- 假的内置壁纸清单要和 `resources/backgrounds/` 保持一致，并把原图拷进 `dist`；
+- 假的内置壁纸清单要和 `apps/desktop/resources/backgrounds/` 保持一致，并把原图拷进 `dist`；
   缩略图按 Rust 侧 `imaging.rs` 的做法压到 360 宽，别拿几兆的原图铺设置面板
 
 #### 只验一个组件
@@ -79,10 +79,10 @@ window.workbench = new Proxy(
 vite 配置，把 `root` 指到工作区内的一个小目录，只挂那一个组件：
 
 ```ts
-// .preview/vite.harness.config.ts
+// apps/desktop/.preview/vite.harness.config.ts
 root: resolve(__dirname, 'harness'),                       // 工作区里的 index.html + main.ts
-publicDir: resolve(__dirname, '../src/renderer/public'),   // 见下面那条：Vditor 要靠它
-resolve: { alias: { '@': '…/src/renderer/src', '@shared': '…/src/shared' } },
+publicDir: resolve(__dirname, '../apps/desktop/src/renderer/public'),   // 见下面那条：Vditor 要靠它
+resolve: { alias: { '@': '…/apps/desktop/src/renderer/src' } },   // 域包（@workbench/*）按包名解析，不配别名
 plugins: [vue(), vditorAssets()]                           // sync-vditor-assets.mjs 导出的那个插件
 ```
 
@@ -95,17 +95,17 @@ plugins: [vue(), vditorAssets()]                           // sync-vditor-assets
 这样一次 build 一两秒，也不用碰仓库里的任何文件。
 
 **挂到跟 Vditor 有关的组件时，`publicDir` 与 `vditorAssets()` 两样都要**：编辑器本体打在 JS 里，
-但图标 sprite、语言包、lute 是运行时按 `cdn` 取的，它们住在 `src/renderer/public/vditor/dist/`
+但图标 sprite、语言包、lute 是运行时按 `cdn` 取的，它们住在 `apps/desktop/src/renderer/public/vditor/dist/`
 （由那个插件在 dev / build 前同步）。`root` 指到工作区之后 `public/` 默认变成工作区自己的目录，
 少了这两样会一路 404 —— 症状是「编辑器起不来 / 图标全空」，别顺着组件代码找。
 
 ### 三、Rust 侧逻辑走 `cargo test`
 
-图像解码缩放、路径解析、端口判定、进程树终止这些逻辑现在都在 `src-tauri/src/` 里，
+图像解码缩放、路径解析、端口判定、进程树终止这些逻辑现在都在 `apps/desktop/src-tauri/src/` 里，
 浏览器预览够不到，也不该为了验它们去拉整个应用：测试就写在与实现同文件的 `#[cfg(test)] mod tests` 中。
 
 ```bash
-cargo test --manifest-path src-tauri/Cargo.toml
+cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
 ```
 
 改 Rust 前先关掉正在运行的应用，否则链接会因 exe 被占用而报「拒绝访问」。另外 `cargo test`
@@ -125,7 +125,7 @@ cargo test --manifest-path src-tauri/Cargo.toml
 明明只是命令名拼错、参数名没对上，预览里照样一片正常。这时直接连真应用：
 
 ```bash
-WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="--remote-debugging-port=9222" npm run dev
+WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="--remote-debugging-port=9222" pnpm run dev
 ```
 
 起来之后 `/json` 里就有页面 target，连它的 `webSocketDebuggerUrl` 发 `Runtime.evaluate`
@@ -144,7 +144,7 @@ WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="--remote-debugging-port=9222" npm run dev
   （项目里的路径工具本来就会归一方向），`\\` 在两层引号之后很可能变成别的字符，
   那时量到的「相对路径没生效」其实是路径串本身就不是你想的那样
 - **要动设置又不想污染自己的配置，就把整个 `APPDATA` 指到临时目录再起应用**：
-  `APPDATA='C:\Users\...\Temp\wb-smoke' npm run dev`。数据目录是 `%APPDATA%\Workbench\data`
+  `APPDATA='C:\Users\...\Temp\wb-smoke' pnpm run dev`。数据目录是 `%APPDATA%\Workbench\data`
   （**不是 `%APPDATA%` 本身**），所以这一下连项目列表、设置、笔记文件夹一起隔离了；
   想从某个状态起步（例如「已经选好笔记文件夹」）就先把 `workbench-data.json` 写进去再启动 ——
   比在页面上找入口省事，也不用像上一节那样记着「测完还原」。收尾时连临时目录一起删掉。
@@ -175,7 +175,7 @@ WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="--remote-debugging-port=9222" npm run dev
   踩过的例子：Gitee 的 `/raw/` 防盗链只认 `Referer` —— 不带、或者是 gitee 的域名才 200，
   带 `Referer: http://localhost:5274/` 直接 403（UA 与 `Sec-Fetch-*` 都不影响），
   而 WebView 一定带 Referer，于是 curl 全绿、界面全裂。顺手的修法是页面级
-  `<meta name="referrer" content="no-referrer">`（见 `src/renderer/index.html`）。
+  `<meta name="referrer" content="no-referrer">`（见 `apps/desktop/src/renderer/index.html`）。
 
 ## 无头截图配方
 
@@ -311,7 +311,7 @@ await send('Runtime.evaluate', { expression: `(async () => {
   判据用数字：亮色修完是 17.4 / 10.0 / 5.7，暗色是 15 / 9.4 / 5.1。
 
 **关键**：探针里复算主题色的算法（`mix` 混色、`inkOf` 取字色）必须和
-[`src/shared/accent-color.ts`](../../src/shared/accent-color.ts) 里真实实现**同源照抄**，
+[`packages/appearance/src/accent-color.ts`](../../packages/appearance/src/accent-color.ts) 里真实实现**同源照抄**，
 并且切场景的方式要和 `bootstrap.ts` 的 `writeAccentColor` 一致（空值就是逐个摘掉内联属性）。
 算法不一致的话，量出来的是一份假象。
 
@@ -405,7 +405,7 @@ await send('Runtime.evaluate', { expression: `(async () => {
   `<script type="module">`，页面一片空白、控制台外没有任何迹象。在截图脚本里起一个十几行的
   静态服务器（`node:http` + `readFileSync`，按后缀给 `Content-Type`）指向 `.preview/dist` 即可。
 - **假的 `window.workbench` 必须实现 `getBootstrap`**：`bootstrapSnapshot()` 走的就是它
-  （见 [bootstrap.ts](../../src/renderer/src/bootstrap.ts)），缺了它整个 store 退回 `DEFAULT_SETTINGS`
+  （见 [bootstrap.ts](../../apps/desktop/src/renderer/src/bootstrap.ts)），缺了它整个 store 退回 `DEFAULT_SETTINGS`
   + 异步加载那条老路 —— 而单独挂一个组件时没人调 `init()`/`loadData()`，于是设置永远是默认值。
   症状是「按设置分支渲染的区块根本不出现」（比如需要先填仓库地址才显示的那几块），
   很容易误判成新写的 `v-if` 写错了。顺手给 `getThemeConfig` 也补上。
@@ -414,7 +414,7 @@ await send('Runtime.evaluate', { expression: `(async () => {
   截图里「有外壳、有标题栏」看着像跑通了，其实一个通道都没验到（踩过一次，A/B 比对差点据此收工）。
   判据是 `document.documentElement.dataset.theme` 有没有被写上：空的就说明 `getBootstrap` 没生效。
 - **纯浏览器里必定有一条 `Tauri 运行时不可用，无法调用 data_load` 异常**，这是环境造成的、不是产物的问题：
-  `main.ts` 调的 `initState()`（[state.ts](../../src/renderer/src/workbench/state.ts)）**直接** `invoke('data_load')`，
+  `main.ts` 调的 `initState()`（[state.ts](../../apps/desktop/src/renderer/src/workbench/state.ts)）**直接** `invoke('data_load')`，
   不经过 `window.workbench`，所以顶替 `window.workbench` 拦不住它。它只让 `initState` 提前 reject
   （`app.mount` 在 `finally` 里，界面照常出），别顺着这条去查产物。
   反过来，`window.workbench` 的桩是有效的：`installTauriWorkbench()` 里 `hasTauri()` 为假就直接 return，不会覆盖它。
@@ -470,7 +470,7 @@ await send('Runtime.evaluate', { expression: `(async () => {
   症状是「明明配好了，界面还说 Node 太旧 / 没找到 Pi」。要把这一面也喂上：
   `window.__TAURI__ = { core: { invoke }, event: { listen } }`，**回的是裸值**（`ai_runtime`
   回运行时的结构、`ai_key_state` 回布尔），包成 Result 是 `window.workbench` 那一层
-  `guard` 干的 —— 两面各自的形状不同，见 [bridge.ts](../../src/renderer/src/workbench/bridge.ts)。
+  `guard` 干的 —— 两面各自的形状不同，见 [bridge.ts](../../apps/desktop/src/renderer/src/workbench/bridge.ts)。
   顺手在桩里记一份调用名单（`window.__calls.push(command)`），「点那颗按钮到底发没发出去」就能直接问。
 - **截图一片空白先量几何，别猜渲染**：把 `getBoundingClientRect()` 打出来最快。踩过的是
   「挂载点排在视口之外」—— 页面上那个空的 `#app` 占着 100% 高度，后加的盒子接在它后面，
