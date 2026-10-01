@@ -84,6 +84,19 @@ body.is-resizing-ai-tree * {
   user-select: none !important;
 }
 
+/* 拖 AI 预览栏左缘那条缝：同一副兜法（指针会扫过对话与预览正文） */
+body.is-resizing-ai-preview,
+body.is-resizing-ai-preview * {
+  cursor: ew-resize !important;
+  user-select: none !important;
+}
+
+/* 沙箱 iframe 是另一个文档，指针一进它里面父窗口就收不到 pointermove、拖拽就断 ——
+   拖动期间让它对指针透明（HTML 预览整栏都是它，必须放行），事件才到得了拖拽监听 */
+body.is-resizing-ai-preview iframe {
+  pointer-events: none !important;
+}
+
 /* 拖知识库页那条左右分隔条：与笔记 / 视频 / AI 页同一副兜法（指针会扫过正文阅读区） */
 body.is-resizing-kb-tree,
 body.is-resizing-kb-tree * {

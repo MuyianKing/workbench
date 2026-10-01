@@ -7,18 +7,26 @@ AI 助手（ai）的文档：先读「约束」一节（不能破的规矩）；
 ## 约束
 
 关键落点：`packages/ai/src/ai.ts`（服务 / 模型 / 会话的形状与收敛、`thinkingLevelMap`、提示词、启动参数、RPC 帧解析、
-历史消息 → 日志行，带单测）、`packages/ai/src/pi-skills.ts`（技能的根与开关键、交给 Pi 的清单，带单测）、
+历史消息 → 日志行，带单测）、`packages/ai/src/ai-preview.ts`（回答里的站内链接 → 预览目标的解析与画法判定，带单测）、
+`packages/ai/src/pi-skills.ts`（技能的根与开关键、交给 Pi 的清单，带单测）、
 `apps/desktop/src-tauri/src/pi_skills.rs`（技能的列 / 装 / 卸、手写 zip 与 `Location` 跳转，带单测）、
 `apps/desktop/src-tauri/src/ai.rs`（提示词进 stdin、权限扩展、models.json、拉模型列表、密钥、环境变量、起会话、拼 `--skill`、删会话）、
 `workbench/ai.ts`（按会话 id 认领进程事件、确认帧应答、`aiRequest` / `aiAbort` 与会话删除）、
 `workbench/pi-skill.ts`（技能四条通道适配）、`stores/ai.ts`（编排、每会话运行态、确认队列、服务增删改与 models.json 对齐）、
 `stores/ai-skills.ts`（两栏扫描、开关、装 / 卸）；组件：`AiView.vue`（左树右对话，左栏底部一行是技能入口与收起开关）、
 `AiSessionTree.vue`、`AiLocationBar.vue`（两屏共用）、`AiComposer.vue`（贴图缩略图与 `/skill:` 候选）、
-`AiSkillDialog.vue`、`AiRunPanel.vue`（对话画法与确认条）、`AiModelDialog.vue` / `AiProviderDialog.vue` /
-`AiPresetGrid.vue` / `AiModelPicker.vue`（模型管理三层）。
+`AiSkillDialog.vue`、`AiRunPanel.vue`（对话画法与确认条）、`AiPreviewPane.vue`（右侧预览栏）、
+`AiModelDialog.vue` / `AiProviderDialog.vue` / `AiPresetGrid.vue` / `AiModelPicker.vue`（模型管理三层）。
 
 - **会话是头等对象**：一个会话 = 一个工作目录里的一段连续对话，与 Pi 的会话文件一一对应。
-  `aiSessions` 只存调度字段（id / dir / title / createdAt / updatedAt，收敛见 `sanitizeAiSessions`），
+  `aiSessions` 存调度字段（id / dir / title / createdAt / updatedAt，收敛见 `sanitizeAiSessions`）
+  **加这个会话自己的一份配置**（provider / model / thinking / permission 四个可选字段，
+  同函数收敛 —— 认得出才记，坏值不写字段）：**composer 那一栏（权限 / 模型 / 档位）每个会话
+  各自独立**，起进程参数（`--provider` / `--model` / `--thinking` 与那份权限扩展）按会话自己的
+  生效配置取（stores/ai.ts 的 `configOf`）；没记过的回落设置里的默认（老会话不用迁移），
+  在会话上改任何一样就把**那一刻生效的四样一起快照**进它；起始屏（还没建会话）改的才是
+  设置默认 —— 之后新建的对话用它起步。配置变了要收进程重开：按会话精确收（哪个会话变了
+  收哪个），改服务那种整份 models.json 重写的入口仍旧全收。
   对话本身不在应用的数据文件里；左栏按 `dir` 分组（`aiSessionGroups`），第一层项目、第二层会话。
   **工作目录创建后定死**（Pi 按目录分组，换目录等于换对话），要换就新建；`aiActiveSession` 记上次打开的那个
   （认不出回最近说过话的）。**「起一段新的」只是切屏**（`drafting` / `startNew`），**不先建空会话**；
@@ -47,6 +55,23 @@ AI 助手（ai）的文档：先读「约束」一节（不能破的规矩）；
   （脱敏空块不画）。**顶部状态行只说等确认 / 接历史 / 在停 / 装 Pi / 出错**，「运行中」的动静跟过程块走
   （转圈 + 正文末尾竖条）。**轮间「开始执行 / 执行结束」不画**（`isTurnMarker`）—— 连续对话里是噪音。
   **对话区不铺底色、不描边**（底色归 `.panel` 与卡片不透明度，再铺一层就是灰压在对话上）。
+- **正文里的站内链接与「写下 N 个文件」都点得动，开进右侧预览栏**（`AiPreviewPane.vue`，
+  DOCX / PPTX / HTML 三个画法各是 `AiPreviewDoc` / `AiPreviewSlides` / `AiPreviewHtml`）：
+  这是**页内的分栏面板，不是弹层**（读文件与继续看对话要同时进行，AppDialog 那套不适用）。
+  **一个文件一个 Tab**（`previews` + `activeKey`，行上的 × 关那一个，全关了整栏收起、
+  对话占满整行；切 Tab 是 v-show 保活，PPTX 不重解析；再点同一个文件 = 摊开它并重读一遍）；
+  **宽度拖预览栏左缘那条缝改**（`use-pointer-drag`，280 起、给对话留一截，不落盘重启回默认）。
+  只有非 http(s) / mailto 的地址会进预览（外部地址照旧交系统浏览器，见 MarkdownView 的 `internalLinks`），
+  相对地址一律对到**会话工作目录**解析（口径唯一出处 `resolveAiPreview`，`../` 出目录是本意）；
+  画法按扩展名：markdown / html 按正文渲染（html 走**沙箱 iframe**，`sandbox` 全禁 —— AI 写的
+  HTML 里若有脚本，绝不能在带宿主能力的 webview 里执行，这是硬边界）、图片显示原图、
+  docx / pptx 交给渲染库（`docx-preview` / `@aiden0z/pptx-renderer`，二者**不出网**：资源都出自文件
+  本身，pptx 的 pdf.js 兜底必须显式 `pdfjs: false` 关掉 —— 那是潜在的新出口；库都是动态引的，
+  不用就不进包）、其余文本等宽原文；docx / pptx 的二进制经 `fs_read_base64`（commands.rs，
+  base64 已在依赖图里）回传，解码用 `decodeBase64ToBuffer`；读不到 / 超限（文本 2 MB、
+  二进制约 24 MB，`AI_PREVIEW_MAX_*`）就地给一行错因；**Excel（.xlsx/.xls）与老二进制格式
+  （.doc/.ppt）明确不支持**，解析那层就给出理由、不掉进文本通道读乱码。换会话（换工作目录）
+  预览整栏收起。
 - **这一页不摆提示行，弹窗里也不写说明段**：缺什么由 `blocking` 说，只出现在**发送按钮的悬停**里（`sendTitle`）；
   页面上只留控件自己的字（栏名、placeholder、composer 里那句工具边界），与首页「不打招呼不问好」同一条语气。
   弹窗里没有「只留一句」的余地：说明句、空态提示、生效时机说明全不写，只有控件与数据；
@@ -91,7 +116,9 @@ AI 助手（ai）的文档：先读「约束」一节（不能破的规矩）；
   `maxTokens`）—— serde 静默丢弃认不出的键，名字对不上**两边单测都绿**（踩过：勾了「图片」永远写不进 models.json）。
   思考档位落成 `thinkingLevelMap`：`reasoning: true` 时 off–high 默认支持（不写），`xhigh` / `max` 必须显式给，
   不支持的写 `null`；下拉只列支持的档位，挑了不支持的退默认档（`pickAiThinking`）。
-- **默认模型一条设置**（`aiDefaultProvider` + `aiDefaultModel`，行为记忆），挑的没了退回第一个能挑的
+- **默认模型一条设置**（`aiDefaultProvider` + `aiDefaultModel`，行为记忆）：它是**起始屏与
+  新对话的默认** —— 会话建起来之后 composer 那一栏就各自独立了（见「会话是头等对象」那条），
+  模型管理弹窗顶上那一栏写的仍是这个默认。挑的没了退回第一个能挑的
   （`pickAiChoice`）。**只由 `--provider <服务名> --model <模型 id>` 钉住**（piLaunch，有单测）：内置 Pi **不读
   `PI_MODEL`**、`models.json` 的清单只当候选，两处都不给它退到自己那张内置默认表（踩过：`opencode-go` 被按内置表
   发了 `kimi-k2.6`，用户清单里的模型没用上，端点回 410）。**验法**：把 models.json 指向本地假端点（回 400 即可）
@@ -127,6 +154,8 @@ AI 助手（ai）的文档：先读「约束」一节（不能破的规矩）；
   所以先按空提示词起一次进程再要消息；读过的（`hydrated`）不再读，之后由事件流接上。系统消息与**成功的**
   工具结果整条丢掉（前者是提示词与工具清单、后者一次几百行）；**失败的工具结果留一行错因**（与实时那条共用
   `failureLine`）。**没说过话的会话跳过这一趟**（没有历史，白起一次进程用户看得出「卡了一下」）。
+  「在哪个目录里工作」那行插在**最后一句用户消息之后**（与实时起进程同一处）—— 接在轮尾会把
+  `aiTurns` 该摘的答案顶进过程块，重开一看整段回话都收在折叠的「过程」里。
   Pi 起进程那句 `Warning: No project session found` 是我们要求的（新会话就这么建），别画进对话（`BENIGN_STARTUP`）。
 - **一个会话一个进程**（进程会话 id `ai:<会话 id>`）：一轮跑完**不收**（上下文在它那儿），所以能一句一句聊下去；
   几个会话可同时在跑（`runs` 按会话 id 分，界面一次画一个）。模型 / 档位 / 权限在起进程时定死：改设置后闲着的
@@ -246,7 +275,9 @@ AI 助手（ai）的文档：先读「约束」一节（不能破的规矩）；
 - **一轮的流程**：写一句 → 交给那条会话的进程（没在跑先起，同一会话一句一轮、同一根 stdin）→
   事件流翻成对话行（失败也落错误行）→ `agent_settled` 收尾但进程留着；停止走 `abort`、应答没回来再按进程树杀。
   画法（气泡、过程块、收据、流式）见 [AiProcess.vue](../../apps/desktop/src/renderer/src/components/AiProcess.vue)
-  与 [../ai/constraints.md](ai.md)。
+  与 [../ai/constraints.md](ai.md)；正文里的站内链接与「写下 N 个文件」点开在右侧预览栏
+  （`AiView` 编排取数与图片授权、`AiPreviewPane.vue` 画，DOCX / PPTX / HTML 三个画法在
+  `AiPreviewDoc` / `AiPreviewSlides` / `AiPreviewHtml`，解析口径见 `packages/ai/src/ai-preview.ts`）。
 - **Pi 已随包内置，Node 用系统里的**：资源解析与内置壁纸同一条路子（打包走 `resource_dir`、开发态读仓库目录，
   `\\?\` 前缀要剥）；两处都没有才退回 PATH 上的全局 `pi`，再没有才显示「安装 Pi」（`npm install -g`，
   与包管理器安装同一条会话通道）—— 打包出的安装包里内置那份永远在，这颗按钮只在开发态可能见到。
@@ -262,7 +293,9 @@ AI 助手（ai）的文档：先读「约束」一节（不能破的规矩）；
   两屏排版与 composer 归
   [AiView.vue](../../apps/desktop/src/renderer/src/components/AiView.vue) 与
   [AiComposer.vue](../../apps/desktop/src/renderer/src/components/AiComposer.vue)（composer 自己一张卡片，
-  父级只决定摆哪儿）；模型管理两屏各自一个组件：
+  父级只决定摆哪儿）；回答里的文件链接点开的右侧预览栏归
+  [AiPreviewPane.vue](../../apps/desktop/src/renderer/src/components/AiPreviewPane.vue)（页内分栏不是弹层，
+  取数与授权都在 AiView）；模型管理两屏各自一个组件：
   [AiModelDialog.vue](../../apps/desktop/src/renderer/src/components/AiModelDialog.vue)（默认模型 + 服务列表）
   与 [AiProviderDialog.vue](../../apps/desktop/src/renderer/src/components/AiProviderDialog.vue)（加 / 改服务），
   后者的两半又是

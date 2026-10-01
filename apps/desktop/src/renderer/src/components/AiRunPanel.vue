@@ -15,6 +15,8 @@
  *    最后那段正文弹出去（见 aiTurns 的 live）；
  *  - **答案（收尾时最后那段正文）摊在外面**（走 MarkdownView 渲染，没有气泡框）：它常常几屏长，
  *    套个框只会把阅读面积削掉一圈。过程里那些旁白照常渲染 markdown，只是跟着过程一起收着；
+ *    正文里的**站内链接与「写下 N 个文件」都点得动** —— 经 `open` 交给 AiView，在右侧
+ *    预览栏里打开（外部 http(s) 地址照旧交系统浏览器，见 MarkdownView）；
  *  - 过程里的工具行与系统行是**浅灰的窄行**（只有工具行里的路径用等宽），报错走 `--st-fail`；
  *    想的那几段是纯文本（草稿里的半截标记不该被当成排版）。
  *    **轮与轮之间的那两条进度行（开始执行 / 执行结束）不画**（见 stores/ai.ts 的 isTurnMarker）——
@@ -69,7 +71,17 @@ const props = defineProps<{
   written: string[]
 }>()
 
-const emit = defineEmits<{ install: []; answer: [id: string, allowed: boolean] }>()
+const emit = defineEmits<{ install: []; answer: [id: string, allowed: boolean]; open: [href: string] }>()
+
+/** 正文里的站内链接与「写下 N 个文件」都从这儿出去：AiView 对到工作目录、开右侧预览栏 */
+function openLink(href: string): void {
+  emit('open', href)
+}
+
+/** 「写下 N 个文件」那行只显示文件名，全路径在悬停里 */
+function fileNameOf(path: string): string {
+  return path.split(/[\\/]/).pop() || path
+}
 
 const scroller = ref<HTMLElement | null>(null)
 
@@ -214,8 +226,13 @@ const hasHead = computed(() => notice.value !== null || !props.piVersion)
             >
               <!-- 想的那一段：草稿，纯文本（半截标记不该被当成排版） -->
               <p v-if="line.kind === 'thinking'" class="msg__think">{{ line.text }}</p>
-              <!-- 中途那些还没成答案的正文：照常渲染 markdown -->
-              <MarkdownView v-else-if="line.kind === 'text'" :source="line.text" />
+              <!-- 中途那些还没成答案的正文：照常渲染 markdown；站内链接开进右侧预览栏 -->
+              <MarkdownView
+                v-else-if="line.kind === 'text'"
+                :source="line.text"
+                internal-links
+                @internal="openLink"
+              />
               <!-- 工具行、系统行、报错：窄行注脚（鼠标停一下才出 detail） -->
               <p
                 v-else
@@ -235,14 +252,14 @@ const hasHead = computed(() => notice.value !== null || !props.piVersion)
             <!-- 正在长出来的那段回话：跑着的时候它也是过程的一部分（收尾才定答案），
                  落地就落在原地不跳；末尾一根小竖条表示它还在写 -->
             <div v-if="turn.index === liveIndex && streaming" class="msg is-text is-streaming">
-              <MarkdownView :source="streaming" />
+              <MarkdownView :source="streaming" internal-links @internal="openLink" />
               <span class="msg__caret" aria-hidden="true" />
             </div>
           </AiProcess>
 
           <!-- 这一轮最后那段正文：这就是答案，摊在外面 -->
           <div v-if="turn.answer" class="msg is-text">
-            <MarkdownView :source="turn.answer.text" />
+            <MarkdownView :source="turn.answer.text" internal-links @internal="openLink" />
           </div>
 
           <!-- 答案之后那几行（「用时 …」）：一轮的句号 -->
@@ -277,7 +294,9 @@ const hasHead = computed(() => notice.value !== null || !props.piVersion)
     <div v-if="written.length" class="run__foot">
       <p class="run__written">
         写下 {{ written.length }} 个文件：
-        <span class="mono">{{ written.join('、') }}</span>
+        <template v-for="(path, index) in written" :key="path">
+          <button type="button" class="run__written-file mono" :title="path" @click="openLink(path)">{{ fileNameOf(path) }}</button><span v-if="index < written.length - 1">、</span>
+        </template>
       </p>
     </div>
   </div>
@@ -562,5 +581,24 @@ const hasHead = computed(() => notice.value !== null || !props.piVersion)
   font-size: var(--fs-micro);
   line-height: 1.7;
   word-break: break-word;
+}
+
+/* 写下的文件是颗长成链接样子的按钮：点开进右侧预览栏。配色与对话里的 markdown 链接
+   同一副（--el-color-primary），常驻细下划线 —— 不用悬停就知道点得开 */
+.run__written-file {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--el-color-primary);
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+
+.run__written-file:hover {
+  color: var(--el-color-primary-dark-2);
+  text-decoration-thickness: 2px;
 }
 </style>

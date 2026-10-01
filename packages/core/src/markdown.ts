@@ -47,14 +47,40 @@ md.renderer.rules.table_close = (tokens, idx, options, env, self) =>
   `${renderToken(tokens, idx, options, env, self)}</div>`
 
 /**
+ * renderMarkdown 的调用侧参数（走 markdown-it 的 env 进渲染规则）：
+ * `resolveImageSrc` 把正文里图片的相对地址换成别的（预览栏拿它把相对图片
+ * 对到磁盘文件再换成 asset URL）；返回空值就保留原地址不动。
+ */
+export interface MarkdownEnv {
+  resolveImageSrc?: (src: string) => string | null
+}
+
+/** 默认的图片渲染；改写 src 用的是它，所以这里取同一份实现 */
+const renderImage = md.renderer.rules.image ?? ((tokens, idx, options, _env, self) =>
+  self.renderToken(tokens, idx, options))
+
+md.renderer.rules.image = (tokens, idx, options, env, self) => {
+  const resolve = (env as MarkdownEnv | undefined)?.resolveImageSrc
+  if (resolve) {
+    const src = tokens[idx].attrGet('src')
+    if (typeof src === 'string' && src) {
+      const resolved = resolve(src)
+      if (resolved) tokens[idx].attrSet('src', resolved)
+    }
+  }
+  return renderImage(tokens, idx, options, env, self)
+}
+
+/**
  * markdown 原文 → 可以直接插入页面的 HTML 片段（空内容返回空串，不留一个空段落）。
  *
  * 安全性由 markdown-it 保证：`html: false` 转义原文里的标签，它自带的 `validateLink`
  * 也挡掉了 `javascript:` / `data:` 这类地址。
  */
-export function renderMarkdown(source: string): string {
+export function renderMarkdown(source: string, env?: MarkdownEnv): string {
   if (typeof source !== 'string' || !source.trim()) return ''
-  return md.render(source)
+  // markdown-it 的 Env 带索引签名，接口形状要顺从它
+  return md.render(source, (env ?? {}) as Record<string, unknown>)
 }
 
 /**
@@ -76,6 +102,26 @@ export function markdownLinks(source: string): string[] {
     }
   }
   return hrefs
+}
+
+/**
+ * 原文里的图片地址（`![说明](地址)` 的地址；链接、纯文本里的方括号都不算）。
+ *
+ * 走同一份 token 流，认出来的与渲染出来的是同一批 —— 预览栏先按它把正文里的
+ * 相对图片挨个授权，再在渲染时把地址换成 asset URL（见 MarkdownEnv）。
+ */
+export function markdownImages(source: string): string[] {
+  if (typeof source !== 'string' || !source.trim()) return []
+
+  const srcs: string[] = []
+  for (const token of md.parse(source, {})) {
+    for (const child of token.children ?? []) {
+      if (child.type !== 'image') continue
+      const src = child.attrGet('src')
+      if (typeof src === 'string' && src) srcs.push(src)
+    }
+  }
+  return srcs
 }
 
 /**

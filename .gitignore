@@ -11,3 +11,7 @@ apps/desktop/.preview/**
 apps/desktop/src/renderer/public/vditor/
 # Pi 的内置运行时：构建前由 apps/desktop/scripts/vendor-pi.mjs 生成（瘦身方案见 constraints/ai.md），不进版本库
 apps/desktop/resources/pi/
+# monorepo 迁移前旧根布局的残留（真身在 apps/desktop/ 下，里面还有旧构建产物与本地凭据），不进版本库
+/resources/
+/src/
+/src-tauri/

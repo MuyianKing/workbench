@@ -10,7 +10,11 @@
  *
  * `internalLinks` 置真时，非外部地址的链接不再被吞掉、改经 `internal` 事件交给父层
  * （地址原样交出去，怎么解析归父层：知识库条目阅读按它做站内跳转，见 shared/kb-lint.ts
- * 的 resolveKbLink）。默认关 —— 工作日志、AI 对话那几处照旧只放行外部地址。
+ * 的 resolveKbLink；AI 对话按它把回答里的文件链接开进右侧预览栏，见 resolveAiPreview）。
+ * 默认关 —— 工作日志那几处照旧只放行外部地址。
+ *
+ * `resolveImageSrc` 给了就把它交给渲染层（见 core 的 MarkdownEnv）：正文里图片的地址
+ * 换成调用方给的（AI 预览栏用它把相对图片换成已授权的 asset URL），返回空值保留原地址。
  */
 import { computed } from 'vue'
 import { ElMessage } from 'element-plus'
@@ -20,11 +24,17 @@ const props = defineProps<{
   source: string
   /** 站内链接（相对路径）要不要交给父层：真 = emit `internal`，假 = 拦下不处理 */
   internalLinks?: boolean
+  /** 图片地址的替换函数（不给就按原文渲染） */
+  resolveImageSrc?: (src: string) => string | null
 }>()
 
 const emit = defineEmits<{ internal: [href: string] }>()
 
-const html = computed(() => renderMarkdown(props.source))
+const html = computed(() =>
+  props.resolveImageSrc
+    ? renderMarkdown(props.source, { resolveImageSrc: props.resolveImageSrc })
+    : renderMarkdown(props.source)
+)
 
 /** 只有带协议的 http(s) / mailto 才值得交给系统；其余地址拦下，站内的看父层要不要 */
 const OPENABLE = /^(https?:|mailto:)/i

@@ -691,6 +691,13 @@ export interface AiSession {
   title: string
   createdAt: number
   updatedAt: number
+  /** 这个会话自己的模型（服务名 + 模型 id 分开记）：没记过的回落设置里的默认模型 */
+  provider?: string
+  model?: string
+  /** 思考档位（AI_THINKING_LEVELS 七档 id 之一）：没记过的回落设置里的默认档 */
+  thinking?: string
+  /** 工具权限（AI_PERMISSION_MODES 之一）：没记过的回落设置里的默认档 */
+  permission?: string
 }
 
 /** 会话 id 的长度上限（uuid 是 36 位，留一倍余量） */
@@ -752,14 +759,27 @@ export function sanitizeAiSessions(value: unknown): AiSession[] {
     if (!id || !dir || seen.has(id)) continue
     seen.add(id)
     const createdAt = sanitizeStamp(record.createdAt)
-    result.push({
+    const entry: AiSession = {
       id,
       dir,
       title: sanitizeAiSessionTitle(record.title),
       createdAt,
       // 老文件里可能没有 updatedAt：那就以创建时间为准（排序只看它）
       updatedAt: sanitizeStamp(record.updatedAt) || createdAt
-    })
+    }
+    // 会话自己那份配置（模型 / 档位 / 权限）：**认得出才记**，认不出的不写字段 ——
+    // 读的时候回落设置里的默认（见 stores/ai.ts 的 configOf）。老文件没有这些字段，原样有效
+    const provider = sanitizeAiName(record.provider)
+    if (provider) entry.provider = provider
+    const model = typeof record.model === 'string' ? record.model.trim().slice(0, 200) : ''
+    if (model) entry.model = model
+    if (AI_THINKING_LEVELS.some((level) => level.id === record.thinking)) {
+      entry.thinking = record.thinking as string
+    }
+    if (AI_PERMISSION_MODES.some((mode) => mode.id === record.permission)) {
+      entry.permission = record.permission as string
+    }
+    result.push(entry)
     if (result.length >= AI_SESSION_MAX) break
   }
   return result

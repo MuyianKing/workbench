@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { markdownLinks, markdownToPlainText, renderMarkdown } from './markdown'
+import { markdownImages, markdownLinks, markdownToPlainText, renderMarkdown } from './markdown'
 
 describe('renderMarkdown', () => {
   it('空内容渲染成空串', () => {
@@ -12,6 +12,17 @@ describe('renderMarkdown', () => {
       '<p>&lt;img src=x onerror=alert(1)&gt;</p>\n'
     )
     expect(renderMarkdown('a & b <c>')).toBe('<p>a &amp; b &lt;c&gt;</p>\n')
+  })
+
+  it('resolveImageSrc 把图片地址换成给定的；返回空值保留原地址', () => {
+    const env = {
+      resolveImageSrc: (src: string) => (src === './a.png' ? 'asset://已授权' : null)
+    }
+    expect(renderMarkdown('![甲](./a.png) ![乙](./b.png)', env)).toBe(
+      '<p><img src="asset://已授权" alt="甲"> <img src="./b.png" alt="乙"></p>\n'
+    )
+    // 不给钩子时图片照原样渲染
+    expect(renderMarkdown('![甲](./a.png)')).toBe('<p><img src="./a.png" alt="甲"></p>\n')
   })
 
   it('段落与软换行（breaks：一个换行就是一个 <br>）', () => {
@@ -124,6 +135,24 @@ describe('markdownLinks', () => {
 
   it('空内容返回空数组', () => {
     expect(markdownLinks('  ')).toEqual([])
+  })
+})
+
+describe('markdownImages', () => {
+  it('收图片地址，按出现顺序', () => {
+    expect(markdownImages('![截图](./a.png) 与 ![另一张](./b.jpg)')).toEqual([
+      './a.png',
+      './b.jpg'
+    ])
+  })
+
+  it('链接与代码里的感叹号都不算图片', () => {
+    expect(markdownImages('[不是图片](./a.md)')).toEqual([])
+    expect(markdownImages('`![也不是](./x.png)`')).toEqual([])
+  })
+
+  it('空内容返回空数组', () => {
+    expect(markdownImages('  ')).toEqual([])
   })
 })
 

@@ -24,9 +24,12 @@
  * 页面自己只做编排与状态呈现：会话的增删选、起进程、读历史、停止都在 stores/ai.ts，
  * 模型与档位那两个下拉直接写设置（行为记忆，下次打开还是它）。
  */
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { Download, Expand, Fold, MagicStick, Plus } from '@element-plus/icons-vue'
+import { AI_PREVIEW_MAX_BINARY_CHARS, AI_PREVIEW_MAX_CHARS, htmlImageSrcs, resolveAiPreview, type AiPreviewState, type AiPreviewTarget } from '@workbench/ai'
+import { markdownImages } from '@workbench/core'
 import AiComposer from '@/components/AiComposer.vue'
+import AiPreviewPane from '@/components/AiPreviewPane.vue'
 import AiSkillDialog from '@/components/AiSkillDialog.vue'
 import AiLocationBar from '@/components/AiLocationBar.vue'
 import AiModelDialog from '@/components/AiModelDialog.vue'
@@ -42,6 +45,149 @@ const skills = useAiSkillsStore()
 const settings = useSettingsStore()
 const modelVisible = ref(false)
 const skillVisible = ref(false)
+
+/** 文件名（Tab 与预览标题上只放它，全路径在链接那行的悬停里） */
+function fileNameOf(path: string): string {
+  return path.split(/[\\/]/).pop() || path
+}
+
+/**
+ * 右侧预览栏：**一个文件一个 Tab**（`previews` 按点开顺序排，`activeKey` 是当前那张）。
+ * 一张都不剩时整栏收起，对话占满整行。宽度不落盘，重启回默认。
+ */
+const previews = ref<AiPreviewState[]>([])
+const activeKey = ref('')
+const previewWidth = ref(420)
+
+watch(
+  () => ai.activeId,
+  () => {
+    // 文件是相对那段对话的目录解析的：换会话（换目录）就整栏收掉
+    previews.value = []
+    activeKey.value = ''
+  }
+)
+
+/** 预览栏宽度钳位：280 起步，另一头给对话区留出能读的一截 */
+function clampPreviewWidth(width: number): number {
+  const min = 280
+  const max = Math.max(min, window.innerWidth - 640)
+  return Math.min(Math.max(Math.round(width), min), max)
+}
+
+/** 关掉一张 Tab：关的是当前那张就挪到邻居（右边优先，没有才左边） */
+function closePreview(key: string): void {
+  const index = previews.value.findIndex((state) => state.key === key)
+  if (index < 0) return
+  previews.value.splice(index, 1)
+  if (activeKey.value !== key) return
+  const next = previews.value[index] ?? previews.value[index - 1]
+  activeKey.value = next?.key ?? ''
+}
+
+/**
+ * 点开回答里的一个文件（站内链接或「写下 N 个文件」那行）：相对地址对到会话工作目录
+ * （resolveAiPreview，解析口径都在那）。同一个文件已有 Tab 就摊开它并**重读一遍**
+ * （内容可能被这轮对话改掉了）；没有就开一张新 Tab 再取内容 —— 取数见 loadInto，
+ * 各 Tab 互不干扰，中途关掉的就让它留在半路。
+ */
+function openPreview(href: string): void {
+  const session = ai.activeSession
+  if (!session) return
+
+  const target = resolveAiPreview(href, session.dir)
+  const key = target.ok ? `${target.kind}:${target.path}` : href
+
+  const existing = previews.value.find((state) => state.key === key)
+  if (existing) {
+    activeKey.value = key
+    if (target.ok) void loadInto(existing, target, session.dir)
+    return
+  }
+
+  previews.value.push({
+    key,
+    href,
+    name: target.ok ? fileNameOf(target.path) : href,
+    kind: target.ok ? target.kind : 'text',
+    loading: target.ok,
+    error: target.ok ? '' : target.reason,
+    text: '',
+    binary: '',
+    imageUrl: '',
+    imageSrcs: {}
+  })
+  activeKey.value = key
+  if (!target.ok) return
+  // **从数组里取回响应式代理**再交给 loadInto —— 直接改 push 进去的那个原始对象
+  // 一帧都不会触发更新（「正在打开…」就是这么卡死的），响应式数组读出来的代理才会
+  const stored = previews.value.find((entry) => entry.key === key)
+  if (stored) void loadInto(stored, target, session.dir)
+}
+
+/** 取一份文件的内容摊进它的 Tab；每份状态只由自己的 loadInto 写，连点几个文件各走各的 */
+async function loadInto(state: AiPreviewState, target: AiPreviewTarget, dir: string): Promise<void> {
+  const alive = () => previews.value.includes(state)
+  state.loading = true
+  state.error = ''
+
+  if (target.kind === 'image') {
+    const image = await window.workbench.allowPreviewImage(target.path)
+    if (!alive()) return // Tab 已被关掉，过期的不写回
+    state.loading = false
+    if (image.ok) state.imageUrl = image.data?.url ?? ''
+    else state.error = image.error ?? '图片打不开'
+    return
+  }
+
+  // docx / pptx：zip 容器，文本通道读不了，走 base64 交渲染库解
+  if (target.kind === 'docx' || target.kind === 'pptx') {
+    const file = await window.workbench.readBinaryFile(target.path)
+    if (!alive()) return
+    state.loading = false
+    if (!file.ok) {
+      state.error = file.error ?? '读取失败'
+      return
+    }
+    const binary = file.data ?? ''
+    if (binary.length > AI_PREVIEW_MAX_BINARY_CHARS) {
+      state.error = '文件太大，打不开预览'
+      return
+    }
+    state.binary = binary
+    return
+  }
+
+  const file = await window.workbench.readTextFile(target.path)
+  if (!alive()) return
+  state.loading = false
+  if (!file.ok) {
+    state.error = file.error ?? '读取失败'
+    return
+  }
+  const text = file.data ?? ''
+  if (text.length > AI_PREVIEW_MAX_CHARS) {
+    state.error = '文件太大，打不开预览'
+    return
+  }
+  if (target.kind === 'text') {
+    state.text = text
+    return
+  }
+
+  // markdown / html：正文里的相对图片挨个授权再回填地址（与工作区背景图同一条 asset 边界）
+  const srcs: Record<string, string> = {}
+  for (const src of target.kind === 'markdown' ? markdownImages(text) : htmlImageSrcs(text)) {
+    const image = resolveAiPreview(src, dir)
+    if (!image.ok || image.kind !== 'image') continue
+    const allowed = await window.workbench.allowPreviewImage(image.path)
+    if (!alive()) return
+    if (allowed.ok) srcs[src] = allowed.data?.url ?? ''
+  }
+  if (!alive()) return
+  state.text = text
+  state.imageSrcs = srcs
+}
 
 onMounted(() => {
   void ai.init()
@@ -140,28 +286,42 @@ const runningIds = computed(() =>
         />
       </el-tooltip>
 
-      <!-- 控制台：这段对话 + 底部那一栏目录与同一条 composer -->
+      <!-- 控制台：这段对话 + 底部那一栏目录与同一条 composer。
+           点开回答里的文件链接时对话让位：右边并排摊开预览栏（页内分栏，不是弹层） -->
       <template v-if="ai.activeSession">
-        <section class="ai-view__log panel">
-          <AiRunPanel
-            :pi-version="ai.piVersion"
-            :running="ai.running"
-            :hydrating="ai.hydrating"
-            :stopping="ai.stopping"
-            :installing="ai.installing"
-            :install-log="ai.installLog"
-            :lines="ai.lines"
-            :streaming="ai.streaming"
-            :thinking-text="ai.thinkingText"
-            :thinking="ai.thinkingLive"
-            :confirms="ai.confirms"
-            :exit-code="ai.exitCode"
-            :run-error="ai.runError"
-            :written="ai.written"
-            @install="ai.installPi()"
-            @answer="(id, allowed) => ai.answerConfirm(id, allowed)"
+        <div class="ai-view__console">
+          <section class="ai-view__log panel">
+            <AiRunPanel
+              :pi-version="ai.piVersion"
+              :running="ai.running"
+              :hydrating="ai.hydrating"
+              :stopping="ai.stopping"
+              :installing="ai.installing"
+              :install-log="ai.installLog"
+              :lines="ai.lines"
+              :streaming="ai.streaming"
+              :thinking-text="ai.thinkingText"
+              :thinking="ai.thinkingLive"
+              :confirms="ai.confirms"
+              :exit-code="ai.exitCode"
+              :run-error="ai.runError"
+              :written="ai.written"
+              @install="ai.installPi()"
+              @answer="(id, allowed) => ai.answerConfirm(id, allowed)"
+              @open="openPreview"
+            />
+          </section>
+
+          <AiPreviewPane
+            v-if="previews.length"
+            :previews="previews"
+            :active-key="activeKey"
+            :width="previewWidth"
+            @activate="activeKey = $event"
+            @close="closePreview"
+            @resize="previewWidth = clampPreviewWidth($event)"
           />
-        </section>
+        </div>
 
         <AiLocationBar />
         <AiComposer @configure="modelVisible = true" />
@@ -346,6 +506,17 @@ body.is-resizing-ai-tree .ai-view__side {
   width: 24px;
   height: 24px;
   padding: 0;
+}
+
+/**
+ * 控制台那一行：对话与预览栏并排。预览栏的宽度长在它自己身上（AiView 里钳位，
+ * 拖它左缘那条缝改），一张 Tab 都没有的时候这行只剩对话 —— 占满整行。
+ */
+.ai-view__console {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--sp-3);
+  min-height: 0;
 }
 
 .ai-view__log {

@@ -171,7 +171,9 @@ Workbench 的文档按「通用 / 模块」分层：
 URL 由 `convertFileSrc` 转出交给 CSS，图片由 webview 自己读、自己缩放 —— 代价是全尺寸原图进
 webview 内存（旧方案「解码 → 缩放 → 编 JPEG → base64」一张 3824×2400 实测 249ms，且每次启动重算）。
 视频同一套思路（`allow_video`：核后缀与 MP4 文件头 `ftyp`，协议自带 Range，拖进度条不用整份下完）。
-`assetProtocol.scope` 刻意留空 —— 授权一律运行时按文件给，**别为了省事写成 `**`**。
+AI 预览栏显示回答里提到的图片也走 `allow_background` 这条命令（同一条「验图 + 单文件授权」边界，
+见适配层 `allowPreviewImage`）。`assetProtocol.scope` 刻意留空 —— 授权一律运行时按文件给，
+**别为了省事写成 `**`**。
 
 ## 目录结构
 

@@ -947,6 +947,14 @@ pub fn fs_read_text(path: String) -> Result<String, String> {
     std::fs::read_to_string(&path).map_err(|err| format!("读取失败: {err}"))
 }
 
+/// 按路径读一个二进制文件、编成 base64 回传：AI 预览栏的 DOCX / PPTX 是 zip 容器，
+/// 文本通道读不了。文件可能上十兆，一律异步。
+#[tauri::command(async)]
+pub fn fs_read_base64(path: String) -> Result<String, String> {
+    let bytes = std::fs::read(&path).map_err(|err| format!("读取失败: {err}"))?;
+    Ok(crate::encoding::base64(&bytes))
+}
+
 #[tauri::command(async)]
 pub fn fs_exists(path: String) -> bool {
     PathBuf::from(&path).exists()

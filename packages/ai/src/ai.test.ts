@@ -552,6 +552,36 @@ describe('会话（一个目录里的一段连续对话）', () => {
     expect(sanitizeAiSessions(many)).toHaveLength(AI_SESSION_MAX)
   })
 
+  it('会话自带的配置认得出才记：模型 / 档位 / 权限，坏值不写字段', () => {
+    const [kept] = sanitizeAiSessions([
+      session({
+        id: 'a',
+        provider: 'OpenCode-Go',
+        model: '  deepseek-v4.1-chat  ',
+        thinking: 'high',
+        permission: 'full'
+      })
+    ])
+    // 服务名折成小写连字符；模型 id 只去空白限长，原样保留
+    expect(kept?.provider).toBe('opencode-go')
+    expect(kept?.model).toBe('deepseek-v4.1-chat')
+    expect(kept?.thinking).toBe('high')
+    expect(kept?.permission).toBe('full')
+
+    const [dropped] = sanitizeAiSessions([
+      session({ id: 'b', provider: '坏 名 字!', model: '   ', thinking: '最大', permission: '全部' })
+    ])
+    expect(dropped?.provider).toBeUndefined()
+    expect(dropped?.model).toBeUndefined()
+    expect(dropped?.thinking).toBeUndefined()
+    expect(dropped?.permission).toBeUndefined()
+
+    // 老文件里没有这些字段，原样有效
+    const [legacy] = sanitizeAiSessions([session({ id: 'c' })])
+    expect(legacy?.provider).toBeUndefined()
+    expect(legacy?.thinking).toBeUndefined()
+  })
+
   it('记一条会话：同 id 的换到最前面（标题与时间跟着更新），超上限从末尾丢', () => {
     const list = [session({ id: 'a' }), session({ id: 'b' })]
     const updated = rememberAiSession(list, session({ id: 'b', title: '新标题', updatedAt: 3000 }))

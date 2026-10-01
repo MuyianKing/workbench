@@ -1453,6 +1453,15 @@ export interface WorkbenchApi {
    * 与快捷启动同走一条 `open_path` 通道：按 Windows 的文件关联打开，应用不猜程序路径。
    */
   openPath: (path: string) => Promise<Result<null>>
+  /** 按路径读一个文本文件（AI 预览栏、日志解析这类「按需读一份」的解析当数据源） */
+  readTextFile: (path: string) => Promise<Result<string>>
+  /** 按路径读一个二进制文件、以 base64 回传（AI 预览栏的 DOCX / PPTX 是 zip 容器，文本通道读不了） */
+  readBinaryFile: (path: string) => Promise<Result<string>>
+  /**
+   * 把一张图片按**单个文件**授权给 asset 协议，回传 webview 能直接加载的 URL
+   * （AI 预览栏显示回答里提到的图片用，与工作区背景图同一条边界）。
+   */
+  allowPreviewImage: (path: string) => Promise<Result<{ url: string }>>
   checkPackageManagers: () => Promise<PackageManagerStatus>
   /** 用 npm 全局安装 yarn / pnpm；返回的 status 是装完（或装失败）后重新探测的结果 */
   installPackageManager: (

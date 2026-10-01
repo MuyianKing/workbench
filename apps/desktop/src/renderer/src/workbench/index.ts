@@ -573,6 +573,27 @@ function createApi(): WorkbenchApi {
       guard(invoke<null>('open_external', { url }), '打开链接失败'),
     /** 用系统默认程序打开本地文件（与快捷启动同走 open_path，不新增 Rust 命令） */
     openPath: (path: string) => guard(invoke<null>('open_path', { path }), '打开文件失败'),
+    /** 按路径读一个文本文件（AI 预览栏用；fs_read_text 一直在，这里给个能判 ok 的门面） */
+    readTextFile: (path: string) => guard(invoke<string>('fs_read_text', { path }), '读取文件失败'),
+    /**
+     * 按路径读一个二进制文件、以 base64 回传（AI 预览栏的 DOCX / PPTX 是 zip 容器，
+     * 文本通道读不了；解码见 decodeBase64ToBuffer）。
+     */
+    readBinaryFile: (path: string) =>
+      guard(invoke<string>('fs_read_base64', { path }), '读取文件失败'),
+    /**
+     * 把一张图片按**单个文件**授权给 asset 协议，回传 webview 能直接加载的 URL。
+     * 与工作区背景图同一条命令（`allow_background`：读文件头验图 + 授权）——
+     * AI 预览栏显示回答里提到的图片走的就是这条边界，不另开命令。
+     */
+    allowPreviewImage: async (path: string): Promise<Result<{ url: string }>> => {
+      try {
+        await invoke('allow_background', { path })
+        return ok({ url: assetUrl(path) })
+      } catch (error) {
+        return fail(errorText(error, '这张图交不到预览里'))
+      }
+    },
 
     // ---------- 窗口 ----------
     minimizeWindow: () => {
