@@ -38,6 +38,7 @@ import { clampBackgroundOpacity, sanitizeVeilColor } from '@workbench/appearance
 import { clampCardOpacity } from '@workbench/appearance'
 import { sanitizeAccentColor, sanitizeAccentInkMode, type AccentInkMode } from '@workbench/appearance'
 import type { ViewId } from '@workbench/appearance'
+import { VIEW_LABELS } from '@workbench/appearance'
 import { clampVideoFloatHeight, clampVideoFloatPercent, clampVideoFloatWidth } from '@workbench/video'
 import {
   DEFAULT_SETTINGS,
@@ -535,6 +536,14 @@ export const useSettingsStore = defineStore('settings', () => {
   }
 
   /**
+   * 导航上各页的名字：**AI 页跟程序名走** —— 用户在设置里把程序叫什么，这个智能体就叫什么
+   * （导航栏与设置菜单两处都从这儿取）；其余页照 @workbench/appearance 的默认名。
+   */
+  function viewLabelOf(id: ViewId): string {
+    return id === 'ai' ? settings.value.appName : VIEW_LABELS[id]
+  }
+
+  /**
    * AI 助手页左栏（项目 → 会话那棵树）宽度：与笔记 / 视频树同一套做法 ——
    * 拖动时只改本地让界面跟手，松手才整份落盘（它也在 theme.json 里）。
    */
@@ -815,6 +824,7 @@ export const useSettingsStore = defineStore('settings', () => {
     toggleRowMode,
     setCardVisible,
     commitCards,
+    viewLabelOf,
     setColumnWidths,
     commitColumns,
     toggleColumnMode,

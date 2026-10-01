@@ -8,7 +8,7 @@
  */
 import { computed, ref } from 'vue'
 import { HOME_CARD_IDS, HOME_CARD_LABELS, type HomeCardId } from '@workbench/appearance'
-import { VIEW_IDS, VIEW_LABELS, type ViewId } from '@workbench/appearance'
+import { VIEW_IDS, type ViewId } from '@workbench/appearance'
 import { moveToPosition } from '@workbench/core'
 import { useSettingsStore } from '@/stores/settings'
 import { startPointerDrag } from '@/composables/use-pointer-drag'
@@ -200,7 +200,7 @@ function beginViewDrag(event: PointerEvent, id: ViewId): void {
             :class="{ 'is-dragging': draggingView === id }"
             @pointerdown="beginViewDrag($event, id)"
           >
-            <span class="pick__name">{{ VIEW_LABELS[id] }}</span>
+            <span class="pick__name">{{ settings.viewLabelOf(id) }}</span>
             <el-switch
               :model-value="!hiddenViews.includes(id)"
               size="small"

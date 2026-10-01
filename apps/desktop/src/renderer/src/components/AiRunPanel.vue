@@ -9,7 +9,7 @@
  *    `aiTurns`）。**过程整块收着**（`AiProcess.vue`）：模型想的那几段、工具调用、报错、
  *    中途那些旁白都在里面 —— 一段对话要读的是「我说了什么、它最后说了什么」，
  *    那些步骤摊着就是一面墙（一次读文件、一条命令各占一行）。跑着的时候那块是摊开的
- *    （标题上转圈说「正在思考… / 正在执行…」），跑完自动收起，点标题随时再摊开；
+ *    （标题上转圈说「正在思考… / {程序名}正在努力探索中....」），跑完自动收起，点标题随时再摊开；
  *    **跑着的那轮还没有「答案」** —— 正文后面随时会跟上工具与思考，先摘出去的话，
  *    新长出来的思考就压在它上面了（时序倒挂），整轮都在块里按时序往下长，收尾才把
  *    最后那段正文弹出去（见 aiTurns 的 live）；
@@ -41,6 +41,8 @@ import MarkdownView from '@/components/MarkdownView.vue'
 import { aiTurns, visibleInstruction, type AiConfirm, type AiLogLine } from '@workbench/ai'
 
 const props = defineProps<{
+  /** 程序名（设置里的那个）：跑着那一轮的过程标题拿它当主语（见 processLabel） */
+  appName: string
   /** 这台机器上探到的 Pi 版本；空串 = 还没装 */
   piVersion: string
   running: boolean
@@ -113,9 +115,11 @@ function manyShots(images?: string[]): boolean {
   return (images?.length ?? 0) > 1
 }
 
-/** 那一块「过程」的标题：跑着说在干什么，跑完报这一步有多少条 */
+/** 那一块「过程」的标题：跑着说在干什么（主语是程序名，智能体跟程序同一个名字），跑完报这一步有多少条 */
 function processLabel(turn: { process: AiLogLine[]; index: number }): string {
-  if (turn.index === liveIndex.value) return props.thinking ? '正在思考…' : '正在执行…'
+  if (turn.index === liveIndex.value) {
+    return props.thinking ? '正在思考…' : `${props.appName}正在努力探索中....`
+  }
   return turn.process.length ? `过程 · ${turn.process.length} 步` : '过程'
 }
 

@@ -17,7 +17,9 @@ export const VIEW_IDS = ['home', 'projects', 'work', 'notes', 'skills', 'kb', 'a
 
 export type ViewId = (typeof VIEW_IDS)[number]
 
-/** 导航栏上的名字；顺序与 VIEW_IDS 一致（图标在各页组件里给，属于界面层） */
+/** 导航栏上的名字；顺序与 VIEW_IDS 一致（图标在各页组件里给，属于界面层）。
+ * ai 页的名字在渲染层会换成设置里的程序名（stores/settings.ts 的 viewLabelOf）——
+ * 用户把程序叫什么，那个智能体就叫什么；这里的值只是类型上补齐的一格 */
 export const VIEW_LABELS: Record<ViewId, string> = {
   home: '首页',
   projects: '项目',

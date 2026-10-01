@@ -12,7 +12,7 @@
 import { computed } from 'vue'
 import type { Component } from 'vue'
 import { Notebook, FolderOpened, Grid, Document, MagicStick, Collection, ChatDotRound, Key, Brush, VideoPlay } from '@element-plus/icons-vue'
-import { VIEW_LABELS, orderedViews, type ViewId } from '@workbench/appearance'
+import { orderedViews, type ViewId } from '@workbench/appearance'
 import { useNavStore } from '@/stores/nav'
 import { useSettingsStore } from '@/stores/settings'
 
@@ -59,12 +59,12 @@ function select(id: ViewId): void {
       class="nav__item"
       :class="{ 'is-active': active === id }"
       type="button"
-      :title="VIEW_LABELS[id]"
+      :title="settings.viewLabelOf(id)"
       :aria-current="active === id ? 'page' : undefined"
       @click="select(id)"
     >
       <el-icon class="nav__icon"><component :is="ICONS[id]" /></el-icon>
-      <span class="nav__label">{{ VIEW_LABELS[id] }}</span>
+      <span class="nav__label">{{ settings.viewLabelOf(id) }}</span>
     </button>
   </nav>
 </template>

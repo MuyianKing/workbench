@@ -292,6 +292,7 @@ const runningIds = computed(() =>
         <div class="ai-view__console">
           <section class="ai-view__log panel">
             <AiRunPanel
+              :app-name="settings.settings.appName"
               :pi-version="ai.piVersion"
               :running="ai.running"
               :hydrating="ai.hydrating"
