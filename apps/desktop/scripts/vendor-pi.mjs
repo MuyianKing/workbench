@@ -2,16 +2,17 @@
  * 把 Pi（`@earendil-works/pi-coding-agent`，AI 助手页用的那个开源编码 Agent）按**瘦身方案**
  * 随包内置到 `resources/pi/`：构建 / 开发前跑一次，装好并删掉运行时用不到的云厂商 SDK。
  *
- * 为什么瘦身：完整依赖树 385MB，其中 284MB 是 `@esbuild` 的 26 份平台二进制、其余是各家云厂商
- * 的 SDK（AWS Bedrock、Google Gemini、`@anthropic-ai/sdk`、`openai`、web-streams-polyfill）。
+ * 为什么瘦身：完整依赖树里大头是 `@esbuild` 的几十份平台二进制与各家云厂商的 SDK
+ * （AWS Bedrock、Google Gemini、`@anthropic-ai/sdk`、`openai`、web-streams-polyfill）。
  * **这些 SDK 运行时不需要**：应用跑的是 `dist/bundle/cli.js` 那份 bundle（提供方实现按形态内联
  * 在它自己的 chunks 里、SDK 也一并内联），树里 `pi-ai/dist/api/*.js` 那几份静态 import SDK 的
- * 副本谁也加载不到 —— 删掉之后两条提供方路径照常发出真实请求（2026-09-29 用假端点验过
- * `openai-completions` 与 `anthropic-messages`，见 constraints/ai.md）。瘦身后 59MB。
+ * 副本谁也加载不到 —— 删掉之后两条提供方路径照常发出真实请求（2026-09-29 在 0.87.1、
+ * 2026-10-06 在 1.0.4 各用假端点验过 `openai-completions` 与 `anthropic-messages`，
+ * 见 docs/modules/ai.md 与 docs/dev-notes/pi-session-probe.md）。瘦身后 55.5MB（Pi 1.0.4）。
  *
  * 版本**钉死**在下面这个常量：Pi 迭代很快，CLI 与事件协议要当成外部契约对待（与 AGENTS.md
  * 「TypeScript 版本不要动」同一条思路）。升级 = 改这里 + 重跑 `pnpm run vendor:pi` + 把
- * constraints/ai.md 里那份瘦身验证重新做一遍（假 key 打一轮每家要用的提供方）。
+ * docs/dev-notes/pi-session-probe.md 那份瘦身验证重新做一遍（假端点打一轮每家要用的提供方）。
  *
  * 落点 `resources/pi/` 不进版本库（见 .gitignore），由这份脚本在构建 / 开发前生成；
  * 运行时的解析规则见 src-tauri/src/ai.rs 的 `resolve_cli`（打包走 resource_dir，
@@ -32,7 +33,7 @@ import { fileURLToPath } from 'node:url'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 /** 钉死的 Pi 版本；升级要连着 constraints/ai.md 的瘦身验证一起重做 */
-const PI_VERSION = '0.87.1'
+const PI_VERSION = '1.0.4'
 const TARGET = join(root, 'resources', 'pi')
 const STAMP = join(TARGET, '.pi-version')
 /** Pi 的 CLI 入口（与模型目录一起，当作「这份树是好的」的判据） */

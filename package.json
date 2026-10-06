@@ -21,7 +21,7 @@
     "dist:dir": "pnpm -F @workbench/desktop dist:dir"
   },
   "devDependencies": {
-    "@types/node": "^26.5.1",
+    "@types/node": "^26.6.4",
     "typescript": "^5.9.3",
     "vue-tsc": "^3.3.11"
   }

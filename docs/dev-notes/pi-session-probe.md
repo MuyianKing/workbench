@@ -46,5 +46,12 @@
   `$WORKBENCH_AI_KEY`（借环境变量插值顺手把这条也验了）。**这两种形态各走哪条路（内联进
   bundle 还是落到树里）是新版本自己的事，换版本后要重跑。**
 
+- **Pi 1.0.4（2026-10-06 重验）**：上面这些点全部照旧 —— 探针 9 项全过（两形态打假端点、
+  confirm 一问一答、命令真跑）、硬杀后按同 id 重开 `get_messages` 读得回历史
+  （应答仍是 `{success, data:{messages:[…]}}`）、abort 应答 + `agent_settled` + 进程留着、
+  会话文件头仍是 `"type":"session","version":3`。models.dev 快照的 id 变了样
+  （zai 全线 `chat:` 前缀、deepseek-v4.1-flash 没了）—— 内置模型目录跟着再生，
+  ai.test.ts 的夹具换成了新表里真实存在的 id。
+
 **换 Pi 版本后重跑一遍**这些点 —— CLI 与事件协议是外部契约（见
-[constraints/ai.md](../modules/ai.md) 的文件头）。
+[ai.md](../modules/ai.md) 的文件头）。

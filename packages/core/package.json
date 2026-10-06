@@ -3,8 +3,19 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "exports": { ".": "./src/index.ts" },
-  "dependencies": { "markdown-it": "^15.0.2", "diff": "^9.0.0" },
-  "devDependencies": { "@types/markdown-it": "^14.2.0", "vitest": "^5.0.0" },
-  "scripts": { "test": "vitest run --passWithNoTests", "test:watch": "vitest --passWithNoTests" }
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "diff": "^9.0.0",
+    "markdown-it": "^15.0.2"
+  },
+  "devDependencies": {
+    "@types/markdown-it": "^14.2.0",
+    "vitest": "^5.0.3"
+  },
+  "scripts": {
+    "test": "vitest run --passWithNoTests",
+    "test:watch": "vitest --passWithNoTests"
+  }
 }

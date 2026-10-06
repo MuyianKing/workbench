@@ -418,29 +418,29 @@ describe('模型配置的收敛', () => {
   })
 
   it('内置目录：指定厂商优先，其次任意厂商，再认「厂商/模型」后缀；认不出回 null', () => {
-    // deepseek-v4.1-flash 在好几家目录里都有：指定 opencode-go 就认它那份
-    expect(builtinModelMeta('deepseek-v4.1-flash', 'opencode-go')).toEqual({
+    // chat:claude-fable-5 在好几家目录里都有（数值一致）：指定 anthropic 就认它那份
+    expect(builtinModelMeta('chat:claude-fable-5', 'anthropic')).toEqual({
       contextWindow: 1_000_000,
-      maxTokens: 384_000,
+      maxTokens: 128_000,
       reasoning: true,
       imageInput: true
     })
     // 不指定厂商也认得出（按厂商名排序取第一个，结果稳定），大小写不敏感
-    expect(builtinModelMeta('DeepSeek-V4.1-Flash')?.imageInput).toBe(true)
+    expect(builtinModelMeta('Chat:Claude-Fable-5')?.imageInput).toBe(true)
     // 目录里是「厂商/模型」前缀键、端点报的是裸 id：认后缀
-    const prefixed = builtinModelMeta('deepseek/deepseek-v4.1-flash')
+    const prefixed = builtinModelMeta('DeepSeek-V4-Flash-0731')
     expect(prefixed).not.toBeNull()
     // 手工填大写也一样认
-    expect(builtinModelMeta('  GLM-5.2  ', 'zai')?.contextWindow).toBe(1_000_000)
+    expect(builtinModelMeta('  chat:glm-5.2  ', 'zai')?.contextWindow).toBe(1_000_000)
     expect(builtinModelMeta('某个没听过的模型')).toBeNull()
     expect(builtinModelMeta('')).toBeNull()
   })
 
   it('预填四层：端点报了的优先，其次内置目录（含图片能力），再次按名字认', () => {
-    // 端点没报的 deepseek-v4.1-flash：从内置目录把 1M / 384K / 思考 / 图片整个认出来
-    expect(aiModelFromId('deepseek-v4.1-flash', {}, 'opencode-go')).toMatchObject({
+    // 端点没报的 chat:claude-fable-5：从内置目录把 1M / 128K / 思考 / 图片整个认出来
+    expect(aiModelFromId('chat:claude-fable-5', {}, 'anthropic')).toMatchObject({
       contextWindow: 1_000_000,
-      maxTokens: 384_000,
+      maxTokens: 128_000,
       reasoning: true,
       imageInput: true
     })
@@ -465,7 +465,7 @@ describe('模型配置的收敛', () => {
       imageInput: false
     })
     // 用户明确关掉的图片不被迫开（extra 只会传 true，这里防的是「目录说了算」盖过清单）
-    expect(aiModelFromId('glm-5.2', {}, 'zai')).toMatchObject({
+    expect(aiModelFromId('chat:glm-5.2', {}, 'zai')).toMatchObject({
       contextWindow: 1_000_000,
       reasoning: true,
       imageInput: false

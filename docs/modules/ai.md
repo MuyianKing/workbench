@@ -81,7 +81,7 @@ AI 助手（ai）的文档：先读「约束」一节（不能破的规矩）；
   在构建 / 开发前生成到 `resources/pi/`（不进版本库）：钉死版本、删掉运行时用不到的云厂商 SDK ——
   真正被执行的只有 `dist/bundle/cli.js`，它只要 `@earendil-works/chord`、`typebox`、`undici`、
   `@silvia-odwyer/photon-node` 几个外部包；pi-coding-agent 自带 `npm-shrinkwrap.json`、整棵树嵌在自己的
-  `node_modules` 下，按顶层路径删会一声不响地空转（`findDeps` 就为此写）。瘦身后 59MB（原 385MB）。
+  `node_modules` 下，按顶层路径删会一声不响地空转（`findDeps` 就为此写）。瘦身后 55.5MB（Pi 1.0.4；这一轮删掉 62.3MB，2026-10-06 实测）。
   **升级 Pi** = 改版本常量 + 重跑 `pnpm run vendor:pi` + 瘦身验证重做（假 key 打一轮每个提供方），
   会话 / 续聊 / 权限扩展 / 确认帧那条链照 [dev-notes/pi-session-probe.md](../dev-notes/pi-session-probe.md)
   的假端点探针重跑。
@@ -187,7 +187,7 @@ AI 助手（ai）的文档：先读「约束」一节（不能破的规矩）；
   工具侧在事件 `result.content[].text`（`tool_execution_end` **没有 `error` 字段** —— 只认 error 会把
   「找不到 bash」「EISDIR」全显示成同一句兜底文案），多行只留第一句、全文进悬停。
   **有报错不能装顺利；顺利跑完不留状态行**。
-- **技能 = `--no-skills` + 逐条 `--skill`，两头合起来才成立**：Pi（0.87.1）有显式 `--skill <路径>`（可重复）与
+- **技能 = `--no-skills` + 逐条 `--skill`，两头合起来才成立**：Pi（1.0.4）有显式 `--skill <路径>`（可重复）与
   **自动发现**（`~/.agents/skills`、信任项目的 `.agents/skills`（还往上找）、`<agentDir>/skills`、`<cwd>/.pi/skills`、
   package 与扩展）。**自动发现必须关**（`-ns`），否则「关掉」是假的（实测只给 `--skill` 时 `~/.agents/skills`
   仍在清单里，加 `-ns` 才只剩给出去的）。于是**应用那份表是唯一真源**：起进程先 `-ns`，再把开着的逐个
