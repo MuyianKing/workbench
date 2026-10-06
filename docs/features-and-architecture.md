@@ -25,6 +25,7 @@ Workbench 的文档按「通用 / 模块」分层：
 | 知识库（kb） | [kb.md](modules/kb.md) |
 | AI 助手（ai） | [ai.md](modules/ai.md) |
 | 密码保险库 | [vault.md](modules/vault.md) |
+| 邮箱（IMAP 收发） | [mail.md](modules/mail.md) |
 | 样式（设计参考库） | [styles.md](modules/styles.md) |
 | 视频（本地 MP4 播放器） | [video.md](modules/video.md) |
 | 终端面板 | [terminal.md](modules/terminal.md) |
@@ -139,7 +140,7 @@ Workbench 的文档按「通用 / 模块」分层：
 | 工作日志渲染 | markdown-it（只服务工作日志正文：`html: false` 转义原文里的标签、`linkify` 认裸地址、`breaks` 让单个换行就是 `<br>`，链接统一新窗口 + 交系统浏览器打开） |
 | 笔记编辑器 | Vditor（只服务笔记正文；静态资源随包带一份、不走 CDN，见[「笔记」](modules/notes.md)那一节） |
 | 构建 | Vite 8（渲染层，打包器是 rolldown）+ cargo / Tauri CLI（后端）。根与 `apps/desktop` 的 `package.json` 都是 `"type": "module"`，所以各 vite / vitest 配置里用 `import.meta.dirname`（`__dirname` 只在旧的打包式加载器下被 shim 出来；仓库里也不要有 CJS 的 `.js` / `.cjs`，它们会被当成 ESM） |
-| 语言 | TypeScript（渲染层）+ Rust（后端）；契约与纯逻辑按域拆在 `packages/` 的 13 个 `@workbench/*` 包 |
+| 语言 | TypeScript（渲染层）+ Rust（后端）；契约与纯逻辑按域拆在 `packages/` 的 14 个 `@workbench/*` 包 |
 | 持久化 | 本地 JSON，由 Rust 侧 `store.rs` 负责（防抖 300ms、临时文件 + rename、退出前同步落盘） |
 | 子进程 | `std::process` 起 shell 命令（按批回传输出，Windows 下 `taskkill /T /F` 结束整棵进程树） |
 | 端口 → 进程 | `GetExtendedTcpTable`（iphlpapi，一次系统调用拿到监听表）+ `QueryFullProcessImageNameW`；不再起 `netstat` / `tasklist` 解析文本输出（全量检测会并发问十几个端口，原先每个端口两个子进程） |
@@ -203,6 +204,7 @@ apps/desktop/            桌面应用（自包含：渲染层 + Rust + 随包资
   src/oauth.rs           账号登录 —— 注解见 modules/sync-and-auth.md
   src/http.rs            WinHTTP 极简 HTTP 客户端 —— 注解见 modules/ipc-and-state.md
   src/weather.rs         实时天气宿主侧 —— 注解见 modules/home.md
+  src/mail.rs            邮箱（IMAP/SMTP 传输）—— 注解见 modules/mail.md
   src/credentials.rs     Windows 凭据管理器读写 —— 注解见 modules/ipc-and-state.md
   src/vault.rs           密码保险库宿主侧 —— 注解见 modules/vault.md
   src/encoding.rs        base64 / SHA-256 / UTF-16 —— 注解见 modules/ipc-and-state.md
@@ -230,7 +232,7 @@ apps/desktop/            桌面应用（自包含：渲染层 + Rust + 随包资
                          DEFAULT_SETTINGS），并从各域包 re-export 保持 `@/types` 一站式取类型
   persisted-data.ts      数据文件的收敛编排 + theme.json ↔ 数据文件的分流桥接
 
-packages/                按域拆出的 13 个 @workbench/* 包（TS 源码直出、各自带 vitest；
+packages/                按域拆出的 14 个 @workbench/* 包（TS 源码直出、各自带 vitest；
                          包之间与应用都只按包名走各自的 index.ts 桶导入）：
   core/                  平台原语：Result 与 ok/fail、端口与项目路径、dev-port、扫描
                          （scanner，fs 注入）、命令与快捷启动的收敛、图标缓存、残留进程判定、
@@ -254,6 +256,8 @@ packages/                按域拆出的 13 个 @workbench/* 包（TS 源码直�
   work-log/              工作日志的时间轴
   vault/                 密码保险库的条目模型 / 信封 / 合并 / 加解密
   auth/ 、 weather/       账号资料的收敛；实时天气的 WMO 码表与两条接口回包的解析
+  mail/                   邮箱账户配置的收敛、RFC 2047 编解码、发信报文构建（mime.ts）、
+                          收信解析与沙箱正文（parse.ts，postal-mime 包装）
 
 apps/desktop/scripts/    make-icons.mjs（程序化生成应用图标与托盘图标）、
                          vendor-pi.mjs（Pi 随包内置与瘦身）、
@@ -310,7 +314,7 @@ pnpm run dist         # 产出 NSIS 安装包
 
 ## 数据与隐私
 
-应用**默认不联网**。对外发请求的只有九处，且都是你自己开出来的：
+应用**默认不联网**。对外发请求的只有十处，且都是你自己开出来的：
 
 - **Token 用量同步**（可选、默认关闭）：登录账号且设置里填了仓库地址才会推 / 拉那个仓库，退出登录就停。
   **密码保险库推的是同一仓库的另一个目录**（`vault/vault.json`），推上去的只有密文
@@ -357,6 +361,14 @@ pnpm run dist         # 产出 NSIS 安装包
   另两种安装方式（导入本地 zip / 目录）与列表、开关、卸载、`--skill` 注入全在本机。
   实现与边界见 [pi_skills.rs](../apps/desktop/src-tauri/src/pi_skills.rs) 与
   [docs/modules/ai.md](modules/ai.md) 的「技能」那几条
+- **邮箱**（可选、默认关闭；第十条出口）：邮箱页里填了邮箱地址、授权码进了凭据管理器，才会连
+  **你配置的**收发服务器（IMAP 收信 993、SMTP 发信 465，隐式 TLS；主机不设白名单 —— 与「装技能」
+  同类，地址由你给）。授权码存 Windows 凭据管理器（DPAPI 按用户加密），不落明文、不回渲染层；
+  连接参数进设置（明文 JSON，但那几项不是秘密）。**邮件 HTML 正文的外链资源一律不加载**
+  （跟踪像素）：沙箱 iframe + 只放行 `data:` 图片的 CSP —— 除收发服务器本身，这条功能没有别的
+  网络目标。不做后台轮询 / 新邮件提醒：进页面、点刷新、发信才联网。
+  实现与边界见 [mail.rs](../apps/desktop/src-tauri/src/mail.rs) 与
+  [docs/modules/mail.md](modules/mail.md)
 
 九处都没有自建服务端：三处 git 同步发往你自己的仓库，登录走两家平台官方 OAuth，
 AI 热点与天气只 GET 白名单里的公开源，AI 助手发给你自己配的端点，装技能只 GET 你粘的地址 ——

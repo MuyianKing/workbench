@@ -26,6 +26,7 @@
     "@workbench/auth": "workspace:*",
     "@workbench/core": "workspace:*",
     "@workbench/kb": "workspace:*",
+    "@workbench/mail": "workspace:*",
     "@workbench/notes": "workspace:*",
     "@workbench/skills": "workspace:*",
     "@workbench/terminal": "workspace:*",

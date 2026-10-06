@@ -1,0 +1,19 @@
+{
+  "name": "@workbench/mail",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "postal-mime": "^4.0.4"
+  },
+  "devDependencies": {
+    "vitest": "^5.0.3"
+  },
+  "scripts": {
+    "test": "vitest run --passWithNoTests",
+    "test:watch": "vitest --passWithNoTests"
+  }
+}

@@ -11,7 +11,7 @@
  */
 import { computed } from 'vue'
 import type { Component } from 'vue'
-import { Notebook, FolderOpened, Grid, Document, MagicStick, Collection, ChatDotRound, Key, Brush, VideoPlay } from '@element-plus/icons-vue'
+import { Notebook, FolderOpened, Grid, Document, MagicStick, Collection, ChatDotRound, Key, Message, Brush, VideoPlay } from '@element-plus/icons-vue'
 import { orderedViews, type ViewId } from '@workbench/appearance'
 import { useNavStore } from '@/stores/nav'
 import { useSettingsStore } from '@/stores/settings'
@@ -29,6 +29,7 @@ const ICONS: Record<ViewId, Component> = {
   kb: Collection,
   ai: ChatDotRound,
   vault: Key,
+  mail: Message,
   styles: Brush,
   video: VideoPlay
 }

@@ -15,6 +15,7 @@ import SkillsView from '@/components/SkillsView.vue'
 import KbView from '@/components/KbView.vue'
 import AiView from '@/components/AiView.vue'
 import VaultView from '@/components/VaultView.vue'
+import MailView from '@/components/MailView.vue'
 import StylesView from '@/components/StylesView.vue'
 import VideoView from '@/components/VideoView.vue'
 import VideoPlayer from '@/components/VideoPlayer.vue'
@@ -50,6 +51,7 @@ const VIEWS: Record<ViewId, Component> = {
   kb: KbView,
   ai: AiView,
   vault: VaultView,
+  mail: MailView,
   styles: StylesView,
   video: VideoView
 }

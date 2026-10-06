@@ -50,6 +50,7 @@ describe('导航栏显示哪几页', () => {
       'kb',
       'ai',
       'vault',
+      'mail',
       'styles',
       'video'
     ])
@@ -64,6 +65,7 @@ describe('导航栏显示哪几页', () => {
       'kb',
       'ai',
       'vault',
+      'mail',
       'styles',
       'video'
     ])
@@ -93,6 +95,7 @@ describe('导航栏的顺序', () => {
       'kb',
       'ai',
       'vault',
+      'mail',
       'styles',
       'video'
     ])
@@ -109,6 +112,7 @@ describe('导航栏的顺序', () => {
       'kb',
       'ai',
       'vault',
+      'mail',
       'styles',
       'video'
     ])
@@ -117,6 +121,7 @@ describe('导航栏的顺序', () => {
       'notes',
       'kb',
       'ai',
+      'mail',
       'video'
     ])
     // 不带顺序参数时就是老行为：按 VIEW_IDS 的默认顺序
@@ -127,6 +132,7 @@ describe('导航栏的顺序', () => {
       'kb',
       'ai',
       'vault',
+      'mail',
       'styles',
       'video'
     ])

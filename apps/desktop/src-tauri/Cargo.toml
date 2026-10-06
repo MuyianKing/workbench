@@ -39,6 +39,11 @@ walkdir = "2"
 base64 = "0.23"
 sha2 = "0.11"
 flate2 = "1"
+# 邮箱（mail.rs）：IMAP 收信与 SMTP 发信要的是「TCP 流 + 隐式 TLS」，http.rs 那套
+# WinHTTP 封装是 HTTP 专用，用不上。schannel 是系统自带 TLS 的纯 FFI 封装（无 C 编译、
+# 无 build script），证书校验交给 Windows —— 唯一依赖 windows-sys ^0.61 与上面同一份，
+# 只新增这一个编译单元；IMAP/SMTP 协议子集是手写的（rust-imap 不支持网易强制的 ID 命令）。
+schannel = "0.1"
 # 图标抽取直接走 Win32（PrivateExtractIconsW + GDI），不再依赖 PowerShell；
 # Shell / Shell_Common / Storage_FileSystem 是为了 SHGetFileInfoW 与 SHGetPathFromIDListW ——
 # 快捷方式自己不带图标资源，得先靠它们解析到目标程序（见 icon.rs）。
@@ -68,6 +73,20 @@ windows-sys = { version = "0.61", features = [
     "Win32_UI_Shell_Common",
     "Win32_UI_WindowsAndMessaging",
 ] }
+# 保险库解锁优先走 Windows Hello（UserConsentVerifier，WinRT）：微软账户的机器上
+# LogonUserW 那条路验不了登录密码 —— 密码由微软云端认，本机 SAM 里只有一份对不上的内部副本，
+# Hello 验的才是登录界面实际用的那个凭据（见 vault.rs）。
+# Security_Credentials_UI 是 UserConsentVerifier 本体；Win32_System_WinRT + Win32_Foundation
+# 是 IUserConsentVerifierInterop 与 HWND —— 弹验证框必须走带 HWND 的 interop（钉在应用窗口上），
+# 不带窗口的那条会把验证框压在主窗口后面，用户只当没弹出来。
+# windows / windows-future 都已在编译图里（tao → windows 0.62 → windows-future 0.3，
+# windows-future 不被 windows 转出口所以要单列）—— 只把已有的实现用起来，不新增编译单元。
+windows = { version = "0.62", features = [
+    "Security_Credentials_UI",
+    "Win32_Foundation",
+    "Win32_System_WinRT",
+] }
+windows-future = "0.3"
 
 # 开发档位：只留行号级调试信息。Windows 上链接时间的大头就是调试信息，
 # 这一条直接决定改一行之后要等多久（见 docs/dev-notes/build-performance.md）。

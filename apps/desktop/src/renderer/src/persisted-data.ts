@@ -56,6 +56,7 @@ import {
   sanitizeVideoTreeExpanded
 } from '@workbench/video'
 import { sanitizeWeatherCity } from '@workbench/weather'
+import { sanitizeMailAccount } from '@workbench/mail'
 import { sanitizeWorkRange, sanitizeWorkSort } from '@workbench/work-log'
 import {
   DEFAULT_SETTINGS,
@@ -180,6 +181,9 @@ export function sanitizeSettings(raw: unknown): StoredSettings {
   delete (value as unknown as Record<string, unknown>).noteSyncRepo
   // 天气城市：老数据文件里没有，默认空串 = 不显示、不联网。空白与超长在这里收敛
   value.weatherCity = sanitizeWeatherCity(value.weatherCity)
+  // 邮箱账户的连接参数（地址 / 收发服务器）：老数据文件里没有，默认全空 = 出口关闭。
+  // 授权码不在这份明文 JSON 里 —— 它在 Windows 凭据管理器（Rust 侧 mail_key_save）
+  value.mailAccount = sanitizeMailAccount(value.mailAccount)
   // 图片仓库地址：老数据文件里没有，默认未配置。
   // 与 Token 同步仓库同一条口径（含空白、以 `-` 开头的一律当没填）
   value.noteImageRepo = sanitizeImageRepo(value.noteImageRepo)

@@ -104,6 +104,19 @@ body.is-resizing-kb-tree * {
   user-select: none !important;
 }
 
+/* 拖邮箱页那条左右分隔条：同一副兜法（指针会扫过正文阅读区，正文可能是个沙箱 iframe） */
+body.is-resizing-mail-list,
+body.is-resizing-mail-list * {
+  cursor: ew-resize !important;
+  user-select: none !important;
+}
+
+/* 沙箱 iframe 是另一个文档，指针一进它里面父窗口就收不到 pointermove —— 邮箱正文
+   整栏都是它，拖左栏那条缝时同样要对指针透明，事件才到得了拖拽监听 */
+body.is-resizing-mail-list iframe {
+  pointer-events: none !important;
+}
+
 /* 设置里拖动导航项排序：重排清单而不是跟手搬一块，指针游走在清单上，同样全局兜住 */
 body.is-sorting-views,
 body.is-sorting-views * {

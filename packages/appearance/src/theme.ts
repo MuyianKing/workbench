@@ -180,6 +180,8 @@ export interface ThemeConfig {
   aiTreeCollapsed: boolean
   /** 知识库页左栏（条目 / 原始数据清单）的宽度（px）：与笔记 / 视频树同一套做法 */
   kbTreeWidth: number
+  /** 邮箱页左栏（收件箱清单）的宽度（px）：与笔记 / 视频树同一套做法 */
+  mailListWidth: number
   cards: Record<HomeCardId, CardPlacement>
   /**
    * 外观设置（见 appearance.ts）：这一批也住在主题文件里，和布局一起构成
@@ -314,6 +316,16 @@ export const KB_TREE_WIDTH_MAX = 520
 export const KB_TREE_WIDTH_DEFAULT = 232
 
 /**
+ * 邮箱页左栏（收件箱清单）的宽度区间。
+ *
+ * 下限要放得下「发件人 + 主题 + 日期」一行的开头，上限只防手改数据把阅读区挤没。
+ * 与笔记 / AI / 知识库树同一个存放处（theme.json）、同一套做法。
+ */
+export const MAIL_LIST_WIDTH_MIN = 220
+export const MAIL_LIST_WIDTH_MAX = 520
+export const MAIL_LIST_WIDTH_DEFAULT = 300
+
+/**
  * 默认布局（按当前配置固化）。
  *
  * 第一栏（左，373 固定）自上而下是活跃度、快捷启动、系统状态、快捷操作、命令五张定高卡，
@@ -375,6 +387,7 @@ export const DEFAULT_THEME: ThemeConfig = {
   aiTreeWidth: AI_TREE_WIDTH_DEFAULT,
   aiTreeCollapsed: false,
   kbTreeWidth: KB_TREE_WIDTH_DEFAULT,
+  mailListWidth: MAIL_LIST_WIDTH_DEFAULT,
   cards: {
     activity: { row: 'row-1', order: 0, hidden: false },
     quick: { row: 'row-2', order: 0, hidden: false },
@@ -697,6 +710,13 @@ export function clampKbTreeWidth(value: unknown): number {
   return Math.min(KB_TREE_WIDTH_MAX, Math.max(KB_TREE_WIDTH_MIN, base))
 }
 
+/** 收敛邮箱页左栏宽度（与笔记 / 视频树同一条规矩）；非法值回到默认宽度 */
+export function clampMailListWidth(value: unknown): number {
+  const fallback = MAIL_LIST_WIDTH_DEFAULT
+  const base = typeof value === 'number' && Number.isFinite(value) ? Math.round(value) : fallback
+  return Math.min(MAIL_LIST_WIDTH_MAX, Math.max(MAIL_LIST_WIDTH_MIN, base))
+}
+
 function finiteOr(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback
 }
@@ -940,6 +960,8 @@ export function sanitizeTheme(raw: unknown): ThemeConfig {
     aiTreeCollapsed: base.aiTreeCollapsed === true,
     // 同上：老主题文件里没有，补默认宽度
     kbTreeWidth: clampKbTreeWidth(base.kbTreeWidth),
+    // 同上：老主题文件里没有，补默认宽度
+    mailListWidth: clampMailListWidth(base.mailListWidth),
     cards: normalizeOrder(keepOneVisible(cards)),
     // 外观是后加的字段：老主题文件里没有，缺了就补默认（**不能**因为它去动上面的版本判定，
     // 否则升级一次就会把用户的布局整份清掉）
@@ -1003,6 +1025,7 @@ function layoutSignature(layout: ThemeConfig): string {
     layout.videoFloatH,
     layout.aiTreeWidth,
     layout.kbTreeWidth,
+    layout.mailListWidth,
     layout.columns
       .map(
         (column) =>

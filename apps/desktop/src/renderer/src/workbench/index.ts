@@ -83,6 +83,16 @@ async function openDialog(options: Record<string, unknown>): Promise<string | nu
 }
 
 /**
+ * 多选版：返回全部选中的路径（邮箱发信的附件要一次挑好几个）。
+ * 单选环境里插件回的是单个字符串，也包成单元素数组 —— 调用方只面对一种形状。
+ */
+async function openDialogMultiple(options: Record<string, unknown>): Promise<string[] | null> {
+  const selected = await invoke<string | string[] | null>('plugin:dialog|open', { options })
+  if (Array.isArray(selected)) return selected
+  return typeof selected === 'string' && selected.trim() ? [selected] : null
+}
+
+/**
  * 「另存为」对话框（保险库密钥导出用）。与 openDialog 同一个理由：直接调插件命令，
  * 不引 @tauri-apps/plugin-dialog 包。用户在对话框里取消时返回 null。
  */
@@ -558,6 +568,21 @@ function createApi(): WorkbenchApi {
         multiple: false,
         title: title ?? '选择文件',
         ...(filters && filters.length ? { filters } : {})
+      }),
+    // 挑多个文件（邮箱发信的附件用）；全取消回 null
+    pickFiles: (title?: string, filters?: Array<{ name: string; extensions: string[] }>) =>
+      openDialogMultiple({
+        directory: false,
+        multiple: true,
+        title: title ?? '选择文件',
+        ...(filters && filters.length ? { filters } : {})
+      }),
+    // 「另存为」挑保存路径（邮箱附件下载用）；取消回 null，不是失败
+    pickSavePath: (options: { title?: string; defaultPath?: string; filters?: Array<{ name: string; extensions: string[] }> }) =>
+      saveDialog({
+        title: options.title ?? '另存为',
+        ...(options.defaultPath ? { defaultPath: options.defaultPath } : {}),
+        ...(options.filters && options.filters.length ? { filters: options.filters } : {})
       }),
     checkPort: (port: number) => invoke('check_port', { port }),
     killPortProcess: (port: number) =>

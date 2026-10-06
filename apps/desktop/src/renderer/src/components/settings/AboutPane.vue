@@ -90,6 +90,11 @@ const networkBounds: Array<{ title: string; detail: string }> = [
     title: '实时天气',
     detail:
       '只有设置里填了天气城市才会去取（每半小时一次），地址是内置白名单里的两台主机 —— 城市名检索走 OpenStreetMap 的公开接口、实况走 Open-Meteo，都免费且只读；城市名会出现在请求里。'
+  },
+  {
+    title: '邮箱',
+    detail:
+      '只有邮箱页里配置了邮箱账户才会连你填的收发服务器（IMAP 收信、SMTP 发信，隐式 TLS，主机不设白名单）；授权码在 Windows 凭据管理器里，不落明文；邮件正文里的外链资源一概不加载 —— 不做后台收信，进页面、点刷新或发信才联网。'
   }
 ]
 </script>

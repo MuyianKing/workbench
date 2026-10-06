@@ -11,6 +11,7 @@ mod http;
 mod icon;
 mod imaging;
 mod kb;
+mod mail;
 mod nrm;
 mod notes;
 mod nvm;
@@ -337,6 +338,15 @@ fn main() {
             ai_news::ai_news_sources,
             weather::weather_geocode,
             weather::weather_forecast,
+            mail::mail_key_save,
+            mail::mail_key_state,
+            mail::mail_key_clear,
+            mail::mail_verify,
+            mail::mail_list,
+            mail::mail_fetch_body,
+            mail::mail_set_seen,
+            mail::mail_send,
+            mail::mail_attachment_save,
             commands::note_scan,
             commands::note_read,
             commands::note_write,

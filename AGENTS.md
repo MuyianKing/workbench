@@ -37,7 +37,7 @@
 ## 1. 项目边界
 
 - 定位：Windows 桌面应用（Tauri 2 + WebView2），一个窗口里管项目、记工作、写笔记、看 AI 用量；pnpm workspace monorepo
-  （应用在 `apps/desktop/`，纯逻辑按域拆在 `packages/` 的 13 个 `@workbench/*` 包，见第 2 节），`Cargo.lock` 要提交；
+  （应用在 `apps/desktop/`，纯逻辑按域拆在 `packages/` 的 14 个 `@workbench/*` 包，见第 2 节），`Cargo.lock` 要提交；
   例外：`vendor-pi.mjs` 内部装 Pi 仍走 `npm install`（`resources/pi/` 要整树打进安装包，不能用符号链接布局）。
 - **联网边界：默认不联网、不上报任何数据；出口只有九个，且都由用户显式开启**：用户自己填的两个 git 仓库（用量同步、笔记图片，
   留空即关闭）与**笔记自己那个仓库**（地址不在设置里 —— 跟着那个笔记文件夹的 `origin` 走，且只有用户点了同步才会跑一次 git；
@@ -55,14 +55,20 @@
   用户在弹窗里粘上 Key / 点「获取列表」时，按他填的 Base URL GET 一次 `/models`，同一个主机同一把 Key，不点就不走）、**装技能**
   （AI 助手页那颗「技能」按钮里的「粘地址」：地址由用户粘、点了「装上」才走一次 GET，主机不设白名单、跟着跳转最多 5 跳、
   只收 zip 且超过 64 MB 就停 —— 与「用户自己填的 git 仓库」同一类「地址由用户给」的出口；**只有这一件事需要出网**：
-  导入本地 zip / 导入目录、装卸开关、`--skill` 注入全在本机，见 `pi_skills.rs` 与 `docs/modules/ai.md`）。
+  导入本地 zip / 导入目录、装卸开关、`--skill` 注入全在本机，见 `pi_skills.rs` 与 `docs/modules/ai.md`）、
+  **邮箱**（第十条出口；邮箱页里填了邮箱地址、授权码进了凭据管理器才会连**用户配置的**收发服务器 ——
+  IMAP 收信、SMTP 发信各一台，主机不设白名单，与「装技能」同一类「地址由用户给」的出口；
+  授权码走凭据管理器不落明文，**邮件 HTML 正文的外链资源一律不加载** —— 除收发服务器外这条功能
+  没有别的网络目标；不做后台轮询，进页面与手动刷新才联网，见 `mail.rs` 与 `docs/modules/mail.md`）。
   不要新增网络出口、不往任何第三方服务发数据；笔记里的外链图片不算新出口；
   密码保险库也不算 —— 它推的是**用量同步那个仓库**的另一个目录（`vault/vault.json`），推上去的只有密文；
   登录内嵌的 client_id/secret 是这条边界唯一一次放宽。
 - 引新前端依赖先看它会不会在**运行时**去取外面的资源（Vditor 就是这类：资源按 `options.cdn` 取，默认指 unpkg）—— 这类要么把资源
   随包带一份、要么别引。
 - Rust 依赖的判据是**不新增编译单元**，不是「不新增 crate 名」：先 `cargo tree -e normal -i <crate>` 确认它已经在图里；不要引
-  `reqwest`、`git2`、`sysinfo` 这类会拉进整套栈的 native / 运行时依赖。
+  `reqwest`、`git2`、`sysinfo` 这类会拉进整套栈的 native / 运行时依赖。唯一的例外是邮箱的 TLS：`schannel` 是系统自带
+  Schannel 的纯 FFI 封装（无 C 编译），唯一依赖 windows-sys ^0.61 已在图里、恰好只新增这一个编译单元 —— IMAP/SMTP 要的是
+  「TCP 流 + 隐式 TLS」，`http.rs` 的 WinHTTP 封装是 HTTP 专用用不上（见 mail.rs）。
 - 唯一需要用户预装的外部程序是 **git**，只在两处用它：`sync.rs` 的几处同步与 `skills.rs` 的版本提交 / 同步（外加两条只读探测：
   笔记文件夹的仓库状态 `repo_state`（笔记 / 知识库 / AI 助手的工作目录都走它 —— 它本来就是「对任意文件夹、认它自己的
   `.git` 与 origin」的通用实现；AI 助手页另外拿它回的当前分支说清在哪儿干活）、技能库所在的仓库 `skills::state`）。直启 `git.exe`（`proc::run_direct`），**不要**经 `cmd /C`；
@@ -80,7 +86,7 @@
   `data\pi\sessions\`（起进程时传 `--session-id` 与 `--session-dir`，**不要传 `--no-session`**）。跑它时子进程必须带 `PI_TELEMETRY=0`、`PI_SKIP_VERSION_CHECK=1` 与 `PI_OFFLINE=1`（它默认会
   报遥测、向 pi.dev 查最新版本、RPC 启动时还刷一遍模型目录 —— 那三条不在任何已登记的出口里），密钥只经环境变量给，**进程直启不经 `cmd /C`**（行内层引号会被
   cmd 拆坏，见 session.rs 的 `spawn_args`）。别照着再引别的 Agent。
-- 测试用 Vitest（13 个域包各自跑自己的用例，根目录 `pnpm test` = `pnpm -r test` 聚合；渲染层用例在 `@workbench/desktop` 包里）
+- 测试用 Vitest（14 个域包各自跑自己的用例，根目录 `pnpm test` = `pnpm -r test` 聚合；渲染层用例在 `@workbench/desktop` 包里）
   + `cargo test`（写在同文件的 `#[cfg(test)] mod tests`）。**TypeScript 与 vue-tsc 的版本不要动**：
   升到 TS 7 会让 `pnpm run typecheck` 直接不可用。
 - 仅 Windows，不做 macOS / Linux 适配。
@@ -89,9 +95,9 @@
 
 - 总览：monorepo。桌面应用自包含在 `apps/desktop/` —— Rust 在 `src-tauri/src/`、渲染层在 `src/renderer/src/`（组件 `components/`、
   store `stores/`、交互骨架 `composables/`、适配层 `workbench/`、设计令牌与全局样式 `styles/`）、随包资源 `resources/`、构建脚本 `scripts/`；
-  跨页面复用的类型 / 契约 / 纯逻辑按域拆在 `packages/` 的 13 个包里：`core`（平台原语：Result、端口与路径、扫描、命令、快捷启动、
+  跨页面复用的类型 / 契约 / 纯逻辑按域拆在 `packages/` 的 14 个包里：`core`（平台原语：Result、端口与路径、扫描、命令、快捷启动、
   图标缓存、日期）、`notes` / `video` / `appearance`（含设计参考库）/ `terminal` / `kb` / `skills` / `ai`（含 Pi 技能与 AI 热点）/
-  `usage`（用量与各 IDE 日志源）/ `work-log` / `vault` / `auth` / `weather`。逐文件分工见架构文档的「目录结构」。
+  `usage`（用量与各 IDE 日志源）/ `work-log` / `vault` / `auth` / `weather` / `mail`（账户配置收敛、RFC 2047、发信报文构建、收信解析）。逐文件分工见架构文档的「目录结构」。
 - 域包之间与应用对域包一律**按包名导入**（`@workbench/<包>`，只走各包 `index.ts` 桶）；解析走 pnpm 的 workspace 软链 + 各包
   `exports`（TS 源码直出），TS 检查由根目录唯一的 `tsconfig.json` / `tsconfig.test.json` 的 paths 兜底。渲染层内部别名
   `@` → `apps/desktop/src/renderer/src`（`@shared` 已随拆包删除）。单测与被测模块同目录，命名 `*.test.ts`。
@@ -164,6 +170,7 @@ asset 协议、读取权限在 Rust 侧按单个文件授予）、**通道一律
 | AI 助手（会话 / 项目 / 驱动本机 Pi / 模型与密钥 / 提示词与出口） | [ai](docs/modules/ai.md) |
 | 用量与外观同步、账号登录 | [sync-and-auth](docs/modules/sync-and-auth.md) |
 | 密码保险库（密钥 / 加解密 / 多机共写一份文件） | [vault](docs/modules/vault.md) |
+| 邮箱（IMAP 收信 / SMTP 发信 / 授权码 / 联网出口） | [mail](docs/modules/mail.md) |
 
 没有列入表里的模块（首页、项目、技能、样式、视频、快捷启动、官网）也在 [docs/modules/](docs/modules/) 下各有一份文档，
 动手前先看它的「约束」一节。

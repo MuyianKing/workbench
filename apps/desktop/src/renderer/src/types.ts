@@ -30,6 +30,7 @@ import type {
   AiSession,
   AiSkillRef
 } from '@workbench/ai'
+import type { MailAccount } from '@workbench/mail'
 import type {
   ActiveSession,
   ActivityCounts,
@@ -476,6 +477,17 @@ export interface AppSettings {
    * 取值由 shared/weather.ts 的 sanitizeWeatherCity 收敛。
    */
   weatherCity: string
+  /**
+   * 邮箱账户的连接参数（`@workbench/mail` 的 MailAccount）：邮箱地址与收发服务器。
+   *
+   * 这是**第十个联网出口、且由用户显式开启**：地址填了（且授权码在凭据管理器里）
+   * 才会连用户配置的那两台 IMAP/SMTP 服务器，主机名不设白名单 —— 与 AI 助手的
+   * Base URL 同属「地址由用户给」的出口。授权码不落这份明文 JSON，它在 Windows
+   * 凭据管理器（`Workbench/mail/<地址>/token`，见 src-tauri/src/mail.rs）；
+   * 邮件 HTML 正文的外链资源在渲染层一律不加载 —— 除收发服务器外这条功能没有别的目标。
+   * 取值由 @workbench/mail 的 sanitizeMailAccount 收敛。
+   */
+  mailAccount: MailAccount
   /**
    * Token 用量同步仓库地址（git 远程地址），空串表示不同步。
    *
@@ -1031,6 +1043,17 @@ export interface WorkbenchApi {
     title?: string,
     filters?: Array<{ name: string; extensions: string[] }>
   ) => Promise<string | null>
+  /** 挑多个文件（邮箱发信的附件用）；取消回 null —— 那不是失败，调用方不该报错 */
+  pickFiles: (
+    title?: string,
+    filters?: Array<{ name: string; extensions: string[] }>
+  ) => Promise<string[] | null>
+  /** 「另存为」挑一个保存路径（邮箱附件下载用）；取消回 null，不是失败 */
+  pickSavePath: (options: {
+    title?: string
+    defaultPath?: string
+    filters?: Array<{ name: string; extensions: string[] }>
+  }) => Promise<string | null>
   scanProject: (dirPath: string) => Promise<Result<ScanResult>>
   listProjects: () => Promise<{ projects: Project[]; groups: ProjectGroup[] }>
   addProject: (input: AddProjectInput) => Promise<Result<Project>>
@@ -1726,6 +1749,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   aiActiveSession: '',
   aiSkillsOff: [],
   weatherCity: '',
+  mailAccount: { address: '', imapHost: '', imapPort: 0, smtpHost: '', smtpPort: 0 },
   tokenSyncRepo: '',
   activeView: 'home',
   // 行为记忆：第一次打开时就是这几个默认档，之后记住用户自己选的那一档

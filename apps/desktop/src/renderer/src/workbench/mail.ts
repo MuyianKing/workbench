@@ -1,0 +1,120 @@
+/**
+ * 邮箱页的适配层实现。
+ *
+ * **为什么会出网**：命令在 Rust 侧（`src-tauri/src/mail.rs`），第十条「由用户显式开启」
+ * 的出口 —— 连接目标就是账户配置里那两台收发服务器（IMAP 收 / SMTP 发），主机名不设
+ * 白名单，与 AI 助手的 Base URL 同属「地址由用户给」的出口。授权码不经过这一层：
+ * Rust 从凭据管理器里取，这里只递非敏感的连接参数。
+ *
+ * 这一层只做「invoke → Result」的收敛，MIME 解析（postal-mime）与发信报文构建
+ * （buildMime）在 @workbench/mail 包（有单测），策略（缓存、拉多少封）在 stores/mail.ts。
+ */
+import type { MailAccount } from '@workbench/mail'
+import { fail, ok } from '@workbench/core'
+import type { Result } from '@/types'
+import { errorText, guard, invoke } from './bridge'
+
+/** Rust 回来的列表摘要（与 mail.rs 的 MailSummary 一致，serde camelCase） */
+export interface MailSummary {
+  uid: number
+  subject: string
+  from: string
+  date: string
+  seen: boolean
+  hasAttachment: boolean
+}
+
+/** 连通性验证（收发两边都试一遍，授权码只在这一趟作参数）。 */
+export async function verifyMailAccount(account: MailAccount, secret: string): Promise<Result<null>> {
+  return guard(
+    invoke<null>('mail_verify', {
+      address: account.address,
+      secret,
+      imapHost: account.imapHost,
+      imapPort: account.imapPort,
+      smtpHost: account.smtpHost,
+      smtpPort: account.smtpPort
+    }),
+    '验证失败'
+  )
+}
+
+/** 存 / 覆盖这个邮箱的授权码（进凭据管理器，之后 Rust 自己取，渲染层不再持有）。 */
+export async function saveMailKey(address: string, secret: string): Promise<Result<null>> {
+  return guard(invoke<null>('mail_key_save', { address, secret }), '保存授权码失败')
+}
+
+/** 这个邮箱配过授权码没有（只回有没有，界面显示「已配置 / 未配置」）。 */
+export async function mailKeyState(address: string): Promise<Result<boolean>> {
+  return guard(invoke<boolean>('mail_key_state', { address }), '查询授权码状态失败')
+}
+
+/** 清掉这个邮箱的授权码（换地址或删账户时用）。 */
+export async function clearMailKey(address: string): Promise<Result<null>> {
+  return guard(invoke<null>('mail_key_clear', { address }), '清除授权码失败')
+}
+
+/** 收件箱最近 N 封的摘要。 */
+export async function fetchMailList(account: MailAccount, limit: number): Promise<Result<MailSummary[]>> {
+  return guard(
+    invoke<MailSummary[]>('mail_list', {
+      address: account.address,
+      imapHost: account.imapHost,
+      imapPort: account.imapPort,
+      limit
+    }),
+    '拉取收件箱失败'
+  )
+}
+
+/** 拉一封完整报文（base64），MIME 解析在 store 里交给 @workbench/mail。 */
+export async function fetchMailBody(account: MailAccount, uid: number, markSeen: boolean): Promise<Result<string>> {
+  return guard(
+    invoke<string>('mail_fetch_body', {
+      address: account.address,
+      imapHost: account.imapHost,
+      imapPort: account.imapPort,
+      uid,
+      markSeen
+    }),
+    '读取邮件失败'
+  )
+}
+
+/** 标记 / 取消一封的已读。 */
+export async function setMailSeen(account: MailAccount, uid: number, seen: boolean): Promise<Result<null>> {
+  return guard(
+    invoke<null>('mail_set_seen', {
+      address: account.address,
+      imapHost: account.imapHost,
+      imapPort: account.imapPort,
+      uid,
+      seen
+    }),
+    '标记已读失败'
+  )
+}
+
+/** 发一封邮件（mime 是 @workbench/mail 的 buildMime 拼好的完整报文）。 */
+export async function sendMail(account: MailAccount, to: string[], mime: string): Promise<Result<null>> {
+  return guard(
+    invoke<null>('mail_send', {
+      address: account.address,
+      smtpHost: account.smtpHost,
+      smtpPort: account.smtpPort,
+      to,
+      mime
+    }),
+    '发送失败'
+  )
+}
+
+/** 附件落盘（路径来自「另存为」，数据是 MIME 解析出的附件 base64）。 */
+export async function saveMailAttachment(path: string, base64: string): Promise<Result<null>> {
+  try {
+    const saved = await invoke<null>('mail_attachment_save', { path, data: base64 })
+    return ok(saved)
+  } catch (error) {
+    return fail(errorText(error, '保存附件失败'))
+  }
+}

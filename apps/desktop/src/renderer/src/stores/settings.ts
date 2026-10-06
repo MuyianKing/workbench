@@ -18,6 +18,7 @@ import {
   clampCardGap,
   clampColumnWidth,
   clampKbTreeWidth,
+  clampMailListWidth,
   clampNoteTreeWidth,
   clampRowHeight,
   clampVideoTreeWidth,
@@ -556,6 +557,18 @@ export const useSettingsStore = defineStore('settings', () => {
   }
 
   /**
+   * 邮箱页左栏（收件箱清单）宽度：与笔记 / 视频树同一套做法 ——
+   * 拖动时只改本地让界面跟手，松手才整份落盘（它也在 theme.json 里）。
+   */
+  function setMailListWidth(width: number): void {
+    themeConfig.value.mailListWidth = clampMailListWidth(width)
+  }
+
+  async function commitMailListWidth(): Promise<void> {
+    await saveThemeConfig({ mailListWidth: themeConfig.value.mailListWidth })
+  }
+
+  /**
    * AI 助手页左栏（项目 → 会话那棵树）收起 / 展开：收起后对话占满整行，
    * 入口在对话区左上角那颗按钮上。落 theme.json（与视频树收起同一套做法）。
    */
@@ -836,6 +849,8 @@ export const useSettingsStore = defineStore('settings', () => {
     commitVideoTreeWidth,
     setAiTreeWidth,
     commitAiTreeWidth,
+    setMailListWidth,
+    commitMailListWidth,
     setAiTreeCollapsed,
     setKbTreeWidth,
     commitKbTreeWidth,
