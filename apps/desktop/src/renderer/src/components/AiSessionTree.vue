@@ -156,7 +156,7 @@ const running = computed(() => new Set(props.runningIds))
   flex-shrink: 0;
   font-size: 12px;
   color: var(--ink-3);
-  transition: transform 0.15s ease;
+  transition: transform 0.15s var(--ease-out);
 }
 
 .row__caret.is-open {

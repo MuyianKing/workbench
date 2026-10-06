@@ -508,7 +508,7 @@ function clearLogs(): void {
         class="dock"
         :class="{ 'is-dragging': dockDragging }"
         type="button"
-        :style="{ top: `${renderDockTop}%` }"
+        :style="{ '--dock-top': `${renderDockTop}vh` }"
         title="展开终端（按住可上下拖动）"
         aria-label="展开终端"
         @pointerdown="startDockDrag"
@@ -655,6 +655,7 @@ function clearLogs(): void {
   position: fixed;
   /* 贴死窗口右缘，只留左边两个圆角：看着像挂在窗口边上的一道把手，而不是页面里的一个浮块 */
   right: 0;
+  top: 0;
   z-index: 5;
   display: grid;
   place-items: center;
@@ -669,9 +670,10 @@ function clearLogs(): void {
   font-size: 15px;
   box-shadow: var(--shadow-pop);
   cursor: grab;
-  /* top 取的是「按钮中心落在窗口高度的百分之几」，所以自身上移一半 */
-  transform: translateY(-50%);
-  transition: top 0.16s ease, background 0.15s ease, color 0.15s ease;
+  /* 垂直位置住在 transform 上：--dock-top 是「按钮中心在窗口高度的百分之几」，模板带 vh 绑进来，
+     自身再上移一半 —— 键盘微调与位置恢复的滑动都落在合成器上，不碰布局 */
+  transform: translateY(var(--dock-top, 50vh)) translateY(-50%);
+  transition: transform 0.16s var(--ease-out), background 0.15s ease, color 0.15s ease;
   touch-action: none;
 }
 
@@ -739,7 +741,8 @@ function clearLogs(): void {
 .term.term-fold-leave-active {
   overflow: hidden;
   transform-origin: right center;
-  transition: transform 0.18s ease, opacity 0.16s ease, height 0.16s ease 0.18s;
+  transition: transform 0.18s var(--ease-out), opacity 0.16s var(--ease-out),
+    height 0.16s var(--ease-out) 0.18s;
 }
 
 .term.term-fold-leave-to {
@@ -752,7 +755,8 @@ function clearLogs(): void {
 .term.term-fold-enter-active {
   overflow: hidden;
   transform-origin: right center;
-  transition: height 0.16s ease, transform 0.18s ease 0.16s, opacity 0.16s ease 0.16s;
+  transition: height 0.16s var(--ease-out), transform 0.18s var(--ease-out) 0.16s,
+    opacity 0.16s var(--ease-out) 0.16s;
 }
 
 .term.term-fold-enter-from {
@@ -763,17 +767,17 @@ function clearLogs(): void {
 
 /* 按钮从窗口右缘滑出来 / 缩回右缘：与面板那一拍错开，看着像面板收进去之后它才冒头 */
 .dock.dock-enter-active {
-  transition: transform 0.18s ease 0.14s, opacity 0.16s ease 0.14s;
+  transition: transform 0.18s var(--ease-out) 0.14s, opacity 0.16s var(--ease-out) 0.14s;
 }
 
 .dock.dock-leave-active {
-  transition: transform 0.14s ease, opacity 0.12s ease;
+  transition: transform 0.14s var(--ease-out), opacity 0.12s var(--ease-out);
 }
 
 .dock.dock-enter-from,
 .dock.dock-leave-to {
   opacity: 0;
-  transform: translateY(-50%) translateX(100%);
+  transform: translateY(var(--dock-top, 50vh)) translateY(-50%) translateX(100%);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -794,7 +798,7 @@ function clearLogs(): void {
   height: var(--term-h, var(--h-terminal));
   background: var(--term-bg);
   border-top: 1px solid var(--term-border);
-  transition: height 0.18s ease;
+  transition: height 0.18s var(--ease-out);
   border-radius: var(--r-md);
   margin: var(--sp-2);
   margin-top: 0;

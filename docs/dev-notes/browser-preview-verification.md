@@ -413,6 +413,17 @@ await send('Runtime.evaluate', { expression: `(async () => {
   于是每个通道都落到 Proxy 兜底、返回 `{ ok: true, data: null }`，页面只剩一片空态 ——
   截图里「有外壳、有标题栏」看着像跑通了，其实一个通道都没验到（踩过一次，A/B 比对差点据此收工）。
   判据是 `document.documentElement.dataset.theme` 有没有被写上：空的就说明 `getBootstrap` 没生效。
+- **`updateSettings` 必须真实现，store 不做乐观更新**：`settings.value = result.data` 在通道**回包之后**才赋值，
+  桩不实现它的话，所有「点按钮改设置」的交互（折叠导航、收终端面板……）都会原地不动 ——
+  界面看着毫无异常，只是值永远写不进去。桩按 store 当前值合并补丁、**回一个新对象**即可
+  （store 读得到：`#app.__vue_app__.config.globalProperties.$pinia._s.get('settings')`）。
+  其余通道维持「零桩语义」——Proxy 一律抛错，等价于 `window.workbench` 不存在（mount 照常、store 走默认值），
+  比给每个通道编返回值安全得多；壳层 + 侧栏 / 终端这类 store 驱动的动效验证，有这一个真桩就够了。
+- **动画判「怎么动」靠逐帧记录，别靠截图猜**：`Runtime.evaluate` 里起 rAF 循环，每帧记
+  `getBoundingClientRect` / `getComputedStyle` 的宽高、opacity、transform（`new DOMMatrix(...)` 取位移），
+  跑满一秒一次性读回 —— 谁先动、哪一拍动、曲线起步快不快（半程进度一算便知）都在数组里。
+  配 `transitionend`（记 `elapsedTime`）核时长，位置类改动用「期望中心 vs 实际中心」的算术断言，
+  比肉眼比对截图可靠。本次验侧栏收展、终端两拍折叠、dock 滑入全靠这一套（2026-10）。
 - **纯浏览器里必定有一条 `Tauri 运行时不可用，无法调用 data_load` 异常**，这是环境造成的、不是产物的问题：
   `main.ts` 调的 `initState()`（[state.ts](../../apps/desktop/src/renderer/src/workbench/state.ts)）**直接** `invoke('data_load')`，
   不经过 `window.workbench`，所以顶替 `window.workbench` 拦不住它。它只让 `initState` 提前 reject

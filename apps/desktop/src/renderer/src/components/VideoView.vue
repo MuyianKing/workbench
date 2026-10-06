@@ -352,13 +352,13 @@ function openRecentRoot(dir: string): void {
    * 收起方向由 is-collapsed 里那条带延时的声明接管。
    */
   transition:
-    width 0.2s ease,
-    margin-right 0.2s ease,
-    padding-left 0.2s ease,
-    padding-right 0.2s ease,
-    border-left-width 0.2s ease,
-    border-right-width 0.2s ease,
-    opacity 0.2s ease,
+    width 0.2s var(--ease-out),
+    margin-right 0.2s var(--ease-out),
+    padding-left 0.2s var(--ease-out),
+    padding-right 0.2s var(--ease-out),
+    border-left-width 0.2s var(--ease-out),
+    border-right-width 0.2s var(--ease-out),
+    opacity 0.2s var(--ease-out),
     visibility 0s;
 }
 
@@ -376,13 +376,13 @@ function openRecentRoot(dir: string): void {
   pointer-events: none;
   /* visibility 拖到动画走完再生效：淡出全程可见，收完之后里面的东西也不进 Tab 序 */
   transition:
-    width 0.2s ease,
-    margin-right 0.2s ease,
-    padding-left 0.2s ease,
-    padding-right 0.2s ease,
-    border-left-width 0.2s ease,
-    border-right-width 0.2s ease,
-    opacity 0.2s ease,
+    width 0.2s var(--ease-out),
+    margin-right 0.2s var(--ease-out),
+    padding-left 0.2s var(--ease-out),
+    padding-right 0.2s var(--ease-out),
+    border-left-width 0.2s var(--ease-out),
+    border-right-width 0.2s var(--ease-out),
+    opacity 0.2s var(--ease-out),
     visibility 0s 0.2s;
 }
 

@@ -113,13 +113,13 @@ function select(id: ViewId): void {
    */
   --nav-inner: calc(var(--w-nav) - 16px - 2px); /* 内容盒宽：减去左右 padding(8×2) 与边框(1×2) */
   transition:
-    width 0.2s ease,
-    margin-left 0.2s ease,
-    padding-left 0.2s ease,
-    padding-right 0.2s ease,
-    border-left-width 0.2s ease,
-    border-right-width 0.2s ease,
-    opacity 0.2s ease,
+    width 0.2s var(--ease-out),
+    margin-left 0.2s var(--ease-out),
+    padding-left 0.2s var(--ease-out),
+    padding-right 0.2s var(--ease-out),
+    border-left-width 0.2s var(--ease-out),
+    border-right-width 0.2s var(--ease-out),
+    opacity 0.2s var(--ease-out),
     visibility 0s;
 }
 
@@ -141,13 +141,13 @@ function select(id: ViewId): void {
   pointer-events: none;
   /* visibility 拖到动画走完再生效：淡出全程可见，收完之后按钮也不进 Tab 序 */
   transition:
-    width 0.2s ease,
-    margin-left 0.2s ease,
-    padding-left 0.2s ease,
-    padding-right 0.2s ease,
-    border-left-width 0.2s ease,
-    border-right-width 0.2s ease,
-    opacity 0.2s ease,
+    width 0.2s var(--ease-out),
+    margin-left 0.2s var(--ease-out),
+    padding-left 0.2s var(--ease-out),
+    padding-right 0.2s var(--ease-out),
+    border-left-width 0.2s var(--ease-out),
+    border-right-width 0.2s var(--ease-out),
+    opacity 0.2s var(--ease-out),
     visibility 0s 0.2s;
 }
 

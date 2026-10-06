@@ -125,8 +125,8 @@
 
 ## 4. UI 与样式
 
-- 手写 CSS，不用原子化 CSS；颜色、间距、圆角、字号一律取 [tokens.css](apps/desktop/src/renderer/src/styles/tokens.css) 的
-  `--bg-*` `--ink-*` `--st-*` `--sp-*` `--r-*` `--fs-*`。暗色只在 `:root[data-theme='dark']` 覆盖令牌。
+- 手写 CSS，不用原子化 CSS；颜色、间距、圆角、字号与动效缓动一律取 [tokens.css](apps/desktop/src/renderer/src/styles/tokens.css) 的
+  `--bg-*` `--ink-*` `--st-*` `--sp-*` `--r-*` `--fs-*` `--ease-*`。暗色只在 `:root[data-theme='dark']` 覆盖令牌。
 - 界面主体灰度，彩色只表达运行状态（`--st-run` / `--st-ok` / `--st-fail`）与项目标识色；终端面板始终深色（`--term-*`）。
 - **项目标识色**（[project-color.ts](packages/core/src/project-color.ts)）：预设色存名字不存色值，自定义色 `#rrggbb` 一律经
   `sanitizeProjectColor()` 收敛；颜色怎么分配只在那一个文件里定义，界面别自己另拍一个。

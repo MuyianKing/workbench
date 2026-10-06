@@ -268,7 +268,7 @@ function beginViewDrag(event: PointerEvent, id: ViewId): void {
  * 拖动中会连着换好几次位，时长压到 140ms —— 再长会跟不上手。
  */
 .pick-move {
-  transition: transform 0.14s ease-out;
+  transition: transform 0.14s var(--ease-out);
 }
 
 @media (prefers-reduced-motion: reduce) {
