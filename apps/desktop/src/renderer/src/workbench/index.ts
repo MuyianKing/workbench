@@ -359,7 +359,9 @@ function createApi(): WorkbenchApi {
     // 同步仓库地址与其余几条同步同一个入口 —— 没登录一律当没填（见 syncRepo 的说明）。
     vaultKeyState: () => vault.keyState(),
     vaultCreateKey: (replace: boolean) => vault.createKey(replace),
+    vaultHello: () => vault.helloState(),
     vaultUnlock: (password: string) => vault.unlock(password),
+    vaultUnlockHello: () => vault.unlockHello(),
     vaultLock: () => Promise.resolve(vault.lock()),
     // 导出 / 导入都自己弹对话框：密钥是一段三百来字符的 base64，让人手抄错一个字符的后果
     // 是另一台机器上一条都解不开，所以只走文件这条路（取消返回 false，不是失败）

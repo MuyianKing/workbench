@@ -608,6 +608,16 @@ export interface VaultKeyState {
 }
 
 /**
+ * 这台机器的 Windows 验证（Hello）配没配好，解锁屏据此分流两条路：
+ *
+ * - `available`：已配好，解锁弹系统自己的验证框（PIN / 指纹 / 人脸）—— 默认路；
+ * - `unconfigured`：机器配得上但还没配，界面给一句去哪儿配（微软账户的机器上，
+ *   输本机账户密码那条路永远走不通，只有这一句能救回来）；
+ * - `unavailable`：没有验证手段（连 PIN 都配不了，或被策略关了），只能输本机账户密码。
+ */
+export type VaultHelloState = 'available' | 'unconfigured' | 'unavailable'
+
+/**
  * 推给仓库的结果。
  *
  * `pushed: false` **不是失败**：那是「远端在这一轮里被另一台机器推过」，
@@ -1416,13 +1426,21 @@ export interface WorkbenchApi {
   vaultKeyState: () => Promise<Result<VaultKeyState>>
   /** 现生成一把密钥并落进凭据管理器；已有密钥时 `replace` 为假则不动它（换密钥等于把现有条目全作废） */
   vaultCreateKey: (replace: boolean) => Promise<Result<VaultKeyState>>
+  /** 这台机器的 Windows 验证（Hello）配没配好：解锁屏据此决定弹系统验证框还是输本机账户密码 */
+  vaultHello: () => Promise<Result<VaultHelloState>>
   /**
-   * 解锁：先由 Windows 校验本机账户密码（Rust 侧的 `LogonUserW`），过了才把密钥取进内存。
+   * 解锁（输本机账户密码那条路，回退用）：先由 Windows 校验密码（Rust 侧的 `LogonUserW`），
+   * 过了才把密钥取进内存。**它只验本机 SAM** —— 微软账户的机器上登录密码由云端认，这条路走不通。
    *
    * 密码只在这条通道上过一次，**不落盘、不进凭据管理器**；应用不存它、也不拿它派生任何东西 ——
    * 认密码的是 Windows，改 Windows 密码不影响保险库。
    */
   vaultUnlock: (password: string) => Promise<Result<VaultKeyState>>
+  /**
+   * 解锁（Windows Hello 那条路，默认）：弹系统自己的验证框，过了才把密钥取进内存。
+   * 返回 null 是用户把验证框关掉了 —— 不是失败，界面不该报错。
+   */
+  vaultUnlockHello: () => Promise<Result<VaultKeyState | null>>
   /** 把内存里那把丢掉（不动凭据管理器） */
   vaultLock: () => Promise<Result<VaultKeyState>>
   /**

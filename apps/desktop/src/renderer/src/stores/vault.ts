@@ -12,10 +12,11 @@
  * 所以这一层管的是「什么时候解锁 / 什么时候重新读一遍 / 改动怎么落下去」，
  * 而不是数据本身。
  *
- * **解锁要输本机账户密码**，由 Windows 自己认（Rust 侧 `LogonUserW`）：应用不存这道口令，
+ * **解锁交给 Windows 认**：默认走 Windows Hello（弹系统自己的验证框，PIN / 指纹 / 人脸），
+ * 机器没配 Hello 才退回输本机账户密码（Rust 侧 `LogonUserW`）。应用不存任何凭据，
  * 也不拿它派生任何东西，所以改 Windows 密码不会让保险库打不开。收起（`lock`）仍然只是把内存里
  * 那把丢掉、把明文从屏幕上撤掉；区别是**再解锁不是点一下的事** —— 冷启动之后这一页也是锁着的，
- * 每次打开应用都要输一次。
+ * 每次打开应用都要过一遍验证。
  *
  * 与其余几条同步同一条口径：**没登录就没有同步**（仓库地址由适配层按登录状态给），
  * 而保险库在没登录时照常能用 —— 本机那份是完整的，只是推不出去，界面会如实说明。
@@ -34,6 +35,7 @@ import {
 import { notifyError, notifySuccess } from '@/notify'
 import { useAuthStore } from '@/stores/auth'
 import { useSettingsStore } from '@/stores/settings'
+import type { Result, VaultHelloState, VaultKeyState } from '@/types'
 
 export const useVaultStore = defineStore('vault', () => {
   const settings = useSettingsStore()
@@ -52,6 +54,13 @@ export const useVaultStore = defineStore('vault', () => {
   const keyChecked = ref(false)
   /** 公钥指纹（`A1B2-C3D4-E5F6`）：核对两台机器拿的是不是同一把密钥 */
   const fingerprint = ref('')
+
+  /**
+   * 这台机器的 Windows 验证（Hello）配没配好。锁着的那一屏靠它分流：
+   * `available` 只摆一颗「解锁」（点了弹系统验证框），其余两档摆密码框 ——
+   * `unconfigured` 多说一句去哪儿配（微软账户的机器上，密码那条路永远走不通）。
+   */
+  const hello = ref<VaultHelloState>('unavailable')
 
   const records = ref<VaultRecord[]>([])
   /** 本机解不开的条数：密钥换过、或文件被改过。大于 0 时界面必须如实说一句 */
@@ -131,7 +140,7 @@ export const useVaultStore = defineStore('vault', () => {
     updatedAt.value = loaded.updatedAt
   }
 
-  /** 问一次密钥状态（进页面时、以及每个动作之后） */
+  /** 问一次密钥状态（进页面时、以及每个动作之后）；锁着时顺带问一遍 Hello 配没配好 */
   async function refreshKey(): Promise<void> {
     try {
       const result = await window.workbench.vaultKeyState()
@@ -142,29 +151,55 @@ export const useVaultStore = defineStore('vault', () => {
       keyExists.value = result.data!.exists
       unlocked.value = result.data!.unlocked
       fingerprint.value = result.data!.fingerprint
+      if (!unlocked.value) await refreshHello()
     } finally {
+      // 放在 finally：Hello 状态那一路出问题时也不能让这一页停在「没查过」的引导帧上
       keyChecked.value = true
     }
   }
 
+  /** 问一遍 Windows 验证（Hello）配没配好。只影响解锁屏长什么样，失败就当没有验证手段 */
+  async function refreshHello(): Promise<void> {
+    const result = await window.workbench.vaultHello()
+    hello.value = result.ok ? result.data! : 'unavailable'
+  }
+
   /**
-   * 解锁并读出全部条目。
+   * 解锁（输本机账户密码那条路）。
    *
-   * 密码交给 Windows 校验（见 workbench/vault.ts），这一层只把结论落到状态上：
    * 失败就地显示一句（`unlockError`），不弹消息 —— 那一刻用户正盯着那个框。
    */
   async function unlock(password: string): Promise<boolean> {
     loading.value = true
-    unlockError.value = ''
     const opened = await window.workbench.vaultUnlock(password)
     loading.value = false
+    return applyUnlock(opened)
+  }
+
+  /**
+   * 解锁（Windows Hello 那条路）：点下去弹系统自己的验证框，等用户给结论。
+   * 用户把框关掉（返回 null）不算失败也不报错，锁着的那一屏原样留着。
+   */
+  async function unlockHello(): Promise<boolean> {
+    loading.value = true
+    const opened = await window.workbench.vaultUnlockHello()
+    loading.value = false
+    return applyUnlock(opened)
+  }
+
+  /** 两条解锁路共用的一段：把结果铺进状态、读出条目 */
+  async function applyUnlock(opened: Result<VaultKeyState | null>): Promise<boolean> {
+    unlockError.value = ''
     if (!opened.ok) {
       unlockError.value = opened.error ?? '解锁失败'
       return false
     }
-    keyExists.value = opened.data!.exists
-    unlocked.value = opened.data!.unlocked
-    fingerprint.value = opened.data!.fingerprint
+    // null = 用户在 Windows 的验证框里取消了：安静地回到锁着的那一屏
+    if (!opened.data) return false
+
+    keyExists.value = opened.data.exists
+    unlocked.value = opened.data.unlocked
+    fingerprint.value = opened.data.fingerprint
     await reload()
     return true
   }
@@ -183,6 +218,8 @@ export const useVaultStore = defineStore('vault', () => {
     syncNote.value = ''
     syncFailed.value = false
     query.value = ''
+    // 解锁屏马上就要摆出来，分流靠 hello：收起前问过的是什么状态已经不作数了
+    await refreshHello()
   }
 
   /** 重新解开本机那份（改动之后、同步之后、切回这一页时） */
@@ -337,6 +374,7 @@ export const useVaultStore = defineStore('vault', () => {
     keyChecked,
     unlocked,
     fingerprint,
+    hello,
     records,
     unreadable,
     dropped,
@@ -358,6 +396,7 @@ export const useVaultStore = defineStore('vault', () => {
     init,
     refreshKey,
     unlock,
+    unlockHello,
     lock,
     reload,
     createKey,

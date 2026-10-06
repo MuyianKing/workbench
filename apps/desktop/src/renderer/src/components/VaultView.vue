@@ -10,7 +10,8 @@
  *
  * 三种样子，按密钥状态走：
  *   - **还没有密钥**：整页只说一件事 —— 先建一把，或者从另一台机器导入；
- *   - **收起来了**：输入本机账户密码再解锁（密码由 Windows 校验，见 workbench/vault.ts）；
+ *   - **收起来了**：解锁交给 Windows —— 配了 Hello 的机器弹系统自己的验证框（默认），
+ *     没配的输本机账户密码（都由 Windows 校验，见 workbench/vault.ts）；
  *   - **开着**：筛选工具带 + 卡片墙。
  *
  * **密码默认是遮住的**，按卡片上那颗眼睛才现形；遮罩是**固定长度**的，不按真实长度铺点 ——
@@ -79,10 +80,11 @@ onMounted(() => {
 /**
  * 解锁屏一出现就把光标放进密码框：这一屏是「回来接着用」的地方，一进来就该能直接敲，
  * 而不是先点一下框。冷启动时 `keyChecked` 还在路上（见上面的 PanelLoading），所以盯的是
- * 三件事都定下来的那一刻。
+ * 几件事都定下来的那一刻。**走 Windows Hello 的机器没有密码框**（弹的是系统验证框），
+ * 那一档不聚焦 —— 所以把 hello 状态也并进这一个判据。
  */
 watch(
-  () => store.keyChecked && store.keyExists && !store.unlocked,
+  () => store.keyChecked && store.keyExists && !store.unlocked && store.hello !== 'available',
   (locked) => {
     if (!locked) return
     void nextTick(() => passwordInput.value?.focus())
@@ -167,10 +169,15 @@ async function sync(): Promise<void> {
 }
 
 /**
- * 解锁：成了就把框里那串清掉。失败时（密码打错）**留着不清** —— 用户多半只是敲错一个字符，
+ * 解锁：按这台机器配没配 Windows Hello 分流 —— 配了就弹系统自己的验证框（没有密码框可清），
+ * 没配才把框里那串递给 store。失败时（密码打错）**留着不清** —— 用户多半只是敲错一个字符，
  * 让他接着改比重打一遍好。失败原因由 store 就地在框下面显示。
  */
 async function unlock(): Promise<void> {
+  if (store.hello === 'available') {
+    await store.unlockHello()
+    return
+  }
   if (await store.unlock(password.value)) password.value = ''
 }
 
@@ -212,14 +219,18 @@ async function lock(): Promise<void> {
       </div>
     </div>
 
-    <!-- 收起来了：解锁要输入本机账户密码，由 Windows 自己认（见 workbench/vault.ts） -->
+    <!-- 收起来了：解锁交给 Windows —— 配了 Hello 的弹系统验证框，没配的输本机账户密码 -->
     <div v-else-if="!store.unlocked" class="vault__intro panel">
       <div class="empty">
         <el-icon class="empty__icon"><Lock /></el-icon>
         <p>密码已经从屏幕上和内存里收起来了。</p>
-        <p class="empty__hint">解锁要输入这台机器的 Windows 账户密码。</p>
+        <p v-if="store.hello === 'available'" class="empty__hint">
+          解锁交给这台机器的 Windows 登录验证（PIN 或指纹）。
+        </p>
+        <p v-else class="empty__hint">解锁要输入这台机器的 Windows 账户密码。</p>
         <div class="vault__intro-actions">
           <el-input
+            v-if="store.hello !== 'available'"
             ref="passwordInput"
             v-model="password"
             class="vault__unlock-input"
@@ -234,6 +245,14 @@ async function lock(): Promise<void> {
             解锁
           </el-button>
         </div>
+        <!--
+          机器配得上 Hello 却没配：说一句去哪儿配。微软账户的机器上密码那条路永远走不通
+          （本机账户库里那份内部副本跟登录密码对不上），这一句是唯一能指到出路的话
+        -->
+        <p v-if="store.hello === 'unconfigured'" class="empty__hint">
+          这台机器没配 Windows Hello：到 设置 → 账户 → 登录选项 配一个 PIN，
+          之后解锁会弹 Windows 自己的验证。
+        </p>
         <!-- 密码不对之类的话就地显示（那一刻用户的注意力就在框上），不弹消息 -->
         <p v-if="store.unlockError" class="vault__intro-error">{{ store.unlockError }}</p>
         <p class="empty__hint">
@@ -278,7 +297,7 @@ async function lock(): Promise<void> {
               <el-icon><Key /></el-icon>
             </el-button>
           </el-tooltip>
-          <el-tooltip content="收起密码（清掉屏幕与内存里的明文；再看得输一次本机账户密码）" placement="bottom">
+          <el-tooltip content="收起密码（清掉屏幕与内存里的明文；再看得过一遍 Windows 验证）" placement="bottom">
             <el-button size="small" @click="lock">
               <el-icon><Lock /></el-icon>
             </el-button>

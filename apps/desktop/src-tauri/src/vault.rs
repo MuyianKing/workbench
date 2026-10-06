@@ -9,8 +9,9 @@
 //!      密钥串因此过一次 IPC，这是全项目唯一一处机密进渲染层的地方，
 //!      理由是解密后的正文本来就要在那儿显示，而 Rust 侧没有能做这件事的工具；
 //!   3. 同步仓库里 `vault/vault.json` 的读与写（复用 `sync.rs` 的 git 管道）；
-//!   4. 解锁那一步的**本机账户密码校验**（`LogonUserW`，见下面那一节）——
-//!      密码由 Windows 自己认，这里既不存它、也不拿它派生任何东西。
+//!   4. 解锁那一步的**身份验证**：优先 Windows Hello（`UserConsentVerifier`，弹系统自己的
+//!      验证框），机器没配 Hello 才退回输本机账户密码（`LogonUserW`）—— 两路都是 Windows
+//!      自己认，这里既不存凭据、也不拿它派生任何东西（见下面那两节）。
 //!
 //! **与仓库里其余几个目录最大的不同：这份文件是所有机器共写的**。
 //! `token-usage/<设备id>.json` 那套「一台机器一个文件、每个文件一个写者、所以不需要人工合并」
@@ -23,6 +24,15 @@
 use serde_json::{json, Value};
 use std::path::Path;
 use std::sync::OnceLock;
+use windows::core::{imp::load_factory, HSTRING};
+use windows::Security::Credentials::UI::{
+    UserConsentVerificationResult, UserConsentVerifier, UserConsentVerifierAvailability,
+};
+// IUserConsentVerifierInterop：带 HWND 的那一路（弹验证框必须钉在应用窗口上，见下面 vault_unlock_hello）
+use windows::Win32::System::WinRT::IUserConsentVerifierInterop;
+// join（等一个 WinRT 异步收场）在 IAsyncOperation 身上；AsyncStatus（收场状态）在
+// windows-future 的 bindings 里 —— 0.3 起 windows 不再从 Foundation 转出口它们
+use windows_future::{AsyncStatus, IAsyncOperation};
 use windows_sys::Win32::Foundation::{
     CloseHandle, ERROR_ACCOUNT_DISABLED, ERROR_ACCOUNT_EXPIRED, ERROR_ACCOUNT_LOCKED_OUT,
     ERROR_ACCOUNT_RESTRICTION, ERROR_INVALID_LOGON_HOURS, ERROR_INVALID_WORKSTATION,
@@ -69,9 +79,120 @@ pub fn vault_save(value: Value) {
     vault_store().schedule();
 }
 
-// ---------- 本机账户密码 ----------
+// ---------- Windows Hello（解锁的默认路） ----------
 
-/// 校验用户输入的本机（Windows 账户）密码 —— **解锁那一步的闸**：过了才把密钥从凭据管理器取进内存。
+/// 验证框上那句提示。应用名系统会自己摆上，这里只说这次验证是为了什么
+const HELLO_PROMPT: &str = "解锁密码保险库";
+
+/// 解锁优先走这一路：把验证交给 Windows 自己的登录凭据（PIN / 指纹 / 人脸）。
+///
+/// **为什么它是默认**：微软账户的机器上，登录密码由微软云端（或它的本地缓存）认，
+/// 本机 SAM 里只有一份 Windows 自己管的内部副本 —— `LogonUserW`（下面那节）在这类机器上
+/// **输什么都是 1326，连每天登录用的那个正确密码也过不去**。Hello 验的恰恰是登录界面
+/// 实际用的那个凭据，微软账户与本地账户都成立。机器没配 Hello 时才退回输本机账户密码。
+///
+/// 走 WinRT 的 `UserConsentVerifier`：弹的是系统自己的验证框，输的是什么、错了几次
+/// 都在 Windows 那边，应用经手不了。crate 已由 tao 引进编译图（见 Cargo.toml 的 windows 那条），
+/// 这里只是把已有的实现用起来。
+///
+/// **单测不弹真框**，与下面 LogonUser 那节同一条口径；验 interop 通不通的是
+/// `hello_availability_probe` 那条 `#[ignore]` 探针。
+#[tauri::command(async)]
+pub fn vault_hello_state() -> Result<String, String> {
+    let availability = check_hello().map_err(|err| format!("读不出 Windows 验证状态（{err}）"))?;
+    Ok(hello_state_name(availability).to_string())
+}
+
+/// 弹一遍 Windows 验证，过了才算解锁。返回 `false` 是**用户自己把验证框关了** ——
+/// 那不是失败，渲染层不该报错。
+///
+/// 验证框开着就等：与其他命令里等 git / 等子进程是同一种等法（线程睡在事件上，不占 CPU），
+/// 这条命令要到用户给出结论（过了 / 错了 / 关了）才回。
+///
+/// **必须走带 HWND 的 interop**（`IUserConsentVerifierInterop::RequestVerificationForWindowAsync`）：
+/// 不带窗口的 `RequestVerificationAsync` 弹出的框不归任何窗口管，在桌面应用里会被压在
+/// 主窗口后面 —— 用户盯着应用，只当没弹出来（微软 tracker 上的已知问题，实测正是如此）。
+/// interop 把框钉在应用窗口的前面，结论与返回值跟无窗口那条完全一致。
+#[tauri::command(async)]
+pub fn vault_unlock_hello(window: tauri::WebviewWindow) -> Result<bool, String> {
+    let availability = check_hello().map_err(|err| format!("读不出 Windows 验证状态（{err}）"))?;
+    if availability != UserConsentVerifierAvailability::Available {
+        // 渲染层是先问过状态才走这条路的，走到这里说明状态刚变过 —— 给一句不指向任何人的话
+        return Err("这台机器的 Windows 验证现在用不了".into());
+    }
+
+    // 拿不到当前窗口（理论上走不到：命令就是从这个窗口发出来的）就没法钉框
+    let hwnd = window.hwnd().map_err(|err| format!("拿不到应用窗口句柄（{err}）"))?;
+    let interop: IUserConsentVerifierInterop =
+        load_factory::<UserConsentVerifier, IUserConsentVerifierInterop>()
+            .map_err(|err| format!("起不了 Windows 验证（{err}）"))?;
+
+    let operation: IAsyncOperation<UserConsentVerificationResult> = unsafe {
+        interop.RequestVerificationForWindowAsync(hwnd, &HSTRING::from(HELLO_PROMPT))
+    }
+    .map_err(|err| format!("起不了 Windows 验证（{err}）"))?;
+    let result = match operation
+        .join()
+        .map_err(|err| format!("Windows 验证没有完成（{err}）"))
+    {
+        Ok(result) => result,
+        Err(err) => {
+            // 用户关掉验证框时，这个异步操作可能以「取消」收场：GetResults 直接报错，
+            // 结论得回头问状态。那是用户自己的选择，不当失败报。
+            if operation.Status() == Ok(AsyncStatus::Canceled) {
+                return Ok(false);
+            }
+            return Err(format!("Windows 验证没有完成（{err}）"));
+        }
+    };
+    match result {
+        UserConsentVerificationResult::Verified => Ok(true),
+        UserConsentVerificationResult::Canceled => Ok(false),
+        other => Err(hello_result_message(other)),
+    }
+}
+
+/// 问一遍这台机器的验证手段配没配好（只读，不弹任何框）。
+fn check_hello() -> windows::core::Result<UserConsentVerifierAvailability> {
+    UserConsentVerifier::CheckAvailabilityAsync().and_then(|operation| operation.join())
+}
+
+/// 验证手段 → 给渲染层的三个状态：解锁屏据此分流两条路、要不要说一句「去配个 PIN」。
+/// `unconfigured` 必须单独成档 —— 那是「配得上但还没配」，与「压根没有」要说给不同的话。
+fn hello_state_name(availability: UserConsentVerifierAvailability) -> &'static str {
+    match availability {
+        UserConsentVerifierAvailability::Available => "available",
+        UserConsentVerifierAvailability::NotConfiguredForUser => "unconfigured",
+        // 没有验证手段（连 PIN 都配不了）或被策略关掉：只剩输本机账户密码一条路。
+        // DeviceBusy 是暂态，这会儿问不了，按「用不了」处理，下一回自己就好
+        UserConsentVerifierAvailability::DeviceNotPresent
+        | UserConsentVerifierAvailability::DisabledByPolicy
+        | UserConsentVerifierAvailability::DeviceBusy => "unavailable",
+        _ => "unavailable",
+    }
+}
+
+/// `UserConsentVerificationResult` → 一句能照做的话。Verified 与 Canceled 不进这里：
+/// 那两个不是失败（前者是解锁成功，后者是用户自己关了框）。
+fn hello_result_message(result: UserConsentVerificationResult) -> String {
+    match result {
+        UserConsentVerificationResult::NotConfiguredForUser => {
+            "这台机器还没配 Windows Hello（设置 → 账户 → 登录选项里配一个 PIN）".into()
+        }
+        UserConsentVerificationResult::DeviceNotPresent => {
+            "这台机器没有可用的 Windows 验证方式".into()
+        }
+        UserConsentVerificationResult::DisabledByPolicy => "Windows 验证被系统策略关掉了".into(),
+        UserConsentVerificationResult::DeviceBusy => "Windows 验证正忙，稍后再试".into(),
+        UserConsentVerificationResult::RetriesExhausted => "Windows 验证没通过（错的次数太多）".into(),
+        other => format!("Windows 验证失败（代码 {}）", other.0),
+    }
+}
+
+// ---------- 本机账户密码（没配 Windows Hello 的机器上的解锁闸） ----------
+
+/// 校验用户输入的本机（Windows 账户）密码 —— **解锁那一步的回退闸**：机器没配 Windows Hello
+/// 时（连 PIN 都配不了，或被策略关掉），解锁走这里，过了才把密钥从凭据管理器取进内存。
 ///
 /// **密码交给 Windows 认**，应用不存口令、不存哈希、也不拿它派生任何东西：改 Windows 密码不会让
 /// 保险库打不开，也不存在「忘了自己设的那道口令」这回事。这与「主口令」（自己派生一把密钥把本机
@@ -80,7 +201,8 @@ pub fn vault_save(value: Value) {
 /// 走 `LogonUserW` + `LOGON32_LOGON_NETWORK`：这一档专为验明文密码而设，不缓存凭据、
 /// 不需要 SE_TCB_NAME，验出来的令牌立刻关掉、不拿它做任何事。
 /// **一次失败就是一次真实的登录失败**：会计入系统的账户锁定计数（本机策略是 10 次 / 10 分钟），
-/// 所以别拿这条命令当「试密码」的地方。
+/// 所以别拿这条命令当「试密码」的地方。**它只验本机 SAM**：微软账户的登录密码由云端认，
+/// 这条路在那种机器上永远验不过 —— 所以它只是 Hello 的回退，不是默认。
 #[tauri::command(async)]
 pub fn vault_verify_password(password: String) -> Result<(), String> {
     verify_password(&password)
@@ -655,5 +777,46 @@ mod tests {
     fn the_current_account_is_readable() {
         let (user, domain) = current_account().expect("读当前 Windows 账户不该失败");
         assert!(!user.is_empty() && !domain.is_empty(), "{domain}\\{user}");
+    }
+
+    // ---------- Windows Hello ----------
+    //
+    // 真·弹一次验证框的用例同样没有（那要用户亲自输一次 PIN）。映射函数是纯的，照常钉住。
+
+    /// 三档状态里 `unconfigured` 必须单独成档 —— 解锁屏要靠它说一句「去配个 PIN」，
+    /// 与「压根没有验证手段」不是同一句话
+    #[test]
+    fn hello_availability_maps_to_three_states() {
+        assert_eq!(hello_state_name(UserConsentVerifierAvailability::Available), "available");
+        assert_eq!(
+            hello_state_name(UserConsentVerifierAvailability::NotConfiguredForUser),
+            "unconfigured"
+        );
+        assert_eq!(
+            hello_state_name(UserConsentVerifierAvailability::DeviceNotPresent),
+            "unavailable"
+        );
+        assert_eq!(hello_state_name(UserConsentVerifierAvailability::DisabledByPolicy), "unavailable");
+        assert_eq!(hello_state_name(UserConsentVerifierAvailability::DeviceBusy), "unavailable");
+        // 枚举是开放的 i32：认不出来的值按「用不了」处理
+        assert_eq!(hello_state_name(UserConsentVerifierAvailability(999)), "unavailable");
+    }
+
+    /// Verified 与 Canceled 不进消息映射（那两个不是失败），其余的都得是一句人话
+    #[test]
+    fn hello_results_map_to_readable_messages() {
+        assert!(hello_result_message(UserConsentVerificationResult::RetriesExhausted).contains("没通过"));
+        assert!(hello_result_message(UserConsentVerificationResult::NotConfiguredForUser).contains("PIN"));
+        assert!(hello_result_message(UserConsentVerificationResult(999)).contains("999"));
+    }
+
+    /// 手动探针：验 WinRT interop 通不通，`cargo test -p workbench hello_availability_probe -- --ignored`。
+    /// 它只问一遍「配没配好」，**不弹任何框、不产生任何登录尝试**。期望值随机器而变：
+    /// 配了 PIN / 指纹的机器是 `availability = 0`（Available），什么都没配的是 `2`（NotConfiguredForUser）。
+    #[test]
+    #[ignore = "手动探针：只用来确认 UserConsentVerifier 的 interop 在这台机器上通"]
+    fn hello_availability_probe() {
+        let availability = check_hello().expect("CheckAvailabilityAsync 不该失败");
+        eprintln!("hello availability = {}（0=已配好 1=无设备 2=没配置 3=策略关了 4=正忙）", availability.0);
     }
 }

@@ -455,6 +455,8 @@ fn main() {
             vault::vault_key_export,
             vault::vault_key_import,
             vault::vault_verify_password,
+            vault::vault_hello_state,
+            vault::vault_unlock_hello,
             vault::vault_pull,
             vault::vault_push,
         ])

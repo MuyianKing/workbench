@@ -3,8 +3,8 @@
  *
  * 分工（与其余几处同步同一条口径：Rust 只做「取原始数据 / 落盘 / 调系统能力」）：
  *  - Rust（`vault.rs`）管四件事：本机那份 JSON 的落盘、本机密钥在 Windows 凭据管理器里的存取、
- *    同步仓库里 `vault/vault.json` 的读写、以及解锁那一步的**本机账户密码校验**（`LogonUserW`）。
- *    它一行密码学都没有。
+ *    同步仓库里 `vault/vault.json` 的读写、以及解锁那一步的**身份验证** —— 优先 Windows Hello
+ *    （弹系统自己的验证框），机器没配 Hello 才退回输本机账户密码（`LogonUserW`）。它一行密码学都没有。
  *  - **加解密与合并全在这里**，算式来自 `@workbench/vault`（纯函数，带单测）。
  *
  * **同步为什么不是一个命令就完事**：那份文件是所有机器共写的，而合并要拿「本机那份」与
@@ -49,7 +49,7 @@ import {
   type VaultRecord
 } from '@workbench/vault'
 import { fail, ok } from '@workbench/core'
-import type { Result, VaultKeyState, VaultLoaded, VaultPushOutcome, VaultSyncOutcome } from '@/types'
+import type { Result, VaultHelloState, VaultKeyState, VaultLoaded, VaultPushOutcome, VaultSyncOutcome } from '@/types'
 import { invoke, guard } from './bridge'
 import { localDevice } from './token'
 
@@ -86,11 +86,25 @@ export async function keyState(): Promise<Result<VaultKeyState>> {
 }
 
 /**
- * 解锁：先由 Windows 认一遍本机账户密码，再把密钥从凭据管理器取进内存。
+ * 这台机器的 Windows 验证（Hello）配没配好：解锁屏据此决定走哪条路。
+ *
+ * `available` = 已配好，解锁弹系统自己的验证框；`unconfigured` = 机器配得上但还没配
+ * （界面上要说一句去哪儿配）；`unavailable` = 没有验证手段（连 PIN 都配不了，或被策略关了），
+ * 只能输本机账户密码。
+ */
+export async function helloState(): Promise<Result<VaultHelloState>> {
+  return guard(invoke<VaultHelloState>('vault_hello_state'), '读取 Windows 验证状态失败')
+}
+
+/**
+ * 解锁（输本机账户密码那条路，回退用）：先由 Windows 认一遍密码，再把密钥从凭据管理器取进内存。
  *
  * **密码由系统校验**（Rust 侧 `vault_verify_password` → `LogonUserW`）：应用不存口令、
  * 不存哈希，也不拿它派生任何东西 —— 改 Windows 密码不会让保险库打不开，也没有
  * 「忘了自己设的那道口令」这回事。验不过就直接回来，密钥一个字都不读。
+ *
+ * **这条路只验本机 SAM**：微软账户的登录密码由微软云端认，SAM 里只有一份对不上的内部副本，
+ * 所以在那类机器上这条路永远走不通（这正是它只当回退、Hello 当默认的原因，见 vault.rs）。
  */
 export async function unlock(password: string): Promise<Result<VaultKeyState>> {
   const verified = await guard(
@@ -98,7 +112,24 @@ export async function unlock(password: string): Promise<Result<VaultKeyState>> {
     '校验本机账户密码失败'
   )
   if (!verified.ok) return fail(verified.error ?? '校验本机账户密码失败')
+  return adoptStoredKey()
+}
 
+/**
+ * 解锁（Windows Hello 那条路，默认）：弹系统自己的验证框（PIN / 指纹 / 人脸），
+ * 过了才把密钥从凭据管理器取进内存。验证框里输什么、错几次都在 Windows 那边，应用经手不了。
+ *
+ * 返回 `null` 是**用户把验证框关了** —— 那不是失败，界面不该报错。
+ */
+export async function unlockHello(): Promise<Result<VaultKeyState | null>> {
+  const verified = await guard(invoke<boolean>('vault_unlock_hello'), 'Windows 验证失败')
+  if (!verified.ok) return fail(verified.error ?? 'Windows 验证失败')
+  if (!verified.data) return ok(null)
+  return adoptStoredKey()
+}
+
+/** 两条解锁路共用的一段：验证过了，把凭据管理器里的密钥取进内存并算好状态 */
+async function adoptStoredKey(): Promise<Result<VaultKeyState>> {
   const stored = await guard(invoke<string | null>('vault_key_read'), '读取本机密钥失败')
   if (!stored.ok) return fail(stored.error ?? '读取本机密钥失败')
 
@@ -124,13 +155,14 @@ function currentKey(): VaultPrivateKey | null {
  * 换密钥（新建 / 导入）之后把本机那份挪到新密钥下。
  *
  * 两条，缺一不可：
- *  - **能读出来的条目解开再用新密钥封回去** —— 换密钥不该顺手把密码弄丢；
- *  - **读不出来的留墓碑** —— 那些条目在任何机器上都解不开了，不清掉的话下一次同步
+ *  - **能读出来的条目解开再用新密钥封回去** —— 换密钥不该顺手把密码弄丢。上一把在手上
+ *    就先按它解；不在手上（新机器还没解锁就导入、或重启之后导入，`previous` 是 null）
+ *    也**要把刚换上的这把试一遍** —— 本机文件里那些用同一把密钥加的密（同步拉下来的）
+ *    照样解得开，漏了这一步就是把它们全部误杀成墓碑；
+ *  - **两把都读不出来的留墓碑** —— 那些条目在这台机器上再也解不开了，不清掉的话下一次同步
  *    会把它们当成本机内容并进去（合并只认 id 与时间，看不见密文），界面上就是一堆
- *    永远解不开、也删不掉的条目。
- *
- * `previous` 是换之前那把；没解锁时它是 null，那就只剩留墓碑这一条路（正常走不到：
- * 密钥那一屏只在解锁之后才进得去）。
+ *    永远解不开、也删不掉的条目。已有的墓碑**原样带上**：重打时间戳会让它反过来压住
+ *    别的机器上「删除之后又改过」的那条。
  */
 async function adoptKey(next: VaultPrivateKey, previous: VaultPrivateKey | null): Promise<Result<null>> {
   const file = await loadFile(next)
@@ -139,25 +171,32 @@ async function adoptKey(next: VaultPrivateKey, previous: VaultPrivateKey | null)
   const device = await localDevice()
   const updatedAt = Date.now()
   const kept: VaultItem[] = []
+  const rest: VaultItem[] = []
 
-  if (previous) {
-    for (const item of file.data!.items) {
-      if (item.deleted) continue
+  for (const item of file.data!.items) {
+    // 已有的墓碑不是「这一轮读不出来」，是早就删好的 —— 原样带走
+    if (item.deleted) {
+      rest.push(item)
+      continue
+    }
+    let entry: VaultEntry | null = null
+    for (const candidate of [previous, next]) {
+      if (!candidate) continue
       try {
-        const entry = await open(previous, item)
-        kept.push({ id: item.id, updatedAt, by: device.id, ...(await seal(publicKeyOf(next), entry)) })
+        entry = await open(candidate, item)
+        break
       } catch {
-        // 旧密钥也解不开这一条：它本来就没救了，下面按墓碑处理
+        // 这把解不开，换下一把；都解不开才按墓碑处理
       }
+    }
+    if (entry) {
+      kept.push({ id: item.id, updatedAt, by: device.id, ...(await seal(publicKeyOf(next), entry)) })
+    } else {
+      rest.push(tombstoneOf(item, updatedAt, device.id))
     }
   }
 
-  const readable = new Set(kept.map((item) => item.id))
-  const tombstones = file.data!.items
-    .filter((item) => !readable.has(item.id))
-    .map((item) => tombstoneOf(item, updatedAt, device.id))
-
-  return saveFile(vaultFileOf(next, [...tombstones, ...kept]))
+  return saveFile(vaultFileOf(next, [...rest, ...kept]))
 }
 
 /**
@@ -190,7 +229,7 @@ export async function createKey(replace: boolean): Promise<Result<VaultKeyState>
  *
  * 正常用法是在**新机器**上导入：本机还没有文件，导入完同步一次就把仓库里那些条目拉下来了。
  * 在一台已经有保险库的机器上导入另一把密钥，等于换成另一份保险库 ——
- * 本机原来那些条目（用旧密钥加的密）按墓碑处理，见 `adoptKey`。
+ * 本机原来那些条目（上一把不在手上、新钥匙也解不开的）按墓碑处理，见 `adoptKey`。
  */
 export async function importKey(text: string): Promise<Result<VaultKeyState>> {
   const key = parseKeyString(text)

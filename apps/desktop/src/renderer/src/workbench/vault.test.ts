@@ -34,6 +34,12 @@ let remote: unknown = null
  * 真密码由 Windows 认（`LogonUserW`，见 src-tauri/src/vault.rs），测试里换成一句常量。
  */
 const GOOD_PASSWORD = '本机账户密码'
+/**
+ * 桩里的 Windows Hello：`helloState` 是「这台机器配没配好」（解锁屏拿它分流两条路），
+ * `helloOutcome` 是那一次系统验证的结论（true 过了 / false 用户关了框 / 字符串 Windows 报的错）。
+ */
+let helloState: string = 'available'
+let helloOutcome: boolean | string = true
 /** 让接下来 n 次 push 被挡下来（模拟「远端在这一轮里被另一台机器推过」） */
 let refuseNextPush = 0
 /**
@@ -64,6 +70,12 @@ function bridge(): void {
             return args?.password === GOOD_PASSWORD
               ? Promise.resolve(null)
               : Promise.reject('本机账户密码不对')
+          case 'vault_hello_state':
+            return Promise.resolve(helloState)
+          case 'vault_unlock_hello':
+            return typeof helloOutcome === 'string'
+              ? Promise.reject(helloOutcome)
+              : Promise.resolve(helloOutcome)
           case 'vault_key_write':
             keys[machine] = String(args?.key ?? '')
             return Promise.resolve(null)
@@ -115,6 +127,8 @@ beforeEach(() => {
   refuseNextPush = 0
   beforeRefusal = null
   pushBases = []
+  helloState = 'available'
+  helloOutcome = true
 })
 
 describe('密钥', () => {
@@ -184,6 +198,53 @@ describe('密钥', () => {
 
     const loaded = await vault.load()
     expect(loaded.ok).toBe(false)
+  })
+
+  it('Windows Hello 那条路：验证过了才把密钥取进内存', async () => {
+    const vault = await freshModule()
+    await vault.createKey(false)
+    vault.lock()
+    helloOutcome = true
+
+    const opened = await vault.unlockHello()
+    expect(opened.ok).toBe(true)
+    expect(opened.data!.unlocked).toBe(true)
+    expect((await vault.load()).ok).toBe(true)
+  })
+
+  it('用户把 Windows 的验证框关掉：结果成功但什么都没解开', async () => {
+    const vault = await freshModule()
+    await vault.createKey(false)
+    vault.lock()
+    helloOutcome = false
+
+    const opened = await vault.unlockHello()
+    expect(opened.ok).toBe(true)
+    expect(opened.data).toBeNull()
+    expect((await vault.load()).ok).toBe(false)
+  })
+
+  it('Windows 那边验不过：错误如实递回来，密钥一个字都不读', async () => {
+    const vault = await freshModule()
+    await vault.createKey(false)
+    vault.lock()
+    helloOutcome = 'Windows 验证没通过（错的次数太多）'
+
+    const opened = await vault.unlockHello()
+    expect(opened.ok).toBe(false)
+    expect(opened.error).toContain('没通过')
+    expect((await vault.load()).ok).toBe(false)
+  })
+
+  it('helloState 原样回传：解锁屏拿它决定弹验证框还是摆密码框', async () => {
+    const vault = await freshModule()
+
+    helloState = 'unconfigured'
+    expect((await vault.helloState()).data).toBe('unconfigured')
+    helloState = 'available'
+    expect((await vault.helloState()).data).toBe('available')
+    helloState = 'unavailable'
+    expect((await vault.helloState()).data).toBe('unavailable')
   })
 
   it('清除本机密钥之后这台机器解不开自己的保险库', async () => {
@@ -471,6 +532,58 @@ describe('换密钥', () => {
     const synced = await b.sync('git@example.com:me/sync.git')
     expect(synced.ok).toBe(true)
     expect(synced.data!.records.map((record) => record.name)).toEqual(['A 的条目'])
+  })
+
+  it('锁着导入同一把密钥：本机那些它解得开的条目跟着走，不全量墓碑（2026-09-30 的事故）', async () => {
+    const a = await machineWithOneEntry('e1', 'A 的条目')
+    expect((await a.sync('git@example.com:me/sync.git')).ok).toBe(true)
+    const keyText = keys['dev-a']!
+    const key = parseKeyString(keyText)!
+
+    // B 本机文件里已经有同步拉下来的条目（同一把密钥加的密），
+    // 另有一条别的密钥加的密文、和一枚早就存在的墓碑
+    const otherKey = await createVaultKey()
+    local['dev-b'] = {
+      version: 1,
+      key: publicKeyOf(key),
+      items: [
+        { id: 'e1', updatedAt: 1, by: 'dev-a', ...(await seal(publicKeyOf(key), entry('拉下来的'))) },
+        { id: 'old', updatedAt: 5, by: 'dev-z', deleted: true },
+        { id: 'orphan', updatedAt: 2, by: 'dev-z', ...(await seal(publicKeyOf(otherKey), entry('解不开的'))) }
+      ]
+    }
+
+    // B 没解锁（内存里没有上一把），直接导入 A 的密钥 —— 事故发生时的操作序列
+    machine = 'dev-b'
+    const b = await freshModule()
+    expect((await b.importKey(keyText)).ok).toBe(true)
+
+    const loaded = await b.load()
+    expect(loaded.ok).toBe(true)
+    expect(loaded.data!.records.map((record) => record.name)).toEqual(['拉下来的'])
+    // e1 活着；orphan 留墓碑；old 那枚墓碑原样保留（时间戳与删除者都不动）
+    const items = parseVaultFile(local['dev-b'])!.file.items
+    expect(items.map((item) => [item.id, item.deleted === true])).toEqual([
+      ['e1', false],
+      ['old', true],
+      ['orphan', true]
+    ])
+    expect(items.find((item) => item.id === 'old')!.updatedAt).toBe(5)
+    expect(items.find((item) => item.id === 'old')!.by).toBe('dev-z')
+  })
+
+  it('换密钥不动已有墓碑的时间戳：别的机器「删除之后又改过」的判定不被搅乱', async () => {
+    const vault = await freshModule()
+    await vault.createKey(false)
+    await vault.save({ id: 'gone', entry: entry('早就删掉的') })
+    await vault.remove('gone')
+    const before = parseVaultFile(local['dev-a'])!.file.items.find((item) => item.id === 'gone')!
+
+    await vault.createKey(true)
+    const after = parseVaultFile(local['dev-a'])!.file.items.find((item) => item.id === 'gone')!
+    expect(after.deleted).toBe(true)
+    expect(after.updatedAt).toBe(before.updatedAt)
+    expect(after.by).toBe(before.by)
   })
 
   it('密钥文件里的内容不是一把密钥时如实报错，不动凭据管理器', async () => {
