@@ -42,6 +42,7 @@ use windows_sys::Win32::Security::Authentication::Identity::{GetUserNameExW, Nam
 use windows_sys::Win32::Security::{LogonUserW, LOGON32_LOGON_NETWORK, LOGON32_PROVIDER_DEFAULT};
 
 use crate::credentials;
+use crate::fs_util;
 use crate::encoding::wide;
 use crate::paths;
 use crate::store::JsonStore;
@@ -499,9 +500,7 @@ fn write_text(file: &Path, text: &str) -> Result<(), String> {
     if let Some(parent) = file.parent() {
         std::fs::create_dir_all(parent).map_err(|err| format!("创建目录失败: {err}"))?;
     }
-    let tmp = file.with_extension("json.tmp");
-    std::fs::write(&tmp, text).map_err(|err| format!("写入失败: {err}"))?;
-    std::fs::rename(&tmp, file).map_err(|err| format!("替换文件失败: {err}"))
+    fs_util::write_atomic(file, text.as_bytes())
 }
 
 #[cfg(test)]

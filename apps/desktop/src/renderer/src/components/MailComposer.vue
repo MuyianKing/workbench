@@ -23,6 +23,7 @@ import {
 import AppDialog from '@/components/AppDialog.vue'
 import { useMailStore, type MailReplyTarget } from '@/stores/mail'
 import { notifyError, notifySuccess } from '@/notify'
+import { basenameOf } from '@/format'
 
 const visible = defineModel<boolean>({ required: true })
 const props = defineProps<{ reply: MailReplyTarget | null }>()
@@ -102,7 +103,7 @@ async function addAttachments(): Promise<void> {
       notifyError(file.error ?? `读不了 ${path}`)
       continue
     }
-    const name = path.split(/[\\/]/).pop() || path
+    const name = basenameOf(path)
     attachments.value.push({
       name,
       contentType: contentTypeForFileName(name),

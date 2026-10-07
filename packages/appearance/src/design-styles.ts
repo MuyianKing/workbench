@@ -12,6 +12,7 @@
  * 没有任何键名能覆盖到底的词段会原样保留 —— 像 `rausch`（Airbnb 的品牌红）、`safu`（Kraken 的术语）
  * 本来就是专有名词，硬翻反而失真。
  */
+import { sanitizeHexColor } from '@workbench/core'
 
 /** 明暗基调：用页面底色判定，不是「最亮/最暗色」 */
 export type DesignTheme = 'light' | 'dark'
@@ -96,19 +97,17 @@ export interface DesignStyle {
 
 // ---------------------------------------------------------------- 颜色计算
 
-const HEX_RE = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i
-
 /** 解析 hex，认不出来回 null（不抛错：外部数据手改坏过也不能白屏） */
 export function parseHex(value: unknown): { r: number; g: number; b: number } | null {
   if (typeof value !== 'string') return null
-  const matched = HEX_RE.exec(value.trim())
-  if (!matched) return null
-  let hex = matched[1]
-  if (hex.length === 3) hex = hex.replace(/./g, (ch) => ch + ch)
+  const text = value.trim()
+  // 这套数据里的色值有不带 # 的写法；core 那把尺子要求带 #，补上再量
+  const hex = sanitizeHexColor(text.startsWith('#') ? text : `#${text}`)
+  if (!hex) return null
   return {
-    r: parseInt(hex.slice(0, 2), 16),
-    g: parseInt(hex.slice(2, 4), 16),
-    b: parseInt(hex.slice(4, 6), 16)
+    r: parseInt(hex.slice(1, 3), 16),
+    g: parseInt(hex.slice(3, 5), 16),
+    b: parseInt(hex.slice(5, 7), 16)
   }
 }
 

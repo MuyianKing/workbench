@@ -166,7 +166,7 @@ const failed = computed(() => !store.loaded && !store.loading && Boolean(store.l
       </div>
     </div>
 
-    <StyleDetailDialog v-model:open="detailOpen" :design="detail" />
+    <StyleDetailDialog v-model="detailOpen" :design="detail" />
   </main>
 </template>
 

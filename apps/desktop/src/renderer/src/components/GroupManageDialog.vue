@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
+import { confirmAction } from '@/notify'
 import { Close, Plus } from '@element-plus/icons-vue'
 import { moveToPosition } from '@workbench/core'
 import AppDialog from '@/components/AppDialog.vue'
@@ -8,14 +9,16 @@ import { DRAG_MIME } from '@/drag-mime'
 import { useProjectsStore } from '@/stores/projects'
 import type { ProjectGroup } from '@/types'
 
-const props = defineProps<{ modelValue: boolean }>()
-const emit = defineEmits<{ 'update:modelValue': [value: boolean] }>()
+/** 弹层开关:v-model 一条口径(与 AppDialog / el-dialog 相同,全应用的弹层都这么开) */
+const open = defineModel<boolean>({ required: true })
 
 const store = useProjectsStore()
 
 const visible = computed({
-  get: () => props.modelValue,
-  set: (value: boolean) => emit('update:modelValue', value)
+  get: () => open.value,
+  set: (value: boolean) => {
+    open.value = value
+  }
 })
 
 const newName = ref('')
@@ -27,9 +30,9 @@ const draggingId = ref<string | null>(null)
 const dragOverId = ref<string | null>(null)
 
 watch(
-  () => props.modelValue,
-  (open) => {
-    if (!open) return
+  open,
+  (value) => {
+    if (!value) return
     newName.value = ''
     editingId.value = null
     editingName.value = ''
@@ -84,17 +87,14 @@ async function create(): Promise<void> {
 
 async function remove(group: ProjectGroup): Promise<void> {
   const count = countOf(group.id)
-  try {
-    await ElMessageBox.confirm(
-      count
-        ? `「${group.name}」下有 ${count} 个项目，删除分组后它们会变为未分组，项目本身不受影响。`
-        : `确定删除分组「${group.name}」？`,
-      '删除分组',
-      { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' }
-    )
-  } catch {
-    return // 用户取消
-  }
+  const agreed = await confirmAction(
+    count
+      ? `「${group.name}」下有 ${count} 个项目，删除分组后它们会变为未分组，项目本身不受影响。`
+      : `确定删除分组「${group.name}」？`,
+    '删除分组',
+    { confirmButtonText: '删除' }
+  )
+  if (!agreed) return
 
   if (editingId.value === group.id) cancelEdit()
   await store.removeGroup(group.id)

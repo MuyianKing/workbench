@@ -17,6 +17,7 @@
 import { computed, ref, watch } from 'vue'
 import { defineStore } from 'pinia'
 import { backfillProjectColors as backfillColors } from '@workbench/core'
+import { reorderById } from '@workbench/core'
 import { sanitizeProjectSort, type ProjectSort } from '@workbench/core'
 import type {
   ActivityCounts,
@@ -261,9 +262,7 @@ export const useProjectsStore = defineStore('projects', () => {
     terminal.runtimeOf(result.data.id)
     pathValidity.value[result.data.id] = true
     notifySuccess(`已添加 ${result.data.name}`)
-    if (hasDuplicateName(result.data.name, result.data.groupId, result.data.id)) {
-      notifyWarning('同一分组下已有同名项目，建议改用更易区分的显示名')
-    }
+    warnIfDuplicateName(result.data)
     return true
   }
 
@@ -302,11 +301,10 @@ export const useProjectsStore = defineStore('projects', () => {
   /** 拖动排序：先本地生效再落盘，失败则整份回滚 */
   async function reorderGroups(ids: string[]): Promise<void> {
     const snapshot = groups.value.slice()
-    const byId = new Map(groups.value.map((group) => [group.id, group]))
-    groups.value = ids
-      .map((id) => byId.get(id))
-      .filter((group): group is ProjectGroup => !!group)
-      .map((group, index) => ({ ...group, order: index }))
+    groups.value = reorderById(groups.value, ids).map((group, index) => ({
+      ...group,
+      order: index
+    }))
 
     const result = await window.workbench.reorderGroups(ids)
     if (!result.ok || !result.data) {
@@ -597,7 +595,12 @@ export const useProjectsStore = defineStore('projects', () => {
       pathValidity.value = {}
       return
     }
-    pathValidity.value = await window.workbench.checkProjectPaths()
+    try {
+      pathValidity.value = await window.workbench.checkProjectPaths()
+    } catch (error) {
+      // 这条通道失败会 reject,而它总被 void 调用(init / 窗口聚焦),吞下异常保持旧的有效性
+      console.warn('检查项目路径失败', error)
+    }
   }
 
   /** 目录被移动或删除后重新选择位置，并重新识别命令/包管理器 */

@@ -27,6 +27,7 @@ use std::time::Duration;
 use walkdir::WalkDir;
 
 use crate::oauth;
+use crate::fs_util;
 use crate::paths;
 use crate::proc;
 
@@ -193,18 +194,9 @@ fn publish_at(
         log.push(run_git(&["commit", "-m", &message], Some(&dir), GIT_TIMEOUT)?);
     }
 
-    // 即使这轮没提交也推一次：上一轮可能提交成功而推送失败，那一笔还压在本地等着出去
-    if let Err(err) = push(&dir, &branch) {
-        // 远端在 pull 之后又动了（另一台机器刚推过）：rebase 一次再试。
-        // 两个目录里都是单写者文件，所以这次 rebase 不可能产生冲突。
-        log.push(err);
-        log.push(run_git(
-            &["pull", "--rebase", "--autostash", "--no-edit", "origin", &branch],
-            Some(&dir),
-            GIT_TIMEOUT,
-        )?);
-        log.push(push(&dir, &branch)?);
-    }
+    // 即使这轮没提交也推一次：上一轮可能提交成功而推送失败，那一笔还压在本地等着出去。
+    // 推不动时 rebase 一次再试 —— 两个目录里都是单写者文件，这次 rebase 不可能产生冲突
+    push_with_retry(&dir, &branch, &mut log)?;
 
     Ok(json!({ "changed": changed, "pushed": true, "log": log.join("\n") }))
 }
@@ -215,9 +207,7 @@ fn write_json(file: &Path, value: &Value) -> Result<(), String> {
         std::fs::create_dir_all(parent).map_err(|err| format!("创建目录失败: {err}"))?;
     }
     let text = serde_json::to_string_pretty(value).map_err(|err| format!("序列化失败: {err}"))?;
-    let tmp = file.with_extension("json.tmp");
-    std::fs::write(&tmp, &text).map_err(|err| format!("写入失败: {err}"))?;
-    std::fs::rename(&tmp, file).map_err(|err| format!("替换文件失败: {err}"))
+    fs_util::write_atomic(file, text.as_bytes())
 }
 
 /// 仓库里两个目录的内容（原始 JSON，收敛与合并由渲染层负责）
@@ -273,12 +263,7 @@ fn publish_image_at(
     }
     // 先写临时文件再改名：与 store.rs 同一个道理 —— 中途断电时，读到的不是半张图。
     // 临时文件**不参与这次提交**（下面只 add 这一个相对路径），所以它进不了仓库历史
-    let temp = file.with_file_name(format!("{name}.part"));
-    std::fs::write(&temp, bytes).map_err(|err| format!("写入失败: {err}"))?;
-    std::fs::rename(&temp, &file).map_err(|err| {
-        let _ = std::fs::remove_file(&temp);
-        format!("保存失败: {err}")
-    })?;
+    fs_util::write_atomic(&file, bytes).map_err(|err| format!("保存失败: {err}"))?;
 
     let mut log: Vec<String> = Vec::new();
     run_git(&["add", "-A", "--", &relative], Some(&dir_path), GIT_TIMEOUT)?;
@@ -290,16 +275,8 @@ fn publish_image_at(
         log.push(run_git(&["commit", "-m", &message], Some(&dir_path), GIT_TIMEOUT)?);
     }
 
-    if let Err(err) = push(&dir_path, &branch) {
-        // 远端在我们 pull 之后又动了（另一处刚推过）：rebase 一次再试
-        log.push(err);
-        log.push(run_git(
-            &["pull", "--rebase", "--autostash", "--no-edit", "origin", &branch],
-            Some(&dir_path),
-            GIT_TIMEOUT,
-        )?);
-        log.push(push(&dir_path, &branch)?);
-    }
+    // 推不动（远端在 pull 之后又动了，另一处刚推过）时 rebase 一次再试
+    push_with_retry(&dir_path, &branch, &mut log)?;
 
     Ok(json!({ "path": relative, "branch": branch, "changed": changed, "log": log.join("\n") }))
 }
@@ -411,16 +388,8 @@ fn delete_images_at(
     let mut log: Vec<String> = Vec::new();
     log.push(run_git(&["commit", "-m", &message], Some(&root), GIT_TIMEOUT)?);
 
-    if let Err(err) = push(&root, &branch) {
-        // 远端在我们 pull 之后又动了（另一处刚推过）：rebase 一次再试
-        log.push(err);
-        log.push(run_git(
-            &["pull", "--rebase", "--autostash", "--no-edit", "origin", &branch],
-            Some(&root),
-            GIT_TIMEOUT,
-        )?);
-        log.push(push(&root, &branch)?);
-    }
+    // 推不动（远端在 pull 之后又动了，另一处刚推过）时 rebase 一次再试
+    push_with_retry(&root, &branch, &mut log)?;
 
     Ok(json!({
         "deleted": removed.len(),
@@ -484,13 +453,9 @@ fn normalize_image_dir(dir: &str) -> Result<String, String> {
     Ok(parts.join("/"))
 }
 
-/// 一个「正常的路径段」：非空、不是 `.` / `..`、不带分隔符与 Windows 上的非法字符
-pub fn is_plain_segment(part: &str) -> bool {
-    !part.is_empty()
-        && part != "."
-        && part != ".."
-        && !part.contains(['/', '\\', ':', '*', '?', '"', '<', '>', '|'])
-}
+/// 一个「正常的路径段」：非空、不是 `.` / `..`、不带分隔符与 Windows 上的非法字符。
+/// 实现归 [fs_util](fs_util.rs)，从这里转发（pi_skills / skills 还按老路子 import 它）。
+pub use crate::fs_util::is_plain_segment;
 
 /// 认得出是图片的后缀（大小写不比）。素材管理只认这些：
 /// 仓库里还住着 README 之类的东西，混进图片列表只会让人以为那些也能删。

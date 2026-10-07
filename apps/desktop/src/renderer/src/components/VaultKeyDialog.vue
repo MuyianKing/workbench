@@ -18,7 +18,8 @@ import { useAuthStore } from '@/stores/auth'
 import { useSettingsStore } from '@/stores/settings'
 import { useVaultStore } from '@/stores/vault'
 
-const visible = defineModel<boolean>('visible', { required: true })
+/** 弹层开关:v-model 一条口径(与 AppDialog / el-dialog 相同,全应用的弹层都这么开) */
+const visible = defineModel<boolean>({ required: true })
 
 const emit = defineEmits<{ changed: [] }>()
 

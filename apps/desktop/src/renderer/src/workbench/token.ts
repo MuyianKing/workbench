@@ -177,49 +177,52 @@ async function readCodeBuddyLive(): Promise<LiveRead> {
   return { ok: true, days }
 }
 
-// ---------- DeepSeek Harness(~/.dsh/sessions) ----------
+// ---------- DSH / WorkBuddy / Qoder(会话目录,同一副骨架) ----------
 
-/** `token_dsh_sessions` 回来的一项 */
-interface DshSessionFile {
+/** 三个来源的清单回来的一项:Rust 只列文件,内容自己读 */
+interface SessionFile {
   path: string
   mtimeMs: number
   size: number
 }
 
 /**
- * 每个会话文件的解码结果，key 是路径。
+ * 会话文件读取器的公共骨架:清单(很便宜)→ 没装安静跳过 → 截止过滤 →
+ * **按文件**缓存(mtime + size 没变的直接复用上次解析)→ sumDays 求和 → 摘除失效键。
  *
- * 与 CodeBuddy 的整批缓存不同，这里可以**按文件**缓存：会话文件之间互不依赖
- * （每个文件都自带 request/header 声明模型、没有跨文件的链路），
- * 所以只重解变化的那些就够 —— 解压是实打实的 CPU 活，本机 9MB 会话没必要时时全解一遍。
+ * 与 CodeBuddy 的整批缓存不同,这里按文件缓存:会话文件之间互不依赖
+ * (每行自带模型 / 用量,没有跨文件的链路),只重解变化的那些就够 ——
+ * 会话正文会长到几兆,每分钟整批重解析一遍没有意义。
+ *
+ * 三个来源只差「清单命令、失败文案、单文件怎么解」(见各自 read 函数传入的 parse)。
  */
-const dshCache = new Map<string, { mtimeMs: number; size: number; days: TokenDays }>()
-
-/**
- * 实读 DSH。清单由 Rust 给（很便宜），内容要逐帧解压 —— 浏览器没有 zstd 解码 API，
- * 所以这一步回 Rust 走 `token_zstd_decode`，解出来的事件交给 shared 的纯函数解析。
- */
-async function readDshLive(): Promise<LiveRead> {
+async function readSessionFiles(options: {
+  command: string
+  errorText: string
+  cache: Map<string, { mtimeMs: number; size: number; days: TokenDays }>
+  parse: (file: SessionFile) => Promise<TokenDays>
+}): Promise<LiveRead> {
   let listing: { found?: unknown; sessions?: unknown }
   try {
-    listing = await invoke<{ found?: unknown; sessions?: unknown }>('token_dsh_sessions')
+    listing = await invoke<{ found?: unknown; sessions?: unknown }>(options.command)
   } catch (error) {
-    return { ok: false, error: errorText(error, '读取 DSH 会话目录失败') }
+    return { ok: false, error: errorText(error, options.errorText) }
   }
 
-  // 没装就安静跳过（与 CodeBuddy 同一约定）
+  // 没装就安静跳过(与 CodeBuddy 同一约定):这台机器上没有这个工具是常态,
+  // 不该和「装了却读不出来」一样点亮面板上的「部分来源不可用」
   if (listing?.found !== true) return { ok: false, missing: true, error: '' }
 
   const cutoff = Date.now() - (TOKEN_KEEP_DAYS - 1) * 86_400_000
   const sessions = (Array.isArray(listing.sessions) ? listing.sessions : [])
-    .map((item) => item as Partial<DshSessionFile>)
+    .map((item) => item as Partial<SessionFile>)
     .filter(
-      (item): item is DshSessionFile =>
+      (item): item is SessionFile =>
         typeof item.path === 'string' &&
         typeof item.mtimeMs === 'number' &&
         typeof item.size === 'number'
     )
-    // 快照只留最近一年，更早的会话里不可能有窗口内的记录
+    // 快照只留最近一年,更早的会话里不可能有窗口内的记录
     .filter((item) => item.mtimeMs >= cutoff)
 
   let days: TokenDays = {}
@@ -227,18 +230,16 @@ async function readDshLive(): Promise<LiveRead> {
 
   for (const session of sessions) {
     alive.add(session.path)
-    let cached = dshCache.get(session.path)
+    let cached = options.cache.get(session.path)
 
     if (!cached || cached.mtimeMs !== session.mtimeMs || cached.size !== session.size) {
       try {
-        const text = await invoke<string>('token_zstd_decode', { path: session.path })
-        const parsed: TokenDays = {}
-        collectDshSessionText(text, parsed)
+        const parsed = await options.parse(session)
         cached = { mtimeMs: session.mtimeMs, size: session.size, days: parsed }
-        dshCache.set(session.path, cached)
+        options.cache.set(session.path, cached)
       } catch {
-        // 单个会话坏了（帧损坏 / 文件被删）只少这一个，不影响其余
-        dshCache.delete(session.path)
+        // 单个会话坏了(帧损坏 / 被占用 / 编码异常)只少这一个,不影响其余
+        options.cache.delete(session.path)
         continue
       }
     }
@@ -246,169 +247,77 @@ async function readDshLive(): Promise<LiveRead> {
     days = sumDays(days, cached.days)
   }
 
-  // 会话被清理掉的就从缓存里摘掉，不然内存里会一直留着它们
-  for (const path of [...dshCache.keys()]) {
-    if (!alive.has(path)) dshCache.delete(path)
+  // 会话被清理掉的就从缓存里摘掉,不然内存里会一直留着它们
+  for (const path of [...options.cache.keys()]) {
+    if (!alive.has(path)) options.cache.delete(path)
   }
 
   return { ok: true, days }
+}
+
+// ---------- DeepSeek Harness(~/.dsh/sessions) ----------
+
+const dshCache = new Map<string, { mtimeMs: number; size: number; days: TokenDays }>()
+
+/**
+ * 实读 DSH。会话文件逐帧 zstd 压缩 —— 浏览器没有解码 API,
+ * 所以单文件解析回 Rust 走 `token_zstd_decode`,解出来的事件交给 shared 的纯函数解析。
+ */
+async function readDshLive(): Promise<LiveRead> {
+  return readSessionFiles({
+    command: 'token_dsh_sessions',
+    errorText: '读取 DSH 会话目录失败',
+    cache: dshCache,
+    parse: async (file) => {
+      const parsed: TokenDays = {}
+      collectDshSessionText(await invoke<string>('token_zstd_decode', { path: file.path }), parsed)
+      return parsed
+    }
+  })
 }
 
 // ---------- WorkBuddy(~/.workbuddy/projects) ----------
 
-/** `token_workbuddy_sessions` 回来的一项 */
-interface WorkBuddySessionFile {
-  path: string
-  mtimeMs: number
-  size: number
-}
-
-/**
- * 每个会话文件的解析结果，key 是路径。
- *
- * 与 DSH 同样**按文件**缓存：会话正文里每一行都自带模型与用量（见 shared/workbuddy-log.ts），
- * 文件之间互不依赖，所以只重解变化的那些就够 —— 会话正文会长到几兆，
- * 每分钟整批重解析一遍没有意义。
- */
 const workbuddyCache = new Map<string, { mtimeMs: number; size: number; days: TokenDays }>()
 
 /**
- * 实读 WorkBuddy。清单由 Rust 给（很便宜），正文按路径读回来自己解析 ——
- * 正文没有压缩，不用像 DSH 那样再回 Rust 解码一趟。
+ * 实读 WorkBuddy。正文按路径读回来自己解析 ——
+ * 正文没有压缩,不用像 DSH 那样再回 Rust 解码一趟。
  */
 async function readWorkBuddyLive(): Promise<LiveRead> {
-  let listing: { found?: unknown; sessions?: unknown }
-  try {
-    listing = await invoke<{ found?: unknown; sessions?: unknown }>('token_workbuddy_sessions')
-  } catch (error) {
-    return { ok: false, error: errorText(error, '读取 WorkBuddy 会话目录失败') }
-  }
-
-  // 没装就安静跳过（与 CodeBuddy / DSH 同一约定）
-  if (listing?.found !== true) return { ok: false, missing: true, error: '' }
-
-  const cutoff = Date.now() - (TOKEN_KEEP_DAYS - 1) * 86_400_000
-  const sessions = (Array.isArray(listing.sessions) ? listing.sessions : [])
-    .map((item) => item as Partial<WorkBuddySessionFile>)
-    .filter(
-      (item): item is WorkBuddySessionFile =>
-        typeof item.path === 'string' &&
-        typeof item.mtimeMs === 'number' &&
-        typeof item.size === 'number'
-    )
-    // 快照只留最近一年，更早的会话里不可能有窗口内的记录
-    .filter((item) => item.mtimeMs >= cutoff)
-
-  let days: TokenDays = {}
-  const alive = new Set<string>()
-
-  for (const session of sessions) {
-    alive.add(session.path)
-    let cached = workbuddyCache.get(session.path)
-
-    if (!cached || cached.mtimeMs !== session.mtimeMs || cached.size !== session.size) {
-      try {
-        const parsed: TokenDays = {}
-        collectWorkBuddySessionText(
-          await invoke<string>('fs_read_text', { path: session.path }),
-          parsed
-        )
-        cached = { mtimeMs: session.mtimeMs, size: session.size, days: parsed }
-        workbuddyCache.set(session.path, cached)
-      } catch {
-        // 单个会话读不了（被占用 / 编码异常）只少这一个，不影响其余
-        workbuddyCache.delete(session.path)
-        continue
-      }
+  return readSessionFiles({
+    command: 'token_workbuddy_sessions',
+    errorText: '读取 WorkBuddy 会话目录失败',
+    cache: workbuddyCache,
+    parse: async (file) => {
+      const parsed: TokenDays = {}
+      collectWorkBuddySessionText(await invoke<string>('fs_read_text', { path: file.path }), parsed)
+      return parsed
     }
-
-    days = sumDays(days, cached.days)
-  }
-
-  // 会话被清理掉的就从缓存里摘掉，不然内存里会一直留着它们
-  for (const path of [...workbuddyCache.keys()]) {
-    if (!alive.has(path)) workbuddyCache.delete(path)
-  }
-
-  return { ok: true, days }
+  })
 }
 
 // ---------- Qoder(~/.qoder-cn/projects) ----------
 
-/** `token_qoder_sessions` 回来的一项 */
-interface QoderSessionFile {
-  path: string
-  mtimeMs: number
-  size: number
-}
-
-/**
- * 每个会话文件的解析结果，key 是路径。
- *
- * 与 WorkBuddy / DSH 同样**按文件**缓存：每一行都自带时间、模型与额度
- * （见 shared/qoder-log.ts），文件之间互不依赖，只重解变化的那些就够。
- */
 const qoderCache = new Map<string, { mtimeMs: number; size: number; days: TokenDays }>()
 
 /**
- * 实读 Qoder。清单由 Rust 给（很便宜），正文按路径读回来自己解析 ——
- * 正文没有压缩，不用像 DSH 那样再回 Rust 解码一趟。
+ * 实读 Qoder。正文按路径读回来自己解析,同样不用回 Rust 解码。
  *
- * 它报的是**额度**不是 token：Qoder 的客户端不产生 token 计数，
- * 所以这份 days 里只有 credits 有值，面板在 credits 口径下才显示它。
+ * 它报的是**额度**不是 token:Qoder 的客户端不产生 token 计数,
+ * 所以这份 days 里只有 credits 有值,面板在 credits 口径下才显示它。
  */
 async function readQoderLive(): Promise<LiveRead> {
-  let listing: { found?: unknown; sessions?: unknown }
-  try {
-    listing = await invoke<{ found?: unknown; sessions?: unknown }>('token_qoder_sessions')
-  } catch (error) {
-    return { ok: false, error: errorText(error, '读取 Qoder 会话目录失败') }
-  }
-
-  // 没装就安静跳过（与 CodeBuddy / DSH / WorkBuddy 同一约定）
-  if (listing?.found !== true) return { ok: false, missing: true, error: '' }
-
-  const cutoff = Date.now() - (TOKEN_KEEP_DAYS - 1) * 86_400_000
-  const sessions = (Array.isArray(listing.sessions) ? listing.sessions : [])
-    .map((item) => item as Partial<QoderSessionFile>)
-    .filter(
-      (item): item is QoderSessionFile =>
-        typeof item.path === 'string' &&
-        typeof item.mtimeMs === 'number' &&
-        typeof item.size === 'number'
-    )
-    // 快照只留最近一年，更早的会话里不可能有窗口内的记录
-    .filter((item) => item.mtimeMs >= cutoff)
-
-  let days: TokenDays = {}
-  const alive = new Set<string>()
-
-  for (const session of sessions) {
-    alive.add(session.path)
-    let cached = qoderCache.get(session.path)
-
-    if (!cached || cached.mtimeMs !== session.mtimeMs || cached.size !== session.size) {
-      try {
-        const parsed: TokenDays = {}
-        collectQoderSessionText(await invoke<string>('fs_read_text', { path: session.path }), parsed)
-        cached = { mtimeMs: session.mtimeMs, size: session.size, days: parsed }
-        qoderCache.set(session.path, cached)
-      } catch {
-        // 单个会话读不了（被占用 / 编码异常）只少这一个，不影响其余
-        qoderCache.delete(session.path)
-        continue
-      }
+  return readSessionFiles({
+    command: 'token_qoder_sessions',
+    errorText: '读取 Qoder 会话目录失败',
+    cache: qoderCache,
+    parse: async (file) => {
+      const parsed: TokenDays = {}
+      collectQoderSessionText(await invoke<string>('fs_read_text', { path: file.path }), parsed)
+      return parsed
     }
-
-    days = sumDays(days, cached.days)
-  }
-
-  // 会话被清理掉的就从缓存里摘掉，不然内存里会一直留着它们
-  for (const path of [...qoderCache.keys()]) {
-    if (!alive.has(path)) qoderCache.delete(path)
-  }
-
-  return { ok: true, days }
+  })
 }
 
 // ---------- 本机设备标识 ----------

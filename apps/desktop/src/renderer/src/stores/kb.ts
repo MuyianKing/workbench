@@ -384,17 +384,23 @@ export const useKbStore = defineStore('kb', () => {
   )
 
   /**
-   * 起跑前还缺什么：与 AI 助手页的 `blocking` 同一个顺序（Node → Pi → 模型 → 密钥），
-   * 少「工作目录 / 指令」两样 —— 目录就是知识库文件夹，指令是应用拼的。
-   * 读的是 AI store 里那份全局配置与探测结果；清洗不新增任何设置。
+   * 起跑前还缺什么：顺序归 AI store 的 envGap（与 AI 助手页的 blocking、run 的校验
+   * 同一条级联，Node → Pi → 模型 → 密钥），少「工作目录 / 指令」两样 ——
+   * 目录就是知识库文件夹，指令是应用拼的。文案是清洗面板自己的折中版。
    */
   function cleanBlocker(): string {
     const ai = useAiStore()
     if (!ai.probed) return '正在探测运行环境…'
-    if (!ai.nodeOk) return '这台机器的 Node 太旧：跑 Pi 需要 Node ≥ 22.19，先把 Node 升上去。'
-    if (!ai.piReady) return '没找到 Pi 运行时：随包内置的那份不在，PATH 上也没有全局安装的。'
-    if (!ai.configured) return '还没配模型：添加一个 AI 服务（预设厂商或自定义端点）并选上模型。'
-    if (!ai.keyReady) return `还没有配置 ${ai.providerLabel} 的 API Key。`
+    switch (ai.envGap()) {
+      case 'node':
+        return '这台机器的 Node 太旧：跑 Pi 需要 Node ≥ 22.19，先把 Node 升上去。'
+      case 'pi':
+        return '没找到 Pi 运行时：随包内置的那份不在，PATH 上也没有全局安装的。'
+      case 'model':
+        return '还没配模型：添加一个 AI 服务（预设厂商或自定义端点）并选上模型。'
+      case 'key':
+        return `还没有配置 ${ai.providerLabel} 的 API Key。`
+    }
     return ''
   }
 

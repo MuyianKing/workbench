@@ -53,6 +53,11 @@ export const LEVEL_THRESHOLDS = [1, 4, 8, 12] as const
 const DAY_MS = 86_400_000
 const DAY_KEY = /^\d{4}-\d{2}-\d{2}$/
 
+/** 这条键是不是 YYYY-MM-DD 的日期键（活跃度、用量快照、工作日志同一条口径） */
+export function isDateKey(value: unknown): value is string {
+  return typeof value === 'string' && DAY_KEY.test(value)
+}
+
 function pad(value: number): string {
   return String(value).padStart(2, '0')
 }
@@ -136,7 +141,7 @@ export function sanitizeActivity(raw: unknown): ActivityCounts {
 
   const next: ActivityCounts = {}
   for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
-    if (!DAY_KEY.test(key)) continue
+    if (!isDateKey(key)) continue
     if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) continue
     next[key] = Math.floor(value)
   }

@@ -6,6 +6,7 @@
 //!
 //! 落点是固定的 `<项目根>/DESIGN.md`，没有相对路径要解析，所以不需要 notes.rs 那套越界校验。
 
+use crate::fs_util;
 use std::path::Path;
 
 /// 落在项目根下的文件名
@@ -33,13 +34,8 @@ pub fn write(project_dir: &str, content: &str) -> Result<WriteOutcome, String> {
     let existed = target.exists();
 
     // 先写同目录的临时文件再改名：与 notes.rs 同一条口径，
-    // 中途失败（断电、盘满）不会在项目里留下半篇规范
-    let temp = target.with_file_name(format!("{FILE_NAME}.tmp"));
-    std::fs::write(&temp, content).map_err(|err| format!("写入失败：{err}"))?;
-    std::fs::rename(&temp, &target).map_err(|err| {
-        let _ = std::fs::remove_file(&temp);
-        format!("写入失败：{err}")
-    })?;
+    // 中途失败（断电、盘满）不会在项目里留下半篇规范（实现归 fs_util）
+    fs_util::write_atomic(&target, content.as_bytes())?;
 
     Ok(WriteOutcome {
         path: target.to_string_lossy().into_owned(),

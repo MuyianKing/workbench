@@ -16,7 +16,8 @@ import type { InputInstance } from 'element-plus'
 import { emptyVaultEntry, vaultEntryProblem, type VaultEntry, type VaultRecord } from '@workbench/vault'
 import AppDialog from '@/components/AppDialog.vue'
 
-const visible = defineModel<boolean>('visible', { required: true })
+/** 弹层开关:v-model 一条口径(与 AppDialog / el-dialog 相同,全应用的弹层都这么开) */
+const visible = defineModel<boolean>({ required: true })
 
 const props = defineProps<{
   /** 要编辑的那条；null = 添加一条新的 */

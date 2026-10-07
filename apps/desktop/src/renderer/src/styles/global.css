@@ -574,6 +574,38 @@ body.is-resizing-video-float * {
   font-size: var(--fs-micro);
 }
 
+/* 左栏的表头与底部那一行（AI 页与邮箱页共用，原先两页各写一份） */
+
+/* 表头：标题在左、入口按钮在右，直接贴着清单或树（.panel 的 gap 在这两栏都归零） */
+.side__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  flex-shrink: 0;
+}
+
+.side__title {
+  color: var(--ink-2);
+  font-size: var(--fs-meta);
+}
+
+/*
+ * 底部那一行（技能开关 / 账户与写邮件）：一条上边线把内容与它分开，
+ * margin 把它推下去 —— 树多矮它都钉在栏底。
+ */
+.side__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  flex-shrink: 0;
+  /* .panel 的 gap 已在这两栏归零，内容与这一行的间隔由这条 margin 给 */
+  margin-top: var(--sp-3);
+  padding-top: var(--sp-2);
+  border-top: 1px solid var(--border);
+}
+
 /* ---------- 顶部两条栏的样式 ---------- */
 
 /**

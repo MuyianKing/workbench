@@ -10,10 +10,10 @@
  * 标题固定不动，程序多了只在中间那块滚动区里滚动，面板不会跟着程序数量长高。
  */
 import { computed, ref } from 'vue'
-import { ElMessageBox } from 'element-plus'
 import { MoreFilled, Plus } from '@element-plus/icons-vue'
 import { moveToPosition } from '@workbench/core'
 import { DRAG_MIME } from '@/drag-mime'
+import { confirmAction } from '@/notify'
 import { useProjectsStore } from '@/stores/projects'
 import { useCatalogStore } from '@/stores/catalog'
 import PanelLoading from '@/components/PanelLoading.vue'
@@ -55,15 +55,12 @@ function onMore(app: QuickApp, command: string): void {
 }
 
 async function remove(app: QuickApp): Promise<void> {
-  try {
-    await ElMessageBox.confirm(
-      `确定把「${app.name}」从快捷启动里移除？程序本身不会被卸载或删除。`,
-      '移除常用软件',
-      { confirmButtonText: '移除', cancelButtonText: '取消', type: 'warning' }
-    )
-  } catch {
-    return
-  }
+  const agreed = await confirmAction(
+    `确定把「${app.name}」从快捷启动里移除？程序本身不会被卸载或删除。`,
+    '移除常用软件',
+    { confirmButtonText: '移除' }
+  )
+  if (!agreed) return
   await catalog.removeQuickApp(app.id)
 }
 

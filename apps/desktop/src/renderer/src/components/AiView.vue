@@ -39,6 +39,7 @@ import {
   type AiPreviewTarget
 } from '@workbench/ai'
 import { markdownImages } from '@workbench/core'
+import { basenameOf } from '@/format'
 import AiComposer from '@/components/AiComposer.vue'
 import AiPreviewPane from '@/components/AiPreviewPane.vue'
 import AiSkillDialog from '@/components/AiSkillDialog.vue'
@@ -127,7 +128,7 @@ watch(
 
 /** 文件名（Tab 与预览标题上只放它，全路径在链接那行的悬停里） */
 function fileNameOf(path: string): string {
-  return path.split(/[\\/]/).pop() || path
+  return basenameOf(path)
 }
 
 /**
@@ -527,41 +528,13 @@ body.is-resizing-ai-tree .ai-view__side {
   transition: none;
 }
 
-/* 与树的间隔不在 .panel 的 gap 里给（那一层已归零）—— 这一栏的表头直接贴着树 */
-.side__head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--sp-2);
-  flex-shrink: 0;
-}
-
-.side__title {
-  color: var(--ink-2);
-  font-size: var(--fs-meta);
-}
+/* .side__head / .side__title / .side__foot 收在 global.css（与邮箱页左栏共用） */
 
 /* 那颗「+」与标题同高就够：它是这一栏的入口，不是页面的主操作 */
 .side__new {
   width: 24px;
   height: 24px;
   padding: 0;
-}
-
-/**
- * 左栏底部那一行：技能的管理入口与收起整栏的开关（右栏的 composer 工具行不再放它们）。
- * 一条上边线把树与这一行分开 —— 树多矮它都钉在栏底。
- */
-.side__foot {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--sp-2);
-  flex-shrink: 0;
-  /* .panel 的 gap 已在这一栏归零，树与这一行的间隔由这条 margin 给 */
-  margin-top: var(--sp-3);
-  padding-top: var(--sp-2);
-  border-top: 1px solid var(--border);
 }
 
 .side__skills {

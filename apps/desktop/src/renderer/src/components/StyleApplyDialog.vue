@@ -16,8 +16,10 @@ import AppDialog from '@/components/AppDialog.vue'
 import { notifyError, notifySuccess, notifyWarning } from '@/notify'
 import { useProjectsStore } from '@/stores/projects'
 
-const props = defineProps<{ open: boolean; design: DesignStyle | null }>()
-const emit = defineEmits<{ (event: 'update:open', value: boolean): void }>()
+/** 弹层开关:v-model 一条口径(与 AppDialog / el-dialog 相同,全应用的弹层都这么开) */
+const open = defineModel<boolean>({ required: true })
+
+const props = defineProps<{ design: DesignStyle | null }>()
 
 const projects = useProjectsStore()
 
@@ -25,23 +27,22 @@ const selectedId = ref('')
 const applying = ref(false)
 
 const visible = computed({
-  get: () => props.open,
-  set: (value) => emit('update:open', value)
+  get: () => open.value,
+  set: (value) => {
+    open.value = value
+  }
 })
 
 const selected = computed(
   () => projects.projects.find((project) => project.id === selectedId.value) ?? null
 )
 
-watch(
-  () => props.open,
-  (value) => {
-    if (value) {
-      selectedId.value = ''
-      applying.value = false
-    }
+watch(open, (value) => {
+  if (value) {
+    selectedId.value = ''
+    applying.value = false
   }
-)
+})
 
 async function submit(): Promise<void> {
   const project = selected.value

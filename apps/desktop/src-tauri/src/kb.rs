@@ -11,12 +11,13 @@
 //! 那边有单测；与 notes.rs 同一条分工——这里只管把磁盘上的事实带回去。
 //!
 //! 路径边界与 notes.rs 同一条：只认「相对知识库根的路径」，逐段解析挡住 `..` / 盘符 / UNC。
-//! （这一小段路径代码与 notes.rs 各有一份：报错里说的文件夹不是同一个，「找不到笔记文件夹」
-//! 出现在知识库页上会让人找错地方；噪音目录的名单则只此一份，复用 `notes::is_skipped_entry`。）
+//! （实现收在 [fs_util](fs_util.rs)，这里的薄壳只把报错里的称呼说成「知识库文件夹」；
+//! 噪音目录的名单只此一份，复用 `notes::is_skipped_entry`。）
 
+use crate::fs_util;
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashMap};
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
 /// 递归的深度上限（与 notes.rs 同一个数）：拦的是「把盘根选成了知识库」
@@ -24,51 +25,21 @@ const MAX_DEPTH: usize = 12;
 
 /// 知识库根。目录不在（被移走 / 被删掉 / 网络盘没连上）时给一句能看懂的话
 fn root_path(root: &str) -> Result<PathBuf, String> {
-    let trimmed = root.trim();
-    if trimmed.is_empty() {
-        return Err("还没有选择知识库文件夹".into());
-    }
-    let base = PathBuf::from(trimmed);
-    if !base.is_dir() {
-        return Err(format!("找不到知识库文件夹：{trimmed}"));
-    }
-    Ok(base)
+    fs_util::root_dir(root, "知识库文件夹")
 }
 
 /// 相对路径 → 绝对路径，逐段只接受普通名字（与 `notes::resolve` 同一条边界，越界一律拒）
 fn resolve(root: &str, rel: &str) -> Result<PathBuf, String> {
-    let mut path = root_path(root)?;
-    for raw in rel.split(['/', '\\']) {
-        let part = raw.trim();
-        if part.is_empty() {
-            continue;
-        }
-        let mut parts = Path::new(part).components();
-        match (parts.next(), parts.next()) {
-            (Some(Component::Normal(name)), None) => path.push(name),
-            _ => return Err(format!("路径不合法：{rel}")),
-        }
-    }
-    Ok(path)
+    fs_util::resolve_under(root, rel, "知识库文件夹")
 }
 
 /// 绝对路径 → 相对知识库根的路径，统一用 `/` 分隔
 fn rel_of(root: &Path, path: &Path) -> String {
-    path.strip_prefix(root)
-        .unwrap_or(path)
-        .components()
-        .map(|part| part.as_os_str().to_string_lossy())
-        .collect::<Vec<_>>()
-        .join("/")
+    fs_util::rel_under(root, path)
 }
 
 fn mtime_ms(path: &Path) -> u64 {
-    std::fs::metadata(path)
-        .and_then(|meta| meta.modified())
-        .ok()
-        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
-        .map(|dur| dur.as_millis() as u64)
-        .unwrap_or(0)
+    fs_util::mtime_ms(path)
 }
 
 /// 列目录：一层层往下走，文件夹与**所有**文件都回（任意后缀，见模块注释）。

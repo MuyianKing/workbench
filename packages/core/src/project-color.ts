@@ -43,15 +43,29 @@ export const PROJECT_COLOR_CUSTOM_LABEL = '自定义'
 
 const PRESET_NAMES: readonly string[] = PROJECT_COLOR_PRESETS
 
-/** `#abc` / `#aabbcc`，大小写都认；别的写法（`rgb()`、颜色名、八位带透明度）一律不收 */
-const HEX_COLOR = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i
-
 export function isProjectColorPreset(value: unknown): value is ProjectColorPreset {
   return typeof value === 'string' && PRESET_NAMES.includes(value)
 }
 
+/**
+ * 收敛一个 hex 色值：`#abc` / `#aabbcc`，大小写都认；统一成小写六位 `#rrggbb`。
+ * 认不出来的（`rgb()`、颜色名、八位带透明度、不是字符串）返回 null ——
+ * 回退成默认色还是当「没配」由调用方定。不做首尾空白收拾：要 trim 的调用方自己来。
+ *
+ * 这是全项目唯一一份「hex 校验 + 归一」（项目标识色、主题色、工作区蒙版色、
+ * 设计参考库共用），别处不要再写同一条正则。
+ */
+export function sanitizeHexColor(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const matched = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(value)
+  if (!matched) return null
+  const digits = matched[1].toLowerCase()
+  const full = digits.length === 3 ? [...digits].map((d) => d + d).join('') : digits
+  return `#${full}`
+}
+
 export function isProjectColor(value: unknown): value is ProjectColor {
-  return isProjectColorPreset(value) || (typeof value === 'string' && HEX_COLOR.test(value))
+  return isProjectColorPreset(value) || sanitizeHexColor(value) !== null
 }
 
 /**
@@ -61,11 +75,8 @@ export function isProjectColor(value: unknown): value is ProjectColor {
  */
 export function sanitizeProjectColor(value: unknown): ProjectColor | undefined {
   if (isProjectColorPreset(value)) return value
-  if (typeof value !== 'string' || !HEX_COLOR.test(value)) return undefined
-
-  const hex = value.slice(1).toLowerCase()
-  const full = hex.length === 3 ? hex.replace(/./g, (char) => char + char) : hex
-  return `#${full}`
+  const hex = sanitizeHexColor(value)
+  return hex ? (hex as ProjectColor) : undefined
 }
 
 /** 标识色对应的 CSS 值：预设取主题变量，自定义色直接就是它自己 */

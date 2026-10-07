@@ -21,6 +21,7 @@
  * 主进程（收敛磁盘上的旧数据）与渲染层（挑完色立即生效）共用这里的判定，
  * 所以整个模块是纯函数、不碰 DOM；写变量由渲染层负责。
  */
+import { sanitizeHexColor } from '@workbench/core'
 
 /** 设置里空串表示「用默认的中性色」，也就是界面原本的灰度样子 */
 export const ACCENT_COLOR_DEFAULT = ''
@@ -112,20 +113,14 @@ const WHITE = '#ffffff'
 const WHITE_INK_FLOOR = 3
 
 /**
- * 只认 #rgb / #rrggbb，统一归一成小写六位；其它一律返回空串（即「没配」）。
+ * 只认 #rgb / #rrggbb，统一归一成小写六位；其它一律回默认色（即「没配」）。
  *
  * 渲染层拿它拼 CSS 变量，主进程用它收敛磁盘上的旧数据；两边必须是同一套判定，
  * 否则一个手改过的色值就能写出一个非法变量、把整族主色带崩。
+ * 校验与归一用的是 core 的 sanitizeHexColor（全项目唯一一份 hex 口径），这里只留回退语义。
  */
 export function sanitizeAccentColor(value: unknown): string {
-  if (typeof value !== 'string') return ACCENT_COLOR_DEFAULT
-
-  const matched = /^#([0-9a-f]{3}|[0-9a-f]{6})$/.exec(value.trim().toLowerCase())
-  if (!matched) return ACCENT_COLOR_DEFAULT
-
-  const digits = matched[1]
-  const full = digits.length === 3 ? [...digits].map((d) => d + d).join('') : digits
-  return `#${full}`
+  return sanitizeHexColor(typeof value === 'string' ? value.trim() : '') ?? ACCENT_COLOR_DEFAULT
 }
 
 /** #rrggbb → 三个 0~255 的分量 */

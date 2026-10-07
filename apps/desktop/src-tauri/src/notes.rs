@@ -12,8 +12,9 @@
 //! 渲染层递进来的是一串它自己组的字符串，`..`、绝对路径、盘符这些一律不接受。
 //! 笔记根本身（相对路径为空）只能整份扫描，改名 / 移动 / 删除都被挡在 `resolve_child` 那里。
 
+use crate::fs_util;
 use serde_json::{json, Value};
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
 /// 只认这两种后缀：编辑器写出来的是 `.md`，`.markdown` 是照顾别处写下的文件
@@ -69,37 +70,14 @@ pub(crate) fn is_skipped_entry(name: &str, is_dir: bool) -> bool {
     is_dir && is_ignored_dir(name)
 }
 
-/// 笔记根本身。目录不在（被移走 / 被删掉 / 网络盘没连上）时给一句能看懂的话
+/// 笔记根本身与「相对路径 → 绝对路径」的守卫：实现与 kb.rs / video.rs 同构，
+/// 收在 [fs_util](fs_util.rs)（`root_dir` / `resolve_under`），这里的薄壳只带上称呼。
 fn root_path(root: &str) -> Result<PathBuf, String> {
-    let trimmed = root.trim();
-    if trimmed.is_empty() {
-        return Err("还没有选择笔记文件夹".into());
-    }
-    let base = PathBuf::from(trimmed);
-    if !base.is_dir() {
-        return Err(format!("找不到笔记文件夹：{trimmed}"));
-    }
-    Ok(base)
+    fs_util::root_dir(root, "笔记文件夹")
 }
 
-/// 相对路径 → 绝对路径，逐段只接受普通名字。
-///
-/// `..` / `.` / 盘符 / UNC 前缀在 `Component` 里都不是 `Normal`，于是「往上跳一级」
-/// 这种写法到不了这里 —— 笔记模块的边界就是笔记根，越界的一律当非法路径拒掉。
 fn resolve(root: &str, rel: &str) -> Result<PathBuf, String> {
-    let mut path = root_path(root)?;
-    for raw in rel.split(['/', '\\']) {
-        let part = raw.trim();
-        if part.is_empty() {
-            continue;
-        }
-        let mut parts = Path::new(part).components();
-        match (parts.next(), parts.next()) {
-            (Some(Component::Normal(name)), None) => path.push(name),
-            _ => return Err(format!("路径不合法：{rel}")),
-        }
-    }
-    Ok(path)
+    fs_util::resolve_under(root, rel, "笔记文件夹")
 }
 
 /// 同上，但不接受空路径：改名 / 移动 / 删除针对的是根**里面**的东西，
@@ -113,21 +91,11 @@ fn resolve_child(root: &str, rel: &str) -> Result<PathBuf, String> {
 
 /// 绝对路径 → 相对笔记根的路径，统一用 `/` 分隔（渲染层只认这一种写法）
 fn rel_of(root: &Path, path: &Path) -> String {
-    path.strip_prefix(root)
-        .unwrap_or(path)
-        .components()
-        .map(|part| part.as_os_str().to_string_lossy())
-        .collect::<Vec<_>>()
-        .join("/")
+    fs_util::rel_under(root, path)
 }
 
 fn mtime_ms(path: &Path) -> u64 {
-    std::fs::metadata(path)
-        .and_then(|meta| meta.modified())
-        .ok()
-        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
-        .map(|dur| dur.as_millis() as u64)
-        .unwrap_or(0)
+    fs_util::mtime_ms(path)
 }
 
 /// 列目录：一层层往下走，只回文件夹与 markdown 文件。
@@ -242,17 +210,8 @@ pub fn write(root: &str, rel: &str, content: &str) -> Result<(), String> {
         return Err("这篇笔记所在的文件夹已经不在了".into());
     }
 
-    let temp = path.with_file_name(format!(
-        "{}.tmp",
-        path.file_name().unwrap_or_default().to_string_lossy()
-    ));
-    std::fs::write(&temp, content).map_err(|err| format!("写入失败：{err}"))?;
-    std::fs::rename(&temp, &path).map_err(|err| {
-        let _ = std::fs::remove_file(&temp);
-        format!("保存失败：{err}")
-    })
+    fs_util::write_atomic(&path, content.as_bytes())
 }
-
 /// 新建一个文件夹或一篇空笔记；同名已存在时报错（名字撞车由渲染层按树去重）
 pub fn create(root: &str, rel: &str, is_dir: bool) -> Result<(), String> {
     let path = resolve_child(root, rel)?;

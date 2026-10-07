@@ -126,18 +126,24 @@ const canRun = computed(
  *
  * **它只出现在发送按钮的悬停里**：页面不摆提示行（这个工具是作者自己用的，页面上把控件
  * 已经说清的事再讲一遍就是噪音），那颗按钮按不动时才是它该说话的时候。
+ * 环境那四样的顺序归 store 的 envGap（与 run 的校验、知识库清洗同一条级联），文案是
+ * 这里的悬停版 —— 说得到位些。
  */
 const blocking = computed(() => {
   if (!ai.probed) return ''
   if (!ai.activeSession && !ai.newDir)
     return '先挑一个工作目录：位置那一栏那个下拉 —— 对话就在它里面干活，一个目录就是一个「项目」。'
   if (ai.hydrating) return '正在接上这段对话…等它读完就能接着说。'
-  if (!ai.nodeOk) return '这台机器的 Node 太旧：跑 Pi 需要 Node ≥ 22.19，先把 Node 升上去。'
-  if (!ai.piVersion)
-    return '没找到 Pi 运行时：随包内置的那份不在（开发态先跑一次 npm run vendor:pi），PATH 上也没有全局安装的 —— 点页面上那颗「安装 Pi」全局装一个。'
-  if (!ai.configured)
-    return '还没配模型：点「模型」下拉里的「模型管理」，添加一个 AI 服务（预设厂商或自定义端点）并选上模型。'
-  if (!ai.keyReady) return `${ai.providerLabel} 还没配 API Key：点「模型」下拉里的「模型管理」。`
+  switch (ai.envGap()) {
+    case 'node':
+      return '这台机器的 Node 太旧：跑 Pi 需要 Node ≥ 22.19，先把 Node 升上去。'
+    case 'pi':
+      return '没找到 Pi 运行时：随包内置的那份不在（开发态先跑一次 npm run vendor:pi），PATH 上也没有全局安装的 —— 点页面上那颗「安装 Pi」全局装一个。'
+    case 'model':
+      return '还没配模型：点「模型」下拉里的「模型管理」，添加一个 AI 服务（预设厂商或自定义端点）并选上模型。'
+    case 'key':
+      return `${ai.providerLabel} 还没配 API Key：点「模型」下拉里的「模型管理」。`
+  }
   if (!props.instruction.trim() && props.images.length === 0)
     return '还没写指令：接着这段对话说点什么。'
   if (props.images.length > 0 && !ai.imageReady)

@@ -38,15 +38,12 @@ import AppDialog from '@/components/AppDialog.vue'
 import { confirmAction, notifyError, notifySuccess } from '@/notify'
 import { useSettingsStore } from '@/stores/settings'
 
+/** 弹层开关:v-model 一条口径(与 AppDialog / el-dialog 相同,全应用的弹层都这么开) */
+const open = defineModel<boolean>({ required: true })
+
 const props = defineProps<{
-  /** 面板开关（v-model） */
-  modelValue: boolean
   /** 当前笔记本：清单与引用次数都只限它（还没选文件夹时是空串，那时这一页什么都不列） */
   root: string
-}>()
-
-const emit = defineEmits<{
-  'update:modelValue': [open: boolean]
 }>()
 
 const settings = useSettingsStore()
@@ -116,14 +113,14 @@ watch(
     result.value = null
     selected.value = []
     // 面板正开着（改设置时走得到这里）就立刻按新的一层重数一遍，别让它停在空清单上
-    if (props.modelValue) void scan()
+    if (open.value) void scan()
   }
 )
 
 watch(
-  () => props.modelValue,
-  (open) => {
-    if (!open) return
+  open,
+  (value) => {
+    if (!value) return
     // 先把上次的结果显示出来（有的话），再在后台重新数一遍
     if (cached && !result.value) result.value = cached
     void scan()
@@ -261,11 +258,10 @@ async function remove(): Promise<void> {
 <template>
   <!-- penetrable：对着图片清单删东西时，正文还要看得见（见 AppDialog.vue） -->
   <AppDialog
-    :model-value="modelValue"
+    v-model="open"
     title="素材管理"
     width="min(780px, calc(100vw - 80px))"
     penetrable
-    @update:model-value="(open: boolean) => emit('update:modelValue', open)"
   >
     <!-- 没配仓库：这一页没什么可管的，说清楚去哪儿配 -->
     <div v-if="repoMissing" class="empty asset-empty">
@@ -375,7 +371,7 @@ async function remove(): Promise<void> {
 
         <span class="assets__spacer" />
 
-        <el-button size="small" @click="emit('update:modelValue', false)">关闭</el-button>
+        <el-button size="small" @click="open = false">关闭</el-button>
         <el-button
           type="danger"
           size="small"

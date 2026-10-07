@@ -19,15 +19,18 @@ import AppDialog from '@/components/AppDialog.vue'
 import { formatTimestamp } from '@/format'
 import type { AiNewsArticle, AiNewsItem } from '@/types'
 
+/** 弹层开关:v-model 一条口径(与 AppDialog / el-dialog 相同,全应用的弹层都这么开) */
+const open = defineModel<boolean>({ required: true })
+
 const props = defineProps<{
-  modelValue: boolean
   item: AiNewsItem | null
 }>()
-const emit = defineEmits<{ 'update:modelValue': [value: boolean] }>()
 
 const visible = computed({
-  get: () => props.modelValue,
-  set: (value: boolean) => emit('update:modelValue', value)
+  get: () => open.value,
+  set: (value: boolean) => {
+    open.value = value
+  }
 })
 
 const article = ref<AiNewsArticle | null>(null)
@@ -64,9 +67,9 @@ async function load(): Promise<void> {
 }
 
 watch(
-  () => [props.modelValue, props.item?.link] as const,
-  ([open]) => {
-    if (open) void load()
+  () => [open.value, props.item?.link] as const,
+  ([value]) => {
+    if (value) void load()
   },
   { immediate: true }
 )

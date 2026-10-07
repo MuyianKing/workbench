@@ -743,6 +743,20 @@ export const useAiStore = defineStore('ai', () => {
   }
 
   /**
+   * 环境这一环还缺哪一样，按用户要动手的顺序：Node → Pi → 模型 → 密钥。
+   * 「还差什么」级联的**唯一顺序口径** —— composer 的 blocking、run 的校验、知识库清洗
+   * 的拦路都从这里取（原先三处各排一遍，顺序已经漂移出两种）。文案各归各：悬停里
+   * 说得详尽、通知里一句话、清洗面板折中。
+   */
+  function envGap(): 'node' | 'pi' | 'model' | 'key' | null {
+    if (!nodeOk.value) return 'node'
+    if (!piReady.value) return 'pi'
+    if (!configured.value) return 'model'
+    if (!keyReady.value) return 'key'
+    return null
+  }
+
+  /**
    * 在**当前这个会话**里说一句。还没有会话时（起始那一屏）**这一句就是第一句**：
    * 先按那一屏挑好的目录建一个会话，再说下去 —— 「新建会话」不再是发消息之前要单独点的
    * 一步（见下面 startSession）。
@@ -763,20 +777,16 @@ export const useAiStore = defineStore('ai', () => {
       notifyError('先写一条指令')
       return false
     }
-    if (!piReady.value) {
-      notifyError('没找到 Pi 运行时：内置那份不在，PATH 上也没有全局安装的')
-      return false
-    }
-    if (!nodeOk.value) {
-      notifyError('Node 版本太旧：跑内置的 Pi 需要 Node ≥ 22.19')
-      return false
-    }
-    if (!configured.value) {
-      notifyError('先在「模型」里配好端点、模型与密钥')
-      return false
-    }
-    if (!keyReady.value) {
-      notifyError(`还没有配置 ${providerName.value} 的 API Key`)
+    // 环境那四样的顺序归 envGap（与 composer 的 blocking、知识库清洗同一条级联）
+    const gap = envGap()
+    if (gap) {
+      const notices = {
+        node: 'Node 版本太旧：跑内置的 Pi 需要 Node ≥ 22.19',
+        pi: '没找到 Pi 运行时：内置那份不在，PATH 上也没有全局安装的',
+        model: '先在「模型」里配好端点、模型与密钥',
+        key: `还没有配置 ${providerName.value} 的 API Key`
+      } as const
+      notifyError(notices[gap])
       return false
     }
     if (attached.length && !imageReady.value) {
@@ -836,15 +846,7 @@ export const useAiStore = defineStore('ai', () => {
       // 进程还没起过（或换过参数）时把「这一轮跑的是什么」记一行：完整命令行（含绝对路径的
       // cli.js 与那一串开关）收进 detail —— 它是排障用的，摆在一行正文里只会把日志开头堵死
       // （界面拿它当悬停提示，见 AiRunPanel）。同一个进程接着聊时不必每轮都写一遍
-      ...(runState.live
-        ? []
-        : [
-            {
-              kind: 'info' as const,
-              text: `在 ${noteRootName(session.dir)} 里工作`,
-              detail: `${launch.program} ${piLaunchForDisplay(launch)}`
-            }
-          ])
+      ...(runState.live ? [] : [noteProcess(session, launch)])
     ]
 
     // 起进程这一趟与「收下这句」拆开：到这儿输入就算收下了（校验过了、会话有着落了、
@@ -1377,6 +1379,7 @@ export const useAiStore = defineStore('ai', () => {
     keyReady,
     piReady,
     nodeOk,
+    envGap,
     imageReady,
     lines,
     streaming,

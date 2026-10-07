@@ -17,8 +17,10 @@ import type { InputInstance } from 'element-plus'
 import { NOTE_NAME_MAX, noteNameProblem, type NoteKind } from '@workbench/notes'
 import AppDialog from '@/components/AppDialog.vue'
 
+/** 弹层开关:v-model 一条口径(与 AppDialog / el-dialog 相同,全应用的弹层都这么开) */
+const open = defineModel<boolean>({ required: true })
+
 const props = defineProps<{
-  modelValue: boolean
   title: string
   /** 决定提示语怎么写（文件夹 / 笔记） */
   kind: NoteKind
@@ -27,14 +29,15 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  'update:modelValue': [value: boolean]
   /** 用户确认了名字；名字已经过收敛，一定非空 */
   submit: [name: string]
 }>()
 
 const visible = computed({
-  get: () => props.modelValue,
-  set: (value: boolean) => emit('update:modelValue', value)
+  get: () => open.value,
+  set: (value: boolean) => {
+    open.value = value
+  }
 })
 
 const name = ref('')
@@ -50,12 +53,9 @@ const hint = computed(() => {
     : '正文按 markdown 写，存成同名的 .md 文件。'
 })
 
-watch(
-  () => props.modelValue,
-  (open) => {
-    if (open) name.value = props.defaultName
-  }
-)
+watch(open, (value) => {
+  if (value) name.value = props.defaultName
+})
 
 /**
  * 聚焦与全选放在弹窗的 `opened` 之后，而不是上面那个 watch 里。

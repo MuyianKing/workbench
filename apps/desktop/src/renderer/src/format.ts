@@ -5,6 +5,14 @@
  * 各写一份，同一个「毫秒 → 秒」有多种写法，风格也不统一。集中到这里。
  */
 
+/**
+ * 路径末段：正反斜杠都认（Windows 路径两种都可能混着来）。
+ * 没有分隔符时原样返回；「以分隔符结尾」这种取不出名字的输入也回退原串。
+ */
+export function basenameOf(path: string): string {
+  return path.split(/[\\/]/).pop() || path
+}
+
 /** 耗时：1.2s */
 export function formatDurationMs(ms: number): string {
   return `${(ms / 1000).toFixed(1)}s`

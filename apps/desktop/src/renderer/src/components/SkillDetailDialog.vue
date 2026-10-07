@@ -17,7 +17,7 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { Close } from '@element-plus/icons-vue'
 import { SKILL_FILE, compareSkillVersions, skillVersionOf, type SkillCompareFile, type SkillInstalledScan } from '@workbench/skills'
-import { formatTimestamp } from '@/format'
+import { basenameOf, formatTimestamp } from '@/format'
 import AppDialog from '@/components/AppDialog.vue'
 import { confirmAction, notifySuccess } from '@/notify'
 import { useProjectsStore } from '@/stores/projects'
@@ -26,9 +26,10 @@ import SkillHistoryDialog from '@/components/SkillHistoryDialog.vue'
 import SkillCompareDialog from '@/components/SkillCompareDialog.vue'
 import SkillFileTabs from '@/components/SkillFileTabs.vue'
 
-const props = defineProps<{ open: boolean }>()
+/** 弹层开关:v-model 一条口径(与 AppDialog / el-dialog 相同,全应用的弹层都这么开) */
+const open = defineModel<boolean>({ required: true })
+
 const emit = defineEmits<{
-  (event: 'update:open', value: boolean): void
   /** 「安装到项目」交给页面层处理：安装弹窗是页面上的那一份（卡片上的按钮也开它） */
   (event: 'install'): void
 }>()
@@ -37,8 +38,10 @@ const store = useSkillsStore()
 const projects = useProjectsStore()
 
 const visible = computed({
-  get: () => props.open,
-  set: (value) => emit('update:open', value)
+  get: () => open.value,
+  set: (value) => {
+    open.value = value
+  }
 })
 
 /** 打开那一刻的正文快照：与当前内容一致才算「没有未保存的修改」 */
@@ -65,20 +68,17 @@ const scan = ref<SkillInstalledScan | null>(null)
 /** 换行归一：项目里的文件可能带着 CRLF，内容没变不该被换行写法误报成更新 */
 const normalizeLf = (text: string): string => text.replace(/\r\n/g, '\n')
 
-watch(
-  () => props.open,
-  (value) => {
-    if (!value) return
-    checkJob += 1
-    updates.value = []
-    // 已选中且内容在手上（连点同一张卡片关了再开）时立刻记快照
-    if (!store.contentLoading) {
-      baseline.value = store.content
-      if (store.activeFile === SKILL_FILE) libraryContent.value = store.content
-      void checkUpdates()
-    }
+watch(open, (value) => {
+  if (!value) return
+  checkJob += 1
+  updates.value = []
+  // 已选中且内容在手上（连点同一张卡片关了再开）时立刻记快照
+  if (!store.contentLoading) {
+    baseline.value = store.content
+    if (store.activeFile === SKILL_FILE) libraryContent.value = store.content
+    void checkUpdates()
   }
-)
+})
 
 /**
  * 每一次**载入完成**都重新取一次基线。正文除了编辑器里敲的，只会由「打开某个文件」
@@ -118,7 +118,7 @@ async function checkUpdates(): Promise<void> {
         projects.projects.map((project) => project.path)
       )
     // 期间关了弹窗 / 换了技能：这份结果已经过期
-    if (job !== checkJob || !props.open || store.activeId !== id) return
+    if (job !== checkJob || !open.value || store.activeId !== id) return
 
     scan.value = result.ok && result.data ? result.data : null
 
@@ -140,7 +140,7 @@ async function checkUpdates(): Promise<void> {
 
 /** 项目显示名：按路径对应不到时显示路径末段 */
 function projectNameOf(dir: string): string {
-  return projects.projects.find((project) => project.path === dir)?.name ?? dir.split(/[\\/]/).pop() ?? dir
+  return projects.projects.find((project) => project.path === dir)?.name ?? basenameOf(dir)
 }
 
 // ---------- 对比（差异只在对比弹窗里看） ----------
@@ -360,12 +360,12 @@ async function removeActive(): Promise<void> {
     </div>
 
     <SkillHistoryDialog
-      v-model:open="historyOpen"
+      v-model="historyOpen"
       :skill-id="store.activeId"
       :skill-name="store.activeSkill?.name ?? ''"
     />
     <SkillCompareDialog
-      v-model:open="compareOpen"
+      v-model="compareOpen"
       :skill-id="store.activeId"
       :skill-name="store.activeSkill?.name ?? ''"
       :project-name="projectNameOf(compareProject)"

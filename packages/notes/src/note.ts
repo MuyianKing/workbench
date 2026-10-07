@@ -12,6 +12,10 @@
  * 适配层把两端接起来（见 workbench/note.ts）。放这里是为了能被单测直接覆盖 ——
  * 「点开头的目录不理」「非 markdown 的文件不进树」这些口径改起来也不必重编 Rust。
  *
+ * 另外，笔记树与视频树（@workbench/video）逐行同构，组树 / 排序 / 查找的公共骨架
+ * （RelTreeNode / buildRelTree / sortRelNodes / findRelNode / relChain / countRelNodes）
+ * 也只写这一份 —— video 按自己的名字留出口，逻辑不过两遍。
+ *
  * **只在本机**：笔记本是用户自己的目录，应用既不复制它、也不把它写进任何数据文件；
  * 记下来的只有两样：当前打开的那个目录（设置里的 `noteDir`）与打开过的那几个
  * （`noteDirs`，笔记页左栏底部的「最近打开」）。两个都只对本机成立、不参与同步。
@@ -279,6 +283,19 @@ export function uniqueNoteName(siblings: readonly NoteNode[], base: string): str
 // ---------- 组树 ----------
 
 /**
+ * 相对路径树的节点形状：笔记树与视频树（@workbench/video）逐行同构，组树 / 排序 /
+ * 查找这一套就只写这一份。泛型参数指回节点自己（`children` 里装的是同一型），
+ * NoteNode 与 VideoNode 都满足它。
+ */
+export interface RelTreeNode<Self extends RelTreeNode<Self>> {
+  id: string
+  rel: string
+  name: string
+  kind: string
+  children?: Self[]
+}
+
+/**
  * 同层排序：**文件夹在前、文件在后**，各自按名字排。
  *
  * 用带 `numeric` 的排序规则：`笔记 10` 排在 `笔记 9` 后面，而不是按字符串逐位比。
@@ -286,30 +303,36 @@ export function uniqueNoteName(siblings: readonly NoteNode[], base: string): str
  */
 const collator = new Intl.Collator('zh-Hans-CN', { numeric: true, sensitivity: 'base' })
 
-function compareNodes(left: NoteNode, right: NoteNode): number {
-  if (left.kind !== right.kind) return left.kind === 'folder' ? -1 : 1
-  return collator.compare(left.name, right.name) || collator.compare(left.rel, right.rel)
+/** 同构树共用的逐层排序（文件夹在前；返回新对象，不改入参） */
+export function sortRelNodes<Self extends RelTreeNode<Self>>(nodes: readonly Self[]): Self[] {
+  return [...nodes]
+    .sort((left, right) => {
+      if (left.kind !== right.kind) return left.kind === 'folder' ? -1 : 1
+      return collator.compare(left.name, right.name) || collator.compare(left.rel, right.rel)
+    })
+    .map((node) => (node.children ? { ...node, children: sortRelNodes(node.children) } : node))
 }
 
 /** 逐层排序（返回新对象，不改入参） */
 export function sortNoteNodes(nodes: readonly NoteNode[]): NoteNode[] {
-  return [...nodes]
-    .sort(compareNodes)
-    .map((node) => (node.children ? { ...node, children: sortNoteNodes(node.children) } : node))
+  return sortRelNodes(nodes)
 }
 
 /**
- * 平铺清单 → 树。
- *
- * 两份过滤在这里定下：只收文件夹与 markdown 文件（图片、附件这些不进树，
- * 它们在编辑器的链接里照样能用）；点开头的条目、以及 `node_modules` / `dist` 那批
- * 依赖与构建产物的目录由后端扫的时候就跳过了（见 src-tauri/src/notes.rs 的 `IGNORED_DIRS`）。
+ * 平铺清单 → 树的公共骨架。文件夹节点两棵树长得一模一样（kind 都叫 'folder'），
+ * 叶子怎么造（收哪些文件、显示名、带什么字段）由 `buildLeaf` 定 —— 返回 null 表示不进树。
  *
  * 父目录没出现在清单里时（扫描期间被删掉、或网络盘上那一段读不到），
  * 把节点挂到根上：树里位置不准，但总比整篇笔记看不见强。
  */
-export function buildNoteTree(entries: readonly NoteEntry[]): NoteNode[] {
-  const table = new Map<string, NoteNode>()
+export function buildRelTree<
+  Entry extends { rel: string; name: string; isDir: boolean },
+  Self extends RelTreeNode<Self>
+>(
+  entries: readonly Entry[],
+  buildLeaf: (rel: string, fileName: string, entry: Entry) => Self | null
+): Self[] {
+  const table = new Map<string, Self>()
 
   for (const entry of entries) {
     const rel = normalizeRel(entry.rel)
@@ -317,20 +340,16 @@ export function buildNoteTree(entries: readonly NoteEntry[]): NoteNode[] {
 
     const fileName = entry.name ? normalizeRel(entry.name) : relName(rel)
     if (entry.isDir) {
-      table.set(rel, { id: rel, rel, name: fileName, kind: 'folder', children: [] })
+      // 泛型 N 的字段它自己说了算，文件夹这块公共形状在这里只能断言收口
+      const folder: RelTreeNode<Self> = { id: rel, rel, name: fileName, kind: 'folder', children: [] }
+      table.set(rel, folder as Self)
       continue
     }
-    if (!isNoteFile(fileName)) continue
-    table.set(rel, {
-      id: rel,
-      rel,
-      name: noteDisplayName(fileName),
-      kind: 'note',
-      mtimeMs: entry.mtimeMs ?? 0
-    })
+    const leaf = buildLeaf(rel, fileName, entry)
+    if (leaf) table.set(rel, leaf)
   }
 
-  const roots: NoteNode[] = []
+  const roots: Self[] = []
   for (const node of table.values()) {
     const parent = parentRel(node.rel)
     const owner = parent ? table.get(parent) : undefined
@@ -338,7 +357,29 @@ export function buildNoteTree(entries: readonly NoteEntry[]): NoteNode[] {
     else roots.push(node)
   }
 
-  return sortNoteNodes(roots)
+  return sortRelNodes(roots)
+}
+
+/** 笔记树的叶子：只收 markdown 文件（图片、附件这些不进树，它们在编辑器的链接里照样能用），显示名去掉后缀 */
+function buildNoteLeaf(rel: string, fileName: string, entry: NoteEntry): NoteNode | null {
+  if (!isNoteFile(fileName)) return null
+  return {
+    id: rel,
+    rel,
+    name: noteDisplayName(fileName),
+    kind: 'note',
+    mtimeMs: entry.mtimeMs ?? 0
+  }
+}
+
+/**
+ * 平铺清单 → 树。
+ *
+ * 点开头的条目、以及 `node_modules` / `dist` 那批依赖与构建产物的目录由后端扫的时候就
+ * 跳过了（见 src-tauri/src/notes.rs 的 `IGNORED_DIRS`）。
+ */
+export function buildNoteTree(entries: readonly NoteEntry[]): NoteNode[] {
+  return buildRelTree(entries, buildNoteLeaf)
 }
 
 // ---------- 打开过的笔记本 ----------
@@ -421,26 +462,31 @@ export function removeFromNoteHistory(history: unknown, dir: unknown): string[] 
 
 // ---------- 读 ----------
 
-/** 深度优先找到某个路径上的节点；找不到返回 null */
-export function findNoteNode(nodes: readonly NoteNode[], rel: string): NoteNode | null {
+/** 同构树共用的查找：深度优先找到某个路径上的节点；找不到返回 null */
+export function findRelNode<Self extends RelTreeNode<Self>>(
+  nodes: readonly Self[],
+  rel: string
+): Self | null {
   const target = normalizeRel(rel)
   if (!target) return null
 
   for (const node of nodes) {
     if (node.rel === target) return node
     if (node.children) {
-      const found = findNoteNode(node.children, target)
+      const found = findRelNode(node.children, target)
       if (found) return found
     }
   }
   return null
 }
 
-/**
- * 从最外层到该节点的完整链（含自身）；找不到返回空数组。
- * 界面用它写面包屑，也用它决定「要把哪几层展开」。
- */
-export function noteChain(nodes: readonly NoteNode[], rel: string): NoteNode[] {
+/** 深度优先找到某个路径上的节点；找不到返回 null */
+export function findNoteNode(nodes: readonly NoteNode[], rel: string): NoteNode | null {
+  return findRelNode(nodes, rel)
+}
+
+/** 同构树共用的「链」：从最外层到该节点的完整链（含自身）；找不到返回空数组 */
+export function relChain<Self extends RelTreeNode<Self>>(nodes: readonly Self[], rel: string): Self[] {
   const target = normalizeRel(rel)
   if (!target) return []
 
@@ -448,21 +494,37 @@ export function noteChain(nodes: readonly NoteNode[], rel: string): NoteNode[] {
     if (node.rel === target) return [node]
     // 只往「可能是它祖先」的那一支里走：rel 是带层级的前缀路径
     if (node.children && target.startsWith(`${node.rel}/`)) {
-      const deeper = noteChain(node.children, target)
+      const deeper = relChain(node.children, target)
       if (deeper.length) return [node, ...deeper]
     }
   }
   return []
 }
 
-/** 整棵树里的笔记篇数（文件夹不算） */
-export function countNotes(nodes: readonly NoteNode[]): number {
+/**
+ * 从最外层到该节点的完整链（含自身）；找不到返回空数组。
+ * 界面用它写面包屑，也用它决定「要把哪几层展开」。
+ */
+export function noteChain(nodes: readonly NoteNode[], rel: string): NoteNode[] {
+  return relChain(nodes, rel)
+}
+
+/** 同构树共用的计数：数某一类节点（文件夹不算） */
+export function countRelNodes<Self extends RelTreeNode<Self>>(
+  nodes: readonly Self[],
+  kind: string
+): number {
   let total = 0
   for (const node of nodes) {
-    if (node.kind === 'note') total += 1
-    if (node.children) total += countNotes(node.children)
+    if (node.kind === kind) total += 1
+    if (node.children) total += countRelNodes(node.children, kind)
   }
   return total
+}
+
+/** 整棵树里的笔记篇数（文件夹不算） */
+export function countNotes(nodes: readonly NoteNode[]): number {
+  return countRelNodes(nodes, 'note')
 }
 
 /** 树里的节点总数（文件夹 + 笔记）；删文件夹前的确认框用它报个数 */

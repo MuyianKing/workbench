@@ -6,8 +6,32 @@ import {
   isProjectColorPreset,
   nextProjectColor,
   projectColorVar,
+  sanitizeHexColor,
   sanitizeProjectColor
 } from './project-color'
+
+describe('sanitizeHexColor', () => {
+  it('统一成小写六位：三位简写展开、大写压小', () => {
+    expect(sanitizeHexColor('#abc')).toBe('#aabbcc')
+    expect(sanitizeHexColor('#4C8BF5')).toBe('#4c8bf5')
+    expect(sanitizeHexColor('#ABCDEF')).toBe('#abcdef')
+  })
+
+  it('别的写法一律不收（rgb()、颜色名、带透明度、位数不对）', () => {
+    expect(sanitizeHexColor('#ff0000ff')).toBeNull()
+    expect(sanitizeHexColor('#12345')).toBeNull()
+    expect(sanitizeHexColor('rgb(1,2,3)')).toBeNull()
+    expect(sanitizeHexColor('红色')).toBeNull()
+    expect(sanitizeHexColor('abc')).toBeNull()
+    expect(sanitizeHexColor(123)).toBeNull()
+    expect(sanitizeHexColor(null)).toBeNull()
+  })
+
+  it('不做首尾空白收拾：要 trim 的调用方自己来', () => {
+    expect(sanitizeHexColor(' #abc ')).toBeNull()
+    expect(sanitizeHexColor('  #4c8bf5')).toBeNull()
+  })
+})
 
 describe('sanitizeProjectColor', () => {
   it('预设名原样返回', () => {

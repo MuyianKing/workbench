@@ -10,8 +10,8 @@ import { noteNameProblem } from '@workbench/notes'
 import AppDialog from '@/components/AppDialog.vue'
 import { useSkillsStore } from '@/stores/skills'
 
-const props = defineProps<{ open: boolean }>()
-const emit = defineEmits<{ (event: 'update:open', value: boolean): void }>()
+/** 弹层开关:v-model 一条口径(与 AppDialog / el-dialog 相同,全应用的弹层都这么开) */
+const open = defineModel<boolean>({ required: true })
 
 const store = useSkillsStore()
 
@@ -19,19 +19,18 @@ const form = reactive({ id: '', description: '' })
 const submitting = ref(false)
 
 const visible = computed({
-  get: () => props.open,
-  set: (value) => emit('update:open', value)
+  get: () => open.value,
+  set: (value) => {
+    open.value = value
+  }
 })
 
-watch(
-  () => props.open,
-  (value) => {
-    if (value) {
-      form.id = ''
-      form.description = ''
-    }
+watch(open, (value) => {
+  if (value) {
+    form.id = ''
+    form.description = ''
   }
-)
+})
 
 const idProblem = computed(() => noteNameProblem(form.id))
 

@@ -4,6 +4,7 @@
 //! JSON 原样安全写盘」，不做 sanitize —— 收敛逻辑留在 `src/shared/persisted-data.ts`，
 //! 与渲染层共用一份，也就不需要为它写两遍测试。
 
+use crate::fs_util;
 use serde_json::Value;
 use std::path::PathBuf;
 use std::sync::mpsc::{channel, RecvTimeoutError, Sender};
@@ -132,8 +133,7 @@ fn write_file(path: PathBuf, label: &str, inner: &Arc<Mutex<Inner>>) {
         }
     }
 
-    let tmp = path.with_extension("json.tmp");
-    if let Err(err) = std::fs::write(&tmp, text).and_then(|_| std::fs::rename(&tmp, &path)) {
+    if let Err(err) = fs_util::write_atomic(&path, text.as_bytes()) {
         eprintln!("[workbench] {label}失败: {err}");
     }
 }

@@ -23,8 +23,10 @@ import AppDialog from '@/components/AppDialog.vue'
 import { useSkillsStore } from '@/stores/skills'
 import SkillFileTabs from '@/components/SkillFileTabs.vue'
 
+/** 弹层开关:v-model 一条口径(与 AppDialog / el-dialog 相同,全应用的弹层都这么开) */
+const open = defineModel<boolean>({ required: true })
+
 const props = defineProps<{
-  open: boolean
   skillId: string
   skillName: string
   /** 全部文件的对比数据（两侧内容），由父级从扫描 / 历史结果组装 */
@@ -42,7 +44,6 @@ const props = defineProps<{
   versionHash?: string
 }>()
 const emit = defineEmits<{
-  (event: 'update:open', value: boolean): void
   /** 更新成功（project 模式）：父级据此对齐编辑器、刷新检测 */
   (event: 'applied', rel: string, content: string): void
   /** 恢复成功（version 模式）：父级据此把上游那层弹窗一起收掉 */
@@ -52,21 +53,20 @@ const emit = defineEmits<{
 const store = useSkillsStore()
 
 const visible = computed({
-  get: () => props.open,
-  set: (value) => emit('update:open', value)
+  get: () => open.value,
+  set: (value) => {
+    open.value = value
+  }
 })
 
 const currentRel = ref(props.initialRel)
 
-watch(
-  () => props.open,
-  (value) => {
-    if (!value) return
-    currentRel.value = props.initialRel
-    error.value = ''
-    applying.value = false
-  }
-)
+watch(open, (value) => {
+  if (!value) return
+  currentRel.value = props.initialRel
+  error.value = ''
+  applying.value = false
+})
 
 /** 切换文件后把差异表滚回顶部：上一个文件看到一半的位置对下一个文件没有意义 */
 const scrollRef = ref<HTMLElement | null>(null)

@@ -10,6 +10,7 @@
 //! 不用把整份文件下完），所以这一层还负责「放行前核一遍它确实是 MP4」——
 //! webview 解码失败是静默的（黑屏、控制台也不响），坏文件必须在这里就报出来。
 
+use crate::fs_util;
 use serde_json::{json, Value};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
@@ -27,25 +28,12 @@ fn is_video_file(name: &str) -> bool {
 
 /// 视频根本身。目录不在（被移走 / 被删掉 / 网络盘没连上）时给一句能看懂的话
 fn root_path(root: &str) -> Result<PathBuf, String> {
-    let trimmed = root.trim();
-    if trimmed.is_empty() {
-        return Err("还没有选择视频文件夹".into());
-    }
-    let base = PathBuf::from(trimmed);
-    if !base.is_dir() {
-        return Err(format!("找不到视频文件夹：{trimmed}"));
-    }
-    Ok(base)
+    fs_util::root_dir(root, "视频文件夹")
 }
 
 /// 绝对路径 → 相对视频根的路径，统一用 `/` 分隔（渲染层只认这一种写法）
-fn rel_of(root: &PathBuf, path: &PathBuf) -> String {
-    path.strip_prefix(root)
-        .unwrap_or(path)
-        .components()
-        .map(|part| part.as_os_str().to_string_lossy())
-        .collect::<Vec<_>>()
-        .join("/")
+fn rel_of(root: &Path, path: &Path) -> String {
+    fs_util::rel_under(root, path)
 }
 
 /// 列目录：一层层往下走，只回文件夹与 MP4 文件。

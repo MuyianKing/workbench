@@ -12,7 +12,8 @@
  * 这一层只做取数与交互。
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
+import { confirmAction } from '@/notify'
 import { ArrowDown, Memo, Plus } from '@element-plus/icons-vue'
 import { addDays, dayKey } from '@workbench/core'
 import { markdownToPlainText } from '@workbench/core'
@@ -289,15 +290,10 @@ async function remove(entry: WorkLogEntry): Promise<void> {
   // 确认框里放摘要而不是 markdown 原文：标记混在问句里读起来很别扭
   const preview = markdownToPlainText(entry.content)
   const short = preview.length > 24 ? `${preview.slice(0, 24)}…` : preview
-  try {
-    await ElMessageBox.confirm(`删除「${short}」？删除后不可恢复。`, '删除记录', {
-      confirmButtonText: '删除',
-      cancelButtonText: '取消',
-      type: 'warning'
-    })
-  } catch {
-    return // 用户取消
-  }
+  const agreed = await confirmAction(`删除「${short}」？删除后不可恢复。`, '删除记录', {
+    confirmButtonText: '删除'
+  })
+  if (!agreed) return
 
   const result = await window.workbench.removeWorkLog(entry.id)
   if (!result.ok) {

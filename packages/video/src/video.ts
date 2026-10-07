@@ -12,12 +12,18 @@
  * 笔记文件夹是同一件事（本机挑的一个目录），直接复用 note.ts 的那几个函数。
  */
 import {
+  buildRelTree,
+  countRelNodes,
+  findRelNode,
+  normalizeRel,
   noteRootName,
   pushNoteHistory,
+  relChain,
   removeFromNoteHistory,
   sanitizeNoteHistory,
   sanitizeNoteRoot,
-  sanitizeNoteTreeExpanded
+  sanitizeNoteTreeExpanded,
+  sortRelNodes
 } from '@workbench/notes'
 
 /** 只认这一种后缀。别的容器（mkv / avi / flv…）webview 里的解码器不一定有，先不收 */
@@ -63,45 +69,20 @@ export function videoDisplayName(fileName: string): string {
 }
 
 /**
+ * 树这一套（排序 / 组树 / 查找 / 计数 / 链）与笔记树逐行同构，实现只在 note.ts 里写一份
+ * （buildRelTree / sortRelNodes / findRelNode / relChain / countRelNodes）；这里按视频的
+ * 名字各留一个出口 —— 名字各叫各的，逻辑只有一份。
+ */
+
+/** 收敛一个相对路径：分隔符统一成 `/`、去掉空段与 `.` 段（与 note.ts 同一条口径） */
+export const normalizeVideoRel = normalizeRel
+
+/**
  * 同层排序：**文件夹在前、视频在后**，各自按名字排（与笔记树同一条规则，
  * 连 `笔记 10` 排在 `笔记 9` 后面的 numeric 口径也一样）。
  */
-const collator = new Intl.Collator('zh-Hans-CN', { numeric: true, sensitivity: 'base' })
-
-function compareNodes(left: VideoNode, right: VideoNode): number {
-  if (left.kind !== right.kind) return left.kind === 'folder' ? -1 : 1
-  return collator.compare(left.name, right.name) || collator.compare(left.rel, right.rel)
-}
-
-/** 逐层排序（返回新对象，不改入参） */
 export function sortVideoNodes(nodes: readonly VideoNode[]): VideoNode[] {
-  return [...nodes]
-    .sort(compareNodes)
-    .map((node) => (node.children ? { ...node, children: sortVideoNodes(node.children) } : node))
-}
-
-/** 路径的最后一段（文件名 / 文件夹名）；与 note.ts 同一条口径，复制一份免得视频依赖笔记的内部名 */
-function relName(rel: string): string {
-  const parts = rel.split('/').filter(Boolean)
-  return parts[parts.length - 1] ?? ''
-}
-
-/** 路径的所在目录；根下的条目是空串 */
-function parentRel(rel: string): string {
-  const parts = rel.split('/').filter(Boolean)
-  parts.pop()
-  return parts.join('/')
-}
-
-/** 收敛一个相对路径：分隔符统一成 `/`、去掉空段与 `.` 段 */
-export function normalizeVideoRel(raw: unknown): string {
-  if (typeof raw !== 'string') return ''
-  return raw
-    .replace(/\\/g, '/')
-    .split('/')
-    .map((part) => part.trim())
-    .filter((part) => part && part !== '.')
-    .join('/')
+  return sortRelNodes(nodes)
 }
 
 /**
@@ -111,19 +92,9 @@ export function normalizeVideoRel(raw: unknown): string {
  * 树里摆一排打不开的东西只会添堵。父目录不在清单里时（扫描期间被删掉）挂到根上。
  */
 export function buildVideoTree(entries: readonly VideoEntry[]): VideoNode[] {
-  const table = new Map<string, VideoNode>()
-
-  for (const entry of entries) {
-    const rel = normalizeVideoRel(entry.rel)
-    if (!rel || table.has(rel)) continue
-
-    const fileName = entry.name ? normalizeVideoRel(entry.name) : relName(rel)
-    if (entry.isDir) {
-      table.set(rel, { id: rel, rel, name: fileName, kind: 'folder', children: [] })
-      continue
-    }
-    if (!isVideoFile(fileName)) continue
-    table.set(rel, {
+  return buildRelTree(entries, (rel, fileName, entry): VideoNode | null => {
+    if (!isVideoFile(fileName)) return null
+    return {
       id: rel,
       rel,
       name: videoDisplayName(fileName),
@@ -132,58 +103,23 @@ export function buildVideoTree(entries: readonly VideoEntry[]): VideoNode[] {
         typeof entry.duration === 'number' && Number.isFinite(entry.duration) && entry.duration > 0
           ? entry.duration
           : 0
-    })
-  }
-
-  const roots: VideoNode[] = []
-  for (const node of table.values()) {
-    const parent = parentRel(node.rel)
-    const owner = parent ? table.get(parent) : undefined
-    if (owner) owner.children?.push(node)
-    else roots.push(node)
-  }
-
-  return sortVideoNodes(roots)
+    }
+  })
 }
 
 /** 整棵树里的视频个数（文件夹不算） */
 export function countVideos(nodes: readonly VideoNode[]): number {
-  let total = 0
-  for (const node of nodes) {
-    if (node.kind === 'video') total += 1
-    if (node.children) total += countVideos(node.children)
-  }
-  return total
+  return countRelNodes(nodes, 'video')
 }
 
 /** 深度优先找到某个路径上的节点；找不到返回 null */
 export function findVideoNode(nodes: readonly VideoNode[], rel: string): VideoNode | null {
-  const target = normalizeVideoRel(rel)
-  if (!target) return null
-
-  for (const node of nodes) {
-    if (node.rel === target) return node
-    if (node.children) {
-      const found = findVideoNode(node.children, target)
-      if (found) return found
-    }
-  }
-  return null
+  return findRelNode(nodes, rel)
 }
 
 /** 从最外层到该节点的完整链（含自身）；找不到返回空数组。选中项所在的那几层靠它展开 */
 export function videoChain(nodes: readonly VideoNode[], rel: string): VideoNode[] {
-  const target = normalizeVideoRel(rel)
-  if (!target) return []
-
-  for (const node of nodes) {
-    if (node.rel === target) return [node]
-    if (node.children && target.startsWith(`${node.rel}/`)) {
-      const deeper = videoChain(node.children, target)
-      if (deeper.length) return [node, ...deeper]
-    }
-  }
-  return []
+  return relChain(nodes, rel)
 }
 
 // ---------- 打开过的视频目录（与笔记本的「最近打开」同一条收敛） ----------

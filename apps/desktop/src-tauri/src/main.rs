@@ -7,6 +7,7 @@ mod commands;
 mod credentials;
 mod design;
 mod encoding;
+mod fs_util;
 mod http;
 mod icon;
 mod imaging;

@@ -12,21 +12,23 @@
  * **没有页脚按钮**：右上角那个 × 就是关闭，再放一个「关闭」只是把同一个动作说两遍。
  */
 import { computed, ref, watch } from 'vue'
-import { ElMessageBox } from 'element-plus'
 import { Loading, User } from '@element-plus/icons-vue'
 import { AUTH_PROVIDERS, AUTH_PROVIDER_HINTS, AUTH_PROVIDER_LABELS, accountLabel } from '@workbench/auth'
 import AppDialog from '@/components/AppDialog.vue'
+import { confirmAction } from '@/notify'
 import { useAuthStore } from '@/stores/auth'
 import type { AuthProvider } from '@/types'
 
-const props = defineProps<{ modelValue: boolean }>()
-const emit = defineEmits<{ 'update:modelValue': [value: boolean] }>()
+/** 弹层开关:v-model 一条口径(与 AppDialog / el-dialog 相同,全应用的弹层都这么开) */
+const open = defineModel<boolean>({ required: true })
 
 const auth = useAuthStore()
 
 const visible = computed({
-  get: () => props.modelValue,
-  set: (value: boolean) => emit('update:modelValue', value)
+  get: () => open.value,
+  set: (value: boolean) => {
+    open.value = value
+  }
 })
 
 /** 手动兜底那一栏：默认收起，只有回调没跳回来时用户才需要它 */
@@ -85,17 +87,13 @@ async function signOut(): Promise<void> {
   const current = account.value
   if (!current) return
 
-  try {
-    await ElMessageBox.confirm(
-      `退出后 Workbench 会删掉本机保存的 ${AUTH_PROVIDER_LABELS[current.provider]} 凭据，` +
-        '同步随之停止，数据只留在这台机器上（设置里的仓库地址不会丢，重新登录即可接着同步）。',
-      '退出登录',
-      { confirmButtonText: '退出登录', cancelButtonText: '取消', type: 'warning' }
-    )
-  } catch {
-    // 用户点了取消
-    return
-  }
+  const agreed = await confirmAction(
+    `退出后 Workbench 会删掉本机保存的 ${AUTH_PROVIDER_LABELS[current.provider]} 凭据，` +
+      '同步随之停止，数据只留在这台机器上（设置里的仓库地址不会丢，重新登录即可接着同步）。',
+    '退出登录',
+    { confirmButtonText: '退出登录' }
+  )
+  if (!agreed) return
 
   await auth.logout()
 }

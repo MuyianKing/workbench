@@ -187,14 +187,10 @@ function installActive(): void {
       </div>
     </template>
 
-    <SkillCreateDialog v-model:open="createOpen" />
-    <SkillImportDialog v-model:open="importOpen" />
-    <SkillDetailDialog v-model:open="detailOpen" @install="installActive" />
-    <SkillInstallDialog
-      v-model:open="installOpen"
-      :skill-id="installId"
-      :skill-name="installName"
-    />
+    <SkillCreateDialog v-model="createOpen" />
+    <SkillImportDialog v-model="importOpen" />
+    <SkillDetailDialog v-model="detailOpen" @install="installActive" />
+    <SkillInstallDialog v-model="installOpen" :skill-id="installId" :skill-name="installName" />
   </main>
 </template>
 

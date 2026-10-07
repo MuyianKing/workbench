@@ -34,7 +34,7 @@ import {
   flattenSources,
   formatCredits,
   formatPercent,
-  formatTokens,
+  formatTokensWan,
   resolvePresetRange,
   shareByModel,
   shareBySource,
@@ -197,7 +197,7 @@ function dayHasData(models: Record<string, TokenCounters>): boolean {
 /** 一组计数在当前口径下的显示文字:token 走数量级短写法,额度走小数 */
 function formatCounters(counters: TokenCounters): string {
   const value = amount(counters)
-  return axis.value === 'credits' ? formatCredits(value) : formatTokens(value)
+  return axis.value === 'credits' ? formatCredits(value) : formatTokensWan(value)
 }
 
 /**
@@ -573,10 +573,10 @@ function detailWidth(value: number, max: number): string {
                 <p class="token-tip__title">{{ bucket.label }}</p>
                 <template v-if="showModels">
                   <p>
-                    输入：{{ formatTokens(bucket.counters.cacheReadTokens) }}/{{ formatTokens(inputTotal(bucket.counters)) }}/{{ hitRateLabel(bucket.counters) }}
+                    输入：{{ formatTokensWan(bucket.counters.cacheReadTokens) }}/{{ formatTokensWan(inputTotal(bucket.counters)) }}/{{ hitRateLabel(bucket.counters) }}
                   </p>
-                  <p>输出：{{ formatTokens(bucket.counters.outputTokens) }}</p>
-                  <p>思考：{{ formatTokens(bucket.counters.reasoningTokens) }}</p>
+                  <p>输出：{{ formatTokensWan(bucket.counters.outputTokens) }}</p>
+                  <p>思考：{{ formatTokensWan(bucket.counters.reasoningTokens) }}</p>
                 </template>
                 <p v-else>额度：{{ formatCredits(bucket.counters.credits) }}</p>
                 <p>请求：{{ bucket.counters.requests }} 次</p>
@@ -632,7 +632,7 @@ function detailWidth(value: number, max: number): string {
                 <i :style="{ width: detailWidth(row.value, totalTokens(m.counters)) }" />
               </span>
               <span class="detail__pct mono">{{ formatPercent(row.value, totalTokens(m.counters)) }}</span>
-              <b class="detail__val mono">{{ formatTokens(row.value) }}</b>
+              <b class="detail__val mono">{{ formatTokensWan(row.value) }}</b>
             </div>
             <div class="detail__foot">
               请求 {{ m.counters.requests }} 次 · 缓存命中率 {{ hitRateLabel(m.counters) }}
@@ -672,7 +672,7 @@ function detailWidth(value: number, max: number): string {
                 <i :style="{ width: detailWidth(totalTokens(tm.counters), totalTokens(expandedToolModels[0]?.counters ?? emptyCounters())) }" />
               </span>
               <span class="detail__pct mono">{{ formatPercent(totalTokens(tm.counters), totalTokens(s.counters)) }}</span>
-              <b class="detail__val mono">{{ formatTokens(totalTokens(tm.counters)) }}</b>
+              <b class="detail__val mono">{{ formatTokensWan(totalTokens(tm.counters)) }}</b>
             </div>
             <div class="detail__foot">
               请求 {{ s.counters.requests }} 次 · 缓存命中率 {{ hitRateLabel(s.counters) }}

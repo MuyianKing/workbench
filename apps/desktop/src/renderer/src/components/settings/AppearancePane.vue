@@ -11,7 +11,6 @@
  * （纯本地读，不联网），用户很可能刚从首页点过同步按钮再进来。
  */
 import { computed, ref, watch } from 'vue'
-import { ElMessageBox } from 'element-plus'
 import { CircleClose, Picture } from '@element-plus/icons-vue'
 import { ACCENT_PRESETS, type AccentInkMode } from '@workbench/appearance'
 import { CARD_GAP_MAX, CARD_GAP_MIN } from '@workbench/appearance'
@@ -23,6 +22,7 @@ import { builtinIdOf } from '@workbench/appearance'
 import { CARD_OPACITY_MAX, CARD_OPACITY_MIN } from '@workbench/appearance'
 import { formatRelative } from '@/format'
 import { useSettingsStore } from '@/stores/settings'
+import { confirmAction } from '@/notify'
 import type { SyncDeviceInfo, ThemeSource, TopBarStyle } from '@/types'
 import type { ThemeOrigin } from '@/theme-transition'
 
@@ -109,16 +109,13 @@ const accentLabel = computed(() =>
  * 确认之后由 store 走既有的 updateThemeConfig 通道落盘，界面上不需要另做刷新。
  */
 async function applyAppearance(device: SyncDeviceInfo): Promise<void> {
-  try {
-    await ElMessageBox.confirm(
-      `把本机的外观与首页布局换成「${device.name}」那一套？本机现在这份仍然留在仓库里，随时可以再取回来。` +
-        '对方若用的是它本机上的图片作背景，这边读不出来，需要重新选一张。',
-      '应用外观配置',
-      { type: 'warning', confirmButtonText: '应用', cancelButtonText: '取消' }
-    )
-  } catch {
-    return
-  }
+  const agreed = await confirmAction(
+    `把本机的外观与首页布局换成「${device.name}」那一套？本机现在这份仍然留在仓库里，随时可以再取回来。` +
+      '对方若用的是它本机上的图片作背景，这边读不出来，需要重新选一张。',
+    '应用外观配置',
+    { confirmButtonText: '应用' }
+  )
+  if (!agreed) return
   await settings.applySyncAppearance(device.id)
 }
 

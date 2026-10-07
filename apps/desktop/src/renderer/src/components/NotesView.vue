@@ -33,6 +33,7 @@ import { confirmAction } from '@/notify'
 import { useNotesStore } from '@/stores/notes'
 import { useSettingsStore } from '@/stores/settings'
 import NoteTree from '@/components/NoteTree.vue'
+import SideLoadError from '@/components/SideLoadError.vue'
 import PanelLoading from '@/components/PanelLoading.vue'
 import NoteEditor from '@/components/NoteEditor.vue'
 import NoteNameDialog from '@/components/NoteNameDialog.vue'
@@ -296,13 +297,12 @@ function syncDoneText(summary: NoteSyncSummary): string {
     <div v-else class="notes__body" :style="bodyStyle">
       <aside class="notes__side panel">
         <!-- 读不出来：把原因说出来并给一次重试，不能显示成「这个文件夹里什么都没有」 -->
-        <template v-if="store.loadError">
-          <p class="notes__error">{{ store.loadError }}</p>
-          <div class="notes__error-actions">
-            <el-button size="small" @click="store.reload()">重试</el-button>
-            <el-button size="small" @click="chooseFolder">换一个文件夹</el-button>
-          </div>
-        </template>
+        <SideLoadError
+          v-if="store.loadError"
+          :error="store.loadError"
+          @retry="store.reload()"
+          @relocate="chooseFolder"
+        />
 
         <NoteTree
           v-else
@@ -479,17 +479,6 @@ function syncDoneText(summary: NoteSyncSummary): string {
 
 .notes__side {
   min-height: 0;
-}
-
-.notes__error {
-  margin: 0;
-  font-size: var(--fs-meta);
-  color: var(--ink-2);
-}
-
-.notes__error-actions {
-  display: flex;
-  gap: var(--sp-2);
 }
 
 .notes__editor {

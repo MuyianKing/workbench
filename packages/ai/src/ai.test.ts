@@ -26,7 +26,7 @@ import {
   builtinModelMeta,
   confirmFrame,
   formatDuration,
-  formatTokens,
+  formatTokensShort,
   formatUsageSummary,
   inferModelMeta,
   nodeSatisfiesPi,
@@ -1006,10 +1006,10 @@ describe('事件流的读法', () => {
   })
 
   it('token 数的念法与这一轮的消耗摘要（输入含缓存读写，输出单列）', () => {
-    expect(formatTokens(876)).toBe('876')
-    expect(formatTokens(1534)).toBe('1.5k')
-    expect(formatTokens(45_200)).toBe('45k')
-    expect(formatTokens(1_234_567)).toBe('1.2m')
+    expect(formatTokensShort(876)).toBe('876')
+    expect(formatTokensShort(1534)).toBe('1.5k')
+    expect(formatTokensShort(45_200)).toBe('45k')
+    expect(formatTokensShort(1_234_567)).toBe('1.2m')
 
     expect(
       formatUsageSummary({ input: 1000, output: 1534, cacheRead: 56_000, cacheWrite: 6_000 })

@@ -49,12 +49,16 @@ import {
 } from '@workbench/appearance'
 import { clampFontSize, clampPadding } from '@workbench/appearance'
 
-const props = defineProps<{ open: boolean; design: DesignStyle | null }>()
-const emit = defineEmits<{ (event: 'update:open', value: boolean): void }>()
+/** 弹层开关:v-model 一条口径(与 AppDialog / el-dialog 相同,全应用的弹层都这么开) */
+const open = defineModel<boolean>({ required: true })
+
+const props = defineProps<{ design: DesignStyle | null }>()
 
 const visible = computed({
-  get: () => props.open,
-  set: (value) => emit('update:open', value)
+  get: () => open.value,
+  set: (value) => {
+    open.value = value
+  }
 })
 
 /** 打开、或换成另一套设计时回到「预览」档 —— 每次点开都先看页面 */
@@ -63,12 +67,9 @@ const viewOptions = [
   { label: '预览', value: 'preview' as const },
   { label: '规格', value: 'spec' as const }
 ]
-watch(
-  () => [props.open, props.design],
-  () => {
-    view.value = 'preview'
-  }
-)
+watch([open, () => props.design], () => {
+  view.value = 'preview'
+})
 
 /** 「应用到项目」的二级弹层；详情弹窗不关，回来还是这一档 */
 const applyOpen = ref(false)
@@ -401,7 +402,7 @@ const canvas = computed(() => props.design?.canvas ?? '')
   </AppDialog>
 
   <!-- 二级弹层：选一个项目，把规范写进去 + 提示词进剪贴板（详情弹窗不关，用户回来还能看规格） -->
-  <StyleApplyDialog v-model:open="applyOpen" :design="design" />
+  <StyleApplyDialog v-model="applyOpen" :design="design" />
 </template>
 
 <style scoped>

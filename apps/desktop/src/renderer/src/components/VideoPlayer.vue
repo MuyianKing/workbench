@@ -19,14 +19,13 @@
  * 没有正播的视频时一个键都不拦。
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { CaretBottom, Check, Close, Monitor } from '@element-plus/icons-vue'
+import { Close, Monitor } from '@element-plus/icons-vue'
 import {
   fitVideoFloatGeometry,
   nextVideoNode,
   nextVideoRate,
   resizeVideoFloat,
   VIDEO_NEXT_SECONDS,
-  VIDEO_RATES,
   VIDEO_SEEK_SECONDS
 } from '@workbench/video'
 import type { VideoNode } from '@workbench/video'
@@ -35,6 +34,7 @@ import { useSettingsStore } from '@/stores/settings'
 import { useNavStore } from '@/stores/nav'
 import { startPointerDrag } from '@/composables/use-pointer-drag'
 import { useVideoStageHost } from '@/composables/use-video-stage'
+import VideoRateMenu from '@/components/VideoRateMenu.vue'
 
 const store = useVideoStore()
 const settings = useSettingsStore()
@@ -355,32 +355,10 @@ function closePlayer(): void {
       <header v-if="floating" class="vplayer__bar" @pointerdown="onBarDown">
         <span class="vplayer__name" :title="store.active.name">{{ store.active.name }}</span>
 
-        <el-dropdown
-          trigger="click"
-          placement="bottom-end"
-          @pointerdown.stop
-          @command="(value: number) => (store.rate = value)"
-        >
-          <button class="vplayer__rate" type="button" title="播放速率">
-            {{ store.rate }}x
-            <el-icon class="vplayer__rate-caret"><CaretBottom /></el-icon>
-          </button>
-          <template #dropdown>
-            <el-dropdown-menu>
-              <el-dropdown-item
-                v-for="value in VIDEO_RATES"
-                :key="value"
-                :command="value"
-                :class="{ 'is-current': value === store.rate }"
-              >
-                <span class="vplayer__rate-item">
-                  <el-icon v-if="value === store.rate" class="vplayer__rate-check"><Check /></el-icon>
-                  {{ value }}x
-                </span>
-              </el-dropdown-item>
-            </el-dropdown-menu>
-          </template>
-        </el-dropdown>
+        <!-- pointerdown 别冒泡到手柄条(那是拖窗口的入口),徽章自己要点得动 -->
+        <span @pointerdown.stop>
+          <VideoRateMenu :rate="store.rate" @change="(value: number) => (store.rate = value)" />
+        </span>
 
         <el-tooltip content="回到视频页" placement="bottom">
           <button class="vplayer__act" type="button" aria-label="回到视频页" @pointerdown.stop @click="backToVideoView">
@@ -497,11 +475,16 @@ function closePlayer(): void {
   gap: var(--sp-2);
   height: 32px;
   padding: 0 var(--sp-2) 0 var(--sp-3);
-  /* 手柄条是深色窗的一部分，底色比画布浮一档，看着是「窗的标题栏」而不是一块黑 */
-  background: color-mix(in srgb, var(--term-ink) 8%, var(--term-bg));
-  border-bottom: 1px solid var(--term-border);
-  cursor: move;
-  user-select: none;
+/* 手柄条是深色窗的一部分，底色比画布浮一档，看着是「窗的标题栏」而不是一块黑 */
+background: color-mix(in srgb, var(--term-ink) 8%, var(--term-bg));
+border-bottom: 1px solid var(--term-border);
+cursor: move;
+user-select: none;
+/* 速率徽章（VideoRateMenu）在这里换深色窗的这一族配色 */
+--rate-badge-border: var(--term-border);
+--rate-badge-ink: var(--term-ink);
+--rate-badge-hover-ink: var(--term-ink);
+--rate-badge-hover-bg: color-mix(in srgb, var(--term-ink) 12%, var(--term-bg));
 }
 
 .vplayer__name {
@@ -512,43 +495,6 @@ function closePlayer(): void {
   text-overflow: ellipsis;
   font-size: var(--fs-meta);
   color: var(--term-ink);
-}
-
-/* 速率徽章：与视频页头部那枚同一副样子，字色换深色窗的这一族 */
-.vplayer__rate {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  padding: 2px var(--sp-2);
-  background: transparent;
-  border: 1px solid var(--term-border);
-  border-radius: var(--r-pill);
-  font: inherit;
-  font-size: var(--fs-micro);
-  font-variant-numeric: tabular-nums;
-  color: var(--term-ink);
-  cursor: pointer;
-}
-
-.vplayer__rate:hover {
-  background: color-mix(in srgb, var(--term-ink) 12%, var(--term-bg));
-}
-
-.vplayer__rate-caret {
-  font-size: 10px;
-}
-
-.vplayer__rate-item {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-1);
-  font-variant-numeric: tabular-nums;
-}
-
-.vplayer__rate-check {
-  font-size: 12px;
-  color: var(--st-ok);
 }
 
 /* 手柄条上的图标按钮：tooltip 已给出名字，按钮本体保持安静 */
@@ -774,22 +720,6 @@ body.is-resizing-video-float .vplayer__grip::after {
 }
 
 /* 左下那枚：对角的另一枚 —— 指示线贴左缘，光标与斜线一起转向（↖↘ 的对角是 ↙↗） */
-.vplayer__grip.is-left {
-  right: auto;
-  left: 0;
-  cursor: nesw-resize;
-}
-
-.vplayer__grip.is-left::after {
-  right: auto;
-  left: 3px;
-  border-right: 0;
-  border-left: 2px solid var(--term-ink);
-  border-bottom-right-radius: 0;
-  border-bottom-left-radius: 3px;
-}
-
-/* 左下那枚：对角的另一枚 —— 指示线贴左缘，光标与斜线一起转向（↘↖ 的对角是 ↙↗） */
 .vplayer__grip.is-left {
   right: auto;
   left: 0;

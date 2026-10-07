@@ -20,6 +20,7 @@ use std::sync::OnceLock;
 use tauri::{AppHandle, Manager, WebviewWindow};
 
 use crate::design;
+use crate::fs_util;
 use crate::paths;
 use crate::store::JsonStore;
 use crate::system;
@@ -969,13 +970,7 @@ pub fn fs_is_dir(path: String) -> bool {
 /// 文件的最后修改时间（毫秒）。图标缓存靠它判断「程序升级换了图标」而失效。
 #[tauri::command(async)]
 pub fn fs_stat_mtime(path: String) -> Option<u64> {
-    std::fs::metadata(&path)
-        .ok()?
-        .modified()
-        .ok()?
-        .duration_since(std::time::UNIX_EPOCH)
-        .ok()
-        .map(|elapsed| elapsed.as_millis() as u64)
+    std::fs::metadata(&path).ok().map(|meta| fs_util::modified_ms(&meta))
 }
 
 /// 列目录：只回元数据，怎么用由渲染层决定
@@ -989,12 +984,7 @@ pub fn fs_list_dir(path: String) -> Result<Vec<Value>, String> {
             Ok(meta) => meta,
             Err(_) => continue,
         };
-        let mtime_ms = meta
-            .modified()
-            .ok()
-            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
-            .map(|dur| dur.as_millis() as u64)
-            .unwrap_or(0);
+        let mtime_ms = fs_util::modified_ms(&meta);
 
         out.push(json!({
             "name": entry.file_name().to_string_lossy(),

@@ -15,10 +15,11 @@
  * 应用全局已关掉 WebView2 的默认右键菜单（main.rs 的初始化脚本），这里的
  * `@contextmenu.prevent` 只是兜住事件冒泡。
  */
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import type { Component } from 'vue'
 import { CircleCheck, Delete, Finished, Flag, Hide, View } from '@element-plus/icons-vue'
 import { useFloatingDismiss } from '@/composables/use-floating-dismiss'
+import { useFloatingPosition } from '@/composables/use-floating-position'
 
 const props = defineProps<{
   /** 打开的位置，视口坐标（取自 contextmenu 的 clientX / clientY） */
@@ -67,23 +68,15 @@ const items = computed(() => [
   { name: 'delete' as const, label: '删除邮件', icon: Delete as Component, danger: true, sep: props.pickedCount === 0 }
 ])
 
-/** 离窗口边缘留出的空当：贴着边看着像被裁掉了一角 */
-const EDGE = 6
-
 const panel = ref<HTMLDivElement | null>(null)
-/** 夹回窗口之后的落点 */
-const pos = ref({ left: props.x, top: props.y })
 
-/** 贴指针摆好，并把整块夹进窗口 */
-function place(): void {
-  const element = panel.value
-  if (!element) return
-  const { width, height } = element.getBoundingClientRect()
-  pos.value = {
-    left: Math.max(EDGE, Math.min(props.x, window.innerWidth - width - EDGE)),
-    top: Math.max(EDGE, Math.min(props.y, window.innerHeight - height - EDGE))
-  }
-}
+// 落点骨架（贴指针 + 夹回窗口）在 composables 里，与笔记正文、目录树空白区共用
+const { pos, place } = useFloatingPosition({
+  x: () => props.x,
+  y: () => props.y,
+  panel: () => panel.value,
+  follow: true
+})
 
 type MenuAct = 'bulk' | 'toggle-seen' | 'multi-pick' | 'multi-delete' | 'delete'
 
@@ -96,9 +89,6 @@ function pick(name: MenuAct): void {
 useFloatingDismiss({ panel: () => panel.value, onDismiss: () => emit('close') })
 
 onMounted(place)
-
-// 同一行上换个地方右击：面板沿用同一个实例，重算一次落点即可，不必重建
-watch(() => [props.x, props.y], place)
 </script>
 
 <template>

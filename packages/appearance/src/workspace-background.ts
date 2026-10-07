@@ -5,6 +5,7 @@
  * （拖动浓淡滑块时）必须用同一套边界：百分比一旦越界，蒙版就会算出一个负的 alpha，
  * 把首页留白的对比度整个打穿。
  */
+import { sanitizeHexColor } from '@workbench/core'
 
 /** 浓淡下限：再淡就等于没设，用户会以为设置没生效 */
 export const BACKGROUND_OPACITY_MIN = 5
@@ -42,16 +43,10 @@ export function sanitizeBackgroundPath(value: unknown): string {
  * 其它一律返回空串，也就是「没配」—— 这时蒙版跟着主题的画布色走。
  * 渲染层拿它拼 CSS 变量，主进程用它收敛磁盘上的旧数据，两边必须是同一套判定，
  * 否则一个手改过的数据文件就能把 rgba() 拼成非法值、整条 background 声明作废。
+ * 校验与归一用的是 core 的 sanitizeHexColor（全项目唯一一份 hex 口径），这里只留回退语义。
  */
 export function sanitizeVeilColor(value: unknown): string {
-  if (typeof value !== 'string') return ''
-
-  const matched = /^#([0-9a-f]{3}|[0-9a-f]{6})$/.exec(value.trim().toLowerCase())
-  if (!matched) return ''
-
-  const digits = matched[1]
-  const full = digits.length === 3 ? [...digits].map((d) => d + d).join('') : digits
-  return `#${full}`
+  return sanitizeHexColor(typeof value === 'string' ? value.trim() : '') ?? ''
 }
 
 /** #rrggbb → "r, g, b"，直接喂给 CSS 的 rgba(var(--ws-veil-rgb), alpha)；没配则返回空串 */

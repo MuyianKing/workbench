@@ -11,7 +11,7 @@ import {
   flattenSources,
   formatCredits,
   formatPercent,
-  formatTokens,
+  formatTokensWan,
   isDateKey,
   maxCounters,
   mergeDays,
@@ -110,17 +110,17 @@ describe('计数运算', () => {
     expect(formatCredits(12_345)).toBe('1.2万')
   })
 
-  it('formatTokens 用中文数量级短写法,非法与非正数归零', () => {
-    expect(formatTokens(0)).toBe('0')
-    expect(formatTokens(-5)).toBe('0')
-    expect(formatTokens(NaN)).toBe('0')
-    expect(formatTokens(999)).toBe('999')
-    expect(formatTokens(4363000)).toBe('436万')
-    expect(formatTokens(12_800_000)).toBe('1280万')
-    expect(formatTokens(331_900_000)).toBe('3.32亿')
-    expect(formatTokens(692_000_000)).toBe('6.92亿')
-    expect(formatTokens(2_100_000_000)).toBe('21亿')
-    expect(formatTokens(76_000)).toBe('7.6万')
+  it('formatTokensWan 用中文数量级短写法,非法与非正数归零', () => {
+    expect(formatTokensWan(0)).toBe('0')
+    expect(formatTokensWan(-5)).toBe('0')
+    expect(formatTokensWan(NaN)).toBe('0')
+    expect(formatTokensWan(999)).toBe('999')
+    expect(formatTokensWan(4363000)).toBe('436万')
+    expect(formatTokensWan(12_800_000)).toBe('1280万')
+    expect(formatTokensWan(331_900_000)).toBe('3.32亿')
+    expect(formatTokensWan(692_000_000)).toBe('6.92亿')
+    expect(formatTokensWan(2_100_000_000)).toBe('21亿')
+    expect(formatTokensWan(76_000)).toBe('7.6万')
   })
 
   it('formatPercent 不足 1 显示 <1%,四舍五入到整数', () => {

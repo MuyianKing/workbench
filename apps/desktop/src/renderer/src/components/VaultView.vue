@@ -434,10 +434,10 @@ async function lock(): Promise<void> {
       </div>
     </template>
 
-    <VaultKeyDialog v-model:visible="keyDialog" @changed="store.refreshKey()" />
+    <VaultKeyDialog v-model="keyDialog" @changed="store.refreshKey()" />
     <VaultEntryDialog
       ref="entryDialogRef"
-      v-model:visible="entryDialog"
+      v-model="entryDialog"
       :record="editing"
       :groups="groupOptions"
       @save="save"

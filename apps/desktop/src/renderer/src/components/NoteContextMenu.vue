@@ -17,8 +17,9 @@
  *     **右键不关自己**：在正文里换个地方右击时，编辑器的 contextmenu 会紧接着在新位置重开，
  *     两件事在同一个事件里闭环，不会先消失再出现。
  */
-import { onMounted, ref, watch } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useFloatingDismiss } from '@/composables/use-floating-dismiss'
+import { useFloatingPosition } from '@/composables/use-floating-position'
 
 /** 排成图标按钮的动作：名字给 NoteEditor 认，图标是 Vditor 那套 sprite 里的 id */
 interface MenuAction {
@@ -45,8 +46,6 @@ const emit = defineEmits<{
   close: []
 }>()
 
-/** 离窗口边缘留出的空当：贴着边看着像被裁掉了一角 */
-const EDGE = 6
 /** 子菜单的宽度（含中间那道「桥」），与样式里的 min-width 对齐；用来判断往右开还放不放得下 */
 const SUBMENU_WIDTH = 158
 
@@ -102,22 +101,23 @@ const SUBMENUS: { label: string; items: MenuRow[] }[] = [
 ]
 
 const panel = ref<HTMLDivElement | null>(null)
-/** 夹回窗口之后的落点 */
-const pos = ref({ left: props.x, top: props.y })
 /** 子菜单往左开 */
 const flip = ref(false)
 
-/** 贴指针摆好，并把整块夹进窗口；子菜单要往哪边开也在这里定 */
-function place(): void {
-  const element = panel.value
-  if (!element) return
-
-  const { width, height } = element.getBoundingClientRect()
-  const left = Math.min(props.x, window.innerWidth - width - EDGE)
-  const top = Math.min(props.y, window.innerHeight - height - EDGE)
-  pos.value = { left: Math.max(EDGE, left), top: Math.max(EDGE, top) }
-  flip.value = pos.value.left + width + SUBMENU_WIDTH > window.innerWidth
-}
+// 落点骨架（贴指针 + 夹回窗口）在 composables 里，与邮件清单行、目录树空白区共用；
+// 子菜单要往哪边开是这份菜单自己的事，挂在 onPlaced 里跟着每次重摆一起算
+const { pos, place } = useFloatingPosition({
+  x: () => props.x,
+  y: () => props.y,
+  panel: () => panel.value,
+  follow: true,
+  onPlaced: () => {
+    const element = panel.value
+    if (!element) return
+    flip.value =
+      pos.value.left + element.getBoundingClientRect().width + SUBMENU_WIDTH > window.innerWidth
+  }
+})
 
 function pick(name: string): void {
   emit('act', name)
@@ -128,9 +128,6 @@ function pick(name: string): void {
 useFloatingDismiss({ panel: () => panel.value, onDismiss: () => emit('close') })
 
 onMounted(place)
-
-// 在正文里换个地方右击：面板沿用同一个实例，重算一次落点即可，不必重建
-watch(() => [props.x, props.y], place)
 </script>
 
 <template>

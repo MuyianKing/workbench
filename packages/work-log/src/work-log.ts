@@ -12,8 +12,7 @@
  * 同日之内的先后由 `createdAt` 决定，界面上按时间倒序排。
  */
 
-import { addDays, dayKey, startOfDay } from '@workbench/core'
-import { isDateKey } from '@workbench/usage'
+import { addDays, dayKey, isDateKey, startOfDay } from '@workbench/core'
 
 /** 文件口径版本。只在本机流转，不参与跨设备合并，所以版本只用来标记格式 */
 export const WORK_LOG_VERSION = 1

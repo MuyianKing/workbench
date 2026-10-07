@@ -12,8 +12,10 @@ import { confirmAction, notifyError, notifySuccess } from '@/notify'
 import { useProjectsStore } from '@/stores/projects'
 import { useSkillsStore } from '@/stores/skills'
 
-const props = defineProps<{ open: boolean; skillId: string; skillName: string }>()
-const emit = defineEmits<{ (event: 'update:open', value: boolean): void }>()
+/** 弹层开关:v-model 一条口径(与 AppDialog / el-dialog 相同,全应用的弹层都这么开) */
+const open = defineModel<boolean>({ required: true })
+
+const props = defineProps<{ skillId: string; skillName: string }>()
 
 const projects = useProjectsStore()
 const store = useSkillsStore()
@@ -22,19 +24,18 @@ const selectedId = ref('')
 const installing = ref(false)
 
 const visible = computed({
-  get: () => props.open,
-  set: (value) => emit('update:open', value)
+  get: () => open.value,
+  set: (value) => {
+    open.value = value
+  }
 })
 
-watch(
-  () => props.open,
-  (value) => {
-    if (value) {
-      selectedId.value = ''
-      installing.value = false
-    }
+watch(open, (value) => {
+  if (value) {
+    selectedId.value = ''
+    installing.value = false
   }
-)
+})
 
 async function submit(): Promise<void> {
   const project = projects.projects.find((item) => item.id === selectedId.value)

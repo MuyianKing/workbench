@@ -8,7 +8,8 @@
   },
   "dependencies": {
     "@workbench/notes": "workspace:*",
-    "@workbench/skills": "workspace:*"
+    "@workbench/skills": "workspace:*",
+    "@workbench/terminal": "workspace:*"
   },
   "devDependencies": {
     "vitest": "^5.0.3"

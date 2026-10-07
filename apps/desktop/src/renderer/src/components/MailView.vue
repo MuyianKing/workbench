@@ -528,19 +528,7 @@ const bodyStyle = computed(() => ({
   padding: var(--sp-3);
 }
 
-/* 表头直接贴着清单（.panel 的 gap 在这一栏归零，与 AI 页同一套） */
-.side__head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--sp-2);
-  flex-shrink: 0;
-}
-
-.side__title {
-  color: var(--ink-2);
-  font-size: var(--fs-meta);
-}
+/* .side__head / .side__title / .side__foot 收在 global.css（与 AI 页左栏共用） */
 
 .side__refresh {
   width: 24px;
@@ -788,18 +776,6 @@ const bodyStyle = computed(() => ({
     transform: scaleX(1);
     opacity: 0.1;
   }
-}
-
-/** 左栏底部一行：账户与写邮件（与 AI 页左栏底部同一套做法） */
-.side__foot {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--sp-2);
-  flex-shrink: 0;
-  margin-top: var(--sp-3);
-  padding-top: var(--sp-2);
-  border-top: 1px solid var(--border);
 }
 
 .side__account,

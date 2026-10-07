@@ -37,6 +37,7 @@ import {
   type NoteNode
 } from '@workbench/notes'
 import { useFloatingDismiss } from '@/composables/use-floating-dismiss'
+import { useFloatingPosition } from '@/composables/use-floating-position'
 
 /** 树容器：把选中项滚进视野时要在这里面找它那一行 */
 const treeRoot = ref<HTMLDivElement | null>(null)
@@ -183,13 +184,17 @@ const ROOT_ITEMS: { command: string; label: string; icon: Component }[] = [
   { command: 'new-folder', label: '新建文件夹', icon: FolderAdd }
 ]
 
-/** 离窗口边缘留出的空当：贴着边看着像被裁掉了一角 */
-const EDGE = 6
-
 const rootMenuOpen = ref(false)
 const rootPanel = ref<HTMLDivElement | null>(null)
-/** 夹回窗口之后的落点 */
-const rootPos = ref({ left: 0, top: 0 })
+/** 右击落下的位置；面板渲染要一帧，place() 量完尺寸才夹回窗口 */
+const rootPoint = ref({ x: 0, y: 0 })
+
+// 落点骨架（贴指针 + 夹回窗口）在 composables 里，与笔记正文、邮件清单行的菜单共用
+const { pos: rootPos, place: placeRootMenu } = useFloatingPosition({
+  x: () => rootPoint.value.x,
+  y: () => rootPoint.value.y,
+  panel: () => rootPanel.value
+})
 
 /**
  * 空白区（树下面那片没有节点的地方）右键：菜单里的新建落在根目录。
@@ -200,20 +205,13 @@ async function openRootMenu(event: MouseEvent): Promise<void> {
   const target = event.target as HTMLElement | null
   if (target?.closest('.el-tree-node__content')) return
 
-  const point = { x: event.clientX, y: event.clientY }
+  rootPoint.value = { x: event.clientX, y: event.clientY }
   rootMenuOpen.value = true
-  rootPos.value = { left: point.x, top: point.y }
+  rootPos.value = { left: rootPoint.value.x, top: rootPoint.value.y }
 
   // 面板是刚渲染出来的，量完尺寸再夹回窗口内
   await nextTick()
-  const element = rootPanel.value
-  if (!element) return
-
-  const { width, height } = element.getBoundingClientRect()
-  rootPos.value = {
-    left: Math.max(EDGE, Math.min(point.x, window.innerWidth - width - EDGE)),
-    top: Math.max(EDGE, Math.min(point.y, window.innerHeight - height - EDGE))
-  }
+  placeRootMenu()
 }
 
 function runRootCommand(command: string): void {

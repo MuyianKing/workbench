@@ -26,7 +26,13 @@
  * 日期一律本地时区(与活跃度图同一约定);周按周一起始,月按自然月。
  */
 
-import { addDays, dayKey } from '@workbench/core'
+import { addDays, dayKey, isDateKey } from '@workbench/core'
+
+/**
+ * 日期键的判定只有 core 那一份（与活跃度、工作日志同一条 YYYY-MM-DD）；
+ * 这里按原样再导出 —— 这条口径的老引用都从 @workbench/usage 拿，不用跟着改。
+ */
+export { isDateKey } from '@workbench/core'
 
 /** 接入来源:ZCode(读它的 ~/.zcode/cli/db/db.sqlite) */
 export const ZCODE_SOURCE_ID = 'zcode'
@@ -195,12 +201,6 @@ export const TOKEN_DATA_VERSION = 7
 
 /** 能安全读进来的版本:这几版之间的逐日计数口径相同,多带一份外观、或是把外观搬走都不改变计数 */
 export const TOKEN_DATA_COMPATIBLE_VERSIONS: readonly number[] = [3, 4, 5, 6, 7]
-
-const DATE_KEY = /^\d{4}-\d{2}-\d{2}$/
-
-export function isDateKey(value: unknown): value is string {
-  return typeof value === 'string' && DATE_KEY.test(value)
-}
 
 export function emptyCounters(): TokenCounters {
   return {
@@ -785,8 +785,13 @@ function trimZeroes(text: string): string {
   return text.replace(/\.0+$/, '').replace(/(\.\d)0$/, '$1')
 }
 
-/** token 数的中文数量级短写法:6.92亿 / 4380万 / 7.6万;非法与非正数归零 */
-export function formatTokens(value: number): string {
+/**
+ * token 数的中文数量级短写法：6.92亿 / 4380万 / 7.6万；非法与非正数归零。
+ *
+ * 名字带 Wan 是跟 AI 助手收据那套千进制（k / m，见 @workbench/ai 的 formatTokensShort）
+ * 分开 —— 两边都叫 formatTokens 的话，import 的人只能靠猜。
+ */
+export function formatTokensWan(value: number): string {
   const n = Number(value)
   if (!Number.isFinite(n) || n <= 0) return '0'
   const trim = (v: number): string => {

@@ -13,7 +13,7 @@
  * 一切都是纯函数（扫描结果进、问题清单出）：没有 IO，也不知道 store 的存在。
  */
 import { KB_DIR, KB_RAW_DIR, type KbEntryMeta, type KbScanEntry } from './kb'
-import { markdownLinks } from '@workbench/core'
+import { isDateKey, markdownLinks } from '@workbench/core'
 
 /** 巡检的问题分类；界面上的说法在 KB_ISSUE_LABELS */
 export type KbIssueKind = 'orphan' | 'link' | 'meta' | 'source' | 'topic'
@@ -118,8 +118,6 @@ export function resolveKbLink(fromRel: string, href: string): string | null {
 
 /** 主题目录：`NN-主题名`（两位序号 + 名字），与条目格式规范、清洗提示词同一口径 */
 const TOPIC_DIR = /^\d{2}-.+$/
-/** 必填的两处日期：仓库自己的写法就是 `YYYY-MM-DD` */
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/
 /** 导航页的文件名：主题总览（README.md）只是那个主题的入口 */
 const NAV_NAME = 'readme.md'
 
@@ -198,10 +196,10 @@ export function kbLint(entries: KbEntryMeta[], files: KbScanEntry[]): KbIssue[] 
       if (!entry.status) {
         found.meta.push({ kind: 'meta', rel: entry.rel, text: '没有 status' })
       }
-      if (!ISO_DATE.test(entry.created)) {
+      if (!isDateKey(entry.created)) {
         found.meta.push({ kind: 'meta', rel: entry.rel, text: `created 不是 YYYY-MM-DD：${entry.created || '（空）'}` })
       }
-      if (!ISO_DATE.test(entry.updated)) {
+      if (!isDateKey(entry.updated)) {
         found.meta.push({ kind: 'meta', rel: entry.rel, text: `updated 不是 YYYY-MM-DD：${entry.updated || '（空）'}` })
       }
     }

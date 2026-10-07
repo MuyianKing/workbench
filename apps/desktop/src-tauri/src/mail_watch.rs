@@ -23,6 +23,7 @@ use serde_json::json;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::mail::{self, MailSummary};
+use crate::fs_util;
 use crate::{notify, paths};
 
 /// 轮询周期的下限（分钟）：每一轮都是一条全新的 IMAP 连接，再密就是在给服务器找麻烦。
@@ -104,9 +105,8 @@ impl WatchState {
         if let Some(parent) = path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        // 与 store.rs 同一个写法：临时文件 + rename，不会留下半个 JSON
-        let tmp = path.with_extension("json.tmp");
-        if let Err(err) = std::fs::write(&tmp, text).and_then(|_| std::fs::rename(&tmp, &path)) {
+        // 与 store.rs 同一个写法：临时文件 + rename，不会留下半个 JSON（实现归 fs_util）
+        if let Err(err) = fs_util::write_atomic(&path, text.as_bytes()) {
             eprintln!("[workbench] 邮件监视进度落盘失败: {err}");
         }
     }

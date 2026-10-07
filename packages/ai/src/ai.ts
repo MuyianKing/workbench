@@ -8,6 +8,7 @@
  * 命令少一个开关、RPC 帧认错一个字段，都是几行单测就能钉住的事。
  */
 import { noteRootName, sanitizeNoteRoot } from '@workbench/notes'
+import { stripAnsi } from '@workbench/terminal'
 import { AI_BUILTIN_MODELS, type AiBuiltinModelEntry } from './ai-builtin-models.generated'
 
 /**
@@ -1102,9 +1103,9 @@ export interface AiLogLine {
   detail?: string
 }
 
-/** 去掉控制序列：终端那套清理是给整行用的，这里只清要展示的文本 */
+/** 去掉控制序列：终端那套清理是给整行用的，这里只清要展示的文本（OSC 之类的序列它也一并剥掉） */
 function clean(text: string): string {
-  return text.replace(/\u001b\[[0-9;?]*[ -/]*[@-~]/g, '').trim()
+  return stripAnsi(text).trim()
 }
 
 /** 多行原文的头一句：错误行是窄行注脚，全文另收在 `detail` 里（见 failureLine） */
@@ -1271,6 +1272,26 @@ function num(value: unknown): number | null {
 }
 
 /**
+ * 一行输出 → JSON 对象：五条「一行 JSONL」的解析（parsePiEvent / parsePiDelta / parsePiUsage /
+ * parsePiResponse / parsePiConfirm）共用的前置 —— trim 之后 JSON.parse，且必须是对象。
+ * 不是合法 JSON、或解析出来不是对象（数组、字符串、数字、null）都返回 null，各自再按
+ * 自己关心的事件类型去筛。**这里不先看首字符**：合法 JSON 但不是对象的行要走到 type 判断
+ * 才能确定去留，提前拦会改变 parsePiEvent 对「原样保留的行」的判定。
+ */
+function parseJsonObject(rawLine: string): Record<string, unknown> | null {
+  const line = rawLine.trim()
+  if (!line) return null
+
+  try {
+    const parsed: unknown = JSON.parse(line)
+    if (!parsed || typeof parsed !== 'object') return null
+    return parsed as Record<string, unknown>
+  } catch {
+    return null
+  }
+}
+
+/**
  * 一行 JSONL 事件 → 界面上新起的那一行；这一行不是 JSON、或者事件类型不关心时返回 null。
  *
  * 只认几种有信息量的事件（见 Pi 的 json 模式文档）：会话头、开始与结束、工具调用、
@@ -1280,15 +1301,8 @@ function num(value: unknown): number | null {
  * 反过来，非 JSON 的行（子进程的报错、npm 的输出）原样留下：那不是协议噪音，是它真的在说什么。
  */
 export function parsePiEvent(rawLine: string): AiLogLine | null {
-  const line = rawLine.trim()
-  if (!line) return null
-
-  let event: Record<string, unknown>
-  try {
-    const parsed: unknown = JSON.parse(line)
-    if (!parsed || typeof parsed !== 'object') throw new Error('not an object')
-    event = parsed as Record<string, unknown>
-  } catch {
+  const event = parseJsonObject(rawLine)
+  if (!event) {
     const text = clean(rawLine)
     // 认得出的「启动提示」丢掉（见 BENIGN_STARTUP）；其余非 JSON 的行原样留下
     if (!text || BENIGN_STARTUP.test(text)) return null
@@ -1382,17 +1396,8 @@ export interface PiDelta {
 }
 
 export function parsePiDelta(rawLine: string): PiDelta | null {
-  const line = rawLine.trim()
-  if (!line.startsWith('{')) return null
-
-  let event: Record<string, unknown>
-  try {
-    const parsed: unknown = JSON.parse(line)
-    if (!parsed || typeof parsed !== 'object') return null
-    event = parsed as Record<string, unknown>
-  } catch {
-    return null
-  }
+  const event = parseJsonObject(rawLine)
+  if (!event) return null
 
   if (str(event.type) !== 'message_update') return null
   const delta = (event.assistantMessageEvent ?? {}) as Record<string, unknown>
@@ -1433,17 +1438,8 @@ export interface AiUsage {
  * 「用时 …」旁边落一行。
  */
 export function parsePiUsage(rawLine: string): AiUsage | null {
-  const line = rawLine.trim()
-  if (!line.startsWith('{')) return null
-
-  let event: Record<string, unknown>
-  try {
-    const parsed: unknown = JSON.parse(line)
-    if (!parsed || typeof parsed !== 'object') return null
-    event = parsed as Record<string, unknown>
-  } catch {
-    return null
-  }
+  const event = parseJsonObject(rawLine)
+  if (!event) return null
 
   if (str(event.type) !== 'message_end') return null
   const message = (event.message ?? {}) as Record<string, unknown>
@@ -1469,8 +1465,11 @@ export function parsePiUsage(rawLine: string): AiUsage | null {
 /**
  * token 数怎么念（收据上那点字的量级，不是仪表盘）：一千以内给整数，一万以内给一位小数的
  * 「k」，再大取整；上百万换「m」。与模型弹窗认 `128k` 那格同一套单位（k / m 都是千进制）。
+ *
+ * 名字带 Short 是跟用量面板那套中文数量级（万 / 亿，见 @workbench/usage 的 formatTokensWan）
+ * 分开 —— 两边都叫 formatTokens 的话， import 的人只能靠猜。
  */
-export function formatTokens(value: number): string {
+export function formatTokensShort(value: number): string {
   const n = Math.max(0, Math.floor(value))
   if (n < 1000) return String(n)
   if (n < 10_000) return `${(n / 1000).toFixed(1)}k`
@@ -1485,7 +1484,7 @@ export function formatTokens(value: number): string {
 export function formatUsageSummary(usage: AiUsage): string {
   const prompt = usage.input + usage.cacheRead + usage.cacheWrite
   if (prompt === 0 && usage.output === 0) return ''
-  return `输入 ${formatTokens(prompt)} · 输出 ${formatTokens(usage.output)}`
+  return `输入 ${formatTokensShort(prompt)} · 输出 ${formatTokensShort(usage.output)}`
 }
 
 // ---------- RPC 帧 ----------
@@ -1508,17 +1507,8 @@ export interface PiResponse {
 
 /** 一行输出里那条应答帧；不是它、或认不出的返回 null（非 JSON 的行在这里也是 null） */
 export function parsePiResponse(rawLine: string): PiResponse | null {
-  const line = rawLine.trim()
-  if (!line.startsWith('{')) return null
-
-  let frame: Record<string, unknown>
-  try {
-    const parsed: unknown = JSON.parse(line)
-    if (!parsed || typeof parsed !== 'object') return null
-    frame = parsed as Record<string, unknown>
-  } catch {
-    return null
-  }
+  const frame = parseJsonObject(rawLine)
+  if (!frame) return null
 
   if (str(frame.type) !== 'response') return null
   const command = str(frame.command)
@@ -1549,17 +1539,8 @@ export interface AiConfirm {
  * 这个应用不画那些，一律当噪音丢掉）。
  */
 export function parsePiConfirm(rawLine: string): AiConfirm | null {
-  const line = rawLine.trim()
-  if (!line.startsWith('{')) return null
-
-  let frame: Record<string, unknown>
-  try {
-    const parsed: unknown = JSON.parse(line)
-    if (!parsed || typeof parsed !== 'object') return null
-    frame = parsed as Record<string, unknown>
-  } catch {
-    return null
-  }
+  const frame = parseJsonObject(rawLine)
+  if (!frame) return null
 
   if (str(frame.type) !== 'extension_ui_request') return null
   if (str(frame.method) !== 'confirm') return null

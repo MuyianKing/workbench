@@ -16,8 +16,10 @@ import { useSkillsStore } from '@/stores/skills'
 import AppDialog from '@/components/AppDialog.vue'
 import SkillCompareDialog from '@/components/SkillCompareDialog.vue'
 
-const props = defineProps<{ open: boolean; skillId: string; skillName: string }>()
-const emit = defineEmits<{ (event: 'update:open', value: boolean): void }>()
+/** 弹层开关:v-model 一条口径(与 AppDialog / el-dialog 相同,全应用的弹层都这么开) */
+const open = defineModel<boolean>({ required: true })
+
+const props = defineProps<{ skillId: string; skillName: string }>()
 
 const store = useSkillsStore()
 
@@ -35,28 +37,27 @@ const compareRel = ref(SKILL_FILE)
 const compareFiles = ref<SkillCompareFile[]>([])
 
 const visible = computed({
-  get: () => props.open,
-  set: (value) => emit('update:open', value)
+  get: () => open.value,
+  set: (value) => {
+    open.value = value
+  }
 })
 
-watch(
-  () => props.open,
-  async (value) => {
-    if (!value) return
-    commits.value = []
-    error.value = ''
-    if (!props.skillId) return
+watch(open, async (value) => {
+  if (!value) return
+  commits.value = []
+  error.value = ''
+  if (!props.skillId) return
 
-    loading.value = true
-    const result = await store.history(props.skillId)
-    loading.value = false
-    if (!result.ok || !result.data) {
-      error.value = result.error ?? '读取版本历史失败'
-      return
-    }
-    commits.value = result.data
+  loading.value = true
+  const result = await store.history(props.skillId)
+  loading.value = false
+  if (!result.ok || !result.data) {
+    error.value = result.error ?? '读取版本历史失败'
+    return
   }
-)
+  commits.value = result.data
+})
 
 /**
  * 打开某一版的对比：先把「那一版 + 现在这一份」的全部文件取回来，取到了才开弹窗
@@ -135,7 +136,7 @@ async function restoreTo(hash: string): Promise<void> {
       底下那颗按钮是「恢复到这个版本」—— 恢复完两层弹窗一起收掉。
     -->
     <SkillCompareDialog
-      v-model:open="compareOpen"
+      v-model="compareOpen"
       mode="version"
       :skill-id="skillId"
       :skill-name="skillName"

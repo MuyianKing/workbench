@@ -11,7 +11,6 @@
  * 状态文字、外部启动这类说明在悬停提示里。
  */
 import { computed, ref } from 'vue'
-import { ElMessageBox } from 'element-plus'
 import {
   Loading,
   MoreFilled,
@@ -22,6 +21,7 @@ import {
   VideoPlay
 } from '@element-plus/icons-vue'
 import { commandStatusLabel, statusTone } from '@/status'
+import { confirmAction } from '@/notify'
 import { useProjectsStore } from '@/stores/projects'
 import { useTerminalStore } from '@/stores/terminal'
 import { useCatalogStore } from '@/stores/catalog'
@@ -82,17 +82,14 @@ function onMore(item: CommandEntry, command: string): void {
 }
 
 async function remove(item: CommandEntry): Promise<void> {
-  try {
-    await ElMessageBox.confirm(
-      isRunning(item)
-        ? `「${item.name}」正在运行，删除会先停止它。确定删除？`
-        : `确定删除「${item.name}」？只是从这里移除配置，命令本身不会被卸载。`,
-      '删除命令',
-      { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' }
-    )
-  } catch {
-    return
-  }
+  const agreed = await confirmAction(
+    isRunning(item)
+      ? `「${item.name}」正在运行，删除会先停止它。确定删除？`
+      : `确定删除「${item.name}」？只是从这里移除配置，命令本身不会被卸载。`,
+    '删除命令',
+    { confirmButtonText: '删除' }
+  )
+  if (!agreed) return
   await catalog.removeCommand(item.id)
 }
 </script>

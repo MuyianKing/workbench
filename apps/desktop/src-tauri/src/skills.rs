@@ -475,11 +475,13 @@ fn read_commit_files(workspace: &Path, path: &str, hash: &str) -> Result<Vec<Val
 ///
 /// 为什么不复用 `sync::run_git`：那个函数给的是「一条命令的答案」，会把收尾空白 trim 掉 ——
 /// 对「列提交」「取提交号」正好，对「把某个版本的文件内容取回来」是致命的（末尾换行被削掉）。
-/// 技能这边的 git 调用全在本地，不需要 sync 那套凭据与全局选项（路径里的中文由 `-z` 负责，
-/// 见 `read_commit_files`）。
+/// 技能这边的 git 调用全在本地，不需要 sync 那套凭据与全局 -c 选项（路径里的中文由 `-z` 负责，
+/// 见 `read_commit_files`）；但 `GIT_TERMINAL_PROMPT=0` 照 AGENTS.md 的口径一律带上 ——
+/// 没有终端可问时挂着只会白等超时，这里不赌它永远不触发。
 fn git_stdout(workspace: &Path, args: &[&str]) -> Result<String, String> {
     let owned: Vec<String> = args.iter().map(|arg| (*arg).to_string()).collect();
-    let outcome = crate::proc::run_direct("git", &owned, GIT_TIMEOUT, Some(workspace), &[])
+    let envs = [("GIT_TERMINAL_PROMPT", "0")];
+    let outcome = crate::proc::run_direct("git", &owned, GIT_TIMEOUT, Some(workspace), &envs)
         .map_err(|err| format!("启动 git 失败（请确认已安装 Git 并把它放在 PATH 里）: {err}"))?;
 
     if outcome.timed_out {

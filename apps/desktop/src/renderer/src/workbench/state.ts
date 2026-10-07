@@ -18,7 +18,7 @@ import {
   sanitizeSettings,
   splitSettingsPatch
 } from '@/persisted-data'
-import { bumpDay, pruneDays } from '@workbench/core'
+import { bumpDay, pruneDays, reorderById } from '@workbench/core'
 import {
   DEFAULT_THEME,
   sameThemeContent,
@@ -302,10 +302,12 @@ export function removeGroup(id: string): void {
   persist()
 }
 
-export function reorderGroups(ids: string[]): void {
-  const byId = new Map(data.groups.map((group) => [group.id, group]))
-  data.groups = ids.map((id) => byId.get(id)).filter((group): group is ProjectGroup => !!group)
+export function reorderGroups(ids: string[]): ProjectGroup[] {
+  // 与 reorderQuickApps 同一套:按 ids 排列、order 重新编号(order 是落盘的一部分,
+  // 不编号的话下次载入按 order 排序会回到旧顺序);没在 ids 里的分组追加到末尾。
+  data.groups = reorderById(data.groups, ids).map((group, index) => ({ ...group, order: index }))
   persist()
+  return copy(data.groups)
 }
 
 // ---------- 活跃度 ----------
@@ -385,12 +387,8 @@ export function removeQuickApp(id: string): void {
 }
 
 export function reorderQuickApps(ids: string[]): QuickApp[] {
-  const byId = new Map(data.quickApps.map((app) => [app.id, app]))
-  data.quickApps = ids
-    .map((id) => byId.get(id))
-    .filter((app): app is QuickApp => !!app)
-    // order 是落盘的一部分，重排后必须重新编号，否则下次载入顺序又回到旧值
-    .map((app, index) => ({ ...app, order: index }))
+  // order 是落盘的一部分，重排后必须重新编号，否则下次载入顺序又回到旧值
+  data.quickApps = reorderById(data.quickApps, ids).map((app, index) => ({ ...app, order: index }))
   persist()
   return copy(data.quickApps)
 }

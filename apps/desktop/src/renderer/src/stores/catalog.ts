@@ -9,6 +9,7 @@
  */
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
+import { reorderById } from '@workbench/core'
 import type {
   CommandEntry,
   CommandInput,
@@ -158,11 +159,10 @@ export const useCatalogStore = defineStore('catalog', () => {
   /** 拖动排序：先本地生效再落盘，失败整份回滚（与分组排序同一套） */
   async function reorderQuickApps(ids: string[]): Promise<void> {
     const snapshot = quickApps.value.slice()
-    const byId = new Map(quickApps.value.map((item) => [item.id, item]))
-    quickApps.value = ids
-      .map((id) => byId.get(id))
-      .filter((item): item is QuickApp => !!item)
-      .map((item, index) => ({ ...item, order: index }))
+    quickApps.value = reorderById(quickApps.value, ids).map((item, index) => ({
+      ...item,
+      order: index
+    }))
 
     const result = await window.workbench.reorderQuickApps(ids)
     if (!result.ok || !result.data) {

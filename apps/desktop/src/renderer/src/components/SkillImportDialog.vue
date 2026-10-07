@@ -8,11 +8,12 @@
  */
 import { computed, ref, watch } from 'vue'
 import { noteNameProblem, sanitizeNoteName } from '@workbench/notes'
+import { basenameOf } from '@/format'
 import AppDialog from '@/components/AppDialog.vue'
 import { useSkillsStore } from '@/stores/skills'
 
-const props = defineProps<{ open: boolean }>()
-const emit = defineEmits<{ (event: 'update:open', value: boolean): void }>()
+/** 弹层开关:v-model 一条口径(与 AppDialog / el-dialog 相同,全应用的弹层都这么开) */
+const open = defineModel<boolean>({ required: true })
 
 const store = useSkillsStore()
 
@@ -21,19 +22,18 @@ const id = ref('')
 const submitting = ref(false)
 
 const visible = computed({
-  get: () => props.open,
-  set: (value) => emit('update:open', value)
+  get: () => open.value,
+  set: (value) => {
+    open.value = value
+  }
 })
 
-watch(
-  () => props.open,
-  (value) => {
-    if (value) {
-      sourcePath.value = ''
-      id.value = ''
-    }
+watch(open, (value) => {
+  if (value) {
+    sourcePath.value = ''
+    id.value = ''
   }
-)
+})
 
 async function pick(): Promise<void> {
   const picked = await window.workbench.pickDirectory('选择技能文件夹')
@@ -41,7 +41,7 @@ async function pick(): Promise<void> {
   sourcePath.value = picked
   if (!id.value.trim()) {
     // 名字默认取目录名：多数时候导入的就是一个已经起好名字的技能目录
-    id.value = sanitizeNoteName(picked.split(/[\\/]/).pop() ?? '')
+    id.value = sanitizeNoteName(basenameOf(picked))
   }
 }
 

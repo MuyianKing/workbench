@@ -19,12 +19,14 @@
  */
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { CaretBottom, Check, Expand, Fold, FolderOpened, Refresh, VideoPlay } from '@element-plus/icons-vue'
-import { findVideoNode, videoRootName, VIDEO_RATES, VIDEO_SEEK_SECONDS } from '@workbench/video'
+import { Expand, Fold, FolderOpened, Refresh, VideoPlay } from '@element-plus/icons-vue'
+import { findVideoNode, videoRootName, VIDEO_SEEK_SECONDS } from '@workbench/video'
 import { useVideoStore } from '@/stores/video'
 import { useSettingsStore } from '@/stores/settings'
 import { setVideoStageHost } from '@/composables/use-video-stage'
 import VideoTree from '@/components/VideoTree.vue'
+import VideoRateMenu from '@/components/VideoRateMenu.vue'
+import SideLoadError from '@/components/SideLoadError.vue'
 import PanelLoading from '@/components/PanelLoading.vue'
 import RecentRoots from '@/components/RecentRoots.vue'
 import PanelResizer from '@/components/PanelResizer.vue'
@@ -134,13 +136,12 @@ function openRecentRoot(dir: string): void {
     <div v-else class="video__body" :style="treeWidthStyle">
       <aside class="video__side panel" :class="{ 'is-collapsed': treeCollapsed }">
         <!-- 读不出来：把原因说出来并给一次重试，不能显示成「这个文件夹里什么都没有」 -->
-        <template v-if="store.loadError">
-          <p class="video__error">{{ store.loadError }}</p>
-          <div class="video__error-actions">
-            <el-button size="small" @click="store.reload()">重试</el-button>
-            <el-button size="small" @click="chooseFolder">换一个文件夹</el-button>
-          </div>
-        </template>
+        <SideLoadError
+          v-if="store.loadError"
+          :error="store.loadError"
+          @retry="store.reload()"
+          @relocate="chooseFolder"
+        />
 
         <VideoTree
           v-else
@@ -211,34 +212,13 @@ function openRecentRoot(dir: string): void {
 
           <span class="video__spacer" />
 
-          <!-- 速率：与快捷键 ↑↓ 共用同一份档位表（shared/video.ts 的 VIDEO_RATES）；
-               值住在 store 里 —— 悬浮小窗（VideoPlayer）与这里是同一份，两处改的是同一个 -->
-          <el-dropdown
+          <!-- 速率：档位表住在 VideoRateMenu（与悬浮小窗共用一枚），值住在 store 里 -->
+          <VideoRateMenu
             v-if="store.active"
-            trigger="click"
-            placement="bottom-end"
-            @command="(value: number) => (store.rate = value)"
-          >
-            <button class="video__rate" type="button" title="播放速率（快捷键 ↑ / ↓）">
-              {{ store.rate }}x
-              <el-icon class="video__rate-caret"><CaretBottom /></el-icon>
-            </button>
-            <template #dropdown>
-              <el-dropdown-menu>
-                <el-dropdown-item
-                  v-for="value in VIDEO_RATES"
-                  :key="value"
-                  :command="value"
-                  :class="{ 'is-current': value === store.rate }"
-                >
-                  <span class="video__rate-item">
-                    <el-icon v-if="value === store.rate" class="video__rate-check"><Check /></el-icon>
-                    {{ value }}x
-                  </span>
-                </el-dropdown-item>
-              </el-dropdown-menu>
-            </template>
-          </el-dropdown>
+            :rate="store.rate"
+            title="播放速率（快捷键 ↑ / ↓）"
+            @change="(value: number) => (store.rate = value)"
+          />
         </header>
 
         <!-- 播放画布：始终深色（与终端面板同一族令牌），视频居中、按比例缩进画布里 -->
@@ -386,20 +366,9 @@ function openRecentRoot(dir: string): void {
     visibility 0s 0.2s;
 }
 
-.video__error {
-  margin: 0;
-  font-size: var(--fs-meta);
-  color: var(--ink-2);
-}
-
 /* 拖动期间别让 0.2s 的宽度过渡跟手作对：每一帧都在改目标值，过渡只会让它拖泥带水 */
 body.is-resizing-video-tree .video__side {
   transition: none;
-}
-
-.video__error-actions {
-  display: flex;
-  gap: var(--sp-2);
 }
 
 /* ---------- 右栏：播放器 ---------- */
@@ -451,44 +420,6 @@ body.is-resizing-video-tree .video__side {
   height: 24px;
   padding: 0 4px;
   margin-right: var(--sp-1);
-}
-
-/* 速率按钮：一枚安静的小徽章，不与标题抢注意力 */
-.video__rate {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  padding: 2px var(--sp-2);
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: var(--r-pill);
-  font: inherit;
-  font-size: var(--fs-micro);
-  font-variant-numeric: tabular-nums;
-  color: var(--ink-2);
-  cursor: pointer;
-}
-
-.video__rate:hover {
-  color: var(--ink);
-  background: var(--bg-subtle);
-}
-
-.video__rate-caret {
-  font-size: 10px;
-}
-
-.video__rate-item {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-1);
-  font-variant-numeric: tabular-nums;
-}
-
-.video__rate-check {
-  font-size: 12px;
-  color: var(--st-ok);
 }
 
 /**

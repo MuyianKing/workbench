@@ -19,14 +19,16 @@ import MenuPane from './settings/MenuPane.vue'
 import GeneralPane from './settings/GeneralPane.vue'
 import AboutPane from './settings/AboutPane.vue'
 
-const props = defineProps<{ modelValue: boolean }>()
-const emit = defineEmits<{ 'update:modelValue': [value: boolean] }>()
+/** 弹层开关:v-model 一条口径(与 AppDialog / el-dialog 相同,全应用的弹层都这么开) */
+const open = defineModel<boolean>({ required: true })
 
 const settings = useSettingsStore()
 
 const visible = computed({
-  get: () => props.modelValue,
-  set: (value: boolean) => emit('update:modelValue', value)
+  get: () => open.value,
+  set: (value: boolean) => {
+    open.value = value
+  }
 })
 
 type SettingsTab = 'appearance' | 'menu' | 'general' | 'about'

@@ -18,8 +18,10 @@ import AppDialog from '@/components/AppDialog.vue'
 import MarkdownView from '@/components/MarkdownView.vue'
 import type { WorkLogEntry } from '@/types'
 
+/** 弹层开关:v-model 一条口径(与 AppDialog / el-dialog 相同,全应用的弹层都这么开) */
+const open = defineModel<boolean>({ required: true })
+
 const props = defineProps<{
-  modelValue: boolean
   /** 编辑对象；null 表示新增 */
   entry: WorkLogEntry | null
   /** 新增时的默认日期（跟随当前时间范围，例如停在「昨天」时默认记到昨天） */
@@ -27,7 +29,6 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  'update:modelValue': [value: boolean]
   /** 保存成功；页面据此把这条记录并进列表 */
   saved: [entry: WorkLogEntry]
 }>()
@@ -35,8 +36,10 @@ const emit = defineEmits<{
 const store = useProjectsStore()
 
 const visible = computed({
-  get: () => props.modelValue,
-  set: (value: boolean) => emit('update:modelValue', value)
+  get: () => open.value,
+  set: (value: boolean) => {
+    open.value = value
+  }
 })
 
 const form = reactive({
@@ -90,12 +93,9 @@ function reset(): void {
   mode.value = 'write'
 }
 
-watch(
-  () => props.modelValue,
-  (open) => {
-    if (open) reset()
-  }
-)
+watch(open, (value) => {
+  if (value) reset()
+})
 
 async function submit(): Promise<void> {
   if (!canSubmit.value) return

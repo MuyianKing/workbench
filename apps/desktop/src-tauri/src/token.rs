@@ -4,6 +4,7 @@
 //! `src/shared/token-usage.ts` 里，渲染层复用同一份实现，Rust 侧不重复第二遍。
 //! 唯一的例外是 zstd —— 浏览器没有 zstd 解码 API，DSH 的多帧解压只能留在 Rust。
 
+use crate::fs_util;
 use serde_json::{json, Value};
 use std::path::PathBuf;
 use walkdir::WalkDir;
@@ -307,11 +308,7 @@ fn qoder_sessions_in(root: &std::path::Path) -> Result<Value, String> {
 }
 
 fn modified_ms(meta: &std::fs::Metadata) -> u64 {
-    meta.modified()
-        .ok()
-        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
-        .map(|elapsed| elapsed.as_millis() as u64)
-        .unwrap_or(0)
+    fs_util::modified_ms(meta)
 }
 
 // ---------- DeepSeek Harness(~/.dsh/sessions) ----------

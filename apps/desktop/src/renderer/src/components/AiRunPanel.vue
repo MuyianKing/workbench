@@ -39,6 +39,7 @@ import { Download, Loading } from '@element-plus/icons-vue'
 import AiProcess from '@/components/AiProcess.vue'
 import MarkdownView from '@/components/MarkdownView.vue'
 import { aiTurns, visibleInstruction, type AiConfirm, type AiLogLine } from '@workbench/ai'
+import { basenameOf } from '@/format'
 
 const props = defineProps<{
   /** 程序名（设置里的那个）：跑着那一轮的过程标题拿它当主语（见 processLabel） */
@@ -82,7 +83,7 @@ function openLink(href: string): void {
 
 /** 「写下 N 个文件」那行只显示文件名，全路径在悬停里 */
 function fileNameOf(path: string): string {
-  return path.split(/[\\/]/).pop() || path
+  return basenameOf(path)
 }
 
 const scroller = ref<HTMLElement | null>(null)
