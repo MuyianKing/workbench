@@ -20,40 +20,33 @@ export interface BulkSignals {
 
 /**
  * 发件人地址的本地部分一眼就是批量发的：推广 / 营销 / 订阅这些，不含 order / service
- *  这类事务性前缀 —— 订单确认、账单通知不能误伤。
+ *  这类事务性前缀 —— 订单确认、账单通知不能误伤。裸的 `news` 也刻意不收：LinkedIn
+ *  这类正常网站的职位 / 互动通知就从 news@ 发，收了它误伤一串。
  */
-const BULK_FROM_PREFIX = /^(promo|promotions|promotion|marketing|news|newsletter|ads|advertising|ad-?campaign|offers|deals|bulletin)[\-.@]/
+const BULK_FROM_PREFIX = /^(promo|promotions|promotion|marketing|newsletter|ads|advertising|ad-?campaign|offers|deals|bulletin)[\-.@]/
 
 /**
  * 主题里的广告词。中文按包含认（这类词出现在主题里基本就是营销），英文按整词认 ——
- *  standalone 的 sale 不能把 wholesale 误伤。刻意不收「中奖 / 领取」这类个人信也可能
- *  出现的词：误伤一封真信比放过一封广告难看得多。
+ *  standalone 的 sale 不能把 wholesale 误伤。词表刻意收得窄：只留不可能出现在事务信里
+ *  的词 —— 「优惠 / 折扣 / 限时 / 优惠券 / 上新 / 红包 / 周刊」这类在续费提醒、券过期
+ *  通知、订阅的周刊标题里照样出现，收了就是一串误伤（实测翻车过一轮）。误伤一封真信
+ *  比放过一封广告难看得多，漏网的靠用户右击「标记为广告」补。
  */
 const BULK_SUBJECT_CN = [
   '促销',
-  '优惠',
-  '折扣',
-  '限时',
   '秒杀',
   '大促',
   '满减',
-  '优惠券',
-  '领券',
-  '红包',
   '返现',
-  '特惠',
   '钜惠',
   '狂欢',
-  '上新',
   '双11',
   '双十一',
   '年货节',
   '黑五',
-  '推广',
-  '周刊',
 ]
 const BULK_SUBJECT_EN
-  = /\b(newsletter|unsubscribe|promo(?:tion)?s?|deals?|discount|sale|flash\s?sale|giveaway)\b/i
+  = /\b(unsubscribe|promo(?:tion)?s?|deals?|discount|sale|flash\s?sale)\b/i
 
 /** 发件人黑名单的上限：个人邮箱攒不到这个数，只防手改数据文件塞进一大坨 */
 export const MAIL_BULK_SENDERS_MAX = 500

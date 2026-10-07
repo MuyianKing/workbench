@@ -329,16 +329,25 @@ describe('广告邮件的识别', () => {
     expect(isBulkMail({ ...base, from: 'no-reply@service.example.com' })).toBe(false)
     // 订单确认这类走 service / order 前缀 —— 不能拦
     expect(isBulkMail({ ...base, from: 'order@shop.example.com', subject: '订单已发货' })).toBe(false)
+    // 裸的 news 前缀不收：LinkedIn 这类正常通知就从 news@ 发
+    expect(isBulkMail({ ...base, from: 'LinkedIn <news@linkedin.com>', subject: '你出现了新的职位推荐' })).toBe(false)
   })
 
   it('主题里的广告词算（中文包含、英文整词）', () => {
     expect(isBulkMail({ ...base, subject: '【京东】限时秒杀 全场 5 折' })).toBe(true)
     expect(isBulkMail({ ...base, subject: '双11 狂欢节提前购' })).toBe(true)
-    expect(isBulkMail({ ...base, subject: 'Your weekly newsletter is here' })).toBe(true)
     // wholesale 不是 sale；整词匹配不误伤
     expect(isBulkMail({ ...base, subject: 'wholesale price inquiry' })).toBe(false)
     expect(isBulkMail({ ...base, subject: '周末拍的照片已修好' })).toBe(false)
     expect(isBulkMail({ ...base, subject: '关于项目排期的一封信' })).toBe(false)
+  })
+
+  it('事务信里也常见的词不收进词表：续费提醒、券过期通知、订阅的周刊不算广告', () => {
+    expect(isBulkMail({ ...base, subject: '您的会员即将到期，续费享限时优惠' })).toBe(false)
+    expect(isBulkMail({ ...base, subject: '您的优惠券还有 3 天过期' })).toBe(false)
+    expect(isBulkMail({ ...base, subject: '科技爱好者周刊（第 200 期）' })).toBe(false)
+    expect(isBulkMail({ ...base, subject: '【支付宝】红包到账通知' })).toBe(false)
+    expect(isBulkMail({ ...base, subject: 'New comment on your post' })).toBe(false)
   })
 
   it('黑名单的收敛：trim、小写、去重，认不出像地址的丢掉', () => {
