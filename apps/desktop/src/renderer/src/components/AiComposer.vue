@@ -8,8 +8,8 @@
  *
  * **贴进来的图排成一行缩略图，在输入框上面**（截图、复制的图片文件都从粘贴进来）：
  * 收下的那几张随这一句一起发出去（同一行 JSON，见 ai.rs 的 prompt_frame），角上那颗 × 删掉
- * 一张，**点一下看大图**（56px 的缩略图连截图上的字都认不出）。收在哪、发多少由 store 管
- * （`ai.images` / `addImages`），这里只把剪贴板里的图读出来
+ * 一张，**点一下看大图**（56px 的缩略图连截图上的字都认不出）。指令与图都归页面（AiView）
+ * 持有 —— 这里只把剪贴板里的图读出来、报给页面收（`add-images`）
  * —— **认不出格式的当场说清楚**（Pi 会把认不出的换成一句「图被略去」，那等于白贴）；
  * 模型看不看得见图不归这里管：贴上的图先留着，发不出去时由发送按钮的悬停说（`blocking`）。
  *
@@ -19,7 +19,9 @@
  * 全是重复的字；做成**没有边框的浅底 chip**（与位置栏那颗 `.pick__item` 同一副样子），
  * 发送是一颗**圆形实心**的箭头。**别把文字标签加回来、也别给 chip 描边**。
  *
- * 它自己读 store：说一句、换权限、换模型与换档位都是这一页的动作，归它发。**模型管理那个弹层
+ * 与 store 的分工：**说一句是报给页面**（`send` 事件，指令与图跟着走，页面转给 store 跑一轮；
+ * 「能不能发 / 还差什么」的判断也长在自己身上 —— 那两样是这条输入框自己的事，见 canRun /
+ * blocking），换权限、换模型与换档位是会话自己的配置记忆，直接写 store。**模型管理那个弹层
  * **不归它** —— 弹层挂在页面最外层，所以这里只报一声「要开配置」（技能的管理入口在左栏
  * 底部那一行，不在这条输入框上）。
  *
@@ -45,7 +47,20 @@ import { notifyWarning } from '@/notify'
 import { useAiStore } from '@/stores/ai'
 import { useAiSkillsStore } from '@/stores/ai-skills'
 
-const emit = defineEmits<{ configure: [] }>()
+const props = defineProps<{
+  /** 输入框里那句话：父级（AiView）持有 —— 换屏不丢（KeepAlive 兜着），重启不保留 */
+  instruction: string
+  /** 贴上还没发出去的图：与 instruction 同一条口径，归父级持有 */
+  images: AiImage[]
+}>()
+
+const emit = defineEmits<{
+  configure: []
+  'update:instruction': [value: string]
+  'add-images': [images: AiImage[]]
+  'remove-image': [at: number]
+  send: [text: string, images: AiImage[]]
+}>()
 
 const ai = useAiStore()
 const skillsStore = useAiSkillsStore()
@@ -76,11 +91,59 @@ function choosePermission(value: unknown): void {
   void ai.setPermission(String(value))
 }
 
-/** 那一颗按钮：没在跑就是「发送」，跑着就是「停止」 */
+/** 那一颗按钮：没在跑就是「发送」，跑着就是「停止」。发送报给页面（send），由页面转给 store */
 function sendOrStop(): void {
   if (ai.running) void ai.stop()
-  else void ai.run()
+  else emit('send', props.instruction.trim(), [...props.images])
 }
+
+/**
+ * 这条能不能发：环境那几样（Pi / Node / 模型 / 密钥）与「有没有落处」问 store，
+ * 「写没写字、贴没贴图」问自己 —— 那两样归父级持有（见 props），所以这道判断也长在这里。
+ */
+const canRun = computed(
+  () =>
+    // 有会话就说在那个会话里；还没有会话（起始那一屏）时，挑好的那个目录就是它的落处
+    (!!ai.activeSession || !!ai.newDir) &&
+    !ai.running &&
+    // 正在建那一个会话的当口不能再发（见 stores/ai.ts 的 creating）
+    !ai.creating &&
+    // 正在读回历史的那一会儿不让发：这一段的对话还没落地，发出去会把读回来的那段挤掉
+    !ai.hydrating &&
+    ai.piReady &&
+    ai.nodeOk &&
+    ai.configured &&
+    ai.keyReady &&
+    // 贴了图就得是能看图的模型：不然 Pi 会把图换成一句「图被略去」的占位发出去
+    (props.images.length === 0 || ai.imageReady) &&
+    // 一句话要么有字要么有图 —— 只有图的那句照样发得出去
+    (!!props.instruction.trim() || props.images.length > 0)
+)
+
+/**
+ * 还差什么才能跑。一次只说第一件缺的事 —— 按用户要动手的顺序排：
+ * 工作目录 → Node → Pi → 模型 → 密钥 → 指令 → 贴的图。空串表示都齐了。
+ *
+ * **它只出现在发送按钮的悬停里**：页面不摆提示行（这个工具是作者自己用的，页面上把控件
+ * 已经说清的事再讲一遍就是噪音），那颗按钮按不动时才是它该说话的时候。
+ */
+const blocking = computed(() => {
+  if (!ai.probed) return ''
+  if (!ai.activeSession && !ai.newDir)
+    return '先挑一个工作目录：位置那一栏那个下拉 —— 对话就在它里面干活，一个目录就是一个「项目」。'
+  if (ai.hydrating) return '正在接上这段对话…等它读完就能接着说。'
+  if (!ai.nodeOk) return '这台机器的 Node 太旧：跑 Pi 需要 Node ≥ 22.19，先把 Node 升上去。'
+  if (!ai.piVersion)
+    return '没找到 Pi 运行时：随包内置的那份不在（开发态先跑一次 npm run vendor:pi），PATH 上也没有全局安装的 —— 点页面上那颗「安装 Pi」全局装一个。'
+  if (!ai.configured)
+    return '还没配模型：点「模型」下拉里的「模型管理」，添加一个 AI 服务（预设厂商或自定义端点）并选上模型。'
+  if (!ai.keyReady) return `${ai.providerLabel} 还没配 API Key：点「模型」下拉里的「模型管理」。`
+  if (!props.instruction.trim() && props.images.length === 0)
+    return '还没写指令：接着这段对话说点什么。'
+  if (props.images.length > 0 && !ai.imageReady)
+    return `贴了 ${props.images.length} 张图，但「${ai.activeChoice?.name ?? '这个模型'}」看不了图：把图删掉，或者在「模型管理」里给它勾上「图片」、换一个能看图的模型。`
+  return ''
+})
 
 // ---------- 技能（输入框里那条 `/skill:名字`） ----------
 
@@ -93,7 +156,7 @@ function sendOrStop(): void {
  * 面板就在哪儿，没有定位那一套。（浮层那套见 AiLocationBar 的下拉 —— 那里是点出来的。）
  */
 const skillQuery = computed<string | null>(() => {
-  const text = ai.instruction.trimStart()
+  const text = props.instruction.trimStart()
   if (text === '/') return ''
   if (!text.startsWith(AI_SKILL_COMMAND)) return null
   const rest = text.slice(AI_SKILL_COMMAND.length)
@@ -125,7 +188,7 @@ const inputRef = ref<{ focus: () => void } | null>(null)
 
 /** 选一个：命令插到**最前面**（Pi 只在开头认它），后面留一个空格，接着写要它干什么 */
 function insertSkill(row: AiSkillRow): void {
-  ai.instruction = `${AI_SKILL_COMMAND}${row.name || row.id} `
+  emit('update:instruction', `${AI_SKILL_COMMAND}${row.name || row.id} `)
   skillIndex.value = 0
   inputRef.value?.focus()
 }
@@ -149,9 +212,9 @@ function onEnter(event: KeyboardEvent): void {
     insertSkill(skillCandidates.value[skillIndex.value] ?? skillCandidates.value[0])
     return
   }
-  if (ai.running || !ai.canRun) return
+  if (ai.running || !canRun.value) return
   event.preventDefault()
-  void ai.run()
+  emit('send', props.instruction.trim(), [...props.images])
 }
 
 /** 一个 File 读成数据 URL（读不出来、或看不出类型的回 null） */
@@ -195,11 +258,11 @@ async function onPaste(event: ClipboardEvent): Promise<void> {
 
   const read = (await Promise.all(files.map(readImage))).filter((image): image is AiImage => !!image)
   if (!read.length) return notifyWarning('这张图读不出来，换一张试试')
-  ai.addImages(read)
+  emit('add-images', read)
 }
 
 /** 贴上的那几张的数据 URL（点开看大图时左右切换用的就是这一串，顺序与缩略图一致） */
-const shotSrcs = computed(() => ai.images.map((image) => image.dataUrl))
+const shotSrcs = computed(() => props.images.map((image) => image.dataUrl))
 
 /**
  * 输入框里那句话：还没有会话时不能是「接着这段对话」—— 那会儿对话还没开始，
@@ -214,7 +277,7 @@ const placeholder = computed(() =>
 /** 发送按钮的提示：跑着时它是停止，其余时候把还差什么说清楚 */
 const sendTitle = computed(() => {
   if (ai.running) return '停掉这一轮（先让它自己停，卡住了才按进程树杀）'
-  if (!ai.canRun) return ai.blocking || '还跑不起来'
+  if (!canRun.value) return blocking.value || '还跑不起来'
   return '发送：接着这段对话说下去（Enter）'
 })
 </script>
@@ -224,8 +287,8 @@ const sendTitle = computed(() => {
     <!-- 贴进来的图：排在输入框上面，一行缩略图（角上那颗 × 删掉一张；发出去时跟着那句走）。
          **点一下看大图**（EP 的查看器：多张之间左右切、滚轮缩放、Esc 或点外面关掉）——
          缩略图只有 56px，一张截图缩到这儿是看不清的 -->
-    <div v-if="ai.images.length" class="composer__shots">
-      <div v-for="(image, index) in ai.images" :key="index" class="shot">
+    <div v-if="images.length" class="composer__shots">
+      <div v-for="(image, index) in images" :key="index" class="shot">
         <el-image
           class="shot__img"
           :src="image.dataUrl"
@@ -240,7 +303,7 @@ const sendTitle = computed(() => {
           class="shot__x"
           type="button"
           aria-label="移除这张图"
-          @click="ai.removeImage(index)"
+          @click="emit('remove-image', index)"
         >
           <el-icon><Close /></el-icon>
         </button>
@@ -271,7 +334,7 @@ const sendTitle = computed(() => {
 
     <el-input
       ref="inputRef"
-      v-model="ai.instruction"
+      :model-value="instruction"
       class="composer__input"
       type="textarea"
       resize="none"
@@ -281,6 +344,7 @@ const sendTitle = computed(() => {
       @keydown.enter.exact="onEnter"
       @keydown.down.prevent="moveSkill(1)"
       @keydown.up.prevent="moveSkill(-1)"
+      @update:model-value="(value: string) => emit('update:instruction', value)"
     />
 
     <div class="composer__row">
@@ -364,7 +428,7 @@ const sendTitle = computed(() => {
             class="composer__send"
             :type="ai.running ? 'danger' : 'primary'"
             :icon="ai.running ? VideoPause : Top"
-            :disabled="!ai.running && !ai.canRun"
+            :disabled="!ai.running && !canRun"
             @click="sendOrStop"
           />
         </el-tooltip>

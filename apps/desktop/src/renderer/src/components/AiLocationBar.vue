@@ -10,11 +10,18 @@
  *  - **起始那一屏**（还没挑中会话）：这一栏就是**挑目录**的地方 —— 下一个会话在哪儿干活，
  *    下拉里是最近用过的几个目录 + 「选择其他目录…」。挑完只是记下来，会话在发出第一句时
  *    才建（见 stores/ai.ts 的 run）。
+ *
+ * git 分支那一格是父级（AiView）探好递下来的（它自己只显示，不探）。
  */
 import { computed } from 'vue'
 import { Folder, FolderAdd, FolderOpened, Share } from '@element-plus/icons-vue'
 import { noteRootName } from '@workbench/notes'
 import { useAiStore } from '@/stores/ai'
+
+const props = defineProps<{
+  /** 当前目录的 git 分支（AiView 探好递下来的；空串是不显示那一格） */
+  repoBranch: string
+}>()
 
 const ai = useAiStore()
 
@@ -55,9 +62,9 @@ function onCommand(command: string): void {
       </template>
     </el-dropdown>
 
-    <span v-if="ai.repoBranch" class="pick__item is-static" title="这个目录当前的 git 分支">
+    <span v-if="props.repoBranch" class="pick__item is-static" title="这个目录当前的 git 分支">
       <el-icon><Share /></el-icon>
-      {{ ai.repoBranch }}
+      {{ props.repoBranch }}
     </span>
   </div>
 </template>

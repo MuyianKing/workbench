@@ -18,15 +18,26 @@
  *    **两屏都没有顶部工具条**：标题、目录那些要么与导航栏重复、要么下面那一栏已经说了。
  *
  * **页面不摆提示行**（说明、问候、还差什么）：这个应用是给作者自己用的，页面上把控件本身
- * 已经说清的事再讲一遍就是噪音。缺什么由 `stores/ai.ts` 的 `blocking` 说，而它只出现在
+ * 已经说清的事再讲一遍就是噪音。缺什么由 composer 自己的 `blocking` 说，而它只出现在
  * 发送按钮的悬停里；问候在顶栏那一行（见 HomeGreeting），这一页只说这件事本身。
  *
  * 页面自己只做编排与状态呈现：会话的增删选、起进程、读历史、停止都在 stores/ai.ts，
- * 模型与档位那两个下拉直接写设置（行为记忆，下次打开还是它）。
+ * 模型与档位那两个下拉直接写设置（行为记忆，下次打开还是它）。**输入框里那句指令与贴上的
+ * 图归这一页持有**（composer 经事件报上来，页面转给 store 跑一轮），位置栏那格 git 分支的
+ * 探测也是这一页自己的显示（store 只留着「当前盯着的目录」那一位）。
  */
 import { computed, onMounted, ref, watch } from 'vue'
 import { Download, Expand, Fold, MagicStick, Plus } from '@element-plus/icons-vue'
-import { AI_PREVIEW_MAX_BINARY_CHARS, AI_PREVIEW_MAX_CHARS, htmlImageSrcs, resolveAiPreview, type AiPreviewState, type AiPreviewTarget } from '@workbench/ai'
+import {
+  AI_IMAGE_MAX,
+  AI_PREVIEW_MAX_BINARY_CHARS,
+  AI_PREVIEW_MAX_CHARS,
+  htmlImageSrcs,
+  resolveAiPreview,
+  type AiImage,
+  type AiPreviewState,
+  type AiPreviewTarget
+} from '@workbench/ai'
 import { markdownImages } from '@workbench/core'
 import AiComposer from '@/components/AiComposer.vue'
 import AiPreviewPane from '@/components/AiPreviewPane.vue'
@@ -36,15 +47,83 @@ import AiModelDialog from '@/components/AiModelDialog.vue'
 import AiRunPanel from '@/components/AiRunPanel.vue'
 import AiSessionTree from '@/components/AiSessionTree.vue'
 import PanelResizer from '@/components/PanelResizer.vue'
+import { notifyWarning } from '@/notify'
 import { useAiStore } from '@/stores/ai'
 import { useAiSkillsStore } from '@/stores/ai-skills'
 import { useSettingsStore } from '@/stores/settings'
+import { aiRepoState } from '@/workbench/ai'
 
 const ai = useAiStore()
 const skills = useAiSkillsStore()
 const settings = useSettingsStore()
 const modelVisible = ref(false)
 const skillVisible = ref(false)
+
+/**
+ * 输入框里那句话与贴上的图：**这一页自己的视图态**（composer 只是那条输入框）——
+ * 两屏各有一条 composer 实例，状态放这层才换屏不丢；换页回来还在是 KeepAlive 的事，
+ * 重启不保留（与从前放 store 里同一条口径）。
+ */
+const instruction = ref('')
+const images = ref<AiImage[]>([])
+
+/**
+ * 收下 composer 报上来的几张图：超量的当场说清楚（**别攒着让用户以为发出去了** ——
+ * 模型收不到的那种，Pi 会把它换成一句「图被略去」的占位）。
+ */
+function addImages(incoming: AiImage[]): void {
+  const room = AI_IMAGE_MAX - images.value.length
+  if (room <= 0) {
+    notifyWarning(`一条消息最多贴 ${AI_IMAGE_MAX} 张图`)
+    return
+  }
+  images.value = [...images.value, ...incoming.slice(0, room)]
+  if (incoming.length > room) {
+    notifyWarning(`一条消息最多贴 ${AI_IMAGE_MAX} 张图，多出来的没收`)
+  }
+}
+
+/** 删掉贴上的第几张（缩略图角上那颗 ×） */
+function removeImage(at: number): void {
+  images.value = images.value.filter((_, index) => index !== at)
+}
+
+/**
+ * composer 报上来的「发这句」：转给 store 跑一轮。store 说收下了（校验过了、会话有着落了）
+ * 才清空输入框与图 —— 没收下的那一次输入原样留着，用户改一改还能再发。
+ */
+async function send(text: string, attached: AiImage[]): Promise<void> {
+  const accepted = await ai.run({ text, images: attached })
+  if (accepted) {
+    instruction.value = ''
+    images.value = []
+  }
+}
+
+/**
+ * 位置那一栏那格 git 分支（只读探测，页面自己的显示）：探不到不是错误 ——
+ * 没仓库、没装 git 都照常干活，那一截只是不显示。
+ */
+const repoBranch = ref('')
+
+/** 探一次位置那一栏说的那个目录的分支；没目录或探不到就清空（那截不显示） */
+async function refreshRepo(): Promise<void> {
+  const dir = ai.watchedDir
+  if (!dir) {
+    repoBranch.value = ''
+    return
+  }
+  const state = await aiRepoState(dir)
+  repoBranch.value = state.ok && state.data?.isRepo ? (state.data.branch ?? '') : ''
+}
+
+// 位置那一栏说的那个目录换了（换会话、或在起始那一屏换目录）：看那个目录的分支
+watch(
+  () => ai.watchedDir,
+  () => {
+    void refreshRepo()
+  }
+)
 
 /** 文件名（Tab 与预览标题上只放它，全路径在链接那行的悬停里） */
 function fileNameOf(path: string): string {
@@ -193,6 +272,8 @@ onMounted(() => {
   void ai.init()
   // 技能那两条根在页面一进来就扫一遍：composer 那颗 chip 与候选那一列都要有东西可挑
   void skills.ensure()
+  // 分支那格也是这一页自己的显示：进来先探一次，目录换了由上面那个 watch 跟
+  void refreshRepo()
 })
 
 /**
@@ -324,8 +405,15 @@ const runningIds = computed(() =>
           />
         </div>
 
-        <AiLocationBar />
-        <AiComposer @configure="modelVisible = true" />
+        <AiLocationBar :repo-branch="repoBranch" />
+        <AiComposer
+          v-model:instruction="instruction"
+          :images="images"
+          @add-images="addImages"
+          @remove-image="removeImage"
+          @send="send"
+          @configure="modelVisible = true"
+        />
       </template>
 
       <!-- 起始那一屏：没挑中会话（一段都还没有 / 都删光了 / 刚点了左栏那颗「+」）——
@@ -333,8 +421,15 @@ const runningIds = computed(() =>
            （见 stores/ai.ts 的 run），所以上面那条从「挑目录」说起：下一个在哪个目录里干活。 -->
       <div v-else class="landing">
         <div class="landing__box">
-          <AiLocationBar />
-          <AiComposer @configure="modelVisible = true" />
+          <AiLocationBar :repo-branch="repoBranch" />
+          <AiComposer
+            v-model:instruction="instruction"
+            :images="images"
+            @add-images="addImages"
+            @remove-image="removeImage"
+            @send="send"
+            @configure="modelVisible = true"
+          />
 
           <!-- 只在没探到 Pi 时才有东西的一行（它随包内置，正常看不到）。控制台那一屏那颗
                长在运行面板的顶部通知条上（见 AiRunPanel），这一屏没有那一条，所以在这儿
