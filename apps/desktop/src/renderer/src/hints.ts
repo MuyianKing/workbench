@@ -13,13 +13,13 @@ interface Hint {
  */
 export function buildHints(settings: AppSettings): Hint[] {
   const hotkey = settings.hotkeyEnabled
-    ? settings.hotkey.split('+').map((part) => part.trim()).filter(Boolean).join(' + ')
+    ? settings.hotkey.split('+').map(part => part.trim()).filter(Boolean).join(' + ')
     : '未启用'
 
   return [
     { text: '唤起 / 隐藏窗口', hint: hotkey },
     { text: '把卡片拖到分组标签即归类', hint: '拖动' },
     { text: '拖动分组标签可调整顺序', hint: '拖动' },
-    { text: '点关闭按钮收进托盘，不会退出', hint: '关闭' }
+    { text: '点关闭按钮收进托盘，不会退出', hint: '关闭' },
   ]
 }

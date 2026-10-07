@@ -10,13 +10,13 @@ import type { ProjectStatus, TerminalKind } from '@/types'
  * `success` 的文案在这里是最中性的那份（命令跑完了），「打包成功」要由 statusLabel 按
  * 命令类型补上 —— 直接取这张表的 label 只会得到「已结束」，不会把启动说成打包。
  */
-export const STATUS_META: Record<ProjectStatus, { label: string; tone: string }> = {
+export const STATUS_META: Record<ProjectStatus, { label: string, tone: string }> = {
   idle: { label: '空闲', tone: 'idle' },
   installing: { label: '安装中', tone: 'run' },
   running: { label: '运行中', tone: 'run' },
   building: { label: '打包中', tone: 'run' },
   success: { label: '已结束', tone: 'ok' },
-  failed: { label: '执行失败', tone: 'fail' }
+  failed: { label: '执行失败', tone: 'fail' },
 }
 
 /**
@@ -28,7 +28,8 @@ export const STATUS_META: Record<ProjectStatus, { label: string; tone: string }>
  * 既不对又误导。`kind` 缺省时按中性文案走（老运行态、外部探测出来的运行态都没有它）。
  */
 export function statusLabel(status: ProjectStatus, kind?: TerminalKind): string {
-  if (status === 'success' && kind === 'build') return '打包成功'
+  if (status === 'success' && kind === 'build')
+    return '打包成功'
   return STATUS_META[status].label
 }
 
@@ -37,7 +38,7 @@ export function statusTone(status: ProjectStatus): string {
 }
 
 /** 文案 + 色带。色带只看状态（绿=正常退出），文案还要看是哪类命令 */
-export function statusMeta(status: ProjectStatus, kind?: TerminalKind): { label: string; tone: string } {
+export function statusMeta(status: ProjectStatus, kind?: TerminalKind): { label: string, tone: string } {
   return { label: statusLabel(status, kind), tone: STATUS_META[status].tone }
 }
 
@@ -53,7 +54,9 @@ export function isBusyStatus(status: ProjectStatus): boolean {
  * 用项目那套说法（空闲、打包成功）都不贴切，所以单独给一份文案；色带仍取 STATUS_META。
  */
 export function commandStatusLabel(status: ProjectStatus): string {
-  if (status === 'running') return '运行中'
-  if (status === 'failed') return '已退出'
+  if (status === 'running')
+    return '运行中'
+  if (status === 'failed')
+    return '已退出'
   return '未运行'
 }

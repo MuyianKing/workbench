@@ -22,7 +22,7 @@ const REVEAL_EASING = 'cubic-bezier(0.22, 0.61, 0.36, 1)'
 function revealRadius(x: number, y: number): number {
   return Math.hypot(
     Math.max(x, window.innerWidth - x),
-    Math.max(y, window.innerHeight - y)
+    Math.max(y, window.innerHeight - y),
   )
 }
 
@@ -39,15 +39,15 @@ function prefersReducedMotion(): boolean {
  */
 export function applyThemeWithTransition(
   mutate: () => void,
-  origin?: ThemeOrigin | null
+  origin?: ThemeOrigin | null,
 ): void {
-  const canAnimate =
-    typeof document !== 'undefined' &&
-    typeof document.startViewTransition === 'function' &&
+  const canAnimate
+    = typeof document !== 'undefined'
+      && typeof document.startViewTransition === 'function'
     // 窗口收在托盘 / 页面不可见时，浏览器会把转场直接判定为无效并中止；
     // 与其开一个必然被中止的转场，不如同步切换
-    document.visibilityState === 'visible' &&
-    !prefersReducedMotion()
+      && document.visibilityState === 'visible'
+      && !prefersReducedMotion()
 
   if (!canAnimate) {
     mutate()
@@ -61,7 +61,8 @@ export function applyThemeWithTransition(
   let transition: ViewTransition
   try {
     transition = document.startViewTransition(mutate)
-  } catch {
+  }
+  catch {
     // 同一时刻已经有转场在跑时浏览器会直接拒绝，退回同步切换
     mutate()
     return
@@ -73,14 +74,14 @@ export function applyThemeWithTransition(
         {
           clipPath: [
             `circle(0px at ${x}px ${y}px)`,
-            `circle(${radius}px at ${x}px ${y}px)`
-          ]
+            `circle(${radius}px at ${x}px ${y}px)`,
+          ],
         },
         {
           duration: REVEAL_DURATION,
           easing: REVEAL_EASING,
-          pseudoElement: '::view-transition-new(root)'
-        }
+          pseudoElement: '::view-transition-new(root)',
+        },
       )
     })
     .catch(() => {

@@ -1,3 +1,7 @@
+import type { AiSkillLevel, AiSkillRow } from '@workbench/ai'
+import { aiSkillRows, enabledAiSkills, projectSkillsRoot } from '@workbench/ai'
+import { ok } from '@workbench/core'
+import { defineStore } from 'pinia'
 /**
  * AI 助手页那颗「技能」按钮的状态：两条 `.agents/skills`（全局 / 项目）的扫描结果、
  * 每个技能的开关、装 / 卸 / 换目录的编排。
@@ -18,31 +22,16 @@
  *    这一层不替他在仓库里提交任何东西（Rust 侧也不碰 git），要提交他自己来。
  */
 import { computed, ref, watch } from 'vue'
-import { defineStore } from 'pinia'
-import {
-  aiSkillRows,
-  enabledAiSkills,
-  projectSkillsRoot,
-  type AiSkillLevel,
-  type AiSkillRow
-} from '@workbench/ai'
 import { confirmAction, notifyError, notifySuccess } from '@/notify'
-import { ok } from '@workbench/core'
 import { useAiStore } from '@/stores/ai'
 import { useSettingsStore } from '@/stores/settings'
-import {
-  piSkillInstallDir,
-  piSkillInstallUrl,
-  piSkillInstallZip,
-  piSkillList,
-  piSkillRemove
-} from '@/workbench/pi-skill'
+import { piSkillInstallDir, piSkillInstallUrl, piSkillInstallZip, piSkillList, piSkillRemove } from '@/workbench/pi-skill'
 
 /** 装进来的东西从哪来：用户挑的 zip / 用户挑的文件夹 / 用户粘的地址 */
-export type PiSkillSource =
-  | { kind: 'zip'; value: string }
-  | { kind: 'dir'; value: string }
-  | { kind: 'url'; value: string }
+export type PiSkillSource
+  = | { kind: 'zip', value: string }
+    | { kind: 'dir', value: string }
+    | { kind: 'url', value: string }
 
 export const useAiSkillsStore = defineStore('aiSkills', () => {
   const ai = useAiStore()
@@ -73,7 +62,7 @@ export const useAiSkillsStore = defineStore('aiSkills', () => {
    */
   const enabledRefs = computed(() => enabledAiSkills(rows.value))
   /** 开着的那些（输入框里打 `/` 时那排候选：关掉的技能不该出现在那儿） */
-  const pickable = computed(() => rows.value.filter((row) => row.enabled))
+  const pickable = computed(() => rows.value.filter(row => row.enabled))
   /**
    * 只有全局那几条（开着的）。给**不在 AI 助手页上跑**的那些 Pi 会话用 ——
    * 知识库清洗在自己的目录里干活，那里的「项目技能」不该是 AI 助手页当前挑的那个目录的
@@ -103,31 +92,35 @@ export const useAiSkillsStore = defineStore('aiSkills', () => {
     try {
       const [globalRaw, projectRaw] = await Promise.all([
         globalKey ? piSkillList(globalKey) : Promise.resolve(ok<unknown>([])),
-        projectKey ? piSkillList(projectKey) : Promise.resolve(ok<unknown>([]))
+        projectKey ? piSkillList(projectKey) : Promise.resolve(ok<unknown>([])),
       ])
 
       if (globalRaw.ok) {
         globalRows.value = aiSkillRows('global', globalKey, globalRaw.data, off)
-      } else {
+      }
+      else {
         globalRows.value = []
         loadError.value = globalRaw.error ?? '读取全局技能失败'
       }
 
       if (projectRaw.ok) {
         projectRows.value = aiSkillRows('project', projectKey, projectRaw.data, off)
-      } else {
+      }
+      else {
         projectRows.value = []
         loadError.value = projectRaw.error ?? '读取项目技能失败'
       }
       loadedFor.value = keyOf()
-    } finally {
+    }
+    finally {
       loading.value = false
     }
   }
 
   /** 扫一次但别重复扫：没扫过、或者换过根（换目录 / 换机器）才真扫 */
   async function ensure(): Promise<void> {
-    if (loadedFor.value === keyOf()) return
+    if (loadedFor.value === keyOf())
+      return
     await refresh()
   }
 
@@ -136,12 +129,12 @@ export const useAiSkillsStore = defineStore('aiSkills', () => {
     const off = settings.settings.aiSkillsOff
     const next = row.enabled
       ? [...off, row.key] // 关掉：记进表里
-      : off.filter((key) => key !== row.key)
+      : off.filter(key => key !== row.key)
     await settings.updateSettings({ aiSkillsOff: next })
 
     // 就地更新两栏（不必重扫：只有开关变了）
     const apply = (list: AiSkillRow[]): AiSkillRow[] =>
-      list.map((item) => (item.key === row.key ? { ...item, enabled: !row.enabled } : item))
+      list.map(item => (item.key === row.key ? { ...item, enabled: !row.enabled } : item))
     globalRows.value = apply(globalRows.value)
     projectRows.value = apply(projectRows.value)
   }
@@ -185,9 +178,10 @@ export const useAiSkillsStore = defineStore('aiSkills', () => {
     const yes = await confirmAction(
       `技能根里已经有一个「${id}」了。覆盖会把它整个换成这一份（原来那份的内容不再保留）。`,
       '要覆盖吗？',
-      { confirmButtonText: '覆盖' }
+      { confirmButtonText: '覆盖' },
     )
-    if (!yes) return ''
+    if (!yes)
+      return ''
 
     const retry = await call(true)
     const replaced = retry.data
@@ -207,12 +201,13 @@ export const useAiSkillsStore = defineStore('aiSkills', () => {
   async function remove(row: AiSkillRow): Promise<boolean> {
     const where = row.level === 'global' ? '全局技能' : '这个项目'
     const yes = await confirmAction(
-      `「${row.name || row.id}」会从${where}里整个删掉（${row.fileCount} 个文件）。` +
-        (row.level === 'project' ? '项目里那份删掉之后，技能库里的原件还在。' : ''),
+      `「${row.name || row.id}」会从${where}里整个删掉（${row.fileCount} 个文件）。${
+        row.level === 'project' ? '项目里那份删掉之后，技能库里的原件还在。' : ''}`,
       '要卸掉吗？',
-      { confirmButtonText: '卸掉' }
+      { confirmButtonText: '卸掉' },
     )
-    if (!yes) return false
+    if (!yes)
+      return false
 
     const result = await piSkillRemove(row.root, row.id)
     if (!result.ok) {
@@ -228,8 +223,9 @@ export const useAiSkillsStore = defineStore('aiSkills', () => {
   watch(
     () => keyOf(),
     () => {
-      if (loadedFor.value && loadedFor.value !== keyOf()) void refresh()
-    }
+      if (loadedFor.value && loadedFor.value !== keyOf())
+        void refresh()
+    },
   )
 
   return {
@@ -249,6 +245,6 @@ export const useAiSkillsStore = defineStore('aiSkills', () => {
     ensure,
     toggle,
     install,
-    remove
+    remove,
   }
 })

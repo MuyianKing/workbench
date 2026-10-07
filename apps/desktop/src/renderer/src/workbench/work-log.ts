@@ -1,3 +1,6 @@
+import type { WorkLogEntry, WorkLogFile, WorkLogInput, WorkLogPatch } from '@workbench/work-log'
+import type { Result } from '@/types'
+import { fail, ok } from '@workbench/core'
 /**
  * 工作日志（本地 `work-log.json`）的适配层实现。
  *
@@ -8,18 +11,7 @@
  * 文件是懒加载的：首屏不读它，第一次进「工作」页时才把整份取回来，
  * 之后一直在内存里维护，每次改动整份落盘（防抖在 Rust 侧）。
  */
-import {
-  createWorkLogEntry,
-  emptyWorkLog,
-  parseWorkLog,
-  patchWorkLogEntry,
-  type WorkLogEntry,
-  type WorkLogFile,
-  type WorkLogInput,
-  type WorkLogPatch
-} from '@workbench/work-log'
-import { fail, ok } from '@workbench/core'
-import type { Result } from '@/types'
+import { createWorkLogEntry, emptyWorkLog, parseWorkLog, patchWorkLogEntry } from '@workbench/work-log'
 import { errorText, invoke } from './bridge'
 
 let file: WorkLogFile = emptyWorkLog()
@@ -28,7 +20,8 @@ let loaded = false
 let pending: Promise<void> | null = null
 
 async function ensureLoaded(): Promise<void> {
-  if (loaded) return
+  if (loaded)
+    return
 
   if (!pending) {
     pending = invoke<unknown>('work_log_load')
@@ -45,7 +38,8 @@ async function ensureLoaded(): Promise<void> {
 
 /** 变更即写（落盘防抖在 Rust 侧，300ms 合并一次） */
 function persist(): void {
-  if (loaded) void invoke('work_log_save', { value: file })
+  if (loaded)
+    void invoke('work_log_save', { value: file })
 }
 
 /**
@@ -62,7 +56,8 @@ export async function listWorkLogs(): Promise<Result<WorkLogEntry[]>> {
   try {
     await ensureLoaded()
     return ok(copy(file.entries))
-  } catch (error) {
+  }
+  catch (error) {
     return fail(errorText(error, '读取工作日志失败'))
   }
 }
@@ -72,31 +67,35 @@ export async function addWorkLog(input: WorkLogInput): Promise<Result<WorkLogEnt
     await ensureLoaded()
     // 工作内容必填：界面已经拦过一次，这里是兜底（与状态机同口径的校验留在 shared）
     const entry = createWorkLogEntry(input, () => crypto.randomUUID())
-    if (!entry) return fail('工作内容不能为空')
+    if (!entry)
+      return fail('工作内容不能为空')
 
     file.entries.push(entry)
     persist()
     return ok(copy(entry))
-  } catch (error) {
+  }
+  catch (error) {
     return fail(errorText(error, '保存工作日志失败'))
   }
 }
 
 export async function updateWorkLog(
   id: string,
-  patch: WorkLogPatch
+  patch: WorkLogPatch,
 ): Promise<Result<WorkLogEntry>> {
   try {
     await ensureLoaded()
-    const index = file.entries.findIndex((entry) => entry.id === id)
-    if (index === -1) return fail('找不到这条工作记录')
+    const index = file.entries.findIndex(entry => entry.id === id)
+    if (index === -1)
+      return fail('找不到这条工作记录')
 
     const next = patchWorkLogEntry(file.entries[index], patch)
     file.entries[index] = next
     // 内容没变时 patch 返回的是原对象，这里落盘一次也无妨：不产生任何语义变化
     persist()
     return ok(copy(next))
-  } catch (error) {
+  }
+  catch (error) {
     return fail(errorText(error, '更新工作日志失败'))
   }
 }
@@ -104,13 +103,14 @@ export async function updateWorkLog(
 export async function removeWorkLog(id: string): Promise<Result<null>> {
   try {
     await ensureLoaded()
-    const next = file.entries.filter((entry) => entry.id !== id)
+    const next = file.entries.filter(entry => entry.id !== id)
     if (next.length !== file.entries.length) {
       file.entries = next
       persist()
     }
     return ok(null)
-  } catch (error) {
+  }
+  catch (error) {
     return fail(errorText(error, '删除工作日志失败'))
   }
 }

@@ -1,3 +1,4 @@
+import type { ShallowRef } from 'vue'
 /**
  * 视频播放器的「传送宿主」。
  *
@@ -10,7 +11,7 @@
  * 没有业务语义、不落盘、只有一个写入方（视频页）与一个读取方（播放器），
  * 一次注册长期有效 —— 视频页被 KeepAlive 包着，切走的页面元素只是脱离文档、不销毁。
  */
-import { shallowRef, type ShallowRef } from 'vue'
+import { shallowRef } from 'vue'
 
 /**
  * 视频页画布里供传送落位的那个元素；视频页没挂载过（没进过那一页）时是 null。

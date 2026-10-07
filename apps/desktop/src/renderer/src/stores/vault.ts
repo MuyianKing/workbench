@@ -1,3 +1,7 @@
+import type { VaultEntry, VaultRecord } from '@workbench/vault'
+import type { Result, VaultHelloState, VaultKeyState } from '@/types'
+import { filterVaultRecords, groupVaultRecords, sortVaultRecords, vaultEntryProblem, vaultGroups } from '@workbench/vault'
+import { defineStore } from 'pinia'
 /**
  * 密码保险库：密钥状态、卡片清单、增删改与同步的编排。
  *
@@ -22,20 +26,9 @@
  * 而保险库在没登录时照常能用 —— 本机那份是完整的，只是推不出去，界面会如实说明。
  */
 import { computed, ref } from 'vue'
-import { defineStore } from 'pinia'
-import {
-  filterVaultRecords,
-  groupVaultRecords,
-  sortVaultRecords,
-  vaultEntryProblem,
-  vaultGroups,
-  type VaultEntry,
-  type VaultRecord
-} from '@workbench/vault'
 import { notifyError, notifySuccess } from '@/notify'
 import { useAuthStore } from '@/stores/auth'
 import { useSettingsStore } from '@/stores/settings'
-import type { Result, VaultHelloState, VaultKeyState } from '@/types'
 
 export const useVaultStore = defineStore('vault', () => {
   const settings = useSettingsStore()
@@ -113,7 +106,8 @@ export const useVaultStore = defineStore('vault', () => {
 
   /** 卡片墙底下那行小字：几条记录 */
   const summary = computed(() => {
-    if (!records.value.length) return '还没有记录'
+    if (!records.value.length)
+      return '还没有记录'
     return `${records.value.length} 条`
   })
 
@@ -151,8 +145,10 @@ export const useVaultStore = defineStore('vault', () => {
       keyExists.value = result.data!.exists
       unlocked.value = result.data!.unlocked
       fingerprint.value = result.data!.fingerprint
-      if (!unlocked.value) await refreshHello()
-    } finally {
+      if (!unlocked.value)
+        await refreshHello()
+    }
+    finally {
       // 放在 finally：Hello 状态那一路出问题时也不能让这一页停在「没查过」的引导帧上
       keyChecked.value = true
     }
@@ -195,7 +191,8 @@ export const useVaultStore = defineStore('vault', () => {
       return false
     }
     // null = 用户在 Windows 的验证框里取消了：安静地回到锁着的那一屏
-    if (!opened.data) return false
+    if (!opened.data)
+      return false
 
     keyExists.value = opened.data.exists
     unlocked.value = opened.data.unlocked
@@ -224,7 +221,8 @@ export const useVaultStore = defineStore('vault', () => {
 
   /** 重新解开本机那份（改动之后、同步之后、切回这一页时） */
   async function reload(): Promise<void> {
-    if (!unlocked.value) return
+    if (!unlocked.value)
+      return
     const result = await window.workbench.vaultLoad()
     if (!result.ok) {
       notifyError(result.error ?? '读取保险库失败')
@@ -249,7 +247,8 @@ export const useVaultStore = defineStore('vault', () => {
       await reload()
       notifySuccess(replace ? '已经换上一把新密钥' : '保险库已经建好')
       return true
-    } finally {
+    }
+    finally {
       creating.value = false
     }
   }
@@ -261,7 +260,8 @@ export const useVaultStore = defineStore('vault', () => {
       notifyError(result.error ?? '导入密钥失败')
       return
     }
-    if (!result.data) return // 用户取消了
+    if (!result.data)
+      return // 用户取消了
 
     // 适配层导入时已经把密钥放进内存，所以这里重问一次状态、再读一遍条目
     clearRemoteVerdict()
@@ -289,7 +289,8 @@ export const useVaultStore = defineStore('vault', () => {
       notifyError(result.error ?? '导出密钥失败')
       return
     }
-    if (!result.data) return // 用户取消了
+    if (!result.data)
+      return // 用户取消了
     notifySuccess('密钥已导出，把它放到另一台机器上导入即可')
   }
 
@@ -310,8 +311,9 @@ export const useVaultStore = defineStore('vault', () => {
     }
 
     const saved = result.data!
-    const index = records.value.findIndex((record) => record.id === id)
-    if (index >= 0) records.value.splice(index, 1, saved)
+    const index = records.value.findIndex(record => record.id === id)
+    if (index >= 0)
+      records.value.splice(index, 1, saved)
     else records.value.push(saved)
     updatedAt.value = Math.max(updatedAt.value, saved.updatedAt)
 
@@ -325,7 +327,7 @@ export const useVaultStore = defineStore('vault', () => {
       notifyError(result.error ?? '删除记录失败')
       return
     }
-    records.value = records.value.filter((record) => record.id !== id)
+    records.value = records.value.filter(record => record.id !== id)
     updatedAt.value = Date.now()
     notifySuccess('已删除')
   }
@@ -365,7 +367,8 @@ export const useVaultStore = defineStore('vault', () => {
   /** 进页面时调一次：读密钥状态，已经解锁过就直接把条目摆出来 */
   async function init(): Promise<void> {
     await refreshKey()
-    if (unlocked.value) await reload()
+    if (unlocked.value)
+      await reload()
   }
 
   return {
@@ -405,6 +408,6 @@ export const useVaultStore = defineStore('vault', () => {
     exportKey,
     saveEntry,
     removeEntry,
-    sync
+    sync,
   }
 })

@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import type { HomeRow, RowId } from '@workbench/appearance'
+import type { CSSProperties } from 'vue'
+import { resizeRowHeight } from '@workbench/appearance'
 /**
  * 布局里的一行：栏内横向的一条槽，槽里的卡片平分这一栏的宽度、高度跟着这一行走。
  *
@@ -11,9 +14,7 @@
  * 卡片由 HomeBoard 从插槽排进来（它才认得落点空隙该插在哪两张之间）。
  */
 import { computed } from 'vue'
-import type { CSSProperties } from 'vue'
 import { startPointerDrag } from '@/composables/use-pointer-drag'
-import { resizeRowHeight, type HomeRow, type RowId } from '@workbench/appearance'
 
 const props = defineProps<{
   row: HomeRow
@@ -25,19 +26,20 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  resize: [id: RowId, height: number]
-  toggleMode: [id: RowId]
-  commit: []
+  'resize': [id: RowId, height: number]
+  'toggle-mode': [id: RowId]
+  'commit': []
 }>()
 
 const style = computed<CSSProperties>(() => ({
   flex: props.row.mode === 'flex' ? '1 1 0' : `0 0 ${props.row.height}px`,
-  minHeight: `${props.min}px`
+  minHeight: `${props.min}px`,
 }))
 
 /** 拖动下边缘改高度：过程中只往上冒，落盘由 HomeBoard 在松手时做 */
 function onResizeDown(event: PointerEvent): void {
-  if (!props.editing || props.row.mode === 'flex' || event.button !== 0) return
+  if (!props.editing || props.row.mode === 'flex' || event.button !== 0)
+    return
   event.preventDefault()
 
   const startHeight = props.row.height
@@ -49,10 +51,10 @@ function onResizeDown(event: PointerEvent): void {
       emit(
         'resize',
         props.row.id,
-        resizeRowHeight(startHeight, moveEvent.clientY - start.y, props.min)
+        resizeRowHeight(startHeight, moveEvent.clientY - start.y, props.min),
       )
     },
-    onEnd: () => emit('commit')
+    onEnd: () => emit('commit'),
   })
 }
 </script>
@@ -77,10 +79,14 @@ function onResizeDown(event: PointerEvent): void {
             ? '这一行是自适应高度，点一下改为固定高度'
             : '这一行是固定高度，点一下改为自适应'
         "
-        @click.stop="emit('toggleMode', row.id)"
+        @click.stop="emit('toggle-mode', row.id)"
       >
-        <template v-if="row.mode === 'flex'">自适应</template>
-        <template v-else>{{ row.height }}px</template>
+        <template v-if="row.mode === 'flex'">
+          自适应
+        </template>
+        <template v-else>
+          {{ row.height }}px
+        </template>
       </button>
 
       <!-- 只有固定高度才需要手动拉高度 -->

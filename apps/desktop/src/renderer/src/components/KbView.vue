@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { DocumentAdd, Folder, FolderOpened, MagicStick, Refresh, RefreshRight } from '@element-plus/icons-vue'
 /**
  * 知识库页：看一个用户在别处维护的独立项目，清洗也在这里一键完成。
  *
@@ -18,19 +19,18 @@
  * 数据与动作都在 store 里（见 stores/kb.ts），组件只编排界面。
  */
 import { computed, onMounted, ref } from 'vue'
-import { DocumentAdd, Folder, FolderOpened, MagicStick, Refresh, RefreshRight } from '@element-plus/icons-vue'
+import AiModelDialog from '@/components/AiModelDialog.vue'
+import KbCleanPanel from '@/components/KbCleanPanel.vue'
+import KbEntryTree from '@/components/KbEntryTree.vue'
+import KbEntryViewer from '@/components/KbEntryViewer.vue'
+import KbInfoPanel from '@/components/KbInfoPanel.vue'
+import KbRawList from '@/components/KbRawList.vue'
+import KbRawViewer from '@/components/KbRawViewer.vue'
+import PanelLoading from '@/components/PanelLoading.vue'
+import PanelResizer from '@/components/PanelResizer.vue'
+import { notifyError } from '@/notify'
 import { useKbStore } from '@/stores/kb'
 import { useSettingsStore } from '@/stores/settings'
-import { notifyError } from '@/notify'
-import PanelLoading from '@/components/PanelLoading.vue'
-import KbEntryTree from '@/components/KbEntryTree.vue'
-import KbRawList from '@/components/KbRawList.vue'
-import KbInfoPanel from '@/components/KbInfoPanel.vue'
-import KbEntryViewer from '@/components/KbEntryViewer.vue'
-import KbRawViewer from '@/components/KbRawViewer.vue'
-import KbCleanPanel from '@/components/KbCleanPanel.vue'
-import AiModelDialog from '@/components/AiModelDialog.vue'
-import PanelResizer from '@/components/PanelResizer.vue'
 
 const store = useKbStore()
 const settings = useSettingsStore()
@@ -45,7 +45,8 @@ const modelVisible = ref(false)
 /** 挑一个知识库文件夹：**它就是那个独立项目的根**。换目录不搬动任何文件 */
 async function pickRoot(): Promise<void> {
   const picked = await window.workbench.pickDirectory('选择知识库文件夹')
-  if (picked) await store.setRoot(picked)
+  if (picked)
+    await store.setRoot(picked)
 }
 
 /** 在资源管理器里打开知识库文件夹（往 data/raw 里放资料就在那儿放） */
@@ -55,27 +56,29 @@ function revealRoot(): void {
 
 /** 同步按钮的提示：同步到哪儿先说清楚（它只推这个文件夹自己连着的仓库） */
 const syncTitle = computed(() =>
-  store.remoteUrl ? `提交改动、拉回别处的改动：同步到 ${store.remoteUrl}` : '这个文件夹还没连 git 远端'
+  store.remoteUrl ? `提交改动、拉回别处的改动：同步到 ${store.remoteUrl}` : '这个文件夹还没连 git 远端',
 )
 
 /** 左栏的两个签：条目 / 原始数据 */
 const pane = ref<'entries' | 'raw'>('entries')
 const PANES = [
   { label: '条目', value: 'entries' as const },
-  { label: '原始数据', value: 'raw' as const }
+  { label: '原始数据', value: 'raw' as const },
 ]
 
 /** 两栏的宽度：左栏是主题里存的那个值（与笔记 / 视频 / AI 页同一套做法） */
 const bodyStyle = computed(() => ({
-  gridTemplateColumns: `${settings.themeConfig.kbTreeWidth}px minmax(0, 1fr)`,
-  '--tree-w': `${settings.themeConfig.kbTreeWidth}px`
+  'gridTemplateColumns': `${settings.themeConfig.kbTreeWidth}px minmax(0, 1fr)`,
+  '--tree-w': `${settings.themeConfig.kbTreeWidth}px`,
 }))
 
 /** 用系统默认程序打开正在查看的原始数据（预览不了的格式给出去；路径就是根 + rel） */
 async function openRawExternally(): Promise<void> {
-  if (!store.activeRaw) return
+  if (!store.activeRaw)
+    return
   const result = await window.workbench.openPath(`${store.root}/${store.activeRaw.rel}`)
-  if (!result.ok) notifyError(result.error ?? '打开文件失败')
+  if (!result.ok)
+    notifyError(result.error ?? '打开文件失败')
 }
 
 /**
@@ -125,14 +128,18 @@ function openWritten(rel: string): void {
           <path d="M104 76h72M104 92h46M104 108h62" stroke="currentColor" stroke-width="1" />
         </svg>
 
-        <h2 class="guide__title">知识库</h2>
+        <h2 class="guide__title">
+          知识库
+        </h2>
       </div>
 
       <el-tooltip
         content="选一个独立的知识库项目文件夹：data/raw 放原始资料，kb 放整理好的条目；清洗由应用一键完成"
         placement="top"
       >
-        <el-button type="primary" :icon="FolderOpened" @click="pickRoot">选择知识库文件夹</el-button>
+        <el-button type="primary" :icon="FolderOpened" @click="pickRoot">
+          选择知识库文件夹
+        </el-button>
       </el-tooltip>
     </div>
 
@@ -141,7 +148,9 @@ function openWritten(rel: string): void {
       <div class="filter">
         <div class="filter__head">
           <div class="head">
-            <h2 class="head__title">知识库</h2>
+            <h2 class="head__title">
+              知识库
+            </h2>
             <span class="head__loc mono" :title="store.root">{{ store.locationText }}</span>
           </div>
           <span v-if="store.loaded && store.looksLikeKb" class="head__stats">
@@ -207,7 +216,9 @@ function openWritten(rel: string): void {
         </div>
       </div>
 
-      <p v-if="store.syncError" class="sync-error">{{ store.syncError }}</p>
+      <p v-if="store.syncError" class="sync-error">
+        {{ store.syncError }}
+      </p>
 
       <!-- 正常的两栏：左清单右阅读（清洗进行中 / 刚收场时右栏让给清洗面板） -->
       <div v-if="store.loaded && store.looksLikeKb" class="kb-view__body" :style="bodyStyle">
@@ -281,8 +292,12 @@ function openWritten(rel: string): void {
           <PanelLoading text="正在读取知识库…" />
         </div>
         <div v-else-if="store.loadError" class="empty panel">
-          <p class="empty__text">{{ store.loadError }}</p>
-          <el-button :icon="FolderOpened" @click="pickRoot">换一个知识库文件夹</el-button>
+          <p class="empty__text">
+            {{ store.loadError }}
+          </p>
+          <el-button :icon="FolderOpened" @click="pickRoot">
+            换一个知识库文件夹
+          </el-button>
         </div>
         <div v-else class="empty panel">
           <p class="empty__text">
@@ -293,7 +308,9 @@ function openWritten(rel: string): void {
             知识库是纯数据的：<span class="mono">data/raw</span> 放原始资料、
             <span class="mono">kb</span> 放整理好的条目，这里只认这两块布局。
           </p>
-          <el-button :icon="FolderOpened" @click="pickRoot">换一个知识库文件夹</el-button>
+          <el-button :icon="FolderOpened" @click="pickRoot">
+            换一个知识库文件夹
+          </el-button>
         </div>
       </div>
     </template>

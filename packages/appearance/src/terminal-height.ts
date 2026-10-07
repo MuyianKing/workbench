@@ -16,7 +16,8 @@ export const TERMINAL_HEIGHT_DEFAULT = 266
 
 /** 收敛到合法区间；不是有限数字（缺失 / null / 字符串 / NaN）一律回到默认值 */
 export function clampTerminalHeight(value: unknown): number {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return TERMINAL_HEIGHT_DEFAULT
+  if (typeof value !== 'number' || !Number.isFinite(value))
+    return TERMINAL_HEIGHT_DEFAULT
   return Math.min(TERMINAL_HEIGHT_MAX, Math.max(TERMINAL_HEIGHT_MIN, Math.round(value)))
 }
 

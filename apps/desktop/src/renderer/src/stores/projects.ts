@@ -1,3 +1,10 @@
+import type { ProjectSort } from '@workbench/core'
+import type { ProcessTarget } from './terminal'
+
+import type { ActivityCounts, AddProjectInput, PackageManager, Project, ProjectGroup, ProjectPatch } from '@/types'
+import { backfillProjectColors as backfillColors, reorderById, sanitizeProjectSort } from '@workbench/core'
+
+import { defineStore } from 'pinia'
 /**
  * 项目与分组：列表、筛选排序、抽屉与「添加项目」，以及项目的启停打包。
  *
@@ -15,24 +22,12 @@
  * 都在这里按顺序发起，因为它们之间的先后顺序是有讲究的（外观必须先落地）。
  */
 import { computed, ref, watch } from 'vue'
-import { defineStore } from 'pinia'
-import { backfillProjectColors as backfillColors } from '@workbench/core'
-import { reorderById } from '@workbench/core'
-import { sanitizeProjectSort, type ProjectSort } from '@workbench/core'
-import type {
-  ActivityCounts,
-  AddProjectInput,
-  PackageManager,
-  Project,
-  ProjectGroup,
-  ProjectPatch
-} from '@/types'
-import { notifyError, notifySuccess, notifyWarning, confirmAction } from '@/notify'
-import { useSettingsStore } from './settings'
-import { useTerminalStore, RUNNING_STATUS, type ProcessTarget } from './terminal'
+import { confirmAction, notifyError, notifySuccess, notifyWarning } from '@/notify'
+import { useAuthStore } from './auth'
 import { useCatalogStore } from './catalog'
 import { useEnvironmentStore } from './environment'
-import { useAuthStore } from './auth'
+import { useSettingsStore } from './settings'
+import { RUNNING_STATUS, useTerminalStore } from './terminal'
 
 /** 未分组项目在筛选栏里的伪分组 id */
 export const UNGROUPED = 'ungrouped'
@@ -67,7 +62,7 @@ export const useProjectsStore = defineStore('projects', () => {
     (value) => {
       sortBy.value = sanitizeProjectSort(value)
     },
-    { immediate: true }
+    { immediate: true },
   )
 
   /** 筛选/排序状态只经 action 变更，模板里不再直接赋值，非法值也无从写进来 */
@@ -82,7 +77,8 @@ export const useProjectsStore = defineStore('projects', () => {
    * 失败由 updateSettings 统一提示。相同值直接返回：不值得为一次没变化的点击写一次文件。
    */
   function setSortBy(value: ProjectSort): void {
-    if (value === sortBy.value) return
+    if (value === sortBy.value)
+      return
     sortBy.value = value
     void settingsStore.updateSettings({ projectSort: value })
   }
@@ -103,7 +99,8 @@ export const useProjectsStore = defineStore('projects', () => {
   let initialized = false
 
   async function init(): Promise<void> {
-    if (initialized) return
+    if (initialized)
+      return
     initialized = true
 
     await loadData()
@@ -160,7 +157,7 @@ export const useProjectsStore = defineStore('projects', () => {
       environment.loadDataDir(),
       window.workbench.getActivity(),
       catalog.refreshQuickApps(),
-      catalog.refreshCommands()
+      catalog.refreshCommands(),
     ])
     activity.value = counts
     for (const item of catalog.commands) terminal.runtimeOf(item.id)
@@ -173,8 +170,9 @@ export const useProjectsStore = defineStore('projects', () => {
 
   /** 主进程更新了项目（执行记录、最近使用时间），同步回本地列表 */
   function onProjectChanged(updated: Project): void {
-    const index = projects.value.findIndex((p) => p.id === updated.id)
-    if (index === -1) return
+    const index = projects.value.findIndex(p => p.id === updated.id)
+    if (index === -1)
+      return
 
     // 先更新落盘快照，避免这次同步又被 watcher 推回主进程
     pushedSnapshot.set(updated.id, JSON.stringify(editableOf(updated)))
@@ -186,22 +184,23 @@ export const useProjectsStore = defineStore('projects', () => {
   // ---------- 项目与分组 ----------
 
   function findProject(id: string): Project | undefined {
-    return projects.value.find((p) => p.id === id)
+    return projects.value.find(p => p.id === id)
   }
 
   /** 同一分组内是否已有同名项目（规则：允许重复，但要给提示） */
   function hasDuplicateName(
     name: string,
     groupId: string | undefined,
-    excludeId?: string
+    excludeId?: string,
   ): boolean {
     const target = name.trim().toLowerCase()
-    if (!target) return false
+    if (!target)
+      return false
     return projects.value.some(
-      (p) =>
-        p.id !== excludeId &&
-        p.name.trim().toLowerCase() === target &&
-        (p.groupId ?? undefined) === (groupId ?? undefined)
+      p =>
+        p.id !== excludeId
+        && p.name.trim().toLowerCase() === target
+        && (p.groupId ?? undefined) === (groupId ?? undefined),
     )
   }
 
@@ -215,8 +214,10 @@ export const useProjectsStore = defineStore('projects', () => {
   /** 拖拽 / 下拉改分组：真正的落盘交给 projects 的深度 watch */
   function assignGroup(id: string, groupId: string | undefined): void {
     const project = findProject(id)
-    if (!project) return
-    if ((project.groupId ?? undefined) === (groupId ?? undefined)) return
+    if (!project)
+      return
+    if ((project.groupId ?? undefined) === (groupId ?? undefined))
+      return
 
     project.groupId = groupId
     notifySuccess(groupId ? `已移入「${groupName(groupId)}」` : '已移出分组')
@@ -230,8 +231,10 @@ export const useProjectsStore = defineStore('projects', () => {
    */
   function setHome(id: string, value: boolean): void {
     const project = findProject(id)
-    if (!project) return
-    if ((project.home === true) === value) return
+    if (!project)
+      return
+    if ((project.home === true) === value)
+      return
 
     project.home = value
     notifySuccess(value ? `「${project.name}」已放到首页` : `「${project.name}」已从首页移除`)
@@ -250,7 +253,7 @@ export const useProjectsStore = defineStore('projects', () => {
       // 「仅管理目录」的放行标志，漏掉它会让勾选项静默失效
       allowInvalid: input.allowInvalid,
       // 同上：漏掉它勾了「在首页展示」也会静默失效
-      home: input.home === true
+      home: input.home === true,
     }
 
     const result = await window.workbench.addProject(payload)
@@ -275,27 +278,30 @@ export const useProjectsStore = defineStore('projects', () => {
     const agreed = await confirmAction(
       `确定把「${project?.name ?? '该项目'}」从列表中移除？磁盘上的项目文件不会被删除。`,
       '移除项目',
-      { confirmButtonText: '移除' }
+      { confirmButtonText: '移除' },
     )
-    if (!agreed) return
+    if (!agreed)
+      return
 
     const result = await window.workbench.removeProject(id)
     if (!result.ok) {
       notifyError(result.error ?? '移除失败')
       return
     }
-    const index = projects.value.findIndex((p) => p.id === id)
-    if (index !== -1) projects.value.splice(index, 1)
+    const index = projects.value.findIndex(p => p.id === id)
+    if (index !== -1)
+      projects.value.splice(index, 1)
     terminal.forgetRuntime(id)
     delete pathValidity.value[id]
     terminal.dropTerminalsOf(id)
-    if (drawerProjectId.value === id) drawerProjectId.value = null
+    if (drawerProjectId.value === id)
+      drawerProjectId.value = null
     notifySuccess('已从列表移除')
   }
 
   /** 按 order 排好的分组；筛选栏、抽屉下拉、管理弹窗都用这一份 */
   const sortedGroups = computed(() =>
-    [...groups.value].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+    [...groups.value].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)),
   )
 
   /** 拖动排序：先本地生效再落盘，失败则整份回滚 */
@@ -303,7 +309,7 @@ export const useProjectsStore = defineStore('projects', () => {
     const snapshot = groups.value.slice()
     groups.value = reorderById(groups.value, ids).map((group, index) => ({
       ...group,
-      order: index
+      order: index,
     }))
 
     const result = await window.workbench.reorderGroups(ids)
@@ -333,8 +339,9 @@ export const useProjectsStore = defineStore('projects', () => {
       notifyError(result.error ?? '重命名分组失败')
       return false
     }
-    const index = groups.value.findIndex((g) => g.id === id)
-    if (index !== -1) groups.value[index] = result.data
+    const index = groups.value.findIndex(g => g.id === id)
+    if (index !== -1)
+      groups.value[index] = result.data
     return true
   }
 
@@ -344,11 +351,13 @@ export const useProjectsStore = defineStore('projects', () => {
       notifyError(result.error ?? '删除分组失败')
       return
     }
-    groups.value = groups.value.filter((g) => g.id !== id)
+    groups.value = groups.value.filter(g => g.id !== id)
     for (const project of projects.value) {
-      if (project.groupId === id) project.groupId = undefined
+      if (project.groupId === id)
+        project.groupId = undefined
     }
-    if (groupFilter.value === id) groupFilter.value = 'all'
+    if (groupFilter.value === id)
+      groupFilter.value = 'all'
   }
 
   // ---------- 配置变更自动落盘 ----------
@@ -362,10 +371,10 @@ export const useProjectsStore = defineStore('projects', () => {
         serve: project.scripts.serve,
         build: [...project.scripts.build],
         defaultBuild: project.scripts.defaultBuild,
-        custom: project.scripts.custom?.map((item) => ({
+        custom: project.scripts.custom?.map(item => ({
           name: item.name,
-          command: item.command
-        }))
+          command: item.command,
+        })),
       },
       outputDir: project.outputDir ?? '',
       autoOpenExplorer: project.autoOpenExplorer,
@@ -375,7 +384,7 @@ export const useProjectsStore = defineStore('projects', () => {
       groupId: project.groupId,
       color: project.color,
       // 同上，落盘口径统一成「不展示 = 没有这个字段」，界面写成 false 也在这里收掉
-      home: project.home === true || undefined
+      home: project.home === true || undefined,
     }
   }
 
@@ -392,7 +401,8 @@ export const useProjectsStore = defineStore('projects', () => {
     const patch = backfillColors(projects.value)
     for (const project of projects.value) {
       const color = patch[project.id]
-      if (color) project.color = color
+      if (color)
+        project.color = color
     }
   }
 
@@ -410,26 +420,30 @@ export const useProjectsStore = defineStore('projects', () => {
   watch(
     projects,
     () => {
-      if (!ready.value) return
-      if (pushTimer) window.clearTimeout(pushTimer)
+      if (!ready.value)
+        return
+      if (pushTimer)
+        window.clearTimeout(pushTimer)
       pushTimer = window.setTimeout(() => {
         pushTimer = null
         for (const project of projects.value) {
           const next = JSON.stringify(editableOf(project))
-          if (pushedSnapshot.get(project.id) === next) continue
+          if (pushedSnapshot.get(project.id) === next)
+            continue
           pushedSnapshot.set(project.id, next)
           void window.workbench.updateProject(project.id, editableOf(project))
         }
       }, 400)
     },
-    { deep: true }
+    { deep: true },
   )
 
   // ---------- 操作 ----------
 
   async function guardProject(id: string): Promise<Project | null> {
     const project = findProject(id)
-    if (!project) return null
+    if (!project)
+      return null
 
     if (!isPathValid(id)) {
       notifyError('项目目录不存在，请先重新定位')
@@ -468,21 +482,24 @@ export const useProjectsStore = defineStore('projects', () => {
       name: project.name,
       subject: '项目',
       noPortHint: '未配置监听端口，请先在项目详情里填写',
-      busyHint: '项目正在执行 Workbench 启动的命令，无需检测'
+      busyHint: '项目正在执行 Workbench 启动的命令，无需检测',
     }
   }
 
   async function install(id: string): Promise<void> {
     const project = await guardProject(id)
-    if (!project) return
+    if (!project)
+      return
     terminal.focusTerminal(id, 'install')
     const result = await window.workbench.install(id)
-    if (!result.ok) notifyError(result.error ?? '安装依赖失败')
+    if (!result.ok)
+      notifyError(result.error ?? '安装依赖失败')
   }
 
   async function start(id: string): Promise<void> {
     const project = await guardProject(id)
-    if (!project) return
+    if (!project)
+      return
 
     // Node 版本不满足只提示不阻断（F-9.3）
     const node = await window.workbench.checkNodeVersion(id)
@@ -493,16 +510,19 @@ export const useProjectsStore = defineStore('projects', () => {
     // 先看项目配置的监听端口，其次用本次会话里从启动日志识别到的那个。
     // 两个都没有就静默跳过 —— 不知道端口就无从检测占用。
     const rt = terminal.runtimeOf(id)
-    if (!(await terminal.ensurePortFree(project.port ?? rt.port, rt))) return
+    if (!(await terminal.ensurePortFree(project.port ?? rt.port, rt)))
+      return
 
     terminal.focusTerminal(id, 'start')
     const result = await window.workbench.start(id)
-    if (!result.ok) notifyError(result.error ?? '启动失败')
+    if (!result.ok)
+      notifyError(result.error ?? '启动失败')
   }
 
   async function build(id: string, script?: string): Promise<void> {
     const project = await guardProject(id)
-    if (!project) return
+    if (!project)
+      return
 
     const target = script ?? project.scripts.defaultBuild ?? project.scripts.build[0]
     if (!target) {
@@ -512,13 +532,15 @@ export const useProjectsStore = defineStore('projects', () => {
 
     terminal.focusTerminal(id, 'build')
     const result = await window.workbench.build(id, target)
-    if (!result.ok) notifyError(result.error ?? '打包失败')
+    if (!result.ok)
+      notifyError(result.error ?? '打包失败')
   }
 
   /** 停止项目；外部启动的那种按端口结束，先确认一次（实现见 terminal store） */
   function stop(id: string): Promise<boolean> {
     const project = findProject(id)
-    if (!project) return Promise.resolve(false)
+    if (!project)
+      return Promise.resolve(false)
 
     // 卡片显示的是哪一类操作就停哪一类：一个项目可以同时挂着 dev server 和一次打包
     const kind = terminal.runtimeOf(id).kind
@@ -528,21 +550,23 @@ export const useProjectsStore = defineStore('projects', () => {
   /** 检测项目是否已经在运行（判据是端口占用，实现见 terminal store） */
   function detect(id: string, options: { silent?: boolean } = {}): Promise<boolean> {
     const project = findProject(id)
-    if (!project) return Promise.resolve(false)
+    if (!project)
+      return Promise.resolve(false)
 
     return terminal.detectTarget({ ...targetOf(project), port: project.port }, options)
   }
 
   /** 启动应用后做一次全量检测：项目可能是在 Workbench 之外启动、至今还跑着的 */
   async function detectAll(): Promise<void> {
-    const targets = projects.value.filter((project) => project.port)
-    await Promise.all(targets.map((project) => detect(project.id, { silent: true })))
+    const targets = projects.value.filter(project => project.port)
+    await Promise.all(targets.map(project => detect(project.id, { silent: true })))
   }
 
   /** 执行项目配置里的第 index 条自定义命令（F-2.6） */
   async function runCustom(id: string, index: number): Promise<void> {
     const project = await guardProject(id)
-    if (!project) return
+    if (!project)
+      return
 
     const command = project.scripts.custom?.[index]
     if (!command) {
@@ -552,7 +576,8 @@ export const useProjectsStore = defineStore('projects', () => {
 
     terminal.focusTerminal(id, `custom:${index}`)
     const result = await window.workbench.runCustom(id, index)
-    if (!result.ok) notifyError(result.error ?? `执行「${command.name}」失败`)
+    if (!result.ok)
+      notifyError(result.error ?? `执行「${command.name}」失败`)
   }
 
   /** 重启：停止并等进程真正退出后再启动，不再靠固定延时赌时序 */
@@ -561,8 +586,10 @@ export const useProjectsStore = defineStore('projects', () => {
     if (rt && RUNNING_STATUS.includes(rt.status)) {
       if (rt.external) {
         // 外部进程没有退出事件可等，结束成功与否看 stop 的返回值
-        if (!(await stop(id))) return
-      } else {
+        if (!(await stop(id)))
+          return
+      }
+      else {
         await window.workbench.stop(id, rt.kind)
         if (!(await terminal.waitForIdle(id))) {
           notifyError('停止超时，请稍后再试')
@@ -575,12 +602,14 @@ export const useProjectsStore = defineStore('projects', () => {
 
   async function reveal(targetPath: string): Promise<void> {
     const result = await window.workbench.reveal(targetPath)
-    if (!result.ok) notifyError(result.error ?? '打开目录失败')
+    if (!result.ok)
+      notifyError(result.error ?? '打开目录失败')
   }
 
   async function openInVSCode(targetPath: string): Promise<void> {
     const result = await window.workbench.openInVSCode(targetPath)
-    if (!result.ok) notifyError(result.error ?? '打开 VS Code 失败')
+    if (!result.ok)
+      notifyError(result.error ?? '打开 VS Code 失败')
   }
 
   // ---------- 路径有效性 ----------
@@ -597,7 +626,8 @@ export const useProjectsStore = defineStore('projects', () => {
     }
     try {
       pathValidity.value = await window.workbench.checkProjectPaths()
-    } catch (error) {
+    }
+    catch (error) {
       // 这条通道失败会 reject,而它总被 void 调用(init / 窗口聚焦),吞下异常保持旧的有效性
       console.warn('检查项目路径失败', error)
     }
@@ -606,10 +636,12 @@ export const useProjectsStore = defineStore('projects', () => {
   /** 目录被移动或删除后重新选择位置，并重新识别命令/包管理器 */
   async function relocate(id: string): Promise<void> {
     const project = findProject(id)
-    if (!project) return
+    if (!project)
+      return
 
     const picked = await window.workbench.pickDirectory()
-    if (!picked) return
+    if (!picked)
+      return
 
     const result = await window.workbench.relocateProject(id, picked)
     if (!result.ok || !result.data) {
@@ -617,7 +649,7 @@ export const useProjectsStore = defineStore('projects', () => {
       return
     }
 
-    const index = projects.value.findIndex((p) => p.id === id)
+    const index = projects.value.findIndex(p => p.id === id)
     if (index !== -1) {
       // 同 onProjectChanged：先登记快照，避免这次替换被 watch 当成用户编辑推回主进程
       pushedSnapshot.set(id, JSON.stringify(editableOf(result.data)))
@@ -644,20 +676,24 @@ export const useProjectsStore = defineStore('projects', () => {
   }
 
   function groupName(groupId?: string): string {
-    if (!groupId) return '未分组'
-    return groups.value.find((g) => g.id === groupId)?.name ?? '未分组'
+    if (!groupId)
+      return '未分组'
+    return groups.value.find(g => g.id === groupId)?.name ?? '未分组'
   }
 
   /** 「运行中」筛选标签上的计数：只数项目，不含独立命令（那是命令卡片的事） */
   const runningCount = computed(
-    () => projects.value.filter((p) => terminal.runtimes[p.id]?.status === 'running').length
+    () => projects.value.filter(p => terminal.runtimes[p.id]?.status === 'running').length,
   )
 
   /** 分组筛选：「全部」不筛；其余按运行状态或所属分组归拣 */
   function matchesFilter(project: Project): boolean {
-    if (groupFilter.value === 'all') return true
-    if (groupFilter.value === 'running') return terminal.runtimes[project.id]?.status === 'running'
-    if (groupFilter.value === UNGROUPED) return !project.groupId
+    if (groupFilter.value === 'all')
+      return true
+    if (groupFilter.value === 'running')
+      return terminal.runtimes[project.id]?.status === 'running'
+    if (groupFilter.value === UNGROUPED)
+      return !project.groupId
     return project.groupId === groupFilter.value
   }
 
@@ -667,7 +703,7 @@ export const useProjectsStore = defineStore('projects', () => {
    * 故意不含 lastUsedAt —— 否则点一下「启动」，那张卡片立刻跳到第一位，看着像列表被改动了。
    * 只有切换排序方式、增删项目、或重启应用时，才按最新的最近使用时间重排。
    */
-  const orderKey = computed(() => `${sortBy.value}|${projects.value.map((p) => p.id).join(',')}`)
+  const orderKey = computed(() => `${sortBy.value}|${projects.value.map(p => p.id).join(',')}`)
 
   const displayOrder = ref<string[]>([])
 
@@ -677,24 +713,27 @@ export const useProjectsStore = defineStore('projects', () => {
       const list = projects.value.slice()
       if (sortBy.value === 'recent') {
         list.sort((a, b) => (b.lastUsedAt ?? 0) - (a.lastUsedAt ?? 0))
-      } else if (sortBy.value === 'name') {
+      }
+      else if (sortBy.value === 'name') {
         list.sort((a, b) => a.name.localeCompare(b.name))
-      } else {
+      }
+      else {
         list.sort((a, b) => a.createdAt - b.createdAt)
       }
-      displayOrder.value = list.map((p) => p.id)
+      displayOrder.value = list.map(p => p.id)
     },
     // sync：避免筛选条件变化后出现一帧旧顺序
-    { immediate: true, flush: 'sync' }
+    { immediate: true, flush: 'sync' },
   )
 
   /** 按展示顺序排好的全部项目（不筛）；筛选列表从它出发 */
   const orderedProjects = computed(() => {
-    const byId = new Map(projects.value.map((p) => [p.id, p]))
+    const byId = new Map(projects.value.map(p => [p.id, p]))
     const list: Project[] = []
     for (const id of displayOrder.value) {
       const project = byId.get(id)
-      if (project) list.push(project)
+      if (project)
+        list.push(project)
     }
     return list
   })
@@ -708,10 +747,10 @@ export const useProjectsStore = defineStore('projects', () => {
    * 顺序就是项目页的展示顺序（`orderedProjects`），不是最近使用时间 —— 这是一份**挑出来的**
    * 名单，用户按什么顺序摆的项目页，首页就照着来；按时间排的话每启动一次卡片就会跳位置。
    */
-  const homeProjects = computed(() => orderedProjects.value.filter((p) => p.home === true))
+  const homeProjects = computed(() => orderedProjects.value.filter(p => p.home === true))
 
   const drawerProject = computed(() =>
-    drawerProjectId.value ? findProject(drawerProjectId.value) ?? null : null
+    drawerProjectId.value ? findProject(drawerProjectId.value) ?? null : null,
   )
 
   return {
@@ -759,6 +798,6 @@ export const useProjectsStore = defineStore('projects', () => {
     closeDrawer,
     resolvedPm,
     groupName,
-    refreshActivity
+    refreshActivity,
   }
 })

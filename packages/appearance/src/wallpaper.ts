@@ -30,17 +30,21 @@ export function builtinReference(id: string): string {
  * 另外主进程只拿 id 去已扫描出来的列表里查，不拼路径，这里是第二道闸。
  */
 export function isSafeWallpaperId(value: unknown): boolean {
-  if (typeof value !== 'string' || !value.trim()) return false
-  if (value.includes('..')) return false
-  return !/[/\\:*?"<>|\u0000-\u001f]/.test(value)
+  if (typeof value !== 'string' || !value.trim())
+    return false
+  if (value.includes('..'))
+    return false
+  return !/[/\\:*?"<>|\u0000-\u001F]/.test(value)
 }
 
 /** 取出内置壁纸 id；不是内置引用、或 id 不合法时返回 null */
 export function builtinIdOf(value: unknown): string | null {
-  if (typeof value !== 'string') return null
+  if (typeof value !== 'string')
+    return null
 
   const text = value.trim()
-  if (!text.startsWith(BUILTIN_WALLPAPER_PREFIX)) return null
+  if (!text.startsWith(BUILTIN_WALLPAPER_PREFIX))
+    return null
 
   const id = text.slice(BUILTIN_WALLPAPER_PREFIX.length)
   return isSafeWallpaperId(id) ? id : null
@@ -48,10 +52,12 @@ export function builtinIdOf(value: unknown): string | null {
 
 /** 这个文件名能不能当壁纸（按后缀判断，真正的解码能力由后端 imaging.rs 的 image crate 说了算） */
 export function isWallpaperFile(fileName: unknown): boolean {
-  if (typeof fileName !== 'string') return false
+  if (typeof fileName !== 'string')
+    return false
 
   const dot = fileName.lastIndexOf('.')
-  if (dot <= 0) return false
+  if (dot <= 0)
+    return false
 
   const ext = fileName.slice(dot + 1).toLowerCase()
   return (WALLPAPER_EXTENSIONS as readonly string[]).includes(ext)

@@ -42,7 +42,7 @@ const attrs = useAttrs()
 const forwarded = computed(() =>
   props.penetrable
     ? { ...attrs, modal: false, modalPenetrable: true, closeOnClickModal: false }
-    : attrs
+    : attrs,
 )
 
 /** el-dialog 实例上只用到这一个方法（见上面「关掉之后把位置复位」） */

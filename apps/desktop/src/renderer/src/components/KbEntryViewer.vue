@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { KbEntryMeta } from '@workbench/kb'
 /**
  * 条目阅读（右栏点开一个条目之后）：只读渲染 Markdown 正文。
  *
@@ -10,7 +11,6 @@
  * 这里只管把 MarkdownView 那个口子打开，解析成哪一条是父层的事。
  */
 import { ArrowLeft } from '@element-plus/icons-vue'
-import type { KbEntryMeta } from '@workbench/kb'
 import MarkdownView from '@/components/MarkdownView.vue'
 import PanelLoading from '@/components/PanelLoading.vue'
 
@@ -20,7 +20,7 @@ defineProps<{
   loading: boolean
 }>()
 
-const emit = defineEmits<{ back: []; internal: [href: string] }>()
+const emit = defineEmits<{ back: [], internal: [href: string] }>()
 
 /** 出处那行的前缀：指回原始资料的与外部出处的说法不一样 */
 function sourceLabel(entry: KbEntryMeta): string {
@@ -32,12 +32,20 @@ function sourceLabel(entry: KbEntryMeta): string {
   <div class="kb-viewer">
     <header class="kb-viewer__head">
       <div class="kb-viewer__bar">
-        <el-button size="small" :icon="ArrowLeft" @click="emit('back')">概览</el-button>
+        <el-button size="small" :icon="ArrowLeft" @click="emit('back')">
+          概览
+        </el-button>
       </div>
-      <h2 class="kb-viewer__title">{{ entry.title }}</h2>
+      <h2 class="kb-viewer__title">
+        {{ entry.title }}
+      </h2>
       <p class="kb-viewer__meta">
-        <template v-if="entry.status">（{{ entry.status === 'draft' ? '草稿' : entry.status === 'reviewed' ? '已核对' : entry.status }}）</template>
-        <template v-if="entry.updated">更新于 {{ entry.updated }}</template>
+        <template v-if="entry.status">
+          （{{ entry.status === 'draft' ? '草稿' : entry.status === 'reviewed' ? '已核对' : entry.status }}）
+        </template>
+        <template v-if="entry.updated">
+          更新于 {{ entry.updated }}
+        </template>
       </p>
       <p v-if="entry.source" class="kb-viewer__source" :title="entry.source">
         {{ sourceLabel(entry) }}：<span class="mono">{{ entry.source }}</span>

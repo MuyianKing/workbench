@@ -1,3 +1,4 @@
+import type { AccountProfile, WorkbenchApi } from '@/types'
 /**
  * 适配层的同步入口：**没登录就不该有任何一次推 / 拉**。
  *
@@ -7,7 +8,6 @@
  * 每条用例 `vi.resetModules()` 重新导入（模块级的同步节流状态要清干净）。
  */
 import { beforeAll, describe, expect, it, vi } from 'vitest'
-import type { AccountProfile, WorkbenchApi } from '@/types'
 
 const REPO = 'git@example.com:me/sync.git'
 const ACCOUNT: AccountProfile = {
@@ -15,7 +15,7 @@ const ACCOUNT: AccountProfile = {
   id: '1',
   login: 'muyian',
   name: 'MUYIAN',
-  avatar: null
+  avatar: null,
 }
 
 /** 推上去的那些 publish 调用 */
@@ -55,8 +55,8 @@ beforeAll(() => {
           default:
             return Promise.resolve(null)
         }
-      }
-    }
+      },
+    },
   }
 })
 

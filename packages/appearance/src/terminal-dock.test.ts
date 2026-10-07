@@ -1,10 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  TERMINAL_BUTTON_TOP_DEFAULT,
-  TERMINAL_BUTTON_TOP_MAX,
-  TERMINAL_BUTTON_TOP_MIN,
-  clampTerminalButtonTop
-} from './terminal-dock'
+import { clampTerminalButtonTop, TERMINAL_BUTTON_TOP_DEFAULT, TERMINAL_BUTTON_TOP_MAX, TERMINAL_BUTTON_TOP_MIN } from './terminal-dock'
 
 describe('clampTerminalButtonTop', () => {
   it('区间内的值原样返回', () => {

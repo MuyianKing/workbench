@@ -1,4 +1,9 @@
 <script setup lang="ts">
+import type { ProjectColor } from '@workbench/core'
+import type { WorkLogEntry } from '@/types'
+import { CircleCheck, Delete, EditPen } from '@element-plus/icons-vue'
+import { sanitizeProjectColor } from '@workbench/core'
+import { WORK_STATUS_LABELS } from '@workbench/work-log'
 /**
  * 时间轴上的一条工作记录。
  *
@@ -6,13 +11,9 @@
  * 内容很长时默认收起，留一个「展开」——一条日志写成一篇长文时，时间轴不该被它整段占满。
  */
 import { computed, ref, watch } from 'vue'
-import { CircleCheck, Delete, EditPen } from '@element-plus/icons-vue'
-import { sanitizeProjectColor, type ProjectColor } from '@workbench/core'
-import { WORK_STATUS_LABELS } from '@workbench/work-log'
 import MarkdownView from '@/components/MarkdownView.vue'
 import ProjectTag from '@/components/ProjectTag.vue'
 import { formatTimeOfDay, formatTimestamp } from '@/format'
-import type { WorkLogEntry } from '@/types'
 
 const props = defineProps<{
   entry: WorkLogEntry
@@ -45,8 +46,10 @@ const isDone = computed(() => props.entry.status === 'done')
  */
 function onCardClick(event: MouseEvent): void {
   const target = event.target as HTMLElement | null
-  if (target?.closest('a, button')) return
-  if (window.getSelection()?.toString()) return
+  if (target?.closest('a, button'))
+    return
+  if (window.getSelection()?.toString())
+    return
   emit('toggle', props.entry)
 }
 
@@ -60,7 +63,7 @@ const color = computed(() => sanitizeProjectColor(props.projectColor))
 const COLLAPSE_AT = 220
 
 const collapsible = computed(
-  () => props.entry.content.length > COLLAPSE_AT || props.entry.content.split('\n').length > 6
+  () => props.entry.content.length > COLLAPSE_AT || props.entry.content.split('\n').length > 6,
 )
 
 const expanded = ref(false)
@@ -70,7 +73,7 @@ watch(
   () => props.entry.id,
   () => {
     expanded.value = false
-  }
+  },
 )
 </script>
 

@@ -1,4 +1,9 @@
 <script setup lang="ts">
+import type { NoteDocument } from '@workbench/notes'
+import { Loading } from '@element-plus/icons-vue'
+import { imageFileName, imageMarkdown, NOTE_IMAGE_MAX_BYTES, resolveNoteLink } from '@workbench/notes'
+
+import Vditor from 'vditor'
 /**
  * 笔记正文编辑器（Vditor，即时渲染模式）。
  *
@@ -26,14 +31,10 @@
  * 正文里只有一个外链，于是笔记本搬到哪台机器、用哪个编辑器打开都成立。
  */
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { Loading } from '@element-plus/icons-vue'
-import Vditor from 'vditor'
-import 'vditor/dist/index.css'
-import { imageFileName, imageMarkdown, NOTE_IMAGE_MAX_BYTES } from '@workbench/notes'
-import { resolveNoteLink, type NoteDocument } from '@workbench/notes'
+import NoteContextMenu from '@/components/NoteContextMenu.vue'
 import { notifyWarning } from '@/notify'
 import { useSettingsStore } from '@/stores/settings'
-import NoteContextMenu from '@/components/NoteContextMenu.vue'
+import 'vditor/dist/index.css'
 
 const props = defineProps<{
   note: NoteDocument
@@ -55,7 +56,7 @@ const emit = defineEmits<{
    * 带上路径而不是让上层去看「当前打开的是哪一篇」：换篇时这里会先把上一篇没写完的改动冲出去，
    * 而那一刻上层的选中项已经是新的一篇了（按选中项取就会把上一篇的正文写进刚点开的那一篇）。
    */
-  change: [payload: { rel: string; content: string }]
+  change: [payload: { rel: string, content: string }]
   /**
    * 正文里点了一个指向**本笔记本里另一篇笔记**的链接（`[标题](./别的.md)`）：请上层打开它。
    *
@@ -107,7 +108,7 @@ const TOOLBAR = [
   'redo',
   '|',
   'outline',
-  'fullscreen'
+  'fullscreen',
 ]
 
 /** 输入防抖：一边打字一边整份落盘太费，停顿一下再写 */
@@ -132,10 +133,12 @@ const isDark = (): boolean => props.theme === 'dark'
 
 /** 编辑器现在的正文；还没初始化完（Vditor 的初始化是异步的）时返回 undefined */
 function currentValue(): string | undefined {
-  if (!editor) return undefined
+  if (!editor)
+    return undefined
   try {
     return editor.getValue()
-  } catch {
+  }
+  catch {
     return undefined
   }
 }
@@ -167,7 +170,8 @@ function flush(current?: string): void {
   // 现取的那一份优先：它比防抖攒下的更新，也是切换前编辑器里真正的样子
   const content = current ?? pending
   pending = null
-  if (content === undefined || content === null || sameText(content, saved)) return
+  if (content === undefined || content === null || sameText(content, saved))
+    return
 
   saved = content
   // **必须带上它是哪一篇**：换篇时这份改动属于上一篇，而 `props.note` 那时已经是新的了，
@@ -176,10 +180,12 @@ function flush(current?: string): void {
 }
 
 function schedule(content: string): void {
-  if (sameText(content, saved)) return
+  if (sameText(content, saved))
+    return
   pending = content
-  if (timer !== null) window.clearTimeout(timer)
-  timer = window.setTimeout(() => flush(), SAVE_DELAY)
+  if (timer !== null)
+    window.clearTimeout(timer)
+  timer = window.setTimeout(flush, SAVE_DELAY)
 }
 
 /** 换一篇：先把上一篇没写完的改动交出去，再整份换成新的 */
@@ -209,19 +215,22 @@ function load(node: NoteDocument): void {
  */
 async function onClick(event: MouseEvent): Promise<void> {
   const node = (event.target as HTMLElement | null)?.closest('[data-type="a"]')
-  if (!(node instanceof HTMLElement)) return
+  if (!(node instanceof HTMLElement))
+    return
 
   // IR 下这条链接不是 `<a>`、本来没有默认动作；预览 / 所见即所得模式渲染的是真 `<a>`，
   // 那两处这一下会把界面导航走，所以照旧拦掉
   event.preventDefault()
 
   // 没按 Ctrl 就是一次普通点击：什么都不做（光标归 Vditor 管）
-  if (!event.ctrlKey) return
+  if (!event.ctrlKey)
+    return
 
   const href = node.querySelector(':scope > .vditor-ir__marker--link')?.textContent ?? ''
   if (/^(https?:|mailto:)/i.test(href)) {
     const result = await window.workbench.openExternal(href)
-    if (!result.ok) console.warn('[workbench] 打开链接失败', result.error)
+    if (!result.ok)
+      console.warn('[workbench] 打开链接失败', result.error)
     return
   }
 
@@ -240,11 +249,12 @@ async function onClick(event: MouseEvent): Promise<void> {
 }
 
 /** 右键菜单的落点（视口坐标）；null 表示没开 */
-const menu = ref<{ x: number; y: number } | null>(null)
+const menu = ref<{ x: number, y: number } | null>(null)
 
 function openMenu(event: MouseEvent): void {
   // 编辑器还没建好时菜单没有可点的东西（动作全在那份工具带上）
-  if (!editor) return
+  if (!editor)
+    return
   menu.value = { x: event.clientX, y: event.clientY }
 }
 
@@ -256,7 +266,8 @@ function openMenu(event: MouseEvent): void {
  */
 function runAction(name: string): void {
   const elements = editor?.vditor.toolbar?.elements
-  if (!elements) return
+  if (!elements)
+    return
 
   // 标题在工具带上是一个下拉面板，动作挂在面板里的按钮上（data-tag="h1"…见 Vditor 的 Headings）
   const target = name.startsWith('heading')
@@ -286,8 +297,9 @@ function runAction(name: string): void {
  *      几秒钟很正常，而这几秒里正文里什么都不会出现 —— 没有提示就像按下去没反应。
  */
 async function uploadImages(files: File[]): Promise<string | null> {
-  const images = files.filter((file) => file.type.startsWith('image/'))
-  if (!images.length) return null
+  const images = files.filter(file => file.type.startsWith('image/'))
+  if (!images.length)
+    return null
 
   if (!settings.settings.noteImageRepo) {
     return '还没有配置图片仓库：设置 → 笔记图片，填一个 git 仓库地址后，粘贴的图片会自动传上去'
@@ -301,15 +313,17 @@ async function uploadImages(files: File[]): Promise<string | null> {
       }
 
       const data = await toBase64(file)
-      if (!data) return `读不出这张图片的内容：${file.name || '粘贴的图片'}`
+      if (!data)
+        return `读不出这张图片的内容：${file.name || '粘贴的图片'}`
 
       const result = await window.workbench.uploadNoteImage({
         repo: settings.settings.noteImageRepo,
         root: props.root,
         name: imageFileName({ mime: file.type }),
-        data
+        data,
       })
-      if (!result.ok || !result.data) return result.error ?? '上传图片失败'
+      if (!result.ok || !result.data)
+        return result.error ?? '上传图片失败'
 
       if (!result.data.url) {
         return `图片已经传进仓库（${result.data.path}），但这个仓库拼不出访问地址：图片只认得 GitHub / Gitee / GitLab 的仓库地址`
@@ -318,7 +332,8 @@ async function uploadImages(files: File[]): Promise<string | null> {
     }
 
     return null
-  } finally {
+  }
+  finally {
     // 收尾只有这里：中途 return（图太大、传失败）时角标一样要收掉，
     // 否则它会一直挂在编辑器上，像是一次永远传不完的上传
     uploading.value = 0
@@ -346,14 +361,16 @@ async function toBase64(file: File): Promise<string> {
       binary += String.fromCharCode(...bytes.subarray(index, index + CHUNK))
     }
     return btoa(binary)
-  } catch (error) {
+  }
+  catch (error) {
     console.warn('[workbench] 读取粘贴的图片失败', error)
     return ''
   }
 }
 
 onMounted(() => {
-  if (!host.value) return
+  if (!host.value)
+    return
 
   editingRel = props.note.rel
   saved = props.note.content
@@ -381,14 +398,14 @@ onMounted(() => {
     upload: {
       accept: 'image/*',
       multiple: true,
-      handler: uploadHandler
+      handler: uploadHandler,
     },
     theme: isDark() ? 'dark' : 'classic',
     preview: {
       delay: 300,
       // 正文区（内容主题）与代码块高亮各有一套配色，明暗切换时一起换
       theme: { current: isDark() ? 'dark' : 'light' },
-      hljs: { enable: true, lineNumber: false, style: isDark() ? 'github-dark' : 'github' }
+      hljs: { enable: true, lineNumber: false, style: isDark() ? 'github-dark' : 'github' },
     },
     /**
      * 链接**不交给 Vditor 打开**。
@@ -401,13 +418,13 @@ onMounted(() => {
      */
     link: { isOpen: false },
     toolbar: TOOLBAR,
-    input: (value) => schedule(value)
+    input: value => schedule(value),
   })
 })
 
 watch(
   () => props.note.rel,
-  () => load(props.note)
+  () => load(props.note),
 )
 
 watch(
@@ -416,7 +433,7 @@ watch(
     // 编辑器配色 / 内容主题 / 代码高亮是三处，setTheme 一次换掉
     const dark = theme === 'dark'
     editor?.setTheme(dark ? 'dark' : 'classic', dark ? 'dark' : 'light', dark ? 'github-dark' : 'github')
-  }
+  },
 )
 
 onBeforeUnmount(() => {
@@ -437,7 +454,7 @@ defineExpose({
   /** 立刻把攒着的那一份交出去，不等 `SAVE_DELAY` */
   flushAll: () => flush(currentValue()),
   /** 用上层刚读回来的那一份（`props.note`）整份重置正文 */
-  reloadFromProps: () => load(props.note)
+  reloadFromProps: () => load(props.note),
 })
 </script>
 
@@ -447,7 +464,9 @@ defineExpose({
     <div ref="host" class="editor" @click="onClick" @contextmenu.prevent="openMenu" />
 
     <div v-if="uploading" class="upload" role="status">
-      <el-icon class="is-loading"><Loading /></el-icon>
+      <el-icon class="is-loading">
+        <Loading />
+      </el-icon>
       <span>正在上传{{ uploading > 1 ? ` ${uploading} 张` : '' }}图片…</span>
     </div>
   </div>

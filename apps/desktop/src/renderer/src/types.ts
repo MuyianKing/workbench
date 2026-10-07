@@ -6,103 +6,55 @@
  * Project、AppSettings、WorkbenchApi、IPC 通道表与整份默认设置。
  */
 
-import { DEFAULT_APPEARANCE, TERMINAL_BUTTON_TOP_DEFAULT } from '@workbench/appearance'
-import { AI_PERMISSION_DEFAULT, AI_THINKING_DEFAULT } from '@workbench/ai'
-import { PROJECT_SORT_DEFAULT } from '@workbench/core'
-import { WORK_RANGE_DEFAULT, WORK_SORT_DEFAULT } from '@workbench/work-log'
-import type {
-  AccentInkMode,
-  AppearanceSettingKey,
-  EffectiveTheme,
-  ThemeConfig,
-  ThemeSource,
-  TopBarStyle,
-  ViewId
-} from '@workbench/appearance'
+import type { AiImagePayload, AiNewsArticle, AiNewsRefreshResult, AiNewsSourceInfo, AiNewsView, AiProvider, AiSession, AiSkillRef } from '@workbench/ai'
+import type { AccentInkMode, AppearanceSettingKey, EffectiveTheme, ThemeConfig, ThemeSource, TopBarStyle, ViewId } from '@workbench/appearance'
 import type { AccountProfile, AuthProvider } from '@workbench/auth'
-import type {
-  AiImagePayload,
-  AiNewsArticle,
-  AiNewsRefreshResult,
-  AiNewsSourceInfo,
-  AiNewsView,
-  AiProvider,
-  AiSession,
-  AiSkillRef
-} from '@workbench/ai'
-import type { MailAccount } from '@workbench/mail'
-import type {
-  ActiveSession,
-  ActivityCounts,
-  CommandEntry,
-  IconCacheEntry,
-  PackageManager,
-  ProjectColor,
-  ProjectSort,
-  QuickApp,
-  Result,
-  ScanResult
-} from '@workbench/core'
+import type { ActiveSession, ActivityCounts, CommandEntry, IconCacheEntry, PackageManager, ProjectColor, ProjectSort, QuickApp, Result, ScanResult } from '@workbench/core'
 import type { KbRepoState, KbScanEntry, KbSyncInput, KbSyncSummary } from '@workbench/kb'
-import type {
-  NoteChange,
-  NoteCreateInput,
-  NoteImageDeleteInput,
-  NoteImageDeleted,
-  NoteImageList,
-  NoteImageListInput,
-  NoteImageUploaded,
-  NoteImageUploadInput,
-  NoteNode,
-  NoteRepoState,
-  NoteSyncInput,
-  NoteSyncSummary,
-  NoteTextScan
-} from '@workbench/notes'
-import type {
-  SkillCommit,
-  SkillCompareFile,
-  SkillCreateInput,
-  SkillEntry,
-  SkillFileInfo,
-  SkillInstalledScan,
-  SkillLibraryState,
-  SkillSyncSummary
-} from '@workbench/skills'
+import type { MailAccount } from '@workbench/mail'
+import type { NoteChange, NoteCreateInput, NoteImageDeleted, NoteImageDeleteInput, NoteImageList, NoteImageListInput, NoteImageUploaded, NoteImageUploadInput, NoteNode, NoteRepoState, NoteSyncInput, NoteSyncSummary, NoteTextScan } from '@workbench/notes'
+import type { SkillCommit, SkillCompareFile, SkillCreateInput, SkillEntry, SkillFileInfo, SkillInstalledScan, SkillLibraryState, SkillSyncSummary } from '@workbench/skills'
 import type { SyncDeviceInfo, TokenUsageResult } from '@workbench/usage'
 import type { VaultEntry, VaultRecord } from '@workbench/vault'
 import type { VideoNode, VideoSource } from '@workbench/video'
-import type {
-  WorkLogEntry,
-  WorkLogInput,
-  WorkLogPatch,
-  WorkRange,
-  WorkSort
-} from '@workbench/work-log'
+import type { WorkLogEntry, WorkLogInput, WorkLogPatch, WorkRange, WorkSort } from '@workbench/work-log'
+import { AI_PERMISSION_DEFAULT, AI_THINKING_DEFAULT } from '@workbench/ai'
+import { DEFAULT_APPEARANCE, TERMINAL_BUTTON_TOP_DEFAULT } from '@workbench/appearance'
+import { PROJECT_SORT_DEFAULT } from '@workbench/core'
+import { WORK_RANGE_DEFAULT, WORK_SORT_DEFAULT } from '@workbench/work-log'
 
-/** 活跃度计数、首页布局、同步的其它设备也走这里导出，渲染层统一从 @/types 取类型 */
-export type { ActivityCounts } from '@workbench/core'
-export type { ThemeConfig } from '@workbench/appearance'
-export type { SyncDeviceInfo } from '@workbench/usage'
 export type {
   AiNewsArticle,
   AiNewsCache,
   AiNewsItem,
   AiNewsRefreshResult,
   AiNewsSourceInfo,
-  AiNewsView
+  AiNewsView,
 } from '@workbench/ai'
-export type { TokenUsageResult } from '@workbench/usage'
-export type { ProjectColor } from '@workbench/core'
+export type { ThemeConfig } from '@workbench/appearance'
 export type {
-  SkillCommit,
-  SkillCreateInput,
-  SkillEntry,
-  SkillFileInfo,
-  SkillInstalledScan,
-  SkillLibraryState,
-  SkillSyncSummary
-} from '@workbench/skills'
+  AppearanceSettings,
+  EffectiveTheme,
+  ThemeSource,
+  TopBarStyle,
+} from '@workbench/appearance'
+export { TOP_BAR_STYLES } from '@workbench/appearance'
+export type { AccountProfile, AuthProvider } from '@workbench/auth'
+/** 活跃度计数、首页布局、同步的其它设备也走这里导出，渲染层统一从 @/types 取类型 */
+export type { ActivityCounts } from '@workbench/core'
+export type { ProjectColor } from '@workbench/core'
+// 下面这几样原先定义在本文件，monorepo 化后类型跟着自己的域走（Result / PackageManager /
+// ScanResult / CommandEntry / QuickApp / IconCacheEntry / ActiveSession 在 core，
+// 账号那两样在 auth，主题与顶栏那批在 appearance），这里保留原来的出口形状。
+export type {
+  ActiveSession,
+  CommandEntry,
+  IconCacheEntry,
+  PackageManager,
+  QuickApp,
+  Result,
+  ScanResult,
+} from '@workbench/core'
 export type {
   KbEntryMeta,
   KbIndexInfo,
@@ -112,9 +64,8 @@ export type {
   KbScanEntry,
   KbStats,
   KbSyncInput,
-  KbSyncSummary
+  KbSyncSummary,
 } from '@workbench/kb'
-export type { WorkLogEntry, WorkLogInput, WorkLogPatch } from '@workbench/work-log'
 export type {
   NoteChange,
   NoteCreateInput,
@@ -124,40 +75,32 @@ export type {
   NoteNode,
   NoteRepoState,
   NoteSyncInput,
-  NoteSyncSummary
+  NoteSyncSummary,
 } from '@workbench/notes'
 export type {
   NoteImage,
   NoteImageAsset,
-  NoteImageDeleteInput,
   NoteImageDeleted,
+  NoteImageDeleteInput,
   NoteImageList,
   NoteImageListInput,
   NoteImageUploaded,
   NoteImageUploadInput,
-  NoteTextScan
+  NoteTextScan,
 } from '@workbench/notes'
+export type {
+  SkillCommit,
+  SkillCreateInput,
+  SkillEntry,
+  SkillFileInfo,
+  SkillInstalledScan,
+  SkillLibraryState,
+  SkillSyncSummary,
+} from '@workbench/skills'
+export type { SyncDeviceInfo } from '@workbench/usage'
+export type { TokenUsageResult } from '@workbench/usage'
 export type { VideoNode, VideoSource } from '@workbench/video'
-// 下面这几样原先定义在本文件，monorepo 化后类型跟着自己的域走（Result / PackageManager /
-// ScanResult / CommandEntry / QuickApp / IconCacheEntry / ActiveSession 在 core，
-// 账号那两样在 auth，主题与顶栏那批在 appearance），这里保留原来的出口形状。
-export type {
-  Result,
-  PackageManager,
-  ScanResult,
-  CommandEntry,
-  QuickApp,
-  IconCacheEntry,
-  ActiveSession
-} from '@workbench/core'
-export type { AccountProfile, AuthProvider } from '@workbench/auth'
-export type {
-  ThemeSource,
-  EffectiveTheme,
-  TopBarStyle,
-  AppearanceSettings
-} from '@workbench/appearance'
-export { TOP_BAR_STYLES } from '@workbench/appearance'
+export type { WorkLogEntry, WorkLogInput, WorkLogPatch } from '@workbench/work-log'
 
 export type ProjectStatus = 'idle' | 'installing' | 'running' | 'building' | 'success' | 'failed'
 
@@ -683,7 +626,7 @@ export interface AuthStatus {
    * 由 Rust 侧给出而不是这里写死：它必须和回环监听实际用的地址逐字一致。
    */
   redirectUri: string
-  /** 凭据管理器里确实有 token 的那些平台。**这才是「已登录」的判据。** */
+  /** 凭据管理器里确实有 token 的那些平台。**这才是「已登录」的判据。 */
   providers: AuthProvider[]
   /**
    * 已登录账号的显示资料（昵称 / 头像 / 登录名），未登录是 null。
@@ -719,10 +662,10 @@ export interface LoginPoll {
  * **取消单独占一档，没有被并进失败**：关掉弹窗、改主意都是正常操作，
  * 界面上不该为此弹一个红色错误 —— 真要报错就得能在文案上把这两件事分开。
  */
-export type LoginOutcome =
-  | { status: 'ok'; account: AccountProfile }
-  | { status: 'cancelled' }
-  | { status: 'failed'; error: string }
+export type LoginOutcome
+  = | { status: 'ok', account: AccountProfile }
+    | { status: 'cancelled' }
+    | { status: 'failed', error: string }
 
 /** 持久化到磁盘的数据结构 */
 export interface PersistedData {
@@ -1052,7 +995,7 @@ export interface AiRunInput {
 }
 
 export interface WorkbenchApi {
-  versions: { node: string; chrome: string }
+  versions: { node: string, chrome: string }
   /**
    * 挑一个目录。
    * title 用于给不同用途换标题（选项目目录 / 选输出目录），不传就是「选择项目目录」。
@@ -1066,21 +1009,21 @@ export interface WorkbenchApi {
    */
   pickFile: (
     title?: string,
-    filters?: Array<{ name: string; extensions: string[] }>
+    filters?: Array<{ name: string, extensions: string[] }>,
   ) => Promise<string | null>
   /** 挑多个文件（邮箱发信的附件用）；取消回 null —— 那不是失败，调用方不该报错 */
   pickFiles: (
     title?: string,
-    filters?: Array<{ name: string; extensions: string[] }>
+    filters?: Array<{ name: string, extensions: string[] }>,
   ) => Promise<string[] | null>
   /** 「另存为」挑一个保存路径（邮箱附件下载用）；取消回 null，不是失败 */
   pickSavePath: (options: {
     title?: string
     defaultPath?: string
-    filters?: Array<{ name: string; extensions: string[] }>
+    filters?: Array<{ name: string, extensions: string[] }>
   }) => Promise<string | null>
   scanProject: (dirPath: string) => Promise<Result<ScanResult>>
-  listProjects: () => Promise<{ projects: Project[]; groups: ProjectGroup[] }>
+  listProjects: () => Promise<{ projects: Project[], groups: ProjectGroup[] }>
   addProject: (input: AddProjectInput) => Promise<Result<Project>>
   updateProject: (id: string, patch: ProjectPatch) => Promise<Result<Project>>
   removeProject: (id: string) => Promise<Result<null>>
@@ -1306,7 +1249,7 @@ export interface WorkbenchApi {
     dir: string,
     id: string,
     rel: string,
-    content: string
+    content: string,
   ) => Promise<Result<null>>
   /** 删除技能（整棵目录），并提交这次删除 */
   removeSkill: (root: string, dir: string, id: string) => Promise<Result<null>>
@@ -1325,7 +1268,7 @@ export interface WorkbenchApi {
     root: string,
     dir: string,
     id: string,
-    hash: string
+    hash: string,
   ) => Promise<Result<SkillCompareFile[]>>
   /**
    * 把技能安装到指定项目（复制到 `<项目>/.agents/skills/<id>/`）。
@@ -1336,7 +1279,7 @@ export interface WorkbenchApi {
     dir: string,
     id: string,
     projectDir: string,
-    overwrite: boolean
+    overwrite: boolean,
   ) => Promise<Result<null>>
   /**
    * 各个项目里这份技能的 SKILL.md 副本（**只读**）：详情页拿它与库中的内容比对，
@@ -1352,7 +1295,7 @@ export interface WorkbenchApi {
     root: string,
     dir: string,
     id: string,
-    projectDirs: string[]
+    projectDirs: string[],
   ) => Promise<Result<SkillInstalledScan>>
   /**
    * 技能目录里的全部文件（相对路径 + 字节数）：一个技能往往不止 SKILL.md，
@@ -1404,7 +1347,7 @@ export interface WorkbenchApi {
     root: string,
     zip: string,
     id: string | null,
-    overwrite: boolean
+    overwrite: boolean,
   ) => Promise<Result<unknown>>
   /**
    * 装一个本机文件夹（那个文件夹本身就是一个技能：根上要有 SKILL.md）。
@@ -1414,7 +1357,7 @@ export interface WorkbenchApi {
     root: string,
     source: string,
     id: string | null,
-    overwrite: boolean
+    overwrite: boolean,
   ) => Promise<Result<unknown>>
   /**
    * 从用户粘的地址装（GET 一次、跟随跳转）。**这是应用的一条网络出口**：主机由用户给、
@@ -1424,7 +1367,7 @@ export interface WorkbenchApi {
     root: string,
     url: string,
     id: string | null,
-    overwrite: boolean
+    overwrite: boolean,
   ) => Promise<Result<unknown>>
   /** 卸掉一个技能（删掉那个技能目录整棵）；界面那一侧先问过一次 */
   piSkillRemove: (root: string, id: string) => Promise<Result<null>>
@@ -1521,7 +1464,7 @@ export interface WorkbenchApi {
   checkPackageManagers: () => Promise<PackageManagerStatus>
   /** 用 npm 全局安装 yarn / pnpm；返回的 status 是装完（或装失败）后重新探测的结果 */
   installPackageManager: (
-    pm: InstallablePackageManager
+    pm: InstallablePackageManager,
   ) => Promise<Result<PackageManagerStatus>>
   checkPort: (port: number) => Promise<PortCheckResult>
   killPortProcess: (port: number) => Promise<Result<null>>
@@ -1580,7 +1523,7 @@ export interface WorkbenchApi {
    */
   authLogin: (
     provider: AuthProvider,
-    onAuthUrl?: (authUrl: string, opened: boolean) => void
+    onAuthUrl?: (authUrl: string, opened: boolean) => void,
   ) => Promise<LoginOutcome>
   /**
    * 手动兜底：回调没跳回来时，把浏览器地址栏里那条完整地址直接交上去。
@@ -1715,5 +1658,5 @@ export const DEFAULT_SETTINGS: AppSettings = {
   videoDir: '',
   videoDirs: [],
   videoTreeExpanded: [],
-  videoLastRel: ''
+  videoLastRel: '',
 }

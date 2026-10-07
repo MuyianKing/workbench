@@ -46,7 +46,8 @@ export interface DiffRow {
 /** 把一份文本拆成一行一行（先做换行归一；末尾的换行符不产生空的最后一行） */
 function splitLines(text: string): string[] {
   const normalized = text.replace(/\r\n/g, '\n')
-  if (!normalized) return []
+  if (!normalized)
+    return []
   return normalized.replace(/\n$/, '').split('\n')
 }
 
@@ -55,13 +56,15 @@ function segmentsOfSide(line: string, parts: LinePart[], side: 'old' | 'new'): D
   const segments: DiffSegment[] = []
   for (const part of parts) {
     const keep = side === 'old' ? part.removed || !part.added : part.added || !part.removed
-    if (!keep) continue
+    if (!keep)
+      continue
     segments.push({ text: part.value, changed: side === 'old' ? part.removed === true : part.added === true })
   }
   // 不变式兜底：段拼接必须还原这一行本身。对不上（分词边界与整行不一致的极端情况）
   // 就放弃词级高亮，整行交给底色 —— 高亮是锦上添花，错一分都不能
-  const joined = segments.map((segment) => segment.text).join('')
-  if (joined !== line) return [{ text: line, changed: false }]
+  const joined = segments.map(segment => segment.text).join('')
+  if (joined !== line)
+    return [{ text: line, changed: false }]
   return segments
 }
 
@@ -71,7 +74,7 @@ function changeRow(oldNo: number, newNo: number, oldLine: string, newLine: strin
   return {
     type: 'change',
     left: { no: oldNo, segments: segmentsOfSide(oldLine, parts, 'old') },
-    right: { no: newNo, segments: segmentsOfSide(newLine, parts, 'new') }
+    right: { no: newNo, segments: segmentsOfSide(newLine, parts, 'new') },
   }
 }
 
@@ -113,9 +116,11 @@ export function buildDiffRows(oldText: string, newText: string): DiffRow[] {
   for (const part of parts) {
     if (part.removed) {
       removed.push(...splitLines(part.value))
-    } else if (part.added) {
+    }
+    else if (part.added) {
       added.push(...splitLines(part.value))
-    } else {
+    }
+    else {
       flush()
       for (const line of splitLines(part.value)) {
         oldNo += 1

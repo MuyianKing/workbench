@@ -16,22 +16,22 @@
  * 清行（`2K`）、上移（`1A`）、回车到行首（`G`）、颜色（`92m`、`38;5;196m`）、
  * 隐藏光标（`?25l`）都是这一类，全部丢掉。
  */
-const CSI = /\u001b\[[0-9;:<=>?]*[ -/]*[@-~]/g
+const CSI = /\u001B\[[0-9;:<=>?]*[ -/]*[@-~]/g
 
 /** OSC：`ESC ] ... BEL`（或以 ST 结尾），改窗口标题、写超链接用，尾巴要一起吃掉 */
-const OSC = /\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)/g
+const OSC = /\u001B\][^\u0007\u001B]*(?:\u0007|\u001B\\)/g
 
 /**
  * 其余短的转义：字符集切换 `ESC ( B`，以及 `ESC =`、`ESC 7` 这种两字符序列
  * （后者的第二个字符落在 0x30–0x3F 与 0x40–0x5F 两段里）。
  */
-const SHORT_ESCAPE = /\u001b[()#][0-9A-Za-z]|\u001b[0-?]|\u001b[@-Z\\-_]/g
+const SHORT_ESCAPE = /\u001B[()#][0-9A-Za-z]|\u001B[0-?]|\u001B[@-Z\\-_]/g
 
 /**
  * 收尾：上一步没匹配掉的 C0 / C1 控制字符（包括落单的 ESC）、DEL。
  * 空白只留 `\t`（对齐有意义）——`\r` 单独在这里处理，见 `cleanLogLine`。
  */
-const CONTROL = /[\u0000-\u0008\u000b-\u000c\u000e-\u001f\u007f-\u009f]/g
+const CONTROL = /[\u0000-\u0008\v\f\u000E-\u001F\u007F-\u009F]/g
 
 /** 去掉控制序列，其余一字不改 */
 export function stripAnsi(text: string): string {

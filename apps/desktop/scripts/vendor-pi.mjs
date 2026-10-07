@@ -22,11 +22,11 @@ import { execFileSync } from 'node:child_process'
 import {
   existsSync,
   mkdirSync,
-  readFileSync,
   readdirSync,
+  readFileSync,
   rmSync,
   statSync,
-  writeFileSync
+  writeFileSync,
 } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -44,7 +44,7 @@ const CLI = join(
   'pi-coding-agent',
   'dist',
   'bundle',
-  'cli.js'
+  'cli.js',
 )
 /** 预填表的落点：添加模型时认能力默认值（@workbench/ai 的 builtinModelMeta），进版本库 */
 const CATALOG_TARGET = join(root, '..', '..', 'packages', 'ai', 'src', 'ai-builtin-models.generated.ts')
@@ -63,7 +63,7 @@ const PRUNE = [
   '@esbuild',
   'openai',
   '@anthropic-ai',
-  'web-streams-polyfill'
+  'web-streams-polyfill',
 ]
 
 /**
@@ -74,12 +74,14 @@ const PRUNE = [
  */
 function findDeps(name, dir = TARGET) {
   const modules = join(dir, 'node_modules')
-  if (!existsSync(modules)) return []
+  if (!existsSync(modules))
+    return []
   const found = existsSync(join(modules, name)) ? [join(modules, name)] : []
   for (const entry of readdirSync(modules)) {
-    if (entry === '.bin') continue
+    if (entry === '.bin')
+      continue
     const children = entry.startsWith('@')
-      ? readdirSync(join(modules, entry)).map((sub) => `${entry}/${sub}`)
+      ? readdirSync(join(modules, entry)).map(sub => `${entry}/${sub}`)
       : [entry]
     for (const child of children) {
       found.push(...findDeps(name, join(modules, child)))
@@ -91,18 +93,20 @@ function findDeps(name, dir = TARGET) {
 /** Pi 自带的模型目录（models.dev 那份快照，按厂商一个 JSON）；预填表从这儿剪出来 */
 function catalogSource() {
   return findDeps('@earendil-works/pi-ai')
-    .map((dir) => join(dir, 'dist', 'providers', 'data'))
-    .find((dir) => existsSync(dir))
+    .map(dir => join(dir, 'dist', 'providers', 'data'))
+    .find(dir => existsSync(dir))
 }
 
 function dirSize(dir) {
   const info = statSync(dir, { throwIfNoEntry: false })
-  if (!info) return 0
-  if (!info.isDirectory()) return info.size
+  if (!info)
+    return 0
+  if (!info.isDirectory())
+    return info.size
   return readdirSync(dir).reduce((sum, entry) => sum + dirSize(join(dir, entry)), 0)
 }
 
-const mb = (bytes) => (bytes / 1048576).toFixed(1)
+const mb = bytes => (bytes / 1048576).toFixed(1)
 
 /**
  * Pi 自带的模型目录 → 预填表（`AI_BUILTIN_MODELS`）：每家一份、按模型 id 收**添加模型时
@@ -113,7 +117,7 @@ const mb = (bytes) => (bytes / 1048576).toFixed(1)
 function emitCatalog() {
   const source = catalogSource()
   const files = source
-    ? readdirSync(source).filter((name) => name.endsWith('.json')).sort()
+    ? readdirSync(source).filter(name => name.endsWith('.json')).sort()
     : []
   if (!source || !files.length) {
     console.error('[vendor-pi] 找不到 Pi 的内置模型数据（dist/providers/data），目录生成失败')
@@ -134,26 +138,27 @@ function emitCatalog() {
             ? { maxTokens: model.maxTokens }
             : {}),
           ...(model.reasoning === true ? { reasoning: true } : {}),
-          ...(Array.isArray(model.input) && model.input.includes('image') ? { image: true } : {})
+          ...(Array.isArray(model.input) && model.input.includes('image') ? { image: true } : {}),
         }
       }
     }
     const provider = file.replace(/\.json$/, '')
-    if (Object.keys(models).length) providers[provider] = models
+    if (Object.keys(models).length)
+      providers[provider] = models
   }
-  const header =
-    `/* 由 scripts/vendor-pi.mjs 从内置 Pi（${PI_VERSION}）自带的模型目录生成 —— 勿手改，` +
-    `重跑 pnpm run vendor:pi 再生。添加模型时的默认值就从这份表认（@workbench/ai 的 builtinModelMeta）。 */\n`
-  const body =
-    'export interface AiBuiltinModelEntry {\n' +
-    '  contextWindow?: number\n' +
-    '  maxTokens?: number\n' +
-    '  reasoning?: boolean\n' +
-    '  image?: boolean\n' +
-    '}\n\n' +
-    'export const AI_BUILTIN_MODELS: Record<string, Record<string, AiBuiltinModelEntry>> = ' +
-    JSON.stringify(providers) +
-    '\n'
+  const header
+    = `/* 由 scripts/vendor-pi.mjs 从内置 Pi（${PI_VERSION}）自带的模型目录生成 —— 勿手改，`
+      + `重跑 pnpm run vendor:pi 再生。添加模型时的默认值就从这份表认（@workbench/ai 的 builtinModelMeta）。 */\n`
+  const body
+    = `export interface AiBuiltinModelEntry {\n`
+      + `  contextWindow?: number\n`
+      + `  maxTokens?: number\n`
+      + `  reasoning?: boolean\n`
+      + `  image?: boolean\n`
+      + `}\n\n`
+      + `export const AI_BUILTIN_MODELS: Record<string, Record<string, AiBuiltinModelEntry>> = ${
+        JSON.stringify(providers)
+      }\n`
   // 内容没变就不动文件：每次 dev 启动都重写会让 mtime 一跳、vite 白推一轮 HMR 更新
   const next = header + body
   if (existsSync(CATALOG_TARGET) && readFileSync(CATALOG_TARGET, 'utf8') === next) {
@@ -162,15 +167,15 @@ function emitCatalog() {
   }
   writeFileSync(CATALOG_TARGET, next)
   console.log(
-    `[vendor-pi] 内置模型目录已生成：${CATALOG_TARGET}（${Object.keys(providers).length} 家）`
+    `[vendor-pi] 内置模型目录已生成：${CATALOG_TARGET}（${Object.keys(providers).length} 家）`,
   )
 }
 
-const hasCli =
-  existsSync(CLI) && existsSync(STAMP) && readFileSync(STAMP, 'utf8').trim() === PI_VERSION
+const hasCli
+  = existsSync(CLI) && existsSync(STAMP) && readFileSync(STAMP, 'utf8').trim() === PI_VERSION
 const catalog = catalogSource()
 /** 该瘦掉的还在 = 这份树不是本脚本产出的（比如旧版脚本删错了地方）—— 也重装 */
-const leftover = PRUNE.filter((name) => findDeps(name).length)
+const leftover = PRUNE.filter(name => findDeps(name).length)
 if (hasCli && catalog && !leftover.length) {
   emitCatalog()
   console.log(`[vendor-pi] Pi ${PI_VERSION} 已内置，跳过安装`)
@@ -189,7 +194,7 @@ writeFileSync(join(TARGET, 'package.json'), JSON.stringify({ private: true }, nu
 execFileSync('npm', ['install', '--ignore-scripts', '--no-audit', '--no-fund', `@earendil-works/pi-coding-agent@${PI_VERSION}`], {
   cwd: TARGET,
   stdio: 'inherit',
-  shell: true
+  shell: true,
 })
 
 // 删到的与没删到的都要看得见：这些包不在顶层是常态（见 findDeps），落点一旦又变，
@@ -199,7 +204,7 @@ for (const name of PRUNE) {
   const dirs = findDeps(name)
   if (!dirs.length) {
     console.warn(
-      `[vendor-pi] 警告：${name} 没找到，这一项没有瘦掉（新版可能不再随包，别处要求过就改这里）`
+      `[vendor-pi] 警告：${name} 没找到，这一项没有瘦掉（新版可能不再随包，别处要求过就改这里）`,
     )
     continue
   }

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { CaretBottom, Close } from '@element-plus/icons-vue'
 /**
  * 「左栏底部那一行」：目录是哪个 + 最近打开的那几个 + 右侧的工具按钮（插槽）。
  *
@@ -17,7 +18,6 @@
  * 走 #tools 插槽进来的内容按同一副小按钮的尺寸画。
  */
 import { nextTick, onMounted, ref, watch } from 'vue'
-import { CaretBottom, Close } from '@element-plus/icons-vue'
 
 const props = defineProps<{
   /** 当前打开的目录（绝对路径；浮层里用它认「哪条是当前的」） */
@@ -50,20 +50,22 @@ const historyWidth = ref(200)
 
 function measureHistoryWidth(): void {
   const width = metaRef.value?.clientWidth ?? 0
-  if (width > 0) historyWidth.value = Math.round(width)
+  if (width > 0)
+    historyWidth.value = Math.round(width)
 }
 
 onMounted(() => void nextTick(measureHistoryWidth))
 
 watch(
   [() => props.root, () => props.treeWidth],
-  () => void nextTick(measureHistoryWidth)
+  () => void nextTick(measureHistoryWidth),
 )
 
 /** 换一个目录；点的是当前这个就什么都不做。换完把浮层收起来：这一下的事已经做完了 */
 function openRecent(dir: string): void {
   historyOpen.value = false
-  if (dir === props.root) return
+  if (dir === props.root)
+    return
   emit('open', dir)
 }
 
@@ -95,7 +97,9 @@ function forgetRecent(dir: string): void {
         </template>
 
         <div class="recent-roots__history">
-          <p class="recent-roots__history-title">最近打开</p>
+          <p class="recent-roots__history-title">
+            最近打开
+          </p>
           <ul class="recent-roots__history-list scrollbar">
             <li
               v-for="dir in roots"

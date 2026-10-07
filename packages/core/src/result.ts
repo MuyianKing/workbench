@@ -32,7 +32,8 @@ export function fail<T = never>(error: string): Result<T> {
 export async function toResult<T>(fn: () => Promise<T>): Promise<Result<T>> {
   try {
     return ok(await fn())
-  } catch (err) {
+  }
+  catch (err) {
     return fail((err as Error).message)
   }
 }

@@ -1,3 +1,4 @@
+import type { ComponentStyle, DesignStyle, DesignTypeToken } from './design-styles'
 /**
  * 样式页的「示例页面」：把一套设计语言的 token 装成一个完整的中文落地页。
  *
@@ -19,20 +20,7 @@
  *
  * 这里只产出「该画成什么样」（颜色、字阶、尺寸、文案），DOM 结构在 StyleDemo.vue / StyleCard.vue。
  */
-import {
-  componentStyle,
-  inkOn,
-  isColorValue,
-  lineHeightCss,
-  mixHex,
-  numericScale,
-  relativeLuminance,
-  safeCssValue,
-  typographyScale,
-  type ComponentStyle,
-  type DesignStyle,
-  type DesignTypeToken
-} from './design-styles'
+import { componentStyle, inkOn, isColorValue, lineHeightCss, mixHex, numericScale, relativeLuminance, safeCssValue, typographyScale } from './design-styles'
 
 /** 示例页面用到的一组颜色角色；兜底之后每一项都必定有值 */
 export interface DemoPalette {
@@ -66,8 +54,8 @@ export interface DemoCopy {
   subtitle: string
   primary: string
   secondary: string
-  cards: Array<{ title: string; text: string }>
-  stats: Array<{ value: string; label: string }>
+  cards: Array<{ title: string, text: string }>
+  stats: Array<{ value: string, label: string }>
   cta: string
   ctaButton: string
   footer: string[]
@@ -112,16 +100,16 @@ const DEFAULT_COPY: DemoCopy = {
   cards: [
     { title: '清晰的结构', text: '每一块内容都有归属，找不到的东西几乎不存在。' },
     { title: '好用的默认值', text: '开箱即用，需要细调时每一项都留了出口。' },
-    { title: '随你而变', text: '从小团队到大规模协作，同一套东西撑得住。' }
+    { title: '随你而变', text: '从小团队到大规模协作，同一套东西撑得住。' },
   ],
   stats: [
     { value: '12ms', label: '平均响应' },
     { value: '99.9%', label: '服务可用性' },
-    { value: '40+', label: '集成' }
+    { value: '40+', label: '集成' },
   ],
   cta: '现在就把第一件事交给它',
   ctaButton: '免费开始',
-  footer: ['产品', '资源', '公司', '法律']
+  footer: ['产品', '资源', '公司', '法律'],
 }
 
 /**
@@ -139,15 +127,15 @@ const CATEGORY_COPY: Record<string, Partial<DemoCopy>> = {
     cards: [
       { title: '编排工作流', text: '把常用任务串成自动化流程，几步就能上线。' },
       { title: '接入你的数据', text: '私有知识库挂载之后，每个回答都有据可查。' },
-      { title: '为团队扩展', text: '从个人实验到团队生产，配额弹性伸缩。' }
+      { title: '为团队扩展', text: '从个人实验到团队生产，配额弹性伸缩。' },
     ],
     stats: [
       { value: '10ms', label: '首字延迟' },
       { value: '120+', label: '可用模型' },
-      { value: '99.9%', label: '服务可用性' }
+      { value: '99.9%', label: '服务可用性' },
     ],
     cta: '准备好让模型接过重复劳动了吗',
-    ctaButton: '立即体验'
+    ctaButton: '立即体验',
   },
   '后端 · 数据库 · 运维': {
     nav: ['产品', '文档', '社区'],
@@ -159,15 +147,15 @@ const CATEGORY_COPY: Record<string, Partial<DemoCopy>> = {
     cards: [
       { title: '秒级扩缩容', text: '流量涨落随它去，容量跟着走，不用提前规划。' },
       { title: '自带高可用', text: '多副本同步写入，出问题自动切换，业务无感。' },
-      { title: '看得见的状态', text: '慢查询、连接数、锁等待，一块面板看清楚。' }
+      { title: '看得见的状态', text: '慢查询、连接数、锁等待，一块面板看清楚。' },
     ],
     stats: [
       { value: '99.99%', label: '可用性' },
       { value: '5s', label: '故障切换' },
-      { value: '32', label: '可用区' }
+      { value: '32', label: '可用区' },
     ],
     cta: '五分钟起一个生产可用的实例',
-    ctaButton: '创建实例'
+    ctaButton: '创建实例',
   },
   '开发工具与 IDE': {
     nav: ['功能', '扩展', '下载'],
@@ -179,17 +167,17 @@ const CATEGORY_COPY: Record<string, Partial<DemoCopy>> = {
     cards: [
       { title: '懂上下文', text: '整个仓库都是它的上下文，补全的不是字符串而是意图。' },
       { title: '批量重构', text: '一处改动跨几十个文件，改完直接给一份可审查的差异。' },
-      { title: '接上你的流程', text: '构建、评审、发布都在同一个界面里闭环。' }
+      { title: '接上你的流程', text: '构建、评审、发布都在同一个界面里闭环。' },
     ],
     stats: [
       { value: '200万', label: '开发者' },
       { value: '40+', label: '语言' },
-      { value: '2min', label: '安装耗时' }
+      { value: '2min', label: '安装耗时' },
     ],
     cta: '今天就把编辑器升一级',
-    ctaButton: '下载'
+    ctaButton: '下载',
   },
-  效率与协作: {
+  '效率与协作': {
     nav: ['工作台', '集成', '定价'],
     eyebrow: '团队工作台',
     title: '把团队的对话变成进展',
@@ -199,17 +187,17 @@ const CATEGORY_COPY: Record<string, Partial<DemoCopy>> = {
     cards: [
       { title: '一切可追踪', text: '每件事都有负责人和状态，翻旧账只需要一次搜索。' },
       { title: '少开一个会', text: '异步汇报自动汇总，站会可以只留十分钟。' },
-      { title: '连上现有工具', text: '代码、日历、文档各留在原地，信息汇总到这里。' }
+      { title: '连上现有工具', text: '代码、日历、文档各留在原地，信息汇总到这里。' },
     ],
     stats: [
       { value: '30%', label: '会议时长下降' },
       { value: '120+', label: '集成' },
-      { value: '8万', label: '团队在用' }
+      { value: '8万', label: '团队在用' },
     ],
     cta: '把一个项目搬进来试试',
-    ctaButton: '开始使用'
+    ctaButton: '开始使用',
   },
-  金融与加密: {
+  '金融与加密': {
     nav: ['账户', '转账', '帮助'],
     eyebrow: '新一代账户',
     title: '看得清的每一笔资产',
@@ -219,17 +207,17 @@ const CATEGORY_COPY: Record<string, Partial<DemoCopy>> = {
     cards: [
       { title: '实时到账', text: '转账秒级确认，状态每一步都看得见。' },
       { title: '费用透明', text: '汇率与手续费写在按钮旁边，确认前就知道总额。' },
-      { title: '安全兜底', text: '异常交易自动拦截，可疑操作二次确认。' }
+      { title: '安全兜底', text: '异常交易自动拦截，可疑操作二次确认。' },
     ],
     stats: [
       { value: '0.1%', label: '手续费' },
       { value: '1.2s', label: '平均到账' },
-      { value: '24/7', label: '人工支持' }
+      { value: '24/7', label: '人工支持' },
     ],
     cta: '开个账户，五分钟搞定',
-    ctaButton: '立即开立'
+    ctaButton: '立即开立',
   },
-  汽车: {
+  '汽车': {
     nav: ['车型', '配置', '预约'],
     eyebrow: '新一代车型',
     title: '为驾驭而生的每一处细节',
@@ -239,17 +227,17 @@ const CATEGORY_COPY: Record<string, Partial<DemoCopy>> = {
     cards: [
       { title: '动力响应', text: '踩下去就有，输出曲线经过反复调校。' },
       { title: '底盘调校', text: '长途不累，弯道不飘，两种性格在同一辆车里。' },
-      { title: '按需定制', text: '颜色、内饰、轮毂，配置单随你组合。' }
+      { title: '按需定制', text: '颜色、内饰、轮毂，配置单随你组合。' },
     ],
     stats: [
       { value: '3.9s', label: '零百加速' },
       { value: '520km', label: '续航' },
-      { value: '5年', label: '整车质保' }
+      { value: '5年', label: '整车质保' },
     ],
     cta: '预约一次试驾，感受比参数更直接',
-    ctaButton: '预约试驾'
+    ctaButton: '预约试驾',
   },
-  媒体与消费科技: {
+  '媒体与消费科技': {
     nav: ['内容', '专题', '订阅'],
     eyebrow: '今日专题',
     title: '值得花时间的内容',
@@ -259,17 +247,17 @@ const CATEGORY_COPY: Record<string, Partial<DemoCopy>> = {
     cards: [
       { title: '深度报道', text: '不只讲发生了什么，还讲清楚为什么。' },
       { title: '独家专访', text: '和当事人坐下来聊，问题问到底。' },
-      { title: '每日精选', text: '每天三条，不超过十分钟。' }
+      { title: '每日精选', text: '每天三条，不超过十分钟。' },
     ],
     stats: [
       { value: '200万', label: '订阅者' },
       { value: '每日', label: '更新' },
-      { value: '0', label: '广告干扰' }
+      { value: '0', label: '广告干扰' },
     ],
     cta: '把这周的好内容收进邮箱',
-    ctaButton: '订阅'
+    ctaButton: '订阅',
   },
-  设计与创意工具: {
+  '设计与创意工具': {
     nav: ['功能', '模板', '定价'],
     eyebrow: '创意工作台',
     title: '从灵感直达成稿',
@@ -279,17 +267,17 @@ const CATEGORY_COPY: Record<string, Partial<DemoCopy>> = {
     cards: [
       { title: '画布无限', text: '从草图画到高保真，不用换工具。' },
       { title: '组件复用', text: '改一处，所有引用同步更新。' },
-      { title: '交付即代码', text: '标注、切图、变量一次导出，开发不用再问。' }
+      { title: '交付即代码', text: '标注、切图、变量一次导出，开发不用再问。' },
     ],
     stats: [
       { value: '500万', label: '创作者' },
       { value: '1.2亿', label: '模板' },
-      { value: '实时', label: '多人协作' }
+      { value: '实时', label: '多人协作' },
     ],
     cta: '打开画布，第一笔免费',
-    ctaButton: '开始创作'
+    ctaButton: '开始创作',
   },
-  电商与零售: {
+  '电商与零售': {
     nav: ['新品', '分类', '购物车'],
     eyebrow: '当季新品',
     title: '把好物送到家门口',
@@ -299,17 +287,17 @@ const CATEGORY_COPY: Record<string, Partial<DemoCopy>> = {
     cards: [
       { title: '当日达', text: '中午前下单，晚上就能拆箱。' },
       { title: '七天无理由', text: '不合适就退，运费我们承担。' },
-      { title: '正品保障', text: '每一件都可溯源，假一赔十。' }
+      { title: '正品保障', text: '每一件都可溯源，假一赔十。' },
     ],
     stats: [
       { value: '48h', label: '极速发货' },
       { value: '7天', label: '无理由退货' },
-      { value: '98%', label: '好评率' }
+      { value: '98%', label: '好评率' },
     ],
     cta: '新客首单立减，先逛逛看',
-    ctaButton: '去逛逛'
+    ctaButton: '去逛逛',
   },
-  复古网页: {
+  '复古网页': {
     nav: ['首页', '档案', '留言板'],
     eyebrow: '自 1996 年',
     title: '欢迎来到互联网的黄金年代',
@@ -319,16 +307,16 @@ const CATEGORY_COPY: Record<string, Partial<DemoCopy>> = {
     cards: [
       { title: '访客计数器', text: '第 0001234 位访客，感谢你的到来。' },
       { title: '正在建设中', text: '这个区域还在施工，请戴好安全帽。' },
-      { title: '留言板', text: '留下你的邮箱，我会尽快回复。' }
+      { title: '留言板', text: '留下你的邮箱，我会尽快回复。' },
     ],
     stats: [
       { value: '56k', label: '调制解调器' },
       { value: '800×600', label: '最佳分辨率' },
-      { value: '1996', label: '建站年份' }
+      { value: '1996', label: '建站年份' },
     ],
     cta: '别忘了把本站加入收藏夹',
-    ctaButton: '加入收藏'
-  }
+    ctaButton: '加入收藏',
+  },
 }
 
 /** 这套设计该讲什么故事：分类命中就用它的，否则通用那套 */
@@ -351,36 +339,36 @@ const ROLE_RULES: Record<keyof Omit<DemoPalette, 'canvas' | 'accent'>, RoleRule>
     keys: [
       /^(ink|text|heading|title|foreground|fg|content)$/i,
       /^(ink|text|heading|title|fg)-(primary|default|base|main|strong|high)$/i,
-      /^(ink|text|heading|title)(-|$)/i
+      /^(ink|text|heading|title)(-|$)/i,
     ],
-    labels: [/^(标题|主文字|文字色|正文)$/, /^(标题|文字)/]
+    labels: [/^(标题|主文字|文字色|正文)$/, /^(标题|文字)/],
   },
   muted: {
     keys: [
       /^(text|ink|fg|content)-(secondary|tertiary|muted|subtle|soft)/i,
       /muted/i,
       /^(secondary|tertiary)(-text)?$/i,
-      /^(body|paragraph|copy)(-|$)/i
+      /^(body|paragraph|copy)(-|$)/i,
     ],
-    labels: [/弱化/, /次级|次要|正文|说明字/]
+    labels: [/弱化/, /次级|次要|正文|说明字/],
   },
   hairline: {
     keys: [/hairline/i, /divider/i, /(^|-)border(-|$)/i, /(^|-)rule(-|$)/i],
-    labels: [/描边|边框/, /分隔线|分割线/]
+    labels: [/描边|边框/, /分隔线|分割线/],
   },
   surface: {
     keys: [
       /^(surface|card|panel|tile)-(card|elevated|default|primary|base)$/i,
       /^(surface|card|panel)(-|$)/i,
       /-card(-|$)/i,
-      /elevated/i
+      /elevated/i,
     ],
-    labels: [/^(卡片|表面|面板)/, /卡片$|表面$/]
+    labels: [/^(卡片|表面|面板)/, /卡片$|表面$/],
   },
   onAccent: {
     keys: [/^on-(primary|accent|brand|action|cta)/i, /-on-(primary|accent|brand)/i, /^(inverse|inverted)(-|$)/i],
-    labels: [/反色|反转/]
-  }
+    labels: [/反色|反转/],
+  },
 }
 
 /**
@@ -391,13 +379,15 @@ function pickColor(style: DesignStyle, rule: RoleRule): string | undefined {
   const entries = Object.entries(style.colors).filter(([, value]) => isColorValue(value))
   for (const pattern of rule.keys) {
     const hit = entries.find(([key]) => pattern.test(key))
-    if (hit) return hit[1]
+    if (hit)
+      return hit[1]
   }
   const labels = style.labels?.colors
   if (labels) {
     for (const pattern of rule.labels) {
       const hit = entries.find(([key]) => pattern.test(labels[key] ?? ''))
-      if (hit) return hit[1]
+      if (hit)
+        return hit[1]
     }
   }
   return undefined
@@ -408,12 +398,18 @@ function colorCandidates(style: DesignStyle, rule: RoleRule): string[] {
   const entries = Object.entries(style.colors).filter(([, value]) => isColorValue(value))
   const out: string[] = []
   for (const pattern of rule.keys) {
-    for (const [key, value] of entries) if (pattern.test(key)) out.push(value)
+    for (const [key, value] of entries) {
+      if (pattern.test(key))
+        out.push(value)
+    }
   }
   const labels = style.labels?.colors
   if (labels) {
     for (const pattern of rule.labels) {
-      for (const [key, value] of entries) if (pattern.test(labels[key] ?? '')) out.push(value)
+      for (const [key, value] of entries) {
+        if (pattern.test(labels[key] ?? ''))
+          out.push(value)
+      }
     }
   }
   return [...new Set(out)]
@@ -431,11 +427,12 @@ function pickReadable(
   rule: RoleRule,
   reference: string,
   minDiff: number,
-  fallback: string
+  fallback: string,
 ): string {
   const referenceLuminance = relativeLuminance(reference)
   for (const value of colorCandidates(style, rule)) {
-    if (Math.abs(relativeLuminance(value) - referenceLuminance) >= minDiff) return value
+    if (Math.abs(relativeLuminance(value) - referenceLuminance) >= minDiff)
+      return value
   }
   return fallback
 }
@@ -482,18 +479,19 @@ function demoTypes(style: DesignStyle): {
   small: DesignTypeToken | undefined
 } {
   const scale = typographyScale(style)
-  if (!scale.length) return { hero: undefined, body: undefined, small: undefined }
+  if (!scale.length)
+    return { hero: undefined, body: undefined, small: undefined }
   const hero = scale[0][1]
-  const body =
-    scale.find(([key]) => /(^|-)body(-|$)/i.test(key))?.[1] ??
-    scale.find(([, token]) => {
-      const size = fontSizeOf(token)
-      return size > 0 && size <= 18
-    })?.[1] ??
-    hero
-  const small =
-    scale.find(([key]) => /caption|label|micro|eyebrow|overline|tag|badge|nav|link|button/i.test(key))?.[1] ??
-    body
+  const body
+    = scale.find(([key]) => /(^|-)body(-|$)/i.test(key))?.[1]
+      ?? scale.find(([, token]) => {
+        const size = fontSizeOf(token)
+        return size > 0 && size <= 18
+      })?.[1]
+      ?? hero
+  const small
+    = scale.find(([key]) => /caption|label|micro|eyebrow|overline|tag|badge|nav|link|button/i.test(key))?.[1]
+      ?? body
   return { hero, body, small }
 }
 
@@ -503,7 +501,7 @@ const BUTTON_PRIMARY: RegExp[] = [
   /button[-_ ]?cta/i,
   /^(cta|primary)(-|$)/i,
   /filled|solid/i,
-  /^primary/i
+  /^primary/i,
 ]
 
 const BUTTON_SECONDARY: RegExp[] = [
@@ -511,7 +509,7 @@ const BUTTON_SECONDARY: RegExp[] = [
   /button-(secondary|ghost|outline|tertiary)/i,
   /secondary-button/i,
   /ghost|outlined?|outline/i,
-  /^secondary/i
+  /^secondary/i,
 ]
 
 const INPUT_PATTERNS: RegExp[] = [/^text-input/i, /input/i, /search/i]
@@ -521,9 +519,11 @@ const INPUT_PATTERNS: RegExp[] = [/^text-input/i, /input/i, /search/i]
  * 只剩一条字阶的样张等于看不见，不如按主色现画一枚。
  */
 function resolveVisible(style: DesignStyle, key: string | undefined): ComponentStyle | null {
-  if (!key) return null
+  if (!key)
+    return null
   const token = style.components[key]
-  if (!token) return null
+  if (!token)
+    return null
   const resolved = componentStyle(token, style)
   return resolved.background || resolved.border ? resolved : null
 }
@@ -532,18 +532,20 @@ function resolveVisible(style: DesignStyle, key: string | undefined): ComponentS
 function pickComponent(
   style: DesignStyle,
   patterns: RegExp[],
-  labels: RegExp[]
+  labels: RegExp[],
 ): string | undefined {
   const keys = Object.keys(style.components)
   for (const pattern of patterns) {
-    const hit = keys.find((key) => pattern.test(key))
-    if (hit) return hit
+    const hit = keys.find(key => pattern.test(key))
+    if (hit)
+      return hit
   }
   const table = style.labels?.components
   if (table) {
     for (const pattern of labels) {
-      const hit = keys.find((key) => pattern.test(table[key] ?? ''))
-      if (hit) return hit
+      const hit = keys.find(key => pattern.test(table[key] ?? ''))
+      if (hit)
+        return hit
     }
   }
   return undefined
@@ -552,18 +554,20 @@ function pickComponent(
 /** 内边距收到 32px 以内：上游有 `96px` 这种首屏级内边距，照搬会把样张撑爆 */
 export function clampPadding(raw: string | undefined): string | undefined {
   const value = safeCssValue(raw)
-  if (!value) return undefined
+  if (!value)
+    return undefined
   return value.replace(/([\d.]+)px/g, (_, number: string) =>
-    `${Math.min(32, Math.round(Number(number)))}px`
-  )
+    `${Math.min(32, Math.round(Number(number)))}px`)
 }
 
 /** 字号收到上限以内（卡片档与详情档给的上限不同，所以上限由调用方给）；非 px 单位原样留着 */
 export function clampFontSize(raw: string | undefined, max: number): string | undefined {
   const value = safeCssValue(raw)
-  if (!value) return undefined
+  if (!value)
+    return undefined
   const matched = /^([\d.]+)px$/.exec(value)
-  if (!matched) return value
+  if (!matched)
+    return value
   const size = Number(matched[1])
   return size > max ? `${max}px` : `${Math.round(size)}px`
 }
@@ -573,7 +577,8 @@ export function clampFontSize(raw: string | undefined, max: number): string | un
 /** 从间距阶梯里按相对位置取一档，再收到区间内 —— 阶梯长短不一，按比例取才通用 */
 function scaleStep(block: Record<string, string>, ratio: number, min: number, max: number, fallback: number): number {
   const steps = numericScale(block).filter(([, , value]) => value > 0)
-  if (!steps.length) return fallback
+  if (!steps.length)
+    return fallback
   const index = Math.min(steps.length - 1, Math.floor((steps.length - 1) * ratio))
   return Math.min(max, Math.max(min, Math.round(steps[index][2])))
 }
@@ -582,10 +587,11 @@ function scaleStep(block: Record<string, string>, ratio: number, min: number, ma
 function radiusStep(block: Record<string, string>, patterns: RegExp[], min: number, max: number, fallback: string): string {
   const keys = Object.keys(block)
   for (const pattern of patterns) {
-    const hit = keys.find((key) => pattern.test(key))
+    const hit = keys.find(key => pattern.test(key))
     if (hit) {
       const value = Number(/([\d.]+)/.exec(block[hit])?.[1] ?? NaN)
-      if (Number.isFinite(value)) return `${Math.min(max, Math.max(min, Math.round(value)))}px`
+      if (Number.isFinite(value))
+        return `${Math.min(max, Math.max(min, Math.round(value)))}px`
     }
   }
   return fallback
@@ -597,7 +603,7 @@ function demoMetrics(style: DesignStyle): DemoMetrics {
     block: scaleStep(style.spacing, 0.45, 12, 24, 16),
     gap: scaleStep(style.spacing, 0.3, 8, 16, 12),
     cardRadius: radiusStep(style.rounded, [/^(lg|xl|md)$/i, /card/i, /radius/i], 8, 20, '12px'),
-    buttonRadius: radiusStep(style.rounded, [/^(sm|md|xs)$/i, /button/i], 6, 14, '10px')
+    buttonRadius: radiusStep(style.rounded, [/^(sm|md|xs)$/i, /button/i], 6, 14, '10px'),
   }
 }
 
@@ -612,8 +618,8 @@ function fallbackPrimary(copy: DemoCopy, palette: DemoPalette, metrics: DemoMetr
       color: palette.onAccent,
       borderRadius: metrics.buttonRadius,
       padding: '10px 22px',
-      font
-    }
+      font,
+    },
   }
 }
 
@@ -626,8 +632,8 @@ function fallbackSecondary(copy: DemoCopy, palette: DemoPalette, metrics: DemoMe
       border: `1px solid ${palette.hairline}`,
       borderRadius: metrics.buttonRadius,
       padding: '10px 22px',
-      font
-    }
+      font,
+    },
   }
 }
 
@@ -654,14 +660,14 @@ export function buildDesignDemo(style: DesignStyle): DesignDemo {
   const primary: DemoButton = primaryResolved
     ? {
         label: copy.primary,
-        style: { ...primaryResolved, padding: clampPadding(primaryResolved.padding), font: buttonFont(primaryResolved, small) }
+        style: { ...primaryResolved, padding: clampPadding(primaryResolved.padding), font: buttonFont(primaryResolved, small) },
       }
     : fallbackPrimary(copy, palette, metrics, small)
 
   const secondary: DemoButton = secondaryResolved
     ? {
         label: copy.secondary,
-        style: { ...secondaryResolved, padding: clampPadding(secondaryResolved.padding), font: buttonFont(secondaryResolved, small) }
+        style: { ...secondaryResolved, padding: clampPadding(secondaryResolved.padding), font: buttonFont(secondaryResolved, small) },
       }
     : fallbackSecondary(copy, palette, metrics, small)
 
@@ -673,7 +679,7 @@ export function buildDesignDemo(style: DesignStyle): DesignDemo {
         border: `1px solid ${palette.hairline}`,
         borderRadius: metrics.buttonRadius,
         padding: '10px 14px',
-        font: body
+        font: body,
       }
 
   return { palette, copy, hero, body, small, primary, secondary, input, metrics }
@@ -686,18 +692,24 @@ export function buildDesignDemo(style: DesignStyle): DesignDemo {
  * 卡片与详情宽度差着好几倍，上限由调用方按档位给（收敛规则见 `clampFontSize`）。
  */
 export function typeCss(token: DesignTypeToken | undefined, maxSize: number): Record<string, string> {
-  if (!token) return {}
+  if (!token)
+    return {}
   const out: Record<string, string> = {}
   const family = safeCssValue(token.fontFamily)
   const size = clampFontSize(token.fontSize, maxSize)
   const weight = safeCssValue(token.fontWeight)
   const lineHeight = lineHeightCss(token.lineHeight, token.fontSize)
   const spacing = safeCssValue(token.letterSpacing)
-  if (family) out.fontFamily = family
-  if (size) out.fontSize = size
-  if (weight) out.fontWeight = weight
-  if (lineHeight) out.lineHeight = lineHeight
-  if (spacing) out.letterSpacing = spacing
+  if (family)
+    out.fontFamily = family
+  if (size)
+    out.fontSize = size
+  if (weight)
+    out.fontWeight = weight
+  if (lineHeight)
+    out.lineHeight = lineHeight
+  if (spacing)
+    out.letterSpacing = spacing
   return out
 }
 
@@ -710,15 +722,20 @@ export function buttonCss(
   button: DemoButton,
   fallbackRadius: string,
   fontMax: number,
-  heightMax: number
+  heightMax: number,
 ): Record<string, string> {
   const spec = button.style
   const out: Record<string, string> = {}
-  if (spec.background) out.background = spec.background
-  if (spec.color) out.color = spec.color
-  if (spec.border) out.border = spec.border
-  if (spec.boxShadow) out.boxShadow = spec.boxShadow
-  if (spec.padding) out.padding = spec.padding
+  if (spec.background)
+    out.background = spec.background
+  if (spec.color)
+    out.color = spec.color
+  if (spec.border)
+    out.border = spec.border
+  if (spec.boxShadow)
+    out.boxShadow = spec.boxShadow
+  if (spec.padding)
+    out.padding = spec.padding
   out.borderRadius = spec.borderRadius ?? fallbackRadius
   const height = spec.height ? /^([\d.]+)px$/.exec(spec.height) : null
   out.height = `${height ? Math.min(heightMax, Number(height[1])) : heightMax}px`

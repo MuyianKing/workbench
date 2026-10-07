@@ -1,4 +1,8 @@
 <script setup lang="ts">
+import type { NoteKind, NoteNode } from '@workbench/notes'
+import type { Component } from 'vue'
+import { Document, Folder, FolderAdd, Plus } from '@element-plus/icons-vue'
+import { noteChain, noteDropAllowed, parentRel } from '@workbench/notes'
 /**
  * 笔记目录树（左栏）。
  *
@@ -26,21 +30,10 @@
  * 自己不留一份副本 —— 上层要拿它落盘（见 NotesView 的 expandedKeys），
  * 组件里再存一份就变成「两份状态谁说了算」。
  */
-import { nextTick, onBeforeUnmount, onMounted, ref, watch, type Component } from 'vue'
-import { Document, Folder, FolderAdd, Plus } from '@element-plus/icons-vue'
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import PanelLoading from '@/components/PanelLoading.vue'
-import {
-  noteChain,
-  noteDropAllowed,
-  parentRel,
-  type NoteKind,
-  type NoteNode
-} from '@workbench/notes'
 import { useFloatingDismiss } from '@/composables/use-floating-dismiss'
 import { useFloatingPosition } from '@/composables/use-floating-position'
-
-/** 树容器：把选中项滚进视野时要在这里面找它那一行 */
-const treeRoot = ref<HTMLDivElement | null>(null)
 
 const props = defineProps<{
   /** 笔记本里的顶层条目（文件夹在前、同层按名字，顺序由后端 + shared 定下） */
@@ -60,13 +53,16 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  select: [rel: string]
-  create: [payload: { parentRel: string; kind: NoteKind }]
-  rename: [rel: string]
-  remove: [rel: string]
-  move: [payload: { rel: string; targetDir: string }]
+  'select': [rel: string]
+  'create': [payload: { parentRel: string, kind: NoteKind }]
+  'rename': [rel: string]
+  'remove': [rel: string]
+  'move': [payload: { rel: string, targetDir: string }]
   'update:expanded': [value: string[]]
 }>()
+
+/** 树容器：把选中项滚进视野时要在这里面找它那一行 */
+const treeRoot = ref<HTMLDivElement | null>(null)
 
 /** el-tree 认的字段名：数据里叫 name / children */
 const TREE_PROPS = { label: 'name', children: 'children' } as const
@@ -92,7 +88,7 @@ function expand(ids: string[]): void {
 function collapse(id: string): void {
   emit(
     'update:expanded',
-    props.expanded.filter((item) => item !== id)
+    props.expanded.filter(item => item !== id),
   )
 }
 
@@ -116,16 +112,19 @@ function collapse(id: string): void {
 async function revealActive(): Promise<void> {
   const STEP = 40
   for (let attempt = 0; attempt < 8; attempt += 1) {
-    await new Promise((resolve) => window.setTimeout(resolve, STEP))
+    await new Promise(resolve => window.setTimeout(resolve, STEP))
     const element = treeRoot.value?.querySelector<HTMLElement>('.node.is-active')
-    if (!element) continue
+    if (!element)
+      continue
 
     const viewport = treeRoot.value?.querySelector<HTMLElement>('.tree__body')
-    if (!viewport) return
+    if (!viewport)
+      return
 
     element.scrollIntoView({ block: 'nearest' })
     for (let node = element.parentElement; node && node !== viewport; node = node.parentElement) {
-      if (node.scrollLeft !== 0) node.scrollLeft = 0
+      if (node.scrollLeft !== 0)
+        node.scrollLeft = 0
     }
     return
   }
@@ -143,15 +142,16 @@ async function revealActive(): Promise<void> {
 watch(
   () => props.activeRel,
   (rel) => {
-    if (!rel) return
+    if (!rel)
+      return
     expand(
       noteChain(props.nodes, rel)
         .slice(0, -1)
-        .map((node) => node.id)
+        .map(node => node.id),
     )
     void revealActive()
   },
-  { immediate: true }
+  { immediate: true },
 )
 
 // ---------- 节点上的右键菜单 ----------
@@ -172,16 +172,16 @@ function onCommand(command: string, data: NoteNode): void {
   }
   emit('create', {
     parentRel: folderOf(data),
-    kind: command === 'new-folder' ? 'folder' : 'note'
+    kind: command === 'new-folder' ? 'folder' : 'note',
   })
 }
 
 // ---------- 空白区的右键菜单 ----------
 
 /** 空白区菜单的两项：都落在笔记本根目录 */
-const ROOT_ITEMS: { command: string; label: string; icon: Component }[] = [
+const ROOT_ITEMS: { command: string, label: string, icon: Component }[] = [
   { command: 'new-note', label: '新建笔记', icon: Plus },
-  { command: 'new-folder', label: '新建文件夹', icon: FolderAdd }
+  { command: 'new-folder', label: '新建文件夹', icon: FolderAdd },
 ]
 
 const rootMenuOpen = ref(false)
@@ -193,7 +193,7 @@ const rootPoint = ref({ x: 0, y: 0 })
 const { pos: rootPos, place: placeRootMenu } = useFloatingPosition({
   x: () => rootPoint.value.x,
   y: () => rootPoint.value.y,
-  panel: () => rootPanel.value
+  panel: () => rootPanel.value,
 })
 
 /**
@@ -203,7 +203,8 @@ const { pos: rootPos, place: placeRootMenu } = useFloatingPosition({
  */
 async function openRootMenu(event: MouseEvent): Promise<void> {
   const target = event.target as HTMLElement | null
-  if (target?.closest('.el-tree-node__content')) return
+  if (target?.closest('.el-tree-node__content'))
+    return
 
   rootPoint.value = { x: event.clientX, y: event.clientY }
   rootMenuOpen.value = true
@@ -257,7 +258,8 @@ function allowDrag(node: TreeNodeLike): boolean {
 }
 
 function allowDrop(dragging: TreeNodeLike, drop: TreeNodeLike, type: string): boolean {
-  if (type !== 'inner') return false
+  if (type !== 'inner')
+    return false
   return noteDropAllowed(dragging.data, drop.data)
 }
 
@@ -268,7 +270,8 @@ function allowDrop(dragging: TreeNodeLike, drop: TreeNodeLike, type: string): bo
  * 由上层执行；失败时上层会重新扫一遍把这棵树的显示拉回真实状态（见 NotesView）。
  */
 function onDrop(dragging: TreeNodeLike, drop: TreeNodeLike): void {
-  if (blankHover) return
+  if (blankHover)
+    return
   emit('move', { rel: dragging.data.rel, targetDir: drop.data.rel })
 }
 
@@ -286,7 +289,7 @@ function isBlankArea(target: EventTarget | null): boolean {
 function rootDropAllowed(): boolean {
   return Boolean(draggingRel) && noteDropAllowed(
     { rel: draggingRel, kind: 'note' },
-    { rel: '', kind: 'folder' }
+    { rel: '', kind: 'folder' },
   )
 }
 
@@ -305,12 +308,14 @@ function onDragOver(event: DragEvent): void {
     return
   }
   event.preventDefault()
-  if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
+  if (event.dataTransfer)
+    event.dataTransfer.dropEffect = 'move'
   rootDrop.value = true
 }
 
 function onDropOnRoot(event: DragEvent): void {
-  if (!blankHover || !rootDropAllowed()) return
+  if (!blankHover || !rootDropAllowed())
+    return
   event.preventDefault()
   rootDrop.value = false
   emit('move', { rel: draggingRel, targetDir: '' })
@@ -332,7 +337,6 @@ function onDragEnd(): void {
 
 onMounted(() => window.addEventListener('dragend', onDragEnd))
 onBeforeUnmount(() => window.removeEventListener('dragend', onDragEnd))
-
 </script>
 
 <template>
@@ -387,8 +391,12 @@ onBeforeUnmount(() => window.removeEventListener('dragend', onDragEnd))
               <el-dropdown-item command="new-folder" divided>
                 <el-icon><FolderAdd /></el-icon>新建文件夹
               </el-dropdown-item>
-              <el-dropdown-item command="rename" divided>重命名</el-dropdown-item>
-              <el-dropdown-item command="remove">删除</el-dropdown-item>
+              <el-dropdown-item command="rename" divided>
+                重命名
+              </el-dropdown-item>
+              <el-dropdown-item command="remove">
+                删除
+              </el-dropdown-item>
             </el-dropdown-menu>
           </template>
         </el-dropdown>
@@ -400,7 +408,9 @@ onBeforeUnmount(() => window.removeEventListener('dragend', onDragEnd))
 
     <!-- 一篇都没有：直接给两颗按钮，别让人对着空白猜「怎么开始」 -->
     <div v-if="loaded && !nodes.length" class="tree__empty">
-      <p class="tree__empty-title">这个文件夹里还没有笔记</p>
+      <p class="tree__empty-title">
+        这个文件夹里还没有笔记
+      </p>
       <div class="tree__empty-actions">
         <el-button
           type="primary"

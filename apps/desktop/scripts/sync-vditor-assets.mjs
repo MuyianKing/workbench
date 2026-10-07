@@ -39,7 +39,7 @@ const FILES = [
   'js/highlight.js/highlight.min.js',
   'js/highlight.js/third-languages.js',
   'js/highlight.js/styles/github.min.css',
-  'js/highlight.js/styles/github-dark.min.css'
+  'js/highlight.js/styles/github-dark.min.css',
 ]
 
 /** 整目录带走的（内容主题是四份 css，表情是一组 png/gif） */
@@ -56,7 +56,8 @@ export function syncVditorAssets() {
 
   const version = installedVersion()
   const marker = join(TARGET, '.version')
-  if (existsSync(marker) && readFileSync(marker, 'utf8').trim() === version) return
+  if (existsSync(marker) && readFileSync(marker, 'utf8').trim() === version)
+    return
 
   // 先整个换掉：升级 / 降级时不会留下旧版本那些其实已经用不到的文件
   rmSync(TARGET, { recursive: true, force: true })
@@ -84,6 +85,6 @@ export function vditorAssets() {
     name: 'workbench:vditor-assets',
     configResolved() {
       syncVditorAssets()
-    }
+    },
   }
 }

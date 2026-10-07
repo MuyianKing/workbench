@@ -1,28 +1,6 @@
+import type { WorkLogEntry, WorkLogStatus } from './work-log'
 import { describe, expect, it } from 'vitest'
-import {
-  DELETED_PROJECT_ID,
-  WORK_PAGE_DAYS,
-  WORK_RANGES,
-  WORK_RANGE_DEFAULT,
-  WORK_SORTS,
-  WORK_SORT_DEFAULT,
-  completedEntriesOn,
-  createWorkLogEntry,
-  dayMeta,
-  emptyWorkLog,
-  groupByProject,
-  paginate,
-  parseWorkLog,
-  patchWorkLogEntry,
-  rangeBounds,
-  sanitizeWorkLogStatus,
-  sanitizeWorkRange,
-  sanitizeWorkSort,
-  timelineOf,
-  toggleWorkLogStatus,
-  type WorkLogEntry,
-  type WorkLogStatus
-} from './work-log'
+import { completedEntriesOn, createWorkLogEntry, dayMeta, DELETED_PROJECT_ID, emptyWorkLog, groupByProject, paginate, parseWorkLog, patchWorkLogEntry, rangeBounds, sanitizeWorkLogStatus, sanitizeWorkRange, sanitizeWorkSort, timelineOf, toggleWorkLogStatus, WORK_PAGE_DAYS, WORK_RANGE_DEFAULT, WORK_RANGES, WORK_SORT_DEFAULT, WORK_SORTS } from './work-log'
 
 /** 2026-09-15 是周二，本周 = 09-14（周一）~ 09-20（周日） */
 const NOW = new Date(2026, 8, 15, 10, 30).getTime()
@@ -35,7 +13,7 @@ function entry(
   createdAt: number,
   content = '内容',
   projectId?: string,
-  status: WorkLogStatus = 'done'
+  status: WorkLogStatus = 'done',
 ): WorkLogEntry {
   return {
     id: `e-${date}-${createdAt}`,
@@ -44,7 +22,7 @@ function entry(
     status,
     createdAt,
     updatedAt: createdAt,
-    ...(projectId ? { projectId } : {})
+    ...(projectId ? { projectId } : {}),
   }
 }
 
@@ -65,15 +43,15 @@ describe('parseWorkLog', () => {
         entries: [
           { date: '2026-09-15', content: '甲' },
           { id: 'same', date: '2026-09-15', content: '乙' },
-          { id: 'same', date: '2026-09-15', content: '丙' }
-        ]
+          { id: 'same', date: '2026-09-15', content: '丙' },
+        ],
       },
       uuid,
-      NOW
+      NOW,
     )
-    expect(file.entries.map((item) => [item.id, item.content])).toEqual([
+    expect(file.entries.map(item => [item.id, item.content])).toEqual([
       ['id-1', '甲'],
-      ['same', '乙']
+      ['same', '乙'],
     ])
   })
 
@@ -89,7 +67,7 @@ describe('parseWorkLog', () => {
       content: '甲',
       createdAt: NOW,
       updatedAt: NOW,
-      date: '2026-09-15'
+      date: '2026-09-15',
     })
   })
 
@@ -97,7 +75,7 @@ describe('parseWorkLog', () => {
     const file = parseWorkLog(
       { entries: [{ date: '2026-09-15', content: '甲', projectId: '  ' }] },
       uuid,
-      NOW
+      NOW,
     )
     expect('projectId' in file.entries[0]).toBe(false)
   })
@@ -130,20 +108,20 @@ describe('timelineOf', () => {
     entry('2026-09-15', NOW - 60_000, '今天的后一条'),
     entry('2026-09-15', NOW - 120_000, '今天的前一条'),
     entry('2026-09-14', NOW - 86_400_000, '昨天'),
-    entry('2026-08-31', NOW - 1_000_000_000, '上个月')
+    entry('2026-08-31', NOW - 1_000_000_000, '上个月'),
   ]
 
   it('只留范围内的记录，按天分组', () => {
     const days = timelineOf(entries, 'week', NOW)
-    expect(days.map((group) => group.day)).toEqual(['2026-09-15', '2026-09-14'])
-    expect(days[0].entries.map((item) => item.content)).toEqual(['今天的后一条', '今天的前一条'])
+    expect(days.map(group => group.day)).toEqual(['2026-09-15', '2026-09-14'])
+    expect(days[0].entries.map(item => item.content)).toEqual(['今天的后一条', '今天的前一条'])
   })
 
   it('范围外的一天整体不出现（没有记录的日子也不占一栏）', () => {
-    expect(timelineOf(entries, 'today', NOW).map((group) => group.day)).toEqual(['2026-09-15'])
-    expect(timelineOf(entries, 'month', NOW).map((group) => group.day)).toEqual([
+    expect(timelineOf(entries, 'today', NOW).map(group => group.day)).toEqual(['2026-09-15'])
+    expect(timelineOf(entries, 'month', NOW).map(group => group.day)).toEqual([
       '2026-09-15',
-      '2026-09-14'
+      '2026-09-14',
     ])
   })
 
@@ -157,13 +135,13 @@ describe('completedEntriesOn', () => {
     entry('2026-09-15', NOW - 60_000, '今天后一条'),
     entry('2026-09-15', NOW - 120_000, '今天前一条'),
     entry('2026-09-15', NOW - 180_000, '今天还欠着的', undefined, 'todo'),
-    entry('2026-09-14', NOW - 86_400_000, '昨天做完的')
+    entry('2026-09-14', NOW - 86_400_000, '昨天做完的'),
   ]
 
   it('只留那一天里已完成的记录，新的在前', () => {
-    expect(completedEntriesOn(entries, '2026-09-15').map((item) => item.content)).toEqual([
+    expect(completedEntriesOn(entries, '2026-09-15').map(item => item.content)).toEqual([
       '今天后一条',
-      '今天前一条'
+      '今天前一条',
     ])
   })
 
@@ -174,11 +152,11 @@ describe('completedEntriesOn', () => {
 
   it('不改动传入的数组', () => {
     completedEntriesOn(entries, '2026-09-15')
-    expect(entries.map((item) => item.content)).toEqual([
+    expect(entries.map(item => item.content)).toEqual([
       '今天后一条',
       '今天前一条',
       '今天还欠着的',
-      '昨天做完的'
+      '昨天做完的',
     ])
   })
 })
@@ -189,7 +167,7 @@ describe('groupByProject', () => {
   const projects = [
     { id: 'p1', name: 'Alpha' },
     { id: 'p2', name: 'Beta' },
-    { id: 'p3', name: 'Gamma' }
+    { id: 'p3', name: 'Gamma' },
   ]
   const entries = [
     entry('2026-09-15', NOW - 60_000, '今天的后一条', 'p2'),
@@ -197,36 +175,36 @@ describe('groupByProject', () => {
     entry('2026-09-14', NOW - 86_400_000, '昨天的', 'p2'),
     entry('2026-09-13', NOW - 200_000_000, '没关联的'),
     entry('2026-09-12', NOW - 300_000_000, '项目没了的', 'gone'),
-    entry('2026-08-31', NOW - 1_000_000_000, '上个月', 'p1')
+    entry('2026-08-31', NOW - 1_000_000_000, '上个月', 'p1'),
   ]
 
   it('一个项目一栏，栏内从新到旧', () => {
     const groups = groupByProject(entries, 'month', NOW, projects)
     expect(groups[0].projectId).toBe('p1')
-    expect(groups[0].entries.map((item) => item.content)).toEqual(['今天的前一条'])
+    expect(groups[0].entries.map(item => item.content)).toEqual(['今天的前一条'])
     expect(groups[1].projectId).toBe('p2')
-    expect(groups[1].entries.map((item) => item.content)).toEqual(['今天的后一条', '昨天的'])
+    expect(groups[1].entries.map(item => item.content)).toEqual(['今天的后一条', '昨天的'])
   })
 
   it('范围外的记录不出现', () => {
     const groups = groupByProject(entries, 'today', NOW, projects)
-    expect(groups.map((group) => group.projectId)).toEqual(['p1', 'p2'])
-    expect(groups.flatMap((group) => group.entries)).toHaveLength(2)
+    expect(groups.map(group => group.projectId)).toEqual(['p1', 'p2'])
+    expect(groups.flatMap(group => group.entries)).toHaveLength(2)
 
     // 本周（09-14 起）里没有 09-13 之后那两条，所以只有两个项目栏
-    expect(groupByProject(entries, 'week', NOW, projects).map((group) => group.projectId)).toEqual([
+    expect(groupByProject(entries, 'week', NOW, projects).map(group => group.projectId)).toEqual([
       'p1',
-      'p2'
+      'p2',
     ])
   })
 
   it('已删除的项目合并成一栏，未关联单独一栏，都排在已知项目之后', () => {
     const groups = groupByProject(entries, 'month', NOW, projects)
-    expect(groups.map((group) => group.projectId)).toEqual([
+    expect(groups.map(group => group.projectId)).toEqual([
       'p1',
       'p2',
       null,
-      DELETED_PROJECT_ID
+      DELETED_PROJECT_ID,
     ])
     expect(groups[2].entries[0].content).toBe('没关联的')
     expect(groups[3].entries[0].content).toBe('项目没了的')
@@ -235,7 +213,7 @@ describe('groupByProject', () => {
   it('项目栏按名字排，与传入顺序无关', () => {
     const shuffled = [projects[2], projects[0], projects[1]]
     expect(
-      groupByProject(entries, 'month', NOW, shuffled).map((group) => group.projectId)
+      groupByProject(entries, 'month', NOW, shuffled).map(group => group.projectId),
     ).toEqual(['p1', 'p2', null, DELETED_PROJECT_ID])
   })
 
@@ -251,7 +229,7 @@ describe('paginate', () => {
     expect(paginate(days, 2, WORK_PAGE_DAYS)).toEqual({
       items: [8, 9, 10],
       page: 2,
-      pages: 2
+      pages: 2,
     })
   })
 
@@ -279,7 +257,7 @@ describe('createWorkLogEntry', () => {
   it('不传状态就是「已完成」，显式传待办则尊重它', () => {
     expect(createWorkLogEntry({ date: '2026-09-15', content: '甲' }, uuid, NOW)?.status).toBe('done')
     expect(
-      createWorkLogEntry({ date: '2026-09-15', content: '甲', status: 'todo' }, uuid, NOW)?.status
+      createWorkLogEntry({ date: '2026-09-15', content: '甲', status: 'todo' }, uuid, NOW)?.status,
     ).toBe('todo')
   })
 
@@ -287,7 +265,7 @@ describe('createWorkLogEntry', () => {
     const created = createWorkLogEntry(
       { date: '2026-09-15', content: '甲', status: 'doing' as never },
       uuid,
-      NOW
+      NOW,
     )
     expect(created?.status).toBe('done')
   })

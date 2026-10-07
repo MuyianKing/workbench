@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { SkillCompareFile } from '@workbench/skills'
+import { buildDiffRows } from '@workbench/core'
 /**
  * 内容差异弹窗：GitHub split 视图那样的逐行对比 —— 左边现在库里的那份，右边要采纳的那份。
  *
@@ -17,14 +19,9 @@
  * 项目里没有的文件无从采纳，那一侧按钮置灰；整目录恢复不看当前文件，所以一直可点。
  */
 import { computed, nextTick, ref, watch } from 'vue'
-import { buildDiffRows } from '@workbench/core'
-import { type SkillCompareFile } from '@workbench/skills'
 import AppDialog from '@/components/AppDialog.vue'
-import { useSkillsStore } from '@/stores/skills'
 import SkillFileTabs from '@/components/SkillFileTabs.vue'
-
-/** 弹层开关:v-model 一条口径(与 AppDialog / el-dialog 相同,全应用的弹层都这么开) */
-const open = defineModel<boolean>({ required: true })
+import { useSkillsStore } from '@/stores/skills'
 
 const props = defineProps<{
   skillId: string
@@ -43,6 +40,7 @@ const props = defineProps<{
   /** version 模式：那一版的提交号（右栏徽标写它的短号） */
   versionHash?: string
 }>()
+
 const emit = defineEmits<{
   /** 更新成功（project 模式）：父级据此对齐编辑器、刷新检测 */
   (event: 'applied', rel: string, content: string): void
@@ -50,19 +48,23 @@ const emit = defineEmits<{
   (event: 'restored'): void
 }>()
 
+/** 弹层开关:v-model 一条口径(与 AppDialog / el-dialog 相同,全应用的弹层都这么开) */
+const open = defineModel<boolean>({ required: true })
+
 const store = useSkillsStore()
 
 const visible = computed({
   get: () => open.value,
   set: (value) => {
     open.value = value
-  }
+  },
 })
 
 const currentRel = ref(props.initialRel)
 
 watch(open, (value) => {
-  if (!value) return
+  if (!value)
+    return
   currentRel.value = props.initialRel
   error.value = ''
   applying.value = false
@@ -73,12 +75,13 @@ const scrollRef = ref<HTMLElement | null>(null)
 
 watch(currentRel, async () => {
   await nextTick()
-  if (scrollRef.value) scrollRef.value.scrollTop = 0
+  if (scrollRef.value)
+    scrollRef.value.scrollTop = 0
 })
 
-const current = computed(() => props.files.find((file) => file.rel === currentRel.value) ?? null)
+const current = computed(() => props.files.find(file => file.rel === currentRel.value) ?? null)
 const rows = computed(() =>
-  buildDiffRows(current.value?.base ?? '', current.value?.incoming ?? '')
+  buildDiffRows(current.value?.base ?? '', current.value?.incoming ?? ''),
 )
 
 /** 项目里没有这个文件时无从「采纳」，更新按钮置灰（整目录恢复不看这个，见 actionEnabled） */
@@ -95,7 +98,7 @@ const shortHash = computed(() => (props.versionHash ?? '').slice(0, 7))
  */
 const baseBadge = computed(() => (isVersion.value ? '当前版本' : '库中的版本'))
 const incomingBadge = computed(() =>
-  isVersion.value ? `${shortHash.value} 那一版` : `「${props.projectName}」项目里的版本`
+  isVersion.value ? `${shortHash.value} 那一版` : `「${props.projectName}」项目里的版本`,
 )
 const incomingHint = computed(() => (isVersion.value ? '确认后恢复到这一版' : '确认后将更新到库'))
 const actionLabel = computed(() => (isVersion.value ? '恢复到这个版本' : '用项目版本更新到库'))
@@ -106,29 +109,31 @@ const actionLabel = computed(() => (isVersion.value ? '恢复到这个版本' : 
  * （那一版里没有的文件会被删掉 —— 那也是「恢复到那一版」的一部分）。
  */
 const actionEnabled = computed(() =>
-  isVersion.value ? Boolean(props.versionHash) : canApply.value
+  isVersion.value ? Boolean(props.versionHash) : canApply.value,
 )
 const actionDisabledHint = computed(() =>
-  isVersion.value ? '缺少版本号，无法恢复' : '项目里没有这个文件，无从采纳'
+  isVersion.value ? '缺少版本号，无法恢复' : '项目里没有这个文件，无从采纳',
 )
 
 /** 文件条上的圆点：两侧内容不同（含某一侧没有的）才标 —— 找「动过」的文件全靠它 */
 const isDiff = (file: SkillCompareFile): boolean => file.base !== file.incoming
 /** 挂圆点的那些 rel（文件条组件按它标注，见 SkillFileTabs） */
-const diffRels = computed(() => props.files.filter(isDiff).map((file) => file.rel))
+const diffRels = computed(() => props.files.filter(isDiff).map(file => file.rel))
 
 const applying = ref(false)
 const error = ref('')
 
 async function apply(): Promise<void> {
-  if (applying.value || !actionEnabled.value) return
+  if (applying.value || !actionEnabled.value)
+    return
   if (isVersion.value) {
     await restoreVersion()
     return
   }
 
   const target = current.value
-  if (!target || target.incoming === null) return
+  if (!target || target.incoming === null)
+    return
   applying.value = true
   error.value = ''
 
@@ -138,7 +143,8 @@ async function apply(): Promise<void> {
   if (saved) {
     emit('applied', currentRel.value, target.incoming)
     visible.value = false
-  } else {
+  }
+  else {
     error.value = store.saveError || '更新到库失败'
   }
 }
@@ -151,7 +157,8 @@ async function restoreVersion(): Promise<void> {
   applying.value = true
   const done = await store.restoreWithConfirm(props.skillId, props.versionHash ?? '')
   applying.value = false
-  if (done) emit('restored')
+  if (done)
+    emit('restored')
 }
 </script>
 
@@ -191,13 +198,17 @@ async function restoreVersion(): Promise<void> {
         <table class="cmp__table mono">
           <tbody>
             <tr v-for="(row, index) in rows" :key="index" :class="`is-${row.type}`">
-              <td class="cmp__no">{{ row.left?.no ?? '' }}</td>
+              <td class="cmp__no">
+                {{ row.left?.no ?? '' }}
+              </td>
               <td class="cmp__code cmp__code--l" :class="{ 'is-empty': !row.left }">
                 <span v-for="(segment, s) in row.left?.segments ?? []" :key="s" :class="{ 'is-chg': segment.changed }">
                   {{ segment.text || ' ' }}
                 </span>
               </td>
-              <td class="cmp__no">{{ row.right?.no ?? '' }}</td>
+              <td class="cmp__no">
+                {{ row.right?.no ?? '' }}
+              </td>
               <td class="cmp__code cmp__code--r" :class="{ 'is-empty': !row.right }">
                 <span v-for="(segment, s) in row.right?.segments ?? []" :key="s" :class="{ 'is-chg': segment.changed }">
                   {{ segment.text || ' ' }}
@@ -210,7 +221,9 @@ async function restoreVersion(): Promise<void> {
 
       <footer class="cmp__foot">
         <span v-if="error" class="cmp__error">{{ error }}</span>
-        <el-button @click="visible = false">取消</el-button>
+        <el-button @click="visible = false">
+          取消
+        </el-button>
         <el-tooltip v-if="!actionEnabled" :content="actionDisabledHint" placement="top">
           <span>
             <el-button type="primary" disabled>{{ actionLabel }}</el-button>

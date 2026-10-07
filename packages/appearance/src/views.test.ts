@@ -1,15 +1,5 @@
+import { fallbackView, isViewId, orderedViews, sanitizeHiddenViews, sanitizeViewId, sanitizeViewOrder, VIEW_IDS, VIEW_LABELS, visibleViews } from '@workbench/appearance'
 import { describe, expect, it } from 'vitest'
-import {
-  VIEW_IDS,
-  VIEW_LABELS,
-  fallbackView,
-  isViewId,
-  orderedViews,
-  sanitizeHiddenViews,
-  sanitizeViewId,
-  sanitizeViewOrder,
-  visibleViews
-} from '@workbench/appearance'
 
 describe('页面 id', () => {
   it('每个 id 都有名字，否则导航栏会出现空白项', () => {
@@ -52,7 +42,7 @@ describe('导航栏显示哪几页', () => {
       'vault',
       'mail',
       'styles',
-      'video'
+      'video',
     ])
   })
 
@@ -67,7 +57,7 @@ describe('导航栏显示哪几页', () => {
       'vault',
       'mail',
       'styles',
-      'video'
+      'video',
     ])
     expect(visibleViews(sanitizeHiddenViews([...VIEW_IDS]))).toEqual(['home'])
   })
@@ -97,7 +87,7 @@ describe('导航栏的顺序', () => {
       'vault',
       'mail',
       'styles',
-      'video'
+      'video',
     ])
   })
 
@@ -114,7 +104,7 @@ describe('导航栏的顺序', () => {
       'vault',
       'mail',
       'styles',
-      'video'
+      'video',
     ])
     expect(orderedViews(['work', 'skills', 'vault', 'styles', 'projects'], order)).toEqual([
       'home',
@@ -122,7 +112,7 @@ describe('导航栏的顺序', () => {
       'kb',
       'ai',
       'mail',
-      'video'
+      'video',
     ])
     // 不带顺序参数时就是老行为：按 VIEW_IDS 的默认顺序
     expect(orderedViews(['home', 'work'])).toEqual([
@@ -134,7 +124,7 @@ describe('导航栏的顺序', () => {
       'vault',
       'mail',
       'styles',
-      'video'
+      'video',
     ])
   })
 

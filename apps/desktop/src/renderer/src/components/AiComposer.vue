@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import type { AiImage, AiSkillRow } from '@workbench/ai'
+import { Close, Cpu, Lock, Odometer, Setting, Top, Unlock, VideoPause } from '@element-plus/icons-vue'
+import { AI_IMAGE_TYPES, AI_PERMISSION_MODES, AI_SKILL_COMMAND, aiImageAccepted, aiThinkingLabel } from '@workbench/ai'
 /**
  * 写指令的那一条：输入框 + 一行控件（工具权限、这一轮用哪个模型、思考几档、发送 / 停止）。
  *
@@ -33,16 +36,6 @@
  * 那两行字的样式在 global.css（`.composer-permission-pop`）。
  */
 import { computed, ref, watch } from 'vue'
-import { Close, Cpu, Lock, Odometer, Setting, Top, Unlock, VideoPause } from '@element-plus/icons-vue'
-import {
-  AI_IMAGE_TYPES,
-  AI_PERMISSION_MODES,
-  AI_SKILL_COMMAND,
-  aiImageAccepted,
-  aiThinkingLabel,
-  type AiImage
-} from '@workbench/ai'
-import type { AiSkillRow } from '@workbench/ai'
 import { notifyWarning } from '@/notify'
 import { useAiStore } from '@/stores/ai'
 import { useAiSkillsStore } from '@/stores/ai-skills'
@@ -55,11 +48,11 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  configure: []
+  'configure': []
   'update:instruction': [value: string]
   'add-images': [images: AiImage[]]
   'remove-image': [at: number]
-  send: [text: string, images: AiImage[]]
+  'send': [text: string, images: AiImage[]]
 }>()
 
 const ai = useAiStore()
@@ -71,11 +64,11 @@ const skillsStore = useAiSkillsStore()
  * （几个服务可能都有同名模型）。挑的是 shared/ai.ts 的 AiModelChoice.key。
  */
 const modelOptions = computed(() =>
-  ai.choices.map((choice) => ({
+  ai.choices.map(choice => ({
     key: choice.key,
     label: `${choice.providerLabel} · ${choice.name}`,
-    id: choice.model
-  }))
+    id: choice.model,
+  })),
 )
 
 /** 下拉挑了什么就记进设置（el-select 的 change 给的是宽联合，这里只可能是字符串） */
@@ -93,7 +86,8 @@ function choosePermission(value: unknown): void {
 
 /** 那一颗按钮：没在跑就是「发送」，跑着就是「停止」。发送报给页面（send），由页面转给 store */
 function sendOrStop(): void {
-  if (ai.running) void ai.stop()
+  if (ai.running)
+    void ai.stop()
   else emit('send', props.instruction.trim(), [...props.images])
 }
 
@@ -104,20 +98,20 @@ function sendOrStop(): void {
 const canRun = computed(
   () =>
     // 有会话就说在那个会话里；还没有会话（起始那一屏）时，挑好的那个目录就是它的落处
-    (!!ai.activeSession || !!ai.newDir) &&
-    !ai.running &&
+    (!!ai.activeSession || !!ai.newDir)
+    && !ai.running
     // 正在建那一个会话的当口不能再发（见 stores/ai.ts 的 creating）
-    !ai.creating &&
+    && !ai.creating
     // 正在读回历史的那一会儿不让发：这一段的对话还没落地，发出去会把读回来的那段挤掉
-    !ai.hydrating &&
-    ai.piReady &&
-    ai.nodeOk &&
-    ai.configured &&
-    ai.keyReady &&
+    && !ai.hydrating
+    && ai.piReady
+    && ai.nodeOk
+    && ai.configured
+    && ai.keyReady
     // 贴了图就得是能看图的模型：不然 Pi 会把图换成一句「图被略去」的占位发出去
-    (props.images.length === 0 || ai.imageReady) &&
+    && (props.images.length === 0 || ai.imageReady)
     // 一句话要么有字要么有图 —— 只有图的那句照样发得出去
-    (!!props.instruction.trim() || props.images.length > 0)
+    && (!!props.instruction.trim() || props.images.length > 0),
 )
 
 /**
@@ -130,10 +124,12 @@ const canRun = computed(
  * 这里的悬停版 —— 说得到位些。
  */
 const blocking = computed(() => {
-  if (!ai.probed) return ''
+  if (!ai.probed)
+    return ''
   if (!ai.activeSession && !ai.newDir)
     return '先挑一个工作目录：位置那一栏那个下拉 —— 对话就在它里面干活，一个目录就是一个「项目」。'
-  if (ai.hydrating) return '正在接上这段对话…等它读完就能接着说。'
+  if (ai.hydrating)
+    return '正在接上这段对话…等它读完就能接着说。'
   switch (ai.envGap()) {
     case 'node':
       return '这台机器的 Node 太旧：跑 Pi 需要 Node ≥ 22.19，先把 Node 升上去。'
@@ -163,8 +159,10 @@ const blocking = computed(() => {
  */
 const skillQuery = computed<string | null>(() => {
   const text = props.instruction.trimStart()
-  if (text === '/') return ''
-  if (!text.startsWith(AI_SKILL_COMMAND)) return null
+  if (text === '/')
+    return ''
+  if (!text.startsWith(AI_SKILL_COMMAND))
+    return null
   const rest = text.slice(AI_SKILL_COMMAND.length)
   return /^\S*$/.test(rest) ? rest : null
 })
@@ -172,11 +170,12 @@ const skillQuery = computed<string | null>(() => {
 /** 候选：装好且**开着**的技能（关掉的不该出现在这儿），按名字 / 描述筛一下，最多 8 条 */
 const skillCandidates = computed(() => {
   const query = skillQuery.value
-  if (query === null) return []
+  if (query === null)
+    return []
   const text = query.trim().toLowerCase()
   return skillsStore.pickable
-    .filter((row) =>
-      text ? `${row.name} ${row.id} ${row.description}`.toLowerCase().includes(text) : true
+    .filter(row =>
+      text ? `${row.name} ${row.id} ${row.description}`.toLowerCase().includes(text) : true,
     )
     .slice(0, 8)
 })
@@ -201,7 +200,8 @@ function insertSkill(row: AiSkillRow): void {
 
 /** 上下键在候选里走（首尾相接） */
 function moveSkill(step: number): void {
-  if (!skillPickerOpen.value) return
+  if (!skillPickerOpen.value)
+    return
   const count = skillCandidates.value.length
   skillIndex.value = (skillIndex.value + step + count) % count
 }
@@ -212,13 +212,15 @@ function moveSkill(step: number): void {
  * **候选那一列开着时 Enter 是「选这一条」**（敲命令的当口，用户要的是挑技能而不是发出去）。
  */
 function onEnter(event: KeyboardEvent): void {
-  if (event.isComposing) return
+  if (event.isComposing)
+    return
   if (skillPickerOpen.value) {
     event.preventDefault()
     insertSkill(skillCandidates.value[skillIndex.value] ?? skillCandidates.value[0])
     return
   }
-  if (ai.running || !canRun.value) return
+  if (ai.running || !canRun.value)
+    return
   event.preventDefault()
   emit('send', props.instruction.trim(), [...props.images])
 }
@@ -247,28 +249,30 @@ function readImage(file: File): Promise<AiImage | null> {
  */
 async function onPaste(event: ClipboardEvent): Promise<void> {
   const items = [...(event.clipboardData?.items ?? [])].filter(
-    (item) => item.kind === 'file' && item.type.startsWith('image/')
+    item => item.kind === 'file' && item.type.startsWith('image/'),
   )
-  if (!items.length) return
+  if (!items.length)
+    return
   event.preventDefault()
 
   const files = items
-    .filter((item) => aiImageAccepted(item.type))
-    .map((item) => item.getAsFile())
+    .filter(item => aiImageAccepted(item.type))
+    .map(item => item.getAsFile())
     .filter((file): file is File => !!file)
   if (!files.length) {
     // 收哪几种由 shared/ai.ts 那张表说了算（它对的是 Pi 能直接内联给模型的那几种）
-    const types = AI_IMAGE_TYPES.map((type) => type.replace('image/', '')).join(' / ')
+    const types = AI_IMAGE_TYPES.map(type => type.replace('image/', '')).join(' / ')
     return notifyWarning(`这种图发不出去：只认 ${types}`)
   }
 
   const read = (await Promise.all(files.map(readImage))).filter((image): image is AiImage => !!image)
-  if (!read.length) return notifyWarning('这张图读不出来，换一张试试')
+  if (!read.length)
+    return notifyWarning('这张图读不出来，换一张试试')
   emit('add-images', read)
 }
 
 /** 贴上的那几张的数据 URL（点开看大图时左右切换用的就是这一串，顺序与缩略图一致） */
-const shotSrcs = computed(() => props.images.map((image) => image.dataUrl))
+const shotSrcs = computed(() => props.images.map(image => image.dataUrl))
 
 /**
  * 输入框里那句话：还没有会话时不能是「接着这段对话」—— 那会儿对话还没开始，
@@ -277,13 +281,15 @@ const shotSrcs = computed(() => props.images.map((image) => image.dataUrl))
 const placeholder = computed(() =>
   ai.activeSession
     ? '接着这段对话说点什么 —— 它会自己读目录里的说明、改文件，也可能执行命令。'
-    : '说点什么 —— 它会在这个目录里干活：读目录里的说明、改文件，也可能执行命令。'
+    : '说点什么 —— 它会在这个目录里干活：读目录里的说明、改文件，也可能执行命令。',
 )
 
 /** 发送按钮的提示：跑着时它是停止，其余时候把还差什么说清楚 */
 const sendTitle = computed(() => {
-  if (ai.running) return '停掉这一轮（先让它自己停，卡住了才按进程树杀）'
-  if (!canRun.value) return blocking.value || '还跑不起来'
+  if (ai.running)
+    return '停掉这一轮（先让它自己停，卡住了才按进程树杀）'
+  if (!canRun.value)
+    return blocking.value || '还跑不起来'
   return '发送：接着这段对话说下去（Enter）'
 })
 </script>
@@ -402,7 +408,9 @@ const sendTitle = computed(() => {
             :value="option.key"
           />
           <template #empty>
-            <p class="composer__empty">还没有能挑的模型：先在模型管理里加一个服务</p>
+            <p class="composer__empty">
+              还没有能挑的模型：先在模型管理里加一个服务
+            </p>
           </template>
           <template #footer>
             <el-button link size="small" :icon="Setting" @click="emit('configure')">

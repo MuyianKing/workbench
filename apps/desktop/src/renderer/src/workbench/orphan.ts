@@ -1,9 +1,10 @@
+import type { ReapDeps, ReapResult } from '@workbench/core'
 /**
  * 残留进程清理的生产侧：把 `@workbench/core` 的判定接到 Rust 上。
  *
  * 判定规则一行都没有重复 —— 那些留在 shared 里，连同「PID 被复用」这类安全性判断的测试。
  */
-import { reapOrphanSessions, type ReapDeps, type ReapResult } from '@workbench/core'
+import { reapOrphanSessions } from '@workbench/core'
 import { invoke } from './bridge'
 import * as state from './state'
 
@@ -12,7 +13,8 @@ const rustDeps: ReapDeps = {
   createdAt: async (pid) => {
     try {
       return await invoke<number | null>('process_created_at', { pid })
-    } catch {
+    }
+    catch {
       // 问不到就当作认不出来，清理流程会跳过它
       return null
     }
@@ -20,7 +22,7 @@ const rustDeps: ReapDeps = {
 
   killTree: async (pid) => {
     await invoke('kill_process_tree', { pid })
-  }
+  },
 }
 
 /**

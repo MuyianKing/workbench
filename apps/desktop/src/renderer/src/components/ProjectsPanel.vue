@@ -7,10 +7,10 @@
  * 项目再多也在这一层滚，不把页面撑高。
  */
 import { Plus, Search } from '@element-plus/icons-vue'
-import { useProjectsStore } from '@/stores/projects'
 import PanelLoading from '@/components/PanelLoading.vue'
 import ProjectCard from '@/components/ProjectCard.vue'
 import WelcomePanel from '@/components/WelcomePanel.vue'
+import { useProjectsStore } from '@/stores/projects'
 
 const store = useProjectsStore()
 
@@ -29,17 +29,27 @@ function clearFilter(): void {
         <ProjectCard v-for="p in store.filteredProjects" :key="p.id" :project="p" />
 
         <button class="add-tile" type="button" @click="store.openAddDialog()">
-          <el-icon class="add-tile__icon"><Plus /></el-icon>
+          <el-icon class="add-tile__icon">
+            <Plus />
+          </el-icon>
           <span class="add-tile__text">添加项目</span>
           <span class="add-tile__hint mono">选择项目目录</span>
         </button>
       </div>
 
       <div v-else class="nomatch">
-        <el-icon class="empty__icon"><Search /></el-icon>
-        <p class="nomatch__title">这个分组下没有项目</p>
-        <p class="nomatch__desc">切回「全部」分组，或先给项目归类。</p>
-        <el-button size="small" @click="clearFilter">清除筛选条件</el-button>
+        <el-icon class="empty__icon">
+          <Search />
+        </el-icon>
+        <p class="nomatch__title">
+          这个分组下没有项目
+        </p>
+        <p class="nomatch__desc">
+          切回「全部」分组，或先给项目归类。
+        </p>
+        <el-button size="small" @click="clearFilter">
+          清除筛选条件
+        </el-button>
       </div>
     </template>
 

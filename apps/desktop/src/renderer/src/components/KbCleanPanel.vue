@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import type { AiLogLine } from '@workbench/ai'
+import type { KbCleanPhase } from '@workbench/kb'
+import { ArrowLeft, Loading, MagicStick } from '@element-plus/icons-vue'
 /**
  * 清洗面板（右栏的第三态）：一键清洗的整个过程都在这里看得见。
  *
@@ -12,9 +15,6 @@
  * splitCleanWrites）：条目名是一颗能点的按钮，点一下收面板、直接去读那一条。
  */
 import { computed, nextTick, ref, watch } from 'vue'
-import { ArrowLeft, Loading, MagicStick } from '@element-plus/icons-vue'
-import type { AiLogLine } from '@workbench/ai'
-import type { KbCleanPhase } from '@workbench/kb'
 import MarkdownView from '@/components/MarkdownView.vue'
 
 const props = defineProps<{
@@ -29,10 +29,10 @@ const props = defineProps<{
   updated: string[]
 }>()
 
-const emit = defineEmits<{ start: []; stop: []; close: []; 'open-models': []; 'open-entry': [rel: string] }>()
+const emit = defineEmits<{ 'start': [], 'stop': [], 'close': [], 'open-models': [], 'open-entry': [rel: string] }>()
 
 /** 顶部那行状态说什么：跑着的每一步、收场与拦截各有一句 */
-const status = computed<{ text: string; kind: 'run' | 'ok' | 'fail' } | null>(() => {
+const status = computed<{ text: string, kind: 'run' | 'ok' | 'fail' } | null>(() => {
   switch (props.phase) {
     case 'cleaning':
       return { text: '正在清洗：Pi 在按清单整理条目…', kind: 'run' }
@@ -56,8 +56,9 @@ const modelsNeeded = computed(() => /模型|API Key/.test(props.error))
 const WRITE_LIMIT = 12
 const createdShown = computed(() => props.created.slice(0, WRITE_LIMIT))
 const updatedShown = computed(() => props.updated.slice(0, WRITE_LIMIT))
-const restText = (list: string[]): string =>
-  list.length > WRITE_LIMIT ? `还有 ${list.length - WRITE_LIMIT} 条没有列出` : ''
+function restText(list: string[]): string {
+  return list.length > WRITE_LIMIT ? `还有 ${list.length - WRITE_LIMIT} 条没有列出` : ''
+}
 
 const scroller = ref<HTMLElement | null>(null)
 
@@ -67,8 +68,9 @@ watch(
   async () => {
     await nextTick()
     const box = scroller.value
-    if (box) box.scrollTop = box.scrollHeight
-  }
+    if (box)
+      box.scrollTop = box.scrollHeight
+  },
 )
 </script>
 
@@ -76,7 +78,9 @@ watch(
   <div class="clean">
     <header class="clean__head">
       <div class="clean__bar">
-        <h3 class="clean__title">清洗</h3>
+        <h3 class="clean__title">
+          清洗
+        </h3>
         <span v-if="status" class="clean__status" :class="`is-${status.kind}`">
           <el-icon v-if="status.kind === 'run'" class="clean__spin"><Loading /></el-icon>
           {{ status.text }}
@@ -96,12 +100,16 @@ watch(
 
       <!-- 拦路那一屏：缺什么就地说明，能去的去处给到位 -->
       <div v-if="phase === 'blocked'" class="clean__blocked">
-        <p class="clean__blocked-text">{{ error }}</p>
+        <p class="clean__blocked-text">
+          {{ error }}
+        </p>
         <el-button v-if="modelsNeeded" size="small" @click="emit('open-models')">
           打开模型管理
         </el-button>
       </div>
-      <p v-else-if="phase === 'failed' && error" class="clean__fail">{{ error }}</p>
+      <p v-else-if="phase === 'failed' && error" class="clean__fail">
+        {{ error }}
+      </p>
     </header>
 
     <div ref="scroller" class="clean__log">
@@ -109,34 +117,52 @@ watch(
         <div v-for="(line, index) in lines" :key="index" class="msg" :class="`is-${line.kind}`">
           <MarkdownView v-if="line.kind === 'text'" :source="line.text" />
           <!-- 想的那几段是纯文本（草稿里的半截标记不该被当成排版），与 AiProcess 同一条 -->
-          <p v-else-if="line.kind === 'thinking'" class="clean__think">{{ line.text }}</p>
+          <p v-else-if="line.kind === 'thinking'" class="clean__think">
+            {{ line.text }}
+          </p>
           <p v-else class="clean__meta" :class="{ 'has-detail': line.detail }" :title="line.detail">
             {{ line.text }}
           </p>
         </div>
       </template>
-      <p v-else-if="phase === 'cleaning'" class="clean__meta">正在把清洗清单交给 Pi…</p>
-      <p v-else-if="phase !== 'blocked'" class="clean__meta">还没有日志。</p>
+      <p v-else-if="phase === 'cleaning'" class="clean__meta">
+        正在把清洗清单交给 Pi…
+      </p>
+      <p v-else-if="phase !== 'blocked'" class="clean__meta">
+        还没有日志。
+      </p>
     </div>
 
     <footer v-if="created.length || updated.length" class="clean__foot">
       <div v-if="created.length" class="clean__write">
-        <p class="clean__written">新建 {{ created.length }} 条</p>
+        <p class="clean__written">
+          新建 {{ created.length }} 条
+        </p>
         <ul class="clean__rels">
           <li v-for="rel in createdShown" :key="rel">
-            <button type="button" class="clean__rel" @click="emit('open-entry', rel)">{{ rel }}</button>
+            <button type="button" class="clean__rel" @click="emit('open-entry', rel)">
+              {{ rel }}
+            </button>
           </li>
         </ul>
-        <p v-if="restText(created)" class="clean__written">{{ restText(created) }}</p>
+        <p v-if="restText(created)" class="clean__written">
+          {{ restText(created) }}
+        </p>
       </div>
       <div v-if="updated.length" class="clean__write">
-        <p class="clean__written">覆盖 {{ updated.length }} 条</p>
+        <p class="clean__written">
+          覆盖 {{ updated.length }} 条
+        </p>
         <ul class="clean__rels">
           <li v-for="rel in updatedShown" :key="rel">
-            <button type="button" class="clean__rel" @click="emit('open-entry', rel)">{{ rel }}</button>
+            <button type="button" class="clean__rel" @click="emit('open-entry', rel)">
+              {{ rel }}
+            </button>
           </li>
         </ul>
-        <p v-if="restText(updated)" class="clean__written">{{ restText(updated) }}</p>
+        <p v-if="restText(updated)" class="clean__written">
+          {{ restText(updated) }}
+        </p>
       </div>
     </footer>
   </div>

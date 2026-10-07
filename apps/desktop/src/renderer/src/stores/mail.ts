@@ -1,3 +1,9 @@
+import type { MailAccount, MailAttachmentInput, ParsedAttachment } from '@workbench/mail'
+import type { Result } from '@/types'
+import type { MailSummary } from '@/workbench/mail'
+import { fail, ok } from '@workbench/core'
+import { buildMime, displayDate, displaySender, htmlBody, isBulkMail, mailAccountReady, mailTime, parseMessage, senderAddress } from '@workbench/mail'
+import { defineStore } from 'pinia'
 /**
  * 邮箱页的状态。
  *
@@ -19,34 +25,8 @@
  * 用户自己点刷新。
  */
 import { computed, ref, watch } from 'vue'
-import { defineStore } from 'pinia'
-import {
-  buildMime,
-  displayDate,
-  displaySender,
-  htmlBody,
-  isBulkMail,
-  mailAccountReady,
-  mailTime,
-  parseMessage,
-  senderAddress,
-  type MailAccount,
-  type MailAttachmentInput,
-  type ParsedAttachment
-} from '@workbench/mail'
-import { fail, ok } from '@workbench/core'
 import { notifyError } from '@/notify'
-import type { Result } from '@/types'
-import {
-  deleteMails as deleteMailsOnServer,
-  fetchMailBody,
-  fetchMailList,
-  registerMailWatch,
-  saveMailAttachment,
-  sendMail,
-  setMailSeen,
-  type MailSummary
-} from '@/workbench/mail'
+import { deleteMails as deleteMailsOnServer, fetchMailBody, fetchMailList, registerMailWatch, saveMailAttachment, sendMail, setMailSeen } from '@/workbench/mail'
 import { useNavStore } from './nav'
 import { useSettingsStore } from './settings'
 
@@ -94,7 +74,7 @@ export const useMailStore = defineStore('mail', () => {
 
   /** 按地址找账户的连接配置（账户删了 / 配置改了之后找不到，就干不了那件事） */
   function accountOf(address: string): MailAccount | undefined {
-    return accounts.value.find((account) => account.address === address)
+    return accounts.value.find(account => account.address === address)
   }
 
   // ---------- 收件箱列表（多账户合并） ----------
@@ -106,17 +86,21 @@ export const useMailStore = defineStore('mail', () => {
   const listLoading = ref(false)
   /** 每个拉取失败的账户一句话（其余账户的信照常显示） */
   const listErrors = ref<string[]>([])
-  /** 在途的那次拉取：并发调用共享同一个 Promise，而不是各自开一轮（通知点击
-   *  与页面挂载可能前后脚各调一次 —— 共享才不会拿着旧清单去找刚到的那封） */
+  /**
+   * 在途的那次拉取：并发调用共享同一个 Promise，而不是各自开一轮（通知点击
+   *  与页面挂载可能前后脚各调一次 —— 共享才不会拿着旧清单去找刚到的那封）
+   */
   let listInFlight: Promise<void> | null = null
 
   /** 用户右击「标记为广告」攒下的发件人黑名单（设置里的 mailBulkSenders） */
   const bulkSenders = computed(() => settings.settings.mailBulkSenders)
 
-  const list = computed(() => all.value.filter((item) => !isBulkMail(item, bulkSenders.value)))
-  /** 识别成推广 / 广告的那部分：**不进**上面的收件箱清单 —— 收进清单底部分开的一段
-   *  （showBulk 控制那段折不折），展开也不与正常邮件混排 */
-  const bulkList = computed(() => all.value.filter((item) => isBulkMail(item, bulkSenders.value)))
+  const list = computed(() => all.value.filter(item => !isBulkMail(item, bulkSenders.value)))
+  /**
+   * 识别成推广 / 广告的那部分：**不进**上面的收件箱清单 —— 收进清单底部分开的一段
+   *  （showBulk 控制那段折不折），展开也不与正常邮件混排
+   */
+  const bulkList = computed(() => all.value.filter(item => isBulkMail(item, bulkSenders.value)))
   const bulkCount = computed(() => bulkList.value.length)
 
   /**
@@ -125,7 +109,8 @@ export const useMailStore = defineStore('mail', () => {
    * 并发调用共享在途的那次（见 listInFlight）。
    */
   function refreshList(): Promise<void> {
-    if (listInFlight) return listInFlight
+    if (listInFlight)
+      return listInFlight
     if (!configured.value) {
       all.value = []
       listErrors.value = []
@@ -135,7 +120,7 @@ export const useMailStore = defineStore('mail', () => {
     listErrors.value = []
     listInFlight = (async () => {
       const results = await Promise.all(
-        accounts.value.map(async (account) => ({ account, result: await fetchMailList(account, MAIL_LIST_LIMIT) }))
+        accounts.value.map(async account => ({ account, result: await fetchMailList(account, MAIL_LIST_LIMIT) })),
       )
       const merged: MailListItem[] = []
       const errors: string[] = []
@@ -144,7 +129,8 @@ export const useMailStore = defineStore('mail', () => {
           for (const summary of result.data) {
             merged.push({ ...summary, account: account.address, key: `${account.address}/${summary.uid}` })
           }
-        } else {
+        }
+        else {
           errors.push(`「${account.address}」${result.error ?? '拉取收件箱失败'}`)
         }
       }
@@ -173,7 +159,8 @@ export const useMailStore = defineStore('mail', () => {
       return
     }
     const account = accountOf(item.account)
-    if (!account || bodyLoading.value) return
+    if (!account || bodyLoading.value)
+      return
     bodyLoading.value = true
     bodyError.value = ''
     const raw = await fetchMailBody(account, item.uid, true)
@@ -195,14 +182,16 @@ export const useMailStore = defineStore('mail', () => {
         dateText: displayDate(item.date),
         html: htmlBody(parsed),
         text: parsed.text,
-        attachments: parsed.attachments
+        attachments: parsed.attachments,
       }
       bodies.set(item.key, message)
       active.value = message
       // 打开即已读（Rust 侧 markSeen），列表上的点就地跟上
-      const summary = all.value.find((entry) => entry.key === item.key)
-      if (summary && !summary.seen) summary.seen = true
-    } catch (error) {
+      const summary = all.value.find(entry => entry.key === item.key)
+      if (summary && !summary.seen)
+        summary.seen = true
+    }
+    catch (error) {
       bodyError.value = error instanceof Error ? error.message : '邮件解析失败'
     }
     bodyLoading.value = false
@@ -215,11 +204,13 @@ export const useMailStore = defineStore('mail', () => {
   /** 标记 / 取消已读。列表先就地改，服务器那边失败了再说（返回 Result 给调用方提示）。 */
   async function markSeen(account: string, uid: number, seen: boolean): Promise<Result<null>> {
     const config = accountOf(account)
-    if (!config) return fail(`「${account}」的账户配置不在了`)
+    if (!config)
+      return fail(`「${account}」的账户配置不在了`)
     const result = await setMailSeen(config, uid, seen)
     if (result.ok) {
-      const item = all.value.find((entry) => entry.account === account && entry.uid === uid)
-      if (item) item.seen = seen
+      const item = all.value.find(entry => entry.account === account && entry.uid === uid)
+      if (item)
+        item.seen = seen
     }
     return result
   }
@@ -234,10 +225,11 @@ export const useMailStore = defineStore('mail', () => {
    * 立刻跟上：清单摘掉、正文缓存扔掉、正在读的就地关掉 —— 不等下次刷新；
    * 某个账户失败只记它的一句话，其余账户照删。
    */
-  async function deleteMails(items: ReadonlyArray<{ account: string; uid: number }>): Promise<Result<null>> {
-    const pending = items.filter((item) => !deletingKeys.value.includes(`${item.account}/${item.uid}`))
-    if (pending.length === 0) return ok(null)
-    const keys = pending.map((item) => `${item.account}/${item.uid}`)
+  async function deleteMails(items: ReadonlyArray<{ account: string, uid: number }>): Promise<Result<null>> {
+    const pending = items.filter(item => !deletingKeys.value.includes(`${item.account}/${item.uid}`))
+    if (pending.length === 0)
+      return ok(null)
+    const keys = pending.map(item => `${item.account}/${item.uid}`)
     deletingKeys.value = [...deletingKeys.value, ...keys]
 
     const byAccount = new Map<string, number[]>()
@@ -258,16 +250,18 @@ export const useMailStore = defineStore('mail', () => {
         const result = await deleteMailsOnServer(config, uids)
         if (result.ok) {
           for (const uid of uids) done.add(`${account}/${uid}`)
-        } else {
+        }
+        else {
           failures.push(`「${account}」${result.error ?? '删除失败'}`)
         }
-      })
+      }),
     )
-    deletingKeys.value = deletingKeys.value.filter((key) => !keys.includes(key))
+    deletingKeys.value = deletingKeys.value.filter(key => !keys.includes(key))
     if (done.size) {
-      all.value = all.value.filter((entry) => !done.has(entry.key))
+      all.value = all.value.filter(entry => !done.has(entry.key))
       for (const key of done) bodies.delete(key)
-      if (active.value && done.has(active.value.key)) active.value = null
+      if (active.value && done.has(active.value.key))
+        active.value = null
     }
     return failures.length ? fail(failures.join('；')) : ok(null)
   }
@@ -278,23 +272,29 @@ export const useMailStore = defineStore('mail', () => {
    * 计入底部那行略过数）。落盘失败飘一条错误，黑名单以设置回推的为准。
    */
   async function markBulk(account: string, uid: number): Promise<void> {
-    const item = all.value.find((entry) => entry.account === account && entry.uid === uid)
-    if (!item) return
+    const item = all.value.find(entry => entry.account === account && entry.uid === uid)
+    if (!item)
+      return
     const address = senderAddress(item.from).toLowerCase()
-    if (!address || bulkSenders.value.includes(address)) return
+    if (!address || bulkSenders.value.includes(address))
+      return
     const updated = await settings.updateSettings({ mailBulkSenders: [...bulkSenders.value, address] })
-    if (!updated) notifyError('标记失败')
+    if (!updated)
+      notifyError('标记失败')
   }
 
   /** 右击「取消广告标记」（对着黑名单里的发件人）：从黑名单里摘掉，信回到清单。 */
   async function unbulk(account: string, uid: number): Promise<void> {
-    const item = all.value.find((entry) => entry.account === account && entry.uid === uid)
-    if (!item) return
+    const item = all.value.find(entry => entry.account === account && entry.uid === uid)
+    if (!item)
+      return
     const address = senderAddress(item.from).toLowerCase()
-    const next = bulkSenders.value.filter((entry) => entry !== address)
-    if (next.length === bulkSenders.value.length) return
+    const next = bulkSenders.value.filter(entry => entry !== address)
+    if (next.length === bulkSenders.value.length)
+      return
     const updated = await settings.updateSettings({ mailBulkSenders: next })
-    if (!updated) notifyError('取消标记失败')
+    if (!updated)
+      notifyError('取消标记失败')
   }
 
   // ---------- 发信 ----------
@@ -310,8 +310,10 @@ export const useMailStore = defineStore('mail', () => {
     attachments?: MailAttachmentInput[]
   }): Promise<Result<null>> {
     const account = accountOf(input.from)
-    if (!account) return fail('先在「账户」里把发件邮箱配好')
-    if (sending.value) return fail('上一封还在发，等它跑完')
+    if (!account)
+      return fail('先在「账户」里把发件邮箱配好')
+    if (sending.value)
+      return fail('上一封还在发，等它跑完')
     sending.value = true
     try {
       const mime = buildMime({
@@ -319,12 +321,14 @@ export const useMailStore = defineStore('mail', () => {
         to: input.to,
         subject: input.subject,
         text: input.text,
-        attachments: input.attachments
+        attachments: input.attachments,
       })
       return await sendMail(account, input.to, mime)
-    } catch (error) {
+    }
+    catch (error) {
       return fail(error instanceof Error ? error.message : '报文构建失败')
-    } finally {
+    }
+    finally {
       sending.value = false
     }
   }
@@ -353,7 +357,8 @@ export const useMailStore = defineStore('mail', () => {
    * 把通知里那封打开（唤出窗口是 Rust 做的，这里只管页面内的事）。
    */
   function startWatch(): void {
-    if (watchStarted) return
+    if (watchStarted)
+      return
     watchStarted = true
 
     // 用内容签名而不是引用比对：设置里任何一项改动都会换掉 settings 对象，
@@ -364,14 +369,15 @@ export const useMailStore = defineStore('mail', () => {
         JSON.stringify({
           accounts: accounts.value,
           bulk: bulkSenders.value,
-          poll: settings.settings.mailPollMinutes
+          poll: settings.settings.mailPollMinutes,
         }),
       (next) => {
-        if (next === signature) return
+        if (next === signature)
+          return
         signature = next
         void registerMailWatch(accounts.value, bulkSenders.value, settings.settings.mailPollMinutes)
       },
-      { immediate: true }
+      { immediate: true },
     )
 
     // 浏览器预览下没有后端，订阅退化成空操作（与 settings.ts 的 setAppName 同一防御）
@@ -379,8 +385,9 @@ export const useMailStore = defineStore('mail', () => {
       const nav = useNavStore()
       void nav.setActiveView('mail').then(async () => {
         await refreshList()
-        const item = all.value.find((entry) => entry.account === account && entry.uid === uid)
-        if (item) void openMail(item)
+        const item = all.value.find(entry => entry.account === account && entry.uid === uid)
+        if (item)
+          void openMail(item)
       })
     })
   }
@@ -416,6 +423,6 @@ export const useMailStore = defineStore('mail', () => {
     downloadAttachment,
     invalidate,
     startWatch,
-    senderText
+    senderText,
   }
 })

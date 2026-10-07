@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { KbIndexInfo, KbIssue, KbStats } from '@workbench/kb'
+import { KB_ISSUE_LABELS, kbIssueCounts } from '@workbench/kb'
 /**
  * 知识库概览（右栏的默认内容）：统计、标签分布、索引状态、仓库归属与**巡检**。
  *
@@ -8,12 +10,10 @@
  * 巡检只报不改：每一条都能点开对应的条目，改哪儿由人定。
  */
 import { computed } from 'vue'
-import type { KbIndexInfo, KbStats } from '@workbench/kb'
-import { kbIssueCounts, KB_ISSUE_LABELS, type KbIssue } from '@workbench/kb'
 
 const props = defineProps<{
   stats: KbStats
-  tagCounts: Array<{ tag: string; count: number }>
+  tagCounts: Array<{ tag: string, count: number }>
   /** index.json 解出来的两样；null = 索引还没生成（或认不出） */
   indexInfo: KbIndexInfo | null
   /** 知识库文件夹在不在 git 仓库里 */
@@ -32,14 +32,14 @@ const topTags = computed(() => props.tagCounts.slice(0, TAG_LIMIT))
 
 /** 索引与实际条目数对不上：该重建了（null 不算对不上，那是「还没生成」的另一句话） */
 const indexMismatch = computed(
-  () => props.indexInfo !== null && props.indexInfo.count !== props.stats.entries
+  () => props.indexInfo !== null && props.indexInfo.count !== props.stats.entries,
 )
 
 /** 巡检的汇总行：「孤儿 3 · 断链 1」（只有非零的那几类，顺序固定） */
 const issueSummary = computed(() =>
   kbIssueCounts(props.issues)
-    .map((item) => `${item.label} ${item.count}`)
-    .join(' · ')
+    .map(item => `${item.label} ${item.count}`)
+    .join(' · '),
 )
 
 /** 问题多起来先列前几条：剩下的给一句计数，别把这张卡片铺成一整页 */
@@ -48,8 +48,10 @@ const shownIssues = computed(() => props.issues.slice(0, ISSUE_LIMIT))
 const restIssues = computed(() => Math.max(0, props.issues.length - ISSUE_LIMIT))
 
 const repoText = computed(() => {
-  if (!props.isRepo) return '不在 git 仓库里：没有版本记录，也没法在这里同步'
-  if (!props.repoOrigin) return '在 git 仓库里，但还没连远端：版本只留本机'
+  if (!props.isRepo)
+    return '不在 git 仓库里：没有版本记录，也没法在这里同步'
+  if (!props.repoOrigin)
+    return '在 git 仓库里，但还没连远端：版本只留本机'
   return `已连远端：${props.repoOrigin}`
 })
 </script>
@@ -58,26 +60,33 @@ const repoText = computed(() => {
   <div class="kb-info">
     <div class="kb-info__scroll">
       <section class="kb-info__block">
-        <h3 class="kb-info__title">概览</h3>
+        <h3 class="kb-info__title">
+          概览
+        </h3>
         <dl class="kb-info__facts">
           <div class="kb-info__fact">
             <dt>条目</dt>
             <dd>
-              {{ stats.entries }}<template v-if="stats.drafts > 0">（草稿 {{ stats.drafts }}）</template>
+              {{ stats.entries }}<template v-if="stats.drafts > 0">
+                （草稿 {{ stats.drafts }}）
+              </template>
             </dd>
           </div>
           <div class="kb-info__fact">
             <dt>原始数据</dt>
             <dd>
               {{ stats.raws }}<template v-if="stats.pending + stats.stale > 0">
-                （未入库 {{ stats.pending }} · 有更新 {{ stats.stale }}）</template>
+                （未入库 {{ stats.pending }} · 有更新 {{ stats.stale }}）
+              </template>
             </dd>
           </div>
         </dl>
       </section>
 
       <section v-if="topTags.length" class="kb-info__block">
-        <h3 class="kb-info__title">标签</h3>
+        <h3 class="kb-info__title">
+          标签
+        </h3>
         <div class="kb-info__tags">
           <span v-for="item in topTags" :key="item.tag" class="kb-info__tag">
             {{ item.tag }}<span class="kb-info__tag-count">{{ item.count }}</span>
@@ -86,7 +95,9 @@ const repoText = computed(() => {
       </section>
 
       <section class="kb-info__block">
-        <h3 class="kb-info__title">索引</h3>
+        <h3 class="kb-info__title">
+          索引
+        </h3>
         <p v-if="!indexInfo" class="kb-info__note">
           还没有生成索引：点工具条上的「重建索引」，由应用按 kb/ 下的条目算出目录与机器索引。
         </p>
@@ -101,7 +112,9 @@ const repoText = computed(() => {
       </section>
 
       <section class="kb-info__block">
-        <h3 class="kb-info__title">仓库</h3>
+        <h3 class="kb-info__title">
+          仓库
+        </h3>
         <p class="kb-info__note" :class="{ 'kb-info__warn': !isRepo || !repoOrigin }">
           {{ repoText }}
         </p>
@@ -109,12 +122,16 @@ const repoText = computed(() => {
 
       <!-- 巡检：只读检查，出问题就点开那一条去看（改哪儿由人定） -->
       <section class="kb-info__block">
-        <h3 class="kb-info__title">巡检</h3>
+        <h3 class="kb-info__title">
+          巡检
+        </h3>
         <p v-if="!issues.length" class="kb-info__note">
           没有发现问题：孤儿、断链、元数据、出处、主题目录都过了一遍。
         </p>
         <template v-else>
-          <p class="kb-info__note">共 {{ issues.length }} 处：{{ issueSummary }}</p>
+          <p class="kb-info__note">
+            共 {{ issues.length }} 处：{{ issueSummary }}
+          </p>
           <ul class="kb-info__issues">
             <li v-for="(issue, index) in shownIssues" :key="index">
               <button type="button" class="kb-info__issue" @click="emit('open-entry', issue.rel)">
@@ -125,7 +142,9 @@ const repoText = computed(() => {
               </button>
             </li>
           </ul>
-          <p v-if="restIssues" class="kb-info__note">还有 {{ restIssues }} 处没有列出。</p>
+          <p v-if="restIssues" class="kb-info__note">
+            还有 {{ restIssues }} 处没有列出。
+          </p>
         </template>
         <p class="kb-info__hint">
           只读检查，不改任何文件；生成物与主题总览（README）的链接不算引用。

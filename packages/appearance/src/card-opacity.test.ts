@@ -1,11 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  CARD_OPACITY_DEFAULT,
-  CARD_OPACITY_MAX,
-  CARD_OPACITY_MIN,
-  cardSurfaceAlpha,
-  clampCardOpacity
-} from './card-opacity'
+import { CARD_OPACITY_DEFAULT, CARD_OPACITY_MAX, CARD_OPACITY_MIN, cardSurfaceAlpha, clampCardOpacity } from './card-opacity'
 
 describe('clampCardOpacity', () => {
   it('区间内的值原样返回', () => {

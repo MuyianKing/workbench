@@ -7,6 +7,7 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
+    "dayjs": "^1.11.23",
     "diff": "^9.0.0",
     "markdown-it": "^15.0.2"
   },

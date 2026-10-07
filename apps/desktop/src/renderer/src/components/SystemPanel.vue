@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import type { PackageManagerKey } from '@/managers'
+import type { InstallablePackageManager, NrmRegistry } from '@/types'
+import { ArrowDown, Refresh } from '@element-plus/icons-vue'
 /**
  * 首页「系统状态」卡片：node / 包管理器 / nvm / nrm。
  * 内容顶在上沿，卡片被拖矮时明细行自己滚。
@@ -8,10 +11,8 @@
  * nrm 装好之后那一行还是个镜像源开关 —— 值就是当前用的源，点开换一个。
  */
 import { computed } from 'vue'
-import { ArrowDown, Refresh } from '@element-plus/icons-vue'
-import { PACKAGE_MANAGERS, type PackageManagerKey } from '@/managers'
+import { PACKAGE_MANAGERS } from '@/managers'
 import { useEnvironmentStore } from '@/stores/environment'
-import type { InstallablePackageManager, NrmRegistry } from '@/types'
 
 const environment = useEnvironmentStore()
 
@@ -22,13 +23,14 @@ const managers = PACKAGE_MANAGERS
  * 三项都要起子进程，几百毫秒到几秒才回来，这段时间各行的值先说「检测中…」。
  */
 const nodeVersion = computed(() => {
-  if (!environment.packageManagers) return environment.probing ? '检测中…' : '未检测到'
+  if (!environment.packageManagers)
+    return environment.probing ? '检测中…' : '未检测到'
   return environment.packageManagers.node || '未检测到'
 })
 
 /** 包管理器那一行：探测没回来前不画成三个「安装」按钮（点了也白点，结果还是错的） */
 const pmLabel = computed(() =>
-  environment.packageManagers ? '' : environment.probing ? '检测中…' : '未检测到'
+  environment.packageManagers ? '' : environment.probing ? '检测中…' : '未检测到',
 )
 
 function available(key: PackageManagerKey): boolean {
@@ -46,8 +48,10 @@ async function install(key: PackageManagerKey): Promise<void> {
 
 const nvmLabel = computed(() => {
   const nvm = environment.nvm
-  if (!nvm) return environment.probing ? '检测中…' : '未检测到'
-  if (!nvm.available) return '未检测到'
+  if (!nvm)
+    return environment.probing ? '检测中…' : '未检测到'
+  if (!nvm.available)
+    return '未检测到'
   return nvm.current
     ? `已装 ${nvm.versions.length} 个 · 当前 ${nvm.current}`
     : `已装 ${nvm.versions.length} 个版本`
@@ -66,23 +70,28 @@ const nrmRegistries = computed(() => environment.nrm?.registries ?? [])
  */
 const nrmLabel = computed(() => {
   const nrm = environment.nrm
-  if (!nrm) return environment.probing ? '检测中…' : '未检测到'
-  if (!nrm.available) return '未安装'
-  if (!nrm.registries.length) return nrm.version ? `已安装 v${nrm.version}` : '已安装'
+  if (!nrm)
+    return environment.probing ? '检测中…' : '未检测到'
+  if (!nrm.available)
+    return '未安装'
+  if (!nrm.registries.length)
+    return nrm.version ? `已安装 v${nrm.version}` : '已安装'
   return nrm.current ?? '未识别'
 })
 
 /** 悬停提示：版本、镜像地址，以及为什么读不出清单 */
 const nrmTip = computed(() => {
   const nrm = environment.nrm
-  if (!nrm) return environment.probing ? '正在检测 nrm' : '没有检测到 nrm'
-  if (!nrm.available) return '通过 npm 全局安装 nrm（npm 镜像源管理器）'
-  const current = nrmRegistries.value.find((item) => item.name === nrm.current)
+  if (!nrm)
+    return environment.probing ? '正在检测 nrm' : '没有检测到 nrm'
+  if (!nrm.available)
+    return '通过 npm 全局安装 nrm（npm 镜像源管理器）'
+  const current = nrmRegistries.value.find(item => item.name === nrm.current)
   return [
     nrm.version ? `nrm v${nrm.version}` : 'nrm',
     current ? `${current.name} · ${current.url}` : '',
     nrm.error ?? '',
-    nrm.registries.length ? '点击切换镜像源' : ''
+    nrm.registries.length ? '点击切换镜像源' : '',
   ]
     .filter(Boolean)
     .join('\n')
@@ -93,7 +102,8 @@ function registryTip(item: NrmRegistry): string {
 }
 
 async function switchRegistry(name: unknown): Promise<void> {
-  if (typeof name === 'string') await environment.useNrmRegistry(name)
+  if (typeof name === 'string')
+    await environment.useNrmRegistry(name)
 }
 
 /** 重新检测本机环境：包管理器与 nrm 各探一次 */
@@ -124,7 +134,9 @@ function refresh(): void {
     <dl class="facts panel__scroll">
       <div class="fact">
         <dt>node</dt>
-        <dd class="mono">{{ nodeVersion }}</dd>
+        <dd class="mono">
+          {{ nodeVersion }}
+        </dd>
       </div>
       <div class="fact">
         <dt>包管理器</dt>
@@ -162,7 +174,9 @@ function refresh(): void {
       </div>
       <div class="fact">
         <dt>nvm</dt>
-        <dd class="mono">{{ nvmLabel }}</dd>
+        <dd class="mono">
+          {{ nvmLabel }}
+        </dd>
       </div>
 
       <!--
@@ -203,7 +217,9 @@ function refresh(): void {
             >
               <i class="pm__dot is-ok" aria-hidden="true" />
               <span class="nrm__name mono truncate">{{ nrmLabel }}</span>
-              <el-icon class="nrm__caret"><ArrowDown /></el-icon>
+              <el-icon class="nrm__caret">
+                <ArrowDown />
+              </el-icon>
             </button>
 
             <template #dropdown>

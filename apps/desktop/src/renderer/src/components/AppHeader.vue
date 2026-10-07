@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { Expand, Fold, Grid, Moon, Setting, Sunny, User } from '@element-plus/icons-vue'
+import { accountLabel } from '@workbench/auth'
 /**
  * 顶栏：欢迎语 + 右上三颗工具按钮。
  *
@@ -7,15 +9,13 @@
  * 进出编辑态画布不会上下跳，而那颗「编辑布局」按钮本来就在这一行的右端。
  */
 import { computed, ref } from 'vue'
-import { Expand, Fold, Grid, Moon, Setting, Sunny, User } from '@element-plus/icons-vue'
-import { accountLabel } from '@workbench/auth'
+import AccountDialog from '@/components/AccountDialog.vue'
+import HomeGreeting from '@/components/HomeGreeting.vue'
+import LayoutEditBar from '@/components/LayoutEditBar.vue'
+import SettingsDialog from '@/components/SettingsDialog.vue'
+import { useAuthStore } from '@/stores/auth'
 import { useNavStore } from '@/stores/nav'
 import { useSettingsStore } from '@/stores/settings'
-import { useAuthStore } from '@/stores/auth'
-import SettingsDialog from '@/components/SettingsDialog.vue'
-import AccountDialog from '@/components/AccountDialog.vue'
-import LayoutEditBar from '@/components/LayoutEditBar.vue'
-import HomeGreeting from '@/components/HomeGreeting.vue'
 
 const store = useNavStore()
 const settings = useSettingsStore()

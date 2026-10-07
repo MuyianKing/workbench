@@ -17,7 +17,8 @@ export const CARD_OPACITY_DEFAULT = 55
 
 /** 收敛到合法区间；不是有限数字（缺失 / null / 字符串 / NaN）一律回到默认值 */
 export function clampCardOpacity(value: unknown): number {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return CARD_OPACITY_DEFAULT
+  if (typeof value !== 'number' || !Number.isFinite(value))
+    return CARD_OPACITY_DEFAULT
   return Math.min(CARD_OPACITY_MAX, Math.max(CARD_OPACITY_MIN, Math.round(value)))
 }
 

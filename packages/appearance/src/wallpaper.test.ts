@@ -1,12 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  BUILTIN_WALLPAPER_PREFIX,
-  builtinIdOf,
-  builtinReference,
-  isSafeWallpaperId,
-  isWallpaperFile,
-  wallpaperIdOf
-} from './wallpaper'
+import { BUILTIN_WALLPAPER_PREFIX, builtinIdOf, builtinReference, isSafeWallpaperId, isWallpaperFile, wallpaperIdOf } from './wallpaper'
 
 describe('wallpaperIdOf', () => {
   it('去掉最后一段后缀', () => {

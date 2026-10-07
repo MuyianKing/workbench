@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import type { NoteKind } from '@workbench/notes'
+import type { InputInstance } from 'element-plus'
+import { NOTE_NAME_MAX, noteNameProblem } from '@workbench/notes'
 /**
  * 给一个文件夹 / 笔记起名字（新建与重命名共用）。
  *
@@ -13,12 +16,7 @@
  * 写盘由调用方负责（它是这次业务动作的发起方），这里只把名字交出去。
  */
 import { computed, ref, watch } from 'vue'
-import type { InputInstance } from 'element-plus'
-import { NOTE_NAME_MAX, noteNameProblem, type NoteKind } from '@workbench/notes'
 import AppDialog from '@/components/AppDialog.vue'
-
-/** 弹层开关:v-model 一条口径(与 AppDialog / el-dialog 相同,全应用的弹层都这么开) */
-const open = defineModel<boolean>({ required: true })
 
 const props = defineProps<{
   title: string
@@ -33,11 +31,14 @@ const emit = defineEmits<{
   submit: [name: string]
 }>()
 
+/** 弹层开关:v-model 一条口径(与 AppDialog / el-dialog 相同,全应用的弹层都这么开) */
+const open = defineModel<boolean>({ required: true })
+
 const visible = computed({
   get: () => open.value,
   set: (value: boolean) => {
     open.value = value
-  }
+  },
 })
 
 const name = ref('')
@@ -47,14 +48,16 @@ const inputRef = ref<InputInstance | null>(null)
 const problem = computed(() => noteNameProblem(name.value))
 const valid = computed(() => !problem.value)
 const hint = computed(() => {
-  if (problem.value) return problem.value
+  if (problem.value)
+    return problem.value
   return props.kind === 'folder'
     ? '文件夹里可以继续放文件夹与笔记。'
     : '正文按 markdown 写，存成同名的 .md 文件。'
 })
 
 watch(open, (value) => {
-  if (value) name.value = props.defaultName
+  if (value)
+    name.value = props.defaultName
 })
 
 /**
@@ -69,7 +72,8 @@ function focusInput(): void {
 }
 
 function submit(): void {
-  if (!valid.value) return
+  if (!valid.value)
+    return
   emit('submit', name.value.trim())
   visible.value = false
 }
@@ -94,13 +98,19 @@ function submit(): void {
           placeholder="起个名字"
           @keyup.enter="submit"
         />
-        <p class="field__hint" :class="{ 'is-invalid': !valid }">{{ hint }}</p>
+        <p class="field__hint" :class="{ 'is-invalid': !valid }">
+          {{ hint }}
+        </p>
       </el-form-item>
     </el-form>
 
     <template #footer>
-      <el-button @click="visible = false">取消</el-button>
-      <el-button type="primary" :disabled="!valid" @click="submit">确定</el-button>
+      <el-button @click="visible = false">
+        取消
+      </el-button>
+      <el-button type="primary" :disabled="!valid" @click="submit">
+        确定
+      </el-button>
     </template>
   </AppDialog>
 </template>

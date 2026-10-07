@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { SkillCommit, SkillCompareFile } from '@workbench/skills'
+import { SKILL_FILE } from '@workbench/skills'
 /**
  * 版本历史的弹层：一个技能在笔记仓库里的提交记录，可以看清差异再恢复。
  *
@@ -10,16 +12,15 @@
  * 快捷方式。两条路都会先确认，且恢复本身也是一次提交，现在的内容不会丢。
  */
 import { computed, ref, watch } from 'vue'
-import { SKILL_FILE, type SkillCommit, type SkillCompareFile } from '@workbench/skills'
-import { formatTimestamp } from '@/format'
-import { useSkillsStore } from '@/stores/skills'
 import AppDialog from '@/components/AppDialog.vue'
 import SkillCompareDialog from '@/components/SkillCompareDialog.vue'
+import { formatTimestamp } from '@/format'
+import { useSkillsStore } from '@/stores/skills'
+
+const props = defineProps<{ skillId: string, skillName: string }>()
 
 /** 弹层开关:v-model 一条口径(与 AppDialog / el-dialog 相同,全应用的弹层都这么开) */
 const open = defineModel<boolean>({ required: true })
-
-const props = defineProps<{ skillId: string; skillName: string }>()
 
 const store = useSkillsStore()
 
@@ -40,14 +41,16 @@ const visible = computed({
   get: () => open.value,
   set: (value) => {
     open.value = value
-  }
+  },
 })
 
 watch(open, async (value) => {
-  if (!value) return
+  if (!value)
+    return
   commits.value = []
   error.value = ''
-  if (!props.skillId) return
+  if (!props.skillId)
+    return
 
   loading.value = true
   const result = await store.history(props.skillId)
@@ -67,10 +70,11 @@ async function openCompare(commit: SkillCommit): Promise<void> {
   comparing.value = commit.hash
   const files = await store.versionCompare(props.skillId, commit.hash)
   comparing.value = ''
-  if (!files) return
+  if (!files)
+    return
 
   compareFiles.value = files
-  compareRel.value = files.some((file) => file.rel === SKILL_FILE)
+  compareRel.value = files.some(file => file.rel === SKILL_FILE)
     ? SKILL_FILE
     : files[0]?.rel ?? SKILL_FILE
   compareHash.value = commit.hash
@@ -88,14 +92,19 @@ async function restoreTo(hash: string): Promise<void> {
   restoring.value = hash
   const restored = await store.restoreWithConfirm(props.skillId, hash)
   restoring.value = ''
-  if (restored) visible.value = false
+  if (restored)
+    visible.value = false
 }
 </script>
 
 <template>
   <AppDialog v-model="visible" :title="`版本历史 · ${skillName}`" width="560px">
-    <div v-if="loading" class="state">正在读取版本历史…</div>
-    <div v-else-if="error" class="state state--error">{{ error }}</div>
+    <div v-if="loading" class="state">
+      正在读取版本历史…
+    </div>
+    <div v-else-if="error" class="state state--error">
+      {{ error }}
+    </div>
     <div v-else-if="!commits.length" class="state">
       还没有版本。保存过的每一版都会记在这里（前提是技能库所在的文件夹在一个 git 仓库里 ——
       从技能库目录往上找到 .git 就有版本，换一个文件夹或给它配好仓库后重新扫描即可）。

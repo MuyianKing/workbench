@@ -1,3 +1,4 @@
+import { dayKey } from '@workbench/core'
 /**
  * 适配层是渲染层与后端之间的那条边界 —— 在 Electron 版它是 IPC，值跨进程复制。
  *
@@ -8,10 +9,9 @@
  * 适配层的 invoke 只认 `__TAURI_INTERNALS__.invoke`，`fs_exists` 一律回 true 就够这几条用例用了。
  */
 import { beforeAll, describe, expect, it } from 'vitest'
-import { dayKey } from '@workbench/core'
 
 /** 记下每个通道与它的入参：迁移有没有真的落盘，只能从这里看 */
-const calls: Array<{ command: string; args?: Record<string, unknown> }> = []
+const calls: Array<{ command: string, args?: Record<string, unknown> }> = []
 /** 磁盘上那两份数据（用例直接摆，模拟升级前后的样子） */
 let rawData: unknown = null
 let rawTheme: unknown = null
@@ -21,12 +21,15 @@ beforeAll(() => {
     __TAURI_INTERNALS__: {
       invoke: (command: string, args?: Record<string, unknown>): Promise<unknown> => {
         calls.push({ command, args })
-        if (command === 'fs_exists') return Promise.resolve(true)
-        if (command === 'data_load') return Promise.resolve(rawData)
-        if (command === 'theme_load') return Promise.resolve(rawTheme)
+        if (command === 'fs_exists')
+          return Promise.resolve(true)
+        if (command === 'data_load')
+          return Promise.resolve(rawData)
+        if (command === 'theme_load')
+          return Promise.resolve(rawTheme)
         return Promise.resolve(null)
-      }
-    }
+      },
+    },
   }
 })
 
@@ -43,7 +46,7 @@ describe('适配层交出去的列表', () => {
 
     // 不是快照的话，`rendered` 就是适配层内部那个数组本身：添加时它已经被塞进了新条目，
     // 展开追加之后同一条出现两次，界面上就是「添加上去变成了两个」
-    expect(next.map((app) => app.id)).toEqual([added.id])
+    expect(next.map(app => app.id)).toEqual([added.id])
   })
 
   /** 反方向同理：渲染层往自己那份列表里塞东西，不能写进适配层的数据（那边是要落盘的） */
@@ -65,7 +68,7 @@ describe('适配层交出去的列表', () => {
  */
 describe('老数据的搬家', () => {
   function savedTheme(): { appearance?: { accentColor?: string } } | null {
-    const call = calls.find((item) => item.command === 'theme_save')
+    const call = calls.find(item => item.command === 'theme_save')
     return (call?.args?.value ?? null) as { appearance?: { accentColor?: string } } | null
   }
 
@@ -73,7 +76,7 @@ describe('老数据的搬家', () => {
     rawTheme = { version: 2, cardGap: 14, cards: {} }
     rawData = {
       settings: { accentColor: '#ef4444', terminalHeight: 320, hotkey: 'Control+J' },
-      projects: []
+      projects: [],
     }
     calls.length = 0
 
@@ -98,7 +101,7 @@ describe('老数据的搬家', () => {
     await state.initState()
 
     expect(state.settings().accentColor).toBe('#22c55e')
-    expect(calls.some((item) => item.command === 'theme_save')).toBe(false)
+    expect(calls.some(item => item.command === 'theme_save')).toBe(false)
   })
 })
 
@@ -120,7 +123,7 @@ describe('活跃度计数', () => {
 
     const today = dayKey(Date.now())
     expect(state.activityCounts()?.[today]).toBe(2)
-    const saved = calls.filter((item) => item.command === 'data_save').pop()
+    const saved = calls.filter(item => item.command === 'data_save').pop()
     const dumped = saved?.args?.value as { activity?: Record<string, number> } | undefined
     expect(dumped?.activity?.[today]).toBe(2)
   })

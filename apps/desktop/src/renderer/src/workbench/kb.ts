@@ -1,3 +1,6 @@
+import type { KbRepoState, KbScanEntry, KbSyncInput, KbSyncSummary } from '@workbench/kb'
+import type { Result } from '@/types'
+import { fail, ok } from '@workbench/core'
 /**
  * 知识库的适配层：应用对知识库**只读**，这里只有「扫清单」与「读文件」两条自己的通道，
  * 外加复用笔记那两条通用通道的同步与仓库探测（`note_sync` / `note_repo_state` 本来就是
@@ -8,9 +11,7 @@
  * store 负责编排。清单在这里收成确定的形状并按相对路径排好 —— 认不出的条目丢掉，
  * 宁可少一行，也不让 undefined 流进界面。
  */
-import { compareKbRel, type KbRepoState, type KbScanEntry, type KbSyncInput, type KbSyncSummary } from '@workbench/kb'
-import { fail, ok } from '@workbench/core'
-import type { Result } from '@/types'
+import { compareKbRel } from '@workbench/kb'
 import { guard, invoke } from './bridge'
 
 /** root 从调用方带进来（设置里的那个值），这里不缓存：用户换了文件夹，来源就换了 */
@@ -21,23 +22,25 @@ function rootArg(root: string): string {
 /** 扫知识库文件夹：收成确定的形状（rel 必须有），按相对路径排好 */
 export async function kbScan(root: string): Promise<Result<KbScanEntry[]>> {
   const result = await guard(
-    invoke<Array<{ rel?: unknown; name?: unknown; isDir?: unknown; mtimeMs?: unknown }>>('kb_scan', {
-      root: rootArg(root)
+    invoke<Array<{ rel?: unknown, name?: unknown, isDir?: unknown, mtimeMs?: unknown }>>('kb_scan', {
+      root: rootArg(root),
     }),
-    '读取知识库失败'
+    '读取知识库失败',
   )
-  if (!result.ok || !result.data) return fail(result.error ?? '读取知识库失败')
+  if (!result.ok || !result.data)
+    return fail(result.error ?? '读取知识库失败')
 
   const entries: KbScanEntry[] = []
   for (const item of Array.isArray(result.data) ? result.data : []) {
     const rel = typeof item?.rel === 'string' ? item.rel.trim() : ''
-    if (!rel) continue
+    if (!rel)
+      continue
     entries.push({
       rel,
       name: typeof item?.name === 'string' ? item.name : rel,
       isDir: item?.isDir === true,
       mtimeMs:
-        typeof item?.mtimeMs === 'number' && Number.isFinite(item.mtimeMs) ? item.mtimeMs : 0
+        typeof item?.mtimeMs === 'number' && Number.isFinite(item.mtimeMs) ? item.mtimeMs : 0,
     })
   }
   entries.sort(compareKbRel)
@@ -58,10 +61,12 @@ export function kbRead(root: string, rel: string): Promise<Result<string>> {
  */
 export async function kbSync(input: KbSyncInput): Promise<Result<KbSyncSummary>> {
   const dir = rootArg(input.dir)
-  if (!dir) return fail('还没有选择知识库文件夹')
+  if (!dir)
+    return fail('还没有选择知识库文件夹')
 
   const result = await guard(invoke<Partial<KbSyncSummary>>('note_sync', { dir }), '同步知识库失败')
-  if (!result.ok || !result.data) return fail(result.error ?? '同步知识库失败')
+  if (!result.ok || !result.data)
+    return fail(result.error ?? '同步知识库失败')
 
   return ok({
     branch: typeof result.data.branch === 'string' ? result.data.branch : '',
@@ -70,7 +75,7 @@ export async function kbSync(input: KbSyncInput): Promise<Result<KbSyncSummary>>
         ? result.data.files
         : 0,
     received: result.data.received === true,
-    log: typeof result.data.log === 'string' ? result.data.log : ''
+    log: typeof result.data.log === 'string' ? result.data.log : '',
   })
 }
 
@@ -81,18 +86,20 @@ export async function kbSync(input: KbSyncInput): Promise<Result<KbSyncSummary>>
  */
 export async function kbRepoState(dir: string): Promise<Result<KbRepoState>> {
   const target = rootArg(dir)
-  if (!target) return ok({ isRepo: false, origin: '', branch: '' })
+  if (!target)
+    return ok({ isRepo: false, origin: '', branch: '' })
 
   const result = await guard(
     invoke<Partial<KbRepoState>>('note_repo_state', { dir: target }),
-    '探测知识库仓库失败'
+    '探测知识库仓库失败',
   )
-  if (!result.ok || !result.data) return fail(result.error ?? '探测知识库仓库失败')
+  if (!result.ok || !result.data)
+    return fail(result.error ?? '探测知识库仓库失败')
 
   return ok({
     isRepo: result.data.isRepo === true,
     origin: typeof result.data.origin === 'string' ? result.data.origin : '',
-    branch: typeof result.data.branch === 'string' ? result.data.branch : ''
+    branch: typeof result.data.branch === 'string' ? result.data.branch : '',
   })
 }
 
@@ -105,15 +112,16 @@ export async function kbRepoState(dir: string): Promise<Result<KbRepoState>> {
  */
 export async function kbIndexBuild(
   root: string,
-  generatedAt: string
+  generatedAt: string,
 ): Promise<Result<{ count: number }>> {
   const result = await guard(
     invoke<{ count?: unknown }>('kb_index_build', { root: rootArg(root), generatedAt }),
-    '重建索引失败'
+    '重建索引失败',
   )
-  if (!result.ok || !result.data) return fail(result.error ?? '重建索引失败')
-  const count =
-    typeof result.data.count === 'number' && Number.isFinite(result.data.count)
+  if (!result.ok || !result.data)
+    return fail(result.error ?? '重建索引失败')
+  const count
+    = typeof result.data.count === 'number' && Number.isFinite(result.data.count)
       ? result.data.count
       : 0
   return ok({ count })

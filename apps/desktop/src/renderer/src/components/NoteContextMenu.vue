@@ -60,26 +60,26 @@ const GROUPS: MenuAction[][] = [
     { name: 'undo', label: '撤销', icon: 'undo' },
     { name: 'redo', label: '重做', icon: 'redo' },
     { name: 'outline', label: '大纲', icon: 'align-center' },
-    { name: 'fullscreen', label: '全屏切换', icon: 'fullscreen' }
+    { name: 'fullscreen', label: '全屏切换', icon: 'fullscreen' },
   ],
   [
     { name: 'bold', label: '粗体', icon: 'bold' },
     { name: 'italic', label: '斜体', icon: 'italic' },
     { name: 'strike', label: '删除线', icon: 'strike' },
     { name: 'inline-code', label: '行内代码', icon: 'inline-code' },
-    { name: 'link', label: '链接', icon: 'link' }
+    { name: 'link', label: '链接', icon: 'link' },
   ],
   [
     { name: 'quote', label: '引用', icon: 'quote' },
     { name: 'ordered-list', label: '有序列表', icon: 'ordered-list' },
     { name: 'list', label: '无序列表', icon: 'list' },
     { name: 'check', label: '任务列表', icon: 'check' },
-    { name: 'line', label: '分隔线', icon: 'line' }
-  ]
+    { name: 'line', label: '分隔线', icon: 'line' },
+  ],
 ]
 
 /** 两行带子菜单的：标题（Vditor 工具带上是一个下拉）与插入整块的东西 */
-const SUBMENUS: { label: string; items: MenuRow[] }[] = [
+const SUBMENUS: { label: string, items: MenuRow[] }[] = [
   {
     label: '段落',
     items: [
@@ -88,16 +88,16 @@ const SUBMENUS: { label: string; items: MenuRow[] }[] = [
       { name: 'heading3', label: '三级标题' },
       { name: 'heading4', label: '四级标题' },
       { name: 'heading5', label: '五级标题' },
-      { name: 'heading6', label: '六级标题' }
-    ]
+      { name: 'heading6', label: '六级标题' },
+    ],
   },
   {
     label: '插入',
     items: [
       { name: 'code', label: '代码块' },
-      { name: 'table', label: '表格' }
-    ]
-  }
+      { name: 'table', label: '表格' },
+    ],
+  },
 ]
 
 const panel = ref<HTMLDivElement | null>(null)
@@ -113,10 +113,11 @@ const { pos, place } = useFloatingPosition({
   follow: true,
   onPlaced: () => {
     const element = panel.value
-    if (!element) return
-    flip.value =
-      pos.value.left + element.getBoundingClientRect().width + SUBMENU_WIDTH > window.innerWidth
-  }
+    if (!element)
+      return
+    flip.value
+      = pos.value.left + element.getBoundingClientRect().width + SUBMENU_WIDTH > window.innerWidth
+  },
 })
 
 function pick(name: string): void {

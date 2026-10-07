@@ -1,3 +1,5 @@
+import type { AiNewsArticle, AiNewsCache, AiNewsRefreshResult, AiNewsSourceInfo, AiNewsView } from '@workbench/ai'
+import type { Result } from '@/types'
 /**
  * AI 热点（首页「AI 热点」卡片）的适配层实现。
  *
@@ -9,24 +11,8 @@
  * **为什么会出网**：这张卡片是那份白名单的唯一出口，而且地址只在 Rust 侧 ——
  * 这一层只能报源 id。卡片没画在首页上、或源没到期，都不发请求。
  */
-import {
-  applySourceFailure,
-  applySourceNotModified,
-  applySourceSuccess,
-  extractArticle,
-  latestUpdatedAt,
-  mergedItems,
-  parseSourcePayload,
-  sanitizeAiNewsCache,
-  shouldFetchSource,
-  type AiNewsArticle,
-  type AiNewsCache,
-  type AiNewsRefreshResult,
-  type AiNewsSourceInfo,
-  type AiNewsView
-} from '@workbench/ai'
+import { applySourceFailure, applySourceNotModified, applySourceSuccess, extractArticle, latestUpdatedAt, mergedItems, parseSourcePayload, sanitizeAiNewsCache, shouldFetchSource } from '@workbench/ai'
 import { fail, ok } from '@workbench/core'
-import type { Result } from '@/types'
 import { errorText, invoke } from './bridge'
 
 /** 问一次源清单。它只读宿主侧的白名单，不走网络，所以每次刷新都现问一遍 */
@@ -50,10 +36,10 @@ async function saveCache(cache: AiNewsCache): Promise<void> {
  * 那些 id 不在清单里，因此不会被并进来 —— 从用户视角就是「说好的去掉，就真的不在了」。
  */
 function buildView(cache: AiNewsCache, sources: AiNewsSourceInfo[]): AiNewsView {
-  const ids = sources.map((source) => source.id)
+  const ids = sources.map(source => source.id)
   return {
     items: mergedItems(cache, ids),
-    updatedAt: latestUpdatedAt(cache, ids)
+    updatedAt: latestUpdatedAt(cache, ids),
   }
 }
 
@@ -62,7 +48,8 @@ export async function getAiNews(): Promise<Result<AiNewsView>> {
   try {
     const [cache, sources] = await Promise.all([loadCache(), loadSources()])
     return ok(buildView(cache, sources))
-  } catch (error) {
+  }
+  catch (error) {
     return fail(errorText(error, '读取 AI 热点缓存失败'))
   }
 }
@@ -89,12 +76,13 @@ export async function refreshAiNews(): Promise<Result<AiNewsRefreshResult>> {
       sources.map(async (source): Promise<Attempt> => {
         const current = cache.sources[source.id]
 
-        if (!shouldFetchSource(current, now)) return { fired: false }
+        if (!shouldFetchSource(current, now))
+          return { fired: false }
 
         try {
-          const fetched = await invoke<{ status: number; body: string; etag: string }>(
+          const fetched = await invoke<{ status: number, body: string, etag: string }>(
             'ai_news_fetch',
-            { sourceId: source.id, etag: current?.etag ?? '' }
+            { sourceId: source.id, etag: current?.etag ?? '' },
           )
 
           if (fetched.status === 304) {
@@ -103,11 +91,11 @@ export async function refreshAiNews(): Promise<Result<AiNewsRefreshResult>> {
           }
 
           if (fetched.status === 200) {
-            const items = parseSourcePayload(source.format, fetched.body).map((item) => ({
+            const items = parseSourcePayload(source.format, fetched.body).map(item => ({
               ...item,
               // 源名统一盖成清单里的名字：载荷里没自带来源的（JSON / Atom 那几类）也有名字，
               // 将来在清单里改名不必重刷缓存
-              source: item.source || source.name
+              source: item.source || source.name,
             }))
 
             // 200 但解析不出任何条目：说明对面回了意外的东西（风控页 / 空壳），按失败处理，
@@ -123,33 +111,37 @@ export async function refreshAiNews(): Promise<Result<AiNewsRefreshResult>> {
           }
 
           // 429（被限流）与其它的 4xx / 5xx：指数退避，下次可拉时刻往后推
-          const message =
-            fetched.status === 429
+          const message
+            = fetched.status === 429
               ? `${source.name} 被限流了（429），已按退避安排重试`
               : `${source.name} 拉取失败（HTTP ${fetched.status}）`
           cache.sources[source.id] = applySourceFailure(current, now, message)
           return { fired: true, error: message }
-        } catch (error) {
+        }
+        catch (error) {
           const message = `${source.name}：${errorText(error, '拉取失败')}`
           cache.sources[source.id] = applySourceFailure(current, now, message)
           return { fired: true, error: message }
         }
-      })
+      }),
     )
 
     // 只有真的动过缓存才落盘：全都没到期时不必写一次盘
-    if (attempts.some((attempt) => attempt.fired)) await saveCache(cache)
+    if (attempts.some(attempt => attempt.fired))
+      await saveCache(cache)
 
     for (const attempt of attempts) {
-      if (attempt.error) notes.push(attempt.error)
+      if (attempt.error)
+        notes.push(attempt.error)
     }
 
     return ok({
       view: buildView(cache, sources),
-      refreshed: attempts.some((attempt) => attempt.fired),
-      notes
+      refreshed: attempts.some(attempt => attempt.fired),
+      notes,
     })
-  } catch (error) {
+  }
+  catch (error) {
     return fail(errorText(error, '刷新 AI 热点失败'))
   }
 }
@@ -163,7 +155,8 @@ export async function refreshAiNews(): Promise<Result<AiNewsRefreshResult>> {
  * 改一版显示口径也不必重编 Rust（与整条 AI 热点链路的职责划分一致）。
  */
 export async function loadAiNewsArticle(url: string): Promise<Result<AiNewsArticle>> {
-  if (!url) return fail('这条热点没有可打开的原文地址')
+  if (!url)
+    return fail('这条热点没有可打开的原文地址')
   try {
     const html = await invoke<string>('ai_news_article', { url })
     const article = extractArticle(html)
@@ -171,7 +164,8 @@ export async function loadAiNewsArticle(url: string): Promise<Result<AiNewsArtic
       return fail('没能从原页里提出正文（可能是会员专属、或正文由脚本动态加载）')
     }
     return ok(article)
-  } catch (error) {
+  }
+  catch (error) {
     return fail(errorText(error, '抓取原文失败'))
   }
 }

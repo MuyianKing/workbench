@@ -1,3 +1,4 @@
+import type { NoteNode, NoteSyncSummary } from '@workbench/notes'
 /**
  * 技能（skill）：**技能库是它自己的一个目录**，里面是一批可安装的技能。
  *
@@ -20,13 +21,7 @@
  * 渲染层（workbench/skill.ts + stores/skills.ts）。放 shared 是为了让「frontmatter 怎么认、
  * 路径怎么拼」有单测、改起来不用重编 Rust。
  */
-import {
-  joinRel,
-  normalizeRel,
-  sanitizeNoteName,
-  type NoteNode,
-  type NoteSyncSummary
-} from '@workbench/notes'
+import { joinRel, normalizeRel, sanitizeNoteName } from '@workbench/notes'
 
 /** 技能的清单文件：frontmatter 里带 name / description，正文是给 agent 看的用法说明 */
 export const SKILL_FILE = 'SKILL.md'
@@ -67,11 +62,13 @@ export type SkillSyncSummary = NoteSyncSummary
  */
 export function sanitizeSkillSyncDir(raw: unknown): string {
   const rel = normalizeRel(raw)
-  if (!rel) return ''
+  if (!rel)
+    return ''
 
-  const parts = rel.split('/').map((part) => sanitizeNoteName(part))
+  const parts = rel.split('/').map(part => sanitizeNoteName(part))
   // 有哪一段清洗后为空（纯点、纯符号）就整条作废：拼出来的路径已经不是磁盘上那个了
-  if (parts.some((part) => !part)) return ''
+  if (parts.some(part => !part))
+    return ''
 
   const cleaned = parts.join('/')
   return cleaned.length <= SKILL_DIR_MAX ? cleaned : ''
@@ -171,7 +168,7 @@ export interface SkillCompareFile {
  */
 export function mergeVersionCopies(
   current: readonly SkillFileCopy[],
-  version: readonly SkillFileCopy[]
+  version: readonly SkillFileCopy[],
 ): SkillCompareFile[] {
   const byRel = new Map<string, SkillCompareFile>()
   for (const file of version) {
@@ -179,12 +176,13 @@ export function mergeVersionCopies(
   }
   for (const file of current) {
     const existing = byRel.get(file.rel)
-    if (existing) existing.base = file.content ?? ''
+    if (existing)
+      existing.base = file.content ?? ''
     else byRel.set(file.rel, { rel: file.rel, base: file.content ?? '', incoming: null })
   }
 
   return [...byRel.values()].sort((left, right) =>
-    left.rel < right.rel ? -1 : left.rel > right.rel ? 1 : 0
+    left.rel < right.rel ? -1 : left.rel > right.rel ? 1 : 0,
   )
 }
 
@@ -219,30 +217,37 @@ export interface SkillFrontmatter {
  */
 export function parseSkillFrontmatter(text: string): SkillFrontmatter {
   const empty: SkillFrontmatter = { name: '', description: '', version: '' }
-  if (typeof text !== 'string') return empty
+  if (typeof text !== 'string')
+    return empty
 
   const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/)
 
   // 围栏前允许空行；第一行非空行必须是 `---`
   let index = 0
   while (index < lines.length && !lines[index].trim()) index += 1
-  if (lines[index]?.trim() !== '---') return empty
+  if (lines[index]?.trim() !== '---')
+    return empty
   index += 1
 
   const result: SkillFrontmatter = { name: '', description: '', version: '' }
   for (; index < lines.length; index += 1) {
     const line = lines[index].trim()
-    if (line === '---' || line === '...') break
+    if (line === '---' || line === '...')
+      break
 
     const match = /^(name|description|version)\s*:\s*(.*)$/.exec(line)
-    if (!match) continue
+    if (!match)
+      continue
 
     const value = match[2].trim()
     // 多行块标量的开头（`|` / `>` 及其变体）：内容在后面几行的缩进里，这里不认
-    if (/^[|>][+-]?$/.test(value)) continue
+    if (/^[|>][+-]?$/.test(value))
+      continue
     const unquoted = unquoteScalar(value)
-    if (match[1] === 'name') result.name = unquoted
-    else if (match[1] === 'description') result.description = unquoted
+    if (match[1] === 'name')
+      result.name = unquoted
+    else if (match[1] === 'description')
+      result.description = unquoted
     else result.version = unquoted
   }
   return result
@@ -251,8 +256,8 @@ export function parseSkillFrontmatter(text: string): SkillFrontmatter {
 /** 去掉一层成对的引号（YAML 单引号 / 双引号） */
 function unquoteScalar(value: string): string {
   if (
-    value.length >= 2 &&
-    ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'")))
+    value.length >= 2
+    && ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith('\'') && value.endsWith('\'')))
   ) {
     return value.slice(1, -1)
   }
@@ -273,7 +278,8 @@ export const SKILL_VERSION_DEFAULT = '0.1.0'
 
 /** 有没有 frontmatter（首行非空行是 `---` 就算，内容里写了什么不归它管） */
 export function hasSkillFrontmatter(text: string): boolean {
-  if (typeof text !== 'string') return false
+  if (typeof text !== 'string')
+    return false
   const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/)
   let index = 0
   while (index < lines.length && !lines[index].trim()) index += 1
@@ -307,7 +313,8 @@ export function compareSkillVersions(a: string, b: string): number {
   const left = segmentsOf(a)
   const right = segmentsOf(b)
   for (let index = 0; index < 3; index += 1) {
-    if (left[index] !== right[index]) return left[index] < right[index] ? -1 : 1
+    if (left[index] !== right[index])
+      return left[index] < right[index] ? -1 : 1
   }
   return 0
 }
@@ -340,8 +347,10 @@ export function skillVersionProblem(text: string): string {
  */
 export function yamlScalar(value: string): string {
   const clean = value.replace(/\s+/g, ' ').trim()
-  if (!clean) return "''"
-  if (!/[:#"']/.test(clean) && !/^[-?&*!|>%@`{}[\],]/.test(clean)) return clean
+  if (!clean)
+    return '\'\''
+  if (!/[:#"']/.test(clean) && !/^[-?&*!|>%@`{}[\],]/.test(clean))
+    return clean
   return `"${clean.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
 }
 
@@ -349,7 +358,7 @@ export function yamlScalar(value: string): string {
 export function skillMdTemplate(
   name: string,
   description: string,
-  version: string = SKILL_VERSION_DEFAULT
+  version: string = SKILL_VERSION_DEFAULT,
 ): string {
   return [
     '---',
@@ -361,7 +370,7 @@ export function skillMdTemplate(
     `# ${yamlScalar(name)}`,
     '',
     '<!-- 在这里写这个技能的用法：什么时候用、按什么步骤做。改动后记得升 version（如 1.0.0 → 1.1.0）。 -->',
-    ''
+    '',
   ].join('\n')
 }
 
@@ -374,7 +383,8 @@ export function toSkillEntry(raw: {
   skillMd?: unknown
 }): SkillEntry | null {
   const id = typeof raw.id === 'string' ? raw.id.trim() : ''
-  if (!id) return null
+  if (!id)
+    return null
 
   const meta = parseSkillFrontmatter(typeof raw.skillMd === 'string' ? raw.skillMd : '')
   return {
@@ -384,7 +394,7 @@ export function toSkillEntry(raw: {
     // 归一化（去 v 前缀）；没写或写了不合语义的如实空串 —— 保存那一关会把它拦下
     version: skillVersionOf(typeof raw.skillMd === 'string' ? raw.skillMd : ''),
     hasSkillMd: typeof raw.skillMd === 'string',
-    fileCount: typeof raw.fileCount === 'number' && Number.isFinite(raw.fileCount) ? raw.fileCount : 0
+    fileCount: typeof raw.fileCount === 'number' && Number.isFinite(raw.fileCount) ? raw.fileCount : 0,
   }
 }
 
@@ -395,8 +405,9 @@ export function toSkillEntry(raw: {
  */
 export function withoutSkillDir(nodes: readonly NoteNode[], dir: string): NoteNode[] {
   const rel = normalizeRel(dir)
-  if (!rel || rel.includes('/')) return [...nodes]
-  return nodes.filter((node) => node.rel !== rel)
+  if (!rel || rel.includes('/'))
+    return [...nodes]
+  return nodes.filter(node => node.rel !== rel)
 }
 
 /**
@@ -410,16 +421,19 @@ export function withoutSkillDir(nodes: readonly NoteNode[], dir: string): NoteNo
 export function libraryInNotebook(libraryDir: unknown, notebookDir: unknown): string {
   const library = splitRoot(libraryDir)
   const notebook = splitRoot(notebookDir)
-  if (!library.length || !notebook.length || notebook.length >= library.length) return ''
+  if (!library.length || !notebook.length || notebook.length >= library.length)
+    return ''
 
   for (let index = 0; index < notebook.length; index += 1) {
-    if (notebook[index].toLowerCase() !== library[index].toLowerCase()) return ''
+    if (notebook[index].toLowerCase() !== library[index].toLowerCase())
+      return ''
   }
   return library.slice(notebook.length).join('/')
 }
 
 /** 把一条绝对路径切成有内容的段（两种分隔符都认） */
 function splitRoot(raw: unknown): string[] {
-  if (typeof raw !== 'string') return []
-  return raw.split(/[\\/]+/).filter((part) => part && part !== '.')
+  if (typeof raw !== 'string')
+    return []
+  return raw.split(/[\\/]+/).filter(part => part && part !== '.')
 }

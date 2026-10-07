@@ -8,7 +8,6 @@
  * 与首页共用同一套间距：--card-gap 由 .app 统一给（导航栏那张卡片也吃它），
  * 网格周围的内边距由 ProjectsPanel 自己带（它是这一页的滚动体）。
  */
-import { ref } from 'vue'
 import ProjectFilterBar from '@/components/ProjectFilterBar.vue'
 import ProjectsPanel from '@/components/ProjectsPanel.vue'
 </script>

@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import type { MailListItem, MailReplyTarget } from '@/stores/mail'
+import { ArrowDown, EditPen, Message, Paperclip, Refresh, Setting } from '@element-plus/icons-vue'
+import { formatMailSize, senderAddress } from '@workbench/mail'
 /**
  * 邮箱页：左栏收件箱清单，右栏读信（与 AI / 笔记 / 视频页同一副左右分栏，
  * 左栏宽度住 theme.json 的 `mailListWidth`）。
@@ -17,16 +20,14 @@
  * 页面只做编排与状态呈现：拉列表、读信、标记、发送都在 stores/mail.ts。
  */
 import { computed, onActivated, onMounted, ref } from 'vue'
-import { ArrowDown, EditPen, Message, Paperclip, Refresh, Setting } from '@element-plus/icons-vue'
-import { formatMailSize, senderAddress } from '@workbench/mail'
-import PanelResizer from '@/components/PanelResizer.vue'
 import MailAccountDialog from '@/components/MailAccountDialog.vue'
 import MailComposer from '@/components/MailComposer.vue'
 import MailContextMenu from '@/components/MailContextMenu.vue'
 import MailListRow from '@/components/MailListRow.vue'
-import { useMailStore, type MailListItem, type MailReplyTarget } from '@/stores/mail'
-import { useSettingsStore } from '@/stores/settings'
+import PanelResizer from '@/components/PanelResizer.vue'
 import { confirmAction, notifyError, notifySuccess } from '@/notify'
+import { useMailStore } from '@/stores/mail'
+import { useSettingsStore } from '@/stores/settings'
 
 const mail = useMailStore()
 const settings = useSettingsStore()
@@ -55,22 +56,25 @@ function openMenu(event: MouseEvent, item: MailListItem): void {
     account: item.account,
     uid: item.uid,
     bulk: mail.bulkSenders.includes(senderAddress(item.from).toLowerCase()),
-    seen: item.seen
+    seen: item.seen,
   }
 }
 
 function onMenuAct(name: 'bulk' | 'toggle-seen' | 'multi-pick' | 'multi-delete' | 'delete'): void {
   const state = menu.value
-  if (!state) return
+  if (!state)
+    return
   if (name === 'bulk') {
-    if (state.bulk) mail.unbulk(state.account, state.uid)
+    if (state.bulk)
+      mail.unbulk(state.account, state.uid)
     else mail.markBulk(state.account, state.uid)
     return
   }
   if (name === 'multi-pick') {
     // 「多选删除」的入口：把这封勾进批次并进入多选态，勾选条出现后接着挑
     picking.value = true
-    if (!picked.value.has(state.key)) pickedKeys.value = [...pickedKeys.value, state.key]
+    if (!picked.value.has(state.key))
+      pickedKeys.value = [...pickedKeys.value, state.key]
     anchorKey.value = state.key
     return
   }
@@ -80,14 +84,17 @@ function onMenuAct(name: 'bulk' | 'toggle-seen' | 'multi-pick' | 'multi-delete' 
   }
   if (name === 'delete') {
     void confirmAction('服务器上的这封信也会被删掉，找不回来。', '删除这封邮件').then(async (confirmed) => {
-      if (!confirmed) return
+      if (!confirmed)
+        return
       const result = await mail.deleteMails([{ account: state.account, uid: state.uid }])
-      if (!result.ok) notifyError(result.error ?? '删除失败')
+      if (!result.ok)
+        notifyError(result.error ?? '删除失败')
     })
     return
   }
   void mail.markSeen(state.account, state.uid, !state.seen).then((result) => {
-    if (!result.ok) notifyError(result.error ?? '标记失败')
+    if (!result.ok)
+      notifyError(result.error ?? '标记失败')
   })
 }
 
@@ -113,7 +120,7 @@ function togglePick(item: MailListItem): void {
   picking.value = true
   anchorKey.value = item.key
   pickedKeys.value = picked.value.has(item.key)
-    ? pickedKeys.value.filter((key) => key !== item.key)
+    ? pickedKeys.value.filter(key => key !== item.key)
     : [...pickedKeys.value, item.key]
 }
 
@@ -123,13 +130,14 @@ function togglePick(item: MailListItem): void {
  */
 function onItemClick(event: MouseEvent, item: MailListItem): void {
   const items = visibleItems.value
-  const at = items.findIndex((entry) => entry.key === item.key)
-  if (at < 0) return
+  const at = items.findIndex(entry => entry.key === item.key)
+  if (at < 0)
+    return
   if (event.shiftKey) {
-    const from = anchorKey.value == null ? at : items.findIndex((entry) => entry.key === anchorKey.value)
+    const from = anchorKey.value == null ? at : items.findIndex(entry => entry.key === anchorKey.value)
     const start = Math.min(from < 0 ? at : from, at)
     const end = Math.max(from < 0 ? at : from, at)
-    pickedKeys.value = items.slice(start, end + 1).map((entry) => entry.key)
+    pickedKeys.value = items.slice(start, end + 1).map(entry => entry.key)
     picking.value = true
     return
   }
@@ -159,34 +167,38 @@ const visibleItems = computed(() => (mail.showBulk ? [...mail.list, ...mail.bulk
  *  平时按 Ctrl+A 也从这儿进多选态 */
 function pickAll(): void {
   picking.value = true
-  pickedKeys.value = visibleItems.value.map((item) => item.key)
+  pickedKeys.value = visibleItems.value.map(item => item.key)
 }
 
 /** 勾选条头那颗三态复选框的状态：看得见的全勾上 = 勾，勾了一部分 = 半勾，一个没勾 = 空 */
 const allVisiblePicked = computed(() => {
   const items = visibleItems.value
-  return items.length > 0 && items.every((item) => picked.value.has(item.key))
+  return items.length > 0 && items.every(item => picked.value.has(item.key))
 })
 
-const someVisiblePicked = computed(() => visibleItems.value.some((item) => picked.value.has(item.key)))
+const someVisiblePicked = computed(() => visibleItems.value.some(item => picked.value.has(item.key)))
 
 /** 点那颗全选框：全勾着就取消全选，空着 / 半勾就勾上全部 */
 function togglePickAll(): void {
-  if (allVisiblePicked.value) clearPicked()
+  if (allVisiblePicked.value)
+    clearPicked()
   else pickAll()
 }
 
 /** 勾选条上的「删除」：只删此刻看得见的勾选（刷新拉回新列表后过期的勾选不算数），确认在视图层 */
 function deletePicked(): void {
-  const items = visibleItems.value.filter((item) => picked.value.has(item.key))
-  if (!items.length) return
+  const items = visibleItems.value.filter(item => picked.value.has(item.key))
+  if (!items.length)
+    return
   void confirmAction(`选中的 ${items.length} 封会从服务器上删掉，找不回来。`, `删除 ${items.length} 封邮件`).then(
     async (confirmed) => {
-      if (!confirmed) return
+      if (!confirmed)
+        return
       const result = await mail.deleteMails(items)
-      if (result.ok) pickedKeys.value = []
+      if (result.ok)
+        pickedKeys.value = []
       else notifyError(result.error ?? '删除失败')
-    }
+    },
   )
 }
 
@@ -194,8 +206,8 @@ function deletePicked(): void {
 function toggleShowBulk(): void {
   mail.showBulk = !mail.showBulk
   if (!mail.showBulk) {
-    const visible = new Set(visibleItems.value.map((item) => item.key))
-    pickedKeys.value = pickedKeys.value.filter((key) => visible.has(key))
+    const visible = new Set(visibleItems.value.map(item => item.key))
+    pickedKeys.value = pickedKeys.value.filter(key => visible.has(key))
   }
 }
 
@@ -211,7 +223,7 @@ const skeletonParas = [
   [100, 66],
   [96, 88, 40],
   [100, 78],
-  [90, 52]
+  [90, 52],
 ]
 
 onMounted(() => {
@@ -224,13 +236,15 @@ onActivated(() => {
 })
 
 /** 清单里当前这封信的已读态（阅读栏「标记未读」按钮的依据） */
-const activeSeen = computed(() => mail.list.find((item) => item.key === mail.active?.key)?.seen ?? true)
+const activeSeen = computed(() => mail.list.find(item => item.key === mail.active?.key)?.seen ?? true)
 
 function toggleSeen(): void {
   const message = mail.active
-  if (!message) return
+  if (!message)
+    return
   void mail.markSeen(message.account, message.uid, !activeSeen.value).then((result) => {
-    if (!result.ok) notifyError(result.error ?? '标记失败')
+    if (!result.ok)
+      notifyError(result.error ?? '标记失败')
   })
 }
 
@@ -241,12 +255,13 @@ function openComposer(): void {
 
 function reply(): void {
   const message = mail.active
-  if (!message) return
+  if (!message)
+    return
   replyTarget.value = {
     from: message.account,
     to: message.fromAddress,
     subject: message.subject,
-    text: message.text
+    text: message.text,
   }
   composerVisible.value = true
 }
@@ -255,11 +270,13 @@ function reply(): void {
 async function downloadAttachment(name: string, base64: string): Promise<void> {
   const path = await window.workbench.pickSavePath({
     title: '保存附件',
-    defaultPath: name
+    defaultPath: name,
   })
-  if (!path) return
+  if (!path)
+    return
   const result = await mail.downloadAttachment(path, base64)
-  if (result.ok) notifySuccess('附件已保存')
+  if (result.ok)
+    notifySuccess('附件已保存')
   else notifyError(result.error ?? '保存附件失败')
 }
 
@@ -273,8 +290,8 @@ function attachmentSize(base64: string): string {
  * 列宽用 auto —— 宽度长在左栏自己身上，grid 这一行跟着缩。
  */
 const bodyStyle = computed(() => ({
-  gridTemplateColumns: 'auto minmax(0, 1fr)',
-  '--tree-w': `${settings.themeConfig.mailListWidth}px`
+  'gridTemplateColumns': 'auto minmax(0, 1fr)',
+  '--tree-w': `${settings.themeConfig.mailListWidth}px`,
 }))
 </script>
 
@@ -297,7 +314,9 @@ const bodyStyle = computed(() => ({
       </header>
 
       <!-- 出错时清单还在（留着上一次的），每个拉取失败的账户一条压在顶部 -->
-      <div v-for="(message, index) in mail.listErrors" :key="index" class="mail-list__error">{{ message }}</div>
+      <div v-for="(message, index) in mail.listErrors" :key="index" class="mail-list__error">
+        {{ message }}
+      </div>
 
       <!-- 多选态的操作条：与出错条同一个位置。左边那颗是三态全选框（全勾 / 半勾 / 空，
            取消勾选只是清掉勾选、多选态还在），「取消」才退出多选态 -->
@@ -352,11 +371,11 @@ const bodyStyle = computed(() => ({
              教学式引导一律不加 -->
         <div
           v-if="
-            mail.configured &&
-            !mail.listLoading &&
-            mail.list.length === 0 &&
-            mail.bulkCount === 0 &&
-            mail.listErrors.length === 0
+            mail.configured
+              && !mail.listLoading
+              && mail.list.length === 0
+              && mail.bulkCount === 0
+              && mail.listErrors.length === 0
           "
           class="mail-list__empty"
         >
@@ -375,7 +394,9 @@ const bodyStyle = computed(() => ({
         <div v-if="mail.bulkCount > 0" class="mail-bulk">
           <button class="mail-bulk__head" type="button" @click="toggleShowBulk">
             <span>推广邮件 {{ mail.bulkCount }} 封</span>
-            <el-icon class="mail-bulk__chevron" :class="{ 'is-open': mail.showBulk }"><ArrowDown /></el-icon>
+            <el-icon class="mail-bulk__chevron" :class="{ 'is-open': mail.showBulk }">
+              <ArrowDown />
+            </el-icon>
           </button>
           <template v-if="mail.showBulk">
             <MailListRow
@@ -417,7 +438,9 @@ const bodyStyle = computed(() => ({
     <section class="mail-view__main panel">
       <!-- 没配置账户：中间就一颗入口（地址、授权码都在那个弹层里填） -->
       <div v-if="!mail.configured" class="mail-view__blank">
-        <el-button type="primary" :icon="Message" @click="accountVisible = true">配置邮箱账户</el-button>
+        <el-button type="primary" :icon="Message" @click="accountVisible = true">
+          配置邮箱账户
+        </el-button>
       </div>
 
       <!-- 拉正文期间整个阅读区让位给骨架屏：铺满整栏（头像 / 落款 / 主题 / 撑满高度的正文段落），
@@ -440,7 +463,9 @@ const bodyStyle = computed(() => ({
 
       <template v-else-if="mail.active">
         <header class="mail-head">
-          <h2 class="mail-head__subject">{{ mail.active.subject }}</h2>
+          <h2 class="mail-head__subject">
+            {{ mail.active.subject }}
+          </h2>
           <div class="mail-head__meta">
             <span class="mail-head__from">{{ mail.active.fromText }}</span>
             <span v-if="mail.active.fromAddress && mail.active.fromText !== mail.active.fromAddress" class="mail-head__addr">
@@ -452,7 +477,9 @@ const bodyStyle = computed(() => ({
               {{ mail.active.account }}
             </span>
             <span class="mail-head__spacer" />
-            <el-button size="small" text :icon="EditPen" @click="reply">回复</el-button>
+            <el-button size="small" text :icon="EditPen" @click="reply">
+              回复
+            </el-button>
             <el-button size="small" text @click="toggleSeen">
               {{ activeSeen ? '标记未读' : '标记已读' }}
             </el-button>
@@ -466,19 +493,23 @@ const bodyStyle = computed(() => ({
               :title="`${file.name}（${attachmentSize(file.base64)}），点开另存`"
               @click="downloadAttachment(file.name, file.base64)"
             >
-              <el-icon class="mail-file__icon"><Paperclip /></el-icon>
+              <el-icon class="mail-file__icon">
+                <Paperclip />
+              </el-icon>
               <span class="mail-file__name">{{ file.name }}</span>
               <span class="mail-file__size">{{ attachmentSize(file.base64) }}</span>
             </button>
           </div>
         </header>
 
-        <div v-if="mail.bodyError" class="mail-body__error">{{ mail.bodyError }}</div>
+        <div v-if="mail.bodyError" class="mail-body__error">
+          {{ mail.bodyError }}
+        </div>
 
         <div class="mail-body">
           <!-- HTML 正文：sandbox 全禁（脚本、同源、表单、弹窗全禁）—— 硬边界，
                与 AI 预览栏同一套；文档里的 CSP 把外链资源（跟踪像素）也掐死了 -->
-          <iframe v-if="mail.active.html" class="mail-body__frame" :sandbox="''" :srcdoc="mail.active.html" title="邮件正文" />
+          <iframe v-if="mail.active.html" class="mail-body__frame" sandbox="" :srcdoc="mail.active.html" title="邮件正文" />
           <pre v-else class="mail-body__text">{{ mail.active.text || '（这封邮件没有可显示的正文）' }}</pre>
         </div>
       </template>

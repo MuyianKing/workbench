@@ -1,3 +1,6 @@
+import type { VideoEntry, VideoNode, VideoSource } from '@workbench/video'
+import type { Result } from '@/types'
+import { fail, ok } from '@workbench/core'
 /**
  * 视频的适配层实现：**用户自己挑的那个文件夹** ↔ 磁盘上的 MP4 文件。
  *
@@ -11,17 +14,7 @@
  *      `<video>` 的 URL。授权按文件给（tauri.conf.json 的 scope 保持为空），
  *      所以「能拼出 URL」与「webview 读得到」两件事在这里一次做完。
  */
-import {
-  buildVideoTree,
-  normalizeVideoRel,
-  sanitizeVideoRoot,
-  videoDisplayName,
-  type VideoEntry,
-  type VideoNode,
-  type VideoSource
-} from '@workbench/video'
-import { fail, ok } from '@workbench/core'
-import type { Result } from '@/types'
+import { buildVideoTree, normalizeVideoRel, sanitizeVideoRoot, videoDisplayName } from '@workbench/video'
 import { assetUrl, guard, invoke } from './bridge'
 
 /** root 从调用方带进来（设置里的那个值），这里不缓存：用户换了文件夹，来源就换了 */
@@ -33,9 +26,10 @@ function rootArg(root: string): string {
 export async function listVideos(root: string): Promise<Result<VideoNode[]>> {
   const result = await guard(
     invoke<VideoEntry[]>('video_scan', { root: rootArg(root) }),
-    '读取视频文件夹失败'
+    '读取视频文件夹失败',
   )
-  if (!result.ok) return fail(result.error ?? '读取视频文件夹失败')
+  if (!result.ok)
+    return fail(result.error ?? '读取视频文件夹失败')
 
   const entries = Array.isArray(result.data) ? result.data : []
   return ok(buildVideoTree(entries))
@@ -51,20 +45,24 @@ export async function listVideos(root: string): Promise<Result<VideoNode[]>> {
 export async function loadVideo(root: string, rel: string): Promise<Result<VideoSource>> {
   const base = sanitizeVideoRoot(root)
   const clean = normalizeVideoRel(rel)
-  if (!base) return fail('还没有选择视频文件夹')
-  if (!clean) return fail('路径不合法')
+  if (!base)
+    return fail('还没有选择视频文件夹')
+  if (!clean)
+    return fail('路径不合法')
 
   const path = `${base}/${clean}`
   const allowed = await guard(invoke<null>('allow_video', { path }), '打开视频失败')
-  if (!allowed.ok) return fail(allowed.error ?? '打开视频失败')
+  if (!allowed.ok)
+    return fail(allowed.error ?? '打开视频失败')
 
   try {
     return ok({
       rel: clean,
       name: videoDisplayName(clean.split('/').pop() ?? clean),
-      url: assetUrl(path)
+      url: assetUrl(path),
     })
-  } catch {
+  }
+  catch {
     return fail('Tauri 运行时不可用，无法播放本地视频')
   }
 }

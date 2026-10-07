@@ -32,7 +32,8 @@ export function samePath(left: string, right: string): boolean {
 export function relativeToProject(root: string, target: string): string {
   const base = pathKey(root)
   const full = pathKey(target)
-  if (!base || !full || !full.startsWith(`${base}/`)) return target
+  if (!base || !full || !full.startsWith(`${base}/`))
+    return target
 
   const depth = base.split('/').length
   const segments = target
@@ -50,10 +51,13 @@ export function relativeToProject(root: string, target: string): string {
  */
 export function resolveWithinProject(root: string, outputDir: string): string {
   const trimmed = outputDir.trim()
-  if (!trimmed) return ''
-  if (/^[a-zA-Z]:[\\/]/.test(trimmed) || trimmed.startsWith('\\\\')) return trimmed
+  if (!trimmed)
+    return ''
+  if (/^[a-z]:[\\/]/i.test(trimmed) || trimmed.startsWith('\\\\'))
+    return trimmed
 
   const base = root.trim().replace(/[\\/]+$/, '')
-  if (!base) return trimmed
+  if (!base)
+    return trimmed
   return `${base}\\${trimmed.replace(/[\\/]+/g, '\\')}`
 }

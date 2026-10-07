@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { Folder, FolderAdd, FolderOpened, Share } from '@element-plus/icons-vue'
+import { noteRootName } from '@workbench/notes'
 /**
  * 位置那一栏：**这段对话在哪个目录里干活**（+ 那个目录的 git 分支）。两屏共用 ——
  * 挑中会话那一屏它贴着左缘、与 composer 对齐，起始那一屏它在 composer 上方（居中由父级排）。
@@ -14,8 +16,6 @@
  * git 分支那一格是父级（AiView）探好递下来的（它自己只显示，不探）。
  */
 import { computed } from 'vue'
-import { Folder, FolderAdd, FolderOpened, Share } from '@element-plus/icons-vue'
-import { noteRootName } from '@workbench/notes'
 import { useAiStore } from '@/stores/ai'
 
 const props = defineProps<{
@@ -32,10 +32,14 @@ const label = computed(() => (dir.value ? noteRootName(dir.value) : '挑一个�
 
 /** 下拉里那几项：看这个目录（挑中会话时）、或者挑下一个目录（起始那一屏） */
 function onCommand(command: string): void {
-  if (command === 'reveal' && dir.value) void window.workbench.reveal(dir.value)
-  else if (command === 'copy' && dir.value) void navigator.clipboard.writeText(dir.value)
-  else if (command === 'pick') void ai.pickNewDir()
-  else if (command) ai.setNewDir(command)
+  if (command === 'reveal' && dir.value)
+    void window.workbench.reveal(dir.value)
+  else if (command === 'copy' && dir.value)
+    void navigator.clipboard.writeText(dir.value)
+  else if (command === 'pick')
+    void ai.pickNewDir()
+  else if (command)
+    ai.setNewDir(command)
 }
 </script>
 
@@ -48,8 +52,12 @@ function onCommand(command: string): void {
       </button>
       <template #dropdown>
         <el-dropdown-menu v-if="ai.activeSession">
-          <el-dropdown-item command="reveal" :icon="Folder">在资源管理器中打开</el-dropdown-item>
-          <el-dropdown-item command="copy" :icon="Folder">复制完整路径</el-dropdown-item>
+          <el-dropdown-item command="reveal" :icon="Folder">
+            在资源管理器中打开
+          </el-dropdown-item>
+          <el-dropdown-item command="copy" :icon="Folder">
+            复制完整路径
+          </el-dropdown-item>
         </el-dropdown-menu>
         <el-dropdown-menu v-else>
           <el-dropdown-item v-for="item in ai.recentDirs" :key="item" :command="item">

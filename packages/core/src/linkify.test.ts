@@ -10,7 +10,7 @@ describe('splitLinks', () => {
   it('切出中间的一段地址', () => {
     expect(splitLinks('  ➜  Local:   http://localhost:5173/blog/')).toEqual([
       { text: '  ➜  Local:   ', url: null },
-      { text: 'http://localhost:5173/blog/', url: 'http://localhost:5173/blog/' }
+      { text: 'http://localhost:5173/blog/', url: 'http://localhost:5173/blog/' },
     ])
   })
 
@@ -18,7 +18,7 @@ describe('splitLinks', () => {
     expect(splitLinks('open https://example.com/docs now')).toEqual([
       { text: 'open ', url: null },
       { text: 'https://example.com/docs', url: 'https://example.com/docs' },
-      { text: ' now', url: null }
+      { text: ' now', url: null },
     ])
   })
 
@@ -26,7 +26,7 @@ describe('splitLinks', () => {
     expect(splitLinks('见 http://localhost:5173/。')).toEqual([
       { text: '见 ', url: null },
       { text: 'http://localhost:5173/', url: 'http://localhost:5173/' },
-      { text: '。', url: null }
+      { text: '。', url: null },
     ])
   })
 
@@ -35,7 +35,7 @@ describe('splitLinks', () => {
       { text: 'a ', url: null },
       { text: 'http://a.test/x', url: 'http://a.test/x' },
       { text: ' b ', url: null },
-      { text: 'http://b.test/y', url: 'http://b.test/y' }
+      { text: 'http://b.test/y', url: 'http://b.test/y' },
     ])
   })
 

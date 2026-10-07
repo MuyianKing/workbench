@@ -1,36 +1,6 @@
+import type { VideoEntry } from './video'
 import { describe, expect, it } from 'vitest'
-import {
-  buildVideoTree,
-  clampVideoFloatHeight,
-  clampVideoFloatPercent,
-  clampVideoFloatWidth,
-  clampVideoRate,
-  fitVideoFloatGeometry,
-  resizeVideoFloat,
-  countVideos,
-  findVideoNode,
-  formatVideoTime,
-  isVideoFile,
-  nextVideoNode,
-  nextVideoRate,
-  pushVideoHistory,
-  removeFromVideoHistory,
-  sanitizeVideoHistory,
-  sanitizeVideoLastRel,
-  sanitizeVideoRoot,
-  sanitizeVideoTreeExpanded,
-  videoChain,
-  videoDisplayName,
-  VIDEO_HISTORY_MAX,
-  VIDEO_FLOAT_SIZE_DEFAULT,
-  VIDEO_FLOAT_SIZE_MAX,
-  VIDEO_FLOAT_SIZE_MIN,
-  VIDEO_NEXT_SECONDS,
-  VIDEO_RATES,
-  VIDEO_TREE_EXPANDED_MAX,
-  VIDEO_SEEK_SECONDS,
-  type VideoEntry
-} from './video'
+import { buildVideoTree, clampVideoFloatHeight, clampVideoFloatPercent, clampVideoFloatWidth, clampVideoRate, countVideos, findVideoNode, fitVideoFloatGeometry, formatVideoTime, isVideoFile, nextVideoNode, nextVideoRate, pushVideoHistory, removeFromVideoHistory, resizeVideoFloat, sanitizeVideoHistory, sanitizeVideoLastRel, sanitizeVideoRoot, sanitizeVideoTreeExpanded, VIDEO_FLOAT_SIZE_DEFAULT, VIDEO_FLOAT_SIZE_MAX, VIDEO_FLOAT_SIZE_MIN, VIDEO_HISTORY_MAX, VIDEO_NEXT_SECONDS, VIDEO_RATES, VIDEO_SEEK_SECONDS, VIDEO_TREE_EXPANDED_MAX, videoChain, videoDisplayName } from './video'
 
 function dir(rel: string): VideoEntry {
   return { rel, name: relName(rel), isDir: true }
@@ -48,17 +18,17 @@ function relName(rel: string): string {
 
 /** 树里某一层的名字（按显示顺序），写断言时比整棵树好读 */
 function namesOf(nodes: readonly { name: string }[]): string[] {
-  return nodes.map((node) => node.name)
+  return nodes.map(node => node.name)
 }
 
-describe('MP4 过滤与建树', () => {
+describe('mP4 过滤与建树', () => {
   it('只收 mp4 与文件夹，字幕、封面等不进树', () => {
     const tree = buildVideoTree([
       dir('第一季'),
       video('第一季/第1集.mp4'),
       video('第一季/第1集.ass'),
       video('封面.jpg'),
-      video('第一季/花絮.MP4')
+      video('第一季/花絮.MP4'),
     ])
 
     expect(namesOf(tree)).toEqual(['第一季'])
@@ -71,7 +41,7 @@ describe('MP4 过滤与建树', () => {
       dir('花絮'),
       video('第9集.mp4'),
       dir(' extras '),
-      video('第1集.mp4')
+      video('第1集.mp4'),
     ])
 
     // 与笔记树同一条排序规则（zh-Hans-CN），中文名与英文名的先后由它说了算，这里只锁住「稳定」
@@ -98,7 +68,7 @@ describe('MP4 过滤与建树', () => {
   it('计数与按链找节点', () => {
     const tree = buildVideoTree([dir('a'), video('a/1.mp4'), video('a/2.mp4'), video('b.mp4')])
     expect(countVideos(tree)).toBe(3)
-    expect(videoChain(tree, 'a/2.mp4').map((node) => node.name)).toEqual(['a', '2'])
+    expect(videoChain(tree, 'a/2.mp4').map(node => node.name)).toEqual(['a', '2'])
     expect(videoChain(tree, '不存在的.mp4')).toEqual([])
     expect(findVideoNode(tree, 'a/2.mp4')?.kind).toBe('video')
   })
@@ -192,14 +162,14 @@ describe('浮窗贴合与缩放', () => {
       left: 800,
       top: 225,
       width: 320,
-      height: 180
+      height: 180,
     })
     // 比视口还大的宽高压到视口为止（渲染不可能比视口大）
     expect(fitVideoFloatGeometry({ x: 0, y: 0, w: 9999, h: 9999 }, viewport)).toEqual({
       left: 0,
       top: 0,
       width: 1600,
-      height: 900
+      height: 900,
     })
   })
 
@@ -208,13 +178,13 @@ describe('浮窗贴合与缩放', () => {
       x: 20,
       y: 10,
       w: 400,
-      h: 200
+      h: 200,
     })
     expect(resizeVideoFloat({ x: 20, y: 10, w: 320, h: 180 }, viewport, 'right', -9999, -9999)).toEqual({
       x: 20,
       y: 10,
       w: VIDEO_FLOAT_SIZE_MIN.width,
-      h: VIDEO_FLOAT_SIZE_MIN.height
+      h: VIDEO_FLOAT_SIZE_MIN.height,
     })
   })
 

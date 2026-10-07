@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { SCROLL_PIN_THRESHOLD_PX, distanceFromBottom, isPinnedToBottom } from './log-scroll'
+import { distanceFromBottom, isPinnedToBottom, SCROLL_PIN_THRESHOLD_PX } from './log-scroll'
 
-const metrics = (scrollTop: number, scrollHeight: number, clientHeight: number) => ({
-  scrollTop,
-  scrollHeight,
-  clientHeight
-})
+function metrics(scrollTop: number, scrollHeight: number, clientHeight: number) {
+  return {
+    scrollTop,
+    scrollHeight,
+    clientHeight,
+  }
+}
 
 describe('distanceFromBottom', () => {
   it('滚到底时为 0', () => {

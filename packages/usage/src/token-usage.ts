@@ -27,6 +27,7 @@
  */
 
 import { addDays, dayKey, isDateKey } from '@workbench/core'
+import { isEqual } from 'lodash-es'
 
 /**
  * 日期键的判定只有 core 那一份（与活跃度、工作日志同一条 YYYY-MM-DD）；
@@ -62,7 +63,7 @@ export const SOURCE_LABELS: Record<string, string> = {
   [DSH_SOURCE_ID]: 'DeepSeek Harness',
   [CODEBUDDY_SOURCE_ID]: 'CodeBuddy',
   [WORKBUDDY_SOURCE_ID]: 'WorkBuddy',
-  [QODER_SOURCE_ID]: 'Qoder'
+  [QODER_SOURCE_ID]: 'Qoder',
 }
 
 /** 一组计数(某个工具某天某模型的合计) */
@@ -174,10 +175,13 @@ export const TOKEN_SYNC_REPO_MAX_LENGTH = 300
  * 认不出来的一律按没填处理(等于关掉同步),而不是留着一个每次都失败的值。
  */
 export function sanitizeSyncRepo(raw: unknown): string {
-  if (typeof raw !== 'string') return ''
+  if (typeof raw !== 'string')
+    return ''
   const value = raw.trim()
-  if (!value || value.length > TOKEN_SYNC_REPO_MAX_LENGTH) return ''
-  if (/\s/.test(value) || value.startsWith('-')) return ''
+  if (!value || value.length > TOKEN_SYNC_REPO_MAX_LENGTH)
+    return ''
+  if (/\s/.test(value) || value.startsWith('-'))
+    return ''
   return value
 }
 
@@ -210,18 +214,18 @@ export function emptyCounters(): TokenCounters {
     cacheReadTokens: 0,
     cacheWriteTokens: 0,
     credits: 0,
-    requests: 0
+    requests: 0,
   }
 }
 
 /** 五类计数之和:展示与排序用的「总量」口径(缓存读取往往是大头,构成拆分交给界面) */
 export function totalTokens(counters: TokenCounters): number {
   return (
-    counters.inputTokens +
-    counters.outputTokens +
-    counters.reasoningTokens +
-    counters.cacheReadTokens +
-    counters.cacheWriteTokens
+    counters.inputTokens
+    + counters.outputTokens
+    + counters.reasoningTokens
+    + counters.cacheReadTokens
+    + counters.cacheWriteTokens
   )
 }
 
@@ -248,7 +252,7 @@ export function addCounters(a: TokenCounters, b: TokenCounters): TokenCounters {
     cacheReadTokens: a.cacheReadTokens + b.cacheReadTokens,
     cacheWriteTokens: a.cacheWriteTokens + b.cacheWriteTokens,
     credits: a.credits + b.credits,
-    requests: a.requests + b.requests
+    requests: a.requests + b.requests,
   }
 }
 
@@ -261,7 +265,7 @@ export function maxCounters(a: TokenCounters, b: TokenCounters): TokenCounters {
     cacheReadTokens: Math.max(a.cacheReadTokens, b.cacheReadTokens),
     cacheWriteTokens: Math.max(a.cacheWriteTokens, b.cacheWriteTokens),
     credits: Math.max(a.credits, b.credits),
-    requests: Math.max(a.requests, b.requests)
+    requests: Math.max(a.requests, b.requests),
   }
 }
 
@@ -276,7 +280,8 @@ function sanitizeCounters(raw: unknown): TokenCounters {
   const out = emptyCounters()
   for (const key of Object.keys(out) as Array<keyof TokenCounters>) {
     const value = input[key]
-    if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) continue
+    if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0)
+      continue
     // credits 是小数记账(一条请求不到 1 个额度是常态),取整会把它抹成 0 —— 唯一不取整的字段
     out[key] = key === 'credits' ? value : Math.floor(value)
   }
@@ -284,14 +289,17 @@ function sanitizeCounters(raw: unknown): TokenCounters {
 }
 
 function sanitizeDays(raw: unknown): TokenDays {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {}
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw))
+    return {}
   const next: TokenDays = {}
   for (const [date, models] of Object.entries(raw as Record<string, unknown>)) {
-    if (!isDateKey(date)) continue
+    if (!isDateKey(date))
+      continue
     const modelDays: Record<string, TokenCounters> = {}
     const input = (models ?? {}) as Record<string, unknown>
     for (const [model, counters] of Object.entries(input)) {
-      if (!model) continue
+      if (!model)
+        continue
       modelDays[model] = sanitizeCounters(counters)
     }
     next[date] = modelDays
@@ -309,16 +317,18 @@ function sanitizeDays(raw: unknown): TokenDays {
  */
 export function sanitizeShard(
   raw: unknown,
-  fallback: { device?: string; name?: string } = {}
+  fallback: { device?: string, name?: string } = {},
 ): TokenShard {
   const input = (raw ?? {}) as Partial<TokenShard>
   const version = typeof input.version === 'number' ? input.version : 0
-  if (!TOKEN_DATA_COMPATIBLE_VERSIONS.includes(version)) return emptyShard(fallback)
+  if (!TOKEN_DATA_COMPATIBLE_VERSIONS.includes(version))
+    return emptyShard(fallback)
 
   const sources: Record<string, TokenSourceSnapshot> = {}
   if (input.sources && typeof input.sources === 'object' && !Array.isArray(input.sources)) {
     for (const [id, source] of Object.entries(input.sources as Record<string, unknown>)) {
-      if (!id) continue
+      if (!id)
+        continue
       sources[id] = { days: sanitizeDays((source as TokenSourceSnapshot | undefined)?.days) }
     }
   }
@@ -330,7 +340,7 @@ export function sanitizeShard(
       typeof input.updatedAt === 'number' && Number.isFinite(input.updatedAt)
         ? input.updatedAt
         : 0,
-    sources
+    sources,
   }
 }
 
@@ -338,13 +348,13 @@ function text(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
 }
 
-export function emptyShard(fallback: { device?: string; name?: string } = {}): TokenShard {
+export function emptyShard(fallback: { device?: string, name?: string } = {}): TokenShard {
   return {
     version: TOKEN_DATA_VERSION,
     device: fallback.device ?? '',
     name: fallback.name ?? '',
     updatedAt: 0,
-    sources: {}
+    sources: {},
   }
 }
 
@@ -377,27 +387,7 @@ export function mergeDays(existing: TokenDays, incoming: TokenDays): TokenDays {
  * 每 10 分钟往仓库里推一个什么都没改的提交。
  */
 export function sameDays(a: TokenDays, b: TokenDays): boolean {
-  const dates = Object.keys(a)
-  if (dates.length !== Object.keys(b).length) return false
-
-  for (const date of dates) {
-    const left = a[date]
-    const right = b[date]
-    if (!right) return false
-
-    const models = Object.keys(left)
-    if (models.length !== Object.keys(right).length) return false
-
-    for (const model of models) {
-      const l = left[model]
-      const r = right[model]
-      if (!r) return false
-      for (const key of Object.keys(l) as Array<keyof TokenCounters>) {
-        if (l[key] !== r[key]) return false
-      }
-    }
-  }
-  return true
+  return isEqual(a, b)
 }
 
 /**
@@ -412,47 +402,40 @@ export function sameDays(a: TokenDays, b: TokenDays): boolean {
  * 「写回去再读出来一定判等」,否则会退化成每轮都写。
  */
 export function sameShardContent(a: unknown, b: unknown): boolean {
-  if (a === b) return true
-  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false
-  if (Array.isArray(a) || Array.isArray(b)) return false
-
-  const left = a as Record<string, unknown>
-  const right = b as Record<string, unknown>
-  const keys = Object.keys(left)
-  if (keys.length !== Object.keys(right).length) return false
-
-  for (const key of keys) {
-    if (!Object.hasOwn(right, key)) return false
-    const l = left[key]
-    const r = right[key]
-    if (typeof l === 'object' && typeof r === 'object' && l !== null && r !== null) {
-      if (!sameShardContent(l, r)) return false
-      continue
-    }
-    if (l !== r) return false
-  }
-  return true
+  if (a === b)
+    return true
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null)
+    return false
+  // 数组不算合法的分片内容：isEqual 会把两个内容相同的数组判成相等，这里要保持「不一致」，
+  // 让被手工改坏的磁盘文件在下一轮落盘时升回正确结构
+  if (Array.isArray(a) || Array.isArray(b))
+    return false
+  return isEqual(a, b)
 }
 
 /** 丢掉超出保留窗口的旧天数:键是定长 YYYY-MM-DD,字典序即时间序 */
 export function pruneTokenDays(
   days: TokenDays,
   now: number | Date,
-  keepDays: number = TOKEN_KEEP_DAYS
+  keepDays: number = TOKEN_KEEP_DAYS,
 ): TokenDays {
   const span = Number.isFinite(keepDays) && keepDays > 0 ? Math.floor(keepDays) : TOKEN_KEEP_DAYS
   const cutoff = dayKey(addDays(now, -(span - 1)))
-  if (!cutoff) return {}
+  if (!cutoff)
+    return {}
   const next: TokenDays = {}
   for (const [date, models] of Object.entries(days)) {
-    if (date < cutoff) continue
+    if (date < cutoff)
+      continue
     next[date] = models
   }
   return next
 }
 
-/** 合计两组天级数据:键的并集,同天同模型逐字段相加(跨设备合并用)。
- *  名字避开 `addDays` —— 那是 activity 里「日期加减天数」的工具函数,本模块已经在用它推日期。 */
+/**
+ * 合计两组天级数据:键的并集,同天同模型逐字段相加(跨设备合并用)。
+ *  名字避开 `addDays` —— 那是 activity 里「日期加减天数」的工具函数,本模块已经在用它推日期。
+ */
 export function sumDays(a: TokenDays, b: TokenDays): TokenDays {
   const next: TokenDays = {}
   for (const date of new Set([...Object.keys(a), ...Object.keys(b)])) {
@@ -478,13 +461,14 @@ export function sumDays(a: TokenDays, b: TokenDays): TokenDays {
 export function combineShards(
   shards: TokenShard[],
   now: number | Date,
-  keepDays: number = TOKEN_KEEP_DAYS
+  keepDays: number = TOKEN_KEEP_DAYS,
 ): TokenDataFile {
   const sources: Record<string, TokenSourceSnapshot> = {}
   let updatedAt = 0
 
   for (const shard of shards) {
-    if (shard.updatedAt > updatedAt) updatedAt = shard.updatedAt
+    if (shard.updatedAt > updatedAt)
+      updatedAt = shard.updatedAt
     for (const [tool, source] of Object.entries(shard.sources)) {
       const target = (sources[tool] ??= { days: {} })
       target.days = sumDays(target.days, source.days)
@@ -517,7 +501,8 @@ export type TokenGranularity = 'day' | 'week' | 'month'
 
 /** 解析 YYYY-MM-DD 为本地当天 00:00;不合法返回无效 Date */
 function parseDateKey(key: string): Date {
-  if (!isDateKey(key)) return new Date(NaN)
+  if (!isDateKey(key))
+    return new Date(NaN)
   const date = new Date(Number(key.slice(0, 4)), Number(key.slice(5, 7)) - 1, Number(key.slice(8, 10)))
   return Number.isFinite(date.getTime()) ? date : new Date(NaN)
 }
@@ -525,14 +510,16 @@ function parseDateKey(key: string): Date {
 /** 所在周的周一(周一起始);入参必须是合法日期键 */
 export function weekKeyOf(key: string): string {
   const date = parseDateKey(key)
-  if (!Number.isFinite(date.getTime())) return ''
+  if (!Number.isFinite(date.getTime()))
+    return ''
   date.setDate(date.getDate() - ((date.getDay() + 6) % 7))
   return dayKey(date)
 }
 
 /** 所在月份的键 'YYYY-MM';入参必须是合法日期键 */
 export function monthKeyOf(key: string): string {
-  if (!isDateKey(key)) return ''
+  if (!isDateKey(key))
+    return ''
   return key.slice(0, 7)
 }
 
@@ -552,19 +539,23 @@ export interface TokenSeries {
 }
 
 function bucketKeyOf(dateKey: string, granularity: TokenGranularity): string {
-  if (granularity === 'day') return dateKey
-  if (granularity === 'week') return weekKeyOf(dateKey)
+  if (granularity === 'day')
+    return dateKey
+  if (granularity === 'week')
+    return weekKeyOf(dateKey)
   return monthKeyOf(dateKey)
 }
 
 /** 日期键的短标签(9/14):图表坐标与区间标题共用 */
 export function shortDayLabel(key: string): string {
-  if (!isDateKey(key)) return ''
+  if (!isDateKey(key))
+    return ''
   return `${Number(key.slice(5, 7))}/${Number(key.slice(8, 10))}`
 }
 
 function bucketLabel(key: string, granularity: TokenGranularity): string {
-  if (granularity === 'month') return `${Number(key.slice(5, 7))}月`
+  if (granularity === 'month')
+    return `${Number(key.slice(5, 7))}月`
   return shortDayLabel(key)
 }
 
@@ -572,7 +563,7 @@ function bucketLabel(key: string, granularity: TokenGranularity): string {
 function bucketKeysBetween(
   firstKey: string,
   lastKey: string,
-  granularity: TokenGranularity
+  granularity: TokenGranularity,
 ): string[] {
   const keys: string[] = []
   if (granularity === 'month') {
@@ -595,7 +586,8 @@ function bucketKeysBetween(
   const start = parseDateKey(firstKey)
   for (let index = 0; ; index += 1) {
     const key = dayKey(addDays(start, index * step))
-    if (!key || key > lastKey) break
+    if (!key || key > lastKey)
+      break
     keys.push(key)
   }
   return keys
@@ -611,7 +603,7 @@ export function buildSeriesRange(
   days: TokenDays,
   granularity: TokenGranularity,
   fromKey: string,
-  toKey: string
+  toKey: string,
 ): TokenSeries {
   if (!isDateKey(fromKey) || !isDateKey(toKey) || fromKey > toKey) {
     return { buckets: [], fromKey: '' }
@@ -623,7 +615,8 @@ export function buildSeriesRange(
   }
 
   for (const [date, models] of Object.entries(days)) {
-    if (date < fromKey || date > toKey) continue
+    if (date < fromKey || date > toKey)
+      continue
     for (const counters of Object.values(models)) bump(bucketKeyOf(date, granularity), counters)
   }
 
@@ -631,13 +624,13 @@ export function buildSeriesRange(
   const keyRange = bucketKeysBetween(
     bucketKeyOf(fromKey, granularity),
     bucketKeyOf(toKey, granularity),
-    granularity
+    granularity,
   )
   for (const key of keyRange) {
     buckets.push({
       key,
       label: bucketLabel(key, granularity),
-      counters: totals.get(key) ?? emptyCounters()
+      counters: totals.get(key) ?? emptyCounters(),
     })
   }
 
@@ -650,18 +643,21 @@ export function buildSeriesRange(
  */
 export function bucketRangeOf(
   key: string,
-  granularity: TokenGranularity
-): { fromKey: string; toKey: string } {
+  granularity: TokenGranularity,
+): { fromKey: string, toKey: string } {
   if (granularity === 'month') {
-    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(key)) return { fromKey: '', toKey: '' }
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(key))
+      return { fromKey: '', toKey: '' }
     const year = Number(key.slice(0, 4))
     const month = Number(key.slice(5, 7))
     // 下个月的第 0 天即本月最后一天
     const lastDay = new Date(year, month, 0).getDate()
     return { fromKey: `${key}-01`, toKey: `${key}-${pad(lastDay)}` }
   }
-  if (!isDateKey(key)) return { fromKey: '', toKey: '' }
-  if (granularity === 'week') return { fromKey: key, toKey: dayKey(addDays(parseDateKey(key), 6)) }
+  if (!isDateKey(key))
+    return { fromKey: '', toKey: '' }
+  if (granularity === 'week')
+    return { fromKey: key, toKey: dayKey(addDays(parseDateKey(key), 6)) }
   return { fromKey: key, toKey: key }
 }
 
@@ -669,7 +665,8 @@ export function bucketRangeOf(
 export function sumRange(days: TokenDays, fromKey: string, toKey: string): TokenCounters {
   let total = emptyCounters()
   for (const [date, models] of Object.entries(days)) {
-    if (date < fromKey || date > toKey) continue
+    if (date < fromKey || date > toKey)
+      continue
     for (const counters of Object.values(models)) {
       total = addCounters(total, counters)
     }
@@ -690,7 +687,8 @@ export function shareByModel(days: TokenDays, fromKey: string, toKey: string): T
     totals.set(key, addCounters(totals.get(key) ?? emptyCounters(), counters))
   }
   for (const [date, models] of Object.entries(days)) {
-    if (date < fromKey || date > toKey) continue
+    if (date < fromKey || date > toKey)
+      continue
     for (const [model, counters] of Object.entries(models)) bump(model, counters)
   }
   return [...totals.entries()]
@@ -709,11 +707,11 @@ export function shareBySource(
   data: TokenDataFile,
   fromKey: string,
   toKey: string,
-  axis: UsageAxis
+  axis: UsageAxis,
 ): TokenShare[] {
   return Object.entries(data.sources)
     .map(([key, source]) => ({ key, counters: sumRange(source.days, fromKey, toKey) }))
-    .filter((share) => axisTotal(share.counters, axis) > 0)
+    .filter(share => axisTotal(share.counters, axis) > 0)
     .sort((a, b) => axisTotal(b.counters, axis) - axisTotal(a.counters, axis))
 }
 
@@ -726,17 +724,17 @@ export function shareBySource(
 export type TokenRangePreset = 'last7' | 'last30' | 'thisMonth' | 'lastMonth' | 'custom'
 
 /** 面板里的固定顺序:自定义放最后,选中它才展开右侧的区间日历 */
-export const TOKEN_RANGE_PRESETS: ReadonlyArray<{ key: TokenRangePreset; label: string }> = [
+export const TOKEN_RANGE_PRESETS: ReadonlyArray<{ key: TokenRangePreset, label: string }> = [
   { key: 'last7', label: '近 7 天' },
   { key: 'last30', label: '近 30 天' },
   { key: 'thisMonth', label: '本月' },
   { key: 'lastMonth', label: '上月' },
-  { key: 'custom', label: '自定义' }
+  { key: 'custom', label: '自定义' },
 ]
 
 /** 预设的界面名;未知值按自定义处理 */
 export function presetLabel(preset: TokenRangePreset): string {
-  return TOKEN_RANGE_PRESETS.find((option) => option.key === preset)?.label ?? '自定义'
+  return TOKEN_RANGE_PRESETS.find(option => option.key === preset)?.label ?? '自定义'
 }
 
 /**
@@ -746,10 +744,11 @@ export function presetLabel(preset: TokenRangePreset): string {
  */
 export function resolvePresetRange(
   preset: TokenRangePreset,
-  now: number | Date
-): { fromKey: string; toKey: string } | null {
+  now: number | Date,
+): { fromKey: string, toKey: string } | null {
   const today = dayKey(now)
-  if (!today) return null
+  if (!today)
+    return null
   switch (preset) {
     case 'last7':
       return { fromKey: dayKey(addDays(now, -6)), toKey: today }
@@ -768,7 +767,7 @@ export function resolvePresetRange(
  * 上个月的首尾两天:1 号到「本月 0 号」(即上月最后一天)。
  * 先把日期挪到 1 号再退月份,否则 3 月 31 日退一个月会落到 3 月 3 日;跨年由 Date 自己进位。
  */
-function lastMonthRange(now: number | Date): { fromKey: string; toKey: string } {
+function lastMonthRange(now: number | Date): { fromKey: string, toKey: string } {
   const source = now instanceof Date ? new Date(now.getTime()) : new Date(now)
   const first = new Date(source.getTime())
   first.setDate(1)
@@ -793,13 +792,16 @@ function trimZeroes(text: string): string {
  */
 export function formatTokensWan(value: number): string {
   const n = Number(value)
-  if (!Number.isFinite(n) || n <= 0) return '0'
+  if (!Number.isFinite(n) || n <= 0)
+    return '0'
   const trim = (v: number): string => {
     const text = v >= 100 ? Math.round(v).toString() : v >= 10 ? v.toFixed(1) : v.toFixed(2)
     return trimZeroes(text)
   }
-  if (n >= 1e8) return `${trim(n / 1e8)}亿`
-  if (n >= 1e4) return `${trim(n / 1e4)}万`
+  if (n >= 1e8)
+    return `${trim(n / 1e8)}亿`
+  if (n >= 1e4)
+    return `${trim(n / 1e4)}万`
   return String(Math.round(n))
 }
 
@@ -812,24 +814,31 @@ export function formatTokensWan(value: number): string {
  */
 export function formatCredits(value: number): string {
   const n = Number(value)
-  if (!Number.isFinite(n) || n <= 0) return '0'
-  if (n >= 1e4) return `${trimZeroes(n >= 1e6 ? (n / 1e4).toFixed(0) : (n / 1e4).toFixed(1))}万`
-  if (n >= 100) return String(Math.round(n))
-  if (n >= 1) return trimZeroes(n.toFixed(1))
+  if (!Number.isFinite(n) || n <= 0)
+    return '0'
+  if (n >= 1e4)
+    return `${trimZeroes(n >= 1e6 ? (n / 1e4).toFixed(0) : (n / 1e4).toFixed(1))}万`
+  if (n >= 100)
+    return String(Math.round(n))
+  if (n >= 1)
+    return trimZeroes(n.toFixed(1))
   return n.toFixed(2)
 }
 
 /** 占比百分数:大于 0 但不足 1% 显示 <1%(四舍五入成 1% 会高估),其余取整数 */
 export function formatPercent(part: number, total: number): string {
-  if (!Number.isFinite(part) || !Number.isFinite(total) || total <= 0 || part <= 0) return '0%'
+  if (!Number.isFinite(part) || !Number.isFinite(total) || total <= 0 || part <= 0)
+    return '0%'
   const ratio = part / total
-  if (ratio < 0.01) return '<1%'
+  if (ratio < 0.01)
+    return '<1%'
   return `${Math.min(Math.round(ratio * 100), 100)}%`
 }
 
 /** 缓存命中率:缓存读取占「缓存读取 + 未命中输入」的比例(ZCode 的 input_tokens 不含缓存部分) */
 export function cacheHitRate(counters: TokenCounters): number {
   const base = counters.cacheReadTokens + counters.inputTokens
-  if (base <= 0) return 0
+  if (base <= 0)
+    return 0
   return counters.cacheReadTokens / base
 }

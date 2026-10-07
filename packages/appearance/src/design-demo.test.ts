@@ -1,13 +1,9 @@
-import { describe, expect, it } from 'vitest'
+import type { DesignStyle } from './design-styles'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { describe, expect, it } from 'vitest'
 import { buildDesignDemo, CARD_TYPE, clampFontSize, clampPadding, demoCopy, demoPalette, typeCss } from './design-demo'
-import {
-  isColorValue,
-  relativeLuminance,
-  sanitizeDesignStyles,
-  type DesignStyle
-} from './design-styles'
+import { isColorValue, relativeLuminance, sanitizeDesignStyles } from './design-styles'
 
 // ---------------------------------------------------------------- 夹具
 
@@ -24,17 +20,17 @@ function makeTidy(patch: Partial<DesignStyle> = {}): DesignStyle {
     strip: ['#ff0000', '#00ff00', '#0000ff'],
     description: '一套演示用的设计语言。',
     colors: {
-      primary: '#ff0000',
+      'primary': '#ff0000',
       'on-primary': '#ffffff',
-      ink: '#1a1a1a',
-      muted: '#6b6b6b',
-      hairline: '#e4e4e4',
-      'surface-card': '#f7f7f7'
+      'ink': '#1a1a1a',
+      'muted': '#6b6b6b',
+      'hairline': '#e4e4e4',
+      'surface-card': '#f7f7f7',
     },
     typography: {
       'display-lg': { fontFamily: 'Tidy Sans', fontSize: '48px', fontWeight: '400' },
       'body-md': { fontFamily: 'Tidy Sans', fontSize: '16px', fontWeight: '400' },
-      'button-md': { fontFamily: 'Tidy Sans', fontSize: '14px', fontWeight: '600' }
+      'button-md': { fontFamily: 'Tidy Sans', fontSize: '14px', fontWeight: '600' },
     },
     rounded: { sm: '6px', md: '12px', full: '9999px' },
     spacing: { sm: '8px', md: '16px', lg: '24px', section: '96px' },
@@ -44,16 +40,16 @@ function makeTidy(patch: Partial<DesignStyle> = {}): DesignStyle {
         textColor: '{colors.on-primary}',
         typography: '{typography.button-md}',
         rounded: '{rounded.sm}',
-        padding: '{spacing.sm} {spacing.md}'
+        padding: '{spacing.sm} {spacing.md}',
       },
       'button-secondary': {
         textColor: '{colors.ink}',
         border: '1px solid {colors.hairline}',
-        rounded: '{rounded.sm}'
+        rounded: '{rounded.sm}',
       },
-      'text-input': { backgroundColor: '{colors.surface-card}', textColor: '{colors.ink}' }
+      'text-input': { backgroundColor: '{colors.surface-card}', textColor: '{colors.ink}' },
     },
-    ...patch
+    ...patch,
   }
 }
 
@@ -73,12 +69,12 @@ function makeProse(): DesignStyle {
       'Prose Green': '#1ed760',
       'Near Black': '#121212',
       'Dark Card': '#181818',
-      Silver: '#b3b3b3',
-      'Border Gray': '#dedee5'
+      'Silver': '#b3b3b3',
+      'Border Gray': '#dedee5',
     },
     typography: {
       'Hero Display': { fontFamily: 'Prose Sans', fontSize: '56px', fontWeight: '700' },
-      Body: { fontFamily: 'Prose Sans', fontSize: '15px', fontWeight: '400' }
+      'Body': { fontFamily: 'Prose Sans', fontSize: '15px', fontWeight: '400' },
     },
     rounded: { Small: '8px' },
     spacing: { Small: '8px', Large: '32px' },
@@ -88,15 +84,15 @@ function makeProse(): DesignStyle {
         'Prose Green': 'Prose 绿',
         'Near Black': '近黑',
         'Dark Card': '深色卡片',
-        Silver: '银',
-        'Border Gray': '描边灰'
-      }
-    }
+        'Silver': '银',
+        'Border Gray': '描边灰',
+      },
+    },
   }
 }
 
 const styles: DesignStyle[] = sanitizeDesignStyles(
-  JSON.parse(readFileSync(resolve(__dirname, '../../../apps/desktop/src/renderer/public/design-styles.json'), 'utf-8'))
+  JSON.parse(readFileSync(resolve(__dirname, '../../../apps/desktop/src/renderer/public/design-styles.json'), 'utf-8')),
 )
 
 // ---------------------------------------------------------------- 真实数据
@@ -134,7 +130,7 @@ describe('示例页面（74 套真实数据）', () => {
 
   it('三个上游没给组件规格的品牌走现画，按钮底色就是主色', () => {
     for (const brand of ['lamborghini', 'runwayml', 'tesla']) {
-      const style = styles.find((s) => s.brand === brand)
+      const style = styles.find(s => s.brand === brand)
       expect(style, brand).toBeTruthy()
       const demo = buildDesignDemo(style!)
       expect(demo.primary.style.background, brand).toBe(demo.palette.accent)
@@ -144,7 +140,7 @@ describe('示例页面（74 套真实数据）', () => {
 
   it('内边距与字号都收敛过，不会把样张撑爆', () => {
     const px = (raw: string | undefined): number[] =>
-      [...(raw ?? '').matchAll(/([\d.]+)px/g)].map((m) => Number(m[1]))
+      [...(raw ?? '').matchAll(/([\d.]+)px/g)].map(m => Number(m[1]))
     for (const style of styles) {
       const demo = buildDesignDemo(style)
       for (const value of [demo.primary.style.padding, demo.secondary.style.padding, demo.input.padding]) {
@@ -168,11 +164,11 @@ describe('示例页面（74 套真实数据）', () => {
         expect(card.title.length, style.brand).toBeGreaterThan(1)
         expect(card.text.length, style.brand).toBeGreaterThan(6)
       }
-      expect(/[\u4e00-\u9fa5]/.test(copy.subtitle), style.brand).toBe(true)
+      expect(/[\u4E00-\u9FA5]/.test(copy.subtitle), style.brand).toBe(true)
     }
-    const ai = styles.find((s) => s.category === 'AI 与大模型')!
+    const ai = styles.find(s => s.category === 'AI 与大模型')!
     expect(demoCopy(ai).title).toBe('让模型替你把活干完')
-    const car = styles.find((s) => s.category === '汽车')!
+    const car = styles.find(s => s.category === '汽车')!
     expect(demoCopy(car).title).toBe('为驾驭而生的每一处细节')
   })
 
@@ -187,7 +183,8 @@ describe('示例页面（74 套真实数据）', () => {
       const demo = buildDesignDemo(style)
       for (const token of [demo.hero, demo.body, demo.small]) {
         const css = typeCss(token, CARD_TYPE.title)
-        if (!css.lineHeight) continue
+        if (!css.lineHeight)
+          continue
         // 归一化之后只可能是倍数（带单位的写法在数据里不存在）
         expect(Number(css.lineHeight), `${style.brand} 的 ${token?.fontSize}`).toBeLessThanOrEqual(2)
       }
@@ -221,7 +218,7 @@ describe('颜色角色解析', () => {
       theme: 'dark',
       canvas: '#101010',
       colors: { brand: '#ff0000' },
-      labels: undefined
+      labels: undefined,
     })
     const palette = demoPalette(bare)
     expect(isColorValue(palette.ink)).toBe(true)

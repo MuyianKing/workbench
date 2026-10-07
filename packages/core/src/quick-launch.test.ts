@@ -1,6 +1,6 @@
+import type { QuickApp } from './quick-launch'
 import { describe, expect, it } from 'vitest'
 import { defaultQuickAppName, sanitizeQuickApps } from './quick-launch'
-import type { QuickApp } from './quick-launch'
 
 describe('defaultQuickAppName', () => {
   it('去掉扩展名，只留文件名', () => {
@@ -36,9 +36,9 @@ describe('sanitizeQuickApps', () => {
         { target: '  D:\\tools\\Code.exe  ' },
         { name: '没有路径' },
         null,
-        'not an object'
+        'not an object',
       ],
-      makeId
+      makeId,
     )
 
     expect(list).toHaveLength(1)
@@ -53,13 +53,13 @@ describe('sanitizeQuickApps', () => {
       [
         { id: 'a', target: 'D:\\a.exe', order: 9 },
         { id: 'b', target: 'D:\\b.exe', order: 2 },
-        { id: 'c', target: 'D:\\c.exe' }
+        { id: 'c', target: 'D:\\c.exe' },
       ],
-      makeId
+      makeId,
     )
 
-    expect(list.map((app) => app.id)).toEqual(['b', 'c', 'a'])
-    expect(list.map((app) => app.order)).toEqual([0, 1, 2])
+    expect(list.map(app => app.id)).toEqual(['b', 'c', 'a'])
+    expect(list.map(app => app.order)).toEqual([0, 1, 2])
   })
 
   it('缺 id 时用注入的工厂补一个', () => {
@@ -74,7 +74,7 @@ describe('sanitizeQuickApps', () => {
       target: 'D:\\Code.exe',
       order: 0,
       createdAt: 1,
-      lastUsedAt: 2
+      lastUsedAt: 2,
     }
     expect(sanitizeQuickApps([raw], makeId)).toEqual([raw])
   })
@@ -82,7 +82,7 @@ describe('sanitizeQuickApps', () => {
   it('旧数据里的启动参数与工作目录被丢掉（这两项已经不再支持）', () => {
     const list = sanitizeQuickApps(
       [{ id: 'a', target: 'D:\\a.exe', args: '--new-window', cwd: 'D:\\work' }],
-      makeId
+      makeId,
     )
     expect(list[0]).toEqual({
       id: 'a',
@@ -90,7 +90,7 @@ describe('sanitizeQuickApps', () => {
       target: 'D:\\a.exe',
       order: 0,
       createdAt: expect.any(Number),
-      lastUsedAt: undefined
+      lastUsedAt: undefined,
     })
   })
 })

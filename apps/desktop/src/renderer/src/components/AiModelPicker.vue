@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import type { AiFetchedModel, AiModelEntry } from '@workbench/ai'
+import { Delete, Plus, Refresh } from '@element-plus/icons-vue'
+import { AI_MODEL_MAX, AI_THINKING_LEVELS, aiModelFromId, aiThinkingLabel, sanitizeAiThinkingLevels } from '@workbench/ai'
 /**
  * 「添加 AI 服务」第二步下面那两栏：左边是**端点报上来的模型**（点一下就加到右边），
  * 右边是**这个服务的清单**（每条一行，行上的「高级」摊开它的编辑面板：别名、
@@ -13,16 +16,6 @@
  * 点一下把数字填进那一格，真正的值以输入框里的为准。
  */
 import { computed, ref } from 'vue'
-import { Delete, Plus, Refresh } from '@element-plus/icons-vue'
-import {
-  AI_MODEL_MAX,
-  AI_THINKING_LEVELS,
-  aiModelFromId,
-  aiThinkingLabel,
-  sanitizeAiThinkingLevels,
-  type AiFetchedModel,
-  type AiModelEntry
-} from '@workbench/ai'
 import { notifyError } from '@/notify'
 
 const props = defineProps<{
@@ -36,9 +29,9 @@ const props = defineProps<{
   provider?: string
 }>()
 
-const models = defineModel<AiModelEntry[]>({ required: true })
-
 const emit = defineEmits<{ refresh: [] }>()
+
+const models = defineModel<AiModelEntry[]>({ required: true })
 
 const leftSearch = ref('')
 const rightSearch = ref('')
@@ -49,9 +42,10 @@ const opened = ref('')
 /** 左栏那一列：按搜索筛过 */
 const offered = computed(() => {
   const keyword = leftSearch.value.trim().toLowerCase()
-  if (!keyword) return props.available
+  if (!keyword)
+    return props.available
   return props.available.filter(
-    (item) => item.id.toLowerCase().includes(keyword) || item.name.toLowerCase().includes(keyword)
+    item => item.id.toLowerCase().includes(keyword) || item.name.toLowerCase().includes(keyword),
   )
 })
 
@@ -69,9 +63,9 @@ const offeredRows = computed(() =>
         contextWindow: item.contextWindow,
         maxTokens: item.maxTokens,
         // 端点没说（null）就交给内置目录 / 按名字认的那两层
-        ...(item.reasoning === null ? {} : { reasoning: item.reasoning })
+        ...(item.reasoning === null ? {} : { reasoning: item.reasoning }),
       },
-      props.provider ?? ''
+      props.provider ?? '',
     )
     return {
       model: item,
@@ -79,27 +73,29 @@ const offeredRows = computed(() =>
       contextGuessed: !item.contextWindow,
       reasoning: filled.reasoning,
       reasoningGuessed: item.reasoning === null,
-      image: filled.imageInput
+      image: filled.imageInput,
     }
-  })
+  }),
 )
 
 /** 右栏那一列（清单草稿）：同样能搜 */
 const chosen = computed(() => {
   const keyword = rightSearch.value.trim().toLowerCase()
-  if (!keyword) return models.value
+  if (!keyword)
+    return models.value
   return models.value.filter(
-    (item) => item.id.toLowerCase().includes(keyword) || item.name.toLowerCase().includes(keyword)
+    item => item.id.toLowerCase().includes(keyword) || item.name.toLowerCase().includes(keyword),
   )
 })
 
 function has(id: string): boolean {
-  return models.value.some((entry) => entry.id === id)
+  return models.value.some(entry => entry.id === id)
 }
 
 /** 左栏点一下：没加过的加进来，加过的撤下去（同一个动作来回切，不必找那个删除按钮） */
 function toggle(item: AiFetchedModel): void {
-  if (has(item.id)) return remove(item.id)
+  if (has(item.id))
+    return remove(item.id)
   if (models.value.length >= AI_MODEL_MAX) {
     notifyError(`一个服务最多留 ${AI_MODEL_MAX} 个模型（先在右边去掉几个）`)
     return
@@ -113,32 +109,34 @@ function toggle(item: AiFetchedModel): void {
         contextWindow: item.contextWindow,
         maxTokens: item.maxTokens,
         // 端点没说（null）就交给内置目录 / 按名字认的那两层
-        ...(item.reasoning === null ? {} : { reasoning: item.reasoning })
+        ...(item.reasoning === null ? {} : { reasoning: item.reasoning }),
       },
-      props.provider ?? ''
-    )
+      props.provider ?? '',
+    ),
   ]
 }
 
 function remove(id: string): void {
-  models.value = models.value.filter((entry) => entry.id !== id)
+  models.value = models.value.filter(entry => entry.id !== id)
 }
 
 /** 手填一个 id（端点列表里没有的：私有部署、别名、还没发布的那种）——同样吃预填 */
 function addCustom(): void {
   const id = customId.value.trim()
-  if (!id) return
+  if (!id)
+    return
   if (!has(id) && models.value.length >= AI_MODEL_MAX) {
     notifyError(`一个服务最多留 ${AI_MODEL_MAX} 个模型（先在右边去掉几个）`)
     return
   }
-  if (!has(id)) models.value = [...models.value, aiModelFromId(id, {}, props.provider ?? '')]
+  if (!has(id))
+    models.value = [...models.value, aiModelFromId(id, {}, props.provider ?? '')]
   customId.value = ''
 }
 
 function patch(entry: AiModelEntry, changes: Partial<AiModelEntry>): void {
-  models.value = models.value.map((item) =>
-    item.id === entry.id ? { ...item, ...changes } : item
+  models.value = models.value.map(item =>
+    item.id === entry.id ? { ...item, ...changes } : item,
   )
 }
 
@@ -148,9 +146,11 @@ function patch(entry: AiModelEntry, changes: Partial<AiModelEntry>): void {
  */
 function parseTokens(text: string): number {
   const value = text.trim().toLowerCase()
-  if (!value) return 0
+  if (!value)
+    return 0
   const match = /^(\d+(?:\.\d+)?)\s*(k|m)?$/.exec(value)
-  if (!match) return 0
+  if (!match)
+    return 0
   const size = Number(match[1])
   const unit = match[2] === 'm' ? 1_000_000 : match[2] === 'k' ? 1_000 : 1
   return Math.floor(size * unit)
@@ -206,7 +206,8 @@ function toggleOpen(id: string): void {
  * off 一直在清单里占着位（与 Pi 的算法一致，见 sanitizeAiThinkingLevels）。
  */
 function levelOn(entry: AiModelEntry, id: string): boolean {
-  if (id === 'off') return !entry.reasoning
+  if (id === 'off')
+    return !entry.reasoning
   return entry.reasoning && entry.levels.includes(id)
 }
 
@@ -216,9 +217,9 @@ function toggleLevel(entry: AiModelEntry, id: string): void {
     return
   }
   const next = entry.reasoning && entry.levels.includes(id)
-    ? entry.levels.filter((level) => level !== id)
+    ? entry.levels.filter(level => level !== id)
     : [...entry.levels, id]
-  const on = next.some((level) => level !== 'off')
+  const on = next.some(level => level !== 'off')
   patch(entry, { reasoning: on, levels: sanitizeAiThinkingLevels(next, true) })
 }
 
@@ -248,7 +249,9 @@ function contextText(size: number): string {
       </header>
 
       <div class="pick__list">
-        <p v-if="!offeredRows.length" class="pick__empty">{{ hint }}</p>
+        <p v-if="!offeredRows.length" class="pick__empty">
+          {{ hint }}
+        </p>
         <ul v-else class="pick__rows">
           <li v-for="row in offeredRows" :key="row.model.id" class="pick__row">
             <button
@@ -298,8 +301,12 @@ function contextText(size: number): string {
       </header>
 
       <div class="pick__list">
-        <p v-if="!models.length" class="pick__empty">尚未选择模型。请在左侧列表中点选。</p>
-        <p v-else-if="!chosen.length" class="pick__empty">这些模型里没有匹配的。</p>
+        <p v-if="!models.length" class="pick__empty">
+          尚未选择模型。请在左侧列表中点选。
+        </p>
+        <p v-else-if="!chosen.length" class="pick__empty">
+          这些模型里没有匹配的。
+        </p>
         <ul v-else class="pick__rows">
           <li v-for="entry in chosen" :key="entry.id" class="pick__row is-chosen">
             <div class="pick__line">
@@ -434,7 +441,9 @@ function contextText(size: number): string {
             placeholder="输入模型 ID，如 my-model-v2"
             @keyup.enter="addCustom"
           />
-          <el-button size="small" :icon="Plus" @click="addCustom">添加自定义模型</el-button>
+          <el-button size="small" :icon="Plus" @click="addCustom">
+            添加自定义模型
+          </el-button>
         </div>
       </footer>
     </section>

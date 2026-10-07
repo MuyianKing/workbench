@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import type { KbRawItem, KbRawStatus, KbRawTreeNode } from '@workbench/kb'
+import { Document, Folder } from '@element-plus/icons-vue'
+import { kbRawStatusText, kbRawTree, kbTreeFolderIds } from '@workbench/kb'
 /**
  * 原始数据树（左栏「原始数据」签）：data/raw 下的文件按目录结构收成的树与各自的入库状态。
  *
@@ -9,16 +12,7 @@
  * 见 stores/kb.ts），这里只管把状态摆清楚。
  */
 import { computed, ref, watch } from 'vue'
-import { Document, Folder } from '@element-plus/icons-vue'
 import { formatTimestamp } from '@/format'
-import {
-  kbRawStatusText,
-  kbRawTree,
-  kbTreeFolderIds,
-  type KbRawItem,
-  type KbRawStatus,
-  type KbRawTreeNode
-} from '@workbench/kb'
 
 const props = defineProps<{
   items: KbRawItem[]
@@ -32,7 +26,7 @@ const FILTER_LABELS: Record<Filter, string> = {
   all: '全部',
   pending: '未入库',
   stale: '有更新',
-  synced: '已入库'
+  synced: '已入库',
 }
 
 /** el-tree 认的字段名：数据里叫 name / children */
@@ -42,13 +36,13 @@ const filter = ref<Filter>('all')
 
 const counts = computed<Record<Filter, number>>(() => ({
   all: props.items.length,
-  pending: props.items.filter((item) => item.status === 'pending').length,
-  stale: props.items.filter((item) => item.status === 'stale').length,
-  synced: props.items.filter((item) => item.status === 'synced').length
+  pending: props.items.filter(item => item.status === 'pending').length,
+  stale: props.items.filter(item => item.status === 'stale').length,
+  synced: props.items.filter(item => item.status === 'synced').length,
 }))
 
 const filtered = computed(() =>
-  filter.value === 'all' ? props.items : props.items.filter((item) => item.status === filter.value)
+  filter.value === 'all' ? props.items : props.items.filter(item => item.status === filter.value),
 )
 
 const tree = computed(() => kbRawTree(filtered.value))
@@ -60,30 +54,33 @@ const expanded = ref<string[]>([])
 
 /** 筛选时整棵摊开：重建出的树只含筛出项，收着的目录会让「筛到了」看不出来 */
 const expandedKeys = computed(() =>
-  filtering.value ? kbTreeFolderIds(tree.value) : expanded.value
+  filtering.value ? kbTreeFolderIds(tree.value) : expanded.value,
 )
 
 // 首次出数据（重扫后也一样）把顶层目录摊开：树默认全收着的话，
 // 一进来只剩目录名，「哪些等着清洗」就看不出来了
 watch(tree, (nodes) => {
   if (!filtering.value && !expanded.value.length && nodes.length) {
-    expanded.value = nodes.filter((node) => node.kind === 'folder').map((node) => node.id)
+    expanded.value = nodes.filter(node => node.kind === 'folder').map(node => node.id)
   }
 })
 
 function expand(id: string): void {
-  if (filtering.value) return
+  if (filtering.value)
+    return
   expanded.value = [...new Set([...expanded.value, id])]
 }
 
 function collapse(id: string): void {
-  if (filtering.value) return
-  expanded.value = expanded.value.filter((item) => item !== id)
+  if (filtering.value)
+    return
+  expanded.value = expanded.value.filter(item => item !== id)
 }
 
 /** 点目录行只是收展（el-tree 自己处理），点文件才算「查看它」（右栏就地预览或给出去） */
 function onNodeClick(data: KbRawTreeNode): void {
-  if (data.kind === 'file') emit('open', data.id)
+  if (data.kind === 'file')
+    emit('open', data.id)
 }
 </script>
 

@@ -28,9 +28,10 @@ window.setInterval(() => {
   const now = Date.now()
   clock.value = now
   const today = startOfToday()
-  if (today !== dayStart.value) dayStart.value = today
+  if (today !== dayStart.value)
+    dayStart.value = today
 }, 1000)
 
-export function useWallClock(): { clock: typeof clock; dayStart: typeof dayStart } {
+export function useWallClock(): { clock: typeof clock, dayStart: typeof dayStart } {
   return { clock, dayStart }
 }

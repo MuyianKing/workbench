@@ -15,14 +15,14 @@
 import { KB_CATALOG_NAME, KB_DIR } from './kb'
 
 /** 清洗流程的阶段：store 里推进，面板与工具条都按它说话 */
-export type KbCleanPhase =
-  | 'idle'
-  | 'blocked'
-  | 'cleaning'
-  | 'indexing'
-  | 'done'
-  | 'failed'
-  | 'cancelled'
+export type KbCleanPhase
+  = | 'idle'
+    | 'blocked'
+    | 'cleaning'
+    | 'indexing'
+    | 'done'
+    | 'failed'
+    | 'cancelled'
 
 /** 清洗的输入：应用扫描出的两组待处理文件（仓库相对路径）与今天的日期 */
 export interface KbCleanInput {
@@ -41,13 +41,13 @@ export function kbCleanPrompt(input: KbCleanInput): string {
   const list: string[] = []
   list.push(
     pending.length
-      ? [`未入库（${pending.length} 个，还没有条目指向它们）：`, ...pending.map((rel) => `- ${rel}`)].join('\n')
-      : '未入库：没有'
+      ? [`未入库（${pending.length} 个，还没有条目指向它们）：`, ...pending.map(rel => `- ${rel}`)].join('\n')
+      : '未入库：没有',
   )
   list.push(
     stale.length
-      ? [`有更新（${stale.length} 个，原始文件比指向它们的条目都新）：`, ...stale.map((rel) => `- ${rel}`)].join('\n')
-      : '有更新：没有'
+      ? [`有更新（${stale.length} 个，原始文件比指向它们的条目都新）：`, ...stale.map(rel => `- ${rel}`)].join('\n')
+      : '有更新：没有',
   )
 
   return [
@@ -76,7 +76,7 @@ export function kbCleanPrompt(input: KbCleanInput): string {
     '3. 原始资料可能是任意格式：文本类（md / txt 等）读出来整理；读不了的（二进制等）跳过，总结里说明是哪几个、为什么。',
     '4. kb/_catalog.md 与 index/index.json 是应用自动重建的生成物：不必读它们，也绝不要改。',
     '5. 你有这台机器的完全访问权限，需要什么命令就用什么命令；git 提交 / 推送不用做（同步由应用负责），也不要在仓库里留下脚本或临时文件。',
-    '6. 全部处理完后用一段话总结：每个原始文件新建了哪些条目、覆盖了哪些条目、还是跳过了（跳过的说明原因），以及遇到的问题。'
+    '6. 全部处理完后用一段话总结：每个原始文件新建了哪些条目、覆盖了哪些条目、还是跳过了（跳过的说明原因），以及遇到的问题。',
   ].join('\n')
 }
 
@@ -108,22 +108,25 @@ export function splitCleanWrites(root: string, paths: string[], before: string[]
   const updated = new Set<string>()
   for (const raw of paths) {
     const rel = kbRelOfWrite(root, raw)
-    if (!rel) continue
+    if (!rel)
+      continue
     const hit = known.get(rel.toLowerCase())
-    if (hit) updated.add(hit)
+    if (hit)
+      updated.add(hit)
     else created.add(rel)
   }
 
   return {
     created: [...created].sort((a, b) => a.localeCompare(b)),
-    updated: [...updated].sort((a, b) => a.localeCompare(b))
+    updated: [...updated].sort((a, b) => a.localeCompare(b)),
   }
 }
 
 /** 一条写入路径归一成 `kb/…` 相对路径；不是 kb/ 下的条目文件（或认不出来）回空串 */
 function kbRelOfWrite(root: string, rawPath: string): string {
   let path = rawPath.trim().replace(/\\/g, '/')
-  if (!path) return ''
+  if (!path)
+    return ''
 
   const base = root.trim().replace(/\\/g, '/').replace(/\/+$/, '')
   if (base && path.toLowerCase().startsWith(`${base.toLowerCase()}/`)) {
@@ -131,8 +134,11 @@ function kbRelOfWrite(root: string, rawPath: string): string {
   }
   path = path.replace(/^\.\//, '').replace(/^\/+/, '')
 
-  if (!path.startsWith(`${KB_DIR}/`)) return ''
-  if (!path.toLowerCase().endsWith('.md')) return ''
-  if ((path.split('/').pop() ?? '').toLowerCase() === KB_CATALOG_NAME) return ''
+  if (!path.startsWith(`${KB_DIR}/`))
+    return ''
+  if (!path.toLowerCase().endsWith('.md'))
+    return ''
+  if ((path.split('/').pop() ?? '').toLowerCase() === KB_CATALOG_NAME)
+    return ''
   return path
 }

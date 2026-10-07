@@ -26,7 +26,8 @@ export function subscribe<T>(name: string, handler: (payload: T) => void): () =>
 
 export function emit<T>(name: string, payload: T): void {
   const group = handlers.get(name)
-  if (!group) return
+  if (!group)
+    return
   // 先复制再遍历：处理器里可能出现退订（组件销毁）
   for (const handler of [...group]) handler(payload)
 }

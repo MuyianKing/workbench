@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { SkillEntry } from '@workbench/skills'
+import { FolderOpened, Plus, Refresh, RefreshRight, Upload } from '@element-plus/icons-vue'
 /**
  * 技能页：卡片网格铺开技能库，点一张卡片打开详情弹窗（编辑 / 安装 / 历史 / 删除都在那里）。
  *
@@ -18,15 +20,13 @@
  * （见 shared/views.ts），换页由 App.vue 的 KeepAlive 负责，数据与动作都在 store 里。
  */
 import { computed, onMounted, ref } from 'vue'
-import { FolderOpened, Plus, Refresh, RefreshRight, Upload } from '@element-plus/icons-vue'
-import type { SkillEntry } from '@workbench/skills'
-import { useSkillsStore } from '@/stores/skills'
 import PanelLoading from '@/components/PanelLoading.vue'
 import SkillCard from '@/components/SkillCard.vue'
-import SkillDetailDialog from '@/components/SkillDetailDialog.vue'
 import SkillCreateDialog from '@/components/SkillCreateDialog.vue'
+import SkillDetailDialog from '@/components/SkillDetailDialog.vue'
 import SkillImportDialog from '@/components/SkillImportDialog.vue'
 import SkillInstallDialog from '@/components/SkillInstallDialog.vue'
+import { useSkillsStore } from '@/stores/skills'
 
 const store = useSkillsStore()
 
@@ -43,7 +43,8 @@ onMounted(() => {
  */
 async function pickRoot(): Promise<void> {
   const picked = await window.workbench.pickDirectory('选择技能文件夹')
-  if (picked) await store.setRoot(picked)
+  if (picked)
+    await store.setRoot(picked)
 }
 
 const createOpen = ref(false)
@@ -57,7 +58,7 @@ const detailOpen = ref(false)
 const installOpen = ref(false)
 const installId = ref('')
 const installName = computed(() => {
-  const skill = store.skills.find((item) => item.id === installId.value)
+  const skill = store.skills.find(item => item.id === installId.value)
   return skill?.name ?? installId.value
 })
 
@@ -70,7 +71,7 @@ const installName = computed(() => {
 const syncTitle = computed(() =>
   store.remoteUrl
     ? `提交技能库的改动、拉回别处的改动：同步到 ${store.remoteUrl}`
-    : '技能库所在的仓库还没连远端'
+    : '技能库所在的仓库还没连远端',
 )
 
 /**
@@ -81,14 +82,17 @@ const syncTitle = computed(() =>
  */
 const locTitle = computed(() => {
   const lines = [store.root]
-  if (store.gitRoot && store.dir) lines.push(`在仓库里：${store.gitRoot}`)
-  if (store.hasVersions && !store.remoteUrl) lines.push('这个仓库还没连远端：版本只留本机')
+  if (store.gitRoot && store.dir)
+    lines.push(`在仓库里：${store.gitRoot}`)
+  if (store.hasVersions && !store.remoteUrl)
+    lines.push('这个仓库还没连远端：版本只留本机')
   return lines.join('\n')
 })
 
 /** 点开一张卡片：先读它的 SKILL.md，读成了才拉开详情弹窗（编辑区读着的时候是「正在读取」） */
 async function openDetail(skill: SkillEntry): Promise<void> {
-  if (await store.select(skill.id)) detailOpen.value = true
+  if (await store.select(skill.id))
+    detailOpen.value = true
 }
 
 function openInstall(skill: SkillEntry): void {
@@ -99,7 +103,8 @@ function openInstall(skill: SkillEntry): void {
 /** 详情弹窗里那颗「安装到项目」：装的就是当前打开着的这个 */
 function installActive(): void {
   const skill = store.activeSkill
-  if (skill) openInstall(skill)
+  if (skill)
+    openInstall(skill)
 }
 </script>
 
@@ -111,8 +116,12 @@ function installActive(): void {
       目录不在时那行原因是必须的：不说的话这一页看着就像「技能没了」。
     -->
     <div v-if="!store.root || store.stateError" class="guide panel">
-      <h2 class="guide__title">技能</h2>
-      <p v-if="store.stateError" class="guide__text">{{ store.stateError }}</p>
+      <h2 class="guide__title">
+        技能
+      </h2>
+      <p v-if="store.stateError" class="guide__text">
+        {{ store.stateError }}
+      </p>
       <el-button type="primary" :icon="FolderOpened" @click="pickRoot">
         {{ store.root ? '换一个技能文件夹' : '选择技能文件夹' }}
       </el-button>
@@ -123,14 +132,18 @@ function installActive(): void {
       <div class="filter">
         <div class="filter__head">
           <div class="head">
-            <h2 class="head__title">技能</h2>
+            <h2 class="head__title">
+              技能
+            </h2>
             <span class="head__loc mono" :title="locTitle">
               {{ store.locationText }}
             </span>
           </div>
         </div>
         <div class="filter__tools">
-          <el-button size="small" :icon="Upload" @click="importOpen = true">导入</el-button>
+          <el-button size="small" :icon="Upload" @click="importOpen = true">
+            导入
+          </el-button>
           <el-tooltip v-if="store.canSync" :content="syncTitle" placement="bottom">
             <el-button
               size="small"
@@ -154,7 +167,9 @@ function installActive(): void {
         </div>
       </div>
 
-      <p v-if="store.syncError" class="sync-error">{{ store.syncError }}</p>
+      <p v-if="store.syncError" class="sync-error">
+        {{ store.syncError }}
+      </p>
 
       <div class="skills-view__scroll">
         <!-- 还没有技能：入口就在空态里，任何状态下都找得到门 -->
@@ -162,13 +177,21 @@ function installActive(): void {
           <PanelLoading text="正在读取技能…" />
         </div>
         <div v-else-if="store.loadError" class="empty panel">
-          <p class="empty__text">{{ store.loadError }}</p>
+          <p class="empty__text">
+            {{ store.loadError }}
+          </p>
         </div>
         <div v-else-if="!store.skills.length" class="empty panel">
-          <p class="empty__text">技能库里还没有技能。每个技能就是一个文件夹加一份 SKILL.md。</p>
+          <p class="empty__text">
+            技能库里还没有技能。每个技能就是一个文件夹加一份 SKILL.md。
+          </p>
           <div class="empty__actions">
-            <el-button type="primary" :icon="Plus" @click="createOpen = true">新建技能</el-button>
-            <el-button :icon="Upload" @click="importOpen = true">导入文件夹</el-button>
+            <el-button type="primary" :icon="Plus" @click="createOpen = true">
+              新建技能
+            </el-button>
+            <el-button :icon="Upload" @click="importOpen = true">
+              导入文件夹
+            </el-button>
           </div>
         </div>
 

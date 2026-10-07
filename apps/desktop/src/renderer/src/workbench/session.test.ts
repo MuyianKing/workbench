@@ -1,3 +1,5 @@
+import type { Project } from '@/types'
+import { terminalKey } from '@workbench/terminal'
 /**
  * 会话这一侧「停止到底停了哪一条」的判定。
  *
@@ -9,20 +11,19 @@
  * 这几条用例只需要 spawn_session 回一个 PID，其余通道一律 null。
  */
 import { beforeAll, describe, expect, it } from 'vitest'
-import { terminalKey } from '@workbench/terminal'
-import type { Project } from '@/types'
 
-const calls: Array<{ command: string; args?: Record<string, unknown> }> = []
+const calls: Array<{ command: string, args?: Record<string, unknown> }> = []
 
 beforeAll(() => {
   ;(globalThis as { window?: unknown }).window = {
     __TAURI_INTERNALS__: {
       invoke: (command: string, args?: Record<string, unknown>): Promise<unknown> => {
         calls.push({ command, args })
-        if (command === 'spawn_session') return Promise.resolve(4321)
+        if (command === 'spawn_session')
+          return Promise.resolve(4321)
         return Promise.resolve(null)
-      }
-    }
+      },
+    },
   }
 })
 
@@ -41,7 +42,7 @@ function makeProject(id: string): Project {
     scripts: { serve: 'dev', build: ['build'], defaultBuild: 'build' },
     autoOpenExplorer: false,
     order: 0,
-    createdAt: 0
+    createdAt: 0,
   }
 }
 
@@ -60,7 +61,7 @@ describe('停止命中哪一条会话', () => {
 
     expect((await session.stopOwner(id, 'build')).ok).toBe(true)
 
-    const stopped = calls.find((item) => item.command === 'stop_session')
+    const stopped = calls.find(item => item.command === 'stop_session')
     expect(stopped?.args?.sessionId).toBe(terminalKey(id, 'build'))
   })
 
@@ -71,7 +72,7 @@ describe('停止命中哪一条会话', () => {
 
     expect((await session.stopOwner(id, 'start')).ok).toBe(true)
 
-    const stopped = calls.find((item) => item.command === 'stop_session')
+    const stopped = calls.find(item => item.command === 'stop_session')
     expect(stopped?.args?.sessionId).toBe(terminalKey(id, 'start'))
   })
 
@@ -83,7 +84,7 @@ describe('停止命中哪一条会话', () => {
 
     expect((await session.stopOwner(id, 'install')).ok).toBe(true)
 
-    const stopped = calls.find((item) => item.command === 'stop_session')
+    const stopped = calls.find(item => item.command === 'stop_session')
     expect(stopped?.args?.sessionId).toBe(terminalKey(id, 'start'))
   })
 
@@ -94,6 +95,6 @@ describe('停止命中哪一条会话', () => {
 
     expect(result.ok).toBe(false)
     expect(result.error).toBe('该项目当前没有在运行的命令')
-    expect(calls.some((item) => item.command === 'stop_session')).toBe(false)
+    expect(calls.some(item => item.command === 'stop_session')).toBe(false)
   })
 })

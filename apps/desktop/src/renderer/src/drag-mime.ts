@@ -10,5 +10,5 @@ export const DRAG_MIME = {
   /** 分组标签：拖动即排序 */
   group: 'application/x-workbench-group',
   /** 快捷启动项：拖动即排序 */
-  quickApp: 'application/x-workbench-quick-app'
+  quickApp: 'application/x-workbench-quick-app',
 } as const

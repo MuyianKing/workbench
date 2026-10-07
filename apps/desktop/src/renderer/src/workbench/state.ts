@@ -1,3 +1,6 @@
+import type { AppearanceSettings, ThemeConfig } from '@workbench/appearance'
+import type { AccountProfile, ActiveSession, AppSettings, CommandEntry, CommandInput, CommandPatch, IconCacheEntry, PersistedData, Project, ProjectGroup, ProjectPatch, QuickApp, QuickAppInput, QuickAppList, QuickAppPatch } from '@/types'
+import { DEFAULT_THEME, sameThemeContent, sanitizeTheme } from '@workbench/appearance'
 /**
  * 渲染层持有的持久化状态：项目 / 分组 / 快捷启动 / 命令 / 设置 / 首页布局 / 活跃度。
  *
@@ -9,42 +12,9 @@
  * 同步仓库地址…)住在 workbench-data.json。渲染层只认一份完整的 `AppSettings` ——
  * 读的时候在这里合（`settings()`）、写的时候在这里分（`updateSettings` 按白名单分流）。
  */
-import { withSessionRecorded, withoutSession } from '@workbench/core'
-import {
-  emptyData,
-  mergeSettingsAppearance,
-  migrateAppearanceIntoTheme,
-  parseData,
-  sanitizeSettings,
-  splitSettingsPatch
-} from '@/persisted-data'
-import { bumpDay, pruneDays, reorderById } from '@workbench/core'
-import {
-  DEFAULT_THEME,
-  sameThemeContent,
-  sanitizeTheme,
-  type AppearanceSettings,
-  type ThemeConfig
-} from '@workbench/appearance'
-import type {
-  AccountProfile,
-  ActiveSession,
-  AppSettings,
-  CommandEntry,
-  CommandInput,
-  CommandPatch,
-  IconCacheEntry,
-  PersistedData,
-  Project,
-  ProjectGroup,
-  ProjectPatch,
-  QuickApp,
-  QuickAppInput,
-  QuickAppList,
-  QuickAppPatch
-} from '@/types'
+import { bumpDay, pruneDays, reorderById, withoutSession, withSessionRecorded } from '@workbench/core'
+import { emptyData, mergeSettingsAppearance, migrateAppearanceIntoTheme, parseData, sanitizeSettings, splitSettingsPatch } from '@/persisted-data'
 import { invoke } from './bridge'
-import * as workLog from './work-log'
 
 let data: PersistedData = emptyData()
 let theme: ThemeConfig = DEFAULT_THEME
@@ -58,7 +28,8 @@ interface RawBootstrap {
 
 function rawBootstrap(): RawBootstrap | null {
   const raw = window.__WB_BOOTSTRAP__
-  if (typeof raw !== 'object' || raw === null) return null
+  if (typeof raw !== 'object' || raw === null)
+    return null
   return raw as RawBootstrap
 }
 
@@ -84,7 +55,7 @@ export function initialTheme(): ThemeConfig {
 export async function initState(): Promise<void> {
   const [rawData, rawTheme] = await Promise.all([
     invoke<unknown>('data_load'),
-    invoke<unknown>('theme_load')
+    invoke<unknown>('theme_load'),
   ])
 
   data = parseData(rawData, () => crypto.randomUUID())
@@ -95,18 +66,21 @@ export async function initState(): Promise<void> {
   const rawSettings = (rawData as { settings?: unknown } | null)?.settings
   const migrated = migrateAppearanceIntoTheme(rawTheme, rawSettings)
   theme = sanitizeTheme(migrated)
-  if (migrated !== rawTheme) void invoke('theme_save', { value: theme })
+  if (migrated !== rawTheme)
+    void invoke('theme_save', { value: theme })
 
   loaded = true
 }
 
 /** 变更即写（落盘防抖在 Rust 侧，300ms 合并一次） */
 function persist(): void {
-  if (loaded) void invoke('data_save', { value: data })
+  if (loaded)
+    void invoke('data_save', { value: data })
 }
 
 function persistTheme(): void {
-  if (loaded) void invoke('theme_save', { value: theme })
+  if (loaded)
+    void invoke('theme_save', { value: theme })
 }
 
 // ---------- 读取 ----------
@@ -171,7 +145,7 @@ export function themeConfig(): ThemeConfig {
   return copy(theme)
 }
 
-export function listProjects(): { projects: Project[]; groups: ProjectGroup[] } {
+export function listProjects(): { projects: Project[], groups: ProjectGroup[] } {
   return copy({ projects: data.projects, groups: data.groups })
 }
 
@@ -199,7 +173,8 @@ function updateAppearance(patch: Partial<AppearanceSettings>): void {
 export function updateSettings(patch: Partial<AppSettings>): AppSettings {
   // 先 sanitize 再落盘：手改过的数据文件不会把非法取值带进内存（与主进程版同一函数）
   const { settings: stored, appearance } = splitSettingsPatch(patch)
-  if (Object.keys(appearance).length) updateAppearance(appearance)
+  if (Object.keys(appearance).length)
+    updateAppearance(appearance)
 
   data.settings = sanitizeSettings({ ...data.settings, ...stored })
   persist()
@@ -214,7 +189,7 @@ export function updateThemeConfig(patch: Partial<ThemeConfig>): ThemeConfig {
     ...theme,
     ...patch,
     appearance: { ...theme.appearance, ...(patch.appearance ?? {}) },
-    updatedAt: before.updatedAt
+    updatedAt: before.updatedAt,
   })
   theme = touchTheme(merged, before)
   persistTheme()
@@ -224,15 +199,16 @@ export function updateThemeConfig(patch: Partial<ThemeConfig>): ThemeConfig {
 // ---------- 项目 ----------
 
 export function updateProject(id: string, patch: ProjectPatch): Project | null {
-  const target = data.projects.find((project) => project.id === id)
-  if (!target) return null
+  const target = data.projects.find(project => project.id === id)
+  if (!target)
+    return null
   Object.assign(target, patch)
   persist()
   return copy(target)
 }
 
 export function removeProject(id: string): void {
-  data.projects = data.projects.filter((project) => project.id !== id)
+  data.projects = data.projects.filter(project => project.id !== id)
   persist()
 }
 
@@ -258,7 +234,7 @@ export async function checkProjectPaths(): Promise<Record<string, boolean>> {
     data.projects.map(async (project) => {
       const exists = await invoke<boolean>('fs_exists', { path: project.path })
       return [project.id, exists] as const
-    })
+    }),
   )
   return Object.fromEntries(entries)
 }
@@ -270,8 +246,9 @@ export async function checkProjectPaths(): Promise<Record<string, boolean>> {
  * 广播本身不归这里管 —— 事件是适配层那一侧的事。
  */
 export function touchProject(id: string, at = Date.now()): Project | null {
-  const target = data.projects.find((project) => project.id === id)
-  if (!target) return null
+  const target = data.projects.find(project => project.id === id)
+  if (!target)
+    return null
   target.lastUsedAt = at
   persist()
   return copy(target)
@@ -287,17 +264,19 @@ export function createGroup(name: string): ProjectGroup {
 }
 
 export function renameGroup(id: string, name: string): void {
-  const group = data.groups.find((item) => item.id === id)
-  if (!group) return
+  const group = data.groups.find(item => item.id === id)
+  if (!group)
+    return
   group.name = name
   persist()
 }
 
 export function removeGroup(id: string): void {
-  data.groups = data.groups.filter((group) => group.id !== id)
+  data.groups = data.groups.filter(group => group.id !== id)
   // 组没了，组内项目回落到未分组，不能留下指向已删分组的悬空引用
   for (const project of data.projects) {
-    if (project.groupId === id) project.groupId = undefined
+    if (project.groupId === id)
+      project.groupId = undefined
   }
   persist()
 }
@@ -341,11 +320,11 @@ export async function quickAppList(): Promise<QuickAppList> {
   // 先取快照再逐个问：下面那串 await 期间列表可能又被改过，两半要来自同一时刻
   const apps = copy(data.quickApps)
   const flags = await Promise.all(
-    apps.map(async (app) => [app.id, !(await invoke<boolean>('fs_exists', { path: app.target }))] as const)
+    apps.map(async app => [app.id, !(await invoke<boolean>('fs_exists', { path: app.target }))] as const),
   )
   return {
     apps,
-    missing: Object.fromEntries(flags.filter(([, missing]) => missing))
+    missing: Object.fromEntries(flags.filter(([, missing]) => missing)),
   }
 }
 
@@ -355,8 +334,9 @@ export function quickApps(): QuickApp[] {
 
 /** 记一次启动：只动最近使用时间（它不在 QuickAppPatch 的可编辑字段里） */
 export function touchQuickApp(id: string, at: number): void {
-  const target = data.quickApps.find((app) => app.id === id)
-  if (!target) return
+  const target = data.quickApps.find(app => app.id === id)
+  if (!target)
+    return
   target.lastUsedAt = at
   persist()
 }
@@ -366,7 +346,7 @@ export function addQuickApp(input: QuickAppInput): QuickApp {
     ...input,
     id: crypto.randomUUID(),
     order: data.quickApps.length,
-    createdAt: Date.now()
+    createdAt: Date.now(),
   }
   data.quickApps.push(app)
   persist()
@@ -374,15 +354,16 @@ export function addQuickApp(input: QuickAppInput): QuickApp {
 }
 
 export function updateQuickApp(id: string, patch: QuickAppPatch): QuickApp | null {
-  const target = data.quickApps.find((app) => app.id === id)
-  if (!target) return null
+  const target = data.quickApps.find(app => app.id === id)
+  if (!target)
+    return null
   Object.assign(target, patch)
   persist()
   return copy(target)
 }
 
 export function removeQuickApp(id: string): void {
-  data.quickApps = data.quickApps.filter((app) => app.id !== id)
+  data.quickApps = data.quickApps.filter(app => app.id !== id)
   persist()
 }
 
@@ -414,7 +395,8 @@ export function iconCache(): Record<string, IconCacheEntry> {
 export function setIconCacheEntry(target: string, entry: IconCacheEntry): void {
   const current = data.iconCache ?? (data.iconCache = {})
   const existing = current[target]
-  if (existing && existing.mtime === entry.mtime && existing.dataUrl === entry.dataUrl) return
+  if (existing && existing.mtime === entry.mtime && existing.dataUrl === entry.dataUrl)
+    return
 
   current[target] = entry
   persist()
@@ -434,7 +416,7 @@ export function addCommand(input: CommandInput): CommandEntry {
     order: data.commands.length,
     createdAt: Date.now(),
     // 表单清空端口时给的是 null，落盘口径统一成「字段不存在」
-    ...(port == null ? {} : { port })
+    ...(port == null ? {} : { port }),
   }
   data.commands.push(entry)
   persist()
@@ -442,21 +424,24 @@ export function addCommand(input: CommandInput): CommandEntry {
 }
 
 export function updateCommand(id: string, patch: CommandPatch): CommandEntry | null {
-  const target = data.commands.find((item) => item.id === id)
-  if (!target) return null
+  const target = data.commands.find(item => item.id === id)
+  if (!target)
+    return null
 
   const { port, ...rest } = patch
   Object.assign(target, rest)
   // 同上：null 表示「清空端口」，要真把字段删掉而不是留一个 null
-  if (port === null) delete target.port
-  else if (port !== undefined) target.port = port
+  if (port === null)
+    delete target.port
+  else if (port !== undefined)
+    target.port = port
 
   persist()
   return copy(target)
 }
 
 export function removeCommand(id: string): void {
-  data.commands = data.commands.filter((item) => item.id !== id)
+  data.commands = data.commands.filter(item => item.id !== id)
   persist()
 }
 
@@ -485,10 +470,12 @@ export function recordSession(session: ActiveSession): void {
 /** 进程正常结束就把它从记录里摘掉（按 pid 匹配，一个会话一条） */
 export function dropSession(pid: number): void {
   const current = data.activeSessions
-  if (!current) return
+  if (!current)
+    return
 
   const next = withoutSession(current, pid)
-  if (next.length === current.length) return
+  if (next.length === current.length)
+    return
 
   data.activeSessions = next
   persist()

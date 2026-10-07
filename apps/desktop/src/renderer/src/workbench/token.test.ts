@@ -1,3 +1,5 @@
+import type { TokenDays } from '@workbench/usage'
+import { DEFAULT_THEME, THEME_VERSION } from '@workbench/appearance'
 /**
  * Token 适配层：本机实读 + 本机分片 + 多机合并。
  *
@@ -12,8 +14,6 @@
  * 自动同步在后台跑，断言推送内容前要先 `flushBackgroundSync()`。
  */
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { DEFAULT_THEME, THEME_VERSION } from '@workbench/appearance'
-import type { TokenDays } from '@workbench/usage'
 
 /** 用例里的同步仓库地址（桩数据按它分仓库存放分片） */
 const REPO = 'git@example.com:me/sync.git'
@@ -47,29 +47,29 @@ let hangPublish = false
 let cloneRepo = ''
 let rows: UsageRow[] = []
 /** CodeBuddy：`token_codebuddy_files` 回的清单，以及按路径取内容的桩文件 */
-let codebuddy: { found: boolean; files: Array<{ path: string; mtimeMs: number; size: number }> } = {
+let codebuddy: { found: boolean, files: Array<{ path: string, mtimeMs: number, size: number }> } = {
   found: false,
-  files: []
+  files: [],
 }
 let codebuddyText: Record<string, string> = {}
 let textReads: string[] = []
 /** DSH：`token_dsh_sessions` 回的清单，以及按路径「解压」出来的文本 */
-let dsh: { found: boolean; sessions: Array<{ path: string; mtimeMs: number; size: number }> } = {
+let dsh: { found: boolean, sessions: Array<{ path: string, mtimeMs: number, size: number }> } = {
   found: false,
-  sessions: []
+  sessions: [],
 }
 let dshFrames: Record<string, string> = {}
 let dshDecodes: string[] = []
 /** WorkBuddy：`token_workbuddy_sessions` 回的清单，以及按路径取内容的桩会话正文 */
-let workbuddy: { found: boolean; sessions: Array<{ path: string; mtimeMs: number; size: number }> } = {
+let workbuddy: { found: boolean, sessions: Array<{ path: string, mtimeMs: number, size: number }> } = {
   found: false,
-  sessions: []
+  sessions: [],
 }
 let workbuddyText: Record<string, string> = {}
 /** Qoder：`token_qoder_sessions` 回的清单，以及按路径取内容的桩会话正文（只有额度，没有 token） */
-let qoder: { found: boolean; sessions: Array<{ path: string; mtimeMs: number; size: number }> } = {
+let qoder: { found: boolean, sessions: Array<{ path: string, mtimeMs: number, size: number }> } = {
   found: false,
-  sessions: []
+  sessions: [],
 }
 let qoderText: Record<string, string> = {}
 
@@ -86,7 +86,7 @@ function shard(device: string, input: number, day = today()): Record<string, unk
     device,
     name: device,
     updatedAt: 1,
-    sources: { zcode: { days: { [day]: { 'glm-5': { inputTokens: input, requests: 1 } } } } }
+    sources: { zcode: { days: { [day]: { 'glm-5': { inputTokens: input, requests: 1 } } } } },
   }
 }
 
@@ -112,7 +112,8 @@ beforeAll(() => {
             textReads.push(path)
             // CodeBuddy / WorkBuddy / Qoder 都是「列清单 + 自己读文件」，共用一个读取桩
             const text = workbuddyText[path] ?? qoderText[path] ?? codebuddyText[path]
-            if (typeof text !== 'string') return Promise.reject('文件读不了')
+            if (typeof text !== 'string')
+              return Promise.reject('文件读不了')
             return Promise.resolve(text)
           }
           case 'token_dsh_sessions':
@@ -124,32 +125,37 @@ beforeAll(() => {
           case 'token_zstd_decode': {
             const path = String((args as { path?: unknown })?.path ?? '')
             dshDecodes.push(path)
-            if (!(path in dshFrames)) return Promise.reject('会话文件坏了')
+            if (!(path in dshFrames))
+              return Promise.reject('会话文件坏了')
             return Promise.resolve(dshFrames[path])
           }
           case 'token_sync_publish': {
-            if (hangPublish) return new Promise(() => {})
-            if (failPublish) return Promise.reject('仓库推不上去')
+            if (hangPublish)
+              return new Promise(() => {})
+            if (failPublish)
+              return Promise.reject('仓库推不上去')
             published.push(args ?? {})
             const repo = String(args?.repo ?? '')
             // 推送这路会顺带建好 / 拉新克隆（见 sync.rs 的 ensure_clone），克隆从此属于这个仓库
             cloneRepo = repo
             // 用量那条出口**只有分片**：仓库里自己那份被覆盖，别人那份原样留着
             const others = (remotes[repo] ?? []).filter(
-              (item) => (item as { device?: string }).device !== args?.device
+              item => (item as { device?: string }).device !== args?.device,
             )
             remotes[repo] = [...others, args?.shard]
             return Promise.resolve({ changed: true, pushed: true, log: '' })
           }
           case 'token_sync_config': {
             // 外观那条出口（设置 → 外观 →「同步一次」）：只写 config/，用量分片一概不碰
-            if (hangPublish) return new Promise(() => {})
-            if (failPublish) return Promise.reject('仓库推不上去')
+            if (hangPublish)
+              return new Promise(() => {})
+            if (failPublish)
+              return Promise.reject('仓库推不上去')
             published.push(args ?? {})
             const repo = String(args?.repo ?? '')
             cloneRepo = repo
             const others = (remoteConfigs[repo] ?? []).filter(
-              (item) => (item as { device?: string }).device !== args?.device
+              item => (item as { device?: string }).device !== args?.device,
             )
             remoteConfigs[repo] = [...others, args?.config]
             return Promise.resolve({ changed: true, pushed: true, log: '' })
@@ -162,14 +168,14 @@ beforeAll(() => {
             const owned = cloneRepo === repo
             return Promise.resolve({
               usage: owned ? remotes[repo] ?? [] : [],
-              config: owned ? remoteConfigs[repo] ?? [] : []
+              config: owned ? remoteConfigs[repo] ?? [] : [],
             })
           }
           default:
             return Promise.reject(new Error(`用例没打桩的命令: ${command}`))
         }
-      }
-    }
+      },
+    },
   }
 })
 
@@ -212,7 +218,7 @@ function codebuddyLog(day: string, model: string, input: number, cache: number):
   return [
     `${day} 16:44:19.123 [CraftInvokableAgent] [${trace}] Preparing model: ${model} preview (${model})`,
     `${day} 16:44:20.456 [AgentReporter] [${trace}] onAgentStart: run requestId=${request}`,
-    `${day} 16:44:25.789 [BaseAgent:x] [${request}] notifyStepEnd, requestId: ${request}, usage: {"inputTokens":${input},"outputTokens":10,"cacheTokens":${cache},"thinkingTokens":5,"cachedWriteTokens":2}`
+    `${day} 16:44:25.789 [BaseAgent:x] [${request}] notifyStepEnd, requestId: ${request}, usage: {"inputTokens":${input},"outputTokens":10,"cacheTokens":${cache},"thinkingTokens":5,"cachedWriteTokens":2}`,
   ].join('\n')
 }
 
@@ -232,11 +238,11 @@ function addCodebuddyFile(name: string, text: string, mtimeMs = Date.now()): {
 function dshSession(
   model = 'deepseek-flash',
   usage: Record<string, number> = { inputTokens: 161, outputTokens: 892, cacheReadTokens: 29696 },
-  at = Date.now()
+  at = Date.now(),
 ): string {
   return [
     JSON.stringify({ type: 'request/header', seq: 15, time: at, data: { header: { config: { model } } } }),
-    JSON.stringify({ type: 'assistant/message', seq: 19, time: at, data: { turn: 1, step: 1, usage } })
+    JSON.stringify({ type: 'assistant/message', seq: 19, time: at, data: { turn: 1, step: 1, usage } }),
   ].join('\n')
 }
 
@@ -261,15 +267,15 @@ function workbuddySession(
     outputTokens: 280,
     totalTokens: 37055,
     inputTokensDetails: [{ cached_tokens: 3520 }],
-    outputTokensDetails: [{ reasoning_tokens: 243 }]
+    outputTokensDetails: [{ reasoning_tokens: 243 }],
   },
-  at = Date.now()
+  at = Date.now(),
 ): string {
   return JSON.stringify({
     id: 'cafebabe1234',
     timestamp: at,
     type: 'function_call',
-    providerData: { model, usage }
+    providerData: { model, usage },
   })
 }
 
@@ -305,9 +311,9 @@ function qoderSession(credits = 0.78379939, at = new Date().toISOString()): stri
         output_tokens: 0,
         credits,
         original_credits: credits,
-        billable: false
-      }
-    }
+        billable: false,
+      },
+    },
   })
 }
 
@@ -352,7 +358,7 @@ describe('多机合并', () => {
     localFile = {
       version: 3,
       updatedAt: 0,
-      sources: { zcode: { days: { [day]: { 'glm-5': { inputTokens: 10, requests: 1 } } } } }
+      sources: { zcode: { days: { [day]: { 'glm-5': { inputTokens: 10, requests: 1 } } } } },
     }
     // 仓库里先放着：自己上一轮推的旧副本 + 另一台机器推的
     remotes[REPO] = [shard('dev-local', 10, day), shard('dev-b', 5, day)]
@@ -365,7 +371,7 @@ describe('多机合并', () => {
 
     // 10(本机) + 5(另一端)；把仓库里自己那份也算进来就会变成 25
     expect(inputOn(result)).toBe(15)
-    expect(result.sync.devices.map((item) => item.id)).toEqual(['dev-b'])
+    expect(result.sync.devices.map(item => item.id)).toEqual(['dev-b'])
     expect(result.sync.enabled).toBe(true)
     expect(result.sync.error).toBe('')
   })
@@ -375,14 +381,14 @@ describe('多机合并', () => {
     localFile = {
       version: 3,
       updatedAt: 5,
-      sources: { zcode: { days: { [day]: { 'glm-5': { inputTokens: 10, requests: 1 } } } } }
+      sources: { zcode: { days: { [day]: { 'glm-5': { inputTokens: 10, requests: 1 } } } } },
     }
     rows = [{ day, model: 'glm-5', input: 10, cacheRead: 0, requests: 1 }]
 
     const token = await freshToken()
     await token.getTokenUsage({ repo: '' })
 
-    const saved = localFile as { version: number; device: string; name: string }
+    const saved = localFile as { version: number, device: string, name: string }
     expect(saved.version).toBe(7)
     expect(saved.device).toBe('dev-local')
     expect(saved.name).toBe('本机')
@@ -433,14 +439,14 @@ describe('多机合并', () => {
     localFile = {
       version: 3,
       updatedAt: 0,
-      sources: { zcode: { days: { [day]: { 'glm-5': { inputTokens: 10, requests: 1 } } } } }
+      sources: { zcode: { days: { [day]: { 'glm-5': { inputTokens: 10, requests: 1 } } } } },
     }
     rows = [{ day, model: 'glm-5', input: 10, cacheRead: 0, requests: 1 }]
 
     const token = await freshToken()
     await token.getTokenUsage({ repo: '' })
 
-    const saved = localFile as { version: number; device: string }
+    const saved = localFile as { version: number, device: string }
     expect(saved.version).toBe(7)
     expect(saved.device).toBe('dev-local')
   })
@@ -497,7 +503,7 @@ describe('首屏快照(只读本地)', () => {
     const token = await freshToken()
     const mine = await token.getTokenUsageSnapshot({ repo: REPO })
     expect(inputOn(mine)).toBe(15)
-    expect(mine.sync.devices.map((item) => item.id)).toEqual(['dev-b'])
+    expect(mine.sync.devices.map(item => item.id)).toEqual(['dev-b'])
 
     // 换了仓库：克隆还指着老仓库，Rust 侧核对 origin 会返回空表，那台机器必须消失
     const other = await token.getTokenUsageSnapshot({ repo: OTHER })
@@ -506,12 +512,12 @@ describe('首屏快照(只读本地)', () => {
   })
 })
 
-describe('CodeBuddy(扩展日志)', () => {
+describe('codeBuddy(扩展日志)', () => {
   /** 取某天的模型输入量（CodeBuddy 的 inputTokens 是「减去缓存读取」之后的） */
   function codebuddyOf(
     result: Awaited<ReturnType<typeof import('./token').getTokenUsage>>,
     model: string,
-    day = today()
+    day = today(),
   ): number {
     return result.data.sources.codebuddy?.days[day]?.[model]?.inputTokens ?? -1
   }
@@ -602,12 +608,12 @@ describe('CodeBuddy(扩展日志)', () => {
   })
 })
 
-describe('DSH(会话文件)', () => {
+describe('dSH(会话文件)', () => {
   /** 取某天的模型输入量 */
   function dshOf(
     result: Awaited<ReturnType<typeof import('./token').getTokenUsage>>,
     model: string,
-    day = today()
+    day = today(),
   ): number {
     return result.data.sources.dsh?.days[day]?.[model]?.inputTokens ?? -1
   }
@@ -664,7 +670,7 @@ describe('DSH(会话文件)', () => {
     const token = await freshToken()
     expect(dshOf(await token.getTokenUsage({ repo: '' }), 'deepseek-flash')).toBe(107)
 
-    dsh = { found: true, sessions: dsh.sessions.filter((item) => item.path !== second.path) }
+    dsh = { found: true, sessions: dsh.sessions.filter(item => item.path !== second.path) }
     delete dshFrames[second.path]
 
     // 快照是「取最大值、永不缩水」的，所以本机快照里的 107 会一直在（那是刻意的：
@@ -686,12 +692,12 @@ describe('DSH(会话文件)', () => {
   })
 })
 
-describe('WorkBuddy(会话正文)', () => {
+describe('workBuddy(会话正文)', () => {
   /** 取某天的模型输入量（WorkBuddy 的 inputTokens 是「减去缓存读取」之后的） */
   function workbuddyOf(
     result: Awaited<ReturnType<typeof import('./token').getTokenUsage>>,
     model: string,
-    day = today()
+    day = today(),
   ): number {
     return result.data.sources.workbuddy?.days[day]?.[model]?.inputTokens ?? -1
   }
@@ -704,7 +710,7 @@ describe('WorkBuddy(会话正文)', () => {
 
     // 36775 里含 3520 的缓存读取，落盘时只记未命中的那部分（与 ZCode 同一口径）
     expect(workbuddyOf(result, 'hy3')).toBe(36775 - 3520)
-    const counters = result.data.sources.workbuddy.days[today()]['hy3']
+    const counters = result.data.sources.workbuddy.days[today()].hy3
     expect(counters.cacheReadTokens).toBe(3520)
     expect(counters.outputTokens).toBe(280)
     expect(counters.reasoningTokens).toBe(243)
@@ -756,14 +762,14 @@ describe('WorkBuddy(会话正文)', () => {
   })
 })
 
-describe('Qoder(会话正文里的额度)', () => {
+describe('qoder(会话正文里的额度)', () => {
   it('额度算进 qoder 这个来源，token 几项照上游的 0 落着', async () => {
     addQoderSession('F--projects-workbench/c5ef1c9b.jsonl', qoderSession(0.78379939))
 
     const token = await freshToken()
     const result = await token.getTokenUsage({ repo: '' })
 
-    const counters = result.data.sources.qoder.days[today()]['qfmodel']
+    const counters = result.data.sources.qoder.days[today()].qfmodel
     expect(counters.credits).toBeCloseTo(0.78379939, 9)
     expect(counters.requests).toBe(1)
     // 不能顺手把额度折算成 token：真这么干，tokens 口径下就多了一份编出来的数
@@ -790,7 +796,7 @@ describe('Qoder(会话正文里的额度)', () => {
     // 落盘的这份分片要原样带小数：快照与同步分片都是它，
     // 一旦在这一层取整，界面上一天的额度就会变成 0（sanitize 那边同理）
     const saved = localFile as { sources: Record<string, { days: TokenDays }> }
-    expect(saved.sources.qoder.days[today()]['qfmodel'].credits).toBeCloseTo(0.078367718, 9)
+    expect(saved.sources.qoder.days[today()].qfmodel.credits).toBeCloseTo(0.078367718, 9)
   })
 
   it('单个会话读不了不影响其余会话', async () => {
@@ -801,7 +807,7 @@ describe('Qoder(会话正文里的额度)', () => {
     const token = await freshToken()
     const result = await token.getTokenUsage({ repo: '' })
 
-    expect(result.data.sources.qoder.days[today()]['qfmodel'].credits).toBe(2)
+    expect(result.data.sources.qoder.days[today()].qfmodel.credits).toBe(2)
     expect(result.sourceErrors.qoder).toBeUndefined()
   })
 })
@@ -842,7 +848,7 @@ describe('换同步仓库', () => {
 
     const token = await freshToken()
     const before = await token.getTokenUsage({ repo: REPO })
-    expect(before.sync.devices.map((item) => item.id)).toEqual(['dev-old-repo'])
+    expect(before.sync.devices.map(item => item.id)).toEqual(['dev-old-repo'])
     expect(inputOn(before)).toBe(1009)
 
     const after = await token.getTokenUsage({ repo: OTHER })
@@ -899,7 +905,8 @@ describe('同步节流', () => {
       await token.getTokenUsage({ repo })
       await flushBackgroundSync()
       expect(published).toHaveLength(2)
-    } finally {
+    }
+    finally {
       vi.useRealTimers()
     }
   })
@@ -1041,9 +1048,9 @@ describe('用量与外观是两个独立的出口', () => {
 
       // 拖一下布局（改栏宽）：真的变了，时间戳记的是**变化**那一刻，不是推送那一刻
       state.updateThemeConfig({
-        columns: DEFAULT_THEME.columns.map((column) =>
-          column.id === 'col-1' ? { ...column, width: 320 } : column
-        )
+        columns: DEFAULT_THEME.columns.map(column =>
+          column.id === 'col-1' ? { ...column, width: 320 } : column,
+        ),
       })
       const layoutChangedAt = Date.now()
       vi.setSystemTime(new Date(2026, 8, 14, 12, 0, 0))
@@ -1059,7 +1066,8 @@ describe('用量与外观是两个独立的出口', () => {
       const appearance = themeIn(3)?.appearance as { accentColor?: string } | undefined
       expect(appearance?.accentColor).toBe('#ef4444')
       expect(themeIn(3)?.updatedAt).toBe(colorChangedAt)
-    } finally {
+    }
+    finally {
       vi.useRealTimers()
     }
   })
@@ -1078,7 +1086,7 @@ describe('用量与外观是两个独立的出口', () => {
     remotes[REPO] = [
       shard('dev-local', 10, day),
       { ...shard('dev-older', 20, day), name: '办公室', updatedAt: 100 },
-      { ...shard('dev-newer', 30, day), name: '笔记本', updatedAt: 200 }
+      { ...shard('dev-newer', 30, day), name: '笔记本', updatedAt: 200 },
     ]
     // 只有「办公室」点过外观那次的「同步一次」（其余机器只同步用量），而且它那份配置比分片新
     remoteConfigs[REPO] = [
@@ -1090,9 +1098,9 @@ describe('用量与外观是两个独立的出口', () => {
           version: THEME_VERSION,
           cards: {},
           appearance: { accentColor: '#ef4444' },
-          updatedAt: 300
-        }
-      }
+          updatedAt: 300,
+        },
+      },
     ]
 
     const token = await freshToken()
@@ -1102,7 +1110,7 @@ describe('用量与外观是两个独立的出口', () => {
     const devices = await token.listSyncDevices(REPO)
 
     // 时间取两份里较新的那个：办公室的配置（300）比它的分片（100）新，所以它排到了最前面
-    expect(devices.map((item) => item.id)).toEqual(['dev-older', 'dev-newer', 'dev-local'])
+    expect(devices.map(item => item.id)).toEqual(['dev-older', 'dev-newer', 'dev-local'])
     expect(devices[0].updatedAt).toBe(300)
     expect(devices[0].name).toBe('办公室')
     expect(devices[0].theme?.appearance.accentColor).toBe('#ef4444')
@@ -1111,7 +1119,7 @@ describe('用量与外观是两个独立的出口', () => {
     // 本机也列出来（标了 self，界面上不可「应用」），它那份配置照常收敛后带出来
     expect(devices[2].self).toBe(true)
     expect(devices[2].name).toBe('本机')
-    expect(devices.slice(0, 2).every((item) => !item.self)).toBe(true)
+    expect(devices.slice(0, 2).every(item => !item.self)).toBe(true)
   })
 
   it('没填仓库地址时一台设备都不列', async () => {

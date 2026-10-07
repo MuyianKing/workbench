@@ -1,3 +1,6 @@
+import type { WeatherGeo, WeatherView } from '@workbench/weather'
+import { WEATHER_REFRESH_MS } from '@workbench/weather'
+import { defineStore } from 'pinia'
 /**
  * 实时天气（顶栏问候语旁那一小段）的状态。
  *
@@ -10,8 +13,6 @@
  * 它只是一个中间量，丢了就再查一次。
  */
 import { ref, watch } from 'vue'
-import { defineStore } from 'pinia'
-import { WEATHER_REFRESH_MS, type WeatherGeo, type WeatherView } from '@workbench/weather'
 import { fetchWeather, geocodeCity } from '@/workbench/weather'
 import { useSettingsStore } from './settings'
 
@@ -32,7 +33,8 @@ export const useWeatherStore = defineStore('weather', () => {
       geo = null
       return
     }
-    if (inFlight) return
+    if (inFlight)
+      return
     inFlight = true
     try {
       if (!geo) {
@@ -44,9 +46,11 @@ export const useWeatherStore = defineStore('weather', () => {
         geo = located.data
       }
       const result = await fetchWeather(geo)
-      if (result.ok && result.data) view.value = result.data
+      if (result.ok && result.data)
+        view.value = result.data
       else console.warn('[workbench]', result.error)
-    } finally {
+    }
+    finally {
       inFlight = false
     }
   }
@@ -57,13 +61,14 @@ export const useWeatherStore = defineStore('weather', () => {
     () => {
       geo = null
       void refresh()
-    }
+    },
   )
 
   /** 启动取一次，之后按间隔续。重复调用只起一个定时器（App.vue 的 onMounted 只该走一次，这里兜住） */
   let started = false
   function start(): void {
-    if (started) return
+    if (started)
+      return
     started = true
     void refresh()
     window.setInterval(() => void refresh(), WEATHER_REFRESH_MS)

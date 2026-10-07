@@ -1,4 +1,8 @@
 <script setup lang="ts">
+import type { ViewId } from '@workbench/appearance'
+import type { Component } from 'vue'
+import { Brush, ChatDotRound, Collection, Document, FolderOpened, Grid, Key, MagicStick, Message, Notebook, VideoPlay } from '@element-plus/icons-vue'
+import { orderedViews } from '@workbench/appearance'
 /**
  * 左侧导航栏：应用的一级页面都挂在这里。
  *
@@ -10,9 +14,6 @@
  * 拖窗口是标题栏的事（在面板上按空白处也不会拖窗口，两边保持一致）。
  */
 import { computed } from 'vue'
-import type { Component } from 'vue'
-import { Notebook, FolderOpened, Grid, Document, MagicStick, Collection, ChatDotRound, Key, Message, Brush, VideoPlay } from '@element-plus/icons-vue'
-import { orderedViews, type ViewId } from '@workbench/appearance'
 import { useNavStore } from '@/stores/nav'
 import { useSettingsStore } from '@/stores/settings'
 
@@ -31,7 +32,7 @@ const ICONS: Record<ViewId, Component> = {
   vault: Key,
   mail: Message,
   styles: Brush,
-  video: VideoPlay
+  video: VideoPlay,
 }
 
 const active = computed(() => store.activeView)
@@ -41,7 +42,7 @@ const active = computed(() => store.activeView)
  * 顺序是用户在设置里拖出来的，见 shared/views.ts 的 orderedViews）。
  */
 const items = computed(() =>
-  orderedViews(settings.settings.hiddenViews, settings.settings.viewOrder)
+  orderedViews(settings.settings.hiddenViews, settings.settings.viewOrder),
 )
 
 function select(id: ViewId): void {
@@ -64,7 +65,9 @@ function select(id: ViewId): void {
       :aria-current="active === id ? 'page' : undefined"
       @click="select(id)"
     >
-      <el-icon class="nav__icon"><component :is="ICONS[id]" /></el-icon>
+      <el-icon class="nav__icon">
+        <component :is="ICONS[id]" />
+      </el-icon>
       <span class="nav__label">{{ settings.viewLabelOf(id) }}</span>
     </button>
   </nav>

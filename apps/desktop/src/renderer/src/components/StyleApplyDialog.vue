@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { DesignStyle } from '@workbench/appearance'
+import { DESIGN_FILE_NAME, designMarkdown, designPrompt } from '@workbench/appearance'
 /**
  * 应用到项目的弹层：把一套设计规范写进选中的项目，顺带把给 AI 的提示词放进剪贴板。
  *
@@ -10,16 +12,14 @@
  * 用户点的是「应用这份规范」，覆盖自己上一版是预期内的动作。
  */
 import { computed, ref, watch } from 'vue'
-import type { DesignStyle } from '@workbench/appearance'
-import { DESIGN_FILE_NAME, designMarkdown, designPrompt } from '@workbench/appearance'
 import AppDialog from '@/components/AppDialog.vue'
 import { notifyError, notifySuccess, notifyWarning } from '@/notify'
 import { useProjectsStore } from '@/stores/projects'
 
+const props = defineProps<{ design: DesignStyle | null }>()
+
 /** 弹层开关:v-model 一条口径(与 AppDialog / el-dialog 相同,全应用的弹层都这么开) */
 const open = defineModel<boolean>({ required: true })
-
-const props = defineProps<{ design: DesignStyle | null }>()
 
 const projects = useProjectsStore()
 
@@ -30,11 +30,11 @@ const visible = computed({
   get: () => open.value,
   set: (value) => {
     open.value = value
-  }
+  },
 })
 
 const selected = computed(
-  () => projects.projects.find((project) => project.id === selectedId.value) ?? null
+  () => projects.projects.find(project => project.id === selectedId.value) ?? null,
 )
 
 watch(open, (value) => {
@@ -47,7 +47,8 @@ watch(open, (value) => {
 async function submit(): Promise<void> {
   const project = selected.value
   const design = props.design
-  if (!project || !design || applying.value) return
+  if (!project || !design || applying.value)
+    return
 
   applying.value = true
   const written = await window.workbench.writeDesign(project.path, designMarkdown(design))
@@ -60,13 +61,14 @@ async function submit(): Promise<void> {
   let copied = true
   try {
     await navigator.clipboard.writeText(designPrompt(design))
-  } catch {
+  }
+  catch {
     copied = false
   }
 
   const verb = written.data?.existed ? '已覆盖' : '已写入'
   notifySuccess(
-    `${verb}「${project.name}」的 ${DESIGN_FILE_NAME}${copied ? '，提示词已复制到剪贴板' : ''}`
+    `${verb}「${project.name}」的 ${DESIGN_FILE_NAME}${copied ? '，提示词已复制到剪贴板' : ''}`,
   )
   if (!copied) {
     notifyWarning('提示词没能写进剪贴板，可以在规格档里手动复制')
@@ -106,12 +108,16 @@ async function submit(): Promise<void> {
         <template v-if="selected">
           写到 <code class="mono">{{ selected.path }}\{{ DESIGN_FILE_NAME }}</code>
         </template>
-        <template v-else>选一个项目。规范按这套设计的 token 现生成，不联网。</template>
+        <template v-else>
+          选一个项目。规范按这套设计的 token 现生成，不联网。
+        </template>
       </p>
     </template>
 
     <template #footer>
-      <el-button @click="visible = false">取消</el-button>
+      <el-button @click="visible = false">
+        取消
+      </el-button>
       <el-button type="primary" :loading="applying" :disabled="!selectedId" @click="submit">
         写入并复制提示词
       </el-button>

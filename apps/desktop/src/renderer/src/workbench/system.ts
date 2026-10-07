@@ -1,3 +1,4 @@
+import type { InstallableGlobalTool, InstallablePackageManager, PackageManagerStatus, Result } from '@/types'
 /**
  * 系统能力里「探测」这一部分：包管理器、Node 版本。
  *
@@ -6,14 +7,8 @@
  * 这里只负责并发探测与结果拼装。
  */
 import { fail, ok } from '@workbench/core'
-import type {
-  InstallableGlobalTool,
-  InstallablePackageManager,
-  PackageManagerStatus,
-  Result
-} from '@/types'
 import { invoke } from './bridge'
-import { PM_SESSION_PREFIX, abortDetached, runDetached } from './session'
+import { abortDetached, PM_SESSION_PREFIX, runDetached } from './session'
 
 /** 安装包管理器最多等 5 分钟：registry 慢的时候一分钟上下是常态，但也不能无限挂着 */
 const PM_INSTALL_TIMEOUT_MS = 5 * 60 * 1000
@@ -22,7 +17,8 @@ const PM_INSTALL_TIMEOUT_MS = 5 * 60 * 1000
 async function probeVersion(bin: string): Promise<string | null> {
   try {
     return await invoke<string | null>('probe_version', { bin })
-  } catch (error) {
+  }
+  catch (error) {
     // 不能静默吞掉：这个 catch 曾经把「通道根本到不了 Rust」伪装成「这四个都没装」，
     // 排查时多花了好几轮才看出区别
     console.warn(`[workbench] 探测 ${bin} 失败`, error)
@@ -35,13 +31,13 @@ export async function checkPackageManagers(): Promise<PackageManagerStatus> {
     probeVersion('npm'),
     probeVersion('yarn'),
     probeVersion('pnpm'),
-    probeVersion('node')
+    probeVersion('node'),
   ])
   return {
     npm: npm !== null,
     yarn: yarn !== null,
     pnpm: pnpm !== null,
-    node: node ?? ''
+    node: node ?? '',
   }
 }
 
@@ -65,11 +61,13 @@ export async function installGlobalTool(tool: InstallableGlobalTool): Promise<Re
     await Promise.race([
       runDetached(sessionId, `npm install -g ${tool}`, (text) => {
         const trimmed = text.trim()
-        if (trimmed) lastOutput = trimmed
+        if (trimmed)
+          lastOutput = trimmed
       }),
-      timeout
+      timeout,
     ])
-  } catch (error) {
+  }
+  catch (error) {
     // 超时或被中断：把还挂着的安装进程按树收掉，别留在后台
     void abortDetached(sessionId)
     return fail(error instanceof Error ? error.message : '安装失败')
@@ -83,13 +81,15 @@ export async function installGlobalTool(tool: InstallableGlobalTool): Promise<Re
  * npm 有时装了包仍返回非 0，所以不看退出码，以重新探测为准。
  */
 export async function installPackageManager(
-  pm: InstallablePackageManager
+  pm: InstallablePackageManager,
 ): Promise<Result<PackageManagerStatus>> {
   const install = await installGlobalTool(pm)
-  if (!install.ok) return fail(install.error ?? '安装失败')
+  if (!install.ok)
+    return fail(install.error ?? '安装失败')
 
   const status = await checkPackageManagers()
-  if (status[pm]) return ok(status)
+  if (status[pm])
+    return ok(status)
 
   return fail(install.data || '安装失败，请查看终端输出')
 }

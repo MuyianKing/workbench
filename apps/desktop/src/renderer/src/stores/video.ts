@@ -1,3 +1,6 @@
+import type { VideoNode, VideoSource } from '@workbench/video'
+import { countVideos, findVideoNode, pushVideoHistory, removeFromVideoHistory, sanitizeVideoRoot, videoChain, videoRootName } from '@workbench/video'
+import { defineStore } from 'pinia'
 /**
  * 视频：一个**用户自己挑的文件夹**，以及它里面的目录树与正在播放的那一个。
  *
@@ -17,18 +20,6 @@
  * 页面被 KeepAlive 包着，切走再回来播放还在原地，不需要一份全局状态。
  */
 import { computed, ref, watch } from 'vue'
-import { defineStore } from 'pinia'
-import {
-  countVideos,
-  findVideoNode,
-  pushVideoHistory,
-  removeFromVideoHistory,
-  sanitizeVideoRoot,
-  videoChain,
-  videoRootName,
-  type VideoNode,
-  type VideoSource
-} from '@workbench/video'
 import { useSettingsStore } from '@/stores/settings'
 
 export const useVideoStore = defineStore('video', () => {
@@ -79,7 +70,7 @@ export const useVideoStore = defineStore('video', () => {
   const videoCount = computed(() => countVideos(nodes.value))
   /** 选中项从最外层到自身的链；界面拿它写「它在哪一层」 */
   const activeChain = computed(() =>
-    activeRel.value ? videoChain(nodes.value, activeRel.value) : []
+    activeRel.value ? videoChain(nodes.value, activeRel.value) : [],
   )
 
   function reset(): void {
@@ -110,7 +101,8 @@ export const useVideoStore = defineStore('video', () => {
     loadError.value = ''
 
     const result = await window.workbench.listVideos(current)
-    if (job !== scanJob) return
+    if (job !== scanJob)
+      return
     loading.value = false
 
     if (!result.ok || !result.data) {
@@ -135,7 +127,8 @@ export const useVideoStore = defineStore('video', () => {
    */
   async function init(): Promise<void> {
     started = true
-    if (ready) return
+    if (ready)
+      return
     if (!pending) {
       pending = reload().finally(() => {
         pending = null
@@ -144,7 +137,8 @@ export const useVideoStore = defineStore('video', () => {
     await pending
 
     // 首次进页面且扫成功了：把「上次打开的那个」接上（首次扫描失败时不清记录，下次进来还能接）
-    if (ready) void restoreLast()
+    if (ready)
+      void restoreLast()
   }
 
   /**
@@ -153,10 +147,12 @@ export const useVideoStore = defineStore('video', () => {
    * 它所在的那几层文件夹一起撑开，否则视频在播、树里却找不到它高亮在哪。
    */
   async function restoreLast(): Promise<void> {
-    if (active.value) return
+    if (active.value)
+      return
 
     const rel = settings.settings.videoLastRel
-    if (!rel) return
+    if (!rel)
+      return
 
     const node = findVideoNode(nodes.value, rel)
     if (!node || node.kind !== 'video') {
@@ -166,10 +162,10 @@ export const useVideoStore = defineStore('video', () => {
 
     const folders = videoChain(nodes.value, rel)
       .slice(0, -1)
-      .map((item) => item.id)
+      .map(item => item.id)
     if (folders.length) {
       await settings.updateSettings({
-        videoTreeExpanded: [...new Set([...settings.settings.videoTreeExpanded, ...folders])]
+        videoTreeExpanded: [...new Set([...settings.settings.videoTreeExpanded, ...folders])],
       })
     }
 
@@ -187,7 +183,8 @@ export const useVideoStore = defineStore('video', () => {
    */
   async function setRoot(dir: string): Promise<boolean> {
     const target = sanitizeVideoRoot(dir)
-    if (!target) return false
+    if (!target)
+      return false
 
     return settings.updateSettings({
       videoDir: target,
@@ -195,7 +192,7 @@ export const useVideoStore = defineStore('video', () => {
       // 展开态与「上次打开的文件」都只对上一个目录成立：存的是相对路径，
       // 换到另一个目录就指向完全不同的东西了。一起清掉，新目录从收起状态开始
       videoTreeExpanded: [],
-      videoLastRel: ''
+      videoLastRel: '',
     })
   }
 
@@ -207,14 +204,15 @@ export const useVideoStore = defineStore('video', () => {
    */
   async function forgetRoot(dir: string): Promise<boolean> {
     return settings.updateSettings({
-      videoDirs: removeFromVideoHistory(settings.settings.videoDirs, dir)
+      videoDirs: removeFromVideoHistory(settings.settings.videoDirs, dir),
     })
   }
 
   // 设置里的视频文件夹一改就重新扫（首次选的目录、换一个目录、清空都走这里）；
   // 选中的与正播的都收起来 —— 它们的相对路径与授权都属于上一个目录，留着只会让人困惑
   watch(root, () => {
-    if (!started) return
+    if (!started)
+      return
     ready = false
     activeRel.value = ''
     closeVideo()
@@ -232,7 +230,8 @@ export const useVideoStore = defineStore('video', () => {
     activeRel.value = rel
     openError.value = ''
 
-    if (!node || node.kind === 'folder') return
+    if (!node || node.kind === 'folder')
+      return
     void open(node)
   }
 
@@ -240,7 +239,8 @@ export const useVideoStore = defineStore('video', () => {
   async function open(node: VideoNode, autoplay = true): Promise<void> {
     const job = (openJob += 1)
     const result = await window.workbench.loadVideo(root.value, node.rel)
-    if (job !== openJob) return
+    if (job !== openJob)
+      return
 
     if (!result.ok || !result.data) {
       active.value = null
@@ -281,6 +281,6 @@ export const useVideoStore = defineStore('video', () => {
     setRoot,
     forgetRoot,
     select,
-    closeVideo
+    closeVideo,
   }
 })

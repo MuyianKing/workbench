@@ -37,22 +37,24 @@ export function useFloatingPosition(options: FloatingPositionOptions) {
   /** 贴指针摆好，并把整块夹进窗口 */
   function place(): void {
     const element = options.panel()
-    if (!element) return
+    if (!element)
+      return
     const { width, height } = element.getBoundingClientRect()
     pos.value = {
       left: Math.max(
         FLOATING_EDGE,
-        Math.min(options.x(), window.innerWidth - width - FLOATING_EDGE)
+        Math.min(options.x(), window.innerWidth - width - FLOATING_EDGE),
       ),
       top: Math.max(
         FLOATING_EDGE,
-        Math.min(options.y(), window.innerHeight - height - FLOATING_EDGE)
-      )
+        Math.min(options.y(), window.innerHeight - height - FLOATING_EDGE),
+      ),
     }
     options.onPlaced?.()
   }
 
-  if (options.follow) watch(() => [options.x(), options.y()], place)
+  if (options.follow)
+    watch(() => [options.x(), options.y()], place)
 
   return { pos, place }
 }

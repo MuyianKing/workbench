@@ -18,7 +18,8 @@ export const BACKGROUND_OPACITY_DEFAULT = 35
 
 /** 收敛到合法区间；不是有限数字（缺失 / null / 字符串 / NaN）一律回到默认值 */
 export function clampBackgroundOpacity(value: unknown): number {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return BACKGROUND_OPACITY_DEFAULT
+  if (typeof value !== 'number' || !Number.isFinite(value))
+    return BACKGROUND_OPACITY_DEFAULT
   return Math.min(BACKGROUND_OPACITY_MAX, Math.max(BACKGROUND_OPACITY_MIN, Math.round(value)))
 }
 
@@ -52,7 +53,8 @@ export function sanitizeVeilColor(value: unknown): string {
 /** #rrggbb → "r, g, b"，直接喂给 CSS 的 rgba(var(--ws-veil-rgb), alpha)；没配则返回空串 */
 export function veilRgbTriplet(color: unknown): string {
   const hex = sanitizeVeilColor(color)
-  if (!hex) return ''
+  if (!hex)
+    return ''
 
   const value = Number.parseInt(hex.slice(1), 16)
   return `${(value >> 16) & 255}, ${(value >> 8) & 255}, ${value & 255}`

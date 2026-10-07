@@ -1,3 +1,6 @@
+import type { SkillCommit, SkillCompareFile, SkillCreateInput, SkillEntry, SkillFileCopy, SkillFileInfo, SkillInstalledScan, SkillLibraryState, SkillSyncSummary } from '@workbench/skills'
+import type { Result } from '@/types'
+import { fail, ok } from '@workbench/core'
 /**
  * 技能的适配层：把「文件动作 + 版本提交」编排成一条条通道。
  *
@@ -13,29 +16,7 @@
  *      Rust 只回 SKILL.md 原文，那是数据；「它的名字是什么」是语义，留在这边。
  */
 import { noteNameProblem, sanitizeNoteName } from '@workbench/notes'
-import {
-  SKILL_FILE,
-  SKILL_VERSION_DEFAULT,
-  mergeVersionCopies,
-  sanitizeSkillSyncDir,
-  skillFileRel,
-  skillMdTemplate,
-  skillRel,
-  skillVersionOf,
-  skillVersionProblem,
-  toSkillEntry,
-  type SkillCommit,
-  type SkillCompareFile,
-  type SkillCreateInput,
-  type SkillEntry,
-  type SkillFileCopy,
-  type SkillFileInfo,
-  type SkillInstalledScan,
-  type SkillLibraryState,
-  type SkillSyncSummary
-} from '@workbench/skills'
-import { fail, ok } from '@workbench/core'
-import type { Result } from '@/types'
+import { mergeVersionCopies, sanitizeSkillSyncDir, SKILL_FILE, SKILL_VERSION_DEFAULT, skillFileRel, skillMdTemplate, skillRel, skillVersionOf, skillVersionProblem, toSkillEntry } from '@workbench/skills'
 import { guard, invoke } from './bridge'
 
 /**
@@ -52,7 +33,8 @@ function dirArg(dir: string): string {
 function idArg(id: string): Result<string> {
   const cleaned = sanitizeNoteName(id)
   const problem = noteNameProblem(cleaned)
-  if (problem) return fail(problem)
+  if (problem)
+    return fail(problem)
   return ok(cleaned)
 }
 
@@ -60,24 +42,26 @@ function idArg(id: string): Result<string> {
 async function commitSkill(root: string, dir: string, message: string): Promise<void> {
   const result = await guard(
     invoke<unknown>('skill_commit', { root: root.trim(), dir: dirArg(dir), message }),
-    '提交技能版本失败'
+    '提交技能版本失败',
   )
-  if (!result.ok) console.warn('[workbench] 技能版本提交失败:', result.error)
+  if (!result.ok)
+    console.warn('[workbench] 技能版本提交失败:', result.error)
 }
 
 /** 列出技能库：Rust 回原文，名字与描述在这里解析成摘要 */
 export async function listSkills(root: string, dir: string): Promise<Result<SkillEntry[]>> {
   const result = await guard(
-    invoke<Array<{ id?: unknown; fileCount?: unknown; skillMd?: unknown }>>('skill_list', {
+    invoke<Array<{ id?: unknown, fileCount?: unknown, skillMd?: unknown }>>('skill_list', {
       root: root.trim(),
-      dir: dirArg(dir)
+      dir: dirArg(dir),
     }),
-    '读取技能失败'
+    '读取技能失败',
   )
-  if (!result.ok || !result.data) return fail(result.error ?? '读取技能失败')
+  if (!result.ok || !result.data)
+    return fail(result.error ?? '读取技能失败')
 
   const entries = (Array.isArray(result.data) ? result.data : [])
-    .map((raw) => toSkillEntry(raw))
+    .map(raw => toSkillEntry(raw))
     .filter((entry): entry is SkillEntry => entry !== null)
   return ok(entries)
 }
@@ -90,19 +74,21 @@ export async function listSkills(root: string, dir: string): Promise<Result<Skil
  */
 export async function skillState(dir: string): Promise<Result<SkillLibraryState>> {
   const target = dir.trim()
-  if (!target) return fail('还没有选择技能库目录')
+  if (!target)
+    return fail('还没有选择技能库目录')
 
   const result = await guard(
     invoke<Partial<SkillLibraryState>>('skill_state', { dir: target }),
-    '读取技能库失败'
+    '读取技能库失败',
   )
-  if (!result.ok || !result.data) return fail(result.error ?? '读取技能库失败')
+  if (!result.ok || !result.data)
+    return fail(result.error ?? '读取技能库失败')
 
   return ok({
     repo: typeof result.data.repo === 'string' ? result.data.repo : '',
     libraryRel: sanitizeSkillSyncDir(result.data.libraryRel ?? ''),
     hasGit: result.data.hasGit === true,
-    origin: typeof result.data.origin === 'string' ? result.data.origin : ''
+    origin: typeof result.data.origin === 'string' ? result.data.origin : '',
   })
 }
 
@@ -115,13 +101,15 @@ export async function skillState(dir: string): Promise<Result<SkillLibraryState>
  */
 export async function skillSync(root: string, dir: string): Promise<Result<SkillSyncSummary>> {
   const current = root.trim()
-  if (!current) return fail('技能库还不在 git 仓库里')
+  if (!current)
+    return fail('技能库还不在 git 仓库里')
 
   const result = await guard(
     invoke<Partial<SkillSyncSummary>>('skill_sync', { root: current, dir: dirArg(dir) }),
-    '同步技能失败'
+    '同步技能失败',
   )
-  if (!result.ok || !result.data) return fail(result.error ?? '同步技能失败')
+  if (!result.ok || !result.data)
+    return fail(result.error ?? '同步技能失败')
 
   return ok({
     branch: typeof result.data.branch === 'string' ? result.data.branch : '',
@@ -130,7 +118,7 @@ export async function skillSync(root: string, dir: string): Promise<Result<Skill
         ? result.data.files
         : 0,
     received: result.data.received === true,
-    log: typeof result.data.log === 'string' ? result.data.log : ''
+    log: typeof result.data.log === 'string' ? result.data.log : '',
   })
 }
 
@@ -138,31 +126,34 @@ export async function skillSync(root: string, dir: string): Promise<Result<Skill
 export async function createSkill(
   root: string,
   dir: string,
-  input: SkillCreateInput
+  input: SkillCreateInput,
 ): Promise<Result<null>> {
   const id = idArg(input.id)
-  if (!id.ok || !id.data) return fail(id.error ?? '技能名不合法')
+  if (!id.ok || !id.data)
+    return fail(id.error ?? '技能名不合法')
 
   const base = dirArg(dir)
   const created = await guard(
     invoke<null>('note_create', {
       root: root.trim(),
       rel: skillRel(base, id.data),
-      isDir: true
+      isDir: true,
     }),
-    '新建技能失败'
+    '新建技能失败',
   )
-  if (!created.ok) return fail(created.error ?? '新建技能失败')
+  if (!created.ok)
+    return fail(created.error ?? '新建技能失败')
 
   const written = await guard(
     invoke<null>('note_write', {
       root: root.trim(),
       rel: skillFileRel(base, id.data),
-      content: skillMdTemplate(sanitizeNoteName(input.name) || id.data, input.description ?? '')
+      content: skillMdTemplate(sanitizeNoteName(input.name) || id.data, input.description ?? ''),
     }),
-    '写入 SKILL.md 失败'
+    '写入 SKILL.md 失败',
   )
-  if (!written.ok) return fail(written.error ?? '写入 SKILL.md 失败')
+  if (!written.ok)
+    return fail(written.error ?? '写入 SKILL.md 失败')
 
   await commitSkill(root, base, `skill: ${id.data} 新建 ${SKILL_VERSION_DEFAULT}`)
   return ok(null)
@@ -189,20 +180,24 @@ export async function saveSkillFile(
   dir: string,
   id: string,
   rel: string,
-  content: string
+  content: string,
 ): Promise<Result<null>> {
   const cleaned = idArg(id)
-  if (!cleaned.ok || !cleaned.data) return fail(cleaned.error ?? '技能名不合法')
+  if (!cleaned.ok || !cleaned.data)
+    return fail(cleaned.error ?? '技能名不合法')
 
   const isMainFile = rel.trim() === SKILL_FILE
   let message: string
   if (isMainFile) {
     const versionProblem = skillVersionProblem(content)
-    if (versionProblem) return fail(versionProblem)
+    if (versionProblem)
+      return fail(versionProblem)
     message = `skill: ${cleaned.data} 保存 ${skillVersionOf(content)}`
-  } else {
+  }
+  else {
     const relProblem = noteNameProblem(rel.trim().split('/').pop() ?? '')
-    if (relProblem) return fail(relProblem)
+    if (relProblem)
+      return fail(relProblem)
     message = `skill: ${cleaned.data} 保存 ${rel.trim()}`
   }
 
@@ -210,11 +205,12 @@ export async function saveSkillFile(
     invoke<null>('note_write', {
       root: root.trim(),
       rel: fileRel(dir, cleaned.data, rel),
-      content
+      content,
     }),
-    '保存技能失败'
+    '保存技能失败',
   )
-  if (!written.ok) return fail(written.error ?? '保存技能失败')
+  if (!written.ok)
+    return fail(written.error ?? '保存技能失败')
 
   await commitSkill(root, dir, message)
   return ok(null)
@@ -225,11 +221,11 @@ export async function readSkillFile(
   root: string,
   dir: string,
   id: string,
-  rel: string
+  rel: string,
 ): Promise<Result<string>> {
   return guard(
     invoke<string>('note_read', { root: root.trim(), rel: fileRel(dir, id.trim(), rel) }),
-    '读取文件失败'
+    '读取文件失败',
   )
 }
 
@@ -237,25 +233,27 @@ export async function readSkillFile(
 export async function listSkillFiles(
   root: string,
   dir: string,
-  id: string
+  id: string,
 ): Promise<Result<SkillFileInfo[]>> {
   const result = await guard(
-    invoke<Array<{ rel?: unknown; size?: unknown }>>('skill_files', {
+    invoke<Array<{ rel?: unknown, size?: unknown }>>('skill_files', {
       root: root.trim(),
       dir: dirArg(dir),
-      id: id.trim()
+      id: id.trim(),
     }),
-    '读取技能文件清单失败'
+    '读取技能文件清单失败',
   )
-  if (!result.ok || !result.data) return fail(result.error ?? '读取技能文件清单失败')
+  if (!result.ok || !result.data)
+    return fail(result.error ?? '读取技能文件清单失败')
 
   const files: SkillFileInfo[] = []
   for (const item of Array.isArray(result.data) ? result.data : []) {
     const rel = typeof item?.rel === 'string' ? item.rel.trim() : ''
-    if (!rel) continue
+    if (!rel)
+      continue
     files.push({
       rel,
-      size: typeof item?.size === 'number' && Number.isFinite(item.size) ? item.size : 0
+      size: typeof item?.size === 'number' && Number.isFinite(item.size) ? item.size : 0,
     })
   }
   return ok(files)
@@ -264,13 +262,15 @@ export async function listSkillFiles(
 /** 删除技能（整棵目录），并把这次删除提交进历史 */
 export async function removeSkill(root: string, dir: string, id: string): Promise<Result<null>> {
   const cleaned = idArg(id)
-  if (!cleaned.ok || !cleaned.data) return fail(cleaned.error ?? '技能名不合法')
+  if (!cleaned.ok || !cleaned.data)
+    return fail(cleaned.error ?? '技能名不合法')
 
   const removed = await guard(
     invoke<null>('note_delete', { root: root.trim(), rel: skillRel(dirArg(dir), cleaned.data) }),
-    '删除技能失败'
+    '删除技能失败',
   )
-  if (!removed.ok) return fail(removed.error ?? '删除技能失败')
+  if (!removed.ok)
+    return fail(removed.error ?? '删除技能失败')
 
   await commitSkill(root, dir, `skill: ${cleaned.data} 删除`)
   return ok(null)
@@ -281,21 +281,23 @@ export async function importSkill(
   root: string,
   dir: string,
   source: string,
-  id: string
+  id: string,
 ): Promise<Result<null>> {
   const cleaned = idArg(id)
-  if (!cleaned.ok || !cleaned.data) return fail(cleaned.error ?? '技能名不合法')
+  if (!cleaned.ok || !cleaned.data)
+    return fail(cleaned.error ?? '技能名不合法')
 
   const imported = await guard(
     invoke<unknown>('skill_import', {
       root: root.trim(),
       dir: dirArg(dir),
       source: source.trim(),
-      id: cleaned.data
+      id: cleaned.data,
     }),
-    '导入技能失败'
+    '导入技能失败',
   )
-  if (!imported.ok) return fail(imported.error ?? '导入技能失败')
+  if (!imported.ok)
+    return fail(imported.error ?? '导入技能失败')
 
   await commitSkill(root, dir, `skill: ${cleaned.data} 导入`)
   return ok(null)
@@ -306,28 +308,30 @@ export async function skillHistory(
   root: string,
   dir: string,
   id: string,
-  limit?: number
+  limit?: number,
 ): Promise<Result<SkillCommit[]>> {
   const result = await guard(
-    invoke<Array<{ hash?: unknown; time?: unknown; subject?: unknown }>>('skill_history', {
+    invoke<Array<{ hash?: unknown, time?: unknown, subject?: unknown }>>('skill_history', {
       root: root.trim(),
       dir: dirArg(dir),
       id: id.trim(),
-      limit
+      limit,
     }),
-    '读取版本历史失败'
+    '读取版本历史失败',
   )
-  if (!result.ok || !result.data) return fail(result.error ?? '读取版本历史失败')
+  if (!result.ok || !result.data)
+    return fail(result.error ?? '读取版本历史失败')
 
   const commits: SkillCommit[] = []
   for (const item of Array.isArray(result.data) ? result.data : []) {
     const hash = typeof item?.hash === 'string' ? item.hash : ''
     const subject = typeof item?.subject === 'string' ? item.subject : ''
-    if (!hash) continue
+    if (!hash)
+      continue
     commits.push({
       hash,
       time: typeof item?.time === 'number' && Number.isFinite(item.time) ? item.time : 0,
-      subject
+      subject,
     })
   }
   return ok(commits)
@@ -338,16 +342,16 @@ export async function restoreSkill(
   root: string,
   dir: string,
   id: string,
-  hash: string
+  hash: string,
 ): Promise<Result<null>> {
   return guard(
     invoke<null>('skill_restore', {
       root: root.trim(),
       dir: dirArg(dir),
       id: id.trim(),
-      hash: hash.trim()
+      hash: hash.trim(),
     }),
-    '恢复版本失败'
+    '恢复版本失败',
   )
 }
 
@@ -355,7 +359,8 @@ export async function restoreSkill(
 function fileCopiesOf(raw: unknown): SkillFileCopy[] {
   return (Array.isArray(raw) ? raw : []).flatMap((item) => {
     const rel = typeof (item as { rel?: unknown })?.rel === 'string' ? (item as { rel: string }).rel.trim() : ''
-    if (!rel) return []
+    if (!rel)
+      return []
     const content = (item as { content?: unknown })?.content
     return [{ rel, content: typeof content === 'string' ? content : null }]
   })
@@ -372,21 +377,22 @@ export async function compareSkillVersion(
   root: string,
   dir: string,
   id: string,
-  hash: string
+  hash: string,
 ): Promise<Result<SkillCompareFile[]>> {
   const result = await guard(
-    invoke<{ current?: unknown; version?: unknown }>('skill_version_compare', {
+    invoke<{ current?: unknown, version?: unknown }>('skill_version_compare', {
       root: root.trim(),
       dir: dirArg(dir),
       id: id.trim(),
-      hash: hash.trim()
+      hash: hash.trim(),
     }),
-    '读取版本内容失败'
+    '读取版本内容失败',
   )
-  if (!result.ok || !result.data) return fail(result.error ?? '读取版本内容失败')
+  if (!result.ok || !result.data)
+    return fail(result.error ?? '读取版本内容失败')
 
   return ok(
-    mergeVersionCopies(fileCopiesOf(result.data.current), fileCopiesOf(result.data.version))
+    mergeVersionCopies(fileCopiesOf(result.data.current), fileCopiesOf(result.data.version)),
   )
 }
 
@@ -396,7 +402,7 @@ export async function installSkill(
   dir: string,
   id: string,
   projectDir: string,
-  overwrite: boolean
+  overwrite: boolean,
 ): Promise<Result<null>> {
   return guard(
     invoke<null>('skill_install', {
@@ -404,9 +410,9 @@ export async function installSkill(
       dir: dirArg(dir),
       id: id.trim(),
       projectDir: projectDir.trim(),
-      overwrite
+      overwrite,
     }),
-    '安装技能失败'
+    '安装技能失败',
   )
 }
 
@@ -418,22 +424,24 @@ export async function scanSkillCopies(
   root: string,
   dir: string,
   id: string,
-  projectDirs: string[]
+  projectDirs: string[],
 ): Promise<Result<SkillInstalledScan>> {
   const result = await guard(
-    invoke<{ library?: unknown; projects?: unknown }>('skill_installed_versions', {
+    invoke<{ library?: unknown, projects?: unknown }>('skill_installed_versions', {
       root: root.trim(),
       dir: dirArg(dir),
       id: id.trim(),
-      projectDirs: projectDirs.map((path) => path.trim()).filter(Boolean)
+      projectDirs: projectDirs.map(path => path.trim()).filter(Boolean),
     }),
-    '读取项目里的技能副本失败'
+    '读取项目里的技能副本失败',
   )
-  if (!result.ok || !result.data) return fail(result.error ?? '读取项目里的技能副本失败')
+  if (!result.ok || !result.data)
+    return fail(result.error ?? '读取项目里的技能副本失败')
 
-  const fileOf = (item: unknown): { rel: string; content: string | null } | null => {
+  const fileOf = (item: unknown): { rel: string, content: string | null } | null => {
     const rel = typeof (item as { rel?: unknown })?.rel === 'string' ? (item as { rel: string }).rel.trim() : ''
-    if (!rel) return null
+    if (!rel)
+      return null
     const content = (item as { content?: unknown })?.content
     return { rel, content: typeof content === 'string' ? content : null }
   }
@@ -443,9 +451,10 @@ export async function scanSkillCopies(
     : []
 
   const projects = Array.isArray(result.data.projects)
-    ? (result.data.projects as Array<{ project?: unknown; files?: unknown }>).flatMap((copy) => {
+    ? (result.data.projects as Array<{ project?: unknown, files?: unknown }>).flatMap((copy) => {
         const project = typeof copy?.project === 'string' ? copy.project.trim() : ''
-        if (!project) return []
+        if (!project)
+          return []
         const files = Array.isArray(copy.files)
           ? copy.files.map(fileOf).filter((file): file is NonNullable<typeof file> => file !== null)
           : []

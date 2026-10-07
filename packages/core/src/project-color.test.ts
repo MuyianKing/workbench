@@ -1,14 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  PROJECT_COLOR_PRESETS,
-  backfillProjectColors,
-  isProjectColor,
-  isProjectColorPreset,
-  nextProjectColor,
-  projectColorVar,
-  sanitizeHexColor,
-  sanitizeProjectColor
-} from './project-color'
+import { backfillProjectColors, isProjectColor, isProjectColorPreset, nextProjectColor, PROJECT_COLOR_PRESETS, projectColorVar, sanitizeHexColor, sanitizeProjectColor } from './project-color'
 
 describe('sanitizeHexColor', () => {
   it('统一成小写六位：三位简写展开、大写压小', () => {
@@ -85,7 +76,7 @@ describe('nextProjectColor', () => {
     expect(nextProjectColor(used)).toBe(PROJECT_COLOR_PRESETS[0])
     // 第一个多用一个之后，就该轮到第二个
     expect(nextProjectColor([...PROJECT_COLOR_PRESETS, PROJECT_COLOR_PRESETS[0]])).toBe(
-      PROJECT_COLOR_PRESETS[1]
+      PROJECT_COLOR_PRESETS[1],
     )
   })
 
@@ -104,7 +95,7 @@ describe('backfillProjectColors', () => {
     const patch = backfillProjectColors([
       { id: 'a', color: 'danger' },
       { id: 'b' },
-      { id: 'c' }
+      { id: 'c' },
     ])
     expect(patch).toEqual({ b: 'primary', c: 'success' })
   })

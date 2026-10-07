@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { FolderOpened } from '@element-plus/icons-vue'
+import { accountLabel } from '@workbench/auth'
+import { ElMessage } from 'element-plus'
 /**
  * 设置 · 关于：这个应用是什么、数据住在哪、什么时候才会联网。
  *
@@ -9,14 +12,11 @@
  * 数据目录那一行显示的是环境探测的结果。
  */
 import { computed, ref, watch } from 'vue'
-import { ElMessage } from 'element-plus'
-import { FolderOpened } from '@element-plus/icons-vue'
-import { accountLabel } from '@workbench/auth'
-import { useSettingsStore } from '@/stores/settings'
-import { useEnvironmentStore } from '@/stores/environment'
 import { useAuthStore } from '@/stores/auth'
+import { useEnvironmentStore } from '@/stores/environment'
+import { useSettingsStore } from '@/stores/settings'
 
-const props = defineProps<{ open: boolean; active: boolean }>()
+const props = defineProps<{ open: boolean, active: boolean }>()
 
 const settings = useSettingsStore()
 const environment = useEnvironmentStore()
@@ -32,7 +32,8 @@ const appVersion = ref(APP_VERSION_PENDING)
 async function loadAppVersion(): Promise<void> {
   try {
     appVersion.value = await window.workbench.getAppVersion()
-  } catch {
+  }
+  catch {
     // 拿不到版本不该让这一屏打不开，如实说明即可
     appVersion.value = '未知'
   }
@@ -42,67 +43,72 @@ async function loadAppVersion(): Promise<void> {
 watch(
   () => props.open && props.active,
   (current) => {
-    if (current && appVersion.value === APP_VERSION_PENDING) void loadAppVersion()
-  }
+    if (current && appVersion.value === APP_VERSION_PENDING)
+      void loadAppVersion()
+  },
 )
 
 /** 打开数据目录：与项目卡那颗「打开目录」同一条通道，失败时把原因说出来 */
 async function openDataDir(): Promise<void> {
   const dir = environment.dataDir
-  if (!dir) return
+  if (!dir)
+    return
 
   const result = await window.workbench.reveal(dir)
-  if (!result.ok) ElMessage.error(result.error ?? '打开目录失败')
+  if (!result.ok)
+    ElMessage.error(result.error ?? '打开目录失败')
 }
 
 /**
  * 联网边界：**这个应用默认不联网**，出口只有这几处，且都由用户自己开出来
  * （与架构文档「数据与隐私」那一节同源 —— 改了一边就要改另一边）。
  */
-const networkBounds: Array<{ title: string; detail: string }> = [
+const networkBounds: Array<{ title: string, detail: string }> = [
   {
     title: '同步仓库（Token 用量 / 外观 / 密码保险库）',
     detail:
-      '默认关闭：要在设置里登录账号并填一个你自己的 git 仓库，才会推拉那个仓库。密码保险库也走它（vault/vault.json），推上去的只有密文。'
+      '默认关闭：要在设置里登录账号并填一个你自己的 git 仓库，才会推拉那个仓库。密码保险库也走它（vault/vault.json），推上去的只有密文。',
   },
   {
     title: '账号登录',
-    detail: '点登录时才会去 GitHub / Gitee 的授权接口；登录之后不会在后台反复打请求。'
+    detail: '点登录时才会去 GitHub / Gitee 的授权接口；登录之后不会在后台反复打请求。',
   },
   {
     title: '笔记里的图片',
-    detail: '只有填了图片仓库、并且你真的往正文里粘贴了图片（或删图），才会碰那个仓库。'
+    detail: '只有填了图片仓库、并且你真的往正文里粘贴了图片（或删图），才会碰那个仓库。',
   },
   {
     title: '笔记本身的同步',
-    detail: '只有填了笔记仓库、并且你点了那颗同步按钮，才会走一次 git。'
+    detail: '只有填了笔记仓库、并且你点了那颗同步按钮，才会走一次 git。',
   },
   {
     title: '命令执行',
-    detail: 'npm install、dev server 这些是你自己那条命令在上网，不属于应用的行为。'
+    detail: 'npm install、dev server 这些是你自己那条命令在上网，不属于应用的行为。',
   },
   {
     title: 'AI 热点',
     detail:
-      '首页画着「AI 热点」卡片时才会去 GET 它，且要到了那个源自己的刷新间隔（地址是内置白名单，只放中文源），只读不传任何数据。'
+      '首页画着「AI 热点」卡片时才会去 GET 它，且要到了那个源自己的刷新间隔（地址是内置白名单，只放中文源），只读不传任何数据。',
   },
   {
     title: '实时天气',
     detail:
-      '只有设置里填了天气城市才会去取（每半小时一次），地址是内置白名单里的两台主机 —— 城市名检索走 OpenStreetMap 的公开接口、实况走 Open-Meteo，都免费且只读；城市名会出现在请求里。'
+      '只有设置里填了天气城市才会去取（每半小时一次），地址是内置白名单里的两台主机 —— 城市名检索走 OpenStreetMap 的公开接口、实况走 Open-Meteo，都免费且只读；城市名会出现在请求里。',
   },
   {
     title: '邮箱',
     detail:
-      '只有邮箱页里配置了邮箱账户才会连你填的收发服务器（IMAP 收信、SMTP 发信，隐式 TLS，主机不设白名单）；授权码在 Windows 凭据管理器里，不落明文；邮件正文里的外链资源一概不加载 —— 不做后台收信，进页面、点刷新或发信才联网。'
-  }
+      '只有邮箱页里配置了邮箱账户才会连你填的收发服务器（IMAP 收信、SMTP 发信，隐式 TLS，主机不设白名单）；授权码在 Windows 凭据管理器里，不落明文；邮件正文里的外链资源一概不加载 —— 不做后台收信，进页面、点刷新或发信才联网。',
+  },
 ]
 </script>
 
 <template>
   <section class="pane">
     <div class="block">
-      <h3 class="block__title">程序</h3>
+      <h3 class="block__title">
+        程序
+      </h3>
 
       <div class="row row--stack">
         <div class="row__text">
@@ -116,7 +122,9 @@ const networkBounds: Array<{ title: string; detail: string }> = [
     </div>
 
     <div class="block">
-      <h3 class="block__title">这台机器上的数据</h3>
+      <h3 class="block__title">
+        这台机器上的数据
+      </h3>
 
       <div class="row row--stack">
         <div class="row__text">
@@ -161,7 +169,9 @@ const networkBounds: Array<{ title: string; detail: string }> = [
       只有这五处，且都是显式开出来的 —— 这里写的与架构文档「数据与隐私」是同一份事实。
     -->
     <div class="block">
-      <h3 class="block__title">联网</h3>
+      <h3 class="block__title">
+        联网
+      </h3>
 
       <p class="about__lead">
         默认不联网、不上报任何数据。对外发请求的只有下面七处，且都由你自己开出来：

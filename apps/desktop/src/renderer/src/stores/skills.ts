@@ -1,3 +1,8 @@
+import type { SkillCommit, SkillCompareFile, SkillCreateInput, SkillEntry, SkillFileInfo, SkillLibraryState } from '@workbench/skills'
+import type { Result } from '@/types'
+import { noteNameProblem, noteRootName, sanitizeNoteName, sanitizeNoteRoot } from '@workbench/notes'
+import { SKILL_FILE, skillFileRel, skillRel } from '@workbench/skills'
+import { defineStore } from 'pinia'
 /**
  * 技能：列表、当前打开的那一篇、增删改、版本历史与安装的编排。
  *
@@ -10,27 +15,7 @@
  * 历史与恢复直接问 git（skillHistory / restoreSkill），没有需要缓存的中间态。
  */
 import { computed, ref, watch } from 'vue'
-import { defineStore } from 'pinia'
-import {
-  joinRel,
-  noteNameProblem,
-  noteRootName,
-  sanitizeNoteName,
-  sanitizeNoteRoot
-} from '@workbench/notes'
-import {
-  SKILL_FILE,
-  skillFileRel,
-  skillRel,
-  type SkillCommit,
-  type SkillCompareFile,
-  type SkillCreateInput,
-  type SkillEntry,
-  type SkillFileInfo,
-  type SkillLibraryState
-} from '@workbench/skills'
-import type { Result } from '@/types'
-import { notifyError, notifySuccess, confirmAction } from '@/notify'
+import { confirmAction, notifyError, notifySuccess } from '@/notify'
 import { useSettingsStore } from '@/stores/settings'
 
 export const useSkillsStore = defineStore('skills', () => {
@@ -82,7 +67,7 @@ export const useSkillsStore = defineStore('skills', () => {
   const syncing = ref(false)
   const syncError = ref('')
 
-  const activeSkill = computed(() => skills.value.find((item) => item.id === activeId.value) ?? null)
+  const activeSkill = computed(() => skills.value.find(item => item.id === activeId.value) ?? null)
 
   /** 库位置给人看的一句话：技能库目录那一层的名字（完整路径在悬停提示里） */
   const locationText = computed(() => noteRootName(root.value))
@@ -115,8 +100,8 @@ export const useSkillsStore = defineStore('skills', () => {
     }
     const result = await window.workbench.listSkillFiles(gitRoot.value, dir.value, id)
     files.value = result.ok && result.data ? result.data : []
-    if (!files.value.some((file) => file.rel === activeFile.value)) {
-      if (files.value.some((file) => file.rel === SKILL_FILE) && activeFile.value !== SKILL_FILE) {
+    if (!files.value.some(file => file.rel === activeFile.value)) {
+      if (files.value.some(file => file.rel === SKILL_FILE) && activeFile.value !== SKILL_FILE) {
         await openFile(SKILL_FILE)
       }
     }
@@ -125,7 +110,8 @@ export const useSkillsStore = defineStore('skills', () => {
   /** 读技能里的一个文件到编辑区（二进制读不出文本时如实报错，留在原文件） */
   async function openFile(rel: string): Promise<void> {
     const id = activeId.value
-    if (!id) return
+    if (!id)
+      return
 
     contentLoading.value = true
     const result = await window.workbench.readSkillFile(gitRoot.value, dir.value, id, rel)
@@ -195,12 +181,13 @@ export const useSkillsStore = defineStore('skills', () => {
 
     skills.value = result.data
     loaded.value = true
-    if (activeId.value && !result.data.some((item) => item.id === activeId.value)) {
+    if (activeId.value && !result.data.some(item => item.id === activeId.value)) {
       closeActive()
       return
     }
     // 打开着的技能还在：文件清单跟着刷一遍（附属文件可能增删）
-    if (activeId.value) await loadFiles()
+    if (activeId.value)
+      await loadFiles()
   }
 
   let started = false
@@ -208,14 +195,16 @@ export const useSkillsStore = defineStore('skills', () => {
 
   /** 首次进页面扫一次（KeepAlive 下来回切页不重挂载，这里挡住重复扫描） */
   async function init(): Promise<void> {
-    if (started && ready) return
+    if (started && ready)
+      return
     started = true
     await reload()
   }
 
   // 技能库目录变了（选了新目录、别的窗口迁移）：仓库与库都重新认一遍
   watch(root, () => {
-    if (!started) return
+    if (!started)
+      return
     ready = false
     closeActive()
     void reload()
@@ -229,7 +218,8 @@ export const useSkillsStore = defineStore('skills', () => {
    */
   async function setRoot(dir: string): Promise<boolean> {
     const target = sanitizeNoteRoot(dir)
-    if (!target) return false
+    if (!target)
+      return false
     return settings.updateSettings({ skillDir: target })
   }
 
@@ -246,9 +236,11 @@ export const useSkillsStore = defineStore('skills', () => {
 
     contentLoading.value = true
     const result = await window.workbench.readNote(gitRoot.value, skillFileRel(dir.value, id))
-    if (activeId.value === id) void loadFiles()
+    if (activeId.value === id)
+      void loadFiles()
     contentLoading.value = false
-    if (activeId.value !== id) return false
+    if (activeId.value !== id)
+      return false
 
     if (!result.ok || result.data === undefined) {
       closeActive()
@@ -268,7 +260,8 @@ export const useSkillsStore = defineStore('skills', () => {
    * 失败原因留在 saveError 上，调用方（对比弹窗）拿它显示。
    */
   async function saveContent(id: string, rel: string, content: string): Promise<boolean> {
-    if (saving.value) return false
+    if (saving.value)
+      return false
 
     saving.value = true
     saveError.value = ''
@@ -288,7 +281,8 @@ export const useSkillsStore = defineStore('skills', () => {
   /** 保存编辑器里打开的那一个文件 */
   async function saveActive(): Promise<boolean> {
     const id = activeId.value
-    if (!id) return false
+    if (!id)
+      return false
     return saveContent(id, activeFile.value, content.value)
   }
 
@@ -299,7 +293,7 @@ export const useSkillsStore = defineStore('skills', () => {
       return false
     }
     const id = sanitizeNoteName(input.id)
-    if (skills.value.some((item) => item.id === id)) {
+    if (skills.value.some(item => item.id === id)) {
       notifyError(`已经有同名的技能了：${id}`)
       return false
     }
@@ -322,7 +316,8 @@ export const useSkillsStore = defineStore('skills', () => {
       return false
     }
 
-    if (activeId.value === id) closeActive()
+    if (activeId.value === id)
+      closeActive()
     await reload()
     return true
   }
@@ -333,7 +328,7 @@ export const useSkillsStore = defineStore('skills', () => {
       notifyError('技能名不合法')
       return false
     }
-    if (skills.value.some((item) => item.id === cleaned)) {
+    if (skills.value.some(item => item.id === cleaned)) {
       notifyError(`已经有同名的技能了：${cleaned}`)
       return false
     }
@@ -380,7 +375,8 @@ export const useSkillsStore = defineStore('skills', () => {
 
     notifySuccess('已恢复到所选版本')
     await reload()
-    if (activeId.value === id) await select(id)
+    if (activeId.value === id)
+      await select(id)
     return true
   }
 
@@ -395,9 +391,10 @@ export const useSkillsStore = defineStore('skills', () => {
     const confirmed = await confirmAction(
       '这个技能的文件会变回所选版本的样子。恢复本身也是一次提交，现在的内容留在历史里，随时能再恢复回来。',
       '恢复到这个版本？',
-      { confirmButtonText: '恢复' }
+      { confirmButtonText: '恢复' },
     )
-    if (!confirmed) return false
+    if (!confirmed)
+      return false
     return restore(id, hash)
   }
 
@@ -408,7 +405,7 @@ export const useSkillsStore = defineStore('skills', () => {
   async function install(
     id: string,
     projectDir: string,
-    overwrite: boolean
+    overwrite: boolean,
   ): Promise<Result<null>> {
     return window.workbench.installSkill(gitRoot.value, dir.value, id, projectDir, overwrite)
   }
@@ -440,9 +437,11 @@ export const useSkillsStore = defineStore('skills', () => {
       }
 
       await reload()
-      if (activeId.value) await select(activeId.value)
+      if (activeId.value)
+        await select(activeId.value)
       syncError.value = ''
-    } finally {
+    }
+    finally {
       syncing.value = false
     }
   }
@@ -495,6 +494,6 @@ export const useSkillsStore = defineStore('skills', () => {
     restoreWithConfirm,
     install,
     syncNow,
-    reveal
+    reveal,
   }
 })

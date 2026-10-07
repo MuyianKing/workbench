@@ -1,6 +1,7 @@
+import type { TokenDays } from './token-usage'
 import { describe, expect, it } from 'vitest'
 import { collectQoderSessionText, QODER_DEFAULT_MODEL } from './qoder-log'
-import { emptyCounters, type TokenDays } from './token-usage'
+import { emptyCounters } from './token-usage'
 
 /**
  * 样例行取自 Qoder 会话文件（`~/.qoder-cn/projects/<项目>/<会话 id>.jsonl`）的真实形态，
@@ -15,7 +16,7 @@ function at(day = 10, hour = 16, minute = 44): string {
 /** 真实 usage 的形状：token 那几项恒为 0，只有 credits 有值 */
 function usageLine(
   usage: Record<string, unknown>,
-  options: { type?: string; model?: string | null; timestamp?: unknown } = {}
+  options: { type?: string, model?: string | null, timestamp?: unknown } = {},
 ): string {
   const { type = 'assistant', model = 'qfmodel', timestamp = at() } = options
   return JSON.stringify({
@@ -27,8 +28,8 @@ function usageLine(
       id: 'msg_01',
       role: 'assistant',
       model,
-      usage
-    }
+      usage,
+    },
   })
 }
 
@@ -39,20 +40,20 @@ const FULL_USAGE = {
   output_tokens: 0,
   credits: 0.78379939,
   original_credits: 0.78379939,
-  billable: false
+  billable: false,
 }
 
-describe('Qoder 会话额度解析', () => {
+describe('qoder 会话额度解析', () => {
   it('只落 credits：token 那几项照上游的 0，不拿额度折算', () => {
     const days: TokenDays = {}
     collectQoderSessionText(usageLine(FULL_USAGE), days)
 
     // 这份 usage 里 input/output/cache 全是 0（Qoder 不产生 token 计数），
     // 一旦有人在这儿「顺手折算一下」，credits 口径就变成了编出来的 token 数
-    expect(days['2026-09-10']['qfmodel']).toEqual({
+    expect(days['2026-09-10'].qfmodel).toEqual({
       ...emptyCounters(),
       credits: 0.78379939,
-      requests: 1
+      requests: 1,
     })
   })
 
@@ -62,12 +63,12 @@ describe('Qoder 会话额度解析', () => {
       [
         usageLine({ credits: 0.078367718 }),
         usageLine({ credits: 6.140525885999999 }),
-        usageLine({ credits: 0.5 })
+        usageLine({ credits: 0.5 }),
       ].join('\n'),
-      days
+      days,
     )
 
-    const counters = days['2026-09-10']['qfmodel']
+    const counters = days['2026-09-10'].qfmodel
     expect(counters.credits).toBeCloseTo(6.718893604, 9)
     expect(counters.requests).toBe(3)
   })
@@ -77,13 +78,13 @@ describe('Qoder 会话额度解析', () => {
     collectQoderSessionText(
       [
         usageLine({ credits: 1 }, { timestamp: at(10, 23, 59) }),
-        usageLine({ credits: 2 }, { timestamp: at(11, 0, 1) })
+        usageLine({ credits: 2 }, { timestamp: at(11, 0, 1) }),
       ].join('\n'),
-      days
+      days,
     )
 
-    expect(days['2026-09-10']['qfmodel'].credits).toBe(1)
-    expect(days['2026-09-11']['qfmodel'].credits).toBe(2)
+    expect(days['2026-09-10'].qfmodel.credits).toBe(1)
+    expect(days['2026-09-11'].qfmodel.credits).toBe(2)
   })
 
   it('模型名取行内自带的那一个，缺失才落到兜底名', () => {
@@ -92,12 +93,12 @@ describe('Qoder 会话额度解析', () => {
       [
         usageLine({ credits: 1 }, { model: 'qfmodel' }),
         usageLine({ credits: 2 }, { model: '  ' }),
-        usageLine({ credits: 4 }, { model: null })
+        usageLine({ credits: 4 }, { model: null }),
       ].join('\n'),
-      days
+      days,
     )
 
-    expect(days['2026-09-10']['qfmodel'].credits).toBe(1)
+    expect(days['2026-09-10'].qfmodel.credits).toBe(1)
     // 没带模型名的两条落兜底名，不并进上面那一个
     expect(days['2026-09-10'][QODER_DEFAULT_MODEL].credits).toBe(6)
   })
@@ -117,25 +118,25 @@ describe('Qoder 会话额度解析', () => {
         // usage 整个缺失
         usageLine({}),
         // 真正该落账的那一条
-        usageLine({ credits: 0.25 })
+        usageLine({ credits: 0.25 }),
       ].join('\n'),
-      days
+      days,
     )
 
     expect(Object.keys(days)).toEqual(['2026-09-10'])
-    expect(days['2026-09-10']['qfmodel'].credits).toBe(0.25)
-    expect(days['2026-09-10']['qfmodel'].requests).toBe(1)
+    expect(days['2026-09-10'].qfmodel.credits).toBe(0.25)
+    expect(days['2026-09-10'].qfmodel.requests).toBe(1)
   })
 
   it('半行与坏行只丢那一条，不影响同一个文件里的其余记录', () => {
     const days: TokenDays = {}
     collectQoderSessionText(
       ['{"type":"assistant","timestamp"', 'not json at all', usageLine({ credits: 3 })].join('\n'),
-      days
+      days,
     )
 
-    expect(days['2026-09-10']['qfmodel'].credits).toBe(3)
-    expect(days['2026-09-10']['qfmodel'].requests).toBe(1)
+    expect(days['2026-09-10'].qfmodel.credits).toBe(3)
+    expect(days['2026-09-10'].qfmodel.requests).toBe(1)
   })
 
   it('时间戳缺失或解析不出来时丢掉那条，不硬塞进今天', () => {
@@ -144,13 +145,13 @@ describe('Qoder 会话额度解析', () => {
       [
         usageLine({ credits: 1 }, { timestamp: 'oops' }),
         usageLine({ credits: 2 }, { timestamp: null }),
-        usageLine({ credits: 4 }, { timestamp: Date.parse(at(12, 9, 30)) })
+        usageLine({ credits: 4 }, { timestamp: Date.parse(at(12, 9, 30)) }),
       ].join('\n'),
-      days
+      days,
     )
 
     // 毫秒数也认（万一上游换了写法），前面两条照丢
     expect(Object.keys(days)).toEqual(['2026-09-12'])
-    expect(days['2026-09-12']['qfmodel'].credits).toBe(4)
+    expect(days['2026-09-12'].qfmodel.credits).toBe(4)
   })
 })

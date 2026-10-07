@@ -1,3 +1,4 @@
+import type { NrmStatus, Result } from '@/types'
 /**
  * nrm（npm 镜像源管理器）：探测、安装、切换镜像源。
  *
@@ -6,7 +7,6 @@
  * 这一层只做结果拼装与失败收敛。
  */
 import { fail, ok } from '@workbench/core'
-import type { NrmStatus, Result } from '@/types'
 import { invoke } from './bridge'
 import { installGlobalTool } from './system'
 
@@ -23,7 +23,8 @@ export function status(): Promise<NrmStatus> {
 export async function useRegistry(name: string): Promise<Result<NrmStatus>> {
   try {
     await invoke<null>('nrm_use', { name })
-  } catch (error) {
+  }
+  catch (error) {
     // Rust 的 Err(String) 是被 Tauri 直接 reject 的，所以失败值不一定是 Error
     return fail(error instanceof Error ? error.message : '切换镜像源失败')
   }
@@ -36,10 +37,12 @@ export async function useRegistry(name: string): Promise<Result<NrmStatus>> {
  */
 export async function install(): Promise<Result<NrmStatus>> {
   const install = await installGlobalTool('nrm')
-  if (!install.ok) return fail(install.error ?? '安装失败')
+  if (!install.ok)
+    return fail(install.error ?? '安装失败')
 
   const next = await status()
-  if (next.available) return ok(next)
+  if (next.available)
+    return ok(next)
 
   return fail(install.data || '安装失败，请查看终端输出')
 }

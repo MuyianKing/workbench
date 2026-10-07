@@ -25,7 +25,9 @@ const emit = defineEmits<{ change: [value: number] }>()
   >
     <button class="rate-badge" type="button" :title="title ?? '播放速率'">
       {{ rate }}x
-      <el-icon class="rate-badge__caret"><CaretBottom /></el-icon>
+      <el-icon class="rate-badge__caret">
+        <CaretBottom />
+      </el-icon>
     </button>
     <template #dropdown>
       <el-dropdown-menu>

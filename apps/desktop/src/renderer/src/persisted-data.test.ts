@@ -1,25 +1,8 @@
+import type { AppSettings, StoredSettings } from './types'
+import { APPEARANCE_SETTING_KEYS, columnIds, columnOfRow, DEFAULT_APPEARANCE, DEFAULT_THEME, pickAppearance, rowOf, sanitizeAppearanceSettings, sanitizeTheme, stripAppearance, TERMINAL_BUTTON_TOP_MAX } from '@workbench/appearance'
 import { describe, expect, it } from 'vitest'
-import {
-  columnIds,
-  columnOfRow,
-  rowOf,
-  APPEARANCE_SETTING_KEYS,
-  DEFAULT_APPEARANCE,
-  DEFAULT_THEME,
-  pickAppearance,
-  sanitizeAppearanceSettings,
-  sanitizeTheme,
-  stripAppearance,
-  TERMINAL_BUTTON_TOP_MAX
-} from '@workbench/appearance'
-import {
-  DEFAULT_STORED_SETTINGS,
-  mergeSettingsAppearance,
-  migrateAppearanceIntoTheme,
-  sanitizeSettings,
-  splitSettingsPatch
-} from './persisted-data'
-import { DEFAULT_SETTINGS, type AppSettings, type StoredSettings } from './types'
+import { DEFAULT_STORED_SETTINGS, mergeSettingsAppearance, migrateAppearanceIntoTheme, sanitizeSettings, splitSettingsPatch } from './persisted-data'
+import { DEFAULT_SETTINGS } from './types'
 
 describe('设置里那颗悬浮按钮的位置', () => {
   it('老数据文件里没有这一项时回到「跟随终端面板」', () => {
@@ -61,7 +44,7 @@ describe('行为记忆那几项设置', () => {
       projectSort: 'name',
       workRange: 'month',
       workSort: 'project',
-      noteTreeExpanded: ['工作', '工作/周报']
+      noteTreeExpanded: ['工作', '工作/周报'],
     })
     expect(value.projectSort).toBe('name')
     expect(value.workRange).toBe('month')
@@ -74,7 +57,7 @@ describe('行为记忆那几项设置', () => {
       projectSort: 'size',
       workRange: 3,
       workSort: null,
-      noteTreeExpanded: ['工作\\周报', '../越界', '', '工作/周报']
+      noteTreeExpanded: ['工作\\周报', '../越界', '', '工作/周报'],
     })
     expect(value.projectSort).toBe('recent')
     expect(value.workRange).toBe('today')
@@ -137,7 +120,7 @@ describe('按落点拆一份设置补丁', () => {
     const { settings: stored, appearance } = splitSettingsPatch({
       accentColor: '#3b82f6',
       terminalHeight: 300,
-      activeView: 'projects'
+      activeView: 'projects',
     })
 
     expect(appearance).toEqual({ accentColor: '#3b82f6', terminalHeight: 300 })
@@ -153,7 +136,7 @@ describe('按落点拆一份设置补丁', () => {
   it('导航菜单那一项算外观：住在 theme.json 里，跟着配置一起同步', () => {
     const { settings: stored, appearance } = splitSettingsPatch({
       hiddenViews: ['notes'],
-      activeView: 'projects'
+      activeView: 'projects',
     })
 
     expect(appearance).toEqual({ hiddenViews: ['notes'] })
@@ -164,7 +147,7 @@ describe('按落点拆一份设置补丁', () => {
 
   it('关掉的页一样要过收敛（手改过的主题文件可能写着认不出来的 id）', () => {
     expect(sanitizeAppearanceSettings({ hiddenViews: ['notes', 'nope', 'notes'] }).hiddenViews).toEqual([
-      'notes'
+      'notes',
     ])
     expect(sanitizeAppearanceSettings({ hiddenViews: 'notes' }).hiddenViews).toEqual([])
   })
@@ -185,7 +168,7 @@ describe('按落点拆一份设置补丁', () => {
       'vault',
       'mail',
       'styles',
-      'video'
+      'video',
     ])
     expect(sanitizeAppearanceSettings({ viewOrder: 'notes' }).viewOrder.length).toBe(11)
   })
@@ -197,7 +180,7 @@ describe('按落点拆一份设置补丁', () => {
 
     const merged = mergeSettingsAppearance(
       { ...(stripAppearance(before) as StoredSettings), ...stored },
-      { ...pickAppearance(before), ...appearance }
+      { ...pickAppearance(before), ...appearance },
     )
     expect(merged).toEqual({ ...before, ...patch })
   })
@@ -234,7 +217,7 @@ describe('老数据搬家', () => {
   it('搬过来的值一样要过收敛（老数据文件可能是手改过的）', () => {
     const migrated = migrateAppearanceIntoTheme(
       { version: 2 },
-      { theme: 'neon', cardOpacity: 999, terminalHeight: 'tall' }
+      { theme: 'neon', cardOpacity: 999, terminalHeight: 'tall' },
     )
     const appearance = sanitizeTheme(migrated).appearance
 
@@ -245,7 +228,7 @@ describe('老数据搬家', () => {
 
   it('单个 mailAccount 搬成 mailAccounts 清单，旧字段不再写回', () => {
     const value = sanitizeSettings({
-      mailAccount: { address: 'A@163.com', imapHost: 'imap.163.com', imapPort: 993, smtpHost: 'smtp.163.com', smtpPort: 465 }
+      mailAccount: { address: 'A@163.com', imapHost: 'imap.163.com', imapPort: 993, smtpHost: 'smtp.163.com', smtpPort: 465 },
     })
     expect(value.mailAccounts).toHaveLength(1)
     expect(value.mailAccounts[0].address).toBe('a@163.com')
@@ -256,9 +239,9 @@ describe('老数据搬家', () => {
 
   it('mailAccounts 清单照常收敛：没地址的丢、按地址去重', () => {
     const value = sanitizeSettings({
-      mailAccounts: [{ address: 'a@163.com' }, { address: 'a@163.com' }, { imapHost: 'x' }, { address: 'b@qq.com' }]
+      mailAccounts: [{ address: 'a@163.com' }, { address: 'a@163.com' }, { imapHost: 'x' }, { address: 'b@qq.com' }],
     })
-    expect(value.mailAccounts.map((account) => account.address)).toEqual(['a@163.com', 'b@qq.com'])
+    expect(value.mailAccounts.map(account => account.address)).toEqual(['a@163.com', 'b@qq.com'])
     expect(value.mailAccounts[1].imapHost).toBe('imap.qq.com')
   })
 
@@ -283,20 +266,20 @@ describe('theme.json 的整份收敛（适配层视角）', () => {
       cardGap: 14,
       columns: [
         { id: 'col-1', width: 320 },
-        { id: 'col-2', width: null }
+        { id: 'col-2', width: null },
       ],
-      cards: { quick: { column: 'col-2', order: 0, mode: 'fixed', height: 120 } }
+      cards: { quick: { column: 'col-2', order: 0, mode: 'fixed', height: 120 } },
     }
     const theme = sanitizeTheme(legacy)
 
     expect(theme.cardGap).toBe(14)
     expect(columnIds(theme.columns)).toEqual(['col-1', 'col-2'])
-    expect(theme.columns.map((column) => column.width)).toEqual([320, null])
+    expect(theme.columns.map(column => column.width)).toEqual([320, null])
     expect(columnOfRow(theme.columns, theme.cards.quick.row)?.id).toBe('col-2')
     expect(rowOf(theme.columns, theme.cards.quick.row)).toEqual({
       id: theme.cards.quick.row,
       mode: 'fixed',
-      height: 120
+      height: 120,
     })
     expect(theme.appearance).toEqual(DEFAULT_APPEARANCE)
     expect(theme.updatedAt).toBe(0)

@@ -1,4 +1,9 @@
 <script setup lang="ts">
+import type { WorkLogEntry } from '@/types'
+import { dayKey, projectColorVar, sanitizeProjectColor } from '@workbench/core'
+
+import { WORK_STATUS_DEFAULT, WORK_STATUS_LABELS, WORK_STATUSES } from '@workbench/work-log'
+import { ElMessage } from 'element-plus'
 /**
  * 写一条工作记录（新增 / 编辑）。
  *
@@ -9,17 +14,9 @@
  * 数据写入由这个弹窗自己负责（它是这次业务动作的发起方），落库成功后再把结果抛给页面。
  */
 import { computed, reactive, ref, watch } from 'vue'
-import { ElMessage } from 'element-plus'
-import { dayKey } from '@workbench/core'
-import { projectColorVar, sanitizeProjectColor } from '@workbench/core'
-import { WORK_STATUSES, WORK_STATUS_DEFAULT, WORK_STATUS_LABELS } from '@workbench/work-log'
-import { useProjectsStore } from '@/stores/projects'
 import AppDialog from '@/components/AppDialog.vue'
 import MarkdownView from '@/components/MarkdownView.vue'
-import type { WorkLogEntry } from '@/types'
-
-/** 弹层开关:v-model 一条口径(与 AppDialog / el-dialog 相同,全应用的弹层都这么开) */
-const open = defineModel<boolean>({ required: true })
+import { useProjectsStore } from '@/stores/projects'
 
 const props = defineProps<{
   /** 编辑对象；null 表示新增 */
@@ -33,29 +30,32 @@ const emit = defineEmits<{
   saved: [entry: WorkLogEntry]
 }>()
 
+/** 弹层开关:v-model 一条口径(与 AppDialog / el-dialog 相同,全应用的弹层都这么开) */
+const open = defineModel<boolean>({ required: true })
+
 const store = useProjectsStore()
 
 const visible = computed({
   get: () => open.value,
   set: (value: boolean) => {
     open.value = value
-  }
+  },
 })
 
 const form = reactive({
   date: '',
   projectId: '',
   content: '',
-  status: WORK_STATUS_DEFAULT
+  status: WORK_STATUS_DEFAULT,
 })
 
 /** 预览态：写的时候不用离开弹窗就能看渲染结果 */
 const mode = ref<'write' | 'preview'>('write')
 /** 两处分段控件的选项（Element Plus 的分段控件要 { label, value }） */
-const statusOptions = WORK_STATUSES.map((value) => ({ label: WORK_STATUS_LABELS[value], value }))
+const statusOptions = WORK_STATUSES.map(value => ({ label: WORK_STATUS_LABELS[value], value }))
 const modeOptions = [
   { label: '编写', value: 'write' },
-  { label: '预览', value: 'preview' }
+  { label: '预览', value: 'preview' },
 ]
 const saving = ref(false)
 
@@ -70,13 +70,13 @@ const canSubmit = computed(() => !!form.content.trim() && !saving.value)
  * 用户以为「本来就没关联」，一保存就把这条记录的项目关联悄悄清掉了。
  */
 const projects = computed(() => {
-  const list = store.projects.map((project) => ({
+  const list = store.projects.map(project => ({
     id: project.id,
     name: project.name,
-    color: sanitizeProjectColor(project.color)
+    color: sanitizeProjectColor(project.color),
   }))
   const current = form.projectId
-  if (current && !list.some((item) => item.id === current)) {
+  if (current && !list.some(item => item.id === current)) {
     list.unshift({ id: current, name: '已删除的项目', color: undefined })
   }
   return list
@@ -94,17 +94,19 @@ function reset(): void {
 }
 
 watch(open, (value) => {
-  if (value) reset()
+  if (value)
+    reset()
 })
 
 async function submit(): Promise<void> {
-  if (!canSubmit.value) return
+  if (!canSubmit.value)
+    return
 
   const payload = {
     date: form.date || dayKey(Date.now()),
     projectId: form.projectId || undefined,
     content: form.content.trim(),
-    status: form.status
+    status: form.status,
   }
 
   saving.value = true
@@ -116,7 +118,7 @@ async function submit(): Promise<void> {
           // 清空下拉 = 解除关联：显式传 null，主进程才知道要把这个字段摘掉
           projectId: form.projectId || null,
           content: payload.content,
-          status: payload.status
+          status: payload.status,
         })
       : await window.workbench.addWorkLog(payload)
 
@@ -128,7 +130,8 @@ async function submit(): Promise<void> {
     emit('saved', result.data)
     ElMessage.success(current ? '已保存' : '已记录')
     visible.value = false
-  } finally {
+  }
+  finally {
     saving.value = false
   }
 }
@@ -195,7 +198,6 @@ async function submit(): Promise<void> {
         </el-form-item>
       </div>
 
-
       <el-form-item class="field--content">
         <template #label>
           <span class="field__head">
@@ -223,19 +225,27 @@ async function submit(): Promise<void> {
           <!-- 预览区高度跟着写的那份走，切换时块不会突然长高变矮 -->
           <div v-else class="preview">
             <MarkdownView v-if="form.content.trim()" :source="form.content" />
-            <p v-else class="preview__empty">还没有内容</p>
+            <p v-else class="preview__empty">
+              还没有内容
+            </p>
           </div>
 
           <p class="field__hint" :class="{ 'is-invalid': !form.content.trim() }">
-            <template v-if="!form.content.trim()">工作内容是必填项。</template>
-            <template v-else>支持 markdown 语法，时间轴上按这里的预览渲染。</template>
+            <template v-if="!form.content.trim()">
+              工作内容是必填项。
+            </template>
+            <template v-else>
+              支持 markdown 语法，时间轴上按这里的预览渲染。
+            </template>
           </p>
         </div>
       </el-form-item>
     </el-form>
 
     <template #footer>
-      <el-button @click="visible = false">取消</el-button>
+      <el-button @click="visible = false">
+        取消
+      </el-button>
       <el-button type="primary" :disabled="!canSubmit" @click="submit">
         {{ editing ? '保存' : '记录' }}
       </el-button>
@@ -302,8 +312,6 @@ async function submit(): Promise<void> {
   width: 100%;
 }
 
-
-
 /* 编辑 / 预览的分段控件：与工作页头部的范围切换同一副样子 */
 /* 两处分段控件用 el-segmented：外壳（底色 / 圆角 / 选中态）在 global.css，
    这里只留这一处的字号与内边距 */
@@ -330,6 +338,4 @@ async function submit(): Promise<void> {
   font-size: var(--fs-meta);
   color: var(--ink-3);
 }
-
-
 </style>

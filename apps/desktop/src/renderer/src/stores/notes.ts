@@ -1,3 +1,7 @@
+import type { NoteCreateInput, NoteDocument, NoteNode, NoteRepoState, NoteSyncSummary } from '@workbench/notes'
+import { countNotes, findNoteNode, noteChain, noteRootName, pushNoteHistory, removeFromNoteHistory, sanitizeNoteRoot, uniqueNoteName } from '@workbench/notes'
+import { libraryInNotebook, withoutSkillDir } from '@workbench/skills'
+import { defineStore } from 'pinia'
 /**
  * 笔记：一个**用户自己挑的文件夹**，以及它里面的目录树与当前打开的那一篇。
  *
@@ -18,23 +22,6 @@
  * 所以回来之后必须重扫一遍树、并重读打开着的那一篇（远端可能刚好改过它）。
  */
 import { computed, ref, watch } from 'vue'
-import { defineStore } from 'pinia'
-import {
-  countNotes,
-  findNoteNode,
-  noteChain,
-  noteRootName,
-  pushNoteHistory,
-  removeFromNoteHistory,
-  sanitizeNoteRoot,
-  uniqueNoteName,
-  type NoteCreateInput,
-  type NoteDocument,
-  type NoteNode,
-  type NoteRepoState,
-  type NoteSyncSummary
-} from '@workbench/notes'
-import { libraryInNotebook, withoutSkillDir } from '@workbench/skills'
 import { notifyError } from '@/notify'
 import { useSettingsStore } from '@/stores/settings'
 
@@ -112,11 +99,11 @@ export const useNotesStore = defineStore('notes', () => {
    * 库正好是笔记本里的一层时藏它（SKILL.md 有自己的页面），在别处时树里本来就没有它。
    */
   const skillDirInNotebook = computed(() =>
-    libraryInNotebook(settings.settings.skillDir, root.value)
+    libraryInNotebook(settings.settings.skillDir, root.value),
   )
   /** 选中项从最外层到自身的链；界面拿它写「它在哪一层」与面包屑 */
   const activeChain = computed(() =>
-    activeRel.value ? noteChain(nodes.value, activeRel.value) : []
+    activeRel.value ? noteChain(nodes.value, activeRel.value) : [],
   )
 
   function reset(): void {
@@ -149,10 +136,11 @@ export const useNotesStore = defineStore('notes', () => {
 
     const job = (repoJob += 1)
     const result = await window.workbench.noteRepoState(current)
-    if (job !== repoJob) return
+    if (job !== repoJob)
+      return
 
-    repoState.value =
-      result.ok && result.data ? result.data : { isRepo: false, origin: '', branch: '' }
+    repoState.value
+      = result.ok && result.data ? result.data : { isRepo: false, origin: '', branch: '' }
   }
 
   /**
@@ -175,7 +163,8 @@ export const useNotesStore = defineStore('notes', () => {
     loadError.value = ''
 
     const result = await window.workbench.listNotes(current)
-    if (job !== scanJob) return
+    if (job !== scanJob)
+      return
     loading.value = false
 
     if (!result.ok || !result.data) {
@@ -206,7 +195,8 @@ export const useNotesStore = defineStore('notes', () => {
    */
   async function init(): Promise<void> {
     started = true
-    if (ready) return
+    if (ready)
+      return
     if (!pending) {
       pending = reload().finally(() => {
         pending = null
@@ -223,14 +213,15 @@ export const useNotesStore = defineStore('notes', () => {
    */
   async function setRoot(dir: string): Promise<boolean> {
     const target = sanitizeNoteRoot(dir)
-    if (!target) return false
+    if (!target)
+      return false
 
     return settings.updateSettings({
       noteDir: target,
       noteDirs: pushNoteHistory(settings.settings.noteDirs, target),
       // 目录树的展开态只对上一个笔记本成立：清单里存的是相对路径，换到另一个笔记本
       // 就指向完全不同的东西了。一起清掉，新笔记本从收起状态开始
-      noteTreeExpanded: []
+      noteTreeExpanded: [],
     })
   }
 
@@ -242,14 +233,15 @@ export const useNotesStore = defineStore('notes', () => {
    */
   async function forgetRoot(dir: string): Promise<boolean> {
     return settings.updateSettings({
-      noteDirs: removeFromNoteHistory(settings.settings.noteDirs, dir)
+      noteDirs: removeFromNoteHistory(settings.settings.noteDirs, dir),
     })
   }
 
   // 设置里的笔记文件夹一改就重新扫（首次选的目录、换一个目录、清空都走这里）；
   // 技能库目录也盯着 —— 它变了，树里该藏的那一层就变了
   watch([root, () => settings.settings.skillDir], () => {
-    if (!started) return
+    if (!started)
+      return
     ready = false
     void reload()
   })
@@ -287,12 +279,14 @@ export const useNotesStore = defineStore('notes', () => {
      * 把它换成盘上那份旧的之后，再输入就会以旧的结尾往下写 —— 刚才那几个字就没了。
      * 换了别的篇再回来时 rel 变了，那时才真的重读。
      */
-    if (active.value?.rel === node.rel) return
+    if (active.value?.rel === node.rel)
+      return
 
     const job = (openJob += 1)
     const result = await window.workbench.readNote(root.value, node.rel)
     // 期间又点了别的（或换了文件夹）：这一份已经过期了
-    if (job !== openJob) return
+    if (job !== openJob)
+      return
 
     if (!result.ok || result.data === undefined) {
       closeNote()
@@ -306,7 +300,7 @@ export const useNotesStore = defineStore('notes', () => {
       rel: node.rel,
       name: node.name,
       content: result.data,
-      mtimeMs: node.mtimeMs ?? 0
+      mtimeMs: node.mtimeMs ?? 0,
     }
   }
 
@@ -323,7 +317,8 @@ export const useNotesStore = defineStore('notes', () => {
    * 真撞上极端时序时宁可少最后几个字，也不要留下一个没人认领的文件。
    */
   function saveContent(rel: string, content: string): Promise<void> {
-    if (!findNoteNode(nodes.value, rel)) return Promise.resolve()
+    if (!findNoteNode(nodes.value, rel))
+      return Promise.resolve()
 
     const task = writeContent(rel, content)
     writing = task
@@ -333,7 +328,8 @@ export const useNotesStore = defineStore('notes', () => {
   async function writeContent(rel: string, content: string): Promise<void> {
     const result = await window.workbench.writeNote(root.value, rel, content)
     saveError.value = result.ok ? '' : (result.error ?? '保存笔记失败')
-    if (!result.ok) return
+    if (!result.ok)
+      return
 
     savedAt.value = Date.now()
     // 本地也记下这一份：右栏那句「最后修改」与下次打开时给的初值都用它
@@ -388,7 +384,8 @@ export const useNotesStore = defineStore('notes', () => {
       await reload()
       const activeChanged = await rereadActive()
       return { summary: result.data, activeChanged }
-    } finally {
+    }
+    finally {
       syncing.value = false
     }
   }
@@ -401,17 +398,20 @@ export const useNotesStore = defineStore('notes', () => {
    */
   async function rereadActive(): Promise<boolean> {
     const current = active.value
-    if (!current) return false
+    if (!current)
+      return false
 
     const result = await window.workbench.readNote(root.value, current.rel)
-    if (!result.ok || result.data === undefined) return false
-    if (result.data === current.content) return false
+    if (!result.ok || result.data === undefined)
+      return false
+    if (result.data === current.content)
+      return false
 
     active.value = {
       rel: current.rel,
       name: current.name,
       content: result.data,
-      mtimeMs: findNoteNode(nodes.value, current.rel)?.mtimeMs ?? current.mtimeMs
+      mtimeMs: findNoteNode(nodes.value, current.rel)?.mtimeMs ?? current.mtimeMs,
     }
     return true
   }
@@ -425,12 +425,15 @@ export const useNotesStore = defineStore('notes', () => {
    */
   function remapActive(from: string, to: string): void {
     const current = activeRel.value
-    if (!current) return
-    if (current !== from && !current.startsWith(`${from}/`)) return
+    if (!current)
+      return
+    if (current !== from && !current.startsWith(`${from}/`))
+      return
 
     const next = to ? `${to}${current.slice(from.length)}` : ''
     activeRel.value = next
-    if (!active.value) return
+    if (!active.value)
+      return
 
     if (!next) {
       closeNote()
@@ -441,7 +444,7 @@ export const useNotesStore = defineStore('notes', () => {
       rel: next,
       name: node?.name ?? active.value.name,
       content: active.value.content,
-      mtimeMs: node?.mtimeMs ?? active.value.mtimeMs
+      mtimeMs: node?.mtimeMs ?? active.value.mtimeMs,
     }
   }
 
@@ -543,6 +546,6 @@ export const useNotesStore = defineStore('notes', () => {
     saveContent,
     waitForWrites,
     syncNotes,
-    closeNote
+    closeNote,
   }
 })

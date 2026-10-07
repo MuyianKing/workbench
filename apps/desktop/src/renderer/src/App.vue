@@ -1,35 +1,35 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
-import type { Component } from 'vue'
-import { backgroundVeilAlpha, veilRgbTriplet } from '@workbench/appearance'
-import { cardSurfaceAlpha } from '@workbench/appearance'
 import type { ViewId } from '@workbench/appearance'
-import NavRail from '@/components/NavRail.vue'
-import TitleBar from '@/components/TitleBar.vue'
+import type { Component } from 'vue'
+import { backgroundVeilAlpha, cardSurfaceAlpha, veilRgbTriplet } from '@workbench/appearance'
+
+import { computed, onMounted } from 'vue'
+import AddProjectDialog from '@/components/AddProjectDialog.vue'
+import AiView from '@/components/AiView.vue'
 import AppHeader from '@/components/AppHeader.vue'
+import CommandDialog from '@/components/CommandDialog.vue'
+import KbView from '@/components/KbView.vue'
+import MailView from '@/components/MailView.vue'
+import NavRail from '@/components/NavRail.vue'
+import NotesView from '@/components/NotesView.vue'
+import ProjectDrawer from '@/components/ProjectDrawer.vue'
 import ProjectGrid from '@/components/ProjectGrid.vue'
 import ProjectsView from '@/components/ProjectsView.vue'
-import WorkView from '@/components/WorkView.vue'
-import NotesView from '@/components/NotesView.vue'
-import SkillsView from '@/components/SkillsView.vue'
-import KbView from '@/components/KbView.vue'
-import AiView from '@/components/AiView.vue'
-import VaultView from '@/components/VaultView.vue'
-import MailView from '@/components/MailView.vue'
-import StylesView from '@/components/StylesView.vue'
-import VideoView from '@/components/VideoView.vue'
-import VideoPlayer from '@/components/VideoPlayer.vue'
-import TerminalPanel from '@/components/TerminalPanel.vue'
-import ProjectDrawer from '@/components/ProjectDrawer.vue'
-import AddProjectDialog from '@/components/AddProjectDialog.vue'
 import QuickAppDialog from '@/components/QuickAppDialog.vue'
-import CommandDialog from '@/components/CommandDialog.vue'
 import QuitConfirmDialog from '@/components/QuitConfirmDialog.vue'
-import { useProjectsStore } from '@/stores/projects'
+import SkillsView from '@/components/SkillsView.vue'
+import StylesView from '@/components/StylesView.vue'
+import TerminalPanel from '@/components/TerminalPanel.vue'
+import TitleBar from '@/components/TitleBar.vue'
+import VaultView from '@/components/VaultView.vue'
+import VideoPlayer from '@/components/VideoPlayer.vue'
+import VideoView from '@/components/VideoView.vue'
+import WorkView from '@/components/WorkView.vue'
+import { useMailStore } from '@/stores/mail'
 import { useNavStore } from '@/stores/nav'
+import { useProjectsStore } from '@/stores/projects'
 import { useSettingsStore } from '@/stores/settings'
 import { useWeatherStore } from '@/stores/weather'
-import { useMailStore } from '@/stores/mail'
 
 const store = useProjectsStore()
 const nav = useNavStore()
@@ -56,7 +56,7 @@ const VIEWS: Record<ViewId, Component> = {
   vault: VaultView,
   mail: MailView,
   styles: StylesView,
-  video: VideoView
+  video: VideoView,
 }
 
 const currentView = computed(() => VIEWS[nav.activeView])
@@ -83,13 +83,14 @@ const appStyle = computed(() => {
      * 卡片间距（px）：栏间、栏内卡片之间、项目页网格之间共用这一个值，
      * 导航栏这张卡片的四周留白也取它 —— 所以定义在 .app 上，全窗口一处来源。
      */
-    '--card-gap': `${settings.cardGap}px`
+    '--card-gap': `${settings.cardGap}px`,
   }
 
   // 蒙版底色：用户在设置里指定了就用它（图片「渐淡」进这个颜色），没指定则留空，
   // 交给 tokens.css 里按主题定义的那一份
   const veil = veilRgbTriplet(settings.settings.workspaceBackgroundVeil)
-  if (veil) style['--ws-veil-rgb'] = veil
+  if (veil)
+    style['--ws-veil-rgb'] = veil
 
   return style
 })

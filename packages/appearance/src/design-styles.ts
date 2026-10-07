@@ -29,7 +29,7 @@ export const COLOR_FAMILIES: readonly ColorFamily[] = [
   '蓝',
   '紫',
   '粉',
-  '中性'
+  '中性',
 ]
 
 export const THEME_LABELS: Record<DesignTheme, string> = { light: '浅色系', dark: '深色系' }
@@ -98,31 +98,36 @@ export interface DesignStyle {
 // ---------------------------------------------------------------- 颜色计算
 
 /** 解析 hex，认不出来回 null（不抛错：外部数据手改坏过也不能白屏） */
-export function parseHex(value: unknown): { r: number; g: number; b: number } | null {
-  if (typeof value !== 'string') return null
+export function parseHex(value: unknown): { r: number, g: number, b: number } | null {
+  if (typeof value !== 'string')
+    return null
   const text = value.trim()
   // 这套数据里的色值有不带 # 的写法；core 那把尺子要求带 #，补上再量
   const hex = sanitizeHexColor(text.startsWith('#') ? text : `#${text}`)
-  if (!hex) return null
+  if (!hex)
+    return null
   return {
-    r: parseInt(hex.slice(1, 3), 16),
-    g: parseInt(hex.slice(3, 5), 16),
-    b: parseInt(hex.slice(5, 7), 16)
+    r: Number.parseInt(hex.slice(1, 3), 16),
+    g: Number.parseInt(hex.slice(3, 5), 16),
+    b: Number.parseInt(hex.slice(5, 7), 16),
   }
 }
 
 /** 是不是一个能写进样式的颜色值（hex / 常见函数式写法 / 关键字） */
 export function isColorValue(value: unknown): value is string {
-  if (typeof value !== 'string') return false
+  if (typeof value !== 'string')
+    return false
   const text = value.trim()
-  if (parseHex(text)) return true
+  if (parseHex(text))
+    return true
   return /^(rgb|rgba|hsl|hsla|oklch|lab|color-mix)\(/i.test(text) || text === 'transparent'
 }
 
 /** 相对亮度（WCAG），用于决定叠在某个底色上的字用黑还是白 */
 export function relativeLuminance(hex: string): number {
   const rgb = parseHex(hex)
-  if (!rgb) return 0
+  if (!rgb)
+    return 0
   const channel = (value: number): number => {
     const v = value / 255
     return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4
@@ -148,7 +153,8 @@ export function inkOn(background: string): string {
 export function mixHex(a: string, b: string, t: number): string {
   const from = parseHex(a)
   const to = parseHex(b)
-  if (!from || !to) return a
+  if (!from || !to)
+    return a
   const ratio = Math.min(1, Math.max(0, t))
   const channel = (x: number, y: number): number => Math.round(x + (y - x) * ratio)
   const hex = (value: number): string => value.toString(16).padStart(2, '0')
@@ -158,17 +164,21 @@ export function mixHex(a: string, b: string, t: number): string {
 /** 色相（0–360），灰阶回 -1 */
 export function hueOf(hex: string): number {
   const rgb = parseHex(hex)
-  if (!rgb) return -1
+  if (!rgb)
+    return -1
   const r = rgb.r / 255
   const g = rgb.g / 255
   const b = rgb.b / 255
   const max = Math.max(r, g, b)
   const min = Math.min(r, g, b)
   const span = max - min
-  if (span < 0.04) return -1
+  if (span < 0.04)
+    return -1
   let hue: number
-  if (max === r) hue = ((g - b) / span) % 6
-  else if (max === g) hue = (b - r) / span + 2
+  if (max === r)
+    hue = ((g - b) / span) % 6
+  else if (max === g)
+    hue = (b - r) / span + 2
   else hue = (r - g) / span + 4
   hue *= 60
   return hue < 0 ? hue + 360 : hue
@@ -180,7 +190,8 @@ export function hueOf(hex: string): number {
  */
 export function colorFamily(hex: string): ColorFamily {
   const rgb = parseHex(hex)
-  if (!rgb) return '中性'
+  if (!rgb)
+    return '中性'
   const r = rgb.r / 255
   const g = rgb.g / 255
   const b = rgb.b / 255
@@ -188,19 +199,28 @@ export function colorFamily(hex: string): ColorFamily {
   const min = Math.min(r, g, b)
   const span = max - min
   // 接近纯黑/纯白/灰：没有色相可言
-  if (span < 0.08 || max < 0.09 || min > 0.94) return '中性'
+  if (span < 0.08 || max < 0.09 || min > 0.94)
+    return '中性'
   const hue = hueOf(hex)
-  if (hue < 0) return '中性'
+  if (hue < 0)
+    return '中性'
   // 粉与红用「红偏冷 + 偏亮」区分，纯靠色相分不开
-  if (hue < 12 || hue >= 345) return b > r * 0.62 && max > 0.55 ? '粉' : '红'
-  if (hue < 40) return '橙'
-  if (hue < 68) return '黄'
-  if (hue < 160) return '绿'
-  if (hue < 200) return '青'
+  if (hue < 12 || hue >= 345)
+    return b > r * 0.62 && max > 0.55 ? '粉' : '红'
+  if (hue < 40)
+    return '橙'
+  if (hue < 68)
+    return '黄'
+  if (hue < 160)
+    return '绿'
+  if (hue < 200)
+    return '青'
   // 蓝紫分界放在 245：品牌里的 violet / indigo（#6a5fc1 这类）色相在 246 上下，
   // 边界划在 255 会让它们全被算成蓝，界面上就没有紫色可筛了
-  if (hue < 245) return '蓝'
-  if (hue < 292) return '紫'
+  if (hue < 245)
+    return '蓝'
+  if (hue < 292)
+    return '紫'
   return '粉'
 }
 
@@ -211,7 +231,7 @@ export function designStyleFamily(style: DesignStyle): ColorFamily {
 
 // ---------------------------------------------------------------- token 引用
 
-const REF_RE = /^\{([a-zA-Z]+)\.([^}]+)\}$/
+const REF_RE = /^\{([a-z]+)\.([^}]+)\}$/i
 
 /**
  * 展开 `{colors.primary}` 这类引用。引用指向不存在的 token 时回 undefined（而不是回原字符串 ——
@@ -219,34 +239,43 @@ const REF_RE = /^\{([a-zA-Z]+)\.([^}]+)\}$/
  */
 export function resolveTokenRef(
   value: unknown,
-  style: Pick<DesignStyle, 'colors' | 'typography' | 'rounded' | 'spacing'>
+  style: Pick<DesignStyle, 'colors' | 'typography' | 'rounded' | 'spacing'>,
 ): string | undefined {
-  if (typeof value !== 'string') return undefined
+  if (typeof value !== 'string')
+    return undefined
   const text = value.trim()
-  if (!text) return undefined
+  if (!text)
+    return undefined
   const matched = REF_RE.exec(text)
-  if (!matched) return text
+  if (!matched)
+    return text
   const block = matched[1]
   const key = matched[2]
-  if (block === 'colors') return style.colors[key]
-  if (block === 'rounded') return style.rounded[key]
-  if (block === 'spacing') return style.spacing[key]
-  if (block === 'typography') return undefined // 字阶不是单个值，走 typographyRef
+  if (block === 'colors')
+    return style.colors[key]
+  if (block === 'rounded')
+    return style.rounded[key]
+  if (block === 'spacing')
+    return style.spacing[key]
+  if (block === 'typography')
+    return undefined // 字阶不是单个值，走 typographyRef
   return undefined
 }
 
 /** `{typography.button}` 指向的是整条字阶，单独取出来用 */
 export function typographyRef(
   value: unknown,
-  style: Pick<DesignStyle, 'typography'>
+  style: Pick<DesignStyle, 'typography'>,
 ): DesignTypeToken | undefined {
-  if (typeof value !== 'string') return undefined
+  if (typeof value !== 'string')
+    return undefined
   const matched = REF_RE.exec(value.trim())
-  if (!matched || matched[1] !== 'typography') return undefined
+  if (!matched || matched[1] !== 'typography')
+    return undefined
   return style.typography[matched[2]]
 }
 
-const REF_INLINE_RE = /\{([a-zA-Z]+)\.([^}]+)\}/g
+const REF_INLINE_RE = /\{([a-z]+)\.([^}]+)\}/gi
 
 /**
  * 把值里嵌着的引用一并展开 —— `{spacing.sm} {spacing.md}` → `8px 12px`。
@@ -256,16 +285,19 @@ const REF_INLINE_RE = /\{([a-zA-Z]+)\.([^}]+)\}/g
  */
 export function expandTokenRefs(
   value: unknown,
-  style: Pick<DesignStyle, 'colors' | 'typography' | 'rounded' | 'spacing'>
+  style: Pick<DesignStyle, 'colors' | 'typography' | 'rounded' | 'spacing'>,
 ): string | undefined {
-  if (typeof value !== 'string') return undefined
+  if (typeof value !== 'string')
+    return undefined
   const text = value.trim()
-  if (!text) return undefined
-  if (!text.includes('{')) return text
+  if (!text)
+    return undefined
+  if (!text.includes('{'))
+    return text
   let failed = false
   const expanded = text.replace(REF_INLINE_RE, (_, block: string, key: string) => {
-    const resolved =
-      block === 'colors'
+    const resolved
+      = block === 'colors'
         ? style.colors[key]
         : block === 'rounded'
           ? style.rounded[key]
@@ -283,11 +315,15 @@ export function expandTokenRefs(
 
 /** 只放行看起来像 CSS 值的短字符串，挡住 `url(...)`、分号、花括号这类会改变样式表结构的输入 */
 export function safeCssValue(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined
+  if (typeof value !== 'string')
+    return undefined
   const text = value.trim()
-  if (!text || text.length > 120) return undefined
-  if (/[<>;{}]/.test(text)) return undefined
-  if (/url\s*\(|expression|javascript:/i.test(text)) return undefined
+  if (!text || text.length > 120)
+    return undefined
+  if (/[<>;{}]/.test(text))
+    return undefined
+  if (/url\s*\(|expression|javascript:/i.test(text))
+    return undefined
   return text
 }
 
@@ -301,18 +337,23 @@ export function safeCssValue(value: unknown): string | undefined {
  */
 export function lineHeightCss(raw: unknown, fontSize: unknown): string | undefined {
   const value = safeCssValue(raw)
-  if (!value) return undefined
+  if (!value)
+    return undefined
   const asRatio = (pixels: number): string | undefined => {
     const size = Number(/([\d.]+)/.exec(typeof fontSize === 'string' ? fontSize : '')?.[1] ?? '')
-    if (!Number.isFinite(size) || size <= 0) return undefined
+    if (!Number.isFinite(size) || size <= 0)
+      return undefined
     return String(Math.min(2, Math.max(0.8, Math.round((pixels / size) * 100) / 100)))
   }
   const withUnit = /^([\d.]+)px$/.exec(value)
-  if (withUnit) return asRatio(Number(withUnit[1]))
+  if (withUnit)
+    return asRatio(Number(withUnit[1]))
   const number = Number(value)
-  if (!Number.isFinite(number)) return value
+  if (!Number.isFinite(number))
+    return value
   // 3 是数据里的安全分界：倍数写法最大 2.41，像素写法最小 14
-  if (number <= 3) return String(number)
+  if (number <= 3)
+    return String(number)
   return asRatio(number)
 }
 
@@ -334,16 +375,16 @@ export function componentStyle(token: DesignComponentToken, style: DesignStyle):
   const background = safeCssValue(expandTokenRefs(token.backgroundColor, style))
   // 没给字色时按底色自动定黑白。只有认得出 hex 才敢算对比度：`rgba(...)` 算不出亮度，
   // 硬猜会把白字放到浅底上。
-  const color =
-    safeCssValue(expandTokenRefs(token.textColor, style)) ??
-    (background && parseHex(background) ? inkOn(background) : undefined)
+  const color
+    = safeCssValue(expandTokenRefs(token.textColor, style))
+      ?? (background && parseHex(background) ? inkOn(background) : undefined)
   const borderColor = safeCssValue(expandTokenRefs(token.borderColor, style))
   const borderWidth = safeCssValue(expandTokenRefs(token.borderWidth, style))
   const borderStyle = safeCssValue(expandTokenRefs(token.borderStyle, style)) ?? (borderWidth ? 'solid' : undefined)
   // 有的规格把描边整条写在 `border` 里（`2px solid {colors.ink-deep}`），能展开就用它
-  const border =
-    safeCssValue(expandTokenRefs(token.border, style)) ??
-    (borderColor ? `${borderWidth ?? '1px'} ${borderStyle ?? 'solid'} ${borderColor}` : undefined)
+  const border
+    = safeCssValue(expandTokenRefs(token.border, style))
+      ?? (borderColor ? `${borderWidth ?? '1px'} ${borderStyle ?? 'solid'} ${borderColor}` : undefined)
   return {
     background,
     color,
@@ -353,7 +394,7 @@ export function componentStyle(token: DesignComponentToken, style: DesignStyle):
     height: safeCssValue(expandTokenRefs(token.height ?? token.size, style)),
     width: safeCssValue(expandTokenRefs(token.width, style)),
     boxShadow: safeCssValue(expandTokenRefs(token.boxShadow, style)),
-    font: typographyRef(token.typography, style)
+    font: typographyRef(token.typography, style),
   }
 }
 
@@ -365,591 +406,591 @@ export function componentStyle(token: DesignComponentToken, style: DesignStyle):
  */
 const SEGMENTS: Record<string, string> = {
   // 角色
-  primary: '主色',
-  secondary: '次色',
-  tertiary: '三级色',
-  accent: '强调色',
-  brand: '品牌色',
-  signature: '标志色',
-  commerce: '电商色',
-  neutral: '中性色',
-  inverse: '反色',
-  inverted: '反色',
-  semantic: '语义',
-  success: '成功',
-  warning: '警告',
-  warn: '警告',
-  error: '错误',
-  danger: '危险',
-  critical: '严重',
-  info: '信息',
-  positive: '正向',
-  negative: '负向',
-  attention: '注意',
-  alert: '警报',
-  sale: '促销',
-  trading: '交易',
-  fin: '金融',
+  'primary': '主色',
+  'secondary': '次色',
+  'tertiary': '三级色',
+  'accent': '强调色',
+  'brand': '品牌色',
+  'signature': '标志色',
+  'commerce': '电商色',
+  'neutral': '中性色',
+  'inverse': '反色',
+  'inverted': '反色',
+  'semantic': '语义',
+  'success': '成功',
+  'warning': '警告',
+  'warn': '警告',
+  'error': '错误',
+  'danger': '危险',
+  'critical': '严重',
+  'info': '信息',
+  'positive': '正向',
+  'negative': '负向',
+  'attention': '注意',
+  'alert': '警报',
+  'sale': '促销',
+  'trading': '交易',
+  'fin': '金融',
   // 明暗与浓淡
-  dark: '深色',
-  darkest: '最深',
-  deeper: '更深',
-  deep: '深',
-  night: '夜间',
-  light: '浅色',
-  lightest: '最浅',
-  bright: '明亮',
-  pale: '淡',
-  soft: '柔和',
-  softer: '更柔和',
-  subtle: '微妙',
-  faint: '极淡',
-  muted: '弱化',
-  mute: '弱化',
-  strong: '加重',
-  stronger: '更重',
-  subdued: '收敛',
-  translucent: '半透明',
-  frosted: '磨砂',
-  tinted: '着色',
-  tint: '浅调',
-  shade: '色阶',
+  'dark': '深色',
+  'darkest': '最深',
+  'deeper': '更深',
+  'deep': '深',
+  'night': '夜间',
+  'light': '浅色',
+  'lightest': '最浅',
+  'bright': '明亮',
+  'pale': '淡',
+  'soft': '柔和',
+  'softer': '更柔和',
+  'subtle': '微妙',
+  'faint': '极淡',
+  'muted': '弱化',
+  'mute': '弱化',
+  'strong': '加重',
+  'stronger': '更重',
+  'subdued': '收敛',
+  'translucent': '半透明',
+  'frosted': '磨砂',
+  'tinted': '着色',
+  'tint': '浅调',
+  'shade': '色阶',
   // 表面与结构
-  canvas: '画布',
-  surface: '表面',
-  background: '背景',
-  bg: '背景',
-  card: '卡片',
-  panel: '面板',
-  tile: '方块',
-  block: '区块',
-  box: '盒子',
-  bar: '条',
-  band: '色带',
-  strip: '条纹',
-  stripe: '条纹',
-  ribbon: '缎带',
-  chip: '标签块',
-  tag: '标签',
-  badge: '徽标',
-  pill: '胶囊',
-  capsule: '胶囊',
-  dot: '圆点',
-  orb: '圆球',
-  circle: '圆形',
-  square: '方形',
-  avatar: '头像',
-  logo: '标志',
-  wordmark: '品牌字标',
-  icon: '图标',
-  illustration: '插画',
-  mascot: '吉祥物',
-  sticker: '贴纸',
-  mockup: '示意稿',
-  screenshot: '截图',
-  thumbnail: '缩略图',
-  swatch: '色块',
-  palette: '色板',
-  gradient: '渐变',
-  glow: '光晕',
-  shadow: '阴影',
-  overlay: '蒙层',
-  scrim: '遮罩',
-  frame: '画框',
-  border: '描边',
-  bordered: '描边',
-  outline: '外框',
-  divider: '分隔线',
-  rule: '分隔线',
-  hairline: '细线',
-  ring: '焦点环',
-  keycap: '键帽',
-  inset: '内嵌',
-  floating: '浮动',
+  'canvas': '画布',
+  'surface': '表面',
+  'background': '背景',
+  'bg': '背景',
+  'card': '卡片',
+  'panel': '面板',
+  'tile': '方块',
+  'block': '区块',
+  'box': '盒子',
+  'bar': '条',
+  'band': '色带',
+  'strip': '条纹',
+  'stripe': '条纹',
+  'ribbon': '缎带',
+  'chip': '标签块',
+  'tag': '标签',
+  'badge': '徽标',
+  'pill': '胶囊',
+  'capsule': '胶囊',
+  'dot': '圆点',
+  'orb': '圆球',
+  'circle': '圆形',
+  'square': '方形',
+  'avatar': '头像',
+  'logo': '标志',
+  'wordmark': '品牌字标',
+  'icon': '图标',
+  'illustration': '插画',
+  'mascot': '吉祥物',
+  'sticker': '贴纸',
+  'mockup': '示意稿',
+  'screenshot': '截图',
+  'thumbnail': '缩略图',
+  'swatch': '色块',
+  'palette': '色板',
+  'gradient': '渐变',
+  'glow': '光晕',
+  'shadow': '阴影',
+  'overlay': '蒙层',
+  'scrim': '遮罩',
+  'frame': '画框',
+  'border': '描边',
+  'bordered': '描边',
+  'outline': '外框',
+  'divider': '分隔线',
+  'rule': '分隔线',
+  'hairline': '细线',
+  'ring': '焦点环',
+  'keycap': '键帽',
+  'inset': '内嵌',
+  'floating': '浮动',
   // 文字
-  ink: '文字色',
-  text: '文字',
-  body: '正文',
-  title: '标题',
-  heading: '标题',
-  headline: '大标题',
-  subhead: '副标题',
-  subtitle: '副标题',
-  sub: '次级',
-  overline: '顶线',
-  eyebrow: '眉题',
-  caption: '说明字',
-  label: '标签字',
-  micro: '微型字',
-  mono: '等宽',
-  code: '代码',
-  terminal: '终端',
-  tui: '终端界面',
-  stat: '数据',
-  stats: '数据',
-  number: '数字',
-  quote: '引语',
-  byline: '署名',
-  tagline: '标语',
-  prose: '正文',
-  legal: '法务',
-  fine: '细则',
-  print: '印刷',
+  'ink': '文字色',
+  'text': '文字',
+  'body': '正文',
+  'title': '标题',
+  'heading': '标题',
+  'headline': '大标题',
+  'subhead': '副标题',
+  'subtitle': '副标题',
+  'sub': '次级',
+  'overline': '顶线',
+  'eyebrow': '眉题',
+  'caption': '说明字',
+  'label': '标签字',
+  'micro': '微型字',
+  'mono': '等宽',
+  'code': '代码',
+  'terminal': '终端',
+  'tui': '终端界面',
+  'stat': '数据',
+  'stats': '数据',
+  'number': '数字',
+  'quote': '引语',
+  'byline': '署名',
+  'tagline': '标语',
+  'prose': '正文',
+  'legal': '法务',
+  'fine': '细则',
+  'print': '印刷',
   // 表单与控件
-  button: '按钮',
-  input: '输入框',
-  textarea: '多行输入框',
-  select: '选择器',
-  dropdown: '下拉',
-  checkbox: '复选框',
-  radio: '单选',
-  toggle: '开关',
-  switch: '开关',
-  slider: '滑块',
-  picker: '选择器',
-  form: '表单',
-  field: '字段',
-  auth: '认证',
-  login: '登录',
-  signup: '注册',
-  search: '搜索',
-  filter: '筛选',
-  sort: '排序',
-  pagination: '分页',
-  breadcrumb: '面包屑',
-  nav: '导航',
-  subnav: '次级导航',
-  menu: '菜单',
-  sidebar: '侧栏',
-  rail: '侧栏',
-  header: '页头',
-  footer: '页脚',
-  top: '顶部',
-  sticky: '吸顶',
-  pane: '面板',
-  window: '窗口',
-  modal: '弹窗',
-  drawer: '抽屉',
-  sheet: '抽屉面板',
-  toast: '提示条',
-  tip: '提示',
-  tooltip: '提示框',
-  banner: '横幅',
-  promo: '促销',
-  callout: '提示块',
-  announcement: '公告',
-  newsletter: '订阅',
-  cookie: 'Cookie',
-  consent: '同意',
-  segmented: '分段选择',
+  'button': '按钮',
+  'input': '输入框',
+  'textarea': '多行输入框',
+  'select': '选择器',
+  'dropdown': '下拉',
+  'checkbox': '复选框',
+  'radio': '单选',
+  'toggle': '开关',
+  'switch': '开关',
+  'slider': '滑块',
+  'picker': '选择器',
+  'form': '表单',
+  'field': '字段',
+  'auth': '认证',
+  'login': '登录',
+  'signup': '注册',
+  'search': '搜索',
+  'filter': '筛选',
+  'sort': '排序',
+  'pagination': '分页',
+  'breadcrumb': '面包屑',
+  'nav': '导航',
+  'subnav': '次级导航',
+  'menu': '菜单',
+  'sidebar': '侧栏',
+  'rail': '侧栏',
+  'header': '页头',
+  'footer': '页脚',
+  'top': '顶部',
+  'sticky': '吸顶',
+  'pane': '面板',
+  'window': '窗口',
+  'modal': '弹窗',
+  'drawer': '抽屉',
+  'sheet': '抽屉面板',
+  'toast': '提示条',
+  'tip': '提示',
+  'tooltip': '提示框',
+  'banner': '横幅',
+  'promo': '促销',
+  'callout': '提示块',
+  'announcement': '公告',
+  'newsletter': '订阅',
+  'cookie': 'Cookie',
+  'consent': '同意',
+  'segmented': '分段选择',
   // 版式
-  hero: '首屏',
-  section: '区块',
-  content: '内容',
-  page: '页面',
-  app: '应用',
-  shell: '外壳',
-  layout: '布局',
-  grid: '网格',
-  matrix: '矩阵',
-  row: '行',
-  cell: '单元格',
-  table: '表格',
-  data: '数据',
-  list: '列表',
-  item: '条目',
-  step: '步骤',
-  steps: '步骤',
-  timeline: '时间轴',
-  accordion: '折叠面板',
-  faq: '常见问题',
-  carousel: '轮播',
-  gallery: '画廊',
-  tabs: '标签页',
-  tab: '标签页',
-  tabbed: '标签页式',
-  option: '选项',
-  group: '分组',
-  collection: '合集',
-  region: '区域',
-  wall: '墙',
-  stack: '堆叠',
-  sphere: '圆球',
+  'hero': '首屏',
+  'section': '区块',
+  'content': '内容',
+  'page': '页面',
+  'app': '应用',
+  'shell': '外壳',
+  'layout': '布局',
+  'grid': '网格',
+  'matrix': '矩阵',
+  'row': '行',
+  'cell': '单元格',
+  'table': '表格',
+  'data': '数据',
+  'list': '列表',
+  'item': '条目',
+  'step': '步骤',
+  'steps': '步骤',
+  'timeline': '时间轴',
+  'accordion': '折叠面板',
+  'faq': '常见问题',
+  'carousel': '轮播',
+  'gallery': '画廊',
+  'tabs': '标签页',
+  'tab': '标签页',
+  'tabbed': '标签页式',
+  'option': '选项',
+  'group': '分组',
+  'collection': '合集',
+  'region': '区域',
+  'wall': '墙',
+  'stack': '堆叠',
+  'sphere': '圆球',
   // 商业
-  pricing: '定价',
-  tier: '档位',
-  plan: '套餐',
-  price: '价格',
-  buy: '购买',
-  cart: '购物车',
-  checkout: '结算',
-  shop: '商店',
-  store: '商店',
-  product: '产品',
-  pdp: '商品详情',
-  inventory: '库存',
-  order: '订单',
-  discount: '折扣',
-  coupon: '优惠券',
-  perk: '权益',
-  rewards: '奖励',
-  subscription: '订阅',
-  monthly: '月付',
-  yearly: '年付',
-  amount: '金额',
-  currency: '货币',
-  markets: '市场',
-  funds: '资金',
-  invoice: '账单',
-  billing: '计费',
+  'pricing': '定价',
+  'tier': '档位',
+  'plan': '套餐',
+  'price': '价格',
+  'buy': '购买',
+  'cart': '购物车',
+  'checkout': '结算',
+  'shop': '商店',
+  'store': '商店',
+  'product': '产品',
+  'pdp': '商品详情',
+  'inventory': '库存',
+  'order': '订单',
+  'discount': '折扣',
+  'coupon': '优惠券',
+  'perk': '权益',
+  'rewards': '奖励',
+  'subscription': '订阅',
+  'monthly': '月付',
+  'yearly': '年付',
+  'amount': '金额',
+  'currency': '货币',
+  'markets': '市场',
+  'funds': '资金',
+  'invoice': '账单',
+  'billing': '计费',
   // 内容与功能
-  feature: '功能',
-  features: '功能',
-  benefit: '优势',
-  comparison: '对比',
-  testimonial: '用户评价',
-  customer: '客户',
-  reviews: '评价',
-  review: '评价',
-  rating: '评分',
-  star: '星级',
-  stars: '星级',
-  trust: '信任',
-  spotlight: '聚光灯',
-  showcase: '展示',
-  preview: '预览',
-  demo: '演示',
-  example: '示例',
-  ex: '示例',
-  cta: '行动按钮',
-  link: '链接',
-  inline: '行内',
-  ghost: '幽灵',
-  filled: '实心',
-  dotted: '点线',
-  dashed: '虚线',
-  circular: '圆形',
-  rounded: '圆角',
-  inner: '内',
-  outer: '外',
-  left: '左',
-  right: '右',
-  end: '结束',
-  start: '开始',
-  from: '起点',
-  to: '终点',
-  up: '涨',
-  down: '跌',
-  new: '新建',
-  popular: '热门',
-  featured: '精选',
-  active: '激活',
-  pressed: '按下',
-  press: '按下',
-  hover: '悬停',
-  focused: '聚焦',
-  focus: '聚焦',
-  disabled: '禁用',
-  inactive: '未激活',
-  visited: '已访问',
-  required: '必填',
-  selected: '选中',
-  selection: '选中',
-  default: '默认',
-  state: '状态',
-  status: '状态',
-  empty: '空态',
-  placeholder: '占位',
-  skeleton: '骨架',
-  loading: '加载中',
-  secure: '安全',
+  'feature': '功能',
+  'features': '功能',
+  'benefit': '优势',
+  'comparison': '对比',
+  'testimonial': '用户评价',
+  'customer': '客户',
+  'reviews': '评价',
+  'review': '评价',
+  'rating': '评分',
+  'star': '星级',
+  'stars': '星级',
+  'trust': '信任',
+  'spotlight': '聚光灯',
+  'showcase': '展示',
+  'preview': '预览',
+  'demo': '演示',
+  'example': '示例',
+  'ex': '示例',
+  'cta': '行动按钮',
+  'link': '链接',
+  'inline': '行内',
+  'ghost': '幽灵',
+  'filled': '实心',
+  'dotted': '点线',
+  'dashed': '虚线',
+  'circular': '圆形',
+  'rounded': '圆角',
+  'inner': '内',
+  'outer': '外',
+  'left': '左',
+  'right': '右',
+  'end': '结束',
+  'start': '开始',
+  'from': '起点',
+  'to': '终点',
+  'up': '涨',
+  'down': '跌',
+  'new': '新建',
+  'popular': '热门',
+  'featured': '精选',
+  'active': '激活',
+  'pressed': '按下',
+  'press': '按下',
+  'hover': '悬停',
+  'focused': '聚焦',
+  'focus': '聚焦',
+  'disabled': '禁用',
+  'inactive': '未激活',
+  'visited': '已访问',
+  'required': '必填',
+  'selected': '选中',
+  'selection': '选中',
+  'default': '默认',
+  'state': '状态',
+  'status': '状态',
+  'empty': '空态',
+  'placeholder': '占位',
+  'skeleton': '骨架',
+  'loading': '加载中',
+  'secure': '安全',
   // 文档与站点
-  snippet: '代码片段',
-  keyword: '关键词',
-  command: '命令',
-  prompt: '提示词',
-  token: '设计变量',
-  spec: '规格',
-  specs: '规格',
-  doc: '文档',
-  docs: '文档',
-  changelog: '更新日志',
-  blog: '博客',
-  article: '文章',
-  news: '新闻',
-  newsroom: '新闻中心',
-  story: '报道',
-  campaign: '活动',
-  magazine: '杂志',
-  masthead: '报头',
-  marquee: '走马灯',
-  podcast: '播客',
+  'snippet': '代码片段',
+  'keyword': '关键词',
+  'command': '命令',
+  'prompt': '提示词',
+  'token': '设计变量',
+  'spec': '规格',
+  'specs': '规格',
+  'doc': '文档',
+  'docs': '文档',
+  'changelog': '更新日志',
+  'blog': '博客',
+  'article': '文章',
+  'news': '新闻',
+  'newsroom': '新闻中心',
+  'story': '报道',
+  'campaign': '活动',
+  'magazine': '杂志',
+  'masthead': '报头',
+  'marquee': '走马灯',
+  'podcast': '播客',
   // 场景
-  project: '项目',
-  workflow: '工作流',
-  workspace: '工作区',
-  environment: '环境',
-  ecosystem: '生态',
-  platform: '平台',
-  enterprise: '企业',
-  business: '商业',
-  startup: '创业',
-  developer: '开发者',
-  develop: '开发',
-  deploy: '部署',
-  install: '安装',
-  download: '下载',
-  host: '主机',
-  driver: '驱动',
-  extension: '扩展',
-  plugin: '插件',
-  toolkit: '工具包',
-  capability: '能力',
-  program: '计划',
-  course: '课程',
-  university: '大学',
-  research: '研究',
-  community: '社区',
-  support: '支持',
-  help: '帮助',
-  contact: '联系',
-  career: '招聘',
-  events: '活动',
-  event: '活动',
-  about: '关于',
-  why: '为什么',
-  day: '日',
-  date: '日期',
-  calendar: '日历',
-  time: '时间',
+  'project': '项目',
+  'workflow': '工作流',
+  'workspace': '工作区',
+  'environment': '环境',
+  'ecosystem': '生态',
+  'platform': '平台',
+  'enterprise': '企业',
+  'business': '商业',
+  'startup': '创业',
+  'developer': '开发者',
+  'develop': '开发',
+  'deploy': '部署',
+  'install': '安装',
+  'download': '下载',
+  'host': '主机',
+  'driver': '驱动',
+  'extension': '扩展',
+  'plugin': '插件',
+  'toolkit': '工具包',
+  'capability': '能力',
+  'program': '计划',
+  'course': '课程',
+  'university': '大学',
+  'research': '研究',
+  'community': '社区',
+  'support': '支持',
+  'help': '帮助',
+  'contact': '联系',
+  'career': '招聘',
+  'events': '活动',
+  'event': '活动',
+  'about': '关于',
+  'why': '为什么',
+  'day': '日',
+  'date': '日期',
+  'calendar': '日历',
+  'time': '时间',
   // 素材
-  asset: '素材',
-  image: '图片',
-  photo: '摄影',
-  photographic: '摄影',
-  cinematic: '电影感',
-  video: '视频',
-  audio: '音频',
-  voice: '语音',
-  waveform: '波形',
-  qr: '二维码',
+  'asset': '素材',
+  'image': '图片',
+  'photo': '摄影',
+  'photographic': '摄影',
+  'cinematic': '电影感',
+  'video': '视频',
+  'audio': '音频',
+  'voice': '语音',
+  'waveform': '波形',
+  'qr': '二维码',
   // 游戏 / 汽车 / 硬件
-  game: '游戏',
-  games: '游戏',
-  console: '主机',
-  paddle: '手柄',
-  esrb: '分级',
-  vehicle: '车型',
-  motorsport: '赛车',
-  race: '赛道',
-  livery: '涂装',
-  preowned: '二手车',
-  warranty: '质保',
-  service: '服务',
-  reservation: '预约',
-  guest: '访客',
-  member: '会员',
-  amenity: '设施',
-  experience: '体验',
-  sku: '商品编号',
+  'game': '游戏',
+  'games': '游戏',
+  'console': '主机',
+  'paddle': '手柄',
+  'esrb': '分级',
+  'vehicle': '车型',
+  'motorsport': '赛车',
+  'race': '赛道',
+  'livery': '涂装',
+  'preowned': '二手车',
+  'warranty': '质保',
+  'service': '服务',
+  'reservation': '预约',
+  'guest': '访客',
+  'member': '会员',
+  'amenity': '设施',
+  'experience': '体验',
+  'sku': '商品编号',
   // 尺寸阶梯
-  xxs: '微小',
-  xxxs: '极小',
-  xs: '极小',
-  sm: '小',
-  md: '中',
-  lg: '大',
-  xl: '特大',
-  xxl: '超大',
-  xxxl: '巨大',
-  xxxxl: '宏大',
+  'xxs': '微小',
+  'xxxs': '极小',
+  'xs': '极小',
+  'sm': '小',
+  'md': '中',
+  'lg': '大',
+  'xl': '特大',
+  'xxl': '超大',
+  'xxxl': '巨大',
+  'xxxxl': '宏大',
   '2xl': '超大',
   '3xl': '巨大',
   '4xl': '宏大',
   '5xl': '极大',
   '6xl': '最大',
-  huge: '特大',
-  super: '超大',
-  mega: '超大',
-  jumbo: '巨型',
-  large: '大',
-  medium: '中',
-  small: '小',
-  mini: '迷你',
-  nano: '极微',
-  tight: '紧凑',
-  dense: '密集',
-  airy: '疏朗',
-  bold: '粗体',
-  emph: '强调',
-  emphasis: '强调',
-  emphasized: '强调',
-  caps: '全大写',
-  uppercase: '全大写',
-  tabular: '等宽数字',
-  utility: '功能',
-  base: '基础',
-  none: '无',
-  full: '全',
-  hair: '极细',
-  height: '高度',
-  width: '宽度',
-  size: '尺寸',
-  typography: '字体',
+  'huge': '特大',
+  'super': '超大',
+  'mega': '超大',
+  'jumbo': '巨型',
+  'large': '大',
+  'medium': '中',
+  'small': '小',
+  'mini': '迷你',
+  'nano': '极微',
+  'tight': '紧凑',
+  'dense': '密集',
+  'airy': '疏朗',
+  'bold': '粗体',
+  'emph': '强调',
+  'emphasis': '强调',
+  'emphasized': '强调',
+  'caps': '全大写',
+  'uppercase': '全大写',
+  'tabular': '等宽数字',
+  'utility': '功能',
+  'base': '基础',
+  'none': '无',
+  'full': '全',
+  'hair': '极细',
+  'height': '高度',
+  'width': '宽度',
+  'size': '尺寸',
+  'typography': '字体',
   // 颜色词：色板里大量直接以颜色命名的键（`accent-blue`、`stone`、`charcoal`），
   // 这一段是标签能全中文的关键，缺一个就漏一个英文串
-  white: '白',
-  black: '黑',
-  gray: '灰',
-  grey: '灰',
-  blue: '蓝',
-  yellow: '黄',
-  green: '绿',
-  purple: '紫',
-  orange: '橙',
-  pink: '粉',
-  red: '红',
-  teal: '青绿',
-  cyan: '青',
-  coral: '珊瑚',
-  cream: '奶油',
-  violet: '紫罗兰',
-  magenta: '洋红',
-  mint: '薄荷',
-  peach: '蜜桃',
-  rose: '玫瑰',
-  amber: '琥珀',
-  gold: '金',
-  navy: '藏青',
-  sage: '鼠尾草绿',
-  salmon: '鲑粉',
-  olive: '橄榄绿',
-  indigo: '靛蓝',
-  lilac: '丁香紫',
-  ochre: '赭黄',
-  aubergine: '茄紫',
-  sunshine: '阳光黄',
-  sky: '天蓝',
-  lime: '青柠',
-  brown: '棕',
-  forest: '森林绿',
-  emerald: '祖母绿',
-  turquoise: '绿松石',
-  platinum: '铂金',
-  graphite: '石墨灰',
-  crimson: '绯红',
-  ruby: '宝石红',
-  wine: '酒红',
-  ice: '冰蓝',
-  chrome: '铬色',
-  periwinkle: '长春花蓝',
-  parchment: '羊皮纸色',
-  pearl: '珍珠白',
-  aloe: '芦荟绿',
-  pistachio: '开心果绿',
-  charcoal: '炭黑',
-  stone: '石灰',
-  ash: '灰白',
-  slate: '石板灰',
-  steel: '钢灰',
-  iron: '铁灰',
-  smoke: '烟灰',
-  mist: '雾灰',
-  fog: '雾色',
-  cloud: '云灰',
-  silver: '银灰',
-  bronze: '青铜',
-  copper: '铜色',
-  sand: '沙色',
-  clay: '陶土',
-  moss: '苔绿',
-  sea: '海蓝',
-  ocean: '海洋蓝',
-  storm: '风暴灰',
-  bloom: '花开色',
-  sunset: '落日色',
-  twilight: '暮色',
-  dusk: '黄昏色',
-  midnight: '午夜蓝',
-  breeze: '微风色',
-  bone: '骨白',
-  paper: '纸白',
-  snow: '雪白',
-  ivory: '象牙白',
-  beige: '米色',
-  taupe: '灰褐',
-  electric: '电光',
-  saturated: '高饱和',
-  warm: '暖',
-  cool: '冷',
-  deepest: '最深',
+  'white': '白',
+  'black': '黑',
+  'gray': '灰',
+  'grey': '灰',
+  'blue': '蓝',
+  'yellow': '黄',
+  'green': '绿',
+  'purple': '紫',
+  'orange': '橙',
+  'pink': '粉',
+  'red': '红',
+  'teal': '青绿',
+  'cyan': '青',
+  'coral': '珊瑚',
+  'cream': '奶油',
+  'violet': '紫罗兰',
+  'magenta': '洋红',
+  'mint': '薄荷',
+  'peach': '蜜桃',
+  'rose': '玫瑰',
+  'amber': '琥珀',
+  'gold': '金',
+  'navy': '藏青',
+  'sage': '鼠尾草绿',
+  'salmon': '鲑粉',
+  'olive': '橄榄绿',
+  'indigo': '靛蓝',
+  'lilac': '丁香紫',
+  'ochre': '赭黄',
+  'aubergine': '茄紫',
+  'sunshine': '阳光黄',
+  'sky': '天蓝',
+  'lime': '青柠',
+  'brown': '棕',
+  'forest': '森林绿',
+  'emerald': '祖母绿',
+  'turquoise': '绿松石',
+  'platinum': '铂金',
+  'graphite': '石墨灰',
+  'crimson': '绯红',
+  'ruby': '宝石红',
+  'wine': '酒红',
+  'ice': '冰蓝',
+  'chrome': '铬色',
+  'periwinkle': '长春花蓝',
+  'parchment': '羊皮纸色',
+  'pearl': '珍珠白',
+  'aloe': '芦荟绿',
+  'pistachio': '开心果绿',
+  'charcoal': '炭黑',
+  'stone': '石灰',
+  'ash': '灰白',
+  'slate': '石板灰',
+  'steel': '钢灰',
+  'iron': '铁灰',
+  'smoke': '烟灰',
+  'mist': '雾灰',
+  'fog': '雾色',
+  'cloud': '云灰',
+  'silver': '银灰',
+  'bronze': '青铜',
+  'copper': '铜色',
+  'sand': '沙色',
+  'clay': '陶土',
+  'moss': '苔绿',
+  'sea': '海蓝',
+  'ocean': '海洋蓝',
+  'storm': '风暴灰',
+  'bloom': '花开色',
+  'sunset': '落日色',
+  'twilight': '暮色',
+  'dusk': '黄昏色',
+  'midnight': '午夜蓝',
+  'breeze': '微风色',
+  'bone': '骨白',
+  'paper': '纸白',
+  'snow': '雪白',
+  'ivory': '象牙白',
+  'beige': '米色',
+  'taupe': '灰褐',
+  'electric': '电光',
+  'saturated': '高饱和',
+  'warm': '暖',
+  'cool': '冷',
+  'deepest': '最深',
   // 其它高频词
-  display: '展示字',
-  branding: '品牌',
-  template: '模板',
-  model: '模型',
-  marketing: '营销',
-  cap: '全大写',
-  invert: '反色',
-  elevated: '抬升',
-  mid: '中间',
-  m: '中',
-  s: '小',
-  ui: '界面',
-  ide: '编辑器',
-  editor: '编辑器',
-  toc: '目录',
-  resource: '资源',
-  industry: '行业',
-  contributor: '贡献者',
-  segment: '分段',
-  category: '分类',
-  property: '属性',
-  city: '城市',
-  favorite: '收藏',
-  feedback: '反馈',
-  mustard: '芥末黄',
-  topic: '话题',
-  lead: '引导',
-  global: '全局',
-  subscribe: '订阅',
-  arena: '竞技场',
-  crypto: '加密',
-  chart: '图表',
-  conversion: '转化',
-  trader: '交易',
-  luxe: '奢华',
-  plus: '增强',
-  lavender: '薰衣草',
-  carbon: '碳灰',
-  action: '行动',
-  device: '设备',
-  phone: '手机',
-  expert: '专家',
-  agent: '智能体',
-  configurator: '配置器',
-  chatbot: '聊天机器人',
-  launcher: '启动器',
-  connector: '连接器',
-  arrow: '箭头',
-  listing: '列表',
-  burst: '爆炸标',
-  cert: '证书',
-  seal: '印章',
-  tracked: '加宽字距',
-  illustrated: '插画',
-  cinema: '影院',
+  'display': '展示字',
+  'branding': '品牌',
+  'template': '模板',
+  'model': '模型',
+  'marketing': '营销',
+  'cap': '全大写',
+  'invert': '反色',
+  'elevated': '抬升',
+  'mid': '中间',
+  'm': '中',
+  's': '小',
+  'ui': '界面',
+  'ide': '编辑器',
+  'editor': '编辑器',
+  'toc': '目录',
+  'resource': '资源',
+  'industry': '行业',
+  'contributor': '贡献者',
+  'segment': '分段',
+  'category': '分类',
+  'property': '属性',
+  'city': '城市',
+  'favorite': '收藏',
+  'feedback': '反馈',
+  'mustard': '芥末黄',
+  'topic': '话题',
+  'lead': '引导',
+  'global': '全局',
+  'subscribe': '订阅',
+  'arena': '竞技场',
+  'crypto': '加密',
+  'chart': '图表',
+  'conversion': '转化',
+  'trader': '交易',
+  'luxe': '奢华',
+  'plus': '增强',
+  'lavender': '薰衣草',
+  'carbon': '碳灰',
+  'action': '行动',
+  'device': '设备',
+  'phone': '手机',
+  'expert': '专家',
+  'agent': '智能体',
+  'configurator': '配置器',
+  'chatbot': '聊天机器人',
+  'launcher': '启动器',
+  'connector': '连接器',
+  'arrow': '箭头',
+  'listing': '列表',
+  'burst': '爆炸标',
+  'cert': '证书',
+  'seal': '印章',
+  'tracked': '加宽字距',
+  'illustrated': '插画',
+  'cinema': '影院',
   // Cursor 的产品内时间轴阶段名，原文就是这几个词
-  thinking: '思考',
-  read: '读取',
-  edit: '编辑',
-  grep: '检索',
-  done: '完成',
-  report: '报告',
-  position: '名次',
-  checkmark: '对勾',
-  decoration: '装饰',
-  color: '色'
+  'thinking': '思考',
+  'read': '读取',
+  'edit': '编辑',
+  'grep': '检索',
+  'done': '完成',
+  'report': '报告',
+  'position': '名次',
+  'checkmark': '对勾',
+  'decoration': '装饰',
+  'color': '色',
 }
 
 /**
@@ -1051,9 +1092,9 @@ const KEY_LABELS: Record<string, string> = {
   'stat-display': '数据展示字',
   'hero-display': '首屏展示字',
   'body-md-strong': '正文（中·加重）',
-  card: '卡片圆角',
-  hero: '首屏圆角',
-  feature: '特色圆角'
+  'card': '卡片圆角',
+  'hero': '首屏圆角',
+  'feature': '特色圆角',
 }
 
 /**
@@ -1064,9 +1105,11 @@ const KEY_LABELS: Record<string, string> = {
  */
 export function tokenLabel(key: string, labels?: Record<string, string>): string {
   const hand = labels?.[key]
-  if (hand) return hand
+  if (hand)
+    return hand
   const whole = KEY_LABELS[key]
-  if (whole) return whole
+  if (whole)
+    return whole
 
   if (key.startsWith('on-')) {
     return `${tokenLabel(key.slice(3), labels)}上的文字`
@@ -1115,14 +1158,17 @@ const GROUP_RULES: Array<[ColorGroup, RegExp]> = [
   ['语义状态', /success|warning|warn|error|danger|critical|info|positive|negative|attention|alert/],
   [
     '品牌与强调',
-    /primary|accent|brand|signature|secondary|tertiary|link|cta|commerce|sale|trading|fin|highlight/
+    /primary|accent|brand|signature|secondary|tertiary|link|cta|commerce|sale|trading|fin|highlight/,
   ],
   ['文字与线条', /ink|text|body|caption|muted|mute|hairline|border|divider|rule|outline|ring|focus|label|heading|title|byline/],
-  ['表面与画布', /canvas|surface|background|bg|card|panel|overlay|scrim|elevated|inset|paper|cream|night/]
+  ['表面与画布', /canvas|surface|background|bg|card|panel|overlay|scrim|elevated|inset|paper|cream|night/],
 ]
 
 export function colorGroup(key: string): ColorGroup {
-  for (const [group, rule] of GROUP_RULES) if (rule.test(key)) return group
+  for (const [group, rule] of GROUP_RULES) {
+    if (rule.test(key))
+      return group
+  }
   return '其它'
 }
 
@@ -1136,11 +1182,14 @@ export const COMPONENT_GROUPS: readonly ComponentGroup[] = ['按钮', '卡片', 
 const COMPONENT_RULES: Array<[ComponentGroup, RegExp]> = [
   ['按钮', /button|cta|(^|-)tabs?(-|$)|pill-tab|link|badge|chip/],
   ['表单', /input|field|textarea|select|checkbox|radio|toggle|switch|search|form/],
-  ['卡片', /card|tile|pricing|tier|modal|toast|callout|drawer|sheet|panel|table|row|cell|empty|story|quote|testimonial/]
+  ['卡片', /card|tile|pricing|tier|modal|toast|callout|drawer|sheet|panel|table|row|cell|empty|story|quote|testimonial/],
 ]
 
 export function componentGroup(key: string): ComponentGroup {
-  for (const [group, rule] of COMPONENT_RULES) if (rule.test(key)) return group
+  for (const [group, rule] of COMPONENT_RULES) {
+    if (rule.test(key))
+      return group
+  }
   return '版式'
 }
 
@@ -1159,21 +1208,21 @@ export function groupComponents(style: DesignStyle): Record<ComponentGroup, stri
  */
 export function familyCounts(
   styles: DesignStyle[],
-  familyOf: (style: DesignStyle) => ColorFamily = designStyleFamily
-): Array<{ family: ColorFamily; count: number }> {
+  familyOf: (style: DesignStyle) => ColorFamily = designStyleFamily,
+): Array<{ family: ColorFamily, count: number }> {
   const counts = new Map<ColorFamily, number>()
   for (const style of styles) {
     const family = familyOf(style)
     counts.set(family, (counts.get(family) ?? 0) + 1)
   }
-  return COLOR_FAMILIES.filter((family) => counts.has(family)).map((family) => ({
+  return COLOR_FAMILIES.filter(family => counts.has(family)).map(family => ({
     family,
-    count: counts.get(family) ?? 0
+    count: counts.get(family) ?? 0,
   }))
 }
 
 /** 按分类统计，规则同上：界面上只列真实存在的分类 */
-export function categoryCounts(styles: DesignStyle[]): Array<{ category: string; count: number }> {
+export function categoryCounts(styles: DesignStyle[]): Array<{ category: string, count: number }> {
   const counts = new Map<string, number>()
   for (const style of styles) counts.set(style.category, (counts.get(style.category) ?? 0) + 1)
   return [...counts.entries()]
@@ -1181,13 +1230,12 @@ export function categoryCounts(styles: DesignStyle[]): Array<{ category: string;
     .sort((a, b) => b.count - a.count || a.category.localeCompare(b.category, 'zh'))
 }
 
-
 /** 组件排在前面的那几条最值得画出来，其余只做计数 */
 export const GROUP_PREVIEW_LIMIT: Record<ComponentGroup, number> = {
   按钮: 12,
   卡片: 6,
   表单: 4,
-  版式: 10
+  版式: 10,
 }
 
 /** 字阶按字号从大到小（认不出字号的一律排到最后） */
@@ -1201,7 +1249,7 @@ export function typographyScale(style: DesignStyle): Array<[string, DesignTypeTo
 
 /** 间距 / 圆角按数值从小到大 —— 它们是阶梯，按阶梯顺序看才有意义 */
 export function numericScale(
-  block: Record<string, string>
+  block: Record<string, string>,
 ): Array<[string, string, number]> {
   const value = (raw: string): number => {
     const matched = /([\d.]+)/.exec(raw)
@@ -1226,7 +1274,7 @@ export function componentSamples(style: DesignStyle): Array<{
     const keys = grouped[group]
     const limit = GROUP_PREVIEW_LIMIT[group]
     return { group, keys: keys.slice(0, limit), rest: Math.max(0, keys.length - limit) }
-  }).filter((entry) => entry.keys.length > 0)
+  }).filter(entry => entry.keys.length > 0)
 }
 
 // ---------------------------------------------------------------- 筛选与排序
@@ -1238,7 +1286,7 @@ export type DesignStyleSort = 'az' | 'hue' | 'dark'
 export const SORT_LABELS: Record<DesignStyleSort, string> = {
   az: '名称 A–Z',
   hue: '按色相',
-  dark: '深色优先'
+  dark: '深色优先',
 }
 
 export interface DesignStyleFilter {
@@ -1261,7 +1309,7 @@ export function designStyleHaystack(style: DesignStyle): string {
     style.description,
     // 主色与画布色是卡片上最显眼的两个值，用户很可能会照着它们搜
     style.accent,
-    style.canvas
+    style.canvas,
   ]
   for (const [key, value] of Object.entries(style.colors)) {
     parts.push(key, colorLabel(style, key), value)
@@ -1276,17 +1324,21 @@ export function designStyleHaystack(style: DesignStyle): string {
 export function filterDesignStyles(
   styles: DesignStyle[],
   filter: DesignStyleFilter,
-  haystackOf: (style: DesignStyle) => string = designStyleHaystack
+  haystackOf: (style: DesignStyle) => string = designStyleHaystack,
 ): DesignStyle[] {
   const query = (filter.query ?? '').trim().toLowerCase()
   const theme = filter.theme ?? 'all'
   const family = filter.family ?? 'all'
   const category = filter.category ?? 'all'
   return styles.filter((style) => {
-    if (theme !== 'all' && style.theme !== theme) return false
-    if (family !== 'all' && designStyleFamily(style) !== family) return false
-    if (category !== 'all' && style.category !== category) return false
-    if (!query) return true
+    if (theme !== 'all' && style.theme !== theme)
+      return false
+    if (family !== 'all' && designStyleFamily(style) !== family)
+      return false
+    if (category !== 'all' && style.category !== category)
+      return false
+    if (!query)
+      return true
     return haystackOf(style).includes(query)
   })
 }
@@ -1294,7 +1346,7 @@ export function filterDesignStyles(
 export function sortDesignStyles(
   styles: DesignStyle[],
   sort: DesignStyleSort,
-  familyOf: (style: DesignStyle) => ColorFamily = designStyleFamily
+  familyOf: (style: DesignStyle) => ColorFamily = designStyleFamily,
 ): DesignStyle[] {
   const list = [...styles]
   if (sort === 'az') {
@@ -1304,7 +1356,8 @@ export function sortDesignStyles(
   if (sort === 'dark') {
     // 深色系排前面；同档按名称，避免每次渲染顺序抖动
     list.sort((a, b) => {
-      if (a.theme !== b.theme) return a.theme === 'dark' ? -1 : 1
+      if (a.theme !== b.theme)
+        return a.theme === 'dark' ? -1 : 1
       return a.title.localeCompare(b.title, 'en')
     })
     return list
@@ -1313,10 +1366,12 @@ export function sortDesignStyles(
   list.sort((a, b) => {
     const fa = familyOrder.indexOf(familyOf(a))
     const fb = familyOrder.indexOf(familyOf(b))
-    if (fa !== fb) return fa - fb
+    if (fa !== fb)
+      return fa - fb
     const ha = hueOf(a.accent)
     const hb = hueOf(b.accent)
-    if (ha !== hb) return ha - hb
+    if (ha !== hb)
+      return ha - hb
     return a.title.localeCompare(b.title, 'en')
   })
   return list
@@ -1329,24 +1384,30 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function stringMap(value: unknown): Record<string, string> {
-  if (!isRecord(value)) return {}
+  if (!isRecord(value))
+    return {}
   const out: Record<string, string> = {}
   for (const [key, raw] of Object.entries(value)) {
-    if (typeof raw === 'string' && raw.trim()) out[key] = raw
+    if (typeof raw === 'string' && raw.trim())
+      out[key] = raw
   }
   return out
 }
 
 function typographyMap(value: unknown): Record<string, DesignTypeToken> {
-  if (!isRecord(value)) return {}
+  if (!isRecord(value))
+    return {}
   const out: Record<string, DesignTypeToken> = {}
   for (const [key, raw] of Object.entries(value)) {
-    if (!isRecord(raw)) continue
+    if (!isRecord(raw))
+      continue
     const token: DesignTypeToken = {}
     for (const field of ['fontFamily', 'fontSize', 'fontWeight', 'lineHeight', 'letterSpacing'] as const) {
       const text = raw[field]
-      if (typeof text === 'string' && text.trim()) token[field] = text
-      else if (typeof text === 'number') token[field] = String(text)
+      if (typeof text === 'string' && text.trim())
+        token[field] = text
+      else if (typeof text === 'number')
+        token[field] = String(text)
     }
     out[key] = token
   }
@@ -1354,14 +1415,18 @@ function typographyMap(value: unknown): Record<string, DesignTypeToken> {
 }
 
 function componentMap(value: unknown): Record<string, DesignComponentToken> {
-  if (!isRecord(value)) return {}
+  if (!isRecord(value))
+    return {}
   const out: Record<string, DesignComponentToken> = {}
   for (const [key, raw] of Object.entries(value)) {
-    if (!isRecord(raw)) continue
+    if (!isRecord(raw))
+      continue
     const token: DesignComponentToken = {}
     for (const [field, cell] of Object.entries(raw)) {
-      if (typeof cell === 'string' && cell.trim()) token[field] = cell
-      else if (typeof cell === 'number') token[field] = String(cell)
+      if (typeof cell === 'string' && cell.trim())
+        token[field] = cell
+      else if (typeof cell === 'number')
+        token[field] = String(cell)
     }
     out[key] = token
   }
@@ -1369,11 +1434,12 @@ function componentMap(value: unknown): Record<string, DesignComponentToken> {
 }
 
 function labelsOf(value: unknown): DesignStyleLabels | undefined {
-  if (!isRecord(value)) return undefined
+  if (!isRecord(value))
+    return undefined
   const labels: DesignStyleLabels = {
     colors: stringMap(value.colors),
     typography: stringMap(value.typography),
-    components: stringMap(value.components)
+    components: stringMap(value.components),
   }
   return labels
 }
@@ -1386,11 +1452,13 @@ export function sanitizeDesignStyles(raw: unknown): DesignStyle[] {
   const list = isRecord(raw) && Array.isArray(raw.styles) ? raw.styles : Array.isArray(raw) ? raw : []
   const out: DesignStyle[] = []
   for (const entry of list) {
-    if (!isRecord(entry)) continue
+    if (!isRecord(entry))
+      continue
     const brand = typeof entry.brand === 'string' ? entry.brand.trim() : ''
     const title = typeof entry.title === 'string' ? entry.title.trim() : ''
     const accent = typeof entry.accent === 'string' ? entry.accent.trim() : ''
-    if (!brand || !title || !isColorValue(accent)) continue
+    if (!brand || !title || !isColorValue(accent))
+      continue
     const canvas = typeof entry.canvas === 'string' && isColorValue(entry.canvas) ? entry.canvas : accent
     out.push({
       brand,
@@ -1407,7 +1475,7 @@ export function sanitizeDesignStyles(raw: unknown): DesignStyle[] {
       rounded: stringMap(entry.rounded),
       spacing: stringMap(entry.spacing),
       components: componentMap(entry.components),
-      labels: labelsOf(entry.labels)
+      labels: labelsOf(entry.labels),
     })
   }
   return out

@@ -1,4 +1,10 @@
 <script setup lang="ts">
+import type { ProjectColor } from '@workbench/core'
+import type { WorkLogEntry, WorkRange, WorkSort } from '@workbench/work-log'
+import { ArrowDown, Memo, Plus } from '@element-plus/icons-vue'
+import { addDays, dayKey, markdownToPlainText, projectColorVar, sanitizeProjectColor } from '@workbench/core'
+import { dayMeta, DELETED_PROJECT_ID, groupByProject, isWorkSort, paginate, sanitizeWorkRange, sanitizeWorkSort, timelineOf, toggleWorkLogStatus, WORK_PAGE_DAYS, WORK_RANGE_LABELS, WORK_RANGES, WORK_SORT_LABELS, WORK_SORTS, WORK_STATUS_LABELS } from '@workbench/work-log'
+import { ElMessage } from 'element-plus'
 /**
  * 工作页：按天分组的工作日志时间轴。
  *
@@ -12,37 +18,12 @@
  * 这一层只做取数与交互。
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { ElMessage } from 'element-plus'
-import { confirmAction } from '@/notify'
-import { ArrowDown, Memo, Plus } from '@element-plus/icons-vue'
-import { addDays, dayKey } from '@workbench/core'
-import { markdownToPlainText } from '@workbench/core'
-import { projectColorVar, sanitizeProjectColor, type ProjectColor } from '@workbench/core'
-import {
-  DELETED_PROJECT_ID,
-  WORK_PAGE_DAYS,
-  WORK_RANGES,
-  WORK_RANGE_LABELS,
-  WORK_SORTS,
-  WORK_SORT_LABELS,
-  WORK_STATUS_LABELS,
-  dayMeta,
-  groupByProject,
-  isWorkSort,
-  paginate,
-  sanitizeWorkRange,
-  sanitizeWorkSort,
-  timelineOf,
-  toggleWorkLogStatus,
-  type WorkLogEntry,
-  type WorkRange,
-  type WorkSort
-} from '@workbench/work-log'
-import { useProjectsStore } from '@/stores/projects'
-import { useSettingsStore } from '@/stores/settings'
+import PanelLoading from '@/components/PanelLoading.vue'
 import WorkLogCard from '@/components/WorkLogCard.vue'
 import WorkLogDialog from '@/components/WorkLogDialog.vue'
-import PanelLoading from '@/components/PanelLoading.vue'
+import { confirmAction } from '@/notify'
+import { useProjectsStore } from '@/stores/projects'
+import { useSettingsStore } from '@/stores/settings'
 
 const store = useProjectsStore()
 const settings = useSettingsStore()
@@ -53,7 +34,7 @@ const loading = ref(true)
 const loadError = ref('')
 const range = ref<WorkRange>(sanitizeWorkRange(settings.settings.workRange))
 /** 时间范围的选项：Element Plus 的分段控件要 { label, value }，标签表在 shared 里 */
-const rangeOptions = WORK_RANGES.map((value) => ({ label: WORK_RANGE_LABELS[value], value }))
+const rangeOptions = WORK_RANGES.map(value => ({ label: WORK_RANGE_LABELS[value], value }))
 /** 排序维度：按时间（天为轴）或按项目（项目为轴） */
 const sort = ref<WorkSort>(sanitizeWorkSort(settings.settings.workSort))
 
@@ -62,14 +43,14 @@ watch(
   () => settings.settings.workRange,
   (value) => {
     range.value = sanitizeWorkRange(value)
-  }
+  },
 )
 
 watch(
   () => settings.settings.workSort,
   (value) => {
     sort.value = sanitizeWorkSort(value)
-  }
+  },
 )
 /** 只看待办：把已完成的筛掉（默认关） */
 const todoOnly = ref(false)
@@ -84,11 +65,14 @@ async function load(): Promise<void> {
   loadError.value = ''
   try {
     const result = await window.workbench.listWorkLogs()
-    if (result.ok && result.data) entries.value = result.data
+    if (result.ok && result.data)
+      entries.value = result.data
     else loadError.value = result.error ?? '读取工作日志失败'
-  } catch (error) {
+  }
+  catch (error) {
     loadError.value = error instanceof Error ? error.message : '读取工作日志失败'
-  } finally {
+  }
+  finally {
     loading.value = false
     now.value = Date.now()
   }
@@ -104,12 +88,14 @@ onMounted(() => {
   void load()
   timer = window.setInterval(() => {
     const next = Date.now()
-    if (dayKey(next) !== dayKey(now.value)) now.value = next
+    if (dayKey(next) !== dayKey(now.value))
+      now.value = next
   }, 60_000)
 })
 
 onBeforeUnmount(() => {
-  if (timer) window.clearInterval(timer)
+  if (timer)
+    window.clearInterval(timer)
 })
 
 /**
@@ -122,15 +108,15 @@ onBeforeUnmount(() => {
  */
 const sections = computed(() => {
   const visible = todoOnly.value
-    ? entries.value.filter((entry) => entry.status !== 'done')
+    ? entries.value.filter(entry => entry.status !== 'done')
     : entries.value
 
   if (sort.value === 'time') {
-    return timelineOf(visible, range.value, now.value).map((group) => ({
+    return timelineOf(visible, range.value, now.value).map(group => ({
       key: group.day,
       day: group.day,
       projectId: null as string | null,
-      entries: group.entries
+      entries: group.entries,
     }))
   }
 
@@ -138,12 +124,12 @@ const sections = computed(() => {
     visible,
     range.value,
     now.value,
-    store.projects.map((project) => ({ id: project.id, name: project.name }))
-  ).map((group) => ({
+    store.projects.map(project => ({ id: project.id, name: project.name })),
+  ).map(group => ({
     key: group.projectId ?? 'none',
     day: '',
     projectId: group.projectId,
-    entries: group.entries
+    entries: group.entries,
   }))
 })
 
@@ -151,12 +137,12 @@ const paged = computed(() => paginate(sections.value, page.value, WORK_PAGE_DAYS
 
 /** 当前页里的栏 + 各自的栏头信息（时间维度给日期，项目维度给项目名与颜色） */
 const groups = computed(() =>
-  paged.value.items.map((section) => ({
+  paged.value.items.map(section => ({
     ...section,
     meta: dayMeta(section.day, now.value),
     title: projectTitleOf(section.projectId),
-    color: projectColorOf(section.projectId)
-  }))
+    color: projectColorOf(section.projectId),
+  })),
 )
 
 /** 当前范围里的记录条数（不是栏数）：头部那个计数与分页都从它来 */
@@ -172,9 +158,10 @@ const total = computed(() => sections.value.reduce((sum, group) => sum + group.e
 const lastLoggedText = computed(() => {
   const latest = entries.value.reduce(
     (max, entry) => (entry.date > max ? entry.date : max),
-    ''
+    '',
   )
-  if (!latest) return ''
+  if (!latest)
+    return ''
 
   // 近几天说「昨天 / 前天」比报日期更像人话，再远就报日期（dayMeta 自己就是这套口径）
   const meta = dayMeta(latest, now.value)
@@ -188,9 +175,9 @@ const lastLoggedText = computed(() => {
 const todoCount = computed(
   () =>
     timelineOf(entries.value, range.value, now.value).reduce(
-      (sum, group) => sum + group.entries.filter((entry) => entry.status !== 'done').length,
-      0
-    )
+      (sum, group) => sum + group.entries.filter(entry => entry.status !== 'done').length,
+      0,
+    ),
 )
 
 /** 换范围、换维度或开关筛选后回到第一页，否则会停在一个新视图里并不存在的页码上 */
@@ -211,10 +198,11 @@ watch([range, sort], () => {
 
 function pickSort(value: string): void {
   // 走 action 式的收敛：非法值不会被写进 sort
-  if (isWorkSort(value)) sort.value = value
+  if (isWorkSort(value))
+    sort.value = value
 }
 
-const projectNames = computed(() => new Map(store.projects.map((item) => [item.id, item])))
+const projectNames = computed(() => new Map(store.projects.map(item => [item.id, item])))
 
 /** 记录上的项目名；项目已被删除时返回 null，由卡片显示「项目已删除」 */
 function projectNameOf(entry: WorkLogEntry): string | null {
@@ -230,8 +218,10 @@ function projectColorOf(projectId?: string | null): ProjectColor | undefined {
 
 /** 项目维度下栏头上的名字：未关联 / 已删除各说各的 */
 function projectTitleOf(projectId?: string | null): string {
-  if (!projectId) return '未关联项目'
-  if (projectId === DELETED_PROJECT_ID) return '项目已删除'
+  if (!projectId)
+    return '未关联项目'
+  if (projectId === DELETED_PROJECT_ID)
+    return '项目已删除'
   return projectNames.value.get(projectId)?.name ?? '项目已删除'
 }
 
@@ -242,7 +232,7 @@ function entryColorOf(entry: WorkLogEntry): ProjectColor | undefined {
 
 /** 新增时的默认日期：停在「昨天」就默认记到昨天，其余档位按今天 */
 const defaultDate = computed(() =>
-  range.value === 'yesterday' ? dayKey(addDays(now.value, -1)) : dayKey(now.value)
+  range.value === 'yesterday' ? dayKey(addDays(now.value, -1)) : dayKey(now.value),
 )
 
 function openCreate(): void {
@@ -257,8 +247,9 @@ function openEdit(entry: WorkLogEntry): void {
 
 /** 保存成功后把结果并进内存里那份列表：不重读文件，也不等下一次进页面 */
 function onSaved(entry: WorkLogEntry): void {
-  const index = entries.value.findIndex((item) => item.id === entry.id)
-  if (index === -1) entries.value = [...entries.value, entry]
+  const index = entries.value.findIndex(item => item.id === entry.id)
+  if (index === -1)
+    entries.value = [...entries.value, entry]
   else entries.value.splice(index, 1, entry)
   // 新记的那条未必落在当前范围里（例如停在「昨天」却记到了今天），把时刻推一下让范围重新算
   now.value = Date.now()
@@ -273,8 +264,9 @@ function onSaved(entry: WorkLogEntry): void {
 async function toggleStatus(entry: WorkLogEntry): Promise<void> {
   const before = entry.status
   const next = toggleWorkLogStatus(before)
-  const index = entries.value.findIndex((item) => item.id === entry.id)
-  if (index === -1) return
+  const index = entries.value.findIndex(item => item.id === entry.id)
+  if (index === -1)
+    return
   entries.value.splice(index, 1, { ...entry, status: next })
 
   const result = await window.workbench.updateWorkLog(entry.id, { status: next })
@@ -291,16 +283,17 @@ async function remove(entry: WorkLogEntry): Promise<void> {
   const preview = markdownToPlainText(entry.content)
   const short = preview.length > 24 ? `${preview.slice(0, 24)}…` : preview
   const agreed = await confirmAction(`删除「${short}」？删除后不可恢复。`, '删除记录', {
-    confirmButtonText: '删除'
+    confirmButtonText: '删除',
   })
-  if (!agreed) return
+  if (!agreed)
+    return
 
   const result = await window.workbench.removeWorkLog(entry.id)
   if (!result.ok) {
     ElMessage.error(result.error ?? '删除工作记录失败')
     return
   }
-  entries.value = entries.value.filter((item) => item.id !== entry.id)
+  entries.value = entries.value.filter(item => item.id !== entry.id)
   ElMessage.success('已删除')
 }
 </script>
@@ -338,7 +331,9 @@ async function remove(entry: WorkLogEntry): Promise<void> {
           <button class="sort" type="button">
             <span class="sort__label">排序</span>
             <span class="sort__value">{{ WORK_SORT_LABELS[sort] }}</span>
-            <el-icon class="sort__caret"><ArrowDown /></el-icon>
+            <el-icon class="sort__caret">
+              <ArrowDown />
+            </el-icon>
           </button>
           <template #dropdown>
             <el-dropdown-menu>
@@ -365,16 +360,22 @@ async function remove(entry: WorkLogEntry): Promise<void> {
       <!-- 读盘失败：把原因说出来并给一次重试，不能显示成「还没有记录」 -->
       <div v-if="loadError" class="empty">
         <p>{{ loadError }}</p>
-        <el-button size="small" @click="load()">重试</el-button>
+        <el-button size="small" @click="load()">
+          重试
+        </el-button>
       </div>
 
       <PanelLoading v-else-if="loading" text="正在读取工作日志…" />
 
       <div v-else-if="!total" class="empty">
-        <el-icon class="empty__icon"><Memo /></el-icon>
+        <el-icon class="empty__icon">
+          <Memo />
+        </el-icon>
         <p>{{ WORK_RANGE_LABELS[range] }}{{ todoOnly ? '没有待办' : '还没有记录' }}</p>
         <p class="empty__hint">
-          <template v-if="todoOnly">这个范围里的记录都已完成。</template>
+          <template v-if="todoOnly">
+            这个范围里的记录都已完成。
+          </template>
           <!--
             有记录、只是不在这段时间里：把「最近一次是哪天」说出来。
             只说「还没有记录」会让人以为东西丢了，而此刻真正要知道的是这个。
@@ -481,7 +482,6 @@ async function remove(entry: WorkLogEntry): Promise<void> {
   padding: var(--card-gap, 10px);
 }
 
-
 /* 工作页的空态比别处「重」一档（整页居中，等日志的时间更长），
    基础样式在 global.css，这里只留与别处不同的高度与字号 */
 .empty {
@@ -496,7 +496,6 @@ async function remove(entry: WorkLogEntry): Promise<void> {
 .empty p {
   margin: 0;
 }
-
 
 .day {
   display: flex;

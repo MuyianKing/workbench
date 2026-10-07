@@ -1,35 +1,6 @@
+import type { NoteEntry, NoteNode } from './note'
 import { describe, expect, it } from 'vitest'
-import {
-  buildNoteTree,
-  countNodes,
-  countNotes,
-  findNoteNode,
-  isNoteFile,
-  isValidNoteName,
-  joinRel,
-  noteChain,
-  noteDisplayName,
-  noteDropAllowed,
-  noteFileName,
-  noteNameProblem,
-  noteRootName,
-  normalizeRel,
-  parentRel,
-  relName,
-  pushNoteHistory,
-  removeFromNoteHistory,
-  resolveNoteLink,
-  sanitizeNoteHistory,
-  sanitizeNoteName,
-  sanitizeNoteRoot,
-  sanitizeNoteTreeExpanded,
-  sortNoteNodes,
-  uniqueNoteName,
-  NOTE_HISTORY_MAX,
-  NOTE_TREE_EXPANDED_MAX,
-  type NoteEntry,
-  type NoteNode
-} from './note'
+import { buildNoteTree, countNodes, countNotes, findNoteNode, isNoteFile, isValidNoteName, joinRel, normalizeRel, NOTE_HISTORY_MAX, NOTE_TREE_EXPANDED_MAX, noteChain, noteDisplayName, noteDropAllowed, noteFileName, noteNameProblem, noteRootName, parentRel, pushNoteHistory, relName, removeFromNoteHistory, resolveNoteLink, sanitizeNoteHistory, sanitizeNoteName, sanitizeNoteRoot, sanitizeNoteTreeExpanded, sortNoteNodes, uniqueNoteName } from './note'
 
 function dir(rel: string): NoteEntry {
   return { rel, name: relName(rel), isDir: true }
@@ -41,7 +12,7 @@ function file(rel: string, mtimeMs = 0): NoteEntry {
 
 /** 树里某一层的名字（按显示顺序），写断言时比整棵树好读 */
 function namesOf(nodes: readonly NoteNode[]): string[] {
-  return nodes.map((node) => node.name)
+  return nodes.map(node => node.name)
 }
 
 describe('路径', () => {
@@ -120,7 +91,7 @@ describe('组树', () => {
       file('笔记 9.md'),
       dir('工作'),
       file('笔记 8.md'),
-      dir('归档')
+      dir('归档'),
     ])
     expect(namesOf(nodes)).toEqual(['工作', '归档', '笔记 8', '笔记 9', '笔记 10'])
   })
@@ -132,7 +103,7 @@ describe('组树', () => {
       dir('工作/归档'),
       file('工作/归档/旧事.md'),
       file('工作/配图.png'),
-      file('随手记.markdown')
+      file('随手记.markdown'),
     ])
 
     expect(namesOf(nodes)).toEqual(['工作', '随手记'])
@@ -169,7 +140,7 @@ describe('组树', () => {
   it('树里没有「根」这一层：顶层条目就是笔记本里的东西', () => {
     const nodes = buildNoteTree([file('周报.md'), dir('工作')])
     expect(namesOf(nodes)).toEqual(['工作', '周报'])
-    expect(nodes.every((node) => node.rel && node.id === node.rel)).toBe(true)
+    expect(nodes.every(node => node.rel && node.id === node.rel)).toBe(true)
   })
 })
 
@@ -179,7 +150,7 @@ describe('读树', () => {
     file('工作/周报.md'),
     dir('工作/归档'),
     file('工作/归档/旧事.md'),
-    file('随手记.md')
+    file('随手记.md'),
   ])
 
   it('findNoteNode 能找到任意深度，找不到返回 null', () => {
@@ -191,10 +162,10 @@ describe('读树', () => {
   })
 
   it('noteChain 给出从最外层到自身的链', () => {
-    expect(noteChain(nodes, '工作/归档/旧事.md').map((node) => node.name)).toEqual([
+    expect(noteChain(nodes, '工作/归档/旧事.md').map(node => node.name)).toEqual([
       '工作',
       '归档',
-      '旧事'
+      '旧事',
     ])
     expect(noteChain(nodes, '随手记.md')).toHaveLength(1)
     expect(noteChain(nodes, '工作/没有.md')).toEqual([])
@@ -209,26 +180,26 @@ describe('读树', () => {
 describe('拖动', () => {
   it('文件可以拖进别的文件夹', () => {
     expect(noteDropAllowed({ rel: '周报.md', kind: 'note' }, { rel: '工作', kind: 'folder' })).toBe(
-      true
+      true,
     )
     // 拖回最外层（目录树下面的空白区，落点按 rel 为空串的文件夹算）
     expect(
-      noteDropAllowed({ rel: '工作/周报.md', kind: 'note' }, { rel: '', kind: 'folder' })
+      noteDropAllowed({ rel: '工作/周报.md', kind: 'note' }, { rel: '', kind: 'folder' }),
     ).toBe(true)
   })
 
   it('已经在里面的、落在文件上的、拖文件夹的一律不行', () => {
     expect(
-      noteDropAllowed({ rel: '工作/周报.md', kind: 'note' }, { rel: '工作', kind: 'folder' })
+      noteDropAllowed({ rel: '工作/周报.md', kind: 'note' }, { rel: '工作', kind: 'folder' }),
     ).toBe(false)
     expect(noteDropAllowed({ rel: '周报.md', kind: 'note' }, { rel: '', kind: 'folder' })).toBe(
-      false
+      false,
     )
     expect(noteDropAllowed({ rel: '周报.md', kind: 'note' }, { rel: '别的.md', kind: 'note' })).toBe(
-      false
+      false,
     )
     expect(noteDropAllowed({ rel: '工作', kind: 'folder' }, { rel: '归档', kind: 'folder' })).toBe(
-      false
+      false,
     )
   })
 })
@@ -259,7 +230,7 @@ describe('正文里的链接', () => {
     expect(resolveNoteLink('./别的.md?raw=true', '周报.md')).toBe('别的.md')
     expect(resolveNoteLink('%E5%91%A8%E6%8A%A5.md', '别的.md')).toBe('周报.md')
     expect(resolveNoteLink('./%E5%BD%92%E6%A1%A3/%E5%91%A8%E6%8A%A5.md', '别的.md')).toBe(
-      '归档/周报.md'
+      '归档/周报.md',
     )
     // 解不开的编码（半截的、或者文件名里真的带 %）按原样用，别把链接整个丢掉
     expect(resolveNoteLink('./50%.md', '别的.md')).toBe('50%.md')
@@ -284,7 +255,7 @@ describe('打开过的笔记本', () => {
     expect(sanitizeNoteHistory('不是数组')).toEqual([])
     expect(sanitizeNoteHistory(['D:\\笔记\\', '', '  ', null, 'D:\\笔记', 'E:\\工作'])).toEqual([
       'D:\\笔记',
-      'E:\\工作'
+      'E:\\工作',
     ])
 
     const many = Array.from({ length: NOTE_HISTORY_MAX + 3 }, (_, index) => `D:\\n${index}`)

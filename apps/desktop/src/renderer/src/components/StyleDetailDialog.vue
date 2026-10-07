@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import type { ComponentGroup, DesignStyle, DesignTypeToken } from '@workbench/appearance'
+import { clampFontSize, clampPadding, COLOR_GROUPS, colorGroup, colorLabel, componentLabel, componentSamples, componentStyle, designStyleFamily, inkOn, isColorValue, lineHeightCss, numericScale, roundedLabel, safeCssValue, spacingLabel, THEME_LABELS, typeLabel, typographyScale } from '@workbench/appearance'
+
 /**
  * 样式详情弹窗：一套设计语言分两档看。
  *
@@ -25,47 +28,24 @@ import AppDialog from '@/components/AppDialog.vue'
 import StyleApplyDialog from '@/components/StyleApplyDialog.vue'
 import StyleDemo from '@/components/StyleDemo.vue'
 import { notifyError, notifySuccess } from '@/notify'
-import {
-  COLOR_GROUPS,
-  THEME_LABELS,
-  colorGroup,
-  colorLabel,
-  componentLabel,
-  componentSamples,
-  componentStyle,
-  designStyleFamily,
-  inkOn,
-  isColorValue,
-  lineHeightCss,
-  numericScale,
-  roundedLabel,
-  safeCssValue,
-  spacingLabel,
-  typeLabel,
-  typographyScale,
-  type ComponentGroup,
-  type DesignStyle,
-  type DesignTypeToken
-} from '@workbench/appearance'
-import { clampFontSize, clampPadding } from '@workbench/appearance'
+
+const props = defineProps<{ design: DesignStyle | null }>()
 
 /** 弹层开关:v-model 一条口径(与 AppDialog / el-dialog 相同,全应用的弹层都这么开) */
 const open = defineModel<boolean>({ required: true })
-
-const props = defineProps<{ design: DesignStyle | null }>()
 
 const visible = computed({
   get: () => open.value,
   set: (value) => {
     open.value = value
-  }
+  },
 })
 
 /** 打开、或换成另一套设计时回到「预览」档 —— 每次点开都先看页面 */
 const view = ref<'preview' | 'spec'>('preview')
 const viewOptions = [
   { label: '预览', value: 'preview' as const },
-  { label: '规格', value: 'spec' as const }
+  { label: '规格', value: 'spec' as const },
 ]
 watch([open, () => props.design], () => {
   view.value = 'preview'
@@ -76,15 +56,17 @@ const applyOpen = ref(false)
 
 const title = computed(() => props.design?.title ?? '')
 const badge = computed(() =>
-  props.design ? `${props.design.category} · ${THEME_LABELS[props.design.theme]} · ${designStyleFamily(props.design)}` : ''
+  props.design ? `${props.design.category} · ${THEME_LABELS[props.design.theme]} · ${designStyleFamily(props.design)}` : '',
 )
 
 async function copy(text: string, what: string): Promise<void> {
-  if (!text) return
+  if (!text)
+    return
   try {
     await navigator.clipboard.writeText(text)
     notifySuccess(`${what}已复制`)
-  } catch {
+  }
+  catch {
     notifyError('复制失败，可以手动选中再复制')
   }
 }
@@ -92,7 +74,10 @@ async function copy(text: string, what: string): Promise<void> {
 /** 把空值剔掉，避免往 :style 上一堆空串 */
 function compact(source: Record<string, string | undefined>): Record<string, string> {
   const out: Record<string, string> = {}
-  for (const [key, value] of Object.entries(source)) if (value) out[key] = value
+  for (const [key, value] of Object.entries(source)) {
+    if (value)
+      out[key] = value
+  }
   return out
 }
 
@@ -107,18 +92,20 @@ interface Swatch {
 
 const colorSections = computed(() => {
   const style = props.design
-  if (!style) return []
+  if (!style)
+    return []
   const buckets = new Map<string, Swatch[]>()
   for (const [key, value] of Object.entries(style.colors)) {
-    if (!isColorValue(value)) continue
+    if (!isColorValue(value))
+      continue
     const group = colorGroup(key)
     const list = buckets.get(group) ?? []
     list.push({ key, value, label: colorLabel(style, key), ink: inkOn(value) })
     buckets.set(group, list)
   }
-  return COLOR_GROUPS.filter((group) => buckets.has(group)).map((group) => ({
+  return COLOR_GROUPS.filter(group => buckets.has(group)).map(group => ({
     group,
-    swatches: buckets.get(group) ?? []
+    swatches: buckets.get(group) ?? [],
   }))
 })
 
@@ -136,8 +123,10 @@ interface TypeRow {
 function typeRow(style: DesignStyle, key: string, token: DesignTypeToken): TypeRow {
   const size = clampFontSize(token.fontSize, 44)
   const parts = [token.fontSize, token.fontWeight ? `字重 ${token.fontWeight}` : '']
-  if (token.lineHeight) parts.push(`行高 ${token.lineHeight}`)
-  if (token.letterSpacing) parts.push(`字距 ${token.letterSpacing}`)
+  if (token.lineHeight)
+    parts.push(`行高 ${token.lineHeight}`)
+  if (token.letterSpacing)
+    parts.push(`字距 ${token.letterSpacing}`)
   const big = Number(/([\d.]+)/.exec(token.fontSize ?? '')?.[1] ?? 0) >= 24
   return {
     key,
@@ -150,15 +139,16 @@ function typeRow(style: DesignStyle, key: string, token: DesignTypeToken): TypeR
       // 行高要先归一化：上游有的把像素行高写成不带单位的数字（`64`），
       // 直接绑上去会被读成「字号的 64 倍」（见 shared/design-styles.ts 的 lineHeightCss）
       lineHeight: lineHeightCss(token.lineHeight, token.fontSize),
-      letterSpacing: safeCssValue(token.letterSpacing)
+      letterSpacing: safeCssValue(token.letterSpacing),
     }),
-    sample: big ? '设计样式预览' : '这是一段正文示例文字，用来看行距与字距。'
+    sample: big ? '设计样式预览' : '这是一段正文示例文字，用来看行距与字距。',
   }
 }
 
 const typeRows = computed(() => {
   const style = props.design
-  if (!style) return []
+  if (!style)
+    return []
   return typographyScale(style).map(([key, token]) => typeRow(style, key, token))
 })
 
@@ -175,7 +165,7 @@ const SAMPLE_TEXT: Record<ComponentGroup, string> = {
   按钮: '按钮',
   卡片: '卡片标题',
   表单: '请输入内容',
-  版式: '版式元素'
+  版式: '版式元素',
 }
 
 /** 样张内边距收一收：上游有 `96px` 这种首屏级内边距，照搬会把弹窗撑爆（见 shared/design-demo.ts） */
@@ -194,19 +184,20 @@ function toSample(style: DesignStyle, key: string, group: ComponentGroup): Sampl
       fontFamily: safeCssValue(resolved.font?.fontFamily),
       fontSize: clampFontSize(resolved.font?.fontSize, 18),
       fontWeight: safeCssValue(resolved.font?.fontWeight),
-      letterSpacing: safeCssValue(resolved.font?.letterSpacing)
+      letterSpacing: safeCssValue(resolved.font?.letterSpacing),
     }),
-    text: SAMPLE_TEXT[group]
+    text: SAMPLE_TEXT[group],
   }
 }
 
 const componentGroups = computed(() => {
   const style = props.design
-  if (!style) return []
-  return componentSamples(style).map((entry) => ({
+  if (!style)
+    return []
+  return componentSamples(style).map(entry => ({
     group: entry.group,
     rest: entry.rest,
-    samples: entry.keys.map((key) => toSample(style, key, entry.group))
+    samples: entry.keys.map(key => toSample(style, key, entry.group)),
   }))
 })
 
@@ -216,29 +207,31 @@ const componentCount = computed(() => Object.keys(props.design?.components ?? {}
 
 const spacingSteps = computed(() => {
   const style = props.design
-  if (!style) return []
+  if (!style)
+    return []
   const steps = numericScale(style.spacing)
-  const max = Math.max(1, ...steps.map((step) => step[2]))
+  const max = Math.max(1, ...steps.map(step => step[2]))
   return steps.map(([key, raw, value]) => ({
     key,
     raw,
     label: spacingLabel(style, key),
     // 最宽的一档占满整行，其余按比例
-    width: `${Math.max(3, Math.round((value / max) * 100))}%`
+    width: `${Math.max(3, Math.round((value / max) * 100))}%`,
   }))
 })
 
 const roundedSteps = computed(() => {
   const style = props.design
-  if (!style) return []
-  const max = Math.max(1, ...numericScale(style.rounded).map((step) => step[2]))
+  if (!style)
+    return []
+  const max = Math.max(1, ...numericScale(style.rounded).map(step => step[2]))
   return numericScale(style.rounded).map(([key, raw, value]) => ({
     key,
     raw,
     label: roundedLabel(style, key),
     // 圆角用 44px 的方块展示：超过 22px 的半径画出来都一样（已经是全圆）
     radius: `${Math.min(22, Math.max(0, value))}px`,
-    full: value >= max
+    full: value >= max,
   }))
 })
 
@@ -250,7 +243,9 @@ const canvas = computed(() => props.design?.canvas ?? '')
   <AppDialog v-model="visible" class="style-dialog" width="min(1120px, 94vw)">
     <template #header>
       <div class="dialog-head">
-        <h3 class="dialog-head__title">{{ title }}</h3>
+        <h3 class="dialog-head__title">
+          {{ title }}
+        </h3>
         <el-segmented v-model="view" :options="viewOptions" size="small" aria-label="查看方式" />
         <el-button size="small" type="primary" :disabled="!design" @click="applyOpen = true">
           应用到项目
@@ -265,138 +260,162 @@ const canvas = computed(() => props.design?.canvas ?? '')
       <!-- 规格档：八段 token 陈列，色块与变量名点一下就复制 -->
       <div v-else class="spec">
         <p class="lede">
-        <span class="lede__badge">{{ badge }}</span>
-        <button v-if="canvas" class="lede__color" type="button" @click="copy(canvas, '画布色')">
-          画布 <i :style="{ background: canvas }" /> <span class="mono">{{ canvas }}</span>
-        </button>
-        <button v-if="accent" class="lede__color" type="button" @click="copy(accent, '主色')">
-          主色 <i :style="{ background: accent }" /> <span class="mono">{{ accent }}</span>
-        </button>
-        <span v-if="design.font" class="lede__font">展示字体 {{ design.font }}</span>
-      </p>
-
-      <p class="desc">{{ design.description }}</p>
-
-      <!-- 01 配色 -->
-      <section class="sec">
-        <h4 class="sec__title">配色</h4>
-        <p class="sec__hint">按角色分组，点色块复制色值，点变量名复制名字</p>
-        <div v-for="section in colorSections" :key="section.group" class="color-group">
-          <span class="eyebrow">{{ section.group }}</span>
-          <div class="swatches">
-            <div v-for="swatch in section.swatches" :key="swatch.key" class="swatch">
-              <button
-                class="swatch__chip mono"
-                type="button"
-                :style="{ background: swatch.value, color: swatch.ink }"
-                :title="`复制 ${swatch.value}`"
-                @click="copy(swatch.value, '色值')"
-              >
-                {{ swatch.value }}
-              </button>
-              <span class="swatch__label">{{ swatch.label }}</span>
-              <button
-                class="swatch__key mono"
-                type="button"
-                :title="`复制变量名 ${swatch.key}`"
-                @click="copy(swatch.key, '变量名')"
-              >
-                {{ swatch.key }}
-              </button>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <!-- 02 字体 -->
-      <section class="sec">
-        <h4 class="sec__title">字体</h4>
-        <p class="sec__hint">
-          字号与字重取自这套设计；字体本身多为品牌专有字体，本机没装时会回落到系统字体
+          <span class="lede__badge">{{ badge }}</span>
+          <button v-if="canvas" class="lede__color" type="button" @click="copy(canvas, '画布色')">
+            画布 <i :style="{ background: canvas }" /> <span class="mono">{{ canvas }}</span>
+          </button>
+          <button v-if="accent" class="lede__color" type="button" @click="copy(accent, '主色')">
+            主色 <i :style="{ background: accent }" /> <span class="mono">{{ accent }}</span>
+          </button>
+          <span v-if="design.font" class="lede__font">展示字体 {{ design.font }}</span>
         </p>
-        <div class="types">
-          <div v-for="row in typeRows" :key="row.key" class="type-row">
-            <div class="type-row__meta">
-              <span class="type-row__label">{{ row.label }}</span>
-              <button
-                class="type-row__key mono"
-                type="button"
-                :title="`复制变量名 ${row.key}`"
-                @click="copy(row.key, '变量名')"
-              >
-                {{ row.key }}
-              </button>
-              <span class="type-row__spec mono">{{ row.spec }}</span>
-            </div>
-            <p class="type-row__sample" :style="row.style">{{ row.sample }}</p>
-          </div>
-        </div>
-      </section>
 
-      <!-- 03–06 组件样张 -->
-      <section v-if="componentGroups.length" class="sec">
-        <h4 class="sec__title">组件</h4>
-        <p class="sec__hint">
-          底色、字色、圆角、内边距都取这套设计自己的规格；{{ componentCount }} 个组件里挑了代表性的这些
+        <p class="desc">
+          {{ design.description }}
         </p>
-        <div v-for="entry in componentGroups" :key="entry.group" class="samples">
-          <span class="eyebrow">{{ entry.group }}</span>
-          <div class="samples__row" :class="`samples__row--${entry.group}`">
-            <div v-for="sample in entry.samples" :key="sample.key" class="sample">
-              <div
-                class="sample__box"
-                :class="`sample__box--${entry.group}`"
-                :style="sample.style"
-              >
-                {{ sample.text }}
+
+        <!-- 01 配色 -->
+        <section class="sec">
+          <h4 class="sec__title">
+            配色
+          </h4>
+          <p class="sec__hint">
+            按角色分组，点色块复制色值，点变量名复制名字
+          </p>
+          <div v-for="section in colorSections" :key="section.group" class="color-group">
+            <span class="eyebrow">{{ section.group }}</span>
+            <div class="swatches">
+              <div v-for="swatch in section.swatches" :key="swatch.key" class="swatch">
+                <button
+                  class="swatch__chip mono"
+                  type="button"
+                  :style="{ background: swatch.value, color: swatch.ink }"
+                  :title="`复制 ${swatch.value}`"
+                  @click="copy(swatch.value, '色值')"
+                >
+                  {{ swatch.value }}
+                </button>
+                <span class="swatch__label">{{ swatch.label }}</span>
+                <button
+                  class="swatch__key mono"
+                  type="button"
+                  :title="`复制变量名 ${swatch.key}`"
+                  @click="copy(swatch.key, '变量名')"
+                >
+                  {{ swatch.key }}
+                </button>
               </div>
-              <button
-                class="sample__label mono"
-                type="button"
-                :title="`复制变量名 ${sample.key}`"
-                @click="copy(sample.key, '变量名')"
-              >
-                {{ sample.label }}
-              </button>
             </div>
           </div>
-          <p v-if="entry.rest" class="samples__rest">另有 {{ entry.rest }} 个同类组件未展开</p>
-        </div>
-      </section>
+        </section>
 
-      <section v-else class="sec">
-        <h4 class="sec__title">组件</h4>
-        <p class="sec__hint">
-          这套 DESIGN.md 只给了配色与字体，没有组件规格 —— 上游的 74 套里只有
-          Lamborghini、Runway、Tesla 这三套是这样。
-        </p>
-      </section>
-
-      <!-- 07 间距 -->
-      <section v-if="spacingSteps.length" class="sec">
-        <h4 class="sec__title">间距</h4>
-        <p class="sec__hint">按数值从小到大</p>
-        <div class="steps">
-          <div v-for="step in spacingSteps" :key="step.key" class="step">
-            <span class="step__label">{{ step.label }}</span>
-            <span class="step__bar"><i :style="{ width: step.width }" /></span>
-            <span class="step__raw mono">{{ step.raw }}</span>
+        <!-- 02 字体 -->
+        <section class="sec">
+          <h4 class="sec__title">
+            字体
+          </h4>
+          <p class="sec__hint">
+            字号与字重取自这套设计；字体本身多为品牌专有字体，本机没装时会回落到系统字体
+          </p>
+          <div class="types">
+            <div v-for="row in typeRows" :key="row.key" class="type-row">
+              <div class="type-row__meta">
+                <span class="type-row__label">{{ row.label }}</span>
+                <button
+                  class="type-row__key mono"
+                  type="button"
+                  :title="`复制变量名 ${row.key}`"
+                  @click="copy(row.key, '变量名')"
+                >
+                  {{ row.key }}
+                </button>
+                <span class="type-row__spec mono">{{ row.spec }}</span>
+              </div>
+              <p class="type-row__sample" :style="row.style">
+                {{ row.sample }}
+              </p>
+            </div>
           </div>
-        </div>
-      </section>
+        </section>
 
-      <!-- 08 圆角 -->
-      <section v-if="roundedSteps.length" class="sec">
-        <h4 class="sec__title">圆角</h4>
-        <p class="sec__hint">同一块 44px 的方块，按各自的圆角值切</p>
-        <div class="radii">
-          <div v-for="step in roundedSteps" :key="step.key" class="radius">
-            <span class="radius__box" :style="{ borderRadius: step.radius }" />
-            <span class="radius__label">{{ step.label }}</span>
-            <span class="radius__raw mono">{{ step.raw }}</span>
+        <!-- 03–06 组件样张 -->
+        <section v-if="componentGroups.length" class="sec">
+          <h4 class="sec__title">
+            组件
+          </h4>
+          <p class="sec__hint">
+            底色、字色、圆角、内边距都取这套设计自己的规格；{{ componentCount }} 个组件里挑了代表性的这些
+          </p>
+          <div v-for="entry in componentGroups" :key="entry.group" class="samples">
+            <span class="eyebrow">{{ entry.group }}</span>
+            <div class="samples__row" :class="`samples__row--${entry.group}`">
+              <div v-for="sample in entry.samples" :key="sample.key" class="sample">
+                <div
+                  class="sample__box"
+                  :class="`sample__box--${entry.group}`"
+                  :style="sample.style"
+                >
+                  {{ sample.text }}
+                </div>
+                <button
+                  class="sample__label mono"
+                  type="button"
+                  :title="`复制变量名 ${sample.key}`"
+                  @click="copy(sample.key, '变量名')"
+                >
+                  {{ sample.label }}
+                </button>
+              </div>
+            </div>
+            <p v-if="entry.rest" class="samples__rest">
+              另有 {{ entry.rest }} 个同类组件未展开
+            </p>
           </div>
-        </div>
-      </section>
+        </section>
+
+        <section v-else class="sec">
+          <h4 class="sec__title">
+            组件
+          </h4>
+          <p class="sec__hint">
+            这套 DESIGN.md 只给了配色与字体，没有组件规格 —— 上游的 74 套里只有
+            Lamborghini、Runway、Tesla 这三套是这样。
+          </p>
+        </section>
+
+        <!-- 07 间距 -->
+        <section v-if="spacingSteps.length" class="sec">
+          <h4 class="sec__title">
+            间距
+          </h4>
+          <p class="sec__hint">
+            按数值从小到大
+          </p>
+          <div class="steps">
+            <div v-for="step in spacingSteps" :key="step.key" class="step">
+              <span class="step__label">{{ step.label }}</span>
+              <span class="step__bar"><i :style="{ width: step.width }" /></span>
+              <span class="step__raw mono">{{ step.raw }}</span>
+            </div>
+          </div>
+        </section>
+
+        <!-- 08 圆角 -->
+        <section v-if="roundedSteps.length" class="sec">
+          <h4 class="sec__title">
+            圆角
+          </h4>
+          <p class="sec__hint">
+            同一块 44px 的方块，按各自的圆角值切
+          </p>
+          <div class="radii">
+            <div v-for="step in roundedSteps" :key="step.key" class="radius">
+              <span class="radius__box" :style="{ borderRadius: step.radius }" />
+              <span class="radius__label">{{ step.label }}</span>
+              <span class="radius__raw mono">{{ step.raw }}</span>
+            </div>
+          </div>
+        </section>
       </div>
     </template>
   </AppDialog>

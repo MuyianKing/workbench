@@ -1,8 +1,8 @@
-//! 发信报文的构建：完整 RFC 822 报文在这里拼好、整份递给 Rust 的 mail_send，
-//! Rust 只负责 SMTP 传输（见 mail.rs 的职责分工）。正文与附件全部 base64 ——
-//! 中文、二进制在这条路上都安全，报文里不出现裸的 8-bit 内容。
-//!
-//! 所有行一律 CRLF（SMTP 的硬要求），信体文本里的换行也归一成 CRLF。
+// ! 发信报文的构建：完整 RFC 822 报文在这里拼好、整份递给 Rust 的 mail_send，
+// ! Rust 只负责 SMTP 传输（见 mail.rs 的职责分工）。正文与附件全部 base64 ——
+// ! 中文、二进制在这条路上都安全，报文里不出现裸的 8-bit 内容。
+// !
+// ! 所有行一律 CRLF（SMTP 的硬要求），信体文本里的换行也归一成 CRLF。
 
 import { bytesToBase64 } from './base64'
 import { encodeRfc2047Word } from './rfc2047'
@@ -45,15 +45,17 @@ function wrappedBase64(base64: string): string {
 
 /** 收件人列表进 To 头：逗号分隔。 */
 function addressList(to: string[]): string {
-  return to.map((address) => address.trim()).join(', ')
+  return to.map(address => address.trim()).join(', ')
 }
 
-/** 附件文件名进 Content-Disposition：RFC 2231 的 filename*（utf-8 百分号编码）。
- *  filename= 一份 ASCII 兜底 —— 不认 filename* 的老客户端至少看得到个名字。 */
+/**
+ * 附件文件名进 Content-Disposition：RFC 2231 的 filename*（utf-8 百分号编码）。
+ *  filename= 一份 ASCII 兜底 —— 不认 filename* 的老客户端至少看得到个名字。
+ */
 function contentDisposition(name: string): string {
-  const asciiFallback = name.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_')
+  const asciiFallback = name.replace(/[^\x20-\x7E]/g, '_').replace(/["\\]/g, '_')
   const encoded = Array.from(new TextEncoder().encode(name))
-    .map((byte) => (byte < 0x21 || byte > 0x7e || byte === 0x25 ? `%${byte.toString(16).toUpperCase().padStart(2, '0')}` : String.fromCharCode(byte)))
+    .map(byte => (byte < 0x21 || byte > 0x7E || byte === 0x25 ? `%${byte.toString(16).toUpperCase().padStart(2, '0')}` : String.fromCharCode(byte)))
     .join('')
   return `attachment; filename="${asciiFallback}"; filename*=utf-8''${encoded}`
 }
@@ -68,38 +70,40 @@ function messageId(): string {
   return `<${random.replace(/-/g, '.')}@workbench.mail>`
 }
 
-/** 常见后缀 → MIME 类型。认不出的一律 application/octet-stream —— 服务器按扩展名
- *  也能猜个八九不离十，这里只是让收件方的预览体验好一点。 */
+/**
+ * 常见后缀 → MIME 类型。认不出的一律 application/octet-stream —— 服务器按扩展名
+ *  也能猜个八九不离十，这里只是让收件方的预览体验好一点。
+ */
 const CONTENT_TYPES: Record<string, string> = {
-  txt: 'text/plain',
-  html: 'text/html',
-  htm: 'text/html',
-  md: 'text/markdown',
-  pdf: 'application/pdf',
-  zip: 'application/zip',
+  'txt': 'text/plain',
+  'html': 'text/html',
+  'htm': 'text/html',
+  'md': 'text/markdown',
+  'pdf': 'application/pdf',
+  'zip': 'application/zip',
   '7z': 'application/x-7z-compressed',
-  gz: 'application/gzip',
-  tar: 'application/x-tar',
-  png: 'image/png',
-  jpg: 'image/jpeg',
-  jpeg: 'image/jpeg',
-  gif: 'image/gif',
-  webp: 'image/webp',
-  bmp: 'image/bmp',
-  svg: 'image/svg+xml',
-  ico: 'image/x-icon',
-  mp3: 'audio/mpeg',
-  wav: 'audio/wav',
-  mp4: 'video/mp4',
-  doc: 'application/msword',
-  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  xls: 'application/vnd.ms-excel',
-  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  ppt: 'application/vnd.ms-powerpoint',
-  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-  json: 'application/json',
-  xml: 'application/xml',
-  csv: 'text/csv'
+  'gz': 'application/gzip',
+  'tar': 'application/x-tar',
+  'png': 'image/png',
+  'jpg': 'image/jpeg',
+  'jpeg': 'image/jpeg',
+  'gif': 'image/gif',
+  'webp': 'image/webp',
+  'bmp': 'image/bmp',
+  'svg': 'image/svg+xml',
+  'ico': 'image/x-icon',
+  'mp3': 'audio/mpeg',
+  'wav': 'audio/wav',
+  'mp4': 'video/mp4',
+  'doc': 'application/msword',
+  'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'xls': 'application/vnd.ms-excel',
+  'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'ppt': 'application/vnd.ms-powerpoint',
+  'pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  'json': 'application/json',
+  'xml': 'application/xml',
+  'csv': 'text/csv',
 }
 
 /** 按文件名猜 Content-Type（发附件用）。 */
@@ -110,8 +114,10 @@ export function contentTypeForFileName(name: string): string {
 
 /** 附件大小进界面：KB 以下按字节、MB 以下按 KB，其余按 MB（一位小数）。 */
 export function formatMailSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`
+  if (bytes < 1024)
+    return `${bytes} B`
+  if (bytes < 1024 * 1024)
+    return `${Math.max(1, Math.round(bytes / 1024))} KB`
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
@@ -133,7 +139,7 @@ export function buildMime(input: BuildMimeInput): string {
     `To: ${addressList(input.to)}`,
     `Subject: ${encodeRfc2047Word(input.subject)}`,
     'MIME-Version: 1.0',
-    `Message-ID: ${messageId()}`
+    `Message-ID: ${messageId()}`,
   ]
 
   if (attachments.length === 0) {
@@ -143,7 +149,7 @@ export function buildMime(input: BuildMimeInput): string {
       'Content-Transfer-Encoding: base64',
       '',
       textBase64,
-      ''
+      '',
     ].join('\r\n')
   }
 
@@ -156,7 +162,7 @@ export function buildMime(input: BuildMimeInput): string {
     'Content-Type: text/plain; charset=utf-8',
     'Content-Transfer-Encoding: base64',
     '',
-    textBase64
+    textBase64,
   ]
   for (const part of attachments) {
     parts.push(
@@ -165,7 +171,7 @@ export function buildMime(input: BuildMimeInput): string {
       'Content-Transfer-Encoding: base64',
       `Content-Disposition: ${contentDisposition(part.name)}`,
       '',
-      wrappedBase64(part.bytesBase64)
+      wrappedBase64(part.bytesBase64),
     )
   }
   parts.push(`--${boundary}--`, '')

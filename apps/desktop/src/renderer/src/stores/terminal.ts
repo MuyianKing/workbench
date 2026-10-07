@@ -1,3 +1,9 @@
+import type { LogLine, ProcessLogEvent, ProcessLogPayload, ProcessStatusEvent, Result, RuntimeState, TerminalKind, TerminalOpenEvent } from '@/types'
+
+import { clampTerminalButtonTop, clampTerminalHeight } from '@workbench/appearance'
+
+import { RingLog, terminalKey } from '@workbench/terminal'
+import { defineStore } from 'pinia'
 /**
  * 终端与运行态：底部面板的每个 Tab、每个项目的运行状态，以及它们的日志缓冲。
  *
@@ -9,23 +15,8 @@
  * 项目与独立命令只是同一件事的两个入口（见 `ProcessTarget`）。
  */
 import { computed, markRaw, reactive, ref, watch } from 'vue'
-import { defineStore } from 'pinia'
-import { RingLog } from '@workbench/terminal'
-import { clampTerminalHeight } from '@workbench/appearance'
-import { clampTerminalButtonTop } from '@workbench/appearance'
-import { terminalKey } from '@workbench/terminal'
-import {
-  DEFAULT_SETTINGS,
-  type LogLine,
-  type ProcessLogEvent,
-  type ProcessLogPayload,
-  type ProcessStatusEvent,
-  type Result,
-  type RuntimeState,
-  type TerminalKind,
-  type TerminalOpenEvent
-} from '@/types'
-import { notifyError, notifyInfo, notifySuccess, notifyWarning, confirmAction } from '@/notify'
+import { confirmAction, notifyError, notifyInfo, notifySuccess, notifyWarning } from '@/notify'
+import { DEFAULT_SETTINGS } from '@/types'
 import { useSettingsStore } from './settings'
 
 const LOG_LIMIT = 5000
@@ -97,7 +88,7 @@ export interface ProcessTarget {
 }
 
 /** 端口被谁占着，拼成一句给人看的说明 */
-function describeHolder(check: { pid?: number; processName?: string }): string {
+function describeHolder(check: { pid?: number, processName?: string }): string {
   return check.processName ? `${check.processName}（PID ${check.pid}）` : `PID ${check.pid ?? '未知'}`
 }
 
@@ -136,7 +127,7 @@ export const useTerminalStore = defineStore('terminal', () => {
     (value) => {
       terminalHeight.value = clampTerminalHeight(value)
     },
-    { immediate: true }
+    { immediate: true },
   )
 
   watch(
@@ -144,14 +135,15 @@ export const useTerminalStore = defineStore('terminal', () => {
     (value) => {
       terminalButtonTop.value = clampTerminalButtonTop(value)
     },
-    { immediate: true }
+    { immediate: true },
   )
 
   /** 拖完 / 键盘微调后落地：界面先跟手，磁盘异步写 */
   async function setTerminalHeight(px: number): Promise<void> {
     const next = clampTerminalHeight(px)
     terminalHeight.value = next
-    if (next === settingsStore.settings.terminalHeight) return
+    if (next === settingsStore.settings.terminalHeight)
+      return
 
     await settingsStore.updateSettings({ terminalHeight: next })
   }
@@ -159,7 +151,8 @@ export const useTerminalStore = defineStore('terminal', () => {
   async function setTerminalButtonTop(top: number | null): Promise<void> {
     const next = clampTerminalButtonTop(top)
     terminalButtonTop.value = next
-    if (next === settingsStore.settings.terminalButtonTop) return
+    if (next === settingsStore.settings.terminalButtonTop)
+      return
 
     await settingsStore.updateSettings({ terminalButtonTop: next })
   }
@@ -175,7 +168,8 @@ export const useTerminalStore = defineStore('terminal', () => {
   // ---------- 运行态 ----------
 
   function runtimeOf(id: string): RuntimeState {
-    if (!runtimes[id]) runtimes[id] = { status: 'idle' }
+    if (!runtimes[id])
+      runtimes[id] = { status: 'idle' }
     return runtimes[id]
   }
 
@@ -217,7 +211,7 @@ export const useTerminalStore = defineStore('terminal', () => {
   /** 某个目标当前有哪些终端（自定义命令按索引各一个） */
   function terminalsOfProject(projectId: string): TerminalState[] {
     return terminalOrder.value
-      .map((key) => terminals[key])
+      .map(key => terminals[key])
       .filter((item): item is TerminalState => !!item && item.projectId === projectId)
   }
 
@@ -230,7 +224,7 @@ export const useTerminalStore = defineStore('terminal', () => {
     key: string,
     projectId: string,
     kind: TerminalKind,
-    label: string
+    label: string,
   ): TerminalState {
     return {
       key,
@@ -238,7 +232,7 @@ export const useTerminalStore = defineStore('terminal', () => {
       kind,
       label,
       status: 'idle',
-      logs: markRaw(new RingLog<LogLine>(LOG_LIMIT))
+      logs: markRaw(new RingLog<LogLine>(LOG_LIMIT)),
     }
   }
 
@@ -280,13 +274,14 @@ export const useTerminalStore = defineStore('terminal', () => {
 
   /** 往系统终端补一行输出；走批量通道，与项目日志同一套节奏 */
   function appendSystemLog(text: string, stream: LogLine['stream'] = 'out'): void {
-    if (!terminals[SYSTEM_PM_TERMINAL]) return
+    if (!terminals[SYSTEM_PM_TERMINAL])
+      return
     pushPending({
       terminal: SYSTEM_PM_TERMINAL,
       projectId: '',
       stream,
       text,
-      time: new Date().toLocaleTimeString('zh-CN', { hour12: false })
+      time: new Date().toLocaleTimeString('zh-CN', { hour12: false }),
     })
     scheduleFlush()
   }
@@ -304,14 +299,18 @@ export const useTerminalStore = defineStore('terminal', () => {
       currentCommand?: string
       startedAt?: number | undefined
       durationMs?: number
-    } = {}
+    } = {},
   ): void {
     const target = terminals[SYSTEM_PM_TERMINAL]
-    if (!target) return
+    if (!target)
+      return
     target.status = status
-    if ('currentCommand' in fields) target.currentCommand = fields.currentCommand
-    if ('startedAt' in fields) target.startedAt = fields.startedAt
-    if ('durationMs' in fields) target.durationMs = fields.durationMs
+    if ('currentCommand' in fields)
+      target.currentCommand = fields.currentCommand
+    if ('startedAt' in fields)
+      target.startedAt = fields.startedAt
+    if ('durationMs' in fields)
+      target.durationMs = fields.durationMs
   }
 
   function onTerminalOpen(event: TerminalOpenEvent): void {
@@ -323,14 +322,15 @@ export const useTerminalStore = defineStore('terminal', () => {
   /** 关掉一个终端；正在跑的那个不允许关，否则进程还在却再也看不到输出 */
   function closeTerminal(key: string): void {
     const target = terminals[key]
-    if (!target) return
+    if (!target)
+      return
     if (RUNNING_STATUS.includes(target.status)) {
       notifyWarning('该终端正在执行命令，请先停止再关闭')
       return
     }
 
     delete terminals[key]
-    terminalOrder.value = terminalOrder.value.filter((item) => item !== key)
+    terminalOrder.value = terminalOrder.value.filter(item => item !== key)
     // 丢弃尚未写入的批次，避免关掉后又冒出来
     dropPendingOf(key)
 
@@ -364,18 +364,21 @@ export const useTerminalStore = defineStore('terminal', () => {
   const FLUSH_FALLBACK_MS = 200
 
   function pushPending(event: ProcessLogEvent): void {
-    if (pendingLogs.length >= PENDING_LIMIT) pendingLogs.splice(0, PENDING_DROP)
+    if (pendingLogs.length >= PENDING_LIMIT)
+      pendingLogs.splice(0, PENDING_DROP)
     pendingLogs.push(event)
   }
 
   function dropPendingOf(key: string): void {
     for (let i = pendingLogs.length - 1; i >= 0; i -= 1) {
-      if (pendingLogs[i].terminal === key) pendingLogs.splice(i, 1)
+      if (pendingLogs[i].terminal === key)
+        pendingLogs.splice(i, 1)
     }
   }
 
   function scheduleFlush(): void {
-    if (flushScheduled) return
+    if (flushScheduled)
+      return
     flushScheduled = true
     requestAnimationFrame(flushLogs)
     // 兜底：窗口藏在托盘里时 Chromium 不再给 rAF，只等它日志就永远不落进缓冲
@@ -388,7 +391,8 @@ export const useTerminalStore = defineStore('terminal', () => {
       window.clearTimeout(flushTimer)
       flushTimer = null
     }
-    if (!pendingLogs.length) return
+    if (!pendingLogs.length)
+      return
 
     const batch = pendingLogs.splice(0, pendingLogs.length)
 
@@ -396,7 +400,8 @@ export const useTerminalStore = defineStore('terminal', () => {
     const grouped = new Map<string, LogLine[]>()
     for (const event of batch) {
       // 终端被用户关掉了就丢弃后续输出，不要凭日志把它复活
-      if (!terminals[event.terminal]) continue
+      if (!terminals[event.terminal])
+        continue
 
       let list = grouped.get(event.terminal)
       if (!list) {
@@ -407,11 +412,12 @@ export const useTerminalStore = defineStore('terminal', () => {
         id: ++logSeq,
         time: event.time,
         stream: event.stream,
-        text: event.text
+        text: event.text,
       })
     }
 
-    if (!grouped.size) return
+    if (!grouped.size)
+      return
 
     for (const [key, list] of grouped) {
       terminals[key]?.logs.pushMany(list)
@@ -433,15 +439,18 @@ export const useTerminalStore = defineStore('terminal', () => {
       // 系统 / 错误提示可能来自命令之外的动作（如「打开产物目录」），没有绑定到
       // 具体命令终端。落到该项目当前已有的任一终端，免得这些信息凭空消失；
       // 已关闭的终端不在 terminalOrder 里，所以不会把已关的 Tab 复活。
-      if (event.stream !== 'sys' && event.stream !== 'err') continue
+      if (event.stream !== 'sys' && event.stream !== 'err')
+        continue
 
       const fallback = terminalOrder.value
-        .map((key) => terminals[key])
-        .find((item) => item && item.projectId === event.projectId)
-      if (fallback) pushPending({ ...event, terminal: fallback.key })
+        .map(key => terminals[key])
+        .find(item => item && item.projectId === event.projectId)
+      if (fallback)
+        pushPending({ ...event, terminal: fallback.key })
     }
 
-    if (pendingLogs.length) scheduleFlush()
+    if (pendingLogs.length)
+      scheduleFlush()
   }
 
   function onStatus(event: ProcessStatusEvent): void {
@@ -457,17 +466,20 @@ export const useTerminalStore = defineStore('terminal', () => {
     rt.durationMs = event.durationMs
     rt.exitCode = event.exitCode
     rt.port = event.port ?? rt.port
-    if (target) rt.kind = target.kind
+    if (target)
+      rt.kind = target.kind
     // 事件只可能来自 Workbench 自己的子进程，探测出来的「外部运行」到此为止
     rt.external = false
 
     if (event.status === 'idle' || event.status === 'failed' || event.status === 'success') {
       rt.startedAt = undefined
-      if (event.status !== 'failed') rt.pid = undefined
+      if (event.status !== 'failed')
+        rt.pid = undefined
     }
 
     // 终端级状态：Tab 上的圆点与耗时
-    if (!target) return
+    if (!target)
+      return
     target.status = event.status
     target.pid = event.pid
     target.currentCommand = event.currentCommand
@@ -478,10 +490,12 @@ export const useTerminalStore = defineStore('terminal', () => {
 
     if (event.status === 'idle' || event.status === 'failed' || event.status === 'success') {
       target.startedAt = undefined
-      if (event.status !== 'failed') target.pid = undefined
+      if (event.status !== 'failed')
+        target.pid = undefined
     }
 
-    if (RUNNING_STATUS.includes(event.status)) terminalCollapsed.value = false
+    if (RUNNING_STATUS.includes(event.status))
+      terminalCollapsed.value = false
   }
 
   function onClear(payload: { terminal: string }): void {
@@ -497,7 +511,8 @@ export const useTerminalStore = defineStore('terminal', () => {
    */
   function clearTerminalLogs(key: string): void {
     const target = terminals[key]
-    if (!target) return
+    if (!target)
+      return
 
     dropPendingOf(key)
     target.logs.clear()
@@ -519,7 +534,7 @@ export const useTerminalStore = defineStore('terminal', () => {
         delete terminals[key]
       }
     }
-    terminalOrder.value = terminalOrder.value.filter((key) => !!terminals[key])
+    terminalOrder.value = terminalOrder.value.filter(key => !!terminals[key])
     if (activeTerminal.value && !terminals[activeTerminal.value]) {
       activeTerminal.value = terminalOrder.value[terminalOrder.value.length - 1] ?? null
     }
@@ -535,7 +550,8 @@ export const useTerminalStore = defineStore('terminal', () => {
    * 项目启动与命令卡片启动共用这一套，两边的确认文案与行为才一致。
    */
   async function ensurePortFree(port: number | undefined, rt: RuntimeState): Promise<boolean> {
-    if (!port) return true
+    if (!port)
+      return true
 
     const check = await window.workbench.checkPort(port)
     if (!check.inUse) {
@@ -551,9 +567,10 @@ export const useTerminalStore = defineStore('terminal', () => {
     const agreed = await confirmAction(
       `端口 ${port} 已被 ${describeHolder(check)} 占用，是否结束该进程后重新启动？`,
       '端口被占用',
-      { confirmButtonText: '结束进程并启动' }
+      { confirmButtonText: '结束进程并启动' },
     )
-    if (!agreed) return false
+    if (!agreed)
+      return false
 
     const killed = await window.workbench.killPortProcess(port)
     if (!killed.ok) {
@@ -574,19 +591,21 @@ export const useTerminalStore = defineStore('terminal', () => {
    */
   async function detectTarget(
     target: ProcessTarget,
-    options: { silent?: boolean } = {}
+    options: { silent?: boolean } = {},
   ): Promise<boolean> {
     const rt = runtimeOf(target.id)
     // Workbench 自己启动的进程，状态本来就准，不必再探；
     // 而探测出来的「外部运行中」只是个快照，要重新确认（服务可能已经被人停了）
     if (!rt.external && RUNNING_STATUS.includes(rt.status)) {
-      if (!options.silent) notifyInfo(target.busyHint)
+      if (!options.silent)
+        notifyInfo(target.busyHint)
       return true
     }
 
     const port = target.port ?? rt.port
     if (!port) {
-      if (!options.silent) notifyWarning(target.noPortHint)
+      if (!options.silent)
+        notifyWarning(target.noPortHint)
       return false
     }
 
@@ -598,7 +617,7 @@ export const useTerminalStore = defineStore('terminal', () => {
       rt.pid = check.pid
       if (!options.silent) {
         notifySuccess(
-          `端口 ${port} 已被 ${describeHolder(check)} 占用，${target.subject}已在运行`
+          `端口 ${port} 已被 ${describeHolder(check)} 占用，${target.subject}已在运行`,
         )
       }
       return true
@@ -611,7 +630,8 @@ export const useTerminalStore = defineStore('terminal', () => {
       rt.pid = undefined
       rt.port = undefined
     }
-    if (!options.silent) notifyInfo(`端口 ${port} 空闲，${target.subject}未在运行`)
+    if (!options.silent)
+      notifyInfo(`端口 ${port} 空闲，${target.subject}未在运行`)
     return false
   }
 
@@ -624,7 +644,7 @@ export const useTerminalStore = defineStore('terminal', () => {
    */
   async function stopTarget(
     target: ProcessTarget,
-    stop: () => Promise<Result<null>>
+    stop: () => Promise<Result<null>>,
   ): Promise<boolean> {
     const rt = runtimes[target.id]
 
@@ -634,9 +654,10 @@ export const useTerminalStore = defineStore('terminal', () => {
       const agreed = await confirmAction(
         `将结束【${target.name}】占用【${rt.port}】端口。确定吗？`,
         '结束外部进程',
-        { confirmButtonText: '结束进程' }
+        { confirmButtonText: '结束进程' },
       )
-      if (!agreed) return false
+      if (!agreed)
+        return false
 
       const killed = await window.workbench.killPortProcess(rt.port)
       if (!killed.ok) {
@@ -667,7 +688,7 @@ export const useTerminalStore = defineStore('terminal', () => {
     window.workbench.onTerminalOpen(onTerminalOpen)
     window.workbench.onClear(onClear)
     // npm 全局安装的输出原样进系统终端（「最后一行顶在卡片上」那份由环境 store 自己订阅）
-    window.workbench.onPmInstallLog((event) => appendSystemLog(event.text))
+    window.workbench.onPmInstallLog(event => appendSystemLog(event.text))
   }
 
   // ---------- 派生数据 ----------
@@ -675,13 +696,13 @@ export const useTerminalStore = defineStore('terminal', () => {
   /** 终端面板里的 Tab，按创建顺序 */
   const terminalList = computed(() =>
     terminalOrder.value
-      .map((key) => terminals[key])
-      .filter((item): item is TerminalState => !!item)
+      .map(key => terminals[key])
+      .filter((item): item is TerminalState => !!item),
   )
 
   /** 当前选中的终端 */
   const activeTerminalState = computed(() =>
-    activeTerminal.value ? terminals[activeTerminal.value] ?? null : null
+    activeTerminal.value ? terminals[activeTerminal.value] ?? null : null,
   )
 
   /**
@@ -735,6 +756,6 @@ export const useTerminalStore = defineStore('terminal', () => {
     // 端口
     ensurePortFree,
     detectTarget,
-    stopTarget
+    stopTarget,
   }
 })

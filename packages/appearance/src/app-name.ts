@@ -17,10 +17,12 @@ export const APP_NAME_MAX_LENGTH = 24
  * 空串 / 全空白 / 非字符串一律回到默认名，超长截断。
  */
 export function sanitizeAppName(value: unknown): string {
-  if (typeof value !== 'string') return APP_NAME_DEFAULT
+  if (typeof value !== 'string')
+    return APP_NAME_DEFAULT
 
   const normalized = value.replace(/\s+/g, ' ').trim()
-  if (!normalized) return APP_NAME_DEFAULT
+  if (!normalized)
+    return APP_NAME_DEFAULT
 
   return normalized.slice(0, APP_NAME_MAX_LENGTH)
 }

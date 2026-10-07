@@ -1,6 +1,6 @@
+import type { IconCacheEntry } from './icon-cache'
 import { describe, expect, it } from 'vitest'
 import { iconCacheHit, sanitizeIconCache } from './icon-cache'
-import type { IconCacheEntry } from './icon-cache'
 
 const PNG = 'data:image/png;base64,AAAA'
 const TARGET = 'C:\\Tools\\Code.exe'
@@ -23,7 +23,7 @@ describe('sanitizeIconCache', () => {
   it('丢掉不是内联图片的值', () => {
     const raw = {
       [TARGET]: { mtime: 1, dataUrl: 'C:\\icon.png' },
-      'C:\\b.exe': { mtime: 1, dataUrl: undefined }
+      'C:\\b.exe': { mtime: 1, dataUrl: undefined },
     }
     expect(sanitizeIconCache(raw, new Set([TARGET, 'C:\\b.exe']))).toEqual({})
   })
@@ -31,7 +31,7 @@ describe('sanitizeIconCache', () => {
   it('丢掉修改时间不是有限数的条目', () => {
     const raw = {
       [TARGET]: { mtime: Number.NaN, dataUrl: PNG },
-      'C:\\b.exe': { mtime: 'x', dataUrl: PNG }
+      'C:\\b.exe': { mtime: 'x', dataUrl: PNG },
     }
     expect(sanitizeIconCache(raw, new Set([TARGET, 'C:\\b.exe']))).toEqual({})
   })

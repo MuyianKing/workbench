@@ -1,3 +1,4 @@
+import type { Result } from '@/types'
 /**
  * 渲染层与 Tauri 后端之间的桥。
  *
@@ -9,7 +10,6 @@
  *  4. 可能失败的调用经 `guard` 收敛成 `Result`，形状与主进程版一致。
  */
 import { fail, ok } from '@workbench/core'
-import type { Result } from '@/types'
 
 /** Tauri 注入到 window 上的全局对象（withGlobalTauri） */
 interface TauriGlobalApi {
@@ -44,10 +44,12 @@ export function invoke<T>(command: string, args?: Record<string, unknown>): Prom
   // 摘下来单独引用（const f = core.invoke; f(...)）会丢掉绑定 —— 表现出来就是
   // 「无参数的调用正常、带参数的调用到不了 Rust」这种很迷惑的形态。
   const core = window.__TAURI__?.core
-  if (core) return core.invoke(command, args) as Promise<T>
+  if (core)
+    return core.invoke(command, args) as Promise<T>
 
   const internals = window.__TAURI_INTERNALS__
-  if (internals) return internals.invoke(command, args) as Promise<T>
+  if (internals)
+    return internals.invoke(command, args) as Promise<T>
 
   return Promise.reject(new Error(`Tauri 运行时不可用，无法调用 ${command}`))
 }
@@ -63,7 +65,8 @@ export function invoke<T>(command: string, args?: Record<string, unknown>): Prom
  */
 export function assetUrl(path: string): string {
   const core = window.__TAURI__?.core
-  if (!core?.convertFileSrc) throw new Error('Tauri 运行时不可用，无法加载本地文件')
+  if (!core?.convertFileSrc)
+    throw new Error('Tauri 运行时不可用，无法加载本地文件')
 
   return core.convertFileSrc(path)
 }
@@ -79,7 +82,8 @@ export function listen<T>(event: string, handler: (payload: T) => void): () => v
   void window.__TAURI__?.event
     ?.listen<T>(event, ({ payload }) => handler(payload))
     .then((unlisten) => {
-      if (cancelled) unlisten()
+      if (cancelled)
+        unlisten()
       else dispose = unlisten
     })
 
@@ -99,9 +103,12 @@ export function listen<T>(event: string, handler: (payload: T) => void): () => v
 export async function guard<T>(task: Promise<T>, fallback: string): Promise<Result<T>> {
   try {
     return ok(await task)
-  } catch (error) {
-    if (error instanceof Error) return fail(error.message)
-    if (typeof error === 'string' && error.trim()) return fail(error)
+  }
+  catch (error) {
+    if (error instanceof Error)
+      return fail(error.message)
+    if (typeof error === 'string' && error.trim())
+      return fail(error)
     return fail(fallback)
   }
 }
@@ -114,8 +121,10 @@ export async function guard<T>(task: Promise<T>, fallback: string): Promise<Resu
  * 「Error 优先」的那几份会把 Rust 的原文吞成泛化文案),现在收敛在这里。
  */
 export function errorText(error: unknown, fallback: string): string {
-  if (typeof error === 'string' && error.trim()) return error
-  if (error instanceof Error && error.message) return error.message
+  if (typeof error === 'string' && error.trim())
+    return error
+  if (error instanceof Error && error.message)
+    return error.message
   return fallback
 }
 

@@ -1,4 +1,9 @@
 <script setup lang="ts">
+import type { HomeCardId, ViewId } from '@workbench/appearance'
+
+import { HOME_CARD_IDS, HOME_CARD_LABELS, VIEW_IDS } from '@workbench/appearance'
+
+import { moveToPosition } from '@workbench/core'
 /**
  * 设置 · 菜单：应用自己的入口留哪几个、按什么先后（与「这一页长什么样」无关，所以单独一屏）。
  *
@@ -7,11 +12,8 @@
  * 首页不参与这一组：它是默认页、也是布局编辑的落点，钉在导航栏最上面。
  */
 import { computed, ref } from 'vue'
-import { HOME_CARD_IDS, HOME_CARD_LABELS, type HomeCardId } from '@workbench/appearance'
-import { VIEW_IDS, type ViewId } from '@workbench/appearance'
-import { moveToPosition } from '@workbench/core'
-import { useSettingsStore } from '@/stores/settings'
 import { startPointerDrag } from '@/composables/use-pointer-drag'
+import { useSettingsStore } from '@/stores/settings'
 
 const settings = useSettingsStore()
 
@@ -22,7 +24,7 @@ const settings = useSettingsStore()
  * 但在这里先拦一道，用户看到的是「点了没反应但按钮是灰的」，而不是「关掉之后它自己又开了」。
  */
 function isOnlyVisible(all: readonly string[], hidden: readonly string[], id: string): boolean {
-  return !hidden.includes(id) && all.every((item) => item === id || hidden.includes(item))
+  return !hidden.includes(id) && all.every(item => item === id || hidden.includes(item))
 }
 
 const hiddenViews = computed(() => settings.settings.hiddenViews)
@@ -32,7 +34,7 @@ function setViewVisible(id: ViewId, visible: boolean): void {
 }
 
 const hiddenCards = computed(() =>
-  HOME_CARD_IDS.filter((id) => settings.themeConfig.cards[id].hidden)
+  HOME_CARD_IDS.filter(id => settings.themeConfig.cards[id].hidden),
 )
 
 function setCardVisible(id: HomeCardId, visible: boolean): void {
@@ -52,7 +54,7 @@ const draggingView = ref<ViewId | null>(null)
 
 /** 清单按什么顺序画：拖动期间用本地那份，平时跟设置走 */
 const sortableViews = computed<ViewId[]>(() => {
-  const visible = settings.settings.viewOrder.filter((id) => id !== 'home')
+  const visible = settings.settings.viewOrder.filter(id => id !== 'home')
   return dragOrder.value ?? visible
 })
 
@@ -68,7 +70,7 @@ const picksEl = ref<HTMLElement | null>(null)
  * 后者在动画期间拿到的是「飞在半路」的位置。容器自己的 rect 与 offsetWidth / Height
  * 都是布局值，不受 transform 影响，所以量一次、整次拖动都准。
  */
-let slotRects: Array<{ left: number; top: number; width: number; height: number }> = []
+let slotRects: Array<{ left: number, top: number, width: number, height: number }> = []
 
 function measureSlots(count: number): void {
   const el = picksEl.value
@@ -84,14 +86,14 @@ function measureSlots(count: number): void {
   const box = el.getBoundingClientRect()
   const width = first.offsetWidth
   const height = first.offsetHeight
-  // 一格占多宽由网格列数决定（现在是两列），不写死：容器宽度里塞得下几列就算几列
+  // 一格占多宽由网格列数决定（现在是单列），不写死：容器宽度里塞得下几列就算几列
   const columns = Math.max(1, Math.round((box.width + columnGap) / (width + columnGap)))
 
   slotRects = Array.from({ length: count }, (_, index) => ({
     left: box.left + (index % columns) * (width + columnGap),
     top: box.top + Math.floor(index / columns) * (height + rowGap),
     width,
-    height
+    height,
   }))
 }
 
@@ -101,8 +103,8 @@ function slotAt(x: number, y: number): number {
   let nearestDistance = Infinity
 
   slotRects.forEach((rect, index) => {
-    const inside =
-      x >= rect.left && x <= rect.left + rect.width && y >= rect.top && y <= rect.top + rect.height
+    const inside
+      = x >= rect.left && x <= rect.left + rect.width && y >= rect.top && y <= rect.top + rect.height
     const dx = x - (rect.left + rect.width / 2)
     const dy = y - (rect.top + rect.height / 2)
     const distance = inside ? 0 : dx * dx + dy * dy
@@ -117,7 +119,8 @@ function slotAt(x: number, y: number): number {
 
 function beginViewDrag(event: PointerEvent, id: ViewId): void {
   // 开关自己要点按：从它上面起手不算拖动
-  if ((event.target as HTMLElement).closest('.el-switch')) return
+  if ((event.target as HTMLElement).closest('.el-switch'))
+    return
 
   const original = [...sortableViews.value]
   measureSlots(original.length)
@@ -129,11 +132,13 @@ function beginViewDrag(event: PointerEvent, id: ViewId): void {
     bodyClass: 'is-sorting-views',
     onMove(moveEvent) {
       const order = dragOrder.value
-      if (!order || slotRects.length !== order.length) return
+      if (!order || slotRects.length !== order.length)
+        return
 
       // 挪到指针所在槽位「现在」装的那一项的位置上；那已经是自己时就什么都不做（不横跳）
       const target = order[slotAt(moveEvent.clientX, moveEvent.clientY)]
-      if (!target) return
+      if (!target)
+        return
       dragOrder.value = moveToPosition(order, id, target) ?? order
     },
     onEnd(_last, cancelled) {
@@ -146,9 +151,10 @@ function beginViewDrag(event: PointerEvent, id: ViewId): void {
       }
       // 本地顺序先留着，等设置回推再撒手：落盘走一趟 IPC，先清掉的话清单会闪回旧顺序一瞬
       void settings.setViewOrder(['home', ...final]).then(() => {
-        if (dragOrder.value === final) dragOrder.value = null
+        if (dragOrder.value === final)
+          dragOrder.value = null
       })
-    }
+    },
   })
 }
 </script>
@@ -156,8 +162,12 @@ function beginViewDrag(event: PointerEvent, id: ViewId): void {
 <template>
   <section class="pane">
     <div class="block">
-      <h3 class="block__title">左侧导航栏</h3>
-      <p class="row__hint menu-hint">按住一项拖动可调整它在导航栏上的先后；首页固定在最上面。</p>
+      <h3 class="block__title">
+        左侧导航栏
+      </h3>
+      <p class="row__hint menu-hint">
+        按住一项拖动可调整它在导航栏上的先后；首页固定在最上面。
+      </p>
 
       <!--
         首页那一页自带九块卡片（卡片只属于首页），所以它的开关下面挂一层子项：
@@ -216,14 +226,14 @@ function beginViewDrag(event: PointerEvent, id: ViewId): void {
 
 <style scoped>
 /**
- * 开关清单（导航栏那几页，以及首页下面挂的九块卡片）：一格一项，一行放两个 ——
- * 四项、九项各占两三行，不至于把这一屏撑出一整屏高。
+ * 开关清单（导航栏那几页，以及首页下面挂的九块卡片）：树形，一行一项 ——
+ * 首页的九块卡片缩进挂它下面，其余页与首页同层平铺。
  * 每项是一小块浅底，名字在左、开关贴右，与上面那些 row 的行内控件同一个右边缘。
  */
 .picks {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--sp-2) var(--sp-3);
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--sp-2);
   margin-top: var(--sp-3);
 }
 
@@ -279,7 +289,7 @@ function beginViewDrag(event: PointerEvent, id: ViewId): void {
 
 /**
  * 首页那一页下面的那层卡片：子项缩进 + 一条竖线，父子关系不用读文字就看得出；
- * 卡片自己仍是两列的小块，不额外撑高（见 .picks 那条注释）。
+ * 一行一项，整段树形与上面的清单同一个宽度。
  */
 .picks--nested {
   margin-top: var(--sp-2);

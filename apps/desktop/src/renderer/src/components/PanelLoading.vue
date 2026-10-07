@@ -19,13 +19,15 @@ withDefaults(defineProps<{
   hint?: string
 }>(), {
   text: '正在加载…',
-  hint: ''
+  hint: '',
 })
 </script>
 
 <template>
   <div class="loading" role="status">
-    <el-icon class="loading__icon is-loading"><Loading /></el-icon>
+    <el-icon class="loading__icon is-loading">
+      <Loading />
+    </el-icon>
     <span class="loading__text">{{ text }}</span>
     <span v-if="hint" class="loading__hint">{{ hint }}</span>
   </div>

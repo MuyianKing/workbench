@@ -1,14 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  BACKGROUND_OPACITY_DEFAULT,
-  BACKGROUND_OPACITY_MAX,
-  BACKGROUND_OPACITY_MIN,
-  backgroundVeilAlpha,
-  clampBackgroundOpacity,
-  sanitizeBackgroundPath,
-  sanitizeVeilColor,
-  veilRgbTriplet
-} from './workspace-background'
+import { BACKGROUND_OPACITY_DEFAULT, BACKGROUND_OPACITY_MAX, BACKGROUND_OPACITY_MIN, backgroundVeilAlpha, clampBackgroundOpacity, sanitizeBackgroundPath, sanitizeVeilColor, veilRgbTriplet } from './workspace-background'
 
 describe('clampBackgroundOpacity', () => {
   it('区间内的值原样返回', () => {

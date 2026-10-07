@@ -60,7 +60,7 @@ export const WEATHER_CITY_MAX = 40
   86: '大阵雪',
   95: '雷阵雨',
   96: '雷阵雨伴冰雹',
-  99: '强雷阵雨伴冰雹'
+  99: '强雷阵雨伴冰雹',
 }
 
 /** 天气码的中文现象；码表外的码给空串 */
@@ -79,7 +79,8 @@ export function formatWeatherView(view: WeatherView): string {
  * 留空（空串）= 关闭这条出口 —— 与两个同步仓库「留空即关闭」同一条规矩。
  */
 export function sanitizeWeatherCity(raw: unknown): string {
-  if (typeof raw !== 'string') return ''
+  if (typeof raw !== 'string')
+    return ''
   return raw.replace(/\s+/g, ' ').trim().slice(0, WEATHER_CITY_MAX)
 }
 
@@ -90,14 +91,16 @@ function parseJsonObject(body: string): Record<string, unknown> | null {
     return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
       ? (parsed as Record<string, unknown>)
       : null
-  } catch {
+  }
+  catch {
     return null
   }
 }
 
 /** 数字或数字字符串都收（Nominatim 把经纬度当字符串给），NaN / Infinity / 缺字段不算 */
 function numericOf(value: unknown): number | null {
-  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'number' && Number.isFinite(value))
+    return value
   if (typeof value === 'string' && value.trim() !== '') {
     const parsed = Number(value)
     return Number.isFinite(parsed) ? parsed : null
@@ -114,23 +117,27 @@ export function parseWeatherGeocoding(body: string): WeatherGeo | null {
   let parsed: unknown
   try {
     parsed = JSON.parse(body)
-  } catch {
+  }
+  catch {
     return null
   }
-  if (!Array.isArray(parsed)) return null
+  if (!Array.isArray(parsed))
+    return null
 
   const first = parsed[0]
-  if (typeof first !== 'object' || first === null) return null
+  if (typeof first !== 'object' || first === null)
+    return null
   const record = first as Record<string, unknown>
   const latitude = numericOf(record.lat)
   const longitude = numericOf(record.lon)
-  if (latitude === null || longitude === null) return null
+  if (latitude === null || longitude === null)
+    return null
 
   const displayName = typeof record.display_name === 'string' ? record.display_name : ''
   return {
     name: typeof record.name === 'string' && record.name ? record.name : displayName.split(',')[0]?.trim() ?? '',
     latitude,
-    longitude
+    longitude,
   }
 }
 
@@ -142,15 +149,17 @@ export function parseWeatherGeocoding(body: string): WeatherGeo | null {
 export function parseWeatherForecast(body: string): WeatherView | null {
   const root = parseJsonObject(body)
   const current = root?.current
-  if (typeof current !== 'object' || current === null) return null
+  if (typeof current !== 'object' || current === null)
+    return null
 
   const record = current as Record<string, unknown>
   const temperature = numericOf(record.temperature_2m)
-  if (temperature === null) return null
+  if (temperature === null)
+    return null
 
   const code = numericOf(record.weather_code)
   return {
     text: code === null ? '' : weatherTextOf(code),
-    temperature
+    temperature,
   }
 }

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { AiFetchedModel, AiModelEntry, AiProvider, AiProviderPreset } from '@workbench/ai'
+import { AI_API_FORMATS, aiProviderReady, uniqueAiName } from '@workbench/ai'
 /**
  * 「添加 / 编辑一个 AI 服务」那个弹层：**一条链路走到底** ——
  *
@@ -14,18 +16,9 @@
  * 与密码、添加项目那几个同一条（见 AGENTS.md 第 4 节）。
  */
 import { computed, ref, watch } from 'vue'
-import {
-  AI_API_FORMATS,
-  aiProviderReady,
-  uniqueAiName,
-  type AiFetchedModel,
-  type AiModelEntry,
-  type AiProvider,
-  type AiProviderPreset
-} from '@workbench/ai'
-import AppDialog from '@/components/AppDialog.vue'
 import AiModelPicker from '@/components/AiModelPicker.vue'
 import AiPresetGrid from '@/components/AiPresetGrid.vue'
+import AppDialog from '@/components/AppDialog.vue'
 import { useAiStore } from '@/stores/ai'
 
 const props = defineProps<{
@@ -63,12 +56,13 @@ const originalId = computed(() => props.provider?.id ?? '')
 const keyConfigured = computed(() => !!originalId.value && store.keyStates[originalId.value] === true)
 /** 已经用掉的服务名（新增时避重名用；编辑时把自己那个排除掉） */
 const takenIds = computed(() =>
-  store.providers.filter((item) => item.id !== originalId.value).map((item) => item.id)
+  store.providers.filter(item => item.id !== originalId.value).map(item => item.id),
 )
 
 /** 每次打开都从零开始：编辑就是那份现成的，新增就是空的（关掉不保存不留下痕迹） */
 watch(visible, (open) => {
-  if (!open) return
+  if (!open)
+    return
   const editing = props.provider
   step.value = editing ? 'edit' : 'pick'
   advanced.value = !!editing && !editing.preset
@@ -78,7 +72,7 @@ watch(visible, (open) => {
   baseUrl.value = editing?.baseUrl ?? ''
   apiFormat.value = editing?.apiFormat ?? AI_API_FORMATS[0].id
   preset.value = editing?.preset ?? ''
-  models.value = editing ? editing.models.map((entry) => ({ ...entry })) : []
+  models.value = editing ? editing.models.map(entry => ({ ...entry })) : []
   keyDraft.value = ''
   fetched.value = []
   fetchError.value = ''
@@ -120,9 +114,11 @@ function back(): void {
  * （中文名字折不出字符就是空串，那时保持不动）。
  */
 function onLabelChange(): void {
-  if (idTouched.value) return
+  if (idTouched.value)
+    return
   const next = uniqueAiName(label.value, takenIds.value)
-  if (next && next !== 'custom') id.value = next
+  if (next && next !== 'custom')
+    id.value = next
 }
 
 /**
@@ -131,12 +127,14 @@ function onLabelChange(): void {
  */
 function onIdInput(): void {
   idTouched.value = true
-  if (!preset.value && (!label.value || label.value === '自定义端点')) label.value = id.value
+  if (!preset.value && (!label.value || label.value === '自定义端点'))
+    label.value = id.value
 }
 
 /** 拉一次模型列表：地址与 Key 都齐了才走（Rust 那边打的是用户自己那个端点） */
 async function load(): Promise<void> {
-  if (fetching.value) return
+  if (fetching.value)
+    return
   if (!/^https?:\/\//.test(baseUrl.value.trim())) {
     fetchError.value = '先填 Base URL（要以 http:// 或 https:// 开头）'
     return
@@ -152,7 +150,7 @@ async function load(): Promise<void> {
     provider: id.value || 'draft',
     baseUrl: baseUrl.value,
     api: apiFormat.value,
-    secret: keyDraft.value.trim()
+    secret: keyDraft.value.trim(),
   })
   fetching.value = false
 
@@ -161,7 +159,8 @@ async function load(): Promise<void> {
     return
   }
   fetched.value = result.data ?? []
-  if (!fetched.value.length) fetchError.value = '这个端点没有报出任何模型，可以自己填 id'
+  if (!fetched.value.length)
+    fetchError.value = '这个端点没有报出任何模型，可以自己填 id'
 }
 
 /** 粘完 Key 自动连一次（粘贴事件早于 v-model 更新，所以推到下一个 tick 再读） */
@@ -171,9 +170,12 @@ function onPasteKey(): void {
 
 /** 左栏空着时那句说明：把「为什么空」说清楚，别让用户猜 */
 const listHint = computed(() => {
-  if (fetching.value) return '正在连端点取模型列表…'
-  if (fetchError.value) return fetchError.value
-  if (!fetched.value.length) return '粘上 API Key 就会自动获取模型列表，也可以点上面的「获取列表」。'
+  if (fetching.value)
+    return '正在连端点取模型列表…'
+  if (fetchError.value)
+    return fetchError.value
+  if (!fetched.value.length)
+    return '粘上 API Key 就会自动获取模型列表，也可以点上面的「获取列表」。'
   return '这些模型里没有匹配的。'
 })
 
@@ -185,7 +187,7 @@ async function save(): Promise<void> {
     apiFormat: apiFormat.value,
     preset: preset.value,
     enabled: props.provider?.enabled !== false,
-    models: models.value
+    models: models.value,
   }
   if (!aiProviderReady(draft)) {
     fetchError.value = '还差东西：服务名、Base URL、API 形态，以及至少一个启用的模型'
@@ -205,7 +207,8 @@ async function save(): Promise<void> {
 
 /** 清掉这个服务已经存着的 Key（新加的那种没有） */
 async function clearKey(): Promise<void> {
-  if (!originalId.value) return
+  if (!originalId.value)
+    return
   await store.clearProviderKey(originalId.value)
 }
 
@@ -227,7 +230,9 @@ const title = computed(() => (props.provider ? '编辑 AI 服务' : '添加 AI �
             <span class="svc__name">{{ label || '还没起名字' }}</span>
             <span class="svc__host">{{ baseUrl || '还没填地址' }}</span>
           </span>
-          <el-button link size="small" @click="back">更换</el-button>
+          <el-button link size="small" @click="back">
+            更换
+          </el-button>
         </div>
         <el-button link size="small" @click="advanced = !advanced">
           {{ advanced ? '收起高级设置' : '高级设置' }}
@@ -279,8 +284,12 @@ const title = computed(() => (props.provider ? '编辑 AI 服务' : '添加 AI �
             @paste="onPasteKey"
             @keyup.enter="load"
           />
-          <el-button :loading="fetching" @click="load">获取列表</el-button>
-          <el-button v-if="keyConfigured" link @click="clearKey">清除</el-button>
+          <el-button :loading="fetching" @click="load">
+            获取列表
+          </el-button>
+          <el-button v-if="keyConfigured" link @click="clearKey">
+            清除
+          </el-button>
         </div>
         <p class="svc__hint">
           粘贴 API Key 后自动连接并获取模型；它存在 Windows 凭据管理器里，只经环境变量交给
@@ -297,11 +306,15 @@ const title = computed(() => (props.provider ? '编辑 AI 服务' : '添加 AI �
         @refresh="load"
       />
 
-      <p v-if="saveError" class="svc__save-error">{{ saveError }}</p>
+      <p v-if="saveError" class="svc__save-error">
+        {{ saveError }}
+      </p>
     </div>
 
     <template #footer>
-      <el-button @click="visible = false">取消</el-button>
+      <el-button @click="visible = false">
+        取消
+      </el-button>
       <el-button v-if="step === 'edit'" type="primary" :loading="saving" @click="save">
         保存服务
       </el-button>

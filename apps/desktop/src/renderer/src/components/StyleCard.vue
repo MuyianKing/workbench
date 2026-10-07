@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import type { DesignStyle } from '@workbench/appearance'
+import { buildDesignDemo, buttonCss, CARD_TYPE, designStyleFamily, safeCssValue, THEME_LABELS, typeCss } from '@workbench/appearance'
+
 /**
  * 样式卡片：网格里的一块，卡面就是这套设计的一小张页面。
  *
@@ -13,9 +16,6 @@
  * 整卡可点、可键盘操作，与 SkillCard 同一条交互（role=button + Enter/Space）。
  */
 import { computed } from 'vue'
-import type { DesignStyle } from '@workbench/appearance'
-import { CARD_TYPE, buildDesignDemo, buttonCss, typeCss } from '@workbench/appearance'
-import { designStyleFamily, safeCssValue, THEME_LABELS } from '@workbench/appearance'
 
 const props = defineProps<{ design: DesignStyle }>()
 const emit = defineEmits<{ (event: 'open'): void }>()
@@ -24,7 +24,7 @@ const demo = computed(() => buildDesignDemo(props.design))
 
 /** 卡片上的角标：浅色 · 红 */
 const badge = computed(
-  () => `${THEME_LABELS[props.design.theme]} · ${designStyleFamily(props.design)}`
+  () => `${THEME_LABELS[props.design.theme]} · ${designStyleFamily(props.design)}`,
 )
 
 const componentCount = computed(() => Object.keys(props.design.components).length)
@@ -37,13 +37,13 @@ const rootStyle = computed<Record<string, string>>(() => {
     '--card-ink': palette.ink,
     '--card-muted': palette.muted,
     '--card-hairline': palette.hairline,
-    '--card-accent': palette.accent
+    '--card-accent': palette.accent,
   }
 })
 
 const brandStyle = computed(() => ({
   ...typeCss(demo.value.small, CARD_TYPE.brand),
-  fontWeight: safeCssValue(demo.value.small?.fontWeight) ?? '600'
+  fontWeight: safeCssValue(demo.value.small?.fontWeight) ?? '600',
 }))
 
 const linkStyle = computed(() => ({ ...typeCss(demo.value.small, 11), color: 'var(--card-muted)' }))
@@ -51,22 +51,22 @@ const linkStyle = computed(() => ({ ...typeCss(demo.value.small, 11), color: 'va
 const eyebrowStyle = computed(() => ({
   ...typeCss(demo.value.small, 10),
   color: 'var(--card-accent)',
-  letterSpacing: safeCssValue(demo.value.small?.letterSpacing) ?? '0.08em'
+  letterSpacing: safeCssValue(demo.value.small?.letterSpacing) ?? '0.08em',
 }))
 
 const titleStyle = computed(() => ({ ...typeCss(demo.value.hero, CARD_TYPE.title), color: 'var(--card-ink)' }))
 
 const subtitleStyle = computed(() => ({
   ...typeCss(demo.value.body, CARD_TYPE.text),
-  color: 'var(--card-muted)'
+  color: 'var(--card-muted)',
 }))
 
 const primaryStyle = computed(() =>
-  buttonCss(demo.value.primary, demo.value.metrics.buttonRadius, CARD_TYPE.button, CARD_TYPE.buttonHeight)
+  buttonCss(demo.value.primary, demo.value.metrics.buttonRadius, CARD_TYPE.button, CARD_TYPE.buttonHeight),
 )
 
 const secondaryStyle = computed(() =>
-  buttonCss(demo.value.secondary, demo.value.metrics.buttonRadius, CARD_TYPE.button, CARD_TYPE.buttonHeight)
+  buttonCss(demo.value.secondary, demo.value.metrics.buttonRadius, CARD_TYPE.button, CARD_TYPE.buttonHeight),
 )
 </script>
 
@@ -89,9 +89,15 @@ const secondaryStyle = computed(() =>
     </div>
 
     <!-- 首屏那一小段：眉题、标题、副文案、按钮 -->
-    <p class="card__eyebrow" :style="eyebrowStyle">{{ demo.copy.eyebrow }}</p>
-    <h3 class="card__title" :style="titleStyle">{{ demo.copy.title }}</h3>
-    <p class="card__subtitle" :style="subtitleStyle">{{ demo.copy.subtitle }}</p>
+    <p class="card__eyebrow" :style="eyebrowStyle">
+      {{ demo.copy.eyebrow }}
+    </p>
+    <h3 class="card__title" :style="titleStyle">
+      {{ demo.copy.title }}
+    </h3>
+    <p class="card__subtitle" :style="subtitleStyle">
+      {{ demo.copy.subtitle }}
+    </p>
     <div class="card__actions">
       <span class="card__button" :style="primaryStyle">{{ demo.copy.primary }}</span>
       <span class="card__button card__button--quiet" :style="secondaryStyle">{{ demo.copy.secondary }}</span>

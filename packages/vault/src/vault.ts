@@ -47,7 +47,7 @@ export interface VaultPublicKey {
   y: string
 }
 
-/** 私钥的 JWK：公钥那三个坐标加一个 d。**只在本机、只在渲染层内存与凭据管理器之间流转** */
+/** 私钥的 JWK：公钥那三个坐标加一个 d。**只在本机、只在渲染层内存与凭据管理器之间流转 */
 export interface VaultPrivateKey extends VaultPublicKey {
   d: string
 }
@@ -151,7 +151,7 @@ export async function createVaultKey(): Promise<VaultPrivateKey> {
     crv: 'P-256',
     x: jwk.x ?? '',
     y: jwk.y ?? '',
-    d: jwk.d ?? ''
+    d: jwk.d ?? '',
   }
 }
 
@@ -170,30 +170,32 @@ export function publicKeyOf(key: VaultPublicKey): VaultPublicKey {
 
 /** 形状对不对。读凭据管理器 / 读用户导入的文件时先过这一关，别把半截 JWK 拿去 import */
 export function isVaultPrivateKey(value: unknown): value is VaultPrivateKey {
-  if (typeof value !== 'object' || value === null) return false
+  if (typeof value !== 'object' || value === null)
+    return false
   const key = value as Record<string, unknown>
   return (
-    key.kty === 'EC' &&
-    key.crv === 'P-256' &&
-    typeof key.x === 'string' &&
-    key.x.length > 0 &&
-    typeof key.y === 'string' &&
-    key.y.length > 0 &&
-    typeof key.d === 'string' &&
-    key.d.length > 0
+    key.kty === 'EC'
+    && key.crv === 'P-256'
+    && typeof key.x === 'string'
+    && key.x.length > 0
+    && typeof key.y === 'string'
+    && key.y.length > 0
+    && typeof key.d === 'string'
+    && key.d.length > 0
   )
 }
 
 export function isVaultPublicKey(value: unknown): value is VaultPublicKey {
-  if (typeof value !== 'object' || value === null) return false
+  if (typeof value !== 'object' || value === null)
+    return false
   const key = value as Record<string, unknown>
   return (
-    key.kty === 'EC' &&
-    key.crv === 'P-256' &&
-    typeof key.x === 'string' &&
-    key.x.length > 0 &&
-    typeof key.y === 'string' &&
-    key.y.length > 0
+    key.kty === 'EC'
+    && key.crv === 'P-256'
+    && typeof key.x === 'string'
+    && key.x.length > 0
+    && typeof key.y === 'string'
+    && key.y.length > 0
   )
 }
 
@@ -210,11 +212,13 @@ export function encodeKeyString(key: VaultPrivateKey): string {
 /** `encodeKeyString` 的反面：认不出来一律 null，调用方据此给一句人话 */
 export function parseKeyString(text: string): VaultPrivateKey | null {
   const trimmed = text.trim()
-  if (!trimmed.startsWith(KEY_PREFIX)) return null
+  if (!trimmed.startsWith(KEY_PREFIX))
+    return null
   try {
     const parsed: unknown = JSON.parse(new TextDecoder().decode(fromBase64Url(trimmed.slice(KEY_PREFIX.length))))
     return isVaultPrivateKey(parsed) ? parsed : null
-  } catch {
+  }
+  catch {
     return null
   }
 }
@@ -229,7 +233,7 @@ export async function publicKeyFingerprint(key: VaultPublicKey): Promise<string>
   const imported = await crypto.subtle.importKey('jwk', publicKeyOf(key), CURVE, true, [])
   const raw = new Uint8Array(await crypto.subtle.exportKey('raw', imported))
   const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', raw))
-  const hex = Array.from(digest.slice(0, 6), (byte) => byte.toString(16).padStart(2, '0')).join('')
+  const hex = Array.from(digest.slice(0, 6), byte => byte.toString(16).padStart(2, '0')).join('')
   return hex.toUpperCase().replace(/(.{4})(?=.)/g, '$1-')
 }
 
@@ -251,12 +255,12 @@ async function sharedAesKey(privateKey: CryptoKey, publicKey: CryptoKey): Promis
       // 盐与 info 都是常量：这里没有「同一把密钥加密多条消息要各自域分离」的需求，
       // 每条条目的密钥来自**每次现场生成的临时密钥对**，本身就已经一次一密
       salt: new Uint8Array(32),
-      info: new TextEncoder().encode(HKDF_INFO)
+      info: new TextEncoder().encode(HKDF_INFO),
     },
     material,
     { name: AES, length: 256 },
     false,
-    ['encrypt', 'decrypt']
+    ['encrypt', 'decrypt'],
   )
 }
 
@@ -295,7 +299,8 @@ export async function seal(key: VaultPublicKey, entry: VaultEntry): Promise<Seal
  * 让其余条目照常显示，而不是整份保险库打不开。
  */
 export async function open(privateKey: VaultPrivateKey, item: VaultItem): Promise<VaultEntry> {
-  if (!item.pub || !item.iv || !item.ct) throw new Error('这条记录里没有密文')
+  if (!item.pub || !item.iv || !item.ct)
+    throw new Error('这条记录里没有密文')
 
   // 这一处**故意**整个摊开：这里要的正是私钥（`d` 得带上），摊开才对。
   // 反过来，收公钥的那几处必须走 publicKeyOf()，理由见它的说明
@@ -306,7 +311,7 @@ export async function open(privateKey: VaultPrivateKey, item: VaultItem): Promis
   const plaintext = await crypto.subtle.decrypt(
     { name: AES, iv: fromBase64Url(item.iv) },
     aes,
-    fromBase64Url(item.ct)
+    fromBase64Url(item.ct),
   )
   const parsed: unknown = JSON.parse(new TextDecoder().decode(new Uint8Array(plaintext)))
   return sanitizeVaultEntry(parsed)
@@ -315,17 +320,19 @@ export async function open(privateKey: VaultPrivateKey, item: VaultItem): Promis
 /** 读哪几条读不出来：返回 id 清单，界面据此如实说「有 N 条解不开」 */
 export async function openAll(
   privateKey: VaultPrivateKey,
-  file: VaultFile
-): Promise<{ records: VaultRecord[]; failed: string[] }> {
+  file: VaultFile,
+): Promise<{ records: VaultRecord[], failed: string[] }> {
   const records: VaultRecord[] = []
   const failed: string[] = []
 
   for (const item of file.items) {
-    if (item.deleted) continue
+    if (item.deleted)
+      continue
     try {
       const entry = await open(privateKey, item)
       records.push({ ...entry, id: item.id, updatedAt: item.updatedAt, by: item.by })
-    } catch {
+    }
+    catch {
       failed.push(item.id)
     }
   }
@@ -336,7 +343,8 @@ export async function openAll(
 // ---------- 条目 ----------
 
 export function sanitizeVaultEntry(raw: unknown): VaultEntry {
-  if (typeof raw !== 'object' || raw === null) return emptyVaultEntry()
+  if (typeof raw !== 'object' || raw === null)
+    return emptyVaultEntry()
   const value = raw as Record<string, unknown>
   const text = (key: string): string => (typeof value[key] === 'string' ? (value[key] as string) : '')
 
@@ -347,7 +355,7 @@ export function sanitizeVaultEntry(raw: unknown): VaultEntry {
     notes: text('notes').slice(0, 5000),
     // 分组名去掉首尾空白：`开发 ` 与 `开发` 必须被当成同一组 —— 否则排序认为它们不同、
     // 而筛选标签按名字精确匹配，点进去是空的（分组这一栏本来就是随手打的）
-    group: text('group').trim().slice(0, 100)
+    group: text('group').trim().slice(0, 100),
   }
 }
 
@@ -370,8 +378,10 @@ export function tombstoneOf(item: Pick<VaultItem, 'id'>, updatedAt: number, by: 
 
 /** 同一个 id 上取新的那一份：先比时间，再比设备 id（保证两台机器算出同一个赢家） */
 function pickNewer(a: VaultItem, b: VaultItem): VaultItem {
-  if (a.updatedAt !== b.updatedAt) return a.updatedAt > b.updatedAt ? a : b
-  if (a.by !== b.by) return a.by > b.by ? a : b
+  if (a.updatedAt !== b.updatedAt)
+    return a.updatedAt > b.updatedAt ? a : b
+  if (a.by !== b.by)
+    return a.by > b.by ? a : b
   // 时间与设备都撞上：只可能是同一台机器在同一毫秒写下来的同一份内容，留本地那份即可
   return a
 }
@@ -394,7 +404,7 @@ function pickNewer(a: VaultItem, b: VaultItem): VaultItem {
  */
 export function mergeVaultItems(
   local: readonly VaultItem[],
-  remote: readonly VaultItem[]
+  remote: readonly VaultItem[],
 ): VaultItem[] {
   const merged = new Map<string, VaultItem>()
 
@@ -414,7 +424,7 @@ export function vaultFileOf(key: VaultPublicKey, items: readonly VaultItem[]): V
   return {
     version: VAULT_VERSION,
     key: publicKeyOf(key),
-    items: mergeVaultItems(items, [])
+    items: mergeVaultItems(items, []),
   }
 }
 
@@ -425,19 +435,24 @@ export function emptyVaultFile(key: VaultPublicKey): VaultFile {
 
 /** 一条信封能不能用：缺 id / 时间不是数 / 正文三件套不齐的一律不算 */
 function normalizeItem(raw: unknown): VaultItem | null {
-  if (typeof raw !== 'object' || raw === null) return null
+  if (typeof raw !== 'object' || raw === null)
+    return null
   const value = raw as Record<string, unknown>
   const id = typeof value.id === 'string' ? value.id.trim() : ''
-  if (!id) return null
-  if (typeof value.updatedAt !== 'number' || !Number.isFinite(value.updatedAt)) return null
+  if (!id)
+    return null
+  if (typeof value.updatedAt !== 'number' || !Number.isFinite(value.updatedAt))
+    return null
 
   const by = typeof value.by === 'string' ? value.by : ''
-  if (value.deleted === true) return { id, updatedAt: value.updatedAt, by, deleted: true }
+  if (value.deleted === true)
+    return { id, updatedAt: value.updatedAt, by, deleted: true }
 
   const pub = typeof value.pub === 'string' ? value.pub : ''
   const iv = typeof value.iv === 'string' ? value.iv : ''
   const ct = typeof value.ct === 'string' ? value.ct : ''
-  if (!pub || !iv || !ct) return null
+  if (!pub || !iv || !ct)
+    return null
 
   return { id, updatedAt: value.updatedAt, by, pub, iv, ct }
 }
@@ -450,17 +465,22 @@ function normalizeItem(raw: unknown): VaultItem | null {
  * 单条坏掉只丢那一条，并在 `dropped` 里报个数：整份作废等于把还能读的密码一起弄丢。
  */
 export function parseVaultFile(raw: unknown): ParsedVault | null {
-  if (typeof raw !== 'object' || raw === null) return null
+  if (typeof raw !== 'object' || raw === null)
+    return null
   const value = raw as Record<string, unknown>
-  if (typeof value.version !== 'number') return null
-  if (!isVaultPublicKey(value.key)) return null
-  if (!Array.isArray(value.items)) return null
+  if (typeof value.version !== 'number')
+    return null
+  if (!isVaultPublicKey(value.key))
+    return null
+  if (!Array.isArray(value.items))
+    return null
 
   const items: VaultItem[] = []
   let dropped = 0
   for (const candidate of value.items) {
     const item = normalizeItem(candidate)
-    if (item) items.push(item)
+    if (item)
+      items.push(item)
     else dropped += 1
   }
 
@@ -468,9 +488,9 @@ export function parseVaultFile(raw: unknown): ParsedVault | null {
     file: {
       version: VAULT_VERSION,
       key: publicKeyOf(value.key),
-      items: mergeVaultItems(items, [])
+      items: mergeVaultItems(items, []),
     },
-    dropped
+    dropped,
   }
 }
 
@@ -483,10 +503,11 @@ export function parseVaultFile(raw: unknown): ParsedVault | null {
  */
 export function filterVaultRecords(records: readonly VaultRecord[], query: string): VaultRecord[] {
   const needle = query.trim().toLowerCase()
-  if (!needle) return [...records]
+  if (!needle)
+    return [...records]
 
-  return records.filter((record) =>
-    [record.name, record.notes, record.group].some((field) => field.toLowerCase().includes(needle))
+  return records.filter(record =>
+    [record.name, record.notes, record.group].some(field => field.toLowerCase().includes(needle)),
   )
 }
 
@@ -504,11 +525,12 @@ function byName(a: VaultRecord, b: VaultRecord): number {
  */
 export function sortVaultRecords(records: readonly VaultRecord[]): VaultRecord[] {
   return [...records].sort((a, b) => {
-    if (!a.group !== !b.group) return a.group ? -1 : 1
+    if (!a.group !== !b.group)
+      return a.group ? -1 : 1
     return (
-      a.group.localeCompare(b.group, 'zh-Hans-CN', { numeric: true }) ||
-      byName(a, b) ||
-      (a.id < b.id ? -1 : 1)
+      a.group.localeCompare(b.group, 'zh-Hans-CN', { numeric: true })
+      || byName(a, b)
+      || (a.id < b.id ? -1 : 1)
     )
   })
 }
@@ -525,7 +547,8 @@ export function sortVaultRecords(records: readonly VaultRecord[]): VaultRecord[]
 export function vaultGroups(records: readonly VaultRecord[]): string[] {
   const names = new Set<string>()
   for (const record of records) {
-    if (record.group) names.add(record.group)
+    if (record.group)
+      names.add(record.group)
   }
   return [...names].sort((a, b) => a.localeCompare(b, 'zh-Hans-CN', { numeric: true }))
 }
@@ -553,7 +576,8 @@ export function groupVaultRecords(records: readonly VaultRecord[]): VaultSection
 
   for (const record of records) {
     const last = sections[sections.length - 1]
-    if (last && last.key === record.group) last.records.push(record)
+    if (last && last.key === record.group)
+      last.records.push(record)
     else sections.push({ key: record.group, label: record.group || UNGROUPED_LABEL, records: [record] })
   }
 

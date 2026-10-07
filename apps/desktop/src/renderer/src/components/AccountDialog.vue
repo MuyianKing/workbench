@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import type { AuthProvider } from '@/types'
+import { Loading, User } from '@element-plus/icons-vue'
+import { accountLabel, AUTH_PROVIDER_HINTS, AUTH_PROVIDER_LABELS, AUTH_PROVIDERS } from '@workbench/auth'
 /**
  * 账号弹窗：登录 / 看当前账号 / 退出登录。
  *
@@ -12,12 +15,9 @@
  * **没有页脚按钮**：右上角那个 × 就是关闭，再放一个「关闭」只是把同一个动作说两遍。
  */
 import { computed, ref, watch } from 'vue'
-import { Loading, User } from '@element-plus/icons-vue'
-import { AUTH_PROVIDERS, AUTH_PROVIDER_HINTS, AUTH_PROVIDER_LABELS, accountLabel } from '@workbench/auth'
 import AppDialog from '@/components/AppDialog.vue'
 import { confirmAction } from '@/notify'
 import { useAuthStore } from '@/stores/auth'
-import type { AuthProvider } from '@/types'
 
 /** 弹层开关:v-model 一条口径(与 AppDialog / el-dialog 相同,全应用的弹层都这么开) */
 const open = defineModel<boolean>({ required: true })
@@ -28,7 +28,7 @@ const visible = computed({
   get: () => open.value,
   set: (value: boolean) => {
     open.value = value
-  }
+  },
 })
 
 /** 手动兜底那一栏：默认收起，只有回调没跳回来时用户才需要它 */
@@ -41,7 +41,8 @@ const account = computed(() => auth.status?.account ?? null)
 const configured = computed(() => auth.status?.configured !== false)
 
 watch(visible, (open) => {
-  if (!open) return
+  if (!open)
+    return
 
   manualOpen.value = false
   manualUrl.value = ''
@@ -66,7 +67,8 @@ function start(provider: AuthProvider): void {
 
 async function submitManual(): Promise<void> {
   const url = manualUrl.value.trim()
-  if (!url || manualBusy.value) return
+  if (!url || manualBusy.value)
+    return
 
   manualBusy.value = true
   manualError.value = ''
@@ -75,25 +77,29 @@ async function submitManual(): Promise<void> {
     if (done) {
       manualUrl.value = ''
       manualOpen.value = false
-    } else {
+    }
+    else {
       manualError.value = '这段地址里没有可用的授权码，请复制浏览器地址栏里以 /callback 开头的那一整条'
     }
-  } finally {
+  }
+  finally {
     manualBusy.value = false
   }
 }
 
 async function signOut(): Promise<void> {
   const current = account.value
-  if (!current) return
+  if (!current)
+    return
 
   const agreed = await confirmAction(
-    `退出后 Workbench 会删掉本机保存的 ${AUTH_PROVIDER_LABELS[current.provider]} 凭据，` +
-      '同步随之停止，数据只留在这台机器上（设置里的仓库地址不会丢，重新登录即可接着同步）。',
+    `退出后 Workbench 会删掉本机保存的 ${AUTH_PROVIDER_LABELS[current.provider]} 凭据，`
+    + '同步随之停止，数据只留在这台机器上（设置里的仓库地址不会丢，重新登录即可接着同步）。',
     '退出登录',
-    { confirmButtonText: '退出登录' }
+    { confirmButtonText: '退出登录' },
   )
-  if (!agreed) return
+  if (!agreed)
+    return
 
   await auth.logout()
 }
@@ -113,7 +119,9 @@ async function signOut(): Promise<void> {
     <!-- 用不了：把 Rust 侧给出的具体原因摆在最前面，别让人以为是网络问题。
          只留「原因 + 怎么办」两段，背后那套「凭据随安装包发布」的机制在 README 里说。 -->
     <div v-if="!configured" class="block">
-      <p class="block__title">账号登录当前不可用</p>
+      <p class="block__title">
+        账号登录当前不可用
+      </p>
       <p class="block__text">
         {{ auth.status?.configError || '当前构建未内置 OAuth 凭据。' }}
       </p>
@@ -128,14 +136,18 @@ async function signOut(): Promise<void> {
     <div v-else-if="auth.pending" class="waiting">
       <!-- 转圈用 Element Plus 图标自带的 .is-loading（不必自己写 keyframes） -->
       <span class="waiting__badge"><el-icon class="is-loading"><Loading /></el-icon></span>
-      <p class="waiting__title">已打开浏览器，请在那里完成授权</p>
+      <p class="waiting__title">
+        已打开浏览器，请在那里完成授权
+      </p>
       <p class="waiting__text">
         正在等待 {{ AUTH_PROVIDER_LABELS[auth.pending] }} 授权完成，这里会自动更新。
       </p>
 
       <!-- 只在浏览器没能自动打开时才把地址露出来：正常情况下它只是一串噪音 -->
       <template v-if="!auth.opened">
-        <p class="waiting__warn">浏览器没能自动打开，请手动访问：</p>
+        <p class="waiting__warn">
+          浏览器没能自动打开，请手动访问：
+        </p>
         <a class="waiting__link" :href="auth.url" target="_blank" rel="noreferrer">
           {{ auth.url }}
         </a>
@@ -153,16 +165,22 @@ async function signOut(): Promise<void> {
             placeholder="http://127.0.0.1:45871/callback?code=…"
             spellcheck="false"
           />
-          <el-button size="small" :loading="manualBusy" @click="submitManual">提交</el-button>
+          <el-button size="small" :loading="manualBusy" @click="submitManual">
+            提交
+          </el-button>
         </div>
-        <p v-if="manualError" class="manual__error">{{ manualError }}</p>
+        <p v-if="manualError" class="manual__error">
+          {{ manualError }}
+        </p>
       </div>
 
       <div class="waiting__actions">
         <el-button size="small" text @click="manualOpen = !manualOpen">
           {{ manualOpen ? '收起' : '没有自动跳回来？' }}
         </el-button>
-        <el-button size="small" @click="auth.cancelLogin()">取消</el-button>
+        <el-button size="small" @click="auth.cancelLogin()">
+          取消
+        </el-button>
       </div>
     </div>
 
@@ -178,7 +196,9 @@ async function signOut(): Promise<void> {
             <span class="row__meta">{{ account.login }} · {{ AUTH_PROVIDER_LABELS[account.provider] }}</span>
           </span>
         </div>
-        <el-button size="small" @click="signOut">退出登录</el-button>
+        <el-button size="small" @click="signOut">
+          退出登录
+        </el-button>
       </div>
 
       <p class="block__note block__note--after">
@@ -188,7 +208,9 @@ async function signOut(): Promise<void> {
 
     <!-- 未登录 -->
     <div v-else class="block">
-      <p class="block__text">用一个已有的账号登录，不需要额外注册：</p>
+      <p class="block__text">
+        用一个已有的账号登录，不需要额外注册：
+      </p>
 
       <button
         v-for="provider in AUTH_PROVIDERS"
@@ -315,7 +337,6 @@ code.mono {
   background: var(--st-run-soft);
   border-radius: var(--r-md);
 }
-
 
 .waiting__title {
   margin: 0;

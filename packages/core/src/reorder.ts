@@ -5,12 +5,13 @@
  * 所以没在顺序里出现的一律追加到末尾，绝不能凭空丢掉。
  */
 export function reorderById<T extends { id: string }>(items: T[], ids: string[]): T[] {
-  const byId = new Map(items.map((item) => [item.id, item]))
+  const byId = new Map(items.map(item => [item.id, item]))
   const ordered: T[] = []
 
   for (const id of ids) {
     const item = byId.get(id)
-    if (!item) continue
+    if (!item)
+      continue
     ordered.push(item)
     byId.delete(id)
   }
@@ -29,7 +30,8 @@ export function reorderById<T extends { id: string }>(items: T[], ids: string[])
 export function moveToPosition<T extends string>(ids: T[], fromId: T, toId: T): T[] | null {
   const from = ids.indexOf(fromId)
   const to = ids.indexOf(toId)
-  if (from === -1 || to === -1 || from === to) return null
+  if (from === -1 || to === -1 || from === to)
+    return null
 
   const next = [...ids]
   next.splice(to, 0, ...next.splice(from, 1))

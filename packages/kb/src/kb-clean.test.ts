@@ -9,7 +9,7 @@ import { kbCleanPrompt, splitCleanWrites } from './kb-clean'
 const FULL = kbCleanPrompt({
   pending: ['data/raw/mu-ui/button.md', 'data/raw/mu-ui/input.md'],
   stale: ['data/raw/mu-ui/dialog.md'],
-  today: '2026-09-29'
+  today: '2026-09-29',
 })
 
 describe('kbCleanPrompt', () => {
@@ -55,20 +55,20 @@ describe('splitCleanWrites', () => {
 
   it('在旧清单里的算覆盖、不在的算新建，写出来的相对路径原样保留', () => {
     expect(
-      splitCleanWrites('E:\\kb-root', ['kb/01-主题/button.md', 'kb/01-主题/新条目.md'], BEFORE)
+      splitCleanWrites('E:\\kb-root', ['kb/01-主题/button.md', 'kb/01-主题/新条目.md'], BEFORE),
     ).toEqual({ created: ['kb/01-主题/新条目.md'], updated: ['kb/01-主题/button.md'] })
   })
 
   it('绝对路径剥掉根前缀；反斜杠也认', () => {
     expect(
-      splitCleanWrites('E:\\kb-root', ['E:\\kb-root\\kb\\01-主题\\button.md'], BEFORE)
+      splitCleanWrites('E:\\kb-root', ['E:\\kb-root\\kb\\01-主题\\button.md'], BEFORE),
     ).toEqual({ created: [], updated: ['kb/01-主题/button.md'] })
   })
 
   it('大小写不同也算同一份（Windows 的文件名不分大小写）', () => {
     expect(splitCleanWrites('E:\\kb-root', ['kb/01-主题/Button.md'], BEFORE)).toEqual({
       created: [],
-      updated: ['kb/01-主题/button.md']
+      updated: ['kb/01-主题/button.md'],
     })
   })
 
@@ -77,14 +77,14 @@ describe('splitCleanWrites', () => {
       splitCleanWrites(
         'E:\\kb-root',
         ['data/raw/x.md', 'kb/01-主题/a.txt', 'kb/_catalog.md', 'notes.md', ''],
-        BEFORE
-      )
+        BEFORE,
+      ),
     ).toEqual({ created: [], updated: [] })
   })
 
   it('重复报同一份只算一次，两份清单各自按路径排', () => {
     expect(
-      splitCleanWrites('E:\\kb-root', ['kb/02-其他/b.md', 'kb/02-其他/b.md', 'kb/02-其他/a.md'], [])
+      splitCleanWrites('E:\\kb-root', ['kb/02-其他/b.md', 'kb/02-其他/b.md', 'kb/02-其他/a.md'], []),
     ).toEqual({ created: ['kb/02-其他/a.md', 'kb/02-其他/b.md'], updated: [] })
   })
 })

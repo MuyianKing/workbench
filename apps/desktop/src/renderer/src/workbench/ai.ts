@@ -1,3 +1,6 @@
+import type { AiConfirm, AiFetchedModel, AiLogLine, AiProviderPayload, AiUsage, PiDelta } from '@workbench/ai'
+import type { NoteRepoState } from '@workbench/notes'
+import type { AiRunInput, Result } from '@/types'
 /**
  * AI 助手的适配层：把「在一条会话里跑一轮」接到 Rust（`ai_run`）与进程会话的事件流上，
  * 外加密钥三条、探测、RPC 的命令应答与会话删除。
@@ -14,22 +17,8 @@
  * JSON（RPC 协议）；密钥存在 Windows 凭据管理器里，进子进程的环境变量。
  * 这一层只做形状收敛与事件翻译的接线，怎么读帧在 shared/ai.ts（有单测）。
  */
-import {
-  parsePiConfirm,
-  parsePiDelta,
-  parsePiEvent,
-  parsePiResponse,
-  parsePiUsage,
-  type AiConfirm,
-  type AiFetchedModel,
-  type AiLogLine,
-  type AiProviderPayload,
-  type AiUsage,
-  type PiDelta
-} from '@workbench/ai'
-import type { NoteRepoState } from '@workbench/notes'
+import { parsePiConfirm, parsePiDelta, parsePiEvent, parsePiResponse, parsePiUsage } from '@workbench/ai'
 import { fail, ok } from '@workbench/core'
-import type { AiRunInput, Result } from '@/types'
 import { errorText, invoke, listen } from './bridge'
 import { noteRepoState } from './note'
 
@@ -114,17 +103,18 @@ export interface AiRuntime {
 export async function aiRuntime(): Promise<AiRuntime> {
   try {
     const raw = await invoke<Partial<AiRuntime>>('ai_runtime')
-    const source =
-      raw.source === 'bundled' || raw.source === 'path' ? raw.source : ('none' as const)
+    const source
+      = raw.source === 'bundled' || raw.source === 'path' ? raw.source : ('none' as const)
     return {
       source,
       cli: typeof raw.cli === 'string' ? raw.cli : '',
       pi: typeof raw.pi === 'string' ? raw.pi : '',
       node: typeof raw.node === 'string' ? raw.node : '',
       detail: typeof raw.detail === 'string' ? raw.detail : '',
-      skillRoot: typeof raw.skillRoot === 'string' ? raw.skillRoot : ''
+      skillRoot: typeof raw.skillRoot === 'string' ? raw.skillRoot : '',
     }
-  } catch (error) {
+  }
+  catch (error) {
     const message = errorText(error, '探测 AI 运行时失败')
     console.warn('[workbench] 探测 AI 运行时失败', error)
     return { source: 'none', cli: '', pi: '', node: '', detail: message, skillRoot: '' }
@@ -136,11 +126,12 @@ export async function aiRuntime(): Promise<AiRuntime> {
  * 只翻译自己认识的会话 —— 认不出的 id 一律不动，终端那边自己会接。
  */
 export function installAiListeners(): void {
-  listen<{ sessionId: string; lines: Array<{ stream: string; text: string }> }>(
+  listen<{ sessionId: string, lines: Array<{ stream: string, text: string }> }>(
     'session:lines',
     ({ sessionId, lines }) => {
       const handlers = runs.get(sessionId)
-      if (!handlers) return
+      if (!handlers)
+        return
       for (const line of lines) {
         // **一条帧翻不出来不许连累同批后面的帧**：这里断一下，同一批里排在后面的
         // agent_settled 就没人处理了 —— 轮次收不了尾，转圈永远停不下来（踩过：
@@ -148,33 +139,37 @@ export function installAiListeners(): void {
         // 记一条 warn 让问题看得见，然后继续走。
         try {
           dispatchLine(handlers, line)
-        } catch (error) {
+        }
+        catch (error) {
           console.warn('[workbench] 处理 Pi 的一帧输出失败', error, line.text.slice(0, 200))
         }
       }
-    }
+    },
   )
 
-  listen<{ sessionId: string; code: number | null }>('session:exit', ({ sessionId, code }) => {
+  listen<{ sessionId: string, code: number | null }>('session:exit', ({ sessionId, code }) => {
     // 进程没了：还在等它应答的命令当场失败（等下去只会白等满超时）
     for (const [id, request] of [...pending]) {
-      if (request.sessionId !== sessionId) continue
+      if (request.sessionId !== sessionId)
+        continue
       pending.delete(id)
       request.settle(fail('这一轮已经结束了'))
     }
     const handlers = runs.get(sessionId)
-    if (!handlers) return
+    if (!handlers)
+      return
     runs.delete(sessionId)
     handlers.onExit(code)
   })
 }
 
 /** 一帧输出走一遍分流：应答 → 流式增量 → 扩展询问 → 消耗与事件行（顺序就是热路径在前的顺序） */
-function dispatchLine(handlers: RunHandlers, line: { stream: string; text: string }): void {
+function dispatchLine(handlers: RunHandlers, line: { stream: string, text: string }): void {
   // 先看它是不是某条命令的应答（`get_messages` / `abort` 这些要读结果的命令在等它）：
   // 配上了就不再当日志画 —— 读回来的数据不是给人看的，成败由等它的那边说
   const response = parsePiResponse(line.text)
-  if (response && settleRequest(response)) return
+  if (response && settleRequest(response))
+    return
   // 流式增量：助手正一个字一个字往外吐，接在对话末尾（这条是热路径，排在前面）
   const delta = parsePiDelta(line.text)
   if (delta !== null) {
@@ -189,19 +184,23 @@ function dispatchLine(handlers: RunHandlers, line: { stream: string; text: strin
   }
   // 消耗与正文行同源（同一条 message_end 帧）：先递 usage 再落正文行，两个都要
   const usage = parsePiUsage(line.text)
-  if (usage) handlers.onUsage(usage)
+  if (usage)
+    handlers.onUsage(usage)
   const parsed = parsePiEvent(line.text)
-  if (parsed) handlers.onLine(parsed)
+  if (parsed)
+    handlers.onLine(parsed)
 }
 
 /** 把应答兑现给等它的那条命令；没有在等它的（或不是应答）返回 false */
 function settleRequest(response: ReturnType<typeof parsePiResponse>): boolean {
-  if (!response || !response.id) return false
+  if (!response || !response.id)
+    return false
   const request = pending.get(response.id)
-  if (!request) return false
+  if (!request)
+    return false
   pending.delete(response.id)
   request.settle(
-    response.success ? ok(response.data) : fail(response.error || `${response.command} 没有成功`)
+    response.success ? ok(response.data) : fail(response.error || `${response.command} 没有成功`),
   )
   return true
 }
@@ -226,10 +225,11 @@ export async function aiRun(input: AiRunInput, handlers: RunHandlers): Promise<R
       provider: input.provider,
       permission: input.permission,
       // 这一轮启用的技能（根 + 技能名）：Rust 逐条拼成 `--skill <目录>` 交给 Pi
-      skills: input.skills
+      skills: input.skills,
     })
     return ok(pid)
-  } catch (error) {
+  }
+  catch (error) {
     runs.delete(input.sessionId)
     return fail(errorText(error, '启动失败'))
   }
@@ -244,11 +244,12 @@ export async function aiRun(input: AiRunInput, handlers: RunHandlers): Promise<R
 export async function aiRequest(
   sessionId: string,
   frame: Record<string, unknown>,
-  timeoutMs: number = REQUEST_TIMEOUT
+  timeoutMs: number = REQUEST_TIMEOUT,
 ): Promise<Result<unknown>> {
   const id = `wb-${crypto.randomUUID()}`
   const sent = await aiSend(sessionId, JSON.stringify({ id, ...frame }))
-  if (!sent.ok) return sent
+  if (!sent.ok)
+    return sent
 
   return await new Promise<Result<unknown>>((resolve) => {
     const timer = setTimeout(() => {
@@ -260,7 +261,7 @@ export async function aiRequest(
       settle: (result) => {
         clearTimeout(timer)
         resolve(result)
-      }
+      },
     })
   })
 }
@@ -268,10 +269,11 @@ export async function aiRequest(
 /** 读回这条会话的全部历史消息（RPC 的 `get_messages`）：打开旧会话时画对话用 */
 export async function aiMessages(sessionId: string): Promise<Result<unknown>> {
   const result = await aiRequest(sessionId, { type: 'get_messages' })
-  if (!result.ok) return result
+  if (!result.ok)
+    return result
   const data = result.data
-  const messages =
-    data && typeof data === 'object' ? (data as { messages?: unknown }).messages : undefined
+  const messages
+    = data && typeof data === 'object' ? (data as { messages?: unknown }).messages : undefined
   return ok(messages)
 }
 
@@ -294,7 +296,8 @@ export async function aiSend(sessionId: string, line: string): Promise<Result<nu
   try {
     await invoke('session_write', { sessionId, line })
     return ok(null)
-  } catch (error) {
+  }
+  catch (error) {
     return fail(errorText(error, '写入会话失败'))
   }
 }
@@ -304,7 +307,8 @@ export async function aiStop(sessionId: string): Promise<Result<null>> {
   try {
     await invoke('stop_session', { sessionId })
     return ok(null)
-  } catch (error) {
+  }
+  catch (error) {
     return fail(errorText(error, '停止失败'))
   }
 }
@@ -318,7 +322,8 @@ export async function aiSessionDelete(sessionId: string): Promise<Result<number>
   await aiStop(aiSessionProcessId(sessionId))
   try {
     return ok(await invoke<number>('ai_session_delete', { sessionId }))
-  } catch (error) {
+  }
+  catch (error) {
     return fail(errorText(error, '删除会话失败'))
   }
 }
@@ -328,7 +333,8 @@ export async function aiKeySave(provider: string, secret: string): Promise<Resul
   try {
     await invoke('ai_key_save', { provider, secret })
     return ok(null)
-  } catch (error) {
+  }
+  catch (error) {
     return fail(errorText(error, '保存 Key 失败'))
   }
 }
@@ -337,7 +343,8 @@ export async function aiKeySave(provider: string, secret: string): Promise<Resul
 export async function aiKeyState(provider: string): Promise<Result<boolean>> {
   try {
     return ok((await invoke<boolean>('ai_key_state', { provider })) === true)
-  } catch (error) {
+  }
+  catch (error) {
     return fail(errorText(error, '读取 Key 状态失败'))
   }
 }
@@ -347,7 +354,8 @@ export async function aiKeyClear(provider: string): Promise<Result<null>> {
   try {
     await invoke('ai_key_clear', { provider })
     return ok(null)
-  } catch (error) {
+  }
+  catch (error) {
     return fail(errorText(error, '清除 Key 失败'))
   }
 }
@@ -361,7 +369,8 @@ export async function aiModelsWrite(providers: AiProviderPayload[]): Promise<Res
   try {
     await invoke('ai_models_write', { providers })
     return ok(null)
-  } catch (error) {
+  }
+  catch (error) {
     return fail(errorText(error, '写入模型配置失败'))
   }
 }
@@ -376,22 +385,24 @@ export async function aiModelsFetch(
   provider: string,
   baseUrl: string,
   api: string,
-  secret = ''
+  secret = '',
 ): Promise<Result<AiFetchedModel[]>> {
   try {
     const raw = await invoke<unknown[]>('ai_models_fetch', {
       provider,
       baseUrl,
       api,
-      secret
+      secret,
     })
     const list = Array.isArray(raw) ? raw : []
     return ok(
       list.flatMap((item) => {
-        if (!item || typeof item !== 'object') return []
+        if (!item || typeof item !== 'object')
+          return []
         const record = item as Record<string, unknown>
         const id = typeof record.id === 'string' ? record.id : ''
-        if (!id) return []
+        if (!id)
+          return []
         return [
           {
             id,
@@ -400,12 +411,13 @@ export async function aiModelsFetch(
             // 端点没报就是 0（不是「没有」）
             maxTokens: typeof record.maxTokens === 'number' ? record.maxTokens : 0,
             // null = 端点没说（不是「不支持」）
-            reasoning: typeof record.reasoning === 'boolean' ? record.reasoning : null
-          }
+            reasoning: typeof record.reasoning === 'boolean' ? record.reasoning : null,
+          },
         ]
-      })
+      }),
     )
-  } catch (error) {
+  }
+  catch (error) {
     return fail(errorText(error, '获取模型列表失败'))
   }
 }

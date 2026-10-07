@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { FormRules } from 'element-plus'
+import { parsePort } from '@workbench/core'
 /**
  * 添加 / 编辑一条命令。
  *
@@ -6,24 +8,20 @@
  * 一律在用户主目录下执行 —— 这类命令多是全局 CLI，等价于新开一个终端直接敲它。
  */
 import { computed, reactive, watch } from 'vue'
-import type { FormRules } from 'element-plus'
-import { parsePort } from '@workbench/core'
 import AppDialog from '@/components/AppDialog.vue'
-import { useProjectsStore } from '@/stores/projects'
 import { useCatalogStore } from '@/stores/catalog'
 
-const store = useProjectsStore()
 const catalog = useCatalogStore()
 
 const form = reactive({
   name: '',
   command: '',
-  port: ''
+  port: '',
 })
 
 const visible = computed({
   get: () => catalog.commandDialogVisible,
-  set: (value: boolean) => catalog.setCommandDialogVisible(value)
+  set: (value: boolean) => catalog.setCommandDialogVisible(value),
 })
 
 const editing = computed(() => catalog.commandEditing)
@@ -33,7 +31,7 @@ const title = computed(() => (editing.value ? '编辑命令' : '添加命令'))
 const portInvalid = computed(() => !!form.port.trim() && !parsePort(form.port))
 
 const canSubmit = computed(
-  () => !!form.name.trim() && !!form.command.trim() && !portInvalid.value
+  () => !!form.name.trim() && !!form.command.trim() && !portInvalid.value,
 )
 
 /**
@@ -42,14 +40,15 @@ const canSubmit = computed(
  */
 function validatePort(_rule: unknown, value: string, callback: (error?: Error) => void): void {
   const text = String(value ?? '').trim()
-  if (!text || parsePort(text)) callback()
+  if (!text || parsePort(text))
+    callback()
   else callback(new Error('监听端口需要是 1–65535 的整数'))
 }
 
 const rules: FormRules = {
   name: [{ required: true, message: '请填写名称', trigger: 'blur' }],
   command: [{ required: true, message: '请填写要执行的命令', trigger: 'blur' }],
-  port: [{ validator: validatePort, trigger: 'blur' }]
+  port: [{ validator: validatePort, trigger: 'blur' }],
 }
 
 /** 打开弹窗时按当前模式填值：编辑就回填已有配置，新增就是一张白纸 */
@@ -63,18 +62,20 @@ function reset(): void {
 watch(
   () => catalog.commandDialogVisible,
   (open) => {
-    if (open) reset()
-  }
+    if (open)
+      reset()
+  },
 )
 
 async function submit(): Promise<void> {
-  if (!canSubmit.value) return
+  if (!canSubmit.value)
+    return
 
   const payload = {
     name: form.name.trim(),
     command: form.command.trim(),
     // 留空表示「不检测」：显式送 null，主进程才知道要把它清掉
-    port: form.port.trim() ? parsePort(form.port) : null
+    port: form.port.trim() ? parsePort(form.port) : null,
   }
 
   const current = editing.value
@@ -82,9 +83,9 @@ async function submit(): Promise<void> {
     ? await catalog.updateCommand(current.id, payload)
     : await catalog.addCommand(payload)
 
-  if (done) visible.value = false
+  if (done)
+    visible.value = false
 }
-
 </script>
 
 <template>
@@ -127,7 +128,9 @@ async function submit(): Promise<void> {
     </el-form>
 
     <template #footer>
-      <el-button @click="visible = false">取消</el-button>
+      <el-button @click="visible = false">
+        取消
+      </el-button>
       <el-button type="primary" :disabled="!canSubmit" @click="submit">
         {{ editing ? '保存' : '添加' }}
       </el-button>

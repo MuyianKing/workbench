@@ -1,3 +1,5 @@
+import type { TokenDays } from './token-usage'
+import { dayKey } from '@workbench/core'
 /**
  * DSH 会话事件 → 按天计数的解析规则。
  *
@@ -7,9 +9,8 @@
  * 这里不能再减一次（那是 ZCode 的口径，减了 inputTokens 会变成 0）。
  */
 import { describe, expect, it } from 'vitest'
-import { dayKey } from '@workbench/core'
-import { DSH_DEFAULT_MODEL, collectDshSessionText } from './dsh-log'
-import { emptyCounters, type TokenDays } from './token-usage'
+import { collectDshSessionText, DSH_DEFAULT_MODEL } from './dsh-log'
+import { emptyCounters } from './token-usage'
 
 /** 一次请求的时间戳（毫秒）——照真实事件取 */
 const TIME = 1789348272520
@@ -19,7 +20,7 @@ function headerLine(time: number, model: string): string {
     type: 'request/header',
     seq: 15,
     time,
-    data: { header: { config: { provider: 'deepseek-official', model } } }
+    data: { header: { config: { provider: 'deepseek-official', model } } },
   })
 }
 
@@ -28,7 +29,7 @@ function messageLine(time: number, usage: Record<string, number>): string {
     type: 'assistant/message',
     seq: 19,
     time,
-    data: { turn: 1, step: 1, message: { role: 'assistant', content: [] }, usage }
+    data: { turn: 1, step: 1, message: { role: 'assistant', content: [] }, usage },
   })
 }
 
@@ -38,11 +39,11 @@ function collect(...lines: string[]): TokenDays {
   return days
 }
 
-describe('DSH 会话解析', () => {
+describe('dSH 会话解析', () => {
   it('按事件时间的本地日期与请求声明的模型分桶', () => {
     const days = collect(
       headerLine(TIME, 'deepseek-flash'),
-      messageLine(TIME, { inputTokens: 161, outputTokens: 892, cacheReadTokens: 29696, reasoningTokens: 0 })
+      messageLine(TIME, { inputTokens: 161, outputTokens: 892, cacheReadTokens: 29696, reasoningTokens: 0 }),
     )
 
     const counters = days[dayKey(TIME)]['deepseek-flash']
@@ -60,7 +61,7 @@ describe('DSH 会话解析', () => {
     const days = collect(
       headerLine(TIME, 'deepseek-flash'),
       messageLine(TIME, { inputTokens: 100, outputTokens: 10 }),
-      messageLine(TIME, { inputTokens: 200, outputTokens: 20 })
+      messageLine(TIME, { inputTokens: 200, outputTokens: 20 }),
     )
 
     const counters = days[dayKey(TIME)]['deepseek-flash']
@@ -74,7 +75,7 @@ describe('DSH 会话解析', () => {
       headerLine(TIME, 'deepseek-flash'),
       messageLine(TIME, { inputTokens: 100 }),
       headerLine(TIME, 'deepseek-pro'),
-      messageLine(TIME, { inputTokens: 7 })
+      messageLine(TIME, { inputTokens: 7 }),
     )
 
     const models = days[dayKey(TIME)]
@@ -95,7 +96,7 @@ describe('DSH 会话解析', () => {
       // 没有 usage 的 assistant 事件
       JSON.stringify({ type: 'assistant/message', seq: 20, time: TIME, data: { step: 2 } }),
       // 时间拿不到日期
-      JSON.stringify({ type: 'assistant/message', time: 'oops', data: { usage: { inputTokens: 999 } } })
+      JSON.stringify({ type: 'assistant/message', time: 'oops', data: { usage: { inputTokens: 999 } } }),
     )
 
     const models = days[dayKey(TIME)]

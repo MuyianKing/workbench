@@ -18,10 +18,16 @@ const emit = defineEmits<{
 </script>
 
 <template>
-  <p class="side-error__text">{{ error }}</p>
+  <p class="side-error__text">
+    {{ error }}
+  </p>
   <div class="side-error__actions">
-    <el-button size="small" @click="emit('retry')">重试</el-button>
-    <el-button size="small" @click="emit('relocate')">换一个文件夹</el-button>
+    <el-button size="small" @click="emit('retry')">
+      重试
+    </el-button>
+    <el-button size="small" @click="emit('relocate')">
+      换一个文件夹
+    </el-button>
   </div>
 </template>
 

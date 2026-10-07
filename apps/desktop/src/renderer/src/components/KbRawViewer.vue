@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { KbRawItem, KbRawViewKind } from '@workbench/kb'
 /**
  * 原始数据查看（右栏点开一个原始文件之后）：文本类就地预览，其余说明去向。
  *
@@ -9,10 +10,10 @@
  * 读失败（权限 / 编码）不算致命：原因摆进来，外部打开那条路还在。
  */
 import { ArrowLeft, FolderOpened } from '@element-plus/icons-vue'
-import { kbRawStatusText, type KbRawItem, type KbRawViewKind } from '@workbench/kb'
-import { formatTimestamp } from '@/format'
+import { kbRawStatusText } from '@workbench/kb'
 import MarkdownView from '@/components/MarkdownView.vue'
 import PanelLoading from '@/components/PanelLoading.vue'
+import { formatTimestamp } from '@/format'
 
 defineProps<{
   item: KbRawItem
@@ -22,19 +23,23 @@ defineProps<{
   error: string
 }>()
 
-const emit = defineEmits<{ back: []; open: [] }>()
+const emit = defineEmits<{ back: [], open: [] }>()
 </script>
 
 <template>
   <div class="kb-raw-viewer">
     <header class="kb-raw-viewer__head">
       <div class="kb-raw-viewer__bar">
-        <el-button size="small" :icon="ArrowLeft" @click="emit('back')">概览</el-button>
+        <el-button size="small" :icon="ArrowLeft" @click="emit('back')">
+          概览
+        </el-button>
         <el-tooltip content="用系统默认程序打开" placement="bottom">
           <el-button size="small" :icon="FolderOpened" @click="emit('open')" />
         </el-tooltip>
       </div>
-      <h2 class="kb-raw-viewer__title">{{ item.name }}</h2>
+      <h2 class="kb-raw-viewer__title">
+        {{ item.name }}
+      </h2>
       <p class="kb-raw-viewer__meta">
         <span class="mono" :title="item.rel">{{ item.rel }}</span>
       </p>
@@ -52,7 +57,9 @@ const emit = defineEmits<{ back: []; open: [] }>()
 
       <div v-else-if="error" class="kb-raw-viewer__fallback">
         <p>{{ error }}</p>
-        <el-button :icon="FolderOpened" @click="emit('open')">用系统默认程序打开</el-button>
+        <el-button :icon="FolderOpened" @click="emit('open')">
+          用系统默认程序打开
+        </el-button>
       </div>
 
       <MarkdownView v-else-if="kind === 'markdown'" :source="content" class="kb-raw-viewer__md" />

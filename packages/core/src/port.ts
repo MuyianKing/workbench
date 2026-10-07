@@ -14,10 +14,12 @@ export function parsePort(input: unknown): number | undefined {
     return Number.isInteger(input) && input >= PORT_MIN && input <= PORT_MAX ? input : undefined
   }
 
-  if (typeof input !== 'string') return undefined
+  if (typeof input !== 'string')
+    return undefined
 
   const text = input.trim()
-  if (!text) return undefined
+  if (!text)
+    return undefined
 
   const value = Number(text)
   return Number.isInteger(value) && value >= PORT_MIN && value <= PORT_MAX ? value : undefined

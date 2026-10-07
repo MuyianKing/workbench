@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import type { VaultEntry, VaultRecord } from '@workbench/vault'
+import type { InputInstance } from 'element-plus'
+import { emptyVaultEntry, vaultEntryProblem } from '@workbench/vault'
 /**
  * 添加 / 编辑一条记录的弹框：名字、密码、分组、备注。
  *
@@ -12,12 +15,7 @@
  * 不弹消息。
  */
 import { computed, nextTick, ref, watch } from 'vue'
-import type { InputInstance } from 'element-plus'
-import { emptyVaultEntry, vaultEntryProblem, type VaultEntry, type VaultRecord } from '@workbench/vault'
 import AppDialog from '@/components/AppDialog.vue'
-
-/** 弹层开关:v-model 一条口径(与 AppDialog / el-dialog 相同,全应用的弹层都这么开) */
-const visible = defineModel<boolean>({ required: true })
 
 const props = defineProps<{
   /** 要编辑的那条；null = 添加一条新的 */
@@ -27,6 +25,9 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{ save: [entry: VaultEntry] }>()
+
+/** 弹层开关:v-model 一条口径(与 AppDialog / el-dialog 相同,全应用的弹层都这么开) */
+const visible = defineModel<boolean>({ required: true })
 
 const draft = ref<VaultEntry>(emptyVaultEntry())
 const nameInput = ref<InputInstance>()
@@ -40,13 +41,14 @@ function fieldsOf(record: VaultRecord): VaultEntry {
     name: record.name,
     password: record.password,
     notes: record.notes,
-    group: record.group
+    group: record.group,
   }
 }
 
 // 每次打开都重新铺一遍：上一次留下的草稿不该跟着进这一次
 watch(visible, (open) => {
-  if (!open) return
+  if (!open)
+    return
   draft.value = props.record ? fieldsOf(props.record) : emptyVaultEntry()
   submitting.value = false
 })
@@ -60,7 +62,8 @@ function focusName(): void {
 }
 
 function submit(): void {
-  if (problem.value || submitting.value) return
+  if (problem.value || submitting.value)
+    return
   submitting.value = true
   emit('save', draft.value)
 }
@@ -123,7 +126,9 @@ defineExpose({ done: () => (submitting.value = false) })
     </el-form>
 
     <template #footer>
-      <el-button @click="visible = false">取消</el-button>
+      <el-button @click="visible = false">
+        取消
+      </el-button>
       <el-button type="primary" :loading="submitting" :disabled="Boolean(problem)" @click="submit">
         {{ record ? '保存' : '添加' }}
       </el-button>

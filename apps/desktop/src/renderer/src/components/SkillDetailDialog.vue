@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import type { SkillCompareFile, SkillInstalledScan } from '@workbench/skills'
+import { Close } from '@element-plus/icons-vue'
+import { compareSkillVersions, SKILL_FILE, skillVersionOf } from '@workbench/skills'
 /**
  * 技能详情弹窗：卡片点开的那一侧 —— 编辑 SKILL.md、安装到项目、版本历史、删除都在这里。
  *
@@ -15,24 +18,22 @@
  * 刚敲的字会真的丢 —— 问一句比静默丢掉强。保存成功之后 baseline 跟着走，不会误报。
  */
 import { computed, nextTick, ref, watch } from 'vue'
-import { Close } from '@element-plus/icons-vue'
-import { SKILL_FILE, compareSkillVersions, skillVersionOf, type SkillCompareFile, type SkillInstalledScan } from '@workbench/skills'
-import { basenameOf, formatTimestamp } from '@/format'
 import AppDialog from '@/components/AppDialog.vue'
+import SkillCompareDialog from '@/components/SkillCompareDialog.vue'
+import SkillFileTabs from '@/components/SkillFileTabs.vue'
+import SkillHistoryDialog from '@/components/SkillHistoryDialog.vue'
+import { basenameOf, formatTimestamp } from '@/format'
 import { confirmAction, notifySuccess } from '@/notify'
 import { useProjectsStore } from '@/stores/projects'
 import { useSkillsStore } from '@/stores/skills'
-import SkillHistoryDialog from '@/components/SkillHistoryDialog.vue'
-import SkillCompareDialog from '@/components/SkillCompareDialog.vue'
-import SkillFileTabs from '@/components/SkillFileTabs.vue'
-
-/** 弹层开关:v-model 一条口径(与 AppDialog / el-dialog 相同,全应用的弹层都这么开) */
-const open = defineModel<boolean>({ required: true })
 
 const emit = defineEmits<{
   /** 「安装到项目」交给页面层处理：安装弹窗是页面上的那一份（卡片上的按钮也开它） */
   (event: 'install'): void
 }>()
+
+/** 弹层开关:v-model 一条口径(与 AppDialog / el-dialog 相同,全应用的弹层都这么开) */
+const open = defineModel<boolean>({ required: true })
 
 const store = useSkillsStore()
 const projects = useProjectsStore()
@@ -41,7 +42,7 @@ const visible = computed({
   get: () => open.value,
   set: (value) => {
     open.value = value
-  }
+  },
 })
 
 /** 打开那一刻的正文快照：与当前内容一致才算「没有未保存的修改」 */
@@ -69,13 +70,15 @@ const scan = ref<SkillInstalledScan | null>(null)
 const normalizeLf = (text: string): string => text.replace(/\r\n/g, '\n')
 
 watch(open, (value) => {
-  if (!value) return
+  if (!value)
+    return
   checkJob += 1
   updates.value = []
   // 已选中且内容在手上（连点同一张卡片关了再开）时立刻记快照
   if (!store.contentLoading) {
     baseline.value = store.content
-    if (store.activeFile === SKILL_FILE) libraryContent.value = store.content
+    if (store.activeFile === SKILL_FILE)
+      libraryContent.value = store.content
     void checkUpdates()
   }
 })
@@ -91,11 +94,13 @@ watch(open, (value) => {
 watch(
   () => store.contentLoading,
   (loading, was) => {
-    if (loading || was === loading) return
+    if (loading || was === loading)
+      return
     baseline.value = store.content
-    if (store.activeFile === SKILL_FILE) libraryContent.value = store.content
+    if (store.activeFile === SKILL_FILE)
+      libraryContent.value = store.content
     void checkUpdates()
-  }
+  },
 )
 
 /** 扫一遍库与各项目副本；「有更新」的提示条**只由 SKILL.md 的 version 判定** */
@@ -110,15 +115,16 @@ async function checkUpdates(): Promise<void> {
   const job = (checkJob += 1)
   checking.value = true
   try {
-    const result: { ok: boolean; data?: SkillInstalledScan; error?: string } =
-      await window.workbench.scanSkillCopies(
+    const result: { ok: boolean, data?: SkillInstalledScan, error?: string }
+      = await window.workbench.scanSkillCopies(
         store.gitRoot,
         store.dir,
         id,
-        projects.projects.map((project) => project.path)
+        projects.projects.map(project => project.path),
       )
     // 期间关了弹窗 / 换了技能：这份结果已经过期
-    if (job !== checkJob || !open.value || store.activeId !== id) return
+    if (job !== checkJob || !open.value || store.activeId !== id)
+      return
 
     scan.value = result.ok && result.data ? result.data : null
 
@@ -126,21 +132,25 @@ async function checkUpdates(): Promise<void> {
     updates.value = !scan.value
       ? []
       : scan.value.projects.flatMap((copy) => {
-          const file = copy.files.find((item) => item.rel === SKILL_FILE)
-          if (!file || file.content === null) return []
+          const file = copy.files.find(item => item.rel === SKILL_FILE)
+          if (!file || file.content === null)
+            return []
           const text = normalizeLf(file.content)
           const version = skillVersionOf(text)
-          if (!version || compareSkillVersions(version, libraryVersion) <= 0) return []
+          if (!version || compareSkillVersions(version, libraryVersion) <= 0)
+            return []
           return [{ project: copy.project, content: text, version }]
         })
-  } finally {
-    if (job === checkJob) checking.value = false
+  }
+  finally {
+    if (job === checkJob)
+      checking.value = false
   }
 }
 
 /** 项目显示名：按路径对应不到时显示路径末段 */
 function projectNameOf(dir: string): string {
-  return projects.projects.find((project) => project.path === dir)?.name ?? basenameOf(dir)
+  return projects.projects.find(project => project.path === dir)?.name ?? basenameOf(dir)
 }
 
 // ---------- 对比（差异只在对比弹窗里看） ----------
@@ -152,13 +162,13 @@ const compareFiles = ref<SkillCompareFile[]>([])
 
 /** 组装「某个项目副本 vs 库」的全文件对比数据，从 rel 开始看（换行先归一） */
 function openCompareFor(project: string, rel: string): void {
-  const copy = scan.value?.projects.find((item) => item.project === project)
+  const copy = scan.value?.projects.find(item => item.project === project)
   compareFiles.value = (scan.value?.library ?? []).map((file) => {
-    const found = copy?.files.find((item) => item.rel === file.rel)
+    const found = copy?.files.find(item => item.rel === file.rel)
     return {
       rel: file.rel,
       base: normalizeLf(file.content ?? ''),
-      incoming: found ? normalizeLf(found.content ?? '') : null
+      incoming: found ? normalizeLf(found.content ?? '') : null,
     }
   })
   compareRel.value = rel
@@ -176,7 +186,8 @@ async function onApplied(rel: string, content: string): Promise<void> {
   if (store.activeFile === rel) {
     store.content = content
     baseline.value = content
-    if (rel === SKILL_FILE) libraryContent.value = content
+    if (rel === SKILL_FILE)
+      libraryContent.value = content
   }
   await checkUpdates()
   notifySuccess('已更新到库，保存成功')
@@ -184,13 +195,13 @@ async function onApplied(rel: string, content: string): Promise<void> {
 
 /** 正文还在读时不算 dirty：那时 content 里是上一篇的旧文本，比了只会误报 */
 const dirty = computed(
-  () => !store.contentLoading && Boolean(store.activeId) && store.content !== baseline.value
+  () => !store.contentLoading && Boolean(store.activeId) && store.content !== baseline.value,
 )
 
 const historyOpen = ref(false)
 
 const savedText = computed(() =>
-  store.savedAt ? `已保存 · ${formatTimestamp(store.savedAt)}` : '已保存'
+  store.savedAt ? `已保存 · ${formatTimestamp(store.savedAt)}` : '已保存',
 )
 
 /** 想关弹窗的所有入口（自绘的关闭按钮 / 遮罩 / Esc）都走这一道确认 */
@@ -202,13 +213,15 @@ async function requestClose(): Promise<void> {
   const discard = await confirmAction(
     'SKILL.md 还有没保存的修改，直接关掉就丢了。',
     '放弃修改？',
-    { confirmButtonText: '放弃并关闭' }
+    { confirmButtonText: '放弃并关闭' },
   )
-  if (discard) visible.value = false
+  if (discard)
+    visible.value = false
 }
 
 async function save(): Promise<void> {
-  if (await store.saveActive()) baseline.value = store.content
+  if (await store.saveActive())
+    baseline.value = store.content
 }
 
 /** 当前编辑的是不是清单文件（version 门槛只对它） */
@@ -222,7 +235,8 @@ const isMainFile = computed(() => store.activeFile === SKILL_FILE)
  * 那不是「版本只留本机」，是**没有版本**。
  */
 const versionHint = computed(() => {
-  if (!store.hasVersions) return '；技能库还不在 git 仓库里：改完没有版本'
+  if (!store.hasVersions)
+    return '；技能库还不在 git 仓库里：改完没有版本'
   return store.remoteUrl ? '' : '；版本只留本机（它所在的仓库还没连远端）'
 })
 
@@ -233,8 +247,9 @@ watch(
   () => store.activeFile,
   async () => {
     await nextTick()
-    if (editorRef.value) editorRef.value.scrollTop = 0
-  }
+    if (editorRef.value)
+      editorRef.value.scrollTop = 0
+  },
 )
 
 /**
@@ -242,14 +257,16 @@ watch(
  * **详情页只看库里的文件** —— 差异与更新都在对比弹窗里（由提示条打开）。
  */
 async function switchFile(rel: string): Promise<void> {
-  if (rel === store.activeFile) return
+  if (rel === store.activeFile)
+    return
   if (dirty.value) {
     const discard = await confirmAction(
       '当前文件还有没保存的修改，直接切过去就丢了。',
       '放弃修改？',
-      { confirmButtonText: '放弃并切换' }
+      { confirmButtonText: '放弃并切换' },
     )
-    if (!discard) return
+    if (!discard)
+      return
   }
   await store.openFile(rel)
   baseline.value = store.content
@@ -257,15 +274,18 @@ async function switchFile(rel: string): Promise<void> {
 
 async function removeActive(): Promise<void> {
   const skill = store.activeSkill
-  if (!skill) return
+  if (!skill)
+    return
   const confirmed = await confirmAction(
     `「${skill.name}」连同它目录里的 ${skill.fileCount} 个文件会一起删掉。删除也会记进版本历史，想找回可以恢复到删除前的版本。`,
     '删除技能？',
-    { confirmButtonText: '删除' }
+    { confirmButtonText: '删除' },
   )
-  if (!confirmed) return
+  if (!confirmed)
+    return
 
-  if (await store.remove(skill.id)) visible.value = false
+  if (await store.remove(skill.id))
+    visible.value = false
 }
 </script>
 
@@ -282,7 +302,9 @@ async function removeActive(): Promise<void> {
     <div v-if="store.activeSkill" class="detail">
       <header class="detail__head">
         <div class="detail__identity">
-          <h2 class="detail__name">{{ store.activeSkill.name }}</h2>
+          <h2 class="detail__name">
+            {{ store.activeSkill.name }}
+          </h2>
           <span class="detail__id mono" :title="store.activeSkill.id">
             目录 {{ store.activeSkill.id }}
           </span>
@@ -294,9 +316,15 @@ async function removeActive(): Promise<void> {
         <el-button type="primary" plain size="small" @click="emit('install')">
           安装到项目
         </el-button>
-        <el-button size="small" @click="historyOpen = true">版本历史</el-button>
-        <el-button size="small" @click="store.reveal(store.activeSkill.id)">文件夹</el-button>
-        <el-button size="small" type="danger" plain @click="removeActive">删除</el-button>
+        <el-button size="small" @click="historyOpen = true">
+          版本历史
+        </el-button>
+        <el-button size="small" @click="store.reveal(store.activeSkill.id)">
+          文件夹
+        </el-button>
+        <el-button size="small" type="danger" plain @click="removeActive">
+          删除
+        </el-button>
       </div>
 
       <!-- 项目里被优化过的副本：打开详情时检测，查看后可一键更新到库 -->
@@ -311,7 +339,9 @@ async function removeActive(): Promise<void> {
               {{ projectNameOf(update.project) }}
             </span>
             <span class="detail__update-hint">项目里的版本 v{{ update.version }} 高于库中</span>
-            <el-button size="small" text @click="openCompare(update)">查看新版本内容</el-button>
+            <el-button size="small" text @click="openCompare(update)">
+              查看新版本内容
+            </el-button>
           </div>
         </template>
       </div>
@@ -326,17 +356,19 @@ async function removeActive(): Promise<void> {
       />
 
       <div class="detail__editor">
-        <div v-if="store.contentLoading" class="detail__state">正在读取…</div>
-              <textarea
-                v-else
-                ref="editorRef"
-                v-model="store.content"
-                class="detail__textarea mono"
-                spellcheck="false"
-                :placeholder="isMainFile
-                  ? `没有 ${SKILL_FILE}。保存一段带 frontmatter 的 markdown，它就会成为清单。`
-                  : '这个文件还没有内容。'"
-              ></textarea>
+        <div v-if="store.contentLoading" class="detail__state">
+          正在读取…
+        </div>
+        <textarea
+          v-else
+          ref="editorRef"
+          v-model="store.content"
+          class="detail__textarea mono"
+          spellcheck="false"
+          :placeholder="isMainFile
+            ? `没有 ${SKILL_FILE}。保存一段带 frontmatter 的 markdown，它就会成为清单。`
+            : '这个文件还没有内容。'"
+        />
       </div>
 
       <footer class="detail__foot">

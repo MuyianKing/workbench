@@ -42,16 +42,19 @@ export function defaultQuickAppName(target: string): string {
  * makeId 由调用方注入（主进程用 randomUUID），这里保持纯函数。
  */
 export function sanitizeQuickApps(raw: unknown, makeId: () => string): QuickApp[] {
-  if (!Array.isArray(raw)) return []
+  if (!Array.isArray(raw))
+    return []
 
-  const list: Array<{ app: QuickApp; order: number }> = []
+  const list: Array<{ app: QuickApp, order: number }> = []
 
   raw.forEach((item, index) => {
-    if (!item || typeof item !== 'object') return
+    if (!item || typeof item !== 'object')
+      return
     const value = item as Partial<QuickApp>
 
     const target = typeof value.target === 'string' ? value.target.trim() : ''
-    if (!target) return
+    if (!target)
+      return
 
     const name = typeof value.name === 'string' ? value.name.trim() : ''
     const order = typeof value.order === 'number' && Number.isFinite(value.order) ? value.order : index
@@ -70,8 +73,8 @@ export function sanitizeQuickApps(raw: unknown, makeId: () => string): QuickApp[
         lastUsedAt:
           typeof value.lastUsedAt === 'number' && Number.isFinite(value.lastUsedAt)
             ? value.lastUsedAt
-            : undefined
-      }
+            : undefined,
+      },
     })
   })
 

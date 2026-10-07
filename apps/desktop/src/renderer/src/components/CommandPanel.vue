@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { CommandEntry, ProjectStatus } from '@/types'
+import { Loading, MoreFilled, Operation, Plus, Search, VideoPause, VideoPlay } from '@element-plus/icons-vue'
 /**
  * 首页「命令」卡片：一批独立于项目的命令，点一下就跑。
  *
@@ -11,22 +13,12 @@
  * 状态文字、外部启动这类说明在悬停提示里。
  */
 import { computed, ref } from 'vue'
-import {
-  Loading,
-  MoreFilled,
-  Operation,
-  Plus,
-  Search,
-  VideoPause,
-  VideoPlay
-} from '@element-plus/icons-vue'
-import { commandStatusLabel, statusTone } from '@/status'
+import PanelLoading from '@/components/PanelLoading.vue'
 import { confirmAction } from '@/notify'
+import { commandStatusLabel, statusTone } from '@/status'
+import { useCatalogStore } from '@/stores/catalog'
 import { useProjectsStore } from '@/stores/projects'
 import { useTerminalStore } from '@/stores/terminal'
-import { useCatalogStore } from '@/stores/catalog'
-import PanelLoading from '@/components/PanelLoading.vue'
-import type { CommandEntry, ProjectStatus } from '@/types'
 
 const store = useProjectsStore()
 const terminal = useTerminalStore()
@@ -66,19 +58,23 @@ async function detect(item: CommandEntry): Promise<void> {
   detectingId.value = item.id
   try {
     await catalog.detectCommand(item.id)
-  } finally {
+  }
+  finally {
     detectingId.value = null
   }
 }
 
 function toggle(item: CommandEntry): void {
-  if (isRunning(item)) void catalog.stopCommand(item.id)
+  if (isRunning(item))
+    void catalog.stopCommand(item.id)
   else void catalog.startCommand(item.id)
 }
 
 function onMore(item: CommandEntry, command: string): void {
-  if (command === 'edit') catalog.openCommandDialog(item.id)
-  else if (command === 'remove') void remove(item)
+  if (command === 'edit')
+    catalog.openCommandDialog(item.id)
+  else if (command === 'remove')
+    void remove(item)
 }
 
 async function remove(item: CommandEntry): Promise<void> {
@@ -87,9 +83,10 @@ async function remove(item: CommandEntry): Promise<void> {
       ? `「${item.name}」正在运行，删除会先停止它。确定删除？`
       : `确定删除「${item.name}」？只是从这里移除配置，命令本身不会被卸载。`,
     '删除命令',
-    { confirmButtonText: '删除' }
+    { confirmButtonText: '删除' },
   )
-  if (!agreed) return
+  if (!agreed)
+    return
   await catalog.removeCommand(item.id)
 }
 </script>
@@ -121,8 +118,10 @@ async function remove(item: CommandEntry): Promise<void> {
       <PanelLoading v-if="!store.ready" text="正在读取命令…" />
 
       <p v-else-if="!commands.length" class="panel__empty">
-        <el-icon class="empty__icon"><Operation /></el-icon>
-        还没有命令<br />点右上角的 + 添加
+        <el-icon class="empty__icon">
+          <Operation />
+        </el-icon>
+        还没有命令<br>点右上角的 + 添加
       </p>
 
       <ul v-else class="commands__list">
@@ -139,7 +138,9 @@ async function remove(item: CommandEntry): Promise<void> {
             <span v-if="portOf(item)" class="cmd__port mono">:{{ portOf(item) }}</span>
           </div>
 
-          <p class="cmd__text mono truncate">{{ item.command }}</p>
+          <p class="cmd__text mono truncate">
+            {{ item.command }}
+          </p>
 
           <div class="cmd__acts">
             <button
@@ -187,8 +188,12 @@ async function remove(item: CommandEntry): Promise<void> {
               </button>
               <template #dropdown>
                 <el-dropdown-menu>
-                  <el-dropdown-item command="edit">编辑…</el-dropdown-item>
-                  <el-dropdown-item command="remove" divided>删除</el-dropdown-item>
+                  <el-dropdown-item command="edit">
+                    编辑…
+                  </el-dropdown-item>
+                  <el-dropdown-item command="remove" divided>
+                    删除
+                  </el-dropdown-item>
                 </el-dropdown-menu>
               </template>
             </el-dropdown>

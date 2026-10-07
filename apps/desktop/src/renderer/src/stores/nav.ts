@@ -1,3 +1,6 @@
+import type { ViewId } from '@workbench/appearance'
+import { fallbackView, sanitizeViewId } from '@workbench/appearance'
+import { defineStore } from 'pinia'
 /**
  * 导航：当前页、切页，以及首页布局编辑态。
  *
@@ -8,8 +11,6 @@
  * 各页的滚动位置由 KeepAlive 保住。值会落盘，重启后回到上次那一页。
  */
 import { ref, watch } from 'vue'
-import { defineStore } from 'pinia'
-import { fallbackView, sanitizeViewId, type ViewId } from '@workbench/appearance'
 import { useSettingsStore } from './settings'
 
 export const useNavStore = defineStore('nav', () => {
@@ -29,7 +30,7 @@ export const useNavStore = defineStore('nav', () => {
     (value) => {
       activeView.value = sanitizeViewId(value)
     },
-    { immediate: true }
+    { immediate: true },
   )
 
   /**
@@ -43,13 +44,14 @@ export const useNavStore = defineStore('nav', () => {
     () => settingsStore.settings.hiddenViews.join(','),
     () => {
       const hidden = settingsStore.settings.hiddenViews
-      if (!hidden.includes(activeView.value)) return
+      if (!hidden.includes(activeView.value))
+        return
 
       const next = fallbackView(hidden, settingsStore.settings.viewOrder)
       applyView(next)
       void settingsStore.updateSettings({ activeView: next })
     },
-    { immediate: true }
+    { immediate: true },
   )
 
   /** 是否处于首页布局编辑态：由首页顶栏那颗「编辑布局」进入，画布上的「完成」退出 */
@@ -68,11 +70,13 @@ export const useNavStore = defineStore('nav', () => {
   /** 切页的共同部分：布局编辑只对首页画布有意义，切走时收掉 */
   function applyView(value: ViewId): void {
     activeView.value = value
-    if (value !== 'home') layoutEditing.value = false
+    if (value !== 'home')
+      layoutEditing.value = false
   }
 
   async function setActiveView(value: ViewId): Promise<void> {
-    if (value === activeView.value) return
+    if (value === activeView.value)
+      return
 
     applyView(value)
     await settingsStore.updateSettings({ activeView: value })
@@ -83,6 +87,6 @@ export const useNavStore = defineStore('nav', () => {
     setActiveView,
     applyView,
     layoutEditing,
-    setLayoutEditing
+    setLayoutEditing,
   }
 })

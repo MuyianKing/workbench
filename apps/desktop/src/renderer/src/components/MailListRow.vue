@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { MailListItem } from '@/stores/mail'
 /**
  * 收件箱的清单行（收件箱清单与推广邮件段共用同一副）：
  * 两行内容 —— 第一行「未读点 + 发件人 + 日期」，第二行「主题 + 附件回形针 +
@@ -8,11 +9,10 @@
  * 只管摆：勾选 / 开信 / 右键都原样交回父级（MailView）处置 —— 多选态、勾选批次、
  * 菜单与删除的策略都在那边。
  */
-import { Paperclip, Loading } from '@element-plus/icons-vue'
+import { Loading, Paperclip } from '@element-plus/icons-vue'
 import { accountTag, decodeEncodedWords, displayDate, displaySender } from '@workbench/mail'
-import type { MailListItem } from '@/stores/mail'
 
-const props = defineProps<{
+defineProps<{
   /** 这一行画哪封 */
   item: MailListItem
   /** 多选态：行首亮出复选框，点行从「开信」变成「勾 / 撤」 */
@@ -31,9 +31,9 @@ const emit = defineEmits<{
   /** 勾 / 撤这封（复选框或 Ctrl+点选） */
   'toggle-pick': []
   /** 点了行主体：开信（父级按修饰键还能接住 Ctrl / Shift 的快捷选法） */
-  open: [event: MouseEvent]
+  'open': [event: MouseEvent]
   /** 右键：父级摆菜单 */
-  menu: [event: MouseEvent]
+  'menu': [event: MouseEvent]
 }>()
 
 /** 主题是原始头部文本（RFC 2047 编码词），解码在这里做 */
@@ -57,7 +57,7 @@ function senderText(raw: string): string {
       'is-active': active,
       'is-unread': !item.seen,
       'is-picked': picked,
-      'is-deleting': deleting
+      'is-deleting': deleting,
     }"
     @contextmenu.prevent="emit('menu', $event)"
   >

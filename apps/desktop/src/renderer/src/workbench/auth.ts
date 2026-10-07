@@ -1,3 +1,4 @@
+import type { AccountProfile, AuthProvider, AuthStatus, LoginOutcome, LoginPoll, LoginStart, Result } from '@/types'
 /**
  * 账号登录的适配层。
  *
@@ -9,15 +10,6 @@
  */
 import { AUTH_PROVIDERS, sanitizeAccount } from '@workbench/auth'
 import { fail, ok } from '@workbench/core'
-import type {
-  AccountProfile,
-  AuthProvider,
-  AuthStatus,
-  LoginOutcome,
-  LoginPoll,
-  LoginStart,
-  Result
-} from '@/types'
 import { guard, invoke } from './bridge'
 import * as state from './state'
 
@@ -44,7 +36,7 @@ let session = 0
 let finished: AccountProfile | null = null
 
 function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
+  return new Promise(resolve => setTimeout(resolve, ms))
 }
 
 /**
@@ -55,8 +47,10 @@ function delay(ms: number): Promise<void> {
  */
 function reconcile(status: AuthStatus): AccountProfile | null {
   const stored = state.account()
-  if (!stored) return null
-  if (status.providers.includes(stored.provider)) return stored
+  if (!stored)
+    return null
+  if (status.providers.includes(stored.provider))
+    return stored
 
   state.setAccount(null)
   return null
@@ -66,16 +60,18 @@ function reconcile(status: AuthStatus): AccountProfile | null {
  * `settle` 只会给出这两档 —— 它不会「取消」，取消是等待循环那边的事。
  * 收紧返回类型是为了调用方不必再排一次 cancelled。
  */
-type SettledLogin =
-  | { status: 'ok'; account: AccountProfile }
-  | { status: 'failed'; error: string }
+type SettledLogin
+  = | { status: 'ok', account: AccountProfile }
+    | { status: 'failed', error: string }
 
 /** 收下一次结果，成功时落资料 */
 async function settle(poll: LoginPoll): Promise<SettledLogin> {
-  if (poll.status !== 'ok') return { status: 'failed', error: poll.error ?? '登录未完成' }
+  if (poll.status !== 'ok')
+    return { status: 'failed', error: poll.error ?? '登录未完成' }
 
   const account = sanitizeAccount(poll.account)
-  if (!account) return { status: 'failed', error: '登录回包不完整，请重试' }
+  if (!account)
+    return { status: 'failed', error: '登录回包不完整，请重试' }
 
   // 一次只保留一个账号：这一层的用途是授权同步仓库，同时登录两家不会多出能力，
   // 反而让界面要回答「现在到底是哪个账号」。换账号时顺手把上一个清掉，
@@ -109,16 +105,19 @@ async function waitForCallback(): Promise<LoginOutcome> {
     let poll: LoginPoll
     try {
       poll = await invoke<LoginPoll>('auth_login_poll')
-    } catch (error) {
+    }
+    catch (error) {
       // 轮询本身出错（后端异常）就别继续空转了
-      if (mine === session) await cancel()
+      if (mine === session)
+        await cancel()
       return {
         status: 'failed',
-        error: error instanceof Error ? error.message : '登录状态查询失败'
+        error: error instanceof Error ? error.message : '登录状态查询失败',
       }
     }
 
-    if (poll.status === 'pending') continue
+    if (poll.status === 'pending')
+      continue
     return await settle(poll)
   }
 }
@@ -133,12 +132,14 @@ export async function authStatus(): Promise<AuthStatus> {
 export async function refreshAccount(provider: AuthProvider): Promise<Result<AccountProfile>> {
   const result = await guard<unknown>(
     invoke('auth_refresh_account', { provider }),
-    '刷新账号信息失败'
+    '刷新账号信息失败',
   )
-  if (!result.ok) return fail(result.error ?? '刷新账号信息失败')
+  if (!result.ok)
+    return fail(result.error ?? '刷新账号信息失败')
 
   const account = sanitizeAccount(result.data)
-  if (!account) return fail('账号信息不完整，请重新登录')
+  if (!account)
+    return fail('账号信息不完整，请重新登录')
 
   state.setAccount(account)
   return ok(account)
@@ -152,11 +153,11 @@ export async function refreshAccount(provider: AuthProvider): Promise<Result<Acc
  */
 export async function login(
   provider: AuthProvider,
-  onAuthUrl?: (authUrl: string, opened: boolean) => void
+  onAuthUrl?: (authUrl: string, opened: boolean) => void,
 ): Promise<LoginOutcome> {
   const started = await guard<LoginStart>(
     invoke('auth_login_start', { provider }),
-    '发起登录失败'
+    '发起登录失败',
   )
   if (!started.ok || !started.data) {
     return { status: 'failed', error: started.error ?? '发起登录失败' }
@@ -177,9 +178,10 @@ export async function login(
 export async function submit(url: string): Promise<Result<AccountProfile>> {
   const result = await guard<LoginPoll>(
     invoke('auth_login_submit', { url }),
-    '提交回调地址失败'
+    '提交回调地址失败',
   )
-  if (!result.ok || !result.data) return fail(result.error ?? '提交回调地址失败')
+  if (!result.ok || !result.data)
+    return fail(result.error ?? '提交回调地址失败')
 
   const outcome = await settle(result.data)
   return outcome.status === 'ok' ? ok(outcome.account) : fail(outcome.error)
@@ -195,10 +197,12 @@ export async function cancel(): Promise<void> {
 /** 退出登录：清掉凭据管理器里的 token，连带清掉显示用的资料 */
 export async function logout(provider: AuthProvider): Promise<Result<null>> {
   const result = await guard<null>(invoke('auth_logout', { provider }), '退出登录失败')
-  if (!result.ok) return result
+  if (!result.ok)
+    return result
 
   const stored = state.account()
-  if (stored?.provider === provider) state.setAccount(null)
+  if (stored?.provider === provider)
+    state.setAccount(null)
   return ok(null)
 }
 

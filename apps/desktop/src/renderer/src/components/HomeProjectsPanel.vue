@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { Collection } from '@element-plus/icons-vue'
 /**
  * 首页「我的项目」卡片：只画**勾了「在首页展示」**的那些项目（见 Project.home），
  * 一个项目就是项目页上那张项目卡（启动 / 停止 / 打包 / 检测 / 安装 / 「⋯」菜单都在卡上，
@@ -19,10 +20,9 @@
  * 否则用户对着这张卡只会以为它坏了。
  */
 import { computed } from 'vue'
-import { Collection } from '@element-plus/icons-vue'
-import { useProjectsStore } from '@/stores/projects'
 import PanelLoading from '@/components/PanelLoading.vue'
 import ProjectCard from '@/components/ProjectCard.vue'
+import { useProjectsStore } from '@/stores/projects'
 
 const store = useProjectsStore()
 
@@ -39,13 +39,15 @@ const projects = computed(() => store.homeProjects)
     </div>
 
     <p v-else class="panel__empty">
-      <el-icon class="empty__icon"><Collection /></el-icon>
+      <el-icon class="empty__icon">
+        <Collection />
+      </el-icon>
       <template v-if="store.projects.length">
-        还没有放到首页的项目<br />
+        还没有放到首页的项目<br>
         在项目卡的「⋯」菜单或项目详情里打开「在首页展示」。
       </template>
       <template v-else>
-        还没有项目<br />
+        还没有项目<br>
         添加项目时勾上「在首页展示」，它就会出现在这里。
       </template>
     </p>

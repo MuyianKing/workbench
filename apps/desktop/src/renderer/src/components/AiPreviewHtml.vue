@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { rewriteHtmlImages } from '@workbench/ai'
 /**
  * 预览栏的 HTML 画法：**沙箱 iframe** —— sandbox 什么都不给（脚本不跑、无同源、
  * 表单与弹窗全禁）。AI 写的 HTML 里如果有脚本，绝不能在带宿主能力（window.workbench /
@@ -7,7 +8,6 @@
  * 链接点击也出不去（顶层导航被 sandbox 挡住）。
  */
 import { computed } from 'vue'
-import { rewriteHtmlImages } from '@workbench/ai'
 
 const props = defineProps<{
   source: string
@@ -20,7 +20,7 @@ const framed = computed(() => rewriteHtmlImages(props.source, props.imageSrcs))
 
 <template>
   <!-- sandbox 绑定空串：属性存在但值为空 = 全限制（脚本、同源、表单、弹窗全禁） -->
-  <iframe class="html-frame" :sandbox="''" :srcdoc="framed" title="HTML 预览" />
+  <iframe class="html-frame" sandbox="" :srcdoc="framed" title="HTML 预览" />
 </template>
 
 <style scoped>

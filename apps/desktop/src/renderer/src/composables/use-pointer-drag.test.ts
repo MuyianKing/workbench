@@ -28,7 +28,7 @@ function stubWindow(): {
     },
     removeEventListener(type: string, handler: (event: unknown) => void) {
       listeners.get(type)?.delete(handler)
-    }
+    },
   }
 
   const classes = new Set<string>()
@@ -36,9 +36,9 @@ function stubWindow(): {
     body: {
       classList: {
         add: (name: string) => void classes.add(name),
-        remove: (name: string) => void classes.delete(name)
-      }
-    }
+        remove: (name: string) => void classes.delete(name),
+      },
+    },
   }
 
   vi.stubGlobal('window', windowStub)
@@ -50,7 +50,7 @@ function stubWindow(): {
     dispatch: (type, event = {}) => {
       for (const handler of [...(listeners.get(type) ?? [])]) handler(event)
     },
-    counts: () => Object.fromEntries([...listeners].map(([type, group]) => [type, group.size]))
+    counts: () => Object.fromEntries([...listeners].map(([type, group]) => [type, group.size])),
   }
 }
 
@@ -133,7 +133,7 @@ describe('startPointerDrag', () => {
     expect(onMove).toHaveBeenCalledTimes(1)
   })
 
-  it('Esc 之外的其他键不作数', () => {
+  it('esc 之外的其他键不作数', () => {
     const { dispatch } = stubWindow()
     const onEnd = vi.fn()
 
@@ -177,7 +177,7 @@ describe('startPointerDrag', () => {
       start: { x: 0, y: 0 },
       onMove: vi.fn(),
       onEnd,
-      bodyClass: 'is-resizing-terminal'
+      bodyClass: 'is-resizing-terminal',
     })
     expect(bodyClasses.has('is-resizing-terminal')).toBe(true)
 

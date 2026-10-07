@@ -1,4 +1,9 @@
 <script setup lang="ts">
+import type { WorkLogEntry } from '@workbench/work-log'
+import { Finished } from '@element-plus/icons-vue'
+
+import { dayKey, markdownToPlainText, sanitizeProjectColor } from '@workbench/core'
+import { completedEntriesOn } from '@workbench/work-log'
 /**
  * 首页「今日完成」卡片：今天**标记为已完成**的工作记录，一条一行（项目标签 + 内容）。
  *
@@ -11,16 +16,11 @@
  * 去掉标记后一行显示，悬停给全文，要读全貌就点进去。
  */
 import { computed, onActivated, onMounted, ref } from 'vue'
-import { Finished } from '@element-plus/icons-vue'
-import { dayKey } from '@workbench/core'
-import { markdownToPlainText } from '@workbench/core'
-import { sanitizeProjectColor } from '@workbench/core'
-import { completedEntriesOn, type WorkLogEntry } from '@workbench/work-log'
-import { useProjectsStore } from '@/stores/projects'
-import { useNavStore } from '@/stores/nav'
-import { useWallClock } from '@/composables/use-wall-clock'
 import PanelLoading from '@/components/PanelLoading.vue'
 import ProjectTag from '@/components/ProjectTag.vue'
+import { useWallClock } from '@/composables/use-wall-clock'
+import { useNavStore } from '@/stores/nav'
+import { useProjectsStore } from '@/stores/projects'
 
 const store = useProjectsStore()
 const nav = useNavStore()
@@ -35,11 +35,14 @@ async function load(): Promise<void> {
   error.value = ''
   try {
     const result = await window.workbench.listWorkLogs()
-    if (result.ok && result.data) entries.value = result.data
+    if (result.ok && result.data)
+      entries.value = result.data
     else error.value = result.error ?? '读取工作日志失败'
-  } catch (err) {
+  }
+  catch (err) {
     error.value = err instanceof Error ? err.message : '读取工作日志失败'
-  } finally {
+  }
+  finally {
     loading.value = false
   }
 }
@@ -67,7 +70,7 @@ onActivated(() => {
  */
 const today = computed(() => dayKey(dayStart.value))
 
-const projects = computed(() => new Map(store.projects.map((item) => [item.id, item])))
+const projects = computed(() => new Map(store.projects.map(item => [item.id, item])))
 
 // ---------- 要渲染的行 ----------
 
@@ -94,9 +97,9 @@ const rows = computed<PanelRow[]>(() =>
       ...(entry.projectId ? { projectId: entry.projectId } : {}),
       projectName: project?.name ?? null,
       projectColor: sanitizeProjectColor(project?.color),
-      missing: !!entry.projectId && !project
+      missing: !!entry.projectId && !project,
     }
-  })
+  }),
 )
 
 /** 点一行 = 去「工作」页看全貌（时间、正文与编辑都在那边） */
@@ -115,14 +118,18 @@ function openWorkView(): void {
     <!-- 读盘失败：把原因说出来并给一次重试，不能显示成「今天什么也没做」 -->
     <div v-if="error" class="panel__empty">
       <p>{{ error }}</p>
-      <button class="panel__link" type="button" @click="load">重试</button>
+      <button class="panel__link" type="button" @click="load">
+        重试
+      </button>
     </div>
 
     <PanelLoading v-else-if="loading" text="正在读取工作日志…" />
 
     <p v-else-if="!rows.length" class="panel__empty">
-      <el-icon class="empty__icon"><Finished /></el-icon>
-      今天还没有完成的记录<br />在「工作」页记一条，做完的会出现在这里。
+      <el-icon class="empty__icon">
+        <Finished />
+      </el-icon>
+      今天还没有完成的记录<br>在「工作」页记一条，做完的会出现在这里。
     </p>
 
     <ul v-else class="rows panel__scroll">
@@ -144,7 +151,6 @@ function openWorkView(): void {
 </template>
 
 <style scoped>
-
 .rows {
   display: flex;
   flex-direction: column;

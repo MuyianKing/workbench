@@ -1,3 +1,6 @@
+import type { SyncDeviceInfo, ThemeFile, TokenCounters, TokenDataFile, TokenDays, TokenShard, TokenSyncStatus, TokenUsageResult } from '@workbench/usage'
+import type { Result } from '@/types'
+import { fail, ok } from '@workbench/core'
 /**
  * Token 用量的读取、快照合并与多机同步。
  *
@@ -21,45 +24,10 @@
  * 首屏还有一条更早的路：`getTokenUsageSnapshot` 只读本地那份快照（几毫秒），
  * 让面板先把上次的数据摆出来，再被实读结果覆盖。它不实读、不落盘，只是一个先手。
  */
-import {
-  CODEBUDDY_SOURCE_ID,
-  DSH_SOURCE_ID,
-  QODER_SOURCE_ID,
-  TOKEN_DATA_VERSION,
-  TOKEN_KEEP_DAYS,
-  WORKBUDDY_SOURCE_ID,
-  ZCODE_SOURCE_ID,
-  combineShards,
-  isDateKey,
-  mergeDays,
-  pruneTokenDays,
-  sameDays,
-  sameShardContent,
-  sanitizeShard,
-  sanitizeSyncRepo,
-  sumDays,
-  type TokenCounters,
-  type TokenDataFile,
-  type TokenDays,
-  type TokenShard,
-  type TokenSyncStatus,
-  type TokenSourceSnapshot,
-  type TokenUsageResult
-} from '@workbench/usage'
-import {
-  captureThemeFile,
-  sanitizeThemeFile,
-  type SyncDeviceInfo,
-  type ThemeFile
-} from '@workbench/usage'
-import { collectCodeBuddyLogText, createCodeBuddyParseState } from '@workbench/usage'
-import { collectDshSessionText } from '@workbench/usage'
-import { collectQoderSessionText } from '@workbench/usage'
-import { collectWorkBuddySessionText } from '@workbench/usage'
+import { captureThemeFile, CODEBUDDY_SOURCE_ID, collectCodeBuddyLogText, collectDshSessionText, collectQoderSessionText, collectWorkBuddySessionText, combineShards, createCodeBuddyParseState, DSH_SOURCE_ID, isDateKey, mergeDays, pruneTokenDays, QODER_SOURCE_ID, sameDays, sameShardContent, sanitizeShard, sanitizeSyncRepo, sanitizeThemeFile, sumDays, TOKEN_DATA_VERSION, TOKEN_KEEP_DAYS, WORKBUDDY_SOURCE_ID, ZCODE_SOURCE_ID } from '@workbench/usage'
+
 import { errorText, guard, invoke } from './bridge'
 import { emit } from './events'
-import { fail, ok } from '@workbench/core'
-import type { Result } from '@/types'
 import * as state from './state'
 
 /** Rust 侧 `token_zcode_rows` 回来的行：SUM 在无数据时是 NULL，所以全部可空 */
@@ -92,11 +60,11 @@ function toCounters(row: UsageRow): TokenCounters {
     cacheWriteTokens: finite(row.cacheWrite),
     // ZCode 的库里只有 token 计数，没有额度这一项
     credits: 0,
-    requests: finite(row.requests)
+    requests: finite(row.requests),
   }
 }
 
-type LiveRead = { ok: true; days: TokenDays } | { ok: false; error: string; missing?: boolean }
+type LiveRead = { ok: true, days: TokenDays } | { ok: false, error: string, missing?: boolean }
 
 /** 实读 ZCode：按天 × 模型聚合后交给共享逻辑去合并 */
 async function readZcodeLive(): Promise<LiveRead> {
@@ -105,12 +73,14 @@ async function readZcodeLive(): Promise<LiveRead> {
     const days: TokenDays = {}
 
     for (const row of rows) {
-      if (!isDateKey(row.day) || !row.model) continue
+      if (!isDateKey(row.day) || !row.model)
+        continue
       const modelDays = (days[row.day] ??= {})
       modelDays[row.model] = toCounters(row)
     }
     return { ok: true, days }
-  } catch (error) {
+  }
+  catch (error) {
     return { ok: false, error: errorText(error, '读取 ZCode 用量失败') }
   }
 }
@@ -131,44 +101,48 @@ interface CodeBuddyLogFile {
  * 可以整份复用上次的结果 —— 这台机器上扩展日志将近十兆，闲着也每分钟重读重解析一遍
  * 没有任何意义（而改了任何一个文件就必须整批重来：解析状态是跨文件的，见 codebuddy-log.ts）。
  */
-let codebuddyCache: { signature: string; days: TokenDays } | null = null
+let codebuddyCache: { signature: string, days: TokenDays } | null = null
 
 /**
  * 实读 CodeBuddy。分三步就是为了省掉上面那次无谓的重读：
  * 先拿清单（很便宜）→ 比签名 → 只有变了才真去读文件、重新解析。
  */
 async function readCodeBuddyLive(): Promise<LiveRead> {
-  let listing: { found?: unknown; files?: unknown }
+  let listing: { found?: unknown, files?: unknown }
   try {
-    listing = await invoke<{ found?: unknown; files?: unknown }>('token_codebuddy_files')
-  } catch (error) {
+    listing = await invoke<{ found?: unknown, files?: unknown }>('token_codebuddy_files')
+  }
+  catch (error) {
     return { ok: false, error: errorText(error, '读取 CodeBuddy 日志失败') }
   }
 
   // 没装就安静跳过：这台机器上没有这个工具是常态，
   // 不该和「装了却读不出来」一样点亮面板上的「部分来源不可用」
-  if (listing?.found !== true) return { ok: false, missing: true, error: '' }
+  if (listing?.found !== true)
+    return { ok: false, missing: true, error: '' }
 
   const files = (Array.isArray(listing.files) ? listing.files : [])
-    .map((item) => item as Partial<CodeBuddyLogFile>)
+    .map(item => item as Partial<CodeBuddyLogFile>)
     .filter(
       (item): item is CodeBuddyLogFile =>
-        typeof item.path === 'string' &&
-        typeof item.mtimeMs === 'number' &&
-        typeof item.size === 'number'
+        typeof item.path === 'string'
+        && typeof item.mtimeMs === 'number'
+        && typeof item.size === 'number',
     )
     // 快照只留最近一年，更早的日志里不可能有窗口内的记录
-    .filter((item) => item.mtimeMs >= Date.now() - (TOKEN_KEEP_DAYS - 1) * 86_400_000)
+    .filter(item => item.mtimeMs >= Date.now() - (TOKEN_KEEP_DAYS - 1) * 86_400_000)
 
-  const signature = files.map((item) => `${item.path}:${item.mtimeMs}:${item.size}`).join('|')
-  if (codebuddyCache?.signature === signature) return { ok: true, days: codebuddyCache.days }
+  const signature = files.map(item => `${item.path}:${item.mtimeMs}:${item.size}`).join('|')
+  if (codebuddyCache?.signature === signature)
+    return { ok: true, days: codebuddyCache.days }
 
   const state = createCodeBuddyParseState()
   const days: TokenDays = {}
   for (const file of files) {
     try {
       collectCodeBuddyLogText(await invoke<string>('fs_read_text', { path: file.path }), state, days)
-    } catch {
+    }
+    catch {
       // 单个文件读不了（被占用 / 编码异常）只少几条记录，不影响其余
     }
   }
@@ -199,31 +173,33 @@ interface SessionFile {
 async function readSessionFiles(options: {
   command: string
   errorText: string
-  cache: Map<string, { mtimeMs: number; size: number; days: TokenDays }>
+  cache: Map<string, { mtimeMs: number, size: number, days: TokenDays }>
   parse: (file: SessionFile) => Promise<TokenDays>
 }): Promise<LiveRead> {
-  let listing: { found?: unknown; sessions?: unknown }
+  let listing: { found?: unknown, sessions?: unknown }
   try {
-    listing = await invoke<{ found?: unknown; sessions?: unknown }>(options.command)
-  } catch (error) {
+    listing = await invoke<{ found?: unknown, sessions?: unknown }>(options.command)
+  }
+  catch (error) {
     return { ok: false, error: errorText(error, options.errorText) }
   }
 
   // 没装就安静跳过(与 CodeBuddy 同一约定):这台机器上没有这个工具是常态,
   // 不该和「装了却读不出来」一样点亮面板上的「部分来源不可用」
-  if (listing?.found !== true) return { ok: false, missing: true, error: '' }
+  if (listing?.found !== true)
+    return { ok: false, missing: true, error: '' }
 
   const cutoff = Date.now() - (TOKEN_KEEP_DAYS - 1) * 86_400_000
   const sessions = (Array.isArray(listing.sessions) ? listing.sessions : [])
-    .map((item) => item as Partial<SessionFile>)
+    .map(item => item as Partial<SessionFile>)
     .filter(
       (item): item is SessionFile =>
-        typeof item.path === 'string' &&
-        typeof item.mtimeMs === 'number' &&
-        typeof item.size === 'number'
+        typeof item.path === 'string'
+        && typeof item.mtimeMs === 'number'
+        && typeof item.size === 'number',
     )
     // 快照只留最近一年,更早的会话里不可能有窗口内的记录
-    .filter((item) => item.mtimeMs >= cutoff)
+    .filter(item => item.mtimeMs >= cutoff)
 
   let days: TokenDays = {}
   const alive = new Set<string>()
@@ -237,7 +213,8 @@ async function readSessionFiles(options: {
         const parsed = await options.parse(session)
         cached = { mtimeMs: session.mtimeMs, size: session.size, days: parsed }
         options.cache.set(session.path, cached)
-      } catch {
+      }
+      catch {
         // 单个会话坏了(帧损坏 / 被占用 / 编码异常)只少这一个,不影响其余
         options.cache.delete(session.path)
         continue
@@ -249,7 +226,8 @@ async function readSessionFiles(options: {
 
   // 会话被清理掉的就从缓存里摘掉,不然内存里会一直留着它们
   for (const path of [...options.cache.keys()]) {
-    if (!alive.has(path)) options.cache.delete(path)
+    if (!alive.has(path))
+      options.cache.delete(path)
   }
 
   return { ok: true, days }
@@ -257,7 +235,7 @@ async function readSessionFiles(options: {
 
 // ---------- DeepSeek Harness(~/.dsh/sessions) ----------
 
-const dshCache = new Map<string, { mtimeMs: number; size: number; days: TokenDays }>()
+const dshCache = new Map<string, { mtimeMs: number, size: number, days: TokenDays }>()
 
 /**
  * 实读 DSH。会话文件逐帧 zstd 压缩 —— 浏览器没有解码 API,
@@ -272,13 +250,13 @@ async function readDshLive(): Promise<LiveRead> {
       const parsed: TokenDays = {}
       collectDshSessionText(await invoke<string>('token_zstd_decode', { path: file.path }), parsed)
       return parsed
-    }
+    },
   })
 }
 
 // ---------- WorkBuddy(~/.workbuddy/projects) ----------
 
-const workbuddyCache = new Map<string, { mtimeMs: number; size: number; days: TokenDays }>()
+const workbuddyCache = new Map<string, { mtimeMs: number, size: number, days: TokenDays }>()
 
 /**
  * 实读 WorkBuddy。正文按路径读回来自己解析 ——
@@ -293,13 +271,13 @@ async function readWorkBuddyLive(): Promise<LiveRead> {
       const parsed: TokenDays = {}
       collectWorkBuddySessionText(await invoke<string>('fs_read_text', { path: file.path }), parsed)
       return parsed
-    }
+    },
   })
 }
 
 // ---------- Qoder(~/.qoder-cn/projects) ----------
 
-const qoderCache = new Map<string, { mtimeMs: number; size: number; days: TokenDays }>()
+const qoderCache = new Map<string, { mtimeMs: number, size: number, days: TokenDays }>()
 
 /**
  * 实读 Qoder。正文按路径读回来自己解析,同样不用回 Rust 解码。
@@ -316,14 +294,14 @@ async function readQoderLive(): Promise<LiveRead> {
       const parsed: TokenDays = {}
       collectQoderSessionText(await invoke<string>('fs_read_text', { path: file.path }), parsed)
       return parsed
-    }
+    },
   })
 }
 
 // ---------- 本机设备标识 ----------
 
 /** 本机设备标识只问一次：它落盘后就不再变，而面板每 60 秒就会走一次这条路 */
-let device: { id: string; name: string } | null = null
+let device: { id: string, name: string } | null = null
 
 /**
  * 本机设备标识（`%APPDATA%/Workbench/data/device.json`，没有就现生成一份）。
@@ -331,16 +309,18 @@ let device: { id: string; name: string } | null = null
  * 除了 Token 分片，笔记图片的落点也要用它（见 `workbench/note.ts` 的 `imageScope`），
  * 所以这里是导出的：它描述的是「这台机器」，不是「Token 面板」。
  */
-export async function localDevice(): Promise<{ id: string; name: string }> {
-  if (device) return device
+export async function localDevice(): Promise<{ id: string, name: string }> {
+  if (device)
+    return device
 
   try {
-    const info = await invoke<{ id?: unknown; name?: unknown }>('token_device')
+    const info = await invoke<{ id?: unknown, name?: unknown }>('token_device')
     device = {
       id: typeof info?.id === 'string' ? info.id.trim() : '',
-      name: typeof info?.name === 'string' ? info.name.trim() : ''
+      name: typeof info?.name === 'string' ? info.name.trim() : '',
     }
-  } catch {
+  }
+  catch {
     // 拿不到标识只影响同步与图片上传（分片名 / 目录名要用它），本机数据照常展示
     device = { id: '', name: '' }
   }
@@ -387,10 +367,10 @@ interface SyncFiles {
 }
 
 /** 两个目录里的原始条目 → 收敛后的分片与配置（认不出来的整条丢掉，坏文件不拖垮面板） */
-function parseFiles(files: SyncFiles): { shards: TokenShard[]; configs: ThemeFile[] } {
-  const shards = (Array.isArray(files.usage) ? files.usage : []).map((item) => sanitizeShard(item))
+function parseFiles(files: SyncFiles): { shards: TokenShard[], configs: ThemeFile[] } {
+  const shards = (Array.isArray(files.usage) ? files.usage : []).map(item => sanitizeShard(item))
   const configs = (Array.isArray(files.config) ? files.config : [])
-    .map((item) => sanitizeThemeFile(item))
+    .map(item => sanitizeThemeFile(item))
     .filter((file): file is ThemeFile => file !== null)
   return { shards, configs }
 }
@@ -409,7 +389,7 @@ function pairDevices(shards: TokenShard[], configs: ThemeFile[]): SyncDeviceInfo
       id: shard.device,
       name: shard.name || shard.device,
       updatedAt: shard.updatedAt,
-      theme: null
+      theme: null,
     })
   }
 
@@ -420,7 +400,7 @@ function pairDevices(shards: TokenShard[], configs: ThemeFile[]): SyncDeviceInfo
       id: file.device,
       name: file.name || existing?.name || file.device,
       updatedAt,
-      theme: file.theme
+      theme: file.theme,
     })
   }
 
@@ -438,8 +418,8 @@ async function readRemoteShards(repo: string, ownDevice: string): Promise<void> 
 
   // 本机那份要用内存里的最新分片 / 最新主题，仓库里的副本是上次推送时的样子；
   // 两份都合进去就会把本机重复计一遍。没有 device 的条目认不出是谁的，一并丢掉。
-  remoteShards = shards.filter((item) => item.device && item.device !== ownDevice)
-  remoteConfigs = configs.filter((file) => file.device !== ownDevice)
+  remoteShards = shards.filter(item => item.device && item.device !== ownDevice)
+  remoteConfigs = configs.filter(file => file.device !== ownDevice)
   shardsRepo = repo
 }
 
@@ -462,11 +442,13 @@ async function syncLocalShards(repo: string, ownDevice: string): Promise<void> {
   }
 
   // 同一个仓库只需要读一次：两次同步之间克隆目录不会被别的进程改写
-  if (shardsRepo === repo) return
+  if (shardsRepo === repo)
+    return
 
   try {
     await readRemoteShards(repo, ownDevice)
-  } catch {
+  }
+  catch {
     // 读不回来（克隆还指着上个仓库 / 目录被占）就把旧的丢掉，宁可少显示也不显示错的
     remoteShards = []
   }
@@ -490,17 +472,19 @@ async function runSync(repo: string, shard: TokenShard): Promise<void> {
     await invoke('token_sync_publish', {
       repo,
       device: shard.device,
-      shard
+      shard,
       // 这里**只推用量**（外观配置由设置界面「同步一次」走 token_sync_config 单独推）：
       // 两个目录各管一件事，自动同步一小时一轮也不必每次都带上外观
     })
-  } catch (error) {
+  }
+  catch (error) {
     errors.push(errorText(error, '同步失败'))
   }
 
   try {
     await readRemoteShards(repo, shard.device)
-  } catch (error) {
+  }
+  catch (error) {
     errors.push(errorText(error, '读取同步分片失败'))
   }
 
@@ -520,11 +504,11 @@ function syncStatus(enabled: boolean, deviceName: string, repo: string): TokenSy
     lastSyncAt,
     error: lastSyncError,
     // 时间取用量与配置里较新的那个（见 pairDevices）：配置改晚了也该反映出来
-    devices: pairDevices(remoteShards, remoteConfigs).map((device) => ({
+    devices: pairDevices(remoteShards, remoteConfigs).map(device => ({
       id: device.id,
       name: device.name,
-      updatedAt: device.updatedAt
-    }))
+      updatedAt: device.updatedAt,
+    })),
   }
 }
 
@@ -555,7 +539,7 @@ export async function getTokenUsage(options: {
     readCodeBuddyLive(),
     readDshLive(),
     readWorkBuddyLive(),
-    readQoderLive()
+    readQoderLive(),
   ])
 
   // 别人的分片同样是本地读（克隆目录），也并行：首屏就带上别的机器，
@@ -576,17 +560,19 @@ export async function getTokenUsage(options: {
     { id: CODEBUDDY_SOURCE_ID, read: codebuddyLive },
     { id: DSH_SOURCE_ID, read: dshLive },
     { id: WORKBUDDY_SOURCE_ID, read: workbuddyLive },
-    { id: QODER_SOURCE_ID, read: qoderLive }
+    { id: QODER_SOURCE_ID, read: qoderLive },
   ]) {
     if (!read.ok) {
       // missing 是「这台机器上没装这个工具」,不算读取失败,只是没有这个来源
-      if (!read.missing) sourceErrors[sourceId] = read.error
+      if (!read.missing)
+        sourceErrors[sourceId] = read.error
       continue
     }
 
     const before = local.sources[sourceId]?.days ?? {}
     const merged = pruneTokenDays(mergeDays(before, read.days), now)
-    if (!sameDays(merged, before)) changed = true
+    if (!sameDays(merged, before))
+      changed = true
     sources[sourceId] = { days: merged }
   }
 
@@ -598,7 +584,7 @@ export async function getTokenUsage(options: {
     name,
     // 计数没变就不刷新时间戳，否则每轮同步都会推一个内容相同的提交
     updatedAt: changed ? now : local.updatedAt,
-    sources
+    sources,
   }
   // 该不该落盘：计数变了要写；计数没变但磁盘上那份还没收敛过（老版本号、缺设备信息）
   // 也要写 —— sanitizeShard 只把补齐的结果留在内存里，不写回去的话老文件永远升不上来。
@@ -616,10 +602,12 @@ export async function getTokenUsage(options: {
       lastSyncAt = now
       lastSyncRepo = repo
       lastSyncError = '拿不到本机设备标识，无法同步'
-    } else if (options.force) {
+    }
+    else if (options.force) {
       // 手点的那一次必须等回来：按钮上的成功 / 失败提示要用这一轮的真实结果
       await enqueue(() => runSync(repo, shard))
-    } else {
+    }
+    else {
       // 自动同步放后台：数据上面已经全部算完了，没有理由让卡片再等两趟网络。
       // 跑完（成功失败都算）广播一次，订阅方据此重取 —— 新读回的分片立刻显示出来，
       // 同步失败的原因也能及时反映到标题行，都不必干等到下一个轮询周期
@@ -658,7 +646,7 @@ export async function getTokenUsageSnapshot(options: {
   return {
     data: buildData(repo, local, now),
     sourceErrors: {},
-    sync: syncStatus(Boolean(repo), name, repo)
+    sync: syncStatus(Boolean(repo), name, repo),
   }
 }
 
@@ -674,26 +662,30 @@ export async function syncTokenUsage(repo: string): Promise<TokenUsageResult> {
  */
 export async function syncThemeConfig(repo: string): Promise<Result<{ changed: boolean }>> {
   const target = sanitizeSyncRepo(repo)
-  if (!target) return fail('还没有配置同步仓库（设置 → 通用 → 账号）')
+  if (!target)
+    return fail('还没有配置同步仓库（设置 → 通用 → 账号）')
 
   const { id, name } = await localDevice()
-  if (!id) return fail('拿不到本机设备标识，无法同步')
+  if (!id)
+    return fail('拿不到本机设备标识，无法同步')
 
   const result = await guard(
     invoke<Partial<{ changed: boolean }>>('token_sync_config', {
       repo: target,
       device: id,
-      config: captureThemeFile(id, name, state.themeConfig())
+      config: captureThemeFile(id, name, state.themeConfig()),
     }),
-    '同步外观配置失败'
+    '同步外观配置失败',
   )
-  if (!result.ok) return fail(result.error ?? '同步外观配置失败')
+  if (!result.ok)
+    return fail(result.error ?? '同步外观配置失败')
 
   // 推完克隆就是最新的：把别人的分片与配置重读一遍，设备列表立刻反映出来；
   // 读不回来只当列表还是旧样子，推送本身是成功的
   try {
     await readRemoteShards(target, id)
-  } catch {
+  }
+  catch {
     // 忽略：列表留在上一次的样子
   }
   return ok({ changed: result.data?.changed === true })
@@ -711,14 +703,15 @@ export async function syncThemeConfig(repo: string): Promise<Result<{ changed: b
  */
 export async function listSyncDevices(repo: string): Promise<SyncDeviceInfo[]> {
   const target = sanitizeSyncRepo(repo)
-  if (!target) return []
+  if (!target)
+    return []
 
   const { id } = await localDevice()
   const files = await invoke<SyncFiles>('token_sync_shards', { repo: target })
   const { shards, configs } = parseFiles(files ?? {})
 
   return pairDevices(
-    shards.filter((item) => item.device),
-    configs
-  ).map((device) => (device.id === id ? { ...device, self: true } : device))
+    shards.filter(item => item.device),
+    configs,
+  ).map(device => (device.id === id ? { ...device, self: true } : device))
 }

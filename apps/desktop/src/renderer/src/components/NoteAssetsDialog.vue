@@ -1,4 +1,8 @@
 <script setup lang="ts">
+import type { NoteImageAsset, NoteTextScan } from '@workbench/notes'
+import type { Result } from '@/types'
+import { Picture, Refresh } from '@element-plus/icons-vue'
+import { buildImageAssets, sortImageAssets, totalImageBytes, unusedImages } from '@workbench/notes'
 /**
  * 素材管理：当前这个笔记本传过哪些图、谁还在用、把没人用的清掉。
  *
@@ -23,28 +27,18 @@
  * **没打开笔记本时这一页什么都不列**：退回上一层目录去列图，等于把别的笔记本的图当成可删的。
  */
 import { computed, ref, watch } from 'vue'
-import { Picture, Refresh } from '@element-plus/icons-vue'
-import {
-  buildImageAssets,
-  sortImageAssets,
-  totalImageBytes,
-  unusedImages,
-  type NoteImageAsset,
-  type NoteTextScan
-} from '@workbench/notes'
-import type { Result } from '@/types'
-import { formatBytes, formatRelative } from '@/format'
 import AppDialog from '@/components/AppDialog.vue'
+import { formatBytes, formatRelative } from '@/format'
 import { confirmAction, notifyError, notifySuccess } from '@/notify'
 import { useSettingsStore } from '@/stores/settings'
-
-/** 弹层开关:v-model 一条口径(与 AppDialog / el-dialog 相同,全应用的弹层都这么开) */
-const open = defineModel<boolean>({ required: true })
 
 const props = defineProps<{
   /** 当前笔记本：清单与引用次数都只限它（还没选文件夹时是空串，那时这一页什么都不列） */
   root: string
 }>()
+
+/** 弹层开关:v-model 一条口径(与 AppDialog / el-dialog 相同,全应用的弹层都这么开) */
+const open = defineModel<boolean>({ required: true })
 
 const settings = useSettingsStore()
 
@@ -76,7 +70,7 @@ const onlyUnused = ref('all')
 
 const SECTION_OPTIONS = [
   { label: '全部', value: 'all' },
-  { label: '未引用', value: 'unused' }
+  { label: '未引用', value: 'unused' },
 ]
 
 /** 勾中的图片路径 */
@@ -85,15 +79,15 @@ const selected = ref<string[]>([])
 const assets = computed(() => result.value?.assets ?? [])
 const unused = computed(() => unusedImages(assets.value))
 const visible = computed(() =>
-  onlyUnused.value === 'unused' ? unused.value : assets.value
+  onlyUnused.value === 'unused' ? unused.value : assets.value,
 )
 const selectedAssets = computed(() =>
-  assets.value.filter((asset) => selected.value.includes(asset.path))
+  assets.value.filter(asset => selected.value.includes(asset.path)),
 )
 const selectedBytes = computed(() => totalImageBytes(selectedAssets.value))
 const unusedBytes = computed(() => totalImageBytes(unused.value))
 const scannedText = computed(() =>
-  result.value ? formatRelative(result.value.at, Date.now()) : ''
+  result.value ? formatRelative(result.value.at, Date.now()) : '',
 )
 
 const repoMissing = computed(() => !settings.settings.noteImageRepo)
@@ -113,18 +107,21 @@ watch(
     result.value = null
     selected.value = []
     // 面板正开着（改设置时走得到这里）就立刻按新的一层重数一遍，别让它停在空清单上
-    if (open.value) void scan()
-  }
+    if (open.value)
+      void scan()
+  },
 )
 
 watch(
   open,
   (value) => {
-    if (!value) return
+    if (!value)
+      return
     // 先把上次的结果显示出来（有的话），再在后台重新数一遍
-    if (cached && !result.value) result.value = cached
+    if (cached && !result.value)
+      result.value = cached
     void scan()
-  }
+  },
 )
 
 /**
@@ -153,7 +150,7 @@ async function scan(): Promise<void> {
 
     const [images, texts] = await Promise.all([
       window.workbench.listNoteImages({ repo, root }),
-      textsTask
+      textsTask,
     ])
 
     if (!images.ok || !images.data) {
@@ -170,33 +167,35 @@ async function scan(): Promise<void> {
     const list: NoteImageAsset[] = sortImageAssets(
       buildImageAssets({
         images: images.data.files,
-        texts: texts.data.files.map((file) => file.text),
+        texts: texts.data.files.map(file => file.text),
         repo,
-        branch: images.data.branch
-      })
+        branch: images.data.branch,
+      }),
     )
 
     cached = { at: Date.now(), assets: list, failed: texts.data.failed }
     result.value = cached
     // 勾选跟着新结果走：已经不在清单里、或已经变成「有人引用」的，一律取消勾选
-    selected.value = selected.value.filter((path) =>
-      list.some((asset) => asset.path === path && asset.refs === 0)
+    selected.value = selected.value.filter(path =>
+      list.some(asset => asset.path === path && asset.refs === 0),
     )
-  } finally {
+  }
+  finally {
     scanning.value = false
   }
 }
 
 function toggle(path: string, checked: boolean): void {
   if (checked) {
-    if (!selected.value.includes(path)) selected.value = [...selected.value, path]
+    if (!selected.value.includes(path))
+      selected.value = [...selected.value, path]
     return
   }
-  selected.value = selected.value.filter((item) => item !== path)
+  selected.value = selected.value.filter(item => item !== path)
 }
 
 function selectAllUnused(): void {
-  selected.value = unused.value.map((asset) => asset.path)
+  selected.value = unused.value.map(asset => asset.path)
 }
 
 function clearSelection(): void {
@@ -205,9 +204,11 @@ function clearSelection(): void {
 
 /** 在浏览器里打开这张图（就是它自己的地址）：删之前想确认「这是哪张」，这是最直接的办法 */
 async function openAsset(asset: NoteImageAsset): Promise<void> {
-  if (!asset.url) return
+  if (!asset.url)
+    return
   const result = await window.workbench.openExternal(asset.url)
-  if (!result.ok) notifyError(result.error ?? '打不开这个地址')
+  if (!result.ok)
+    notifyError(result.error ?? '打不开这个地址')
 }
 
 /**
@@ -221,20 +222,22 @@ async function openAsset(asset: NoteImageAsset): Promise<void> {
 async function remove(): Promise<void> {
   const repo = settings.settings.noteImageRepo
   const targets = selectedAssets.value
-  if (!repo || !targets.length) return
+  if (!repo || !targets.length)
+    return
 
   // 确认框里是纯文本（不走 markdown），别在这里写 `**强调**`，那几个星号会原样显示出来
   const detail = `删除 ${targets.length} 张图片（${formatBytes(selectedBytes.value)}）？删除会提交并推送到图片仓库，不可恢复。`
-  const hint =
-    '这些图只来自当前笔记本，引用次数也只数了它；要是这个地址被你抄到别处用过，那里会裂图。'
-  if (!(await confirmAction(`${detail}${hint}`, '删除', { confirmButtonText: '删除' }))) return
+  const hint
+    = '这些图只来自当前笔记本，引用次数也只数了它；要是这个地址被你抄到别处用过，那里会裂图。'
+  if (!(await confirmAction(`${detail}${hint}`, '删除', { confirmButtonText: '删除' })))
+    return
 
   deleting.value = true
   try {
     const deleted = await window.workbench.deleteNoteImages({
       repo,
       root: props.root,
-      paths: targets.map((asset) => asset.path)
+      paths: targets.map(asset => asset.path),
     })
     if (!deleted.ok || !deleted.data) {
       notifyError(deleted.error ?? '删除图片失败')
@@ -245,11 +248,12 @@ async function remove(): Promise<void> {
     notifySuccess(
       deleted.data.deleted
         ? `已删除 ${deleted.data.deleted} 张图片`
-        : '这些图片已经不在仓库里了'
+        : '这些图片已经不在仓库里了',
     )
     // 删完立刻重数一遍：清单与引用次数都要跟着磁盘上真实的样子走
     await scan()
-  } finally {
+  }
+  finally {
     deleting.value = false
   }
 }
@@ -296,12 +300,16 @@ async function remove(): Promise<void> {
         <span v-if="scannedText" class="assets__time">上次扫描：{{ scannedText }}</span>
         <el-tooltip content="重新读取仓库并重数引用次数" placement="top">
           <el-button size="small" text :disabled="scanning" @click="scan">
-            <el-icon :class="{ 'is-loading': scanning }"><Refresh /></el-icon>
+            <el-icon :class="{ 'is-loading': scanning }">
+              <Refresh />
+            </el-icon>
           </el-button>
         </el-tooltip>
       </div>
 
-      <p v-if="error" class="assets__error">{{ error }}</p>
+      <p v-if="error" class="assets__error">
+        {{ error }}
+      </p>
 
       <!-- 有笔记没读到：少读一篇就可能把还在用的图当成没人引用，得说在前面 -->
       <p v-else-if="result?.failed" class="assets__error">
@@ -345,8 +353,10 @@ async function remove(): Promise<void> {
               type="button"
               @click="openAsset(asset)"
             >
-              <img v-if="asset.url" :src="asset.url" alt="" loading="lazy" />
-              <el-icon v-else><Picture /></el-icon>
+              <img v-if="asset.url" :src="asset.url" alt="" loading="lazy">
+              <el-icon v-else>
+                <Picture />
+              </el-icon>
             </button>
           </el-tooltip>
 
@@ -371,7 +381,9 @@ async function remove(): Promise<void> {
 
         <span class="assets__spacer" />
 
-        <el-button size="small" @click="open = false">关闭</el-button>
+        <el-button size="small" @click="open = false">
+          关闭
+        </el-button>
         <el-button
           type="danger"
           size="small"

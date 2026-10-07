@@ -4,8 +4,8 @@
  * 说明行用实线划到列表外面（行间是虚线），读起来是「列表到此为止」。
  */
 import { computed } from 'vue'
-import { useSettingsStore } from '@/stores/settings'
 import { buildHints } from '@/hints'
+import { useSettingsStore } from '@/stores/settings'
 
 const settings = useSettingsStore()
 const hints = computed(() => buildHints(settings.settings))
@@ -24,7 +24,9 @@ const hints = computed(() => buildHints(settings.settings))
       </li>
     </ul>
 
-    <p class="tips__note">主题、托盘、开机自启在右上角的设置里。</p>
+    <p class="tips__note">
+      主题、托盘、开机自启在右上角的设置里。
+    </p>
   </article>
 </template>
 

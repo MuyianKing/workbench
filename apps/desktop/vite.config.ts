@@ -1,6 +1,6 @@
 import { resolve } from 'node:path'
-import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
+import { defineConfig } from 'vite'
 import { vditorAssets } from './scripts/sync-vditor-assets.mjs'
 
 /**
@@ -15,8 +15,8 @@ export default defineConfig({
   resolve: {
     // 域包（@workbench/*）不配别名：走 workspace 软链与各包 exports 的包名解析
     alias: {
-      '@': resolve(import.meta.dirname, 'src/renderer/src')
-    }
+      '@': resolve(import.meta.dirname, 'src/renderer/src'),
+    },
   },
   // vditorAssets 把 Vditor 的图标 / 语言包 / 内容主题等复制到 public/（见 scripts/sync-vditor-assets.mjs）
   plugins: [vue(), vditorAssets()],
@@ -24,10 +24,10 @@ export default defineConfig({
   base: './',
   build: {
     outDir: resolve(import.meta.dirname, 'out/renderer'),
-    emptyOutDir: true
+    emptyOutDir: true,
   },
   server: {
     port: 5274,
-    strictPort: true
-  }
+    strictPort: true,
+  },
 })

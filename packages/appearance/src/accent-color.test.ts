@@ -1,19 +1,6 @@
+import type { AccentVariableName, AccentVariables } from './accent-color'
 import { describe, expect, it } from 'vitest'
-import {
-  ACCENT_COLOR_DEFAULT,
-  ACCENT_INK_DEFAULT,
-  ACCENT_PRESETS,
-  ACCENT_VARIABLE_NAMES,
-  accentVariables,
-  contrastRatio,
-  inkOnAccent,
-  mixHex,
-  relativeLuminance,
-  sanitizeAccentColor,
-  sanitizeAccentInkMode,
-  type AccentVariableName,
-  type AccentVariables
-} from './accent-color'
+import { ACCENT_COLOR_DEFAULT, ACCENT_INK_DEFAULT, ACCENT_PRESETS, ACCENT_VARIABLE_NAMES, accentVariables, contrastRatio, inkOnAccent, mixHex, relativeLuminance, sanitizeAccentColor, sanitizeAccentInkMode } from './accent-color'
 
 /** 取一个派生变量；缺失就是用例失败，省得每处都写非空断言 */
 function varOf(vars: AccentVariables, name: AccentVariableName): string {
@@ -39,7 +26,7 @@ describe('sanitizeAccentColor', () => {
     expect(sanitizeAccentColor('')).toBe(ACCENT_COLOR_DEFAULT)
     expect(sanitizeAccentColor(undefined)).toBe(ACCENT_COLOR_DEFAULT)
     expect(sanitizeAccentColor(null)).toBe(ACCENT_COLOR_DEFAULT)
-    expect(sanitizeAccentColor(0x2f6bd8)).toBe(ACCENT_COLOR_DEFAULT)
+    expect(sanitizeAccentColor(0x2F6BD8)).toBe(ACCENT_COLOR_DEFAULT)
   })
 })
 

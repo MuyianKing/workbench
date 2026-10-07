@@ -30,7 +30,7 @@ export const AUTH_PROVIDERS: readonly AuthProvider[] = ['github', 'gitee']
 
 export const AUTH_PROVIDER_LABELS: Record<AuthProvider, string> = {
   github: 'GitHub',
-  gitee: 'Gitee'
+  gitee: 'Gitee',
 }
 
 /**
@@ -39,7 +39,7 @@ export const AUTH_PROVIDER_LABELS: Record<AuthProvider, string> = {
  */
 export const AUTH_PROVIDER_HINTS: Record<AuthProvider, string> = {
   github: '需要 repo 权限，是为了能读写你用来同步 Token 快照的私有仓库。',
-  gitee: '授权后即可用该账号读写你用来同步 Token 快照的仓库。'
+  gitee: '授权后即可用该账号读写你用来同步 Token 快照的仓库。',
 }
 
 export function isAuthProvider(value: unknown): value is AuthProvider {
@@ -53,12 +53,15 @@ export function isAuthProvider(value: unknown): value is AuthProvider {
  * provider 与 login 缺一个就没有意义，直接整条丢掉。
  */
 export function sanitizeAccount(raw: unknown): AccountProfile | null {
-  if (!raw || typeof raw !== 'object') return null
+  if (!raw || typeof raw !== 'object')
+    return null
   const input = raw as Partial<AccountProfile>
 
-  if (!isAuthProvider(input.provider)) return null
+  if (!isAuthProvider(input.provider))
+    return null
   const login = typeof input.login === 'string' ? input.login.trim() : ''
-  if (!login) return null
+  if (!login)
+    return null
 
   const name = typeof input.name === 'string' ? input.name.trim() : ''
 
@@ -72,7 +75,7 @@ export function sanitizeAccount(raw: unknown): AccountProfile | null {
     avatar:
       typeof input.avatar === 'string' && input.avatar.startsWith('data:image/')
         ? input.avatar
-        : null
+        : null,
   }
 }
 

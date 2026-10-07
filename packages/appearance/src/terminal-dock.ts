@@ -27,6 +27,7 @@ export const TERMINAL_BUTTON_TOP_MAX = 97
  * 比一个猜出来的数字安全。
  */
 export function clampTerminalButtonTop(value: unknown): number | null {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return TERMINAL_BUTTON_TOP_DEFAULT
+  if (typeof value !== 'number' || !Number.isFinite(value))
+    return TERMINAL_BUTTON_TOP_DEFAULT
   return Math.min(TERMINAL_BUTTON_TOP_MAX, Math.max(TERMINAL_BUTTON_TOP_MIN, value))
 }

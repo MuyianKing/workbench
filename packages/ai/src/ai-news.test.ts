@@ -1,31 +1,9 @@
+import type { AiNewsItem } from './ai-news'
 /**
  * ai-news 纯逻辑的单测：三种载荷解析、缓存收敛、每源退避与合并视图。
  */
 import { describe, expect, it } from 'vitest'
-import {
-  AI_NEWS_BACKOFF_BASE_MS,
-  AI_NEWS_BACKOFF_MAX_MS,
-  AI_NEWS_MAX_ITEMS_PER_SOURCE,
-  AI_NEWS_MERGED_MAX,
-  ARTICLE_MAX_PARAGRAPHS,
-  applySourceFailure,
-  applySourceNotModified,
-  applySourceSuccess,
-  backoffDelayMs,
-  emptyAiNewsCache,
-  emptySourceState,
-  extractArticle,
-  latestUpdatedAt,
-  mergedItems,
-  parseAtom,
-  parseHfDailyPapers,
-  parseRss,
-  parseSourcePayload,
-  sanitizeAiNewsCache,
-  shouldFetchSource,
-  stripHtml,
-  type AiNewsItem
-} from './ai-news'
+import { AI_NEWS_BACKOFF_BASE_MS, AI_NEWS_BACKOFF_MAX_MS, AI_NEWS_MAX_ITEMS_PER_SOURCE, AI_NEWS_MERGED_MAX, applySourceFailure, applySourceNotModified, applySourceSuccess, ARTICLE_MAX_PARAGRAPHS, backoffDelayMs, emptyAiNewsCache, emptySourceState, extractArticle, latestUpdatedAt, mergedItems, parseAtom, parseHfDailyPapers, parseRss, parseSourcePayload, sanitizeAiNewsCache, shouldFetchSource, stripHtml } from './ai-news'
 
 /** 一份 RSS 2.0：摘要用 CDATA 包着，且**被实体转义过**（真实 feed 里两种写法都见过） */
 const SAMPLE_RSS = `<?xml version="1.0" encoding="UTF-8"?>
@@ -85,11 +63,11 @@ const SAMPLE_HF = JSON.stringify([
       title: 'Can MiniMax-H3 Reason About the Physical World?',
       summary: 'Recent Omni-Modal Generative Models have advanced content generation.',
       publishedAt: '2026-09-15T20:00:00.000Z',
-      upvotes: 19
+      upvotes: 19,
     },
     publishedAt: '2026-09-15T20:00:00.000Z',
     title: 'Can MiniMax-H3 Reason About the Physical World?',
-    summary: 'Recent Omni-Modal Generative Models have advanced content generation.'
+    summary: 'Recent Omni-Modal Generative Models have advanced content generation.',
   },
   {
     // 只有 paper 里有字段：外层缺失时要能回落
@@ -97,10 +75,10 @@ const SAMPLE_HF = JSON.stringify([
       id: '2609.20817',
       title: 'FAMOS: Feed-Forward 3D Articulation Modeling',
       summary: 'Modeling articulated objects from sparse monocular views.',
-      publishedAt: '2026-09-16T20:00:00.000Z'
-    }
+      publishedAt: '2026-09-16T20:00:00.000Z',
+    },
   },
-  { paper: { id: '9999.1' } } // 没有标题：丢掉
+  { paper: { id: '9999.1' } }, // 没有标题：丢掉
 ])
 
 describe('parseRss', () => {
@@ -156,7 +134,7 @@ describe('parseHfDailyPapers', () => {
   it('解析出条目、拼出 papers 链接', () => {
     const items = parseHfDailyPapers(SAMPLE_HF)
     expect(items).toHaveLength(2) // 第三条没有标题被丢掉
-    const first = items.find((item) => item.link.includes('2609.18323'))
+    const first = items.find(item => item.link.includes('2609.18323'))
     expect(first?.link).toBe('https://huggingface.co/papers/2609.18323')
     expect(first?.guid).toBe('https://huggingface.co/papers/2609.18323')
     expect(first?.source).toBe('') // 源名由适配层统一盖
@@ -166,7 +144,7 @@ describe('parseHfDailyPapers', () => {
 
   it('外层字段缺失时回落到 paper.*', () => {
     const items = parseHfDailyPapers(SAMPLE_HF)
-    const second = items.find((item) => item.link.includes('2609.20817'))
+    const second = items.find(item => item.link.includes('2609.20817'))
     expect(second?.title).toBe('FAMOS: Feed-Forward 3D Articulation Modeling')
     expect(second?.summary).toBe('Modeling articulated objects from sparse monocular views.')
     expect(second?.pubDate).toBe(Date.parse('2026-09-16T20:00:00.000Z'))
@@ -190,8 +168,7 @@ describe('parseSourcePayload', () => {
 describe('单源上限', () => {
   it('超出上限时截断', () => {
     const many = Array.from({ length: 40 }, (_, index) =>
-      `<item><title>标题 ${index}</title><link>https://x.com/${index}</link></item>`
-    ).join('')
+      `<item><title>标题 ${index}</title><link>https://x.com/${index}</link></item>`).join('')
     expect(parseRss(`<rss>${many}</rss>`).length).toBe(AI_NEWS_MAX_ITEMS_PER_SOURCE)
   })
 })
@@ -238,20 +215,20 @@ describe('extractArticle', () => {
 
   it('过短的段落（导航、按钮）被丢掉', () => {
     const article = extractArticle(PAGE)
-    expect(article.paragraphs.some((p) => p === '短')).toBe(false)
-    expect(article.paragraphs.some((p) => p.includes('首页 关于 联系'))).toBe(false)
+    expect(article.paragraphs.includes('短')).toBe(false)
+    expect(article.paragraphs.some(p => p.includes('首页 关于 联系'))).toBe(false)
   })
 
   it('脚本与样式进不了正文', () => {
     const article = extractArticle(PAGE)
-    expect(article.paragraphs.some((p) => p.includes('var x'))).toBe(false)
-    expect(article.paragraphs.some((p) => p.includes('color:red'))).toBe(false)
+    expect(article.paragraphs.some(p => p.includes('var x'))).toBe(false)
+    expect(article.paragraphs.some(p => p.includes('color:red'))).toBe(false)
   })
 
   it('评论区与页脚在截断点之后，不会混进正文', () => {
     const article = extractArticle(PAGE)
-    expect(article.paragraphs.some((p) => p.includes('读者评论'))).toBe(false)
-    expect(article.paragraphs.some((p) => p.includes('版权所有'))).toBe(false)
+    expect(article.paragraphs.some(p => p.includes('读者评论'))).toBe(false)
+    expect(article.paragraphs.some(p => p.includes('版权所有'))).toBe(false)
   })
 
   it('script 里的 id="comments" 字样不会把正文提前切断', () => {
@@ -268,7 +245,7 @@ describe('extractArticle', () => {
   it('过长时截断并如实标记', () => {
     const many = Array.from(
       { length: 300 },
-      (_, i) => `<p>这是第 ${i} 段正文，长度足够被当成正文段落保留下来。</p>`
+      (_, i) => `<p>这是第 ${i} 段正文，长度足够被当成正文段落保留下来。</p>`,
     ).join('')
     const article = extractArticle(`<html><body>${many}</body></html>`)
     expect(article.truncated).toBe(true)
@@ -300,10 +277,10 @@ describe('extractArticle', () => {
 
   it('容器之外的侧栏与相关阅读进不来', () => {
     const article = extractArticle(LAYOUT_PAGE)
-    expect(article.paragraphs.some((p) => p.includes('侧栏里的一段推荐语'))).toBe(false)
-    expect(article.paragraphs.some((p) => p.includes('相关阅读'))).toBe(false)
-    expect(article.paragraphs.some((p) => p.includes('热门文章'))).toBe(false)
-    expect(article.paragraphs.some((p) => p.includes('首页 快讯'))).toBe(false)
+    expect(article.paragraphs.some(p => p.includes('侧栏里的一段推荐语'))).toBe(false)
+    expect(article.paragraphs.some(p => p.includes('相关阅读'))).toBe(false)
+    expect(article.paragraphs.some(p => p.includes('热门文章'))).toBe(false)
+    expect(article.paragraphs.some(p => p.includes('首页 快讯'))).toBe(false)
   })
 
   it('词边界卡住形近的类名：content_right / article_info 不算正文容器', () => {
@@ -342,9 +319,9 @@ describe('sanitizeAiNewsCache', () => {
           nextFetchAt: -5,
           failCount: -2,
           lastError: '限流',
-          items: [{ guid: 'g', title: 't', link: 'l', pubDate: 1 }]
-        }
-      }
+          items: [{ guid: 'g', title: 't', link: 'l', pubDate: 1 }],
+        },
+      },
     })
     const state = cache.sources.qbitai
     expect(state.updatedAt).toBe(123)
@@ -357,7 +334,7 @@ describe('sanitizeAiNewsCache', () => {
 
   it('没有标题的条目被滤掉（避免界面上出现空行）', () => {
     const cache = sanitizeAiNewsCache({
-      sources: { s: { items: [{ title: '有' }, { title: '' }, { guid: 'only-guid' }] } }
+      sources: { s: { items: [{ title: '有' }, { title: '' }, { guid: 'only-guid' }] } },
     })
     expect(cache.sources.s.items).toHaveLength(1)
   })
@@ -369,7 +346,7 @@ describe('sanitizeAiNewsCache', () => {
       etag: 'W/"old"',
       nextFetchAt: 888,
       failCount: 1,
-      items: [{ guid: 'g1', title: '旧缓存的一条', link: 'https://x.com/1', pubDate: 5 }]
+      items: [{ guid: 'g1', title: '旧缓存的一条', link: 'https://x.com/1', pubDate: 5 }],
     })
     // 那些内容只属于已经撤掉的源，搬进来也没有地方能显示
     expect(cache.version).toBe(2)
@@ -427,16 +404,16 @@ describe('合并视图', () => {
   it('只并清单里给出的源，按时间从新到旧', () => {
     const cache = cacheOf({
       qbitai: [item('量子位旧', 100), item('量子位新', 300)],
-      hf: [item('HF 中', 200)]
+      hf: [item('HF 中', 200)],
     })
     const merged = mergedItems(cache, ['qbitai', 'hf'])
-    expect(merged.map((i) => i.title)).toEqual(['量子位新', 'HF 中', '量子位旧'])
+    expect(merged.map(i => i.title)).toEqual(['量子位新', 'HF 中', '量子位旧'])
   })
 
   it('没列在清单里的源不出现（撤掉的源留在旧缓存里那份也不并）', () => {
     const cache = cacheOf({ qbitai: [item('量子位', 100)], hf: [item('HF', 200)] })
-    expect(mergedItems(cache, ['hf']).map((i) => i.title)).toEqual(['HF'])
-    expect(mergedItems(cache, ['qbitai']).map((i) => i.title)).toEqual(['量子位'])
+    expect(mergedItems(cache, ['hf']).map(i => i.title)).toEqual(['HF'])
+    expect(mergedItems(cache, ['qbitai']).map(i => i.title)).toEqual(['量子位'])
   })
 
   it('同一个链接在多源出现时先去重（按清单顺序先到先得）', () => {

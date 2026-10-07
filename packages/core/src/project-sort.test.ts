@@ -1,10 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  PROJECT_SORT_DEFAULT,
-  PROJECT_SORTS,
-  isProjectSort,
-  sanitizeProjectSort
-} from './project-sort'
+import { isProjectSort, PROJECT_SORT_DEFAULT, PROJECT_SORTS, sanitizeProjectSort } from './project-sort'
 
 describe('project-sort', () => {
   it('默认是「最近使用」', () => {

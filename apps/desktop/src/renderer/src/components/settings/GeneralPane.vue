@@ -1,4 +1,9 @@
 <script setup lang="ts">
+import type { AppSettings } from '@/types'
+import { APP_NAME_DEFAULT, APP_NAME_MAX_LENGTH } from '@workbench/appearance'
+import { accountLabel } from '@workbench/auth'
+import { WEATHER_CITY_MAX } from '@workbench/weather'
+import { ElMessage } from 'element-plus'
 /**
  * 设置 · 通用：程序（名称 / 快捷键 / 开机自启）、天气、笔记（图片仓库）、账号与同步仓库。
  *
@@ -9,15 +14,10 @@
  * 看着像出了错。
  */
 import { computed, ref, watch } from 'vue'
-import { ElMessage } from 'element-plus'
-import { accountLabel } from '@workbench/auth'
-import { APP_NAME_DEFAULT, APP_NAME_MAX_LENGTH } from '@workbench/appearance'
-import { WEATHER_CITY_MAX } from '@workbench/weather'
-import { useSettingsStore } from '@/stores/settings'
-import { useAuthStore } from '@/stores/auth'
-import { useDraftField } from '@/composables/use-draft-field'
 import AccountDialog from '@/components/AccountDialog.vue'
-import type { AppSettings } from '@/types'
+import { useDraftField } from '@/composables/use-draft-field'
+import { useAuthStore } from '@/stores/auth'
+import { useSettingsStore } from '@/stores/settings'
 
 const props = defineProps<{ open: boolean }>()
 
@@ -41,8 +41,9 @@ const recording = ref(false)
 watch(
   () => props.open,
   (open) => {
-    if (!open) recording.value = false
-  }
+    if (!open)
+      recording.value = false
+  },
 )
 
 /**
@@ -53,7 +54,8 @@ watch(
 const appNameDraft = useDraftField(() => settings.settings.appName)
 
 function commitAppName(): void {
-  if (appNameDraft.value === settings.settings.appName) return
+  if (appNameDraft.value === settings.settings.appName)
+    return
   save({ appName: appNameDraft.value })
 }
 
@@ -65,7 +67,8 @@ function commitAppName(): void {
 const syncRepoDraft = useDraftField(() => settings.settings.tokenSyncRepo)
 
 function commitSyncRepo(): void {
-  if (syncRepoDraft.value === settings.settings.tokenSyncRepo) return
+  if (syncRepoDraft.value === settings.settings.tokenSyncRepo)
+    return
   save({ tokenSyncRepo: syncRepoDraft.value })
 }
 
@@ -74,7 +77,8 @@ function commitSyncRepo(): void {
 const imageRepoDraft = useDraftField(() => settings.settings.noteImageRepo)
 
 function commitImageRepo(): void {
-  if (imageRepoDraft.value === settings.settings.noteImageRepo) return
+  if (imageRepoDraft.value === settings.settings.noteImageRepo)
+    return
   save({ noteImageRepo: imageRepoDraft.value })
 }
 
@@ -87,7 +91,8 @@ function commitImageRepo(): void {
 const weatherCityDraft = useDraftField(() => settings.settings.weatherCity)
 
 function commitWeatherCity(): void {
-  if (weatherCityDraft.value === settings.settings.weatherCity) return
+  if (weatherCityDraft.value === settings.settings.weatherCity)
+    return
   save({ weatherCity: weatherCityDraft.value })
 }
 
@@ -97,30 +102,35 @@ const MODIFIER_KEYS = new Set(['Control', 'Shift', 'Alt', 'Meta', 'CapsLock'])
 
 const KEY_ALIAS: Record<string, string> = {
   ' ': 'Space',
-  ArrowUp: 'Up',
-  ArrowDown: 'Down',
-  ArrowLeft: 'Left',
-  ArrowRight: 'Right',
-  Escape: 'Escape',
-  Enter: 'Return',
-  Tab: 'Tab',
-  Backspace: 'Backspace',
-  Delete: 'Delete',
-  Home: 'Home',
-  End: 'End',
-  PageUp: 'PageUp',
-  PageDown: 'PageDown'
+  'ArrowUp': 'Up',
+  'ArrowDown': 'Down',
+  'ArrowLeft': 'Left',
+  'ArrowRight': 'Right',
+  'Escape': 'Escape',
+  'Enter': 'Return',
+  'Tab': 'Tab',
+  'Backspace': 'Backspace',
+  'Delete': 'Delete',
+  'Home': 'Home',
+  'End': 'End',
+  'PageUp': 'PageUp',
+  'PageDown': 'PageDown',
 }
 
 const PUNCTUATION = '`-=[]\\;\',./'
 
 /** 浏览器 KeyboardEvent.key → 快捷键串里的一段（Rust 侧交给 tauri-plugin-global-shortcut 解析） */
 function normalizeKey(key: string): string | null {
-  if (/^[a-zA-Z]$/.test(key)) return key.toUpperCase()
-  if (/^[0-9]$/.test(key)) return key
-  if (/^F([1-9]|1[0-9]|2[0-4])$/.test(key)) return key
-  if (KEY_ALIAS[key]) return KEY_ALIAS[key]
-  if (PUNCTUATION.includes(key)) return key
+  if (/^[a-z]$/i.test(key))
+    return key.toUpperCase()
+  if (/^\d$/.test(key))
+    return key
+  if (/^F([1-9]|1\d|2[0-4])$/.test(key))
+    return key
+  if (KEY_ALIAS[key])
+    return KEY_ALIAS[key]
+  if (PUNCTUATION.includes(key))
+    return key
   return null
 }
 
@@ -130,7 +140,7 @@ const hotkeyLabel = computed(() =>
     .split('+')
     .map((part: string) => part.trim())
     .filter(Boolean)
-    .join(' + ')
+    .join(' + '),
 )
 
 function captureHotkey(event: KeyboardEvent): void {
@@ -144,13 +154,18 @@ function captureHotkey(event: KeyboardEvent): void {
 
   const key = normalizeKey(event.key)
   // 只按住修饰键时还没构成组合，继续等
-  if (MODIFIER_KEYS.has(event.key) || !key) return
+  if (MODIFIER_KEYS.has(event.key) || !key)
+    return
 
   const parts: string[] = []
-  if (event.ctrlKey) parts.push('Control')
-  if (event.shiftKey) parts.push('Shift')
-  if (event.altKey) parts.push('Alt')
-  if (event.metaKey) parts.push('Super')
+  if (event.ctrlKey)
+    parts.push('Control')
+  if (event.shiftKey)
+    parts.push('Shift')
+  if (event.altKey)
+    parts.push('Alt')
+  if (event.metaKey)
+    parts.push('Super')
 
   if (parts.length === 0) {
     ElMessage.warning('快捷键至少需要一个修饰键（Ctrl / Shift / Alt）')
@@ -171,7 +186,9 @@ function startRecording(): void {
 <template>
   <section class="pane">
     <div class="block">
-      <h3 class="block__title">程序</h3>
+      <h3 class="block__title">
+        程序
+      </h3>
 
       <div class="row">
         <div class="row__text">
@@ -240,7 +257,9 @@ function startRecording(): void {
       留空就是整条出口关闭，与两个同步仓库「留空即关闭」同一条规矩。
     -->
     <div class="block">
-      <h3 class="block__title">天气</h3>
+      <h3 class="block__title">
+        天气
+      </h3>
 
       <div class="row">
         <div class="row__text">
@@ -270,7 +289,9 @@ function startRecording(): void {
       应用既不替用户 init、也不替他接远端。笔记文件夹本身在笔记页左栏底部挑，这里不重复显示。
     -->
     <div class="block">
-      <h3 class="block__title">笔记</h3>
+      <h3 class="block__title">
+        笔记
+      </h3>
 
       <!--
         笔记里的图片：粘贴的图片推到用户自己的一个 git 仓库里，正文里只留一个外链。
@@ -309,7 +330,9 @@ function startRecording(): void {
       没登录时地址那一行不出现 —— 数据全部留在本机，登录回来接着用。
     -->
     <div class="block">
-      <h3 class="block__title">账号</h3>
+      <h3 class="block__title">
+        账号
+      </h3>
 
       <div class="row">
         <div class="row__text">

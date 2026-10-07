@@ -1,35 +1,19 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import type { ProjectColorPreset } from '@workbench/core'
+import type { ProjectStatus, RunRecord } from '@/types'
+import { Box, Close, Download, FolderOpened, Plus, Refresh, VideoPause, VideoPlay } from '@element-plus/icons-vue'
+
+import { isProjectColorPreset, parsePort, PROJECT_COLOR_LABELS, PROJECT_COLOR_PRESETS, projectColorVar, relativeToProject, resolveWithinProject, sanitizeProjectColor, satisfiesNodeVersion } from '@workbench/core'
+
 import { ElMessage } from 'element-plus'
-import {
-  Box,
-  Close,
-  Download,
-  FolderOpened,
-  Plus,
-  Refresh,
-  VideoPause,
-  VideoPlay
-} from '@element-plus/icons-vue'
-import { satisfiesNodeVersion } from '@workbench/core'
-import { parsePort } from '@workbench/core'
-import {
-  PROJECT_COLOR_LABELS,
-  PROJECT_COLOR_PRESETS,
-  isProjectColorPreset,
-  projectColorVar,
-  sanitizeProjectColor,
-  type ProjectColorPreset
-} from '@workbench/core'
-import { relativeToProject, resolveWithinProject } from '@workbench/core'
-import { formatDurationOrDash, formatTimestamp } from '@/format'
-import { STATUS_META, isBusyStatus, statusLabel } from '@/status'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useDraftField } from '@/composables/use-draft-field'
+import { formatDurationOrDash, formatTimestamp } from '@/format'
+import { isBusyStatus, STATUS_META, statusLabel } from '@/status'
+import { useEnvironmentStore } from '@/stores/environment'
 import { useProjectsStore } from '@/stores/projects'
 import { useSettingsStore } from '@/stores/settings'
 import { useTerminalStore } from '@/stores/terminal'
-import { useEnvironmentStore } from '@/stores/environment'
-import type { ProjectStatus, RunRecord } from '@/types'
 
 const store = useProjectsStore()
 const settings = useSettingsStore()
@@ -42,8 +26,9 @@ const visible = ref(false)
 watch(
   () => store.drawerProjectId,
   (id) => {
-    if (id) visible.value = true
-  }
+    if (id)
+      visible.value = true
+  },
 )
 
 onMounted(() => {
@@ -60,12 +45,13 @@ const pathValid = computed(() => (project.value ? store.isPathValid(project.valu
 /** 显示名先落在本地草稿，回车或失焦才提交，避免半截名字被写进磁盘 */
 const nameDraft = useDraftField(
   () => project.value?.id ?? '',
-  () => project.value?.name ?? ''
+  () => project.value?.name ?? '',
 )
 
 function commitName(): void {
   const current = project.value
-  if (!current) return
+  if (!current)
+    return
 
   const next = nameDraft.value.trim()
   if (!next) {
@@ -81,7 +67,8 @@ function commitName(): void {
 /** 「在首页展示」开关：写动作归 store（与项目卡「⋯」菜单同一条路，提示也只有那一处） */
 function toggleHome(value: boolean | string | number): void {
   const current = project.value
-  if (!current) return
+  if (!current)
+    return
   store.setHome(current.id, value === true)
 }
 
@@ -100,12 +87,13 @@ watch(
     const scan = result.ok ? result.data : undefined
     allScripts.value = scan?.ok ? scan.allScripts : []
   },
-  { immediate: true }
+  { immediate: true },
 )
 
 const serveOptions = computed(() => {
   const set = new Set(allScripts.value)
-  if (project.value?.scripts.serve) set.add(project.value.scripts.serve)
+  if (project.value?.scripts.serve)
+    set.add(project.value.scripts.serve)
   return [...set]
 })
 
@@ -121,7 +109,7 @@ const pmOptions = [
   { label: '自动检测', value: 'auto' },
   { label: 'npm', value: 'npm' },
   { label: 'yarn', value: 'yarn' },
-  { label: 'pnpm', value: 'pnpm' }
+  { label: 'pnpm', value: 'pnpm' },
 ]
 
 // ---------- 标识色 ----------
@@ -133,7 +121,7 @@ const CUSTOM_COLOR = 'custom'
 const predefineColors = computed(() => {
   // 明暗一变，主题变量就换了值，取色器里的预设也得跟着换一套
   void settings.effectiveTheme
-  return PROJECT_COLOR_PRESETS.map((preset) => readColorVar(preset))
+  return PROJECT_COLOR_PRESETS.map(preset => readColorVar(preset))
 })
 
 function readColorVar(preset: ProjectColorPreset): string {
@@ -150,17 +138,20 @@ function readColorVar(preset: ProjectColorPreset): string {
 const colorModel = computed({
   get: () => {
     const color = sanitizeProjectColor(project.value?.color)
-    if (!color) return ''
+    if (!color)
+      return ''
     return isProjectColorPreset(color) ? color : CUSTOM_COLOR
   },
   set: (value: string) => {
     const current = project.value
-    if (!current) return
+    if (!current)
+      return
     // 切到「自定义」时把当前看到的颜色带过去，否则取色器会从一个毫不相干的颜色开始。
     // 一律过一遍 sanitize：取值可能来自 DOM（主题变量的实际色值），落盘前要收敛成合法形态
     const color = sanitizeProjectColor(value === CUSTOM_COLOR ? customPicker.value : value)
-    if (color) current.color = color
-  }
+    if (color)
+      current.color = color
+  },
 })
 
 /** 取色器：读的时候把预设解析成当前主题下的实际色值，写的时候直接落自定义色 */
@@ -168,14 +159,16 @@ const customPicker = computed({
   get: () => {
     void settings.effectiveTheme
     const color = sanitizeProjectColor(project.value?.color)
-    if (!color) return readColorVar('primary')
+    if (!color)
+      return readColorVar('primary')
     return isProjectColorPreset(color) ? readColorVar(color) : color
   },
   set: (value: string | null) => {
     const current = project.value
     const next = sanitizeProjectColor(value)
-    if (current && next) current.color = next
-  }
+    if (current && next)
+      current.color = next
+  },
 })
 
 /** 自定义那一项的标题：带上当前色值，收起后也知道选的是哪个色 */
@@ -183,10 +176,10 @@ const customOptionLabel = computed(() => `自定义（${customPicker.value}）`)
 
 const history = computed<RunRecord[]>(() => project.value?.history ?? [])
 
-const RESULT_META: Record<RunRecord['result'], { label: string; tone: string }> = {
+const RESULT_META: Record<RunRecord['result'], { label: string, tone: string }> = {
   success: { label: '成功', tone: 'ok' },
   failed: { label: '失败', tone: 'fail' },
-  stopped: { label: '已停止', tone: 'idle' }
+  stopped: { label: '已停止', tone: 'idle' },
 }
 
 function close(): void {
@@ -199,12 +192,14 @@ function onClosed(): void {
 
 function restart(): void {
   const current = project.value
-  if (current) void store.restart(current.id)
+  if (current)
+    void store.restart(current.id)
 }
 
 function onBuild(script?: unknown): void {
   const current = project.value
-  if (current) void store.build(current.id, typeof script === 'string' ? script : undefined)
+  if (current)
+    void store.build(current.id, typeof script === 'string' ? script : undefined)
 }
 
 // ---------- 自定义命令（F-2.6） ----------
@@ -215,7 +210,8 @@ const customs = computed(() => project.value?.scripts.custom ?? [])
 
 function addCustom(): void {
   const current = project.value
-  if (!current) return
+  if (!current)
+    return
 
   const name = customDraft.value.name.trim()
   const command = customDraft.value.command.trim()
@@ -223,7 +219,7 @@ function addCustom(): void {
     ElMessage.warning('命令名称与命令行都要填写')
     return
   }
-  if (customs.value.some((item) => item.name === name)) {
+  if (customs.value.some(item => item.name === name)) {
     ElMessage.warning(`已存在同名命令「${name}」`)
     return
   }
@@ -235,13 +231,15 @@ function addCustom(): void {
 
 function removeCustom(index: number): void {
   const current = project.value
-  if (!current) return
+  if (!current)
+    return
   current.scripts.custom = customs.value.filter((_: unknown, i: number) => i !== index)
 }
 
 function runCustom(index: number): void {
   const current = project.value
-  if (current) void store.runCustom(current.id, index)
+  if (current)
+    void store.runCustom(current.id, index)
 }
 
 // ---------- 监听端口 ----------
@@ -249,12 +247,13 @@ function runCustom(index: number): void {
 /** 端口先进草稿，失焦或回车才提交，避免把半截数字写进配置 */
 const portDraft = useDraftField(
   () => project.value?.id ?? '',
-  () => (project.value?.port ? String(project.value.port) : '')
+  () => (project.value?.port ? String(project.value.port) : ''),
 )
 
 function commitPort(): void {
   const current = project.value
-  if (!current) return
+  if (!current)
+    return
 
   const raw = portDraft.value.trim()
   if (!raw) {
@@ -275,7 +274,7 @@ function commitPort(): void {
 
 /** 系统在用的 node：nvm 软链优先，退回到 node -v 的探测结果 */
 const systemNode = computed(
-  () => environment.nvm?.current ?? environment.packageManagers?.node?.replace(/^v/, '') ?? ''
+  () => environment.nvm?.current ?? environment.packageManagers?.node?.replace(/^v/, '') ?? '',
 )
 
 const installedVersions = computed(() => environment.nvm?.versions ?? [])
@@ -288,13 +287,14 @@ const nodeVersionModel = computed({
   get: () => project.value?.nodeVersion ?? '',
   set: (value: string) => {
     const current = project.value
-    if (!current) return
+    if (!current)
+      return
     current.nodeVersion = value || undefined
-  }
+  },
 })
 
 const systemNodeLabel = computed(() =>
-  systemNode.value ? `跟随系统（v${systemNode.value}）` : '跟随系统'
+  systemNode.value ? `跟随系统（v${systemNode.value}）` : '跟随系统',
 )
 
 /** 项目要求与实际生效版本（选了 nvm 版本就是那个，否则是系统 node） */
@@ -302,32 +302,36 @@ const nodeState = computed(() => {
   const required = project.value?.nodeRequirement?.trim()
   const selected = project.value?.nodeVersion?.trim()
   const actual = selected ? environment.installedNodeVersion(selected) ?? selected : systemNode.value
-  if (!required || !actual) return null
+  if (!required || !actual)
+    return null
   return {
     required,
     actual,
     fromProject: !!selected,
-    ok: satisfiesNodeVersion(required, actual)
+    ok: satisfiesNodeVersion(required, actual),
   }
 })
 
 function nodeOptionLabel(version: string): string {
   const required = project.value?.nodeRequirement?.trim()
   const tags: string[] = []
-  if (version === systemNode.value) tags.push('全局当前')
+  if (version === systemNode.value)
+    tags.push('全局当前')
   // 项目没声明要求时，「匹配」说明不了什么，不打标签
-  if (required && satisfiesNodeVersion(required, version)) tags.push('匹配要求')
+  if (required && satisfiesNodeVersion(required, version))
+    tags.push('匹配要求')
   return tags.length ? `v${version}（${tags.join(' / ')}）` : `v${version}`
 }
 
 /** 当前版本不满足要求时，给出 nvm 里第一个能救场的版本 */
 const suggestedNode = computed(() => {
   const state = nodeState.value
-  if (!state || state.ok) return null
+  if (!state || state.ok)
+    return null
   const current = project.value?.nodeVersion?.trim()
   return (
     installedVersions.value.find(
-      (v: string) => v !== current && satisfiesNodeVersion(state.required, v)
+      (v: string) => v !== current && satisfiesNodeVersion(state.required, v),
     ) ?? null
   )
 })
@@ -335,7 +339,8 @@ const suggestedNode = computed(() => {
 function applySuggestedNode(): void {
   const target = suggestedNode.value
   const current = project.value
-  if (!target || !current) return
+  if (!target || !current)
+    return
 
   current.nodeVersion = target
   ElMessage.success(`已改为使用 Node v${target}（仅本项目）`)
@@ -346,7 +351,8 @@ function applySuggestedNode(): void {
 /** 输出目录的完整路径，只用于显示与悬停提示（配置里存的可能是相对写法） */
 const resolvedOutputDir = computed(() => {
   const current = project.value
-  if (!current) return ''
+  if (!current)
+    return ''
   return resolveWithinProject(current.path, current.outputDir ?? '')
 })
 
@@ -358,22 +364,26 @@ const resolvedOutputDir = computed(() => {
  */
 async function pickOutputDir(): Promise<void> {
   const current = project.value
-  if (!current) return
+  if (!current)
+    return
 
   const picked = await window.workbench.pickDirectory('选择打包输出目录')
-  if (!picked) return
+  if (!picked)
+    return
 
   current.outputDir = relativeToProject(current.path, picked)
 }
 
 async function relocate(): Promise<void> {
   const current = project.value
-  if (current) await store.relocate(current.id)
+  if (current)
+    await store.relocate(current.id)
 }
 
 async function removeProject(): Promise<void> {
   const current = project.value
-  if (!current) return
+  if (!current)
+    return
 
   // 确认框在 store 里（与项目卡上的「移除」共用同一句）
   visible.value = false
@@ -397,7 +407,9 @@ async function removeProject(): Promise<void> {
       <!-- 头部 -->
       <header class="drawer__head">
         <div class="drawer__identity">
-          <h2 class="drawer__name truncate">{{ project.name }}</h2>
+          <h2 class="drawer__name truncate">
+            {{ project.name }}
+          </h2>
           <span class="drawer__path mono truncate" :title="project.path">{{ project.path }}</span>
         </div>
         <el-button class="icon-btn" :icon="Close" text aria-label="关闭" @click="close" />
@@ -429,10 +441,16 @@ async function removeProject(): Promise<void> {
       <!-- 主操作 -->
       <div class="drawer__actions">
         <!-- 安装 / 打包进行中：只能停，不能启动，否则按钮全是灰的没处下手 -->
-        <el-button v-if="isBusy" :icon="VideoPause" @click="store.stop(project.id)">停止</el-button>
+        <el-button v-if="isBusy" :icon="VideoPause" @click="store.stop(project.id)">
+          停止
+        </el-button>
         <template v-else-if="isRunning">
-          <el-button :icon="VideoPause" @click="store.stop(project.id)">停止</el-button>
-          <el-button :icon="Refresh" @click="restart">重启</el-button>
+          <el-button :icon="VideoPause" @click="store.stop(project.id)">
+            停止
+          </el-button>
+          <el-button :icon="Refresh" @click="restart">
+            重启
+          </el-button>
         </template>
         <el-button
           v-else
@@ -478,7 +496,9 @@ async function removeProject(): Promise<void> {
       <div class="drawer__scroll">
         <!-- 基本信息 -->
         <section class="block">
-          <h3 class="section-title">基本信息</h3>
+          <h3 class="section-title">
+            基本信息
+          </h3>
 
           <div class="field">
             <label class="field__label">显示名</label>
@@ -491,7 +511,9 @@ async function removeProject(): Promise<void> {
               @blur="commitName"
               @keydown.enter="commitName"
             />
-            <p class="field__hint">改完按回车生效，留空会还原。</p>
+            <p class="field__hint">
+              改完按回车生效，留空会还原。
+            </p>
           </div>
 
           <div class="field">
@@ -571,13 +593,17 @@ async function removeProject(): Promise<void> {
             <p class="field__hint field__hint--warn">
               项目目录已不存在或被移动，启动 / 打包 / 安装已禁用。
             </p>
-            <el-button size="small" :icon="FolderOpened" @click="relocate">重新定位</el-button>
+            <el-button size="small" :icon="FolderOpened" @click="relocate">
+              重新定位
+            </el-button>
           </div>
         </section>
 
         <!-- 命令配置 -->
         <section class="block">
-          <h3 class="section-title">命令配置</h3>
+          <h3 class="section-title">
+            命令配置
+          </h3>
 
           <div class="field">
             <label class="field__label">启动命令</label>
@@ -590,7 +616,9 @@ async function removeProject(): Promise<void> {
             >
               <el-option v-for="s in serveOptions" :key="s" :label="s" :value="s" />
             </el-select>
-            <p class="field__hint">来自 package.json 的 scripts，可手动指定。</p>
+            <p class="field__hint">
+              来自 package.json 的 scripts，可手动指定。
+            </p>
           </div>
 
           <div class="field">
@@ -621,7 +649,9 @@ async function removeProject(): Promise<void> {
             >
               <el-option v-for="s in buildOptions" :key="s" :label="s" :value="s" />
             </el-select>
-            <p class="field__hint">勾选多条后，卡片上的「打包」可通过下拉切换。</p>
+            <p class="field__hint">
+              勾选多条后，卡片上的「打包」可通过下拉切换。
+            </p>
           </div>
 
           <div class="field">
@@ -689,14 +719,18 @@ async function removeProject(): Promise<void> {
                 placeholder="命令行，如 npm run type-check"
                 spellcheck="false"
               />
-              <el-button size="small" :icon="Plus" @click="addCustom">添加</el-button>
+              <el-button size="small" :icon="Plus" @click="addCustom">
+                添加
+              </el-button>
             </div>
           </div>
         </section>
 
         <!-- 环境 -->
         <section class="block">
-          <h3 class="section-title">环境</h3>
+          <h3 class="section-title">
+            环境
+          </h3>
 
           <div class="field">
             <label class="field__label">包管理器</label>
@@ -762,7 +796,9 @@ async function removeProject(): Promise<void> {
 
         <!-- 打包输出 -->
         <section class="block">
-          <h3 class="section-title">打包输出</h3>
+          <h3 class="section-title">
+            打包输出
+          </h3>
 
           <div class="field">
             <label class="field__label">输出目录</label>
@@ -798,7 +834,9 @@ async function removeProject(): Promise<void> {
 
         <!-- 运行记录 -->
         <section class="block">
-          <h3 class="section-title">运行记录</h3>
+          <h3 class="section-title">
+            运行记录
+          </h3>
 
           <ul v-if="history.length" class="history">
             <li v-for="record in history" :key="record.id" class="history__row">
@@ -813,14 +851,22 @@ async function removeProject(): Promise<void> {
               </span>
             </li>
           </ul>
-          <p v-else class="field__hint">还没有执行记录。</p>
+          <p v-else class="field__hint">
+            还没有执行记录。
+          </p>
         </section>
 
         <!-- 危险操作 -->
         <section class="block">
-          <h3 class="section-title">危险操作</h3>
-          <el-button type="danger" size="small" @click="removeProject">从列表中移除</el-button>
-          <p class="field__hint">仅从 Workbench 列表移除，不会删除磁盘上的项目文件。</p>
+          <h3 class="section-title">
+            危险操作
+          </h3>
+          <el-button type="danger" size="small" @click="removeProject">
+            从列表中移除
+          </el-button>
+          <p class="field__hint">
+            仅从 Workbench 列表移除，不会删除磁盘上的项目文件。
+          </p>
         </section>
       </div>
     </div>

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { renderMarkdown } from '@workbench/core'
+import { ElMessage } from 'element-plus'
 /**
  * 工作日志的 markdown 展示。
  *
@@ -17,8 +19,6 @@
  * 换成调用方给的（AI 预览栏用它把相对图片换成已授权的 asset URL），返回空值保留原地址。
  */
 import { computed } from 'vue'
-import { ElMessage } from 'element-plus'
-import { renderMarkdown } from '@workbench/core'
 
 const props = defineProps<{
   source: string
@@ -33,7 +33,7 @@ const emit = defineEmits<{ internal: [href: string] }>()
 const html = computed(() =>
   props.resolveImageSrc
     ? renderMarkdown(props.source, { resolveImageSrc: props.resolveImageSrc })
-    : renderMarkdown(props.source)
+    : renderMarkdown(props.source),
 )
 
 /** 只有带协议的 http(s) / mailto 才值得交给系统；其余地址拦下，站内的看父层要不要 */
@@ -41,7 +41,8 @@ const OPENABLE = /^(https?:|mailto:)/i
 
 async function onClick(event: MouseEvent): Promise<void> {
   const anchor = (event.target as HTMLElement | null)?.closest('a')
-  if (!anchor) return
+  if (!anchor)
+    return
 
   // 无论打不打开，都不能让 webview 自己导航
   event.preventDefault()
@@ -49,16 +50,18 @@ async function onClick(event: MouseEvent): Promise<void> {
   const href = anchor.getAttribute('href') ?? ''
   if (OPENABLE.test(href)) {
     const result = await window.workbench.openExternal(href)
-    if (!result.ok) ElMessage.warning(result.error ?? '打开链接失败')
+    if (!result.ok)
+      ElMessage.warning(result.error ?? '打开链接失败')
     return
   }
   // 纯锚点（`#某一节`）不是跳文件：不往上交（父层也解析不出它）
-  if (props.internalLinks && href && !href.startsWith('#')) emit('internal', href)
+  if (props.internalLinks && href && !href.startsWith('#'))
+    emit('internal', href)
 }
 </script>
 
 <template>
-  <div class="md" v-html="html" @click="onClick" />
+  <div class="md" @click="onClick" v-html="html" />
 </template>
 
 <style scoped>

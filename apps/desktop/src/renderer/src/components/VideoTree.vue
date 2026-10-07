@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { VideoNode } from '@workbench/video'
 /**
  * 视频目录树（左栏）。
  *
@@ -12,8 +13,8 @@
  * 「展开一个子孙」会顺手把祖先顶开，选中项那一支怎么点都收不起来。
  */
 import { Folder, VideoPlay } from '@element-plus/icons-vue'
+import { formatVideoTime } from '@workbench/video'
 import PanelLoading from '@/components/PanelLoading.vue'
-import { formatVideoTime, type VideoNode } from '@workbench/video'
 
 const props = defineProps<{
   /** 视频文件夹里的顶层条目（文件夹在前、同层按名字，顺序由后端 + shared 定下） */
@@ -27,7 +28,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  select: [rel: string]
+  'select': [rel: string]
   'update:expanded': [value: string[]]
 }>()
 
@@ -41,7 +42,7 @@ function expand(ids: string[]): void {
 function collapse(id: string): void {
   emit(
     'update:expanded',
-    props.expanded.filter((item) => item !== id)
+    props.expanded.filter(item => item !== id),
   )
 }
 
@@ -51,7 +52,8 @@ function collapse(id: string): void {
  * 占位符只说「未知」）；文件夹不摆这一格，名字吃满整行。
  */
 function durationOf(node: VideoNode): string {
-  if (node.kind !== 'video') return ''
+  if (node.kind !== 'video')
+    return ''
   const duration = node.duration ?? 0
   return duration > 0 ? formatVideoTime(duration) : '--:--'
 }
@@ -91,7 +93,9 @@ function durationOf(node: VideoNode): string {
 
     <!-- 一个视频都没有：说清「这里会是什么」，别让人对着空白猜坏了 -->
     <div v-if="loaded && !nodes.length" class="tree__empty">
-      <p class="tree__empty-title">这个文件夹里还没有 MP4 视频</p>
+      <p class="tree__empty-title">
+        这个文件夹里还没有 MP4 视频
+      </p>
       <p class="tree__empty-hint">
         把视频放进来（或在别处放好），点左栏底部那颗刷新就能看到。字幕、封面这些别的文件不会出现在树里。
       </p>

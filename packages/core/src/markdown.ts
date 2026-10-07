@@ -21,7 +21,7 @@ const md = new MarkdownIt({
   linkify: true,
   breaks: true,
   // 排版替换（引号、破折号）会把用户写的原文改掉，日志不需要这个
-  typographer: false
+  typographer: false,
 })
 
 /** 默认的 token 渲染；link_open 用的是它，所以这里取同一份实现 */
@@ -65,7 +65,8 @@ md.renderer.rules.image = (tokens, idx, options, env, self) => {
     const src = tokens[idx].attrGet('src')
     if (typeof src === 'string' && src) {
       const resolved = resolve(src)
-      if (resolved) tokens[idx].attrSet('src', resolved)
+      if (resolved)
+        tokens[idx].attrSet('src', resolved)
     }
   }
   return renderImage(tokens, idx, options, env, self)
@@ -78,7 +79,8 @@ md.renderer.rules.image = (tokens, idx, options, env, self) => {
  * 也挡掉了 `javascript:` / `data:` 这类地址。
  */
 export function renderMarkdown(source: string, env?: MarkdownEnv): string {
-  if (typeof source !== 'string' || !source.trim()) return ''
+  if (typeof source !== 'string' || !source.trim())
+    return ''
   // markdown-it 的 Env 带索引签名，接口形状要顺从它
   return md.render(source, (env ?? {}) as Record<string, unknown>)
 }
@@ -91,14 +93,17 @@ export function renderMarkdown(source: string, env?: MarkdownEnv): string {
  * 知识库的「谁链到谁」按它算，见 shared/kb-lint.ts 的 kbEntryLinks。
  */
 export function markdownLinks(source: string): string[] {
-  if (typeof source !== 'string' || !source.trim()) return []
+  if (typeof source !== 'string' || !source.trim())
+    return []
 
   const hrefs: string[] = []
   for (const token of md.parse(source, {})) {
     for (const child of token.children ?? []) {
-      if (child.type !== 'link_open') continue
+      if (child.type !== 'link_open')
+        continue
       const href = child.attrGet('href')
-      if (typeof href === 'string' && href) hrefs.push(href)
+      if (typeof href === 'string' && href)
+        hrefs.push(href)
     }
   }
   return hrefs
@@ -111,14 +116,17 @@ export function markdownLinks(source: string): string[] {
  * 相对图片挨个授权，再在渲染时把地址换成 asset URL（见 MarkdownEnv）。
  */
 export function markdownImages(source: string): string[] {
-  if (typeof source !== 'string' || !source.trim()) return []
+  if (typeof source !== 'string' || !source.trim())
+    return []
 
   const srcs: string[] = []
   for (const token of md.parse(source, {})) {
     for (const child of token.children ?? []) {
-      if (child.type !== 'image') continue
+      if (child.type !== 'image')
+        continue
       const src = child.attrGet('src')
-      if (typeof src === 'string' && src) srcs.push(src)
+      if (typeof src === 'string' && src)
+        srcs.push(src)
     }
   }
   return srcs
@@ -131,16 +139,20 @@ export function markdownImages(source: string): string[] {
  * 只取行内 token 里的文字，代码块整段不要 —— 摘要里出现半截代码没有意义。
  */
 export function markdownToPlainText(source: string): string {
-  if (typeof source !== 'string' || !source.trim()) return ''
+  if (typeof source !== 'string' || !source.trim())
+    return ''
 
   const parts: string[] = []
   for (const token of md.parse(source, {})) {
     for (const child of token.children ?? []) {
-      if (child.type === 'text' || child.type === 'code_inline') parts.push(child.content)
-      else if (child.type === 'softbreak' || child.type === 'hardbreak') parts.push(' ')
+      if (child.type === 'text' || child.type === 'code_inline')
+        parts.push(child.content)
+      else if (child.type === 'softbreak' || child.type === 'hardbreak')
+        parts.push(' ')
     }
     // 纯文本的行内内容（标题、段落）都带着 children，上面已经取过；这里只补空行分隔
-    if (token.children?.length) parts.push(' ')
+    if (token.children?.length)
+      parts.push(' ')
   }
 
   return parts.join('').replace(/\s+/g, ' ').trim()

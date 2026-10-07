@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { AiProvider } from '@workbench/ai'
+import { Delete, Edit, Plus } from '@element-plus/icons-vue'
 /**
  * 模型管理那个弹层：**跑一轮用哪个模型**这一件事的两半 ——
  *
@@ -11,10 +13,8 @@
  * 三处一起对齐。这里只把当前状态画出来。
  */
 import { computed, ref } from 'vue'
-import { Delete, Edit, Plus } from '@element-plus/icons-vue'
-import type { AiProvider } from '@workbench/ai'
-import AppDialog from '@/components/AppDialog.vue'
 import AiProviderDialog from '@/components/AiProviderDialog.vue'
+import AppDialog from '@/components/AppDialog.vue'
 import { useAiStore } from '@/stores/ai'
 
 const visible = defineModel<boolean>({ required: true })
@@ -27,7 +27,8 @@ const providerVisible = ref(false)
 /** 默认模型那一栏显示什么：`服务名 · 模型名`（名字与 id 不一样时两行都给） */
 const defaultText = computed(() => {
   const choice = store.activeChoice
-  if (!choice) return '还没配模型'
+  if (!choice)
+    return '还没配模型'
   return `${choice.providerLabel} · ${choice.name}`
 })
 const defaultId = computed(() => store.activeChoice?.model ?? '')
@@ -35,12 +36,12 @@ const defaultId = computed(() => store.activeChoice?.model ?? '')
 /** 下拉里按服务分组：一个服务一组，组名就是它的名字 */
 const grouped = computed(() =>
   store.providers
-    .filter((provider) => provider.enabled)
-    .map((provider) => ({
+    .filter(provider => provider.enabled)
+    .map(provider => ({
       provider,
-      items: store.choices.filter((choice) => choice.provider === provider.id)
+      items: store.choices.filter(choice => choice.provider === provider.id),
     }))
-    .filter((group) => group.items.length > 0)
+    .filter(group => group.items.length > 0),
 )
 
 /** 行上那行小字：地址（去协议）+ 几个模型 + 没配密钥时说一句 */
@@ -72,7 +73,9 @@ function toggle(provider: AiProvider, value: unknown): void {
     <div class="model">
       <!-- 默认模型：跑一轮用它（模型管理弹窗顶上那一栏，页面上那个下拉也是它） -->
       <section class="model__section">
-        <p class="model__label">默认项</p>
+        <p class="model__label">
+          默认项
+        </p>
         <div class="model__default">
           <span class="model__default-text">
             <span class="model__default-title">默认模型</span>
@@ -87,7 +90,9 @@ function toggle(provider: AiProvider, value: unknown): void {
             placeholder="还没能挑的模型"
             @change="(value: unknown) => void store.setChoice(String(value))"
           >
-            <template #prefix>更改</template>
+            <template #prefix>
+              更改
+            </template>
             <el-option-group
               v-for="group in grouped"
               :key="group.provider.id"
@@ -116,7 +121,9 @@ function toggle(provider: AiProvider, value: unknown): void {
             AI 服务
             <span class="model__count">{{ store.providers.length }}</span>
           </p>
-          <el-button type="primary" :icon="Plus" @click="openNew">添加服务</el-button>
+          <el-button type="primary" :icon="Plus" @click="openNew">
+            添加服务
+          </el-button>
         </div>
 
         <p v-if="!store.providers.length" class="model__empty">
@@ -151,7 +158,9 @@ function toggle(provider: AiProvider, value: unknown): void {
     </div>
 
     <template #footer>
-      <el-button @click="visible = false">关闭</el-button>
+      <el-button @click="visible = false">
+        关闭
+      </el-button>
     </template>
   </AppDialog>
 

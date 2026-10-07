@@ -18,7 +18,7 @@ export class RingLog<T> {
     if (!Number.isInteger(capacity) || capacity <= 0) {
       throw new Error('RingLog 容量必须是正整数')
     }
-    this.items = new Array<T | undefined>(capacity)
+    this.items = Array.from({ length: capacity })
   }
 
   /** 当前保留的条数（写满后等于容量） */
@@ -39,7 +39,7 @@ export class RingLog<T> {
   /** 按写入顺序导出（最旧 → 最新） */
   toArray(): T[] {
     const size = this.size
-    const out = new Array<T>(size)
+    const out = Array.from({ length: size }) as T[]
     if (size < this.written) {
       // 已经绕过一圈：最旧的一条落在 written % capacity 这一格
       const start = this.written % this.capacity

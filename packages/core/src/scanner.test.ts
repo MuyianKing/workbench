@@ -1,19 +1,9 @@
-import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import type { ScanFs } from './scanner'
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import {
-  detectConfiguredOutputDir,
-  detectFramework,
-  detectPackageManager,
-  isNonEmptyDir,
-  isValidScriptName,
-  pickBuild,
-  pickServe,
-  resolveOutputDir,
-  scanProject,
-  type ScanFs
-} from './scanner'
+import { detectConfiguredOutputDir, detectFramework, detectPackageManager, isNonEmptyDir, isValidScriptName, pickBuild, pickServe, resolveOutputDir, scanProject } from './scanner'
 
 /**
  * 测试用的 ScanFs：直接走 node:fs。
@@ -24,24 +14,27 @@ const nodeFs: ScanFs = {
   async readText(path) {
     try {
       return readFileSync(path, 'utf-8')
-    } catch {
+    }
+    catch {
       return null
     }
   },
   async isDirectory(path) {
     try {
       return statSync(path).isDirectory()
-    } catch {
+    }
+    catch {
       return false
     }
   },
   async listDir(path) {
     try {
       return readdirSync(path)
-    } catch {
+    }
+    catch {
       return []
     }
-  }
+  },
 }
 
 const tempDirs: string[] = []
@@ -64,7 +57,8 @@ function makeProject(pkg: unknown, files: Record<string, string> = {}): string {
 afterEach(() => {
   while (tempDirs.length) {
     const dir = tempDirs.pop()
-    if (dir) rmSync(dir, { recursive: true, force: true })
+    if (dir)
+      rmSync(dir, { recursive: true, force: true })
   }
 })
 
@@ -109,10 +103,10 @@ describe('pickServe', () => {
 
 describe('pickBuild', () => {
   it('收集 build 及其变体', () => {
-    expect(pickBuild({ build: 'x', 'build:prod': 'x', 'docs:build': 'x', dev: 'x' })).toEqual([
+    expect(pickBuild({ 'build': 'x', 'build:prod': 'x', 'docs:build': 'x', 'dev': 'x' })).toEqual([
       'build',
       'build:prod',
-      'docs:build'
+      'docs:build',
     ])
   })
 
@@ -124,7 +118,7 @@ describe('pickBuild', () => {
 describe('detectFramework', () => {
   it('按依赖推断框架', () => {
     expect(detectFramework({ vite: '^5' })).toBe('Vite')
-    expect(detectFramework({ vue: '^3', '@vue/cli-service': '^5' })).toBe('Vue CLI')
+    expect(detectFramework({ 'vue': '^3', '@vue/cli-service': '^5' })).toBe('Vue CLI')
     expect(detectFramework({ next: '^14' })).toBe('Next.js')
     expect(detectFramework({ vitepress: '^1' })).toBe('VitePress')
     expect(detectFramework({ lodash: '^4' })).toBe('Node')
@@ -136,7 +130,7 @@ describe('detectPackageManager', () => {
     expect((await detectPackageManager(nodeFs, makeProject({}, { 'pnpm-lock.yaml': '' }))).pm).toBe('pnpm')
     expect((await detectPackageManager(nodeFs, makeProject({}, { 'yarn.lock': '' }))).pm).toBe('yarn')
     expect((await detectPackageManager(nodeFs, makeProject({}, { 'package-lock.json': '{}' }))).pm).toBe(
-      'npm'
+      'npm',
     )
   })
 
@@ -154,12 +148,12 @@ describe('detectPackageManager', () => {
 
 describe('detectConfiguredOutputDir', () => {
   it('读 vite.config 的 build.outDir', async () => {
-    const dir = makeProject({}, { 'vite.config.ts': "export default { build: { outDir: 'www' } }" })
+    const dir = makeProject({}, { 'vite.config.ts': 'export default { build: { outDir: \'www\' } }' })
     expect(await detectConfiguredOutputDir(nodeFs, dir)).toBe('www')
   })
 
   it('读 vue.config.js 的 outputDir', async () => {
-    const dir = makeProject({}, { 'vue.config.js': "module.exports = { outputDir: 'public/dist' }" })
+    const dir = makeProject({}, { 'vue.config.js': 'module.exports = { outputDir: \'public/dist\' }' })
     expect(await detectConfiguredOutputDir(nodeFs, dir)).toBe('public/dist')
   })
 
@@ -191,7 +185,7 @@ describe('resolveOutputDir', () => {
   }
 
   it('手动配置优先，且相对项目根解析', async () => {
-    const dir = makeProject({}, { 'vite.config.ts': "export default { build: { outDir: 'www' } }" })
+    const dir = makeProject({}, { 'vite.config.ts': 'export default { build: { outDir: \'www\' } }' })
     makeDirWithFile(dir, 'www')
     makeDirWithFile(dir, 'public/dist')
 
@@ -200,7 +194,7 @@ describe('resolveOutputDir', () => {
   })
 
   it('手动配置为空目录时退回探测', async () => {
-    const dir = makeProject({}, { 'vite.config.ts': "export default { build: { outDir: 'www' } }" })
+    const dir = makeProject({}, { 'vite.config.ts': 'export default { build: { outDir: \'www\' } }' })
     mkdirSync(join(dir, 'public/dist'), { recursive: true })
     makeDirWithFile(dir, 'www')
 
@@ -210,7 +204,7 @@ describe('resolveOutputDir', () => {
   })
 
   it('没有手动配置时用构建配置声明的 outDir', async () => {
-    const dir = makeProject({}, { 'vite.config.ts': "export default { build: { outDir: 'www' } }" })
+    const dir = makeProject({}, { 'vite.config.ts': 'export default { build: { outDir: \'www\' } }' })
     makeDirWithFile(dir, 'www')
 
     expect(await resolveOutputDir(nodeFs, dir)).toEqual({ dir: join(dir, 'www'), detected: true })
@@ -245,11 +239,11 @@ describe('scanProject', () => {
       {
         name: 'admin-web',
         version: '1.2.0',
-        scripts: { dev: 'vite', build: 'vite build', 'build:test': 'vite build --mode test' },
+        scripts: { 'dev': 'vite', 'build': 'vite build', 'build:test': 'vite build --mode test' },
         devDependencies: { vite: '^5' },
-        engines: { node: '>=18' }
+        engines: { node: '>=18' },
       },
-      { 'pnpm-lock.yaml': '', 'vite.config.ts': "export default { build: { outDir: 'www' } }" }
+      { 'pnpm-lock.yaml': '', 'vite.config.ts': 'export default { build: { outDir: \'www\' } }' },
     )
     mkdirSync(join(dir, 'www'))
     writeFileSync(join(dir, 'www', 'index.html'), 'x')
@@ -278,7 +272,7 @@ describe('scanProject', () => {
 
   // 这两个名字最终会拼成 `<包管理器> run <名>` 交给 cmd /C，所以不合规的一律不进候选
   it('名字带 shell 元字符的 build 不进候选', async () => {
-    const dir = makeProject({ scripts: { build: 'vite build', 'build:x&calc': 'calc' } })
+    const dir = makeProject({ scripts: { 'build': 'vite build', 'build:x&calc': 'calc' } })
     const scan = await scanProject(nodeFs, dir)
 
     expect(scan.build).toEqual(['build'])

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { CopyDocument, Delete, Download, Upload } from '@element-plus/icons-vue'
 /**
  * 密钥与同步：保险库那把密钥怎么管，以及它跟哪个仓库对。
  *
@@ -11,17 +12,16 @@
  * 它只走文件（导出一份，拿到另一台机器导入）。
  */
 import { computed } from 'vue'
-import { CopyDocument, Delete, Download, Upload } from '@element-plus/icons-vue'
 import AppDialog from '@/components/AppDialog.vue'
 import { confirmAction, notifyError, notifySuccess } from '@/notify'
 import { useAuthStore } from '@/stores/auth'
 import { useSettingsStore } from '@/stores/settings'
 import { useVaultStore } from '@/stores/vault'
 
+const emit = defineEmits<{ changed: [] }>()
+
 /** 弹层开关:v-model 一条口径(与 AppDialog / el-dialog 相同,全应用的弹层都这么开) */
 const visible = defineModel<boolean>({ required: true })
-
-const emit = defineEmits<{ changed: [] }>()
 
 const store = useVaultStore()
 const settings = useSettingsStore()
@@ -32,8 +32,10 @@ const repo = computed(() => settings.settings.tokenSyncRepo.trim())
 
 /** 同步仓库那一行说什么：与其余几条同步同一个判据（没登录就没有同步） */
 const repoHint = computed(() => {
-  if (!auth.status?.account) return '登录账号之后才能同步：凭据来自账号，见设置 → 通用 → 账号。'
-  if (!repo) return '还没填同步仓库地址（设置 → 通用 → 账号 → 同步仓库）。'
+  if (!auth.status?.account)
+    return '登录账号之后才能同步：凭据来自账号，见设置 → 通用 → 账号。'
+  if (!repo.value)
+    return '还没填同步仓库地址（设置 → 通用 → 账号 → 同步仓库）。'
   return repo
 })
 
@@ -41,7 +43,8 @@ async function copyFingerprint(): Promise<void> {
   try {
     await navigator.clipboard.writeText(store.fingerprint)
     notifySuccess('公钥指纹已复制')
-  } catch {
+  }
+  catch {
     notifyError('复制失败，可以手动选中再复制')
   }
 }
@@ -52,13 +55,14 @@ async function copyFingerprint(): Promise<void> {
  */
 async function replaceKey(): Promise<void> {
   const ok = await confirmAction(
-    '全部条目会用新密钥重新加密一遍（不会丢）。但旧密钥从此解不开这个保险库，' +
-      '别的机器要重新导入这份新密钥，否则它们那边只会显示一堆解不开的条目 —— ' +
-      '所以换完请先把密钥导出一次。',
+    '全部条目会用新密钥重新加密一遍（不会丢）。但旧密钥从此解不开这个保险库，'
+    + '别的机器要重新导入这份新密钥，否则它们那边只会显示一堆解不开的条目 —— '
+    + '所以换完请先把密钥导出一次。',
     '换一把新密钥？',
-    { confirmButtonText: '换新密钥', type: 'warning' }
+    { confirmButtonText: '换新密钥', type: 'warning' },
   )
-  if (!ok) return
+  if (!ok)
+    return
 
   await store.createKey(true)
   emit('changed')
@@ -67,12 +71,13 @@ async function replaceKey(): Promise<void> {
 /** 清除本机密钥：本机从此解不开任何东西，但仓库里那份数据不动 */
 async function forgetKey(): Promise<void> {
   const ok = await confirmAction(
-    '本机密钥会被删掉，这台机器从此解不开保险库（仓库里那份数据不动，别的机器也不受影响）。' +
-      '只要手里还有导出过的那份密钥文件，之后还能导入回来。',
+    '本机密钥会被删掉，这台机器从此解不开保险库（仓库里那份数据不动，别的机器也不受影响）。'
+    + '只要手里还有导出过的那份密钥文件，之后还能导入回来。',
     '清除本机密钥？',
-    { confirmButtonText: '清除', type: 'warning' }
+    { confirmButtonText: '清除', type: 'warning' },
   )
-  if (!ok) return
+  if (!ok)
+    return
 
   await store.forgetKey()
   emit('changed')
@@ -133,14 +138,20 @@ function importKey(): void {
           </span>
         </div>
         <div class="keys__value">
-          <el-button size="small" :icon="Download" @click="exportKey">导出</el-button>
-          <el-button size="small" :icon="Upload" @click="importKey">导入</el-button>
+          <el-button size="small" :icon="Download" @click="exportKey">
+            导出
+          </el-button>
+          <el-button size="small" :icon="Upload" @click="importKey">
+            导入
+          </el-button>
         </div>
       </div>
 
       <!-- 两件不可逆的事收在最下面：它们不该跟上面那几颗按钮混在一起 -->
       <div class="keys__danger">
-        <el-button size="small" :loading="store.creating" @click="replaceKey">换一把新密钥</el-button>
+        <el-button size="small" :loading="store.creating" @click="replaceKey">
+          换一把新密钥
+        </el-button>
         <el-button size="small" type="danger" plain :disabled="store.creating" @click="forgetKey">
           <el-icon><Delete /></el-icon>
           清除本机密钥

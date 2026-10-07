@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { noteNameProblem, sanitizeNoteName } from '@workbench/notes'
 /**
  * 导入技能的弹窗：挑一个本机文件夹（通常是从别处 clone 或手工整理好的技能目录），
  * 复制进技能库并提交一次版本。
@@ -7,9 +8,8 @@
  * 那些是别人的仓库状态，不是技能的内容（Rust 侧同样挡一道）。
  */
 import { computed, ref, watch } from 'vue'
-import { noteNameProblem, sanitizeNoteName } from '@workbench/notes'
-import { basenameOf } from '@/format'
 import AppDialog from '@/components/AppDialog.vue'
+import { basenameOf } from '@/format'
 import { useSkillsStore } from '@/stores/skills'
 
 /** 弹层开关:v-model 一条口径(与 AppDialog / el-dialog 相同,全应用的弹层都这么开) */
@@ -25,7 +25,7 @@ const visible = computed({
   get: () => open.value,
   set: (value) => {
     open.value = value
-  }
+  },
 })
 
 watch(open, (value) => {
@@ -37,7 +37,8 @@ watch(open, (value) => {
 
 async function pick(): Promise<void> {
   const picked = await window.workbench.pickDirectory('选择技能文件夹')
-  if (!picked) return
+  if (!picked)
+    return
   sourcePath.value = picked
   if (!id.value.trim()) {
     // 名字默认取目录名：多数时候导入的就是一个已经起好名字的技能目录
@@ -48,11 +49,13 @@ async function pick(): Promise<void> {
 const idProblem = computed(() => noteNameProblem(id.value))
 
 async function submit(): Promise<void> {
-  if (!sourcePath.value || !id.value.trim() || idProblem.value || submitting.value) return
+  if (!sourcePath.value || !id.value.trim() || idProblem.value || submitting.value)
+    return
   submitting.value = true
   const imported = await store.importFrom(sourcePath.value, id.value)
   submitting.value = false
-  if (imported) visible.value = false
+  if (imported)
+    visible.value = false
 }
 </script>
 
@@ -61,7 +64,9 @@ async function submit(): Promise<void> {
     <el-form label-position="top" @submit.prevent>
       <el-form-item label="技能文件夹">
         <div class="pick">
-          <el-button @click="pick">选择文件夹…</el-button>
+          <el-button @click="pick">
+            选择文件夹…
+          </el-button>
           <span v-if="sourcePath" class="pick__path mono" :title="sourcePath">{{ sourcePath }}</span>
           <span v-else class="pick__hint">整棵复制（含子目录），.git 等隐藏目录不带</span>
         </div>
@@ -76,7 +81,9 @@ async function submit(): Promise<void> {
       </el-form-item>
     </el-form>
     <template #footer>
-      <el-button @click="visible = false">取消</el-button>
+      <el-button @click="visible = false">
+        取消
+      </el-button>
       <el-button
         type="primary"
         :loading="submitting"

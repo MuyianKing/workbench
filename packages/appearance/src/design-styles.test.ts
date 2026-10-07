@@ -1,42 +1,8 @@
-import { describe, expect, it } from 'vitest'
+import type { ColorFamily, DesignStyle } from './design-styles'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import {
-  COLOR_FAMILIES,
-  COLOR_GROUPS,
-  categoryCounts,
-  colorFamily,
-  colorGroup,
-  colorLabel,
-  componentGroup,
-  componentLabel,
-  componentSamples,
-  componentStyle,
-  designStyleHaystack,
-  expandTokenRefs,
-  familyCounts,
-  filterDesignStyles,
-  groupComponents,
-  hueOf,
-  inkOn,
-  isColorValue,
-  lineHeightCss,
-  mixHex,
-  numericScale,
-  parseHex,
-  resolveTokenRef,
-  roundedLabel,
-  safeCssValue,
-  sanitizeDesignStyles,
-  sortDesignStyles,
-  spacingLabel,
-  tokenLabel,
-  typeLabel,
-  typographyRef,
-  typographyScale,
-  type ColorFamily,
-  type DesignStyle
-} from './design-styles'
+import { describe, expect, it } from 'vitest'
+import { categoryCounts, COLOR_FAMILIES, COLOR_GROUPS, colorFamily, colorGroup, colorLabel, componentGroup, componentLabel, componentSamples, componentStyle, designStyleHaystack, expandTokenRefs, familyCounts, filterDesignStyles, groupComponents, hueOf, inkOn, isColorValue, lineHeightCss, mixHex, numericScale, parseHex, resolveTokenRef, roundedLabel, safeCssValue, sanitizeDesignStyles, sortDesignStyles, spacingLabel, tokenLabel, typeLabel, typographyRef, typographyScale } from './design-styles'
 
 // ---------------------------------------------------------------- 夹具
 
@@ -51,10 +17,10 @@ function makeStyle(patch: Partial<DesignStyle> = {}): DesignStyle {
     font: 'Demo Sans',
     strip: ['#ff0000', '#00ff00'],
     description: '一套演示用的设计语言。',
-    colors: { primary: '#ff0000', 'on-primary': '#ffffff', 'surface-dark': '#181715' },
+    colors: { 'primary': '#ff0000', 'on-primary': '#ffffff', 'surface-dark': '#181715' },
     typography: {
       'display-lg': { fontFamily: 'Demo Sans', fontSize: '48px', fontWeight: '400' },
-      'body-md': { fontFamily: 'Demo Sans', fontSize: '16px', fontWeight: '400' }
+      'body-md': { fontFamily: 'Demo Sans', fontSize: '16px', fontWeight: '400' },
     },
     rounded: { sm: '6px', pill: '9999px' },
     spacing: { sm: '12px', lg: '24px', section: '96px' },
@@ -63,12 +29,12 @@ function makeStyle(patch: Partial<DesignStyle> = {}): DesignStyle {
         backgroundColor: '{colors.primary}',
         textColor: '{colors.on-primary}',
         rounded: '{rounded.sm}',
-        padding: '12px 20px'
+        padding: '12px 20px',
       },
       'text-input': { backgroundColor: '{colors.canvas}', textColor: '{colors.primary}' },
-      'feature-card': { backgroundColor: '{colors.surface-dark}' }
+      'feature-card': { backgroundColor: '{colors.surface-dark}' },
     },
-    ...patch
+    ...patch,
   }
 }
 
@@ -328,8 +294,8 @@ describe('配色与组件的分组', () => {
       typography: {
         'body-md': { fontSize: '16px' },
         'display-lg': { fontSize: '48px' },
-        weird: {}
-      }
+        'weird': {},
+      },
     })
     expect(typographyScale(style).map(([key]) => key)).toEqual(['display-lg', 'body-md', 'weird'])
   })
@@ -341,8 +307,8 @@ describe('配色与组件的分组', () => {
 
   it('组件样张按组分好并截断，三个上游没给组件的品牌自然回空', () => {
     const samples = componentSamples(makeStyle())
-    expect(samples.map((entry) => entry.group)).toEqual(['按钮', '卡片', '表单'])
-    expect(samples.every((entry) => entry.rest === 0)).toBe(true)
+    expect(samples.map(entry => entry.group)).toEqual(['按钮', '卡片', '表单'])
+    expect(samples.every(entry => entry.rest === 0)).toBe(true)
     expect(componentSamples(makeStyle({ components: {} }))).toEqual([])
   })
 })
@@ -358,16 +324,16 @@ describe('筛选与排序', () => {
       accent: '#0052ff',
       theme: 'dark',
       category: 'AI 与大模型',
-      description: '深色画布与冷蓝主色。'
+      description: '深色画布与冷蓝主色。',
     }),
-    makeStyle({ brand: 'c', title: 'Gamma', accent: '#3ecf8e', theme: 'dark' })
+    makeStyle({ brand: 'c', title: 'Gamma', accent: '#3ecf8e', theme: 'dark' }),
   ]
 
   it('关键词命中品牌名、分类、中文描述与色值', () => {
-    expect(filterDesignStyles(styles, { query: 'beta' }).map((s) => s.brand)).toEqual(['b'])
-    expect(filterDesignStyles(styles, { query: 'AI 与大模型' }).map((s) => s.brand)).toEqual(['b'])
-    expect(filterDesignStyles(styles, { query: '冷蓝' }).map((s) => s.brand)).toEqual(['b'])
-    expect(filterDesignStyles(styles, { query: '#0052ff' }).map((s) => s.brand)).toEqual(['b'])
+    expect(filterDesignStyles(styles, { query: 'beta' }).map(s => s.brand)).toEqual(['b'])
+    expect(filterDesignStyles(styles, { query: 'AI 与大模型' }).map(s => s.brand)).toEqual(['b'])
+    expect(filterDesignStyles(styles, { query: '冷蓝' }).map(s => s.brand)).toEqual(['b'])
+    expect(filterDesignStyles(styles, { query: '#0052ff' }).map(s => s.brand)).toEqual(['b'])
   })
 
   it('关键词也能搜颜色的中文标签', () => {
@@ -376,25 +342,25 @@ describe('筛选与排序', () => {
   })
 
   it('明暗、色系、分类是「与」的关系', () => {
-    expect(filterDesignStyles(styles, { theme: 'dark' }).map((s) => s.brand)).toEqual(['b', 'c'])
-    expect(filterDesignStyles(styles, { family: '蓝' }).map((s) => s.brand)).toEqual(['b'])
+    expect(filterDesignStyles(styles, { theme: 'dark' }).map(s => s.brand)).toEqual(['b', 'c'])
+    expect(filterDesignStyles(styles, { family: '蓝' }).map(s => s.brand)).toEqual(['b'])
     expect(
-      filterDesignStyles(styles, { theme: 'dark', family: '绿' }).map((s) => s.brand)
+      filterDesignStyles(styles, { theme: 'dark', family: '绿' }).map(s => s.brand),
     ).toEqual(['c'])
     expect(filterDesignStyles(styles, { theme: 'dark', category: '开发工具与 IDE' })).toHaveLength(1)
   })
 
   it('三种排序：名称、色相、深色优先', () => {
-    expect(sortDesignStyles(styles, 'az').map((s) => s.title)).toEqual(['Alpha', 'Beta', 'Gamma'])
-    expect(sortDesignStyles(styles, 'dark').map((s) => s.brand)).toEqual(['b', 'c', 'a'])
+    expect(sortDesignStyles(styles, 'az').map(s => s.title)).toEqual(['Alpha', 'Beta', 'Gamma'])
+    expect(sortDesignStyles(styles, 'dark').map(s => s.brand)).toEqual(['b', 'c', 'a'])
     // 红 → 绿 → 蓝 在色系表里的先后是 红、绿、蓝
-    expect(sortDesignStyles(styles, 'hue').map((s) => s.brand)).toEqual(['a', 'c', 'b'])
+    expect(sortDesignStyles(styles, 'hue').map(s => s.brand)).toEqual(['a', 'c', 'b'])
   })
 
   it('排序不改原数组', () => {
-    const before = styles.map((s) => s.brand)
+    const before = styles.map(s => s.brand)
     sortDesignStyles(styles, 'hue')
-    expect(styles.map((s) => s.brand)).toEqual(before)
+    expect(styles.map(s => s.brand)).toEqual(before)
   })
 
   it('索引里带上了颜色键名与色值', () => {
@@ -405,7 +371,7 @@ describe('筛选与排序', () => {
   })
 
   it('筛选项由数据统计出来，不铺空档', () => {
-    expect(familyCounts(styles).map((entry) => entry.family)).toEqual(['红', '绿', '蓝'])
+    expect(familyCounts(styles).map(entry => entry.family)).toEqual(['红', '绿', '蓝'])
     expect(categoryCounts(styles)[0]).toEqual({ category: '开发工具与 IDE', count: 2 })
   })
 })
@@ -421,10 +387,10 @@ describe('外部数据收敛', () => {
         { brand: 'no-title', accent: '#ff0000' },
         { brand: 'bad-color', title: 'Bad', accent: '红色' },
         null,
-        'x'
-      ]
+        'x',
+      ],
     })
-    expect(cleaned.map((s) => s.brand)).toEqual(['ok'])
+    expect(cleaned.map(s => s.brand)).toEqual(['ok'])
     expect(cleaned[0].theme).toBe('light')
     expect(cleaned[0].colors).toEqual({})
   })
@@ -438,8 +404,8 @@ describe('外部数据收敛', () => {
         theme: 'dark',
         strip: ['#fff', 'nope', 42],
         typography: { a: { fontSize: 16, fontWeight: '700' }, b: 'no' },
-        components: { c: { padding: '4px', height: 40 } }
-      }
+        components: { c: { padding: '4px', height: 40 } },
+      },
     ])
     expect(cleaned[0].theme).toBe('dark')
     expect(cleaned[0].strip).toEqual(['#fff'])
@@ -458,19 +424,19 @@ describe('外部数据收敛', () => {
 
 describe('随包的那份数据', () => {
   const raw = JSON.parse(
-    readFileSync(resolve(__dirname, '../../../apps/desktop/src/renderer/public/design-styles.json'), 'utf-8')
+    readFileSync(resolve(__dirname, '../../../apps/desktop/src/renderer/public/design-styles.json'), 'utf-8'),
   )
   const styles = sanitizeDesignStyles(raw)
 
   it('74 套全部收敛下来，没被丢掉任何一套', () => {
     expect(styles).toHaveLength(74)
-    expect(new Set(styles.map((s) => s.brand)).size).toBe(74)
+    expect(new Set(styles.map(s => s.brand)).size).toBe(74)
   })
 
   it('每套都有中文描述、分类、主色与画布色，且描述里不残留英文花括号引用', () => {
     for (const style of styles) {
       expect(style.description.length, style.brand).toBeGreaterThan(30)
-      expect(/[\u4e00-\u9fa5]/.test(style.description), style.brand).toBe(true)
+      expect(/[\u4E00-\u9FA5]/.test(style.description), style.brand).toBe(true)
       expect(style.description.includes('{'), style.brand).toBe(false)
       expect(style.category, style.brand).toBeTruthy()
       expect(parseHex(style.accent), style.brand).not.toBeNull()
@@ -484,7 +450,8 @@ describe('随包的那份数据', () => {
     for (const style of styles) {
       hit.add(colorFamily(style.accent))
       for (const value of Object.values(style.colors)) {
-        if (isColorValue(value)) hit.add(colorFamily(value))
+        if (isColorValue(value))
+          hit.add(colorFamily(value))
       }
     }
     for (const family of COLOR_FAMILIES) expect(hit.has(family), family).toBe(true)
@@ -511,7 +478,7 @@ describe('随包的那份数据', () => {
       ['typography', typeLabel],
       ['components', componentLabel],
       ['rounded', roundedLabel],
-      ['spacing', spacingLabel]
+      ['spacing', spacingLabel],
     ] as const
     let total = 0
     let latin = 0
@@ -519,7 +486,8 @@ describe('随包的那份数据', () => {
       for (const [block, labelOf] of blocks) {
         for (const key of Object.keys(style[block])) {
           total += 1
-          if (/[A-Za-z]/.test(labelOf(style, key))) latin += 1
+          if (/[A-Z]/i.test(labelOf(style, key)))
+            latin += 1
         }
       }
     }
@@ -530,7 +498,7 @@ describe('随包的那份数据', () => {
 
   it('三个上游没给组件的品牌确实拿到空组件，且组件样张不炸', () => {
     for (const brand of ['lamborghini', 'runwayml', 'tesla']) {
-      const style = styles.find((s) => s.brand === brand)
+      const style = styles.find(s => s.brand === brand)
       expect(style, brand).toBeTruthy()
       expect(Object.keys(style!.components), brand).toHaveLength(0)
       expect(componentSamples(style!)).toEqual([])

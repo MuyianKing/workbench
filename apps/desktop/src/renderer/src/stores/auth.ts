@@ -1,3 +1,6 @@
+import type { AuthProvider, AuthStatus } from '@/types'
+import { accountLabel } from '@workbench/auth'
+import { defineStore } from 'pinia'
 /**
  * 账号：登录状态、授权中的过程态，以及退出登录。
  *
@@ -5,9 +8,6 @@
  * 显示资料（昵称 / 头像 / 登录名）与「哪几家已登录」的判定结果，见 workbench/auth.ts。
  */
 import { ref } from 'vue'
-import { defineStore } from 'pinia'
-import { accountLabel } from '@workbench/auth'
-import type { AuthProvider, AuthStatus } from '@/types'
 import { notifyError, notifySuccess } from '@/notify'
 
 export const useAuthStore = defineStore('auth', () => {
@@ -32,7 +32,8 @@ export const useAuthStore = defineStore('auth', () => {
   async function refreshAuth(): Promise<void> {
     try {
       status.value = await window.workbench.authStatus()
-    } catch {
+    }
+    catch {
       // 拿不到就当没登录：账号是可选功能，不该把首屏拖下水
       status.value = null
     }
@@ -41,7 +42,8 @@ export const useAuthStore = defineStore('auth', () => {
   /** 走一次登录。成功后账号资料由适配层落盘，这里只负责界面状态与提示 */
   async function login(provider: AuthProvider): Promise<void> {
     // 一次只允许一个登录流程：重复点击会让两个轮询循环对着同一个回环监听说话
-    if (pending.value) return
+    if (pending.value)
+      return
 
     pending.value = provider
     url.value = ''
@@ -56,11 +58,13 @@ export const useAuthStore = defineStore('auth', () => {
 
       if (outcome.status === 'ok') {
         notifySuccess(`已登录 ${accountLabel(outcome.account)}`)
-      } else if (outcome.status === 'failed') {
+      }
+      else if (outcome.status === 'failed') {
         // 只剩「失败」要报：cancelled 是用户自己关掉或点了取消，弹红字只会惹人烦
         notifyError(outcome.error)
       }
-    } finally {
+    }
+    finally {
       pending.value = null
       url.value = ''
       await refreshAuth()
@@ -74,7 +78,8 @@ export const useAuthStore = defineStore('auth', () => {
    */
   async function submitLoginCallback(url: string): Promise<boolean> {
     const result = await window.workbench.authLoginSubmit(url)
-    if (!result.ok) return false
+    if (!result.ok)
+      return false
 
     await refreshAuth()
     return true
@@ -82,14 +87,16 @@ export const useAuthStore = defineStore('auth', () => {
 
   /** 放弃进行中的登录（点取消、关弹窗） */
   async function cancelLogin(): Promise<void> {
-    if (!pending.value) return
+    if (!pending.value)
+      return
     await window.workbench.authLoginCancel()
   }
 
   /** 退出登录；是否先确认由调用方决定 */
   async function logout(): Promise<boolean> {
     const provider = status.value?.account?.provider
-    if (!provider) return false
+    if (!provider)
+      return false
 
     const result = await window.workbench.authLogout(provider)
     if (!result.ok) {
@@ -104,11 +111,13 @@ export const useAuthStore = defineStore('auth', () => {
   /** 重新拉一次账号资料（联网）：头像在平台上换过之后，打开账号弹窗就能看到 */
   async function refreshAccount(): Promise<void> {
     const provider = status.value?.account?.provider
-    if (!provider) return
+    if (!provider)
+      return
 
     // 刷新失败就保留旧资料：头像没了比头像旧了更让人困惑
     const result = await window.workbench.authRefreshAccount(provider)
-    if (!result.ok) return
+    if (!result.ok)
+      return
     await refreshAuth()
   }
 
@@ -122,6 +131,6 @@ export const useAuthStore = defineStore('auth', () => {
     submitLoginCallback,
     cancelLogin,
     logout,
-    refreshAccount
+    refreshAccount,
   }
 })

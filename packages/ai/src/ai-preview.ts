@@ -22,9 +22,9 @@ export interface AiPreviewTarget {
   kind: AiPreviewKind
 }
 
-export type AiPreviewResolution =
-  | ({ ok: true } & AiPreviewTarget)
-  | { ok: false; reason: string }
+export type AiPreviewResolution
+  = | ({ ok: true } & AiPreviewTarget)
+    | { ok: false, reason: string }
 
 /** 预览栏的一屏状态（AiView 编排取数，AiPreviewPane 只管画；多份并存 = 多个 Tab） */
 export interface AiPreviewState {
@@ -78,11 +78,16 @@ function extOf(path: string): string {
 
 function kindOf(path: string): AiPreviewKind {
   const ext = extOf(path)
-  if (MARKDOWN_EXT.has(ext)) return 'markdown'
-  if (IMAGE_EXT.has(ext)) return 'image'
-  if (HTML_EXT.has(ext)) return 'html'
-  if (DOCX_EXT.has(ext)) return 'docx'
-  if (PPTX_EXT.has(ext)) return 'pptx'
+  if (MARKDOWN_EXT.has(ext))
+    return 'markdown'
+  if (IMAGE_EXT.has(ext))
+    return 'image'
+  if (HTML_EXT.has(ext))
+    return 'html'
+  if (DOCX_EXT.has(ext))
+    return 'docx'
+  if (PPTX_EXT.has(ext))
+    return 'pptx'
   return 'text'
 }
 
@@ -104,10 +109,13 @@ function joinPath(dir: string, href: string): string {
 
   const out: string[] = []
   for (const part of parts) {
-    if (!part || part === '.') continue
+    if (!part || part === '.')
+      continue
     if (part === '..') {
-      if (out.length) out.pop()
-      else if (!head) out.push('..')
+      if (out.length)
+        out.pop()
+      else if (!head)
+        out.push('..')
       continue
     }
     out.push(part)
@@ -121,18 +129,22 @@ function joinPath(dir: string, href: string): string {
  */
 export function resolveAiPreview(href: string, dir: string): AiPreviewResolution {
   let decoded = href.trim()
-  if (!decoded) return { ok: false, reason: '链接是空的' }
+  if (!decoded)
+    return { ok: false, reason: '链接是空的' }
   try {
     decoded = decodeURIComponent(decoded)
-  } catch {
+  }
+  catch {
     // 百分号不是转义（原文写了「50%风险.md」）：按原文处理
   }
-  if (decoded.startsWith('#')) return { ok: false, reason: '页内锚点不是文件' }
+  if (decoded.startsWith('#'))
+    return { ok: false, reason: '页内锚点不是文件' }
   if (WIN_DRIVE.test(decoded) || WIN_UNC.test(decoded)) {
     const path = decoded.replace(/\//g, '\\')
     return settle(path)
   }
-  if (SCHEME.test(decoded)) return { ok: false, reason: '外部链接不在这里打开' }
+  if (SCHEME.test(decoded))
+    return { ok: false, reason: '外部链接不在这里打开' }
   if (!WIN_DRIVE.test(dir) && !WIN_UNC.test(dir)) {
     return { ok: false, reason: '这段对话还没有工作目录' }
   }
@@ -142,9 +154,12 @@ export function resolveAiPreview(href: string, dir: string): AiPreviewResolution
 /** 路径到手后的最后一道：老格式与 Excel 明确说「不支持」，别让它们掉进文本通道读出乱码 */
 function settle(path: string): AiPreviewResolution {
   const ext = extOf(path)
-  if (SHEET_EXT.has(ext)) return { ok: false, reason: 'Excel 文件暂不支持预览' }
-  if (LEGACY_WORD_EXT.has(ext)) return { ok: false, reason: '旧版 .doc 暂不支持预览，另存为 .docx 再看' }
-  if (LEGACY_SLIDES_EXT.has(ext)) return { ok: false, reason: '旧版 .ppt 暂不支持预览，另存为 .pptx 再看' }
+  if (SHEET_EXT.has(ext))
+    return { ok: false, reason: 'Excel 文件暂不支持预览' }
+  if (LEGACY_WORD_EXT.has(ext))
+    return { ok: false, reason: '旧版 .doc 暂不支持预览，另存为 .docx 再看' }
+  if (LEGACY_SLIDES_EXT.has(ext))
+    return { ok: false, reason: '旧版 .ppt 暂不支持预览，另存为 .pptx 再看' }
   return { ok: true, path, kind: kindOf(path) }
 }
 
@@ -158,7 +173,8 @@ export function decodeBase64ToBuffer(encoded: string): ArrayBuffer | null {
     const bytes = new Uint8Array(raw.length)
     for (let index = 0; index < raw.length; index += 1) bytes[index] = raw.charCodeAt(index)
     return bytes.buffer
-  } catch {
+  }
+  catch {
     return null
   }
 }
@@ -171,7 +187,8 @@ const IMG_SRC_RE = /<img\b[^>]*?\ssrc=(["'])([^"']+)\1/gi
  * 挨个授权 —— 外链、data URL 不是这里的活，调用方解析时自然筛掉。
  */
 export function htmlImageSrcs(html: string): string[] {
-  if (typeof html !== 'string' || !html) return []
+  if (typeof html !== 'string' || !html)
+    return []
   const srcs: string[] = []
   for (const match of html.matchAll(IMG_SRC_RE)) srcs.push(match[2])
   return srcs
@@ -182,7 +199,8 @@ export function htmlImageSrcs(html: string): string[] {
  * 表里没有的地址原样保留 —— 外链图片照旧由 webview 自己取。
  */
 export function rewriteHtmlImages(html: string, replacements: Record<string, string>): string {
-  if (typeof html !== 'string' || !html) return html
+  if (typeof html !== 'string' || !html)
+    return html
   return html.replace(IMG_SRC_RE, (whole, quote: string, src: string) => {
     const replacement = replacements[src]
     return replacement ? `<img src=${quote}${replacement}${quote}` : whole

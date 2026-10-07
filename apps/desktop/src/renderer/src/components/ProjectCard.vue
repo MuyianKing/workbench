@@ -1,22 +1,14 @@
 <script setup lang="ts">
+import type { Project, ProjectStatus } from '@/types'
+import { Box, Download, MoreFilled, Refresh, Search, VideoPause, VideoPlay } from '@element-plus/icons-vue'
+import { projectColorVar, sanitizeProjectColor } from '@workbench/core'
 import { computed, ref } from 'vue'
-import {
-  Box,
-  Download,
-  MoreFilled,
-  Refresh,
-  Search,
-  VideoPause,
-  VideoPlay
-} from '@element-plus/icons-vue'
+import { useWallClock } from '@/composables/use-wall-clock'
 import { DRAG_MIME } from '@/drag-mime'
 import { formatClock, formatDurationMs } from '@/format'
-import { sanitizeProjectColor, projectColorVar } from '@workbench/core'
-import { statusMeta, isBusyStatus } from '@/status'
+import { isBusyStatus, statusMeta } from '@/status'
 import { useProjectsStore } from '@/stores/projects'
 import { useTerminalStore } from '@/stores/terminal'
-import { useWallClock } from '@/composables/use-wall-clock'
-import type { Project, ProjectStatus } from '@/types'
 
 const props = defineProps<{
   project: Project
@@ -32,7 +24,7 @@ const pathValid = computed(() => store.isPathValid(props.project.id))
 const meta = computed(() =>
   pathValid.value
     ? statusMeta(status.value, runtime.value?.kind)
-    : { label: '路径无效', tone: 'fail' }
+    : { label: '路径无效', tone: 'fail' },
 )
 const pm = computed(() => store.resolvedPm(props.project))
 const isBusy = computed(() => isBusyStatus(status.value))
@@ -50,7 +42,8 @@ const colorVar = computed(() => {
 /** 运行 / 打包中显示已运行时长，命令结束后显示本次耗时 */
 const elapsed = computed(() => {
   const rt = runtime.value
-  if (!rt) return ''
+  if (!rt)
+    return ''
   if (status.value === 'running' && rt.startedAt) {
     return formatClock(clock.value - rt.startedAt)
   }
@@ -86,14 +79,16 @@ async function detect(): Promise<void> {
   detecting.value = true
   try {
     await store.detect(props.project.id)
-  } finally {
+  }
+  finally {
     detecting.value = false
   }
 }
 
 /** 拖到筛选栏的分组标签上即可完成归类（场景 S7） */
 function onDragStart(event: DragEvent): void {
-  if (!event.dataTransfer) return
+  if (!event.dataTransfer)
+    return
   event.dataTransfer.setData(DRAG_MIME.project, props.project.id)
   event.dataTransfer.setData('text/plain', props.project.id)
   event.dataTransfer.effectAllowed = 'move'
@@ -107,14 +102,20 @@ function onMore(command: string): void {
     return
   }
 
-  if (command === 'reveal') void store.reveal(props.project.path)
-  else if (command === 'vscode') void store.openInVSCode(props.project.path)
-  else if (command === 'relocate') void store.relocate(id)
-  else if (command === 'drawer') store.openDrawer(id)
+  if (command === 'reveal')
+    void store.reveal(props.project.path)
+  else if (command === 'vscode')
+    void store.openInVSCode(props.project.path)
+  else if (command === 'relocate')
+    void store.relocate(id)
+  else if (command === 'drawer')
+    store.openDrawer(id)
   // 首页展示开关：在首页那张卡上关掉它，这张卡会立刻消失（store 里给了说明的那句提示）
-  else if (command === 'home') store.setHome(id, !props.project.home)
+  else if (command === 'home')
+    store.setHome(id, !props.project.home)
   // 确认框在 store 里（项目卡与详情抽屉共用同一句）
-  else if (command === 'remove') void store.removeProject(id)
+  else if (command === 'remove')
+    void store.removeProject(id)
 }
 </script>
 
@@ -135,7 +136,9 @@ function onMore(command: string): void {
     <div class="card__head">
       <!-- 标识色：项目之间一眼分得出来（左侧那条灯带留给运行状态，两者不能混） -->
       <i class="card__color" :style="{ background: colorVar }" aria-hidden="true" />
-      <h3 class="card__name truncate" :title="project.name">{{ project.name }}</h3>
+      <h3 class="card__name truncate" :title="project.name">
+        {{ project.name }}
+      </h3>
       <span
         class="state"
         :title="runtime?.external ? '由 Workbench 之外启动的服务' : undefined"
@@ -154,14 +157,22 @@ function onMore(command: string): void {
 
     <ul class="card__meta mono">
       <li>{{ pm }}</li>
-      <li v-if="project.nodeVersion" class="card__node">node {{ project.nodeVersion }}</li>
-      <li v-if="runtime?.port">:{{ runtime.port }}</li>
-      <li v-if="project.manageOnly" class="card__flag">仅管理目录</li>
+      <li v-if="project.nodeVersion" class="card__node">
+        node {{ project.nodeVersion }}
+      </li>
+      <li v-if="runtime?.port">
+        :{{ runtime.port }}
+      </li>
+      <li v-if="project.manageOnly" class="card__flag">
+        仅管理目录
+      </li>
     </ul>
 
     <footer class="card__actions" @click.stop>
       <template v-if="isRunning">
-        <el-button size="small" :icon="VideoPause" @click="store.stop(project.id)">停止</el-button>
+        <el-button size="small" :icon="VideoPause" @click="store.stop(project.id)">
+          停止
+        </el-button>
         <el-tooltip content="重启" placement="top" :show-after="400">
           <el-button
             class="icon-btn"
@@ -276,14 +287,22 @@ function onMore(command: string): void {
         />
         <template #dropdown>
           <el-dropdown-menu>
-            <el-dropdown-item command="drawer">查看详情</el-dropdown-item>
+            <el-dropdown-item command="drawer">
+              查看详情
+            </el-dropdown-item>
             <!-- 一行菜单项，标签跟着当前状态翻：在首页那张卡上点它就是把自己撤下来 -->
             <el-dropdown-item command="home">
               {{ project.home ? '从首页移除' : '在首页展示' }}
             </el-dropdown-item>
-            <el-dropdown-item v-if="pathValid" command="vscode">在 VS Code 中打开</el-dropdown-item>
-            <el-dropdown-item v-if="pathValid" command="reveal">打开项目目录</el-dropdown-item>
-            <el-dropdown-item v-else command="relocate">重新定位…</el-dropdown-item>
+            <el-dropdown-item v-if="pathValid" command="vscode">
+              在 VS Code 中打开
+            </el-dropdown-item>
+            <el-dropdown-item v-if="pathValid" command="reveal">
+              打开项目目录
+            </el-dropdown-item>
+            <el-dropdown-item v-else command="relocate">
+              重新定位…
+            </el-dropdown-item>
             <template v-if="project.scripts.custom?.length">
               <el-dropdown-item
                 v-for="(item, index) in project.scripts.custom"
@@ -295,7 +314,9 @@ function onMore(command: string): void {
                 运行 {{ item.name }}
               </el-dropdown-item>
             </template>
-            <el-dropdown-item command="remove" divided>从列表中移除</el-dropdown-item>
+            <el-dropdown-item command="remove" divided>
+              从列表中移除
+            </el-dropdown-item>
           </el-dropdown-menu>
         </template>
       </el-dropdown>

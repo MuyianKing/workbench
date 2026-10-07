@@ -18,7 +18,7 @@ export interface PackageManagerEntry {
 export const PACKAGE_MANAGERS: readonly PackageManagerEntry[] = [
   { key: 'npm', label: 'npm', installable: false },
   { key: 'pnpm', label: 'pnpm', installable: true },
-  { key: 'yarn', label: 'yarn', installable: true }
+  { key: 'yarn', label: 'yarn', installable: true },
 ]
 
 /** 拿不到版本信息时的占位，避免界面上出现 undefined */

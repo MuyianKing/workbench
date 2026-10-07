@@ -1,12 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  aiSkillRows,
-  enabledAiSkills,
-  projectSkillsRoot,
-  sanitizeAiSkillsOff,
-  skillKey,
-  skillPathOf
-} from './pi-skills'
+import { aiSkillRows, enabledAiSkills, projectSkillsRoot, sanitizeAiSkillsOff, skillKey, skillPathOf } from './pi-skills'
 
 const SKILL_MD = [
   '---',
@@ -16,12 +9,12 @@ const SKILL_MD = [
   'version: 1.0.1',
   '---',
   '',
-  '正文'
+  '正文',
 ].join('\n')
 
 const RAW = [
   { id: 'universal--charts', fileCount: 9, skillMd: SKILL_MD },
-  { id: '另一个技能', fileCount: 1, skillMd: '---\nname: 另一个\ndescription: x\n---\n' }
+  { id: '另一个技能', fileCount: 1, skillMd: '---\nname: 另一个\ndescription: x\n---\n' },
 ]
 
 describe('projectSkillsRoot', () => {
@@ -41,7 +34,7 @@ describe('skillKey', () => {
   it('大小写与分隔符都不影响同一个技能的身份', () => {
     expect(skillKey('E:\\Work', 'tauri')).toBe(skillKey('E:/work/', 'tauri'))
     expect(skillKey('C:\\Users\\Admin\\.agents\\skills', 'Tauri')).toBe(
-      'c:\\users\\admin\\.agents\\skills\\tauri'
+      'c:\\users\\admin\\.agents\\skills\\tauri',
     )
   })
 })
@@ -49,7 +42,7 @@ describe('skillKey', () => {
 describe('skillPathOf', () => {
   it('给界面用的路径：分隔符跟着根走，尾部分隔符不留', () => {
     expect(skillPathOf('C:\\Users\\Admin\\.agents\\skills', 'find-skills')).toBe(
-      'C:\\Users\\Admin\\.agents\\skills\\find-skills'
+      'C:\\Users\\Admin\\.agents\\skills\\find-skills',
     )
     expect(skillPathOf('C:/g/', 'a')).toBe('C:/g/a')
     expect(skillPathOf('', 'a')).toBe('a')
@@ -77,7 +70,7 @@ describe('aiSkillRows', () => {
       version: '1.0.1',
       fileCount: 9,
       level: 'global',
-      enabled: false
+      enabled: false,
     })
     // 原文跟着行一起带着（详情那一栏直接画它，不再跑一趟通道）
     expect(rows[0].md).toContain('正文')
@@ -96,12 +89,12 @@ describe('enabledAiSkills', () => {
   it('交给 Pi 的只有开着的那几条，两个根各按各的来', () => {
     const rows = aiSkillRows('global', 'C:\\g', RAW, [])
     const project = aiSkillRows('project', 'E:\\work\\.agents\\skills', RAW, [
-      skillKey('E:\\work\\.agents\\skills', 'universal--charts')
+      skillKey('E:\\work\\.agents\\skills', 'universal--charts'),
     ])
     expect(enabledAiSkills([...rows, ...project])).toEqual([
       { root: 'C:\\g', id: 'universal--charts' },
       { root: 'C:\\g', id: '另一个技能' },
-      { root: 'E:\\work\\.agents\\skills', id: '另一个技能' }
+      { root: 'E:\\work\\.agents\\skills', id: '另一个技能' },
     ])
   })
 })

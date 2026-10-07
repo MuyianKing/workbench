@@ -17,8 +17,9 @@
  * 所以适配层可以**按文件**缓存解析结果，只重解变化的那些（见 workbench/token.ts）。
  */
 
+import type { TokenCounters, TokenDays } from './token-usage'
 import { dayKey } from '@workbench/core'
-import { addCounters, emptyCounters, isDateKey, type TokenCounters, type TokenDays } from './token-usage'
+import { addCounters, emptyCounters, isDateKey } from './token-usage'
 
 /** 事件里没带模型名时的兜底名（正常每条用量都自带模型，只防残缺事件） */
 export const WORKBUDDY_DEFAULT_MODEL = 'workbuddy'
@@ -51,10 +52,12 @@ function finite(value: unknown): number {
  * 项不是对象、字段不是数字的按 0 计，坏数据不把整行带崩。
  */
 function sumDetail(details: unknown, field: string): number {
-  if (!Array.isArray(details)) return 0
+  if (!Array.isArray(details))
+    return 0
   let total = 0
   for (const item of details) {
-    if (!item || typeof item !== 'object') continue
+    if (!item || typeof item !== 'object')
+      continue
     total += finite((item as Record<string, unknown>)[field])
   }
   return total
@@ -68,27 +71,33 @@ export function collectWorkBuddySessionText(text: string, days: TokenDays): void
   let model = WORKBUDDY_DEFAULT_MODEL
 
   for (const line of text.split('\n')) {
-    if (!line) continue
+    if (!line)
+      continue
 
     let event: WorkBuddyEvent
     try {
       event = JSON.parse(line) as WorkBuddyEvent
-    } catch {
+    }
+    catch {
       // 会话正文是追加写的：最后一行可能只写了一半，下次刷新就会带上完整的那条
       continue
     }
 
     const providerData = event.providerData
-    if (!providerData || typeof providerData !== 'object') continue
+    if (!providerData || typeof providerData !== 'object')
+      continue
 
     const declared = providerData.model
-    if (typeof declared === 'string' && declared.trim()) model = declared.trim()
+    if (typeof declared === 'string' && declared.trim())
+      model = declared.trim()
 
     const usage = providerData.usage
-    if (!usage || typeof usage !== 'object') continue
+    if (!usage || typeof usage !== 'object')
+      continue
 
     const date = dayKey(Number(event.timestamp))
-    if (!isDateKey(date)) continue
+    if (!isDateKey(date))
+      continue
 
     const cacheRead = sumDetail(usage.inputTokensDetails, 'cached_tokens')
     const requests = finite(usage.requests)
@@ -102,7 +111,7 @@ export function collectWorkBuddySessionText(text: string, days: TokenDays): void
       // 也没有额度这一项
       credits: 0,
       // 一条 usage 记的就是一次请求；字段缺失或非法时也按一次算
-      requests: requests > 0 ? requests : 1
+      requests: requests > 0 ? requests : 1,
     }
 
     const modelDays = (days[date] ??= {})

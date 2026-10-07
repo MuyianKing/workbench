@@ -1,3 +1,10 @@
+import type { AccentInkMode, CardPlacement, ColumnId, HomeCardId, RowId, RowTarget, ThemeConfig, ViewId } from '@workbench/appearance'
+import type { ThemeOrigin } from '@/theme-transition'
+import type { AppSettings, BuiltinWallpaper, EffectiveTheme, Result, SyncDeviceInfo, ThemeSource, TokenUsageResult, TopBarStyle } from '@/types'
+import { addColumn as addColumnTo, clampAiTreeWidth, clampBackgroundOpacity, clampCardGap, clampCardOpacity, clampColumnWidth, clampKbTreeWidth, clampMailListWidth, clampNoteTreeWidth, clampRowHeight, clampVideoTreeWidth, COLUMN_WIDTH_DEFAULT, DEFAULT_THEME, moveCard as placeCard, setColumnWidths as placeColumnWidths, removeColumn as removeColumnFrom, rowHeightMin, rowOf, sanitizeAccentColor, sanitizeAccentInkMode, sanitizeTheme, sanitizeVeilColor, VIEW_LABELS } from '@workbench/appearance'
+
+import { clampVideoFloatHeight, clampVideoFloatPercent, clampVideoFloatWidth } from '@workbench/video'
+import { defineStore } from 'pinia'
 /**
  * 设置与外观：明暗、主题色、工作区背景、卡片浓度，以及首页的分栏布局。
  *
@@ -9,52 +16,10 @@
  * 只需 `useSettingsStore()`，不必把项目数据一起拖进来。
  */
 import { computed, ref, watch } from 'vue'
-import { defineStore } from 'pinia'
-import {
-  COLUMN_WIDTH_DEFAULT,
-  DEFAULT_THEME,
-  addColumn as addColumnTo,
-  clampAiTreeWidth,
-  clampCardGap,
-  clampColumnWidth,
-  clampKbTreeWidth,
-  clampMailListWidth,
-  clampNoteTreeWidth,
-  clampRowHeight,
-  clampVideoTreeWidth,
-  moveCard as placeCard,
-  removeColumn as removeColumnFrom,
-  rowHeightMin,
-  rowOf,
-  sanitizeTheme,
-  setColumnWidths as placeColumnWidths,
-  type CardPlacement,
-  type ColumnId,
-  type HomeCardId,
-  type RowId,
-  type RowTarget,
-  type ThemeConfig
-} from '@workbench/appearance'
-import { clampBackgroundOpacity, sanitizeVeilColor } from '@workbench/appearance'
-import { clampCardOpacity } from '@workbench/appearance'
-import { sanitizeAccentColor, sanitizeAccentInkMode, type AccentInkMode } from '@workbench/appearance'
-import type { ViewId } from '@workbench/appearance'
-import { VIEW_LABELS } from '@workbench/appearance'
-import { clampVideoFloatHeight, clampVideoFloatPercent, clampVideoFloatWidth } from '@workbench/video'
-import {
-  DEFAULT_SETTINGS,
-  TOP_BAR_STYLES,
-  type AppSettings,
-  type BuiltinWallpaper,
-  type EffectiveTheme,
-  type SyncDeviceInfo,
-  type ThemeSource,
-  type TopBarStyle
-} from '@/types'
 import { bootstrapSnapshot, writeAccentColor, writeTheme } from '@/bootstrap'
-import { applyThemeWithTransition, type ThemeOrigin } from '@/theme-transition'
-import type { Result, TokenUsageResult } from '@/types'
 import { notifyError, notifySuccess, notifyWarning } from '@/notify'
+import { applyThemeWithTransition } from '@/theme-transition'
+import { DEFAULT_SETTINGS, TOP_BAR_STYLES } from '@/types'
 
 function prefersDark(): boolean {
   return window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false
@@ -62,7 +27,8 @@ function prefersDark(): boolean {
 
 /** 主进程推主题之前，先按设置自算一次，避免首帧闪一下白底 */
 function resolveTheme(value: AppSettings): EffectiveTheme {
-  if (value.theme === 'system') return prefersDark() ? 'dark' : 'light'
+  if (value.theme === 'system')
+    return prefersDark() ? 'dark' : 'light'
   return value.theme
 }
 
@@ -111,10 +77,11 @@ export const useSettingsStore = defineStore('settings', () => {
    */
   function applyTheme(
     theme: EffectiveTheme,
-    options: { origin?: ThemeOrigin | null; animate?: boolean } = {}
+    options: { origin?: ThemeOrigin | null, animate?: boolean } = {},
   ): void {
     // 同一轮切换里的其余推送到这里直接返回，保证一次切换只开一个转场
-    if (appliedTheme === theme) return
+    if (appliedTheme === theme)
+      return
 
     appliedTheme = theme
     effectiveTheme.value = theme
@@ -148,7 +115,7 @@ export const useSettingsStore = defineStore('settings', () => {
    * 首次加载、别的窗口改设置推回来的整份设置也都经它。
    */
   watch([() => settings.value.accentColor, () => settings.value.accentInk], applyAccentColor, {
-    immediate: true
+    immediate: true,
   })
 
   /**
@@ -161,21 +128,22 @@ export const useSettingsStore = defineStore('settings', () => {
    */
   watch(
     () => settings.value.appName,
-    (name) => window.workbench?.setAppName(name),
-    { immediate: true }
+    name => window.workbench?.setAppName(name),
+    { immediate: true },
   )
 
   // ---------- 设置本体 ----------
 
   async function updateSettings(
     patch: Partial<AppSettings>,
-    origin?: ThemeOrigin | null
+    origin?: ThemeOrigin | null,
   ): Promise<boolean> {
     const wantedHotkey = patch.hotkeyEnabled === true
 
     // 主题的起点先挂上：主进程既会回包又会广播，哪条路先触发应用都要用同一个起点。
     // 传了主题却没传起点（键盘切换）就是 null，从中心扩散。
-    if (patch.theme !== undefined) pendingThemeOrigin = origin ?? null
+    if (patch.theme !== undefined)
+      pendingThemeOrigin = origin ?? null
 
     const result = await window.workbench.updateSettings(patch)
     if (!result.ok || !result.data) {
@@ -208,8 +176,10 @@ export const useSettingsStore = defineStore('settings', () => {
 
   /** 顶部三条栏的样式（标题栏 / 欢迎语 / 筛选栏怎么跟壁纸叠） */
   async function setTopBarStyle(style: TopBarStyle): Promise<boolean> {
-    if (!TOP_BAR_STYLES.includes(style)) return false
-    if (style === settings.value.topBarStyle) return true
+    if (!TOP_BAR_STYLES.includes(style))
+      return false
+    if (style === settings.value.topBarStyle)
+      return true
 
     return updateSettings({ topBarStyle: style })
   }
@@ -223,7 +193,7 @@ export const useSettingsStore = defineStore('settings', () => {
    */
   async function setViewVisible(id: ViewId, visible: boolean): Promise<boolean> {
     const hidden = visible
-      ? settings.value.hiddenViews.filter((item) => item !== id)
+      ? settings.value.hiddenViews.filter(item => item !== id)
       : [...settings.value.hiddenViews, id]
 
     return updateSettings({ hiddenViews: hidden })
@@ -247,7 +217,8 @@ export const useSettingsStore = defineStore('settings', () => {
    * 收起只是不画那一列（App.vue 按 navHidden 决定渲染），换页入口仍在顶栏按钮上。
    */
   async function setNavVisible(visible: boolean): Promise<boolean> {
-    if (settings.value.navHidden === !visible) return true
+    if (settings.value.navHidden === !visible)
+      return true
     return updateSettings({ navHidden: !visible })
   }
 
@@ -257,7 +228,8 @@ export const useSettingsStore = defineStore('settings', () => {
    */
   async function setAccentColor(color: string): Promise<boolean> {
     const next = sanitizeAccentColor(color)
-    if (next === settings.value.accentColor) return true
+    if (next === settings.value.accentColor)
+      return true
 
     return updateSettings({ accentColor: next })
   }
@@ -265,7 +237,8 @@ export const useSettingsStore = defineStore('settings', () => {
   /** 铺在主题色上的文字色：自动 / 白字 / 黑字 */
   async function setAccentInk(mode: AccentInkMode): Promise<boolean> {
     const next = sanitizeAccentInkMode(mode)
-    if (next === settings.value.accentInk) return true
+    if (next === settings.value.accentInk)
+      return true
 
     return updateSettings({ accentInk: next })
   }
@@ -292,13 +265,14 @@ export const useSettingsStore = defineStore('settings', () => {
     (value) => {
       backgroundOpacity.value = clampBackgroundOpacity(value)
     },
-    { immediate: true }
+    { immediate: true },
   )
 
   async function setBackgroundOpacity(percent: number): Promise<void> {
     const next = clampBackgroundOpacity(percent)
     backgroundOpacity.value = next
-    if (next === settings.value.workspaceBackgroundOpacity) return
+    if (next === settings.value.workspaceBackgroundOpacity)
+      return
 
     await updateSettings({ workspaceBackgroundOpacity: next })
   }
@@ -309,7 +283,8 @@ export const useSettingsStore = defineStore('settings', () => {
    */
   async function setBackgroundVeil(color: string): Promise<boolean> {
     const next = sanitizeVeilColor(color)
-    if (next === settings.value.workspaceBackgroundVeil) return true
+    if (next === settings.value.workspaceBackgroundVeil)
+      return true
 
     return updateSettings({ workspaceBackgroundVeil: next })
   }
@@ -325,7 +300,8 @@ export const useSettingsStore = defineStore('settings', () => {
     }
 
     // 同一张图已经在手上：选完图落盘会再触发一次，没必要把同一个 asset URL 再解析一遍
-    if (path === backgroundPath.value && backgroundImage.value) return true
+    if (path === backgroundPath.value && backgroundImage.value)
+      return true
 
     const result = await window.workbench.loadBackground(path)
     if (!result.ok || !result.data) {
@@ -344,8 +320,8 @@ export const useSettingsStore = defineStore('settings', () => {
   }
 
   // 设置是异步载入的，也可能被设置窗口改写，跟着它同步
-  watch(() => settings.value.workspaceBackground, (value) => void applyBackground(value), {
-    immediate: true
+  watch(() => settings.value.workspaceBackground, value => void applyBackground(value), {
+    immediate: true,
   })
 
   /**
@@ -360,11 +336,13 @@ export const useSettingsStore = defineStore('settings', () => {
 
   /** 打开设置面板时调一次；取不到就下次再试，不因为一组缩略图让面板打不开 */
   async function ensureWallpapers(): Promise<void> {
-    if (wallpapersLoaded) return
+    if (wallpapersLoaded)
+      return
     try {
       wallpapers.value = await window.workbench.listWallpapers()
       wallpapersLoaded = true
-    } catch (error) {
+    }
+    catch (error) {
       console.warn('[workbench] 读取内置壁纸失败', error)
     }
   }
@@ -380,7 +358,8 @@ export const useSettingsStore = defineStore('settings', () => {
       notifyError(backgroundError.value || '这张图片读不出来，请换一张')
       return false
     }
-    if (target === settings.value.workspaceBackground) return true
+    if (target === settings.value.workspaceBackground)
+      return true
 
     return updateSettings({ workspaceBackground: target })
   }
@@ -388,7 +367,8 @@ export const useSettingsStore = defineStore('settings', () => {
   /** 从磁盘上挑一张图当背景 */
   async function pickBackground(): Promise<boolean> {
     const picked = await window.workbench.pickBackground()
-    if (!picked) return false
+    if (!picked)
+      return false
 
     return chooseBackground(picked)
   }
@@ -414,13 +394,14 @@ export const useSettingsStore = defineStore('settings', () => {
     (value) => {
       cardOpacity.value = clampCardOpacity(value)
     },
-    { immediate: true }
+    { immediate: true },
   )
 
   async function setCardOpacity(percent: number): Promise<void> {
     const next = clampCardOpacity(percent)
     cardOpacity.value = next
-    if (next === settings.value.cardOpacity) return
+    if (next === settings.value.cardOpacity)
+      return
 
     await updateSettings({ cardOpacity: next })
   }
@@ -471,14 +452,16 @@ export const useSettingsStore = defineStore('settings', () => {
   /** 拖动行下边缘改高度：过程中只改本地，松手时由 commitColumns 落盘 */
   function setRowHeight(id: RowId, height: number): void {
     const row = rowOf(themeConfig.value.columns, id)
-    if (!row) return
+    if (!row)
+      return
     row.height = clampRowHeight(height, rowHeightMin(themeConfig.value.cards, id))
   }
 
   /** 切换一行的高度模式（固定 / 自适应）；一次性动作，切完直接落盘 */
   async function toggleRowMode(id: RowId): Promise<void> {
     const row = rowOf(themeConfig.value.columns, id)
-    if (!row) return
+    if (!row)
+      return
     row.mode = row.mode === 'flex' ? 'fixed' : 'flex'
     await commitColumns()
   }
@@ -520,7 +503,8 @@ export const useSettingsStore = defineStore('settings', () => {
    * 入口在播放器头部那颗按钮上。落 theme.json（与笔记树宽度同属「这一页长什么样」）。
    */
   async function setVideoTreeCollapsed(collapsed: boolean): Promise<boolean> {
-    if (themeConfig.value.videoTreeCollapsed === collapsed) return true
+    if (themeConfig.value.videoTreeCollapsed === collapsed)
+      return true
     return saveThemeConfig({ videoTreeCollapsed: collapsed })
   }
 
@@ -573,7 +557,8 @@ export const useSettingsStore = defineStore('settings', () => {
    * 入口在对话区左上角那颗按钮上。落 theme.json（与视频树收起同一套做法）。
    */
   async function setAiTreeCollapsed(collapsed: boolean): Promise<boolean> {
-    if (themeConfig.value.aiTreeCollapsed === collapsed) return true
+    if (themeConfig.value.aiTreeCollapsed === collapsed)
+      return true
     return saveThemeConfig({ aiTreeCollapsed: collapsed })
   }
 
@@ -593,7 +578,7 @@ export const useSettingsStore = defineStore('settings', () => {
    * 画中画悬浮小窗的位置与尺寸：与视频树宽同一套做法 —— 拖动 / 缩放时只改本地让界面跟手，
    * 松手才整份落盘（四个字段一起送，theme.json 一份快照一次写完）。
    */
-  function setVideoFloatGeometry(geometry: { x: number; y: number; w: number; h: number }): void {
+  function setVideoFloatGeometry(geometry: { x: number, y: number, w: number, h: number }): void {
     themeConfig.value.videoFloatX = clampVideoFloatPercent(geometry.x)
     themeConfig.value.videoFloatY = clampVideoFloatPercent(geometry.y)
     themeConfig.value.videoFloatW = clampVideoFloatWidth(geometry.w)
@@ -605,7 +590,7 @@ export const useSettingsStore = defineStore('settings', () => {
       videoFloatX: themeConfig.value.videoFloatX,
       videoFloatY: themeConfig.value.videoFloatY,
       videoFloatW: themeConfig.value.videoFloatW,
-      videoFloatH: themeConfig.value.videoFloatH
+      videoFloatH: themeConfig.value.videoFloatH,
     })
   }
 
@@ -620,10 +605,10 @@ export const useSettingsStore = defineStore('settings', () => {
    */
   async function commitColumns(): Promise<void> {
     await saveThemeConfig({
-      columns: themeConfig.value.columns.map((column) => ({
+      columns: themeConfig.value.columns.map(column => ({
         ...column,
-        rows: column.rows.map((row) => ({ ...row }))
-      }))
+        rows: column.rows.map(row => ({ ...row })),
+      })),
     })
   }
 
@@ -634,18 +619,20 @@ export const useSettingsStore = defineStore('settings', () => {
    * 用户只是把「当前这个宽度」钉住了 —— 与行上那颗「固定 / 自适应」同一个做法。
    */
   async function toggleColumnMode(id: ColumnId, currentWidth: number): Promise<void> {
-    const column = themeConfig.value.columns.find((item) => item.id === id)
-    if (!column) return
+    const column = themeConfig.value.columns.find(item => item.id === id)
+    if (!column)
+      return
 
-    column.width =
-      column.width === null ? clampColumnWidth(currentWidth, COLUMN_WIDTH_DEFAULT) : null
+    column.width
+      = column.width === null ? clampColumnWidth(currentWidth, COLUMN_WIDTH_DEFAULT) : null
     await commitColumns()
   }
 
   /** 在某一栏右边拆出一栏（宽度跟着它）；到栏数上限时不动 */
   async function addColumn(afterId: ColumnId): Promise<void> {
     const next = addColumnTo(themeConfig.value.columns, afterId)
-    if (next === themeConfig.value.columns) return
+    if (next === themeConfig.value.columns)
+      return
 
     themeConfig.value.columns = next
     await commitColumns()
@@ -654,7 +641,8 @@ export const useSettingsStore = defineStore('settings', () => {
   /** 收掉一栏：栏里的行整条并到相邻那一栏；只剩一栏时不动 */
   async function removeColumn(id: ColumnId): Promise<void> {
     const removed = removeColumnFrom(themeConfig.value.cards, themeConfig.value.columns, id)
-    if (!removed) return
+    if (!removed)
+      return
 
     themeConfig.value.columns = removed.columns
     themeConfig.value.cards = removed.cards
@@ -675,7 +663,7 @@ export const useSettingsStore = defineStore('settings', () => {
     await saveThemeConfig({
       cardGap: fallback.cardGap,
       columns: fallback.columns,
-      cards: fallback.cards
+      cards: fallback.cards,
     })
   }
 
@@ -691,7 +679,8 @@ export const useSettingsStore = defineStore('settings', () => {
   async function loadSyncDevices(): Promise<void> {
     try {
       syncDevices.value = await window.workbench.listSyncDevices()
-    } catch (error) {
+    }
+    catch (error) {
       // 取不到就当没有：没填仓库地址、还没同步过都是常态，界面上是一句空态提示
       syncDevices.value = []
       console.warn('[workbench] 读取同步设备失败', error)
@@ -707,13 +696,14 @@ export const useSettingsStore = defineStore('settings', () => {
    * 主题过渡、终端高度、卡片摆放这些联动不必另写一套。
    */
   async function applySyncAppearance(deviceId: string): Promise<boolean> {
-    const device = syncDevices.value.find((item) => item.id === deviceId)
+    const device = syncDevices.value.find(item => item.id === deviceId)
     if (!device?.theme) {
       notifyWarning('那台机器没有可用的配置')
       return false
     }
 
-    if (!(await saveThemeConfig(device.theme))) return false
+    if (!(await saveThemeConfig(device.theme)))
+      return false
 
     notifySuccess(`已应用「${device.name}」的外观与布局`)
     return true
@@ -735,10 +725,12 @@ export const useSettingsStore = defineStore('settings', () => {
       }
 
       const error = result.data?.sync.error
-      if (error) notifyError(error)
+      if (error)
+        notifyError(error)
       else notifySuccess(`已同步${deviceTextOf(result.data)}`)
       return result
-    } catch (err) {
+    }
+    catch (err) {
       // 版本不一致、后端没起来都可能走到这里：说一声比按钮转完圈什么都不发生强
       notifyError(err instanceof Error ? err.message : '同步失败')
       return null
@@ -758,7 +750,8 @@ export const useSettingsStore = defineStore('settings', () => {
       }
       notifySuccess('外观配置已同步')
       return true
-    } catch (err) {
+    }
+    catch (err) {
       notifyError(err instanceof Error ? err.message : '同步外观配置失败')
       return false
     }
@@ -767,8 +760,9 @@ export const useSettingsStore = defineStore('settings', () => {
   /** 「已同步 · 本机、另一台」里那一段设备名；没开同步就是空串 */
   function deviceTextOf(data: TokenUsageResult | undefined): string {
     const sync = data?.sync
-    if (!sync?.enabled) return ''
-    const others = sync.devices.map((item) => item.name).join('、')
+    if (!sync?.enabled)
+      return ''
+    const others = sync.devices.map(item => item.name).join('、')
     return others ? ` · ${sync.deviceName}、${others}` : ` · ${sync.deviceName}`
   }
 
@@ -798,7 +792,8 @@ export const useSettingsStore = defineStore('settings', () => {
     window.workbench.onThemeConfig(applyThemeConfig)
     // 跟随系统时，系统切换主题要即时响应（主进程那条事件是另一重保险）
     window.matchMedia?.('(prefers-color-scheme: dark)').addEventListener('change', () => {
-      if (settings.value.theme === 'system') applyTheme(resolveTheme(settings.value))
+      if (settings.value.theme === 'system')
+        applyTheme(resolveTheme(settings.value))
     })
   }
 
@@ -867,6 +862,6 @@ export const useSettingsStore = defineStore('settings', () => {
     syncAppearanceNow,
     // 生命周期
     loadAppearance,
-    installListeners
+    installListeners,
   }
 })

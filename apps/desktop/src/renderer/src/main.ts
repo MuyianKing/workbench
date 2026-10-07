@@ -1,17 +1,17 @@
-import { createApp } from 'vue'
-import { createPinia } from 'pinia'
 import ElementPlus from 'element-plus'
 import zhCn from 'element-plus/es/locale/lang/zh-cn'
-
-import 'element-plus/dist/index.css'
-// Element Plus 的暗色变量表必须在我们的 tokens 之前，:root[data-theme='dark'] 才能盖住它
-import 'element-plus/theme-chalk/dark/css-vars.css'
-import './styles/tokens.css'
-import './styles/global.css'
+import { createPinia } from 'pinia'
+import { createApp } from 'vue'
 
 import App from './App.vue'
 import { applyBootstrapTheme } from './bootstrap'
 import { initState, installTauriWorkbench, reapOrphansOnStart } from './workbench'
+import 'element-plus/dist/index.css'
+
+// Element Plus 的暗色变量表必须在我们的 tokens 之前，:root[data-theme='dark'] 才能盖住它
+import 'element-plus/theme-chalk/dark/css-vars.css'
+import './styles/tokens.css'
+import './styles/global.css'
 
 // 先装后端适配层，再取首屏快照：getBootstrap 是同步读 window 上的注入值，
 // 顺序反了会读到 undefined，第一帧就会闪一次默认外观

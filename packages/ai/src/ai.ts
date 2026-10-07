@@ -1,3 +1,4 @@
+import type { AiBuiltinModelEntry } from './ai-builtin-models.generated'
 /**
  * AI 助手（页面 id `ai`）：应用里那个**通用的 agent 控制台** —— 选一个目录、写一条指令，
  * 请本机的 Pi（一个开源的编码 Agent，<https://pi.dev>）在那个目录里干活。
@@ -9,7 +10,7 @@
  */
 import { noteRootName, sanitizeNoteRoot } from '@workbench/notes'
 import { stripAnsi } from '@workbench/terminal'
-import { AI_BUILTIN_MODELS, type AiBuiltinModelEntry } from './ai-builtin-models.generated'
+import { AI_BUILTIN_MODELS } from './ai-builtin-models.generated'
 
 /**
  * 模型配置是**多服务形态**（模型管理弹窗里那一屏）：一个服务 = 名称 + Base URL + API 形态 +
@@ -32,7 +33,7 @@ export interface AiApiFormat {
 
 export const AI_API_FORMATS: AiApiFormat[] = [
   { id: 'openai-completions', label: 'Chat Completions（/chat/completions）' },
-  { id: 'anthropic-messages', label: 'Anthropic Messages（/v1/messages）' }
+  { id: 'anthropic-messages', label: 'Anthropic Messages（/v1/messages）' },
 ]
 
 /**
@@ -110,7 +111,7 @@ export const AI_PROVIDER_PRESETS: AiProviderPreset[] = [
     id: 'google',
     label: 'Google Gemini',
     baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
-    apiFormat: 'openai-completions'
+    apiFormat: 'openai-completions',
   },
   { id: 'deepseek', label: 'DeepSeek', baseUrl: 'https://api.deepseek.com/v1', apiFormat: 'openai-completions' },
   { id: 'moonshot', label: '月之暗面 Kimi', baseUrl: 'https://api.moonshot.cn/v1', apiFormat: 'openai-completions' },
@@ -120,7 +121,7 @@ export const AI_PROVIDER_PRESETS: AiProviderPreset[] = [
     id: 'dashscope',
     label: '通义千问',
     baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-    apiFormat: 'openai-completions'
+    apiFormat: 'openai-completions',
   },
   { id: 'siliconflow', label: '硅基流动', baseUrl: 'https://api.siliconflow.cn/v1', apiFormat: 'openai-completions' },
   { id: 'volces', label: '火山方舟', baseUrl: 'https://ark.cn-beijing.volces.com/api/v3', apiFormat: 'openai-completions' },
@@ -137,13 +138,14 @@ export const AI_PROVIDER_PRESETS: AiProviderPreset[] = [
   { id: 'huggingface', label: 'Hugging Face', baseUrl: 'https://router.huggingface.co/v1', apiFormat: 'openai-completions' },
   { id: 'baseten', label: 'Baseten', baseUrl: 'https://inference.baseten.co/v1', apiFormat: 'openai-completions' },
   { id: 'opencode-zen', label: 'OpenCode Zen', baseUrl: 'https://opencode.ai/zen/v1', apiFormat: 'openai-completions' },
-  { id: 'opencode-go', label: 'OpenCode Go', baseUrl: 'https://opencode.ai/zen/go/v1', apiFormat: 'openai-completions' }
+  { id: 'opencode-go', label: 'OpenCode Go', baseUrl: 'https://opencode.ai/zen/go/v1', apiFormat: 'openai-completions' },
 ]
 
 /** 认得出的预设（认不出的回空串：预设 id 只用来画头像，界面不该显示一个不存在的厂商） */
 export function sanitizeAiPreset(value: unknown): string {
-  if (typeof value !== 'string') return ''
-  return AI_PROVIDER_PRESETS.find((preset) => preset.id === value)?.id ?? ''
+  if (typeof value !== 'string')
+    return ''
+  return AI_PROVIDER_PRESETS.find(preset => preset.id === value)?.id ?? ''
 }
 
 /**
@@ -151,7 +153,8 @@ export function sanitizeAiPreset(value: unknown): string {
  * 收紧到小写字母 / 数字 / 连字符（其余字符一律折成 -），存起来之前就折好。
  */
 export function sanitizeAiName(value: unknown): string {
-  if (typeof value !== 'string') return ''
+  if (typeof value !== 'string')
+    return ''
   return value
     .toLowerCase()
     .replace(/[^a-z0-9-]+/g, '-')
@@ -162,19 +165,22 @@ export function sanitizeAiName(value: unknown): string {
 
 /** 界面上那个名字的收敛：压成一行、去空白、限长 */
 export function sanitizeAiLabel(value: unknown): string {
-  if (typeof value !== 'string') return ''
+  if (typeof value !== 'string')
+    return ''
   return value.replace(/\s+/g, ' ').trim().slice(0, 40)
 }
 
 /** API 形态的收敛：认不出的回空串 */
 export function sanitizeAiApiFormat(value: unknown): string {
-  if (typeof value !== 'string') return ''
-  return AI_API_FORMATS.find((format) => format.id === value)?.id ?? ''
+  if (typeof value !== 'string')
+    return ''
+  return AI_API_FORMATS.find(format => format.id === value)?.id ?? ''
 }
 
 /** Base URL 的收敛：去空白、限长；形状（http(s):// 开头）在保存时校验 */
 export function sanitizeAiBaseUrl(value: unknown): string {
-  if (typeof value !== 'string') return ''
+  if (typeof value !== 'string')
+    return ''
   return value.trim().slice(0, 300)
 }
 
@@ -186,7 +192,8 @@ export function sanitizeAiModelId(value: unknown): string {
 /** 上下文窗口的收敛：认不出的、非正数、离谱大的都回 0（= 不知道） */
 export function sanitizeAiContext(value: unknown): number {
   const size = typeof value === 'number' ? value : Number(value)
-  if (!Number.isFinite(size) || size <= 0) return 0
+  if (!Number.isFinite(size) || size <= 0)
+    return 0
   return Math.min(Math.floor(size), 20_000_000)
 }
 
@@ -204,10 +211,11 @@ export const AI_THINKING_BASE_LEVELS = ['off', 'minimal', 'low', 'medium', 'high
  * 空清单也按这个默认给，免得界面上一个档位都不剩。
  */
 export function sanitizeAiThinkingLevels(value: unknown, reasoning: boolean): string[] {
-  if (!reasoning) return ['off']
+  if (!reasoning)
+    return ['off']
   const raw = Array.isArray(value) ? value : AI_THINKING_BASE_LEVELS
   const wanted = new Set(raw.filter((level): level is string => typeof level === 'string'))
-  const levels = AI_THINKING_LEVELS.filter((level) => wanted.has(level.id)).map((level) => level.id)
+  const levels = AI_THINKING_LEVELS.filter(level => wanted.has(level.id)).map(level => level.id)
   return levels.length ? levels : [...AI_THINKING_BASE_LEVELS]
 }
 
@@ -216,14 +224,17 @@ export function sanitizeAiThinkingLevels(value: unknown, reasoning: boolean): st
  * id 与 enabled，上下文与思考那两样按「不知道」落）。
  */
 export function sanitizeAiModels(value: unknown): AiModelEntry[] {
-  if (!Array.isArray(value)) return []
+  if (!Array.isArray(value))
+    return []
   const seen = new Set<string>()
   const result: AiModelEntry[] = []
   for (const raw of value) {
-    if (!raw || typeof raw !== 'object') continue
+    if (!raw || typeof raw !== 'object')
+      continue
     const record = raw as Record<string, unknown>
     const id = sanitizeAiModelId(record.id)
-    if (!id || seen.has(id)) continue
+    if (!id || seen.has(id))
+      continue
     seen.add(id)
     const reasoning = record.reasoning === true
     result.push({
@@ -234,26 +245,30 @@ export function sanitizeAiModels(value: unknown): AiModelEntry[] {
       maxTokens: sanitizeAiMaxTokens(record.maxTokens),
       reasoning,
       levels: sanitizeAiThinkingLevels(record.levels, reasoning),
-      imageInput: record.imageInput === true
+      imageInput: record.imageInput === true,
     })
-    if (result.length >= AI_MODEL_MAX) break
+    if (result.length >= AI_MODEL_MAX)
+      break
   }
   return result
 }
 
 /** 一个服务的收敛：认不出的整条丢掉（清单空的、地址不成形的、跑不起来的都不留） */
 export function sanitizeAiProviders(value: unknown): AiProvider[] {
-  if (!Array.isArray(value)) return []
+  if (!Array.isArray(value))
+    return []
   const seen = new Set<string>()
   const result: AiProvider[] = []
   for (const raw of value) {
-    if (!raw || typeof raw !== 'object') continue
+    if (!raw || typeof raw !== 'object')
+      continue
     const record = raw as Record<string, unknown>
     const id = sanitizeAiName(record.id)
     const baseUrl = sanitizeAiBaseUrl(record.baseUrl)
     const apiFormat = sanitizeAiApiFormat(record.apiFormat)
     const models = sanitizeAiModels(record.models)
-    if (!id || !/^https?:\/\//.test(baseUrl) || !apiFormat || !models.length || seen.has(id)) continue
+    if (!id || !/^https?:\/\//.test(baseUrl) || !apiFormat || !models.length || seen.has(id))
+      continue
     seen.add(id)
     result.push({
       id,
@@ -262,9 +277,10 @@ export function sanitizeAiProviders(value: unknown): AiProvider[] {
       apiFormat,
       preset: sanitizeAiPreset(record.preset),
       enabled: record.enabled !== false,
-      models
+      models,
     })
-    if (result.length >= AI_PROVIDER_MAX) break
+    if (result.length >= AI_PROVIDER_MAX)
+      break
   }
   return result
 }
@@ -276,7 +292,7 @@ export function sanitizeAiProviders(value: unknown): AiProvider[] {
  * models.json、Pi 按 128k 兜底；思考按不支持），由用户在模型那一行上改。
  * 编一个数字比留空更坏 —— 上下文给大了会在该压缩的时候不压缩。
  */
-const AI_MODEL_HINTS: Array<{ pattern: RegExp; contextWindow: number; reasoning: boolean }> = [
+const AI_MODEL_HINTS: Array<{ pattern: RegExp, contextWindow: number, reasoning: boolean }> = [
   { pattern: /^claude-/, contextWindow: 200_000, reasoning: true },
   { pattern: /^o[1-9](-|$)/, contextWindow: 200_000, reasoning: true },
   { pattern: /^gpt-5/, contextWindow: 400_000, reasoning: true },
@@ -288,7 +304,7 @@ const AI_MODEL_HINTS: Array<{ pattern: RegExp; contextWindow: number; reasoning:
   { pattern: /^gemini/, contextWindow: 1_048_576, reasoning: false },
   { pattern: /^glm-(4\.[5-9]|[5-9])/, contextWindow: 128_000, reasoning: true },
   { pattern: /^glm-/, contextWindow: 128_000, reasoning: false },
-  { pattern: /^kimi-(k2|k3|latest)/, contextWindow: 256_000, reasoning: true }
+  { pattern: /^kimi-(k2|k3|latest)/, contextWindow: 256_000, reasoning: true },
 ]
 
 /**
@@ -297,11 +313,12 @@ const AI_MODEL_HINTS: Array<{ pattern: RegExp; contextWindow: number; reasoning:
  *
  * 它是预填的**最后一层**：Pi 自带的目录认得出的（builtinModelMeta）轮不到它。
  */
-export function inferModelMeta(id: string): { contextWindow: number; reasoning: boolean } {
+export function inferModelMeta(id: string): { contextWindow: number, reasoning: boolean } {
   const name = id.trim().toLowerCase()
   const moonshot = /^moonshot-v1-(\d+)k$/.exec(name)
-  if (moonshot) return { contextWindow: Number(moonshot[1]) * 1024, reasoning: false }
-  const hint = AI_MODEL_HINTS.find((item) => item.pattern.test(name))
+  if (moonshot)
+    return { contextWindow: Number(moonshot[1]) * 1024, reasoning: false }
+  const hint = AI_MODEL_HINTS.find(item => item.pattern.test(name))
   return hint
     ? { contextWindow: hint.contextWindow, reasoning: hint.reasoning }
     : { contextWindow: 0, reasoning: false }
@@ -316,12 +333,13 @@ export interface AiBuiltinModelMeta {
 }
 
 function toBuiltinMeta(entry: AiBuiltinModelEntry | undefined): AiBuiltinModelMeta | null {
-  if (!entry) return null
+  if (!entry)
+    return null
   return {
     contextWindow: entry.contextWindow ?? 0,
     maxTokens: entry.maxTokens ?? 0,
     reasoning: entry.reasoning === true,
-    imageInput: entry.image === true
+    imageInput: entry.image === true,
   }
 }
 
@@ -338,7 +356,8 @@ function toBuiltinMeta(entry: AiBuiltinModelEntry | undefined): AiBuiltinModelMe
  */
 export function builtinModelMeta(id: string, provider = ''): AiBuiltinModelMeta | null {
   const raw = sanitizeAiModelId(id)
-  if (!raw) return null
+  if (!raw)
+    return null
   const lower = raw.toLowerCase()
   const keys = raw === lower ? [raw] : [raw, lower]
   const names = Object.keys(AI_BUILTIN_MODELS).sort()
@@ -348,7 +367,8 @@ export function builtinModelMeta(id: string, provider = ''): AiBuiltinModelMeta 
     if (map) {
       for (const key of keys) {
         const hit = toBuiltinMeta(map[key])
-        if (hit) return hit
+        if (hit)
+          return hit
       }
     }
   }
@@ -356,7 +376,8 @@ export function builtinModelMeta(id: string, provider = ''): AiBuiltinModelMeta 
     const map = AI_BUILTIN_MODELS[name]
     for (const key of keys) {
       const hit = toBuiltinMeta(map[key])
-      if (hit) return hit
+      if (hit)
+        return hit
     }
   }
   for (const name of names) {
@@ -364,8 +385,9 @@ export function builtinModelMeta(id: string, provider = ''): AiBuiltinModelMeta 
     for (const key of keys) {
       const prefixed = Object.keys(map)
         .sort()
-        .find((candidate) => candidate.endsWith(`/${key}`))
-      if (prefixed) return toBuiltinMeta(map[prefixed])
+        .find(candidate => candidate.endsWith(`/${key}`))
+      if (prefixed)
+        return toBuiltinMeta(map[prefixed])
     }
   }
   return null
@@ -396,7 +418,7 @@ export interface AiFetchedModel {
 export function aiModelFromId(
   id: string,
   extra: Partial<AiModelEntry> = {},
-  provider = ''
+  provider = '',
 ): AiModelEntry {
   const modelId = sanitizeAiModelId(id)
   const hint = inferModelMeta(modelId)
@@ -411,7 +433,7 @@ export function aiModelFromId(
     maxTokens: sanitizeAiMaxTokens(extra.maxTokens) || builtin?.maxTokens || 0,
     reasoning,
     levels: sanitizeAiThinkingLevels(extra.levels, reasoning),
-    imageInput: extra.imageInput === true || builtin?.imageInput === true
+    imageInput: extra.imageInput === true || builtin?.imageInput === true,
   }
 }
 
@@ -430,18 +452,21 @@ export function aiModelFromId(
  * 不支持思考的模型整份 map 都不写（它只看 `reasoning: false`）。
  */
 export function aiThinkingMap(entry: AiModelEntry): Record<string, string | null> | undefined {
-  if (!entry.reasoning) return undefined
+  if (!entry.reasoning)
+    return undefined
   const supported = new Set(sanitizeAiThinkingLevels(entry.levels, true))
   const map: Record<string, string | null> = {}
   for (const { id } of AI_THINKING_LEVELS) {
     const extended = id === 'xhigh' || id === 'max'
     if (supported.has(id)) {
       // xhigh / max 不写就等于不支持，支持的必须显式写一个值出来了
-      if (extended) map[id] = id
+      if (extended)
+        map[id] = id
       continue
     }
     // 落回默认的那几档要写成 null 才是「不支持」；扩展档不支持的默认就是不支持，不必写
-    if (!extended) map[id] = null
+    if (!extended)
+      map[id] = null
   }
   return Object.keys(map).length ? map : undefined
 }
@@ -454,8 +479,10 @@ export function aiThinkingMap(entry: AiModelEntry): Record<string, string | null
 export function pickAiThinking(levels: string[], chosen: string): string {
   // 只有 off 的模型（不支持思考）传进来的就是 ['off']；清单是空的按同一档算
   const list = sanitizeAiThinkingLevels(levels.length ? levels : ['off'], true)
-  if (list.includes(chosen)) return chosen
-  if (list.includes(AI_THINKING_DEFAULT)) return AI_THINKING_DEFAULT
+  if (list.includes(chosen))
+    return chosen
+  if (list.includes(AI_THINKING_DEFAULT))
+    return AI_THINKING_DEFAULT
   return list[list.length - 1] ?? 'off'
 }
 
@@ -483,9 +510,11 @@ export interface AiModelChoice {
 export function aiModelChoices(providers: AiProvider[]): AiModelChoice[] {
   const choices: AiModelChoice[] = []
   for (const provider of providers) {
-    if (!provider.enabled) continue
+    if (!provider.enabled)
+      continue
     for (const entry of provider.models) {
-      if (!entry.enabled) continue
+      if (!entry.enabled)
+        continue
       choices.push({
         key: `${provider.id}/${entry.id}`,
         provider: provider.id,
@@ -495,7 +524,7 @@ export function aiModelChoices(providers: AiProvider[]): AiModelChoice[] {
         contextWindow: entry.contextWindow,
         reasoning: entry.reasoning,
         levels: entry.levels,
-        imageInput: entry.imageInput
+        imageInput: entry.imageInput,
       })
     }
   }
@@ -509,23 +538,23 @@ export function aiModelChoices(providers: AiProvider[]): AiModelChoice[] {
 export function pickAiChoice(
   providers: AiProvider[],
   provider: string,
-  model: string
+  model: string,
 ): AiModelChoice | null {
   const choices = aiModelChoices(providers)
   return (
-    choices.find((choice) => choice.provider === provider && choice.model === model) ??
-    choices[0] ??
-    null
+    choices.find(choice => choice.provider === provider && choice.model === model)
+    ?? choices[0]
+    ?? null
   )
 }
 
 /** 一个服务够不够跑：名称 + Base URL + API 形态 + 至少一个启用的模型 */
 export function aiProviderReady(provider: AiProvider): boolean {
   return (
-    !!sanitizeAiName(provider.id) &&
-    /^https?:\/\//.test(sanitizeAiBaseUrl(provider.baseUrl)) &&
-    !!sanitizeAiApiFormat(provider.apiFormat) &&
-    provider.models.some((entry) => entry.enabled)
+    !!sanitizeAiName(provider.id)
+    && /^https?:\/\//.test(sanitizeAiBaseUrl(provider.baseUrl))
+    && !!sanitizeAiApiFormat(provider.apiFormat)
+    && provider.models.some(entry => entry.enabled)
   )
 }
 
@@ -561,14 +590,14 @@ export interface AiProviderPayload {
  */
 export function aiProviderPayload(providers: AiProvider[]): AiProviderPayload[] {
   return providers
-    .filter((provider) => provider.enabled && aiProviderReady(provider))
-    .map((provider) => ({
+    .filter(provider => provider.enabled && aiProviderReady(provider))
+    .map(provider => ({
       id: sanitizeAiName(provider.id),
       name: sanitizeAiLabel(provider.label),
       baseUrl: sanitizeAiBaseUrl(provider.baseUrl),
       api: sanitizeAiApiFormat(provider.apiFormat),
       models: provider.models
-        .filter((entry) => entry.enabled)
+        .filter(entry => entry.enabled)
         .map((entry) => {
           const map = aiThinkingMap(entry)
           return {
@@ -579,11 +608,11 @@ export function aiProviderPayload(providers: AiProvider[]): AiProviderPayload[] 
             reasoning: entry.reasoning,
             ...(map ? { thinkingLevelMap: map } : {}),
             // 键名是（Rust 的）imageInput，不是 Pi 文件里的 input —— 后者由 Rust 落
-            ...(entry.imageInput ? { imageInput: true } : {})
+            ...(entry.imageInput ? { imageInput: true } : {}),
           }
-        })
+        }),
     }))
-    .filter((provider) => provider.models.length > 0)
+    .filter(provider => provider.models.length > 0)
 }
 
 /**
@@ -592,10 +621,12 @@ export function aiProviderPayload(providers: AiProvider[]): AiProviderPayload[] 
  */
 export function uniqueAiName(id: string, taken: string[]): string {
   const base = sanitizeAiName(id) || 'provider'
-  if (!taken.includes(base)) return base
+  if (!taken.includes(base))
+    return base
   for (let index = 2; index < 100; index += 1) {
     const candidate = `${base}-${index}`.slice(0, 32)
-    if (!taken.includes(candidate)) return candidate
+    if (!taken.includes(candidate))
+      return candidate
   }
   return base
 }
@@ -617,7 +648,7 @@ export const AI_THINKING_LEVELS: AiThinkingLevel[] = [
   { id: 'medium', label: '中' },
   { id: 'high', label: '高' },
   { id: 'xhigh', label: '极高' },
-  { id: 'max', label: '最高' }
+  { id: 'max', label: '最高' },
 ]
 
 /** 默认档：与 Pi 自己的默认是同一个（medium）—— 不挑也不改变它的行为 */
@@ -625,12 +656,12 @@ export const AI_THINKING_DEFAULT = 'medium'
 
 /** 思考等级的收敛：认不出的（含空串、手工改坏的值）回默认档 */
 export function sanitizeAiThinking(value: unknown): string {
-  return AI_THINKING_LEVELS.find((level) => level.id === value)?.id ?? AI_THINKING_DEFAULT
+  return AI_THINKING_LEVELS.find(level => level.id === value)?.id ?? AI_THINKING_DEFAULT
 }
 
 /** 界面上那一档怎么叫：认不出的照原样给（存坏了也别显示成空白） */
 export function aiThinkingLabel(id: string): string {
-  return AI_THINKING_LEVELS.find((level) => level.id === id)?.label ?? id
+  return AI_THINKING_LEVELS.find(level => level.id === id)?.label ?? id
 }
 
 // ---------- 工具权限（composer 左边那一栏） ----------
@@ -655,7 +686,7 @@ export interface AiPermissionMode {
 
 export const AI_PERMISSION_MODES: AiPermissionMode[] = [
   { id: 'auto-edit', label: '自动编辑', hint: '改文件不问，命令先问你' },
-  { id: 'full', label: '完全访问', hint: '所有操作都不再询问' }
+  { id: 'full', label: '完全访问', hint: '所有操作都不再询问' },
 ]
 
 /** 默认档：自动编辑（保守的那个 —— 命令先问一句，不会有脚本悄悄跑起来） */
@@ -663,12 +694,12 @@ export const AI_PERMISSION_DEFAULT = 'auto-edit'
 
 /** 权限模式的收敛：认不出的回默认档 */
 export function sanitizeAiPermission(value: unknown): string {
-  return AI_PERMISSION_MODES.find((mode) => mode.id === value)?.id ?? AI_PERMISSION_DEFAULT
+  return AI_PERMISSION_MODES.find(mode => mode.id === value)?.id ?? AI_PERMISSION_DEFAULT
 }
 
 /** 界面上这一档怎么叫：认不出的照原样给（存坏了也别显示成空白） */
 export function aiPermissionLabel(id: string): string {
-  return AI_PERMISSION_MODES.find((mode) => mode.id === id)?.label ?? id
+  return AI_PERMISSION_MODES.find(mode => mode.id === id)?.label ?? id
 }
 
 // ---------- 会话（一个工作目录里的一段连续对话） ----------
@@ -714,16 +745,19 @@ export const AI_SESSION_TITLE_MAX = 48
  * 我们生成的 id 走 `crypto.randomUUID()`，天然落在里面。
  */
 export function sanitizeAiSessionId(value: unknown): string {
-  if (typeof value !== 'string') return ''
+  if (typeof value !== 'string')
+    return ''
   const id = value.trim()
-  if (id.length > AI_SESSION_ID_MAX) return ''
+  if (id.length > AI_SESSION_ID_MAX)
+    return ''
   // 首尾是字母数字、中间只收 `.` `_` `-`；**单个字符也认**（首尾同一位，Pi 的规则就是这样）
-  return /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/.test(id) ? id : ''
+  return /^[A-Z0-9](?:[\w.-]*[A-Z0-9])?$/i.test(id) ? id : ''
 }
 
 /** 标题的收敛：压成一行（换行会让树行高低不一）、去空白、限长 */
 export function sanitizeAiSessionTitle(value: unknown): string {
-  if (typeof value !== 'string') return ''
+  if (typeof value !== 'string')
+    return ''
   const oneLine = value.replace(/\s+/g, ' ').trim()
   return oneLine.length > AI_SESSION_TITLE_MAX
     ? `${oneLine.slice(0, AI_SESSION_TITLE_MAX)}…`
@@ -748,16 +782,19 @@ function sanitizeStamp(value: unknown): number {
 
 /** 会话清单的收敛：丢掉认不出的、按 id 去重、限量（老数据文件里没有这一项） */
 export function sanitizeAiSessions(value: unknown): AiSession[] {
-  if (!Array.isArray(value)) return []
+  if (!Array.isArray(value))
+    return []
   const seen = new Set<string>()
   const result: AiSession[] = []
   for (const raw of value) {
-    if (!raw || typeof raw !== 'object') continue
+    if (!raw || typeof raw !== 'object')
+      continue
     const record = raw as Record<string, unknown>
     const id = sanitizeAiSessionId(record.id)
     // 目录与笔记 / 技能 / 知识库同一条收敛：它要拿去拼路径、进命令行（与 kbDir 一类）
     const dir = sanitizeNoteRoot(record.dir)
-    if (!id || !dir || seen.has(id)) continue
+    if (!id || !dir || seen.has(id))
+      continue
     seen.add(id)
     const createdAt = sanitizeStamp(record.createdAt)
     const entry: AiSession = {
@@ -766,22 +803,25 @@ export function sanitizeAiSessions(value: unknown): AiSession[] {
       title: sanitizeAiSessionTitle(record.title),
       createdAt,
       // 老文件里可能没有 updatedAt：那就以创建时间为准（排序只看它）
-      updatedAt: sanitizeStamp(record.updatedAt) || createdAt
+      updatedAt: sanitizeStamp(record.updatedAt) || createdAt,
     }
     // 会话自己那份配置（模型 / 档位 / 权限）：**认得出才记**，认不出的不写字段 ——
     // 读的时候回落设置里的默认（见 stores/ai.ts 的 configOf）。老文件没有这些字段，原样有效
     const provider = sanitizeAiName(record.provider)
-    if (provider) entry.provider = provider
+    if (provider)
+      entry.provider = provider
     const model = typeof record.model === 'string' ? record.model.trim().slice(0, 200) : ''
-    if (model) entry.model = model
-    if (AI_THINKING_LEVELS.some((level) => level.id === record.thinking)) {
+    if (model)
+      entry.model = model
+    if (AI_THINKING_LEVELS.some(level => level.id === record.thinking)) {
       entry.thinking = record.thinking as string
     }
-    if (AI_PERMISSION_MODES.some((mode) => mode.id === record.permission)) {
+    if (AI_PERMISSION_MODES.some(mode => mode.id === record.permission)) {
       entry.permission = record.permission as string
     }
     result.push(entry)
-    if (result.length >= AI_SESSION_MAX) break
+    if (result.length >= AI_SESSION_MAX)
+      break
   }
   return result
 }
@@ -791,7 +831,7 @@ export function sanitizeAiSessions(value: unknown): AiSession[] {
  * 最近说话的排在最前面；超出上限的从末尾丢。
  */
 export function rememberAiSession(sessions: AiSession[], session: AiSession): AiSession[] {
-  const rest = sessions.filter((item) => item.id !== session.id)
+  const rest = sessions.filter(item => item.id !== session.id)
   return sanitizeAiSessions([session, ...rest])
 }
 
@@ -800,10 +840,12 @@ export function rememberAiSession(sessions: AiSession[], session: AiSession): Ai
  * 最近说过话的那个；一个都没有就是空串（页面显示新任务那一屏）。
  */
 export function pickAiActiveSession(sessions: AiSession[], chosen: string): string {
-  if (sessions.some((session) => session.id === chosen)) return chosen
+  if (sessions.some(session => session.id === chosen))
+    return chosen
   let latest: AiSession | null = null
   for (const session of sessions) {
-    if (!latest || session.updatedAt > latest.updatedAt) latest = session
+    if (!latest || session.updatedAt > latest.updatedAt)
+      latest = session
   }
   return latest?.id ?? ''
 }
@@ -825,14 +867,15 @@ export function aiSessionGroups(sessions: AiSession[]): AiSessionGroup[] {
   const byDir = new Map<string, AiSession[]>()
   for (const session of sessions) {
     const list = byDir.get(session.dir)
-    if (list) list.push(session)
+    if (list)
+      list.push(session)
     else byDir.set(session.dir, [session])
   }
   return [...byDir.entries()]
     .map(([dir, list]) => ({
       dir,
       name: noteRootName(dir),
-      sessions: [...list].sort((a, b) => b.updatedAt - a.updatedAt)
+      sessions: [...list].sort((a, b) => b.updatedAt - a.updatedAt),
     }))
     .sort((a, b) => (b.sessions[0]?.updatedAt ?? 0) - (a.sessions[0]?.updatedAt ?? 0))
 }
@@ -896,7 +939,7 @@ export function piLaunch(entry: string | null, selection: PiSelection, sessionId
     '--model',
     selection.model,
     '--thinking',
-    selection.thinking
+    selection.thinking,
   ]
   return entry
     ? { program: 'node', args: [entry, ...flags] }
@@ -926,10 +969,12 @@ const PI_NODE_MIN: readonly [number, number, number] = [22, 19, 0]
  */
 export function nodeSatisfiesPi(version: string): boolean {
   const match = /^v?(\d+)\.(\d+)(?:\.(\d+))?/.exec(version.trim())
-  if (!match) return false
+  if (!match)
+    return false
   const actual = [Number(match[1]), Number(match[2]), Number(match[3] ?? 0)]
   for (let index = 0; index < PI_NODE_MIN.length; index += 1) {
-    if (actual[index] !== PI_NODE_MIN[index]) return actual[index] > PI_NODE_MIN[index]
+    if (actual[index] !== PI_NODE_MIN[index])
+      return actual[index] > PI_NODE_MIN[index]
   }
   return true
 }
@@ -959,7 +1004,8 @@ export const AI_SKILL_COMMAND = '/skill:'
  */
 export function skillCommandOf(instruction: string): string {
   const text = instruction.trimStart()
-  if (!text.startsWith(AI_SKILL_COMMAND)) return ''
+  if (!text.startsWith(AI_SKILL_COMMAND))
+    return ''
   const match = /^\S+/.exec(text.slice(AI_SKILL_COMMAND.length))
   return match ? match[0] : ''
 }
@@ -988,7 +1034,8 @@ export function taskPrompt(input: AiTaskInput): string {
   const skill = skillCommandOf(raw)
   const instruction = skill ? stripSkillCommand(raw).trim() : raw
   const parts = [`${AI_PROMPT_PREFIX}${dir}`]
-  if (instruction) parts.push('', instruction)
+  if (instruction)
+    parts.push('', instruction)
   const body = parts.join('\n')
   return skill ? `${AI_SKILL_COMMAND}${skill} ${body}` : body
 }
@@ -1005,14 +1052,16 @@ export function taskPrompt(input: AiTaskInput): string {
 export function visibleInstruction(text: string): string {
   const skill = skillCommandOf(text)
   const rest = stripScaffold(skill ? stripSkillCommand(text) : text)
-  if (!skill) return rest
+  if (!skill)
+    return rest
   return rest ? `${AI_SKILL_COMMAND}${skill} ${rest}` : `${AI_SKILL_COMMAND}${skill}`
 }
 
 /** 去掉开头那行「你在下面这个目录里工作：…」（连同它后面的空行）；没有那行就原样返回 */
 function stripScaffold(text: string): string {
   const trimmed = text.trimStart()
-  if (!trimmed.startsWith(AI_PROMPT_PREFIX)) return text
+  if (!trimmed.startsWith(AI_PROMPT_PREFIX))
+    return text
   const rest = trimmed.slice(AI_PROMPT_PREFIX.length)
   const brk = rest.indexOf('\n')
   // 脚手架后面那个空行也一起吃掉，剩下的就是用户写的原文（尾部空白留给调用方去 trim）
@@ -1067,10 +1116,12 @@ export function aiImagePayload(images: AiImage[]): AiImagePayload[] {
   const result: AiImagePayload[] = []
   for (const image of images) {
     const comma = image.dataUrl.indexOf(',')
-    if (comma < 0) continue
+    if (comma < 0)
+      continue
     const data = image.dataUrl.slice(comma + 1).trim()
     const mimeType = image.mimeType.trim()
-    if (!data || !mimeType) continue
+    if (!data || !mimeType)
+      continue
     result.push({ data, mimeType })
   }
   return result
@@ -1126,7 +1177,8 @@ function failureLine(name: string, raw: string): AiLogLine {
   const detail = clean(raw)
   const reason = detail ? firstLine(detail) : '工具调用失败'
   const line: AiLogLine = { kind: 'error', text: `${name || '工具'}：${reason}` }
-  if (detail && detail !== reason) line.detail = detail
+  if (detail && detail !== reason)
+    line.detail = detail
   return line
 }
 
@@ -1138,16 +1190,18 @@ const BENIGN_STARTUP = /^Warning: No project session found with id .*creating a 
 
 /** 工具调用里的文件路径：几个常见的字段名都认（Pi 的工具参数名随版本变过） */
 function toolPath(args: unknown): string {
-  if (!args || typeof args !== 'object') return ''
+  if (!args || typeof args !== 'object')
+    return ''
   const record = args as Record<string, unknown>
   for (const key of ['path', 'file_path', 'filePath', 'filename', 'file']) {
     const value = record[key]
-    if (typeof value === 'string' && value.trim()) return value.trim()
+    if (typeof value === 'string' && value.trim())
+      return value.trim()
   }
   return ''
 }
 
-function toolVerb(name: string): { verb: string; writes: boolean } {
+function toolVerb(name: string): { verb: string, writes: boolean } {
   switch (name) {
     case 'write':
       return { verb: '写入', writes: true }
@@ -1165,16 +1219,20 @@ function toolVerb(name: string): { verb: string; writes: boolean } {
  * 助手消息与工具结果用的是同一种形状（工具结果是 `{ content: [{ type: 'text', text }] }`）。
  */
 function messageText(message: unknown): string {
-  if (typeof message === 'string') return message
-  if (!message || typeof message !== 'object') return ''
+  if (typeof message === 'string')
+    return message
+  if (!message || typeof message !== 'object')
+    return ''
   const content = (message as { content?: unknown }).content
-  if (typeof content === 'string') return content
-  if (!Array.isArray(content)) return ''
+  if (typeof content === 'string')
+    return content
+  if (!Array.isArray(content))
+    return ''
   return content
-    .map((part) =>
+    .map(part =>
       part && typeof part === 'object' && typeof (part as { text?: unknown }).text === 'string'
         ? (part as { text: string }).text
-        : ''
+        : '',
     )
     .filter(Boolean)
     .join('\n')
@@ -1191,16 +1249,18 @@ function str(value: unknown): string {
 function imageDataUrl(part: Record<string, unknown>): string {
   const data = str(part.data).trim()
   const mimeType = str(part.mimeType).trim()
-  if (!data || !mimeType) return ''
+  if (!data || !mimeType)
+    return ''
   return `data:${mimeType};base64,${data}`
 }
 
 /** 消息的正文块（有的消息 content 是字符串，有的是块数组：不是数组就是空） */
 function contentParts(message: Record<string, unknown>): Array<Record<string, unknown>> {
   const content = message.content
-  if (!Array.isArray(content)) return []
+  if (!Array.isArray(content))
+    return []
   return content.filter(
-    (part): part is Record<string, unknown> => !!part && typeof part === 'object'
+    (part): part is Record<string, unknown> => !!part && typeof part === 'object',
   )
 }
 
@@ -1218,10 +1278,12 @@ function contentParts(message: Record<string, unknown>): Array<Record<string, un
  *    重开会话时它没了，用户回头再看就只剩一行「读取 …」（见 failureLine）。
  */
 export function sessionMessagesToLines(messages: unknown): AiLogLine[] {
-  if (!Array.isArray(messages)) return []
+  if (!Array.isArray(messages))
+    return []
   const lines: AiLogLine[] = []
   for (const raw of messages) {
-    if (!raw || typeof raw !== 'object') continue
+    if (!raw || typeof raw !== 'object')
+      continue
     const message = raw as Record<string, unknown>
     const role = str(message.role)
     if (role === 'user') {
@@ -1230,10 +1292,11 @@ export function sessionMessagesToLines(messages: unknown): AiLogLine[] {
       const text = visibleInstruction(clean(messageText(message))).trim()
       // 贴在这句话里的图（发出去时与文字同一条消息）：一句只有图没有字的话照画
       const images = contentParts(message)
-        .filter((part) => str(part.type) === 'image')
+        .filter(part => str(part.type) === 'image')
         .map(imageDataUrl)
         .filter(Boolean)
-      if (text || images.length) lines.push({ kind: 'user', text, ...(images.length ? { images } : {}) })
+      if (text || images.length)
+        lines.push({ kind: 'user', text, ...(images.length ? { images } : {}) })
       continue
     }
     // 工具结果（落盘的 role 是 toolResult）：只有失败的那条留一行，与实时那条同一句话
@@ -1243,22 +1306,26 @@ export function sessionMessagesToLines(messages: unknown): AiLogLine[] {
       }
       continue
     }
-    if (role !== 'assistant') continue
+    if (role !== 'assistant')
+      continue
     for (const part of contentParts(message)) {
       const type = str(part.type)
       if (type === 'text') {
         const text = clean(str(part.text))
-        if (text) lines.push({ kind: 'text', text })
+        if (text)
+          lines.push({ kind: 'text', text })
         continue
       }
       // 想的那一段（草稿）：界面上是一块收着的「思考过程」。被厂商脱敏过的块
       // 一个字都没有，那就不画
       if (type === 'thinking') {
         const text = clean(str(part.thinking))
-        if (text) lines.push({ kind: 'thinking', text })
+        if (text)
+          lines.push({ kind: 'thinking', text })
         continue
       }
-      if (type !== 'toolCall') continue
+      if (type !== 'toolCall')
+        continue
       const name = str(part.name) || '工具'
       const { verb } = toolVerb(name)
       const path = toolPath(part.arguments)
@@ -1280,13 +1347,16 @@ function num(value: unknown): number | null {
  */
 function parseJsonObject(rawLine: string): Record<string, unknown> | null {
   const line = rawLine.trim()
-  if (!line) return null
+  if (!line)
+    return null
 
   try {
     const parsed: unknown = JSON.parse(line)
-    if (!parsed || typeof parsed !== 'object') return null
+    if (!parsed || typeof parsed !== 'object')
+      return null
     return parsed as Record<string, unknown>
-  } catch {
+  }
+  catch {
     return null
   }
 }
@@ -1305,7 +1375,8 @@ export function parsePiEvent(rawLine: string): AiLogLine | null {
   if (!event) {
     const text = clean(rawLine)
     // 认得出的「启动提示」丢掉（见 BENIGN_STARTUP）；其余非 JSON 的行原样留下
-    if (!text || BENIGN_STARTUP.test(text)) return null
+    if (!text || BENIGN_STARTUP.test(text))
+      return null
     return { kind: 'info', text }
   }
 
@@ -1319,7 +1390,8 @@ export function parsePiEvent(rawLine: string): AiLogLine | null {
     case 'response': {
       // RPC 的应答：成功的一律不画（每一条命令都有一条应答，画出来全是噪音），
       // 失败的要留一句 —— 提示词没收下这种问题不然就彻底没人说
-      if (event.success !== false) return null
+      if (event.success !== false)
+        return null
       const command = str(event.command) || '请求'
       return { kind: 'error', text: str(event.error) || `${command} 没有成功` }
     }
@@ -1332,7 +1404,7 @@ export function parsePiEvent(rawLine: string): AiLogLine | null {
       const max = num(event.maxAttempts)
       return {
         kind: 'info',
-        text: attempt && max ? `连接不稳，正在重试（${attempt}/${max}）` : '连接不稳，正在重试'
+        text: attempt && max ? `连接不稳，正在重试（${attempt}/${max}）` : '连接不稳，正在重试',
       }
     }
     case 'tool_execution_start': {
@@ -1346,26 +1418,30 @@ export function parsePiEvent(rawLine: string): AiLogLine | null {
       // 失败与否看三处：事件顶层那两个（Pi 会给）、结果里的那一份（扩展可以改这一层，
       // 见 agent-loop 的 `afterResult.isError ?? isError`），以及老形状里的 error 字段
       const result = (event.result ?? {}) as Record<string, unknown>
-      const failed =
-        event.is_error === true || event.isError === true || result.isError === true || !!str(event.error)
-      if (!failed) return null
+      const failed
+        = event.is_error === true || event.isError === true || result.isError === true || !!str(event.error)
+      if (!failed)
+        return null
       // 原文先看工具结果（Pi 现在就把原因放在那儿），error 字段只作兜底 —— 见 failureLine
       return failureLine(str(event.toolName), messageText(event.result) || str(event.error))
     }
     case 'message_update': {
       // 逐字增量不走这里（它接在对话末尾，见 parsePiDelta）；只有出错的事件要留一句
       const delta = (event.assistantMessageEvent ?? {}) as Record<string, unknown>
-      if (str(delta.type) !== 'error') return null
+      if (str(delta.type) !== 'error')
+        return null
       return { kind: 'error', text: str(delta.error) || '模型返回出错' }
     }
     case 'message_end': {
       const message = (event.message ?? {}) as Record<string, unknown>
       // 模型侧的失败长在 message 上（stopReason=error + errorMessage），别的都不算
       const failure = str(message.errorMessage)
-      if (failure) return { kind: 'error', text: clean(failure) }
+      if (failure)
+        return { kind: 'error', text: clean(failure) }
       // 用户消息也会触发 message_end（@文件 的回显在这儿），只画助手说的
       const role = str(message.role)
-      if (role && role !== 'assistant') return null
+      if (role && role !== 'assistant')
+        return null
       const text = clean(messageText(message))
       return text ? { kind: 'text', text } : null
     }
@@ -1397,20 +1473,24 @@ export interface PiDelta {
 
 export function parsePiDelta(rawLine: string): PiDelta | null {
   const event = parseJsonObject(rawLine)
-  if (!event) return null
+  if (!event)
+    return null
 
-  if (str(event.type) !== 'message_update') return null
+  if (str(event.type) !== 'message_update')
+    return null
   const delta = (event.assistantMessageEvent ?? {}) as Record<string, unknown>
   const kind = str(delta.type)
 
   if (kind === 'text_delta' || kind === 'thinking_delta') {
     const text = str(delta.delta)
-    if (!text) return null
+    if (!text)
+      return null
     return { kind: kind === 'text_delta' ? 'text' : 'thinking', text }
   }
   // 一段思考结束：**这一块以它为准**。内容为空也要报一声 —— 调用方靠它把「正在思考」
   // 那个状态收掉（被厂商脱敏过的块一个字都没有）
-  if (kind === 'thinking_end') return { kind: 'thinkingEnd', text: clean(str(delta.content)) }
+  if (kind === 'thinking_end')
+    return { kind: 'thinkingEnd', text: clean(str(delta.content)) }
   return null
 }
 
@@ -1439,13 +1519,16 @@ export interface AiUsage {
  */
 export function parsePiUsage(rawLine: string): AiUsage | null {
   const event = parseJsonObject(rawLine)
-  if (!event) return null
+  if (!event)
+    return null
 
-  if (str(event.type) !== 'message_end') return null
+  if (str(event.type) !== 'message_end')
+    return null
   const message = (event.message ?? {}) as Record<string, unknown>
   // 用户消息也会触发 message_end（@文件 的回显，见 parsePiEvent），它没有消耗
   const role = str(message.role)
-  if (role && role !== 'assistant') return null
+  if (role && role !== 'assistant')
+    return null
   const raw = (message.usage ?? {}) as Record<string, unknown>
   const field = (key: string): number => {
     const value = raw[key]
@@ -1455,7 +1538,7 @@ export function parsePiUsage(rawLine: string): AiUsage | null {
     input: field('input'),
     output: field('output'),
     cacheRead: field('cacheRead'),
-    cacheWrite: field('cacheWrite')
+    cacheWrite: field('cacheWrite'),
   }
   // 四个桶全是 0 = 这个端点没报消耗（自定义端点不保证都有），那就当没有
   const total = usage.input + usage.output + usage.cacheRead + usage.cacheWrite
@@ -1471,9 +1554,12 @@ export function parsePiUsage(rawLine: string): AiUsage | null {
  */
 export function formatTokensShort(value: number): string {
   const n = Math.max(0, Math.floor(value))
-  if (n < 1000) return String(n)
-  if (n < 10_000) return `${(n / 1000).toFixed(1)}k`
-  if (n < 1_000_000) return `${Math.round(n / 1000)}k`
+  if (n < 1000)
+    return String(n)
+  if (n < 10_000)
+    return `${(n / 1000).toFixed(1)}k`
+  if (n < 1_000_000)
+    return `${Math.round(n / 1000)}k`
   return `${(n / 1_000_000).toFixed(1)}m`
 }
 
@@ -1483,7 +1569,8 @@ export function formatTokensShort(value: number): string {
  */
 export function formatUsageSummary(usage: AiUsage): string {
   const prompt = usage.input + usage.cacheRead + usage.cacheWrite
-  if (prompt === 0 && usage.output === 0) return ''
+  if (prompt === 0 && usage.output === 0)
+    return ''
   return `输入 ${formatTokensShort(prompt)} · 输出 ${formatTokensShort(usage.output)}`
 }
 
@@ -1508,17 +1595,20 @@ export interface PiResponse {
 /** 一行输出里那条应答帧；不是它、或认不出的返回 null（非 JSON 的行在这里也是 null） */
 export function parsePiResponse(rawLine: string): PiResponse | null {
   const frame = parseJsonObject(rawLine)
-  if (!frame) return null
+  if (!frame)
+    return null
 
-  if (str(frame.type) !== 'response') return null
+  if (str(frame.type) !== 'response')
+    return null
   const command = str(frame.command)
-  if (!command) return null
+  if (!command)
+    return null
   return {
     id: str(frame.id),
     command,
     success: frame.success !== false,
     data: frame.data,
-    error: str(frame.error)
+    error: str(frame.error),
   }
 }
 
@@ -1540,12 +1630,16 @@ export interface AiConfirm {
  */
 export function parsePiConfirm(rawLine: string): AiConfirm | null {
   const frame = parseJsonObject(rawLine)
-  if (!frame) return null
+  if (!frame)
+    return null
 
-  if (str(frame.type) !== 'extension_ui_request') return null
-  if (str(frame.method) !== 'confirm') return null
+  if (str(frame.type) !== 'extension_ui_request')
+    return null
+  if (str(frame.method) !== 'confirm')
+    return null
   const id = str(frame.id)
-  if (!id) return null
+  if (!id)
+    return null
   return { id, title: str(frame.title) || '执行命令前先确认', message: str(frame.message) }
 }
 
@@ -1584,12 +1678,14 @@ export interface AiTurn {
 }
 
 export function aiTurns(lines: AiLogLine[], live = false): AiTurn[] {
-  const turns: Array<{ index: number; user: AiLogLine | null; rest: AiLogLine[] }> = []
+  const turns: Array<{ index: number, user: AiLogLine | null, rest: AiLogLine[] }> = []
   lines.forEach((line, index) => {
     // 用户那句话开一轮；整条日志的头几行（还没跟谁说过话时的那些注脚）也自成一「轮」
-    if (line.kind === 'user' || !turns.length) turns.push({ index, user: null, rest: [] })
+    if (line.kind === 'user' || !turns.length)
+      turns.push({ index, user: null, rest: [] })
     const turn = turns[turns.length - 1]
-    if (line.kind === 'user') turn.user = line
+    if (line.kind === 'user')
+      turn.user = line
     else turn.rest.push(line)
   })
 
@@ -1604,7 +1700,7 @@ export function aiTurns(lines: AiLogLine[], live = false): AiTurn[] {
         user: turn.user,
         process: turn.rest.slice(0, tailAt - 1),
         answer: turn.rest[tailAt - 1],
-        tail: turn.rest.slice(tailAt)
+        tail: turn.rest.slice(tailAt),
       }
     }
     // 摘不出答案（这轮还在跑 / 正文后面跟着工具或思考 / 压根没有正文）：
@@ -1614,7 +1710,7 @@ export function aiTurns(lines: AiLogLine[], live = false): AiTurn[] {
       user: turn.user,
       process: turn.rest.slice(0, tailAt),
       answer: null,
-      tail: turn.rest.slice(tailAt)
+      tail: turn.rest.slice(tailAt),
     }
   })
 }
@@ -1623,7 +1719,8 @@ export function aiTurns(lines: AiLogLine[], live = false): AiTurn[] {
 export function writtenEntries(lines: AiLogLine[]): string[] {
   const seen = new Set<string>()
   for (const line of lines) {
-    if (line.path) seen.add(line.path)
+    if (line.path)
+      seen.add(line.path)
   }
   return [...seen].sort((a, b) => a.localeCompare(b))
 }

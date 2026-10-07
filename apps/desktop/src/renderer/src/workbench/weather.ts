@@ -1,3 +1,6 @@
+import type { WeatherGeo, WeatherView } from '@workbench/weather'
+import type { Result } from '@/types'
+import { fail, ok } from '@workbench/core'
 /**
  * 实时天气（顶栏问候语旁那一小段）的适配层实现。
  *
@@ -7,14 +10,7 @@
  * 拼不出任意地址。这里只做「取原始回包 → 交给 shared/weather.ts 解析」，策略
  * （间隔、按城市缓存坐标）在 stores/weather.ts。
  */
-import {
-  parseWeatherForecast,
-  parseWeatherGeocoding,
-  type WeatherGeo,
-  type WeatherView
-} from '@workbench/weather'
-import { fail, ok } from '@workbench/core'
-import type { Result } from '@/types'
+import { parseWeatherForecast, parseWeatherGeocoding } from '@workbench/weather'
 import { errorText, guard, invoke } from './bridge'
 
 /** Rust 回来的原始取数结果（与 weather.rs 的 WeatherFetchResult 一致） */
@@ -35,9 +31,11 @@ export async function geocodeCity(city: string): Promise<Result<WeatherGeo>> {
       return fail(`查「${city}」失败（HTTP ${fetched.status}）`)
     }
     const geo = parseWeatherGeocoding(fetched.body)
-    if (!geo) return fail(`没找到「${city}」，看看是不是这个名字的另一种写法`)
+    if (!geo)
+      return fail(`没找到「${city}」，看看是不是这个名字的另一种写法`)
     return ok(geo)
-  } catch (error) {
+  }
+  catch (error) {
     return fail(errorText(error, '查询城市失败'))
   }
 }
@@ -47,15 +45,17 @@ export async function fetchWeather(geo: WeatherGeo): Promise<Result<WeatherView>
   const fetched = await guard(
     invoke<WeatherFetchResult>('weather_forecast', {
       latitude: geo.latitude,
-      longitude: geo.longitude
+      longitude: geo.longitude,
     }),
-    '获取天气失败'
+    '获取天气失败',
   )
-  if (!fetched.ok || !fetched.data) return fail(fetched.error ?? '获取天气失败')
+  if (!fetched.ok || !fetched.data)
+    return fail(fetched.error ?? '获取天气失败')
   if (fetched.data.status !== 200) {
     return fail(`获取天气失败（HTTP ${fetched.data.status}）`)
   }
   const view = parseWeatherForecast(fetched.data.body)
-  if (!view) return fail('天气接口回了个空壳，解析不出实况')
+  if (!view)
+    return fail('天气接口回了个空壳，解析不出实况')
   return ok(view)
 }

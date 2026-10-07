@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { MailAccount } from '@workbench/mail'
+import { MAIL_ACCOUNTS_MAX, mailAccountReady, presetForAddress, sanitizeMailAccount } from '@workbench/mail'
 /**
  * 邮箱账户的管理弹层：上面是已配账户的清单（逐个编辑 / 删除，可同时配多个 ——
  * 收件箱合并成一份按时间排），下面是表单 —— 新增一个账户，或编辑选中的那个。
@@ -17,21 +19,13 @@
  * 与 AI 服务、添加项目那几个同一条（见 AGENTS.md 第 4 节）。
  */
 import { computed, ref, watch } from 'vue'
-import {
-  MAIL_ACCOUNTS_MAX,
-  mailAccountReady,
-  presetForAddress,
-  sanitizeMailAccount,
-  type MailAccount
-} from '@workbench/mail'
 import AppDialog from '@/components/AppDialog.vue'
-import { clearMailKey, mailKeyState, saveMailKey, verifyMailAccount } from '@/workbench/mail'
-import { useSettingsStore } from '@/stores/settings'
 import { confirmAction, notifyError, notifySuccess } from '@/notify'
+import { useSettingsStore } from '@/stores/settings'
+import { clearMailKey, mailKeyState, saveMailKey, verifyMailAccount } from '@/workbench/mail'
 
-const visible = defineModel<boolean>({ required: true })
 const emit = defineEmits<{ saved: [] }>()
-
+const visible = defineModel<boolean>({ required: true })
 const settings = useSettingsStore()
 
 /** 已配的账户清单（落盘的那份） */
@@ -66,7 +60,8 @@ const removing = ref<string | null>(null)
 
 /** 每次打开都回新增模式：清单看得见现有的，表单是空的 */
 watch(visible, (open) => {
-  if (open) startAdd()
+  if (open)
+    startAdd()
 })
 
 /** 表单回到新增模式：全空 */
@@ -108,7 +103,8 @@ function startEdit(account: MailAccount): void {
 
 async function refreshKeyState(): Promise<void> {
   keyConfigured.value = false
-  if (!address.value.includes('@')) return
+  if (!address.value.includes('@'))
+    return
   const result = await mailKeyState(address.value)
   keyConfigured.value = result.ok && result.data === true
 }
@@ -122,8 +118,10 @@ watch(address, () => {
   void refreshKeyState()
   const preset = presetForAddress(address.value)
   // 认不出的域名（且像是个地址）：服务器得自己填，自动摊开；认得出的静静带出预设
-  if (address.value.includes('@') && !preset) advanced.value = true
-  if (hostsTouched.value || !preset) return
+  if (address.value.includes('@') && !preset)
+    advanced.value = true
+  if (hostsTouched.value || !preset)
+    return
   imapHost.value = preset.imapHost
   imapPort.value = preset.imapPort
   smtpHost.value = preset.smtpHost
@@ -137,22 +135,27 @@ function draftOf(): MailAccount {
     imapHost: imapHost.value,
     imapPort: Number(imapPort.value) || 0,
     smtpHost: smtpHost.value,
-    smtpPort: Number(smtpPort.value) || 0
+    smtpPort: Number(smtpPort.value) || 0,
   })
 }
 
 /** 保存前过一遍必填项；差什么就地说什么 */
 function validate(draft: MailAccount, secret: string): string {
-  if (!draft.address) return '先填邮箱地址'
+  if (!draft.address)
+    return '先填邮箱地址'
   if (!editing.value) {
-    if (accounts.value.some((account) => account.address === draft.address)) {
+    if (accounts.value.some(account => account.address === draft.address)) {
       return '这个地址已经配过了 —— 在上面的清单里点「编辑」改它'
     }
-    if (accounts.value.length >= MAIL_ACCOUNTS_MAX) return `最多配 ${MAIL_ACCOUNTS_MAX} 个邮箱`
+    if (accounts.value.length >= MAIL_ACCOUNTS_MAX)
+      return `最多配 ${MAIL_ACCOUNTS_MAX} 个邮箱`
   }
-  if (!draft.imapHost || !draft.imapPort) return '收件服务器（IMAP）没填全 —— 在下面的「服务器设置」里补上'
-  if (!draft.smtpHost || !draft.smtpPort) return '发件服务器（SMTP）没填全 —— 在下面的「服务器设置」里补上'
-  if (!secret && !keyConfigured.value) return '先填授权码（邮箱后台「POP3/SMTP/IMAP」里生成的那个，不是登录密码）'
+  if (!draft.imapHost || !draft.imapPort)
+    return '收件服务器（IMAP）没填全 —— 在下面的「服务器设置」里补上'
+  if (!draft.smtpHost || !draft.smtpPort)
+    return '发件服务器（SMTP）没填全 —— 在下面的「服务器设置」里补上'
+  if (!secret && !keyConfigured.value)
+    return '先填授权码（邮箱后台「POP3/SMTP/IMAP」里生成的那个，不是登录密码）'
   return ''
 }
 
@@ -160,7 +163,8 @@ async function save(): Promise<void> {
   const draft = draftOf()
   const secret = secretDraft.value.trim()
   formError.value = validate(draft, secret)
-  if (formError.value) return
+  if (formError.value)
+    return
 
   verifying.value = true
   saveError.value = ''
@@ -174,7 +178,7 @@ async function save(): Promise<void> {
     }
   }
   const next = editing.value
-    ? accounts.value.map((account) => (account.address === editing.value ? draft : account))
+    ? accounts.value.map(account => (account.address === editing.value ? draft : account))
     : [...accounts.value, draft]
   const updated = await settings.updateSettings({ mailAccounts: next })
   if (!updated) {
@@ -195,7 +199,8 @@ async function save(): Promise<void> {
   emit('saved')
   if (editing.value) {
     visible.value = false
-  } else {
+  }
+  else {
     // 新增完留在弹层里（清单里立刻能看到），接着添下一个
     startAdd()
   }
@@ -212,27 +217,30 @@ const pollMinutes = computed<number>({
   get: () => settings.settings.mailPollMinutes,
   set: (value) => {
     void settings.updateSettings({ mailPollMinutes: value })
-  }
+  },
 })
 
 /** 删除走一次确认：清掉的是这个账户的授权码与配置，误手滑还有一次回头的机会 */
 async function remove(account: MailAccount): Promise<void> {
-  if (removing.value) return
+  if (removing.value)
+    return
   if (!(await confirmAction('它的授权码也会从凭据管理器清掉，要重新填才能再收发这个邮箱的信。', `删除 ${account.address}`))) {
     return
   }
   removing.value = account.address
   const cleared = await clearMailKey(account.address)
-  if (!cleared.ok) notifyError(cleared.error ?? '授权码没清掉，可以到系统凭据管理器里手动删')
+  if (!cleared.ok)
+    notifyError(cleared.error ?? '授权码没清掉，可以到系统凭据管理器里手动删')
   const updated = await settings.updateSettings({
-    mailAccounts: accounts.value.filter((entry) => entry.address !== account.address)
+    mailAccounts: accounts.value.filter(entry => entry.address !== account.address),
   })
   removing.value = null
   if (!updated) {
     saveError.value = '删除没有完成（设置没写回去），再试一次'
     return
   }
-  if (editing.value === account.address) startAdd()
+  if (editing.value === account.address)
+    startAdd()
   notifySuccess('邮箱已删除')
   emit('saved')
 }
@@ -250,7 +258,9 @@ async function remove(account: MailAccount): Promise<void> {
           :class="{ 'is-editing': account.address === editing }"
         >
           <span class="acct__addr" :title="account.address">{{ account.address }}</span>
-          <el-button text size="small" @click="startEdit(account)">编辑</el-button>
+          <el-button text size="small" @click="startEdit(account)">
+            编辑
+          </el-button>
           <el-button
             text
             size="small"
@@ -265,9 +275,13 @@ async function remove(account: MailAccount): Promise<void> {
 
       <p v-if="editing" class="acct__mode">
         正在编辑 {{ editing }}
-        <el-button link size="small" @click="startAdd">不编辑了</el-button>
+        <el-button link size="small" @click="startAdd">
+          不编辑了
+        </el-button>
       </p>
-      <p v-else-if="accounts.length" class="acct__mode">添加邮箱</p>
+      <p v-else-if="accounts.length" class="acct__mode">
+        添加邮箱
+      </p>
 
       <el-form label-position="top" class="acct__form" @submit.prevent>
         <el-form-item label="邮箱地址">
@@ -342,14 +356,20 @@ async function remove(account: MailAccount): Promise<void> {
         </el-select>
       </div>
 
-      <p v-if="formError" class="acct__error">{{ formError }}</p>
-      <p v-if="saveError" class="acct__error">{{ saveError }}</p>
+      <p v-if="formError" class="acct__error">
+        {{ formError }}
+      </p>
+      <p v-if="saveError" class="acct__error">
+        {{ saveError }}
+      </p>
     </div>
 
     <template #footer>
       <div class="acct__footer">
         <span class="acct__footer-spacer" />
-        <el-button @click="visible = false">取消</el-button>
+        <el-button @click="visible = false">
+          取消
+        </el-button>
         <el-button type="primary" :loading="verifying" :disabled="!ready && !address" @click="save">
           {{ editing ? '保存修改' : '验证并保存' }}
         </el-button>

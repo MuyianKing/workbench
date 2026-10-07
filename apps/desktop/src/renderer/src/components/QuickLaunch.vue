@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import type { QuickApp } from '@/types'
+import { MoreFilled, Plus } from '@element-plus/icons-vue'
+import { moveToPosition } from '@workbench/core'
 /**
  * 首页的「快捷启动」：常用软件挂在一块工作台面板里，点一下就启动。
  *
@@ -10,14 +13,11 @@
  * 标题固定不动，程序多了只在中间那块滚动区里滚动，面板不会跟着程序数量长高。
  */
 import { computed, ref } from 'vue'
-import { MoreFilled, Plus } from '@element-plus/icons-vue'
-import { moveToPosition } from '@workbench/core'
+import PanelLoading from '@/components/PanelLoading.vue'
 import { DRAG_MIME } from '@/drag-mime'
 import { confirmAction } from '@/notify'
-import { useProjectsStore } from '@/stores/projects'
 import { useCatalogStore } from '@/stores/catalog'
-import PanelLoading from '@/components/PanelLoading.vue'
-import type { QuickApp } from '@/types'
+import { useProjectsStore } from '@/stores/projects'
 
 const store = useProjectsStore()
 const catalog = useCatalogStore()
@@ -49,32 +49,39 @@ function launch(app: QuickApp): void {
 }
 
 function onMore(app: QuickApp, command: string): void {
-  if (command === 'edit') catalog.openQuickDialog(app.id)
-  else if (command === 'reveal') void store.reveal(app.target)
-  else if (command === 'remove') void remove(app)
+  if (command === 'edit')
+    catalog.openQuickDialog(app.id)
+  else if (command === 'reveal')
+    void store.reveal(app.target)
+  else if (command === 'remove')
+    void remove(app)
 }
 
 async function remove(app: QuickApp): Promise<void> {
   const agreed = await confirmAction(
     `确定把「${app.name}」从快捷启动里移除？程序本身不会被卸载或删除。`,
     '移除常用软件',
-    { confirmButtonText: '移除' }
+    { confirmButtonText: '移除' },
   )
-  if (!agreed) return
+  if (!agreed)
+    return
   await catalog.removeQuickApp(app.id)
 }
 
 function onDragStart(app: QuickApp, event: DragEvent): void {
-  if (!event.dataTransfer) return
+  if (!event.dataTransfer)
+    return
   draggingId.value = app.id
   event.dataTransfer.setData(DRAG_MIME.quickApp, app.id)
   event.dataTransfer.effectAllowed = 'move'
 }
 
 function onDragOver(app: QuickApp, event: DragEvent): void {
-  if (!draggingId.value || draggingId.value === app.id) return
+  if (!draggingId.value || draggingId.value === app.id)
+    return
   event.preventDefault()
-  if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
+  if (event.dataTransfer)
+    event.dataTransfer.dropEffect = 'move'
   dragOverId.value = app.id
 }
 
@@ -87,14 +94,16 @@ function onDragEnd(): void {
 function onDrop(app: QuickApp): void {
   const from = draggingId.value
   onDragEnd()
-  if (!from || from === app.id) return
+  if (!from || from === app.id)
+    return
 
   const next = moveToPosition(
-    apps.value.map((item) => item.id),
+    apps.value.map(item => item.id),
     from,
-    app.id
+    app.id,
   )
-  if (next) void catalog.reorderQuickApps(next)
+  if (next)
+    void catalog.reorderQuickApps(next)
 }
 </script>
 
@@ -124,7 +133,9 @@ function onDrop(app: QuickApp): void {
       <!-- 首次取数没回来前不说「还没有」：还没问到与真的没有是两回事 -->
       <PanelLoading v-if="!store.ready" text="正在读取常用软件…" />
 
-      <p v-else-if="!apps.length" class="launch__empty">还没有常用软件，点右上角的 + 添加</p>
+      <p v-else-if="!apps.length" class="launch__empty">
+        还没有常用软件，点右上角的 + 添加
+      </p>
 
       <ul v-else class="launch__list">
         <li
@@ -133,7 +144,7 @@ function onDrop(app: QuickApp): void {
           class="launch__item"
           :class="{
             'is-missing': catalog.isQuickAppMissing(app.id),
-            'is-dragover': dragOverId === app.id
+            'is-dragover': dragOverId === app.id,
           }"
           role="button"
           tabindex="0"
@@ -152,7 +163,7 @@ function onDrop(app: QuickApp): void {
           <el-tooltip :content="tipOf(app)" placement="top" :show-after="250">
             <span class="launch__hit">
               <span class="launch__icon">
-                <img v-if="iconOf(app)" class="launch__img" :src="iconOf(app)" alt="" />
+                <img v-if="iconOf(app)" class="launch__img" :src="iconOf(app)" alt="">
                 <template v-else>{{ initialOf(app) }}</template>
               </span>
               <span
@@ -182,9 +193,15 @@ function onDrop(app: QuickApp): void {
             </button>
             <template #dropdown>
               <el-dropdown-menu>
-                <el-dropdown-item command="edit">编辑…</el-dropdown-item>
-                <el-dropdown-item command="reveal">打开所在位置</el-dropdown-item>
-                <el-dropdown-item command="remove" divided>从快捷启动移除</el-dropdown-item>
+                <el-dropdown-item command="edit">
+                  编辑…
+                </el-dropdown-item>
+                <el-dropdown-item command="reveal">
+                  打开所在位置
+                </el-dropdown-item>
+                <el-dropdown-item command="remove" divided>
+                  从快捷启动移除
+                </el-dropdown-item>
               </el-dropdown-menu>
             </template>
           </el-dropdown>

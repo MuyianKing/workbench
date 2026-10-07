@@ -10,8 +10,8 @@
  * （buildMime）在 @workbench/mail 包（有单测），策略（缓存、拉多少封）在 stores/mail.ts。
  */
 import type { MailAccount } from '@workbench/mail'
-import { fail, ok } from '@workbench/core'
 import type { Result } from '@/types'
+import { fail, ok } from '@workbench/core'
 import { errorText, guard, invoke } from './bridge'
 
 /** Rust 回来的列表摘要（与 mail.rs 的 MailSummary 一致，serde camelCase） */
@@ -33,9 +33,9 @@ export async function verifyMailAccount(account: MailAccount, secret: string): P
       imapHost: account.imapHost,
       imapPort: account.imapPort,
       smtpHost: account.smtpHost,
-      smtpPort: account.smtpPort
+      smtpPort: account.smtpPort,
     }),
-    '验证失败'
+    '验证失败',
   )
 }
 
@@ -61,9 +61,9 @@ export async function fetchMailList(account: MailAccount, limit: number): Promis
       address: account.address,
       imapHost: account.imapHost,
       imapPort: account.imapPort,
-      limit
+      limit,
     }),
-    '拉取收件箱失败'
+    '拉取收件箱失败',
   )
 }
 
@@ -75,9 +75,9 @@ export async function fetchMailBody(account: MailAccount, uid: number, markSeen:
       imapHost: account.imapHost,
       imapPort: account.imapPort,
       uid,
-      markSeen
+      markSeen,
     }),
-    '读取邮件失败'
+    '读取邮件失败',
   )
 }
 
@@ -89,9 +89,9 @@ export async function setMailSeen(account: MailAccount, uid: number, seen: boole
       imapHost: account.imapHost,
       imapPort: account.imapPort,
       uid,
-      seen
+      seen,
     }),
-    '标记已读失败'
+    '标记已读失败',
   )
 }
 
@@ -102,9 +102,9 @@ export async function deleteMails(account: MailAccount, uids: number[]): Promise
       address: account.address,
       imapHost: account.imapHost,
       imapPort: account.imapPort,
-      uids
+      uids,
     }),
-    '删除失败'
+    '删除失败',
   )
 }
 
@@ -116,9 +116,9 @@ export async function sendMail(account: MailAccount, to: string[], mime: string)
       smtpHost: account.smtpHost,
       smtpPort: account.smtpPort,
       to,
-      mime
+      mime,
     }),
-    '发送失败'
+    '发送失败',
   )
 }
 
@@ -127,7 +127,8 @@ export async function saveMailAttachment(path: string, base64: string): Promise<
   try {
     const saved = await invoke<null>('mail_attachment_save', { path, data: base64 })
     return ok(saved)
-  } catch (error) {
+  }
+  catch (error) {
     return fail(errorText(error, '保存附件失败'))
   }
 }
@@ -140,18 +141,18 @@ export async function saveMailAttachment(path: string, base64: string): Promise<
 export async function registerMailWatch(
   accounts: MailAccount[],
   bulkSenders: string[],
-  pollMinutes: number
+  pollMinutes: number,
 ): Promise<Result<null>> {
   return guard(
     invoke<null>('mail_watch_register', {
-      accounts: accounts.map((account) => ({
+      accounts: accounts.map(account => ({
         address: account.address,
         imapHost: account.imapHost,
-        imapPort: account.imapPort
+        imapPort: account.imapPort,
       })),
       bulkSenders,
-      pollMinutes
+      pollMinutes,
     }),
-    '登记邮件监视失败'
+    '登记邮件监视失败',
   )
 }

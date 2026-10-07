@@ -1,22 +1,6 @@
-import { describe, expect, it } from 'vitest'
-import {
-  SKILL_VERSION_DEFAULT,
-  compareSkillVersions,
-  hasSkillFrontmatter,
-  libraryInNotebook,
-  mergeVersionCopies,
-  parseSkillFrontmatter,
-  sanitizeSkillSyncDir,
-  skillFileRel,
-  skillMdTemplate,
-  skillRel,
-  skillVersionOf,
-  skillVersionProblem,
-  toSkillEntry,
-  withoutSkillDir,
-  yamlScalar
-} from './skills'
 import type { NoteNode } from '@workbench/notes'
+import { describe, expect, it } from 'vitest'
+import { compareSkillVersions, hasSkillFrontmatter, libraryInNotebook, mergeVersionCopies, parseSkillFrontmatter, sanitizeSkillSyncDir, SKILL_VERSION_DEFAULT, skillFileRel, skillMdTemplate, skillRel, skillVersionOf, skillVersionProblem, toSkillEntry, withoutSkillDir, yamlScalar } from './skills'
 
 describe('parseSkillFrontmatter', () => {
   it('提取 name、description 与 version', () => {
@@ -27,12 +11,12 @@ describe('parseSkillFrontmatter', () => {
       'version: 1.2.0',
       '---',
       '',
-      '# 提交规范'
+      '# 提交规范',
     ].join('\n')
     expect(parseSkillFrontmatter(text)).toEqual({
       name: '提交规范',
       description: '按约定式提交写 commit message',
-      version: '1.2.0'
+      version: '1.2.0',
     })
   })
 
@@ -41,7 +25,7 @@ describe('parseSkillFrontmatter', () => {
     expect(parseSkillFrontmatter(text)).toEqual({
       name: 'my-skill',
       description: '说了: 冒号也行',
-      version: '2.0.0'
+      version: '2.0.0',
     })
   })
 
@@ -56,7 +40,7 @@ describe('parseSkillFrontmatter', () => {
     expect(parseSkillFrontmatter(undefined as unknown as string)).toEqual({
       name: '',
       description: '',
-      version: ''
+      version: '',
     })
   })
 
@@ -81,10 +65,10 @@ describe('版本：保存的必经门槛', () => {
 
   it('没写 version：有没有 frontmatter 各说各的', () => {
     expect(skillVersionProblem('---\nname: n\n---\n')).toBe(
-      'frontmatter 里还没有 version，补一行 version: 1.0.0 再保存'
+      'frontmatter 里还没有 version，补一行 version: 1.0.0 再保存',
     )
     expect(skillVersionProblem('# 没有围栏的正文')).toBe(
-      'SKILL.md 开头要有 frontmatter（--- 包住的那段），version 写在那里（如 version: 1.0.0）'
+      'SKILL.md 开头要有 frontmatter（--- 包住的那段），version 写在那里（如 version: 1.0.0）',
     )
     expect(hasSkillFrontmatter('---\nname: n\n---\n')).toBe(true)
     expect(hasSkillFrontmatter('# 没有围栏')).toBe(false)
@@ -123,7 +107,7 @@ describe('yamlScalar / skillMdTemplate', () => {
     expect(yamlScalar('my-skill')).toBe('my-skill')
     expect(yamlScalar('说了: 冒号')).toBe('"说了: 冒号"')
     expect(yamlScalar('带"引号"')).toBe('"带\\"引号\\""')
-    expect(yamlScalar('')).toBe("''")
+    expect(yamlScalar('')).toBe('\'\'')
   })
 
   it('模板写出来再解析，取回的就是填进去的（版本取默认那档）', () => {
@@ -162,7 +146,7 @@ describe('sanitizeSkillSyncDir', () => {
 describe('libraryInNotebook', () => {
   it('技能库在笔记本里：给出它相对笔记本的路径（两种分隔符都认）', () => {
     expect(libraryInNotebook('D:/notes/agent-knowledge/skills', 'D:/notes')).toBe(
-      'agent-knowledge/skills'
+      'agent-knowledge/skills',
     )
     expect(libraryInNotebook('D:\\notes\\skills', 'D:/notes')).toBe('skills')
     expect(libraryInNotebook('D:/notes/skills/', 'D:/notes')).toBe('skills')
@@ -191,14 +175,14 @@ describe('路径拼接与摘要', () => {
 
   it('toSkillEntry：名字缺省回落 id，版本归一化，认不出的条目丢掉', () => {
     expect(
-      toSkillEntry({ id: 'alpha', fileCount: 2, skillMd: '---\nname: 阿尔法\nversion: v1.0.0\n---\n' })
+      toSkillEntry({ id: 'alpha', fileCount: 2, skillMd: '---\nname: 阿尔法\nversion: v1.0.0\n---\n' }),
     ).toEqual({
       id: 'alpha',
       name: '阿尔法',
       description: '',
       version: '1.0.0',
       hasSkillMd: true,
-      fileCount: 2
+      fileCount: 2,
     })
 
     const noMd = toSkillEntry({ id: 'beta', skillMd: null })
@@ -218,7 +202,7 @@ describe('mergeVersionCopies', () => {
   it('base 是现在这份、incoming 是所选那一版，两侧都在的看内容差异', () => {
     const merged = mergeVersionCopies(
       [{ rel: 'SKILL.md', content: '现在的\n' }],
-      [{ rel: 'SKILL.md', content: '那一版\n' }]
+      [{ rel: 'SKILL.md', content: '那一版\n' }],
     )
     expect(merged).toEqual([{ rel: 'SKILL.md', base: '现在的\n', incoming: '那一版\n' }])
   })
@@ -228,10 +212,10 @@ describe('mergeVersionCopies', () => {
       [{ rel: 'SKILL.md', content: '现在的\n' }],
       [
         { rel: 'SKILL.md', content: '那一版\n' },
-        { rel: '旧脚本.sh', content: 'echo 1\n' }
-      ]
+        { rel: '旧脚本.sh', content: 'echo 1\n' },
+      ],
     )
-    expect(merged.map((file) => file.rel)).toEqual(['SKILL.md', '旧脚本.sh'])
+    expect(merged.map(file => file.rel)).toEqual(['SKILL.md', '旧脚本.sh'])
     expect(merged[1]).toEqual({ rel: '旧脚本.sh', base: '', incoming: 'echo 1\n' })
   })
 
@@ -239,20 +223,20 @@ describe('mergeVersionCopies', () => {
     const merged = mergeVersionCopies(
       [
         { rel: 'SKILL.md', content: '现在的\n' },
-        { rel: '后来加的.md', content: '新内容\n' }
+        { rel: '后来加的.md', content: '新内容\n' },
       ],
-      [{ rel: 'SKILL.md', content: '那一版\n' }]
+      [{ rel: 'SKILL.md', content: '那一版\n' }],
     )
     expect(merged).toEqual([
       { rel: 'SKILL.md', base: '现在的\n', incoming: '那一版\n' },
-      { rel: '后来加的.md', base: '新内容\n', incoming: null }
+      { rel: '后来加的.md', base: '新内容\n', incoming: null },
     ])
   })
 
   it('读不出文本的（二进制）如实留空串 / null，不编内容', () => {
     const merged = mergeVersionCopies(
       [{ rel: 'logo.png', content: null }],
-      [{ rel: 'logo.png', content: null }]
+      [{ rel: 'logo.png', content: null }],
     )
     expect(merged).toEqual([{ rel: 'logo.png', base: '', incoming: null }])
   })
@@ -260,9 +244,9 @@ describe('mergeVersionCopies', () => {
   it('结果按 rel 的码点顺序排（与 Rust 递回来的那一侧同一口径），与输入顺序无关', () => {
     const merged = mergeVersionCopies(
       [{ rel: 'z.md', content: 'z' }, { rel: 'a.md', content: 'a' }],
-      [{ rel: 'm.md', content: 'm' }]
+      [{ rel: 'm.md', content: 'm' }],
     )
-    expect(merged.map((file) => file.rel)).toEqual(['a.md', 'm.md', 'z.md'])
+    expect(merged.map(file => file.rel)).toEqual(['a.md', 'm.md', 'z.md'])
   })
 })
 
@@ -272,7 +256,7 @@ describe('withoutSkillDir', () => {
   it('顶层同名的目录被藏掉，其余原样保留', () => {
     const nodes = [node('skills'), node('工作'), node('skills/inner')]
     const kept = withoutSkillDir(nodes, 'skills')
-    expect(kept.map((item) => item.rel)).toEqual(['工作', 'skills/inner'])
+    expect(kept.map(item => item.rel)).toEqual(['工作', 'skills/inner'])
   })
 
   it('多段的技能库路径与空路径都原样返回', () => {

@@ -41,25 +41,25 @@ export interface ActiveSession {
  */
 export function withSessionRecorded(
   sessions: ActiveSession[] | undefined,
-  entry: ActiveSession
+  entry: ActiveSession,
 ): ActiveSession[] {
-  const rest = (sessions ?? []).filter((item) => item.pid !== entry.pid)
+  const rest = (sessions ?? []).filter(item => item.pid !== entry.pid)
   return [...rest, entry]
 }
 
 /** 摘掉某个 PID 的记录（进程正常结束时调用） */
 export function withoutSession(
   sessions: ActiveSession[] | undefined,
-  pid: number
+  pid: number,
 ): ActiveSession[] {
-  return (sessions ?? []).filter((item) => item.pid !== pid)
+  return (sessions ?? []).filter(item => item.pid !== pid)
 }
 
 export interface ReapDeps {
   /** 进程创建时间（毫秒，Unix 纪元）；进程已退出或打不开时返回 null */
-  createdAt(pid: number): Promise<number | null>
+  createdAt: (pid: number) => Promise<number | null>
   /** 按进程树结束 */
-  killTree(pid: number): Promise<void>
+  killTree: (pid: number) => Promise<void>
 }
 
 export interface ReapResult {
@@ -78,10 +78,12 @@ export interface ReapResult {
  */
 export function isSameProcess(
   session: Pick<ActiveSession, 'processCreatedAt'>,
-  actualCreatedAt: number | null
+  actualCreatedAt: number | null,
 ): boolean {
-  if (actualCreatedAt === null) return false
-  if (typeof session.processCreatedAt !== 'number') return false
+  if (actualCreatedAt === null)
+    return false
+  if (typeof session.processCreatedAt !== 'number')
+    return false
   return session.processCreatedAt === actualCreatedAt
 }
 
@@ -95,23 +97,26 @@ export function isSameProcess(
  */
 export function isSameOwner(
   session: Pick<ActiveSession, 'ownerCreatedAt'>,
-  actualCreatedAt: number | null
+  actualCreatedAt: number | null,
 ): boolean {
-  if (actualCreatedAt === null) return false
-  if (typeof session.ownerCreatedAt !== 'number') return false
+  if (actualCreatedAt === null)
+    return false
+  if (typeof session.ownerCreatedAt !== 'number')
+    return false
   return session.ownerCreatedAt === actualCreatedAt
 }
 
 /** 启动时调用：清理上次残留的子进程，返回仍有效的会话记录与处理说明 */
 export async function reapOrphanSessions(
   sessions: ActiveSession[] | undefined,
-  deps: ReapDeps
+  deps: ReapDeps,
 ): Promise<ReapResult> {
   const notes: string[] = []
   const kept: ActiveSession[] = []
 
   const list = Array.isArray(sessions) ? sessions.filter(Boolean) : []
-  if (list.length === 0) return { killed: 0, kept: [], notes }
+  if (list.length === 0)
+    return { killed: 0, kept: [], notes }
 
   let killed = 0
   for (const session of list) {
@@ -127,7 +132,8 @@ export async function reapOrphanSessions(
 
     const created = await deps.createdAt(session.pid)
     // 进程早没了，记录一并丢弃
-    if (created === null) continue
+    if (created === null)
+      continue
 
     if (!isSameProcess(session, created)) {
       notes.push(`PID ${session.pid} 的创建时间与记录不符，已跳过（可能被系统复用）`)
@@ -138,9 +144,10 @@ export async function reapOrphanSessions(
       await deps.killTree(session.pid)
       killed += 1
       notes.push(`已结束上次残留的进程 PID ${session.pid}（${session.command}）`)
-    } catch (error) {
+    }
+    catch (error) {
       notes.push(
-        `结束残留进程 PID ${session.pid} 失败：${error instanceof Error ? error.message : String(error)}`
+        `结束残留进程 PID ${session.pid} 失败：${error instanceof Error ? error.message : String(error)}`,
       )
     }
   }

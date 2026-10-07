@@ -18,7 +18,7 @@ function stubViewport(width: number, height: number): void {
 /** 面板桩：只用到 getBoundingClientRect */
 function panelOf(width: number, height: number): HTMLElement {
   return {
-    getBoundingClientRect: () => ({ width, height })
+    getBoundingClientRect: () => ({ width, height }),
   } as unknown as HTMLElement
 }
 
@@ -33,7 +33,7 @@ describe('useFloatingPosition', () => {
     const { pos, place } = useFloatingPosition({
       x: () => 300,
       y: () => 200,
-      panel: () => panel
+      panel: () => panel,
     })
 
     place()
@@ -46,13 +46,13 @@ describe('useFloatingPosition', () => {
     const { pos, place } = useFloatingPosition({
       x: () => 950,
       y: () => 760,
-      panel: () => panel
+      panel: () => panel,
     })
 
     place()
     expect(pos.value).toEqual({
       left: 1000 - 200 - FLOATING_EDGE,
-      top: 800 - 100 - FLOATING_EDGE
+      top: 800 - 100 - FLOATING_EDGE,
     })
   })
 
@@ -62,7 +62,7 @@ describe('useFloatingPosition', () => {
     const { pos, place } = useFloatingPosition({
       x: () => 1,
       y: () => 2,
-      panel: () => panel
+      panel: () => panel,
     })
 
     place()
@@ -79,7 +79,7 @@ describe('useFloatingPosition', () => {
       x: () => x.value,
       y: () => y.value,
       panel: () => panel,
-      follow: true
+      follow: true,
     })
 
     x.value = 500
@@ -93,7 +93,7 @@ describe('useFloatingPosition', () => {
     const { pos, place } = useFloatingPosition({
       x: () => 300,
       y: () => 200,
-      panel: () => null
+      panel: () => null,
     })
 
     place()

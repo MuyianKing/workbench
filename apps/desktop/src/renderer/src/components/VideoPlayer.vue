@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import type { VideoNode } from '@workbench/video'
+import { Close, Monitor } from '@element-plus/icons-vue'
+import { fitVideoFloatGeometry, nextVideoNode, nextVideoRate, resizeVideoFloat, VIDEO_NEXT_SECONDS, VIDEO_SEEK_SECONDS } from '@workbench/video'
 /**
  * 视频播放器本体：**全局单例**，挂在 App.vue 上（与终端面板同层），不随换页切换。
  *
@@ -19,22 +22,12 @@
  * 没有正播的视频时一个键都不拦。
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { Close, Monitor } from '@element-plus/icons-vue'
-import {
-  fitVideoFloatGeometry,
-  nextVideoNode,
-  nextVideoRate,
-  resizeVideoFloat,
-  VIDEO_NEXT_SECONDS,
-  VIDEO_SEEK_SECONDS
-} from '@workbench/video'
-import type { VideoNode } from '@workbench/video'
-import { useVideoStore } from '@/stores/video'
-import { useSettingsStore } from '@/stores/settings'
-import { useNavStore } from '@/stores/nav'
+import VideoRateMenu from '@/components/VideoRateMenu.vue'
 import { startPointerDrag } from '@/composables/use-pointer-drag'
 import { useVideoStageHost } from '@/composables/use-video-stage'
-import VideoRateMenu from '@/components/VideoRateMenu.vue'
+import { useNavStore } from '@/stores/nav'
+import { useSettingsStore } from '@/stores/settings'
+import { useVideoStore } from '@/stores/video'
 
 const store = useVideoStore()
 const settings = useSettingsStore()
@@ -53,7 +46,8 @@ const playerRef = ref<HTMLVideoElement | null>(null)
 
 function applyRate(): void {
   const video = playerRef.value
-  if (!video) return
+  if (!video)
+    return
   // defaultPlaybackRate 一起设：换视频重载后浏览器会把它复位回默认值
   video.defaultPlaybackRate = store.rate
   video.playbackRate = store.rate
@@ -65,7 +59,7 @@ function stepRate(direction: 1 | -1): void {
 
 watch(
   () => store.rate,
-  () => applyRate()
+  () => applyRate(),
 )
 
 /** 新视频挂上来（元素随 :key 整个换新）：把速率贴上去；播不播看 store 的意图 ——
@@ -75,13 +69,15 @@ watch(
   async () => {
     // 换了视频，上一部播完时摆出的「即将播放」就算数了：无论是自动接过去的还是用户自己挑的
     clearUpNext()
-    if (!store.active) return
+    if (!store.active)
+      return
     await nextTick()
     applyRate()
-    if (!store.autoplayNext) return
+    if (!store.autoplayNext)
+      return
     // 播不出来（还没缓冲完、或浏览器拦了自动播放）就停在原处，用户按空格再来
     void playerRef.value?.play().catch(() => {})
-  }
+  },
 )
 
 // ---------- 播完自动接下去 ----------
@@ -114,21 +110,25 @@ function clearUpNext(): void {
 function goUpNext(): void {
   const target = upNext.value
   clearUpNext()
-  if (target) store.select(target.rel)
+  if (target)
+    store.select(target.rel)
 }
 
 function onEnded(): void {
   const current = store.active
-  if (!current) return
+  if (!current)
+    return
   const next = nextVideoNode(store.nodes, current.rel)
-  if (!next) return
+  if (!next)
+    return
 
   clearUpNext()
   upNext.value = next
   upNextLeft.value = VIDEO_NEXT_SECONDS
   upNextTimer = setInterval(() => {
     upNextLeft.value -= 1
-    if (upNextLeft.value > 0) return
+    if (upNextLeft.value > 0)
+      return
     goUpNext()
   }, 1000)
 }
@@ -140,15 +140,18 @@ function cancelUpNext(): void {
 
 function togglePlay(): void {
   const video = playerRef.value
-  if (!video) return
-  if (video.paused) void video.play().catch(() => {})
+  if (!video)
+    return
+  if (video.paused)
+    void video.play().catch(() => {})
   else video.pause()
 }
 
 /** 快进 / 快退：夹在 [0, 时长] 里，元数据还没到位（duration 是 NaN）就不动 */
 function seekBy(delta: number): void {
   const video = playerRef.value
-  if (!video || !Number.isFinite(video.duration)) return
+  if (!video || !Number.isFinite(video.duration))
+    return
   video.currentTime = Math.max(0, Math.min(video.duration, video.currentTime + delta))
 }
 
@@ -174,23 +177,28 @@ function typingOn(event: KeyboardEvent): boolean {
  * 按住不放时 Space 只算一次（连发的 keydown 不再逐次 toggle），方向键保持连发（连续快进）。
  */
 function onKeydown(event: KeyboardEvent): void {
-  if (!store.active || event.isComposing || typingOn(event)) return
+  if (!store.active || event.isComposing || typingOn(event))
+    return
 
   if (floating.value) {
-    if (event.code !== 'Space') return
+    if (event.code !== 'Space')
+      return
     event.preventDefault()
     event.stopPropagation()
-    if (!event.repeat) togglePlay()
+    if (!event.repeat)
+      togglePlay()
     return
   }
 
-  if (!HANDLED_KEYS.has(event.code)) return
+  if (!HANDLED_KEYS.has(event.code))
+    return
   event.preventDefault()
   event.stopPropagation()
 
   switch (event.code) {
     case 'Space':
-      if (!event.repeat) togglePlay()
+      if (!event.repeat)
+        togglePlay()
       break
     case 'ArrowLeft':
       seekBy(-VIDEO_SEEK_SECONDS)
@@ -209,7 +217,8 @@ function onKeydown(event: KeyboardEvent): void {
 
 /** 空格的 keyup 一起拦：媒体控件在 keyup 上还留着半只手，这里把门关死（见 VideoView 时代的注释） */
 function onKeyup(event: KeyboardEvent): void {
-  if (!store.active || event.code !== 'Space' || event.isComposing || typingOn(event)) return
+  if (!store.active || event.code !== 'Space' || event.isComposing || typingOn(event))
+    return
 
   event.preventDefault()
   event.stopPropagation()
@@ -220,14 +229,15 @@ function bindKeys(bind: boolean): void {
   if (bind) {
     window.addEventListener('keydown', onKeydown, true)
     window.addEventListener('keyup', onKeyup, true)
-  } else {
+  }
+  else {
     window.removeEventListener('keydown', onKeydown, true)
     window.removeEventListener('keyup', onKeyup, true)
   }
 }
 
 watch([inline, floating], ([nextInline, nextFloating]) => bindKeys(nextInline || nextFloating), {
-  immediate: true
+  immediate: true,
 })
 
 onBeforeUnmount(() => {
@@ -260,7 +270,7 @@ const floatGeometry = computed(() => ({
   x: settings.themeConfig.videoFloatX,
   y: settings.themeConfig.videoFloatY,
   w: settings.themeConfig.videoFloatW,
-  h: settings.themeConfig.videoFloatH
+  h: settings.themeConfig.videoFloatH,
 }))
 
 const floatStyle = computed(() => {
@@ -270,24 +280,25 @@ const floatStyle = computed(() => {
     left: `${fit.left}px`,
     top: `${fit.top}px`,
     width: `${fit.width}px`,
-    height: `${fit.height}px`
+    height: `${fit.height}px`,
   }
 })
 
 /** 把视口内的像素落点折回百分比落盘值（拖动跟手走 settings 的 set，边界它自己再收一遍） */
-function geometryOf(left: number, top: number, width: number, height: number): { x: number; y: number; w: number; h: number } {
+function geometryOf(left: number, top: number, width: number, height: number): { x: number, y: number, w: number, h: number } {
   const { w: vw, h: vh } = viewport.value
   return {
     x: (left / vw) * 100,
     y: (top / vh) * 100,
     w: width,
-    h: height
+    h: height,
   }
 }
 
 /** 拖手柄挪窗：起点是窗当前的像素落点，位移直接加上去，全程压在视口内 */
 function onBarDown(event: PointerEvent): void {
-  if (event.button !== 0) return
+  if (event.button !== 0)
+    return
   event.preventDefault()
 
   const { left, top, width, height } = fitVideoFloatGeometry(floatGeometry.value, viewport.value)
@@ -300,7 +311,7 @@ function onBarDown(event: PointerEvent): void {
       const nextTop = Math.min(Math.max(0, top + (moveEvent.clientY - start.y)), viewport.value.h - height)
       settings.setVideoFloatGeometry(geometryOf(nextLeft, nextTop, width, height))
     },
-    onEnd: () => void settings.commitVideoFloatGeometry()
+    onEnd: () => void settings.commitVideoFloatGeometry(),
   })
 }
 
@@ -311,7 +322,8 @@ function onBarDown(event: PointerEvent): void {
  * 拖动期间只改本地，松手才落盘（与视频树宽同一套两段式）。
  */
 function onGripDown(event: PointerEvent, edge: 'left' | 'right'): void {
-  if (event.button !== 0) return
+  if (event.button !== 0)
+    return
   event.preventDefault()
 
   const start = floatGeometry.value
@@ -325,11 +337,11 @@ function onGripDown(event: PointerEvent, edge: 'left' | 'right'): void {
           viewport.value,
           edge,
           moveEvent.clientX - dragStart.x,
-          moveEvent.clientY - dragStart.y
-        )
+          moveEvent.clientY - dragStart.y,
+        ),
       )
     },
-    onEnd: () => void settings.commitVideoFloatGeometry()
+    onEnd: () => void settings.commitVideoFloatGeometry(),
   })
 }
 
@@ -390,7 +402,7 @@ function closePlayer(): void {
           @play="cancelUpNext"
           @seeking="cancelUpNext"
           @ended="onEnded"
-        ></video>
+        />
 
         <!--
           播完接下去的倒计时浮层（压暗层 + 卡片）：与视频同进退（传送时跟着元素一起搬），
@@ -403,10 +415,16 @@ function closePlayer(): void {
               <span class="vplayer__next-label">即将进入下一个视频</span>
               <span class="vplayer__next-left">{{ upNextLeft }} 秒后自动播放</span>
             </div>
-            <p class="vplayer__next-name" :title="upNext.name">{{ upNext.name }}</p>
+            <p class="vplayer__next-name" :title="upNext.name">
+              {{ upNext.name }}
+            </p>
             <div class="vplayer__next-actions">
-              <el-button size="small" type="primary" @click="goUpNext">立即播放</el-button>
-              <el-button size="small" @click="cancelUpNext">取消</el-button>
+              <el-button size="small" type="primary" @click="goUpNext">
+                立即播放
+              </el-button>
+              <el-button size="small" @click="cancelUpNext">
+                取消
+              </el-button>
             </div>
             <span class="vplayer__next-bar" :style="{ animationDuration: `${VIDEO_NEXT_SECONDS}s` }" />
           </div>

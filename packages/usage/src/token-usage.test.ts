@@ -1,38 +1,6 @@
+import type { TokenCounters, TokenDays, TokenShard } from './token-usage'
 import { describe, expect, it } from 'vitest'
-import {
-  addCounters,
-  sumDays,
-  axisTotal,
-  bucketRangeOf,
-  buildSeriesRange,
-  cacheHitRate,
-  combineShards,
-  emptyCounters,
-  flattenSources,
-  formatCredits,
-  formatPercent,
-  formatTokensWan,
-  isDateKey,
-  maxCounters,
-  mergeDays,
-  monthKeyOf,
-  presetLabel,
-  pruneTokenDays,
-  resolvePresetRange,
-  sameDays,
-  sameShardContent,
-  sanitizeShard,
-  shareByModel,
-  shareBySource,
-  shortDayLabel,
-  sumRange,
-  TOKEN_RANGE_PRESETS,
-  totalTokens,
-  weekKeyOf,
-  type TokenCounters,
-  type TokenDays,
-  type TokenShard
-} from './token-usage'
+import { addCounters, axisTotal, bucketRangeOf, buildSeriesRange, cacheHitRate, combineShards, emptyCounters, flattenSources, formatCredits, formatPercent, formatTokensWan, isDateKey, maxCounters, mergeDays, monthKeyOf, presetLabel, pruneTokenDays, resolvePresetRange, sameShardContent, sanitizeShard, shareByModel, shareBySource, shortDayLabel, sumDays, sumRange, TOKEN_RANGE_PRESETS, totalTokens, weekKeyOf } from './token-usage'
 
 function counters(overrides: Partial<TokenCounters> = {}): TokenCounters {
   return { ...emptyCounters(), ...overrides }
@@ -57,7 +25,7 @@ describe('计数运算', () => {
   it('maxCounters 逐字段取较大者', () => {
     const max = maxCounters(
       counters({ inputTokens: 100, outputTokens: 7, requests: 4 }),
-      counters({ inputTokens: 60, outputTokens: 9, requests: 2 })
+      counters({ inputTokens: 60, outputTokens: 9, requests: 2 }),
     )
     expect(max).toEqual(counters({ inputTokens: 100, outputTokens: 9, requests: 4 }))
   })
@@ -65,8 +33,8 @@ describe('计数运算', () => {
   it('totalTokens 是五类计数之和,不含 requests', () => {
     expect(
       totalTokens(
-        counters({ inputTokens: 1, outputTokens: 2, reasoningTokens: 3, cacheReadTokens: 4, cacheWriteTokens: 5, requests: 99 })
-      )
+        counters({ inputTokens: 1, outputTokens: 2, reasoningTokens: 3, cacheReadTokens: 4, cacheWriteTokens: 5, requests: 99 }),
+      ),
     ).toBe(15)
   })
 
@@ -77,7 +45,7 @@ describe('计数运算', () => {
   it('credits 照常参与求和与取大,且不取整', () => {
     expect(addCounters(counters({ credits: 0.4 }), counters({ credits: 0.35 })).credits).toBeCloseTo(
       0.75,
-      9
+      9,
     )
     expect(maxCounters(counters({ credits: 0.4 }), counters({ credits: 0.35 })).credits).toBe(0.4)
   })
@@ -87,7 +55,7 @@ describe('计数运算', () => {
       inputTokens: 10,
       outputTokens: 2,
       cacheReadTokens: 3,
-      credits: 1.5
+      credits: 1.5,
     })
     expect(axisTotal(value, 'tokens')).toBe(15)
     expect(axisTotal(value, 'credits')).toBe(1.5)
@@ -147,15 +115,15 @@ describe('落盘收敛', () => {
       version: 3,
       updatedAt: 123,
       sources: {
-        zcode: {
+        'zcode': {
           days: {
             '2026-09-13': { 'glm-5': { inputTokens: 10, requests: 2 } },
             'not-a-date': { 'glm-5': { inputTokens: 5 } },
-            '2026-09-14': { 'glm-5': { inputTokens: 'oops' } }
-          }
+            '2026-09-14': { 'glm-5': { inputTokens: 'oops' } },
+          },
         },
-        '': { days: {} }
-      }
+        '': { days: {} },
+      },
     })
 
     expect(clean.updatedAt).toBe(123)
@@ -172,7 +140,7 @@ describe('落盘收敛', () => {
     // 一条请求不到 1 个额度是常态:这里一取整,落盘再读回来就全成 0 了
     const clean = sanitizeShard({
       version: 7,
-      sources: { qoder: { days: { '2026-09-13': { qfmodel: { credits: 0.78379939, requests: 2.9 } } } } }
+      sources: { qoder: { days: { '2026-09-13': { qfmodel: { credits: 0.78379939, requests: 2.9 } } } } },
     })
 
     const counters = clean.sources.qoder.days['2026-09-13'].qfmodel
@@ -185,7 +153,7 @@ describe('落盘收敛', () => {
       version: 6,
       device: 'dev-1',
       name: '办公室',
-      sources: { zcode: { days: { '2026-09-13': { 'glm-5': { inputTokens: 10 } } } } }
+      sources: { zcode: { days: { '2026-09-13': { 'glm-5': { inputTokens: 10 } } } } },
     })
 
     expect(shard.sources.zcode.days['2026-09-13']['glm-5'].credits).toBe(0)
@@ -197,9 +165,9 @@ describe('落盘收敛', () => {
       {
         version: 3,
         updatedAt: 7,
-        sources: { zcode: { days: { '2026-09-13': { 'glm-5': { inputTokens: 10 } } } } }
+        sources: { zcode: { days: { '2026-09-13': { 'glm-5': { inputTokens: 10 } } } } },
       },
-      { device: 'dev-1', name: '办公室' }
+      { device: 'dev-1', name: '办公室' },
     )
 
     // 口径没变,历史必须留住 —— 这里要是整份弃用,用户攒下的一年快照就没了
@@ -218,7 +186,7 @@ describe('落盘收敛', () => {
       name: '书房',
       updatedAt: 9,
       sources: {},
-      appearance: { settings: { theme: 'light' } }
+      appearance: { settings: { theme: 'light' } },
     })
 
     expect(shard.version).toBe(7)
@@ -228,7 +196,7 @@ describe('落盘收敛', () => {
   it('分片自带的设备信息优先于 fallback', () => {
     const shard = sanitizeShard(
       { version: 4, device: 'dev-2', name: '笔记本', sources: {} },
-      { device: 'dev-1', name: '办公室' }
+      { device: 'dev-1', name: '办公室' },
     )
     expect(shard.device).toBe('dev-2')
     expect(shard.name).toBe('笔记本')
@@ -238,14 +206,14 @@ describe('落盘收敛', () => {
     const v1 = {
       version: 1,
       updatedAt: 123,
-      sources: { zcode: { days: { '2026-09-13': { zhipu: { 'glm-5': { inputTokens: 10 } } } } } }
+      sources: { zcode: { days: { '2026-09-13': { zhipu: { 'glm-5': { inputTokens: 10 } } } } } },
     }
     expect(sanitizeShard(v1)).toEqual({
       version: 7,
       device: '',
       name: '',
       updatedAt: 0,
-      sources: {}
+      sources: {},
     })
   })
 
@@ -268,13 +236,13 @@ describe('快照合并与修剪', () => {
   it('mergeDays 取并集且逐字段取大者:上游清理后重读变小不缩水', () => {
     const existing = makeDays([
       ['2026-09-12', 'glm-5', 500],
-      ['2026-09-13', 'glm-5', 100]
+      ['2026-09-13', 'glm-5', 100],
     ])
     const incoming = makeDays([
       // 12 日的记录被上游清理,重读只剩 300
       ['2026-09-12', 'glm-5', 300],
       // 13 日正常增长
-      ['2026-09-13', 'glm-5', 180]
+      ['2026-09-13', 'glm-5', 180],
     ])
 
     const merged = mergeDays(existing, incoming)
@@ -294,7 +262,7 @@ describe('快照合并与修剪', () => {
   it('pruneTokenDays 丢掉窗口外的天数', () => {
     const days = makeDays([
       ['2020-01-01', 'glm-5', 1],
-      ['2026-09-01', 'glm-5', 2]
+      ['2026-09-01', 'glm-5', 2],
     ])
     const pruned = pruneTokenDays(days, new Date(2026, 8, 13))
     expect(pruned['2020-01-01']).toBeUndefined()
@@ -308,8 +276,8 @@ describe('跨工具合并', () => {
       version: 3,
       sources: {
         zcode: { days: { '2026-09-13': { 'glm-5': { inputTokens: 10 } } } },
-        claude: { days: { '2026-09-13': { 'glm-5': { inputTokens: 5 }, claude: { inputTokens: 7 } } } }
-      }
+        claude: { days: { '2026-09-13': { 'glm-5': { inputTokens: 5 }, 'claude': { inputTokens: 7 } } } },
+      },
     })
 
     const days = flattenSources(data)
@@ -329,7 +297,7 @@ describe('跨设备合并', () => {
     const b = makeDays([
       ['2026-09-13', 'glm-5', 5],
       ['2026-09-13', 'glm-flash', 3],
-      ['2026-09-14', 'glm-5', 7]
+      ['2026-09-14', 'glm-5', 7],
     ])
 
     const sum = sumDays(a, b)
@@ -343,9 +311,9 @@ describe('跨设备合并', () => {
     const data = combineShards(
       [
         shard('dev-a', 100, makeDays([['2026-09-13', 'glm-5', 1000]])),
-        shard('dev-b', 200, makeDays([['2026-09-13', 'glm-5', 400]]))
+        shard('dev-b', 200, makeDays([['2026-09-13', 'glm-5', 400]])),
       ],
-      now
+      now,
     )
 
     expect(data.sources.zcode.days['2026-09-13']['glm-5'].inputTokens).toBe(1400)
@@ -357,7 +325,7 @@ describe('跨设备合并', () => {
     const now = new Date(2026, 8, 14)
     const data = combineShards(
       [shard('dev-a', 1, makeDays([['2020-01-01', 'glm-5', 1]]))],
-      now
+      now,
     )
     expect(data.sources.zcode.days['2020-01-01']).toBeUndefined()
   })
@@ -366,7 +334,7 @@ describe('跨设备合并', () => {
     const now = new Date(2026, 8, 14)
     const shards = [
       shard('dev-a', 1, makeDays([['2026-09-13', 'glm-5', 10]])),
-      shard('dev-b', 2, makeDays([['2026-09-13', 'glm-5', 20]]))
+      shard('dev-b', 2, makeDays([['2026-09-13', 'glm-5', 20]])),
     ]
     const first = combineShards(shards, now)
     const second = combineShards(shards, now)
@@ -406,7 +374,7 @@ describe('周期与聚合', () => {
       ['2026-08-14', 'glm-5', 100], // 区间(08-15 起)之外
       ['2026-09-12', 'glm-5', 7],
       ['2026-09-13', 'glm-5', 8],
-      ['2026-09-14', 'glm-5', 9] // 区间之外
+      ['2026-09-14', 'glm-5', 9], // 区间之外
     ])
 
     const { buckets, fromKey } = buildSeriesRange(days, 'day', '2026-08-15', '2026-09-13')
@@ -425,11 +393,11 @@ describe('周期与聚合', () => {
       ['2026-09-06', 'glm-5', 8], // 上一周的周日,区间之外
       ['2026-09-07', 'glm-5', 1], // 周一,但早于区间起点(09-08),不进首桶
       ['2026-09-10', 'glm-5', 2], // 周四,首桶
-      ['2026-09-15', 'glm-5', 5] // 下周二,末桶(09-14 那一周)
+      ['2026-09-15', 'glm-5', 5], // 下周二,末桶(09-14 那一周)
     ])
 
     const { buckets } = buildSeriesRange(days, 'week', '2026-09-08', '2026-09-15')
-    expect(buckets.map((bucket) => bucket.key)).toEqual(['2026-09-07', '2026-09-14'])
+    expect(buckets.map(bucket => bucket.key)).toEqual(['2026-09-07', '2026-09-14'])
     expect(buckets[0].counters.inputTokens).toBe(2)
     expect(buckets[1].counters.inputTokens).toBe(5)
   })
@@ -438,13 +406,13 @@ describe('周期与聚合', () => {
     const days = makeDays([
       ['2026-07-15', 'glm-5', 1],
       ['2026-08-02', 'glm-5', 2],
-      ['2026-09-13', 'glm-5', 3]
+      ['2026-09-13', 'glm-5', 3],
     ])
 
     const { buckets, fromKey } = buildSeriesRange(days, 'month', '2026-07-10', '2026-09-13')
     expect(fromKey).toBe('2026-07-10')
-    expect(buckets.map((bucket) => bucket.key)).toEqual(['2026-07', '2026-08', '2026-09'])
-    expect(buckets.map((bucket) => bucket.label)).toEqual(['7月', '8月', '9月'])
+    expect(buckets.map(bucket => bucket.key)).toEqual(['2026-07', '2026-08', '2026-09'])
+    expect(buckets.map(bucket => bucket.label)).toEqual(['7月', '8月', '9月'])
     expect(buckets[0].counters.inputTokens).toBe(1)
     expect(buckets[2].counters.inputTokens).toBe(3)
   })
@@ -452,7 +420,7 @@ describe('周期与聚合', () => {
   it('buildSeriesRange 单天区间只有一根柱,跨年月份不出错', () => {
     const days = makeDays([
       ['2026-09-13', 'glm-5', 5],
-      ['2027-01-02', 'glm-5', 6]
+      ['2027-01-02', 'glm-5', 6],
     ])
 
     const single = buildSeriesRange(days, 'day', '2026-09-13', '2026-09-13')
@@ -460,7 +428,7 @@ describe('周期与聚合', () => {
     expect(single.buckets[0].counters.inputTokens).toBe(5)
 
     const acrossYear = buildSeriesRange(days, 'month', '2026-11-05', '2027-01-20')
-    expect(acrossYear.buckets.map((bucket) => bucket.key)).toEqual(['2026-11', '2026-12', '2027-01'])
+    expect(acrossYear.buckets.map(bucket => bucket.key)).toEqual(['2026-11', '2026-12', '2027-01'])
     expect(acrossYear.buckets.at(-1)?.counters.inputTokens).toBe(6)
   })
 
@@ -475,7 +443,7 @@ describe('周期与聚合', () => {
     const days = makeDays([
       ['2026-09-11', 'glm-5', 1],
       ['2026-09-12', 'glm-5', 2],
-      ['2026-09-13', 'glm-5', 4]
+      ['2026-09-13', 'glm-5', 4],
     ])
     expect(sumRange(days, '2026-09-11', '2026-09-12').inputTokens).toBe(3)
     expect(sumRange(days, '2026-09-12', '2026-09-13').inputTokens).toBe(6)
@@ -499,12 +467,12 @@ describe('周期与聚合', () => {
     const days: TokenDays = {
       '2026-09-13': {
         'glm-5': { ...emptyCounters(), inputTokens: 10, outputTokens: 2 },
-        'glm-flash': { ...emptyCounters(), inputTokens: 50 }
-      }
+        'glm-flash': { ...emptyCounters(), inputTokens: 50 },
+      },
     }
 
     const models = shareByModel(days, '2026-09-01', '2026-09-30')
-    expect(models.map((share) => share.key)).toEqual(['glm-flash', 'glm-5'])
+    expect(models.map(share => share.key)).toEqual(['glm-flash', 'glm-5'])
     expect(models[0].counters.inputTokens).toBe(50)
   })
 
@@ -514,12 +482,12 @@ describe('周期与聚合', () => {
       sources: {
         zcode: { days: { '2026-09-13': { 'glm-5': { inputTokens: 10, outputTokens: 2 } } } },
         claude: { days: { '2026-09-13': { claude: { inputTokens: 30 } } } },
-        codex: { days: { '2026-09-13': { codex: { inputTokens: 0 } } } }
-      }
+        codex: { days: { '2026-09-13': { codex: { inputTokens: 0 } } } },
+      },
     })
 
     const shares = shareBySource(data, '2026-09-01', '2026-09-30', 'tokens')
-    expect(shares.map((share) => share.key)).toEqual(['claude', 'zcode'])
+    expect(shares.map(share => share.key)).toEqual(['claude', 'zcode'])
     expect(shares[0].counters.inputTokens).toBe(30)
     expect(shares[1].counters.outputTokens).toBe(2)
   })
@@ -530,16 +498,16 @@ describe('周期与聚合', () => {
       sources: {
         zcode: { days: { '2026-09-13': { 'glm-5': { inputTokens: 10 } } } },
         // Qoder 只有额度:请求次数一堆、token 全是 0 —— 它不该出现在 tokens 那张榜上
-        qoder: { days: { '2026-09-13': { qfmodel: { credits: 8.5, requests: 20 } } } }
-      }
+        qoder: { days: { '2026-09-13': { qfmodel: { credits: 8.5, requests: 20 } } } },
+      },
     })
 
-    expect(shareBySource(data, '2026-09-01', '2026-09-30', 'tokens').map((s) => s.key)).toEqual([
-      'zcode'
+    expect(shareBySource(data, '2026-09-01', '2026-09-30', 'tokens').map(s => s.key)).toEqual([
+      'zcode',
     ])
 
     const credits = shareBySource(data, '2026-09-01', '2026-09-30', 'credits')
-    expect(credits.map((s) => s.key)).toEqual(['qoder'])
+    expect(credits.map(s => s.key)).toEqual(['qoder'])
     expect(credits[0].counters.credits).toBe(8.5)
   })
 })
@@ -562,15 +530,15 @@ describe('时间维度预设', () => {
     // 3 月 31 日退一个月是 2 月,不能落到 3 月 3 日
     expect(resolvePresetRange('lastMonth', new Date(2026, 2, 31))).toEqual({
       fromKey: '2026-02-01',
-      toKey: '2026-02-28'
+      toKey: '2026-02-28',
     })
     expect(resolvePresetRange('lastMonth', new Date(2027, 0, 5))).toEqual({
       fromKey: '2026-12-01',
-      toKey: '2026-12-31'
+      toKey: '2026-12-31',
     })
     expect(resolvePresetRange('lastMonth', new Date(2028, 2, 10))).toEqual({
       fromKey: '2028-02-01',
-      toKey: '2028-02-29'
+      toKey: '2028-02-29',
     })
   })
 
@@ -580,12 +548,12 @@ describe('时间维度预设', () => {
   })
 
   it('面板里的五档与界面名一一对应', () => {
-    expect(TOKEN_RANGE_PRESETS.map((option) => option.key)).toEqual([
+    expect(TOKEN_RANGE_PRESETS.map(option => option.key)).toEqual([
       'last7',
       'last30',
       'thisMonth',
       'lastMonth',
-      'custom'
+      'custom',
     ])
     for (const option of TOKEN_RANGE_PRESETS) {
       expect(presetLabel(option.key)).toBe(option.label)
@@ -612,7 +580,7 @@ describe('落盘判据', () => {
     expect(sameShardContent(base, { ...base, version: 3 })).toBe(false)
     expect(sameShardContent(base, { ...base, device: 'd2' })).toBe(false)
     expect(
-      sameShardContent(base, { version: 7, device: 'd1', sources: { zcode: { days: {} }, qoder: { days: {} } } })
+      sameShardContent(base, { version: 7, device: 'd1', sources: { zcode: { days: {} }, qoder: { days: {} } } }),
     ).toBe(false)
   })
 
@@ -635,9 +603,9 @@ describe('落盘判据', () => {
       {
         version: 7,
         updatedAt: 123,
-        sources: { zcode: { days: { '2026-09-13': { 'glm-5': { inputTokens: 10, requests: 2 } } } } }
+        sources: { zcode: { days: { '2026-09-13': { 'glm-5': { inputTokens: 10, requests: 2 } } } } },
       },
-      { device: 'dev-local', name: '本机' }
+      { device: 'dev-local', name: '本机' },
     )
     // 序列化再解析一遍，模拟「写盘 → 下次启动读回来」这一圈
     const roundTripped: unknown = JSON.parse(JSON.stringify(shard))

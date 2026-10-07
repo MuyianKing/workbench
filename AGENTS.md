@@ -181,7 +181,10 @@ asset 协议、读取权限在 Rust 侧按单个文件授予）、**通道一律
 
 - 脚本：`pnpm run typecheck`、`pnpm test`、`cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`、`pnpm run dev`、`pnpm run build`、
   `pnpm run build:renderer`、`pnpm run dev:renderer`、`pnpm run preview:renderer`（渲染层单独构建到 `.preview/`）、`pnpm run icons`；
-  其余以 `package.json` 为准（根与 `apps/desktop` 各一份），不新增 lint / format 工具。
+  其余以 `package.json` 为准（根与 `apps/desktop` 各一份）。
+- **前端代码格式化走 ESLint**：`pnpm run lint:fix`（检查用 `pnpm run lint`），配置在根目录 `eslint.config.mjs`
+  （`@antfu/eslint-config`，范围是渲染层 + 域包，`site/`、`src-tauri/`、`resources/`、`apps/desktop/scripts/` 不在圈里）；
+  **每次改完前端代码都要跑一遍 `pnpm run lint:fix`**，只允许这一套，不要再引 Prettier 之类的第二套格式化工具。
 - 改了 Rust 要跑 `cargo test` **与 `cargo build`**：`cargo test` 编译的是开着 `cfg(test)` 的那个 bin，被 `#[cfg(test)]` 关起来的东西
   在那边是可见的，拿它当生产代码用时 test 一片绿、build 才报「not found, an item that was configured out」。
 - 动过 `.vue` 的模板（加 / 删 / 挪标签）要顺手跑一次 `pnpm run build:renderer`：**`pnpm run typecheck` 查不出模板标签不配平** ——

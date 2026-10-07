@@ -1,10 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  AUTH_PROVIDERS,
-  accountLabel,
-  isAuthProvider,
-  sanitizeAccount
-} from './auth'
+import { accountLabel, AUTH_PROVIDERS, isAuthProvider, sanitizeAccount } from './auth'
 
 describe('isAuthProvider', () => {
   it('只认这两家', () => {
@@ -22,7 +17,7 @@ describe('sanitizeAccount', () => {
     id: '1234',
     login: 'octocat',
     name: 'The Octocat',
-    avatar: 'data:image/png;base64,AAAA'
+    avatar: 'data:image/png;base64,AAAA',
   }
 
   it('原样保留一份合法的资料', () => {
@@ -57,7 +52,7 @@ describe('sanitizeAccount', () => {
     expect(sanitizeAccount({ ...valid, avatar: 'data:text/html,<script>' })?.avatar).toBeNull()
     expect(sanitizeAccount({ ...valid, avatar: undefined })?.avatar).toBeNull()
     expect(sanitizeAccount({ ...valid, avatar: 'data:image/webp;base64,AA' })?.avatar).toBe(
-      'data:image/webp;base64,AA'
+      'data:image/webp;base64,AA',
     )
   })
 
@@ -69,15 +64,15 @@ describe('sanitizeAccount', () => {
 describe('accountLabel', () => {
   it('优先用昵称，没填就用登录名', () => {
     expect(
-      accountLabel({ provider: 'gitee', id: '1', login: 'muyian', name: '木言', avatar: null })
+      accountLabel({ provider: 'gitee', id: '1', login: 'muyian', name: '木言', avatar: null }),
     ).toBe('木言')
     expect(
-      accountLabel({ provider: 'gitee', id: '1', login: 'muyian', name: null, avatar: null })
+      accountLabel({ provider: 'gitee', id: '1', login: 'muyian', name: null, avatar: null }),
     ).toBe('muyian')
   })
 })
 
-describe('AUTH_PROVIDERS', () => {
+describe('aUTH_PROVIDERS', () => {
   it('只有两家，顺序固定（界面按钮按它渲染）', () => {
     expect(AUTH_PROVIDERS).toEqual(['github', 'gitee'])
   })

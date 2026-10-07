@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { SkillEntry } from '@workbench/skills'
 /**
  * 技能卡片：网格里的一块（与项目卡同一副外壳 —— 同样的圆角、投影与不透明度跟随）。
  *
@@ -8,7 +9,6 @@
  * 不该顺带把详情弹窗也拉开。没有 SKILL.md 的卡片挂着常显的警示徽标，安装按钮置灰。
  */
 import { FolderOpened, Position } from '@element-plus/icons-vue'
-import type { SkillEntry } from '@workbench/skills'
 
 const props = defineProps<{ skill: SkillEntry }>()
 const emit = defineEmits<{
@@ -32,7 +32,9 @@ const metaWarn = !props.skill.hasSkillMd
   >
     <div class="card__head">
       <div class="card__title">
-        <h3 class="card__name" :title="skill.name">{{ skill.name }}</h3>
+        <h3 class="card__name" :title="skill.name">
+          {{ skill.name }}
+        </h3>
         <!-- 版本号：从 frontmatter 的 version 里解析的（保存时必填）；历史数据 / 导入的没有就不显示 -->
         <el-tag v-if="skill.version" size="small" type="info" effect="plain" class="card__version mono">
           v{{ skill.version }}

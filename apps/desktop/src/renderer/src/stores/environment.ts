@@ -1,3 +1,5 @@
+import type { InstallableGlobalTool, InstallablePackageManager, NrmStatus, NvmStatus, PackageManagerStatus } from '@/types'
+import { defineStore } from 'pinia'
 /**
  * 本机环境：包管理器、Node 版本（nvm）、npm 镜像（nrm），以及数据目录的位置。
  *
@@ -6,16 +8,8 @@
  * 因为它们都要开系统终端、都要把最后一行输出顶在系统状态卡片上。
  */
 import { ref } from 'vue'
-import { defineStore } from 'pinia'
-import type {
-  InstallableGlobalTool,
-  InstallablePackageManager,
-  NrmStatus,
-  NvmStatus,
-  PackageManagerStatus
-} from '@/types'
 import { notifyError, notifySuccess } from '@/notify'
-import { useTerminalStore, SYSTEM_PM_TERMINAL } from './terminal'
+import { SYSTEM_PM_TERMINAL, useTerminalStore } from './terminal'
 
 export const useEnvironmentStore = defineStore('environment', () => {
   const terminal = useTerminalStore()
@@ -77,13 +71,16 @@ export const useEnvironmentStore = defineStore('environment', () => {
    */
   function installedNodeVersion(wanted?: string): string | null {
     const target = (wanted ?? '').trim().replace(/^v/i, '')
-    if (!target) return null
+    if (!target)
+      return null
 
     const versions = nvm.value?.versions ?? []
-    if (versions.includes(target)) return target
-    if (!/^\d+(\.\d+)*$/.test(target)) return null
+    if (versions.includes(target))
+      return target
+    if (!/^\d+(\.\d+)*$/.test(target))
+      return null
     // versions 已按版本号降序，find 命中的就是符合前缀的最高版本
-    return versions.find((v) => v.startsWith(`${target}.`)) ?? null
+    return versions.find(v => v.startsWith(`${target}.`)) ?? null
   }
 
   /**
@@ -97,7 +94,8 @@ export const useEnvironmentStore = defineStore('environment', () => {
    * 失败的情况也照样刷一遍 —— 例如装成功了但 PATH 还没生效，至少状态是准的。
    */
   async function installGlobalTool(tool: InstallableGlobalTool): Promise<boolean> {
-    if (pmInstalling.value) return false
+    if (pmInstalling.value)
+      return false
 
     terminal.openSystemTerminal(`安装 ${tool}`)
     // 同一轮接一轮地装不同的包时，日志从零开始，别把上一次的输出混进来
@@ -107,7 +105,7 @@ export const useEnvironmentStore = defineStore('environment', () => {
     // 终端状态的写入口收在 terminal store 的这个 action 里（系统终端不走主进程的状态事件）
     terminal.setSystemTerminalStatus('installing', {
       currentCommand: `npm install -g ${tool}`,
-      startedAt
+      startedAt,
     })
     terminal.appendSystemLog(`npm install -g ${tool}`, 'cmd')
 
@@ -116,15 +114,16 @@ export const useEnvironmentStore = defineStore('environment', () => {
 
     const settle = (status: 'success' | 'failed', note?: string): void => {
       terminal.setSystemTerminalStatus(status, { startedAt: undefined, durationMs: Date.now() - startedAt })
-      if (note) terminal.appendSystemLog(note, status === 'failed' ? 'err' : 'sys')
+      if (note)
+        terminal.appendSystemLog(note, status === 'failed' ? 'err' : 'sys')
     }
 
     const refresh = (): Promise<void> =>
       tool === 'nrm' ? refreshNrm() : refreshPackageManagers()
 
     try {
-      const result =
-        tool === 'nrm'
+      const result
+        = tool === 'nrm'
           ? await window.workbench.installNrm()
           : await window.workbench.installPackageManager(tool)
       await refresh()
@@ -136,13 +135,15 @@ export const useEnvironmentStore = defineStore('environment', () => {
       settle('success', `${tool} 安装完成，已刷新环境状态`)
       notifySuccess(`${tool} 安装完成`)
       return true
-    } catch (err) {
+    }
+    catch (err) {
       await refresh()
       const message = (err as Error).message || `安装 ${tool} 失败`
       settle('failed', message)
       notifyError(message)
       return false
-    } finally {
+    }
+    finally {
       pmInstalling.value = null
       pmInstallLog.value = ''
     }
@@ -164,7 +165,8 @@ export const useEnvironmentStore = defineStore('environment', () => {
    * 所以成功与失败都给一句明确反馈，并把重新探测的结果落回 nrm 那一行。
    */
   async function useNrmRegistry(name: string): Promise<boolean> {
-    if (nrmSwitching.value || !name) return false
+    if (nrmSwitching.value || !name)
+      return false
 
     nrmSwitching.value = name
     try {
@@ -176,7 +178,8 @@ export const useEnvironmentStore = defineStore('environment', () => {
       nrm.value = result.data ?? nrm.value
       notifySuccess(`npm 镜像已切到 ${name}`)
       return true
-    } finally {
+    }
+    finally {
       nrmSwitching.value = null
     }
   }
@@ -207,6 +210,6 @@ export const useEnvironmentStore = defineStore('environment', () => {
     installPackageManager,
     installNrm,
     useNrmRegistry,
-    installListeners
+    installListeners,
   }
 })

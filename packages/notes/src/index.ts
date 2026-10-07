@@ -1,2 +1,2 @@
-export * from './note-image'
 export * from './note'
+export * from './note-image'

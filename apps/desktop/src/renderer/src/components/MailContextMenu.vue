@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { Component } from 'vue'
+import { CircleCheck, Delete, Finished, Flag, Hide, View } from '@element-plus/icons-vue'
 /**
  * 收件箱清单行的右键菜单：标记广告 / 翻已读 / 多选删除 / 删信。
  *
@@ -16,8 +18,6 @@
  * `@contextmenu.prevent` 只是兜住事件冒泡。
  */
 import { computed, onMounted, ref } from 'vue'
-import type { Component } from 'vue'
-import { CircleCheck, Delete, Finished, Flag, Hide, View } from '@element-plus/icons-vue'
 import { useFloatingDismiss } from '@/composables/use-floating-dismiss'
 import { useFloatingPosition } from '@/composables/use-floating-position'
 
@@ -47,14 +47,14 @@ const items = computed(() => [
     label: props.bulk ? '取消广告标记' : '标记为广告',
     icon: props.bulk ? CircleCheck : Flag,
     danger: false,
-    sep: false
+    sep: false,
   },
   {
     name: 'toggle-seen' as const,
     label: props.seen ? '标记为未读' : '标记为已读',
     icon: props.seen ? Hide : View,
     danger: false,
-    sep: false
+    sep: false,
   },
   props.pickedCount > 0
     ? {
@@ -62,10 +62,10 @@ const items = computed(() => [
         label: `删除所选 ${props.pickedCount} 封`,
         icon: Delete as Component,
         danger: true,
-        sep: true
+        sep: true,
       }
     : { name: 'multi-pick' as const, label: '多选删除', icon: Finished as Component, danger: false, sep: true },
-  { name: 'delete' as const, label: '删除邮件', icon: Delete as Component, danger: true, sep: props.pickedCount === 0 }
+  { name: 'delete' as const, label: '删除邮件', icon: Delete as Component, danger: true, sep: props.pickedCount === 0 },
 ])
 
 const panel = ref<HTMLDivElement | null>(null)
@@ -75,7 +75,7 @@ const { pos, place } = useFloatingPosition({
   x: () => props.x,
   y: () => props.y,
   panel: () => panel.value,
-  follow: true
+  follow: true,
 })
 
 type MenuAct = 'bulk' | 'toggle-seen' | 'multi-pick' | 'multi-delete' | 'delete'
@@ -110,7 +110,9 @@ onMounted(place)
           role="menuitem"
           @click="pick(item.name)"
         >
-          <el-icon class="menu__icon"><component :is="item.icon" /></el-icon>
+          <el-icon class="menu__icon">
+            <component :is="item.icon" />
+          </el-icon>
           <span class="menu__label">{{ item.label }}</span>
         </button>
       </template>

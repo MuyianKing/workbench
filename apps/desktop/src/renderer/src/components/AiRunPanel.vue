@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import type { AiConfirm, AiLogLine } from '@workbench/ai'
+import { Download, Loading } from '@element-plus/icons-vue'
+import { aiTurns, visibleInstruction } from '@workbench/ai'
 /**
  * 对话面板：这一段对话（历史 + 这一轮）、收尾与结果。**版式是聊天**：
  *
@@ -35,10 +38,8 @@
  * 它是流程里的一道闸 —— Pi 那边正停在这一句上，答完才往下走（答复见 stores/ai.ts）。
  */
 import { computed, nextTick, ref, watch } from 'vue'
-import { Download, Loading } from '@element-plus/icons-vue'
 import AiProcess from '@/components/AiProcess.vue'
 import MarkdownView from '@/components/MarkdownView.vue'
-import { aiTurns, visibleInstruction, type AiConfirm, type AiLogLine } from '@workbench/ai'
 import { basenameOf } from '@/format'
 
 const props = defineProps<{
@@ -74,7 +75,7 @@ const props = defineProps<{
   written: string[]
 }>()
 
-const emit = defineEmits<{ install: []; answer: [id: string, allowed: boolean]; open: [href: string] }>()
+const emit = defineEmits<{ install: [], answer: [id: string, allowed: boolean], open: [href: string] }>()
 
 /** 正文里的站内链接与「写下 N 个文件」都从这儿出去：AiView 对到工作目录、开右侧预览栏 */
 function openLink(href: string): void {
@@ -96,10 +97,10 @@ const scroller = ref<HTMLElement | null>(null)
  */
 const shown = computed(() =>
   props.lines
-    .map((line) =>
-      line.kind === 'user' ? { ...line, text: visibleInstruction(line.text).trim() } : line
+    .map(line =>
+      line.kind === 'user' ? { ...line, text: visibleInstruction(line.text).trim() } : line,
     )
-    .filter((line) => !(line.kind === 'user' && !line.text && !line.images?.length))
+    .filter(line => !(line.kind === 'user' && !line.text && !line.images?.length)),
 )
 
 /** 正在画的那一条（没有就是 null） */
@@ -117,7 +118,7 @@ function manyShots(images?: string[]): boolean {
 }
 
 /** 那一块「过程」的标题：跑着说在干什么（主语是程序名，智能体跟程序同一个名字），跑完报这一步有多少条 */
-function processLabel(turn: { process: AiLogLine[]; index: number }): string {
+function processLabel(turn: { process: AiLogLine[], index: number }): string {
   if (turn.index === liveIndex.value) {
     return props.thinking ? '正在思考…' : `${props.appName}正在努力探索中....`
   }
@@ -135,18 +136,19 @@ watch(
     props.confirms.length,
     props.streaming.length,
     props.thinkingText.length,
-    props.thinking
+    props.thinking,
   ],
   async () => {
     await nextTick()
     const box = scroller.value
-    if (box) box.scrollTop = box.scrollHeight
-  }
+    if (box)
+      box.scrollTop = box.scrollHeight
+  },
 )
 
 /** 对话里出现过报错（或 runError 本身）：这种「跑完了」不能装作顺利 */
 const hasError = computed(
-  () => props.runError !== '' || props.lines.some((line) => line.kind === 'error')
+  () => props.runError !== '' || props.lines.some(line => line.kind === 'error'),
 )
 
 /**
@@ -155,14 +157,20 @@ const hasError = computed(
  * 正文末尾闪竖条），顶部再说一遍只是重复；顺利跑完也不报信，出错的那次必须报
  * —— 见 docs/constraints/ai.md。「等你确认」排在最前：那会儿进程正停在命令上。
  */
-const notice = computed<{ text: string; kind: 'run' | 'fail' } | null>(() => {
-  if (props.installing) return { text: '正在安装 Pi…', kind: 'run' }
-  if (confirm.value) return { text: '等你确认这条命令…', kind: 'run' }
-  if (props.stopping) return { text: '正在停下这一轮…', kind: 'run' }
+const notice = computed<{ text: string, kind: 'run' | 'fail' } | null>(() => {
+  if (props.installing)
+    return { text: '正在安装 Pi…', kind: 'run' }
+  if (confirm.value)
+    return { text: '等你确认这条命令…', kind: 'run' }
+  if (props.stopping)
+    return { text: '正在停下这一轮…', kind: 'run' }
   // 接历史那一下：它是这一屏自己的事，不是对话里的一句（从前那行画在对话区里，挪到这儿了）
-  if (props.hydrating) return { text: '正在接上这段对话…', kind: 'run' }
-  if (props.runError) return { text: props.runError, kind: 'fail' }
-  if (props.exitCode === 0 && hasError.value) return { text: '跑完了，但日志里有报错', kind: 'fail' }
+  if (props.hydrating)
+    return { text: '正在接上这段对话…', kind: 'run' }
+  if (props.runError)
+    return { text: props.runError, kind: 'fail' }
+  if (props.exitCode === 0 && hasError.value)
+    return { text: '跑完了，但日志里有报错', kind: 'fail' }
   return null
 })
 
@@ -212,7 +220,9 @@ const hasHead = computed(() => notice.value !== null || !props.piVersion)
                   :show-progress="manyShots(turn.user.images)"
                 />
               </div>
-              <p v-if="turn.user.text" class="msg__said">{{ turn.user.text }}</p>
+              <p v-if="turn.user.text" class="msg__said">
+                {{ turn.user.text }}
+              </p>
             </div>
           </div>
 
@@ -230,7 +240,9 @@ const hasHead = computed(() => notice.value !== null || !props.piVersion)
               :class="`is-${line.kind}`"
             >
               <!-- 想的那一段：草稿，纯文本（半截标记不该被当成排版） -->
-              <p v-if="line.kind === 'thinking'" class="msg__think">{{ line.text }}</p>
+              <p v-if="line.kind === 'thinking'" class="msg__think">
+                {{ line.text }}
+              </p>
               <!-- 中途那些还没成答案的正文：照常渲染 markdown；站内链接开进右侧预览栏 -->
               <MarkdownView
                 v-else-if="line.kind === 'text'"
@@ -251,7 +263,9 @@ const hasHead = computed(() => notice.value !== null || !props.piVersion)
 
             <!-- 正在想的那一段：**loading 就在这一块里**（这一轮的过程摊开着） -->
             <div v-if="turn.index === liveIndex" class="msg is-thinking">
-              <p v-if="thinkingText" class="msg__think is-live">{{ thinkingText }}</p>
+              <p v-if="thinkingText" class="msg__think is-live">
+                {{ thinkingText }}
+              </p>
             </div>
 
             <!-- 正在长出来的那段回话：跑着的时候它也是过程的一部分（收尾才定答案），
@@ -269,19 +283,25 @@ const hasHead = computed(() => notice.value !== null || !props.piVersion)
 
           <!-- 答案之后那几行（「用时 …」）：一轮的句号 -->
           <div v-for="(line, index) in turn.tail" :key="`tail-${index}`" class="msg is-duration">
-            <p class="run__meta" :title="line.detail">{{ line.text }}</p>
+            <p class="run__meta" :title="line.detail">
+              {{ line.text }}
+            </p>
           </div>
         </template>
 
         <!-- 等确认的那条命令：流程停在这儿，答完 Pi 才往下走（只有「自动编辑」那一档会有） -->
         <div v-if="confirm" class="run__confirm">
-          <p class="run__confirm-title">{{ confirm.title }}</p>
+          <p class="run__confirm-title">
+            {{ confirm.title }}
+          </p>
           <pre class="run__confirm-cmd">{{ confirm.message }}</pre>
           <div class="run__confirm-actions">
             <el-button type="primary" size="small" @click="emit('answer', confirm.id, true)">
               允许执行
             </el-button>
-            <el-button size="small" @click="emit('answer', confirm.id, false)">拒绝</el-button>
+            <el-button size="small" @click="emit('answer', confirm.id, false)">
+              拒绝
+            </el-button>
             <span v-if="confirms.length > 1" class="run__confirm-more">
               后面还有 {{ confirms.length - 1 }} 条在等
             </span>
@@ -300,7 +320,9 @@ const hasHead = computed(() => notice.value !== null || !props.piVersion)
       <p class="run__written">
         写下 {{ written.length }} 个文件：
         <template v-for="(path, index) in written" :key="path">
-          <button type="button" class="run__written-file mono" :title="path" @click="openLink(path)">{{ fileNameOf(path) }}</button><span v-if="index < written.length - 1">、</span>
+          <button type="button" class="run__written-file mono" :title="path" @click="openLink(path)">
+            {{ fileNameOf(path) }}
+          </button><span v-if="index < written.length - 1">、</span>
         </template>
       </p>
     </div>

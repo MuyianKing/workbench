@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import type { DesignStyle } from '@workbench/appearance'
+import { buildDesignDemo, buttonCss, safeCssValue, typeCss } from '@workbench/appearance'
+
 /**
  * 示例页面：一套设计语言的 token 装成的完整中文落地页。
  *
@@ -16,9 +19,6 @@
  *    卡片标题 17px、说明 13px。收敛的是尺寸，字重与字距保持原样 —— 那才是气质所在。
  */
 import { computed } from 'vue'
-import type { DesignStyle } from '@workbench/appearance'
-import { buttonCss, buildDesignDemo, typeCss } from '@workbench/appearance'
-import { safeCssValue } from '@workbench/appearance'
 
 const props = defineProps<{ design: DesignStyle }>()
 
@@ -32,7 +32,7 @@ const ctaButtonStyle = computed<Record<string, string>>(() => {
     color: palette.accent,
     borderRadius: metrics.buttonRadius,
     padding: '10px 22px',
-    ...typeCss(demo.value.small, 15)
+    ...typeCss(demo.value.small, 15),
   }
 })
 
@@ -42,7 +42,7 @@ const navButtonStyle = computed(() => buttonCss(demo.value.primary, demo.value.m
 const heroButtonStyle = computed(() => buttonCss(demo.value.primary, demo.value.metrics.buttonRadius, 15, 46))
 
 const secondaryButtonStyle = computed(() =>
-  buttonCss(demo.value.secondary, demo.value.metrics.buttonRadius, 15, 46)
+  buttonCss(demo.value.secondary, demo.value.metrics.buttonRadius, 15, 46),
 )
 
 const heroStyle = computed(() => typeCss(demo.value.hero, 48))
@@ -58,7 +58,7 @@ function thumbStyle(index: number): Record<string, string> {
   const strip = props.design.strip
   const palette = demo.value.palette
   const colors = strip.length
-    ? [0, 1, 2].map((offset) => strip[(index * 3 + offset) % strip.length])
+    ? [0, 1, 2].map(offset => strip[(index * 3 + offset) % strip.length])
     : [palette.accent, palette.surface]
   return { background: `linear-gradient(135deg, ${colors.join(', ')})` }
 }
@@ -78,7 +78,7 @@ const rootStyle = computed<Record<string, string>>(() => {
     '--demo-block': `${metrics.block}px`,
     '--demo-gap': `${metrics.gap}px`,
     '--demo-card-radius': metrics.cardRadius,
-    '--demo-button-radius': metrics.buttonRadius
+    '--demo-button-radius': metrics.buttonRadius,
   }
 })
 </script>
@@ -104,9 +104,15 @@ const rootStyle = computed<Record<string, string>>(() => {
     <div class="demo__wrap">
       <!-- 首屏 -->
       <section class="demo__hero">
-        <p class="demo__eyebrow" :style="smallStyle">{{ demo.copy.eyebrow }}</p>
-        <h3 class="demo__title" :style="heroStyle">{{ demo.copy.title }}</h3>
-        <p class="demo__subtitle" :style="{ ...bodyStyle, color: 'var(--demo-muted)' }">{{ demo.copy.subtitle }}</p>
+        <p class="demo__eyebrow" :style="smallStyle">
+          {{ demo.copy.eyebrow }}
+        </p>
+        <h3 class="demo__title" :style="heroStyle">
+          {{ demo.copy.title }}
+        </h3>
+        <p class="demo__subtitle" :style="{ ...bodyStyle, color: 'var(--demo-muted)' }">
+          {{ demo.copy.subtitle }}
+        </p>
         <div class="demo__actions">
           <span class="demo__button" :style="heroButtonStyle">{{ demo.copy.primary }}</span>
           <span class="demo__button demo__button--quiet" :style="secondaryButtonStyle">{{ demo.copy.secondary }}</span>
@@ -120,7 +126,9 @@ const rootStyle = computed<Record<string, string>>(() => {
           <h4 class="demo__card-title" :style="{ ...typeCss(demo.body, 17), fontWeight: safeCssValue(demo.body?.fontWeight) ?? '600' }">
             {{ card.title }}
           </h4>
-          <p class="demo__card-text" :style="{ ...smallStyle, color: 'var(--demo-muted)' }">{{ card.text }}</p>
+          <p class="demo__card-text" :style="{ ...smallStyle, color: 'var(--demo-muted)' }">
+            {{ card.text }}
+          </p>
         </article>
       </section>
 

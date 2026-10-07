@@ -92,7 +92,7 @@ export interface NoteCreateInput {
 /** 新建时的默认名字；重名时由 `uniqueNoteName` 往后编号 */
 export const NOTE_DEFAULT_NAMES: Record<NoteKind, string> = {
   folder: '新建文件夹',
-  note: '新建笔记'
+  note: '新建笔记',
 }
 
 export function isNoteKind(value: unknown): value is NoteKind {
@@ -108,12 +108,13 @@ export function isNoteKind(value: unknown): value is NoteKind {
  * 真正的边界判断在 Rust 侧：那边逐段只接受普通名字，越界一律报错。
  */
 export function normalizeRel(raw: unknown): string {
-  if (typeof raw !== 'string') return ''
+  if (typeof raw !== 'string')
+    return ''
   return raw
     .replace(/\\/g, '/')
     .split('/')
-    .map((part) => part.trim())
-    .filter((part) => part && part !== '.')
+    .map(part => part.trim())
+    .filter(part => part && part !== '.')
     .join('/')
 }
 
@@ -121,7 +122,8 @@ export function normalizeRel(raw: unknown): string {
 export function joinRel(dir: string, name: string): string {
   const base = normalizeRel(dir)
   const leaf = normalizeRel(name)
-  if (!base) return leaf
+  if (!base)
+    return leaf
   return leaf ? `${base}/${leaf}` : base
 }
 
@@ -145,11 +147,13 @@ export function relName(rel: string): string {
  * 意思完全变了，所以只留一个盘符时补回分隔符。
  */
 export function sanitizeNoteRoot(raw: unknown): string {
-  if (typeof raw !== 'string') return ''
+  if (typeof raw !== 'string')
+    return ''
   const trimmed = raw.trim()
-  if (!trimmed) return ''
+  if (!trimmed)
+    return ''
   const cut = trimmed.replace(/[\\/]+$/, '')
-  return /^[a-zA-Z]:$/.test(cut) ? `${cut}\\` : cut
+  return /^[a-z]:$/i.test(cut) ? `${cut}\\` : cut
 }
 
 /** 笔记本在界面上显示的名字：路径的最后一段；问不出来就原样显示整条路径 */
@@ -216,9 +220,10 @@ const RESERVED_NAMES = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i
  * （见 notes.rs 的 `validate_name`）—— 落盘的名字不能只靠上游自觉。
  */
 export function sanitizeNoteName(raw: unknown): string {
-  if (typeof raw !== 'string') return ''
+  if (typeof raw !== 'string')
+    return ''
   return raw
-    .replace(/[\u0000-\u001f\u007f]/g, ' ')
+    .replace(/[\u0000-\u001F\u007F]/g, ' ')
     .replace(/[<>:"/\\|?*]/g, '')
     .replace(/\s+/g, ' ')
     .trim()
@@ -233,12 +238,17 @@ export function sanitizeNoteName(raw: unknown): string {
  * 有一类名字（带 `/`、系统保留名）不是「换一个号码就能过」的，说清原因比只报「非法」有用。
  */
 export function noteNameProblem(raw: unknown): string {
-  if (typeof raw !== 'string' || !raw.trim()) return '名字不能为空'
+  if (typeof raw !== 'string' || !raw.trim())
+    return '名字不能为空'
   const name = raw.trim()
-  if (ILLEGAL_NAME_CHARS.test(name)) return '名字里不能包含 \\ / : * ? " < > | 这些字符'
-  if (name.startsWith('.')) return '名字不能以点开头'
-  if (RESERVED_NAMES.test(name)) return '这是系统的保留名字，换一个'
-  if (!sanitizeNoteName(name)) return '名字不能为空'
+  if (ILLEGAL_NAME_CHARS.test(name))
+    return '名字里不能包含 \\ / : * ? " < > | 这些字符'
+  if (name.startsWith('.'))
+    return '名字不能以点开头'
+  if (RESERVED_NAMES.test(name))
+    return '这是系统的保留名字，换一个'
+  if (!sanitizeNoteName(name))
+    return '名字不能为空'
   return ''
 }
 
@@ -254,7 +264,7 @@ export function noteFileName(name: string): string {
 /** 是不是一篇笔记（按后缀判） */
 export function isNoteFile(name: string): boolean {
   const lower = name.trim().toLowerCase()
-  return NOTE_EXTENSIONS.some((ext) => lower.endsWith(ext))
+  return NOTE_EXTENSIONS.some(ext => lower.endsWith(ext))
 }
 
 /** 文件名 → 显示名（去掉后缀） */
@@ -270,12 +280,14 @@ export function noteDisplayName(fileName: string): string {
  */
 export function uniqueNoteName(siblings: readonly NoteNode[], base: string): string {
   const wanted = sanitizeNoteName(base) || NOTE_DEFAULT_NAMES.note
-  const taken = new Set(siblings.map((node) => node.name))
-  if (!taken.has(wanted)) return wanted
+  const taken = new Set(siblings.map(node => node.name))
+  if (!taken.has(wanted))
+    return wanted
 
   for (let index = 2; index < 1000; index += 1) {
     const candidate = `${wanted} ${index}`
-    if (!taken.has(candidate)) return candidate
+    if (!taken.has(candidate))
+      return candidate
   }
   return wanted
 }
@@ -307,10 +319,11 @@ const collator = new Intl.Collator('zh-Hans-CN', { numeric: true, sensitivity: '
 export function sortRelNodes<Self extends RelTreeNode<Self>>(nodes: readonly Self[]): Self[] {
   return [...nodes]
     .sort((left, right) => {
-      if (left.kind !== right.kind) return left.kind === 'folder' ? -1 : 1
+      if (left.kind !== right.kind)
+        return left.kind === 'folder' ? -1 : 1
       return collator.compare(left.name, right.name) || collator.compare(left.rel, right.rel)
     })
-    .map((node) => (node.children ? { ...node, children: sortRelNodes(node.children) } : node))
+    .map(node => (node.children ? { ...node, children: sortRelNodes(node.children) } : node))
 }
 
 /** 逐层排序（返回新对象，不改入参） */
@@ -326,17 +339,18 @@ export function sortNoteNodes(nodes: readonly NoteNode[]): NoteNode[] {
  * 把节点挂到根上：树里位置不准，但总比整篇笔记看不见强。
  */
 export function buildRelTree<
-  Entry extends { rel: string; name: string; isDir: boolean },
-  Self extends RelTreeNode<Self>
+  Entry extends { rel: string, name: string, isDir: boolean },
+  Self extends RelTreeNode<Self>,
 >(
   entries: readonly Entry[],
-  buildLeaf: (rel: string, fileName: string, entry: Entry) => Self | null
+  buildLeaf: (rel: string, fileName: string, entry: Entry) => Self | null,
 ): Self[] {
   const table = new Map<string, Self>()
 
   for (const entry of entries) {
     const rel = normalizeRel(entry.rel)
-    if (!rel || table.has(rel)) continue
+    if (!rel || table.has(rel))
+      continue
 
     const fileName = entry.name ? normalizeRel(entry.name) : relName(rel)
     if (entry.isDir) {
@@ -346,14 +360,16 @@ export function buildRelTree<
       continue
     }
     const leaf = buildLeaf(rel, fileName, entry)
-    if (leaf) table.set(rel, leaf)
+    if (leaf)
+      table.set(rel, leaf)
   }
 
   const roots: Self[] = []
   for (const node of table.values()) {
     const parent = parentRel(node.rel)
     const owner = parent ? table.get(parent) : undefined
-    if (owner) owner.children?.push(node)
+    if (owner)
+      owner.children?.push(node)
     else roots.push(node)
   }
 
@@ -362,13 +378,14 @@ export function buildRelTree<
 
 /** 笔记树的叶子：只收 markdown 文件（图片、附件这些不进树，它们在编辑器的链接里照样能用），显示名去掉后缀 */
 function buildNoteLeaf(rel: string, fileName: string, entry: NoteEntry): NoteNode | null {
-  if (!isNoteFile(fileName)) return null
+  if (!isNoteFile(fileName))
+    return null
   return {
     id: rel,
     rel,
     name: noteDisplayName(fileName),
     kind: 'note',
-    mtimeMs: entry.mtimeMs ?? 0
+    mtimeMs: entry.mtimeMs ?? 0,
   }
 }
 
@@ -400,19 +417,23 @@ export const NOTE_HISTORY_MAX = 6
  * 超过上限的部分整段丢掉，留下的是最近打开的那几个。
  */
 export function sanitizeNoteHistory(raw: unknown): string[] {
-  if (!Array.isArray(raw)) return []
+  if (!Array.isArray(raw))
+    return []
 
   const seen = new Set<string>()
   const list: string[] = []
   for (const item of raw) {
     const dir = sanitizeNoteRoot(item)
-    if (!dir) continue
+    if (!dir)
+      continue
 
     const key = dir.toLowerCase()
-    if (seen.has(key)) continue
+    if (seen.has(key))
+      continue
     seen.add(key)
     list.push(dir)
-    if (list.length >= NOTE_HISTORY_MAX) break
+    if (list.length >= NOTE_HISTORY_MAX)
+      break
   }
   return list
 }
@@ -420,7 +441,8 @@ export function sanitizeNoteHistory(raw: unknown): string[] {
 /** 打开（或换到）一个目录：它排到最前面，已在那儿的不会出现两次 */
 export function pushNoteHistory(history: unknown, dir: unknown): string[] {
   const target = sanitizeNoteRoot(dir)
-  if (!target) return sanitizeNoteHistory(history)
+  if (!target)
+    return sanitizeNoteHistory(history)
   return sanitizeNoteHistory([target, ...sanitizeNoteHistory(history)])
 }
 
@@ -437,19 +459,23 @@ export const NOTE_TREE_EXPANDED_MAX = 64
  * 相对路径只在**当前这个笔记本**里有意义，所以换笔记本时清空（见 stores/notes.ts）。
  */
 export function sanitizeNoteTreeExpanded(raw: unknown): string[] {
-  if (!Array.isArray(raw)) return []
+  if (!Array.isArray(raw))
+    return []
 
   const seen = new Set<string>()
   const list: string[] = []
   for (const item of raw) {
     const rel = normalizeRel(item)
-    if (!rel || rel.split('/').includes('..')) continue
+    if (!rel || rel.split('/').includes('..'))
+      continue
 
     const key = rel.toLowerCase()
-    if (seen.has(key)) continue
+    if (seen.has(key))
+      continue
     seen.add(key)
     list.push(rel)
-    if (list.length >= NOTE_TREE_EXPANDED_MAX) break
+    if (list.length >= NOTE_TREE_EXPANDED_MAX)
+      break
   }
   return list
 }
@@ -457,7 +483,7 @@ export function sanitizeNoteTreeExpanded(raw: unknown): string[] {
 /** 删掉清单里的一条（历史记录可以删）；本来就不在里面时原样返回 */
 export function removeFromNoteHistory(history: unknown, dir: unknown): string[] {
   const target = sanitizeNoteRoot(dir).toLowerCase()
-  return sanitizeNoteHistory(history).filter((item) => item.toLowerCase() !== target)
+  return sanitizeNoteHistory(history).filter(item => item.toLowerCase() !== target)
 }
 
 // ---------- 读 ----------
@@ -465,16 +491,19 @@ export function removeFromNoteHistory(history: unknown, dir: unknown): string[] 
 /** 同构树共用的查找：深度优先找到某个路径上的节点；找不到返回 null */
 export function findRelNode<Self extends RelTreeNode<Self>>(
   nodes: readonly Self[],
-  rel: string
+  rel: string,
 ): Self | null {
   const target = normalizeRel(rel)
-  if (!target) return null
+  if (!target)
+    return null
 
   for (const node of nodes) {
-    if (node.rel === target) return node
+    if (node.rel === target)
+      return node
     if (node.children) {
       const found = findRelNode(node.children, target)
-      if (found) return found
+      if (found)
+        return found
     }
   }
   return null
@@ -488,14 +517,17 @@ export function findNoteNode(nodes: readonly NoteNode[], rel: string): NoteNode 
 /** 同构树共用的「链」：从最外层到该节点的完整链（含自身）；找不到返回空数组 */
 export function relChain<Self extends RelTreeNode<Self>>(nodes: readonly Self[], rel: string): Self[] {
   const target = normalizeRel(rel)
-  if (!target) return []
+  if (!target)
+    return []
 
   for (const node of nodes) {
-    if (node.rel === target) return [node]
+    if (node.rel === target)
+      return [node]
     // 只往「可能是它祖先」的那一支里走：rel 是带层级的前缀路径
     if (node.children && target.startsWith(`${node.rel}/`)) {
       const deeper = relChain(node.children, target)
-      if (deeper.length) return [node, ...deeper]
+      if (deeper.length)
+        return [node, ...deeper]
     }
   }
   return []
@@ -512,12 +544,14 @@ export function noteChain(nodes: readonly NoteNode[], rel: string): NoteNode[] {
 /** 同构树共用的计数：数某一类节点（文件夹不算） */
 export function countRelNodes<Self extends RelTreeNode<Self>>(
   nodes: readonly Self[],
-  kind: string
+  kind: string,
 ): number {
   let total = 0
   for (const node of nodes) {
-    if (node.kind === kind) total += 1
-    if (node.children) total += countRelNodes(node.children, kind)
+    if (node.kind === kind)
+      total += 1
+    if (node.children)
+      total += countRelNodes(node.children, kind)
   }
   return total
 }
@@ -532,7 +566,8 @@ export function countNodes(nodes: readonly NoteNode[]): number {
   let total = 0
   for (const node of nodes) {
     total += 1
-    if (node.children) total += countNodes(node.children)
+    if (node.children)
+      total += countNodes(node.children)
   }
   return total
 }
@@ -553,24 +588,27 @@ export function countNodes(nodes: readonly NoteNode[]): number {
  *     但界面上给个「能放」的提示再什么都不发生，会让人以为拖动坏了。
  */
 export function noteDropAllowed(
-  drag: { rel: string; kind: NoteKind },
-  target: { rel: string; kind: NoteKind }
+  drag: { rel: string, kind: NoteKind },
+  target: { rel: string, kind: NoteKind },
 ): boolean {
-  if (drag.kind !== 'note') return false
-  if (target.kind !== 'folder') return false
+  if (drag.kind !== 'note')
+    return false
+  if (target.kind !== 'folder')
+    return false
   return parentRel(drag.rel) !== normalizeRel(target.rel)
 }
 
 // ---------- 正文里的链接 ----------
 
 /** 带协议头的地址（`https:` / `mailto:` / `file:`…）：那些不是本笔记本里的路径 */
-const LINK_SCHEME = /^[A-Za-z][A-Za-z0-9+.-]*:/
+const LINK_SCHEME = /^[A-Z][A-Z0-9+.-]*:/i
 
 /** 百分号编码解回原文；解不开（半截编码、名字里真的带 `%`）时按原样用 */
 function decodeHref(path: string): string {
   try {
     return decodeURIComponent(path)
-  } catch {
+  }
+  catch {
     return path
   }
 }
@@ -592,10 +630,12 @@ function decodeHref(path: string): string {
  * 只算路径，**不问那一篇在不在**：在不在得拿树去查，而树在调用方手上。
  */
 export function resolveNoteLink(href: unknown, fromRel: string): string {
-  if (typeof href !== 'string') return ''
+  if (typeof href !== 'string')
+    return ''
 
   const raw = href.trim()
-  if (!raw || raw.startsWith('#') || LINK_SCHEME.test(raw)) return ''
+  if (!raw || raw.startsWith('#') || LINK_SCHEME.test(raw))
+    return ''
 
   const path = decodeHref(raw.split('#')[0].split('?')[0]).replace(/\\/g, '/')
   // 从笔记本根写起的（`/别的.md`）：基准是笔记本本身，不是这一篇所在的文件夹 ——
@@ -604,12 +644,14 @@ export function resolveNoteLink(href: unknown, fromRel: string): string {
   const parts = base ? base.split('/') : []
 
   for (const part of normalizeRel(path).split('/')) {
-    if (!part) continue
+    if (!part)
+      continue
     if (part !== '..') {
       parts.push(part)
       continue
     }
-    if (!parts.length) return ''
+    if (!parts.length)
+      return ''
     parts.pop()
   }
 

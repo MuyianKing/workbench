@@ -9,25 +9,25 @@ const items: Item[] = [{ id: 'a' }, { id: 'b' }, { id: 'c' }]
 
 describe('reorderById', () => {
   it('按给定顺序重排', () => {
-    expect(reorderById(items, ['c', 'a', 'b']).map((i) => i.id)).toEqual(['c', 'a', 'b'])
+    expect(reorderById(items, ['c', 'a', 'b']).map(i => i.id)).toEqual(['c', 'a', 'b'])
   })
 
   it('顺序里没提到的条目追加到末尾，不会被丢掉', () => {
-    expect(reorderById(items, ['c']).map((i) => i.id)).toEqual(['c', 'a', 'b'])
+    expect(reorderById(items, ['c']).map(i => i.id)).toEqual(['c', 'a', 'b'])
   })
 
   it('忽略不存在的 id', () => {
-    expect(reorderById(items, ['b', 'ghost', 'a', 'c']).map((i) => i.id)).toEqual(['b', 'a', 'c'])
+    expect(reorderById(items, ['b', 'ghost', 'a', 'c']).map(i => i.id)).toEqual(['b', 'a', 'c'])
   })
 
   it('空顺序时保持原样', () => {
-    expect(reorderById(items, []).map((i) => i.id)).toEqual(['a', 'b', 'c'])
+    expect(reorderById(items, []).map(i => i.id)).toEqual(['a', 'b', 'c'])
   })
 
   it('不修改传入的数组', () => {
     const source = [...items]
     reorderById(source, ['c', 'b', 'a'])
-    expect(source.map((i) => i.id)).toEqual(['a', 'b', 'c'])
+    expect(source.map(i => i.id)).toEqual(['a', 'b', 'c'])
   })
 })
 

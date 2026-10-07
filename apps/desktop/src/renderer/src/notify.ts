@@ -36,16 +36,17 @@ export function notifyError(message: string): void {
 export async function confirmAction(
   message: string,
   title: string,
-  options: { confirmButtonText?: string; cancelButtonText?: string; type?: 'warning' | 'info' | 'error' | 'success' } = {}
+  options: { confirmButtonText?: string, cancelButtonText?: string, type?: 'warning' | 'info' | 'error' | 'success' } = {},
 ): Promise<boolean> {
   try {
     await ElMessageBox.confirm(message, title, {
       confirmButtonText: options.confirmButtonText ?? '确定',
       cancelButtonText: options.cancelButtonText ?? '取消',
-      type: options.type ?? 'warning'
+      type: options.type ?? 'warning',
     })
     return true
-  } catch {
+  }
+  catch {
     return false
   }
 }

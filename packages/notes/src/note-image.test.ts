@@ -1,22 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  buildImageAssets,
-  countImageReferences,
-  imageDeviceKey,
-  imageExtension,
-  imageFileName,
-  imageMarkdown,
-  imageNotebookKey,
-  imageRawUrl,
-  imageRepoPath,
-  imageScopeDir,
-  parseImageRemote,
-  sanitizeImageDir,
-  sanitizeImageRepo,
-  sortImageAssets,
-  totalImageBytes,
-  unusedImages
-} from './note-image'
+import { buildImageAssets, countImageReferences, imageDeviceKey, imageExtension, imageFileName, imageMarkdown, imageNotebookKey, imageRawUrl, imageRepoPath, imageScopeDir, parseImageRemote, sanitizeImageDir, sanitizeImageRepo, sortImageAssets, totalImageBytes, unusedImages } from './note-image'
 
 /** 2026-09-16 10:45:12 本地时间 */
 const NOW = new Date(2026, 8, 16, 10, 45, 12).getTime()
@@ -45,7 +28,7 @@ describe('仓库地址与目录的收敛', () => {
 describe('文件名', () => {
   it('时间戳在前、随机段在后，后缀按 mime 认', () => {
     expect(imageFileName({ mime: 'image/png', now: NOW, token: 'ab12cd34ef' })).toBe(
-      '20260916-104512-ab12cd34.png'
+      '20260916-104512-ab12cd34.png',
     )
     expect(imageFileName({ mime: 'image/jpeg', now: NOW, token: 'x' })).toBe('20260916-104512-x.jpg')
     // 认不出来的 mime 按 png，总得有个后缀
@@ -55,7 +38,7 @@ describe('文件名', () => {
 
   it('随机段里的杂字符剔掉；不传就现取一个', () => {
     expect(imageFileName({ mime: 'image/png', now: NOW, token: 'a-b/c d' })).toBe(
-      '20260916-104512-abcd.png'
+      '20260916-104512-abcd.png',
     )
     expect(imageFileName({ mime: 'image/png', now: NOW, token: '///' })).toBe('20260916-104512-0.png')
     expect(imageFileName({ mime: 'image/png', now: NOW })).toMatch(/^20260916-104512-[0-9a-f]{8}\.png$/)
@@ -72,12 +55,12 @@ describe('文件名', () => {
   it('目录进了仓库路径，也进了访问地址', () => {
     const path = imageRepoPath('images', '20260916-104512-ab12cd34.png')
     expect(
-      imageRawUrl({ repo: 'git@github.com:me/pics.git', branch: 'main', path })
+      imageRawUrl({ repo: 'git@github.com:me/pics.git', branch: 'main', path }),
     ).toBe('https://raw.githubusercontent.com/me/pics/main/images/20260916-104512-ab12cd34.png')
 
     const nested = imageRepoPath('notes/images', '20260916-104512-ab12cd34.png')
     expect(
-      imageRawUrl({ repo: 'git@github.com:me/pics.git', branch: 'main', path: nested })
+      imageRawUrl({ repo: 'git@github.com:me/pics.git', branch: 'main', path: nested }),
     ).toBe('https://raw.githubusercontent.com/me/pics/main/notes/images/20260916-104512-ab12cd34.png')
   })
 })
@@ -127,7 +110,7 @@ describe('这台机器上这个笔记本那一层', () => {
     const path = imageRepoPath(scope, '20260916-104512-ab12cd34.png')
     expect(path).toBe(`images/${DEVICE}/${notebook}/20260916-104512-ab12cd34.png`)
     expect(imageRawUrl({ repo: 'git@github.com:me/pics.git', branch: 'main', path })).toBe(
-      `https://raw.githubusercontent.com/me/pics/main/images/${DEVICE}/${notebook}/20260916-104512-ab12cd34.png`
+      `https://raw.githubusercontent.com/me/pics/main/images/${DEVICE}/${notebook}/20260916-104512-ab12cd34.png`,
     )
   })
 })
@@ -137,23 +120,23 @@ describe('拆仓库地址', () => {
     expect(parseImageRemote('https://github.com/muyian/pics.git')).toEqual({
       host: 'github.com',
       owner: 'muyian',
-      name: 'pics'
+      name: 'pics',
     })
     expect(parseImageRemote('git@github.com:muyian/pics.git')).toEqual({
       host: 'github.com',
       owner: 'muyian',
-      name: 'pics'
+      name: 'pics',
     })
     expect(parseImageRemote('ssh://git@gitee.com/muyian/pics.git')).toEqual({
       host: 'gitee.com',
       owner: 'muyian',
-      name: 'pics'
+      name: 'pics',
     })
     // 自建服务器上的分组路径：owner 可以是多段
     expect(parseImageRemote('git@git.example.com:team/docs/pics.git')).toEqual({
       host: 'git.example.com',
       owner: 'team/docs',
-      name: 'pics'
+      name: 'pics',
     })
   })
 
@@ -166,36 +149,36 @@ describe('拆仓库地址', () => {
 })
 
 describe('访问地址', () => {
-  it('GitHub / Gitee / GitLab 各按各的规则拼', () => {
+  it('gitHub / Gitee / GitLab 各按各的规则拼', () => {
     expect(
-      imageRawUrl({ repo: 'git@github.com:muyian/pics.git', branch: 'main', path: 'images/a.png' })
+      imageRawUrl({ repo: 'git@github.com:muyian/pics.git', branch: 'main', path: 'images/a.png' }),
     ).toBe('https://raw.githubusercontent.com/muyian/pics/main/images/a.png')
 
     expect(
       imageRawUrl({
         repo: 'https://gitee.com/muyian/pics.git',
         branch: 'master',
-        path: 'images/a.png'
-      })
+        path: 'images/a.png',
+      }),
     ).toBe('https://gitee.com/muyian/pics/raw/master/images/a.png')
 
     expect(
       imageRawUrl({
         repo: 'https://gitlab.com/muyian/pics.git',
         branch: 'main',
-        path: 'images/a.png'
-      })
+        path: 'images/a.png',
+      }),
     ).toBe('https://gitlab.com/muyian/pics/-/raw/main/images/a.png')
   })
 
   it('三家以外的仓库给空串，不拼一个点不开的地址', () => {
     expect(
-      imageRawUrl({ repo: 'git@git.example.com:team/pics.git', branch: 'main', path: 'images/a.png' })
+      imageRawUrl({ repo: 'git@git.example.com:team/pics.git', branch: 'main', path: 'images/a.png' }),
     ).toBe('')
 
     // 本地路径当远端的测试仓库，一样认不出托管方
     expect(
-      imageRawUrl({ repo: 'C:/tmp/images.git', branch: 'main', path: 'images/a.png' })
+      imageRawUrl({ repo: 'C:/tmp/images.git', branch: 'main', path: 'images/a.png' }),
     ).toBe('')
   })
 
@@ -204,8 +187,8 @@ describe('访问地址', () => {
       imageRawUrl({
         repo: 'git@github.com:me/pics.git',
         branch: 'main',
-        path: '我的图片/a b.png'
-      })
+        path: '我的图片/a b.png',
+      }),
     ).toBe('https://raw.githubusercontent.com/me/pics/main/%E6%88%91%E7%9A%84%E5%9B%BE%E7%89%87/a%20b.png')
   })
 
@@ -224,14 +207,14 @@ describe('素材管理：谁还在用', () => {
   const images = [
     { path: 'images/20260916-104512-ab12cd34.png', name: '20260916-104512-ab12cd34.png', size: 2048 },
     { path: 'images/20260915-090000-ffffffff.png', name: '20260915-090000-ffffffff.png', size: 1024 },
-    { path: 'images/20260101-000000-00000000.jpg', name: '20260101-000000-00000000.jpg', size: 4096 }
+    { path: 'images/20260101-000000-00000000.jpg', name: '20260101-000000-00000000.jpg', size: 4096 },
   ]
 
   it('按文件名数出现次数，写成什么地址都认', () => {
     const texts = [
       '看这张 ![图片](https://raw.githubusercontent.com/me/pics/main/images/20260916-104512-ab12cd34.png)',
       '同一个文件又贴了一次：![](https://cdn.example.com/images/20260916-104512-ab12cd34.png?raw=true)',
-      '本地相对路径也算：![](images/20260915-090000-ffffffff.png)'
+      '本地相对路径也算：![](images/20260915-090000-ffffffff.png)',
     ]
 
     expect(countImageReferences(texts, '20260916-104512-ab12cd34.png')).toBe(2)
@@ -253,26 +236,26 @@ describe('素材管理：谁还在用', () => {
       images,
       texts: ['![](https://raw.githubusercontent.com/me/pics/main/images/20260915-090000-ffffffff.png)'],
       repo: 'git@github.com:me/pics.git',
-      branch: 'main'
+      branch: 'main',
     })
 
     const sorted = sortImageAssets(assets)
-    expect(sorted.map((asset) => asset.name)).toEqual([
+    expect(sorted.map(asset => asset.name)).toEqual([
       '20260916-104512-ab12cd34.png',
       '20260101-000000-00000000.jpg',
-      '20260915-090000-ffffffff.png'
+      '20260915-090000-ffffffff.png',
     ])
     expect(sorted[0].refs).toBe(0)
     expect(sorted[1].refs).toBe(0)
     expect(sorted[2].refs).toBe(1)
     expect(sorted[2].url).toBe(
-      'https://raw.githubusercontent.com/me/pics/main/images/20260915-090000-ffffffff.png'
+      'https://raw.githubusercontent.com/me/pics/main/images/20260915-090000-ffffffff.png',
     )
     expect(sorted[0].url).toBe(
-      'https://raw.githubusercontent.com/me/pics/main/images/20260916-104512-ab12cd34.png'
+      'https://raw.githubusercontent.com/me/pics/main/images/20260916-104512-ab12cd34.png',
     )
     expect(
-      unusedImages(sorted).map((asset) => asset.name)
+      unusedImages(sorted).map(asset => asset.name),
     ).toEqual(['20260916-104512-ab12cd34.png', '20260101-000000-00000000.jpg'])
     expect(totalImageBytes(sorted)).toBe(2048 + 1024 + 4096)
   })
@@ -282,7 +265,7 @@ describe('素材管理：谁还在用', () => {
       images: [images[0]],
       texts: [],
       repo: 'https://git.example.com/me/pics.git',
-      branch: 'main'
+      branch: 'main',
     })
     expect(asset.url).toBe('')
   })

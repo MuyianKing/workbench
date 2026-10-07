@@ -1,3 +1,4 @@
+import type { KbEntryMeta, KbRawItem, KbRawStatus, KbScanEntry } from './kb'
 /**
  * 知识库纯逻辑的测试。
  *
@@ -6,29 +7,7 @@
  * 而不是报错 —— 这个「不是错误」的口径本身也要测到。
  */
 import { describe, expect, it } from 'vitest'
-import {
-  KB_DIR,
-  KB_RAW_DIR,
-  compareKbRel,
-  kbEntryFiles,
-  kbEntryTree,
-  kbFolderChain,
-  kbRawFiles,
-  kbRawStatusText,
-  kbRawTree,
-  kbRawViewKind,
-  kbStats,
-  kbTagCounts,
-  kbTreeFolderIds,
-  matchKbRawStatus,
-  normalizeKbSource,
-  parseKbFrontmatter,
-  parseKbIndex,
-  type KbEntryMeta,
-  type KbRawItem,
-  type KbRawStatus,
-  type KbScanEntry
-} from './kb'
+import { compareKbRel, KB_DIR, KB_RAW_DIR, kbEntryFiles, kbEntryTree, kbFolderChain, kbRawFiles, kbRawStatusText, kbRawTree, kbRawViewKind, kbStats, kbTagCounts, kbTreeFolderIds, matchKbRawStatus, normalizeKbSource, parseKbFrontmatter, parseKbIndex } from './kb'
 
 /** 造一条扫描清单：rel 之外都有说得过去的默认值 */
 function entry(rel: string, mtimeMs = 1000, isDir = false): KbScanEntry {
@@ -48,7 +27,7 @@ function meta(partial: Partial<KbEntryMeta>): KbEntryMeta {
     source: '',
     links: [],
     mtimeMs: 1000,
-    ...partial
+    ...partial,
   }
 }
 
@@ -57,7 +36,7 @@ describe('parseKbFrontmatter', () => {
     const text = [
       '---',
       'title: "MuButton（mu-button）"',
-      "tags: [mu-ui, 组件, '按钮']",
+      'tags: [mu-ui, 组件, \'按钮\']',
       'status: reviewed',
       'created: 2026-09-28',
       'updated: 2026-09-28',
@@ -65,7 +44,7 @@ describe('parseKbFrontmatter', () => {
       'source: data/raw/mu-ui/button.md',
       '---',
       '',
-      '# MuButton（mu-button）'
+      '# MuButton（mu-button）',
     ].join('\n')
 
     const meta = parseKbFrontmatter(text)
@@ -89,7 +68,7 @@ describe('parseKbFrontmatter', () => {
     expect(parseKbFrontmatter(null).title).toBe('')
   })
 
-  it('BOM 不挡解析，tags 认单个裸标量，不认识的键不碰', () => {
+  it('bOM 不挡解析，tags 认单个裸标量，不认识的键不碰', () => {
     const meta = parseKbFrontmatter('\uFEFF---\ntags: 部署\nalias: 别名\n---\n正文')
     expect(meta.tags).toEqual(['部署'])
     expect(meta.title).toBe('')
@@ -119,21 +98,21 @@ describe('清单拆分', () => {
       entry(`${KB_DIR}/草图.png`),
       entry(KB_RAW_DIR, 0, true),
       entry(`${KB_RAW_DIR}/mu-ui/button.md`),
-      entry(`${KB_RAW_DIR}/手册.pdf`)
+      entry(`${KB_RAW_DIR}/手册.pdf`),
     ]
-    expect(kbEntryFiles(scan).map((item) => item.rel)).toEqual([`${KB_DIR}/button.md`])
-    expect(kbRawFiles(scan).map((item) => item.rel)).toEqual([
+    expect(kbEntryFiles(scan).map(item => item.rel)).toEqual([`${KB_DIR}/button.md`])
+    expect(kbRawFiles(scan).map(item => item.rel)).toEqual([
       `${KB_RAW_DIR}/mu-ui/button.md`,
-      `${KB_RAW_DIR}/手册.pdf`
+      `${KB_RAW_DIR}/手册.pdf`,
     ])
   })
 
   it('compareKbRel 按中文与数字排', () => {
     const items = [entry('kb/第10篇.md'), entry('kb/第2篇.md'), entry('kb/按钮.md')]
-    expect([...items].sort(compareKbRel).map((item) => item.rel)).toEqual([
+    expect([...items].sort(compareKbRel).map(item => item.rel)).toEqual([
       'kb/按钮.md',
       'kb/第2篇.md',
-      'kb/第10篇.md'
+      'kb/第10篇.md',
     ])
   })
 })
@@ -162,7 +141,7 @@ describe('matchKbRawStatus', () => {
   it('一拆多时取最新的那份条目比；entryRels 按修改时间新的在前', () => {
     const entries = [
       meta({ rel: `${KB_DIR}/旧.md`, source: `${KB_RAW_DIR}/a.md`, mtimeMs: 1500 }),
-      meta({ rel: `${KB_DIR}/新.md`, source: `${KB_RAW_DIR}/a.md`, mtimeMs: 4000 })
+      meta({ rel: `${KB_DIR}/新.md`, source: `${KB_RAW_DIR}/a.md`, mtimeMs: 4000 }),
     ]
     const items = matchKbRawStatus([entry(`${KB_RAW_DIR}/a.md`, 3000)], entries)
     // 最新的条目（4000）比原始文件（3000）新，所以已入库
@@ -182,7 +161,7 @@ describe('统计', () => {
     const entries = [meta({ status: 'draft' }), meta({ status: 'reviewed' })]
     const raw = matchKbRawStatus(
       [entry(`${KB_RAW_DIR}/a.md`, 9000), entry(`${KB_RAW_DIR}/b.md`, 3000), entry(`${KB_RAW_DIR}/c.md`)],
-      [meta({ source: `${KB_RAW_DIR}/b.md`, mtimeMs: 1000 })]
+      [meta({ source: `${KB_RAW_DIR}/b.md`, mtimeMs: 1000 })],
     )
     const stats = kbStats(entries, raw)
     expect(stats).toEqual({ entries: 2, drafts: 1, raws: 3, pending: 2, stale: 1 })
@@ -192,12 +171,12 @@ describe('统计', () => {
     const counts = kbTagCounts([
       meta({ tags: ['组件', 'mu-ui'] }),
       meta({ tags: ['组件'] }),
-      meta({ tags: ['部署'] })
+      meta({ tags: ['部署'] }),
     ])
     expect(counts).toEqual([
       { tag: '组件', count: 2 },
       { tag: '部署', count: 1 },
-      { tag: 'mu-ui', count: 1 }
+      { tag: 'mu-ui', count: 1 },
     ])
   })
 })
@@ -206,7 +185,7 @@ describe('parseKbIndex', () => {
   it('认 generated_at 与 count 两样', () => {
     expect(parseKbIndex('{"generated_at":"2026-09-28","count":50}')).toEqual({
       generatedAt: '2026-09-28',
-      count: 50
+      count: 50,
     })
   })
 
@@ -223,13 +202,13 @@ describe('kbEntryTree', () => {
     const tree = kbEntryTree([
       meta({ rel: 'kb/01-组件库/add-button.md', title: 'MuAddButton' }),
       meta({ rel: 'kb/00-规范/条目格式.md', title: '条目格式规范' }),
-      meta({ rel: 'kb/01-组件库/嵌套/button.md', title: 'MuButton' })
+      meta({ rel: 'kb/01-组件库/嵌套/button.md', title: 'MuButton' }),
     ])
 
-    expect(tree.map((node) => node.id)).toEqual(['00-规范', '01-组件库'])
+    expect(tree.map(node => node.id)).toEqual(['00-规范', '01-组件库'])
     expect(tree[0].children[0]).toMatchObject({ id: 'kb/00-规范/条目格式.md', name: '条目格式规范' })
     const nested = tree[1].children
-    expect(nested.map((node) => node.id)).toEqual(['01-组件库/嵌套', 'kb/01-组件库/add-button.md'])
+    expect(nested.map(node => node.id)).toEqual(['01-组件库/嵌套', 'kb/01-组件库/add-button.md'])
     expect(nested[0].children[0]).toMatchObject({ id: 'kb/01-组件库/嵌套/button.md', kind: 'entry' })
   })
 
@@ -237,12 +216,12 @@ describe('kbEntryTree', () => {
     const tree = kbEntryTree([
       meta({ rel: 'kb/库/b.md', title: '乙', status: 'draft' }),
       meta({ rel: 'kb/库/a.md', title: '甲' }),
-      meta({ rel: 'kb/库.md', title: '单文件' })
+      meta({ rel: 'kb/库.md', title: '单文件' }),
     ])
 
     const folder = tree[0]
     expect(folder.kind).toBe('folder')
-    expect(folder.children.map((node) => node.name)).toEqual(['甲', '乙'])
+    expect(folder.children.map(node => node.name)).toEqual(['甲', '乙'])
     expect(folder.children[1].status).toBe('draft')
     expect(tree[1]).toMatchObject({ id: 'kb/库.md', kind: 'entry' })
   })
@@ -259,7 +238,7 @@ describe('kbTreeFolderIds / kbFolderChain', () => {
   it('folderIds 只收目录、逐层都算；chain 从最外层排下来、不含条目自己', () => {
     const tree = kbEntryTree([
       meta({ rel: 'kb/01-组件库/嵌套/button.md', title: 'MuButton' }),
-      meta({ rel: 'kb/00-规范/条目格式.md', title: '条目格式规范' })
+      meta({ rel: 'kb/00-规范/条目格式.md', title: '条目格式规范' }),
     ])
 
     expect(kbTreeFolderIds(tree)).toEqual(['00-规范', '01-组件库', '01-组件库/嵌套'])
@@ -279,14 +258,14 @@ describe('kbRawTree', () => {
     const tree = kbRawTree([
       raw('data/raw/mu-ui/button.md'),
       raw('data/raw/随手记.md', 'pending'),
-      raw('data/raw/mu-ui/子目录/avatar.md', 'stale')
+      raw('data/raw/mu-ui/子目录/avatar.md', 'stale'),
     ])
 
-    expect(tree.map((node) => node.id)).toEqual(['mu-ui', 'data/raw/随手记.md'])
+    expect(tree.map(node => node.id)).toEqual(['mu-ui', 'data/raw/随手记.md'])
     const folder = tree[0]
-    expect(folder.children.map((node) => node.id)).toEqual([
+    expect(folder.children.map(node => node.id)).toEqual([
       'mu-ui/子目录',
-      'data/raw/mu-ui/button.md'
+      'data/raw/mu-ui/button.md',
     ])
     expect(folder.children[1].item).toMatchObject({ status: 'synced' })
     expect(folder.children[0].children[0]).toMatchObject({ kind: 'file', name: 'avatar.md' })

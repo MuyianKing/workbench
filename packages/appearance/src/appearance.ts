@@ -1,3 +1,5 @@
+import type { AccentInkMode } from './accent-color'
+import type { ViewId } from './views'
 /**
  * 外观配置：**哪些设置算「看起来什么样」，以及它们的在文件里怎么落**。
  *
@@ -17,24 +19,13 @@
  * 而那个路径在那边不存在 —— 界面会照实显示「图片读不出来」，用户重新选一张即可。
  * 内置壁纸（`builtin:<id>`）没有这个问题，它在两台机器上指向同一张随包发布的图。
  */
-import {
-  ACCENT_COLOR_DEFAULT,
-  ACCENT_INK_DEFAULT,
-  sanitizeAccentColor,
-  sanitizeAccentInkMode,
-  type AccentInkMode
-} from './accent-color'
+import { ACCENT_COLOR_DEFAULT, ACCENT_INK_DEFAULT, sanitizeAccentColor, sanitizeAccentInkMode } from './accent-color'
 import { APP_NAME_DEFAULT, sanitizeAppName } from './app-name'
 import { CARD_OPACITY_DEFAULT, clampCardOpacity } from './card-opacity'
-import { TERMINAL_HEIGHT_DEFAULT, clampTerminalHeight } from './terminal-height'
-import {
-  BACKGROUND_OPACITY_DEFAULT,
-  clampBackgroundOpacity,
-  sanitizeBackgroundPath,
-  sanitizeVeilColor
-} from './workspace-background'
+import { clampTerminalHeight, TERMINAL_HEIGHT_DEFAULT } from './terminal-height'
+import { sanitizeHiddenViews, sanitizeViewOrder, VIEW_IDS } from './views'
 import { builtinReference } from './wallpaper'
-import { VIEW_IDS, sanitizeHiddenViews, sanitizeViewOrder, type ViewId } from './views'
+import { BACKGROUND_OPACITY_DEFAULT, clampBackgroundOpacity, sanitizeBackgroundPath, sanitizeVeilColor } from './workspace-background'
 
 /** 主题取值来源：system 跟随系统，light / dark 是手动钉死 */
 export type ThemeSource = 'system' | 'light' | 'dark'
@@ -74,7 +65,7 @@ export const APPEARANCE_SETTING_KEYS = [
   'cardOpacity',
   'hiddenViews',
   'viewOrder',
-  'navHidden'
+  'navHidden',
 ] as const
 
 export type AppearanceSettingKey = (typeof APPEARANCE_SETTING_KEYS)[number]
@@ -117,7 +108,7 @@ export const DEFAULT_APPEARANCE: AppearanceSettings = {
   cardOpacity: CARD_OPACITY_DEFAULT,
   hiddenViews: [],
   viewOrder: [...VIEW_IDS],
-  navHidden: false
+  navHidden: false,
 }
 
 const THEME_SOURCES: readonly ThemeSource[] = ['system', 'light', 'dark']
@@ -157,7 +148,7 @@ export function sanitizeAppearanceSettings(raw: unknown): AppearanceSettings {
     hiddenViews: sanitizeHiddenViews(value.hiddenViews),
     viewOrder: sanitizeViewOrder(value.viewOrder),
     // 收起与否只在明确写了 true 时才认（老主题文件里没有这个字段 = 展开），与卡片的 hidden 同一口径
-    navHidden: value.navHidden === true
+    navHidden: value.navHidden === true,
   }
 }
 
@@ -168,17 +159,20 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 /** 只挑出外观那一批键（值保持原样，收敛交给 sanitizeAppearanceSettings） */
 export function pickAppearance(raw: unknown): Partial<AppearanceSettings> {
-  if (!isRecord(raw)) return {}
+  if (!isRecord(raw))
+    return {}
   const picked: Record<string, unknown> = {}
   for (const key of APPEARANCE_SETTING_KEYS) {
-    if (key in raw) picked[key] = raw[key]
+    if (key in raw)
+      picked[key] = raw[key]
   }
   return picked as Partial<AppearanceSettings>
 }
 
 /** 从一份完整设置里摘掉外观项，剩下的就是数据文件里该存的那部分（形状由调用方认领） */
 export function stripAppearance(raw: unknown): Record<string, unknown> {
-  if (!isRecord(raw)) return {}
+  if (!isRecord(raw))
+    return {}
   const rest = { ...raw }
   for (const key of APPEARANCE_SETTING_KEYS) delete rest[key]
   return rest

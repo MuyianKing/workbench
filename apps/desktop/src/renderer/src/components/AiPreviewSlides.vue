@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { PptxViewer } from '@aiden0z/pptx-renderer'
+import { decodeBase64ToBuffer } from '@workbench/ai'
 /**
  * 预览栏的 PPTX 画法：@aiden0z/pptx-renderer 在浏览器里解析并渲染，列表模式
  * （幻灯片从上到下排、带页码标）。**pdfjs 兜底必须显式关** —— EMF 媒体的降级渲染
@@ -6,8 +8,6 @@
  * 库（连带它依赖的 echarts）是动态引的：不用这个画法就不进包。
  */
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import type { PptxViewer } from '@aiden0z/pptx-renderer'
-import { decodeBase64ToBuffer } from '@workbench/ai'
 
 const props = defineProps<{ binary: string }>()
 
@@ -25,7 +25,8 @@ function dispose(): void {
 async function load(): Promise<void> {
   const id = ++runId
   const box = host.value
-  if (!box || !props.binary) return // 还没挂上 / 还没取回来：等下一次触发
+  if (!box || !props.binary)
+    return // 还没挂上 / 还没取回来：等下一次触发
   const buffer = decodeBase64ToBuffer(props.binary)
   if (!buffer) {
     error.value = '文件内容解不出来'
@@ -35,15 +36,18 @@ async function load(): Promise<void> {
   error.value = ''
   try {
     const { PptxViewer } = await import('@aiden0z/pptx-renderer')
-    if (id !== runId) return
+    if (id !== runId)
+      return
     viewer = new PptxViewer(box, {
       fitMode: 'contain',
-      pdfjs: false
+      pdfjs: false,
     })
     await viewer.open(buffer, { renderMode: 'list', listOptions: { showSlideLabels: true } })
-  } catch (err) {
+  }
+  catch (err) {
     dispose()
-    if (id === runId) error.value = err instanceof Error ? err.message : '这个文件画不出来'
+    if (id === runId)
+      error.value = err instanceof Error ? err.message : '这个文件画不出来'
   }
 }
 
@@ -60,7 +64,7 @@ watch(
   () => props.binary,
   () => {
     void load()
-  }
+  },
 )
 
 onBeforeUnmount(dispose)
@@ -68,7 +72,9 @@ onBeforeUnmount(dispose)
 
 <template>
   <div class="slides">
-    <p v-if="error" class="slides__note is-fail">{{ error }}</p>
+    <p v-if="error" class="slides__note is-fail">
+      {{ error }}
+    </p>
     <div v-show="!error" ref="host" class="slides__host" />
   </div>
 </template>

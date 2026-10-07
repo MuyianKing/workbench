@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { ActivityDay } from '@workbench/core'
+import { buildActivityCalendar, monthLabels } from '@workbench/core'
 /**
  * 首页的活跃度图 —— 完全照 GitHub 贡献图的样子：一列一周、一行一周中的一天、
  * 53 列铺满一年，颜色深浅表示当天执行了多少次命令。
@@ -9,10 +11,9 @@
  * 活跃度回答的是「这段时间用得勤不勤」，不是「跑得顺不顺」。
  */
 import { computed, nextTick, onActivated, ref } from 'vue'
-import { useProjectsStore } from '@/stores/projects'
-import { useWallClock } from '@/composables/use-wall-clock'
 import PanelLoading from '@/components/PanelLoading.vue'
-import { buildActivityCalendar, monthLabels, type ActivityDay } from '@workbench/core'
+import { useWallClock } from '@/composables/use-wall-clock'
+import { useProjectsStore } from '@/stores/projects'
 
 const store = useProjectsStore()
 const { dayStart } = useWallClock()
@@ -27,7 +28,8 @@ const scrollEl = ref<HTMLElement | null>(null)
  */
 function scrollToLatest(): void {
   const el = scrollEl.value
-  if (el) el.scrollLeft = el.scrollWidth
+  if (el)
+    el.scrollLeft = el.scrollWidth
 }
 
 /**
@@ -49,12 +51,12 @@ const calendar = computed(() => buildActivityCalendar(store.activity, dayStart.v
 const months = computed(() => monthLabels(calendar.value.weeks))
 
 function tipOf(day: ActivityDay): string {
-  if (day.future) return ''
+  if (day.future)
+    return ''
   const [year, month, date] = day.date.split('-')
   const label = `${year}年${Number(month)}月${Number(date)}日`
   return day.count ? `${label} · ${day.count} 次执行` : `${label} · 无执行`
 }
-
 </script>
 
 <template>

@@ -1,11 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  TERMINAL_HEIGHT_DEFAULT,
-  TERMINAL_HEIGHT_MAX,
-  TERMINAL_HEIGHT_MIN,
-  clampTerminalHeight,
-  maxTerminalHeightFor
-} from './terminal-height'
+import { clampTerminalHeight, maxTerminalHeightFor, TERMINAL_HEIGHT_DEFAULT, TERMINAL_HEIGHT_MAX, TERMINAL_HEIGHT_MIN } from './terminal-height'
 
 describe('clampTerminalHeight', () => {
   it('区间内的值原样返回', () => {

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { AiNewsArticle, AiNewsItem } from '@/types'
+import { Refresh, TopRight } from '@element-plus/icons-vue'
 /**
  * 站内阅读弹层：把一条热点的原文正文抓下来，直接在应用里读。
  *
@@ -14,23 +16,21 @@
  * 而不是摆一个空白页或者转圈转到天荒地老。
  */
 import { computed, ref, watch } from 'vue'
-import { Refresh, TopRight } from '@element-plus/icons-vue'
 import AppDialog from '@/components/AppDialog.vue'
 import { formatTimestamp } from '@/format'
-import type { AiNewsArticle, AiNewsItem } from '@/types'
-
-/** 弹层开关:v-model 一条口径(与 AppDialog / el-dialog 相同,全应用的弹层都这么开) */
-const open = defineModel<boolean>({ required: true })
 
 const props = defineProps<{
   item: AiNewsItem | null
 }>()
 
+/** 弹层开关:v-model 一条口径(与 AppDialog / el-dialog 相同,全应用的弹层都这么开) */
+const open = defineModel<boolean>({ required: true })
+
 const visible = computed({
   get: () => open.value,
   set: (value: boolean) => {
     open.value = value
-  }
+  },
 })
 
 const article = ref<AiNewsArticle | null>(null)
@@ -46,7 +46,8 @@ async function load(): Promise<void> {
     error.value = '这条热点没有可打开的原文地址'
     return
   }
-  if (cachedUrl.value === item.link && article.value) return
+  if (cachedUrl.value === item.link && article.value)
+    return
 
   loading.value = true
   error.value = ''
@@ -56,12 +57,15 @@ async function load(): Promise<void> {
     if (result.ok && result.data) {
       article.value = result.data
       cachedUrl.value = item.link
-    } else {
+    }
+    else {
       error.value = result.error ?? '抓取原文失败'
     }
-  } catch (err) {
+  }
+  catch (err) {
     error.value = err instanceof Error ? err.message : '抓取原文失败'
-  } finally {
+  }
+  finally {
     loading.value = false
   }
 }
@@ -69,9 +73,10 @@ async function load(): Promise<void> {
 watch(
   () => [open.value, props.item?.link] as const,
   ([value]) => {
-    if (value) void load()
+    if (value)
+      void load()
   },
-  { immediate: true }
+  { immediate: true },
 )
 
 /** 关掉时把抓回来的正文丢掉：十篇文章留在内存里没意义，重开一次也不贵 */
@@ -89,19 +94,24 @@ function retry(): void {
 }
 
 function openExternal(): void {
-  if (props.item?.link) void window.workbench.openExternal(props.item.link)
+  if (props.item?.link)
+    void window.workbench.openExternal(props.item.link)
 }
 
 /** 标题下面那行：来源 · 时间 · 原文域名 */
 const meta = computed(() => {
   const item = props.item
-  if (!item) return []
+  if (!item)
+    return []
   const parts: string[] = []
-  if (item.source) parts.push(item.source)
-  if (item.pubDate) parts.push(formatTimestamp(item.pubDate))
+  if (item.source)
+    parts.push(item.source)
+  if (item.pubDate)
+    parts.push(formatTimestamp(item.pubDate))
   try {
     parts.push(new URL(item.link).hostname)
-  } catch {
+  }
+  catch {
     // 地址解析不出来就不显示域名，没必要为它编一个
   }
   return parts
@@ -127,14 +137,22 @@ const paragraphs = computed(() => article.value?.paragraphs ?? [])
       </p>
 
       <!-- 抓取中 -->
-      <p v-if="loading" class="article__state">正在读取原文…</p>
+      <p v-if="loading" class="article__state">
+        正在读取原文…
+      </p>
 
       <!-- 抓不到：把我们已有的导语摆出来，并指路浏览器 -->
       <template v-else-if="error">
-        <p v-if="item?.summary" class="article__lead">{{ item.summary }}</p>
-        <p class="article__state article__state--warn">{{ error }}</p>
+        <p v-if="item?.summary" class="article__lead">
+          {{ item.summary }}
+        </p>
+        <p class="article__state article__state--warn">
+          {{ error }}
+        </p>
         <div class="article__actions">
-          <el-button size="small" :icon="Refresh" @click="retry">重试</el-button>
+          <el-button size="small" :icon="Refresh" @click="retry">
+            重试
+          </el-button>
           <el-button size="small" type="primary" :icon="TopRight" @click="openExternal">
             在浏览器中打开
           </el-button>
@@ -154,7 +172,9 @@ const paragraphs = computed(() => article.value?.paragraphs ?? [])
 
     <template #footer>
       <div class="article__foot">
-        <el-button size="small" :icon="TopRight" @click="openExternal">在浏览器中打开</el-button>
+        <el-button size="small" :icon="TopRight" @click="openExternal">
+          在浏览器中打开
+        </el-button>
       </div>
     </template>
   </AppDialog>

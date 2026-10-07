@@ -6,13 +6,8 @@
  * 随 monorepo 化搬过去了。
  */
 import { describe, expect, it } from 'vitest'
-import {
-  DEFAULT_APPEARANCE,
-  sanitizeAppearanceSettings,
-  sanitizeThemeSource,
-  stripAppearance
-} from './appearance'
-import { DEFAULT_THEME, columnIds, columnOfRow, rowOf, sanitizeTheme } from './theme'
+import { DEFAULT_APPEARANCE, sanitizeAppearanceSettings, sanitizeThemeSource, stripAppearance } from './appearance'
+import { columnIds, columnOfRow, DEFAULT_THEME, rowOf, sanitizeTheme } from './theme'
 
 describe('收敛一份外观', () => {
   it('缺项补默认、认不出来的回默认、越界的夹住', () => {
@@ -26,7 +21,7 @@ describe('收敛一份外观', () => {
       cardOpacity: 999,
       workspaceBackgroundOpacity: '60',
       workspaceBackgroundVeil: 'red',
-      workspaceBackground: '  C:\\Users\\me\\wall.png  '
+      workspaceBackground: '  C:\\Users\\me\\wall.png  ',
     })
 
     expect(clean.appName).toBe(DEFAULT_APPEARANCE.appName)
@@ -70,21 +65,21 @@ describe('theme.json 的整份收敛', () => {
       cardGap: 14,
       columns: [
         { id: 'col-1', width: 320 },
-        { id: 'col-2', width: null }
+        { id: 'col-2', width: null },
       ],
-      cards: { quick: { column: 'col-2', order: 0, mode: 'fixed', height: 120 } }
+      cards: { quick: { column: 'col-2', order: 0, mode: 'fixed', height: 120 } },
     }
     const theme = sanitizeTheme(legacy)
 
     expect(theme.cardGap).toBe(14)
     expect(columnIds(theme.columns)).toEqual(['col-1', 'col-2'])
-    expect(theme.columns.map((column) => column.width)).toEqual([320, null])
+    expect(theme.columns.map(column => column.width)).toEqual([320, null])
     // 卡片挪到了「行」这一层，老结构里那份高度与模式一样带了过来
     expect(columnOfRow(theme.columns, theme.cards.quick.row)?.id).toBe('col-2')
     expect(rowOf(theme.columns, theme.cards.quick.row)).toEqual({
       id: theme.cards.quick.row,
       mode: 'fixed',
-      height: 120
+      height: 120,
     })
     expect(theme.appearance).toEqual(DEFAULT_APPEARANCE)
     expect(theme.updatedAt).toBe(0)

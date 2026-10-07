@@ -16,10 +16,8 @@
  * （见 src-tauri/capabilities/default.json），漏了就变成「按住标题栏没反应、控制台也不报错」。
  */
 import { onMounted, onUnmounted, ref } from 'vue'
-import { useProjectsStore } from '@/stores/projects'
 import { useSettingsStore } from '@/stores/settings'
 
-const store = useProjectsStore()
 const settings = useSettingsStore()
 /** 模板里拿不到 window，先把白名单 API 取出来给模板用 */
 const api = window.workbench

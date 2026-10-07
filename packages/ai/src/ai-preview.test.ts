@@ -1,10 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  decodeBase64ToBuffer,
-  htmlImageSrcs,
-  resolveAiPreview,
-  rewriteHtmlImages
-} from './ai-preview'
+import { decodeBase64ToBuffer, htmlImageSrcs, resolveAiPreview, rewriteHtmlImages } from './ai-preview'
 
 const DIR = 'F:\\work\\proj'
 
@@ -13,17 +8,17 @@ describe('resolveAiPreview', () => {
     expect(resolveAiPreview('../test.md', DIR)).toEqual({
       ok: true,
       path: 'F:\\work\\test.md',
-      kind: 'markdown'
+      kind: 'markdown',
     })
     expect(resolveAiPreview('./docs/计划.md', DIR)).toEqual({
       ok: true,
       path: 'F:\\work\\proj\\docs\\计划.md',
-      kind: 'markdown'
+      kind: 'markdown',
     })
     expect(resolveAiPreview('notes/todo.txt', DIR)).toEqual({
       ok: true,
       path: 'F:\\work\\proj\\notes\\todo.txt',
-      kind: 'text'
+      kind: 'text',
     })
   })
 
@@ -31,7 +26,7 @@ describe('resolveAiPreview', () => {
     expect(resolveAiPreview('../%E6%B5%8B%E8%AF%95.md', DIR)).toEqual({
       ok: true,
       path: 'F:\\work\\测试.md',
-      kind: 'markdown'
+      kind: 'markdown',
     })
   })
 
@@ -39,12 +34,12 @@ describe('resolveAiPreview', () => {
     expect(resolveAiPreview('./a/./b/../../outside.txt', DIR)).toEqual({
       ok: true,
       path: 'F:\\work\\proj\\outside.txt',
-      kind: 'text'
+      kind: 'text',
     })
     expect(resolveAiPreview('./a/b/../../../outside.txt', DIR)).toEqual({
       ok: true,
       path: 'F:\\work\\outside.txt',
-      kind: 'text'
+      kind: 'text',
     })
   })
 
@@ -52,12 +47,12 @@ describe('resolveAiPreview', () => {
     expect(resolveAiPreview('F:/a/b/报告.md', DIR)).toEqual({
       ok: true,
       path: 'F:\\a\\b\\报告.md',
-      kind: 'markdown'
+      kind: 'markdown',
     })
     expect(resolveAiPreview('\\\\srv\\share\\readme.txt', DIR)).toEqual({
       ok: true,
       path: '\\\\srv\\share\\readme.txt',
-      kind: 'text'
+      kind: 'text',
     })
   })
 
@@ -65,7 +60,7 @@ describe('resolveAiPreview', () => {
     expect(resolveAiPreview('../../../../x.txt', 'F:\\proj')).toEqual({
       ok: true,
       path: 'F:\\x.txt',
-      kind: 'text'
+      kind: 'text',
     })
   })
 
@@ -98,7 +93,7 @@ describe('resolveAiPreview', () => {
     expect(resolveAiPreview('C:\\x\\a.md', DIR)).toEqual({
       ok: true,
       path: 'C:\\x\\a.md',
-      kind: 'markdown'
+      kind: 'markdown',
     })
   })
 
@@ -129,7 +124,7 @@ describe('htmlImageSrcs / rewriteHtmlImages', () => {
   it('按替换表改写 src，表里没有的原样保留', () => {
     const rewritten = rewriteHtmlImages(html, { ' shots/a.png ': 'asset://已授权' })
     expect(rewritten).toContain('<img src="asset://已授权" alt="外">')
-    expect(rewritten).toContain("src='http://x/b.png'")
+    expect(rewritten).toContain('src=\'http://x/b.png\'')
     expect(rewriteHtmlImages(html, {})).toBe(html)
   })
 })

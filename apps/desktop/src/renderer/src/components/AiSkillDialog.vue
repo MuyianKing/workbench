@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import type { AiSkillLevel, AiSkillRow } from '@workbench/ai'
+import { Delete, DocumentAdd, EditPen, FolderAdd, FolderOpened, Link, MoreFilled, Reading, Search } from '@element-plus/icons-vue'
+import { skillPathOf } from '@workbench/ai'
 /**
  * 技能弹窗（AI 助手页 composer 工具行那颗「技能」按钮打开的那个）：**两条技能根各一组**。
  *
@@ -25,19 +28,7 @@
  *     项目那份多半就在他的仓库里 —— 卸掉要提交才是真的删（应用不替他提交）。
  */
 import { computed, ref, watch } from 'vue'
-import {
-  Delete,
-  DocumentAdd,
-  EditPen,
-  FolderAdd,
-  FolderOpened,
-  Link,
-  MoreFilled,
-  Reading,
-  Search
-} from '@element-plus/icons-vue'
 import AppDialog from '@/components/AppDialog.vue'
-import { skillPathOf, type AiSkillLevel, type AiSkillRow } from '@workbench/ai'
 import { useAiSkillsStore } from '@/stores/ai-skills'
 
 const visible = defineModel<boolean>({ required: true })
@@ -60,27 +51,29 @@ const urlLevel = ref<AiSkillLevel>('global')
 const url = ref('')
 const urlProblem = computed(() => {
   const text = url.value.trim()
-  if (!text) return ''
+  if (!text)
+    return ''
   return /^https?:\/\/\S+$/i.test(text) ? '' : '地址要以 http:// 或 https:// 开头'
 })
 
 watch(
   () => visible.value,
   (value) => {
-    if (!value) return
+    if (!value)
+      return
     urlOpen.value = false
     url.value = ''
     detail.value = null
     query.value = ''
     void store.refresh()
-  }
+  },
 )
 
 /** 分段筛选的三个选项：计数是两条根各自的总数，不跟搜索走 */
 const scopeOptions = computed(() => [
   { label: '全部', value: 'all', count: store.rows.length },
   { label: '全局', value: 'global', count: store.globalRows.length },
-  { label: '项目', value: 'project', count: store.projectRows.length }
+  { label: '项目', value: 'project', count: store.projectRows.length },
 ])
 
 function rowsOf(level: AiSkillLevel): AiSkillRow[] {
@@ -97,46 +90,53 @@ function rootOf(level: AiSkillLevel): string {
 
 /** 现在要画哪几组：全部时两条都上（各自能不能用另说），单选时只上那一条 */
 const visibleLevels = computed<AiSkillLevel[]>(() => {
-  const levels = (['global', 'project'] as AiSkillLevel[]).filter((level) => readyOf(level))
-  if (scope.value === 'all') return levels
-  return levels.filter((level) => level === scope.value)
+  const levels = (['global', 'project'] as AiSkillLevel[]).filter(level => readyOf(level))
+  if (scope.value === 'all')
+    return levels
+  return levels.filter(level => level === scope.value)
 })
 
 /** 搜索命中（目录名 / name / 描述，大小写不敏感）；没输入就原样全量 */
 function matching(rows: AiSkillRow[]): AiSkillRow[] {
   const q = query.value.trim().toLowerCase()
-  if (!q) return rows
+  if (!q)
+    return rows
   return rows.filter(
-    (row) =>
-      row.id.toLowerCase().includes(q) ||
-      row.name.toLowerCase().includes(q) ||
-      row.description.toLowerCase().includes(q)
+    row =>
+      row.id.toLowerCase().includes(q)
+      || row.name.toLowerCase().includes(q)
+      || row.description.toLowerCase().includes(q),
   )
 }
 
 /** 组头那条路径只服务显示：全局根把用户目录那段收写成 ~，认不出就原样 */
 function displayRoot(level: AiSkillLevel): string {
   const root = rootOf(level)
-  if (level !== 'global') return root
+  if (level !== 'global')
+    return root
   const matched = /^[a-zA-Z]:\\Users\\[^\\]+\\(.+)$/.exec(root)
   return matched ? `~\\${matched[1]}` : root
 }
 
 async function importZip(level: AiSkillLevel): Promise<void> {
-  if (busy.value) return
+  if (busy.value)
+    return
   const file = await window.workbench.pickFile('选择技能包', [
-    { name: '技能包（zip）', extensions: ['zip'] }
+    { name: '技能包（zip）', extensions: ['zip'] },
   ])
-  if (!file) return
+  if (!file)
+    return
   busy.value = true
   await store.install(level, { kind: 'zip', value: file })
   busy.value = false
 }
 
 async function importDir(level: AiSkillLevel): Promise<void> {
-  if (busy.value) return
+  if (busy.value)
+    return
   const dir = await window.workbench.pickDirectory('选择技能文件夹（根上要有 SKILL.md）')
-  if (!dir) return
+  if (!dir)
+    return
   busy.value = true
   await store.install(level, { kind: 'dir', value: dir })
   busy.value = false
@@ -149,24 +149,29 @@ function openUrl(level: AiSkillLevel): void {
 }
 
 async function submitUrl(): Promise<void> {
-  if (busy.value || urlProblem.value || !url.value.trim()) return
+  if (busy.value || urlProblem.value || !url.value.trim())
+    return
   busy.value = true
   const id = await store.install(urlLevel.value, { kind: 'url', value: url.value.trim() })
   busy.value = false
-  if (id) urlOpen.value = false
+  if (id)
+    urlOpen.value = false
 }
 
 async function toggle(row: AiSkillRow): Promise<void> {
-  if (busy.value) return
+  if (busy.value)
+    return
   await store.toggle(row)
 }
 
 async function remove(row: AiSkillRow): Promise<void> {
-  if (busy.value) return
+  if (busy.value)
+    return
   busy.value = true
   const done = await store.remove(row)
   busy.value = false
-  if (done && detail.value?.key === row.key) detail.value = null
+  if (done && detail.value?.key === row.key)
+    detail.value = null
 }
 
 function reveal(row: AiSkillRow): void {
@@ -175,8 +180,10 @@ function reveal(row: AiSkillRow): void {
 
 /** 行内「更多」菜单：在文件管理器里打开 / 卸掉 */
 function onRowCommand(command: unknown, row: AiSkillRow): void {
-  if (command === 'reveal') reveal(row)
-  if (command === 'remove') void remove(row)
+  if (command === 'reveal')
+    reveal(row)
+  if (command === 'remove')
+    void remove(row)
 }
 </script>
 
@@ -238,7 +245,9 @@ function onRowCommand(command: unknown, row: AiSkillRow): void {
 
         <ul v-if="matching(rowsOf(level)).length" class="list">
           <li v-for="row in matching(rowsOf(level))" :key="row.key" class="row">
-            <el-icon class="row__icon"><Reading /></el-icon>
+            <el-icon class="row__icon">
+              <Reading />
+            </el-icon>
             <div class="row__main">
               <div class="row__title">
                 <button class="row__name" type="button" :title="row.name || row.id" @click="detail = row">
@@ -247,7 +256,9 @@ function onRowCommand(command: unknown, row: AiSkillRow): void {
                 <span class="row__tag">{{ row.level === 'global' ? '全局' : '项目' }}</span>
                 <span v-if="row.version" class="row__version">v{{ row.version }}</span>
               </div>
-              <p class="row__desc" :title="row.description">{{ row.description || '（没有写描述）' }}</p>
+              <p class="row__desc" :title="row.description">
+                {{ row.description || '（没有写描述）' }}
+              </p>
             </div>
             <div class="row__side">
               <el-tooltip content="看 SKILL.md" placement="top">
@@ -264,7 +275,9 @@ function onRowCommand(command: unknown, row: AiSkillRow): void {
                     <el-dropdown-item command="reveal" :icon="FolderOpened">
                       在文件管理器里打开
                     </el-dropdown-item>
-                    <el-dropdown-item command="remove" :icon="Delete" divided>卸掉…</el-dropdown-item>
+                    <el-dropdown-item command="remove" :icon="Delete" divided>
+                      卸掉…
+                    </el-dropdown-item>
                   </el-dropdown-menu>
                 </template>
               </el-dropdown>
@@ -314,7 +327,9 @@ function onRowCommand(command: unknown, row: AiSkillRow): void {
         技能市场那种「页面地址」不行 —— 要给能直接下到 zip 的那个。
       </p>
       <template #footer>
-        <el-button @click="urlOpen = false">取消</el-button>
+        <el-button @click="urlOpen = false">
+          取消
+        </el-button>
         <el-button
           type="primary"
           :loading="busy"

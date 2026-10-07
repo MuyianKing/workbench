@@ -4,18 +4,18 @@
 // 外界要色值工具就走 design-styles 的防御式版本。
 export {
   ACCENT_COLOR_DEFAULT,
+  ACCENT_INK_DEFAULT,
+  ACCENT_INK_MODES,
   ACCENT_PRESETS,
   ACCENT_VARIABLE_NAMES,
+  type AccentInkMode,
   type AccentVariableName,
   type AccentVariables,
-  ACCENT_INK_MODES,
-  type AccentInkMode,
-  ACCENT_INK_DEFAULT,
-  sanitizeAccentInkMode,
-  sanitizeAccentColor,
+  accentVariables,
   contrastRatio,
   inkOnAccent,
-  accentVariables
+  sanitizeAccentColor,
+  sanitizeAccentInkMode,
 } from './accent-color'
 export * from './app-name'
 export * from './appearance'

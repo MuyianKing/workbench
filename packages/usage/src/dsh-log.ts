@@ -12,8 +12,9 @@
  * 因此适配层可以按文件单独解析、只重解变化的那些（见 workbench/token.ts 的按文件缓存）。
  */
 
+import type { TokenCounters, TokenDays } from './token-usage'
 import { dayKey } from '@workbench/core'
-import { addCounters, emptyCounters, isDateKey, type TokenCounters, type TokenDays } from './token-usage'
+import { addCounters, emptyCounters, isDateKey } from './token-usage'
 
 /** 会话里没声明模型时的兜底名 */
 export const DSH_DEFAULT_MODEL = 'deepseek'
@@ -48,27 +49,33 @@ export function collectDshSessionText(text: string, days: TokenDays): void {
   let model = DSH_DEFAULT_MODEL
 
   for (const line of text.split('\n')) {
-    if (!line) continue
+    if (!line)
+      continue
 
     let event: DshEvent
     try {
       event = JSON.parse(line) as DshEvent
-    } catch {
+    }
+    catch {
       continue
     }
 
     if (event.type === 'request/header') {
       const declared = event.data?.header?.config?.model
-      if (typeof declared === 'string' && declared.trim()) model = declared.trim()
+      if (typeof declared === 'string' && declared.trim())
+        model = declared.trim()
       continue
     }
-    if (event.type !== 'assistant/message') continue
+    if (event.type !== 'assistant/message')
+      continue
 
     const usage = event.data?.usage
-    if (!usage) continue
+    if (!usage)
+      continue
 
     const date = dayKey(Number(event.time))
-    if (!isDateKey(date)) continue
+    if (!isDateKey(date))
+      continue
 
     // 只记「这条 assistant 消息产生了一次请求」；同一会话的多条消息各自成一条
     const step: TokenCounters = {
@@ -79,7 +86,7 @@ export function collectDshSessionText(text: string, days: TokenDays): void {
       cacheWriteTokens: 0,
       // DSH 的 usage 里只有 token 计数，没有额度这一项
       credits: 0,
-      requests: 1
+      requests: 1,
     }
 
     const modelDays = (days[date] ??= {})

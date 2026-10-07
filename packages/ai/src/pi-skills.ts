@@ -1,3 +1,4 @@
+import type { SkillEntry } from '@workbench/skills'
 /**
  * AI 助手页那份「技能」弹窗的纯逻辑：**两条技能根、开关状态与列表怎么合、目录名怎么收敛**。
  * 读写与出网都在 Rust（`pi_skills.rs`），这里只留口径与判定，带单测。
@@ -17,7 +18,7 @@
  * 形状是「被关掉的那些」，不是「开着的那些」—— 新装进来、别处放进来的技能默认就是开着的，
  * 不需要应用替它们登记一遍。
  */
-import { SKILL_INSTALL_DIR, toSkillEntry, type SkillEntry } from '@workbench/skills'
+import { SKILL_INSTALL_DIR, toSkillEntry } from '@workbench/skills'
 
 /** 技能分两级：全局那份、项目那份 */
 export type AiSkillLevel = 'global' | 'project'
@@ -60,7 +61,8 @@ export interface AiSkillRow extends SkillEntry {
  */
 export function projectSkillsRoot(dir: string): string {
   const base = dir.trim()
-  if (!base) return ''
+  if (!base)
+    return ''
   return skillPathOf(base, SKILL_INSTALL_DIR)
 }
 
@@ -82,7 +84,8 @@ export function skillKey(root: string, id: string): string {
 export function skillPathOf(root: string, id: string): string {
   const base = root.trim().replace(/[\\/]+$/, '')
   const name = id.trim()
-  if (!base) return name
+  if (!base)
+    return name
   const separator = base.includes('\\') || !base.includes('/') ? '\\' : '/'
   return `${base}${separator}${name.replace(/[\\/]/g, separator)}`
 }
@@ -92,14 +95,19 @@ export function skillPathOf(root: string, id: string): string {
  * 认不出的整条丢掉 —— 它只影响「默认开还是默认关」，不该拖垮整份数据。
  */
 export function sanitizeAiSkillsOff(value: unknown): string[] {
-  if (!Array.isArray(value)) return []
+  if (!Array.isArray(value))
+    return []
   const out: string[] = []
   for (const item of value) {
-    if (typeof item !== 'string') continue
+    if (typeof item !== 'string')
+      continue
     const key = item.trim()
-    if (!key || key.length > 400 || /[\r\n]/.test(key)) continue
-    if (!out.includes(key)) out.push(key)
-    if (out.length >= AI_SKILLS_OFF_MAX) break
+    if (!key || key.length > 400 || /[\r\n]/.test(key))
+      continue
+    if (!out.includes(key))
+      out.push(key)
+    if (out.length >= AI_SKILLS_OFF_MAX)
+      break
   }
   return out
 }
@@ -114,14 +122,16 @@ export function aiSkillRows(
   level: AiSkillLevel,
   root: string,
   raw: unknown,
-  disabled: readonly string[]
+  disabled: readonly string[],
 ): AiSkillRow[] {
-  if (!Array.isArray(raw)) return []
+  if (!Array.isArray(raw))
+    return []
   const rows: AiSkillRow[] = []
   for (const item of raw) {
-    const record = (item ?? {}) as { id?: unknown; fileCount?: unknown; skillMd?: unknown }
+    const record = (item ?? {}) as { id?: unknown, fileCount?: unknown, skillMd?: unknown }
     const entry = toSkillEntry(record)
-    if (!entry || entry.id.length > SKILL_ID_MAX) continue
+    if (!entry || entry.id.length > SKILL_ID_MAX)
+      continue
     const key = skillKey(root, entry.id)
     rows.push({
       ...entry,
@@ -129,7 +139,7 @@ export function aiSkillRows(
       root,
       key,
       enabled: !disabled.includes(key),
-      md: typeof record.skillMd === 'string' ? record.skillMd : ''
+      md: typeof record.skillMd === 'string' ? record.skillMd : '',
     })
   }
   return rows
@@ -142,6 +152,6 @@ export function aiSkillRows(
  */
 export function enabledAiSkills(rows: readonly AiSkillRow[]): AiSkillRef[] {
   return rows
-    .filter((row) => row.enabled)
-    .map((row) => ({ root: row.root, id: row.id }))
+    .filter(row => row.enabled)
+    .map(row => ({ root: row.root, id: row.id }))
 }

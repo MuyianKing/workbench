@@ -1,24 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
 import { bytesToBase64 } from './base64'
-import {
-  MAIL_ACCOUNTS_MAX,
-  MAIL_POLL_DEFAULT,
-  MAIL_POLL_MAX,
-  MAIL_POLL_MIN,
-  mailAccountReady,
-  presetForAddress,
-  sanitizeMailAccount,
-  sanitizeMailAccounts,
-  sanitizeMailAddress,
-  sanitizeMailHost,
-  sanitizeMailPollMinutes,
-  sanitizeMailPort
-} from './mail'
-import { decodeEncodedWords, encodeRfc2047Word } from './rfc2047'
+import { isBulkMail, sanitizeMailBulkSenders } from './bulk'
+import { MAIL_ACCOUNTS_MAX, MAIL_POLL_DEFAULT, MAIL_POLL_MAX, MAIL_POLL_MIN, mailAccountReady, presetForAddress, sanitizeMailAccount, sanitizeMailAccounts, sanitizeMailAddress, sanitizeMailHost, sanitizeMailPollMinutes, sanitizeMailPort } from './mail'
 import { buildMime } from './mime'
 import { accountTag, displayDate, displaySender, htmlBody, mailTime, parseMessage, senderAddress } from './parse'
-import { isBulkMail, sanitizeMailBulkSenders } from './bulk'
+import { decodeEncodedWords, encodeRfc2047Word } from './rfc2047'
 
 describe('账户配置收敛', () => {
   it('地址 trim、小写，没有 @ 就当没填', () => {
@@ -26,7 +13,7 @@ describe('账户配置收敛', () => {
     expect(sanitizeMailAddress('not-an-address')).toBe('')
     expect(sanitizeMailAddress(undefined)).toBe('')
     // 过长的串（前 80 字符里都没有 @）整条当没填
-    expect(sanitizeMailAddress('x'.repeat(100) + '@163.com')).toBe('')
+    expect(sanitizeMailAddress(`${'x'.repeat(100)}@163.com`)).toBe('')
   })
 
   it('主机名剥掉协议头与路径', () => {
@@ -61,7 +48,7 @@ describe('账户配置收敛', () => {
     expect(account.imapPort).toBe(0)
   })
 
-  it('QQ 地址（含 foxmail.com）走腾讯那套收发服务器', () => {
+  it('qQ 地址（含 foxmail.com）走腾讯那套收发服务器', () => {
     const account = sanitizeMailAccount({ address: 'Someone@QQ.com' })
     expect(account.imapHost).toBe('imap.qq.com')
     expect(account.imapPort).toBe(993)
@@ -77,7 +64,7 @@ describe('账户配置收敛', () => {
       imapHost: 'imap.example.com',
       imapPort: 10993,
       smtpHost: 'smtp.example.com',
-      smtpPort: 10465
+      smtpPort: 10465,
     })
     expect(account.imapHost).toBe('imap.example.com')
     expect(account.imapPort).toBe(10993)
@@ -95,9 +82,9 @@ describe('账户配置收敛', () => {
       { address: 'a@163.com', imapHost: 'imap.example.com' }, // 同地址：保留前一条，后面的丢
       { address: 'b@qq.com' },
       { imapHost: 'imap.example.com' }, // 没地址的半截，丢
-      'not-an-object'
+      'not-an-object',
     ])
-    expect(accounts.map((account) => account.address)).toEqual(['a@163.com', 'b@qq.com'])
+    expect(accounts.map(account => account.address)).toEqual(['a@163.com', 'b@qq.com'])
     expect(accounts[0].imapHost).toBe('imap.163.com')
 
     const full = Array.from({ length: MAIL_ACCOUNTS_MAX + 2 }, (_, index) => ({ address: `u${index}@163.com` }))
@@ -119,7 +106,7 @@ describe('账户配置收敛', () => {
   })
 })
 
-describe('RFC 2047 编码词', () => {
+describe('rFC 2047 编码词', () => {
   it('解 B 编码的 UTF-8 中文', () => {
     // "测试" 的 UTF-8 字节经 B 编码
     expect(decodeEncodedWords('=?utf-8?B?5rWL6K+V?=')).toBe('测试')
@@ -179,7 +166,7 @@ describe('发信报文构建', () => {
       to: ['you@qq.com'],
       subject: '带附件',
       text: '见附件',
-      attachments: [{ name: '报告.pdf', contentType: 'application/pdf', bytesBase64: bytesToBase64(new TextEncoder().encode('pdf-bytes')) }]
+      attachments: [{ name: '报告.pdf', contentType: 'application/pdf', bytesBase64: bytesToBase64(new TextEncoder().encode('pdf-bytes')) }],
     })
     expect(mime).toContain('multipart/mixed; boundary=')
     expect(mime).toContain('Content-Type: application/pdf')
@@ -196,8 +183,8 @@ describe('发信报文构建', () => {
         to: ['you@qq.com'],
         subject: 'too big',
         text: 'x',
-        attachments: [{ name: 'a.bin', contentType: 'application/octet-stream', bytesBase64: big }]
-      })
+        attachments: [{ name: 'a.bin', contentType: 'application/octet-stream', bytesBase64: big }],
+      }),
     ).toThrow(/30 MB/)
   })
 })
@@ -239,7 +226,7 @@ describe('收信侧解析', () => {
       '',
       'JVBERi0=',
       '--BB--',
-      ''
+      '',
     ].join('\r\n')
     return bytesToBase64(new TextEncoder().encode(raw))
   }
@@ -277,7 +264,7 @@ describe('收信侧解析', () => {
       'Content-Type: text/html; charset=utf-8',
       '',
       '<img src="https://tracker.example.com/pixel">',
-      ''
+      '',
     ].join('\r\n')
     const parsed = await parseMessage(bytesToBase64(new TextEncoder().encode(raw)))
     expect(htmlBody(parsed)).toContain('https://tracker.example.com/pixel')

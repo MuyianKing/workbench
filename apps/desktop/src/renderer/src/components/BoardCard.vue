@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { CardGrab, HomeCardId } from '@workbench/appearance'
+import type { CSSProperties } from 'vue'
 /**
  * 布局里的一块卡片：本体 + 编辑态的卡片名，整块区域都是拖动手柄。
  *
@@ -11,8 +13,6 @@
  * 传下来，它就脱离文档流跟手移动 —— 原位置不留任何东西，也不会出现第二份副本。
  */
 import { computed } from 'vue'
-import type { CSSProperties } from 'vue'
-import type { CardGrab, HomeCardId } from '@workbench/appearance'
 
 const props = defineProps<{
   id: HomeCardId
@@ -29,7 +29,8 @@ const emit = defineEmits<{
 const style = computed<CSSProperties>(() => props.floatingStyle ?? {})
 
 function onCardPointerDown(event: PointerEvent): void {
-  if (!props.editing || event.button !== 0) return
+  if (!props.editing || event.button !== 0)
+    return
   event.preventDefault()
 
   const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
@@ -39,7 +40,7 @@ function onCardPointerDown(event: PointerEvent): void {
     left: rect.left,
     top: rect.top,
     width: rect.width,
-    height: rect.height
+    height: rect.height,
   })
 }
 </script>

@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import type { AiProviderPreset } from '@workbench/ai'
+import { Plus, Search } from '@element-plus/icons-vue'
+import { AI_PROVIDER_PRESETS } from '@workbench/ai'
 /**
  * 「添加 AI 服务」第一步的那张网格：一格一个预设厂商（第一个是「自定义端点」），
  * 顶上一条搜索框。**只挑地址**（Base URL 与 API 形态都由预设带齐），
@@ -8,8 +11,6 @@
  * 它自己不留状态：搜什么、挑了什么都是父组件的事（挑完就进下一步）。
  */
 import { computed, ref } from 'vue'
-import { Plus, Search } from '@element-plus/icons-vue'
-import { AI_PROVIDER_PRESETS, type AiProviderPreset } from '@workbench/ai'
 
 const emit = defineEmits<{
   /** 挑了一个预设（地址与形态都由它带齐） */
@@ -23,12 +24,13 @@ const search = ref('')
 /** 厂商名或地址里带这几个字就算匹配（与别处的搜索同一条口径：小写后比对） */
 const matched = computed(() => {
   const keyword = search.value.trim().toLowerCase()
-  if (!keyword) return AI_PROVIDER_PRESETS
+  if (!keyword)
+    return AI_PROVIDER_PRESETS
   return AI_PROVIDER_PRESETS.filter(
-    (preset) =>
-      preset.label.toLowerCase().includes(keyword) ||
-      preset.baseUrl.toLowerCase().includes(keyword) ||
-      preset.id.includes(keyword)
+    preset =>
+      preset.label.toLowerCase().includes(keyword)
+      || preset.baseUrl.toLowerCase().includes(keyword)
+      || preset.id.includes(keyword),
   )
 })
 
@@ -57,7 +59,9 @@ const showCustom = computed(() => {
       </template>
     </el-input>
 
-    <p class="preset__label">用 API Key 连接</p>
+    <p class="preset__label">
+      用 API Key 连接
+    </p>
 
     <div class="preset__grid">
       <button v-if="showCustom" type="button" class="preset__cell" @click="emit('custom')">

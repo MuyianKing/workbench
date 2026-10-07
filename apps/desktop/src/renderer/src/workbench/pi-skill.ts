@@ -1,3 +1,4 @@
+import type { Result } from '@/types'
 /**
  * Pi 技能的适配层（AI 助手页那颗「技能」按钮）：列一个技能根里的技能、往里装、从里卸。
  *
@@ -9,7 +10,6 @@
  * 形状、错误文案、以及「装好了但没拿回技能名」这种不该发生的情况。
  */
 import { fail, ok } from '@workbench/core'
-import type { Result } from '@/types'
 import { guard, invoke } from './bridge'
 
 /** 装完之后的回执：落下去的技能名与文件数（界面拿它拼提示文案） */
@@ -28,16 +28,16 @@ export async function piSkillInstallZip(
   root: string,
   zip: string,
   id: string | null,
-  overwrite: boolean
+  overwrite: boolean,
 ): Promise<Result<PiSkillInstallResult>> {
   const result = await guard(
     invoke<unknown>('pi_skill_install_zip', {
       root: root.trim(),
       zip: zip.trim(),
       id: id ?? null,
-      overwrite
+      overwrite,
     }),
-    '装技能失败'
+    '装技能失败',
   )
   return result.ok ? readInstall(result.data) : fail(result.error ?? '装技能失败')
 }
@@ -47,16 +47,16 @@ export async function piSkillInstallDir(
   root: string,
   source: string,
   id: string | null,
-  overwrite: boolean
+  overwrite: boolean,
 ): Promise<Result<PiSkillInstallResult>> {
   const result = await guard(
     invoke<unknown>('pi_skill_install_dir', {
       root: root.trim(),
       source: source.trim(),
       id: id ?? null,
-      overwrite
+      overwrite,
     }),
-    '装技能失败'
+    '装技能失败',
   )
   return result.ok ? readInstall(result.data) : fail(result.error ?? '装技能失败')
 }
@@ -66,16 +66,16 @@ export async function piSkillInstallUrl(
   root: string,
   url: string,
   id: string | null,
-  overwrite: boolean
+  overwrite: boolean,
 ): Promise<Result<PiSkillInstallResult>> {
   const result = await guard(
     invoke<unknown>('pi_skill_install_url', {
       root: root.trim(),
       url: url.trim(),
       id: id ?? null,
-      overwrite
+      overwrite,
     }),
-    '装技能失败'
+    '装技能失败',
   )
   return result.ok ? readInstall(result.data) : fail(result.error ?? '装技能失败')
 }
@@ -84,15 +84,16 @@ export async function piSkillInstallUrl(
 export async function piSkillRemove(root: string, id: string): Promise<Result<null>> {
   const result = await guard(
     invoke<null>('pi_skill_remove', { root: root.trim(), id: id.trim() }),
-    '卸掉技能失败'
+    '卸掉技能失败',
   )
   return result.ok ? ok(null) : fail(result.error ?? '卸掉技能失败')
 }
 
 /** 安装回执的形状收敛：没有技能名就没法告诉用户装了什么，当失败报出来 */
 function readInstall(raw: unknown): Result<PiSkillInstallResult> {
-  const data = (raw ?? {}) as { id?: unknown; files?: unknown }
+  const data = (raw ?? {}) as { id?: unknown, files?: unknown }
   const id = typeof data.id === 'string' ? data.id : ''
-  if (!id) return fail('装完了，但没拿回技能名')
+  if (!id)
+    return fail('装完了，但没拿回技能名')
   return ok({ id, files: typeof data.files === 'number' ? data.files : 0 })
 }

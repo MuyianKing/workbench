@@ -1,3 +1,4 @@
+import type { Ref } from 'vue'
 /**
  * 「草稿字段」：边打边存会把半截内容写进设置 / 配置（设置项落盘还会触发一轮
  * 收敛与回推，把光标顶走），所以本地先存着，失焦 / 回车时调用方再提交。
@@ -11,11 +12,11 @@
  *
  * 提交（相等即跳过、失败回退）留在调用方：各字段的收敛规则与后处理本来就不同。
  */
-import { ref, watch, type Ref } from 'vue'
+import { ref, watch } from 'vue'
 
 export function useDraftField(
   source: () => string,
-  read: (value: string) => string = (value) => value
+  read: (value: string) => string = value => value,
 ): Ref<string> {
   const draft = ref('')
   watch(
@@ -23,7 +24,7 @@ export function useDraftField(
     (value) => {
       draft.value = read(value)
     },
-    { immediate: true }
+    { immediate: true },
   )
   return draft
 }

@@ -1,5 +1,5 @@
-//! base64 与字节数组的小工具。渲染层、Node 测试两侧都要能跑 —— btoa/atob
-//! 在 WebView2 与 Node ≥ 16 里都是全局，不用再引 polyfill。
+// ! base64 与字节数组的小工具。渲染层、Node 测试两侧都要能跑 —— btoa/atob
+// ! 在 WebView2 与 Node ≥ 16 里都是全局，不用再引 polyfill。
 
 /** 字节数组 → 标准 base64。分段拼，免得大数组把 `String.fromCharCode` 的栈撑爆。 */
 export function bytesToBase64(bytes: Uint8Array): string {
@@ -20,7 +20,8 @@ export function base64ToBytes(input: string): Uint8Array | null {
       bytes[index] = binary.charCodeAt(index)
     }
     return bytes
-  } catch {
+  }
+  catch {
     return null
   }
 }

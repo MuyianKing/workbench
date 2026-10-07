@@ -5,7 +5,7 @@ describe('relativeToProject', () => {
   it('把项目内的子目录落成相对写法', () => {
     expect(relativeToProject('E:\\proj', 'E:\\proj\\dist')).toBe('dist')
     expect(relativeToProject('E:\\proj\\', 'E:\\proj\\packages\\web\\dist')).toBe(
-      'packages/web/dist'
+      'packages/web/dist',
     )
   })
 
@@ -30,7 +30,7 @@ describe('resolveWithinProject', () => {
   it('相对写法拼到项目根下', () => {
     expect(resolveWithinProject('E:\\proj', 'dist')).toBe('E:\\proj\\dist')
     expect(resolveWithinProject('E:\\proj\\', 'packages/web/dist')).toBe(
-      'E:\\proj\\packages\\web\\dist'
+      'E:\\proj\\packages\\web\\dist',
     )
   })
 

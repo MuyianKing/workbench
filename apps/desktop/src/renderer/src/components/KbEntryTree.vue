@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import type { KbEntryMeta, KbTreeNode } from '@workbench/kb'
+import { Document, Folder, Search } from '@element-plus/icons-vue'
+import { kbEntryTree, kbFolderChain, kbTreeFolderIds } from '@workbench/kb'
 /**
  * 知识库条目树（左栏「条目」签）：搜索 + 按目录结构收成的树，点开一条进右栏阅读。
  *
@@ -14,8 +17,6 @@
  * 搜索命中是逐字变化的，重建出的树只含匹配项，摊开才看得见都搜到了哪儿。
  */
 import { computed, ref, watch } from 'vue'
-import { Document, Folder, Search } from '@element-plus/icons-vue'
-import { kbEntryTree, kbFolderChain, kbTreeFolderIds, type KbEntryMeta, type KbTreeNode } from '@workbench/kb'
 
 const props = defineProps<{
   entries: KbEntryMeta[]
@@ -33,12 +34,13 @@ const searchText = ref('')
 /** 标题 / 标签 / 摘要 / 路径，哪儿沾边算哪儿（大小写不敏感） */
 const filtered = computed(() => {
   const keyword = searchText.value.trim().toLowerCase()
-  if (!keyword) return props.entries
-  return props.entries.filter((entry) =>
+  if (!keyword)
+    return props.entries
+  return props.entries.filter(entry =>
     [entry.title, entry.summary, entry.rel, entry.tags.join(' ')]
       .join(' ')
       .toLowerCase()
-      .includes(keyword)
+      .includes(keyword),
   )
 })
 
@@ -50,14 +52,14 @@ const expanded = ref<string[]>([])
 
 /** 搜索时整棵摊开：重建出的树只含匹配项，收着的目录会让「搜到了」看不出来 */
 const expandedKeys = computed(() =>
-  searching.value ? kbTreeFolderIds(tree.value) : expanded.value
+  searching.value ? kbTreeFolderIds(tree.value) : expanded.value,
 )
 
 // 首次出数据（换文件夹后重新扫到也一样）把顶层目录摊开：树默认全收着的话，
 // 一进来只剩两个目录名，与「全库目录」的用途不符
 watch(tree, (nodes) => {
   if (!searching.value && !expanded.value.length && nodes.length) {
-    expanded.value = nodes.filter((node) => node.kind === 'folder').map((node) => node.id)
+    expanded.value = nodes.filter(node => node.kind === 'folder').map(node => node.id)
   }
 })
 
@@ -68,31 +70,37 @@ watch(tree, (nodes) => {
 watch(
   () => props.activeRel,
   (rel) => {
-    if (!rel) return
+    if (!rel)
+      return
     expanded.value = [...new Set([...expanded.value, ...kbFolderChain(rel)])]
   },
-  { immediate: true }
+  { immediate: true },
 )
 
 function expand(id: string): void {
-  if (searching.value) return
+  if (searching.value)
+    return
   expanded.value = [...new Set([...expanded.value, id])]
 }
 
 function collapse(id: string): void {
-  if (searching.value) return
-  expanded.value = expanded.value.filter((item) => item !== id)
+  if (searching.value)
+    return
+  expanded.value = expanded.value.filter(item => item !== id)
 }
 
 /** 点目录行只是收展（el-tree 自己处理），点条目才算「打开它」 */
 function onNodeClick(data: KbTreeNode): void {
-  if (data.kind === 'entry') emit('select', data.id)
+  if (data.kind === 'entry')
+    emit('select', data.id)
 }
 
 /** 仓库自己的口径：draft / reviewed 有中文名，别的值照原样显示 */
 function statusText(status: string): string {
-  if (status === 'draft') return '草稿'
-  if (status === 'reviewed') return '已核对'
+  if (status === 'draft')
+    return '草稿'
+  if (status === 'reviewed')
+    return '已核对'
   return status
 }
 </script>

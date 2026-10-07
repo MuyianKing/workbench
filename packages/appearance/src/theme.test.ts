@@ -1,58 +1,6 @@
+import type { CardPlacement, HomeCardId, HomeColumn } from './theme'
 import { describe, expect, it } from 'vitest'
-import {
-  CARD_GAP_DEFAULT,
-  CARD_GAP_MAX,
-  CARD_GAP_MIN,
-  CARD_HEIGHT_MIN,
-  COLUMN_COUNT_MAX,
-  COLUMN_WIDTH_DEFAULT,
-  COLUMN_WIDTH_MAX,
-  COLUMN_WIDTH_MIN,
-  DEFAULT_THEME,
-  HOME_CARD_IDS,
-  KB_TREE_WIDTH_DEFAULT,
-  KB_TREE_WIDTH_MAX,
-  KB_TREE_WIDTH_MIN,
-  NOTE_TREE_WIDTH_DEFAULT,
-  NOTE_TREE_WIDTH_MAX,
-  NOTE_TREE_WIDTH_MIN,
-  ROW_HEIGHT_MAX,
-  ROW_HEIGHT_MIN_DEFAULT,
-  THEME_VERSION,
-  VIDEO_TREE_WIDTH_DEFAULT,
-  VIDEO_TREE_WIDTH_MAX,
-  VIDEO_TREE_WIDTH_MIN,
-  addColumn,
-  cardIdsInRow,
-  clampCardGap,
-  clampColumnWidth,
-  clampKbTreeWidth,
-  clampNoteTreeWidth,
-  clampRowHeight,
-  clampVideoTreeWidth,
-  columnHasVisibleCards,
-  columnIds,
-  columnOfRow,
-  moveCard,
-  normalizeOrder,
-  pruneEmptyRows,
-  removeColumn,
-  resizeColumnPair,
-  resizeRowHeight,
-  rowBoxHeight,
-  rowHeightMin,
-  rowIds,
-  rowOf,
-  rowShapeFor,
-  sameThemeContent,
-  sanitizeCardMode,
-  sanitizeTheme,
-  setColumnWidths,
-  visibleCardIdsInRow,
-  type CardPlacement,
-  type HomeCardId,
-  type HomeColumn
-} from './theme'
+import { addColumn, CARD_GAP_DEFAULT, CARD_GAP_MAX, CARD_GAP_MIN, CARD_HEIGHT_MIN, cardIdsInRow, clampCardGap, clampColumnWidth, clampKbTreeWidth, clampNoteTreeWidth, clampRowHeight, clampVideoTreeWidth, COLUMN_COUNT_MAX, COLUMN_WIDTH_DEFAULT, COLUMN_WIDTH_MAX, COLUMN_WIDTH_MIN, columnHasVisibleCards, columnIds, columnOfRow, DEFAULT_THEME, HOME_CARD_IDS, KB_TREE_WIDTH_DEFAULT, KB_TREE_WIDTH_MAX, KB_TREE_WIDTH_MIN, moveCard, normalizeOrder, NOTE_TREE_WIDTH_DEFAULT, NOTE_TREE_WIDTH_MAX, NOTE_TREE_WIDTH_MIN, pruneEmptyRows, removeColumn, resizeColumnPair, resizeRowHeight, ROW_HEIGHT_MAX, ROW_HEIGHT_MIN_DEFAULT, rowBoxHeight, rowHeightMin, rowIds, rowOf, rowShapeFor, sameThemeContent, sanitizeCardMode, sanitizeTheme, setColumnWidths, THEME_VERSION, VIDEO_TREE_WIDTH_DEFAULT, VIDEO_TREE_WIDTH_MAX, VIDEO_TREE_WIDTH_MIN, visibleCardIdsInRow } from './theme'
 
 /**
  * 算法用例（移动 / 拆栏 / 收栏）的固定夹具：三栏五行，一行里可能并着好几张卡片。
@@ -65,11 +13,11 @@ function sampleColumns(): HomeColumn[] {
       width: 300,
       rows: [
         { id: 'row-1', mode: 'fixed', height: 200 },
-        { id: 'row-2', mode: 'fixed', height: 150 }
-      ]
+        { id: 'row-2', mode: 'fixed', height: 150 },
+      ],
     },
     { id: 'col-2', width: null, rows: [{ id: 'row-3', mode: 'flex', height: 240 }] },
-    { id: 'col-3', width: 320, rows: [{ id: 'row-4', mode: 'fixed', height: 260 }] }
+    { id: 'col-3', width: 320, rows: [{ id: 'row-4', mode: 'fixed', height: 260 }] },
   ]
 }
 
@@ -83,7 +31,7 @@ function sampleCards(): Record<HomeCardId, CardPlacement> {
     commands: { row: 'row-3', order: 1, hidden: false },
     actions: { row: 'row-4', order: 0, hidden: false },
     work: { row: 'row-4', order: 1, hidden: false },
-    news: { row: 'row-4', order: 2, hidden: false }
+    news: { row: 'row-4', order: 2, hidden: false },
   }
 }
 
@@ -150,13 +98,13 @@ describe('sanitizeTheme', () => {
   it('缺哪块补哪块，九块一定齐全', () => {
     const result = sanitizeTheme({
       version: THEME_VERSION,
-      cards: { quick: { row: 'row-1', order: 0 } }
+      cards: { quick: { row: 'row-1', order: 0 } },
     })
     expect(Object.keys(result.cards).sort()).toEqual([...HOME_CARD_IDS].sort())
     // 没在入参里出现的卡片沿用默认布局（order 会被重排成连续序号，故只比对其余字段）
     expect(result.cards.recent).toMatchObject({
       row: DEFAULT_THEME.cards.recent.row,
-      hidden: false
+      hidden: false,
     })
   })
 
@@ -178,14 +126,14 @@ describe('sanitizeTheme', () => {
       columns: [
         { id: 'col-1', width: 420 },
         { id: 'col-2', width: null },
-        { id: 'col-3', width: 380 }
+        { id: 'col-3', width: 380 },
       ],
-      cards: { commands: { column: 'col-3', order: 0, mode: 'flex', height: 300 } }
+      cards: { commands: { column: 'col-3', order: 0, mode: 'flex', height: 300 } },
     }
     const result = sanitizeTheme(legacy)
 
     expect(columnIds(result.columns)).toEqual(['col-1', 'col-2', 'col-3'])
-    expect(result.columns.map((column) => column.width)).toEqual([420, null, 380])
+    expect(result.columns.map(column => column.width)).toEqual([420, null, 380])
     expect(result.cardGap).toBe(30)
 
     // 左栏剩下五张卡各占一行（命令被老文件挪去了右栏），高度与模式就是它们原来那一份
@@ -194,13 +142,13 @@ describe('sanitizeTheme', () => {
       { id: 'row-2', mode: 'fixed', height: 103 },
       { id: 'row-3', mode: 'fixed', height: 170 },
       { id: 'row-4', mode: 'fixed', height: 198 },
-      { id: 'row-5', mode: 'flex', height: 727 }
+      { id: 'row-5', mode: 'flex', height: 727 },
     ])
     // 挪到右栏的命令夹在 Token 用量与 AI 热点之间（老文件里 order 0，与 Token 用量并列时按卡片清单的顺序）
     expect(result.columns[2].rows).toEqual([
       { id: 'row-7', mode: 'flex', height: 727 },
       { id: 'row-8', mode: 'flex', height: 300 },
-      { id: 'row-9', mode: 'fixed', height: 345 }
+      { id: 'row-9', mode: 'fixed', height: 345 },
     ])
     expect(result.cards.commands).toEqual({ row: 'row-8', order: 0, hidden: false })
   })
@@ -209,7 +157,7 @@ describe('sanitizeTheme', () => {
     const result = sanitizeTheme({
       version: 2,
       leftWidth: 300,
-      cards: { recent: { column: 'left', order: 0, mode: 'fixed', height: 200 } }
+      cards: { recent: { column: 'left', order: 0, mode: 'fixed', height: 200 } },
     })
 
     expect(columnIds(result.columns)).toEqual(['col-1', 'col-2', 'col-3'])
@@ -224,10 +172,10 @@ describe('sanitizeTheme', () => {
     expect(clampNoteTreeWidth(undefined)).toBe(NOTE_TREE_WIDTH_DEFAULT)
     expect(clampNoteTreeWidth('宽一点')).toBe(NOTE_TREE_WIDTH_DEFAULT)
     expect(sanitizeTheme({ version: THEME_VERSION, noteTreeWidth: 9999 }).noteTreeWidth).toBe(
-      NOTE_TREE_WIDTH_MAX
+      NOTE_TREE_WIDTH_MAX,
     )
     expect(sanitizeTheme({ version: THEME_VERSION, noteTreeWidth: 1 }).noteTreeWidth).toBe(
-      NOTE_TREE_WIDTH_MIN
+      NOTE_TREE_WIDTH_MIN,
     )
     expect(sanitizeTheme({ version: THEME_VERSION, noteTreeWidth: 300 }).noteTreeWidth).toBe(300)
   })
@@ -238,10 +186,10 @@ describe('sanitizeTheme', () => {
     expect(clampVideoTreeWidth(undefined)).toBe(VIDEO_TREE_WIDTH_DEFAULT)
     expect(clampVideoTreeWidth('宽一点')).toBe(VIDEO_TREE_WIDTH_DEFAULT)
     expect(sanitizeTheme({ version: THEME_VERSION, videoTreeWidth: 9999 }).videoTreeWidth).toBe(
-      VIDEO_TREE_WIDTH_MAX
+      VIDEO_TREE_WIDTH_MAX,
     )
     expect(sanitizeTheme({ version: THEME_VERSION, videoTreeWidth: 1 }).videoTreeWidth).toBe(
-      VIDEO_TREE_WIDTH_MIN
+      VIDEO_TREE_WIDTH_MIN,
     )
     expect(sanitizeTheme({ version: THEME_VERSION, videoTreeWidth: 300 }).videoTreeWidth).toBe(300)
   })
@@ -252,10 +200,10 @@ describe('sanitizeTheme', () => {
     expect(clampKbTreeWidth(undefined)).toBe(KB_TREE_WIDTH_DEFAULT)
     expect(clampKbTreeWidth('宽一点')).toBe(KB_TREE_WIDTH_DEFAULT)
     expect(sanitizeTheme({ version: THEME_VERSION, kbTreeWidth: 9999 }).kbTreeWidth).toBe(
-      KB_TREE_WIDTH_MAX
+      KB_TREE_WIDTH_MAX,
     )
     expect(sanitizeTheme({ version: THEME_VERSION, kbTreeWidth: 1 }).kbTreeWidth).toBe(
-      KB_TREE_WIDTH_MIN
+      KB_TREE_WIDTH_MIN,
     )
     expect(sanitizeTheme({ version: THEME_VERSION, kbTreeWidth: 300 }).kbTreeWidth).toBe(300)
   })
@@ -274,7 +222,7 @@ describe('sanitizeTheme', () => {
     const result = sanitizeTheme({
       version: THEME_VERSION,
       columns: [{ id: 'col-1', width: 300, rows: [{ id: 'row-a', mode: 'fixed', height: 200 }] }],
-      cards: { quick: { row: '不存在的行', order: 0 } }
+      cards: { quick: { row: '不存在的行', order: 0 } },
     })
 
     const row = cardIdsInRow(result.cards, result.cards.quick.row)
@@ -294,11 +242,11 @@ describe('sanitizeTheme', () => {
           rows: [
             { id: 'row-a', mode: '怪', height: 200 },
             { height: 200 },
-            { id: 'row-b', mode: 'fixed', height: 200 }
-          ]
-        }
+            { id: 'row-b', mode: 'fixed', height: 200 },
+          ],
+        },
       ],
-      cards: { quick: { row: 'row-a', order: 0 }, token: { row: 'row-b', order: 0 } }
+      cards: { quick: { row: 'row-a', order: 0 }, token: { row: 'row-b', order: 0 } },
     })
 
     expect(rowIds(result.columns)).toContain('row-a')
@@ -308,15 +256,15 @@ describe('sanitizeTheme', () => {
 
   it('一栏里一张卡片都没有时也留一行（那是往这一栏拖卡片的落点）', () => {
     const everyOneInCol2 = Object.fromEntries(
-      HOME_CARD_IDS.map((id) => [id, { row: 'row-b', order: 0 }])
+      HOME_CARD_IDS.map(id => [id, { row: 'row-b', order: 0 }]),
     )
     const result = sanitizeTheme({
       version: THEME_VERSION,
       columns: [
         { id: 'col-1', width: 300, rows: [{ id: 'row-a', mode: 'fixed', height: 200 }] },
-        { id: 'col-2', width: 300, rows: [{ id: 'row-b', mode: 'flex', height: 200 }] }
+        { id: 'col-2', width: 300, rows: [{ id: 'row-b', mode: 'flex', height: 200 }] },
       ],
-      cards: everyOneInCol2
+      cards: everyOneInCol2,
     })
 
     expect(rowIds(result.columns)).toEqual(['row-a', 'row-b'])
@@ -332,11 +280,11 @@ describe('sanitizeTheme', () => {
           width: 300,
           rows: [
             { id: 'row-a', mode: 'fixed', height: 10 },
-            { id: 'row-b', mode: 'fixed', height: 10 }
-          ]
-        }
+            { id: 'row-b', mode: 'fixed', height: 10 },
+          ],
+        },
       ],
-      cards: { token: { row: 'row-a', order: 0 }, quick: { row: 'row-b', order: 0 } }
+      cards: { token: { row: 'row-a', order: 0 }, quick: { row: 'row-b', order: 0 } },
     })
 
     // token 的下限 160 把 10px 顶上去；快捷启动只有 76，10 也照样顶到 76
@@ -351,8 +299,8 @@ describe('sanitizeTheme', () => {
         { id: 'col-1', width: 99999 },
         { width: 300 },
         { id: 'col-1', width: 300 },
-        ...Array.from({ length: 8 }, (_, index) => ({ id: `col-x${index}`, width: 260 }))
-      ]
+        ...Array.from({ length: 8 }, (_, index) => ({ id: `col-x${index}`, width: 260 })),
+      ],
     })
 
     expect(result.columns.length).toBe(COLUMN_COUNT_MAX)
@@ -380,8 +328,8 @@ describe('sanitizeTheme', () => {
         commands: { row: 'row-3', order: 9 },
         actions: { row: 'row-4', order: 7 },
         work: { row: 'row-4', order: 2 },
-        news: { row: 'row-4', order: 9 }
-      }
+        news: { row: 'row-4', order: 9 },
+      },
     })
 
     expect(cardIdsInRow(result.cards, 'row-1')).toEqual(['activity', 'token'])
@@ -394,10 +342,10 @@ describe('sanitizeTheme', () => {
   })
 
   it('默认布局：三栏各自的行高与模式，一张卡片一行', () => {
-    expect(DEFAULT_THEME.columns.map((column) => [column.id, column.width])).toEqual([
+    expect(DEFAULT_THEME.columns.map(column => [column.id, column.width])).toEqual([
       ['col-1', 373],
       ['col-2', null],
-      ['col-3', 345]
+      ['col-3', 345],
     ])
     expect(rowIds(DEFAULT_THEME.columns)).toEqual([
       'row-1',
@@ -408,7 +356,7 @@ describe('sanitizeTheme', () => {
       'row-6',
       'row-7',
       'row-8',
-      'row-9'
+      'row-9',
     ])
     expect(cardIdsInRow(DEFAULT_THEME.cards, 'row-1')).toEqual(['activity'])
     expect(cardIdsInRow(DEFAULT_THEME.cards, 'row-7')).toEqual(['recent'])
@@ -440,7 +388,7 @@ describe('moveCard', () => {
       column: 'col-1',
       rowIndex: 0,
       newRow: false,
-      index: 1
+      index: 1,
     })
     expect(cardIdsInRow(cards, 'row-1')).toEqual(['activity', 'quick', 'token'])
   })
@@ -450,7 +398,7 @@ describe('moveCard', () => {
       column: 'col-1',
       rowIndex: 0,
       newRow: false,
-      index: 0
+      index: 0,
     })
     expect(cardIdsInRow(forward.cards, 'row-1')).toEqual(['token', 'activity'])
   })
@@ -460,7 +408,7 @@ describe('moveCard', () => {
       column: 'col-1',
       rowIndex: 99,
       newRow: false,
-      index: 0
+      index: 0,
     })
     expect(cardIdsInRow(cards, 'row-2')).toEqual(['quick', 'system', 'recent'])
   })
@@ -470,11 +418,11 @@ describe('moveCard', () => {
       column: 'col-1',
       rowIndex: 1,
       newRow: true,
-      index: 0
+      index: 0,
     })
 
-    const list = columns.find((column) => column.id === 'col-1')!
-    expect(list.rows.map((row) => row.id)).toEqual(['row-1', cards.work.row, 'row-2'])
+    const list = columns.find(column => column.id === 'col-1')!
+    expect(list.rows.map(row => row.id)).toEqual(['row-1', cards.work.row, 'row-2'])
     // 原来那一行（row-4）是固定 260，新开的一行照搬
     expect(rowOf(columns, cards.work.row)).toEqual({ id: cards.work.row, mode: 'fixed', height: 260 })
     expect(cardIdsInRow(cards, cards.work.row)).toEqual(['work'])
@@ -485,10 +433,10 @@ describe('moveCard', () => {
       column: 'col-1',
       rowIndex: 99,
       newRow: true,
-      index: 0
+      index: 0,
     })
 
-    const list = columns.find((column) => column.id === 'col-1')!
+    const list = columns.find(column => column.id === 'col-1')!
     expect(list.rows[list.rows.length - 1].id).toBe(cards.news.row)
   })
 
@@ -497,7 +445,7 @@ describe('moveCard', () => {
       column: 'col-3',
       rowIndex: 0,
       newRow: false,
-      index: 0
+      index: 0,
     })
     expect(rowIds(first.columns)).toContain('row-1')
 
@@ -505,7 +453,7 @@ describe('moveCard', () => {
       column: 'col-3',
       rowIndex: 0,
       newRow: false,
-      index: 1
+      index: 1,
     })
     expect(rowIds(second.columns)).not.toContain('row-1')
     // 两次都插在第 index 位上：先插进去的 activity 排在 actions 前面，token 又插到它后面
@@ -518,7 +466,7 @@ describe('moveCard', () => {
       column: 'col-1',
       rowIndex: 1,
       newRow: false,
-      index: 0
+      index: 0,
     })
     expect(rowOf(columns, 'row-2')?.height).toBe(160)
   })
@@ -530,7 +478,7 @@ describe('moveCard', () => {
       column: '没有这一栏',
       rowIndex: 0,
       newRow: false,
-      index: 0
+      index: 0,
     })
     expect(result.cards).toBe(cards)
     expect(result.columns).toBe(columns)
@@ -553,10 +501,10 @@ describe('pruneEmptyRows', () => {
     for (const id of HOME_CARD_IDS) cards[id].row = 'row-4'
     const next = pruneEmptyRows(sampleColumns(), cards)
 
-    expect(next.map((column) => column.rows.map((row) => row.id))).toEqual([
+    expect(next.map(column => column.rows.map(row => row.id))).toEqual([
       ['row-1'],
       ['row-3'],
-      ['row-4']
+      ['row-4'],
     ])
   })
 })
@@ -607,7 +555,7 @@ describe('拆栏 / 收栏', () => {
 
   it('只剩一栏时收不掉：首页总得留一栏给卡片落脚', () => {
     expect(
-      removeColumn(sampleCards(), [{ id: 'col-1', width: null, rows: [{ id: 'row-1', mode: 'flex', height: 200 }] }], 'col-1')
+      removeColumn(sampleCards(), [{ id: 'col-1', width: null, rows: [{ id: 'row-1', mode: 'flex', height: 200 }] }], 'col-1'),
     ).toBeNull()
   })
 
@@ -730,11 +678,11 @@ describe('行与卡片的关系', () => {
   it('新开一行时继承的高度：跟着卡片原来那一行；原来那一行认不出时给一条柔性行', () => {
     expect(rowShapeFor(sampleCards(), sampleColumns(), 'token')).toEqual({
       mode: 'fixed',
-      height: 200
+      height: 200,
     })
     expect(rowShapeFor(sampleCards(), [], 'token')).toEqual({
       mode: 'flex',
-      height: ROW_HEIGHT_MIN_DEFAULT
+      height: ROW_HEIGHT_MIN_DEFAULT,
     })
   })
 
@@ -770,13 +718,13 @@ describe('关掉的卡片', () => {
   it('缺省是开着的：老主题文件里没有这个字段，也只有明确的 true 才算关', () => {
     const result = sanitizeTheme({
       version: THEME_VERSION,
-      cards: { quick: { row: DEFAULT_THEME.cards.quick.row, order: 0 } }
+      cards: { quick: { row: DEFAULT_THEME.cards.quick.row, order: 0 } },
     })
     expect(result.cards.quick.hidden).toBe(false)
 
     const loose = sanitizeTheme({
       version: THEME_VERSION,
-      cards: { quick: { hidden: 'yes' }, work: { hidden: 1 } }
+      cards: { quick: { hidden: 'yes' }, work: { hidden: 1 } },
     })
     expect(loose.cards.quick.hidden).toBe(false)
     expect(loose.cards.work.hidden).toBe(false)
@@ -789,7 +737,7 @@ describe('关掉的卡片', () => {
     const result = sanitizeTheme({ version: THEME_VERSION, cards: cardsWithHidden([...HOME_CARD_IDS]) })
 
     expect(result.cards[HOME_CARD_IDS[0]].hidden).toBe(false)
-    expect(HOME_CARD_IDS.filter((id) => !result.cards[id].hidden)).toEqual([HOME_CARD_IDS[0]])
+    expect(HOME_CARD_IDS.filter(id => !result.cards[id].hidden)).toEqual([HOME_CARD_IDS[0]])
   })
 
   it('关掉只是不画：它那一行与行内的位置照旧留着，再打开时回到原处', () => {
@@ -811,19 +759,19 @@ describe('关掉的卡片', () => {
     const before = sanitizeTheme(DEFAULT_THEME)
     const taller = {
       ...before,
-      columns: before.columns.map((column) => ({
+      columns: before.columns.map(column => ({
         ...column,
-        rows: column.rows.map((row) => (row.id === 'row-1' ? { ...row, height: row.height + 20 } : row))
-      }))
+        rows: column.rows.map(row => (row.id === 'row-1' ? { ...row, height: row.height + 20 } : row)),
+      })),
     }
     expect(sameThemeContent(before, sanitizeTheme(taller))).toBe(false)
 
     const flexible = {
       ...before,
-      columns: before.columns.map((column) => ({
+      columns: before.columns.map(column => ({
         ...column,
-        rows: column.rows.map((row) => (row.id === 'row-2' ? { ...row, mode: 'flex' as const } : row))
-      }))
+        rows: column.rows.map(row => (row.id === 'row-2' ? { ...row, mode: 'flex' as const } : row)),
+      })),
     }
     expect(sameThemeContent(before, sanitizeTheme(flexible))).toBe(false)
   })
@@ -840,15 +788,15 @@ describe('关掉的卡片', () => {
       JSON.parse(
         JSON.stringify({
           ...before,
-          appearance: { ...before.appearance, hiddenViews: [] }
-        })
-      )
+          appearance: { ...before.appearance, hiddenViews: [] },
+        }),
+      ),
     )
     expect(sameThemeContent(before, same)).toBe(true)
 
     const changed = sanitizeTheme({
       ...before,
-      appearance: { ...before.appearance, hiddenViews: ['notes'] }
+      appearance: { ...before.appearance, hiddenViews: ['notes'] },
     })
     expect(sameThemeContent(before, changed)).toBe(false)
   })

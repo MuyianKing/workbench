@@ -36,7 +36,7 @@ const MIME_EXTENSIONS: Record<string, string> = {
   'image/bmp': 'bmp',
   'image/svg+xml': 'svg',
   'image/avif': 'avif',
-  'image/tiff': 'tiff'
+  'image/tiff': 'tiff',
 }
 
 /** 一次上传要带的东西：图片本身（base64）与它该去哪儿 */
@@ -66,14 +66,18 @@ export interface NoteImageUploaded {
   url: string
 }
 
-/** 收敛仓库地址。与 Token 同步仓库同一条口径：空、含空白、以 `-` 开头的都当没填 ——
+/**
+ * 收敛仓库地址。与 Token 同步仓库同一条口径：空、含空白、以 `-` 开头的都当没填 ——
  * 后面那个值会被当成 git 的选项，填错了就是一条看不懂的报错。
  */
 export function sanitizeImageRepo(raw: unknown): string {
-  if (typeof raw !== 'string') return ''
+  if (typeof raw !== 'string')
+    return ''
   const value = raw.trim()
-  if (!value || value.length > REPO_MAX_LENGTH) return ''
-  if (/\s/.test(value) || value.startsWith('-')) return ''
+  if (!value || value.length > REPO_MAX_LENGTH)
+    return ''
+  if (/\s/.test(value) || value.startsWith('-'))
+    return ''
   return value
 }
 
@@ -82,12 +86,13 @@ export function sanitizeImageRepo(raw: unknown): string {
  * 空串表示直接放在仓库根目录。
  */
 export function sanitizeImageDir(raw: unknown): string {
-  if (typeof raw !== 'string') return ''
+  if (typeof raw !== 'string')
+    return ''
   return raw
     .replace(/\\/g, '/')
     .split('/')
-    .map((part) => part.trim())
-    .filter((part) => part && part !== '.' && part !== '..')
+    .map(part => part.trim())
+    .filter(part => part && part !== '.' && part !== '..')
     .join('/')
 }
 
@@ -113,9 +118,9 @@ export function imageFileName(input: {
   token?: string
 }): string {
   const date = new Date(input.now ?? Date.now())
-  const stamp =
-    `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}` +
-    `-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`
+  const stamp
+    = `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}`
+      + `-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`
 
   const token = (input.token ?? fallbackToken())
     .toLowerCase()
@@ -156,7 +161,7 @@ const PATH_HASH_LENGTH = 8
 function plainSegment(raw: string): string {
   return raw
     // 保留字符与控制字符都去掉：留着它们 git 在 Windows 上会直接报错
-    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '')
+    .replace(/[<>:"/\\|?*\u0000-\u001F]/g, '')
     .replace(/\s+/g, ' ')
     .trim()
     .replace(/^\.+|\.+$/g, '')
@@ -170,7 +175,7 @@ function plainSegment(raw: string): string {
  * 这里也就不引 crypto：shared 里不许 import node 的东西，而这个函数在渲染层直接跑。
  */
 function shortHash(text: string): string {
-  let hash = 0x811c9dc5
+  let hash = 0x811C9DC5
   for (let index = 0; index < text.length; index += 1) {
     hash ^= text.charCodeAt(index)
     hash = Math.imul(hash, 0x01000193)
@@ -203,9 +208,10 @@ export function imageDeviceKey(deviceId: string): string {
  * 会算成另一个目录，那些图在这边就列不出来（正文里的外链照样能用）。
  */
 export function imageNotebookKey(root: string): string {
-  const clean =
-    typeof root === 'string' ? root.trim().replace(/\\/g, '/').replace(/\/+$/, '') : ''
-  if (!clean) return ''
+  const clean
+    = typeof root === 'string' ? root.trim().replace(/\\/g, '/').replace(/\/+$/, '') : ''
+  if (!clean)
+    return ''
 
   const parts = clean.split('/').filter(Boolean)
   const name = plainSegment(parts[parts.length - 1] ?? '')
@@ -225,7 +231,8 @@ export function imageNotebookKey(root: string): string {
 export function imageScopeDir(dir: string, deviceId: string, root: string): string {
   const device = imageDeviceKey(deviceId)
   const notebook = imageNotebookKey(root)
-  if (!device || !notebook) return ''
+  if (!device || !notebook)
+    return ''
   return [sanitizeImageDir(dir), device, notebook].filter(Boolean).join('/')
 }
 
@@ -243,7 +250,8 @@ export interface ImageRemote {
  */
 export function parseImageRemote(repo: string): ImageRemote | null {
   const clean = repo.trim().replace(/\/+$/, '')
-  if (!clean) return null
+  if (!clean)
+    return null
 
   let host = ''
   let path = ''
@@ -253,12 +261,14 @@ export function parseImageRemote(repo: string): ImageRemote | null {
   if (!hasScheme && scp) {
     host = scp[1]
     path = scp[2]
-  } else {
+  }
+  else {
     try {
       const url = new URL(clean)
       host = url.hostname
       path = url.pathname
-    } catch {
+    }
+    catch {
       return null
     }
   }
@@ -266,12 +276,13 @@ export function parseImageRemote(repo: string): ImageRemote | null {
   path = path.replace(/\.git$/i, '').replace(/^\/+|\/+$/g, '')
   const parts = path.split('/').filter(Boolean)
   // 至少要有 `owner/repo` 两段：只有一段的话推不出托管方给的 raw 地址
-  if (!host || parts.length < 2) return null
+  if (!host || parts.length < 2)
+    return null
 
   return {
     host: host.toLowerCase(),
     owner: parts.slice(0, -1).join('/'),
-    name: parts[parts.length - 1]
+    name: parts[parts.length - 1],
   }
 }
 
@@ -284,19 +295,22 @@ export function parseImageRemote(repo: string): ImageRemote | null {
  *
  * 每一段都做百分号编码：目录名可能是中文，而 markdown 的链接里出现空格就直接断了。
  */
-export function imageRawUrl(input: { repo: string; branch: string; path: string }): string {
+export function imageRawUrl(input: { repo: string, branch: string, path: string }): string {
   const path = input.path
     .split('/')
     .filter(Boolean)
-    .map((part) => encodeURIComponent(part))
+    .map(part => encodeURIComponent(part))
     .join('/')
-  if (!path) return ''
+  if (!path)
+    return ''
 
   const remote = parseImageRemote(input.repo)
-  if (!remote) return ''
+  if (!remote)
+    return ''
 
   const branch = input.branch.trim().replace(/^\/+|\/+$/g, '')
-  if (!branch) return ''
+  if (!branch)
+    return ''
 
   const { owner, name } = remote
   switch (remote.host) {
@@ -373,7 +387,7 @@ export interface NoteImageDeleted {
 
 /** 扫出来的笔记正文（引用计数用） */
 export interface NoteTextScan {
-  files: { rel: string; text: string }[]
+  files: { rel: string, text: string }[]
   /** 读不出来的篇数：大于 0 时界面要如实说一句（少读一篇就可能误判「没人引用」） */
   failed: number
 }
@@ -391,14 +405,16 @@ export interface NoteTextScan {
  */
 function countInLowered(loweredTexts: readonly string[], name: string): number {
   const needle = name.trim().toLowerCase()
-  if (!needle) return 0
+  if (!needle)
+    return 0
 
   let total = 0
   for (const text of loweredTexts) {
     let from = 0
     for (;;) {
       const at = text.indexOf(needle, from)
-      if (at < 0) break
+      if (at < 0)
+        break
       total += 1
       from = at + needle.length
     }
@@ -409,8 +425,8 @@ function countInLowered(loweredTexts: readonly string[], name: string): number {
 /** 上面的单张版本（给测试与别处复用；每次调用会把整批文本各转一遍小写） */
 export function countImageReferences(texts: readonly string[], name: string): number {
   return countInLowered(
-    texts.map((text) => text.toLowerCase()),
-    name
+    texts.map(text => text.toLowerCase()),
+    name,
   )
 }
 
@@ -428,14 +444,14 @@ export function buildImageAssets(input: {
   repo: string
   branch: string
 }): NoteImageAsset[] {
-  const lowered = input.texts.map((text) => text.toLowerCase())
+  const lowered = input.texts.map(text => text.toLowerCase())
 
-  return input.images.map((image) => ({
+  return input.images.map(image => ({
     path: image.path,
     name: image.name,
     size: Math.max(0, Math.round(image.size)),
     refs: countInLowered(lowered, image.name),
-    url: imageRawUrl({ repo: input.repo, branch: input.branch, path: image.path })
+    url: imageRawUrl({ repo: input.repo, branch: input.branch, path: image.path }),
   }))
 }
 
@@ -447,14 +463,15 @@ export function sortImageAssets(assets: readonly NoteImageAsset[]): NoteImageAss
   return [...assets].sort((left, right) => {
     const leftUnused = left.refs === 0
     const rightUnused = right.refs === 0
-    if (leftUnused !== rightUnused) return leftUnused ? -1 : 1
+    if (leftUnused !== rightUnused)
+      return leftUnused ? -1 : 1
     return right.name.localeCompare(left.name)
   })
 }
 
 /** 没人引用的那些（批量删除的对象） */
 export function unusedImages(assets: readonly NoteImageAsset[]): NoteImageAsset[] {
-  return assets.filter((asset) => asset.refs === 0)
+  return assets.filter(asset => asset.refs === 0)
 }
 
 /** 一批图片一共多少字节（确认框里说「要删掉多少」用它） */

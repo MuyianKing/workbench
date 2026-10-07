@@ -1,3 +1,5 @@
+import type { KbEntryMeta, KbScanEntry } from './kb'
+import type { KbIssue, KbIssueKind } from './kb-lint'
 /**
  * 知识库巡检的测试。
  *
@@ -6,16 +8,7 @@
  * 不信这张清单，所以这里逐条钉住口径。
  */
 import { describe, expect, it } from 'vitest'
-import {
-  KB_ISSUE_KINDS,
-  kbEntryLinks,
-  kbIssueCounts,
-  kbLint,
-  resolveKbLink,
-  type KbIssue,
-  type KbIssueKind
-} from './kb-lint'
-import type { KbEntryMeta, KbScanEntry } from './kb'
+import { KB_ISSUE_KINDS, kbEntryLinks, kbIssueCounts, kbLint, resolveKbLink } from './kb-lint'
 
 /** 造一条扫描清单：rel 之外都有说得过去的默认值 */
 function file(rel: string, isDir = false): KbScanEntry {
@@ -35,13 +28,13 @@ function meta(partial: Partial<KbEntryMeta> = {}): KbEntryMeta {
     source: '',
     links: [],
     mtimeMs: 1000,
-    ...partial
+    ...partial,
   }
 }
 
 /** 只看某一类的说法（别的类在不在不掺和这一条用例） */
 function ofKind(issues: KbIssue[], kind: KbIssueKind): string[] {
-  return issues.filter((issue) => issue.kind === kind).map((issue) => issue.text)
+  return issues.filter(issue => issue.kind === kind).map(issue => issue.text)
 }
 
 describe('kbLint：孤儿', () => {
@@ -53,28 +46,28 @@ describe('kbLint：孤儿', () => {
   it('被别的条目链到就不是孤儿（跨目录的相对路径也算）', () => {
     const entries = [
       meta({ rel: 'kb/01-主题/a.md' }),
-      meta({ rel: 'kb/02-其他/b.md', links: ['../01-主题/a.md'] })
+      meta({ rel: 'kb/02-其他/b.md', links: ['../01-主题/a.md'] }),
     ]
     const issues = kbLint(entries, [file('kb/01-主题/a.md'), file('kb/02-其他/b.md')])
-    expect(issues.filter((issue) => issue.rel === 'kb/01-主题/a.md' && issue.kind === 'orphan')).toEqual([])
+    expect(issues.filter(issue => issue.rel === 'kb/01-主题/a.md' && issue.kind === 'orphan')).toEqual([])
     expect(ofKind(issues, 'orphan')).toEqual(['没有其它条目链接它'])
   })
 
   it('导航页（README.md）发的链接不算引用，它自己也不参与判定', () => {
     const entries = [
       meta({ rel: 'kb/01-主题/README.md', links: ['./a.md'] }),
-      meta({ rel: 'kb/01-主题/a.md' })
+      meta({ rel: 'kb/01-主题/a.md' }),
     ]
     const issues = kbLint(entries, [file('kb/01-主题/README.md'), file('kb/01-主题/a.md')])
     // 总览把同目录的条目全链一遍 —— 算上它这个数就永远是零
     expect(ofKind(issues, 'orphan')).toEqual(['没有其它条目链接它'])
-    expect(issues.filter((issue) => issue.rel === 'kb/01-主题/README.md' && issue.kind === 'orphan')).toEqual([])
+    expect(issues.filter(issue => issue.rel === 'kb/01-主题/README.md' && issue.kind === 'orphan')).toEqual([])
   })
 
   it('链到原始资料不算「被引用」：目标不是条目', () => {
     const entries = [
       meta({ rel: 'kb/01-主题/a.md' }),
-      meta({ rel: 'kb/01-主题/b.md', links: ['../../data/raw/x.md'] })
+      meta({ rel: 'kb/01-主题/b.md', links: ['../../data/raw/x.md'] }),
     ]
     const issues = kbLint(entries, [file('kb/01-主题/a.md'), file('kb/01-主题/b.md'), file('data/raw/x.md')])
     expect(ofKind(issues, 'orphan')).toEqual(['没有其它条目链接它', '没有其它条目链接它'])
@@ -95,7 +88,7 @@ describe('kbLint：断链', () => {
     expect(ofKind(issues, 'link')).toEqual([
       '链接跳不到库里：../../../外面.md',
       '链接跳不到库里：/abs/x.md',
-      '链接跳不到库里：https://example.com/a'
+      '链接跳不到库里：https://example.com/a',
     ])
   })
 
@@ -116,13 +109,13 @@ describe('kbLint：元数据', () => {
   it('缺 tags / status 各报一条，日期格式不对也报', () => {
     const issues = kbLint(
       [meta({ tags: [], status: '', created: '2026/09/28', updated: '' })],
-      [file('kb/01-主题/a.md')]
+      [file('kb/01-主题/a.md')],
     )
     expect(ofKind(issues, 'meta')).toEqual([
       '没有 tags：搜索与标签筛选挂不上它',
       '没有 status',
       'created 不是 YYYY-MM-DD：2026/09/28',
-      'updated 不是 YYYY-MM-DD：（空）'
+      'updated 不是 YYYY-MM-DD：（空）',
     ])
   })
 
@@ -160,7 +153,7 @@ describe('kbLint：主题目录', () => {
     const issues = kbLint(entries, [file('kb/散页.md'), file('kb/notes/a.md'), file('kb/01-主题/a.md')])
     expect(ofKind(issues, 'topic')).toEqual([
       '直接放在 kb/ 根下，没有归进主题目录',
-      '主题目录名不是 NN-主题名：notes'
+      '主题目录名不是 NN-主题名：notes',
     ])
   })
 })
@@ -168,11 +161,11 @@ describe('kbLint：主题目录', () => {
 describe('kbLint：整体形状', () => {
   it('按分类的固定顺序拼（界面上一眼看得出哪一类有几处）', () => {
     const entries = [
-      meta({ rel: 'kb/notes/a.md', links: ['./没有.md'] }) // 断链 + 主题目录 + 孤儿
+      meta({ rel: 'kb/notes/a.md', links: ['./没有.md'] }), // 断链 + 主题目录 + 孤儿
     ]
     const issues = kbLint(entries, [file('kb/notes/a.md')])
-    expect(issues.map((issue) => issue.kind)).toEqual(['orphan', 'link', 'topic'])
-    const order = issues.map((issue) => KB_ISSUE_KINDS.indexOf(issue.kind))
+    expect(issues.map(issue => issue.kind)).toEqual(['orphan', 'link', 'topic'])
+    const order = issues.map(issue => KB_ISSUE_KINDS.indexOf(issue.kind))
     expect(order).toEqual([...order].sort((a, b) => a - b))
   })
 
@@ -180,13 +173,13 @@ describe('kbLint：整体形状', () => {
     const entries = [
       meta({ rel: 'kb/01-主题/README.md', links: ['./a.md'] }),
       meta({ rel: 'kb/01-主题/a.md', source: 'data/raw/x.md', links: ['./b.md'] }),
-      meta({ rel: 'kb/01-主题/b.md', links: ['./a.md'] })
+      meta({ rel: 'kb/01-主题/b.md', links: ['./a.md'] }),
     ]
     const issues = kbLint(entries, [
       file('kb/01-主题/README.md'),
       file('kb/01-主题/a.md'),
       file('kb/01-主题/b.md'),
-      file('data/raw/x.md')
+      file('data/raw/x.md'),
     ])
     expect(issues).toEqual([])
   })
@@ -197,11 +190,11 @@ describe('kbIssueCounts', () => {
     const issues: KbIssue[] = [
       { kind: 'topic', rel: 'kb/a.md', text: 'x' },
       { kind: 'orphan', rel: 'kb/a.md', text: 'y' },
-      { kind: 'orphan', rel: 'kb/b.md', text: 'z' }
+      { kind: 'orphan', rel: 'kb/b.md', text: 'z' },
     ]
     expect(kbIssueCounts(issues)).toEqual([
       { kind: 'orphan', label: '孤儿', count: 2 },
-      { kind: 'topic', label: '主题目录', count: 1 }
+      { kind: 'topic', label: '主题目录', count: 1 },
     ])
   })
 })
@@ -242,11 +235,11 @@ describe('resolveKbLink', () => {
     expect(resolveKbLink('kb/02-其他/b.md', '../../../外面.md')).toBeNull()
     // 退到仓库根为止是合法的：落到根下的文件（templates / README 这类）
     expect(resolveKbLink('kb/01-主题/a.md', '../../templates/note-template.md')).toBe(
-      'templates/note-template.md'
+      'templates/note-template.md',
     )
   })
 
-  it('URL 编码解开一层，解不开就按原文用', () => {
+  it('uRL 编码解开一层，解不开就按原文用', () => {
     expect(resolveKbLink('kb/01-主题/a.md', './%E7%BB%84%E4%BB%B6.md')).toBe('kb/01-主题/组件.md')
     expect(resolveKbLink('kb/01-主题/a.md', './100%.md')).toBe('kb/01-主题/100%.md')
   })

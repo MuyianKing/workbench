@@ -1,4 +1,8 @@
 <script setup lang="ts">
+import type { TokenBucket, TokenCounters, TokenGranularity, TokenRangePreset, TokenUsageResult, UsageAxis } from '@workbench/usage'
+import { CaretRight, Connection, Histogram, Refresh } from '@element-plus/icons-vue'
+import { dayKey } from '@workbench/core'
+import { axisTotal, bucketRangeOf, buildSeriesRange, emptyCounters, flattenSources, formatCredits, formatPercent, formatTokensWan, resolvePresetRange, shareByModel, shareBySource, shortDayLabel, SOURCE_LABELS, sumRange, totalTokens } from '@workbench/usage'
 /**
  * 首页「Coding 用量」卡片:读各 AI 工具本地用量数据(ZCode / DeepSeek Harness / CodeBuddy /
  * WorkBuddy / Qoder)的按天聚合快照,画 今日/本周/本月 概览、趋势条形图与模型/工具占比。
@@ -21,41 +25,16 @@
  * 缓存读取通常占九成以上,构成拆分收在悬停里,总量数字才不会因缓存命中波动而误导。
  */
 import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue'
-import { CaretRight, Connection, Histogram, Refresh } from '@element-plus/icons-vue'
-import TokenRangePicker from '@/components/TokenRangePicker.vue'
 import PanelLoading from '@/components/PanelLoading.vue'
-import { useSettingsStore } from '@/stores/settings'
-import {
-  SOURCE_LABELS,
-  axisTotal,
-  bucketRangeOf,
-  buildSeriesRange,
-  emptyCounters,
-  flattenSources,
-  formatCredits,
-  formatPercent,
-  formatTokensWan,
-  resolvePresetRange,
-  shareByModel,
-  shareBySource,
-  shortDayLabel,
-  sumRange,
-  totalTokens,
-  type TokenBucket,
-  type TokenCounters,
-  type TokenGranularity,
-  type TokenRangePreset,
-  type TokenUsageResult,
-  type UsageAxis
-} from '@workbench/usage'
-import { dayKey } from '@workbench/core'
+import TokenRangePicker from '@/components/TokenRangePicker.vue'
 import { formatRelative } from '@/format'
+import { useSettingsStore } from '@/stores/settings'
 
 /** 三档粒度:只决定柱子的分桶宽度,趋势窗口由头部的时间维度下拉给出 */
-const GRANULARITIES: Array<{ key: TokenGranularity; label: string }> = [
+const GRANULARITIES: Array<{ key: TokenGranularity, label: string }> = [
   { key: 'day', label: '天' },
   { key: 'week', label: '周' },
-  { key: 'month', label: '月' }
+  { key: 'month', label: '月' },
 ]
 
 /**
@@ -64,9 +43,9 @@ const GRANULARITIES: Array<{ key: TokenGranularity; label: string }> = [
  * 一次只画一个:两者量纲不同,相加或同轴都没有意义。默认 tokens ——
  * 那是这个面板一直以来的样子,credits 是后来的、只有用 Qoder 的人才有的那一份。
  */
-const AXES: Array<{ key: UsageAxis; label: string }> = [
+const AXES: Array<{ key: UsageAxis, label: string }> = [
   { key: 'tokens', label: 'Tokens' },
-  { key: 'credits', label: 'Credits' }
+  { key: 'credits', label: 'Credits' },
 ]
 
 const settings = useSettingsStore()
@@ -107,7 +86,8 @@ async function refresh(): Promise<void> {
   loading.value = true
   try {
     applyResult(await window.workbench.getTokenUsage())
-  } finally {
+  }
+  finally {
     loading.value = false
     readOnce.value = true
   }
@@ -135,8 +115,10 @@ async function syncNow(): Promise<void> {
   syncing.value = true
   try {
     const res = await settings.syncUsageNow()
-    if (res?.ok && res.data) applyResult(res)
-  } finally {
+    if (res?.ok && res.data)
+      applyResult(res)
+  }
+  finally {
     syncing.value = false
   }
 }
@@ -154,7 +136,8 @@ onMounted(() => {
  * 也会走一次（onMounted 之后），所以这里与 onMounted 分工：boot 只做一次，轮询由它起。
  */
 function startPolling(): void {
-  if (timer !== null) return
+  if (timer !== null)
+    return
   timer = window.setInterval(() => void refresh(), 60_000)
   // 后台的自动同步跑完会广播一次：新读回的别人的分片立刻显示出来，
   // 不必干等到下一个轮询周期（首屏用的是上一次同步时读回的那一份）
@@ -180,7 +163,7 @@ const todayKey = computed(() => dayKey(nowTick.value))
 const sourceErrorText = computed(() =>
   Object.entries(result.value?.sourceErrors ?? {})
     .map(([id, error]) => `${SOURCE_LABELS[id] ?? id}:${error}`)
-    .join(';')
+    .join(';'),
 )
 const updatedAt = computed(() => result.value?.data.updatedAt ?? 0)
 
@@ -191,7 +174,7 @@ function amount(counters: TokenCounters): number {
 
 /** 某一天在当前口径下有没有数(日期下限与空态都按它判) */
 function dayHasData(models: Record<string, TokenCounters>): boolean {
-  return Object.values(models).some((counters) => amount(counters) > 0)
+  return Object.values(models).some(counters => amount(counters) > 0)
 }
 
 /** 一组计数在当前口径下的显示文字:token 走数量级短写法,额度走小数 */
@@ -225,15 +208,18 @@ const syncError = computed(() => sync.value?.error ?? '')
 /** 参与合并的本机与其它设备名字,拼成一句给悬停提示 */
 const deviceText = computed(() => {
   const status = sync.value
-  if (!status?.enabled) return ''
-  const others = status.devices.map((item) => item.name).join('、')
+  if (!status?.enabled)
+    return ''
+  const others = status.devices.map(item => item.name).join('、')
   return others ? `${status.deviceName}、${others}` : status.deviceName
 })
 
 /** 标题行右侧那行字:实读失败优先,其次是同步失败,再次才是更新时间 */
 const statusText = computed(() => {
-  if (sourceErrorText.value) return '部分来源不可用'
-  if (sync.value?.enabled && syncError.value) return '同步失败'
+  if (sourceErrorText.value)
+    return '部分来源不可用'
+  if (sync.value?.enabled && syncError.value)
+    return '同步失败'
   return updatedAt.value ? `更新于 ${formatRelative(updatedAt.value, nowTick.value)}` : ''
 })
 
@@ -247,7 +233,8 @@ const statusTitle = computed(() => {
     parts.push(`同步仓库:${status.repo}`)
     if (status.lastSyncAt) {
       parts.push(`上次同步:${formatRelative(status.lastSyncAt, nowTick.value)}`)
-    } else {
+    }
+    else {
       parts.push('还没同步过')
     }
   }
@@ -263,8 +250,8 @@ const statusFail = computed(() => Boolean(sourceErrorText.value || syncError.val
 const earliestKey = computed(
   () =>
     Object.keys(days.value)
-      .filter((date) => dayHasData(days.value[date]))
-      .sort()[0] ?? todayKey.value
+      .filter(date => dayHasData(days.value[date]))
+      .sort()[0] ?? todayKey.value,
 )
 
 /**
@@ -288,12 +275,15 @@ function clampRange(): void {
     toKey.value = latest
     return
   }
-  if (toKey.value > latest) toKey.value = latest
+  if (toKey.value > latest)
+    toKey.value = latest
   // 起点贴到最早那天:只在不会把起点推到终点之后时才收 ——
   // 否则(比如选了「昨天」而昨天还没有记录)那一档本就落在没数据的日子上,该照原样显示,而不是挪到有数据的地方
-  if (fromKey.value < earliest && earliest <= toKey.value) fromKey.value = earliest
+  if (fromKey.value < earliest && earliest <= toKey.value)
+    fromKey.value = earliest
   // 不变式:起点不晚于终点。日历已按快照范围禁掉越界日期,正常操作碰不到,这里是兜底
-  if (fromKey.value > toKey.value) fromKey.value = toKey.value
+  if (fromKey.value > toKey.value)
+    fromKey.value = toKey.value
 }
 
 /** 下拉里点了某一档:窗口交给预设解析,再按快照范围收敛 */
@@ -303,7 +293,7 @@ function pickPreset(preset: TokenRangePreset): void {
 }
 
 /** 日历里选完一段:这一档随之成为自定义 */
-function pickRange(range: { fromKey: string; toKey: string }): void {
+function pickRange(range: { fromKey: string, toKey: string }): void {
   rangePreset.value = 'custom'
   fromKey.value = range.fromKey
   toKey.value = range.toKey
@@ -351,12 +341,13 @@ watch(axis, () => {
 
 /** 趋势序列:按当前粒度把窗口内的天级数据分桶,没有数据的桶补零 */
 const series = computed(() =>
-  buildSeriesRange(days.value, granularity.value, fromKey.value, toKey.value)
+  buildSeriesRange(days.value, granularity.value, fromKey.value, toKey.value),
 )
 
 /** 选中柱子时生效的桶;未选中为 null,占比走整个窗口 */
 const activeBucket = computed<TokenBucket | null>(() => {
-  if (selectedBucketIndex.value === null) return null
+  if (selectedBucketIndex.value === null)
+    return null
   return series.value.buckets[selectedBucketIndex.value] ?? null
 })
 
@@ -364,7 +355,8 @@ const activeBucket = computed<TokenBucket | null>(() => {
 const activeRange = computed(() => {
   if (activeBucket.value) {
     const range = bucketRangeOf(activeBucket.value.key, granularity.value)
-    if (range.fromKey) return range
+    if (range.fromKey)
+      return range
   }
   return { fromKey: fromKey.value, toKey: toKey.value }
 })
@@ -373,7 +365,7 @@ const activeRange = computed(() => {
 const shareRangeLabel = computed(() =>
   activeBucket.value
     ? activeBucket.value.label
-    : `${shortDayLabel(fromKey.value)} ~ ${shortDayLabel(toKey.value)}`
+    : `${shortDayLabel(fromKey.value)} ~ ${shortDayLabel(toKey.value)}`,
 )
 
 function selectBucket(index: number): void {
@@ -385,29 +377,30 @@ function isSelected(index: number): boolean {
 }
 
 const maxBucketTotal = computed(() =>
-  Math.max(1, ...series.value.buckets.map((bucket) => amount(bucket.counters)))
+  Math.max(1, ...series.value.buckets.map(bucket => amount(bucket.counters))),
 )
 
 function barHeight(bucket: { counters: TokenCounters }): string {
   // 没有数据的桶给一根 2px 的小柱,图不至于大片留白;颜色更淡,与真数据区分
-  if (amount(bucket.counters) === 0) return '2px'
+  if (amount(bucket.counters) === 0)
+    return '2px'
   return `${Math.max(2, (amount(bucket.counters) / maxBucketTotal.value) * 100)}%`
 }
 
 // ---------- 占比 ----------
 
 const models = computed(() =>
-  shareByModel(days.value, activeRange.value.fromKey, activeRange.value.toKey).slice(0, 5)
+  shareByModel(days.value, activeRange.value.fromKey, activeRange.value.toKey).slice(0, 5),
 )
 /** 工具占比:按参考样式逐工具一行,行下一条细条表示份额;只列当前口径下真有数的工具 */
 const sources = computed(() =>
   result.value
     ? shareBySource(result.value.data, activeRange.value.fromKey, activeRange.value.toKey, axis.value)
-    : []
+    : [],
 )
 
 const maxSourceTotal = computed(() =>
-  Math.max(1, amount(sources.value[0]?.counters ?? emptyCounters()))
+  Math.max(1, amount(sources.value[0]?.counters ?? emptyCounters())),
 )
 
 function sourceWidth(counters: TokenCounters): string {
@@ -428,27 +421,31 @@ const expandedTool = ref<string | null>(null)
 
 function toggleTool(key: string): void {
   // credits 口径下工具没有可展开的东西(展开出来是模型,而那一维在那边没意义,见 showModels)
-  if (!showModels.value) return
+  if (!showModels.value)
+    return
   expandedTool.value = expandedTool.value === key ? null : key
 }
 
 /** 展开的工具里各模型的占比(按该工具自己的天级数据统计) */
 const expandedToolModels = computed(() => {
-  if (!expandedTool.value || !result.value) return []
+  if (!expandedTool.value || !result.value)
+    return []
   const source = result.value.data.sources[expandedTool.value]
-  if (!source) return []
+  if (!source)
+    return []
   return shareByModel(source.days, activeRange.value.fromKey, activeRange.value.toKey)
 })
 
 /** 一行明细:标签 + 占比 + 数值 */
-function detailRows(counters: TokenCounters): Array<{ label: string; value: number }> {
+function detailRows(counters: TokenCounters): Array<{ label: string, value: number }> {
   const rows = [
     { label: '输入(缓存命中)', value: counters.cacheReadTokens },
     { label: '输入(缓存未命中)', value: counters.inputTokens },
-    { label: '输出', value: counters.outputTokens }
+    { label: '输出', value: counters.outputTokens },
   ]
   // 思考token通常为 0,不占一行
-  if (counters.reasoningTokens > 0) rows.push({ label: '思考', value: counters.reasoningTokens })
+  if (counters.reasoningTokens > 0)
+    rows.push({ label: '思考', value: counters.reasoningTokens })
   return rows
 }
 
@@ -515,193 +512,205 @@ function detailWidth(value: number, max: number): string {
 
     <!-- 内容区:面板高度不够时自己出滚动条,标题行与刷新按钮钉在顶部 -->
     <div class="panel__body panel__scroll">
-    <template v-if="hasData">
-      <div class="topline">
-        <div class="top">
-          <i>今日</i>
-          <b class="mono">{{ formatCounters(today) }}</b>
-        </div>
-        <div class="top">
-          <i>本周</i>
-          <b class="mono">{{ formatCounters(thisWeek) }}</b>
-        </div>
-        <div class="top">
-          <i>本月</i>
-          <b class="mono">{{ formatCounters(thisMonth) }}</b>
-        </div>
-      </div>
-
-      <div class="chart">
-        <div class="chart__head">
-          <!-- 趋势窗口:时间维度下拉(预设 + 自定义区间),右侧页签只切换柱子的分桶宽度 -->
-          <div class="range" role="group" aria-label="趋势时间范围">
-            <TokenRangePicker
-              :from-key="fromKey"
-              :to-key="toKey"
-              :preset="rangePreset"
-              :earliest-key="earliestKey"
-              :latest-key="todayKey"
-              @pick-preset="pickPreset"
-              @pick-range="pickRange"
-            />
-            <!-- 实际生效的起止日:预设按快照收敛后可能与字面含义不同,这里给出确切窗口 -->
-            <span class="range__text mono">{{ shortDayLabel(fromKey) }} ~ {{ shortDayLabel(toKey) }}</span>
+      <template v-if="hasData">
+        <div class="topline">
+          <div class="top">
+            <i>今日</i>
+            <b class="mono">{{ formatCounters(today) }}</b>
           </div>
-          <!-- 分桶宽度的三档页签：Element Plus 的分段控件（外观见 global.css） -->
-          <el-segmented
-            v-model="granularity"
-            class="chart__tabs"
-            :options="GRANULARITIES"
-            :props="{ label: 'label', value: 'key' }"
-            aria-label="趋势分桶宽度"
-          />
+          <div class="top">
+            <i>本周</i>
+            <b class="mono">{{ formatCounters(thisWeek) }}</b>
+          </div>
+          <div class="top">
+            <i>本月</i>
+            <b class="mono">{{ formatCounters(thisMonth) }}</b>
+          </div>
         </div>
 
-        <div class="chart__bars">
-          <el-tooltip
-            v-for="(bucket, index) in series.buckets"
-            :key="bucket.key"
-            placement="top"
-            :show-after="120"
-            :disabled="amount(bucket.counters) === 0"
-          >
-            <template #content>
-              <!-- 一行一个口径:输入那行是「缓存命中 / 全部输入 / 命中率」三段,
+        <div class="chart">
+          <div class="chart__head">
+            <!-- 趋势窗口:时间维度下拉(预设 + 自定义区间),右侧页签只切换柱子的分桶宽度 -->
+            <div class="range" role="group" aria-label="趋势时间范围">
+              <TokenRangePicker
+                :from-key="fromKey"
+                :to-key="toKey"
+                :preset="rangePreset"
+                :earliest-key="earliestKey"
+                :latest-key="todayKey"
+                @pick-preset="pickPreset"
+                @pick-range="pickRange"
+              />
+              <!-- 实际生效的起止日:预设按快照收敛后可能与字面含义不同,这里给出确切窗口 -->
+              <span class="range__text mono">{{ shortDayLabel(fromKey) }} ~ {{ shortDayLabel(toKey) }}</span>
+            </div>
+            <!-- 分桶宽度的三档页签：Element Plus 的分段控件（外观见 global.css） -->
+            <el-segmented
+              v-model="granularity"
+              class="chart__tabs"
+              :options="GRANULARITIES"
+              :props="{ label: 'label', value: 'key' }"
+              aria-label="趋势分桶宽度"
+            />
+          </div>
+
+          <div class="chart__bars">
+            <el-tooltip
+              v-for="(bucket, index) in series.buckets"
+              :key="bucket.key"
+              placement="top"
+              :show-after="120"
+              :disabled="amount(bucket.counters) === 0"
+            >
+              <template #content>
+                <!-- 一行一个口径:输入那行是「缓存命中 / 全部输入 / 命中率」三段,
                    与展开模型时的构成、下方的占比用的都是同一套口径。
                    额度的柱子上没有这几段可拆,就只报这一口径的总数。 -->
-              <div class="token-tip mono">
-                <p class="token-tip__title">{{ bucket.label }}</p>
-                <template v-if="showModels">
-                  <p>
-                    输入：{{ formatTokensWan(bucket.counters.cacheReadTokens) }}/{{ formatTokensWan(inputTotal(bucket.counters)) }}/{{ hitRateLabel(bucket.counters) }}
+                <div class="token-tip mono">
+                  <p class="token-tip__title">
+                    {{ bucket.label }}
                   </p>
-                  <p>输出：{{ formatTokensWan(bucket.counters.outputTokens) }}</p>
-                  <p>思考：{{ formatTokensWan(bucket.counters.reasoningTokens) }}</p>
-                </template>
-                <p v-else>额度：{{ formatCredits(bucket.counters.credits) }}</p>
-                <p>请求：{{ bucket.counters.requests }} 次</p>
-              </div>
-            </template>
-            <!-- 点柱子把下方占比切到那个桶,再点一下回到全部 -->
+                  <template v-if="showModels">
+                    <p>
+                      输入：{{ formatTokensWan(bucket.counters.cacheReadTokens) }}/{{ formatTokensWan(inputTotal(bucket.counters)) }}/{{ hitRateLabel(bucket.counters) }}
+                    </p>
+                    <p>输出：{{ formatTokensWan(bucket.counters.outputTokens) }}</p>
+                    <p>思考：{{ formatTokensWan(bucket.counters.reasoningTokens) }}</p>
+                  </template>
+                  <p v-else>
+                    额度：{{ formatCredits(bucket.counters.credits) }}
+                  </p>
+                  <p>请求：{{ bucket.counters.requests }} 次</p>
+                </div>
+              </template>
+              <!-- 点柱子把下方占比切到那个桶,再点一下回到全部 -->
+              <button
+                type="button"
+                class="bar-slot"
+                :class="{ 'is-selected': isSelected(index) }"
+                :aria-label="`查看 ${bucket.label} 的占比`"
+                @click="selectBucket(index)"
+              >
+                <i
+                  class="bar"
+                  :class="{ 'is-empty': amount(bucket.counters) === 0 }"
+                  :style="{ height: barHeight(bucket) }"
+                />
+              </button>
+            </el-tooltip>
+          </div>
+        </div>
+
+        <div v-if="showModels" class="share">
+          <div class="share__head">
+            模型占比
+            <span>{{ shareRangeLabel }} · 点击行看构成</span>
+          </div>
+          <template v-for="m in models" :key="m.key">
             <button
               type="button"
-              class="bar-slot"
-              :class="{ 'is-selected': isSelected(index) }"
-              :aria-label="`查看 ${bucket.label} 的占比`"
-              @click="selectBucket(index)"
+              class="source model"
+              :aria-expanded="expandedModel === m.key"
+              @click="toggleModel(m.key)"
             >
-              <i
-                class="bar"
-                :class="{ 'is-empty': amount(bucket.counters) === 0 }"
-                :style="{ height: barHeight(bucket) }"
-              />
+              <div class="source__line">
+                <span class="source__name mono" :title="m.key">{{ m.key }}</span>
+                <span class="source__num mono">
+                  {{ formatCounters(m.counters) }}
+                  <el-icon class="share__chevron" :class="{ 'is-open': expandedModel === m.key }">
+                    <CaretRight />
+                  </el-icon>
+                </span>
+              </div>
+              <div class="source__track">
+                <i :style="{ width: shareWidth(m.counters) }" />
+              </div>
             </button>
-          </el-tooltip>
+            <div v-if="expandedModel === m.key" class="share__detail">
+              <div v-for="row in detailRows(m.counters)" :key="row.label" class="detail__row">
+                <span class="detail__label">{{ row.label }}</span>
+                <span class="detail__track">
+                  <i :style="{ width: detailWidth(row.value, totalTokens(m.counters)) }" />
+                </span>
+                <span class="detail__pct mono">{{ formatPercent(row.value, totalTokens(m.counters)) }}</span>
+                <b class="detail__val mono">{{ formatTokensWan(row.value) }}</b>
+              </div>
+              <div class="detail__foot">
+                请求 {{ m.counters.requests }} 次 · 缓存命中率 {{ hitRateLabel(m.counters) }}
+              </div>
+            </div>
+          </template>
         </div>
-      </div>
 
-      <div v-if="showModels" class="share">
-        <div class="share__head">
-          模型占比
-          <span>{{ shareRangeLabel }} · 点击行看构成</span>
-        </div>
-        <template v-for="m in models" :key="m.key">
-          <button
-            type="button"
-            class="source model"
-            :aria-expanded="expandedModel === m.key"
-            @click="toggleModel(m.key)"
-          >
-            <div class="source__line">
-              <span class="source__name mono" :title="m.key">{{ m.key }}</span>
-              <span class="source__num mono">
-                {{ formatCounters(m.counters) }}
-                <el-icon class="share__chevron" :class="{ 'is-open': expandedModel === m.key }">
-                  <CaretRight />
-                </el-icon>
-              </span>
-            </div>
-            <div class="source__track">
-              <i :style="{ width: shareWidth(m.counters) }" />
-            </div>
-          </button>
-          <div v-if="expandedModel === m.key" class="share__detail">
-            <div v-for="row in detailRows(m.counters)" :key="row.label" class="detail__row">
-              <span class="detail__label">{{ row.label }}</span>
-              <span class="detail__track">
-                <i :style="{ width: detailWidth(row.value, totalTokens(m.counters)) }" />
-              </span>
-              <span class="detail__pct mono">{{ formatPercent(row.value, totalTokens(m.counters)) }}</span>
-              <b class="detail__val mono">{{ formatTokensWan(row.value) }}</b>
-            </div>
-            <div class="detail__foot">
-              请求 {{ m.counters.requests }} 次 · 缓存命中率 {{ hitRateLabel(m.counters) }}
-            </div>
+        <div class="share">
+          <div class="share__head">
+            工具占比
+            <span>{{ shareRangeLabel }}{{ showModels ? ' · 点击行看模型' : '' }}</span>
           </div>
-        </template>
-      </div>
-
-      <div class="share">
-        <div class="share__head">
-          工具占比
-          <span>{{ shareRangeLabel }}{{ showModels ? ' · 点击行看模型' : '' }}</span>
-        </div>
-        <template v-for="s in sources" :key="s.key">
-          <button
-            type="button"
-            class="tool"
-            :class="{ 'tool--toggle': showModels }"
-            :aria-expanded="expandedTool === s.key"
-            @click="toggleTool(s.key)"
-          >
-            <span class="tool__name" :title="s.key">{{ SOURCE_LABELS[s.key] ?? s.key }}</span>
-            <span class="tool__track"><i :style="{ width: sourceWidth(s.counters) }" /></span>
-            <span class="tool__num mono">{{ formatCounters(s.counters) }}</span>
-            <el-icon
-              v-if="showModels"
-              class="share__chevron"
-              :class="{ 'is-open': expandedTool === s.key }"
+          <template v-for="s in sources" :key="s.key">
+            <button
+              type="button"
+              class="tool"
+              :class="{ 'tool--toggle': showModels }"
+              :aria-expanded="expandedTool === s.key"
+              @click="toggleTool(s.key)"
             >
-              <CaretRight />
-            </el-icon>
-          </button>
-          <div v-if="expandedTool === s.key" class="share__detail">
-            <div v-for="tm in expandedToolModels" :key="tm.key" class="detail__row">
-              <span class="detail__label mono" :title="tm.key">{{ tm.key }}</span>
-              <span class="detail__track">
-                <i :style="{ width: detailWidth(totalTokens(tm.counters), totalTokens(expandedToolModels[0]?.counters ?? emptyCounters())) }" />
-              </span>
-              <span class="detail__pct mono">{{ formatPercent(totalTokens(tm.counters), totalTokens(s.counters)) }}</span>
-              <b class="detail__val mono">{{ formatTokensWan(totalTokens(tm.counters)) }}</b>
+              <span class="tool__name" :title="s.key">{{ SOURCE_LABELS[s.key] ?? s.key }}</span>
+              <span class="tool__track"><i :style="{ width: sourceWidth(s.counters) }" /></span>
+              <span class="tool__num mono">{{ formatCounters(s.counters) }}</span>
+              <el-icon
+                v-if="showModels"
+                class="share__chevron"
+                :class="{ 'is-open': expandedTool === s.key }"
+              >
+                <CaretRight />
+              </el-icon>
+            </button>
+            <div v-if="expandedTool === s.key" class="share__detail">
+              <div v-for="tm in expandedToolModels" :key="tm.key" class="detail__row">
+                <span class="detail__label mono" :title="tm.key">{{ tm.key }}</span>
+                <span class="detail__track">
+                  <i :style="{ width: detailWidth(totalTokens(tm.counters), totalTokens(expandedToolModels[0]?.counters ?? emptyCounters())) }" />
+                </span>
+                <span class="detail__pct mono">{{ formatPercent(totalTokens(tm.counters), totalTokens(s.counters)) }}</span>
+                <b class="detail__val mono">{{ formatTokensWan(totalTokens(tm.counters)) }}</b>
+              </div>
+              <div class="detail__foot">
+                请求 {{ s.counters.requests }} 次 · 缓存命中率 {{ hitRateLabel(s.counters) }}
+              </div>
             </div>
-            <div class="detail__foot">
-              请求 {{ s.counters.requests }} 次 · 缓存命中率 {{ hitRateLabel(s.counters) }}
-            </div>
-          </div>
+          </template>
+        </div>
+      </template>
+
+      <!-- 空态分两种:实读还没回来时是「读取中」,回来过才是「确实没有」——
+         把前者说成后者,有数据的用户会以为自己的记录没了 -->
+      <PanelLoading
+        v-else-if="!readOnce"
+        text="正在读取用量…"
+        hint="首次读取要解析各工具的本地日志，稍等一下"
+      />
+
+      <div v-else class="empty">
+        <template v-if="axis === 'credits'">
+          <el-icon class="empty__icon">
+            <Histogram />
+          </el-icon>
+          <p>暂无额度记录</p>
+          <p class="empty__hint">
+            在 Qoder 里跑过对话后,这里会出现按天的额度消耗
+          </p>
+        </template>
+        <template v-else>
+          <el-icon class="empty__icon">
+            <Histogram />
+          </el-icon>
+          <p>暂无 Token 用量记录</p>
+          <p class="empty__hint">
+            在 ZCode / DeepSeek Harness / CodeBuddy / WorkBuddy 里跑过对话后,这里会出现按天的统计
+          </p>
         </template>
       </div>
-    </template>
-
-    <!-- 空态分两种:实读还没回来时是「读取中」,回来过才是「确实没有」——
-         把前者说成后者,有数据的用户会以为自己的记录没了 -->
-    <PanelLoading
-      v-else-if="!readOnce"
-      text="正在读取用量…"
-      hint="首次读取要解析各工具的本地日志，稍等一下"
-    />
-
-    <div v-else class="empty">
-      <template v-if="axis === 'credits'">
-        <el-icon class="empty__icon"><Histogram /></el-icon>
-        <p>暂无额度记录</p>
-        <p class="empty__hint">在 Qoder 里跑过对话后,这里会出现按天的额度消耗</p>
-      </template>
-      <template v-else>
-        <el-icon class="empty__icon"><Histogram /></el-icon>
-        <p>暂无 Token 用量记录</p>
-        <p class="empty__hint">在 ZCode / DeepSeek Harness / CodeBuddy / WorkBuddy 里跑过对话后,这里会出现按天的统计</p>
-      </template>
-    </div>
     </div>
   </article>
 </template>
@@ -1135,8 +1144,6 @@ function detailWidth(value: number, max: number): string {
 }
 
 /* ---------- 空态与底部 ---------- */
-
-
 
 /* 标题行右侧的更新时间与状态点(原底部信息合并到这里),与刷新按钮同一条 flex 中线 */
 .head__meta {

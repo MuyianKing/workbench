@@ -7,6 +7,7 @@
  * 日期一律用本地时区：用户看到的「今天」就是本机时钟上的今天，
  * 用 UTC 会让晚上跑的命令算到第二天去。
  */
+import dayjs from 'dayjs'
 
 /** 日期（YYYY-MM-DD）→ 当天的命令执行次数 */
 export type ActivityCounts = Record<string, number>
@@ -58,55 +59,52 @@ export function isDateKey(value: unknown): value is string {
   return typeof value === 'string' && DAY_KEY.test(value)
 }
 
-function pad(value: number): string {
-  return String(value).padStart(2, '0')
-}
-
 /** 本地日期键；时间戳非法时返回空串（调用方跳过） */
 export function dayKey(value: number | Date): string {
-  const date = value instanceof Date ? value : new Date(value)
-  const time = date.getTime()
-  if (!Number.isFinite(time)) return ''
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+  const day = dayjs(value)
+  return day.isValid() ? day.format('YYYY-MM-DD') : ''
 }
 
 /** 当天 00:00（本地时区） */
 export function startOfDay(value: number | Date): Date {
-  const date = value instanceof Date ? new Date(value.getTime()) : new Date(value)
-  if (!Number.isFinite(date.getTime())) return new Date(NaN)
-  date.setHours(0, 0, 0, 0)
-  return date
+  const day = dayjs(value)
+  return day.isValid() ? day.startOf('day').toDate() : new Date(NaN)
 }
 
-/** 所在周的周日 00:00 —— 贡献图的一列从周日开始 */
+/** 所在周的周日 00:00 —— 贡献图的一列从周日开始；不用 startOf('week')，那个跟着 locale 的周起始走 */
 export function startOfWeek(value: number | Date): Date {
-  const date = startOfDay(value)
-  if (!Number.isFinite(date.getTime())) return date
-  date.setDate(date.getDate() - date.getDay())
-  return date
+  const day = dayjs(value)
+  if (!day.isValid())
+    return new Date(NaN)
+  return day.startOf('day').subtract(day.day(), 'day').toDate()
 }
 
-/** 按整天位移：走 setDate 而不是加毫秒，跨月与夏令时才不会错位 */
+/** 按整天位移：走日历日而不是加毫秒，跨月与夏令时才不会错位 */
 export function addDays(value: number | Date, days: number): Date {
-  const date = startOfDay(value)
-  if (!Number.isFinite(date.getTime())) return date
-  date.setDate(date.getDate() + days)
-  return date
+  const day = dayjs(value)
+  if (!day.isValid())
+    return new Date(NaN)
+  return day.startOf('day').add(days, 'day').toDate()
 }
 
 /** 次数 → 等级 */
 export function levelOf(count: number): ActivityLevel {
-  if (!Number.isFinite(count) || count <= 0) return 0
-  if (count >= LEVEL_THRESHOLDS[3]) return 4
-  if (count >= LEVEL_THRESHOLDS[2]) return 3
-  if (count >= LEVEL_THRESHOLDS[1]) return 2
+  if (!Number.isFinite(count) || count <= 0)
+    return 0
+  if (count >= LEVEL_THRESHOLDS[3])
+    return 4
+  if (count >= LEVEL_THRESHOLDS[2])
+    return 3
+  if (count >= LEVEL_THRESHOLDS[1])
+    return 2
   return 1
 }
 
 /** 记一次执行；返回新对象，方便交给响应式系统替换 */
 export function bumpDay(counts: ActivityCounts, timestamp: number | Date): ActivityCounts {
   const key = dayKey(timestamp)
-  if (!key) return counts
+  if (!key)
+    return counts
   return { ...counts, [key]: (counts[key] ?? 0) + 1 }
 }
 
@@ -117,16 +115,19 @@ export function bumpDay(counts: ActivityCounts, timestamp: number | Date): Activ
 export function pruneDays(
   counts: ActivityCounts,
   now: number | Date,
-  keepDays: number = ACTIVITY_DAYS
+  keepDays: number = ACTIVITY_DAYS,
 ): ActivityCounts {
   const span = Number.isFinite(keepDays) && keepDays > 0 ? Math.floor(keepDays) : ACTIVITY_DAYS
   const cutoff = dayKey(addDays(now, -(span - 1)))
-  if (!cutoff) return {}
+  if (!cutoff)
+    return {}
 
   const next: ActivityCounts = {}
   for (const [key, value] of Object.entries(counts)) {
-    if (key < cutoff) continue
-    if (!Number.isFinite(value) || value <= 0) continue
+    if (key < cutoff)
+      continue
+    if (!Number.isFinite(value) || value <= 0)
+      continue
     next[key] = Math.floor(value)
   }
   return next
@@ -137,12 +138,15 @@ export function pruneDays(
  * 键不是合法日期、值不是正数的条目一律丢掉，坏数据不该让图崩掉。
  */
 export function sanitizeActivity(raw: unknown): ActivityCounts {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {}
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw))
+    return {}
 
   const next: ActivityCounts = {}
   for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
-    if (!isDateKey(key)) continue
-    if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) continue
+    if (!isDateKey(key))
+      continue
+    if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0)
+      continue
     next[key] = Math.floor(value)
   }
   return next
@@ -151,7 +155,8 @@ export function sanitizeActivity(raw: unknown): ActivityCounts {
 /** 从 counts 里取某天的次数（键非法或缺失都算 0） */
 function countOf(counts: ActivityCounts, date: Date): number {
   const key = dayKey(date)
-  if (!key) return 0
+  if (!key)
+    return 0
   const value = counts[key]
   return Number.isFinite(value) ? Math.floor(value) : 0
 }
@@ -164,7 +169,7 @@ function countOf(counts: ActivityCounts, date: Date): number {
  */
 export function buildActivityCalendar(
   counts: ActivityCounts,
-  now: number | Date
+  now: number | Date,
 ): ActivityCalendar {
   const today = startOfDay(now)
   const source: ActivityCounts = counts ?? {}
@@ -184,7 +189,8 @@ export function buildActivityCalendar(
       if (count > 0) {
         total += count
         activeDays += 1
-        if (count > max) max = count
+        if (count > max)
+          max = count
       }
       days.push({ date: dayKey(date), count, level: levelOf(count), future })
     }
@@ -197,7 +203,7 @@ export function buildActivityCalendar(
     max,
     activeDays,
     streak: streakOf(source, today),
-    bestStreak: bestStreakIn(source, start, today)
+    bestStreak: bestStreakIn(source, start, today),
   }
 }
 
@@ -225,8 +231,10 @@ function bestStreakIn(counts: ActivityCounts, start: Date, today: Date): number 
   for (let i = 0; i < span; i += 1) {
     if (countOf(counts, addDays(start, i)) > 0) {
       current += 1
-      if (current > best) best = current
-    } else {
+      if (current > best)
+        best = current
+    }
+    else {
       current = 0
     }
   }
@@ -239,7 +247,7 @@ function bestStreakIn(counts: ActivityCounts, start: Date, today: Date): number 
  */
 export function monthLabels(weeks: ActivityWeek[]): string[] {
   return weeks.map((week) => {
-    const first = week.days.find((day) => day.date.endsWith('-01'))
+    const first = week.days.find(day => day.date.endsWith('-01'))
     return first ? `${Number(first.date.slice(5, 7))}月` : ''
   })
 }

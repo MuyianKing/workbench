@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import type { DesignStyle, DesignStyleSort, FamilyFilter, ThemeFilter } from '@workbench/appearance'
+import { Search } from '@element-plus/icons-vue'
+import { SORT_LABELS, THEME_LABELS } from '@workbench/appearance'
 /**
  * 样式页：74 套设计语言（DESIGN.md 的解析结果）的一页浏览。
  *
@@ -12,15 +15,6 @@
  *    用带计数的标签各占一行铺在下面。两条都由数据现算，所以不会有点了没结果的空档。
  */
 import { computed, onMounted, ref } from 'vue'
-import { Search } from '@element-plus/icons-vue'
-import {
-  SORT_LABELS,
-  THEME_LABELS,
-  type DesignStyle,
-  type DesignStyleSort,
-  type FamilyFilter,
-  type ThemeFilter
-} from '@workbench/appearance'
 import PanelLoading from '@/components/PanelLoading.vue'
 import StyleCard from '@/components/StyleCard.vue'
 import StyleDetailDialog from '@/components/StyleDetailDialog.vue'
@@ -39,13 +33,13 @@ onMounted(() => {
 const themeOptions = [
   { label: '全部', value: 'all' as const },
   { label: THEME_LABELS.light, value: 'light' as const },
-  { label: THEME_LABELS.dark, value: 'dark' as const }
+  { label: THEME_LABELS.dark, value: 'dark' as const },
 ]
 
 /** 分段控件的双向绑定走 setter，筛选条件本身存在 store 里 */
 const themeValue = computed<ThemeFilter>({
   get: () => store.theme,
-  set: (value) => store.setTheme(value)
+  set: value => store.setTheme(value),
 })
 
 const sortOptions = Object.entries(SORT_LABELS) as Array<[DesignStyleSort, string]>
@@ -53,16 +47,17 @@ const sortOptions = Object.entries(SORT_LABELS) as Array<[DesignStyleSort, strin
 /** 分类与色系的候选都来自数据，第一项是「全部」 */
 const categoryChips = computed(() => [
   { key: 'all', label: '全部', count: store.styles.length },
-  ...store.categories.map((entry) => ({ key: entry.category, label: entry.category, count: entry.count }))
+  ...store.categories.map(entry => ({ key: entry.category, label: entry.category, count: entry.count })),
 ])
 
-const familyChips = computed<Array<{ key: FamilyFilter; label: string; count: number }>>(() => [
+const familyChips = computed<Array<{ key: FamilyFilter, label: string, count: number }>>(() => [
   { key: 'all', label: '全部', count: store.styles.length },
-  ...store.families.map((entry) => ({ key: entry.family, label: entry.family, count: entry.count }))
+  ...store.families.map(entry => ({ key: entry.family, label: entry.family, count: entry.count })),
 ])
 
 function applySort(command: unknown): void {
-  if (command === 'az' || command === 'hue' || command === 'dark') store.setSort(command)
+  if (command === 'az' || command === 'hue' || command === 'dark')
+    store.setSort(command)
 }
 
 function openDetail(style: DesignStyle): void {
@@ -80,7 +75,9 @@ const failed = computed(() => !store.loaded && !store.loading && Boolean(store.l
     <div class="filter">
       <div class="filter__head">
         <div class="head">
-          <h2 class="head__title">样式</h2>
+          <h2 class="head__title">
+            样式
+          </h2>
           <span class="head__count mono">{{ store.summary }}</span>
         </div>
       </div>
@@ -108,7 +105,9 @@ const failed = computed(() => !store.loaded && !store.loading && Boolean(store.l
           spellcheck="false"
           placeholder="搜索品牌、色值、字体或描述"
         >
-          <template #prefix><el-icon><Search /></el-icon></template>
+          <template #prefix>
+            <el-icon><Search /></el-icon>
+          </template>
         </el-input>
       </div>
     </div>
@@ -151,14 +150,22 @@ const failed = computed(() => !store.loaded && !store.loading && Boolean(store.l
 
       <div v-else-if="failed" class="empty">
         <p>读不出样式清单</p>
-        <p class="empty__hint">这份清单随包带着（public/design-styles.json），正常情况下不会读不到。</p>
-        <el-button size="small" @click="store.init()">重试</el-button>
+        <p class="empty__hint">
+          这份清单随包带着（public/design-styles.json），正常情况下不会读不到。
+        </p>
+        <el-button size="small" @click="store.init()">
+          重试
+        </el-button>
       </div>
 
       <div v-else-if="!store.visible.length" class="empty">
         <p>{{ store.filtering ? '没有匹配的样式' : '还没有样式数据' }}</p>
-        <p v-if="store.filtering" class="empty__hint">换个关键词，或者把筛选条件清掉。</p>
-        <el-button v-if="store.filtering" size="small" @click="store.resetFilters()">清除筛选条件</el-button>
+        <p v-if="store.filtering" class="empty__hint">
+          换个关键词，或者把筛选条件清掉。
+        </p>
+        <el-button v-if="store.filtering" size="small" @click="store.resetFilters()">
+          清除筛选条件
+        </el-button>
       </div>
 
       <div v-else class="grid">

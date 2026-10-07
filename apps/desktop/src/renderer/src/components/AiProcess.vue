@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ArrowRight, Loading } from '@element-plus/icons-vue'
 /**
  * 一轮的**过程**收成的一块：模型想的那几段、工具调用、报错、中途那些旁白都在它里面。
  *
@@ -11,7 +12,6 @@
  * 顶部那行说的是等你确认 / 接历史 / 在停 / 装 Pi / 出错（见 AiRunPanel）。
  */
 import { ref, watch } from 'vue'
-import { ArrowRight, Loading } from '@element-plus/icons-vue'
 
 const props = defineProps<{
   /** 标题上那句话（跑着是「正在思考…」或「{程序名}正在努力探索中....」，跑完是「过程 · 12 步」） */
@@ -26,16 +26,21 @@ const expanded = ref(props.active)
 watch(
   () => props.active,
   (active) => {
-    if (!active) expanded.value = false
-  }
+    if (!active)
+      expanded.value = false
+  },
 )
 </script>
 
 <template>
   <div class="proc" :class="{ 'is-live': active }">
     <button type="button" class="proc__head" @click="expanded = !expanded">
-      <el-icon v-if="active" class="proc__spin"><Loading /></el-icon>
-      <el-icon v-else class="proc__chevron" :class="{ 'is-open': expanded }"><ArrowRight /></el-icon>
+      <el-icon v-if="active" class="proc__spin">
+        <Loading />
+      </el-icon>
+      <el-icon v-else class="proc__chevron" :class="{ 'is-open': expanded }">
+        <ArrowRight />
+      </el-icon>
       <span class="proc__label">{{ label }}</span>
     </button>
 

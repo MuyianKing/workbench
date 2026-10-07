@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { PackageManagerKey } from '@/managers'
+import { Plus } from '@element-plus/icons-vue'
 /**
  * 一个项目都还没有时的首页。
  *
@@ -6,12 +8,11 @@
  * 右边是本机环境与快捷操作——第一次打开就能看清这个应用会替你做哪些事。
  */
 import { computed } from 'vue'
-import { Plus } from '@element-plus/icons-vue'
 import { buildHints } from '@/hints'
-import { PACKAGE_MANAGERS, VERSIONS_FALLBACK, type PackageManagerKey } from '@/managers'
+import { PACKAGE_MANAGERS, VERSIONS_FALLBACK } from '@/managers'
+import { useEnvironmentStore } from '@/stores/environment'
 import { useProjectsStore } from '@/stores/projects'
 import { useSettingsStore } from '@/stores/settings'
-import { useEnvironmentStore } from '@/stores/environment'
 
 const store = useProjectsStore()
 const settings = useSettingsStore()
@@ -32,18 +33,18 @@ const steps = [
   {
     no: '01',
     title: '添加项目目录',
-    desc: '选一个已有的前端工程，Workbench 只记住列表与配置，不动工程里任何文件。'
+    desc: '选一个已有的前端工程，Workbench 只记住列表与配置，不动工程里任何文件。',
   },
   {
     no: '02',
     title: '自动识别',
-    desc: '读取 package.json：框架、版本、全部 scripts，以及锁文件对应的包管理器。'
+    desc: '读取 package.json：框架、版本、全部 scripts，以及锁文件对应的包管理器。',
   },
   {
     no: '03',
     title: '一键执行',
-    desc: '装依赖 / 启动 dev server / 打包，输出在底部终端面板里实时可见，随时可停。'
-  }
+    desc: '装依赖 / 启动 dev server / 打包，输出在底部终端面板里实时可见，随时可停。',
+  },
 ]
 
 const hints = computed(() => buildHints(settings.settings))
@@ -60,7 +61,9 @@ const hints = computed(() => buildHints(settings.settings))
         <span class="hero__mark mono" aria-hidden="true">&rsaquo;_</span>
         <div class="hero__lead">
           <span class="eyebrow">开始使用</span>
-          <h1 class="hero__title">把前端项目的日常收进一个窗口</h1>
+          <h1 class="hero__title">
+            把前端项目的日常收进一个窗口
+          </h1>
           <p class="hero__desc">
             打开终端 → cd 到项目 → 选包管理器 → <span class="mono">npm run serve</span>，
             这套动作在这里就是一次点击。
@@ -79,8 +82,12 @@ const hints = computed(() => buildHints(settings.settings))
         <li v-for="step in steps" :key="step.no" class="step">
           <b class="step__no mono">{{ step.no }}</b>
           <div class="step__body">
-            <h3 class="step__title">{{ step.title }}</h3>
-            <p class="step__desc">{{ step.desc }}</p>
+            <h3 class="step__title">
+              {{ step.title }}
+            </h3>
+            <p class="step__desc">
+              {{ step.desc }}
+            </p>
           </div>
         </li>
       </ol>
@@ -101,7 +108,9 @@ const hints = computed(() => buildHints(settings.settings))
           </div>
           <div class="fact">
             <dt>chromium</dt>
-            <dd class="mono">{{ versions.chrome }}</dd>
+            <dd class="mono">
+              {{ versions.chrome }}
+            </dd>
           </div>
         </dl>
 
@@ -135,7 +144,9 @@ const hints = computed(() => buildHints(settings.settings))
           </li>
         </ul>
 
-        <p class="side__note">主题、托盘、开机自启在右上角的设置里。</p>
+        <p class="side__note">
+          主题、托盘、开机自启在右上角的设置里。
+        </p>
       </article>
     </div>
   </section>

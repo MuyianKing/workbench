@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { QuitChoice } from '@/types'
+import { WarningFilled } from '@element-plus/icons-vue'
 /**
  * 退出确认框（应用内）。
  *
@@ -9,9 +11,7 @@
  * 右上角关闭按钮与 Esc 都是「取消」：关掉弹窗、什么都不做，应用继续运行。
  */
 import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
-import { WarningFilled } from '@element-plus/icons-vue'
 import AppDialog from '@/components/AppDialog.vue'
-import type { QuitChoice } from '@/types'
 
 const visible = ref(false)
 const count = ref(0)
@@ -37,7 +37,8 @@ onBeforeUnmount(() => unsubscribe?.())
  * （Esc 关掉它，`@closed` 落到下面那个处理函数里回一个 cancel）。
  */
 function choose(choice: QuitChoice): void {
-  if (!visible.value) return
+  if (!visible.value)
+    return
   answered = true
   visible.value = false
   window.workbench.respondQuitConfirm(choice)
@@ -45,7 +46,8 @@ function choose(choice: QuitChoice): void {
 
 /** 关掉弹窗而没选过（Esc / 点右上角关闭）：按「取消」处理，应用继续运行 */
 function onClosed(): void {
-  if (answered) return
+  if (answered)
+    return
   answered = true
   window.workbench.respondQuitConfirm('cancel')
 }
@@ -74,14 +76,18 @@ function onClosed(): void {
     <div class="quit__head">
       <span class="quit__badge"><el-icon><WarningFilled /></el-icon></span>
       <div class="quit__head-text">
-        <h2 id="quit-title" class="quit__title">仍有进程在运行</h2>
+        <h2 id="quit-title" class="quit__title">
+          仍有进程在运行
+        </h2>
         <p class="quit__subtitle">
           还有 <b>{{ count }}</b> 个进程正在运行
         </p>
       </div>
     </div>
 
-    <p id="quit-desc" class="quit__desc">选择先结束它们，还是让它们继续留在后台。</p>
+    <p id="quit-desc" class="quit__desc">
+      选择先结束它们，还是让它们继续留在后台。
+    </p>
 
     <div class="quit__options">
       <button ref="primaryButton" type="button" class="opt opt--primary" @click="choose('stop')">

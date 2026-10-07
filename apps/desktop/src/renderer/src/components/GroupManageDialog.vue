@@ -1,13 +1,13 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
-import { ElMessage } from 'element-plus'
-import { confirmAction } from '@/notify'
+import type { ProjectGroup } from '@/types'
 import { Close, Plus } from '@element-plus/icons-vue'
 import { moveToPosition } from '@workbench/core'
+import { ElMessage } from 'element-plus'
+import { computed, ref, watch } from 'vue'
 import AppDialog from '@/components/AppDialog.vue'
 import { DRAG_MIME } from '@/drag-mime'
+import { confirmAction } from '@/notify'
 import { useProjectsStore } from '@/stores/projects'
-import type { ProjectGroup } from '@/types'
 
 /** 弹层开关:v-model 一条口径(与 AppDialog / el-dialog 相同,全应用的弹层都这么开) */
 const open = defineModel<boolean>({ required: true })
@@ -18,7 +18,7 @@ const visible = computed({
   get: () => open.value,
   set: (value: boolean) => {
     open.value = value
-  }
+  },
 })
 
 const newName = ref('')
@@ -32,25 +32,28 @@ const dragOverId = ref<string | null>(null)
 watch(
   open,
   (value) => {
-    if (!value) return
+    if (!value)
+      return
     newName.value = ''
     editingId.value = null
     editingName.value = ''
     draggingId.value = null
     dragOverId.value = null
   },
-  { immediate: true }
+  { immediate: true },
 )
 
 function countOf(groupId: string): number {
-  return store.projects.filter((p) => p.groupId === groupId).length
+  return store.projects.filter(p => p.groupId === groupId).length
 }
 
 /** 双击进入编辑后把焦点落到输入框（el-input 暴露 focus()） */
 function focusEdit(el: unknown): void {
-  if (!el) return
-  const instance = el as { focus?: () => void; input?: HTMLInputElement }
-  if (typeof instance.focus === 'function') instance.focus()
+  if (!el)
+    return
+  const instance = el as { focus?: () => void, input?: HTMLInputElement }
+  if (typeof instance.focus === 'function')
+    instance.focus()
   else instance.input?.focus()
 }
 
@@ -66,12 +69,14 @@ function cancelEdit(): void {
 }
 
 async function commitEdit(group: ProjectGroup): Promise<void> {
-  if (editingId.value !== group.id) return // 已被 Esc 取消
+  if (editingId.value !== group.id)
+    return // 已被 Esc 取消
 
   const next = editingName.value.trim()
   editingId.value = null
   editingName.value = ''
-  if (!next || next === group.name) return
+  if (!next || next === group.name)
+    return
 
   await store.renameGroup(group.id, next)
 }
@@ -82,7 +87,8 @@ async function create(): Promise<void> {
     ElMessage.warning('请输入分组名称')
     return
   }
-  if (await store.createGroup(name)) newName.value = ''
+  if (await store.createGroup(name))
+    newName.value = ''
 }
 
 async function remove(group: ProjectGroup): Promise<void> {
@@ -92,18 +98,21 @@ async function remove(group: ProjectGroup): Promise<void> {
       ? `「${group.name}」下有 ${count} 个项目，删除分组后它们会变为未分组，项目本身不受影响。`
       : `确定删除分组「${group.name}」？`,
     '删除分组',
-    { confirmButtonText: '删除' }
+    { confirmButtonText: '删除' },
   )
-  if (!agreed) return
+  if (!agreed)
+    return
 
-  if (editingId.value === group.id) cancelEdit()
+  if (editingId.value === group.id)
+    cancelEdit()
   await store.removeGroup(group.id)
 }
 
 // ---------- 拖动排序：与筛选栏同一套交互，落盘也走同一个 store 方法 ----------
 
 function onDragStart(group: ProjectGroup, event: DragEvent): void {
-  if (!event.dataTransfer) return
+  if (!event.dataTransfer)
+    return
   draggingId.value = group.id
   dragOverId.value = null
   event.dataTransfer.setData(DRAG_MIME.group, group.id)
@@ -112,14 +121,17 @@ function onDragStart(group: ProjectGroup, event: DragEvent): void {
 
 function onDragOver(group: ProjectGroup, event: DragEvent): void {
   // 只认自己发起的拖动：别的东西（文件、项目卡片）拖进来不该被当成排序落点
-  if (!draggingId.value) return
+  if (!draggingId.value)
+    return
   event.preventDefault()
-  if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
+  if (event.dataTransfer)
+    event.dataTransfer.dropEffect = 'move'
   dragOverId.value = group.id
 }
 
 function onDragLeave(group: ProjectGroup): void {
-  if (dragOverId.value === group.id) dragOverId.value = null
+  if (dragOverId.value === group.id)
+    dragOverId.value = null
 }
 
 function onDragEnd(): void {
@@ -128,18 +140,20 @@ function onDragEnd(): void {
 }
 
 async function onDrop(group: ProjectGroup, event: DragEvent): Promise<void> {
-  const fromId =
-    draggingId.value ?? event.dataTransfer?.getData(DRAG_MIME.group) ?? ''
+  const fromId
+    = draggingId.value ?? event.dataTransfer?.getData(DRAG_MIME.group) ?? ''
   draggingId.value = null
   dragOverId.value = null
-  if (!fromId) return
+  if (!fromId)
+    return
 
   const next = moveToPosition(
-    store.sortedGroups.map((g) => g.id),
+    store.sortedGroups.map(g => g.id),
     fromId,
-    group.id
+    group.id,
   )
-  if (next) await store.reorderGroups(next)
+  if (next)
+    await store.reorderGroups(next)
 }
 </script>
 
@@ -165,7 +179,7 @@ async function onDrop(group: ProjectGroup, event: DragEvent): Promise<void> {
             class="tag"
             :class="{
               'is-drop': dragOverId === group.id && draggingId !== group.id,
-              'is-dragging': draggingId === group.id
+              'is-dragging': draggingId === group.id,
             }"
             size="large"
             disable-transitions
@@ -191,7 +205,9 @@ async function onDrop(group: ProjectGroup, event: DragEvent): Promise<void> {
       <p v-if="!store.sortedGroups.length" class="groups__empty">
         还没有分组。分组用于把项目归类，并在顶部筛选栏按组过滤。
       </p>
-      <p v-else class="hint">双击分组改名，悬停标签可删除；拖动标签可调整顺序。</p>
+      <p v-else class="hint">
+        双击分组改名，悬停标签可删除；拖动标签可调整顺序。
+      </p>
 
       <div class="create">
         <el-input
@@ -201,12 +217,16 @@ async function onDrop(group: ProjectGroup, event: DragEvent): Promise<void> {
           spellcheck="false"
           @keydown.enter="create"
         />
-        <el-button type="primary" :icon="Plus" @click="create">添加</el-button>
+        <el-button type="primary" :icon="Plus" @click="create">
+          添加
+        </el-button>
       </div>
     </div>
 
     <template #footer>
-      <el-button @click="visible = false">完成</el-button>
+      <el-button @click="visible = false">
+        完成
+      </el-button>
     </template>
   </AppDialog>
 </template>
@@ -315,7 +335,6 @@ async function onDrop(group: ProjectGroup, event: DragEvent): Promise<void> {
 
 /* ---------- 说明与新建 ---------- */
 .hint,
-
 
 .create {
   display: flex;

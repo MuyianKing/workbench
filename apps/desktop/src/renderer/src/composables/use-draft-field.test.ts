@@ -32,10 +32,10 @@ describe('useDraftField', () => {
   })
 
   it('read 从当前对象里取值:随选中对象重置的草稿(抽屉用法)', async () => {
-    const project = ref<{ id: string; name: string } | null>({ id: 'p1', name: '项目一' })
+    const project = ref<{ id: string, name: string } | null>({ id: 'p1', name: '项目一' })
     const draft = useDraftField(
       () => project.value?.id ?? '',
-      () => project.value?.name ?? ''
+      () => project.value?.name ?? '',
     )
     expect(draft.value).toBe('项目一')
 

@@ -1,3 +1,6 @@
+import type { VaultEntry, VaultFile, VaultItem, VaultPrivateKey, VaultPublicKey, VaultRecord } from '@workbench/vault'
+import type { Result, VaultHelloState, VaultKeyState, VaultLoaded, VaultPushOutcome, VaultSyncOutcome } from '@/types'
+import { fail, ok } from '@workbench/core'
 /**
  * 密码保险库的适配层：加解密、合并、同步编排。
  *
@@ -24,33 +27,8 @@
  * 没登录一律当没填）。保险库本身在没登录时照常能用 —— 本机那份是完整的，
  * 只是推不出去，界面会如实说明。
  */
-import {
-  createVaultKey,
-  emptyVaultFile,
-  encodeKeyString,
-  lastChangeAt,
-  mergeVaultItems,
-  open,
-  openAll,
-  sanitizeVaultEntry,
-  parseKeyString,
-  parseVaultFile,
-  publicKeyFingerprint,
-  publicKeyOf,
-  sameVaultKey,
-  seal,
-  tombstoneOf,
-  vaultFileOf,
-  type VaultEntry,
-  type VaultFile,
-  type VaultItem,
-  type VaultPrivateKey,
-  type VaultPublicKey,
-  type VaultRecord
-} from '@workbench/vault'
-import { fail, ok } from '@workbench/core'
-import type { Result, VaultHelloState, VaultKeyState, VaultLoaded, VaultPushOutcome, VaultSyncOutcome } from '@/types'
-import { invoke, guard } from './bridge'
+import { createVaultKey, emptyVaultFile, encodeKeyString, lastChangeAt, mergeVaultItems, open, openAll, parseKeyString, parseVaultFile, publicKeyFingerprint, publicKeyOf, sameVaultKey, sanitizeVaultEntry, seal, tombstoneOf, vaultFileOf } from '@workbench/vault'
+import { guard, invoke } from './bridge'
 import { localDevice } from './token'
 
 /** 一轮同步最多走几遍（每遍都是「远端又变了，重新合一次」）；走完还撞上就报失败 */
@@ -65,12 +43,13 @@ export async function keyState(): Promise<Result<VaultKeyState>> {
     return ok({
       exists: true,
       unlocked: true,
-      fingerprint: await publicKeyFingerprint(cachedKey)
+      fingerprint: await publicKeyFingerprint(cachedKey),
     })
   }
 
   const stored = await guard(invoke<string | null>('vault_key_read'), '读取本机密钥失败')
-  if (!stored.ok) return fail(stored.error ?? '读取本机密钥失败')
+  if (!stored.ok)
+    return fail(stored.error ?? '读取本机密钥失败')
 
   const key = stored.data ? parseKeyString(stored.data) : null
   return ok({
@@ -81,7 +60,7 @@ export async function keyState(): Promise<Result<VaultKeyState>> {
      * 只是不把它放进内存。收起那一屏上要显示的正是它 —— 让用户核对两台机器拿的是不是同一把，
      * 而那时界面恰恰是锁着的。之前这里返回空串，界面上就是「公钥指纹 —」，等于没说。
      */
-    fingerprint: key ? await publicKeyFingerprint(key) : ''
+    fingerprint: key ? await publicKeyFingerprint(key) : '',
   })
 }
 
@@ -109,9 +88,10 @@ export async function helloState(): Promise<Result<VaultHelloState>> {
 export async function unlock(password: string): Promise<Result<VaultKeyState>> {
   const verified = await guard(
     invoke<null>('vault_verify_password', { password }),
-    '校验本机账户密码失败'
+    '校验本机账户密码失败',
   )
-  if (!verified.ok) return fail(verified.error ?? '校验本机账户密码失败')
+  if (!verified.ok)
+    return fail(verified.error ?? '校验本机账户密码失败')
   return adoptStoredKey()
 }
 
@@ -123,18 +103,22 @@ export async function unlock(password: string): Promise<Result<VaultKeyState>> {
  */
 export async function unlockHello(): Promise<Result<VaultKeyState | null>> {
   const verified = await guard(invoke<boolean>('vault_unlock_hello'), 'Windows 验证失败')
-  if (!verified.ok) return fail(verified.error ?? 'Windows 验证失败')
-  if (!verified.data) return ok(null)
+  if (!verified.ok)
+    return fail(verified.error ?? 'Windows 验证失败')
+  if (!verified.data)
+    return ok(null)
   return adoptStoredKey()
 }
 
 /** 两条解锁路共用的一段：验证过了，把凭据管理器里的密钥取进内存并算好状态 */
 async function adoptStoredKey(): Promise<Result<VaultKeyState>> {
   const stored = await guard(invoke<string | null>('vault_key_read'), '读取本机密钥失败')
-  if (!stored.ok) return fail(stored.error ?? '读取本机密钥失败')
+  if (!stored.ok)
+    return fail(stored.error ?? '读取本机密钥失败')
 
   const key = stored.data ? parseKeyString(stored.data) : null
-  if (!key) return fail('这台机器上还没有保险库密钥，先创建或导入一把')
+  if (!key)
+    return fail('这台机器上还没有保险库密钥，先创建或导入一把')
 
   cachedKey = key
   return ok({ exists: true, unlocked: true, fingerprint: await publicKeyFingerprint(key) })
@@ -166,7 +150,8 @@ function currentKey(): VaultPrivateKey | null {
  */
 async function adoptKey(next: VaultPrivateKey, previous: VaultPrivateKey | null): Promise<Result<null>> {
   const file = await loadFile(next)
-  if (!file.ok) return fail(file.error ?? '读取保险库失败')
+  if (!file.ok)
+    return fail(file.error ?? '读取保险库失败')
 
   const device = await localDevice()
   const updatedAt = Date.now()
@@ -181,17 +166,20 @@ async function adoptKey(next: VaultPrivateKey, previous: VaultPrivateKey | null)
     }
     let entry: VaultEntry | null = null
     for (const candidate of [previous, next]) {
-      if (!candidate) continue
+      if (!candidate)
+        continue
       try {
         entry = await open(candidate, item)
         break
-      } catch {
+      }
+      catch {
         // 这把解不开，换下一把；都解不开才按墓碑处理
       }
     }
     if (entry) {
       kept.push({ id: item.id, updatedAt, by: device.id, ...(await seal(publicKeyOf(next), entry)) })
-    } else {
+    }
+    else {
       rest.push(tombstoneOf(item, updatedAt, device.id))
     }
   }
@@ -206,20 +194,24 @@ async function adoptKey(next: VaultPrivateKey, previous: VaultPrivateKey | null)
  */
 export async function createKey(replace: boolean): Promise<Result<VaultKeyState>> {
   const stored = await guard(invoke<string | null>('vault_key_read'), '读取本机密钥失败')
-  if (!stored.ok) return fail(stored.error ?? '读取本机密钥失败')
-  if (stored.data && !replace) return fail('这台机器上已经有一把密钥了')
+  if (!stored.ok)
+    return fail(stored.error ?? '读取本机密钥失败')
+  if (stored.data && !replace)
+    return fail('这台机器上已经有一把密钥了')
 
   const previous = currentKey()
   const key = await createVaultKey()
   const written = await guard(
     invoke<null>('vault_key_write', { key: encodeKeyString(key) }),
-    '保存本机密钥失败'
+    '保存本机密钥失败',
   )
-  if (!written.ok) return fail(written.error ?? '保存本机密钥失败')
+  if (!written.ok)
+    return fail(written.error ?? '保存本机密钥失败')
 
   cachedKey = key
   const adopted = await adoptKey(key, previous)
-  if (!adopted.ok) return fail(adopted.error ?? '保存保险库失败')
+  if (!adopted.ok)
+    return fail(adopted.error ?? '保存保险库失败')
 
   return ok({ exists: true, unlocked: true, fingerprint: await publicKeyFingerprint(key) })
 }
@@ -233,18 +225,21 @@ export async function createKey(replace: boolean): Promise<Result<VaultKeyState>
  */
 export async function importKey(text: string): Promise<Result<VaultKeyState>> {
   const key = parseKeyString(text)
-  if (!key) return fail('这段内容不是一把保险库密钥')
+  if (!key)
+    return fail('这段内容不是一把保险库密钥')
 
   const previous = currentKey()
   const written = await guard(
     invoke<null>('vault_key_write', { key: encodeKeyString(key) }),
-    '保存本机密钥失败'
+    '保存本机密钥失败',
   )
-  if (!written.ok) return fail(written.error ?? '保存本机密钥失败')
+  if (!written.ok)
+    return fail(written.error ?? '保存本机密钥失败')
 
   cachedKey = key
   const adopted = await adoptKey(key, previous)
-  if (!adopted.ok) return fail(adopted.error ?? '保存保险库失败')
+  if (!adopted.ok)
+    return fail(adopted.error ?? '保存保险库失败')
 
   return ok({ exists: true, unlocked: true, fingerprint: await publicKeyFingerprint(key) })
 }
@@ -252,7 +247,8 @@ export async function importKey(text: string): Promise<Result<VaultKeyState>> {
 /** 忘掉本机密钥（换密钥、或要把这台机器彻底退出保险库时用） */
 export async function forgetKey(): Promise<Result<VaultKeyState>> {
   const cleared = await guard(invoke<null>('vault_key_clear'), '清除本机密钥失败')
-  if (!cleared.ok) return fail(cleared.error ?? '清除本机密钥失败')
+  if (!cleared.ok)
+    return fail(cleared.error ?? '清除本机密钥失败')
 
   cachedKey = null
   return ok({ exists: false, unlocked: false, fingerprint: '' })
@@ -260,17 +256,19 @@ export async function forgetKey(): Promise<Result<VaultKeyState>> {
 
 /** 导出成文件：先挑存到哪儿，再把密钥串写进去 */
 export async function exportKey(path: string): Promise<Result<null>> {
-  if (!cachedKey) return fail('先解锁再导出')
+  if (!cachedKey)
+    return fail('先解锁再导出')
   return guard(
     invoke<null>('vault_key_export', { path, key: encodeKeyString(cachedKey) }),
-    '导出密钥失败'
+    '导出密钥失败',
   )
 }
 
 /** 读一个导出的密钥文件，认得出是密钥就存进凭据管理器 */
 export async function importKeyFile(path: string): Promise<Result<VaultKeyState>> {
   const text = await guard(invoke<string>('vault_key_import', { path }), '读取密钥文件失败')
-  if (!text.ok) return fail(text.error ?? '读取密钥文件失败')
+  if (!text.ok)
+    return fail(text.error ?? '读取密钥文件失败')
   return importKey(text.data ?? '')
 }
 
@@ -279,13 +277,16 @@ export async function importKeyFile(path: string): Promise<Result<VaultKeyState>
 /** 本机那份文件（原样返回，收敛交给 shared/vault.ts） */
 async function loadFile(key: VaultPublicKey): Promise<Result<VaultFile>> {
   const raw = await guard(invoke<unknown>('vault_load'), '读取保险库失败')
-  if (!raw.ok) return fail(raw.error ?? '读取保险库失败')
+  if (!raw.ok)
+    return fail(raw.error ?? '读取保险库失败')
 
   // 还没有文件（第一次用）时后端给的是 null，那不是错误
-  if (raw.data === null || raw.data === undefined) return ok(emptyVaultFile(key))
+  if (raw.data === null || raw.data === undefined)
+    return ok(emptyVaultFile(key))
 
   const parsed = parseVaultFile(raw.data)
-  if (!parsed) return fail('本机那份 vault.json 认不出来（可能被手工改坏了）')
+  if (!parsed)
+    return fail('本机那份 vault.json 认不出来（可能被手工改坏了）')
   return ok(parsed.file)
 }
 
@@ -298,23 +299,26 @@ async function saveFile(file: VaultFile): Promise<Result<null>> {
  */
 export async function load(): Promise<Result<VaultLoaded>> {
   const key = currentKey()
-  if (!key) return fail('保险库还没有解锁')
+  if (!key)
+    return fail('保险库还没有解锁')
 
   const raw = await guard(invoke<unknown>('vault_load'), '读取保险库失败')
-  if (!raw.ok) return fail(raw.error ?? '读取保险库失败')
+  if (!raw.ok)
+    return fail(raw.error ?? '读取保险库失败')
 
-  const parsed =
-    raw.data === null || raw.data === undefined
+  const parsed
+    = raw.data === null || raw.data === undefined
       ? { file: emptyVaultFile(publicKeyOf(key)), dropped: 0 }
       : parseVaultFile(raw.data)
-  if (!parsed) return fail('本机那份 vault.json 认不出来（可能被手工改坏了）')
+  if (!parsed)
+    return fail('本机那份 vault.json 认不出来（可能被手工改坏了）')
 
   const { records, failed } = await openAll(key, parsed.file)
   return ok({
     records,
     unreadable: failed.length,
     dropped: parsed.dropped,
-    updatedAt: lastChangeAt(parsed.file.items)
+    updatedAt: lastChangeAt(parsed.file.items),
   })
 }
 
@@ -335,10 +339,12 @@ export interface VaultWriteInput {
  */
 export async function save(input: VaultWriteInput): Promise<Result<VaultRecord>> {
   const key = currentKey()
-  if (!key) return fail('保险库还没有解锁')
+  if (!key)
+    return fail('保险库还没有解锁')
 
   const file = await loadFile(key)
-  if (!file.ok) return fail(file.error ?? '读取保险库失败')
+  if (!file.ok)
+    return fail(file.error ?? '读取保险库失败')
 
   const device = await localDevice()
   const updatedAt = Date.now()
@@ -349,9 +355,10 @@ export async function save(input: VaultWriteInput): Promise<Result<VaultRecord>>
   const sealed = await seal(publicKeyOf(key), entry)
   const item: VaultItem = { id: input.id, updatedAt, by: device.id, ...sealed }
 
-  const items = [...file.data!.items.filter((existing) => existing.id !== input.id), item]
+  const items = [...file.data!.items.filter(existing => existing.id !== input.id), item]
   const written = await saveFile(vaultFileOf(key, items))
-  if (!written.ok) return fail(written.error ?? '保存保险库失败')
+  if (!written.ok)
+    return fail(written.error ?? '保存保险库失败')
 
   return ok({ ...entry, id: input.id, updatedAt, by: device.id })
 }
@@ -359,15 +366,17 @@ export async function save(input: VaultWriteInput): Promise<Result<VaultRecord>>
 /** 删一条：换成墓碑。空壳留着是为了让别的机器别把它复活（见 shared/vault.ts 的 mergeVaultItems） */
 export async function remove(id: string): Promise<Result<null>> {
   const key = currentKey()
-  if (!key) return fail('保险库还没有解锁')
+  if (!key)
+    return fail('保险库还没有解锁')
 
   const file = await loadFile(key)
-  if (!file.ok) return fail(file.error ?? '读取保险库失败')
+  if (!file.ok)
+    return fail(file.error ?? '读取保险库失败')
 
   const device = await localDevice()
   const items = [
-    ...file.data!.items.filter((existing) => existing.id !== id),
-    tombstoneOf({ id }, Date.now(), device.id)
+    ...file.data!.items.filter(existing => existing.id !== id),
+    tombstoneOf({ id }, Date.now(), device.id),
   ]
   return saveFile(vaultFileOf(key, items))
 }
@@ -377,11 +386,14 @@ export async function remove(id: string): Promise<Result<null>> {
 /** 读回远端那份（仓库里还没有时是 null） */
 async function pullRemote(repo: string): Promise<Result<VaultFile | null>> {
   const raw = await guard(invoke<unknown>('vault_pull', { repo }), '读取仓库失败')
-  if (!raw.ok) return fail(raw.error ?? '读取仓库失败')
-  if (raw.data === null || raw.data === undefined) return ok(null)
+  if (!raw.ok)
+    return fail(raw.error ?? '读取仓库失败')
+  if (raw.data === null || raw.data === undefined)
+    return ok(null)
 
   const parsed = parseVaultFile(raw.data)
-  if (!parsed) return fail('仓库里那个路径上放的不是一份保险库文件')
+  if (!parsed)
+    return fail('仓库里那个路径上放的不是一份保险库文件')
   return ok(parsed.file)
 }
 
@@ -394,22 +406,24 @@ async function pullRemote(repo: string): Promise<Result<VaultFile | null>> {
 async function pushRemote(
   repo: string,
   content: VaultFile,
-  base: VaultFile | null
-): Promise<Result<{ pushed: boolean; remote: VaultFile | null; reason?: string }>> {
+  base: VaultFile | null,
+): Promise<Result<{ pushed: boolean, remote: VaultFile | null, reason?: string }>> {
   const outcome = await guard(
     invoke<VaultPushOutcome>('vault_push', { repo, content, base }),
-    '推送到仓库失败'
+    '推送到仓库失败',
   )
-  if (!outcome.ok) return fail(outcome.error ?? '推送到仓库失败')
+  if (!outcome.ok)
+    return fail(outcome.error ?? '推送到仓库失败')
 
   const value = outcome.data
-  if (!value) return fail('推送到仓库失败')
+  if (!value)
+    return fail('推送到仓库失败')
 
   return ok({
     pushed: value.pushed,
     // 远端被别的机器改过时它交回一份新的；那份认不出来就当作没拿到
     remote: value.remote === null || value.remote === undefined ? null : (parseVaultFile(value.remote)?.file ?? null),
-    reason: value.reason
+    reason: value.reason,
   })
 }
 
@@ -424,11 +438,14 @@ async function pushRemote(
  */
 export async function sync(repo: string): Promise<Result<VaultSyncOutcome>> {
   const key = currentKey()
-  if (!key) return fail('保险库还没有解锁')
-  if (!repo.trim()) return fail('还没有登录账号并填同步仓库地址')
+  if (!key)
+    return fail('保险库还没有解锁')
+  if (!repo.trim())
+    return fail('还没有登录账号并填同步仓库地址')
 
   const local = await loadFile(key)
-  if (!local.ok) return fail(local.error ?? '读取保险库失败')
+  if (!local.ok)
+    return fail(local.error ?? '读取保险库失败')
 
   let merged = local.data!
   let base: VaultFile | null = null
@@ -437,34 +454,40 @@ export async function sync(repo: string): Promise<Result<VaultSyncOutcome>> {
 
   for (let round = 0; round < SYNC_ROUNDS; round += 1) {
     const remote = await pullRemote(repo)
-    if (!remote.ok) return fail(remote.error ?? '读取仓库失败')
+    if (!remote.ok)
+      return fail(remote.error ?? '读取仓库失败')
     base = remote.data ?? null
     remoteItems = remote.data?.items ?? []
 
     // 仓库里那份是用别的密钥加的密：能合并、能推，但那些条目在这台机器上永远解不开。
     // 这不能悄悄过去 —— 用户会看到「同步成功，但一条都没多出来」。
-    if (remote.data && !sameVaultKey(remote.data, publicKeyOf(key))) remoteKeyMismatch = true
+    if (remote.data && !sameVaultKey(remote.data, publicKeyOf(key)))
+      remoteKeyMismatch = true
 
     merged = vaultFileOf(key, mergeVaultItems(merged.items, remoteItems))
 
     const saved = await saveFile(merged)
-    if (!saved.ok) return fail(saved.error ?? '保存保险库失败')
+    if (!saved.ok)
+      return fail(saved.error ?? '保存保险库失败')
 
     const pushed = await pushRemote(repo, merged, base)
-    if (!pushed.ok) return fail(pushed.error ?? '推送到仓库失败')
+    if (!pushed.ok)
+      return fail(pushed.error ?? '推送到仓库失败')
     if (pushed.data!.pushed) {
       const loaded = await load()
-      if (!loaded.ok) return fail(loaded.error ?? '读取保险库失败')
+      if (!loaded.ok)
+        return fail(loaded.error ?? '读取保险库失败')
       return ok({
         rounds: round + 1,
         remoteItems: remoteItems.length,
         keyMismatch: remoteKeyMismatch,
-        ...loaded.data!
+        ...loaded.data!,
       })
     }
 
     // 远端在这一轮里又被推过：拿它交回来的那份当新的本机内容，重走一遍
-    if (pushed.data!.remote) merged = vaultFileOf(key, mergeVaultItems(merged.items, pushed.data!.remote.items))
+    if (pushed.data!.remote)
+      merged = vaultFileOf(key, mergeVaultItems(merged.items, pushed.data!.remote.items))
   }
 
   return fail(`同步撞了三轮都没落定（仓库里那份一直在被改动），稍后再试一次`)
@@ -473,10 +496,13 @@ export async function sync(repo: string): Promise<Result<VaultSyncOutcome>> {
 /** 仓库里那份与本机这把密钥对不对得上（给界面提前说一句「两边密钥不一样」） */
 export async function remoteKeyStatus(repo: string): Promise<Result<'none' | 'match' | 'mismatch'>> {
   const key = currentKey()
-  if (!key) return fail('保险库还没有解锁')
+  if (!key)
+    return fail('保险库还没有解锁')
 
   const remote = await pullRemote(repo)
-  if (!remote.ok) return fail(remote.error ?? '读取仓库失败')
-  if (!remote.data) return ok('none')
+  if (!remote.ok)
+    return fail(remote.error ?? '读取仓库失败')
+  if (!remote.data)
+    return ok('none')
   return ok(sameVaultKey(remote.data, publicKeyOf(key)) ? 'match' : 'mismatch')
 }

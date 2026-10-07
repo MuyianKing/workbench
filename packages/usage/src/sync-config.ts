@@ -1,3 +1,4 @@
+import type { ThemeConfig } from '@workbench/appearance'
 /**
  * 同步仓库里 `config/<设备id>.json` 的结构：**本机 theme.json 的整份副本 + 一层设备信封**。
  *
@@ -9,7 +10,7 @@
  * （两台机器互相自动采用对方的配置会来回覆盖、永远收敛不了）。时间戳取自 theme.updatedAt ——
  * 那是这台机器上外观最后一次真的变化的时间，不是「推送到仓库」的时间。
  */
-import { sanitizeTheme, type ThemeConfig } from '@workbench/appearance'
+import { sanitizeTheme } from '@workbench/appearance'
 
 /** 仓库里一台机器的那份配置 */
 export interface ThemeFile {
@@ -39,11 +40,13 @@ export function captureThemeFile(device: string, name: string, theme: ThemeConfi
  * 手改过的 JSON 不会把越界的值带进界面。
  */
 export function sanitizeThemeFile(raw: unknown): ThemeFile | null {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw))
+    return null
 
-  const input = raw as { device?: unknown; name?: unknown; theme?: unknown }
+  const input = raw as { device?: unknown, name?: unknown, theme?: unknown }
   const device = typeof input.device === 'string' ? input.device.trim() : ''
-  if (!device) return null
+  if (!device)
+    return null
 
   const theme = input.theme as { version?: unknown } | undefined
   const usable = theme && typeof theme === 'object'
@@ -53,7 +56,7 @@ export function sanitizeThemeFile(raw: unknown): ThemeFile | null {
     name: typeof input.name === 'string' ? input.name.trim() : '',
     // 版本对不上的交给 sanitizeTheme 走迁移（v3 及更早的一维布局能原样翻成行清单），
     // 不是老版本的一律回默认布局收敛 —— 两条路都在 sanitizeTheme 里，这里不再单独拦
-    theme: usable ? sanitizeTheme(theme) : null
+    theme: usable ? sanitizeTheme(theme) : null,
   }
 }
 

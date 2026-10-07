@@ -1,4 +1,8 @@
 <script setup lang="ts">
+import type { TokenRangePreset } from '@workbench/usage'
+import { ArrowDown, ArrowLeft, ArrowRight, Check } from '@element-plus/icons-vue'
+import { dayKey } from '@workbench/core'
+import { presetLabel, TOKEN_RANGE_PRESETS } from '@workbench/usage'
 /**
  * Token 用量的时间筛选:与 DeepSeek 用量页同款的预设下拉。
  *
@@ -14,9 +18,6 @@
  * 内容会溢出那 150px 的盒子、画到边框与阴影外面去),global.css 里再去掉它同款的 150px 最小宽度。
  */
 import { computed, ref, watch } from 'vue'
-import { ArrowDown, ArrowLeft, ArrowRight, Check } from '@element-plus/icons-vue'
-import { TOKEN_RANGE_PRESETS, presetLabel, type TokenRangePreset } from '@workbench/usage'
-import { dayKey } from '@workbench/core'
 
 const props = defineProps<{
   /** 当前生效的区间(含两端) */
@@ -32,7 +33,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   'pick-preset': [preset: TokenRangePreset]
-  'pick-range': [range: { fromKey: string; toKey: string }]
+  'pick-range': [range: { fromKey: string, toKey: string }]
 }>()
 
 /** 周日起始,与日历表头一致 */
@@ -51,7 +52,8 @@ const viewMonth = ref('')
 
 /** 每次打开都从当前生效的区间接着改,不在两次打开之间留半截选择 */
 watch(open, (visible) => {
-  if (!visible) return
+  if (!visible)
+    return
   calendarOpen.value = props.preset === 'custom'
   pickedFrom.value = props.fromKey
   pickedTo.value = props.toKey
@@ -104,7 +106,7 @@ const months = computed(() => {
   const second = shiftMonth(first, 1)
   return [
     { key: first, label: monthLabel(first), weeks: monthWeeks(first) },
-    { key: second, label: monthLabel(second), weeks: monthWeeks(second) }
+    { key: second, label: monthLabel(second), weeks: monthWeeks(second) },
   ]
 })
 
@@ -121,8 +123,10 @@ function selectable(key: string): boolean {
 
 /** 预览的终点:还没定下终点时跟着指针走,但不早于起点 */
 const bandTo = computed(() => {
-  if (!pickedFrom.value) return ''
-  if (pickedTo.value) return pickedTo.value
+  if (!pickedFrom.value)
+    return ''
+  if (pickedTo.value)
+    return pickedTo.value
   return hoverKey.value > pickedFrom.value ? hoverKey.value : pickedFrom.value
 })
 
@@ -133,12 +137,13 @@ function dayState(key: string): Record<string, boolean> {
     'is-band': inBand,
     // 两端的实心圆:起点、终点,以及只定了起点时的起点本身
     'is-edge': inBand && (key === pickedFrom.value || key === pickedTo.value),
-    'is-today': key === props.latestKey
+    'is-today': key === props.latestKey,
   }
 }
 
 function pickDay(key: string): void {
-  if (!selectable(key)) return
+  if (!selectable(key))
+    return
   // 还没起点,或上一段已经选完(两端都在),这一下都算重新起头
   if (!pickedFrom.value || pickedTo.value) {
     pickedFrom.value = key
@@ -185,7 +190,9 @@ function pickPreset(preset: TokenRangePreset): void {
         title="按时间维度筛选趋势与占比"
       >
         <span class="trigger__value">{{ presetLabel(preset) }}</span>
-        <el-icon class="trigger__caret"><ArrowDown /></el-icon>
+        <el-icon class="trigger__caret">
+          <ArrowDown />
+        </el-icon>
       </button>
     </template>
 
@@ -201,7 +208,9 @@ function pickPreset(preset: TokenRangePreset): void {
           @click="pickPreset(option.key)"
         >
           <span>{{ option.label }}</span>
-          <el-icon v-if="preset === option.key" class="preset__check"><Check /></el-icon>
+          <el-icon v-if="preset === option.key" class="preset__check">
+            <Check />
+          </el-icon>
         </button>
       </div>
 

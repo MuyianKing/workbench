@@ -11,20 +11,7 @@
  * 全是纯函数，放这里是为了被单测直接覆盖。目录收敛（sanitizeVideoRoot）与
  * 笔记文件夹是同一件事（本机挑的一个目录），直接复用 note.ts 的那几个函数。
  */
-import {
-  buildRelTree,
-  countRelNodes,
-  findRelNode,
-  normalizeRel,
-  noteRootName,
-  pushNoteHistory,
-  relChain,
-  removeFromNoteHistory,
-  sanitizeNoteHistory,
-  sanitizeNoteRoot,
-  sanitizeNoteTreeExpanded,
-  sortRelNodes
-} from '@workbench/notes'
+import { buildRelTree, countRelNodes, findRelNode, normalizeRel, noteRootName, pushNoteHistory, relChain, removeFromNoteHistory, sanitizeNoteHistory, sanitizeNoteRoot, sanitizeNoteTreeExpanded, sortRelNodes } from '@workbench/notes'
 
 /** 只认这一种后缀。别的容器（mkv / avi / flv…）webview 里的解码器不一定有，先不收 */
 const VIDEO_EXTENSION = '.mp4'
@@ -93,7 +80,8 @@ export function sortVideoNodes(nodes: readonly VideoNode[]): VideoNode[] {
  */
 export function buildVideoTree(entries: readonly VideoEntry[]): VideoNode[] {
   return buildRelTree(entries, (rel, fileName, entry): VideoNode | null => {
-    if (!isVideoFile(fileName)) return null
+    if (!isVideoFile(fileName))
+      return null
     return {
       id: rel,
       rel,
@@ -102,7 +90,7 @@ export function buildVideoTree(entries: readonly VideoEntry[]): VideoNode[] {
       duration:
         typeof entry.duration === 'number' && Number.isFinite(entry.duration) && entry.duration > 0
           ? entry.duration
-          : 0
+          : 0,
     }
   })
 }
@@ -173,7 +161,8 @@ export function sanitizeVideoTreeExpanded(raw: unknown): string[] {
  */
 export function sanitizeVideoLastRel(raw: unknown): string {
   const rel = normalizeVideoRel(raw)
-  if (!rel || rel.split('/').includes('..')) return ''
+  if (!rel || rel.split('/').includes('..'))
+    return ''
   return rel
 }
 
@@ -205,21 +194,25 @@ export const VIDEO_NEXT_SECONDS = 3
  */
 export function nextVideoNode(nodes: readonly VideoNode[], rel: string): VideoNode | null {
   const target = normalizeVideoRel(rel)
-  if (!target) return null
+  if (!target)
+    return null
 
   const videos: VideoNode[] = []
   const walk = (list: readonly VideoNode[]): void => {
     for (const node of list) {
-      if (node.kind === 'video') videos.push(node)
-      if (node.children) walk(node.children)
+      if (node.kind === 'video')
+        videos.push(node)
+      if (node.children)
+        walk(node.children)
     }
   }
   walk(nodes)
 
-  const at = videos.findIndex((node) => node.rel === target)
+  const at = videos.findIndex(node => node.rel === target)
   // 当前那一个不在树里（被删了、路径是别的目录的）按「没有下一个」算，
   // 不能让 -1 + 1 恰好捞回第一个视频
-  if (at === -1) return null
+  if (at === -1)
+    return null
   return videos[at + 1] ?? null
 }
 
@@ -227,7 +220,7 @@ export function nextVideoNode(nodes: readonly VideoNode[], rel: string): VideoNo
 export function clampVideoRate(value: unknown): number {
   const rate = typeof value === 'number' && Number.isFinite(value) ? value : 1
   const nearest = VIDEO_RATES.reduce((best, item) =>
-    Math.abs(item - rate) < Math.abs(best - rate) ? item : best
+    Math.abs(item - rate) < Math.abs(best - rate) ? item : best,
   )
   return nearest
 }
@@ -274,7 +267,8 @@ export const VIDEO_FLOAT_Y_DEFAULT = 0
  * —— X 的默认是右上角、Y 的默认是顶边（与 DEFAULT_THEME 同一口径）。
  */
 export function clampVideoFloatPercent(value: unknown, fallback = 0): number {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return clampVideoFloatPercent(fallback)
+  if (typeof value !== 'number' || !Number.isFinite(value))
+    return clampVideoFloatPercent(fallback)
   return Math.min(100, Math.max(0, value))
 }
 
@@ -299,16 +293,16 @@ export function clampVideoFloatHeight(value: unknown): number {
  * 位置存的是视口百分比，只知道「大概在哪」；压不进视口的边界在这里收口。
  */
 export function fitVideoFloatGeometry(
-  geometry: { x: number; y: number; w: number; h: number },
-  viewport: { w: number; h: number }
-): { left: number; top: number; width: number; height: number } {
+  geometry: { x: number, y: number, w: number, h: number },
+  viewport: { w: number, h: number },
+): { left: number, top: number, width: number, height: number } {
   const width = Math.min(geometry.w, viewport.w)
   const height = Math.min(geometry.h, viewport.h)
   return {
     width,
     height,
     left: Math.min(Math.max(0, (geometry.x / 100) * viewport.w), viewport.w - width),
-    top: Math.min(Math.max(0, (geometry.y / 100) * viewport.h), viewport.h - height)
+    top: Math.min(Math.max(0, (geometry.y / 100) * viewport.h), viewport.h - height),
   }
 }
 
@@ -324,12 +318,12 @@ export function fitVideoFloatGeometry(
  * 视口比最小宽还窄的极端情形保住 MIN：左缘钉在 0，越界的那一点交给渲染再压。
  */
 export function resizeVideoFloat(
-  geometry: { x: number; y: number; w: number; h: number },
-  viewport: { w: number; h: number },
+  geometry: { x: number, y: number, w: number, h: number },
+  viewport: { w: number, h: number },
   edge: 'left' | 'right',
   dx: number,
-  dy: number
-): { x: number; y: number; w: number; h: number } {
+  dy: number,
+): { x: number, y: number, w: number, h: number } {
   const height = clampVideoFloatHeight(geometry.h + dy)
 
   if (edge === 'right') {
@@ -341,7 +335,7 @@ export function resizeVideoFloat(
   const rightEdge = fit.left + fit.width
   const width = Math.min(
     clampVideoFloatWidth(geometry.w - dx),
-    Math.max(VIDEO_FLOAT_SIZE_MIN.width, rightEdge)
+    Math.max(VIDEO_FLOAT_SIZE_MIN.width, rightEdge),
   )
   const left = Math.max(0, rightEdge - width)
 

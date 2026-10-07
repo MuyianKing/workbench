@@ -1,4 +1,8 @@
 <script setup lang="ts">
+import type { MailAttachmentInput } from '@workbench/mail'
+import type { MailReplyTarget } from '@/stores/mail'
+import { Close, Paperclip } from '@element-plus/icons-vue'
+import { contentTypeForFileName, formatMailSize } from '@workbench/mail'
 /**
  * 写信 / 回信的弹层：发件邮箱、收件人、主题、正文与附件，发送走 stores/mail.ts 的
  * send（报文构建在 @workbench/mail 的 buildMime，SMTP 传输在 Rust）。
@@ -14,20 +18,13 @@
  * 见 AGENTS.md 第 4 节。
  */
 import { ref, watch } from 'vue'
-import { Close, Paperclip } from '@element-plus/icons-vue'
-import {
-  contentTypeForFileName,
-  formatMailSize,
-  type MailAttachmentInput
-} from '@workbench/mail'
 import AppDialog from '@/components/AppDialog.vue'
-import { useMailStore, type MailReplyTarget } from '@/stores/mail'
-import { notifyError, notifySuccess } from '@/notify'
 import { basenameOf } from '@/format'
+import { notifyError, notifySuccess } from '@/notify'
+import { useMailStore } from '@/stores/mail'
 
-const visible = defineModel<boolean>({ required: true })
 const props = defineProps<{ reply: MailReplyTarget | null }>()
-
+const visible = defineModel<boolean>({ required: true })
 const mail = useMailStore()
 
 const fromAccount = ref('')
@@ -41,19 +38,21 @@ const toError = ref('')
 
 /** 每次打开按需起手：回信预填引用（用收信的那个账户发），新邮件是空白的；关闭不保留草稿 */
 watch(visible, (open) => {
-  if (!open) return
+  if (!open)
+    return
   formError.value = ''
   toError.value = ''
   const reply = props.reply
   const from = reply?.from ?? ''
-  fromAccount.value = mail.accounts.some((account) => account.address === from)
+  fromAccount.value = mail.accounts.some(account => account.address === from)
     ? from
     : (mail.accounts[0]?.address ?? '')
   if (reply) {
     to.value = reply.to
     subject.value = /^re:/i.test(reply.subject) ? reply.subject : `Re: ${reply.subject}`
     body.value = quote(reply)
-  } else {
+  }
+  else {
     to.value = ''
     subject.value = ''
     body.value = ''
@@ -65,7 +64,7 @@ watch(visible, (open) => {
 function quote(reply: MailReplyTarget): string {
   const quoted = reply.text
     .split('\r\n')
-    .map((line) => `> ${line}`)
+    .map(line => `> ${line}`)
     .join('\n')
   return `\n\n---- ${reply.to} 写道 ----\n${quoted}\n`
 }
@@ -74,7 +73,7 @@ function quote(reply: MailReplyTarget): string {
 function recipients(): string[] {
   return to.value
     .split(/[,;，；\s]+/)
-    .map((address) => address.trim())
+    .map(address => address.trim())
     .filter(Boolean)
 }
 
@@ -84,7 +83,7 @@ function validateTo(): boolean {
     toError.value = '收件人是空的'
     return false
   }
-  const bad = list.find((address) => !address.includes('@') || /\s/.test(address))
+  const bad = list.find(address => !address.includes('@') || /\s/.test(address))
   if (bad) {
     toError.value = `收件人地址不对：${bad}`
     return false
@@ -96,7 +95,8 @@ function validateTo(): boolean {
 /** 挑附件：一次可多选，读成 base64 挂进来。读不动的那个跳过并提示。 */
 async function addAttachments(): Promise<void> {
   const picked = await window.workbench.pickFiles('选择附件')
-  if (!picked || picked.length === 0) return
+  if (!picked || picked.length === 0)
+    return
   for (const path of picked) {
     const file = await window.workbench.readBinaryFile(path)
     if (!file.ok || !file.data) {
@@ -107,7 +107,7 @@ async function addAttachments(): Promise<void> {
     attachments.value.push({
       name,
       contentType: contentTypeForFileName(name),
-      bytesBase64: file.data
+      bytesBase64: file.data,
     })
   }
 }
@@ -121,13 +121,14 @@ function attachmentSize(base64: string): string {
 }
 
 async function send(): Promise<void> {
-  if (!validateTo()) return
+  if (!validateTo())
+    return
   const result = await mail.send({
     from: fromAccount.value,
     to: recipients(),
     subject: subject.value.trim(),
     text: body.value,
-    attachments: attachments.value
+    attachments: attachments.value,
   })
   if (!result.ok) {
     formError.value = result.error ?? '发送失败'
@@ -175,7 +176,9 @@ async function send(): Promise<void> {
       </el-form>
 
       <div class="comp__files">
-        <el-button size="small" :icon="Paperclip" @click="addAttachments">添加附件</el-button>
+        <el-button size="small" :icon="Paperclip" @click="addAttachments">
+          添加附件
+        </el-button>
         <span v-for="(file, index) in attachments" :key="`${index}-${file.name}`" class="comp__file">
           <span class="comp__file-name" :title="file.name">{{ file.name }}</span>
           <span class="comp__file-size">{{ attachmentSize(file.bytesBase64) }}</span>
@@ -190,12 +193,18 @@ async function send(): Promise<void> {
         </span>
       </div>
 
-      <p v-if="formError" class="comp__error">{{ formError }}</p>
+      <p v-if="formError" class="comp__error">
+        {{ formError }}
+      </p>
     </div>
 
     <template #footer>
-      <el-button @click="visible = false">取消</el-button>
-      <el-button type="primary" :loading="mail.sending" @click="send">发送</el-button>
+      <el-button @click="visible = false">
+        取消
+      </el-button>
+      <el-button type="primary" :loading="mail.sending" @click="send">
+        发送
+      </el-button>
     </template>
   </AppDialog>
 </template>

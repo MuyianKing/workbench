@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { AiNewsItem, AiNewsView } from '@/types'
+import { Collection, Refresh } from '@element-plus/icons-vue'
 /**
  * 首页「AI 热点」卡片：内置热点源的合并列表，一条一行（标题 + 时间），点击跳原文。
  *
@@ -14,12 +16,10 @@
  * **联网边界**：这里不拼任何地址，只报源 id；源清单与地址都在 Rust 侧的 `SOURCES` 里。
  * 卡片自己不弹表单，看或不看热点就是这张卡片在不在首页上（设置 → 菜单 → 首页下面那层卡片）。
  */
-import { computed, nextTick, onMounted, onActivated, ref, watch } from 'vue'
-import { Collection, Refresh } from '@element-plus/icons-vue'
-import { formatListTime, formatTimestamp } from '@/format'
+import { computed, nextTick, onActivated, onMounted, ref, watch } from 'vue'
 import NewsArticleDialog from '@/components/NewsArticleDialog.vue'
 import PanelLoading from '@/components/PanelLoading.vue'
-import type { AiNewsItem, AiNewsView } from '@/types'
+import { formatListTime, formatTimestamp } from '@/format'
 
 const view = ref<AiNewsView | null>(null)
 /** 首屏读盘完成前不说「还没有热点」：读盘失败与真的没内容是两回事 */
@@ -52,14 +52,19 @@ async function refresh(manual: boolean): Promise<void> {
       view.value = result.data.view
       now.value = Date.now()
       // 逐源的失败说明照实摆出来（哪个源挂了、为什么），不吞掉
-      if (result.data.notes.length) hint.value = result.data.notes.join('；')
-      else if (manual && !result.data.refreshed) hint.value = '还没到下次刷新时间'
-    } else {
+      if (result.data.notes.length)
+        hint.value = result.data.notes.join('；')
+      else if (manual && !result.data.refreshed)
+        hint.value = '还没到下次刷新时间'
+    }
+    else {
       hint.value = result.error ?? '刷新 AI 热点失败'
     }
-  } catch (err) {
+  }
+  catch (err) {
     hint.value = err instanceof Error ? err.message : '刷新 AI 热点失败'
-  } finally {
+  }
+  finally {
     refreshing.value = false
   }
 }
@@ -70,7 +75,8 @@ async function refresh(manual: boolean): Promise<void> {
  * 浏览器留给「要看原排版 / 图片」的情况，入口在弹层里。
  */
 function openArticle(row: Row): void {
-  if (!row.raw.link) return
+  if (!row.raw.link)
+    return
   selected.value = row.raw
   articleOpen.value = true
 }
@@ -87,7 +93,8 @@ onMounted(async () => {
  */
 let activatedOnce = false
 onActivated(() => {
-  if (activatedOnce) void refresh(false)
+  if (activatedOnce)
+    void refresh(false)
   else activatedOnce = true
 })
 
@@ -114,15 +121,15 @@ interface Row {
  * 满屏来源仍会是同一个词，又变回那种十行重复的噪音。
  */
 const rows = computed<Row[]>(() =>
-  (view.value?.items ?? []).map((item) => ({
+  (view.value?.items ?? []).map(item => ({
     id: item.guid || item.link || item.title,
     title: item.title,
     link: item.link,
     time: formatListTime(item.pubDate, now.value),
     source: item.source,
     hint: item.summary || item.title,
-    raw: item
-  }))
+    raw: item,
+  })),
 )
 
 /** 站内阅读：当前打开的那一条（null = 弹层关着） */
@@ -130,7 +137,7 @@ const selected = ref<AiNewsItem | null>(null)
 const articleOpen = ref(false)
 
 /** 这一屏混着几个源；≤1 就不必逐行标来源 */
-const showSource = computed(() => new Set(rows.value.map((row) => row.source).filter(Boolean)).size > 1)
+const showSource = computed(() => new Set(rows.value.map(row => row.source).filter(Boolean)).size > 1)
 
 // ---------- 列表底部的「还有内容」渐隐 ----------
 
@@ -146,7 +153,8 @@ const moreBelow = ref(false)
 
 function syncOverflow(): void {
   const el = listEl.value
-  if (!el) return
+  if (!el)
+    return
   moreBelow.value = el.scrollHeight - el.scrollTop - el.clientHeight > 2
 }
 
@@ -154,7 +162,8 @@ watch(rows, () => void nextTick(syncOverflow))
 
 // 卡片高度是用户拖出来的：盒子尺寸一变就要重算，光靠滚动事件接不住这种情况
 watch(listEl, (el, _previous, onCleanup) => {
-  if (!el) return
+  if (!el)
+    return
   const observer = new ResizeObserver(() => syncOverflow())
   observer.observe(el)
   onCleanup(() => observer.disconnect())
@@ -181,7 +190,9 @@ const footer = computed(() => {
         :disabled="refreshing"
         @click="refresh(true)"
       >
-        <el-icon :size="13"><Refresh /></el-icon>
+        <el-icon :size="13">
+          <Refresh />
+        </el-icon>
       </button>
     </header>
 
@@ -211,12 +222,16 @@ const footer = computed(() => {
 
     <!-- 读过了也刷新过了还是空：才是真的没有 -->
     <p v-else class="panel__empty">
-      <el-icon class="empty__icon"><Collection /></el-icon>
+      <el-icon class="empty__icon">
+        <Collection />
+      </el-icon>
       暂时没有热点
     </p>
 
     <!-- 逐源失败 / 未到时间：一行小字，不挡住已有内容。哪个源挂了这件事在任何状态下都得说出来 -->
-    <p v-if="hint" class="panel__note truncate" :title="hint">{{ hint }}</p>
+    <p v-if="hint" class="panel__note truncate" :title="hint">
+      {{ hint }}
+    </p>
 
     <!-- 站内阅读：点一行打开它，正文由它自己抓（见 NewsArticleDialog） -->
     <NewsArticleDialog v-model="articleOpen" :item="selected" />

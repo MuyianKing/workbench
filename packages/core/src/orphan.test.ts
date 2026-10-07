@@ -1,13 +1,6 @@
+import type { ActiveSession, ReapDeps } from './orphan'
 import { describe, expect, it, vi } from 'vitest'
-import {
-  isSameOwner,
-  isSameProcess,
-  reapOrphanSessions,
-  withSessionRecorded,
-  withoutSession,
-  type ReapDeps
-} from './orphan'
-import type { ActiveSession } from './orphan'
+import { isSameOwner, isSameProcess, reapOrphanSessions, withoutSession, withSessionRecorded } from './orphan'
 
 /** 进程创建时间：测试里用固定值，它只需要「能不能区分两个进程」 */
 const CREATED = 1_700_000_000_000
@@ -50,8 +43,8 @@ describe('isSameProcess', () => {
 
 function depsOf(created: Record<number, number>, killTree = vi.fn()): ReapDeps {
   return {
-    createdAt: async (pid) => created[pid] ?? null,
-    killTree
+    createdAt: async pid => created[pid] ?? null,
+    killTree,
   }
 }
 
@@ -65,7 +58,7 @@ function session(patch: Partial<ActiveSession> = {}): ActiveSession {
     ownerPid: 100,
     ownerCreatedAt: OWNER_CREATED,
     processCreatedAt: CREATED,
-    ...patch
+    ...patch,
   }
 }
 
@@ -163,7 +156,7 @@ describe('会话记录的增删', () => {
     const second = session({ pid: 300 })
 
     const list = withSessionRecorded([first], second)
-    expect(list.map((item) => item.pid)).toEqual([200, 300])
+    expect(list.map(item => item.pid)).toEqual([200, 300])
   })
 
   it('同一个 PID 重复记录时只保留最新的一条', () => {
@@ -176,12 +169,12 @@ describe('会话记录的增删', () => {
   })
 
   it('老数据文件没有这个字段时也能安全追加', () => {
-    expect(withSessionRecorded(undefined, session({ pid: 7 })).map((item) => item.pid)).toEqual([7])
+    expect(withSessionRecorded(undefined, session({ pid: 7 })).map(item => item.pid)).toEqual([7])
   })
 
   it('按 PID 摘掉记录', () => {
     const list = withoutSession([session({ pid: 200 }), session({ pid: 300 })], 200)
-    expect(list.map((item) => item.pid)).toEqual([300])
+    expect(list.map(item => item.pid)).toEqual([300])
   })
 
   it('摘一个不存在的 PID 时列表不变', () => {

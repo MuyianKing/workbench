@@ -1,3 +1,6 @@
+import type { ColorFamily, DesignStyle, DesignStyleSort, FamilyFilter, ThemeFilter } from '@workbench/appearance'
+import { categoryCounts as countCategories, familyCounts as countFamilies, designStyleHaystack, filterDesignStyles, sanitizeDesignStyles, sortDesignStyles } from '@workbench/appearance'
+import { defineStore } from 'pinia'
 /**
  * 样式：74 套设计语言（DESIGN.md 的解析结果）的清单与筛选状态。
  *
@@ -13,20 +16,6 @@
  * 搜索词与选中的档位还在（KeepAlive 本来就保住了组件状态，但两处都存会多一个真源）。
  */
 import { computed, ref } from 'vue'
-import { defineStore } from 'pinia'
-import {
-  categoryCounts as countCategories,
-  designStyleHaystack,
-  familyCounts as countFamilies,
-  filterDesignStyles,
-  sanitizeDesignStyles,
-  sortDesignStyles,
-  type ColorFamily,
-  type DesignStyle,
-  type DesignStyleSort,
-  type FamilyFilter,
-  type ThemeFilter
-} from '@workbench/appearance'
 
 /** 随包数据的地址：用相对基址，`http://` 与 `tauri://` 两种运行方式下落到同一处 */
 const DATA_URL = `${import.meta.env.BASE_URL}design-styles.json`
@@ -64,28 +53,30 @@ export const useStylesStore = defineStore('styles', () => {
           query: query.value,
           theme: theme.value,
           family: family.value,
-          category: category.value
+          category: category.value,
         },
-        (style) => haystacks.value.get(style.brand) ?? ''
+        style => haystacks.value.get(style.brand) ?? '',
       ),
-      sort.value
-    )
+      sort.value,
+    ),
   )
 
   /** 工具带上的计数：筛过之后剩几套 / 一共几套 */
   const summary = computed(() => {
-    if (!styles.value.length) return ''
-    if (visible.value.length === styles.value.length) return `${styles.value.length} 套设计`
+    if (!styles.value.length)
+      return ''
+    if (visible.value.length === styles.value.length)
+      return `${styles.value.length} 套设计`
     return `${visible.value.length} / ${styles.value.length} 套`
   })
 
   /** 有没有在筛：空态里要靠它区分「筛没了」与「读不出来」 */
   const filtering = computed(
     () =>
-      Boolean(query.value.trim()) ||
-      theme.value !== 'all' ||
-      family.value !== 'all' ||
-      category.value !== 'all'
+      Boolean(query.value.trim())
+      || theme.value !== 'all'
+      || family.value !== 'all'
+      || category.value !== 'all',
   )
 
   /** 色系与分类的候选由数据现算，不铺空档 —— 点了没有任何结果的档位不该出现在界面上 */
@@ -106,18 +97,23 @@ export const useStylesStore = defineStore('styles', () => {
    * 再叠一个 toast 是同一句话说两遍。
    */
   async function init(): Promise<void> {
-    if (loaded.value || loading.value) return
+    if (loaded.value || loading.value)
+      return
     loading.value = true
     loadError.value = ''
     try {
       const response = await fetch(DATA_URL)
-      if (!response.ok) throw new Error(String(response.status))
+      if (!response.ok)
+        throw new Error(String(response.status))
       styles.value = sanitizeDesignStyles(await response.json())
-      if (!styles.value.length) throw new Error('empty')
+      if (!styles.value.length)
+        throw new Error('empty')
       loaded.value = true
-    } catch (error) {
+    }
+    catch (error) {
       loadError.value = error instanceof Error && error.message !== 'empty' ? error.message : ''
-    } finally {
+    }
+    finally {
       loading.value = false
     }
   }
@@ -158,7 +154,7 @@ export const useStylesStore = defineStore('styles', () => {
     setTheme,
     setFamily,
     setCategory,
-    setSort
+    setSort,
   }
 })
 

@@ -38,7 +38,7 @@ export const ACCENT_PRESETS = [
   '#7c3aed',
   '#be185d',
   '#0e7490',
-  '#b45309'
+  '#b45309',
 ] as const
 
 /**
@@ -54,7 +54,7 @@ export const ACCENT_VARIABLE_NAMES = [
   '--el-color-primary-light-9',
   '--el-color-primary-dark-2',
   '--el-color-white',
-  '--bg-selected'
+  '--bg-selected',
 ] as const
 
 export type AccentVariableName = (typeof ACCENT_VARIABLE_NAMES)[number]
@@ -174,8 +174,10 @@ export function contrastRatio(a: string, b: string): number {
  * —— 他挑了一个浅灰底还坚持要白字，那是他的事，我们只负责照做。
  */
 export function inkOnAccent(color: string, mode: AccentInkMode = ACCENT_INK_DEFAULT): string {
-  if (mode === 'white') return WHITE
-  if (mode === 'dark') return DARK_INK
+  if (mode === 'white')
+    return WHITE
+  if (mode === 'dark')
+    return DARK_INK
 
   return contrastRatio(color, WHITE) >= WHITE_INK_FLOOR ? WHITE : DARK_INK
 }
@@ -191,10 +193,11 @@ export function inkOnAccent(color: string, mode: AccentInkMode = ACCENT_INK_DEFA
 export function accentVariables(
   color: unknown,
   theme: 'light' | 'dark',
-  inkMode: AccentInkMode = ACCENT_INK_DEFAULT
+  inkMode: AccentInkMode = ACCENT_INK_DEFAULT,
 ): AccentVariables {
   const hex = sanitizeAccentColor(color)
-  if (!hex) return {}
+  if (!hex)
+    return {}
 
   const blend = theme === 'dark' ? DARK_BLEND : LIGHT_BLEND
   const deep = theme === 'dark' ? WHITE : '#000000'
@@ -209,6 +212,6 @@ export function accentVariables(
     '--el-color-primary-light-9': mixHex(hex, blend, 0.9),
     '--el-color-primary-dark-2': mixHex(hex, deep, 0.2),
     '--el-color-white': inkOnAccent(hex, inkMode),
-    '--bg-selected': mixHex(hex, blend, selected)
+    '--bg-selected': mixHex(hex, blend, selected),
   }
 }

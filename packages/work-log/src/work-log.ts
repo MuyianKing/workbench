@@ -42,7 +42,7 @@ export type WorkLogStatus = (typeof WORK_STATUSES)[number]
 
 export const WORK_STATUS_LABELS: Record<WorkLogStatus, string> = {
   done: '已完成',
-  todo: '待办'
+  todo: '待办',
 }
 
 export const WORK_STATUS_DEFAULT: WorkLogStatus = 'done'
@@ -95,7 +95,7 @@ export const WORK_RANGE_LABELS: Record<WorkRange, string> = {
   today: '今天',
   yesterday: '昨天',
   week: '本周',
-  month: '本月'
+  month: '本月',
 }
 
 /** 每页显示几天（不是几条）：一天的多条记录不该被分页切开 */
@@ -115,7 +115,7 @@ export type WorkSort = (typeof WORK_SORTS)[number]
 
 export const WORK_SORT_LABELS: Record<WorkSort, string> = {
   time: '时间',
-  project: '项目'
+  project: '项目',
 }
 
 export function isWorkSort(value: unknown): value is WorkSort {
@@ -173,17 +173,20 @@ function stamp(value: unknown, fallback: number): number {
 export function sanitizeWorkLogEntry(
   raw: unknown,
   uuid: () => string,
-  now: number = Date.now()
+  now: number = Date.now(),
 ): WorkLogEntry | null {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw))
+    return null
 
   const input = raw as Partial<WorkLogEntry>
   const content = text(input.content)
-  if (!content) return null
+  if (!content)
+    return null
 
   const createdAt = stamp(input.createdAt, now)
   const date = isDateKey(input.date) ? input.date : dayKey(createdAt)
-  if (!date) return null
+  if (!date)
+    return null
 
   const id = text(input.id)
   const projectId = text(input.projectId)
@@ -197,7 +200,7 @@ export function sanitizeWorkLogEntry(
     // 老数据文件里没有这个字段 —— 缺了就是「已完成」，界面因此不会把它标成待办
     status: sanitizeWorkLogStatus(input.status),
     createdAt,
-    updatedAt: stamp(input.updatedAt, createdAt)
+    updatedAt: stamp(input.updatedAt, createdAt),
   }
 }
 
@@ -208,7 +211,7 @@ export function sanitizeWorkLogEntry(
 export function parseWorkLog(
   raw: unknown,
   uuid: () => string,
-  now: number = Date.now()
+  now: number = Date.now(),
 ): WorkLogFile {
   const parsed = (raw ?? {}) as Partial<WorkLogFile>
   const source = Array.isArray(parsed.entries) ? parsed.entries : []
@@ -217,7 +220,8 @@ export function parseWorkLog(
   const seen = new Set<string>()
   for (const item of source) {
     const entry = sanitizeWorkLogEntry(item, uuid, now)
-    if (!entry || seen.has(entry.id)) continue
+    if (!entry || seen.has(entry.id))
+      continue
     seen.add(entry.id)
     entries.push(entry)
   }
@@ -231,13 +235,15 @@ export function parseWorkLog(
 export function createWorkLogEntry(
   input: WorkLogInput,
   uuid: () => string,
-  now: number = Date.now()
+  now: number = Date.now(),
 ): WorkLogEntry | null {
   const content = text(input.content)
-  if (!content) return null
+  if (!content)
+    return null
 
   const date = isDateKey(input.date) ? input.date : dayKey(now)
-  if (!date) return null
+  if (!date)
+    return null
 
   const projectId = text(input.projectId)
   return {
@@ -248,7 +254,7 @@ export function createWorkLogEntry(
     // 不传就是「已完成」：写下这条时事情多半已经做完了
     status: sanitizeWorkLogStatus(input.status),
     createdAt: now,
-    updatedAt: now
+    updatedAt: now,
   }
 }
 
@@ -262,7 +268,7 @@ export function createWorkLogEntry(
 export function patchWorkLogEntry(
   entry: WorkLogEntry,
   patch: WorkLogPatch,
-  now: number = Date.now()
+  now: number = Date.now(),
 ): WorkLogEntry {
   const content = patch.content === undefined ? entry.content : text(patch.content)
   // 必填项被清空时按无效处理：保持原值，而不是存下一条空记录
@@ -271,21 +277,21 @@ export function patchWorkLogEntry(
   const nextDate = patch.date === undefined ? entry.date : patch.date
   const date = isDateKey(nextDate) ? nextDate : entry.date
 
-  const status =
-    patch.status === undefined ? entry.status : sanitizeWorkLogStatus(patch.status)
+  const status
+    = patch.status === undefined ? entry.status : sanitizeWorkLogStatus(patch.status)
 
-  const projectId =
-    patch.projectId === undefined
+  const projectId
+    = patch.projectId === undefined
       ? entry.projectId
       : patch.projectId === null || !text(patch.projectId)
         ? undefined
         : text(patch.projectId)
 
   if (
-    nextContent === entry.content &&
-    date === entry.date &&
-    projectId === entry.projectId &&
-    status === entry.status
+    nextContent === entry.content
+    && date === entry.date
+    && projectId === entry.projectId
+    && status === entry.status
   ) {
     return entry
   }
@@ -297,7 +303,7 @@ export function patchWorkLogEntry(
     content: nextContent,
     status,
     createdAt: entry.createdAt,
-    updatedAt: now
+    updatedAt: now,
   }
 }
 
@@ -312,7 +318,8 @@ export interface WorkLogDay {
 
 /** 日期键 → 当天 00:00（本地时区）；键非法时返回 Invalid Date，调用方自己兜 */
 export function dateOfDayKey(day: string): Date {
-  if (!isDateKey(day)) return new Date(NaN)
+  if (!isDateKey(day))
+    return new Date(NaN)
   const [year, month, date] = day.split('-').map(Number)
   return new Date(year, month - 1, date)
 }
@@ -323,7 +330,7 @@ export function dateOfDayKey(day: string): Date {
  * 「本周」从**周一**起算：项目里另一处 startOfWeek 是按周日切的（贡献图那一列的起点），
  * 那是网格的排版约定，跟用户嘴里的「本周」不是一回事，别把两者合并。
  */
-export function rangeBounds(range: WorkRange, now: number): { from: string; to: string } {
+export function rangeBounds(range: WorkRange, now: number): { from: string, to: string } {
   const today = startOfDay(now)
 
   switch (range) {
@@ -356,13 +363,14 @@ export function rangeBounds(range: WorkRange, now: number): { from: string; to: 
 export function timelineOf(
   entries: readonly WorkLogEntry[],
   range: WorkRange,
-  now: number
+  now: number,
 ): WorkLogDay[] {
   const byDay = new Map<string, WorkLogEntry[]>()
 
   for (const entry of entriesInRange(entries, range, now)) {
     const group = byDay.get(entry.date)
-    if (group) group.push(entry)
+    if (group)
+      group.push(entry)
     else byDay.set(entry.date, [entry])
   }
 
@@ -399,9 +407,9 @@ export function groupByProject(
   entries: readonly WorkLogEntry[],
   range: WorkRange,
   now: number,
-  projects: readonly WorkLogProjectRef[]
+  projects: readonly WorkLogProjectRef[],
 ): WorkLogProjectGroup[] {
-  const known = new Map(projects.map((project) => [project.id, project.name]))
+  const known = new Map(projects.map(project => [project.id, project.name]))
   const groups = new Map<string, WorkLogEntry[]>()
 
   for (const entry of entriesInRange(entries, range, now)) {
@@ -411,7 +419,8 @@ export function groupByProject(
         ? entry.projectId
         : DELETED_PROJECT_ID
     const group = groups.get(key)
-    if (group) group.push(entry)
+    if (group)
+      group.push(entry)
     else groups.set(key, [entry])
   }
 
@@ -421,14 +430,15 @@ export function groupByProject(
   return [...groups.entries()]
     .sort((a, b) => {
       const rank = rankOf(a[0]) - rankOf(b[0])
-      if (rank !== 0) return rank
+      if (rank !== 0)
+        return rank
       const left = known.get(a[0]) ?? ''
       const right = known.get(b[0]) ?? ''
       return left.localeCompare(right)
     })
     .map(([key, list]) => ({
       projectId: key === '' ? null : key,
-      entries: list.slice().sort(byRecentFirst)
+      entries: list.slice().sort(byRecentFirst),
     }))
 }
 
@@ -436,26 +446,27 @@ export function groupByProject(
 function entriesInRange(
   entries: readonly WorkLogEntry[],
   range: WorkRange,
-  now: number
+  now: number,
 ): WorkLogEntry[] {
   const { from, to } = rangeBounds(range, now)
-  return entries.filter((entry) => entry.date >= from && entry.date <= to)
+  return entries.filter(entry => entry.date >= from && entry.date <= to)
 }
 
 /** 从新到旧：先比日期，同一天再比写入时间 */
 function byRecentFirst(a: WorkLogEntry, b: WorkLogEntry): number {
-  if (a.date !== b.date) return a.date < b.date ? 1 : -1
+  if (a.date !== b.date)
+    return a.date < b.date ? 1 : -1
   return b.createdAt - a.createdAt
 }
 
 /** 某一天里**已完成**的记录，新的在前 —— 首页「今日完成」那张卡片的数据源 */
 export function completedEntriesOn(
   entries: readonly WorkLogEntry[],
-  day: string
+  day: string,
 ): WorkLogEntry[] {
   return entries
     // 待办是还欠着的，不算进「今天做完了什么」
-    .filter((entry) => entry.date === day && entry.status === 'done')
+    .filter(entry => entry.date === day && entry.status === 'done')
     .sort(byRecentFirst)
 }
 
@@ -494,17 +505,18 @@ export interface WorkLogDayMeta {
 /** 一天在时间轴上的标题：日期 + 星期 + 相对今天。 */
 export function dayMeta(day: string, now: number): WorkLogDayMeta {
   const date = dateOfDayKey(day)
-  if (Number.isNaN(date.getTime())) return { title: day, weekday: '', relative: '' }
+  if (Number.isNaN(date.getTime()))
+    return { title: day, weekday: '', relative: '' }
 
   const diff = Math.round(
-    (startOfDay(date).getTime() - startOfDay(now).getTime()) / 86_400_000
+    (startOfDay(date).getTime() - startOfDay(now).getTime()) / 86_400_000,
   )
-  const relative =
-    diff === 0 ? '今天' : diff === -1 ? '昨天' : diff === -2 ? '前天' : diff === 1 ? '明天' : ''
+  const relative
+    = diff === 0 ? '今天' : diff === -1 ? '昨天' : diff === -2 ? '前天' : diff === 1 ? '明天' : ''
 
   return {
     title: `${date.getMonth() + 1}月${date.getDate()}日`,
     weekday: WEEKDAY_LABELS[date.getDay()],
-    relative
+    relative,
   }
 }

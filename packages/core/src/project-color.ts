@@ -35,7 +35,7 @@ export const PROJECT_COLOR_LABELS: Record<ProjectColorPreset, string> = {
   success: '成功',
   warning: '警告',
   danger: '危险',
-  info: '信息'
+  info: '信息',
 }
 
 /** 自定义色在界面上的名字 */
@@ -56,11 +56,13 @@ export function isProjectColorPreset(value: unknown): value is ProjectColorPrese
  * 设计参考库共用），别处不要再写同一条正则。
  */
 export function sanitizeHexColor(value: unknown): string | null {
-  if (typeof value !== 'string') return null
+  if (typeof value !== 'string')
+    return null
   const matched = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(value)
-  if (!matched) return null
+  if (!matched)
+    return null
   const digits = matched[1].toLowerCase()
-  const full = digits.length === 3 ? [...digits].map((d) => d + d).join('') : digits
+  const full = digits.length === 3 ? [...digits].map(d => d + d).join('') : digits
   return `#${full}`
 }
 
@@ -74,7 +76,8 @@ export function isProjectColor(value: unknown): value is ProjectColor {
  * 手改坏的数据文件不该把 `var(--el-color-红色)` 这种东西送进样式表。
  */
 export function sanitizeProjectColor(value: unknown): ProjectColor | undefined {
-  if (isProjectColorPreset(value)) return value
+  if (isProjectColorPreset(value))
+    return value
   const hex = sanitizeHexColor(value)
   return hex ? (hex as ProjectColor) : undefined
 }
@@ -94,7 +97,8 @@ export function projectColorVar(color: ProjectColor): string {
 export function nextProjectColor(used: readonly (ProjectColor | undefined)[]): ProjectColorPreset {
   const counts = new Map<ProjectColorPreset, number>()
   for (const color of used) {
-    if (isProjectColorPreset(color)) counts.set(color, (counts.get(color) ?? 0) + 1)
+    if (isProjectColorPreset(color))
+      counts.set(color, (counts.get(color) ?? 0) + 1)
   }
 
   let picked: ProjectColorPreset = PROJECT_COLOR_PRESETS[0]
@@ -116,15 +120,16 @@ export function nextProjectColor(used: readonly (ProjectColor | undefined)[]): P
  * 不该藏在读取路径里（见项目 store 里 backfillProjectColors 的说明）。
  */
 export function backfillProjectColors(
-  projects: readonly { id: string; color?: ProjectColor }[]
+  projects: readonly { id: string, color?: ProjectColor }[],
 ): Record<string, ProjectColor> {
   const patch: Record<string, ProjectColor> = {}
-  let assigned: Array<ProjectColor | undefined> = projects.map((project) =>
-    sanitizeProjectColor(project.color)
+  let assigned: Array<ProjectColor | undefined> = projects.map(project =>
+    sanitizeProjectColor(project.color),
   )
 
   projects.forEach((project, index) => {
-    if (assigned[index]) return
+    if (assigned[index])
+      return
     const color = nextProjectColor(assigned)
     assigned = assigned.slice()
     assigned[index] = color

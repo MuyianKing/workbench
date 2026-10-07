@@ -1,3 +1,5 @@
+import type { VaultEntry } from '@workbench/vault'
+import { createVaultKey, encodeKeyString, parseKeyString, parseVaultFile, publicKeyOf, seal } from '@workbench/vault'
 /**
  * 保险库适配层：加解密、合并、以及同步那几轮编排。
  *
@@ -11,15 +13,6 @@
  * 各自的 `vault.json`、一个共用的远端。
  */
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import {
-  createVaultKey,
-  encodeKeyString,
-  parseKeyString,
-  parseVaultFile,
-  publicKeyOf,
-  seal,
-  type VaultEntry
-} from '@workbench/vault'
 
 /** 当前是哪台机器（决定 local / storedKey 读哪一份） */
 let machine = 'dev-a'
@@ -92,7 +85,7 @@ function bridge(): void {
               beforeRefusal = null
               return (hook ? hook() : Promise.resolve()).then(() => ({
                 pushed: false,
-                remote
+                remote,
               }))
             }
             remote = args?.content ?? null
@@ -101,8 +94,8 @@ function bridge(): void {
           default:
             return Promise.resolve(null)
         }
-      }
-    }
+      },
+    },
   }
 }
 
@@ -200,7 +193,7 @@ describe('密钥', () => {
     expect(loaded.ok).toBe(false)
   })
 
-  it('Windows Hello 那条路：验证过了才把密钥取进内存', async () => {
+  it('windows Hello 那条路：验证过了才把密钥取进内存', async () => {
     const vault = await freshModule()
     await vault.createKey(false)
     vault.lock()
@@ -224,7 +217,7 @@ describe('密钥', () => {
     expect((await vault.load()).ok).toBe(false)
   })
 
-  it('Windows 那边验不过：错误如实递回来，密钥一个字都不读', async () => {
+  it('windows 那边验不过：错误如实递回来，密钥一个字都不读', async () => {
     const vault = await freshModule()
     await vault.createKey(false)
     vault.lock()
@@ -290,9 +283,9 @@ describe('条目', () => {
     await vault.save({ id: 'a', entry: entry('A') })
     await vault.save({ id: 'b', entry: entry('B') })
 
-    const before = parseVaultFile(local['dev-a'])!.file.items.find((item) => item.id === 'b')!
+    const before = parseVaultFile(local['dev-a'])!.file.items.find(item => item.id === 'b')!
     await vault.save({ id: 'a', entry: entry('A 改过') })
-    const after = parseVaultFile(local['dev-a'])!.file.items.find((item) => item.id === 'b')!
+    const after = parseVaultFile(local['dev-a'])!.file.items.find(item => item.id === 'b')!
 
     expect(after.ct).toBe(before.ct)
     expect(after.updatedAt).toBe(before.updatedAt)
@@ -355,7 +348,7 @@ describe('同步', () => {
     await b.importKey(keyText)
     const first = await b.sync(repo)
     expect(first.ok).toBe(true)
-    expect(first.data!.records.map((record) => record.name)).toEqual(['A 的条目'])
+    expect(first.data!.records.map(record => record.name)).toEqual(['A 的条目'])
 
     // B 再加一条推上去
     await b.save({ id: 'e2', entry: entry('B 的条目') })
@@ -365,7 +358,7 @@ describe('同步', () => {
     machine = 'dev-a'
     const back = await a.sync(repo)
     expect(back.ok).toBe(true)
-    expect(back.data!.records.map((record) => record.name).sort()).toEqual(['A 的条目', 'B 的条目'])
+    expect(back.data!.records.map(record => record.name).sort()).toEqual(['A 的条目', 'B 的条目'])
     expect(back.data!.unreadable).toBe(0)
   })
 
@@ -380,7 +373,7 @@ describe('同步', () => {
       const sealed = await seal(first.key, entry(name))
       remote = {
         ...first,
-        items: [...parseVaultFile(remote)!.file.items, { id, updatedAt: Date.now() + offset, by: 'dev-z', ...sealed }]
+        items: [...parseVaultFile(remote)!.file.items, { id, updatedAt: Date.now() + offset, by: 'dev-z', ...sealed }],
       }
     }
 
@@ -392,7 +385,7 @@ describe('同步', () => {
     const result = await a.sync(repo)
     expect(result.ok).toBe(true)
     expect(result.data!.rounds).toBe(2)
-    expect(result.data!.records.map((record) => record.name).sort()).toEqual(['A 的条目', '别人的条目'])
+    expect(result.data!.records.map(record => record.name).sort()).toEqual(['A 的条目', '别人的条目'])
 
     // 两轮各自的基准：第一轮是拉回来的那份（一条），第二轮是**第一轮交回来的那份**（两条）
     // —— 走的不是最初那个 base，否则第二轮还会再被挡一次
@@ -414,12 +407,12 @@ describe('同步', () => {
       name: '解不开的条目',
       password: '',
       notes: '',
-      group: ''
+      group: '',
     })
     remote = {
       version: 1,
       key: publicKeyOf(otherKey),
-      items: [{ id: 'x1', updatedAt: 1, by: 'dev-z', ...sealed }]
+      items: [{ id: 'x1', updatedAt: 1, by: 'dev-z', ...sealed }],
     }
 
     const result = await a.sync(repo)
@@ -469,12 +462,12 @@ describe('换密钥', () => {
       name: '读不出来的',
       password: '',
       notes: '',
-      group: ''
+      group: '',
     })
     local['dev-a'] = {
       version: 1,
       key: publicKeyOf(otherKey),
-      items: [{ id: 'orphan', updatedAt: 1, by: 'dev-z', ...sealed }]
+      items: [{ id: 'orphan', updatedAt: 1, by: 'dev-z', ...sealed }],
     }
 
     await vault.createKey(true)
@@ -508,7 +501,7 @@ describe('换密钥', () => {
     // 同步一次把 A 那份也拉下来：两边合成一份
     const synced = await b.sync('git@example.com:me/sync.git')
     expect(synced.ok).toBe(true)
-    expect(synced.data!.records.map((record) => record.name).sort()).toEqual(['A 的条目', 'B 自己的'])
+    expect(synced.data!.records.map(record => record.name).sort()).toEqual(['A 的条目', 'B 自己的'])
     expect(synced.data!.unreadable).toBe(0)
   })
 
@@ -527,11 +520,11 @@ describe('换密钥', () => {
 
     expect((await b.importKey(keyText)).ok).toBe(true)
     const items = parseVaultFile(local['dev-b'])!.file.items
-    expect(items.map((item) => [item.id, item.deleted === true])).toEqual([['own', true]])
+    expect(items.map(item => [item.id, item.deleted === true])).toEqual([['own', true]])
 
     const synced = await b.sync('git@example.com:me/sync.git')
     expect(synced.ok).toBe(true)
-    expect(synced.data!.records.map((record) => record.name)).toEqual(['A 的条目'])
+    expect(synced.data!.records.map(record => record.name)).toEqual(['A 的条目'])
   })
 
   it('锁着导入同一把密钥：本机那些它解得开的条目跟着走，不全量墓碑（2026-09-30 的事故）', async () => {
@@ -549,8 +542,8 @@ describe('换密钥', () => {
       items: [
         { id: 'e1', updatedAt: 1, by: 'dev-a', ...(await seal(publicKeyOf(key), entry('拉下来的'))) },
         { id: 'old', updatedAt: 5, by: 'dev-z', deleted: true },
-        { id: 'orphan', updatedAt: 2, by: 'dev-z', ...(await seal(publicKeyOf(otherKey), entry('解不开的'))) }
-      ]
+        { id: 'orphan', updatedAt: 2, by: 'dev-z', ...(await seal(publicKeyOf(otherKey), entry('解不开的'))) },
+      ],
     }
 
     // B 没解锁（内存里没有上一把），直接导入 A 的密钥 —— 事故发生时的操作序列
@@ -560,16 +553,16 @@ describe('换密钥', () => {
 
     const loaded = await b.load()
     expect(loaded.ok).toBe(true)
-    expect(loaded.data!.records.map((record) => record.name)).toEqual(['拉下来的'])
+    expect(loaded.data!.records.map(record => record.name)).toEqual(['拉下来的'])
     // e1 活着；orphan 留墓碑；old 那枚墓碑原样保留（时间戳与删除者都不动）
     const items = parseVaultFile(local['dev-b'])!.file.items
-    expect(items.map((item) => [item.id, item.deleted === true])).toEqual([
+    expect(items.map(item => [item.id, item.deleted === true])).toEqual([
       ['e1', false],
       ['old', true],
-      ['orphan', true]
+      ['orphan', true],
     ])
-    expect(items.find((item) => item.id === 'old')!.updatedAt).toBe(5)
-    expect(items.find((item) => item.id === 'old')!.by).toBe('dev-z')
+    expect(items.find(item => item.id === 'old')!.updatedAt).toBe(5)
+    expect(items.find(item => item.id === 'old')!.by).toBe('dev-z')
   })
 
   it('换密钥不动已有墓碑的时间戳：别的机器「删除之后又改过」的判定不被搅乱', async () => {
@@ -577,10 +570,10 @@ describe('换密钥', () => {
     await vault.createKey(false)
     await vault.save({ id: 'gone', entry: entry('早就删掉的') })
     await vault.remove('gone')
-    const before = parseVaultFile(local['dev-a'])!.file.items.find((item) => item.id === 'gone')!
+    const before = parseVaultFile(local['dev-a'])!.file.items.find(item => item.id === 'gone')!
 
     await vault.createKey(true)
-    const after = parseVaultFile(local['dev-a'])!.file.items.find((item) => item.id === 'gone')!
+    const after = parseVaultFile(local['dev-a'])!.file.items.find(item => item.id === 'gone')!
     expect(after.deleted).toBe(true)
     expect(after.updatedAt).toBe(before.updatedAt)
     expect(after.by).toBe(before.by)

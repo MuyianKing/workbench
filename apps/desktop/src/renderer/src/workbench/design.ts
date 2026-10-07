@@ -15,10 +15,10 @@ import { guard, invoke } from './bridge'
 /** 把一套设计规范写到项目根目录的 DESIGN.md（同名覆盖） */
 export async function writeDesign(
   projectDir: string,
-  content: string
+  content: string,
 ): Promise<Result<DesignWriteOutcome>> {
   return guard(
     invoke<DesignWriteOutcome>('design_write', { projectDir: projectDir.trim(), content }),
-    '写入 DESIGN.md 失败'
+    '写入 DESIGN.md 失败',
   )
 }

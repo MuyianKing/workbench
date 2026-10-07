@@ -1,4 +1,9 @@
 <script setup lang="ts">
+import type { AccentInkMode } from '@workbench/appearance'
+import type { ThemeOrigin } from '@/theme-transition'
+import type { SyncDeviceInfo, ThemeSource, TopBarStyle } from '@/types'
+import { CircleClose, Picture } from '@element-plus/icons-vue'
+import { ACCENT_PRESETS, BACKGROUND_OPACITY_MAX, BACKGROUND_OPACITY_MIN, builtinIdOf, CARD_GAP_MAX, CARD_GAP_MIN, CARD_OPACITY_MAX, CARD_OPACITY_MIN } from '@workbench/appearance'
 /**
  * 设置 · 外观：看起来什么样。
  *
@@ -11,43 +16,32 @@
  * （纯本地读，不联网），用户很可能刚从首页点过同步按钮再进来。
  */
 import { computed, ref, watch } from 'vue'
-import { CircleClose, Picture } from '@element-plus/icons-vue'
-import { ACCENT_PRESETS, type AccentInkMode } from '@workbench/appearance'
-import { CARD_GAP_MAX, CARD_GAP_MIN } from '@workbench/appearance'
-import {
-  BACKGROUND_OPACITY_MAX,
-  BACKGROUND_OPACITY_MIN
-} from '@workbench/appearance'
-import { builtinIdOf } from '@workbench/appearance'
-import { CARD_OPACITY_MAX, CARD_OPACITY_MIN } from '@workbench/appearance'
 import { formatRelative } from '@/format'
-import { useSettingsStore } from '@/stores/settings'
 import { confirmAction } from '@/notify'
-import type { SyncDeviceInfo, ThemeSource, TopBarStyle } from '@/types'
-import type { ThemeOrigin } from '@/theme-transition'
+import { useSettingsStore } from '@/stores/settings'
 
-const props = defineProps<{ open: boolean; active: boolean }>()
+const props = defineProps<{ open: boolean, active: boolean }>()
 
 const settings = useSettingsStore()
 
-const themes: Array<{ value: ThemeSource; label: string }> = [
+const themes: Array<{ value: ThemeSource, label: string }> = [
   { value: 'system', label: '跟随系统' },
   { value: 'light', label: '亮色' },
-  { value: 'dark', label: '暗色' }
+  { value: 'dark', label: '暗色' },
 ]
 
 /** 顶部三条栏的三种处理方式，顺序与设置界面上的一致 */
-const topBarStyles: Array<{ value: TopBarStyle; label: string }> = [
+const topBarStyles: Array<{ value: TopBarStyle, label: string }> = [
   { value: 'band', label: '正常' },
   { value: 'glass', label: '毛玻璃' },
-  { value: 'clear', label: '透明' }
+  { value: 'clear', label: '透明' },
 ]
 
 /** 主题色上文字的三种取法，顺序与设置界面上的一致 */
-const accentInkModes: Array<{ value: AccentInkMode; label: string }> = [
+const accentInkModes: Array<{ value: AccentInkMode, label: string }> = [
   { value: 'auto', label: '自动' },
   { value: 'white', label: '白字' },
-  { value: 'dark', label: '黑字' }
+  { value: 'dark', label: '黑字' },
 ]
 
 /**
@@ -55,8 +49,10 @@ const accentInkModes: Array<{ value: AccentInkMode; label: string }> = [
  * 后者是图片被删 / 换了格式，得让用户知道该重新选一张。
  */
 const backgroundHint = computed(() => {
-  if (settings.backgroundImage) return ''
-  if (settings.backgroundError) return '图片读不出来'
+  if (settings.backgroundImage)
+    return ''
+  if (settings.backgroundError)
+    return '图片读不出来'
   return settings.settings.workspaceBackground ? '读取中…' : '未设置'
 })
 
@@ -65,14 +61,14 @@ const backgroundHint = computed(() => {
  * 但「到底设的是哪个文件」还得能查到 —— 鼠标停在预览上给全名。
  */
 const backgroundTitle = computed(
-  () => settings.backgroundName || settings.settings.workspaceBackground || '还没有选择背景图'
+  () => settings.backgroundName || settings.settings.workspaceBackground || '还没有选择背景图',
 )
 
 /** 当前背景是自选的本地文件（不是内置壁纸），给「本地图片」那块一个选中态 */
 const isLocalBackground = computed(
   () =>
-    !!settings.settings.workspaceBackground &&
-    builtinIdOf(settings.settings.workspaceBackground) === null
+    !!settings.settings.workspaceBackground
+    && builtinIdOf(settings.settings.workspaceBackground) === null,
 )
 
 /**
@@ -86,20 +82,20 @@ const VEIL_PRESETS = [
   '#eef1ec',
   '#e9edf2',
   '#f6ece0',
-  '#2a2620'
+  '#2a2620',
 ]
 
 const veilLabel = computed(() =>
   settings.settings.workspaceBackgroundVeil
     ? settings.settings.workspaceBackgroundVeil.toUpperCase()
-    : '默认（主题画布色）'
+    : '默认（主题画布色）',
 )
 
 const accentPresets: string[] = [...ACCENT_PRESETS]
 
 /** 主题色当前值：留空就是界面原本的中性色，得说清楚「没配」不等于没生效 */
 const accentLabel = computed(() =>
-  settings.settings.accentColor ? settings.settings.accentColor.toUpperCase() : '默认（中性色）'
+  settings.settings.accentColor ? settings.settings.accentColor.toUpperCase() : '默认（中性色）',
 )
 
 /**
@@ -110,12 +106,13 @@ const accentLabel = computed(() =>
  */
 async function applyAppearance(device: SyncDeviceInfo): Promise<void> {
   const agreed = await confirmAction(
-    `把本机的外观与首页布局换成「${device.name}」那一套？本机现在这份仍然留在仓库里，随时可以再取回来。` +
-      '对方若用的是它本机上的图片作背景，这边读不出来，需要重新选一张。',
+    `把本机的外观与首页布局换成「${device.name}」那一套？本机现在这份仍然留在仓库里，随时可以再取回来。`
+    + '对方若用的是它本机上的图片作背景，这边读不出来，需要重新选一张。',
     '应用外观配置',
-    { confirmButtonText: '应用' }
+    { confirmButtonText: '应用' },
   )
-  if (!agreed) return
+  if (!agreed)
+    return
   await settings.applySyncAppearance(device.id)
 }
 
@@ -133,7 +130,8 @@ async function syncAppearanceNow(): Promise<void> {
   syncing.value = true
   try {
     await settings.syncAppearanceNow()
-  } finally {
+  }
+  finally {
     syncing.value = false
     await settings.loadSyncDevices()
   }
@@ -164,15 +162,17 @@ function changeTheme(value: ThemeSource): void {
 }
 
 function changeCardGap(value: number | undefined): void {
-  if (typeof value === 'number') void settings.setCardGap(value)
+  if (typeof value === 'number')
+    void settings.setCardGap(value)
 }
 
 // 打开弹窗、或切回这一屏时重读设备列表（纯本地读，见文件头）
 watch(
   () => props.open && props.active,
   (current) => {
-    if (current) void settings.loadSyncDevices()
-  }
+    if (current)
+      void settings.loadSyncDevices()
+  },
 )
 </script>
 
@@ -188,7 +188,9 @@ watch(
     <div v-if="settings.settings.tokenSyncRepo" class="block">
       <!-- 同步是「整块一起动」，所以按钮跟着标题走：放到底部会与列表最后一项混在一起 -->
       <div class="block__head">
-        <h3 class="block__title">从别的机器取外观</h3>
+        <h3 class="block__title">
+          从别的机器取外观
+        </h3>
         <el-button size="small" :loading="syncing" @click="syncAppearanceNow">
           同步一次
         </el-button>
@@ -287,7 +289,7 @@ watch(
 
         <div class="bg">
           <div class="bg__preview" :title="backgroundTitle">
-            <img v-if="settings.backgroundImage" :src="settings.backgroundImage" alt="工作区背景预览" />
+            <img v-if="settings.backgroundImage" :src="settings.backgroundImage" alt="工作区背景预览">
             <span v-else class="bg__empty">{{ backgroundHint }}</span>
           </div>
 
@@ -328,7 +330,9 @@ watch(
               </el-button>
             </div>
 
-            <p v-if="settings.backgroundError" class="bg__error">{{ settings.backgroundError }}</p>
+            <p v-if="settings.backgroundError" class="bg__error">
+              {{ settings.backgroundError }}
+            </p>
           </div>
         </div>
 
@@ -353,7 +357,7 @@ watch(
               @click="settings.useWallpaper(item.reference)"
             >
               <span class="wallpaper__thumb">
-                <img v-if="item.thumbnail" :src="item.thumbnail" alt="" />
+                <img v-if="item.thumbnail" :src="item.thumbnail" alt="">
                 <span v-else class="wallpaper__name">读不出来</span>
               </span>
               <span class="wallpaper__name truncate">{{ item.id }}</span>

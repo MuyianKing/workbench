@@ -1,3 +1,11 @@
+import type { AiLogLine } from '@workbench/ai'
+import type { KbCleanPhase, KbEntryMeta, KbIndexInfo, KbIssue, KbRawItem, KbRawViewKind, KbRepoState, KbScanEntry } from '@workbench/kb'
+
+import { confirmFrame, piLaunch, writtenEntries } from '@workbench/ai'
+import { KB_DIR, KB_INDEX_REL, KB_RAW_DIR, kbCleanPrompt, kbEntryFiles, kbEntryLinks, kbLint, kbRawFiles, kbRawViewKind, kbStats, kbTagCounts, matchKbRawStatus, normalizeKbSource, parseKbFrontmatter, parseKbIndex, resolveKbLink, splitCleanWrites, todayIsoDate } from '@workbench/kb'
+
+import { noteRootName, sanitizeNoteRoot } from '@workbench/notes'
+import { defineStore } from 'pinia'
 /**
  * 知识库：清单、条目、原始数据与入库状态的编排，外加**清洗**这件事的全程驱动。
  *
@@ -13,12 +21,6 @@
  * **站内链接**（条目正文里点一条 → followLink 解析成条目或原始数据，再走上面那两条开口）。
  */
 import { computed, ref, watch } from 'vue'
-import { defineStore } from 'pinia'
-import { noteRootName, sanitizeNoteRoot } from '@workbench/notes'
-import { confirmFrame, piLaunch, writtenEntries, type AiLogLine } from '@workbench/ai'
-import { KB_DIR, KB_INDEX_REL, KB_RAW_DIR, kbEntryFiles, kbRawFiles, kbRawViewKind, kbStats, kbTagCounts, matchKbRawStatus, normalizeKbSource, parseKbFrontmatter, parseKbIndex, todayIsoDate, type KbEntryMeta, type KbIndexInfo, type KbRawItem, type KbRawViewKind, type KbRepoState, type KbScanEntry } from '@workbench/kb'
-import { kbEntryLinks, kbLint, resolveKbLink, type KbIssue } from '@workbench/kb'
-import { kbCleanPrompt, splitCleanWrites, type KbCleanPhase } from '@workbench/kb'
 import { notifyError, notifyInfo, notifySuccess } from '@/notify'
 import { useAiStore } from '@/stores/ai'
 import { useAiSkillsStore } from '@/stores/ai-skills'
@@ -65,11 +67,11 @@ export const useKbStore = defineStore('kb', () => {
   /** 重建索引正在进行（那颗按钮转圈用） */
   const rebuilding = ref(false)
 
-  const activeEntry = computed(() => entries.value.find((item) => item.rel === activeRel.value) ?? null)
+  const activeEntry = computed(() => entries.value.find(item => item.rel === activeRel.value) ?? null)
   /** 正在查看的原始数据（清单里那一条）与它该怎么看（按后缀分：渲染 / 纯文本 / 交出去） */
-  const activeRaw = computed(() => rawItems.value.find((item) => item.rel === activeRawRel.value) ?? null)
+  const activeRaw = computed(() => rawItems.value.find(item => item.rel === activeRawRel.value) ?? null)
   const activeRawKind = computed<KbRawViewKind>(() =>
-    activeRaw.value ? kbRawViewKind(activeRaw.value.name) : 'external'
+    activeRaw.value ? kbRawViewKind(activeRaw.value.name) : 'external',
   )
   const stats = computed(() => kbStats(entries.value, rawItems.value))
   const tagCounts = computed(() => kbTagCounts(entries.value))
@@ -79,10 +81,10 @@ export const useKbStore = defineStore('kb', () => {
   /** 选的文件夹像不像一个知识库：两块布局（data/raw、kb）一块都没有就不是 */
   const looksLikeKb = computed(
     () =>
-      scanEntries.value.some((item) => item.rel === KB_DIR || item.rel.startsWith(`${KB_DIR}/`)) ||
-      scanEntries.value.some(
-        (item) => item.rel === KB_RAW_DIR || item.rel.startsWith(`${KB_RAW_DIR}/`)
-      )
+      scanEntries.value.some(item => item.rel === KB_DIR || item.rel.startsWith(`${KB_DIR}/`))
+      || scanEntries.value.some(
+        item => item.rel === KB_RAW_DIR || item.rel.startsWith(`${KB_RAW_DIR}/`),
+      ),
   )
 
   function reset(): void {
@@ -141,7 +143,8 @@ export const useKbStore = defineStore('kb', () => {
     const metas = await Promise.all(
       kbEntryFiles(result.data).map(async (file): Promise<KbEntryMeta | null> => {
         const read = await window.workbench.kbRead(current, file.rel)
-        if (!read.ok || typeof read.data !== 'string') return null
+        if (!read.ok || typeof read.data !== 'string')
+          return null
         const fm = parseKbFrontmatter(read.data)
         const stem = file.name.replace(/\.md$/i, '')
         return {
@@ -155,24 +158,24 @@ export const useKbStore = defineStore('kb', () => {
           source: normalizeKbSource(fm.source),
           // 正文里的站内链接在这里一次读出来带着走：巡检与站内跳转都不必再读一遍文件
           links: kbEntryLinks(read.data),
-          mtimeMs: file.mtimeMs
+          mtimeMs: file.mtimeMs,
         }
-      })
+      }),
     )
     entries.value = metas.filter((meta): meta is KbEntryMeta => meta !== null)
     rawItems.value = matchKbRawStatus(kbRawFiles(result.data), entries.value)
 
     // 索引：读不到 / 认不出都按「还没生成」处理，不是错误（清单不依赖它）
     const indexRead = await window.workbench.kbRead(current, KB_INDEX_REL)
-    indexInfo.value =
-      indexRead.ok && typeof indexRead.data === 'string' ? parseKbIndex(indexRead.data) : null
+    indexInfo.value
+      = indexRead.ok && typeof indexRead.data === 'string' ? parseKbIndex(indexRead.data) : null
 
     // 打开着的条目没了（整理重排 / 换了文件夹）：收起来，别挂着一个空壳。
     // 正在查看的原始数据同理 —— 它清走 / 重洗后文件可能就没了
-    if (activeRel.value && !entries.value.some((item) => item.rel === activeRel.value)) {
+    if (activeRel.value && !entries.value.some(item => item.rel === activeRel.value)) {
       closeActive()
     }
-    if (activeRawRel.value && !rawItems.value.some((item) => item.rel === activeRawRel.value)) {
+    if (activeRawRel.value && !rawItems.value.some(item => item.rel === activeRawRel.value)) {
       closeRaw()
     }
     loaded.value = true
@@ -197,7 +200,8 @@ export const useKbStore = defineStore('kb', () => {
 
   /** 首次进页面扫一次（KeepAlive 下来回切页不重挂载，这里挡住重复扫描） */
   async function init(): Promise<void> {
-    if (started && ready) return
+    if (started && ready)
+      return
     started = true
     await reload()
   }
@@ -205,7 +209,8 @@ export const useKbStore = defineStore('kb', () => {
   // 知识库文件夹变了（选了新目录）：全部重新认一遍。正在清洗的话先把它按停 ——
   // 那条 Pi 会话的工作目录还是旧文件夹，让它跑完只会把旧目录的条目写进来
   watch(root, () => {
-    if (!started) return
+    if (!started)
+      return
     ready = false
     closeActive()
     closeRaw()
@@ -222,7 +227,8 @@ export const useKbStore = defineStore('kb', () => {
   /** 记下用户挑的知识库文件夹（页面那颗「选择知识库文件夹」用它）。不搬动任何文件 */
   async function setRoot(dir: string): Promise<boolean> {
     const target = sanitizeNoteRoot(dir)
-    if (!target) return false
+    if (!target)
+      return false
     return settings.updateSettings({ kbDir: target })
   }
 
@@ -239,7 +245,8 @@ export const useKbStore = defineStore('kb', () => {
     activeLoading.value = true
     const result = await window.workbench.kbRead(root.value, rel)
     activeLoading.value = false
-    if (activeRel.value !== rel) return
+    if (activeRel.value !== rel)
+      return
 
     if (!result.ok || typeof result.data !== 'string') {
       activeError.value = result.error ?? '读取条目失败'
@@ -265,11 +272,11 @@ export const useKbStore = defineStore('kb', () => {
       notifyInfo('这个链接跳不到知识库里')
       return
     }
-    if (entries.value.some((item) => item.rel === rel)) {
+    if (entries.value.some(item => item.rel === rel)) {
       await openEntry(rel)
       return
     }
-    if (rawItems.value.some((item) => item.rel === rel)) {
+    if (rawItems.value.some(item => item.rel === rel)) {
       await openRaw(rel)
       return
     }
@@ -283,17 +290,19 @@ export const useKbStore = defineStore('kb', () => {
    */
   async function openRaw(rel: string): Promise<void> {
     closeActive()
-    const item = rawItems.value.find((raw) => raw.rel === rel)
+    const item = rawItems.value.find(raw => raw.rel === rel)
     activeRawRel.value = rel
     activeRawError.value = ''
     activeRawContent.value = ''
 
-    if (!item || kbRawViewKind(item.name) === 'external') return
+    if (!item || kbRawViewKind(item.name) === 'external')
+      return
 
     activeRawLoading.value = true
     const result = await window.workbench.kbRead(root.value, rel)
     activeRawLoading.value = false
-    if (activeRawRel.value !== rel) return
+    if (activeRawRel.value !== rel)
+      return
 
     if (!result.ok || typeof result.data !== 'string') {
       activeRawError.value = result.error ?? '读取文件失败'
@@ -326,9 +335,12 @@ export const useKbStore = defineStore('kb', () => {
 
       await reload()
       // 打开着的东西重读一遍：远端 / 清洗可能刚改过它们
-      if (activeRel.value) await openEntry(activeRel.value)
-      else if (activeRawRel.value) await openRaw(activeRawRel.value)
-    } finally {
+      if (activeRel.value)
+        await openEntry(activeRel.value)
+      else if (activeRawRel.value)
+        await openRaw(activeRawRel.value)
+    }
+    finally {
       syncing.value = false
     }
   }
@@ -342,7 +354,8 @@ export const useKbStore = defineStore('kb', () => {
    */
   async function rebuildIndex(): Promise<void> {
     const current = root.value
-    if (!current) return
+    if (!current)
+      return
 
     rebuilding.value = true
     try {
@@ -353,7 +366,8 @@ export const useKbStore = defineStore('kb', () => {
       }
       notifySuccess(`目录与索引已重建（${result.data.count} 条）`)
       await reload()
-    } finally {
+    }
+    finally {
       rebuilding.value = false
     }
   }
@@ -380,7 +394,7 @@ export const useKbStore = defineStore('kb', () => {
    * 与旧清单比对的是**起跑前**那份（cleanBefore）—— 跑完清单已经刷新过，拿它比会说全是新建。
    */
   const cleanWrites = computed(() =>
-    splitCleanWrites(root.value, writtenEntries(cleanLines.value), cleanBefore.value)
+    splitCleanWrites(root.value, writtenEntries(cleanLines.value), cleanBefore.value),
   )
 
   /**
@@ -390,7 +404,8 @@ export const useKbStore = defineStore('kb', () => {
    */
   function cleanBlocker(): string {
     const ai = useAiStore()
-    if (!ai.probed) return '正在探测运行环境…'
+    if (!ai.probed)
+      return '正在探测运行环境…'
     switch (ai.envGap()) {
       case 'node':
         return '这台机器的 Node 太旧：跑 Pi 需要 Node ≥ 22.19，先把 Node 升上去。'
@@ -410,13 +425,16 @@ export const useKbStore = defineStore('kb', () => {
    * `data\pi\sessions\`，可审计）。跑完自动重建索引并刷新状态。
    */
   async function startClean(): Promise<void> {
-    if (cleanBusy.value) return
+    if (cleanBusy.value)
+      return
     const dir = root.value
-    if (!dir || !loaded.value || !looksLikeKb.value) return
+    if (!dir || !loaded.value || !looksLikeKb.value)
+      return
 
     // 环境没探过先探一次（AI 页开没开过都可能）：缺什么就地明说，面板给得出拦路屏
     const ai = useAiStore()
-    if (!ai.probed) await ai.probe()
+    if (!ai.probed)
+      await ai.probe()
     const blocker = cleanBlocker()
     if (blocker) {
       cleanLines.value = []
@@ -425,8 +443,8 @@ export const useKbStore = defineStore('kb', () => {
       return
     }
 
-    const pending = rawItems.value.filter((item) => item.status === 'pending').map((item) => item.rel)
-    const stale = rawItems.value.filter((item) => item.status === 'stale').map((item) => item.rel)
+    const pending = rawItems.value.filter(item => item.status === 'pending').map(item => item.rel)
+    const stale = rawItems.value.filter(item => item.status === 'stale').map(item => item.rel)
     if (!pending.length && !stale.length) {
       notifyInfo('当前没有待处理的原始数据')
       return
@@ -436,12 +454,12 @@ export const useKbStore = defineStore('kb', () => {
     cleanSessionId = sessionId
     cleanCancelled = false
     // 收据的底：这一轮跑完要说清哪些是新建、哪些是覆盖，得先记下跑之前的清单
-    cleanBefore.value = entries.value.map((item) => item.rel)
+    cleanBefore.value = entries.value.map(item => item.rel)
     cleanLines.value = [
       {
         kind: 'info',
-        text: `开始清洗：未入库 ${pending.length} 个、有更新 ${stale.length} 个（模型 ${ai.providerLabel} · ${ai.runModel}）`
-      }
+        text: `开始清洗：未入库 ${pending.length} 个、有更新 ${stale.length} 个（模型 ${ai.providerLabel} · ${ai.runModel}）`,
+      },
     ]
     cleanError.value = ''
     cleanPhase.value = 'cleaning'
@@ -450,7 +468,7 @@ export const useKbStore = defineStore('kb', () => {
     const launch = piLaunch(
       ai.cliPath || null,
       { provider: ai.providerName, model: ai.runModel, thinking: ai.thinking },
-      sessionId
+      sessionId,
     )
 
     // 先挂回调再起进程（事件按进程 id 路由，顺序反了会丢开头那几行），见 workbench/ai.ts
@@ -469,21 +487,24 @@ export const useKbStore = defineStore('kb', () => {
         permission: 'full',
         // 技能：只带**全局那几条**（开着的）—— 清洗在知识库自己的目录里跑，那里没有
         // 「项目技能」这回事；AI 助手页当前那个目录的项目技能不该漏到这儿来
-        skills: useAiSkillsStore().globalRefs
+        skills: useAiSkillsStore().globalRefs,
       },
       {
         onLine: (line) => {
-          if (cleanSessionId !== sessionId) return
+          if (cleanSessionId !== sessionId)
+            return
           cleanLines.value = [...cleanLines.value, line]
           // agent_settled：这一轮收工。接下来是应用自己的收尾（收进程 → 重建索引）
-          if (line.kind === 'done' && !cleanCancelled) void finishClean(sessionId)
+          if (line.kind === 'done' && !cleanCancelled)
+            void finishClean(sessionId)
         },
         // 流式增量不进清洗面板：整段到位时（message_end）自然作为一行出现
         onDelta: () => {},
         // 消耗只在 AI 助手页的收据上记账（清洗面板没有「用时」那一行）
         onUsage: () => {},
         onConfirm: (confirm) => {
-          if (cleanSessionId !== sessionId) return
+          if (cleanSessionId !== sessionId)
+            return
           // 「完全访问」不加载权限扩展，确认帧本不该来；真来了（别的扩展源头）还是挡回去，
           // 不让一次没人答的询问把流程吊死
           void aiSend(procId, confirmFrame(confirm.id, false))
@@ -492,19 +513,21 @@ export const useKbStore = defineStore('kb', () => {
             {
               kind: 'info',
               text: 'Pi 想执行命令，已自动拒绝',
-              detail: confirm.message
-            }
+              detail: confirm.message,
+            },
           ]
         },
         onExit: (code) => {
-          if (cleanSessionId !== sessionId) return
+          if (cleanSessionId !== sessionId)
+            return
           // 自己收的进程（取消 / 收尾）不算事；只有「正在清洗时进程自己没了」才是失败
-          if (cleanCancelled || cleanPhase.value !== 'cleaning') return
+          if (cleanCancelled || cleanPhase.value !== 'cleaning')
+            return
           cleanPhase.value = 'failed'
-          cleanError.value =
-            code === null ? '清洗进程意外退出了' : `清洗进程退出了（退出码 ${code}），可以重试`
-        }
-      }
+          cleanError.value
+            = code === null ? '清洗进程意外退出了' : `清洗进程退出了（退出码 ${code}），可以重试`
+        },
+      },
     )
 
     if (!result.ok) {
@@ -516,7 +539,8 @@ export const useKbStore = defineStore('kb', () => {
 
   /** 清洗的收尾：收掉进程 → 重建目录与索引 → 刷新清单（打开着的条目一并重读） */
   async function finishClean(sessionId: string): Promise<void> {
-    if (cleanPhase.value !== 'cleaning' || cleanSessionId !== sessionId) return
+    if (cleanPhase.value !== 'cleaning' || cleanSessionId !== sessionId)
+      return
     cleanPhase.value = 'indexing'
     // 一次性任务不留常驻进程：一轮跑完就收（留档在盘上，不跟着进程走）
     await aiStop(aiSessionProcessId(sessionId))
@@ -535,15 +559,18 @@ export const useKbStore = defineStore('kb', () => {
       return
     }
     await reload()
-    if (activeRel.value) await openEntry(activeRel.value)
-    else if (activeRawRel.value) await openRaw(activeRawRel.value)
+    if (activeRel.value)
+      await openEntry(activeRel.value)
+    else if (activeRawRel.value)
+      await openRaw(activeRawRel.value)
     cleanPhase.value = 'done'
     notifySuccess(`清洗完成，目录与索引已重建（${built.data.count} 条）`)
   }
 
   /** 停下清洗：先走 Pi 自己的 abort（留档收得完整），不管成没成都按进程树收掉 */
   async function stopClean(): Promise<void> {
-    if (cleanPhase.value !== 'cleaning') return
+    if (cleanPhase.value !== 'cleaning')
+      return
     cleanCancelled = true
     const procId = aiSessionProcessId(cleanSessionId)
     await aiAbort(procId)
@@ -554,7 +581,8 @@ export const useKbStore = defineStore('kb', () => {
 
   /** 收起清洗面板（回到概览）。正在跑的时候不给收 —— 流程还没完 */
   function closeClean(): void {
-    if (cleanBusy.value) return
+    if (cleanBusy.value)
+      return
     cleanPhase.value = 'idle'
     cleanLines.value = []
     cleanError.value = ''
@@ -608,6 +636,6 @@ export const useKbStore = defineStore('kb', () => {
     rebuildIndex,
     startClean,
     stopClean,
-    closeClean
+    closeClean,
   }
 })

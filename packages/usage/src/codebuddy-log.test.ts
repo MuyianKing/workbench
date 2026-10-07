@@ -1,6 +1,6 @@
+import type { TokenDays } from './token-usage'
 import { describe, expect, it } from 'vitest'
 import { collectCodeBuddyLogText, createCodeBuddyParseState } from './codebuddy-log'
-import type { TokenDays } from './token-usage'
 
 /**
  * 样例行取自 CodeBuddy 扩展日志的真实形态(腾讯云代码助手*.log),id 与数值做了匿名化。
@@ -31,17 +31,17 @@ const FULL_USAGE = {
   cachedMissTokens: 22080,
   lastTokens: 25710,
   credit: 0,
-  thinkingTokens: 24
+  thinkingTokens: 24,
 }
 
-describe('CodeBuddy 日志用量解析', () => {
+describe('codeBuddy 日志用量解析', () => {
   it('经 traceId → requestId 串联后,把 usage 归到请求的模型并按天分桶', () => {
     const state = createCodeBuddyParseState()
     const days: TokenDays = {}
     collectCodeBuddyLogText(
       [modelLine('cafebabe1234', 'hy4-preview'), requestLine('cafebabe1234', 'feedface1234'), usageLine('feedface1234', FULL_USAGE)].join('\n'),
       state,
-      days
+      days,
     )
 
     const counters = days['2026-09-10']['hy4-preview']
@@ -62,10 +62,10 @@ describe('CodeBuddy 日志用量解析', () => {
         modelLine('cafebabe1234', 'hy4-preview'),
         requestLine('cafebabe1234', 'feedface1234'),
         usageLine('feedface1234', { inputTokens: 100, outputTokens: 10 }),
-        usageLine('feedface1234', { inputTokens: 200, outputTokens: 20 }, '2026-09-11')
+        usageLine('feedface1234', { inputTokens: 200, outputTokens: 20 }, '2026-09-11'),
       ].join('\n'),
       state,
-      days
+      days,
     )
 
     expect(days['2026-09-10']['hy4-preview'].inputTokens).toBe(100)
@@ -84,10 +84,10 @@ describe('CodeBuddy 日志用量解析', () => {
         requestLine('cafebabe1234', 'feedface1234'),
         requestLine('cafebabe5678', 'feedface5678'),
         usageLine('feedface5678', { inputTokens: 50, outputTokens: 5 }),
-        usageLine('feedface1234', { inputTokens: 60, outputTokens: 6 })
+        usageLine('feedface1234', { inputTokens: 60, outputTokens: 6 }),
       ].join('\n'),
       state,
-      days
+      days,
     )
 
     expect(days['2026-09-10']['hy4-preview'].inputTokens).toBe(60)
@@ -101,10 +101,10 @@ describe('CodeBuddy 日志用量解析', () => {
       [
         modelLine('cafebabe1234', 'hy4-preview'),
         // 只有 usage、没有 trace→request 映射的子请求
-        usageLine('feedface9999', { inputTokens: 70, outputTokens: 7 })
+        usageLine('feedface9999', { inputTokens: 70, outputTokens: 7 }),
       ].join('\n'),
       state,
-      days
+      days,
     )
 
     expect(days['2026-09-10']['hy4-preview'].inputTokens).toBe(70)
@@ -129,10 +129,10 @@ describe('CodeBuddy 日志用量解析', () => {
         requestLine('cafebabe1234', 'feedface1234'),
         usageLine('feedface1234', FULL_USAGE).replace('"inputTokens":25600,', '"inputTokens":"oops",'),
         `${'2026-09-10'} 19:44:47.061 [info] [BaseAgent:craft] usage: {broken`,
-        usageLine('feedface1234', FULL_USAGE, '2026-9-10')
+        usageLine('feedface1234', FULL_USAGE, '2026-9-10'),
       ].join('\n'),
       state,
-      days
+      days,
     )
 
     // 坏行不产生任何桶
@@ -144,10 +144,10 @@ describe('CodeBuddy 日志用量解析', () => {
     const days: TokenDays = {}
     collectCodeBuddyLogText(
       [modelLine('cafebabe1234', 'hy4-preview'), requestLine('cafebabe1234', 'feedface1234'), usageLine('feedface1234', { inputTokens: 0, outputTokens: 0 })].join(
-        '\n'
+        '\n',
       ),
       state,
-      days
+      days,
     )
 
     const counters = days['2026-09-10']['hy4-preview']

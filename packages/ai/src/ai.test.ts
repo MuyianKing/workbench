@@ -1,72 +1,6 @@
+import type { AiLogLine, AiProvider, AiSession } from './ai'
 import { describe, expect, it } from 'vitest'
-import {
-  AI_IMAGE_TYPES,
-  AI_MODEL_MAX,
-  AI_PERMISSION_DEFAULT,
-  AI_PERMISSION_MODES,
-  AI_PROMPT_PREFIX,
-  AI_SKILL_COMMAND,
-  AI_PROVIDER_PRESETS,
-  AI_SESSION_MAX,
-  AI_SESSION_TITLE_MAX,
-  AI_THINKING_DEFAULT,
-  AI_THINKING_LEVELS,
-  aiModelChoices,
-  aiModelFromId,
-  aiImageAccepted,
-  aiImagePayload,
-  aiPermissionLabel,
-  aiProviderPayload,
-  aiProviderReady,
-  aiSessionGroups,
-  aiTurns,
-  aiSessionTitle,
-  aiThinkingLabel,
-  aiThinkingMap,
-  builtinModelMeta,
-  confirmFrame,
-  formatDuration,
-  formatTokensShort,
-  formatUsageSummary,
-  inferModelMeta,
-  nodeSatisfiesPi,
-  parsePiConfirm,
-  parsePiDelta,
-  parsePiEvent,
-  parsePiUsage,
-  piLaunch,
-  piLaunchForDisplay,
-  pickAiActiveSession,
-  pickAiChoice,
-  pickAiThinking,
-  rememberAiSession,
-  sanitizeAiApiFormat,
-  sanitizeAiBaseUrl,
-  sanitizeAiContext,
-  sanitizeAiLabel,
-  sanitizeAiMaxTokens,
-  sanitizeAiModelId,
-  sanitizeAiModels,
-  sanitizeAiName,
-  sanitizeAiPermission,
-  sanitizeAiPreset,
-  sanitizeAiProviders,
-  sanitizeAiSessionId,
-  sanitizeAiSessions,
-  sanitizeAiSessionTitle,
-  sanitizeAiThinking,
-  sanitizeAiThinkingLevels,
-  sessionMessagesToLines,
-  skillCommandOf,
-  stripSkillCommand,
-  taskPrompt,
-  uniqueAiName,
-  visibleInstruction,
-  writtenEntries,
-  type AiLogLine,
-  type AiProvider,
-  type AiSession
-} from './ai'
+import { AI_IMAGE_TYPES, AI_MODEL_MAX, AI_PERMISSION_DEFAULT, AI_PERMISSION_MODES, AI_PROMPT_PREFIX, AI_PROVIDER_PRESETS, AI_SESSION_MAX, AI_SESSION_TITLE_MAX, AI_THINKING_DEFAULT, AI_THINKING_LEVELS, aiImageAccepted, aiImagePayload, aiModelChoices, aiModelFromId, aiPermissionLabel, aiProviderPayload, aiProviderReady, aiSessionGroups, aiSessionTitle, aiThinkingLabel, aiThinkingMap, aiTurns, builtinModelMeta, confirmFrame, formatDuration, formatTokensShort, formatUsageSummary, inferModelMeta, nodeSatisfiesPi, parsePiConfirm, parsePiDelta, parsePiEvent, parsePiUsage, pickAiActiveSession, pickAiChoice, pickAiThinking, piLaunch, piLaunchForDisplay, rememberAiSession, sanitizeAiApiFormat, sanitizeAiBaseUrl, sanitizeAiContext, sanitizeAiLabel, sanitizeAiMaxTokens, sanitizeAiModelId, sanitizeAiModels, sanitizeAiName, sanitizeAiPermission, sanitizeAiPreset, sanitizeAiProviders, sanitizeAiSessionId, sanitizeAiSessions, sanitizeAiSessionTitle, sanitizeAiThinking, sanitizeAiThinkingLevels, sessionMessagesToLines, skillCommandOf, stripSkillCommand, taskPrompt, uniqueAiName, visibleInstruction, writtenEntries } from './ai'
 
 describe('模型配置的收敛', () => {
   it('提供方名折成小写字母 / 数字 / 连字符，超长截断', () => {
@@ -79,14 +13,14 @@ describe('模型配置的收敛', () => {
     expect(sanitizeAiName(null)).toBe('')
   })
 
-  it('API 形态只认登记过的那两个', () => {
+  it('aPI 形态只认登记过的那两个', () => {
     expect(sanitizeAiApiFormat('openai-completions')).toBe('openai-completions')
     expect(sanitizeAiApiFormat('anthropic-messages')).toBe('anthropic-messages')
     expect(sanitizeAiApiFormat('grpc')).toBe('')
     expect(sanitizeAiApiFormat(undefined)).toBe('')
   })
 
-  it('Base URL 只去空白限长（形状在保存时校验）', () => {
+  it('base URL 只去空白限长（形状在保存时校验）', () => {
     expect(sanitizeAiBaseUrl('  https://opencode.ai/zen/go/v1 ')).toBe('https://opencode.ai/zen/go/v1')
     expect(sanitizeAiBaseUrl('x'.repeat(400))).toHaveLength(300)
     expect(sanitizeAiBaseUrl(42)).toBe('')
@@ -101,7 +35,7 @@ describe('模型配置的收敛', () => {
       'not-an-object',
       null,
       // 新的两样：最大输出与「能看图」，老数据文件里没有就按「不知道 / 不能」落
-      { id: 'glm-5.2', maxTokens: 384_000, imageInput: true, maxTokensBogus: 'x' }
+      { id: 'glm-5.2', maxTokens: 384_000, imageInput: true, maxTokensBogus: 'x' },
     ])
     // 老数据文件里只有 id 与 enabled：显示名回 id、上下文 0（不知道）、不支持思考
     expect(models).toEqual([
@@ -113,7 +47,7 @@ describe('模型配置的收敛', () => {
         maxTokens: 0,
         reasoning: false,
         levels: ['off'],
-        imageInput: false
+        imageInput: false,
       },
       {
         id: 'mimo-v2.6-flash',
@@ -123,7 +57,7 @@ describe('模型配置的收敛', () => {
         maxTokens: 0,
         reasoning: false,
         levels: ['off'],
-        imageInput: false
+        imageInput: false,
       },
       {
         id: 'glm-5.2',
@@ -133,8 +67,8 @@ describe('模型配置的收敛', () => {
         maxTokens: 384_000,
         reasoning: false,
         levels: ['off'],
-        imageInput: true
-      }
+        imageInput: true,
+      },
     ])
 
     expect(sanitizeAiModels('x')).toEqual([])
@@ -170,7 +104,7 @@ describe('模型配置的收敛', () => {
       'minimal',
       'low',
       'medium',
-      'high'
+      'high',
     ])
     // 按档位表排序、去重、丢掉认不出的
     expect(sanitizeAiThinkingLevels(['max', 'low', 'low', '疯了'], true)).toEqual(['low', 'max'])
@@ -187,8 +121,8 @@ describe('模型配置的收敛', () => {
         maxTokens: 0,
         reasoning: true,
         levels: ['off', 'minimal', 'low', 'medium', 'high'],
-        imageInput: false
-      })
+        imageInput: false,
+      }),
     ).toBeUndefined()
     // 关掉 minimal、打开 xhigh：一个 null（明说不支持）+ 一个显式打开的档位
     expect(
@@ -200,8 +134,8 @@ describe('模型配置的收敛', () => {
         maxTokens: 0,
         reasoning: true,
         levels: ['off', 'low', 'medium', 'high', 'xhigh'],
-        imageInput: false
-      })
+        imageInput: false,
+      }),
     ).toEqual({ minimal: null, xhigh: 'xhigh' })
     // 不支持思考的模型整份都不写（Pi 只看 reasoning: false）
     expect(
@@ -213,8 +147,8 @@ describe('模型配置的收敛', () => {
         maxTokens: 0,
         reasoning: false,
         levels: ['off'],
-        imageInput: false
-      })
+        imageInput: false,
+      }),
     ).toBeUndefined()
   })
 
@@ -230,7 +164,7 @@ describe('模型配置的收敛', () => {
   it('认得出的预设与界面上那个名字', () => {
     expect(sanitizeAiPreset('deepseek')).toBe('deepseek')
     expect(sanitizeAiPreset('没这个厂商')).toBe('')
-    expect(AI_PROVIDER_PRESETS.every((preset) => /^https:\/\//.test(preset.baseUrl))).toBe(true)
+    expect(AI_PROVIDER_PRESETS.every(preset => /^https:\/\//.test(preset.baseUrl))).toBe(true)
     expect(sanitizeAiLabel('  我的   网关 ')).toBe('我的 网关')
     expect(sanitizeAiLabel('x'.repeat(80))).toHaveLength(40)
   })
@@ -249,13 +183,13 @@ describe('模型配置的收敛', () => {
         baseUrl: ' https://api.deepseek.com/v1 ',
         apiFormat: 'openai-completions',
         preset: 'deepseek',
-        models: [{ id: 'deepseek-chat' }]
+        models: [{ id: 'deepseek-chat' }],
       },
       { id: 'deepseek', label: '重名的', baseUrl: 'https://x', apiFormat: 'openai-completions', models: [{ id: 'a' }] },
       { id: 'no-models', baseUrl: 'https://x', apiFormat: 'openai-completions', models: [] },
       { id: 'bad-url', baseUrl: 'x', apiFormat: 'openai-completions', models: [{ id: 'a' }] },
       { id: 'bad-api', baseUrl: 'https://x', apiFormat: 'grpc', models: [{ id: 'a' }] },
-      null
+      null,
     ])
     expect(providers).toHaveLength(1)
     expect(providers[0].id).toBe('deepseek')
@@ -276,7 +210,7 @@ describe('模型配置的收敛', () => {
         apiFormat: 'openai-completions',
         preset: '',
         enabled: false,
-        models: [{ id: 'a1', enabled: true, name: 'a1', contextWindow: 0, maxTokens: 0, reasoning: false, levels: ['off'], imageInput: false }]
+        models: [{ id: 'a1', enabled: true, name: 'a1', contextWindow: 0, maxTokens: 0, reasoning: false, levels: ['off'], imageInput: false }],
       },
       {
         id: 'b',
@@ -287,11 +221,11 @@ describe('模型配置的收敛', () => {
         enabled: true,
         models: [
           { id: 'b1', enabled: false, name: 'b1', contextWindow: 0, maxTokens: 0, reasoning: false, levels: ['off'], imageInput: false },
-          { id: 'b2', enabled: true, name: 'B 二号', contextWindow: 200_000, maxTokens: 0, reasoning: true, levels: ['off', 'high'], imageInput: true }
-        ]
-      }
+          { id: 'b2', enabled: true, name: 'B 二号', contextWindow: 200_000, maxTokens: 0, reasoning: true, levels: ['off', 'high'], imageInput: true },
+        ],
+      },
     ]
-    expect(aiModelChoices(providers).map((choice) => choice.key)).toEqual(['b/b2'])
+    expect(aiModelChoices(providers).map(choice => choice.key)).toEqual(['b/b2'])
     expect(aiModelChoices(providers)[0].name).toBe('B 二号')
     const chosen = pickAiChoice(providers, 'b', 'b2')
     expect(chosen?.model).toBe('b2')
@@ -304,7 +238,7 @@ describe('模型配置的收敛', () => {
     expect(pickAiChoice(providers, 'b', 'b1')?.key).toBe('b/b2')
     expect(pickAiChoice(providers, '', '')?.key).toBe('b/b2')
 
-    const none = providers.map((provider) => ({ ...provider, enabled: false }))
+    const none = providers.map(provider => ({ ...provider, enabled: false }))
     expect(pickAiChoice(none, '', '')).toBeNull()
   })
 
@@ -316,7 +250,7 @@ describe('模型配置的收敛', () => {
       apiFormat: 'openai-completions',
       preset: '',
       enabled: true,
-      models: [{ id: 'a1', enabled: true, name: 'a1', contextWindow: 0, maxTokens: 0, reasoning: false, levels: ['off'], imageInput: false }]
+      models: [{ id: 'a1', enabled: true, name: 'a1', contextWindow: 0, maxTokens: 0, reasoning: false, levels: ['off'], imageInput: false }],
     }
     expect(aiProviderReady(base)).toBe(true)
     expect(aiProviderReady({ ...base, id: '' })).toBe(false)
@@ -324,7 +258,7 @@ describe('模型配置的收敛', () => {
     expect(aiProviderReady({ ...base, apiFormat: '' })).toBe(false)
     expect(aiProviderReady({ ...base, models: [] })).toBe(false)
     expect(
-      aiProviderReady({ ...base, models: [{ ...base.models[0], enabled: false }] })
+      aiProviderReady({ ...base, models: [{ ...base.models[0], enabled: false }] }),
     ).toBe(false)
   })
 
@@ -346,7 +280,7 @@ describe('模型配置的收敛', () => {
             maxTokens: 32_768,
             reasoning: true,
             levels: ['off', 'low', 'medium', 'high', 'xhigh'],
-            imageInput: true
+            imageInput: true,
           },
           {
             id: 'a2',
@@ -356,9 +290,9 @@ describe('模型配置的收敛', () => {
             maxTokens: 0,
             reasoning: false,
             levels: ['off'],
-            imageInput: false
-          }
-        ]
+            imageInput: false,
+          },
+        ],
       },
       {
         id: 'b',
@@ -368,8 +302,8 @@ describe('模型配置的收敛', () => {
         preset: '',
         enabled: false,
         models: [
-          { id: 'b1', enabled: true, name: 'b1', contextWindow: 0, maxTokens: 0, reasoning: false, levels: ['off'], imageInput: false }
-        ]
+          { id: 'b1', enabled: true, name: 'b1', contextWindow: 0, maxTokens: 0, reasoning: false, levels: ['off'], imageInput: false },
+        ],
       },
       // 清单空的服务（不该进 models.json：Pi 那边会当成一个有凭据但没模型的端点）
       {
@@ -379,8 +313,8 @@ describe('模型配置的收敛', () => {
         apiFormat: 'openai-completions',
         preset: '',
         enabled: true,
-        models: []
-      }
+        models: [],
+      },
     ]
 
     expect(aiProviderPayload(providers)).toEqual([
@@ -398,10 +332,10 @@ describe('模型配置的收敛', () => {
             reasoning: true,
             thinkingLevelMap: { minimal: null, xhigh: 'xhigh' },
             // 能看图：发的是 Rust 认的 imageInput（它再落成 Pi 的 input: ["text","image"]）
-            imageInput: true
-          }
-        ]
-      }
+            imageInput: true,
+          },
+        ],
+      },
     ])
     expect(aiProviderPayload([])).toEqual([])
   })
@@ -423,7 +357,7 @@ describe('模型配置的收敛', () => {
       contextWindow: 1_000_000,
       maxTokens: 128_000,
       reasoning: true,
-      imageInput: true
+      imageInput: true,
     })
     // 不指定厂商也认得出（按厂商名排序取第一个，结果稳定），大小写不敏感
     expect(builtinModelMeta('Chat:Claude-Fable-5')?.imageInput).toBe(true)
@@ -442,7 +376,7 @@ describe('模型配置的收敛', () => {
       contextWindow: 1_000_000,
       maxTokens: 128_000,
       reasoning: true,
-      imageInput: true
+      imageInput: true,
     })
     // 端点报了就以端点为准（目录让位）
     expect(aiModelFromId('没听过的', { contextWindow: 65_536, reasoning: true })).toMatchObject({
@@ -452,23 +386,23 @@ describe('模型配置的收敛', () => {
       maxTokens: 0,
       reasoning: true,
       levels: ['off', 'minimal', 'low', 'medium', 'high'],
-      imageInput: false
+      imageInput: false,
     })
     expect(
-      aiModelFromId('没听过的', { contextWindow: 65_536, reasoning: true }, 'opencode-go')
+      aiModelFromId('没听过的', { contextWindow: 65_536, reasoning: true }, 'opencode-go'),
     ).toMatchObject({ contextWindow: 65_536, maxTokens: 0 })
     // 目录里没有的才轮到按名字认（moonshot-v1-32k 只在名字表里）
     expect(aiModelFromId('moonshot-v1-32k')).toMatchObject({
       contextWindow: 32_768,
       maxTokens: 0,
       reasoning: false,
-      imageInput: false
+      imageInput: false,
     })
     // 用户明确关掉的图片不被迫开（extra 只会传 true，这里防的是「目录说了算」盖过清单）
     expect(aiModelFromId('chat:glm-5.2', {}, 'zai')).toMatchObject({
       contextWindow: 1_000_000,
       reasoning: true,
-      imageInput: false
+      imageInput: false,
     })
   })
 
@@ -479,14 +413,14 @@ describe('模型配置的收敛', () => {
   })
 
   it('思考档位只认 Pi 认的那七档，认不出的回默认档（medium）', () => {
-    expect(AI_THINKING_LEVELS.map((level) => level.id)).toEqual([
+    expect(AI_THINKING_LEVELS.map(level => level.id)).toEqual([
       'off',
       'minimal',
       'low',
       'medium',
       'high',
       'xhigh',
-      'max'
+      'max',
     ])
     expect(sanitizeAiThinking('max')).toBe('max')
     expect(sanitizeAiThinking('off')).toBe('off')
@@ -495,7 +429,6 @@ describe('模型配置的收敛', () => {
     expect(sanitizeAiThinking(null)).toBe(AI_THINKING_DEFAULT)
     expect(aiThinkingLabel('xhigh')).toBe('极高')
   })
-
 })
 
 describe('会话（一个目录里的一段连续对话）', () => {
@@ -505,12 +438,12 @@ describe('会话（一个目录里的一段连续对话）', () => {
     title: '整理条目',
     createdAt: 1000,
     updatedAt: 2000,
-    ...over
+    ...over,
   })
 
   it('会话 id 按 Pi 的字符规则收敛（它拿去当 session-id）', () => {
     expect(sanitizeAiSessionId('6f5a1c2e-1111-2222-3333-444455556666')).toBe(
-      '6f5a1c2e-1111-2222-3333-444455556666'
+      '6f5a1c2e-1111-2222-3333-444455556666',
     )
     expect(sanitizeAiSessionId('  probe.1_2-3 ')).toBe('probe.1_2-3')
     // 单个字符也认（首尾同一位，Pi 的规则就是这样）
@@ -539,16 +472,15 @@ describe('会话（一个目录里的一段连续对话）', () => {
       session({ id: 'c', dir: '  ' }), // 没有目录的没法起进程
       { id: 'd', dir: 'E:\\x\\', createdAt: 5 }, // 老文件里可能没有 updatedAt
       'not-an-object',
-      null
+      null,
     ])
-    expect(sessions.map((item) => item.id)).toEqual(['a', 'd'])
+    expect(sessions.map(item => item.id)).toEqual(['a', 'd'])
     // 目录与笔记 / 技能同一条收敛：去掉末尾分隔符
     expect(sessions[1].dir).toBe('E:\\x')
     expect(sessions[1].updatedAt).toBe(5)
 
     const many = Array.from({ length: AI_SESSION_MAX + 20 }, (_, index) =>
-      session({ id: `s${index}` })
-    )
+      session({ id: `s${index}` }))
     expect(sanitizeAiSessions(many)).toHaveLength(AI_SESSION_MAX)
   })
 
@@ -559,8 +491,8 @@ describe('会话（一个目录里的一段连续对话）', () => {
         provider: 'OpenCode-Go',
         model: '  deepseek-v4.1-chat  ',
         thinking: 'high',
-        permission: 'full'
-      })
+        permission: 'full',
+      }),
     ])
     // 服务名折成小写连字符；模型 id 只去空白限长，原样保留
     expect(kept?.provider).toBe('opencode-go')
@@ -569,7 +501,7 @@ describe('会话（一个目录里的一段连续对话）', () => {
     expect(kept?.permission).toBe('full')
 
     const [dropped] = sanitizeAiSessions([
-      session({ id: 'b', provider: '坏 名 字!', model: '   ', thinking: '最大', permission: '全部' })
+      session({ id: 'b', provider: '坏 名 字!', model: '   ', thinking: '最大', permission: '全部' }),
     ])
     expect(dropped?.provider).toBeUndefined()
     expect(dropped?.model).toBeUndefined()
@@ -585,7 +517,7 @@ describe('会话（一个目录里的一段连续对话）', () => {
   it('记一条会话：同 id 的换到最前面（标题与时间跟着更新），超上限从末尾丢', () => {
     const list = [session({ id: 'a' }), session({ id: 'b' })]
     const updated = rememberAiSession(list, session({ id: 'b', title: '新标题', updatedAt: 3000 }))
-    expect(updated.map((item) => item.id)).toEqual(['b', 'a'])
+    expect(updated.map(item => item.id)).toEqual(['b', 'a'])
     expect(updated[0].title).toBe('新标题')
   })
 
@@ -601,11 +533,11 @@ describe('会话（一个目录里的一段连续对话）', () => {
     const groups = aiSessionGroups([
       session({ id: 'kb-old', dir: 'E:\\work\\kb', updatedAt: 100 }),
       session({ id: 'kb-new', dir: 'E:\\work\\kb', updatedAt: 300 }),
-      session({ id: 'app', dir: 'E:\\work\\app', updatedAt: 200 })
+      session({ id: 'app', dir: 'E:\\work\\app', updatedAt: 200 }),
     ])
     // 组间：kb 这一组最新的 300 > app 的 200，所以 kb 在前
-    expect(groups.map((group) => group.name)).toEqual(['kb', 'app'])
-    expect(groups[0].sessions.map((item) => item.id)).toEqual(['kb-new', 'kb-old'])
+    expect(groups.map(group => group.name)).toEqual(['kb', 'app'])
+    expect(groups[0].sessions.map(item => item.id)).toEqual(['kb-new', 'kb-old'])
     // 目录名只是显示用的：认身份的是全路径
     expect(groups[0].dir).toBe('E:\\work\\kb')
   })
@@ -629,7 +561,7 @@ describe('对话按轮切（过程 / 答案 / 收据）', () => {
       line('thinking', '换个工具'),
       line('tool', '读取 kb/b.md'),
       line('text', '整理好了，共 3 条。'),
-      line('duration', '用时 12 秒')
+      line('duration', '用时 12 秒'),
     ])
 
     expect(turns).toHaveLength(1)
@@ -637,17 +569,17 @@ describe('对话按轮切（过程 / 答案 / 收据）', () => {
     expect(turns[0].user?.text).toBe('把资料整理一下')
     // 答案只有最后那段；前面那段正文是过程中的旁白
     expect(turns[0].answer?.text).toBe('整理好了，共 3 条。')
-    expect(turns[0].process.map((item) => item.kind)).toEqual([
+    expect(turns[0].process.map(item => item.kind)).toEqual([
       'info',
       'thinking',
       'tool',
       'text',
       'error',
       'thinking',
-      'tool'
+      'tool',
     ])
     // 「用时 …」留在答案外面（它是一轮的句号）
-    expect(turns[0].tail.map((item) => item.text)).toEqual(['用时 12 秒'])
+    expect(turns[0].tail.map(item => item.text)).toEqual(['用时 12 秒'])
   })
 
   it('没说过话的那一轮（停了一半 / 只读回历史）：整个过程都收着，没有答案', () => {
@@ -665,12 +597,12 @@ describe('对话按轮切（过程 / 答案 / 收据）', () => {
       line('thinking', '想'),
       line('text', '答一'),
       line('user', '第二句'),
-      line('text', '答二')
+      line('text', '答二'),
     ])
     expect(turns).toHaveLength(2)
-    expect(turns.map((turn) => turn.index)).toEqual([0, 3])
-    expect(turns.map((turn) => turn.user?.text)).toEqual(['第一句', '第二句'])
-    expect(turns[0].process.map((item) => item.text)).toEqual(['想'])
+    expect(turns.map(turn => turn.index)).toEqual([0, 3])
+    expect(turns.map(turn => turn.user?.text)).toEqual(['第一句', '第二句'])
+    expect(turns[0].process.map(item => item.text)).toEqual(['想'])
     expect(turns[1].process).toEqual([])
     expect(turns[1].answer?.text).toBe('答二')
   })
@@ -683,19 +615,19 @@ describe('对话按轮切（过程 / 答案 / 收据）', () => {
       line('tool', '写入 c1.js'),
       line('thinking', 'Now chunk2'),
       line('error', '写入失败'),
-      line('duration', '用时 30 秒')
+      line('duration', '用时 30 秒'),
     ])
     // 没有答案可摘 ——「最后说了什么」得是后面没再干活的那段正文
     expect(turns[0].answer).toBeNull()
-    expect(turns[0].process.map((item) => item.text)).toEqual([
+    expect(turns[0].process.map(item => item.text)).toEqual([
       '先分块',
       '脚本较长，我分块写入再合并。',
       '写入 c1.js',
       'Now chunk2',
-      '写入失败'
+      '写入失败',
     ])
     // 收据只有轮尾那串「用时 …」，报错留在过程里（红才丢不了）
-    expect(turns[0].tail.map((item) => item.text)).toEqual(['用时 30 秒'])
+    expect(turns[0].tail.map(item => item.text)).toEqual(['用时 30 秒'])
   })
 
   it('跑动中（live）不摘答案：整轮都在过程里按时序长，正文落地也不跳出去', () => {
@@ -704,12 +636,12 @@ describe('对话按轮切（过程 / 答案 / 收据）', () => {
         line('user', '生成脚本'),
         line('thinking', '想'),
         line('text', '我先分块写入。'),
-        line('tool', '写入 c1.js')
+        line('tool', '写入 c1.js'),
       ],
-      true
+      true,
     )
     expect(turns[0].answer).toBeNull()
-    expect(turns[0].process.map((item) => item.kind)).toEqual(['thinking', 'text', 'tool'])
+    expect(turns[0].process.map(item => item.kind)).toEqual(['thinking', 'text', 'tool'])
     expect(turns[0].tail).toEqual([])
   })
 })
@@ -769,7 +701,7 @@ describe('命令与提示词', () => {
     expect(shown).not.toContain('提示词')
   })
 
-  it('Node 版本门槛：>= 22.19.0', () => {
+  it('node 版本门槛：>= 22.19.0', () => {
     expect(nodeSatisfiesPi('v24.15.0')).toBe(true)
     expect(nodeSatisfiesPi('22.19.0')).toBe(true)
     expect(nodeSatisfiesPi('v22.19')).toBe(true)
@@ -782,7 +714,7 @@ describe('命令与提示词', () => {
   it('提示词只说清「在哪儿干活」+ 用户的指令原文', () => {
     const prompt = taskPrompt({
       dir: 'E:\\muyian\\agent',
-      instruction: '按 kb/00-使用规范/条目格式规范.md 整理 data/raw 下的资料'
+      instruction: '按 kb/00-使用规范/条目格式规范.md 整理 data/raw 下的资料',
     })
 
     expect(prompt).toContain('E:\\muyian\\agent')
@@ -798,7 +730,7 @@ describe('事件流的读法', () => {
   it('会话头：有模型名就说模型', () => {
     expect(parse({ type: 'session', model: 'claude-sonnet-4-5' })).toEqual({
       kind: 'info',
-      text: '已连接模型 claude-sonnet-4-5'
+      text: '已连接模型 claude-sonnet-4-5',
     })
     expect(parse({ type: 'session' })?.text).toBe('已建立会话')
   })
@@ -811,21 +743,21 @@ describe('事件流的读法', () => {
   it('工具调用：读只描述，写与改记下文件（用来汇总）', () => {
     expect(parse({ type: 'tool_execution_start', toolName: 'read', args: { path: 'kb/a.md' } })).toEqual({
       kind: 'tool',
-      text: '读取 kb/a.md'
+      text: '读取 kb/a.md',
     })
 
     expect(
-      parse({ type: 'tool_execution_start', toolName: 'write', args: { path: 'kb/b.md' } })
+      parse({ type: 'tool_execution_start', toolName: 'write', args: { path: 'kb/b.md' } }),
     ).toEqual({ kind: 'tool', text: '写入 kb/b.md', path: 'kb/b.md' })
 
     expect(
-      parse({ type: 'tool_execution_start', toolName: 'edit', args: { file_path: 'kb/c.md' } })
+      parse({ type: 'tool_execution_start', toolName: 'edit', args: { file_path: 'kb/c.md' } }),
     ).toEqual({ kind: 'tool', text: '修改 kb/c.md', path: 'kb/c.md' })
 
     // 认不出的工具也如实说，但不当作「写下的条目」
     expect(parse({ type: 'tool_execution_start', toolName: 'webfetch', args: {} })).toEqual({
       kind: 'tool',
-      text: '调用 webfetch'
+      text: '调用 webfetch',
     })
   })
 
@@ -833,7 +765,7 @@ describe('事件流的读法', () => {
     expect(parse({ type: 'tool_execution_end', toolName: 'write' })).toBeNull()
     expect(parse({ type: 'tool_execution_end', toolName: 'write', error: '磁盘满了' })).toEqual({
       kind: 'error',
-      text: 'write：磁盘满了'
+      text: 'write：磁盘满了',
     })
   })
 
@@ -844,8 +776,8 @@ describe('事件流的读法', () => {
         type: 'tool_execution_end',
         toolName: 'read',
         isError: true,
-        result: { content: [{ type: 'text', text: 'EISDIR: illegal operation on a directory, read' }] }
-      })
+        result: { content: [{ type: 'text', text: 'EISDIR: illegal operation on a directory, read' }] },
+      }),
     ).toEqual({ kind: 'error', text: 'read：EISDIR: illegal operation on a directory, read' })
 
     // 多行原文（「找不到 bash」那种还带一串搜索路径）：窄行只留第一句，全文收进悬停的 detail
@@ -858,15 +790,15 @@ describe('事件流的读法', () => {
           content: [
             {
               type: 'text',
-              text: 'No bash shell found. Options:\n  1. Install Git for Windows\n  D:\\Git\\bin\\bash.exe'
-            }
-          ]
-        }
-      })
+              text: 'No bash shell found. Options:\n  1. Install Git for Windows\n  D:\\Git\\bin\\bash.exe',
+            },
+          ],
+        },
+      }),
     ).toEqual({
       kind: 'error',
       text: 'bash：No bash shell found. Options:',
-      detail: 'No bash shell found. Options:\n  1. Install Git for Windows\n  D:\\Git\\bin\\bash.exe'
+      detail: 'No bash shell found. Options:\n  1. Install Git for Windows\n  D:\\Git\\bin\\bash.exe',
     })
 
     // 只看 result 里的 isError 也算失败（扩展能改这一层）；成功的结果照旧不画
@@ -874,30 +806,30 @@ describe('事件流的读法', () => {
       parse({
         type: 'tool_execution_end',
         toolName: 'bash',
-        result: { content: '没跑起来', isError: true }
-      })
+        result: { content: '没跑起来', isError: true },
+      }),
     ).toEqual({ kind: 'error', text: 'bash：没跑起来' })
     expect(
       parse({
         type: 'tool_execution_end',
         toolName: 'read',
-        result: { content: [{ type: 'text', text: '文件正文' }] }
-      })
+        result: { content: [{ type: 'text', text: '文件正文' }] },
+      }),
     ).toBeNull()
 
     // 失败但结果里一个字都没有：兜底文案还在
     expect(
-      parse({ type: 'tool_execution_end', toolName: 'bash', isError: true, result: { content: [] } })
+      parse({ type: 'tool_execution_end', toolName: 'bash', isError: true, result: { content: [] } }),
     ).toEqual({ kind: 'error', text: 'bash：工具调用失败' })
   })
 
   it('助手正文字符串与内容块两种形状都认；用户消息的回显不画', () => {
     expect(parse({ type: 'message_end', message: '汇总：新建 2 条' })).toEqual({
       kind: 'text',
-      text: '汇总：新建 2 条'
+      text: '汇总：新建 2 条',
     })
     expect(
-      parse({ type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text: '第一段' }, { type: 'text', text: '第二段' }] } })
+      parse({ type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text: '第一段' }, { type: 'text', text: '第二段' }] } }),
     ).toEqual({ kind: 'text', text: '第一段\n第二段' })
     expect(parse({ type: 'message_end', message: { content: [] } })).toBeNull()
     // @文件 的回显长在用户消息里：整段提示词画进日志只会把有用的几行淹掉
@@ -906,32 +838,32 @@ describe('事件流的读法', () => {
 
   it('模型侧的失败（errorMessage）落成错误行', () => {
     expect(
-      parse({ type: 'message_end', message: { role: 'assistant', content: [], stopReason: 'error', errorMessage: '403 Request not allowed' } })
+      parse({ type: 'message_end', message: { role: 'assistant', content: [], stopReason: 'error', errorMessage: '403 Request not allowed' } }),
     ).toEqual({ kind: 'error', text: '403 Request not allowed' })
   })
 
   it('逐字增量不画，只有出错才留一行', () => {
     expect(
-      parse({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: '整' } })
+      parse({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: '整' } }),
     ).toBeNull()
     expect(
-      parse({ type: 'message_update', assistantMessageEvent: { type: 'error', error: '被限流' } })
+      parse({ type: 'message_update', assistantMessageEvent: { type: 'error', error: '被限流' } }),
     ).toEqual({ kind: 'error', text: '被限流' })
   })
 
   it('重试与顶层错误', () => {
     expect(parse({ type: 'auto_retry_start', attempt: 1, maxAttempts: 3 })).toEqual({
       kind: 'info',
-      text: '连接不稳，正在重试（1/3）'
+      text: '连接不稳，正在重试（1/3）',
     })
     expect(parse({ type: 'error', message: '没有凭据' })).toEqual({ kind: 'error', text: '没有凭据' })
   })
 
-  it('Pi 那句「没找到这个 id 的会话、就用它建一份」不画（那是我们自己要的，不是故障）', () => {
+  it('pi 那句「没找到这个 id 的会话、就用它建一份」不画（那是我们自己要的，不是故障）', () => {
     expect(
       parsePiEvent(
-        "Warning: No project session found with id 'bcb75b75-899f-4f9d-a064-7327bd9fcbd6'; creating a new session with that id."
-      )
+        'Warning: No project session found with id \'bcb75b75-899f-4f9d-a064-7327bd9fcbd6\'; creating a new session with that id.',
+      ),
     ).toBeNull()
     // 其余非 JSON 的行照旧原样留下（那是它真的在说什么）
     expect(parsePiEvent('Error: 找不到模型')).toEqual({ kind: 'info', text: 'Error: 找不到模型' })
@@ -943,22 +875,22 @@ describe('事件流的读法', () => {
 
     expect(delta({ type: 'text_delta', contentIndex: 0, delta: '第一段' })).toEqual({
       kind: 'text',
-      text: '第一段'
+      text: '第一段',
     })
     // 思考增量画在末尾那块「思考中…」里（草稿也要看得见）
     expect(delta({ type: 'thinking_delta', contentIndex: 0, delta: '嗯…' })).toEqual({
       kind: 'thinking',
-      text: '嗯…'
+      text: '嗯…',
     })
     // 一段思考结束：整块的权威内容跟着它到（界面到这儿把它收成一块「思考过程」）
     expect(delta({ type: 'thinking_end', contentIndex: 0, content: '想完了\n两行' })).toEqual({
       kind: 'thinkingEnd',
-      text: '想完了\n两行'
+      text: '想完了\n两行',
     })
     // 被厂商脱敏过的块一个字都没有：也要报一声（调用方靠它把「正在思考」收掉）
     expect(delta({ type: 'thinking_end', contentIndex: 0, content: '' })).toEqual({
       kind: 'thinkingEnd',
-      text: ''
+      text: '',
     })
 
     // 正文块的开头与结尾不带新文字（整段的权威版本由 message_end 给）
@@ -979,27 +911,27 @@ describe('事件流的读法', () => {
         message: {
           role: 'assistant',
           content: [],
-          usage: { input: 12, output: 34, cacheRead: 56, cacheWrite: 7, totalTokens: 109, cost: {} }
-        }
-      })
+          usage: { input: 12, output: 34, cacheRead: 56, cacheWrite: 7, totalTokens: 109, cost: {} },
+        },
+      }),
     ).toEqual({ input: 12, output: 34, cacheRead: 56, cacheWrite: 7 })
     // @文件 的回显是用户消息，没有消耗
     expect(
       usage({
         type: 'message_end',
-        message: { role: 'user', content: '整段提示词', usage: { input: 9, output: 9 } }
-      })
+        message: { role: 'user', content: '整段提示词', usage: { input: 9, output: 9 } },
+      }),
     ).toBeNull()
     // 端点没报（缺字段 / 全 0 / 形状不对）：当没有 —— 收据上就不写这段
     expect(usage({ type: 'message_end', message: { role: 'assistant', content: [] } })).toBeNull()
     expect(
       usage({
         type: 'message_end',
-        message: { role: 'assistant', content: [], usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } }
-      })
+        message: { role: 'assistant', content: [], usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
+      }),
     ).toBeNull()
     expect(
-      usage({ type: 'message_end', message: { role: 'assistant', content: [], usage: { input: -5, output: 'x' } } })
+      usage({ type: 'message_end', message: { role: 'assistant', content: [], usage: { input: -5, output: 'x' } } }),
     ).toBeNull()
     expect(usage({ type: 'agent_settled' })).toBeNull()
     expect(parsePiUsage('npm warn 之类的一行')).toBeNull()
@@ -1012,7 +944,7 @@ describe('事件流的读法', () => {
     expect(formatTokensShort(1_234_567)).toBe('1.2m')
 
     expect(
-      formatUsageSummary({ input: 1000, output: 1534, cacheRead: 56_000, cacheWrite: 6_000 })
+      formatUsageSummary({ input: 1000, output: 1534, cacheRead: 56_000, cacheWrite: 6_000 }),
     ).toBe('输入 63k · 输出 1.5k')
     // 端点没报：空串 —— 收据上只有「用时」
     expect(formatUsageSummary({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 })).toBe('')
@@ -1023,9 +955,9 @@ describe('事件流的读法', () => {
     expect(parse({ type: 'queue_update' })).toBeNull()
     expect(parsePiEvent('   ')).toBeNull()
 
-    expect(parsePiEvent('\u001b[31mError: 找不到模型\u001b[0m')).toEqual({
+    expect(parsePiEvent('\u001B[31mError: 找不到模型\u001B[0m')).toEqual({
       kind: 'info',
-      text: 'Error: 找不到模型'
+      text: 'Error: 找不到模型',
     })
   })
 
@@ -1034,19 +966,19 @@ describe('事件流的读法', () => {
       { kind: 'tool', text: '写入 kb/b.md', path: 'kb/b.md' },
       { kind: 'tool', text: '读取 kb/a.md' },
       { kind: 'tool', text: '修改 kb/a.md', path: 'kb/a.md' },
-      { kind: 'tool', text: '写入 kb/b.md', path: 'kb/b.md' }
+      { kind: 'tool', text: '写入 kb/b.md', path: 'kb/b.md' },
     ]
     expect(writtenEntries(lines)).toEqual(['kb/a.md', 'kb/b.md'])
   })
 
-  it('RPC 的应答：成功的不画（每一条命令都有一条，画出来全是噪音），失败的留一句', () => {
+  it('rPC 的应答：成功的不画（每一条命令都有一条，画出来全是噪音），失败的留一句', () => {
     expect(parse({ type: 'response', command: 'prompt', success: true })).toBeNull()
     expect(parse({ type: 'response', command: 'prompt', success: false, error: '会话忙不过来' })).toEqual(
-      { kind: 'error', text: '会话忙不过来' }
+      { kind: 'error', text: '会话忙不过来' },
     )
     expect(parse({ type: 'response', command: 'get_state', success: false })).toEqual({
       kind: 'error',
-      text: 'get_state 没有成功'
+      text: 'get_state 没有成功',
     })
   })
 })
@@ -1062,8 +994,8 @@ describe('打开旧会话：历史消息 → 日志行（续聊的界面从这�
         content: [
           // 想的那一段：界面上是一块收着的「思考过程」
           { type: 'thinking', thinking: '先看看目录里有啥', thinkingSignature: 'opaque' },
-          { type: 'text', text: 'pong' }
-        ]
+          { type: 'text', text: 'pong' },
+        ],
       },
       { role: 'toolResult', content: [{ type: 'text', text: '几百行文件原文…' }] },
       {
@@ -1071,12 +1003,12 @@ describe('打开旧会话：历史消息 → 日志行（续聊的界面从这�
         content: [
           { type: 'toolCall', name: 'read', arguments: { path: 'kb/a.md' } },
           { type: 'toolCall', name: 'write', arguments: { path: 'kb/b.md' } },
-          { type: 'text', text: '读完了，写了 b.md' }
-        ]
+          { type: 'text', text: '读完了，写了 b.md' },
+        ],
       },
       // 被厂商脱敏过的思考块一个字都没有：不画
       { role: 'assistant', content: [{ type: 'thinking', thinking: '', redacted: true }] },
-      { role: 'user', content: '字符串形状的正文也要认' }
+      { role: 'user', content: '字符串形状的正文也要认' },
     ])
 
     expect(lines).toEqual([
@@ -1086,7 +1018,7 @@ describe('打开旧会话：历史消息 → 日志行（续聊的界面从这�
       { kind: 'tool', text: '读取 kb/a.md' },
       { kind: 'tool', text: '写入 kb/b.md' },
       { kind: 'text', text: '读完了，写了 b.md' },
-      { kind: 'user', text: '字符串形状的正文也要认' }
+      { kind: 'user', text: '字符串形状的正文也要认' },
     ])
   })
 
@@ -1104,16 +1036,16 @@ describe('打开旧会话：历史消息 → 日志行（续聊的界面从这�
         toolName: 'bash',
         isError: true,
         // 落盘的那一份形状：原文在 content 里、isError 长在消息上（句级没有这个字段）
-        content: [{ type: 'text', text: 'No bash shell found. Options:\n  1. Install Git for Windows' }]
-      }
+        content: [{ type: 'text', text: 'No bash shell found. Options:\n  1. Install Git for Windows' }],
+      },
     ])
     expect(lines).toEqual([
       { kind: 'tool', text: '调用 bash' },
       {
         kind: 'error',
         text: 'bash：No bash shell found. Options:',
-        detail: 'No bash shell found. Options:\n  1. Install Git for Windows'
-      }
+        detail: 'No bash shell found. Options:\n  1. Install Git for Windows',
+      },
     ])
   })
 
@@ -1133,11 +1065,11 @@ describe('打开旧会话：历史消息 → 日志行（续聊的界面从这�
     expect(prompt).toBe('/skill:charts 你在下面这个目录里工作：E:\\work\n\n画个折线图')
     // 命令后面没写字也一样成立（命令仍在最前，脚手架在它的参数位）
     expect(taskPrompt({ dir: 'E:\\work', instruction: '/skill:charts' })).toBe(
-      '/skill:charts 你在下面这个目录里工作：E:\\work'
+      '/skill:charts 你在下面这个目录里工作：E:\\work',
     )
     // 命令不在开头的写法不动它，照老样子拼（Pi 也不认，模型看到的还是原文）
     expect(taskPrompt({ dir: 'E:\\work', instruction: '看看 /skill:charts' })).toBe(
-      '你在下面这个目录里工作：E:\\work\n\n看看 /skill:charts'
+      '你在下面这个目录里工作：E:\\work\n\n看看 /skill:charts',
     )
   })
 
@@ -1159,7 +1091,7 @@ describe('打开旧会话：历史消息 → 日志行（续聊的界面从这�
     expect(visibleInstruction(prompt)).toBe('/skill:charts 画个折线图')
     // 只调了技能、没写别的
     expect(visibleInstruction(taskPrompt({ dir: 'E:\\work', instruction: '/skill:charts' }))).toBe(
-      '/skill:charts'
+      '/skill:charts',
     )
     // 会话标题要的是「在聊什么」：命令让给气泡，不进标题
     expect(aiSessionTitle('/skill:charts 画个折线图')).toBe('画个折线图')
@@ -1169,17 +1101,17 @@ describe('打开旧会话：历史消息 → 日志行（续聊的界面从这�
   it('打开旧会话：用户那条消息（完整提示词）在对话里只显示原文那一段', () => {
     const lines = sessionMessagesToLines([
       { role: 'user', content: [{ type: 'text', text: taskPrompt({ dir: 'E:\\work\\kb', instruction: '你好' }) }] },
-      { role: 'assistant', content: [{ type: 'text', text: 'pong' }] }
+      { role: 'assistant', content: [{ type: 'text', text: 'pong' }] },
     ])
     expect(lines).toEqual([
       { kind: 'user', text: '你好' },
-      { kind: 'text', text: 'pong' }
+      { kind: 'text', text: 'pong' },
     ])
   })
 
   it('助手那段正文里的控制序列要清掉（与实时那条同一条清理）', () => {
     const lines = sessionMessagesToLines([
-      { role: 'assistant', content: [{ type: 'text', text: '\u001b[31m红字\u001b[0m' }] }
+      { role: 'assistant', content: [{ type: 'text', text: '\u001B[31m红字\u001B[0m' }] },
     ])
     expect(lines).toEqual([{ kind: 'text', text: '红字' }])
   })
@@ -1192,26 +1124,26 @@ describe('打开旧会话：历史消息 → 日志行（续聊的界面从这�
           { type: 'text', text: '这两张哪里不一样？' },
           { type: 'image', data: 'iVBORw0KGgo=', mimeType: 'image/png' },
           // 少一半的（data 或 mimeType 缺一个）不是一张能画的图，丢掉
-          { type: 'image', data: '', mimeType: 'image/png' }
-        ]
+          { type: 'image', data: '', mimeType: 'image/png' },
+        ],
       },
       {
         role: 'user',
         content: [
           { type: 'text', text: taskPrompt({ dir: 'E:\\work', instruction: '' }) },
-          { type: 'image', data: 'AAAA', mimeType: 'image/jpeg' }
-        ]
-      }
+          { type: 'image', data: 'AAAA', mimeType: 'image/jpeg' },
+        ],
+      },
     ])
 
     expect(lines).toEqual([
       {
         kind: 'user',
         text: '这两张哪里不一样？',
-        images: ['data:image/png;base64,iVBORw0KGgo=']
+        images: ['data:image/png;base64,iVBORw0KGgo='],
       },
       // 提示词那行脚手架照剥；剥完没有字，但图在，所以这条还在
-      { kind: 'user', text: '', images: ['data:image/jpeg;base64,AAAA'] }
+      { kind: 'user', text: '', images: ['data:image/jpeg;base64,AAAA'] },
     ])
   })
 })
@@ -1236,11 +1168,11 @@ describe('贴在输入框里的图（随这一句发出去）', () => {
         // 不是数据 URL 的、逗号后面空着的、类型空着的：一律不发（发过去它解析不了）
         { dataUrl: 'http://example.com/a.png', mimeType: 'image/png' },
         { dataUrl: 'data:image/png;base64,', mimeType: 'image/png' },
-        { dataUrl: 'data:image/png;base64,AAAA', mimeType: '' }
-      ])
+        { dataUrl: 'data:image/png;base64,AAAA', mimeType: '' },
+      ]),
     ).toEqual([
       { data: 'iVBORw0KGgo=', mimeType: 'image/png' },
-      { data: 'AAAA', mimeType: 'image/jpeg' }
+      { data: 'AAAA', mimeType: 'image/jpeg' },
     ])
   })
 })
@@ -1260,10 +1192,10 @@ describe('一轮的用时怎么念（跑完在对话末尾补的那一行）', (
 
 describe('工具权限', () => {
   it('两档：自动编辑（命令先问）与完全访问（不问）；默认自动编辑', () => {
-    expect(AI_PERMISSION_MODES.map((mode) => mode.id)).toEqual(['auto-edit', 'full'])
+    expect(AI_PERMISSION_MODES.map(mode => mode.id)).toEqual(['auto-edit', 'full'])
     expect(AI_PERMISSION_DEFAULT).toBe('auto-edit')
     // 每一档都得有一句说明（下拉里挂在名字下面那一行）
-    expect(AI_PERMISSION_MODES.every((mode) => mode.label && mode.hint)).toBe(true)
+    expect(AI_PERMISSION_MODES.every(mode => mode.label && mode.hint)).toBe(true)
   })
 
   it('收敛：认不出的（含空串、手工改坏的值）回默认档', () => {
@@ -1293,18 +1225,18 @@ describe('确认帧（扩展问「这条命令让不让跑」）', () => {
         id: 'c1',
         method: 'confirm',
         title: '执行命令前先确认',
-        message: 'rm -rf build && npm run build'
-      })
+        message: 'rm -rf build && npm run build',
+      }),
     ).toEqual({
       id: 'c1',
       title: '执行命令前先确认',
-      message: 'rm -rf build && npm run build'
+      message: 'rm -rf build && npm run build',
     })
   })
 
   it('标题缺了就用手写的这一句（列表还在，但顶上那句话不该是空的）', () => {
     expect(confirm({ type: 'extension_ui_request', id: 'c1', method: 'confirm' })?.title).toBe(
-      '执行命令前先确认'
+      '执行命令前先确认',
     )
   })
 
@@ -1322,7 +1254,7 @@ describe('确认帧（扩展问「这条命令让不让跑」）', () => {
     expect(JSON.parse(confirmFrame('c1', true))).toEqual({
       type: 'extension_ui_response',
       id: 'c1',
-      confirmed: true
+      confirmed: true,
     })
     expect(JSON.parse(confirmFrame('c1', false)).confirmed).toBe(false)
     expect(confirmFrame('c1', true)).not.toContain('\n')

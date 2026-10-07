@@ -1,3 +1,7 @@
+import type { AiProvider } from '@workbench/ai'
+import type { AppearanceSettings } from '@workbench/appearance'
+import type { AppSettings, PersistedData, StoredSettings } from './types'
+import { pickAiActiveSession, sanitizeAiApiFormat, sanitizeAiBaseUrl, sanitizeAiModelId, sanitizeAiModels, sanitizeAiName, sanitizeAiPermission, sanitizeAiProviders, sanitizeAiSessionId, sanitizeAiSessions, sanitizeAiSkillsOff, sanitizeAiThinking } from '@workbench/ai'
 /**
  * 持久化数据文件（workbench-data.json）的纯逻辑：默认值、逐项收敛（sanitize）、解析，
  * 外加 theme.json 与数据文件之间的分流桥接（merge / split / migrate）。
@@ -10,64 +14,20 @@
  * 终端高度、工作区背景、导航菜单显示哪几页与首页布局都住在 theme.json 里（见 @workbench/appearance
  * 的文件头），同步时整份 theme.json 就是带走的那份配置。
  */
-import {
-  clampTerminalButtonTop,
-  pickAppearance,
-  sanitizeAppearanceSettings,
-  sanitizeViewId,
-  stripAppearance,
-  type AppearanceSettings
-} from '@workbench/appearance'
+import { clampTerminalButtonTop, pickAppearance, sanitizeAppearanceSettings, sanitizeViewId, stripAppearance } from '@workbench/appearance'
 import { sanitizeAccount } from '@workbench/auth'
-import {
-  pruneDays,
-  sanitizeActivity,
-  sanitizeCommands,
-  sanitizeIconCache,
-  sanitizeProjectSort,
-  sanitizeQuickApps
-} from '@workbench/core'
-import {
-  pickAiActiveSession,
-  sanitizeAiApiFormat,
-  sanitizeAiBaseUrl,
-  sanitizeAiModelId,
-  sanitizeAiModels,
-  sanitizeAiName,
-  sanitizeAiPermission,
-  sanitizeAiProviders,
-  sanitizeAiSessionId,
-  sanitizeAiSessions,
-  sanitizeAiSkillsOff,
-  sanitizeAiThinking,
-  type AiProvider
-} from '@workbench/ai'
-import {
-  sanitizeImageRepo,
-  sanitizeNoteHistory,
-  sanitizeNoteRoot,
-  sanitizeNoteTreeExpanded
-} from '@workbench/notes'
-import { sanitizeSyncRepo } from '@workbench/usage'
-import {
-  sanitizeVideoHistory,
-  sanitizeVideoLastRel,
-  sanitizeVideoRoot,
-  sanitizeVideoTreeExpanded
-} from '@workbench/video'
-import { sanitizeWeatherCity } from '@workbench/weather'
+import { pruneDays, sanitizeActivity, sanitizeCommands, sanitizeIconCache, sanitizeProjectSort, sanitizeQuickApps } from '@workbench/core'
 import { sanitizeMailAccounts, sanitizeMailBulkSenders, sanitizeMailPollMinutes } from '@workbench/mail'
+import { sanitizeImageRepo, sanitizeNoteHistory, sanitizeNoteRoot, sanitizeNoteTreeExpanded } from '@workbench/notes'
+import { sanitizeSyncRepo } from '@workbench/usage'
+import { sanitizeVideoHistory, sanitizeVideoLastRel, sanitizeVideoRoot, sanitizeVideoTreeExpanded } from '@workbench/video'
+import { sanitizeWeatherCity } from '@workbench/weather'
 import { sanitizeWorkRange, sanitizeWorkSort } from '@workbench/work-log'
-import {
-  DEFAULT_SETTINGS,
-  type AppSettings,
-  type PersistedData,
-  type StoredSettings
-} from './types'
+import { DEFAULT_SETTINGS } from './types'
 
 /** 数据文件里该存的那部分设置的默认值：完整默认设置摘掉外观项（stripAppearance 来自外观包） */
 export const DEFAULT_STORED_SETTINGS: StoredSettings = stripAppearance(
-  DEFAULT_SETTINGS
+  DEFAULT_SETTINGS,
 ) as StoredSettings
 
 export function emptyData(): PersistedData {
@@ -80,7 +40,7 @@ export function emptyData(): PersistedData {
     settings: { ...DEFAULT_STORED_SETTINGS },
     activeSessions: [],
     activity: {},
-    account: null
+    account: null,
   }
 }
 
@@ -142,7 +102,8 @@ export function sanitizeSettings(raw: unknown): StoredSettings {
   value.aiProviders = sanitizeAiProviders(asRecord(input).aiProviders)
   if (!value.aiProviders.length) {
     const legacy = legacyAiProvider(input)
-    if (legacy) value.aiProviders = [legacy]
+    if (legacy)
+      value.aiProviders = [legacy]
   }
   // 默认模型（行为记忆）：挑的服务 / 模型从不在收敛里对着清单核对 —— 清单随时可以关停增减，
   // 核对放在用它的那一刻（@workbench/ai 的 pickAiChoice）
@@ -190,7 +151,8 @@ export function sanitizeSettings(raw: unknown): StoredSettings {
     const legacy = asRecord(input).mailAccount
     if (legacy) {
       const migrated = sanitizeMailAccounts([legacy])
-      if (migrated.length) value.mailAccounts = migrated
+      if (migrated.length)
+        value.mailAccounts = migrated
     }
   }
   delete (value as unknown as Record<string, unknown>).mailAccount
@@ -240,7 +202,8 @@ function legacyAiProvider(raw: unknown): AiProvider | null {
   const baseUrl = sanitizeAiBaseUrl(record.aiBaseUrl)
   const apiFormat = sanitizeAiApiFormat(record.aiApiFormat)
   const models = sanitizeAiModels(record.aiModels)
-  if (!id || !baseUrl || !apiFormat || !models.length) return null
+  if (!id || !baseUrl || !apiFormat || !models.length)
+    return null
   return { id, label: id, baseUrl, apiFormat, preset: '', enabled: true, models }
 }
 
@@ -261,7 +224,7 @@ export function parseData(raw: unknown, uuid: () => string): PersistedData {
     // 老数据文件没有这一项；只留还在用的程序，删掉的程序不该把图标一直留在盘上
     iconCache: sanitizeIconCache(
       parsed.iconCache,
-      new Set(quickApps.map((app) => app.target))
+      new Set(quickApps.map(app => app.target)),
     ),
     commands: sanitizeCommands(parsed.commands, uuid),
     settings: sanitizeSettings(parsed.settings),
@@ -271,7 +234,7 @@ export function parseData(raw: unknown, uuid: () => string): PersistedData {
     activity: pruneDays(sanitizeActivity(parsed.activity), Date.now()),
     // 老数据文件没有这一项。**只是显示用的资料**：是否真的已登录以凭据管理器为准，
     // 那边没有 token 时适配层会把这份残留资料清掉（见工作区适配层的 auth.ts）
-    account: sanitizeAccount(parsed.account)
+    account: sanitizeAccount(parsed.account),
   }
 }
 
@@ -311,9 +274,11 @@ export function splitSettingsPatch(patch: Partial<AppSettings>): {
  * 没得搬（两处都没有）时返回原对象，调用方据此判断「要不要立刻落盘」（见适配层的 initState）。
  */
 export function migrateAppearanceIntoTheme(rawTheme: unknown, rawSettings: unknown): unknown {
-  if (isRecord(rawTheme) && isRecord(rawTheme.appearance)) return rawTheme
+  if (isRecord(rawTheme) && isRecord(rawTheme.appearance))
+    return rawTheme
 
   const appearance = pickAppearance(rawSettings)
-  if (Object.keys(appearance).length === 0) return rawTheme
+  if (Object.keys(appearance).length === 0)
+    return rawTheme
   return { ...(isRecord(rawTheme) ? rawTheme : {}), appearance }
 }

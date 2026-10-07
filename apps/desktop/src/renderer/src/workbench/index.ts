@@ -1,3 +1,4 @@
+import type { AddProjectInput, AppSettings, AuthProvider, BackgroundImage, BuiltinWallpaper, CommandEntry, EffectiveTheme, InstallablePackageManager, MailNotifyPayload, Project, Result, TerminalKind, ThemeConfig, WindowState, WorkbenchApi } from '@/types'
 /**
  * `window.workbench` 的 Tauri 实现。
  *
@@ -8,56 +9,37 @@
  * 界面降级成空态而不是崩掉 —— 迁移期间的缺口因此可见、可控。
  * 通道补齐后应当去掉兜底（那时 `as` 断言也就不需要了）。
  */
-import { parsePort } from '@workbench/core'
-import { nextProjectColor } from '@workbench/core'
-import { samePath } from '@workbench/core'
-import { fail, ok } from '@workbench/core'
-import type {
-  AddProjectInput,
-  AppSettings,
-  AuthProvider,
-  BackgroundImage,
-  BuiltinWallpaper,
-  CommandEntry,
-  EffectiveTheme,
-  InstallablePackageManager,
-  MailNotifyPayload,
-  Project,
-  Result,
-  TerminalKind,
-  ThemeConfig,
-  WindowState,
-  WorkbenchApi
-} from '@/types'
-import { assetUrl, errorText, guard, hasTauri, invoke, listen, notPorted } from './bridge'
-import { emit } from './events'
+import { fail, nextProjectColor, ok, parsePort, samePath } from '@workbench/core'
 import * as ai from './ai'
-import * as events from './events'
+import * as aiNews from './ai-news'
 import * as auth from './auth'
+import { assetUrl, errorText, guard, hasTauri, invoke, listen, notPorted } from './bridge'
 import * as design from './design'
+import { emit } from './events'
+import * as events from './events'
 import * as kb from './kb'
 import * as note from './note'
 import * as nrm from './nrm'
-import * as piSkill from './pi-skill'
 import * as nvm from './nvm'
 import * as orphan from './orphan'
+import * as piSkill from './pi-skill'
 import * as quick from './quick-launch'
 import * as scanner from './scanner'
 import * as session from './session'
 import * as skill from './skill'
 import * as state from './state'
 import * as system from './system'
+import { getTokenUsage, getTokenUsageSnapshot, listSyncDevices, syncThemeConfig, syncTokenUsage } from './token'
 import * as vault from './vault'
 import * as video from './video'
 import * as workLog from './work-log'
-import * as aiNews from './ai-news'
-import { getTokenUsage, getTokenUsageSnapshot, listSyncDevices, syncThemeConfig, syncTokenUsage } from './token'
 
 /**
  * 把设置里的 system 解析成实际明暗
  */
 function resolveTheme(theme: AppSettings['theme']): EffectiveTheme {
-  if (theme === 'light' || theme === 'dark') return theme
+  if (theme === 'light' || theme === 'dark')
+    return theme
   return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
 }
 
@@ -78,8 +60,10 @@ function syncRepo(): string {
  */
 async function openDialog(options: Record<string, unknown>): Promise<string | null> {
   const selected = await invoke<string | string[] | null>('plugin:dialog|open', { options })
-  if (typeof selected === 'string') return selected
-  if (Array.isArray(selected)) return selected[0] ?? null
+  if (typeof selected === 'string')
+    return selected
+  if (Array.isArray(selected))
+    return selected[0] ?? null
   return null
 }
 
@@ -89,7 +73,8 @@ async function openDialog(options: Record<string, unknown>): Promise<string | nu
  */
 async function openDialogMultiple(options: Record<string, unknown>): Promise<string[] | null> {
   const selected = await invoke<string | string[] | null>('plugin:dialog|open', { options })
-  if (Array.isArray(selected)) return selected
+  if (Array.isArray(selected))
+    return selected
   return typeof selected === 'string' && selected.trim() ? [selected] : null
 }
 
@@ -121,10 +106,10 @@ function wallpaperFrom(filePath: string): BuiltinWallpaper {
 /** 内置壁纸引用 → 真实文件路径；清单由 Rust 提供（打包后走 resource_dir，开发态读仓库） */
 async function resolveBuiltin(id: string): Promise<string | null> {
   const files = await invoke<string[]>('list_wallpapers')
-  return files.find((file) => wallpaperFrom(file).id === id) ?? null
+  return files.find(file => wallpaperFrom(file).id === id) ?? null
 }
 
-const noop = (): void => {}
+function noop(): void {}
 
 /**
  * 把设置里的系统集成项落到系统上：开机自启、全局快捷键。
@@ -134,13 +119,15 @@ const noop = (): void => {}
 async function syncSystemIntegration(settings: AppSettings): Promise<void> {
   try {
     await invoke('set_autostart', { enabled: settings.launchAtLogin })
-  } catch (error) {
+  }
+  catch (error) {
     console.warn('[workbench] 设置开机自启失败', error)
   }
 
   try {
     await invoke('set_hotkey', { accelerator: settings.hotkeyEnabled ? settings.hotkey : null })
-  } catch (error) {
+  }
+  catch (error) {
     console.warn('[workbench] 注册全局快捷键失败', error)
   }
 }
@@ -148,17 +135,17 @@ async function syncSystemIntegration(settings: AppSettings): Promise<void> {
 /** 起命令要先找到对象：命令构造在这一层，后端拿不到项目/命令数据 */
 function withProject(
   id: string,
-  task: (project: Project) => Promise<Result<null>>
+  task: (project: Project) => Promise<Result<null>>,
 ): Promise<Result<null>> {
-  const project = state.projects().find((item) => item.id === id)
+  const project = state.projects().find(item => item.id === id)
   return project ? task(project) : Promise.resolve(fail('找不到该项目'))
 }
 
 function withCommand(
   id: string,
-  task: (entry: CommandEntry) => Promise<Result<null>>
+  task: (entry: CommandEntry) => Promise<Result<null>>,
 ): Promise<Result<null>> {
-  const entry = state.commandList().find((item) => item.id === id)
+  const entry = state.commandList().find(item => item.id === id)
   return entry ? task(entry) : Promise.resolve(fail('找不到该命令'))
 }
 
@@ -167,13 +154,13 @@ function createApi(): WorkbenchApi {
     // Tauri 下没有 Node 版本；Chromium 版本取 WebView2 的 UA。
     versions: {
       node: '—',
-      chrome: navigator.userAgent.match(/Chrome\/([\d.]+)/)?.[1] ?? '—'
+      chrome: navigator.userAgent.match(/Chrome\/([\d.]+)/)?.[1] ?? '—',
     },
 
     getBootstrap: () => ({
       theme: resolveTheme(state.initialSettings().theme),
       settings: state.initialSettings(),
-      themeConfig: state.initialTheme()
+      themeConfig: state.initialTheme(),
     }),
 
     // ---------- 项目 ----------
@@ -185,7 +172,8 @@ function createApi(): WorkbenchApi {
      * 组装规则照着 Electron 版 ipc.ts 的 addProject 搬过来（含「仅管理目录」那条分支）。
      */
     addProject: async (input: AddProjectInput): Promise<Result<Project>> => {
-      if (!input || typeof input.path !== 'string') return fail('参数不合法')
+      if (!input || typeof input.path !== 'string')
+        return fail('参数不合法')
 
       const dirPath = input.path.trim()
       if (!(await invoke<boolean>('fs_is_dir', { path: dirPath }))) {
@@ -193,13 +181,15 @@ function createApi(): WorkbenchApi {
       }
 
       // 界面已经拦过一次，这里是兜底：路径写法不同（盘符大小写、斜杠方向）也算同一个目录
-      const existing = state.projects().find((project) => samePath(project.path, dirPath))
-      if (existing) return fail(`该目录已经添加过了（「${existing.name}」）`)
+      const existing = state.projects().find(project => samePath(project.path, dirPath))
+      if (existing)
+        return fail(`该目录已经添加过了（「${existing.name}」）`)
 
       const scan = await scanner.scan(dirPath)
 
       // 解析失败的 package.json 允许以「仅管理目录」的方式加入（设计文档 §7）
-      if (!scan.ok && !scan.parseError) return fail(scan.error ?? '项目扫描失败')
+      if (!scan.ok && !scan.parseError)
+        return fail(scan.error ?? '项目扫描失败')
       if (scan.parseError && input.allowInvalid !== true) {
         return fail(scan.error ?? 'package.json 解析失败')
       }
@@ -214,7 +204,7 @@ function createApi(): WorkbenchApi {
         name: input.name?.trim() || scan.name,
         path: dirPath,
         // 标识色：自动取一个当前用得最少的颜色，前五个项目因此两两不同（见 shared/project-color.ts）
-        color: nextProjectColor(state.projects().map((item) => item.color)),
+        color: nextProjectColor(state.projects().map(item => item.color)),
         packageManager: 'auto',
         detectedPackageManager: scan.detectedPackageManager,
         framework: scan.framework || 'Node',
@@ -222,7 +212,7 @@ function createApi(): WorkbenchApi {
         scripts: {
           serve: input.serve || scan.serve,
           build: manageOnly ? [] : buildList,
-          defaultBuild: manageOnly ? undefined : input.defaultBuild || buildList[0]
+          defaultBuild: manageOnly ? undefined : input.defaultBuild || buildList[0],
         },
         outputDir: scan.outputDir ?? '',
         nodeRequirement: scan.enginesNode,
@@ -234,7 +224,7 @@ function createApi(): WorkbenchApi {
         groupId: input.groupId,
         order: state.projects().length,
         createdAt: Date.now(),
-        lastUsedAt: Date.now()
+        lastUsedAt: Date.now(),
       }
 
       state.addProject(project)
@@ -276,8 +266,8 @@ function createApi(): WorkbenchApi {
         title: '选择要启动的程序',
         filters: [
           { name: '程序', extensions: ['exe', 'lnk', 'bat', 'cmd'] },
-          { name: '全部文件', extensions: ['*'] }
-        ]
+          { name: '全部文件', extensions: ['*'] },
+        ],
       }),
     addQuickApp: (input: Parameters<WorkbenchApi['addQuickApp']>[0]) =>
       guard(Promise.resolve(state.addQuickApp(input)), '添加快捷启动失败'),
@@ -370,9 +360,10 @@ function createApi(): WorkbenchApi {
       const path = await saveDialog({
         title: '导出保险库密钥',
         defaultPath: 'workbench-vault-key.txt',
-        filters: [{ name: '密钥文件', extensions: ['txt'] }]
+        filters: [{ name: '密钥文件', extensions: ['txt'] }],
       })
-      if (!path) return ok(false)
+      if (!path)
+        return ok(false)
 
       const written = await vault.exportKey(path)
       return written.ok ? ok(true) : fail(written.error ?? '导出密钥失败')
@@ -384,10 +375,11 @@ function createApi(): WorkbenchApi {
         title: '选择密钥文件',
         filters: [
           { name: '密钥文件', extensions: ['txt'] },
-          { name: '全部文件', extensions: ['*'] }
-        ]
+          { name: '全部文件', extensions: ['*'] },
+        ],
       })
-      if (!path) return ok(false)
+      if (!path)
+        return ok(false)
 
       const imported = await vault.importKeyFile(path)
       return imported.ok ? ok(true) : fail(imported.error ?? '导入密钥失败')
@@ -481,7 +473,7 @@ function createApi(): WorkbenchApi {
         directory: false,
         multiple: false,
         title: '选择工作区背景图',
-        filters: [{ name: '图片', extensions: IMAGE_EXTENSIONS }]
+        filters: [{ name: '图片', extensions: IMAGE_EXTENSIONS }],
       }),
 
     /**
@@ -501,11 +493,13 @@ function createApi(): WorkbenchApi {
         const target = path.startsWith(BUILTIN_PREFIX)
           ? await resolveBuiltin(path.slice(BUILTIN_PREFIX.length))
           : path
-        if (!target) return fail(`内置壁纸已不存在：${path}`)
+        if (!target)
+          return fail(`内置壁纸已不存在：${path}`)
 
         await invoke('allow_background', { path: target })
         return ok({ path, name: target.split(/[\\/]/).pop() ?? target, url: assetUrl(target) })
-      } catch (error) {
+      }
+      catch (error) {
         return fail(errorText(error, '读取背景图失败'))
       }
     },
@@ -522,13 +516,14 @@ function createApi(): WorkbenchApi {
               thumbnail: await invoke<string>('image_data_url', {
                 path: file,
                 maxEdge: THUMBNAIL_MAX_EDGE,
-                quality: THUMBNAIL_QUALITY
-              })
+                quality: THUMBNAIL_QUALITY,
+              }),
             }
-          } catch {
+          }
+          catch {
             return item
           }
-        })
+        }),
       )
       return items
     },
@@ -538,14 +533,14 @@ function createApi(): WorkbenchApi {
 
     // ---------- 进程：项目十件事 ----------
     // 起什么命令由这里决定（后端只认整行命令），所以项目查找也要在这一层做
-    install: (id: string) => withProject(id, (project) => session.installProject(project)),
-    start: (id: string) => withProject(id, (project) => session.startProject(project)),
+    install: (id: string) => withProject(id, project => session.installProject(project)),
+    start: (id: string) => withProject(id, project => session.startProject(project)),
     build: (id: string, script: string) =>
-      withProject(id, (project) => session.buildProject(project, script)),
+      withProject(id, project => session.buildProject(project, script)),
     runCustom: (id: string, index: number) =>
-      withProject(id, (project) => session.runCustom(project, index)),
+      withProject(id, project => session.runCustom(project, index)),
     stop: (id: string, kind?: TerminalKind) => session.stopOwner(id, kind),
-    startCommand: (id: string) => withCommand(id, (entry) => session.startCommand(entry)),
+    startCommand: (id: string) => withCommand(id, entry => session.startCommand(entry)),
     stopCommand: (id: string) => session.stopCommand(id),
 
     // ---------- 系统 ----------
@@ -565,27 +560,27 @@ function createApi(): WorkbenchApi {
     pickDirectory: (title?: string) =>
       openDialog({ directory: true, multiple: false, title: title ?? '选择项目目录' }),
     // 挑一个文件（技能包那种要按后缀过滤的走这条；取消回 null，不是失败）
-    pickFile: (title?: string, filters?: Array<{ name: string; extensions: string[] }>) =>
+    pickFile: (title?: string, filters?: Array<{ name: string, extensions: string[] }>) =>
       openDialog({
         directory: false,
         multiple: false,
         title: title ?? '选择文件',
-        ...(filters && filters.length ? { filters } : {})
+        ...(filters && filters.length ? { filters } : {}),
       }),
     // 挑多个文件（邮箱发信的附件用）；全取消回 null
-    pickFiles: (title?: string, filters?: Array<{ name: string; extensions: string[] }>) =>
+    pickFiles: (title?: string, filters?: Array<{ name: string, extensions: string[] }>) =>
       openDialogMultiple({
         directory: false,
         multiple: true,
         title: title ?? '选择文件',
-        ...(filters && filters.length ? { filters } : {})
+        ...(filters && filters.length ? { filters } : {}),
       }),
     // 「另存为」挑保存路径（邮箱附件下载用）；取消回 null，不是失败
-    pickSavePath: (options: { title?: string; defaultPath?: string; filters?: Array<{ name: string; extensions: string[] }> }) =>
+    pickSavePath: (options: { title?: string, defaultPath?: string, filters?: Array<{ name: string, extensions: string[] }> }) =>
       saveDialog({
         title: options.title ?? '另存为',
         ...(options.defaultPath ? { defaultPath: options.defaultPath } : {}),
-        ...(options.filters && options.filters.length ? { filters: options.filters } : {})
+        ...(options.filters && options.filters.length ? { filters: options.filters } : {}),
       }),
     checkPort: (port: number) => invoke('check_port', { port }),
     killPortProcess: (port: number) =>
@@ -618,7 +613,8 @@ function createApi(): WorkbenchApi {
       try {
         await invoke('allow_background', { path })
         return ok({ url: assetUrl(path) })
-      } catch (error) {
+      }
+      catch (error) {
         return fail(errorText(error, '这张图交不到预览里'))
       }
     },
@@ -696,7 +692,7 @@ function createApi(): WorkbenchApi {
     },
 
     // 尚未有人推的一个：首页布局（本地改动的推送方还没补）
-    onThemeConfig: () => noop
+    onThemeConfig: () => noop,
   } as unknown as WorkbenchApi
 
   /**
@@ -706,22 +702,24 @@ function createApi(): WorkbenchApi {
   return new Proxy(implemented, {
     get(target, prop, receiver) {
       const value = Reflect.get(target, prop, receiver)
-      if (value !== undefined || typeof prop !== 'string') return value
+      if (value !== undefined || typeof prop !== 'string')
+        return value
       return () => notPorted(prop)
-    }
+    },
   })
 }
 
 /** 只在 Tauri 里接管；浏览器预览（vite.preview）下没有后端，保持 undefined 让调用方走退化路径 */
 export function installTauriWorkbench(): void {
-  if (!hasTauri()) return
+  if (!hasTauri())
+    return
   // 先接上后端的原始事件（日志 / 退出 / AI 的事件流），再暴露 API：否则第一帧产生的日志会丢
   session.installSessionListeners()
   ai.installAiListeners()
   // 退出确认：后端问「还有项目在跑，要不要先停掉」，转成渲染层认识的事件
-  listen<{ count: number }>('app:quit-confirm', (payload) => events.emit('quitConfirm', payload))
+  listen<{ count: number }>('app:quit-confirm', payload => events.emit('quitConfirm', payload))
   // 邮件通知点击：Rust 弹的系统 toast 被点了，载荷是（账户, uid）
-  listen<MailNotifyPayload>('mail:notify-click', (payload) => events.emit('mailNotifyClick', payload))
+  listen<MailNotifyPayload>('mail:notify-click', payload => events.emit('mailNotifyClick', payload))
   window.workbench = createApi()
 }
 
@@ -734,7 +732,8 @@ export { initState } from './state'
  * 只在 Tauri 里做：浏览器预览下没有后端。
  */
 export async function reapOrphansOnStart(): Promise<void> {
-  if (!hasTauri()) return
+  if (!hasTauri())
+    return
 
   // 顺带把系统集成项对齐一次（开机自启 / 快捷键可能在应用之外被改过）
   void syncSystemIntegration(state.settings())
@@ -742,7 +741,8 @@ export async function reapOrphansOnStart(): Promise<void> {
   try {
     const result = await orphan.reap()
     for (const note of result.notes) console.warn(`[workbench] ${note}`)
-  } catch (error) {
+  }
+  catch (error) {
     // 清理是尽力而为：失败不能让应用起不来
     console.warn('[workbench] 清理残留进程失败', error)
   }

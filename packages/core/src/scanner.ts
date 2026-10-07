@@ -1,3 +1,5 @@
+import type { BuildTool, DevPortGuess, PortSource } from './dev-port'
+import { BUILD_TOOLS, detectBuildTool, guessDevPort, TOOL_CONFIG_FILES } from './dev-port'
 /**
  * 项目目录扫描：读 package.json / 锁文件 / 构建配置，得出添加项目预览所需的一切。
  *
@@ -7,15 +9,6 @@
  *    能原样留在 vitest 里跑，不必为了换运行时把测试改成 Rust。
  */
 import { resolveWithinProject } from './project-path'
-import {
-  BUILD_TOOLS,
-  TOOL_CONFIG_FILES,
-  detectBuildTool,
-  guessDevPort,
-  type BuildTool,
-  type DevPortGuess,
-  type PortSource
-} from './dev-port'
 
 export type PackageManager = 'npm' | 'yarn' | 'pnpm'
 
@@ -51,11 +44,11 @@ export interface ScanResult {
 /** 扫描需要的最小文件系统能力；由宿主提供（生产走 Rust 命令，测试走 node:fs） */
 export interface ScanFs {
   /** 读文本文件；不存在或读不出来返回 null */
-  readText(path: string): Promise<string | null>
+  readText: (path: string) => Promise<string | null>
   /** 路径存在且是目录 */
-  isDirectory(path: string): Promise<boolean>
+  isDirectory: (path: string) => Promise<boolean>
   /** 列目录下的条目名；目录不存在返回空数组 */
-  listDir(path: string): Promise<string[]>
+  listDir: (path: string) => Promise<string[]>
 }
 
 /**
@@ -75,7 +68,7 @@ export function baseName(target: string): string {
 const LOCK_FILES: Array<[string, PackageManager]> = [
   ['pnpm-lock.yaml', 'pnpm'],
   ['yarn.lock', 'yarn'],
-  ['package-lock.json', 'npm']
+  ['package-lock.json', 'npm'],
 ]
 
 /** 按顺序匹配，命中即返回 */
@@ -92,7 +85,7 @@ const FRAMEWORK_RULES: Array<[string, string]> = [
   ['rollup', 'Rollup'],
   ['webpack', 'Webpack'],
   ['esbuild', 'esbuild'],
-  ['parcel', 'Parcel']
+  ['parcel', 'Parcel'],
 ]
 
 const OUTPUT_DIR_CANDIDATES = ['dist', 'dist_electron', 'build', 'out', 'docs/.vitepress/dist']
@@ -105,7 +98,7 @@ const OUTPUT_DIR_CANDIDATES = ['dist', 'dist_electron', 'build', 'out', 'docs/.v
  * 比白名单更聪明的做法是转义，但脚本名来自 package.json，谁也无法穷举 cmd 的引用规则 ——
  * 只放行「长得像脚本名」的那些，剩下的让用户用自定义命令（整行原文）自己写。
  */
-const SCRIPT_NAME_RE = /^[A-Za-z0-9_][A-Za-z0-9_:.-]*$/
+const SCRIPT_NAME_RE = /^\w[\w:.-]*$/
 
 /** 脚本名必须由调用方校验后再拼进命令行，避免注入 */
 export function isValidScriptName(name: string): boolean {
@@ -121,34 +114,37 @@ export async function isNonEmptyDir(scan: ScanFs, target: string): Promise<boole
 /** 启动脚本优先级：serve > dev > start > 含 dev 的变体 > 含 serve 的变体 */
 export function pickServe(scripts: Record<string, string>): string | undefined {
   for (const name of ['serve', 'dev', 'start']) {
-    if (scripts[name]) return name
+    if (scripts[name])
+      return name
   }
   const keys = Object.keys(scripts)
   return (
-    keys.find((k) => /(^|[:.])dev([:.]|$)/.test(k)) ??
-    keys.find((k) => /(^|[:.])serve([:.]|$)/.test(k))
+    keys.find(k => /(^|[:.])dev([:.]|$)/.test(k))
+    ?? keys.find(k => /(^|[:.])serve([:.]|$)/.test(k))
   )
 }
 
 /** build / build:prod / docs:build 都算打包命令 */
 export function pickBuild(scripts: Record<string, string>): string[] {
-  return Object.keys(scripts).filter((k) => /(^|[:.])build([:.]|$)/.test(k))
+  return Object.keys(scripts).filter(k => /(^|[:.])build([:.]|$)/.test(k))
 }
 
 export function detectFramework(deps: Record<string, string>): string {
   for (const [pkg, label] of FRAMEWORK_RULES) {
-    if (deps[pkg]) return label
+    if (deps[pkg])
+      return label
   }
   return 'Node'
 }
 
 export async function detectPackageManager(
   scan: ScanFs,
-  root: string
-): Promise<{ pm: PackageManager; lockFile?: string }> {
+  root: string,
+): Promise<{ pm: PackageManager, lockFile?: string }> {
   for (const [file, pm] of LOCK_FILES) {
     const content = await scan.readText(joinPath(root, file))
-    if (content !== null) return { pm, lockFile: file }
+    if (content !== null)
+      return { pm, lockFile: file }
   }
   return { pm: 'npm' }
 }
@@ -162,18 +158,20 @@ export async function detectPackageManager(
  */
 export async function detectConfiguredOutputDir(
   scan: ScanFs,
-  root: string
+  root: string,
 ): Promise<string | undefined> {
   for (const name of TOOL_CONFIG_FILES.vite) {
     const text = await scan.readText(joinPath(root, name))
     const matched = text?.match(/outDir\s*:\s*['"`]([^'"`]+)['"`]/)
-    if (matched) return matched[1].replace(/\\/g, '/')
+    if (matched)
+      return matched[1].replace(/\\/g, '/')
   }
 
   for (const name of TOOL_CONFIG_FILES['vue-cli']) {
     const text = await scan.readText(joinPath(root, name))
     const matched = text?.match(/outputDir\s*:\s*['"`]([^'"`]+)['"`]/)
-    if (matched) return matched[1].replace(/\\/g, '/')
+    if (matched)
+      return matched[1].replace(/\\/g, '/')
   }
 
   return undefined
@@ -185,10 +183,12 @@ export async function detectConfiguredOutputDir(
  */
 export async function detectOutputDir(scan: ScanFs, root: string): Promise<string | undefined> {
   const configured = await detectConfiguredOutputDir(scan, root)
-  if (configured) return configured
+  if (configured)
+    return configured
 
   for (const candidate of OUTPUT_DIR_CANDIDATES) {
-    if (await isNonEmptyDir(scan, joinPath(root, candidate))) return candidate
+    if (await isNonEmptyDir(scan, joinPath(root, candidate)))
+      return candidate
   }
   return undefined
 }
@@ -203,13 +203,15 @@ export async function detectOutputDir(scan: ScanFs, root: string): Promise<strin
 export async function resolveOutputDir(
   scan: ScanFs,
   root: string,
-  configured = ''
-): Promise<{ dir: string; detected: boolean }> {
+  configured = '',
+): Promise<{ dir: string, detected: boolean }> {
   const manual = resolveWithinProject(root, configured)
-  if (manual && (await isNonEmptyDir(scan, manual))) return { dir: manual, detected: true }
+  if (manual && (await isNonEmptyDir(scan, manual)))
+    return { dir: manual, detected: true }
 
   const found = await detectOutputDir(scan, root)
-  if (found) return { dir: resolveWithinProject(root, found), detected: true }
+  if (found)
+    return { dir: resolveWithinProject(root, found), detected: true }
 
   return { dir: root, detected: false }
 }
@@ -218,13 +220,15 @@ export async function resolveOutputDir(
 async function detectNodeRequirement(
   scan: ScanFs,
   root: string,
-  enginesNode?: string
-): Promise<{ value?: string; from?: 'engines' | 'nvmrc' }> {
+  enginesNode?: string,
+): Promise<{ value?: string, from?: 'engines' | 'nvmrc' }> {
   const declared = enginesNode?.trim()
-  if (declared) return { value: declared, from: 'engines' }
+  if (declared)
+    return { value: declared, from: 'engines' }
 
   const nvmrc = (await scan.readText(joinPath(root, '.nvmrc')))?.trim()
-  if (nvmrc) return { value: nvmrc, from: 'nvmrc' }
+  if (nvmrc)
+    return { value: nvmrc, from: 'nvmrc' }
 
   return {}
 }
@@ -233,11 +237,12 @@ async function detectNodeRequirement(
 async function readToolConfig(
   scan: ScanFs,
   root: string,
-  tool: BuildTool
-): Promise<{ name: string; text: string } | undefined> {
+  tool: BuildTool,
+): Promise<{ name: string, text: string } | undefined> {
   for (const name of TOOL_CONFIG_FILES[tool]) {
     const text = await scan.readText(joinPath(root, name))
-    if (text !== null) return { name, text }
+    if (text !== null)
+      return { name, text }
   }
   return undefined
 }
@@ -245,11 +250,12 @@ async function readToolConfig(
 /** 依赖里看不出工具时，退一步看项目里放着哪家的配置文件 */
 async function detectToolByConfigFile(
   scan: ScanFs,
-  root: string
-): Promise<{ tool: BuildTool; file: { name: string; text: string } } | undefined> {
+  root: string,
+): Promise<{ tool: BuildTool, file: { name: string, text: string } } | undefined> {
   for (const tool of BUILD_TOOLS) {
     const file = await readToolConfig(scan, root, tool)
-    if (file) return { tool, file }
+    if (file)
+      return { tool, file }
   }
   return undefined
 }
@@ -262,8 +268,8 @@ async function detectDevPort(
   scan: ScanFs,
   root: string,
   deps: Record<string, string | undefined>,
-  serveCommand?: string
-): Promise<{ tool?: BuildTool; guess?: DevPortGuess }> {
+  serveCommand?: string,
+): Promise<{ tool?: BuildTool, guess?: DevPortGuess }> {
   let tool = detectBuildTool(deps)
   let configFile = tool ? await readToolConfig(scan, root, tool) : undefined
 
@@ -287,7 +293,7 @@ export async function scanProject(scan: ScanFs, dirPath: string): Promise<ScanRe
     framework: '',
     detectedPackageManager: 'npm',
     build: [],
-    allScripts: []
+    allScripts: [],
   }
 
   if (!(await scan.isDirectory(dirPath))) {
@@ -309,13 +315,14 @@ export async function scanProject(scan: ScanFs, dirPath: string): Promise<ScanRe
   }
   try {
     pkg = JSON.parse(raw)
-  } catch {
+  }
+  catch {
     // 解析失败不直接拒绝：允许以「仅管理目录」的方式加入（设计文档 §7）
     return {
       ...empty,
       parseError: true,
       name: baseName(dirPath),
-      error: 'package.json 解析失败，文件格式可能已损坏'
+      error: 'package.json 解析失败，文件格式可能已损坏',
     }
   }
 
@@ -331,7 +338,7 @@ export async function scanProject(scan: ScanFs, dirPath: string): Promise<ScanRe
     scan,
     dirPath,
     deps,
-    serveScript ? scripts[serveScript] : undefined
+    serveScript ? scripts[serveScript] : undefined,
   )
 
   return {
@@ -350,6 +357,6 @@ export async function scanProject(scan: ScanFs, dirPath: string): Promise<ScanRe
     buildTool: tool,
     port: guess?.port,
     portFrom: guess?.from,
-    portFile: guess?.file
+    portFile: guess?.file,
   }
 }

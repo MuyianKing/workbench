@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { Expand, Fold, FolderOpened, Refresh, VideoPlay } from '@element-plus/icons-vue'
+import { findVideoNode, VIDEO_SEEK_SECONDS, videoRootName } from '@workbench/video'
+import { ElMessage } from 'element-plus'
 /**
  * 视频页：左边目录树，右边播放器。
  *
@@ -18,18 +21,15 @@
  * 「最近打开」。左栏底部那一行与分隔条是 RecentRoots / PanelResizer（与笔记页共用）。
  */
 import { computed, onMounted, ref } from 'vue'
-import { ElMessage } from 'element-plus'
-import { Expand, Fold, FolderOpened, Refresh, VideoPlay } from '@element-plus/icons-vue'
-import { findVideoNode, videoRootName, VIDEO_SEEK_SECONDS } from '@workbench/video'
-import { useVideoStore } from '@/stores/video'
-import { useSettingsStore } from '@/stores/settings'
-import { setVideoStageHost } from '@/composables/use-video-stage'
-import VideoTree from '@/components/VideoTree.vue'
-import VideoRateMenu from '@/components/VideoRateMenu.vue'
-import SideLoadError from '@/components/SideLoadError.vue'
 import PanelLoading from '@/components/PanelLoading.vue'
-import RecentRoots from '@/components/RecentRoots.vue'
 import PanelResizer from '@/components/PanelResizer.vue'
+import RecentRoots from '@/components/RecentRoots.vue'
+import SideLoadError from '@/components/SideLoadError.vue'
+import VideoRateMenu from '@/components/VideoRateMenu.vue'
+import VideoTree from '@/components/VideoTree.vue'
+import { setVideoStageHost } from '@/composables/use-video-stage'
+import { useSettingsStore } from '@/stores/settings'
+import { useVideoStore } from '@/stores/video'
 
 const store = useVideoStore()
 const settings = useSettingsStore()
@@ -42,7 +42,7 @@ const expandedKeys = computed<string[]>({
   get: () => settings.settings.videoTreeExpanded,
   set: (value) => {
     void settings.updateSettings({ videoTreeExpanded: value })
-  }
+  },
 })
 
 /**
@@ -63,7 +63,7 @@ function toggleTree(): void {
  * CSS 变量：左栏宽度、分隔条落点都从它取。
  */
 const treeWidthStyle = computed(() => ({
-  '--tree-w': `${settings.themeConfig.videoTreeWidth}px`
+  '--tree-w': `${settings.themeConfig.videoTreeWidth}px`,
 }))
 
 /** 正在扫描：右栏据此说一句「正在读取」，而不是显示成「这个文件夹里什么都没有」 */
@@ -73,8 +73,8 @@ const scanning = computed(() => store.loading && !store.loaded)
 const locationText = computed(() =>
   store.activeChain
     .slice(0, -1)
-    .map((node) => node.name)
-    .join(' / ')
+    .map(node => node.name)
+    .join(' / '),
 )
 
 /**
@@ -104,9 +104,11 @@ onMounted(() => {
 /** 第一次进来（或想换一个目录）时挑文件夹；取消就什么都不做 */
 async function chooseFolder(): Promise<void> {
   const picked = await window.workbench.pickDirectory('选择视频文件夹')
-  if (!picked) return
+  if (!picked)
+    return
 
-  if (await store.setRoot(picked)) ElMessage.success('视频目录已切换')
+  if (await store.setRoot(picked))
+    ElMessage.success('视频目录已切换')
 }
 
 /** 从「最近打开」里换一个目录（当前的那条 RecentRoots 自己拦下了） */
@@ -120,7 +122,9 @@ function openRecentRoot(dir: string): void {
     <!-- 还没选文件夹：整页只说一件事 —— 先挑一个文件夹当视频库 -->
     <div v-if="!store.root" class="video__intro panel">
       <div class="empty">
-        <el-icon class="empty__icon"><VideoPlay /></el-icon>
+        <el-icon class="empty__icon">
+          <VideoPlay />
+        </el-icon>
         <p>看存在本机的 MP4 视频。</p>
         <p class="empty__hint">
           选一个文件夹当视频库：里面的目录结构会变成左边的目录树（只到 MP4 文件），
@@ -234,32 +238,50 @@ function openRecentRoot(dir: string): void {
           <div v-if="!store.active" class="empty video__hint">
             <template v-if="store.loadError">
               <p>读不出这个文件夹。</p>
-              <p class="empty__hint">{{ store.loadError }}</p>
+              <p class="empty__hint">
+                {{ store.loadError }}
+              </p>
             </template>
             <PanelLoading v-else-if="scanning" text="正在读取视频…" />
             <template v-else-if="store.openError">
               <p>这个视频打不开。</p>
-              <p class="empty__hint">{{ store.openError }}</p>
-              <el-button size="small" @click="store.select(store.activeRel)">重试</el-button>
+              <p class="empty__hint">
+                {{ store.openError }}
+              </p>
+              <el-button size="small" @click="store.select(store.activeRel)">
+                重试
+              </el-button>
             </template>
             <template v-else-if="activeNode?.kind === 'folder'">
               <p>「{{ activeNode.name }}」是文件夹。</p>
-              <p class="empty__hint">在左栏里选中一个视频开始播放。</p>
+              <p class="empty__hint">
+                在左栏里选中一个视频开始播放。
+              </p>
             </template>
             <template v-else-if="activeNode">
               <!-- 选中的是视频却没在播：在画中画上点了「停止」回来就是这个样子 —— 给一次原地重播 -->
               <p>「{{ activeNode.name }}」没有在播放。</p>
-              <el-button size="small" @click="store.select(store.activeRel)">播放</el-button>
+              <el-button size="small" @click="store.select(store.activeRel)">
+                播放
+              </el-button>
             </template>
             <template v-else-if="!store.videoCount">
-              <el-icon class="empty__icon"><VideoPlay /></el-icon>
+              <el-icon class="empty__icon">
+                <VideoPlay />
+              </el-icon>
               <p>这个文件夹里还没有 MP4 视频。</p>
-              <p class="empty__hint">把视频放进来，点左栏底部那颗刷新。</p>
+              <p class="empty__hint">
+                把视频放进来，点左栏底部那颗刷新。
+              </p>
             </template>
             <template v-else>
-              <el-icon class="empty__icon"><VideoPlay /></el-icon>
+              <el-icon class="empty__icon">
+                <VideoPlay />
+              </el-icon>
               <p>从左边选一个视频开始播放。</p>
-              <p class="empty__hint">空格控制播放暂停，方向键快进快退与调倍速。</p>
+              <p class="empty__hint">
+                空格控制播放暂停，方向键快进快退与调倍速。
+              </p>
             </template>
           </div>
         </div>
@@ -267,9 +289,7 @@ function openRecentRoot(dir: string): void {
         <!-- 快捷键提示：只挂在「正播着」的时候 —— 没播视频时这些键一个都不生效 -->
         <footer v-if="store.active" class="video__keys">
           <span class="video__key"><kbd>空格</kbd>播放 / 暂停</span>
-          <span class="video__key"
-            ><kbd>←</kbd><kbd>→</kbd>快退 / 快进 {{ VIDEO_SEEK_SECONDS }} 秒</span
-          >
+          <span class="video__key"><kbd>←</kbd><kbd>→</kbd>快退 / 快进 {{ VIDEO_SEEK_SECONDS }} 秒</span>
           <span class="video__key"><kbd>↑</kbd><kbd>↓</kbd>播放速率</span>
         </footer>
       </section>

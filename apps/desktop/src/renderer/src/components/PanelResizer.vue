@@ -35,7 +35,8 @@ const emit = defineEmits<{
 const dragging = ref(false)
 
 function onPointerDown(event: PointerEvent): void {
-  if (event.button !== 0) return
+  if (event.button !== 0)
+    return
   event.preventDefault()
 
   const startWidth = props.width
@@ -47,7 +48,7 @@ function onPointerDown(event: PointerEvent): void {
     onEnd: () => {
       dragging.value = false
       emit('end')
-    }
+    },
   })
 }
 </script>

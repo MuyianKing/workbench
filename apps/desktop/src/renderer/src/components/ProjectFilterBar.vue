@@ -1,4 +1,8 @@
 <script setup lang="ts">
+import type { ProjectSort } from '@workbench/core'
+import { ArrowDown, FolderOpened } from '@element-plus/icons-vue'
+import { isProjectSort, moveToPosition } from '@workbench/core'
+
 /**
  * 项目页的工具条：左边是分组筛选标签，右边是分组管理与排序。
  *
@@ -9,12 +13,9 @@
  * 所以它看起来还是原来那条工具带，只是从顶部带挪到了页面里。
  */
 import { computed, ref } from 'vue'
-import { ArrowDown, FolderOpened } from '@element-plus/icons-vue'
-import { UNGROUPED, useProjectsStore } from '@/stores/projects'
-import { isProjectSort, type ProjectSort } from '@workbench/core'
-import { moveToPosition } from '@workbench/core'
-import { DRAG_MIME } from '@/drag-mime'
 import GroupManageDialog from '@/components/GroupManageDialog.vue'
+import { DRAG_MIME } from '@/drag-mime'
+import { UNGROUPED, useProjectsStore } from '@/stores/projects'
 
 const store = useProjectsStore()
 const groupDialog = ref(false)
@@ -26,14 +27,14 @@ const draggingGroup = ref<string | null>(null)
 const sortLabels: Record<ProjectSort, string> = {
   recent: '最近使用',
   name: '项目名称',
-  created: '添加时间'
+  created: '添加时间',
 }
 
-const ungroupedCount = computed(() => store.projects.filter((p) => !p.groupId).length)
+const ungroupedCount = computed(() => store.projects.filter(p => !p.groupId).length)
 
 const chips = computed(() => {
-  const list: Array<{ key: string; label: string; count: number; sortable: boolean }> = [
-    { key: 'all', label: '全部', count: store.projects.length, sortable: false }
+  const list: Array<{ key: string, label: string, count: number, sortable: boolean }> = [
+    { key: 'all', label: '全部', count: store.projects.length, sortable: false },
   ]
 
   // 没有项目在跑就不占一个位置；但正停在这个筛选上时得把标签留住，
@@ -51,8 +52,8 @@ const chips = computed(() => {
     list.push({
       key: g.id,
       label: g.name,
-      count: store.projects.filter((p) => p.groupId === g.id).length,
-      sortable: true
+      count: store.projects.filter(p => p.groupId === g.id).length,
+      sortable: true,
     })
   }
   return list
@@ -64,18 +65,22 @@ function canDrop(key: string): boolean {
 }
 
 function onDragOver(key: string, event: DragEvent): void {
-  if (!canDrop(key)) return
+  if (!canDrop(key))
+    return
   event.preventDefault()
-  if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
+  if (event.dataTransfer)
+    event.dataTransfer.dropEffect = 'move'
   dragOverKey.value = key
 }
 
 function onDragLeave(key: string): void {
-  if (dragOverKey.value === key) dragOverKey.value = null
+  if (dragOverKey.value === key)
+    dragOverKey.value = null
 }
 
 function onGroupDragStart(key: string, event: DragEvent): void {
-  if (!canDrop(key) || !event.dataTransfer) return
+  if (!canDrop(key) || !event.dataTransfer)
+    return
   draggingGroup.value = key
   event.dataTransfer.setData(DRAG_MIME.group, key)
   event.dataTransfer.effectAllowed = 'move'
@@ -89,37 +94,42 @@ function onGroupDragEnd(): void {
 /** 把 fromId 插到 toId 的位置上，然后整份落盘 */
 async function reorderGroup(fromId: string, toId: string): Promise<void> {
   const next = moveToPosition(
-    store.sortedGroups.map((g) => g.id),
+    store.sortedGroups.map(g => g.id),
     fromId,
-    toId
+    toId,
   )
-  if (next) await store.reorderGroups(next)
+  if (next)
+    await store.reorderGroups(next)
 }
 
 function onDrop(key: string, event: DragEvent): void {
   dragOverKey.value = null
-  if (!canDrop(key)) return
+  if (!canDrop(key))
+    return
 
   // 拖的是分组标签 → 排序
   const groupId = event.dataTransfer?.getData(DRAG_MIME.group)
   if (groupId) {
     draggingGroup.value = null
-    if (key !== UNGROUPED) void reorderGroup(groupId, key)
+    if (key !== UNGROUPED)
+      void reorderGroup(groupId, key)
     return
   }
 
   // 拖的是项目卡片 → 归类（场景 S7）
-  const id =
-    event.dataTransfer?.getData(DRAG_MIME.project) ||
-    event.dataTransfer?.getData('text/plain')
-  if (!id) return
+  const id
+    = event.dataTransfer?.getData(DRAG_MIME.project)
+      || event.dataTransfer?.getData('text/plain')
+  if (!id)
+    return
 
   store.assignGroup(id, key === UNGROUPED ? undefined : key)
 }
 
 function pickSort(key: string): void {
   // 走 store action 而不是直接赋值，非法值不会被写进 sortBy；取值表在 shared/project-sort.ts
-  if (isProjectSort(key)) store.setSortBy(key)
+  if (isProjectSort(key))
+    store.setSortBy(key)
 }
 </script>
 
@@ -133,7 +143,7 @@ function pickSort(key: string): void {
         :class="{
           'is-active': store.groupFilter === chip.key,
           'is-drop': dragOverKey === chip.key && draggingGroup !== chip.key,
-          'is-dragging': draggingGroup === chip.key
+          'is-dragging': draggingGroup === chip.key,
         }"
         type="button"
         :draggable="chip.sortable"
@@ -157,7 +167,9 @@ function pickSort(key: string): void {
 
     <div class="filter__tools">
       <button class="sort" type="button" @click="groupDialog = true">
-        <el-icon class="sort__caret"><FolderOpened /></el-icon>
+        <el-icon class="sort__caret">
+          <FolderOpened />
+        </el-icon>
         <span class="sort__value">分组管理</span>
       </button>
 
@@ -165,7 +177,9 @@ function pickSort(key: string): void {
         <button class="sort" type="button">
           <span class="sort__label">排序</span>
           <span class="sort__value">{{ sortLabels[store.sortBy] }}</span>
-          <el-icon class="sort__caret"><ArrowDown /></el-icon>
+          <el-icon class="sort__caret">
+            <ArrowDown />
+          </el-icon>
         </button>
         <template #dropdown>
           <el-dropdown-menu>
@@ -226,7 +240,6 @@ function pickSort(key: string): void {
 :root[data-theme='dark'] .chip.is-drop {
   background: rgba(232, 237, 244, 0.08);
 }
-
 
 .chip__dot {
   width: 6px;

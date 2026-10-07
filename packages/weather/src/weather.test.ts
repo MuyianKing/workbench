@@ -1,13 +1,6 @@
+import type { WeatherView } from './weather'
 import { describe, expect, it } from 'vitest'
-import {
-  formatWeatherView,
-  parseWeatherForecast,
-  parseWeatherGeocoding,
-  sanitizeWeatherCity,
-  weatherTextOf,
-  WEATHER_CITY_MAX,
-  type WeatherView
-} from './weather'
+import { formatWeatherView, parseWeatherForecast, parseWeatherGeocoding, sanitizeWeatherCity, WEATHER_CITY_MAX, weatherTextOf } from './weather'
 
 describe('weatherTextOf', () => {
   it('认得出 WMO 码表里的码', () => {
@@ -72,7 +65,7 @@ describe('parseWeatherGeocoding', () => {
     lat: '31.8122623',
     lon: '119.9691539',
     name: '常州市',
-    display_name: '常州市, 江苏省, 213000, 中国'
+    display_name: '常州市, 江苏省, 213000, 中国',
   }
 
   it('取第一条结果的地名与经纬度，字符串坐标收编成数', () => {
@@ -82,7 +75,7 @@ describe('parseWeatherGeocoding', () => {
 
   it('没有 name 字段时回落到 display_name 的第一段', () => {
     const geo = parseWeatherGeocoding(
-      JSON.stringify([{ lat: '31.8', lon: '119.9', display_name: '常州市, 江苏省, 中国' }])
+      JSON.stringify([{ lat: '31.8', lon: '119.9', display_name: '常州市, 江苏省, 中国' }]),
     )
     expect(geo).toEqual({ name: '常州市', latitude: 31.8, longitude: 119.9 })
   })
@@ -110,7 +103,7 @@ describe('parseWeatherForecast', () => {
   const sample = {
     latitude: 31.225,
     current_units: { temperature_2m: '°C', weather_code: 'wmo code' },
-    current: { time: '2026-09-27T00:30', interval: 900, temperature_2m: 18.7, weather_code: 3 }
+    current: { time: '2026-09-27T00:30', interval: 900, temperature_2m: 18.7, weather_code: 3 },
   }
 
   it('取出现象与实况气温（气温保持原值，显示时再取整）', () => {
@@ -120,7 +113,7 @@ describe('parseWeatherForecast', () => {
 
   it('认不出的天气码给空串现象，气温仍在', () => {
     const body = JSON.stringify({
-      current: { temperature_2m: 21.3, weather_code: 42 }
+      current: { temperature_2m: 21.3, weather_code: 42 },
     })
     expect(parseWeatherForecast(body)).toEqual({ text: '', temperature: 21.3 })
   })

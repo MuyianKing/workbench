@@ -1,13 +1,12 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import type { ScanResult } from '@/types'
 import { FolderOpened, Plus } from '@element-plus/icons-vue'
-import { BUILD_TOOL_LABEL } from '@workbench/core'
-import { parsePort } from '@workbench/core'
-import { samePath } from '@workbench/core'
+import { BUILD_TOOL_LABEL, parsePort, samePath } from '@workbench/core'
+
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import AppDialog from '@/components/AppDialog.vue'
 import { useProjectsStore } from '@/stores/projects'
-import type { ScanResult } from '@/types'
 
 const store = useProjectsStore()
 
@@ -20,7 +19,7 @@ const form = reactive({
   /** 监听端口先按字符串收，提交时再校验；空串表示不检测 */
   port: '',
   /** 是否放到首页展示（见 Project.home）；默认不勾 —— 首页是挑出来的一份名单 */
-  home: false
+  home: false,
 })
 
 const scan = ref<ScanResult | null>(null)
@@ -33,7 +32,7 @@ const allowInvalid = ref(false)
 
 const visible = computed({
   get: () => store.addDialogVisible,
-  set: (v: boolean) => (v ? store.openAddDialog() : store.closeAddDialog())
+  set: (v: boolean) => (v ? store.openAddDialog() : store.closeAddDialog()),
 })
 
 const allScripts = computed(() => scan.value?.allScripts ?? [])
@@ -44,13 +43,16 @@ const parseFailed = computed(() => !!scan.value?.parseError)
 /** 选中的目录已经在列表里了；重复添加没有意义，在选路径这一步就拦掉 */
 const duplicate = computed(() => {
   const target = form.path.trim()
-  if (!target) return null
-  return store.projects.find((project) => samePath(project.path, target)) ?? null
+  if (!target)
+    return null
+  return store.projects.find(project => samePath(project.path, target)) ?? null
 })
 
 const canSubmit = computed(() => {
-  if (scanning.value || !form.name.trim() || duplicate.value) return false
-  if (scan.value?.ok) return true
+  if (scanning.value || !form.name.trim() || duplicate.value)
+    return false
+  if (scan.value?.ok)
+    return true
   return allowInvalid.value && parseFailed.value
 })
 
@@ -62,7 +64,8 @@ let scanTimer: ReturnType<typeof setTimeout> | null = null
 let scanSeq = 0
 
 function cancelScheduledScan(): void {
-  if (scanTimer === null) return
+  if (scanTimer === null)
+    return
   clearTimeout(scanTimer)
   scanTimer = null
 }
@@ -84,11 +87,13 @@ async function runScan(dirPath: string): Promise<void> {
   scanError.value = ''
   allowInvalid.value = false
 
-  if (!target) return
+  if (!target)
+    return
 
   scanning.value = true
   const result = await window.workbench.scanProject(target)
-  if (seq !== scanSeq) return // 已有更新的一次扫描，丢弃本次结果
+  if (seq !== scanSeq)
+    return // 已有更新的一次扫描，丢弃本次结果
   scanning.value = false
 
   if (!result.ok || !result.data) {
@@ -101,13 +106,15 @@ async function runScan(dirPath: string): Promise<void> {
     if (result.data.parseError) {
       // 解析失败仍允许加入，保留扫描结果供「仅管理目录」分支使用
       scan.value = result.data
-      if (!nameTouched.value) form.name = result.data.name
+      if (!nameTouched.value)
+        form.name = result.data.name
     }
     return
   }
 
   scan.value = result.data
-  if (!nameTouched.value) form.name = result.data.name
+  if (!nameTouched.value)
+    form.name = result.data.name
   form.serve = result.data.serve
   form.build = result.data.build.length ? [...result.data.build] : []
   form.port = result.data.port ? String(result.data.port) : ''
@@ -132,7 +139,8 @@ const portHint = computed(() => {
 
 async function pickDirectory(): Promise<void> {
   const picked = await window.workbench.pickDirectory()
-  if (!picked) return
+  if (!picked)
+    return
   // 只赋值，扫描交给下面的 watch —— 以前这里再直接扫一次，选个目录会触发两趟 IPC
   form.path = picked
   nameTouched.value = false
@@ -146,25 +154,28 @@ async function newGroup(): Promise<void> {
       confirmButtonText: '创建',
       cancelButtonText: '取消',
       inputPlaceholder: '如：工作中 / 客户项目',
-      inputValidator: (value: string) => (value.trim() ? true : '分组名不能为空')
+      inputValidator: (value: string) => (value.trim() ? true : '分组名不能为空'),
     })
     name = value.trim()
-  } catch {
+  }
+  catch {
     return // 用户取消
   }
 
   const group = await store.createGroup(name)
-  if (group) form.groupId = group.id
+  if (group)
+    form.groupId = group.id
 }
 
 watch(
   () => form.path,
   (path, previous) => {
-    if (path === previous) return
+    if (path === previous)
+      return
     // 防抖：停止输入 300ms 后才读盘，而不是每敲一个字符就发一次扫描
     // （UNC 路径不以盘符开头，所以不再用「盘符正则」当门槛）
     scheduleScan(path)
-  }
+  },
 )
 
 onBeforeUnmount(cancelScheduledScan)
@@ -187,7 +198,8 @@ function reset(): void {
 }
 
 async function submit(): Promise<void> {
-  if (!canSubmit.value) return
+  if (!canSubmit.value)
+    return
 
   const rawPort = form.port.trim()
   if (rawPort && !parsePort(rawPort)) {
@@ -204,10 +216,11 @@ async function submit(): Promise<void> {
     defaultBuild: form.build[0],
     port: rawPort ? parsePort(rawPort) : null,
     allowInvalid: allowInvalid.value,
-    home: form.home
+    home: form.home,
   })
 
-  if (added) visible.value = false
+  if (added)
+    visible.value = false
 }
 </script>
 
@@ -230,15 +243,21 @@ async function submit(): Promise<void> {
             spellcheck="false"
             @keydown.enter="runScan(form.path)"
           />
-          <el-button :icon="FolderOpened" @click="pickDirectory">浏览</el-button>
+          <el-button :icon="FolderOpened" @click="pickDirectory">
+            浏览
+          </el-button>
         </div>
       </el-form-item>
 
       <p v-if="duplicate" class="hint hint--error">
         该目录已经在项目列表里了（「{{ duplicate.name }}」），不能重复添加。
       </p>
-      <p v-else-if="scanning" class="hint">正在读取 package.json…</p>
-      <p v-else-if="scanError" class="hint hint--error">{{ scanError }}</p>
+      <p v-else-if="scanning" class="hint">
+        正在读取 package.json…
+      </p>
+      <p v-else-if="scanError" class="hint hint--error">
+        {{ scanError }}
+      </p>
 
       <el-alert
         v-if="parseFailed"
@@ -269,12 +288,16 @@ async function submit(): Promise<void> {
                 :value="g.id"
               />
             </el-select>
-            <el-button :icon="Plus" @click="newGroup">新建分组</el-button>
+            <el-button :icon="Plus" @click="newGroup">
+              新建分组
+            </el-button>
           </div>
         </el-form-item>
 
         <!-- 首页那张项目卡只画勾了这一项的项目，所以这里默认不勾（见 Project.home） -->
-        <el-checkbox v-model="form.home" class="option">在首页展示</el-checkbox>
+        <el-checkbox v-model="form.home" class="option">
+          在首页展示
+        </el-checkbox>
 
         <el-checkbox v-if="parseFailed" v-model="allowInvalid" class="option">
           以「仅管理目录」方式加入（不执行命令）
@@ -293,11 +316,17 @@ async function submit(): Promise<void> {
           <ul class="scan__facts mono">
             <li>{{ scan.framework }}</li>
             <li>v{{ scan.version }}</li>
-            <li v-if="scan.outputDir">产物 {{ scan.outputDir }}</li>
-            <li v-else>未探测到产物目录</li>
+            <li v-if="scan.outputDir">
+              产物 {{ scan.outputDir }}
+            </li>
+            <li v-else>
+              未探测到产物目录
+            </li>
             <li v-if="scan.enginesNode">
               node {{ scan.enginesNode }}
-              <template v-if="scan.nodeRequirementFrom === 'nvmrc'">（来自 .nvmrc）</template>
+              <template v-if="scan.nodeRequirementFrom === 'nvmrc'">
+                （来自 .nvmrc）
+              </template>
             </li>
           </ul>
 
@@ -320,7 +349,9 @@ async function submit(): Promise<void> {
           <el-form-item label="监听端口">
             <div class="field__stack">
               <el-input v-model="form.port" placeholder="留空表示不检测" spellcheck="false" />
-              <p class="field__hint">{{ portHint }}</p>
+              <p class="field__hint">
+                {{ portHint }}
+              </p>
             </div>
           </el-form-item>
 
@@ -334,7 +365,9 @@ async function submit(): Promise<void> {
               >
                 <el-option v-for="s in allScripts" :key="s" :label="s" :value="s" />
               </el-select>
-              <p class="field__hint">可多选；列表中的第一条作为默认打包命令。</p>
+              <p class="field__hint">
+                可多选；列表中的第一条作为默认打包命令。
+              </p>
             </div>
           </el-form-item>
         </div>
@@ -342,16 +375,18 @@ async function submit(): Promise<void> {
     </el-form>
 
     <template #footer>
-      <el-button @click="visible = false">取消</el-button>
-      <el-button type="primary" :disabled="!canSubmit" @click="submit">添加项目</el-button>
+      <el-button @click="visible = false">
+        取消
+      </el-button>
+      <el-button type="primary" :disabled="!canSubmit" @click="submit">
+        添加项目
+      </el-button>
     </template>
   </AppDialog>
 </template>
 
 <style scoped>
 /* 字段排版（标签 / 说明小字）由 global.css 的「弹窗表单」一节统一给 */
-
-
 
 .field__row {
   display: flex;
@@ -366,7 +401,6 @@ async function submit(): Promise<void> {
   flex: 1;
   min-width: 0;
 }
-
 
 .hint {
   font-size: var(--fs-meta);

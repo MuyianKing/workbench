@@ -1,3 +1,5 @@
+import type { KbEntryMeta, KbScanEntry } from './kb'
+import { isDateKey, markdownLinks } from '@workbench/core'
 /**
  * 知识库巡检：库内一致性的**只读**检查 —— 只报问题，不改任何文件。
  *
@@ -12,8 +14,7 @@
  *
  * 一切都是纯函数（扫描结果进、问题清单出）：没有 IO，也不知道 store 的存在。
  */
-import { KB_DIR, KB_RAW_DIR, type KbEntryMeta, type KbScanEntry } from './kb'
-import { isDateKey, markdownLinks } from '@workbench/core'
+import { KB_DIR, KB_RAW_DIR } from './kb'
 
 /** 巡检的问题分类；界面上的说法在 KB_ISSUE_LABELS */
 export type KbIssueKind = 'orphan' | 'link' | 'meta' | 'source' | 'topic'
@@ -27,7 +28,7 @@ export const KB_ISSUE_LABELS: Record<KbIssueKind, string> = {
   link: '断链',
   meta: '元数据',
   source: '出处',
-  topic: '主题目录'
+  topic: '主题目录',
 }
 
 /** 巡检发现的一处问题 */
@@ -41,13 +42,13 @@ export interface KbIssue {
 
 /** 分类计数（只有非零的那几类）：界面汇总行念成「孤儿 2 · 断链 1」 */
 export function kbIssueCounts(
-  issues: KbIssue[]
-): Array<{ kind: KbIssueKind; label: string; count: number }> {
-  return KB_ISSUE_KINDS.map((kind) => ({
+  issues: KbIssue[],
+): Array<{ kind: KbIssueKind, label: string, count: number }> {
+  return KB_ISSUE_KINDS.map(kind => ({
     kind,
     label: KB_ISSUE_LABELS[kind],
-    count: issues.filter((issue) => issue.kind === kind).length
-  })).filter((item) => item.count > 0)
+    count: issues.filter(issue => issue.kind === kind).length,
+  })).filter(item => item.count > 0)
 }
 
 // ---------- 链接 ----------
@@ -60,13 +61,16 @@ export function kbIssueCounts(
  * 与纯锚点（`#…`）在这里就滤掉 —— 它们由渲染层的既有出口管，与库内互链是两回事。
  */
 export function kbEntryLinks(text: string): string[] {
-  if (typeof text !== 'string' || !text.trim()) return []
+  if (typeof text !== 'string' || !text.trim())
+    return []
 
   const seen = new Set<string>()
   for (const href of markdownLinks(text)) {
     const raw = href.trim()
-    if (!raw || raw.startsWith('#')) continue
-    if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) continue
+    if (!raw || raw.startsWith('#'))
+      continue
+    if (/^[a-z][a-z0-9+.-]*:/i.test(raw))
+      continue
     seen.add(raw)
   }
   return [...seen]
@@ -86,26 +90,32 @@ export function kbEntryLinks(text: string): string[] {
  */
 export function resolveKbLink(fromRel: string, href: string): string | null {
   const raw = href.trim()
-  if (!raw || raw.startsWith('#') || raw.startsWith('/')) return null
-  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return null
+  if (!raw || raw.startsWith('#') || raw.startsWith('/'))
+    return null
+  if (/^[a-z][a-z0-9+.-]*:/i.test(raw))
+    return null
 
   // 锚点与查询串只属于定位，不是路径的一部分（`./b.md#第三节` → `./b.md`）
   const target = raw.split('#')[0].split('?')[0]
-  if (!target) return null
+  if (!target)
+    return null
 
   let decoded = target
   try {
     decoded = decodeURIComponent(target)
-  } catch {
+  }
+  catch {
     // 原文里本来就有 %（不是编码）：按原文用，不是错误
   }
 
   // 条目自己那一段不算目录（`kb/02-xx/a.md` 的上一层是 `kb/02-xx`）
   const segments = fromRel.split('/').slice(0, -1)
   for (const part of decoded.replace(/\\/g, '/').split('/')) {
-    if (!part || part === '.') continue
+    if (!part || part === '.')
+      continue
     if (part === '..') {
-      if (!segments.length) return null
+      if (!segments.length)
+        return null
       segments.pop()
       continue
     }
@@ -132,8 +142,10 @@ function isNav(rel: string): boolean {
  * 对话这类出处，也允许写库外的一份资料（`某某书.pdf`），那些不是缺陷。
  */
 function looksLikePath(source: string): boolean {
-  if (!source || /\s/.test(source)) return false
-  if (/^[a-z][a-z0-9+.-]*:/i.test(source)) return false
+  if (!source || /\s/.test(source))
+    return false
+  if (/^[a-z][a-z0-9+.-]*:/i.test(source))
+    return false
   return source.includes('/') || /\.md$/i.test(source)
 }
 
@@ -158,38 +170,42 @@ export function kbLint(entries: KbEntryMeta[], files: KbScanEntry[]): KbIssue[] 
     link: [],
     meta: [],
     source: [],
-    topic: []
+    topic: [],
   }
 
   /** 库里真有的文件（小写 rel）：断链与出处都拿它判「在不在」 */
   const known = new Set<string>()
   for (const file of files) {
-    if (!file.isDir) known.add(file.rel.toLowerCase())
+    if (!file.isDir)
+      known.add(file.rel.toLowerCase())
   }
-  const entryRels = new Set(entries.map((entry) => entry.rel.toLowerCase()))
+  const entryRels = new Set(entries.map(entry => entry.rel.toLowerCase()))
 
   // 入链先算一遍：条目正文里解析得出、且目标也是条目的那些（导航页发的不算）
   const inbound = new Set<string>()
   for (const entry of entries) {
-    if (isNav(entry.rel)) continue
+    if (isNav(entry.rel))
+      continue
     for (const href of entry.links) {
       const target = resolveKbLink(entry.rel, href)
-      if (target && entryRels.has(target.toLowerCase())) inbound.add(target.toLowerCase())
+      if (target && entryRels.has(target.toLowerCase()))
+        inbound.add(target.toLowerCase())
     }
   }
 
   for (const entry of entries) {
     // 元数据：通篇没有 frontmatter 只报一条（逐项报是同一件事说四遍）
-    const bare =
-      !entry.tags.length &&
-      !entry.status &&
-      !entry.created &&
-      !entry.updated &&
-      !entry.summary &&
-      !entry.source
+    const bare
+      = !entry.tags.length
+        && !entry.status
+        && !entry.created
+        && !entry.updated
+        && !entry.summary
+        && !entry.source
     if (bare) {
       found.meta.push({ kind: 'meta', rel: entry.rel, text: '没有 frontmatter：除了文件名什么都没有' })
-    } else {
+    }
+    else {
       if (!entry.tags.length) {
         found.meta.push({ kind: 'meta', rel: entry.rel, text: '没有 tags：搜索与标签筛选挂不上它' })
       }
@@ -217,7 +233,8 @@ export function kbLint(entries: KbEntryMeta[], files: KbScanEntry[]): KbIssue[] 
     const segments = inner.split('/')
     if (segments.length < 2) {
       found.topic.push({ kind: 'topic', rel: entry.rel, text: '直接放在 kb/ 根下，没有归进主题目录' })
-    } else if (!TOPIC_DIR.test(segments[0])) {
+    }
+    else if (!TOPIC_DIR.test(segments[0])) {
       found.topic.push({ kind: 'topic', rel: entry.rel, text: `主题目录名不是 NN-主题名：${segments[0]}` })
     }
 
@@ -226,7 +243,8 @@ export function kbLint(entries: KbEntryMeta[], files: KbScanEntry[]): KbIssue[] 
       const target = resolveKbLink(entry.rel, href)
       if (!target) {
         found.link.push({ kind: 'link', rel: entry.rel, text: `链接跳不到库里：${href}` })
-      } else if (!known.has(target.toLowerCase())) {
+      }
+      else if (!known.has(target.toLowerCase())) {
         found.link.push({ kind: 'link', rel: entry.rel, text: `链接指向的文件不存在：${target}` })
       }
     }
@@ -236,5 +254,5 @@ export function kbLint(entries: KbEntryMeta[], files: KbScanEntry[]): KbIssue[] 
   }
 
   // 按分类的固定顺序拼起来：界面上一眼看得出「哪一类有几处」
-  return KB_ISSUE_KINDS.flatMap((kind) => found[kind])
+  return KB_ISSUE_KINDS.flatMap(kind => found[kind])
 }

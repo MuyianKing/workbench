@@ -13,13 +13,8 @@
  * 模型名只能从「Preparing model」行反推,极个别子请求拿不到时回退到最近见过的模型。
  */
 
-import {
-  addCounters,
-  emptyCounters,
-  isDateKey,
-  type TokenCounters,
-  type TokenDays
-} from './token-usage'
+import type { TokenCounters, TokenDays } from './token-usage'
+import { addCounters, emptyCounters, isDateKey } from './token-usage'
 
 /** 跨文件保留的解析状态:三张映射 + 兜底模型(日志轮转可能把一次请求拆进两个文件) */
 export interface CodeBuddyParseState {
@@ -34,7 +29,7 @@ export function createCodeBuddyParseState(): CodeBuddyParseState {
     traceModel: new Map(),
     traceRequest: new Map(),
     requestModel: new Map(),
-    lastModel: 'codebuddy'
+    lastModel: 'codebuddy',
   }
 }
 
@@ -85,28 +80,34 @@ export function collectCodeBuddyLogText(text: string, state: CodeBuddyParseState
       const [, traceId, requestId] = requestMatch
       state.traceRequest.set(traceId, requestId)
       const model = state.traceModel.get(traceId)
-      if (model) state.requestModel.set(requestId, model)
+      if (model)
+        state.requestModel.set(requestId, model)
       continue
     }
 
-    if (!line.includes('usage: {')) continue
+    if (!line.includes('usage: {'))
+      continue
 
     const usageMatch = line.match(USAGE_RE)
-    if (!usageMatch) continue
+    if (!usageMatch)
+      continue
     const dateMatch = line.match(DATE_RE)
-    if (!dateMatch || !isDateKey(dateMatch[1])) continue
+    if (!dateMatch || !isDateKey(dateMatch[1]))
+      continue
 
     let usage: CodeBuddyUsageJson
     try {
       usage = JSON.parse(usageMatch[1]) as CodeBuddyUsageJson
-    } catch {
+    }
+    catch {
       continue
     }
     // 核心计数不是数字说明这条 usage 残缺,整条跳过,别按 0 硬计
-    if (typeof usage.inputTokens !== 'number' || typeof usage.outputTokens !== 'number') continue
+    if (typeof usage.inputTokens !== 'number' || typeof usage.outputTokens !== 'number')
+      continue
     const requestMatch2 = line.match(REQUEST_OF_USAGE_RE)
-    const model =
-      (requestMatch2 ? state.requestModel.get(requestMatch2[1]) : undefined) ?? state.lastModel
+    const model
+      = (requestMatch2 ? state.requestModel.get(requestMatch2[1]) : undefined) ?? state.lastModel
 
     const cacheRead = finite(usage.cacheTokens)
     const step: TokenCounters = {
@@ -117,7 +118,7 @@ export function collectCodeBuddyLogText(text: string, state: CodeBuddyParseState
       cacheWriteTokens: finite(usage.cachedWriteTokens),
       // CodeBuddy 的日志里只有 token 计数，没有额度这一项
       credits: 0,
-      requests: 1
+      requests: 1,
     }
     const modelDays = (days[dateMatch[1]] ??= {})
     modelDays[model] = addCounters(modelDays[model] ?? emptyCounters(), step)

@@ -20,7 +20,7 @@ describe('commandTextError', () => {
 
   it('超长命令拒绝，刚好到上限放行', () => {
     expect(commandTextError('a'.repeat(COMMAND_TEXT_MAX + 1))).toBe(
-      `命令过长（上限 ${COMMAND_TEXT_MAX} 字符）`
+      `命令过长（上限 ${COMMAND_TEXT_MAX} 字符）`,
     )
     expect(commandTextError('a'.repeat(COMMAND_TEXT_MAX))).toBeNull()
   })
@@ -49,7 +49,7 @@ describe('sanitizeCommands', () => {
   it('丢掉没有命令的条目，其余补回缺失字段', () => {
     const list = sanitizeCommands(
       [{ command: '  npx dsh web  ' }, { name: '没有命令' }, null, 'not an object'],
-      makeId
+      makeId,
     )
 
     expect(list).toHaveLength(1)
@@ -62,9 +62,9 @@ describe('sanitizeCommands', () => {
   it('含换行与超长的条目一并丢掉', () => {
     const list = sanitizeCommands(
       [{ command: 'a\nb' }, { command: 'a'.repeat(COMMAND_TEXT_MAX + 1) }, { command: 'ok' }],
-      makeId
+      makeId,
     )
-    expect(list.map((item) => item.command)).toEqual(['ok'])
+    expect(list.map(item => item.command)).toEqual(['ok'])
   })
 
   it('非法端口归到 undefined，合法端口保留', () => {
@@ -72,12 +72,12 @@ describe('sanitizeCommands', () => {
       [
         { command: 'a', port: '5173' },
         { command: 'b', port: 70000 },
-        { command: 'c', port: 12.5 }
+        { command: 'c', port: 12.5 },
       ],
-      makeId
+      makeId,
     )
 
-    expect(list.map((item) => item.port)).toEqual([5173, undefined, undefined])
+    expect(list.map(item => item.port)).toEqual([5173, undefined, undefined])
   })
 
   it('按 order 排序并重新编号，结果一定是紧凑的', () => {
@@ -85,13 +85,13 @@ describe('sanitizeCommands', () => {
       [
         { id: 'a', command: 'a', order: 9 },
         { id: 'b', command: 'b', order: 2 },
-        { id: 'c', command: 'c' }
+        { id: 'c', command: 'c' },
       ],
-      makeId
+      makeId,
     )
 
-    expect(list.map((item) => item.id)).toEqual(['b', 'c', 'a'])
-    expect(list.map((item) => item.order)).toEqual([0, 1, 2])
+    expect(list.map(item => item.id)).toEqual(['b', 'c', 'a'])
+    expect(list.map(item => item.order)).toEqual([0, 1, 2])
   })
 
   it('保留已有的 id 与创建时间', () => {

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { noteNameProblem } from '@workbench/notes'
 /**
  * 新建技能的弹窗：填名字（即目录名）与描述，提交后建目录、写 SKILL.md 骨架。
  *
@@ -6,7 +7,6 @@
  * 校验失败显示在字段下面，不弹消息。同名在 store 里拦（列表就在手上）。
  */
 import { computed, reactive, ref, watch } from 'vue'
-import { noteNameProblem } from '@workbench/notes'
 import AppDialog from '@/components/AppDialog.vue'
 import { useSkillsStore } from '@/stores/skills'
 
@@ -22,7 +22,7 @@ const visible = computed({
   get: () => open.value,
   set: (value) => {
     open.value = value
-  }
+  },
 })
 
 watch(open, (value) => {
@@ -35,12 +35,14 @@ watch(open, (value) => {
 const idProblem = computed(() => noteNameProblem(form.id))
 
 async function submit(): Promise<void> {
-  if (!form.id.trim() || idProblem.value || submitting.value) return
+  if (!form.id.trim() || idProblem.value || submitting.value)
+    return
   submitting.value = true
   // 名字与描述写进 frontmatter；正文骨架由适配层生成，建完选中的就是它
   const created = await store.create({ id: form.id, name: form.id, description: form.description })
   submitting.value = false
-  if (created) visible.value = false
+  if (created)
+    visible.value = false
 }
 </script>
 
@@ -65,7 +67,9 @@ async function submit(): Promise<void> {
       </el-form-item>
     </el-form>
     <template #footer>
-      <el-button @click="visible = false">取消</el-button>
+      <el-button @click="visible = false">
+        取消
+      </el-button>
       <el-button
         type="primary"
         :loading="submitting"

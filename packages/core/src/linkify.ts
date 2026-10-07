@@ -35,7 +35,8 @@ const TRAILING_PUNCTUATION = /[.,;:!?)\]}，。；：！？、）】》」』"']
  * 空串返回空数组，调用方要占位的话自己补空格。
  */
 export function splitLinks(text: string): LinkSegment[] {
-  if (!URL_PATTERN.test(text)) return text ? [{ text, url: null }] : []
+  if (!URL_PATTERN.test(text))
+    return text ? [{ text, url: null }] : []
 
   const segments: LinkSegment[] = []
   // g 标志的正则带 lastIndex，属于共享状态，这里每次现造一个
@@ -46,7 +47,8 @@ export function splitLinks(text: string): LinkSegment[] {
   while ((match = pattern.exec(text)) !== null) {
     const raw = match[0]
     const url = raw.replace(TRAILING_PUNCTUATION, '')
-    if (BARE_PROTOCOL.test(url)) continue
+    if (BARE_PROTOCOL.test(url))
+      continue
 
     if (match.index > cursor) {
       segments.push({ text: text.slice(cursor, match.index), url: null })
@@ -54,11 +56,13 @@ export function splitLinks(text: string): LinkSegment[] {
     segments.push({ text: url, url })
 
     const trailing = raw.slice(url.length)
-    if (trailing) segments.push({ text: trailing, url: null })
+    if (trailing)
+      segments.push({ text: trailing, url: null })
 
     cursor = match.index + raw.length
   }
 
-  if (cursor < text.length) segments.push({ text: text.slice(cursor), url: null })
+  if (cursor < text.length)
+    segments.push({ text: text.slice(cursor), url: null })
   return segments
 }

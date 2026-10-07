@@ -17,9 +17,11 @@ export const VIEW_IDS = ['home', 'projects', 'work', 'notes', 'skills', 'kb', 'a
 
 export type ViewId = (typeof VIEW_IDS)[number]
 
-/** 导航栏上的名字；顺序与 VIEW_IDS 一致（图标在各页组件里给，属于界面层）。
+/**
+ * 导航栏上的名字；顺序与 VIEW_IDS 一致（图标在各页组件里给，属于界面层）。
  * ai 页的名字在渲染层会换成设置里的程序名（stores/settings.ts 的 viewLabelOf）——
- * 用户把程序叫什么，那个智能体就叫什么；这里的值只是类型上补齐的一格 */
+ * 用户把程序叫什么，那个智能体就叫什么；这里的值只是类型上补齐的一格
+ */
 export const VIEW_LABELS: Record<ViewId, string> = {
   home: '首页',
   projects: '项目',
@@ -31,7 +33,7 @@ export const VIEW_LABELS: Record<ViewId, string> = {
   vault: '密码',
   mail: '邮箱',
   styles: '样式',
-  video: '视频'
+  video: '视频',
 }
 
 export function isViewId(value: unknown): value is ViewId {
@@ -51,14 +53,15 @@ export function sanitizeViewId(value: unknown): ViewId {
  * 而首页是默认页、也是布局编辑的落点，留它最合适。
  */
 export function sanitizeHiddenViews(value: unknown): ViewId[] {
-  if (!Array.isArray(value)) return []
-  const hidden = VIEW_IDS.filter((id) => value.includes(id))
-  return hidden.length >= VIEW_IDS.length ? hidden.filter((id) => id !== 'home') : hidden
+  if (!Array.isArray(value))
+    return []
+  const hidden = VIEW_IDS.filter(id => value.includes(id))
+  return hidden.length >= VIEW_IDS.length ? hidden.filter(id => id !== 'home') : hidden
 }
 
 /** 导航栏上要显示的页（不带顺序参数时按 VIEW_IDS 的默认顺序） */
 export function visibleViews(hidden: readonly ViewId[]): ViewId[] {
-  return VIEW_IDS.filter((id) => !hidden.includes(id))
+  return VIEW_IDS.filter(id => !hidden.includes(id))
 }
 
 /**
@@ -68,9 +71,10 @@ export function visibleViews(hidden: readonly ViewId[]): ViewId[] {
  * 时得到的就是默认顺序，将来新加一页也自然排在末尾，不必去动谁的数据。
  */
 export function sanitizeViewOrder(value: unknown): ViewId[] {
-  if (!Array.isArray(value)) return [...VIEW_IDS]
+  if (!Array.isArray(value))
+    return [...VIEW_IDS]
   const known = [...new Set(value.filter((id): id is ViewId => isViewId(id)))]
-  const missing = VIEW_IDS.filter((id) => !known.includes(id))
+  const missing = VIEW_IDS.filter(id => !known.includes(id))
   return [...known, ...missing]
 }
 
@@ -80,9 +84,9 @@ export function sanitizeViewOrder(value: unknown): ViewId[] {
  */
 export function orderedViews(
   hidden: readonly ViewId[],
-  order: readonly ViewId[] = VIEW_IDS
+  order: readonly ViewId[] = VIEW_IDS,
 ): ViewId[] {
-  return order.filter((id) => !hidden.includes(id))
+  return order.filter(id => !hidden.includes(id))
 }
 
 /**
@@ -91,7 +95,7 @@ export function orderedViews(
  */
 export function fallbackView(
   hidden: readonly ViewId[],
-  order: readonly ViewId[] = VIEW_IDS
+  order: readonly ViewId[] = VIEW_IDS,
 ): ViewId {
   return orderedViews(hidden, order)[0] ?? 'home'
 }

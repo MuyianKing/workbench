@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { AiSessionGroup } from '@workbench/ai'
+import { CaretRight, ChatLineSquare, Delete, FolderOpened, Plus } from '@element-plus/icons-vue'
 /**
  * 左栏那棵会话树：**两层** —— 第一层是项目（一个工作目录），第二层是那个目录下的会话。
  *
@@ -18,8 +20,6 @@
  * 没必要像笔记树那样落盘。
  */
 import { computed, ref } from 'vue'
-import { CaretRight, ChatLineSquare, Delete, FolderOpened, Plus } from '@element-plus/icons-vue'
-import type { AiSessionGroup } from '@workbench/ai'
 
 const props = defineProps<{
   groups: AiSessionGroup[]
@@ -41,7 +41,8 @@ const collapsed = ref(new Set<string>())
 
 function toggle(dir: string): void {
   const next = new Set(collapsed.value)
-  if (next.has(dir)) next.delete(dir)
+  if (next.has(dir))
+    next.delete(dir)
   else next.add(dir)
   collapsed.value = next
 }
@@ -59,7 +60,9 @@ const running = computed(() => new Set(props.runningIds))
     <!-- 一个会话都还没有：按别处那副空态给一句说明（起一段在那颗「+」与中间那条
          composer 上，这儿只把「项目 → 会话」这层关系说清楚） -->
     <div v-if="!groups.length" class="tree__empty">
-      <p class="tree__empty-title">还没有会话</p>
+      <p class="tree__empty-title">
+        还没有会话
+      </p>
       <p class="tree__empty-hint">
         点上面的「+」开一段新的：一个目录是一个「项目」，它下面可以有好几段对话。
       </p>
@@ -71,7 +74,9 @@ const running = computed(() => new Set(props.runningIds))
         <el-icon class="row__caret" :class="{ 'is-open': !collapsed.has(group.dir) }">
           <CaretRight />
         </el-icon>
-        <el-icon class="row__icon"><FolderOpened /></el-icon>
+        <el-icon class="row__icon">
+          <FolderOpened />
+        </el-icon>
         <span class="row__name">{{ group.name }}</span>
         <el-tooltip content="在这个目录里起一段新的" placement="top">
           <button type="button" class="row__action" @click.stop="emit('start', group.dir)">
@@ -89,7 +94,9 @@ const running = computed(() => new Set(props.runningIds))
           :title="session.title || group.dir"
           @click="emit('select', session.id)"
         >
-          <el-icon class="row__icon"><ChatLineSquare /></el-icon>
+          <el-icon class="row__icon">
+            <ChatLineSquare />
+          </el-icon>
           <span class="row__name">{{ sessionLabel(session.title) }}</span>
           <span v-if="running.has(session.id)" class="row__run" aria-hidden="true" />
           <el-tooltip content="删除这个会话（对话记录一起删掉）" placement="top">

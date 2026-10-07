@@ -1,11 +1,11 @@
 <script setup lang="ts">
+import { decodeBase64ToBuffer } from '@workbench/ai'
 /**
  * 预览栏的 DOCX 画法：docx-preview 在浏览器里把文件解出来画（样式、图片、表格都出自
  * 文件本身，不出网 —— 图片编成 blob URL、字体用文件里内嵌的那份）。库是动态引的：
  * 不用这个画法就不进包。base64 → 二进制的解码见 decodeBase64ToBuffer。
  */
 import { onMounted, ref, watch } from 'vue'
-import { decodeBase64ToBuffer } from '@workbench/ai'
 
 const props = defineProps<{ binary: string }>()
 
@@ -17,7 +17,8 @@ let runId = 0
 async function load(): Promise<void> {
   const id = ++runId
   const box = host.value
-  if (!box || !props.binary) return // 还没挂上 / 还没取回来：等下一次触发
+  if (!box || !props.binary)
+    return // 还没挂上 / 还没取回来：等下一次触发
   const buffer = decodeBase64ToBuffer(props.binary)
   if (!buffer) {
     error.value = '文件内容解不出来'
@@ -27,14 +28,17 @@ async function load(): Promise<void> {
   box.innerHTML = ''
   try {
     const { renderAsync } = await import('docx-preview')
-    if (id !== runId) return
+    if (id !== runId)
+      return
     await renderAsync(buffer, box, box, {
       // 分页与页宽按文件里的版式出，超出的部分由预览栏的滚动容器兜
       inWrapper: true,
-      breakPages: true
+      breakPages: true,
     })
-  } catch (err) {
-    if (id === runId) error.value = err instanceof Error ? err.message : '这个文件画不出来'
+  }
+  catch (err) {
+    if (id === runId)
+      error.value = err instanceof Error ? err.message : '这个文件画不出来'
   }
 }
 
@@ -51,13 +55,15 @@ watch(
   () => props.binary,
   () => {
     void load()
-  }
+  },
 )
 </script>
 
 <template>
   <div class="doc">
-    <p v-if="error" class="doc__note is-fail">{{ error }}</p>
+    <p v-if="error" class="doc__note is-fail">
+      {{ error }}
+    </p>
     <div v-show="!error" ref="host" class="doc__host" />
   </div>
 </template>

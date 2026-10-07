@@ -1,3 +1,5 @@
+import type { AppearanceSettings } from './appearance'
+import { clampVideoFloatHeight, clampVideoFloatPercent, clampVideoFloatWidth, VIDEO_FLOAT_SIZE_DEFAULT, VIDEO_FLOAT_X_DEFAULT, VIDEO_FLOAT_Y_DEFAULT } from '@workbench/video'
 /**
  * 主题文件（theme.json）的数据结构、收敛规则与纯计算：**外观设置 + 首页布局**。
  *
@@ -21,15 +23,7 @@
  * 这个模块被宿主（读盘、收敛旧文件）和渲染层（拖动、缩放）共用：两边必须是同一套
  * 边界与吸附规则，否则一个手改过的 theme.json 就能把栏宽撑爆、或者拖出一个负高度。
  */
-import { DEFAULT_APPEARANCE, sanitizeAppearanceSettings, type AppearanceSettings } from './appearance'
-import {
-  VIDEO_FLOAT_SIZE_DEFAULT,
-  VIDEO_FLOAT_X_DEFAULT,
-  VIDEO_FLOAT_Y_DEFAULT,
-  clampVideoFloatHeight,
-  clampVideoFloatPercent,
-  clampVideoFloatWidth
-} from '@workbench/video'
+import { DEFAULT_APPEARANCE, sanitizeAppearanceSettings } from './appearance'
 
 /** 首页九块卡片的稳定 id；数组顺序也是同栏同行时的兜底排序 */
 export const HOME_CARD_IDS = [
@@ -41,7 +35,7 @@ export const HOME_CARD_IDS = [
   'quick',
   'commands',
   'work',
-  'news'
+  'news',
 ] as const
 
 export type HomeCardId = (typeof HOME_CARD_IDS)[number]
@@ -61,7 +55,7 @@ export const HOME_CARD_LABELS: Record<HomeCardId, string> = {
   quick: '快捷启动',
   commands: '命令',
   work: '今日完成',
-  news: 'AI 热点'
+  news: 'AI 热点',
 }
 
 /** 高度的两种模式（用在行上：一行一个高度，行里的卡片跟着这一行） */
@@ -269,7 +263,7 @@ export const CARD_HEIGHT_MIN: Record<HomeCardId, number> = {
   commands: 90,
   work: 88,
   // AI 热点是名单卡：一条一行（标题 + 来源），太矮就只剩一行标题了
-  news: 120
+  news: 120,
 }
 
 /** 空行的下限：所有卡片下限里最小的那个（一行里没有卡片、没人挑高度时用它） */
@@ -354,8 +348,8 @@ export const DEFAULT_THEME: ThemeConfig = {
         { id: 'row-4', mode: 'fixed', height: 198 },
         { id: 'row-5', mode: 'fixed', height: 90 },
         // 今日完成：条目数不确定，让它吃掉这一栏剩下的高度、在里面自己滚
-        { id: 'row-6', mode: 'flex', height: 727 }
-      ]
+        { id: 'row-6', mode: 'flex', height: 727 },
+      ],
     },
     {
       id: 'col-2',
@@ -363,8 +357,8 @@ export const DEFAULT_THEME: ThemeConfig = {
       rows: [
         /* 我的项目：一张项目卡 155px + 一条卡片间距，再露出下一张小半张 —— 「下面还有」
            这件事得看得见，否则用户不会想到去滚它（排几张由用户在项目上勾，见 Project.home） */
-        { id: 'row-7', mode: 'flex', height: 157 }
-      ]
+        { id: 'row-7', mode: 'flex', height: 157 },
+      ],
     },
     {
       id: 'col-3',
@@ -372,9 +366,9 @@ export const DEFAULT_THEME: ThemeConfig = {
       rows: [
         { id: 'row-8', mode: 'flex', height: 727 },
         // AI 热点：名单卡，固定高度（条目多了在卡内滚）
-        { id: 'row-9', mode: 'fixed', height: 345 }
-      ]
-    }
+        { id: 'row-9', mode: 'fixed', height: 345 },
+      ],
+    },
   ],
   noteTreeWidth: NOTE_TREE_WIDTH_DEFAULT,
   videoTreeCollapsed: false,
@@ -397,12 +391,12 @@ export const DEFAULT_THEME: ThemeConfig = {
     work: { row: 'row-6', order: 0, hidden: false },
     recent: { row: 'row-7', order: 0, hidden: false },
     token: { row: 'row-8', order: 0, hidden: false },
-    news: { row: 'row-9', order: 0, hidden: false }
+    news: { row: 'row-9', order: 0, hidden: false },
   },
   // 外观的默认值只有一处口径（数据文件那份设置的默认值，见 appearance.ts）
   appearance: DEFAULT_APPEARANCE,
   // 还没改过，所以时间未知
-  updatedAt: 0
+  updatedAt: 0,
 }
 
 /** 认不出来的高度模式回落到 fallback */
@@ -412,7 +406,8 @@ export function sanitizeCardMode(value: unknown, fallback: CardMode): CardMode {
 
 /** 收敛卡片间距；不是有限数字一律回到默认值 */
 export function clampCardGap(value: unknown): number {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return CARD_GAP_DEFAULT
+  if (typeof value !== 'number' || !Number.isFinite(value))
+    return CARD_GAP_DEFAULT
   return Math.min(CARD_GAP_MAX, Math.max(CARD_GAP_MIN, Math.round(value)))
 }
 
@@ -426,7 +421,8 @@ export function clampColumnWidth(value: unknown, fallback: number): number {
 
 /** 收敛一栏的宽度：null（自适应）原样留着，其余夹到区间；认不出来的按自适应处理 */
 export function sanitizeColumnWidth(value: unknown): number | null {
-  if (value === null || value === undefined) return null
+  if (value === null || value === undefined)
+    return null
   return clampColumnWidth(value, COLUMN_WIDTH_DEFAULT)
 }
 
@@ -441,7 +437,7 @@ export function clampRowHeight(value: unknown, min: number): number {
 
 /** 栏的深拷贝（含行）：默认布局是常量，不能被就地改到 */
 function cloneColumn(column: HomeColumn): HomeColumn {
-  return { ...column, rows: column.rows.map((row) => ({ ...row })) }
+  return { ...column, rows: column.rows.map(row => ({ ...row })) }
 }
 
 /** 收敛出来的一栏骨架：id 与宽度定下来了，行还是原始数据（交给调用方决定怎么用） */
@@ -459,28 +455,31 @@ interface ColumnSkeleton {
  * `isDefault` 说的是「这份栏清单整个就是默认布局那一份」（文件里一栏都没给出）：
  * 卡片缺摆放时要不要去认默认布局的行，就看它（见 pickRow）。
  */
-function columnSkeleton(raw: unknown): { columns: ColumnSkeleton[]; isDefault: boolean } {
+function columnSkeleton(raw: unknown): { columns: ColumnSkeleton[], isDefault: boolean } {
   const input = Array.isArray(raw) ? raw : []
   const columns: ColumnSkeleton[] = []
 
   for (const item of input) {
-    if (columns.length >= COLUMN_COUNT_MAX) break
+    if (columns.length >= COLUMN_COUNT_MAX)
+      break
     const column = (item ?? {}) as Partial<HomeColumn>
     const id = typeof column.id === 'string' ? column.id.trim() : ''
-    if (!id || columns.some((seen) => seen.id === id)) continue
+    if (!id || columns.some(seen => seen.id === id))
+      continue
     columns.push({ id, width: sanitizeColumnWidth(column.width), rows: column.rows })
   }
 
   // 一栏都没有（老文件、手改坏了）就摆默认那三栏，别让首页没有落脚的地方
-  if (columns.length) return { columns, isDefault: false }
+  if (columns.length)
+    return { columns, isDefault: false }
 
   return {
-    columns: DEFAULT_THEME.columns.map((column) => ({
+    columns: DEFAULT_THEME.columns.map(column => ({
       id: column.id,
       width: column.width,
-      rows: column.rows
+      rows: column.rows,
     })),
-    isDefault: true
+    isDefault: true,
   }
 }
 
@@ -503,13 +502,14 @@ function sanitizeRows(raw: unknown, used: Set<string>, columns: HomeColumn[]): H
   for (const item of input) {
     const row = (item ?? {}) as Partial<HomeRow>
     const id = typeof row.id === 'string' ? row.id.trim() : ''
-    if (!id || used.has(id)) continue
+    if (!id || used.has(id))
+      continue
     used.add(id)
     rows.push({
       id,
       // 认不出的模式按自适应：它跟「吃掉剩余高度」最接近，不会把一栏挤出滚动条
       mode: sanitizeCardMode(row.mode, 'flex'),
-      height: clampRowHeight(row.height, ROW_HEIGHT_MIN_DEFAULT)
+      height: clampRowHeight(row.height, ROW_HEIGHT_MIN_DEFAULT),
     })
   }
 
@@ -532,17 +532,17 @@ export function sanitizeColumns(raw: unknown): HomeColumn[] {
 
 /** 栏的 id 清单，按当前顺序 */
 export function columnIds(columns: HomeColumn[]): ColumnId[] {
-  return columns.map((column) => column.id)
+  return columns.map(column => column.id)
 }
 
 /** 认不认得出这一栏 */
 export function isColumnId(columns: HomeColumn[], value: unknown): value is ColumnId {
-  return typeof value === 'string' && columns.some((column) => column.id === value)
+  return typeof value === 'string' && columns.some(column => column.id === value)
 }
 
 /** 行的 id 清单，按「栏从左到右、行从上到下」的顺序 */
 export function rowIds(columns: HomeColumn[]): RowId[] {
-  return columns.flatMap((column) => column.rows.map((row) => row.id))
+  return columns.flatMap(column => column.rows.map(row => row.id))
 }
 
 /** 认不认得出这一行 */
@@ -552,14 +552,15 @@ export function isRowId(columns: HomeColumn[], value: unknown): value is RowId {
 
 /** 行住哪一栏；认不出来时返回 null */
 export function columnOfRow(columns: HomeColumn[], rowId: RowId): HomeColumn | null {
-  return columns.find((column) => column.rows.some((row) => row.id === rowId)) ?? null
+  return columns.find(column => column.rows.some(row => row.id === rowId)) ?? null
 }
 
 /** 按 id 取一行；认不出来时返回 null */
 export function rowOf(columns: HomeColumn[], rowId: RowId): HomeRow | null {
   for (const column of columns) {
-    const row = column.rows.find((item) => item.id === rowId)
-    if (row) return row
+    const row = column.rows.find(item => item.id === rowId)
+    if (row)
+      return row
   }
   return null
 }
@@ -573,7 +574,8 @@ function nextRowId(columns: HomeColumn[], extra?: Set<string>): RowId {
   for (const id of extra ?? []) used.add(id)
   for (let n = 1; ; n += 1) {
     const id = `row-${n}`
-    if (!used.has(id)) return id
+    if (!used.has(id))
+      return id
   }
 }
 
@@ -585,8 +587,9 @@ function nextRowId(columns: HomeColumn[], extra?: Set<string>): RowId {
  * 到上限（COLUMN_COUNT_MAX）或认不出 afterId 时原样返回。
  */
 export function addColumn(columns: HomeColumn[], afterId: ColumnId): HomeColumn[] {
-  const at = columns.findIndex((column) => column.id === afterId)
-  if (at === -1 || columns.length >= COLUMN_COUNT_MAX) return columns
+  const at = columns.findIndex(column => column.id === afterId)
+  if (at === -1 || columns.length >= COLUMN_COUNT_MAX)
+    return columns
 
   const source = columns[at]
   const first = source.rows[0]
@@ -598,9 +601,9 @@ export function addColumn(columns: HomeColumn[], afterId: ColumnId): HomeColumn[
       {
         id: nextRowId(columns),
         mode: first?.mode ?? 'flex',
-        height: first?.height ?? ROW_HEIGHT_MIN_DEFAULT
-      }
-    ]
+        height: first?.height ?? ROW_HEIGHT_MIN_DEFAULT,
+      },
+    ],
   })
   return next
 }
@@ -610,7 +613,8 @@ function nextColumnId(columns: HomeColumn[]): ColumnId {
   const used = new Set(columnIds(columns))
   for (let n = 1; ; n += 1) {
     const id = `col-${n}`
-    if (!used.has(id)) return id
+    if (!used.has(id))
+      return id
   }
 }
 
@@ -626,7 +630,8 @@ export function resizeColumnPair(left: number, right: number, dx: number): [numb
   const sum = Math.round(left) + Math.round(right)
   const lo = Math.max(COLUMN_WIDTH_MIN, sum - COLUMN_WIDTH_MAX)
   const hi = Math.min(COLUMN_WIDTH_MAX, sum - COLUMN_WIDTH_MIN)
-  if (lo > hi) return [Math.round(left), Math.round(right)]
+  if (lo > hi)
+    return [Math.round(left), Math.round(right)]
 
   const next = Math.min(hi, Math.max(lo, Math.round(left + dx)))
   return [next, sum - next]
@@ -640,15 +645,15 @@ export function resizeColumnPair(left: number, right: number, dx: number): [numb
  */
 export function setColumnWidths(
   columns: HomeColumn[],
-  widths: Record<ColumnId, number>
+  widths: Record<ColumnId, number>,
 ): HomeColumn[] {
-  return columns.map((column) =>
+  return columns.map(column =>
     column.id in widths
       ? {
           ...cloneColumn(column),
-          width: clampColumnWidth(widths[column.id], column.width ?? COLUMN_WIDTH_DEFAULT)
+          width: clampColumnWidth(widths[column.id], column.width ?? COLUMN_WIDTH_DEFAULT),
         }
-      : cloneColumn(column)
+      : cloneColumn(column),
   )
 }
 
@@ -662,21 +667,23 @@ export function setColumnWidths(
 export function removeColumn(
   cards: Record<HomeCardId, CardPlacement>,
   columns: HomeColumn[],
-  id: ColumnId
-): { columns: HomeColumn[]; cards: Record<HomeCardId, CardPlacement> } | null {
-  const at = columns.findIndex((column) => column.id === id)
-  if (at === -1 || columns.length <= COLUMN_COUNT_MIN) return null
+  id: ColumnId,
+): { columns: HomeColumn[], cards: Record<HomeCardId, CardPlacement> } | null {
+  const at = columns.findIndex(column => column.id === id)
+  if (at === -1 || columns.length <= COLUMN_COUNT_MIN)
+    return null
 
   const target = columns[at - 1] ?? columns[at + 1]
-  if (!target) return null
+  if (!target)
+    return null
 
   const merged: HomeColumn = {
     ...target,
-    rows: [...target.rows.map((row) => ({ ...row })), ...columns[at].rows.map((row) => ({ ...row }))]
+    rows: [...target.rows.map(row => ({ ...row })), ...columns[at].rows.map(row => ({ ...row }))],
   }
   const next = columns
-    .filter((column) => column.id !== id)
-    .map((column) => (column.id === target.id ? merged : cloneColumn(column)))
+    .filter(column => column.id !== id)
+    .map(column => (column.id === target.id ? merged : cloneColumn(column)))
 
   // 搬过来的行里可能有空的（那一栏本来就空着），顺手收拾掉
   return { columns: pruneEmptyRows(next, cards), cards }
@@ -741,7 +748,7 @@ function defaultColumnIdOf(id: HomeCardId): ColumnId {
  */
 function defaultRankOf(id: HomeCardId): number {
   const column = columnOfRow(DEFAULT_THEME.columns, DEFAULT_THEME.cards[id].row)
-  const at = column?.rows.findIndex((row) => row.id === DEFAULT_THEME.cards[id].row) ?? -1
+  const at = column?.rows.findIndex(row => row.id === DEFAULT_THEME.cards[id].row) ?? -1
   return at === -1 ? 0 : at
 }
 
@@ -760,19 +767,21 @@ function pickRow(
   columns: HomeColumn[],
   wanted: unknown,
   id: HomeCardId,
-  keepDefaultRow: boolean
+  keepDefaultRow: boolean,
 ): RowId {
-  if (isRowId(columns, wanted)) return wanted
+  if (isRowId(columns, wanted))
+    return wanted
 
   // 整份栏清单就是默认布局那一份（文件里一栏都没给出）时，它在默认布局里那一行也认：
   // 缺的那块于是回到它本来该在的位置上，而不是另起一行挤在末尾。
   // 只在这是默认骨架时才认 —— 别的文件里 row-1 未必还是第一栏的第一行，
   // 而且新造的行 id 也是从 row-1 起编号的，照单全收会让两块卡片挤进同一条槽。
   const fallbackRow = DEFAULT_THEME.cards[id].row
-  if (keepDefaultRow && isRowId(columns, fallbackRow)) return fallbackRow
+  if (keepDefaultRow && isRowId(columns, fallbackRow))
+    return fallbackRow
 
   const home = defaultColumnIdOf(id)
-  const column = columns.find((item) => item.id === home) ?? columns[0]
+  const column = columns.find(item => item.id === home) ?? columns[0]
   const source = defaultRowOf(id)
   const row: HomeRow = { id: nextRowId(columns), mode: source.mode, height: source.height }
   column.rows.push(row)
@@ -787,7 +796,7 @@ export function sanitizeCardPlacement(
   value: unknown,
   id: HomeCardId,
   columns: HomeColumn[],
-  keepDefaultRow = false
+  keepDefaultRow = false,
 ): CardPlacement {
   const fallback = DEFAULT_THEME.cards[id]
   const input = (value ?? {}) as Partial<CardPlacement>
@@ -796,25 +805,25 @@ export function sanitizeCardPlacement(
     row: pickRow(columns, input.row, id, keepDefaultRow),
     order: Math.round(finiteOr(input.order, fallback.order)),
     // 关掉的状态只在明确写了 true 时才认（老主题文件里没有这个字段 = 开着）
-    hidden: input.hidden === true
+    hidden: input.hidden === true,
   }
 }
 
 /** 按行把 order 重排成 0..n-1：手改过的 order 有洞 / 重复也能收拾干净 */
 export function normalizeOrder(
-  cards: Record<HomeCardId, CardPlacement>
+  cards: Record<HomeCardId, CardPlacement>,
 ): Record<HomeCardId, CardPlacement> {
   const next = {} as Record<HomeCardId, CardPlacement>
   for (const id of HOME_CARD_IDS) next[id] = { ...cards[id] }
 
   // 要收拾的就是卡片实际落到的那些行，行清单本身不必参与
-  const rows = [...new Set(HOME_CARD_IDS.map((id) => next[id].row))]
+  const rows = [...new Set(HOME_CARD_IDS.map(id => next[id].row))]
   for (const row of rows) {
-    HOME_CARD_IDS.filter((id) => next[id].row === row)
+    HOME_CARD_IDS.filter(id => next[id].row === row)
       .sort(
         (a, b) =>
-          next[a].order - next[b].order ||
-          HOME_CARD_IDS.indexOf(a) - HOME_CARD_IDS.indexOf(b)
+          next[a].order - next[b].order
+          || HOME_CARD_IDS.indexOf(a) - HOME_CARD_IDS.indexOf(b),
       )
       .forEach((id, index) => {
         next[id].order = index
@@ -827,7 +836,7 @@ export function normalizeOrder(
 const LEGACY_COLUMN_IDS: Record<string, string> = {
   left: 'col-1',
   center: 'col-2',
-  right: 'col-3'
+  right: 'col-3',
 }
 
 /** 老文件里的栏宽：是数字就用它，认不出来的回默认（区间由 sanitizeColumns 再收一次） */
@@ -837,11 +846,12 @@ function legacyWidth(value: unknown, fallback: number | null): number | null {
 
 /** 老文件里的栏骨架：v2 及更早是写死的左中右三栏（宽度住在 leftWidth / rightWidth），v3 是一份栏清单 */
 function legacyColumns(input: Record<string, unknown>): unknown[] {
-  if (Array.isArray(input.columns)) return input.columns
+  if (Array.isArray(input.columns))
+    return input.columns
   return [
     { id: 'col-1', width: legacyWidth(input.leftWidth, DEFAULT_THEME.columns[0].width) },
     { id: 'col-2', width: null },
-    { id: 'col-3', width: legacyWidth(input.rightWidth, DEFAULT_THEME.columns[2].width) }
+    { id: 'col-3', width: legacyWidth(input.rightWidth, DEFAULT_THEME.columns[2].width) },
   ]
 }
 
@@ -850,7 +860,8 @@ function legacyCards(raw: unknown): Record<string, Record<string, unknown>> {
   const cards = (raw ?? {}) as Record<string, Record<string, unknown> | undefined>
   const next: Record<string, Record<string, unknown>> = {}
   for (const [id, placement] of Object.entries(cards)) {
-    if (!placement) continue
+    if (!placement)
+      continue
     next[id] = { ...placement, column: LEGACY_COLUMN_IDS[String(placement.column)] ?? placement.column }
   }
   return next
@@ -870,13 +881,12 @@ function legacyCards(raw: unknown): Record<string, Record<string, unknown>> {
 function migrateLegacyLayout(input: Record<string, unknown>): Record<string, unknown> {
   // 只取栏骨架：老文件里本来就没有「行」这一层，那些行接下来按一卡一行现铺
   const { columns: skeleton } = columnSkeleton(legacyColumns(input))
-  const columns: HomeColumn[] = skeleton.map((item) => ({ id: item.id, width: item.width, rows: [] }))
+  const columns: HomeColumn[] = skeleton.map(item => ({ id: item.id, width: item.width, rows: [] }))
   const cards = legacyCards(input.cards)
 
   // 每块卡片先算出它的栏与栏内位置：老文件里没提到的沿用默认布局那一份
   const flat = HOME_CARD_IDS.map((id) => {
     const placement: Record<string, unknown> = cards[id] ?? {}
-    const fallback = DEFAULT_THEME.cards[id]
     const wanted = placement.column
     const home = defaultColumnIdOf(id)
     return {
@@ -886,7 +896,7 @@ function migrateLegacyLayout(input: Record<string, unknown>): Record<string, unk
       order: Math.round(finiteOr(placement.order, defaultRankOf(id))),
       hidden: placement.hidden === true,
       mode: sanitizeCardMode(placement.mode, defaultRowOf(id).mode),
-      height: finiteOr(placement.height, defaultRowOf(id).height)
+      height: finiteOr(placement.height, defaultRowOf(id).height),
     }
   })
 
@@ -894,7 +904,7 @@ function migrateLegacyLayout(input: Record<string, unknown>): Record<string, unk
   let serial = 1
   for (const column of columns) {
     const mine = flat
-      .filter((item) => item.column === column.id)
+      .filter(item => item.column === column.id)
       .sort((a, b) => a.order - b.order || HOME_CARD_IDS.indexOf(a.id) - HOME_CARD_IDS.indexOf(b.id))
 
     column.rows = mine.map((item) => {
@@ -969,21 +979,21 @@ export function sanitizeTheme(raw: unknown): ThemeConfig {
     updatedAt:
       typeof base.updatedAt === 'number' && Number.isFinite(base.updatedAt) && base.updatedAt > 0
         ? Math.floor(base.updatedAt)
-        : 0
+        : 0,
   }
 }
 
 /** 每行的高度夹到「这一行里最高的那条卡片下限」以上（就地之外造新对象，不动传进来的那份） */
 function clampRowHeights(
   columns: HomeColumn[],
-  cards: Record<HomeCardId, CardPlacement>
+  cards: Record<HomeCardId, CardPlacement>,
 ): HomeColumn[] {
-  return columns.map((column) => ({
+  return columns.map(column => ({
     ...column,
-    rows: column.rows.map((row) => ({
+    rows: column.rows.map(row => ({
       ...row,
-      height: clampRowHeight(row.height, rowHeightMin(cards, row.id))
-    }))
+      height: clampRowHeight(row.height, rowHeightMin(cards, row.id)),
+    })),
   }))
 }
 
@@ -994,9 +1004,10 @@ function clampRowHeights(
  * 每轮同步都刷新的话，仓库里会堆出一串只改了时间的提交。
  */
 export function sameThemeContent(a: ThemeConfig, b: ThemeConfig): boolean {
-  if (layoutSignature(a) !== layoutSignature(b)) return false
-  return (Object.keys(b.appearance) as Array<keyof AppearanceSettings>).every((key) =>
-    sameAppearanceValue(a.appearance[key], b.appearance[key])
+  if (layoutSignature(a) !== layoutSignature(b))
+    return false
+  return (Object.keys(b.appearance) as Array<keyof AppearanceSettings>).every(key =>
+    sameAppearanceValue(a.appearance[key], b.appearance[key]),
   )
 }
 
@@ -1028,16 +1039,16 @@ function layoutSignature(layout: ThemeConfig): string {
     layout.mailListWidth,
     layout.columns
       .map(
-        (column) =>
+        column =>
           `${column.id}:${column.width ?? 'flex'}:${column.rows
-            .map((row) => `${row.id}/${row.mode}/${row.height}`)
-            .join('+')}`
+            .map(row => `${row.id}/${row.mode}/${row.height}`)
+            .join('+')}`,
       )
       .join(','),
     HOME_CARD_IDS.map((id) => {
       const card = layout.cards[id]
       return `${id}:${card.row}/${card.order}/${card.hidden}`
-    }).join(',')
+    }).join(','),
   ].join('|')
 }
 
@@ -1047,9 +1058,10 @@ function layoutSignature(layout: ThemeConfig): string {
  * （见 views.ts 的 sanitizeHiddenViews）。设置界面里最后一颗开关是禁用的，正常够不到这里。
  */
 function keepOneVisible(
-  cards: Record<HomeCardId, CardPlacement>
+  cards: Record<HomeCardId, CardPlacement>,
 ): Record<HomeCardId, CardPlacement> {
-  if (HOME_CARD_IDS.some((id) => !cards[id].hidden)) return cards
+  if (HOME_CARD_IDS.some(id => !cards[id].hidden))
+    return cards
 
   const next = {} as Record<HomeCardId, CardPlacement>
   for (const id of HOME_CARD_IDS) next[id] = { ...cards[id] }
@@ -1060,10 +1072,10 @@ function keepOneVisible(
 /** 某一行里的卡片 id，按 order 排好（含关掉的那些） */
 export function cardIdsInRow(
   cards: Record<HomeCardId, CardPlacement>,
-  row: RowId
+  row: RowId,
 ): HomeCardId[] {
-  return HOME_CARD_IDS.filter((id) => cards[id].row === row).sort(
-    (a, b) => cards[a].order - cards[b].order
+  return HOME_CARD_IDS.filter(id => cards[id].row === row).sort(
+    (a, b) => cards[a].order - cards[b].order,
   )
 }
 
@@ -1073,24 +1085,25 @@ export function cardIdsInRow(
  */
 export function visibleCardIdsInRow(
   cards: Record<HomeCardId, CardPlacement>,
-  row: RowId
+  row: RowId,
 ): HomeCardId[] {
-  return cardIdsInRow(cards, row).filter((id) => !cards[id].hidden)
+  return cardIdsInRow(cards, row).filter(id => !cards[id].hidden)
 }
 
 /** 这一栏平时要不要画：只要有一行还画得出卡片，这一栏就还在 */
 export function columnHasVisibleCards(
   cards: Record<HomeCardId, CardPlacement>,
-  column: HomeColumn
+  column: HomeColumn,
 ): boolean {
-  return column.rows.some((row) => visibleCardIdsInRow(cards, row.id).length > 0)
+  return column.rows.some(row => visibleCardIdsInRow(cards, row.id).length > 0)
 }
 
 /** 一行的高度下限：行里每块卡片各自的下限里最大的那个（空行用默认那条） */
 export function rowHeightMin(cards: Record<HomeCardId, CardPlacement>, row: RowId): number {
   const ids = cardIdsInRow(cards, row)
-  if (!ids.length) return ROW_HEIGHT_MIN_DEFAULT
-  return Math.max(...ids.map((id) => CARD_HEIGHT_MIN[id]))
+  if (!ids.length)
+    return ROW_HEIGHT_MIN_DEFAULT
+  return Math.max(...ids.map(id => CARD_HEIGHT_MIN[id]))
 }
 
 /** 一行在画布上占多高：固定高度按像素（不低于下限），自适应按下限示意 */
@@ -1107,11 +1120,12 @@ export function rowBoxHeight(row: HomeRow, min: number): number {
  */
 export function pruneEmptyRows(
   columns: HomeColumn[],
-  cards: Record<HomeCardId, CardPlacement>
+  cards: Record<HomeCardId, CardPlacement>,
 ): HomeColumn[] {
   return columns.map((column) => {
-    const kept = column.rows.filter((row) => cardIdsInRow(cards, row.id).length > 0)
-    if (kept.length) return { ...column, rows: kept }
+    const kept = column.rows.filter(row => cardIdsInRow(cards, row.id).length > 0)
+    if (kept.length)
+      return { ...column, rows: kept }
     // 一栏总得留一行当落点；一栏一行都不剩（手改数据）时现造一条，id 照样从 row-1 起找
     const first = column.rows[0]
     return {
@@ -1119,8 +1133,8 @@ export function pruneEmptyRows(
       rows: [
         first
           ? { ...first }
-          : { id: nextRowId(columns), mode: 'flex' as CardMode, height: ROW_HEIGHT_MIN_DEFAULT }
-      ]
+          : { id: nextRowId(columns), mode: 'flex' as CardMode, height: ROW_HEIGHT_MIN_DEFAULT },
+      ],
     }
   })
 }
@@ -1132,7 +1146,7 @@ export function pruneEmptyRows(
 export function rowShapeFor(
   cards: Record<HomeCardId, CardPlacement>,
   columns: HomeColumn[],
-  id: HomeCardId
+  id: HomeCardId,
 ): Pick<HomeRow, 'mode' | 'height'> {
   const row = rowOf(columns, cards[id].row)
   return row ? { mode: row.mode, height: row.height } : { mode: 'flex', height: ROW_HEIGHT_MIN_DEFAULT }
@@ -1154,14 +1168,15 @@ export function moveCard(
   cards: Record<HomeCardId, CardPlacement>,
   columns: HomeColumn[],
   id: HomeCardId,
-  target: RowTarget
-): { cards: Record<HomeCardId, CardPlacement>; columns: HomeColumn[] } {
+  target: RowTarget,
+): { cards: Record<HomeCardId, CardPlacement>, columns: HomeColumn[] } {
   const next = {} as Record<HomeCardId, CardPlacement>
   for (const cardId of HOME_CARD_IDS) next[cardId] = { ...cards[cardId] }
 
   const nextColumns = columns.map(cloneColumn)
-  const column = nextColumns.find((item) => item.id === target.column)
-  if (!column) return { cards, columns }
+  const column = nextColumns.find(item => item.id === target.column)
+  if (!column)
+    return { cards, columns }
 
   let row: HomeRow
   if (target.newRow) {
@@ -1169,16 +1184,18 @@ export function moveCard(
     const at = Math.max(0, Math.min(Math.round(target.rowIndex), column.rows.length))
     row = { id: nextRowId(nextColumns), mode: shape.mode, height: shape.height }
     column.rows.splice(at, 0, row)
-  } else {
+  }
+  else {
     const wanted = column.rows[Math.max(0, Math.min(Math.round(target.rowIndex), column.rows.length - 1))]
-    if (!wanted) return { cards, columns }
+    if (!wanted)
+      return { cards, columns }
     row = wanted
   }
 
   next[id].row = row.id
 
   const rest = HOME_CARD_IDS.filter(
-    (cardId) => cardId !== id && next[cardId].row === row.id
+    cardId => cardId !== id && next[cardId].row === row.id,
   ).sort((a, b) => next[a].order - next[b].order)
 
   const at = Math.max(0, Math.min(Math.round(target.index), rest.length))
@@ -1188,7 +1205,8 @@ export function moveCard(
   })
 
   const normalized = normalizeOrder(next)
-  if (row.mode === 'fixed') row.height = Math.max(row.height, rowHeightMin(normalized, row.id))
+  if (row.mode === 'fixed')
+    row.height = Math.max(row.height, rowHeightMin(normalized, row.id))
 
   return { cards: normalized, columns: pruneEmptyRows(nextColumns, normalized) }
 }

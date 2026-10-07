@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { SKILL_INSTALL_DIR } from '@workbench/skills'
 /**
  * 安装到项目的弹层：列出本机项目，选一个装进去（复制到 `<项目>/.agents/skills/<技能名>/`）。
  *
@@ -6,16 +7,15 @@
  * 「要不要覆盖」—— 覆盖会把项目里那份整个换成库里的当前版本，必须经过确认。
  */
 import { computed, ref, watch } from 'vue'
-import { SKILL_INSTALL_DIR } from '@workbench/skills'
 import AppDialog from '@/components/AppDialog.vue'
 import { confirmAction, notifyError, notifySuccess } from '@/notify'
 import { useProjectsStore } from '@/stores/projects'
 import { useSkillsStore } from '@/stores/skills'
 
+const props = defineProps<{ skillId: string, skillName: string }>()
+
 /** 弹层开关:v-model 一条口径(与 AppDialog / el-dialog 相同,全应用的弹层都这么开) */
 const open = defineModel<boolean>({ required: true })
-
-const props = defineProps<{ skillId: string; skillName: string }>()
 
 const projects = useProjectsStore()
 const store = useSkillsStore()
@@ -27,7 +27,7 @@ const visible = computed({
   get: () => open.value,
   set: (value) => {
     open.value = value
-  }
+  },
 })
 
 watch(open, (value) => {
@@ -38,8 +38,9 @@ watch(open, (value) => {
 })
 
 async function submit(): Promise<void> {
-  const project = projects.projects.find((item) => item.id === selectedId.value)
-  if (!project || installing.value) return
+  const project = projects.projects.find(item => item.id === selectedId.value)
+  if (!project || installing.value)
+    return
 
   installing.value = true
   const first = await store.install(props.skillId, project.path, false)
@@ -61,9 +62,10 @@ async function submit(): Promise<void> {
   const overwrite = await confirmAction(
     `「${props.skillId}」已经装在「${project.name}」里了。覆盖后项目里的那份会被整个换成库里的当前版本。`,
     '要覆盖吗？',
-    { confirmButtonText: '覆盖' }
+    { confirmButtonText: '覆盖' },
   )
-  if (!overwrite) return
+  if (!overwrite)
+    return
 
   installing.value = true
   const retry = await store.install(props.skillId, project.path, true)
@@ -71,7 +73,8 @@ async function submit(): Promise<void> {
   if (retry.ok) {
     notifySuccess(`已覆盖「${project.name}」里的安装`)
     visible.value = false
-  } else {
+  }
+  else {
     notifyError(retry.error ?? '安装失败')
   }
 }
@@ -104,7 +107,9 @@ async function submit(): Promise<void> {
       </p>
     </template>
     <template #footer>
-      <el-button @click="visible = false">取消</el-button>
+      <el-button @click="visible = false">
+        取消
+      </el-button>
       <el-button
         type="primary"
         :loading="installing"

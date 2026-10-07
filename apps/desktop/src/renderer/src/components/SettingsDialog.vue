@@ -12,12 +12,12 @@
  * 各屏的取数时机（设备列表、版本号）由 pane 自己盯 open / active。
  */
 import { computed, ref, watch } from 'vue'
-import { useSettingsStore } from '@/stores/settings'
 import AppDialog from '@/components/AppDialog.vue'
-import AppearancePane from './settings/AppearancePane.vue'
-import MenuPane from './settings/MenuPane.vue'
-import GeneralPane from './settings/GeneralPane.vue'
+import { useSettingsStore } from '@/stores/settings'
 import AboutPane from './settings/AboutPane.vue'
+import AppearancePane from './settings/AppearancePane.vue'
+import GeneralPane from './settings/GeneralPane.vue'
+import MenuPane from './settings/MenuPane.vue'
 
 /** 弹层开关:v-model 一条口径(与 AppDialog / el-dialog 相同,全应用的弹层都这么开) */
 const open = defineModel<boolean>({ required: true })
@@ -28,23 +28,24 @@ const visible = computed({
   get: () => open.value,
   set: (value: boolean) => {
     open.value = value
-  }
+  },
 })
 
 type SettingsTab = 'appearance' | 'menu' | 'general' | 'about'
 
-const tabs: Array<{ value: SettingsTab; label: string }> = [
+const tabs: Array<{ value: SettingsTab, label: string }> = [
   { value: 'appearance', label: '外观' },
   { value: 'menu', label: '菜单' },
   { value: 'general', label: '通用' },
-  { value: 'about', label: '关于' }
+  { value: 'about', label: '关于' },
 ]
 
 const activeTab = ref<SettingsTab>('appearance')
 
 // 内置壁纸的缩略图要现压，按需在第一次打开面板时取（见 store 的 ensureWallpapers）
 watch(visible, (open) => {
-  if (open) void settings.ensureWallpapers()
+  if (open)
+    void settings.ensureWallpapers()
 })
 </script>
 

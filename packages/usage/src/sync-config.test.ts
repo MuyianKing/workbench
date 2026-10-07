@@ -1,3 +1,4 @@
+import { COLUMN_WIDTH_MAX, DEFAULT_THEME, sanitizeTheme, THEME_VERSION } from '@workbench/appearance'
 /**
  * 仓库里 `config/<设备id>.json` 的读写口径。
  *
@@ -6,7 +7,6 @@
  * 一律不能采用（用 null 表达，界面上那颗按钮也就点不动）；版本旧的先走迁移再采用。
  */
 import { describe, expect, it } from 'vitest'
-import { COLUMN_WIDTH_MAX, DEFAULT_THEME, THEME_VERSION, sanitizeTheme } from '@workbench/appearance'
 import { captureThemeFile, sanitizeThemeFile } from './sync-config'
 
 describe('打包一份要推上去的配置', () => {
@@ -17,8 +17,8 @@ describe('打包一份要推上去的配置', () => {
       columns: [
         { id: 'col-1', width: 320 },
         { id: 'col-2', width: null },
-        { id: 'col-3', width: 294 }
-      ]
+        { id: 'col-3', width: 294 },
+      ],
     })
     const file = captureThemeFile('dev-1', ' 办公室 ', theme)
 
@@ -48,16 +48,16 @@ describe('读一份别人推上来的配置', () => {
       theme: {
         version: THEME_VERSION - 1,
         leftWidth: 320,
-        cards: { quick: { column: 'left', order: 0 } }
-      }
+        cards: { quick: { column: 'left', order: 0 } },
+      },
     })
 
     expect(file).not.toBeNull()
     expect(file?.theme).not.toBeNull()
     expect(file?.theme?.version).toBe(THEME_VERSION)
     // 迁移后布局齐全：栏是收敛过的三栏，卡片落进了行清单
-    expect(file?.theme?.columns.map((column) => column.id)).toEqual(
-      DEFAULT_THEME.columns.map((column) => column.id)
+    expect(file?.theme?.columns.map(column => column.id)).toEqual(
+      DEFAULT_THEME.columns.map(column => column.id),
     )
     expect(file?.theme?.cards.quick.row).toBeTruthy()
   })
@@ -70,11 +70,11 @@ describe('读一份别人推上来的配置', () => {
         version: THEME_VERSION,
         columns: [
           { id: 'col-1', width: 99999 },
-          { id: 'col-2', width: null }
+          { id: 'col-2', width: null },
         ],
         updatedAt: 99,
-        appearance: { accentColor: 'red', cardOpacity: 999, topBarStyle: 'rainbow' }
-      }
+        appearance: { accentColor: 'red', cardOpacity: 999, topBarStyle: 'rainbow' },
+      },
     })
 
     expect(file?.theme?.columns[0].width).toBeLessThanOrEqual(COLUMN_WIDTH_MAX)

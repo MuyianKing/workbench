@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import type { VaultEntry, VaultRecord } from '@workbench/vault'
+import type { InputInstance } from 'element-plus'
+import { CopyDocument, Document, Hide, Key, Lock, MoreFilled, Plus, Refresh, Search, Unlock, View } from '@element-plus/icons-vue'
 /**
  * 密码页：一张卡片墙。
  *
@@ -20,26 +23,11 @@
  * 明文只活在内存里：磁盘上那份与仓库里那份都只有密文（见 workbench/vault.ts）。
  */
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
-import {
-  CopyDocument,
-  Document,
-  Hide,
-  Key,
-  Lock,
-  MoreFilled,
-  Plus,
-  Refresh,
-  Search,
-  Unlock,
-  View
-} from '@element-plus/icons-vue'
-import type { InputInstance } from 'element-plus'
-import type { VaultEntry, VaultRecord } from '@workbench/vault'
-import { confirmAction, notifyError, notifySuccess } from '@/notify'
-import { useVaultStore } from '@/stores/vault'
 import PanelLoading from '@/components/PanelLoading.vue'
 import VaultEntryDialog from '@/components/VaultEntryDialog.vue'
 import VaultKeyDialog from '@/components/VaultKeyDialog.vue'
+import { confirmAction, notifyError, notifySuccess } from '@/notify'
+import { useVaultStore } from '@/stores/vault'
 
 const store = useVaultStore()
 
@@ -86,10 +74,11 @@ onMounted(() => {
 watch(
   () => store.keyChecked && store.keyExists && !store.unlocked && store.hello !== 'available',
   (locked) => {
-    if (!locked) return
+    if (!locked)
+      return
     void nextTick(() => passwordInput.value?.focus())
   },
-  { immediate: true }
+  { immediate: true },
 )
 
 function isRevealed(id: string): boolean {
@@ -98,17 +87,19 @@ function isRevealed(id: string): boolean {
 
 function toggleReveal(id: string): void {
   revealed.value = isRevealed(id)
-    ? revealed.value.filter((item) => item !== id)
+    ? revealed.value.filter(item => item !== id)
     : [...revealed.value, id]
 }
 
 /** 复制。WebView 里 `navigator.clipboard` 在安全上下文下可用，失败时如实说一句 */
 async function copy(text: string, what: string): Promise<void> {
-  if (!text) return
+  if (!text)
+    return
   try {
     await navigator.clipboard.writeText(text)
     notifySuccess(`${what}已复制`)
-  } catch {
+  }
+  catch {
     notifyError('复制失败，可以手动选中再复制')
   }
 }
@@ -148,7 +139,8 @@ async function save(entry: VaultEntry): Promise<void> {
 }
 
 function onMore(command: string, record: VaultRecord): void {
-  if (command === 'edit') startEdit(record)
+  if (command === 'edit')
+    startEdit(record)
   else void remove(record)
 }
 
@@ -156,12 +148,13 @@ async function remove(record: VaultRecord): Promise<void> {
   const ok = await confirmAction(
     `「${record.name}」会从这台机器和仓库里一起删掉。`,
     '删除这条记录？',
-    { confirmButtonText: '删除', type: 'warning' }
+    { confirmButtonText: '删除', type: 'warning' },
   )
-  if (!ok) return
+  if (!ok)
+    return
 
   await store.removeEntry(record.id)
-  revealed.value = revealed.value.filter((id) => id !== record.id)
+  revealed.value = revealed.value.filter(id => id !== record.id)
 }
 
 async function sync(): Promise<void> {
@@ -178,7 +171,8 @@ async function unlock(): Promise<void> {
     await store.unlockHello()
     return
   }
-  if (await store.unlock(password.value)) password.value = ''
+  if (await store.unlock(password.value))
+    password.value = ''
 }
 
 async function lock(): Promise<void> {
@@ -197,7 +191,9 @@ async function lock(): Promise<void> {
     <!-- 还没有密钥：这一页的入口只有两条 —— 建一把，或从另一台机器导入 -->
     <div v-else-if="!store.keyExists" class="vault__intro panel">
       <div class="empty">
-        <el-icon class="empty__icon"><Key /></el-icon>
+        <el-icon class="empty__icon">
+          <Key />
+        </el-icon>
         <p>保险库要用一把密钥才能建起来。</p>
         <p class="empty__hint">
           密钥只存在这台机器上（Windows 凭据管理器里）；仓库里那份文件从头到尾都是密文 ——
@@ -222,12 +218,16 @@ async function lock(): Promise<void> {
     <!-- 收起来了：解锁交给 Windows —— 配了 Hello 的弹系统验证框，没配的输本机账户密码 -->
     <div v-else-if="!store.unlocked" class="vault__intro panel">
       <div class="empty">
-        <el-icon class="empty__icon"><Lock /></el-icon>
+        <el-icon class="empty__icon">
+          <Lock />
+        </el-icon>
         <p>密码已经从屏幕上和内存里收起来了。</p>
         <p v-if="store.hello === 'available'" class="empty__hint">
           解锁交给这台机器的 Windows 登录验证（PIN 或指纹）。
         </p>
-        <p v-else class="empty__hint">解锁要输入这台机器的 Windows 账户密码。</p>
+        <p v-else class="empty__hint">
+          解锁要输入这台机器的 Windows 账户密码。
+        </p>
         <div class="vault__intro-actions">
           <el-input
             v-if="store.hello !== 'available'"
@@ -254,7 +254,9 @@ async function lock(): Promise<void> {
           之后解锁会弹 Windows 自己的验证。
         </p>
         <!-- 密码不对之类的话就地显示（那一刻用户的注意力就在框上），不弹消息 -->
-        <p v-if="store.unlockError" class="vault__intro-error">{{ store.unlockError }}</p>
+        <p v-if="store.unlockError" class="vault__intro-error">
+          {{ store.unlockError }}
+        </p>
         <p class="empty__hint">
           公钥指纹 <span class="mono">{{ fingerprintText }}</span>，
           另一台机器上显示的应当是同一串。
@@ -278,7 +280,9 @@ async function lock(): Promise<void> {
             spellcheck="false"
             placeholder="搜索名字、备注、分组"
           >
-            <template #prefix><el-icon><Search /></el-icon></template>
+            <template #prefix>
+              <el-icon><Search /></el-icon>
+            </template>
           </el-input>
           <span v-if="store.records.length" class="vault__count">{{ store.summary }}</span>
         </div>
@@ -341,7 +345,9 @@ async function lock(): Promise<void> {
             <div class="grid">
               <article v-for="record in section.records" :key="record.id" class="card">
                 <header class="card__head">
-                  <h3 class="card__name" :title="record.name">{{ record.name }}</h3>
+                  <h3 class="card__name" :title="record.name">
+                    {{ record.name }}
+                  </h3>
 
                   <!-- 改与删收在「⋯」里：悬停 / 键盘聚焦才显形（这是偶尔才做一次的事） -->
                   <el-dropdown
@@ -355,8 +361,12 @@ async function lock(): Promise<void> {
                     <el-button text size="small" :icon="MoreFilled" aria-label="更多" />
                     <template #dropdown>
                       <el-dropdown-menu>
-                        <el-dropdown-item command="edit">编辑</el-dropdown-item>
-                        <el-dropdown-item command="remove" divided>删除</el-dropdown-item>
+                        <el-dropdown-item command="edit">
+                          编辑
+                        </el-dropdown-item>
+                        <el-dropdown-item command="remove" divided>
+                          删除
+                        </el-dropdown-item>
                       </el-dropdown-menu>
                     </template>
                   </el-dropdown>
@@ -369,7 +379,9 @@ async function lock(): Promise<void> {
                 -->
                 <dl class="rows">
                   <div class="row">
-                    <dt class="row__label">密码</dt>
+                    <dt class="row__label">
+                      密码
+                    </dt>
                     <dd class="row__secret">
                       <span class="row__value">{{
                         isRevealed(record.id) ? record.password || '—' : MASK
@@ -420,11 +432,17 @@ async function lock(): Promise<void> {
         <!-- 一条都没有 vs 筛没了：两回事，空态说清楚是哪一种 -->
         <div v-else class="nomatch">
           <template v-if="store.records.length">
-            <p class="nomatch__title">没有匹配「{{ store.query }}」的记录</p>
+            <p class="nomatch__title">
+              没有匹配「{{ store.query }}」的记录
+            </p>
           </template>
           <template v-else>
-            <p class="nomatch__title">还没有一条记录</p>
-            <p class="nomatch__desc">点右上角「添加」记第一条。</p>
+            <p class="nomatch__title">
+              还没有一条记录
+            </p>
+            <p class="nomatch__desc">
+              点右上角「添加」记第一条。
+            </p>
             <el-button type="primary" @click="startAdd">
               <el-icon><Plus /></el-icon>
               添加

@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import type { CardGrab, ColumnId, HomeCardId, HomeColumn, HomeRow, RowId, RowTarget } from '@workbench/appearance'
+import type { Component, CSSProperties } from 'vue'
+import { COLUMN_COUNT_MAX, COLUMN_COUNT_MIN, COLUMN_WIDTH_DEFAULT, columnHasVisibleCards, columnOfRow, HOME_CARD_LABELS, resizeColumnPair, rowBoxHeight, rowHeightMin, rowOf, visibleCardIdsInRow } from '@workbench/appearance'
 /**
  * 首页布局画布：若干栏并排，每栏里若干行上下摞，行里的卡片横向平分这一栏的宽度。
  *
@@ -14,44 +17,21 @@
  * 按左右换位 —— 于是「中栏上面一张宽卡、下面三张并排」拖得出来，不必再设「拆行」按钮。
  */
 import { computed, ref } from 'vue'
-import type { Component, CSSProperties } from 'vue'
-import {
-  COLUMN_COUNT_MAX,
-  COLUMN_COUNT_MIN,
-  COLUMN_WIDTH_DEFAULT,
-  HOME_CARD_LABELS,
-  columnHasVisibleCards,
-  columnOfRow,
-  resizeColumnPair,
-  rowBoxHeight,
-  rowHeightMin,
-  rowOf,
-  visibleCardIdsInRow,
-  type CardGrab,
-  type ColumnId,
-  type HomeCardId,
-  type HomeColumn,
-  type HomeRow,
-  type RowId,
-  type RowTarget
-} from '@workbench/appearance'
-import { useProjectsStore } from '@/stores/projects'
-import { useNavStore } from '@/stores/nav'
-import { startPointerDrag } from '@/composables/use-pointer-drag'
-import { useSettingsStore } from '@/stores/settings'
+import ActionsPanel from '@/components/ActionsPanel.vue'
+import ActivityGraph from '@/components/ActivityGraph.vue'
 import BoardCard from '@/components/BoardCard.vue'
 import BoardRow from '@/components/BoardRow.vue'
-import ActivityGraph from '@/components/ActivityGraph.vue'
-import TokenPanel from '@/components/TokenPanel.vue'
-import SystemPanel from '@/components/SystemPanel.vue'
-import HomeProjectsPanel from '@/components/HomeProjectsPanel.vue'
-import ActionsPanel from '@/components/ActionsPanel.vue'
-import QuickLaunch from '@/components/QuickLaunch.vue'
 import CommandPanel from '@/components/CommandPanel.vue'
-import TodayWorkPanel from '@/components/TodayWorkPanel.vue'
+import HomeProjectsPanel from '@/components/HomeProjectsPanel.vue'
 import NewsPanel from '@/components/NewsPanel.vue'
+import QuickLaunch from '@/components/QuickLaunch.vue'
+import SystemPanel from '@/components/SystemPanel.vue'
+import TodayWorkPanel from '@/components/TodayWorkPanel.vue'
+import TokenPanel from '@/components/TokenPanel.vue'
+import { startPointerDrag } from '@/composables/use-pointer-drag'
+import { useNavStore } from '@/stores/nav'
+import { useSettingsStore } from '@/stores/settings'
 
-const store = useProjectsStore()
 const nav = useNavStore()
 const settings = useSettingsStore()
 
@@ -65,7 +45,7 @@ const CARDS: Record<HomeCardId, Component> = {
   quick: QuickLaunch,
   commands: CommandPanel,
   work: TodayWorkPanel,
-  news: NewsPanel
+  news: NewsPanel,
 }
 
 const editing = computed(() => nav.layoutEditing)
@@ -79,7 +59,7 @@ const cards = computed(() => settings.themeConfig.cards)
  * 一栏里要画的行：**连它在栏里的下标一起**给出来 —— 落点、占位都按那个下标算，
  * 而卡片全被关掉的行不画（位置留着，再打开时回到原处），两者的序号因此对不齐。
  */
-function renderRows(column: HomeColumn): Array<{ row: HomeRow; index: number }> {
+function renderRows(column: HomeColumn): Array<{ row: HomeRow, index: number }> {
   return column.rows
     .map((row, index) => ({ row, index }))
     .filter(({ row }) => visibleCardIdsInRow(cards.value, row.id).length > 0)
@@ -89,14 +69,14 @@ function renderRows(column: HomeColumn): Array<{ row: HomeRow; index: number }> 
 const visibleColumns = computed<HomeColumn[]>(() =>
   editing.value
     ? columns.value
-    : columns.value.filter((column) => columnHasVisibleCards(cards.value, column))
+    : columns.value.filter(column => columnHasVisibleCards(cards.value, column)),
 )
 
 /** 每栏占多宽：有像素宽度的按像素，自适应的与其余自适应栏平分剩下的宽度 */
 const columnsStyle = computed(() => ({
   gridTemplateColumns: visibleColumns.value
-    .map((column) => (column.width === null ? 'minmax(0, 1fr)' : `${column.width}px`))
-    .join(' ')
+    .map(column => (column.width === null ? 'minmax(0, 1fr)' : `${column.width}px`))
+    .join(' '),
 }))
 
 /** 画布本身：找某一栏的盒子、量它多宽都从这儿问 */
@@ -110,7 +90,7 @@ const boardEl = ref<HTMLElement | null>(null)
  */
 function columnTrack(id: ColumnId): HTMLElement | null {
   const wraps = boardEl.value?.querySelectorAll<HTMLElement>('.colwrap') ?? []
-  return [...wraps].find((element) => element.dataset.column === id) ?? null
+  return [...wraps].find(element => element.dataset.column === id) ?? null
 }
 
 /**
@@ -125,7 +105,7 @@ function columnTrack(id: ColumnId): HTMLElement | null {
 const seamHandles = computed<boolean[]>(() => {
   const list = visibleColumns.value
   return list.map(
-    (column, index) => index < list.length - 1 && (column.width !== null || list[index + 1].width !== null)
+    (column, index) => index < list.length - 1 && (column.width !== null || list[index + 1].width !== null),
   )
 })
 
@@ -134,7 +114,8 @@ function seamTitle(index: number): string {
   const list = visibleColumns.value
   const left = list[index]
   const right = list[index + 1]
-  if (!left || !right) return '拖动调整栏宽'
+  if (!left || !right)
+    return '拖动调整栏宽'
   if (left.width !== null && right.width !== null) {
     return `拖动调整第 ${index + 1} 与第 ${index + 2} 栏的宽度（两栏一起变）`
   }
@@ -178,7 +159,8 @@ const dropTarget = ref<RowTarget | null>(null)
 const resizingColumns = ref<ColumnId[]>([])
 
 function beginDrag(id: HomeCardId, grab: CardGrab): void {
-  if (!editing.value) return
+  if (!editing.value)
+    return
 
   const placement = cards.value[id]
   const column = columnOfRow(columns.value, placement.row)
@@ -192,14 +174,14 @@ function beginDrag(id: HomeCardId, grab: CardGrab): void {
     offsetY: grab.y - grab.top,
     width: grab.width,
     height: grab.height,
-    moved: false
+    moved: false,
   }
   dropTarget.value = column
     ? {
         column: column.id,
-        rowIndex: column.rows.findIndex((row) => row.id === placement.row),
+        rowIndex: column.rows.findIndex(row => row.id === placement.row),
         newRow: false,
-        index: visibleCardIdsInRow(cards.value, placement.row).indexOf(id)
+        index: visibleCardIdsInRow(cards.value, placement.row).indexOf(id),
       }
     : null
 
@@ -207,13 +189,14 @@ function beginDrag(id: HomeCardId, grab: CardGrab): void {
   startPointerDrag({
     start: { x: grab.x, y: grab.y },
     onMove: onDragMove,
-    onEnd: endDrag
+    onEnd: endDrag,
   })
 }
 
 function onDragMove(event: PointerEvent): void {
   const state = drag.value
-  if (!state) return
+  if (!state)
+    return
 
   state.pointerX = event.clientX
   state.pointerY = event.clientY
@@ -227,7 +210,8 @@ function onDragMove(event: PointerEvent): void {
 
   // 指针下面是哪一栏哪一行（浮层已经 pointer-events: none，不会挡住判定）
   const target = targetAt(event.clientX, event.clientY)
-  if (target) dropTarget.value = target
+  if (target)
+    dropTarget.value = target
 }
 
 /** 指针落在哪儿：先认栏，再在该栏画出来的那些行里认「哪一行、落的哪儿」 */
@@ -235,28 +219,34 @@ function targetAt(x: number, y: number): RowTarget | null {
   const under = document.elementFromPoint(x, y)
   const columnEl = under?.closest<HTMLElement>('.col')
   const columnId = columnEl?.dataset.column as ColumnId | undefined
-  if (!columnEl || !columnId) return null
+  if (!columnEl || !columnId)
+    return null
 
-  const column = columns.value.find((item) => item.id === columnId)
-  if (!column) return null
+  const column = columns.value.find(item => item.id === columnId)
+  if (!column)
+    return null
 
   const dragged = drag.value?.id
   // 按 data-row 认行（行的类名是 .board-row，那是它自己的样式；这里要的是「哪一行」这个身份）
   const rows = [...columnEl.querySelectorAll<HTMLElement>('[data-row]')]
 
   // 这一栏一行都没画（卡片被关光了）：落点就是往这一栏末尾加一行
-  if (!rows.length) return { column: columnId, rowIndex: column.rows.length, newRow: true, index: 0 }
+  if (!rows.length)
+    return { column: columnId, rowIndex: column.rows.length, newRow: true, index: 0 }
 
   for (const rowEl of rows) {
     const rect = rowEl.getBoundingClientRect()
     const rowIndex = Number(rowEl.dataset.rowIndex)
 
     // 落在这一行上面（含行与行之间那条缝）：在它前面另起一行
-    if (y < rect.top) return { column: columnId, rowIndex, newRow: true, index: 0 }
-    if (y > rect.bottom) continue
+    if (y < rect.top)
+      return { column: columnId, rowIndex, newRow: true, index: 0 }
+    if (y > rect.bottom)
+      continue
 
     const edge = Math.min(rect.height * EDGE_RATIO, EDGE_MAX_PX)
-    if (y < rect.top + edge) return { column: columnId, rowIndex, newRow: true, index: 0 }
+    if (y < rect.top + edge)
+      return { column: columnId, rowIndex, newRow: true, index: 0 }
     if (y > rect.bottom - edge) {
       return { column: columnId, rowIndex: rowIndex + 1, newRow: true, index: 0 }
     }
@@ -269,7 +259,7 @@ function targetAt(x: number, y: number): RowTarget | null {
     column: columnId,
     rowIndex: Number(last.dataset.rowIndex),
     newRow: false,
-    index: indexInRow(last, x, dragged)
+    index: indexInRow(last, x, dragged),
   }
 }
 
@@ -280,7 +270,7 @@ function targetAt(x: number, y: number): RowTarget | null {
  */
 function indexInRow(container: HTMLElement, x: number, dragged: HomeCardId | undefined): number {
   const rowCards = [...container.querySelectorAll<HTMLElement>('[data-card-id]')].filter(
-    (el) => el.dataset.cardId !== dragged
+    el => el.dataset.cardId !== dragged,
   )
 
   const gap = container.querySelector<HTMLElement>('.row__gap')
@@ -291,7 +281,8 @@ function indexInRow(container: HTMLElement, x: number, dragged: HomeCardId | und
   for (let i = 0; i < rowCards.length; i += 1) {
     const rect = rowCards[i].getBoundingClientRect()
     const left = shift && i >= gapIndex ? rect.left - shift : rect.left
-    if (x < left + rect.width / 2) return i
+    if (x < left + rect.width / 2)
+      return i
   }
   return rowCards.length
 }
@@ -304,29 +295,31 @@ function endDrag(last: PointerEvent | null): void {
   dropTarget.value = null
 
   // last 为 null 表示被取消了（Esc / 系统接管）：不落盘
-  if (state?.moved && last && target) void settings.moveCard(state.id, target)
+  if (state?.moved && last && target)
+    void settings.moveCard(state.id, target)
 }
 
 /** 拖起来的那张卡片：脱离文档流，跟着指针走 */
 const floatingStyle = computed<CSSProperties | null>(() => {
   const state = drag.value
-  if (!state?.moved) return null
+  if (!state?.moved)
+    return null
 
   return {
     position: 'fixed',
     left: `${state.pointerX - state.offsetX}px`,
     top: `${state.pointerY - state.offsetY}px`,
     width: `${state.width}px`,
-    height: `${state.height}px`
+    height: `${state.height}px`,
   }
 })
 
 // ---------- 落点占位 ----------
 
 /** 画布上的一格：一行，或者「拖动要新开的那一行」占位 */
-type Slot =
-  | { kind: 'row'; key: string; row: HomeRow; index: number; cards: HomeCardId[]; gapIndex: number | null }
-  | { kind: 'newRow'; key: string; height: number }
+type Slot
+  = | { kind: 'row', key: string, row: HomeRow, index: number, cards: HomeCardId[], gapIndex: number | null }
+    | { kind: 'newRow', key: string, height: number }
 
 /**
  * 新开一行的占位有多高：那一行跟着被拖的卡片走（它原来多高，新行就多高），
@@ -334,9 +327,11 @@ type Slot =
  */
 const newRowHeight = computed(() => {
   const id = drag.value?.id
-  if (!id) return 0
+  if (!id)
+    return 0
   const row = rowOf(columns.value, cards.value[id].row)
-  if (!row) return 0
+  if (!row)
+    return 0
   return rowBoxHeight(row, rowHeightMin(cards.value, row.id))
 })
 
@@ -363,11 +358,12 @@ function slotsOf(column: HomeColumn): Slot[] {
       row,
       index,
       cards: ids,
-      gapIndex: gapRenderIndex(index, ids)
+      gapIndex: gapRenderIndex(index, ids),
     })
   }
 
-  if (asNew && !placed) slots.push({ kind: 'newRow', key: `new-${column.id}`, height: newRowHeight.value })
+  if (asNew && !placed)
+    slots.push({ kind: 'newRow', key: `new-${column.id}`, height: newRowHeight.value })
   return slots
 }
 
@@ -375,7 +371,8 @@ function slotsOf(column: HomeColumn): Slot[] {
 function gapRenderIndex(index: number, ids: HomeCardId[]): number | null {
   const target = dropTarget.value
   const dragged = drag.value?.id
-  if (drag.value?.moved !== true || !target || target.newRow || target.rowIndex !== index) return null
+  if (drag.value?.moved !== true || !target || target.newRow || target.rowIndex !== index)
+    return null
 
   // 落点序号是按「不含被拖卡片」的列表算的，映射回渲染序时要把它自己那一格让开
   const own = dragged ? ids.indexOf(dragged) : -1
@@ -392,13 +389,15 @@ function gapRenderIndex(index: number, ids: HomeCardId[]): number | null {
  * 最后一栏也是在这儿调：往左拖，它变宽、左边那栏变窄。
  */
 function onSeamResizeDown(index: number, event: PointerEvent): void {
-  if (event.button !== 0) return
+  if (event.button !== 0)
+    return
   event.preventDefault()
 
   const list = visibleColumns.value
   const left = list[index]
   const right = list[index + 1]
-  if (!left || !right) return
+  if (!left || !right)
+    return
 
   // 起点宽度在按下时就定死：拖动过程中本地一直在变，闭包里那两个对象才是这一手的起点
   const leftStart = left.width
@@ -413,7 +412,8 @@ function onSeamResizeDown(index: number, event: PointerEvent): void {
     start: { x: event.clientX, y: event.clientY },
     onMove: (moveEvent, start) => {
       const dx = moveEvent.clientX - start.x
-      if (!moved && Math.abs(dx) < DRAG_THRESHOLD) return
+      if (!moved && Math.abs(dx) < DRAG_THRESHOLD)
+        return
       moved = true
       settings.setColumnWidths(seamWidths(left.id, leftStart, right.id, rightStart, dx))
     },
@@ -421,8 +421,9 @@ function onSeamResizeDown(index: number, event: PointerEvent): void {
       resizingColumns.value = []
     },
     onEnd: () => {
-      if (moved) void settings.commitColumns()
-    }
+      if (moved)
+        void settings.commitColumns()
+    },
   })
 }
 
@@ -432,13 +433,14 @@ function seamWidths(
   leftWidth: number | null,
   rightId: ColumnId,
   rightWidth: number | null,
-  dx: number
+  dx: number,
 ): Record<ColumnId, number> {
   if (leftWidth !== null && rightWidth !== null) {
     const [left, right] = resizeColumnPair(leftWidth, rightWidth, dx)
     return { [leftId]: left, [rightId]: right }
   }
-  if (leftWidth !== null) return { [leftId]: leftWidth + dx }
+  if (leftWidth !== null)
+    return { [leftId]: leftWidth + dx }
   return { [rightId]: (rightWidth ?? COLUMN_WIDTH_DEFAULT) - dx }
 }
 
@@ -557,7 +559,7 @@ function onToggleRowMode(id: RowId): void {
 
           <!-- 编辑态的空栏也要看得见，否则卡片没地方拖 -->
           <div v-if="editing && !renderRows(column).length" class="col__empty">
-            第 {{ index + 1 }} 栏为空<br />把卡片拖到这里
+            第 {{ index + 1 }} 栏为空<br>把卡片拖到这里
           </div>
         </div>
 

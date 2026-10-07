@@ -17,51 +17,51 @@ export type BuildTool = 'vite' | 'vue-cli' | 'rsbuild'
 
 /** 展示用名称；与 scanner 的 framework 标签保持同一套写法 */
 export const BUILD_TOOL_LABEL: Record<BuildTool, string> = {
-  vite: 'Vite',
+  'vite': 'Vite',
   'vue-cli': 'Vue CLI',
-  rsbuild: 'Rsbuild'
+  'rsbuild': 'Rsbuild',
 }
 
 /** 工具没显式配置端口时的默认值 */
 export const DEFAULT_DEV_PORT: Record<BuildTool, number> = {
-  vite: 5173,
+  'vite': 5173,
   'vue-cli': 8080,
-  rsbuild: 3000
+  'rsbuild': 3000,
 }
 
 /** 各工具的配置文件，按优先级排列（.ts 在前，实际项目里最常见） */
 export const TOOL_CONFIG_FILES: Record<BuildTool, string[]> = {
-  vite: [
+  'vite': [
     'vite.config.ts',
     'vite.config.js',
     'vite.config.mts',
     'vite.config.mjs',
     'vite.config.cts',
-    'vite.config.cjs'
+    'vite.config.cjs',
   ],
   'vue-cli': ['vue.config.ts', 'vue.config.js'],
-  rsbuild: [
+  'rsbuild': [
     'rsbuild.config.ts',
     'rsbuild.config.js',
     'rsbuild.config.mts',
     'rsbuild.config.mjs',
     'rsbuild.config.cts',
-    'rsbuild.config.cjs'
-  ]
+    'rsbuild.config.cjs',
+  ],
 }
 
 /** 配置里端口所在的键：Vue CLI 在 devServer，另外两家在 server */
 export const TOOL_PORT_KEY: Record<BuildTool, string> = {
-  vite: 'server',
+  'vite': 'server',
   'vue-cli': 'devServer',
-  rsbuild: 'server'
+  'rsbuild': 'server',
 }
 
 /** 工具在 package.json 里的标志性依赖；vite 最通用，排在最后免得误判 */
 const TOOL_DEPENDENCIES: Array<[string, BuildTool]> = [
   ['@rsbuild/core', 'rsbuild'],
   ['@vue/cli-service', 'vue-cli'],
-  ['vite', 'vite']
+  ['vite', 'vite'],
 ]
 
 export const BUILD_TOOLS: BuildTool[] = ['vite', 'vue-cli', 'rsbuild']
@@ -69,7 +69,8 @@ export const BUILD_TOOLS: BuildTool[] = ['vite', 'vue-cli', 'rsbuild']
 /** 只按依赖判断，不看配置文件；配置文件的探测要读磁盘，交给主进程 */
 export function detectBuildTool(deps: Record<string, string | undefined>): BuildTool | undefined {
   for (const [dependency, tool] of TOOL_DEPENDENCIES) {
-    if (deps[dependency]) return tool
+    if (deps[dependency])
+      return tool
   }
   return undefined
 }
@@ -90,29 +91,33 @@ export interface DevPortGuess {
  */
 export function guessDevPort(input: {
   tool?: BuildTool
-  configFile?: { name: string; text: string }
+  configFile?: { name: string, text: string }
   serveCommand?: string
 }): DevPortGuess | undefined {
   const { tool, configFile, serveCommand } = input
 
   if (tool && configFile) {
     const fromConfig = parsePortFromConfig(configFile.text, tool)
-    if (fromConfig) return { port: fromConfig, from: 'config', file: configFile.name }
+    if (fromConfig)
+      return { port: fromConfig, from: 'config', file: configFile.name }
   }
 
   if (serveCommand) {
     const fromScript = parsePortFromScript(serveCommand, tool)
-    if (fromScript) return { port: fromScript, from: 'script' }
+    if (fromScript)
+      return { port: fromScript, from: 'script' }
   }
 
-  if (tool) return { port: DEFAULT_DEV_PORT[tool], from: 'default' }
+  if (tool)
+    return { port: DEFAULT_DEV_PORT[tool], from: 'default' }
   return undefined
 }
 
 /** 从配置文本里读 server.port / devServer.port 的字面量 */
 export function parsePortFromConfig(text: string, tool: BuildTool): number | undefined {
   const body = objectBodyAfter(stripComments(text), TOOL_PORT_KEY[tool])
-  if (body === null) return undefined
+  if (body === null)
+    return undefined
   return readPortLiteral(body)
 }
 
@@ -122,14 +127,17 @@ export function parsePortFromConfig(text: string, tool: BuildTool): number | und
  */
 export function parsePortFromScript(command: string, tool?: BuildTool): number | undefined {
   const long = command.match(/--port[=\s]+(\d{1,5})/)
-  if (long) return parsePort(long[1])
+  if (long)
+    return parsePort(long[1])
 
   const env = command.match(/\bPORT\s*=\s*(\d{1,5})/)
-  if (env) return parsePort(env[1])
+  if (env)
+    return parsePort(env[1])
 
   if (tool === 'vite') {
     const short = command.match(/(?:^|\s)-p\s+(\d{1,5})(?=\s|$)/)
-    if (short) return parsePort(short[1])
+    if (short)
+      return parsePort(short[1])
   }
   return undefined
 }
@@ -137,20 +145,24 @@ export function parsePortFromScript(command: string, tool?: BuildTool): number |
 /** 取 `key: { ... }` 里那对大括号之间的内容；不是对象字面量时返回 null */
 function objectBodyAfter(code: string, key: string): string | null {
   const matched = new RegExp(`(?:^|[^\\w$])${key}\\s*:\\s*\\{`).exec(code)
-  if (!matched) return null
+  if (!matched)
+    return null
 
   const start = matched.index + matched[0].length
   let depth = 1
   for (let i = start; i < code.length; i += 1) {
     const char = code[i]
-    if (char === '"' || char === "'" || char === '`') {
+    if (char === '"' || char === '\'' || char === '`') {
       i = skipString(code, i)
       continue
     }
-    if (char === '{') depth += 1
+    if (char === '{') {
+      depth += 1
+    }
     else if (char === '}') {
       depth -= 1
-      if (depth === 0) return code.slice(start, i)
+      if (depth === 0)
+        return code.slice(start, i)
     }
   }
   return null
@@ -170,7 +182,8 @@ function skipString(code: string, start: number): number {
       i += 1
       continue
     }
-    if (code[i] === quote) return i
+    if (code[i] === quote)
+      return i
   }
   return code.length - 1
 }
@@ -181,7 +194,7 @@ function stripComments(code: string): string {
   for (let i = 0; i < code.length; i += 1) {
     const char = code[i]
 
-    if (char === '"' || char === "'" || char === '`') {
+    if (char === '"' || char === '\'' || char === '`') {
       const end = skipString(code, i)
       out += code.slice(i, end + 1)
       i = end
@@ -216,9 +229,11 @@ const LOG_PORT_RE = /(?:localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0)[:/](\d{2,5})/
 
 export function parsePortFromLog(text: string): number | undefined {
   const matched = LOG_PORT_RE.exec(text)
-  if (!matched) return undefined
+  if (!matched)
+    return undefined
 
   const port = Number(matched[1])
-  if (!Number.isInteger(port) || port < 1 || port > 65535) return undefined
+  if (!Number.isInteger(port) || port < 1 || port > 65535)
+    return undefined
   return port
 }

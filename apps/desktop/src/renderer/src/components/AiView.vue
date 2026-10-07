@@ -1,4 +1,8 @@
 <script setup lang="ts">
+import type { AiImage, AiPreviewState, AiPreviewTarget } from '@workbench/ai'
+import { Download, Expand, Fold, MagicStick, Plus } from '@element-plus/icons-vue'
+import { AI_IMAGE_MAX, AI_PREVIEW_MAX_BINARY_CHARS, AI_PREVIEW_MAX_CHARS, htmlImageSrcs, resolveAiPreview } from '@workbench/ai'
+import { markdownImages } from '@workbench/core'
 /**
  * AI 助手页：一个**通用的 agent 控制台** —— 左栏挑一段会话，右栏跟它说下去。
  *
@@ -27,27 +31,15 @@
  * 探测也是这一页自己的显示（store 只留着「当前盯着的目录」那一位）。
  */
 import { computed, onMounted, ref, watch } from 'vue'
-import { Download, Expand, Fold, MagicStick, Plus } from '@element-plus/icons-vue'
-import {
-  AI_IMAGE_MAX,
-  AI_PREVIEW_MAX_BINARY_CHARS,
-  AI_PREVIEW_MAX_CHARS,
-  htmlImageSrcs,
-  resolveAiPreview,
-  type AiImage,
-  type AiPreviewState,
-  type AiPreviewTarget
-} from '@workbench/ai'
-import { markdownImages } from '@workbench/core'
-import { basenameOf } from '@/format'
 import AiComposer from '@/components/AiComposer.vue'
-import AiPreviewPane from '@/components/AiPreviewPane.vue'
-import AiSkillDialog from '@/components/AiSkillDialog.vue'
 import AiLocationBar from '@/components/AiLocationBar.vue'
 import AiModelDialog from '@/components/AiModelDialog.vue'
+import AiPreviewPane from '@/components/AiPreviewPane.vue'
 import AiRunPanel from '@/components/AiRunPanel.vue'
 import AiSessionTree from '@/components/AiSessionTree.vue'
+import AiSkillDialog from '@/components/AiSkillDialog.vue'
 import PanelResizer from '@/components/PanelResizer.vue'
+import { basenameOf } from '@/format'
 import { notifyWarning } from '@/notify'
 import { useAiStore } from '@/stores/ai'
 import { useAiSkillsStore } from '@/stores/ai-skills'
@@ -123,7 +115,7 @@ watch(
   () => ai.watchedDir,
   () => {
     void refreshRepo()
-  }
+  },
 )
 
 /** 文件名（Tab 与预览标题上只放它，全路径在链接那行的悬停里） */
@@ -145,7 +137,7 @@ watch(
     // 文件是相对那段对话的目录解析的：换会话（换目录）就整栏收掉
     previews.value = []
     activeKey.value = ''
-  }
+  },
 )
 
 /** 预览栏宽度钳位：280 起步，另一头给对话区留出能读的一截 */
@@ -157,10 +149,12 @@ function clampPreviewWidth(width: number): number {
 
 /** 关掉一张 Tab：关的是当前那张就挪到邻居（右边优先，没有才左边） */
 function closePreview(key: string): void {
-  const index = previews.value.findIndex((state) => state.key === key)
-  if (index < 0) return
+  const index = previews.value.findIndex(state => state.key === key)
+  if (index < 0)
+    return
   previews.value.splice(index, 1)
-  if (activeKey.value !== key) return
+  if (activeKey.value !== key)
+    return
   const next = previews.value[index] ?? previews.value[index - 1]
   activeKey.value = next?.key ?? ''
 }
@@ -173,15 +167,17 @@ function closePreview(key: string): void {
  */
 function openPreview(href: string): void {
   const session = ai.activeSession
-  if (!session) return
+  if (!session)
+    return
 
   const target = resolveAiPreview(href, session.dir)
   const key = target.ok ? `${target.kind}:${target.path}` : href
 
-  const existing = previews.value.find((state) => state.key === key)
+  const existing = previews.value.find(state => state.key === key)
   if (existing) {
     activeKey.value = key
-    if (target.ok) void loadInto(existing, target, session.dir)
+    if (target.ok)
+      void loadInto(existing, target, session.dir)
     return
   }
 
@@ -195,14 +191,16 @@ function openPreview(href: string): void {
     text: '',
     binary: '',
     imageUrl: '',
-    imageSrcs: {}
+    imageSrcs: {},
   })
   activeKey.value = key
-  if (!target.ok) return
+  if (!target.ok)
+    return
   // **从数组里取回响应式代理**再交给 loadInto —— 直接改 push 进去的那个原始对象
   // 一帧都不会触发更新（「正在打开…」就是这么卡死的），响应式数组读出来的代理才会
-  const stored = previews.value.find((entry) => entry.key === key)
-  if (stored) void loadInto(stored, target, session.dir)
+  const stored = previews.value.find(entry => entry.key === key)
+  if (stored)
+    void loadInto(stored, target, session.dir)
 }
 
 /** 取一份文件的内容摊进它的 Tab；每份状态只由自己的 loadInto 写，连点几个文件各走各的 */
@@ -213,9 +211,11 @@ async function loadInto(state: AiPreviewState, target: AiPreviewTarget, dir: str
 
   if (target.kind === 'image') {
     const image = await window.workbench.allowPreviewImage(target.path)
-    if (!alive()) return // Tab 已被关掉，过期的不写回
+    if (!alive())
+      return // Tab 已被关掉，过期的不写回
     state.loading = false
-    if (image.ok) state.imageUrl = image.data?.url ?? ''
+    if (image.ok)
+      state.imageUrl = image.data?.url ?? ''
     else state.error = image.error ?? '图片打不开'
     return
   }
@@ -223,7 +223,8 @@ async function loadInto(state: AiPreviewState, target: AiPreviewTarget, dir: str
   // docx / pptx：zip 容器，文本通道读不了，走 base64 交渲染库解
   if (target.kind === 'docx' || target.kind === 'pptx') {
     const file = await window.workbench.readBinaryFile(target.path)
-    if (!alive()) return
+    if (!alive())
+      return
     state.loading = false
     if (!file.ok) {
       state.error = file.error ?? '读取失败'
@@ -239,7 +240,8 @@ async function loadInto(state: AiPreviewState, target: AiPreviewTarget, dir: str
   }
 
   const file = await window.workbench.readTextFile(target.path)
-  if (!alive()) return
+  if (!alive())
+    return
   state.loading = false
   if (!file.ok) {
     state.error = file.error ?? '读取失败'
@@ -259,12 +261,16 @@ async function loadInto(state: AiPreviewState, target: AiPreviewTarget, dir: str
   const srcs: Record<string, string> = {}
   for (const src of target.kind === 'markdown' ? markdownImages(text) : htmlImageSrcs(text)) {
     const image = resolveAiPreview(src, dir)
-    if (!image.ok || image.kind !== 'image') continue
+    if (!image.ok || image.kind !== 'image')
+      continue
     const allowed = await window.workbench.allowPreviewImage(image.path)
-    if (!alive()) return
-    if (allowed.ok) srcs[src] = allowed.data?.url ?? ''
+    if (!alive())
+      return
+    if (allowed.ok)
+      srcs[src] = allowed.data?.url ?? ''
   }
-  if (!alive()) return
+  if (!alive())
+    return
   state.text = text
   state.imageSrcs = srcs
 }
@@ -282,8 +288,8 @@ onMounted(() => {
  * 宽度长在左栏自己身上（见样式），收起时它过渡到 0，auto 这一行跟着缩。
  */
 const bodyStyle = computed(() => ({
-  gridTemplateColumns: 'auto minmax(0, 1fr)',
-  '--tree-w': `${settings.themeConfig.aiTreeWidth}px`
+  'gridTemplateColumns': 'auto minmax(0, 1fr)',
+  '--tree-w': `${settings.themeConfig.aiTreeWidth}px`,
 }))
 
 /**
@@ -298,7 +304,7 @@ function toggleTree(): void {
 
 /** 哪几个会话在跑：左栏在那些行上点一颗小圆点（几个会话可以同时在跑） */
 const runningIds = computed(() =>
-  [...ai.runs.entries()].filter(([, run]) => run.running).map(([id]) => id)
+  [...ai.runs.entries()].filter(([, run]) => run.running).map(([id]) => id),
 )
 </script>
 

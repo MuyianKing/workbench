@@ -1,4 +1,8 @@
 <script setup lang="ts">
+import type { NoteKind, NoteSyncSummary } from '@workbench/notes'
+import { Document, EditPen, FolderOpened, Notebook, Picture, Refresh, RefreshRight } from '@element-plus/icons-vue'
+import { countNodes, findNoteNode, noteRootName } from '@workbench/notes'
+import { ElMessage } from 'element-plus'
 /**
  * 笔记页：左边目录树，右边正文。
  *
@@ -19,27 +23,18 @@
  * 左栏底部那一行与分隔条是 RecentRoots / PanelResizer（与视频页共用）。
  */
 import { computed, onMounted, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
-import { Document, EditPen, FolderOpened, Notebook, Picture, Refresh, RefreshRight } from '@element-plus/icons-vue'
-import {
-  countNodes,
-  findNoteNode,
-  noteRootName,
-  type NoteKind,
-  type NoteSyncSummary
-} from '@workbench/notes'
+import NoteAssetsDialog from '@/components/NoteAssetsDialog.vue'
+import NoteEditor from '@/components/NoteEditor.vue'
+import NoteNameDialog from '@/components/NoteNameDialog.vue'
+import NoteTree from '@/components/NoteTree.vue'
+import PanelLoading from '@/components/PanelLoading.vue'
+import PanelResizer from '@/components/PanelResizer.vue'
+import RecentRoots from '@/components/RecentRoots.vue'
+import SideLoadError from '@/components/SideLoadError.vue'
 import { formatTimestamp } from '@/format'
 import { confirmAction } from '@/notify'
 import { useNotesStore } from '@/stores/notes'
 import { useSettingsStore } from '@/stores/settings'
-import NoteTree from '@/components/NoteTree.vue'
-import SideLoadError from '@/components/SideLoadError.vue'
-import PanelLoading from '@/components/PanelLoading.vue'
-import NoteEditor from '@/components/NoteEditor.vue'
-import NoteNameDialog from '@/components/NoteNameDialog.vue'
-import NoteAssetsDialog from '@/components/NoteAssetsDialog.vue'
-import RecentRoots from '@/components/RecentRoots.vue'
-import PanelResizer from '@/components/PanelResizer.vue'
 
 const store = useNotesStore()
 const settings = useSettingsStore()
@@ -55,7 +50,7 @@ const expandedKeys = computed<string[]>({
   get: () => settings.settings.noteTreeExpanded,
   set: (value) => {
     void settings.updateSettings({ noteTreeExpanded: value })
-  }
+  },
 })
 
 /**
@@ -71,16 +66,18 @@ const dialog = reactive({
   /** 新建时落在哪个文件夹（相对路径）；空串表示最外层 */
   parentRel: '',
   /** 重命名时的目标路径 */
-  targetRel: ''
+  targetRel: '',
 })
 
 const dialogTitle = computed(() => {
-  if (dialog.mode === 'rename') return dialog.kind === 'folder' ? '重命名文件夹' : '重命名笔记'
+  if (dialog.mode === 'rename')
+    return dialog.kind === 'folder' ? '重命名文件夹' : '重命名笔记'
   return dialog.kind === 'folder' ? '新建文件夹' : '新建笔记'
 })
 
 const dialogDefaultName = computed(() => {
-  if (dialog.mode === 'rename') return findNoteNode(store.nodes, dialog.targetRel)?.name ?? ''
+  if (dialog.mode === 'rename')
+    return findNoteNode(store.nodes, dialog.targetRel)?.name ?? ''
   return dialog.kind === 'folder' ? '新建文件夹' : '新建笔记'
 })
 
@@ -96,21 +93,22 @@ const scanning = computed(() => store.loading && !store.loaded)
 const locationText = computed(() =>
   store.activeChain
     .slice(0, -1)
-    .map((node) => node.name)
-    .join(' / ')
+    .map(node => node.name)
+    .join(' / '),
 )
 
 /** 保存状态：失败时给原因，正常时给最后一次落盘的时间 */
 const savedText = computed(() => {
-  if (!store.active) return ''
+  if (!store.active)
+    return ''
   const at = store.savedAt || store.active.mtimeMs
   return at ? `已保存 · ${formatTimestamp(at)}` : '已保存'
 })
 
 /** 两栏的宽度：左栏是主题里存的那个值，分隔条按它定位 */
 const bodyStyle = computed(() => ({
-  gridTemplateColumns: `${settings.themeConfig.noteTreeWidth}px minmax(0, 1fr)`,
-  '--tree-w': `${settings.themeConfig.noteTreeWidth}px`
+  'gridTemplateColumns': `${settings.themeConfig.noteTreeWidth}px minmax(0, 1fr)`,
+  '--tree-w': `${settings.themeConfig.noteTreeWidth}px`,
 }))
 
 /** 素材管理那个面板：当前笔记本在这台机器上传过哪些图、谁还在用（见 NoteAssetsDialog） */
@@ -123,9 +121,11 @@ onMounted(() => {
 /** 第一次进来（或想换一个目录）时挑文件夹；取消就什么都不做 */
 async function chooseFolder(): Promise<void> {
   const picked = await window.workbench.pickDirectory('选择笔记文件夹')
-  if (!picked) return
+  if (!picked)
+    return
 
-  if (await store.setRoot(picked)) ElMessage.success('笔记本已切换')
+  if (await store.setRoot(picked))
+    ElMessage.success('笔记本已切换')
 }
 
 /** 从「最近打开」里换一个笔记本（当前的那条 RecentRoots 自己拦下了） */
@@ -144,7 +144,8 @@ function openCreateIn(parentRel: string, kind: NoteKind): void {
 
 function openRename(rel: string): void {
   const node = findNoteNode(store.nodes, rel)
-  if (!node) return
+  if (!node)
+    return
   dialog.mode = 'rename'
   dialog.kind = node.kind
   dialog.parentRel = ''
@@ -154,12 +155,14 @@ function openRename(rel: string): void {
 
 async function submitName(name: string): Promise<void> {
   if (dialog.mode === 'rename') {
-    if (await store.rename(dialog.targetRel, name)) ElMessage.success('已重命名')
+    if (await store.rename(dialog.targetRel, name))
+      ElMessage.success('已重命名')
     return
   }
 
   const created = await store.create({ parentRel: dialog.parentRel, kind: dialog.kind, name })
-  if (created) ElMessage.success(dialog.kind === 'folder' ? '已新建文件夹' : '已新建笔记')
+  if (created)
+    ElMessage.success(dialog.kind === 'folder' ? '已新建文件夹' : '已新建笔记')
 }
 
 /**
@@ -170,17 +173,19 @@ async function submitName(name: string): Promise<void> {
  */
 async function remove(rel: string): Promise<void> {
   const node = findNoteNode(store.nodes, rel)
-  if (!node) return
+  if (!node)
+    return
 
-  const detail =
-    node.kind === 'note'
+  const detail
+    = node.kind === 'note'
       ? `删除笔记「${node.name}」？`
       : `删除文件夹「${node.name}」及里面的 ${countNodes(node.children ?? [])} 项？`
   if (!(await confirmAction(`${detail}删除后不可恢复。`, '删除', { confirmButtonText: '删除' }))) {
     return
   }
 
-  if (await store.remove(rel)) ElMessage.success('已删除')
+  if (await store.remove(rel))
+    ElMessage.success('已删除')
 }
 
 /**
@@ -189,8 +194,9 @@ async function remove(rel: string): Promise<void> {
  * 失败时要**重新扫一遍**：`el-tree` 在松手那一刻已经把它自己那份数据挪过了，
  * 不重新读一次，左栏显示的会是一个磁盘上并不存在的位置。
  */
-async function onMove(payload: { rel: string; targetDir: string }): Promise<void> {
-  if (await store.move(payload.rel, payload.targetDir)) return
+async function onMove(payload: { rel: string, targetDir: string }): Promise<void> {
+  if (await store.move(payload.rel, payload.targetDir))
+    return
   await store.reload()
 }
 
@@ -200,7 +206,7 @@ async function onMove(payload: { rel: string; targetDir: string }): Promise<void
  * 用编辑器给的路径而不是 `store.active.rel`：换一篇时它会先把上一篇没写完的那段冲出来，
  * 那一下发生在选中项已经切走之后，按当前选中项去取就会写错篇（见 NoteEditor 里的说明）。
  */
-function onContentChange(payload: { rel: string; content: string }): void {
+function onContentChange(payload: { rel: string, content: string }): void {
   void store.saveContent(payload.rel, payload.content)
 }
 
@@ -215,7 +221,8 @@ function onContentChange(payload: { rel: string; content: string }): void {
  * 跳过去之后的展开与高亮交给 store 的 select（与在左栏点一下是同一条路）。
  */
 async function openNoteLink(rel: string): Promise<void> {
-  if (!findNoteNode(store.nodes, rel)) await store.reload()
+  if (!findNoteNode(store.nodes, rel))
+    await store.reload()
   if (!findNoteNode(store.nodes, rel)) {
     ElMessage.warning(`找不到这篇笔记：${rel}`)
     return
@@ -238,7 +245,7 @@ const editorRef = ref<InstanceType<typeof NoteEditor> | null>(null)
 const syncTitle = computed(() =>
   store.remoteUrl
     ? `同步到 ${store.remoteUrl}（提交本机改动、拉回别处的改动）`
-    : '这个文件夹是 git 仓库，但还没连远端仓库'
+    : '这个文件夹是 git 仓库，但还没连远端仓库',
 )
 
 /**
@@ -262,7 +269,8 @@ async function syncNow(): Promise<void> {
     ElMessage.error(store.syncError || '同步笔记失败')
     return
   }
-  if (outcome.activeChanged) editorRef.value?.reloadFromProps()
+  if (outcome.activeChanged)
+    editorRef.value?.reloadFromProps()
 
   ElMessage.success(syncDoneText(outcome.summary))
 }
@@ -270,8 +278,10 @@ async function syncNow(): Promise<void> {
 /** 同步成功那句提示：把「提交了什么、拉回了什么」说清楚，两边都没动就直说 */
 function syncDoneText(summary: NoteSyncSummary): string {
   const parts: string[] = []
-  if (summary.files) parts.push(`提交 ${summary.files} 个文件`)
-  if (summary.received) parts.push('拉回了远端的改动')
+  if (summary.files)
+    parts.push(`提交 ${summary.files} 个文件`)
+  if (summary.received)
+    parts.push('拉回了远端的改动')
   return parts.length ? `已同步（${parts.join('、')}）` : '已同步，两边都没有新改动'
 }
 </script>
@@ -281,7 +291,9 @@ function syncDoneText(summary: NoteSyncSummary): string {
     <!-- 还没选文件夹：整页只说一件事 —— 先挑一个文件夹当笔记本 -->
     <div v-if="!store.root" class="notes__intro panel">
       <div class="empty">
-        <el-icon class="empty__icon"><Notebook /></el-icon>
+        <el-icon class="empty__icon">
+          <Notebook />
+        </el-icon>
         <p>笔记就是这个文件夹里的 markdown 文件。</p>
         <p class="empty__hint">
           选一个文件夹当笔记本：里面的目录结构会直接变成左边的目录树，
@@ -335,7 +347,9 @@ function syncDoneText(summary: NoteSyncSummary): string {
             <!-- 没仓库的文件夹就是本机的笔记：这颗按钮连同它的提示一起不出现 -->
             <el-tooltip v-if="store.canSync" :content="syncTitle" placement="top">
               <el-button size="small" text :disabled="store.syncing" @click="syncNow">
-                <el-icon :class="{ 'is-loading': store.syncing }"><RefreshRight /></el-icon>
+                <el-icon :class="{ 'is-loading': store.syncing }">
+                  <RefreshRight />
+                </el-icon>
               </el-button>
             </el-tooltip>
             <el-tooltip content="重新读取文件夹" placement="top">
@@ -402,27 +416,43 @@ function syncDoneText(summary: NoteSyncSummary): string {
         <div v-else class="empty notes__hint">
           <template v-if="store.loadError">
             <p>读不出这个文件夹。</p>
-            <p class="empty__hint">{{ store.loadError }}</p>
+            <p class="empty__hint">
+              {{ store.loadError }}
+            </p>
           </template>
           <PanelLoading v-else-if="scanning" text="正在读取笔记…" />
           <template v-else-if="store.openError">
             <p>这一篇打不开。</p>
-            <p class="empty__hint">{{ store.openError }}</p>
-            <el-button size="small" @click="store.select(store.activeRel)">重试</el-button>
+            <p class="empty__hint">
+              {{ store.openError }}
+            </p>
+            <el-button size="small" @click="store.select(store.activeRel)">
+              重试
+            </el-button>
           </template>
           <template v-else-if="store.activeRel">
             <p>「{{ findNoteNode(store.nodes, store.activeRel)?.name }}」是文件夹。</p>
-            <p class="empty__hint">在左栏里选中一篇笔记打开，或者右击它往里面新建。</p>
+            <p class="empty__hint">
+              在左栏里选中一篇笔记打开，或者右击它往里面新建。
+            </p>
           </template>
           <template v-else-if="!store.noteCount">
-            <el-icon class="empty__icon"><EditPen /></el-icon>
+            <el-icon class="empty__icon">
+              <EditPen />
+            </el-icon>
             <p>这个文件夹里还没有笔记。</p>
-            <p class="empty__hint">在左栏里右击新建一篇，写下第一行。</p>
+            <p class="empty__hint">
+              在左栏里右击新建一篇，写下第一行。
+            </p>
           </template>
           <template v-else>
-            <el-icon class="empty__icon"><Document /></el-icon>
+            <el-icon class="empty__icon">
+              <Document />
+            </el-icon>
             <p>从左边选一篇笔记打开。</p>
-            <p class="empty__hint">标题栏右侧那句会显示它最后一次改动的时间。</p>
+            <p class="empty__hint">
+              标题栏右侧那句会显示它最后一次改动的时间。
+            </p>
           </template>
         </div>
       </section>

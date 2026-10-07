@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { Monitor } from '@element-plus/icons-vue'
+import { defaultQuickAppName } from '@workbench/core'
 /**
  * 添加 / 编辑一个常用软件。
  *
@@ -6,18 +8,14 @@
  * 所以没有参数、工作目录这类选项。中间那块预览用真实图标，选完就能确认没选错。
  */
 import { computed, reactive, ref, watch } from 'vue'
-import { Monitor } from '@element-plus/icons-vue'
-import { defaultQuickAppName } from '@workbench/core'
 import AppDialog from '@/components/AppDialog.vue'
-import { useProjectsStore } from '@/stores/projects'
 import { useCatalogStore } from '@/stores/catalog'
 
-const store = useProjectsStore()
 const catalog = useCatalogStore()
 
 const form = reactive({
   target: '',
-  name: ''
+  name: '',
 })
 
 /** 用户手动改过名称后，不再被路径推出来的默认名覆盖 */
@@ -25,7 +23,7 @@ const nameTouched = ref(false)
 
 const visible = computed({
   get: () => catalog.quickDialogVisible,
-  set: (value: boolean) => catalog.setQuickDialogVisible(value)
+  set: (value: boolean) => catalog.setQuickDialogVisible(value),
 })
 
 const editing = computed(() => catalog.quickEditing)
@@ -47,29 +45,34 @@ function reset(): void {
 watch(
   () => catalog.quickDialogVisible,
   (open) => {
-    if (open) reset()
-  }
+    if (open)
+      reset()
+  },
 )
 
 /** 手输路径时跟着推默认名（选文件走 browse，同样只在没改过名字时覆盖） */
 function onTargetInput(): void {
-  if (!nameTouched.value) form.name = defaultQuickAppName(form.target)
+  if (!nameTouched.value)
+    form.name = defaultQuickAppName(form.target)
 }
 
 async function browse(): Promise<void> {
   const picked = await window.workbench.pickQuickTarget()
-  if (!picked) return
+  if (!picked)
+    return
 
   form.target = picked
-  if (!nameTouched.value) form.name = defaultQuickAppName(picked)
+  if (!nameTouched.value)
+    form.name = defaultQuickAppName(picked)
 }
 
 async function submit(): Promise<void> {
-  if (!canSubmit.value) return
+  if (!canSubmit.value)
+    return
 
   const payload = {
     target: form.target.trim(),
-    name: form.name.trim()
+    name: form.name.trim(),
   }
 
   const current = editing.value
@@ -77,7 +80,8 @@ async function submit(): Promise<void> {
     ? await catalog.updateQuickApp(current.id, payload)
     : await catalog.addQuickApp(payload)
 
-  if (done) visible.value = false
+  if (done)
+    visible.value = false
 }
 </script>
 
@@ -101,7 +105,9 @@ async function submit(): Promise<void> {
               spellcheck="false"
               @input="onTargetInput"
             />
-            <el-button :icon="Monitor" @click="browse">浏览</el-button>
+            <el-button :icon="Monitor" @click="browse">
+              浏览
+            </el-button>
           </div>
           <p class="field__hint">
             支持 .exe、快捷方式（.lnk）与 .bat / .cmd；对话框默认从开始菜单打开。
@@ -111,11 +117,13 @@ async function submit(): Promise<void> {
 
       <div class="preview">
         <span class="preview__icon">
-          <img v-if="icon" :src="icon" alt="" />
+          <img v-if="icon" :src="icon" alt="">
           <template v-else>{{ initial }}</template>
         </span>
         <div class="preview__body">
-          <p class="preview__name truncate">{{ form.name.trim() || '未命名' }}</p>
+          <p class="preview__name truncate">
+            {{ form.name.trim() || '未命名' }}
+          </p>
           <p class="preview__path mono truncate" :title="form.target">
             {{ form.target.trim() || '还没有选择程序' }}
           </p>
@@ -128,7 +136,9 @@ async function submit(): Promise<void> {
     </el-form>
 
     <template #footer>
-      <el-button @click="visible = false">取消</el-button>
+      <el-button @click="visible = false">
+        取消
+      </el-button>
       <el-button type="primary" :disabled="!canSubmit" @click="submit">
         {{ editing ? '保存' : '添加' }}
       </el-button>

@@ -1,3 +1,8 @@
+import type { AiConfirm, AiFetchedModel, AiImage, AiLogLine, AiModelChoice, AiProvider, AiSession, AiUsage, PiDelta } from '@workbench/ai'
+import type { Result } from '@/types'
+import { aiImagePayload, aiModelChoices, aiProviderPayload, aiSessionGroups, aiSessionTitle, confirmFrame, formatDuration, formatUsageSummary, nodeSatisfiesPi, pickAiActiveSession, pickAiChoice, pickAiThinking, piLaunch, piLaunchForDisplay, rememberAiSession, sanitizeAiApiFormat, sanitizeAiBaseUrl, sanitizeAiLabel, sanitizeAiModels, sanitizeAiName, sanitizeAiPermission, sanitizeAiPreset, sanitizeAiSessionId, sanitizeAiSessions, sanitizeAiThinking, sessionMessagesToLines, taskPrompt, writtenEntries } from '@workbench/ai'
+import { noteRootName, sanitizeNoteRoot } from '@workbench/notes'
+import { defineStore } from 'pinia'
 /**
  * AI 助手：一个通用的 agent 控制台 —— **在哪个目录里、跟哪一段对话**请内置的 Pi 干活。
  *
@@ -22,68 +27,11 @@
  * （见 run），「能不能发、还差什么」的判断也长在 composer 上（canRun / blocking）。
  */
 import { computed, reactive, ref, watch } from 'vue'
-import { defineStore } from 'pinia'
-import { noteRootName, sanitizeNoteRoot } from '@workbench/notes'
-import {
-  aiImagePayload,
-  aiModelChoices,
-  aiProviderPayload,
-  aiSessionGroups,
-  aiSessionTitle,
-  confirmFrame,
-  formatDuration,
-  formatUsageSummary,
-  nodeSatisfiesPi,
-  piLaunch,
-  piLaunchForDisplay,
-  pickAiActiveSession,
-  pickAiChoice,
-  pickAiThinking,
-  rememberAiSession,
-  sanitizeAiApiFormat,
-  sanitizeAiBaseUrl,
-  sanitizeAiLabel,
-  sanitizeAiModels,
-  sanitizeAiName,
-  sanitizeAiPermission,
-  sanitizeAiPreset,
-  sanitizeAiSessionId,
-  sanitizeAiSessions,
-  sanitizeAiThinking,
-  sessionMessagesToLines,
-  taskPrompt,
-  writtenEntries,
-  type AiConfirm,
-  type AiFetchedModel,
-  type AiImage,
-  type AiLogLine,
-  type AiModelChoice,
-  type AiProvider,
-  type AiSession,
-  type AiUsage,
-  type PiDelta
-} from '@workbench/ai'
-import type { Result } from '@/types'
 import { confirmAction, notifyError, notifySuccess, notifyWarning } from '@/notify'
 import { useAiSkillsStore } from '@/stores/ai-skills'
 import { useSettingsStore } from '@/stores/settings'
+import { AI_INSTALL_SESSION_ID, aiAbort, aiKeyClear, aiKeySave, aiKeyState, aiMessages, aiModelsFetch, aiModelsWrite, aiRun, aiRuntime, aiSend, aiSessionDelete, aiSessionProcessId, aiStop } from '@/workbench/ai'
 import { runDetached } from '@/workbench/session'
-import {
-  AI_INSTALL_SESSION_ID,
-  aiAbort,
-  aiKeyClear,
-  aiKeySave,
-  aiKeyState,
-  aiMessages,
-  aiModelsFetch,
-  aiModelsWrite,
-  aiRun,
-  aiRuntime,
-  aiSend,
-  aiSessionDelete,
-  aiSessionProcessId,
-  aiStop
-} from '@/workbench/ai'
 
 /** Pi 的 npm 包名（它官方给的安装方式就是全局装一个包） */
 const PI_PACKAGE = '@earendil-works/pi-coding-agent'
@@ -158,7 +106,7 @@ const IDLE_RUN: AiRun = Object.freeze({
   thinkBuffer: '',
   thinkTimer: null,
   thinking: false,
-  usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+  usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 })
 
 /**
@@ -195,10 +143,10 @@ export const useAiStore = defineStore('ai', () => {
    * 一段新的）是空串 —— 空串就是右栏画起始那一屏、左栏哪一行都不铺底色。
    */
   const activeId = computed(() =>
-    drafting.value ? '' : pickAiActiveSession(sessions.value, settings.settings.aiActiveSession)
+    drafting.value ? '' : pickAiActiveSession(sessions.value, settings.settings.aiActiveSession),
   )
   const activeSession = computed(
-    () => sessions.value.find((session) => session.id === activeId.value) ?? null
+    () => sessions.value.find(session => session.id === activeId.value) ?? null,
   )
 
   /** 每个会话的运行态：key 是会话 id（界面只画当前那个，但每个都在跑自己的） */
@@ -206,7 +154,8 @@ export const useAiStore = defineStore('ai', () => {
   /** 取一条会话的运行态（没有就建一个空的） */
   function runOf(sessionId: string): AiRun {
     const existing = runs.get(sessionId)
-    if (existing) return existing
+    if (existing)
+      return existing
     const created: AiRun = {
       lines: [],
       running: false,
@@ -226,7 +175,7 @@ export const useAiStore = defineStore('ai', () => {
       thinkBuffer: '',
       thinkTimer: null,
       thinking: false,
-      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     }
     runs.set(sessionId, created)
     // 回**代理**而不是 created 本体：reactive Map 的 get 才会把对象包成响应式代理，
@@ -237,7 +186,7 @@ export const useAiStore = defineStore('ai', () => {
   }
 
   const activeRun = computed<AiRun>(
-    () => runs.get(activeId.value) ?? IDLE_RUN
+    () => runs.get(activeId.value) ?? IDLE_RUN,
   )
 
   /**
@@ -247,7 +196,7 @@ export const useAiStore = defineStore('ai', () => {
   const creating = ref(false)
 
   /** 最近用过的工作目录（挑目录那几处列的就是它）：按树的顺序取，最多三个 */
-  const recentDirs = computed(() => groups.value.slice(0, 3).map((group) => group.dir))
+  const recentDirs = computed(() => groups.value.slice(0, 3).map(group => group.dir))
 
   /**
    * 还没有会话时那一屏（`AiView` 的起始屏）：**下一个会话在哪个目录里干活**。
@@ -260,13 +209,15 @@ export const useAiStore = defineStore('ai', () => {
   /** 在起始那一屏上挑一个目录（下拉里最近用过的那几个直接走这里） */
   function setNewDir(dir: string): void {
     const target = sanitizeNoteRoot(dir)
-    if (target) pickedDir.value = target
+    if (target)
+      pickedDir.value = target
   }
 
   /** 那一屏上的「选择其他目录…」：挑完接着挑下一个会话在哪儿干活（不建会话） */
   async function pickNewDir(): Promise<void> {
     const picked = await window.workbench.pickDirectory('新会话在哪个目录里干活')
-    if (picked) setNewDir(picked)
+    if (picked)
+      setNewDir(picked)
   }
 
   /**
@@ -275,7 +226,8 @@ export const useAiStore = defineStore('ai', () => {
    * 没给就接着最近用过的那个 —— 会话都还没建，只是把屏幕切过去。
    */
   function startNew(dir?: string): void {
-    if (dir) setNewDir(dir)
+    if (dir)
+      setNewDir(dir)
     drafting.value = true
   }
 
@@ -311,7 +263,7 @@ export const useAiStore = defineStore('ai', () => {
     const choice = pickAiChoice(
       providers.value,
       session?.provider ?? settings.settings.aiDefaultProvider,
-      session?.model ?? settings.settings.aiDefaultModel
+      session?.model ?? settings.settings.aiDefaultModel,
     )
     return {
       choice,
@@ -319,9 +271,9 @@ export const useAiStore = defineStore('ai', () => {
       model: choice?.model ?? '',
       thinking: pickAiThinking(
         choice?.levels ?? ['off'],
-        session?.thinking ?? settings.settings.aiThinking
+        session?.thinking ?? settings.settings.aiThinking,
       ),
-      permission: sanitizeAiPermission(session?.permission ?? settings.settings.aiPermission)
+      permission: sanitizeAiPermission(session?.permission ?? settings.settings.aiPermission),
     }
   }
 
@@ -408,8 +360,10 @@ export const useAiStore = defineStore('ai', () => {
   const installing = ref(false)
   const installLog = ref<string[]>([])
 
-  /** 挑中的这个模型能不能看图（贴图只在它上面成立，见 shared/ai.ts 的 AiModelChoice.imageInput）；
-   ** composer 那边判断「这条能不能发 / 还差什么」时要用它（canRun / blocking 归输入框自己） */
+  /**
+   * 挑中的这个模型能不能看图（贴图只在它上面成立，见 shared/ai.ts 的 AiModelChoice.imageInput）；
+   *composer 那边判断「这条能不能发 / 还差什么」时要用它（canRun / blocking 归输入框自己）
+   */
   const imageReady = computed(() => activeChoice.value?.imageInput === true)
 
   // ---------- 环境探测 ----------
@@ -425,7 +379,8 @@ export const useAiStore = defineStore('ai', () => {
       piVersion.value = runtime.pi
       nodeVersion.value = runtime.node
       skillRoot.value = runtime.skillRoot
-    } finally {
+    }
+    finally {
       probed.value = true
       probing.value = false
     }
@@ -439,9 +394,10 @@ export const useAiStore = defineStore('ai', () => {
       keyStates[provider.id] = result.ok && result.data === true
     }
     // 删掉的服务不留残影（它已经不在这张表里了，界面不该还记着「已配置」）
-    const alive = new Set(providers.value.map((provider) => provider.id))
+    const alive = new Set(providers.value.map(provider => provider.id))
     for (const id of Object.keys(keyStates)) {
-      if (!alive.has(id)) delete keyStates[id]
+      if (!alive.has(id))
+        delete keyStates[id]
     }
   }
 
@@ -456,7 +412,8 @@ export const useAiStore = defineStore('ai', () => {
    */
   async function createSession(dir: string): Promise<boolean> {
     const target = sanitizeNoteRoot(dir)
-    if (!target) return false
+    if (!target)
+      return false
 
     const now = Date.now()
     const session: AiSession = {
@@ -464,11 +421,11 @@ export const useAiStore = defineStore('ai', () => {
       dir: target,
       title: '',
       createdAt: now,
-      updatedAt: now
+      updatedAt: now,
     }
     const saved = await settings.updateSettings({
       aiSessions: rememberAiSession(sessions.value, session),
-      aiActiveSession: session.id
+      aiActiveSession: session.id,
     })
     if (!saved) {
       notifyError('新建会话失败')
@@ -486,28 +443,32 @@ export const useAiStore = defineStore('ai', () => {
    * 先问一句，用户点了确认才动手；进程由适配层先收掉，再删文件。
    */
   async function deleteSession(id: string): Promise<void> {
-    const session = sessions.value.find((item) => item.id === id)
-    if (!session) return
+    const session = sessions.value.find(item => item.id === id)
+    if (!session)
+      return
 
     const label = session.title || noteRootName(session.dir)
     const agreed = await confirmAction(
       `「${label}」这段对话的记录会一起删掉，删了就找不回来（目录里的文件不受影响）。`,
       '删除会话',
-      { confirmButtonText: '删除', type: 'warning' }
+      { confirmButtonText: '删除', type: 'warning' },
     )
-    if (!agreed) return
+    if (!agreed)
+      return
 
     const removed = await aiSessionDelete(id)
-    if (!removed.ok) notifyError(removed.error ?? '删除会话失败')
+    if (!removed.ok)
+      notifyError(removed.error ?? '删除会话失败')
 
-    const rest = sessions.value.filter((item) => item.id !== id)
+    const rest = sessions.value.filter(item => item.id !== id)
     // 这一段的收尾（流式那口气）先撤掉，再把它的运行态丢掉
     const dropped = runs.get(id)
-    if (dropped) endStream(dropped)
+    if (dropped)
+      endStream(dropped)
     runs.delete(id)
     await settings.updateSettings({
       aiSessions: rest,
-      aiActiveSession: pickAiActiveSession(rest, '')
+      aiActiveSession: pickAiActiveSession(rest, ''),
     })
   }
 
@@ -518,10 +479,12 @@ export const useAiStore = defineStore('ai', () => {
    */
   async function selectSession(id: string): Promise<void> {
     const target = sanitizeAiSessionId(id)
-    if (!target) return
+    if (!target)
+      return
     // 点左栏那一行就是「挑中它」：正在起一段新的那个状态先退掉
     drafting.value = false
-    if (target !== activeId.value) await settings.updateSettings({ aiActiveSession: target })
+    if (target !== activeId.value)
+      await settings.updateSettings({ aiActiveSession: target })
     void hydrate(target)
   }
 
@@ -538,15 +501,18 @@ export const useAiStore = defineStore('ai', () => {
    * 第一句发出去时进程自然会起来。
    */
   async function hydrate(sessionId: string): Promise<void> {
-    const session = sessions.value.find((item) => item.id === sessionId)
-    if (!session) return
+    const session = sessions.value.find(item => item.id === sessionId)
+    if (!session)
+      return
     const run = runOf(sessionId)
-    if (run.hydrated || run.hydrating || run.running) return
+    if (run.hydrated || run.hydrating || run.running)
+      return
     if (!session.title) {
       run.hydrated = true
       return
     }
-    if (!startable.value) return
+    if (!startable.value)
+      return
 
     run.hydrating = true
     try {
@@ -567,9 +533,9 @@ export const useAiStore = defineStore('ai', () => {
           args: launch.args,
           provider: config.providerName,
           permission: config.permission,
-          skills: useAiSkillsStore().enabledRefs
+          skills: useAiSkillsStore().enabledRefs,
         },
-        handlers(sessionId)
+        handlers(sessionId),
       )
       if (!started.ok) {
         run.runError = started.error ?? '这一个会话起不来'
@@ -596,34 +562,38 @@ export const useAiStore = defineStore('ai', () => {
         }
         history.splice(at, 0, noteProcess(session, launch))
         run.lines = history
-      } else if (!messages.ok) {
+      }
+      else if (!messages.ok) {
         run.runError = messages.error ?? '读不回这段对话的历史'
       }
       run.hydrated = true
-    } finally {
+    }
+    finally {
       run.hydrating = false
     }
   }
 
   /** 「这一段在哪个进程上」那一条：程序与参数（含绝对路径的 cli.js 与那一串开关）收进 detail */
-  function noteProcess(session: AiSession, launch: { program: string; args: string[] }): AiLogLine {
+  function noteProcess(session: AiSession, launch: { program: string, args: string[] }): AiLogLine {
     return {
       kind: 'info',
       text: `在 ${noteRootName(session.dir)} 里工作`,
-      detail: `${launch.program} ${piLaunchForDisplay(launch)}`
+      detail: `${launch.program} ${piLaunchForDisplay(launch)}`,
     }
   }
 
   // ---------- 跑一轮 ----------
 
-  /** 这一句要用的程序与参数（模型 / 档位 / 会话都在里面，见 shared/ai.ts 的 piLaunch）；
-   ** 参数按**这个会话自己**的生效配置取（configOf），不是当前正对着的那份 */
+  /**
+   * 这一句要用的程序与参数（模型 / 档位 / 会话都在里面，见 shared/ai.ts 的 piLaunch）；
+   *参数按**这个会话自己**的生效配置取（configOf），不是当前正对着的那份
+   */
   function launchFor(session: AiSession) {
     const config = configOf(session)
     return piLaunch(runtimeSource.value === 'bundled' ? cliPath.value : null, {
       provider: config.providerName,
       model: config.model,
-      thinking: config.thinking
+      thinking: config.thinking,
     }, session.id)
   }
 
@@ -633,10 +603,13 @@ export const useAiStore = defineStore('ai', () => {
       onLine: (line: AiLogLine) => {
         // 这条会话已经被删掉了（进程收尾与删除之间那段）：这几行没地方可去，丢掉就是
         const run = runs.get(sessionId)
-        if (!run) return
+        if (!run)
+          return
         // `agent_settled`：这一轮完了（**进程留着**，见文件头）。它是信号，不是对话里的一句
-        if (line.kind === 'done') settle(sessionId)
-        if (isTurnMarker(line)) return
+        if (line.kind === 'done')
+          settle(sessionId)
+        if (isTurnMarker(line))
+          return
         // 助手的整段正文到了（`message_end`）：它是权威版本 —— 流式那段到这儿换成它，
         // 一个字都不差（增量拼起来只是给人看着长出来的过程版）
         if (line.kind === 'text') {
@@ -649,12 +622,14 @@ export const useAiStore = defineStore('ai', () => {
       },
       onDelta: (delta: PiDelta) => {
         const run = runs.get(sessionId)
-        if (!run) return
+        if (!run)
+          return
 
         if (delta.kind === 'text') {
           run.streamBuffer += delta.text
           // 攒够一小会儿再画（见 STREAM_TICK）：每个字都重画一遍是白烧钱
-          if (run.streamTimer) return
+          if (run.streamTimer)
+            return
           run.streamTimer = setTimeout(() => {
             run.streamTimer = null
             run.streamText = run.streamBuffer
@@ -671,7 +646,8 @@ export const useAiStore = defineStore('ai', () => {
         // 正在想：与正文同一套节流（面板上那块「思考中…」跟着长）
         run.thinking = true
         run.thinkBuffer += delta.text
-        if (run.thinkTimer) return
+        if (run.thinkTimer)
+          return
         run.thinkTimer = setTimeout(() => {
           run.thinkTimer = null
           run.thinkText = run.thinkBuffer
@@ -679,23 +655,25 @@ export const useAiStore = defineStore('ai', () => {
       },
       onUsage: (usage: AiUsage) => {
         const run = runs.get(sessionId)
-        if (!run) return
+        if (!run)
+          return
         // 一轮里模型说了好几段（中间隔着工具调用），每段带一份 —— 这里累加成这一轮的
         run.usage = {
           input: run.usage.input + usage.input,
           output: run.usage.output + usage.output,
           cacheRead: run.usage.cacheRead + usage.cacheRead,
-          cacheWrite: run.usage.cacheWrite + usage.cacheWrite
+          cacheWrite: run.usage.cacheWrite + usage.cacheWrite,
         }
       },
       onConfirm: (confirm: AiConfirm) => {
         const run = runs.get(sessionId)
-        if (!run) return
+        if (!run)
+          return
         run.confirms = [...run.confirms, confirm]
       },
       onExit: (code: number | null) => {
         finish(sessionId, code)
-      }
+      },
     }
   }
 
@@ -712,7 +690,8 @@ export const useAiStore = defineStore('ai', () => {
     const text = run.streamBuffer
     run.streamBuffer = ''
     run.streamText = ''
-    if (keep && text.trim()) run.lines = [...run.lines, { kind: 'text', text }]
+    if (keep && text.trim())
+      run.lines = [...run.lines, { kind: 'text', text }]
   }
 
   /**
@@ -729,7 +708,8 @@ export const useAiStore = defineStore('ai', () => {
     run.thinkBuffer = ''
     run.thinkText = ''
     run.thinking = false
-    if (keep && text) run.lines = [...run.lines, { kind: 'thinking', text }]
+    if (keep && text)
+      run.lines = [...run.lines, { kind: 'thinking', text }]
   }
 
   /**
@@ -749,10 +729,14 @@ export const useAiStore = defineStore('ai', () => {
    * 说得详尽、通知里一句话、清洗面板折中。
    */
   function envGap(): 'node' | 'pi' | 'model' | 'key' | null {
-    if (!nodeOk.value) return 'node'
-    if (!piReady.value) return 'pi'
-    if (!configured.value) return 'model'
-    if (!keyReady.value) return 'key'
+    if (!nodeOk.value)
+      return 'node'
+    if (!piReady.value)
+      return 'pi'
+    if (!configured.value)
+      return 'model'
+    if (!keyReady.value)
+      return 'key'
     return null
   }
 
@@ -784,7 +768,7 @@ export const useAiStore = defineStore('ai', () => {
         node: 'Node 版本太旧：跑内置的 Pi 需要 Node ≥ 22.19',
         pi: '没找到 Pi 运行时：内置那份不在，PATH 上也没有全局安装的',
         model: '先在「模型」里配好端点、模型与密钥',
-        key: `还没有配置 ${providerName.value} 的 API Key`
+        key: `还没有配置 ${providerName.value} 的 API Key`,
       } as const
       notifyError(notices[gap])
       return false
@@ -798,17 +782,21 @@ export const useAiStore = defineStore('ai', () => {
     // 建了只会在左栏多留一行没人说过的「新会话」
     let session = activeSession.value
     if (!session) {
-      if (creating.value) return false
+      if (creating.value)
+        return false
       creating.value = true
       try {
         session = await ensureSession()
-      } finally {
+      }
+      finally {
         creating.value = false
       }
-      if (!session) return false
+      if (!session)
+        return false
     }
     const runState = runOf(session.id)
-    if (runState.running) return false
+    if (runState.running)
+      return false
 
     // 起进程的参数按**这个会话自己**的生效配置取（configOf），不是当前正对着的那份
     const launch = launchFor(session)
@@ -820,8 +808,8 @@ export const useAiStore = defineStore('ai', () => {
       aiSessions: rememberAiSession(sessions.value, {
         ...session,
         title: session.title || aiSessionTitle(text) || `（${attached.length} 张图）`,
-        updatedAt: Date.now()
-      })
+        updatedAt: Date.now(),
+      }),
     })
 
     runState.running = true
@@ -841,12 +829,12 @@ export const useAiStore = defineStore('ai', () => {
       {
         kind: 'user',
         text,
-        ...(attached.length ? { images: attached.map((image) => image.dataUrl) } : {})
+        ...(attached.length ? { images: attached.map(image => image.dataUrl) } : {}),
       },
       // 进程还没起过（或换过参数）时把「这一轮跑的是什么」记一行：完整命令行（含绝对路径的
       // cli.js 与那一串开关）收进 detail —— 它是排障用的，摆在一行正文里只会把日志开头堵死
       // （界面拿它当悬停提示，见 AiRunPanel）。同一个进程接着聊时不必每轮都写一遍
-      ...(runState.live ? [] : [noteProcess(session, launch)])
+      ...(runState.live ? [] : [noteProcess(session, launch)]),
     ]
 
     // 起进程这一趟与「收下这句」拆开：到这儿输入就算收下了（校验过了、会话有着落了、
@@ -867,9 +855,9 @@ export const useAiStore = defineStore('ai', () => {
           permission: config.permission,
           // 已经在跑的进程不会因为这张表变了而变（`--skill` 只认起进程那一趟）；
           // 没在跑时这一句就是起进程那一趟，带的必须是当下这份
-          skills: useAiSkillsStore().enabledRefs
+          skills: useAiSkillsStore().enabledRefs,
         },
-        handlers(session.id)
+        handlers(session.id),
       )
 
       if (result.ok) {
@@ -894,7 +882,8 @@ export const useAiStore = defineStore('ai', () => {
       notifyError('先挑一个工作目录：位置那一栏那个下拉')
       return null
     }
-    if (!(await createSession(dir))) return null
+    if (!(await createSession(dir)))
+      return null
     return activeSession.value
   }
 
@@ -904,7 +893,8 @@ export const useAiStore = defineStore('ai', () => {
    */
   function settle(sessionId: string): void {
     const run = runs.get(sessionId)
-    if (!run) return
+    if (!run)
+      return
     run.running = false
     run.stopping = false
     run.exitCode = 0
@@ -913,7 +903,8 @@ export const useAiStore = defineStore('ai', () => {
     // 想了一半就结束的那一段也一样留着（它是收着的一块，不挡阅读）
     endThink(run, '', true)
     noteDuration(run)
-    if (run.stale) void recycle(sessionId)
+    if (run.stale)
+      void recycle(sessionId)
   }
 
   /**
@@ -923,13 +914,14 @@ export const useAiStore = defineStore('ai', () => {
    * 没报就只有用时 —— 自定义端点不保证都有。
    */
   function noteDuration(run: AiRun): void {
-    if (!run.startedAt) return
+    if (!run.startedAt)
+      return
     const text = formatDuration(Date.now() - run.startedAt)
     run.startedAt = 0
     const usage = formatUsageSummary(run.usage)
     run.lines = [
       ...run.lines,
-      { kind: 'duration', text: usage ? `用时 ${text} · ${usage}` : `用时 ${text}` }
+      { kind: 'duration', text: usage ? `用时 ${text} · ${usage}` : `用时 ${text}` },
     ]
   }
 
@@ -937,14 +929,16 @@ export const useAiStore = defineStore('ai', () => {
   function finish(sessionId: string, code: number | null): void {
     // 会话已经被删掉时不重建条目（`runs.delete` 之后进程才收尾的那一小段）
     const run = runs.get(sessionId)
-    if (!run) return
+    if (!run)
+      return
     run.live = false
     run.confirms = []
     const wasRunning = run.running
     const intentional = run.stopping || run.stale
     run.running = false
     run.stopping = false
-    if (!wasRunning) return
+    if (!wasRunning)
+      return
     // 进程没了而整段还没等到（被杀 / 崩了）：已经吐出来的字留在对话里，再补用时
     endStream(run, true)
     endThink(run, '', true)
@@ -963,14 +957,17 @@ export const useAiStore = defineStore('ai', () => {
    */
   async function stop(): Promise<void> {
     const session = activeSession.value
-    if (!session) return
+    if (!session)
+      return
     const run = runOf(session.id)
-    if (!run.running || run.stopping) return
+    if (!run.running || run.stopping)
+      return
 
     run.stopping = true
     const processId = aiSessionProcessId(session.id)
     const aborted = await aiAbort(processId)
-    if (!aborted.ok) await aiStop(processId)
+    if (!aborted.ok)
+      await aiStop(processId)
   }
 
   /**
@@ -981,7 +978,8 @@ export const useAiStore = defineStore('ai', () => {
   async function recycle(sessionId: string): Promise<void> {
     const run = runOf(sessionId)
     run.stale = false
-    if (!run.live) return
+    if (!run.live)
+      return
     run.stopping = true
     await aiStop(aiSessionProcessId(sessionId))
   }
@@ -993,18 +991,21 @@ export const useAiStore = defineStore('ai', () => {
    */
   async function answerConfirm(id: string, allowed: boolean): Promise<void> {
     const session = activeSession.value
-    if (!session) return
+    if (!session)
+      return
     const run = runOf(session.id)
-    const confirm = run.confirms.find((item) => item.id === id)
-    if (!confirm) return
-    run.confirms = run.confirms.filter((item) => item.id !== id)
+    const confirm = run.confirms.find(item => item.id === id)
+    if (!confirm)
+      return
+    run.confirms = run.confirms.filter(item => item.id !== id)
 
     const sent = await aiSend(aiSessionProcessId(session.id), confirmFrame(id, allowed))
     run.lines = [
       ...run.lines,
-      { kind: 'tool', text: `${allowed ? '允许执行' : '拒绝执行'}：${confirm.message}` }
+      { kind: 'tool', text: `${allowed ? '允许执行' : '拒绝执行'}：${confirm.message}` },
     ]
-    if (!sent.ok) notifyError(sent.error ?? '答复没能送到 Pi 那边')
+    if (!sent.ok)
+      notifyError(sent.error ?? '答复没能送到 Pi 那边')
   }
 
   /**
@@ -1020,43 +1021,46 @@ export const useAiStore = defineStore('ai', () => {
    * 认不出就当没挑过。
    */
   async function setChoice(key: string): Promise<boolean> {
-    const choice = choices.value.find((item) => item.key === key)
-    if (!choice) return false
+    const choice = choices.value.find(item => item.key === key)
+    if (!choice)
+      return false
     const session = activeSession.value
     if (!session) {
       return settings.updateSettings({
         aiDefaultProvider: choice.provider,
-        aiDefaultModel: choice.model
+        aiDefaultModel: choice.model,
       })
     }
     return persistSessionConfig(session, {
       provider: choice.provider,
       model: choice.model,
       thinking: thinking.value,
-      permission: permission.value
+      permission: permission.value,
     })
   }
 
   async function setThinking(level: string): Promise<boolean> {
     const session = activeSession.value
-    if (!session) return settings.updateSettings({ aiThinking: sanitizeAiThinking(level) })
+    if (!session)
+      return settings.updateSettings({ aiThinking: sanitizeAiThinking(level) })
     return persistSessionConfig(session, {
       provider: providerName.value,
       model: runModel.value,
       thinking: sanitizeAiThinking(level),
-      permission: permission.value
+      permission: permission.value,
     })
   }
 
   /** 页面上那一栏挑了什么：与模型 / 档位同一条口径（有会话记会话，起始屏记设置默认） */
   async function setPermission(id: string): Promise<boolean> {
     const session = activeSession.value
-    if (!session) return settings.updateSettings({ aiPermission: sanitizeAiPermission(id) })
+    if (!session)
+      return settings.updateSettings({ aiPermission: sanitizeAiPermission(id) })
     return persistSessionConfig(session, {
       provider: providerName.value,
       model: runModel.value,
       thinking: thinking.value,
-      permission: sanitizeAiPermission(id)
+      permission: sanitizeAiPermission(id),
     })
   }
 
@@ -1066,10 +1070,10 @@ export const useAiStore = defineStore('ai', () => {
    */
   async function persistSessionConfig(
     session: AiSession,
-    patch: Partial<Pick<AiSession, 'provider' | 'model' | 'thinking' | 'permission'>>
+    patch: Partial<Pick<AiSession, 'provider' | 'model' | 'thinking' | 'permission'>>,
   ): Promise<boolean> {
-    const next = sessions.value.map((item) =>
-      item.id === session.id ? { ...item, ...patch } : item
+    const next = sessions.value.map(item =>
+      item.id === session.id ? { ...item, ...patch } : item,
     )
     return settings.updateSettings({ aiSessions: sanitizeAiSessions(next) })
   }
@@ -1087,7 +1091,8 @@ export const useAiStore = defineStore('ai', () => {
     const payload = aiProviderPayload(providers.value)
     // 一个能跑的服务都没有（还没配过，或者都停用了）：models.json 留着上一次那份也无妨 ——
     // 起进程时 --provider 是显式给的，没挑中就没有那一轮，残留的端点不会被用上
-    if (!payload.length) return true
+    if (!payload.length)
+      return true
     const written = await aiModelsWrite(payload)
     if (!written.ok) {
       notifyError(written.error ?? '写入模型配置失败')
@@ -1121,7 +1126,7 @@ export const useAiStore = defineStore('ai', () => {
       notifyError('先选一个 API 形态')
       return false
     }
-    if (!models.some((entry) => entry.enabled)) {
+    if (!models.some(entry => entry.enabled)) {
       notifyError('至少要启用一个模型')
       return false
     }
@@ -1133,27 +1138,27 @@ export const useAiStore = defineStore('ai', () => {
       apiFormat,
       preset: sanitizeAiPreset(input.preset),
       enabled: input.enabled !== false,
-      models
+      models,
     }
     // 编辑的是哪一条：**按原名找**（改名之后那一条还在清单里，只是换了键）
     const target = previousId || id
     const taken = providers.value
-      .filter((item) => item.id !== target && item.id !== id)
-      .map((item) => item.id)
+      .filter(item => item.id !== target && item.id !== id)
+      .map(item => item.id)
     if (taken.includes(id)) {
       notifyError(`已经有一个叫 ${id} 的服务了：换一个名字`)
       return false
     }
 
-    const next = providers.value.some((item) => item.id === target)
-      ? providers.value.map((item) => (item.id === target ? provider : item))
+    const next = providers.value.some(item => item.id === target)
+      ? providers.value.map(item => (item.id === target ? provider : item))
       : [...providers.value, provider]
     const saved = await settings.updateSettings({
       aiProviders: next,
       // 一个都没挑过（或者挑的那个刚被这次编辑弄没了）：默认模型就落到它身上
       ...(activeChoice.value
         ? {}
-        : { aiDefaultProvider: provider.id, aiDefaultModel: provider.models[0]?.id ?? '' })
+        : { aiDefaultProvider: provider.id, aiDefaultModel: provider.models[0]?.id ?? '' }),
     })
     if (!saved) {
       notifyError('保存设置失败')
@@ -1167,37 +1172,43 @@ export const useAiStore = defineStore('ai', () => {
     let keyWarning = ''
     if (secret.trim()) {
       const stored = await aiKeySave(id, secret.trim())
-      if (!stored.ok) keyWarning = stored.error ?? '保存 Key 失败'
+      if (!stored.ok)
+        keyWarning = stored.error ?? '保存 Key 失败'
     }
 
     // 设置已经落下去了：models.json 照**它**重写一遍（两边永远对得上）。
     // 能力位（能看图 / 上下文 / 档位）都长在这份文件里，写完就把进程退掉 ——
     // 否则改完的配置对已经在聊的会话不生效（Pi 起进程时读一次，不重读）
-    if (!(await syncModels())) return false
+    if (!(await syncModels()))
+      return false
     retireProcesses()
 
     // 改过名字：旧名字下那条凭据（API Key）已经没人认领了，清掉 —— 留着的只是一条密文
-    if (previousId && previousId !== id) await aiKeyClear(previousId)
+    if (previousId && previousId !== id)
+      await aiKeyClear(previousId)
 
     await refreshKey()
-    if (keyWarning) notifyWarning(`已保存 ${provider.label}，但 API Key 没存进去：${keyWarning}`)
+    if (keyWarning)
+      notifyWarning(`已保存 ${provider.label}，但 API Key 没存进去：${keyWarning}`)
     else notifySuccess(`已保存 ${provider.label}`)
     return true
   }
 
   /** 删掉一个服务：设置里去掉、models.json 重写；**密钥一起清掉**（留着它就是一条没人认领的密文） */
   async function removeProvider(id: string): Promise<void> {
-    const provider = providers.value.find((item) => item.id === id)
-    if (!provider) return
+    const provider = providers.value.find(item => item.id === id)
+    if (!provider)
+      return
 
     const agreed = await confirmAction(
       `「${provider.label}」这个服务会从模型管理里删掉，里面的 ${provider.models.length} 个模型与它的 API Key 一起清掉。`,
       '删除服务',
-      { confirmButtonText: '删除', type: 'warning' }
+      { confirmButtonText: '删除', type: 'warning' },
     )
-    if (!agreed) return
+    if (!agreed)
+      return
 
-    const next = providers.value.filter((item) => item.id !== id)
+    const next = providers.value.filter(item => item.id !== id)
     const saved = await settings.updateSettings({ aiProviders: next })
     if (!saved) {
       notifyError('保存设置失败')
@@ -1212,9 +1223,10 @@ export const useAiStore = defineStore('ai', () => {
 
   /** 打开 / 停用一个服务（停用的不进 models.json，也当不了默认模型） */
   async function toggleProvider(id: string, enabled: boolean): Promise<void> {
-    const next = providers.value.map((item) => (item.id === id ? { ...item, enabled } : item))
+    const next = providers.value.map(item => (item.id === id ? { ...item, enabled } : item))
     const saved = await settings.updateSettings({ aiProviders: next })
-    if (!saved) return
+    if (!saved)
+      return
     await syncModels()
     retireProcesses()
   }
@@ -1245,7 +1257,8 @@ export const useAiStore = defineStore('ai', () => {
 
   /** 装 Pi（全局装那一个包）。输出进安装日志，装完自动重探一次 */
   async function installPi(): Promise<void> {
-    if (installing.value) return
+    if (installing.value)
+      return
 
     installing.value = true
     installLog.value = []
@@ -1255,17 +1268,20 @@ export const useAiStore = defineStore('ai', () => {
         `npm install -g ${PI_PACKAGE}`,
         (text) => {
           installLog.value = [...installLog.value, text]
-        }
+        },
       )
       if (code === 0) {
         notifySuccess('Pi 装好了')
         await probe()
-      } else {
+      }
+      else {
         notifyError(`安装没有成功（退出码 ${code ?? '未知'}）`)
       }
-    } catch (error) {
+    }
+    catch (error) {
       notifyError(error instanceof Error ? error.message : '安装失败')
-    } finally {
+    }
+    finally {
       installing.value = false
     }
   }
@@ -1274,29 +1290,34 @@ export const useAiStore = defineStore('ai', () => {
 
   /** 进页面时探一次环境（KeepAlive 下重复进入不再探）；顺带把上次那个会话接上 */
   async function init(): Promise<void> {
-    if (started) return
+    if (started)
+      return
     started = true
     await probe()
     // 设置里的服务清单与 Pi 的 models.json 对齐一次：老设置搬到新形状之后，
     // 那份文件里还是上一个版本写的端点（界面看不出这一层，所以每次进来都对一遍）
     await syncModels()
-    if (activeId.value) void hydrate(activeId.value)
+    if (activeId.value)
+      void hydrate(activeId.value)
   }
 
   // 设置里换了模型 / 换了服务（也可能是在别处改的）：密钥状态得重新问一遍
   watch([providerName, providers], () => {
-    if (started) void refreshKey()
+    if (started)
+      void refreshKey()
   })
 
   // 换了一个会话：把它接上（读过的那几段由 hydrate 自己挡掉）
   watch(activeId, () => {
-    if (started && activeId.value) void hydrate(activeId.value)
+    if (started && activeId.value)
+      void hydrate(activeId.value)
   })
 
   // 环境刚好在这一刻齐了（比如刚配完模型就切回来）：那一条还没接过历史的会话补接一次 ——
   // 那次打开时起不了进程，读历史就没做成
   watch(startable, (ready) => {
-    if (started && ready && activeId.value) void hydrate(activeId.value)
+    if (started && ready && activeId.value)
+      void hydrate(activeId.value)
   })
 
   /**
@@ -1308,8 +1329,10 @@ export const useAiStore = defineStore('ai', () => {
    */
   function retireProcesses(): void {
     for (const [sessionId, run] of runs) {
-      if (!run.live) continue
-      if (run.running) run.stale = true
+      if (!run.live)
+        continue
+      if (run.running)
+        run.stale = true
       else void recycle(sessionId)
     }
   }
@@ -1327,21 +1350,24 @@ export const useAiStore = defineStore('ai', () => {
 
   const lastConfigKeys = new Map<string, string>()
   watch(
-    () => sessions.value.map((session) => effectiveKey(session)).join('\n'),
+    () => sessions.value.map(session => effectiveKey(session)).join('\n'),
     () => {
       for (const session of sessions.value) {
         const key = effectiveKey(session)
         const previous = lastConfigKeys.get(session.id)
         lastConfigKeys.set(session.id, key)
         // 第一趟（immediate）只是记账；会话刚出现（没有旧键）也不算换配置
-        if (!started || previous === undefined || previous === key) continue
+        if (!started || previous === undefined || previous === key)
+          continue
         const run = runs.get(session.id)
-        if (!run?.live) continue
-        if (run.running) run.stale = true
+        if (!run?.live)
+          continue
+        if (run.running)
+          run.stale = true
         else void recycle(session.id)
       }
     },
-    { immediate: true }
+    { immediate: true },
   )
 
   return {
@@ -1415,6 +1441,6 @@ export const useAiStore = defineStore('ai', () => {
     toggleProvider,
     fetchModels,
     clearProviderKey,
-    installPi
+    installPi,
   }
 })

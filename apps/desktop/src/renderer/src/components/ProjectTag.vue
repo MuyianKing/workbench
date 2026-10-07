@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import type { ProjectColor, ProjectColorPreset } from '@workbench/core'
+import { inkOnAccent } from '@workbench/appearance'
+import { isProjectColorPreset } from '@workbench/core'
 /**
  * 工作记录上的项目标签：「这块是哪个项目」的那一枚记号。
  *
@@ -12,12 +15,6 @@
  * 宽度与行为（截断、是否参与收缩）由调用方在自己的样式里给，这里只管颜色与形态。
  */
 import { computed } from 'vue'
-import { inkOnAccent } from '@workbench/appearance'
-import {
-  isProjectColorPreset,
-  type ProjectColor,
-  type ProjectColorPreset
-} from '@workbench/core'
 
 const props = defineProps<{
   /** 标签上显示的名字；项目已删除时由调用方写成「项目已删除」 */
@@ -29,18 +26,19 @@ const props = defineProps<{
 }>()
 
 const tagType = computed<ProjectColorPreset>(() =>
-  isProjectColorPreset(props.color) ? props.color : 'primary'
+  isProjectColorPreset(props.color) ? props.color : 'primary',
 )
 
 const tagStyle = computed(() => {
   const value = props.color
-  if (!value || isProjectColorPreset(value)) return undefined
+  if (!value || isProjectColorPreset(value))
+    return undefined
   return {
     '--el-tag-bg-color': value,
     '--el-tag-border-color': value,
     '--el-tag-text-color': inkOnAccent(value),
     // 悬停底色跟着底色走，免得鼠标划过时冒出 EP 默认的那个浅色
-    '--el-tag-hover-color': value
+    '--el-tag-hover-color': value,
   }
 })
 </script>

@@ -34,18 +34,23 @@ function isIconDataUrl(value: unknown): value is string {
  */
 export function sanitizeIconCache(
   raw: unknown,
-  validTargets: ReadonlySet<string>
+  validTargets: ReadonlySet<string>,
 ): Record<string, IconCacheEntry> {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {}
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw))
+    return {}
 
   const out: Record<string, IconCacheEntry> = {}
   for (const [target, entry] of Object.entries(raw as Record<string, unknown>)) {
-    if (!validTargets.has(target)) continue
-    if (!entry || typeof entry !== 'object') continue
+    if (!validTargets.has(target))
+      continue
+    if (!entry || typeof entry !== 'object')
+      continue
 
     const value = entry as Partial<IconCacheEntry>
-    if (typeof value.mtime !== 'number' || !Number.isFinite(value.mtime)) continue
-    if (!isIconDataUrl(value.dataUrl)) continue
+    if (typeof value.mtime !== 'number' || !Number.isFinite(value.mtime))
+      continue
+    if (!isIconDataUrl(value.dataUrl))
+      continue
 
     out[target] = { mtime: value.mtime, dataUrl: value.dataUrl }
   }
@@ -60,8 +65,9 @@ export function sanitizeIconCache(
  */
 export function iconCacheHit(
   entry: IconCacheEntry | undefined,
-  mtime: number | null
+  mtime: number | null,
 ): entry is IconCacheEntry {
-  if (!entry || mtime === null) return false
+  if (!entry || mtime === null)
+    return false
   return entry.mtime === mtime
 }

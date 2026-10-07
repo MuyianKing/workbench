@@ -41,9 +41,12 @@ export const COMMAND_TEXT_MAX = 500
  */
 export function commandTextError(command: unknown): string | null {
   const text = typeof command === 'string' ? command.trim() : ''
-  if (!text) return '命令不能为空'
-  if (text.length > COMMAND_TEXT_MAX) return `命令过长（上限 ${COMMAND_TEXT_MAX} 字符）`
-  if (/[\r\n]/.test(text)) return '命令不能包含换行'
+  if (!text)
+    return '命令不能为空'
+  if (text.length > COMMAND_TEXT_MAX)
+    return `命令过长（上限 ${COMMAND_TEXT_MAX} 字符）`
+  if (/[\r\n]/.test(text))
+    return '命令不能包含换行'
   return null
 }
 
@@ -60,20 +63,23 @@ export function defaultCommandName(command: string): string {
  * makeId 由调用方注入（主进程用 randomUUID），这里保持纯函数。
  */
 export function sanitizeCommands(raw: unknown, makeId: () => string): CommandEntry[] {
-  if (!Array.isArray(raw)) return []
+  if (!Array.isArray(raw))
+    return []
 
-  const list: Array<{ entry: CommandEntry; order: number }> = []
+  const list: Array<{ entry: CommandEntry, order: number }> = []
 
   raw.forEach((item, index) => {
-    if (!item || typeof item !== 'object') return
+    if (!item || typeof item !== 'object')
+      return
     const value = item as Partial<CommandEntry>
 
     const command = typeof value.command === 'string' ? value.command.trim() : ''
-    if (commandTextError(command)) return
+    if (commandTextError(command))
+      return
 
     const name = typeof value.name === 'string' ? value.name.trim() : ''
-    const order =
-      typeof value.order === 'number' && Number.isFinite(value.order) ? value.order : index
+    const order
+      = typeof value.order === 'number' && Number.isFinite(value.order) ? value.order : index
 
     list.push({
       order,
@@ -87,8 +93,8 @@ export function sanitizeCommands(raw: unknown, makeId: () => string): CommandEnt
         createdAt:
           typeof value.createdAt === 'number' && Number.isFinite(value.createdAt)
             ? value.createdAt
-            : Date.now()
-      }
+            : Date.now(),
+      },
     })
   })
 

@@ -1,3 +1,6 @@
+import { mkdirSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 /**
  * 程序化生成应用图标，避免往仓库里塞（也没法用工具导出的）二进制素材。
  *
@@ -10,9 +13,6 @@
  * 方块满幅绘制、不留透明边距，这样在任何尺寸下都和系统里其它应用图标一样大。
  */
 import { deflateSync } from 'node:zlib'
-import { mkdirSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const root = join(here, '..')
@@ -22,14 +22,14 @@ const root = join(here, '..')
 const CRC_TABLE = new Uint32Array(256)
 for (let n = 0; n < 256; n += 1) {
   let c = n
-  for (let k = 0; k < 8; k += 1) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1
+  for (let k = 0; k < 8; k += 1) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1
   CRC_TABLE[n] = c >>> 0
 }
 
 function crc32(buf) {
-  let c = 0xffffffff
-  for (let i = 0; i < buf.length; i += 1) c = CRC_TABLE[(c ^ buf[i]) & 0xff] ^ (c >>> 8)
-  return (c ^ 0xffffffff) >>> 0
+  let c = 0xFFFFFFFF
+  for (let i = 0; i < buf.length; i += 1) c = CRC_TABLE[(c ^ buf[i]) & 0xFF] ^ (c >>> 8)
+  return (c ^ 0xFFFFFFFF) >>> 0
 }
 
 function chunk(type, data) {
@@ -56,17 +56,17 @@ function encodePng(size, rgba) {
   ihdr[9] = 6 // color type: RGBA
 
   return Buffer.concat([
-    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]),
     chunk('IHDR', ihdr),
     chunk('IDAT', deflateSync(raw, { level: 9 })),
-    chunk('IEND', Buffer.alloc(0))
+    chunk('IEND', Buffer.alloc(0)),
   ])
 }
 
 // ---------- 绘制 ----------
 
-const BG = [0x11, 0x15, 0x1b]
-const FG = [0xff, 0xff, 0xff]
+const BG = [0x11, 0x15, 0x1B]
+const FG = [0xFF, 0xFF, 0xFF]
 
 function distanceToSegment(px, py, x1, y1, x2, y2) {
   const dx = x2 - x1
@@ -85,9 +85,9 @@ function insideRoundedRect(x, y, size, radius) {
 /** 「›」折角 + 「_」下划线 */
 function insideGlyph(x, y, size) {
   const stroke = 0.085 * size
-  const chevron =
-    distanceToSegment(x, y, 0.3 * size, 0.28 * size, 0.55 * size, 0.5 * size) <= stroke ||
-    distanceToSegment(x, y, 0.55 * size, 0.5 * size, 0.3 * size, 0.72 * size) <= stroke
+  const chevron
+    = distanceToSegment(x, y, 0.3 * size, 0.28 * size, 0.55 * size, 0.5 * size) <= stroke
+      || distanceToSegment(x, y, 0.55 * size, 0.5 * size, 0.3 * size, 0.72 * size) <= stroke
   const bar = distanceToSegment(x, y, 0.63 * size, 0.72 * size, 0.78 * size, 0.72 * size) <= 0.048 * size
   return chevron || bar
 }
@@ -106,9 +106,11 @@ function render(size) {
         for (let sx = 0; sx < samples; sx += 1) {
           const x = px + (sx + 0.5) / samples
           const y = py + (sy + 0.5) / samples
-          if (!insideRoundedRect(x, y, size, radius)) continue
+          if (!insideRoundedRect(x, y, size, radius))
+            continue
           body += 1
-          if (insideGlyph(x, y, size)) ink += 1
+          if (insideGlyph(x, y, size))
+            ink += 1
         }
       }
 
@@ -149,7 +151,7 @@ function buildIco(images) {
     offset += image.png.length
   }
 
-  return Buffer.concat([header, ...entries, ...images.map((image) => image.png)])
+  return Buffer.concat([header, ...entries, ...images.map(image => image.png)])
 }
 
 // ---------- 输出 ----------
@@ -159,7 +161,7 @@ function buildIco(images) {
 // 与列表视图会要的尺寸，一并备齐后系统基本总能拿到原生位图。
 const ICON_SIZES = [256, 128, 96, 64, 48, 40, 32, 24, 20, 16]
 
-const images = ICON_SIZES.map((size) => ({ size, png: encodePng(size, render(size)) }))
+const images = ICON_SIZES.map(size => ({ size, png: encodePng(size, render(size)) }))
 
 mkdirSync(join(root, 'src-tauri'), { recursive: true })
 writeFileSync(join(root, 'src-tauri', 'icon.ico'), buildIco(images))

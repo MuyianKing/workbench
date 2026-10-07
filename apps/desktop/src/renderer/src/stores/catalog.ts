@@ -1,3 +1,7 @@
+import type { ProcessTarget } from './terminal'
+import type { CommandEntry, CommandInput, CommandPatch, QuickApp, QuickAppInput, QuickAppList, QuickAppPatch } from '@/types'
+import { reorderById } from '@workbench/core'
+import { defineStore } from 'pinia'
 /**
  * 两样「点一下就跑」的东西：快捷启动（常用软件）与独立命令。
  *
@@ -8,19 +12,8 @@
  * 命令的启停与检测走 terminal store 里的统一实现（项目与命令在那三件事上是一回事）。
  */
 import { computed, ref } from 'vue'
-import { defineStore } from 'pinia'
-import { reorderById } from '@workbench/core'
-import type {
-  CommandEntry,
-  CommandInput,
-  CommandPatch,
-  QuickApp,
-  QuickAppInput,
-  QuickAppList,
-  QuickAppPatch
-} from '@/types'
 import { notifyError, notifySuccess } from '@/notify'
-import { useTerminalStore, type ProcessTarget } from './terminal'
+import { useTerminalStore } from './terminal'
 
 export const useCatalogStore = defineStore('catalog', () => {
   const terminal = useTerminalStore()
@@ -39,8 +32,8 @@ export const useCatalogStore = defineStore('catalog', () => {
 
   const quickEditing = computed(() =>
     quickDialogId.value
-      ? quickApps.value.find((item) => item.id === quickDialogId.value) ?? null
-      : null
+      ? quickApps.value.find(item => item.id === quickDialogId.value) ?? null
+      : null,
   )
 
   function openQuickDialog(id?: string): void {
@@ -66,7 +59,8 @@ export const useCatalogStore = defineStore('catalog', () => {
   function dropFailedIcons(): void {
     const next: Record<string, string> = {}
     for (const [target, dataUrl] of Object.entries(quickIcons.value)) {
-      if (dataUrl) next[target] = dataUrl
+      if (dataUrl)
+        next[target] = dataUrl
     }
     quickIcons.value = next
   }
@@ -88,7 +82,8 @@ export const useCatalogStore = defineStore('catalog', () => {
   const iconPending = new Set<string>()
 
   async function loadQuickIcon(target: string): Promise<void> {
-    if (quickIcons.value[target] !== undefined || iconPending.has(target)) return
+    if (quickIcons.value[target] !== undefined || iconPending.has(target))
+      return
     iconPending.add(target)
     try {
       const result = await window.workbench.quickAppIcon(target)
@@ -96,9 +91,10 @@ export const useCatalogStore = defineStore('catalog', () => {
       // 界面用首字母兜底，不值得为它弹一个提示。空串表示「问过了，别再问」
       quickIcons.value = {
         ...quickIcons.value,
-        [target]: result.ok && result.data ? result.data : ''
+        [target]: result.ok && result.data ? result.data : '',
       }
-    } finally {
+    }
+    finally {
       iconPending.delete(target)
     }
   }
@@ -137,22 +133,23 @@ export const useCatalogStore = defineStore('catalog', () => {
       return false
     }
 
-    const index = quickApps.value.findIndex((item) => item.id === id)
-    if (index !== -1) quickApps.value[index] = result.data
+    const index = quickApps.value.findIndex(item => item.id === id)
+    if (index !== -1)
+      quickApps.value[index] = result.data
     // 路径可能被换成了另一个程序，失效标记得重算
     void refreshQuickApps()
     return true
   }
 
   async function removeQuickApp(id: string): Promise<void> {
-    const entry = quickApps.value.find((item) => item.id === id)
+    const entry = quickApps.value.find(item => item.id === id)
     const result = await window.workbench.removeQuickApp(id)
     if (!result.ok) {
       notifyError(result.error ?? '移除失败')
       return
     }
 
-    quickApps.value = quickApps.value.filter((item) => item.id !== id)
+    quickApps.value = quickApps.value.filter(item => item.id !== id)
     notifySuccess(entry ? `已移除 ${entry.name}` : '已移除')
   }
 
@@ -161,7 +158,7 @@ export const useCatalogStore = defineStore('catalog', () => {
     const snapshot = quickApps.value.slice()
     quickApps.value = reorderById(quickApps.value, ids).map((item, index) => ({
       ...item,
-      order: index
+      order: index,
     }))
 
     const result = await window.workbench.reorderQuickApps(ids)
@@ -180,7 +177,7 @@ export const useCatalogStore = defineStore('catalog', () => {
    * 失败多半是程序被移动或删除，顺手刷新失效标记。
    */
   async function launchQuickApp(id: string): Promise<void> {
-    const entry = quickApps.value.find((item) => item.id === id)
+    const entry = quickApps.value.find(item => item.id === id)
     const result = await window.workbench.launchQuickApp(id)
     if (!result.ok) {
       notifyError(result.error ?? '启动失败')
@@ -203,8 +200,8 @@ export const useCatalogStore = defineStore('catalog', () => {
 
   const commandEditing = computed(() =>
     commandDialogId.value
-      ? commands.value.find((item) => item.id === commandDialogId.value) ?? null
-      : null
+      ? commands.value.find(item => item.id === commandDialogId.value) ?? null
+      : null,
   )
 
   function openCommandDialog(id?: string): void {
@@ -221,7 +218,7 @@ export const useCatalogStore = defineStore('catalog', () => {
   }
 
   function findCommand(id: string): CommandEntry | undefined {
-    return commands.value.find((item) => item.id === id)
+    return commands.value.find(item => item.id === id)
   }
 
   async function refreshCommands(): Promise<void> {
@@ -233,7 +230,7 @@ export const useCatalogStore = defineStore('catalog', () => {
     const result = await window.workbench.addCommand({
       name: input.name,
       command: input.command,
-      port: input.port
+      port: input.port,
     })
     if (!result.ok || !result.data) {
       notifyError(result.error ?? '添加失败')
@@ -253,8 +250,9 @@ export const useCatalogStore = defineStore('catalog', () => {
       return false
     }
 
-    const index = commands.value.findIndex((item) => item.id === id)
-    if (index !== -1) commands.value[index] = result.data
+    const index = commands.value.findIndex(item => item.id === id)
+    if (index !== -1)
+      commands.value[index] = result.data
     return true
   }
 
@@ -270,7 +268,7 @@ export const useCatalogStore = defineStore('catalog', () => {
       return
     }
 
-    commands.value = commands.value.filter((item) => item.id !== id)
+    commands.value = commands.value.filter(item => item.id !== id)
     terminal.forgetRuntime(id)
     terminal.dropTerminalsOf(id)
     notifySuccess(entry ? `已删除 ${entry.name}` : '已删除')
@@ -283,27 +281,31 @@ export const useCatalogStore = defineStore('catalog', () => {
       name: entry.name,
       subject: '命令',
       noPortHint: '这条命令没有配置监听端口，无法检测运行状态',
-      busyHint: '命令正在运行，无需检测'
+      busyHint: '命令正在运行，无需检测',
     }
   }
 
   /** 启动一条命令：端口占用按项目那套先处理掉，再交给主进程拉起进程 */
   async function startCommand(id: string): Promise<void> {
     const entry = findCommand(id)
-    if (!entry) return
+    if (!entry)
+      return
 
     const rt = terminal.runtimeOf(id)
-    if (!(await terminal.ensurePortFree(entry.port ?? rt.port, rt))) return
+    if (!(await terminal.ensurePortFree(entry.port ?? rt.port, rt)))
+      return
 
     terminal.focusTerminal(id, 'command')
     const result = await window.workbench.startCommand(id)
-    if (!result.ok) notifyError(result.error ?? '启动失败')
+    if (!result.ok)
+      notifyError(result.error ?? '启动失败')
   }
 
   /** 停止一条命令；外部启动的那种按端口结束，先确认一次 */
   function stopCommand(id: string): Promise<boolean> {
     const entry = findCommand(id)
-    if (!entry) return Promise.resolve(false)
+    if (!entry)
+      return Promise.resolve(false)
 
     return terminal.stopTarget(targetOf(entry), () => window.workbench.stopCommand(id))
   }
@@ -311,15 +313,16 @@ export const useCatalogStore = defineStore('catalog', () => {
   /** 检测一条命令是否已经在运行（判据是端口占用，实现见 terminal store） */
   function detectCommand(id: string, options: { silent?: boolean } = {}): Promise<boolean> {
     const entry = findCommand(id)
-    if (!entry) return Promise.resolve(false)
+    if (!entry)
+      return Promise.resolve(false)
 
     return terminal.detectTarget({ ...targetOf(entry), port: entry.port }, options)
   }
 
   /** 启动应用后做一次全量检测：命令可能是在 Workbench 之外启动、至今还跑着的 */
   async function detectAllCommands(): Promise<void> {
-    const targets = commands.value.filter((item) => item.port)
-    await Promise.all(targets.map((item) => detectCommand(item.id, { silent: true })))
+    const targets = commands.value.filter(item => item.port)
+    await Promise.all(targets.map(item => detectCommand(item.id, { silent: true })))
   }
 
   /** 启动常用软件后主进程会推整份列表（最近使用时间变了），失效标记也一并刷新 */
@@ -359,6 +362,6 @@ export const useCatalogStore = defineStore('catalog', () => {
     stopCommand,
     detectCommand,
     detectAllCommands,
-    installListeners
+    installListeners,
   }
 })

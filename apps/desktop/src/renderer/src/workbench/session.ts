@@ -1,28 +1,18 @@
+import type { CommandEntry, ProcessLogEvent, ProcessStatusEvent, Project, Result, TerminalKind, TerminalOpenEvent } from '@/types'
 /**
  * 进程会话：把「起一条命令」这件事接到 Rust 上，并把输出翻译成渲染层认识的事件。
  *
  * 后端只认 sessionId 与整行命令；起什么命令、状态怎么转、日志落进哪个终端，都在这里决定。
  * 终端键同时充当 sessionId —— 日志与状态都靠它回到正确的终端（见 shared/terminal-key.ts）。
  */
-import { parsePortFromLog } from '@workbench/core'
-import { cleanLogLine } from '@workbench/terminal'
-import { fail, ok } from '@workbench/core'
-import { isValidScriptName } from '@workbench/core'
-import { terminalKey } from '@workbench/terminal'
-import type {
-  CommandEntry,
-  ProcessLogEvent,
-  ProcessStatusEvent,
-  Project,
-  Result,
-  TerminalKind,
-  TerminalOpenEvent
-} from '@/types'
+import { fail, isValidScriptName, ok, parsePortFromLog } from '@workbench/core'
+import { cleanLogLine, terminalKey } from '@workbench/terminal'
+
 import { errorText, invoke, listen } from './bridge'
 import { emit } from './events'
+import * as nvm from './nvm'
 import { outputDirOf } from './scanner'
 import * as state from './state'
-import * as nvm from './nvm'
 
 interface SessionMeta {
   projectId: string
@@ -61,14 +51,16 @@ const detachedExit = new Map<string, (code: number | null) => void>()
 export async function runDetached(
   sessionId: string,
   line: string,
-  onLine?: (text: string) => void
+  onLine?: (text: string) => void,
 ): Promise<number | null> {
-  if (onLine) detachedLines.set(sessionId, onLine)
-  const exited = new Promise<number | null>((resolve) => detachedExit.set(sessionId, resolve))
+  if (onLine)
+    detachedLines.set(sessionId, onLine)
+  const exited = new Promise<number | null>(resolve => detachedExit.set(sessionId, resolve))
 
   try {
     await invoke('spawn_session', { sessionId, line, cwd: null, pathPrepend: null })
-  } catch (error) {
+  }
+  catch (error) {
     detachedLines.delete(sessionId)
     detachedExit.delete(sessionId)
     throw error
@@ -83,7 +75,8 @@ export async function runDetached(
 export async function abortDetached(sessionId: string): Promise<void> {
   try {
     await invoke('stop_session', { sessionId })
-  } catch {
+  }
+  catch {
     // 已经自己结束了：这里只是清理，不必把失败抛给调用方
   }
 }
@@ -119,8 +112,10 @@ function packageManagerOf(project: Project): string {
 }
 
 function statusOf(kind: TerminalKind): ProcessStatusEvent['status'] {
-  if (kind === 'build') return 'building'
-  if (kind === 'install') return 'installing'
+  if (kind === 'build')
+    return 'building'
+  if (kind === 'install')
+    return 'installing'
   return 'running'
 }
 
@@ -131,7 +126,7 @@ function emitStatus(meta: SessionMeta, status: ProcessStatusEvent['status'], ext
     status,
     startedAt: status === 'running' || status === 'building' || status === 'installing' ? meta.startedAt : undefined,
     currentCommand: meta.currentCommand,
-    ...extra
+    ...extra,
   })
 }
 
@@ -141,7 +136,7 @@ function pushLog(meta: SessionMeta, stream: ProcessLogEvent['stream'], text: str
     projectId: meta.projectId,
     stream,
     text,
-    time: nowTime()
+    time: nowTime(),
   })
 }
 
@@ -154,11 +149,13 @@ function pushLog(meta: SessionMeta, stream: ProcessLogEvent['stream'], text: str
  */
 async function openBuildOutput(meta: SessionMeta): Promise<void> {
   // 设置以完成时刻的为准：打包往往要跑几十秒，期间用户可能刚把开关关掉
-  const project = state.projects().find((item) => item.id === meta.projectId)
-  if (!project?.autoOpenExplorer) return
+  const project = state.projects().find(item => item.id === meta.projectId)
+  if (!project?.autoOpenExplorer)
+    return
 
   const { dir, detected } = await outputDirOf(project.path, project.outputDir)
-  if (!detected) pushLog(meta, 'sys', '未探测到产物目录，已打开项目根目录')
+  if (!detected)
+    pushLog(meta, 'sys', '未探测到产物目录，已打开项目根目录')
 
   // 只发起、不等结果：explorer 就算成功也常返回非 0 退出码，等它没有意义
   void invoke('reveal', { path: dir })
@@ -185,7 +182,7 @@ async function run(input: RunInput): Promise<Result<null>> {
     label: input.label,
     currentCommand: input.line,
     startedAt: Date.now(),
-    stopping: false
+    stopping: false,
   }
 
   live.set(meta.terminal, meta)
@@ -194,7 +191,7 @@ async function run(input: RunInput): Promise<Result<null>> {
     terminal: meta.terminal,
     projectId: meta.projectId,
     kind: meta.kind,
-    label: meta.label
+    label: meta.label,
   })
 
   // 先把「要跑什么」写进终端，用户才知道这条命令是从哪来的
@@ -210,7 +207,7 @@ async function run(input: RunInput): Promise<Result<null>> {
       sessionId: meta.terminal,
       line: input.line,
       cwd: input.cwd ?? null,
-      pathPrepend
+      pathPrepend,
     })
     meta.pid = pid
 
@@ -227,18 +224,21 @@ async function run(input: RunInput): Promise<Result<null>> {
       startedAt: meta.startedAt,
       ownerPid: await appPid(),
       ...(createdAt === null ? {} : { processCreatedAt: createdAt }),
-      ...(ownerCreated === null ? {} : { ownerCreatedAt: ownerCreated })
+      ...(ownerCreated === null ? {} : { ownerCreatedAt: ownerCreated }),
     })
     // 活跃度只认「启动 / 打包」这两种主动操作，且记在进程真起来这一刻（见 state.recordActivity）
-    if (input.kind === 'start' || input.kind === 'build') state.recordActivity()
+    if (input.kind === 'start' || input.kind === 'build')
+      state.recordActivity()
     // 跑过一次就算用过这个项目：项目卡与首页「最近使用」按它排序，
     // 而这条 projectChanged 推送同时是渲染层重新拉活跃度计数的时机（首页的图因此当场变深）
     if (input.kind !== 'command') {
       const touched = state.touchProject(input.projectId)
-      if (touched) emit('projectChanged', touched)
+      if (touched)
+        emit('projectChanged', touched)
     }
     return ok(null)
-  } catch (error) {
+  }
+  catch (error) {
     const message = errorText(error, '启动失败')
     live.delete(meta.terminal)
     pushLog(meta, 'err', message)
@@ -249,19 +249,21 @@ async function run(input: RunInput): Promise<Result<null>> {
 
 /** 后端推来的原始行：翻译成渲染层的日志事件（后端已按批聚合，这里整批转发） */
 export function installSessionListeners(): void {
-  listen<{ sessionId: string; lines: Array<{ stream: string; text: string }> }>(
+  listen<{ sessionId: string, lines: Array<{ stream: string, text: string }> }>(
     'session:lines',
     ({ sessionId, lines: rawLines }) => {
       // 后端交过来的行是子进程的原样输出，控制序列在这里一次清掉：
       // 终端日志与系统面板的安装输出都出自这批行（见 shared/ansi.ts）
-      const lines: Array<{ stream: string; text: string }> = []
+      const lines: Array<{ stream: string, text: string }> = []
       for (const line of rawLines) {
         const text = cleanLogLine(line.text)
         // 整行只有控制序列（清行 / 移光标）时清完就空了，这种行本来就不该显示
-        if (!text && line.text) continue
+        if (!text && line.text)
+          continue
         lines.push({ stream: line.stream, text })
       }
-      if (!lines.length) return
+      if (!lines.length)
+        return
 
       // 临时会话（包管理器安装等）：输出交给回调，并推给界面的专属事件
       const isPm = sessionId.startsWith(PM_SESSION_PREFIX)
@@ -272,7 +274,7 @@ export function installSessionListeners(): void {
           if (isPm) {
             emit('pmInstallLog', {
               pm: sessionId.slice(PM_SESSION_PREFIX.length),
-              text: line.text
+              text: line.text,
             })
           }
         }
@@ -280,7 +282,8 @@ export function installSessionListeners(): void {
       }
 
       const meta = live.get(sessionId)
-      if (!meta) return
+      if (!meta)
+        return
 
       // 从输出里认监听端口：项目没手填端口时，这是唯一的线索
       // （界面据此显示端口，也据此做「端口被占用」的提醒）
@@ -294,19 +297,19 @@ export function installSessionListeners(): void {
       }
 
       const time = nowTime()
-      const batch: ProcessLogEvent[] = lines.map((line) => ({
+      const batch: ProcessLogEvent[] = lines.map(line => ({
         terminal: sessionId,
         projectId: meta.projectId,
         // 后端只区分 out / err，其余一律按系统提示处理
         stream: line.stream === 'out' ? 'out' : line.stream === 'err' ? 'err' : 'sys',
         text: line.text,
-        time
+        time,
       }))
       emit<ProcessLogEvent[]>('log', batch)
-    }
+    },
   )
 
-  listen<{ sessionId: string; code: number | null }>('session:exit', ({ sessionId, code }) => {
+  listen<{ sessionId: string, code: number | null }>('session:exit', ({ sessionId, code }) => {
     // 临时会话：唤醒等它的那个调用方
     const waiter = detachedExit.get(sessionId)
     if (waiter) {
@@ -316,11 +319,13 @@ export function installSessionListeners(): void {
     }
 
     const meta = live.get(sessionId)
-    if (!meta) return
+    if (!meta)
+      return
     live.delete(sessionId)
 
     // 正常结束就把残留记录摘掉，别让它下次启动时被当成残留再处理一遍
-    if (meta.pid !== undefined) state.dropSession(meta.pid)
+    if (meta.pid !== undefined)
+      state.dropSession(meta.pid)
 
     // 用户喊停的：落 idle 而不是失败，否则「停止」按钮点完会显示成出错
     if (meta.stopping) {
@@ -331,11 +336,12 @@ export function installSessionListeners(): void {
     pushLog(meta, 'sys', code === 0 ? '已结束' : `已退出（退出码 ${code ?? '未知'}）`)
     emitStatus(meta, code === 0 ? 'success' : 'failed', {
       exitCode: code,
-      durationMs: Date.now() - meta.startedAt
+      durationMs: Date.now() - meta.startedAt,
     })
 
     // 只有打包成功才谈得上「产物」；不 await：探测要跑几个来回，别拖住退出这条通道
-    if (meta.kind === 'build' && code === 0) void openBuildOutput(meta)
+    if (meta.kind === 'build' && code === 0)
+      void openBuildOutput(meta)
   })
 }
 
@@ -343,7 +349,8 @@ export function installSessionListeners(): void {
 
 export function startProject(project: Project): Promise<Result<null>> {
   const script = project.scripts.serve
-  if (!script) return Promise.resolve(fail('该项目没有可用的启动脚本'))
+  if (!script)
+    return Promise.resolve(fail('该项目没有可用的启动脚本'))
   if (!isValidScriptName(script)) {
     return Promise.resolve(fail(`启动脚本名不合法，已阻止执行：${script}`))
   }
@@ -356,7 +363,7 @@ export function startProject(project: Project): Promise<Result<null>> {
     label: '启动',
     line,
     cwd: project.path,
-    nodeVersion: project.nodeVersion
+    nodeVersion: project.nodeVersion,
   })
 }
 
@@ -374,7 +381,7 @@ export function buildProject(project: Project, script: string): Promise<Result<n
     label: '打包',
     line,
     cwd: project.path,
-    nodeVersion: project.nodeVersion
+    nodeVersion: project.nodeVersion,
   })
 }
 
@@ -387,13 +394,14 @@ export function installProject(project: Project): Promise<Result<null>> {
     label: '安装依赖',
     line,
     cwd: project.path,
-    nodeVersion: project.nodeVersion
+    nodeVersion: project.nodeVersion,
   })
 }
 
 export function runCustom(project: Project, index: number): Promise<Result<null>> {
   const entry = project.scripts.custom?.[index]
-  if (!entry) return Promise.resolve(fail(`没有第 ${index + 1} 条自定义命令`))
+  if (!entry)
+    return Promise.resolve(fail(`没有第 ${index + 1} 条自定义命令`))
 
   return run({
     projectId: project.id,
@@ -402,7 +410,7 @@ export function runCustom(project: Project, index: number): Promise<Result<null>
     label: entry.name,
     line: entry.command,
     cwd: project.path,
-    nodeVersion: project.nodeVersion
+    nodeVersion: project.nodeVersion,
   })
 }
 
@@ -412,7 +420,7 @@ export function startCommand(entry: CommandEntry): Promise<Result<null>> {
     kind: 'command',
     kindKey: 'command',
     label: entry.name,
-    line: entry.command
+    line: entry.command,
   })
 }
 
@@ -421,13 +429,15 @@ export function startCommand(entry: CommandEntry): Promise<Result<null>> {
 /** 按终端键停止；用户主动停止要标记出来，退出时才能落成 idle */
 async function stopTerminal(terminal: string): Promise<Result<null>> {
   const meta = live.get(terminal)
-  if (!meta) return fail('该命令已经不在运行')
+  if (!meta)
+    return fail('该命令已经不在运行')
 
   meta.stopping = true
   try {
     await invoke('stop_session', { sessionId: terminal })
     return ok(null)
-  } catch (error) {
+  }
+  catch (error) {
     meta.stopping = false
     return fail(errorText(error, '停止失败'))
   }
@@ -441,9 +451,10 @@ async function stopTerminal(terminal: string): Promise<Result<null>> {
  * 没给、或那一类已经不在了（界面比实际慢一拍），才退回「在跑的任意一条」。
  */
 export function stopOwner(projectId: string, kind?: TerminalKind): Promise<Result<null>> {
-  const owned = [...live.values()].filter((meta) => meta.projectId === projectId)
-  if (!owned.length) return Promise.resolve(fail('该项目当前没有在运行的命令'))
-  const target = owned.find((meta) => meta.kind === kind) ?? owned[0]
+  const owned = [...live.values()].filter(meta => meta.projectId === projectId)
+  if (!owned.length)
+    return Promise.resolve(fail('该项目当前没有在运行的命令'))
+  const target = owned.find(meta => meta.kind === kind) ?? owned[0]
   return stopTerminal(target.terminal)
 }
 

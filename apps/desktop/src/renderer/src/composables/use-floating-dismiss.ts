@@ -31,24 +31,29 @@ export function attachFloatingDismiss(options: FloatingDismissOptions): () => vo
 
   /** 事件是否落在面板里。target 可能是 window / document 这类非元素，先认一下再问 */
   function insidePanel(target: EventTarget | null): boolean {
-    if (typeof target !== 'object' || target === null) return false
+    if (typeof target !== 'object' || target === null)
+      return false
     return options.panel()?.contains(target as Node) === true
   }
 
   function onPointerDown(event: PointerEvent): void {
     // 只认左键：右键按下去先收、等松开 contextmenu 才到，中间那段会白闪一下
-    if (event.button !== 0) return
-    if (insidePanel(event.target)) return
+    if (event.button !== 0)
+      return
+    if (insidePanel(event.target))
+      return
     dismiss()
   }
 
   function onContextMenu(event: MouseEvent): void {
-    if (insidePanel(event.target)) return
+    if (insidePanel(event.target))
+      return
     dismiss()
   }
 
   function onKeyDown(event: KeyboardEvent): void {
-    if (event.key === 'Escape') dismiss()
+    if (event.key === 'Escape')
+      dismiss()
   }
 
   // 捕获阶段：这几件事一旦发生，浮层原来的位置就不再对了

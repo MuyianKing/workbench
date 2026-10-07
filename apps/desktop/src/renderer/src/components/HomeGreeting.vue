@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { dayKey, streakOf } from '@workbench/core'
+import { formatWeatherView } from '@workbench/weather'
 /**
  * 顶栏左侧那一行：**整个界面里唯一一处「认得你」的地方**。
  *
@@ -27,13 +29,11 @@
  * **这里不放头像**：账号入口归顶栏右上角那颗头像，这一行只说事情、只出一个名字。
  */
 import { computed } from 'vue'
-import { dayKey, streakOf } from '@workbench/core'
-import { formatWeatherView } from '@workbench/weather'
+import { useWallClock } from '@/composables/use-wall-clock'
 import { useAuthStore } from '@/stores/auth'
 import { useProjectsStore } from '@/stores/projects'
 import { useSettingsStore } from '@/stores/settings'
 import { useWeatherStore } from '@/stores/weather'
-import { useWallClock } from '@/composables/use-wall-clock'
 
 const store = useProjectsStore()
 const settings = useSettingsStore()
@@ -70,10 +70,14 @@ const isNight = computed(() => hour.value < 5 || hour.value >= 23)
  */
 const greeting = computed(() => {
   const value = hour.value
-  if (value < 5 || value >= 23) return '夜深了'
-  if (value < 11) return '早上好'
-  if (value < 13) return '中午好'
-  if (value < 18) return '下午好'
+  if (value < 5 || value >= 23)
+    return '夜深了'
+  if (value < 11)
+    return '早上好'
+  if (value < 13)
+    return '中午好'
+  if (value < 18)
+    return '下午好'
   return '晚上好'
 })
 
@@ -100,12 +104,15 @@ const weatherText = computed(() => (weather.view ? formatWeatherView(weather.vie
  */
 const facts = computed(() => {
   const parts: string[] = []
-  if (weatherText.value) parts.push(weatherText.value)
+  if (weatherText.value)
+    parts.push(weatherText.value)
   if (store.runningCount) {
     parts.push(isNight.value ? `${store.runningCount} 个项目还在跑` : `${store.runningCount} 个项目在跑`)
   }
-  if (todayCount.value) parts.push(`今天 ${todayCount.value} 次执行`)
-  if (streak.value > 1) parts.push(`连续 ${streak.value} 天`)
+  if (todayCount.value)
+    parts.push(`今天 ${todayCount.value} 次执行`)
+  if (streak.value > 1)
+    parts.push(`连续 ${streak.value} 天`)
   return parts
 })
 

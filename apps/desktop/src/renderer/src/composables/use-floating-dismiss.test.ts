@@ -26,14 +26,14 @@ function stubWindow(): {
     },
     removeEventListener(type: string, handler: Listener) {
       listeners.get(type)?.delete(handler)
-    }
+    },
   })
 
   return {
     dispatch: (type, event = {}) => {
       for (const handler of [...(listeners.get(type) ?? [])]) handler(event)
     },
-    counts: () => Object.fromEntries([...listeners].map(([type, group]) => [type, group.size]))
+    counts: () => Object.fromEntries([...listeners].map(([type, group]) => [type, group.size])),
   }
 }
 
@@ -98,7 +98,7 @@ describe('attachFloatingDismiss', () => {
     expect(onDismiss).not.toHaveBeenCalled()
   })
 
-  it('Esc 收起，别的键不作数', () => {
+  it('esc 收起，别的键不作数', () => {
     const { dispatch } = stubWindow()
     const onDismiss = vi.fn()
 
@@ -148,7 +148,7 @@ describe('attachFloatingDismiss', () => {
       keydown: 0,
       wheel: 0,
       resize: 0,
-      blur: 0
+      blur: 0,
     })
   })
 })

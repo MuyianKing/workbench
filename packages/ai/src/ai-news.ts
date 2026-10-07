@@ -138,8 +138,10 @@ export function emptySourceState(): AiNewsSourceState {
  * 「解析失败」与「服务端确实没内容」是两回事，由调用方决定怎么提示。
  */
 export function parseSourcePayload(format: AiNewsSourceFormat, body: string): AiNewsItem[] {
-  if (format === 'json-hf-papers') return parseHfDailyPapers(body)
-  if (format === 'atom') return parseAtom(body)
+  if (format === 'json-hf-papers')
+    return parseHfDailyPapers(body)
+  if (format === 'atom')
+    return parseAtom(body)
   return parseRss(body)
 }
 
@@ -163,20 +165,24 @@ export function parseHfDailyPapers(body: string): AiNewsItem[] {
   let raw: unknown
   try {
     raw = JSON.parse(body)
-  } catch {
+  }
+  catch {
     return []
   }
-  if (!Array.isArray(raw)) return []
+  if (!Array.isArray(raw))
+    return []
 
   const items: AiNewsItem[] = []
   for (const entry of raw) {
-    if (!entry || typeof entry !== 'object') continue
+    if (!entry || typeof entry !== 'object')
+      continue
     const outer = entry as Record<string, unknown>
     const paper = (outer.paper ?? {}) as Record<string, unknown>
 
     const id = text(paper.id) || text(outer.id)
     const title = text(outer.title) || text(paper.title)
-    if (!title) continue
+    if (!title)
+      continue
 
     const link = id ? `https://huggingface.co/papers/${id}` : text(outer.url)
     const published = text(outer.publishedAt) || text(paper.publishedAt)
@@ -189,7 +195,7 @@ export function parseHfDailyPapers(body: string): AiNewsItem[] {
       pubDate: Number.isFinite(Date.parse(published)) ? Date.parse(published) : 0,
       summary: stripHtml(summary).slice(0, 500),
       // 源名留空：由适配层统一盖上源清单里的名字（这样改名不用重刷数据）
-      source: ''
+      source: '',
     })
   }
   return finish(items)
@@ -203,9 +209,11 @@ function blocksOf(xml: string, tag: string): string[] {
   let pos = 0
   for (;;) {
     const start = xml.indexOf(open, pos)
-    if (start === -1) break
+    if (start === -1)
+      break
     const end = xml.indexOf(close, start)
-    if (end === -1) break
+    if (end === -1)
+      break
     blocks.push(xml.slice(start, end))
     pos = end + close.length
   }
@@ -226,7 +234,8 @@ function finish(items: AiNewsItem[]): AiNewsItem[] {
 
 function parseRssItem(block: string): AiNewsItem | null {
   const title = cleanText(tagText(block, 'title'))
-  if (!title) return null
+  if (!title)
+    return null
 
   const link = cleanText(tagText(block, 'link')).trim()
   const guid = cleanText(tagText(block, 'guid')).trim() || link
@@ -241,7 +250,7 @@ function parseRssItem(block: string): AiNewsItem | null {
     link: link.slice(0, 1000),
     pubDate,
     summary: summary.slice(0, 500),
-    source: source.slice(0, 50)
+    source: source.slice(0, 50),
   }
 }
 
@@ -253,7 +262,8 @@ function parseRssItem(block: string): AiNewsItem | null {
  */
 function parseAtomEntry(block: string): AiNewsItem | null {
   const title = cleanText(tagText(block, 'title'))
-  if (!title) return null
+  if (!title)
+    return null
 
   const id = cleanText(tagText(block, 'id')).trim()
   const link = id || atomHref(block)
@@ -266,7 +276,7 @@ function parseAtomEntry(block: string): AiNewsItem | null {
     link: link.slice(0, 1000),
     pubDate,
     summary: summary.slice(0, 500),
-    source: ''
+    source: '',
   }
 }
 
@@ -285,11 +295,14 @@ function atomHref(block: string): string {
  */
 function tagText(block: string, tag: string): string {
   const start = block.indexOf(`<${tag}`)
-  if (start === -1) return ''
+  if (start === -1)
+    return ''
   const contentStart = block.indexOf('>', start)
-  if (contentStart === -1) return ''
+  if (contentStart === -1)
+    return ''
   const end = block.indexOf(`</${tag}>`, contentStart)
-  if (end === -1) return ''
+  if (end === -1)
+    return ''
   const inner = block.slice(contentStart + 1, end)
 
   const once = unwrapCdata(inner)
@@ -300,9 +313,11 @@ function tagText(block: string, tag: string): string {
 /** 剥掉 CDATA 的包裹标记（没有就当普通文本原样返回） */
 function unwrapCdata(text: string): string {
   const start = text.indexOf('<![CDATA[')
-  if (start === -1) return text
+  if (start === -1)
+    return text
   const end = text.indexOf(']]>', start)
-  if (end === -1) return text
+  if (end === -1)
+    return text
   return text.slice(start + '<![CDATA['.length, end)
 }
 
@@ -320,7 +335,7 @@ function decodeEntities(text: string): string {
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
+    .replace(/&#39;/g, '\'')
     .replace(/&amp;/g, '&')
     .replace(/&nbsp;/g, ' ')
 }
@@ -373,7 +388,8 @@ export function extractArticle(html: string): AiNewsArticle {
   const cleaned = cutNoise(html)
   // 先在正文容器里找；一个容器都没命中（或命中的提不出东西）才退回整篇 + 末尾分界
   let blocks = sliceMainContent(cleaned)
-  if (!blocks.length) blocks = collectBlocks(cutTail(cleaned))
+  if (!blocks.length)
+    blocks = collectBlocks(cutTail(cleaned))
 
   const paragraphs: string[] = []
   let total = 0
@@ -401,7 +417,7 @@ const CONTENT_MARKERS: RegExp[] = [
   /\bid=["'](js_content|article-content|articleContent)["']/i,
   /<article\b/i,
   /\bclass=["'][^"']*\barticle\b[^"']*["']/i,
-  /\bclass=["'][^"']*\bcontent\b[^"']*["']/i
+  /\bclass=["'][^"']*\bcontent\b[^"']*["']/i,
 ]
 
 /**
@@ -414,9 +430,11 @@ const CONTENT_MARKERS: RegExp[] = [
 function sliceMainContent(html: string): string[] {
   for (const marker of CONTENT_MARKERS) {
     const inner = sliceContainer(html, marker)
-    if (inner === null) continue
+    if (inner === null)
+      continue
     const blocks = collectBlocks(inner)
-    if (blocks.length) return blocks
+    if (blocks.length)
+      return blocks
   }
   return []
 }
@@ -429,15 +447,19 @@ function sliceMainContent(html: string): string[] {
  */
 function sliceContainer(html: string, marker: RegExp): string | null {
   const found = marker.exec(html)
-  if (!found) return null
+  if (!found)
+    return null
 
   const openStart = html.lastIndexOf('<', found.index)
-  if (openStart === -1) return null
+  if (openStart === -1)
+    return null
   const openEnd = html.indexOf('>', found.index)
-  if (openEnd === -1) return null
+  if (openEnd === -1)
+    return null
 
   const tag = /^<([a-z0-9]+)/i.exec(html.slice(openStart, openEnd + 1))?.[1]
-  if (!tag) return null
+  if (!tag)
+    return null
 
   const walker = new RegExp(`<${tag}\\b|</${tag}>`, 'gi')
   walker.lastIndex = openEnd + 1
@@ -445,7 +467,8 @@ function sliceContainer(html: string, marker: RegExp): string | null {
   let step: RegExpExecArray | null
   while ((step = walker.exec(html)) !== null) {
     depth += step[0].startsWith('</') ? -1 : 1
-    if (depth === 0) return html.slice(openEnd + 1, step.index)
+    if (depth === 0)
+      return html.slice(openEnd + 1, step.index)
   }
   return null
 }
@@ -458,7 +481,8 @@ function collectBlocks(html: string): string[] {
   while ((match = pattern.exec(html)) !== null) {
     const text = cleanText(match[2])
     const min = match[1].toLowerCase() === 'p' ? ARTICLE_MIN_PARAGRAPH : ARTICLE_MIN_HEADING
-    if (text.length >= min) blocks.push(text)
+    if (text.length >= min)
+      blocks.push(text)
   }
   return blocks
 }
@@ -490,12 +514,13 @@ function cutTail(html: string): string {
     /class=["'][^"']*\b(xiangguan|related|yaowen|hot-?news)\b[^"']*["']/i,
     /<footer\b/i,
     /id=["']footer["']/i,
-    /class=["'][^"']*\bsidebar\b[^"']*["']/i
+    /class=["'][^"']*\bsidebar\b[^"']*["']/i,
   ]
   let cut = -1
   for (const marker of markers) {
     const index = html.search(marker)
-    if (index !== -1 && (cut === -1 || index < cut)) cut = index
+    if (index !== -1 && (cut === -1 || index < cut))
+      cut = index
   }
   return cut > 0 ? html.slice(0, cut) : html
 }
@@ -518,7 +543,7 @@ function sanitizeItem(value: unknown): AiNewsItem {
     link: cleanString(input.link, ''),
     pubDate: finiteNumber(input.pubDate, 0),
     summary: cleanString(input.summary, ''),
-    source: cleanString(input.source, '')
+    source: cleanString(input.source, ''),
   }
 }
 
@@ -532,8 +557,8 @@ function sanitizeSourceState(value: unknown): AiNewsSourceState {
     failCount: Math.max(0, Math.floor(finiteNumber(input.failCount, 0))),
     lastError: cleanString(input.lastError, ''),
     items: Array.isArray(input.items)
-      ? input.items.map(sanitizeItem).filter((item) => item.title).slice(0, AI_NEWS_MAX_ITEMS_PER_SOURCE)
-      : []
+      ? input.items.map(sanitizeItem).filter(item => item.title).slice(0, AI_NEWS_MAX_ITEMS_PER_SOURCE)
+      : [],
   }
 }
 
@@ -546,11 +571,13 @@ function sanitizeSourceState(value: unknown): AiNewsSourceState {
 export function sanitizeAiNewsCache(raw: unknown): AiNewsCache {
   const input = (raw ?? {}) as Partial<AiNewsCache> & Record<string, unknown>
 
-  if (!input.sources || typeof input.sources !== 'object') return emptyAiNewsCache()
+  if (!input.sources || typeof input.sources !== 'object')
+    return emptyAiNewsCache()
 
   const sources: Record<string, AiNewsSourceState> = {}
   for (const [id, value] of Object.entries(input.sources as Record<string, unknown>)) {
-    if (!id.trim()) continue
+    if (!id.trim())
+      continue
     sources[id] = sanitizeSourceState(value)
   }
   return { version: AI_NEWS_VERSION, sources }
@@ -574,7 +601,7 @@ export function applySourceSuccess(
   items: AiNewsItem[],
   etag: string,
   ttlMs: number,
-  now: number
+  now: number,
 ): AiNewsSourceState {
   return {
     updatedAt: now,
@@ -582,7 +609,7 @@ export function applySourceSuccess(
     nextFetchAt: now + ttlMs,
     failCount: 0,
     lastError: '',
-    items
+    items,
   }
 }
 
@@ -591,7 +618,7 @@ export function applySourceNotModified(
   state: AiNewsSourceState | undefined,
   etag: string,
   ttlMs: number,
-  now: number
+  now: number,
 ): AiNewsSourceState {
   const base = state ?? emptySourceState()
   return {
@@ -599,7 +626,7 @@ export function applySourceNotModified(
     etag: etag || base.etag,
     nextFetchAt: now + ttlMs,
     failCount: 0,
-    lastError: ''
+    lastError: '',
   }
 }
 
@@ -607,14 +634,14 @@ export function applySourceNotModified(
 export function applySourceFailure(
   state: AiNewsSourceState | undefined,
   now: number,
-  error: string
+  error: string,
 ): AiNewsSourceState {
   const base = state ?? emptySourceState()
   return {
     ...base,
     nextFetchAt: now + backoffDelayMs(base.failCount),
     failCount: base.failCount + 1,
-    lastError: error
+    lastError: error,
   }
 }
 
@@ -629,7 +656,7 @@ export function applySourceFailure(
 export function mergedItems(
   cache: AiNewsCache,
   sourceIds: string[],
-  max: number = AI_NEWS_MERGED_MAX
+  max: number = AI_NEWS_MERGED_MAX,
 ): AiNewsItem[] {
   const seen = new Set<string>()
   const merged: AiNewsItem[] = []
@@ -637,7 +664,8 @@ export function mergedItems(
   for (const id of sourceIds) {
     for (const item of cache.sources[id]?.items ?? []) {
       const key = item.link || item.guid || item.title
-      if (!key || seen.has(key)) continue
+      if (!key || seen.has(key))
+        continue
       seen.add(key)
       merged.push(item)
     }
@@ -651,7 +679,8 @@ export function latestUpdatedAt(cache: AiNewsCache, sourceIds: string[]): number
   let latest = 0
   for (const id of sourceIds) {
     const updatedAt = cache.sources[id]?.updatedAt ?? 0
-    if (updatedAt > latest) latest = updatedAt
+    if (updatedAt > latest)
+      latest = updatedAt
   }
   return latest
 }

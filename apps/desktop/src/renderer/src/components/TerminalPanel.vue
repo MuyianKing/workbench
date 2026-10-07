@@ -1,20 +1,18 @@
 <script setup lang="ts">
-import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
-import { ElMessage } from 'element-plus'
+import type { LinkSegment } from '@workbench/core'
+import type { TerminalState } from '@/stores/terminal'
+import type { LogLine, ProjectStatus } from '@/types'
 import { ArrowLeft, ArrowRight, Close, Delete } from '@element-plus/icons-vue'
-import {
-  TERMINAL_HEIGHT_MIN,
-  clampTerminalHeight,
-  maxTerminalHeightFor
-} from '@workbench/appearance'
+import { clampTerminalHeight, maxTerminalHeightFor, TERMINAL_HEIGHT_MIN } from '@workbench/appearance'
+import { splitLinks } from '@workbench/core'
 import { isPinnedToBottom } from '@workbench/terminal'
-import { splitLinks, type LinkSegment } from '@workbench/core'
+import { ElMessage } from 'element-plus'
+import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
 import { startPointerDrag } from '@/composables/use-pointer-drag'
 import { statusTone } from '@/status'
-import { useProjectsStore } from '@/stores/projects'
-import { useTerminalStore, type TerminalState } from '@/stores/terminal'
 import { useCatalogStore } from '@/stores/catalog'
-import type { LogLine, ProjectStatus } from '@/types'
+import { useProjectsStore } from '@/stores/projects'
+import { useTerminalStore } from '@/stores/terminal'
 
 const store = useProjectsStore()
 const terminal = useTerminalStore()
@@ -23,7 +21,7 @@ const bodyRef = ref<HTMLElement | null>(null)
 
 const collapsed = computed({
   get: () => terminal.terminalCollapsed,
-  set: (value: boolean) => terminal.setTerminalCollapsed(value)
+  set: (value: boolean) => terminal.setTerminalCollapsed(value),
 })
 
 // ---------- 拖动调整高度 ----------
@@ -80,8 +78,9 @@ function startResize(event: PointerEvent): void {
     onEnd: (last, cancelled) => {
       const next = dragHeight.value
       dragHeight.value = null
-      if (!cancelled && last && next !== null) void terminal.setTerminalHeight(next)
-    }
+      if (!cancelled && last && next !== null)
+        void terminal.setTerminalHeight(next)
+    },
   })
 }
 
@@ -130,13 +129,15 @@ const CHUNK_SIZE = 100
 const toneOf = (s: ProjectStatus): string => statusTone(s)
 
 /** 参数名一律避开 `terminal`：那是 store 的名字，遮住了就读不到 store 的成员 */
-const isRunning = (item: TerminalState): boolean =>
-  item.status === 'running' || item.status === 'installing' || item.status === 'building'
+function isRunning(item: TerminalState): boolean {
+  return item.status === 'running' || item.status === 'installing' || item.status === 'building'
+}
 
 /** 这个终端属于谁：项目名 / 命令名 / 本机环境 */
 function projectName(item: TerminalState): string {
   // 系统终端不属于任何项目，别把它显示成「已移除的项目」
-  if (item.kind === 'system') return '本机环境'
+  if (item.kind === 'system')
+    return '本机环境'
   // 命令卡片的终端同理：它归属的是一条命令，不是项目
   if (item.kind === 'command') {
     return catalog.findCommand(item.projectId)?.name ?? '已删除的命令'
@@ -181,7 +182,7 @@ const dockRange = computed(() => {
   const half = DOCK_SIZE / 2
   return {
     min: ((DOCK_TOP_LIMIT + half) / height) * 100,
-    max: ((height - half - DOCK_MARGIN) / height) * 100
+    max: ((height - half - DOCK_MARGIN) / height) * 100,
   }
 })
 
@@ -203,7 +204,7 @@ const autoDockTop = computed(() => {
 
 /** 真正渲染的位置：拖动 > 用户存下来的 > 面板中线，再按当前窗口收一次 */
 const renderDockTop = computed(() =>
-  clampDockTop(dragDockTop.value ?? terminal.terminalButtonTop ?? autoDockTop.value)
+  clampDockTop(dragDockTop.value ?? terminal.terminalButtonTop ?? autoDockTop.value),
 )
 
 /**
@@ -211,8 +212,10 @@ const renderDockTop = computed(() =>
  * 还有命令在跑（黄点，呼吸）或上一次跑失败了（红点）都得看得出来。
  */
 const dockTone = computed(() => {
-  if (tabs.value.some(isRunning)) return 'run'
-  if (tabs.value.some((item) => item.status === 'failed')) return 'fail'
+  if (tabs.value.some(isRunning))
+    return 'run'
+  if (tabs.value.some(item => item.status === 'failed'))
+    return 'fail'
   return ''
 })
 
@@ -228,7 +231,8 @@ let dockSuppressClick = false
 let endDockDrag: (() => void) | null = null
 
 function startDockDrag(event: PointerEvent): void {
-  if (event.button !== 0) return
+  if (event.button !== 0)
+    return
 
   // 按住时指针相对按钮中心的偏移：拖动中保持它，按钮才不会在指针底下跳一下
   const height = Math.max(1, viewportHeight.value)
@@ -254,12 +258,14 @@ function startDockDrag(event: PointerEvent): void {
       const moved = dockMoved
       dragDockTop.value = null
       dockMoved = false
-      if (moved && last && next !== null) void terminal.setTerminalButtonTop(next)
+      if (moved && last && next !== null)
+        void terminal.setTerminalButtonTop(next)
       // 拖动过或放弃过：随后补的那个 click 不算「点开面板」（见 expandFromDock）。
       // 这里不能用「dragDockTop 还没归零」来判断 —— onCleanup 早于 onEnd，
       // 那个条件在每次收手时都成立，单击也就被一起吞掉了。
-      if (moved || cancelled) dockSuppressClick = true
-    }
+      if (moved || cancelled)
+        dockSuppressClick = true
+    },
   })
 }
 
@@ -293,7 +299,8 @@ const allLines = computed<LogLine[]>(() => terminal.activeLogs)
  */
 const start = computed(() => {
   const total = allLines.value.length
-  if (total <= RENDER_LIMIT) return 0
+  if (total <= RENDER_LIMIT)
+    return 0
   return Math.floor((total - RENDER_LIMIT) / CHUNK_SIZE) * CHUNK_SIZE
 })
 
@@ -325,10 +332,12 @@ const linkCache = new Map<string, LinkSegment[]>()
 
 function segmentsOf(text: string): LinkSegment[] {
   const cached = linkCache.get(text)
-  if (cached) return cached
+  if (cached)
+    return cached
 
   const segments = splitLinks(text)
-  if (linkCache.size >= 4096) linkCache.clear()
+  if (linkCache.size >= 4096)
+    linkCache.clear()
   linkCache.set(text, segments)
   return segments
 }
@@ -342,11 +351,13 @@ function segmentsOf(text: string): LinkSegment[] {
 const ctrlHeld = ref(false)
 
 function onKeyDown(event: KeyboardEvent): void {
-  if (event.key === 'Control') ctrlHeld.value = true
+  if (event.key === 'Control')
+    ctrlHeld.value = true
 }
 
 function onKeyUp(event: KeyboardEvent): void {
-  if (event.key === 'Control') ctrlHeld.value = false
+  if (event.key === 'Control')
+    ctrlHeld.value = false
 }
 
 /** 切走窗口时收不到 keyup，回来别停在「按住」的样子 */
@@ -360,9 +371,11 @@ window.addEventListener('blur', onWindowBlur)
 
 /** Ctrl + 单击：把地址交给系统默认浏览器 */
 async function openLink(event: MouseEvent, url: string): Promise<void> {
-  if (!event.ctrlKey) return
+  if (!event.ctrlKey)
+    return
   const result = await window.workbench.openExternal(url)
-  if (!result.ok) ElMessage.warning(result.error)
+  if (!result.ok)
+    ElMessage.warning(result.error)
 }
 
 // ---------- 自动滚动：只在用户贴底时跟随 ----------
@@ -378,13 +391,15 @@ const pinned = ref(true)
 
 function onBodyScroll(): void {
   const el = bodyRef.value
-  if (!el) return
+  if (!el)
+    return
   pinned.value = isPinnedToBottom(el)
 }
 
 function scrollToBottom(): void {
   const el = bodyRef.value
-  if (!el) return
+  if (!el)
+    return
   el.scrollTop = el.scrollHeight
   // 程序化滚动同样会触发 scroll 事件，这里直接把状态定下来，省一次回调
   pinned.value = true
@@ -401,9 +416,10 @@ function scrollToBottom(): void {
 watch(
   () => terminal.logVersion,
   () => {
-    if (pinned.value) scrollToBottom()
+    if (pinned.value)
+      scrollToBottom()
   },
-  { flush: 'post' }
+  { flush: 'post' },
 )
 
 // 切终端时回到该终端的底部（每个终端都是「最新在下面」）
@@ -413,12 +429,13 @@ watch(
     pinned.value = true
     scrollToBottom()
   },
-  { flush: 'post' }
+  { flush: 'post' },
 )
 
 // 面板被拖高、窗口变大或 Tab 条换行都会改变可视高度，贴底时跟着走
 const bodyObserver = new ResizeObserver(() => {
-  if (pinned.value) scrollToBottom()
+  if (pinned.value)
+    scrollToBottom()
 })
 
 /**
@@ -434,14 +451,17 @@ const chunkEstimatePx = computed(() => Math.round((lineHeight.value || 22) * CHU
 const lineObserver = new ResizeObserver((entries) => {
   for (const entry of entries) {
     const height = entry.borderBoxSize?.[0]?.blockSize ?? entry.contentRect.height
-    if (height > 0 && Math.abs(height - lineHeight.value) > 0.5) lineHeight.value = height
+    if (height > 0 && Math.abs(height - lineHeight.value) > 0.5)
+      lineHeight.value = height
   }
 })
 
 function measureLine(el: Element | null): void {
-  if (!el) return
+  if (!el)
+    return
   const height = (el as HTMLElement).getBoundingClientRect().height
-  if (height > 0) lineHeight.value = height
+  if (height > 0)
+    lineHeight.value = height
 }
 
 /**
@@ -460,8 +480,10 @@ function measureFirstLine(el: HTMLElement | null): void {
 }
 
 watch(bodyRef, (el, prev) => {
-  if (prev) bodyObserver.unobserve(prev)
-  if (el) bodyObserver.observe(el)
+  if (prev)
+    bodyObserver.unobserve(prev)
+  if (el)
+    bodyObserver.observe(el)
   measureFirstLine(el)
 })
 
@@ -469,11 +491,12 @@ watch(bodyRef, (el, prev) => {
 watch(
   () => chunks.value.length > 0,
   async (hasLines) => {
-    if (!hasLines) return
+    if (!hasLines)
+      return
     await nextTick()
     measureFirstLine(bodyRef.value)
   },
-  { immediate: true }
+  { immediate: true },
 )
 
 onUnmounted(() => {
@@ -490,7 +513,8 @@ onUnmounted(() => {
 
 function clearLogs(): void {
   const target = active.value
-  if (target) terminal.clearTerminalLogs(target.key)
+  if (target)
+    terminal.clearTerminalLogs(target.key)
 }
 </script>
 
@@ -547,15 +571,17 @@ function clearLogs(): void {
       />
 
       <div class="term__bar">
-      <button
-        class="term__toggle"
-        type="button"
-        title="收起终端"
-        @click="collapsed = true"
-      >
-        <el-icon class="term__caret"><ArrowRight /></el-icon>
-        <span class="term__title">终端</span>
-      </button>
+        <button
+          class="term__toggle"
+          type="button"
+          title="收起终端"
+          @click="collapsed = true"
+        >
+          <el-icon class="term__caret">
+            <ArrowRight />
+          </el-icon>
+          <span class="term__title">终端</span>
+        </button>
 
         <div class="term__tabs">
           <div
@@ -593,11 +619,11 @@ function clearLogs(): void {
               <el-icon><Delete /></el-icon>
             </button>
           </el-tooltip>
-        <el-tooltip content="收起终端" placement="top" :show-after="400">
-          <button class="tool" type="button" aria-label="收起终端" @click="collapsed = true">
-            <el-icon><ArrowRight /></el-icon>
-          </button>
-        </el-tooltip>
+          <el-tooltip content="收起终端" placement="top" :show-after="400">
+            <button class="tool" type="button" aria-label="收起终端" @click="collapsed = true">
+              <el-icon><ArrowRight /></el-icon>
+            </button>
+          </el-tooltip>
         </div>
       </div>
 
@@ -623,8 +649,8 @@ function clearLogs(): void {
               <span class="line__time mono">{{ line.time }}</span>
               <!-- 先按地址切段：链接单独成段上绿色，空行仍拿空格占住行高 -->
               <span class="line__text mono"><template
-                v-for="(seg, index) in segmentsOf(line.text || ' ')"
-                :key="index"
+                v-for="(seg, segIndex) in segmentsOf(line.text || ' ')"
+                :key="segIndex"
               ><span
                 v-if="seg.url"
                 class="line__link"

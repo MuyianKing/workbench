@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { AiPreviewState } from '@workbench/ai'
 /**
  * AI 对话右侧的**预览栏**：回答里的文件链接（`[测试](../test.md)`）与轮尾「写下 N 个文件」
  * 点开就摊在这里。
@@ -16,12 +17,11 @@
  * 宽度定在卡片自己身上（`:style`），比写在列模板里直 —— 反正拖动时每帧都要改它。
  */
 import { Close } from '@element-plus/icons-vue'
-import type { AiPreviewState } from '@workbench/ai'
 import AiPreviewDoc from '@/components/AiPreviewDoc.vue'
 import AiPreviewHtml from '@/components/AiPreviewHtml.vue'
 import AiPreviewSlides from '@/components/AiPreviewSlides.vue'
-import { startPointerDrag } from '@/composables/use-pointer-drag'
 import MarkdownView from '@/components/MarkdownView.vue'
+import { startPointerDrag } from '@/composables/use-pointer-drag'
 
 const props = defineProps<{
   previews: AiPreviewState[]
@@ -43,14 +43,15 @@ const emit = defineEmits<{
  * global.css 的 body.is-resizing-ai-preview 兜住。
  */
 function onResizeDown(event: PointerEvent): void {
-  if (event.button !== 0) return
+  if (event.button !== 0)
+    return
   event.preventDefault()
 
   const startWidth = props.width
   startPointerDrag({
     start: { x: event.clientX, y: event.clientY },
     bodyClass: 'is-resizing-ai-preview',
-    onMove: (moveEvent, start) => emit('resize', startWidth + (start.x - moveEvent.clientX))
+    onMove: (moveEvent, start) => emit('resize', startWidth + (start.x - moveEvent.clientX)),
   })
 }
 </script>
@@ -87,13 +88,17 @@ function onResizeDown(event: PointerEvent): void {
     <div class="pane__body">
       <section
         v-for="state in previews"
-        :key="state.key"
         v-show="state.key === activeKey"
+        :key="state.key"
         class="pane__page"
         :class="`is-${state.kind}`"
       >
-        <p v-if="state.error" class="pane__note is-fail">{{ state.error }}</p>
-        <p v-else-if="state.loading" class="pane__note">正在打开…</p>
+        <p v-if="state.error" class="pane__note is-fail">
+          {{ state.error }}
+        </p>
+        <p v-else-if="state.loading" class="pane__note">
+          正在打开…
+        </p>
         <template v-else>
           <MarkdownView
             v-if="state.kind === 'markdown'"
@@ -112,7 +117,7 @@ function onResizeDown(event: PointerEvent): void {
             class="pane__img"
             :src="state.imageUrl"
             :alt="state.name"
-          />
+          >
           <pre v-else class="pane__text">{{ state.text }}</pre>
         </template>
       </section>

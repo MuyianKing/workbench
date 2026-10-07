@@ -1,3 +1,5 @@
+import type { AccentInkMode } from '@workbench/appearance'
+import type { BootstrapSnapshot, EffectiveTheme } from '@/types'
 /**
  * 首屏快照，以及「把外观落到 DOM」的两个写入口。
  *
@@ -12,8 +14,7 @@
  * 快照里刻意不含背景图：它是主进程解码压缩出来的 data URL，体积大、天生异步，
  * 只能等 loadBackground 回来（见 store 里的 applyBackground）。
  */
-import { ACCENT_VARIABLE_NAMES, accentVariables, type AccentInkMode } from '@workbench/appearance'
-import type { BootstrapSnapshot, EffectiveTheme } from '@/types'
+import { ACCENT_VARIABLE_NAMES, accentVariables } from '@workbench/appearance'
 
 /**
  * 快照只取一次：入口 main.ts 与 store 各要一回，缓存住省一次跨进程往返。
@@ -28,13 +29,16 @@ let cached: BootstrapSnapshot | null | undefined
  * 调用方一律退回默认值 + 异步加载那条老路：只是没有「首帧即正确」这个优化，功能不受影响。
  */
 export function bootstrapSnapshot(): BootstrapSnapshot | null {
-  if (cached !== undefined) return cached
+  if (cached !== undefined)
+    return cached
 
   cached = null
   try {
     const snapshot = window.workbench?.getBootstrap?.()
-    if (snapshot && snapshot.settings && snapshot.theme) cached = snapshot
-  } catch {
+    if (snapshot && snapshot.settings && snapshot.theme)
+      cached = snapshot
+  }
+  catch {
     // 通道不可用就当作没有快照，别让启动挂在这一步上
   }
   return cached
@@ -59,7 +63,8 @@ export function writeAccentColor(color: string, theme: EffectiveTheme, ink: Acce
 
   for (const name of ACCENT_VARIABLE_NAMES) {
     const value = vars[name]
-    if (value) root.style.setProperty(name, value)
+    if (value)
+      root.style.setProperty(name, value)
     else root.style.removeProperty(name)
   }
 }
@@ -72,7 +77,8 @@ export function writeAccentColor(color: string, theme: EffectiveTheme, ink: Acce
  */
 export function applyBootstrapTheme(): void {
   const snapshot = bootstrapSnapshot()
-  if (!snapshot) return
+  if (!snapshot)
+    return
 
   writeTheme(snapshot.theme)
   writeAccentColor(snapshot.settings.accentColor, snapshot.theme, snapshot.settings.accentInk)

@@ -1,3 +1,4 @@
+import type { NoteRepoState, NoteSyncInput, NoteSyncSummary } from '@workbench/notes'
 /**
  * 知识库（kb）：用户在别处维护的一个独立项目 —— `data/raw/` 放原始资料，`kb/` 放整理好的
  * 条目（frontmatter 的 source 指回原始文件），`index/index.json` 由应用重建（Rust 侧
@@ -13,7 +14,7 @@
  * 它是个启发式：git 操作（checkout / pull）会重写 mtime，但换状态文件、记同步位标
  * 都比它更脆 —— 它不依赖任何额外状态，重启就对得上。口径要换时只改这里。
  */
-import type { NoteRepoState, NoteSyncInput, NoteSyncSummary } from '@workbench/notes'
+import { dayKey } from '@workbench/core'
 
 /** 同步与仓库探测复用笔记那两条通道（本来就是「对任意文件夹、认它自己的 origin」的），形状照搬 */
 export type KbSyncInput = NoteSyncInput
@@ -116,29 +117,34 @@ export function parseKbFrontmatter(text: string): KbFrontmatter {
     created: '',
     updated: '',
     summary: '',
-    source: ''
+    source: '',
   }
-  if (typeof text !== 'string') return empty
+  if (typeof text !== 'string')
+    return empty
 
   const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/)
 
   // 围栏前允许空行；第一行非空行必须是 `---`
   let index = 0
   while (index < lines.length && !lines[index].trim()) index += 1
-  if (lines[index]?.trim() !== '---') return empty
+  if (lines[index]?.trim() !== '---')
+    return empty
   index += 1
 
   const result: KbFrontmatter = { ...empty, tags: [] }
   for (; index < lines.length; index += 1) {
     const line = lines[index].trim()
-    if (line === '---' || line === '...') break
+    if (line === '---' || line === '...')
+      break
 
     const match = /^(title|tags|status|created|updated|summary|source)\s*:\s*(.*)$/.exec(line)
-    if (!match) continue
+    if (!match)
+      continue
 
     const value = match[2].trim()
     // 多行块标量的开头（`|` / `>` 及其变体）：内容在后面几行的缩进里，这里不认
-    if (/^[|>][+-]?$/.test(value)) continue
+    if (/^[|>][+-]?$/.test(value))
+      continue
 
     switch (match[1]) {
       case 'title':
@@ -173,7 +179,7 @@ function parseTagList(value: string): string[] {
     return value
       .slice(1, -1)
       .split(',')
-      .map((part) => unquoteScalar(part.trim()))
+      .map(part => unquoteScalar(part.trim()))
       .filter(Boolean)
   }
   const single = unquoteScalar(value)
@@ -183,8 +189,8 @@ function parseTagList(value: string): string[] {
 /** 去掉一层成对的引号（YAML 单引号 / 双引号） */
 function unquoteScalar(value: string): string {
   if (
-    value.length >= 2 &&
-    ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'")))
+    value.length >= 2
+    && ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith('\'') && value.endsWith('\'')))
   ) {
     return value.slice(1, -1)
   }
@@ -199,7 +205,8 @@ function unquoteScalar(value: string): string {
  * （见仓库的条目格式规范），配不上的条目自然不会参与状态判定。
  */
 export function normalizeKbSource(raw: unknown): string {
-  if (typeof raw !== 'string') return ''
+  if (typeof raw !== 'string')
+    return ''
   return raw
     .replace(/^\uFEFF/, '')
     .trim()
@@ -210,17 +217,17 @@ export function normalizeKbSource(raw: unknown): string {
 /** 扫描清单里的条目文件：`kb/` 下的 `.md`，`_catalog.md` 不算（它是脚本生成的目录） */
 export function kbEntryFiles(entries: KbScanEntry[]): KbScanEntry[] {
   return entries.filter(
-    (entry) =>
-      !entry.isDir &&
-      entry.rel.startsWith(`${KB_DIR}/`) &&
-      entry.name.toLowerCase().endsWith('.md') &&
-      entry.name !== KB_CATALOG_NAME
+    entry =>
+      !entry.isDir
+      && entry.rel.startsWith(`${KB_DIR}/`)
+      && entry.name.toLowerCase().endsWith('.md')
+      && entry.name !== KB_CATALOG_NAME,
   )
 }
 
 /** 扫描清单里的原始数据：`data/raw/` 下的文件，任意后缀（资料可能是 pdf / docx 任何东西） */
 export function kbRawFiles(entries: KbScanEntry[]): KbScanEntry[] {
-  return entries.filter((entry) => !entry.isDir && entry.rel.startsWith(`${KB_RAW_DIR}/`))
+  return entries.filter(entry => !entry.isDir && entry.rel.startsWith(`${KB_RAW_DIR}/`))
 }
 
 /** 按相对路径排（条目清单与原始数据清单都是它）：目录自然聚在一起，同层按名字 */
@@ -263,17 +270,18 @@ export function kbEntryTree(entries: KbEntryMeta[]): KbTreeNode[] {
       : entryMeta.rel
     const segments = inner.split('/')
     const name = segments.pop()
-    if (!name) continue
+    if (!name)
+      continue
 
     let parent = root
     for (const segment of segments) {
-      let folder = parent.children.find((node) => node.kind === 'folder' && node.name === segment)
+      let folder = parent.children.find(node => node.kind === 'folder' && node.name === segment)
       if (!folder) {
         folder = {
           id: parent.id ? `${parent.id}/${segment}` : segment,
           name: segment,
           kind: 'folder',
-          children: []
+          children: [],
         }
         parent.children.push(folder)
       }
@@ -284,7 +292,7 @@ export function kbEntryTree(entries: KbEntryMeta[]): KbTreeNode[] {
       name: entryMeta.title,
       kind: 'entry',
       children: [],
-      status: entryMeta.status
+      status: entryMeta.status,
     })
   }
 
@@ -292,8 +300,10 @@ export function kbEntryTree(entries: KbEntryMeta[]): KbTreeNode[] {
   return root.children
 }
 
-/** 目录在前、同层按名字（数字按值、中文按拼音，与笔记树同一把 collator），逐层递归。
- * 条目树（entry）与原始数据树（file）两种节点的公共骨架，收成一把排 */
+/**
+ * 目录在前、同层按名字（数字按值、中文按拼音，与笔记树同一把 collator），逐层递归。
+ * 条目树（entry）与原始数据树（file）两种节点的公共骨架，收成一把排
+ */
 interface KbTreeBranch {
   name: string
   kind: 'folder' | 'entry' | 'file'
@@ -303,17 +313,20 @@ interface KbTreeBranch {
 function sortKbTree(nodes: KbTreeBranch[]): void {
   nodes.sort(
     (a, b) =>
-      (a.kind === 'folder' ? 0 : 1) - (b.kind === 'folder' ? 0 : 1) || collator.compare(a.name, b.name)
+      (a.kind === 'folder' ? 0 : 1) - (b.kind === 'folder' ? 0 : 1) || collator.compare(a.name, b.name),
   )
   for (const node of nodes) {
-    if (node.children.length) sortKbTree(node.children)
+    if (node.children.length)
+      sortKbTree(node.children)
   }
 }
 
-/** 树里所有目录节点的 id：搜索 / 筛选时整棵树默认摊开用（folder 才有展开态）。
- * 条目树与原始数据树两份节点形状都吃（只看 id、kind 与 children） */
-export function kbTreeFolderIds<T extends { id: string; kind: 'folder' | 'entry' | 'file'; children: T[] }>(
-  nodes: T[]
+/**
+ * 树里所有目录节点的 id：搜索 / 筛选时整棵树默认摊开用（folder 才有展开态）。
+ * 条目树与原始数据树两份节点形状都吃（只看 id、kind 与 children）
+ */
+export function kbTreeFolderIds<T extends { id: string, kind: 'folder' | 'entry' | 'file', children: T[] }>(
+  nodes: T[],
 ): string[] {
   const ids: string[] = []
   for (const node of nodes) {
@@ -374,17 +387,18 @@ export function kbRawTree(items: KbRawItem[]): KbRawTreeNode[] {
       : item.rel
     const segments = inner.split('/')
     const name = segments.pop()
-    if (!name) continue
+    if (!name)
+      continue
 
     let parent = root
     for (const segment of segments) {
-      let folder = parent.children.find((node) => node.kind === 'folder' && node.name === segment)
+      let folder = parent.children.find(node => node.kind === 'folder' && node.name === segment)
       if (!folder) {
         folder = {
           id: parent.id ? `${parent.id}/${segment}` : segment,
           name: segment,
           kind: 'folder',
-          children: []
+          children: [],
         }
         parent.children.push(folder)
       }
@@ -413,15 +427,19 @@ const KB_RAW_TEXT_EXTS = new Set(['txt', 'json', 'csv', 'log', 'xml', 'html', 'h
 export function kbRawViewKind(name: string): KbRawViewKind {
   const dot = name.lastIndexOf('.')
   const ext = dot > 0 ? name.slice(dot + 1).toLowerCase() : ''
-  if (ext === 'md' || ext === 'markdown') return 'markdown'
-  if (KB_RAW_TEXT_EXTS.has(ext)) return 'text'
+  if (ext === 'md' || ext === 'markdown')
+    return 'markdown'
+  if (KB_RAW_TEXT_EXTS.has(ext))
+    return 'text'
   return 'external'
 }
 
 /** 原始数据状态的界面用词：未入库 / 有更新要催，已入库照实说（清单与查看共用这一份） */
 export function kbRawStatusText(status: KbRawStatus): string {
-  if (status === 'pending') return '未入库'
-  if (status === 'stale') return '有更新'
+  if (status === 'pending')
+    return '未入库'
+  if (status === 'stale')
+    return '有更新'
   return '已入库'
 }
 
@@ -446,7 +464,8 @@ export function matchKbRawStatus(rawFiles: KbScanEntry[], kbEntries: KbEntryMeta
   const byInner = new Map<string, KbEntryMeta[]>()
   for (const entry of kbEntries) {
     const source = normalizeKbSource(entry.source).toLowerCase()
-    if (!source) continue
+    if (!source)
+      continue
     pushEntry(byFull, source, entry)
     // 不带前缀的 source（直接相对 data/raw 的写法）进的就是内层键本尊
     const inner = source.startsWith(`${KB_RAW_DIR}/`) ? source.slice(KB_RAW_DIR.length + 1) : source
@@ -455,25 +474,26 @@ export function matchKbRawStatus(rawFiles: KbScanEntry[], kbEntries: KbEntryMeta
 
   return rawFiles.map((file) => {
     const key = file.rel.toLowerCase()
-    const linked =
-      byFull.get(key) ?? byInner.get(key.slice(KB_RAW_DIR.length + 1)) ?? []
+    const linked
+      = byFull.get(key) ?? byInner.get(key.slice(KB_RAW_DIR.length + 1)) ?? []
     const newest = linked.reduce((max, entry) => Math.max(max, entry.mtimeMs), 0)
-    const status: KbRawStatus =
-      linked.length === 0 ? 'pending' : newest < file.mtimeMs ? 'stale' : 'synced'
+    const status: KbRawStatus
+      = linked.length === 0 ? 'pending' : newest < file.mtimeMs ? 'stale' : 'synced'
     return {
       rel: file.rel,
       name: file.name,
       ext: extOf(file.name),
       mtimeMs: file.mtimeMs,
       status,
-      entryRels: [...linked].sort((a, b) => b.mtimeMs - a.mtimeMs).map((entry) => entry.rel)
+      entryRels: [...linked].sort((a, b) => b.mtimeMs - a.mtimeMs).map(entry => entry.rel),
     }
   })
 }
 
 function pushEntry(map: Map<string, KbEntryMeta[]>, key: string, entry: KbEntryMeta): void {
   const list = map.get(key)
-  if (list) list.push(entry)
+  if (list)
+    list.push(entry)
   else map.set(key, [entry])
 }
 
@@ -491,15 +511,15 @@ export interface KbStats {
 export function kbStats(entries: KbEntryMeta[], rawItems: KbRawItem[]): KbStats {
   return {
     entries: entries.length,
-    drafts: entries.filter((entry) => entry.status === 'draft').length,
+    drafts: entries.filter(entry => entry.status === 'draft').length,
     raws: rawItems.length,
-    pending: rawItems.filter((item) => item.status === 'pending').length,
-    stale: rawItems.filter((item) => item.status === 'stale').length
+    pending: rawItems.filter(item => item.status === 'pending').length,
+    stale: rawItems.filter(item => item.status === 'stale').length,
   }
 }
 
 /** 标签分布：按数量降序、同数按名字，界面取前几名展示 */
-export function kbTagCounts(entries: KbEntryMeta[]): Array<{ tag: string; count: number }> {
+export function kbTagCounts(entries: KbEntryMeta[]): Array<{ tag: string, count: number }> {
   const counts = new Map<string, number>()
   for (const entry of entries) {
     for (const tag of entry.tags) counts.set(tag, (counts.get(tag) ?? 0) + 1)
@@ -519,13 +539,16 @@ export function kbTagCounts(entries: KbEntryMeta[]): Array<{ tag: string; count:
  */
 export function parseKbIndex(text: string): KbIndexInfo | null {
   try {
-    const raw = JSON.parse(text) as { generated_at?: unknown; count?: unknown } | null
-    if (!raw || typeof raw !== 'object') return null
+    const raw = JSON.parse(text) as { generated_at?: unknown, count?: unknown } | null
+    if (!raw || typeof raw !== 'object')
+      return null
     const generatedAt = typeof raw.generated_at === 'string' ? raw.generated_at : ''
     const count = typeof raw.count === 'number' && Number.isFinite(raw.count) ? raw.count : -1
-    if (!generatedAt || count < 0) return null
+    if (!generatedAt || count < 0)
+      return null
     return { generatedAt, count }
-  } catch {
+  }
+  catch {
     return null
   }
 }
@@ -535,8 +558,8 @@ export function parseKbIndex(text: string): KbIndexInfo | null {
  *
  * 本机时区，不是 UTC —— 由渲染层算好交给 Rust，而不是让 Rust 自己从时间戳推
  * （那边要么引一个日期库，要么就得自己处理时区）。
+ * 实现走 core 的 `dayKey`（活跃度、用量、工作日志的日期键同一条口径），名字留给 kb 自己的语义。
  */
 export function todayIsoDate(now: Date = new Date()): string {
-  const pad = (value: number): string => String(value).padStart(2, '0')
-  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
+  return dayKey(now)
 }

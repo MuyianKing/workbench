@@ -1,39 +1,13 @@
+import type { VaultEntry, VaultItem, VaultRecord } from './vault'
 import { describe, expect, it } from 'vitest'
-import {
-  createVaultKey,
-  emptyVaultEntry,
-  encodeKeyString,
-  filterVaultRecords,
-  groupVaultRecords,
-  isVaultPrivateKey,
-  isVaultPublicKey,
-  lastChangeAt,
-  mergeVaultItems,
-  open,
-  openAll,
-  parseKeyString,
-  parseVaultFile,
-  publicKeyFingerprint,
-  publicKeyOf,
-  sameVaultKey,
-  sanitizeVaultEntry,
-  seal,
-  sortVaultRecords,
-  tombstoneOf,
-  vaultEntryProblem,
-  vaultFileOf,
-  vaultGroups,
-  type VaultEntry,
-  type VaultItem,
-  type VaultRecord
-} from './vault'
+import { createVaultKey, emptyVaultEntry, encodeKeyString, filterVaultRecords, groupVaultRecords, isVaultPrivateKey, isVaultPublicKey, lastChangeAt, mergeVaultItems, open, openAll, parseKeyString, parseVaultFile, publicKeyFingerprint, publicKeyOf, sameVaultKey, sanitizeVaultEntry, seal, sortVaultRecords, tombstoneOf, vaultEntryProblem, vaultFileOf, vaultGroups } from './vault'
 
 /** 一份固定的正文，避免每个用例各写一遍 */
 const ENTRY: VaultEntry = {
   name: 'GitHub',
   password: '正确的马电池订书钉',
   notes: '两段式验证开着',
-  group: '开发'
+  group: '开发',
 }
 
 /** 造一条信封：只填合并逻辑关心的那几个字段 */
@@ -89,11 +63,11 @@ describe('加密与解密', () => {
     const file = vaultFileOf(publicKeyOf(key), [
       { id: 'good', updatedAt: 1, by: 'a', ...good },
       { id: 'bad', updatedAt: 2, by: 'a', ...bad },
-      { id: 'gone', updatedAt: 3, by: 'a', deleted: true }
+      { id: 'gone', updatedAt: 3, by: 'a', deleted: true },
     ])
 
     const { records, failed } = await openAll(key, file)
-    expect(records.map((record) => record.id)).toEqual(['good'])
+    expect(records.map(record => record.id)).toEqual(['good'])
     expect(failed).toEqual(['bad'])
   })
 })
@@ -101,7 +75,7 @@ describe('加密与解密', () => {
 describe('合并（两台机器各算一次必须得到同一份）', () => {
   it('只在一边出现过的直接留下', () => {
     const merged = mergeVaultItems([item('a', 1, 'x')], [item('b', 2, 'y')])
-    expect(merged.map((entry) => entry.id)).toEqual(['a', 'b'])
+    expect(merged.map(entry => entry.id)).toEqual(['a', 'b'])
   })
 
   it('同一个 id 取改动时间新的那份', () => {
@@ -143,13 +117,13 @@ describe('合并（两台机器各算一次必须得到同一份）', () => {
     const one = mergeVaultItems(local, remote)
     const other = mergeVaultItems(remote, local)
 
-    expect(one.map((entry) => entry.id)).toEqual(['a', 'b', 'c'])
+    expect(one.map(entry => entry.id)).toEqual(['a', 'b', 'c'])
     expect(JSON.stringify(one)).toBe(JSON.stringify(other))
   })
 
   it('墓碑也参与排序，不因为它是墓碑就飘到别处', () => {
     const merged = mergeVaultItems([item('b', 1, 'x'), tombstoneOf({ id: 'a' }, 2, 'x')], [])
-    expect(merged.map((entry) => entry.id)).toEqual(['a', 'b'])
+    expect(merged.map(entry => entry.id)).toEqual(['a', 'b'])
   })
 })
 
@@ -174,11 +148,11 @@ describe('文件解析', () => {
         { id: '', updatedAt: 1, by: 'x', pub: 'p', iv: 'i', ct: 'c' },
         { id: 'b', updatedAt: 'nope', by: 'x' },
         { id: 'c', updatedAt: 1, by: 'x', pub: '', iv: 'i', ct: 'c' },
-        item('d', 2, 'x')
-      ]
+        item('d', 2, 'x'),
+      ],
     })
 
-    expect(parsed?.file.items.map((entry) => entry.id)).toEqual(['a', 'd'])
+    expect(parsed?.file.items.map(entry => entry.id)).toEqual(['a', 'd'])
     expect(parsed?.dropped).toBe(3)
   })
 
@@ -192,9 +166,9 @@ describe('文件解析', () => {
     const parsed = parseVaultFile({
       version: 1,
       key,
-      items: [item('c', 1, 'x'), item('a', 1, 'x'), item('b', 1, 'x')]
+      items: [item('c', 1, 'x'), item('a', 1, 'x'), item('b', 1, 'x')],
     })
-    expect(parsed?.file.items.map((entry) => entry.id)).toEqual(['a', 'b', 'c'])
+    expect(parsed?.file.items.map(entry => entry.id)).toEqual(['a', 'b', 'c'])
   })
 })
 
@@ -211,9 +185,9 @@ describe('密钥串与指纹', () => {
     expect(parseKeyString('')).toBeNull()
     expect(parseKeyString('aGVsbG8=')).toBeNull()
     // 前缀对、内容也解得出 base64，但它不是一把密钥
-    expect(parseKeyString('workbench-vault-v1.' + btoa('{"kty":"RSA"}'))).toBeNull()
+    expect(parseKeyString(`workbench-vault-v1.${btoa('{"kty":"RSA"}')}`)).toBeNull()
     // 公钥那半（没有 d）不能当私钥用
-    expect(parseKeyString('workbench-vault-v1.' + btoa(JSON.stringify(publicKeyOf(key))))).toBeNull()
+    expect(parseKeyString(`workbench-vault-v1.${btoa(JSON.stringify(publicKeyOf(key)))}`)).toBeNull()
   })
 
   it('指纹只看公钥：同一把密钥稳定，换一把就不同', async () => {
@@ -261,7 +235,7 @@ describe('条目收敛', () => {
     expect(sanitizeVaultEntry({ title: '老记录', password: 'p' })).toEqual({
       ...emptyVaultEntry(),
       name: '老记录',
-      password: 'p'
+      password: 'p',
     })
     // 两个都有时以 name 为准
     expect(sanitizeVaultEntry({ name: '新的', title: '老的' }).name).toBe('新的')
@@ -282,26 +256,26 @@ describe('查找、分组与排序', () => {
     id,
     updatedAt: 1,
     by: 'me',
-    ...fields
+    ...fields,
   })
 
   const records = [
     record('1', { name: 'GitHub', group: '开发', notes: '两段式验证开着' }),
     record('2', { name: '知乎', group: '日常' }),
     record('3', { name: '内网 OA' }),
-    record('4', { name: '宽带账号', group: '日常', password: 'abc123' })
+    record('4', { name: '宽带账号', group: '日常', password: 'abc123' }),
   ]
 
   it('名字、备注、分组里任一处命中都算', () => {
-    expect(filterVaultRecords(records, 'github').map((entry) => entry.id)).toEqual(['1'])
-    expect(filterVaultRecords(records, '两段式').map((entry) => entry.id)).toEqual(['1'])
-    expect(filterVaultRecords(records, '日常').map((entry) => entry.id)).toEqual(['2', '4'])
+    expect(filterVaultRecords(records, 'github').map(entry => entry.id)).toEqual(['1'])
+    expect(filterVaultRecords(records, '两段式').map(entry => entry.id)).toEqual(['1'])
+    expect(filterVaultRecords(records, '日常').map(entry => entry.id)).toEqual(['2', '4'])
     // 密码**不参与搜索**：它是拿来复制的，不是拿来当关键词的（搜密码等于把明文打进搜索框）
     expect(filterVaultRecords(records, 'abc123')).toEqual([])
   })
 
   it('关键词空（或只有空白）时原样返回，且不重排', () => {
-    expect(filterVaultRecords(records, '  ').map((entry) => entry.id)).toEqual(['1', '2', '3', '4'])
+    expect(filterVaultRecords(records, '  ').map(entry => entry.id)).toEqual(['1', '2', '3', '4'])
   })
 
   it('分组取值现算：按名字排，空分组不进清单', () => {
@@ -322,37 +296,37 @@ describe('查找、分组与排序', () => {
 
   it('分段：相邻的同组连成一段，标题空组叫「未分组」', () => {
     const sections = groupVaultRecords(sortVaultRecords(records))
-    expect(sections.map((section) => [section.label, section.records.length])).toEqual([
+    expect(sections.map(section => [section.label, section.records.length])).toEqual([
       ['开发', 1],
       ['日常', 2],
-      ['未分组', 1]
+      ['未分组', 1],
     ])
     // key 是分组名本身（空串代表未分组），label 才是给人看的那个
-    expect(sections.map((section) => section.key)).toEqual(['开发', '日常', ''])
+    expect(sections.map(section => section.key)).toEqual(['开发', '日常', ''])
   })
 
   it('分段保留传进来的顺序，一段都不漏', () => {
     const sections = groupVaultRecords(sortVaultRecords(records))
-    const flat = sections.flatMap((section) => section.records.map((entry) => entry.id))
-    expect(flat).toEqual(sortVaultRecords(records).map((entry) => entry.id))
+    const flat = sections.flatMap(section => section.records.map(entry => entry.id))
+    expect(flat).toEqual(sortVaultRecords(records).map(entry => entry.id))
     expect(groupVaultRecords([])).toEqual([])
   })
 
   it('卡片顺序：先按分组、组内按名字，未分组排最后', () => {
     const sorted = sortVaultRecords(records)
-    expect(sorted.map((entry) => entry.name)).toEqual(['GitHub', '宽带账号', '知乎', '内网 OA'])
+    expect(sorted.map(entry => entry.name)).toEqual(['GitHub', '宽带账号', '知乎', '内网 OA'])
     // 未分组垫底，即使它的名字排在最前
     expect(sorted[sorted.length - 1].group).toBe('')
   })
 
   it('名字里的数字按大小排，不逐字比', () => {
     const sorted = sortVaultRecords([record('1', { name: '服务器 10' }), record('2', { name: '服务器 9' })])
-    expect(sorted.map((entry) => entry.name)).toEqual(['服务器 9', '服务器 10'])
+    expect(sorted.map(entry => entry.name)).toEqual(['服务器 9', '服务器 10'])
   })
 
   it('顺序是稳的：分组与名字都一样时按 id 兜底', () => {
     const same = [record('b', { name: '同名' }), record('a', { name: '同名' })]
-    expect(sortVaultRecords(same).map((entry) => entry.id)).toEqual(['a', 'b'])
+    expect(sortVaultRecords(same).map(entry => entry.id)).toEqual(['a', 'b'])
   })
 
   it('最近改动时间取最大的那条，一条都没有时是 0', () => {

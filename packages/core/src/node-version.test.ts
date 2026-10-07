@@ -24,7 +24,7 @@ describe('satisfiesNodeVersion', () => {
     expect(satisfiesNodeVersion('>=18 <21', '17.9.1')).toBe(false)
   })
 
-  it('X 区间与精确版本', () => {
+  it('x 区间与精确版本', () => {
     expect(satisfiesNodeVersion('18', '18.1.0')).toBe(true)
     expect(satisfiesNodeVersion('18', '19.0.0')).toBe(false)
     expect(satisfiesNodeVersion('18.x', '18.9.9')).toBe(true)

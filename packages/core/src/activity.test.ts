@@ -1,18 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  ACTIVITY_DAYS,
-  ACTIVITY_WEEKS,
-  addDays,
-  buildActivityCalendar,
-  bumpDay,
-  dayKey,
-  levelOf,
-  monthLabels,
-  pruneDays,
-  sanitizeActivity,
-  startOfWeek,
-  streakOf
-} from './activity'
+import { ACTIVITY_DAYS, ACTIVITY_WEEKS, addDays, buildActivityCalendar, bumpDay, dayKey, levelOf, monthLabels, pruneDays, sanitizeActivity, startOfWeek, streakOf } from './activity'
 
 /** 固定的「今天」，避免测试跑到跨天/跨年就失效 */
 const TODAY = new Date(2026, 8, 10) // 2026-09-10
@@ -95,8 +82,8 @@ describe('sanitizeActivity', () => {
         '2026-09-09': 2.7,
         'not-a-date': 5,
         '2026-09-08': 0,
-        '2026-09-07': '3'
-      })
+        '2026-09-07': '3',
+      }),
     ).toEqual({ [TODAY_KEY]: 4, '2026-09-09': 2 })
   })
 
@@ -118,14 +105,14 @@ describe('buildActivityCalendar', () => {
 
   it('最后一列是本周，今天之后的格子标记为未来', () => {
     const calendar = buildActivityCalendar(counts, TODAY)
-    const flat = calendar.weeks.flatMap((week) => week.days)
-    const index = flat.findIndex((day) => day.date === TODAY_KEY)
+    const flat = calendar.weeks.flatMap(week => week.days)
+    const index = flat.findIndex(day => day.date === TODAY_KEY)
 
     expect(index).toBeGreaterThan(-1)
     expect(flat[index].future).toBe(false)
     // 今天之前都不是未来；今天之后全是未来
-    expect(flat.slice(0, index).some((day) => day.future)).toBe(false)
-    expect(flat.slice(index + 1).every((day) => day.future)).toBe(true)
+    expect(flat.slice(0, index).some(day => day.future)).toBe(false)
+    expect(flat.slice(index + 1).every(day => day.future)).toBe(true)
   })
 
   it('只统计区间内的次数，更老的记录不算进去', () => {
@@ -156,7 +143,7 @@ describe('buildActivityCalendar', () => {
       '2026-08-02': 1,
       '2026-08-03': 1,
       '2026-08-04': 1,
-      [TODAY_KEY]: 1
+      [TODAY_KEY]: 1,
     }
     const calendar = buildActivityCalendar(old, TODAY)
     expect(calendar.streak).toBe(1)
@@ -168,7 +155,7 @@ describe('buildActivityCalendar', () => {
     expect(calendar.total).toBe(0)
     expect(calendar.streak).toBe(0)
     expect(calendar.bestStreak).toBe(0)
-    expect(calendar.weeks.flatMap((w) => w.days).every((day) => day.level === 0)).toBe(true)
+    expect(calendar.weeks.flatMap(w => w.days).every(day => day.level === 0)).toBe(true)
   })
 
   it('counts 缺失时不炸', () => {

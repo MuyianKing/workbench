@@ -36,6 +36,7 @@
     "@workbench/weather": "workspace:*",
     "@workbench/work-log": "workspace:*",
     "docx-preview": "^0.4.1",
+    "dayjs": "^1.11.23",
     "element-plus": "^2.14.7",
     "pinia": "^4.0.3",
     "vditor": "^4.0.0",

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { RingLog } from './log-ring'
 
-describe('RingLog', () => {
+describe('ringLog', () => {
   it('没写满时按写入顺序导出', () => {
     const ring = new RingLog<number>(4)
     ring.pushMany([1, 2, 3])

@@ -18,8 +18,9 @@
  * 每一行都自足（模型与用量都在同一行），所以适配层可以**按文件**缓存解析结果。
  */
 
+import type { TokenCounters, TokenDays } from './token-usage'
 import { dayKey } from '@workbench/core'
-import { addCounters, emptyCounters, isDateKey, type TokenCounters, type TokenDays } from './token-usage'
+import { addCounters, emptyCounters, isDateKey } from './token-usage'
 
 /** 事件里没带模型名时的兜底名（正常每条都带，只防残缺事件） */
 export const QODER_DEFAULT_MODEL = 'qoder'
@@ -45,34 +46,40 @@ function creditsOf(value: unknown): number {
  */
 export function collectQoderSessionText(text: string, days: TokenDays): void {
   for (const line of text.split('\n')) {
-    if (!line) continue
+    if (!line)
+      continue
 
     let event: QoderEvent
     try {
       event = JSON.parse(line) as QoderEvent
-    } catch {
+    }
+    catch {
       // 会话文件是追加写的：最后一行可能只写了一半，下次刷新就会带上完整的那条
       continue
     }
 
-    if (event.type !== 'assistant') continue
+    if (event.type !== 'assistant')
+      continue
     const message = event.message
-    if (!message || typeof message !== 'object') continue
+    if (!message || typeof message !== 'object')
+      continue
 
     const credits = creditsOf(message.usage?.credits)
-    if (credits <= 0) continue
+    if (credits <= 0)
+      continue
 
     // 时间戳是 UTC 的 ISO 串（实测如此）；顺手也认毫秒数，解析不出来（缺字段 / 半行）
     // 就丢这一条，不硬塞进今天
     const raw = event.timestamp
-    const timestamp =
-      typeof raw === 'number' ? raw : Date.parse(typeof raw === 'string' ? raw : '')
+    const timestamp
+      = typeof raw === 'number' ? raw : Date.parse(typeof raw === 'string' ? raw : '')
     const date = dayKey(timestamp)
-    if (!isDateKey(date)) continue
+    if (!isDateKey(date))
+      continue
 
     const declared = message.model
-    const model =
-      typeof declared === 'string' && declared.trim() ? declared.trim() : QODER_DEFAULT_MODEL
+    const model
+      = typeof declared === 'string' && declared.trim() ? declared.trim() : QODER_DEFAULT_MODEL
 
     const step: TokenCounters = {
       // Qoder 不报 token，这几个字段一律留 0，不拿额度去折算
@@ -83,7 +90,7 @@ export function collectQoderSessionText(text: string, days: TokenDays): void {
       cacheWriteTokens: 0,
       credits,
       // 一条 assistant 用量记的就是一次请求
-      requests: 1
+      requests: 1,
     }
 
     const modelDays = (days[date] ??= {})
