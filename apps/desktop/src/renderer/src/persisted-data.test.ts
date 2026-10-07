@@ -242,6 +242,38 @@ describe('老数据搬家', () => {
     expect(appearance.cardOpacity).toBe(100)
     expect(appearance.terminalHeight).toBe(DEFAULT_APPEARANCE.terminalHeight)
   })
+
+  it('单个 mailAccount 搬成 mailAccounts 清单，旧字段不再写回', () => {
+    const value = sanitizeSettings({
+      mailAccount: { address: 'A@163.com', imapHost: 'imap.163.com', imapPort: 993, smtpHost: 'smtp.163.com', smtpPort: 465 }
+    })
+    expect(value.mailAccounts).toHaveLength(1)
+    expect(value.mailAccounts[0].address).toBe('a@163.com')
+    expect(value.mailAccounts[0].imapHost).toBe('imap.163.com')
+    // 授权码按地址住在凭据管理器里，搬清单不用动它；旧字段清掉免得一直写回
+    expect('mailAccount' in (value as unknown as Record<string, unknown>)).toBe(false)
+  })
+
+  it('mailAccounts 清单照常收敛：没地址的丢、按地址去重', () => {
+    const value = sanitizeSettings({
+      mailAccounts: [{ address: 'a@163.com' }, { address: 'a@163.com' }, { imapHost: 'x' }, { address: 'b@qq.com' }]
+    })
+    expect(value.mailAccounts.map((account) => account.address)).toEqual(['a@163.com', 'b@qq.com'])
+    expect(value.mailAccounts[1].imapHost).toBe('imap.qq.com')
+  })
+
+  it('后台检查周期：没填回默认 30，0 保留为关闭，其余夹进范围', () => {
+    expect(sanitizeSettings({}).mailPollMinutes).toBe(30)
+    expect(sanitizeSettings({ mailPollMinutes: 0 }).mailPollMinutes).toBe(0)
+    expect(sanitizeSettings({ mailPollMinutes: 10 }).mailPollMinutes).toBe(10)
+    expect(sanitizeSettings({ mailPollMinutes: 1 }).mailPollMinutes).toBe(1)
+    expect(sanitizeSettings({ mailPollMinutes: -3 }).mailPollMinutes).toBe(1)
+    expect(sanitizeSettings({ mailPollMinutes: 'x' }).mailPollMinutes).toBe(30)
+  })
+
+  it('两边都没有时清单是空的（出口关闭）', () => {
+    expect(sanitizeSettings({}).mailAccounts).toEqual([])
+  })
 })
 
 describe('theme.json 的整份收敛（适配层视角）', () => {

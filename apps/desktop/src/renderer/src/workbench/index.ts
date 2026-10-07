@@ -21,6 +21,7 @@ import type {
   CommandEntry,
   EffectiveTheme,
   InstallablePackageManager,
+  MailNotifyPayload,
   Project,
   Result,
   TerminalKind,
@@ -685,6 +686,10 @@ function createApi(): WorkbenchApi {
     onQuitConfirm: (handler: Parameters<WorkbenchApi['onQuitConfirm']>[0]) =>
       events.subscribe('quitConfirm', handler),
 
+    /** 邮件系统通知被点了（Rust 已唤出主窗口）：换页并打开那封信由 store 接手 */
+    onMailNotifyClick: (handler: Parameters<WorkbenchApi['onMailNotifyClick']>[0]) =>
+      events.subscribe('mailNotifyClick', handler),
+
     /** 把用户的选择回传后端：后端在另一个线程里等着它决定「停进程还是留着」 */
     respondQuitConfirm: (choice: Parameters<WorkbenchApi['respondQuitConfirm']>[0]) => {
       void invoke('resolve_quit_choice', { choice })
@@ -715,6 +720,8 @@ export function installTauriWorkbench(): void {
   ai.installAiListeners()
   // 退出确认：后端问「还有项目在跑，要不要先停掉」，转成渲染层认识的事件
   listen<{ count: number }>('app:quit-confirm', (payload) => events.emit('quitConfirm', payload))
+  // 邮件通知点击：Rust 弹的系统 toast 被点了，载荷是（账户, uid）
+  listen<MailNotifyPayload>('mail:notify-click', (payload) => events.emit('mailNotifyClick', payload))
   window.workbench = createApi()
 }
 

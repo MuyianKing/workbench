@@ -1,11 +1,13 @@
-//! 邮箱（网易 163 / 126）：IMAP 收信 + SMTP 发信。
+//! 邮箱（163 / 126 / QQ 等用户配置的 IMAP/SMTP 账户，可同时配多个 —— 账户清单在
+//! 渲染层，这里一个账户一条命令，收发各一台）：IMAP 收信 + SMTP 发信。
 //!
 //! **联网边界（重要）**：这是第十条「由用户显式开启」的出口 —— 只有邮箱页的账户
-//! 配置里填了邮箱地址与客户端授权码（网易邮箱后台开通 IMAP/SMTP 服务后生成）才会
-//! 连接，留空即关闭。连接目标就是用户配置的那两台收发服务器，主机名不设白名单 ——
+//! 配置里填了邮箱地址与客户端授权码（网易 / QQ 邮箱后台开通 IMAP/SMTP 服务后生成）
+//! 才会连接，留空即关闭。连接目标就是用户配置的那两台收发服务器，主机名不设白名单 ——
 //! 与 AI 助手的 Base URL 同属「地址由用户给」的出口。授权码走 Windows 凭据管理器
-//! （`credentials::store`，DPAPI 按用户加密），不落 JSON、不回渲染层；邮件 HTML
-//! 正文的渲染在 TS 侧禁掉一切外链资源 —— 除收发服务器外，这个功能不产生任何别的请求。
+//! （`credentials::store`，DPAPI 按用户加密，按地址一条），不落 JSON、不回渲染层；
+//! 邮件 HTML 正文的渲染在 TS 侧禁掉一切外链资源 —— 除收发服务器外，这个功能不产生
+//! 任何别的请求。
 //!
 //! **职责分工与 weather.rs 一致**：这一层只做「TLS + 协议传输」，按命令现连现断
 //! （一次会话跑完 LOGOUT，不做常驻连接）；回给渲染层的是结构化摘要与原始报文
@@ -98,7 +100,8 @@ fn write_line(stream: &mut impl Write, line: &str) -> Result<(), String> {
 // ---------- 参数收敛 ----------
 
 /// 邮箱地址：trim、统一小写 —— 凭据管理器的目标名要稳定，大小写不该劈成两条。
-fn clean_address(raw: &str) -> Result<String, String> {
+/// mail_watch.rs 登记后台监视清单时也用它收敛。
+pub(crate) fn clean_address(raw: &str) -> Result<String, String> {
     let value = raw.trim().to_lowercase();
     if !value.contains('@') || value.len() < 3 || value.chars().any(|c| c.is_whitespace() || c.is_control()) {
         return Err(format!("邮箱地址不对：{raw}"));
@@ -108,7 +111,8 @@ fn clean_address(raw: &str) -> Result<String, String> {
 
 /// 服务器地址：宽容一点 —— 用户从别处粘过来常带着协议头、路径甚至 `:端口`，
 /// 都收拾干净；粘了 `host:port` 就以它为准（端口单独的参数作废）。
-fn clean_host(raw: &str, fallback_port: u16) -> Result<(String, u16), String> {
+/// 后台监视清单登记时也用它收敛（mail_watch.rs）。
+pub(crate) fn clean_host(raw: &str, fallback_port: u16) -> Result<(String, u16), String> {
     let mut text = raw.trim().to_string();
     if let Some(offset) = text.find("://") {
         text = text[offset + 3..].to_string();
@@ -257,8 +261,10 @@ impl Imap {
         Ok(())
     }
 
-    /// 选中 INBOX，返回里面的邮件总数（SELECT 响应里的 `* n EXISTS`）。
-    fn select_inbox(&mut self) -> Result<usize, String> {
+    /// 选中 INBOX，返回里面的邮件总数（SELECT 响应里的 `* n EXISTS`）与
+    /// UIDVALIDITY（`* OK [UIDVALIDITY n]`，服务器不报就 None）—— 后台监视靠它
+    /// 认「UID 序列是不是换过一茬」，换过就不能拿旧 UID 比新邮件。
+    fn select_inbox(&mut self) -> Result<InboxInfo, String> {
         let attempt = self.command("SELECT INBOX");
         let buffer = match attempt {
             Ok(buffer) => buffer,
@@ -269,8 +275,12 @@ impl Imap {
             }
             Err(err) => return Err(err),
         };
-        exists_from_select(&String::from_utf8_lossy(&buffer))
-            .ok_or_else(|| "服务器没报收件箱里的邮件数".into())
+        let text = String::from_utf8_lossy(&buffer);
+        let exists = exists_from_select(&text).ok_or("服务器没报收件箱里的邮件数")?;
+        Ok(InboxInfo {
+            exists,
+            uidvalidity: uidvalidity_from_select(&text),
+        })
     }
 
     /// 拉一段序号区间的邮件摘要（UID / 已读标记 / 头部三件套 / 结构）。
@@ -300,10 +310,37 @@ impl Imap {
         Ok(())
     }
 
+    /// 删一批：同一条会话里把要删的都标上 \Deleted，再一次 EXPUNGE 收走。
+    /// EXPUNGE 会清掉邮箱里**所有**带 \Deleted 的信 —— 本命令每次独立连接、
+    /// 只标这一批，所以收走的就只有它们；单封也走这条路（一个元素的集合）。
+    fn delete(&mut self, uids: &[u64]) -> Result<(), String> {
+        let set = uid_set(uids);
+        if set.is_empty() {
+            return Err("没有要删的邮件".into());
+        }
+        self.command(&format!("UID STORE {set} +FLAGS.SILENT (\\Deleted)"))?;
+        self.command("EXPUNGE")?;
+        Ok(())
+    }
+
     /// 收尾。失败无所谓 —— 连接本来就要关。
     fn logout(&mut self) {
         let _ = self.command("LOGOUT");
     }
+}
+
+/// UID 集合串：升序、去重、滤掉 0（uid 从 1 起），逗号连接 —— `UID STORE 3,5,9 ...`。
+/// 元素全是 u64，拼出来必是合法的 uid 集，不存在注入一说了。
+fn uid_set(uids: &[u64]) -> String {
+    let mut values = uids.to_vec();
+    values.sort_unstable();
+    values.dedup();
+    values.retain(|uid| *uid > 0);
+    values
+        .iter()
+        .map(|uid| uid.to_string())
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 /// IMAP 引号串：反斜杠与双引号要转义。地址与授权码都经这里进 LOGIN。
@@ -330,6 +367,13 @@ fn literal_size(line: &[u8]) -> Option<usize> {
     std::str::from_utf8(&line[cursor..digits_end]).ok()?.parse().ok()
 }
 
+/// SELECT 一次拿回的两样：邮件总数与 UIDVALIDITY（监视模块比对新邮件用）。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct InboxInfo {
+    pub exists: usize,
+    pub uidvalidity: Option<u64>,
+}
+
 /// SELECT 响应里的 `* 42 EXISTS`。
 fn exists_from_select(buffer: &str) -> Option<usize> {
     for line in buffer.split('\n') {
@@ -348,6 +392,18 @@ fn exists_from_select(buffer: &str) -> Option<usize> {
 /// 网易 SELECT 被拒的招牌错误，补发 ID 重试的依据。
 fn is_unsafe_login(message: &str) -> bool {
     message.to_lowercase().contains("unsafe")
+}
+
+/// SELECT 响应里的 `* OK [UIDVALIDITY 385752904] UIDs valid`。响应码本身大小写不敏感。
+fn uidvalidity_from_select(buffer: &str) -> Option<u64> {
+    let lowered = buffer.to_ascii_lowercase();
+    let start = lowered.find("[uidvalidity ")? + "[uidvalidity ".len();
+    let rest = &lowered[start..];
+    let digits: &str = rest.split(|c: char| !c.is_ascii_digit()).next()?;
+    if digits.is_empty() {
+        return None;
+    }
+    digits.parse().ok()
 }
 
 /// 在字节缓冲里找子串（windows 对短于 needle 的切片会 panic，先把门把住）。
@@ -801,6 +857,26 @@ pub fn mail_verify(
     Ok(())
 }
 
+/// 现连现断拉一次收件箱最近 `window` 封的摘要（连上 → 选中 → 拉摘要 → LOGOUT）。
+/// mail_list 命令与后台监视（mail_watch.rs）走同一套。
+pub(crate) fn fetch_recent_summaries(
+    address: &str,
+    raw_host: &str,
+    raw_port: u16,
+    window: usize,
+) -> Result<(InboxInfo, Vec<MailSummary>), String> {
+    let mut session = open_inbox(address, raw_host, raw_port)?;
+    let info = session.select_inbox()?;
+    let summaries = if info.exists == 0 {
+        Vec::new()
+    } else {
+        let start = info.exists.saturating_sub(window) + 1;
+        session.fetch_summaries(start, info.exists)?
+    };
+    session.logout();
+    Ok((info, summaries))
+}
+
 /// 收件箱最近 N 封的摘要。每次现连现断 —— 个人用量下一次握手几十毫秒，不值得养常驻连接。
 #[tauri::command(async)]
 pub fn mail_list(
@@ -811,15 +887,7 @@ pub fn mail_list(
 ) -> Result<Vec<MailSummary>, String> {
     let address = clean_address(&address)?;
     let limit = limit.clamp(1, 100) as usize;
-    let mut session = open_inbox(&address, &imap_host, imap_port)?;
-    let exists = session.select_inbox()?;
-    let summaries = if exists == 0 {
-        Vec::new()
-    } else {
-        let start = exists.saturating_sub(limit) + 1;
-        session.fetch_summaries(start, exists)?
-    };
-    session.logout();
+    let (_, summaries) = fetch_recent_summaries(&address, &imap_host, imap_port, limit)?;
     Ok(summaries)
 }
 
@@ -857,6 +925,27 @@ pub fn mail_set_seen(
     let mut session = open_inbox(&address, &imap_host, imap_port)?;
     session.select_inbox()?;
     session.store_seen(uid, seen)?;
+    session.logout();
+    Ok(())
+}
+
+/// 删一批：服务器上标 \Deleted 并 EXPUNGE（不可找回 —— 确认在渲染层那一步做过），
+/// 右键删单封传一个元素的数组即可。对着不存在的 uid 服务器只会安静地 OK，
+/// 本地清单反正已经把它们摘掉了，无碍。
+#[tauri::command(async)]
+pub fn mail_delete(
+    address: String,
+    imap_host: String,
+    imap_port: u16,
+    uids: Vec<u64>,
+) -> Result<(), String> {
+    let address = clean_address(&address)?;
+    if uids.is_empty() {
+        return Err("没有要删的邮件".into());
+    }
+    let mut session = open_inbox(&address, &imap_host, imap_port)?;
+    session.select_inbox()?;
+    session.delete(&uids)?;
     session.logout();
     Ok(())
 }
@@ -1023,6 +1112,18 @@ mod tests {
     }
 
     #[test]
+    fn uidvalidity_is_parsed_from_select() {
+        assert_eq!(
+            uidvalidity_from_select("* OK [UIDVALIDITY 385752904] UIDs valid\n* 42 EXISTS\n"),
+            Some(385752904)
+        );
+        // 响应码大小写不敏感
+        assert_eq!(uidvalidity_from_select("* OK [UidValidity 7] ok"), Some(7));
+        assert_eq!(uidvalidity_from_select("* 42 EXISTS\n"), None);
+        assert_eq!(uidvalidity_from_select("* OK [UIDVALIDITY ] empty"), None);
+    }
+
+    #[test]
     fn unsafe_login_is_detected_case_insensitively() {
         assert!(is_unsafe_login("NO SELECT Unsafe Login. Please contact kefu@188.com"));
         assert!(is_unsafe_login("unsafe login"));
@@ -1034,6 +1135,17 @@ mod tests {
         assert_eq!(imap_quote("user@example.com"), "\"user@example.com\"");
         assert_eq!(imap_quote("a\"b"), "\"a\\\"b\"");
         assert_eq!(imap_quote("a\\b"), "\"a\\\\b\"");
+    }
+
+    // ----- UID 集合 -----
+
+    #[test]
+    fn uid_set_sorts_dedups_and_drops_zero() {
+        assert_eq!(uid_set(&[9, 3, 5]), "3,5,9");
+        assert_eq!(uid_set(&[5, 3, 5, 3]), "3,5");
+        assert_eq!(uid_set(&[0, 7, 0]), "7");
+        assert_eq!(uid_set(&[42]), "42");
+        assert_eq!(uid_set(&[]), "");
     }
 
     // ----- 参数收敛 -----

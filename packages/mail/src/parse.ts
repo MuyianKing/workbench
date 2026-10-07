@@ -133,3 +133,18 @@ export function displayDate(raw: string): string {
   if (Number.isNaN(date.getTime())) return text
   return date.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
 }
+
+/** 头部日期 → 时间戳（多账户合并清单按它排序）。解析不动给 0 —— 没有日期的信排最后。 */
+export function mailTime(raw: string): number {
+  const time = Date.parse(raw.trim())
+  return Number.isNaN(time) ? 0 : time
+}
+
+/** 账户地址 → 清单上的来源标注：本地部分 + 域名第一段（`zhangsan@163`）——
+ *  全地址太长挤不动一行，完整地址由 title 兜着。拆不动的原样给。 */
+export function accountTag(address: string): string {
+  const at = address.indexOf('@')
+  if (at <= 0 || at === address.length - 1) return address
+  const domain = address.slice(at + 1).toLowerCase().split('.')[0]
+  return `${address.slice(0, at)}@${domain}`
+}

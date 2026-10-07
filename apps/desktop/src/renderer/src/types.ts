@@ -478,16 +478,31 @@ export interface AppSettings {
    */
   weatherCity: string
   /**
-   * 邮箱账户的连接参数（`@workbench/mail` 的 MailAccount）：邮箱地址与收发服务器。
+   * 邮箱账户清单（`@workbench/mail` 的 MailAccount[]，可同时配多个 —— 收件箱合并成
+   * 一份按时间排，清单行标注来源；旧数据的单个 mailAccount 在收敛里搬进来）。
    *
-   * 这是**第十个联网出口、且由用户显式开启**：地址填了（且授权码在凭据管理器里）
-   * 才会连用户配置的那两台 IMAP/SMTP 服务器，主机名不设白名单 —— 与 AI 助手的
+   * 这是**第十个联网出口、且由用户显式开启**：清单里有地址（且授权码在凭据管理器里）
+   * 才会连各账户配置的那两台 IMAP/SMTP 服务器，主机名不设白名单 —— 与 AI 助手的
    * Base URL 同属「地址由用户给」的出口。授权码不落这份明文 JSON，它在 Windows
    * 凭据管理器（`Workbench/mail/<地址>/token`，见 src-tauri/src/mail.rs）；
    * 邮件 HTML 正文的外链资源在渲染层一律不加载 —— 除收发服务器外这条功能没有别的目标。
-   * 取值由 @workbench/mail 的 sanitizeMailAccount 收敛。
+   * 取值由 @workbench/mail 的 sanitizeMailAccounts 收敛（逐项 sanitize / 去重 / 上限 5）。
    */
-  mailAccount: MailAccount
+  mailAccounts: MailAccount[]
+  /**
+   * 广告发件人黑名单（邮箱页右击「标记为广告」攒下来的）：一个地址进去，这个发件人
+   * **过去与将来**的信在清单里都算广告（@workbench/mail 的 isBulkMail 第一判法）。
+   * 只对本机成立，进数据文件、不参与外观同步；取值由 sanitizeMailBulkSenders 收敛
+   * （trim / 小写 / 去重 / 认不出像地址的丢掉 / 上限 500）。
+   */
+  mailBulkSenders: string[]
+  /**
+   * 后台新邮件检查的周期（分钟）：0 = 关闭（只保留进页面 / 手动刷新的检查），
+   * 其余夹在 1..1440。周期由邮箱账户弹层里的「新邮件检查」下拉改，改了即生效
+   * （store 的 startWatch 会把整份监视配置重登给 Rust）。取值由
+   * sanitizeMailPollMinutes 收敛（非数字回默认 30）。
+   */
+  mailPollMinutes: number
   /**
    * Token 用量同步仓库地址（git 远程地址），空串表示不同步。
    *
@@ -1601,6 +1616,12 @@ export interface WorkbenchApi {
   onQuitConfirm: (fn: (payload: QuitConfirmPayload) => void) => () => void
   /** 回传退出确认框里选中的结果 */
   respondQuitConfirm: (choice: QuitChoice) => void
+  /**
+   * 邮件后台监视弹的系统通知被点了：Rust 已唤出主窗口，这里换到邮箱页并把
+   * 通知里那封打开。载荷是通知对应的（账户, uid）—— 那封信可能已被删掉或在
+   * 广告段里，找不到时只开页面不报错。
+   */
+  onMailNotifyClick: (fn: (payload: MailNotifyPayload) => void) => () => void
   /** 标题栏自绘窗口按钮：最小化 / 最大化（已最大化时为还原）/ 关闭（仍走托盘那套逻辑） */
   minimizeWindow: () => void
   toggleMaximizeWindow: () => void
@@ -1645,6 +1666,12 @@ export type QuitChoice = 'stop' | 'direct' | 'cancel'
 export interface QuitConfirmPayload {
   /** 仍在运行的进程数：项目与「命令」卡片启动的，外加启动检测按端口认出的外部服务 */
   count: number
+}
+
+/** 邮件系统通知被点击时的载荷：哪个账户的哪一封（uid 是通知时最新那封新邮件） */
+export interface MailNotifyPayload {
+  account: string
+  uid: number
 }
 
 export const IPC = {
@@ -1767,7 +1794,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   aiActiveSession: '',
   aiSkillsOff: [],
   weatherCity: '',
-  mailAccount: { address: '', imapHost: '', imapPort: 0, smtpHost: '', smtpPort: 0 },
+  mailAccounts: [],
+  mailBulkSenders: [],
+  mailPollMinutes: 30,
   tokenSyncRepo: '',
   activeView: 'home',
   // 行为记忆：第一次打开时就是这几个默认档，之后记住用户自己选的那一档

@@ -1,7 +1,10 @@
 <script setup lang="ts">
 /**
- * 写信 / 回信的弹层：收件人、主题、正文与附件，发送走 stores/mail.ts 的 send
- * （报文构建在 @workbench/mail 的 buildMime，SMTP 传输在 Rust）。
+ * 写信 / 回信的弹层：发件邮箱、收件人、主题、正文与附件，发送走 stores/mail.ts 的
+ * send（报文构建在 @workbench/mail 的 buildMime，SMTP 传输在 Rust）。
+ *
+ * 发件邮箱：配了多个账户才要挑（回信默认收信的那个，新邮件是清单里第一个）；
+ * 只有一个账户时这一栏不画 —— 没什么可选的。
  *
  * 附件一次可以挑多个（pickFiles），内容按路径读成 base64（fs_read_base64）——
  * 文件本身是用户在对话框里亲手挑的，读取范围不需要额外圈。发出去之后清空草稿，
@@ -26,6 +29,7 @@ const props = defineProps<{ reply: MailReplyTarget | null }>()
 
 const mail = useMailStore()
 
+const fromAccount = ref('')
 const to = ref('')
 const subject = ref('')
 const body = ref('')
@@ -34,12 +38,16 @@ const formError = ref('')
 /** 收件人输入框的就地校验（store.send 那边还会再拦一遍） */
 const toError = ref('')
 
-/** 每次打开按需起手：回信预填引用，新邮件是空白的；关闭不保留草稿 */
+/** 每次打开按需起手：回信预填引用（用收信的那个账户发），新邮件是空白的；关闭不保留草稿 */
 watch(visible, (open) => {
   if (!open) return
   formError.value = ''
   toError.value = ''
   const reply = props.reply
+  const from = reply?.from ?? ''
+  fromAccount.value = mail.accounts.some((account) => account.address === from)
+    ? from
+    : (mail.accounts[0]?.address ?? '')
   if (reply) {
     to.value = reply.to
     subject.value = /^re:/i.test(reply.subject) ? reply.subject : `Re: ${reply.subject}`
@@ -114,6 +122,7 @@ function attachmentSize(base64: string): string {
 async function send(): Promise<void> {
   if (!validateTo()) return
   const result = await mail.send({
+    from: fromAccount.value,
     to: recipients(),
     subject: subject.value.trim(),
     text: body.value,
@@ -132,6 +141,17 @@ async function send(): Promise<void> {
   <AppDialog v-model="visible" title="写邮件" width="640px" penetrable>
     <div class="comp">
       <el-form label-position="top" class="comp__form" @submit.prevent>
+        <!-- 发件邮箱：配了多个账户才要挑（一个账户没什么可选的，不画） -->
+        <el-form-item v-if="mail.accounts.length > 1" label="发件邮箱">
+          <el-select v-model="fromAccount">
+            <el-option
+              v-for="account in mail.accounts"
+              :key="account.address"
+              :label="account.address"
+              :value="account.address"
+            />
+          </el-select>
+        </el-form-item>
         <el-form-item label="收件人" :error="toError">
           <el-input
             v-model="to"

@@ -95,6 +95,19 @@ export async function setMailSeen(account: MailAccount, uid: number, seen: boole
   )
 }
 
+/** 删一批（服务器上标 \Deleted 并 EXPUNGE —— 不可找回，调用方先确认过）；单封传一个元素的数组。 */
+export async function deleteMails(account: MailAccount, uids: number[]): Promise<Result<null>> {
+  return guard(
+    invoke<null>('mail_delete', {
+      address: account.address,
+      imapHost: account.imapHost,
+      imapPort: account.imapPort,
+      uids
+    }),
+    '删除失败'
+  )
+}
+
 /** 发一封邮件（mime 是 @workbench/mail 的 buildMime 拼好的完整报文）。 */
 export async function sendMail(account: MailAccount, to: string[], mime: string): Promise<Result<null>> {
   return guard(
@@ -117,4 +130,28 @@ export async function saveMailAttachment(path: string, base64: string): Promise<
   } catch (error) {
     return fail(errorText(error, '保存附件失败'))
   }
+}
+
+/**
+ * 把账户清单、广告发件人黑名单与轮询周期交给后台监视（Rust 侧按登记的周期查新邮件，
+ * 有未读的新信弹系统通知）。任何一项变了就整份重登；清单为空或周期 0 = 监视空转，
+ * 出口依旧是「配了账户才开」。授权码不经过这一层（Rust 连的时候自己取）。
+ */
+export async function registerMailWatch(
+  accounts: MailAccount[],
+  bulkSenders: string[],
+  pollMinutes: number
+): Promise<Result<null>> {
+  return guard(
+    invoke<null>('mail_watch_register', {
+      accounts: accounts.map((account) => ({
+        address: account.address,
+        imapHost: account.imapHost,
+        imapPort: account.imapPort
+      })),
+      bulkSenders,
+      pollMinutes
+    }),
+    '登记邮件监视失败'
+  )
 }

@@ -79,12 +79,25 @@ windows-sys = { version = "0.61", features = [
 # Security_Credentials_UI 是 UserConsentVerifier 本体；Win32_System_WinRT + Win32_Foundation
 # 是 IUserConsentVerifierInterop 与 HWND —— 弹验证框必须走带 HWND 的 interop（钉在应用窗口上），
 # 不带窗口的那条会把验证框压在主窗口后面，用户只当没弹出来。
+# 邮件后台监视的系统通知（notify.rs）也走这条路：toast 是 WinRT 的 Windows.UI.Notifications
+# （配 Data_Xml_Dom 拼通知的 XML），dev / 便携运行时没有安装器代建的快捷方式，
+# 用 IShellLinkW + IPropertyStore 自己建一条带 AppUserModelID 的（COM 在 Win32_System_Com /
+# Com_StructuredStorage / UI_Shell / UI_Shell_PropertiesSystem）。这几个 feature 有的是
+# tao 那边已经并集进来的，添进来只是把用到的显式列出 —— 仍是同一个 crate、不新增编译单元。
 # windows / windows-future 都已在编译图里（tao → windows 0.62 → windows-future 0.3，
 # windows-future 不被 windows 转出口所以要单列）—— 只把已有的实现用起来，不新增编译单元。
 windows = { version = "0.62", features = [
+    "Data_Xml_Dom",
+    "Foundation",
     "Security_Credentials_UI",
+    "UI_Notifications",
     "Win32_Foundation",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
     "Win32_System_WinRT",
+    "Win32_UI_Shell",
+    "Win32_UI_Shell_PropertiesSystem",
+    "Win32_System_Variant",
 ] }
 windows-future = "0.3"
 

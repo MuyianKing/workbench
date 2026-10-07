@@ -29,12 +29,15 @@ import { useProjectsStore } from '@/stores/projects'
 import { useNavStore } from '@/stores/nav'
 import { useSettingsStore } from '@/stores/settings'
 import { useWeatherStore } from '@/stores/weather'
+import { useMailStore } from '@/stores/mail'
 
 const store = useProjectsStore()
 const nav = useNavStore()
 const settings = useSettingsStore()
 // 天气是顶栏问候语旁那一小段实况：启动时取一次、之后按自己的间隔续（只在填了城市时才出网）
 const weather = useWeatherStore()
+// 邮件的后台监视也是启动就绪的常驻事：账户清单交给 Rust 每 30 分钟查一轮（stores/mail.ts）
+const mail = useMailStore()
 
 /**
  * 页面清单：id 在 shared/views.ts 里登记，这里给出对应的组件。
@@ -94,6 +97,7 @@ const appStyle = computed(() => {
 onMounted(() => {
   void store.init()
   weather.start()
+  mail.startWatch()
 })
 </script>
 

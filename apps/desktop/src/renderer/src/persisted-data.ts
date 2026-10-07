@@ -56,7 +56,7 @@ import {
   sanitizeVideoTreeExpanded
 } from '@workbench/video'
 import { sanitizeWeatherCity } from '@workbench/weather'
-import { sanitizeMailAccount } from '@workbench/mail'
+import { sanitizeMailAccounts, sanitizeMailBulkSenders, sanitizeMailPollMinutes } from '@workbench/mail'
 import { sanitizeWorkRange, sanitizeWorkSort } from '@workbench/work-log'
 import {
   DEFAULT_SETTINGS,
@@ -181,9 +181,24 @@ export function sanitizeSettings(raw: unknown): StoredSettings {
   delete (value as unknown as Record<string, unknown>).noteSyncRepo
   // 天气城市：老数据文件里没有，默认空串 = 不显示、不联网。空白与超长在这里收敛
   value.weatherCity = sanitizeWeatherCity(value.weatherCity)
-  // 邮箱账户的连接参数（地址 / 收发服务器）：老数据文件里没有，默认全空 = 出口关闭。
-  // 授权码不在这份明文 JSON 里 —— 它在 Windows 凭据管理器（Rust 侧 mail_key_save）
-  value.mailAccount = sanitizeMailAccount(value.mailAccount)
+  // 邮箱账户清单（可同时配多个，收件箱合并按时间排）：老数据文件里没有，默认空清单 =
+  // 出口关闭。更老的版本只有一个 mailAccount，这里搬成清单的第一条 —— 只搬一次，
+  // 之后那个旧字段就清掉了。授权码不在这份明文 JSON 里 —— 它在 Windows 凭据管理器
+  // （Rust 侧 mail_key_save，按地址一条，搬清单不用动它）
+  value.mailAccounts = sanitizeMailAccounts(asRecord(input).mailAccounts)
+  if (!value.mailAccounts.length) {
+    const legacy = asRecord(input).mailAccount
+    if (legacy) {
+      const migrated = sanitizeMailAccounts([legacy])
+      if (migrated.length) value.mailAccounts = migrated
+    }
+  }
+  delete (value as unknown as Record<string, unknown>).mailAccount
+  // 广告发件人黑名单（邮箱页右击「标记为广告」攒的）：老数据文件里没有，默认空清单
+  value.mailBulkSenders = sanitizeMailBulkSenders(value.mailBulkSenders)
+  // 后台新邮件检查的周期（分钟，0 = 关闭）：老数据文件里没有，默认 30。
+  // 与 mailBulkSenders 同一待遇：只对本机成立，不参与外观同步
+  value.mailPollMinutes = sanitizeMailPollMinutes(value.mailPollMinutes)
   // 图片仓库地址：老数据文件里没有，默认未配置。
   // 与 Token 同步仓库同一条口径（含空白、以 `-` 开头的一律当没填）
   value.noteImageRepo = sanitizeImageRepo(value.noteImageRepo)

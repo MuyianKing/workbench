@@ -20,6 +20,9 @@ pub const AI_NEWS_FILE: &str = "ai-news.json";
 /// 密码保险库（见 shared/vault.ts）。**文件本身只有密文**：明文从不落盘，
 /// 本机这把密钥在 Windows 凭据管理器里（见 vault.rs），仓库里那份在 `vault/vault.json`
 pub const VAULT_FILE: &str = "vault.json";
+/// 邮件后台监视的进度（见 mail_watch.rs）：每个账户的 UIDVALIDITY 与上次见过的
+/// 最大 UID，外加上一轮检查的时间。只是通知用的记账，**不进同步仓库**
+pub const MAIL_WATCH_FILE: &str = "mail-watch.json";
 /// 克隆里放**保险库**的子目录名。与用量 / 配置那两个目录最大的不同：那份文件是所有机器**共写**的
 /// （用户的要求：所有设备公用一个文件），所以合并规则必须自己定死，见 shared/vault.ts
 pub(crate) const VAULT_DIR: &str = "vault";
@@ -91,6 +94,10 @@ pub fn ai_news_file() -> PathBuf {
 /// 这一份是离线的落点：没登录、没填仓库地址时照样能建库、能读写条目。
 pub fn vault_file() -> PathBuf {
     data_dir().join(VAULT_FILE)
+}
+
+pub fn mail_watch_file() -> PathBuf {
+    data_dir().join(MAIL_WATCH_FILE)
 }
 
 /// 一次性的本地搬家，启动时跑一次（commands.rs 的 `load_all`，必须早于任何 store 载入）：

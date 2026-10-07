@@ -59,7 +59,9 @@
   **邮箱**（第十条出口；邮箱页里填了邮箱地址、授权码进了凭据管理器才会连**用户配置的**收发服务器 ——
   IMAP 收信、SMTP 发信各一台，主机不设白名单，与「装技能」同一类「地址由用户给」的出口；
   授权码走凭据管理器不落明文，**邮件 HTML 正文的外链资源一律不加载** —— 除收发服务器外这条功能
-  没有别的网络目标；不做后台轮询，进页面与手动刷新才联网，见 `mail.rs` 与 `docs/modules/mail.md`）。
+  没有别的网络目标；进页面 / 手动刷新 / 发信才联网，此外配了账户后有**后台新邮件检查**
+  （`mail_watch.rs`，周期在邮箱账户弹层里设、默认 30 分钟、可关，连的还是用户配置的
+  那台收件服务器），判定与通知见 `docs/modules/mail.md`）。
   不要新增网络出口、不往任何第三方服务发数据；笔记里的外链图片不算新出口；
   密码保险库也不算 —— 它推的是**用量同步那个仓库**的另一个目录（`vault/vault.json`），推上去的只有密文；
   登录内嵌的 client_id/secret 是这条边界唯一一次放宽。
@@ -97,7 +99,7 @@
   store `stores/`、交互骨架 `composables/`、适配层 `workbench/`、设计令牌与全局样式 `styles/`）、随包资源 `resources/`、构建脚本 `scripts/`；
   跨页面复用的类型 / 契约 / 纯逻辑按域拆在 `packages/` 的 14 个包里：`core`（平台原语：Result、端口与路径、扫描、命令、快捷启动、
   图标缓存、日期）、`notes` / `video` / `appearance`（含设计参考库）/ `terminal` / `kb` / `skills` / `ai`（含 Pi 技能与 AI 热点）/
-  `usage`（用量与各 IDE 日志源）/ `work-log` / `vault` / `auth` / `weather` / `mail`（账户配置收敛、RFC 2047、发信报文构建、收信解析）。逐文件分工见架构文档的「目录结构」。
+  `usage`（用量与各 IDE 日志源）/ `work-log` / `vault` / `auth` / `weather` / `mail`（账户配置收敛、RFC 2047、发信报文构建、收信解析、广告邮件识别）。逐文件分工见架构文档的「目录结构」。
 - 域包之间与应用对域包一律**按包名导入**（`@workbench/<包>`，只走各包 `index.ts` 桶）；解析走 pnpm 的 workspace 软链 + 各包
   `exports`（TS 源码直出），TS 检查由根目录唯一的 `tsconfig.json` / `tsconfig.test.json` 的 paths 兜底。渲染层内部别名
   `@` → `apps/desktop/src/renderer/src`（`@shared` 已随拆包删除）。单测与被测模块同目录，命名 `*.test.ts`。

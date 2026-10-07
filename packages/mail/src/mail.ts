@@ -1,13 +1,14 @@
 //! 邮箱账户配置的形状与收敛。落盘进 workbench-data.json（行为配置，不属于外观 ——
 //! 判据见 ipc-and-state.md），授权码不在这里 —— 那条进 Windows 凭据管理器（Rust 侧）。
 //!
-//! 服务器地址用户只填一次：地址后缀认得出 163 / 126 就自动带出官方的收发服务器
-//! （见 `presetForAddress`），认不出就留空等用户填 —— 支持任意 IMAP/SMTP 服务器。
-//! 地址留空 = 这条出口整体关闭，与 weatherCity 的口径一致。
+//! 账户是一份清单（可同时配多个，收件箱合并成一份按时间排），服务器地址用户只填一次：
+//! 地址后缀认得出 163 / 126 / QQ 就自动带出官方的收发服务器（见 `presetForAddress`），
+//! 认不出就留空等用户填 —— 支持任意 IMAP/SMTP 服务器。清单为空 = 这条出口整体关闭，
+//! 与 weatherCity 的口径一致。
 
-/** 一个邮箱账户的连接配置。授权码另存（凭据管理器），这里只有非敏感的连接参数。 */
+/** 一个邮箱账户的连接配置。授权码另存（凭据管理器，按地址一条），这里只有非敏感的连接参数。 */
 export interface MailAccount {
-  /** 邮箱地址；留空 = 出口关闭 */
+  /** 邮箱地址；账户清单里它就是身份 */
   address: string
   imapHost: string
   imapPort: number
@@ -17,11 +18,16 @@ export interface MailAccount {
 
 export const MAIL_ADDRESS_MAX = 80
 export const MAIL_HOST_MAX = 100
+/** 账户清单的上限：个人邮箱攒不到这个数，只防手改数据文件塞进一大坨 */
+export const MAIL_ACCOUNTS_MAX = 5
 
-/** 常见网易域名的官方服务器。认不出后缀的地址（含自定义域邮箱）就自己填。 */
+/** 常见邮箱域名的官方服务器。认不出后缀的地址（含自定义域邮箱）就自己填。
+ *  foxmail.com 的邮箱也是腾讯这套收发服务器（与 QQ 邮箱同一把授权码）。 */
 const HOST_PRESETS: Record<string, { imapHost: string; imapPort: number; smtpHost: string; smtpPort: number }> = {
   '163.com': { imapHost: 'imap.163.com', imapPort: 993, smtpHost: 'smtp.163.com', smtpPort: 465 },
-  '126.com': { imapHost: 'imap.126.com', imapPort: 993, smtpHost: 'smtp.126.com', smtpPort: 465 }
+  '126.com': { imapHost: 'imap.126.com', imapPort: 993, smtpHost: 'smtp.126.com', smtpPort: 465 },
+  'qq.com': { imapHost: 'imap.qq.com', imapPort: 993, smtpHost: 'smtp.qq.com', smtpPort: 465 },
+  'foxmail.com': { imapHost: 'imap.qq.com', imapPort: 993, smtpHost: 'smtp.qq.com', smtpPort: 465 }
 }
 
 /** 按地址后缀查官方服务器预设；认不出返回 null。 */
@@ -85,4 +91,37 @@ export function mailAccountReady(account: MailAccount): boolean {
   return Boolean(
     account.address.includes('@') && account.imapHost && account.imapPort && account.smtpHost && account.smtpPort
   )
+}
+
+/** 整份账户清单的收敛：逐个过 sanitizeMailAccount，没有地址的（没填完的半截）丢掉、
+ *  按地址去重、超上限截断。清单为空 = 出口关闭。 */
+export function sanitizeMailAccounts(value: unknown): MailAccount[] {
+  if (!Array.isArray(value)) return []
+  const seen = new Set<string>()
+  const accounts: MailAccount[] = []
+  for (const item of value) {
+    const account = sanitizeMailAccount(item)
+    if (!account.address || seen.has(account.address)) continue
+    seen.add(account.address)
+    accounts.push(account)
+    if (accounts.length >= MAIL_ACCOUNTS_MAX) break
+  }
+  return accounts
+}
+
+/** 后台新邮件检查的周期（分钟）：0 = 关闭。 */
+export const MAIL_POLL_OFF = 0
+/** 默认周期：30 分钟。 */
+export const MAIL_POLL_DEFAULT = 30
+/** 下限：每一轮都是一条全新的 IMAP 连接，一分钟已是能接受的最密节奏。 */
+export const MAIL_POLL_MIN = 1
+/** 上限：24 小时（再长不如直接关掉）。 */
+export const MAIL_POLL_MAX = 1440
+
+/** 后台检查周期的收敛：非数字回默认，0 = 关闭，其余夹进 1..1440（四舍五入取整）。 */
+export function sanitizeMailPollMinutes(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return MAIL_POLL_DEFAULT
+  const minutes = Math.round(value)
+  if (minutes === MAIL_POLL_OFF) return MAIL_POLL_OFF
+  return Math.min(MAIL_POLL_MAX, Math.max(MAIL_POLL_MIN, minutes))
 }

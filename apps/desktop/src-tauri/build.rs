@@ -17,12 +17,17 @@ fn inject_oauth_credentials() {
     );
     let local = dir.join("oauth.local.json");
     let example = dir.join("oauth.example.json");
-    let source = if local.is_file() { local.clone() } else { example };
 
-    // 两个路径都盯着：新增 / 删除 oauth.local.json 也要触发重跑，
-    // 否则改了凭据却不重新注入，表现是「改了没生效」。
-    println!("cargo:rerun-if-changed={}", local.display());
-    println!("cargo:rerun-if-changed={}", source.display());
+    // 只盯存在的那个文件：cargo 对「被盯但不存在的路径」每次构建都判脏（cargo 1.98 实测），
+    // build script 一脏，整个 bin 就跟着重编重链 —— 表现是 pnpm dev 零改动也要全量构建。
+    // 删除 local 会触发（被盯的文件没了算变更）；唯一不触发的是凭空新建——
+    // 第一次建 oauth.local.json 后随手保存一个 Rust 文件再构建即可。
+    println!("cargo:rerun-if-changed={}", example.display());
+    if local.is_file() {
+        println!("cargo:rerun-if-changed={}", local.display());
+    }
+
+    let source = if local.is_file() { local.clone() } else { example };
 
     let out = std::path::PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR 未设置"))
         .join("oauth.json");

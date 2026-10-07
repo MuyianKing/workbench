@@ -12,8 +12,10 @@ mod icon;
 mod imaging;
 mod kb;
 mod mail;
+mod mail_watch;
 mod nrm;
 mod notes;
+mod notify;
 mod nvm;
 mod oauth;
 mod paths;
@@ -49,7 +51,8 @@ fn main_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
     app.get_webview_window("main")
 }
 
-fn show_main_window(app: &AppHandle) {
+/// 唤出主窗口。托盘 / 全局快捷键走它，邮件通知被点击时也一样（mail_watch.rs）。
+pub(crate) fn show_main_window(app: &AppHandle) {
     if let Some(window) = main_window(app) {
         // 隐藏期间任务栏按钮被摘掉了，重新显示时先装回来
         let _ = window.set_skip_taskbar(false);
@@ -321,6 +324,7 @@ fn main() {
         .manage(MaximizedFlag(Mutex::new(false)))
         .manage(session::Sessions::default())
         .manage(PendingQuit(Mutex::new(None)))
+        .manage(mail_watch::MailWatch::default())
         .invoke_handler(tauri::generate_handler![
             commands::data_load,
             commands::data_save,
@@ -345,8 +349,10 @@ fn main() {
             mail::mail_list,
             mail::mail_fetch_body,
             mail::mail_set_seen,
+            mail::mail_delete,
             mail::mail_send,
             mail::mail_attachment_save,
+            mail_watch::mail_watch_register,
             commands::note_scan,
             commands::note_read,
             commands::note_write,
@@ -482,6 +488,10 @@ fn main() {
                     eprintln!("[workbench] {err}");
                 }
             }
+
+            // 邮件后台监视：线程自己每分钟醒一次，到点（满登记的周期）查新邮件、弹通知。
+            // 账户清单与周期由渲染层载入设置后经 mail_watch_register 登记进来。
+            mail_watch::spawn(&handle);
 
             Ok(())
         })

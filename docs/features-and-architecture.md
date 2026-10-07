@@ -205,6 +205,8 @@ apps/desktop/            桌面应用（自包含：渲染层 + Rust + 随包资
   src/http.rs            WinHTTP 极简 HTTP 客户端 —— 注解见 modules/ipc-and-state.md
   src/weather.rs         实时天气宿主侧 —— 注解见 modules/home.md
   src/mail.rs            邮箱（IMAP/SMTP 传输）—— 注解见 modules/mail.md
+  src/mail_watch.rs      邮件后台监视（按设置周期的新邮件检查 + 系统通知）—— 注解见 modules/mail.md
+  src/notify.rs          Windows toast 的手写 WinRT FFI —— 注解见 modules/mail.md
   src/credentials.rs     Windows 凭据管理器读写 —— 注解见 modules/ipc-and-state.md
   src/vault.rs           密码保险库宿主侧 —— 注解见 modules/vault.md
   src/encoding.rs        base64 / SHA-256 / UTF-16 —— 注解见 modules/ipc-and-state.md
@@ -257,7 +259,7 @@ packages/                按域拆出的 14 个 @workbench/* 包（TS 源码直�
   vault/                 密码保险库的条目模型 / 信封 / 合并 / 加解密
   auth/ 、 weather/       账号资料的收敛；实时天气的 WMO 码表与两条接口回包的解析
   mail/                   邮箱账户配置的收敛、RFC 2047 编解码、发信报文构建（mime.ts）、
-                          收信解析与沙箱正文（parse.ts，postal-mime 包装）
+                          收信解析与沙箱正文（parse.ts，postal-mime 包装）、广告邮件识别（bulk.ts）
 
 apps/desktop/scripts/    make-icons.mjs（程序化生成应用图标与托盘图标）、
                          vendor-pi.mjs（Pi 随包内置与瘦身）、
@@ -361,12 +363,17 @@ pnpm run dist         # 产出 NSIS 安装包
   另两种安装方式（导入本地 zip / 目录）与列表、开关、卸载、`--skill` 注入全在本机。
   实现与边界见 [pi_skills.rs](../apps/desktop/src-tauri/src/pi_skills.rs) 与
   [docs/modules/ai.md](modules/ai.md) 的「技能」那几条
-- **邮箱**（可选、默认关闭；第十条出口）：邮箱页里填了邮箱地址、授权码进了凭据管理器，才会连
-  **你配置的**收发服务器（IMAP 收信 993、SMTP 发信 465，隐式 TLS；主机不设白名单 —— 与「装技能」
-  同类，地址由你给）。授权码存 Windows 凭据管理器（DPAPI 按用户加密），不落明文、不回渲染层；
+- **邮箱**（可选、默认关闭；第十条出口）：邮箱账户**可同时配多个**（163 / 126 / QQ 的收发服务器跟着
+  地址后缀自动带出，自定义域自己填），每个账户填了地址、授权码进了凭据管理器，才会连
+  **它配置的**收发服务器（IMAP 收信 993、SMTP 发信 465，隐式 TLS；主机不设白名单 —— 与「装技能」
+  同类，地址由你给）。收件箱合并成一条按时间排的清单，行上标注来源账户。授权码存 Windows 凭据管理器
+  （DPAPI 按用户加密，按地址一条），不落明文、不回渲染层；
   连接参数进设置（明文 JSON，但那几项不是秘密）。**邮件 HTML 正文的外链资源一律不加载**
   （跟踪像素）：沙箱 iframe + 只放行 `data:` 图片的 CSP —— 除收发服务器本身，这条功能没有别的
-  网络目标。不做后台轮询 / 新邮件提醒：进页面、点刷新、发信才联网。
+  网络目标。进页面、点刷新、发信各是一次现连现断的连接；此外配了账户后有**后台新邮件检查**
+  （`mail_watch.rs`，连的还是你配置的那台收件服务器；周期在邮箱账户弹层里设、
+  默认 30 分钟、可关）：有未读的新信弹 Windows 系统通知，点通知唤出主窗口并打开那封信
+  （通知是 `notify.rs` 手写的 WinRT toast，不引通知插件）。
   实现与边界见 [mail.rs](../apps/desktop/src-tauri/src/mail.rs) 与
   [docs/modules/mail.md](modules/mail.md)
 

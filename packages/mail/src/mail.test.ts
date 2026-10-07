@@ -1,10 +1,24 @@
 import { describe, expect, it } from 'vitest'
 
 import { bytesToBase64 } from './base64'
-import { mailAccountReady, presetForAddress, sanitizeMailAccount, sanitizeMailAddress, sanitizeMailHost, sanitizeMailPort } from './mail'
+import {
+  MAIL_ACCOUNTS_MAX,
+  MAIL_POLL_DEFAULT,
+  MAIL_POLL_MAX,
+  MAIL_POLL_MIN,
+  mailAccountReady,
+  presetForAddress,
+  sanitizeMailAccount,
+  sanitizeMailAccounts,
+  sanitizeMailAddress,
+  sanitizeMailHost,
+  sanitizeMailPollMinutes,
+  sanitizeMailPort
+} from './mail'
 import { decodeEncodedWords, encodeRfc2047Word } from './rfc2047'
 import { buildMime } from './mime'
-import { displayDate, displaySender, htmlBody, parseMessage, senderAddress } from './parse'
+import { accountTag, displayDate, displaySender, htmlBody, mailTime, parseMessage, senderAddress } from './parse'
+import { isBulkMail, sanitizeMailBulkSenders } from './bulk'
 
 describe('账户配置收敛', () => {
   it('地址 trim、小写，没有 @ 就当没填', () => {
@@ -47,6 +61,16 @@ describe('账户配置收敛', () => {
     expect(account.imapPort).toBe(0)
   })
 
+  it('QQ 地址（含 foxmail.com）走腾讯那套收发服务器', () => {
+    const account = sanitizeMailAccount({ address: 'Someone@QQ.com' })
+    expect(account.imapHost).toBe('imap.qq.com')
+    expect(account.imapPort).toBe(993)
+    expect(account.smtpHost).toBe('smtp.qq.com')
+    expect(account.smtpPort).toBe(465)
+    // foxmail.com 的邮箱也是同一套服务器、同一把授权码
+    expect(presetForAddress('a@foxmail.com')?.imapHost).toBe('imap.qq.com')
+  })
+
   it('用户自己填过的服务器不被预设覆盖', () => {
     const account = sanitizeMailAccount({
       address: 'a@163.com',
@@ -63,6 +87,35 @@ describe('账户配置收敛', () => {
     expect(mailAccountReady(sanitizeMailAccount({ address: 'a@163.com' }))).toBe(true)
     expect(mailAccountReady(sanitizeMailAccount({ address: 'a@example.com' }))).toBe(false)
     expect(mailAccountReady(sanitizeMailAccount({}))).toBe(false)
+  })
+
+  it('账户清单的收敛：没地址的丢、按地址去重、超上限截断', () => {
+    const accounts = sanitizeMailAccounts([
+      { address: ' A@163.com ' },
+      { address: 'a@163.com', imapHost: 'imap.example.com' }, // 同地址：保留前一条，后面的丢
+      { address: 'b@qq.com' },
+      { imapHost: 'imap.example.com' }, // 没地址的半截，丢
+      'not-an-object'
+    ])
+    expect(accounts.map((account) => account.address)).toEqual(['a@163.com', 'b@qq.com'])
+    expect(accounts[0].imapHost).toBe('imap.163.com')
+
+    const full = Array.from({ length: MAIL_ACCOUNTS_MAX + 2 }, (_, index) => ({ address: `u${index}@163.com` }))
+    expect(sanitizeMailAccounts(full)).toHaveLength(MAIL_ACCOUNTS_MAX)
+    expect(sanitizeMailAccounts(undefined)).toEqual([])
+    expect(sanitizeMailAccounts('a@163.com')).toEqual([])
+  })
+
+  it('后台检查周期：0 = 关闭，其余夹进 1..1440，非数字回默认', () => {
+    expect(sanitizeMailPollMinutes(0)).toBe(0)
+    expect(sanitizeMailPollMinutes(30)).toBe(30)
+    expect(sanitizeMailPollMinutes(2.4)).toBe(2) // 四舍五入取整
+    expect(sanitizeMailPollMinutes(0.4)).toBe(0) // 取整后 0，当关闭而不是夹回下限
+    expect(sanitizeMailPollMinutes(MAIL_POLL_MAX + 500)).toBe(MAIL_POLL_MAX)
+    expect(sanitizeMailPollMinutes(-10)).toBe(MAIL_POLL_MIN)
+    expect(sanitizeMailPollMinutes(undefined)).toBe(MAIL_POLL_DEFAULT)
+    expect(sanitizeMailPollMinutes('30')).toBe(MAIL_POLL_DEFAULT)
+    expect(sanitizeMailPollMinutes(Number.NaN)).toBe(MAIL_POLL_DEFAULT)
   })
 })
 
@@ -244,5 +297,66 @@ describe('展示层的拆解', () => {
     expect(displayDate('Mon, 5 Oct 2026 10:00:00 +0800')).toMatch(/^\d{2}\/\d{2} \d{2}:\d{2}$/)
     expect(displayDate('not a date')).toBe('not a date')
     expect(displayDate('')).toBe('')
+  })
+
+  it('日期的时间戳给排序用：解析不动给 0', () => {
+    const older = mailTime('Mon, 5 Oct 2026 10:00:00 +0800')
+    const newer = mailTime('Tue, 6 Oct 2026 09:00:00 +0800')
+    expect(older).toBeGreaterThan(0)
+    expect(newer).toBeGreaterThan(older)
+    expect(mailTime('not a date')).toBe(0)
+    expect(mailTime('')).toBe(0)
+  })
+
+  it('来源标注：本地部分 + 域名第一段，拆不动的原样给', () => {
+    expect(accountTag('ZhangSan@163.com')).toBe('ZhangSan@163')
+    expect(accountTag('lisi@qq.com')).toBe('lisi@qq')
+    expect(accountTag('a@mail.corp.example.com')).toBe('a@mail')
+    expect(accountTag('no-at-sign')).toBe('no-at-sign')
+    expect(accountTag('@163.com')).toBe('@163.com')
+  })
+})
+
+describe('广告邮件的识别', () => {
+  const base = { subject: '周末的照片', from: 'alice@example.com' }
+
+  it('黑名单说了算：用户标记过的发件人，过去将来的信都算广告', () => {
+    expect(isBulkMail({ ...base, subject: 'Re: 项目排期', from: '张三 <zhang@corp.com>' }, ['zhang@corp.com'])).toBe(true)
+    // 发件人头部带着显示名也认得出地址（senderAddress 提取）
+    expect(isBulkMail(base, ['alice@example.com'])).toBe(true)
+    expect(isBulkMail(base, [])).toBe(false)
+    // 别的发件人不连坐
+    expect(isBulkMail({ ...base, from: 'bob@example.com' }, ['alice@example.com'])).toBe(false)
+  })
+
+  it('带通知类 List-Unsubscribe 场景不再误拦（该信号已弃用：正常通知邮件也带）', () => {
+    // 网易收件箱实测：注册确认、订单提醒这类都带 List-Unsubscribe —— 只凭它拦会误伤一片。
+    // isBulkMail 不再收这个字段；这类信只有发件人进黑名单或撞上启发式才算广告。
+    expect(isBulkMail({ subject: '你的帐号创建成功', from: 'noreply@github.com' })).toBe(false)
+    expect(isBulkMail({ subject: '订单已发货', from: 'order@shop.example.com' })).toBe(false)
+  })
+
+  it('发件人地址一眼是批量发的算；事务性前缀不误伤', () => {
+    expect(isBulkMail({ ...base, from: 'promo@shop.example.com' })).toBe(true)
+    expect(isBulkMail({ ...base, from: '京东会员 <newsletter@mail.jd.com>' })).toBe(true)
+    expect(isBulkMail({ ...base, from: 'no-reply@service.example.com' })).toBe(false)
+    // 订单确认这类走 service / order 前缀 —— 不能拦
+    expect(isBulkMail({ ...base, from: 'order@shop.example.com', subject: '订单已发货' })).toBe(false)
+  })
+
+  it('主题里的广告词算（中文包含、英文整词）', () => {
+    expect(isBulkMail({ ...base, subject: '【京东】限时秒杀 全场 5 折' })).toBe(true)
+    expect(isBulkMail({ ...base, subject: '双11 狂欢节提前购' })).toBe(true)
+    expect(isBulkMail({ ...base, subject: 'Your weekly newsletter is here' })).toBe(true)
+    // wholesale 不是 sale；整词匹配不误伤
+    expect(isBulkMail({ ...base, subject: 'wholesale price inquiry' })).toBe(false)
+    expect(isBulkMail({ ...base, subject: '周末拍的照片已修好' })).toBe(false)
+    expect(isBulkMail({ ...base, subject: '关于项目排期的一封信' })).toBe(false)
+  })
+
+  it('黑名单的收敛：trim、小写、去重，认不出像地址的丢掉', () => {
+    expect(sanitizeMailBulkSenders([' A@B.com ', 'a@b.com', 'not-an-address', '', 42, null])).toEqual(['a@b.com'])
+    expect(sanitizeMailBulkSenders(undefined)).toEqual([])
+    expect(sanitizeMailBulkSenders('a@b.com')).toEqual([])
   })
 })
