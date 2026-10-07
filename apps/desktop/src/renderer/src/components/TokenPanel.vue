@@ -12,7 +12,7 @@ import { axisTotal, bucketRangeOf, buildSeriesRange, emptyCounters, flattenSourc
  * 相加或同轴都没有意义;切口径即换一整套数字,有数的那几天也可能不同,所以窗口要重新收敛。
  * credits 那边不画模型占比(那一维在额度上没有意义,见 showModels),只留工具占比。
  *
- * 趋势窗口由头部的预设下拉给出(默认「本月」,与 DeepSeek 用量页同款:
+ * 趋势窗口由头部的预设下拉给出(默认「近 30 天」,与 DeepSeek 用量页同款:
  * 近 7 天 / 近 30 天 / 本月 / 上月 / 自定义;可选的日子限于当前口径下有记录的那段),
  * 右侧 天/周/月 页签只切换柱子的分桶宽度,窗口本身不变;
  * 占比默认统计整个窗口(全部);点击某根柱子则把占比切到那个桶(那天/那周/那月),再点一下回到全部。
@@ -55,7 +55,7 @@ const granularity = ref<TokenGranularity>('day')
 /** 当前口径;切换即换一整套数字(总览、趋势、占比都跟着走) */
 const axis = ref<UsageAxis>('tokens')
 /** 生效的时间维度档位;日历上选过区间后即为 custom */
-const rangePreset = ref<TokenRangePreset>('thisMonth')
+const rangePreset = ref<TokenRangePreset>('last30')
 /** 趋势窗口的起止日期(本地日期键,含两端);空串表示还没拿到数据 */
 const fromKey = ref('')
 const toKey = ref('')
