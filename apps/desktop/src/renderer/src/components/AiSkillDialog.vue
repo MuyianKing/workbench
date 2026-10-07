@@ -374,8 +374,9 @@ function onRowCommand(command: unknown, row: AiSkillRow): void {
 }
 
 .bar__search {
-  flex: 1;
-  max-width: 340px;
+  flex: none;
+  width: 340px;
+  margin-left: auto;
 }
 
 .group {
