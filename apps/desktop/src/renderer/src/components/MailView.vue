@@ -14,7 +14,7 @@ import { formatMailSize, senderAddress } from '@workbench/mail'
  *    的入口：**账户**（多账户的管理弹层）与**写邮件**。
  *  - **右栏**：没配置账户时是一颗「配置邮箱账户」；配置了就是阅读栏 ——
  *    头部是主题、发件人、日期与「回复 / 标记未读」，正文按信里的形态画：
- *    有 HTML 走 sandbox 全禁的 iframe（CSP 只放行 data: 图片，外链跟踪像素一张不取，
+ *    有 HTML 走 sandbox 的 iframe（外链图片照常显示、脚本照旧全禁，
  *    见 @workbench/mail 的 htmlBody），没有就按纯文本排版。附件逐个「另存为」。
  *
  * 页面只做编排与状态呈现：拉列表、读信、标记、发送都在 stores/mail.ts。
@@ -359,7 +359,7 @@ const bodyStyle = computed(() => ({
           :item="item"
           :picking="picking"
           :picked="picked.has(item.key)"
-          :active="mail.active?.key === item.key"
+          :active="mail.activeKey === item.key"
           :deleting="mail.deletingKeys.includes(item.key)"
           :show-source="mail.accounts.length > 1"
           @toggle-pick="togglePick(item)"
@@ -405,7 +405,7 @@ const bodyStyle = computed(() => ({
               :item="item"
               :picking="picking"
               :picked="picked.has(item.key)"
-              :active="mail.active?.key === item.key"
+              :active="mail.activeKey === item.key"
               :deleting="mail.deletingKeys.includes(item.key)"
               :show-source="mail.accounts.length > 1"
               @toggle-pick="togglePick(item)"
@@ -507,9 +507,11 @@ const bodyStyle = computed(() => ({
         </div>
 
         <div class="mail-body">
-          <!-- HTML 正文：sandbox 全禁（脚本、同源、表单、弹窗全禁）—— 硬边界，
-               与 AI 预览栏同一套；文档里的 CSP 把外链资源（跟踪像素）也掐死了 -->
-          <iframe v-if="mail.active.html" class="mail-body__frame" sandbox="" :srcdoc="mail.active.html" title="邮件正文" />
+          <!-- HTML 正文：sandbox 禁脚本 / 同源 / 表单 / 弹窗 —— 硬边界，与 AI 预览栏同一套；
+               只放行用户点出来的顶层导航：htmlBody 把链接统一 target="_top"，
+               这次导航被 main.rs 的 on_navigation 拦下转交系统浏览器。
+               正文外链图片照常加载（CSP img-src *），请求不带 Referer -->
+          <iframe v-if="mail.active.html" class="mail-body__frame" sandbox="allow-top-navigation-by-user-activation" referrerpolicy="no-referrer" :srcdoc="mail.active.html" title="邮件正文" />
           <pre v-else class="mail-body__text">{{ mail.active.text || '（这封邮件没有可显示的正文）' }}</pre>
         </div>
       </template>

@@ -1,9 +1,10 @@
 // ! 收信侧的 MIME 解析与阅读视图。Rust 只把原始报文（base64）带回来，解析全在这里
 // ! —— postal-mime 是纯 JS、无运行时外取资源的库，中文各代字符集经 TextDecoder 天然支持。
 // !
-// ! **渲染的硬边界**：`htmlBody` 产出的文档交给 sandbox 全禁的 iframe（与 AI 预览栏
-// ! 同一套，见 AiPreviewHtml.vue），并且注入 CSP 只放行 data: 图片 —— 邮件里的外链
-// ! 资源（跟踪像素）一张都不许加载。内联图（cid:）是邮件自带的内容，转成 data URL。
+// ! **渲染的硬边界**：`htmlBody` 产出的文档交给 sandbox 的 iframe（禁脚本 / 同源 /
+// ! 表单 / 弹窗，与 AI 预览栏同一套，见 AiPreviewHtml.vue），注入 CSP 放行外链图片
+// ! （营销信的主视觉跟着信里的地址加载）但掐死其余一切外链资源 —— 脚本、字体、
+// ! 音视频、iframe 都没有。内联图（cid:）是邮件自带的内容，转成 data URL。
 
 import PostalMime from 'postal-mime'
 import { base64ToBytes, bytesToBase64 } from './base64'
@@ -85,12 +86,15 @@ function cidMap(inline: ParsedAttachment[]): Map<string, string> {
   return map
 }
 
-/** 只放行 data: 图与内联样式的 CSP —— 外链图片（跟踪像素）在这里被掐死。 */
-const SANDBOX_CSP = 'default-src \'none\'; img-src data:; style-src \'unsafe-inline\'; media-src data:'
+/** 外链图片放行（跟着信里写的地址加载），其余资源全掐死：脚本、字体、音视频外链、iframe 都没有。 */
+const SANDBOX_CSP = 'default-src \'none\'; img-src * data:; style-src \'unsafe-inline\'; media-src data:'
+
+/** 图片请求不带 Referer：读信这件事不留给图片主机多余的来路。 */
+const NO_REFERRER = '<meta name="referrer" content="no-referrer">'
 
 /**
- * 把 HTML 正文准备成能进沙箱 iframe 的文档：注入 CSP、cid: 换成 data URL。
- *  返回 null 表示这封信没有 HTML 正文，展示层改走纯文本。
+ * 把 HTML 正文准备成能进沙箱 iframe 的文档：注入 CSP 与 no-referrer、cid: 换成 data URL、
+ *  链接统一 target="_top"。返回 null 表示这封信没有 HTML 正文，展示层改走纯文本。
  */
 export function htmlBody(parsed: ParsedMail): string | null {
   if (!parsed.html.trim())
@@ -99,15 +103,23 @@ export function htmlBody(parsed: ParsedMail): string | null {
   let html = parsed.html.replace(/cid:\s*([^"'>\s]+)/gi, (whole, id: string) => {
     return map.get(id.toLowerCase().trim()) ?? whole
   })
-  const meta = `<meta http-equiv="Content-Security-Policy" content="${SANDBOX_CSP}">`
+  // 链接一律 target="_top"：sandbox iframe 里点链接本来就是死的，改成往顶层窗口
+  // 导航后由 main.rs 的 on_navigation 拦下转交系统浏览器。按整段标签做改写 ——
+  // 属性值里带 > 的写法（罕见）会漏改，漏改的链接点不动，不破沙箱。
+  html = html.replace(/<a\b[^>]*>/gi, (tag) => {
+    if (/target\s*=/i.test(tag))
+      return tag.replace(/target\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/i, 'target="_top"')
+    return `${tag.slice(0, -1)} target="_top">`
+  })
+  const head = `<meta http-equiv="Content-Security-Policy" content="${SANDBOX_CSP}">${NO_REFERRER}`
   if (/<head[^>]*>/i.test(html)) {
-    html = html.replace(/<head[^>]*>/i, head => `${head}${meta}`)
+    html = html.replace(/<head[^>]*>/i, tag => `${tag}${head}`)
   }
   else if (/<html[^>]*>/i.test(html)) {
-    html = html.replace(/<html[^>]*>/i, head => `${head}<head>${meta}</head>`)
+    html = html.replace(/<html[^>]*>/i, tag => `${tag}<head>${head}</head>`)
   }
   else {
-    html = `${meta}${html}`
+    html = `${head}${html}`
   }
   return html
 }

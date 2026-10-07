@@ -244,11 +244,12 @@ describe('收信侧解析', () => {
     expect(parsed.inline[0].contentId).toBe('pic1')
   })
 
-  it('htmlBody 注入 CSP 并把 cid 换成 data URL', async () => {
+  it('htmlBody 注入 CSP 与 no-referrer 并把 cid 换成 data URL', async () => {
     const parsed = await parseMessage(sampleMessageBase64())
     const html = htmlBody(parsed)
     expect(html).toContain('Content-Security-Policy')
-    expect(html).toContain('img-src data:')
+    expect(html).toContain('img-src * data:')
+    expect(html).toContain('name="referrer" content="no-referrer"')
     expect(html).toContain('src="data:image/png;base64,iVBORw0KGgo="')
     expect(html).not.toContain('cid:')
   })
@@ -257,7 +258,7 @@ describe('收信侧解析', () => {
     expect(htmlBody({ subject: '', from: null, text: 'x', html: '', attachments: [], inline: [] })).toBeNull()
   })
 
-  it('外链图片保留原样（加载被 CSP 挡住，标记不动）', async () => {
+  it('外链图片放行加载（CSP img-src *），标记不动', async () => {
     const raw = [
       'From: a@b.com',
       'Subject: tracking',
@@ -268,6 +269,25 @@ describe('收信侧解析', () => {
     ].join('\r\n')
     const parsed = await parseMessage(bytesToBase64(new TextEncoder().encode(raw)))
     expect(htmlBody(parsed)).toContain('https://tracker.example.com/pixel')
+  })
+
+  it('链接统一改成 target="_top"（点击转交系统浏览器，见 main.rs on_navigation）', async () => {
+    const raw = [
+      'From: a@b.com',
+      'Subject: links',
+      'Content-Type: text/html; charset=utf-8',
+      '',
+      '<a href="https://tr.jd.com/jump?kid=1">没写 target 的</a>',
+      '<a href="https://www.jd.com" target="_blank">写了新开窗口的</a>',
+      '<a href=\'https://mail.example.com\' target=\'_self\'>单引号的</a>',
+      '',
+    ].join('\r\n')
+    const parsed = await parseMessage(bytesToBase64(new TextEncoder().encode(raw)))
+    const html = htmlBody(parsed)
+    expect(html).toContain('<a href="https://tr.jd.com/jump?kid=1" target="_top">')
+    expect(html).toContain('<a href="https://www.jd.com" target="_top">')
+    expect(html).toContain('<a href=\'https://mail.example.com\' target="_top">')
+    expect(html).not.toContain('_blank')
   })
 })
 

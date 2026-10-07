@@ -165,6 +165,24 @@ fn create_main_window(app: &AppHandle) -> tauri::Result<()> {
                 let _ = window.show();
             }
         })
+        // 邮件正文（sandbox iframe）里的链接统一 target="_top" 往顶层窗口导航
+        // （见 @workbench/mail 的 htmlBody），在这里拦下：应用自己的页面照常放行，
+        // 其余 http(s) / mailto 交给系统浏览器开，别的 scheme 一律取消 ——
+        // 邮件的 HTML 不带宿主能力，这条边界不因放行链接而破。
+        .on_navigation(|url| {
+            let url = url.as_str();
+            let own = url.starts_with("http://tauri.localhost")
+                || url.starts_with("https://tauri.localhost")
+                || url.starts_with("tauri://localhost")
+                || url.starts_with("about:");
+            if own || (cfg!(dev) && url.starts_with("http://localhost:5274")) {
+                return true;
+            }
+            if url.starts_with("http://") || url.starts_with("https://") || url.starts_with("mailto:") {
+                let _ = crate::system::open_external(url);
+            }
+            false
+        })
         .build()?;
 
     attach_window_events(&window);

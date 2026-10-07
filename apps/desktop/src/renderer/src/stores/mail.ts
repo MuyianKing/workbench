@@ -147,19 +147,39 @@ export const useMailStore = defineStore('mail', () => {
   // ---------- 读信 ----------
 
   const active = ref<MailMessage | null>(null)
+  /** 左侧高亮跟着它走：点击那一刻就切，不等右侧正文下载回来（active 才是内容） */
+  const activeKey = ref<string | null>(null)
   const bodyLoading = ref(false)
   const bodyError = ref('')
   /** 正文按 (账户, uid) 缓存：一封信拉一次，翻回来不再下载（内含整份报文，页面上限几十封没问题） */
   const bodies = new Map<string, MailMessage>()
 
+  /** 正文下载期间又点的那封：等当前这封完事接着开（只记最后一封，连点时中间的都是路过） */
+  let queuedItem: MailListItem | null = null
+
   async function openMail(item: MailListItem): Promise<void> {
+    activeKey.value = item.key
     const cached = bodies.get(item.key)
     if (cached) {
       active.value = cached
       return
     }
+    if (bodyLoading.value) {
+      queuedItem = item
+      return
+    }
+    await loadBody(item)
+    // 排队的那封接上去，但只在用户的最新点击仍是它时 —— 期间点了别的（缓存件就地打开）
+    // 就把它丢掉，别把内容刷回旧目标
+    const next = queuedItem
+    queuedItem = null
+    if (next && next.key !== item.key && activeKey.value === next.key)
+      await openMail(next)
+  }
+
+  async function loadBody(item: MailListItem): Promise<void> {
     const account = accountOf(item.account)
-    if (!account || bodyLoading.value)
+    if (!account)
       return
     bodyLoading.value = true
     bodyError.value = ''
@@ -185,7 +205,9 @@ export const useMailStore = defineStore('mail', () => {
         attachments: parsed.attachments,
       }
       bodies.set(item.key, message)
-      active.value = message
+      // 下载期间用户又点了别的：这封只进缓存不换内容，高亮与内容保持同一封
+      if (activeKey.value === item.key)
+        active.value = message
       // 打开即已读（Rust 侧 markSeen），列表上的点就地跟上
       const summary = all.value.find(entry => entry.key === item.key)
       if (summary && !summary.seen)
@@ -199,6 +221,7 @@ export const useMailStore = defineStore('mail', () => {
 
   function closeMail(): void {
     active.value = null
+    activeKey.value = null
   }
 
   /** 标记 / 取消已读。列表先就地改，服务器那边失败了再说（返回 Result 给调用方提示）。 */
@@ -260,8 +283,10 @@ export const useMailStore = defineStore('mail', () => {
     if (done.size) {
       all.value = all.value.filter(entry => !done.has(entry.key))
       for (const key of done) bodies.delete(key)
-      if (active.value && done.has(active.value.key))
+      if (active.value && done.has(active.value.key)) {
         active.value = null
+        activeKey.value = null
+      }
     }
     return failures.length ? fail(failures.join('；')) : ok(null)
   }
@@ -343,6 +368,7 @@ export const useMailStore = defineStore('mail', () => {
   function invalidate(): void {
     bodies.clear()
     active.value = null
+    activeKey.value = null
     void refreshList()
   }
 
@@ -409,6 +435,7 @@ export const useMailStore = defineStore('mail', () => {
     listLoading,
     listErrors,
     active,
+    activeKey,
     bodyLoading,
     bodyError,
     sending,

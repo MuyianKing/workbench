@@ -16,9 +16,11 @@
 
 - **第十条出口，「地址由用户给」**：邮箱地址留空 = 整条出口关闭；填了地址（且授权码进了
   凭据管理器）才会连**用户配置的那两台**收发服务器，主机名不设白名单 —— 与 AI 助手的
-  Base URL 同属一类出口。**除收发服务器本身，这个功能不得产生任何别的网络请求**：
-  邮件 HTML 正文的外链资源（跟踪像素）一张都不许加载 —— `htmlBody`（parse.ts）注入的
-  CSP 只放行 `data:` 图片，渲染层照实传 `htmlBody` 的产物，不要改回「外链照旧加载」。
+  Base URL 同属一类出口。**外链图片跟着信里的地址加载**（营销信的主视觉直接可见，
+  请求不带 Referer —— htmlBody 注入 CSP `img-src *` + no-referrer，iframe 再补一层
+  `referrerpolicy`），脚本 / 字体 / 音视频 / iframe 等其余外链资源照旧一张都不许加载；
+  这条功能的网络目标只有收发服务器与信里引用的图片主机，渲染层照实传 `htmlBody` 的产物，
+  不要把 CSP 收回「只放行 data:」。
 - **授权码只进凭据管理器，绝不落 JSON、绝不回渲染层**：`mail_key_save` 存
   `Workbench/mail/<地址>/token`（credentials.rs，DPAPI 按用户加密，按地址一条 ——
   天然多账户），之后 Rust 侧命令自己读（`auth_code`）；渲染层只在「验证并保存」那一次经参数递它。
@@ -66,9 +68,17 @@
   notify.rs 弹之前用 `ToastNotifier.Setting` 自查，被禁时给出指路「设置 > 系统 > 通知」
   的报错而不是静默；ZCode 的通知能用不是因为代码不同（同为系统 toast），是它的
   `s:toast` 没被关过。
-- **HTML 正文渲染是 sandbox 全禁的 iframe**：`sandbox="''"`（脚本、同源、表单、弹窗全禁）
-  —— 与 AI 预览栏（AiPreviewHtml.vue）同一条硬边界：邮件的 HTML 绝不能在带宿主能力的
-  webview 里执行。没有 HTML 正文时按纯文本排版，两者不混渲染。
+- **HTML 正文渲染是 sandbox 的 iframe**：脚本、同源、表单、弹窗全禁
+  （只放行 `allow-top-navigation-by-user-activation`）—— 与 AI 预览栏（AiPreviewHtml.vue）
+  同一条硬边界：邮件的 HTML 绝不能在带宿主能力的 webview 里执行。没有 HTML 正文时按
+  纯文本排版，两者不混渲染。**边界上两个刻意的口子**：
+  ① **外链图片** —— CSP `img-src * data:`（htmlBody 注入）放行，营销信的主视觉直接可见，
+  请求不带 Referer；其余外链资源（脚本、字体、音视频、iframe）照样掐死。
+  ② **链接** —— 三处配套：`htmlBody`（parse.ts）把每个 `<a>` 统一改写成
+  `target="_top"`（点链接在 iframe 里走不通，只能往顶层窗口导航）→ MailView.vue 的 iframe
+  只放行「用户点出来的顶层导航」（脚本自动跳转照样被沙箱掐死）→ main.rs 的
+  `on_navigation` 把这次导航拦下：应用自己的页面照常放行，http(s) / mailto 交给系统浏览器
+  开，其余 scheme 一律取消。改任何一处都要三处一起看。
 - **大小上限两侧同源**：发信 30 MB（`mime.ts` 的 `MAX_MESSAGE_BYTES` = Rust `mail.rs` 的
   `MAX_MESSAGE_BYTES`，构建这一步就拦）、拉正文 24 MB（与 AI 预览栏二进制同一口径）。
   改就两边一起改。
@@ -82,9 +92,13 @@
   底部一行是「账户 / 写邮件」两个入口。拉列表的时机：页面挂载、
   KeepAlive 换页回来（onActivated）、点刷新；`listInFlight` 挡住重复。发件人展示名与主题的
   RFC 2047 解码在行组件里做（`displaySender` / `decodeEncodedWords`）。
-- **读信**：点清单行 → `mail.openMail(item)` → 正文缓存查一次 → 没有才
-  `mail_fetch_body`（base64 回来，顺带标已读）→ `parseMessage` 拆成
-  文本 / HTML / 附件 / 内联图 → `htmlBody` 生成沙箱文档（注入 CSP、cid 换 data URL）。
+- **读信**：点清单行 → `mail.openMail(item)` → 高亮（`activeKey`）在点击那一刻就切，
+  正文缓存查一次，有就开；没有才 `mail_fetch_body`（base64 回来，顺带标已读）→
+  `parseMessage` 拆成
+  文本 / HTML / 附件 / 内联图 → `htmlBody` 生成沙箱文档（注入 CSP、cid 换 data URL、
+  链接统一 `target="_top"`）。下载期间又点别的不再被吞：排队等当前这封完事接着开
+  （只记最后一封）；下载完时若用户最新点的已不是它，只进缓存不换内容 —— 高亮与
+  阅读栏永远指同一封。
   列表上的未读点就地更新。阅读栏头部有「回复 / 标记已读（未读）」（多账户时还标收自
   哪个邮箱 —— 回信默认就从它发）；附件一颗一片、点开走「另存为」（pickSavePath 挑路径 +
   `mail_attachment_save` 落盘，与 vault_key_export 同一个信任模型）。
@@ -182,7 +196,7 @@ apps/desktop/src/renderer/src/stores/mail.ts
   邮箱页状态：列表 / 正文（按 uid 的会话内存缓存）/ 发送 / 后台监视的登记与通知点击
   （startWatch）；拉取时机在这层
 apps/desktop/src/renderer/src/components/MailView.vue
-  邮箱页：左清单右阅读；HTML 正文走 sandbox 全禁 iframe（CSP 只放行 data: 图片）
+  邮箱页：左清单右阅读；HTML 正文走 sandbox iframe（外链图片照常显示，脚本全禁，链接经顶层导航转交系统浏览器）
 apps/desktop/src/renderer/src/components/MailListRow.vue
   收件箱的清单行：行首复选框 + 两行内容（收件箱清单与推广邮件段共用一副）
 apps/desktop/src/renderer/src/components/MailAccountDialog.vue
