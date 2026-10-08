@@ -360,8 +360,6 @@ function openWritten(rel: string): void {
             :index-info="store.indexInfo"
             :is-repo="store.repoState?.isRepo === true"
             :repo-origin="store.remoteUrl"
-            :issues="store.lintIssues"
-            @open-entry="store.openEntry($event)"
           />
         </section>
       </div>
@@ -568,6 +566,11 @@ function openWritten(rel: string): void {
 .kb-view__right {
   min-height: 0;
   overflow: hidden;
+  /*
+   * 内边距收到与左栏同一档（.kb-view__left 也是 sp-3）：两栏的第一行内容落在同一条竖线上。
+   * 右栏里那两个阅读视图（条目 / 原始数据）自己不再补左边距，内容就直接落在这一档上。
+   */
+  padding: var(--sp-3);
 }
 
 /* 整页状态的容器（读取中 / 报错 / 不像知识库）：与两栏同占一块地方，吃满剩下的高度 */

@@ -119,7 +119,7 @@
   颜色圆角照规范。细节见 [docs/modules/site.md](docs/modules/site.md)。
 - 文档分工：[README.md](README.md) 给概览与上手；[docs/modules/](docs/modules/) 每模块一份文档
   （「约束」一节装硬规矩、后面是实现细节）；[features-and-architecture.md](docs/features-and-architecture.md)
-  装跨模块的通用事实；本文件写跨模块约束的骨架；`docs/dev-notes/` 写动手方法与踩坑。
+  装跨模块的通用事实；本文件写跨模块约束的骨架；`docs/dev-notes/` 写动手方法与踩坑；[AGENT-DOC.md](AGENT-DOC.md) 通用知识库的配置
 
 ## 3. 编码规范
 

@@ -81,7 +81,11 @@ function sourceLabel(entry: KbEntryMeta): string {
   display: flex;
   flex-direction: column;
   gap: var(--sp-2);
-  padding: var(--sp-3) var(--sp-3) var(--sp-2);
+  /*
+   * 左与顶都不留：右栏（.kb-view__right）自己已经有内边距了，阅读区再留一层，标题就与
+   * 左边那棵树不在同一条竖线上。右边留着 —— 滚动条要有地方落。
+   */
+  padding: 0 var(--sp-3) var(--sp-2) 0;
   border-bottom: 1px solid var(--border);
 }
 
@@ -135,7 +139,8 @@ function sourceLabel(entry: KbEntryMeta): string {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: var(--sp-3);
+  /* 左不留：正文第一行与标题落在同一条竖线上（右栏那层内边距已经给过了） */
+  padding: var(--sp-3) var(--sp-3) var(--sp-3) 0;
 }
 
 .kb-viewer__md {

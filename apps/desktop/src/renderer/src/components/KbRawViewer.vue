@@ -103,7 +103,8 @@ const realPath = computed(() => {
   display: flex;
   flex-direction: column;
   gap: var(--sp-2);
-  padding: var(--sp-3) var(--sp-3) var(--sp-2);
+  /* 与条目阅读同一副壳子：左与顶都不留（右栏 .kb-view__right 已经给过内边距），右边留给滚动条 */
+  padding: 0 var(--sp-3) var(--sp-2) 0;
   border-bottom: 1px solid var(--border);
 }
 
@@ -134,7 +135,8 @@ const realPath = computed(() => {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: var(--sp-3);
+  /* 左不留：与上面那行标题同一条竖线（与条目阅读同一个口径） */
+  padding: var(--sp-3) var(--sp-3) var(--sp-3) 0;
 }
 
 .kb-raw-viewer__md {

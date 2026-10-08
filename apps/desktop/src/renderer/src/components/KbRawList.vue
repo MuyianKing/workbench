@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { KbRawItem, KbRawSourceRow, KbRawStatus, KbRawTreeNode } from '@workbench/kb'
 import { Document, Folder, Setting } from '@element-plus/icons-vue'
-import { kbRawSourceNameOf, kbRawStatusText, kbRawTree, kbTreeFolderIds } from '@workbench/kb'
+import { kbRawSourceNameOf, kbRawTree, kbTreeFolderIds } from '@workbench/kb'
 /**
  * 原始数据树（左栏「原始数据」签）：最外层是**来源**（`data/raw/<名字>` 那一格，见
  * shared/kb.ts 的 KbRawSourceRow —— 它可能对到本机一个外部文件夹），来源下面是按目录
@@ -9,11 +9,12 @@ import { kbRawSourceNameOf, kbRawStatusText, kbRawTree, kbTreeFolderIds } from '
  *
  * 状态的口径在 shared/kb.ts（source 配对 + mtime 比较），这里只把结果摆出来：
  * 按状态筛（带计数）、一眼看出哪些等着清洗；树由 kbRawTree 从筛过的清单现算
- * （props 只读，这里不留第二份）。来源行的「配置路径」与顶部那颗「添加原始数据」都只是
- * 把意图交给父层（弹层与落盘在 store 里）—— 组件不碰设置、也不碰文件。
+ * （props 只读，这里不留第二份）。文件行只挂「有更新」一个 tag —— 已入库 / 条目数 /
+ * 后缀 / 时间都不上行（右栏一看就有，分档交给顶上那排 chips）。来源行的「配置路径」与
+ * 顶部那颗「添加原始数据」都只是把意图交给父层（弹层与落盘在 store 里）—— 组件不碰设置、
+ * 也不碰文件。
  */
 import { computed, ref, watch } from 'vue'
-import { formatTimestamp } from '@/format'
 
 const props = defineProps<{
   items: KbRawItem[]
@@ -208,26 +209,11 @@ function sourceHint(row: KbRawSourceRow): string {
           <span class="node__name">{{ data.name }}</span>
         </span>
 
-        <!-- 文件行：保留原来那副两行块（名字 + 后缀 / 状态 + 条目数 + 时间），点开进右栏查看 -->
+        <!-- 文件行：与目录行同一副（图标 + 名字，一行），只有「有更新」才在行尾挂一个 tag -->
         <span v-else class="raw-item" :title="data.id">
-          <span class="raw-item__head">
-            <el-icon class="raw-item__icon"><Document /></el-icon>
-            <span class="raw-item__name">{{ data.name }}</span>
-            <span v-if="data.item?.ext" class="raw-item__ext">{{ data.item.ext }}</span>
-          </span>
-          <span class="raw-item__meta">
-            <span v-if="data.item" class="raw-item__status" :class="`is-${data.item.status}`">
-              {{ kbRawStatusText(data.item.status) }}
-            </span>
-            <span
-              v-if="data.item?.entryRels.length"
-              class="raw-item__entries"
-              :title="data.item.entryRels.join('\n')"
-            >
-              {{ data.item.entryRels.length }} 个条目
-            </span>
-            <span v-if="data.item" class="raw-item__time">{{ formatTimestamp(data.item.mtimeMs) }}</span>
-          </span>
+          <el-icon class="raw-item__icon"><Document /></el-icon>
+          <span class="raw-item__name">{{ data.name }}</span>
+          <span v-if="data.item?.status === 'stale'" class="raw-item__tag">有更新</span>
         </span>
       </template>
     </el-tree>
@@ -247,21 +233,6 @@ function sourceHint(row: KbRawSourceRow): string {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 2px;
-}
-
-<style scoped>
-.kb-raw {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-2);
-  min-height: 0;
-  flex: 1;
-}
-
-.kb-raw__filters {
-  display: flex;
-  flex-wrap: wrap;
   gap: 2px;
 }
 
@@ -290,7 +261,7 @@ function sourceHint(row: KbRawSourceRow): string {
   background: transparent;
 }
 
-/* 文件行是两行块：行盒不再定死 26px，让内容自己撑（目录行自己的 .node 定了 28px） */
+/* 树的行盒：行高由三种行自己写（来源 / 目录 / 文件都是一行 28px），悬停给一块浅底 */
 .kb-raw__body :deep(.el-tree-node__content) {
   height: auto;
   min-height: 28px;
@@ -382,26 +353,19 @@ function sourceHint(row: KbRawSourceRow): string {
 
 /* ---------- 文件行 ---------- */
 
+/* 与目录行 / 来源行同高的一行：名字占满中间，只有「有更新」在行尾挂一个 tag */
 .raw-item {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  align-items: center;
+  gap: 6px;
   flex: 1 1 auto;
   min-width: 0;
-  padding: 2px 0;
+  height: 28px;
   cursor: pointer;
-}
-
-.raw-item__head {
-  display: flex;
-  align-items: baseline;
-  gap: var(--sp-2);
-  min-width: 0;
 }
 
 .raw-item__icon {
   flex-shrink: 0;
-  align-self: center;
   font-size: 14px;
   color: var(--ink-3);
 }
@@ -416,45 +380,17 @@ function sourceHint(row: KbRawSourceRow): string {
   font-size: var(--fs-body);
 }
 
-.raw-item__ext {
+/*
+ * 要催的那一档：红底小 tag。整栏灰着，只有它上色 —— 一屏里要动的东西就是这几个
+ * （与项目卡 / 保险库那些「要催」的 pill 同一副 `--st-fail` 口径）。
+ */
+.raw-item__tag {
   flex-shrink: 0;
-  color: var(--ink-3);
+  padding: 0 6px;
+  border-radius: var(--r-sm);
+  background: var(--st-fail-soft);
+  color: var(--st-fail);
   font-size: var(--fs-micro);
-  font-family: var(--font-mono);
-}
-
-.raw-item__meta {
-  display: flex;
-  align-items: baseline;
-  gap: var(--sp-3);
-  padding-left: 20px;
-}
-
-/* 彩色在这个界面只表达运行状态，所以入库状态用灰度说话：要催的浓、已完成的淡 */
-.raw-item__status {
-  flex-shrink: 0;
-  color: var(--ink);
-  font-size: var(--fs-micro);
-}
-
-.raw-item__status.is-synced {
-  color: var(--ink-3);
-}
-
-.raw-item__entries {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--ink-3);
-  font-size: var(--fs-micro);
-}
-
-.raw-item__time {
-  flex-shrink: 0;
-  color: var(--ink-3);
-  font-size: var(--fs-micro);
-  font-family: var(--font-mono);
+  line-height: 18px;
 }
 </style>
