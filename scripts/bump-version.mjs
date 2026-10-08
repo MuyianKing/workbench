@@ -21,8 +21,9 @@
  * - **packages/\*：私有子包不参与版本**（统一钉 0.0.0）。它们 private: true 且互相 workspace:*，
  *   版本号本来就不参与解析；跟着应用版本一起涨只会把「要同步的地方」从 4 处变成 18 处。
  *   这里按 glob 发现，将来新建的包自动纳入，不用改这份清单。
- * - **CHANGELOG.md：一个版本一节**，正文就是 Release 的正文。这里只管「哪一节属于哪个版本」与
- *   「这一节有没有条目」，分类与措辞是写给人看的（分类那几行的名字随便改，脚本不认它们）。
+ * - **CHANGELOG.md：一个版本一节**，正文就是 Release 的开头（后面接 GitHub 自动生成的
+ *   「Full Changelog」那段）。这里只管「哪一节属于哪个版本」与「这一节有没有条目」——
+ *   分类与措辞是写给人看的，脚本不认它们，也不会往文件里塞脚手架。
  *
  * 只替换那一行，不整份 parse + stringify 重写（那会把 ["nsis"] 这类数组展开、顺带把 CRLF
  * 翻成 LF）；内容没变就不写文件，免得 mtime 一跳白推一轮 HMR（与 vendor-pi.mjs 同一个考虑）。
@@ -103,15 +104,10 @@ function patch({ file, pattern, replace }, value) {
   return { file, ok, line: found[0].replace(/\s+/g, ' ').trim() }
 }
 
-/** CHANGELOG.md：一个版本一节（`## [版本]` / `## [未发布]`），那一节的正文就是 Release 的正文 */
+/** CHANGELOG.md：一个版本一节（`## [版本]` / `## [未发布]`），那一节的正文就是 Release 的开头 */
 const CHANGELOG = 'CHANGELOG.md'
 const UNRELEASED = '未发布'
-/** 新版本骨架里预置的分类：只是给人起个头 —— 脚本不认分类名，它只看这一节有没有 `- ` 条目 */
-const CATEGORIES = ['新特性', '修复', '调整']
 const HEADING = /^## \[([^\]]+)\]/
-/** 空着的那一档留给人看的提示，不算条目、也不会进 Release 正文 */
-const EMPTY_HINT = '<!-- 这一档没有条目就把这一节删掉 -->'
-const skeleton = () => CATEGORIES.flatMap(name => [`### ${name}`, '', EMPTY_HINT, ''])
 
 /** 把 CHANGELOG 读成「按 `## [` 切开的若干节」，并给出取节 / 数条目 / 回写三件事 */
 function changelog() {
@@ -137,8 +133,11 @@ function changelog() {
 }
 
 /**
- * 写入模式：把 `## [未发布]` 升成 `## [<版本>] - <日期>`，并在上面补一节空的「未发布」；
- * 没有「未发布」那一节（第一次用，或者被谁删了）就在最前面插一节带日期的骨架。
+ * 写入模式：把 `## [未发布]` 升成 `## [<版本>] - <日期>`，并在上面补一个空的「未发布」；
+ * 没有「未发布」那一节（第一次用，或者被谁删了）就在最前面插一节带日期的空节。
+ * **只写标题，不预置分类、也不写提示注释** —— 这一节是写给人看的变更记录，摆空标题与
+ * 「没有就删掉」那类脚手架只会让文件不干净（分类名、顺序都随作者，脚本不认它们，
+ * 它只看这一节有没有 `- ` 条目）。
  * 日期取**本机时区**：这是人写 changelog 的那一天，不是 runner 的 UTC 那天。
  * 这个版本那一节已经在了就什么都不动 —— 重跑 bump 不该造出两节一样的版本。
  */
@@ -153,14 +152,14 @@ function promoteChangelog(version) {
   const had = un ? bulletsOf(un).length : 0
   if (un && had) {
     lines[un.start] = `## [${version}] - ${today}`
-    lines.splice(un.start, 0, `## [${UNRELEASED}]`, '', ...skeleton())
+    lines.splice(un.start, 0, `## [${UNRELEASED}]`, '')
     write(lines)
-    return { changed: true, note: `「${UNRELEASED}」升成 [${version}] - ${today}（${had} 条条目），并补了一节空的「${UNRELEASED}」` }
+    return { changed: true, note: `「${UNRELEASED}」升成 [${version}] - ${today}（${had} 条条目），并补了一个空的「${UNRELEASED}」` }
   }
   const at = secs[0]?.start ?? lines.length
-  lines.splice(at, 0, `## [${version}] - ${today}`, '', ...skeleton())
+  lines.splice(at, 0, `## [${version}] - ${today}`, '')
   write(lines)
-  return { changed: true, note: `「${UNRELEASED}」里没有条目，直接插了 [${version}] - ${today} 一节（三类都还空着，写完再提交）` }
+  return { changed: true, note: `「${UNRELEASED}」里没有条目，直接插了 [${version}] - ${today} 一节（还空着，写完再提交）` }
 }
 
 /** 校验模式：这个版本那一节必须在、且至少有一条条目 —— 空着等于「发了个版却没写变更」 */
