@@ -60,6 +60,12 @@ pnpm run typecheck  # 类型检查
 pnpm run dist       # 打包出 NSIS 安装包
 ```
 
+发版走 GitHub Actions（`.github/workflows/release.yml`）：**打一个 `vX.Y.Z` 的 tag 推上去**（可以带预发布后缀，如 `v0.2.0-rc.1`），
+它会先跑 `typecheck` 与单元测试，再在 windows-latest 上打 Windows x64 的 NSIS 安装包，最后建 Release 并把安装包挂上去
+（正文是 GitHub 自动生成的 notes）。版本号从 tag 取、构建时写进四处版本字段，不用先改 `package.json` / `tauri.conf.json`。
+想让发布出来的包**登录可用**，得先给仓库配一个 `OAUTH_LOCAL_JSON` Secret（内容就是本机 `apps/desktop/src-tauri/oauth.local.json` 的原文）；
+没配也能构建，只是那个包里登录按钮显示「未内置凭据」。
+
 用 Token 多机同步、要让笔记里粘贴的图片自动上传、或者要同步笔记 / 知识库的话，还需要系统里有 `git`
 （Token 同步那项先登录账号即可不用单独配凭据）。**想让笔记或知识库同步，得先自己把那个文件夹做成一个连了远端的 git 仓库**
 （`git clone` 一个下来，或在文件夹里 `git init` + `git remote add origin <地址>`）再把文件夹选进来 ——

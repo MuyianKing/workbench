@@ -1,0 +1,173 @@
+# 发版：push 一个 tag（`v0.2.0` 这种）→ 先过闸（typecheck + 单元测试）→ 再打 Windows x64 的 NSIS 安装包
+# → 建 Release 并把安装包挂上去。日常提交不触发（只认 tag）。
+#
+# 几条约定：
+#
+# - **tag 即版本真相**：版本从 tag 取（去掉开头的 `v`），构建前写进根 `package.json`、
+#   `apps/desktop/package.json`、`apps/desktop/src-tauri/tauri.conf.json` 与那份 `Cargo.toml`
+#   —— 只改 runner 上的工作区、**不提交**，仓库里的版本字段照旧由提交决定；Cargo.lock 里
+#   那条 version 由 cargo 自己在构建时补上。所以发版只需要打 tag，不用先改四处版本号。
+# - **账号登录的 OAuth 凭据**从仓库 Secret `OAUTH_LOCAL_JSON` 注入：内容就是本机那份
+#   `apps/desktop/src-tauri/oauth.local.json` 的原文（形状见同目录 `oauth.example.json`）。
+#   没配这个 Secret 也能构建，只是发布包里登录按钮显示「未内置凭据」—— 与本地缺凭据时同一个行为。
+# - **只出 Windows x64**：runner 是 x64 的 `windows-latest`，不传 `--target`，产物固定落在
+#   `apps/desktop/src-tauri/target/release/bundle/nsis/` 下那一颗 `*_x64-setup.exe`（配置见
+#   `tauri.conf.json` 的 `bundle.targets = ["nsis"]`）。
+# - **Release 正文**用 GitHub 自动生成的 notes（上一个 tag 到本次之间的提交）；tag 带预发布后缀
+#   （`v0.2.0-rc.1`）时标成 prerelease。同一个 tag 重跑：不重复建，改成往已有 Release 上覆盖附件。
+# - 版本号只认 `vX.Y.Z`（可带 `-rc.1` 这类后缀）；对不上的 tag 在第一步就报错，不会打出名不符实的包。
+
+name: 发布 Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+# 同一个 tag 只允许一轮在跑：失败后重跑不打乱先后，也不会有两次构建同时往一个 Release 上挂附件
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: 校验（typecheck + 测试）
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+
+      # 版本读根 package.json 的 packageManager（单一来源，不在这儿再钉一遍）
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: 装依赖
+        run: pnpm install --frozen-lockfile
+
+      - name: 类型检查
+        run: pnpm run typecheck
+
+      - name: 单元测试
+        run: pnpm test
+
+  release:
+    name: 打包并发布（Windows x64）
+    needs: verify
+    runs-on: windows-latest
+    timeout-minutes: 90
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+
+      # 版本读根 package.json 的 packageManager（单一来源，不在这儿再钉一遍）
+      - uses: pnpm/action-setup@v4
+
+      # Node 24 与开发机一致（内置的 Pi 要 ≥ 22.19，门槛判定在 packages/ai/src/ai.ts）
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: 装 Rust（stable + x86_64-pc-windows-msvc）
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      # Tauri 那棵依赖树第一次编要十几分钟，靠它把 target/ 与 registry 缓存住
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri -> target
+
+      - name: 装依赖
+        run: pnpm install --frozen-lockfile
+
+      - name: 从 tag 取版本
+        shell: bash
+        run: |
+          TAG="$GITHUB_REF_NAME"
+          if ! printf '%s' "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'; then
+            echo "::error::tag 必须是 vX.Y.Z 形式（可带预发布后缀，如 v0.2.0-rc.1），当前是 $TAG"
+            exit 1
+          fi
+          VERSION="${TAG#v}"
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          case "$VERSION" in
+            *-*) echo "PRERELEASE=1" >> "$GITHUB_ENV" ;;
+          esac
+          echo "$TAG → 版本 $VERSION"
+
+      # 只动那一行版本号：不整份 JSON.parse + stringify 重写（那会把 ["nsis"] 这类数组展开、顺带
+      # 把 CRLF 翻成 LF），也不提交。四处都必须**恰好命中一处**，少了一处就直接报错 ——
+      # 将来谁挪了这些字段的位置，要在这里炸掉，而不是打出一个版本号不对的包。
+      - name: 把版本写进那四个版本字段（只改工作区，不提交）
+        shell: bash
+        run: |
+          node -e '
+            const fs = require("fs");
+            const version = process.env.VERSION;
+            const targets = [
+              ["package.json", /^  "version": "[^"]*"(,?\r?)$/m, `  "version": "${version}"`],
+              ["apps/desktop/package.json", /^  "version": "[^"]*"(,?\r?)$/m, `  "version": "${version}"`],
+              ["apps/desktop/src-tauri/tauri.conf.json", /^  "version": "[^"]*"(,?\r?)$/m, `  "version": "${version}"`],
+              ["apps/desktop/src-tauri/Cargo.toml", /^version = "[^"]*"(,?\r?)$/m, `version = "${version}"`],
+            ];
+            for (const [file, pattern, line] of targets) {
+              const text = fs.readFileSync(file, "utf8");
+              const found = text.match(new RegExp(pattern.source, "gm"));
+              if (found?.length !== 1) {
+                throw new Error(`${file} 里的版本字段不是恰好一处（找到 ${found?.length ?? 0} 处），版本没写成`);
+              }
+              fs.writeFileSync(file, text.replace(pattern, line + "$1"));
+              console.log(`${file} → ${version}`);
+            }
+          '
+
+      - name: 注入 OAuth 凭据（Secret OAUTH_LOCAL_JSON；没配就退回空模板）
+        shell: bash
+        env:
+          OAUTH_LOCAL_JSON: ${{ secrets.OAUTH_LOCAL_JSON }}
+        run: |
+          if [ -z "$OAUTH_LOCAL_JSON" ]; then
+            echo "::warning::仓库里没有 OAUTH_LOCAL_JSON 这个 Secret，本次发布的包里账号登录会显示「未内置凭据」"
+            exit 0
+          fi
+          printf '%s\n' "$OAUTH_LOCAL_JSON" > apps/desktop/src-tauri/oauth.local.json
+          node -e 'JSON.parse(require("fs").readFileSync("apps/desktop/src-tauri/oauth.local.json", "utf8"))' \
+            || { echo "::error::OAUTH_LOCAL_JSON 不是合法 JSON（内容应当就是本机 oauth.local.json 的原文）"; exit 1; }
+          echo "已注入 OAuth 凭据"
+
+      # beforeBuildCommand 会自己跑 build:renderer；这条 = vendor-pi.mjs（内置 Pi）+ tauri build
+      - name: 打包（NSIS，Windows x64）
+        run: pnpm run dist
+
+      - name: 建 Release 并挂上安装包
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          shopt -s nullglob
+          installers=(apps/desktop/src-tauri/target/release/bundle/nsis/*.exe)
+          if [ ${#installers[@]} -eq 0 ]; then
+            echo "::error::target/release/bundle/nsis 下没有 .exe，安装包没打出来"
+            exit 1
+          fi
+          ls -lh "${installers[@]}"
+          if gh release view "$TAG" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "Release $TAG 已存在，覆盖附件"
+            gh release upload "$TAG" "${installers[@]}" -R "$GITHUB_REPOSITORY" --clobber
+          else
+            args=(--title "Workbench $TAG" --generate-notes)
+            if [ -n "$PRERELEASE" ]; then
+              args+=(--prerelease)
+            fi
+            gh release create "$TAG" "${installers[@]}" -R "$GITHUB_REPOSITORY" "${args[@]}"
+          fi

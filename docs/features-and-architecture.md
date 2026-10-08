@@ -272,6 +272,8 @@ apps/desktop/scripts/    make-icons.mjs（程序化生成应用图标与托盘�
                          vendor-pi.mjs（Pi 随包内置与瘦身）、
                          sync-vditor-assets.mjs（Vditor 静态资源随包 —— 注解见
                          modules/notes.md）
+.github/workflows/       release.yml（打 vX.Y.Z 的 tag → 过闸 typecheck + 测试 → 打 Windows x64 的
+                         NSIS 包 → 建 Release 并挂上安装包；版本号从 tag 取）
 site/ 、 site-claude/     官网两版 —— 注解见 modules/site.md
 ```
 
