@@ -1,9 +1,12 @@
 /**
- * 把**应用版本号**真正写进仓库的那个工具（发版流程两半里的前半）。
+ * 把**应用版本号**真正写进仓库的那个工具（发版流程两半里的前半），顺带管 CHANGELOG 的版本节。
  *
  * 用法：
- *   pnpm run bump 0.2.1          写入：把版本写进下面 TARGETS 那几处
- *   pnpm run bump --check 0.2.1  校验：只读，任何一处对不上就退出码 1（流水线里跑这个）
+ *   pnpm run bump 0.2.1          写入：把版本写进下面 TARGETS 那几处，并把 CHANGELOG 的
+ *                                `## [未发布]` 升成 `## [0.2.1] - <今天>`
+ *   pnpm run bump --check 0.2.1  校验：只读，任何一处（含 CHANGELOG 那一节有没有条目）对不上
+ *                                就退出码 1 —— 流水线里跑这个
+ *   pnpm run bump --notes 0.2.1  只把 CHANGELOG 里那一节打出来：Release 的正文就是它
  *
  * 为什么要有它：发版流水线（.github/workflows/release.yml）只认 tag，而 tag 不住在源码里 ——
  * 版本号必须在**打 tag 之前**就真的写进仓库并提交，这样 clone 那个 tag 出来就是那个版本，
@@ -11,12 +14,14 @@
  * runner 的工作区里写、不提交，结果是 v0.2.0 发出来了，仓库里 16 个 package.json 还写着 0.1.0：
  * 本地重打同一个 tag 得到的是 `Workbench_0.1.0_x64-setup.exe`，与发布包同名同版本、分不清谁是谁。
  *
- * 两条约定：
+ * 三条约定：
  * - **TARGETS**：跟着 tag 走的那几处。每一处必须**恰好命中一次** —— 将来谁挪了这些字段的位置，
  *   要在这里炸掉，而不是一声不响地不写、打出一个版本号不对的包。
  * - **packages/\*：私有子包不参与版本**（统一钉 0.0.0）。它们 private: true 且互相 workspace:*，
  *   版本号本来就不参与解析；跟着应用版本一起涨只会把「要同步的地方」从 4 处变成 18 处。
  *   这里按 glob 发现，将来新建的包自动纳入，不用改这份清单。
+ * - **CHANGELOG.md：一个版本一节**，正文就是 Release 的正文。这里只管「哪一节属于哪个版本」与
+ *   「这一节有没有条目」，分类与措辞是写给人看的（分类那几行的名字随便改，脚本不认它们）。
  *
  * 只替换那一行，不整份 parse + stringify 重写（那会把 ["nsis"] 这类数组展开、顺带把 CRLF
  * 翻成 LF）；内容没变就不写文件，免得 mtime 一跳白推一轮 HMR（与 vendor-pi.mjs 同一个考虑）。
@@ -97,6 +102,102 @@ function patch({ file, pattern, replace }, value) {
   return { file, ok, line: found[0].replace(/\s+/g, ' ').trim() }
 }
 
+/** CHANGELOG.md：一个版本一节（`## [版本]` / `## [未发布]`），那一节的正文就是 Release 的正文 */
+const CHANGELOG = 'CHANGELOG.md'
+const UNRELEASED = '未发布'
+/** 新版本骨架里预置的分类：只是给人起个头 —— 脚本不认分类名，它只看这一节有没有 `- ` 条目 */
+const CATEGORIES = ['新特性', '修复', '调整']
+const HEADING = /^## \[([^\]]+)\]/
+/** 空着的那一档留给人看的提示，不算条目、也不会进 Release 正文 */
+const EMPTY_HINT = '<!-- 这一档没有条目就把这一节删掉 -->'
+const skeleton = () => CATEGORIES.flatMap(name => [`### ${name}`, '', EMPTY_HINT, ''])
+
+/** 把 CHANGELOG 读成「按 `## [` 切开的若干节」，并给出取节 / 数条目 / 回写三件事 */
+function changelog() {
+  const text = readFileSync(join(root, CHANGELOG), 'utf8')
+  const nl = text.includes('\r\n') ? '\r\n' : '\n'
+  const lines = text.replace(/\r\n/g, '\n').split('\n')
+  const marks = []
+  lines.forEach((line, i) => {
+    const m = HEADING.exec(line)
+    if (m)
+      marks.push({ i, name: m[1] })
+  })
+  const secs = marks.map((mark, k) => ({
+    name: mark.name,
+    start: mark.i,
+    end: k + 1 < marks.length ? marks[k + 1].i : lines.length,
+  }))
+  const secOf = name => secs.find(s => s.name === name)
+  const bulletsOf = sec => (sec ? lines.slice(sec.start + 1, sec.end).filter(l => /^\s*- /.test(l)) : [])
+  // 回写时换回文件原本的换行符：这份文件跟仓库里别的文件一样是 CRLF，别被整份翻成 LF
+  const write = next => writeFileSync(join(root, CHANGELOG), next.join('\n').replace(/\n/g, nl))
+  return { lines, secs, secOf, bulletsOf, write }
+}
+
+/**
+ * 写入模式：把 `## [未发布]` 升成 `## [<版本>] - <日期>`，并在上面补一节空的「未发布」；
+ * 没有「未发布」那一节（第一次用，或者被谁删了）就在最前面插一节带日期的骨架。
+ * 日期取**本机时区**：这是人写 changelog 的那一天，不是 runner 的 UTC 那天。
+ * 这个版本那一节已经在了就什么都不动 —— 重跑 bump 不该造出两节一样的版本。
+ */
+function promoteChangelog(version) {
+  const { lines, secs, secOf, bulletsOf, write } = changelog()
+  const today = new Date().toLocaleDateString('sv-SE')
+  const already = secOf(version)
+  if (already)
+    return { changed: false, note: `[${version}] 那一节已经在了（${bulletsOf(already).length} 条条目），没动它` }
+  const un = secOf(UNRELEASED)
+  // 条目数要在动手之前数：上面一 splice，un 的区间就不对了
+  const had = un ? bulletsOf(un).length : 0
+  if (un && had) {
+    lines[un.start] = `## [${version}] - ${today}`
+    lines.splice(un.start, 0, `## [${UNRELEASED}]`, '', ...skeleton())
+    write(lines)
+    return { changed: true, note: `「${UNRELEASED}」升成 [${version}] - ${today}（${had} 条条目），并补了一节空的「${UNRELEASED}」` }
+  }
+  const at = secs[0]?.start ?? lines.length
+  lines.splice(at, 0, `## [${version}] - ${today}`, '', ...skeleton())
+  write(lines)
+  return { changed: true, note: `「${UNRELEASED}」里没有条目，直接插了 [${version}] - ${today} 一节（三类都还空着，写完再提交）` }
+}
+
+/** 校验模式：这个版本那一节必须在、且至少有一条条目 —— 空着等于「发了个版却没写变更」 */
+function checkChangelog(version) {
+  const { secOf, bulletsOf } = changelog()
+  const sec = secOf(version)
+  if (!sec) {
+    fail(`${CHANGELOG} 里没有 [${version}] 那一节（先在仓库里跑 \`pnpm run bump ${version}\`）`)
+  }
+  const bullets = bulletsOf(sec)
+  if (!bullets.length) {
+    fail(`${CHANGELOG} 的 [${version}] 那一节还没有条目（新特性 / 修复 / 调整 各写一条，没有的那一节删掉）`)
+  }
+  return bullets.length
+}
+
+/** --notes：只把那一节的正文打出来（流水线拿它当 Release 正文） */
+function printNotes(version) {
+  const { lines, secOf, bulletsOf } = changelog()
+  const sec = secOf(version)
+  if (!sec || !bulletsOf(sec).length)
+    fail(`${CHANGELOG} 的 [${version}] 那一节缺条目`)
+  const body = lines
+    .slice(sec.start + 1, sec.end)
+    .filter(line => !/^\s*<!--/.test(line))
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+  const repo = process.env.GITHUB_REPOSITORY
+  const tail = repo ? `\n\n完整变更见 [CHANGELOG.md](https://github.com/${repo}/blob/v${version}/CHANGELOG.md)` : ''
+  process.stdout.write(`${body}${tail}\n`)
+}
+
+if (process.argv.includes('--notes')) {
+  printNotes(version)
+  process.exit(0)
+}
+
 const app = TARGETS.map(target => patch(target, version))
 const sub = privatePackages().map(file => patch({ file, pattern: JSON_VERSION, replace: jsonLine }, PLACEHOLDER))
 const rows = [...app, ...sub]
@@ -114,15 +215,21 @@ if (checkOnly) {
     console.error(`[bump] 先在仓库里跑 \`pnpm run bump ${version}\`，把那一笔提交，再打 tag`)
     process.exit(1)
   }
-  console.log(`[bump] 应用版本那 ${app.length} 处与 ${sub.length} 个私有子包都对得上，可以打这个 tag`)
-}
-else if (bad.length) {
-  // 把「该提交哪几处」直接给出来：版本这一笔最好只带这几处（仓库里常有别的在改）
-  console.log(`[bump] 写了 ${bad.length} 处；下一步：`)
-  console.log(`  git add ${bad.map(row => row.file).join(' ')}`)
-  console.log(`  git commit -m "chore: 版本号 ${version}"`)
-  console.log(`  git tag v${version} && git push origin main v${version}`)
+  const bullets = checkChangelog(version)
+  console.log(`[bump] 应用版本那 ${app.length} 处与 ${sub.length} 个私有子包都对得上；${CHANGELOG} 的 [${version}] 有 ${bullets} 条条目，可以打这个 tag`)
 }
 else {
-  console.log(`[bump] 本来就是 ${version}，没动文件`)
+  const log = promoteChangelog(version)
+  console.log(`[bump] ${CHANGELOG}：${log.note}`)
+  // 把「该提交哪几处」直接给出来：版本这一笔最好只带这几处（仓库里常有别的在改）
+  const files = [...bad.map(row => row.file), ...(log.changed ? [CHANGELOG] : [])]
+  if (!files.length) {
+    console.log(`[bump] 本来就是 ${version}，没动文件`)
+  }
+  else {
+    console.log(`[bump] 写了 ${files.length} 处；下一步：`)
+    console.log(`  git add ${files.join(' ')}`)
+    console.log(`  git commit -m "chore: 版本号 ${version}"`)
+    console.log(`  git tag v${version} && git push origin main v${version}`)
+  }
 }

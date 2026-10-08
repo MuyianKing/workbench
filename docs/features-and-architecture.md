@@ -273,8 +273,10 @@ apps/desktop/scripts/    make-icons.mjs（程序化生成应用图标与托盘�
                          sync-vditor-assets.mjs（Vditor 静态资源随包 —— 注解见
                          modules/notes.md）
 .github/workflows/       release.yml（打 vX.Y.Z 的 tag → 过闸 typecheck + 测试 → 打 Windows x64 的
-                         NSIS 包 → 建 Release 并挂上安装包；tag 与仓库里的版本字段对不上就停）
-scripts/                 bump-version.mjs（发版前把版本写进那几处；--check 只对账，流水线里跑的就是它）
+                         NSIS 包 → 建 Release 并挂上安装包；版本字段与 CHANGELOG 对不上就停）
+scripts/                 bump-version.mjs（发版前把版本写进那几处、把 CHANGELOG 的「未发布」升成
+                         正式版本节；--check 只对账、--notes 抽 Release 正文，流水线里跑的就是它）
+CHANGELOG.md             一个版本一节（新特性 / 修复 / 调整），Release 的正文取的就是这一节
 site/ 、 site-claude/     官网两版 —— 注解见 modules/site.md
 ```
 
