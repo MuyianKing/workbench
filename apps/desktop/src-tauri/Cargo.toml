@@ -1,6 +1,6 @@
 [package]
 name = "workbench"
-version = "0.1.0"
+version = "0.2.1"
 description = "前端项目控制台"
 authors = ["muyian"]
 edition = "2021"
