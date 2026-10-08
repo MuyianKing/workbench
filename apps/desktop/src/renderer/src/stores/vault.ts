@@ -1,6 +1,6 @@
 import type { VaultEntry, VaultRecord } from '@workbench/vault'
 import type { Result, VaultHelloState, VaultKeyState } from '@/types'
-import { filterVaultRecords, groupVaultRecords, sortVaultRecords, vaultEntryProblem, vaultGroups } from '@workbench/vault'
+import { filterVaultRecords, groupVaultRecords, orderedVaultGroups, sortVaultRecords, vaultEntryProblem, vaultGroups, withoutHiddenGroups } from '@workbench/vault'
 import { defineStore } from 'pinia'
 /**
  * 密码保险库：密钥状态、卡片清单、增删改与同步的编排。
@@ -81,11 +81,70 @@ export const useVaultStore = defineStore('vault', () => {
 
   const query = ref('')
 
+  /**
+   * 分组那两样 —— 用户拖出来的顺序、藏起来的那几组（都在「分组设置」那个弹窗里改）。
+   *
+   * 两样都是**行为记忆**（住本机数据文件、不进 theme.json、不参与外观同步，见 types.ts），
+   * 也**不进 vault.json 那份会跨设备合并的文件**：那份只装条目本身，往信封里加视图偏好
+   * 会牵动合并口径（见 packages/vault/src/vault.ts 的文件头）。
+   *
+   * 单源就是设置，这里不再各存一份 ref —— 存一份就多一处会与磁盘漂移的副本，
+   * 写入一律经 `settings.updateSettings`（与项目页的 sortBy 同一条路）。
+   */
+  const groupOrder = computed(() => settings.settings.vaultGroupOrder)
+  const hiddenGroups = computed(() => settings.settings.vaultHiddenGroups)
+
+  /**
+   * 弹窗里那一行行：全部分组、按用户拖出来的先后（未分组不在里面，它不是一个组）。
+   *
+   * 拖动要的那份名单就是它 —— 藏起来的分组也在里面（它的开关是关的），所以拖动落盘的那份
+   * 名单一直是完整的：藏一下再放出来，位次还是原来那个。
+   */
+  const orderedGroups = computed(() => orderedVaultGroups(records.value, groupOrder.value))
+
+  /**
+   * 整份落一次顺序（「分组设置」弹窗里拖完之后写的）。
+   *
+   * 拖动那边算好的是**完整一份名单**（它自己那份本地顺序就是拖动时的实时样子），
+   * 所以这里收整份，而不是「从哪儿挪到哪儿」—— 收一对 from / to 的话，两边还得各算一遍
+   * 「没上名单的分组排在哪」，迟早对不上。
+   */
+  async function setGroupOrder(names: string[]): Promise<void> {
+    await settings.updateSettings({ vaultGroupOrder: names })
+  }
+
+  /**
+   * 藏起一组（弹窗里那个开关关掉）：整段不画、也不进搜索。
+   *
+   * **未分组藏不了**（空串直接挡掉）：它是个兜底的口袋，藏掉之后新加一条没归类的记录
+   * 就等于凭空消失 —— 弹窗里也不列它。
+   */
+  function hideGroup(key: string): void {
+    if (!key || hiddenGroups.value.includes(key))
+      return
+    void settings.updateSettings({ vaultHiddenGroups: [...hiddenGroups.value, key] })
+  }
+
+  /** 放出一组（开关打开）：它回到墙上原来的位次（顺序名单里一直留着它） */
+  function showGroup(key: string): void {
+    if (!hiddenGroups.value.includes(key))
+      return
+    void settings.updateSettings({
+      vaultHiddenGroups: hiddenGroups.value.filter(name => name !== key),
+    })
+  }
+
+  /** 全放出来：一段都不剩时那个空态上的按钮 */
+  function showAllGroups(): void {
+    if (hiddenGroups.value.length)
+      void settings.updateSettings({ vaultHiddenGroups: [] })
+  }
+
   /** 同步能不能用：与其余几条同步同一个判据（没登录就没有同步） */
   const syncReady = computed(() => Boolean(account.value) && Boolean(settings.settings.tokenSyncRepo.trim()))
 
   /**
-   * 已经有的分组名：**只给弹框那一栏当候选项**（选一下省得打字），不参与界面筛选。
+   * 已经有的分组名：**只给编辑弹框那一栏当候选项**（选一下省得打字），不参与界面筛选。
    *
    * 之前这里还有一排分组筛选标签，撤掉了：分组已经在卡片墙上分了段、每段一个标题，
    * 标签把那几个数又摆了一遍（同一屏里「测试 1」出现两次），而且工具栏那一行被它撑得没有重心。
@@ -93,8 +152,13 @@ export const useVaultStore = defineStore('vault', () => {
    */
   const groups = computed(() => vaultGroups(records.value))
 
-  /** 当前这一屏要画的卡片（搜索过滤 + 排序） */
-  const visibleRecords = computed(() => sortVaultRecords(filterVaultRecords(records.value, query.value)))
+  /** 当前这一屏要画的卡片（搜索过滤 → 摘掉藏起来的那几组 → 按用户拖出来的顺序排） */
+  const visibleRecords = computed(() =>
+    sortVaultRecords(
+      withoutHiddenGroups(filterVaultRecords(records.value, query.value), hiddenGroups.value),
+      groupOrder.value,
+    ),
+  )
 
   /**
    * 卡片墙按分组切段（每一段一个标题 + 一段卡片）。
@@ -391,7 +455,10 @@ export const useVaultStore = defineStore('vault', () => {
     syncFailed,
     keyMismatch,
     query,
+    groupOrder,
+    hiddenGroups,
     groups,
+    orderedGroups,
     syncReady,
     visibleRecords,
     sections,
@@ -409,5 +476,9 @@ export const useVaultStore = defineStore('vault', () => {
     saveEntry,
     removeEntry,
     sync,
+    setGroupOrder,
+    hideGroup,
+    showGroup,
+    showAllGroups,
   }
 })

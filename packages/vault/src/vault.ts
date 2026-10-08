@@ -517,22 +517,108 @@ function byName(a: VaultRecord, b: VaultRecord): number {
 }
 
 /**
+ * 分组名名单的条数上限：拖出来的顺序、藏起来的分组都用它兜着（手改坏的文件不该把界面撑爆）。
+ * 名字本身的长度上限在 `sanitizeVaultEntry` 那一处（100）。
+ */
+const GROUP_LIST_MAX = 500
+
+/**
+ * 收敛一份分组名名单（用户拖出来的顺序、或藏起来的那几组）。
+ *
+ * 两条：**只留字符串**、**去重并保序**（同一个名字出现两次会让排序的 rank 认第一个，纯属自找麻烦）。
+ * 名字按 `sanitizeVaultEntry` 同一条口径截断。
+ *
+ * **空串（未分组那一段）一律丢掉**：它是个兜底的口袋、不是一个组 —— 永远垫底，
+ * 不靠名单给它位次（见 `compareGroups`），「分组设置」里也不列它（藏掉它，
+ * 新加一条没归类的记录就等于凭空消失）。所以这两份名单里都不会有它。
+ *
+ * 认不出来的输入返回空数组 —— 调用方据此退回默认行为（按名字排 / 什么都不藏）。
+ */
+export function sanitizeVaultGroupNames(value: unknown): string[] {
+  if (!Array.isArray(value))
+    return []
+
+  const names: string[] = []
+  for (const raw of value) {
+    if (typeof raw !== 'string')
+      continue
+    const name = raw.trim().slice(0, 100)
+    if (!name || names.includes(name))
+      continue
+    names.push(name)
+    if (names.length >= GROUP_LIST_MAX)
+      break
+  }
+
+  return names
+}
+
+/**
+ * 把藏起来的那几组从卡片墙上摘掉（搜索之后再走这一步，顺序见 stores/vault.ts）。
+ *
+ * 藏起来是**整段不画**：它下面的记录不进墙、也不进搜索 —— 想找就去「分组设置」里把开关打开。
+ * 名字比对按收敛过的那个值（与排序、筛选同一条口径）。
+ */
+export function withoutHiddenGroups(
+  records: readonly VaultRecord[],
+  hidden: readonly string[],
+): VaultRecord[] {
+  if (!hidden.length)
+    return [...records]
+  return records.filter(record => !hidden.includes(record.group))
+}
+
+/**
+ * 两段之间谁在前：**按用户拖出来的那份名单**（`order` 里的位次）。
+ *
+ * 名单里没有的分组排在名单之后、按名字 —— 新加一个分组不必先去弹窗里拖一下才看得见
+ * （它一出现就在名单末尾那一档里）。**未分组（空串）永远垫底**，名单里写了它也不认：
+ * 它是个兜底的口袋、不是一个组，而弹窗里也不列它。
+ */
+function compareGroups(a: string, b: string, order: readonly string[]): number {
+  const ra = a ? order.indexOf(a) : -1
+  const rb = b ? order.indexOf(b) : -1
+  if (ra >= 0 && rb >= 0)
+    return ra - rb
+  if (ra !== rb)
+    return ra >= 0 ? -1 : 1
+
+  if (!a !== !b)
+    return a ? -1 : 1
+
+  return a.localeCompare(b, 'zh-Hans-CN', { numeric: true })
+}
+
+/**
  * 卡片的顺序：**先按分组、组内按名字**。
  *
- * 分组是自由文本，没有一份「分组顺序」可配，所以按名字排 —— 于是同一组的卡片在「全部」那一档里
- * 也是挨着的，一眼看得出归了哪些组。**未分组排在最后**：它是个兜底，不该挤在正经分组前面。
- * 末了拿 id 兜底，保证顺序是稳的（两台机器看到的排列一样）。
+ * 分组那一段的先后由 `order` 定（用户在「分组设置」弹窗里拖出来的名单）；组内一直是按名字
+ * —— 段里的卡片乱序反而找不着东西。末了拿 id 兜底，保证顺序是稳的（两台机器看到的排列一样）。
  */
-export function sortVaultRecords(records: readonly VaultRecord[]): VaultRecord[] {
-  return [...records].sort((a, b) => {
-    if (!a.group !== !b.group)
-      return a.group ? -1 : 1
-    return (
-      a.group.localeCompare(b.group, 'zh-Hans-CN', { numeric: true })
-      || byName(a, b)
-      || (a.id < b.id ? -1 : 1)
-    )
-  })
+export function sortVaultRecords(
+  records: readonly VaultRecord[],
+  order: readonly string[] = [],
+): VaultRecord[] {
+  return [...records].sort((a, b) =>
+    compareGroups(a.group, b.group, order)
+    || byName(a, b)
+    || (a.id < b.id ? -1 : 1),
+  )
+}
+
+/**
+ * 「分组设置」弹窗里那一行行：**全部有名字的分组**，按用户拖出来的先后排。
+ *
+ * 未分组不在里面（它不是一个组，永远垫底、也没有开关）；**藏起来的分组照常在里面**
+ * （它的开关是关的）—— 于是拖动落盘的那份名单一直是完整的，藏一下再放出来，位次还是原来那个。
+ */
+export function orderedVaultGroups(
+  records: readonly VaultRecord[],
+  order: readonly string[] = [],
+): string[] {
+  return groupVaultRecords(sortVaultRecords(records, order))
+    .map(section => section.key)
+    .filter(key => key !== '')
 }
 
 /**

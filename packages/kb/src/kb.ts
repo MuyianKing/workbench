@@ -1,13 +1,20 @@
 import type { NoteRepoState, NoteSyncInput, NoteSyncSummary } from '@workbench/notes'
 /**
- * 知识库（kb）：用户在别处维护的一个独立项目 —— `data/raw/` 放原始资料，`kb/` 放整理好的
- * 条目（frontmatter 的 source 指回原始文件），`index/index.json` 由应用重建（Rust 侧
+ * 知识库（kb）：用户在别处维护的一个独立项目 —— 原始资料在 `data/raw/`、整理好的条目在
+ * `kb/`（frontmatter 的 source 指回原始文件）、`index/index.json` 由应用重建（Rust 侧
  * kb.rs 的 index_build）。**仓库是纯数据**：没有脚本、没有 Agent 说明文件，清洗由应用
  * 全程编排（指令在 kb-clean.ts，编排与收尾在 stores/kb.ts）。
  *
  * 应用对条目内容**只读**，写的只有生成物（重建索引）。应用负责的是把「哪些还没入库、
  * 哪些原始资料又更新了」算清楚（这些口径都是纯函数，在这里、有单测），清洗就按这份清单
- * 交给内置的 Agent。Rust 侧（kb.rs）只带事实：平铺清单（任意后缀、带 mtime）与文件文本。
+ * 交给内置的 Agent。Rust 侧（kb.rs）只带事实：平铺清单（任意后缀、带 mtime 与绝对路径）
+ * 与文件文本。
+ *
+ * **原始数据的最外层是「来源」**：`data/raw/<来源名>` 这一格对到本机的一个文件夹
+ * （见 KbRawSource）—— 为了让外面的资料可见而把它 copy 进库里，那条路不再需要了。
+ * 逻辑路径始终是 `data/raw/<来源名>/<内层>`，**不随来源实际在哪儿变** —— 条目 frontmatter
+ * 的 source、正文里指向原始资料的相对链接、状态配对全都按逻辑路径走，来源换一个位置
+ * 不用改任何条目。没有配过的来源照旧读库里那份（兼容层，见 kbVisibleRawEntries）。
  *
  * 「有没有更新」的判据是**文件修改时间**：条目的 source 归一化后与原始文件配对 ——
  * 没有条目指向 = 未入库；原始文件比指向它的条目里最新的那份还新 = 有更新。
@@ -15,6 +22,7 @@ import type { NoteRepoState, NoteSyncInput, NoteSyncSummary } from '@workbench/n
  * 都比它更脆 —— 它不依赖任何额外状态，重启就对得上。口径要换时只改这里。
  */
 import { dayKey } from '@workbench/core'
+import { sanitizeNoteRoot } from '@workbench/notes'
 
 /** 同步与仓库探测复用笔记那两条通道（本来就是「对任意文件夹、认它自己的 origin」的），形状照搬 */
 export type KbSyncInput = NoteSyncInput
@@ -40,6 +48,21 @@ export interface KbScanEntry {
   name: string
   isDir: boolean
   mtimeMs: number
+  /**
+   * 这个条目**实际在磁盘上的绝对路径**。库里的东西就是「根 + rel」；来源里的东西在
+   * 用户指定的那个文件夹下，随便怎么算都可能算错 —— 交给 Rust 一起带回来，渲染层
+   * 不再自己拼一条路径规则（打开文件、清洗清单里给 Pi 读的地址都用它）。
+   * 认不出来时是空串（测试里造清单时也常常不填）。
+   */
+  abs?: string
+  /**
+   * 这条事实的出处：`repo` = 知识库文件夹里那一份，`source` = 某个来源文件夹里那一份。
+   *
+   * **必须分开**：一个来源名配了外部文件夹时，库里那份副本（`repo`）要整棵让位，
+   * 而外部那份（`source`）正是要用的那份 —— 光看 rel 两者一模一样，分不出来。
+   * 缺省按 `repo` 算（测试里造清单常常不填，那正是「库里那份」的意思）。
+   */
+  origin?: 'repo' | 'source'
 }
 
 /** 原始数据的入库状态 */
@@ -75,6 +98,8 @@ export interface KbRawItem {
   /** 小写后缀（不带点）；没有后缀（含点开头的名字）是空串 */
   ext: string
   mtimeMs: number
+  /** 这个文件的真实绝对路径（库里的那份就是根下，来源里的在用户指定的文件夹下） */
+  abs: string
   status: KbRawStatus
   /** 指向它的条目（kb 相对路径），按修改时间新的在前 */
   entryRels: string[]
@@ -356,6 +381,268 @@ export function kbFolderChain(rel: string): string[] {
   return chain
 }
 
+// ---------- 来源（原始数据最外层对到本机的一个文件夹） ----------
+
+/**
+ * 一条来源映射：`data/raw/<名字>` 这最外层的一格，对到本机的一个文件夹。
+ *
+ * 配置**只是一层映射**：应用不搬运、不复制、不删除任何文件，改的只有「去哪儿读」。
+ * 路径只对本机成立（换台机器就不成立），所以它住在数据文件里、不进 theme.json、
+ * 不参与外观同步。没有配过的来源照旧读库里的 `data/raw/<名字>`（兼容层）。
+ */
+export interface KbRawSource {
+  /** 这条映射属于哪个知识库（用户挑的那个目录）：来源名在不同知识库里可以重名 */
+  root: string
+  /** 来源名：逻辑路径 `data/raw/<名字>` 的那一段，也是条目 frontmatter 的 source 引用的那一截 */
+  name: string
+  /** 来源文件夹在本机的绝对路径；空串 = 还没配（树里照样占一行，可以再指定） */
+  dir: string
+}
+
+/** 来源名的长度上限：够放下常见的文件夹名，又不至于把树撑破 */
+export const KB_RAW_NAME_MAX = 60
+
+/**
+ * 收敛来源名。它是**逻辑路径**的一段、不是真实路径的一段，所以只挡分隔符与
+ * `.` / `..`（前者会让逻辑路径跑到别处，后者会指到来源根外面）；其余（中文、空格、
+ * 点开头的名字）原样留着 —— 库里已经在用的目录名不该因为这里多一条规矩而配不上。
+ */
+export function sanitizeKbSourceName(raw: unknown): string {
+  if (typeof raw !== 'string')
+    return ''
+  // 控制字符（文件名里本来就不该有）先摘掉，再判分隔符
+  const clean = raw.replace(/[\u0000-\u001F]/g, '').trim()
+  if (!clean || clean === '.' || clean === '..' || /[\\/]/.test(clean))
+    return ''
+  return clean.slice(0, KB_RAW_NAME_MAX)
+}
+
+/** 路径归一成「判等用」的形状：统一斜杠、去尾斜杠、小写（Windows 的文件系统分不清大小写） */
+function pathKey(value: string): string {
+  return value.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
+}
+
+/** dir 是不是就在这个知识库文件夹里（等于它、或在它下面）：那读的其实还是库里的 data/raw */
+export function isInsideKbRoot(dir: string, root: string): boolean {
+  const base = pathKey(root)
+  const target = pathKey(dir)
+  if (!base || !target)
+    return false
+  return target === base || target.startsWith(`${base}/`)
+}
+
+/**
+ * 收敛设置里的来源清单（磁盘上的可能是旧版本写的或手工改坏的）：
+ * root 与 name 缺一不可，路径按笔记文件夹同一套收敛；同一个知识库里**来源名不重复**、
+ * **同一个文件夹不挂两个名字**（重复的那条保留名字、按「还没配」处理 —— 名字是条目
+ * source 的契约，不能悄悄丢掉，用户得在界面上看见它还需要指定）；路径指到知识库
+ * 文件夹自己或它里面的一律不认（那是库里的 `data/raw`，不是外部来源）。
+ */
+export function sanitizeKbRawSources(raw: unknown): KbRawSource[] {
+  if (!Array.isArray(raw))
+    return []
+
+  const out: KbRawSource[] = []
+  const names = new Set<string>()
+  const dirs = new Set<string>()
+  for (const item of raw) {
+    if (!item || typeof item !== 'object' || Array.isArray(item))
+      continue
+    const record = item as Record<string, unknown>
+    const root = sanitizeNoteRoot(record.root)
+    const name = sanitizeKbSourceName(record.name)
+    if (!root || !name)
+      continue
+
+    const nameKey = `${pathKey(root)}\u0000${name.toLowerCase()}`
+    if (names.has(nameKey))
+      continue
+    names.add(nameKey)
+
+    let dir = sanitizeNoteRoot(record.dir)
+    if (dir && isInsideKbRoot(dir, root))
+      dir = ''
+    if (dir) {
+      const dirKey = `${pathKey(root)}\u0000${pathKey(dir)}`
+      if (dirs.has(dirKey))
+        dir = ''
+      else dirs.add(dirKey)
+    }
+    out.push({ root, name, dir })
+  }
+  return out
+}
+
+/** 当前知识库配的那些来源：来源名在不同知识库里可以重名，所以按根过滤 */
+export function kbRawSourcesFor(sources: KbRawSource[], root: string): KbRawSource[] {
+  const key = pathKey(root)
+  if (!key)
+    return []
+  return sources.filter(source => pathKey(source.root) === key)
+}
+
+/** 两个知识库根是不是同一个（分隔符与大小写不敏感）：改 / 删来源时按它认自己那几条 */
+export function sameKbRoot(a: string, b: string): boolean {
+  const left = pathKey(a)
+  return !!left && left === pathKey(b)
+}
+
+/** 逻辑路径里 `data/raw/` 那一段之后的部分；不在原始资料区时回空串 */
+function rawInnerOf(rel: string): string {
+  const prefix = `${KB_RAW_DIR}/`
+  return rel.startsWith(prefix) ? rel.slice(prefix.length) : ''
+}
+
+/**
+ * 一个**文件**的逻辑路径属于哪个来源（`data/raw/mu-ui/a/b.md` → `mu-ui`）。
+ * 直接躺在 `data/raw` 下的文件（`data/raw/随手记.md`）没有来源，回空串。
+ */
+export function kbRawSourceNameOf(rel: string): string {
+  const inner = rawInnerOf(rel)
+  const cut = inner.indexOf('/')
+  return cut > 0 ? inner.slice(0, cut) : ''
+}
+
+/** 这个条目是不是**库里那份**、且落在某个来源名下（含最外层那个目录自己：它是一条 isDir 的清单项） */
+function insideRawSource(entry: KbScanEntry, name: string): boolean {
+  // 来源文件夹里扫回来的那一份正是要用的：它的 rel 与库里副本长得一模一样，靠 origin 分
+  if (entry.origin === 'source')
+    return false
+  const inner = rawInnerOf(entry.rel).toLowerCase()
+  if (!inner)
+    return false
+  const target = name.toLowerCase()
+  if (inner.startsWith(`${target}/`))
+    return true
+  return entry.isDir && inner === target
+}
+
+/**
+ * 把**被映射顶掉的库里副本**从清单里摘掉。
+ *
+ * 一个来源名配了外部文件夹时，库里 `data/raw/<名字>` 那一棵整棵不看：以映射为准。
+ * 不摘的话同一个名字下会同时列出两批文件（甚至同一份资料的两个版本），状态、计数
+ * 与清洗清单都会说不清。**来源文件夹扫回来的那些不动**（靠 `origin` 分，见 KbScanEntry）；
+ * 库里那份没删就走开这件事，由来源行上的「库里还留着一份」说明（KbRawSourceRow 的
+ * shadowed）——**应用不替用户删任何东西**。
+ */
+export function kbVisibleRawEntries(entries: KbScanEntry[], sources: KbRawSource[]): KbScanEntry[] {
+  const names = sources.map(source => source.name).filter(Boolean)
+  if (!names.length)
+    return entries
+  return entries.filter(entry => !names.some(name => insideRawSource(entry, name)))
+}
+
+/** 一个配置好的来源这一轮扫成了什么样（Rust 带回来的事实） */
+export interface KbRawSourceScan {
+  name: string
+  /** 空串 = 读到了；非空 = 这个来源没读成（路径打不开），内容是给用户看的原因 */
+  error: string
+}
+
+/** kb_scan 回来的一整份：平铺清单（来源里的文件带逻辑 rel）+ 每条来源这一轮的结果 */
+export interface KbScanResult {
+  entries: KbScanEntry[]
+  sources: KbRawSourceScan[]
+}
+
+/**
+ * 左栏「原始数据」签最外层的一行：配置里的来源与库里 `data/raw` 的顶层目录合起来看。
+ * 树的最外层就是这份清单（见 kbRawTree）—— 没配路径、路径打不开的来源照样占一行，
+ * 点它就能重新指定；库里那份还留着而映射指向别处时，shadowed 让界面把话说清楚。
+ */
+export interface KbRawSourceRow {
+  name: string
+  /**
+   * mapped：配置指向本机一个外部文件夹（路径在 dir）；
+   * inRepo：没配过，读的是库里的 `data/raw/<名字>`（兼容层）；
+   * unconfigured：配过、但路径还没定下来（还没指定；或指定的路径不合法被收敛掉了）
+   */
+  kind: 'mapped' | 'inRepo' | 'unconfigured'
+  /** 实际读的那个文件夹的绝对路径；unconfigured 时是空串（没有可打开的落点） */
+  dir: string
+  /** 读不到的原因（盘不在 / 被改名 / 被删）；空串 = 没问题 */
+  error: string
+  /** 库里还留着一份 `data/raw/<名字>`，而映射指向了别处：以映射为准 */
+  shadowed: boolean
+  files: number
+  pending: number
+  stale: number
+}
+
+/**
+ * 来源行：配置（sources）与库里顶层目录（entries 里 isDir 的 `data/raw/<名字>`）合起来，
+ * 再把 items 按来源归到行上数出「未入库 / 有更新」。配置里的来源排在前面（配过的优先级高），
+ * 其余按名字 —— 与树、与文件行同一副口径。
+ *
+ * entries 传**扫描回来的全量清单**（不是摘掉库里副本之后的那份）：「库里还留着一份」
+ * 这件事正要看它，见 shadowed。
+ */
+export function kbRawSourceRows(
+  sources: KbRawSource[],
+  scans: KbRawSourceScan[],
+  entries: KbScanEntry[],
+  items: KbRawItem[],
+): KbRawSourceRow[] {
+  const inRepo = new Map<string, { name: string, abs: string }>()
+  for (const entry of entries) {
+    // 「库里还留着一份吗」问的只能是库里那些（来源文件夹里扫回来的同名目录不算，见 KbScanEntry.origin）
+    if (!entry.isDir || entry.origin === 'source')
+      continue
+    const inner = rawInnerOf(entry.rel)
+    if (!inner || inner.includes('/'))
+      continue
+    inRepo.set(inner.toLowerCase(), { name: inner, abs: entry.abs ?? '' })
+  }
+
+  const rows: KbRawSourceRow[] = []
+  const byName = new Map<string, KbRawSourceRow>()
+  /**
+   * 一行一个来源。**状态按「读得到什么」定，不按配置里有没有这条记录定**：库里还留着
+   * 那一份时它就是 inRepo（那份确实读得到，说成「还没配路径」反而看不出来），配了外部
+   * 路径才叫 mapped。两者都有（配了路径、库里那份还没删）是 shadowed。
+   */
+  const add = (name: string, configuredDir: string): void => {
+    const key = name.toLowerCase()
+    if (byName.has(key))
+      return
+    const repoCopy = inRepo.get(key)
+    const error = configuredDir
+      ? scans.find(item => item.name.toLowerCase() === key)?.error ?? ''
+      : ''
+    // 配的路径打不开、库里又没留一份：这一行没有任何可读的落点，如实说「还没配好」
+    const readable = configuredDir && !error
+    const row: KbRawSourceRow = {
+      name: repoCopy?.name ?? name,
+      kind: readable ? 'mapped' : repoCopy ? 'inRepo' : 'unconfigured',
+      dir: readable ? configuredDir : repoCopy?.abs ?? '',
+      error,
+      shadowed: !!configuredDir && !!repoCopy,
+      files: 0,
+      pending: 0,
+      stale: 0,
+    }
+    byName.set(key, row)
+    rows.push(row)
+  }
+
+  for (const source of sources) add(source.name, source.dir)
+  for (const { name } of inRepo.values()) add(name, '')
+
+  for (const item of items) {
+    const row = byName.get(kbRawSourceNameOf(item.rel).toLowerCase())
+    if (!row)
+      continue
+    row.files += 1
+    if (item.status === 'pending')
+      row.pending += 1
+    else if (item.status === 'stale')
+      row.stale += 1
+  }
+
+  return rows
+}
+
 // ---------- 原始数据树 ----------
 
 /** 原始数据树的一个节点：目录或文件（左栏「原始数据」签那棵树的数据形状） */
@@ -371,15 +658,31 @@ export interface KbRawTreeNode {
   children: KbRawTreeNode[]
   /** 文件节点带上的原始数据（目录节点没有）：状态、指向它的条目、修改时间都在里面 */
   item?: KbRawItem
+  /** **来源行**（最外层那些目录才有）：它配到哪儿、读没读成、库里还留没留着一份 */
+  source?: KbRawSourceRow
 }
 
 /**
  * 把原始数据清单按 `data/raw/` 下的目录结构收成树 —— 与条目树（kbEntryTree）同一条路数：
  * rel 就是它在仓库里的位置，树照着它长，目录在前、同层按名字排；搜索 / 状态筛选
  * 在过滤后的清单上再调一次，就得到「只含筛出项」的树。空清单回空树，不是错误。
+ *
+ * 最外层那几格是**来源**（sources，见 kbRawSourceRows）：配了外部文件夹的、没配的、
+ * 路径打不开的都在树上占一行（没配的自然没有子文件）—— 不然「这个来源需要指定路径」
+ * 这件事在界面上没有落点。不传 sources 就是老样子：树完全照着 items 长。
  */
-export function kbRawTree(items: KbRawItem[]): KbRawTreeNode[] {
+export function kbRawTree(items: KbRawItem[], sources: KbRawSourceRow[] = []): KbRawTreeNode[] {
   const root: KbRawTreeNode = { id: '', name: '', kind: 'folder', children: [] }
+
+  for (const source of sources) {
+    root.children.push({
+      id: source.name,
+      name: source.name,
+      kind: 'folder',
+      children: [],
+      source,
+    })
+  }
 
   for (const item of items) {
     const inner = item.rel.startsWith(`${KB_RAW_DIR}/`)
@@ -484,6 +787,7 @@ export function matchKbRawStatus(rawFiles: KbScanEntry[], kbEntries: KbEntryMeta
       name: file.name,
       ext: extOf(file.name),
       mtimeMs: file.mtimeMs,
+      abs: file.abs ?? '',
       status,
       entryRels: [...linked].sort((a, b) => b.mtimeMs - a.mtimeMs).map(entry => entry.rel),
     }

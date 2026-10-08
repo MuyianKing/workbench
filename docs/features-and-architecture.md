@@ -50,6 +50,13 @@ Workbench 的文档按「通用 / 模块」分层：
   **所有弹层都走 AppDialog**：`append-to-body`、挡不挡背后、可拖动都只写在那个组件里，调用处不必（也不该）重复
 - **弹窗可以拖**（抓手是标题栏，`AppDialog` 统一开）：把弹框拖开一点，被压住的正文就露出来；
   关掉后位置复位。头部被 CSS 藏掉的弹层（自绘头部的技能详情那种）拖不了
+- **提示条（`ElMessage`）浮在顶栏下沿，不是窗口最顶上**：那里是拖窗口的地方，标题栏与应用名字也在那儿，
+  一条提示压上去既挡事又离「刚点的那颗按钮」很远。位置与外观都在
+  [global.css](../apps/desktop/src/renderer/src/styles/global.css) 的 `.el-message` 一处给 ——
+  居中、`margin-top` 让开 `--h-titlebar + --h-header`、不透明面底色 + 一条状态色左侧竖条 + 卡片阴影
+  （默认那套「浅色底 + 同色字」压在壁纸上几乎看不见）。**调用处不要传 `placement` / `offset`**：
+  前者会跟那条上边距打架（`bottom` 那档会被往下推），后者会绕过它。
+  多条同时出现时的叠放仍由 EP 自己算（它按「基准 + 前几条的高度」排，统一加一段上边距不影响间距）
 - 当前页只是 store 里的一个 id（取值登记在 `packages/appearance/src/views.ts`），**不引入 Vue Router**：
   换页就是换这个值，`App.vue` 用 `<KeepAlive><component :is>` 渲染，滚动位置不丢；
   当前页随数据文件落盘，重启回到上次那一页。新增一页 = 登记 id + 挂组件两处
@@ -349,9 +356,10 @@ pnpm run dist         # 产出 NSIS 安装包
   经纬度只在本机内存里缓存（换城市才重查），不落盘、不参与同步；取不到就少显示一段，问候语不报错
 - **AI 助手用的模型端点**（可选、默认关闭）：配好服务（挑厂商或自定义端点 → 粘 API Key → 挑模型）、
   选了默认模型并点了发送，才会请本机 Pi 干活 —— **请求是那个子进程直接发给你配置的端点的**
-  （不经应用的 HTTP 客户端），**它在那个目录里读到的内容与这段会话的历史都会发到那个端点**
-  （预设表在 [packages/ai/src/ai.ts](../packages/ai/src/ai.ts)，密钥与端点的规矩见
-  [docs/modules/ai.md](modules/ai.md)）。**同一条出口还包括「拉模型列表」**：
+  （不经应用的 HTTP 客户端），**它在工作目录里读到的内容与这段会话的历史都会发到那个端点**
+  （清洗知识库那一轮还包括知识库配的各个**来源文件夹** —— 原始资料常常在知识库文件夹外面，
+  见 [kb.md](modules/kb.md)）；预设表在 [packages/ai/src/ai.ts](../packages/ai/src/ai.ts)，密钥与端点的规矩见
+  [docs/modules/ai.md](modules/ai.md)。**同一条出口还包括「拉模型列表」**：
   粘上 Key（或点「获取列表」）时**应用自己**按你填的 Base URL GET 一次 `{Base URL}/models`
   （Anthropic 那套是 `/v1/models`）—— 同一主机同一把 Key，不点不走。**Pi 自己的遥测与版本检查
   由应用在起进程时关掉**（`PI_TELEMETRY=0` / `PI_SKIP_VERSION_CHECK=1` / `PI_OFFLINE=1`），

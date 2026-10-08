@@ -10,7 +10,7 @@ import type { AiImagePayload, AiNewsArticle, AiNewsRefreshResult, AiNewsSourceIn
 import type { AccentInkMode, AppearanceSettingKey, EffectiveTheme, ThemeConfig, ThemeSource, TopBarStyle, ViewId } from '@workbench/appearance'
 import type { AccountProfile, AuthProvider } from '@workbench/auth'
 import type { ActiveSession, ActivityCounts, CommandEntry, IconCacheEntry, PackageManager, ProjectColor, ProjectSort, QuickApp, Result, ScanResult } from '@workbench/core'
-import type { KbRepoState, KbScanEntry, KbSyncInput, KbSyncSummary } from '@workbench/kb'
+import type { KbRawSource, KbRepoState, KbScanResult, KbSyncInput, KbSyncSummary } from '@workbench/kb'
 import type { MailAccount } from '@workbench/mail'
 import type { NoteChange, NoteCreateInput, NoteImageDeleted, NoteImageDeleteInput, NoteImageList, NoteImageListInput, NoteImageUploaded, NoteImageUploadInput, NoteNode, NoteRepoState, NoteSyncInput, NoteSyncSummary, NoteTextScan } from '@workbench/notes'
 import type { SkillCommit, SkillCompareFile, SkillCreateInput, SkillEntry, SkillFileInfo, SkillInstalledScan, SkillLibraryState, SkillSyncSummary } from '@workbench/skills'
@@ -59,9 +59,13 @@ export type {
   KbEntryMeta,
   KbIndexInfo,
   KbRawItem,
+  KbRawSource,
+  KbRawSourceRow,
+  KbRawSourceScan,
   KbRawStatus,
   KbRepoState,
   KbScanEntry,
+  KbScanResult,
   KbStats,
   KbSyncInput,
   KbSyncSummary,
@@ -358,6 +362,19 @@ export interface AppSettings {
    */
   kbDir: string
   /**
+   * 原始数据的来源（知识库页「原始数据」签最外层那一格）：来源名 → 本机一个文件夹。
+   *
+   * **配置只是一层映射**：应用不搬运、不复制、不删除任何文件，改的只有「去哪儿读」。
+   * 逻辑路径始终是 `data/raw/<来源名>/…`（条目 frontmatter 的 source 引用的就是它），
+   * 所以来源换一个位置不用改任何条目。没配过的来源照旧读库里的 `data/raw/<名字>`
+   * （兼容层）；`dir` 为空 = 还没指定（树里照样占一行，点它就能再指定）。
+   * 收敛与口径见 shared/kb.ts 的 KbRawSource / sanitizeKbRawSources。
+   *
+   * 换台机器就不成立（路径是本机的），所以进数据文件、不参与外观同步 —— 与 `kbDir`
+   * 同一类。每条带 root：来源名在不同知识库里可以重名，映射只对它那个库生效。
+   */
+  kbRawSources: KbRawSource[]
+  /**
    * AI 助手配过的服务（模型管理弹窗里那一屏）：一个服务 = 名称 + Base URL + API 形态 +
    * 模型清单（每条带上下文与思考档位）。密钥不在这里 —— 它在 Windows 凭据管理器里
    * （`ai/<服务 id>/token`），由 Rust 取出来注入子进程的环境变量。
@@ -540,6 +557,25 @@ export interface AppSettings {
    * 同一批行为记忆：本机成立、进数据文件、不参与外观同步。
    */
   videoLastRel: string
+  /**
+   * 密码页**用户拖出来的分组顺序**（「分组设置」弹窗里那一行行的先后）。
+   *
+   * 与上面那几项同一批行为记忆：住数据文件、不进 theme.json（那是会整份同步的「这台机器该长成
+   * 什么样」），**也不进 vault.json** —— 那份只装条目本身，往信封里加视图偏好会牵动跨设备合并的口径。
+   * 代价是换台机器要重新拖一次，换来的是合并规则一个字都不用动。
+   *
+   * 只记「拖过的那几组」：名单里没有的分组排在名单之后、按名字（新加一个分组不必先去弹窗里
+   * 拖一下才看得见）。**藏起来的分组照常在名单里** —— 藏一下再放出来，位次还是原来那个。
+   * 名字的收敛在 `sanitizeVaultGroupNames`（去空白、去重、限长限条数）。
+   */
+  vaultGroupOrder: string[]
+  /**
+   * 密码页**藏起来的那几组**（「分组设置」弹窗里关掉的那些开关）。
+   *
+   * 藏 = 整段不画、也不进搜索（想找就把开关打开）。它只管这一页画不画，
+   * 不动记录本身，也不参与同步 —— 换台机器照旧全都看得见。
+   */
+  vaultHiddenGroups: string[]
 }
 
 /**
@@ -1306,16 +1342,22 @@ export interface WorkbenchApi {
   readSkillFile: (root: string, dir: string, id: string, rel: string) => Promise<Result<string>>
   // ---------- 知识库（用户在别处维护的独立项目，见 @workbench/kb） ----------
   /**
-   * 扫描知识库文件夹：**平铺清单**（文件夹 + 任意后缀的文件，带修改时间），树与「哪些是
-   * 原始数据、哪些是条目」的拆分在渲染层（@workbench/kb 的前缀规则）。
+   * 扫描知识库文件夹**与各原始数据来源**：回来的是平铺清单（文件夹 + 任意后缀的文件，
+   * 带修改时间与绝对路径）与每条来源这一轮的结果，树与「哪些是原始数据、哪些是条目」的
+   * 拆分在渲染层（@workbench/kb 的前缀规则）。
    *
+   * 来源里的文件带的是**逻辑**相对路径（`data/raw/<来源名>/…`），绝对路径在 `abs` 里；
+   * 配了路径却读不到的来源只在 `sources` 里报它自己的原因，别的照扫。
    * 读是只读的；写只有一处：重建索引（生成物）。条目的内容由应用编排的清洗写成
    * （写的人是 Pi，编排见 stores/kb.ts）。每条通道都带上 root，与笔记同一套原因：
    * 用户换了文件夹，来源就换了。
    */
-  kbScan: (root: string) => Promise<Result<KbScanEntry[]>>
-  /** 读知识库里的一个文件文本（条目正文 / index.json）；越界路径由 Rust 侧挡住 */
-  kbRead: (root: string, rel: string) => Promise<Result<string>>
+  kbScan: (root: string, sources: KbRawSource[]) => Promise<Result<KbScanResult>>
+  /**
+   * 读知识库里的一个文件文本（条目正文 / index.json / 来源里的原始资料）；
+   * `data/raw/<来源名>/…` 经那条来源的根解析，越界路径由 Rust 侧挡住。
+   */
+  kbRead: (root: string, rel: string, sources: KbRawSource[]) => Promise<Result<string>>
   /**
    * 重建 `kb/_catalog.md` 与 `index/index.json`（索引只由应用生成，格式与既有生成物
    * 一致、换行写成 CRLF）。`generatedAt` 由渲染层按本机时区算（@workbench/kb 的 todayIsoDate）。
@@ -1636,6 +1678,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   noteImageRepo: '',
   skillDir: '',
   kbDir: '',
+  kbRawSources: [],
   aiProviders: [],
   aiDefaultProvider: '',
   aiDefaultModel: '',
@@ -1659,4 +1702,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   videoDirs: [],
   videoTreeExpanded: [],
   videoLastRel: '',
+  // 密码页：没拖过顺序（按名字排）、一组都不藏
+  vaultGroupOrder: [],
+  vaultHiddenGroups: [],
 }

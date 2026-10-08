@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import type { KbRawItem, KbRawViewKind } from '@workbench/kb'
+import { ArrowLeft, FolderOpened } from '@element-plus/icons-vue'
+import { kbRawStatusText } from '@workbench/kb'
 /**
  * 原始数据查看（右栏点开一个原始文件之后）：文本类就地预览，其余说明去向。
  *
@@ -9,13 +11,12 @@ import type { KbRawItem, KbRawViewKind } from '@workbench/kb'
  * 说明并给「用系统默认程序打开」—— 应用对原始数据只读，看与不看都不改它。
  * 读失败（权限 / 编码）不算致命：原因摆进来，外部打开那条路还在。
  */
-import { ArrowLeft, FolderOpened } from '@element-plus/icons-vue'
-import { kbRawStatusText } from '@workbench/kb'
+import { computed } from 'vue'
 import MarkdownView from '@/components/MarkdownView.vue'
 import PanelLoading from '@/components/PanelLoading.vue'
 import { formatTimestamp } from '@/format'
 
-defineProps<{
+const props = defineProps<{
   item: KbRawItem
   kind: KbRawViewKind
   content: string
@@ -24,6 +25,15 @@ defineProps<{
 }>()
 
 const emit = defineEmits<{ back: [], open: [] }>()
+
+/**
+ * 资料的真实位置：库里那份就是「知识库文件夹 + 逻辑路径」，不必多摆一行；
+ * 在来源文件夹里时它是用户自己的目录，摆出来才找得到。
+ */
+const realPath = computed(() => {
+  const trimmed = props.item.abs.replace(/\\/g, '/').replace(/\/+$/, '')
+  return trimmed && !trimmed.endsWith(props.item.rel) ? props.item.abs : ''
+})
 </script>
 
 <template>
@@ -42,6 +52,10 @@ const emit = defineEmits<{ back: [], open: [] }>()
       </h2>
       <p class="kb-raw-viewer__meta">
         <span class="mono" :title="item.rel">{{ item.rel }}</span>
+      </p>
+      <!-- 资料在来源文件夹里时把真实位置也摆出来：它是用户自己的目录，找得到才放心改 -->
+      <p v-if="realPath" class="kb-raw-viewer__meta">
+        <span class="mono" :title="realPath">{{ realPath }}</span>
       </p>
       <p class="kb-raw-viewer__meta">
         <span>{{ kbRawStatusText(item.status) }}</span>

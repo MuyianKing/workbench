@@ -257,6 +257,26 @@ describe('老数据搬家', () => {
   it('两边都没有时清单是空的（出口关闭）', () => {
     expect(sanitizeSettings({}).mailAccounts).toEqual([])
   })
+
+  it('原始数据的来源：老数据文件里没有就是空清单（一律读库里的 data/raw）', () => {
+    expect(sanitizeSettings({}).kbRawSources).toEqual([])
+  })
+
+  it('原始数据的来源逐项收敛：缺项丢掉、同名去重、指到知识库文件夹里的按没配处理', () => {
+    const value = sanitizeSettings({
+      kbDir: 'E:/muyian/agent',
+      kbRawSources: [
+        { root: 'E:/muyian/agent', name: 'mu-ui', dir: 'D:/work/mu-ui' },
+        { root: 'E:/muyian/agent', name: 'mu-ui', dir: 'D:/other' },
+        { root: 'E:/muyian/agent', name: 'v2', dir: 'E:\\muyian\\agent\\data\\raw\\v2' },
+        { name: '没有 root', dir: 'D:/x' },
+      ],
+    })
+    expect(value.kbRawSources).toEqual([
+      { root: 'E:/muyian/agent', name: 'mu-ui', dir: 'D:/work/mu-ui' },
+      { root: 'E:/muyian/agent', name: 'v2', dir: '' },
+    ])
+  })
 })
 
 describe('theme.json 的整份收敛（适配层视角）', () => {

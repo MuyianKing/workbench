@@ -145,6 +145,25 @@ describe('kbLint：出处', () => {
       expect(ofKind(kbLint([meta({ source })], files), 'source')).toEqual([])
     }
   })
+
+  it('指到没收成的来源（没配路径 / 路径打不开）时说的是来源的事，不是条目写错了', () => {
+    const files = [file('kb/01-主题/a.md')]
+    const entries = [meta({ source: 'data/raw/mu-ui/select.md' })]
+    const rows = [
+      { name: 'mu-ui', kind: 'unconfigured' as const, dir: '', error: '', shadowed: false, files: 0, pending: 0, stale: 0 },
+    ]
+    expect(ofKind(kbLint(entries, files, rows), 'source')).toEqual([
+      '来源「mu-ui」还没指定路径，先给它选一个文件夹',
+    ])
+
+    const broken = [{ ...rows[0], kind: 'mapped' as const, dir: 'D:/not-there', error: '找不到这个文件夹：D:\\not-there' }]
+    expect(ofKind(kbLint(entries, files, broken), 'source')).toEqual([
+      '来源「mu-ui」打不开：找不到这个文件夹：D:\\not-there',
+    ])
+
+    // 不带前缀的 source 写法同样认得出是哪个来源
+    expect(ofKind(kbLint([meta({ source: 'mu-ui/select.md' })], files, rows), 'source')).toHaveLength(1)
+  })
 })
 
 describe('kbLint：主题目录', () => {

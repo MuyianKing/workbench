@@ -42,7 +42,9 @@
 - **联网边界：默认不联网、不上报任何数据；出口只有九个，且都由用户显式开启**：用户自己填的两个 git 仓库（用量同步、笔记图片，
   留空即关闭）与**笔记自己那个仓库**（地址不在设置里 —— 跟着那个笔记文件夹的 `origin` 走，且只有用户点了同步才会跑一次 git；
   没仓库的文件夹就是本机的笔记，应用既不 `git init` 也不替用户接远端；**知识库**（`kbDir` 指向的那个
-  独立项目）的同步走同一条路 —— 推它自己连的 `origin`，同样只在点同步时跑一次 git，应用不写它的内容）、账号登录与 token 到期续期（都只打 GitHub / Gitee 的 OAuth 接口）、命令执行本身、AI 热点（源地址是 Rust 侧
+  独立项目）的同步走同一条路 —— 推它自己连的 `origin`，同样只在点同步时跑一次 git，应用不写它的内容；
+  知识库的**原始数据来源**还可以是本机的其它文件夹（来源名 → 文件夹的映射，配置只落数据文件、只对本机成立；
+  指到网络位置时读取走系统文件访问，应用自己不发请求 —— 那只是「去哪儿读」，应用不搬运、不复制、不删除任何文件））、账号登录与 token 到期续期（都只打 GitHub / Gitee 的 OAuth 接口）、命令执行本身、AI 热点（源地址是 Rust 侧
   `ai_news.rs` 的 `SOURCES` 白名单，渲染层只能报源 id、拿不到任何地址；卡片画在首页上且到了该源自己的刷新间隔才 GET，
   只读不上报；白名单里只收免费、不需要凭据的中文源，用户不想看就把那张卡片关掉；**站内阅读**是同一个出口的
   延伸：用户点开某一条时才去抓那篇正文，域名另有一道 `article_hosts` 白名单卡着 —— 只认源站自己的域名与它的子域，
@@ -50,8 +52,9 @@
   `weather.rs` 里那**两个**，各管一段 —— 城市名检索走 OpenStreetMap 的公开 Nominatim 接口
   （Open-Meteo 自带的检索对部分中文名匹配不上，实测「常州」搜不到）、实况走 Open-Meteo 的
   forecast；**城市名会作为查询串发出去**，这是这条出口唯一的用户内容）、AI 助手（用户自己配的 AI 服务：名称 / Base URL / API 形态 /
-  模型 / API Key 都齐且用户点了发送才会走；请求由那个子进程直接发，**它在那个目录里读到的内容、以及这一段会话的历史
-  都会发给你自己配的那个端点**，配置的形状与收敛在 `packages/ai/src/ai.ts`；**同一条出口还包括「拉模型列表」** ——
+  模型 / API Key 都齐且用户点了发送才会走；请求由那个子进程直接发，**它在工作目录里读到的内容、以及这一段会话的历史
+  都会发给你自己配的那个端点**（清洗知识库那一轮还包括各**来源文件夹** —— 原始资料常常在知识库文件夹外面），
+  配置的形状与收敛在 `packages/ai/src/ai.ts`；**同一条出口还包括「拉模型列表」** ——
   用户在弹窗里粘上 Key / 点「获取列表」时，按他填的 Base URL GET 一次 `/models`，同一个主机同一把 Key，不点就不走）、**装技能**
   （AI 助手页那颗「技能」按钮里的「粘地址」：地址由用户粘、点了「装上」才走一次 GET，主机不设白名单、跟着跳转最多 5 跳、
   只收 zip 且超过 64 MB 就停 —— 与「用户自己填的 git 仓库」同一类「地址由用户给」的出口；**只有这一件事需要出网**：
@@ -130,7 +133,9 @@
 
 - 手写 CSS，不用原子化 CSS；颜色、间距、圆角、字号与动效缓动一律取 [tokens.css](apps/desktop/src/renderer/src/styles/tokens.css) 的
   `--bg-*` `--ink-*` `--st-*` `--sp-*` `--r-*` `--fs-*` `--ease-*`。暗色只在 `:root[data-theme='dark']` 覆盖令牌。
-- 界面主体灰度，彩色只表达运行状态（`--st-run` / `--st-ok` / `--st-fail`）与项目标识色；终端面板始终深色（`--term-*`）。
+- 界面主体灰度，彩色只表达运行状态（`--st-run` / `--st-ok` / `--st-fail`）与项目标识色；用户配的主题色只管
+  交互态与首页活跃度图的色阶（口径在 [accent-color.ts](packages/appearance/src/accent-color.ts) 的文件头，别扩到别处）；
+  终端面板始终深色（`--term-*`）。
 - **项目标识色**（[project-color.ts](packages/core/src/project-color.ts)）：预设色存名字不存色值，自定义色 `#rrggbb` 一律经
   `sanitizeProjectColor()` 收敛；颜色怎么分配只在那一个文件里定义，界面别自己另拍一个。
 - 项目标签统一走 [ProjectTag.vue](apps/desktop/src/renderer/src/components/ProjectTag.vue)（`el-tag` + `effect="dark"`），**别自绘浅底同色字标签**；
@@ -149,6 +154,8 @@
 - **填内容的弹层传 `penetrable`（不挡背后）**：密码、工作记录、命令、常用软件、添加项目、起名字、素材管理这几个
   「要回别处抄一段再填」的弹层都这么开，遮罩只围住弹框自己；代价是没有「点外面关掉」（它们本来就关着）。
   **确认框（`ElMessageBox`）与退出确认框保持挡住**，设置 / 技能这类不抄内容的弹层也照旧挡点击。
+- **提示条（`ElMessage`）的位置与外观只在 global.css 的 `.el-message` 一处定**（顶栏下沿居中、不透明面底色卡片 +
+  一条状态色竖条）：调用处不要传 `placement` / `offset` —— 会跟那条让开顶栏的上边距打架。新增一处 `ElMessage` 不用管这些。
 - 明暗切换经 `theme-transition.ts` 驱动，`<html>` 上同时维护 `data-theme` 与 `.dark`；切换守卫用
   [stores/settings.ts](apps/desktop/src/renderer/src/stores/settings.ts) 里的 `appliedTheme` 变量，不读 DOM。
 - 拖动窗口用 `data-tauri-drag-region`：裸属性只认直接按在带属性的那个元素上（子元素要再标一遍），`"deep"` 才是整棵子树；
@@ -190,6 +197,9 @@ asset 协议、读取权限在 Rust 侧按单个文件授予）、**通道一律
   在那边是可见的，拿它当生产代码用时 test 一片绿、build 才报「not found, an item that was configured out」。
 - 动过 `.vue` 的模板（加 / 删 / 挪标签）要顺手跑一次 `pnpm run build:renderer`：**`pnpm run typecheck` 查不出模板标签不配平** ——
   实测 vue-tsc 全绿而 vite 报 `Invalid end tag`、页面白屏，只有真的编译一遍模板才发现得了。
+  **模板里用到的组件必须在脚本里 import**（`el-*` 那几个是全局注册的除外）：少了它上面两条都不报错，
+  那个标签被当成认不出的元素渲染成空 —— 现象是「按钮在、点下去什么都没发生」，`pnpm run lint` 的
+  `vue/no-undef-components` 才拦得住。
 - **改 Rust 前先关掉正在运行的应用**：exe 被占用会链接失败，而构建失败后跑起来的仍是旧二进制，结论会完全跑偏。
   `tauri build` 与 `tauri dev` 也别同时跑（抢同一个 `target/` 构建锁）。
 - **停掉 `pnpm run dev` 之后要确认那一串子进程真的都没了**：Windows 上杀掉外层命令不会带走它的子孙。按端口与进程名各查一遍

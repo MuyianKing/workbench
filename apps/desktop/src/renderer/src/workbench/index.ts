@@ -406,8 +406,10 @@ function createApi(): WorkbenchApi {
       skill.scanSkillCopies(root, dir, id, projectDirs),
 
     // ---------- 知识库（用户在别处维护的独立项目，见 workbench/kb.ts） ----------
-    kbScan: (root: string) => kb.kbScan(root),
-    kbRead: (root: string, rel: string) => kb.kbRead(root, rel),
+    // 后两个参数是原始数据的来源清单（来源名 → 本机一个文件夹）：扫与读都要带上它
+    kbScan: (root: string, sources: Parameters<WorkbenchApi['kbScan']>[1]) => kb.kbScan(root, sources),
+    kbRead: (root: string, rel: string, sources: Parameters<WorkbenchApi['kbRead']>[2]) =>
+      kb.kbRead(root, rel, sources),
     // 目录与索引的重建由应用自己做（对齐仓库脚本的输出）；内容由 AI 助手那一轮写入
     kbIndexBuild: (root: string, generatedAt: string) => kb.kbIndexBuild(root, generatedAt),
     // 同步与仓库探测复用笔记那两条通用通道（对任意文件夹、认它自己的 origin），技能页同款

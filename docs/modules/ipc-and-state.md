@@ -64,7 +64,8 @@
     **没有例外**：技能库在哪儿不是「界面长什么样」，它是**本机的一个目录**
     （设置里的 `skillDir`，住 `workbench-data.json`，与 `noteDir` 同一类），
     也不再有「技能放在仓库哪一层」这种配置；
-  - **行为习惯**（`activeView`、`projectSort`、`workRange` / `workSort`、`noteTreeExpanded`）与
+  - **行为习惯**（`activeView`、`projectSort`、`workRange` / `workSort`、`noteTreeExpanded`、
+    密码页那两样 `vaultGroupOrder` / `vaultHiddenGroups`）与
     本机路径 / 凭据（快捷键、开机自启、两个同步仓库地址 —— 用量与图片；**笔记与技能那两个仓库的地址
     都不在设置里**：它们跟着各自那个文件夹的 `origin` 走、`noteDir`、`skillDir`）住 `workbench-data.json`。
     天气城市 `weatherCity` 也在这一边：它是「这台机器上的人住哪儿」，不是「界面长什么样」，
@@ -85,6 +86,15 @@
 - **后端刻意做薄**：`commands.rs` 只做「取原始数据 / 落盘 / 调系统能力」；合并、排序、修剪、
   状态机、命令构造这些业务语义在渲染层适配层（`apps/desktop/src/renderer/src/workbench/`）——
   改动因此大多走 Vite 的秒级热更新，只有动到系统能力时才重编 Rust。
+  **例外是 store 的「形状」**：加了字段 / 加了动作之后，正在跑的那个应用**要整页刷新一次**才认得 ——
+  组件会热替换，而 Pinia 的 store 实例不会（项目里没有一处 `acceptHMRUpdate`，实例是上次整页加载时
+  建好的）。新组件去读 store 上还不存在的字段，渲染时就抛错、被 Vue 吞掉（控制台才有）。
+  store 里加东西之后**把应用重开一次**（或刷新 webview 的页面）。
+- **「按钮在、点下去什么都没发生」有两种来路，别只认一种**（2026-10 密码页那次就认错了）：
+  一是上面那条 store 实例过期；二是**模板里用了组件、脚本里漏了 import** —— 少了 import 时
+  `vue-tsc` 与 `vite build` **都不报错**（那个标签被当成认不出的元素渲染成空），只有
+  `pnpm run lint` 的 `vue/no-undef-components` 拦得住（见 eslint.config.mjs 里那条说明）。
+  诊断时先看这两处，别一上来就猜 HMR。
 - **适配层顶替的是 Electron 时代的进程边界**：它递给渲染层的列表一律是快照
   （`structuredClone`），渲染层的乐观追加写不进要落盘的数据。
 - **IPC 命令默认跑在主线程上**：会起子进程、读写文件、解码图片、跑 SQL 的命令都标 `(async)`

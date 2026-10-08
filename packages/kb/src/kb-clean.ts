@@ -9,6 +9,11 @@
  * 提示词只交代「清洗」这一件事，资料自己的结构（怎么分类、打什么标签）让 Pi 进了目录
  * 先读 README / 索引 / 总览类文件自己归纳 —— 那是模型擅长的事，应用不替某个资料源写死规则。
  *
+ * **清单里的每一行都带两个地址**：逻辑路径（`data/raw/<来源名>/…`，条目 source 写它）
+ * 与真实绝对路径（资料实际在哪儿，读文件走它）—— 原始资料现在多半在知识库文件夹外面，
+ * 只有逻辑路径是读不到的。同时这里有一条硬禁令：来源文件夹里的东西是用户自己的原文，
+ * 一个字都不许动（早先 raw 是库里的副本，写坏了 git 里还有一份；现在不是了）。
+ *
  * 文件末尾那一节是**清洗的收据**：跑完把 Pi 报出的写入路径分成「新建 / 覆盖」两组，
  * 界面拿它说清这一轮动了哪几条（口径在那里，不散在组件里）。
  */
@@ -24,14 +29,35 @@ export type KbCleanPhase
     | 'failed'
     | 'cancelled'
 
-/** 清洗的输入：应用扫描出的两组待处理文件（仓库相对路径）与今天的日期 */
+/** 清洗清单里的一个待处理文件：逻辑路径给 source 用，绝对路径给读文件用 */
+export interface KbCleanTarget {
+  /** 逻辑路径（`data/raw/<来源名>/…`）：条目 source 写这个，不写真实位置 */
+  rel: string
+  /** 真实绝对路径（来源里的原件在用户指定的文件夹下）；认不出时是空串，那时只有 rel */
+  abs: string
+}
+
+/** 清洗的输入：应用扫描出的两组待处理文件与今天的日期 */
 export interface KbCleanInput {
   /** 未入库：没有任何条目指向它 */
-  pending: string[]
+  pending: KbCleanTarget[]
   /** 有更新：原始文件比指向它的条目都新（重洗覆盖） */
-  stale: string[]
+  stale: KbCleanTarget[]
   /** 本机时区的今天（YYYY-MM-DD），写进新条目的 created / updated */
   today: string
+}
+
+/**
+ * 清单里的一行：逻辑路径在上、真实路径跟在后面。**认不出真实位置时不重复写** ——
+ * 库里那份（`data/raw/x.md`）的绝对路径就是「知识库文件夹 + 逻辑路径」，多写一遍只是噪音，
+ * Pi 按 cwd（知识库文件夹）也读得到它；来源里的那份才需要绝对路径（它在库外面）。
+ */
+function targetLine(target: KbCleanTarget): string {
+  const abs = target.abs.trim().replace(/\\/g, '/')
+  const rel = target.rel.trim().replace(/\\/g, '/')
+  if (!abs || abs.endsWith(rel))
+    return `- ${rel}`
+  return `- ${rel}（实际文件：${abs}）`
 }
 
 /** 清洗指令的全文：一段话交给子进程的 stdin（RPC 协议），格式随内容定 */
@@ -41,12 +67,12 @@ export function kbCleanPrompt(input: KbCleanInput): string {
   const list: string[] = []
   list.push(
     pending.length
-      ? [`未入库（${pending.length} 个，还没有条目指向它们）：`, ...pending.map(rel => `- ${rel}`)].join('\n')
+      ? [`未入库（${pending.length} 个，还没有条目指向它们）：`, ...pending.map(targetLine)].join('\n')
       : '未入库：没有',
   )
   list.push(
     stale.length
-      ? [`有更新（${stale.length} 个，原始文件比指向它们的条目都新）：`, ...stale.map(rel => `- ${rel}`)].join('\n')
+      ? [`有更新（${stale.length} 个，原始文件比指向它们的条目都新）：`, ...stale.map(targetLine)].join('\n')
       : '有更新：没有',
   )
 
@@ -61,7 +87,7 @@ export function kbCleanPrompt(input: KbCleanInput): string {
     '  title: 条目标题（与文件名一致）',
     '  tags: [标签1, 标签2] —— 从资料内容与所属主题归纳，便于跨主题检索',
     `  created: 建条目日期；updated: 最后修改日期 —— 都是 YYYY-MM-DD，今天是 ${today}`,
-    '  source: 原始文件的相对路径（如 data/raw/某目录/某文件.md）；同一原始文件拆出的多条目都填同一个 source',
+    '  source: 清单里那一行的**逻辑路径**（如 data/raw/某来源/某文件.md）—— 照抄清单上的写法，不要写「实际文件」那个绝对路径；同一原始文件拆出的多条目都填同一个 source',
     '  status: reviewed（清洗生成的条目一律 reviewed）',
     '  summary: 一句话概括，会显示在全库目录与机器索引里',
     '- 主题目录命名 NN-主题名（NN 是两位序号，决定排序）：资料属于已有主题就归入现有目录，没有合适的就新建一个。',
@@ -74,9 +100,11 @@ export function kbCleanPrompt(input: KbCleanInput): string {
     '1. 动手前先读待处理资料所在目录里的 README、索引、总览类文件，弄清这批资料的结构与分类（tags 与主题归类都从它来），再逐个文件整理。',
     '2. 只处理清单里的文件；清单之外的条目与原始文件一律不动，也不删除任何现有条目。',
     '3. 原始资料可能是任意格式：文本类（md / txt 等）读出来整理；读不了的（二进制等）跳过，总结里说明是哪几个、为什么。',
-    '4. kb/_catalog.md 与 index/index.json 是应用自动重建的生成物：不必读它们，也绝不要改。',
-    '5. 你有这台机器的完全访问权限，需要什么命令就用什么命令；git 提交 / 推送不用做（同步由应用负责），也不要在仓库里留下脚本或临时文件。',
-    '6. 全部处理完后用一段话总结：每个原始文件新建了哪些条目、覆盖了哪些条目、还是跳过了（跳过的说明原因），以及遇到的问题。',
+    '4. 清单里带「实际文件」的，读那个绝对路径（资料就在那儿，不在本知识库文件夹里）；条目里的 source 照旧写逻辑路径。',
+    '5. **来源文件夹里的文件是用户自己的原文，一个字都不许改、不许移动、不许删除**：只读它们；这一轮所有产出都只写进本知识库的 kb/。',
+    '6. kb/_catalog.md 与 index/index.json 是应用自动重建的生成物：不必读它们，也绝不要改。',
+    '7. 你有这台机器的完全访问权限，需要什么命令就用什么命令；git 提交 / 推送不用做（同步由应用负责），也不要在任何目录里留下脚本或临时文件。',
+    '8. 全部处理完后用一段话总结：每个原始文件新建了哪些条目、覆盖了哪些条目、还是跳过了（跳过的说明原因），以及遇到的问题。',
   ].join('\n')
 }
 

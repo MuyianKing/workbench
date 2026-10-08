@@ -7,8 +7,11 @@ import { describe, expect, it } from 'vitest'
 import { kbCleanPrompt, splitCleanWrites } from './kb-clean'
 
 const FULL = kbCleanPrompt({
-  pending: ['data/raw/mu-ui/button.md', 'data/raw/mu-ui/input.md'],
-  stale: ['data/raw/mu-ui/dialog.md'],
+  pending: [
+    { rel: 'data/raw/mu-ui/button.md', abs: 'D:/work/mu-ui/button.md' },
+    { rel: 'data/raw/mu-ui/input.md', abs: 'D:/work/mu-ui/input.md' },
+  ],
+  stale: [{ rel: 'data/raw/mu-ui/dialog.md', abs: 'D:/work/mu-ui/dialog.md' }],
   today: '2026-09-29',
 })
 
@@ -21,6 +24,30 @@ describe('kbCleanPrompt', () => {
     expect(FULL).toContain('- data/raw/mu-ui/dialog.md')
   })
 
+  it('来源在库外时把真实路径一起给出来（逻辑路径是读不到的）', () => {
+    expect(FULL).toContain('实际文件：D:/work/mu-ui/button.md')
+  })
+
+  it('真实路径与逻辑路径一致（库里那份）时不重复写', () => {
+    // 库里的那份：绝对路径就是「知识库根 + 逻辑路径」，多写一遍是噪音
+    const inRepo = kbCleanPrompt({
+      pending: [{ rel: 'data/raw/随手记.md', abs: 'E:/kb/data/raw/随手记.md' }],
+      stale: [],
+      today: '2026-09-29',
+    })
+    expect(inRepo).toContain('- data/raw/随手记.md\n')
+    expect(inRepo).not.toContain('实际文件：E:/kb')
+
+    const same = kbCleanPrompt({
+      pending: [{ rel: 'data/raw/a.md', abs: 'data\\raw\\a.md' }],
+      stale: [],
+      today: '2026-09-29',
+    })
+    // 认不出真实位置（abs 与 rel 是一回事）时只写一行
+    expect(same).toContain('- data/raw/a.md\n')
+    expect(same).not.toContain('- data/raw/a.md（')
+  })
+
   it('带条目格式契约：七样字段、status 取值、source 填法与主题目录命名', () => {
     for (const key of ['title:', 'tags:', 'created:', 'updated:', 'source:', 'status:', 'summary:']) {
       expect(FULL).toContain(key)
@@ -29,6 +56,8 @@ describe('kbCleanPrompt', () => {
     expect(FULL).toContain('今天是 2026-09-29')
     expect(FULL).toContain('NN-主题名')
     expect(FULL).toContain('同一个 source')
+    // source 写逻辑路径，不写真实位置（真实位置随机器变）
+    expect(FULL).toContain('不要写「实际文件」那个绝对路径')
   })
 
   it('带做法与分工：完全访问不设命令禁令，git 归应用、仓库不留杂物、生成物不碰', () => {
@@ -36,6 +65,11 @@ describe('kbCleanPrompt', () => {
     expect(FULL).toContain('git 提交 / 推送不用做')
     expect(FULL).toContain('kb/_catalog.md')
     expect(FULL).toContain('index/index.json')
+  })
+
+  it('来源文件夹是用户的原文：明令只读、产出只落 kb/', () => {
+    expect(FULL).toContain('来源文件夹里的文件是用户自己的原文')
+    expect(FULL).toContain('只写进本知识库的 kb/')
   })
 
   it('要求条目之间用相对链接互链（库内互链是巡检与站内跳转的前提）', () => {

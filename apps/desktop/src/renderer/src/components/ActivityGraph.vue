@@ -5,6 +5,9 @@ import { buildActivityCalendar, monthLabels } from '@workbench/core'
  * 首页的活跃度图 —— 完全照 GitHub 贡献图的样子：一列一周、一行一周中的一天、
  * 53 列铺满一年，颜色深浅表示当天执行了多少次命令。
  *
+ * 深浅那四档**跟着主题色走**（从 `--el-color-primary` 掺出来，见下面 `.graph` 那段说明）：
+ * 没配主题色时是灰阶，配了就是那个色相的一整条色阶。
+ *
  * 数据来自 store.activity（YYYY-MM-DD → 次数），由适配层在用户点「启动 / 打包」时累加
  * （见 workbench/state.ts 的 recordActivity）。
  * 只算用户主动发起的启动与打包：安装依赖、自定义命令、停止与失败都不计入 ——
@@ -140,21 +143,23 @@ function tipOf(day: ActivityDay): string {
   overflow-y: auto;
 
   /**
-   * 深浅五档，纯黑到浅灰。
-   * 图里的颜色只表达「多与少」，不表达运行状态，所以不上绿色那套状态色——
-   * 最深一档就是 --ink 本身，浅色主题下往黑走、暗色主题下反过来往白走。
+   * 深浅五档：**从主题色掺出来** —— 四档是主色按 20 / 45 / 70 / 100% 掺进面底色，
+   * 掺得越少那天跑得越少，最深一档就是主题色本身。
+   *
+   * 为什么不直接用 Element Plus 那族 `--el-color-primary-light-N`：那几档是给**悬停底色**用的
+   * （亮色往白里混、暗色往画布色里混，比例固定），而 tokens.css 里那套中性灰还是手调过的
+   * ——它的 light-5 已经到七成主色，拿它当数据色阶，中间两档会明显偏深、四档的间距也不匀。
+   * 这里要的是一条「掺得越少越浅」的等比色阶，所以比例自己定，底色取面底色（卡片那张纸）。
+   *
+   * **没配主题色时主色就是中性色**（亮色近黑、暗色近白，见 tokens.css 的 --el-color-primary），
+   * 于是这一页仍旧是灰阶的样子；配了主题色（比如绿色）它就整条跟着走，与设置里那颗色一致。
+   * 图里的颜色只表达「多与少」，不表达运行状态 —— 所以不上 --st-* 那套状态色。
    */
   --lv-0: var(--bg-inset);
-  --lv-1: #ced3da;
-  --lv-2: #9aa1ab;
-  --lv-3: #5c6472;
-  --lv-4: var(--ink);
-}
-
-:root[data-theme='dark'] .graph {
-  --lv-1: #3d4550;
-  --lv-2: #5a6472;
-  --lv-3: #8b96a5;
+  --lv-1: color-mix(in srgb, var(--el-color-primary) 20%, var(--bg-surface));
+  --lv-2: color-mix(in srgb, var(--el-color-primary) 45%, var(--bg-surface));
+  --lv-3: color-mix(in srgb, var(--el-color-primary) 70%, var(--bg-surface));
+  --lv-4: var(--el-color-primary);
 }
 
 /*

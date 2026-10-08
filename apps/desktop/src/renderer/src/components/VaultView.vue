@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { VaultEntry, VaultRecord } from '@workbench/vault'
 import type { InputInstance } from 'element-plus'
-import { CopyDocument, Document, Hide, Key, Lock, MoreFilled, Plus, Refresh, Search, Unlock, View } from '@element-plus/icons-vue'
+import { ArrowRight, CopyDocument, Document, Hide, Key, Lock, MoreFilled, Plus, Refresh, Search, Setting, Unlock, View } from '@element-plus/icons-vue'
 /**
  * 密码页：一张卡片墙。
  *
@@ -20,11 +20,16 @@ import { CopyDocument, Document, Hide, Key, Lock, MoreFilled, Plus, Refresh, Sea
  * **密码默认是遮住的**，按卡片上那颗眼睛才现形；遮罩是**固定长度**的，不按真实长度铺点 ——
  * 长度也是信息，没必要替用户说出去。复制与查看是两颗独立按钮（用户要的就是这两个动作）。
  *
+ * 卡片墙按分组分段：点段头**收起 / 摊开**那一组（收起态只活在这一页里），段的先后与
+ * 「哪几组不上墙」都在工具带那颗「分组设置」的弹框里改（按住一行拖动换先后、开关关掉就是藏起来）。
+ * 分组是自由文本，顺序与隐藏是**行为记忆**（住数据文件，见 stores/vault.ts）。
+ *
  * 明文只活在内存里：磁盘上那份与仓库里那份都只有密文（见 workbench/vault.ts）。
  */
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import PanelLoading from '@/components/PanelLoading.vue'
 import VaultEntryDialog from '@/components/VaultEntryDialog.vue'
+import VaultGroupDialog from '@/components/VaultGroupDialog.vue'
 import VaultKeyDialog from '@/components/VaultKeyDialog.vue'
 import { confirmAction, notifyError, notifySuccess } from '@/notify'
 import { useVaultStore } from '@/stores/vault'
@@ -36,6 +41,27 @@ const MASK = '••••••••'
 
 /** 哪几张卡片正把密码亮着。按 id 记，换一档筛选也留着（比较两条记录时用得上） */
 const revealed = ref<string[]>([])
+
+/**
+ * 收起来的分组（存「收起来的」而不是「展开的」：不点它默认就是摊开的）。
+ *
+ * 与 AI 助手页左栏那棵树同一个做法，也**只活在这一页里**：换页不丢（视图被 KeepAlive 留着），
+ * 重启回来是全展开 —— 它是「这一眼怎么看」的事，不是数据（分组本来也只是一栏自由文本）。
+ * 键取段头那个 `key`（空串是「未分组」那一段）。
+ */
+const collapsed = ref(new Set<string>())
+
+function isCollapsed(key: string): boolean {
+  return collapsed.value.has(key)
+}
+
+function toggleGroup(key: string): void {
+  const next = new Set(collapsed.value)
+  if (next.has(key))
+    next.delete(key)
+  else next.add(key)
+  collapsed.value = next
+}
 
 const keyDialog = ref(false)
 const entryDialog = ref(false)
@@ -60,6 +86,9 @@ const fingerprintText = computed(() => store.fingerprint || '—')
 
 /** 弹框里分组那一栏的候选项：已经有的那些分组名（选一下省得打字，也能直接敲一个新的） */
 const groupOptions = computed(() => store.groups)
+
+/** 「分组设置」弹框：段的先后与哪几组不上墙都在里面改（见 VaultGroupDialog） */
+const groupDialog = ref(false)
 
 onMounted(() => {
   void store.init()
@@ -269,7 +298,7 @@ async function lock(): Promise<void> {
         <!--
           工具带上只留搜索：**分组不在这一行做筛选**。上一版有一排分组标签，与卡片墙上的段头
           把那几个数摆了两遍（同一屏里「测试 1」出现两次），整条带子也被它撑得没有重心。
-          找某一条用搜索，看某一组用分段 —— 两条路都够了。
+          找某一条用搜索，看某一组用分段，段的先后与显示去右边那颗「分组设置」的弹框里改。
         -->
         <div class="filter__head">
           <el-input
@@ -306,6 +335,12 @@ async function lock(): Promise<void> {
               <el-icon><Lock /></el-icon>
             </el-button>
           </el-tooltip>
+          <!-- 分组设置：段的先后与哪几组不上墙都在那个弹框里（一行一个分组，按住拖 / 开关关） -->
+          <el-tooltip content="分组设置（先后与显示）" placement="bottom">
+            <el-button size="small" @click="groupDialog = true">
+              <el-icon><Setting /></el-icon>
+            </el-button>
+          </el-tooltip>
           <el-button type="primary" size="small" @click="startAdd">
             <el-icon><Plus /></el-icon>
             添加
@@ -337,12 +372,29 @@ async function lock(): Promise<void> {
         -->
         <template v-if="store.visibleRecords.length">
           <section v-for="section in store.sections" :key="section.key" class="group">
-            <header class="group__head">
+            <!--
+              段头点一下就**收起 / 摊开**这一组（那一组现在看没看的问题）。
+              它是一颗按钮，但外观全推掉了 —— 段头本来就该只是「一行小字加一个数」。
+              收起时条数照常显示：那正是「这一段里还有几条」的答案（尤其搜索筛过之后）。
+              段的先后与「哪几组不上墙」不在这里改：那两件事在工具带那颗「分组设置」的弹框里
+              （每一段都挂一颗只在悬停时显形的按钮，墙上反而看不清有哪些组）。
+            -->
+            <button
+              class="group__head"
+              type="button"
+              :aria-expanded="!isCollapsed(section.key)"
+              @click="toggleGroup(section.key)"
+            >
               <span class="group__title">{{ section.label }}</span>
               <span class="group__count mono">{{ section.records.length }}</span>
-            </header>
+              <!-- 小箭头排在条数**后面**：摆到标题前面就把标题顶右十几像素，与底下卡片的左缘错开
+                   （这一页的「一条左基准线」，见 docs/modules/vault.md 的「约束」） -->
+              <el-icon class="group__caret" :class="{ 'is-open': !isCollapsed(section.key) }">
+                <ArrowRight />
+              </el-icon>
+            </button>
 
-            <div class="grid">
+            <div v-if="!isCollapsed(section.key)" class="grid">
               <article v-for="record in section.records" :key="record.id" class="card">
                 <header class="card__head">
                   <h3 class="card__name" :title="record.name">
@@ -429,14 +481,13 @@ async function lock(): Promise<void> {
           </section>
         </template>
 
-        <!-- 一条都没有 vs 筛没了：两回事，空态说清楚是哪一种 -->
+        <!--
+          三种空态，说清楚是哪一种：一条都没有 / 分组被藏起来了 / 搜索没匹配上。
+          中间那一种是**这一版新加的** —— 藏起来的分组不进墙也不进搜索，不单独说一句的话，
+          整页空着会被读成「记录没了」（而它们好端端地在数据文件里）。
+        -->
         <div v-else class="nomatch">
-          <template v-if="store.records.length">
-            <p class="nomatch__title">
-              没有匹配「{{ store.query }}」的记录
-            </p>
-          </template>
-          <template v-else>
+          <template v-if="!store.records.length">
             <p class="nomatch__title">
               还没有一条记录
             </p>
@@ -448,11 +499,28 @@ async function lock(): Promise<void> {
               添加
             </el-button>
           </template>
+          <template v-else-if="!store.query && store.hiddenGroups.length">
+            <p class="nomatch__title">
+              分组都隐藏了
+            </p>
+            <p class="nomatch__desc">
+              隐藏了 {{ store.hiddenGroups.length }} 组。
+            </p>
+            <el-button @click="store.showAllGroups()">
+              全部显示
+            </el-button>
+          </template>
+          <template v-else>
+            <p class="nomatch__title">
+              没有匹配「{{ store.query }}」的记录
+            </p>
+          </template>
         </div>
       </div>
     </template>
 
     <VaultKeyDialog v-model="keyDialog" @changed="store.refreshKey()" />
+    <VaultGroupDialog v-model="groupDialog" />
     <VaultEntryDialog
       ref="entryDialogRef"
       v-model="entryDialog"
@@ -621,11 +689,15 @@ async function lock(): Promise<void> {
 }
 
 /*
- * 段头 = 分组名 + 条数。**不画那条拉到右缘的细线**。
+ * 段头 = 分组名 + 条数 + 一个会转的小箭头。**不画那条拉到右缘的细线**。
  *
  * 加过一版：它把段头变成一处分隔，看着确实「有设计感」—— 但那是在**内容稀疏**的页面上
  * 露馅的：一组只有一张卡时，那条线仍然拉满一千三百像素，整页就成了几道横线夹着几张小卡，
  * 像一张没填完的表。这个应用里带标题的分组（工作页那天一天）本来就没有线，靠字号与留白分层。
+ *
+ * 它是一颗**按钮**（点一下收起 / 摊开这一组），但外观整个推掉：没有边框与底色、
+ * 字号跟着继承，看上去仍旧是一行小字。宽度取 fit-content 而**不是整行** ——
+ * 整行可点会让那一条的悬停面拉到右缘，又成了上面说的那道「线」。
  */
 .group__head {
   display: flex;
@@ -635,8 +707,15 @@ async function lock(): Promise<void> {
    */
   align-items: baseline;
   gap: var(--sp-2);
+  width: fit-content;
+  border: 0;
   /* 左右不留内边距：段头的字与下面卡片的左缘要在同一条竖线上（那 2px 曾经把它顶偏过） */
   padding: 0 0 var(--sp-3);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 
 .group__title {
@@ -650,6 +729,23 @@ async function lock(): Promise<void> {
   color: var(--ink-3);
   font-size: var(--fs-micro);
   line-height: 1.4;
+}
+
+/* 收起 / 摊开的那个小箭头：摊开时转 90 度（与左栏那棵树、过程那一行同一个意思）。
+   它比段头的字浅一档、只在悬停时亮一点 —— 段头的重心是分组名。 */
+.group__caret {
+  font-size: var(--fs-micro);
+  color: var(--ink-3);
+  transition: transform 0.15s ease, color 0.15s ease;
+}
+
+.group__caret.is-open {
+  transform: rotate(90deg);
+}
+
+.group__head:hover .group__caret,
+.group__head:focus-visible .group__caret {
+  color: var(--ink-2);
 }
 
 /*

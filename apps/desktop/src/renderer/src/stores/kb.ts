@@ -1,8 +1,8 @@
 import type { AiLogLine } from '@workbench/ai'
-import type { KbCleanPhase, KbEntryMeta, KbIndexInfo, KbIssue, KbRawItem, KbRawViewKind, KbRepoState, KbScanEntry } from '@workbench/kb'
+import type { KbCleanPhase, KbEntryMeta, KbIndexInfo, KbIssue, KbRawItem, KbRawSource, KbRawSourceRow, KbRawViewKind, KbRepoState, KbScanEntry, KbStats } from '@workbench/kb'
 
 import { confirmFrame, piLaunch, writtenEntries } from '@workbench/ai'
-import { KB_DIR, KB_INDEX_REL, KB_RAW_DIR, kbCleanPrompt, kbEntryFiles, kbEntryLinks, kbLint, kbRawFiles, kbRawViewKind, kbStats, kbTagCounts, matchKbRawStatus, normalizeKbSource, parseKbFrontmatter, parseKbIndex, resolveKbLink, splitCleanWrites, todayIsoDate } from '@workbench/kb'
+import { KB_DIR, KB_INDEX_REL, KB_RAW_DIR, kbCleanPrompt, kbEntryFiles, kbEntryLinks, kbLint, kbRawFiles, kbRawSourceRows, kbRawSourcesFor, kbRawViewKind, kbStats, kbTagCounts, kbVisibleRawEntries, matchKbRawStatus, normalizeKbSource, parseKbFrontmatter, parseKbIndex, resolveKbLink, sameKbRoot, sanitizeKbRawSources, sanitizeKbSourceName, splitCleanWrites, todayIsoDate } from '@workbench/kb'
 
 import { noteRootName, sanitizeNoteRoot } from '@workbench/notes'
 import { defineStore } from 'pinia'
@@ -19,6 +19,10 @@ import { defineStore } from 'pinia'
  * 扫描 → 拆三部分（条目 / 原始数据 / 索引）→ 配状态 → 界面取用。另有两件「库内一致性」
  * 的事也在这里收口：**巡检**（shared/kb-lint.ts 的 kbLint，只读报告，概览里那张清单）与
  * **站内链接**（条目正文里点一条 → followLink 解析成条目或原始数据，再走上面那两条开口）。
+ *
+ * **原始数据的来源**（来源名 → 本机一个文件夹）也归这里编：映射住在设置里、只对本机成立，
+ * 应用不搬运任何文件。检测是**手动**的（工具条那颗「检测更新」= reload + 报一句结果），
+ * 不设后台轮询、也没有自动清洗 —— 这一页的动作都由用户点出来。
  */
 import { computed, ref, watch } from 'vue'
 import { notifyError, notifyInfo, notifySuccess } from '@/notify'
@@ -35,15 +39,27 @@ export const useKbStore = defineStore('kb', () => {
    * 空串 = 还没选过，整页只给引导。与笔记 / 技能文件夹互不相干。
    */
   const root = computed(() => settings.settings.kbDir)
+  /** 当前知识库配的原始数据来源（别的知识库配的不串过来） */
+  const sources = computed<KbRawSource[]>(() =>
+    kbRawSourcesFor(settings.settings.kbRawSources, root.value),
+  )
   /** 文件夹的 git 状态（探出来的、不落盘）：有没有仓库与远端决定给不给同步按钮 */
   const repoState = ref<KbRepoState | null>(null)
   const remoteUrl = computed(() => repoState.value?.origin ?? '')
   const canSync = computed(() => repoState.value?.isRepo === true && remoteUrl.value !== '')
 
-  /** 扫描的原始平铺清单（布局长什么样用它判断：选了个不像知识库的文件夹时要提醒） */
+  /** 扫描的原始平铺清单（**全量**：来源行要看库里那份副本还在不在，所以不在这里摘） */
   const scanEntries = ref<KbScanEntry[]>([])
   const entries = ref<KbEntryMeta[]>([])
   const rawItems = ref<KbRawItem[]>([])
+  /** 来源行（最外层那一格）：配置与库里 data/raw 的顶层目录合起来，带每个来源的几个数 */
+  const rawSources = ref<KbRawSourceRow[]>([])
+  /**
+   * 上一次检测报出去的几个数（「检测更新」那颗按钮）：只说**变化**用（「发现了 2 处更新」
+   * 比把总数再说一遍有用）。它记的是「上一次报给你的话」，不是数据事实，所以只在内存里、
+   * 不落盘、也不进设置 —— 进设置就成了第二份真源。
+   */
+  const lastDetect = ref<KbStats | null>(null)
   const indexInfo = ref<KbIndexInfo | null>(null)
 
   const loading = ref(false)
@@ -76,23 +92,36 @@ export const useKbStore = defineStore('kb', () => {
   const stats = computed(() => kbStats(entries.value, rawItems.value))
   const tagCounts = computed(() => kbTagCounts(entries.value))
   /** 巡检：库内一致性的**只读**检查（孤儿 / 断链 / 元数据 / 出处 / 主题目录） */
-  const lintIssues = computed<KbIssue[]>(() => kbLint(entries.value, scanEntries.value))
+  const lintIssues = computed<KbIssue[]>(() =>
+    kbLint(
+      entries.value,
+      // 被映射顶掉的库里那份不进巡检的「库里有什么」：以映射为准，与清单、与状态同一口径
+      kbVisibleRawEntries(scanEntries.value, sources.value),
+      rawSources.value,
+    ),
+  )
   const locationText = computed(() => noteRootName(root.value))
-  /** 选的文件夹像不像一个知识库：两块布局（data/raw、kb）一块都没有就不是 */
+  /**
+   * 选的文件夹像不像一个知识库：有 `kb/`、有库里的 `data/raw/`、或者配过来源都算
+   * （原始资料现在多半在库外，「只有 kb/」也是一种正常的摆法）。
+   */
   const looksLikeKb = computed(
     () =>
       scanEntries.value.some(item => item.rel === KB_DIR || item.rel.startsWith(`${KB_DIR}/`))
       || scanEntries.value.some(
         item => item.rel === KB_RAW_DIR || item.rel.startsWith(`${KB_RAW_DIR}/`),
-      ),
+      )
+      || sources.value.length > 0,
   )
 
   function reset(): void {
     scanEntries.value = []
     entries.value = []
     rawItems.value = []
+    rawSources.value = []
     indexInfo.value = null
     repoState.value = null
+    lastDetect.value = null
     closeActive()
     closeRaw()
     loaded.value = false
@@ -119,6 +148,10 @@ export const useKbStore = defineStore('kb', () => {
    * 条目是逐个读出来解析的（source 在 frontmatter 里，状态判定绕不开），几十上百个
    * 本地小文件并发读，量级与笔记首扫相当；读不出的（权限 / 刚被删）如实丢掉 ——
    * 少一条只是清单上少一行，不该让整页读不出来。
+   *
+   * 来源清单一起带过去（Rust 不缓存它）：回来的 rel 一律是**逻辑路径**，来源里的文件
+   * 落在 `data/raw/<来源名>/…` 下，真实位置在每条的 abs 里。配了路径却读不到的来源
+   * 只在自己的结果里报原因，界面把它摆到那一行上。
    */
   async function reload(): Promise<void> {
     if (!root.value) {
@@ -128,7 +161,7 @@ export const useKbStore = defineStore('kb', () => {
 
     loading.value = true
     loadError.value = ''
-    const result = await window.workbench.kbScan(root.value)
+    const result = await window.workbench.kbScan(root.value, sources.value)
     loading.value = false
 
     if (!result.ok || !result.data) {
@@ -137,12 +170,14 @@ export const useKbStore = defineStore('kb', () => {
       return
     }
 
-    scanEntries.value = result.data
+    // 全量清单留着（来源行要看库里那份副本还在不在）；被映射顶掉的那部分在取用处分流
+    scanEntries.value = result.data.entries
+    const visible = kbVisibleRawEntries(result.data.entries, sources.value)
     const current = root.value
 
     const metas = await Promise.all(
-      kbEntryFiles(result.data).map(async (file): Promise<KbEntryMeta | null> => {
-        const read = await window.workbench.kbRead(current, file.rel)
+      kbEntryFiles(visible).map(async (file): Promise<KbEntryMeta | null> => {
+        const read = await window.workbench.kbRead(current, file.rel, sources.value)
         if (!read.ok || typeof read.data !== 'string')
           return null
         const fm = parseKbFrontmatter(read.data)
@@ -163,10 +198,16 @@ export const useKbStore = defineStore('kb', () => {
       }),
     )
     entries.value = metas.filter((meta): meta is KbEntryMeta => meta !== null)
-    rawItems.value = matchKbRawStatus(kbRawFiles(result.data), entries.value)
+    rawItems.value = matchKbRawStatus(kbRawFiles(visible), entries.value)
+    rawSources.value = kbRawSourceRows(
+      sources.value,
+      result.data.sources,
+      result.data.entries,
+      rawItems.value,
+    )
 
     // 索引：读不到 / 认不出都按「还没生成」处理，不是错误（清单不依赖它）
-    const indexRead = await window.workbench.kbRead(current, KB_INDEX_REL)
+    const indexRead = await window.workbench.kbRead(current, KB_INDEX_REL, sources.value)
     indexInfo.value
       = indexRead.ok && typeof indexRead.data === 'string' ? parseKbIndex(indexRead.data) : null
 
@@ -181,6 +222,105 @@ export const useKbStore = defineStore('kb', () => {
     loaded.value = true
 
     void probeState()
+  }
+
+  // ---------- 检测更新（手动那一下） ----------
+
+  /**
+   * 检测更新：全扫一遍（与刷新是同一条路），再挑**变化**说一句。
+   *
+   * 只读、不写任何文件，也不清洗 —— 清洗是另一颗按钮、由用户明明白白点出来。
+   * 没有变化就说「没有变化」：静默什么都不说，用户没法确认这一下到底跑没跑。
+   */
+  async function detect(): Promise<void> {
+    if (!root.value)
+      return
+    const before = lastDetect.value
+    await reload()
+    if (!loaded.value) {
+      notifyError(loadError.value || '检测失败')
+      return
+    }
+
+    const now = stats.value
+    lastDetect.value = { ...now }
+    if (!before) {
+      notifySuccess(`检测完成：原始数据 ${now.raws} 个（未入库 ${now.pending} · 有更新 ${now.stale}）`)
+      return
+    }
+
+    const parts: string[] = []
+    if (now.pending > before.pending)
+      parts.push(`未入库 +${now.pending - before.pending}`)
+    if (now.stale > before.stale)
+      parts.push(`有更新 +${now.stale - before.stale}`)
+    if (now.raws > before.raws)
+      parts.push(`文件 +${now.raws - before.raws}`)
+    if (now.raws < before.raws)
+      parts.push(`文件 -${before.raws - now.raws}`)
+    notifyInfo(parts.length ? `检测到 ${parts.join(' · ')}` : '没有变化')
+  }
+
+  // ---------- 来源（原始数据最外层对到本机一个文件夹） ----------
+  //
+  // 映射只落设置、只对本机成立；**应用不搬运 / 不复制 / 不删除任何文件** —— 换路径、
+  // 移除来源动的都只是这条配置（库里那份副本还在原处，移除后会照旧读它）。
+
+  /** 来源名与路径都收敛过再落盘（收敛函数在 @workbench/kb，与设置读侧同一份口径） */
+  async function updateSources(next: KbRawSource[]): Promise<boolean> {
+    return settings.updateSettings({ kbRawSources: sanitizeKbRawSources(next) })
+  }
+
+  /**
+   * 加一个来源（名称 + 文件夹）。同名已经在清单里时不重复加：名字是条目 source 的契约，
+   * 悄悄换一个名字下挂的文件夹会让状态判定说不清。
+   */
+  async function addSource(name: string, dir: string): Promise<boolean> {
+    const clean = sanitizeKbSourceName(name)
+    const target = sanitizeNoteRoot(dir)
+    if (!root.value || !clean || !target)
+      return false
+    if (sources.value.some(source => source.name.toLowerCase() === clean.toLowerCase())) {
+      notifyError(`已经有叫「${clean}」的来源了`)
+      return false
+    }
+    return updateSources([...settings.settings.kbRawSources, { root: root.value, name: clean, dir: target }])
+  }
+
+  /** 给一个来源指定 / 更换文件夹（「还没有配置路径」的那一行就是它再指定一次） */
+  async function setSourceDir(name: string, dir: string): Promise<boolean> {
+    const current = root.value
+    const target = sanitizeNoteRoot(dir)
+    if (!current || !target)
+      return false
+
+    const next = settings.settings.kbRawSources.filter(
+      item => !(sameKbRoot(item.root, current) && item.name.toLowerCase() === name.toLowerCase()),
+    )
+    next.push({ root: current, name, dir: target })
+    return updateSources(next)
+  }
+
+  /**
+   * 移除一个来源：**只删这条配置**（库里那份副本、来源文件夹里的东西都不动）。
+   * 库里没有副本时这一行就从树上消失；有副本时它会退回「读库里那份」的样子。
+   */
+  async function removeSource(name: string): Promise<boolean> {
+    const current = root.value
+    if (!current)
+      return false
+    return updateSources(
+      settings.settings.kbRawSources.filter(
+        item => !(sameKbRoot(item.root, current) && item.name.toLowerCase() === name.toLowerCase()),
+      ),
+    )
+  }
+
+  /** 在资源管理器里打开一个来源的文件夹（未配置路径的行没有落点，界面不给这个入口） */
+  function revealSource(row: KbRawSourceRow): void {
+    if (!row.dir)
+      return
+    void window.workbench.reveal(row.dir)
   }
 
   /** 探一次 git 状态：探不到就当本机文件夹处理（同步按钮不出现），不打扰界面 */
@@ -224,6 +364,19 @@ export const useKbStore = defineStore('kb', () => {
     void reload()
   })
 
+  /**
+   * 来源映射变了（加了一个 / 换了路径 / 移除了）：重新扫一遍。
+   *
+   * 比的是**映射的形状**（名字 + 路径），不是数组引用 —— 设置里任何一项改动都会换掉
+   * settings 对象，盯着引用就会因为「改了个卡片宽度」去重扫一遍知识库。
+   */
+  const sourceShape = computed(() => JSON.stringify(sources.value.map(item => [item.name, item.dir])))
+  watch(sourceShape, () => {
+    if (!started)
+      return
+    void reload()
+  })
+
   /** 记下用户挑的知识库文件夹（页面那颗「选择知识库文件夹」用它）。不搬动任何文件 */
   async function setRoot(dir: string): Promise<boolean> {
     const target = sanitizeNoteRoot(dir)
@@ -243,7 +396,7 @@ export const useKbStore = defineStore('kb', () => {
     activeContent.value = ''
 
     activeLoading.value = true
-    const result = await window.workbench.kbRead(root.value, rel)
+    const result = await window.workbench.kbRead(root.value, rel, sources.value)
     activeLoading.value = false
     if (activeRel.value !== rel)
       return
@@ -299,7 +452,7 @@ export const useKbStore = defineStore('kb', () => {
       return
 
     activeRawLoading.value = true
-    const result = await window.workbench.kbRead(root.value, rel)
+    const result = await window.workbench.kbRead(root.value, rel, sources.value)
     activeRawLoading.value = false
     if (activeRawRel.value !== rel)
       return
@@ -443,8 +596,14 @@ export const useKbStore = defineStore('kb', () => {
       return
     }
 
-    const pending = rawItems.value.filter(item => item.status === 'pending').map(item => item.rel)
-    const stale = rawItems.value.filter(item => item.status === 'stale').map(item => item.rel)
+    // 清单里两个地址都给：rel 是逻辑路径（条目 source 写它），abs 是资料实际在哪儿
+    // （来源多半在知识库文件夹外面，只有逻辑路径 Pi 读不到）
+    const pending = rawItems.value
+      .filter(item => item.status === 'pending')
+      .map(item => ({ rel: item.rel, abs: item.abs }))
+    const stale = rawItems.value
+      .filter(item => item.status === 'stale')
+      .map(item => ({ rel: item.rel, abs: item.abs }))
     if (!pending.length && !stale.length) {
       notifyInfo('当前没有待处理的原始数据')
       return
@@ -590,12 +749,14 @@ export const useKbStore = defineStore('kb', () => {
 
   return {
     root,
+    sources,
     repoState,
     remoteUrl,
     canSync,
     scanEntries,
     entries,
     rawItems,
+    rawSources,
     indexInfo,
     loading,
     loaded,
@@ -626,7 +787,12 @@ export const useKbStore = defineStore('kb', () => {
     cleanWrites,
     init,
     reload,
+    detect,
     setRoot,
+    addSource,
+    setSourceDir,
+    removeSource,
+    revealSource,
     openEntry,
     openRaw,
     closeRaw,

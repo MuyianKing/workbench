@@ -12,6 +12,7 @@
     "lodash-es": "^4.17.12"
   },
   "devDependencies": {
+    "@types/lodash-es": "^4.17.12",
     "vitest": "^5.0.3"
   },
   "scripts": {

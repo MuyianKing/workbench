@@ -17,9 +17,11 @@ import { pickAiActiveSession, sanitizeAiApiFormat, sanitizeAiBaseUrl, sanitizeAi
 import { clampTerminalButtonTop, pickAppearance, sanitizeAppearanceSettings, sanitizeViewId, stripAppearance } from '@workbench/appearance'
 import { sanitizeAccount } from '@workbench/auth'
 import { pruneDays, sanitizeActivity, sanitizeCommands, sanitizeIconCache, sanitizeProjectSort, sanitizeQuickApps } from '@workbench/core'
+import { sanitizeKbRawSources } from '@workbench/kb'
 import { sanitizeMailAccounts, sanitizeMailBulkSenders, sanitizeMailPollMinutes } from '@workbench/mail'
 import { sanitizeImageRepo, sanitizeNoteHistory, sanitizeNoteRoot, sanitizeNoteTreeExpanded } from '@workbench/notes'
 import { sanitizeSyncRepo } from '@workbench/usage'
+import { sanitizeVaultGroupNames } from '@workbench/vault'
 import { sanitizeVideoHistory, sanitizeVideoLastRel, sanitizeVideoRoot, sanitizeVideoTreeExpanded } from '@workbench/video'
 import { sanitizeWeatherCity } from '@workbench/weather'
 import { sanitizeWorkRange, sanitizeWorkSort } from '@workbench/work-log'
@@ -96,6 +98,10 @@ export function sanitizeSettings(raw: unknown): StoredSettings {
   // 知识库文件夹（本机挑的一个目录，一个独立项目的根）：老数据文件里没有，默认空串 = 还没选过。
   // 与笔记 / 技能同一条收敛 —— 它同样要拿去拼文件路径
   value.kbDir = sanitizeNoteRoot(value.kbDir)
+  // 原始数据的来源映射（来源名 → 本机一个文件夹）：老数据文件里没有，默认空清单 =
+  // 一律读库里的 data/raw。与 kbDir 同一类 —— 路径只对本机成立，逐项收敛
+  // （缺 root / 缺名字的丢掉、同名与同一个文件夹去重、指到知识库文件夹里的按没配处理）
+  value.kbRawSources = sanitizeKbRawSources(value.kbRawSources)
   // AI 助手的模型配置（AI 服务清单）：老数据文件里没有，默认空 = 还没配过。
   // 更早的版本只有「一个自定义端点」（aiProviderName / aiBaseUrl / aiApiFormat / aiModels
   // 四样平铺在设置里），这里顺手搬成一条服务 —— 只搬一次，之后那四个字段就清掉了
@@ -170,6 +176,14 @@ export function sanitizeSettings(raw: unknown): StoredSettings {
   value.videoDirs = sanitizeVideoHistory(value.videoDirs)
   value.videoTreeExpanded = sanitizeVideoTreeExpanded(value.videoTreeExpanded)
   value.videoLastRel = sanitizeVideoLastRel(value.videoLastRel)
+  // 密码页那两样（拖出来的分组顺序 / 藏起来的分组）：老数据文件里都没有，默认空名单
+  // （顺序没拖过就按名字排、一组都不藏）。**它们不参与外观同步** —— 与 projectSort 同一批行为记忆，
+  // 也因此不进 vault.json 那份会跨设备合并的文件（那份只装条目本身）
+  value.vaultGroupOrder = sanitizeVaultGroupNames(value.vaultGroupOrder)
+  value.vaultHiddenGroups = sanitizeVaultGroupNames(value.vaultHiddenGroups)
+  // 排序档只出现在未发布的中间版本里（那一版有按名称 / 按最近改动 / 按条数四档，后来收成
+  // 「弹窗里拖出来的那一个顺序」）。不主动清掉的话它会一直写回数据文件当第二份真源
+  delete (value as unknown as Record<string, unknown>).vaultGroupSort
   // 这个字段的开发期名字，存的是「绝对值、没有跟随终端这一档」。它只出现在未发布的中间版本里，
   // 而那个值会把「跟随终端」这档永远盖住 —— 清掉，免得它一直写回数据文件当第二份真源。
   delete (value as unknown as Record<string, unknown>).terminalDockTop

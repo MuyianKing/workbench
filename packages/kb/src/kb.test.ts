@@ -7,7 +7,7 @@ import type { KbEntryMeta, KbRawItem, KbRawStatus, KbScanEntry } from './kb'
  * 而不是报错 —— 这个「不是错误」的口径本身也要测到。
  */
 import { describe, expect, it } from 'vitest'
-import { compareKbRel, KB_DIR, KB_RAW_DIR, kbEntryFiles, kbEntryTree, kbFolderChain, kbRawFiles, kbRawStatusText, kbRawTree, kbRawViewKind, kbStats, kbTagCounts, kbTreeFolderIds, matchKbRawStatus, normalizeKbSource, parseKbFrontmatter, parseKbIndex } from './kb'
+import { compareKbRel, isInsideKbRoot, KB_DIR, KB_RAW_DIR, kbEntryFiles, kbEntryTree, kbFolderChain, kbRawFiles, kbRawSourceNameOf, kbRawSourceRows, kbRawSourcesFor, kbRawStatusText, kbRawTree, kbRawViewKind, kbStats, kbTagCounts, kbTreeFolderIds, kbVisibleRawEntries, matchKbRawStatus, normalizeKbSource, parseKbFrontmatter, parseKbIndex, sanitizeKbRawSources, sanitizeKbSourceName } from './kb'
 
 /** 造一条扫描清单：rel 之外都有说得过去的默认值 */
 function entry(rel: string, mtimeMs = 1000, isDir = false): KbScanEntry {
@@ -251,7 +251,15 @@ describe('kbTreeFolderIds / kbFolderChain', () => {
 describe('kbRawTree', () => {
   /** 造一条原始数据：rel 之外都有默认值 */
   function raw(rel: string, status: KbRawStatus = 'synced'): KbRawItem {
-    return { rel, name: rel.split('/').pop() ?? rel, ext: 'md', mtimeMs: 1000, status, entryRels: [] }
+    return {
+      rel,
+      name: rel.split('/').pop() ?? rel,
+      ext: 'md',
+      mtimeMs: 1000,
+      abs: `E:/kb/${rel}`,
+      status,
+      entryRels: [],
+    }
   }
 
   it('按目录结构收成树，文件节点带上 item；目录在前、同层按名字', () => {
@@ -273,6 +281,153 @@ describe('kbRawTree', () => {
 
   it('空清单回空树', () => {
     expect(kbRawTree([])).toEqual([])
+  })
+
+  it('没配路径的来源照样在树上占最外层那一行（文件挂在同一个节点下）', () => {
+    const tree = kbRawTree(
+      [raw('data/raw/mu-ui/button.md')],
+      [
+        { name: 'mu-ui', kind: 'mapped', dir: 'D:/work/mu-ui', error: '', shadowed: false, files: 1, pending: 0, stale: 0 },
+        { name: 'workbench', kind: 'unconfigured', dir: '', error: '', shadowed: false, files: 0, pending: 0, stale: 0 },
+      ],
+    )
+
+    expect(tree.map(node => node.id)).toEqual(['mu-ui', 'workbench'])
+    expect(tree[0].children.map(node => node.id)).toEqual(['data/raw/mu-ui/button.md'])
+    expect(tree[1].source).toMatchObject({ kind: 'unconfigured' })
+    expect(tree[0].source).toMatchObject({ dir: 'D:/work/mu-ui' })
+  })
+})
+
+describe('来源（原始数据最外层对到本机一个文件夹）', () => {
+  const KB_ROOT = 'E:\\muyian\\agent'
+
+  it('来源名：挡分隔符与 ./..，中文、空格与点开头的名字照旧', () => {
+    expect(sanitizeKbSourceName('  mu-ui  ')).toBe('mu-ui')
+    expect(sanitizeKbSourceName('组件库 v2')).toBe('组件库 v2')
+    expect(sanitizeKbSourceName('.hidden')).toBe('.hidden')
+    for (const bad of ['', '   ', '.', '..', 'a/b', 'a\\b', 42, null]) {
+      expect(sanitizeKbSourceName(bad)).toBe('')
+    }
+    expect(sanitizeKbSourceName('x'.repeat(80))).toHaveLength(60)
+  })
+
+  it('清单收敛：缺项丢掉、同名去重；同一文件夹只挂一个名字；指到库里的按没配处理', () => {
+    const sources = sanitizeKbRawSources([
+      { root: 'E:\\muyian\\agent\\', name: 'mu-ui', dir: 'D:\\work\\mu-ui\\' },
+      { root: 'E:/muyian/agent', name: 'mu-ui', dir: 'D:/other' },
+      { root: 'E:/muyian/agent', name: '日志', dir: 'd:\\work\\MU-UI' },
+      { root: 'E:/muyian/agent', name: 'v2', dir: 'E:/muyian/agent/data/raw/v2' },
+      { root: '', name: '孤儿', dir: 'D:/x' },
+      { root: 'E:/muyian/agent', name: 'a/b', dir: 'D:/x' },
+      'not an object',
+    ])
+
+    expect(sources).toEqual([
+      { root: 'E:\\muyian\\agent', name: 'mu-ui', dir: 'D:\\work\\mu-ui' },
+      { root: 'E:/muyian/agent', name: '日志', dir: '' },
+      { root: 'E:/muyian/agent', name: 'v2', dir: '' },
+    ])
+  })
+
+  it('不是数组 / 空数组都回空清单', () => {
+    expect(sanitizeKbRawSources(null)).toEqual([])
+    expect(sanitizeKbRawSources([])).toEqual([])
+  })
+
+  it('isInsideKbRoot：等于知识库文件夹或在它下面都算「库里的」', () => {
+    expect(isInsideKbRoot('E:/muyian/agent', KB_ROOT)).toBe(true)
+    expect(isInsideKbRoot('E:\\muyian\\agent\\data\\raw', KB_ROOT)).toBe(true)
+    expect(isInsideKbRoot('E:/muyian/agent2', KB_ROOT)).toBe(false)
+    expect(isInsideKbRoot('D:/work', KB_ROOT)).toBe(false)
+  })
+
+  it('按知识库过滤：别的库配的来源不串过来', () => {
+    const sources = [
+      { root: 'E:\\muyian\\agent', name: 'mu-ui', dir: 'D:/work/mu-ui' },
+      { root: 'E:/别的库', name: 'mu-ui', dir: 'D:/other' },
+    ]
+    expect(kbRawSourcesFor(sources, 'E:/muyian/agent/')).toEqual([sources[0]])
+    expect(kbRawSourcesFor(sources, '')).toEqual([])
+  })
+
+  it('逻辑路径认来源名：库里那份、来源里那份、直接躺在 data/raw 下的文件', () => {
+    expect(kbRawSourceNameOf('data/raw/mu-ui/button.md')).toBe('mu-ui')
+    expect(kbRawSourceNameOf('data/raw/mu-ui/子目录/a.md')).toBe('mu-ui')
+    expect(kbRawSourceNameOf('data/raw/随手记.md')).toBe('')
+    expect(kbRawSourceNameOf('kb/01-主题/a.md')).toBe('')
+  })
+
+  it('映射顶掉库里的副本：那个名字下库里那一棵整棵不看，**来源扫回来的那份照旧留着**', () => {
+    const sources = [{ root: 'E:/kb', name: 'mu-ui', dir: 'D:/work/mu-ui' }]
+    const scan = [
+      entry(`${KB_RAW_DIR}/mu-ui`, 0, true),
+      entry(`${KB_RAW_DIR}/mu-ui/button.md`),
+      // 来源文件夹扫回来的那份：rel 与库里副本一模一样，只有 origin 分得出来
+      { ...entry(`${KB_RAW_DIR}/mu-ui/button.md`), origin: 'source' as const, abs: 'D:/work/mu-ui/button.md' },
+      entry(`${KB_RAW_DIR}/workbench/a.md`),
+      entry(`${KB_RAW_DIR}/随手记.md`),
+      entry(`${KB_DIR}/01-主题/条目.md`),
+    ]
+
+    const visible = kbVisibleRawEntries(scan, sources)
+    expect(visible.map(item => [item.rel, item.origin ?? 'repo'])).toEqual([
+      [`${KB_RAW_DIR}/mu-ui/button.md`, 'source'],
+      [`${KB_RAW_DIR}/workbench/a.md`, 'repo'],
+      [`${KB_RAW_DIR}/随手记.md`, 'repo'],
+      [`${KB_DIR}/01-主题/条目.md`, 'repo'],
+    ])
+    // 没配任何来源时清单原样
+    expect(kbVisibleRawEntries(scan, [])).toHaveLength(6)
+  })
+
+  it('来源行：配置与库里顶层目录合起来，数出这一来源的未入库 / 有更新', () => {
+    const sources = [
+      { root: 'E:/kb', name: 'mu-ui', dir: 'D:/work/mu-ui' },
+      { root: 'E:/kb', name: 'workbench', dir: '' },
+    ]
+    const scan = [
+      entry(`${KB_RAW_DIR}/mu-ui`, 0, true),
+      entry(`${KB_RAW_DIR}/workbench`, 0, true),
+      entry(`${KB_RAW_DIR}/手册.pdf`),
+    ]
+    const items = matchKbRawStatus(
+      [
+        entry(`${KB_RAW_DIR}/mu-ui/a.md`, 1000),
+        entry(`${KB_RAW_DIR}/mu-ui/b.md`, 9000),
+        entry(`${KB_RAW_DIR}/mu-ui/c.md`, 1000),
+        entry(`${KB_RAW_DIR}/workbench/d.md`, 1000),
+      ],
+      [
+        meta({ rel: `${KB_DIR}/a.md`, source: `${KB_RAW_DIR}/mu-ui/a.md`, mtimeMs: 5000 }),
+        meta({ rel: `${KB_DIR}/b.md`, source: `${KB_RAW_DIR}/mu-ui/b.md`, mtimeMs: 500 }),
+      ],
+    )
+    const rows = kbRawSourceRows(sources, [{ name: 'mu-ui', error: '' }], scan, items)
+
+    expect(rows.map(row => [row.name, row.kind, row.files])).toEqual([
+      ['mu-ui', 'mapped', 3],
+      ['workbench', 'inRepo', 1],
+    ])
+    expect(rows[0]).toMatchObject({ pending: 1, stale: 1, shadowed: true })
+    expect(rows[1]).toMatchObject({ pending: 1, stale: 0, error: '' })
+  })
+
+  it('路径打不开时原因落在那一行上，别的来源不受影响', () => {
+    const rows = kbRawSourceRows(
+      [
+        { root: 'E:/kb', name: 'mu-ui', dir: 'D:/not-there' },
+        { root: 'E:/kb', name: '别的', dir: 'D:/ok' },
+      ],
+      [
+        { name: 'mu-ui', error: '找不到这个文件夹：D:\\not-there' },
+        { name: '别的', error: '' },
+      ],
+      [],
+      [],
+    )
+    expect(rows[0].error).toContain('找不到这个文件夹')
+    expect(rows[1].error).toBe('')
   })
 })
 

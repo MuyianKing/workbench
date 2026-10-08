@@ -352,16 +352,24 @@ pub fn skill_files(root: String, dir: String, id: String) -> Result<Vec<Value>, 
 // 同步与仓库探测不走新命令 —— note_sync / note_repo_state 本来就是「对任意文件夹、
 // 认它自己的 origin」的通用实现，渲染层带着知识库目录直接调。
 
-/// 列目录（平铺清单，**任意后缀** —— 原始资料可能是 pdf / docx 任何东西）；前缀拆分由渲染层做
+/// 列目录（平铺清单，**任意后缀** —— 原始资料可能是 pdf / docx 任何东西）；
+/// 前缀拆分由渲染层做。`sources` 是原始数据的来源映射（来源名 → 本机一个文件夹）：
+/// 那些文件夹里的文件按**逻辑路径** `data/raw/<来源名>/…` 进来；读不到的那条只在自己
+/// 的结果里报原因（见 kb.rs 的 scan），不让整页读不出来
 #[tauri::command(async)]
-pub fn kb_scan(root: String) -> Result<Vec<Value>, String> {
-    crate::kb::scan(&root)
+pub fn kb_scan(root: String, sources: Vec<crate::kb::RawSource>) -> Result<Value, String> {
+    crate::kb::scan(&root, &sources)
 }
 
-/// 读一个文件的文本（条目正文 / index.json）
+/// 读一个文件的文本（条目正文 / index.json / 来源里的原始资料）：
+/// `data/raw/<来源名>/…` 这条形状经来源根解析，其余在知识库文件夹里找；越界一律挡
 #[tauri::command(async)]
-pub fn kb_read(root: String, rel: String) -> Result<String, String> {
-    crate::kb::read(&root, &rel)
+pub fn kb_read(
+    root: String,
+    rel: String,
+    sources: Vec<crate::kb::RawSource>,
+) -> Result<String, String> {
+    crate::kb::read(&root, &rel, &sources)
 }
 
 /// 重建 `kb/_catalog.md` 与 `index/index.json`（输出与仓库自己的脚本逐字节一致）。

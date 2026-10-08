@@ -1,4 +1,4 @@
-import type { KbEntryMeta, KbScanEntry } from './kb'
+import type { KbEntryMeta, KbRawSourceRow, KbScanEntry } from './kb'
 import { isDateKey, markdownLinks } from '@workbench/core'
 /**
  * 知识库巡检：库内一致性的**只读**检查 —— 只报问题，不改任何文件。
@@ -158,13 +158,19 @@ function looksLikePath(source: string): boolean {
  *  - **元数据**：缺 tags / status / created / updated（日期要 `YYYY-MM-DD`），
  *    或者整篇就没有 frontmatter（这时只报一条，不逐项报）；
  *  - **出处**：source 像库里的一条路径、但那个文件不在库里（不像路径的见 looksLikePath
- *    —— 书名、网址、库外的一份 pdf 都不查）；
+ *    —— 书名、网址、库外的一份 pdf 都不查）。指到某个**没收成的来源**里（没配路径 /
+ *    路径打不开，sources 里那一行）时说的是另一句话：文件不在库里不是条目写错了，
+ *    是那个来源还得指定一下；
  *  - **主题目录**：条目没归进主题目录（直接躺在 `kb/` 根下），或最外层目录名不是 `NN-主题名`。
  *
  * 只报事实、不报感觉：每一条都说得出是哪个文件的哪一处，界面点一下就能去改。
  * 大小写按 Windows 的口径比（`./Button.md` 对 `button.md` 打得开，不报）。
  */
-export function kbLint(entries: KbEntryMeta[], files: KbScanEntry[]): KbIssue[] {
+export function kbLint(
+  entries: KbEntryMeta[],
+  files: KbScanEntry[],
+  sources: KbRawSourceRow[] = [],
+): KbIssue[] {
   const found: Record<KbIssueKind, KbIssue[]> = {
     orphan: [],
     link: [],
@@ -180,6 +186,23 @@ export function kbLint(entries: KbEntryMeta[], files: KbScanEntry[]): KbIssue[] 
       known.add(file.rel.toLowerCase())
   }
   const entryRels = new Set(entries.map(entry => entry.rel.toLowerCase()))
+
+  /** 没收成的来源（没配路径 / 路径打不开）：出处指到它们里时换个说法 */
+  const broken = new Map<string, string>()
+  for (const source of sources) {
+    if (source.kind === 'unconfigured')
+      broken.set(source.name.toLowerCase(), `来源「${source.name}」还没指定路径，先给它选一个文件夹`)
+    else if (source.error)
+      broken.set(source.name.toLowerCase(), `来源「${source.name}」打不开：${source.error}`)
+  }
+
+  /** 一条 source 指到哪个来源名（`data/raw/x/…` 与 `x/…` 两种写法都认）；没指到来源就回空串 */
+  function sourceOf(value: string): string {
+    const lower = value.toLowerCase()
+    const inner = lower.startsWith(`${KB_RAW_DIR}/`) ? lower.slice(KB_RAW_DIR.length + 1) : lower
+    const cut = inner.indexOf('/')
+    return cut > 0 ? inner.slice(0, cut) : ''
+  }
 
   // 入链先算一遍：条目正文里解析得出、且目标也是条目的那些（导航页发的不算）
   const inbound = new Set<string>()
@@ -224,7 +247,12 @@ export function kbLint(entries: KbEntryMeta[], files: KbScanEntry[]): KbIssue[] 
     if (looksLikePath(entry.source)) {
       const key = entry.source.toLowerCase()
       if (!known.has(key) && !known.has(`${KB_RAW_DIR}/${key}`)) {
-        found.source.push({ kind: 'source', rel: entry.rel, text: `出处指不到库里的文件：${entry.source}` })
+        const hint = broken.get(sourceOf(entry.source))
+        found.source.push({
+          kind: 'source',
+          rel: entry.rel,
+          text: hint ?? `出处指不到库里的文件：${entry.source}`,
+        })
       }
     }
 

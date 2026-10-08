@@ -1,6 +1,6 @@
 import type { VaultEntry, VaultItem, VaultRecord } from './vault'
 import { describe, expect, it } from 'vitest'
-import { createVaultKey, emptyVaultEntry, encodeKeyString, filterVaultRecords, groupVaultRecords, isVaultPrivateKey, isVaultPublicKey, lastChangeAt, mergeVaultItems, open, openAll, parseKeyString, parseVaultFile, publicKeyFingerprint, publicKeyOf, sameVaultKey, sanitizeVaultEntry, seal, sortVaultRecords, tombstoneOf, vaultEntryProblem, vaultFileOf, vaultGroups } from './vault'
+import { createVaultKey, emptyVaultEntry, encodeKeyString, filterVaultRecords, groupVaultRecords, isVaultPrivateKey, isVaultPublicKey, lastChangeAt, mergeVaultItems, open, openAll, orderedVaultGroups, parseKeyString, parseVaultFile, publicKeyFingerprint, publicKeyOf, sameVaultKey, sanitizeVaultEntry, sanitizeVaultGroupNames, seal, sortVaultRecords, tombstoneOf, vaultEntryProblem, vaultFileOf, vaultGroups, withoutHiddenGroups } from './vault'
 
 /** 一份固定的正文，避免每个用例各写一遍 */
 const ENTRY: VaultEntry = {
@@ -317,6 +317,93 @@ describe('查找、分组与排序', () => {
     expect(sorted.map(entry => entry.name)).toEqual(['GitHub', '宽带账号', '知乎', '内网 OA'])
     // 未分组垫底，即使它的名字排在最前
     expect(sorted[sorted.length - 1].group).toBe('')
+  })
+
+  /** 段头那几行（分组名）—— 顺序说的是段的先后，所以断言看的是这一份 */
+  const sectionsOf = (list: VaultRecord[], order: string[] = []): string[] =>
+    groupVaultRecords(sortVaultRecords(list, order)).map(section => section.label)
+
+  it('按用户拖出来的名单排：名单里的按位次，没上名单的排在后面按名字', () => {
+    const list = [
+      record('1', { name: 'a', group: '开发' }),
+      record('2', { name: 'b', group: '日常' }),
+      record('3', { name: 'c', group: '内网' }),
+      record('4', { name: 'd' }),
+    ]
+
+    // 名单只管先后：没上名单的内网与未分组排在后面（未分组垫底），两者都按名字
+    expect(sectionsOf(list, ['日常', '开发'])).toEqual(['日常', '开发', '内网', '未分组'])
+    // 名单里认不出的名字不影响结果（分组被删掉 / 改过名之后名单里还留着它）
+    expect(sectionsOf(list, ['测试', '内网'])).toEqual(['内网', '开发', '日常', '未分组'])
+    // 名单空 = 全都没上名单，退回按名字
+    expect(sectionsOf(list, [])).toEqual(['开发', '内网', '日常', '未分组'])
+  })
+
+  it('未分组永远垫底：名单里写了它也不认（它不是一个组，弹窗里也不列它）', () => {
+    const list = [record('1', { name: 'a', group: '开发' }), record('2', { name: 'b' })]
+    expect(sectionsOf(list, ['开发'])).toEqual(['开发', '未分组'])
+    expect(sectionsOf(list, [''])).toEqual(['开发', '未分组'])
+    expect(sectionsOf(list, ['', '开发'])).toEqual(['开发', '未分组'])
+  })
+
+  it('段内一直是按名字：名单只动段的先后，段里的卡片不重排', () => {
+    const list = [
+      record('1', { name: '服务器 10', group: '开发' }),
+      record('2', { name: '服务器 9', group: '开发' }),
+      record('3', { name: 'B 站', group: '日常' }),
+    ]
+
+    expect(sortVaultRecords(list, ['日常', '开发']).map(entry => entry.name)).toEqual([
+      'B 站',
+      '服务器 9',
+      '服务器 10',
+    ])
+  })
+
+  it('弹窗里那一行行：全部有名字的分组按名单排，未分组不列、藏起来的一样列（开关在界面上管）', () => {
+    const list = [
+      record('1', { name: 'a', group: '开发' }),
+      record('2', { name: 'b', group: '日常' }),
+      record('3', { name: 'c', group: '内网' }),
+      record('4', { name: 'd' }),
+    ]
+
+    expect(orderedVaultGroups(list, ['日常', '开发'])).toEqual(['日常', '开发', '内网'])
+    // 名单里认不出的名字不会变成一行
+    expect(orderedVaultGroups(list, ['测试', '内网'])).toEqual(['内网', '开发', '日常'])
+    // 未分组那一段永远不在里面
+    expect(orderedVaultGroups(list)).not.toContain('')
+    expect(orderedVaultGroups([])).toEqual([])
+  })
+
+  it('藏起来的分组整段摘掉，其余原样（连顺序都不动）', () => {
+    const list = [
+      record('1', { name: 'a', group: '开发' }),
+      record('2', { name: 'b', group: '日常' }),
+      record('3', { name: 'c' }),
+    ]
+
+    expect(withoutHiddenGroups(list, ['日常']).map(entry => entry.id)).toEqual(['1', '3'])
+    // 一条都不藏时原样返回（连数组都不必新建）
+    expect(withoutHiddenGroups(list, []).map(entry => entry.id)).toEqual(['1', '2', '3'])
+    // 藏的名字现下已经不存在了也不出错
+    expect(withoutHiddenGroups(list, ['测试']).map(entry => entry.id)).toEqual(['1', '2', '3'])
+    // 整段摘掉之后，分段里那一段自然就没了
+    expect(sectionsOf(withoutHiddenGroups(list, ['日常']))).toEqual(['开发', '未分组'])
+    // 藏起来的那一组照旧在弹窗的名单里（它的开关是关的）—— 放出来时位次还是原来那个
+    expect(orderedVaultGroups(list, ['日常', '开发'])).toContain('日常')
+  })
+
+  it('分组名名单的收敛：去空白、去重、非字符串与空串丢掉、超长截断', () => {
+    expect(sanitizeVaultGroupNames(null)).toEqual([])
+    expect(sanitizeVaultGroupNames('开发')).toEqual([])
+    expect(sanitizeVaultGroupNames(['  开发  ', '开发', '', '  ', 42, null, '日常'])).toEqual([
+      '开发',
+      '日常',
+    ])
+    expect(sanitizeVaultGroupNames([`${'x'.repeat(200)}`])[0]).toHaveLength(100)
+    // 上限兜着（手改坏的文件不该让名单无限长）
+    expect(sanitizeVaultGroupNames(Array.from({ length: 900 }, (_, i) => `组${i}`))).toHaveLength(500)
   })
 
   it('名字里的数字按大小排，不逐字比', () => {

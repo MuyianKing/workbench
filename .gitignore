@@ -16,3 +16,5 @@ apps/desktop/resources/pi/
 /src/
 /src-tauri/
 .preview
+.zcode/plans/
+.tmp-skill

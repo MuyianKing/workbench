@@ -117,9 +117,12 @@ body.is-resizing-mail-list iframe {
   pointer-events: none !important;
 }
 
-/* 设置里拖动导航项排序：重排清单而不是跟手搬一块，指针游走在清单上，同样全局兜住 */
+/* 拖动清单里的一项排序（设置里的导航项、密码页「分组设置」弹窗里那一行行）：
+   重排清单而不是跟手搬一块，指针游走在清单上，同样全局兜住 */
 body.is-sorting-views,
-body.is-sorting-views * {
+body.is-sorting-views *,
+body.is-sorting-groups,
+body.is-sorting-groups * {
   cursor: grabbing !important;
   user-select: none !important;
 }
@@ -1218,6 +1221,70 @@ body.is-resizing-video-float * {
 
 .el-dialog.article-dialog .el-dialog__footer {
   padding: var(--sp-3) var(--sp-5) var(--sp-4);
+}
+
+/**
+ * 提示条（ElMessage）：**挪到顶栏下面，并做成一眼看得见的一张卡**。
+ *
+ * 两处都动过，原来是真不好用：
+ *
+ *  - **位置**：EP 默认 `top: 16px`，正好压在标题栏与问候语那两行上 —— 那里是拖窗口的地方，
+ *    应用名字、明暗切换也都在那儿；而提示说的往往是页面中间某个按钮刚干的事，离得又远。
+ *    这里用 **margin-top** 整条推到顶栏下沿（`--h-titlebar` + `--h-header`）。
+ *    **不能用 transform**：`.el-message.is-center` 就是靠 `transform: translate(-50%)` 居中的，
+ *    再写一个 transform 会把它顶到右边去。多条叠放时 EP 按「基准 + 前几条的高度」算各自的
+ *    `top`，统一加一段上边距不会打乱它们之间的间距。
+ *
+ *  - **分量**：默认是「浅色底 + 同色字」（success 那档最淡），压在壁纸与蒙版上几乎看不出是
+ *    一条提示。这里换成不透明的面底色 + 一条状态色的左侧竖条 + 卡片阴影，字号提到正文那一档。
+ *    颜色仍然只表达状态（`--st-ok` / `--st-fail` / `--st-run`），与全站同一条口径。
+ */
+.el-message {
+  --el-message-padding: var(--sp-3) var(--sp-4);
+  margin-top: calc(var(--h-titlebar) + var(--h-header));
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--st-idle);
+  border-radius: var(--r-md);
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-hover);
+}
+
+.el-message__content {
+  color: var(--ink);
+  font-size: var(--fs-body);
+}
+
+.el-message__icon {
+  font-size: 15px;
+}
+
+/* 图标与左侧那条竖条取同一个状态色 —— 整条提示只有这一处彩色 */
+.el-message--success {
+  border-left-color: var(--st-ok);
+}
+
+.el-message--success .el-message__icon {
+  color: var(--st-ok);
+}
+
+.el-message--error {
+  border-left-color: var(--st-fail);
+}
+
+.el-message--error .el-message__icon {
+  color: var(--st-fail);
+}
+
+.el-message--warning {
+  border-left-color: var(--st-run);
+}
+
+.el-message--warning .el-message__icon {
+  color: var(--st-run);
+}
+
+.el-message--info .el-message__icon {
+  color: var(--ink-3);
 }
 
 /**
