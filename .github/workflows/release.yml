@@ -40,8 +40,10 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      # 版本读根 package.json 的 packageManager（单一来源，不在这儿再钉一遍）
-      - uses: pnpm/action-setup@v4
+      # 版本读根 package.json 的 packageManager（单一来源，不在这儿再钉一遍）。
+      # 要 v6：v4 是 node20 那批，GitHub 会以「Node.js 20 is deprecated」把它强制跑在 node24 上；
+      # v6 的 using 就是 node24，且省掉 version 的前提是 packageManager 里的 pnpm ≥ 11（这里是 12.5.1）
+      - uses: pnpm/action-setup@v6
 
       - uses: actions/setup-node@v6
         with:
@@ -67,8 +69,8 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      # 版本读根 package.json 的 packageManager（单一来源，不在这儿再钉一遍）
-      - uses: pnpm/action-setup@v4
+      # 版本读根 package.json 的 packageManager（单一来源，不在这儿再钉一遍）—— 同 verify job，要 v6
+      - uses: pnpm/action-setup@v6
 
       # Node 24 与开发机一致（内置的 Pi 要 ≥ 22.19，门槛判定在 packages/ai/src/ai.ts）
       - uses: actions/setup-node@v6
