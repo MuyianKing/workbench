@@ -60,9 +60,22 @@ pnpm run typecheck  # 类型检查
 pnpm run dist       # 打包出 NSIS 安装包
 ```
 
-发版走 GitHub Actions（`.github/workflows/release.yml`）：**打一个 `vX.Y.Z` 的 tag 推上去**（可以带预发布后缀，如 `v0.2.0-rc.1`），
-它会先跑 `typecheck` 与单元测试，再在 windows-latest 上打 Windows x64 的 NSIS 安装包，最后建 Release 并把安装包挂上去
-（正文是 GitHub 自动生成的 notes）。版本号从 tag 取、构建时写进四处版本字段，不用先改 `package.json` / `tauri.conf.json`。
+发版走 GitHub Actions（`.github/workflows/release.yml`），**先把版本号写进仓库提交，再打 tag**：
+
+```bash
+pnpm run bump 0.2.1     # 版本写进 package.json / tauri.conf.json / Cargo.toml + Cargo.lock，
+                        # 并把「该 git add 哪几处」打在输出里（packages/* 是私有子包，钉在 0.0.0 不参与版本）
+# 按它给的 git add / git commit（chore: 版本号 0.2.1）提交那一笔，然后：
+git tag v0.2.1 && git push origin main v0.2.1
+```
+
+推上 tag 之后流水线先跑 `typecheck` 与单元测试，再在 windows-latest 上打 Windows x64 的 NSIS 安装包，
+最后建 Release 并把安装包挂上去（`tag` 可以带预发布后缀，如 `v0.2.1-rc.1`，那样会标成 prerelease）。
+**tag 与仓库里那几处版本对不上就会停在版本校验那一步**（它就是 `pnpm run bump --check <版本>`，同一个脚本、
+同一份清单），提示你先跑 bump —— 所以 clone 这个 tag 出来就是那个版本，本地 `pnpm run dist` 打的包不会与发布包
+同名同版本。Release 正文暂时是 GitHub 自动生成的 notes（仓库一路直推 main、没有 PR，所以它基本只有一条
+Full Changelog 链接）。
+
 想让发布出来的包**登录可用**，得先给仓库配一个 `OAUTH_LOCAL_JSON` Secret（内容就是本机 `apps/desktop/src-tauri/oauth.local.json` 的原文）；
 没配也能构建，只是那个包里登录按钮显示「未内置凭据」。
 

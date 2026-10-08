@@ -19,6 +19,13 @@ export default antfu(
       'site/**',
       'apps/desktop/resources/**',
       'apps/desktop/src-tauri/**',
+      /**
+       * 构建 / 发版用的 Node 工具脚本不进 lint（与 `apps/desktop/scripts/**` 同一类）：
+       * 它们是纯 JS，而 `unused-imports/no-unused-vars` 在这套配置下会把每个变量都误判成
+       * 「只被当作类型使用」、`node/prefer-global/process` 又要求 ESM 里 `require('process')` ——
+       * 拿被排除的 vendor-pi.mjs 强跑一次（`eslint --no-ignore`）能复现一模一样的整片报错。
+       */
+      'scripts/**',
       'apps/desktop/scripts/**',
       '**/.preview/**',
       '**/out/**',

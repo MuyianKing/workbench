@@ -19,6 +19,7 @@
     "test:watch": "pnpm -r --parallel test:watch",
     "icons": "pnpm -F @workbench/desktop icons",
     "vendor:pi": "pnpm -F @workbench/desktop vendor:pi",
+    "bump": "node scripts/bump-version.mjs",
     "dist": "pnpm -F @workbench/desktop dist",
     "dist:dir": "pnpm -F @workbench/desktop dist:dir"
   },
