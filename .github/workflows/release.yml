@@ -17,10 +17,10 @@
 # - **只出 Windows x64**：runner 是 x64 的 `windows-latest`，不传 `--target`，产物固定落在
 #   `apps/desktop/src-tauri/target/release/bundle/nsis/` 下那一颗 `*_x64-setup.exe`（配置见
 #   `tauri.conf.json` 的 `bundle.targets = ["nsis"]`）。
-# - **Release 正文**就是 `CHANGELOG.md` 里这一版那一节（`--notes` 取出来的那份），随校验一起要求
-#   非空 —— 不再用 GitHub 自动生成的 notes（这个仓库直推 main、没有 PR，那份基本只有一条链接）。
-#   tag 带预发布后缀（`v0.2.0-rc.1`）时标成 prerelease。同一个 tag 重跑：不重复建，改成更新已有那条
-#   的正文并覆盖附件。
+# - **Release 正文**＝ `CHANGELOG.md` 里这一版那一节（`--notes` 取出来的那份，随校验一起要求非空）
+#   ＋ GitHub 自动生成的「**Full Changelog**: …/compare/上一个 tag...这个 tag」那段（用 release-notes
+#   那个 API 自己取，理由见步骤里的注释）。tag 带预发布后缀（`v0.2.0-rc.1`）时标成 prerelease；
+#   同一个 tag 重跑：不重复建，改成更新已有那条的正文并覆盖附件。
 # - 版本号只认 `vX.Y.Z`（可带 `-rc.1` 这类后缀）；tag 与仓库里那几处对不上，就在版本校验那一步停下
 #   （故意放在装 Rust / 编依赖之前：打错 tag 是最常见的失手，不该等十几分钟才知道）。
 
@@ -152,12 +152,17 @@ jobs:
             exit 1
           fi
           ls -lh "${installers[@]}"
-          # 正文就是 CHANGELOG.md 里这一版那一节（同一个脚本负责认它，--check 已经确认过非空）
+          # 正文 = CHANGELOG.md 里这一版那一节（--check 已经确认过非空）+ GitHub 自动生成的
+          # 「**Full Changelog**: …/compare/上一个 tag...这个 tag」那段。后者本来是 `--generate-notes`
+          # 给的，但 `gh release edit` 没有这个旗标 —— 用同一个 API 自己取一次，建与重跑才喂同一份正文。
+          # 中间留一个空行：不留的话那行加粗字会被 markdown 并进上面最后一条列表项里。
           notes="$RUNNER_TEMP/release-notes.md"
           node scripts/bump-version.mjs --notes "$VERSION" > "$notes"
+          printf '\n' >> "$notes"
+          gh api -X POST "repos/$GITHUB_REPOSITORY/releases/generate-notes" -f tag_name="$TAG" --jq .body >> "$notes"
           cat "$notes"
           if gh release view "$TAG" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
-            echo "Release $TAG 已存在：更新正文、覆盖附件"
+            echo "Release $TAG 已存在：更新正文（含刚生成的那段）、覆盖附件"
             gh release edit "$TAG" -R "$GITHUB_REPOSITORY" --notes-file "$notes"
             gh release upload "$TAG" "${installers[@]}" -R "$GITHUB_REPOSITORY" --clobber
           else

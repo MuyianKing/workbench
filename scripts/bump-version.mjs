@@ -6,7 +6,8 @@
  *                                `## [未发布]` 升成 `## [0.2.1] - <今天>`
  *   pnpm run bump --check 0.2.1  校验：只读，任何一处（含 CHANGELOG 那一节有没有条目）对不上
  *                                就退出码 1 —— 流水线里跑这个
- *   pnpm run bump --notes 0.2.1  只把 CHANGELOG 里那一节打出来：Release 的正文就是它
+ *   pnpm run bump --notes 0.2.1  只把 CHANGELOG 里那一节打出来：Release 的正文以它开头
+ *                                （流水线在后面接上 GitHub 自动生成的「Full Changelog」那段）
  *
  * 为什么要有它：发版流水线（.github/workflows/release.yml）只认 tag，而 tag 不住在源码里 ——
  * 版本号必须在**打 tag 之前**就真的写进仓库并提交，这样 clone 那个 tag 出来就是那个版本，
@@ -176,7 +177,8 @@ function checkChangelog(version) {
   return bullets.length
 }
 
-/** --notes：只把那一节的正文打出来（流水线拿它当 Release 正文） */
+/** --notes：只把那一节的正文打出来（Release 的正文以它开头，后面由流水线接上 GitHub 自动生成的
+ * 「**Full Changelog**: …/compare/上一个 tag...这个 tag」那段） */
 function printNotes(version) {
   const { lines, secOf, bulletsOf } = changelog()
   const sec = secOf(version)
@@ -188,9 +190,7 @@ function printNotes(version) {
     .join('\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim()
-  const repo = process.env.GITHUB_REPOSITORY
-  const tail = repo ? `\n\n完整变更见 [CHANGELOG.md](https://github.com/${repo}/blob/v${version}/CHANGELOG.md)` : ''
-  process.stdout.write(`${body}${tail}\n`)
+  process.stdout.write(`${body}\n`)
 }
 
 if (process.argv.includes('--notes')) {

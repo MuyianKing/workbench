@@ -76,7 +76,7 @@ git tag v0.2.1 && git push origin main v0.2.1
 （它就是 `pnpm run bump --check <版本>`，同一个脚本、同一份清单），提示你先跑 bump —— 所以 clone 这个 tag 出来就是那个版本，
 本地 `pnpm run dist` 打的包不会与发布包同名同版本。
 **变更记录就写在 [CHANGELOG.md](CHANGELOG.md) 里**（分「新特性 / 修复 / 调整」三档，平时记在 `## [未发布]` 那一节），
-Release 的正文取的就是这个版本节 —— 不再用 GitHub 自动生成的 notes（仓库一路直推 main、没有 PR，那份基本只有一条链接）。
+Release 的正文以这个版本节开头，后面接 GitHub 自动生成的 `**Full Changelog**: …/compare/上一个 tag...这个 tag` 那段。
 
 想让发布出来的包**登录可用**，得先给仓库配一个 `OAUTH_LOCAL_JSON` Secret（内容就是本机 `apps/desktop/src-tauri/oauth.local.json` 的原文）；
 没配也能构建，只是那个包里登录按钮显示「未内置凭据」。
