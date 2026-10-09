@@ -1,18 +1,22 @@
 <script setup lang="ts">
 import type { MailListItem } from '@/stores/mail'
 /**
- * 收件箱的清单行（收件箱清单与推广邮件段共用同一副）：
+ * 邮件清单行（收件箱清单、推广邮件段与发件箱共用同一副）：
  * 两行内容 —— 第一行「未读点 + 发件人 + 日期」，第二行「主题 + 附件回形针 +
  * 来源（配了多个账户才画）」。行首的复选框**只在多选态出现**（入口是右键的
  * 「多选删除」，或 Ctrl / Shift 的快捷选法），平时点行就是开信。
+ *
+ * **发件箱里第一行摆的是收件人**（`sent`）：那儿的「发件人」是自己，摆出来没信息；
+ * 未读点也一并收起来 —— 自己发出去的信没有未读这回事。
  *
  * 只管摆：勾选 / 开信 / 右键都原样交回父级（MailView）处置 —— 多选态、勾选批次、
  * 菜单与删除的策略都在那边。
  */
 import { Loading, Paperclip } from '@element-plus/icons-vue'
-import { accountTag, decodeEncodedWords, displayDate, displaySender } from '@workbench/mail'
+import { accountTag, decodeEncodedWords, displayDate, displayRecipients, displaySender } from '@workbench/mail'
+import { computed } from 'vue'
 
-defineProps<{
+const props = defineProps<{
   /** 这一行画哪封 */
   item: MailListItem
   /** 多选态：行首亮出复选框，点行从「开信」变成「勾 / 撤」 */
@@ -25,6 +29,8 @@ defineProps<{
   deleting: boolean
   /** 来源标注画不画（配了多个账户才画，一个账户没什么可标的） */
   showSource: boolean
+  /** 发件箱：第一行摆收件人、不画未读点 */
+  sent: boolean
 }>()
 
 const emit = defineEmits<{
@@ -36,15 +42,17 @@ const emit = defineEmits<{
   'menu': [event: MouseEvent]
 }>()
 
+/** 第一行摆谁：收件箱是发件人，发件箱是收件人（顿号连接，全名由 title 兜着） */
+const party = computed(() => {
+  if (!props.sent)
+    return displaySender(props.item.from)
+  return displayRecipients(props.item.to) || '(无收件人)'
+})
+
 /** 主题是原始头部文本（RFC 2047 编码词），解码在这里做 */
 function subjectText(raw: string): string {
   const decoded = decodeEncodedWords(raw).trim()
   return decoded || '(无主题)'
-}
-
-/** 发件人展示名（@workbench/mail 的 displaySender，列表与阅读栏同一套解码） */
-function senderText(raw: string): string {
-  return displaySender(raw)
 }
 </script>
 
@@ -55,7 +63,7 @@ function senderText(raw: string): string {
     :aria-selected="picked"
     :class="{
       'is-active': active,
-      'is-unread': !item.seen,
+      'is-unread': !sent && !item.seen,
       'is-picked': picked,
       'is-deleting': deleting,
     }"
@@ -72,7 +80,7 @@ function senderText(raw: string): string {
     <button class="mail-item__main" type="button" @click="emit('open', $event)">
       <span class="mail-item__row">
         <span class="mail-item__dot" aria-hidden="true" />
-        <span class="mail-item__from" :title="senderText(item.from)">{{ senderText(item.from) }}</span>
+        <span class="mail-item__from" :title="party">{{ party }}</span>
         <el-icon v-if="deleting" class="mail-item__deleting is-loading"><Loading /></el-icon>
         <span class="mail-item__date">{{ displayDate(item.date) }}</span>
       </span>

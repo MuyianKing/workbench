@@ -18,9 +18,9 @@ export {
   sanitizeMailPollMinutes,
   sanitizeMailPort,
 } from './mail'
-export type { MailAccount } from './mail'
+export type { MailAccount, MailFolder } from './mail'
 export { buildMime, contentTypeForFileName, formatMailSize, MAX_MESSAGE_BYTES } from './mime'
 export type { BuildMimeInput, MailAttachmentInput } from './mime'
-export { accountTag, displayDate, displaySender, htmlBody, mailTime, parseMessage, senderAddress } from './parse'
+export { accountTag, displayDate, displayRecipients, displaySender, htmlBody, mailTime, parseMessage, recipientAddress, senderAddress } from './parse'
 export type { ParsedAttachment, ParsedMail } from './parse'
 export { decodeEncodedWords, encodeRfc2047Word } from './rfc2047'

@@ -1,25 +1,27 @@
 <script setup lang="ts">
+import type { MailFolder } from '@workbench/mail'
 import type { MailListItem, MailReplyTarget } from '@/stores/mail'
 import { ArrowDown, EditPen, Message, Paperclip, Refresh, Setting } from '@element-plus/icons-vue'
 import { formatMailSize, senderAddress } from '@workbench/mail'
 /**
- * 邮箱页：左栏收件箱清单，右栏读信（与 AI / 笔记 / 视频页同一副左右分栏，
+ * 邮箱页：左栏邮件清单，右栏读信（与 AI / 笔记 / 视频页同一副左右分栏，
  * 左栏宽度住 theme.json 的 `mailListWidth`）。
  *
- *  - **左栏**：所有账户的收件箱合并成一份清单（各账户并行各拉最近的 50 封，按时间
- *    新在前，不按来源分组；进页面 / 点刷新才拉，不后台轮询 —— 这个应用没有
- *    「自己偷偷跑流量」这回事）。右键「多选删除」进入多选态：行首亮出复选框、点行
- *    就是勾 / 撤，勾选条出「已选 N 封」；识别成推广 / 广告的信不混在这里 —— 收进
- *    清单底部分开的一段（默认折叠，展开也是自己的一段）。底部一行是两个不跟邮件走
- *    的入口：**账户**（多账户的管理弹层）与**写邮件**。
+ *  - **左栏**：头部一颗分段选择器切**收件箱 / 已发送**（Rust 侧现认服务器上的文件夹名，
+ *    见 docs/modules/mail.md）。清单是当前那个文件夹里所有账户合并的一份（各账户并行
+ *    各拉最近的 50 封，按时间新在前，不按来源分组；进页面 / 切文件夹 / 点刷新才拉，
+ *    不后台轮询 —— 这个应用没有「自己偷偷跑流量」这回事）。右键「多选删除」进入多选态：
+ *    行首亮出复选框、点行就是勾 / 撤，勾选条出「已选 N 封」；收件箱里识别成推广 / 广告
+ *    的信不混在这里 —— 收进清单底部分开的一段（默认折叠，展开也是自己的一段）。
+ *    底部一行是两个不跟邮件走的入口：**账户**（多账户的管理弹层）与**写邮件**。
  *  - **右栏**：没配置账户时是一颗「配置邮箱账户」；配置了就是阅读栏 ——
- *    头部是主题、发件人、日期与「回复 / 标记未读」，正文按信里的形态画：
+ *    头部是主题、发件人（发件箱里是收件人）、日期与「回复」，正文按信里的形态画：
  *    有 HTML 走 sandbox 的 iframe（外链图片照常显示、脚本照旧全禁，
  *    见 @workbench/mail 的 htmlBody），没有就按纯文本排版。附件逐个「另存为」。
  *
  * 页面只做编排与状态呈现：拉列表、读信、标记、发送都在 stores/mail.ts。
  */
-import { computed, onActivated, onMounted, ref } from 'vue'
+import { computed, onActivated, onMounted, ref, watch } from 'vue'
 import MailAccountDialog from '@/components/MailAccountDialog.vue'
 import MailComposer from '@/components/MailComposer.vue'
 import MailContextMenu from '@/components/MailContextMenu.vue'
@@ -37,11 +39,12 @@ const composerVisible = ref(false)
 /** 回复的预填内容；null = 写的是新邮件 */
 const replyTarget = ref<MailReplyTarget | null>(null)
 
-/** 右键菜单的落点与它对着的那一行（哪个账户、发件人在不在黑名单、已读态，都给菜单定文案用） */
+/** 右键菜单的落点与它对着的那一行（哪个文件夹 / 账户、发件人在不在黑名单、已读态，都给菜单定文案用） */
 const menu = ref<{
   x: number
   y: number
   key: string
+  folder: MailFolder
   account: string
   uid: number
   bulk: boolean
@@ -53,6 +56,7 @@ function openMenu(event: MouseEvent, item: MailListItem): void {
     x: event.clientX,
     y: event.clientY,
     key: item.key,
+    folder: item.folder,
     account: item.account,
     uid: item.uid,
     bulk: mail.bulkSenders.includes(senderAddress(item.from).toLowerCase()),
@@ -86,16 +90,28 @@ function onMenuAct(name: 'bulk' | 'toggle-seen' | 'multi-pick' | 'multi-delete' 
     void confirmAction('服务器上的这封信也会被删掉，找不回来。', '删除这封邮件').then(async (confirmed) => {
       if (!confirmed)
         return
-      const result = await mail.deleteMails([{ account: state.account, uid: state.uid }])
+      const result = await mail.deleteMails([{ folder: state.folder, account: state.account, uid: state.uid }])
       if (!result.ok)
         notifyError(result.error ?? '删除失败')
     })
     return
   }
-  void mail.markSeen(state.account, state.uid, !state.seen).then((result) => {
+  void mail.markSeen({ folder: state.folder, account: state.account, uid: state.uid }, !state.seen).then((result) => {
     if (!result.ok)
       notifyError(result.error ?? '标记失败')
   })
+}
+
+// ---------- 文件夹切换（收件箱 / 已发送） ----------
+
+const folderOptions = [
+  { label: '收件箱', value: 'inbox' },
+  { label: '已发送', value: 'sent' },
+]
+
+/** 分段选择器递回来的值收敛成两个逻辑名（组件那边是宽泛的联合类型，这里收一道） */
+function changeFolder(value: unknown): void {
+  mail.setFolder(value === 'sent' ? 'sent' : 'inbox')
 }
 
 // ---------- 批量删除的勾选 ----------
@@ -159,6 +175,9 @@ function exitPicking(): void {
   picking.value = false
   pickedKeys.value = []
 }
+
+/** 换文件夹就把多选态收掉：勾选是按旧文件夹的身份记的，留着会对着看不见的行报「已选 N 封」 */
+watch(() => mail.folder, exitPicking)
 
 /** 此刻看得见的行：收件箱清单 + 展开着的推广段 —— 全选、删除与收起时的修剪都只认这些 */
 const visibleItems = computed(() => (mail.showBulk ? [...mail.list, ...mail.bulkList] : mail.list))
@@ -242,11 +261,31 @@ function toggleSeen(): void {
   const message = mail.active
   if (!message)
     return
-  void mail.markSeen(message.account, message.uid, !activeSeen.value).then((result) => {
-    if (!result.ok)
-      notifyError(result.error ?? '标记失败')
-  })
+  void mail.markSeen({ folder: message.folder, account: message.account, uid: message.uid }, !activeSeen.value).then(
+    (result) => {
+      if (!result.ok)
+        notifyError(result.error ?? '标记失败')
+    },
+  )
 }
+
+/**
+ * 阅读栏第一行摆谁：收件箱看发件人，发件箱看收件人（那儿摆自己没信息 ——
+ * 回信也按这个走，发给当初收到这封的人）。
+ */
+const partyText = computed(() => {
+  const message = mail.active
+  if (!message)
+    return ''
+  return message.folder === 'sent' ? message.toText || '(无收件人)' : message.fromText
+})
+
+const partyAddress = computed(() => {
+  const message = mail.active
+  if (!message)
+    return ''
+  return message.folder === 'sent' ? message.toAddress : message.fromAddress
+})
 
 function openComposer(): void {
   replyTarget.value = null
@@ -259,7 +298,7 @@ function reply(): void {
     return
   replyTarget.value = {
     from: message.account,
-    to: message.fromAddress,
+    to: message.folder === 'sent' ? message.toAddress : message.fromAddress,
     subject: message.subject,
     text: message.text,
   }
@@ -300,14 +339,20 @@ const bodyStyle = computed(() => ({
     <!-- 左栏：收件箱清单 -->
     <aside class="mail-view__side panel">
       <header class="side__head">
-        <span class="side__title">收件箱</span>
+        <el-segmented
+          class="side__folders"
+          size="small"
+          :model-value="mail.folder"
+          :options="folderOptions"
+          @change="changeFolder"
+        />
         <el-tooltip content="刷新" placement="bottom">
           <el-button
             class="side__refresh"
             text
             :icon="Refresh"
             :loading="mail.listLoading"
-            aria-label="刷新收件箱"
+            :aria-label="`刷新${mail.folderLabel}`"
             @click="mail.refreshList()"
           />
         </el-tooltip>
@@ -348,7 +393,7 @@ const bodyStyle = computed(() => ({
       <div
         class="mail-list"
         role="listbox"
-        aria-label="收件箱"
+        :aria-label="mail.folderLabel"
         :aria-multiselectable="pickedKeys.length ? 'true' : undefined"
         @keydown.esc="exitPicking"
         @keydown.ctrl.a.prevent="pickAll"
@@ -362,6 +407,7 @@ const bodyStyle = computed(() => ({
           :active="mail.activeKey === item.key"
           :deleting="mail.deletingKeys.includes(item.key)"
           :show-source="mail.accounts.length > 1"
+          :sent="item.folder === 'sent'"
           @toggle-pick="togglePick(item)"
           @open="onItemClick($event, item)"
           @menu="openMenu($event, item)"
@@ -386,7 +432,7 @@ const bodyStyle = computed(() => ({
             </span>
             <span class="mail-list__empty-shadow" />
           </div>
-          <span class="mail-list__empty-text">收件箱是空的</span>
+          <span class="mail-list__empty-text">{{ mail.folder === 'sent' ? '已发送是空的' : '收件箱是空的' }}</span>
         </div>
 
         <!-- 推广 / 广告邮件段：与收件箱分开的一段 —— 默认折叠，展开也是自己的一段，
@@ -408,6 +454,7 @@ const bodyStyle = computed(() => ({
               :active="mail.activeKey === item.key"
               :deleting="mail.deletingKeys.includes(item.key)"
               :show-source="mail.accounts.length > 1"
+              :sent="false"
               @toggle-pick="togglePick(item)"
               @open="onItemClick($event, item)"
               @menu="openMenu($event, item)"
@@ -467,9 +514,11 @@ const bodyStyle = computed(() => ({
             {{ mail.active.subject }}
           </h2>
           <div class="mail-head__meta">
-            <span class="mail-head__from">{{ mail.active.fromText }}</span>
-            <span v-if="mail.active.fromAddress && mail.active.fromText !== mail.active.fromAddress" class="mail-head__addr">
-              &lt;{{ mail.active.fromAddress }}&gt;
+            <!-- 发件箱里第一行摆的是收件人：挂一个安静的小字，免得跟发件人混淆 -->
+            <span v-if="mail.active.folder === 'sent'" class="mail-head__to">收件人</span>
+            <span class="mail-head__from">{{ partyText }}</span>
+            <span v-if="partyAddress && partyText !== partyAddress" class="mail-head__addr">
+              &lt;{{ partyAddress }}&gt;
             </span>
             <span class="mail-head__date">{{ mail.active.dateText }}</span>
             <!-- 收自哪个邮箱（配了多个账户才画）：回信默认就从它发 -->
@@ -480,7 +529,8 @@ const bodyStyle = computed(() => ({
             <el-button size="small" text :icon="EditPen" @click="reply">
               回复
             </el-button>
-            <el-button size="small" text @click="toggleSeen">
+            <!-- 已读态只对收件箱有意义：自己发出去的信没有未读这回事 -->
+            <el-button v-if="mail.active.folder === 'inbox'" size="small" text @click="toggleSeen">
               {{ activeSeen ? '标记未读' : '标记已读' }}
             </el-button>
           </div>
@@ -530,6 +580,7 @@ const bodyStyle = computed(() => ({
       :bulk="menu.bulk"
       :seen="menu.seen"
       :picked-count="pickedKeys.length"
+      :sent="menu.folder === 'sent'"
       @act="onMenuAct"
       @close="menu = null"
     />
@@ -562,6 +613,17 @@ const bodyStyle = computed(() => ({
 }
 
 /* .side__head / .side__title / .side__foot 收在 global.css（与 AI 页左栏共用） */
+
+/* 文件夹切换（收件箱 / 已发送）：外壳（底色 / 圆角 / 选中态）在 global.css，
+   这里只补字号与内边距 —— 压到与 .side__title 同一档，不把表头那一行撑高 */
+.side__folders.el-segmented {
+  flex-shrink: 0;
+  font-size: var(--fs-meta);
+}
+
+.side__folders :deep(.el-segmented__item) {
+  padding: 1px 10px;
+}
 
 .side__refresh {
   width: 24px;
@@ -891,6 +953,13 @@ const bodyStyle = computed(() => ({
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* 发件箱里第一行摆的是收件人：前面挂一个安静的小字，免得跟发件人混淆 */
+.mail-head__to {
+  flex-shrink: 0;
+  color: var(--ink-3);
+  font-size: var(--fs-meta);
 }
 
 /* 后面的按钮推到行尾 */

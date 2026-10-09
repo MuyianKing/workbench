@@ -168,9 +168,35 @@ fn auth_code(address: &str) -> Result<String, String> {
         .ok_or_else(|| format!("还没配置 {address} 的授权码，在邮箱页的设置里填一次"))
 }
 
+// ---------- 文件夹：渲染层只说逻辑名，服务器上的名字现认 ----------
+
+/// 邮箱页能看的两个文件夹（收件箱 / 已发送）。**服务器上的文件夹名不在这里** ——
+/// 网易把「已发送」报成 modified UTF-7 的 `&XfJT0ZAB-`、腾讯报成 `Sent Messages`，
+/// 名字靠 `Imap::sent_mailbox` 现场从 LIST 结果里认（见 `pick_sent_mailbox`）。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Folder {
+    Inbox,
+    Sent,
+}
+
+impl Folder {
+    /// 渲染层递来的逻辑名。认不出的名字不猜、直接报错 —— 少一个静默看错文件夹的坑。
+    pub fn parse(raw: &str) -> Result<Self, String> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "inbox" => Ok(Self::Inbox),
+            "sent" => Ok(Self::Sent),
+            other => Err(format!("认不出的文件夹：{other}")),
+        }
+    }
+}
+
+/// 认不出 `\Sent` 属性时的候选名。网易的已发送是 modified UTF-7 的 `&XfJT0ZAB-`，
+/// 腾讯（QQ / foxmail）是 `Sent Messages`，也有服务器把名字直接报成 UTF-8 的中文。
+const SENT_MAILBOX_NAMES: &[&str] = &["&XfJT0ZAB-", "已发送", "Sent", "Sent Messages", "Sent Items", "Sent Mail"];
+
 // ---------- IMAP：命令子集 + literal 感知的读取 ----------
 
-/// 一条 IMAP 会话。命令子集：ID / LOGIN / SELECT INBOX / FETCH / STORE / LOGOUT。
+/// 一条 IMAP 会话。命令子集：ID / LOGIN / LIST / SELECT <文件夹> / FETCH / STORE / LOGOUT。
 /// 字面量（`{n}\r\n` + n 字节）在读侧就地展开 —— 之后所有解析都对着一份完整缓冲。
 struct Imap {
     reader: BufReader<TlsStream<TcpStream>>,
@@ -261,33 +287,61 @@ impl Imap {
         Ok(())
     }
 
-    /// 选中 INBOX，返回里面的邮件总数（SELECT 响应里的 `* n EXISTS`）与
-    /// UIDVALIDITY（`* OK [UIDVALIDITY n]`，服务器不报就 None）—— 后台监视靠它
-    /// 认「UID 序列是不是换过一茬」，换过就不能拿旧 UID 比新邮件。
-    fn select_inbox(&mut self) -> Result<InboxInfo, String> {
-        let attempt = self.command("SELECT INBOX");
+    /// 选中一个文件夹（`SELECT <邮箱名>`），返回里面的邮件总数（SELECT 响应里的
+    /// `* n EXISTS`）与 UIDVALIDITY（`* OK [UIDVALIDITY n]`，服务器不报就 None）——
+    /// 后台监视靠它认「UID 序列是不是换过一茬」，换过就不能拿旧 UID 比新邮件。
+    /// 名字由调用方先认好（收件箱是 `INBOX`，已发送走 `select_folder`）。
+    fn select(&mut self, mailbox: &str) -> Result<MailboxInfo, String> {
+        let cmd = format!("SELECT {}", imap_quote(mailbox));
+        let attempt = self.command(&cmd);
         let buffer = match attempt {
             Ok(buffer) => buffer,
             // 网易的怪癖：没收到 ID 命令就 SELECT 会吃闭门羹。补一次身份再试。
             Err(err) if is_unsafe_login(&err) => {
                 self.id()?;
-                self.command("SELECT INBOX")?
+                self.command(&cmd)?
             }
             Err(err) => return Err(err),
         };
         let text = String::from_utf8_lossy(&buffer);
-        let exists = exists_from_select(&text).ok_or("服务器没报收件箱里的邮件数")?;
-        Ok(InboxInfo {
+        let exists = exists_from_select(&text).ok_or("服务器没报这个文件夹里的邮件数")?;
+        Ok(MailboxInfo {
             exists,
             uidvalidity: uidvalidity_from_select(&text),
         })
     }
 
-    /// 拉一段序号区间的邮件摘要（UID / 已读标记 / 头部三件套 / 结构）。
+    /// 列出服务器上的全部文件夹（`LIST "" "*"`）。
+    fn list_mailboxes(&mut self) -> Result<Vec<MailboxEntry>, String> {
+        let buffer = self.command("LIST \"\" \"*\"")?;
+        Ok(parse_mailbox_list(&buffer))
+    }
+
+    /// 认这个账户的「已发送」文件夹名 —— **写死不得**：网易报的是 modified UTF-7 的
+    /// `&XfJT0ZAB-`，腾讯是 `Sent Messages`，自定义服务器什么都可能。
+    fn sent_mailbox(&mut self) -> Result<String, String> {
+        let entries = self.list_mailboxes()?;
+        pick_sent_mailbox(&entries)
+            .ok_or_else(|| "这个账户里没找到「已发送」文件夹（服务器没报 \\Sent 属性，名字也不认得）".into())
+    }
+
+    /// 选中渲染层要的那个逻辑文件夹：收件箱就是 INBOX，已发送先现认名字再选。
+    fn select_folder(&mut self, folder: Folder) -> Result<MailboxInfo, String> {
+        match folder {
+            Folder::Inbox => self.select("INBOX"),
+            Folder::Sent => {
+                let mailbox = self.sent_mailbox()?;
+                self.select(&mailbox)
+            }
+        }
+    }
+
+    /// 拉一段序号区间的邮件摘要（UID / 已读标记 / 头部四件套 / 结构）。
     /// 用序号区间而不是 UID SEARCH —— 列表页只关心「最近 N 封」，序号直接够用。
+    /// 收件人（To）也一起拉：收件箱用不上，发件箱的清单行与回信落点都要它。
     fn fetch_summaries(&mut self, start: usize, end: usize) -> Result<Vec<MailSummary>, String> {
         let cmd = format!(
-            "FETCH {start}:{end} (UID FLAGS BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE)] BODYSTRUCTURE)"
+            "FETCH {start}:{end} (UID FLAGS BODY.PEEK[HEADER.FIELDS (FROM TO SUBJECT DATE)] BODYSTRUCTURE)"
         );
         let buffer = self.command(&cmd)?;
         Ok(parse_mail_summaries(&buffer))
@@ -369,7 +423,7 @@ fn literal_size(line: &[u8]) -> Option<usize> {
 
 /// SELECT 一次拿回的两样：邮件总数与 UIDVALIDITY（监视模块比对新邮件用）。
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct InboxInfo {
+pub struct MailboxInfo {
     pub exists: usize,
     pub uidvalidity: Option<u64>,
 }
@@ -412,6 +466,80 @@ fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
         return None;
     }
     haystack.windows(needle.len()).position(|window| window == needle)
+}
+
+/// `LIST` 报回来的一个文件夹：属性（`\Sent` / `\HasNoChildren` 这类）与它的名字。
+/// 名字是服务器原样的写法（网易报 modified UTF-7），要 SELECT 就把它原样递回去。
+#[derive(Debug, Clone, PartialEq)]
+pub struct MailboxEntry {
+    pub flags: Vec<String>,
+    pub name: String,
+}
+
+/// 从 `LIST` 响应里解析出全部文件夹。一行形如
+/// `* LIST (\HasNoChildren) "/" "&XfJT0ZAB-"`；名字也可能是字面量（非 ASCII 时），
+/// 读侧已把字面量拼进同一份缓冲，所以照常走 parse_token。
+fn parse_mailbox_list(buffer: &[u8]) -> Vec<MailboxEntry> {
+    let mut entries = Vec::new();
+    let mut pos = 0usize;
+    while let Some(offset) = find_subslice(&buffer[pos.min(buffer.len())..], b"* LIST ") {
+        let start = pos + offset + b"* LIST ".len();
+        let mut at = start;
+        let flags = match parse_token(buffer, &mut at) {
+            Ok(Tok::List(items)) => items
+                .iter()
+                .filter_map(|item| match item {
+                    Tok::Atom(text) => Some(text.clone()),
+                    _ => None,
+                })
+                .collect(),
+            _ => {
+                pos = at.max(start + 1);
+                continue;
+            }
+        };
+        // 层级分隔符（`"/"` 或 NIL）：解析出来只为把游标推到名字那一段
+        if parse_token(buffer, &mut at).is_err() {
+            pos = at.max(start + 1);
+            continue;
+        }
+        let name = match parse_token(buffer, &mut at) {
+            Ok(Tok::Str(bytes)) => String::from_utf8_lossy(&bytes).into_owned(),
+            Ok(Tok::Atom(text)) => text,
+            _ => {
+                pos = at.max(start + 1);
+                continue;
+            }
+        };
+        entries.push(MailboxEntry { flags, name });
+        pos = at.max(start + 1);
+    }
+    entries
+}
+
+/// 从 LIST 结果里挑出「已发送」：先认 RFC 6154 的 `\Sent` 特殊用途属性（服务器自己
+/// 说的，最可靠），认不出再按候选名比（大小写不敏感），最后才按层级末段比一次
+/// （有的服务器把它放在 `INBOX.Sent` / `INBOX/Sent Messages` 这种层级里）。
+/// 挑不着给 None —— 由调用方把它变成一句给用户看的话。
+fn pick_sent_mailbox(entries: &[MailboxEntry]) -> Option<String> {
+    if let Some(entry) = entries
+        .iter()
+        .find(|entry| entry.flags.iter().any(|flag| flag.eq_ignore_ascii_case("\\Sent")))
+    {
+        return Some(entry.name.clone());
+    }
+    for candidate in SENT_MAILBOX_NAMES {
+        if let Some(entry) = entries.iter().find(|entry| entry.name.eq_ignore_ascii_case(candidate)) {
+            return Some(entry.name.clone());
+        }
+    }
+    entries
+        .iter()
+        .find(|entry| {
+            let leaf = entry.name.rsplit(['/', '.']).next().unwrap_or(&entry.name);
+            SENT_MAILBOX_NAMES.iter().any(|candidate| leaf.eq_ignore_ascii_case(candidate))
+        })
+        .map(|entry| entry.name.clone())
 }
 
 // ---------- IMAP 响应的解析（纯函数，可单测） ----------
@@ -538,14 +666,15 @@ fn tok_bytes(token: &Tok) -> Option<Vec<u8>> {
     }
 }
 
-/// 一封邮件的列表摘要。头部三件套是原始文本（RFC 2047 编码词、名字与地址都在里面），
-/// 展示层的拆解在 TS 侧做。
+/// 一封邮件的列表摘要。头部四件套是原始文本（RFC 2047 编码词、名字与地址都在里面），
+/// 展示层的拆解在 TS 侧做。`to` 收件箱用不上（清单行画的是发件人），发件箱要它。
 #[derive(Serialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct MailSummary {
     pub uid: u64,
     pub subject: String,
     pub from: String,
+    pub to: String,
     pub date: String,
     pub seen: bool,
     pub has_attachment: bool,
@@ -614,6 +743,7 @@ fn summary_from_tokens(items: &[Tok]) -> Option<MailSummary> {
         uid: uid?,
         subject: header_value(&headers, "Subject"),
         from: header_value(&headers, "From"),
+        to: header_value(&headers, "To"),
         date: header_value(&headers, "Date"),
         seen,
         has_attachment,
@@ -851,22 +981,23 @@ pub fn mail_verify(
         .map_err(|err| format!("收件服务器拒绝登录：{err}（核对授权码，它不是登录密码）"))?;
     session.id().map_err(|err| format!("向收件服务器报身份失败：{err}"))?;
     session
-        .select_inbox()
+        .select("INBOX")
         .map_err(|err| format!("选中收件箱失败：{err}"))?;
     smtp_login(&smtp, sport, &address, secret)?;
     Ok(())
 }
 
-/// 现连现断拉一次收件箱最近 `window` 封的摘要（连上 → 选中 → 拉摘要 → LOGOUT）。
-/// mail_list 命令与后台监视（mail_watch.rs）走同一套。
+/// 现连现断拉一次某个文件夹最近 `window` 封的摘要（连上 → 选中 → 拉摘要 → LOGOUT）。
+/// mail_list 命令与后台监视（mail_watch.rs，只盯收件箱）走同一套。
 pub(crate) fn fetch_recent_summaries(
     address: &str,
     raw_host: &str,
     raw_port: u16,
+    folder: Folder,
     window: usize,
-) -> Result<(InboxInfo, Vec<MailSummary>), String> {
-    let mut session = open_inbox(address, raw_host, raw_port)?;
-    let info = session.select_inbox()?;
+) -> Result<(MailboxInfo, Vec<MailSummary>), String> {
+    let mut session = open_session(address, raw_host, raw_port)?;
+    let info = session.select_folder(folder)?;
     let summaries = if info.exists == 0 {
         Vec::new()
     } else {
@@ -877,33 +1008,39 @@ pub(crate) fn fetch_recent_summaries(
     Ok((info, summaries))
 }
 
-/// 收件箱最近 N 封的摘要。每次现连现断 —— 个人用量下一次握手几十毫秒，不值得养常驻连接。
+/// 一个文件夹里最近 N 封的摘要。每次现连现断 —— 个人用量下一次握手几十毫秒，
+/// 不值得养常驻连接。folder 是逻辑名（inbox / sent），服务器上的名字由 Rust 现认。
 #[tauri::command(async)]
 pub fn mail_list(
     address: String,
     imap_host: String,
     imap_port: u16,
+    folder: String,
     limit: u32,
 ) -> Result<Vec<MailSummary>, String> {
     let address = clean_address(&address)?;
+    let folder = Folder::parse(&folder)?;
     let limit = limit.clamp(1, 100) as usize;
-    let (_, summaries) = fetch_recent_summaries(&address, &imap_host, imap_port, limit)?;
+    let (_, summaries) = fetch_recent_summaries(&address, &imap_host, imap_port, folder, limit)?;
     Ok(summaries)
 }
 
 /// 拉一封完整报文（base64 回传，MIME 解析在 TS 侧）。markSeen 时顺手标已读 ——
-/// 失败不拦展示，读信不该因为一个标记失败而看不了。
+/// 失败不拦展示，读信不该因为一个标记失败而看不了（发件箱里的信本来就是读过的，
+/// 渲染层那边不会传 markSeen）。
 #[tauri::command(async)]
 pub fn mail_fetch_body(
     address: String,
     imap_host: String,
     imap_port: u16,
+    folder: String,
     uid: u64,
     mark_seen: bool,
 ) -> Result<String, String> {
     let address = clean_address(&address)?;
-    let mut session = open_inbox(&address, &imap_host, imap_port)?;
-    session.select_inbox()?;
+    let folder = Folder::parse(&folder)?;
+    let mut session = open_session(&address, &imap_host, imap_port)?;
+    session.select_folder(folder)?;
     let body = session.fetch_body(uid)?;
     if mark_seen {
         let _ = session.store_seen(uid, true);
@@ -918,12 +1055,14 @@ pub fn mail_set_seen(
     address: String,
     imap_host: String,
     imap_port: u16,
+    folder: String,
     uid: u64,
     seen: bool,
 ) -> Result<(), String> {
     let address = clean_address(&address)?;
-    let mut session = open_inbox(&address, &imap_host, imap_port)?;
-    session.select_inbox()?;
+    let folder = Folder::parse(&folder)?;
+    let mut session = open_session(&address, &imap_host, imap_port)?;
+    session.select_folder(folder)?;
     session.store_seen(uid, seen)?;
     session.logout();
     Ok(())
@@ -931,20 +1070,23 @@ pub fn mail_set_seen(
 
 /// 删一批：服务器上标 \Deleted 并 EXPUNGE（不可找回 —— 确认在渲染层那一步做过），
 /// 右键删单封传一个元素的数组即可。对着不存在的 uid 服务器只会安静地 OK，
-/// 本地清单反正已经把它们摘掉了，无碍。
+/// 本地清单反正已经把它们摘掉了，无碍。收到的 uid 属于同一个文件夹（渲染层按
+/// (文件夹, 账户) 分好组才调）。
 #[tauri::command(async)]
 pub fn mail_delete(
     address: String,
     imap_host: String,
     imap_port: u16,
+    folder: String,
     uids: Vec<u64>,
 ) -> Result<(), String> {
     let address = clean_address(&address)?;
+    let folder = Folder::parse(&folder)?;
     if uids.is_empty() {
         return Err("没有要删的邮件".into());
     }
-    let mut session = open_inbox(&address, &imap_host, imap_port)?;
-    session.select_inbox()?;
+    let mut session = open_session(&address, &imap_host, imap_port)?;
+    session.select_folder(folder)?;
     session.delete(&uids)?;
     session.logout();
     Ok(())
@@ -986,8 +1128,8 @@ pub fn mail_attachment_save(path: String, data: String) -> Result<(), String> {
     std::fs::write(path, &bytes).map_err(|err| format!("写入文件失败：{err}"))
 }
 
-/// 打开收件箱的公共前缀：连 IMAP → 登录 → 报身份。
-fn open_inbox(address: &str, raw_host: &str, raw_port: u16) -> Result<Imap, String> {
+/// 打开一条会话的公共前缀：连 IMAP → 登录 → 报身份（选中哪个文件夹由调用方接着做）。
+fn open_session(address: &str, raw_host: &str, raw_port: u16) -> Result<Imap, String> {
     let (host, port) = clean_host(raw_host, raw_port)?;
     let code = auth_code(address)?;
     let mut session =
@@ -1022,8 +1164,8 @@ mod tests {
     /// 按生产侧 command() 的拼法构造一段带字面量的 FETCH 响应：
     /// 行本体（CRLF 已去）+ 字面量原始字节 + 后半行。
     fn sample_fetch_buffer() -> Vec<u8> {
-        let headers = "From: Alice <alice@example.com>\r\nSubject: =?utf-8?B?6YKu5Lu2?=\r\nDate: Mon, 5 Oct 2026 10:00:00 +0800\r\n\r\n";
-        let mut buffer = b"* 3 FETCH (UID 7 FLAGS (\\Seen) BODY[HEADER.FIELDS (FROM SUBJECT DATE)] {".to_vec();
+        let headers = "From: Alice <alice@example.com>\r\nTo: 张三 <lisi@qq.com>\r\nSubject: =?utf-8?B?6YKu5Lu2?=\r\nDate: Mon, 5 Oct 2026 10:00:00 +0800\r\n\r\n";
+        let mut buffer = b"* 3 FETCH (UID 7 FLAGS (\\Seen) BODY[HEADER.FIELDS (FROM TO SUBJECT DATE)] {".to_vec();
         buffer.extend_from_slice(headers.len().to_string().as_bytes());
         buffer.extend_from_slice(b"}");
         buffer.extend_from_slice(headers.as_bytes());
@@ -1043,12 +1185,14 @@ mod tests {
         assert!(summary.has_attachment);
         assert_eq!(summary.subject, "=?utf-8?B?6YKu5Lu2?=");
         assert_eq!(summary.from, "Alice <alice@example.com>");
+        // 收件人头部原样带回（发件箱的清单行与回信落点用它，拆解在 TS 侧）
+        assert_eq!(summary.to, "张三 <lisi@qq.com>");
         assert_eq!(summary.date, "Mon, 5 Oct 2026 10:00:00 +0800");
     }
 
     #[test]
     fn unread_mail_without_attachment_is_recognized() {
-        let mut buffer = b"* 1 FETCH (UID 2 FLAGS () BODY[HEADER.FIELDS (FROM SUBJECT DATE)] {".to_vec();
+        let mut buffer = b"* 1 FETCH (UID 2 FLAGS () BODY[HEADER.FIELDS (FROM TO SUBJECT DATE)] {".to_vec();
         let headers = "From: bob@example.com\r\nSubject: hi\r\nDate: Tue, 6 Oct 2026 09:00:00 +0800\r\n\r\n";
         buffer.extend_from_slice(headers.len().to_string().as_bytes());
         buffer.extend_from_slice(b"}");
@@ -1135,6 +1279,98 @@ mod tests {
         assert_eq!(imap_quote("user@example.com"), "\"user@example.com\"");
         assert_eq!(imap_quote("a\"b"), "\"a\\\"b\"");
         assert_eq!(imap_quote("a\\b"), "\"a\\\\b\"");
+    }
+
+    // ----- 文件夹（收件箱 / 已发送） -----
+
+    /// 照生产侧的拼法造一份 LIST 结果：网易的三条（收件箱 / 已发送 / 草稿箱，
+    /// 后两个是 modified UTF-7 的名字）。
+    fn sample_list_buffer() -> Vec<u8> {
+        b"* LIST (\\HasNoChildren) \"/\" \"INBOX\"\n* LIST (\\HasNoChildren) \"/\" \"&XfJT0ZAB-\"\n* LIST (\\HasNoChildren) \"/\" \"&g0l6P3ux-\"\nA002 OK LIST completed\n".to_vec()
+    }
+
+    /// 手搓几条 LIST 结果：`("\\Sent \\HasNoChildren", "Sent Items")` 这样的对。
+    fn mailboxes(raw: &[(&str, &str)]) -> Vec<MailboxEntry> {
+        raw.iter()
+            .map(|(flags, name)| MailboxEntry {
+                flags: flags.split(' ').filter(|flag| !flag.is_empty()).map(str::to_string).collect(),
+                name: (*name).to_string(),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn folder_names_are_parsed_strictly() {
+        assert_eq!(Folder::parse("inbox").unwrap(), Folder::Inbox);
+        assert_eq!(Folder::parse(" Sent ").unwrap(), Folder::Sent);
+        assert_eq!(Folder::parse("SENT").unwrap(), Folder::Sent);
+        // 认不出的名字不猜成收件箱：静默看错文件夹比报一句错难查
+        assert!(Folder::parse("drafts").is_err());
+        assert!(Folder::parse("").is_err());
+    }
+
+    #[test]
+    fn mailbox_list_parses_quoted_names() {
+        let entries = parse_mailbox_list(&sample_list_buffer());
+        assert_eq!(entries.len(), 3);
+        assert_eq!(entries[0].name, "INBOX");
+        assert_eq!(entries[0].flags, vec!["\\HasNoChildren".to_string()]);
+        // 非 ASCII 的名字是 modified UTF-7 的写法，原样留着（SELECT 时再引号转义）
+        assert_eq!(entries[1].name, "&XfJT0ZAB-");
+        assert_eq!(entries[2].name, "&g0l6P3ux-");
+    }
+
+    #[test]
+    fn mailbox_list_parses_literal_names() {
+        // 名字是非 ASCII 时有的服务器回字面量：读侧已把字节拼进同一份缓冲
+        let name = "已发送";
+        let mut buffer = b"* LIST (\\HasNoChildren) \"/\" {".to_vec();
+        buffer.extend_from_slice(name.len().to_string().as_bytes());
+        buffer.extend_from_slice(b"}");
+        buffer.extend_from_slice(name.as_bytes());
+        buffer.extend_from_slice(b"\nA002 OK LIST completed\n");
+        let entries = parse_mailbox_list(&buffer);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].name, "已发送");
+    }
+
+    #[test]
+    fn sent_mailbox_prefers_the_special_use_attribute() {
+        // \Sent 是服务器自己说的，最可靠 —— 名字完全不认得也认得出
+        let list = mailboxes(&[("\\HasNoChildren", "INBOX"), ("\\Sent \\HasNoChildren", "Outbox-42")]);
+        assert_eq!(pick_sent_mailbox(&list), Some("Outbox-42".to_string()));
+    }
+
+    #[test]
+    fn sent_mailbox_falls_back_to_known_names() {
+        // 网易：已发送报成 modified UTF-7
+        let netease = mailboxes(&[("\\HasNoChildren", "INBOX"), ("\\HasNoChildren", "&XfJT0ZAB-")]);
+        assert_eq!(pick_sent_mailbox(&netease), Some("&XfJT0ZAB-".to_string()));
+        // 腾讯：Sent Messages
+        let tencent = mailboxes(&[("\\HasNoChildren", "INBOX"), ("\\HasNoChildren", "Sent Messages")]);
+        assert_eq!(pick_sent_mailbox(&tencent), Some("Sent Messages".to_string()));
+        // 也有服务器把名字直接报成中文，或大小写不同
+        assert_eq!(pick_sent_mailbox(&mailboxes(&[("\\HasNoChildren", "已发送")])), Some("已发送".to_string()));
+        assert_eq!(pick_sent_mailbox(&mailboxes(&[("\\HasNoChildren", "SENT")])), Some("SENT".to_string()));
+    }
+
+    #[test]
+    fn sent_mailbox_matches_the_leaf_of_a_hierarchical_name() {
+        // 候选名整条都没命中时，才按层级末段比（前两轮优先，不会抢在精确名前面）
+        let nested = mailboxes(&[("\\HasNoChildren", "INBOX"), ("\\HasNoChildren", "INBOX.Sent")]);
+        assert_eq!(pick_sent_mailbox(&nested), Some("INBOX.Sent".to_string()));
+        let slashed = mailboxes(&[("\\HasNoChildren", "INBOX/Sent Messages")]);
+        assert_eq!(pick_sent_mailbox(&slashed), Some("INBOX/Sent Messages".to_string()));
+        // 精确名先赢：两个都在时挑那个就叫 Sent 的
+        let both = mailboxes(&[("\\HasNoChildren", "INBOX.Sent"), ("\\HasNoChildren", "Sent")]);
+        assert_eq!(pick_sent_mailbox(&both), Some("Sent".to_string()));
+    }
+
+    #[test]
+    fn sent_mailbox_is_none_when_nothing_matches() {
+        let list = mailboxes(&[("\\HasNoChildren", "INBOX"), ("\\HasNoChildren", "&g0l6P3ux-")]);
+        assert_eq!(pick_sent_mailbox(&list), None);
+        assert_eq!(pick_sent_mailbox(&[]), None);
     }
 
     // ----- UID 集合 -----

@@ -1,8 +1,8 @@
-import type { MailAccount, MailAttachmentInput, ParsedAttachment } from '@workbench/mail'
+import type { MailAccount, MailAttachmentInput, MailFolder, ParsedAttachment } from '@workbench/mail'
 import type { Result } from '@/types'
 import type { MailSummary } from '@/workbench/mail'
 import { fail, ok } from '@workbench/core'
-import { buildMime, displayDate, displaySender, htmlBody, isBulkMail, mailAccountReady, mailTime, parseMessage, senderAddress } from '@workbench/mail'
+import { buildMime, displayDate, displayRecipients, displaySender, htmlBody, isBulkMail, mailAccountReady, mailTime, parseMessage, recipientAddress, senderAddress } from '@workbench/mail'
 import { defineStore } from 'pinia'
 /**
  * 邮箱页的状态。
@@ -10,19 +10,24 @@ import { defineStore } from 'pinia'
  * **数据流**：设置里的账户清单（`settings.mailAccounts`，空 = 出口关闭）→
  * 适配层（`workbench/mail.ts`，invoke mail_* 命令，一个账户一条）→ Rust 现连现断跑
  * IMAP/SMTP → 这一层做策略：多账户的清单合并成一份（每封打上来源账户、按头部日期
- * 新在前 —— 不按来源分组）、正文按 (账户, uid) 缓存（页面会话内存，不落盘）、MIME
- * 解析与沙箱用 HTML 的生成（@workbench/mail 的 parseMessage / htmlBody）。
+ * 新在前 —— 不按来源分组）、正文按 (文件夹, 账户, uid) 缓存（页面会话内存，不落盘）、
+ * MIME 解析与沙箱用 HTML 的生成（@workbench/mail 的 parseMessage / htmlBody）。
  *
- * **拉取时机**：进页面 / 手动刷新各拉一次；另外 Rust 侧有一条后台监视线程
- * （`mail_watch.rs`），按设置的周期（mailPollMinutes，默认 30 分钟、可关）对配好的
- * 账户查新邮件，有未读的新信弹系统通知（账户清单、广告黑名单与周期由 `startWatch`
- * 在启动时整份登记过去，改了就重登）。
+ * **两个文件夹**（`folder`，左栏头部那颗分段选择器切）：收件箱与已发送。清单一次
+ * 只装当前那个文件夹（切过去就重拉，见 `setFolder`）；uid 只在单个文件夹里唯一，
+ * 所以身份键（`key`）与正文缓存键都把文件夹带上。广告过滤只对收件箱生效 ——
+ * 发件箱里「发件人」是自己，拿它判广告毫无道理。
+ *
+ * **拉取时机**：进页面 / 手动刷新 / 切文件夹各拉一次；另外 Rust 侧有一条后台监视线程
+ * （`mail_watch.rs`，只盯收件箱），按设置的周期（mailPollMinutes，默认 30 分钟、可关）
+ * 对配好的账户查新邮件，有未读的新信弹系统通知（账户清单、广告黑名单与周期由
+ * `startWatch` 在启动时整份登记过去，改了就重登）。
  * 这个应用不上报任何数据，邮箱的检查目标也只有用户自己配的那台服务器。各账户
  * 并行各拉各的，谁的失败只记谁的一句话（其余照常显示）。
  * **广告邮件不进收件箱清单**（isBulkMail 的三路启发式，见 @workbench/mail）：
  * 单独收进清单底部分开的一段（showBulk 控制折叠），勾选 / 删除 / 右键与正常邮件
- * 同一套 —— 误拦了有地方找。发送成功不主动重拉列表（新信未必排得进最近 50 封），
- * 用户自己点刷新。
+ * 同一套 —— 误拦了有地方找。发送成功不主动重拉收件箱（新信未必排得进最近 50 封），
+ * 用户自己点刷新；发件箱正开着就顺手重拉一次（服务器自己会把刚发的存进已发送）。
  */
 import { computed, ref, watch } from 'vue'
 import { notifyError } from '@/notify'
@@ -37,18 +42,24 @@ export const MAIL_LIST_LIMIT = 50
 export type MailListItem = MailSummary & {
   /** 这封信是哪个账户收的（账户地址，就是清单行上标注的来源） */
   account: string
-  /** (账户, uid) 拼成的身份：uid 只在单个收件箱里唯一，跨账户会撞 */
+  /** 这封在哪个文件夹里（收件箱 / 已发送）—— 命令与身份键都要它 */
+  folder: MailFolder
+  /** (文件夹, 账户, uid) 拼成的身份：uid 只在单个文件夹里唯一，跨账户、跨文件夹都会撞 */
   key: string
 }
 
 /** 打开的一封信：都是展示层直接能用的形态（解码过、日期格式化过） */
 export interface MailMessage {
   account: string
+  folder: MailFolder
   key: string
   uid: number
   subject: string
   fromText: string
   fromAddress: string
+  /** 收件人（发件箱的阅读栏摆它，回信也发给它）；没有收件人给空串 */
+  toText: string
+  toAddress: string
   dateText: string
   /** sandbox iframe 用的文档（CSP 已注入、cid 已换成 data URL）；null = 这封没有 HTML 正文 */
   html: string | null
@@ -77,11 +88,31 @@ export const useMailStore = defineStore('mail', () => {
     return accounts.value.find(account => account.address === address)
   }
 
-  // ---------- 收件箱列表（多账户合并） ----------
+  // ---------- 文件夹（收件箱 / 已发送） ----------
+
+  /** 现在在看哪个文件夹：清单、阅读栏、命令与缓存键都跟着它 */
+  const folder = ref<MailFolder>('inbox')
+  const folderLabel = computed(() => (folder.value === 'sent' ? '已发送' : '收件箱'))
+
+  /**
+   * 切文件夹：清单与阅读栏都换一份（正文缓存留着 —— 键里带了文件夹，切回来不用重下），
+   * 立刻重拉。切的时候正在途中的那次拉取会被丢掉（见 refreshList 里的比对）。
+   */
+  function setFolder(next: MailFolder): void {
+    if (folder.value === next)
+      return
+    folder.value = next
+    closeMail()
+    all.value = []
+    listErrors.value = []
+    void refreshList()
+  }
+
+  // ---------- 清单（当前文件夹、多账户合并） ----------
 
   /** 拉回来的全部摘要（不筛）；画在清单上的是 list 这份过滤后的视图 */
   const all = ref<MailListItem[]>([])
-  /** 广告邮件要不要也画出来（底部那行「已略过 N 封推广」点开的开关） */
+  /** 广告邮件要不要也画出来（底部那行「已略过 N 封推广」点开的开关，只在收件箱） */
   const showBulk = ref(false)
   const listLoading = ref(false)
   /** 每个拉取失败的账户一句话（其余账户的信照常显示） */
@@ -95,18 +126,31 @@ export const useMailStore = defineStore('mail', () => {
   /** 用户右击「标记为广告」攒下的发件人黑名单（设置里的 mailBulkSenders） */
   const bulkSenders = computed(() => settings.settings.mailBulkSenders)
 
-  const list = computed(() => all.value.filter(item => !isBulkMail(item, bulkSenders.value)))
+  /** 发件箱里不筛广告：那儿的「发件人」是自己，按发件人判广告毫无道理 */
+  const isSent = computed(() => folder.value === 'sent')
+
+  const list = computed(() =>
+    isSent.value ? all.value : all.value.filter(item => !isBulkMail(item, bulkSenders.value)),
+  )
   /**
    * 识别成推广 / 广告的那部分：**不进**上面的收件箱清单 —— 收进清单底部分开的一段
-   *  （showBulk 控制那段折不折），展开也不与正常邮件混排
+   *  （showBulk 控制那段折不折），展开也不与正常邮件混排。发件箱里永远是空的。
    */
-  const bulkList = computed(() => all.value.filter(item => isBulkMail(item, bulkSenders.value)))
+  const bulkList = computed(() =>
+    isSent.value ? [] : all.value.filter(item => isBulkMail(item, bulkSenders.value)),
+  )
   const bulkCount = computed(() => bulkList.value.length)
+
+  /** 一封在某个文件夹里的身份键 —— uid 只在单个文件夹里唯一，三个字段缺一不可 */
+  function mailKey(folder: MailFolder, account: string, uid: number): string {
+    return `${folder}/${account}/${uid}`
+  }
 
   /**
    * 各账户并行各拉各的，合并成一份：每封打上来源账户，按头部日期新在前（不按来源
    * 分组 —— 看的就是一条时间线）；谁的失败只记谁的一句话，不挡别人。
-   * 并发调用共享在途的那次（见 listInFlight）。
+   * 并发调用共享在途的那次（见 listInFlight）；拉的过程中切了文件夹，这批结果
+   * 已经不是用户要看的那份了，丢掉不写进清单（切过去那次拉取会顶上）。
    */
   function refreshList(): Promise<void> {
     if (listInFlight)
@@ -116,22 +160,33 @@ export const useMailStore = defineStore('mail', () => {
       listErrors.value = []
       return Promise.resolve()
     }
+    const requested = folder.value
     listLoading.value = true
     listErrors.value = []
     listInFlight = (async () => {
       const results = await Promise.all(
-        accounts.value.map(async account => ({ account, result: await fetchMailList(account, MAIL_LIST_LIMIT) })),
+        accounts.value.map(async account => ({
+          account,
+          result: await fetchMailList(account, requested, MAIL_LIST_LIMIT),
+        })),
       )
+      if (requested !== folder.value)
+        return
       const merged: MailListItem[] = []
       const errors: string[] = []
       for (const { account, result } of results) {
         if (result.ok && result.data) {
           for (const summary of result.data) {
-            merged.push({ ...summary, account: account.address, key: `${account.address}/${summary.uid}` })
+            merged.push({
+              ...summary,
+              account: account.address,
+              folder: requested,
+              key: mailKey(requested, account.address, summary.uid),
+            })
           }
         }
         else {
-          errors.push(`「${account.address}」${result.error ?? '拉取收件箱失败'}`)
+          errors.push(`「${account.address}」${result.error ?? `拉取${folderLabel.value}失败`}`)
         }
       }
       merged.sort((a, b) => mailTime(b.date) - mailTime(a.date))
@@ -151,7 +206,7 @@ export const useMailStore = defineStore('mail', () => {
   const activeKey = ref<string | null>(null)
   const bodyLoading = ref(false)
   const bodyError = ref('')
-  /** 正文按 (账户, uid) 缓存：一封信拉一次，翻回来不再下载（内含整份报文，页面上限几十封没问题） */
+  /** 正文按 (文件夹, 账户, uid) 缓存：一封信拉一次，翻回来不再下载（内含整份报文，页面上限几十封没问题） */
   const bodies = new Map<string, MailMessage>()
 
   /** 正文下载期间又点的那封：等当前这封完事接着开（只记最后一封，连点时中间的都是路过） */
@@ -183,7 +238,8 @@ export const useMailStore = defineStore('mail', () => {
       return
     bodyLoading.value = true
     bodyError.value = ''
-    const raw = await fetchMailBody(account, item.uid, true)
+    // 已读标记只对收件箱发：发件箱里的信本来就是读过的，别白写一趟服务器
+    const raw = await fetchMailBody(account, item.folder, item.uid, item.folder === 'inbox')
     if (!raw.ok || !raw.data) {
       bodyLoading.value = false
       bodyError.value = raw.error ?? '读取邮件失败'
@@ -194,11 +250,14 @@ export const useMailStore = defineStore('mail', () => {
       const fromAddress = parsed.from?.address || senderAddress(item.from)
       const message: MailMessage = {
         account: item.account,
+        folder: item.folder,
         key: item.key,
         uid: item.uid,
         subject: parsed.subject?.trim() || '(无主题)',
         fromText: parsed.from?.name || fromAddress || '(未知发件人)',
         fromAddress,
+        toText: displayRecipients(item.to),
+        toAddress: recipientAddress(item.to),
         dateText: displayDate(item.date),
         html: htmlBody(parsed),
         text: parsed.text,
@@ -208,10 +267,12 @@ export const useMailStore = defineStore('mail', () => {
       // 下载期间用户又点了别的：这封只进缓存不换内容，高亮与内容保持同一封
       if (activeKey.value === item.key)
         active.value = message
-      // 打开即已读（Rust 侧 markSeen），列表上的点就地跟上
-      const summary = all.value.find(entry => entry.key === item.key)
-      if (summary && !summary.seen)
-        summary.seen = true
+      // 打开即已读（收件箱那边 Rust 顺手标了 \Seen），列表上的点就地跟上
+      if (item.folder === 'inbox') {
+        const summary = all.value.find(entry => entry.key === item.key)
+        if (summary && !summary.seen)
+          summary.seen = true
+      }
     }
     catch (error) {
       bodyError.value = error instanceof Error ? error.message : '邮件解析失败'
@@ -225,13 +286,16 @@ export const useMailStore = defineStore('mail', () => {
   }
 
   /** 标记 / 取消已读。列表先就地改，服务器那边失败了再说（返回 Result 给调用方提示）。 */
-  async function markSeen(account: string, uid: number, seen: boolean): Promise<Result<null>> {
-    const config = accountOf(account)
+  async function markSeen(
+    target: { folder: MailFolder, account: string, uid: number },
+    seen: boolean,
+  ): Promise<Result<null>> {
+    const config = accountOf(target.account)
     if (!config)
-      return fail(`「${account}」的账户配置不在了`)
-    const result = await setMailSeen(config, uid, seen)
+      return fail(`「${target.account}」的账户配置不在了`)
+    const result = await setMailSeen(config, target.folder, target.uid, seen)
     if (result.ok) {
-      const item = all.value.find(entry => entry.account === account && entry.uid === uid)
+      const item = all.value.find(entry => entry.key === mailKey(target.folder, target.account, target.uid))
       if (item)
         item.seen = seen
     }
@@ -243,39 +307,43 @@ export const useMailStore = defineStore('mail', () => {
 
   /**
    * 删一批（右键的「删除邮件」传一封，清单上方勾选条的「删除」传勾选的那几封）：
-   * 按账户分组 —— 一个账户一条连接，把它的整批标 \Deleted 再 EXPUNGE（找不回来，
-   * 确认在视图层做过）。全程这些行处于「删除中」（变淡 + 转圈），删成的账户本地
+   * 按 (文件夹, 账户) 分组 —— 一个账户一条连接，把它的整批标 \Deleted 再 EXPUNGE
+   * （找不回来，确认在视图层做过；uid 只在单个文件夹里唯一，分组得带上文件夹）。
+   * 全程这些行处于「删除中」（变淡 + 转圈），删成的账户本地
    * 立刻跟上：清单摘掉、正文缓存扔掉、正在读的就地关掉 —— 不等下次刷新；
    * 某个账户失败只记它的一句话，其余账户照删。
    */
-  async function deleteMails(items: ReadonlyArray<{ account: string, uid: number }>): Promise<Result<null>> {
-    const pending = items.filter(item => !deletingKeys.value.includes(`${item.account}/${item.uid}`))
+  async function deleteMails(items: ReadonlyArray<{ folder: MailFolder, account: string, uid: number }>): Promise<Result<null>> {
+    const keyOf = (item: { folder: MailFolder, account: string, uid: number }): string =>
+      mailKey(item.folder, item.account, item.uid)
+    const pending = items.filter(item => !deletingKeys.value.includes(keyOf(item)))
     if (pending.length === 0)
       return ok(null)
-    const keys = pending.map(item => `${item.account}/${item.uid}`)
+    const keys = pending.map(keyOf)
     deletingKeys.value = [...deletingKeys.value, ...keys]
 
-    const byAccount = new Map<string, number[]>()
+    const groups = new Map<string, { folder: MailFolder, account: string, uids: number[] }>()
     for (const item of pending) {
-      const uids = byAccount.get(item.account) ?? []
-      uids.push(item.uid)
-      byAccount.set(item.account, uids)
+      const groupKey = `${item.folder}/${item.account}`
+      const group = groups.get(groupKey) ?? { folder: item.folder, account: item.account, uids: [] }
+      group.uids.push(item.uid)
+      groups.set(groupKey, group)
     }
     const failures: string[] = []
     const done = new Set<string>()
     await Promise.all(
-      [...byAccount].map(async ([account, uids]) => {
-        const config = accountOf(account)
+      [...groups.values()].map(async (group) => {
+        const config = accountOf(group.account)
         if (!config) {
-          failures.push(`「${account}」的账户配置不在了，删不了`)
+          failures.push(`「${group.account}」的账户配置不在了，删不了`)
           return
         }
-        const result = await deleteMailsOnServer(config, uids)
+        const result = await deleteMailsOnServer(config, group.folder, group.uids)
         if (result.ok) {
-          for (const uid of uids) done.add(`${account}/${uid}`)
+          for (const uid of group.uids) done.add(mailKey(group.folder, group.account, uid))
         }
         else {
-          failures.push(`「${account}」${result.error ?? '删除失败'}`)
+          failures.push(`「${group.account}」${result.error ?? '删除失败'}`)
         }
       }),
     )
@@ -348,7 +416,13 @@ export const useMailStore = defineStore('mail', () => {
         text: input.text,
         attachments: input.attachments,
       })
-      return await sendMail(account, input.to, mime)
+      const result = await sendMail(account, input.to, mime)
+      // 发件箱正开着就顺手重拉一次 —— 服务器自己会把刚发的这封存进已发送
+      // （应用不补 APPEND，补了会出两封，见 docs/modules/mail.md）。
+      // 收件箱那边不打断：切到已发送时 setFolder 本来就会重拉。
+      if (result.ok && isSent.value)
+        void refreshList()
+      return result
     }
     catch (error) {
       return fail(error instanceof Error ? error.message : '报文构建失败')
@@ -410,8 +484,10 @@ export const useMailStore = defineStore('mail', () => {
     window.workbench?.onMailNotifyClick(({ account, uid }) => {
       const nav = useNavStore()
       void nav.setActiveView('mail').then(async () => {
+        // 通知说的永远是收件箱里的事：用户正看着发件箱也先切回收件箱（切了会自己重拉）
+        setFolder('inbox')
         await refreshList()
-        const item = all.value.find(entry => entry.account === account && entry.uid === uid)
+        const item = all.value.find(entry => entry.key === mailKey('inbox', account, uid))
         if (item)
           void openMail(item)
       })
@@ -426,6 +502,9 @@ export const useMailStore = defineStore('mail', () => {
   return {
     accounts,
     configured,
+    folder,
+    folderLabel,
+    setFolder,
     list,
     bulkList,
     bulkSenders,

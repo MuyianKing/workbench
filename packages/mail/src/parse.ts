@@ -143,6 +143,47 @@ export function senderAddress(raw: string): string {
   return (angled ? angled[1] : raw).trim()
 }
 
+/**
+ * 地址头部（To / Cc）拆成逐个条目：逗号分隔，但引号串与 `<>` 里的逗号不算分隔符
+ * （`"Doe, John" <j@d.com>` 是一个收件人）。拆不动的（组地址）原样留一条。
+ */
+function splitAddressList(raw: string): string[] {
+  const parts: string[] = []
+  let current = ''
+  let quoted = false
+  let angled = false
+  for (const char of raw) {
+    if (char === '"') {
+      quoted = !quoted
+    }
+    else if (char === '<') {
+      angled = true
+    }
+    else if (char === '>') {
+      angled = false
+    }
+    else if (char === ',' && !quoted && !angled) {
+      parts.push(current)
+      current = ''
+      continue
+    }
+    current += char
+  }
+  parts.push(current)
+  return parts.map(part => part.trim()).filter(Boolean)
+}
+
+/** 收件人头部 → 展示串：逐个取展示名（没名字给地址），顿号连接。发件箱的清单行用它。 */
+export function displayRecipients(raw: string): string {
+  return splitAddressList(raw).map(entry => displaySender(entry)).join('、')
+}
+
+/** 收件人头部 → 第一个收件人地址（发件箱里回信要发给谁）。没有收件人给空串。 */
+export function recipientAddress(raw: string): string {
+  const first = splitAddressList(raw)[0]
+  return first ? senderAddress(first) : ''
+}
+
 function decodeName(raw: string): string {
   const text = raw.trim().replace(/^"|"$/g, '').trim()
   if (!text)

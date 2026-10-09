@@ -2,11 +2,13 @@
 import type { Component } from 'vue'
 import { CircleCheck, Delete, Finished, Flag, Hide, View } from '@element-plus/icons-vue'
 /**
- * 收件箱清单行的右键菜单：标记广告 / 翻已读 / 多选删除 / 删信。
+ * 邮件清单行的右键菜单：标记广告 / 翻已读 / 多选删除 / 删信。
  *
  * **标记为广告**是广告过滤的主入口：发件人地址进黑名单（设置里的 mailBulkSenders），
  * 这个发件人过去与将来的信在清单里都算广告 —— 自动启发式只兜显然的那种，
  * 什么算广告最终由主人说了算。对着黑名单里的发件人再右击，这一项变成「取消广告标记」。
+ * **发件箱里（`sent`）前两项不画**：那儿的发件人是自己（标自己为广告说不过去），
+ * 自己发出去的信也没有已读未读这回事，剩下的就是勾选与删除。
  *
  * **多选删除**跟着勾选态变：还没勾选时它是个入口 —— 把右击的这封勾进批次（行首
  * 复选框随之亮起，勾选条出现）；已勾选时它变成「删除所选 N 封」，直接确认删掉整批。
@@ -31,6 +33,8 @@ const props = defineProps<{
   seen: boolean
   /** 此刻勾了几封（0 = 还没勾）：决定「多选删除」是入口还是直接删这批 */
   pickedCount: number
+  /** 发件箱里的一行：广告与已读两项不画 */
+  sent: boolean
 }>()
 
 const emit = defineEmits<{
@@ -40,32 +44,51 @@ const emit = defineEmits<{
   close: []
 }>()
 
-/** 菜单项：图标与文案跟着状态走；危险项前画分隔线（相邻两个危险项只画一道） */
-const items = computed(() => [
-  {
-    name: 'bulk' as const,
-    label: props.bulk ? '取消广告标记' : '标记为广告',
-    icon: props.bulk ? CircleCheck : Flag,
-    danger: false,
-    sep: false,
-  },
-  {
-    name: 'toggle-seen' as const,
-    label: props.seen ? '标记为未读' : '标记为已读',
-    icon: props.seen ? Hide : View,
-    danger: false,
-    sep: false,
-  },
+/** 一个菜单项：图标与文案跟着状态走；危险项前画分隔线（相邻两个危险项只画一道） */
+interface MenuItem {
+  name: 'bulk' | 'toggle-seen' | 'multi-pick' | 'multi-delete' | 'delete'
+  label: string
+  icon: Component
+  danger: boolean
+  sep: boolean
+}
+
+/** 菜单项：发件箱里只剩勾选与删除，所以那条分隔线只在收件箱画（免得开头多一道线） */
+const items = computed<MenuItem[]>(() => [
+  ...(props.sent
+    ? []
+    : [
+        {
+          name: 'bulk' as const,
+          label: props.bulk ? '取消广告标记' : '标记为广告',
+          icon: props.bulk ? CircleCheck : Flag,
+          danger: false,
+          sep: false,
+        },
+        {
+          name: 'toggle-seen' as const,
+          label: props.seen ? '标记为未读' : '标记为已读',
+          icon: props.seen ? Hide : View,
+          danger: false,
+          sep: false,
+        },
+      ]),
   props.pickedCount > 0
     ? {
         name: 'multi-delete' as const,
         label: `删除所选 ${props.pickedCount} 封`,
         icon: Delete as Component,
         danger: true,
-        sep: true,
+        sep: !props.sent,
       }
-    : { name: 'multi-pick' as const, label: '多选删除', icon: Finished as Component, danger: false, sep: true },
-  { name: 'delete' as const, label: '删除邮件', icon: Delete as Component, danger: true, sep: props.pickedCount === 0 },
+    : { name: 'multi-pick' as const, label: '多选删除', icon: Finished as Component, danger: false, sep: !props.sent },
+  {
+    name: 'delete' as const,
+    label: '删除邮件',
+    icon: Delete as Component,
+    danger: true,
+    sep: !props.sent && props.pickedCount === 0,
+  },
 ])
 
 const panel = ref<HTMLDivElement | null>(null)

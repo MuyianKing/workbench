@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tauri::{AppHandle, Emitter, Manager};
 
-use crate::mail::{self, MailSummary};
+use crate::mail::{self, Folder, MailSummary};
 use crate::fs_util;
 use crate::{notify, paths};
 
@@ -224,6 +224,7 @@ fn tick(app: &AppHandle) {
 }
 
 /// 查一个账户：现连现断拉一次最近摘要，比出「基准之后到达且未读」的那部分。
+/// 只看收件箱 —— 新邮件提醒跟「我发出去的信」没关系。
 fn check_account(
     account: &WatchAccount,
     known: Option<AccountMark>,
@@ -233,6 +234,7 @@ fn check_account(
         &account.address,
         &account.imap_host,
         account.imap_port,
+        Folder::Inbox,
         WINDOW,
     )?;
     Ok(pick_new(&summaries, known, info.uidvalidity, bulk))
@@ -340,6 +342,7 @@ mod tests {
             uid,
             subject: "主题".into(),
             from: from.into(),
+            to: "me@163.com".into(),
             date: String::new(),
             seen,
             has_attachment: false,

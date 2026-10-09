@@ -21,6 +21,8 @@
   },
   "bundle": {
     "active": true,
+    "publisher": "muyian",
+    "copyright": "Copyright (c) 2026 muyian",
     "targets": ["nsis"],
     "icon": ["icon.ico"],
     "resources": {

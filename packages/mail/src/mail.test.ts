@@ -4,7 +4,7 @@ import { bytesToBase64 } from './base64'
 import { isBulkMail, sanitizeMailBulkSenders } from './bulk'
 import { MAIL_ACCOUNTS_MAX, MAIL_POLL_DEFAULT, MAIL_POLL_MAX, MAIL_POLL_MIN, mailAccountReady, presetForAddress, sanitizeMailAccount, sanitizeMailAccounts, sanitizeMailAddress, sanitizeMailHost, sanitizeMailPollMinutes, sanitizeMailPort } from './mail'
 import { buildMime } from './mime'
-import { accountTag, displayDate, displaySender, htmlBody, mailTime, parseMessage, senderAddress } from './parse'
+import { accountTag, displayDate, displayRecipients, displaySender, htmlBody, mailTime, parseMessage, recipientAddress, senderAddress } from './parse'
 import { decodeEncodedWords, encodeRfc2047Word } from './rfc2047'
 
 describe('账户配置收敛', () => {
@@ -298,6 +298,20 @@ describe('展示层的拆解', () => {
     expect(displaySender('bob@example.com')).toBe('bob@example.com')
     expect(senderAddress('Alice <alice@example.com>')).toBe('alice@example.com')
     expect(senderAddress('bob@example.com')).toBe('bob@example.com')
+  })
+
+  it('收件人列表：逐个展示名顿号连接，引号里的逗号不当分隔符', () => {
+    expect(displayRecipients('Alice <alice@example.com>, 李四 <lisi@qq.com>')).toBe('Alice、李四')
+    expect(displayRecipients('"Doe, John" <john@example.com>, a@b.com')).toBe('Doe, John、a@b.com')
+    expect(displayRecipients('bob@example.com')).toBe('bob@example.com')
+    expect(displayRecipients('')).toBe('')
+    expect(displayRecipients(', ,')).toBe('')
+  })
+
+  it('收件人地址取第一个（发件箱里回信的落点）', () => {
+    expect(recipientAddress('Alice <alice@example.com>, b@c.com')).toBe('alice@example.com')
+    expect(recipientAddress('a@b.com')).toBe('a@b.com')
+    expect(recipientAddress('')).toBe('')
   })
 
   it('日期解析成短串，解析不动原样给', () => {

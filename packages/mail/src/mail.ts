@@ -16,6 +16,14 @@ export interface MailAccount {
   smtpPort: number
 }
 
+/**
+ * 邮箱页能看的两个文件夹。**服务器上的文件夹名不在这里** —— 网易把「已发送」报成
+ * modified UTF-7 的 `&XfJT0ZAB-`、腾讯报成 `Sent Messages`，认名字是 Rust 侧的活
+ * （mail.rs 的 `pick_sent_mailbox`：先认 `\Sent` 特殊用途属性，再按候选名比）。
+ * 渲染层只说这两个逻辑名，uid 只在单个文件夹里唯一，所以到处都得带上它。
+ */
+export type MailFolder = 'inbox' | 'sent'
+
 export const MAIL_ADDRESS_MAX = 80
 export const MAIL_HOST_MAX = 100
 /** 账户清单的上限：个人邮箱攒不到这个数，只防手改数据文件塞进一大坨 */

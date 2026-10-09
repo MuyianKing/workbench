@@ -273,7 +273,9 @@ apps/desktop/scripts/    make-icons.mjs（程序化生成应用图标与托盘�
                          sync-vditor-assets.mjs（Vditor 静态资源随包 —— 注解见
                          modules/notes.md）
 .github/workflows/       release.yml（打 vX.Y.Z 的 tag → 过闸 typecheck + 测试 → 打 Windows x64 的
-                         NSIS 包 → 建 Release 并挂上安装包；版本字段与 CHANGELOG 对不上就停）
+                         NSIS 包 → 建 Release 并挂上安装包；版本字段与 CHANGELOG 对不上就停；
+                         配了 SignPath 那几项就把安装包送签、发签名后的包，没配则照旧发未签名的包 ——
+                         配置清单与申请步骤见该文件头部注释）
 scripts/                 bump-version.mjs（发版前把版本写进那几处、把 CHANGELOG 的「未发布」升成
                          正式版本节；--check 只对账、--notes 抽 Release 正文，流水线里跑的就是它）
 CHANGELOG.md             一个版本一节（新特性 / 修复 / 调整），Release 的正文取的就是这一节
@@ -323,6 +325,15 @@ pnpm run dist         # 产出 NSIS 安装包
   （配置在 [`apps/desktop/.cargo/config.toml`](../apps/desktop/.cargo/config.toml)）。**打包前先停掉 `pnpm run dev`**：
   两者会抢 `target/` 的构建锁并互相拖慢。取舍、实测数据与更多坑见
   [`dev-notes/build-performance.md`](dev-notes/build-performance.md)。
+- 可执行文件的版本资源：`CompanyName` 取 `bundle.publisher`，**没配时回退到 `identifier` 的第二段**
+  （`com.muyian.workbench` → `muyian`，所以曾经也是对的）；`LegalCopyright` **只在配了
+  `bundle.copyright` 时才写**，不配就是空的（`tauri-build` 那句在 `if let Some` 里）。两个都显式配在
+  `tauri.conf.json` 里，不再依赖回退 —— 否则哪天改了 identifier，`CompanyName` 会静默跟着变。
+  **NSIS 安装包那颗 exe 没有 `CompanyName`**：Tauri 的 NSIS 模板只写 ProductName / FileDescription /
+  LegalCopyright / FileVersion / ProductVersion。安装包在「应用和功能」里的发布者走 `${MANUFACTURER}`
+  （同一个 publisher 值，本来就对），不受此影响；要给安装包也补上 `CompanyName` 得自备
+  `bundle.windows.nsis.template`，代价是那份模板要一直跟着 Tauri 升级，暂时不做。
+  仓库根是 MIT（`LICENSE`，2026 muyian）。
 
 安装包为单用户、可选安装目录，卸载时保留 `workbench-data.json`，不会连带删掉项目列表。
 
@@ -379,7 +390,8 @@ pnpm run dist         # 产出 NSIS 安装包
 - **邮箱**（可选、默认关闭；第十条出口）：邮箱账户**可同时配多个**（163 / 126 / QQ 的收发服务器跟着
   地址后缀自动带出，自定义域自己填），每个账户填了地址、授权码进了凭据管理器，才会连
   **它配置的**收发服务器（IMAP 收信 993、SMTP 发信 465，隐式 TLS；主机不设白名单 —— 与「装技能」
-  同类，地址由你给）。收件箱合并成一条按时间排的清单，行上标注来源账户。授权码存 Windows 凭据管理器
+  同类，地址由你给）。**收件箱与已发送**各合并成一条按时间排的清单（服务器上的文件夹名由应用
+  现认，网易 / 腾讯各是一种写法），行上标注来源账户。授权码存 Windows 凭据管理器
   （DPAPI 按用户加密，按地址一条），不落明文、不回渲染层；
   连接参数进设置（明文 JSON，但那几项不是秘密）。**邮件 HTML 正文的外链图片跟着信里的地址
   加载**（营销信的主视觉能直接看到；请求不带 Referer），脚本 / 字体 / 音视频等其余外链

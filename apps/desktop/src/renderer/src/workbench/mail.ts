@@ -9,7 +9,7 @@
  * 这一层只做「invoke → Result」的收敛，MIME 解析（postal-mime）与发信报文构建
  * （buildMime）在 @workbench/mail 包（有单测），策略（缓存、拉多少封）在 stores/mail.ts。
  */
-import type { MailAccount } from '@workbench/mail'
+import type { MailAccount, MailFolder } from '@workbench/mail'
 import type { Result } from '@/types'
 import { fail, ok } from '@workbench/core'
 import { errorText, guard, invoke } from './bridge'
@@ -19,6 +19,8 @@ export interface MailSummary {
   uid: number
   subject: string
   from: string
+  /** 收件人头部原文：收件箱的清单行不画它，发件箱画收件人、回信也发给它 */
+  to: string
   date: string
   seen: boolean
   hasAttachment: boolean
@@ -54,26 +56,31 @@ export async function clearMailKey(address: string): Promise<Result<null>> {
   return guard(invoke<null>('mail_key_clear', { address }), '清除授权码失败')
 }
 
-/** 收件箱最近 N 封的摘要。 */
-export async function fetchMailList(account: MailAccount, limit: number): Promise<Result<MailSummary[]>> {
+/**
+ * 一个文件夹里最近 N 封的摘要。folder 是逻辑名（inbox / sent）—— 服务器上的文件夹名
+ * （网易是 modified UTF-7 的 `&XfJT0ZAB-`、腾讯是 `Sent Messages`）由 Rust 侧现认。
+ */
+export async function fetchMailList(account: MailAccount, folder: MailFolder, limit: number): Promise<Result<MailSummary[]>> {
   return guard(
     invoke<MailSummary[]>('mail_list', {
       address: account.address,
       imapHost: account.imapHost,
       imapPort: account.imapPort,
+      folder,
       limit,
     }),
-    '拉取收件箱失败',
+    '拉取邮件列表失败',
   )
 }
 
 /** 拉一封完整报文（base64），MIME 解析在 store 里交给 @workbench/mail。 */
-export async function fetchMailBody(account: MailAccount, uid: number, markSeen: boolean): Promise<Result<string>> {
+export async function fetchMailBody(account: MailAccount, folder: MailFolder, uid: number, markSeen: boolean): Promise<Result<string>> {
   return guard(
     invoke<string>('mail_fetch_body', {
       address: account.address,
       imapHost: account.imapHost,
       imapPort: account.imapPort,
+      folder,
       uid,
       markSeen,
     }),
@@ -82,12 +89,13 @@ export async function fetchMailBody(account: MailAccount, uid: number, markSeen:
 }
 
 /** 标记 / 取消一封的已读。 */
-export async function setMailSeen(account: MailAccount, uid: number, seen: boolean): Promise<Result<null>> {
+export async function setMailSeen(account: MailAccount, folder: MailFolder, uid: number, seen: boolean): Promise<Result<null>> {
   return guard(
     invoke<null>('mail_set_seen', {
       address: account.address,
       imapHost: account.imapHost,
       imapPort: account.imapPort,
+      folder,
       uid,
       seen,
     }),
@@ -96,12 +104,13 @@ export async function setMailSeen(account: MailAccount, uid: number, seen: boole
 }
 
 /** 删一批（服务器上标 \Deleted 并 EXPUNGE —— 不可找回，调用方先确认过）；单封传一个元素的数组。 */
-export async function deleteMails(account: MailAccount, uids: number[]): Promise<Result<null>> {
+export async function deleteMails(account: MailAccount, folder: MailFolder, uids: number[]): Promise<Result<null>> {
   return guard(
     invoke<null>('mail_delete', {
       address: account.address,
       imapHost: account.imapHost,
       imapPort: account.imapPort,
+      folder,
       uids,
     }),
     '删除失败',
