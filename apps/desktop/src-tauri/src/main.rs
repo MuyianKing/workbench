@@ -53,10 +53,12 @@ fn main_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
 }
 
 /// 唤出主窗口。托盘 / 全局快捷键走它，邮件通知被点击时也一样（mail_watch.rs）。
+///
+/// 任务栏按钮交给系统随 hide / show 自动摘装，不要手动 set_skip_taskbar：
+/// 它走 ITaskbarList 的 DeleteTab / AddTab，AddTab 出来的按钮系统盯不住前台状态，
+/// 点它会走「已激活 → 最小化」的切换，把压在别的程序后面的窗口收起来而不是调到前面。
 pub(crate) fn show_main_window(app: &AppHandle) {
     if let Some(window) = main_window(app) {
-        // 隐藏期间任务栏按钮被摘掉了，重新显示时先装回来
-        let _ = window.set_skip_taskbar(false);
         let _ = window.show();
         let _ = window.unminimize();
         let _ = window.set_focus();
@@ -66,7 +68,6 @@ pub(crate) fn show_main_window(app: &AppHandle) {
 fn hide_main_window(app: &AppHandle) {
     if let Some(window) = main_window(app) {
         let _ = window.hide();
-        let _ = window.set_skip_taskbar(true);
     }
 }
 
@@ -124,7 +125,6 @@ fn attach_window_events(window: &tauri::WebviewWindow) {
         tauri::WindowEvent::CloseRequested { api, .. } => {
             api.prevent_close();
             let _ = handle.hide();
-            let _ = handle.set_skip_taskbar(true);
         }
         // 最大化状态从窗口事件推，不由按钮自己记：拖边缘、双击标题栏、
         // 系统快捷键都能最大化，按钮只管画。

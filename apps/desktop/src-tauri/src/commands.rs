@@ -545,11 +545,11 @@ pub fn window_toggle_maximize(window: WebviewWindow) -> bool {
     !maximized
 }
 
-/// 关闭按钮 = 收进托盘（与 Electron 版一致），退出只能从托盘菜单走
+/// 关闭按钮 = 收进托盘（与 Electron 版一致），退出只能从托盘菜单走。
+/// 只 hide：任务栏按钮由系统随隐藏自动摘掉，不要 set_skip_taskbar（理由见 main.rs 的 show_main_window）。
 #[tauri::command]
 pub fn window_close(window: WebviewWindow) {
     let _ = window.hide();
-    let _ = window.set_skip_taskbar(true);
 }
 
 #[tauri::command]
