@@ -19,12 +19,13 @@ import { addCounters, emptyCounters, isDateKey } from './token-usage'
 /** 会话里没声明模型时的兜底名 */
 export const DSH_DEFAULT_MODEL = 'deepseek'
 
-/** assistant/message 事件里的用量；字段缺失或非法都按 0 计 */
+/** assistant/message 事件里的用量；字段缺失或非法都按 0 计（cacheWriteTokens 只有 v4 会话才带） */
 interface DshUsage {
   inputTokens?: unknown
   outputTokens?: unknown
   reasoningTokens?: unknown
   cacheReadTokens?: unknown
+  cacheWriteTokens?: unknown
 }
 
 /** 事件里用得上的那几层；其余字段不解析 */
@@ -83,8 +84,8 @@ export function collectDshSessionText(text: string, days: TokenDays): void {
       outputTokens: finite(usage.outputTokens),
       reasoningTokens: finite(usage.reasoningTokens),
       cacheReadTokens: finite(usage.cacheReadTokens),
-      cacheWriteTokens: 0,
-      // DSH 的 usage 里只有 token 计数，没有额度这一项
+      cacheWriteTokens: finite(usage.cacheWriteTokens),
+      // DSH 的 usage 里没有额度这一项
       credits: 0,
       requests: 1,
     }

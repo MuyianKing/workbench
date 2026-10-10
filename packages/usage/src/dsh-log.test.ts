@@ -52,9 +52,21 @@ describe('dSH 会话解析', () => {
     expect(counters.cacheReadTokens).toBe(29696)
     expect(counters.outputTokens).toBe(892)
     expect(counters.reasoningTokens).toBe(0)
-    // 缓存写入 DSH 的 usage 里没有这一项，恒为 0
+    // v3 会话的 usage 里没有缓存写入这一项，按 0 计
     expect(counters.cacheWriteTokens).toBe(0)
     expect(counters.requests).toBe(1)
+  })
+
+  it('v4 会话的 usage 多带 cacheWriteTokens，照实落账', () => {
+    // v4（桌面端）的 usage 形状：字段比 v3 多一个 cacheWriteTokens
+    const days = collect(
+      headerLine(TIME, 'deepseek-flash'),
+      messageLine(TIME, { inputTokens: 6935, outputTokens: 83, cacheReadTokens: 768, cacheWriteTokens: 12 }),
+    )
+
+    const counters = days[dayKey(TIME)]['deepseek-flash']
+    expect(counters.inputTokens).toBe(6935)
+    expect(counters.cacheWriteTokens).toBe(12)
   })
 
   it('同一个会话里多条 assistant 消息累计，请求数逐条相加', () => {

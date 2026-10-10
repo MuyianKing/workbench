@@ -151,7 +151,9 @@
 - **打开程序先出上次的数据**：先读本地快照（几毫秒）摆出来、再实读覆盖 —— 冷读一轮要一秒上下，
   没这一步那段空窗只能显示「暂无记录」，有数据的人会以为记录丢了。
 - 五个来源都只读、只取用量数字，日志与会话正文不进快照：ZCode 读本地 sqlite；DeepSeek Harness 读
-  `~/.dsh/sessions` 的多帧 zstd 会话（Rust 逐帧解压后渲染层解析）；CodeBuddy 解析 IDE 扩展日志里的
+  `~/.dsh/sessions` 的多帧 zstd 会话（Rust 逐帧解压后渲染层解析；会话目录里 v4 / v3 / 旧版文件可能并存，
+  **只读版本最高的那一个** —— 桌面端升级后新会话只写 v4、老会话整卷迁到 v4，读错版本用量就停在那天）；
+  CodeBuddy 解析 IDE 扩展日志里的
   usage 记录（模型从请求链路反推）；WorkBuddy 读 `~/.workbuddy/projects` 的会话正文（用量写在行里，
   带模型名）；Qoder 读 `~/.qoder-cn/projects`（国际版 `~/.qoder`），取 `usage.credits`。
   **Qoder 只有额度没有 token**（它不产生计数，面板是回头问服务端的），只出现在 credits 口径下。

@@ -316,8 +316,9 @@ fn modified_ms(meta: &std::fs::Metadata) -> u64 {
 // 同样只做「列文件」：会话文件是多帧 zstd（浏览器没有 zstd 解码 API，所以解压在 Rust，
 // 走 `token_zstd_decode`），解出来的每一行是一个 JSON 事件，语义解析在 shared/dsh-log.ts。
 
-/// 会话文件名：v3 与旧版两种。**同一会话目录可能两者都在**（实测本机 25 个里有 4 个），
-/// 只读其中一个 —— 两个都读会把那次会话的用量算两遍，而且不会有任何报错。
+/// 会话文件名：v4、v3 与旧版三种。桌面端升级后新会话只写 v4、老会话整卷迁到 v4（v3 变成冻结副本），
+/// **同一会话目录可能多种并存**，只读版本最高的那个 —— 两个都读会把那次会话的用量算两遍，而且不会有任何报错。
+const DSH_SESSION_FILE_V4: &str = "session.v4.jsonl.zstd";
 const DSH_SESSION_FILE: &str = "session.v3.jsonl.zstd";
 const DSH_LEGACY_SESSION_FILE: &str = "session.jsonl.zstd";
 
@@ -372,8 +373,13 @@ fn dsh_sessions_in(root: &std::path::Path) -> Result<Value, String> {
     Ok(json!({ "found": true, "root": root.to_string_lossy(), "sessions": sessions }))
 }
 
-/// 取这个会话该读哪个文件：v3 优先，没有才退回旧版（两者并存时**只能读一个**）
+/// 取这个会话该读哪个文件：v4 优先，没有才依次退回 v3、旧版（多个并存时**只能读一个**，
+/// v4 是含全部历史事件的全量迁移，读它一个就是完整口径）
 fn pick_session_file(session_dir: &std::path::Path) -> Option<PathBuf> {
+    let v4 = session_dir.join(DSH_SESSION_FILE_V4);
+    if v4.is_file() {
+        return Some(v4);
+    }
     let v3 = session_dir.join(DSH_SESSION_FILE);
     if v3.is_file() {
         return Some(v3);
@@ -616,19 +622,25 @@ mod tests {
         eprintln!("带缓存读取的事件: {with_cache} 个");
     }
 
-    /// 会话目录里 v3 与旧版并存时只取 v3：两个都读会把那次会话的用量算两遍
+    /// 会话目录里多版本并存时只取版本最高的那个：两个都读会把那次会话的用量算两遍
     #[test]
-    fn picks_the_v3_session_file_and_never_both() {
+    fn picks_the_newest_session_file_and_never_both() {
         let root = std::env::temp_dir().join(format!("wb-dsh-{}", uuid::Uuid::new_v4()));
 
         let both = root.join("--proj-a--").join("session-1");
         std::fs::create_dir_all(&both).unwrap();
+        std::fs::write(both.join(DSH_SESSION_FILE_V4), "v4").unwrap();
         std::fs::write(both.join(DSH_SESSION_FILE), "v3").unwrap();
         std::fs::write(both.join(DSH_LEGACY_SESSION_FILE), "legacy").unwrap();
 
         let legacy_only = root.join("--proj-b--").join("session-2");
         std::fs::create_dir_all(&legacy_only).unwrap();
         std::fs::write(legacy_only.join(DSH_LEGACY_SESSION_FILE), "legacy").unwrap();
+
+        // 只有 v3 的老会话照旧能读到
+        let v3_only = root.join("--proj-d--").join("session-4");
+        std::fs::create_dir_all(&v3_only).unwrap();
+        std::fs::write(v3_only.join(DSH_SESSION_FILE), "v3").unwrap();
 
         // 两个文件都没有的会话目录直接跳过
         std::fs::create_dir_all(root.join("--proj-c--").join("session-3")).unwrap();
@@ -637,7 +649,7 @@ mod tests {
         assert_eq!(value["found"], json!(true));
 
         let sessions = value["sessions"].as_array().unwrap();
-        assert_eq!(sessions.len(), 2, "只该有两个会话，且并存的那个只算一次");
+        assert_eq!(sessions.len(), 3, "只该有三个会话，且并存的那个只算一次");
 
         let mut paths: Vec<String> = sessions
             .iter()
@@ -645,8 +657,9 @@ mod tests {
             .collect();
         paths.sort();
 
-        assert!(paths[0].ends_with("session-1\\session.v3.jsonl.zstd") || paths[0].ends_with("session-1/session.v3.jsonl.zstd"));
+        assert!(paths[0].ends_with("session-1\\session.v4.jsonl.zstd") || paths[0].ends_with("session-1/session.v4.jsonl.zstd"));
         assert!(paths[1].ends_with("session-2\\session.jsonl.zstd") || paths[1].ends_with("session-2/session.jsonl.zstd"));
+        assert!(paths[2].ends_with("session-4\\session.v3.jsonl.zstd") || paths[2].ends_with("session-4/session.v3.jsonl.zstd"));
         assert!(sessions.iter().all(|item| item["size"].as_u64().unwrap() > 0));
 
         let _ = std::fs::remove_dir_all(&root);
