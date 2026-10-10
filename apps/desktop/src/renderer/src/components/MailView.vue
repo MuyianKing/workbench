@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import type { MailFolder } from '@workbench/mail'
+import type { MailFolder, ParsedAttachment } from '@workbench/mail'
 import type { MailListItem, MailReplyTarget } from '@/stores/mail'
-import { ArrowDown, EditPen, Message, Paperclip, Refresh, Setting } from '@element-plus/icons-vue'
-import { formatMailSize, senderAddress } from '@workbench/mail'
+import { ArrowDown, Download, EditPen, Message, Refresh, Setting } from '@element-plus/icons-vue'
+import { attachmentBadge, attachmentDataUrl, attachmentKind, formatMailSize, isImageAttachment, senderAddress } from '@workbench/mail'
 /**
  * 邮箱页：左栏邮件清单，右栏读信（与 AI / 笔记 / 视频页同一副左右分栏，
  * 左栏宽度住 theme.json 的 `mailListWidth`）。
@@ -17,12 +17,17 @@ import { formatMailSize, senderAddress } from '@workbench/mail'
  *  - **右栏**：没配置账户时是一颗「配置邮箱账户」；配置了就是阅读栏 ——
  *    头部是主题、发件人（发件箱里是收件人）、日期与「回复」，正文按信里的形态画：
  *    有 HTML 走 sandbox 的 iframe（外链图片照常显示、脚本照旧全禁，
- *    见 @workbench/mail 的 htmlBody），没有就按纯文本排版。附件逐个「另存为」。
+ *    见 @workbench/mail 的 htmlBody），没有就按纯文本排版。附件里**能在应用里打开的**
+ *    整片点开都是它自己那一种：图片进 EP 的查看器（多张之间左右切）、md / docx / pptx
+ *    进预览弹层（MailAttachmentDialog）；「另存为」一律走片子右端那颗图标按钮
+ *    （点它是存、不触发打开），应用里画不了的格式（pdf / 压缩包 / 老式 .doc 那些）
+ *    照旧整片点开就是另存为。
  *
  * 页面只做编排与状态呈现：拉列表、读信、标记、发送都在 stores/mail.ts。
  */
 import { computed, onActivated, onMounted, ref, watch } from 'vue'
 import MailAccountDialog from '@/components/MailAccountDialog.vue'
+import MailAttachmentDialog from '@/components/MailAttachmentDialog.vue'
 import MailComposer from '@/components/MailComposer.vue'
 import MailContextMenu from '@/components/MailContextMenu.vue'
 import MailListRow from '@/components/MailListRow.vue'
@@ -325,6 +330,62 @@ function attachmentSize(base64: string): string {
 }
 
 /**
+ * 附件片的标题：**能在应用里打开的**说清点开去哪儿，其余照旧说另存。
+ */
+function attachmentHint(file: ParsedAttachment): string {
+  const kind = attachmentKind(file)
+  const where = kind === 'file' ? '点开另存' : kind === 'image' ? '点开看大图' : '点开在应用里看'
+  return `${file.name}（${attachmentSize(file.base64)}），${where}`
+}
+
+/** 能在应用里打开的（图 / md / docx / pptx）：片子整片是一颗按钮，另存另给一颗图标按钮 */
+function openableAttachment(file: ParsedAttachment): boolean {
+  return attachmentKind(file) !== 'file'
+}
+
+/**
+ * 当前这封里所有图片附件的 data URL —— 就是查看器里左右切的那一串（顺序即附件顺序，
+ * 点哪张从哪张开始）。缩略图与原图都取它，不落盘、不经过文件系统。
+ */
+const imagePreviewList = computed(() =>
+  (mail.active?.attachments ?? []).filter(isImageAttachment).map(attachmentDataUrl),
+)
+
+/**
+ * 大图查看器：null = 关着。**整片附件都能点开它**（缩略图、名字、大小任意一处），
+ * 所以查看器由页面自己持一个（EP 的独立组件），不靠 el-image 自带的点击 ——
+ * 那样只有缩略图那一小块能触发。
+ */
+const viewer = ref<{ list: string[], index: number } | null>(null)
+
+function openImagePreview(file: ParsedAttachment): void {
+  const list = imagePreviewList.value
+  const index = list.indexOf(attachmentDataUrl(file))
+  if (index >= 0)
+    viewer.value = { list, index }
+}
+
+/** 预览弹层（md / docx / pptx）：关掉动画走完才把 file 清掉，见下面对 dialog 的用法 */
+const previewOpen = ref(false)
+const previewFile = ref<ParsedAttachment | null>(null)
+
+function openAttachment(file: ParsedAttachment): void {
+  if (attachmentKind(file) === 'image') {
+    openImagePreview(file)
+    return
+  }
+  previewFile.value = file
+  previewOpen.value = true
+}
+
+/** 弹层里的「另存为」：与片子上那颗图标按钮同一条链路 */
+function savePreviewed(): void {
+  const file = previewFile.value
+  if (file)
+    void downloadAttachment(file.name, file.base64)
+}
+
+/**
  * 两栏的宽度：左栏是主题里存的那个值（与笔记 / 视频 / AI 页同一套做法）。
  * 列宽用 auto —— 宽度长在左栏自己身上，grid 这一行跟着缩。
  */
@@ -535,20 +596,51 @@ const bodyStyle = computed(() => ({
             </el-button>
           </div>
           <div v-if="mail.active.attachments.length" class="mail-head__files">
-            <button
-              v-for="file in mail.active.attachments"
-              :key="file.contentId || file.name"
-              class="mail-file"
-              type="button"
-              :title="`${file.name}（${attachmentSize(file.base64)}），点开另存`"
-              @click="downloadAttachment(file.name, file.base64)"
-            >
-              <el-icon class="mail-file__icon">
-                <Paperclip />
-              </el-icon>
-              <span class="mail-file__name">{{ file.name }}</span>
-              <span class="mail-file__size">{{ attachmentSize(file.base64) }}</span>
-            </button>
+            <template v-for="(file, index) in mail.active.attachments" :key="`${index}-${file.name}`">
+              <!-- 能在应用里打开的附件（图 / md / docx / pptx）：**整片**点开 —— 片子是一颗
+                   内层按钮（左首的类型角标 / 缩略图 + 名字 + 大小都在它里面），打开方式按类型分：
+                   图进 EP 的查看器，md / docx / pptx 进预览弹层。右端那颗另存按钮留在片子
+                   外层（按钮不能套按钮），点它是「存」、不触发打开 -->
+              <span v-if="openableAttachment(file)" class="mail-file mail-file--open">
+                <button
+                  class="mail-file__open"
+                  type="button"
+                  :title="attachmentHint(file)"
+                  @click="openAttachment(file)"
+                >
+                  <el-image
+                    v-if="attachmentKind(file) === 'image'"
+                    class="mail-file__thumb"
+                    :src="attachmentDataUrl(file)"
+                    fit="cover"
+                  />
+                  <span v-else class="mail-file__badge">{{ attachmentBadge(file) }}</span>
+                  <span class="mail-file__name">{{ file.name }}</span>
+                  <span class="mail-file__size">{{ attachmentSize(file.base64) }}</span>
+                </button>
+                <el-tooltip content="另存为" placement="top">
+                  <el-button
+                    class="mail-file__save"
+                    text
+                    size="small"
+                    :icon="Download"
+                    :aria-label="`另存 ${file.name}`"
+                    @click="downloadAttachment(file.name, file.base64)"
+                  />
+                </el-tooltip>
+              </span>
+              <button
+                v-else
+                class="mail-file"
+                type="button"
+                :title="attachmentHint(file)"
+                @click="downloadAttachment(file.name, file.base64)"
+              >
+                <span class="mail-file__badge">{{ attachmentBadge(file) }}</span>
+                <span class="mail-file__name">{{ file.name }}</span>
+                <span class="mail-file__size">{{ attachmentSize(file.base64) }}</span>
+              </button>
+            </template>
           </div>
         </header>
 
@@ -570,7 +662,25 @@ const bodyStyle = computed(() => ({
       <div v-else class="mail-view__blank" />
     </section>
 
+    <!-- 图片附件的大图：整片附件点开它（多张之间左右切、滚轮缩放、Esc 或点外面关掉 ——
+         EP 的独立查看器）。teleported 是必须的：阅读栏自己有 overflow，不挪到 body 会被裁掉 -->
+    <el-image-viewer
+      v-if="viewer"
+      :url-list="viewer.list"
+      :initial-index="viewer.index"
+      :show-progress="viewer.list.length > 1"
+      hide-on-click-modal
+      teleported
+      @close="viewer = null"
+    />
+
     <!-- 弹层挂在最外层（换页不关弹层，见 AGENTS.md 第 4 节） -->
+    <MailAttachmentDialog
+      v-model="previewOpen"
+      :file="previewFile"
+      @save="savePreviewed"
+      @closed="previewFile = null"
+    />
     <MailAccountDialog v-model="accountVisible" @saved="mail.invalidate()" />
     <MailComposer v-model="composerVisible" :reply="replyTarget" />
     <MailContextMenu
@@ -637,7 +747,7 @@ const bodyStyle = computed(() => ({
   margin-top: var(--sp-2);
   padding: var(--sp-2);
   border: 1px solid var(--st-fail);
-  border-radius: var(--r-2);
+  border-radius: var(--r-md);
   color: var(--st-fail);
   font-size: var(--fs-meta);
 }
@@ -652,7 +762,7 @@ const bodyStyle = computed(() => ({
   margin-top: var(--sp-2);
   padding: 2px var(--sp-2);
   border: 1px solid var(--border);
-  border-radius: var(--r-2);
+  border-radius: var(--r-md);
 }
 
 .mail-list__pick-count {
@@ -715,7 +825,7 @@ const bodyStyle = computed(() => ({
   width: 100%;
   padding: var(--sp-1) var(--sp-2);
   border: 0;
-  border-radius: var(--r-2);
+  border-radius: var(--r-md);
   background: transparent;
   color: var(--ink-3);
   font: inherit;
@@ -967,35 +1077,101 @@ const bodyStyle = computed(() => ({
   flex: 1;
 }
 
-/** 附件行：一颗一颗像文件片，点开另存 */
+/** 附件行：一颗一颗像文件片。图片的片子首是个缩略图（点开看大图），其余点开另存 */
 .mail-head__files {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: var(--sp-2);
   margin-top: var(--sp-2);
 }
 
+/**
+ * 附件片：一颗一号大小的「纸片」。左首是这张片子的样子（图给缩略图、其余给类型角标），
+ * 中间是名字（主文字色，长了截断），末尾是大小（退一档的灰）—— 一行里读得出的主次就这三个。
+ * 悬停按项目里 chip 那套给一点底色与更实的边框，别只换个字色。
+ */
 .mail-file {
   display: inline-flex;
   align-items: center;
   gap: var(--sp-1);
-  max-width: 260px;
+  max-width: 300px;
   padding: 2px var(--sp-2);
   border: 1px solid var(--border);
-  border-radius: var(--r-2);
+  border-radius: var(--r-md);
   background: var(--bg-surface);
-  color: var(--ink-2);
+  color: var(--ink);
   font-size: var(--fs-meta);
   cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
 }
 
 .mail-file:hover {
-  border-color: var(--ink-3);
-  color: var(--ink);
+  border-color: var(--border-strong);
+  background: var(--bg-subtle);
 }
 
-.mail-file__icon {
+/** 类型角标（DOCX / MD / PPTX / PDF…）：定宽，几个片子的名字才对得齐 */
+.mail-file__badge {
   flex-shrink: 0;
+  min-width: 34px;
+  padding: 1px var(--sp-1);
+  border-radius: var(--r-sm);
+  background: var(--bg-inset);
+  color: var(--ink-2);
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-align: center;
+}
+
+/** 图片片子的缩略图：方正一小块，`fit="cover"` 已经让原图铺满这个框（点它开查看器） */
+.mail-file__thumb {
+  display: block;
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--r-sm);
+  overflow: hidden;
+  background: var(--bg-inset);
+}
+
+/**
+ * 能在应用里打开的片子是「一颗内层按钮 + 右端那颗另存图标」拼的：内边距长在内层按钮上，
+ * 所以整片（含角标左边那点留白）都在它的可点范围里 —— 片子本身只留边框与底色。
+ */
+.mail-file--open {
+  gap: 0;
+  padding: 0;
+}
+
+.mail-file__open {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  min-width: 0;
+  padding: 2px var(--sp-2);
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* 另存的那颗图标按钮：贴着片子右端，撑满片子高（那一小条也好点中），平常安静、悬停才亮起来。
+   `button.` 前缀是为了压过 EP 自己的内边距与逗号规则 */
+button.mail-file__save {
+  flex-shrink: 0;
+  align-self: stretch;
+  height: auto;
+  margin: 0;
+  padding: 0 var(--sp-2);
+  color: var(--ink-3);
+}
+
+button.mail-file__save:hover {
+  color: var(--ink);
 }
 
 .mail-file__name {
@@ -1016,7 +1192,7 @@ const bodyStyle = computed(() => ({
   margin-top: var(--sp-2);
   padding: var(--sp-2);
   border: 1px solid var(--st-fail);
-  border-radius: var(--r-2);
+  border-radius: var(--r-md);
   color: var(--st-fail);
   font-size: var(--fs-meta);
 }
@@ -1027,7 +1203,7 @@ const bodyStyle = computed(() => ({
   min-height: 0;
   margin-top: var(--sp-2);
   overflow: hidden;
-  border-radius: var(--r-2);
+  border-radius: var(--r-md);
 }
 
 /* ---------- 骨架屏（拉正文时的加载态） ---------- */
@@ -1043,7 +1219,7 @@ const bodyStyle = computed(() => ({
   min-height: 0;
   margin-top: var(--sp-2);
   padding: var(--sp-3);
-  border-radius: var(--r-2);
+  border-radius: var(--r-md);
   background: var(--bg-subtle);
   overflow: hidden;
   display: flex;
@@ -1131,7 +1307,6 @@ const bodyStyle = computed(() => ({
   width: 100%;
   height: 100%;
   border: 0;
-  background: #fff;
 }
 
 /* 纯文本邮件：等宽不用、按排版文本铺，留白按原文走 */
@@ -1140,8 +1315,7 @@ const bodyStyle = computed(() => ({
   margin: 0;
   padding: var(--sp-3);
   overflow-y: auto;
-  background: var(--bg-surface);
-  border-radius: var(--r-2);
+  border-radius: var(--r-md);
   color: var(--ink);
   font-family: inherit;
   font-size: var(--fs-body);

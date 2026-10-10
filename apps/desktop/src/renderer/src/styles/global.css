@@ -1134,6 +1134,23 @@ body.is-resizing-video-float * {
 }
 
 /**
+ * 邮件附件预览弹窗（components/MailAttachmentDialog.vue 上的 class，正文另挂 body-class）：
+ * 与技能详情弹窗同一条高度口径。正文收掉内边距与整窗滚动、竖排，滚的是组件里那块
+ * `.preview`（markdown 正文 / docx 页 / pptx 幻灯片都在它里面）。
+ */
+.el-dialog.mail-preview-dialog {
+  height: min(820px, calc(100vh - var(--h-titlebar) - 48px));
+}
+
+.el-dialog__body.mail-preview-dialog__body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+/**
  * 样式详情弹窗（components/StyleDetailDialog.vue 上的 class）：两档（预览 / 规格）都是竖向流水，
  * 要滚的就是正文本身（头部固定），所以这里只需要一个确定的高度 ——
  * 正文的高度由「弹窗定高 − 头」算出来，只给 max-height 的话正文拿不到滚动所需的高度，

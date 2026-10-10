@@ -1,10 +1,11 @@
-import { describe, expect, it } from 'vitest'
+import type { ParsedAttachment } from './parse'
 
+import { describe, expect, it } from 'vitest'
 import { bytesToBase64 } from './base64'
 import { isBulkMail, sanitizeMailBulkSenders } from './bulk'
 import { MAIL_ACCOUNTS_MAX, MAIL_POLL_DEFAULT, MAIL_POLL_MAX, MAIL_POLL_MIN, mailAccountReady, presetForAddress, sanitizeMailAccount, sanitizeMailAccounts, sanitizeMailAddress, sanitizeMailHost, sanitizeMailPollMinutes, sanitizeMailPort } from './mail'
 import { buildMime } from './mime'
-import { accountTag, displayDate, displayRecipients, displaySender, htmlBody, mailTime, parseMessage, recipientAddress, senderAddress } from './parse'
+import { accountTag, attachmentBadge, attachmentDataUrl, attachmentKind, attachmentText, displayDate, displayRecipients, displaySender, htmlBody, isImageAttachment, mailTime, parseMessage, preferExtendedFilenames, recipientAddress, senderAddress } from './parse'
 import { decodeEncodedWords, encodeRfc2047Word } from './rfc2047'
 
 describe('账户配置收敛', () => {
@@ -288,6 +289,152 @@ describe('收信侧解析', () => {
     expect(html).toContain('<a href="https://www.jd.com" target="_top">')
     expect(html).toContain('<a href=\'https://mail.example.com\' target="_top">')
     expect(html).not.toContain('_blank')
+  })
+})
+
+describe('附件：图片判定与预览地址', () => {
+  const part = (contentType: string): ParsedAttachment => ({ name: 'x', contentType, contentId: '', base64: 'AAA' })
+
+  it('按 contentType 的 image/ 前缀判图（大小写不敏感）', () => {
+    expect(isImageAttachment(part('image/jpeg'))).toBe(true)
+    expect(isImageAttachment(part('IMAGE/PNG'))).toBe(true)
+    expect(isImageAttachment(part('application/pdf'))).toBe(false)
+    // 信里没写类型的给的就是这个 —— 当普通文件，不往 <img> 里塞二进制
+    expect(isImageAttachment(part('application/octet-stream'))).toBe(false)
+  })
+
+  it('预览地址是手里的 base64 拼出的 data URL，不落盘', () => {
+    expect(attachmentDataUrl(part('image/png'))).toBe('data:image/png;base64,AAA')
+  })
+})
+
+describe('附件在应用里怎么打开', () => {
+  const part = (name: string, contentType = 'application/octet-stream'): ParsedAttachment =>
+    ({ name, contentType, contentId: '', base64: 'AAA' })
+
+  it('图、md、docx、pptx 各归一类，其余是只能另存的普通文件', () => {
+    expect(attachmentKind(part('图.png', 'image/png'))).toBe('image')
+    expect(attachmentKind(part('说明.md', 'text/markdown'))).toBe('markdown')
+    // 服务器把类型改成八位字节流时还得靠扩展名认出来（两条判据互为兜底）
+    expect(attachmentKind(part('说明.MD'))).toBe('markdown')
+    expect(attachmentKind(part('报告.docx'))).toBe('docx')
+    expect(attachmentKind(part('讲稿.pptx'))).toBe('pptx')
+    expect(attachmentKind(part('老文档.doc'))).toBe('file')
+    expect(attachmentKind(part('老讲稿.ppt'))).toBe('file')
+    expect(attachmentKind(part('合同.pdf'))).toBe('file')
+    expect(attachmentKind(part('没有扩展名'))).toBe('file')
+    expect(attachmentKind(part('.md'))).toBe('file')
+  })
+
+  it('没写扩展名时按 contentType 认（长 MIME 那两种）', () => {
+    expect(attachmentKind(part('未命名', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'))).toBe('docx')
+    expect(attachmentKind(part('未命名', 'application/vnd.openxmlformats-officedocument.presentationml.presentation'))).toBe('pptx')
+  })
+
+  it('角标取扩展名（大写、最多 4 个字符），认不出给 FILE', () => {
+    expect(attachmentBadge(part('需求.md'))).toBe('MD')
+    expect(attachmentBadge(part('新建 DOCX 文档.docx'))).toBe('DOCX')
+    expect(attachmentBadge(part('说明.markdown'))).toBe('MARK')
+    expect(attachmentBadge(part('没有扩展名'))).toBe('FILE')
+    expect(attachmentBadge(part('.md'))).toBe('FILE')
+  })
+
+  it('文本读出来是 UTF-8（markdown 预览用），坏 base64 给空串', () => {
+    const text = bytesToBase64(new TextEncoder().encode('# 标题\n正文'))
+    expect(attachmentText({ ...part('说明.md'), base64: text })).toBe('# 标题\n正文')
+    expect(attachmentText({ ...part('说明.md'), base64: '不是 base64' })).toBe('')
+  })
+})
+
+describe('附件名的归一（RFC 2231 扩展参数优先）', () => {
+  const header = (line: string): string => `Subject: x\r\n${line}\r\n\r\nbody`
+
+  it('两份都在时摘掉纯参数，扩展那份留给 postal-mime 解', () => {
+    const raw = header(`Content-Disposition: attachment; filename="__ DOCX __.docx"; filename*=utf-8''%E6%B5%8B%E8%AF%95.docx`)
+    expect(preferExtendedFilenames(raw)).toContain(`Content-Disposition: attachment; filename*=utf-8''%E6%B5%8B%E8%AF%95.docx`)
+    expect(preferExtendedFilenames(raw)).not.toContain(`filename="__ DOCX __.docx"`)
+  })
+
+  it('续行写法（filename*0*）同样认，Content-Type 的 name 一并管', () => {
+    const raw = header(`Content-Type: application/pdf; name="__.pdf"; name*0*=utf-8''%E6%B5%8B; name*1*=%E8%AF%95.pdf`)
+    const fixed = preferExtendedFilenames(raw)
+    expect(fixed).toContain('name*0*=')
+    expect(fixed).not.toContain('name="__.pdf"')
+  })
+
+  it('只有扩展参数、或只有纯参数时一个字都不动', () => {
+    const onlyStarred = header(`Content-Disposition: attachment; filename*=utf-8''%E6%B5%8B%E8%AF%95.docx`)
+    const onlyPlain = header('Content-Disposition: attachment; filename="__.docx"')
+    expect(preferExtendedFilenames(onlyStarred)).toBe(onlyStarred)
+    expect(preferExtendedFilenames(onlyPlain)).toBe(onlyPlain)
+  })
+
+  it('引号串里的分号不当分隔符，别的参数原样留着', () => {
+    const raw = header(`Content-Disposition: attachment; filename="a;b.docx"; filename*=utf-8''c%3Bd.docx; size=1`)
+    expect(preferExtendedFilenames(raw)).toBe(header(`Content-Disposition: attachment; filename*=utf-8''c%3Bd.docx; size=1`))
+  })
+
+  it('只有扩展参数的来信（别人发的）也解得出来', async () => {
+    const raw = [
+      'From: a@b.com',
+      'Subject: 附件',
+      'MIME-Version: 1.0',
+      'Content-Type: multipart/mixed; boundary="BB"',
+      '',
+      '--BB',
+      'Content-Type: text/plain; charset=utf-8',
+      '',
+      '正文',
+      '--BB',
+      `Content-Disposition: attachment; filename*=utf-8''%E6%B5%8B%E8%AF%95%E6%8A%A5%E5%91%8A.md`,
+      'Content-Type: text/markdown',
+      '',
+      '# hi',
+      '--BB--',
+      '',
+    ].join('\r\n')
+    const parsed = await parseMessage(bytesToBase64(new TextEncoder().encode(raw)))
+    expect(parsed.attachments.map(attachment => attachment.name)).toEqual(['测试报告.md'])
+  })
+
+  it('续行写法（filename*0*）解出来也是完整名字', async () => {
+    const raw = [
+      'From: a@b.com',
+      'Subject: 附件',
+      'MIME-Version: 1.0',
+      'Content-Type: multipart/mixed; boundary="BB"',
+      '',
+      '--BB',
+      'Content-Type: text/plain; charset=utf-8',
+      '',
+      '正文',
+      '--BB',
+      `Content-Disposition: attachment; filename="__.md"; filename*0*=utf-8''%E6%B5%8B%E8%AF%95; filename*1*=%E6%8A%A5%E5%91%8A.md`,
+      'Content-Type: text/markdown',
+      '',
+      '# hi',
+      '--BB--',
+      '',
+    ].join('\r\n')
+    const parsed = await parseMessage(bytesToBase64(new TextEncoder().encode(raw)))
+    expect(parsed.attachments.map(attachment => attachment.name)).toEqual(['测试报告.md'])
+  })
+
+  it('自己发的信读回来是原名（发信构建 → 收信解析整条路）', async () => {
+    const raw = buildMime({
+      from: 'me@163.com',
+      to: ['you@qq.com'],
+      subject: '测试附件',
+      text: '正文',
+      attachments: [
+        { name: '测试 DOCX 文档.docx', contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', bytesBase64: bytesToBase64(new TextEncoder().encode('x')) },
+        { name: '测试.md', contentType: 'text/markdown', bytesBase64: bytesToBase64(new TextEncoder().encode('# hi')) },
+      ],
+    })
+    // 报文里是「纯参数 + filename*」两份都在 —— 这正是以前读回来变 `__` 的那种
+    expect(raw).toContain('filename="__ DOCX __.docx"')
+    const parsed = await parseMessage(bytesToBase64(new TextEncoder().encode(raw)))
+    expect(parsed.attachments.map(attachment => attachment.name)).toEqual(['测试 DOCX 文档.docx', '测试.md'])
   })
 })
 

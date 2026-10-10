@@ -43,12 +43,129 @@ function normalizeBytes(content: ArrayBuffer | Uint8Array | string): Uint8Array 
   return new Uint8Array(content)
 }
 
+/**
+ * 头部带了 RFC 2231 的扩展参数（`filename*` / `name*`）时，先把它旁边那份同名纯参数摘掉，
+ * 剩下的交给 postal-mime 自己的解码器（charset、百分号编码、续行 `filename*0*` 都由它解，
+ * 我们不重写一份）。
+ *
+ * 为什么要在递进去之前动手：postal-mime 4.0.4 明确按「同名纯参数优先」读
+ * （见它 decodeParameterValueContinuations 里那条守卫，changelog 4.0.3 的原话是
+ * 「keep a continuation from overriding the plain parameter of the same name」）。
+ * 于是我们自己发出去的 `filename="__ DOCX __.docx"; filename*=utf-8''%E6%B5%8B…`
+ * 读回来只剩那串下划线 —— 中文名全成了 `__`。两份都在时业界（浏览器下载、Gmail、
+ * 雷鸟）一律认扩展那份，这里按同一口径归一；**已经只剩兜底那份的报文救不回来**
+ * （信息在那台改写它的服务器上就没了），那种只能照实显示。
+ *
+ * 只动 `Content-Disposition` / `Content-Type` 两行头（含折叠续行），报文体一个字节不碰。
+ */
+export function preferExtendedFilenames(raw: string): string {
+  return raw.replace(
+    /^(content-(?:disposition|type)[^\r\n]*(?:\r?\n[ \t][^\r\n]*)*)/gim,
+    block => rewriteFilenameHeader(block),
+  )
+}
+
+/** 头里的参数拆成一段一段（引号串里的 `;` 不算分隔符），保留原始片段好原样拼回去。 */
+function splitHeaderParams(rest: string): string[] {
+  const segments: string[] = []
+  let current = ''
+  let quoted = false
+  for (let index = 0; index < rest.length; index += 1) {
+    const char = rest[index]
+    if (char === '\\' && quoted) {
+      current += char + (rest[index + 1] ?? '')
+      index += 1
+      continue
+    }
+    if (char === '"') {
+      quoted = !quoted
+    }
+    else if (char === ';' && !quoted) {
+      segments.push(current)
+      current = ''
+      continue
+    }
+    current += char
+  }
+  segments.push(current)
+  return segments
+}
+
+/** 一段参数的键（` filename*=` → `filename*`；拿不到键给 null）。 */
+function paramKey(segment: string): string | null {
+  const match = segment.match(/^\s*([!#$%&'*+.^\w`|~-]+)\s*=/)
+  return match ? match[1] : null
+}
+
+function rewriteFilenameHeader(block: string): string {
+  const joined = block.replace(/\r?\n[ \t]+/g, ' ')
+  const colon = joined.indexOf(':')
+  if (colon < 0)
+    return block
+  const segments = splitHeaderParams(joined.slice(colon + 1))
+  // 有扩展参数的键（filename / name，含续行的 `*0*` 写法）
+  const extended = new Set<string>()
+  for (const segment of segments.slice(1)) {
+    const match = paramKey(segment)?.match(/^(filename|name)\*(\d+)?\*?$/i)
+    if (match)
+      extended.add(match[1].toLowerCase())
+  }
+  if (extended.size === 0)
+    return block
+  const kept = segments.filter((segment, index) =>
+    index === 0 || !extended.has((paramKey(segment) ?? '').toLowerCase()))
+  if (kept.length === segments.length)
+    return block
+  return `${joined.slice(0, colon + 1)}${kept.join(';')}`
+}
+
+/**
+ * 字节 → 交给 postal-mime 的字节。报文里出现扩展附件名的那几个字节时才走一遍文本改写，
+ * 其余原样把字节递过去 —— 24 MB 的正文不该为一件偶尔才有的事整份进出一次字符串。
+ */
+function favorExtendedFilenames(bytes: Uint8Array): Uint8Array {
+  if (!hasAscii(bytes, 'filename*') && !hasAscii(bytes, 'name*'))
+    return bytes
+  const raw = latin1FromBytes(bytes)
+  const next = preferExtendedFilenames(raw)
+  return next === raw ? bytes : bytesFromLatin1(next)
+}
+
+/** 字节里有没有这一段 ASCII（快路判断，逐字节比、不建字符串） */
+function hasAscii(bytes: Uint8Array, needle: string): boolean {
+  const last = bytes.length - needle.length
+  for (let index = 0; index <= last; index += 1) {
+    let offset = 0
+    while (offset < needle.length && bytes[index + offset] === needle.charCodeAt(offset))
+      offset += 1
+    if (offset === needle.length)
+      return true
+  }
+  return false
+}
+
+/** 字节 → 每字节一个码元的字符串（改写只落在头部的 ASCII 上，正文原样过）。 */
+function latin1FromBytes(bytes: Uint8Array): string {
+  let text = ''
+  const chunk = 0x8000
+  for (let offset = 0; offset < bytes.length; offset += chunk)
+    text += String.fromCharCode(...bytes.subarray(offset, offset + chunk))
+  return text
+}
+
+function bytesFromLatin1(text: string): Uint8Array {
+  const bytes = new Uint8Array(text.length)
+  for (let index = 0; index < text.length; index += 1)
+    bytes[index] = text.charCodeAt(index) & 0xFF
+  return bytes
+}
+
 /** 解一份原始报文（Rust 回传的 base64）。解不开抛错，由适配层给人话。 */
 export async function parseMessage(rawBase64: string): Promise<ParsedMail> {
   const bytes = base64ToBytes(rawBase64)
   if (!bytes)
     throw new Error('报文不是合法的 base64')
-  const parsed = await new PostalMime().parse(bytes)
+  const parsed = await new PostalMime().parse(favorExtendedFilenames(bytes))
   const toPart = (part: {
     filename?: string | null
     mimeType?: string
@@ -74,6 +191,67 @@ export async function parseMessage(rawBase64: string): Promise<ParsedMail> {
     attachments: all.filter(part => part.contentId === ''),
     inline: all.filter(part => part.contentId !== ''),
   }
+}
+
+/**
+ * 附件是不是图：只看 contentType 的 `image/` 前缀。信里没写类型的（给的是
+ *  `application/octet-stream`）当普通文件 —— 宁可不预览，也不把二进制塞进 <img>。
+ */
+export function isImageAttachment(part: ParsedAttachment): boolean {
+  return /^image\//i.test(part.contentType)
+}
+
+/** 附件 → data URL。图片预览直接用手里的 base64，不落盘、不经过文件系统。 */
+export function attachmentDataUrl(part: ParsedAttachment): string {
+  return `data:${part.contentType};base64,${part.base64}`
+}
+
+/**
+ * 附件在应用里怎么打开：图给查看器，md / docx / pptx 进预览弹层，其余只能另存
+ * （pdf、压缩包、老式 .doc / .ppt 这些应用里画不了）。
+ * 判据是**扩展名与 contentType 两条** —— 服务器转手时这两样都可能被改写或丢掉一样。
+ */
+export type MailAttachmentKind = 'image' | 'markdown' | 'docx' | 'pptx' | 'file'
+
+const DOCX_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+const PPTX_TYPE = 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+const MARKDOWN_EXTS = new Set(['md', 'markdown', 'mdown', 'mkd'])
+const MARKDOWN_TYPES = new Set(['text/markdown', 'text/x-markdown'])
+
+/** 文件名 → 小写扩展名（没有点、或以点开头的一律当没扩展名）。 */
+function extensionOf(name: string): string {
+  const dot = name.lastIndexOf('.')
+  return dot > 0 ? name.slice(dot + 1).toLowerCase() : ''
+}
+
+export function attachmentKind(part: ParsedAttachment): MailAttachmentKind {
+  if (isImageAttachment(part))
+    return 'image'
+  const type = part.contentType.split(';')[0].trim().toLowerCase()
+  const extension = extensionOf(part.name)
+  if (extension === 'docx' || type === DOCX_TYPE)
+    return 'docx'
+  if (extension === 'pptx' || type === PPTX_TYPE)
+    return 'pptx'
+  if (MARKDOWN_EXTS.has(extension) || MARKDOWN_TYPES.has(type))
+    return 'markdown'
+  return 'file'
+}
+
+/** 附件内容当文本读（markdown 预览用）：base64 → 字节 → UTF-8 文本。解不开给空串。 */
+export function attachmentText(part: ParsedAttachment): string {
+  const bytes = base64ToBytes(part.base64)
+  return bytes ? new TextDecoder().decode(bytes) : ''
+}
+
+/**
+ * 附件片左首那个**类型角标**上的字：扩展名大写（最多 4 个字符），认不出扩展名给 FILE。
+ * 角标是这一行里唯一能一眼分出 docx / md / pptx / pdf 的东西 —— 光一个回形针三颗片子
+ * 长得一模一样。
+ */
+export function attachmentBadge(part: ParsedAttachment): string {
+  const extension = extensionOf(part.name)
+  return extension ? extension.slice(0, 4).toUpperCase() : 'FILE'
 }
 
 /** contentId → data URL 的替换表。 */

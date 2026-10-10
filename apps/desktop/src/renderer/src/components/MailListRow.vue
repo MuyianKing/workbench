@@ -104,7 +104,7 @@ function subjectText(raw: string): string {
   gap: var(--sp-1);
   width: 100%;
   padding: var(--sp-2);
-  border-radius: var(--r-2);
+  border-radius: var(--r-md);
   /* Shift 点范围时别把正文选中（勾选走的是行状态，不是 DOM 选区） */
   user-select: none;
 }

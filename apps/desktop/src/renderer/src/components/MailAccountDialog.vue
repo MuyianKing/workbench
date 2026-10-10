@@ -396,7 +396,7 @@ async function remove(account: MailAccount): Promise<void> {
   align-items: center;
   gap: var(--sp-1);
   padding: 2px var(--sp-1);
-  border-radius: var(--r-2);
+  border-radius: var(--r-md);
 }
 
 .acct__row.is-editing {

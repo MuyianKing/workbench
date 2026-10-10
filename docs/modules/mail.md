@@ -47,6 +47,14 @@
   回结构化摘要与原始报文（base64）；MIME 解析（postal-mime 包装）、发信报文构建
   （buildMime）、RFC 2047、展示拆解全在 @workbench/mail（有单测、改动走热更新）。
   不要往 Rust 侧加 MIME / 编码逻辑。
+- **附件名：两份参数都在时认 RFC 2231 的扩展那份**（`filename*=` / `name*=`）。postal-mime
+  的口径正相反 —— 同名纯参数优先（它 decodeParameterValueContinuations 里那条守卫，
+  changelog 4.0.3 明说的），于是我们自己发出去的
+  `filename="__ DOCX __.docx"; filename*=utf-8''…` 读回来只剩那串下划线，中文名全成了 `__`。
+  所以 `parseMessage` 在把字节递给它之前先跑一遍 `preferExtendedFilenames`（摘掉同名纯参数、
+  只摘这两行头，报文体一个字节不碰），回调给它的解码器。**别摘这一层**，
+  也别把纯参数写回去 —— 只有扩展参数的那种来信（大多数客户端发的）本来就解得对。
+  报文里没有扩展参数时这一层原样把字节递过去，不做多余的文本转换。
 - **网易 IMAP 必须先报身份**：不发 `ID` 命令，SELECT 直接吃 `Unsafe Login` 闭门羹
   （rust-imap 不支持这条，这就是手写协议子集的原因）。mail.rs 的流程是 LOGIN 后发 ID、
   SELECT 被拒且错误里带 Unsafe 时补发 ID 重试一次。改这段流程别把 ID 弄丢。
@@ -120,8 +128,21 @@
   列表上的未读点就地更新。阅读栏头部是「回复」（发件箱里第一行摆收件人，前面挂一个
   安静的「收件人」小字；回复也发给当初收到这封的人 —— `recipientAddress`）、
   「标记已读（未读）」（只在收件箱画），多账户时还标收自哪个邮箱 —— 回信默认就从它发；
-  附件一颗一片、点开走「另存为」（pickSavePath 挑路径 +
-  `mail_attachment_save` 落盘，与 vault_key_export 同一个信任模型）。
+  附件一颗一片，按 `attachmentKind`（packages/mail）分三种打开方式：**能在应用里打开的，
+  整片都是打开的入口**（片子是「一颗内层按钮 + 右端一颗另存图标」拼的 —— 按钮不能套按钮，
+  另存留在外层）—— 图进 EP 的 `el-image-viewer`（页面持一个实例：该封里所有图左右切、
+  滚轮缩放、Esc 或点外面关掉，`teleported` 才不会被子栏的 overflow 裁掉）；**md / docx /
+  pptx 进预览弹层**（MailAttachmentDialog：md 借 MarkdownView、docx 借 AiPreviewDoc、
+  pptx 借 AiPreviewSlides —— 三件都只吃 base64、都在浏览器里画、都不出网，pptx 的
+  pdfjs 兜底在那边显式关着）；应用里画不了的（pdf / 压缩包 / 老式 .doc .ppt）整片点开
+  就是「另存为」（pickSavePath 挑路径 + `mail_attachment_save` 落盘，与 vault_key_export
+  同一个信任模型）。片子的样子：左首是**这张片子的样子** —— 图给缩略图、其余给
+  `attachmentBadge` 出的类型角标（DOCX / MD / PPTX / PDF，定宽所以名字对得齐），
+  名字走 `--ink`、大小退到 `--ink-3`；图与缩略图都取 `attachmentDataUrl` —— 手里的 base64
+  拼 data URL，预览不落盘。**md 是唯一一处把邮件内容画进宿主 webview 的地方**：
+  走 markdown-it（`html: false`，原文标签早被转义过，v-html 拿到的是安全片段），
+  正文里的外链图片跟着信里写的地址加载 —— 与 HTML 正文那条外链图片的口子同一个口径，
+  别在这条路上放脚本。
 - **删除（右键入口，多选态勾选）**：右键菜单的「多选删除」是入口 —— 把右击的这封勾进
   批次的同时进入**多选态**（Ctrl+点选 / Shift+点范围 / Ctrl+A 也进）：每封左侧亮出复选框
   （**不常驻**，平时点行就是开信），点行从「开信」变成「勾 / 撤」（Shift 从锚点整段勾），
@@ -185,7 +206,8 @@
   `ms-winsoundevent:Notification.Mail`（默认那声太轻，用户注意不到弹窗）。
   `refreshList` 的并发调用共享在途的同一
   个 Promise（页面挂载与通知点击可能前后脚各调一次）。
-- **测试**：@workbench/mail 的 37 个用例（收敛 / 编码词 / 报文构建 / 解析与沙箱正文 /
+- **测试**：@workbench/mail 的 50 个用例（收敛 / 编码词 / 报文构建 / 解析与沙箱正文 /
+  附件的打开方式、类型角标与图片判定 / **附件名的归一（含「自己发的信读回来是原名」整条路）** /
   广告识别 / 收件人列表的拆解）；
   mail.rs 的 `#[cfg(test)]`（字面量标记 / 括号项解析 / 头部折叠展开 / EXISTS /
   UIDVALIDITY / **文件夹：LIST 结果的解析（引号串与字面量两种名字）、`\Sent` 属性与
@@ -226,7 +248,12 @@ apps/desktop/src/renderer/src/stores/mail.ts
   发送 / 后台监视的登记与通知点击
   （startWatch）；拉取时机在这层
 apps/desktop/src/renderer/src/components/MailView.vue
-  邮箱页：左清单右阅读（头部一颗分段选择器切收件箱 / 已发送）；HTML 正文走 sandbox iframe（外链图片照常显示，脚本全禁，链接经顶层导航转交系统浏览器）
+  邮箱页：左清单右阅读（头部一颗分段选择器切收件箱 / 已发送）；HTML 正文走 sandbox iframe（外链图片照常显示，脚本全禁，链接经顶层导航转交系统浏览器）；
+  附件片按 attachmentKind 分打开方式：图进 EP 查看器、md / docx / pptx 进 MailAttachmentDialog，其余点开另存为
+apps/desktop/src/renderer/src/components/MailAttachmentDialog.vue
+  附件预览弹层：md（MarkdownView）/ docx（AiPreviewDoc）/ pptx（AiPreviewSlides）在应用里看；
+  弹窗定高、宽度照 docx 一页（A4 794 / Letter 816）定的 920px —— 页外不再堆一大片白，
+  中间那块自己滚（global.css 的 .mail-preview-dialog 一组），脚上一个「另存为」
 apps/desktop/src/renderer/src/components/MailListRow.vue
   邮件清单行：行首复选框 + 两行内容（收件箱清单、推广邮件段与发件箱共用一副；发件箱里第一行摆收件人）
 apps/desktop/src/renderer/src/components/MailAccountDialog.vue
@@ -246,6 +273,9 @@ packages/mail/src/mime.ts
   发信报文构建（multipart/mixed、RFC 2231 文件名、30 MB 上限）与附件的
   Content-Type 猜测
 packages/mail/src/parse.ts
-  postal-mime 包装（parseMessage）、沙箱正文生成（htmlBody：CSP + cid → data URL）、
-  发件人 / 收件人（displayRecipients、recipientAddress）与日期的展示拆解
+  postal-mime 包装（parseMessage，含附件名的归一 preferExtendedFilenames）、
+  沙箱正文生成（htmlBody：CSP + cid → data URL）、
+  发件人 / 收件人（displayRecipients、recipientAddress）与日期的展示拆解、
+  附件的打开方式与片子上的字（attachmentKind、attachmentBadge、isImageAttachment、
+  attachmentDataUrl、attachmentText）
 ```

@@ -231,7 +231,7 @@ async function send(): Promise<void> {
   max-width: 260px;
   padding: 2px var(--sp-2);
   border: 1px solid var(--border);
-  border-radius: var(--r-2);
+  border-radius: var(--r-md);
   background: var(--bg-surface);
   font-size: var(--fs-meta);
 }
