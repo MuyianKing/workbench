@@ -84,6 +84,13 @@ watch(
   padding: 8px;
 }
 
+/* 每页四周那圈阴影摘掉（库默认给自己注入的是 `box-shadow: 0 0 10px rgba(0, 0, 0, .5)`，
+   页里页外都是浅底色，那圈黑晕只显得脏）。选择器比库那条多一层，压得过它 ——
+   库的样式是渲染时塞进这块宿主 div 的 `<style>`，scoped 规则够不着，得走 :deep() */
+.doc__host :deep(.docx-wrapper > section.docx) {
+  box-shadow: none;
+}
+
 .doc__note {
   margin: 0;
   color: var(--ink-3);

@@ -541,20 +541,25 @@ watch(
 }
 
 /**
- * 数字框右侧那两个加减按钮。EP 是按 24px 高的框算死的：每个 11px、上下各让 1px、
- * 中间再留 2px 缝。上面把框抬到 28px 之后那套数字就不成立了 —— 按钮还是 11px，
- * 中间于是空出一道白缝。这里只让它们跟着框长：各占一半（减掉上下各 1px），
+ * 数字框右侧那两个加减按钮。EP 是按 24px 高的框算死的：每个 11px、上下各让 1px，
+ * 刚好铺满。上面把框抬到 28px 之后那套数字就不成立了 —— 按钮还是 11px，
+ * 中间于是空出 3px 一道白缝。这里只让它们跟着框长：各占一半（减掉上下各 1px），
  * 外沿圆角跟着输入框走（--r-sm 就是框的圆角）。
+ *
+ * **`.number-input` 写两遍是故意的，别合并**：EP 那条定高规则是
+ * `.el-input-number.is-controls-right .el-input-number__increase`（三个选择器），
+ * 本组件的 `.number-input[data-v-x] .el-input-number__increase` 也是三个 —— 同分时谁在后面谁赢，
+ * 而组件样式在模块图里排在 element-plus 之前（main.ts 先 import App.vue 再 import EP 的 CSS），
+ * 结果单写一遍是 EP 赢、按钮仍 11px，缝还在。重复一个类把具体度抬到它上面，就不再看样式表顺序了。
  *
  * **别把 EP 那 1px 的右 / 上 / 下内缩也去掉**：输入框的边框是画在框上的一圈 inset 阴影，
  * 按钮贴到边上就会把它盖掉，表现成「最右边那条边框没了」（踩过一次）。
  */
-.number-input :deep(.el-input-number__increase),
-.number-input :deep(.el-input-number__decrease) {
+.number-input.number-input :deep(.el-input-number__increase),
+.number-input.number-input :deep(.el-input-number__decrease) {
   /*
-   * 高度直接写：EP 把它塞在 --el-input-number-controls-height 里，而给那个变量赋值的选择器
-   * （.is-controls-right[class*=small] [class*=increase]）比这里长，改变量压不过它。
-   * 这条能生效靠的是本组件样式排在 element-plus 之后，与 global.css 里改 small 按钮高度同一个道理。
+   * 高度直接写，不走 --el-input-number-controls-height：给那个变量赋值的选择器
+   * （.is-controls-right[class*=small] [class*=increase]）同样是三个，改它还得再打一次具体度。
    */
   height: calc(50% - 1px);
 }
