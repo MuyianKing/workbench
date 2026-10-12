@@ -36,7 +36,7 @@
 
 ## 完整打包链路
 
-`ppnpm run dist`（即 `tauri build`）依次做三件事：跑 `beforeBuildCommand` 编前端、编 Rust、
+`pnpm run dist`（即 `tauri build`）依次做三件事：跑 `beforeBuildCommand` 编前端、编 Rust、
 用 makensis 出安装包。实测两次连续打包：
 
 | | 首次（`target/` 里还没有 `custom-protocol` 变体） | 第二次 |
@@ -73,14 +73,19 @@ Rust 两行与前端用什么打包器无关；**合计两行仍是 vite 7 那�
 只有最终 crate 会被重编，这一段的耗时才是每次都要付的那一份。
 
 ```bash
-touch apps/desktop/src-tauri/src/main.rs   # 只动 mtime，不改内容
-time cargo build --release --manifest-path apps/desktop/src-tauri/Cargo.toml
+touch src/main.rs            # 只动 mtime，不改内容
+cd apps/desktop/src-tauri    # cwd 必须落在这层，理由见下节「坑」
+time cargo build --release
 ```
+
+**cwd 必须落在 `apps/desktop` 或 `apps/desktop/src-tauri`**：`--manifest-path` 只决定编哪个包，
+不影响 cargo 去哪找 `.cargo/config.toml`（它只从 cwd 往上找）。从仓库根跑会读不到 `rust-lld`，
+量到的是 `link.exe` 那个变体，来回切还会让 `target/` 里长出两套互不相认的缓存。
 
 cargo 按 mtime 判定新鲜度，所以 `touch` 既触发了重编，又没往仓库里塞任何语义变化。
 对比前后必须用同一条命令、同一个 `touch` 目标，否则量到的不是同一件事。
 （注意上面这条命令量的是 `cargo build` 那个变体；要量打包链路上的那个变体，
-把命令换成 `ppnpm run dist:dir`。）
+把命令换成 `pnpm run dist:dir`。）
 
 ## 坑
 
@@ -106,6 +111,14 @@ monorepo 化后配置放在 `apps/desktop/.cargo/`：`tauri build` 与手敲 `ca
 `apps/desktop/src-tauri`，向上找正好命中它。别把配置下沉进 `apps/desktop/src-tauri/.cargo/` ——
 那样它也能被读到（cwd 就在那儿），但 app 根这一层才是这条链路上「所有 cargo 入口」
 都覆盖的位置；将来若从别的目录起 cargo，埋深了就会出现「dev 生效、打包不生效」这种更难查的样子。
+
+**从仓库根起 cargo 读不到这份配置**（2026-10-10 实测）：cwd 是仓库根时，向上的父目录里没有
+任何 `.cargo/`，linker 与 rustflags 全部回落到默认（`link.exe`）—— 于是同一份代码在 `target/` 里
+是**两套互不相认的缓存**，两边来回切等于每次全量重编；`AGENTS.md` 第 6 节那条
+`cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml` 正是这种写法。两个改法：命令一律在
+`apps/desktop/src-tauri` 下跑（dev / build / 手敲都这样），或把配置提到仓库根 —— 父目录同样覆盖
+`apps/desktop` 与 `src-tauri`，还顺带覆盖「在仓库根起 cargo」这一种，代价是所有机器上 `target/`
+缓存一次性失效。
 
 验证配置有没有被读到不必真跑一遍构建，用 `cargo metadata` 看 `target_directory` 就够
 （临时往配置里加一行 `[build] target-dir = "target-cfgtest"`，看完删掉）：

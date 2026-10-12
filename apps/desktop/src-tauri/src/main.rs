@@ -41,6 +41,12 @@ use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent}
 use tauri::webview::PageLoadEvent;
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
+use windows_sys::Win32::Foundation::RECT;
+use windows_sys::Win32::System::Threading::GetCurrentProcessId;
+use windows_sys::Win32::UI::WindowsAndMessaging::{
+    GW_HWNDPREV, GWL_EXSTYLE, GetWindow, GetWindowLongW, GetWindowRect, GetWindowThreadProcessId,
+    IsWindowVisible, WS_EX_TOOLWINDOW,
+};
 
 /// 最大化状态的上一次观测值：窗口事件推的是「变化」，不是每次 resize 都发
 struct MaximizedFlag(Mutex<bool>);
@@ -71,11 +77,57 @@ fn hide_main_window(app: &AppHandle) {
     }
 }
 
+/// 主窗口是不是被别的程序压住了：z 序排在它前面、可见、与它相交的顶层窗口里有一个就算。
+///
+/// 工具窗口（任务栏、托盘、输入法候选框这些 shell 自己的壳，实测都带 WS_EX_TOOLWINDOW）
+/// 与本进程自己的窗口不算 —— 它们不是用户点开的「别的程序」，被它们挡住不影响
+/// 「窗口就在眼前」这个判断。
+fn covered_by_other_app(window: &tauri::WebviewWindow) -> bool {
+    let Ok(hwnd) = window.hwnd() else { return false };
+    let (Ok(position), Ok(size)) = (window.outer_position(), window.outer_size()) else {
+        return false;
+    };
+
+    let ours = RECT {
+        left: position.x,
+        top: position.y,
+        right: position.x + size.width as i32,
+        bottom: position.y + size.height as i32,
+    };
+    let this = hwnd.0;
+    let pid = unsafe { GetCurrentProcessId() };
+
+    // GetWindow 的 GW_HWNDPREV 是 z 序里的上一个窗口，一路往上就是压在它上面的那些
+    let mut above = unsafe { GetWindow(this, GW_HWNDPREV) };
+    while !above.is_null() {
+        let ex_style = unsafe { GetWindowLongW(above, GWL_EXSTYLE) } as u32;
+        if (ex_style & WS_EX_TOOLWINDOW == 0) && unsafe { IsWindowVisible(above) } != 0 {
+            let mut other_pid = 0;
+            unsafe { GetWindowThreadProcessId(above, &mut other_pid) };
+            let mut rect = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+            let overlaps = unsafe { GetWindowRect(above, &mut rect) } != 0
+                && rect.left < ours.right
+                && rect.right > ours.left
+                && rect.top < ours.bottom
+                && rect.bottom > ours.top;
+            if other_pid != pid && overlaps {
+                return true;
+            }
+        }
+        above = unsafe { GetWindow(above, GW_HWNDPREV) };
+    }
+    false
+}
+
+/// 托盘左键 / 全局快捷键：窗口没被别的程序压住就收起，被压住（或收在托盘、最小化）就调到前面。
+///
+/// 不能只看「可见」：窗口被别的程序遮住时照样可见，按可见就收起会把这一步做成
+/// 「把程序收起来」，而那时想要的恰恰是「调到前面」（判定见 covered_by_other_app）。
 fn toggle_main_window(app: &AppHandle) {
     if let Some(window) = main_window(app) {
         let visible = window.is_visible().unwrap_or(false);
         let minimized = window.is_minimized().unwrap_or(false);
-        if visible && !minimized {
+        if visible && !minimized && !covered_by_other_app(&window) {
             hide_main_window(app);
         } else {
             show_main_window(app);
@@ -189,7 +241,7 @@ fn create_main_window(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
-/// 托盘：常驻。左键唤起 / 收起，右键出菜单。
+/// 托盘：常驻。左键把窗口调到前面（没被别的程序压住时才收起，见 toggle_main_window），右键出菜单。
 fn create_tray(app: &AppHandle) -> tauri::Result<()> {
     let show = MenuItem::with_id(app, "show", "显示主界面", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
@@ -330,7 +382,7 @@ fn main() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ))
-        // 全局快捷键：按下时唤起 / 收起窗口，与 Electron 版的全局快捷键同一行为
+        // 全局快捷键：与托盘左键同一个开关（调到前面 / 没被压住时收起）
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, _shortcut, event| {
