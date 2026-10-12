@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { ViewId } from '@workbench/appearance'
-import type { Component } from 'vue'
+import type { Component, CSSProperties } from 'vue'
 import { Brush, ChatDotRound, Collection, Document, FolderOpened, Grid, Key, MagicStick, Message, Notebook, VideoPlay } from '@element-plus/icons-vue'
 import { orderedViews } from '@workbench/appearance'
 /**
@@ -13,7 +13,7 @@ import { orderedViews } from '@workbench/appearance'
  * 四周留出与卡片之间一致的间距。这里不加 data-tauri-drag-region：它和面板一样是画布上的卡片，
  * 拖窗口是标题栏的事（在面板上按空白处也不会拖窗口，两边保持一致）。
  */
-import { computed } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useNavStore } from '@/stores/nav'
 import { useSettingsStore } from '@/stores/settings'
 
@@ -45,6 +45,57 @@ const items = computed(() =>
   orderedViews(settings.settings.hiddenViews, settings.settings.viewOrder),
 )
 
+const navEl = ref<HTMLElement | null>(null)
+
+/**
+ * 当前项那块底由 .nav__pill 一块浮底承担：换页时它滑过去，而不是老项闪一下、新项亮一下。
+ *
+ * 位置与尺寸按当前项那个盒量出来（横向也量）：菜单长到出滚动条时内容盒会窄一点，
+ * 写死内边距就对不上了。量不到当前项（它被设置关掉了）就先藏起来 —— 那时本来也没有「当前项」。
+ * 初值是 opacity 0：首帧量完就位了才显出来，加载时不会从顶上滑下来。
+ */
+const itemEls = new Map<ViewId, HTMLElement>()
+const pillStyle = ref<CSSProperties>({ opacity: 0 })
+
+function bindItem(el: unknown, id: ViewId): void {
+  if (el instanceof HTMLElement)
+    itemEls.set(id, el)
+  else itemEls.delete(id) // 这一项被卸载（关掉 / 换顺序）时把旧的清掉
+}
+
+function movePill(): void {
+  const el = itemEls.get(active.value)
+  if (!el) {
+    pillStyle.value = { opacity: 0 }
+    return
+  }
+  pillStyle.value = {
+    opacity: 1,
+    left: `${el.offsetLeft}px`,
+    width: `${el.offsetWidth}px`,
+    height: `${el.offsetHeight}px`,
+    transform: `translateY(${el.offsetTop}px)`,
+  }
+}
+
+/**
+ * 收起 / 展开那 0.2s 里内容盒每帧都在变，窗口尺寸变了也可能冒出一条滚动条 ——
+ * 让 ResizeObserver 盯着导航栏自己重算，比在几个入口各算一次稳。
+ */
+let resizeObserver: ResizeObserver | undefined
+
+onMounted(() => {
+  movePill()
+  resizeObserver = new ResizeObserver(movePill)
+  if (navEl.value)
+    resizeObserver.observe(navEl.value)
+})
+
+onBeforeUnmount(() => resizeObserver?.disconnect())
+
+/** 换页、以及菜单本身被改（关掉一页 / 拖动换序）都要重新对位：等 DOM 落定再量 */
+watch([active, items], movePill, { flush: 'post' })
+
 function select(id: ViewId): void {
   // 换页不动弹层：开着的弹框留在原地，切走再切回来还是它，填到一半的输入不丢。
   // 所以导航栏必须浮在遮罩之上（见样式里那个 z-index）—— 否则弹层开着时这一列点不着，
@@ -54,10 +105,14 @@ function select(id: ViewId): void {
 </script>
 
 <template>
-  <nav class="nav" :class="{ 'is-hidden': settings.settings.navHidden }">
+  <nav ref="navEl" class="nav" :class="{ 'is-hidden': settings.settings.navHidden }">
+    <!-- 当前项那块底：绝对定位的一块浮底，换页时滑到下一项去。它排在按钮前面、又比按钮低一层
+         （见样式），滑过中间几项时不会盖住图标与文字 -->
+    <span class="nav__pill" aria-hidden="true" :style="pillStyle" />
     <button
       v-for="id in items"
       :key="id"
+      :ref="(el) => bindItem(el, id)"
       class="nav__item"
       :class="{ 'is-active': active === id }"
       type="button"
@@ -154,7 +209,27 @@ function select(id: ViewId): void {
     visibility 0s 0.2s;
 }
 
+/**
+ * 当前项那块底：一块浮底，位置与尺寸由脚本按当前项的盒给（见 movePill），
+ * 换页时靠 transform 滑过去 —— 位移只走合成，滑的过程中不触发布局。
+ * 它比按钮低一层（按钮 position: relative + z-index 1），滑过中间几项时压在图标与文字下面；
+ * 高度理论上一直不变，留一条过渡是防着将来项高变了它跟不上。
+ */
+.nav__pill {
+  position: absolute;
+  top: 0;
+  z-index: 0;
+  border-radius: var(--r-md);
+  background: var(--bg-selected);
+  pointer-events: none;
+  transition:
+    transform 0.24s var(--ease-out),
+    height 0.24s var(--ease-out);
+}
+
 .nav__item {
+  position: relative;
+  z-index: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -181,10 +256,10 @@ function select(id: ViewId): void {
   color: var(--ink);
 }
 
-/* 当前项用 --bg-selected：它比面底色明确高一档，一眼看得出现在在哪一屏。
-   配了主题色时这一档会跟着变成主色的浅底（见 accent-color.ts），没配就是令牌里那档中性灰。 */
+/* 当前项不用自己画底 —— 那块底在 .nav__pill 上（同一颜色，只是会滑）；
+   这里留着 background: transparent 是为了压住上面那条 :hover：悬停当前项不该换成悬停色 */
 .nav__item.is-active {
-  background: var(--bg-selected);
+  background: transparent;
   color: var(--ink);
   font-weight: 600;
 }
@@ -195,5 +270,11 @@ function select(id: ViewId): void {
 
 .nav__label {
   line-height: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nav__pill {
+    transition: none;
+  }
 }
 </style>

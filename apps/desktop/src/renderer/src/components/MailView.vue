@@ -1,19 +1,24 @@
 <script setup lang="ts">
-import type { MailFolder, ParsedAttachment } from '@workbench/mail'
+import type { MailContact, MailFolder, ParsedAttachment } from '@workbench/mail'
 import type { MailListItem, MailReplyTarget } from '@/stores/mail'
-import { ArrowDown, Download, EditPen, Message, Refresh, Setting } from '@element-plus/icons-vue'
-import { attachmentBadge, attachmentDataUrl, attachmentKind, formatMailSize, isImageAttachment, senderAddress } from '@workbench/mail'
+import { ArrowDown, Download, EditPen, Loading, Message, Plus, Refresh, Setting } from '@element-plus/icons-vue'
+import { attachmentBadge, attachmentDataUrl, attachmentKind, formatMailSize, isImageAttachment, recipientAddress, senderAddress } from '@workbench/mail'
 /**
  * 邮箱页：左栏邮件清单，右栏读信（与 AI / 笔记 / 视频页同一副左右分栏，
  * 左栏宽度住 theme.json 的 `mailListWidth`）。
  *
- *  - **左栏**：头部一颗分段选择器切**收件箱 / 已发送**（Rust 侧现认服务器上的文件夹名，
- *    见 docs/modules/mail.md）。清单是当前那个文件夹里所有账户合并的一份（各账户并行
- *    各拉最近的 50 封，按时间新在前，不按来源分组；进页面 / 切文件夹 / 点刷新才拉，
- *    不后台轮询 —— 这个应用没有「自己偷偷跑流量」这回事）。右键「多选删除」进入多选态：
+ *  - **左栏**：头部一颗分段选择器切**三签**（收件箱 / 已发送 / 联系人）。前两签是邮件
+ *    清单（Rust 侧现认服务器上的文件夹名，见 docs/modules/mail.md）：当前那个文件夹里
+ *    所有账户合并的一份（各账户并行各拉最近的 50 封，按时间新在前，不按来源分组；
+ *    进页面 / 切签 / 点刷新才拉，不后台轮询 —— 这个应用没有「自己偷偷跑流量」这回事）。
+ *    右键「多选删除」进入多选态：
  *    行首亮出复选框、点行就是勾 / 撤，勾选条出「已选 N 封」；收件箱里识别成推广 / 广告
  *    的信不混在这里 —— 收进清单底部分开的一段（默认折叠，展开也是自己的一段）。
- *    底部一行是两个不跟邮件走的入口：**账户**（多账户的管理弹层）与**写邮件**。
+ *    **联系人那一签**摆的是通讯录：一行一个人（名字 / 地址，行上不带按钮 —— 右击弹
+ *    MailContactMenu 出「编辑 / 删除」），头部右端那颗动作按钮从「刷新」换成「新增联系人」，
+ *    新增与编辑都开 MailContactEditDialog 那颗小弹窗（列表归列表、编辑归弹窗）。
+ *    底部一行是两个不跟邮件走的入口：
+ *    **账户**（多账户的管理弹层）与**写邮件**。
  *  - **右栏**：没配置账户时是一颗「配置邮箱账户」；配置了就是阅读栏 ——
  *    头部是主题、发件人（发件箱里是收件人）、日期与「回复」，正文按信里的形态画：
  *    有 HTML 走 sandbox 的 iframe（外链图片照常显示、脚本照旧全禁，
@@ -29,6 +34,8 @@ import { computed, onActivated, onMounted, ref, watch } from 'vue'
 import MailAccountDialog from '@/components/MailAccountDialog.vue'
 import MailAttachmentDialog from '@/components/MailAttachmentDialog.vue'
 import MailComposer from '@/components/MailComposer.vue'
+import MailContactEditDialog from '@/components/MailContactEditDialog.vue'
+import MailContactMenu from '@/components/MailContactMenu.vue'
 import MailContextMenu from '@/components/MailContextMenu.vue'
 import MailListRow from '@/components/MailListRow.vue'
 import PanelResizer from '@/components/PanelResizer.vue'
@@ -44,7 +51,8 @@ const composerVisible = ref(false)
 /** 回复的预填内容；null = 写的是新邮件 */
 const replyTarget = ref<MailReplyTarget | null>(null)
 
-/** 右键菜单的落点与它对着的那一行（哪个文件夹 / 账户、发件人在不在黑名单、已读态，都给菜单定文案用） */
+/** 右键菜单的落点与它对着的那一行（哪个文件夹 / 账户、发件人在不在黑名单、已读态、对方在不在通讯录，
+ *  都给菜单定文案用） */
 const menu = ref<{
   x: number
   y: number
@@ -53,8 +61,17 @@ const menu = ref<{
   account: string
   uid: number
   bulk: boolean
+  contact: boolean
   seen: boolean
 } | null>(null)
+
+/**
+ * 这一行的「对方」地址：收件箱看发件人、发件箱看收件人（与阅读栏第一行、回复同一口径）——
+ * 存联系人存的就是它。找不到（头部没法解析）给空串。
+ */
+function rowPartyAddress(item: MailListItem): string {
+  return (item.folder === 'sent' ? recipientAddress(item.to) : senderAddress(item.from)).toLowerCase()
+}
 
 function openMenu(event: MouseEvent, item: MailListItem): void {
   menu.value = {
@@ -65,14 +82,20 @@ function openMenu(event: MouseEvent, item: MailListItem): void {
     account: item.account,
     uid: item.uid,
     bulk: mail.bulkSenders.includes(senderAddress(item.from).toLowerCase()),
+    contact: mail.isContact(rowPartyAddress(item)),
     seen: item.seen,
   }
 }
 
-function onMenuAct(name: 'bulk' | 'toggle-seen' | 'multi-pick' | 'multi-delete' | 'delete'): void {
+function onMenuAct(name: 'contact' | 'bulk' | 'toggle-seen' | 'multi-pick' | 'multi-delete' | 'delete'): void {
   const state = menu.value
   if (!state)
     return
+  if (name === 'contact') {
+    // 「存为联系人 / 移出联系人」：对着谁、存什么名字都由 store 按这一行的身份自己算
+    void mail.toggleContact(state.account, state.uid)
+    return
+  }
   if (name === 'bulk') {
     if (state.bulk)
       mail.unbulk(state.account, state.uid)
@@ -107,16 +130,62 @@ function onMenuAct(name: 'bulk' | 'toggle-seen' | 'multi-pick' | 'multi-delete' 
   })
 }
 
-// ---------- 文件夹切换（收件箱 / 已发送） ----------
+// ---------- 左栏的签（收件箱 / 已发送 / 联系人） ----------
 
 const folderOptions = [
   { label: '收件箱', value: 'inbox' },
   { label: '已发送', value: 'sent' },
+  { label: '联系人', value: 'contacts' },
 ]
 
-/** 分段选择器递回来的值收敛成两个逻辑名（组件那边是宽泛的联合类型，这里收一道） */
+/** 分段选择器递回来的值收敛成三个逻辑名（组件那边是宽泛的联合类型，这里收一道） */
 function changeFolder(value: unknown): void {
-  mail.setFolder(value === 'sent' ? 'sent' : 'inbox')
+  mail.setTab(value === 'sent' ? 'sent' : value === 'contacts' ? 'contacts' : 'inbox')
+}
+
+// ---------- 通讯录那一签 ----------
+
+/** 新增 / 编辑联系人的小弹窗：名单在左栏那一签里摆，编辑走它 */
+const contactEditVisible = ref(false)
+/** 正在编辑的联系人；null = 新增 */
+const editingContact = ref<MailContact | null>(null)
+/** 正在删的地址（那一行上转圈） */
+const removingContact = ref<string | null>(null)
+/** 联系人那一行的右键菜单落点与它对着的那个人（编辑 / 删除都在菜单里，行上不带按钮） */
+const contactMenu = ref<{ x: number, y: number, contact: MailContact } | null>(null)
+
+function openContactAdd(): void {
+  editingContact.value = null
+  contactEditVisible.value = true
+}
+
+function openContactEdit(contact: MailContact): void {
+  editingContact.value = contact
+  contactEditVisible.value = true
+}
+
+function openContactMenu(event: MouseEvent, contact: MailContact): void {
+  contactMenu.value = { x: event.clientX, y: event.clientY, contact }
+}
+
+function onContactMenuAct(name: 'edit' | 'delete'): void {
+  const state = contactMenu.value
+  if (!state)
+    return
+  if (name === 'edit')
+    openContactEdit(state.contact)
+  else void removeContact(state.contact)
+}
+
+/** 删除不做确认：名单里少一条随时能再加回来，不值得多拦一道 */
+async function removeContact(contact: MailContact): Promise<void> {
+  if (removingContact.value)
+    return
+  removingContact.value = contact.address
+  const result = await mail.removeContact(contact.address)
+  removingContact.value = null
+  if (!result.ok)
+    notifyError(result.error ?? '删除失败')
 }
 
 // ---------- 批量删除的勾选 ----------
@@ -132,7 +201,7 @@ const deleting = computed(() => mail.deletingKeys.length > 0)
 
 /** 多选态：进了它行首才亮复选框、点行从「开信」变成「勾 / 撤」。
  *  是显式的开关，不跟着勾选数走 —— 清空勾选（全选框取消勾）不算退出，
- *  「取消」/ Esc 才退出；删完一批也留着，方便接着挑下一批 */
+ *  「取消」/ Esc 与删完一批才退出 */
 const picking = ref(false)
 
 /** 勾 / 撤一封（多选态点行、复选框与 Ctrl+点选同一条），并记下锚点 —— Shift 范围选从这儿起算。
@@ -170,19 +239,19 @@ function onItemClick(event: MouseEvent, item: MailListItem): void {
   void mail.openMail(item)
 }
 
-/** 只清勾选，**不退出多选态**（全选框取消勾 / 删完一批都走它）—— 复选框留着接着挑 */
+/** 只清勾选，**不退出多选态**（全选框取消勾走它）—— 复选框留着接着挑 */
 function clearPicked(): void {
   pickedKeys.value = []
 }
 
-/** 退出多选态：勾选清掉、复选框收起，点行恢复开信（勾选条「取消」与 Esc） */
+/** 退出多选态：勾选清掉、复选框收起，点行恢复开信（勾选条「取消」、Esc 与删完一批） */
 function exitPicking(): void {
   picking.value = false
   pickedKeys.value = []
 }
 
-/** 换文件夹就把多选态收掉：勾选是按旧文件夹的身份记的，留着会对着看不见的行报「已选 N 封」 */
-watch(() => mail.folder, exitPicking)
+/** 换签就把多选态收掉：勾选是按旧清单的身份记的，留着会对着看不见的行报「已选 N 封」 */
+watch(() => mail.tab, exitPicking)
 
 /** 此刻看得见的行：收件箱清单 + 展开着的推广段 —— 全选、删除与收起时的修剪都只认这些 */
 const visibleItems = computed(() => (mail.showBulk ? [...mail.list, ...mail.bulkList] : mail.list))
@@ -209,7 +278,8 @@ function togglePickAll(): void {
   else pickAll()
 }
 
-/** 勾选条上的「删除」：只删此刻看得见的勾选（刷新拉回新列表后过期的勾选不算数），确认在视图层 */
+/** 勾选条上的「删除」：只删此刻看得见的勾选（刷新拉回新列表后过期的勾选不算数），
+ *  确认在视图层；删成一批就退出多选态 */
 function deletePicked(): void {
   const items = visibleItems.value.filter(item => picked.value.has(item.key))
   if (!items.length)
@@ -220,7 +290,7 @@ function deletePicked(): void {
         return
       const result = await mail.deleteMails(items)
       if (result.ok)
-        pickedKeys.value = []
+        exitPicking()
       else notifyError(result.error ?? '删除失败')
     },
   )
@@ -397,17 +467,19 @@ const bodyStyle = computed(() => ({
 
 <template>
   <main class="mail-view" :style="bodyStyle">
-    <!-- 左栏：收件箱清单 -->
+    <!-- 左栏：邮件清单（收件箱 / 已发送）或通讯录（联系人那一签） -->
     <aside class="mail-view__side panel">
       <header class="side__head">
         <el-segmented
           class="side__folders"
           size="small"
-          :model-value="mail.folder"
+          :model-value="mail.tab"
           :options="folderOptions"
           @change="changeFolder"
         />
-        <el-tooltip content="刷新" placement="bottom">
+        <!-- 面板级动作摆在这一行的右端，只在自己那一签里出现：
+             邮件签是「刷新」，通讯录签是「新增联系人」 -->
+        <el-tooltip v-if="mail.tab !== 'contacts'" content="刷新" placement="bottom">
           <el-button
             class="side__refresh"
             text
@@ -417,16 +489,28 @@ const bodyStyle = computed(() => ({
             @click="mail.refreshList()"
           />
         </el-tooltip>
+        <el-tooltip v-else content="新增联系人" placement="bottom">
+          <el-button
+            class="side__refresh"
+            text
+            :icon="Plus"
+            aria-label="新增联系人"
+            @click="openContactAdd"
+          />
+        </el-tooltip>
       </header>
 
-      <!-- 出错时清单还在（留着上一次的），每个拉取失败的账户一条压在顶部 -->
-      <div v-for="(message, index) in mail.listErrors" :key="index" class="mail-list__error">
-        {{ message }}
-      </div>
+      <!-- 出错时清单还在（留着上一次的），每个拉取失败的账户一条压在顶部（通讯录签里与信无关，不画） -->
+      <template v-if="mail.tab !== 'contacts'">
+        <div v-for="(message, index) in mail.listErrors" :key="index" class="mail-list__error">
+          {{ message }}
+        </div>
+      </template>
 
-      <!-- 多选态的操作条：与出错条同一个位置。左边那颗是三态全选框（全勾 / 半勾 / 空，
-           取消勾选只是清掉勾选、多选态还在），「取消」才退出多选态 -->
-      <div v-if="picking" class="mail-list__pick">
+      <!-- 多选态的操作条：与出错条同一个位置（只在邮件签上有 —— 换签时多选态已经收掉）。
+           左边那颗是三态全选框（全勾 / 半勾 / 空，取消勾选只是清掉勾选、多选态还在），
+           「取消」才退出多选态 -->
+      <div v-if="picking && mail.tab !== 'contacts'" class="mail-list__pick">
         <span class="mail-list__pick-lead">
           <el-checkbox
             class="mail-list__pick-all"
@@ -451,7 +535,34 @@ const bodyStyle = computed(() => ({
         </span>
       </div>
 
+      <!-- 通讯录那一签：一行一个人（名字 / 地址）。**行上不带按钮** —— 编辑与删除都收在
+           右击弹出的 MailContactMenu 里（与邮件清单行同一种做法），新增走头部那颗动作 -->
+      <div v-if="mail.tab === 'contacts'" class="contact-list" role="list">
+        <div
+          v-for="contact in mail.contacts"
+          :key="contact.address"
+          class="contact-row"
+          :class="{ 'is-removing': removingContact === contact.address }"
+          role="listitem"
+          @contextmenu.prevent="openContactMenu($event, contact)"
+        >
+          <span class="contact-row__name" :title="contact.name || contact.address">
+            {{ contact.name || contact.address }}
+          </span>
+          <span v-if="contact.name" class="contact-row__addr" :title="contact.address">
+            {{ contact.address }}
+          </span>
+          <el-icon v-if="removingContact === contact.address" class="contact-row__removing is-loading">
+            <Loading />
+          </el-icon>
+        </div>
+        <p v-if="!mail.contacts.length" class="contact-list__empty">
+          还没有联系人
+        </p>
+      </div>
+
       <div
+        v-else
         class="mail-list"
         role="listbox"
         :aria-label="mail.folderLabel"
@@ -544,8 +655,11 @@ const bodyStyle = computed(() => ({
 
     <!-- 右栏：阅读区 -->
     <section class="mail-view__main panel">
+      <!-- 通讯录那一签：左边那份名单才是这一签的内容，右栏空着 -->
+      <div v-if="mail.tab === 'contacts'" class="mail-view__blank" />
+
       <!-- 没配置账户：中间就一颗入口（地址、授权码都在那个弹层里填） -->
-      <div v-if="!mail.configured" class="mail-view__blank">
+      <div v-else-if="!mail.configured" class="mail-view__blank">
         <el-button type="primary" :icon="Message" @click="accountVisible = true">
           配置邮箱账户
         </el-button>
@@ -553,7 +667,7 @@ const bodyStyle = computed(() => ({
 
       <!-- 拉正文期间整个阅读区让位给骨架屏：铺满整栏（头像 / 落款 / 主题 / 撑满高度的正文段落），
            段落不足时均匀铺开、超出时裁掉 —— 任何窗口高度下都不留空白，内容看着正在成形 -->
-      <div v-if="mail.bodyLoading" class="mail-skeleton" aria-hidden="true">
+      <div v-else-if="mail.bodyLoading" class="mail-skeleton" aria-hidden="true">
         <div class="mail-skeleton__head">
           <span class="sk sk--avatar" />
           <span class="mail-skeleton__who">
@@ -682,17 +796,28 @@ const bodyStyle = computed(() => ({
       @closed="previewFile = null"
     />
     <MailAccountDialog v-model="accountVisible" @saved="mail.invalidate()" />
+    <MailContactEditDialog v-model="contactEditVisible" :contact="editingContact" />
     <MailComposer v-model="composerVisible" :reply="replyTarget" />
+
+    <!-- 两份清单行的右键菜单（邮件清单 / 联系人名单），同一个位置层级 -->
     <MailContextMenu
       v-if="menu"
       :x="menu.x"
       :y="menu.y"
       :bulk="menu.bulk"
       :seen="menu.seen"
+      :contact="menu.contact"
       :picked-count="pickedKeys.length"
       :sent="menu.folder === 'sent'"
       @act="onMenuAct"
       @close="menu = null"
+    />
+    <MailContactMenu
+      v-if="contactMenu"
+      :x="contactMenu.x"
+      :y="contactMenu.y"
+      @act="onContactMenuAct"
+      @close="contactMenu = null"
     />
   </main>
 </template>
@@ -808,6 +933,70 @@ const bodyStyle = computed(() => ({
   min-height: 0;
   margin-top: var(--sp-2);
   overflow-y: auto;
+}
+
+/* 通讯录那一签的名单：一行一个人，与邮件清单同一副行的分量（名字主色、地址退一档）。
+   行上不带按钮，动作用右击（MailContactMenu）—— user-select: none 与邮件清单行同理 */
+.contact-list {
+  flex: 1;
+  min-height: 0;
+  margin-top: var(--sp-2);
+  overflow-y: auto;
+}
+
+.contact-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2);
+  border-radius: var(--r-md);
+  user-select: none;
+}
+
+.contact-row:hover {
+  background: var(--bg-inset);
+}
+
+/* 删除中：整行退到半透明接不住点（与邮件清单里那几行同一口径） */
+.contact-row.is-removing {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+.contact-row__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink);
+  font-size: var(--fs-body);
+}
+
+/* 地址：有名字时才跟着摆（没名字时它已经在名字那一格了） */
+.contact-row__addr {
+  flex-shrink: 1;
+  min-width: 0;
+  max-width: 55%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink-3);
+  font-size: var(--fs-meta);
+}
+
+/* 正在删的那一行：行尾转个圈（与邮件清单里删信那几行同一副信号） */
+.contact-row__removing {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
+.contact-list__empty {
+  margin: var(--sp-3) 0 0;
+  color: var(--ink-3);
+  font-size: var(--fs-body);
+  text-align: center;
 }
 
 /* 推广邮件段：与收件箱分开的一段 —— 头一行是折叠开关，展开的行不混进上面的清单 */

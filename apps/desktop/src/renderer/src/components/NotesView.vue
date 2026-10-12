@@ -16,13 +16,17 @@ import { ElMessage } from 'element-plus'
  * 两栏的分隔线可以左右拖（宽度住在 theme.json 里，见 shared/theme.ts 的 `noteTreeWidth`），
  * 与首页那两条栏宽把手同一套做法：拖动时只改本地让界面跟手，松手才落盘。
  *
+ * 另外还有一档**只读**（**默认就是它**，Ctrl+/ 切到可写）：读一篇长笔记时不想手一抖改掉它，
+ * 就把这一页的写入口统统收起来（正文、格式菜单、左栏树上的增删改拖），省得「看一眼」变成「改一处」。
+ * 这一档不落盘，开着的时候标题行里挂着「只读」（带快捷键提示）—— 口径与三条守卫见 readOnly / onShortcut 那两段。
+ *
  * 与其它页面一样，它是导航栏上的一项（见 shared/views.ts），换页由 App.vue 的
  * `<KeepAlive><component :is>` 负责 —— 切走再回来时编辑器还是刚才那一篇、光标位置也还在。
  * 数据与动作都在 store 里，这一层负责编排：谁被选中、什么时候弹起名字的弹窗、
  * 增删改的确认与提示。树在 NoteTree，正文编辑在 NoteEditor，
  * 左栏底部那一行与分隔条是 RecentRoots / PanelResizer（与视频页共用）。
  */
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import NoteAssetsDialog from '@/components/NoteAssetsDialog.vue'
 import NoteEditor from '@/components/NoteEditor.vue'
 import NoteNameDialog from '@/components/NoteNameDialog.vue'
@@ -33,11 +37,13 @@ import RecentRoots from '@/components/RecentRoots.vue'
 import SideLoadError from '@/components/SideLoadError.vue'
 import { formatTimestamp } from '@/format'
 import { confirmAction } from '@/notify'
+import { useNavStore } from '@/stores/nav'
 import { useNotesStore } from '@/stores/notes'
 import { useSettingsStore } from '@/stores/settings'
 
 const store = useNotesStore()
 const settings = useSettingsStore()
+const nav = useNavStore()
 
 /**
  * 目录树的展开态（行为记忆）：状态住在设置里，这一层只做「读出来 / 写回去」。
@@ -114,9 +120,63 @@ const bodyStyle = computed(() => ({
 /** 素材管理那个面板：当前笔记本在这台机器上传过哪些图、谁还在用（见 NoteAssetsDialog） */
 const assetsOpen = ref(false)
 
+/**
+ * 只读模式：这一页不接任何写入口，只让人把东西看清楚。**Ctrl+/ 切换**（见 onShortcut）。
+ *
+ * **默认就是这一档**（初值 `true`）：进笔记页先按「读」来，想写才按那一下切过去 ——
+ * 「看一眼」变成「改一处」是这个页面上最容易犯的事（点进代码块、顺手勾一个框、
+ * 甚至贴一张图就推一次 git），把默认值放在安全那一侧，代价只是想写的时候多按一次。
+ *
+ * **不落盘**（不写设置）：它记的是「这一趟用它来干什么」，不是「我偏好什么」——
+ * 落盘的话，某次读着读着关掉应用，下次打开笔记就是不能写的，而那时未必想得起来按什么切回来。
+ * 标题行里那颗「只读」小片（带提示，写着 Ctrl+/）就是这一档的落点。
+ *
+ * 关掉的写入口有三处，各在自己的地方实现，改的时候不要漏掉任何一处：
+ *  1. 正文（NoteEditor 收 `readOnly`，落到 Vditor 的 `disabled()`）：不能打字，
+ *     粘贴 / 拖进来的图片也不会上传（那一下是往图片仓库推一次 git）；
+ *  2. 正文的格式右键菜单（同上）：只读下它一个动作都做不了，索性不弹；
+ *  3. 左栏树上的增删改拖（NoteTree 收 `readOnly`）：**删一篇笔记也是写** ——
+ *     只挡正文的话，「只读」就成了半句假话。
+ *
+ * **不管**左栏底部那两颗按钮（同步、素材管理）：它们动的是远端与图片仓库，
+ * 不是这一页正在读的正文；同步本来就要先把编辑器手上的改动交出去，只读下那一份是空的。
+ */
+const readOnly = ref(true)
+
+/**
+ * Ctrl+/ 切只读。
+ *
+ * 三条守卫都是必须的：
+ *  - **只有在笔记页显示着的时候接手**：KeepAlive 把这一页留在内存里，切走之后监听器还在，
+ *    不判当前页的话在别处按 Ctrl+/ 也会悄悄动它；
+ *  - 焦点在输入框里（起名字的那个弹窗）时让路。**正文是 contenteditable，不能一起挡掉** ——
+ *    正读着某一篇、光标就在编辑器里的时候，才最想按这一下；
+ *  - 还没选笔记本（整页只有一句引导）时不动：那时没有「模式」可言。
+ *
+ * 认 `event.key` 而不是 `event.code`：要的是「打出来是 `/`」，各键盘布局自己算 ——
+ * 有些布局上 `/` 本来就在 Shift 那一档，按 `code` 判就会漏掉它们。
+ */
+function onShortcut(event: KeyboardEvent): void {
+  if (!event.ctrlKey || event.altKey || event.metaKey || event.isComposing)
+    return
+  if (event.key !== '/' || nav.activeView !== 'notes' || !store.root)
+    return
+
+  const target = event.target as HTMLElement | null
+  if (target?.closest('input, textarea, select'))
+    return
+
+  event.preventDefault()
+  readOnly.value = !readOnly.value
+}
+
 onMounted(() => {
   void store.init()
+  // 捕获阶段挂：编辑器 / 弹窗自己也会处理键盘，这一下要在它们之前拿到
+  window.addEventListener('keydown', onShortcut, true)
 })
+
+onBeforeUnmount(() => window.removeEventListener('keydown', onShortcut, true))
 
 /** 第一次进来（或想换一个目录）时挑文件夹；取消就什么都不做 */
 async function chooseFolder(): Promise<void> {
@@ -322,6 +382,7 @@ function syncDoneText(summary: NoteSyncSummary): string {
           :nodes="store.nodes"
           :active-rel="store.activeRel"
           :loaded="store.loaded && !store.loading"
+          :read-only="readOnly"
           @select="store.select"
           @create="({ parentRel, kind }) => openCreateIn(parentRel, kind)"
           @rename="openRename"
@@ -397,6 +458,14 @@ function syncDoneText(summary: NoteSyncSummary): string {
 
           <span class="notes__spacer" />
 
+          <!--
+            只读那一档的落点。**这一档是默认的**，所以它几乎一直挂在这儿，也正因为如此
+            它得同时说清两件事：现在打字没反应是因为它在开着，以及怎么切回去（提示里那句）。
+          -->
+          <el-tooltip v-if="readOnly" content="只读模式：Ctrl+/ 切回可写" placement="bottom">
+            <span class="notes__mode">只读</span>
+          </el-tooltip>
+
           <!-- 保存状态就写在标题这一行：写东西的人需要知道「刚才那段到底存下去了没有」 -->
           <span v-if="store.saveError" class="notes__saved is-error">{{ store.saveError }}</span>
           <span v-else-if="store.active" class="notes__saved">{{ savedText }}</span>
@@ -409,6 +478,7 @@ function syncDoneText(summary: NoteSyncSummary): string {
           :note="store.active"
           :root="store.root"
           :theme="settings.effectiveTheme"
+          :read-only="readOnly"
           @change="onContentChange"
           @open="openNoteLink"
         />
@@ -549,6 +619,30 @@ function syncDoneText(summary: NoteSyncSummary): string {
   flex-shrink: 0;
   font-size: var(--fs-micro);
   color: var(--ink-3);
+}
+
+/**
+ * 只读那一档的标记：与知识库信息面板里那种小片同一副样子（浅底 + 小圆角），
+ * 只是**一行纯字** —— 标题这一行是 `align-items: baseline` 的，里面放图标就得去猜
+ * 那颗 svg 的基线落在哪儿（多半会把整片顶高、看着比旁边那行字浮起来）。
+ *
+ * 高度按标题那一档字号的自然行盒算（18px 行高，比标题的 22px 矮）：
+ * 这一片出现 / 消失时，标题行一整行的高度不变 —— 另加竖向内边距就会顶高，
+ * 模式一切标题行就往下跳一格。
+ *
+ * 为什么非有它不可：这是一档「按下去之后界面几乎不变」的模式（能变的只有打字打不出来），
+ * 一个隐形的快捷键总得有个看得见的落脚点。
+ */
+.notes__mode {
+  display: inline-flex;
+  align-items: baseline;
+  flex-shrink: 0;
+  padding: 0 var(--sp-2);
+  border-radius: var(--r-sm);
+  background: var(--bg-inset);
+  font-size: var(--fs-meta);
+  line-height: 18px;
+  color: var(--ink-2);
 }
 
 .notes__saved.is-error {

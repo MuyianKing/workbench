@@ -3,23 +3,24 @@ import type { AppSettings } from '@/types'
 import { APP_NAME_DEFAULT, APP_NAME_MAX_LENGTH } from '@workbench/appearance'
 import { accountLabel } from '@workbench/auth'
 import { WEATHER_CITY_MAX } from '@workbench/weather'
-import { ElMessage } from 'element-plus'
 /**
  * 设置 · 通用：程序（名称 / 快捷键 / 开机自启）、天气、笔记（图片仓库）、账号与同步仓库。
  *
  * 四个文本项都是「草稿字段」（useDraftField）：边打边存会把半截内容写进设置，
  * 失焦 / 回车才提交，提交后由 store 收敛、收敛后的值回推草稿。
  *
- * 弹窗关掉时要退出快捷键的录制态（open 的 watch）—— 不然下次打开落在「请按下新的组合键」上，
- * 看着像出了错。
+ * 快捷键那一行是一块共用件（HotkeyField）：录制态自己管、失焦即放弃，
+ * 所以这一屏不再需要盯着弹窗开关去复位它。
  */
-import { computed, ref, watch } from 'vue'
+import { computed, ref } from 'vue'
 import AccountDialog from '@/components/AccountDialog.vue'
+import HotkeyField from '@/components/HotkeyField.vue'
 import { useDraftField } from '@/composables/use-draft-field'
 import { useAuthStore } from '@/stores/auth'
 import { useSettingsStore } from '@/stores/settings'
 
-const props = defineProps<{ open: boolean }>()
+// 这一屏不再需要 open，但设置弹窗统一按这个 prop 传；声明着免得被当成未声明属性透到根元素上
+defineProps<{ open: boolean }>()
 
 const settings = useSettingsStore()
 const auth = useAuthStore()
@@ -34,17 +35,6 @@ const isPackaged = computed(() => !import.meta.env.DEV)
 function save(patch: Partial<AppSettings>): void {
   void settings.updateSettings(patch)
 }
-
-/** 快捷键录制状态 */
-const recording = ref(false)
-
-watch(
-  () => props.open,
-  (open) => {
-    if (!open)
-      recording.value = false
-  },
-)
 
 /**
  * 程序名称的草稿（useDraftField，见 composables/use-draft-field.ts）：
@@ -97,89 +87,14 @@ function commitWeatherCity(): void {
 }
 
 // ---------- 快捷键 ----------
+//
+// 录制本身（按键名归一化、Esc 放弃、缺修饰键时的提示）在 components/HotkeyField.vue 与
+// composables/use-hotkey-recorder.ts 里 —— 设置·截图那两条快捷键用的是同一套，
+// 三处录出来的串必须一模一样。这里只管把录到的值存进设置。
 
-const MODIFIER_KEYS = new Set(['Control', 'Shift', 'Alt', 'Meta', 'CapsLock'])
-
-const KEY_ALIAS: Record<string, string> = {
-  ' ': 'Space',
-  'ArrowUp': 'Up',
-  'ArrowDown': 'Down',
-  'ArrowLeft': 'Left',
-  'ArrowRight': 'Right',
-  'Escape': 'Escape',
-  'Enter': 'Return',
-  'Tab': 'Tab',
-  'Backspace': 'Backspace',
-  'Delete': 'Delete',
-  'Home': 'Home',
-  'End': 'End',
-  'PageUp': 'PageUp',
-  'PageDown': 'PageDown',
-}
-
-const PUNCTUATION = '`-=[]\\;\',./'
-
-/** 浏览器 KeyboardEvent.key → 快捷键串里的一段（Rust 侧交给 tauri-plugin-global-shortcut 解析） */
-function normalizeKey(key: string): string | null {
-  if (/^[a-z]$/i.test(key))
-    return key.toUpperCase()
-  if (/^\d$/.test(key))
-    return key
-  if (/^F([1-9]|1\d|2[0-4])$/.test(key))
-    return key
-  if (KEY_ALIAS[key])
-    return KEY_ALIAS[key]
-  if (PUNCTUATION.includes(key))
-    return key
-  return null
-}
-
-/** 人类可读的展示形式：Control+Shift+W → Ctrl + Shift + W */
-const hotkeyLabel = computed(() =>
-  settings.settings.hotkey
-    .split('+')
-    .map((part: string) => part.trim())
-    .filter(Boolean)
-    .join(' + '),
-)
-
-function captureHotkey(event: KeyboardEvent): void {
-  // Esc 是「放弃这次录制」的正常路径：静默退出录制态并拦住事件 ——
-  // 不拦的话它会冒泡到 el-dialog 的 close-on-press-escape，把整个设置弹窗一起关掉
-  if (event.key === 'Escape') {
-    recording.value = false
-    event.stopPropagation()
-    return
-  }
-
-  const key = normalizeKey(event.key)
-  // 只按住修饰键时还没构成组合，继续等
-  if (MODIFIER_KEYS.has(event.key) || !key)
-    return
-
-  const parts: string[] = []
-  if (event.ctrlKey)
-    parts.push('Control')
-  if (event.shiftKey)
-    parts.push('Shift')
-  if (event.altKey)
-    parts.push('Alt')
-  if (event.metaKey)
-    parts.push('Super')
-
-  if (parts.length === 0) {
-    ElMessage.warning('快捷键至少需要一个修饰键（Ctrl / Shift / Alt）')
-    return
-  }
-
-  const accelerator = [...parts, key].join('+')
-  recording.value = false
+function saveHotkey(accelerator: string): void {
   // 换了组合键要重新注册，所以一定带上启用开关
   save({ hotkey: accelerator, hotkeyEnabled: true })
-}
-
-function startRecording(): void {
-  recording.value = true
 }
 </script>
 
@@ -222,18 +137,11 @@ function startRecording(): void {
       </div>
 
       <div class="row row--hotkey">
-        <button
-          class="hotkey"
-          :class="{ 'is-recording': recording }"
-          type="button"
+        <HotkeyField
+          :model-value="settings.settings.hotkey"
           :disabled="!settings.settings.hotkeyEnabled"
-          @click="startRecording"
-          @keydown="recording && captureHotkey($event)"
-        >
-          <span v-if="recording" class="hotkey__recording">请按下新的组合键…</span>
-          <span v-else class="hotkey__value mono">{{ hotkeyLabel }}</span>
-        </button>
-        <span class="row__hint row__hint--tight">点击后直接按组合键即可替换（按 Esc 放弃）</span>
+          @update:model-value="saveHotkey"
+        />
       </div>
 
       <div class="row">
@@ -379,39 +287,5 @@ function startRecording(): void {
 
 .row--hotkey {
   align-items: center;
-  gap: var(--sp-3);
-}
-
-.row__hint--tight {
-  margin-top: 0;
-  flex-shrink: 0;
-}
-
-.hotkey {
-  min-width: 168px;
-  height: 30px;
-  padding: 0 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-sm);
-  background: var(--bg-subtle);
-  color: var(--ink);
-  font-size: var(--fs-meta);
-  cursor: pointer;
-  transition: border-color 0.15s ease;
-}
-
-.hotkey:hover:not(:disabled) {
-  border-color: var(--border-strong);
-}
-
-.hotkey:disabled {
-  color: var(--ink-3);
-  cursor: not-allowed;
-}
-
-.hotkey.is-recording {
-  border-color: var(--st-run);
-  color: var(--st-run);
-  background: var(--st-run-soft);
 }
 </style>

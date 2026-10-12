@@ -362,6 +362,16 @@ export function recipientAddress(raw: string): string {
   return first ? senderAddress(first) : ''
 }
 
+/**
+ * 收件人头部 → 第一个收件人的展示名（信里没写名字就给地址）：发件箱里「存为联系人」
+ * 用它当名字。群发的信只认头一个（一封信存不出好几个联系人），其余靠用户对着别的信
+ * 再右击一次，或到联系人弹层里手加。
+ */
+export function recipientDisplay(raw: string): string {
+  const first = splitAddressList(raw)[0]
+  return first ? displaySender(first) : ''
+}
+
 function decodeName(raw: string): string {
   const text = raw.trim().replace(/^"|"$/g, '').trim()
   if (!text)

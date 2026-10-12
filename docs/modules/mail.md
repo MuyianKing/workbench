@@ -6,7 +6,8 @@
 
 ## 约束
 
-关键落点：`packages/mail/src/`（账户配置的形状与收敛、RFC 2047 编解码、发信报文构建
+关键落点：`packages/mail/src/`（账户配置的形状与收敛、通讯录的形状与收敛 `contacts.ts`、
+RFC 2047 编解码、发信报文构建
 `mime.ts`、收信解析与沙箱正文 `parse.ts`、广告识别与发件人黑名单 `bulk.ts`，全部带单测；MIME 解析用 postal-mime）、
 `apps/desktop/src-tauri/src/mail.rs`（Schannel TLS + 手写的 IMAP/SMTP 命令子集 + 全部
 `mail_*` 命令）、`apps/desktop/src-tauri/src/mail_watch.rs`（后台监视：按设置周期的新邮件
@@ -26,6 +27,10 @@
   天然多账户），之后 Rust 侧命令自己读（`auth_code`）；渲染层只在「验证并保存」那一次经参数递它。
   界面上只显示「已配置 / 未配置」。连接参数（地址 / 主机 / 端口）走 `settings.mailAccounts`
   落 workbench-data.json，由 `sanitizeMailAccounts` 收敛 —— 这两者是两条不同的落盘，别混。
+- **通讯录只住本机、不进任何出口**：联系人（名字 + 地址）住 `settings.mailContacts` 那份
+  明文 JSON（不进凭据管理器、不参与外观同步、不发往任何服务器），形状与收敛在
+  packages/mail/src/contacts.ts（地址是身份，按地址去重）。**别把它接进同步仓库、
+  也别为它加接口** —— 它只服务写信时的收件人下拉。
 - **多账户**：账户是一份清单（`settings.mailAccounts`，上限 5 —— 逐项收敛、按地址去重，
   没地址的半截丢掉），当前文件夹里各账户合并成**一条按时间排的时间线**（按头部日期新在前，
   不按来源分组），每封摘要带来源账户：多账户时清单行标注 `accountTag`（本地部分 + 域名第一段）、
@@ -107,13 +112,17 @@
 
 - **页面**（MailView.vue）：左清单右阅读的左右分栏（与 AI / 笔记 / 视频页同一副外壳），
   左栏宽度住 theme.json 的 `mailListWidth`（拖两栏之间那条缝改，PanelResizer 三段式：
-  拖动只改本地、松手落盘）。**左栏头部是一颗分段选择器**（`el-segmented`，收件箱 / 已发送；
-  换文件夹就把多选态收掉 —— 勾选是按旧文件夹的身份记的）。清单行拆在 MailListRow.vue
+  拖动只改本地、松手落盘）。**左栏头部是一颗分段选择器**（`el-segmented`，**三签**：
+  收件箱 / 已发送 / **联系人**；换签就把多选态收掉 —— 勾选是按旧清单的身份记的）。
+  前两签是邮件清单：那两签之间切换走 `setFolder`（关阅读栏、清清单、重拉），
+  切进联系人签只走 `setTab` 的「收掉阅读栏」那半条 —— **`folder` 不动、邮件清单留在内存里**，
+  切回收件箱立刻还是那批信（通知点开也会把签拉回邮件上，见 setFolder 里那行 `tab.value = next`）。
+  清单行拆在 MailListRow.vue
   （收件箱清单 / 推广段 / 发件箱共用一副）：行首复选框，
   第一行「未读点 + 发件人 + 日期」（发件箱里换成收件人、不画未读点）、
   第二行「主题 + 附件回形针 + 来源（多账户时）」；
   底部一行是「账户 / 写邮件」两个入口。拉列表的时机：页面挂载、
-  KeepAlive 换页回来（onActivated）、点刷新、切文件夹；`listInFlight` 挡住重复，
+  KeepAlive 换页回来（onActivated）、点刷新、切邮件签；`listInFlight` 挡住重复，
   拉的中途切了文件夹就把这批结果丢掉（`requested !== folder` 那条比对）。
   发件人展示名与主题的 RFC 2047 解码在行组件里做（`displaySender` / `decodeEncodedWords`），
   收件人那一路是 `displayRecipients`（顿号连接，引号串里的逗号不当分隔符）。
@@ -148,8 +157,8 @@
   （**不常驻**，平时点行就是开信），点行从「开信」变成「勾 / 撤」（Shift 从锚点整段勾），
   清单上方出一条操作条「已选 N 封」——删除（确认框过一道，只删此刻看得见的勾选）与取消。
   **多选态是显式的开关，不跟着勾选数走**：勾选条左侧那颗**三态全选框**（看得见的全勾上 =
-  勾、勾了一部分 = 半勾）取消勾选只是**清掉勾选**——复选框还亮着、接着挑；删完一批也
-  留在多选态里；只有操作条上的「取消」或 Esc 才退出（复选框收起，点行恢复开信）。
+  勾、勾了一部分 = 半勾）取消勾选只是**清掉勾选**——复选框还亮着、接着挑；删完一批就退出
+  多选态（复选框收起，点行恢复开信，要接着删从头挑）；操作条上的「取消」或 Esc 也退出。
   全选框勾上 / Ctrl+A = 勾上看得见的全部（含展开着的推广段）。右键菜单跟着勾选态变：
   已勾选时「多选删除」变成「删除所选 N 封」——直接确认删掉整批；「删除邮件」始终只删
   右击的那一封。服务器侧只有一条
@@ -173,12 +182,41 @@
   弹层留着接着添下一个，编辑保存后关掉。**「删除」**（清单行上，走 ElMessageBox 确认）：
   该账户的授权码清出凭据管理器 + 从清单摘掉。校验失败就地显示（formError 行），不飘 toast。
 - **写信弹层**（MailComposer.vue，penetrable）：配了多个账户才摆「发件邮箱」选择
-  （回信默认收信的那个，新邮件是清单第一个；一个账户不画这栏）；收件人支持逗号 / 分号 /
-  空白分隔、逐个验 @；附件 `pickFiles` 多选 + `readBinaryFile` 读成 base64（文件是用户
+  （回信默认收信的那个，新邮件是清单第一个；一个账户不画这栏）；**收件人是一颗可新建的
+  多选下拉**（`el-select` multiple + filterable + allow-create + default-first-option）——
+  候选是通讯录那一条条（标签「名字 <地址>」，见 contacts.ts 的 `contactLabel`），也可以
+  当场打一个地址回车进去（`default-first-option` 让「打的正好是已有联系人」这种情况落回
+  选项而不是新建一条重复的）；**粘进来的值照样认**：选中的每一项都过一遍
+  `splitTypedAddresses`（逗号 / 分号中英文 / 空白都是分隔符），所以「a@x.com, b@y.com」
+  粘成一条也是两个收件人。已填的值不在通讯录里时（手打的、回信预填的）补成候选 ——
+  el-select 对没有对应项的值会拿值本身当标签，补一条更稳。**发信不顺手存联系人**：
+  地址在这里只用来发信，要不要进通讯录由用户自己说（右键存 / 左栏「联系人」那一签里加）。
+  附件 `pickFiles` 多选 + `readBinaryFile` 读成 base64（文件是用户
   亲手挑的，不需要圈范围）；回信预填 `Re:` 与 `> ` 引用体。发送失败表单原样留着，
   改一改能再发。**发送成功不主动重拉收件箱**（新信未必排得进最近 50 封，用户自己点刷新），
   但发件箱正开着就顺手重拉一次 —— 服务器把刚发的存进了已发送，切过去也一定能看到
   （`setFolder` 会重拉）。
+- **通讯录**（左栏的「联系人」那一签 + MailContactEditDialog.vue / MailContactMenu.vue；
+  数据住设置的 `mailContacts`）：一份
+  **只住在本机的小名单**，形状与收敛在 contacts.ts（`MailContact` = 名字 + 地址，
+  **地址就是身份**：按地址去重、`sanitizeMailContacts` 丢没有地址的、上限 500；
+  **不参与外观同步、不进任何出口、不碰服务器** —— 与 `mailBulkSenders` 同一待遇）。
+  **名单就是左栏那一签**（列表归列表）：一行一个人 —— 名字（没名字就摆地址，两者相同
+  时不重复画）＋ 地址，**行上不带按钮**：编辑与删除收在右击弹出的 MailContactMenu 里
+  （与邮件清单行的右键菜单同一副外壳：位置贴指针、夹回窗口、左键点别处 / Esc 收起），
+  空名单就一句「还没有联系人」，删除中那行变淡转圈。
+  右栏在那一签里空着（`mail.tab === 'contacts'` 那条分支），头部右端那颗面板级动作从
+  「刷新」换成「**新增联系人**」（只在自己那一签出现）。**新增与编辑都开那颗小弹窗**
+  （MailContactEditDialog，penetrable）：名字（可留空）＋ 邮箱地址两栏，
+  编辑时地址锁死 —— 它是身份，换地址走「删除 + 新增」（与邮箱账户同一条口径），
+  新增时撞上名单里已有的地址就地说一句；保存后关掉弹窗。**删除不做确认框**
+  （名单里少一条随时能再加回来），失败才飘一条错误。
+  另一个入口是清单行右击「**存为联系人**」（MailContextMenu 首项）—— 存的是这一行的
+  **对方**（收件箱看发件人 `senderAddress` / 显示名取 `displaySender`，发件箱看收件人
+  `recipientAddress` / `recipientDisplay`，群发的信只认头一个），已经在名单里时这一项
+  变成「移出联系人」（与「标记为广告」同一种两态写法）；信里没写名字（展示出来就是个
+  地址）时只存地址，别把地址抄成名字。这份名单只服务写信时的收件人下拉，
+  别把它扩成第二套通讯录。
 - **列表摘要的来路**：Rust 按序号区间拉最近 N 封的 `UID FLAGS BODY[HEADER.FIELDS
   (FROM TO SUBJECT DATE)] BODYSTRUCTURE`，ENVELOPE 不用 —— 头部四件套是原始文本，
   拆解（编码词 / 名字与地址 / 日期）全在 TS。收件人（TO）收件箱用不上，发件箱的清单行
@@ -248,7 +286,7 @@ apps/desktop/src/renderer/src/stores/mail.ts
   发送 / 后台监视的登记与通知点击
   （startWatch）；拉取时机在这层
 apps/desktop/src/renderer/src/components/MailView.vue
-  邮箱页：左清单右阅读（头部一颗分段选择器切收件箱 / 已发送）；HTML 正文走 sandbox iframe（外链图片照常显示，脚本全禁，链接经顶层导航转交系统浏览器）；
+  邮箱页：左清单右阅读（头部一颗分段选择器切收件箱 / 已发送 / 联系人）；HTML 正文走 sandbox iframe（外链图片照常显示，脚本全禁，链接经顶层导航转交系统浏览器）；
   附件片按 attachmentKind 分打开方式：图进 EP 查看器、md / docx / pptx 进 MailAttachmentDialog，其余点开另存为
 apps/desktop/src/renderer/src/components/MailAttachmentDialog.vue
   附件预览弹层：md（MarkdownView）/ docx（AiPreviewDoc）/ pptx（AiPreviewSlides）在应用里看；

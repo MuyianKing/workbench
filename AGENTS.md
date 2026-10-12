@@ -1,109 +1,68 @@
 # AGENTS.md
 
 本文件是 Workbench 的 AI Coding Agent 约束：只写跨模块的硬约束，一行一条，不写解释。每个模块一份文档，
-在 [docs/modules/](docs/modules/) 下（开头「约束」一节是不能破的规矩、动手前先读，后面是实现细节，索引见第 5 节），
-跨模块的通用事实（壳层、技术栈、目录结构、数据与隐私）在
-[features-and-architecture.md](docs/features-and-architecture.md)，动手方法与踩坑见 [docs/dev-notes/](docs/dev-notes/)。
+在 [docs/modules/](docs/modules/) 下（开头「约束」一节是不能破的规矩、动手前先读，后面是实现细节，索引见第 5 节）；
+跨模块的通用事实在 [features-and-architecture.md](docs/features-and-architecture.md)，**联网、弹层、目录结构这三块的细则只在
+它的「数据与隐私」与「功能」两节，动到再读它**（本文件只留闸门）；动手方法与踩坑见 [docs/dev-notes/](docs/dev-notes/)，
+通用知识库的位置见 [AGENT-DOC.md](AGENT-DOC.md)。
 第 0 节为跨项目通用约束，第 1 节起为本项目专属，冲突时以后者为准。
 
 ## 0. 通用约束
 
-跨项目模板；与本文件后文重复的条目只保留后文那一份。
-
-### 修改原则
+跨项目模板（全文在 `.agents/skills/generate-project-constraints/AGENT_COMMON.md`）；与本文件后文重复的条目只保留后文那一份。
 
 - 改文件前先读懂现有实现，沿用所在模块的风格、命名与技术模式，不凭文件名或框架习惯猜。
 - 只做需求所需的最小修改，不做无关重构；一次改动涉及多个文件时保持接口、命名、数据结构和调用链一致。
 - 新增依赖前先查项目已有的依赖、组件、插件与工具，能复用就不引同类库。
 - 不主动新建 README、CI、Docker、测试配置、类型声明等非用户要求的文件（更新既有文档不算新建）。
-
-### 组件设计
-
-- 一个组件只担一类职责；父组件负责编排与取数，子组件用 props 收输入、经事件或双向绑定回传，不直接改父级状态。
-- 不用 DOM 查询、隐式全局变量或事件总线传业务数据；子组件不依赖父组件内部状态与宿主页面实现。
-- 弹窗、表单、列表与复杂交互按职责拆子组件；接口调用归实际负责该动作的组件或 API 模块。
-
-### UI 与样式
-
-- 复用顺序：项目既有业务组件 → 项目基础公共组件 → UI 库原生组件 → 新增局部组件。
-- 改响应式布局要同时检查模板、局部样式与媒体查询，避免同一属性多个来源打架。
-
-### 验证与 Git
-
+- 一个组件只担一类职责；父组件负责编排与取数，子组件用 props 收输入、经事件或双向绑定回传，不直接改父级状态，
+  也不依赖父组件内部状态与宿主页面实现；弹窗、表单、列表与复杂交互按职责拆子组件，接口调用归实际负责该动作的组件或 API 模块，
+  不用 DOM 查询、隐式全局变量或事件总线传业务数据。
+- 复用顺序：项目既有业务组件 → 项目基础公共组件 → UI 库原生组件 → 新增局部组件；改响应式布局要同时检查模板、局部样式与媒体查询。
 - 较大改动后跑项目已有的静态检查或测试命令；没有对应脚本时不自行引入测试框架。
 - 禁止 `git reset --hard`、`git clean -f`、强制推送等破坏性操作，除非用户明确要求。
-- 文件引用：对话回复用可跳转的绝对路径链接；写进仓库文档的用相对当前文件的相对路径。
+- 文件引用：写进仓库文档的用相对当前文件的相对路径；对话回复用可跳转的绝对路径链接。
 
 ## 1. 项目边界
 
 - 定位：Windows 桌面应用（Tauri 2 + WebView2），一个窗口里管项目、记工作、写笔记、看 AI 用量；pnpm workspace monorepo
-  （应用在 `apps/desktop/`，纯逻辑按域拆在 `packages/` 的 14 个 `@workbench/*` 包，见第 2 节），`Cargo.lock` 要提交；
+  （应用在 `apps/desktop/`，纯逻辑按域拆在 `packages/` 的 15 个 `@workbench/*` 包，见第 2 节），`Cargo.lock` 要提交；
   例外：`vendor-pi.mjs` 内部装 Pi 仍走 `npm install`（`resources/pi/` 要整树打进安装包，不能用符号链接布局）。
-- **联网边界：默认不联网、不上报任何数据；出口只有九个，且都由用户显式开启**：用户自己填的两个 git 仓库（用量同步、笔记图片，
-  留空即关闭）与**笔记自己那个仓库**（地址不在设置里 —— 跟着那个笔记文件夹的 `origin` 走，且只有用户点了同步才会跑一次 git；
-  没仓库的文件夹就是本机的笔记，应用既不 `git init` 也不替用户接远端；**知识库**（`kbDir` 指向的那个
-  独立项目）的同步走同一条路 —— 推它自己连的 `origin`，同样只在点同步时跑一次 git，应用不写它的内容；
-  知识库的**原始数据来源**还可以是本机的其它文件夹（来源名 → 文件夹的映射，配置只落数据文件、只对本机成立；
-  指到网络位置时读取走系统文件访问，应用自己不发请求 —— 那只是「去哪儿读」，应用不搬运、不复制、不删除任何文件））、账号登录与 token 到期续期（都只打 GitHub / Gitee 的 OAuth 接口）、命令执行本身、AI 热点（源地址是 Rust 侧
-  `ai_news.rs` 的 `SOURCES` 白名单，渲染层只能报源 id、拿不到任何地址；卡片画在首页上且到了该源自己的刷新间隔才 GET，
-  只读不上报；白名单里只收免费、不需要凭据的中文源，用户不想看就把那张卡片关掉；**站内阅读**是同一个出口的
-  延伸：用户点开某一条时才去抓那篇正文，域名另有一道 `article_hosts` 白名单卡着 —— 只认源站自己的域名与它的子域，
-  页面脚本不执行、只取正文文本）、实时天气（设置里的 `weatherCity` 填了城市才会取，留空即关闭；主机名白名单是 Rust 侧
-  `weather.rs` 里那**两个**，各管一段 —— 城市名检索走 OpenStreetMap 的公开 Nominatim 接口
-  （Open-Meteo 自带的检索对部分中文名匹配不上，实测「常州」搜不到）、实况走 Open-Meteo 的
-  forecast；**城市名会作为查询串发出去**，这是这条出口唯一的用户内容）、AI 助手（用户自己配的 AI 服务：名称 / Base URL / API 形态 /
-  模型 / API Key 都齐且用户点了发送才会走；请求由那个子进程直接发，**它在工作目录里读到的内容、以及这一段会话的历史
-  都会发给你自己配的那个端点**（清洗知识库那一轮还包括各**来源文件夹** —— 原始资料常常在知识库文件夹外面），
-  配置的形状与收敛在 `packages/ai/src/ai.ts`；**同一条出口还包括「拉模型列表」** ——
-  用户在弹窗里粘上 Key / 点「获取列表」时，按他填的 Base URL GET 一次 `/models`，同一个主机同一把 Key，不点就不走）、**装技能**
-  （AI 助手页那颗「技能」按钮里的「粘地址」：地址由用户粘、点了「装上」才走一次 GET，主机不设白名单、跟着跳转最多 5 跳、
-  只收 zip 且超过 64 MB 就停 —— 与「用户自己填的 git 仓库」同一类「地址由用户给」的出口；**只有这一件事需要出网**：
-  导入本地 zip / 导入目录、装卸开关、`--skill` 注入全在本机，见 `pi_skills.rs` 与 `docs/modules/ai.md`）、
-  **邮箱**（第十条出口；邮箱页里填了邮箱地址、授权码进了凭据管理器才会连**用户配置的**收发服务器 ——
-  IMAP 收信、SMTP 发信各一台，主机不设白名单，与「装技能」同一类「地址由用户给」的出口；
-  授权码走凭据管理器不落明文，**邮件 HTML 正文的外链图片跟着信里的地址加载**（脚本 / 字体 /
-  音视频 / iframe 等其余外链资源照旧一律不加载）—— 这条功能的网络目标是收发服务器与
-  信里引用的图片主机；进页面 / 手动刷新 / 发信才联网，此外配了账户后有**后台新邮件检查**
-  （`mail_watch.rs`，周期在邮箱账户弹层里设、默认 30 分钟、可关，连的还是用户配置的
-  那台收件服务器），判定与通知见 `docs/modules/mail.md`）。
-  不要新增网络出口、不往任何第三方服务发数据；笔记里的外链图片不算新出口；
-  密码保险库也不算 —— 它推的是**用量同步那个仓库**的另一个目录（`vault/vault.json`），推上去的只有密文；
-  登录内嵌的 client_id/secret 是这条边界唯一一次放宽。
+- **联网边界：默认不联网、不上报任何数据；出口只有十条，且都由用户显式开启** —— 清单与每条细则见
+  [features-and-architecture.md](docs/features-and-architecture.md) 的「数据与隐私」一节，**动联网代码前先读那一节**。
+  **不要新增网络出口、不往任何第三方服务发数据**；笔记里的外链图片、密码保险库（推的是用量同步那个仓库的 `vault/vault.json`，
+  推上去的只有密文）都**不算**新出口；登录内嵌的 client_id/secret 是这条边界唯一一次放宽。
 - 引新前端依赖先看它会不会在**运行时**去取外面的资源（Vditor 就是这类：资源按 `options.cdn` 取，默认指 unpkg）—— 这类要么把资源
   随包带一份、要么别引。
 - Rust 依赖的判据是**不新增编译单元**，不是「不新增 crate 名」：先 `cargo tree -e normal -i <crate>` 确认它已经在图里；不要引
-  `reqwest`、`git2`、`sysinfo` 这类会拉进整套栈的 native / 运行时依赖。唯一的例外是邮箱的 TLS：`schannel` 是系统自带
-  Schannel 的纯 FFI 封装（无 C 编译），唯一依赖 windows-sys ^0.61 已在图里、恰好只新增这一个编译单元 —— IMAP/SMTP 要的是
-  「TCP 流 + 隐式 TLS」，`http.rs` 的 WinHTTP 封装是 HTTP 专用用不上（见 mail.rs）。
-- 唯一需要用户预装的外部程序是 **git**，只在两处用它：`sync.rs` 的几处同步与 `skills.rs` 的版本提交 / 同步（外加两条只读探测：
-  笔记文件夹的仓库状态 `repo_state`（笔记 / 知识库 / AI 助手的工作目录都走它 —— 它本来就是「对任意文件夹、认它自己的
-  `.git` 与 origin」的通用实现；AI 助手页另外拿它回的当前分支说清在哪儿干活）、技能库所在的仓库 `skills::state`）。直启 `git.exe`（`proc::run_direct`），**不要**经 `cmd /C`；
-  子进程一律带 `GIT_TERMINAL_PROMPT=0` 与 `-c core.quotepath=false`（前者：没有终端可问，挂着只会等超时；后者：git 默认把非 ASCII
-  路径转义成八进制，中文文件名在冲突提示里会变成乱码，而它是个每台机器都可能不同的全局项）；超时与失败收敛成给用户看的提示。
-  **应用只在用户自己那两个文件夹（笔记本、技能库）所在的仓库里跑 git，且从不写它们的远端配置**
-  （不 `init`、不 `remote add` / `set-url`；只在仓库没配过身份时写一次本地 `user.email` / `user.name` 兜底）。
-  别处不新增这类外部依赖。
+  `reqwest`、`git2`、`sysinfo` 这类会拉进整套栈的 native / 运行时依赖。唯一例外是邮箱的 TLS（`schannel`，理由见 `mail.rs`）。
+- 唯一需要用户预装的外部程序是 **git**：`sync.rs` 的几处同步与 `skills.rs` 的版本提交 / 同步，外加两条只读探测
+  （笔记 / 知识库 / AI 助手工作目录的 `repo_state`、技能库的 `skills::state`）。直启 `git.exe`（`proc::run_direct`），**不要**经 `cmd /C`；
+  子进程一律带 `GIT_TERMINAL_PROMPT=0` 与 `-c core.quotepath=false`（前者：没有终端可问，挂着只会等超时；后者：中文文件名在冲突提示里会变乱码）；
+  超时与失败收敛成给用户看的提示。**只在用户自己那两个文件夹（笔记本、技能库）所在的仓库里跑 git，且从不写它们的远端配置**
+  （不 `init`、不 `remote add` / `set-url`；只在仓库没配过身份时写一次本地 `user.email` / `user.name` 兜底）。别处不新增这类外部依赖。
 - VS Code 是唯一**可选**的外部程序，只服务项目卡的「在 VS Code 中打开」：走它自己注册的 `vscode://` 协议（`system.rs` 的
   `open_in_vscode`），不去找 `Code.exe` 的安装路径；没装只影响那一个菜单项，不要照着再引别的编辑器。
 - **Pi**（开源编码 Agent）只服务 AI 助手页（一个通用控制台：左栏按项目列会话、右栏跟一段对话，它去干活）：**随包内置** —— `apps/desktop/scripts/vendor-pi.mjs` 在构建 / 开发前
-  生成瘦身的 `apps/desktop/resources/pi/`（钉死版本、删掉运行时用不到的云厂商 SDK，细则见 [constraints/ai.md](docs/modules/ai.md)），
+  生成瘦身的 `apps/desktop/resources/pi/`（钉死版本、删掉运行时用不到的云厂商 SDK，细则见 [ai.md](docs/modules/ai.md)），
   Node 用系统里的（≥ 22.19，门槛判定在 `packages/ai/src/ai.ts`）。它跑 **RPC 模式**（提示词与「命令让不让跑」的答复都走子进程的 stdin，
   两档工具权限见 docs/modules/ai.md），**一个会话一个进程**（一轮跑完不收：连续对话靠它），会话留档由 Pi 自己写在
-  `data\pi\sessions\`（起进程时传 `--session-id` 与 `--session-dir`，**不要传 `--no-session`**）。跑它时子进程必须带 `PI_TELEMETRY=0`、`PI_SKIP_VERSION_CHECK=1` 与 `PI_OFFLINE=1`（它默认会
-  报遥测、向 pi.dev 查最新版本、RPC 启动时还刷一遍模型目录 —— 那三条不在任何已登记的出口里），密钥只经环境变量给，**进程直启不经 `cmd /C`**（行内层引号会被
-  cmd 拆坏，见 session.rs 的 `spawn_args`）。别照着再引别的 Agent。
-- 测试用 Vitest（14 个域包各自跑自己的用例，根目录 `pnpm test` = `pnpm -r test` 聚合；渲染层用例在 `@workbench/desktop` 包里）
-  + `cargo test`（写在同文件的 `#[cfg(test)] mod tests`）。**TypeScript 与 vue-tsc 的版本不要动**：
-  升到 TS 7 会让 `pnpm run typecheck` 直接不可用。
+  `data\pi\sessions\`（起进程时传 `--session-id` 与 `--session-dir`，**不要传 `--no-session`**）。跑它时子进程必须带 `PI_TELEMETRY=0`、`PI_SKIP_VERSION_CHECK=1` 与 `PI_OFFLINE=1`
+  （它默认会报遥测、向 pi.dev 查最新版本、RPC 启动时还刷一遍模型目录 —— 那三条不在任何已登记的出口里），密钥只经环境变量给，
+  **进程直启不经 `cmd /C`**（行内层引号会被 cmd 拆坏，见 session.rs 的 `spawn_args`）。别照着再引别的 Agent。
+- 测试用 Vitest（15 个域包各自跑自己的用例，根目录 `pnpm test` = `pnpm -r test` 聚合；渲染层用例在 `@workbench/desktop` 包里）
+  + `cargo test`（写在同文件的 `#[cfg(test)] mod tests`）。**TypeScript 与 vue-tsc 的版本不要动**：升到 TS 7 会让 `pnpm run typecheck` 直接不可用。
 - 仅 Windows，不做 macOS / Linux 适配。
 
 ## 2. 文件落位
 
 - 总览：monorepo。桌面应用自包含在 `apps/desktop/` —— Rust 在 `src-tauri/src/`、渲染层在 `src/renderer/src/`（组件 `components/`、
   store `stores/`、交互骨架 `composables/`、适配层 `workbench/`、设计令牌与全局样式 `styles/`）、随包资源 `resources/`、构建脚本 `scripts/`；
-  跨页面复用的类型 / 契约 / 纯逻辑按域拆在 `packages/` 的 14 个包里：`core`（平台原语：Result、端口与路径、扫描、命令、快捷启动、
-  图标缓存、日期）、`notes` / `video` / `appearance`（含设计参考库）/ `terminal` / `kb` / `skills` / `ai`（含 Pi 技能与 AI 热点）/
-  `usage`（用量与各 IDE 日志源）/ `work-log` / `vault` / `auth` / `weather` / `mail`（账户配置收敛、RFC 2047、发信报文构建、收信解析、广告邮件识别）。逐文件分工见架构文档的「目录结构」。
+  跨页面复用的类型 / 契约 / 纯逻辑按域拆在 `packages/` 的 15 个 `@workbench/*` 包里（`core` 是平台原语，其余按业务域；
+  逐包逐文件分工见 [features-and-architecture.md](docs/features-and-architecture.md) 的「目录结构」）。
+- 渲染层有**三个 HTML 入口**（`src/renderer/` 下，`vite.config.ts` 的 `rollupOptions.input`）：`index.html`（主界面）、
+  `capture.html`（截图遮罩）、`pin.html`（钉图）。后两个是独立窗口、各自的 JS 上下文，**只装适配层，不装 store、不 initState**
+  —— 装了会与主窗口抢着读 / 写同一批数据文件（见 [screenshot.md](docs/modules/screenshot.md)）。
 - 域包之间与应用对域包一律**按包名导入**（`@workbench/<包>`，只走各包 `index.ts` 桶）；解析走 pnpm 的 workspace 软链 + 各包
   `exports`（TS 源码直出），TS 检查由根目录唯一的 `tsconfig.json` / `tsconfig.test.json` 的 paths 兜底。渲染层内部别名
   `@` → `apps/desktop/src/renderer/src`（`@shared` 已随拆包删除）。单测与被测模块同目录，命名 `*.test.ts`。
@@ -113,14 +72,6 @@
 - 随包带的第三方静态资源放 `apps/desktop/src/renderer/public/`；引用用相对基址（`import.meta.env.BASE_URL`），不写死 `/xxx`。
 - OAuth 凭据来自 `apps/desktop/src-tauri/oauth.local.json`（`build.rs` 注入后 `include_str!`）：**不入库**（模板 `oauth.example.json`），
   缺它照样能编译，只是登录按钮显示「未内置凭据」。
-- 官网 `site/` 是独立静态站：无构建、无依赖，不进 `pnpm run typecheck` 与打包流程；页面上那几张应用配图是照
-  [tokens.css](apps/desktop/src/renderer/src/styles/tokens.css) 重画的（改了令牌要一起改）。`site-claude/` 是同一套内容的第二版，
-  照根目录 [DESIGN.md](DESIGN.md) 那套规范画：**独立于 tokens.css**（要改的是 DESIGN.md），配图的尺寸照应用比例、
-  颜色圆角照规范。细节见 [docs/modules/site.md](docs/modules/site.md)。
-- 文档分工：[README.md](README.md) 给概览与上手；[docs/modules/](docs/modules/) 每模块一份文档
-  （「约束」一节装硬规矩、后面是实现细节）；[features-and-architecture.md](docs/features-and-architecture.md)
-  装跨模块的通用事实；本文件写跨模块约束的骨架；`docs/dev-notes/` 写动手方法与踩坑；[AGENT-DOC.md](AGENT-DOC.md) 通用知识库的配置
-
 ## 3. 编码规范
 
 - 全量 TypeScript（`strict: true`）；Vue SFC 一律 `<script setup lang="ts">`，不写 Options API；接口用 `defineProps` / `defineEmits`，props 只读。
@@ -151,8 +102,8 @@
   `.el-overlay` 统一处理）；其余属性与插槽原样透传。
 - 弹层开着时导航栏仍然可用（导航栏浮在遮罩之上，见 [NavRail.vue](apps/desktop/src/renderer/src/components/NavRail.vue)）；
   **换页不关弹层** —— 弹框留在原地，切回来还是它，别在换页路径上加「收弹层」的动作。
-- **填内容的弹层传 `penetrable`（不挡背后）**：密码、工作记录、命令、常用软件、添加项目、起名字、素材管理这几个
-  「要回别处抄一段再填」的弹层都这么开，遮罩只围住弹框自己；代价是没有「点外面关掉」（它们本来就关着）。
+- **填内容的弹层传 `penetrable`（不挡背后）**：「要回别处抄一段再填」的那几个都这么开，遮罩只围住弹框自己
+  （清单见 [features-and-architecture.md](docs/features-and-architecture.md) 的「填内容的弹层不挡背后」一条），代价是没有「点外面关掉」（它们本来就关着）。
   **确认框（`ElMessageBox`）与退出确认框保持挡住**，设置 / 技能这类不抄内容的弹层也照旧挡点击。
 - **提示条（`ElMessage`）的位置与外观只在 global.css 的 `.el-message` 一处定**（顶栏下沿居中、不透明面底色卡片 +
   一条状态色竖条）：调用处不要传 `placement` / `offset` —— 会跟那条让开顶栏的上边距打架。新增一处 `ElMessage` 不用管这些。
@@ -181,8 +132,9 @@ asset 协议、读取权限在 Rust 侧按单个文件授予）、**通道一律
 | 用量与外观同步、账号登录 | [sync-and-auth](docs/modules/sync-and-auth.md) |
 | 密码保险库（密钥 / 加解密 / 多机共写一份文件） | [vault](docs/modules/vault.md) |
 | 邮箱（IMAP 收信 / SMTP 发信 / 授权码 / 联网出口） | [mail](docs/modules/mail.md) |
+| 截图与钉图（抓屏 / 标注 / 剪贴板 / 置顶图窗口） | [screenshot](docs/modules/screenshot.md) |
 
-没有列入表里的模块（首页、项目、技能、样式、视频、快捷启动、官网）也在 [docs/modules/](docs/modules/) 下各有一份文档，
+没有列入表里的模块（首页、项目、技能、样式、视频、快捷启动）也在 [docs/modules/](docs/modules/) 下各有一份文档，
 动手前先看它的「约束」一节。
 
 ## 6. Agent 操作与验证
@@ -191,23 +143,23 @@ asset 协议、读取权限在 Rust 侧按单个文件授予）、**通道一律
   `pnpm run build:renderer`、`pnpm run dev:renderer`、`pnpm run preview:renderer`（渲染层单独构建到 `.preview/`）、`pnpm run icons`；
   其余以 `package.json` 为准（根与 `apps/desktop` 各一份）。
 - **前端代码格式化走 ESLint**：`pnpm run lint:fix`（检查用 `pnpm run lint`），配置在根目录 `eslint.config.mjs`
-  （`@antfu/eslint-config`，范围是渲染层 + 域包，`site/`、`src-tauri/`、`resources/`、`apps/desktop/scripts/` 不在圈里）；
-  **每次改完前端代码都要跑一遍 `pnpm run lint:fix`**，只允许这一套，不要再引 Prettier 之类的第二套格式化工具。
-- 改了 Rust 要跑 `cargo test` **与 `cargo build`**：`cargo test` 编译的是开着 `cfg(test)` 的那个 bin，被 `#[cfg(test)]` 关起来的东西
-  在那边是可见的，拿它当生产代码用时 test 一片绿、build 才报「not found, an item that was configured out」。
-- 动过 `.vue` 的模板（加 / 删 / 挪标签）要顺手跑一次 `pnpm run build:renderer`：**`pnpm run typecheck` 查不出模板标签不配平** ——
-  实测 vue-tsc 全绿而 vite 报 `Invalid end tag`、页面白屏，只有真的编译一遍模板才发现得了。
-  **模板里用到的组件必须在脚本里 import**（`el-*` 那几个是全局注册的除外）：少了它上面两条都不报错，
-  那个标签被当成认不出的元素渲染成空 —— 现象是「按钮在、点下去什么都没发生」，`pnpm run lint` 的
-  `vue/no-undef-components` 才拦得住。
-- **改 Rust 前先关掉正在运行的应用**：exe 被占用会链接失败，而构建失败后跑起来的仍是旧二进制，结论会完全跑偏。
+  （`@antfu/eslint-config`，范围是渲染层 + 域包，`src-tauri/`、`resources/`、`apps/desktop/scripts/` 不在圈里）；
+  **每次改完前端代码都要跑一遍**，只允许这一套，不要再引 Prettier 之类的第二套格式化工具。
+- 改了 Rust 要跑 `cargo test` **与 `cargo build`**：`cargo test` 编译的是开着 `cfg(test)` 的那个 bin，被它关起来的东西当生产代码用时
+  会 test 一片绿、build 才报错。
+- 动过 `.vue` 的模板（加 / 删 / 挪标签）要顺手跑一次 `pnpm run build:renderer`：`typecheck` 查不出模板标签不配平（vue-tsc 全绿而
+  vite 报 `Invalid end tag`、页面白屏），只有真的编译一遍模板才发现得了。**模板里用到的组件必须在脚本里 import**（`el-*` 那几个是全局注册的除外）：
+  少了它上面两条都不报错，那个标签被渲染成空 —— 现象是「按钮在、点下去什么都没发生」，`pnpm run lint` 的 `vue/no-undef-components` 才拦得住。
+- **改 Rust 前先关掉正在运行的应用**（exe 被占用会链接失败，而构建失败后跑起来的仍是旧二进制，结论会完全跑偏）；
   `tauri build` 与 `tauri dev` 也别同时跑（抢同一个 `target/` 构建锁）。
-- **停掉 `pnpm run dev` 之后要确认那一串子进程真的都没了**：Windows 上杀掉外层命令不会带走它的子孙。按端口与进程名各查一遍
+- **停掉 `pnpm run dev` 之后要确认那一串子进程真的都没了**（Windows 上杀掉外层命令不会带走它的子孙）：按端口与进程名各查一遍
   （`netstat -ano | grep LISTENING | grep -E ":(5274|9222)"`、`tasklist | grep -i workbench`），清理用 `taskkill /F /T /PID <pid>`。
-- `cargo test` 卡在链接或执行上时，两种绕法见 [browser-preview-verification.md](docs/dev-notes/browser-preview-verification.md)。
-- 排查 WebView2 里的运行时问题（未捕获异常、控制台警告、接口实际返回值）：用远程调试端口接 CDP 进页面求值，配方同上那份文档。
-- 功能新增或调整后更新对应模块的 `docs/modules/<模块>.md`（约束变了就改「约束」一节）；
-  跨模块的通用事实更新 [features-and-architecture.md](docs/features-and-architecture.md)。
+- `cargo test` 卡在链接或执行上时、以及排查 WebView2 里的运行时问题（未捕获异常、控制台警告、接口实际返回值）时，
+  配方见 [browser-preview-verification.md](docs/dev-notes/browser-preview-verification.md)。
+- **本项目是纯 vibe coding：所有改动都必须落实到文档**（只改代码不算完成）—— 动哪个模块就同步写它的
+  `docs/modules/<模块>.md`（约束变了就改「约束」一节）；跨模块的通用事实更新
+  [features-and-architecture.md](docs/features-and-architecture.md)。
+- **了解业务以文档为主、代码为辅**：先读文档拿结论、再用代码抽验关键点，文档没写或疑似过期才反过来以代码为准。
 - 不提交构建产物与缓存（`out/`、`dist/`、`.preview/`、`*.tsbuildinfo`、`apps/desktop/src-tauri/target/`）；
   **绝不提交 `apps/desktop/src-tauri/oauth.local.json`**（client_id / client_secret）。
 - **视觉验证只在用户明确要求时做**：要做就把渲染层单独跑在浏览器里截图比对，用 `.preview/` 作工作区，

@@ -94,6 +94,18 @@ export function listen<T>(event: string, handler: (payload: T) => void): () => v
 }
 
 /**
+ * 与 `listen` 同一件事，但**等它真的挂上**再给出取消函数。
+ *
+ * `listen` 是同步返回、异步挂上的：需要「先订阅、再补问一次当前状态」这种顺序时，
+ * 用它就不成立了 —— 那一次补问可能落在订阅生效之前，而中间漏掉的事件再也回不来
+ * （截图遮罩的开场就是这样，见 capture.html 的 CaptureApp）。
+ */
+export function listenReady<T>(event: string, handler: (payload: T) => void): Promise<() => void> {
+  const registered = window.__TAURI__?.event?.listen<T>(event, ({ payload }) => handler(payload))
+  return registered ?? Promise.resolve(() => {})
+}
+
+/**
  * 把可能失败的异步动作收敛成 `Result` —— 与主进程版一样的返回形状，渲染层判断逻辑不变。
  *
  * 不复用 shared/result.ts 的 `toResult` 是因为这一层的失败值来自 Rust：

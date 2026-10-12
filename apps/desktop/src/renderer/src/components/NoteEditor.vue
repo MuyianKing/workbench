@@ -29,6 +29,21 @@ import Vditor from 'vditor'
  * 第五件是**粘贴的图片**（见 uploadImages）：剪切板里的图推到用户配置的图片仓库，
  * 拿回地址后插一条 `![](…)` 进正文。图片不进笔记本目录、也不进数据文件 ——
  * 正文里只有一个外链，于是笔记本搬到哪台机器、用哪个编辑器打开都成立。
+ *
+ * 第六件是**只读**（见 `props.readOnly`）。底子是 Vditor 自带的 `disabled()`：它关掉正文那个
+ * `contenteditable`，也就关掉了「写」的平台保证（打字、Ctrl+X、`execCommand` 全进不来）——
+ * 但它只管「不能写」，不管「还像不像编辑器」。四条要知道的：
+ *   - **它自带的样式会把整篇文章压到 30% 不透明度**（`opacity: .3; cursor: not-allowed`）
+ *     —— 那是「编辑器坏了」的样子，不是「在读文章」的样子，样式里要覆盖回去；
+ *   - 它的 IR 点击 / 按键处理器**不问 `contenteditable`**：点击一律 `expandMarker()`
+ *     （点过的代码块会露出围栏与原始代码，看着还能编辑），点复选框会改 DOM，空文档上按退格
+ *     会清 `innerHTML`；而展开态靠 `blur` 收，只读下又点不出焦点，于是那副样子会一直挂着。
+ *     所以在**捕获阶段**把这两类事件拦在 Vditor 之外（见 onClick / onKeyCapture）；
+ *   - 粘贴 / 拖进来的图片**不走 contenteditable**（Vditor 把 paste / drop 挂在元素上，
+ *     与能不能编辑无关），而一次上传就是往仓库推一次 git，uploadImages 里要自己挡一道；
+ *   - 反过来，`contenteditable="false"` 会把正文从「可聚焦元素」里摘出去 —— 而它正是那个
+ *     滚动的容器，于是点了不给焦点、键盘再也滚不动。要补一个 `tabindex` 补回来
+ *     （见 applyReadOnly 第 2 条）。
  */
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import NoteContextMenu from '@/components/NoteContextMenu.vue'
@@ -47,6 +62,14 @@ const props = defineProps<{
   root: string
   /** 应用当前的明暗（编辑器的配色要跟着走，它与应用的主题是两套） */
   theme: 'light' | 'dark'
+  /**
+   * 只读（笔记页按 Ctrl+/ 切的那一档，状态在上层）：正文不可编辑。
+   *
+   * 挡住的不只是打字：粘贴 / 拖进来的图片会走 uploadImages（那是往图片仓库推一次 git），
+   * 格式菜单点一下也会真的改正文 —— 两处各自另有一道闸（见 uploadImages / openMenu）。
+   * 读盘、链接跳转、滚动、选中照旧，那些都是「读」。
+   */
+  readOnly: boolean
 }>()
 
 const emit = defineEmits<{
@@ -144,6 +167,45 @@ function currentValue(): string | undefined {
 }
 
 /**
+ * 把只读那一档落到编辑器上。
+ *
+ * 三件事，缺一件就会出现「点了还是编辑器的样子」或者「滚不动」：
+ *  1. `disabled()` / `enable()`：关掉 `contenteditable`，这是**平台层面**的那道保证
+ *     （打字、Ctrl+X 的删除、`execCommand` 全都进不来，不是靠我们逐个堵洞）；
+ *  2. **只读下给正文补一个 `tabindex`**：`contenteditable="false"` 之后它不再是可聚焦元素，
+ *     点它不给焦点、`Tab` 也到不了 —— 而它正是那个滚动的容器（`.vditor-reset { overflow: auto }`），
+ *     于是 PageUp / PageDown / 方向键全都没反应（可写时点是能聚焦的，所以这一条是「只读后
+ *     滚不动了」的来源）。补上 tabindex 就与可写时一样：点一下就聚焦，键盘能滚，Tab 也能进来
+ *     （可写时它本来就在 Tab 序里，这里只是把同一件事补回来）；
+ *  3. 点击与按键在**捕获阶段**拦下来（`onClick` / `onKeyCapture`），别让 Vditor 那套
+ *     IR 处理器动 DOM —— 它们的理由见那两段注释。
+ *
+ * `!editor?.vditor` 那道判断不是多余的：**Vditor 的初始化是异步的**（构造函数先把
+ * 语言包 / lute 的 script 取回来，真正建 DOM 在那之后 —— 见它源码里 `init` 是被
+ * `.then()` 起来的），所以刚 `new` 完就调 `disabled()` 会在它内部取 `this.vditor.toolbar`
+ * 时炸掉。初始化完成那一刻由 `after` 回调再调一次这里（读到的是当时的 `props.readOnly`，
+ * 中途切过也不怕），开关切换则由下面那条 watch 负责。
+ */
+function applyReadOnly(): void {
+  if (!editor?.vditor)
+    return
+
+  // IR 模式的写作区（就是那个滚动的容器）；与上面那道判断同理，初始化没完时可能还没有
+  const element = editor.vditor.ir?.element
+
+  if (props.readOnly) {
+    editor.disabled()
+    if (element)
+      element.tabIndex = 0
+    return
+  }
+
+  editor.enable()
+  // 可写时它靠 contenteditable 自己就是可聚焦的，这个补丁要摘干净
+  element?.removeAttribute('tabindex')
+}
+
+/**
  * 两份正文算不算同一份。
  *
  * 空文档在 Vditor 里是 `'\n'`（即时渲染会把空内容规范化成一个换行），而磁盘上的空文件是 `''`：
@@ -212,15 +274,36 @@ function load(node: NoteDocument): void {
  *
  * 读地址、按「这一篇」解析目标（用 `editingRel` 而不是 `props.note.rel`：编辑器里
  * 现在这份正文属于哪一篇，它说了算），都只在这里做一次。
+ *
+ * **挂在捕获阶段**（模板里的 `@click.capture`），因为只读那一档要在事件走到 Vditor 之前
+ * 拦住它 —— 理由见下面那一段；顺带链接这半边也跟着提前了，`preventDefault` 在哪一阶段
+ * 都算数，行为与从前一样。
  */
 async function onClick(event: MouseEvent): Promise<void> {
   const node = (event.target as HTMLElement | null)?.closest('[data-type="a"]')
-  if (!(node instanceof HTMLElement))
+  if (!(node instanceof HTMLElement)) {
+    /**
+     * 只读：不是链接的那一下也不放它过去。
+     *
+     * Vditor 的 IR 点击处理器**不看 `contenteditable`**，它一律 `expandMarker()`
+     * ——把点到的那个节点展开成源码样子：代码块会露出 `` ``` `` 围栏与那块灰底的原始代码，
+     * 点复选框会直接改 DOM 再触发一次 input（那是一次真实写盘），点最后一段下面还会补一个空段落。
+     * 只读下这些全是「看上去还能编辑」的假象，得在**捕获阶段**拦下来（事件到不了挂在
+     * `pre` 上的那些监听器）。展开态还有第二个麻烦：Vditor 靠 `blur` 收展开（见它的
+     * `blurEvent`），而这一档点它不给焦点，于是那副样子会一直挂着 —— 拦下来两头都干净。
+     *
+     * 非链接那一支本来什么都不做，所以这里对光标、选区、拖选都没影响（点就是「读」）。
+     */
+    if (props.readOnly)
+      event.stopPropagation()
     return
+  }
 
   // IR 下这条链接不是 `<a>`、本来没有默认动作；预览 / 所见即所得模式渲染的是真 `<a>`，
   // 那两处这一下会把界面导航走，所以照旧拦掉
   event.preventDefault()
+  if (props.readOnly)
+    event.stopPropagation()
 
   // 没按 Ctrl 就是一次普通点击：什么都不做（光标归 Vditor 管）
   if (!event.ctrlKey)
@@ -248,12 +331,28 @@ async function onClick(event: MouseEvent): Promise<void> {
   }
 }
 
+/**
+ * 只读：按键也不交给 Vditor。
+ *
+ * 上面那条 tabindex 让这块正文重新能被聚焦，于是挂在 `pre` 上的那对 keydown / keyup
+ * 监听器又够得着了 —— 它们和点击那半边一样不问 `contenteditable`：方向键会走
+ * `expandMarker()`（又一次把节点展开成源码样子），空文档上按退格还会直接把 `innerHTML` 清掉。
+ *
+ * **只拦传下去，不 `preventDefault`**：默认动作要留着 —— 它是滚动的那个容器，
+ * PageUp / PageDown / 空格 / 方向键正是靠浏览器自己的默认行为滚它（见 applyReadOnly 第 2 条）。
+ */
+function onKeyCapture(event: KeyboardEvent): void {
+  if (props.readOnly)
+    event.stopPropagation()
+}
+
 /** 右键菜单的落点（视口坐标）；null 表示没开 */
 const menu = ref<{ x: number, y: number } | null>(null)
 
 function openMenu(event: MouseEvent): void {
-  // 编辑器还没建好时菜单没有可点的东西（动作全在那份工具带上）
-  if (!editor)
+  // 编辑器还没建好时菜单没有可点的东西（动作全在那份工具带上）；
+  // 只读下同样没有：工具带被 `disabled()` 禁掉了，弹出来会是一份每一项都没反应的菜单
+  if (!editor || props.readOnly)
     return
   menu.value = { x: event.clientX, y: event.clientY }
 }
@@ -300,6 +399,16 @@ async function uploadImages(files: File[]): Promise<string | null> {
   const images = files.filter(file => file.type.startsWith('image/'))
   if (!images.length)
     return null
+
+  /**
+   * 只读：一张都不传。
+   *
+   * 这一道闸不能省 —— 粘贴 / 拖动**不看 `contenteditable`**（Vditor 把 paste / drop
+   * 直接挂在那个元素上），而一次上传就是往用户仓库推一次 git：「读着读着手一抖」
+   * 正是这个模式要挡住的那种失手。如实说一句，别静默丢掉。
+   */
+  if (props.readOnly)
+    return '只读模式：图片没有上传（Ctrl+/ 切回可写再贴）'
 
   if (!settings.settings.noteImageRepo) {
     return '还没有配置图片仓库：设置 → 笔记图片，填一个 git 仓库地址后，粘贴的图片会自动传上去'
@@ -383,8 +492,8 @@ onMounted(() => {
     icon: 'ant',
     lang: 'zh_CN',
     // 工具带藏起来之后，界面上没有别的入口提示「格式在哪」，所以在这里说一句；
-    // 「Ctrl+点击」也一样 —— 那一下是隐形的，不写在这儿就没人知道
-    placeholder: '写点什么…markdown 直接写；图片粘贴即上传，格式走右键菜单；Ctrl+点击链接可打开',
+    // 「Ctrl+点击」与「Ctrl+/」也一样 —— 那两下是隐形的，不写在这儿就没人知道
+    placeholder: '写点什么…markdown 直接写；图片粘贴即上传，格式走右键菜单；Ctrl+点击链接可打开，Ctrl+/ 切只读',
     // 缓存与落盘都归我们：Vditor 自带的那份存在 localStorage 里，会与磁盘上的 .md 打架
     cache: { enable: false },
     counter: { enable: false },
@@ -419,6 +528,8 @@ onMounted(() => {
     link: { isOpen: false },
     toolbar: TOOLBAR,
     input: value => schedule(value),
+    // 初始化完成那一刻核一遍只读（编辑器可能是「已经切到只读之后」才建起来的）
+    after: applyReadOnly,
   })
 })
 
@@ -435,6 +546,10 @@ watch(
     editor?.setTheme(dark ? 'dark' : 'classic', dark ? 'dark' : 'light', dark ? 'github-dark' : 'github')
   },
 )
+
+// 只读是 Vditor 自己那对 `disabled()` / `enable()`（初始化还没完时那次是空转，
+// 由 options 里的 `after` 兜底，见 applyReadOnly）
+watch(() => props.readOnly, applyReadOnly)
 
 onBeforeUnmount(() => {
   // 卸载前把没写完的那一段交出去：防抖窗口里切走不该丢字（同样是现取，道理见 flush）
@@ -459,9 +574,27 @@ defineExpose({
 </script>
 
 <template>
-  <!-- 编辑器的宿主单独裹一层：角标是这张卡片上的浮层，不能塞进 Vditor 自己那块 DOM 里 -->
-  <div class="editor-wrap">
-    <div ref="host" class="editor" @click="onClick" @contextmenu.prevent="openMenu" />
+  <!--
+    编辑器的宿主单独裹一层：角标是这张卡片上的浮层，不能塞进 Vditor 自己那块 DOM 里。
+
+    **只读那个类挂在这一层，不挂在宿主上**（见样式里那几条 `.editor-wrap.is-readonly`）：
+    Vditor 初始化时会给宿主（下面这个 `.editor`）**用 JS 加上一个 `vditor` 类**，而只要宿主身上
+    还有一个 Vue 的 `:class` 绑定，那一档一变 Vue 就会把整个 `class` 属性重写成「它自己算出来的
+    那一份」，把 `vditor` 抹掉。少了这个类，Vditor 那套 `.vditor { display: flex; flex-direction:
+    column }` 全都不再适用，正文那个 `height: 100%` 便解析不出来 —— 它会涨成内容高度（实测 633px
+    → 1603px），于是没有溢出、没有滚动条、也滚不动，卡片还是 `overflow: hidden`，剩下全被裁掉
+    （踩过：现象是「只读之后滚不动了」，看着与滚动无关，其实坏在布局上）。这一层是我们自己的元素，
+    Vditor 不碰，挂在它身上两边都安全。
+  -->
+  <div class="editor-wrap" :class="{ 'is-readonly': readOnly }">
+    <div
+      ref="host"
+      class="editor"
+      @click.capture="onClick"
+      @keydown.capture="onKeyCapture"
+      @keyup.capture="onKeyCapture"
+      @contextmenu.prevent="openMenu"
+    />
 
     <div v-if="uploading" class="upload" role="status">
       <el-icon class="is-loading">
@@ -548,6 +681,31 @@ defineExpose({
 .editor :deep(.vditor-wysiwyg pre.vditor-reset),
 .editor :deep(.vditor-sv .vditor-reset) {
   background-color: transparent;
+}
+
+/**
+ * 只读：把 Vditor 禁用态自带的样式收回来。
+ *
+ * `disabled()` 只是把 contenteditable 关掉，Vditor 那边配的样式是
+ * `pre.vditor-reset[contenteditable="false"] { opacity: .3; cursor: not-allowed }` ——
+ * 那是「这个编辑器不能用了」的样子。这一档是拿来**读**的，正文得与平时一样清楚，
+ * 光标也不该是禁止符号（它是内容，不是一颗按不动的按钮）。
+ *
+ * 空笔记那句 placeholder（「写点什么…」）在这一档里是错的，一并收掉 ——
+ * 模式开着的时候标题行上写着「只读」。
+ *
+ * 选择器从 `.editor-wrap` 这一层起（不是 `.editor`）：只读那个类挂在外壳上，
+ * 理由见模板里那段 —— 宿主身上的类归 Vditor 管，Vue 一碰就会把它的 `vditor` 抹掉。
+ */
+.editor-wrap.is-readonly :deep(.vditor-ir pre.vditor-reset[contenteditable='false']),
+.editor-wrap.is-readonly :deep(.vditor-wysiwyg pre.vditor-reset[contenteditable='false']) {
+  opacity: 1;
+  cursor: auto;
+}
+
+.editor-wrap.is-readonly :deep(.vditor-ir pre.vditor-reset:empty::before),
+.editor-wrap.is-readonly :deep(.vditor-wysiwyg pre.vditor-reset:empty::before) {
+  content: none;
 }
 
 /**

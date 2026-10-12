@@ -72,6 +72,7 @@ pub fn flush_all() {
     work_log_store().flush_sync();
     crate::ai_news::ai_news_store().flush_sync();
     crate::vault::vault_store().flush_sync();
+    crate::pin::pin_store().flush_sync();
 }
 
 // ---------- 数据文件 ----------
@@ -893,10 +894,25 @@ pub fn set_autostart(app: AppHandle, enabled: bool) -> Result<(), String> {
     result.map_err(|err| format!("设置开机自启失败：{err}"))
 }
 
-/// 注册 / 更换全局快捷键；传 null 或空串表示清掉
+/**
+ * 重装一遍全部全局快捷键（唤起窗口 / 截图 / 钉图穿透），值由渲染层给。
+ *
+ * **三串一起传是有意的**：三条快捷键必须一次性装好（见 main.rs 的 register_hotkeys ——
+ * 插件注册是「先全清再逐条注册」，分几次调就会互相注销）。空串 / null = 不要那一条。
+ *
+ * **为什么值不从数据文件里读**：默认值只活在 `@workbench/capture` 里（TS 侧的收敛处），
+ * Rust 自己去盘上读的话，「刚加上的字段还没被写回盘」那一段读到的是空的 —— 首启按快捷键没反应，
+ * 而且之后再也不会补注册。渲染层手里那份是收敛过的、带默认值的权威版本（见 workbench/index.ts）。
+ */
 #[tauri::command]
-pub fn set_hotkey(app: AppHandle, accelerator: Option<String>) -> Result<(), String> {
-    crate::register_hotkey(&app, accelerator)
+pub fn apply_hotkeys(
+    app: AppHandle,
+    main: Option<String>,
+    capture: Option<String>,
+    pin_through: Option<String>,
+) -> Result<(), String> {
+    let set = crate::parse_hotkeys(main, capture, pin_through)?;
+    crate::register_hotkeys(&app, set)
 }
 
 /// 渲染层回传的退出选择：stop（结束全部进程）/ direct（保留进程）/ cancel（不退出）

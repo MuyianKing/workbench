@@ -1,8 +1,8 @@
-import type { MailAccount, MailAttachmentInput, MailFolder, ParsedAttachment } from '@workbench/mail'
+import type { MailAccount, MailAttachmentInput, MailContact, MailFolder, ParsedAttachment } from '@workbench/mail'
 import type { Result } from '@/types'
 import type { MailSummary } from '@/workbench/mail'
 import { fail, ok } from '@workbench/core'
-import { buildMime, displayDate, displayRecipients, displaySender, htmlBody, isBulkMail, mailAccountReady, mailTime, parseMessage, recipientAddress, senderAddress } from '@workbench/mail'
+import { buildMime, contactOf, displayDate, displayRecipients, displaySender, htmlBody, isBulkMail, mailAccountReady, mailTime, parseMessage, recipientAddress, recipientDisplay, sanitizeMailContact, senderAddress } from '@workbench/mail'
 import { defineStore } from 'pinia'
 /**
  * 邮箱页的状态。
@@ -13,10 +13,11 @@ import { defineStore } from 'pinia'
  * 新在前 —— 不按来源分组）、正文按 (文件夹, 账户, uid) 缓存（页面会话内存，不落盘）、
  * MIME 解析与沙箱用 HTML 的生成（@workbench/mail 的 parseMessage / htmlBody）。
  *
- * **两个文件夹**（`folder`，左栏头部那颗分段选择器切）：收件箱与已发送。清单一次
- * 只装当前那个文件夹（切过去就重拉，见 `setFolder`）；uid 只在单个文件夹里唯一，
- * 所以身份键（`key`）与正文缓存键都把文件夹带上。广告过滤只对收件箱生效 ——
- * 发件箱里「发件人」是自己，拿它判广告毫无道理。
+ * **左栏头部那颗分段选择器有三签**（`tab`）：收件箱 / 已发送 / 通讯录。前两签是文件夹
+ * （`folder`，清单一次只装当前那个，切过去就重拉，见 `setFolder`）；通讯录签把邮件
+ * 清单与阅读栏都收起来、只摆联系人名单（清单留在内存里，切回来不用重拉）。
+ * uid 只在单个文件夹里唯一，所以身份键（`key`）与正文缓存键都把文件夹带上。
+ * 广告过滤只对收件箱生效 —— 发件箱里「发件人」是自己，拿它判广告毫无道理。
  *
  * **拉取时机**：进页面 / 手动刷新 / 切文件夹各拉一次；另外 Rust 侧有一条后台监视线程
  * （`mail_watch.rs`，只盯收件箱），按设置的周期（mailPollMinutes，默认 30 分钟、可关）
@@ -28,6 +29,10 @@ import { defineStore } from 'pinia'
  * 单独收进清单底部分开的一段（showBulk 控制折叠），勾选 / 删除 / 右键与正常邮件
  * 同一套 —— 误拦了有地方找。发送成功不主动重拉收件箱（新信未必排得进最近 50 封），
  * 用户自己点刷新；发件箱正开着就顺手重拉一次（服务器自己会把刚发的存进已发送）。
+ *
+ * **通讯录**（`settings.mailContacts`）是一份只住在本机的小名单：右键「存为联系人」
+ * 把这一行的对方（收件箱看发件人、发件箱看收件人）攒进去，写邮件的收件人从它里面挑。
+ * 地址就是身份（按地址去重），只读写设置，不碰服务器、不进任何出口。
  */
 import { computed, ref, watch } from 'vue'
 import { notifyError } from '@/notify'
@@ -94,11 +99,37 @@ export const useMailStore = defineStore('mail', () => {
   const folder = ref<MailFolder>('inbox')
   const folderLabel = computed(() => (folder.value === 'sent' ? '已发送' : '收件箱'))
 
+  // ---------- 左栏这一签（两个邮件文件夹 + 通讯录） ----------
+
+  /**
+   * 左栏头部那颗分段选择器选的是哪一签：收件箱 / 已发送 / **通讯录**。
+   * `folder` 仍是命令与身份键认的那个文件夹 —— 切到通讯录不动它（清单留着，
+   * 切回邮件签不用重拉），所以这两件事得分开记。
+   */
+  const tab = ref<MailFolder | 'contacts'>('inbox')
+
+  /**
+   * 切签：两个邮件签走切文件夹那套（关阅读栏、清清单、重拉）；通讯录签只把阅读栏收掉 ——
+   * 清单留在内存里，切回收件箱立刻还是那批信。
+   */
+  function setTab(next: MailFolder | 'contacts'): void {
+    if (tab.value === next)
+      return
+    if (next === 'contacts') {
+      tab.value = next
+      closeMail()
+      return
+    }
+    setFolder(next)
+  }
+
   /**
    * 切文件夹：清单与阅读栏都换一份（正文缓存留着 —— 键里带了文件夹，切回来不用重下），
    * 立刻重拉。切的时候正在途中的那次拉取会被丢掉（见 refreshList 里的比对）。
    */
   function setFolder(next: MailFolder): void {
+    // 通知点开那一条也会走到这儿：从通讯录签上被叫回来时，签也得跟着回到邮件上
+    tab.value = next
     if (folder.value === next)
       return
     folder.value = next
@@ -390,6 +421,70 @@ export const useMailStore = defineStore('mail', () => {
       notifyError('取消标记失败')
   }
 
+  // ---------- 通讯录 ----------
+
+  /** 联系人名单（设置里的 mailContacts）：写信的收件人下拉与右键「存为联系人」共用一份 */
+  const contacts = computed<MailContact[]>(() => settings.settings.mailContacts)
+
+  /** 这个地址在不在通讯录里（右键菜单据此在「存为联系人 / 移出联系人」之间切） */
+  function isContact(address: string): boolean {
+    return Boolean(contactOf(contacts.value, address))
+  }
+
+  /**
+   * 清单行上的「对方」：收件箱看发件人、发件箱看收件人（与阅读栏第一行、回复同一口径）。
+   * 名字取信里的展示名；信里没写名字（展示出来就是个地址）就只存地址，别把地址抄成名字。
+   */
+  function partyOf(item: MailListItem): MailContact {
+    const raw = item.folder === 'sent' ? item.to : item.from
+    const address = (item.folder === 'sent' ? recipientAddress(raw) : senderAddress(raw)).toLowerCase()
+    const shown = (item.folder === 'sent' ? recipientDisplay(raw) : displaySender(raw)).trim()
+    return { name: shown.toLowerCase() === address ? '' : shown, address }
+  }
+
+  /**
+   * 存一个联系人：通讯录以地址为身份 —— 这个地址已有就改名字，没有才追一条。
+   * 落盘走设置（这里没有秘密，不进凭据管理器），失败把原因交回调用方。
+   */
+  async function saveContact(draft: MailContact): Promise<Result<null>> {
+    const contact = sanitizeMailContact(draft)
+    if (!contact.address)
+      return fail('先填一个像样的邮箱地址')
+    const next = contacts.value.some(entry => entry.address === contact.address)
+      ? contacts.value.map(entry => (entry.address === contact.address ? contact : entry))
+      : [...contacts.value, contact]
+    const updated = await settings.updateSettings({ mailContacts: next })
+    return updated ? ok(null) : fail('保存联系人失败')
+  }
+
+  /** 从通讯录里摘掉一个地址；本来就不在里面算成（结果一样） */
+  async function removeContact(address: string): Promise<Result<null>> {
+    const wanted = address.trim().toLowerCase()
+    const next = contacts.value.filter(entry => entry.address !== wanted)
+    if (next.length === contacts.value.length)
+      return ok(null)
+    const updated = await settings.updateSettings({ mailContacts: next })
+    return updated ? ok(null) : fail('移出联系人失败')
+  }
+
+  /**
+   * 右键「存为联系人 / 移出联系人」：把这一行的对方加进通讯录，已经在里面就摘掉。
+   * 与「标记为广告」同一条路 —— 列表机制不动，落盘失败飘一条错误。
+   */
+  async function toggleContact(account: string, uid: number): Promise<void> {
+    const item = all.value.find(entry => entry.account === account && entry.uid === uid)
+    if (!item)
+      return
+    const party = partyOf(item)
+    if (!party.address)
+      return
+    const result = isContact(party.address)
+      ? await removeContact(party.address)
+      : await saveContact(party)
+    if (!result.ok)
+      notifyError(result.error ?? '联系人没存上')
+  }
+
   // ---------- 发信 ----------
 
   const sending = ref(false)
@@ -504,6 +599,8 @@ export const useMailStore = defineStore('mail', () => {
     configured,
     folder,
     folderLabel,
+    tab,
+    setTab,
     setFolder,
     list,
     bulkList,
@@ -525,6 +622,11 @@ export const useMailStore = defineStore('mail', () => {
     deleteMails,
     markBulk,
     unbulk,
+    contacts,
+    isContact,
+    saveContact,
+    removeContact,
+    toggleContact,
     send,
     downloadAttachment,
     invalidate,

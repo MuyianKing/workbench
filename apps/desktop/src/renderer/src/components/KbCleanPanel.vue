@@ -16,6 +16,7 @@ import { ArrowLeft, Loading, MagicStick } from '@element-plus/icons-vue'
  */
 import { computed, nextTick, ref, watch } from 'vue'
 import MarkdownView from '@/components/MarkdownView.vue'
+import { useSettingsStore } from '@/stores/settings'
 
 const props = defineProps<{
   /** 页面上只在非 idle 时挂这个面板；类型上收下全集，省一层收窄 */
@@ -31,11 +32,13 @@ const props = defineProps<{
 
 const emit = defineEmits<{ 'start': [], 'stop': [], 'close': [], 'open-models': [], 'open-entry': [rel: string] }>()
 
+const settings = useSettingsStore()
+
 /** 顶部那行状态说什么：跑着的每一步、收场与拦截各有一句 */
 const status = computed<{ text: string, kind: 'run' | 'ok' | 'fail' } | null>(() => {
   switch (props.phase) {
     case 'cleaning':
-      return { text: '正在清洗：Pi 在按清单整理条目…', kind: 'run' }
+      return { text: `正在清洗：${settings.settings.appName} 在按清单整理条目…`, kind: 'run' }
     case 'indexing':
       return { text: '条目已整理，正在重建目录与索引…', kind: 'run' }
     case 'done':
@@ -126,7 +129,7 @@ watch(
         </div>
       </template>
       <p v-else-if="phase === 'cleaning'" class="clean__meta">
-        正在把清洗清单交给 Pi…
+        正在把清洗清单交给 {{ settings.settings.appName }}…
       </p>
       <p v-else-if="phase !== 'blocked'" class="clean__meta">
         还没有日志。

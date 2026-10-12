@@ -102,6 +102,11 @@ const syncTitle = computed(() =>
   store.remoteUrl ? `提交改动、拉回别处的改动：同步到 ${store.remoteUrl}` : '这个文件夹还没连 git 远端',
 )
 
+/** 清洗按钮的提示：干活的这个引擎在界面上就叫程序名（与导航栏同一口径） */
+const cleanTitle = computed(() =>
+  `把未入库与有更新的原始文件交给内置的 ${settings.settings.appName} 整理成条目，跑完自动重建索引`,
+)
+
 /** 左栏的两个签：条目 / 原始数据 */
 const pane = ref<'entries' | 'raw'>('entries')
 const PANES = [
@@ -206,7 +211,7 @@ function openWritten(rel: string): void {
         </div>
         <div class="filter__tools">
           <el-tooltip
-            content="把未入库与有更新的原始文件交给内置的 Pi 整理成条目，跑完自动重建索引"
+            :content="cleanTitle"
             placement="bottom"
           >
             <el-button

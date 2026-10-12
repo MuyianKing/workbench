@@ -23,6 +23,11 @@ pub const VAULT_FILE: &str = "vault.json";
 /// 邮件后台监视的进度（见 mail_watch.rs）：每个账户的 UIDVALIDITY 与上次见过的
 /// 最大 UID，外加上一轮检查的时间。只是通知用的记账，**不进同步仓库**
 pub const MAIL_WATCH_FILE: &str = "mail-watch.json";
+/// 钉图的记账文件（见 pin.rs）：哪些图还钉在屏幕上、各自在哪儿、多大、多透明。
+/// 与工作日志同一待遇：只对本机成立（位置是这块屏的坐标），不进同步仓库
+pub const PINS_FILE: &str = "pins.json";
+/// 钉图的图片目录名：一张钉图一个 PNG，钉图关掉时连文件一起删
+const PINS_DIR: &str = "pins";
 /// 克隆里放**保险库**的子目录名。与用量 / 配置那两个目录最大的不同：那份文件是所有机器**共写**的
 /// （用户的要求：所有设备公用一个文件），所以合并规则必须自己定死，见 shared/vault.ts
 pub(crate) const VAULT_DIR: &str = "vault";
@@ -98,6 +103,16 @@ pub fn vault_file() -> PathBuf {
 
 pub fn mail_watch_file() -> PathBuf {
     data_dir().join(MAIL_WATCH_FILE)
+}
+
+/// 钉图的图片目录
+pub fn pins_dir() -> PathBuf {
+    data_dir().join(PINS_DIR)
+}
+
+/// 钉图的记账文件
+pub fn pins_file() -> PathBuf {
+    data_dir().join(PINS_FILE)
 }
 
 /// 一次性的本地搬家，启动时跑一次（commands.rs 的 `load_all`，必须早于任何 store 载入）：

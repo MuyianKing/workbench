@@ -2,10 +2,10 @@
 import type { TokenBucket, TokenCounters, TokenGranularity, TokenRangePreset, TokenUsageResult, UsageAxis } from '@workbench/usage'
 import { CaretRight, Connection, Histogram, Refresh } from '@element-plus/icons-vue'
 import { dayKey } from '@workbench/core'
-import { axisTotal, bucketRangeOf, buildSeriesRange, emptyCounters, flattenSources, formatCredits, formatPercent, formatTokensWan, resolvePresetRange, shareByModel, shareBySource, shortDayLabel, SOURCE_LABELS, sumRange, totalTokens } from '@workbench/usage'
+import { axisTotal, bucketRangeOf, buildSeriesRange, emptyCounters, flattenSources, formatCredits, formatPercent, formatTokensWan, presetLabel, resolvePresetRange, shareByModel, shareBySource, shortDayLabel, SOURCE_LABELS, sumRange, totalTokens } from '@workbench/usage'
 /**
  * 首页「Coding 用量」卡片:读各 AI 工具本地用量数据(ZCode / DeepSeek Harness / CodeBuddy /
- * WorkBuddy / Qoder)的按天聚合快照,画 今日/本周/本月 概览、趋势条形图与模型/工具占比。
+ * WorkBuddy / Qoder)的按天聚合快照,画 今日/本周/当前窗口 概览、趋势条形图与模型/工具占比。
  *
  * 计数有两个口径(见 @workbench/usage 的 UsageAxis):token 计数,与按额度记账的工具
  * 报的 credits(Qoder)。标题行右侧的分段控件切换,一次只画一个 —— 两者量纲不同,
@@ -15,6 +15,8 @@ import { axisTotal, bucketRangeOf, buildSeriesRange, emptyCounters, flattenSourc
  * 趋势窗口由头部的预设下拉给出(默认「近 30 天」,与 DeepSeek 用量页同款:
  * 近 7 天 / 近 30 天 / 本月 / 上月 / 自定义;可选的日子限于当前口径下有记录的那段),
  * 右侧 天/周/月 页签只切换柱子的分桶宽度,窗口本身不变;
+ * 概览那一行的第三格**跟着这个窗口走**(标签与数字都换) —— 前两格是「此刻」的口径
+ * (今天 / 本周至今),第三格报当前看的那一段,数字等于图上柱子之和;
  * 占比默认统计整个窗口(全部);点击某根柱子则把占比切到那个桶(那天/那周/那月),再点一下回到全部。
  *
  * 数据是主进程「实读 + max 合并进快照」后的结果,这里不做任何持久化,只拉取与展示:
@@ -309,14 +311,16 @@ const weekStartKey = computed(() => {
   monday.setHours(0, 0, 0, 0)
   return dayKey(monday)
 })
-const monthStartKey = computed(() => {
-  const first = new Date(nowTick.value)
-  first.setDate(1)
-  first.setHours(0, 0, 0, 0)
-  return dayKey(first)
-})
 const thisWeek = computed(() => sumRange(days.value, weekStartKey.value, todayKey.value))
-const thisMonth = computed(() => sumRange(days.value, monthStartKey.value, todayKey.value))
+/**
+ * 第三格跟着趋势窗口走:标签是当前档位,数字是那段窗口的合计(= 图上柱子之和)。
+ *
+ * 不写真名「本月」—— 档位换成近 7 天 / 上月 / 自定义时那个名字就成了谎话;
+ * 收敛后的确切起止日(预设被快照截短时与字面含义不同)挂在悬停上,与图表头部那行小字同源。
+ */
+const rangeLabel = computed(() => presetLabel(rangePreset.value))
+const rangeTotal = computed(() => sumRange(days.value, fromKey.value, toKey.value))
+const rangeTitle = computed(() => `${shortDayLabel(fromKey.value)} ~ ${shortDayLabel(toKey.value)}`)
 
 // ---------- 趋势 ----------
 
@@ -522,9 +526,9 @@ function detailWidth(value: number, max: number): string {
             <i>本周</i>
             <b class="mono">{{ formatCounters(thisWeek) }}</b>
           </div>
-          <div class="top">
-            <i>本月</i>
-            <b class="mono">{{ formatCounters(thisMonth) }}</b>
+          <div class="top" :title="rangeTitle">
+            <i>{{ rangeLabel }}</i>
+            <b class="mono">{{ formatCounters(rangeTotal) }}</b>
           </div>
         </div>
 

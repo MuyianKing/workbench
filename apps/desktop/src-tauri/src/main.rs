@@ -3,6 +3,8 @@
 
 mod ai;
 mod ai_news;
+mod capture;
+mod clipboard;
 mod commands;
 mod credentials;
 mod design;
@@ -21,7 +23,9 @@ mod nvm;
 mod oauth;
 mod paths;
 mod pi_skills;
+mod pin;
 mod proc;
+mod screen;
 mod session;
 mod skills;
 mod store;
@@ -244,8 +248,20 @@ fn create_main_window(app: &AppHandle) -> tauri::Result<()> {
 /// 托盘：常驻。左键把窗口调到前面（没被别的程序压住时才收起，见 toggle_main_window），右键出菜单。
 fn create_tray(app: &AppHandle) -> tauri::Result<()> {
     let show = MenuItem::with_id(app, "show", "显示主界面", true, None::<&str>)?;
+    let shot = MenuItem::with_id(app, "capture", "截图", true, None::<&str>)?;
+    let close_pins = MenuItem::with_id(app, "close-pins", "关闭所有钉图", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&show, &PredefinedMenuItem::separator(app)?, &quit])?;
+    let menu = Menu::with_items(
+        app,
+        &[
+            &show,
+            &PredefinedMenuItem::separator(app)?,
+            &shot,
+            &close_pins,
+            &PredefinedMenuItem::separator(app)?,
+            &quit,
+        ],
+    )?;
 
     let mut builder = TrayIconBuilder::with_id("main")
         // 同窗口标题：占位用构建时的产品名，渲染层随后按设置里的程序名覆盖
@@ -255,6 +271,9 @@ fn create_tray(app: &AppHandle) -> tauri::Result<()> {
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
             "show" => show_main_window(app),
+            // 截图与钉图都是「本体在别的窗口里」的动作：界面收在托盘时也点得到
+            "capture" => capture::request(app),
+            "close-pins" => pin::pin_close_all(app.clone()),
             "quit" => request_quit(app),
             _ => {}
         })
@@ -278,28 +297,82 @@ fn create_tray(app: &AppHandle) -> tauri::Result<()> {
 }
 
 /**
- * 注册全局快捷键（传 None 表示清掉）。
+ * 一组全局快捷键（解析好之后的那份）。
  *
- * 先全清再注册：设置里改一次快捷键不该留下上一条还活着 ——
- * 那样按新旧两个键都会唤起窗口，很难查出原因。
+ * 三条各自独立：唤起/收起主窗口、起截图、翻钉图的鼠标穿透。**必须放在一处一起装**
+ * —— 插件注册时用的是「先全清再逐条注册」，谁单独调一次都会把别人注销掉（见 register_hotkeys）。
  */
-fn register_hotkey(app: &AppHandle, accelerator: Option<String>) -> Result<(), String> {
+#[derive(Default, Clone)]
+struct HotkeySet {
+    main: Option<Shortcut>,
+    capture: Option<Shortcut>,
+    pin_through: Option<Shortcut>,
+}
+
+/// 当前装着的那组快捷键。按下时按值比对派发（`Shortcut` 的 id 由修饰键与键码算出，同一串解析两次必然相等）。
+#[derive(Default)]
+struct Hotkeys(Mutex<HotkeySet>);
+
+/// 把渲染层递上来的三串解析成一组快捷键。
+///
+/// **值一律由渲染层给**（见 register_hotkeys 的说明）：空串当作不要这一条；
+/// 非空但认不出的那一串要报出来 —— 静默丢掉的话，界面上看着「设过了」，按下去却没反应。
+fn parse_hotkeys(
+    main: Option<String>,
+    capture: Option<String>,
+    pin_through: Option<String>,
+) -> Result<HotkeySet, String> {
+    let parse = |name: &str, raw: Option<String>| -> Result<Option<Shortcut>, String> {
+        let Some(text) = raw.map(|value| value.trim().to_string()) else {
+            return Ok(None);
+        };
+        if text.is_empty() {
+            return Ok(None);
+        }
+        text.parse::<Shortcut>()
+            .map(Some)
+            .map_err(|_| format!("{name}的快捷键认不出来：{text}"))
+    };
+
+    Ok(HotkeySet {
+        main: parse("唤起窗口", main)?,
+        capture: parse("截图", capture)?,
+        pin_through: parse("钉图穿透", pin_through)?,
+    })
+}
+
+/// 注册 / 更换**全部**全局快捷键（哪一项是 None 就是不要那一条）。
+///
+/// 先全清再逐条注册：设置里改一次快捷键不该留下上一条还活着 —— 那样按新旧两个键都会触发，
+/// 很难查出原因。因此三条快捷键只能从这里一次性装好，调用方不许自己 register 一遍。
+/// 单条失败（被别的程序占了）不拦其余的，最后把失败的几条一并报出来。
+///
+/// **值由渲染层推、Rust 自己不读设置**：默认值（默认 F1）只活在 `@workbench/capture` 里，
+/// Rust 去盘上读的话，「刚加上的字段还没被写回盘」这一段时间就是空的 —— 首启时按 F1 没反应，
+/// 而且之后再没有任何东西会去补注册（踩过一次，就是照着盘读的写法）。
+fn register_hotkeys(app: &AppHandle, accelerators: HotkeySet) -> Result<(), String> {
     let manager = app.global_shortcut();
     let _ = manager.unregister_all();
 
-    let Some(text) = accelerator
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-    else {
-        return Ok(());
-    };
+    let mut failed = Vec::new();
+    for (name, shortcut) in [
+        ("唤起窗口", accelerators.main),
+        ("截图", accelerators.capture),
+        ("钉图穿透", accelerators.pin_through),
+    ] {
+        let Some(shortcut) = shortcut else { continue };
+        if manager.register(shortcut).is_err() {
+            failed.push(format!("{name}（{shortcut}）"));
+        }
+    }
 
-    let parsed = text
-        .parse::<Shortcut>()
-        .map_err(|_| format!("无法识别的快捷键：{text}"))?;
-    manager
-        .register(parsed)
-        .map_err(|_| format!("快捷键注册失败，可能已被别的程序占用：{text}"))
+    *app.state::<Hotkeys>().0.lock().unwrap() = accelerators;
+
+    if failed.is_empty() {
+        Ok(())
+    } else {
+        Err(format!("这些快捷键被别的程序占用了：{}", failed.join("、")))
+    }
 }
 
 /**
@@ -382,20 +455,38 @@ fn main() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ))
-        // 全局快捷键：与托盘左键同一个开关（调到前面 / 没被压住时收起）
+        // 全局快捷键：唤起 / 收起窗口、起截图、翻钉图穿透 —— 按值比对分派
+        // （三条快捷键的解析与注册都在 register_hotkeys 里）
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
-                .with_handler(|app, _shortcut, event| {
-                    if event.state() == ShortcutState::Pressed {
+                .with_handler(|app, shortcut, event| {
+                    if event.state() != ShortcutState::Pressed {
+                        return;
+                    }
+
+                    let set = app.state::<Hotkeys>().0.lock().unwrap().clone();
+                    if set.capture.as_ref() == Some(shortcut) {
+                        // 抓屏 + 编码是几百毫秒的活，request 自己会丢到工作线程去（热键回调在主线程上）
+                        capture::request(app);
+                        return;
+                    }
+                    if set.pin_through.as_ref() == Some(shortcut) {
+                        pin::toggle_click_through(app);
+                        return;
+                    }
+                    if set.main.as_ref() == Some(shortcut) {
                         toggle_main_window(app);
                     }
                 })
                 .build(),
         )
         .manage(MaximizedFlag(Mutex::new(false)))
+        .manage(Hotkeys::default())
         .manage(session::Sessions::default())
         .manage(PendingQuit(Mutex::new(None)))
         .manage(mail_watch::MailWatch::default())
+        .manage(capture::CaptureState::default())
+        .manage(pin::Pins::default())
         .invoke_handler(tauri::generate_handler![
             commands::data_load,
             commands::data_save,
@@ -512,7 +603,7 @@ fn main() {
             commands::open_path,
             commands::app_pid,
             commands::set_autostart,
-            commands::set_hotkey,
+            commands::apply_hotkeys,
             commands::resolve_quit_choice,
             commands::process_created_at,
             commands::kill_process_tree,
@@ -536,29 +627,35 @@ fn main() {
             vault::vault_unlock_hello,
             vault::vault_pull,
             vault::vault_push,
+            capture::capture_begin,
+            capture::capture_prewarm,
+            capture::capture_abort,
+            capture::capture_context,
+            capture::capture_frame,
+            capture::capture_show,
+            capture::capture_copy,
+            capture::capture_save,
+            pin::pin_create,
+            pin::pin_context,
+            pin::pin_update,
+            pin::pin_close,
+            pin::pin_close_all,
+            pin::pin_copy,
+            pin::pin_save,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
             // 数据先载入：窗口的初始化脚本要用到设置与布局
             commands::load_all();
+            // 钉图的记账要早于窗口：restore 照着它把上次钉着的图开回来
+            pin::load(&handle);
             create_main_window(&handle)?;
             create_tray(&handle)?;
+            pin::restore(&handle);
 
-            // 按已存设置把快捷键装回来；占用之类的问题只记一笔，不拦启动
-            let settings = commands::data_store()
-                .get()
-                .get("settings")
-                .cloned()
-                .unwrap_or(Value::Null);
-            if settings.get("hotkeyEnabled").and_then(Value::as_bool).unwrap_or(true) {
-                let hotkey = settings
-                    .get("hotkey")
-                    .and_then(Value::as_str)
-                    .map(str::to_string);
-                if let Err(err) = register_hotkey(&handle, hotkey) {
-                    eprintln!("[workbench] {err}");
-                }
-            }
+            // 全局快捷键不在这里装：三条的值（含默认值）只有渲染层那份收敛过的设置里有，
+            // 它在 initState 之后会调 apply_hotkeys 推一次（见 workbench/index.ts 的
+            // syncSystemIntegration）；Rust 去数据文件里读会漏掉「刚加的字段还没写回盘」那一段。
 
             // 邮件后台监视：线程自己每分钟醒一次，到点（满登记的周期）查新邮件、弹通知。
             // 账户清单与周期由渲染层载入设置后经 mail_watch_register 登记进来。

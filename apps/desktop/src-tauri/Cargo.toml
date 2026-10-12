@@ -57,6 +57,9 @@ schannel = "0.1"
 # Windows 自己认（LogonUserW，advapi32），账户名与域来自 GetUserNameExW（secur32）——
 # 与其余几行同一条口径，只是给 windows-sys 加 feature，不引账户管理 / 密码学 crate（见 vault.rs）。
 # 这些路都只给已有依赖加 feature，**不新增任何 crate**。
+# DataExchange / Memory 是截图与钉图往系统剪贴板放图用的：OpenClipboard + SetClipboardData
+# 在前者，GlobalAlloc / GlobalLock 那一套在后者（见 clipboard.rs）。截图本身（BitBlt /
+# GetDIBits）走的是上面那几行里已有的 Gdi 与 WindowsAndMessaging，没加新 feature。
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Globalization",
@@ -68,6 +71,8 @@ windows-sys = { version = "0.61", features = [
     "Win32_Security_Authentication_Identity",
     "Win32_Security_Credentials",
     "Win32_Storage_FileSystem",
+    "Win32_System_DataExchange",
+    "Win32_System_Memory",
     "Win32_System_Threading",
     "Win32_UI_Shell",
     "Win32_UI_Shell_Common",
@@ -116,3 +121,18 @@ lto = "thin"
 opt-level = "s"
 panic = "abort"
 strip = true
+
+# 截图那条路（BitBlt → PNG 编码）是「几兆像素的循环」：debug 不优化时编一张 1080p 的 PNG
+# 要一秒多（自适应滤波那一趟占大头），而按热键的整个预算才 200ms —— 它是这条路在开发态
+# 最大的一笔开销。只给这条链上的几个 crate 开优化（实测 295ms → 158ms），不为整棵依赖树
+# （tauri / rusqlite / windows-sys……）买单选。release 本来就全是优化过的，这一段对安装包没有影响。
+[profile.dev.package.image]
+opt-level = 3
+[profile.dev.package.png]
+opt-level = 3
+[profile.dev.package.flate2]
+opt-level = 3
+[profile.dev.package.fdeflate]
+opt-level = 3
+[profile.dev.package.miniz_oxide]
+opt-level = 3

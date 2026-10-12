@@ -2,9 +2,10 @@
 /**
  * 设置弹窗的外壳：左侧菜单 + 右侧内容区。
  *
- * 四屏各自成片（components/settings/ 下）：外观（看起来什么样：主题、背景、顶部样式
- * 与首页画布的布局）、菜单（左侧导航栏上留哪几页）、通用（程序、快捷键、启动、
- * 天气、笔记、账号与同步）、关于（这个应用是什么、数据住在哪、什么时候才会联网）。
+ * 五屏各自成片（components/settings/ 下）：通用（程序、快捷键、启动、
+ * 天气、笔记、账号与同步）、截图（快捷键、保存位置、钉图与放大镜）、外观（看起来什么样：
+ * 主题、背景、顶部样式与首页画布的布局）、菜单（左侧导航栏上留哪几页）、
+ * 关于（这个应用是什么、数据住在哪、登录状态）。
  * 选中项不随关闭重置，下次打开还停在上一屏，省得每次都要再点一次。
  *
  * 这一壳只管三件事：弹窗骨架与菜单、每屏的显隐（v-show —— 各屏各滚、滚动位置
@@ -16,6 +17,7 @@ import AppDialog from '@/components/AppDialog.vue'
 import { useSettingsStore } from '@/stores/settings'
 import AboutPane from './settings/AboutPane.vue'
 import AppearancePane from './settings/AppearancePane.vue'
+import CapturePane from './settings/CapturePane.vue'
 import GeneralPane from './settings/GeneralPane.vue'
 import MenuPane from './settings/MenuPane.vue'
 
@@ -31,16 +33,17 @@ const visible = computed({
   },
 })
 
-type SettingsTab = 'appearance' | 'menu' | 'general' | 'about'
+type SettingsTab = 'appearance' | 'menu' | 'general' | 'capture' | 'about'
 
 const tabs: Array<{ value: SettingsTab, label: string }> = [
+  { value: 'general', label: '通用' },
+  { value: 'capture', label: '截图' },
   { value: 'appearance', label: '外观' },
   { value: 'menu', label: '菜单' },
-  { value: 'general', label: '通用' },
   { value: 'about', label: '关于' },
 ]
 
-const activeTab = ref<SettingsTab>('appearance')
+const activeTab = ref<SettingsTab>('general')
 
 // 内置壁纸的缩略图要现压，按需在第一次打开面板时取（见 store 的 ensureWallpapers）
 watch(visible, (open) => {
@@ -82,6 +85,7 @@ watch(visible, (open) => {
       <!-- 内容区只是过道；每个 pane 自己滚，切屏时各留各的位置 -->
       <div class="settings__body">
         <AppearancePane v-show="activeTab === 'appearance'" :open="visible" :active="activeTab === 'appearance'" />
+        <CapturePane v-show="activeTab === 'capture'" />
         <MenuPane v-show="activeTab === 'menu'" />
         <GeneralPane v-show="activeTab === 'general'" :open="visible" />
         <AboutPane v-show="activeTab === 'about'" :open="visible" :active="activeTab === 'about'" />
