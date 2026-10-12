@@ -561,9 +561,9 @@ export const useKbStore = defineStore('kb', () => {
       return '正在探测运行环境…'
     switch (ai.envGap()) {
       case 'node':
-        return '这台机器的 Node 太旧：跑 Pi 需要 Node ≥ 22.19，先把 Node 升上去。'
+        return `这台机器的 Node 太旧：跑 ${settings.settings.appName} 需要 Node ≥ 22.19，先把 Node 升上去。`
       case 'pi':
-        return '没找到 Pi 运行时：随包内置的那份不在，PATH 上也没有全局安装的。'
+        return `没找到 ${settings.settings.appName} 运行时：随包内置的那份不在，PATH 上也没有全局安装的。`
       case 'model':
         return '还没配模型：添加一个 AI 服务（预设厂商或自定义端点）并选上模型。'
       case 'key':
@@ -671,7 +671,7 @@ export const useKbStore = defineStore('kb', () => {
             ...cleanLines.value,
             {
               kind: 'info',
-              text: 'Pi 想执行命令，已自动拒绝',
+              text: `${settings.settings.appName} 想执行命令，已自动拒绝`,
               detail: confirm.message,
             },
           ]
