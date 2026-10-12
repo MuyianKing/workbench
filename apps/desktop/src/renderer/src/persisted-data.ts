@@ -16,6 +16,7 @@ import { pickAiActiveSession, sanitizeAiApiFormat, sanitizeAiBaseUrl, sanitizeAi
  */
 import { clampTerminalButtonTop, pickAppearance, sanitizeAppearanceSettings, sanitizeViewId, stripAppearance } from '@workbench/appearance'
 import { sanitizeAccount } from '@workbench/auth'
+import { CAPTURE_HOTKEY_DEFAULT, PIN_THROUGH_HOTKEY_DEFAULT, sanitizeCaptureHotkey, sanitizeCaptureMagnifier, sanitizeCapturePinOpacity, sanitizeCaptureSaveDir } from '@workbench/capture'
 import { pruneDays, sanitizeActivity, sanitizeCommands, sanitizeIconCache, sanitizeProjectSort, sanitizeQuickApps } from '@workbench/core'
 import { sanitizeKbRawSources } from '@workbench/kb'
 import { sanitizeMailAccounts, sanitizeMailBulkSenders, sanitizeMailContacts, sanitizeMailPollMinutes } from '@workbench/mail'
@@ -68,6 +69,15 @@ export function sanitizeSettings(raw: unknown): StoredSettings {
   if (typeof value.hotkey !== 'string' || !value.hotkey.trim()) {
     value.hotkey = DEFAULT_SETTINGS.hotkey
   }
+  // 截图那几项：老数据文件里都没有。快捷键串只做「去空白 / 空则回默认」——
+  // 认不认得出交给 Rust 的 tauri-plugin-global-shortcut 解析器，注册失败会在设置界面里报出来；
+  // 保存目录与透明度这些在这里收敛（它们要拿去拼路径 / 当数值用）
+  value.captureEnabled = value.captureEnabled !== false
+  value.captureHotkey = sanitizeCaptureHotkey(value.captureHotkey, CAPTURE_HOTKEY_DEFAULT)
+  value.pinHotkey = sanitizeCaptureHotkey(value.pinHotkey, PIN_THROUGH_HOTKEY_DEFAULT)
+  value.captureSaveDir = sanitizeCaptureSaveDir(value.captureSaveDir)
+  value.capturePinOpacity = sanitizeCapturePinOpacity(value.capturePinOpacity)
+  value.captureMagnifier = sanitizeCaptureMagnifier(value.captureMagnifier)
   value.launchAtLogin = value.launchAtLogin === true
   value.hotkeyEnabled = value.hotkeyEnabled !== false
   // Token 同步仓库：老数据文件里没有这个字段（默认空串 = 不同步）。

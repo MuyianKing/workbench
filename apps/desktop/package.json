@@ -24,6 +24,7 @@
     "@workbench/ai": "workspace:*",
     "@workbench/appearance": "workspace:*",
     "@workbench/auth": "workspace:*",
+    "@workbench/capture": "workspace:*",
     "@workbench/core": "workspace:*",
     "@workbench/kb": "workspace:*",
     "@workbench/mail": "workspace:*",

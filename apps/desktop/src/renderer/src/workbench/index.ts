@@ -1,4 +1,4 @@
-import type { AddProjectInput, AppSettings, AuthProvider, BackgroundImage, BuiltinWallpaper, CommandEntry, EffectiveTheme, InstallablePackageManager, MailNotifyPayload, Project, Result, TerminalKind, ThemeConfig, WindowState, WorkbenchApi } from '@/types'
+import type { AddProjectInput, AppSettings, AuthProvider, BackgroundImage, BuiltinWallpaper, CaptureContext, CommandEntry, EffectiveTheme, InstallablePackageManager, MailNotifyPayload, PinPatch, PinRecord, Project, Result, TerminalKind, ThemeConfig, WindowState, WorkbenchApi } from '@/types'
 /**
  * `window.workbench` 的 Tauri 实现。
  *
@@ -10,10 +10,11 @@ import type { AddProjectInput, AppSettings, AuthProvider, BackgroundImage, Built
  * 通道补齐后应当去掉兜底（那时 `as` 断言也就不需要了）。
  */
 import { fail, nextProjectColor, ok, parsePort, samePath } from '@workbench/core'
+import { notifyWarning } from '@/notify'
 import * as ai from './ai'
 import * as aiNews from './ai-news'
 import * as auth from './auth'
-import { assetUrl, errorText, guard, hasTauri, invoke, listen, notPorted } from './bridge'
+import { assetUrl, errorText, guard, hasTauri, invoke, listen, listenReady, notPorted } from './bridge'
 import * as design from './design'
 import { emit } from './events'
 import * as events from './events'
@@ -112,9 +113,27 @@ async function resolveBuiltin(id: string): Promise<string | null> {
 function noop(): void {}
 
 /**
+ * 三条全局快捷键的值。
+ *
+ * **值由这一侧给**（Rust 不读设置）：默认值（截图是 F1）只活在 `@workbench/capture` 里，
+ * Rust 去数据文件里读的话，「刚加上的字段还没被写回盘」那一段读到的是空的 ——
+ * 首启按 F1 就没反应，而且之后再也不会补注册（踩过一次）。
+ * 关掉的开关、空串都收敛成 null = 不要那一条。
+ */
+function hotkeyArgs(settings: AppSettings): Record<string, string | null> {
+  return {
+    main: settings.hotkeyEnabled ? settings.hotkey : null,
+    capture: settings.captureEnabled ? settings.captureHotkey : null,
+    pinThrough: settings.pinHotkey,
+  }
+}
+
+/**
  * 把设置里的系统集成项落到系统上：开机自启、全局快捷键。
  *
  * 失败只记一笔就够：设置已经存下了，注册不上（被占用、被策略拦）不该连带让改设置这件事失败。
+ * 只有快捷键那条会**说一句**：界面上看着「设过了」、按下去却没反应是最难查的那种，
+ * 得让用户知道是「被别的程序占了」而不是功能坏了。
  */
 async function syncSystemIntegration(settings: AppSettings): Promise<void> {
   try {
@@ -125,10 +144,21 @@ async function syncSystemIntegration(settings: AppSettings): Promise<void> {
   }
 
   try {
-    await invoke('set_hotkey', { accelerator: settings.hotkeyEnabled ? settings.hotkey : null })
+    // 三条一起装：插件注册是「先全清再逐条注册」，分几次调会互相注销（见 main.rs）
+    await invoke('apply_hotkeys', hotkeyArgs(settings))
   }
   catch (error) {
-    console.warn('[workbench] 注册全局快捷键失败', error)
+    notifyWarning(errorText(error, '全局快捷键注册失败，可能被别的程序占用了'))
+  }
+
+  try {
+    // 遮罩窗口先建好（每块屏一块），免得按热键时现等一个 WebView2 起来。
+    // **必须等设置载完再调**：这一步要读的正是 captureEnabled（关掉就把池子收掉）。
+    // 失败不打扰用户：真按热键时 Rust 会现建，只是那一次慢一点
+    await invoke('capture_prewarm', { enabled: settings.captureEnabled })
+  }
+  catch (error) {
+    console.warn('[workbench] 预建截图遮罩失败', error)
   }
 }
 
@@ -692,6 +722,55 @@ function createApi(): WorkbenchApi {
     respondQuitConfirm: (choice: Parameters<WorkbenchApi['respondQuitConfirm']>[0]) => {
       void invoke('resolve_quit_choice', { choice })
     },
+
+    // ---------- 截图与钉图（见 docs/modules/screenshot.md） ----------
+    //
+    // 这两组通道三个窗口共用：主窗口（设置里那颗「试一下」按钮、托盘提示）、
+    // 遮罩窗口（capture.html）、钉图窗口（pin.html）。后两个入口只装这一层适配层，
+    // **不装 store、不 initState** —— 装了就会与主窗口抢着写同一批 JSON。
+    beginCapture: () => guard(invoke<number>('capture_begin'), '开始截图失败'),
+    // 把「按下热键到看见遮罩」压到两百毫秒级的就这一条：Rust 据此把遮罩窗口先建好，
+    // 之后每场截图只是「塞帧 → 摆位置 → 显示」（见 docs/modules/screenshot.md）
+    capturePrewarm: (enabled: boolean) =>
+      guard(invoke<null>('capture_prewarm', { enabled }), '预建截图遮罩失败'),
+    abortCapture: () => {
+      void invoke('capture_abort')
+      return Promise.resolve()
+    },
+    captureContext: () => guard(invoke<CaptureContext>('capture_context'), '取截图上下文失败'),
+    captureFrame: () => guard(invoke<string>('capture_frame'), '取不到这一帧截图'),
+    // 遮罩里的 JS 报「这一场的帧已经画到画布上了」：Rust 等到每一块屏都报齐才显示遮罩 ——
+    // 抢在帧前面显示就是先闪一块黑（见 docs/modules/screenshot.md 与 capture.rs 的 capture_show）
+    showCapture: (id: number) => guard(invoke<null>('capture_show', { id }), '显示截图遮罩失败'),
+    copyImage: (png: string) => guard(invoke<null>('capture_copy', { png }), '复制到剪贴板失败'),
+    saveImage: (png: string, dir: string, name: string, unique: boolean) =>
+      guard(invoke<string>('capture_save', { png, dir, name, unique }), '保存截图失败'),
+    pinImage: (png: string, x: number, y: number, width: number, height: number, opacity: number) =>
+      guard(invoke<PinRecord>('pin_create', { png, x, y, width, height, opacity }), '钉图失败'),
+    pinContext: () => guard(invoke<PinRecord>('pin_context'), '取钉图信息失败'),
+    pinState: (patch: PinPatch) => guard(invoke<PinRecord>('pin_update', { patch }), '改钉图状态失败'),
+    pinClose: () => {
+      void invoke('pin_close')
+      return Promise.resolve()
+    },
+    pinCloseAll: () => {
+      void invoke('pin_close_all')
+      return Promise.resolve()
+    },
+    pinCopy: () => guard(invoke<null>('pin_copy'), '复制到剪贴板失败'),
+    pinSave: (dir: string, name: string, unique: boolean) =>
+      guard(invoke<string>('pin_save', { dir, name, unique }), '保存钉图失败'),
+    applyHotkeys: () => guard(invoke<null>('apply_hotkeys', hotkeyArgs(state.settings())), '注册全局快捷键失败'),
+    // 截图是在工作线程里抓的，失败没法就地报给谁：Rust 推一条事件过来，
+    // 主窗口弹提示（那时界面多半藏在托盘里 / 根本没显示）
+    onCaptureFailed: (fn: (message: string) => void) => listen<string>('capture:failed', fn),
+    // 跟当前这场会话对一次：开场与收工各推一条（开场带这一场的编号，收工带 null）。
+    // 遮罩窗口是**跨场复用**的（预建、藏起来），显示 / 隐藏它不会让里面的 JS 重新开场，
+    // 两边都靠这一条（见 docs/modules/screenshot.md）。用 listenReady：遮罩要先挂上订阅、
+    // 再补问一次当前有没有会话，顺序反了会漏掉中间那一条
+    onCaptureSync: (fn: (id: number | null) => void) => listenReady<number | null>('capture:sync', fn),
+    // 全局快捷键翻了钉图穿透时，钉图窗口要跟着刷新自己菜单里那一栏
+    onPinState: (fn: (record: PinRecord) => void) => listen<PinRecord>('pin:state', fn),
 
     // 尚未有人推的一个：首页布局（本地改动的推送方还没补）
     onThemeConfig: () => noop,

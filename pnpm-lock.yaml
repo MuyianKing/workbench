@@ -199,6 +199,9 @@ importers:
       '@workbench/auth':
         specifier: workspace:*
         version: link:../../packages/auth
+      '@workbench/capture':
+        specifier: workspace:*
+        version: link:../../packages/capture
       '@workbench/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -294,6 +297,12 @@ importers:
         version: 5.0.3(@types/node@26.6.4)(vite@8.3.2(@types/node@26.6.4)(yaml@2.9.1))
 
   packages/auth:
+    devDependencies:
+      vitest:
+        specifier: ^5.0.3
+        version: 5.0.3(@types/node@26.6.4)(vite@8.3.2(@types/node@26.6.4)(yaml@2.9.1))
+
+  packages/capture:
     devDependencies:
       vitest:
         specifier: ^5.0.3

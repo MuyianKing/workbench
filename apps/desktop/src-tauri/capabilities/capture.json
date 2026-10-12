@@ -1,0 +1,11 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "capture",
+  "description": "截图遮罩与钉图窗口的能力。这两族窗口只做三件事，所以权限是刻意最小的：一，调自己那几条 capture_* / pin_* 命令（命令本身不走 ACL）；二，「另存为」要弹系统对话框（dialog:default）；三，钉图整张标了 data-tauri-drag-region，拖动要放行 core:window:allow-start-dragging —— 被 ACL 拦下是静默失效（拖不动，也不报错）。窗口的位置 / 尺寸 / 置顶 / 鼠标穿透都由 Rust 自己设（见 capture.rs / pin.rs），前端一条都不碰，所以那几项权限一个都不给。",
+  "windows": ["capture-*", "pin-*"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-start-dragging",
+    "dialog:default"
+  ]
+}

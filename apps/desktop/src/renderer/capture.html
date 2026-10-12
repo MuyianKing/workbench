@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="zh-CN" class="dark" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <!--
+      截图遮罩窗口的入口。
+
+      单独一个 HTML 是必需的：它与主界面是**两个窗口、两份 JS 上下文**（见 vite.config.ts 的
+      多入口）。这一屏只装「很薄的一层适配层 + 这一屏自己」，不装 store、不 initState ——
+      那个 store 会与主窗口抢着写同一批 JSON（见 docs/modules/screenshot.md）。
+
+      class="dark" 是固定的：遮罩压在任意内容之上，工具条按深色做（与终端面板同一条口径），
+      不随应用主题走。首屏底色给黑，抓到的那一帧加载出来之前先是一块黑，不会是白闪。
+    -->
+    <title>截图</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+        background: #000;
+        /* 遮罩层不允许被选中 / 拖拽，整个窗口就是一块画布 */
+        user-select: none;
+        -webkit-user-select: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="capture"></div>
+    <script type="module" src="/src/capture/main.ts"></script>
+  </body>
+</html>

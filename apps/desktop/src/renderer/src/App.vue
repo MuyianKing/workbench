@@ -3,6 +3,7 @@ import type { ViewId } from '@workbench/appearance'
 import type { Component } from 'vue'
 import { backgroundVeilAlpha, cardSurfaceAlpha, veilRgbTriplet } from '@workbench/appearance'
 
+import { ElMessage } from 'element-plus'
 import { computed, onMounted } from 'vue'
 import AddProjectDialog from '@/components/AddProjectDialog.vue'
 import AiView from '@/components/AiView.vue'
@@ -99,6 +100,9 @@ onMounted(() => {
   void store.init()
   weather.start()
   mail.startWatch()
+  // 截图失败（抓屏 / 铺遮罩出错）：那是工作线程里跑的动作，没有别的地方能报回来。
+  // Rust 会先把窗口唤出来再推这条事件，所以提示条一定冒在一个看得见的窗口上
+  window.workbench.onCaptureFailed(message => ElMessage.error(message))
 })
 </script>
 

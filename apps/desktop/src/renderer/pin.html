@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-CN" class="dark" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <!--
+      钉图窗口的入口。
+
+      与遮罩一样是**独立的一份 JS 上下文**：只装那层很薄的适配层，不装 store、不 initState
+      （否则会与主窗口抢着写同一批 JSON，见 docs/modules/screenshot.md）。
+
+      class="dark" 固定：这扇窗口浮在桌面上，页面底必须是透明的 —— 窗口开了 transparent(true)，
+      只有 html / body 也真透明，CSS 的 opacity（调钉图透明度那一下）透出来的才是桌面。
+    -->
+    <title>钉图</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+        background: transparent;
+        user-select: none;
+        -webkit-user-select: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="pin"></div>
+    <script type="module" src="/src/pin/main.ts"></script>
+  </body>
+</html>

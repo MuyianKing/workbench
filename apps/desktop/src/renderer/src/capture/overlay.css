@@ -1,0 +1,115 @@
+/**
+ * 遮罩窗口与钉图窗口共用的底子样式。
+ *
+ * 这两个入口不走 global.css（那是应用外壳的样式），只引 tokens 与这一份。
+ * Element Plus 的暗色变量表由各自的 main.ts 引（必须先于 tokens）。
+ */
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#capture,
+#pin {
+  width: 100%;
+  height: 100%;
+}
+
+body {
+  font-family: 'Segoe UI', 'Microsoft YaHei', system-ui, sans-serif;
+  font-size: 13px;
+  color: var(--ink);
+}
+
+/* 浮动工具条：深色半透明卡片，压在任意像素上都看得清 */
+.overlay-bar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 5px 6px;
+  border: 1px solid rgb(255 255 255 / 12%);
+  border-radius: 8px;
+  background: rgb(28 30 34 / 96%);
+  box-shadow: 0 6px 24px rgb(0 0 0 / 45%);
+  white-space: nowrap;
+}
+
+.overlay-bar__sep {
+  width: 1px;
+  height: 18px;
+  margin: 0 4px;
+  background: rgb(255 255 255 / 16%);
+}
+
+/* 工具按钮：无底色，选中时一层浅底 + 主题色描边（界面主体灰度那条规矩不适用于遮罩工具条，
+   它是压在截图上的浮层，用彩色表达「当前选中哪个工具」） */
+.overlay-tool {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 28px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: #e6e8eb;
+  cursor: pointer;
+}
+
+.overlay-tool:hover {
+  background: rgb(255 255 255 / 12%);
+}
+
+.overlay-tool.is-active {
+  border-color: var(--accent, #409eff);
+  background: rgb(64 158 255 / 22%);
+  color: #fff;
+}
+
+.overlay-tool:disabled {
+  color: rgb(255 255 255 / 30%);
+  cursor: default;
+}
+
+.overlay-tool:disabled:hover {
+  background: transparent;
+}
+
+/* 颜色小圆点 */
+.overlay-swatch {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid rgb(255 255 255 / 30%);
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.overlay-swatch.is-active {
+  box-shadow: 0 0 0 2px #fff;
+}
+
+/* 档位（线宽 / 字号 / 马赛克格子）：一排小文字按钮 */
+.overlay-step {
+  min-width: 24px;
+  height: 24px;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: #e6e8eb;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.overlay-step:hover {
+  background: rgb(255 255 255 / 12%);
+}
+
+.overlay-step.is-active {
+  border-color: var(--accent, #409eff);
+  background: rgb(64 158 255 / 22%);
+  color: #fff;
+}

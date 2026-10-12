@@ -28,6 +28,7 @@ Workbench 的文档按「通用 / 模块」分层：
 | 邮箱（IMAP 收发） | [mail.md](modules/mail.md) |
 | 样式（设计参考库） | [styles.md](modules/styles.md) |
 | 视频（本地 MP4 播放器） | [video.md](modules/video.md) |
+| 截图与钉图（capture） | [screenshot.md](modules/screenshot.md) |
 | 终端面板 | [terminal.md](modules/terminal.md) |
 | 用量与外观同步、账号登录 | [sync-and-auth.md](modules/sync-and-auth.md) |
 | 通道、状态与落盘（底座） | [ipc-and-state.md](modules/ipc-and-state.md) |
@@ -91,9 +92,35 @@ Workbench 的文档按「通用 / 模块」分层：
   收起**不是卸载**：导航栏常驻挂载，`is-hidden` 一组过渡把宽、边距与边框收到 0（0.2s，`visibility` 拖到动画走完才生效），
   外壳不占、没有跳变；它也住 `theme.json` 跟外观同步走，重启保持收起前的样子
 
+**截图与钉图**
+
+- 按截图快捷键（默认 **F1**）或托盘菜单里的「截图」起一次：**抓齐所有屏**、每块屏铺一层
+  「冻结画面」的遮罩（无边框、置顶、不上任务栏），光标在哪块屏就在哪块屏上动手。同一个快捷键
+  再按一次 = 取消整场。遮罩窗口是**预建好、跨场复用**的（每块屏常驻一块 webview）：
+  按热键之后只走「抓屏 → 编码 → 塞帧 → 显示」，不再现等一块 WebView2 起来 ——
+  这是这条链能快到两百毫秒级的唯一原因（见[「截图与钉图」](modules/screenshot.md)）
+- 框选一块、双击选整屏、Ctrl+A 全选；八个把手可调、方向键微调（按住 Shift 走十格）、
+  拖选区内部是整体挪动。选区角上实时给出「宽 × 高」，光标旁边有**放大镜与像素颜色读数**
+  （挡视线时可在设置里关掉）。右键先取消选区，没选区了才退出整场
+- 七个标注工具：**矩形 / 椭圆 / 箭头 / 画笔 / 荧光笔 / 马赛克 / 文字**；颜色八档、线宽三档、
+  马赛克格子三档、字号三档。画过的东西还能**点中**（虚线框）拖动、Delete 删掉，
+  Ctrl+Z / Ctrl+Shift+Z 撤销重做 —— 不是「画完就烘死」
+- 三个出口：**复制到剪贴板**（Enter / Ctrl+C，一次给齐 DIB 与 PNG 两种格式，老程序也粘得上）、
+  **保存成 PNG**（Ctrl+S）、**钉到屏幕上**（Ctrl+D）。设过「自动保存位置」就直接落进去
+  （同名自动加序号），没设过才弹一次「另存为」。Esc 逐层退：输入框 → 工具 → 选区 → 退出
+- **钉图**是一张置顶、无边框、拖着就走的图窗口：滚轮缩放（以光标为不动点、保持长宽比）、
+  Ctrl+滚轮调透明度（20%~100%）、右键菜单（复制 / 另存为 / 鼠标穿透 / 适应屏幕 / 关闭）、
+  双击或 Esc 关掉，悬停时描一圈边好认出边界。**位置、大小与透明度会记账** —— 下次启动
+  照原样钉回来（图还在的话）。开了「鼠标穿透」之后它收不到任何鼠标事件（右键菜单也点不到了），
+  只能靠「钉图穿透快捷键」（默认 **Ctrl+Shift+X**）把所有钉图一起翻回来
+- 已知边界（都是有意留的，见[「截图与钉图」](modules/screenshot.md)）：独占全屏的游戏画面抓出来是黑的、
+  HDR 屏颜色偏淡、UAC 的安全桌面抓不到（Windows 就不给）；**选区不跨屏**（拖到屏幕边缘就停）；
+  **没有取字 / OCR** —— 云 OCR 会多出一条联网出口，这一版不做
+
 **系统集成（设置面板）**
 
-- 面板是「左侧菜单 + 右侧内容」两栏：菜单四屏 —— **通用**（程序、天气、快捷键、启动、笔记、账号与同步）、
+- 面板是「左侧菜单 + 右侧内容」两栏：菜单五屏 —— **通用**（程序、天气、快捷键、启动、笔记、账号与同步）、
+  **截图**（截图与钉图穿透两条快捷键、自动保存位置、钉图初始透明度、放大镜开关，外加一颗「立即截图」）、
   **外观**（主题、背景、顶部样式、卡片不透明度与间距）、
   **菜单**（导航栏留哪几页，首页页下还挂着它自己的九块卡片）与
   **关于**（版本、数据目录、登录状态），右侧各区独立滚动、菜单不跟着走。
@@ -121,7 +148,9 @@ Workbench 的文档按「通用 / 模块」分层：
 - **首页那一页下面挂着它自己的九块卡片**（同一屏，缩进一层 + 一条竖线把父子关系摆明）：
   一行一块、一个开关，关掉的卡片不画在首页上（位置与高度留着，再打开回到原处），至少留一块。
   两块开关清单都排在说明文字下面，一行两个，不给某一屏撑出一整屏高
-- 全局快捷键唤起或隐藏窗口（默认 `Ctrl+M`，可自行录制；被占用时自动停用并提示）
+- 全局快捷键唤起或隐藏窗口（默认 `Ctrl+M`，可自行录制）；截图与钉图穿透那两条在设置·截图里。
+  **被别的程序占用时会在界面上提示**（`RegisterHotKey` 是全局独占的，挂不上就是按了没反应），
+  而不是安静地什么都不做
 - **关闭按钮 = 收进托盘**：窗口不会真的关掉，托盘常驻，点托盘图标或快捷键都能找回来；最小化是否也收进托盘可单独设置（默认收进托盘）
 - 右键不弹 WebView2 的原生菜单（返回 / 刷新 / 另存为 / 打印 / 更多工具 / 检查 那一套）：界面是自绘的，浏览器这套菜单在这里没有意义；
   菜单键与 Shift+F10 触发的是同一个事件，也一样不出。调试因此没有「检查」可点，改走远程调试端口（见 [AGENTS.md](../AGENTS.md) 第 6 节）
@@ -150,7 +179,7 @@ Workbench 的文档按「通用 / 模块」分层：
 | 工作日志渲染 | markdown-it（只服务工作日志正文：`html: false` 转义原文里的标签、`linkify` 认裸地址、`breaks` 让单个换行就是 `<br>`，链接统一新窗口 + 交系统浏览器打开） |
 | 笔记编辑器 | Vditor（只服务笔记正文；静态资源随包带一份、不走 CDN，见[「笔记」](modules/notes.md)那一节） |
 | 构建 | Vite 8（渲染层，打包器是 rolldown）+ cargo / Tauri CLI（后端）。根与 `apps/desktop` 的 `package.json` 都是 `"type": "module"`，所以各 vite / vitest 配置里用 `import.meta.dirname`（`__dirname` 只在旧的打包式加载器下被 shim 出来；仓库里也不要有 CJS 的 `.js` / `.cjs`，它们会被当成 ESM） |
-| 语言 | TypeScript（渲染层）+ Rust（后端）；契约与纯逻辑按域拆在 `packages/` 的 14 个 `@workbench/*` 包 |
+| 语言 | TypeScript（渲染层）+ Rust（后端）；契约与纯逻辑按域拆在 `packages/` 的 15 个 `@workbench/*` 包 |
 | 持久化 | 本地 JSON，由 Rust 侧 `store.rs` 负责（防抖 300ms、临时文件 + rename、退出前同步落盘） |
 | 子进程 | `std::process` 起 shell 命令（按批回传输出，Windows 下 `taskkill /T /F` 结束整棵进程树） |
 | 端口 → 进程 | `GetExtendedTcpTable`（iphlpapi，一次系统调用拿到监听表）+ `QueryFullProcessImageNameW`；不再起 `netstat` / `tasklist` 解析文本输出（全量检测会并发问十几个端口，原先每个端口两个子进程） |
@@ -211,6 +240,10 @@ apps/desktop/            桌面应用（自包含：渲染层 + Rust + 随包资
   src/ai.rs              AI 助手宿主侧 —— 注解见 modules/ai.md
   src/pi_skills.rs       Pi 的技能 —— 注解见 modules/ai.md
   src/video.rs           视频文件夹扫描与 allow —— 注解见 modules/video.md
+  src/screen.rs          Win32 抓屏（BitBlt）与光标位置 —— 注解见 modules/screenshot.md
+  src/capture.rs         截图会话与遮罩窗口 —— 注解见 modules/screenshot.md
+  src/clipboard.rs       往系统剪贴板放图（CF_DIBV5 / CF_DIB / PNG）—— 注解见 modules/screenshot.md
+  src/pin.rs             钉图窗口与记账 —— 注解见 modules/screenshot.md
   src/oauth.rs           账号登录 —— 注解见 modules/sync-and-auth.md
   src/http.rs            WinHTTP 极简 HTTP 客户端 —— 注解见 modules/ipc-and-state.md
   src/weather.rs         实时天气宿主侧 —— 注解见 modules/home.md
@@ -225,6 +258,9 @@ apps/desktop/            桌面应用（自包含：渲染层 + Rust + 随包资
   tauri.conf.json        窗口、打包、资源映射
   capabilities/          能力白名单
 
+  src/renderer/           三个 HTML 入口：index.html（主界面）、capture.html（截图遮罩）、
+                         pin.html（钉图）。后两个是独立窗口、各自的 JS 上下文，只装适配层、
+                         不装 store（见 modules/screenshot.md）
   src/renderer/src/       Vue 应用（组件 / Pinia store / 设计令牌）
   workbench/             window.workbench 的适配层（原 preload + 主进程逻辑的替代品）：
                          底座五件（bridge / events / state / session / scanner）的注解见
@@ -244,7 +280,7 @@ apps/desktop/            桌面应用（自包含：渲染层 + Rust + 随包资
                          DEFAULT_SETTINGS），并从各域包 re-export 保持 `@/types` 一站式取类型
   persisted-data.ts      数据文件的收敛编排 + theme.json ↔ 数据文件的分流桥接
 
-packages/                按域拆出的 14 个 @workbench/* 包（TS 源码直出、各自带 vitest；
+packages/                按域拆出的 15 个 @workbench/* 包（TS 源码直出、各自带 vitest；
                          包之间与应用都只按包名走各自的 index.ts 桶导入）：
   core/                  平台原语：Result 与 ok/fail、端口与项目路径、dev-port、扫描
                          （scanner，fs 注入）、命令与快捷启动的收敛、图标缓存、残留进程判定、
@@ -271,6 +307,9 @@ packages/                按域拆出的 14 个 @workbench/* 包（TS 源码直�
   mail/                   邮箱账户配置的收敛、通讯录的收敛（contacts.ts）、RFC 2047 编解码、
                           发信报文构建（mime.ts）、
                           收信解析与沙箱正文（parse.ts，postal-mime 包装）、广告邮件识别（bulk.ts）
+  capture/               截图与钉图的纯逻辑：选区几何与八个把手、标注模型与命中判定、撤销栈、
+                          放大镜取样、三层坐标换算、钉图缩放与透明度、截图文件名，以及那两个
+                          窗口与后端来回的线格式（wire.ts）
 
 apps/desktop/scripts/    make-icons.mjs（程序化生成应用图标与托盘图标）、
                          vendor-pi.mjs（Pi 随包内置与瘦身）、
@@ -342,7 +381,9 @@ pnpm run dist         # 产出 NSIS 安装包
 
 ## 数据与隐私
 
-应用**默认不联网**。对外发请求的只有十处，且都是你自己开出来的：
+应用**默认不联网**。对外发请求的只有十处，且都是你自己开出来的。
+**截图与钉图一处都不占**：抓屏走 Win32（BitBlt）、剪贴板与落盘都在本机、钉图只是一扇置顶窗口，
+整个过程没有一次网络请求（也正因如此，取字 / OCR 这一版不做：云端那条会多出一处出口）。
 
 - **Token 用量同步**（可选、默认关闭）：登录账号且设置里填了仓库地址才会推 / 拉那个仓库，退出登录就停。
   **密码保险库推的是同一仓库的另一个目录**（`vault/vault.json`），推上去的只有密文
@@ -355,7 +396,9 @@ pnpm run dist         # 产出 NSIS 安装包
   正文里的外链图与素材缩略图由 webview 按地址直接取，同一条边界
   （页面级 `no-referrer` 让请求不带来源，见[「笔记」](modules/notes.md)那一节）
 - **笔记本身的同步**（可选、默认关闭）：前提是**笔记文件夹自己是个连了远端的 git 仓库**（应用不替你建），
-  且你**点了同步按钮**才走一次 git，推到它自己的 `origin`
+  且你**点了同步按钮**才走一次 git，推到它自己的 `origin`。**知识库的同步复用这一条**（同一个通道、推的是
+  那个知识库文件夹自己的 `origin`，不另算一处出口）：提交是 `git add -A` 不带 pathspec、等于**整棵工作树**，
+  所以库里 `data/raw/` 那份**原始资料会跟着一起推到远端**；配到**库外**文件夹的来源不在这个仓库里，不进同步
 - **技能库的同步**（可选、默认关闭）：前提是**技能库在连了远端的 git 仓库里**（从它往上找），
   且你**点了技能页同步按钮**。推的是技能库所在的那个仓库（可能是笔记仓库的同一远端，也可能是专门的技能仓库）；
   平时增删改只在本机提交 —— 技能不是多出来的出口
@@ -454,6 +497,9 @@ pnpm run dist         # 产出 NSIS 安装包
   `.md` 就是全部内容；应用只记「当前打开的目录」与「打开过的那几个」（`noteDir` / `noteDirs`，
   左栏**宽度**在 `theme.json`）。天然**不进同步仓库**，换台机器选同一个文件夹即可。
   旧版笔记 JSON 树（`note-data.json`）不再读写，盘上那份可以删掉
+- `pins.json` 与 `pins/<id>.png`：**钉图的记账与图本身**（位置 / 尺寸 / 透明度 / 是否穿透）。
+  （截图那几帧**只在内存里**：一场会话用完即弃，不落盘，也就没有「忘了清理」这回事。）
+  **只在本机**：位置是这块屏上的坐标，换台机器不成立，也不进同步仓库。钉图关掉时连图一起删掉
 - 快捷启动只存程序路径与参数，不放程序本体
 - 程序图标按「路径 + 程序文件修改时间」缓存在 `workbench-data.json`（每个 1.5~4.4 KB）：
   修改时间没变就直接用（实测每次重抽 27~53ms）；只缓存抽成功的，失败的下次照常重试
@@ -492,6 +538,7 @@ WorkBuddy 是 `~/.workbuddy/projects/<项目>/`（`WORKBUDDY_HOME` 可指别处�
 ## 本期不做
 
 多项目批量串行构建、远程部署与 Docker、代码编辑器与 Git 图形化、macOS / Linux 适配、
+截图的云 OCR 取字（会多出一条联网出口）与录屏 / GIF（与截图几乎是两套东西），
 交互式命令输入（伪终端）、多人协作与项目数据云同步（多机同步只做 Token 用量快照与那份主题文件，
 项目列表、快捷启动、独立命令、工作日志与笔记这些本机数据不跟着走；工作日志是**刻意**不同步的，
 笔记则本来就是用户自己目录里的文件，见「数据与隐私」）。

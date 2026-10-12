@@ -9,6 +9,7 @@
 import type { AiImagePayload, AiNewsArticle, AiNewsRefreshResult, AiNewsSourceInfo, AiNewsView, AiProvider, AiSession, AiSkillRef } from '@workbench/ai'
 import type { AccentInkMode, AppearanceSettingKey, EffectiveTheme, ThemeConfig, ThemeSource, TopBarStyle, ViewId } from '@workbench/appearance'
 import type { AccountProfile, AuthProvider } from '@workbench/auth'
+import type { CaptureContext, PinPatch, PinRecord } from '@workbench/capture'
 import type { ActiveSession, ActivityCounts, CommandEntry, IconCacheEntry, PackageManager, ProjectColor, ProjectSort, QuickApp, Result, ScanResult } from '@workbench/core'
 import type { KbRawSource, KbRepoState, KbScanResult, KbSyncInput, KbSyncSummary } from '@workbench/kb'
 import type { MailAccount, MailContact } from '@workbench/mail'
@@ -20,6 +21,7 @@ import type { VideoNode, VideoSource } from '@workbench/video'
 import type { WorkLogEntry, WorkLogInput, WorkLogPatch, WorkRange, WorkSort } from '@workbench/work-log'
 import { AI_PERMISSION_DEFAULT, AI_THINKING_DEFAULT } from '@workbench/ai'
 import { DEFAULT_APPEARANCE, TERMINAL_BUTTON_TOP_DEFAULT } from '@workbench/appearance'
+import { CAPTURE_ENABLED_DEFAULT, CAPTURE_HOTKEY_DEFAULT, CAPTURE_MAGNIFIER_DEFAULT, CAPTURE_PIN_OPACITY_DEFAULT, CAPTURE_SAVE_DIR_DEFAULT, PIN_THROUGH_HOTKEY_DEFAULT } from '@workbench/capture'
 import { PROJECT_SORT_DEFAULT } from '@workbench/core'
 import { WORK_RANGE_DEFAULT, WORK_SORT_DEFAULT } from '@workbench/work-log'
 
@@ -40,6 +42,20 @@ export type {
 } from '@workbench/appearance'
 export { TOP_BAR_STYLES } from '@workbench/appearance'
 export type { AccountProfile, AuthProvider } from '@workbench/auth'
+export type {
+  Annotation,
+  AnnotationTool,
+  CaptureContext,
+  CaptureMonitorFrame,
+  CaptureOptions,
+  MagnifierView,
+  MonitorGeometry,
+  PinPatch,
+  PinRecord,
+  Point,
+  Rect,
+  Size,
+} from '@workbench/capture'
 /** 活跃度计数、首页布局、同步的其它设备也走这里导出，渲染层统一从 @/types 取类型 */
 export type { ActivityCounts } from '@workbench/core'
 export type { ProjectColor } from '@workbench/core'
@@ -269,6 +285,32 @@ export interface AppSettings {
   hotkeyEnabled: boolean
   /** 唤起 / 隐藏主窗口的全局快捷键 */
   hotkey: string
+  /**
+   * 截图功能总开关：关掉之后快捷键与托盘项都不再起截图（功能本身还在，
+   * 设置界面里那颗「试一下」照旧能按）。
+   */
+  captureEnabled: boolean
+  /**
+   * 起截图的全局快捷键（默认 F1，与 Snipaste 同一个键）。
+   * 认不认得出交给 Rust 的 tauri-plugin-global-shortcut 解析，注册失败会在设置里报出来。
+   */
+  captureHotkey: string
+  /**
+   * 「切换钉图鼠标穿透」的全局快捷键。
+   *
+   * 必须有一条**全局**快捷键兜着：钉图一旦开了穿透就收不到任何鼠标事件，
+   * 界面上的菜单也就点不到了 —— 这是唯一能把穿透收回来的入口（见 pin.rs）。
+   */
+  pinHotkey: string
+  /**
+   * 截图的自动保存目录，空串 = 还没设置（那时「保存」会弹一次「另存为」）。
+   * 只对本机成立（是本机的一个盘位），进数据文件、不参与外观同步。
+   */
+  captureSaveDir: string
+  /** 新钉图的初始透明度（百分比，20~100） */
+  capturePinOpacity: number
+  /** 选区时显示放大镜与像素取色（放大镜挡视线时关掉它） */
+  captureMagnifier: boolean
   /** 终端面板展开时的高度（px），由拖动面板上沿决定 */
   terminalHeight: number
   /**
@@ -1557,6 +1599,93 @@ export interface WorkbenchApi {
   updateThemeConfig: (patch: Partial<ThemeConfig>) => Promise<Result<ThemeConfig>>
   /** 数据目录：固定 `%APPDATA%\Workbench\data`，界面只用来如实显示数据放在哪儿 */
   getDataDir: () => Promise<string>
+  // ---------- 截图与钉图（见 docs/modules/screenshot.md） ----------
+  /**
+   * 起一次截图：Rust 抓齐所有屏、逐块铺遮罩窗口。返回铺了几块屏。
+   * 已经在截的话先收掉（热键 / 托盘那个入口是「再按一次 = 取消」，走 beginCapture 的这一条只会重开一次）。
+   */
+  beginCapture: () => Promise<Result<number>>
+  /**
+   * 预先把遮罩窗口建好（每块屏一块）。**按热键到看见遮罩能不能压到两百毫秒级全靠这一条**：
+   * 建一个 WebView2 窗口本身就比整个预算还贵，所以窗口是预建、跨场复用的
+   * （见 docs/modules/screenshot.md）。设置载入后由渲染层调一次 —— 开着就建、关掉就把池子收掉；
+   * 失败不致命（真按热键时 Rust 会现建，只是那一次慢）。
+   */
+  capturePrewarm: (enabled: boolean) => Promise<Result<null>>
+  /** 收工：把遮罩藏起来（窗口留着复用）、丢掉这场会话的几帧 */
+  abortCapture: () => Promise<void>
+  /** 遮罩窗口问：我代表哪块屏、这场会话一共几块、这次要用的设置是什么 */
+  captureContext: () => Promise<Result<CaptureContext>>
+  /**
+   * 这块屏那一帧的 PNG（base64）。
+   *
+   * **不用 asset 协议是有原因的**：渲染层要把这一帧画到画布上，还要 `getImageData`
+   * （放大镜取色、马赛克）与 `toBlob`（复制 / 保存 / 钉图）；asset 协议对页面是跨源的，
+   * 把它的图 drawImage 进画布会**污染画布**，那两个调用都会抛 SecurityError。
+   * base64 → Blob 是同源，没有这回事（与邮箱附件、笔记图片同一条路）。
+   */
+  captureFrame: () => Promise<Result<string>>
+  /**
+   * 遮罩里的 JS 报「这一场的帧已经画到画布上了」。`id` 取自 `captureContext` 返回的
+   * `session`（那才是它真画出来的那一场）。
+   *
+   * Rust 等到**每一块屏**都报齐才把遮罩显示出来 —— 抢在那一帧前面显示，用户看到的就是
+   * 「先闪一块黑、再出画面」。编号对不上（上一场那半截、或者已经收工了）一律忽略；
+   * 万一一直没人报，Rust 侧还有一秒的看门狗兜底，不会「按了没反应」。
+   */
+  showCapture: (id: number) => Promise<Result<null>>
+  /**
+   * 把最终图放进系统剪贴板（base64 的 PNG，与邮箱附件 / 笔记图片同一条路：
+   * IPC 只走 JSON，二进制要编一手）。
+   */
+  copyImage: (png: string) => Promise<Result<null>>
+  /**
+   * 把最终图落盘，返回真正写进去的绝对路径。
+   * `unique` 为真时同名加 `-2` / `-3`（自动保存那条路），为假时覆盖（「另存为」用户挑过的那条路）。
+   */
+  saveImage: (png: string, dir: string, name: string, unique: boolean) => Promise<Result<string>>
+  /** 把这张图钉到屏幕上（位置与尺寸按物理像素给），返回它的记账 */
+  pinImage: (
+    png: string,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    opacity: number,
+  ) => Promise<Result<PinRecord>>
+  /** 钉图窗口问自己的记账（图片路径、长宽比、不透明度、穿透） */
+  pinContext: () => Promise<Result<PinRecord>>
+  /** 改钉图状态：窗口几何交给系统，记账跟着更新 */
+  pinState: (patch: PinPatch) => Promise<Result<PinRecord>>
+  /** 关掉这张钉图（窗口、图片、记账一起清掉） */
+  pinClose: () => Promise<void>
+  /** 关掉所有钉图（托盘菜单里那一项） */
+  pinCloseAll: () => Promise<void>
+  /** 把这张钉图的图放进剪贴板 */
+  pinCopy: () => Promise<Result<null>>
+  /** 把这张钉图另存一份 */
+  pinSave: (dir: string, name: string, unique: boolean) => Promise<Result<string>>
+  /**
+   * 按当前设置重新装一遍全部全局快捷键（唤起窗口 / 截图 / 钉图穿透）。
+   * 三条一起装是插件的硬要求（见 main.rs 的 register_hotkeys），所以只能在改动之后整批重来。
+   */
+  applyHotkeys: () => Promise<Result<null>>
+  /** 截图失败（Rust 侧抓屏 / 铺遮罩出错）：主窗口据此弹一条提示 —— 那时界面多半看不见 */
+  onCaptureFailed: (fn: (message: string) => void) => () => void
+  /**
+   * 「跟当前这场会话对一次」：Rust 在**开场**与**收工**（藏起遮罩之后）各推一条。
+   * 开场那条带这一场的编号（**只当「这是开场」用** —— 要送回去的那个编号以
+   * `captureContext` 里的 `session` 为准，起手补问那一次收不到这条事件），收工那条是 `null`。
+   *
+   * 遮罩窗口是**跨场复用**的（预建、藏起来），所以显示 / 隐藏它并不会让里面的 JS 重新开场 ——
+   * 两边都靠这一条：开场那条去取上下文与帧，收工那条把上一场的帧、选区与标注丢掉。
+   *
+   * 订阅要等它真的挂上才 resolve：遮罩是先订阅、再补问一次当前有没有会话，
+   * 顺序反了会漏掉中间那一条。
+   */
+  onCaptureSync: (fn: (id: number | null) => void) => Promise<() => void>
+  /** 钉图状态被外部改过（全局快捷键翻了穿透）：钉图窗口据此刷新自己那一栏的勾 */
+  onPinState: (fn: (record: PinRecord) => void) => () => void
   /**
    * 账号登录状态：能不能登录、回调地址、已登录哪些平台。
    * **不返回任何 token** —— 它在 Rust 侧，渲染层碰不到（见 AccountProfile）。
@@ -1679,6 +1808,13 @@ export const DEFAULT_SETTINGS: AppSettings = {
   launchAtLogin: true,
   hotkeyEnabled: true,
   hotkey: 'Control+M',
+  // 截图（见 docs/modules/screenshot.md）：默认 F1 起截图、Ctrl+Shift+X 翻钉图穿透
+  captureEnabled: CAPTURE_ENABLED_DEFAULT,
+  captureHotkey: CAPTURE_HOTKEY_DEFAULT,
+  pinHotkey: PIN_THROUGH_HOTKEY_DEFAULT,
+  captureSaveDir: CAPTURE_SAVE_DIR_DEFAULT,
+  capturePinOpacity: CAPTURE_PIN_OPACITY_DEFAULT,
+  captureMagnifier: CAPTURE_MAGNIFIER_DEFAULT,
   terminalButtonTop: TERMINAL_BUTTON_TOP_DEFAULT,
   noteDir: '',
   noteDirs: [],

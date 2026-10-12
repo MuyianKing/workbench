@@ -25,6 +25,21 @@ export default defineConfig({
   build: {
     outDir: resolve(import.meta.dirname, 'out/renderer'),
     emptyOutDir: true,
+    rollupOptions: {
+      /**
+       * 三个入口：主界面、截图遮罩、钉图。
+       *
+       * 后两个是**独立的窗口、各自的 JS 上下文**（Rust 侧用 WebviewUrl::App 分别加载
+       * capture.html / pin.html），所以必须是三个 HTML 入口而不是路由 —— 它们不该、
+       * 也不能去装主界面那套 store（那会与主窗口抢着写同一批 JSON，见
+       * docs/modules/screenshot.md）。
+       */
+      input: {
+        main: resolve(import.meta.dirname, 'src/renderer/index.html'),
+        capture: resolve(import.meta.dirname, 'src/renderer/capture.html'),
+        pin: resolve(import.meta.dirname, 'src/renderer/pin.html'),
+      },
+    },
   },
   server: {
     port: 5274,
