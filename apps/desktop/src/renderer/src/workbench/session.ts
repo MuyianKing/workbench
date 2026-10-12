@@ -3,7 +3,7 @@ import type { CommandEntry, ProcessLogEvent, ProcessStatusEvent, Project, Result
  * 进程会话：把「起一条命令」这件事接到 Rust 上，并把输出翻译成渲染层认识的事件。
  *
  * 后端只认 sessionId 与整行命令；起什么命令、状态怎么转、日志落进哪个终端，都在这里决定。
- * 终端键同时充当 sessionId —— 日志与状态都靠它回到正确的终端（见 shared/terminal-key.ts）。
+ * 终端键同时充当 sessionId —— 日志与状态都靠它回到正确的终端（见 packages/terminal/src/terminal-key.ts）。
  */
 import { fail, isValidScriptName, ok, parsePortFromLog } from '@workbench/core'
 import { cleanLogLine, terminalKey } from '@workbench/terminal'
@@ -253,7 +253,7 @@ export function installSessionListeners(): void {
     'session:lines',
     ({ sessionId, lines: rawLines }) => {
       // 后端交过来的行是子进程的原样输出，控制序列在这里一次清掉：
-      // 终端日志与系统面板的安装输出都出自这批行（见 shared/ansi.ts）
+      // 终端日志与系统面板的安装输出都出自这批行（见 packages/terminal/src/ansi.ts）
       const lines: Array<{ stream: string, text: string }> = []
       for (const line of rawLines) {
         const text = cleanLogLine(line.text)

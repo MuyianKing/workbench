@@ -5,7 +5,7 @@ import { ElMessage } from 'element-plus'
 /**
  * 设置 · 截图：快捷键、保存位置、钉图与放大镜，外加一颗「立即截图」。
  *
- * 三项快捷键（唤起窗口在通用那一屏、这里是截图与钉图穿透）由 Rust **一次性整批装**，
+ * 两项快捷键（唤起窗口在通用那一屏、这里是截图）由 Rust **一次性整批装**，
  * 所以这里改完必须再调一次 `applyHotkeys` —— 插件注册是「先全清再逐条注册」，
  * 少调一次就会留下「改了没生效」或者「旧的那条还活着」。注册失败（被别的程序占用）
  * 在这一屏用 ElMessage 如实报出来，不吞掉。
@@ -36,13 +36,6 @@ async function pickSaveDir(): Promise<void> {
   const picked = await window.workbench.pickDirectory('选择截图的保存位置')
   if (picked)
     save({ captureSaveDir: picked })
-}
-
-/** 立即起一次截图（验证快捷键与保存位置是否顺手） */
-async function tryCapture(): Promise<void> {
-  const result = await window.workbench.beginCapture()
-  if (!result.ok)
-    ElMessage.warning(result.error)
 }
 </script>
 
@@ -76,31 +69,6 @@ async function tryCapture(): Promise<void> {
           allow-bare
           @update:model-value="(value: string) => saveHotkeys({ captureHotkey: value })"
         />
-      </div>
-
-      <div class="row row--stack">
-        <div class="row__text">
-          <span class="row__label">钉图穿透快捷键</span>
-          <span class="row__hint">
-            把所有钉图在「可点」与「不可点」之间翻一面。钉图一旦穿透就收不到鼠标事件（右键菜单也就点不到了），
-            这是唯一能把穿透收回来的入口。
-          </span>
-        </div>
-        <HotkeyField
-          :model-value="settings.settings.pinHotkey"
-          allow-bare
-          @update:model-value="(value: string) => saveHotkeys({ pinHotkey: value })"
-        />
-      </div>
-
-      <div class="row">
-        <div class="row__text">
-          <span class="row__label">试一下</span>
-          <span class="row__hint">与按下截图快捷键是同一个动作。</span>
-        </div>
-        <el-button size="small" @click="tryCapture">
-          立即截图
-        </el-button>
       </div>
     </div>
 

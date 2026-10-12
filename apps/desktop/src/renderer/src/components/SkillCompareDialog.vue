@@ -11,7 +11,7 @@ import { buildDiffRows } from '@workbench/core'
  *
  * **对比弹窗自带文件条**：列出全部文件，点哪个看哪个的差异（有差异的挂一枚圆点），
  * 不必关掉弹窗换文件。数据由父级组装好传入（每个文件的两侧内容），这里只切换与渲染；
- * 差异行模型来自 shared/text-diff.ts（jsdiff 算行块与行内变化段，带单测）。
+ * 差异行模型来自 packages/core/src/text-diff.ts（jsdiff 算行块与行内变化段，带单测）。
  *
  * 两个动作各走各的必经之路：「更新到库」就是**正常保存**（stores/skills.ts 的 saveContent），
  * version 门槛照常生效 —— 只有 SKILL.md（清单）有这一关；「恢复到这个版本」走 store 的 restore，

@@ -16,7 +16,7 @@ import { pickAiActiveSession, sanitizeAiApiFormat, sanitizeAiBaseUrl, sanitizeAi
  */
 import { clampTerminalButtonTop, pickAppearance, sanitizeAppearanceSettings, sanitizeViewId, stripAppearance } from '@workbench/appearance'
 import { sanitizeAccount } from '@workbench/auth'
-import { CAPTURE_HOTKEY_DEFAULT, PIN_THROUGH_HOTKEY_DEFAULT, sanitizeCaptureHotkey, sanitizeCaptureMagnifier, sanitizeCapturePinOpacity, sanitizeCaptureSaveDir } from '@workbench/capture'
+import { CAPTURE_HOTKEY_DEFAULT, sanitizeCaptureHotkey, sanitizeCaptureMagnifier, sanitizeCapturePinOpacity, sanitizeCaptureSaveDir } from '@workbench/capture'
 import { pruneDays, sanitizeActivity, sanitizeCommands, sanitizeIconCache, sanitizeProjectSort, sanitizeQuickApps } from '@workbench/core'
 import { sanitizeKbRawSources } from '@workbench/kb'
 import { sanitizeMailAccounts, sanitizeMailBulkSenders, sanitizeMailContacts, sanitizeMailPollMinutes } from '@workbench/mail'
@@ -74,7 +74,6 @@ export function sanitizeSettings(raw: unknown): StoredSettings {
   // 保存目录与透明度这些在这里收敛（它们要拿去拼路径 / 当数值用）
   value.captureEnabled = value.captureEnabled !== false
   value.captureHotkey = sanitizeCaptureHotkey(value.captureHotkey, CAPTURE_HOTKEY_DEFAULT)
-  value.pinHotkey = sanitizeCaptureHotkey(value.pinHotkey, PIN_THROUGH_HOTKEY_DEFAULT)
   value.captureSaveDir = sanitizeCaptureSaveDir(value.captureSaveDir)
   value.capturePinOpacity = sanitizeCapturePinOpacity(value.capturePinOpacity)
   value.captureMagnifier = sanitizeCaptureMagnifier(value.captureMagnifier)

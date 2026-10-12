@@ -6,7 +6,7 @@ import { ArrowRight, CopyDocument, Document, Hide, Key, Lock, MoreFilled, Plus, 
  * 密码页：一张卡片墙。
  *
  * **它是备忘，不是密码管理器**：一条记录就是「名字 + 密码 + 备注 + 分组」四样，
- * 没有用户名 / 网址那些字段，也不生成口令（见 shared/vault.ts 的 VaultEntry）。
+ * 没有用户名 / 网址那些字段，也不生成口令（见 packages/vault/src/vault.ts 的 VaultEntry）。
  * **卡片上只摆名字与密码**：备注是一句随手记下的话，长短不定，摊上去这几张卡就高矮不齐、
  * 整面墙的节奏散掉；它照旧记着，在编辑弹框里看与改。卡片是**用**的地方：看一眼、复制一下；
  * 改是偶尔才做一次的事，收在悬停才显形的那两颗按钮里，添加与编辑都走弹框。
@@ -137,7 +137,7 @@ async function copy(text: string, what: string): Promise<void> {
  * 添加：**id 在这儿就定下来**（一个现生成的 uuid）。
  *
  * 条目的身份必须在落盘之前就存在 —— 它是跨设备合并时唯一认得出「这是同一条」的东西
- * （见 shared/vault.ts 的 mergeVaultItems），保存时才现编一个的话，两台机器各存一份就成了两条。
+ * （见 packages/vault/src/vault.ts 的 mergeVaultItems），保存时才现编一个的话，两台机器各存一份就成了两条。
  */
 function startAdd(): void {
   draftId.value = crypto.randomUUID()

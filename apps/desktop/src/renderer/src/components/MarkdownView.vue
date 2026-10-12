@@ -4,14 +4,14 @@ import { ElMessage } from 'element-plus'
 /**
  * 工作日志的 markdown 展示。
  *
- * 解析交给 markdown-it（配置与安全口径见 shared/markdown.ts：`html: false`，
+ * 解析交给 markdown-it（配置与安全口径见 packages/core/src/markdown.ts：`html: false`，
  * 原文里的标签早就被转义过，所以这里的 v-html 拿到的是安全的 HTML 片段）。
  *
  * 链接的点击在这里接管：应用是个 WebView，点 `<a>` 默认会把界面自己导航走。
  * 走的是项目里那条既有出口 —— `openExternal`（ShellExecute）交给系统默认浏览器。
  *
  * `internalLinks` 置真时，非外部地址的链接不再被吞掉、改经 `internal` 事件交给父层
- * （地址原样交出去，怎么解析归父层：知识库条目阅读按它做站内跳转，见 shared/kb-lint.ts
+ * （地址原样交出去，怎么解析归父层：知识库条目阅读按它做站内跳转，见 packages/kb/src/kb-lint.ts
  * 的 resolveKbLink；AI 对话按它把回答里的文件链接开进右侧预览栏，见 resolveAiPreview）。
  * 默认关 —— 工作日志那几处照旧只放行外部地址。
  *
@@ -159,7 +159,7 @@ async function onClick(event: MouseEvent): Promise<void> {
 
 /**
  * 表格：**一圈描边 + 内部网格线 + 表头压一档底色**，外面的 `.md-table` 是渲染时包上的
- * 那层滚动容器（见 shared/markdown.ts）—— 列多的表在它里面横向滚，不会把卡片撑破。
+ * 那层滚动容器（见 packages/core/src/markdown.ts）—— 列多的表在它里面横向滚，不会把卡片撑破。
  *
  * **框要贴着表格**：容器是个 block，不给宽度就占满整张卡片，表格缩在左边、右边空出一大条
  * 只有框没有内容的区域。所以 `width: fit-content`（有多宽占多宽）+ `max-width: 100%`

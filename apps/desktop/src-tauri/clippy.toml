@@ -1,0 +1,8 @@
+# Clippy 配置（crate 根目录，`cargo clippy` 自动读取）。
+#
+# `allow-unwrap-in-tests`：用例里 `unwrap()` 出真实失败原因本身就是它的价值，
+# 生产代码的禁令（`src/main.rs` 顶部的 `#![cfg_attr(not(test), deny(clippy::unwrap_used))]`）
+# 只该落在非测试代码上。有了这一条，`cargo clippy --all-targets` 也不会把测试里的
+# 几百处 unwrap 全标红。
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true

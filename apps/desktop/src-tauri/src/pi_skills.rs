@@ -1,6 +1,6 @@
 //! Pi 的技能（AI 助手页那颗「技能」按钮弹出来的那份管理）：列、装、卸。
 //!
-//! 技能根有两处（口径在 shared/pi-skills.ts）：**全局** `%USERPROFILE%\.agents\skills`、
+//! 技能根有两处（口径在 packages/ai/src/pi-skills.ts）：**全局** `%USERPROFILE%\.agents\skills`、
 //! **项目** `<工作目录>\.agents\skills`。一个技能 = 根下一个带 `SKILL.md` 的子目录 ——
 //! 与 skills.rs 的技能库是同一份约定，区别只有两点：这里的根是**任意目录**（可能还不存在），
 //! 而且没有「在哪个仓库里」这回事（AI 的技能不记版本）。
@@ -468,11 +468,9 @@ fn derive_id(skill_md: &str, fallback: &str) -> String {
     let slug = frontmatter_value(skill_md, "slug");
     let name = frontmatter_value(skill_md, "name");
     let package = strip_version(fallback);
-    for candidate in [slug, name, Some(package)] {
-        if let Some(text) = candidate {
-            if let Some(id) = clean_id(&text) {
-                return id;
-            }
+    for text in [slug, name, Some(package)].into_iter().flatten() {
+        if let Some(id) = clean_id(&text) {
+            return id;
         }
     }
     "skill".to_string()
@@ -502,7 +500,7 @@ fn strip_version(name: &str) -> String {
     }
 }
 
-/// frontmatter 里要的那个标量。与 shared/skills.ts 是**同一条最小规矩**：首行 `---` 围栏、
+/// frontmatter 里要的那个标量。与 packages/skills/src/skills.ts 是**同一条最小规矩**：首行 `---` 围栏、
 /// 每行一个 `键: 值`、去掉一层成对的引号；多行块标量（`|` / `>` 开头）不认。
 fn frontmatter_value(text: &str, key: &str) -> Option<String> {
     let mut lines = text.lines().map(|line| line.trim());
@@ -1157,7 +1155,7 @@ mod tests {
         assert!(
             text.contains("Microsoft Connect Test"),
             "跟到最后应当拿到探测页（落在 {final_url}）：{}",
-            &text.chars().take(120).collect::<String>()
+            text.chars().take(120).collect::<String>()
         );
     }
 }

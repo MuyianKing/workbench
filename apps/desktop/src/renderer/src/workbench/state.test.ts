@@ -61,7 +61,7 @@ describe('适配层交出去的列表', () => {
 })
 
 /**
- * 外观从数据文件搬进 theme.json 的那一次搬家（见 shared/appearance.ts）。
+ * 外观从数据文件搬进 theme.json 的那一次搬家（见 packages/appearance/src/appearance.ts）。
  *
  * 这是整次改动里最容易静默丢数据的一步：搬晚了（数据文件先按新口径落盘、把那些键摘掉），
  * 用户的主题色、背景、终端高度就再也没处可搬。所以既要断言搬到了，也要断言**立刻落盘**。

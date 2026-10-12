@@ -6,10 +6,10 @@
  * 位置由父组件算好（贴着选区，摆不下就翻到上面），这里只负责长什么样。
  */
 import type { AnnotationTool } from '@/types'
-import { Check, Close, CopyDocument, Download, RefreshLeft, RefreshRight } from '@element-plus/icons-vue'
+import { Close, CopyDocument, Download } from '@element-plus/icons-vue'
 import { ANNOTATION_COLORS, ANNOTATION_TOOLS, MOSAIC_BLOCKS, STROKE_WIDTHS, TEXT_SIZES } from '@workbench/capture'
 import { computed } from 'vue'
-import { PIN_ICON, TOOL_ICONS } from './tool-icons'
+import { PIN_ICON, REDO_ICON, TOOL_ICONS, UNDO_ICON } from './tool-icons'
 
 const props = defineProps<{
   canUndo: boolean
@@ -24,7 +24,6 @@ const emit = defineEmits<{
   copy: []
   save: []
   pin: []
-  done: []
 }>()
 const tool = defineModel<AnnotationTool | null>('tool', { required: true })
 const color = defineModel<string>('color', { required: true })
@@ -65,12 +64,16 @@ function pick(next: AnnotationTool): void {
 
       <el-tooltip content="撤销（Ctrl+Z）" placement="top">
         <button type="button" class="overlay-tool" :disabled="!canUndo" @click="emit('undo')">
-          <el-icon><RefreshLeft /></el-icon>
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6">
+            <path :d="UNDO_ICON" />
+          </svg>
         </button>
       </el-tooltip>
       <el-tooltip content="重做（Ctrl+Shift+Z）" placement="top">
         <button type="button" class="overlay-tool" :disabled="!canRedo" @click="emit('redo')">
-          <el-icon><RefreshRight /></el-icon>
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6">
+            <path :d="REDO_ICON" />
+          </svg>
         </button>
       </el-tooltip>
 
@@ -79,11 +82,6 @@ function pick(next: AnnotationTool): void {
       <el-tooltip content="取消（Esc）" placement="top">
         <button type="button" class="overlay-tool" @click="emit('cancel')">
           <el-icon><Close /></el-icon>
-        </button>
-      </el-tooltip>
-      <el-tooltip content="复制到剪贴板（Enter）" placement="top">
-        <button type="button" class="overlay-tool" :disabled="props.busy" @click="emit('copy')">
-          <el-icon><CopyDocument /></el-icon>
         </button>
       </el-tooltip>
       <el-tooltip content="保存文件（Ctrl+S）" placement="top">
@@ -101,9 +99,10 @@ function pick(next: AnnotationTool): void {
 
       <span class="overlay-bar__sep" />
 
-      <el-tooltip content="完成（Enter，与复制同一个动作）" placement="top">
-        <button type="button" class="overlay-tool is-primary" :disabled="props.busy" @click="emit('done')">
-          <el-icon><Check /></el-icon>
+      <!-- 主操作只有这一颗：它同时就是「收工」（Enter / Ctrl+C 与它一个动作），不要再加一颗 ✓ -->
+      <el-tooltip content="复制到剪贴板（Enter）" placement="top">
+        <button type="button" class="overlay-tool is-primary" :disabled="props.busy" @click="emit('copy')">
+          <el-icon><CopyDocument /></el-icon>
         </button>
       </el-tooltip>
     </div>

@@ -118,7 +118,7 @@
   2. **清单用 `git ls-tree -r -l -z`**：不加 `-z`，git 会把非 ASCII 路径转义成八进制（中文名的附属文件变乱码），
      带换行的路径还会把一条记录劈成两行。`-l` 报出的字节数顺带当了二进制的判据
      （拿回来的字节数对不上 = 读成字符串时中断在非法 UTF-8 上；再加「内容里有 NUL」一条）。
-- 对比两侧的**方向与并集**是 [shared/skills.ts](../../packages/skills/src/skills.ts) 里 `mergeVersionCopies` 的契约：
+- 对比两侧的**方向与并集**是 [skills.ts](../../packages/skills/src/skills.ts) 里 `mergeVersionCopies` 的契约：
   `base` 永远是库里现在这份（会被换掉）、`incoming` 永远是要采纳的那份，清单取两侧**并集**
   （那一版里有、现在删掉的同样是差异，恢复会把它们带回来）。反了或漏了都不报错，只是红绿两栏的
   含义整个变样 —— 那里有单测钉着，改口径先改测试。

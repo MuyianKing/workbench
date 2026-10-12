@@ -6,7 +6,7 @@ import type { Result } from '@/types'
  * 这一条只管 AI 助手页那两个 `.agents/skills` 根里的目录（一个技能 = 一个带 SKILL.md 的子目录），
  * 没有 git、没有版本 —— 装进来的东西只落盘，包里的脚本一概不执行。
  *
- * 收敛与判定都在 shared/pi-skills.ts（有单测），这里只把四条通道接上：
+ * 收敛与判定都在 packages/ai/src/pi-skills.ts（有单测），这里只把四条通道接上：
  * 形状、错误文案、以及「装好了但没拿回技能名」这种不该发生的情况。
  */
 import { fail, ok } from '@workbench/core'
@@ -61,7 +61,7 @@ export async function piSkillInstallDir(
   return result.ok ? readInstall(result.data) : fail(result.error ?? '装技能失败')
 }
 
-/** 从用户粘的地址装（GET 一次、跟随跳转；出口的边界见 shared/types.ts 那一段） */
+/** 从用户粘的地址装（GET 一次、跟随跳转；出口的边界见 apps/desktop/src/renderer/src/types.ts 那一段） */
 export async function piSkillInstallUrl(
   root: string,
   url: string,

@@ -8,7 +8,7 @@ import { defineStore } from 'pinia'
  *
  * 与技能页那个 store（[skills.ts](./skills.ts)）**不是一回事**：那个管「技能库 + 版本历史 +
  * 装到项目」，这个只管 AI 助手页那两条根 —— 一个技能 = 一个带 `SKILL.md` 的子目录，
- * 没有 git、没有版本。口径与判定都在 [shared/pi-skills.ts](../../../shared/pi-skills.ts)（有单测），
+ * 没有 git、没有版本。口径与判定都在 [pi-skills.ts](../../../packages/ai/src/pi-skills.ts)（有单测），
  * 这里只编排、只落状态。
  *
  * 三件事值得记在这儿：
@@ -58,7 +58,7 @@ export const useAiSkillsStore = defineStore('aiSkills', () => {
 
   /**
    * 这一轮要交给 Pi 的技能（根 + 技能名）：**关掉的、被卸掉的不在里面**。
-   * 起进程时由 stores/ai.ts 带进 `ai_run`（见 shared/types.ts 的 AiRunInput）。
+   * 起进程时由 stores/ai.ts 带进 `ai_run`（见 apps/desktop/src/renderer/src/types.ts 的 AiRunInput）。
    */
   const enabledRefs = computed(() => enabledAiSkills(rows.value))
   /** 开着的那些（输入框里打 `/` 时那排候选：关掉的技能不该出现在那儿） */

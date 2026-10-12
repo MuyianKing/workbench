@@ -1,7 +1,7 @@
 //! 视频：用户自己挑的一个文件夹里的 MP4 文件。
 //!
 //! 与笔记（notes.rs）同一套分工：这一层只做文件系统那点事（递归扫目录、
-//! 放行一个要播放的文件），树怎么组、速率怎么算那些口径由 `src/shared/video.ts`
+//! 放行一个要播放的文件），树怎么组、速率怎么算那些口径由 `packages/video/src/video.ts`
 //! 的纯函数决定 —— 那边有单测，改一版显示口径也不必重编 Rust。
 //!
 //! 扫描**只读**：视频目录是用户的收藏，应用不在里面创建、改名或删除任何东西。
@@ -76,11 +76,11 @@ pub fn scan(root: &str) -> Result<Vec<Value>, String> {
         let duration = if is_dir {
             0
         } else {
-            mp4_duration_seconds(&entry.path())
+            mp4_duration_seconds(entry.path())
         };
 
         out.push(json!({
-            "rel": rel_of(&base, &entry.path().to_path_buf()),
+            "rel": rel_of(&base, entry.path()),
             "name": name,
             "isDir": is_dir,
             "duration": duration,

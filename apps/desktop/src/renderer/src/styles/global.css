@@ -969,7 +969,7 @@ body.is-resizing-video-float * {
  * 滑块手柄与滑杆刻点的底色。
  *
  * Element Plus 拿 --el-color-white 当它们的底色，而主题色把这个变量借去表示「主色上的文字色」
- * （见 shared/accent-color.ts）—— 那样手柄会变成一颗实心墨点、压在灰轨道上。这两处要的是
+ * （见 packages/appearance/src/accent-color.ts）—— 那样手柄会变成一颗实心墨点、压在灰轨道上。这两处要的是
  * 「压在实心块上的那一档」，取 --ink-inverse：亮色下是白、暗色下是近黑，与 EP 原本取到的值一致，
  * 不设主题色时看不出任何差别。
  */

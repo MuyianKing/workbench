@@ -6,7 +6,7 @@
 
 ## 约束
 
-关键落点：`shared/skills.ts`（frontmatter 解析、版本校验与比较、路径口径，带单测）、
+关键落点：`packages/skills/src/skills.ts`（frontmatter 解析、版本校验与比较、路径口径，带单测）、
 `apps/desktop/src-tauri/src/skills.rs`（列目录 / 提交 / 历史 / 恢复 / 对比 / 导入 / 仓库归属探测 / sync）、
 `workbench/skill.ts`（每次一版提交的编排）、`stores/skills.ts`。
 
@@ -33,7 +33,7 @@
 - 导航栏第五项「技能」：管理一批自定义 skill（一个文件夹 + 一份带 frontmatter 的 `SKILL.md`）。
   **卡片网格**（与项目页同一副外壳）：卡片展示自动提取的名字与描述（解析 frontmatter 的
   `name` / `description`，只认「围栏内单行键值」；口径在
-  [shared/skills.ts](../../packages/skills/src/skills.ts)，带单测）加文件数，没有 `SKILL.md`
+  [skills.ts](../../packages/skills/src/skills.ts)，带单测）加文件数，没有 `SKILL.md`
   的挂警示（装不进项目）；底部一排**悬停才显形**的操作（安装到项目 / 打开文件夹，点击
   `stopPropagation` 免得顺带拉开详情）。点卡片开**详情弹窗**（1200px `el-dialog`，窄窗收着不出界）：
   编辑清单、安装到项目、版本历史、删除都在里面；关闭前有「放弃修改」确认（编辑是手动保存的）。
@@ -58,7 +58,7 @@
   （`installed_versions`，路径拼死在项目目录内）；「有没有更新」**只看 SKILL.md 的 version**
   （`compareSkillVersions` 逐段数字比较 —— `1.10.0` > `1.9.0`，字符串比会答反；库版本解析失败按
   `0.0.0` 兜底）。**详情页只看库里的文件**；差异只在对比弹窗里看 —— GitHub split 视图的逐行差异
-  （行模型是纯函数 [shared/text-diff.ts](../../packages/core/src/text-diff.ts)，jsdiff 出行块与
+  （行模型是纯函数 [text-diff.ts](../../packages/core/src/text-diff.ts)，jsdiff 出行块与
   行内变化段、组件只画；红绿借 `--st-fail` / `--st-ok` 语义，深浅 color-mix、不新增颜色；
   整表一个滚动容器，左右天然同步）。「用项目版本更新到库」走正常保存那条路（version 门槛照常）；
   比对基准是**库里盘上那份**，没装或读不出的项目不参与。**「版本历史」的「对比」用同一个弹窗**
@@ -79,7 +79,7 @@
 这些条目的原文注解从主文档「目录结构」迁来（主文档的树里各留一行，指回这里）。
 
 ```
-  src/skills.rs          技能库（它自己的一个目录，见 shared/skills.ts）：列目录 /
+  src/skills.rs          技能库（它自己的一个目录，见 packages/skills/src/skills.ts）：列目录 /
                         提交版本 / 历史 / 恢复 / 版本对比 / 导入与安装（整棵复制，跳过点开头的目录），
                         外加 state（从技能库目录往上找它所在的仓库）与 sync（只提交技能库那一层，
                         再拉推那个仓库）。
@@ -91,7 +91,7 @@
 渲染层两处（原注解）：
 
 ```
-    skill.ts（技能：文件动作 + 每次一版提交的编排，见 shared/skills.ts）
+    skill.ts（技能：文件动作 + 每次一版提交的编排，见 packages/skills/src/skills.ts）
     skills.ts            技能：技能库列表、当前打开的那一篇、增删改 / 版本历史 /
                          版本对比 / 恢复 / 安装的编排（同步复用笔记同步那条通道）（stores/）
 ```

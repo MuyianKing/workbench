@@ -9,7 +9,7 @@ import { emptyVaultEntry, vaultEntryProblem } from '@workbench/vault'
  * 改是偶尔才做一次的事 —— 把四个字段摊在每张卡片上，等于把最不常做的动作摆到最显眼的位置。
  *
  * 分组是一栏**自由文本**，不是一份要管理的清单：下拉里给出已经有的那些（选一下省得打字），
- * 也能直接敲一个新的 —— 那一组随之出现，最后一条离开它也随之消失（见 shared/vault.ts 的 vaultGroups）。
+ * 也能直接敲一个新的 —— 那一组随之出现，最后一条离开它也随之消失（见 packages/vault/src/vault.ts 的 vaultGroups）。
  *
  * 校验就地显示在字段下面（`vaultEntryProblem` 是唯一那份规则，store 里还拿它兜一次），
  * 不弹消息。

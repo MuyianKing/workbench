@@ -3,7 +3,7 @@ import { createVaultKey, encodeKeyString, parseKeyString, parseVaultFile, public
 /**
  * 保险库适配层：加解密、合并、以及同步那几轮编排。
  *
- * 这里盯的是**单测测不到的那一半** —— `shared/vault.ts` 那边是纯函数（合并规则、信封格式、
+ * 这里盯的是**单测测不到的那一半** —— `packages/vault/src/vault.ts` 那边是纯函数（合并规则、信封格式、
  * 密码学），而这一层管的是「拉 → 合 → 推」怎么走、远端在中间被改过怎么办、两台机器怎么收敛。
  * 桩照 token.test.ts / index.test.ts 那套：补一个假的 Tauri 桥，每条用例 `vi.resetModules()`
  * 重新导入（模块级缓存着本机那把密钥，不重置就会串味）。

@@ -7,7 +7,7 @@
 //! 推上去走 `sync`（技能页那颗同步按钮），它**只提交技能库那一层**再拉推那个仓库。
 //!
 //! 与 sync.rs 的分工一致：这里只做「跑 git / 复制文件」，技能叫什么名字、frontmatter 里
-//! 写了什么、安装到哪个项目，都由渲染层决定（见 shared/skills.ts）。因此对入参只有两道把关：
+//! 写了什么、安装到哪个项目，都由渲染层决定（见 packages/skills/src/skills.ts）。因此对入参只有两道把关：
 //! 名字必须是一个「正常的路径段」（拼出来的路径不许越过笔记根），笔记根必须真实存在。
 //!
 //! 技能库不在任何 git 仓库里时，技能照常增删改 —— 本地文件操作照做，
@@ -309,7 +309,7 @@ pub fn commit(root: &str, dir: &str, message: &str) -> Result<Value, String> {
     let names = run_git(&["diff", "--cached", "--name-only", "--", spec], Some(&workspace), GIT_TIMEOUT)?;
     let files = names.lines().filter(|line| !line.trim().is_empty()).count();
     let message = message.trim();
-    let message = message.is_empty().then_some("skill: 更新").unwrap_or(message);
+    let message = if message.is_empty() { "skill: 更新" } else { message };
     run_git(&["commit", "-m", message], Some(&workspace), GIT_TIMEOUT)?;
     Ok(json!({ "changed": true, "files": files }))
 }

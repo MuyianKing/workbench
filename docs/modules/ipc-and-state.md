@@ -15,7 +15,11 @@
   映射只出现在适配层。
 - 通道一律返回 `Result<T>`（[result.ts](../../packages/core/src/result.ts) 的 `ok` / `fail` / `toResult`），不 reject；调用侧判 `result.ok`、
   失败取 `result.error` 提示。Rust 的 `Err(String)` 会被 Tauri 直接 reject，所以适配层用 `guard()` 收敛（它兼容字符串与 Error，
-  不能直接套 shared 的 `toResult`）。
+  不能直接套 `@workbench/core` 的 `toResult`）。
+- **「会 Err 的就必须是 `Result`」**：裸返回具体结构只留给「取不到也只是一句空态」的本地读（`checkPort`、`listProjects`、
+  `getNvmStatus`、`listWallpapers`、`checkPackageManagers`）。一旦跨到 Rust、而那条命令本身会 `Err` —— 典型是
+  `listSyncDevices`（底下是 `token_sync_shards`）—— 适配层必须用 `guard()` 收敛成 `Result`：否则失败会以「未处理异常」
+  的形态冒到调用方，而调用方按签名认为它不会失败。
 - 新增通道三步：`WorkbenchApi` 登记 → 适配层实现 → 需要后端时在 `commands.rs` 写命令并在 `main.rs` 的 `generate_handler!`
   注册。渲染层→主进程的单向事件走适配层的 `events.ts` 广播。
 - **数组 / 对象形状的取值接口必须真实现，绝不能落到「尚未移植」兜底**：兜底返回的是 `Result` 对象，store 会把它当数组遍历、
@@ -47,7 +51,7 @@
   `work-log.json` 与 `ai-news.json`（都只在本机）、`vault.json`（密码保险库，**里面只有密文**，
   密钥在 Windows 凭据管理器里，见 [vault.md](vault.md)）、`mail-watch.json`（邮件后台监视的
   UID 基准与上轮检查时间，见 [mail.md](mail.md)，只是通知的记账，不进同步仓库），
-  加上设备标识 `device.json` —— 全都在 `%APPDATA%/Workbench/data/` 下
+  加上设备标识 `device.json`，以及 `panic.log`（崩溃落痕，见「实现」一节）—— 全都在 `%APPDATA%/Workbench/data/` 下
   （根目录 `%APPDATA%/Workbench` 是 Electron 版留下的 Chromium 配置目录；老版本也把数据文件写在那儿，启动时由 `migrate_legacy_files` 搬进 `data/`）。
   **技能没有数据文件**：技能库是用户挑的一个目录（设置里的 `skillDir`，与笔记文件夹互不相干），
   磁盘上的文件就是数据本身；它在哪个仓库里由 `skills.rs` 的 `state` 从那个目录往上找。
@@ -105,6 +109,17 @@
 - **工作区背景图与视频播放走 asset 协议，后端不碰它们的字节**：渲染层只调一次
   `allow_background` / `allow_video`，后端核文件头后把**这一个文件**的读取权限授给 asset 协议，
   URL 由 `convertFileSrc` 转出；`assetProtocol.scope` 刻意留空。
+- **崩溃落痕**：release 档把 panic 设成直接中止进程（`Cargo.toml` 的 `panic = "abort"`），进程凭空消失、
+  什么都不留 —— `main()` 第一行装 `panic_log::install()`，把「时间 / 线程 / 位置 / 消息 / 回溯」追加到
+  `data/panic.log`（写失败就放弃；默认钩子照旧调用，dev 的 stderr 上还有一份）。单份超 256KB 先清空。
+- **webview 有全局 CSP**（`tauri.conf.json` 的 `csp`；dev 用 `devCsp`，多放行 HMR 的 ws）。底线是
+  `default-src 'self'`、`script-src 'self'`、`object-src 'none'`；必须放行的几处都有理由：
+  `style-src 'unsafe-inline'`（Element Plus / Vditor 的动态样式与邮件正文）、
+  `connect-src ipc: http://ipc.localhost`（IPC 本身）、`worker-src blob:`
+  （pptx 预览与笔记里的 graphviz 都用 blob 建 Worker）、`img-src` 的 asset 协议与 `https:`/`http:`
+  （背景图、笔记与邮件的外链图）、`frame-src` 的 `about:`（邮件与 AI 预览的 srcdoc 内嵌框）。
+  **改这条、或引新的前端依赖 / 资源之前先想它会不会被拦**，而且**要在生产态的真应用里过一遍**：
+  dev 下页面来自 Vite、CSP 根本不生效，浏览器预览也验不了。
 
 ## 涉及文件
 

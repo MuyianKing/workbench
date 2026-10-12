@@ -5,7 +5,7 @@ import { DEFAULT_THEME, sameThemeContent, sanitizeTheme } from '@workbench/appea
  * 渲染层持有的持久化状态：项目 / 分组 / 快捷启动 / 命令 / 设置 / 首页布局 / 活跃度。
  *
  * 这是「逻辑留在 TS」这条架构选择的落点：Rust 只负责把 JSON 安全地读写到磁盘，
- * 收敛（sanitize）、默认值合并、字段增删都在这里，与 `src/shared/persisted-data.ts` 共用一份实现，
+ * 收敛（sanitize）、默认值合并、字段增删都在这里，与 `apps/desktop/src/renderer/src/persisted-data.ts` 共用一份实现，
  * 所以 Electron 时代那批纯逻辑单测可以原样保留，改起来也还是 HMR 秒级。
  *
  * **设置分两个文件**:外观与首页布局住在 theme.json,其余(快捷键 / 开机自启 / 数据目录 /

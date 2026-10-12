@@ -6,7 +6,7 @@ import { COLUMN_COUNT_MAX, COLUMN_COUNT_MIN, COLUMN_WIDTH_DEFAULT, columnHasVisi
  * 首页布局画布：若干栏并排，每栏里若干行上下摞，行里的卡片横向平分这一栏的宽度。
  *
  * 栏数与行数都是自己定的（编辑态里 ＋ 在右边拆一栏、✕ 收掉本栏；行则靠拖动分出来，
- * 见 shared/theme.ts 的 HomeColumn / HomeRow）：每栏宽度要么是一个像素值，要么是「自适应」
+ * 见 packages/appearance/src/theme.ts 的 HomeColumn / HomeRow）：每栏宽度要么是一个像素值，要么是「自适应」
  * （与其余自适应栏平分剩余宽度），行高同样是固定像素 / 自适应两种。
  * 卡片落在哪一行、行内第几位都落在 theme.json 里。
  * 空栏平时不渲染（不占地方），编辑时才把所有栏都摆出来，好把卡片拖进去。

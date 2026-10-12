@@ -30,8 +30,11 @@
  *
  * ## 显示与导出同一条路
  *
- * 标注都画在「选区坐标系」里（ctx 平移到选区左上角 + 裁到选区），导出那张图走的是同一个
- * `drawAnnotations`，所以看到什么就存下来什么，马赛克的格子也不会在两边错位。
+ * 标注一律按**这一帧的绝对坐标**存与画，而且**两侧都在整帧尺寸的画布上画**：显示侧是那块 stage
+ * （只把标注 clip 到选区），导出侧先在同样大的画布上画完、最后才把选区抠出来。两边共用同一个
+ * `drawAnnotations`、画布尺寸也一致，所以看到什么就存下来什么 —— 抗锯齿与马赛克的块色都逐像素一致。
+ * **别改回「只在选区那么大的画布上平移到选区坐标系再画」**：画布尺寸与原点的小数部分一变，
+ * 马赛克的块色会差几个点、普通标注的抗锯齿也会差一点（两样都踩过）。
  */
 import type { Annotation, AnnotationTool, CaptureContext, Point, Rect } from '@/types'
 import {
@@ -128,7 +131,18 @@ const hasSelection = computed(() => {
   return rect !== null && !rectIsEmpty(rect, MIN_SELECTION)
 })
 
-const toolbarVisible = computed(() => hasSelection.value && textEditing.value === null)
+/** 正在拖出一块新选区（`mode === 'create'`）。见 `toolbarVisible` 的说明，它得是个响应式的 */
+const creating = ref(false)
+
+/**
+ * 有选区就一直显示 —— **输入文字的时候也不收**：输入的位置就在选区里，收掉它等于连
+ * 颜色 / 字号那一排一起藏了，想换个颜色得先把字打完。
+ *
+ * 例外：**拖出一块新选区的那一会儿不收**，松手才出现 —— 拖的时候它只会贴着右下角一路跳，
+ * 看着比没有还乱（Snipaste 也是松手才出）。挪选区 / 拖把手不算：那时候它本来就在，
+ * 收掉反而一闪。
+ */
+const toolbarVisible = computed(() => hasSelection.value && !creating.value)
 
 // ---------- 启动 ----------
 
@@ -153,6 +167,7 @@ function reset(): void {
   busy.value = false
   failure.value = ''
   mode = 'none'
+  creating.value = false
   dragHandle = null
   dragAnnotation = null
   draftPoints = []
@@ -226,6 +241,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('pointermove', onPointerMove)
   window.removeEventListener('pointerup', onPointerUp)
   stopSync?.()
+  window.clearTimeout(copyNoteTimer)
   bitmap.value?.close()
 })
 
@@ -289,23 +305,28 @@ function redraw(): void {
 
   // 选区之外压一层暗：选中的那块保持原亮度，一眼看出「要截这一块」
   if (live) {
+    // 标注：裁到选区，但**按这一帧的绝对坐标画** —— stage 上 (0, 0) 就是帧的左上角。
+    // **不能在这里平移到选区坐标系**：只有导出那条路的 canvas 原点才是裁剪原点，
+    // 显示侧再平移一次就多减了一个选区原点，笔迹整体偏向左上、被裁掉大半甚至完全看不见。
+    // 传给 drawAnnotations 的 origin 只给马赛克用（把原图坐标换成设备坐标读像素）：
+    // 显示侧画布与绝对坐标一一对应，所以是 (0, 0)。
+    ctx.save()
+    ctx.beginPath()
+    ctx.rect(rect.x, rect.y, rect.width, rect.height)
+    ctx.clip()
+    drawAnnotations(ctx, annotations.value, { x: 0, y: 0 })
+    if (draft.value)
+      drawAnnotation(ctx, draft.value, { x: 0, y: 0 })
+    ctx.restore()
+
+    // 暗层**画在标注之后**：标注本来就裁在选区里，先后次序看不出来，但马赛克是从这块画布
+    // 读像素取平均的 —— 暗层先画进去，贴着选区边打码的那几格就会把暗色平均进来（导出侧没有暗层，
+    // 于是两边对不上）。放在后面，它读到的就是干净的一帧。
     ctx.fillStyle = 'rgba(0, 0, 0, 0.45)'
     ctx.beginPath()
     ctx.rect(0, 0, element.width, element.height)
     ctx.rect(rect.x, rect.y, rect.width, rect.height)
     ctx.fill('evenodd')
-
-    // 标注：裁到选区、平移到选区坐标系 —— 与导出那张图完全同一条路
-    ctx.save()
-    ctx.beginPath()
-    ctx.rect(rect.x, rect.y, rect.width, rect.height)
-    ctx.clip()
-    ctx.setTransform(1, 0, 0, 1, -rect.x, -rect.y)
-    drawAnnotations(ctx, annotations.value, { x: rect.x, y: rect.y })
-    if (draft.value)
-      drawAnnotation(ctx, draft.value, { x: rect.x, y: rect.y })
-    ctx.restore()
-    ctx.setTransform(1, 0, 0, 1, 0, 0)
 
     drawSelectionChrome(ctx, rect)
     drawSizeLabel(ctx, rect)
@@ -411,9 +432,29 @@ function onPointerDown(event: PointerEvent): void {
     return
   event.preventDefault()
 
+  // 先把上一段还没提交的文字落下来：点别处时输入框会失焦，而 `blur` 里再来提交时，
+  // 这个 ref 可能已经被下面那段「文字工具点一下开新输入框」换成了空的一段
+  // （踩过：打完字点一下别处，那几个字直接没了）
+  commitText()
+
   const point = toCanvas(event)
   const rect = selection.value
   const live = rect !== null && !rectIsEmpty(rect, MIN_SELECTION)
+
+  dragOrigin = point
+  dragSelection = rect ? { ...rect } : null
+  pickedAnnotation.value = null
+
+  // **把手优先于「画」**：选着工具时按在选区四边 / 八个角上仍然是改尺寸，不是起笔
+  // （鼠标形状本来就是这么给的，见 updateHoverCursor —— 不然想挪一下框得先把工具取消）
+  if (live && rect) {
+    const handle = hitHandle(rect, point, HANDLE_TOLERANCE * scale.value)
+    if (handle) {
+      mode = 'resize-selection'
+      dragHandle = handle
+      return
+    }
+  }
 
   // 文字：点一下就在那儿开一个输入框（不拖着画）
   if (live && activeTool.value === 'text') {
@@ -421,10 +462,6 @@ function onPointerDown(event: PointerEvent): void {
     void nextTick(() => textInput.value?.focus())
     return
   }
-
-  dragOrigin = point
-  dragSelection = rect ? { ...rect } : null
-  pickedAnnotation.value = null
 
   if (live && activeTool.value) {
     mode = 'draw'
@@ -434,13 +471,6 @@ function onPointerDown(event: PointerEvent): void {
   }
 
   if (live && rect) {
-    const handle = hitHandle(rect, point, HANDLE_TOLERANCE * scale.value)
-    if (handle) {
-      mode = 'resize-selection'
-      dragHandle = handle
-      return
-    }
-
     const index = hitTestAnnotations(annotations.value, point, ANNOTATION_TOLERANCE * scale.value)
     if (index !== null) {
       pickedAnnotation.value = index
@@ -456,7 +486,9 @@ function onPointerDown(event: PointerEvent): void {
   }
 
   // 没选区、或者点到了选区外面：从这里重新拖一块
+  // （这一拖期间不收工具条，松手才出现，见 toolbarVisible）
   mode = 'create'
+  creating.value = true
   selection.value = { x: point.x, y: point.y, width: 0, height: 0 }
 }
 
@@ -506,6 +538,7 @@ function onPointerUp(): void {
   const finished = mode
   const rect = selection.value
   mode = 'none'
+  creating.value = false
   dragHandle = null
   dragAnnotation = null
 
@@ -536,15 +569,11 @@ function onPointerUp(): void {
   redraw()
 }
 
-/** 右键：先取消选区，没选区了才退出整场截图 */
+/**
+ * 右键：**一次就取消整场截图**（与提示条上那句「右键取消」一致）。
+ * 只清选区用 Esc —— 它才是逐层退的那一条。
+ */
 function onContextMenu(): void {
-  if (hasSelection.value) {
-    selection.value = null
-    pickedAnnotation.value = null
-    activeTool.value = null
-    redraw()
-    return
-  }
   cancel()
 }
 
@@ -664,6 +693,13 @@ function onKeyDown(event: KeyboardEvent): void {
   const ctrl = event.ctrlKey || event.metaKey
   const key = event.key.toLowerCase()
 
+  // Shift：把当前像素的颜色写进剪贴板。**只在放大镜露着的时候认** —— 有选区时它让开了，
+  // 那会儿的 Shift+方向键是「步进十格」，不该顺手往剪贴板里塞东西
+  if (event.key === 'Shift') {
+    if (magnifierVisible.value)
+      void copyPixel()
+    return
+  }
   if (event.key === 'Escape') {
     event.preventDefault()
     onEscape()
@@ -798,17 +834,27 @@ async function compose(): Promise<Blob | null> {
   const width = Math.max(1, Math.round(crop.width))
   const height = Math.max(1, Math.round(crop.height))
 
+  // **先在整帧尺寸的画布上画**（与 stage 同一套：绝对坐标、不平移），最后才把选区那块抠出来。
+  // 不能图省事只在「选区那么大」的画布上平移到选区坐标系再画：那样两边 canvas 尺寸与原点的
+  // 小数部分都不一样，抗锯齿、马赛克那类要读像素 / 要缩放的画法会与屏幕上差一点点
+  // （马赛克更明显：浏览器的缩放实现跟源画布尺寸有关，块色会差几个点）。
+  const stage = document.createElement('canvas')
+  stage.width = frame.width
+  stage.height = frame.height
+  const painter = stage.getContext('2d')
+  if (!painter)
+    return null
+  painter.imageSmoothingEnabled = false
+  painter.drawImage(frame, 0, 0)
+  drawAnnotations(painter, annotations.value, { x: 0, y: 0 })
+
   const canvas = document.createElement('canvas')
   canvas.width = width
   canvas.height = height
   const ctx = canvas.getContext('2d')
   if (!ctx)
     return null
-
-  ctx.drawImage(frame, crop.x, crop.y, width, height, 0, 0, width, height)
-  // 平移到选区坐标系：标注用的还是原图绝对坐标，与显示侧同一个调用
-  ctx.setTransform(1, 0, 0, 1, -crop.x, -crop.y)
-  drawAnnotations(ctx, annotations.value, { x: crop.x, y: crop.y })
+  ctx.drawImage(stage, crop.x, crop.y, width, height, 0, 0, width, height)
 
   try {
     return await new Promise<Blob | null>(resolve => canvas.toBlob(blob => resolve(blob), 'image/png'))
@@ -946,7 +992,12 @@ const toolbarStyle = computed(() => {
     return {}
 
   const canvas = canvasSize.value
-  const size = toolbarSize.value
+  // 量到的是 CSS 像素，选区的几何是画布像素（见 coords.ts）——**先换算成同一套**再算，
+  // 不然「贴选区右边缘」会差出 (1/缩放 - 1) 个工具条宽度（踩过：右边戳出去一截）
+  const size = {
+    width: toolbarSize.value.width * scale.value,
+    height: toolbarSize.value.height * scale.value,
+  }
   const gap = 10 * scale.value
 
   // 优先贴选区下方；下面放不下翻到上面；上下都放不下就压进选区底部
@@ -957,7 +1008,9 @@ const toolbarStyle = computed(() => {
     top = Math.min(rect.y + rect.height - size.height - gap, canvas.height - size.height - gap)
   top = Math.max(gap, top)
 
-  const left = Math.min(Math.max(rect.x, gap), Math.max(gap, canvas.width - size.width - gap))
+  // 横向贴选区的**右边缘**（工具条摆在右下角，与 Snipaste 一致），再夹回画布内
+  const right = rect.x + rect.width - size.width
+  const left = Math.min(Math.max(right, gap), Math.max(gap, canvas.width - size.width - gap))
   const at = canvasToViewport({ x: left, y: top }, viewportBox(), canvas)
   return { left: `${at.x}px`, top: `${at.y}px` }
 })
@@ -974,6 +1027,33 @@ watch([toolbarVisible, activeTool, () => annotations.value.length], () => {
 })
 
 // ---------- 放大镜 ----------
+
+/** 复制失败时的一句话反馈（成功就直接收工了，没机会看卡片） */
+const copyNote = ref('')
+let copyNoteTimer: number | undefined
+
+/**
+ * 把放大镜当前的读数（十六进制）写进剪贴板 —— 这就是「取色」的出口：
+ * 读数卡是画在遮罩上的文本，遮罩整页 `user-select: none`（防误选），选不中也拿不走。
+ * WebView 里的 clipboard 可能被拦（失败还是静默的），所以成不成都在读数卡上说一句。
+ */
+async function copyPixel(): Promise<void> {
+  const hex = pixelHex.value
+  try {
+    await navigator.clipboard.writeText(hex)
+  }
+  catch {
+    // 失败就留在遮罩里：让人看清这一句、挪一下再按一次
+    copyNote.value = '复制失败'
+    window.clearTimeout(copyNoteTimer)
+    copyNoteTimer = window.setTimeout(() => {
+      copyNote.value = ''
+    }, 1200)
+    return
+  }
+  // 成功就收工：取色是一次性的动作，取完该回到原来的活儿上（不用再按一次 Esc）
+  await abort()
+}
 
 const magnifierVisible = computed(() =>
   (options.value?.magnifier ?? true) && !hasSelection.value && hovering.value && failure.value === '',
@@ -1008,15 +1088,18 @@ const redoAble = computed(() => historyCanRedo(history.value))
       @pointerleave="hovering = false"
     />
 
-    <!-- 文字工具：点一下就在那儿开一个输入框，输入法、光标这些交给原生输入框 -->
+    <!--
+      文字工具：点一下就在那儿开一个输入框，输入法、光标这些交给原生输入框。
+      **回车不结输入**：中文输入法要用回车选词，认了就会把字打一半掐掉 ——
+      结束靠点别处（blur 里提交，见 commitText）。
+    -->
     <input
       v-if="textEditing"
       ref="textInput"
       v-model="textEditing.text"
       class="capture-text-input"
       :style="textInputStyle"
-      @keydown.enter.prevent="commitText"
-      @keydown.esc.prevent="textEditing = null"
+      @keydown.esc.stop.prevent="textEditing = null"
       @blur="commitText"
     >
 
@@ -1036,7 +1119,6 @@ const redoAble = computed(() => historyCanRedo(history.value))
         @copy="finishWith(copy)"
         @save="finishWith(save)"
         @pin="finishWith(pin)"
-        @done="finishWith(copy)"
       />
     </div>
 
@@ -1049,12 +1131,13 @@ const redoAble = computed(() => historyCanRedo(history.value))
         :pixel="pixelHex"
         :ink="pixelInk"
         :position="magnifierPosition"
+        :note="copyNote"
       />
     </div>
 
     <!-- 这一屏没有别的说明渠道，还没选区时留一条，选上之后自动让开 -->
     <div v-if="!hasSelection && !failure" class="capture__hint">
-      拖动选一块 · 双击整屏 · 右键取消
+      拖动选一块 · 双击整屏 · 右键取消 · Shift 取色
     </div>
 
     <div v-if="failure" class="capture__failure">
@@ -1079,14 +1162,21 @@ const redoAble = computed(() => historyCanRedo(history.value))
   touch-action: none;
 }
 
+/*
+ * 输入框长得**和落下去的字一模一样**：字号与颜色由行内 style 给（跟着当前档位走），
+ * 这里把边框、底色、内边距全部去掉，只留一个光标。**不要给它加框或底色** ——
+ * 那样提交的时候会看见一个框「收起」成纯色字，而这门功能要的就是所见即所得。
+ */
 .capture-text-input {
   position: absolute;
-  min-width: 60px;
-  padding: 2px 4px;
-  border: 1px dashed rgb(64 158 255 / 90%);
-  border-radius: 3px;
-  background: rgb(0 0 0 / 35%);
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
   font-family: 'Segoe UI', 'Microsoft YaHei', system-ui, sans-serif;
+  /* 与画布上 fillText 的 textBaseline='top' 对齐：结束输入时字不跳 */
+  line-height: 1;
+  caret-color: #409eff;
   outline: none;
 }
 

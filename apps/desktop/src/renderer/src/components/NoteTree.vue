@@ -13,7 +13,7 @@ import { noteChain, noteDropAllowed, parentRel } from '@workbench/notes'
  * 外观与交互交给 `el-tree`：展开 / 收起、缩进、键盘可达性都是它现成的，
  * 这里只补它没有的四件：
  *   1. **拖动**：文件拖进文件夹，或拖到树下面的**空白区**（= 移回最外层）。
- *      能不能落由 shared/note.ts 的 `noteDropAllowed` 说了算，这里只把它接到 el-tree 的回调上；
+ *      能不能落由 packages/notes/src/note.ts 的 `noteDropAllowed` 说了算，这里只把它接到 el-tree 的回调上；
  *   2. **右键菜单**：节点行上是新建笔记 / 新建文件夹 / 重命名 / 删除（触发区盖住整行，
  *      见样式里 el-dropdown 那两条，所以行尾的空白也算这一行）；
  *      落在空白区时只有前两项，且一律落在笔记本根目录 —— 顶部那条工具条去掉之后，
@@ -48,7 +48,7 @@ const props = defineProps<{
   /**
    * 展开着的节点 id（就是各自的 `rel`）。
    *
-   * 由上层持有并落盘（设置里的 `noteTreeExpanded`，见 shared/types.ts）：
+   * 由上层持有并落盘（设置里的 `noteTreeExpanded`，见 apps/desktop/src/renderer/src/types.ts）：
    * 上次摊开的那几层，下次进来还是摊开的。数组而不是 Set ——
    * `default-expanded-keys` 要的就是数组。
    */
@@ -266,7 +266,7 @@ let blankHover = false
  * 拖动：只有文件能拖（`allow-drag`），只能落进文件夹（`allow-drop` 的 inner）。
  *
  * `allow-drop` 会按 prev / next / inner 三种落法各问一次，这里只放行 inner ——
- * 顺序是按名字算出来的（见 shared/note.ts 的排序），插一个「前后」下一秒就没了。
+ * 顺序是按名字算出来的（见 packages/notes/src/note.ts 的排序），插一个「前后」下一秒就没了。
  */
 function allowDrag(node: TreeNodeLike): boolean {
   return node.data.kind === 'note'

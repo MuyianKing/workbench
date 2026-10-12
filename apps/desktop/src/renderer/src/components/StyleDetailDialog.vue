@@ -17,7 +17,7 @@ import { clampFontSize, clampPadding, COLOR_GROUPS, colorGroup, colorLabel, comp
  * 三段要留意的地方：
  *
  * 1. **值必须经 `componentStyle` 展开**：组件规格里写的是 `{colors.primary}` 这种引用，
- *    展开不出来时宁可不画（见 shared/design-styles.ts 的 `expandTokenRefs`）。
+ *    展开不出来时宁可不画（见 packages/appearance/src/design-styles.ts 的 `expandTokenRefs`）。
  * 2. **字体多半是品牌专有字体，本机没装**，会回落到系统字体 —— 字号、字重、字距、
  *    行高这些比例仍然是真的，界面不假装它是原字体。
  * 3. **三个品牌（lamborghini / runwayml / tesla）上游没给组件规格**，规格档的组件段如实说明
@@ -119,7 +119,7 @@ interface TypeRow {
   sample: string
 }
 
-/** 字号上限 44px：再大就把每一行撑成一张屏，弹窗里看不出层次（收敛规则见 shared/design-demo.ts） */
+/** 字号上限 44px：再大就把每一行撑成一张屏，弹窗里看不出层次（收敛规则见 packages/appearance/src/design-demo.ts） */
 function typeRow(style: DesignStyle, key: string, token: DesignTypeToken): TypeRow {
   const size = clampFontSize(token.fontSize, 44)
   const parts = [token.fontSize, token.fontWeight ? `字重 ${token.fontWeight}` : '']
@@ -137,7 +137,7 @@ function typeRow(style: DesignStyle, key: string, token: DesignTypeToken): TypeR
       fontSize: size,
       fontWeight: safeCssValue(token.fontWeight),
       // 行高要先归一化：上游有的把像素行高写成不带单位的数字（`64`），
-      // 直接绑上去会被读成「字号的 64 倍」（见 shared/design-styles.ts 的 lineHeightCss）
+      // 直接绑上去会被读成「字号的 64 倍」（见 packages/appearance/src/design-styles.ts 的 lineHeightCss）
       lineHeight: lineHeightCss(token.lineHeight, token.fontSize),
       letterSpacing: safeCssValue(token.letterSpacing),
     }),
@@ -168,7 +168,7 @@ const SAMPLE_TEXT: Record<ComponentGroup, string> = {
   版式: '版式元素',
 }
 
-/** 样张内边距收一收：上游有 `96px` 这种首屏级内边距，照搬会把弹窗撑爆（见 shared/design-demo.ts） */
+/** 样张内边距收一收：上游有 `96px` 这种首屏级内边距，照搬会把弹窗撑爆（见 packages/appearance/src/design-demo.ts） */
 function toSample(style: DesignStyle, key: string, group: ComponentGroup): Sample {
   const resolved = componentStyle(style.components[key] ?? {}, style)
   return {

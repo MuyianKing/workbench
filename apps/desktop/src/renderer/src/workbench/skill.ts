@@ -4,7 +4,7 @@ import { fail, ok } from '@workbench/core'
 /**
  * 技能的适配层：把「文件动作 + 版本提交」编排成一条条通道。
  *
- * 技能就是笔记文件夹里的普通文件（见 shared/skills.ts 的文件头），所以读写删除直接走
+ * 技能就是笔记文件夹里的普通文件（见 packages/skills/src/skills.ts 的文件头），所以读写删除直接走
  * 笔记的那几条通道（note_create / note_write / note_delete）—— 越界与非法名字的把关
  * 由 Rust 侧同一套逻辑承担。这一层补上的只有两件事：
  *
@@ -12,7 +12,7 @@ import { fail, ok } from '@workbench/core'
  *      提交信息统一 `skill: <id> 动作`。提交失败**不拦主流程**（文件已经落盘了，
  *      版本这次没记上，下一次任何提交会把它带上）—— 只有 Rust 侧确认过的「没产生版本」
  *      （还不是仓库、内容没变）才是什么都不用做的正常情况；
- *   2. **frontmatter 的解析**（名字与描述的提取，shared/skills.ts 里的纯函数）：
+ *   2. **frontmatter 的解析**（名字与描述的提取，packages/skills/src/skills.ts 里的纯函数）：
  *      Rust 只回 SKILL.md 原文，那是数据；「它的名字是什么」是语义，留在这边。
  */
 import { noteNameProblem, sanitizeNoteName } from '@workbench/notes'
@@ -371,7 +371,7 @@ function fileCopiesOf(raw: unknown): SkillFileCopy[] {
  *
  * 两侧都由 Rust 一次取回（分两条通道去问，中间可能插进别的提交），这里只把原始条目收成
  * 确定的形状、再按一条口径合并 —— 「谁是要采纳的那一份」「清单取并集」都在
- * shared/skills.ts 的 `mergeVersionCopies` 里，那边有单测。
+ * packages/skills/src/skills.ts 的 `mergeVersionCopies` 里，那边有单测。
  */
 export async function compareSkillVersion(
   root: string,

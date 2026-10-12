@@ -7,7 +7,7 @@ import { fail, ok } from '@workbench/core'
  * 「对任意文件夹、认它自己的 origin」的实现，技能页同步走的也是它们这族）。
  *
  * 与笔记适配层同一条分工：Rust（kb.rs）只带事实（平铺清单 + 文件文本 + 每条来源这一轮
- * 的结果），「哪些是原始数据、哪些是条目、有没有更新」的口径都在 shared/kb.ts 的纯函数里，
+ * 的结果），「哪些是原始数据、哪些是条目、有没有更新」的口径都在 packages/kb/src/kb.ts 的纯函数里，
  * store 负责编排。清单在这里收成确定的形状并按相对路径排好 —— 认不出的条目丢掉，
  * 宁可少一行，也不让 undefined 流进界面。
  *
@@ -137,7 +137,7 @@ export async function kbRepoState(dir: string): Promise<Result<KbRepoState>> {
  * 重建目录与索引（`kb/_catalog.md` 与 `index/index.json`）。
  *
  * 这是应用**唯一直接写知识库的地方**，写的是脚本的产物、不是内容：内容由 AI 助手那一轮
- * 整理写入（写的人是 Pi）。`generatedAt` 由调用方按本机时区算（shared/kb.ts 的
+ * 整理写入（写的人是 Pi）。`generatedAt` 由调用方按本机时区算（packages/kb/src/kb.ts 的
  * todayIsoDate）—— 与仓库脚本的 `date.today()` 同一条口径。
  */
 export async function kbIndexBuild(

@@ -7,7 +7,7 @@ import type { BootstrapSnapshot, EffectiveTheme } from '@/types'
  * 一份默认外观（亮色、无主题色、默认卡片布局），几十到几百毫秒后才被换成自己的设置，
  * 看上去就是「启动时切换了一次」。
  *
- * 所以这里在 mount 之前同步取一份主进程内存里的快照（见 shared/types.ts 的
+ * 所以这里在 mount 之前同步取一份主进程内存里的快照（见 apps/desktop/src/renderer/src/types.ts 的
  * BootstrapSnapshot），把明暗与主题色先落到 <html> 上，store 再拿同一份快照当初始值。
  * 第一帧因此就是最终的样子，之后的异步加载只是核对一遍，不再产生视觉变化。
  *

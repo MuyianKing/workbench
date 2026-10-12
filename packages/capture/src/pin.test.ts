@@ -26,6 +26,15 @@ describe('clampPinSize', () => {
     const size = clampPinSize({ width: 200, height: 100 }, 0)
     expect(Number.isFinite(size.height)).toBe(true)
   })
+
+  it('两边都是整数：u32/i32 收不下小数', () => {
+    // 滚轮缩放的典型输入：老尺寸 * 1.1，长边带着小数（1193 * 1.1 = 1312.3000000000002）。
+    // 原样发给 Rust 的 pin_update 会被 serde 拒掉：expected u32
+    const size = clampPinSize({ width: 1193 * 1.1, height: 753 * 1.1 }, 1193 / 753)
+    expect(Number.isInteger(size.width)).toBe(true)
+    expect(Number.isInteger(size.height)).toBe(true)
+    expect(size.width).toBe(1312)
+  })
 })
 
 describe('initialPinSize', () => {

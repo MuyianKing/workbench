@@ -4,10 +4,10 @@ import { Document, Folder, Setting } from '@element-plus/icons-vue'
 import { kbRawSourceNameOf, kbRawTree, kbTreeFolderIds } from '@workbench/kb'
 /**
  * 原始数据树（左栏「原始数据」签）：最外层是**来源**（`data/raw/<名字>` 那一格，见
- * shared/kb.ts 的 KbRawSourceRow —— 它可能对到本机一个外部文件夹），来源下面是按目录
+ * packages/kb/src/kb.ts 的 KbRawSourceRow —— 它可能对到本机一个外部文件夹），来源下面是按目录
  * 结构收成的树与各自的入库状态。
  *
- * 状态的口径在 shared/kb.ts（source 配对 + mtime 比较），这里只把结果摆出来：
+ * 状态的口径在 packages/kb/src/kb.ts（source 配对 + mtime 比较），这里只把结果摆出来：
  * 按状态筛（带计数）、一眼看出哪些等着清洗；树由 kbRawTree 从筛过的清单现算
  * （props 只读，这里不留第二份）。文件行只挂「有更新」一个 tag —— 已入库 / 条目数 /
  * 后缀 / 时间都不上行（右栏一看就有，分档交给顶上那排 chips）。来源行的「配置路径」与

@@ -158,7 +158,7 @@ pub fn mail_watch_register(
         }
     }
 
-    *state.0.lock().unwrap() = WatchConfig {
+    *state.0.lock().expect("锁中毒") = WatchConfig {
         accounts: cleaned,
         bulk_senders: bulk,
         poll_minutes: sanitize_poll_minutes(poll_minutes),
@@ -193,7 +193,7 @@ pub fn spawn(app: &AppHandle) {
 /// 一轮：到点没（距上次检查满登记的周期）→ 逐个账户查 → 有新信就弹通知。
 /// 每个账户的失败只记一行日志，不挡别人 —— 后台的事不该吵到界面。
 fn tick(app: &AppHandle) {
-    let config = app.state::<MailWatch>().0.lock().unwrap().clone();
+    let config = app.state::<MailWatch>().0.lock().expect("锁中毒").clone();
     // 清单空着或周期设成关闭（0）：只睡不查
     if config.accounts.is_empty() || config.poll_minutes == 0 {
         return;
@@ -287,7 +287,7 @@ fn from_address(raw: &str) -> String {
 /// 黑名单是用户亲手标的，误伤一封真信比多弹一条通知难看得多。
 fn is_bulk_sender(from: &str, blacklist: &[String]) -> bool {
     let address = from_address(from);
-    !address.is_empty() && blacklist.iter().any(|entry| *entry == address)
+    !address.is_empty() && blacklist.contains(&address)
 }
 
 /// 弹通知。标题用设置里的程序名（与窗口标题 / 托盘提示同一份）；

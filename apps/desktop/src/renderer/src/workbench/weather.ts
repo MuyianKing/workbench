@@ -7,7 +7,7 @@ import { fail, ok } from '@workbench/core'
  * **为什么会出网**：命令在 Rust 侧（`src-tauri/src/weather.rs`），白名单两台主机、各管一段 ——
  * 城市名检索走 OpenStreetMap 的 Nominatim（对中文城市名的匹配比 Open-Meteo 自带检索可靠），
  * 实况走 Open-Meteo。这一层能带下去的只有设置里的城市名与上一步换来的经纬度，
- * 拼不出任意地址。这里只做「取原始回包 → 交给 shared/weather.ts 解析」，策略
+ * 拼不出任意地址。这里只做「取原始回包 → 交给 packages/weather/src/weather.ts 解析」，策略
  * （间隔、按城市缓存坐标）在 stores/weather.ts。
  */
 import { parseWeatherForecast, parseWeatherGeocoding } from '@workbench/weather'

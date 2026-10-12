@@ -1,7 +1,7 @@
 //! Token 用量实读。
 //!
 //! 刻意只做「取原始行」这一层：合并 / 取最大值 / 修剪 / 快照的语义都在
-//! `src/shared/token-usage.ts` 里，渲染层复用同一份实现，Rust 侧不重复第二遍。
+//! `packages/usage/src/token-usage.ts` 里，渲染层复用同一份实现，Rust 侧不重复第二遍。
 //! 唯一的例外是 zstd —— 浏览器没有 zstd 解码 API，DSH 的多帧解压只能留在 Rust。
 
 use crate::fs_util;
@@ -93,7 +93,7 @@ pub fn zcode_rows() -> Result<Vec<Value>, String> {
 // ---------- CodeBuddy(IDE 扩展日志) ----------
 //
 // 只做「列文件」这一层：CodeBuddy 没有落地用量库，唯一的数据源是扩展日志里的逐步 usage 记录，
-// 而行与行之间靠 traceId / requestId 串起来（见 shared/codebuddy-log.ts 的文件头），
+// 而行与行之间靠 traceId / requestId 串起来（见 packages/usage/src/codebuddy-log.ts 的文件头），
 // 所以解析必须整批读、跨文件累积 —— 那是纯逻辑，留在 TS 侧，这里只负责找目录与列文件。
 
 /// 扩展日志的根目录：国内版在 `%APPDATA%/CodeBuddy CN/logs`，国际版没有 CN 后缀，两个都试。
@@ -198,7 +198,7 @@ fn under_extension_dir(root: &std::path::Path, path: &std::path::Path) -> bool {
 //
 // 同样只做「列文件」：WorkBuddy 把每次模型调用的用量写进会话正文
 // （`projects/<项目>/<会话 id>.jsonl`，一行一个 JSON 事件），正文没有压缩、
-// 每一行都自带时间 / 模型 / 用量，读取与解析都在 TS 侧（shared/workbuddy-log.ts）。
+// 每一行都自带时间 / 模型 / 用量，读取与解析都在 TS 侧（packages/usage/src/workbuddy-log.ts）。
 
 /// WorkBuddy 的 home。
 ///
@@ -269,7 +269,7 @@ fn jsonl_sessions_in(root: &std::path::Path, label: &str) -> Result<Value, Strin
 //
 // 同样只做「列文件」：Qoder 把每次请求扣掉的额度写在会话文件里
 // （`projects/<项目>/<会话 id>.jsonl`，一行一个 JSON 事件），正文没有压缩，
-// 读取与解析都在 TS 侧（shared/qoder-log.ts）。
+// 读取与解析都在 TS 侧（packages/usage/src/qoder-log.ts）。
 //
 // 它**没有 token 计数可读**：会话文件与 CLI 日志里的 input_tokens / output_tokens 恒为 0
 // （Qoder 自己的上下文快照里写着 `tokenCountsAvailable: false`，用量面板是问服务端的），
@@ -314,7 +314,7 @@ fn modified_ms(meta: &std::fs::Metadata) -> u64 {
 // ---------- DeepSeek Harness(~/.dsh/sessions) ----------
 //
 // 同样只做「列文件」：会话文件是多帧 zstd（浏览器没有 zstd 解码 API，所以解压在 Rust，
-// 走 `token_zstd_decode`），解出来的每一行是一个 JSON 事件，语义解析在 shared/dsh-log.ts。
+// 走 `token_zstd_decode`），解出来的每一行是一个 JSON 事件，语义解析在 packages/usage/src/dsh-log.ts。
 
 /// 会话文件名：v4、v3 与旧版三种。桌面端升级后新会话只写 v4、老会话整卷迁到 v4（v3 变成冻结副本），
 /// **同一会话目录可能多种并存**，只读版本最高的那个 —— 两个都读会把那次会话的用量算两遍，而且不会有任何报错。

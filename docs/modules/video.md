@@ -6,7 +6,7 @@
 
 ## 约束
 
-关键落点：`shared/video.ts`（MP4 过滤 / 目录树口径 / 倍速档位 / 浮窗几何，带单测）、
+关键落点：`packages/video/src/video.ts`（MP4 过滤 / 目录树口径 / 倍速档位 / 浮窗几何，带单测）、
 `apps/desktop/src-tauri/src/video.rs`（扫描与时长解析、`allow_video`）、`workbench/video.ts`、`stores/video.ts`、
 `components/VideoPlayer.vue`（全局单例播放器）、`composables/use-video-stage.ts`（画中画传送宿主）。
 
@@ -80,7 +80,7 @@
 这些条目的原文注解从主文档「目录结构」迁来（主文档的树里各留一行，指回这里）。
 
 ```
-  src/video.rs           视频文件夹（用户自己挑的一个目录，见 shared/video.ts）：递归列出
+  src/video.rs           视频文件夹（用户自己挑的一个目录，见 packages/video/src/video.ts）：递归列出
                         文件夹与 MP4（跳过点开头的目录与 notes.rs 那份噪音名单；每个 MP4
                         解一遍容器拿时长 —— 只走 ISO BMFF 盒子头找到 `moov/mvhd`，
                         `mdat` 整个 seek 过去，读不出按 0），

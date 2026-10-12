@@ -2,8 +2,8 @@
  * 工具条上那几个形状图标的描边路径（viewBox 24×24）。
  *
  * 为什么手写 SVG 而不取 @element-plus/icons-vue：EP 没有「矩形 / 椭圆 / 箭头 / 画笔 /
- * 荧光笔 / 马赛克」这几个图形工具图标，硬拿别的凑（比如用 Crop 表示矩形）反而认不出来。
- * 撤销 / 重做 / 复制 / 保存 / 关闭 / 完成那几个动作图标仍然用 EP 的（见 CaptureToolbar.vue）。
+ * 荧光笔 / 马赛克」这几个图形工具图标，硬拿别的凑（比如用 Crop 表示矩形）反而认不出来；
+ * 撤销 / 重做同理（见下面那条）。复制 / 保存 / 关闭那几个仍然用 EP 的。
  */
 import type { AnnotationTool } from '@/types'
 
@@ -21,3 +21,10 @@ export const TOOL_ICONS: Record<AnnotationTool, string> = {
 
 /** 钉到屏幕（EP 里没有合适的，形状就是一枚图钉） */
 export const PIN_ICON = 'M9 3h6l-1 6 4.5 4.5H5.5L10 9zM12 13.5V21'
+
+/**
+ * 撤销 / 重做。**别用 EP 的 `RefreshLeft` / `RefreshRight`**：那两个是「绕一圈的箭头」，
+ * 摆在工具条上更像「刷新 / 重新加载」，有歧义；拐个弯回头的返回箭头才是撤销 / 重做。
+ */
+export const UNDO_ICON = 'M9 14 4 9 9 4M20 20v-7a4 4 0 0 0-4-4H4'
+export const REDO_ICON = 'M15 14 20 9 15 4M4 20v-7a4 4 0 0 1 4-4h12'

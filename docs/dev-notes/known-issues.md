@@ -269,3 +269,54 @@ on:
   （`git ls-files --error-unmatch` 通过），也未被 `.gitignore` 排除。`Cargo.toml` 用主版本范围是 Rust 生态常规写法。
 - **截图 / 钉图子系统（capture / pin / screen / clipboard）缺文档** —— 不成立。
   `../modules/screenshot.md` 存在，目录结构清单也登记了。这一组不用补文档。
+
+---
+
+## 处理记录（2026-10-12）
+
+逐条落地的结果。**「核实不成立」的都是按代码复核后不动的**，理由跟在后面。
+
+**已处理**
+
+1. **CI（P0-3）**：新增 [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml) —— push / PR 跑 `lint` + `typecheck` +
+   `pnpm test` + `cargo clippy -- -D warnings` + `cargo test`。Rust job 里补一步 `resources/pi` **空目录占位**：
+   那个目录未入库，而 `tauri-build` 在编译期就会去 copy 它，缺了直接编不过（实测 `resource path ... doesn't exist`）。
+   同时把 15 个域包 `test` 脚本里的 `--passWithNoTests` 全部去掉 —— `include` 一旦写坏会立刻红，不再静默通过。
+2. **panic 卫生（P0-1）**：新增 [panic_log.rs](../../apps/desktop/src-tauri/src/panic_log.rs)，`main()` 第一行装钩子，把
+   「时间 / 线程 / 位置 / 消息 / 回溯」追加到 `data/panic.log`。并开 `clippy::unwrap_used`（生产代码 deny、
+   测试经 `clippy.toml` 豁免），生产侧 53 处 `.unwrap()` 收敛成 `expect("锁中毒")`（锁）与 `if let`（sync.rs 两处）。
+3. **漏标 async（P2-10）**：`open_path` / `open_external` / `spawn_session` / `reveal` 补 `(async)`；
+   `data_flush` 渲染层本就没有调用点（`flush_all` 由 main.rs 直调），整条删掉。
+4. **IPC 契约（P1-4）**：`listSyncDevices` 经 `guard()` 收敛成 `Result<SyncDeviceInfo[]>`（它底下是会 `Err` 的
+   `token_sync_shards`）；`nvm.ts` 的 `checkNodeVersion` 保证不再 reject（探测失败回「不提示」），
+   `nodeDirFor` 的失败留一条 `console.warn`，不再静默吞掉。
+5. **文档漂移（P2-9）**：目录树补上 `ai_news.rs` / `fs_util.rs` / `imaging.rs` / `panic_log.rs`；
+   `modules/<模块>/implementation.md` 这个坏指针改成 `modules/<模块>.md` 的「涉及文件」；
+   迁移前的 `src/shared/*` 路径引用全仓清了 **251 处**（Rust 注释 + 渲染层注释 + 模块文档）。
+6. **测试（P0-2 的一部分）**：`commands.rs` 补 9 条边界用例（fs 家族 / zstd 解码 / 进程探测 / 数据目录），
+   渲染层补 12 条（nvm 适配层的失败收敛、settings 的落盘字段、kb 的 looksLikeKb）。
+7. **CSP（P2-12）**：`tauri.conf.json` 设了 `csp` / `devCsp`（脚本 `'self'`、`object-src 'none'`、`base-uri 'self'`）。
+   必须放行的几处见 [ipc-and-state](../modules/ipc-and-state.md)：`style-src 'unsafe-inline'`、`connect-src ipc:`、
+   `worker-src blob:`（pptx 预览与笔记里的 graphviz）、`img-src` 的 asset/https/http、`frame-src about:`（srcdoc 内嵌框）。
+   已在**生产态真应用**里用 CDP 验过：零违规，IPC / 图片 / blob worker / 样式全部正常。
+
+**核实不成立 / 降级（按代码复核）**
+
+- **`.unwrap()` 的规模**：全仓 592 处没错，但 539 处在 `#[cfg(test)]` 里（测试里 unwrap 是惯用写法），
+  生产侧只有 53 处、其中 51 处是 `Mutex::lock()`。而且 release 是 `panic = "abort"`，锁永远不会中毒
+  （中毒要靠 unwind）—— 那 51 处在生产里不可达。所以这条按**卫生**处理（panic hook + lint 门禁），
+  没有按 P0 大改。审计说的「第 137 / 302 行 `roots[0]` 是数据链路上的硬伤」同样不成立：
+  两个 `*_roots()` 都是恒非空的构造函数，索引碰不到 panic（而且它是索引、不是 unwrap，那道 lint 也管不到它）。
+- **邮件清单会「卡」**：`mail_list` 的 limit 被 clamp 在 1..=100、账户上限 5，行数有界。
+- **`NoteAssetsDialog` 自己算引用次数**：它用的是 `@workbench/notes` 的 `buildImageAssets` /
+  `countImageReferences`（纯函数），没有重算；组件文件头也写明了「数据只在面板打开期间存在，不造 store 切片」。
+- **`NewsArticleDialog` 与 `NewsPanel`「各自取数」**：前者抓的是文章正文、后者是列表，不是同一条数据。
+- **`AiRunInput` 同名不同形**：`stores/ai.ts` 那份没有 export，冲突只在阅读时存在，没有实际漂移面。
+
+**有意留着没做的**
+
+- God store 拆分（`settings.ts` 的 8 组 `setX`/`commitX`、`ai.ts` 拆三份）：收益大、动面也大，值得单独一轮。
+- 性能那三条（虚拟列表 / kb 的 computed / projects 的 deep watch）：先按期不动，等真的有体感再动。
+- 组件块头（现在 28 个文件 > 600 行）：长期维护成本，不在这轮。
+- `run_command` / `spawn_session` 的任意命令执行面：那是设计取舍（见本文件 P2-11），要收紧得先设计。
+

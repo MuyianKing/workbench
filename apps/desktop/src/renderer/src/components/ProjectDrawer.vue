@@ -535,7 +535,7 @@ async function removeProject(): Promise<void> {
           </div>
 
           <!--
-            标识色：下拉里是 Element Plus 那五个主题色（见 shared/project-color.ts），
+            标识色：下拉里是 Element Plus 那五个主题色（见 packages/core/src/project-color.ts），
             外加一个「自定义」—— 选中它时旁边出现取色器。
             预设存的是**主题色名**（明暗与用户自设的主题色都会跟着走），自定义色存 `#rrggbb`。
           -->

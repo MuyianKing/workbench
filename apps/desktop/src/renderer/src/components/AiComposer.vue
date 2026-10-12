@@ -29,7 +29,7 @@ import { AI_IMAGE_TYPES, AI_PERMISSION_MODES, AI_SKILL_COMMAND, aiImageAccepted,
  * 底部那一行，不在这条输入框上）。
  *
  * **技能**在这条输入框上有一处自己的样子：敲 `/` 出候选那一列，选中就把 `/skill:名字`
- * 放到最前面 —— Pi 只在文本开头认这条命令（见 shared/ai.ts 的 taskPrompt），所以命令必须
+ * 放到最前面 —— Pi 只在文本开头认这条命令（见 packages/ai/src/ai.ts 的 taskPrompt），所以命令必须
  * 是第一个字，候选那一列也就长在输入框正上方。
  *
  * 权限那一栏在下拉里给每一档挂一行小字（这一档到底问不问）—— 下拉挂在 body 上，
@@ -61,7 +61,7 @@ const skillsStore = useAiSkillsStore()
 /**
  * 模型下拉里那几项：**把服务名顶在前面**（`服务名 · 模型显示名`）——
  * 下拉收起时那一格也只显示这一串，光有「Kimi K2」看不出它挂在哪个服务上
- * （几个服务可能都有同名模型）。挑的是 shared/ai.ts 的 AiModelChoice.key。
+ * （几个服务可能都有同名模型）。挑的是 packages/ai/src/ai.ts 的 AiModelChoice.key。
  */
 const modelOptions = computed(() =>
   ai.choices.map(choice => ({
@@ -260,7 +260,7 @@ async function onPaste(event: ClipboardEvent): Promise<void> {
     .map(item => item.getAsFile())
     .filter((file): file is File => !!file)
   if (!files.length) {
-    // 收哪几种由 shared/ai.ts 那张表说了算（它对的是 Pi 能直接内联给模型的那几种）
+    // 收哪几种由 packages/ai/src/ai.ts 那张表说了算（它对的是 Pi 能直接内联给模型的那几种）
     const types = AI_IMAGE_TYPES.map(type => type.replace('image/', '')).join(' / ')
     return notifyWarning(`这种图发不出去：只认 ${types}`)
   }
@@ -325,7 +325,7 @@ const sendTitle = computed(() => {
     <!--
       技能候选：输入框里正在写 `/skill:名字` 时排在它上方（一条内嵌的面板，不是浮层）。
       上下键走、Enter 选、点一下也选；选中之后命令留在最前面，光标接在空格后面写正文。
-      「全局 / 项目」那枚小字说的是这个技能从哪条根来的（见 shared/pi-skills.ts）。
+      「全局 / 项目」那枚小字说的是这个技能从哪条根来的（见 packages/ai/src/pi-skills.ts）。
     -->
     <div v-if="skillPickerOpen" class="skills" role="listbox" aria-label="选择技能">
       <button
@@ -362,7 +362,7 @@ const sendTitle = computed(() => {
     <div class="composer__row">
       <!--
         工具权限：**左边这一栏**。两档的差别只有一个 —— 执行命令问不问（读写文件都不问）；
-        它交给 Rust 决定加不加载那份确认扩展（见 shared/ai.ts 的 AI_PERMISSION_MODES）。
+        它交给 Rust 决定加不加载那份确认扩展（见 packages/ai/src/ai.ts 的 AI_PERMISSION_MODES）。
         下拉里每一条底下那行小字说的就是这个（样式在 global.css）。
         图标跟着这一档走：要问 = 锁着，不问 = 开着 —— 两档的差别一眼看得出来。
       -->

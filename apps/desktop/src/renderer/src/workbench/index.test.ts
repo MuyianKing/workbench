@@ -109,7 +109,7 @@ describe('未登录时的同步入口', () => {
     expect(published).toEqual([])
     expect(shardReads).toBe(0)
     expect(result.data?.sync.enabled).toBe(false)
-    expect(await api().listSyncDevices()).toEqual([])
+    expect(await api().listSyncDevices()).toEqual({ ok: true, data: [] })
   })
 })
 

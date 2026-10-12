@@ -20,7 +20,7 @@ import { fail, ok } from '@workbench/core'
  * 让用户再点一次，而不是猜一个结果写下去。
  *
  * `push` 写的是**整份合并结果**：两台机器各自 merge 出的内容逐字节一致（合并规则里没有
- * 「以我为准」这一项，见 shared/vault.ts），所以谁先推都一样，后推的那台会认出来「没变化」
+ * 「以我为准」这一项，见 packages/vault/src/vault.ts），所以谁先推都一样，后推的那台会认出来「没变化」
  * 而不产生空提交。
  *
  * **同步受登录限制**：仓库地址由调用方给（与用量 / 外观那两条一样经 `syncRepo()`，
@@ -274,7 +274,7 @@ export async function importKeyFile(path: string): Promise<Result<VaultKeyState>
 
 // ---------- 条目 ----------
 
-/** 本机那份文件（原样返回，收敛交给 shared/vault.ts） */
+/** 本机那份文件（原样返回，收敛交给 packages/vault/src/vault.ts） */
 async function loadFile(key: VaultPublicKey): Promise<Result<VaultFile>> {
   const raw = await guard(invoke<unknown>('vault_load'), '读取保险库失败')
   if (!raw.ok)
@@ -363,7 +363,7 @@ export async function save(input: VaultWriteInput): Promise<Result<VaultRecord>>
   return ok({ ...entry, id: input.id, updatedAt, by: device.id })
 }
 
-/** 删一条：换成墓碑。空壳留着是为了让别的机器别把它复活（见 shared/vault.ts 的 mergeVaultItems） */
+/** 删一条：换成墓碑。空壳留着是为了让别的机器别把它复活（见 packages/vault/src/vault.ts 的 mergeVaultItems） */
 export async function remove(id: string): Promise<Result<null>> {
   const key = currentKey()
   if (!key)

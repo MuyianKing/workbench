@@ -12,12 +12,12 @@ import { formatWeatherView } from '@workbench/weather'
  * 以及你这些机器上目前的状况（几条从本机数据里现取的实话）。
  * 不打招呼、不问好、不鼓励 —— 那些在这个应用的语气里是噪音（见 AGENTS.md 的「如实说明」）。
  *
- * **称呼后面那个名字是当前登录账号的用户名**（`AccountProfile.login`，见 `shared/auth.ts`）：
+ * **称呼后面那个名字是当前登录账号的用户名**（`AccountProfile.login`，见 `packages/auth/src/auth.ts`）：
  * 这一行是首屏上唯一一处「认得你」，说出来的就该是**此刻登录的那个 git 账号**，
  * 而不是给程序起的名字。取登录名而不是昵称 —— 昵称是平台上的展示名（可能重名、也可能没填过），
  * 登录名才是「哪个账号」。
  *
- * **没登录时回落到设置里的「程序名称」**（`shared/app-name.ts` 收敛，默认 `MUYIAN`，
+ * **没登录时回落到设置里的「程序名称」**（`packages/appearance/src/app-name.ts` 收敛，默认 `MUYIAN`，
  * 与标题栏、托盘提示、窗口标题同一个值）：登录是可选的，而这一行不该因为没登录就少半句。
  *
  * 数据全在 projects / settings / auth 三个 store 里，**一次 IPC 都不发**：账号状态由
@@ -46,7 +46,7 @@ const account = computed(() => auth.status?.account ?? null)
 
 /**
  * 称呼后面那个名字：登录名优先，没登录用设置里的程序名称。
- * 两个来源都收敛过（见 shared/auth.ts / shared/app-name.ts），所以一定有值。
+ * 两个来源都收敛过（见 packages/auth/src/auth.ts / packages/appearance/src/app-name.ts），所以一定有值。
  */
 const name = computed(() => account.value?.login ?? settings.settings.appName)
 
@@ -81,7 +81,7 @@ const greeting = computed(() => {
   return '晚上好'
 })
 
-/** 今天跑过几次（命令开跑那天计数，见 shared/activity.ts） */
+/** 今天跑过几次（命令开跑那天计数，见 packages/core/src/activity.ts） */
 const todayCount = computed(() => store.activity[dayKey(dayStart.value)] ?? 0)
 
 /** 连着用了多少天：今天还没动手也不算断，从昨天数起 */

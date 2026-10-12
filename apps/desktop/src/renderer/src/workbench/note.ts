@@ -11,7 +11,7 @@ import { fail, ok } from '@workbench/core'
  * 笔记本来就该是「我的文件夹 + 我的文件」，而不是应用里的一份投影。
  *
  * 这一层只做两件渲染层不该操心的事：
- *   1. 把 Rust 扫出来的**平铺清单**组回一棵排好序的树（纯函数在 shared/note.ts，那边有单测）；
+ *   1. 把 Rust 扫出来的**平铺清单**组回一棵排好序的树（纯函数在 packages/notes/src/note.ts，那边有单测）；
  *   2. 结构改完之后**重新扫一遍**再回给上层。不在这里推算改动结果：真实原因是
  *      「磁盘上现在是什么样」只有一个来源，算出来的那份迟早会与它对不上（外部改名、大小写）。
  *
@@ -154,7 +154,7 @@ export async function moveNote(
 // ---------- 粘贴的图片 ----------
 
 /**
- * 这次调用落在仓库的哪一层：`<images>/<设备>/<笔记本>`（口径与算法都在 shared/note-image.ts）。
+ * 这次调用落在仓库的哪一层：`<images>/<设备>/<笔记本>`（口径与算法都在 packages/notes/src/note-image.ts）。
  *
  * 设备标识问一次就缓存（`localDevice`，与 Token 分片用的是同一个 id），笔记本每次都由调用方带进来 ——
  * 这两样都不在适配层缓存：用户换了笔记本、换了机器，来源就换了。
@@ -229,7 +229,7 @@ export async function uploadNoteImage(
  * 只列 `<images>/<设备>/<笔记本>` 那一层（见 imageScope）：别的笔记本、别的机器传上来的图
  * **不在清单里** —— 它们的「引用次数」拿当前这个笔记本的正文根本数不出来。
  * 只把 Rust 回来的清单收成确定的形状：仓库没配 / 拉不下来都是失败（界面据此提示去哪儿配），
- * 而「被引用了几次」由调用方拿笔记正文另算（见 shared/note-image.ts 的 buildImageAssets）。
+ * 而「被引用了几次」由调用方拿笔记正文另算（见 packages/notes/src/note-image.ts 的 buildImageAssets）。
  */
 export async function listNoteImages(input: NoteImageListInput): Promise<Result<NoteImageList>> {
   const repo = sanitizeImageRepo(input.repo)
@@ -355,7 +355,7 @@ export async function scanNoteTexts(root: string): Promise<Result<NoteTextScan>>
  * 把当前笔记本与**它自己连着的那个仓库**对齐一次（提交 → 拉 → 推）。
  *
  * 地址不从这里下去：同步到哪儿就是 `dir` 自己 `remote origin` 指着的那个地方，
- * 是 git 说了算的（见 shared/note.ts 的 NoteRepoState）。所以这里只带目录，
+ * 是 git 说了算的（见 packages/notes/src/note.ts 的 NoteRepoState）。所以这里只带目录，
  * 收敛参数与结果形状：谁先改的、撞上哪几篇，都是 git 说了算。
  *
  * 冲突**不算失败得莫名其妙**：Rust 那边会中止这次 rebase（本地那笔提交留着）并把冲突的文件名

@@ -1,5 +1,11 @@
 // 发布态不要额外的控制台窗口
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+// 生产代码里禁止裸 `unwrap()`：release 档是 `panic = "abort"`，一处 unwrap 失手就是进程
+// 凭空消失（数据还在 300ms 去抖窗口里，也没机会落盘）。要显式终止就用 `expect("原因")`
+// —— 它带得走一句话，还会落到 panic.log（见 panic_log.rs）。
+// `cfg(test)` 下不设：用例里 unwrap 出真实原因本身就是它的价值。
+// 配 `clippy.toml` 的 allow-unwrap-in-tests，`--all-targets` 也能干净通过。
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
 
 mod ai;
 mod ai_news;
@@ -21,6 +27,7 @@ mod notes;
 mod notify;
 mod nvm;
 mod oauth;
+mod panic_log;
 mod paths;
 mod pi_skills;
 mod pin;
@@ -189,7 +196,7 @@ fn attach_window_events(window: &tauri::WebviewWindow) {
             // 先放开锁再发事件，避免在持锁期间触发重入
             let changed = {
                 let flag = handle.state::<MaximizedFlag>();
-                let mut last = flag.0.lock().unwrap();
+                let mut last = flag.0.lock().expect("锁中毒");
                 let changed = *last != maximized;
                 *last = maximized;
                 changed
@@ -214,7 +221,7 @@ fn create_main_window(app: &AppHandle) -> tauri::Result<()> {
         .decorations(false)
         // 首帧画好再显示，避免先闪一下白底
         .visible(false)
-        .initialization_script(&bootstrap_script())
+        .initialization_script(bootstrap_script())
         .initialization_script(no_context_menu_script())
         .on_page_load(|window, payload| {
             if let PageLoadEvent::Finished = payload.event() {
@@ -299,28 +306,26 @@ fn create_tray(app: &AppHandle) -> tauri::Result<()> {
 /**
  * 一组全局快捷键（解析好之后的那份）。
  *
- * 三条各自独立：唤起/收起主窗口、起截图、翻钉图的鼠标穿透。**必须放在一处一起装**
+ * 两条各自独立：唤起/收起主窗口、起截图。**必须放在一处一起装**
  * —— 插件注册时用的是「先全清再逐条注册」，谁单独调一次都会把别人注销掉（见 register_hotkeys）。
  */
 #[derive(Default, Clone)]
 struct HotkeySet {
     main: Option<Shortcut>,
     capture: Option<Shortcut>,
-    pin_through: Option<Shortcut>,
 }
 
 /// 当前装着的那组快捷键。按下时按值比对派发（`Shortcut` 的 id 由修饰键与键码算出，同一串解析两次必然相等）。
 #[derive(Default)]
 struct Hotkeys(Mutex<HotkeySet>);
 
-/// 把渲染层递上来的三串解析成一组快捷键。
+/// 把渲染层递上来的两串解析成一组快捷键。
 ///
 /// **值一律由渲染层给**（见 register_hotkeys 的说明）：空串当作不要这一条；
 /// 非空但认不出的那一串要报出来 —— 静默丢掉的话，界面上看着「设过了」，按下去却没反应。
 fn parse_hotkeys(
     main: Option<String>,
     capture: Option<String>,
-    pin_through: Option<String>,
 ) -> Result<HotkeySet, String> {
     let parse = |name: &str, raw: Option<String>| -> Result<Option<Shortcut>, String> {
         let Some(text) = raw.map(|value| value.trim().to_string()) else {
@@ -337,7 +342,6 @@ fn parse_hotkeys(
     Ok(HotkeySet {
         main: parse("唤起窗口", main)?,
         capture: parse("截图", capture)?,
-        pin_through: parse("钉图穿透", pin_through)?,
     })
 }
 
@@ -358,7 +362,6 @@ fn register_hotkeys(app: &AppHandle, accelerators: HotkeySet) -> Result<(), Stri
     for (name, shortcut) in [
         ("唤起窗口", accelerators.main),
         ("截图", accelerators.capture),
-        ("钉图穿透", accelerators.pin_through),
     ] {
         let Some(shortcut) = shortcut else { continue };
         if manager.register(shortcut).is_err() {
@@ -366,7 +369,7 @@ fn register_hotkeys(app: &AppHandle, accelerators: HotkeySet) -> Result<(), Stri
         }
     }
 
-    *app.state::<Hotkeys>().0.lock().unwrap() = accelerators;
+    *app.state::<Hotkeys>().0.lock().expect("锁中毒") = accelerators;
 
     if failed.is_empty() {
         Ok(())
@@ -391,7 +394,7 @@ fn request_quit(app: &AppHandle) {
     }
 
     let (tx, rx) = channel::<String>();
-    *app.state::<PendingQuit>().0.lock().unwrap() = Some(tx);
+    *app.state::<PendingQuit>().0.lock().expect("锁中毒") = Some(tx);
 
     // 唤出窗口之前的状态（可见 / 最小化），取消退出时照着还原
     let mut before_show: Option<(bool, bool)> = None;
@@ -416,7 +419,7 @@ fn request_quit(app: &AppHandle) {
         let choice = rx
             .recv_timeout(Duration::from_secs(60))
             .unwrap_or_else(|_| "direct".to_string());
-        *handle.state::<PendingQuit>().0.lock().unwrap() = None;
+        *handle.state::<PendingQuit>().0.lock().expect("锁中毒") = None;
 
         match choice.as_str() {
             "cancel" => {
@@ -443,6 +446,9 @@ fn request_quit(app: &AppHandle) {
 }
 
 fn main() {
+    // 第一件事：release 档 panic 直接中止进程，只有这个钩子能把那一下记下来
+    panic_log::install();
+
     tauri::Builder::default()
         // 单实例必须最先注册：两个进程各持一份内存数据，后写的一次会把前一次的改动整个覆盖掉
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
@@ -455,7 +461,7 @@ fn main() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ))
-        // 全局快捷键：唤起 / 收起窗口、起截图、翻钉图穿透 —— 按值比对分派
+        // 全局快捷键：唤起 / 收起窗口、起截图 —— 按值比对分派
         // （三条快捷键的解析与注册都在 register_hotkeys 里）
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
@@ -464,14 +470,10 @@ fn main() {
                         return;
                     }
 
-                    let set = app.state::<Hotkeys>().0.lock().unwrap().clone();
+                    let set = app.state::<Hotkeys>().0.lock().expect("锁中毒").clone();
                     if set.capture.as_ref() == Some(shortcut) {
                         // 抓屏 + 编码是几百毫秒的活，request 自己会丢到工作线程去（热键回调在主线程上）
                         capture::request(app);
-                        return;
-                    }
-                    if set.pin_through.as_ref() == Some(shortcut) {
-                        pin::toggle_click_through(app);
                         return;
                     }
                     if set.main.as_ref() == Some(shortcut) {
@@ -490,7 +492,6 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             commands::data_load,
             commands::data_save,
-            commands::data_flush,
             commands::theme_load,
             commands::theme_save,
             commands::token_load,
@@ -653,7 +654,7 @@ fn main() {
             create_tray(&handle)?;
             pin::restore(&handle);
 
-            // 全局快捷键不在这里装：三条的值（含默认值）只有渲染层那份收敛过的设置里有，
+            // 全局快捷键不在这里装：两条的值（含默认值）只有渲染层那份收敛过的设置里有，
             // 它在 initState 之后会调 apply_hotkeys 推一次（见 workbench/index.ts 的
             // syncSystemIntegration）；Rust 去数据文件里读会漏掉「刚加的字段还没写回盘」那一段。
 
@@ -665,9 +666,9 @@ fn main() {
         })
         .build(tauri::generate_context!())
         .expect("Workbench 初始化失败")
-        .run(|_app, event| match event {
+        .run(|_app, event| {
             // 退出前同步落盘，防止防抖窗口内的改动丢失
-            tauri::RunEvent::ExitRequested { .. } => {
+            if let tauri::RunEvent::ExitRequested { .. } = event {
                 commands::flush_all();
             }
             // 这里**不收进程**：收不收是托盘退出确认里那个选择的事，而选择在 request_quit 里
@@ -675,6 +676,5 @@ fn main() {
             // 留在后台，交给下次启动的残留清理。从前这里无条件调 stop_all，而 RunEvent::Exit
             // 是所有退出路径的必经之处（`AppHandle::exit` 就会走到），挡在这儿等于把选择抹平：
             // 选「直接退出」的也一样被收掉。
-            _ => {}
         });
 }

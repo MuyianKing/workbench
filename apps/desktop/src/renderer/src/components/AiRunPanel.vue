@@ -8,7 +8,7 @@ import { aiTurns, visibleInstruction } from '@workbench/ai'
  *  - **用户自己写的那几句靠右**（浅底气泡、限宽），助手的回话在左 —— 一段对话里
  *    「我说到哪儿了」一眼看得出来；**那句话里贴的图排在文字上面**（`AiLogLine.images`，
  *    缩到一行大小只是「发过哪几张」的记号，点一下开 EP 的查看器看大图）；
- *  - **一轮 = 用户那句 + 一块「过程」+ 最后那段正文 +「用时…」**（切法在 shared/ai.ts 的
+ *  - **一轮 = 用户那句 + 一块「过程」+ 最后那段正文 +「用时…」**（切法在 packages/ai/src/ai.ts 的
  *    `aiTurns`）。**过程整块收着**（`AiProcess.vue`）：模型想的那几段、工具调用、报错、
  *    中途那些旁白都在里面 —— 一段对话要读的是「我说了什么、它最后说了什么」，
  *    那些步骤摊着就是一面墙（一次读文件、一条命令各占一行）。跑着的时候那块是摊开的
@@ -91,7 +91,7 @@ const scroller = ref<HTMLElement | null>(null)
 
 /**
  * 画之前过一道：**用户那句剥掉提示词脚手架**（`你在下面这个目录里工作：…` 那行是给模型看的，
- * 用户自己没写过它，见 shared/ai.ts 的 visibleInstruction）。读历史那条路已经剥过一次，
+ * 用户自己没写过它，见 packages/ai/src/ai.ts 的 visibleInstruction）。读历史那条路已经剥过一次，
  * 这里再兜一道不是多余：内存里可能还留着修复之前读进来的老行，剥两遍是幂等的。
  * 剥完空掉的行不画 —— 但**只贴了图没写字的那句要留下**（图就是那句话的内容）。
  */
@@ -106,7 +106,7 @@ const shown = computed(() =>
 /** 正在画的那一条（没有就是 null） */
 const confirm = computed(() => props.confirms[0] ?? null)
 
-/** 整条日志按「轮」切开（用户那句 + 过程 + 答案 + 收据；跑着的那轮不摘答案，见 shared/ai.ts 的 aiTurns） */
+/** 整条日志按「轮」切开（用户那句 + 过程 + 答案 + 收据；跑着的那轮不摘答案，见 packages/ai/src/ai.ts 的 aiTurns） */
 const turns = computed(() => aiTurns(shown.value, props.running))
 
 /** 还在跑的那一轮是哪一个（它那块「过程」摊着、转着；跑完自动收起） */

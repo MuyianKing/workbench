@@ -1,9 +1,9 @@
-//! 钉图：把一张图钉在屏幕上（置顶、可拖动、可缩放、可调透明度、可鼠标穿透）。
+//! 钉图：把一张图钉在屏幕上（置顶、可拖动、可缩放、可调透明度）。
 //!
 //! ## 一张钉图的两半
 //!
 //! **图片**落在 `data\pins\<id>.png`（钉图关掉时连文件一起删），**记账**落在
-//! `data\pins.json`（位置 / 尺寸 / 透明度 / 穿透）。记账进 JsonStore 的防抖落盘，
+//! `data\pins.json`（位置 / 尺寸 / 透明度）。记账进 JsonStore 的防抖落盘，
 //! 与工作日志同一套；下次启动时 `restore` 照着记账把图重新钉回来 ——
 //! 一段没做完的工作不该因为重启就散掉。
 //!
@@ -14,18 +14,13 @@
 //! `transparent(true)`，页面里的 `html` / `body` 也必须真的透明（见 pin.html）。
 //! 代价是没有窗口阴影（`shadow(false)`），换来的是能透过图看到桌面。
 //!
-//! ## 穿透怎么收回来
-//!
-//! `set_ignore_cursor_events(true)` 之后钉图收不到任何鼠标事件 —— 界面上的菜单也就点不到了。
-//! 唯一的退路是全局快捷键（见 main.rs 的 PIN_THROUGH_HOTKEY），它把**所有**钉图一起翻面。
-
 use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::{
-    AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindow,
+    AppHandle, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindow,
     WebviewWindowBuilder,
 };
 
@@ -56,8 +51,6 @@ pub struct PinRecord {
     pub height: u32,
     /// 不透明度（百分比，20~100）
     pub opacity: u32,
-    /// 鼠标穿透：开着的时候点它等于点它底下那个窗口
-    pub click_through: bool,
     /// 图片的原始长宽比（宽 / 高）：缩放时按它保持比例
     pub ratio: f64,
 }
@@ -71,7 +64,6 @@ pub struct PinPatch {
     pub width: Option<u32>,
     pub height: Option<u32>,
     pub opacity: Option<u32>,
-    pub click_through: Option<bool>,
 }
 
 /// 当前钉着的那几张（内存里的那份才是真源，每次改完同步进 JsonStore）
@@ -90,12 +82,12 @@ fn pin_id(label: &str) -> Option<&str> {
 pub fn load(app: &AppHandle) {
     let raw = pin_store().load();
     let records: Vec<PinRecord> = serde_json::from_value(raw).unwrap_or_default();
-    *app.state::<Pins>().0.lock().unwrap() = records;
+    *app.state::<Pins>().0.lock().expect("锁中毒") = records;
 }
 
 /// 启动时把上次钉着的图重新钉回来。图不在了（用户删过、盘没挂上）就丢掉那条记录。
 pub fn restore(app: &AppHandle) {
-    let records = app.state::<Pins>().0.lock().unwrap().clone();
+    let records = app.state::<Pins>().0.lock().expect("锁中毒").clone();
     let total = records.len();
     let mut kept = Vec::new();
 
@@ -113,7 +105,7 @@ pub fn restore(app: &AppHandle) {
     }
 
     let changed = kept.len() != total;
-    *app.state::<Pins>().0.lock().unwrap() = kept.clone();
+    *app.state::<Pins>().0.lock().expect("锁中毒") = kept.clone();
     if changed {
         persist(&kept);
     }
@@ -158,7 +150,6 @@ pub fn create(
         width,
         height,
         opacity,
-        click_through: false,
         ratio: if image.height() > 0 {
             f64::from(image.width()) / f64::from(image.height())
         } else {
@@ -174,7 +165,7 @@ pub fn create(
 
     let all = {
         let state = app.state::<Pins>();
-        let mut guard = state.0.lock().unwrap();
+        let mut guard = state.0.lock().expect("锁中毒");
         guard.push(record.clone());
         guard.clone()
     };
@@ -207,10 +198,6 @@ fn create_window(app: &AppHandle, record: &PinRecord) -> Result<(), String> {
     window
         .set_size(PhysicalSize::new(record.width, record.height))
         .map_err(|err| format!("定钉图窗口尺寸失败：{err}"))?;
-
-    if record.click_through {
-        let _ = window.set_ignore_cursor_events(true);
-    }
 
     // 被系统关掉（Alt+F4、任务管理器之类）也要记账：不然下次启动会照着一份旧账
     // 把已经关掉的图又钉回来。我们自己调 close() 时先删了记录，这里就成了空转。
@@ -251,7 +238,7 @@ fn sync_geometry(app: &AppHandle, id: &str) {
 
     let all = {
         let state = app.state::<Pins>();
-        let mut guard = state.0.lock().unwrap();
+        let mut guard = state.0.lock().expect("锁中毒");
         let Some(record) = guard.iter_mut().find(|record| record.id == id) else {
             return;
         };
@@ -276,7 +263,7 @@ fn sync_geometry(app: &AppHandle, id: &str) {
 fn prune(app: &AppHandle, id: &str) {
     let (all, removed) = {
         let state = app.state::<Pins>();
-        let mut guard = state.0.lock().unwrap();
+        let mut guard = state.0.lock().expect("锁中毒");
         match guard.iter().position(|record| record.id == id) {
             Some(index) => {
                 let record = guard.remove(index);
@@ -296,7 +283,7 @@ fn find(app: &AppHandle, id: &str) -> Option<PinRecord> {
     app.state::<Pins>()
         .0
         .lock()
-        .unwrap()
+        .expect("锁中毒")
         .iter()
         .find(|record| record.id == id)
         .cloned()
@@ -313,7 +300,7 @@ pub fn update(app: &AppHandle, id: &str, patch: PinPatch) -> Result<PinRecord, S
 
     let next = {
         let state = app.state::<Pins>();
-        let mut guard = state.0.lock().unwrap();
+        let mut guard = state.0.lock().expect("锁中毒");
         let record = guard
             .iter_mut()
             .find(|record| record.id == id)
@@ -334,9 +321,6 @@ pub fn update(app: &AppHandle, id: &str, patch: PinPatch) -> Result<PinRecord, S
         if let Some(opacity) = patch.opacity {
             record.opacity = opacity.clamp(20, 100);
         }
-        if let Some(click_through) = patch.click_through {
-            record.click_through = click_through;
-        }
 
         guard.clone()
     };
@@ -347,17 +331,13 @@ pub fn update(app: &AppHandle, id: &str, patch: PinPatch) -> Result<PinRecord, S
         .cloned()
         .ok_or("找不到这张钉图")?;
 
-    // 几何与穿透各设一遍：位置与尺寸分开调用，改一个的时候另一个保持原值
+    // 位置与尺寸分开调用：改一个的时候另一个保持原值
     window
         .set_position(PhysicalPosition::new(record.x, record.y))
         .map_err(|err| format!("挪钉图窗口失败：{err}"))?;
     window
         .set_size(PhysicalSize::new(record.width, record.height))
         .map_err(|err| format!("改钉图窗口尺寸失败：{err}"))?;
-    window
-        .set_ignore_cursor_events(record.click_through)
-        .map_err(|err| format!("切换钉图穿透失败：{err}"))?;
-
     persist(&next);
     Ok(record)
 }
@@ -369,35 +349,6 @@ pub fn close(app: &AppHandle, id: &str) {
     if let Some(window) = app.get_webview_window(&pin_label(id)) {
         let _ = window.close();
     }
-}
-
-/// 把所有钉图的鼠标穿透翻一面。
-///
-/// 这是穿透**唯一**的收回入口：穿透之后点不到钉图，界面上的菜单也就够不着了
-/// （见文件头「穿透怎么收回来」）。只要还有一张没穿透，这一次就把全部变穿透。
-pub fn toggle_click_through(app: &AppHandle) {
-    let all = {
-        let state = app.state::<Pins>();
-        let mut guard = state.0.lock().unwrap();
-        if guard.is_empty() {
-            return;
-        }
-        let target = !guard.iter().all(|record| record.click_through);
-        for record in guard.iter_mut() {
-            record.click_through = target;
-        }
-        guard.clone()
-    };
-
-    for record in &all {
-        if let Some(window) = app.get_webview_window(&pin_label(&record.id)) {
-            let _ = window.set_ignore_cursor_events(record.click_through);
-            // 渲染层也要知道（右键菜单里那一项的勾）
-            let _ = window.emit("pin:state", record);
-        }
-    }
-
-    persist(&all);
 }
 
 // ---------- 命令 ----------
@@ -474,7 +425,7 @@ pub fn pin_close_all(app: AppHandle) {
         .state::<Pins>()
         .0
         .lock()
-        .unwrap()
+        .expect("锁中毒")
         .iter()
         .map(|record| record.id.clone())
         .collect();
@@ -506,24 +457,21 @@ mod tests {
             width: 300,
             height: 200,
             opacity: 80,
-            click_through: true,
             ratio: 1.5,
         };
         let text = serde_json::to_string(&record).unwrap();
         // 出到渲染层与落盘都是 camelCase
-        assert!(text.contains("\"clickThrough\":true"));
+        assert!(text.contains("\"opacity\":80"));
 
         let back: PinRecord = serde_json::from_str(&text).unwrap();
         assert_eq!(back.id, "a");
         assert_eq!(back.x, -100);
-        assert!(back.click_through);
     }
 
     #[test]
     fn 补丁只带改动项() {
         let patch: PinPatch = serde_json::from_str(r#"{"opacity":70}"#).unwrap();
         assert_eq!(patch.opacity, Some(70));
-        assert_eq!(patch.click_through, None);
         assert_eq!(patch.x, None);
 
         let empty: PinPatch = serde_json::from_str("{}").unwrap();

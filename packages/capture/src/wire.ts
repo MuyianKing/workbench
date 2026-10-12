@@ -59,8 +59,6 @@ export interface PinRecord {
   height: number
   /** 不透明度（百分比） */
   opacity: number
-  /** 鼠标穿透：开着时点它等于点它底下那个窗口 */
-  clickThrough: boolean
   /** 图片的原始长宽比（宽 / 高） */
   ratio: number
 }
@@ -72,5 +70,4 @@ export interface PinPatch {
   width?: number
   height?: number
   opacity?: number
-  clickThrough?: boolean
 }

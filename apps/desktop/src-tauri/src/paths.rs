@@ -11,13 +11,13 @@ use std::path::{Path, PathBuf};
 pub const DATA_FILE: &str = "workbench-data.json";
 /// Token 用量快照（改名前的 `token-data.json`，启动时由 `migrate_legacy_files` 搬过来）
 pub const TOKEN_USAGE_FILE: &str = "token-usage.json";
-/// 主题文件：外观设置 + 首页布局（见 shared/theme.ts）
+/// 主题文件：外观设置 + 首页布局（见 packages/appearance/src/theme.ts）
 pub const THEME_FILE: &str = "theme.json";
-/// 工作日志（见 shared/work-log.ts）。**只在本机**：不进同步仓库、也不进任何云端
+/// 工作日志（见 packages/work-log/src/work-log.ts）。**只在本机**：不进同步仓库、也不进任何云端
 pub const WORK_LOG_FILE: &str = "work-log.json";
-/// AI 热点缓存（见 shared/ai-news.ts）。与工作日志同一待遇：只在本机、不进同步仓库
+/// AI 热点缓存（见 packages/ai/src/ai-news.ts）。与工作日志同一待遇：只在本机、不进同步仓库
 pub const AI_NEWS_FILE: &str = "ai-news.json";
-/// 密码保险库（见 shared/vault.ts）。**文件本身只有密文**：明文从不落盘，
+/// 密码保险库（见 packages/vault/src/vault.ts）。**文件本身只有密文**：明文从不落盘，
 /// 本机这把密钥在 Windows 凭据管理器里（见 vault.rs），仓库里那份在 `vault/vault.json`
 pub const VAULT_FILE: &str = "vault.json";
 /// 邮件后台监视的进度（见 mail_watch.rs）：每个账户的 UIDVALIDITY 与上次见过的
@@ -26,10 +26,12 @@ pub const MAIL_WATCH_FILE: &str = "mail-watch.json";
 /// 钉图的记账文件（见 pin.rs）：哪些图还钉在屏幕上、各自在哪儿、多大、多透明。
 /// 与工作日志同一待遇：只对本机成立（位置是这块屏的坐标），不进同步仓库
 pub const PINS_FILE: &str = "pins.json";
+/// 崩溃日志（见 panic_log.rs）：release 档 panic 直接中止进程，那一下的证据只留在这里
+const PANIC_LOG_FILE: &str = "panic.log";
 /// 钉图的图片目录名：一张钉图一个 PNG，钉图关掉时连文件一起删
 const PINS_DIR: &str = "pins";
 /// 克隆里放**保险库**的子目录名。与用量 / 配置那两个目录最大的不同：那份文件是所有机器**共写**的
-/// （用户的要求：所有设备公用一个文件），所以合并规则必须自己定死，见 shared/vault.ts
+/// （用户的要求：所有设备公用一个文件），所以合并规则必须自己定死，见 packages/vault/src/vault.ts
 pub(crate) const VAULT_DIR: &str = "vault";
 /// 数据目录名：数据文件都收在它下面（见文件头的约定）
 const DATA_SUBDIR: &str = "data";
@@ -45,7 +47,7 @@ const TOKEN_SYNC_DIR: &str = "token-sync";
 const IMAGE_SYNC_DIR: &str = "image-sync";
 /// 克隆里放**用量分片**的子目录名：一台机器一个文件
 pub(crate) const TOKEN_USAGE_DIR: &str = "token-usage";
-/// 克隆里放**配置**的子目录名：一台机器一份 theme.json 的副本（见 shared/sync-config.ts）
+/// 克隆里放**配置**的子目录名：一台机器一份 theme.json 的副本（见 packages/usage/src/sync-config.ts）
 pub(crate) const CONFIG_DIR: &str = "config";
 
 /// 老版本直接写在用户数据根目录下的那批文件：搬家清单（见 `relocate_root_files_in`）
@@ -113,6 +115,12 @@ pub fn pins_dir() -> PathBuf {
 /// 钉图的记账文件
 pub fn pins_file() -> PathBuf {
     data_dir().join(PINS_FILE)
+}
+
+/// 崩溃日志（见 panic_log.rs）。与数据文件同一目录：出了「窗口凭空没了」这种怪事时，
+/// 用户只需要找这一处。
+pub fn panic_log_file() -> PathBuf {
+    data_dir().join(PANIC_LOG_FILE)
 }
 
 /// 一次性的本地搬家，启动时跑一次（commands.rs 的 `load_all`，必须早于任何 store 载入）：

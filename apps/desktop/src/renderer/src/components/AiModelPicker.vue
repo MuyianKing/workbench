@@ -11,7 +11,7 @@ import { AI_MODEL_MAX, AI_THINKING_LEVELS, aiModelFromId, aiThinkingLabel, sanit
  * 什么），`models` 是清单草稿（v-model）。这里只做「挑」这件事 —— 拉取、保存都在
  * AiProviderDialog 那一层。
  *
- * 上下文 / 最大输出 / 思考的默认值在 shared/ai.ts 的 aiModelFromId 里算（端点没报就按
+ * 上下文 / 最大输出 / 思考的默认值在 packages/ai/src/ai.ts 的 aiModelFromId 里算（端点没报就按
  * 模型名认一遍，认不出留空），这里只负责让用户改。快捷档位只是**填数的捷径**：
  * 点一下把数字填进那一格，真正的值以输入框里的为准。
  */

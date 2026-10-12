@@ -1107,7 +1107,9 @@ describe('用量与外观是两个独立的出口', () => {
     // 列表读的就是「当前这个仓库」的克隆：先同步一次把克隆建起来（见上面的 cloneRepo 说明）
     await token.getTokenUsage({ repo: REPO })
     await flushBackgroundSync()
-    const devices = await token.listSyncDevices(REPO)
+    const listed = await token.listSyncDevices(REPO)
+    expect(listed.ok).toBe(true)
+    const devices = listed.data ?? []
 
     // 时间取两份里较新的那个：办公室的配置（300）比它的分片（100）新，所以它排到了最前面
     expect(devices.map(item => item.id)).toEqual(['dev-older', 'dev-newer', 'dev-local'])
@@ -1124,7 +1126,7 @@ describe('用量与外观是两个独立的出口', () => {
 
   it('没填仓库地址时一台设备都不列', async () => {
     const token = await freshToken()
-    expect(await token.listSyncDevices('')).toEqual([])
-    expect(await token.listSyncDevices('   ')).toEqual([])
+    expect(await token.listSyncDevices('')).toEqual({ ok: true, data: [] })
+    expect(await token.listSyncDevices('   ')).toEqual({ ok: true, data: [] })
   })
 })

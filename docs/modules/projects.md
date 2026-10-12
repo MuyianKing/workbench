@@ -6,7 +6,7 @@
 
 ## 约束
 
-关键落点：`shared/project-color.ts`（标识色的分配与收敛，唯一真源）、`stores/projects.ts`
+关键落点：`packages/core/src/project-color.ts`（标识色的分配与收敛，唯一真源）、`stores/projects.ts`
 （项目、分组、筛选排序、启动编排）、`stores/environment.ts`（包管理器 / nvm / nrm / 数据目录）、
 Rust 侧 `nvm.rs` / `nrm.rs` / `proc.rs`（残留清理的进程判据）、`system.rs`（`open_in_vscode`）。
 

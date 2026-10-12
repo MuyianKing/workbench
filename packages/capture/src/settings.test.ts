@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { CAPTURE_HOTKEY_DEFAULT, CAPTURE_PIN_OPACITY_DEFAULT, PIN_THROUGH_HOTKEY_DEFAULT, sanitizeCaptureHotkey, sanitizeCaptureMagnifier, sanitizeCapturePinOpacity, sanitizeCaptureSaveDir } from './settings'
+import { CAPTURE_HOTKEY_DEFAULT, CAPTURE_PIN_OPACITY_DEFAULT, sanitizeCaptureHotkey, sanitizeCaptureMagnifier, sanitizeCapturePinOpacity, sanitizeCaptureSaveDir } from './settings'
 
 describe('sanitizeCaptureHotkey', () => {
   it('去空白', () => {
@@ -9,7 +9,7 @@ describe('sanitizeCaptureHotkey', () => {
   it('空 / 非字符串 / 全空白回默认', () => {
     expect(sanitizeCaptureHotkey('', CAPTURE_HOTKEY_DEFAULT)).toBe(CAPTURE_HOTKEY_DEFAULT)
     expect(sanitizeCaptureHotkey('   ', CAPTURE_HOTKEY_DEFAULT)).toBe(CAPTURE_HOTKEY_DEFAULT)
-    expect(sanitizeCaptureHotkey(undefined, PIN_THROUGH_HOTKEY_DEFAULT)).toBe(PIN_THROUGH_HOTKEY_DEFAULT)
+    expect(sanitizeCaptureHotkey(undefined, 'F2')).toBe('F2')
     expect(sanitizeCaptureHotkey(42, CAPTURE_HOTKEY_DEFAULT)).toBe(CAPTURE_HOTKEY_DEFAULT)
   })
 })

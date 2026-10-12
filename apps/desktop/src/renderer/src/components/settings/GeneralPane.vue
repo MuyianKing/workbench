@@ -193,7 +193,7 @@ function saveHotkey(accelerator: string): void {
     <!--
       笔记这一块管两件事：图片往哪儿推、技能库在仓库里的哪一层。
       笔记**本身**那个 git 仓库不在这里，也没有这个地方：同步到哪儿由那个文件夹自己连着的
-      远端决定（见 shared/note.ts 的 NoteRepoState），没仓库的文件夹就是本机的笔记 ——
+      远端决定（见 packages/notes/src/note.ts 的 NoteRepoState），没仓库的文件夹就是本机的笔记 ——
       应用既不替用户 init、也不替他接远端。笔记文件夹本身在笔记页左栏底部挑，这里不重复显示。
     -->
     <div class="block">
@@ -204,7 +204,7 @@ function saveHotkey(accelerator: string): void {
       <!--
         笔记里的图片：粘贴的图片推到用户自己的一个 git 仓库里，正文里只留一个外链。
         地址由仓库地址推导（GitHub / Gitee / GitLab 三家自动认，其余推不出来），
-        而落在仓库的哪一层是定死的（`images/<设备>/<笔记本>`，见 shared/note-image.ts），
+        而落在仓库的哪一层是定死的（`images/<设备>/<笔记本>`，见 packages/notes/src/note-image.ts），
         所以这一项要填的只有一样：往哪个仓库推。
       -->
       <div class="row row--stack">
@@ -229,7 +229,7 @@ function saveHotkey(accelerator: string): void {
         技能（skill）没有设置项：技能库是**它自己的一个目录**（技能页那颗「选择技能文件夹」挑的），
         与上面那个笔记文件夹互不相干 —— 可以正好是同一处，也可以各有各的仓库。
         所以这里既没有「技能目录」也没有「它在仓库哪一层」：那一层由磁盘决定
-        （从技能库目录往上找最近的 `.git`，见 shared/skills.ts 的 SkillLibraryState）。
+        （从技能库目录往上找最近的 `.git`，见 packages/skills/src/skills.ts 的 SkillLibraryState）。
       -->
     </div>
 

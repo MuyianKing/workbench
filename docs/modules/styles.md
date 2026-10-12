@@ -6,8 +6,8 @@
 
 ## 约束
 
-关键落点：`shared/design-styles.ts`（token 模型、键名中文标签规则、行高归一化、色系判定）、
-`shared/design-demo.ts`（示例页面文案）、`shared/design-export.ts`（DESIGN.md 与提示词的生成，带单测）、
+关键落点：`packages/appearance/src/design-styles.ts`（token 模型、键名中文标签规则、行高归一化、色系判定）、
+`packages/appearance/src/design-demo.ts`（示例页面文案）、`packages/appearance/src/design-export.ts`（DESIGN.md 与提示词的生成，带单测）、
 `stores/styles.ts`、`apps/desktop/src-tauri/src/design.rs`（落盘）、`apps/desktop/src/renderer/public/design-styles.json`（数据）。
 
 - **数据是随包静态资源，不是通道也不是用户数据**：`public/design-styles.json`（约 580KB，入库），
@@ -96,10 +96,10 @@
 ```
   src/design.rs          设计规范落盘：把渲染层按 token 生成好的 DESIGN.md 写到目标项目的
                          根目录（先写临时文件再改名，同名覆盖，回执里带「原本有没有这个文件」）。
-                         生成什么内容属于业务语义，在 shared/design-export.ts
+                         生成什么内容属于业务语义，在 packages/appearance/src/design-export.ts
 apps/desktop/src/renderer/public/design-styles.json  随包的 74 套设计语言数据（约 580KB，入库）：
                          中文描述 + 各套的 colors / typography / rounded / spacing / components。
-                         键名的中文标签由 shared/design-styles.ts 的规则现算，数据里只带
+                         键名的中文标签由 packages/appearance/src/design-styles.ts 的规则现算，数据里只带
                          那 10 套散文格式品牌的手写标签（`labels`）
 ```
 

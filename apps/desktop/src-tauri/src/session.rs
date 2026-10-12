@@ -55,7 +55,7 @@ pub struct Sessions(pub Mutex<HashMap<String, Arc<Session>>>);
 
 /// 取一个会话（已克隆出 `Arc`，表锁随即释放）。取不到说明它已经被摘掉了。
 fn session_of(sessions: &Sessions, id: &str) -> Option<Arc<Session>> {
-    sessions.0.lock().unwrap().get(id).cloned()
+    sessions.0.lock().expect("锁中毒").get(id).cloned()
 }
 
 /// 等子进程退出并取退出码。
@@ -68,7 +68,7 @@ fn wait_for_exit(session: &Session) -> Option<i32> {
     session
         .child
         .lock()
-        .unwrap()
+        .expect("锁中毒")
         .wait()
         .ok()
         .and_then(|status| status.code())
@@ -198,7 +198,7 @@ fn spawn_cmd(
             stdin: Mutex::new(stdin),
             pid,
         });
-        state.0.lock().unwrap().insert(session_id.clone(), entry);
+        state.0.lock().expect("锁中毒").insert(session_id.clone(), entry);
     }
 
     if let Some(pipe) = stdout {
@@ -224,7 +224,7 @@ fn spawn_cmd(
         // PID 被系统回收复用时，杀的是别人的进程树。
         // 按 Arc 身份比对而不是直接 remove(&id)：同名的下一次会话可能已经入表了。
         {
-            let mut map = state.0.lock().unwrap();
+            let mut map = state.0.lock().expect("锁中毒");
             if map.get(&id).is_some_and(|entry| Arc::ptr_eq(entry, &session)) {
                 map.remove(&id);
             }
@@ -328,7 +328,7 @@ impl BatchSink {
 
 /// 取一批发出去（`force` 时连不足一批的剩余也发）。取与发都在同一把锁里完成。
 fn flush_locked(pending: &Mutex<LineBatcher>, sink: &BatchSink, force: bool) {
-    let mut batcher = pending.lock().unwrap();
+    let mut batcher = pending.lock().expect("锁中毒");
     let batch = if force {
         batcher.flush()
     } else {
@@ -377,7 +377,7 @@ fn pipe_lines(app: AppHandle, session_id: String, stream: &'static str, pipe: im
                 Err(_) => break,
             };
 
-            let mut batcher = pending.lock().unwrap();
+            let mut batcher = pending.lock().expect("锁中毒");
             if let Some(batch) = batcher.push(text) {
                 sink.send(batch);
             }
@@ -419,7 +419,7 @@ pub fn stop(app: &AppHandle, session_id: &str) -> Result<(), String> {
 /// 往一条会话的标准输入写一行（自己补 `\n`）。
 ///
 /// AI 那条 RPC 通道用它：提示词与「扩展确认」的答复都是一行 JSON（见 ai.rs 的 prompt_frame、
-/// shared/ai.ts 的 confirmFrame）。**只有 `spawn_args` 起的会话能写** ——
+/// packages/ai/src/ai.ts 的 confirmFrame）。**只有 `spawn_args` 起的会话能写** ——
 /// 终端与安装那类会话的 stdin 是 null，这里明说一句，不当成写成功了。
 pub fn write_stdin(app: &AppHandle, session_id: &str, line: &str) -> Result<(), String> {
     let session = {
@@ -430,7 +430,7 @@ pub fn write_stdin(app: &AppHandle, session_id: &str, line: &str) -> Result<(), 
         return Err("这一轮已经结束了".to_string());
     };
 
-    let mut guard = session.stdin.lock().unwrap();
+    let mut guard = session.stdin.lock().expect("锁中毒");
     let Some(stdin) = guard.as_mut() else {
         return Err("这条会话不接受输入".to_string());
     };
@@ -445,7 +445,7 @@ pub fn write_stdin(app: &AppHandle, session_id: &str, line: &str) -> Result<(), 
 pub fn stop_all(app: &AppHandle) {
     let pids: Vec<u32> = {
         let state = app.state::<Sessions>();
-        let map = state.0.lock().unwrap();
+        let map = state.0.lock().expect("锁中毒");
         map.values().map(|session| session.pid).collect()
     };
 
@@ -462,14 +462,14 @@ pub fn stop_all(app: &AppHandle) {
 /// 当前活跃的会话 ID
 pub fn active_ids(app: &AppHandle) -> Vec<String> {
     let state = app.state::<Sessions>();
-    let map = state.0.lock().unwrap();
+    let map = state.0.lock().expect("锁中毒");
     map.keys().cloned().collect()
 }
 
 /// 会话是否还在（等待线程结束后才会从表里移除，所以这里只用来判断「起没起过」）
 pub fn forget(app: &AppHandle, session_id: &str) {
     let state = app.state::<Sessions>();
-    state.0.lock().unwrap().remove(session_id);
+    state.0.lock().expect("锁中毒").remove(session_id);
 }
 
 
@@ -562,7 +562,7 @@ mod tests {
         let pid = child.id();
 
         let sessions = Sessions::default();
-        sessions.0.lock().unwrap().insert(
+        sessions.0.lock().expect("锁中毒").insert(
             "probe".to_string(),
             Arc::new(Session {
                 child: Mutex::new(child),

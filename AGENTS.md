@@ -34,6 +34,8 @@
   推上去的只有密文）都**不算**新出口；登录内嵌的 client_id/secret 是这条边界唯一一次放宽。
 - 引新前端依赖先看它会不会在**运行时**去取外面的资源（Vditor 就是这类：资源按 `options.cdn` 取，默认指 unpkg）—— 这类要么把资源
   随包带一份、要么别引。
+- webview 有**全局 CSP**（`tauri.conf.json` 的 `csp` / `devCsp`，细则见 [ipc-and-state](docs/modules/ipc-and-state.md)）：引新依赖 / 资源
+  之前先确认它不被拦（`connect-src` / `worker-src` / `img-src` 这几项最容易踩）；**改动只能在生产态真应用里验**（dev 与浏览器预览都不生效）。
 - Rust 依赖的判据是**不新增编译单元**，不是「不新增 crate 名」：先 `cargo tree -e normal -i <crate>` 确认它已经在图里；不要引
   `reqwest`、`git2`、`sysinfo` 这类会拉进整套栈的 native / 运行时依赖。唯一例外是邮箱的 TLS（`schannel`，理由见 `mail.rs`）。
 - 唯一需要用户预装的外部程序是 **git**：`sync.rs` 的几处同步与 `skills.rs` 的版本提交 / 同步，外加两条只读探测
@@ -146,7 +148,10 @@ asset 协议、读取权限在 Rust 侧按单个文件授予）、**通道一律
   （`@antfu/eslint-config`，范围是渲染层 + 域包，`src-tauri/`、`resources/`、`apps/desktop/scripts/` 不在圈里）；
   **每次改完前端代码都要跑一遍**，只允许这一套，不要再引 Prettier 之类的第二套格式化工具。
 - 改了 Rust 要跑 `cargo test` **与 `cargo build`**：`cargo test` 编译的是开着 `cfg(test)` 的那个 bin，被它关起来的东西当生产代码用时
-  会 test 一片绿、build 才报错。
+  会 test 一片绿、build 才报错。**生产代码里不许裸 `unwrap()`**（`clippy::unwrap_used` 已在 `src/main.rs` 顶部设成 deny，测试豁免见
+  `src-tauri/clippy.toml`）；要显式终止就用 `expect("原因")` —— 它带得走一句话，也会落进 `data/panic.log`。
+- **push / PR 会过 `.github/workflows/ci.yml`**（`pnpm run lint` + `typecheck` + `pnpm test` + `cargo clippy -- -D warnings` + `cargo test`）：
+  它是兜底、不是替代，上面那几条本地该跑的照跑。
 - 动过 `.vue` 的模板（加 / 删 / 挪标签）要顺手跑一次 `pnpm run build:renderer`：`typecheck` 查不出模板标签不配平（vue-tsc 全绿而
   vite 报 `Invalid end tag`、页面白屏），只有真的编译一遍模板才发现得了。**模板里用到的组件必须在脚本里 import**（`el-*` 那几个是全局注册的除外）：
   少了它上面两条都不报错，那个标签被渲染成空 —— 现象是「按钮在、点下去什么都没发生」，`pnpm run lint` 的 `vue/no-undef-components` 才拦得住。

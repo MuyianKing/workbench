@@ -15,9 +15,9 @@ import { defineStore } from 'pinia'
  * 交给内置的 Pi（走 ai.rs 那条通用驱动链路），盯完一轮自动重建索引、刷新状态 ——
  * 用户不写指令、不碰提示词。
  *
- * 状态判定的口径（source 配对 + mtime 比较）在 shared/kb.ts 的纯函数里，这边只编排：
+ * 状态判定的口径（source 配对 + mtime 比较）在 packages/kb/src/kb.ts 的纯函数里，这边只编排：
  * 扫描 → 拆三部分（条目 / 原始数据 / 索引）→ 配状态 → 界面取用。另有两件「库内一致性」
- * 的事也在这里收口：**巡检**（shared/kb-lint.ts 的 kbLint，只读报告，算着但界面不展示）与
+ * 的事也在这里收口：**巡检**（packages/kb/src/kb-lint.ts 的 kbLint，只读报告，算着但界面不展示）与
  * **站内链接**（条目正文里点一条 → followLink 解析成条目或原始数据，再走上面那两条开口）。
  *
  * **原始数据的来源**（来源名 → 本机一个文件夹）也归这里编：映射住在设置里、只对本机成立，
@@ -415,7 +415,7 @@ export const useKbStore = defineStore('kb', () => {
   }
 
   /**
-   * 条目正文里点了一个站内链接：把地址解析成仓库里的一条路径（口径在 shared/kb-lint.ts），
+   * 条目正文里点了一个站内链接：把地址解析成仓库里的一条路径（口径在 packages/kb/src/kb-lint.ts），
    * 再按它是什么开条目或原始数据 —— 链接指到原始资料上也照样跳（`../../data/raw/x.md`）。
    * 库里没有这一份就一句话说清，不静默什么都不做（点了没反应最让人犯嘀咕）。
    */
@@ -438,7 +438,7 @@ export const useKbStore = defineStore('kb', () => {
 
   /**
    * 查看一个原始数据：文本类（md / 认得出的文本后缀）就地读进来预览，其余只摆出
-   * 「用系统默认程序打开」的入口（看法的分类在 shared/kb.ts 的 kbRawViewKind）。
+   * 「用系统默认程序打开」的入口（看法的分类在 packages/kb/src/kb.ts 的 kbRawViewKind）。
    * 读失败不关查看区、把原因摆进去 —— 外部打开那条路还在。与条目查看互斥。
    */
   async function openRaw(rel: string): Promise<void> {
@@ -527,7 +527,7 @@ export const useKbStore = defineStore('kb', () => {
 
   // ---------- 清洗（应用编排：清单 → Pi → 重建索引 → 刷新） ----------
 
-  /** 清洗流程的阶段（形状见 shared/kb-clean.ts） */
+  /** 清洗流程的阶段（形状见 packages/kb/src/kb-clean.ts） */
   const cleanPhase = ref<KbCleanPhase>('idle')
   /** 清洗的实时日志：与 AI 助手页同一套事件翻译（parsePiEvent），一行一条 */
   const cleanLines = ref<AiLogLine[]>([])

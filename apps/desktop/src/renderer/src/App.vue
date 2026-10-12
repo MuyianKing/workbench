@@ -41,7 +41,7 @@ const weather = useWeatherStore()
 const mail = useMailStore()
 
 /**
- * 页面清单：id 在 shared/views.ts 里登记，这里给出对应的组件。
+ * 页面清单：id 在 packages/appearance/src/views.ts 里登记，这里给出对应的组件。
  *
  * 换页不用路由 —— KeepAlive 包住 <component :is>，切走的页面留在内存里，
  * 各页的滚动位置（首页三栏、项目页的网格）因此不会在来回切时丢掉。

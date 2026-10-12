@@ -6,7 +6,7 @@ import { fail, ok } from '@workbench/core'
  *
  * 与 Token 用量那套的区别在于**没有同步**：这份数据只在本机，读写路径就是
  * 「读一次文件 → 内存里增删改 → 整份写回」，没有分片、没有合并、没有跨设备语义
- * （见 shared/work-log.ts 的文件头）。
+ * （见 packages/work-log/src/work-log.ts 的文件头）。
  *
  * 文件是懒加载的：首屏不读它，第一次进「工作」页时才把整份取回来，
  * 之后一直在内存里维护，每次改动整份落盘（防抖在 Rust 侧）。

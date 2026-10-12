@@ -10,7 +10,7 @@
 //! 设置界面与架构文档里都照实写了。
 //!
 //! **职责分工与 AI 热点一致**：这一层只取原始文本（JSON 不解析、天气码不认），
-//! 解析、WMO 码表与显示口径全在 TS 侧（`src/shared/weather.ts`，有单测、改起来走热更新）。
+//! 解析、WMO 码表与显示口径全在 TS 侧（`packages/weather/src/weather.ts`，有单测、改起来走热更新）。
 
 use serde::Serialize;
 

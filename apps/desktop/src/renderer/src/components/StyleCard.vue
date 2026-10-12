@@ -10,7 +10,7 @@ import { buildDesignDemo, buttonCss, CARD_TYPE, designStyleFamily, safeCssValue,
  * 才知道差别的文字简介；完整的示例页面在详情弹窗的「预览」档里。
  *
  * 卡面只放首屏那一小段（导航 / 眉题 / 标题 / 副文案 / 按钮），文案与详情里那整页是同一份
- * （见 shared/design-demo.ts 的 `buildDesignDemo`），底部一行留作检索用的元信息 ——
+ * （见 packages/appearance/src/design-demo.ts 的 `buildDesignDemo`），底部一行留作检索用的元信息 ——
  * 那行的文字色必须取这套设计的次文字色，深色画布上才读得出来。
  *
  * 整卡可点、可键盘操作，与 SkillCard 同一条交互（role=button + Enter/Space）。

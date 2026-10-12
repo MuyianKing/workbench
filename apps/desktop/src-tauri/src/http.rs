@@ -146,6 +146,7 @@ fn split_url(url: &str) -> Result<(bool, String, u16, String), String> {
 }
 
 /// 真正发请求的那一段：会话 → 连接 → 请求 → 读回状态码、ETag / Location 与响应体。
+#[allow(clippy::too_many_arguments)]
 fn send(
     method: &str,
     host: &str,

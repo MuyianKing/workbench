@@ -10,6 +10,7 @@
 //!  - 独占全屏的 D3D 游戏抓出来是**黑的**（DWM 不合成它，屏幕 DC 上就是没有）；
 //!  - HDR 屏按 SDR 色调映射抓，颜色会比肉眼看到的淡；
 //!  - UAC 安全桌面、DRM 保护内容抓不到（Windows 就不给，Snipaste 也一样，除非进程提权）。
+//!
 //! 要越过这三条得改走 Windows.Graphics.Capture（D3D11 帧池那套），是另一摊活。
 
 use std::ffi::c_void;
@@ -80,16 +81,18 @@ unsafe fn capture_from(
         SRCCOPY | CAPTUREBLT,
     ) != 0;
 
-    let mut info = BITMAPINFO::default();
-    info.bmiHeader = BITMAPINFOHEADER {
-        biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
-        biWidth: width as i32,
-        // 负高度 = 自上而下。DIB 默认是自底向上，用负高度省掉之后翻行的那一步
-        biHeight: -(height as i32),
-        biPlanes: 1,
-        biBitCount: 32,
-        biCompression: BI_RGB,
-        biSizeImage: width * height * 4,
+    let mut info = BITMAPINFO {
+        bmiHeader: BITMAPINFOHEADER {
+            biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+            biWidth: width as i32,
+            // 负高度 = 自上而下。DIB 默认是自底向上，用负高度省掉之后翻行的那一步
+            biHeight: -(height as i32),
+            biPlanes: 1,
+            biBitCount: 32,
+            biCompression: BI_RGB,
+            biSizeImage: width * height * 4,
+            ..Default::default()
+        },
         ..Default::default()
     };
 

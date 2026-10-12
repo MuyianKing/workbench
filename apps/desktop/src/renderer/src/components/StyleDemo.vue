@@ -12,7 +12,7 @@ import { buildDesignDemo, buttonCss, safeCssValue, typeCss } from '@workbench/ap
  * 三条落在具体写法上的约定：
  *
  * 1. **素材全部来自 `buildDesignDemo`**，这里只负责画：挑角色、配文案、收敛尺寸的逻辑在
- *    shared/design-demo.ts 里（带单测）。
+ *    packages/appearance/src/design-demo.ts 里（带单测）。
  * 2. **画布色铺满整块**：深色设计在这里就是深色页面、浅色设计就是浅色页面，页面自带明暗，
  *    所以它不受应用主题影响（弹窗外壳照旧跟着应用走）。
  * 3. **字号按档位收敛**：品牌真实的 display 字号（48–96px）在这块宽度里太大，上限压到 48px；

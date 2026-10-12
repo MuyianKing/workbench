@@ -8,7 +8,7 @@ import { defineStore } from 'pinia'
 /**
  * 设置与外观：明暗、主题色、工作区背景、卡片浓度，以及首页的分栏布局。
  *
- * 这些都在 `theme.json` + 数据文件的 settings 里（见 shared/appearance.ts 的白名单），
+ * 这些都在 `theme.json` + 数据文件的 settings 里（见 packages/appearance/src/appearance.ts 的白名单），
  * 适配层已经把两份合成一份完整的 `AppSettings`，所以这一层只认一个 `settings`。
  * 它是**界面长什么样**的唯一来源：主题落在 `<html>` 上、布局落在 `theme.json` 里。
  *
@@ -188,7 +188,7 @@ export const useSettingsStore = defineStore('settings', () => {
    * 关掉 / 打开左侧导航栏上的某一页。
    *
    * 走 updateSettings：这一项在外观白名单里，实际落在 theme.json（与布局同一个文件）。
-   * 全关掉的补丁会被收敛拦下（至少留一页，见 shared/views.ts 的 sanitizeHiddenViews），
+   * 全关掉的补丁会被收敛拦下（至少留一页，见 packages/appearance/src/views.ts 的 sanitizeHiddenViews），
    * 回推的设置就是收敛后的那一份，界面按它重画即可，这里不必自己兜 —— 所以也不做本地乐观更新。
    */
   async function setViewVisible(id: ViewId, visible: boolean): Promise<boolean> {
@@ -203,7 +203,7 @@ export const useSettingsStore = defineStore('settings', () => {
    * 左侧导航栏的显示顺序（设置里拖动排序收手时落盘）。
    *
    * 与 setViewVisible 同一条路：这一项也在外观白名单里，实际落在 theme.json。
-   * 排列的完整性由收敛兜底（见 shared/views.ts 的 sanitizeViewOrder），这里只管把用户
+   * 排列的完整性由收敛兜底（见 packages/appearance/src/views.ts 的 sanitizeViewOrder），这里只管把用户
    * 拖出来的那份送出去。
    */
   async function setViewOrder(order: ViewId[]): Promise<boolean> {
@@ -440,7 +440,7 @@ export const useSettingsStore = defineStore('settings', () => {
    * 把一块卡片挪到落点上（拖放收手时走它）：本地先跟手，随即落盘。
    *
    * 行清单也一起换 —— 「另起一行」会多出一行、卡片被搬空的那一行会跟着没了
-   * （见 shared/theme.ts 的 moveCard），所以这两份必须同一次写下去。
+   * （见 packages/appearance/src/theme.ts 的 moveCard），所以这两份必须同一次写下去。
    */
   async function moveCard(id: HomeCardId, target: RowTarget): Promise<void> {
     const moved = placeCard(themeConfig.value.cards, themeConfig.value.columns, id, target)
@@ -469,7 +469,7 @@ export const useSettingsStore = defineStore('settings', () => {
   /**
    * 关掉 / 打开首页的某一块卡片。
    *
-   * 关掉只是不画它：它那一行与行内的位置都留着，再打开时回到原来那一格（见 shared/theme.ts）。
+   * 关掉只是不画它：它那一行与行内的位置都留着，再打开时回到原来那一格（见 packages/appearance/src/theme.ts）。
    * 与拖动落盘走同一条路（commitCards）：整份送出去，免得别的卡片停在旧快照。
    */
   async function setCardVisible(id: HomeCardId, visible: boolean): Promise<void> {
@@ -677,21 +677,22 @@ export const useSettingsStore = defineStore('settings', () => {
   const syncDevices = ref<SyncDeviceInfo[]>([])
 
   async function loadSyncDevices(): Promise<void> {
-    try {
-      syncDevices.value = await window.workbench.listSyncDevices()
+    const result = await window.workbench.listSyncDevices()
+    if (result.ok && result.data) {
+      syncDevices.value = result.data
+      return
     }
-    catch (error) {
-      // 取不到就当没有：没填仓库地址、还没同步过都是常态，界面上是一句空态提示
-      syncDevices.value = []
-      console.warn('[workbench] 读取同步设备失败', error)
-    }
+    // 取不到就当没有：没填仓库地址、还没同步过都是常态，界面上是一句空态提示
+    syncDevices.value = []
+    if (!result.ok)
+      console.warn('[workbench] 读取同步设备失败', result.error)
   }
 
   /**
    * 采用另一台机器的配置（设置界面里那一行的「应用」）。
    *
    * **只能由用户点**：配置是「以谁的为准」而不是能合并的数据，两台机器互相自动采用对方的
-   * 会来回覆盖、永远收敛不了（详见 shared/sync-config.ts 的文件头）。
+   * 会来回覆盖、永远收敛不了（详见 packages/usage/src/sync-config.ts 的文件头）。
    * 走的是既有的 updateThemeConfig 通道 —— 外观与布局在同一个文件里，所以一次写入就够，
    * 主题过渡、终端高度、卡片摆放这些联动不必另写一套。
    */

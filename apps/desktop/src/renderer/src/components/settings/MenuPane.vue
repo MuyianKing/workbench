@@ -8,7 +8,7 @@ import { moveToPosition } from '@workbench/core'
  * 设置 · 菜单：应用自己的入口留哪几个、按什么先后（与「这一页长什么样」无关，所以单独一屏）。
  *
  * 首页那一页自带九块卡片（卡片只属于首页），它的开关下面挂一层子项；
- * 除首页以外的页可以按住拖动换位（顺序落盘在 viewOrder，见 shared/views.ts）。
+ * 除首页以外的页可以按住拖动换位（顺序落盘在 viewOrder，见 packages/appearance/src/views.ts）。
  * 首页不参与这一组：它是默认页、也是布局编辑的落点，钉在导航栏最上面。
  */
 import { computed, ref } from 'vue'
@@ -20,7 +20,7 @@ const settings = useSettingsStore()
 /**
  * 「只剩它一个了」：这颗开关不给关。
  *
- * 收敛那一层也会拦（导航栏至少留一页、首页至少留一块，见 shared/views.ts 与 shared/theme.ts），
+ * 收敛那一层也会拦（导航栏至少留一页、首页至少留一块，见 packages/appearance/src/views.ts 与 packages/appearance/src/theme.ts），
  * 但在这里先拦一道，用户看到的是「点了没反应但按钮是灰的」，而不是「关掉之后它自己又开了」。
  */
 function isOnlyVisible(all: readonly string[], hidden: readonly string[], id: string): boolean {

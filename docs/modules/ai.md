@@ -92,7 +92,7 @@ AI 助手（ai）的文档：先读「约束」一节（不能破的规矩）；
 - **内置 cli.js 路径两处候选**（`resolve_cli`，与内置壁纸同一条路子）：打包走 `resource_dir()/pi/...`，
   开发态读仓库 `resources/pi/`，都没有才退回全局 `pi`。**`resource_dir` 给的 `\\?\` 前缀必须剥掉再用**。
 - **模型管理是「服务 + 模型」两层**：一个服务 = 名称 + Base URL + API 形态 + 密钥 + 模型清单，每条模型带
-  上下文窗口、最大输出、思考档位、能看图（形状见 [shared/ai.ts](../../packages/ai/src/ai.ts) 的
+  上下文窗口、最大输出、思考档位、能看图（形状见 [ai.ts](../../packages/ai/src/ai.ts) 的
   `AiProvider` / `sanitizeAiProviders`）。落点：名称 / 地址 / 形态 / 清单进设置（`aiProviders`）；
   密钥进凭据管理器（`Workbench/ai/<服务名>/token`，只写不回显）；端点由 `models_write` **一次写整份**成
   `models.json`（`%APPDATA%\Workbench\data\pi\`，不做增量 —— 增量会留残影）；**停用的服务与模型不进文件**
@@ -196,7 +196,7 @@ AI 助手（ai）的文档：先读「约束」一节（不能破的规矩）；
   `--skill <目录>`（目录不存在跳过、按整条路径去重、上限 200）。代价：**用户在应用之外装给 Pi 的技能
   在应用的会话里看不见**，想用就在弹窗里装一份。`--skill` 认「一个目录 + SKILL.md」、不往里递归；
   项目技能**不依赖「项目被信任」**（显式路径总是加载）。
-- **两条技能根，都是用户自己的目录**（口径唯一出处 `shared/pi-skills.ts`）：**全局** `%USERPROFILE%\.agents\skills`
+- **两条技能根，都是用户自己的目录**（口径唯一出处 `packages/ai/src/pi-skills.ts`）：**全局** `%USERPROFILE%\.agents\skills`
   （`pi_skills::global_root` 探出，跟 `ai_runtime` 回渲染层）、**项目** `<工作目录>\.agents\skills`。
   一个技能 = 根下带 `SKILL.md` 的子目录（裸 `.md` 不算）。全局那份与别的 agent 共用、项目那份就是技能页
   「安装到项目」写的 —— 两处共用有意为之，**别改成「应用自己另存一份」**，也**别写** `skills-lock.json`
@@ -331,7 +331,7 @@ AI 助手（ai）的文档：先读「约束」一节（不能破的规矩）；
                         从凭据管理器取密钥并**只经环境变量**注入、替 Pi 关掉它自己的遥测 /
                         版本检查 / RPC 启动时的模型目录刷新，再复用 session.rs 直启进程
                         （带一根可写的 stdin，不经 cmd /C）。模型的形状、提示词与
-                        事件 / RPC 帧的读法都在 shared/ai.ts；密钥的存 / 查 / 清也在这里
+                        事件 / RPC 帧的读法都在 packages/ai/src/ai.ts；密钥的存 / 查 / 清也在这里
   src/pi_skills.rs       Pi 的技能（AI 助手页那颗「技能」按钮）：两条技能根（全局
                         `%USERPROFILE%\.agents\skills` / 项目 `<工作目录>\.agents\skills`）的
                         列 / 装 / 卸。zip 解包手写（中央目录 + deflate，flate2 已在编译图里）——
@@ -344,7 +344,7 @@ AI 助手（ai）的文档：先读「约束」一节（不能破的规矩）；
 渲染层四处（原注解）：
 
 ```
-    pi-skill.ts（Pi 的技能：列 / 装（zip / 目录 / 地址）/ 卸四条通道的包装，见 shared/pi-skills.ts）
+    pi-skill.ts（Pi 的技能：列 / 装（zip / 目录 / 地址）/ 卸四条通道的包装，见 packages/ai/src/pi-skills.ts）
     ai.ts（AI 助手：在一段会话里说一句 / 起进程、按会话 id 前缀认领进程事件、认扩展的确认帧
     并把答复写回那条会话的 stdin、命令应答的配对（`aiRequest`）、停止与会话删除、密钥的存 / 查 / 清）
     ai.ts                AI 助手：环境探测（Pi / Node 在不在）、工作目录的分支探测、
@@ -354,5 +354,5 @@ AI 助手（ai）的文档：先读「约束」一节（不能破的规矩）；
                          跑完不收进程）、确认队列、装 Pi（复用包管理器安装那条会话通道）（stores/）
     ai-skills.ts         Pi 的技能：两条技能根的扫描结果（全局 / 项目）、每个技能的开关
                          （落设置里的 `aiSkillsOff`）、装 / 卸 / 粘地址的编排；起进程那一趟把
-                         开着的那些交给 stores/ai.ts（见 shared/pi-skills.ts）（stores/）
+                         开着的那些交给 stores/ai.ts（见 packages/ai/src/pi-skills.ts）（stores/）
 ```

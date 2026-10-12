@@ -8,11 +8,11 @@ import { ElMessage } from 'element-plus'
 /**
  * 工作页：按天分组的工作日志时间轴。
  *
- * 与其它页面一样，它是导航栏上的一项（见 shared/views.ts），换页由 App.vue 的
+ * 与其它页面一样，它是导航栏上的一项（见 packages/appearance/src/views.ts），换页由 App.vue 的
  * `<KeepAlive><component :is>` 负责 —— 所以这一页在离开时会留在内存里，滚动位置与
  * 展开状态都不会丢；数据也不会因为切走再回来而重读。
  *
- * 数据住在本机的 `work-log.json`（**不进同步仓库**，见 shared/work-log.ts）。
+ * 数据住在本机的 `work-log.json`（**不进同步仓库**，见 packages/work-log/src/work-log.ts）。
  * 时间的最小刻度是「天」：一天可以有多条记录，所以分页按**天**走 ——
  * 一天里的几条不该被翻页切成两半。范围、分组、分页都是 shared 里的纯函数，
  * 这一层只做取数与交互。
@@ -186,7 +186,7 @@ watch([range, sort, todoOnly], () => {
 })
 
 /**
- * 范围与维度是**行为记忆**（见 shared/types.ts 的那一段）：初值来自设置，改了写回去，
+ * 范围与维度是**行为记忆**（见 apps/desktop/src/renderer/src/types.ts 的那一段）：初值来自设置，改了写回去，
  * 下次打开还停在上一眼看的那一档，不必每次重新拉一遍。
  *
  * 「只看待办」不进去：它是一个临时的镜片（想找一件事时才戴），记住了反而会让

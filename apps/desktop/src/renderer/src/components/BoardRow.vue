@@ -20,7 +20,7 @@ const props = defineProps<{
   row: HomeRow
   /** 它在所在栏 `rows` 里的下标：落点判定按它算（见 HomeBoard 的 targetAt） */
   index: number
-  /** 这一行的高度下限（行里最高的那条卡片下限，见 shared/theme.ts 的 rowHeightMin） */
+  /** 这一行的高度下限（行里最高的那条卡片下限，见 packages/appearance/src/theme.ts 的 rowHeightMin） */
   min: number
   editing: boolean
 }>()

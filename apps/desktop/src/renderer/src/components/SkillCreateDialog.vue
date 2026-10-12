@@ -3,7 +3,7 @@ import { noteNameProblem } from '@workbench/notes'
 /**
  * 新建技能的弹窗：填名字（即目录名）与描述，提交后建目录、写 SKILL.md 骨架。
  *
- * 名字最终就是一个文件夹名，非法字符就地说明（与笔记起名同一条规矩，见 shared/note.ts）；
+ * 名字最终就是一个文件夹名，非法字符就地说明（与笔记起名同一条规矩，见 packages/notes/src/note.ts）；
  * 校验失败显示在字段下面，不弹消息。同名在 store 里拦（列表就在手上）。
  */
 import { computed, reactive, ref, watch } from 'vue'

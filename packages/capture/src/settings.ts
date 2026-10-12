@@ -12,8 +12,6 @@ import { clampPinOpacity } from './pin'
 export const CAPTURE_ENABLED_DEFAULT = true
 /** 起截图的全局快捷键。F1 是 Snipaste 的习惯，系统里没别人占 */
 export const CAPTURE_HOTKEY_DEFAULT = 'F1'
-/** 「切换钉图鼠标穿透」的全局快捷键：钉图一旦穿透就收不到鼠标事件了，只能靠全局键收回来 */
-export const PIN_THROUGH_HOTKEY_DEFAULT = 'Control+Shift+X'
 /** 自动保存的目录。空串 = 还没选过（保存时弹「另存为」） */
 export const CAPTURE_SAVE_DIR_DEFAULT = ''
 /** 新钉图的初始透明度（百分比） */

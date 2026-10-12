@@ -6,10 +6,10 @@ import { fail, ok } from '@workbench/core'
  *
  * 分工：Rust 只把 ZCode 的 sqlite 原始聚合行取回来（`token_zcode_rows`）、
  * 把本机分片推给 git（`token_sync_publish`）、把别人的分片读回来（`token_sync_shards`）；
- * 合并 / 取最大值 / 求和 / 修剪 / 落盘 / 同步节流都在这里 —— 与 `src/shared/token-usage.ts`
+ * 合并 / 取最大值 / 求和 / 修剪 / 落盘 / 同步节流都在这里 —— 与 `packages/usage/src/token-usage.ts`
  * 共用同一套函数，所以那段逻辑的既有单测全部继续有效。
  *
- * 两台机器怎么合到一起（细节见 shared/token-usage.ts 的文件头）：
+ * 两台机器怎么合到一起（细节见 packages/usage/src/token-usage.ts 的文件头）：
  *   本机实读 → 与本机分片 mergeDays（取 max，抗上游清理）→ 落盘本机分片
  *          → 推送到同步仓库 → 读回所有分片 → combineShards（跨设备求和）→ 交给界面
  *
@@ -577,7 +577,7 @@ export async function getTokenUsage(options: {
   }
 
   // 外观配置**不在这份分片里**：它是 theme.json 的整份内容，由 runSync 单独作为 config 推上去
-  // （见 shared/sync-config.ts）。两个目录各管一件事，用量这边的版本演进不必再带上外观
+  // （见 packages/usage/src/sync-config.ts）。两个目录各管一件事，用量这边的版本演进不必再带上外观
   const shard: TokenShard = {
     version: TOKEN_DATA_VERSION,
     device: id,
@@ -697,15 +697,21 @@ export async function syncThemeConfig(repo: string): Promise<Result<{ changed: b
  * 只读本地那份克隆（Rust 侧 `token_sync_shards` 不联网、不推东西），所以设置界面打开时
  * 随时可以问；内容就是上一次同步取回来的样子。地址没填、或还没同步过时是空数组。
  *
+ * **失败经 `Result` 回来，不 reject**：它跨到 Rust 读了仓库里那份克隆（git 不在、克隆坏了
+ * 都会 Err），而调用方（设置界面）要的是「能不能列出设备」这一句话，不是异常。
+ *
  * 列表里**包含本机自己**（标了 `self`）：它那份照常可「应用」，相当于取回本机上次推送
  * 时的外观；面板的「同步设备」仍按 device 排除掉本机：同一份分片已经在那儿露过一次脸了，
  * 列进去只会让人以为多了一台机器。
  */
-export async function listSyncDevices(repo: string): Promise<SyncDeviceInfo[]> {
+export function listSyncDevices(repo: string): Promise<Result<SyncDeviceInfo[]>> {
   const target = sanitizeSyncRepo(repo)
   if (!target)
-    return []
+    return Promise.resolve(ok([]))
+  return guard(listSyncDevicesAt(target), '读取同步设备失败')
+}
 
+async function listSyncDevicesAt(target: string): Promise<SyncDeviceInfo[]> {
   const { id } = await localDevice()
   const files = await invoke<SyncFiles>('token_sync_shards', { repo: target })
   const { shards, configs } = parseFiles(files ?? {})

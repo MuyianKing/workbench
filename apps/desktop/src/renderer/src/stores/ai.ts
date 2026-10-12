@@ -6,12 +6,12 @@ import { defineStore } from 'pinia'
 /**
  * AI 助手：一个通用的 agent 控制台 —— **在哪个目录里、跟哪一段对话**请内置的 Pi 干活。
  *
- * 左栏是一棵两层的树（见 shared/ai.ts 的 aiSessionGroups）：第一层是**项目**（一个工作目录），
+ * 左栏是一棵两层的树（见 packages/ai/src/ai.ts 的 aiSessionGroups）：第一层是**项目**（一个工作目录），
  * 第二层是这个目录下的**会话**，一个会话 = 一段连续对话。页面上同时只画一个会话，而
  * **每个会话各有一个 Pi 进程**（`ai:<会话 id>`，见 workbench/ai.ts）—— 所以几个会话可以
  * 同时在跑，切过去看就行。
  *
- * 一轮的流程：写指令 → 拼提示词（shared/ai.ts 的 taskPrompt）→ 交给 `aiRun`（Rust 写进
+ * 一轮的流程：写指令 → 拼提示词（packages/ai/src/ai.ts 的 taskPrompt）→ 交给 `aiRun`（Rust 写进
  * 那个进程的 stdin）→ 事件流一段段接进这个会话的对话里 → `agent_settled` 表示这一轮跑完。
  * **跑完不收进程**：上下文就在那个进程里，接着说不必重放历史；盘上那份会话文件（Pi 自己写）
  * 则让应用重启后还接得上同一段（打开会话时经 RPC 的 `get_messages` 读回来画）。
@@ -129,7 +129,7 @@ export const useAiStore = defineStore('ai', () => {
 
   /** 会话清单（落盘的那份：id / 目录 / 标题 / 时间） */
   const sessions = computed(() => settings.settings.aiSessions)
-  /** 左栏那棵树：按工作目录分组，最近说过话的排在上面（见 shared/ai.ts） */
+  /** 左栏那棵树：按工作目录分组，最近说过话的排在上面（见 packages/ai/src/ai.ts） */
   const groups = computed(() => aiSessionGroups(sessions.value))
   /**
    * 正在起一段新的（左栏那颗「+」点过了）：**右栏画起始那一屏**，与一段会话都还没有时
@@ -239,7 +239,7 @@ export const useAiStore = defineStore('ai', () => {
    */
   const watchedDir = computed(() => activeSession.value?.dir ?? newDir.value)
 
-  // ---------- 配置（都在设置里；形状是「服务 + 模型清单」，见 shared/ai.ts） ----------
+  // ---------- 配置（都在设置里；形状是「服务 + 模型清单」，见 packages/ai/src/ai.ts） ----------
   /** 配过的 AI 服务（模型管理弹窗里那一屏）：密钥不在里面，它在凭据管理器里 */
   const providers = computed(() => settings.settings.aiProviders)
   /** 页面上那个「模型」下拉里能挑的：启用的服务下启用的那些模型 */
@@ -294,7 +294,7 @@ export const useAiStore = defineStore('ai', () => {
   /** 思考档位：Pi 的 `--thinking` 那一档；挑的不被这个模型支持就退默认档（见 pickAiThinking） */
   const thinking = computed(() => activeConfig.value.thinking)
   /**
-   * 工具权限（composer 左边那一栏）：两档，见 shared/ai.ts 的 AI_PERMISSION_MODES。
+   * 工具权限（composer 左边那一栏）：两档，见 packages/ai/src/ai.ts 的 AI_PERMISSION_MODES。
    * **它决定 Pi 那边加不加载那份确认扩展** —— 自动编辑：每次要跑命令都先问一句；
    * 完全访问：不加载扩展，结构上就没有询问。改它要重开进程（见下面那个 watch）。
    */
@@ -361,7 +361,7 @@ export const useAiStore = defineStore('ai', () => {
   const installLog = ref<string[]>([])
 
   /**
-   * 挑中的这个模型能不能看图（贴图只在它上面成立，见 shared/ai.ts 的 AiModelChoice.imageInput）；
+   * 挑中的这个模型能不能看图（贴图只在它上面成立，见 packages/ai/src/ai.ts 的 AiModelChoice.imageInput）；
    *composer 那边判断「这条能不能发 / 还差什么」时要用它（canRun / blocking 归输入框自己）
    */
   const imageReady = computed(() => activeChoice.value?.imageInput === true)
@@ -585,7 +585,7 @@ export const useAiStore = defineStore('ai', () => {
   // ---------- 跑一轮 ----------
 
   /**
-   * 这一句要用的程序与参数（模型 / 档位 / 会话都在里面，见 shared/ai.ts 的 piLaunch）；
+   * 这一句要用的程序与参数（模型 / 档位 / 会话都在里面，见 packages/ai/src/ai.ts 的 piLaunch）；
    *参数按**这个会话自己**的生效配置取（configOf），不是当前正对着的那份
    */
   function launchFor(session: AiSession) {
@@ -1017,7 +1017,7 @@ export const useAiStore = defineStore('ai', () => {
   /**
    * 页面上那个下拉挑了什么：**有会话就记到会话自己身上**（那一刻生效的四样一起快照，
    * 见 AiSession 的可选字段），起始屏（还没建会话）记到设置里的默认 —— 之后新建的
-   * 对话用它起步。挑的是 `shared/ai.ts` 的 AiModelChoice.key（`<服务 id>/<模型 id>`），
+   * 对话用它起步。挑的是 `packages/ai/src/ai.ts` 的 AiModelChoice.key（`<服务 id>/<模型 id>`），
    * 认不出就当没挑过。
    */
   async function setChoice(key: string): Promise<boolean> {
@@ -1085,7 +1085,7 @@ export const useAiStore = defineStore('ai', () => {
    *
    * Pi 是照这份文件认端点的：设置存下了而文件没写等于没配，所以每次改完服务都要走一遍，
    * 进页面时也补一次（老设置搬到新形状之后那句「还没写」是看不出来的）。停用的服务与模型
-   * 不进这份文件 —— 见 shared/ai.ts 的 aiProviderPayload。
+   * 不进这份文件 —— 见 packages/ai/src/ai.ts 的 aiProviderPayload。
    */
   async function syncModels(): Promise<boolean> {
     const payload = aiProviderPayload(providers.value)

@@ -1,6 +1,6 @@
 //! 设计规范（DESIGN.md）的落盘。
 //!
-//! 内容是渲染层按一套设计的 token 现生成的 markdown（见 shared/design-export.ts），
+//! 内容是渲染层按一套设计的 token 现生成的 markdown（见 packages/appearance/src/design-export.ts），
 //! 这一侧只做一件事：把它写到目标项目的根目录。生成什么、给谁看属于业务语义，留在 TS；
 //! 磁盘操作留在 Rust —— 与笔记、技能那些模块同一条分工。
 //!

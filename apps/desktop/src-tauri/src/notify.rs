@@ -22,7 +22,7 @@ use windows::Data::Xml::Dom::XmlDocument;
 use windows::Foundation::TypedEventHandler;
 use windows::UI::Notifications::{NotificationSetting, ToastNotification, ToastNotificationManager};
 use windows::Win32::Foundation::PROPERTYKEY;
-use windows::Win32::System::Com::StructuredStorage::{PROPVARIANT, PROPVARIANT_0_0};
+use windows::Win32::System::Com::StructuredStorage::{PROPVARIANT, PROPVARIANT_0_0, PROPVARIANT_0_0_0};
 use windows::Win32::System::Com::{
     CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, IPersistFile,
 };
@@ -146,9 +146,13 @@ fn ensure_aumid_shortcut_once(aumid: &str, product: &str) -> Result<(), String> 
         // 靠它把通知认到本应用头上。PROPVARIANT 的联合体字段包在 ManuallyDrop 里，
         // 整个内层构造好再一次性写进槽位。
         let wide = HSTRING::from(aumid);
-        let mut payload = PROPVARIANT_0_0::default();
-        payload.vt = VT_LPWSTR;
-        payload.Anonymous.pwszVal = PWSTR(wide.as_ptr() as *mut u16);
+        let payload = PROPVARIANT_0_0 {
+            vt: VT_LPWSTR,
+            Anonymous: PROPVARIANT_0_0_0 {
+                pwszVal: PWSTR(wide.as_ptr() as *mut u16),
+            },
+            ..Default::default()
+        };
         let mut prop = PROPVARIANT::default();
         prop.Anonymous.Anonymous = ManuallyDrop::new(payload);
         let store: IPropertyStore = link

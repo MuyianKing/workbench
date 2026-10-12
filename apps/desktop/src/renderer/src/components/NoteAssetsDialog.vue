@@ -7,7 +7,7 @@ import { buildImageAssets, sortImageAssets, totalImageBytes, unusedImages } from
  * 素材管理：当前这个笔记本传过哪些图、谁还在用、把没人用的清掉。
  *
  * 这一页回答的是「我能安全删掉哪些图」：素材（图片）不存在笔记本里，而在用户自己的
- * 图片仓库里（见 shared/note-image.ts 的文件头），所以列表来自仓库、引用次数来自笔记本 ——
+ * 图片仓库里（见 packages/notes/src/note-image.ts 的文件头），所以列表来自仓库、引用次数来自笔记本 ——
  * 两边凑起来才知道哪张图已经没人用了。
  *
  * 三件值得说清楚的事：
@@ -129,7 +129,7 @@ watch(
  *
  * 两件事并行：它们互不依赖，串起来等只会让面板多转一会儿。
  * 引用次数按**文件名**数（同一张图在正文里可能写成 raw 地址、带前缀的地址、相对路径），
- * 口径全在 shared/note-image.ts 的纯函数里，这里只负责把两边的数据凑到一起。
+ * 口径全在 packages/notes/src/note-image.ts 的纯函数里，这里只负责把两边的数据凑到一起。
  */
 async function scan(): Promise<void> {
   const repo = settings.settings.noteImageRepo

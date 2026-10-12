@@ -156,7 +156,7 @@ function closeTerminal(item: TerminalState): void {
  * 与页面布局无关；面板则折回它原来的位置，见模板上的两个 Transition）。
  *
  * 位置：没拖动过时落在**终端面板自己的纵向中线**上 —— 收起看着才像面板收进了这颗按钮，
- * 而不是凭空飘到屏幕中间去；拖动过就以存下来的百分比为准（shared/terminal-dock.ts）。
+ * 而不是凭空飘到屏幕中间去；拖动过就以存下来的百分比为准（packages/appearance/src/terminal-dock.ts）。
  */
 const DOCK_SIZE = 34
 
@@ -385,7 +385,7 @@ async function openLink(event: MouseEvent, url: string): Promise<void> {
  *
  * 原实现每帧无条件 `scrollTop = scrollHeight`，有两个毛病：
  * 一是每帧读 scrollHeight 就是一次强制同步布局；二是用户往上翻着看编译报错时，
- * 会被下一帧硬拽回底部。改成贴底才跟随，判定本身抽在 shared/log-scroll.ts 里。
+ * 会被下一帧硬拽回底部。改成贴底才跟随，判定本身抽在 packages/terminal/src/log-scroll.ts 里。
  */
 const pinned = ref(true)
 
@@ -522,7 +522,7 @@ function clearLogs(): void {
   <!--
     收起后整块面板收成这一颗按钮。
     Teleport 到 body：它要贴在**窗口**最右侧，不参与页面（内容列 / 首页那几个面板）的布局，
-    也就不会被任何一层的定位或裁剪带偏；按住可上下拖，位置落盘（见 shared/terminal-dock.ts）。
+    也就不会被任何一层的定位或裁剪带偏；按住可上下拖，位置落盘（见 packages/appearance/src/terminal-dock.ts）。
     收起后 Tab 上的状态点就看不见了，所以按钮带上一个（见 dockTone）。
   -->
   <Teleport to="body">
@@ -674,7 +674,7 @@ function clearLogs(): void {
 
 /**
  * 收起后整块面板就剩这一颗按钮：贴在**窗口**最右侧（Teleport 到 body，见模板），
- * 纵向位置来自设置（百分比，见 shared/terminal-dock.ts）。
+ * 纵向位置来自设置（百分比，见 packages/appearance/src/terminal-dock.ts）。
  * 用终端自己的深色底：它是终端面板的一部分，明暗主题下都不跟着变。
  */
 .dock {

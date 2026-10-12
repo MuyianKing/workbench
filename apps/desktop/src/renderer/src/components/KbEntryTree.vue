@@ -6,7 +6,7 @@ import { kbEntryTree, kbFolderChain, kbTreeFolderIds } from '@workbench/kb'
  * 知识库条目树（左栏「条目」签）：搜索 + 按目录结构收成的树，点开一条进右栏阅读。
  *
  * 条目在仓库里本来就按目录分类（`kb/NN-主题名/…`），树就是它自己的样子：
- * 目录由 shared/kb.ts 的 kbEntryTree 从清单现算出来（props 只读，这里不留第二份），
+ * 目录由 packages/kb/src/kb.ts 的 kbEntryTree 从清单现算出来（props 只读，这里不留第二份），
  * 只负责展示与「点开它」。与笔记树（NoteTree）同一副 el-tree 用法，少了很多 ——
  * 条目在应用里只读不编辑，没有右键菜单、没有拖拽、没有增删。
  *

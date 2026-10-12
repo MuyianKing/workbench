@@ -5,9 +5,9 @@ import { defineStore } from 'pinia'
 /**
  * 密码保险库：密钥状态、卡片清单、增删改与同步的编排。
  *
- * 一条记录就是「名字 + 密码 + 备注 + 分组」四样（见 shared/vault.ts 的 VaultEntry）——
+ * 一条记录就是「名字 + 密码 + 备注 + 分组」四样（见 packages/vault/src/vault.ts 的 VaultEntry）——
  * 它是**备忘**，不是密码管理器：没有用户名 / 网址那些字段，也不生成口令。
- * 界面上一张卡片，分组是一栏自由文本，筛选标签从现存的取值里现算（见 shared/vault.ts 的 vaultGroups），
+ * 界面上一张卡片，分组是一栏自由文本，筛选标签从现存的取值里现算（见 packages/vault/src/vault.ts 的 vaultGroups），
  * 所以这里没有「新建分组 / 改名 / 删除」那一套状态。
  *
  * 与其余几个 store 最大的不同：**这里的状态有一半不在磁盘上**。

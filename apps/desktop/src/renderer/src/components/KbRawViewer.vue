@@ -5,7 +5,7 @@ import { kbRawStatusText } from '@workbench/kb'
 /**
  * 原始数据查看（右栏点开一个原始文件之后）：文本类就地预览，其余说明去向。
  *
- * 看法由 shared/kb.ts 的 kbRawViewKind 按后缀分好（父层算好传进来）：markdown 用
+ * 看法由 packages/kb/src/kb.ts 的 kbRawViewKind 按后缀分好（父层算好传进来）：markdown 用
  * MarkdownView 渲染（与条目阅读同一副 `html: false` 的安全口径），认得出的文本后缀
  * 按纯文本摆出来（等宽、原样，不做任何解析），预览不了的（pdf / docx / 图片…）就地
  * 说明并给「用系统默认程序打开」—— 应用对原始数据只读，看与不看都不改它。

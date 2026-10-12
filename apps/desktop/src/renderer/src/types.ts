@@ -1,5 +1,5 @@
 /**
- * 应用级类型契约与 IPC 通道（原 src/shared/types.ts，monorepo 化后落到渲染层）。
+ * 应用级类型契约与 IPC 通道（迁移前那份 `src/shared/types.ts`，monorepo 化后落到渲染层）。
  *
  * 域类型（笔记 / 知识库 / AI / 用量 / 外观…）住在各自的包（packages/*）里，这里聚合
  * re-export，渲染层照旧从 `@/types` 一站式取类型；只有真正的应用级形状定义在这：
@@ -21,7 +21,7 @@ import type { VideoNode, VideoSource } from '@workbench/video'
 import type { WorkLogEntry, WorkLogInput, WorkLogPatch, WorkRange, WorkSort } from '@workbench/work-log'
 import { AI_PERMISSION_DEFAULT, AI_THINKING_DEFAULT } from '@workbench/ai'
 import { DEFAULT_APPEARANCE, TERMINAL_BUTTON_TOP_DEFAULT } from '@workbench/appearance'
-import { CAPTURE_ENABLED_DEFAULT, CAPTURE_HOTKEY_DEFAULT, CAPTURE_MAGNIFIER_DEFAULT, CAPTURE_PIN_OPACITY_DEFAULT, CAPTURE_SAVE_DIR_DEFAULT, PIN_THROUGH_HOTKEY_DEFAULT } from '@workbench/capture'
+import { CAPTURE_ENABLED_DEFAULT, CAPTURE_HOTKEY_DEFAULT, CAPTURE_MAGNIFIER_DEFAULT, CAPTURE_PIN_OPACITY_DEFAULT, CAPTURE_SAVE_DIR_DEFAULT } from '@workbench/capture'
 import { PROJECT_SORT_DEFAULT } from '@workbench/core'
 import { WORK_RANGE_DEFAULT, WORK_SORT_DEFAULT } from '@workbench/work-log'
 
@@ -172,7 +172,7 @@ export interface Project {
   /**
    * 标识色：用于在项目卡与工作日志里区分项目。
    *
-   * 存的是主题色名（见 shared/project-color.ts），不是色值 —— 明暗切换与用户自定义主题色
+   * 存的是主题色名（见 packages/core/src/project-color.ts），不是色值 —— 明暗切换与用户自定义主题色
    * 都会自动跟着走。**新加项目与老数据补齐都会自动分配一个**，所以正常不会缺失；
    * 缺失时界面按中性色画，不影响别的功能。
    */
@@ -274,7 +274,7 @@ export interface QuickAppList {
 export interface AppSettings {
   /**
    * 程序名称：显示在标题栏、托盘提示与窗口标题上。
-   * 空串 / 全空白 / 超长都会在落盘前被收敛，见 shared/app-name.ts。
+   * 空串 / 全空白 / 超长都会在落盘前被收敛，见 packages/appearance/src/app-name.ts。
    */
   appName: string
   /** 开机自启，默认开启 */
@@ -295,13 +295,6 @@ export interface AppSettings {
    * 认不认得出交给 Rust 的 tauri-plugin-global-shortcut 解析，注册失败会在设置里报出来。
    */
   captureHotkey: string
-  /**
-   * 「切换钉图鼠标穿透」的全局快捷键。
-   *
-   * 必须有一条**全局**快捷键兜着：钉图一旦开了穿透就收不到任何鼠标事件，
-   * 界面上的菜单也就点不到了 —— 这是唯一能把穿透收回来的入口（见 pin.rs）。
-   */
-  pinHotkey: string
   /**
    * 截图的自动保存目录，空串 = 还没设置（那时「保存」会弹一次「另存为」）。
    * 只对本机成立（是本机的一个盘位），进数据文件、不参与外观同步。
@@ -379,7 +372,7 @@ export interface AppSettings {
    * 才会走一次 git（推送目标就是用户自己填的那个仓库，不经过任何第三方服务）。
    * 与 Token 同步同一个机制（系统 git 凭据，或登录账号的 token），见 docs 的「数据与隐私」。
    * 推上去落在仓库的哪一层不在设置里，定死是 `images/<本机设备>/<笔记本>/<文件名>`
-   * （见 shared/note-image.ts 的 imageScopeDir）——分这两层是为了让素材管理只看得到
+   * （见 packages/notes/src/note-image.ts 的 imageScopeDir）——分这两层是为了让素材管理只看得到
    * 「当前这个笔记本在这台机器上传的图」，仓库是所有笔记本、所有机器共用的一份。
    */
   noteImageRepo: string
@@ -388,14 +381,14 @@ export interface AppSettings {
    *
    * 与 `noteDir` 是同一类东西、**互不相干**：可以正好是某个笔记本文件夹、某个仓库的一部分，
    * 也可以是一个专门的技能仓库（那时它自己就是仓库根）。哪个仓库负责它的版本与同步
-   * **由磁盘决定**：从它开始看有没有 `.git`，没有就往上找最近的（见 shared/skills.ts 的
+   * **由磁盘决定**：从它开始看有没有 `.git`，没有就往上找最近的（见 packages/skills/src/skills.ts 的
    * `SkillLibraryState`）—— 所以这里没有「技能目录是仓库里哪一层」这种配置，也没有默认值：
    * 空串 = 还没选过，技能页显示引导。只对本机成立，进数据文件、不参与外观同步。
    */
   skillDir: string
   /**
    * 知识库文件夹（用户自己挑的一个目录）：**一个独立项目的根** —— `data/raw/` 放原始资料、
-   * `kb/` 放整理好的条目、`index/index.json` 由「重建索引」生成（布局见 shared/kb.ts 的
+   * `kb/` 放整理好的条目、`index/index.json` 由「重建索引」生成（布局见 packages/kb/src/kb.ts 的
    * 常量与 docs 的「知识库」一节）。
    *
    * 读是只读的，写只有两处、且都由用户点出来：AI 助手里那一轮整理（真正写文件的是 Pi，
@@ -410,7 +403,7 @@ export interface AppSettings {
    * 逻辑路径始终是 `data/raw/<来源名>/…`（条目 frontmatter 的 source 引用的就是它），
    * 所以来源换一个位置不用改任何条目。没配过的来源照旧读库里的 `data/raw/<名字>`
    * （兼容层）；`dir` 为空 = 还没指定（树里照样占一行，点它就能再指定）。
-   * 收敛与口径见 shared/kb.ts 的 KbRawSource / sanitizeKbRawSources。
+   * 收敛与口径见 packages/kb/src/kb.ts 的 KbRawSource / sanitizeKbRawSources。
    *
    * 换台机器就不成立（路径是本机的），所以进数据文件、不参与外观同步 —— 与 `kbDir`
    * 同一类。每条带 root：来源名在不同知识库里可以重名，映射只对它那个库生效。
@@ -422,25 +415,25 @@ export interface AppSettings {
    * （`ai/<服务 id>/token`），由 Rust 取出来注入子进程的环境变量。
    *
    * 停用的服务不进 Pi 的 models.json、也不能当默认模型。形状与收敛（含限量与去重）见
-   * shared/ai.ts 的 AiProvider / sanitizeAiProviders。
+   * packages/ai/src/ai.ts 的 AiProvider / sanitizeAiProviders。
    */
   aiProviders: AiProvider[]
   /**
    * 默认模型（模型管理弹窗顶上那一栏）：跑一轮用哪个服务的哪颗模型，行为记忆。
    * 空串 = 没挑过，用清单里第一个能挑的；挑过的那个被关掉 / 删掉 / 服务被停用时也退到
-   * 那一个 —— 成不成、退回哪一个都在 shared/ai.ts 的 pickAiChoice 里定。
+   * 那一个 —— 成不成、退回哪一个都在 packages/ai/src/ai.ts 的 pickAiChoice 里定。
    */
   aiDefaultProvider: string
   aiDefaultModel: string
   /**
    * 思考等级：Pi 的 `--thinking` 认的那七档之一（`off` / `minimal` / … / `max`），
-   * 界面上也是一个下拉。收敛在 shared/ai.ts 的 sanitizeAiThinking
+   * 界面上也是一个下拉。收敛在 packages/ai/src/ai.ts 的 sanitizeAiThinking
    * （认不出的回它自己的默认档 medium）。
    */
   aiThinking: string
   /**
    * 工具权限：`auto-edit`（自动编辑，命令先问一句）或 `full`（完全访问，什么都不问），
-   * composer 左边那一栏挑（形状与收敛在 shared/ai.ts 的 AI_PERMISSION_MODES /
+   * composer 左边那一栏挑（形状与收敛在 packages/ai/src/ai.ts 的 AI_PERMISSION_MODES /
    * sanitizeAiPermission，默认自动编辑）。它交给 Rust 决定加不加载那份确认扩展
    * （ai.rs **只把 `full` 当「不问」**，认不出的按自动编辑走）—— 问不问是结构上的差别，
    * 不是「问了然后自动答是」。
@@ -452,22 +445,22 @@ export interface AppSettings {
    *
    * 这里只存**调度用的那点东西**（id / 目录 / 标题 / 时间），对话本身不在应用的数据文件里
    * —— 它由 Pi 自己写进会话文件（`%APPDATA%\Workbench\data\pi\sessions\`，同一条 id），
-   * 打开会话时经 RPC 的 `get_messages` 读回来画（见 shared/ai.ts 的 sessionMessagesToLines）。
-   * 收敛（去空、去重、限量）在 shared/ai.ts 的 sanitizeAiSessions。
+   * 打开会话时经 RPC 的 `get_messages` 读回来画（见 packages/ai/src/ai.ts 的 sessionMessagesToLines）。
+   * 收敛（去空、去重、限量）在 packages/ai/src/ai.ts 的 sanitizeAiSessions。
    */
   aiSessions: AiSession[]
   /**
    * 左栏上选中的那个会话（行为记忆：换台机器就不成立，所以住这儿而不是主题文件）。
    * 认不出来的（被删掉的）回最近说过话的那个，一个会话都没有时是空串。
-   * 判定在 shared/ai.ts 的 pickAiActiveSession。
+   * 判定在 packages/ai/src/ai.ts 的 pickAiActiveSession。
    */
   aiActiveSession: string
   /**
-   * **关掉的技能**（键是「技能根 + 技能名」，见 shared/pi-skills.ts 的 skillKey）。
+   * **关掉的技能**（键是「技能根 + 技能名」，见 packages/ai/src/pi-skills.ts 的 skillKey）。
    *
    * 形状是「被关掉的那些」而不是「开着的那些」：新装进来、别处（技能页、别的 agent）
    * 放进来的技能默认就是开着的，不需要应用替它们登记一遍；被删掉的技能在这里留一条死键，
-   * 除了占几行什么也不影响。收敛在 shared/pi-skills.ts 的 sanitizeAiSkillsOff。
+   * 除了占几行什么也不影响。收敛在 packages/ai/src/pi-skills.ts 的 sanitizeAiSkillsOff。
    */
   aiSkillsOff: string[]
   /**
@@ -476,7 +469,7 @@ export interface AppSettings {
    * 这是**第七个联网出口、且由用户显式开启**：填了城市才会按间隔去取 Open-Meteo 的
    * 免费接口（白名单见 src-tauri/src/weather.rs），城市名会作为查询串发出去 ——
    * 这是这条出口唯一发送的用户内容。只对本机成立，进数据文件、不参与外观同步。
-   * 取值由 shared/weather.ts 的 sanitizeWeatherCity 收敛。
+   * 取值由 packages/weather/src/weather.ts 的 sanitizeWeatherCity 收敛。
    */
   weatherCity: string
   /**
@@ -516,14 +509,14 @@ export interface AppSettings {
    * Token 用量同步仓库地址（git 远程地址），空串表示不同步。
    *
    * 多台机器各自把「本机分片」推到这一个仓库里，读的时候全量合并 ——
-   * 一个设备一个文件，所以永远不会有同文件冲突（详见 shared/token-usage.ts 的文件头）。
+   * 一个设备一个文件，所以永远不会有同文件冲突（详见 packages/usage/src/token-usage.ts 的文件头）。
    * 值会被 shared 的 sanitizeSyncRepo 收敛：带空白或以 `-` 开头的一律当没填。
    *
    * 仓库里放的是模型名与 token 计数，**没有对话内容**，但仍然建议用私有仓库。
    */
   tokenSyncRepo: string
   /**
-   * 上次停留的页面（左侧导航栏的当前项，见 shared/views.ts）。
+   * 上次停留的页面（左侧导航栏的当前项，见 packages/appearance/src/views.ts）。
    *
    * 放在设置里，只是因为设置本来就是「随数据文件落盘的界面状态」的容身处
    * （终端高度、顶部样式、卡片不透明度都在这里）——它不是设置界面上的选项，
@@ -531,7 +524,7 @@ export interface AppSettings {
    */
   activeView: ViewId
   /**
-   * 左侧导航栏上**关掉**的页（见 shared/views.ts）。空数组 = 四页都显示。
+   * 左侧导航栏上**关掉**的页（见 packages/appearance/src/views.ts）。空数组 = 四页都显示。
    *
    * 存「关掉了哪些」而不是「显示了哪些」：将来加一页时老配置里没有它，新页对所有人就是默认
    * 可见的，不必去动谁的数据文件。收敛保证至少留一页（全关掉时留下首页）。
@@ -542,7 +535,7 @@ export interface AppSettings {
    */
   hiddenViews: ViewId[]
   /**
-   * 左侧导航栏的**显示顺序**（一个 ViewId 的排列，见 shared/views.ts 的 sanitizeViewOrder）。
+   * 左侧导航栏的**显示顺序**（一个 ViewId 的排列，见 packages/appearance/src/views.ts 的 sanitizeViewOrder）。
    *
    * 与 `hiddenViews` 同一批：都是「导航栏长什么样」的配置，住在 theme.json 里、跟着外观
    * 同步走。收敛保证它恰好是全部页面的一个排列（落下的补到末尾），老文件没有这个字段
@@ -558,7 +551,7 @@ export interface AppSettings {
    */
   navHidden: boolean
   /**
-   * 项目页的排序方式（见 shared/project-sort.ts）。
+   * 项目页的排序方式（见 packages/core/src/project-sort.ts）。
    *
    * 从这里开始这几项是**行为记忆**：记的不是界面长什么样，而是「你习惯怎么看」——
    * 上次用的那一档，下次打开还停在那儿，不必每次都重新拉一遍。
@@ -583,7 +576,7 @@ export interface AppSettings {
    *
    * 与 `noteDir` / `skillDir` 同一类：本机的一个目录，进数据文件、不参与外观同步；
    * 空串表示还没选过 —— 视频页据此显示「先选一个文件夹」的引导。
-   * 收敛与 `noteDir` 同一条（见 shared/video.ts 的 `sanitizeVideoRoot`）。
+   * 收敛与 `noteDir` 同一条（见 packages/video/src/video.ts 的 `sanitizeVideoRoot`）。
    */
   videoDir: string
   /**
@@ -760,7 +753,7 @@ export interface PersistedData {
   quickApps: QuickApp[]
   /**
    * 程序图标的 base64 缓存，key 是程序路径。
-   * 省掉每次启动重新抽取一遍图标（见 shared/icon-cache.ts）。
+   * 省掉每次启动重新抽取一遍图标（见 packages/core/src/icon-cache.ts）。
    */
   iconCache?: Record<string, IconCacheEntry>
   /** 首页「命令」卡片里的命令，与项目相互独立 */
@@ -1144,7 +1137,7 @@ export interface WorkbenchApi {
    * 只读本地那份克隆，不联网、也不推东西，所以设置界面打开时随时可以问；
    * 内容是上一次同步取回来的样子。地址没填时返回空数组。
    */
-  listSyncDevices: () => Promise<SyncDeviceInfo[]>
+  listSyncDevices: () => Promise<Result<SyncDeviceInfo[]>>
   createGroup: (name: string) => Promise<Result<ProjectGroup>>
   renameGroup: (id: string, name: string) => Promise<Result<ProjectGroup>>
   removeGroup: (id: string) => Promise<Result<null>>
@@ -1601,11 +1594,6 @@ export interface WorkbenchApi {
   getDataDir: () => Promise<string>
   // ---------- 截图与钉图（见 docs/modules/screenshot.md） ----------
   /**
-   * 起一次截图：Rust 抓齐所有屏、逐块铺遮罩窗口。返回铺了几块屏。
-   * 已经在截的话先收掉（热键 / 托盘那个入口是「再按一次 = 取消」，走 beginCapture 的这一条只会重开一次）。
-   */
-  beginCapture: () => Promise<Result<number>>
-  /**
    * 预先把遮罩窗口建好（每块屏一块）。**按热键到看见遮罩能不能压到两百毫秒级全靠这一条**：
    * 建一个 WebView2 窗口本身就比整个预算还贵，所以窗口是预建、跨场复用的
    * （见 docs/modules/screenshot.md）。设置载入后由渲染层调一次 —— 开着就建、关掉就把池子收掉；
@@ -1653,7 +1641,7 @@ export interface WorkbenchApi {
     height: number,
     opacity: number,
   ) => Promise<Result<PinRecord>>
-  /** 钉图窗口问自己的记账（图片路径、长宽比、不透明度、穿透） */
+  /** 钉图窗口问自己的记账（图片路径、长宽比、不透明度） */
   pinContext: () => Promise<Result<PinRecord>>
   /** 改钉图状态：窗口几何交给系统，记账跟着更新 */
   pinState: (patch: PinPatch) => Promise<Result<PinRecord>>
@@ -1666,7 +1654,7 @@ export interface WorkbenchApi {
   /** 把这张钉图另存一份 */
   pinSave: (dir: string, name: string, unique: boolean) => Promise<Result<string>>
   /**
-   * 按当前设置重新装一遍全部全局快捷键（唤起窗口 / 截图 / 钉图穿透）。
+   * 按当前设置重新装一遍全部全局快捷键（唤起窗口 / 截图）。
    * 三条一起装是插件的硬要求（见 main.rs 的 register_hotkeys），所以只能在改动之后整批重来。
    */
   applyHotkeys: () => Promise<Result<null>>
@@ -1684,8 +1672,6 @@ export interface WorkbenchApi {
    * 顺序反了会漏掉中间那一条。
    */
   onCaptureSync: (fn: (id: number | null) => void) => Promise<() => void>
-  /** 钉图状态被外部改过（全局快捷键翻了穿透）：钉图窗口据此刷新自己那一栏的勾 */
-  onPinState: (fn: (record: PinRecord) => void) => () => void
   /**
    * 账号登录状态：能不能登录、回调地址、已登录哪些平台。
    * **不返回任何 token** —— 它在 Rust 侧，渲染层碰不到（见 AccountProfile）。
@@ -1808,10 +1794,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   launchAtLogin: true,
   hotkeyEnabled: true,
   hotkey: 'Control+M',
-  // 截图（见 docs/modules/screenshot.md）：默认 F1 起截图、Ctrl+Shift+X 翻钉图穿透
+  // 截图（见 docs/modules/screenshot.md）：默认 F1 起截图
   captureEnabled: CAPTURE_ENABLED_DEFAULT,
   captureHotkey: CAPTURE_HOTKEY_DEFAULT,
-  pinHotkey: PIN_THROUGH_HOTKEY_DEFAULT,
   captureSaveDir: CAPTURE_SAVE_DIR_DEFAULT,
   capturePinOpacity: CAPTURE_PIN_OPACITY_DEFAULT,
   captureMagnifier: CAPTURE_MAGNIFIER_DEFAULT,

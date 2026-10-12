@@ -13,8 +13,8 @@
 //!   `config/<设备id>.json`      —— 这台机器 theme.json 的整份副本（外观 + 首页布局）
 //! 一台机器在每个目录里各占一个文件，每个文件只有一个写者，所以两个目录都不存在
 //! 需要人工合并的冲突，流程一律是 pull → 写自己的那份 → commit → push。
-//! 别人的文件我们从不修改，只在读取时汇总（用量求和，见 `shared/token-usage.ts`；
-//! 配置则整份采用 —— 什么时候采用由用户在设置里点，见 `shared/sync-config.ts`）。
+//! 别人的文件我们从不修改，只在读取时汇总（用量求和，见 `packages/usage/src/token-usage.ts`；
+//! 配置则整份采用 —— 什么时候采用由用户在设置里点，见 `packages/usage/src/sync-config.ts`）。
 //!
 //! 这一层仍然只做「调系统能力 + 读写文件」：两份文件的内容与合并语义都在 TS 侧。
 //! 它对那两个 payload 的唯一要求是「能原样变成一个 JSON 文件」—— 结构与收敛规则不在这里。
@@ -172,12 +172,12 @@ fn publish_at(
 
     // 这次推哪几个文件就 add / diff 哪几个：用量同步碰不到 config/，外观同步碰不到 token-usage/
     let mut staged: Vec<&str> = Vec::new();
-    if usage.is_some() {
-        write_json(&dir.join(&usage_relative), usage.unwrap())?;
+    if let Some(usage) = usage {
+        write_json(&dir.join(&usage_relative), usage)?;
         staged.push(usage_relative.as_str());
     }
-    if config.is_some() {
-        write_json(&dir.join(&config_relative), config.unwrap())?;
+    if let Some(config) = config {
+        write_json(&dir.join(&config_relative), config)?;
         staged.push(config_relative.as_str());
     }
     let mut add_args: Vec<&str> = vec!["add", "-A", "--"];
@@ -225,7 +225,7 @@ pub struct SyncFiles {
 /// 但地址与克隆目录都是**另一套**：用户完全可以把图片放在另一个仓库里。
 /// 这一层只搬字节 —— 不转格式、不压尺寸、也不看内容（渲染层从粘贴的图片里读到的就是原始字节）。
 ///
-/// 子目录与文件名由渲染层算好（带时间戳与随机段，见 `shared/note-image.ts`），
+/// 子目录与文件名由渲染层算好（带时间戳与随机段，见 `packages/notes/src/note-image.ts`），
 /// 这里做最后一道把关：挡掉会把文件写到克隆目录之外的名字。
 pub fn publish_image(
     repo: &str,
@@ -285,7 +285,7 @@ fn publish_image_at(
 ///
 /// 只扫**设置里那个子目录**：仓库里还住着 README 之类的东西，它们不该出现在素材列表里。
 /// 回来的是「相对路径（仓库内写法，与上传回来的是同一种）+ 文件名 + 字节数」，
-/// 名字不要后缀、谁被引用了多少次这类判断都留在渲染层（见 shared/note-image.ts）。
+/// 名字不要后缀、谁被引用了多少次这类判断都留在渲染层（见 packages/notes/src/note-image.ts）。
 ///
 /// 与上传一样，配置为空是「还没设」而不是「空仓库」：那种情况要报错，
 /// 界面才能提示去哪儿填，而不是显示成「一张图都没有」。
@@ -1068,7 +1068,7 @@ pub(crate) fn describe(command: &str, outcome: &proc::Outcome) -> String {
 
     let mut message = format!("git {command} 失败: {text}");
     if let Some(note) = auth_note(&text) {
-        message.push_str("；");
+        message.push('；');
         message.push_str(&note);
     }
     message
@@ -1484,7 +1484,7 @@ mod tests {
         assert!(image_repo_path("images", "  ").is_err());
     }
 
-    /// 图片现在按「设备 / 笔记本」分了两层（见 shared/note-image.ts 的 imageScopeDir），
+    /// 图片现在按「设备 / 笔记本」分了两层（见 packages/notes/src/note-image.ts 的 imageScopeDir），
     /// 传下来的是**整条三层目录**。这条钉住的正是它的意义：别的笔记本、别的机器那一层里的图，
     /// 路径再合法也删不到 —— 少了这一条，「素材管理只列自己这一层」就只是界面上的一句好话。
     #[test]
@@ -1646,7 +1646,7 @@ mod tests {
             "20260916-104513-ffffffff.png",
             "20260916-104512-ab12cd34.png",
         );
-        // 传下来的目录是「图片目录 / 设备 / 笔记本」三层（见 shared/note-image.ts 的 imageScopeDir）
+        // 传下来的目录是「图片目录 / 设备 / 笔记本」三层（见 packages/notes/src/note-image.ts 的 imageScopeDir）
         let scope = "images/6f1e2d3c-4b5a/notes-2f3a9c02";
         // 同一个仓库、同一个设备下的**另一个笔记本**：它的图不该出现在这一次的清单里，
         // 也不该被这一次的删除够到 —— 这正是那两层目录存在的意义
@@ -1677,7 +1677,7 @@ mod tests {
             // 图片目录底下那张（改版前的老位置）：不属于任何一层
             format!("images/{keep}"),
         ] {
-            let rejected = delete_images_at(&clone, &repo, scope, &[bad.clone()]);
+            let rejected = delete_images_at(&clone, &repo, scope, std::slice::from_ref(&bad));
             assert!(rejected.is_err(), "这条路径本该被拒掉: {bad}");
         }
 

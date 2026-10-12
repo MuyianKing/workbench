@@ -15,7 +15,7 @@ import type { AiRunInput, Result } from '@/types'
  * （`parsePiResponse` —— `get_messages` / `abort` 这类要读结果的命令靠 `aiRequest` 配对）。
  * 提示词与密钥都不从这一层过：提示词全文交给 `aiRun`，由 Rust 写成子进程 stdin 的一行
  * JSON（RPC 协议）；密钥存在 Windows 凭据管理器里，进子进程的环境变量。
- * 这一层只做形状收敛与事件翻译的接线，怎么读帧在 shared/ai.ts（有单测）。
+ * 这一层只做形状收敛与事件翻译的接线，怎么读帧在 packages/ai/src/ai.ts（有单测）。
  */
 import { parsePiConfirm, parsePiDelta, parsePiEvent, parsePiResponse, parsePiUsage } from '@workbench/ai'
 import { fail, ok } from '@workbench/core'
@@ -27,7 +27,7 @@ export const AI_SESSION_PREFIX = 'ai:'
 
 /**
  * 一条会话在进程表里的 id：`ai:<会话 id>`。**会话 id 同时是 Pi 认的 session-id**
- * （在 `--session-id` 里，见 shared/ai.ts 的 piLaunch），前缀只是应用这边的命名空间 ——
+ * （在 `--session-id` 里，见 packages/ai/src/ai.ts 的 piLaunch），前缀只是应用这边的命名空间 ——
  * 终端、安装那些会话共用一张表，靠它分得开。
  */
 export function aiSessionProcessId(sessionId: string): string {
@@ -53,11 +53,11 @@ interface RunHandlers {
   /**
    * 模型正一个字一个字往外吐（RPC 的 `message_update`）：**正文**（`text_delta`）接在
    * 对话末尾让回话流式长出来，**思考**（`thinking_delta` / `thinking_end`）接在末尾那块
-   * 「思考中…」里 —— 形状见 shared/ai.ts 的 parsePiDelta。
+   * 「思考中…」里 —— 形状见 packages/ai/src/ai.ts 的 parsePiDelta。
    */
   onDelta: (delta: PiDelta) => void
   /**
-   * 一条助手消息的 token 消耗（`message_end` 带的 `usage`，形状见 shared/ai.ts 的
+   * 一条助手消息的 token 消耗（`message_end` 带的 `usage`，形状见 packages/ai/src/ai.ts 的
    * parsePiUsage）：按轮累加是 store 的事，这里只把每一条递过去。
    */
   onUsage: (usage: AiUsage) => void
@@ -218,7 +218,7 @@ export async function aiRun(input: AiRunInput, handlers: RunHandlers): Promise<R
       sessionId: input.sessionId,
       dir: input.dir,
       prompt: input.prompt,
-      // 随这一句贴的图（数据 URL 已拆成 Pi 的 `{data, mimeType}`，见 shared/ai.ts）
+      // 随这一句贴的图（数据 URL 已拆成 Pi 的 `{data, mimeType}`，见 packages/ai/src/ai.ts）
       images: input.images,
       program: input.program,
       args: input.args,

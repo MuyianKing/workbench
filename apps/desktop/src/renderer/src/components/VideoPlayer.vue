@@ -316,7 +316,7 @@ function onBarDown(event: PointerEvent): void {
 }
 
 /**
- * 抓角落缩放小窗：右下 / 左下两枚手柄共用这一份（口径在 shared/video.ts 的 resizeVideoFloat）。
+ * 抓角落缩放小窗：右下 / 左下两枚手柄共用这一份（口径在 packages/video/src/video.ts 的 resizeVideoFloat）。
  * 右下角：左上角钉住，宽高随位移长；左下角：**右上角钉住** —— 往左拖是长大，
  * 宽度的变化全部折进左缘（左缘不得越过视口左缘）。抓哪一角、对角就钉住不动；
  * 拖动期间只改本地，松手才落盘（与视频树宽同一套两段式）。

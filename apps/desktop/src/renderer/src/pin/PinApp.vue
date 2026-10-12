@@ -43,10 +43,6 @@ onMounted(async () => {
   // 图片由 Rust 按文件授权给 asset 协议（见 pin.rs），这里拿到的是能直接加载的 URL
   imageUrl.value = assetUrl(info.file)
   window.addEventListener('keydown', onKeyDown)
-  // 全局快捷键翻了穿透时，这份状态也要跟着变（菜单里那一项才显示得对）
-  window.workbench.onPinState((next) => {
-    record.value = next
-  })
 })
 
 onBeforeUnmount(() => window.removeEventListener('keydown', onKeyDown))
@@ -126,14 +122,6 @@ async function saveAs(): Promise<void> {
     failure.value = result.error ?? '保存失败'
 }
 
-/** 穿透开着的时候这扇窗口收不到鼠标事件，只能靠全局快捷键收回来（见设置里的说明） */
-async function toggleThrough(): Promise<void> {
-  const current = record.value
-  if (!current)
-    return
-  await apply({ clickThrough: !current.clickThrough })
-}
-
 /**
  * 适应屏幕：把窗口收回「最长边占这块屏七成」的尺寸（与刚钉出来时同一把尺子）。
  *
@@ -158,7 +146,7 @@ async function fitToScreen(): Promise<void> {
 <template>
   <div
     class="pin"
-    :class="{ 'is-hover': hovering, 'is-through': record?.clickThrough }"
+    :class="{ 'is-hover': hovering }"
     @pointerenter="hovering = true"
     @pointerleave="hovering = false"
     @wheel="onWheel"
@@ -183,11 +171,9 @@ async function fitToScreen(): Promise<void> {
       v-if="menu"
       :x="menu.x"
       :y="menu.y"
-      :click-through="record?.clickThrough === true"
       @act="(name) => {
         if (name === 'copy') void copy()
         else if (name === 'save') void saveAs()
-        else if (name === 'through') void toggleThrough()
         else if (name === 'fit') void fitToScreen()
         else void close()
       }"
@@ -223,10 +209,6 @@ async function fitToScreen(): Promise<void> {
 .pin.is-hover {
   outline: 1px solid rgb(64 158 255 / 90%);
   outline-offset: -1px;
-}
-
-.pin.is-through {
-  outline-color: rgb(250 173 20 / 90%);
 }
 
 .pin__failure {

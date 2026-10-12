@@ -29,15 +29,17 @@ pub fn store(provider: &str, secret: &str) -> Result<(), String> {
     let mut user = wide("Workbench");
     let mut blob = secret.as_bytes().to_vec();
 
-    let mut credential = CREDENTIALW::default();
-    credential.Type = CRED_TYPE_GENERIC;
-    credential.TargetName = target.as_mut_ptr();
-    credential.UserName = user.as_mut_ptr();
-    credential.CredentialBlobSize = blob.len() as u32;
-    credential.CredentialBlob = blob.as_mut_ptr();
-    // LOCAL_MACHINE：跟着这台机器留存，而不是只在本次登录会话里有效。
-    // 凭据本身仍由 DPAPI 按用户加密，别的用户读不到。
-    credential.Persist = CRED_PERSIST_LOCAL_MACHINE;
+    let credential = CREDENTIALW {
+        Type: CRED_TYPE_GENERIC,
+        TargetName: target.as_mut_ptr(),
+        UserName: user.as_mut_ptr(),
+        CredentialBlobSize: blob.len() as u32,
+        CredentialBlob: blob.as_mut_ptr(),
+        // LOCAL_MACHINE：跟着这台机器留存，而不是只在本次登录会话里有效。
+        // 凭据本身仍由 DPAPI 按用户加密，别的用户读不到。
+        Persist: CRED_PERSIST_LOCAL_MACHINE,
+        ..Default::default()
+    };
 
     let written = unsafe { CredWriteW(&credential, 0) };
     if written == 0 {

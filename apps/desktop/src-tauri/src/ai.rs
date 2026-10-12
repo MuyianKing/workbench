@@ -6,7 +6,7 @@
 //!    走命令行必炸。Pi 跑的是 **RPC 模式**（`--mode rpc`，它官方给宿主集成的双向协议），
 //!    提示词是 stdin 上的一行 JSON（`{"type":"prompt","message":…}`，见 `prompt_frame`），
 //!    扩展回头问「这条命令让不让跑」时，渲染层把答复也写成一行 JSON 回同一条 stdin
-//!    （`session::write_stdin`，形状见 shared/ai.ts 的 confirmFrame）。
+//!    （`session::write_stdin`，形状见 packages/ai/src/ai.ts 的 confirmFrame）。
 //!    整条命令走 `session::spawn_args` **直启 node**，不经 `cmd /C` —— 整行 + 内层引号
 //!    会被 cmd 的引号剥离规则拆坏（实测：cli.js 路径带引号时 node 收到的是被剥得只剩盘符的路径）。
 //!    **一个会话一个进程、好几个会话可以同时在跑**（界面上一次只画一个，但它们各跑各的）。
@@ -35,7 +35,7 @@
 //!    Pi 的 RPC 这条路不扫默认技能目录，只有 `--skill` / settings.json / 扩展三种来源，
 //!    应用用第一种。装/卸/开关都发生在用户自己那两个 `.agents/skills` 里，下次起进程才生效。
 //!
-//! 程序与参数的形状在渲染层（`src/shared/ai.ts`，那边有单测）：TS 给 `program` 与
+//! 程序与参数的形状在渲染层（`packages/ai/src/ai.ts`，那边有单测）：TS 给 `program` 与
 //! `args`（内置模式 `node <cli.js>`、退路 `pi`，含 `--session-id`），这里只管写扩展文件、
 //! 取密钥、拼环境变量、补上会话文件目录（`--session-dir`）与技能（`--skill`）、
 //! 把提示词写进 stdin。
@@ -110,7 +110,7 @@ pub fn resolve_cli(app: &AppHandle) -> Option<PathBuf> {
 
 /// 探测 AI 运行时：**内置的那份优先**（resources/pi，vendor 脚本生成、随包分发），
 /// 没有再看 PATH 上的全局 pi，两个都没有就是 `none`。node 版本一并探 ——
-/// 内置的 cli.js 一样要 node ≥ 22.19 才能跑（门槛的判定在渲染层 shared/ai.ts）。
+/// 内置的 cli.js 一样要 node ≥ 22.19 才能跑（门槛的判定在渲染层 packages/ai/src/ai.ts）。
 /// `detail` 带内置那份探测失败时的原始输出：这个字段就是为「为什么明明装了却说没有」
 /// 这类排查准备的，界面上不展示。
 pub fn runtime(app: &AppHandle) -> Value {
@@ -139,7 +139,7 @@ pub fn runtime(app: &AppHandle) -> Value {
                     detail = format!(
                         "版本探测退出码 {:?} | stderr：{}",
                         outcome.status,
-                        &outcome.stderr.chars().take(400).collect::<String>()
+                        outcome.stderr.chars().take(400).collect::<String>()
                     );
                 }
                 Err(err) => {
@@ -187,7 +187,7 @@ pub fn key_provider(provider: &str) -> Result<String, String> {
     }
 }
 
-/// 权限模式（设置里的 `aiPermission`，形状与收敛在 shared/ai.ts）。
+/// 权限模式（设置里的 `aiPermission`，形状与收敛在 packages/ai/src/ai.ts）。
 /// **只把 `full` 当"不问"** —— 认不出的值一律按自动编辑走，权限这种事不靠猜。
 const PERMISSION_FULL: &str = "full";
 
@@ -217,7 +217,7 @@ export default function (pi) {
 ///
 /// **形状对 Pi 的 `ImageContent`**（`{type:'image', data, mimeType}`，见它 rpc-types.d.ts）：
 /// 这里只有后两个字段，`type` 由 `prompt_frame` 补上。`data` 是 base64、不带 `data:` 前缀
-/// —— 渲染层从数据 URL 的逗号后面切出来（shared/ai.ts 的 aiImagePayload，有单测）。
+/// —— 渲染层从数据 URL 的逗号后面切出来（packages/ai/src/ai.ts 的 aiImagePayload，有单测）。
 ///
 /// **键名与渲染层成一字不差的对**（`data` / `mimeType`）：serde 对认不出的键是静默丢弃，
 /// 名字对不上时两边单测都会绿（models.json 那边踩过一次同类坑，见 ModelInput 的注释）。
@@ -318,7 +318,7 @@ const THINKING_LEVELS: [&str; 7] = ["off", "minimal", "low", "medium", "high", "
 const PROVIDER_MAX: usize = 12;
 const MODEL_MAX: usize = 32;
 
-/// 渲染层传进来的一个模型（形状对 shared/ai.ts 的 AiModelEntry）。
+/// 渲染层传进来的一个模型（形状对 packages/ai/src/ai.ts 的 AiModelEntry）。
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelInput {
@@ -334,19 +334,19 @@ pub struct ModelInput {
     #[serde(default)]
     pub reasoning: bool,
     /// Pi 的 `thinkingLevelMap`：档位 → 这一家的取值，或 null（不支持这一档）。
-    /// **算它的是渲染层**（shared/ai.ts 的 aiThinkingMap，有单测）—— 那条规则只写一处，
+    /// **算它的是渲染层**（packages/ai/src/ai.ts 的 aiThinkingMap，有单测）—— 那条规则只写一处，
     /// 这里只按 Pi 认的七个档位过滤一遍。
     #[serde(default)]
     pub thinking_level_map: std::collections::HashMap<String, Option<String>>,
     /// 能不能看图：真时写 `"input": ["text", "image"]`。**不写 Pi 就按 `["text"]` 算** ——
     /// read 读图、工具结果里的截图都会被它丢掉，只给模型留一句「图附在这儿了」。
-    /// **键名与渲染层 payload 一字不差**（shared/ai.ts 的 AiProviderPayload 发 `imageInput`）——
+    /// **键名与渲染层 payload 一字不差**（packages/ai/src/ai.ts 的 AiProviderPayload 发 `imageInput`）——
     /// serde 对认不出的键是静默丢弃，两边名字对不上时哪边单测都不会红（踩过）。
     #[serde(default)]
     pub image_input: bool,
 }
 
-/// 渲染层传进来的一个服务（形状对 shared/ai.ts 的 AiProvider）。
+/// 渲染层传进来的一个服务（形状对 packages/ai/src/ai.ts 的 AiProvider）。
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderInput {
@@ -750,7 +750,7 @@ fn model_reasoning(item: &Value) -> Option<bool> {
 /// `prompt` 空串 = **只把进程起起来、不发提示词**：打开一个旧会话读历史（RPC 的
 /// `get_messages`）走的就是这条路 —— 它要一根活着的 stdin 才答得出来。
 ///
-/// 模型不在这里：它在渲染层拼好的参数里（`--provider` / `--model`，见 shared/ai.ts 的
+/// 模型不在这里：它在渲染层拼好的参数里（`--provider` / `--model`，见 packages/ai/src/ai.ts 的
 /// piLaunch）。**别想着用环境变量指模型** —— 内置的 Pi 只认那两个参数，环境变量
 /// `PI_MODEL` 它压根不读，会退到自己内置的提供方默认模型上（踩过：提供方叫
 /// opencode-go 时实际请求的是它内置的 kimi-k2.6，清单里的模型一个字没用上）。

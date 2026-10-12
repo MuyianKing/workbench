@@ -124,7 +124,6 @@ function hotkeyArgs(settings: AppSettings): Record<string, string | null> {
   return {
     main: settings.hotkeyEnabled ? settings.hotkey : null,
     capture: settings.captureEnabled ? settings.captureHotkey : null,
-    pinThrough: settings.pinHotkey,
   }
 }
 
@@ -233,7 +232,7 @@ function createApi(): WorkbenchApi {
         id: crypto.randomUUID(),
         name: input.name?.trim() || scan.name,
         path: dirPath,
-        // 标识色：自动取一个当前用得最少的颜色，前五个项目因此两两不同（见 shared/project-color.ts）
+        // 标识色：自动取一个当前用得最少的颜色，前五个项目因此两两不同（见 packages/core/src/project-color.ts）
         color: nextProjectColor(state.projects().map(item => item.color)),
         packageManager: 'auto',
         detectedPackageManager: scan.detectedPackageManager,
@@ -363,7 +362,7 @@ function createApi(): WorkbenchApi {
     listVideos: (root: string) => video.listVideos(root),
     loadVideo: (root: string, rel: string) => video.loadVideo(root, rel),
 
-    // ---------- 技能（住在笔记仓库的一个子目录里，见 shared/skills.ts） ----------
+    // ---------- 技能（住在笔记仓库的一个子目录里，见 packages/skills/src/skills.ts） ----------
     listSkills: (root: string, dir: string) => skill.listSkills(root, dir),
     skillState: (dir: string) => skill.skillState(dir),
     skillSync: (root: string, dir: string) => skill.skillSync(root, dir),
@@ -467,7 +466,7 @@ function createApi(): WorkbenchApi {
      * 同步仓库地址从设置里现取 —— 用户刚在设置里填完，下一次刷新就该用上新地址。
      */
     getTokenUsage: () => guard(getTokenUsage({ repo: syncRepo() }), '读取 token 用量失败'),
-    /** 首屏先手：只读本地那份快照，实读结果随后覆盖它（见 shared/types.ts 的说明） */
+    /** 首屏先手：只读本地那份快照，实读结果随后覆盖它（见 apps/desktop/src/renderer/src/types.ts 的说明） */
     getTokenUsageSnapshot: () =>
       guard(getTokenUsageSnapshot({ repo: syncRepo() }), '读取 token 快照失败'),
     /** 手动同步：绕过自动同步的节流（面板上的同步按钮），只推拉用量分片 */
@@ -725,9 +724,10 @@ function createApi(): WorkbenchApi {
 
     // ---------- 截图与钉图（见 docs/modules/screenshot.md） ----------
     //
-    // 这两组通道三个窗口共用：主窗口（设置里那颗「试一下」按钮、托盘提示）、
+    // 这两组通道三个窗口共用：主窗口（托盘提示、设置里的快捷键）、
     // 遮罩窗口（capture.html）、钉图窗口（pin.html）。后两个入口只装这一层适配层，
     // **不装 store、不 initState** —— 装了就会与主窗口抢着写同一批 JSON。
+    // 只给验证配方用（界面上没有入口，见 docs/modules/screenshot.md 的「验证」一节）
     beginCapture: () => guard(invoke<number>('capture_begin'), '开始截图失败'),
     // 把「按下热键到看见遮罩」压到两百毫秒级的就这一条：Rust 据此把遮罩窗口先建好，
     // 之后每场截图只是「塞帧 → 摆位置 → 显示」（见 docs/modules/screenshot.md）
@@ -769,8 +769,6 @@ function createApi(): WorkbenchApi {
     // 两边都靠这一条（见 docs/modules/screenshot.md）。用 listenReady：遮罩要先挂上订阅、
     // 再补问一次当前有没有会话，顺序反了会漏掉中间那一条
     onCaptureSync: (fn: (id: number | null) => void) => listenReady<number | null>('capture:sync', fn),
-    // 全局快捷键翻了钉图穿透时，钉图窗口要跟着刷新自己菜单里那一栏
-    onPinState: (fn: (record: PinRecord) => void) => listen<PinRecord>('pin:state', fn),
 
     // 尚未有人推的一个：首页布局（本地改动的推送方还没补）
     onThemeConfig: () => noop,

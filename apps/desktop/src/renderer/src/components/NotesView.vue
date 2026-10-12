@@ -7,20 +7,20 @@ import { ElMessage } from 'element-plus'
  * 笔记页：左边目录树，右边正文。
  *
  * 它就是一个**本地 markdown 编辑器**，笔记本是用户自己挑的一个文件夹
- * （设置里的 `noteDir`，见 shared/note.ts 的文件头）。所以这一页有两种样子：
+ * （设置里的 `noteDir`，见 packages/notes/src/note.ts 的文件头）。所以这一页有两种样子：
  *   - **还没选文件夹**：整页只有一句引导与那颗「选择文件夹」按钮。
  *     在那之前不给任何操作入口 —— 没有文件夹就没有地方放笔记，先摆一排按钮只是挡路；
  *   - **选好了**：左树右正文，新建都从树的右键菜单走（顶部那条工具条已经去掉），
  *     左栏底部是笔记本本身与「最近打开」那一份历史记录。
  *
- * 两栏的分隔线可以左右拖（宽度住在 theme.json 里，见 shared/theme.ts 的 `noteTreeWidth`），
+ * 两栏的分隔线可以左右拖（宽度住在 theme.json 里，见 packages/appearance/src/theme.ts 的 `noteTreeWidth`），
  * 与首页那两条栏宽把手同一套做法：拖动时只改本地让界面跟手，松手才落盘。
  *
  * 另外还有一档**只读**（**默认就是它**，Ctrl+/ 切到可写）：读一篇长笔记时不想手一抖改掉它，
  * 就把这一页的写入口统统收起来（正文、格式菜单、左栏树上的增删改拖），省得「看一眼」变成「改一处」。
  * 这一档不落盘，开着的时候标题行里挂着「只读」（带快捷键提示）—— 口径与三条守卫见 readOnly / onShortcut 那两段。
  *
- * 与其它页面一样，它是导航栏上的一项（见 shared/views.ts），换页由 App.vue 的
+ * 与其它页面一样，它是导航栏上的一项（见 packages/appearance/src/views.ts），换页由 App.vue 的
  * `<KeepAlive><component :is>` 负责 —— 切走再回来时编辑器还是刚才那一篇、光标位置也还在。
  * 数据与动作都在 store 里，这一层负责编排：谁被选中、什么时候弹起名字的弹窗、
  * 增删改的确认与提示。树在 NoteTree，正文编辑在 NoteEditor，
@@ -273,7 +273,7 @@ function onContentChange(payload: { rel: string, content: string }): void {
 /**
  * 正文里点了一个指向别的笔记的链接：跳到那一篇。
  *
- * 路径已经在编辑器里解析好了（见 shared/note.ts 的 `resolveNoteLink`），这里只管打开：
+ * 路径已经在编辑器里解析好了（见 packages/notes/src/note.ts 的 `resolveNoteLink`），这里只管打开：
  * 树上没有就先**重扫一遍**再看 —— 目标可能是刚在应用外面写下的（别的编辑器、同步拉回来的），
  * 而树只信磁盘。还没有就如实说找不到，**不把选中项切到一个不存在的路径上**：
  * 那样右栏会显示成「『』是文件夹」这种看不出所以然的话。

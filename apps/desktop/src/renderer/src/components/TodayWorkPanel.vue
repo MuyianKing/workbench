@@ -8,7 +8,7 @@ import { completedEntriesOn } from '@workbench/work-log'
  * 首页「今日完成」卡片：今天**标记为已完成**的工作记录，一条一行（项目标签 + 内容）。
  *
  * 只读不写：记一条、改内容都在「工作」页，这张卡片回答的是「今天做完了几件事」。
- * 数据住在本机的 `work-log.json`（**不进同步仓库**，见 shared/work-log.ts）——
+ * 数据住在本机的 `work-log.json`（**不进同步仓库**，见 packages/work-log/src/work-log.ts）——
  * 与工作页是两次独立读取，但适配层把整份文件缓存在内存里，第二次只是取一份快照，
  * 所以两边看到的是同一份内容，不会各自去读一遍磁盘。
  *

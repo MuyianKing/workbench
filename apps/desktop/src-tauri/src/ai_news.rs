@@ -6,7 +6,7 @@
 //! （曾经有过 Hugging Face 每日论文、arXiv cs.AI 两个英文源与一个需要用户填 token 的机器之心，都按要求撤掉了）。
 //!
 //! **职责分工与项目约定一致**：这一层只做「取原始数据（带 ETag 条件请求）/ 落盘 / 调系统能力」，
-//! 解析、去重、排序、每源缓存与退避策略全在 TS 侧（`src/shared/ai-news.ts`，那边有单测、
+//! 解析、去重、排序、每源缓存与退避策略全在 TS 侧（`packages/ai/src/ai-news.ts`，那边有单测、
 //! 改起来走 Vite 热更新）。所以拉取命令回给渲染层的是**原始文本与状态码**，
 //! 由适配层解析收敛后调 `ai_news_save` 整份写回（防抖在 Rust 侧，300ms 合并一次）。
 
@@ -24,7 +24,7 @@ struct SourceSpec {
     name: &'static str,
     /// 完整地址（含查询串）。**白名单就在这里**，别处不接受任意 URL。
     url: &'static str,
-    /// 载荷格式，与 `src/shared/ai-news.ts` 的 `AiNewsSourceFormat` 对齐
+    /// 载荷格式，与 `packages/ai/src/ai-news.ts` 的 `AiNewsSourceFormat` 对齐
     format: &'static str,
     /// 建议的刷新间隔（毫秒）
     ttl_ms: u64,
@@ -42,7 +42,7 @@ struct SourceSpec {
 /// （曾经有过 Hugging Face 每日论文与 arXiv cs.AI 两个英文源，按要求撤掉了）。
 ///
 /// **顺序就是合并视图里同一条新闻的去重优先级**（先到先得）。
-/// 加源时只改这里：`src/shared/ai-news.ts` 不需要跟着改（它按 format 分发解析器）。
+/// 加源时只改这里：`packages/ai/src/ai-news.ts` 不需要跟着改（它按 format 分发解析器）。
 const SOURCES: &[SourceSpec] = &[SourceSpec {
     id: "qbitai",
     name: "量子位",
@@ -75,7 +75,7 @@ pub fn ai_news_save(value: Value) {
 
 // ---------- 源清单 ----------
 
-/// 送到渲染层的源信息（字段名与 `shared/ai-news.ts` 的 `AiNewsSourceInfo` 一致）。
+/// 送到渲染层的源信息（字段名与 `packages/ai/src/ai-news.ts` 的 `AiNewsSourceInfo` 一致）。
 ///
 /// **不带地址**：拉取时宿主自己查 `SOURCES`，渲染层只报 id 就够 ——
 /// 它因此拿不到一个能出网的字符串，这一条是那道联网边界的一半。

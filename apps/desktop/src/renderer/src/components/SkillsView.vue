@@ -6,7 +6,7 @@ import { FolderOpened, Plus, Refresh, RefreshRight, Upload } from '@element-plus
  *
  * 技能库就是**你挑的那个文件夹**（与笔记文件夹互不相干：两边各自挑各自的，可以正好是同一处、
  * 同一个仓库，也可以不是）；它会落在哪个仓库里由磁盘决定 —— 从那个目录开始看有没有 `.git`，
- * 没有就往上找最近的（见 shared/skills.ts 的 `SkillLibraryState`）。
+ * 没有就往上找最近的（见 packages/skills/src/skills.ts 的 `SkillLibraryState`）。
  * 版本管理就是那个仓库的提交历史 —— 每次保存、新建、删除、导入都会记一笔，
  * 「同步」按钮推的也是那个仓库（只提交技能库那一层，再拉、再推），
  * 而它只在这个仓库有远端时出现。
@@ -17,7 +17,7 @@ import { FolderOpened, Plus, Refresh, RefreshRight, Upload } from '@element-plus
  *
  * 卡片只负责展示（名字、描述、文件数，全部来自 SKILL.md 的自动解析）与「点开它」，
  * 动作都收在详情弹窗里（SkillDetailDialog）。与其它页面一样是导航栏上的一项
- * （见 shared/views.ts），换页由 App.vue 的 KeepAlive 负责，数据与动作都在 store 里。
+ * （见 packages/appearance/src/views.ts），换页由 App.vue 的 KeepAlive 负责，数据与动作都在 store 里。
  */
 import { computed, onMounted, ref } from 'vue'
 import PanelLoading from '@/components/PanelLoading.vue'

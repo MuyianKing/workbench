@@ -4,7 +4,7 @@
 //! 这样前端的 `WorkbenchApi` 契约不用改一个字。
 //!
 //! 这一层刻意做薄：只做「取原始数据 / 落盘 / 调系统能力」，不做业务语义。
-//! 合并、排序、收敛、状态机都在 `src/shared/` 与渲染层，那边有测试、改起来也是 HMR 秒级。
+//! 合并、排序、收敛、状态机都在 `packages/` 与渲染层，那边有测试、改起来也是 HMR 秒级。
 //!
 //! **命令的同步 / 异步约定**：`#[tauri::command]` 默认落在「阻塞」执行上下文 ——
 //! 函数体会在 IPC 处理器所在的那个线程（也就是主线程）上内联跑完，所以「起一个子进程」
@@ -49,8 +49,8 @@ pub fn work_log_store() -> &'static JsonStore {
     WORK_LOG.get_or_init(|| JsonStore::new(paths::work_log_file, "保存工作日志"))
 }
 
-/// 笔记没有数据文件：它就是用户挑的那个文件夹里的 .md 文件（见 notes.rs），
-/// 所以这里没有第五份 JsonStore，也没有 load / save / flush。
+// 笔记没有数据文件：它就是用户挑的那个文件夹里的 .md 文件（见 notes.rs），
+// 所以这里没有第五份 JsonStore，也没有 load / save / flush。
 
 /// 启动时载入各份数据（原始 JSON；收敛由 TS 侧负责）
 pub fn load_all() {
@@ -86,11 +86,6 @@ pub fn data_load() -> Value {
 pub fn data_save(value: Value) {
     data_store().set(value);
     data_store().schedule();
-}
-
-#[tauri::command]
-pub fn data_flush() {
-    flush_all();
 }
 
 #[tauri::command]
@@ -178,7 +173,7 @@ pub fn note_delete(root: String, rel: String) -> Result<(), String> {
 ///
 /// `data` 是整张图的 base64（渲染层从粘贴的图片里读到的字节，原样过来）。
 /// 回来的是它在仓库里的相对路径与分支 —— 访问地址（raw URL）由渲染层按仓库地址拼，
-/// 那是纯计算，留在有测试的那一侧（见 shared/note-image.ts）。
+/// 那是纯计算，留在有测试的那一侧（见 packages/notes/src/note-image.ts）。
 #[tauri::command(async)]
 pub fn note_image_upload(
     repo: String,
@@ -194,7 +189,7 @@ pub fn note_image_upload(
 /// 素材管理：图片仓库里现有的图（顺手把本地克隆拉到最新）。
 ///
 /// 只回仓库里那个图片子目录中的图片文件；「谁被引用了多少次」由渲染层拿笔记正文去算
-/// （那是纯计算，见 shared/note-image.ts）。
+/// （那是纯计算，见 packages/notes/src/note-image.ts）。
 #[tauri::command(async)]
 pub fn note_images_list(repo: String, dir: String) -> Result<Value, String> {
     crate::sync::list_images(&repo, &dir)
@@ -421,7 +416,7 @@ pub fn ai_models_fetch(
 /// `images` 是用户随这一句贴的图（形状见 ai.rs 的 `ImageInput`）：与提示词进**同一行**
 /// JSON（Pi 的 `prompt` 命令收 `images`）—— 只有图没有字的一句也算「发了话」。
 ///
-/// `permission` 是权限模式（`auto-edit` / `full`，形状在 shared/ai.ts）：自动编辑时
+/// `permission` 是权限模式（`auto-edit` / `full`，形状在 packages/ai/src/ai.ts）：自动编辑时
 /// ai.rs 会加载一份 `tool_call` 钩子扩展，模型要执行命令时先回头问一次 —— 那次询问是
 /// stdout 上的 `extension_ui_request`，答复经下面的 `session_write` 回给它。
 #[tauri::command(async)]
@@ -562,7 +557,7 @@ pub fn window_is_maximized(window: WebviewWindow) -> bool {
 /// 自绘的那条标题栏归渲染层，这里只管系统这两处 —— 少了它，改完名字任务栏上还是
 /// 构建时那个名字，两边对不上。
 ///
-/// 名称的收敛（去首尾空白、空串回默认名、截断到上限）在 `shared/app-name.ts`，
+/// 名称的收敛（去首尾空白、空串回默认名、截断到上限）在 `packages/appearance/src/app-name.ts`，
 /// 到这里的一定是已经收好的值：两端各写一份判定迟早会分叉（那个文件的注释也是这么说的）。
 ///
 /// 做成命令而不是启动时读一次 theme.json：设置里改完要立刻生效。
@@ -717,13 +712,15 @@ pub fn kill_port_process(port: u16) -> Result<(), String> {
     system::kill_port_process(port)
 }
 
-/// 只发起、不等结果（explorer 是 spawn 出去的），所以留在主线程上没有代价
-#[tauri::command]
+/// 在资源管理器里选中一个路径。只发起、不等结果（explorer 是 spawn 出去的），
+/// 但起进程本身仍算子进程操作 —— 按仓库规矩（见 features-and-architecture.md）
+/// 一并走 async 上下文，与 `open_path` / `open_in_vscode` 同口径。
+#[tauri::command(async)]
 pub fn reveal(path: String) {
     system::reveal(&path)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn open_external(url: String) -> Result<(), String> {
     system::open_external(&url)
 }
@@ -770,7 +767,7 @@ pub fn run_command(program: String, args: Vec<String>, timeout_ms: u64) -> Value
 /// 映射成渲染层认识的事件形状由适配层负责。
 ///
 /// 环境变量参数传空：注入能力只留给 Rust 内部的调用方（AI 那条命令要带密钥，见 ai.rs）。
-#[tauri::command]
+#[tauri::command(async)]
 pub fn spawn_session(
     app: AppHandle,
     session_id: String,
@@ -783,7 +780,7 @@ pub fn spawn_session(
 
 /// 往一条会话的标准输入写一行 JSON。**目前只有 AI 那条 RPC 通道用得上**：
 /// 提示词由 Rust 侧写（见 ai.rs），扩展问「这条命令让不让跑」时的答复由渲染层写回来
-/// （形状见 shared/ai.ts 的 confirmFrame）。别的会话起进程时给的是 null stdin，
+/// （形状见 packages/ai/src/ai.ts 的 confirmFrame）。别的会话起进程时给的是 null stdin，
 /// 这里会回一句「这条会话不接受输入」，不会静默丢掉。
 #[tauri::command]
 pub fn session_write(app: AppHandle, session_id: String, line: String) -> Result<(), String> {
@@ -862,7 +859,7 @@ pub fn allow_background(app: AppHandle, path: String) -> Result<(), String> {
 }
 
 /// 用系统最自然的方式打开路径（ShellExecute）：快捷启动就靠它
-#[tauri::command]
+#[tauri::command(async)]
 pub fn open_path(path: String) -> Result<(), String> {
     system::open_path(&path)
 }
@@ -895,7 +892,7 @@ pub fn set_autostart(app: AppHandle, enabled: bool) -> Result<(), String> {
 }
 
 /**
- * 重装一遍全部全局快捷键（唤起窗口 / 截图 / 钉图穿透），值由渲染层给。
+ * 重装一遍全部全局快捷键（唤起窗口 / 截图），值由渲染层给。
  *
  * **三串一起传是有意的**：三条快捷键必须一次性装好（见 main.rs 的 register_hotkeys ——
  * 插件注册是「先全清再逐条注册」，分几次调就会互相注销）。空串 / null = 不要那一条。
@@ -909,9 +906,8 @@ pub fn apply_hotkeys(
     app: AppHandle,
     main: Option<String>,
     capture: Option<String>,
-    pin_through: Option<String>,
 ) -> Result<(), String> {
-    let set = crate::parse_hotkeys(main, capture, pin_through)?;
+    let set = crate::parse_hotkeys(main, capture)?;
     crate::register_hotkeys(&app, set)
 }
 
@@ -920,7 +916,7 @@ pub fn apply_hotkeys(
 pub fn resolve_quit_choice(app: AppHandle, choice: String) {
     let waiting = {
         let state = app.state::<crate::PendingQuit>();
-        let mut guard = state.0.lock().unwrap();
+        let mut guard = state.0.lock().expect("锁中毒");
         guard.take()
     };
 
@@ -1021,7 +1017,7 @@ pub fn fs_list_dir(path: String) -> Result<Vec<Value>, String> {
 }
 
 /// 把一套设计规范写到项目根目录的 DESIGN.md。
-/// 内容由渲染层按 token 现生成（见 shared/design-export.ts），这一侧只落盘；
+/// 内容由渲染层按 token 现生成（见 packages/appearance/src/design-export.ts），这一侧只落盘；
 /// 目标固定是 `<项目根>/DESIGN.md`，同名覆盖，回执里说明原本是否已有这个文件。
 #[tauri::command(async)]
 pub fn design_write(project_dir: String, content: String) -> Result<design::WriteOutcome, String> {
@@ -1063,3 +1059,136 @@ pub fn list_wallpapers(app: AppHandle) -> Vec<String> {
     files.sort();
     files
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 每个用例一个独立临时目录，用完就删
+    fn temp_dir(label: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("wb-cmd-{label}-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn fs_read_text_reads_content_and_reports_missing_files() {
+        let dir = temp_dir("read-text");
+        let file = dir.join("note.md");
+        std::fs::write(&file, "# 标题\n正文").unwrap();
+
+        let text = fs_read_text(file.to_string_lossy().into_owned()).unwrap();
+        assert_eq!(text, "# 标题\n正文");
+
+        let err = fs_read_text(dir.join("missing.md").to_string_lossy().into_owned()).unwrap_err();
+        assert!(err.contains("读取失败"), "实际是 {err}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn fs_read_base64_returns_the_same_bytes() {
+        let dir = temp_dir("read-b64");
+        let file = dir.join("blob.bin");
+        let bytes: Vec<u8> = (0..=255u8).collect();
+        std::fs::write(&file, &bytes).unwrap();
+
+        let encoded = fs_read_base64(file.to_string_lossy().into_owned()).unwrap();
+        assert_eq!(encoded, crate::encoding::base64(&bytes));
+        assert!(fs_read_base64(dir.join("nope.bin").to_string_lossy().into_owned()).is_err());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn fs_exists_and_is_dir_tell_files_folders_and_ghosts_apart() {
+        let dir = temp_dir("exists");
+        let file = dir.join("a.txt");
+        std::fs::write(&file, "x").unwrap();
+
+        assert!(fs_exists(dir.to_string_lossy().into_owned()));
+        assert!(!fs_is_dir(file.to_string_lossy().into_owned()));
+        assert!(fs_is_dir(dir.to_string_lossy().into_owned()));
+
+        let ghost = dir.join("ghost");
+        assert!(!fs_exists(ghost.to_string_lossy().into_owned()));
+        assert!(!fs_is_dir(ghost.to_string_lossy().into_owned()));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn fs_stat_mtime_is_none_for_a_missing_file() {
+        let dir = temp_dir("mtime");
+        let file = dir.join("a.txt");
+        std::fs::write(&file, "x").unwrap();
+
+        assert!(fs_stat_mtime(file.to_string_lossy().into_owned()).is_some());
+        assert!(fs_stat_mtime(dir.join("ghost").to_string_lossy().into_owned()).is_none());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn fs_list_dir_carries_metadata_and_reports_a_missing_dir() {
+        let dir = temp_dir("list");
+        std::fs::write(dir.join("a.txt"), "hello").unwrap();
+        std::fs::create_dir(dir.join("sub")).unwrap();
+
+        let mut entries = fs_list_dir(dir.to_string_lossy().into_owned()).unwrap();
+        entries.sort_by_key(|entry| entry["name"].as_str().unwrap_or("").to_string());
+        assert_eq!(entries.len(), 2, "实际 {entries:?}");
+
+        assert_eq!(entries[0]["name"], "a.txt");
+        assert_eq!(entries[0]["isDir"], false);
+        assert!(entries[0]["path"].as_str().unwrap().ends_with("a.txt"));
+        assert!(entries[0]["mtimeMs"].as_u64().is_some());
+
+        assert_eq!(entries[1]["name"], "sub");
+        assert_eq!(entries[1]["isDir"], true);
+
+        let err = fs_list_dir(dir.join("ghost").to_string_lossy().into_owned()).unwrap_err();
+        assert!(err.contains("读取目录失败"), "实际是 {err}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn token_zstd_decode_reads_a_frame_and_rejects_unreadable_input() {
+        let dir = temp_dir("zstd");
+        let text = "会话标题：认识一下\n第二行\n";
+
+        let frame = dir.join("frame.bin");
+        std::fs::write(&frame, zstd::encode_all(text.as_bytes(), 0).unwrap()).unwrap();
+        assert_eq!(token_zstd_decode(frame.to_string_lossy().into_owned()).unwrap(), text);
+
+        // 没有 zstd 魔数 = 一帧都解不出来：回空串而不是报错（坏帧只丢那一帧）
+        let garbage = dir.join("garbage.bin");
+        std::fs::write(&garbage, b"not a zstd frame").unwrap();
+        assert_eq!(token_zstd_decode(garbage.to_string_lossy().into_owned()).unwrap(), "");
+
+        assert!(token_zstd_decode(dir.join("ghost").to_string_lossy().into_owned()).is_err());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn probe_version_is_none_for_a_program_that_is_not_there() {
+        // 走 `cmd /C <bin> --version`：命令根本起不来时安静地回 None，不报错
+        assert_eq!(probe_version("workbench-no-such-binary-xyz".to_string()), None);
+    }
+
+    #[test]
+    fn process_created_at_knows_the_current_process() {
+        assert!(process_created_at(std::process::id()).is_some());
+        assert_eq!(process_created_at(u32::MAX), None);
+    }
+
+    #[test]
+    fn data_dir_sits_under_the_app_folder() {
+        let dir = data_dir();
+        assert!(dir.ends_with("data"), "实际是 {dir}");
+        assert!(dir.contains("Workbench"), "实际是 {dir}");
+    }
+}
+

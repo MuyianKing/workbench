@@ -1,7 +1,7 @@
 /**
  * 样式参考库的适配层：把一份设计规范写到用户选的项目里。
  *
- * 生成什么内容、给谁用都在 shared/design-export.ts（纯逻辑，带单测）；
+ * 生成什么内容、给谁用都在 packages/appearance/src/design-export.ts（纯逻辑，带单测）；
  * 这一层只做两件渲染层不该操心的事：
  *   1. 把项目路径收敛成命令参数（去空白，与笔记那条 `rootArg` 同一条口径）；
  *   2. 把宿主抛出的失败收敛成 `Result`（`guard`，见 bridge.ts）。

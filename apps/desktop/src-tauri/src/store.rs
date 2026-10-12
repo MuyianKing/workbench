@@ -1,7 +1,7 @@
 //! 去抖 JSON 单文件存储：`300ms 合并 + 临时文件 rename + 退出前同步落盘`。
 //!
 //! 与 Electron 版 `main/json-store.ts` 的行为对齐，但刻意做薄：Rust 只负责「把 TS 给的
-//! JSON 原样安全写盘」，不做 sanitize —— 收敛逻辑留在 `src/shared/persisted-data.ts`，
+//! JSON 原样安全写盘」，不做 sanitize —— 收敛逻辑留在 `apps/desktop/src/renderer/src/persisted-data.ts`，
 //! 与渲染层共用一份，也就不需要为它写两遍测试。
 
 use crate::fs_util;
@@ -72,7 +72,7 @@ impl JsonStore {
             .and_then(|text| serde_json::from_str::<Value>(&text).ok())
             .unwrap_or(Value::Null);
 
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock().expect("锁中毒");
         inner.value = value.clone();
         inner.loaded = true;
         inner.dirty = false;
@@ -80,12 +80,12 @@ impl JsonStore {
     }
 
     pub fn get(&self) -> Value {
-        self.inner.lock().unwrap().value.clone()
+        self.inner.lock().expect("锁中毒").value.clone()
     }
 
     /// 直接替换内存值（调用方应已 sanitize 过）
     pub fn set(&self, value: Value) {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock().expect("锁中毒");
         inner.value = value;
         inner.dirty = true;
     }
@@ -110,13 +110,13 @@ impl JsonStore {
 
 /// 载入完成、且本进程改过，才允许落盘
 fn should_write(inner: &Arc<Mutex<Inner>>) -> bool {
-    let inner = inner.lock().unwrap();
+    let inner = inner.lock().expect("锁中毒");
     inner.loaded && inner.dirty
 }
 
 /// 先写临时文件再 rename：rename 在同一卷上是原子的，不会留下半个 JSON。
 fn write_file(path: PathBuf, label: &str, inner: &Arc<Mutex<Inner>>) {
-    let value = inner.lock().unwrap().value.clone();
+    let value = inner.lock().expect("锁中毒").value.clone();
     let text = match serde_json::to_string_pretty(&value) {
         Ok(text) => text,
         Err(err) => {

@@ -24,6 +24,8 @@ const props = defineProps<{
   ink: string
   /** 光标处的坐标文本，如 `(1024, 768)` */
   position: string
+  /** 复制读数后的反馈（有它就顶替掉坐标那一格） */
+  note?: string
 }>()
 
 const canvas = ref<HTMLCanvasElement | null>(null)
@@ -93,7 +95,7 @@ watch(() => [props.cursor.x, props.cursor.y, props.bitmap, props.zoom, props.sid
     <canvas ref="canvas" :width="backing" :height="backing" :style="{ width: `${side}px`, height: `${side}px` }" />
     <div class="magnifier__readout" :style="{ background: pixel, color: ink }">
       <span class="magnifier__hex">{{ pixel }}</span>
-      <span class="magnifier__pos">{{ position }}</span>
+      <span class="magnifier__pos">{{ note || position }}</span>
     </div>
   </div>
 </template>

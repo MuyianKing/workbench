@@ -39,7 +39,7 @@ const active = computed(() => store.activeView)
 
 /**
  * 显示哪几项、按什么先后，都由设置里的「菜单」决定（关掉的页整项不出现，
- * 顺序是用户在设置里拖出来的，见 shared/views.ts 的 orderedViews）。
+ * 顺序是用户在设置里拖出来的，见 packages/appearance/src/views.ts 的 orderedViews）。
  */
 const items = computed(() =>
   orderedViews(settings.settings.hiddenViews, settings.settings.viewOrder),

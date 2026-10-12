@@ -56,7 +56,7 @@ const props = defineProps<{
   /**
    * 当前笔记本（笔记文件夹的绝对路径）。
    *
-   * 粘贴的图片要按「哪台机器、哪个笔记本」分目录进仓库（见 shared/note-image.ts 的 imageScopeDir），
+   * 粘贴的图片要按「哪台机器、哪个笔记本」分目录进仓库（见 packages/notes/src/note-image.ts 的 imageScopeDir），
    * 而这两个来源里只有笔记本在这里说了算：路径由上层带进来，省得编辑器自己去问一遍。
    */
   root: string
@@ -83,7 +83,7 @@ const emit = defineEmits<{
   /**
    * 正文里点了一个指向**本笔记本里另一篇笔记**的链接（`[标题](./别的.md)`）：请上层打开它。
    *
-   * 这里只做到「链接指向哪一篇」（相对路径的解析是纯函数，见 shared/note.ts 的 resolveNoteLink）；
+   * 这里只做到「链接指向哪一篇」（相对路径的解析是纯函数，见 packages/notes/src/note.ts 的 resolveNoteLink）；
    * 那一篇在不在、要不要重扫一遍树、跳过去之后选中谁，都是上层的事。
    */
   open: [rel: string]

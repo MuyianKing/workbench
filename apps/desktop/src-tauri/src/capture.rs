@@ -188,7 +188,7 @@ pub fn active(app: &AppHandle) -> bool {
     app.state::<CaptureState>()
         .0
         .lock()
-        .unwrap()
+        .expect("锁中毒")
         .session
         .is_some()
 }
@@ -238,7 +238,7 @@ fn start(app: &AppHandle) -> Result<usize, String> {
     // 会话要在**推事件之前**进状态：窗口里的 JS 收到 sync 就会立刻来问 capture_context
     let id = {
         let state = app.state::<CaptureState>();
-        let mut guard = state.0.lock().unwrap();
+        let mut guard = state.0.lock().expect("锁中毒");
         guard.last_session += 1;
         let id = guard.last_session;
         guard.session = Some(Session {
@@ -281,7 +281,7 @@ pub fn capture_show(window: WebviewWindow, app: AppHandle, id: u64) -> Result<()
 
     let ready = {
         let state = app.state::<CaptureState>();
-        let mut guard = state.0.lock().unwrap();
+        let mut guard = state.0.lock().expect("锁中毒");
         match guard.session.as_mut() {
             Some(session) if session.id == id => {
                 session.pending.retain(|item| *item != index);
@@ -307,7 +307,7 @@ pub fn capture_show(window: WebviewWindow, app: AppHandle, id: u64) -> Result<()
 fn maybe_show(app: &AppHandle, id: u64) -> Result<(), String> {
     let ready = {
         let state = app.state::<CaptureState>();
-        let mut guard = state.0.lock().unwrap();
+        let mut guard = state.0.lock().expect("锁中毒");
         match guard.session.as_mut() {
             Some(session) if session.id == id && !session.shown => {
                 session.shown = true;
@@ -330,7 +330,7 @@ fn maybe_show(app: &AppHandle, id: u64) -> Result<(), String> {
 fn show_session(app: &AppHandle) -> Result<(), String> {
     let (generation, geometry) = {
         let state = app.state::<CaptureState>();
-        let guard = state.0.lock().unwrap();
+        let guard = state.0.lock().expect("锁中毒");
         let geometry: Vec<MonitorFrame> = guard
             .session
             .as_ref()
@@ -375,7 +375,7 @@ pub fn abort(app: &AppHandle) {
 
     // 取锁放在藏窗之后：窗口事件会派发，持着锁等它不划算。
     // 会话里只有内存中的几份 PNG，丢掉引用就算收工了 —— 没有临时文件要删
-    let _ = app.state::<CaptureState>().0.lock().unwrap().session.take();
+    let _ = app.state::<CaptureState>().0.lock().expect("锁中毒").session.take();
 
     // 收工也通知一声（**不带编号** = 这一场结束了）：遮罩里那张上一场的帧（ImageBitmap +
     // 取样画布，4K 下是几十兆）、选区与标注都该丢掉 —— 窗口留着复用，但不必留着上一张图。
@@ -412,10 +412,10 @@ fn overlays_of(app: &AppHandle, generation: u64) -> Vec<WebviewWindow> {
 fn ensure_overlays(app: &AppHandle, specs: &[MonitorSpec]) -> Result<Vec<WebviewWindow>, String> {
     // 建池子这件事一次只能有一个（预建与「按了热键现建」会撞）
     let state = app.state::<CaptureState>();
-    let _building = state.1.lock().unwrap();
+    let _building = state.1.lock().expect("锁中毒");
 
     let needed = specs.len();
-    let generation = state.0.lock().unwrap().generation;
+    let generation = state.0.lock().expect("锁中毒").generation;
     let pooled = overlays_of(app, generation);
 
     if needed > 0 && pooled.len() == needed {
@@ -428,7 +428,7 @@ fn ensure_overlays(app: &AppHandle, specs: &[MonitorSpec]) -> Result<Vec<Webview
 fn build_overlays(app: &AppHandle, needed: usize) -> Result<Vec<WebviewWindow>, String> {
     let generation = {
         let state = app.state::<CaptureState>();
-        let mut guard = state.0.lock().unwrap();
+        let mut guard = state.0.lock().expect("锁中毒");
         guard.generation += 1;
         guard.generation
     };
@@ -457,13 +457,13 @@ fn build_overlays(app: &AppHandle, needed: usize) -> Result<Vec<WebviewWindow>, 
 /// 把池子整个收掉（用户把截图功能关了）
 fn release(app: &AppHandle) {
     let state = app.state::<CaptureState>();
-    let _building = state.1.lock().unwrap();
+    let _building = state.1.lock().expect("锁中毒");
 
     for window in overlay_windows(app) {
         let _ = window.close();
     }
 
-    let mut guard = state.0.lock().unwrap();
+    let mut guard = state.0.lock().expect("锁中毒");
     guard.session = None;
     // 加一代：池子里那批窗口的代号再也对不上，下次要用了会重建
     guard.generation += 1;
@@ -524,7 +524,7 @@ fn create_overlay_window(
     generation: u64,
     index: usize,
 ) -> Result<WebviewWindow, String> {
-    WebviewWindowBuilder::new(
+    let window = WebviewWindowBuilder::new(
         app,
         overlay_label(generation, index),
         WebviewUrl::App("capture.html".into()),
@@ -539,7 +539,35 @@ fn create_overlay_window(
     .focused(false)
     .title("截图")
     .build()
-    .map_err(|err| format!("铺遮罩窗口失败：{err}"))
+    .map_err(|err| format!("铺遮罩窗口失败：{err}"))?;
+
+    // 必须在第一次显示之前设（见 disable_transitions）
+    disable_transitions(&window);
+    Ok(window)
+}
+
+/// 关掉这个窗口显示 / 收起时的那一段过渡。
+///
+/// 不关的话 Windows 会给「隐藏」补一段淡出（实测约 150~200ms，桌面从底下渐渐透出来）——
+/// 遮罩要的是「按下就出现、收工就消失」，那段过渡既看着像画面在渐变，也把热键那一下拖慢。
+/// **必须在窗口第一次显示之前设**，所以建窗口时来一次；`show_overlay` 里再补一次，
+/// 因为 tao 每次改窗口样式都会 `SetWindowLongW`，有可能把这个属性带掉。
+/// 设不上（旧系统不认这个属性）也无所谓：最坏就是那段过渡还在。
+fn disable_transitions(window: &WebviewWindow) {
+    use windows_sys::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_TRANSITIONS_FORCEDISABLED};
+
+    let Ok(handle) = window.hwnd() else {
+        return;
+    };
+    let disabled: i32 = 1;
+    unsafe {
+        DwmSetWindowAttribute(
+            handle.0,
+            DWMWA_TRANSITIONS_FORCEDISABLED as u32,
+            &disabled as *const i32 as *const std::ffi::c_void,
+            std::mem::size_of::<i32>() as u32,
+        );
+    }
 }
 
 /// 摆位置、定尺寸、显示出来。焦点由调用方在**全部显示完之后**统一给（见 start）。
@@ -553,6 +581,8 @@ fn show_overlay(window: &WebviewWindow, frame: &MonitorFrame) -> Result<(), Stri
     window
         .set_size(PhysicalSize::new(frame.width, frame.height))
         .map_err(|err| format!("定遮罩窗口尺寸失败：{err}"))?;
+    // 显示前再压一次过渡（见 disable_transitions：改样式有可能把它带掉）
+    disable_transitions(window);
     window
         .show()
         .map_err(|err| format!("显示遮罩窗口失败：{err}"))
@@ -605,7 +635,7 @@ fn encode_png(image: &image::RgbaImage, out: &mut Vec<u8>) -> Result<(), String>
 pub fn capture_context(window: WebviewWindow, app: AppHandle) -> Result<CaptureContext, String> {
     let index = overlay_index(window.label()).ok_or("这个窗口不是截图遮罩")?;
     let state = app.state::<CaptureState>();
-    let guard = state.0.lock().unwrap();
+    let guard = state.0.lock().expect("锁中毒");
     let session = guard.session.as_ref().ok_or("截图会话已经结束了")?;
     let monitor = session
         .frames
@@ -636,7 +666,7 @@ pub fn capture_context(window: WebviewWindow, app: AppHandle) -> Result<CaptureC
 pub fn capture_frame(window: WebviewWindow, app: AppHandle) -> Result<String, String> {
     let index = overlay_index(window.label()).ok_or("这个窗口不是截图遮罩")?;
     let state = app.state::<CaptureState>();
-    let guard = state.0.lock().unwrap();
+    let guard = state.0.lock().expect("锁中毒");
     let session = guard.session.as_ref().ok_or("截图会话已经结束了")?;
     let frame = session
         .frames
@@ -675,7 +705,8 @@ fn options() -> CaptureOptions {
     }
 }
 
-/// 起一次截图（设置界面里那颗「试一下」按钮走它）
+/// 起一次截图。**只给验证配方用**：界面上已经没有入口了（原来那颗「试一下」按钮已去掉），
+/// 驱动方式见 docs/modules/screenshot.md 的「验证」一节（CDP 在页面里调 `beginCapture`）。
 #[tauri::command(async)]
 pub fn capture_begin(app: AppHandle) -> Result<usize, String> {
     start(&app)

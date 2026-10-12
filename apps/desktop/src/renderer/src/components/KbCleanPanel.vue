@@ -11,7 +11,7 @@ import { ArrowLeft, Loading, MagicStick } from '@element-plus/icons-vue'
  *
  * 面板只画状态：起跑 / 取消 / 重试 / 关 / 开模型管理都交回 store 与页面（见 stores/kb.ts）。
  *
- * 底部的**收据**说清这一轮动了哪几条（新建的与覆盖的分开，口径在 shared/kb-clean.ts 的
+ * 底部的**收据**说清这一轮动了哪几条（新建的与覆盖的分开，口径在 packages/kb/src/kb-clean.ts 的
  * splitCleanWrites）：条目名是一颗能点的按钮，点一下收面板、直接去读那一条。
  */
 import { computed, nextTick, ref, watch } from 'vue'

@@ -127,7 +127,7 @@ function onDrop(key: string, event: DragEvent): void {
 }
 
 function pickSort(key: string): void {
-  // 走 store action 而不是直接赋值，非法值不会被写进 sortBy；取值表在 shared/project-sort.ts
+  // 走 store action 而不是直接赋值，非法值不会被写进 sortBy；取值表在 packages/core/src/project-sort.ts
   if (isProjectSort(key))
     store.setSortBy(key)
 }

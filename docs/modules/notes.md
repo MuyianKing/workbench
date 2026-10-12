@@ -156,7 +156,7 @@ true、清单里不能放选中项自己）只在那里写清楚了，下面不�
 
 ### 笔记同步
 
-远端**不在设置里**：同步到哪儿就是那个笔记文件夹自己连着的 `origin`（`shared/note.ts` 的 `NoteRepoState`），
+远端**不在设置里**：同步到哪儿就是那个笔记文件夹自己连着的 `origin`（`packages/notes/src/note.ts` 的 `NoteRepoState`），
 入口是笔记页左栏底部那颗同步按钮，实现在 `sync.rs` 的 `sync_notes`。
 与另外两处同步最大的区别是**没有克隆目录**：跑 git 的地方就是用户那个笔记文件夹本身
 —— 「笔记就是磁盘上那些 `.md`」这条不变。调用 git 的方式（直启、`GIT_TERMINAL_PROMPT=0`）见 [AGENTS.md](../../AGENTS.md) 第 1 节。

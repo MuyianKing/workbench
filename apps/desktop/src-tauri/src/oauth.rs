@@ -233,7 +233,7 @@ pub fn login_start(provider_id: &str) -> Result<Value, String> {
     let config = config_of(provider)?;
 
     // 起新的之前先把上一次的收掉：否则监听端口还占着，bind 一定失败
-    *PENDING.lock().unwrap() = None;
+    *PENDING.lock().expect("锁中毒") = None;
 
     // 端口被占用就明确报错，不静默换端口 —— Gitee 的 redirect_uri 必须与注册值逐字一致，
     // 换端口只会变成一个更难懂的「回调地址不匹配」。
@@ -273,7 +273,7 @@ pub fn login_start(provider_id: &str) -> Result<Value, String> {
         encode_pairs(&params)
     );
 
-    *PENDING.lock().unwrap() = Some(Pending {
+    *PENDING.lock().expect("锁中毒") = Some(Pending {
         provider,
         state,
         verifier,
@@ -285,13 +285,13 @@ pub fn login_start(provider_id: &str) -> Result<Value, String> {
 }
 
 pub fn login_cancel() {
-    *PENDING.lock().unwrap() = None;
+    *PENDING.lock().expect("锁中毒") = None;
 }
 
 /// 收一次回调。非阻塞，没连接就返回 `pending`；轮询节奏由渲染层控制。
 pub fn login_poll() -> Value {
     let step = {
-        let mut guard = PENDING.lock().unwrap();
+        let mut guard = PENDING.lock().expect("锁中毒");
         let Some(pending) = guard.as_mut() else {
             return json!({ "status": "failed", "error": "没有进行中的登录，请重新发起" });
         };
@@ -333,7 +333,7 @@ pub fn login_submit(pasted: &str) -> Value {
     };
 
     let taken = {
-        let mut guard = PENDING.lock().unwrap();
+        let mut guard = PENDING.lock().expect("锁中毒");
         let Some(pending) = guard.as_ref() else {
             return json!({ "status": "failed", "error": "没有进行中的登录，请重新发起" });
         };

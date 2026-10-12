@@ -12,7 +12,7 @@
 
 ### 密码学与密钥
 
-- **加解密一律在渲染层，用 WebView2 自带的 WebCrypto**（`shared/vault.ts`）。Rust 侧**一行密码学都没有**，
+- **加解密一律在渲染层，用 WebView2 自带的 WebCrypto**（`packages/vault/src/vault.ts`）。Rust 侧**一行密码学都没有**，
   也**不要**为了「把它挪回后端」去引 `rsa` / `p256` / `aes-gcm` 这类 crate —— 项目对新增依赖的判据是
   「不新增编译单元」（AGENTS.md 第 1 节），这几套都会拉进成片的编译单元。
 - **本机密钥过一次 IPC，这是全项目唯一的例外**（`vault_key_read` / `vault_key_write`）。理由是解密后的正文本来
@@ -58,7 +58,7 @@
 
 ### 文件与合并
 
-- 文件形状见 `shared/vault.ts` 的 `VaultFile` / `VaultItem`。**信封是明文、正文是密文**，这不是疏漏：
+- 文件形状见 `packages/vault/src/vault.ts` 的 `VaultFile` / `VaultItem`。**信封是明文、正文是密文**，这不是疏漏：
   跨设备合并要在没有密钥的情况下算出同一个结果 —— 认身份靠 `id`、判新旧靠 `updatedAt`、破平靠 `by`、
   认删除靠 `deleted`。**给信封加字段要同时想清楚它在合并里是什么意思**，否则两台机器会各执一词。
 - `mergeVaultItems` 是**同步的全部**，两条不能破：
@@ -199,12 +199,12 @@
   src/vault.rs           密码保险库的宿主侧：本机那份 vault.json 的落盘、密钥在凭据管理器里的存取、
                          同步仓库里 vault/vault.json 的读与写（复用 sync.rs 的 git 管道）、
                          解锁那一步的身份验证（默认 Windows Hello，没配才退回本机账户密码）。
-                         **一行密码学都没有** —— 加解密全在渲染层，见 shared/vault.ts 的文件头
+                         **一行密码学都没有** —— 加解密全在渲染层，见 packages/vault/src/vault.ts 的文件头
 ```
 
 渲染层两处（原注解）：
 
 ```
-    vault.ts（密码保险库：加解密、跨设备合并、以及「拉 → 合 → 推」那几轮编排，见 shared/vault.ts）
+    vault.ts（密码保险库：加解密、跨设备合并、以及「拉 → 合 → 推」那几轮编排，见 packages/vault/src/vault.ts）
     vault.ts             密码保险库：密钥状态（有没有 / 解没解锁 / 公钥指纹）、条目清单、增删改与同步的编排（stores/）
 ```

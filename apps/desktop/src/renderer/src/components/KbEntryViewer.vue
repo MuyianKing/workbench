@@ -7,7 +7,7 @@ import type { KbEntryMeta } from '@workbench/kb'
  * 元数据 —— 出处（source 指回的那份原始资料）、状态与更新日期。应用对条目是只读的：
  * 改内容去原始资料源头，再清洗一轮就会覆盖出来。
  *
- * 正文里的**站内链接**（条目之间用相对路径互链，见 shared/kb-lint.ts）往上交给父层去跳：
+ * 正文里的**站内链接**（条目之间用相对路径互链，见 packages/kb/src/kb-lint.ts）往上交给父层去跳：
  * 这里只管把 MarkdownView 那个口子打开，解析成哪一条是父层的事。
  */
 import { ArrowLeft } from '@element-plus/icons-vue'

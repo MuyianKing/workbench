@@ -6,8 +6,8 @@
 
 ## 约束
 
-关键落点：`shared/activity.ts`（连续天数 `streakOf`）、`shared/ai-news.ts`（RSS 解析与逐源缓存策略）、
-`shared/weather.ts`（WMO 码表与两条接口回包的解析）、`stores/settings.ts`（布局与卡片开关的落盘）、
+关键落点：`packages/core/src/activity.ts`（连续天数 `streakOf`）、`packages/ai/src/ai-news.ts`（RSS 解析与逐源缓存策略）、
+`packages/weather/src/weather.ts`（WMO 码表与两条接口回包的解析）、`stores/settings.ts`（布局与卡片开关的落盘）、
 Rust 侧 `ai_news.rs`（热点源白名单）与 `weather.rs`（天气主机白名单）。
 
 - **顶栏问候那一行不发 IPC**：用到的数都已在 projects / settings / auth 三个 store 里
@@ -41,9 +41,9 @@ Rust 侧 `ai_news.rs`（热点源白名单）与 `weather.rs`（天气主机白�
 - **天气排在实话最前**（它说「此刻」，后面的说「今天」）：数据来自 weather store 后台按间隔取
   （唯一的例外：这一行自己不发 IPC，但天气是后台取的；`weatherCity` 没填、没取到、取失败都是空串，
   那段就不画 —— 出网边界见[「数据与隐私」](../features-and-architecture.md)）。显示口径只有
-  「现象 + 气温」，码表与解析在 [shared/weather.ts](../../packages/weather/src/weather.ts)；
+  「现象 + 气温」，码表与解析在 [weather.ts](../../packages/weather/src/weather.ts)；
   实况半小时一取，失败不清上一次的值、原因只留控制台（城市是用户手填的，填错了去设置改）。
-  连续天数走 `shared/activity.ts` 的 `streakOf`（只取这一个数，不必铺整张日历）
+  连续天数走 `packages/core/src/activity.ts` 的 `streakOf`（只取这一个数，不必铺整张日历）
 - 首页是**一层画布 + 九块卡片**（活跃度、Coding 用量、系统状态、我的项目、快捷操作、快捷启动、
   命令、今日完成、AI 热点）。布局两层：**栏 → 行 → 卡片**，栏数行数不写死（默认三栏九行，1~6 栏）：
   栏宽是像素或「自适应」，行高同理（自适应吃掉所在栏剩的高度）；一行里的卡片横向平分栏宽、
@@ -72,7 +72,7 @@ Rust 侧 `ai_news.rs`（热点源白名单）与 `weather.rs`（天气主机白�
 - **AI 热点**卡片：热点源的**合并列表**（一条一行，标题 + 来源，点击跳原文），数据住本机 `ai-news.json`
   （不进同步仓库）。**源清单是内置白名单**（`ai_news.rs` 的 `SOURCES`，只放中文源，现在只有量子位
   RSS 3 小时一次）—— 曾经的英文源与要 token 的机器之心已按要求撤掉；`atom` / `json-hf-papers` 两个
-  解析分支留着作扩展点（见 [shared/ai-news.ts](../../packages/ai/src/ai-news.ts)）。
+  解析分支留着作扩展点（见 [ai-news.ts](../../packages/ai/src/ai-news.ts)）。
   **看或不看就是这张卡片在不在首页上**，卡片不画就不取，没有「勾源」设置。每个源**各自睡眠、各自退避**
   （状态按源分开存），合并视图只并清单里的源、去重、截断 40 条；刷新只处理到间隔的源，带
   `If-None-Match`，429 / 失败走指数退避（5 分钟起 2 小时封顶）；某源失败其它源照旧，
@@ -109,7 +109,7 @@ Rust 侧 `ai_news.rs`（热点源白名单）与 `weather.rs`（天气主机白�
 这些条目的原文注解从主文档「目录结构」迁来（主文档的树里各留一行，指回这里）。
 
 ```
-  src/weather.rs         实时天气的宿主侧（见 shared/weather.ts）：主机名白名单两台、各管一段 ——
+  src/weather.rs         实时天气的宿主侧（见 packages/weather/src/weather.ts）：主机名白名单两台、各管一段 ——
                         城市名检索走 OpenStreetMap 的公开 Nominatim（/search，中文城市名
                         匹配可靠；城市名经自写的百分号编码进查询串，空格编成 %20），
                         实况走 Open-Meteo 的 /v1/forecast（坐标越界在拼地址那步就拒）；
@@ -120,7 +120,7 @@ Rust 侧 `ai_news.rs`（热点源白名单）与 `weather.rs`（天气主机白�
 
 ```
     ai-news.ts（AI 热点：读缓存 / 按策略刷新）（workbench/）
-    weather.ts（实时天气：geocode / forecast 两个命令的取数包装，解析交给 shared/weather.ts）（workbench/）
+    weather.ts（实时天气：geocode / forecast 两个命令的取数包装，解析交给 packages/weather/src/weather.ts）（workbench/）
     weather.ts           实时天气：问候语旁那一小段实况（weatherCity 填了城市才取，
                          半小时一次；坐标按城市缓存在内存，不落盘）（stores/）
 ```

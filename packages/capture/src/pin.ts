@@ -22,10 +22,16 @@ export function clampPinOpacity(percent: number): number {
   return Math.min(Math.max(Math.round(percent), PIN_OPACITY_MIN), PIN_OPACITY_MAX)
 }
 
-/** 边长夹回可用区间，并保持长宽比 */
+/**
+ * 边长夹回可用区间，并保持长宽比。
+ *
+ * **两边都必须是整数**：窗口的位置与尺寸都是物理像素，而 Rust 那边 `pin_update` 收的是
+ * u32/i32 —— 滚轮缩放 `* 1.1` 出来的长边带着小数（`1193 * 1.1 = 1312.3000…`），
+ * 原样送过去会被 serde 直接拒掉（`invalid type: floating point …, expected u32`，踩过一次）。
+ */
 export function clampPinSize(size: Size, ratio: number): Size {
   const safeRatio = ratio > 0 ? ratio : 1
-  const target = Math.min(Math.max(Math.max(size.width, size.height), PIN_MIN_EDGE), PIN_MAX_EDGE)
+  const target = Math.round(Math.min(Math.max(Math.max(size.width, size.height), PIN_MIN_EDGE), PIN_MAX_EDGE))
   // 以长边为准反推另一边：钉图的窗口永远与图片同比例，不留黑边
   return size.width >= size.height
     ? { width: target, height: Math.round(target / safeRatio) }

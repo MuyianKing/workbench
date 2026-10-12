@@ -109,10 +109,9 @@ Workbench 的文档按「通用 / 模块」分层：
   **保存成 PNG**（Ctrl+S）、**钉到屏幕上**（Ctrl+D）。设过「自动保存位置」就直接落进去
   （同名自动加序号），没设过才弹一次「另存为」。Esc 逐层退：输入框 → 工具 → 选区 → 退出
 - **钉图**是一张置顶、无边框、拖着就走的图窗口：滚轮缩放（以光标为不动点、保持长宽比）、
-  Ctrl+滚轮调透明度（20%~100%）、右键菜单（复制 / 另存为 / 鼠标穿透 / 适应屏幕 / 关闭）、
+  Ctrl+滚轮调透明度（20%~100%）、右键菜单（复制 / 另存为 / 适应屏幕 / 关闭）、
   双击或 Esc 关掉，悬停时描一圈边好认出边界。**位置、大小与透明度会记账** —— 下次启动
-  照原样钉回来（图还在的话）。开了「鼠标穿透」之后它收不到任何鼠标事件（右键菜单也点不到了），
-  只能靠「钉图穿透快捷键」（默认 **Ctrl+Shift+X**）把所有钉图一起翻回来
+  照原样钉回来（图还在的话）
 - 已知边界（都是有意留的，见[「截图与钉图」](modules/screenshot.md)）：独占全屏的游戏画面抓出来是黑的、
   HDR 屏颜色偏淡、UAC 的安全桌面抓不到（Windows 就不给）；**选区不跨屏**（拖到屏幕边缘就停）；
   **没有取字 / OCR** —— 云 OCR 会多出一条联网出口，这一版不做
@@ -120,7 +119,7 @@ Workbench 的文档按「通用 / 模块」分层：
 **系统集成（设置面板）**
 
 - 面板是「左侧菜单 + 右侧内容」两栏：菜单五屏 —— **通用**（程序、天气、快捷键、启动、笔记、账号与同步）、
-  **截图**（截图与钉图穿透两条快捷键、自动保存位置、钉图初始透明度、放大镜开关，外加一颗「立即截图」）、
+  **截图**（截图快捷键、自动保存位置、钉图初始透明度、放大镜开关）、
   **外观**（主题、背景、顶部样式、卡片不透明度与间距）、
   **菜单**（导航栏留哪几页，首页页下还挂着它自己的九块卡片）与
   **关于**（版本、数据目录、登录状态），右侧各区独立滚动、菜单不跟着走。
@@ -148,7 +147,7 @@ Workbench 的文档按「通用 / 模块」分层：
 - **首页那一页下面挂着它自己的九块卡片**（同一屏，缩进一层 + 一条竖线把父子关系摆明）：
   一行一块、一个开关，关掉的卡片不画在首页上（位置与高度留着，再打开回到原处），至少留一块。
   两块开关清单都排在说明文字下面，一行两个，不给某一屏撑出一整屏高
-- 全局快捷键唤起或隐藏窗口（默认 `Ctrl+M`，可自行录制）；截图与钉图穿透那两条在设置·截图里。
+- 全局快捷键唤起或隐藏窗口（默认 `Ctrl+M`，可自行录制）；截图那一条在设置·截图里。
   **被别的程序占用时会在界面上提示**（`RegisterHotKey` 是全局独占的，挂不上就是按了没反应），
   而不是安静地什么都不做
 - **关闭按钮 = 收进托盘**：窗口不会真的关掉，托盘常驻，点托盘图标或快捷键都能找回来；最小化是否也收进托盘可单独设置（默认收进托盘）
@@ -187,7 +186,7 @@ Workbench 的文档按「通用 / 模块」分层：
 | Token 多机同步 | 可选（默认关闭）：`std::process` 直启系统的 `git`（不经 `cmd`，参数行不会被二次解析），推 / 拉一个用户指定的仓库；`token-usage/` 与 `config/` 两个目录、都是一台机器一个文件，且是两条互不相干的出口（用量自动 + 手动都只动前者，外观只在设置里点「同步一次」时动后者；采用别人的配置也只能手动点）。凭据默认走系统 git，登录过账号则改用该账号的 token（按 host 限定注入请求头，过期前自动续期，见下） |
 | 账号登录 | 可选：GitHub / Gitee 的授权码流程 + 本机回环回调（RFC 8252 那套，与 VS Code 同路）。HTTPS 走系统自带的 WinHTTP，access_token 与 refresh_token 存 Windows 凭据管理器（DPAPI）—— 两者都只给已有的 `windows-sys` 加 feature，**没有引入任何新的 crate**。两家都要求 clientId + clientSecret，凭据由 `build.rs` 编译期内置 |
 | 依赖取舍 | 新增 crate 的标准是**「不新增编译单元」**而不是「不新增名字」：`url` / `percent-encoding` / `form_urlencoded` / `walkdir` / `base64` / `sha2` 都已被 tauri / tao / wry / tauri-utils 拉进编译图（`cargo tree -e normal -i <crate>` 可查），所以直接用它们替掉手写的 URL 编解码、目录递归与摘要实现，代价为零。反过来，`reqwest`（hyper + tower + TLS 整套）、`git2`（libgit2 的 C 依赖）、`sysinfo` 会新增成片的编译单元，一律不引 |
-| 测试 | Vitest（渲染层与 shared）+ `cargo test`（Rust） |
+| 测试 | Vitest（渲染层与域包）+ `cargo test`（Rust） |
 | 打包 | Tauri CLI → NSIS 安装包（Windows x64） |
 
 架构上单独说一句：**后端刻意做薄** —— 只提供「取原始数据 / 落盘 / 调系统能力」，
@@ -217,16 +216,18 @@ AI 预览栏显示回答里提到的图片也走 `allow_background` 这条命令
 
 ## 目录结构
 
-树里只留底座与一行式条目；各模块自己的文件与链路注解，见 `modules/<模块>/implementation.md` 的「涉及文件」。
+树里只留底座与一行式条目；各模块自己的文件与链路注解，见 `modules/<模块>.md` 的「涉及文件」。
 
 ```
 apps/desktop/            桌面应用（自包含：渲染层 + Rust + 随包资源 + 构建脚本）
   src-tauri/               Rust 后端
   src/main.rs            入口、窗口、托盘、单实例、生命周期
+  src/panic_log.rs       panic 落痕（release 是 panic=abort，崩溃证据只留这一份）—— 注解见 modules/ipc-and-state.md
   src/commands.rs        IPC 命令层（薄：取数据 / 落盘 / 调系统能力）
   src/session.rs         子进程会话：起命令、按批回传输出、按进程树终止
   src/proc.rs            带超时的子进程原语 + 进程树终止
   src/store.rs           去抖 JSON 落盘（300ms 合并 + 临时文件 rename）
+  src/fs_util.rs         文件底座：路径守卫（is_plain_segment）与原子写 —— 注解见 modules/ipc-and-state.md
   src/paths.rs           数据目录与指针（与旧 Electron 版同一位置）
   src/system.rs          端口检测（GetExtendedTcpTable）、资源管理器、ShellExecute
   src/nvm.rs             nvm 只读探测 —— 注解见 modules/projects.md
@@ -247,6 +248,7 @@ apps/desktop/            桌面应用（自包含：渲染层 + Rust + 随包资
   src/oauth.rs           账号登录 —— 注解见 modules/sync-and-auth.md
   src/http.rs            WinHTTP 极简 HTTP 客户端 —— 注解见 modules/ipc-and-state.md
   src/weather.rs         实时天气宿主侧 —— 注解见 modules/home.md
+  src/ai_news.rs         AI 热点：源白名单、ETag 条件请求与缓存落盘 —— 注解见 modules/home.md
   src/mail.rs            邮箱（IMAP/SMTP 传输）—— 注解见 modules/mail.md
   src/mail_watch.rs      邮件后台监视（按设置周期的新邮件检查 + 系统通知）—— 注解见 modules/mail.md
   src/notify.rs          Windows toast 的手写 WinRT FFI —— 注解见 modules/mail.md
@@ -254,6 +256,7 @@ apps/desktop/            桌面应用（自包含：渲染层 + Rust + 随包资
   src/vault.rs           密码保险库宿主侧 —— 注解见 modules/vault.md
   src/encoding.rs        base64 / SHA-256 / UTF-16 —— 注解见 modules/ipc-and-state.md
   src/icon.rs            程序图标抽取 —— 注解见 modules/quick-launch.md
+  src/imaging.rs         图片解码校验与缩略（背景图核文件头、壁纸缩略图）—— 注解见 modules/ipc-and-state.md
   oauth.example.json     OAuth 应用凭据模板（真实凭据放 oauth.local.json，不入库）
   tauri.conf.json        窗口、打包、资源映射
   capabilities/          能力白名单
@@ -266,7 +269,7 @@ apps/desktop/            桌面应用（自包含：渲染层 + Rust + 随包资
                          底座五件（bridge / events / state / session / scanner）的注解见
                          modules/ipc-and-state.md，各模块适配文件的注解
                          见各模块的「涉及文件」
-  components/            公共与页面组件（各页组件的分工写在各模块的 implementation.md）
+  components/            公共与页面组件（各页组件的分工写在 modules/<模块>.md 的「涉及文件」）
   composables/           跨组件复用的交互骨架（use-pointer-drag：拖拽的起手 / 收手 / Esc 取消 /
                          解绑；use-floating-dismiss：浮层的收起；use-video-stage：画中画
                          传送宿主的注册；use-wall-clock：每秒时钟与「今天 00:00」的模块级单例；
@@ -275,7 +278,7 @@ apps/desktop/            桌面应用（自包含：渲染层 + Rust + 随包资
   stores/                跨组件状态，按领域分文件：nav.ts（当前页与首页布局编辑态）与
                          settings.ts（设置、外观、首页布局、别台机器的外观）是壳层，
                          见上面的「导航与页面」「系统集成」；其余各 store 的注解见
-                         各模块的 implementation.md
+                         modules/<模块>.md 的「涉及文件」
   types.ts               应用级契约（Project / AppSettings / WorkbenchApi / IPC 通道表 /
                          DEFAULT_SETTINGS），并从各域包 re-export 保持 `@/types` 一站式取类型
   persisted-data.ts      数据文件的收敛编排 + theme.json ↔ 数据文件的分流桥接
@@ -497,7 +500,7 @@ pnpm run dist         # 产出 NSIS 安装包
   `.md` 就是全部内容；应用只记「当前打开的目录」与「打开过的那几个」（`noteDir` / `noteDirs`，
   左栏**宽度**在 `theme.json`）。天然**不进同步仓库**，换台机器选同一个文件夹即可。
   旧版笔记 JSON 树（`note-data.json`）不再读写，盘上那份可以删掉
-- `pins.json` 与 `pins/<id>.png`：**钉图的记账与图本身**（位置 / 尺寸 / 透明度 / 是否穿透）。
+- `pins.json` 与 `pins/<id>.png`：**钉图的记账与图本身**（位置 / 尺寸 / 透明度）。
   （截图那几帧**只在内存里**：一场会话用完即弃，不落盘，也就没有「忘了清理」这回事。）
   **只在本机**：位置是这块屏上的坐标，换台机器不成立，也不进同步仓库。钉图关掉时连图一起删掉
 - 快捷启动只存程序路径与参数，不放程序本体

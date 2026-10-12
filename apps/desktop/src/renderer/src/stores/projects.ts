@@ -53,7 +53,7 @@ export const useProjectsStore = defineStore('projects', () => {
    *
    * 设置是异步载入的、数据目录还可能被整份换掉，所以这里要核一遍 ——
    * 与 nav store 的 activeView 是同一条路。它**不是**「这台机器长什么样」的配置，
-   * 所以住在数据文件里、不进 theme.json（见 shared/types.ts 的那一段）。
+   * 所以住在数据文件里、不进 theme.json（见 apps/desktop/src/renderer/src/types.ts 的那一段）。
    */
   const sortBy = ref<ProjectSort>(sanitizeProjectSort(settingsStore.settings.projectSort))
 

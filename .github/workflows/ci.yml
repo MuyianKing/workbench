@@ -1,0 +1,92 @@
+# 日常闸门：push / PR 都过一遍 lint + typecheck + 前端测试 + Rust clippy/测试。
+#
+# 与 release.yml 的分工：那条只在打 tag 时跑、负责出包；这条管「每一次提交」。
+# 之前唯一的工作流只认 tag，日常提交是零闸门（`cargo test` 那 240 多个用例
+# 从不执行、`pnpm run lint` 连发版时都不跑）—— 本文件把这几样补上。
+#
+# 几条约定：
+#
+# - **runner 一律 windows-latest**：项目只做 Windows（windows-sys / WebView2），
+#   而渲染层用例里也有 `C:\` 这类 Windows 路径，换 Linux 跑会得到假绿。
+# - **前端与 Rust 拆成两个 job**：前者几十秒、后者要编整棵依赖树，并行跑省时间。
+# - **`resources/pi` 用空占位目录**：它是 `tauri.conf.json` 的 bundle.resources 之一，
+#   但 `vendor:pi` 生成的那棵树不入库（见 AGENTS.md 第 1 节）。tauri-build **在编译期**
+#   就会去 copy 这个资源目录，目录不存在直接编不过（实测 `resource path ... doesn't exist`）；
+#   空目录即可通过 —— 测试不读它的内容，不需要在 CI 里真去 npm install 一份 Pi。
+# - **cargo test 不需要前端产物**：不带 `custom-protocol` feature 时走 `dev` 档，
+#   前端资源整个跳过（见 tauri-codegen 的 `dev && dev_url.is_some()` 分支），
+#   所以 CI 不必先 `pnpm run build:renderer`。
+
+name: CI
+
+on:
+  push:
+  pull_request:
+
+# 同一分支只留最新一轮：连续 push 时旧的直接作废，不占 runner、也不会有两个 job
+# 同时去抢 rust-cache
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: 前端（lint + typecheck + 测试）
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+
+      # 版本读根 package.json 的 packageManager（单一来源）；要 v6 的理由同 release.yml
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: 装依赖
+        run: pnpm install --frozen-lockfile
+
+      # 先 lint 再 typecheck：lint 更快出结果，错了省一次全量类型检查
+      - name: ESLint
+        run: pnpm run lint
+
+      - name: 类型检查
+        run: pnpm run typecheck
+
+      - name: 单元测试
+        run: pnpm test
+
+  rust:
+    name: Rust（clippy + 测试）
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: 装 Rust（stable + x86_64-pc-windows-msvc）
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+          components: clippy
+
+      # Tauri 那棵依赖树第一次编要十几分钟，靠它把 target/ 与 registry 缓存住
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri -> target
+
+      # 见文件头：目录不存在会直接编不过，建一个空的就行
+      - name: 占位内置 Pi 资源目录
+        shell: bash
+        run: mkdir -p apps/desktop/resources/pi
+
+      # --all-targets 连测试一起查：那边有 `cfg(test)` 的 unwrap 豁免（见 src/main.rs 顶部的 lint 配置）
+      - name: Clippy（警告即失败）
+        run: cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets -- -D warnings
+
+      - name: 单元测试
+        run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml

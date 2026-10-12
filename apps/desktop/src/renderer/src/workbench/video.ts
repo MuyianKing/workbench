@@ -9,7 +9,7 @@ import { fail, ok } from '@workbench/core'
  * 回来点一下刷新就是最新的样子。
  *
  * 这一层只做两件渲染层不该操心的事：
- *   1. 把 Rust 扫出来的**平铺清单**组回一棵排好序的树（纯函数在 shared/video.ts）；
+ *   1. 把 Rust 扫出来的**平铺清单**组回一棵排好序的树（纯函数在 packages/video/src/video.ts）；
  *   2. 打开一个视频：拼出绝对路径 → 让后端核一遍并授权 asset 协议 → 转出可直接给
  *      `<video>` 的 URL。授权按文件给（tauri.conf.json 的 scope 保持为空），
  *      所以「能拼出 URL」与「webview 读得到」两件事在这里一次做完。

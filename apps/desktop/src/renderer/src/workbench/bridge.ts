@@ -108,7 +108,7 @@ export function listenReady<T>(event: string, handler: (payload: T) => void): Pr
 /**
  * 把可能失败的异步动作收敛成 `Result` —— 与主进程版一样的返回形状，渲染层判断逻辑不变。
  *
- * 不复用 shared/result.ts 的 `toResult` 是因为这一层的失败值来自 Rust：
+ * 不复用 packages/core/src/result.ts 的 `toResult` 是因为这一层的失败值来自 Rust：
  * 命令返回 `Err(String)` 时 Tauri 直接用那个字符串 reject，所以 `error` 往往不是 Error 实例，
  * 取 `.message` 会得到 undefined；这里必须同时兼容字符串与 Error。
  */
