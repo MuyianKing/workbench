@@ -245,6 +245,14 @@ describe('老数据搬家', () => {
     expect(value.mailAccounts[1].imapHost).toBe('imap.qq.com')
   })
 
+  it('通讯录照常收敛：没地址的丢、按地址去重（先来的名字留着）', () => {
+    const value = sanitizeSettings({
+      mailContacts: [{ name: '张三', address: 'A@163.com' }, { name: '别名', address: 'a@163.com' }, { name: '没地址' }],
+    })
+    expect(value.mailContacts).toEqual([{ name: '张三', address: 'a@163.com' }])
+    expect(sanitizeSettings({}).mailContacts).toEqual([])
+  })
+
   it('后台检查周期：没填回默认 30，0 保留为关闭，其余夹进范围', () => {
     expect(sanitizeSettings({}).mailPollMinutes).toBe(30)
     expect(sanitizeSettings({ mailPollMinutes: 0 }).mailPollMinutes).toBe(0)

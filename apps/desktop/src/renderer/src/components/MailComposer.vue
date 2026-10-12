@@ -2,7 +2,7 @@
 import type { MailAttachmentInput } from '@workbench/mail'
 import type { MailReplyTarget } from '@/stores/mail'
 import { Close, Paperclip } from '@element-plus/icons-vue'
-import { contentTypeForFileName, formatMailSize } from '@workbench/mail'
+import { contactLabel, contentTypeForFileName, formatMailSize, splitTypedAddresses } from '@workbench/mail'
 /**
  * 写信 / 回信的弹层：发件邮箱、收件人、主题、正文与附件，发送走 stores/mail.ts 的
  * send（报文构建在 @workbench/mail 的 buildMime，SMTP 传输在 Rust）。
@@ -10,14 +10,19 @@ import { contentTypeForFileName, formatMailSize } from '@workbench/mail'
  * 发件邮箱：配了多个账户才要挑（回信默认收信的那个，新邮件是清单里第一个）；
  * 只有一个账户时这一栏不画 —— 没什么可选的。
  *
+ * 收件人是一颗**可新建的多选下拉**：候选来自通讯录（settings.mailContacts，标签是
+ * 「名字 <地址>」），也可以当场打一个地址回车进去（allow-create）—— 粘一段
+ * 「a@x.com, b@y.com」进来也算，值拆解走 splitTypedAddresses。选中的地址不在通讯录里时
+ * 也补成候选，标签才不会掉成空白。地址存在的意义只是发信，落选的联系人不顺手存。
+ *
  * 附件一次可以挑多个（pickFiles），内容按路径读成 base64（fs_read_base64）——
  * 文件本身是用户在对话框里亲手挑的，读取范围不需要额外圈。发出去之后清空草稿，
  * 发送失败的东西留在原地，改一改还能再发一次。
  *
  * 这个弹层是**填内容的那种**（收件人多半要回列表里抄），所以不挡背后 ——
- * 见 AGENTS.md 第 4 节。
+ * 见 AGENTS.md 第 4 节：联系人弹层就从左栏那颗「联系人」进去，填着填着能开着它加人。
  */
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import AppDialog from '@/components/AppDialog.vue'
 import { basenameOf } from '@/format'
 import { notifyError, notifySuccess } from '@/notify'
@@ -28,7 +33,8 @@ const visible = defineModel<boolean>({ required: true })
 const mail = useMailStore()
 
 const fromAccount = ref('')
-const to = ref('')
+/** 收件人（多选下拉的值：一个个地址） */
+const to = ref<string[]>([])
 const subject = ref('')
 const body = ref('')
 const attachments = ref<MailAttachmentInput[]>([])
@@ -48,12 +54,12 @@ watch(visible, (open) => {
     ? from
     : (mail.accounts[0]?.address ?? '')
   if (reply) {
-    to.value = reply.to
+    to.value = splitTypedAddresses([reply.to])
     subject.value = /^re:/i.test(reply.subject) ? reply.subject : `Re: ${reply.subject}`
     body.value = quote(reply)
   }
   else {
-    to.value = ''
+    to.value = []
     subject.value = ''
     body.value = ''
     attachments.value = []
@@ -69,12 +75,22 @@ function quote(reply: MailReplyTarget): string {
   return `\n\n---- ${reply.to} 写道 ----\n${quoted}\n`
 }
 
-/** 收件人：逗号 / 分号 / 空白都能当分隔符，逐个要有 @ */
+/**
+ * 下拉的候选：通讯录逐个来一条，再补上「已经填进来、但还不在通讯录里」的地址
+ * （手打的、回信预填的）—— el-select 对没有对应项的值会拿值本身当标签，补一条更稳，
+ * 标签一律与候选一起渲染。
+ */
+const recipientOptions = computed(() => {
+  const known = new Set(mail.contacts.map(contact => contact.address))
+  const extra = to.value
+    .filter(address => !known.has(address.trim().toLowerCase()))
+    .map(address => ({ value: address, label: address }))
+  return [...mail.contacts.map(contact => ({ value: contact.address, label: contactLabel(contact) })), ...extra]
+})
+
+/** 收件人：下拉里一个个地址（新建出来的那条可能是一段带分隔符的串，一起拆） */
 function recipients(): string[] {
-  return to.value
-    .split(/[,;，；\s]+/)
-    .map(address => address.trim())
-    .filter(Boolean)
+  return splitTypedAddresses(to.value)
 }
 
 function validateTo(): boolean {
@@ -155,12 +171,22 @@ async function send(): Promise<void> {
           </el-select>
         </el-form-item>
         <el-form-item label="收件人" :error="toError">
-          <el-input
+          <el-select
             v-model="to"
-            placeholder="多个地址用逗号隔开"
-            :maxlength="600"
+            multiple
+            filterable
+            allow-create
+            default-first-option
+            placeholder="从联系人里挑，或直接输入地址"
             @change="validateTo"
-          />
+          >
+            <el-option
+              v-for="option in recipientOptions"
+              :key="option.value"
+              :label="option.label"
+              :value="option.value"
+            />
+          </el-select>
         </el-form-item>
         <el-form-item label="主题">
           <el-input v-model="subject" placeholder="主题" :maxlength="200" />

@@ -11,7 +11,7 @@ import type { AccentInkMode, AppearanceSettingKey, EffectiveTheme, ThemeConfig, 
 import type { AccountProfile, AuthProvider } from '@workbench/auth'
 import type { ActiveSession, ActivityCounts, CommandEntry, IconCacheEntry, PackageManager, ProjectColor, ProjectSort, QuickApp, Result, ScanResult } from '@workbench/core'
 import type { KbRawSource, KbRepoState, KbScanResult, KbSyncInput, KbSyncSummary } from '@workbench/kb'
-import type { MailAccount } from '@workbench/mail'
+import type { MailAccount, MailContact } from '@workbench/mail'
 import type { NoteChange, NoteCreateInput, NoteImageDeleted, NoteImageDeleteInput, NoteImageList, NoteImageListInput, NoteImageUploaded, NoteImageUploadInput, NoteNode, NoteRepoState, NoteSyncInput, NoteSyncSummary, NoteTextScan } from '@workbench/notes'
 import type { SkillCommit, SkillCompareFile, SkillCreateInput, SkillEntry, SkillFileInfo, SkillInstalledScan, SkillLibraryState, SkillSyncSummary } from '@workbench/skills'
 import type { SyncDeviceInfo, TokenUsageResult } from '@workbench/usage'
@@ -456,6 +456,13 @@ export interface AppSettings {
    * （trim / 小写 / 去重 / 认不出像地址的丢掉 / 上限 500）。
    */
   mailBulkSenders: string[]
+  /**
+   * 通讯录（邮箱页右键「存为联系人」攒的、在联系人弹层里手动加的）：写邮件时收件人
+   * 从它里面挑（也允许当场打一个新地址）。**地址就是身份**，按地址去重、名字只是叫法。
+   * 只对本机成立，进数据文件、不参与外观同步；取值由 @workbench/mail 的
+   * sanitizeMailContacts 收敛（没地址的丢 / 按地址去重 / 上限 500）。
+   */
+  mailContacts: MailContact[]
   /**
    * 后台新邮件检查的周期（分钟）：0 = 关闭（只保留进页面 / 手动刷新的检查），
    * 其余夹在 1..1440。周期由邮箱账户弹层里的「新邮件检查」下拉改，改了即生效
@@ -1690,6 +1697,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   weatherCity: '',
   mailAccounts: [],
   mailBulkSenders: [],
+  mailContacts: [],
   mailPollMinutes: 30,
   tokenSyncRepo: '',
   activeView: 'home',

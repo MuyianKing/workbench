@@ -18,7 +18,7 @@ import { clampTerminalButtonTop, pickAppearance, sanitizeAppearanceSettings, san
 import { sanitizeAccount } from '@workbench/auth'
 import { pruneDays, sanitizeActivity, sanitizeCommands, sanitizeIconCache, sanitizeProjectSort, sanitizeQuickApps } from '@workbench/core'
 import { sanitizeKbRawSources } from '@workbench/kb'
-import { sanitizeMailAccounts, sanitizeMailBulkSenders, sanitizeMailPollMinutes } from '@workbench/mail'
+import { sanitizeMailAccounts, sanitizeMailBulkSenders, sanitizeMailContacts, sanitizeMailPollMinutes } from '@workbench/mail'
 import { sanitizeImageRepo, sanitizeNoteHistory, sanitizeNoteRoot, sanitizeNoteTreeExpanded } from '@workbench/notes'
 import { sanitizeSyncRepo } from '@workbench/usage'
 import { sanitizeVaultGroupNames } from '@workbench/vault'
@@ -164,6 +164,9 @@ export function sanitizeSettings(raw: unknown): StoredSettings {
   delete (value as unknown as Record<string, unknown>).mailAccount
   // 广告发件人黑名单（邮箱页右击「标记为广告」攒的）：老数据文件里没有，默认空清单
   value.mailBulkSenders = sanitizeMailBulkSenders(value.mailBulkSenders)
+  // 通讯录（右击「存为联系人」攒的、联系人弹层里手加的）：老数据文件里没有，默认空清单。
+  // 与上面那条同一待遇：只对本机成立，不参与外观同步
+  value.mailContacts = sanitizeMailContacts(value.mailContacts)
   // 后台新邮件检查的周期（分钟，0 = 关闭）：老数据文件里没有，默认 30。
   // 与 mailBulkSenders 同一待遇：只对本机成立，不参与外观同步
   value.mailPollMinutes = sanitizeMailPollMinutes(value.mailPollMinutes)

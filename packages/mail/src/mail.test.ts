@@ -3,9 +3,10 @@ import type { ParsedAttachment } from './parse'
 import { describe, expect, it } from 'vitest'
 import { bytesToBase64 } from './base64'
 import { isBulkMail, sanitizeMailBulkSenders } from './bulk'
+import { contactLabel, contactOf, MAIL_CONTACT_NAME_MAX, MAIL_CONTACTS_MAX, sanitizeMailContact, sanitizeMailContacts, splitTypedAddresses } from './contacts'
 import { MAIL_ACCOUNTS_MAX, MAIL_POLL_DEFAULT, MAIL_POLL_MAX, MAIL_POLL_MIN, mailAccountReady, presetForAddress, sanitizeMailAccount, sanitizeMailAccounts, sanitizeMailAddress, sanitizeMailHost, sanitizeMailPollMinutes, sanitizeMailPort } from './mail'
 import { buildMime } from './mime'
-import { accountTag, attachmentBadge, attachmentDataUrl, attachmentKind, attachmentText, displayDate, displayRecipients, displaySender, htmlBody, isImageAttachment, mailTime, parseMessage, preferExtendedFilenames, recipientAddress, senderAddress } from './parse'
+import { accountTag, attachmentBadge, attachmentDataUrl, attachmentKind, attachmentText, displayDate, displayRecipients, displaySender, htmlBody, isImageAttachment, mailTime, parseMessage, preferExtendedFilenames, recipientAddress, recipientDisplay, senderAddress } from './parse'
 import { decodeEncodedWords, encodeRfc2047Word } from './rfc2047'
 
 describe('账户配置收敛', () => {
@@ -461,6 +462,12 @@ describe('展示层的拆解', () => {
     expect(recipientAddress('')).toBe('')
   })
 
+  it('第一个收件人的展示名（发件箱里「存为联系人」用它当名字）', () => {
+    expect(recipientDisplay('Alice <alice@example.com>, b@c.com')).toBe('Alice')
+    expect(recipientDisplay('bob@example.com')).toBe('bob@example.com')
+    expect(recipientDisplay('')).toBe('')
+  })
+
   it('日期解析成短串，解析不动原样给', () => {
     expect(displayDate('Mon, 5 Oct 2026 10:00:00 +0800')).toMatch(/^\d{2}\/\d{2} \d{2}:\d{2}$/)
     expect(displayDate('not a date')).toBe('not a date')
@@ -535,5 +542,52 @@ describe('广告邮件的识别', () => {
     expect(sanitizeMailBulkSenders([' A@B.com ', 'a@b.com', 'not-an-address', '', 42, null])).toEqual(['a@b.com'])
     expect(sanitizeMailBulkSenders(undefined)).toEqual([])
     expect(sanitizeMailBulkSenders('a@b.com')).toEqual([])
+  })
+})
+
+describe('通讯录', () => {
+  it('联系人收敛：地址 trim / 小写，没 @ 的整条作废，名字 trim 后限长', () => {
+    expect(sanitizeMailContact({ name: ' 张三 ', address: ' Zhang@163.COM ' })).toEqual({
+      name: '张三',
+      address: 'zhang@163.com',
+    })
+    expect(sanitizeMailContact({ name: 'x', address: 'not-an-address' }).address).toBe('')
+    expect(sanitizeMailContact(undefined)).toEqual({ name: '', address: '' })
+    expect(sanitizeMailContact({ name: 'x'.repeat(100), address: 'a@b.com' }).name).toHaveLength(MAIL_CONTACT_NAME_MAX)
+  })
+
+  it('整份通讯录：没地址的丢、按地址去重（先来的名字留着）、超上限截断', () => {
+    const contacts = sanitizeMailContacts([
+      { name: '张三', address: 'a@b.com' },
+      { name: '别名', address: 'A@B.com' },
+      { name: '没地址' },
+      { name: '李四', address: 'c@d.com' },
+      null,
+    ])
+    expect(contacts).toEqual([
+      { name: '张三', address: 'a@b.com' },
+      { name: '李四', address: 'c@d.com' },
+    ])
+    expect(sanitizeMailContacts(undefined)).toEqual([])
+    expect(sanitizeMailContacts('a@b.com')).toEqual([])
+    const full = Array.from({ length: MAIL_CONTACTS_MAX + 2 }, (_, index) => ({ address: `u${index}@163.com` }))
+    expect(sanitizeMailContacts(full)).toHaveLength(MAIL_CONTACTS_MAX)
+  })
+
+  it('怎么叫一个人：有名字给「名字 <地址>」，没名字只给地址', () => {
+    expect(contactLabel({ name: '张三', address: 'a@b.com' })).toBe('张三 <a@b.com>')
+    expect(contactLabel({ name: '', address: 'a@b.com' })).toBe('a@b.com')
+  })
+
+  it('按地址找人：大小写不敏感，空地址找不到', () => {
+    const contacts = [{ name: '张三', address: 'a@b.com' }]
+    expect(contactOf(contacts, ' A@B.com ')?.name).toBe('张三')
+    expect(contactOf(contacts, '')).toBeUndefined()
+    expect(contactOf(contacts, 'c@d.com')).toBeUndefined()
+  })
+
+  it('写信框收件人那一行的值拆成地址：逗号 / 分号（中英文）/ 空白都算分隔符', () => {
+    expect(splitTypedAddresses(['a@b.com, c@d.com； e@f.com'])).toEqual(['a@b.com', 'c@d.com', 'e@f.com'])
+    expect(splitTypedAddresses([])).toEqual([])
   })
 })
