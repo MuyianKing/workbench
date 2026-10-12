@@ -16,7 +16,6 @@ export default antfu(
     jsonc: false,
     yaml: false,
     ignores: [
-      'site/**',
       'apps/desktop/resources/**',
       'apps/desktop/src-tauri/**',
       /**
