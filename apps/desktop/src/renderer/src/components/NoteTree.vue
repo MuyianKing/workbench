@@ -29,6 +29,9 @@ import { noteChain, noteDropAllowed, parentRel } from '@workbench/notes'
  * 这一层只把「想做什么」报上去。**展开态也一样**：这里是 `expanded` 进、`update:expanded` 出，
  * 自己不留一份副本 —— 上层要拿它落盘（见 NotesView 的 expandedKeys），
  * 组件里再存一份就变成「两份状态谁说了算」。
+ *
+ * 只读（`readOnly`，笔记页按 Ctrl+/ 切的那一档）下，这里只剩导航：节点行的菜单禁用、
+ * 空白区的菜单不弹、拖动关掉、空态那两颗新建按钮不出现 —— 口径见那个 prop 的注释。
  */
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import PanelLoading from '@/components/PanelLoading.vue'
@@ -50,6 +53,14 @@ const props = defineProps<{
    * `default-expanded-keys` 要的就是数组。
    */
   expanded: string[]
+  /**
+   * 只读（笔记页按 Ctrl+/ 切的那一档）：树上不给任何**写**的入口，只留导航。
+   *
+   * 于是三条路一起收起来：节点行与空白区的右键菜单、拖动、空态里那两颗新建按钮。
+   * **删除一篇笔记也是写** —— 只挡住正文的话，「只读」就是半句假话（用户按下去
+   * 以为动不了任何东西，其实能删掉一篇）。选中、展开、读盘照旧：那些是「看」。
+   */
+  readOnly: boolean
 }>()
 
 const emit = defineEmits<{
@@ -202,6 +213,10 @@ const { pos: rootPos, place: placeRootMenu } = useFloatingPosition({
  * 落在节点行上时让路 —— 那个事件是给节点自己的菜单的（它挂得更深，先收到）。
  */
 async function openRootMenu(event: MouseEvent): Promise<void> {
+  // 只读：空白区那两项都是「新建」，一个都不该出现 —— 连菜单本身也别弹（空的浮层更费解）
+  if (props.readOnly)
+    return
+
   const target = event.target as HTMLElement | null
   if (target?.closest('.el-tree-node__content'))
     return
@@ -359,7 +374,7 @@ onBeforeUnmount(() => window.removeEventListener('dragend', onDragEnd))
       :auto-expand-parent="false"
       :expand-on-click-node="true"
       :highlight-current="false"
-      draggable
+      :draggable="!readOnly"
       :allow-drag="allowDrag"
       :allow-drop="allowDrop"
       @node-click="(data: NoteNode) => emit('select', data.rel)"
@@ -369,10 +384,16 @@ onBeforeUnmount(() => window.removeEventListener('dragend', onDragEnd))
       @node-drop="(dragging: TreeNodeLike, drop: TreeNodeLike) => onDrop(dragging, drop)"
     >
       <template #default="{ data }">
-        <!-- 右键菜单挂在标签上：位置由 el-dropdown 按指针算，不用自己摆一副浮动层 -->
+        <!--
+          右键菜单挂在标签上：位置由 el-dropdown 按指针算，不用自己摆一副浮动层。
+          **只读这一档不能把它整个拿掉**：它同时是「触发区盖住整行余宽」的那一层
+          （见样式里 `.el-tree-node__content > .el-dropdown` 那两条），拿掉行盒就塌了；
+          禁用它只是不再弹菜单，正好是这里要的（菜单里那四项没有一项是只读下能做的）。
+        -->
         <el-dropdown
           trigger="contextmenu"
           placement="bottom-start"
+          :disabled="readOnly"
           @command="(command: string) => onCommand(command, data)"
         >
           <span class="node" :class="{ 'is-active': data.rel === activeRel }" :title="data.name">
@@ -384,17 +405,22 @@ onBeforeUnmount(() => window.removeEventListener('dragend', onDragEnd))
           </span>
 
           <template #dropdown>
+            <!--
+              每一项也各自标一次 `disabled`：`el-dropdown` 那层的 `disabled` 是「别弹」，
+              这一层是「万一还是弹出来了，每一项也得是灰的」—— 四项没有一项在只读下做得成，
+              看上去点得动却什么都不发生更像坏了。
+            -->
             <el-dropdown-menu>
-              <el-dropdown-item command="new-note">
+              <el-dropdown-item command="new-note" :disabled="readOnly">
                 <el-icon><Plus /></el-icon>新建笔记
               </el-dropdown-item>
-              <el-dropdown-item command="new-folder" divided>
+              <el-dropdown-item command="new-folder" divided :disabled="readOnly">
                 <el-icon><FolderAdd /></el-icon>新建文件夹
               </el-dropdown-item>
-              <el-dropdown-item command="rename" divided>
+              <el-dropdown-item command="rename" divided :disabled="readOnly">
                 重命名
               </el-dropdown-item>
-              <el-dropdown-item command="remove">
+              <el-dropdown-item command="remove" :disabled="readOnly">
                 删除
               </el-dropdown-item>
             </el-dropdown-menu>
@@ -411,7 +437,8 @@ onBeforeUnmount(() => window.removeEventListener('dragend', onDragEnd))
       <p class="tree__empty-title">
         这个文件夹里还没有笔记
       </p>
-      <div class="tree__empty-actions">
+      <!-- 只读下这两颗按钮与下面那句「右击新建」都不作数，一起收掉 -->
+      <div v-if="!readOnly" class="tree__empty-actions">
         <el-button
           type="primary"
           size="small"
@@ -425,7 +452,7 @@ onBeforeUnmount(() => window.removeEventListener('dragend', onDragEnd))
           新建文件夹
         </el-button>
       </div>
-      <p class="tree__empty-hint">
+      <p v-if="!readOnly" class="tree__empty-hint">
         也可以在这里右击新建。把现成的 markdown 文件放进这个文件夹，点一下底部那颗刷新也能看到。
       </p>
     </div>
