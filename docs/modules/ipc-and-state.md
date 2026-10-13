@@ -32,6 +32,9 @@
 - 后端只做「取原始数据 / 落盘 / 调系统能力」；合并、排序、修剪、状态机、命令构造这些业务语义留在 TS 适配层（改动因此走 Vite
   的秒级热更新，不必重编 Rust）。少数通道按约定直接返回具体结构而非 `Result`：`checkPort`、`listProjects`、`getNvmStatus`、
   `listWallpapers`、`checkPackageManagers`。
+- **交给 Shell 的路径先换成反斜杠**：`reveal` 与文件对话框的 `defaultPath` 都归 Windows 解析，而 Shell 的路径解析只认 `\` ——
+  `E:/a/b` 这种写法（设置里的路径可能就是它）会让 `SHParseDisplayName` 直接失败，资源管理器于是开到别处、对话框也不从你要的
+  地方打开。适配层的 `windowsPath()` 是唯一收口（Rust 侧的文件操作两种分隔符都认，不受影响；别在各调用方各写一遍 `replace`）。
 - 首屏快照：Tauri 没有同步 IPC，建窗口时用 `initialization_script` 注入 `window.__WB_BOOTSTRAP__`（`main.rs` 的
   `bootstrap_script`），渲染层同步读它，第一帧就是用户设置的样子。
 

@@ -186,6 +186,109 @@ export function mergeVersionCopies(
   )
 }
 
+/**
+ * 一个项目副本与库比下来的结果（详情弹窗那一行提示条用它）。
+ *
+ * `needsAttention` 是「该不该把这条摆到详情页上」，口径写在这里、带单测：
+ *  - **版本更低的一律不摆**：那是一个旧快照，它的内容不能往回搬（那等于把库降级）。
+ *    这一条也是「应用了一条之后」的收敛：库的版本一涨，比它低的那些副本自己就从页面上掉了，
+ *    不必等它们的内容也被采纳完；
+ *  - **版本更高**：项目那份是往前走的，整份都可以看；
+ *  - **项目里多出来的文件**：单看版本永远看不出来 —— 新增附属文件不一定动清单版本，
+ *    而这类文件库里没有就是没有，「只看 version」会把它一直漏在项目里；
+ *  - **同版本、且有文件内容不同**：保存附属文件本来就不动 version，
+ *    内容不一样也可能就是项目里补充优化过的（谁新谁旧看不出来，所以摆出来让人自己看）。
+ */
+export interface SkillCopyComparison {
+  /** 库那份的清单版本（归一化；读不出按 `0.0.0`） */
+  libraryVersion: string
+  /** 项目副本的清单版本（归一化；读不出按 `0.0.0`） */
+  version: string
+  /** 项目副本的版本与库比：`> 0` 更高 / `0` 相同 / `< 0` 更低 */
+  versionOrder: number
+  /** 项目里多出来的文件（库没有；码点序） */
+  added: string[]
+  /** 两边都有、内容不同的文件（换行已归一；码点序） */
+  changed: string[]
+  /** 值不值得在详情页提一行（口径见本接口的文件头） */
+  needsAttention: boolean
+  /** 直接喂对比弹窗的清单（两侧换行都已归一，`base` = 库里、`incoming` = 项目里） */
+  files: SkillCompareFile[]
+}
+
+/**
+ * 比对某个项目里的副本与库：逐文件差异 + 版本关系 + 对比弹窗要的清单。
+ *
+ * 两件事别做错：
+ *  1. **对比清单取并集**（复用 `mergeVersionCopies`）：只在项目里存在的文件同样是差异 ——
+ *     只按库那一侧铺，界面上就看不见「项目里多了一个文件」，那条提示条也就白提了；
+ *  2. **换行先归一**：项目里的文件可能整份是 CRLF（别的编辑器写的、别处拷来的），
+ *     内容没变不该被换行写法误报成「内容不同」，更不该让差异表整页飘红。
+ *
+ * 读不出文本的（二进制）不参与比对 —— 与 Rust 侧 `read_text_files` 同一口径：
+ * 比不了的东西不能当差异，也不能当新版本采用。
+ */
+export function compareSkillCopy(
+  library: readonly SkillFileCopy[],
+  project: readonly SkillFileCopy[],
+): SkillCopyComparison {
+  const libraryByRel = new Map(library.map(file => [file.rel, file.content]))
+  const libraryVersion = versionOfFiles(library)
+  const version = versionOfFiles(project)
+
+  const added: string[] = []
+  const changed: string[] = []
+  for (const file of project) {
+    if (file.content === null)
+      continue
+    if (!libraryByRel.has(file.rel)) {
+      added.push(file.rel)
+      continue
+    }
+    const base = libraryByRel.get(file.rel) ?? null
+    // 库那份读不出文本（二进制）时内容不同就是事实；两边都读得出就比归一换行后的文本
+    if (base === null || normalizeLf(base) !== normalizeLf(file.content))
+      changed.push(file.rel)
+  }
+
+  const byRel = (left: string, right: string): number => (left < right ? -1 : left > right ? 1 : 0)
+  added.sort(byRel)
+  changed.sort(byRel)
+
+  const versionOrder = compareSkillVersions(version, libraryVersion)
+  // 版本更低的一律不摆（旧快照，内容不能往回搬）；不低于库时，版本更高 / 多出文件 / 内容不同
+  // 三者任一都算「和库不一样」—— 光看版本会漏掉后面两种（见 SkillCopyComparison 的文件头）
+  const notOlder = versionOrder >= 0
+  return {
+    libraryVersion,
+    version,
+    versionOrder,
+    added,
+    changed,
+    needsAttention: notOlder && (versionOrder > 0 || added.length > 0 || changed.length > 0),
+    files: mergeVersionCopies(lfCopies(library), lfCopies(project)),
+  }
+}
+
+/** 一份副本里的清单版本：没有 SKILL.md、或版本读不出，都按 `0.0.0`（与 compareSkillVersions 同一兜底） */
+function versionOfFiles(files: readonly SkillFileCopy[]): string {
+  const skillMd = files.find(file => file.rel === SKILL_FILE)
+  return (skillMd?.content ? skillVersionOf(skillMd.content) : '') || '0.0.0'
+}
+
+/** 换行归一：CRLF 与 LF 是同一份内容，比对与差异表都按归一后的读 */
+function normalizeLf(text: string): string {
+  return text.replace(/\r\n/g, '\n')
+}
+
+/** 归一换行的一组副本（二进制原样留着 —— `null` 是「读不出」，不是空文件） */
+function lfCopies(files: readonly SkillFileCopy[]): SkillFileCopy[] {
+  return files.map(file => ({
+    rel: file.rel,
+    content: file.content === null ? null : normalizeLf(file.content),
+  }))
+}
+
 // ---------- 路径 ----------
 
 /** 技能目录的相对路径（相对笔记根）：`<技能库>/<id>` */

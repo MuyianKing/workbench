@@ -150,8 +150,8 @@ function select(id: ViewId): void {
    *
    * 层级取 int32 的上限：Element Plus 弹层的 z-index 是 2000 起步、每开一个弹层 +1 的
    * 动态值（hooks/use-z-index），写一个「比 2000 大」的常数迟早会被它追平，只有上限追不上。
-   * 代价是弹层宽到压住这一列时（窄窗口下的技能详情弹窗）导航栏盖在它上面 —— 那一列本来
-   * 就是导航栏的地盘，比反过来（点不到菜单）好。
+   * **盖住的只是遮罩，不是弹框**：弹框那边按 --dialog-inset 让开了这一列
+   * （global.css 的 .el-dialog 封了最大宽度）—— 那一列是导航栏的地盘，弹框不许爬进来。
    */
   position: relative;
   z-index: 2147483647;

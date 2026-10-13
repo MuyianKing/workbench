@@ -201,12 +201,12 @@ export async function saveSkillFile(
     message = `skill: ${cleaned.data} 保存 ${rel.trim()}`
   }
 
+  // 附属文件可能带子目录（新增的常常放在 references/ 这类子目录下）：库里缺哪层就补哪层
+  const target = fileRel(dir, cleaned.data, rel)
+  await ensureFolders(root, target)
+
   const written = await guard(
-    invoke<null>('note_write', {
-      root: root.trim(),
-      rel: fileRel(dir, cleaned.data, rel),
-      content,
-    }),
+    invoke<null>('note_write', { root: root.trim(), rel: target, content }),
     '保存技能失败',
   )
   if (!written.ok)
@@ -214,6 +214,25 @@ export async function saveSkillFile(
 
   await commitSkill(root, dir, message)
   return ok(null)
+}
+
+/**
+ * 把库里缺的中间目录补出来（逐段 `note_create`）。
+ *
+ * 「采纳项目里新增的文件」那条路会走到这里：那个文件可能放在库里整个都还没有的
+ * `references/` 之类子目录下，而 `note_write` 只肯往已存在的目录里写。
+ * **已经存在就往下走**（那时 `note_create` 会失败，不当回事）：真正写不下去的原因
+ * （路径被占、权限）由后面那次写入如实报出来，比在这里猜一串文案准。
+ */
+async function ensureFolders(root: string, rel: string): Promise<void> {
+  let current = ''
+  for (const part of rel.split('/').slice(0, -1)) {
+    current = current ? `${current}/${part}` : part
+    await guard(
+      invoke<null>('note_create', { root: root.trim(), rel: current, isDir: true }),
+      '创建文件夹失败',
+    )
+  }
 }
 
 /** 读技能里的一个文件（任意文本文件；二进制读不出文本时如实失败） */
@@ -418,7 +437,8 @@ export async function installSkill(
 
 /**
  * 库与各项目副本的全文件扫描（只读）：形状收成确定的清单，认不出的条目丢掉。
- * 「有没有更新」的口径（SKILL.md 比 version、附属文件比内容）在渲染层。
+ * 「和库不一样」的口径在域包 `compareSkillCopy`（版本更高 / 项目里多出的文件 /
+ * 同版本以上内容不同，带单测）；这里只把两边的内容原样递过去。
  */
 export async function scanSkillCopies(
   root: string,

@@ -1077,8 +1077,10 @@ export interface WorkbenchApi {
   /**
    * 挑一个目录。
    * title 用于给不同用途换标题（选项目目录 / 选输出目录），不传就是「选择项目目录」。
+   * `defaultPath` 是对话框打开时所在的目录：不给就由系统决定，常常落在上次用过的别处 ——
+   * 「换一个正在用的目录」这类调用方该传它（技能页就是这么用的）。
    */
-  pickDirectory: (title?: string) => Promise<string | null>
+  pickDirectory: (title?: string, defaultPath?: string) => Promise<string | null>
   /**
    * 挑一个文件。
    *
@@ -1360,14 +1362,10 @@ export interface WorkbenchApi {
     overwrite: boolean,
   ) => Promise<Result<null>>
   /**
-   * 各个项目里这份技能的 SKILL.md 副本（**只读**）：详情页拿它与库中的内容比对，
-   * 找出「项目里补充优化过」的版本。没装（或读不出来）的项目带回 null 内容 ——
-   * null 不能当新版本采用；比对口径（换行归一、与库中哪个版本比）在渲染层。
-   */
-  /**
-   * 库与各项目副本的**全部文本文件**（只读扫描）：详情页据此判定「有没有更新」并在
-   * 切换文件时弹对比。SKILL.md 按 version 比较判定，附属文件按内容比对 —— 口径在渲染层
-   * （@workbench/skills 的 compareSkillVersions）；二进制（content 为 null）不参与比对。
+   * 库与各项目副本的**全部文本文件**（只读扫描）：详情页据此判定「项目里的副本和库不一样」
+   * 并在切文件时弹对比。口径在域包 `@workbench/skills` 的 `compareSkillCopy`
+   * （版本更高 / 项目里多出的文件 / 同版本以上内容不同，带单测）；
+   * 二进制（content 为 null）读不出文本，不参与比对。
    */
   scanSkillCopies: (
     root: string,

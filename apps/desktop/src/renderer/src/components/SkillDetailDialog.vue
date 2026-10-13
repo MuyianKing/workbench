@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import type { SkillCompareFile, SkillInstalledScan } from '@workbench/skills'
+import type { SkillCompareFile, SkillCopyComparison } from '@workbench/skills'
 import { Close } from '@element-plus/icons-vue'
-import { compareSkillVersions, SKILL_FILE, skillVersionOf } from '@workbench/skills'
+import { compareSkillCopy, SKILL_FILE } from '@workbench/skills'
 /**
  * 技能详情弹窗：卡片点开的那一侧 —— 编辑 SKILL.md、安装到项目、版本历史、删除都在这里。
  *
@@ -49,25 +49,20 @@ const visible = computed({
 const baseline = ref('')
 
 /**
- * 项目里被补充优化过的副本（打开详情时检测一次，更新成功后重跑）。
- * 比对基准是 **libraryContent** —— 库里盘上的那份，而不是编辑器的缓冲：
- * 用户改着没保存的草稿不该影响「项目里有没有更新」的判断。
+ * 项目里的副本与库的差异（打开详情时检测一次，**每次更新成功后重跑**）。
+ *
+ * 判定口径在域包 `compareSkillCopy`（带单测），**不只是版本**：项目里多出来的文件、
+ * 同版本下内容不同的附属文件都算 —— 新增附属文件本来就不动清单版本，
+ * 只看 version 会把它永远漏在项目里；**版本比库低的不摆**（旧快照），所以应用了别处那条
+ * 更新、库的版本一涨，那些比它低的副本自己就从这一行上掉下去了。
+ * `files` 就是对比弹窗那一份清单，切文件不必再扫。
  */
-interface ProjectUpdate {
+interface ProjectUpdate extends SkillCopyComparison {
   project: string
-  content: string
-  /** 项目副本的版本（归一化；高于库版本才会出现在清单里） */
-  version: string
 }
-const libraryContent = ref('')
 const updates = ref<ProjectUpdate[]>([])
 const checking = ref(false)
 let checkJob = 0
-/** 最近一次副本扫描缓存：切换文件时判断「项目里有没有这个文件的另一份内容」 */
-const scan = ref<SkillInstalledScan | null>(null)
-
-/** 换行归一：项目里的文件可能带着 CRLF，内容没变不该被换行写法误报成更新 */
-const normalizeLf = (text: string): string => text.replace(/\r\n/g, '\n')
 
 watch(open, (value) => {
   if (!value)
@@ -77,8 +72,6 @@ watch(open, (value) => {
   // 已选中且内容在手上（连点同一张卡片关了再开）时立刻记快照
   if (!store.contentLoading) {
     baseline.value = store.content
-    if (store.activeFile === SKILL_FILE)
-      libraryContent.value = store.content
     void checkUpdates()
   }
 })
@@ -87,9 +80,6 @@ watch(open, (value) => {
  * 每一次**载入完成**都重新取一次基线。正文除了编辑器里敲的，只会由「打开某个文件」
  * 「恢复到某个版本」「同步后重读」这几条路换掉，而它们全都是「以盘上那份为准」——
  * 基线不跟着走的话，恢复完立刻会显示成有未保存的修改，关弹窗还要问一句「放弃修改？」。
- *
- * 「库版本」的比对基准只认清单那一份（`libraryContent`）：切到附属文件时不能跟着变，
- * 否则「项目里有没有更高的版本」就变成拿附属文件在比了。
  */
 watch(
   () => store.contentLoading,
@@ -97,50 +87,42 @@ watch(
     if (loading || was === loading)
       return
     baseline.value = store.content
-    if (store.activeFile === SKILL_FILE)
-      libraryContent.value = store.content
     void checkUpdates()
   },
 )
 
-/** 扫一遍库与各项目副本；「有更新」的提示条**只由 SKILL.md 的 version 判定** */
+/**
+ * 扫一遍库与各项目副本，挑出「和库不一样」的那些（只读，比对全在域包里做）。
+ *
+ * 比对基准是**库盘上那份**（扫描回来的），不是编辑器的缓冲：改着没保存的草稿
+ * 不该影响「项目里有没有东西可搬回来」的判断。
+ */
 async function checkUpdates(): Promise<void> {
   const id = store.activeId
   if (!id) {
     updates.value = []
-    scan.value = null
     return
   }
 
   const job = (checkJob += 1)
   checking.value = true
   try {
-    const result: { ok: boolean, data?: SkillInstalledScan, error?: string }
-      = await window.workbench.scanSkillCopies(
-        store.gitRoot,
-        store.dir,
-        id,
-        projects.projects.map(project => project.path),
-      )
+    const result = await window.workbench.scanSkillCopies(
+      store.gitRoot,
+      store.dir,
+      id,
+      projects.projects.map(project => project.path),
+    )
     // 期间关了弹窗 / 换了技能：这份结果已经过期
     if (job !== checkJob || !open.value || store.activeId !== id)
       return
 
-    scan.value = result.ok && result.data ? result.data : null
-
-    const libraryVersion = skillVersionOf(libraryContent.value) || '0.0.0'
-    updates.value = !scan.value
-      ? []
-      : scan.value.projects.flatMap((copy) => {
-          const file = copy.files.find(item => item.rel === SKILL_FILE)
-          if (!file || file.content === null)
-            return []
-          const text = normalizeLf(file.content)
-          const version = skillVersionOf(text)
-          if (!version || compareSkillVersions(version, libraryVersion) <= 0)
-            return []
-          return [{ project: copy.project, content: text, version }]
-        })
+    const scan = result.ok ? result.data : undefined
+    updates.value = scan
+      ? scan.projects
+          .map(copy => ({ project: copy.project, ...compareSkillCopy(scan.library, copy.files) }))
+          .filter(update => update.needsAttention)
+      : []
   }
   finally {
     if (job === checkJob)
@@ -153,6 +135,30 @@ function projectNameOf(dir: string): string {
   return projects.projects.find(project => project.path === dir)?.name ?? basenameOf(dir)
 }
 
+/**
+ * 提示条上一行的差异摘要：版本关系 + 文件差异，只写盘上的事实，判断留给对比弹窗。
+ *
+ * 版本只有「更高」与「与库中相同」两档（更低的不摆，见 compareSkillCopy）——
+ * 「相同」还能留在页面上，靠的就是后半句：多出了哪些文件、哪些内容不同。
+ */
+function updateHint(update: ProjectUpdate): string {
+  const parts: string[] = [
+    update.versionOrder > 0
+      ? `版本 v${update.version} 高于库中 v${update.libraryVersion}`
+      : `版本与库中相同（v${update.version}）`,
+  ]
+  if (update.added.length)
+    parts.push(`项目里多出 ${fileNames(update.added)}`)
+  if (update.changed.length)
+    parts.push(`${fileNames(update.changed)} 内容不同`)
+  return parts.join(' · ')
+}
+
+/** 文件名最多点两个，再多只报个数 —— 一行的位置不够，具体哪些文件在对比弹窗里看 */
+function fileNames(rels: string[]): string {
+  return rels.length > 2 ? `${rels.length} 个文件` : rels.join('、')
+}
+
 // ---------- 对比（差异只在对比弹窗里看） ----------
 
 const compareOpen = ref(false)
@@ -160,34 +166,24 @@ const compareRel = ref(SKILL_FILE)
 const compareProject = ref('')
 const compareFiles = ref<SkillCompareFile[]>([])
 
-/** 组装「某个项目副本 vs 库」的全文件对比数据，从 rel 开始看（换行先归一） */
-function openCompareFor(project: string, rel: string): void {
-  const copy = scan.value?.projects.find(item => item.project === project)
-  compareFiles.value = (scan.value?.library ?? []).map((file) => {
-    const found = copy?.files.find(item => item.rel === file.rel)
-    return {
-      rel: file.rel,
-      base: normalizeLf(file.content ?? ''),
-      incoming: found ? normalizeLf(found.content ?? '') : null,
-    }
-  })
-  compareRel.value = rel
-  compareProject.value = project
+/**
+ * 提示条入口：清单那份没差异就跳到第一个有差异的文件。
+ *
+ * 项目里新增的往往是附属文件（清单一个字没动，只有版本号动过或干脆没动），
+ * 停在 SKILL.md 上会先给人看一张「什么都没变」的表。
+ */
+function openCompare(update: ProjectUpdate): void {
+  compareFiles.value = update.files
+  compareRel.value = update.files.find(file => file.base !== file.incoming)?.rel ?? SKILL_FILE
+  compareProject.value = update.project
   compareOpen.value = true
 }
 
-/** 提示条入口：对比的就是 SKILL.md（更新条只由它的 version 产生） */
-function openCompare(update: ProjectUpdate): void {
-  openCompareFor(update.project, SKILL_FILE)
-}
-
-/** 对比弹窗里更新成功：编辑器对齐到新内容、重跑检测（更新条随之消失），并把成功说出来 */
+/** 对比弹窗里更新成功：编辑器对齐到新内容、重跑检测（提示条随之消失），并把成功说出来 */
 async function onApplied(rel: string, content: string): Promise<void> {
   if (store.activeFile === rel) {
     store.content = content
     baseline.value = content
-    if (rel === SKILL_FILE)
-      libraryContent.value = content
   }
   await checkUpdates()
   notifySuccess('已更新到库，保存成功')
@@ -327,20 +323,21 @@ async function removeActive(): Promise<void> {
         </el-button>
       </div>
 
-      <!-- 项目里被优化过的副本：打开详情时检测，查看后可一键更新到库 -->
+      <!-- 项目里的副本和库不一样（版本 / 新增文件 / 内容差异）：查看后可逐文件更新到库 -->
       <div v-if="checking || updates.length" class="detail__updates">
         <span v-if="checking" class="detail__updates-title">正在检查项目里的副本…</span>
         <template v-else>
           <span class="detail__updates-title">
-            有 {{ updates.length }} 个项目里的版本比库中更高（在项目里补充优化过的）：
+            有 {{ updates.length }} 个项目里的副本和库不一样：
           </span>
           <div v-for="update in updates" :key="update.project" class="detail__update">
             <span class="detail__update-name" :title="update.project">
               {{ projectNameOf(update.project) }}
             </span>
-            <span class="detail__update-hint">项目里的版本 v{{ update.version }} 高于库中</span>
+            <!-- 摘要是「版本 + 差异」拼出来的一句，窄窗下会被截断：全名挂在原生 title 上 -->
+            <span class="detail__update-hint" :title="updateHint(update)">{{ updateHint(update) }}</span>
             <el-button size="small" text @click="openCompare(update)">
-              查看新版本内容
+              查看差异
             </el-button>
           </div>
         </template>

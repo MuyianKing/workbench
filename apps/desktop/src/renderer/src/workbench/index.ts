@@ -56,11 +56,31 @@ function syncRepo(): string {
 }
 
 /**
+ * 交给资源管理器 / 文件对话框的路径：**分隔符一律换成反斜杠**。
+ *
+ * 设置里的路径可能是 `E:/a/b` 这种写法（技能库那一项就是），而 Shell 侧的路径解析
+ * 只认反斜杠：`E:/a\b` 这种混写的 `SHParseDisplayName` 直接解析失败，explorer 就开到
+ * 别处去了（实测：混写的解析不出来，整条换成反斜杠的能）。Rust 侧的文件操作两种都认，
+ * 所以只在「要给 Shell」的这两个口子上换。
+ */
+function windowsPath(raw: string): string {
+  return raw.replace(/\//g, '\\')
+}
+
+/** 对话框选项里的 `defaultPath` 也要过一道（它同样交给 Shell 去定位起始目录） */
+function withShellPath(options: Record<string, unknown>): Record<string, unknown> {
+  const value = options.defaultPath
+  return typeof value === 'string' ? { ...options, defaultPath: windowsPath(value) } : options
+}
+
+/**
  * 文件对话框：直接调插件命令，不引 @tauri-apps/plugin-dialog 包
  * （tauri.conf.json 里开了 withGlobalTauri，走 __TAURI__ 即可）。
  */
 async function openDialog(options: Record<string, unknown>): Promise<string | null> {
-  const selected = await invoke<string | string[] | null>('plugin:dialog|open', { options })
+  const selected = await invoke<string | string[] | null>('plugin:dialog|open', {
+    options: withShellPath(options),
+  })
   if (typeof selected === 'string')
     return selected
   if (Array.isArray(selected))
@@ -73,7 +93,9 @@ async function openDialog(options: Record<string, unknown>): Promise<string | nu
  * 单选环境里插件回的是单个字符串，也包成单元素数组 —— 调用方只面对一种形状。
  */
 async function openDialogMultiple(options: Record<string, unknown>): Promise<string[] | null> {
-  const selected = await invoke<string | string[] | null>('plugin:dialog|open', { options })
+  const selected = await invoke<string | string[] | null>('plugin:dialog|open', {
+    options: withShellPath(options),
+  })
   if (Array.isArray(selected))
     return selected
   return typeof selected === 'string' && selected.trim() ? [selected] : null
@@ -84,7 +106,9 @@ async function openDialogMultiple(options: Record<string, unknown>): Promise<str
  * 不引 @tauri-apps/plugin-dialog 包。用户在对话框里取消时返回 null。
  */
 async function saveDialog(options: Record<string, unknown>): Promise<string | null> {
-  const selected = await invoke<string | null>('plugin:dialog|save', { options })
+  const selected = await invoke<string | null>('plugin:dialog|save', {
+    options: withShellPath(options),
+  })
   return typeof selected === 'string' && selected.trim() ? selected : null
 }
 
@@ -588,8 +612,13 @@ function createApi(): WorkbenchApi {
     installNrm: () => nrm.install(),
     useNrmRegistry: (name: string) => nrm.useRegistry(name),
 
-    pickDirectory: (title?: string) =>
-      openDialog({ directory: true, multiple: false, title: title ?? '选择项目目录' }),
+    pickDirectory: (title?: string, defaultPath?: string) =>
+      openDialog({
+        directory: true,
+        multiple: false,
+        title: title ?? '选择项目目录',
+        ...(defaultPath ? { defaultPath } : {}),
+      }),
     // 挑一个文件（技能包那种要按后缀过滤的走这条；取消回 null，不是失败）
     pickFile: (title?: string, filters?: Array<{ name: string, extensions: string[] }>) =>
       openDialog({
@@ -617,7 +646,8 @@ function createApi(): WorkbenchApi {
     killPortProcess: (port: number) =>
       guard(invoke<null>('kill_port_process', { port }), '结束进程失败'),
     reveal: (targetPath: string) => {
-      void invoke('reveal', { path: targetPath })
+      // 资源管理器只认反斜杠：给它的路径一律换过（见 windowsPath），否则会开到别处
+      void invoke('reveal', { path: windowsPath(targetPath) })
       return Promise.resolve(ok(null))
     },
     // 这条**要**等结果：没装 VS Code 时 ShellExecute 会失败，得把原因说出来

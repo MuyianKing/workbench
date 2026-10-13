@@ -47,6 +47,10 @@ Workbench 的文档按「通用 / 模块」分层：
   `z-index` 抬在浮底之上：浮底滑过中间几项时从它们下面过，不盖住图标
 - **弹层开着时导航栏照样点得到**：遮罩铺满整窗，导航栏抬到它之上（`z-index` 取 int32 上限 ——
   Element Plus 弹层是 2000 起步、每开一个 +1 的动态值，写常数迟早被追平，上限追不上）。
+  抬上去的只是**遮罩**，弹框不许爬进那一列：弹框按整窗居中，窗口一窄宽弹框就会钻到菜单底下，
+  所以 `.el-dialog` 统一封了最大宽度 `calc(100vw - var(--dialog-inset) * 2)`
+  （`--dialog-inset` = 导航栏宽度 + 卡片间距上限，见 [tokens.css](../apps/desktop/src/renderer/src/styles/tokens.css)）——
+  宽弹层在各处自己给的 `width` 照旧，封顶只在窄窗口下生效，弹框因此永远落在导航栏右边。
   **换页不收弹层**：弹框挂在 `body` 上不随页面隐藏，切走再切回来还是它，填到一半的输入不丢
 - **填内容的弹层不挡背后**（[AppDialog.vue](../apps/desktop/src/renderer/src/components/AppDialog.vue) 的 `penetrable`）：
   密码、工作记录、命令、常用软件、添加项目、起名字、素材管理这几个弹层，遮罩只围住弹框自己 ——
@@ -297,7 +301,8 @@ packages/                按域拆出的 15 个 @workbench/* 包（TS 源码直�
   terminal/              ansi、log-ring、log-scroll、terminal-key
   kb/                    知识库的布局常量 / 入库状态口径（kb.ts）、清洗提示词（kb-clean.ts）、
                          巡检与条目链接的解析（kb-lint.ts）
-  skills/                技能的 frontmatter 解析与路径口径
+  skills/                技能的 frontmatter 解析与路径口径、项目副本与库的差异判定
+                         （compareSkillCopy，见 modules/skills.md）
   ai/                    AI 服务与模型清单的形状 / 收敛、厂商预设表、按模型名认上下文、
                          内置模型目录（ai-builtin-models.generated.ts，由 vendor-pi 生成）、
                          AI 热点的 RSS 解析与缓存策略（ai-news.ts）、Pi 技能的根与开关口径

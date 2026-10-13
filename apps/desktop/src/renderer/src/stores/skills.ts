@@ -446,7 +446,12 @@ export const useSkillsStore = defineStore('skills', () => {
     }
   }
 
-  /** 在资源管理器里显示技能（或技能库）所在的文件夹 */
+  /**
+   * 在资源管理器里显示技能（或技能库）所在的文件夹。
+   *
+   * 路径 = 仓库根 + 库在里面的相对路径（`gitRoot` / `dir` 都是探测回来的，可能带正斜杠）——
+   * 分隔符不在这里操心：适配层交给资源管理器之前会统一成反斜杠（见 windowsPath）。
+   */
   function reveal(id?: string): void {
     const rel = id ? skillRel(dir.value, id) : dir.value
     void window.workbench.reveal(`${gitRoot.value}\\${rel.replace(/\//g, '\\')}`)

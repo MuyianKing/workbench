@@ -1050,6 +1050,13 @@ body.is-resizing-video-float * {
 .el-dialog {
   border-radius: var(--r-lg);
   max-height: calc(100vh - var(--h-titlebar) - 48px);
+  /**
+   * 宽度上界：弹框按**整窗**居中，而左边的导航栏浮在遮罩之上（见 NavRail）——
+   * 窗口一窄，宽弹框的左半边就钻到菜单那一列底下去了。整窗居中下，只要宽度不超过
+   * 「窗口 − 两侧各一份 --dialog-inset」，左右边距就都还留着那一份，弹框必然落在导航栏右边。
+   * 各弹层自己的 width 照旧，这里只是封顶；320px 是下限（窗口小到离谱时别压成一条）。
+   */
+  max-width: max(320px, calc(100vw - var(--dialog-inset) * 2));
   display: flex;
   flex-direction: column;
 }

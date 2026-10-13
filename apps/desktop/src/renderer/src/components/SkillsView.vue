@@ -40,9 +40,10 @@ onMounted(() => {
  * 与笔记文件夹互不相干 —— 可以正好是某个笔记本、某个仓库里的一层，也可以是一个专门的技能仓库；
  * 换目录**不搬动任何文件**，只是换个地方看技能。它落在哪个仓库里由磁盘决定
  * （从这里往上找最近的 `.git`），所以这里不需要问「放仓库哪一层」。
+ * 对话框从**现在这个库**打开（不传的话系统会落在上次用过的别处，离你要挑的地方八丈远）。
  */
 async function pickRoot(): Promise<void> {
-  const picked = await window.workbench.pickDirectory('选择技能文件夹')
+  const picked = await window.workbench.pickDirectory('选择技能文件夹', store.root)
   if (picked)
     await store.setRoot(picked)
 }
