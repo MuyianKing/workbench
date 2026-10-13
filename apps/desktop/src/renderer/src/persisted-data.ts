@@ -77,6 +77,8 @@ export function sanitizeSettings(raw: unknown): StoredSettings {
   value.captureSaveDir = sanitizeCaptureSaveDir(value.captureSaveDir)
   value.capturePinOpacity = sanitizeCapturePinOpacity(value.capturePinOpacity)
   value.captureMagnifier = sanitizeCaptureMagnifier(value.captureMagnifier)
+  // 网速球：老数据文件里没有这个字段，默认关（只有显式存过 true 才开）
+  value.ballEnabled = value.ballEnabled === true
   value.launchAtLogin = value.launchAtLogin === true
   value.hotkeyEnabled = value.hotkeyEnabled !== false
   // Token 同步仓库：老数据文件里没有这个字段（默认空串 = 不同步）。

@@ -8,6 +8,7 @@ import type { CommandEntry, ProcessLogEvent, ProcessStatusEvent, Project, Result
 import { fail, isValidScriptName, ok, parsePortFromLog } from '@workbench/core'
 import { cleanLogLine, terminalKey } from '@workbench/terminal'
 
+import * as activity from './activity'
 import { errorText, invoke, listen } from './bridge'
 import { emit } from './events'
 import * as nvm from './nvm'
@@ -226,11 +227,11 @@ async function run(input: RunInput): Promise<Result<null>> {
       ...(createdAt === null ? {} : { processCreatedAt: createdAt }),
       ...(ownerCreated === null ? {} : { ownerCreatedAt: ownerCreated }),
     })
-    // 活跃度只认「启动 / 打包」这两种主动操作，且记在进程真起来这一刻（见 state.recordActivity）
+    // 活跃度只认「启动 / 打包」这两种主动操作，且记在进程真起来这一刻（见 state.recordActivity）。
+    // 记录与广播成对走 activity 那个模块（见它的文件头）—— 首页的图靠广播当场变深
     if (input.kind === 'start' || input.kind === 'build')
-      state.recordActivity()
-    // 跑过一次就算用过这个项目：项目卡与首页「最近使用」按它排序，
-    // 而这条 projectChanged 推送同时是渲染层重新拉活跃度计数的时机（首页的图因此当场变深）
+      activity.recordActivity('run')
+    // 跑过一次就算用过这个项目：项目卡与首页「最近使用」按它排序
     if (input.kind !== 'command') {
       const touched = state.touchProject(input.projectId)
       if (touched)

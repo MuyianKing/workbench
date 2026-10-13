@@ -1,4 +1,4 @@
-import type { AddProjectInput, AppSettings, AuthProvider, BackgroundImage, BuiltinWallpaper, CaptureContext, CommandEntry, EffectiveTheme, InstallablePackageManager, MailNotifyPayload, PinPatch, PinRecord, Project, Result, TerminalKind, ThemeConfig, WindowState, WorkbenchApi } from '@/types'
+import type { AddProjectInput, AppSettings, AuthProvider, BackgroundImage, BallContext, BuiltinWallpaper, CaptureContext, CommandEntry, EffectiveTheme, InstallablePackageManager, MailNotifyPayload, NetCounters, PinPatch, PinRecord, Project, Result, TerminalKind, ThemeConfig, WindowState, WorkbenchApi } from '@/types'
 /**
  * `window.workbench` 的 Tauri 实现。
  *
@@ -11,6 +11,7 @@ import type { AddProjectInput, AppSettings, AuthProvider, BackgroundImage, Built
  */
 import { fail, nextProjectColor, ok, parsePort, samePath } from '@workbench/core'
 import { notifyWarning } from '@/notify'
+import * as activity from './activity'
 import * as ai from './ai'
 import * as aiNews from './ai-news'
 import * as auth from './auth'
@@ -152,7 +153,7 @@ function hotkeyArgs(settings: AppSettings): Record<string, string | null> {
 }
 
 /**
- * 把设置里的系统集成项落到系统上：开机自启、全局快捷键。
+ * 把设置里的系统集成项落到系统上：开机自启、全局快捷键、截图遮罩预热、网速球。
  *
  * 失败只记一笔就够：设置已经存下了，注册不上（被占用、被策略拦）不该连带让改设置这件事失败。
  * 只有快捷键那条会**说一句**：界面上看着「设过了」、按下去却没反应是最难查的那种，
@@ -182,6 +183,15 @@ async function syncSystemIntegration(settings: AppSettings): Promise<void> {
   }
   catch (error) {
     console.warn('[workbench] 预建截图遮罩失败', error)
+  }
+
+  try {
+    // 网速球：开 / 关那一扇独立的置顶窗口。**同样必须等设置载完再调**（它读的正是 ballEnabled）。
+    // 失败不打扰用户：设置已经存下了，下次改一下开关还能再试
+    await invoke('ball_apply', { visible: settings.ballEnabled })
+  }
+  catch (error) {
+    console.warn('[workbench] 开关悬浮球失败', error)
   }
 }
 
@@ -484,7 +494,15 @@ function createApi(): WorkbenchApi {
     piSkillRemove: (root: string, id: string) => piSkill.piSkillRemove(root, id),
 
     // ---------- 统计 ----------
-    getActivity: () => Promise.resolve(state.activityCounts()),
+    getActivity: () => Promise.resolve(state.activityView()),
+    /**
+     * 记一次活跃度。适配层内部那几个来源直接调 `activity.recordActivity`，
+     * 这条通道只给渲染层里那一处 —— AI 助手跑完一轮是在 store 里才知道的（见 stores/ai.ts 的 settle）。
+     */
+    recordActivity: async (kind: Parameters<WorkbenchApi['recordActivity']>[0]) => {
+      activity.recordActivity(kind)
+      return ok(null)
+    },
     /**
      * Token 用量：实读 + 合并 + 按需同步。
      * 同步仓库地址从设置里现取 —— 用户刚在设置里填完，下一次刷新就该用上新地址。
@@ -729,6 +747,8 @@ function createApi(): WorkbenchApi {
       events.subscribe('pmInstallLog', handler),
     onProjectChanged: (handler: Parameters<WorkbenchApi['onProjectChanged']>[0]) =>
       events.subscribe('projectChanged', handler),
+    /** 活跃度记了一笔（任何一种来源，见 workbench/activity.ts）：首页那张图据此重拉 */
+    onActivityChanged: (handler: () => void) => events.subscribe('activityChanged', handler),
     onSettingsChanged: (handler: Parameters<WorkbenchApi['onSettingsChanged']>[0]) =>
       events.subscribe('settingsChanged', handler),
     onTheme: (handler: Parameters<WorkbenchApi['onTheme']>[0]) =>
@@ -790,6 +810,23 @@ function createApi(): WorkbenchApi {
     pinCopy: () => guard(invoke<null>('pin_copy'), '复制到剪贴板失败'),
     pinSave: (dir: string, name: string, unique: boolean) =>
       guard(invoke<string>('pin_save', { dir, name, unique }), '保存钉图失败'),
+
+    // ---------- 网速球（见 docs/modules/float-ball.md） ----------
+    //
+    // 角色与 capturePrewarm 一样：**值由渲染层推**，Rust 不去数据文件里读设置
+    // （盘上那份在「刚加的字段还没写回盘」那一段是空的）。球窗口与主窗口共用这一层，
+    // 它自己只装适配层、不装 store。
+    ballApply: (visible: boolean) =>
+      guard(invoke<null>('ball_apply', { visible }), '开悬浮球失败'),
+    ballContext: () => guard(invoke<BallContext>('ball_context'), '取悬浮球状态失败'),
+    ballOpen: (open: boolean) =>
+      guard(invoke<BallContext>('ball_open', { open }), '收起 / 展开悬浮球失败'),
+    ballOpenMain: () => {
+      void invoke('ball_open_main')
+      return Promise.resolve(ok(null))
+    },
+    netCounters: () => guard(invoke<NetCounters>('net_counters'), '取网速失败'),
+
     applyHotkeys: () => guard(invoke<null>('apply_hotkeys', hotkeyArgs(state.settings())), '注册全局快捷键失败'),
     // 截图是在工作线程里抓的，失败没法就地报给谁：Rust 推一条事件过来，
     // 主窗口弹提示（那时界面多半藏在托盘里 / 根本没显示）

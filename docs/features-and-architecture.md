@@ -158,6 +158,9 @@ Workbench 的文档按「通用 / 模块」分层：
 - 右键不弹 WebView2 的原生菜单（返回 / 刷新 / 另存为 / 打印 / 更多工具 / 检查 那一套）：界面是自绘的，浏览器这套菜单在这里没有意义；
   菜单键与 Shift+F10 触发的是同一个事件，也一样不出。调试因此没有「检查」可点，改走远程调试端口（见 [AGENTS.md](../AGENTS.md) 第 6 节）
 - 开机自启（默认开启，仅打包后生效）
+- 网速球（默认关闭）：打开后屏幕左 / 右边缘上出现一颗贴着边的球，显示实时下载 / 上传速度；
+  鼠标移开自动收成半个圆，移上去滑出来（见 [float-ball.md](modules/float-ball.md)）。
+  它与主窗口互不相干 —— 主窗口收进托盘、最小化，它都照样在桌面上
 - 账号与同步：账号在通用屏最后（登录前只有「登录状态」一行，登录后多出同步仓库地址，留空即不同步）；
   **从别的机器取外观**（列出仓库里有文件的机器，含标「本机」的那条，逐台「应用」换成本机外观）
   在**外观屏最上面**，旁边「同步一次」就地推拉一次（做法见[「外观配置同步」](modules/sync-and-auth.md)）
@@ -182,7 +185,7 @@ Workbench 的文档按「通用 / 模块」分层：
 | 工作日志渲染 | markdown-it（只服务工作日志正文：`html: false` 转义原文里的标签、`linkify` 认裸地址、`breaks` 让单个换行就是 `<br>`，链接统一新窗口 + 交系统浏览器打开） |
 | 笔记编辑器 | Vditor（只服务笔记正文；静态资源随包带一份、不走 CDN，见[「笔记」](modules/notes.md)那一节） |
 | 构建 | Vite 8（渲染层，打包器是 rolldown）+ cargo / Tauri CLI（后端）。根与 `apps/desktop` 的 `package.json` 都是 `"type": "module"`，所以各 vite / vitest 配置里用 `import.meta.dirname`（`__dirname` 只在旧的打包式加载器下被 shim 出来；仓库里也不要有 CJS 的 `.js` / `.cjs`，它们会被当成 ESM） |
-| 语言 | TypeScript（渲染层）+ Rust（后端）；契约与纯逻辑按域拆在 `packages/` 的 15 个 `@workbench/*` 包 |
+| 语言 | TypeScript（渲染层）+ Rust（后端）；契约与纯逻辑按域拆在 `packages/` 的 16 个 `@workbench/*` 包 |
 | 持久化 | 本地 JSON，由 Rust 侧 `store.rs` 负责（防抖 300ms、临时文件 + rename、退出前同步落盘） |
 | 子进程 | `std::process` 起 shell 命令（按批回传输出，Windows 下 `taskkill /T /F` 结束整棵进程树） |
 | 端口 → 进程 | `GetExtendedTcpTable`（iphlpapi，一次系统调用拿到监听表）+ `QueryFullProcessImageNameW`；不再起 `netstat` / `tasklist` 解析文本输出（全量检测会并发问十几个端口，原先每个端口两个子进程） |
@@ -249,6 +252,8 @@ apps/desktop/            桌面应用（自包含：渲染层 + Rust + 随包资
   src/capture.rs         截图会话与遮罩窗口 —— 注解见 modules/screenshot.md
   src/clipboard.rs       往系统剪贴板放图（CF_DIBV5 / CF_DIB / PNG）—— 注解见 modules/screenshot.md
   src/pin.rs             钉图窗口与记账 —— 注解见 modules/screenshot.md
+  src/ball.rs            网速球窗口、收起 / 展开与贴边吸附 —— 注解见 modules/float-ball.md
+  src/net.rs             网卡累计字节与链路速率（GetIfTable2，64 位计数器）—— 注解见 modules/float-ball.md
   src/oauth.rs           账号登录 —— 注解见 modules/sync-and-auth.md
   src/http.rs            WinHTTP 极简 HTTP 客户端 —— 注解见 modules/ipc-and-state.md
   src/weather.rs         实时天气宿主侧 —— 注解见 modules/home.md
@@ -265,9 +270,9 @@ apps/desktop/            桌面应用（自包含：渲染层 + Rust + 随包资
   tauri.conf.json        窗口、打包、资源映射
   capabilities/          能力白名单
 
-  src/renderer/           三个 HTML 入口：index.html（主界面）、capture.html（截图遮罩）、
-                         pin.html（钉图）。后两个是独立窗口、各自的 JS 上下文，只装适配层、
-                         不装 store（见 modules/screenshot.md）
+  src/renderer/           四个 HTML 入口：index.html（主界面）、capture.html（截图遮罩）、
+                         pin.html（钉图）、ball.html（网速球）。后三个是独立窗口、各自的 JS 上下文，
+                         只装适配层、不装 store（见 modules/screenshot.md、modules/float-ball.md）
   src/renderer/src/       Vue 应用（组件 / Pinia store / 设计令牌）
   workbench/             window.workbench 的适配层（原 preload + 主进程逻辑的替代品）：
                          底座五件（bridge / events / state / session / scanner）的注解见
@@ -287,7 +292,7 @@ apps/desktop/            桌面应用（自包含：渲染层 + Rust + 随包资
                          DEFAULT_SETTINGS），并从各域包 re-export 保持 `@/types` 一站式取类型
   persisted-data.ts      数据文件的收敛编排 + theme.json ↔ 数据文件的分流桥接
 
-packages/                按域拆出的 15 个 @workbench/* 包（TS 源码直出、各自带 vitest；
+packages/                按域拆出的 16 个 @workbench/* 包（TS 源码直出、各自带 vitest；
                          包之间与应用都只按包名走各自的 index.ts 桶导入）：
   core/                  平台原语：Result 与 ok/fail、端口与项目路径、dev-port、扫描
                          （scanner，fs 注入）、命令与快捷启动的收敛、图标缓存、残留进程判定、
@@ -318,6 +323,9 @@ packages/                按域拆出的 15 个 @workbench/* 包（TS 源码直�
   capture/               截图与钉图的纯逻辑：选区几何与八个把手、标注模型与命中判定、撤销栈、
                           放大镜取样、三层坐标换算、钉图缩放与透明度、截图文件名，以及那两个
                           窗口与后端来回的线格式（wire.ts）
+  net-meter/             网速球的纯逻辑：累计字节 → 速率的换算与采样间隔的两条界、指数滑动平均、
+                          单位进位（B/K/M/G，进位在取整之后复查一遍）、刻度环表盘的几何与尺寸
+                          常量（与 ball.rs 必须一致的那几个），以及 IPC 契约（wire.ts）
 
 apps/desktop/scripts/    make-icons.mjs（程序化生成应用图标与托盘图标）、
                          vendor-pi.mjs（Pi 随包内置与瘦身）、
@@ -481,8 +489,8 @@ pnpm run dist         # 产出 NSIS 安装包
   「上次看的那一档」那几项行为偏好）；AI 助手的服务清单（`aiProviders`：名称 / Base URL /
   API 形态 / 模型清单，密钥不在这里）、默认模型、会话清单（只存调度字段，对话本身由 Pi 写进
   下面的 `pi/` 目录）、**关掉的技能**（`aiSkillsOff`，键是「技能根 + 技能名」；技能本体是用户
-  那两个 `.agents/skills` 目录里的东西）；按天聚合的活跃度计数（只留最近一年）、
-  残留子进程记录、账号显示资料
+  那两个 `.agents/skills` 目录里的东西）；按天聚合的活跃度计数（**分来源**存，只留最近一年，
+  总数由分项现算）、残留子进程记录、账号显示资料
 - `pi/`：**内置 Pi 自己的东西**（`PI_CODING_AGENT_DIR` 指到这里，与用户全局 `~/.pi` 互不掺和）：
   `models.json`（整份由应用写出，`apiKey` 只是环境变量引用）、权限扩展 `permission.js`、
   Pi 自己的 trust.json / auth.json，以及 `pi/sessions/` 下**一段对话一份的会话文件**
@@ -508,6 +516,9 @@ pnpm run dist         # 产出 NSIS 安装包
 - `pins.json` 与 `pins/<id>.png`：**钉图的记账与图本身**（位置 / 尺寸 / 透明度）。
   （截图那几帧**只在内存里**：一场会话用完即弃，不落盘，也就没有「忘了清理」这回事。）
   **只在本机**：位置是这块屏上的坐标，换台机器不成立，也不进同步仓库。钉图关掉时连图一起删掉
+- `ball.json`：**网速球的记账**（贴哪一侧 + 纵向的 y）。与钉图同一待遇：位置是这块屏上的坐标，
+  **只在本机**、不进同步仓库。它不记「收起还是展开」（那是鼠标进出的即时状态），窗口被系统关掉也不清 ——
+  它是位置偏好，不是「球还开着」的凭据（见 [float-ball.md](modules/float-ball.md)）
 - 快捷启动只存程序路径与参数，不放程序本体
 - 程序图标按「路径 + 程序文件修改时间」缓存在 `workbench-data.json`（每个 1.5~4.4 KB）：
   修改时间没变就直接用（实测每次重抽 27~53ms）；只缓存抽成功的，失败的下次照常重试

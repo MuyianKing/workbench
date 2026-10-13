@@ -81,7 +81,10 @@ const greeting = computed(() => {
   return '晚上好'
 })
 
-/** 今天跑过几次（命令开跑那天计数，见 packages/core/src/activity.ts） */
+/**
+ * 今天做了几件事：几个来源求和之后的总数（见 packages/core/src/activity.ts 的 totalOf）。
+ * 这里不列分项 —— 顶栏这一行只报「今天动了多少」，是些什么事在首页那张图上（悬停有分项）。
+ */
 const todayCount = computed(() => store.activity[dayKey(dayStart.value)] ?? 0)
 
 /** 连着用了多少天：今天还没动手也不算断，从昨天数起 */
@@ -110,7 +113,7 @@ const facts = computed(() => {
     parts.push(isNight.value ? `${store.runningCount} 个项目还在跑` : `${store.runningCount} 个项目在跑`)
   }
   if (todayCount.value)
-    parts.push(`今天 ${todayCount.value} 次执行`)
+    parts.push(`今天 ${todayCount.value} 次操作`)
   if (streak.value > 1)
     parts.push(`连续 ${streak.value} 天`)
   return parts

@@ -9,6 +9,7 @@
 
 mod ai;
 mod ai_news;
+mod ball;
 mod capture;
 mod clipboard;
 mod commands;
@@ -22,6 +23,7 @@ mod imaging;
 mod kb;
 mod mail;
 mod mail_watch;
+mod net;
 mod nrm;
 mod notes;
 mod notify;
@@ -489,6 +491,7 @@ fn main() {
         .manage(mail_watch::MailWatch::default())
         .manage(capture::CaptureState::default())
         .manage(pin::Pins::default())
+        .manage(ball::BallState::default())
         .invoke_handler(tauri::generate_handler![
             commands::data_load,
             commands::data_save,
@@ -643,6 +646,11 @@ fn main() {
             pin::pin_close_all,
             pin::pin_copy,
             pin::pin_save,
+            ball::ball_apply,
+            ball::ball_context,
+            ball::ball_open,
+            ball::ball_open_main,
+            net::net_counters,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
@@ -650,6 +658,9 @@ fn main() {
             commands::load_all();
             // 钉图的记账要早于窗口：restore 照着它把上次钉着的图开回来
             pin::load(&handle);
+            // 悬浮球只读记账、不开窗：开不开由设置决定，值由渲染层在 initState 之后推
+            // （ball_apply，见 workbench/index.ts 的 syncSystemIntegration）
+            ball::load(&handle);
             create_main_window(&handle)?;
             create_tray(&handle)?;
             pin::restore(&handle);

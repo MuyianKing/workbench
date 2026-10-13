@@ -28,6 +28,7 @@
     "@workbench/core": "workspace:*",
     "@workbench/kb": "workspace:*",
     "@workbench/mail": "workspace:*",
+    "@workbench/net-meter": "workspace:*",
     "@workbench/notes": "workspace:*",
     "@workbench/skills": "workspace:*",
     "@workbench/terminal": "workspace:*",

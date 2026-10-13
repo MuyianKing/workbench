@@ -26,6 +26,9 @@ pub const MAIL_WATCH_FILE: &str = "mail-watch.json";
 /// 钉图的记账文件（见 pin.rs）：哪些图还钉在屏幕上、各自在哪儿、多大、多透明。
 /// 与工作日志同一待遇：只对本机成立（位置是这块屏的坐标），不进同步仓库
 pub const PINS_FILE: &str = "pins.json";
+/// 悬浮球的记账文件（见 ball.rs）：贴在哪一侧、纵向在哪儿。
+/// 与钉图同一待遇：只对本机成立，不进同步仓库
+pub const BALL_FILE: &str = "ball.json";
 /// 崩溃日志（见 panic_log.rs）：release 档 panic 直接中止进程，那一下的证据只留在这里
 const PANIC_LOG_FILE: &str = "panic.log";
 /// 钉图的图片目录名：一张钉图一个 PNG，钉图关掉时连文件一起删
@@ -115,6 +118,11 @@ pub fn pins_dir() -> PathBuf {
 /// 钉图的记账文件
 pub fn pins_file() -> PathBuf {
     data_dir().join(PINS_FILE)
+}
+
+/// 悬浮球的记账文件
+pub fn ball_file() -> PathBuf {
+    data_dir().join(BALL_FILE)
 }
 
 /// 崩溃日志（见 panic_log.rs）。与数据文件同一目录：出了「窗口凭空没了」这种怪事时，

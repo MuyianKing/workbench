@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh-CN" class="dark" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <!--
+      悬浮球窗口的入口（第四个 HTML 入口，见 float-ball.md）。
+      与 pin / capture 同一套规矩：独立窗口、各自的 JS 上下文，只装适配层，
+      不装 store、不 initState —— 装了会与主窗口抢着读写同一批数据文件。
+      窗口是 transparent 的，html / body 也必须真透明：CSS 这一层再压一层底色
+      就等于把桌面挡掉了（WebView2 的窗口底色默认不透明，见 ball.rs）。
+      收起时窗口只有 36×72，展开是 76×76 —— 两个状态下的排版都由 BallApp.vue 按
+      窗口尺寸自适应，这里不写死任何尺寸。
+    -->
+    <title>网速球</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <style>
+      /* 高度链必须是「定值」：html → body → #ball → 组件根，一层都不能是 auto。
+         CSS 里百分比高度遇到 auto 高的父级会退化成 auto —— 组件根上的 height:100% 一失效，
+         里面按百分比算高度的那几层（中心那枚钮是 68%）就只剩内容的自然高度，
+         球会变成一个「宽 76、高 40 出头」的扁椭圆。 */
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        overflow: hidden;
+        background: transparent;
+        user-select: none;
+        -webkit-user-select: none;
+      }
+
+      #ball {
+        width: 100%;
+        height: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="ball"></div>
+    <script type="module" src="/src/ball/main.ts"></script>
+  </body>
+</html>

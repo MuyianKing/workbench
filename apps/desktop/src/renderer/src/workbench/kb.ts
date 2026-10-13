@@ -16,6 +16,7 @@ import { fail, ok } from '@workbench/core'
  * 文件那一截仍然由 Rust 逐段挡越界。）
  */
 import { compareKbRel } from '@workbench/kb'
+import { recordActivity } from './activity'
 import { guard, invoke } from './bridge'
 
 /** root 从调用方带进来（设置里的那个值），这里不缓存：用户换了文件夹，来源就换了 */
@@ -154,5 +155,8 @@ export async function kbIndexBuild(
     = typeof result.data.count === 'number' && Number.isFinite(result.data.count)
       ? result.data.count
       : 0
+  // 记一笔活跃度。建索引是**应用唯一直接写知识库的动作**，两处调用（手动重建、一键清洗收尾）
+  // 都走这条路 —— 顺带也就把「一次整理」记成了一次，不必在清洗那边单独记
+  recordActivity('kb')
   return ok({ count })
 }

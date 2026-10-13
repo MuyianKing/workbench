@@ -67,6 +67,10 @@ windows-sys = { version = "0.61", features = [
     "Win32_Graphics_Dwm",
     "Win32_Graphics_Gdi",
     "Win32_NetworkManagement_IpHelper",
+    # 悬浮球的网速取样（net.rs）：GetIfTable2 / MIB_IF_ROW2 / IfOperStatusUp 都 gate 在 Ndis 这个
+    # feature 下。用它是因为那套计数器是 64 位的 —— GetIfTable 的 dwInOctets 只有 32 位，
+    # 100Mbps 下几分钟就在 4GB 处回绕（见 net.rs 文件头）。同样只是给已有的 windows-sys 加 feature
+    "Win32_NetworkManagement_Ndis",
     "Win32_Networking_WinHttp",
     "Win32_Networking_WinSock",
     "Win32_Security",

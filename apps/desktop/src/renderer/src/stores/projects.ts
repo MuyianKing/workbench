@@ -1,7 +1,7 @@
 import type { ProjectSort } from '@workbench/core'
 import type { ProcessTarget } from './terminal'
 
-import type { ActivityCounts, AddProjectInput, PackageManager, Project, ProjectGroup, ProjectPatch } from '@/types'
+import type { ActivityBreakdown, ActivityCounts, ActivityView, AddProjectInput, PackageManager, Project, ProjectGroup, ProjectPatch } from '@/types'
 import { backfillProjectColors as backfillColors, reorderById, sanitizeProjectSort } from '@workbench/core'
 
 import { defineStore } from 'pinia'
@@ -43,8 +43,10 @@ export const useProjectsStore = defineStore('projects', () => {
   const ready = ref(false)
   /** 项目目录是否仍然存在；尚未检查过的项目按有效处理 */
   const pathValidity = ref<Record<string, boolean>>({})
-  /** 按天聚合的命令执行次数，首页活跃度图的数据源；每次执行结束后由主进程推着刷新 */
+  /** 按天聚合的操作总次数，首页活跃度图的深浅用；任何一种来源记了一笔就重拉 */
   const activity = ref<ActivityCounts>({})
+  /** 各来源的分项（日期 → 来源 → 次数），图里格子的悬停提示用它 */
+  const activityDays = ref<ActivityBreakdown>({})
 
   const groupFilter = ref<string>('all')
 
@@ -138,6 +140,10 @@ export const useProjectsStore = defineStore('projects', () => {
 
     // 主进程更新了项目（执行记录、最近使用时间），同步回本地列表
     window.workbench.onProjectChanged(onProjectChanged)
+    // 活跃度记了一笔（任何一种来源，见 workbench/activity.ts）：重新拉一次计数。
+    // 与 onProjectChanged 分开挂 —— 改项目名 / 改分组也会推 projectChanged，那些不改活跃度，
+    // 顺手重拉一次纯属白跑（原先就是这么绑的，拆开之后各走各的）
+    window.workbench.onActivityChanged(() => void refreshActivity())
   }
 
   /** 拉一次项目 / 分组 / 设置 / 数据目录 */
@@ -153,19 +159,25 @@ export const useProjectsStore = defineStore('projects', () => {
     await settingsStore.loadAppearance()
 
     // 其余与外观无关，并行拉完即可。
-    const [, counts] = await Promise.all([
+    const [, view] = await Promise.all([
       environment.loadDataDir(),
       window.workbench.getActivity(),
       catalog.refreshQuickApps(),
       catalog.refreshCommands(),
     ])
-    activity.value = counts
+    applyActivity(view)
     for (const item of catalog.commands) terminal.runtimeOf(item.id)
   }
 
-  /** 重新拉一次活跃度计数（命令跑完后调用） */
+  /** 把一份活跃度快照铺进两个 ref：总数画图、分项写格子的悬停提示 */
+  function applyActivity(view: ActivityView): void {
+    activity.value = view.total
+    activityDays.value = view.days
+  }
+
+  /** 重新拉一次活跃度（任何一种来源记了一笔之后调用，见 installListeners） */
   async function refreshActivity(): Promise<void> {
-    activity.value = await window.workbench.getActivity()
+    applyActivity(await window.workbench.getActivity())
   }
 
   /** 主进程更新了项目（执行记录、最近使用时间），同步回本地列表 */
@@ -177,8 +189,6 @@ export const useProjectsStore = defineStore('projects', () => {
     // 先更新落盘快照，避免这次同步又被 watcher 推回主进程
     pushedSnapshot.set(updated.id, JSON.stringify(editableOf(updated)))
     projects.value[index] = updated
-    // 这条推送也意味着刚有一条命令跑完，活跃度计数随之 +1
-    void refreshActivity()
   }
 
   // ---------- 项目与分组 ----------
@@ -759,6 +769,7 @@ export const useProjectsStore = defineStore('projects', () => {
     sortedGroups,
     ready,
     activity,
+    activityDays,
     groupFilter,
     sortBy,
     setGroupFilter,

@@ -18,6 +18,7 @@ import { fail, ok } from '@workbench/core'
  * 路径一律是相对笔记根的相对路径，越界与非法名字由 Rust 侧挡住（见 src-tauri/src/notes.rs）。
  */
 import { buildNoteTree, imageRawUrl, imageScopeDir, joinRel, normalizeRel, NOTE_IMAGE_DIR, noteFileName, noteNameProblem, sanitizeImageRepo, sanitizeNoteName } from '@workbench/notes'
+import { recordActivity } from './activity'
 import { guard, invoke } from './bridge'
 import { localDevice } from './token'
 
@@ -94,6 +95,11 @@ export async function createNote(
   )
   if (!created.ok)
     return fail(created.error ?? '新建失败')
+
+  // 活跃度只认「写了一篇新笔记」，**建文件夹不算**（那是整理，不是产出）。
+  // 也不按保存次数算：编辑器是防抖自动保存的，一个下午能写几百次盘（见 NoteEditor.vue）
+  if (input.kind !== 'folder')
+    recordActivity('note')
 
   return afterChange(root, rel)
 }

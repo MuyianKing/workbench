@@ -1,17 +1,21 @@
 <script setup lang="ts">
 import type { ActivityDay } from '@workbench/core'
-import { buildActivityCalendar, monthLabels } from '@workbench/core'
+import { buildActivityCalendar, describeDay, monthLabels } from '@workbench/core'
 /**
  * 首页的活跃度图 —— 完全照 GitHub 贡献图的样子：一列一周、一行一周中的一天、
- * 53 列铺满一年，颜色深浅表示当天执行了多少次命令。
+ * 53 列铺满一年，颜色深浅表示当天做了多少件事。
  *
  * 深浅那四档**跟着主题色走**（从 `--el-color-primary` 掺出来，见下面 `.graph` 那段说明）：
  * 没配主题色时是灰阶，配了就是那个色相的一整条色阶。
  *
- * 数据来自 store.activity（YYYY-MM-DD → 次数），由适配层在用户点「启动 / 打包」时累加
- * （见 workbench/state.ts 的 recordActivity）。
- * 只算用户主动发起的启动与打包：安装依赖、自定义命令、停止与失败都不计入 ——
+ * 数据来自 store.activity（YYYY-MM-DD → 当天的总次数），是几个来源相加的结果：
+ * 启动 / 打包、记一条工作日志、新建一篇笔记、AI 助手跑完一轮、知识库整理一次。
+ * **只算用户主动发起、且成了的那些**：安装依赖、自定义命令、停止、失败与后台轮询都不计入 ——
  * 活跃度回答的是「这段时间用得勤不勤」，不是「跑得顺不顺」。
+ *
+ * 格子有多深只看总数；**是些什么事写在悬停提示里**（store.activityDays 的分项，
+ * 见 packages/core 的 describeDay）—— 一个数画不出「今天是在写东西还是在跑项目」。
+ * 记一笔的动作分散在各自的模块里（workbench/activity.ts 是那个统一的出口）。
  */
 import { computed, nextTick, onActivated, ref } from 'vue'
 import PanelLoading from '@/components/PanelLoading.vue'
@@ -53,12 +57,13 @@ const WEEKDAY_LABELS = ['', 'Mon', '', 'Wed', '', 'Fri', '']
 const calendar = computed(() => buildActivityCalendar(store.activity, dayStart.value))
 const months = computed(() => monthLabels(calendar.value.weeks))
 
+/** 格子的悬停提示：日期 + 那天做了些什么（一个来源就直接说那个来源，几个来源先说总数） */
 function tipOf(day: ActivityDay): string {
   if (day.future)
     return ''
   const [year, month, date] = day.date.split('-')
   const label = `${year}年${Number(month)}月${Number(date)}日`
-  return day.count ? `${label} · ${day.count} 次执行` : `${label} · 无执行`
+  return `${label} · ${describeDay(day.count, store.activityDays[day.date] ?? {})}`
 }
 </script>
 
@@ -67,7 +72,7 @@ function tipOf(day: ActivityDay): string {
     <header class="panel__head">
       <span class="eyebrow">活跃度</span>
       <span class="graph__total mono">
-        {{ store.ready ? `过去一年共 ${calendar.total} 次执行` : '读取中…' }}
+        {{ store.ready ? `过去一年共 ${calendar.total} 次操作` : '读取中…' }}
       </span>
     </header>
 
@@ -93,7 +98,7 @@ function tipOf(day: ActivityDay): string {
           <div
             class="graph__grid"
             role="img"
-            :aria-label="`过去一年共 ${calendar.total} 次命令执行`"
+            :aria-label="`过去一年共 ${calendar.total} 次操作`"
           >
             <div v-for="(week, wi) in calendar.weeks" :key="wi" class="graph__week">
               <i

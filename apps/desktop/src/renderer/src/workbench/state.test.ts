@@ -112,19 +112,32 @@ describe('老数据的搬家', () => {
  * 从此不再变深。所以这里两样都要盯 —— 当天加了次数，而且真的落了盘。
  */
 describe('活跃度计数', () => {
-  it('每记一次当天加一，并且跟着落盘', async () => {
+  it('每记一次当天加一（按来源分项），并且跟着落盘', async () => {
     rawData = { projects: [], activity: {} }
     rawTheme = { version: 2, cards: {} }
     calls.length = 0
     await state.initState()
 
-    state.recordActivity()
-    state.recordActivity()
+    state.recordActivity('run')
+    state.recordActivity('run')
+    state.recordActivity('log')
 
     const today = dayKey(Date.now())
-    expect(state.activityCounts()?.[today]).toBe(2)
+    expect(state.activityView().days[today]).toEqual({ run: 2, log: 1 })
+    // 总数是现算的（两份真源迟早对不上），图上那一格看的就是它
+    expect(state.activityView().total[today]).toBe(3)
     const saved = calls.filter(item => item.command === 'data_save').pop()
-    const dumped = saved?.args?.value as { activity?: Record<string, number> } | undefined
-    expect(dumped?.activity?.[today]).toBe(2)
+    const dumped = saved?.args?.value as { activity?: Record<string, Record<string, number>> } | undefined
+    expect(dumped?.activity?.[today]).toEqual({ run: 2, log: 1 })
+  })
+
+  it('老数据文件里那个裸数字按「启动 / 打包」收下（迁移只此一处）', async () => {
+    const today = dayKey(Date.now())
+    rawData = { projects: [], activity: { [today]: 5 } }
+    rawTheme = { version: 2, cards: {} }
+    await state.initState()
+
+    expect(state.activityView().days[today]).toEqual({ run: 5 })
+    expect(state.activityView().total[today]).toBe(5)
   })
 })

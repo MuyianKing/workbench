@@ -1,5 +1,5 @@
 import type { AppearanceSettings, ThemeConfig } from '@workbench/appearance'
-import type { AccountProfile, ActiveSession, AppSettings, CommandEntry, CommandInput, CommandPatch, IconCacheEntry, PersistedData, Project, ProjectGroup, ProjectPatch, QuickApp, QuickAppInput, QuickAppList, QuickAppPatch } from '@/types'
+import type { AccountProfile, ActiveSession, ActivityKind, ActivityView, AppSettings, CommandEntry, CommandInput, CommandPatch, IconCacheEntry, PersistedData, Project, ProjectGroup, ProjectPatch, QuickApp, QuickAppInput, QuickAppList, QuickAppPatch } from '@/types'
 import { DEFAULT_THEME, sameThemeContent, sanitizeTheme } from '@workbench/appearance'
 /**
  * 渲染层持有的持久化状态：项目 / 分组 / 快捷启动 / 命令 / 设置 / 首页布局 / 活跃度。
@@ -12,7 +12,7 @@ import { DEFAULT_THEME, sameThemeContent, sanitizeTheme } from '@workbench/appea
  * 同步仓库地址…)住在 workbench-data.json。渲染层只认一份完整的 `AppSettings` ——
  * 读的时候在这里合（`settings()`）、写的时候在这里分（`updateSettings` 按白名单分流）。
  */
-import { bumpDay, pruneDays, reorderById, withoutSession, withSessionRecorded } from '@workbench/core'
+import { bumpDay, pruneDays, reorderById, totalOf, withoutSession, withSessionRecorded } from '@workbench/core'
 import { emptyData, mergeSettingsAppearance, migrateAppearanceIntoTheme, parseData, sanitizeSettings, splitSettingsPatch } from '@/persisted-data'
 import { invoke } from './bridge'
 
@@ -291,20 +291,26 @@ export function reorderGroups(ids: string[]): ProjectGroup[] {
 
 // ---------- 活跃度 ----------
 
-export function activityCounts(): PersistedData['activity'] {
-  return copy(data.activity ?? {})
+/** 交给渲染层的一份活跃度快照：总数画图、分项写格子的悬停提示（见 @workbench/core 的 ActivityView） */
+export function activityView(): ActivityView {
+  const days = copy(data.activity ?? {})
+  return { total: totalOf(days), days }
 }
 
 /**
- * 用户每点一次「启动」或「打包」，就往当天的格子里记一次。
+ * 用户主动做完一件事，就往当天那一类里记一次。
  *
- * 只认这两种主动操作：安装依赖、自定义命令，以及停止 / 强制结束 / 启动失败都不算 ——
- * 图回答的是「主动跑了多少次」，不是「进程收尾了几次」。
+ * `kind` 是这件事属于哪一类（启动 / 打包、工作日志、新建笔记、助手对话、知识库整理，
+ * 见 @workbench/core 的 ActivityKind）。**只认成了的、用户自己点出来的那一下**：
+ * 安装依赖、自定义命令、停止、启动失败，以及后台那些轮询（收信 / 同步 / 天气）都不算 ——
+ * 图回答的是「主动做了多少事」，不是「跑了多少次进程、收尾了几次」。
+ *
+ * 记完由调用方广播 activityChanged（见同目录的 activity.ts）—— 这里不碰事件层。
  * 图只画最近一年，顺手裁掉更旧的计数，数据文件才不会跟着使用年限一直长。
  */
-export function recordActivity(): void {
+export function recordActivity(kind: ActivityKind): void {
   const now = Date.now()
-  data.activity = pruneDays(bumpDay(data.activity ?? {}, now), now)
+  data.activity = pruneDays(bumpDay(data.activity ?? {}, kind, now), now)
   persist()
 }
 

@@ -211,6 +211,9 @@ importers:
       '@workbench/mail':
         specifier: workspace:*
         version: link:../../packages/mail
+      '@workbench/net-meter':
+        specifier: workspace:*
+        version: link:../../packages/net-meter
       '@workbench/notes':
         specifier: workspace:*
         version: link:../../packages/notes
@@ -345,6 +348,12 @@ importers:
       postal-mime:
         specifier: ^4.0.4
         version: 4.0.4
+    devDependencies:
+      vitest:
+        specifier: ^5.0.3
+        version: 5.0.3(@types/node@26.6.4)(vite@8.3.2(@types/node@26.6.4)(yaml@2.9.1))
+
+  packages/net-meter:
     devDependencies:
       vitest:
         specifier: ^5.0.3

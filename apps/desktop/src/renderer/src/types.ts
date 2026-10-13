@@ -10,9 +10,10 @@ import type { AiImagePayload, AiNewsArticle, AiNewsRefreshResult, AiNewsSourceIn
 import type { AccentInkMode, AppearanceSettingKey, EffectiveTheme, ThemeConfig, ThemeSource, TopBarStyle, ViewId } from '@workbench/appearance'
 import type { AccountProfile, AuthProvider } from '@workbench/auth'
 import type { CaptureContext, PinPatch, PinRecord } from '@workbench/capture'
-import type { ActiveSession, ActivityCounts, CommandEntry, IconCacheEntry, PackageManager, ProjectColor, ProjectSort, QuickApp, Result, ScanResult } from '@workbench/core'
+import type { ActiveSession, ActivityBreakdown, ActivityKind, ActivityView, CommandEntry, IconCacheEntry, PackageManager, ProjectColor, ProjectSort, QuickApp, Result, ScanResult } from '@workbench/core'
 import type { KbRawSource, KbRepoState, KbScanResult, KbSyncInput, KbSyncSummary } from '@workbench/kb'
 import type { MailAccount, MailContact } from '@workbench/mail'
+import type { BallContext, NetCounters } from '@workbench/net-meter'
 import type { NoteChange, NoteCreateInput, NoteImageDeleted, NoteImageDeleteInput, NoteImageList, NoteImageListInput, NoteImageUploaded, NoteImageUploadInput, NoteNode, NoteRepoState, NoteSyncInput, NoteSyncSummary, NoteTextScan } from '@workbench/notes'
 import type { SkillCommit, SkillCompareFile, SkillCreateInput, SkillEntry, SkillFileInfo, SkillInstalledScan, SkillLibraryState, SkillSyncSummary } from '@workbench/skills'
 import type { SyncDeviceInfo, TokenUsageResult } from '@workbench/usage'
@@ -57,7 +58,7 @@ export type {
   Size,
 } from '@workbench/capture'
 /** 活跃度计数、首页布局、同步的其它设备也走这里导出，渲染层统一从 @/types 取类型 */
-export type { ActivityCounts } from '@workbench/core'
+export type { ActivityBreakdown, ActivityCounts, ActivityKind, ActivityView } from '@workbench/core'
 export type { ProjectColor } from '@workbench/core'
 // 下面这几样原先定义在本文件，monorepo 化后类型跟着自己的域走（Result / PackageManager /
 // ScanResult / CommandEntry / QuickApp / IconCacheEntry / ActiveSession 在 core，
@@ -86,6 +87,7 @@ export type {
   KbSyncInput,
   KbSyncSummary,
 } from '@workbench/kb'
+export type { BallContext, NetCounters, NetRate } from '@workbench/net-meter'
 export type {
   NoteChange,
   NoteCreateInput,
@@ -304,6 +306,13 @@ export interface AppSettings {
   capturePinOpacity: number
   /** 选区时显示放大镜与像素取色（放大镜挡视线时关掉它） */
   captureMagnifier: boolean
+  /**
+   * 网速球（贴在屏幕左 / 右边缘、可上下拖的那颗球）的总开关，默认关。
+   *
+   * 它是一扇独立的置顶窗口（见 docs/modules/float-ball.md），主窗口收进托盘也照样在；
+   * 位置只对本机成立（是这块屏的坐标），所以它进数据文件、不参与外观同步。
+   */
+  ballEnabled: boolean
   /** 终端面板展开时的高度（px），由拖动面板上沿决定 */
   terminalHeight: number
   /**
@@ -763,10 +772,13 @@ export interface PersistedData {
   /** 上次运行期间启动、尚未确认结束的子进程 */
   activeSessions?: ActiveSession[]
   /**
-   * 按本地日期聚合的命令执行次数，首页活跃度图的数据源。
-   * 与项目各自的 history 分开存：history 每个项目只留最近 10 条，撑不起一整年的图。
+   * 首页活跃度图的数据源：按本地日期聚合的**各来源**操作次数（启动 / 打包、工作日志、
+   * 新建笔记、助手对话、知识库整理）。与项目各自的 history 分开存 —— history 每个项目
+   * 只留最近 10 条，撑不起一整年的图。
+   *
+   * 分来源存、不另存一份总数：图上那一格的深浅由 `totalOf()` 现算（两份真源迟早对不上）。
    */
-  activity?: ActivityCounts
+  activity?: ActivityBreakdown
   /**
    * 登录过的账号资料（昵称 / 头像 / 登录名，**非机密**）。
    *
@@ -1111,8 +1123,13 @@ export interface WorkbenchApi {
   relocateProject: (id: string, newPath: string) => Promise<Result<Project>>
   /** 检查所有项目目录是否仍然存在，返回 项目 ID -> 是否有效 */
   checkProjectPaths: () => Promise<Record<string, boolean>>
-  /** 按天聚合的命令执行次数（YYYY-MM-DD -> 次数） */
-  getActivity: () => Promise<ActivityCounts>
+  /** 首页活跃度：按天聚合的各来源操作次数，总数（total）与分项（days）一起给，见 @workbench/core 的 ActivityView */
+  getActivity: () => Promise<ActivityView>
+  /**
+   * 记一次活跃度（只给渲染层里那几个「适配层看不见动作成败」的来源用：AI 助手跑完一轮，
+   * 见 stores/ai.ts 的 settle）。其余来源都在适配层内部直接记（见 workbench/activity.ts）。
+   */
+  recordActivity: (kind: ActivityKind) => Promise<Result<null>>
   /** Token 用量:实读各 AI 工具本地库并合并进快照;读取失败的来源带原因,数据回退快照 */
   getTokenUsage: () => Promise<Result<TokenUsageResult>>
   /**
@@ -1652,6 +1669,22 @@ export interface WorkbenchApi {
   /** 把这张钉图另存一份 */
   pinSave: (dir: string, name: string, unique: boolean) => Promise<Result<string>>
   /**
+   * 开 / 关网速球。角色与 capturePrewarm 一样：设置改了就推一次，值由渲染层给
+   * （Rust 不去数据文件里读设置）。
+   */
+  ballApply: (visible: boolean) => Promise<Result<null>>
+  /** 球窗口问自己贴哪一侧、收起还是展开 */
+  ballContext: () => Promise<Result<BallContext>>
+  /** 收起 / 展开（意图与防抖在渲染层，窗口尺寸与位置在 Rust） */
+  ballOpen: (open: boolean) => Promise<Result<BallContext>>
+  /** 双击球：把主界面唤出来（它可能收在托盘里） */
+  ballOpenMain: () => Promise<Result<null>>
+  /**
+   * 读一次网卡累计字节与链路速率（一秒一次）。速率 / 单位 / 平滑都在
+   * @workbench/net-meter 里算，这一条只取原始数。
+   */
+  netCounters: () => Promise<Result<NetCounters>>
+  /**
    * 按当前设置重新装一遍全部全局快捷键（唤起窗口 / 截图）。
    * 三条一起装是插件的硬要求（见 main.rs 的 register_hotkeys），所以只能在改动之后整批重来。
    */
@@ -1702,6 +1735,8 @@ export interface WorkbenchApi {
   onTerminalOpen: (fn: (e: TerminalOpenEvent) => void) => () => void
   onClear: (fn: (e: { terminal: string }) => void) => () => void
   onProjectChanged: (fn: (project: Project) => void) => () => void
+  /** 活跃度计数变了（任何一种来源记了一笔），首页那张图据此重拉一次 */
+  onActivityChanged: (fn: () => void) => () => void
   /** 快捷启动列表被主进程改过（启动一次会刷新最近使用时间），整份推过来 */
   onQuickApps: (fn: (payload: QuickAppList) => void) => () => void
   onSettingsChanged: (fn: (settings: AppSettings) => void) => () => void
@@ -1798,6 +1833,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   captureSaveDir: CAPTURE_SAVE_DIR_DEFAULT,
   capturePinOpacity: CAPTURE_PIN_OPACITY_DEFAULT,
   captureMagnifier: CAPTURE_MAGNIFIER_DEFAULT,
+  // 网速球默认关：新功能不自己冒出来，去设置里打开（见 docs/modules/float-ball.md）
+  ballEnabled: false,
   terminalButtonTop: TERMINAL_BUTTON_TOP_DEFAULT,
   noteDir: '',
   noteDirs: [],

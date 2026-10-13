@@ -905,6 +905,11 @@ export const useAiStore = defineStore('ai', () => {
     noteDuration(run)
     if (run.stale)
       void recycle(sessionId)
+    // 这一轮真的跑完了 = 用了一次 AI 助手，记一笔活跃度（首页那张图据此变深）。
+    // **挂在 settle 而不是起进程那一趟**：进程起得来不代表跑得完，起完就崩的那些不该进图；
+    // 也正因为挂在 store 这一层，它才只认这个页面里的会话 —— 知识库一键清洗走的是自己那条
+    // Pi 路子，那一笔在知识库那边记（见 workbench/kb.ts 的 kbIndexBuild），不会重复
+    void window.workbench.recordActivity('ai')
   }
 
   /**

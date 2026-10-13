@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ACTIVITY_DAYS, ACTIVITY_WEEKS, addDays, buildActivityCalendar, bumpDay, dayKey, levelOf, monthLabels, pruneDays, sanitizeActivity, startOfWeek, streakOf } from './activity'
+import { ACTIVITY_DAYS, ACTIVITY_WEEKS, addDays, buildActivityCalendar, bumpDay, dayKey, describeDay, isActivityKind, levelOf, monthLabels, pruneDays, sanitizeActivity, startOfWeek, streakOf, totalOf } from './activity'
 
 /** 固定的「今天」，避免测试跑到跨天/跨年就失效 */
 const TODAY = new Date(2026, 8, 10) // 2026-09-10
@@ -40,57 +40,122 @@ describe('levelOf', () => {
   })
 })
 
+describe('isActivityKind', () => {
+  it('只认登记过的来源', () => {
+    expect(isActivityKind('run')).toBe(true)
+    expect(isActivityKind('log')).toBe(true)
+    expect(isActivityKind('note')).toBe(true)
+    expect(isActivityKind('ai')).toBe(true)
+    expect(isActivityKind('kb')).toBe(true)
+    expect(isActivityKind('unknown')).toBe(false)
+    expect(isActivityKind(1)).toBe(false)
+    expect(isActivityKind(undefined)).toBe(false)
+  })
+})
+
 describe('bumpDay', () => {
-  it('同一天累加，且返回新对象', () => {
-    const first = bumpDay({}, TODAY.getTime())
-    const second = bumpDay(first, TODAY.getTime())
-    expect(first[TODAY_KEY]).toBe(1)
-    expect(second[TODAY_KEY]).toBe(2)
+  it('同一天同一来源累加，且返回新对象', () => {
+    const first = bumpDay({}, 'run', TODAY.getTime())
+    const second = bumpDay(first, 'run', TODAY.getTime())
+    expect(first[TODAY_KEY]).toEqual({ run: 1 })
+    expect(second[TODAY_KEY]).toEqual({ run: 2 })
     expect(first).not.toBe(second)
   })
 
+  it('同一天的另一个来源各记各的', () => {
+    const counts = bumpDay(bumpDay({}, 'run', TODAY.getTime()), 'note', TODAY.getTime())
+    expect(counts[TODAY_KEY]).toEqual({ run: 1, note: 1 })
+  })
+
   it('时间戳非法时原样返回', () => {
-    const counts = { '2026-09-10': 1 }
-    expect(bumpDay(counts, Number.NaN)).toBe(counts)
+    const counts = { '2026-09-10': { run: 1 } }
+    expect(bumpDay(counts, 'run', Number.NaN)).toBe(counts)
   })
 })
 
 describe('pruneDays', () => {
   it('丢掉超出保留范围的旧计数', () => {
-    const counts = { [TODAY_KEY]: 2, '2020-01-01': 9 }
+    const counts = { [TODAY_KEY]: { run: 2 }, '2020-01-01': { run: 9 } }
     const pruned = pruneDays(counts, TODAY)
-    expect(pruned[TODAY_KEY]).toBe(2)
+    expect(pruned[TODAY_KEY]).toEqual({ run: 2 })
     expect(pruned['2020-01-01']).toBeUndefined()
   })
 
   it('保留边界上的那一天', () => {
     const edge = dayKey(addDays(TODAY, -(ACTIVITY_DAYS - 1)))
-    expect(pruneDays({ [edge]: 1 }, TODAY)[edge]).toBe(1)
+    expect(pruneDays({ [edge]: { run: 1 } }, TODAY)[edge]).toEqual({ run: 1 })
   })
 
-  it('丢掉非正数与非法值', () => {
-    const pruned = pruneDays({ [TODAY_KEY]: 0, '2026-09-09': -3 }, TODAY)
-    expect(pruned).toEqual({})
+  it('丢掉非正数与认不出的来源；一天的分项全烂掉时连这天一起去掉', () => {
+    const pruned = pruneDays(
+      {
+        [TODAY_KEY]: { run: 0, log: -3, nope: 2 } as never,
+        '2026-09-09': { note: 4 },
+      },
+      TODAY,
+    )
+    expect(pruned).toEqual({ '2026-09-09': { note: 4 } })
   })
 })
 
 describe('sanitizeActivity', () => {
-  it('只留合法日期键与正的次数', () => {
+  it('只留合法日期键与认得出的正数分项', () => {
     expect(
       sanitizeActivity({
-        [TODAY_KEY]: 4,
-        '2026-09-09': 2.7,
-        'not-a-date': 5,
-        '2026-09-08': 0,
-        '2026-09-07': '3',
+        [TODAY_KEY]: { run: 4, note: 2.7 },
+        '2026-09-09': { weird: 5, ai: 1 },
+        'not-a-date': { run: 5 },
+        '2026-09-08': { run: 0 },
+        '2026-09-07': 'x',
       }),
-    ).toEqual({ [TODAY_KEY]: 4, '2026-09-09': 2 })
+    ).toEqual({ [TODAY_KEY]: { run: 4, note: 2 }, '2026-09-09': { ai: 1 } })
+  })
+
+  it('老数据文件里的裸数字按「启动 / 打包」收下（迁移只此一处）', () => {
+    expect(sanitizeActivity({ [TODAY_KEY]: 7, '2026-09-09': 0 })).toEqual({ [TODAY_KEY]: { run: 7 } })
   })
 
   it('非对象一律当空处理', () => {
     expect(sanitizeActivity(undefined)).toEqual({})
     expect(sanitizeActivity([])).toEqual({})
     expect(sanitizeActivity('x')).toEqual({})
+  })
+})
+
+describe('totalOf', () => {
+  it('各来源求和', () => {
+    expect(totalOf({ [TODAY_KEY]: { run: 3, log: 2, kb: 1 } })).toEqual({ [TODAY_KEY]: 6 })
+  })
+
+  it('空的那天不出现在总数里', () => {
+    expect(totalOf({ [TODAY_KEY]: {}, '2026-09-09': { run: 0 } })).toEqual({})
+    expect(totalOf({})).toEqual({})
+  })
+
+  it('求和结果可以直接喂给日历', () => {
+    const calendar = buildActivityCalendar(totalOf({ [TODAY_KEY]: { run: 2, note: 2 } }), TODAY)
+    expect(calendar.total).toBe(4)
+    expect(calendar.max).toBe(4)
+  })
+})
+
+describe('describeDay', () => {
+  it('只有一个来源时直接按来源说', () => {
+    expect(describeDay(3, { run: 3 })).toBe('3 次启动 / 打包')
+    expect(describeDay(1, { kb: 1 })).toBe('1 次知识库整理')
+  })
+
+  it('多个来源时先说总数，再列分项', () => {
+    expect(describeDay(5, { run: 3, log: 2 })).toBe('5 次操作（3 次启动 / 打包 · 2 次工作日志）')
+  })
+
+  it('分项按固定顺序排列，不跟着对象键的顺序走', () => {
+    expect(describeDay(3, { kb: 1, ai: 1, run: 1 }))
+      .toBe('3 次操作（1 次启动 / 打包 · 1 次助手对话 · 1 次知识库整理）')
+  })
+
+  it('一个来源都没有时说没有操作', () => {
+    expect(describeDay(0, {})).toBe('没有操作')
   })
 })
 

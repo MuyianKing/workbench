@@ -26,7 +26,7 @@
 ## 1. 项目边界
 
 - 定位：Windows 桌面应用（Tauri 2 + WebView2），一个窗口里管项目、记工作、写笔记、看 AI 用量；pnpm workspace monorepo
-  （应用在 `apps/desktop/`，纯逻辑按域拆在 `packages/` 的 15 个 `@workbench/*` 包，见第 2 节），`Cargo.lock` 要提交；
+  （应用在 `apps/desktop/`，纯逻辑按域拆在 `packages/` 的 16 个 `@workbench/*` 包，见第 2 节），`Cargo.lock` 要提交；
   例外：`vendor-pi.mjs` 内部装 Pi 仍走 `npm install`（`resources/pi/` 要整树打进安装包，不能用符号链接布局）。
 - **联网边界：默认不联网、不上报任何数据；出口只有十条，且都由用户显式开启** —— 清单与每条细则见
   [features-and-architecture.md](docs/features-and-architecture.md) 的「数据与隐私」一节，**动联网代码前先读那一节**。
@@ -52,7 +52,7 @@
   `data\pi\sessions\`（起进程时传 `--session-id` 与 `--session-dir`，**不要传 `--no-session`**）。跑它时子进程必须带 `PI_TELEMETRY=0`、`PI_SKIP_VERSION_CHECK=1` 与 `PI_OFFLINE=1`
   （它默认会报遥测、向 pi.dev 查最新版本、RPC 启动时还刷一遍模型目录 —— 那三条不在任何已登记的出口里），密钥只经环境变量给，
   **进程直启不经 `cmd /C`**（行内层引号会被 cmd 拆坏，见 session.rs 的 `spawn_args`）。别照着再引别的 Agent。
-- 测试用 Vitest（15 个域包各自跑自己的用例，根目录 `pnpm test` = `pnpm -r test` 聚合；渲染层用例在 `@workbench/desktop` 包里）
+- 测试用 Vitest（16 个域包各自跑自己的用例，根目录 `pnpm test` = `pnpm -r test` 聚合；渲染层用例在 `@workbench/desktop` 包里）
   + `cargo test`（写在同文件的 `#[cfg(test)] mod tests`）。**TypeScript 与 vue-tsc 的版本不要动**：升到 TS 7 会让 `pnpm run typecheck` 直接不可用。
 - 仅 Windows，不做 macOS / Linux 适配。
 
@@ -60,11 +60,12 @@
 
 - 总览：monorepo。桌面应用自包含在 `apps/desktop/` —— Rust 在 `src-tauri/src/`、渲染层在 `src/renderer/src/`（组件 `components/`、
   store `stores/`、交互骨架 `composables/`、适配层 `workbench/`、设计令牌与全局样式 `styles/`）、随包资源 `resources/`、构建脚本 `scripts/`；
-  跨页面复用的类型 / 契约 / 纯逻辑按域拆在 `packages/` 的 15 个 `@workbench/*` 包里（`core` 是平台原语，其余按业务域；
+  跨页面复用的类型 / 契约 / 纯逻辑按域拆在 `packages/` 的 16 个 `@workbench/*` 包里（`core` 是平台原语，其余按业务域；
   逐包逐文件分工见 [features-and-architecture.md](docs/features-and-architecture.md) 的「目录结构」）。
-- 渲染层有**三个 HTML 入口**（`src/renderer/` 下，`vite.config.ts` 的 `rollupOptions.input`）：`index.html`（主界面）、
-  `capture.html`（截图遮罩）、`pin.html`（钉图）。后两个是独立窗口、各自的 JS 上下文，**只装适配层，不装 store、不 initState**
-  —— 装了会与主窗口抢着读 / 写同一批数据文件（见 [screenshot.md](docs/modules/screenshot.md)）。
+- 渲染层有**四个 HTML 入口**（`src/renderer/` 下，`vite.config.ts` 的 `rollupOptions.input`）：`index.html`（主界面）、
+  `capture.html`（截图遮罩）、`pin.html`（钉图）、`ball.html`（网速球）。后三个是独立窗口、各自的 JS 上下文，
+  **只装适配层，不装 store、不 initState**
+  —— 装了会与主窗口抢着读 / 写同一批数据文件（见 [screenshot.md](docs/modules/screenshot.md)、[float-ball.md](docs/modules/float-ball.md)）。
 - 域包之间与应用对域包一律**按包名导入**（`@workbench/<包>`，只走各包 `index.ts` 桶）；解析走 pnpm 的 workspace 软链 + 各包
   `exports`（TS 源码直出），TS 检查由根目录唯一的 `tsconfig.json` / `tsconfig.test.json` 的 paths 兜底。渲染层内部别名
   `@` → `apps/desktop/src/renderer/src`（`@shared` 已随拆包删除）。单测与被测模块同目录，命名 `*.test.ts`。
@@ -135,6 +136,7 @@ asset 协议、读取权限在 Rust 侧按单个文件授予）、**通道一律
 | 密码保险库（密钥 / 加解密 / 多机共写一份文件） | [vault](docs/modules/vault.md) |
 | 邮箱（IMAP 收信 / SMTP 发信 / 授权码 / 联网出口） | [mail](docs/modules/mail.md) |
 | 截图与钉图（抓屏 / 标注 / 剪贴板 / 置顶图窗口） | [screenshot](docs/modules/screenshot.md) |
+| 网速球（贴边收起 / 悬停滑出 / 网卡计数取样） | [float-ball](docs/modules/float-ball.md) |
 
 没有列入表里的模块（首页、项目、技能、样式、视频、快捷启动）也在 [docs/modules/](docs/modules/) 下各有一份文档，
 动手前先看它的「约束」一节。

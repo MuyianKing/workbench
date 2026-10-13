@@ -12,6 +12,7 @@ import { fail, ok } from '@workbench/core'
  * 之后一直在内存里维护，每次改动整份落盘（防抖在 Rust 侧）。
  */
 import { createWorkLogEntry, emptyWorkLog, parseWorkLog, patchWorkLogEntry } from '@workbench/work-log'
+import { recordActivity } from './activity'
 import { errorText, invoke } from './bridge'
 
 let file: WorkLogFile = emptyWorkLog()
@@ -72,6 +73,8 @@ export async function addWorkLog(input: WorkLogInput): Promise<Result<WorkLogEnt
 
     file.entries.push(entry)
     persist()
+    // 记一笔活跃度：这个来源没有 store（组件直接调这里），所以记在这儿 —— 也正好只有写盘成功才走到这
+    recordActivity('log')
     return ok(copy(entry))
   }
   catch (error) {
