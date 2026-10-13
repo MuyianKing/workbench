@@ -126,12 +126,15 @@ mod tests {
     fn a_bloated_log_is_cleared_before_appending() {
         let (dir, path) = temp_log("bloat");
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(&path, vec![b'x'; MAX_BYTES as usize + 1]).unwrap();
+        // 旧内容要留一个**新记录里不可能出现**的记号：新记录带着一段回溯，里面 `x86_64` 这类
+        // 带 x 的字样一定在，拿单个 `'x'` 当判据会把回溯自己当成没清干净的旧内容（踩过一次）
+        let bloat = "BLOAT".repeat(MAX_BYTES as usize / 5 + 1);
+        std::fs::write(&path, &bloat).unwrap();
 
         write_entry_to(&path, "新的一条", "src/main.rs:1:1");
 
         let text = std::fs::read_to_string(&path).unwrap();
-        assert!(!text.contains('x'), "旧内容该被清掉，实际长度 {}", text.len());
+        assert!(!text.contains("BLOAT"), "旧内容该被清掉，实际长度 {}", text.len());
         assert!(text.contains("新的一条"));
 
         let _ = std::fs::remove_dir_all(&dir);
