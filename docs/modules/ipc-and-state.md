@@ -115,7 +115,9 @@
 - **webview 有全局 CSP**（`tauri.conf.json` 的 `csp`；dev 用 `devCsp`，多放行 HMR 的 ws）。底线是
   `default-src 'self'`、`script-src 'self'`、`object-src 'none'`；必须放行的几处都有理由：
   `style-src 'unsafe-inline'`（Element Plus / Vditor 的动态样式与邮件正文）、
-  `connect-src ipc: http://ipc.localhost`（IPC 本身）、`worker-src blob:`
+  `connect-src ipc: http://ipc.localhost`（IPC 本身）与它的 `data:`
+  （截图遮罩把那一帧的 base64 交给浏览器原生解，见 [screenshot.md](screenshot.md)；`data:` 不出进程、
+  放行它不等于开了新出口）、`worker-src blob:`
   （pptx 预览与笔记里的 graphviz 都用 blob 建 Worker）、`img-src` 的 asset 协议与 `https:`/`http:`
   （背景图、笔记与邮件的外链图）、`frame-src` 的 `about:`（邮件与 AI 预览的 srcdoc 内嵌框）。
   **改这条、或引新的前端依赖 / 资源之前先想它会不会被拦**，而且**要在生产态的真应用里过一遍**：

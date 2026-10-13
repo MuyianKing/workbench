@@ -131,6 +131,14 @@ WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="--remote-debugging-port=9222" pnpm run de
 起来之后 `/json` 里就有页面 target，连它的 `webSocketDebuggerUrl` 发 `Runtime.evaluate`
 即可（就是前面的无头配方，只是不用自己起浏览器）。几件顺手的事：
 
+- **要验 CSP / asset 协议这类只在生产态成立的东西，别用上面那条**（dev 下页面来自 Vite，
+  CSP 根本不生效，见 modules/ipc-and-state.md）。手搓一个生产态二进制来验：
+  `pnpm run build:renderer` 之后 `cargo build --release --features tauri/custom-protocol`
+  （在 `apps/desktop/src-tauri` 下跑），再照上式起 `target/release/workbench.exe`。
+  **`--features tauri/custom-protocol` 不能漏**：`tauri` 没带这个 feature 编出来就是 dev 语义
+  （`generate_context!` 走 `devUrl`，exe 一起来就去连 `localhost:5274`，界面是空白 —— 而现象会指向
+  完全无关的地方）。装着的那份与 `target/release` 那份算同一个应用（单实例按 identifier 认名），
+  验之前先把装着的关掉。
 - 通道直接求值最省事：`await window.workbench.getNrmStatus()`，把返回值原样打出来看形状对不对
 - **要驱动界面就去拿 Pinia store**：
   `document.querySelector('#app').__vue_app__.config.globalProperties.$pinia._s.get('projects')`，

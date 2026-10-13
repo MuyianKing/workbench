@@ -23,8 +23,10 @@
   而**建一块 WebView2 窗口本身就比这个预算还贵**，所以窗口由 `capture_prewarm` 提前建好藏在屏幕外，
   每场截图只是「塞帧 → 摆位置 → 显示」。新的一场由 Rust 推 `capture:sync` 通知窗口里的 JS
   （光显示它不会让 JS 重新开场）。**显示要等每一块屏都报「画好了」**（`capture_show` + 一秒看门狗）——
-  抢在那一帧前面显示就是先闪一块黑。代价是**每块屏常驻一块 webview**，关掉截图功能时由
+  抢在那一帧前面显示，那一帧还在 IPC 上（几兆、几十毫秒），用户先看见的就是旧表面。
+  代价是**每块屏常驻一块 webview**，关掉截图功能时由
   `capture_prewarm(false)` 把池子收掉。别改回「一场一建一关」，也别改回「先显示再等画面」。
+  **旧表面那一瞬间不能是黑底** —— 窗口与页面底都透明，露出来的就是桌面（见下面「为什么遮罩窗口也是透明的」）。
   **显示与收起都不带过渡**：窗口建出来就压一遍 `DwmSetWindowAttribute(DWMWA_TRANSITIONS_FORCEDISABLED)`
   （建窗口时一次、每次显示前再一次，见 `disable_transitions`）—— 不压的话 Windows 会给「隐藏」
   补一段约 150~200ms 的淡出，收工那一下看着就是画面在渐渐变没（实测过帧）。
@@ -42,6 +44,9 @@
   （这不是纸上推演：冒烟验证时先按 asset 走的，症状是「选区怎么拖都出不来」—— `getImageData` 抛在
   `onPointerMove` 的最前面，把整个拖拽打断了）。代价是每帧多一次 base64 往返（几兆的 PNG，几十毫秒），
   换来的是这几条路都能走。钉图窗口只把图摆出来、从不读像素，所以它照旧走 asset（便宜、也不用编字符串）。
+  **解那一手 base64 走 `fetch` 一个 data: URL**（原生解码，不逐字节搬）—— 这条**要 CSP 放行
+  `connect-src` 的 `data:`**：生产态的 `csp` 里少这一个 scheme，`fetch` 直接 `TypeError: Failed to fetch`，
+  遮罩上就一条红字「这一帧读不出来」（踩过一次：dev 下页面来自 Vite、CSP 根本不生效，装完才现形）。
 - **系统剪贴板自己写 Win32**（`clipboard.rs`）：一次给齐 **CF_DIBV5 + CF_DIB + 注册格式 `PNG`**。
   不走 `navigator.clipboard` —— WebView2 那条要 `CoreWebView2` 的权限回调放行（wry 没暴露，
   失败还是静默的），而且它只写 PNG 一种格式，认 CF_DIB 的老程序粘出来是空的。
@@ -114,9 +119,13 @@
   否则会漏掉中间那一条 —— 见 bridge.ts 的 `listenReady`），`reset()` 掉上一场的帧、选区与标注。
   送回去的那个编号取自 `captureContext` 的 `session`，不是事件载荷 —— 起手补问那一次没收到过事件。
 
-**为什么藏着的窗口一显示就有画面**：`hide()` / `show()` 走的是 `ShowWindow`，**页面那边
-`document.visibilityState` 一直是 `visible`**（实测：藏着的窗口 rAF 照跑 60 帧/秒）——
-也就是说它一直在往自己的表面上画，显示出来的就是已经画好的那一帧，不会先白/黑一下。
+**为什么遮罩窗口也是透明的**：`hide()` / `show()` 走的是 `ShowWindow`，页面那边 `document.visibilityState`
+一直是 `visible`（实测：藏着的窗口 rAF 照跑 60 帧/秒），但**合成器不给藏着的窗口交新帧** ——
+`show()` 出来的头一帧还是上一次合成留下的旧表面（实测抓屏：那一帧里只有页面底色与提示条，
+刚画上画布的那一帧还不在上面）。所以遮罩跟钉图一样开 **`transparent(true)`、页面底也透明**
+（见 capture.html）：旧表面那一刻露出来的是**桌面本身**，与冻结帧几乎一样，看不出切换 ——
+底色给黑的话那一下就是「按下热键先闪一块黑」。冻结帧是整块不透明的画布，画上去之后外观与以前一致。
+**透明不影响点击**：真鼠标框选（`SetCursorPos` + `mouse_event`）与真回车复制都验过，选区、工具条、复制全正常。
 
 **这条路上每一笔开销**（1080p 单屏、release 构建、用 CDP 驱动着量，见「验证」一节。
 量这一场时屏幕上正好是 4.28MB 的帧 —— 照片 / 文字密的那种画面，PNG 压不动）：
@@ -212,6 +221,22 @@ Blob → `drawImage` 这一串真的通了）→ 合成出来的 PNG 有几十�
 **target 还在**（窗口复用，只藏起来）、画布 alpha 回到 0（收工清干净了）、再问一次
 `captureContext` 应当回「截图会话已经结束了」→ 再 `beginCapture` 一次应当照常（第二场走的是复用那条路）
 → `pinImage` / `pinContext` / `pinState`（透明度）/ `pinClose` 各走一遍。
+
+**这一串里「帧画上去了没有」那一条必须另起一遍生产态**（`pnpm run build` 出来的那个 exe，或者按
+[dev-notes/browser-preview-verification.md](../dev-notes/browser-preview-verification.md) 里那条手搓一个 ——
+关键是 `cargo build` 要带 `--features tauri/custom-protocol`，漏了编出来是 dev 语义）：
+dev 下页面来自 Vite、CSP 根本不生效，`fetch` 那一笔被拦只有装完才现形（踩过一次，见「帧与最终图都走 base64」
+那条）。判据一样 —— 遮罩上**没有**「这一帧读不出来」那条红字、画布 alpha 是 255。
+两个 exe 不能同时开（单实例按 identifier 认名 —— 装着的那份与 `target/release` 那份算同一个）。
+
+**「显示的那一瞬间闪不闪」只能靠外部抓屏量**（CDP 合成事件与 `Runtime.evaluate` 都看不见合成器那一下）：
+写个抓屏循环，**抓一条窄带而不是整屏** —— 整屏 `CopyFromScreen` 一次 35~55ms（约 25fps）追不上
+30~50ms 的一闪，抓 1920×48 的横条只花十几毫秒（实测 56fps）。判据两条：带子均值在遮罩亮起来前后
+**只差「提示条出现」那一点**（实测 239 ↔ 227），全程**没有一次掉到接近黑**；再故意让这一场的帧取不到
+（在遮罩页里把 `captureFrame` 换成一个回 `{ok:false}` 的桩），窗口亮起来时透出来的应当是**桌面**而不是黑
+—— 这就是「旧表面」那一刻的样子，验完记得把桩换回原函数。**真实的鼠标与键盘别用合成事件**：
+`SetCursorPos` + `mouse_event` 拖一个框、`SendKeys` 发一个回车，才能同时验到「透明窗口没被穿透」
+（合成事件不过 OS 的命中测试）与整条真实路径 —— 判据是提示条收起、工具条出现、剪贴板里是刚框的那块像素。
 
 **量「按下到看见画面」**（改这条路之后该这么量，别凭感觉）：在遮罩页里把 `captureContext` /
 `captureFrame` / `showCapture` 各包一层打时间戳，再用 `requestAnimationFrame` 盯着画布从空到有画面、

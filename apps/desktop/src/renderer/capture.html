@@ -10,7 +10,9 @@
       那个 store 会与主窗口抢着写同一批 JSON（见 docs/modules/screenshot.md）。
 
       class="dark" 是固定的：遮罩压在任意内容之上，工具条按深色做（与终端面板同一条口径），
-      不随应用主题走。首屏底色给黑，抓到的那一帧加载出来之前先是一块黑，不会是白闪。
+      不随应用主题走。页面底**必须透明**：窗口开了 transparent(true)，而藏着的窗口不往合成器
+      交新帧 —— 显示出来的头一帧还是旧表面，底色给黑就是「按下热键先闪一下黑」，给透明露出来的
+      才是桌面本身（与冻结帧几乎一样，看不出切换；见 src-tauri/src/capture.rs 文件头那条）。
     -->
     <title>截图</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -20,7 +22,7 @@
         margin: 0;
         padding: 0;
         overflow: hidden;
-        background: #000;
+        background: transparent;
         /* 遮罩层不允许被选中 / 拖拽，整个窗口就是一块画布 */
         user-select: none;
         -webkit-user-select: none;

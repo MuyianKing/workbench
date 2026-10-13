@@ -251,8 +251,9 @@ async function loadFrame(): Promise<void> {
     throw new Error(result.error ?? '这一帧读不出来')
 
   // base64 交给浏览器自己解：几兆的图走 atob 再逐字节搬进 Uint8Array 是几十毫秒的 JS 循环，
-  // 而 data: URL 是原生解码（CSP 是 null，这条不被拦）。它同源，画布不会被污染 ——
-  // 走 asset 协议才会（见 capture_frame 的说明）
+  // 而 data: URL 是原生解码。**这条路要 CSP 放行**：`fetch` 归 `connect-src` 管，生产态的
+  // `csp` 里少一个 `data:` 就是一句 `TypeError: Failed to fetch`（装完才现形，dev 下 CSP 不生效）。
+  // 它同源，画布不会被污染 —— 走 asset 协议才会（见 capture_frame 的说明）
   const response = await fetch(`data:image/png;base64,${result.data}`)
   bitmap.value = await createImageBitmap(await response.blob())
 }
