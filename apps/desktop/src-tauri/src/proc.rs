@@ -334,7 +334,10 @@ mod tests {
     /// 不存在的 PID 返回 None，而不是编一个值出来
     #[test]
     fn unknown_pid_has_no_creation_time() {
-        // 4 在 Windows 上不会是一个用户进程
-        assert!(process_created_at(4).is_none());
+        // 拿一个**不可能存在**的 PID：Windows 的 PID 是 4 的倍数，`u32::MAX - 3` 是其中之一，
+        // 也远在实际会分配到的范围之外。**别拿 4 当「不存在的进程」** —— 那是 System：普通权限下
+        // 只是一个 OpenProcess 被拒、看着像「问不到」，以管理员跑的机器（CI runner 就是）能问到，
+        // 这条就红了（CI 上踩过一次）
+        assert!(process_created_at(u32::MAX - 3).is_none());
     }
 }

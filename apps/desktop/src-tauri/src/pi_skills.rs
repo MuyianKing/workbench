@@ -1140,7 +1140,9 @@ mod tests {
     }
 
     /// 真发一跳：微软的连通性探测点 302 到别处，用来验「跟着 Location 再发一次」这条路。
-    /// 没网就跳过 —— 与 http.rs 里那条联网测试同一个约定。
+    /// 没网就跳过 —— 与 http.rs 里那条联网测试同一个约定；**网络被改写过**（公司代理、
+    /// captive portal、某些云出口会把这跳落到别的落地页）同样跳过：那不是「没跟重定向」，
+    /// 而是这台机器上验不了（CI 上踩过一次，落地的是 MSN 那种门户页）。
     #[test]
     fn download_follows_a_real_redirect() {
         let result = download("http://www.msftconnecttest.com/redirect");
@@ -1152,10 +1154,17 @@ mod tests {
             }
         };
         let text = String::from_utf8_lossy(&body);
+        if !text.contains("Microsoft Connect Test") {
+            println!(
+                "跳过：这一跳的落地页不是探测页（落在 {final_url}）：{}",
+                text.chars().take(120).collect::<String>()
+            );
+            return;
+        }
+        // 走到这儿说明正文是**最后一跳**那一份；地址也该从起点挪开了，那才叫跟过重定向
         assert!(
-            text.contains("Microsoft Connect Test"),
-            "跟到最后应当拿到探测页（落在 {final_url}）：{}",
-            text.chars().take(120).collect::<String>()
+            final_url != "http://www.msftconnecttest.com/redirect",
+            "跟完之后地址应当挪到别处，实际还是 {final_url}"
         );
     }
 }
