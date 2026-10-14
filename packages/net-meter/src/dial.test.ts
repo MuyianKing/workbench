@@ -7,6 +7,7 @@ import {
   TICK_RADIUS,
   tickMarks,
 } from './dial'
+import { dialShare } from './meter'
 
 const CENTER = DIAL_BOX / 2
 
@@ -90,6 +91,13 @@ describe('tickMarks', () => {
     expect(tickMarks(0.5, -1).filter(m => m.state === 'up')).toHaveLength(24)
     expect(litCount(tickMarks(0.5, 5))).toBe(24)
     expect(tickMarks(0.5, 5).filter(m => m.state === 'down')).toHaveLength(24)
+  })
+
+  it('日常流量也亮得出来（换挡时弧长会回落到 1/4 那一头）', () => {
+    // 千兆链路上 1.6MB/s 走 4M 量程 → 0.4 → 19 格（旧的「占链路带宽比例」只有 1 格）
+    expect(litCount(tickMarks(dialShare(1.6 * 1024 * 1024, 1_000_000_000), 0.5))).toBe(19)
+    // 0.5MB/s 还在 1M 量程上、正好半档 —— 比上一条亮，这是自动换挡该有的样子
+    expect(litCount(tickMarks(dialShare(0.5 * 1024 * 1024, 1_000_000_000), 0.5))).toBe(24)
   })
 
   it('坐标都是有限数（画得出来）', () => {

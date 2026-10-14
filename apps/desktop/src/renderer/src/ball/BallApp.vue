@@ -20,10 +20,10 @@
  */
 import type { BallSide, NetCounters, NetRate } from '@workbench/net-meter'
 import {
+  dialShare,
   directionShare,
   formatSpeed,
   isBusy,
-  linkRatio,
   rateOf,
   SAMPLE_INTERVAL_MS,
   smoothRate,
@@ -77,19 +77,16 @@ const downParts = computed(() => formatSpeed(rate.value.down))
 const upParts = computed(() => formatSpeed(rate.value.up))
 /**
  * 整条链路当作一条管子：分母取上下行里大的那条（同一块网卡两者一般相等）。
- * 刻度环亮多少格 = 上下行合计占这条管子的比例；点亮的那一段里靠前的是下行的份。
+ * 点亮多少格 = 合计量在**当前量程**上的占比（量程自动换挡，见 net-meter 的 dialShare）——
+ * 直取「占链路带宽比例」的话，千兆网里日常流量一格都亮不起来。
+ * 点亮的那一段里靠前的是下行的份。
  */
 const pipe = computed(() => Math.max(link.value.down, link.value.up))
-const ticks = computed(() => tickMarks(
-  linkRatio(totalRate(rate.value), pipe.value),
-  directionShare(rate.value).down,
-))
+const share = computed(() => dialShare(totalRate(rate.value), pipe.value))
+const ticks = computed(() => tickMarks(share.value, directionShare(rate.value).down))
 const busy = computed(() => isBusy(rate.value))
-/** 收起态那条竖条：总高 = 总吞吐占链路带宽的比例 */
-const barPercent = computed(() => {
-  const ratio = linkRatio(totalRate(rate.value), pipe.value)
-  return `${Math.round((ratio ?? 0) * 100)}%`
-})
+/** 收起态那条竖条：总高与刻度环同一条口径 */
+const barPercent = computed(() => `${Math.round(share.value * 100)}%`)
 /** 竖条上绿橙的分界：下行的份 */
 const barSplit = computed(() => `${(directionShare(rate.value).down * 100).toFixed(1)}%`)
 

@@ -1,10 +1,11 @@
 import type { NetCounters } from './wire'
 import { describe, expect, it } from 'vitest'
 import {
+  dialRange,
+  dialShare,
   directionShare,
   formatSpeed,
   isBusy,
-  linkRatio,
   MAX_INTERVAL_MS,
   MIN_INTERVAL_MS,
   rateOf,
@@ -128,23 +129,51 @@ describe('formatSpeed', () => {
   })
 })
 
-describe('linkRatio', () => {
-  it('字节与比特先折成同一口径', () => {
-    // 100Mbps = 12.5MB/s；跑到 6.25MB/s 就是一半
-    expect(linkRatio(6.25 * 1024 * 1024, 100_000_000)).toBeCloseTo(0.524, 2)
+describe('dialRange 与 dialShare', () => {
+  const M = 1024 * 1024
+
+  it('量程是 1M 的 2 的幂，换挡点在量程的一半', () => {
+    expect(dialRange(0.3 * M)).toBe(1 * M)
+    expect(dialRange(0.5 * M)).toBe(1 * M)
+    expect(dialRange(0.6 * M)).toBe(2 * M)
+    expect(dialRange(1 * M)).toBe(2 * M)
+    expect(dialRange(1.5 * M)).toBe(4 * M)
+    expect(dialRange(3 * M)).toBe(8 * M)
+    expect(dialRange(7 * M)).toBe(16 * M)
+    // 速率是 0 / 非法值时给最小那一档，不返回 0（0 会让占比算出 Infinity）
+    expect(dialRange(0)).toBe(1 * M)
+    expect(dialRange(Number.NaN)).toBe(1 * M)
   })
 
-  it('超过链路带宽也夹在 1', () => {
-    expect(linkRatio(100 * 1024 * 1024, 100_000_000)).toBe(1)
+  it('占位落在 1/4 ~ 1/2 之间', () => {
+    expect(dialShare(0.3 * M, 0)).toBeCloseTo(0.3, 4)
+    // 刚好半档：这一档里最亮的一刻
+    expect(dialShare(0.5 * M, 0)).toBeCloseTo(0.5, 4)
+    expect(dialShare(0.75 * M, 0)).toBeCloseTo(0.375, 4)
+    expect(dialShare(3 * M, 0)).toBeCloseTo(0.375, 4)
+    // 用户报的那个读数：千兆链路上 1.6MB/s 走 4M 量程 → 0.4（旧的「占带宽」只有 0.013）
+    expect(dialShare(1.6 * M, 1_000_000_000)).toBeCloseTo(0.4, 4)
   })
 
-  it('取不到链路速率时返回 null（不画弧）', () => {
-    expect(linkRatio(1024, 0)).toBeNull()
-    expect(linkRatio(1024, Number.NaN)).toBeNull()
+  it('量程翻到链路带宽那一档就到头：跑满管子就是满环，再快也夹在 1', () => {
+    const LINK_8M = 8 * M * 8 // 8MB/s 的链路
+    expect(dialShare(3 * M, LINK_8M)).toBeCloseTo(0.375, 4)
+    // 量程本该翻到 16M，被链路压回 8M
+    expect(dialShare(5 * M, LINK_8M)).toBeCloseTo(0.625, 4)
+    expect(dialShare(8 * M, LINK_8M)).toBe(1)
+    expect(dialShare(20 * M, LINK_8M)).toBe(1)
   })
 
-  it('没流量时是 0', () => {
-    expect(linkRatio(0, 100_000_000)).toBe(0)
+  it('取不到链路带宽时不封顶：量程照翻，也不假装满环', () => {
+    expect(dialShare(0.75 * M, 0)).toBeCloseTo(0.375, 4)
+    expect(dialShare(80 * M, 0)).toBeCloseTo(0.3125, 4)
+    expect(dialShare(80 * M, Number.NaN)).toBeCloseTo(0.3125, 4)
+  })
+
+  it('没流量与非法值都是 0', () => {
+    expect(dialShare(0, 1_000_000_000)).toBe(0)
+    expect(dialShare(-1, 1_000_000_000)).toBe(0)
+    expect(dialShare(Number.NaN, 1_000_000_000)).toBe(0)
   })
 })
 

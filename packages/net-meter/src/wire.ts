@@ -33,9 +33,9 @@ export interface NetCounters {
   inOctets: number
   /** 累计发出的字节数 */
   outOctets: number
-  /** 接收链路速率合计（bit/s）。0 = 取不到，弧按「未知」不画 */
+  /** 接收链路速率合计（bit/s）。0 = 取不到，量程就不按链路封顶 */
   downLink: number
-  /** 发送链路速率合计（bit/s） */
+  /** 发送链路速率合计（bit/s）。0 = 取不到，同上 */
   upLink: number
   /** 计入了多少张网卡 */
   interfaces: number

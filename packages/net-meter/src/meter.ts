@@ -6,7 +6,9 @@
  *  - `rateOf` —— 计数器回绕 / 网卡被拔 / 定时器被节流，三种都会算出离谱的数；
  *  - `smoothRate` —— 一秒一跳的数字看着像坏了，指数滑动平均压掉毛刺；
  *  - `formatSpeed` —— 1024 进制进位，且**进位要在四舍五入之后再看一眼**，
- *    否则 1023.96K 会显示成「1024K」而不是「1.0M」。
+ *    否则 1023.96K 会显示成「1024K」而不是「1.0M」；
+ *  - `dialShare` —— 表盘上的占比**靠自动换挡**（量程 1M / 2M / 4M / 8M…，换挡点是量程的一半）：
+ *    直取「占链路带宽的比例」的话，千兆链路上兆把的日常流量一格都亮不起来。
  *
  * 采样间隔的两条界：小于 `MIN_INTERVAL_MS` 说明是重复触发（别把同一段算两遍），
  * 大于 `MAX_INTERVAL_MS` 说明中间被节流或系统挂起了 —— 那一段的**平均值**不是一个
@@ -111,18 +113,54 @@ function format(value: number): string {
 }
 
 /**
- * 速率占链路带宽的比例（0~1），用来画弧。
- *
- * 链路速率是 bit/s，速率是字节/s，先折成同一口径再比。取不到链路速率（虚拟网卡常见）
- * 时返回 `null` —— 这时**不画弧**，而不是画一段假的。
+ * 量程的基准档：1MB/s（就是球里显示的那个 M，1024 进制）。表盘的满刻度取它的 2 的幂。
  */
-export function linkRatio(bytesPerSec: number, linkBitsPerSec: number): number | null {
-  if (!Number.isFinite(linkBitsPerSec) || linkBitsPerSec <= 0)
-    return null
-  const ceiling = linkBitsPerSec / 8
+export const DIAL_RANGE_BASE = 1024 * 1024
+
+/**
+ * 当前速率该用哪一档量程（满刻度，字节/秒）：1M、2M、4M、8M…每档翻一倍。
+ *
+ * 取「2 × 速率」向上够到的第一档，也就是**换挡点落在量程的一半**：
+ *
+ * | 速率 | 满刻度（100%） |
+ * | --- | --- |
+ * | < 0.5M | 1M |
+ * | 0.5M ~ 1M | 2M |
+ * | 1M ~ 2M | 4M |
+ * | 2M ~ 4M | 8M |
+ * | 以此类推 | … |
+ *
+ * 于是点亮的部分总在 1/4 ~ 1/2 之间：速率翻倍就换挡、弧长回落到 1/4 那一头，
+ * 「又翻了一倍」这件事一眼能看出来；量程也不会被顶死在一个读数上。
+ */
+export function dialRange(bytesPerSec: number): number {
+  if (!Number.isFinite(bytesPerSec) || bytesPerSec <= 0)
+    return DIAL_RANGE_BASE
+  const target = bytesPerSec * 2
+  let full = DIAL_RANGE_BASE
+  while (full < target)
+    full *= 2
+  return full
+}
+
+/**
+ * 表盘上的占比（0~1）：刻度环点亮多少格、收起态那条竖条多高，都用它。
+ *
+ * 量程自动换挡（见 `dialRange`：1M、2M、4M、8M…，换挡点是量程的一半），
+ * 所以**它不是「占链路带宽的比例」**——直取那个比例的后果是球在快链路上永远像死的：
+ * 千兆网里 1.6MB/s 只占 1.3%，48 格凑不满一格（用户报的就是这个：
+ * 「网速大部分时间都比较小，外围的圈长时间没有绘制」）。
+ *
+ * 只有一处例外：量程翻到**链路带宽那一档就到头**了（满环 = 跑满自己的管子，
+ * 再快也夹在 1）。取不到链路带宽（只有虚拟网卡）时不封顶 —— 量程照翻，不假装知道管子多粗。
+ */
+export function dialShare(bytesPerSec: number, linkBitsPerSec: number): number {
   if (!Number.isFinite(bytesPerSec) || bytesPerSec <= 0)
     return 0
-  return Math.min(1, bytesPerSec / ceiling)
+
+  const linkBytes = Number.isFinite(linkBitsPerSec) && linkBitsPerSec > 0 ? linkBitsPerSec / 8 : 0
+  const full = linkBytes > 0 ? Math.min(dialRange(bytesPerSec), linkBytes) : dialRange(bytesPerSec)
+  return Math.min(1, bytesPerSec / full)
 }
 
 /** 上行 + 下行的合计速率（收起态那条竖条按它算高度） */
