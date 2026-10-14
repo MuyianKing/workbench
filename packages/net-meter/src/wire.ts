@@ -11,11 +11,12 @@ export type BallSide = 'left' | 'right'
 /**
  * 球窗口问「我现在是什么状态」（`ball_context` / `ball_open` 的返回）。
  *
- * 收起还是展开由窗口尺寸决定（收起是 36×72 的半圆贴片、展开是 76×76 的整颗球），
- * 而那两件事由 Rust 设 —— 渲染层据此决定画哪一副样子。
+ * 画哪一副样子（贴边的竖条还是整颗球）由窗口尺寸决定，而那件事由 Rust 设 ——
+ * 渲染层据此决定画哪一副。`side` 为空就是**浮在桌面上**：那时球永远是整颗球，
+ * 鼠标移开也不收起（收起是「贴边」的形态，见 float-ball.md）。
  */
 export interface BallContext {
-  side: BallSide
+  side: BallSide | null
   /** 窗口上沿的 y（物理像素） */
   y: number
   open: boolean

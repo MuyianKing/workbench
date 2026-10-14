@@ -1,16 +1,21 @@
 <script setup lang="ts">
 /**
- * 悬浮球：贴边收起的半圆贴片 ⇄ 悬停滑出的整颗刻度环球。
+ * 悬浮球：桌面上随便摆的一颗网速球，拖到屏幕左右那条边才收成一条竖流量条。
  *
  * 这个窗口是独立的 JS 上下文（见 float-ball.md）：只装适配层，不装 store、不 initState。
  * 窗口的尺寸与位置全在 Rust 侧（ball.rs），这里只做三件事：
  *
  *  一，每秒问一次 `net_counters`，用 `@workbench/net-meter` 把累计字节算成速率与显示值；
  *  二，鼠标进出时告诉 Rust 收起 / 展开 —— 意图（含防抖）在这一侧，窗口操作在 Rust 那一侧；
- *  三，整块标 `data-tauri-drag-region`，拖动交给系统（Rust 在 Moved 里把纵向夹进工作区、
- *      横向按屏幕中线重新贴边，所以横着拖过中线就换一侧）。
+ *      **浮在桌面上的球不收**（收起是「贴边」的形态），Rust 那边再拦一道；
+ *  三，整块标 `data-tauri-drag-region="deep"` 把拖动交给系统（Rust 在 Moved / Resized 里把
+ *      两个方向都夹进工作区，松手后判贴没贴边 —— 拖到哪就停在哪儿，不吸附）。
+ *      **必须是 `deep`（整棵子树）**：裸属性只认「正好按在带属性的那个元素上」，
+ *      球中间的数字、单位与刻度线都是子元素，按在那儿起不了拖动 —— 现象是「球抓不住、
+ *      只能摸到某几处才拖得动」。球里没有一个可点元素（没有 a / button / tabindex），
+ *      deep 不会顺手把别的交互吃掉。
  *
- * 尺寸单位一律用 vmin / vh / vw：窗口本身就是视口，而窗口尺寸（36×72 / 76×76 逻辑像素）
+ * 尺寸单位一律用 vmin / vh / vw：窗口本身就是视口，而窗口尺寸（6×48 / 76×76 逻辑像素）
  * 由 Rust 按 DPI 设 —— 用百分比或 v* 单位，缩放屏上就自动跟着对。
  */
 import type { BallSide, NetCounters, NetRate } from '@workbench/net-meter'
@@ -37,7 +42,16 @@ const COLLAPSE_DELAY_MS = 1500
  */
 const OPEN_GUARD_MS = 600
 
-const side = ref<BallSide>('right')
+/**
+ * 形状与位置都以 Rust 那边为准，而它是异步取回来的。
+ *
+ * **拿到之前什么都不画**：一上来 `open` 还是 false，可窗口很可能已经是 76 见方的展开态
+ * （浮在桌面上的球就是），那一帧会照收起态画成一条拉满窗口的竖条（一个怪圆饼）。
+ * 窗口本来透明，空白一帧比画错一帧干净。
+ */
+const ready = ref(false)
+/** 贴着屏幕哪一侧；null = 浮在桌面上（这时鼠标移开也不收，见 onLeave） */
+const side = ref<BallSide | null>(null)
 const open = ref(false)
 const rate = ref<NetRate>({ down: 0, up: 0 })
 const link = ref({ down: 0, up: 0 })
@@ -48,6 +62,16 @@ let lastAt = 0
 let sampleTimer = 0
 let collapseTimer = 0
 let openedAt = 0
+/**
+ * 上一次真的推给 Rust 的意图。
+ *
+ * 「还要不要再推一次」拿它判，不拿 `open`：`open` 是**窗口的实际状态**，而展开 / 收起
+ * 各自要走一趟 IPC —— 收起还在路上时指针又移回球上，用 `open` 判就会把那次展开吞掉
+ * （窗口停在收起那一档、指针却明明在球上，得先把指针挪开再回来才好）。
+ * 每次拿到回包（同步 / 推完）都拿实际状态对齐一遍：Rust 会自己改这一档（松手贴边就收起），
+ * 不同步的话下次 hover 正好撞上那条判重，窗口明明收着、指针移上去却没反应。
+ */
+let requested: boolean | null = null
 
 const downParts = computed(() => formatSpeed(rate.value.down))
 const upParts = computed(() => formatSpeed(rate.value.up))
@@ -88,13 +112,21 @@ async function sample(): Promise<void> {
 }
 
 async function applyOpen(next: boolean): Promise<void> {
-  if (open.value === next)
+  // 拿「上一次推的意图」判重（见 requested 的说明）：换成拿 `open` 判会吞掉在途的那次反向意图
+  if (requested === next)
     return
+  requested = next
   const result = await window.workbench.ballOpen(next)
-  if (!result.ok || !result.data)
+  if (!result.ok || !result.data) {
+    // 没推成：把意图放开，下次进出还能再试一遍（不放开就再也不推了）
+    requested = null
     return
+  }
   open.value = result.data.open
   side.value = result.data.side
+  // 推完以**实际状态**为准：Rust 可能没照办（浮着的球不收，见 onLeave）、也可能自己改过
+  // （松手落到边上会自动收起，见 ball.rs 的 settle_drop）—— 记错了下一次进出就被判重吞掉
+  requested = result.data.open
   if (result.data.open)
     openedAt = Date.now()
 }
@@ -105,6 +137,10 @@ function onEnter(): void {
 }
 
 function onLeave(): void {
+  // **浮着的不收**：收起是「贴边」的形态 —— 屏幕中间摆着的一条 6×48 竖条既不像东西、
+  // 也没地方可贴。只有贴着左右边的球才按延迟收回去（Rust 那边也拦一道）
+  if (!side.value)
+    return
   window.clearTimeout(collapseTimer)
   const sinceOpen = Date.now() - openedAt
   const delay = sinceOpen < OPEN_GUARD_MS
@@ -121,16 +157,20 @@ function openMain(): void {
 /**
  * 从 Rust 那边把状态读回来。
  *
- * 画哪一副样子（贴片还是表盘）**以窗口的实际状态为准**，不是以本地那个 ref 为准：
+ * 画哪一副样子（贴边的竖条还是整颗球）**以窗口的实际状态为准**，不是以本地那个 ref 为准：
  * 窗口尺寸是 Rust 设的，本地这份只是个镜像 —— 挂在 resize 上再读一次，
- * 任何不是这条 hover 路径改出来的变化（改尺寸、改边、以后加别的入口）都能自动跟上。
+ * 任何不是这条 hover 路径改出来的变化（松手贴边自动收起 / 摊开、改尺寸、以后加别的入口）
+ * 都能自动跟上。
  */
 async function syncContext(): Promise<void> {
   const result = await window.workbench.ballContext()
-  if (!result.ok || !result.data)
-    return
-  side.value = result.data.side
-  open.value = result.data.open
+  if (result.ok && result.data) {
+    side.value = result.data.side
+    open.value = result.data.open
+    requested = result.data.open
+  }
+  // 取不到也放行：宁可先画成收起态，也别让窗口一直空着（取不到就已经有别的问题了）
+  ready.value = true
 }
 
 onMounted(async () => {
@@ -153,17 +193,19 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
+  <!-- 形状还没从 Rust 取回来之前什么都不画（见 ready 的说明） -->
   <div
+    v-if="ready"
     class="ball"
-    :class="[`ball--${side}`, open ? 'ball--open' : 'ball--tucked', { 'is-busy': busy }]"
-    data-tauri-drag-region
+    :class="[open ? 'ball--open' : 'ball--tucked', { 'is-busy': busy }]"
+    data-tauri-drag-region="deep"
     @mouseenter="onEnter"
     @mouseleave="onLeave"
     @dblclick="openMain"
   >
-    <!-- 收起：直边压在屏幕边上的半圆贴片，里面一条双色竖流量条 -->
-    <div v-if="!open" class="tab" data-tauri-drag-region>
-      <span class="tab__bar" data-tauri-drag-region>
+    <!-- 收起：贴着屏幕边的一条双色竖流量条（窗口就是它本身） -->
+    <div v-if="!open" class="tab">
+      <span class="tab__bar">
         <span
           class="tab__fill"
           :style="{ 'height': barPercent, '--split': barSplit }"
@@ -185,13 +227,13 @@ onBeforeUnmount(() => {
           :y2="tick.y2"
         />
       </svg>
-      <span class="hub" data-tauri-drag-region>
-        <span class="hub__hero" data-tauri-drag-region>
+      <span class="hub">
+        <span class="hub__hero">
           <span class="hub__arrow hub__arrow--down">↓</span>
           <span class="hub__value">{{ downParts.value }}</span>
           <span class="hub__unit">{{ downParts.unit }}</span>
         </span>
-        <span class="hub__sub" data-tauri-drag-region>
+        <span class="hub__sub">
           <span class="hub__arrow hub__arrow--up">↑</span>
           <span class="hub__value">{{ upParts.value }}</span>
           <span class="hub__unit">{{ upParts.unit }}</span>
@@ -231,8 +273,6 @@ onBeforeUnmount(() => {
   border: 1px solid rgb(255 255 255 / 5.5%);
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 9%);
 }
-
-/* ---------- 收起：贴边半圆 ---------- */
 
 /* ---------- 收起：就一条竖流量条 ---------- */
 

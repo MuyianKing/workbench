@@ -136,7 +136,7 @@ asset 协议、读取权限在 Rust 侧按单个文件授予）、**通道一律
 | 密码保险库（密钥 / 加解密 / 多机共写一份文件） | [vault](docs/modules/vault.md) |
 | 邮箱（IMAP 收信 / SMTP 发信 / 授权码 / 联网出口） | [mail](docs/modules/mail.md) |
 | 截图与钉图（抓屏 / 标注 / 剪贴板 / 置顶图窗口） | [screenshot](docs/modules/screenshot.md) |
-| 网速球（贴边收起 / 悬停滑出 / 网卡计数取样） | [float-ball](docs/modules/float-ball.md) |
+| 网速球（自由摆放 / 贴边收起 / 网卡计数取样） | [float-ball](docs/modules/float-ball.md) |
 
 没有列入表里的模块（首页、项目、技能、样式、视频、快捷启动）也在 [docs/modules/](docs/modules/) 下各有一份文档，
 动手前先看它的「约束」一节。

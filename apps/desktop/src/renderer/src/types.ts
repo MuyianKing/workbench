@@ -307,7 +307,7 @@ export interface AppSettings {
   /** 选区时显示放大镜与像素取色（放大镜挡视线时关掉它） */
   captureMagnifier: boolean
   /**
-   * 网速球（贴在屏幕左 / 右边缘、可上下拖的那颗球）的总开关，默认关。
+   * 网速球（桌面上随便摆、拖到屏幕左右边就收起来的那颗球）的总开关，默认关。
    *
    * 它是一扇独立的置顶窗口（见 docs/modules/float-ball.md），主窗口收进托盘也照样在；
    * 位置只对本机成立（是这块屏的坐标），所以它进数据文件、不参与外观同步。
@@ -1673,7 +1673,7 @@ export interface WorkbenchApi {
    * （Rust 不去数据文件里读设置）。
    */
   ballApply: (visible: boolean) => Promise<Result<null>>
-  /** 球窗口问自己贴哪一侧、收起还是展开 */
+  /** 球窗口问自己贴着哪一侧、收起还是展开（side 为空 = 浮在桌面上） */
   ballContext: () => Promise<Result<BallContext>>
   /** 收起 / 展开（意图与防抖在渲染层，窗口尺寸与位置在 Rust） */
   ballOpen: (open: boolean) => Promise<Result<BallContext>>

@@ -83,6 +83,10 @@ windows-sys = { version = "0.61", features = [
     # 不引日期格式化 crate
     "Win32_System_SystemInformation",
     "Win32_System_Threading",
+    # 悬浮球判断「左键还按着没有」（GetAsyncKeyState，见 ball.rs）：拖动是系统在搬窗口，
+    # 松手那一下不产生 Moved，只看「多久没动」分不出「拖着停住」和「已经松手」。
+    # 同样只是给已在这里的 windows-sys 加 feature，不新增编译单元
+    "Win32_UI_Input_KeyboardAndMouse",
     "Win32_UI_Shell",
     "Win32_UI_Shell_Common",
     "Win32_UI_WindowsAndMessaging",

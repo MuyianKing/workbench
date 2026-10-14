@@ -160,7 +160,7 @@ function saveHotkey(accelerator: string): void {
       </div>
 
       <!--
-        网速球：一扇独立的置顶窗口，贴在屏幕左 / 右边缘显示实时上下行速率。
+        网速球：一扇独立的置顶窗口，在桌面上随便摆，显示实时上下行速率。
         它与主窗口互不相干（主窗口收进托盘也照样在），所以位置只对本机成立 ——
         进数据文件、不参与外观同步（见 docs/modules/float-ball.md）。
       -->
@@ -168,8 +168,8 @@ function saveHotkey(accelerator: string): void {
         <div class="row__text">
           <span class="row__label">网速球</span>
           <span class="row__hint">
-            贴在屏幕左或右边缘显示实时下载 / 上传速度，可上下拖、拖过屏幕中线换一侧；
-            鼠标移开自动收成贴边的半个圆，移上去再滑出来。
+            在桌面上随便摆，显示实时下载 / 上传速度；拖到屏幕左或右边缘会收成贴边的一条竖条，
+            鼠标移开收回去、移上来再摊开。
           </span>
         </div>
         <el-switch
