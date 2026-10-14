@@ -237,12 +237,36 @@ mod tests {
     }
 
     #[test]
-    fn 本机的链路速率取的是物理网卡那一档() {
-        // 这条是拿真机当哨兵：虚拟网卡那种 100Gbps 的虚数混进来的话，这个上界会被撞破
-        let counters = net_counters();
-        assert!(
-            counters.down_link <= 40_000_000_000,
-            "链路速率看着像把虚拟网卡的虚数算进来了：{counters:?}",
+    fn 本机的链路速率是某一张网卡那一档而不是各卡相加() {
+        // **别拿具体数值当判据**。这条原来断言「不超过 40Gbps」，理由是虚拟网卡报 100Gbps 那种虚数 ——
+        // 可一台机器长什么样不由我们定：CI runner 那块网卡自己就是**带 HardwareInterface 位的虚拟网卡**、
+        // 报 50Gbps，40G 的上界在那边必炸（2026-10-14 踩过，见 float-ball.md 的「验证」）。
+        // 过滤（只认物理网卡）由上面那几条合成数据的用例覆盖；这里只验口径 ——
+        // 报出来的得是**某一张网卡实际报的值**，而且有网卡能相加时它就不等于合计。
+        let rows = read_interfaces();
+        let counters = sum_interfaces(&rows);
+        println!(
+            "本机网卡 {} 张（报非零链路速率的 {} 张），链路速率上限 {} bit/s",
+            rows.len(),
+            rows.iter().filter(|row| row.down_link > 0).count(),
+            counters.down_link,
         );
+        assert!(
+            counters.down_link == 0 || rows.iter().any(|row| row.down_link == counters.down_link),
+            "链路速率得是某张网卡报的值：{counters:?}",
+        );
+        let reported: Vec<u64> = rows
+            .iter()
+            .map(|row| row.down_link)
+            .filter(|rate| *rate > 0)
+            .collect();
+        if reported.len() >= 2 {
+            let sum: u64 = reported.iter().sum();
+            assert!(
+                counters.down_link < sum,
+                "链路速率是「取最大」不是「相加」：{} 不小于 {sum}",
+                counters.down_link,
+            );
+        }
     }
 }

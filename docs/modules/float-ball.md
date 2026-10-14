@@ -34,6 +34,11 @@
   要精确就得改成「在设置里勾选网卡」，那是另一个设置项加一条列网卡的通道，这一版不做。
 - **链路速率（表盘量程的顶）只认物理网卡**（`InterfaceAndOperStatusFlags` 第 0 位），且取**最快那条**而不是相加 ——
   虚拟网卡报的 100Gbps 是虚数，相加之后量程被推到几百 GB/s，等于把刻度抹平。
+- **这条过滤不许拿「链路速率不超过多少」当用例的判据**：那是台机器一条的判据 —— CI runner 那块网卡
+  自己就是**带 `HardwareInterface` 位的虚拟网卡**、报 50Gbps，「≤ 40Gbps」那种哨兵在那边必炸
+  （2026-10-14 踩过一次，Rust job 红在一条用例上）。只认物理网卡这条过滤由 `net.rs` 里那几条
+  **合成数据**的用例覆盖；真机上只验口径 —— 报出来的是**某张网卡实际报的值**、而且有网卡能相加时
+  它不等于合计（`net::tests::本机的链路速率是某一张网卡那一档而不是各卡相加`）。
 - **表盘的量程是自动换挡的，不是「占链路带宽的比例」**（用户报的：「网速大部分时间都比较小，
   外围的圈长时间没有绘制」）。`dialShare` / `dialRange`（[meter.ts](../../packages/net-meter/src/meter.ts)）里定这一条：
   满刻度取 **1MB/s 的 2 的幂**（1M / 2M / 4M / 8M…），**换挡点在量程的一半** ——
@@ -208,6 +213,15 @@
 它是位置偏好，不是「这个球还开着」的凭据；开关在设置里。
 
 ## 验证
+
+怀疑链路速率取错了（表盘不随流量涨、或者「亮满不降」）时，先看一眼机器上的网卡清单：
+
+```powershell
+Get-NetAdapter | ft Name,InterfaceDescription,LinkSpeed,Status,HardwareInterface
+```
+
+`HardwareInterface=False` 的那几张（Hyper-V / WSL / VPN 隧道）**不许**出现在链路速率里 ——
+上界该等于 `True` 里最快的那条。
 
 界面上没有第二条入口，验证走真应用那条路（配方见
 [browser-preview-verification.md](../dev-notes/browser-preview-verification.md) 的「在真应用里验证」）：
