@@ -24,15 +24,41 @@ export function textFont(size: number): string {
 }
 
 /**
- * 量一段文字的尺寸。文字标注的 `box` 就取它 ——
+ * 文字标注的行高倍数：多行时每行的步进 = size * TEXT_LINE_HEIGHT，标注高度也按行数算。
+ * **画布上的步进、量尺寸、以及输入框自己的 CSS 行高必须是这一个值** —— 差一点，
+ * 提交那一刻整块字就会跳（多行时按行数累积，越往下越明显）。
+ */
+export const TEXT_LINE_HEIGHT = 1.3
+
+/** 按换行把文字拆成几行（`\r\n` / `\r` 都算，空行保留 —— 空行也是用户敲的） */
+export function textLines(text: string): string[] {
+  return text.split(/\r\n|\r|\n/)
+}
+
+/**
+ * 量一段文字的尺寸（多行：宽取最长的那一行、高按行数算）。文字标注的 `box` 就取它 ——
  * 命中判定、选中框、工具栏摆位都靠这个尺寸，量的时候与画的时候必须同一字体。
  */
 export function measureTextBlock(ctx: CanvasRenderingContext2D, text: string, size: number): Size {
   ctx.save()
   ctx.font = textFont(size)
-  const metrics = ctx.measureText(text)
+  const lines = textLines(text)
+  let width = 0
+  for (const line of lines)
+    width = Math.max(width, ctx.measureText(line).width)
   ctx.restore()
-  return { width: Math.ceil(metrics.width), height: Math.ceil(size * 1.3) }
+  return { width: Math.ceil(width), height: Math.ceil(lines.length * size * TEXT_LINE_HEIGHT) }
+}
+
+/** 量尺寸用的离屏上下文（只量不画；输入框的宽高跟着它长） */
+let measureCtx: CanvasRenderingContext2D | null = null
+
+/** 量一段文字的尺寸（自带离屏上下文，供输入框每次敲键实时跟着长） */
+export function measureTextSize(text: string, size: number): Size {
+  measureCtx ??= document.createElement('canvas').getContext('2d')
+  if (!measureCtx)
+    return { width: 0, height: Math.ceil(size * TEXT_LINE_HEIGHT) }
+  return measureTextBlock(measureCtx, text, size)
 }
 
 /** 箭头要用的那几项（按结构取，比从联合类型里 Extract 干净） */
@@ -221,7 +247,11 @@ export function drawAnnotation(ctx: CanvasRenderingContext2D, annotation: Annota
       ctx.font = textFont(annotation.size)
       ctx.textBaseline = 'top'
       ctx.fillStyle = annotation.color
-      ctx.fillText(annotation.text, annotation.at.x, annotation.at.y)
+      // 多行：每行自己一次 fillText，步进与量尺寸、输入框 CSS 行高同一个值
+      const lines = textLines(annotation.text)
+      const step = annotation.size * TEXT_LINE_HEIGHT
+      for (let index = 0; index < lines.length; index += 1)
+        ctx.fillText(lines[index], annotation.at.x, annotation.at.y + index * step)
       break
     }
   }

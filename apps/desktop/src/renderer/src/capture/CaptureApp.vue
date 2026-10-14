@@ -75,7 +75,7 @@ import {
   viewportToCanvas,
 } from '@workbench/capture'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
-import { drawAnnotation, drawAnnotations, measureTextBlock } from './annotation-render'
+import { drawAnnotation, drawAnnotations, measureTextSize, TEXT_LINE_HEIGHT } from './annotation-render'
 import CaptureMagnifier from './CaptureMagnifier.vue'
 import CaptureToolbar from './CaptureToolbar.vue'
 
@@ -90,7 +90,7 @@ const canvasSize = computed(() => ({
 const scale = computed(() => monitor.value?.scale ?? 1)
 
 const stage = ref<HTMLCanvasElement | null>(null)
-const textInput = ref<HTMLInputElement | null>(null)
+const textInput = ref<HTMLTextAreaElement | null>(null)
 const bitmap = shallowRef<ImageBitmap | null>(null)
 /** 干净副本，只给像素读数取样（见文件头） */
 let sampler: HTMLCanvasElement | null = null
@@ -791,10 +791,19 @@ const textInputStyle = computed(() => {
   if (!editing)
     return {}
   const at = canvasToViewport(editing.at, viewportBox(), canvasSize.value)
+  // 输入框跟着内容长：宽高按画布上量出来的那一块换成 CSS 像素。
+  // 空的时候留半个字的宽度，不然框是零宽、光标看不见；末尾多给两像素，
+  // 免得量出来的宽与浏览器排版差一点，最后一列被软换成第二行。
+  const box = measureTextSize(editing.text, textSize.value)
+  const pixels = scale.value || 1
   return {
     left: `${at.x}px`,
     top: `${at.y}px`,
-    fontSize: `${textSize.value / scale.value}px`,
+    width: `${(Math.max(box.width, textSize.value / 2) + 2) / pixels}px`,
+    height: `${box.height / pixels}px`,
+    fontSize: `${textSize.value / pixels}px`,
+    // 与画布上的行进步长同一个值（见 TEXT_LINE_HEIGHT），多行才不会在提交那一刻跳
+    lineHeight: `${TEXT_LINE_HEIGHT}`,
     color: color.value,
   }
 })
@@ -805,10 +814,6 @@ function commitText(): void {
   if (!editing || !editing.text.trim())
     return
 
-  const ctx = stageContext()
-  if (!ctx)
-    return
-
   // 尺寸量在画布像素上（与字号同一套），命中判定与选中框都靠它
   commit([...annotations.value, {
     id: `t-${Date.now()}`,
@@ -817,7 +822,7 @@ function commitText(): void {
     text: editing.text,
     color: color.value,
     size: textSize.value,
-    box: measureTextBlock(ctx, editing.text, textSize.value),
+    box: measureTextSize(editing.text, textSize.value),
   }])
   redraw()
 }
@@ -1090,19 +1095,22 @@ const redoAble = computed(() => historyCanRedo(history.value))
     />
 
     <!--
-      文字工具：点一下就在那儿开一个输入框，输入法、光标这些交给原生输入框。
-      **回车不结输入**：中文输入法要用回车选词，认了就会把字打一半掐掉 ——
-      结束靠点别处（blur 里提交，见 commitText）。
+      文字工具：点一下就在那儿开一个输入框，输入法、光标这些交给原生的 textarea。
+      **多行、不限长度**：回车就是换行（输入法用回车选词那一下由输入法自己吃掉，
+      不会插进正文），宽高跟着内容长，长句不折行也不截断。
+      结束靠点别处（blur 里提交，见 commitText）；Esc 丢掉这段字。
+      换行与查宽度都由 `measureTextSize` 量（与画布上同一套字体与行高）。
     -->
-    <input
+    <textarea
       v-if="textEditing"
       ref="textInput"
       v-model="textEditing.text"
       class="capture-text-input"
       :style="textInputStyle"
+      wrap="off"
       @keydown.esc.stop.prevent="textEditing = null"
       @blur="commitText"
-    >
+    />
 
     <div v-if="toolbarVisible" ref="toolbarRef" class="capture__toolbar" :style="toolbarStyle">
       <CaptureToolbar
@@ -1164,19 +1172,24 @@ const redoAble = computed(() => historyCanRedo(history.value))
 }
 
 /*
- * 输入框长得**和落下去的字一模一样**：字号与颜色由行内 style 给（跟着当前档位走），
+ * 输入框长得**和落下去的字一模一样**：字号、颜色与行高由行内 style 给（跟着当前档位走），
  * 这里把边框、底色、内边距全部去掉，只留一个光标。**不要给它加框或底色** ——
  * 那样提交的时候会看见一个框「收起」成纯色字，而这门功能要的就是所见即所得。
+ * 宽高由 textInputStyle 按量出来的文字块给死，所以关掉换行与滚动条、也不许用户拖尺寸。
  */
 .capture-text-input {
   position: absolute;
-  min-width: 0;
+  display: block;
+  box-sizing: border-box;
+  margin: 0;
   padding: 0;
   border: 0;
   background: transparent;
   font-family: 'Segoe UI', 'Microsoft YaHei', system-ui, sans-serif;
-  /* 与画布上 fillText 的 textBaseline='top' 对齐：结束输入时字不跳 */
-  line-height: 1;
+  /* 长句不折行：与画布一样一行到底（宽已经量够了，这里只是挡浏览器差那一个像素） */
+  white-space: pre;
+  overflow: hidden;
+  resize: none;
   caret-color: #409eff;
   outline: none;
 }
