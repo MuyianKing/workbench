@@ -26,11 +26,13 @@ import VaultView from '@/components/VaultView.vue'
 import VideoPlayer from '@/components/VideoPlayer.vue'
 import VideoView from '@/components/VideoView.vue'
 import WorkView from '@/components/WorkView.vue'
+import ZentaoView from '@/components/ZentaoView.vue'
 import { useMailStore } from '@/stores/mail'
 import { useNavStore } from '@/stores/nav'
 import { useProjectsStore } from '@/stores/projects'
 import { useSettingsStore } from '@/stores/settings'
 import { useWeatherStore } from '@/stores/weather'
+import { useZentaoStore } from '@/stores/zentao'
 
 const store = useProjectsStore()
 const nav = useNavStore()
@@ -39,6 +41,8 @@ const settings = useSettingsStore()
 const weather = useWeatherStore()
 // 邮件的后台监视也是启动就绪的常驻事：账户清单交给 Rust 每 30 分钟查一轮（stores/mail.ts）
 const mail = useMailStore()
+// 禅道的后台检查同理：到点由 Rust 唤醒，取数 / 比新增 / 弹通知在 store 里（stores/zentao.ts）
+const zentao = useZentaoStore()
 
 /**
  * 页面清单：id 在 packages/appearance/src/views.ts 里登记，这里给出对应的组件。
@@ -58,6 +62,7 @@ const VIEWS: Record<ViewId, Component> = {
   mail: MailView,
   styles: StylesView,
   video: VideoView,
+  zentao: ZentaoView,
 }
 
 const currentView = computed(() => VIEWS[nav.activeView])
@@ -100,6 +105,7 @@ onMounted(() => {
   void store.init()
   weather.start()
   mail.startWatch()
+  zentao.startWatch()
   // 截图失败（抓屏 / 铺遮罩出错）：那是工作线程里跑的动作，没有别的地方能报回来。
   // Rust 会先把窗口唤出来再推这条事件，所以提示条一定冒在一个看得见的窗口上
   window.workbench.onCaptureFailed(message => ElMessage.error(message))

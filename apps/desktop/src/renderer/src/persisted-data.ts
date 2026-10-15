@@ -26,6 +26,7 @@ import { sanitizeVaultGroupNames } from '@workbench/vault'
 import { sanitizeVideoHistory, sanitizeVideoLastRel, sanitizeVideoRoot, sanitizeVideoTreeExpanded } from '@workbench/video'
 import { sanitizeWeatherCity } from '@workbench/weather'
 import { sanitizeWorkRange, sanitizeWorkSort } from '@workbench/work-log'
+import { sanitizeZentaoPollMinutes } from '@workbench/zentao'
 import { DEFAULT_SETTINGS } from './types'
 
 /** 数据文件里该存的那部分设置的默认值：完整默认设置摘掉外观项（stripAppearance 来自外观包） */
@@ -181,6 +182,8 @@ export function sanitizeSettings(raw: unknown): StoredSettings {
   // 后台新邮件检查的周期（分钟，0 = 关闭）：老数据文件里没有，默认 30。
   // 与 mailBulkSenders 同一待遇：只对本机成立，不参与外观同步
   value.mailPollMinutes = sanitizeMailPollMinutes(value.mailPollMinutes)
+  // 禅道检查间隔：老数据使用域包默认，只落本机数据文件，不参与外观同步
+  value.zentaoPollMinutes = sanitizeZentaoPollMinutes(value.zentaoPollMinutes)
   // 图片仓库地址：老数据文件里没有，默认未配置。
   // 与 Token 同步仓库同一条口径（含空白、以 `-` 开头的一律当没填）
   value.noteImageRepo = sanitizeImageRepo(value.noteImageRepo)

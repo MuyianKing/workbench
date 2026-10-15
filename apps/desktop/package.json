@@ -37,6 +37,7 @@
     "@workbench/video": "workspace:*",
     "@workbench/weather": "workspace:*",
     "@workbench/work-log": "workspace:*",
+    "@workbench/zentao": "workspace:*",
     "docx-preview": "^0.4.1",
     "dayjs": "^1.11.23",
     "element-plus": "^2.14.7",

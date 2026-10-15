@@ -9,16 +9,17 @@
 //! 函数体落在工作线程上，不占主线程。
 //!
 //! 只做这一件事：发一个请求、拿回状态码、两个用得上的响应头（ETag / Location）与响应体。
-//! 不改编码，**也不跟重定向** —— 要跟的调用方看着 `location` 自己再发一次（技能包那条路就这么办，
-//! 跳数上限与「跳到哪儿」的规矩留在那边，这里不开这个口子）。
+//! 不改编码。旧入口沿用 WinHTTP 默认重定向策略；带机密请求头且不得跳转的调用方必须用
+//! `request_url_no_redirects`，在发送前明确关闭自动重定向。
 
 use std::ffi::c_void;
 
 use windows_sys::Win32::Networking::WinHttp::{
     WinHttpAddRequestHeaders, WinHttpCloseHandle, WinHttpConnect, WinHttpOpen, WinHttpOpenRequest,
     WinHttpQueryDataAvailable, WinHttpQueryHeaders, WinHttpReadData, WinHttpReceiveResponse,
-    WinHttpSendRequest, WinHttpSetTimeouts, WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
-    WINHTTP_ADDREQ_FLAG_ADD, WINHTTP_FLAG_SECURE, WINHTTP_QUERY_ETAG, WINHTTP_QUERY_FLAG_NUMBER,
+    WinHttpSendRequest, WinHttpSetOption, WinHttpSetTimeouts, WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
+    WINHTTP_ADDREQ_FLAG_ADD, WINHTTP_FLAG_SECURE, WINHTTP_OPTION_REDIRECT_POLICY,
+    WINHTTP_OPTION_REDIRECT_POLICY_NEVER, WINHTTP_QUERY_ETAG, WINHTTP_QUERY_FLAG_NUMBER,
     WINHTTP_QUERY_LOCATION, WINHTTP_QUERY_STATUS_CODE,
 };
 
@@ -80,7 +81,7 @@ pub fn request(
     headers: &[(&str, &str)],
     body: Option<&str>,
 ) -> Result<Response, String> {
-    send(method, host, HTTPS_PORT, true, path, headers, body, MAX_BODY)
+    send(method, host, HTTPS_PORT, true, path, headers, body, MAX_BODY, false)
 }
 
 /// 发一个请求到**用户自己填的地址**：http / https 都认，端口与路径照原样走
@@ -107,7 +108,33 @@ pub fn request_url_limited(
     max_body: usize,
 ) -> Result<Response, String> {
     let (secure, host, port, path) = split_url(url)?;
-    send(method, &host, port, secure, &path, headers, body, max_body)
+    send(method, &host, port, secure, &path, headers, body, max_body, false)
+}
+
+/// 带机密请求头的单次请求：发送前关闭 WinHTTP 自动跳转，3xx 原样返回给调用方拒绝。
+/// 独立入口不改变旧调用的系统默认策略。
+pub fn request_url_no_redirects(
+    method: &str,
+    url: &str,
+    headers: &[(&str, &str)],
+    body: Option<&str>,
+) -> Result<Response, String> {
+    // 独立入口用现有 url crate 拆分，也支持用户端点里的 IPv6 字面量。
+    let parsed = url::Url::parse(url).map_err(|_| "HTTP 地址无效".to_string())?;
+    let secure = match parsed.scheme() {
+        "https" => true,
+        "http" => false,
+        _ => return Err("地址要以 http:// 或 https:// 开头".into()),
+    };
+    let host = parsed.host_str().ok_or("地址里没有主机名")?;
+    let host = host.trim_start_matches('[').trim_end_matches(']');
+    let port = parsed.port_or_known_default().ok_or("HTTP 端口无效")?;
+    let mut path = parsed.path().to_string();
+    if let Some(query) = parsed.query() {
+        path.push('?');
+        path.push_str(query);
+    }
+    send(method, host, port, secure, &path, headers, body, MAX_BODY, true)
 }
 
 /// URL → WinHTTP 要的那四样（协议 / 主机 / 端口 / 路径）。只认 http 与 https，
@@ -156,6 +183,7 @@ fn send(
     headers: &[(&str, &str)],
     body: Option<&str>,
     max_body: usize,
+    no_redirects: bool,
 ) -> Result<Response, String> {
     let agent = wide("Workbench");
     let host_w = wide(host);
@@ -194,6 +222,18 @@ fn send(
             if secure { WINHTTP_FLAG_SECURE } else { 0 },
         ));
         check(request.0, "构造请求失败")?;
+
+        if no_redirects {
+            let policy = WINHTTP_OPTION_REDIRECT_POLICY_NEVER;
+            let set = WinHttpSetOption(
+                request.0,
+                WINHTTP_OPTION_REDIRECT_POLICY,
+                &policy as *const u32 as *const c_void,
+                std::mem::size_of::<u32>() as u32,
+            );
+            // 设置失败就不发送，不能退回可能把 Token 带到另一站的默认策略。
+            check_bool(set, "关闭 HTTP 重定向失败")?;
+        }
 
         if !headers.is_empty() {
             // WinHTTP 要的是一整块 CRLF 分隔的 header 文本

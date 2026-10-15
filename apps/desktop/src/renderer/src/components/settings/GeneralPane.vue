@@ -3,8 +3,9 @@ import type { AppSettings } from '@/types'
 import { APP_NAME_DEFAULT, APP_NAME_MAX_LENGTH } from '@workbench/appearance'
 import { accountLabel } from '@workbench/auth'
 import { WEATHER_CITY_MAX } from '@workbench/weather'
+import { sanitizeZentaoPollMinutes } from '@workbench/zentao'
 /**
- * 设置 · 通用：程序（名称 / 快捷键 / 开机自启）、天气、笔记（图片仓库）、账号与同步仓库。
+ * 设置 · 通用：程序（名称 / 快捷键 / 开机自启）、天气、禅道、笔记（图片仓库）、账号与同步仓库。
  *
  * 四个文本项都是「草稿字段」（useDraftField）：边打边存会把半截内容写进设置，
  * 失焦 / 回车才提交，提交后由 store 收敛、收敛后的值回推草稿。
@@ -206,6 +207,28 @@ function saveHotkey(accelerator: string): void {
           spellcheck="false"
           placeholder="城市名，如 上海"
           @change="commitWeatherCity"
+        />
+      </div>
+    </div>
+
+    <div class="block">
+      <h3 class="block__title">
+        禅道
+      </h3>
+
+      <div class="row">
+        <div class="row__text">
+          <span class="row__label">检查间隔（分钟）</span>
+          <span class="row__hint">0 = 关闭</span>
+        </div>
+        <el-input-number
+          :model-value="settings.settings.zentaoPollMinutes"
+          size="small"
+          :min="0"
+          :max="1440"
+          :step="1"
+          :precision="0"
+          @change="(value: number | undefined) => save({ zentaoPollMinutes: sanitizeZentaoPollMinutes(value) })"
         />
       </div>
     </div>

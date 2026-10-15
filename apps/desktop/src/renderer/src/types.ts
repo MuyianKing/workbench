@@ -20,11 +20,13 @@ import type { SyncDeviceInfo, TokenUsageResult } from '@workbench/usage'
 import type { VaultEntry, VaultRecord } from '@workbench/vault'
 import type { VideoNode, VideoSource } from '@workbench/video'
 import type { WorkLogEntry, WorkLogInput, WorkLogPatch, WorkRange, WorkSort } from '@workbench/work-log'
+import type { ZentaoAssignInput, ZentaoBugDetail, ZentaoBugList, ZentaoBuild, ZentaoResolveInput, ZentaoSession, ZentaoUser } from '@workbench/zentao'
 import { AI_PERMISSION_DEFAULT, AI_THINKING_DEFAULT } from '@workbench/ai'
 import { DEFAULT_APPEARANCE, TERMINAL_BUTTON_TOP_DEFAULT } from '@workbench/appearance'
 import { CAPTURE_ENABLED_DEFAULT, CAPTURE_HOTKEY_DEFAULT, CAPTURE_MAGNIFIER_DEFAULT, CAPTURE_PIN_OPACITY_DEFAULT, CAPTURE_SAVE_DIR_DEFAULT } from '@workbench/capture'
 import { PROJECT_SORT_DEFAULT } from '@workbench/core'
 import { WORK_RANGE_DEFAULT, WORK_SORT_DEFAULT } from '@workbench/work-log'
+import { ZENTAO_POLL_MINUTES_DEFAULT } from '@workbench/zentao'
 
 export type {
   AiNewsArticle,
@@ -123,6 +125,7 @@ export type { SyncDeviceInfo } from '@workbench/usage'
 export type { TokenUsageResult } from '@workbench/usage'
 export type { VideoNode, VideoSource } from '@workbench/video'
 export type { WorkLogEntry, WorkLogInput, WorkLogPatch } from '@workbench/work-log'
+export type { ZentaoAssignInput, ZentaoBrowse, ZentaoBug, ZentaoBugAction, ZentaoBugDetail, ZentaoBugHistory, ZentaoBugList, ZentaoBuild, ZentaoResolveInput, ZentaoSession, ZentaoUser } from '@workbench/zentao'
 
 export type ProjectStatus = 'idle' | 'installing' | 'running' | 'building' | 'success' | 'failed'
 
@@ -514,6 +517,11 @@ export interface AppSettings {
    * sanitizeMailPollMinutes 收敛（非数字回默认 30）。
    */
   mailPollMinutes: number
+  /**
+   * 禅道后台检查间隔（分钟）：0 = 关闭，其余为 1..1440。
+   * 只落本机数据文件，不参与外观同步；默认值与收敛由 @workbench/zentao 定义。
+   */
+  zentaoPollMinutes: number
   /**
    * Token 用量同步仓库地址（git 远程地址），空串表示不同步。
    *
@@ -1544,6 +1552,35 @@ export interface WorkbenchApi {
    * 给出提示，而不是点了没反应。
    */
   openInVSCode: (path: string) => Promise<Result<null>>
+  /** 禅道会话仅在本机内存中，token 不进入渲染层或数据文件。 */
+  zentaoSession: () => Promise<Result<ZentaoSession | null>>
+  zentaoLogin: () => Promise<Result<ZentaoSession>>
+  zentaoLogout: (sessionId: string) => Promise<Result<null>>
+  zentaoBugs: (sessionId: string) => Promise<Result<ZentaoBugList>>
+  /** 登记禅道后台检查周期（分钟，0 = 关闭）；间隔没变时后端不动计时 */
+  zentaoWatch: (pollMinutes: number) => Promise<Result<null>>
+  /** 比出新增之后弹系统通知（点击唤出主窗口并切到禅道页） */
+  zentaoNotify: (sessionId: string, count: number, title: string) => Promise<Result<null>>
+  /** 后台线程到点该查了（取数、比新增与通知都在渲染层接手） */
+  onZentaoCheck: (handler: () => void) => Promise<() => void>
+  /** 禅道系统通知被点了（Rust 已唤出主窗口） */
+  onZentaoNotifyClick: (handler: () => void) => () => void
+  /** Bug 详情（含历史 actions） */
+  zentaoBug: (sessionId: string, bugId: number) => Promise<Result<ZentaoBugDetail>>
+  /** 账号可见产品的 id 清单（列表按产品逐个取 Bug；产品名按需补） */
+  zentaoProducts: (sessionId: string) => Promise<Result<ZentaoBuild[]>>
+  /** Bug 正文里的站内图片：回 data URL（界面内联显示） */
+  zentaoImage: (sessionId: string, path: string) => Promise<Result<string>>
+  /** 单个产品的 id 与名称（补产品名用） */
+  zentaoProduct: (sessionId: string, productId: number) => Promise<Result<{ id?: unknown, name: string }>>
+  /** 指派候选人清单（账号 + 真实姓名） */
+  zentaoUsers: (sessionId: string) => Promise<Result<ZentaoUser[]>>
+  /** 某项目下的构建号（解决 Bug 选版本用） */
+  zentaoBuilds: (sessionId: string, projectId: number) => Promise<Result<ZentaoBuild[]>>
+  /** 指派一个 Bug —— 会真实修改禅道数据 */
+  zentaoAssign: (sessionId: string, input: ZentaoAssignInput) => Promise<Result<null>>
+  /** 解决一个 Bug —— 会真实修改禅道数据 */
+  zentaoResolve: (sessionId: string, input: ZentaoResolveInput) => Promise<Result<null>>
   /** 用系统默认浏览器打开 http(s) 链接 */
   openExternal: (url: string) => Promise<Result<null>>
   /**
@@ -1855,6 +1892,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   mailBulkSenders: [],
   mailContacts: [],
   mailPollMinutes: 30,
+  zentaoPollMinutes: ZENTAO_POLL_MINUTES_DEFAULT,
   tokenSyncRepo: '',
   activeView: 'home',
   // 行为记忆：第一次打开时就是这几个默认档，之后记住用户自己选的那一档

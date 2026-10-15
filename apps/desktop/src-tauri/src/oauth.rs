@@ -131,6 +131,35 @@ struct EmbeddedConfig {
     github: ProviderConfig,
     #[serde(default)]
     gitee: ProviderConfig,
+    #[serde(default)]
+    zentao: Value,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub(crate) struct ZentaoConfig {
+    pub base_url: String,
+    pub account: String,
+    pub password: String,
+}
+
+impl ZentaoConfig {
+    fn parse(value: Value) -> Result<Self, String> {
+        let config: Self = serde_json::from_value(value).map_err(|_| {
+            "未配置有效的禅道凭据，请填写 oauth.local.json 的 zentao 并重新构建".to_string()
+        })?;
+        if config.base_url.trim().is_empty()
+            || config.account.trim().is_empty()
+            || config.password.is_empty()
+        {
+            return Err("未配置完整的禅道凭据，请填写 oauth.local.json 的 zentao 并重新构建".into());
+        }
+        Ok(config)
+    }
+}
+
+pub(crate) fn zentao_config() -> Result<ZentaoConfig, String> {
+    ZentaoConfig::parse(embedded().zentao.clone())
 }
 
 fn embedded() -> &'static EmbeddedConfig {
@@ -697,7 +726,7 @@ fn split_url(url: &str) -> Option<(String, String)> {
 /// 不读响应的 `Content-Type`：为这一个用途去解析响应头，比读几个魔数字节复杂得多，
 /// 而这里唯一会拉的就是头像。认出来但不在支持列表里的（TIFF、ICO 之类）同样返回 None ——
 /// 数据地址的 mime 写错了，图片在界面上会直接碎掉，不如不显示。
-fn sniff_image(bytes: &[u8]) -> Option<&'static str> {
+pub(crate) fn sniff_image(bytes: &[u8]) -> Option<&'static str> {
     use image::ImageFormat;
 
     match image::guess_format(bytes).ok()? {
@@ -1037,6 +1066,36 @@ mod tests {
     use std::net::TcpStream;
 
     use super::*;
+
+    #[test]
+    fn zentao_config_requires_all_fields_and_preserves_password() {
+        for value in [
+            Value::Null,
+            json!({}),
+            json!({ "baseUrl": "https://zentao.example", "account": "user" }),
+            json!({ "baseUrl": " ", "account": "user", "password": "secret" }),
+            json!({ "baseUrl": "https://zentao.example", "account": "user", "password": 123 }),
+        ] {
+            assert!(ZentaoConfig::parse(value).is_err());
+        }
+        let config = ZentaoConfig::parse(json!({
+            "baseUrl": "https://zentao.example", "account": " user ", "password": " secret "
+        }))
+        .expect("有效配置");
+        assert_eq!(config.password, " secret ");
+        assert_eq!(config.account, " user ");
+    }
+
+    #[test]
+    fn malformed_zentao_config_does_not_discard_oauth_credentials() {
+        let config: EmbeddedConfig = serde_json::from_value(json!({
+            "github": { "clientId": "mock-id", "clientSecret": "mock-secret" },
+            "zentao": { "password": 123 }
+        }))
+        .expect("分开解析配置");
+        assert_eq!(config.github.client_id, "mock-id");
+        assert!(ZentaoConfig::parse(config.zentao).is_err());
+    }
 
     /// 回归用例：回调请求必须真被读到。
     ///

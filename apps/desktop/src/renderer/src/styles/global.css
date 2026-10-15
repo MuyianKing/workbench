@@ -1158,6 +1158,30 @@ body.is-resizing-video-float * {
 }
 
 /**
+ * 禅道 Bug 详情弹窗（components/ZentaoDetailDialog.vue 上的 class，正文另挂 body-class）：
+ * 两栏（左信息 + 正文 / 右历史）各自滚，动作按钮钉在脚注那一行。
+ *
+ * 高度**不写死**：内容短就矮（内容不长却占满一屏是最难看的），只给一个上限 ——
+ * 写死高度会留出半屏空白。上限要**减掉 EP 自己那份上边距**（`--el-dialog-margin-top`，
+ * 默认 15vh）+ 一点下沿，否则窗口一矮，底部那行按钮就被挤出可视区（720 高的窗口里实测过）。
+ * 内容超过上限时两栏各自滚（`.detail__grid` 是 flex 项、带 min-height: 0）。
+ * 正文内边距与整窗滚动收掉，版式交给组件自己排。
+ */
+.el-dialog.zentao-dialog {
+  max-height: calc(100vh - var(--el-dialog-margin-top, 15vh) - 32px);
+  padding: 0;
+  overflow: hidden;
+}
+
+.el-dialog__body.zentao-dialog__body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+/**
  * 样式详情弹窗（components/StyleDetailDialog.vue 上的 class）：两档（预览 / 规格）都是竖向流水，
  * 要滚的就是正文本身（头部固定），所以这里只需要一个确定的高度 ——
  * 正文的高度由「弹窗定高 − 头」算出来，只给 max-height 的话正文拿不到滚动所需的高度，

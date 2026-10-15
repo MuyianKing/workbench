@@ -314,7 +314,8 @@ fn toast(app: &AppHandle, address: &str, batch: NewBatch) {
 }
 
 /// 通知标题：设置里的程序名（渲染层 `sanitizeAppName` 收敛过的那份），没设就产品名。
-fn display_name(app: &AppHandle) -> String {
+/// 禅道的通知也用同一份（见 zentao.rs 的 notify_new_bugs）。
+pub(crate) fn display_name(app: &AppHandle) -> String {
     crate::commands::data_store()
         .get()
         .get("settings")

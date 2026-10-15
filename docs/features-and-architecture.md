@@ -26,6 +26,7 @@ Workbench 的文档按「通用 / 模块」分层：
 | AI 助手（ai） | [ai.md](modules/ai.md) |
 | 密码保险库 | [vault.md](modules/vault.md) |
 | 邮箱（IMAP 收发） | [mail.md](modules/mail.md) |
+| 禅道（API 登录与我的 Bug） | [zentao.md](modules/zentao.md) |
 | 样式（设计参考库） | [styles.md](modules/styles.md) |
 | 视频（本地 MP4 播放器） | [video.md](modules/video.md) |
 | 截图与钉图（capture） | [screenshot.md](modules/screenshot.md) |
@@ -69,12 +70,13 @@ Workbench 的文档按「通用 / 模块」分层：
 - 当前页只是 store 里的一个 id（取值登记在 `packages/appearance/src/views.ts`），**不引入 Vue Router**：
   换页就是换这个值，`App.vue` 用 `<KeepAlive><component :is>` 渲染，滚动位置不丢；
   当前页随数据文件落盘，重启回到上次那一页。新增一页 = 登记 id + 挂组件两处
-- 现在九页：**首页**（可自由布局的卡片画布）、**项目**（项目卡网格 + 分组筛选工具条）、
+- 当前十二页：**首页**（可自由布局的卡片画布）、**项目**（项目卡网格 + 分组筛选工具条）、
   **工作**（工作日志时间轴）、**笔记**（左目录树 + 右 markdown 编辑器）、
   **技能**（技能库管理，见[「技能」](modules/skills.md)一节）、**知识库**（看一个独立的知识库项目、一键清洗，
   见[「知识库（kb）」](modules/kb.md)一节）、**AI 助手**（请本机的 Pi 干活的通用控制台，
   见[「AI 助手（ai）」](modules/ai.md)一节）、**密码**（密码保险库，见[「密码保险库」](modules/vault.md)一节）、
-  **样式**（74 套设计语言的参考库，见[「样式」](modules/styles.md)一节）与**视频**（本地 MP4 播放器，见[「视频」](modules/video.md)一节）。
+  **样式**（74 套设计语言的参考库，见[「样式」](modules/styles.md)一节）、**视频**（本地 MP4 播放器，见[「视频」](modules/video.md)一节）、
+  **邮箱**（IMAP 收发，见[「邮箱」](modules/mail.md)）与**禅道**（API 登录与指派给我的 Bug，见[「禅道」](modules/zentao.md)）。
   布局编辑态由顶栏那颗「编辑布局」进入，欢迎语那一行原地换成操作条，行高不变、画布不跳。
   那行提示**不换行**，窄窗口下让位给右侧按钮而不把顶栏顶宽：`.app` 与 `.topbar` 的列定义带 `minmax(0, 1fr)`、
   `.header` 与提示自己带 `min-width: 0` + `overflow: hidden` + 省略号 —— 这条链少一环，
@@ -187,7 +189,7 @@ Workbench 的文档按「通用 / 模块」分层：
 | 工作日志渲染 | markdown-it（只服务工作日志正文：`html: false` 转义原文里的标签、`linkify` 认裸地址、`breaks` 让单个换行就是 `<br>`，链接统一新窗口 + 交系统浏览器打开） |
 | 笔记编辑器 | Vditor（只服务笔记正文；静态资源随包带一份、不走 CDN，见[「笔记」](modules/notes.md)那一节） |
 | 构建 | Vite 8（渲染层，打包器是 rolldown）+ cargo / Tauri CLI（后端）。根与 `apps/desktop` 的 `package.json` 都是 `"type": "module"`，所以各 vite / vitest 配置里用 `import.meta.dirname`（`__dirname` 只在旧的打包式加载器下被 shim 出来；仓库里也不要有 CJS 的 `.js` / `.cjs`，它们会被当成 ESM） |
-| 语言 | TypeScript（渲染层）+ Rust（后端）；契约与纯逻辑按域拆在 `packages/` 的 16 个 `@workbench/*` 包 |
+| 语言 | TypeScript（渲染层）+ Rust（后端）；契约与纯逻辑按域拆在 `packages/` 的 17 个 `@workbench/*` 包 |
 | 持久化 | 本地 JSON，由 Rust 侧 `store.rs` 负责（防抖 300ms、临时文件 + rename、退出前同步落盘） |
 | 子进程 | `std::process` 起 shell 命令（按批回传输出，Windows 下 `taskkill /T /F` 结束整棵进程树） |
 | 端口 → 进程 | `GetExtendedTcpTable`（iphlpapi，一次系统调用拿到监听表）+ `QueryFullProcessImageNameW`；不再起 `netstat` / `tasklist` 解析文本输出（全量检测会并发问十几个端口，原先每个端口两个子进程） |
@@ -262,13 +264,15 @@ apps/desktop/            桌面应用（自包含：渲染层 + Rust + 随包资
   src/ai_news.rs         AI 热点：源白名单、ETag 条件请求与缓存落盘 —— 注解见 modules/home.md
   src/mail.rs            邮箱（IMAP/SMTP 传输）—— 注解见 modules/mail.md
   src/mail_watch.rs      邮件后台监视（按设置周期的新邮件检查 + 系统通知）—— 注解见 modules/mail.md
+  src/zentao.rs          禅道 API 认证、内存会话、单页请求与指派 / 解决两个写操作
+                         —— 注解见 modules/zentao.md
   src/notify.rs          Windows toast 的手写 WinRT FFI —— 注解见 modules/mail.md
   src/credentials.rs     Windows 凭据管理器读写 —— 注解见 modules/ipc-and-state.md
   src/vault.rs           密码保险库宿主侧 —— 注解见 modules/vault.md
   src/encoding.rs        base64 / SHA-256 / UTF-16 —— 注解见 modules/ipc-and-state.md
   src/icon.rs            程序图标抽取 —— 注解见 modules/quick-launch.md
   src/imaging.rs         图片解码校验与缩略（背景图核文件头、壁纸缩略图）—— 注解见 modules/ipc-and-state.md
-  oauth.example.json     OAuth 应用凭据模板（真实凭据放 oauth.local.json，不入库）
+  oauth.example.json     OAuth 应用凭据与禅道账号密码模板（真实凭据放 oauth.local.json，不入库）
   tauri.conf.json        窗口、打包、资源映射
   capabilities/          能力白名单
 
@@ -294,7 +298,7 @@ apps/desktop/            桌面应用（自包含：渲染层 + Rust + 随包资
                          DEFAULT_SETTINGS），并从各域包 re-export 保持 `@/types` 一站式取类型
   persisted-data.ts      数据文件的收敛编排 + theme.json ↔ 数据文件的分流桥接
 
-packages/                按域拆出的 16 个 @workbench/* 包（TS 源码直出、各自带 vitest；
+packages/                按域拆出的 17 个 @workbench/* 包（TS 源码直出、各自带 vitest；
                          包之间与应用都只按包名走各自的 index.ts 桶导入）：
   core/                  平台原语：Result 与 ok/fail、端口与项目路径、dev-port、扫描
                          （scanner，fs 注入）、命令与快捷启动的收敛、图标缓存、残留进程判定、
@@ -325,6 +329,9 @@ packages/                按域拆出的 16 个 @workbench/* 包（TS 源码直�
   capture/               截图与钉图的纯逻辑：选区几何与八个把手、标注模型与命中判定、撤销栈、
                           放大镜取样、三层坐标换算、钉图缩放与透明度、截图文件名，以及那两个
                           窗口与后端来回的线格式（wire.ts）
+  zentao/                禅道的分页校验、跨产品 Bug 汇总 / 去重 / 排序与详情地址、
+                         详情与历史的解析（富文本压平、正文分块、站内图片地址闸门）、
+                         等级色阶、选项文案表与指派 / 解决的入参校验
   net-meter/             网速球的纯逻辑：累计字节 → 速率的换算与采样间隔的两条界、指数滑动平均、
                           单位进位（B/K/M/G，进位在取整之后复查一遍）、
                           表盘量程的自动换挡（1M / 2M / 4M / 8M…，换挡点是量程的一半）、
@@ -400,7 +407,7 @@ pnpm run dist         # 产出 NSIS 安装包
 
 ## 数据与隐私
 
-应用**默认不联网**。对外发请求的只有十处，且都是你自己开出来的。
+应用**默认不联网**。对外发请求的只有十一处，且都是你自己开出来的。
 **截图与钉图一处都不占**：抓屏走 Win32（BitBlt）、剪贴板与落盘都在本机、钉图只是一扇置顶窗口，
 整个过程没有一次网络请求（也正因如此，取字 / OCR 这一版不做：云端那条会多出一处出口）。
 
@@ -470,9 +477,21 @@ pnpm run dist         # 产出 NSIS 安装包
   实现与边界见 [mail.rs](../apps/desktop/src-tauri/src/mail.rs) 与
   [docs/modules/mail.md](modules/mail.md)
 
-十处都没有自建服务端：四处 git 同步发往你自己的仓库（知识库的同步与笔记共用同一条路、不另算），
+- **禅道**（可选、配置开启；第十一条出口，**也是唯一会写外部系统业务数据的出口**）：在 `oauth.local.json` 的
+  `zentao` 节填写部署根、账号与密码后重新构建，首次进入禅道页时 Rust 自动 POST `/api.php/v1/tokens`，
+  随后 GET 可见产品及各产品的 Bug 分页（口径：指派给我的 / 未解决 / 未关闭）。看详情与历史、指派、解决都在应用内，
+  **指派与解决会真实修改公司禅道里的 Bug（以你的账号名义）**，所以只由用户在弹窗里显式点击触发 ——
+  不做批量、不做后台自动改、后台检查一个字节都不写。**默认每 30 分钟后台检查一次**（通用设置里可改，0 = 关闭）：
+  间隔由 Rust 计时线程计时并到点发事件，取数、比编号全集与弹通知在渲染层 —— 计时放 Rust 是因为窗口收进托盘后
+  WebView 定时器会被节流。只有配置完整、周期非 0 才发检查事件；第一轮成功只建立基线，之后有新增才弹系统通知
+  （复用邮件那条 toast 路径，点击唤出主窗口并切到禅道页）。请求只发往配置的部署根与固定端点，不跟重定向；
+  账号密码仅由 Rust 读取，token 仅留 Rust 内存，不回渲染层、不写数据文件或凭据管理器。配置缺失不出网；重启清 token。
+  HTTP 的凭据传输不加密，个人密码随配置内嵌到二进制，不能分发带密码的构建。
+  实现与边界见 [zentao.md](modules/zentao.md)。
+
+十一处都没有自建服务端：四处 git 同步发往你自己的仓库（知识库的同步与笔记共用同一条路、不另算），
 登录走两家平台官方 OAuth，AI 热点与天气只 GET 白名单里的公开源，AI 助手发给你自己配的端点，
-装技能只 GET 你粘的地址，邮箱连的是你自己配的收发服务器 ——
+装技能只 GET 你粘的地址，邮箱连的是你自己配的收发服务器，禅道只访问凭据配置中的部署地址 ——
 不上报任何数据。落盘除了数据文件，还有一处**应用之外**的：
 
 - **Windows 凭据管理器**：登录凭据（access_token / refresh_token / 到期时刻）存成一条
@@ -484,6 +503,9 @@ pnpm run dist         # 产出 NSIS 安装包
   （加解密在渲染层做，见[「密码保险库」](modules/vault.md)那一节），
   是全项目唯一一处机密进渲染层，别当先例推广
 - 数据文件里的账号资料只有昵称、头像与登录名，**没有 token**
+- 两处后台常驻检查的周期住本机数据文件（**不进外观同步**）：`mailPollMinutes`（邮件新邮件检查）
+  与 `zentaoPollMinutes`（禅道 Bug 检查，默认 30，0 = 关闭）。两者的计时线程都在 Rust ——
+  窗口收进托盘后 WebView 的定时器会被节流，靠它计时不诚实。
 
 其余落盘都在**数据目录**里（固定 `%APPDATA%/Workbench/data/`，不跟着任何设置走；
 根目录 `%APPDATA%/Workbench` 是迁到 Tauri 之前的 Electron 版留下的 Chromium 配置目录，数据文件不跟它混）：
@@ -532,6 +554,10 @@ pnpm run dist         # 产出 NSIS 安装包
 这是「使用者零配置」的前提（VS Code 同路），代价是 secret 理论上能从安装包逆出来。
 影响面被「回调地址必须是 `127.0.0.1:45871`」限死：拿到 secret 也接不到别人的回调，且只能冒充本应用。
 不接受就退回「每个使用者自己去两家平台注册应用」那条路。
+
+同一份 `oauth.local.json` 还可包含禅道的个人账号密码，构建时整份内嵌到二进制；
+修改后必须重新构建，运行时不会重读文件。这类个人密码泄漏后可以直接登录禅道，
+不受 OAuth 回环地址限制；`.gitignore` 不保护构建目录或安装包，不能分发带个人密码的构建。
 
 读取别人的数据一律只读、不改文件：ZCode 是 `~/.zcode/cli/db/db.sqlite`（WAL 只读打开，
 `ZCODE_HOME` 可指别处）；DeepSeek Harness 是 `~/.dsh/sessions/<项目>/<会话>/`（`DSH_HOME` 可指别处；

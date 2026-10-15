@@ -56,6 +56,8 @@
   UID 基准与上轮检查时间，见 [mail.md](mail.md)，只是通知的记账，不进同步仓库），
   加上设备标识 `device.json`，以及 `panic.log`（崩溃落痕，见「实现」一节）—— 全都在 `%APPDATA%/Workbench/data/` 下
   （根目录 `%APPDATA%/Workbench` 是 Electron 版留下的 Chromium 配置目录；老版本也把数据文件写在那儿，启动时由 `migrate_legacy_files` 搬进 `data/`）。
+  **禅道没有数据文件**：后台检查的编号基线只在本机内存里（应用重启后第一轮重新建立，见
+  [zentao.md](zentao.md)），周期住 `workbench-data.json` 的 `zentaoPollMinutes`。
   **技能没有数据文件**：技能库是用户挑的一个目录（设置里的 `skillDir`，与笔记文件夹互不相干），
   磁盘上的文件就是数据本身；它在哪个仓库里由 `skills.rs` 的 `state` 从那个目录往上找。
 - **数据目录固定 `%APPDATA%\Workbench\data`**（根目录 `%APPDATA%\Workbench` 是 Electron 版留下的 Chromium 配置目录，
@@ -141,7 +143,8 @@
   src/http.rs            WinHTTP 极简 HTTP 客户端（登录、AI 热点与天气的取数都走它）。
                          默认那条是「HTTPS + 443 + 主机名」的固定形状（那几家的地址钉死在代码里）；
                          另有一条**按 URL 走**的（`request_url`，http / https 与端口都认）——
-                         只有 AI 拉模型列表用它，因为地址是用户自己填的（本机服务也在内）
+                         AI 拉模型列表用它，因为地址是用户自己填的（本机服务也在内）；
+                         禅道使用内嵌配置中的地址及显式禁重定向的入口，避免认证信息随跳转离开原部署
   src/credentials.rs     Windows 凭据管理器读写（access_token 与**保险库密钥**落在这里，不落 JSON）
   src/encoding.rs        base64 / SHA-256 / UTF-16 宽字符串（前两者用 base64 / sha2）
 

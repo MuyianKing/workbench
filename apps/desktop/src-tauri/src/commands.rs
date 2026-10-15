@@ -700,6 +700,152 @@ pub fn auth_logout(provider: String) -> Result<(), String> {
     crate::oauth::logout(&provider)
 }
 
+// ---------- 禅道（token 仅保留在 managed 内存状态中） ----------
+
+#[tauri::command(async)]
+pub fn zentao_login(
+    state: tauri::State<'_, crate::zentao::ZentaoState>,
+) -> Result<crate::zentao::SessionInfo, String> {
+    crate::zentao::login(&state)
+}
+
+#[tauri::command]
+pub fn zentao_session(
+    state: tauri::State<'_, crate::zentao::ZentaoState>,
+) -> Result<Option<crate::zentao::SessionInfo>, String> {
+    crate::zentao::session(&state)
+}
+
+#[tauri::command]
+pub fn zentao_logout(
+    state: tauri::State<'_, crate::zentao::ZentaoState>,
+    session_id: String,
+) -> Result<(), String> {
+    crate::zentao::logout(&state, &session_id)
+}
+
+#[tauri::command(async)]
+pub fn zentao_page(
+    state: tauri::State<'_, crate::zentao::ZentaoState>,
+    session_id: String,
+    product_id: Option<u64>,
+    page: u32,
+    browse: String,
+) -> Result<Value, String> {
+    crate::zentao::page(&state, &session_id, product_id, page, &browse)
+}
+
+/// 登记后台检查周期（分钟，0 = 关闭）；间隔没变时不动计时。
+#[tauri::command]
+pub fn zentao_watch(
+    watch: tauri::State<'_, crate::zentao::ZentaoWatch>,
+    poll_minutes: u32,
+) -> Result<(), String> {
+    crate::zentao::register(&watch, poll_minutes)
+}
+
+/// 比出新增之后弹系统通知（点击唤出主窗口并切到禅道页）。
+#[tauri::command(async)]
+pub fn zentao_notify(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, crate::zentao::ZentaoState>,
+    session_id: String,
+    count: u32,
+    title: String,
+) -> Result<(), String> {
+    crate::zentao::notify_new_bugs(&app, &state, &session_id, count, &title)
+}
+
+#[tauri::command(async)]
+pub fn zentao_bug(
+    state: tauri::State<'_, crate::zentao::ZentaoState>,
+    session_id: String,
+    bug_id: u64,
+) -> Result<Value, String> {
+    crate::zentao::bug_detail(&state, &session_id, bug_id)
+}
+
+#[tauri::command(async)]
+pub fn zentao_users(
+    state: tauri::State<'_, crate::zentao::ZentaoState>,
+    session_id: String,
+) -> Result<Value, String> {
+    crate::zentao::users(&state, &session_id)
+}
+
+/// 账号可见产品的 id 清单（列表要按产品逐个取 Bug）。
+#[tauri::command(async)]
+pub fn zentao_products(
+    state: tauri::State<'_, crate::zentao::ZentaoState>,
+    session_id: String,
+) -> Result<Value, String> {
+    crate::zentao::products(&state, &session_id)
+}
+
+/// 单个产品的 id 与名称（产品名按需补取）。
+#[tauri::command(async)]
+pub fn zentao_product(
+    state: tauri::State<'_, crate::zentao::ZentaoState>,
+    session_id: String,
+    product_id: u64,
+) -> Result<Value, String> {
+    crate::zentao::product(&state, &session_id, product_id)
+}
+
+/// Bug 正文里的站内图片：用会话取回来、按 base64 回渲染层（界面内联成 data URL）。
+#[tauri::command(async)]
+pub fn zentao_image(
+    state: tauri::State<'_, crate::zentao::ZentaoState>,
+    session_id: String,
+    path: String,
+) -> Result<Value, String> {
+    crate::zentao::image(&state, &session_id, &path)
+}
+
+#[tauri::command(async)]
+pub fn zentao_builds(
+    state: tauri::State<'_, crate::zentao::ZentaoState>,
+    session_id: String,
+    project_id: u64,
+) -> Result<Value, String> {
+    crate::zentao::builds(&state, &session_id, project_id)
+}
+
+/// 指派一个 Bug（以当前登录账号的名义，会真实修改禅道数据）。
+#[tauri::command(async)]
+pub fn zentao_assign(
+    state: tauri::State<'_, crate::zentao::ZentaoState>,
+    session_id: String,
+    bug_id: u64,
+    assigned_to: String,
+    comment: String,
+) -> Result<(), String> {
+    crate::zentao::assign(&state, &session_id, bug_id, &assigned_to, &comment)
+}
+
+/// 解决一个 Bug（以当前登录账号的名义，会真实修改禅道数据）。
+#[tauri::command(async)]
+#[allow(clippy::too_many_arguments)]
+pub fn zentao_resolve(
+    state: tauri::State<'_, crate::zentao::ZentaoState>,
+    session_id: String,
+    bug_id: u64,
+    resolution: String,
+    resolved_build: String,
+    duplicate_bug: String,
+    comment: String,
+) -> Result<(), String> {
+    crate::zentao::resolve(
+        &state,
+        &session_id,
+        bug_id,
+        &resolution,
+        &resolved_build,
+        &duplicate_bug,
+        &comment,
+    )
+}
+
 // ---------- 系统能力 ----------
 
 #[tauri::command(async)]

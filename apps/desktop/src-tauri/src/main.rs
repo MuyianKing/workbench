@@ -44,6 +44,7 @@ mod token;
 mod vault;
 mod video;
 mod weather;
+mod zentao;
 
 use serde_json::{json, Value};
 use std::sync::mpsc::{channel, Sender};
@@ -492,6 +493,8 @@ fn main() {
         .manage(capture::CaptureState::default())
         .manage(pin::Pins::default())
         .manage(ball::BallState::default())
+        .manage(zentao::ZentaoState::default())
+        .manage(zentao::ZentaoWatch::default())
         .invoke_handler(tauri::generate_handler![
             commands::data_load,
             commands::data_save,
@@ -585,6 +588,20 @@ fn main() {
             commands::auth_login_submit,
             commands::auth_login_cancel,
             commands::auth_logout,
+            commands::zentao_login,
+            commands::zentao_session,
+            commands::zentao_logout,
+            commands::zentao_page,
+            commands::zentao_watch,
+            commands::zentao_notify,
+            commands::zentao_bug,
+            commands::zentao_users,
+            commands::zentao_products,
+            commands::zentao_product,
+            commands::zentao_image,
+            commands::zentao_builds,
+            commands::zentao_assign,
+            commands::zentao_resolve,
             commands::check_port,
             commands::kill_port_process,
             commands::reveal,
@@ -672,6 +689,11 @@ fn main() {
             // 邮件后台监视：线程自己每分钟醒一次，到点（满登记的周期）查新邮件、弹通知。
             // 账户清单与周期由渲染层载入设置后经 mail_watch_register 登记进来。
             mail_watch::spawn(&handle);
+
+            // 禅道后台检查：同样每分钟醒一次，到点给渲染层发一条检查事件
+            // （取数、比新增与通知都在渲染层，线程只计时）。周期由渲染层载入设置后
+            // 经 zentao_watch 登记进来，登记之前只睡。
+            zentao::spawn(&handle);
 
             Ok(())
         })

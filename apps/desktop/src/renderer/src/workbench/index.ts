@@ -35,6 +35,7 @@ import { getTokenUsage, getTokenUsageSnapshot, listSyncDevices, syncThemeConfig,
 import * as vault from './vault'
 import * as video from './video'
 import * as workLog from './work-log'
+import * as zentao from './zentao'
 
 /**
  * 把设置里的 system 解析成实际明暗
@@ -719,6 +720,24 @@ function createApi(): WorkbenchApi {
 
     // ---------- 样式参考库（token 是随包静态资源，导出到项目时只往后端递内容） ----------
     writeDesign: (projectDir: string, content: string) => design.writeDesign(projectDir, content),
+
+    // ---------- 禅道 ----------
+    zentaoSession: zentao.session,
+    zentaoLogin: zentao.login,
+    zentaoLogout: zentao.logout,
+    zentaoBugs: zentao.bugs,
+    zentaoWatch: zentao.watch,
+    zentaoNotify: zentao.notify,
+    onZentaoCheck: zentao.onCheck,
+    onZentaoNotifyClick: zentao.onNotifyClick,
+    zentaoBug: zentao.bugDetail,
+    zentaoUsers: zentao.users,
+    zentaoProducts: zentao.productIds,
+    zentaoProduct: zentao.product,
+    zentaoImage: zentao.image,
+    zentaoBuilds: zentao.builds,
+    zentaoAssign: zentao.assignBug,
+    zentaoResolve: zentao.resolveBug,
 
     // ---------- 账号 ----------
     // 换 token、回环监听、凭据落盘都在 Rust 侧；这里只驱动轮询并落显示资料，

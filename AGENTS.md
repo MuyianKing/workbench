@@ -26,12 +26,12 @@
 ## 1. 项目边界
 
 - 定位：Windows 桌面应用（Tauri 2 + WebView2），一个窗口里管项目、记工作、写笔记、看 AI 用量；pnpm workspace monorepo
-  （应用在 `apps/desktop/`，纯逻辑按域拆在 `packages/` 的 16 个 `@workbench/*` 包，见第 2 节），`Cargo.lock` 要提交；
+  （应用在 `apps/desktop/`，纯逻辑按域拆在 `packages/` 的 17 个 `@workbench/*` 包，见第 2 节），`Cargo.lock` 要提交；
   例外：`vendor-pi.mjs` 内部装 Pi 仍走 `npm install`（`resources/pi/` 要整树打进安装包，不能用符号链接布局）。
-- **联网边界：默认不联网、不上报任何数据；出口只有十条，且都由用户显式开启** —— 清单与每条细则见
+- **联网边界：默认不联网、不上报任何数据；出口只有十一条，且都由用户显式开启** —— 清单与每条细则见
   [features-and-architecture.md](docs/features-and-architecture.md) 的「数据与隐私」一节，**动联网代码前先读那一节**。
   **不要新增网络出口、不往任何第三方服务发数据**；笔记里的外链图片、密码保险库（推的是用量同步那个仓库的 `vault/vault.json`，
-  推上去的只有密文）都**不算**新出口；登录内嵌的 client_id/secret 是这条边界唯一一次放宽。
+  推上去的只有密文）都**不算**新出口；构建期内嵌 OAuth client_id/secret 与用户指定的禅道个人凭据是明确例外，后者不得随包分发。
 - 引新前端依赖先看它会不会在**运行时**去取外面的资源（Vditor 就是这类：资源按 `options.cdn` 取，默认指 unpkg）—— 这类要么把资源
   随包带一份、要么别引。
 - webview 有**全局 CSP**（`tauri.conf.json` 的 `csp` / `devCsp`，细则见 [ipc-and-state](docs/modules/ipc-and-state.md)）：引新依赖 / 资源
@@ -52,7 +52,7 @@
   `data\pi\sessions\`（起进程时传 `--session-id` 与 `--session-dir`，**不要传 `--no-session`**）。跑它时子进程必须带 `PI_TELEMETRY=0`、`PI_SKIP_VERSION_CHECK=1` 与 `PI_OFFLINE=1`
   （它默认会报遥测、向 pi.dev 查最新版本、RPC 启动时还刷一遍模型目录 —— 那三条不在任何已登记的出口里），密钥只经环境变量给，
   **进程直启不经 `cmd /C`**（行内层引号会被 cmd 拆坏，见 session.rs 的 `spawn_args`）。别照着再引别的 Agent。
-- 测试用 Vitest（16 个域包各自跑自己的用例，根目录 `pnpm test` = `pnpm -r test` 聚合；渲染层用例在 `@workbench/desktop` 包里）
+- 测试用 Vitest（17 个域包各自跑自己的用例，根目录 `pnpm test` = `pnpm -r test` 聚合；渲染层用例在 `@workbench/desktop` 包里）
   + `cargo test`（写在同文件的 `#[cfg(test)] mod tests`）。**TypeScript 与 vue-tsc 的版本不要动**：升到 TS 7 会让 `pnpm run typecheck` 直接不可用。
 - 仅 Windows，不做 macOS / Linux 适配。
 
@@ -60,7 +60,7 @@
 
 - 总览：monorepo。桌面应用自包含在 `apps/desktop/` —— Rust 在 `src-tauri/src/`、渲染层在 `src/renderer/src/`（组件 `components/`、
   store `stores/`、交互骨架 `composables/`、适配层 `workbench/`、设计令牌与全局样式 `styles/`）、随包资源 `resources/`、构建脚本 `scripts/`；
-  跨页面复用的类型 / 契约 / 纯逻辑按域拆在 `packages/` 的 16 个 `@workbench/*` 包里（`core` 是平台原语，其余按业务域；
+  跨页面复用的类型 / 契约 / 纯逻辑按域拆在 `packages/` 的 17 个 `@workbench/*` 包里（`core` 是平台原语，其余按业务域；
   逐包逐文件分工见 [features-and-architecture.md](docs/features-and-architecture.md) 的「目录结构」）。
 - 渲染层有**四个 HTML 入口**（`src/renderer/` 下，`vite.config.ts` 的 `rollupOptions.input`）：`index.html`（主界面）、
   `capture.html`（截图遮罩）、`pin.html`（钉图）、`ball.html`（网速球）。后三个是独立窗口、各自的 JS 上下文，
@@ -73,8 +73,8 @@
 - 需要文件系统的逻辑把 fs 抽成参数注入（见 [scanner.ts](packages/core/src/scanner.ts) 的 `ScanFs`）：生产侧走 Rust 命令、测试侧走 `node:fs`。
 - 跨组件复用的拖拽与浮层收起一律用 `composables/` 已有的 `use-pointer-drag` / `use-floating-dismiss`，不要再手写 pointer 事件监听。
 - 随包带的第三方静态资源放 `apps/desktop/src/renderer/public/`；引用用相对基址（`import.meta.env.BASE_URL`），不写死 `/xxx`。
-- OAuth 凭据来自 `apps/desktop/src-tauri/oauth.local.json`（`build.rs` 注入后 `include_str!`）：**不入库**（模板 `oauth.example.json`），
-  缺它照样能编译，只是登录按钮显示「未内置凭据」。
+- OAuth 与禅道凭据来自 `apps/desktop/src-tauri/oauth.local.json`（`build.rs` 注入后 `include_str!`，修改后重构建）：**不入库**（模板 `oauth.example.json`），
+  缺它照样能编译，OAuth 登录显示「未内置凭据」，禅道显示配置错误；禅道密码仅由 Rust 读取。
 ## 3. 编码规范
 
 - 全量 TypeScript（`strict: true`）；Vue SFC 一律 `<script setup lang="ts">`，不写 Options API；接口用 `defineProps` / `defineEmits`，props 只读。
@@ -89,7 +89,8 @@
   `--bg-*` `--ink-*` `--st-*` `--sp-*` `--r-*` `--fs-*` `--ease-*`。暗色只在 `:root[data-theme='dark']` 覆盖令牌。
 - 界面主体灰度，彩色只表达运行状态（`--st-run` / `--st-ok` / `--st-fail`）与项目标识色；用户配的主题色只管
   交互态与首页活跃度图的色阶（口径在 [accent-color.ts](packages/appearance/src/accent-color.ts) 的文件头，别扩到别处）；
-  终端面板始终深色（`--term-*`）。
+  终端面板始终深色（`--term-*`）。**唯一例外**：禅道 Bug 的「严重程度 / 优先级」这两个字段按等级着色（列表列与详情），
+  色阶口径只在 [zentao.ts](packages/zentao/src/zentao.ts)（见 [zentao.md](docs/modules/zentao.md)），不许扩到别的字段。
 - **项目标识色**（[project-color.ts](packages/core/src/project-color.ts)）：预设色存名字不存色值，自定义色 `#rrggbb` 一律经
   `sanitizeProjectColor()` 收敛；颜色怎么分配只在那一个文件里定义，界面别自己另拍一个。
 - 项目标签统一走 [ProjectTag.vue](apps/desktop/src/renderer/src/components/ProjectTag.vue)（`el-tag` + `effect="dark"`），**别自绘浅底同色字标签**；
@@ -135,6 +136,7 @@ asset 协议、读取权限在 Rust 侧按单个文件授予）、**通道一律
 | 用量与外观同步、账号登录 | [sync-and-auth](docs/modules/sync-and-auth.md) |
 | 密码保险库（密钥 / 加解密 / 多机共写一份文件） | [vault](docs/modules/vault.md) |
 | 邮箱（IMAP 收信 / SMTP 发信 / 授权码 / 联网出口） | [mail](docs/modules/mail.md) |
+| 禅道（API 登录 / 内存会话 / Bug 列表与详情 / 指派与解决 / 后台检查与通知） | [zentao](docs/modules/zentao.md) |
 | 截图与钉图（抓屏 / 标注 / 剪贴板 / 置顶图窗口） | [screenshot](docs/modules/screenshot.md) |
 | 网速球（自由摆放 / 贴边收起 / 网卡计数取样） | [float-ball](docs/modules/float-ball.md) |
 
@@ -157,12 +159,25 @@ asset 协议、读取权限在 Rust 侧按单个文件授予）、**通道一律
 - 动过 `.vue` 的模板（加 / 删 / 挪标签）要顺手跑一次 `pnpm run build:renderer`：`typecheck` 查不出模板标签不配平（vue-tsc 全绿而
   vite 报 `Invalid end tag`、页面白屏），只有真的编译一遍模板才发现得了。**模板里用到的组件必须在脚本里 import**（`el-*` 那几个是全局注册的除外）：
   少了它上面两条都不报错，那个标签被渲染成空 —— 现象是「按钮在、点下去什么都没发生」，`pnpm run lint` 的 `vue/no-undef-components` 才拦得住。
-- **改 Rust 前先关掉正在运行的应用**（exe 被占用会链接失败，而构建失败后跑起来的仍是旧二进制，结论会完全跑偏）；
-  `tauri build` 与 `tauri dev` 也别同时跑（抢同一个 `target/` 构建锁）。
-- **停掉 `pnpm run dev` 之后要确认那一串子进程真的都没了**（Windows 上杀掉外层命令不会带走它的子孙）：按端口与进程名各查一遍
-  （`netstat -ano | grep LISTENING | grep -E ":(5274|9222)"`、`tasklist | grep -i workbench`），清理用 `taskkill /F /T /PID <pid>`。
+- **永远不要替用户起应用**（`pnpm run dev` / `tauri dev` / `tauri build` 一律不跑）：验证只到静态检查、单测与构建为止；
+  改完说一句「dev 已停、代码已就绪」，起不起、什么时候起由用户自己决定。
+- **别在 cargo 与 dev 之间来回**：`tauri dev` 是 `--no-default-features`，`cargo test` / `cargo build` / `clippy` 是默认 feature 集，
+  两套 feature 会把彼此的产物作废，每来回一次就是整棵重编（分钟级）。所以一次改完、cargo 只跑一轮。
+- **一次改完再一次跑齐验证，别拆成多轮**：前端一条命令串起来
+  （`pnpm run lint:fix && pnpm run lint && pnpm run typecheck && pnpm run build:renderer && pnpm test`），
+  Rust 一条命令串起来（`cargo test … && cargo build … && cargo clippy … -- -D warnings`）。
+  改到一半只跑受影响的那个包（`pnpm -F @workbench/<包> test`），全量留到收尾那一次。
+- **`pnpm test` 与 `cargo` 不要同时跑**：两边抢 CPU 会让既有那几条基于真实 git 的重测试撞 5 秒超时（假失败）。
+  这类超时先单独复跑该包确认，别当成真失败去改代码。
+- **cargo 之前确认没有正在跑的应用**（exe 被占用会「拒绝访问」链接失败，而失败后跑起来的仍是旧二进制）：
+  查 `workbench.exe` 是否在；**要停就停，但不要顺手再起回来**，也不要在用户可能正用着应用时静默杀掉它 —— 先说一句。
+- **停应用的进程树要连子孙一起收**（Windows 上杀掉外层命令不会带走它的子孙）：`taskkill /F /T /PID <pid>`，
+  停完按进程名与端口各复查一遍（`tasklist | grep -i workbench`、`netstat -ano | grep LISTENING | grep -E ":(5274|9222)"`）。
 - `cargo test` 卡在链接或执行上时、以及排查 WebView2 里的运行时问题（未捕获异常、控制台警告、接口实际返回值）时，
   配方见 [browser-preview-verification.md](docs/dev-notes/browser-preview-verification.md)。
+- **真机接口排查（禅道 / 邮箱这类要登录的）有失败计数与限流**：**一次登录、复用同一会话**把要查的都查完，
+  绝不反复试探登录（禅道的 `fails` 计数会把账号临时锁住，只能等冷却）；
+  会话换新会让旧 token 立刻失效，所以别在同一轮里既用 cookie 登又用 token 读。
 - **本项目是纯 vibe coding：所有改动都必须落实到文档**（只改代码不算完成）—— 动哪个模块就同步写它的
   `docs/modules/<模块>.md`（约束变了就改「约束」一节）；跨模块的通用事实更新
   [features-and-architecture.md](docs/features-and-architecture.md)。

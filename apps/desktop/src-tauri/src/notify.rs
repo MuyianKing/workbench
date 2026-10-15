@@ -14,6 +14,7 @@
 //! **点击回调**：挂的是 in-process 的 `Activated` 事件 —— 进程活着（托盘常驻），
 //! 点通知就回到本进程；进程死了 toast 也不会在场，不存在「点了没反应」的第三种情况。
 
+use std::cell::Cell;
 use std::mem::ManuallyDrop;
 use std::sync::Once;
 
@@ -38,25 +39,42 @@ const PKEY_APP_USER_MODEL_ID: PROPERTYKEY = PROPERTYKEY {
     pid: 5,
 };
 
-/// COM 公寓初始化。每个公开入口都先过一遍（幂等）—— 调用线程是我们自己拉起的
-/// 监视线程，MTA 一次就够；已初始化成 STA 也无碍（toast 的激活工厂 STA 下照常可用）。
+/// COM 公寓初始化。每个公开入口都先过一遍。
+///
+/// **按线程各初始化一次**：COM 的公寓是线程级的，从前这里是进程级 `Once` —— 那时
+/// 只有邮件监视线程一条调用路径，正好成立；禅道的通知走 Tauri 的命令工作线程，
+/// 进程级 Once 会让那条线程在没初始化的情况下调 COM。绝不能让出错的线程把
+/// 「已经初始化过」记在别的线程头上，所以用 thread_local。
 fn ensure_com() {
-    static ONCE: Once = Once::new();
-    ONCE.call_once(|| {
+    thread_local! {
+        static INITIALIZED: Cell<bool> = const { Cell::new(false) };
+    }
+    INITIALIZED.with(|done| {
+        if done.get() {
+            return;
+        }
+        done.set(true);
+        // RPC_E_CHANGED_MODE（线程已经是 STA）不当失败：toast 在 STA 下照常可用。
+        // 初始化后不 CoUninitialize —— 两个调用方都是常驻线程，退出时由系统回收。
         let _ = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
     });
 }
 
-/// toast 的 XML：ToastGeneric 模板的两行文本 + 显式的「新邮件」提示音。
-/// 默认那声系统音太轻，用户反映弹了注意不到 —— 显式挂 `ms-winsoundevent:Notification.Mail`
-/// （就是经典的新邮件提示音）：走 Windows 自带音效，不用随包带任何资源。
+/// toast 提示音（Windows 自带的音效事件，不随包带资源）。
+/// 邮件用经典新邮件音；禅道用默认提示音，免得跟新邮件混成一种声音。
+pub const SOUND_MAIL: &str = "ms-winsoundevent:Notification.Mail";
+pub const SOUND_DEFAULT: &str = "ms-winsoundevent:Notification.Default";
+
+/// toast 的 XML：ToastGeneric 模板的两行文本 + 显式提示音（默认那声系统音太轻，
+/// 用户反映弹了注意不到，所以一律显式挂一个走系统自带音效的事件）。
 /// 文本过 `escape_xml`，主题、地址里出现什么字符都不会把 XML 弄坏。
-fn toast_xml(title: &str, body: &str) -> String {
+fn toast_xml(title: &str, body: &str, sound: &str) -> String {
     format!(
         "<toast><visual><binding template=\"ToastGeneric\"><text>{}</text><text>{}</text></binding></visual>\
-         <audio src=\"ms-winsoundevent:Notification.Mail\"/></toast>",
+         <audio src=\"{}\"/></toast>",
         escape_xml(title),
-        escape_xml(body)
+        escape_xml(body),
+        sound
     )
 }
 
@@ -68,8 +86,19 @@ pub fn show_toast(
     body: &str,
     on_click: impl Fn() + Send + 'static,
 ) -> Result<(), String> {
+    show_toast_with_sound(aumid, title, body, SOUND_MAIL, on_click)
+}
+
+/// 同上，提示音由调用方选（见 SOUND_MAIL / SOUND_DEFAULT）。
+pub fn show_toast_with_sound(
+    aumid: &str,
+    title: &str,
+    body: &str,
+    sound: &str,
+    on_click: impl Fn() + Send + 'static,
+) -> Result<(), String> {
     ensure_com();
-    let xml = toast_xml(title, body);
+    let xml = toast_xml(title, body, sound);
     let document = XmlDocument::new().map_err(|err| format!("建通知 XML 失败：{err}"))?;
     document
         .LoadXml(&HSTRING::from(xml))
@@ -202,13 +231,14 @@ mod tests {
         assert_eq!(escape_xml("普通中文"), "普通中文");
     }
 
-    /// toast 的 XML：正文要转义，且显式挂着「新邮件」提示音（默认音太轻用户注意不到）
+    /// toast 的 XML：正文要转义，提示音按调用方给的事件挂上，默认仍是那声新邮件音
     #[test]
-    fn toast_xml_carries_mail_sound_and_escapes_text() {
-        let xml = toast_xml("标题<1>", "正文&2");
+    fn toast_xml_carries_sound_and_escapes_text() {
+        let xml = toast_xml("标题<1>", "正文&2", SOUND_MAIL);
         assert!(xml.starts_with("<toast><visual>"));
         assert!(xml.contains("<text>标题&lt;1&gt;</text><text>正文&amp;2</text>"));
         assert!(xml.ends_with("<audio src=\"ms-winsoundevent:Notification.Mail\"/></toast>"));
+        assert!(toast_xml("t", "b", SOUND_DEFAULT).contains("<audio src=\"ms-winsoundevent:Notification.Default\"/>"));
     }
 
     /// PROPERTYKEY 的 GUID 不能抄错 —— 抄错了 AUMID 挂不上，toast 静默失踪

@@ -1,5 +1,6 @@
 import type { AppSettings, StoredSettings } from './types'
 import { APPEARANCE_SETTING_KEYS, columnIds, columnOfRow, DEFAULT_APPEARANCE, DEFAULT_THEME, pickAppearance, rowOf, sanitizeAppearanceSettings, sanitizeTheme, stripAppearance, TERMINAL_BUTTON_TOP_MAX } from '@workbench/appearance'
+import { ZENTAO_POLL_MINUTES_DEFAULT } from '@workbench/zentao'
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_STORED_SETTINGS, mergeSettingsAppearance, migrateAppearanceIntoTheme, sanitizeSettings, splitSettingsPatch } from './persisted-data'
 import { DEFAULT_SETTINGS } from './types'
@@ -69,6 +70,46 @@ describe('行为记忆那几项设置', () => {
   it('它们不是外观项，不会被 stripAppearance 摘掉', () => {
     const value = sanitizeSettings({ appearance: { projectSort: 'name' }, projectSort: 'created' })
     expect(value.projectSort).toBe('created')
+  })
+})
+
+describe('禅道检查间隔', () => {
+  it('默认设置与旧数据都使用域包默认值', () => {
+    expect(DEFAULT_SETTINGS.zentaoPollMinutes).toBe(ZENTAO_POLL_MINUTES_DEFAULT)
+    expect(DEFAULT_STORED_SETTINGS.zentaoPollMinutes).toBe(ZENTAO_POLL_MINUTES_DEFAULT)
+    expect(sanitizeSettings({}).zentaoPollMinutes).toBe(ZENTAO_POLL_MINUTES_DEFAULT)
+    expect(sanitizeSettings(undefined).zentaoPollMinutes).toBe(ZENTAO_POLL_MINUTES_DEFAULT)
+  })
+
+  it.each([
+    [0, 0],
+    [1, 1],
+    [15, 15],
+    [1440, 1440],
+    [-3, 1],
+    [2000, 1440],
+    [1.6, 2],
+    [0.4, 0],
+  ])('落盘值 %s 收敛为 %s 分钟', (raw, expected) => {
+    expect(sanitizeSettings({ zentaoPollMinutes: raw }).zentaoPollMinutes).toBe(expected)
+  })
+
+  it.each([undefined, null, '30', Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY])(
+    '非法落盘值 %s 回到域包默认值',
+    (raw) => {
+      expect(sanitizeSettings({ zentaoPollMinutes: raw }).zentaoPollMinutes).toBe(ZENTAO_POLL_MINUTES_DEFAULT)
+    },
+  )
+
+  it.each([0, 45])('间隔 %s 只写本机设置，不参与外观同步', (zentaoPollMinutes) => {
+    const { settings: stored, appearance } = splitSettingsPatch({
+      zentaoPollMinutes,
+      accentColor: '#3b82f6',
+    })
+    expect(stored).toEqual({ zentaoPollMinutes })
+    expect(appearance).toEqual({ accentColor: '#3b82f6' })
+    expect(splitSettingsPatch({ zentaoPollMinutes }).appearance).toEqual({})
+    expect(APPEARANCE_SETTING_KEYS as readonly string[]).not.toContain('zentaoPollMinutes')
   })
 })
 
@@ -169,8 +210,9 @@ describe('按落点拆一份设置补丁', () => {
       'mail',
       'styles',
       'video',
+      'zentao',
     ])
-    expect(sanitizeAppearanceSettings({ viewOrder: 'notes' }).viewOrder.length).toBe(11)
+    expect(sanitizeAppearanceSettings({ viewOrder: 'notes' }).viewOrder.length).toBe(12)
   })
 
   it('合回来的设置与拆之前一致', () => {
