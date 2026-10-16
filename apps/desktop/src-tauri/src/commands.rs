@@ -756,23 +756,6 @@ pub fn zentao_notify(
     crate::zentao::notify_new_bugs(&app, &state, &session_id, count, &title)
 }
 
-#[tauri::command(async)]
-pub fn zentao_bug(
-    state: tauri::State<'_, crate::zentao::ZentaoState>,
-    session_id: String,
-    bug_id: u64,
-) -> Result<Value, String> {
-    crate::zentao::bug_detail(&state, &session_id, bug_id)
-}
-
-#[tauri::command(async)]
-pub fn zentao_users(
-    state: tauri::State<'_, crate::zentao::ZentaoState>,
-    session_id: String,
-) -> Result<Value, String> {
-    crate::zentao::users(&state, &session_id)
-}
-
 /// 账号可见产品的 id 清单（列表要按产品逐个取 Bug）。
 #[tauri::command(async)]
 pub fn zentao_products(
@@ -790,60 +773,6 @@ pub fn zentao_product(
     product_id: u64,
 ) -> Result<Value, String> {
     crate::zentao::product(&state, &session_id, product_id)
-}
-
-/// Bug 正文里的站内图片：用会话取回来、按 base64 回渲染层（界面内联成 data URL）。
-#[tauri::command(async)]
-pub fn zentao_image(
-    state: tauri::State<'_, crate::zentao::ZentaoState>,
-    session_id: String,
-    path: String,
-) -> Result<Value, String> {
-    crate::zentao::image(&state, &session_id, &path)
-}
-
-#[tauri::command(async)]
-pub fn zentao_builds(
-    state: tauri::State<'_, crate::zentao::ZentaoState>,
-    session_id: String,
-    project_id: u64,
-) -> Result<Value, String> {
-    crate::zentao::builds(&state, &session_id, project_id)
-}
-
-/// 指派一个 Bug（以当前登录账号的名义，会真实修改禅道数据）。
-#[tauri::command(async)]
-pub fn zentao_assign(
-    state: tauri::State<'_, crate::zentao::ZentaoState>,
-    session_id: String,
-    bug_id: u64,
-    assigned_to: String,
-    comment: String,
-) -> Result<(), String> {
-    crate::zentao::assign(&state, &session_id, bug_id, &assigned_to, &comment)
-}
-
-/// 解决一个 Bug（以当前登录账号的名义，会真实修改禅道数据）。
-#[tauri::command(async)]
-#[allow(clippy::too_many_arguments)]
-pub fn zentao_resolve(
-    state: tauri::State<'_, crate::zentao::ZentaoState>,
-    session_id: String,
-    bug_id: u64,
-    resolution: String,
-    resolved_build: String,
-    duplicate_bug: String,
-    comment: String,
-) -> Result<(), String> {
-    crate::zentao::resolve(
-        &state,
-        &session_id,
-        bug_id,
-        &resolution,
-        &resolved_build,
-        &duplicate_bug,
-        &comment,
-    )
 }
 
 // ---------- 系统能力 ----------

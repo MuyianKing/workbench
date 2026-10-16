@@ -36,11 +36,12 @@
  * **别改回「只在选区那么大的画布上平移到选区坐标系再画」**：画布尺寸与原点的小数部分一变，
  * 马赛克的块色会差几个点、普通标注的抗锯齿也会差一点（两样都踩过）。
  */
-import type { Annotation, AnnotationTool, CaptureContext, Point, Rect } from '@/types'
+import type { Annotation, AnnotationStylePatch, AnnotationTool, CaptureContext, Point, Rect } from '@/types'
 import {
   ANNOTATION_COLOR_DEFAULT,
   ANNOTATION_TOLERANCE,
   annotationBounds,
+  annotationHandles,
   canvasToViewport,
   clampRect,
   defaultCaptureName,
@@ -55,7 +56,9 @@ import {
   historyPush,
   historyRedo,
   historyUndo,
+  hitAnnotationHandle,
   hitHandle,
+  hitTestAnnotation,
   hitTestAnnotations,
   initialPinSize,
   MAGNIFIER_SIDE,
@@ -67,7 +70,9 @@ import {
   rectContains,
   rectIsEmpty,
   rectSizeText,
+  resizeAnnotation,
   resizeByHandle,
+  restyleAnnotation,
   rgbToHex,
   splitPath,
   STROKE_WIDTH_DEFAULT,
@@ -100,6 +105,15 @@ const annotations = ref<Annotation[]>([])
 const history = shallowRef(historyInit<Annotation[]>([]))
 const activeTool = ref<AnnotationTool | null>(null)
 const pickedAnnotation = ref<number | null>(null)
+/**
+ * **刚画完、还没定稿的那一条**（松手 / 文字落下时设上；起下一笔、动别的标注、重选选区、
+ * 撤销重做、删掉它时清掉）。
+ *
+ * 这是「松手不算定稿，去画下一个才算」那条口径的状态：它在的期间，**按在它身上是动它**
+ * （有工具也一样，不是起一笔新的）、工具条参数那一排跟着它、改它不压撤销栈
+ * （撤销一下整条连着刚才的微调一起退）。见 docs/modules/screenshot.md。
+ */
+const freshId = ref<string | null>(null)
 const color = ref(ANNOTATION_COLOR_DEFAULT)
 const strokeWidth = ref(STROKE_WIDTH_DEFAULT)
 const block = ref(MOSAIC_BLOCK_DEFAULT)
@@ -116,12 +130,14 @@ const textEditing = ref<{ at: Point, text: string } | null>(null)
 const busy = ref(false)
 const failure = ref('')
 
-type DragMode = 'none' | 'create' | 'move-selection' | 'resize-selection' | 'draw' | 'move-annotation'
+type DragMode = 'none' | 'create' | 'move-selection' | 'resize-selection' | 'draw' | 'move-annotation' | 'resize-annotation'
 let mode: DragMode = 'none'
 let dragOrigin: Point = { x: 0, y: 0 }
 let dragSelection: Rect | null = null
 let dragHandle: ReturnType<typeof hitHandle> = null
 let dragAnnotation: Annotation | null = null
+/** 拖的是选中标注身上的哪个把手（见 annotationHandles） */
+let dragAnnotationHandle: ReturnType<typeof hitAnnotationHandle> = null
 let draftPoints: Point[] = []
 /** 上一次取样的像素：同一个格子不重复读（getImageData 要等 GPU 回读） */
 let sampled: Point = { x: -1, y: -1 }
@@ -144,6 +160,23 @@ const creating = ref(false)
  */
 const toolbarVisible = computed(() => hasSelection.value && !creating.value)
 
+/**
+ * 参数那一排照哪个工具摆（见 CaptureToolbar 的 optionTool）：**还在「当前」（freshId）期间
+ * 就跟着那一条** —— 刚画完还没来得及挪 / 改大小时，改颜色 / 线宽 / 字号改的必须是它，
+ * 不然参数排摆的是工具上一条留下的档位、看着像改了没生效；没在「当前」期间时：
+ * 选着工具就是它自己，否则摆选中那条的工具。
+ */
+const optionTool = computed<AnnotationTool | null>(() => {
+  if (freshId.value !== null) {
+    const fresh = freshOf()
+    if (fresh)
+      return fresh.tool
+  }
+  if (activeTool.value)
+    return activeTool.value
+  return pickedOf()?.tool ?? null
+})
+
 // ---------- 启动 ----------
 
 /** 这一屏跑了几场。连着两场挨得近时，靠它别让前一场那半截 await 覆盖掉后一场 */
@@ -162,6 +195,7 @@ function reset(): void {
   history.value = historyInit<Annotation[]>([])
   activeTool.value = null
   pickedAnnotation.value = null
+  freshId.value = null
   draft.value = null
   textEditing.value = null
   busy.value = false
@@ -286,6 +320,19 @@ function stageContext(): CanvasRenderingContext2D | null {
   return stage.value?.getContext('2d') ?? null
 }
 
+/**
+ * 画的时候那份清单：**把正被拖的那一条摘掉**。
+ *
+ * 拖动期间数组里还是它的**旧几何**（只有松手才写回，见 onPointerUp），而 `draft` 才是它现在的样子
+ * —— 两份一起画，旧边就一直留在屏幕上（挪位置更明显：两个位置各一份）。
+ * 显示与导出两条路都按这一份画、都补上 draft，看到什么就存下来什么（见文件头）。
+ * 正在新画的那一笔不在数组里，`draft.id` 找不到，原样返回。
+ */
+function settledAnnotations(): Annotation[] {
+  const dragged = draft.value?.id
+  return dragged ? annotations.value.filter(item => item.id !== dragged) : annotations.value
+}
+
 function redraw(): void {
   const element = stage.value
   const frame = bitmap.value
@@ -315,7 +362,7 @@ function redraw(): void {
     ctx.beginPath()
     ctx.rect(rect.x, rect.y, rect.width, rect.height)
     ctx.clip()
-    drawAnnotations(ctx, annotations.value, { x: 0, y: 0 })
+    drawAnnotations(ctx, settledAnnotations(), { x: 0, y: 0 })
     if (draft.value)
       drawAnnotation(ctx, draft.value, { x: 0, y: 0 })
     ctx.restore()
@@ -332,9 +379,13 @@ function redraw(): void {
     drawSelectionChrome(ctx, rect)
     drawSizeLabel(ctx, rect)
 
-    const picked = pickedAnnotation.value === null ? null : annotations.value[pickedAnnotation.value]
-    if (picked)
-      drawPickedBox(ctx, annotationBounds(picked))
+    // 选中那条的样子：拖把手改大小时画的是**正被你拖的那一份**（draft），
+    // 不然把手会留在旧的位置上、看着像没跟上
+    const index = pickedAnnotation.value
+    const picked = index === null ? null : annotations.value[index]
+    const chrome = draft.value && picked && draft.value.id === picked.id ? draft.value : picked
+    if (chrome)
+      drawPickedChrome(ctx, chrome)
   }
   else if (!draft.value) {
     drawCrosshair(ctx)
@@ -382,14 +433,26 @@ function drawSizeLabel(ctx: CanvasRenderingContext2D, rect: Rect): void {
   ctx.restore()
 }
 
-/** 被选中那条标注的虚线框（好知道 Delete 会删掉哪一条） */
-function drawPickedBox(ctx: CanvasRenderingContext2D, rect: Rect): void {
+/** 被选中那条标注的样子：虚线框 + 它自己的几个把手（见 annotationHandles） */
+function drawPickedChrome(ctx: CanvasRenderingContext2D, annotation: Annotation): void {
   ctx.save()
   ctx.setLineDash([4 * scale.value, 4 * scale.value])
   ctx.strokeStyle = 'rgba(64, 158, 255, 0.9)'
   ctx.lineWidth = 1
-  const box = growRect(rect, 3 * scale.value)
+  const box = growRect(annotationBounds(annotation), 3 * scale.value)
   ctx.strokeRect(box.x + 0.5, box.y + 0.5, box.width, box.height)
+  ctx.setLineDash([])
+
+  // 把手画法与选区那八个一致（白底 + 蓝框），白底要显眼，压在任意像素上都看得见
+  const radius = Math.max(3, 4 * scale.value)
+  for (const handle of annotationHandles(annotation)) {
+    ctx.beginPath()
+    ctx.rect(handle.point.x - radius, handle.point.y - radius, radius * 2, radius * 2)
+    ctx.fillStyle = '#ffffff'
+    ctx.fill()
+    ctx.strokeStyle = '#409eff'
+    ctx.stroke()
+  }
   ctx.restore()
 }
 
@@ -444,27 +507,60 @@ function onPointerDown(event: PointerEvent): void {
 
   dragOrigin = point
   dragSelection = rect ? { ...rect } : null
+  // 上一刻选中的那条先记下来：把手要在「清掉选中」之前判（压在把手上是改大小，不是重选）
+  const picked = pickedAnnotation.value === null ? null : annotations.value[pickedAnnotation.value]
   pickedAnnotation.value = null
 
-  // **把手优先于「画」**：选着工具时按在选区四边 / 八个角上仍然是改尺寸，不是起笔
-  // （鼠标形状本来就是这么给的，见 updateHoverCursor —— 不然想挪一下框得先把工具取消）
+  // **把手优先于别的动作**（选区的把手、选中标注的把手都一样）：按在一个把手上就是改尺寸，
+  // 不是起笔、也不是重选。选区的八个把手排在前面 —— 它们在最外圈，两者一般不会重叠。
   if (live && rect) {
     const handle = hitHandle(rect, point, HANDLE_TOLERANCE * scale.value)
     if (handle) {
+      settleFresh()
       mode = 'resize-selection'
       dragHandle = handle
       return
     }
   }
 
+  if (live && picked) {
+    const handle = hitAnnotationHandle(picked, point, HANDLE_TOLERANCE * scale.value)
+    if (handle) {
+      pickedAnnotation.value = annotations.value.indexOf(picked)
+      dragAnnotation = picked
+      dragAnnotationHandle = handle
+      mode = 'resize-annotation'
+      return
+    }
+  }
+
+  // **还在「当前」的那条：按在身上就是动它** —— 有工具也一样，它不是起一笔新的
+  // （要它让位就去别处按一下、或者直接开始画下一个，见 freshId）。把手在上面已经判过了。
+  if (live) {
+    const fresh = freshOf()
+    if (fresh && hitTestAnnotation(fresh, point, ANNOTATION_TOLERANCE * scale.value)) {
+      pickedAnnotation.value = annotations.value.indexOf(fresh)
+      dragAnnotation = fresh
+      mode = 'move-annotation'
+      return
+    }
+  }
+
   // 文字：点一下就在那儿开一个输入框（不拖着画）
   if (live && activeTool.value === 'text') {
+    settleFresh()
     textEditing.value = { at: point, text: '' }
-    void nextTick(() => textInput.value?.focus())
+    textBoxSize.value = null
+    void nextTick(() => {
+      textInput.value?.focus()
+      measureTextInput()
+    })
     return
   }
 
   if (live && activeTool.value) {
+    // **起下一笔 = 上一条定稿**（这就是「松手不定稿」的那一半：定稿的时刻在这儿）
+    settleFresh()
     mode = 'draw'
     draftPoints = [point]
     draft.value = null
@@ -474,13 +570,19 @@ function onPointerDown(event: PointerEvent): void {
   if (live && rect) {
     const index = hitTestAnnotations(annotations.value, point, ANNOTATION_TOLERANCE * scale.value)
     if (index !== null) {
+      // 点到的是别的一条：当前那条就此定稿，换到这一条上
+      if (annotations.value[index].id !== freshId.value)
+        settleFresh()
       pickedAnnotation.value = index
       dragAnnotation = annotations.value[index]
       mode = 'move-annotation'
+      // 选中就把它自己的参数摆到工具条上：接着改颜色 / 线宽 / 字号改的是它（见 applyToPicked）
+      adoptPickedStyle(annotations.value[index])
       return
     }
 
     if (rectContains(rect, point)) {
+      settleFresh()
       mode = 'move-selection'
       return
     }
@@ -488,6 +590,7 @@ function onPointerDown(event: PointerEvent): void {
 
   // 没选区、或者点到了选区外面：从这里重新拖一块
   // （这一拖期间不收工具条，松手才出现，见 toolbarVisible）
+  settleFresh()
   mode = 'create'
   creating.value = true
   selection.value = { x: point.x, y: point.y, width: 0, height: 0 }
@@ -528,6 +631,10 @@ function onPointerMove(event: PointerEvent): void {
       if (dragAnnotation)
         draft.value = moveAnnotation(dragAnnotation, delta)
       break
+    case 'resize-annotation':
+      if (dragAnnotation && dragAnnotationHandle)
+        draft.value = resizeAnnotation(dragAnnotation, dragAnnotationHandle, delta)
+      break
     default:
       updateHoverCursor(point)
   }
@@ -542,6 +649,7 @@ function onPointerUp(): void {
   creating.value = false
   dragHandle = null
   dragAnnotation = null
+  dragAnnotationHandle = null
 
   if (finished === 'create' && rect && rectIsEmpty(rect, MIN_SELECTION)) {
     // 误点一下（没真拖）不该留一个 1×1 的选区
@@ -552,17 +660,23 @@ function onPointerUp(): void {
     const drawn = draft.value
     draft.value = null
     draftPoints = []
+    // **松手不等于定稿**：把它摆上去、记一步撤销，同时把它设成「当前」的那条 —— 选中、
+    // 把手、参数排跟着它，按在身上还能接着挪 / 改大小 / 改参数，直到你去画下一条（见 freshId）
     commit([...annotations.value, drawn])
+    pickedAnnotation.value = annotations.value.length - 1
+    freshId.value = drawn.id
   }
 
-  if (finished === 'move-annotation' && draft.value) {
-    const moved = draft.value
+  // 挪位置与改大小收工走同一条：把它换成 draft 里那条、记一步撤销，然后保持选中
+  // （改完还想接着改 —— 工具条上的参数改的就是它）
+  if ((finished === 'move-annotation' || finished === 'resize-annotation') && draft.value) {
+    const changed = draft.value
     draft.value = null
-    const index = annotations.value.findIndex(item => item.id === moved.id)
+    const index = annotations.value.findIndex(item => item.id === changed.id)
     if (index >= 0) {
       const next = [...annotations.value]
-      next[index] = moved
-      commit(next)
+      next[index] = changed
+      commitEdit(next, changed.id)
       pickedAnnotation.value = index
     }
   }
@@ -632,7 +746,7 @@ function updatePixelReadout(): void {
   }
 }
 
-/** 悬停时的指针形状：把手上是缩放、选区内是移动、其余是十字 */
+/** 悬停时的指针形状：把手上是缩放（选区与选中标注的把手都算）、选区内是移动、其余是十字 */
 function updateHoverCursor(point: Point): void {
   const rect = selection.value
   if (!rect || rectIsEmpty(rect, MIN_SELECTION)) {
@@ -643,6 +757,21 @@ function updateHoverCursor(point: Point): void {
   const handle = hitHandle(rect, point, HANDLE_TOLERANCE * scale.value)
   if (handle) {
     pointerCursor.value = handleCursor(handle)
+    return
+  }
+
+  // 选中那条的把手（改大小）：形状与选区一致，也是「按在把手上就是缩放」
+  const picked = pickedOf()
+  const pickedHandle = picked ? hitAnnotationHandle(picked, point, HANDLE_TOLERANCE * scale.value) : null
+  if (pickedHandle) {
+    pointerCursor.value = handleCursor(pickedHandle)
+    return
+  }
+
+  // 当前那条身上（把手已经在上面判过了）：按下去是移动它，指针就给「移动」—— 有工具也一样
+  const fresh = freshOf()
+  if (fresh && hitTestAnnotation(fresh, point, ANNOTATION_TOLERANCE * scale.value)) {
+    pointerCursor.value = 'move'
     return
   }
 
@@ -658,12 +787,42 @@ function commit(next: Annotation[]): void {
   annotations.value = next
 }
 
+/**
+ * 落一次改动：**改的是「当前」那条（还没定稿）就不压撤销栈** —— 它连同刚才那点微调算同一步，
+ * 撤销一下整条一起退（这就是「松手不定稿」的另一半，见 freshId）；改的是早就定稿的那条就照旧记一步。
+ */
+function commitEdit(next: Annotation[], id: string): void {
+  if (id !== freshId.value) {
+    commit(next)
+    return
+  }
+  // 只改 present：栈顶仍是「画它之前」那一份。future 一并清掉 —— 这也是一条新分支
+  history.value = { ...history.value, present: next, future: [] }
+  annotations.value = next
+}
+
+/** 当前那条（刚画完还没定稿的）；不在 / 已经被删掉时 null */
+function freshOf(): Annotation | null {
+  const id = freshId.value
+  return id === null ? null : annotations.value.find(item => item.id === id) ?? null
+}
+
+/**
+ * 定稿：当前那条就此交给撤销栈，按在身上不再算「动它」。
+ * **每一个「去干别的」的分支都要叫一次**（起下一笔、开新输入框、动别的标注、重选选区…），
+ * 它只清这个标记：选中 / 把手照旧留着，那条已经落地了，要动它得点选。
+ */
+function settleFresh(): void {
+  freshId.value = null
+}
+
 function undo(): void {
   if (!historyCanUndo(history.value))
     return
   history.value = historyUndo(history.value)
   annotations.value = history.value.present
   pickedAnnotation.value = null
+  freshId.value = null
   redraw()
 }
 
@@ -673,6 +832,7 @@ function redo(): void {
   history.value = historyRedo(history.value)
   annotations.value = history.value.present
   pickedAnnotation.value = null
+  freshId.value = null
   redraw()
 }
 
@@ -681,9 +841,70 @@ function deleteSelected(): void {
   if (index === null)
     return
   pickedAnnotation.value = null
+  freshId.value = null
   commit(annotations.value.filter((_, position) => position !== index))
   redraw()
 }
+
+// ---------- 选中那条的参数（工具条上改的就是它） ----------
+
+/** 当前选中的那条标注（没选中 / 下标过期时 null） */
+function pickedOf(): Annotation | null {
+  const index = pickedAnnotation.value
+  return index === null ? null : annotations.value[index] ?? null
+}
+
+/**
+ * 选中那一刻把它自己的参数摆到工具条上 —— 接着点颜色 / 线宽 / 字号，改的就是这一条
+ * （不摆的话工具条显示的是「上一条画完时留下的档位」，看着像改了没生效）。
+ */
+function adoptPickedStyle(annotation: Annotation): void {
+  if (annotation.tool === 'mosaic') {
+    block.value = annotation.block
+    return
+  }
+  color.value = annotation.color
+  if (annotation.tool === 'text')
+    textSize.value = annotation.size
+  else
+    strokeWidth.value = annotation.width
+}
+
+/** 工具条上的参数落到选中的那条上（没选中时什么都不做：那只是给下一条备着；记不记撤销见 commitEdit） */
+function applyToPicked(patch: AnnotationStylePatch): void {
+  const index = pickedAnnotation.value
+  const annotation = pickedOf()
+  if (index === null || !annotation)
+    return
+  const next = [...annotations.value]
+  next[index] = restyleAnnotation(annotation, patch)
+  commitEdit(next, annotation.id)
+  redraw()
+}
+
+// 四个档位各跟一次：**只在真的变了时才落**（选中那一刻已经把值摆上去了，
+// 不比对就会白记一步撤销，而且撤销栈里会多出一堆没改动的步）
+watch(color, (next) => {
+  const picked = pickedOf()
+  if (picked && picked.tool !== 'mosaic' && picked.color !== next)
+    applyToPicked({ color: next })
+})
+watch(strokeWidth, (next) => {
+  const picked = pickedOf()
+  if (picked && picked.tool !== 'mosaic' && picked.tool !== 'text' && picked.width !== next)
+    applyToPicked({ width: next })
+})
+watch(block, (next) => {
+  const picked = pickedOf()
+  if (picked?.tool === 'mosaic' && picked.block !== next)
+    applyToPicked({ block: next })
+})
+watch(textSize, (next) => {
+  const picked = pickedOf()
+  // 文字改字号要连那个量出来的框一起换（命中判定与选中框都靠它，见 restyleAnnotation）
+  if (picked?.tool === 'text' && picked.size !== next)
+    applyToPicked({ size: next, box: measureTextSize(picked.text, next) })
+})
 
 // ---------- 键盘 ----------
 
@@ -764,6 +985,7 @@ function onEscape(): void {
   if (hasSelection.value) {
     selection.value = null
     pickedAnnotation.value = null
+    freshId.value = null
     redraw()
     return
   }
@@ -786,21 +1008,86 @@ function nudge(event: KeyboardEvent): void {
 
 // ---------- 文字输入 ----------
 
+/**
+ * 输入框自己量出来的内容尺寸（CSS 像素）；null = 还没量过，那一瞬间按画布的 measureText 兜底。
+ *
+ * 为什么不让画布量：两边在字体回退与亚像素网格上会差一点点，差出的那一点会让输入框
+ * **内部横向滚动** —— 一滚，开头那几个字就被推到框的左边看不见了（用户报的就是这个）。
+ * 让浏览器自己报「这段字要多宽」最准：先把盒子压到 0，这时 scrollWidth / scrollHeight
+ * 报的就是内容的真实尺寸（盒子不为 0 时量到的是盒子本身，不是内容）。
+ */
+const textBoxSize = ref<{ width: number, height: number } | null>(null)
+
+/** 量一次输入框的内容尺寸，顺手把它的内部滚动钉回原点（浏览器给光标让路时会自己滚） */
+function measureTextInput(): void {
+  const element = textInput.value
+  if (!element)
+    return
+  const width = element.style.width
+  const height = element.style.height
+  element.style.width = '0px'
+  element.style.height = '0px'
+  textBoxSize.value = { width: element.scrollWidth, height: element.scrollHeight }
+  element.style.width = width
+  element.style.height = height
+  pinTextInputScroll()
+}
+
+/**
+ * 把输入框的内部滚动钉回原点：宽高永远贴着内容，它本来没有要滚的东西 —— 一旦滚起来
+ * （浏览器给光标 / 输入法的合成区让路时会自己滚，横竖都滚），开头那几个字就被推出框外
+ * 看不见了，整块字还会跟着上下挪一点（合成一结束盒子长够了、滚动回到 0，看着就是
+ * 「输入结束后整体向下移动一点」）。**滚动是浏览器主动做的、不经过我们**，所以按 scroll
+ * 事件兜住它 —— 谁、什么时候把它滚起来的都一样。这里不会来回打架：钉回去之后
+ * 盒子装得下内容，浏览器没有理由再滚一次。
+ */
+function pinTextInputScroll(): void {
+  const element = textInput.value
+  if (!element)
+    return
+  element.scrollLeft = 0
+  element.scrollTop = 0
+}
+
+/**
+ * 字一变就重新量。**两处都要挂**：
+ *
+ * - 原生 input（模板上的 `@input`）—— 量的是 DOM 里真实的那一段。**输入法合成的拼音也走它**：
+ *   v-model 在合成期间一个字都不更新（Vue 收到 compositionstart 就把后面的 input 全丢了，
+ *   等 compositionend 再补一条），而拼音是照常写进 textarea 的 —— 只跟着 v-model 量的话，
+ *   「你好」那一段的宽高会一直挂着，合成出来的拼音比它宽，框却不长，于是上面那条滚动就来了。
+ * - 模型变化（这里）—— 兜住不经输入事件的那几种（换了一段新输入、程序改字）。
+ *   flush: 'post' —— 先让新字落进 DOM，量到的才是它。
+ */
+watch(
+  () => textEditing.value?.text,
+  () => measureTextInput(),
+  { flush: 'post' },
+)
+
 const textInputStyle = computed(() => {
   const editing = textEditing.value
   if (!editing)
     return {}
   const at = canvasToViewport(editing.at, viewportBox(), canvasSize.value)
-  // 输入框跟着内容长：宽高按画布上量出来的那一块换成 CSS 像素。
-  // 空的时候留半个字的宽度，不然框是零宽、光标看不见；末尾多给两像素，
-  // 免得量出来的宽与浏览器排版差一点，最后一列被软换成第二行。
-  const box = measureTextSize(editing.text, textSize.value)
   const pixels = scale.value || 1
+  // 输入框跟着内容长：宽高优先取**它自己量出来的那一份**（见 measureTextInput）。
+  // 还没量到时退回画布量出来的那一套：空的时候留半个字的宽度，不然框是零宽、光标看不见；
+  // 末尾多给两个画布像素，免得两边量法差一点、最后一列被软换成第二行。
+  const dom = textBoxSize.value
+  const box = measureTextSize(editing.text, textSize.value)
+  const width = dom
+    ? `${Math.max(dom.width, textSize.value / (2 * pixels)) + 1}px`
+    : `${(Math.max(box.width, textSize.value / 2) + 2) / pixels}px`
+  // 高也要兜底：空的时候这个框量出来是 0，直接用它框就是零高（光标都不见了）；
+  // 留一行的高度，与画布上量出来的那一块（ceil(字号 × 1.3)）同一个值
+  const lineHeight = Math.ceil(textSize.value * TEXT_LINE_HEIGHT) / pixels
+  const height = dom ? `${Math.max(dom.height, lineHeight)}px` : `${box.height / pixels}px`
   return {
     left: `${at.x}px`,
     top: `${at.y}px`,
-    width: `${(Math.max(box.width, textSize.value / 2) + 2) / pixels}px`,
-    height: `${box.height / pixels}px`,
+    width,
+    height,
     fontSize: `${textSize.value / pixels}px`,
     // 与画布上的行进步长同一个值（见 TEXT_LINE_HEIGHT），多行才不会在提交那一刻跳
     lineHeight: `${TEXT_LINE_HEIGHT}`,
@@ -815,7 +1102,7 @@ function commitText(): void {
     return
 
   // 尺寸量在画布像素上（与字号同一套），命中判定与选中框都靠它
-  commit([...annotations.value, {
+  const annotation: Annotation = {
     id: `t-${Date.now()}`,
     tool: 'text',
     at: editing.at,
@@ -823,7 +1110,15 @@ function commitText(): void {
     color: color.value,
     size: textSize.value,
     box: measureTextSize(editing.text, textSize.value),
-  }])
+  }
+  commit([...annotations.value, annotation])
+  // 落下的这段字也照「松手不定稿」那一条：它是**当前**那条（能马上挪位置 / 改字号）。
+  // **顺手把文字工具取消**：不取消的话，紧接着那一下点别处就直接开新的输入框了，
+  // 根本没有机会动它 —— 要接着打下一段，再点一下文字工具就是。
+  pickedAnnotation.value = annotations.value.length - 1
+  freshId.value = annotation.id
+  if (activeTool.value === 'text')
+    activeTool.value = null
   redraw()
 }
 
@@ -852,7 +1147,11 @@ async function compose(): Promise<Blob | null> {
     return null
   painter.imageSmoothingEnabled = false
   painter.drawImage(frame, 0, 0)
-  drawAnnotations(painter, annotations.value, { x: 0, y: 0 })
+  // 与显示侧同一个规矩：正被拖的那条摘掉、补上 draft 那一份（拖到一半按 Enter / Ctrl+C
+  // 导出的就是屏幕上此刻的样子，而不是它的旧几何，见 settledAnnotations）
+  drawAnnotations(painter, settledAnnotations(), { x: 0, y: 0 })
+  if (draft.value)
+    drawAnnotation(painter, draft.value, { x: 0, y: 0 })
 
   const canvas = document.createElement('canvas')
   canvas.width = width
@@ -1028,7 +1327,8 @@ function measureToolbar(): void {
     toolbarSize.value = { width: element.offsetWidth, height: element.offsetHeight }
 }
 
-watch([toolbarVisible, activeTool, () => annotations.value.length], () => {
+// freshId 也在名单里：它一翻，参数那一排跟着换（见 optionTool），高度可能跟着变
+watch([toolbarVisible, activeTool, freshId, () => annotations.value.length], () => {
   void nextTick(measureToolbar)
 })
 
@@ -1098,8 +1398,9 @@ const redoAble = computed(() => historyCanRedo(history.value))
       文字工具：点一下就在那儿开一个输入框，输入法、光标这些交给原生的 textarea。
       **多行、不限长度**：回车就是换行（输入法用回车选词那一下由输入法自己吃掉，
       不会插进正文），宽高跟着内容长，长句不折行也不截断。
+      宽高**按原生 input 量**（合成中的拼音也在里面，v-model 那段是跟不上合成期的，见
+      `measureTextInput`）；内部滚动一律钉回原点（见 `pinTextInputScroll`）。
       结束靠点别处（blur 里提交，见 commitText）；Esc 丢掉这段字。
-      换行与查宽度都由 `measureTextSize` 量（与画布上同一套字体与行高）。
     -->
     <textarea
       v-if="textEditing"
@@ -1108,6 +1409,8 @@ const redoAble = computed(() => historyCanRedo(history.value))
       class="capture-text-input"
       :style="textInputStyle"
       wrap="off"
+      @input="measureTextInput"
+      @scroll="pinTextInputScroll"
       @keydown.esc.stop.prevent="textEditing = null"
       @blur="commitText"
     />
@@ -1119,6 +1422,7 @@ const redoAble = computed(() => historyCanRedo(history.value))
         v-model:stroke-width="strokeWidth"
         v-model:block="block"
         v-model:text-size="textSize"
+        :option-tool="optionTool"
         :can-undo="undoAble"
         :can-redo="redoAble"
         :busy="busy"
@@ -1176,6 +1480,8 @@ const redoAble = computed(() => historyCanRedo(history.value))
  * 这里把边框、底色、内边距全部去掉，只留一个光标。**不要给它加框或底色** ——
  * 那样提交的时候会看见一个框「收起」成纯色字，而这门功能要的就是所见即所得。
  * 宽高由 textInputStyle 按量出来的文字块给死，所以关掉换行与滚动条、也不许用户拖尺寸。
+ * 字体栈与 line-height 要和 annotation-render.ts 里量基线那套一致（那边量「一行字的基线离块顶
+ * 多远」，拿的就是这里的排法），改这里就得连着那边一起改。
  */
 .capture-text-input {
   position: absolute;

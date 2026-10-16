@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { AiProvider } from '@workbench/ai'
-import { Delete, Edit, Plus } from '@element-plus/icons-vue'
+import { Connection, Delete, Edit, Plus } from '@element-plus/icons-vue'
 /**
  * 模型管理那个弹层：**跑一轮用哪个模型**这一件事的两半 ——
  *
@@ -15,6 +15,7 @@ import { Delete, Edit, Plus } from '@element-plus/icons-vue'
 import { computed, ref } from 'vue'
 import AiProviderDialog from '@/components/AiProviderDialog.vue'
 import AppDialog from '@/components/AppDialog.vue'
+import EmptyState from '@/components/EmptyState.vue'
 import { useAiStore } from '@/stores/ai'
 
 const visible = defineModel<boolean>({ required: true })
@@ -126,10 +127,13 @@ function toggle(provider: AiProvider, value: unknown): void {
           </el-button>
         </div>
 
-        <p v-if="!store.providers.length" class="model__empty">
-          还没有服务。添加一个：挑一家厂商（或自定义端点）、粘上 API Key，
-          模型清单会从端点自己拉回来。
-        </p>
+        <EmptyState
+          v-if="!store.providers.length"
+          compact
+          :icon="Connection"
+          text="还没有服务"
+          hint="添加一个：挑一家厂商（或自定义端点）、粘上 API Key，模型清单会从端点自己拉回来。"
+        />
 
         <ul v-else class="model__rows">
           <li v-for="provider in store.providers" :key="provider.id" class="model__row">
@@ -332,12 +336,5 @@ function toggle(provider: AiProvider, value: unknown): void {
   font-size: var(--fs-micro);
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.model__empty {
-  margin: 0;
-  color: var(--ink-3);
-  font-size: var(--fs-micro);
-  line-height: 1.7;
 }
 </style>

@@ -104,13 +104,13 @@ export const WORK_PAGE_DAYS = 7
 /**
  * 时间轴的排序维度。
  *
- *   time    —— 按时间：一天一栏，天与天、天内的记录都从新到旧（默认，记流水账用）
- *   project —— 按项目：一个项目一栏，栏内仍然从新到旧（回看「这个项目这几周做了什么」用）
+ *   project —— 按项目：一个项目一栏，栏内仍然从新到旧（回看「这个项目这几周做了什么」用；默认）
+ *   time    —— 按时间：一天一栏，天与天、天内的记录都从新到旧（记流水账用）
  *
  * 两种维度都会先把范围外的记录筛掉，分页也共用同一套（页大小就是上面那个天数，
- * 项目模式下自然变成「每页 7 个项目」）。
+ * 项目模式下自然变成「每页 7 个项目」）。数组顺序就是下拉里的顺序，默认那一档排在最前。
  */
-export const WORK_SORTS = ['time', 'project'] as const
+export const WORK_SORTS = ['project', 'time'] as const
 export type WorkSort = (typeof WORK_SORTS)[number]
 
 export const WORK_SORT_LABELS: Record<WorkSort, string> = {
@@ -127,14 +127,14 @@ export function isWorkRange(value: unknown): value is WorkRange {
 }
 
 /**
- * 默认档位：范围「今天」、维度「按时间」—— 与工作页原本的初始取值一致
- * （记流水账最常看的就是今天）。
+ * 默认档位：范围「今天」、维度「按项目」—— 一个项目一栏，先看「手头这几件事各做到哪儿了」
+ * （按天排的那一档留给记流水账，切过去也会被记住）。
  *
  * 这两个是**设置项**（数据文件里的 `workRange` / `workSort`，见 types.ts 的
  * 「行为记忆」那一段）：上次看的那一档，下次打开还停在那儿。
  */
 export const WORK_RANGE_DEFAULT: WorkRange = 'today'
-export const WORK_SORT_DEFAULT: WorkSort = 'time'
+export const WORK_SORT_DEFAULT: WorkSort = 'project'
 
 /**
  * 认不出来的一律回默认。

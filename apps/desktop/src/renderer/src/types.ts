@@ -20,7 +20,7 @@ import type { SyncDeviceInfo, TokenUsageResult } from '@workbench/usage'
 import type { VaultEntry, VaultRecord } from '@workbench/vault'
 import type { VideoNode, VideoSource } from '@workbench/video'
 import type { WorkLogEntry, WorkLogInput, WorkLogPatch, WorkRange, WorkSort } from '@workbench/work-log'
-import type { ZentaoAssignInput, ZentaoBugDetail, ZentaoBugList, ZentaoBuild, ZentaoResolveInput, ZentaoSession, ZentaoUser } from '@workbench/zentao'
+import type { ZentaoBugList, ZentaoSession } from '@workbench/zentao'
 import { AI_PERMISSION_DEFAULT, AI_THINKING_DEFAULT } from '@workbench/ai'
 import { DEFAULT_APPEARANCE, TERMINAL_BUTTON_TOP_DEFAULT } from '@workbench/appearance'
 import { CAPTURE_ENABLED_DEFAULT, CAPTURE_HOTKEY_DEFAULT, CAPTURE_MAGNIFIER_DEFAULT, CAPTURE_PIN_OPACITY_DEFAULT, CAPTURE_SAVE_DIR_DEFAULT } from '@workbench/capture'
@@ -47,10 +47,12 @@ export { TOP_BAR_STYLES } from '@workbench/appearance'
 export type { AccountProfile, AuthProvider } from '@workbench/auth'
 export type {
   Annotation,
+  AnnotationStylePatch,
   AnnotationTool,
   CaptureContext,
   CaptureMonitorFrame,
   CaptureOptions,
+  HandleId,
   MagnifierView,
   MonitorGeometry,
   PinPatch,
@@ -125,7 +127,7 @@ export type { SyncDeviceInfo } from '@workbench/usage'
 export type { TokenUsageResult } from '@workbench/usage'
 export type { VideoNode, VideoSource } from '@workbench/video'
 export type { WorkLogEntry, WorkLogInput, WorkLogPatch } from '@workbench/work-log'
-export type { ZentaoAssignInput, ZentaoBrowse, ZentaoBug, ZentaoBugAction, ZentaoBugDetail, ZentaoBugHistory, ZentaoBugList, ZentaoBuild, ZentaoResolveInput, ZentaoSession, ZentaoUser } from '@workbench/zentao'
+export type { ZentaoBrowse, ZentaoBug, ZentaoBugList, ZentaoSession } from '@workbench/zentao'
 
 export type ProjectStatus = 'idle' | 'installing' | 'running' | 'building' | 'success' | 'failed'
 
@@ -1565,22 +1567,10 @@ export interface WorkbenchApi {
   onZentaoCheck: (handler: () => void) => Promise<() => void>
   /** 禅道系统通知被点了（Rust 已唤出主窗口） */
   onZentaoNotifyClick: (handler: () => void) => () => void
-  /** Bug 详情（含历史 actions） */
-  zentaoBug: (sessionId: string, bugId: number) => Promise<Result<ZentaoBugDetail>>
   /** 账号可见产品的 id 清单（列表按产品逐个取 Bug；产品名按需补） */
-  zentaoProducts: (sessionId: string) => Promise<Result<ZentaoBuild[]>>
-  /** Bug 正文里的站内图片：回 data URL（界面内联显示） */
-  zentaoImage: (sessionId: string, path: string) => Promise<Result<string>>
+  zentaoProducts: (sessionId: string) => Promise<Result<{ page: number, total: number, limit: number, products: Array<{ id: number, name?: string }> }>>
   /** 单个产品的 id 与名称（补产品名用） */
   zentaoProduct: (sessionId: string, productId: number) => Promise<Result<{ id?: unknown, name: string }>>
-  /** 指派候选人清单（账号 + 真实姓名） */
-  zentaoUsers: (sessionId: string) => Promise<Result<ZentaoUser[]>>
-  /** 某项目下的构建号（解决 Bug 选版本用） */
-  zentaoBuilds: (sessionId: string, projectId: number) => Promise<Result<ZentaoBuild[]>>
-  /** 指派一个 Bug —— 会真实修改禅道数据 */
-  zentaoAssign: (sessionId: string, input: ZentaoAssignInput) => Promise<Result<null>>
-  /** 解决一个 Bug —— 会真实修改禅道数据 */
-  zentaoResolve: (sessionId: string, input: ZentaoResolveInput) => Promise<Result<null>>
   /** 用系统默认浏览器打开 http(s) 链接 */
   openExternal: (url: string) => Promise<Result<null>>
   /**

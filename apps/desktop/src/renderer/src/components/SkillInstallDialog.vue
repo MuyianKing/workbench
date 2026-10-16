@@ -1,184 +1,157 @@
 <script setup lang="ts">
 import { SKILL_INSTALL_DIR } from '@workbench/skills'
-/**
- * 安装到项目的弹层：列出本机项目，选一个装进去（复制到 `<项目>/.agents/skills/<技能名>/`）。
- *
- * 「已安装」不在打开时预查：安装那次调用由 Rust 报回来，弹窗拿这个错误去问
- * 「要不要覆盖」—— 覆盖会把项目里那份整个换成库里的当前版本，必须经过确认。
- */
 import { computed, ref, watch } from 'vue'
 import AppDialog from '@/components/AppDialog.vue'
-import { confirmAction, notifyError, notifySuccess } from '@/notify'
+import ProjectPickList from '@/components/ProjectPickList.vue'
+import { confirmAction, notifyError, notifySuccess, notifyWarning } from '@/notify'
 import { useProjectsStore } from '@/stores/projects'
 import { useSkillsStore } from '@/stores/skills'
 
 const props = defineProps<{ skillId: string, skillName: string }>()
-
-/** 弹层开关:v-model 一条口径(与 AppDialog / el-dialog 相同,全应用的弹层都这么开) */
 const open = defineModel<boolean>({ required: true })
 
 const projects = useProjectsStore()
 const store = useSkillsStore()
-
-const selectedId = ref('')
+const selectedIds = ref<string[]>([])
 const installing = ref(false)
+const failures = ref<Array<{ id: string, name: string, error: string }>>([])
+const selected = computed(() => projects.projects.filter(project => selectedIds.value.includes(project.id)))
 
 const visible = computed({
   get: () => open.value,
   set: (value) => {
-    open.value = value
+    if (!installing.value)
+      open.value = value
   },
 })
 
 watch(open, (value) => {
   if (value) {
-    selectedId.value = ''
-    installing.value = false
+    selectedIds.value = []
+    failures.value = []
   }
 })
 
 async function submit(): Promise<void> {
-  const project = projects.projects.find(item => item.id === selectedId.value)
-  if (!project || installing.value)
+  const targets = [...selected.value]
+  const skillId = props.skillId
+  if (!targets.length || installing.value)
     return
 
   installing.value = true
-  const first = await store.install(props.skillId, project.path, false)
-  if (first.ok) {
+  failures.value = []
+  let succeeded = 0
+  const conflicts: typeof targets = []
+  let skipped: string[] = []
+  try {
+    for (const project of targets) {
+      const result = await store.install(skillId, project.path, false)
+      if (result.ok)
+        succeeded++
+      else if (/已经装/.test(result.error ?? ''))
+        conflicts.push(project)
+      else
+        failures.value.push({ id: project.id, name: project.name, error: result.error ?? '安装失败' })
+    }
+
+    if (conflicts.length) {
+      const overwrite = await confirmAction(
+        `以下项目已安装「${skillId}」：${conflicts.map(project => `「${project.name}」`).join('、')}。覆盖后，这些项目里的整份技能目录会被替换为库中的当前版本。`,
+        '要覆盖吗？',
+        { confirmButtonText: '覆盖', cancelButtonText: '跳过' },
+      )
+      if (overwrite) {
+        for (const project of conflicts) {
+          const result = await store.install(skillId, project.path, true)
+          if (result.ok)
+            succeeded++
+          else
+            failures.value.push({ id: project.id, name: project.name, error: result.error ?? '覆盖失败' })
+        }
+      }
+      else {
+        skipped = conflicts.map(project => project.id)
+      }
+    }
+
+    selectedIds.value = [...failures.value.map(project => project.id), ...skipped]
+    const summary = [`已安装 ${succeeded} 个项目`]
+    if (failures.value.length)
+      summary.push(`失败 ${failures.value.length} 个`)
+    if (skipped.length)
+      summary.push(`跳过 ${skipped.length} 个`)
+    if (!selectedIds.value.length)
+      notifySuccess(summary.join('，'))
+    else if (succeeded || skipped.length)
+      notifyWarning(summary.join('，'))
+    else
+      notifyError(summary.join('，'))
+  }
+  finally {
     installing.value = false
-    notifySuccess(`已安装到「${project.name}」`)
+  }
+  if (!selectedIds.value.length)
     visible.value = false
-    return
-  }
-
-  // 只有「已安装」这一种错误值得追问一句；别的（路径不在了、技能没有清单）照实报
-  if (!/已经装/.test(first.error ?? '')) {
-    installing.value = false
-    notifyError(first.error ?? '安装失败')
-    return
-  }
-
-  installing.value = false
-  const overwrite = await confirmAction(
-    `「${props.skillId}」已经装在「${project.name}」里了。覆盖后项目里的那份会被整个换成库里的当前版本。`,
-    '要覆盖吗？',
-    { confirmButtonText: '覆盖' },
-  )
-  if (!overwrite)
-    return
-
-  installing.value = true
-  const retry = await store.install(props.skillId, project.path, true)
-  installing.value = false
-  if (retry.ok) {
-    notifySuccess(`已覆盖「${project.name}」里的安装`)
-    visible.value = false
-  }
-  else {
-    notifyError(retry.error ?? '安装失败')
-  }
 }
 </script>
 
 <template>
-  <AppDialog v-model="visible" :title="`安装「${skillName}」到项目`" width="520px">
-    <div v-if="!projects.projects.length" class="state">
-      还没有项目。先把项目加进来，再回来装。
-    </div>
-    <template v-else>
-      <div class="list" role="radiogroup" aria-label="选择项目">
-        <button
-          v-for="project in projects.projects"
-          :key="project.id"
-          class="list__item"
-          type="button"
-          role="radio"
-          :aria-checked="selectedId === project.id"
-          :class="{ 'is-active': selectedId === project.id }"
-          @click="selectedId = project.id"
-        >
-          <span class="list__name">{{ project.name }}</span>
-          <span class="list__path mono" :title="project.path">{{ project.path }}</span>
-        </button>
-      </div>
-      <p class="hint">
-        装到 <code class="mono">{{ SKILL_INSTALL_DIR }}/{{ props.skillId }}</code> ——
-        项目里已有的同名技能需要确认后才会覆盖。
+  <AppDialog
+    v-model="visible"
+    :title="`安装「${skillName}」到项目`"
+    width="520px"
+    :show-close="!installing"
+    :close-on-click-modal="!installing"
+    :close-on-press-escape="!installing"
+  >
+    <ProjectPickList
+      v-model="selectedIds"
+      :projects="projects.projects"
+      :disabled="installing"
+      empty-text="还没有项目。先把项目加进来，再回来装。"
+    />
+    <p v-if="projects.projects.length" class="hint">
+      安装目录 <code class="mono">{{ SKILL_INSTALL_DIR }}/{{ skillId }}</code>
+      <span>已有同名技能会先确认覆盖</span>
+    </p>
+    <div v-if="failures.length" class="failures" role="status">
+      <p v-for="failure in failures" :key="failure.id">
+        {{ failure.name }}：{{ failure.error }}
       </p>
-    </template>
+    </div>
     <template #footer>
-      <el-button @click="visible = false">
+      <el-button :disabled="installing" @click="visible = false">
         取消
       </el-button>
       <el-button
         type="primary"
         :loading="installing"
-        :disabled="!selectedId"
+        :disabled="!selected.length"
         @click="submit"
       >
-        安装
+        安装{{ selected.length ? `（${selected.length}）` : '' }}
       </el-button>
     </template>
   </AppDialog>
 </template>
 
 <style scoped>
-.state {
-  padding: var(--sp-4) 0;
-  color: var(--ink-3);
-  font-size: var(--fs-meta);
-}
-
-.list {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  max-height: 320px;
-  overflow-y: auto;
-  margin-bottom: var(--sp-3);
-}
-
-.list__item {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  padding: var(--sp-2) var(--sp-3);
-  border: 1px solid transparent;
-  border-radius: var(--r-md);
-  background: transparent;
-  text-align: left;
-  cursor: pointer;
-}
-
-.list__item:hover {
-  background: var(--bg-inset);
-}
-
-.list__item.is-active {
-  background: var(--bg-selected);
-  border-color: var(--border);
-}
-
-.list__name {
-  color: var(--ink);
-  font-size: var(--fs-meta);
-  font-weight: 600;
-}
-
-.list__path {
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--ink-3);
-  font-size: var(--fs-micro);
-}
-
 .hint {
-  margin: 0;
+  margin: var(--sp-3) 0 0;
   color: var(--ink-3);
   font-size: var(--fs-micro);
   line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.failures {
+  margin-top: var(--sp-3);
+  color: var(--st-fail);
+  font-size: var(--fs-meta);
+  overflow-wrap: anywhere;
+}
+
+.failures p {
+  margin: var(--sp-1) 0 0;
 }
 </style>

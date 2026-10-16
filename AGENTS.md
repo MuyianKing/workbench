@@ -36,6 +36,8 @@
   随包带一份、要么别引。
 - webview 有**全局 CSP**（`tauri.conf.json` 的 `csp` / `devCsp`，细则见 [ipc-and-state](docs/modules/ipc-and-state.md)）：引新依赖 / 资源
   之前先确认它不被拦（`connect-src` / `worker-src` / `img-src` 这几项最容易踩）；**改动只能在生产态真应用里验**（dev 与浏览器预览都不生效）。
+  `script-src` 上的 `'unsafe-inline'` **只为 HTML 附件那一档**（这份 meta 会被子框架继承，见 [mail.md](docs/modules/mail.md)）——
+  **别再往上加任何来源，也别给附件那个 iframe 加 `allow-same-origin`**。
 - Rust 依赖的判据是**不新增编译单元**，不是「不新增 crate 名」：先 `cargo tree -e normal -i <crate>` 确认它已经在图里；不要引
   `reqwest`、`git2`、`sysinfo` 这类会拉进整套栈的 native / 运行时依赖。唯一例外是邮箱的 TLS（`schannel`，理由见 `mail.rs`）。
 - 唯一需要用户预装的外部程序是 **git**：`sync.rs` 的几处同步与 `skills.rs` 的版本提交 / 同步，外加两条只读探测
@@ -89,8 +91,11 @@
   `--bg-*` `--ink-*` `--st-*` `--sp-*` `--r-*` `--fs-*` `--ease-*`。暗色只在 `:root[data-theme='dark']` 覆盖令牌。
 - 界面主体灰度，彩色只表达运行状态（`--st-run` / `--st-ok` / `--st-fail`）与项目标识色；用户配的主题色只管
   交互态与首页活跃度图的色阶（口径在 [accent-color.ts](packages/appearance/src/accent-color.ts) 的文件头，别扩到别处）；
-  终端面板始终深色（`--term-*`）。**唯一例外**：禅道 Bug 的「严重程度 / 优先级」这两个字段按等级着色（列表列与详情），
-  色阶口径只在 [zentao.ts](packages/zentao/src/zentao.ts)（见 [zentao.md](docs/modules/zentao.md)），不许扩到别的字段。
+  终端面板始终深色（`--term-*`）。**例外只有两个**：禅道 Bug 的「严重程度 / 优先级」这两个字段按等级着色（列表那两列），
+  色阶口径只在 [zentao.ts](packages/zentao/src/zentao.ts)（见 [zentao.md](docs/modules/zentao.md)），不许扩到别的字段；
+  邮箱附件片左首那枚类型图标按文件类型着色（PDF 红 / Word 蓝 / 幻灯片橙 / Markdown 紫 / 网页青），
+  色阶口径只在 [parse.ts](packages/mail/src/parse.ts) 的 `attachmentTint`（见 [mail.md](docs/modules/mail.md)），
+  名字、大小与其余一切照旧灰度，不许扩到别处、也不许拿它给整片附件上色。
 - **项目标识色**（[project-color.ts](packages/core/src/project-color.ts)）：预设色存名字不存色值，自定义色 `#rrggbb` 一律经
   `sanitizeProjectColor()` 收敛；颜色怎么分配只在那一个文件里定义，界面别自己另拍一个。
 - 项目标签统一走 [ProjectTag.vue](apps/desktop/src/renderer/src/components/ProjectTag.vue)（`el-tag` + `effect="dark"`），**别自绘浅底同色字标签**；
@@ -98,8 +103,11 @@
 - 组件样式写 `<style scoped>`；要穿透 Element Plus 或供多页共用的外壳（`.panel`、`.facts`、`.filter`、`.sort` 等）写进
   [global.css](apps/desktop/src/renderer/src/styles/global.css)。
 - **Element Plus 是全量引入的**（`main.ts` 的 `app.use(ElementPlus)` + 整包 CSS），不要手搓 EP 已有的控件。已定下来的用法：
-  分段选择 `el-segmented`；弹窗字段 `el-form` + `el-form-item`（`label-position="top"`，校验失败就地显示，不弹 `ElMessage`）；
+  分段选择 `el-segmented`（外壳与选中态的口径只在 global.css 的 `.el-segmented` 一处；**选中项取主色实心** `--el-color-primary` + `--el-color-white`，别改回白底药丸）；弹窗字段 `el-form` + `el-form-item`（`label-position="top"`，校验失败就地显示，不弹 `ElMessage`）；
   图标按钮与关键操作用 `el-tooltip`，纯截断文字的全名用原生 `title`。
+- **空态要配图**：一栏 / 一整页 / 弹层正文区空着时用 [EmptyState.vue](apps/desktop/src/renderer/src/components/EmptyState.vue)
+  （小图 + 一句事实；窄地方 `compact`），**不许只留一行干字**；几十像素的小格子（首页卡片、日志框、
+  编辑态空栏、下拉空项）仍走 global.css 的 `.empty` + `.empty__icon`。
 - **界面不写教学式说明**（作者自己用的程序）：原理、机制与自我声明（「应用不内置任何…」「只在下次起进程时生效」这类）写在文档里（docs/modules/ 各模块文档），界面上只留影响当下操作的文案；「点这里开始」「第一次用？」这类引导一律不加（AI 助手页细则见 docs/modules/ai.md）。
 - **弹层一律走 [AppDialog.vue](apps/desktop/src/renderer/src/components/AppDialog.vue)，不要直接写 `el-dialog`**：`append-to-body`、
   「挡不挡背后」、可拖动（抓手是标题栏、关掉后位置复位）这几条跨弹层的规矩只写在那里（**不要自己写遮罩**，
@@ -136,7 +144,7 @@ asset 协议、读取权限在 Rust 侧按单个文件授予）、**通道一律
 | 用量与外观同步、账号登录 | [sync-and-auth](docs/modules/sync-and-auth.md) |
 | 密码保险库（密钥 / 加解密 / 多机共写一份文件） | [vault](docs/modules/vault.md) |
 | 邮箱（IMAP 收信 / SMTP 发信 / 授权码 / 联网出口） | [mail](docs/modules/mail.md) |
-| 禅道（API 登录 / 内存会话 / Bug 列表与详情 / 指派与解决 / 后台检查与通知） | [zentao](docs/modules/zentao.md) |
+| 禅道（API 登录 / 内存会话 / Bug 列表 / 后台检查与通知 / 点标题走浏览器） | [zentao](docs/modules/zentao.md) |
 | 截图与钉图（抓屏 / 标注 / 剪贴板 / 置顶图窗口） | [screenshot](docs/modules/screenshot.md) |
 | 网速球（自由摆放 / 贴边收起 / 网卡计数取样） | [float-ball](docs/modules/float-ball.md) |
 

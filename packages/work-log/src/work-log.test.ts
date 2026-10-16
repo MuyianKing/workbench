@@ -335,9 +335,9 @@ describe('dayMeta', () => {
 })
 
 describe('范围与维度作为设置项', () => {
-  it('默认档位与工作页原本的初始取值一致', () => {
+  it('默认档位是「今天 + 按项目」', () => {
     expect(WORK_RANGE_DEFAULT).toBe('today')
-    expect(WORK_SORT_DEFAULT).toBe('time')
+    expect(WORK_SORT_DEFAULT).toBe('project')
   })
 
   it('认得出的取值原样留下', () => {

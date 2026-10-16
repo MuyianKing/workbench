@@ -120,6 +120,10 @@
 - **webview 有全局 CSP**（`tauri.conf.json` 的 `csp`；dev 用 `devCsp`，多放行 HMR 的 ws）。底线是
   `default-src 'self'`、`script-src 'self'`、`object-src 'none'`；必须放行的几处都有理由：
   `style-src 'unsafe-inline'`（Element Plus / Vditor 的动态样式与邮件正文）、
+  `script-src` 上的 **`'unsafe-inline'`**（**只为 HTML 附件那一档**：这份 CSP 由 Tauri 按 meta
+  注入到页面里、**子框架会继承**，附件里的脚本要跑只能在这儿放行；代价与三条不能动的边界写在
+  [mail.md](mail.md) 的「HTML 附件：给脚本、不给宿主能力」一节 —— 别再往 `script-src` 上加
+  别的来源，**也别给附件那个 iframe 加 `allow-same-origin`**）、
   `connect-src ipc: http://ipc.localhost`（IPC 本身）与它的 `data:`
   （截图遮罩把那一帧的 base64 交给浏览器原生解，见 [screenshot.md](screenshot.md)；`data:` 不出进程、
   放行它不等于开了新出口）、`worker-src blob:`

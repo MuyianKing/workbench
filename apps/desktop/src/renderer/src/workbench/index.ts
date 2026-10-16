@@ -730,14 +730,8 @@ function createApi(): WorkbenchApi {
     zentaoNotify: zentao.notify,
     onZentaoCheck: zentao.onCheck,
     onZentaoNotifyClick: zentao.onNotifyClick,
-    zentaoBug: zentao.bugDetail,
-    zentaoUsers: zentao.users,
     zentaoProducts: zentao.productIds,
     zentaoProduct: zentao.product,
-    zentaoImage: zentao.image,
-    zentaoBuilds: zentao.builds,
-    zentaoAssign: zentao.assignBug,
-    zentaoResolve: zentao.resolveBug,
 
     // ---------- 账号 ----------
     // 换 token、回环监听、凭据落盘都在 Rust 侧；这里只驱动轮询并落显示资料，

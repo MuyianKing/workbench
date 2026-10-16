@@ -6,7 +6,7 @@ import { isBulkMail, sanitizeMailBulkSenders } from './bulk'
 import { contactLabel, contactOf, MAIL_CONTACT_NAME_MAX, MAIL_CONTACTS_MAX, sanitizeMailContact, sanitizeMailContacts, splitTypedAddresses } from './contacts'
 import { MAIL_ACCOUNTS_MAX, MAIL_POLL_DEFAULT, MAIL_POLL_MAX, MAIL_POLL_MIN, mailAccountReady, presetForAddress, sanitizeMailAccount, sanitizeMailAccounts, sanitizeMailAddress, sanitizeMailHost, sanitizeMailPollMinutes, sanitizeMailPort } from './mail'
 import { buildMime } from './mime'
-import { accountTag, attachmentBadge, attachmentDataUrl, attachmentKind, attachmentText, displayDate, displayRecipients, displaySender, htmlBody, isImageAttachment, mailTime, parseMessage, preferExtendedFilenames, recipientAddress, recipientDisplay, senderAddress } from './parse'
+import { accountTag, attachmentBadge, attachmentDataUrl, attachmentHtml, attachmentKind, attachmentText, attachmentTint, displayDate, displayRecipients, displaySender, htmlBody, isImageAttachment, mailTime, parseMessage, preferExtendedFilenames, recipientAddress, recipientDisplay, senderAddress } from './parse'
 import { decodeEncodedWords, encodeRfc2047Word } from './rfc2047'
 
 describe('账户配置收敛', () => {
@@ -313,29 +313,45 @@ describe('附件在应用里怎么打开', () => {
   const part = (name: string, contentType = 'application/octet-stream'): ParsedAttachment =>
     ({ name, contentType, contentId: '', base64: 'AAA' })
 
-  it('图、md、docx、pptx 各归一类，其余是只能另存的普通文件', () => {
+  it('图、md、html、docx、pptx、pdf 各归一类，其余是只能另存的普通文件', () => {
     expect(attachmentKind(part('图.png', 'image/png'))).toBe('image')
     expect(attachmentKind(part('说明.md', 'text/markdown'))).toBe('markdown')
     // 服务器把类型改成八位字节流时还得靠扩展名认出来（两条判据互为兜底）
     expect(attachmentKind(part('说明.MD'))).toBe('markdown')
+    expect(attachmentKind(part('呼吸.html', 'text/html'))).toBe('html')
+    expect(attachmentKind(part('呼吸.HTM'))).toBe('html')
     expect(attachmentKind(part('报告.docx'))).toBe('docx')
     expect(attachmentKind(part('讲稿.pptx'))).toBe('pptx')
+    expect(attachmentKind(part('合同.pdf'))).toBe('pdf')
+    expect(attachmentKind(part('合同.PDF'))).toBe('pdf')
     expect(attachmentKind(part('老文档.doc'))).toBe('file')
     expect(attachmentKind(part('老讲稿.ppt'))).toBe('file')
-    expect(attachmentKind(part('合同.pdf'))).toBe('file')
+    expect(attachmentKind(part('打包.zip'))).toBe('file')
     expect(attachmentKind(part('没有扩展名'))).toBe('file')
     expect(attachmentKind(part('.md'))).toBe('file')
   })
 
-  it('没写扩展名时按 contentType 认（长 MIME 那两种）', () => {
+  it('没写扩展名时按 contentType 认（长 MIME 那两种与 pdf、html）', () => {
     expect(attachmentKind(part('未命名', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'))).toBe('docx')
     expect(attachmentKind(part('未命名', 'application/vnd.openxmlformats-officedocument.presentationml.presentation'))).toBe('pptx')
+    expect(attachmentKind(part('未命名', 'application/pdf'))).toBe('pdf')
+    expect(attachmentKind(part('未命名', 'text/html'))).toBe('html')
+  })
+
+  it('每类给一个色（唯一按文件类型着色的一处，见 attachmentTint 的说明）', () => {
+    const kinds = ['pdf', 'docx', 'pptx', 'markdown', 'html', 'image', 'file'] as const
+    const colors = kinds.map(kind => attachmentTint(kind))
+    // 七类各有各的色，认不出的那种是中性灰
+    expect(new Set(colors).size).toBe(kinds.length)
+    for (const color of colors) expect(color).toMatch(/^#[0-9a-f]{6}$/)
+    expect(attachmentTint('file')).toBe('#8a8a8a')
   })
 
   it('角标取扩展名（大写、最多 4 个字符），认不出给 FILE', () => {
     expect(attachmentBadge(part('需求.md'))).toBe('MD')
     expect(attachmentBadge(part('新建 DOCX 文档.docx'))).toBe('DOCX')
     expect(attachmentBadge(part('说明.markdown'))).toBe('MARK')
+    expect(attachmentBadge(part('呼吸.html'))).toBe('HTML')
     expect(attachmentBadge(part('没有扩展名'))).toBe('FILE')
     expect(attachmentBadge(part('.md'))).toBe('FILE')
   })
@@ -344,6 +360,77 @@ describe('附件在应用里怎么打开', () => {
     const text = bytesToBase64(new TextEncoder().encode('# 标题\n正文'))
     expect(attachmentText({ ...part('说明.md'), base64: text })).toBe('# 标题\n正文')
     expect(attachmentText({ ...part('说明.md'), base64: '不是 base64' })).toBe('')
+  })
+})
+
+describe('hTML 附件的预览文档', () => {
+  const page = (markup: string): ParsedAttachment => ({
+    name: '呼吸.html',
+    contentType: 'text/html',
+    contentId: '',
+    base64: bytesToBase64(new TextEncoder().encode(markup)),
+  })
+
+  it('戴上与正文同一套沙箱头（CSP + no-referrer），头部之外的东西一个字节不动', () => {
+    const doc = attachmentHtml(page('<html><head><title>呼吸</title></head><body><img src="https://cdn.example.com/hero.png"></body></html>'))
+    expect(doc).toContain('Content-Security-Policy')
+    expect(doc).toContain(`default-src 'none'`)
+    expect(doc).toContain('img-src * data:')
+    expect(doc).toContain('name="referrer" content="no-referrer"')
+    // 外链图片照旧留在文档里（与正文那条口子同一个口径），正文本身原样
+    expect(doc).toContain('https://cdn.example.com/hero.png')
+    expect(doc).toContain('<title>呼吸</title>')
+    // 声明进 head 里，不在文档外面挂着
+    expect(doc.indexOf('Content-Security-Policy')).toBeLessThan(doc.indexOf('<body>'))
+  })
+
+  it('只有片段、没有 head / html 的也照样戴得上沙箱头', () => {
+    expect(attachmentHtml(page('<p>一段</p>'))).toContain('<meta http-equiv="Content-Security-Policy"')
+  })
+
+  it('放行内联脚本、但不放行任何外链脚本（跑自己带的代码可以，去 CDN 取不行）', () => {
+    const script = '<script>document.title = "跑起来了"</scr' + 'ipt>'
+    const doc = attachmentHtml(page(script))
+    const csp = doc.match(/Content-Security-Policy" content="([^"]+)"/)?.[1] ?? ''
+    expect(csp).toContain(`script-src 'unsafe-inline'`)
+    // 这条指令里不许再冒出别的来源（http(s) / 'self' / 通配）
+    expect(csp).not.toMatch(/script-src[^;]*(https?:|'self'|\*)/)
+    // connect-src 跟着 default-src 'none'：脚本也去不了外网、打不到 IPC 那一条
+    expect(csp).toContain(`default-src 'none'`)
+    expect(csp).toContain('font-src data:')
+  })
+
+  it('正文那一档照旧一行脚本都不跑（脚本只在 HTML 附件那一档放行）', async () => {
+    const raw = [
+      'From: a@b.com',
+      'Subject: 带脚本的信',
+      'Content-Type: text/html; charset=utf-8',
+      '',
+      `<script>alert(1)</scr${'ipt'}><p>正文</p>`,
+      '',
+    ].join('\r\n')
+    const body = htmlBody(await parseMessage(bytesToBase64(new TextEncoder().encode(raw))))
+    expect(body).toContain('Content-Security-Policy')
+    // 正文那份 CSP 里根本没有 script-src 这一条 —— 脚本落回 default-src 'none'
+    expect(body).not.toContain('script-src')
+  })
+
+  it('链接统一 target="_top"（沙箱里点击转交系统浏览器）', () => {
+    const doc = attachmentHtml(page('<a href="https://example.com/x">点我</a>'))
+    expect(doc).toContain('<a href="https://example.com/x" target="_top">')
+  })
+
+  it('按文档声明的字符集解（国内工具的产物常是 GBK），没声明才按 UTF-8', () => {
+    // 头一句是 ASCII（GBK 与 UTF-8 同序），后面那四字节是「呼吸」的 GBK 编码
+    const bytes = new Uint8Array([...new TextEncoder().encode('<meta charset="gbk"><p>'), 0xBA, 0xF4, 0xCE, 0xFC, ...new TextEncoder().encode('</p>')])
+    const doc = attachmentHtml({ name: '呼吸.html', contentType: 'text/html', contentId: '', base64: bytesToBase64(bytes) })
+    expect(doc).toContain('<p>呼吸</p>')
+    // 同样的字节按 UTF-8 解就是一堆替换符 —— 声明没被认的话这里会露出来
+    expect(doc).not.toContain('\uFFFD')
+  })
+
+  it('坏 base64 给空文档（弹层里就是一块白）', () => {
+    expect(attachmentHtml({ name: '呼吸.html', contentType: 'text/html', contentId: '', base64: '不是 base64' })).toContain('Content-Security-Policy')
   })
 })
 

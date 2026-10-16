@@ -726,7 +726,7 @@ fn split_url(url: &str) -> Option<(String, String)> {
 /// 不读响应的 `Content-Type`：为这一个用途去解析响应头，比读几个魔数字节复杂得多，
 /// 而这里唯一会拉的就是头像。认出来但不在支持列表里的（TIFF、ICO 之类）同样返回 None ——
 /// 数据地址的 mime 写错了，图片在界面上会直接碎掉，不如不显示。
-pub(crate) fn sniff_image(bytes: &[u8]) -> Option<&'static str> {
+fn sniff_image(bytes: &[u8]) -> Option<&'static str> {
     use image::ImageFormat;
 
     match image::guess_format(bytes).ok()? {

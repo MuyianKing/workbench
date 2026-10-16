@@ -16,6 +16,11 @@ const props = defineProps<{
   canRedo: boolean
   /** 正在存 / 正在复制：这一刻按钮点不动，免得同一个动作发两次 */
   busy: boolean
+  /**
+   * 参数那一排照哪个工具摆：选着工具就是它；没选工具而**选中了一条标注**时为那条的工具
+   * —— 选中的标注也要能改颜色 / 线宽 / 字号（改的是它自己，见 CaptureApp 的 applyToPicked）。
+   */
+  optionTool: AnnotationTool | null
 }>()
 const emit = defineEmits<{
   undo: []
@@ -31,11 +36,11 @@ const strokeWidth = defineModel<number>('strokeWidth', { required: true })
 const block = defineModel<number>('block', { required: true })
 const textSize = defineModel<number>('textSize', { required: true })
 
-/** 当前工具的相关参数：颜色 / 线宽 / 档位各按工具露哪一排 */
-const usesColor = computed(() => tool.value !== null && tool.value !== 'mosaic')
-const usesStroke = computed(() => tool.value === 'rect' || tool.value === 'ellipse' || tool.value === 'arrow' || tool.value === 'pen' || tool.value === 'highlight')
-const usesBlock = computed(() => tool.value === 'mosaic')
-const usesTextSize = computed(() => tool.value === 'text')
+/** 当前要摆哪几项参数：按 optionTool（选着工具 = 它自己，否则 = 选中那条的工具） */
+const usesColor = computed(() => props.optionTool !== null && props.optionTool !== 'mosaic')
+const usesStroke = computed(() => props.optionTool === 'rect' || props.optionTool === 'ellipse' || props.optionTool === 'arrow' || props.optionTool === 'pen' || props.optionTool === 'highlight')
+const usesBlock = computed(() => props.optionTool === 'mosaic')
+const usesTextSize = computed(() => props.optionTool === 'text')
 const hasOptions = computed(() => usesColor.value || usesStroke.value || usesBlock.value || usesTextSize.value)
 
 /** 再点一次同一个工具 = 取消它（回到「不是画，是挪选区」的那个状态） */

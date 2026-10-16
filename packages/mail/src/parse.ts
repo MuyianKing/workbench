@@ -3,8 +3,12 @@
 // !
 // ! **渲染的硬边界**：`htmlBody` 产出的文档交给 sandbox 的 iframe（禁脚本 / 同源 /
 // ! 表单 / 弹窗，与 AI 预览栏同一套，见 AiPreviewHtml.vue），注入 CSP 放行外链图片
-// ! （营销信的主视觉跟着信里的地址加载）但掐死其余一切外链资源 —— 脚本、字体、
+// ! （营销信的主视觉跟着信里写的地址加载）但掐死其余一切外链资源 —— 脚本、字体、
 // ! 音视频、iframe 都没有。内联图（cid:）是邮件自带的内容，转成 data URL。
+// !
+// ! **HTML 附件是这条边上唯一开了内联脚本的**（`attachmentHtml`）：那是一整页别人做的东西，
+// ! 脚本不跑就只剩死版面。外链脚本照旧一个不放行，承载它的 iframe 也不给同源（不给
+// ! 宿主能力），细则与代价见 docs/modules/mail.md。
 
 import PostalMime from 'postal-mime'
 import { base64ToBytes, bytesToBase64 } from './base64'
@@ -207,16 +211,20 @@ export function attachmentDataUrl(part: ParsedAttachment): string {
 }
 
 /**
- * 附件在应用里怎么打开：图给查看器，md / docx / pptx 进预览弹层，其余只能另存
- * （pdf、压缩包、老式 .doc / .ppt 这些应用里画不了）。
+ * 附件在应用里怎么打开：图给查看器，md / html / docx / pptx / pdf 进预览弹层，其余只能另存
+ * （压缩包、老式 .doc / .ppt 这些应用里画不了；pdf 由 pdf.js 在页面里画，见 PdfPreview.vue；
+ * html 与邮件正文同一道边界 —— 只进 sandbox 的 iframe，见 attachmentHtml）。
  * 判据是**扩展名与 contentType 两条** —— 服务器转手时这两样都可能被改写或丢掉一样。
  */
-export type MailAttachmentKind = 'image' | 'markdown' | 'docx' | 'pptx' | 'file'
+export type MailAttachmentKind = 'image' | 'markdown' | 'html' | 'docx' | 'pptx' | 'pdf' | 'file'
 
 const DOCX_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
 const PPTX_TYPE = 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+const PDF_TYPE = 'application/pdf'
 const MARKDOWN_EXTS = new Set(['md', 'markdown', 'mdown', 'mkd'])
 const MARKDOWN_TYPES = new Set(['text/markdown', 'text/x-markdown'])
+const HTML_EXTS = new Set(['html', 'htm'])
+const HTML_TYPES = new Set(['text/html', 'application/xhtml+xml'])
 
 /** 文件名 → 小写扩展名（没有点、或以点开头的一律当没扩展名）。 */
 function extensionOf(name: string): string {
@@ -233,9 +241,43 @@ export function attachmentKind(part: ParsedAttachment): MailAttachmentKind {
     return 'docx'
   if (extension === 'pptx' || type === PPTX_TYPE)
     return 'pptx'
+  if (extension === 'pdf' || type === PDF_TYPE)
+    return 'pdf'
   if (MARKDOWN_EXTS.has(extension) || MARKDOWN_TYPES.has(type))
     return 'markdown'
+  if (HTML_EXTS.has(extension) || HTML_TYPES.has(type))
+    return 'html'
   return 'file'
+}
+
+/**
+ * 附件片上那枚图标 / 角标的颜色。
+ *
+ * **这是应用里唯一按文件类型着色的一处** —— 「界面主体灰度、彩色只表达运行状态与项目标识色」
+ * 那条规矩（见 AGENTS.md 第 4 节）在这里开了第二个口子（第一个是禅道 Bug 的严重程度 / 优先级）：
+ * 附件那一行的名字与大小都是灰的，只有左首这枚小图标带色，几种文件一眼分得开。
+ * **别把这套色阶扩到别处去**（也不要用它给整片附件上色）。
+ *
+ * 取的是各家品牌那一档色相（红 = PDF、蓝 = Word、橙 = 幻灯片、紫 = Markdown、青 = 网页），
+ * 明暗两套主题下都按 500 档上下取：低饱和度的底 + 本色图标两边都读得清。
+ */
+export function attachmentTint(kind: MailAttachmentKind): string {
+  switch (kind) {
+    case 'pdf':
+      return '#e5484d'
+    case 'docx':
+      return '#3b82f6'
+    case 'pptx':
+      return '#f97316'
+    case 'markdown':
+      return '#8b5cf6'
+    case 'html':
+      return '#0891b2'
+    case 'image':
+      return '#10b981'
+    default:
+      return '#8a8a8a'
+  }
 }
 
 /** 附件内容当文本读（markdown 预览用）：base64 → 字节 → UTF-8 文本。解不开给空串。 */
@@ -244,10 +286,50 @@ export function attachmentText(part: ParsedAttachment): string {
   return bytes ? new TextDecoder().decode(bytes) : ''
 }
 
+/** 找字符集声明只读头部这一段（正好罩得住 `<head>` 里那一行 meta） */
+const CHARSET_PROBE_BYTES = 1024
+
 /**
- * 附件片左首那个**类型角标**上的字：扩展名大写（最多 4 个字符），认不出扩展名给 FILE。
- * 角标是这一行里唯一能一眼分出 docx / md / pptx / pdf 的东西 —— 光一个回形针三颗片子
- * 长得一模一样。
+ * HTML 附件的字节 → 文本：先认文档头部声明的字符集（国内工具的产物不少是 GBK / GB2312，
+ * 照 UTF-8 解出来整页乱码），声明的那个本机不认、或压根没声明就按 UTF-8 来。
+ */
+function decodeHtmlBytes(part: ParsedAttachment): string {
+  const bytes = base64ToBytes(part.base64)
+  if (!bytes)
+    return ''
+  const declared = latin1FromBytes(bytes.subarray(0, CHARSET_PROBE_BYTES))
+    .match(/charset\s*=\s*["']?\s*([\w-]+)/i)?.[1]
+    ?.toLowerCase() ?? ''
+  if (declared && declared !== 'utf-8' && declared !== 'utf8') {
+    try {
+      return new TextDecoder(declared).decode(bytes)
+    }
+    catch {
+      // 认不出的字符集名：落回 UTF-8，宁可看到乱码也不给一页空白
+    }
+  }
+  return new TextDecoder().decode(bytes)
+}
+
+/**
+ * 附件里的 HTML 当预览文档读（`text/html` 那一档）：base64 → 文本 → 与正文同一套沙箱准备
+ * （注入 CSP 与 no-referrer、链接统一 target="_top"），**CSP 换成放行内联脚本的那一份**
+ * （见 ATTACHMENT_CSP）—— 附件是一整页别人做的东西，脚本不跑就只剩一张死版面。
+ *
+ * 两道闸一起才算数：这份 CSP + 承载它的 iframe 的 `allow-scripts`（见 MailAttachmentDialog）
+ * + 应用自己那份 CSP 的 `script-src`（见 docs/modules/mail.md）。与正文只有一处差别：
+ * 附件的 HTML 是一份独立文档，不做 cid 替换 —— 信体的内联图是正文那一份的事。
+ */
+export function attachmentHtml(part: ParsedAttachment): string {
+  return withSandboxHead(linksToTop(decodeHtmlBytes(part)), ATTACHMENT_CSP)
+}
+
+/**
+ * 附件片左首那块小方块里的**扩展名角标**：扩展名大写（最多 4 个字符），认不出扩展名给 FILE。
+ *
+ * 认得出的那五类（pdf / docx / pptx / markdown / html）**不用它** —— 那几档给的是按类型着色的图标
+ * （见 attachmentTint）；它只服务认不出的那一档（zip / rar / 老式 .doc），
+ * 那儿扩展名才是唯一的信息。
  */
 export function attachmentBadge(part: ParsedAttachment): string {
   const extension = extensionOf(part.name)
@@ -264,11 +346,54 @@ function cidMap(inline: ParsedAttachment[]): Map<string, string> {
   return map
 }
 
-/** 外链图片放行（跟着信里写的地址加载），其余资源全掐死：脚本、字体、音视频外链、iframe 都没有。 */
+/**
+ * 沙箱文档的 CSP（**正文那一份**）：外链图片放行（跟着信里写的地址加载），其余外链资源
+ * 全掐死 —— 脚本、字体、音视频、iframe 都没有网络可去（`default-src 'none'` 同时兜住
+ * `connect-src`：连 IPC 那条 http://ipc.localhost 也出不去）。
+ */
 const SANDBOX_CSP = 'default-src \'none\'; img-src * data:; style-src \'unsafe-inline\'; media-src data:'
+
+/**
+ * **HTML 附件那一档**的 CSP：在正文那份之上放行内联脚本与 data: 字体 —— 自带的网页
+ * 基本是单文件，样式与脚本都写在文件里。**外链脚本仍然一个都不放行**（`script-src` 里
+ * 没有 http(s) / `'self'`）：附件跑自己带的代码可以，去 CDN 取代码不行。
+ *
+ * 这一份**不是充分条件**：应用自己的 CSP（`tauri.conf.json`，按 meta 注入、会被子框架
+ * 继承）里的 `script-src` 也得放行内联脚本，两份都允许才跑得起来（见 docs/modules/mail.md）。
+ * `'unsafe-eval'` 刻意没给：要它得连应用那份一起加，先看看附件是不是真的需要。
+ */
+const ATTACHMENT_CSP = `${SANDBOX_CSP}; script-src 'unsafe-inline'; font-src data:`
 
 /** 图片请求不带 Referer：读信这件事不留给图片主机多余的来路。 */
 const NO_REFERRER = '<meta name="referrer" content="no-referrer">'
+
+/** 塞进沙箱文档 `<head>` 的那一句（正文与 HTML 附件共用一副写法，CSP 各自一份） */
+function sandboxHead(csp: string): string {
+  return `<meta http-equiv="Content-Security-Policy" content="${csp}">${NO_REFERRER}`
+}
+
+/** 把沙箱头塞进文档：有 head 进 head，有 html 补一层，两样都没有就顶在最前。 */
+function withSandboxHead(html: string, csp = SANDBOX_CSP): string {
+  const head = sandboxHead(csp)
+  if (/<head[^>]*>/i.test(html))
+    return html.replace(/<head[^>]*>/i, tag => `${tag}${head}`)
+  if (/<html[^>]*>/i.test(html))
+    return html.replace(/<html[^>]*>/i, tag => `${tag}<head>${head}</head>`)
+  return `${head}${html}`
+}
+
+/**
+ * 链接一律 target="_top"：sandbox iframe 里点链接本来就是死的，改成往顶层窗口导航后
+ * 由 main.rs 的 on_navigation 拦下转交系统浏览器。按整段标签做改写 —— 属性值里带 > 的
+ * 写法（罕见）会漏改，漏改的链接点不动，不破沙箱。
+ */
+function linksToTop(html: string): string {
+  return html.replace(/<a\b[^>]*>/gi, (tag) => {
+    if (/target\s*=/i.test(tag))
+      return tag.replace(/target\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/i, 'target="_top"')
+    return `${tag.slice(0, -1)} target="_top">`
+  })
+}
 
 /**
  * 把 HTML 正文准备成能进沙箱 iframe 的文档：注入 CSP 与 no-referrer、cid: 换成 data URL、
@@ -278,28 +403,10 @@ export function htmlBody(parsed: ParsedMail): string | null {
   if (!parsed.html.trim())
     return null
   const map = cidMap(parsed.inline)
-  let html = parsed.html.replace(/cid:\s*([^"'>\s]+)/gi, (whole, id: string) => {
+  const html = parsed.html.replace(/cid:\s*([^"'>\s]+)/gi, (whole, id: string) => {
     return map.get(id.toLowerCase().trim()) ?? whole
   })
-  // 链接一律 target="_top"：sandbox iframe 里点链接本来就是死的，改成往顶层窗口
-  // 导航后由 main.rs 的 on_navigation 拦下转交系统浏览器。按整段标签做改写 ——
-  // 属性值里带 > 的写法（罕见）会漏改，漏改的链接点不动，不破沙箱。
-  html = html.replace(/<a\b[^>]*>/gi, (tag) => {
-    if (/target\s*=/i.test(tag))
-      return tag.replace(/target\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/i, 'target="_top"')
-    return `${tag.slice(0, -1)} target="_top">`
-  })
-  const head = `<meta http-equiv="Content-Security-Policy" content="${SANDBOX_CSP}">${NO_REFERRER}`
-  if (/<head[^>]*>/i.test(html)) {
-    html = html.replace(/<head[^>]*>/i, tag => `${tag}${head}`)
-  }
-  else if (/<html[^>]*>/i.test(html)) {
-    html = html.replace(/<html[^>]*>/i, tag => `${tag}<head>${head}</head>`)
-  }
-  else {
-    html = `${head}${html}`
-  }
-  return html
+  return withSandboxHead(linksToTop(html))
 }
 
 /** 发件人头部 → 展示名：优先名字，退回地址。编码词在这里解码。 */

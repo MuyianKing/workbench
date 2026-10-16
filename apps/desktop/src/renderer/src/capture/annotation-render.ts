@@ -13,14 +13,14 @@
  * 两侧因此落在同一张格子上。
  */
 import type { Annotation, Point, Rect, Size } from '@/types'
-import { HIGHLIGHT_ALPHA } from '@workbench/capture'
+import { arrowOutline, HIGHLIGHT_ALPHA } from '@workbench/capture'
 
-/** 箭头尖张开的半角 */
-const ARROW_SPREAD = Math.PI / 7
+/** 文字标注的字体栈（画布、量基线那条探针，以及 CaptureApp 里输入框的 CSS 都得是这一串） */
+const TEXT_FONT_FAMILY = `'Segoe UI', 'Microsoft YaHei', system-ui, sans-serif`
 
 /** 文字用的字体串（量尺寸与画字必须是同一串，否则摆位会偏） */
 export function textFont(size: number): string {
-  return `${size}px 'Segoe UI', 'Microsoft YaHei', system-ui, sans-serif`
+  return `${size}px ${TEXT_FONT_FAMILY}`
 }
 
 /**
@@ -29,6 +29,81 @@ export function textFont(size: number): string {
  * 提交那一刻整块字就会跳（多行时按行数累积，越往下越明显）。
  */
 export const TEXT_LINE_HEIGHT = 1.3
+
+/**
+ * 文字块**第一行基线**落在块顶下面多少（画布像素）—— 问浏览器自己排的那一行，见 `domBaseline`。
+ *
+ * 为什么不能直接用 `ctx.textBaseline = 'top'` 画在文字块的左上角：那个 'top' 与输入框
+ * **不是同一套字体度量**。实测（Segoe UI / 微软雅黑这套字体栈）canvas 的 'top' 认的是
+ * 字体表里的 typo ascender（16px 时离基线 12px、24px 时 20px），而输入框里的那行字是按
+ * CSS 行盒摆的：行盒高 = size × TEXT_LINE_HEIGHT，字号自带的 ascender + descender 居中
+ * 落在行盒里（上下各摊一半行距）。两边差出来的那几像素，就是「输入的时候一行字在那儿，
+ * 一落下去往上跳一小段」的来源（24px 字号实测差 5~6px，肉眼很明显）。
+ *
+ * 为什么**不自己按字体度量套行盒模型**（`(size × 行高 − (ascender + descender)) / 2 + ascender`）：
+ * canvas 的 `fontBoundingBox*` 是**取整**过的（16px 报 17 + 4，浏览器排版用的是 1/64px 的小数），
+ * 差出来的小半个像素正好把落笔位置翻到相邻的一行上 —— 实测 24px 公式给 25.6、输入框那一行
+ * 落的是 25，字一落下去就往下跳 1px（16px 也一样差 1px，22 / 32px 正好对上；同一个字号
+ * 永远差同一个方向）。看着就是「字落下去 / 合成一结束，整块往下移动了一点」。
+ *
+ * **调用前先设好 `ctx.font`**（量不出 DOM 时退回按度量的老算法，那条要用当前字号的度量）。
+ */
+export function textBaselineOffset(ctx: CanvasRenderingContext2D, size: number): number {
+  const measured = domBaseline(size)
+  if (measured !== null)
+    return measured
+
+  const metrics = ctx.measureText('Hg')
+  // 量不出字体度量时（度量给 0 / NaN）按字号粗估：宁可差一点，也不要摆到行盒外面去
+  const ascent = metrics.fontBoundingBoxAscent > 0 ? metrics.fontBoundingBoxAscent : size
+  const descent = metrics.fontBoundingBoxDescent > 0 ? metrics.fontBoundingBoxDescent : 0
+  return (size * TEXT_LINE_HEIGHT - (ascent + descent)) / 2 + ascent
+}
+
+/** 量出来的第一行基线（按字号缓存；量不出来的那几回不留空值，下次还能量） */
+const baselineCache = new Map<number, number>()
+
+/** 量基线的那对盒子（现用现建，建一次就留着复用） */
+let baselineProbe: { host: HTMLElement, marker: HTMLElement } | null = null
+
+/**
+ * 让浏览器把这一行自己排一遍，读出一行文字的基线离块顶多远。
+ *
+ * 探针是一个**与输入框同字体、同行高**的隐藏块，里面挂一个零尺寸、
+ * `vertical-align: baseline` 的 inline-block —— 这种盒子的基线就是它的底边，而它没有高度，
+ * 于是它的顶边正好压在基线上，两个位置相减就是答案。写什么字都行：一行文字的基线由行盒定
+ * （字号自带的 ascender / descender 摊在行高里），与行里是中文、拉丁还是混排无关（实测同一个数）。
+ *
+ * 量不到（没有 DOM 的单测）给 null，由调用方退回按字体度量算。
+ */
+function domBaseline(size: number): number | null {
+  if (typeof document === 'undefined')
+    return null
+  const cached = baselineCache.get(size)
+  if (cached !== undefined)
+    return cached
+
+  if (!baselineProbe) {
+    const host = document.createElement('div')
+    host.textContent = 'M'
+    host.style.cssText = `position: absolute; left: -9999px; top: 0; visibility: hidden;`
+      + ` white-space: pre; line-height: ${TEXT_LINE_HEIGHT}; font-family: ${TEXT_FONT_FAMILY}`
+    const marker = document.createElement('span')
+    marker.style.cssText = 'display: inline-block; width: 0; height: 0; vertical-align: baseline'
+    host.appendChild(marker)
+    document.body.appendChild(host)
+    baselineProbe = { host, marker }
+  }
+
+  const { host, marker } = baselineProbe
+  host.style.fontSize = `${size}px`
+  const baseline = marker.getBoundingClientRect().top - host.getBoundingClientRect().top
+  // 没有排版引擎时（拿 jsdom 跑单测）这一对全是 0：那不是量到了 0，是量不出来
+  if (!(baseline > 0))
+    return null
+  baselineCache.set(size, baseline)
+  return baseline
+}
 
 /** 按换行把文字拆成几行（`\r\n` / `\r` 都算，空行保留 —— 空行也是用户敲的） */
 export function textLines(text: string): string[] {
@@ -69,27 +144,21 @@ interface ArrowLike {
   color: string
 }
 
+/**
+ * 箭头：**把那一圈轮廓填一次色**（外形在 `@workbench/capture` 的 `arrowOutline` 里 ——
+ * 收尖的锥形杆 + 实心三角头，尺寸随线宽）。一次填充比「先描一层杆、再填一个三角」干净：
+ * 接缝与双重抗锯齿都不会有，锥形杆与头就是同一条边。
+ */
 function drawArrow(ctx: CanvasRenderingContext2D, annotation: ArrowLike): void {
-  const { start, end, width, color } = annotation
-  const angle = Math.atan2(end.y - start.y, end.x - start.x)
-  const head = Math.max(width * 3.5, 10)
+  const outline = arrowOutline(annotation)
+  if (!outline.length)
+    return
 
-  ctx.strokeStyle = color
-  ctx.lineWidth = width
-  ctx.lineCap = 'round'
-
-  // 杆子收在箭头尖之前一点，否则粗箭头会从三角里戳出来
-  const shaft = { x: end.x - (Math.cos(angle) * head) / 2, y: end.y - (Math.sin(angle) * head) / 2 }
+  ctx.fillStyle = annotation.color
   ctx.beginPath()
-  ctx.moveTo(start.x, start.y)
-  ctx.lineTo(shaft.x, shaft.y)
-  ctx.stroke()
-
-  ctx.fillStyle = color
-  ctx.beginPath()
-  ctx.moveTo(end.x, end.y)
-  ctx.lineTo(end.x - Math.cos(angle - ARROW_SPREAD) * head, end.y - Math.sin(angle - ARROW_SPREAD) * head)
-  ctx.lineTo(end.x - Math.cos(angle + ARROW_SPREAD) * head, end.y - Math.sin(angle + ARROW_SPREAD) * head)
+  ctx.moveTo(outline[0].x, outline[0].y)
+  for (const point of outline.slice(1))
+    ctx.lineTo(point.x, point.y)
   ctx.closePath()
   ctx.fill()
 }
@@ -245,13 +314,16 @@ export function drawAnnotation(ctx: CanvasRenderingContext2D, annotation: Annota
       break
     case 'text': {
       ctx.font = textFont(annotation.size)
-      ctx.textBaseline = 'top'
+      ctx.textBaseline = 'alphabetic'
       ctx.fillStyle = annotation.color
-      // 多行：每行自己一次 fillText，步进与量尺寸、输入框 CSS 行高同一个值
+      // 多行：每行自己一次 fillText，步进与量尺寸、输入框 CSS 行高同一个值；
+      // 基线问浏览器自己排的那一行（见 textBaselineOffset —— 用 'top' 或者按画布度量算，
+      // 都会与输入框里那一行差几像素，字一落下去就跳）
       const lines = textLines(annotation.text)
       const step = annotation.size * TEXT_LINE_HEIGHT
+      const first = textBaselineOffset(ctx, annotation.size)
       for (let index = 0; index < lines.length; index += 1)
-        ctx.fillText(lines[index], annotation.at.x, annotation.at.y + index * step)
+        ctx.fillText(lines[index], annotation.at.x, annotation.at.y + first + index * step)
       break
     }
   }

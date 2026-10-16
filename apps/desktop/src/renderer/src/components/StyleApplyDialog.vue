@@ -13,6 +13,7 @@ import { DESIGN_FILE_NAME, designMarkdown, designPrompt } from '@workbench/appea
  */
 import { computed, ref, watch } from 'vue'
 import AppDialog from '@/components/AppDialog.vue'
+import ProjectPickList from '@/components/ProjectPickList.vue'
 import { notifyError, notifySuccess, notifyWarning } from '@/notify'
 import { useProjectsStore } from '@/stores/projects'
 
@@ -23,103 +24,121 @@ const open = defineModel<boolean>({ required: true })
 
 const projects = useProjectsStore()
 
-const selectedId = ref('')
+const selectedIds = ref<string[]>([])
 const applying = ref(false)
+const failures = ref<Array<{ id: string, name: string, error: string }>>([])
 
 const visible = computed({
   get: () => open.value,
   set: (value) => {
-    open.value = value
+    if (!applying.value)
+      open.value = value
   },
 })
 
 const selected = computed(
-  () => projects.projects.find(project => project.id === selectedId.value) ?? null,
+  () => projects.projects.filter(project => selectedIds.value.includes(project.id)),
 )
 
 watch(open, (value) => {
   if (value) {
-    selectedId.value = ''
-    applying.value = false
+    selectedIds.value = []
+    failures.value = []
   }
 })
 
 async function submit(): Promise<void> {
-  const project = selected.value
+  const targets = [...selected.value]
   const design = props.design
-  if (!project || !design || applying.value)
+  if (!targets.length || !design || applying.value)
     return
 
   applying.value = true
-  const written = await window.workbench.writeDesign(project.path, designMarkdown(design))
-  applying.value = false
-  if (!written.ok) {
-    notifyError(written.error ?? `写入 ${DESIGN_FILE_NAME} 失败`)
-    return
-  }
-
-  let copied = true
+  failures.value = []
+  let succeeded = 0
+  let overwritten = 0
   try {
-    await navigator.clipboard.writeText(designPrompt(design))
-  }
-  catch {
-    copied = false
-  }
+    const markdown = designMarkdown(design)
+    for (const project of targets) {
+      const written = await window.workbench.writeDesign(project.path, markdown)
+      if (written.ok) {
+        succeeded++
+        if (written.data?.existed)
+          overwritten++
+      }
+      else {
+        failures.value.push({ id: project.id, name: project.name, error: written.error ?? `写入 ${DESIGN_FILE_NAME} 失败` })
+      }
+    }
 
-  const verb = written.data?.existed ? '已覆盖' : '已写入'
-  notifySuccess(
-    `${verb}「${project.name}」的 ${DESIGN_FILE_NAME}${copied ? '，提示词已复制到剪贴板' : ''}`,
-  )
-  if (!copied) {
-    notifyWarning('提示词没能写进剪贴板，可以在规格档里手动复制')
+    selectedIds.value = failures.value.map(project => project.id)
+    let copied = false
+    if (succeeded) {
+      try {
+        await navigator.clipboard.writeText(designPrompt(design))
+        copied = true
+      }
+      catch {
+        notifyWarning('提示词没能写进剪贴板，可以在规格档里手动复制')
+      }
+    }
+
+    const summary = [`已写入 ${succeeded} 个项目`]
+    if (overwritten)
+      summary.push(`覆盖 ${overwritten} 个`)
+    if (failures.value.length)
+      summary.push(`失败 ${failures.value.length} 个`)
+    if (copied)
+      summary.push('提示词已复制')
+    if (!failures.value.length)
+      notifySuccess(summary.join('，'))
+    else if (succeeded)
+      notifyWarning(summary.join('，'))
+    else
+      notifyError(summary.join('，'))
   }
-  visible.value = false
+  finally {
+    applying.value = false
+  }
+  if (!failures.value.length)
+    visible.value = false
 }
 </script>
 
 <template>
-  <AppDialog v-model="visible" :title="`把「${design?.title ?? ''}」应用到项目`" width="520px">
+  <AppDialog
+    v-model="visible"
+    :title="`把「${design?.title ?? ''}」应用到项目`"
+    width="520px"
+    :show-close="!applying"
+    :close-on-click-modal="!applying"
+    :close-on-press-escape="!applying"
+  >
     <p class="intro">
-      会把这份设计规范写成 <code class="mono">{{ DESIGN_FILE_NAME }}</code> 放进项目根目录
-      （已有同名文件会被覆盖），同时把一段「照这份规范实现界面」的提示词复制到剪贴板，
-      粘给 AI 编码助手即可。
+      写入 <code class="mono">{{ DESIGN_FILE_NAME }}</code>（已有同名文件会被覆盖），并复制提示词到剪贴板。
     </p>
 
-    <div v-if="!projects.projects.length" class="state">
-      还没有项目。先把项目加进来，再回来应用。
-    </div>
-    <template v-else>
-      <div class="list" role="radiogroup" aria-label="选择项目">
-        <button
-          v-for="project in projects.projects"
-          :key="project.id"
-          class="list__item"
-          type="button"
-          role="radio"
-          :aria-checked="selectedId === project.id"
-          :class="{ 'is-active': selectedId === project.id }"
-          @click="selectedId = project.id"
-        >
-          <span class="list__name">{{ project.name }}</span>
-          <span class="list__path mono" :title="project.path">{{ project.path }}</span>
-        </button>
-      </div>
-      <p class="hint">
-        <template v-if="selected">
-          写到 <code class="mono">{{ selected.path }}\{{ DESIGN_FILE_NAME }}</code>
-        </template>
-        <template v-else>
-          选一个项目。规范按这套设计的 token 现生成，不联网。
-        </template>
+    <ProjectPickList
+      v-model="selectedIds"
+      :projects="projects.projects"
+      :disabled="applying"
+      empty-text="还没有项目。先把项目加进来，再回来应用。"
+    />
+    <p v-if="selected.length === 1" class="hint">
+      写到 <code class="mono">{{ selected[0].path }}\{{ DESIGN_FILE_NAME }}</code>
+    </p>
+    <div v-if="failures.length" class="failures" role="status">
+      <p v-for="failure in failures" :key="failure.id">
+        {{ failure.name }}：{{ failure.error }}
       </p>
-    </template>
+    </div>
 
     <template #footer>
-      <el-button @click="visible = false">
+      <el-button :disabled="applying" @click="visible = false">
         取消
       </el-button>
-      <el-button type="primary" :loading="applying" :disabled="!selectedId" @click="submit">
-        写入并复制提示词
+      <el-button type="primary" :loading="applying" :disabled="!selected.length" @click="submit">
+        写入并复制提示词{{ selected.length ? `（${selected.length}）` : '' }}
       </el-button>
     </template>
   </AppDialog>
@@ -133,63 +152,21 @@ async function submit(): Promise<void> {
   line-height: 1.7;
 }
 
-.state {
-  padding: var(--sp-4) 0;
-  color: var(--ink-3);
-  font-size: var(--fs-meta);
-}
-
-.list {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  max-height: 320px;
-  overflow-y: auto;
-  margin-bottom: var(--sp-3);
-}
-
-.list__item {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  padding: var(--sp-2) var(--sp-3);
-  border: 1px solid transparent;
-  border-radius: var(--r-md);
-  background: transparent;
-  text-align: left;
-  cursor: pointer;
-}
-
-.list__item:hover {
-  background: var(--bg-inset);
-}
-
-.list__item.is-active {
-  background: var(--bg-selected);
-  border-color: var(--border);
-}
-
-.list__name {
-  color: var(--ink);
-  font-size: var(--fs-meta);
-  font-weight: 600;
-}
-
-.list__path {
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--ink-3);
-  font-size: var(--fs-micro);
-}
-
 .hint {
-  margin: 0;
+  margin: var(--sp-3) 0 0;
   color: var(--ink-3);
   font-size: var(--fs-micro);
   line-height: 1.6;
   overflow-wrap: anywhere;
+}
+.failures {
+  margin-top: var(--sp-3);
+  color: var(--st-fail);
+  font-size: var(--fs-meta);
+  overflow-wrap: anywhere;
+}
+
+.failures p {
+  margin: var(--sp-1) 0 0;
 }
 </style>

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { AiSessionGroup } from '@workbench/ai'
-import { CaretRight, ChatLineSquare, Delete, FolderOpened, Plus } from '@element-plus/icons-vue'
+import { CaretRight, ChatDotRound, ChatLineSquare, Delete, FolderOpened, Plus } from '@element-plus/icons-vue'
 /**
  * 左栏那棵会话树：**两层** —— 第一层是项目（一个工作目录），第二层是那个目录下的会话。
  *
@@ -20,6 +20,7 @@ import { CaretRight, ChatLineSquare, Delete, FolderOpened, Plus } from '@element
  * 没必要像笔记树那样落盘。
  */
 import { computed, ref } from 'vue'
+import EmptyState from '@/components/EmptyState.vue'
 
 const props = defineProps<{
   groups: AiSessionGroup[]
@@ -57,16 +58,15 @@ const running = computed(() => new Set(props.runningIds))
 
 <template>
   <div class="tree scrollbar">
-    <!-- 一个会话都还没有：按别处那副空态给一句说明（起一段在那颗「+」与中间那条
+    <!-- 一个会话都还没有：一张小图 + 一句事实（起一段在那颗「+」与中间那条
          composer 上，这儿只把「项目 → 会话」这层关系说清楚） -->
-    <div v-if="!groups.length" class="tree__empty">
-      <p class="tree__empty-title">
-        还没有会话
-      </p>
-      <p class="tree__empty-hint">
-        点上面的「+」开一段新的：一个目录是一个「项目」，它下面可以有好几段对话。
-      </p>
-    </div>
+    <EmptyState
+      v-if="!groups.length"
+      compact
+      :icon="ChatDotRound"
+      text="还没有会话"
+      hint="点上面的「+」开一段新的：一个目录是一个「项目」，它下面可以有好几段对话。"
+    />
 
     <div v-for="group in groups" :key="group.dir" class="tree__group">
       <!-- 项目那一行：点整行是收起 / 摊开（这一个目录里有哪些会话） -->
@@ -226,24 +226,4 @@ const running = computed(() => new Set(props.runningIds))
 }
 
 /* 一个会话都没有时那一块：与笔记树 / 视频树同一副空态（标题一行 + 一句说明，不成块、不描边） */
-.tree__empty {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: var(--sp-3);
-  padding: var(--sp-2) var(--sp-1);
-}
-
-.tree__empty-title {
-  margin: 0;
-  color: var(--ink-2);
-  font-size: var(--fs-meta);
-}
-
-.tree__empty-hint {
-  margin: 0;
-  color: var(--ink-3);
-  font-size: var(--fs-micro);
-  line-height: 1.7;
-}
 </style>

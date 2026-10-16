@@ -1,6 +1,7 @@
 import { resolve } from 'node:path'
 import vue from '@vitejs/plugin-vue'
 import { defineConfig } from 'vite'
+import { pdfjsAssets } from './scripts/sync-pdfjs-assets.mjs'
 import { vditorAssets } from './scripts/sync-vditor-assets.mjs'
 
 /**
@@ -18,8 +19,9 @@ export default defineConfig({
       '@': resolve(import.meta.dirname, 'src/renderer/src'),
     },
   },
-  // vditorAssets 把 Vditor 的图标 / 语言包 / 内容主题等复制到 public/（见 scripts/sync-vditor-assets.mjs）
-  plugins: [vue(), vditorAssets()],
+  // vditorAssets 把 Vditor 的图标 / 语言包 / 内容主题等复制到 public/（见 scripts/sync-vditor-assets.mjs）；
+  // pdfjsAssets 同理，带的是 pdf.js 运行时按需取的 cmaps / 标准字体 / wasm（见 scripts/sync-pdfjs-assets.mjs）
+  plugins: [vue(), vditorAssets(), pdfjsAssets()],
   // Tauri 用自定义协议从根路径提供静态资源；相对路径在 http:// 与 tauri:// 下都不会出错
   base: './',
   build: {

@@ -11,6 +11,7 @@ import { AI_PROVIDER_PRESETS } from '@workbench/ai'
  * 它自己不留状态：搜什么、挑了什么都是父组件的事（挑完就进下一步）。
  */
 import { computed, ref } from 'vue'
+import EmptyState from '@/components/EmptyState.vue'
 
 const emit = defineEmits<{
   /** 挑了一个预设（地址与形态都由它带齐） */
@@ -87,9 +88,13 @@ const showCustom = computed(() => {
       </button>
     </div>
 
-    <p v-if="!showCustom && !matched.length" class="preset__empty">
-      没有匹配的服务。要自己填地址就清空上面这一栏，用第一格的「自定义端点」。
-    </p>
+    <EmptyState
+      v-if="!showCustom && !matched.length"
+      compact
+      :icon="Search"
+      text="没有匹配的服务"
+      hint="要自己填地址就清空上面这一栏，用第一格的「自定义端点」。"
+    />
   </div>
 </template>
 
@@ -172,11 +177,5 @@ const showCustom = computed(() => {
   font-size: var(--fs-micro);
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.preset__empty {
-  margin: 0;
-  color: var(--ink-3);
-  font-size: var(--fs-micro);
 }
 </style>

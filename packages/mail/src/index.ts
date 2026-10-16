@@ -31,6 +31,6 @@ export {
 export type { MailAccount, MailFolder } from './mail'
 export { buildMime, contentTypeForFileName, formatMailSize, MAX_MESSAGE_BYTES } from './mime'
 export type { BuildMimeInput, MailAttachmentInput } from './mime'
-export { accountTag, attachmentBadge, attachmentDataUrl, attachmentKind, attachmentText, displayDate, displayRecipients, displaySender, htmlBody, isImageAttachment, mailTime, parseMessage, preferExtendedFilenames, recipientAddress, recipientDisplay, senderAddress } from './parse'
+export { accountTag, attachmentBadge, attachmentDataUrl, attachmentHtml, attachmentKind, attachmentText, attachmentTint, displayDate, displayRecipients, displaySender, htmlBody, isImageAttachment, mailTime, parseMessage, preferExtendedFilenames, recipientAddress, recipientDisplay, senderAddress } from './parse'
 export type { MailAttachmentKind, ParsedAttachment, ParsedMail } from './parse'
 export { decodeEncodedWords, encodeRfc2047Word } from './rfc2047'

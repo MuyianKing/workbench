@@ -17,6 +17,7 @@ import { kbEntryTree, kbFolderChain, kbTreeFolderIds } from '@workbench/kb'
  * 搜索命中是逐字变化的，重建出的树只含匹配项，摊开才看得见都搜到了哪儿。
  */
 import { computed, ref, watch } from 'vue'
+import EmptyState from '@/components/EmptyState.vue'
 
 const props = defineProps<{
   entries: KbEntryMeta[]
@@ -115,13 +116,20 @@ function statusText(status: string): string {
       size="small"
     />
 
-    <!-- 两种空态分开说：库里还没有条目，和搜出来的没有 -->
-    <div v-if="!entries.length" class="kb-tree__empty">
-      <p>kb 里还没有条目。把原始资料整理进 kb 后，这里就是全库目录。</p>
-    </div>
-    <div v-else-if="!filtered.length" class="kb-tree__empty">
-      <p>没有匹配「{{ searchText }}」的条目。</p>
-    </div>
+    <!-- 两种空态分开说：库里还没有条目，和搜出来的没有（都配一张小图，见 EmptyState） -->
+    <EmptyState
+      v-if="!entries.length"
+      compact
+      :icon="Document"
+      text="kb 里还没有条目"
+      hint="把原始资料整理进 kb 后，这里就是全库目录。"
+    />
+    <EmptyState
+      v-else-if="!filtered.length"
+      compact
+      :icon="Search"
+      :text="`没有匹配「${searchText}」的条目`"
+    />
 
     <el-tree
       v-else
@@ -165,18 +173,6 @@ function statusText(status: string): string {
   gap: var(--sp-2);
   min-height: 0;
   flex: 1;
-}
-
-.kb-tree__empty {
-  padding: var(--sp-4) var(--sp-2);
-  text-align: center;
-}
-
-.kb-tree__empty p {
-  margin: 0;
-  color: var(--ink-3);
-  font-size: var(--fs-meta);
-  line-height: 1.7;
 }
 
 /**

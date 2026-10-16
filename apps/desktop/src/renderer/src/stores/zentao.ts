@@ -1,10 +1,10 @@
 import type { ZentaoBugDiff } from '@workbench/zentao'
-import type { Result, ZentaoAssignInput, ZentaoBrowse, ZentaoBug, ZentaoBugDetail, ZentaoBugList, ZentaoBuild, ZentaoResolveInput, ZentaoSession, ZentaoUser } from '@/types'
+import type { Result, ZentaoBrowse, ZentaoBug, ZentaoBugList, ZentaoSession } from '@/types'
 import { fail } from '@workbench/core'
 import { diffZentaoBugs, sanitizeZentaoPollMinutes, zentaoBugUrl } from '@workbench/zentao'
 import { defineStore } from 'pinia'
 import { ref, watch } from 'vue'
-import { assignBug, bugDetail, bugs as fetchBugs, builds as fetchBuilds, image as fetchImage, session as fetchSession, users as fetchUsers, onCheck, onNotifyClick, watch as registerWatch, resolveBug, notify as sendNotify, login as zentaoLogin } from '@/workbench/zentao'
+import { bugs as fetchBugs, session as fetchSession, onCheck, onNotifyClick, watch as registerWatch, notify as sendNotify, login as zentaoLogin } from '@/workbench/zentao'
 import { useNavStore } from './nav'
 import { useSettingsStore } from './settings'
 /**
@@ -15,6 +15,9 @@ import { useSettingsStore } from './settings'
  * 与上一轮**编号全集**比出新增 → 有新增才调 `zentaoNotify` 弹系统通知（点击唤出主窗口并切回本页）。
  * 取数间隔与新增判定放在这一侧，是因为窗口收进托盘后 WebView 的定时器会被节流 ——
  * 计时必须由 Rust 醒，而分页与判定已经有带单测的域包，不在 Rust 里重写一份。
+ *
+ * **只看列表，不开详情**：Bug 的正文与历史都在禅道页面里看 —— 点标题交给系统浏览器
+ * （`zentaoBugUrl` 只造站内链接，见 openBug）。改动禅道数据同样在浏览器里做。
  *
  * **基线（baselineIds）**：第一轮成功只记不报（否则「第一次打开」会把现有 Bug 全报成新增）；
  * 取数失败不推进基线（下一轮照旧能认出中间新增的）；比对的是编号全集而不是最大编号 ——
@@ -49,27 +52,8 @@ export const useZentaoStore = defineStore('zentao', () => {
   /** 列表取回来了、但系统通知没发出去（下一轮后台检查会重试） */
   const notifyError = ref('')
 
-  // ---------- 列表筛选 ----------
-
   /** 列表口径：指派给我的 / 未解决 / 未关闭（切换即重取） */
   const browse = ref<ZentaoBrowse>('assigntome')
-
-  // ---------- 详情（弹窗） ----------
-
-  /** 当前打开的 Bug 编号；null = 没开 */
-  const activeBugId = ref<number | null>(null)
-  const detail = ref<ZentaoBugDetail | null>(null)
-  const detailLoading = ref(false)
-  const detailError = ref('')
-  /** 指派候选人 / 版本号：详情弹窗里要用，取一次缓存（换会话清空） */
-  const users = ref<ZentaoUser[]>([])
-  const builds = ref<ZentaoBuild[]>([])
-  /** 正文图片：站内路径 → data URL（取不到的记空串，界面显示占位、不反复重试） */
-  const images = ref<Record<string, string>>({})
-  /** 指派 / 解决正在提交（挡重复点击、给按钮转圈） */
-  const submitting = ref(false)
-  /** 提交结果的一句话（成功也回一句：写操作不可逆，明确告诉用户结果） */
-  const actionMessage = ref('')
 
   /** 上一轮成功取回的编号全集；null = 还没建立基线 */
   let baselineIds: number[] | null = null
@@ -112,17 +96,6 @@ export const useZentaoStore = defineStore('zentao', () => {
     return result
   }
 
-  /** 会话换了账号 / 部署：详情缓存、候选人与版本都作废 */
-  function resetDetailCache(): void {
-    activeBugId.value = null
-    detail.value = null
-    detailError.value = ''
-    users.value = []
-    builds.value = []
-    images.value = {}
-    actionMessage.value = ''
-  }
-
   /** 把这一轮结果并进状态：推进基线，后台那一轮再顺手把新增通知出去 */
   async function applyResult(list: ZentaoBugList, background: boolean): Promise<void> {
     const current = session.value
@@ -131,7 +104,6 @@ export const useZentaoStore = defineStore('zentao', () => {
       baselineIds = null
       baselineIdentity = identity
       pendingNotify = []
-      resetDetailCache()
     }
     const diff: ZentaoBugDiff = diffZentaoBugs(baselineIds, list.bugs)
     bugList.value = list
@@ -215,7 +187,7 @@ export const useZentaoStore = defineStore('zentao', () => {
     void runFetch(true)
   }
 
-  /** 打开禅道：不带 bug 就开部署首页，带了就开那条 Bug 的详情（详情在系统浏览器里看） */
+  /** 打开禅道：不带 bug 就开部署首页，带了就开那条 Bug 的页面（正文与历史都在那边看） */
   async function openBug(bug?: ZentaoBug): Promise<void> {
     const current = session.value
     if (!current)
@@ -231,8 +203,6 @@ export const useZentaoStore = defineStore('zentao', () => {
     }
   }
 
-  // ---------- 列表筛选 ----------
-
   /** 切列表口径：不一样才重取（指派给我的 / 未解决 / 未关闭） */
   function setBrowse(next: ZentaoBrowse): void {
     if (browse.value === next)
@@ -242,106 +212,6 @@ export const useZentaoStore = defineStore('zentao', () => {
     bugList.value = null
     void refresh()
   }
-
-  // ---------- 详情 ----------
-
-  /**
-   * 打开某条 Bug 的详情弹窗并取详情（含历史）。候选人 / 版本按需取一次并缓存；
-   * 换会话时缓存已清。详情失败不清空已打开的那条 —— 就地显示原因。
-   */
-  async function openDetail(bugId: number): Promise<void> {
-    activeBugId.value = bugId
-    detail.value = null
-    detailError.value = ''
-    actionMessage.value = ''
-    await loadDetail(bugId)
-    const current = session.value
-    if (!current)
-      return
-    // 候选人（指派下拉）与版本号（解决下拉）：取不到只是下拉空着，不挡详情
-    if (!users.value.length) {
-      const result = await fetchUsers(current.id)
-      if (result.ok && result.data)
-        users.value = result.data
-    }
-    await ensureBuilds()
-    await loadStepImages()
-  }
-
-  /** 按当前详情的所属项目取版本号清单（项目编号为 0 时跳过 —— 取不到就不摆版本下拉） */
-  async function ensureBuilds(): Promise<void> {
-    const current = session.value
-    const projectId = detail.value?.projectId ?? 0
-    if (!current || !projectId || builds.value.length)
-      return
-    const result = await fetchBuilds(current.id, projectId)
-    if (result.ok && result.data)
-      builds.value = result.data
-  }
-
-  async function loadDetail(bugId: number): Promise<void> {
-    const current = session.value
-    if (!current)
-      return
-    detailLoading.value = true
-    detailError.value = ''
-    try {
-      const result = await bugDetail(current.id, bugId)
-      if (activeBugId.value !== bugId)
-        return
-      if (!result.ok || !result.data) {
-        detailError.value = readableError(result.error || '读取 Bug 详情失败')
-        return
-      }
-      detail.value = result.data
-    }
-    finally {
-      if (activeBugId.value === bugId)
-        detailLoading.value = false
-    }
-  }
-
-  /** 关掉详情弹窗 */
-  function closeDetail(): void {
-    activeBugId.value = null
-    detail.value = null
-    detailError.value = ''
-    actionMessage.value = ''
-  }
-
-  /**
-   * 提交指派 / 解决（都会真实修改禅道数据）。成功后：重新拉一次该条详情与当前列表 ——
-   * 状态、指派人、历史都会变，就地刷新比让用户自己再点一次靠谱。失败只提示，不动界面数据。
-   */
-  async function submitAction(
-    kind: 'assign' | 'resolve',
-    input: ZentaoAssignInput | ZentaoResolveInput,
-  ): Promise<boolean> {
-    const current = session.value
-    if (!current || submitting.value)
-      return false
-    submitting.value = true
-    actionMessage.value = ''
-    try {
-      const result = kind === 'assign'
-        ? await assignBug(current.id, input as ZentaoAssignInput)
-        : await resolveBug(current.id, input as ZentaoResolveInput)
-      if (!result.ok) {
-        actionMessage.value = readableError(result.error || (kind === 'assign' ? '指派失败' : '解决失败'))
-        return false
-      }
-      actionMessage.value = kind === 'assign' ? '已指派' : '已解决'
-      await loadDetail(input.bugId)
-      await refresh()
-      return true
-    }
-    finally {
-      submitting.value = false
-    }
-  }
-
-  const assign = (input: ZentaoAssignInput) => submitAction('assign', input)
-  const resolve = (input: ZentaoResolveInput) => submitAction('resolve', input)
 
   /**
    * 起后台检查（App.vue 挂载时调一次）：订阅要**先挂上**、再登记周期 ——
@@ -372,23 +242,6 @@ export const useZentaoStore = defineStore('zentao', () => {
     })()
   }
 
-  /**
-   * 取正文里的站内图片（宿主带会话取回、内联成 data URL）。逐张来、取过就不重复；
-   * 取不到的记空串 —— 界面给一个占位，不因为一张图挡着正文。
-   */
-  async function loadStepImages(): Promise<void> {
-    const current = session.value
-    const blocks = detail.value?.stepBlocks ?? []
-    if (!current)
-      return
-    for (const block of blocks) {
-      if (block.kind !== 'image' || block.src in images.value)
-        continue
-      const result = await fetchImage(current.id, block.src)
-      images.value = { ...images.value, [block.src]: result.ok ? (result.data ?? '') : '' }
-    }
-  }
-
   return {
     session,
     bugList,
@@ -397,22 +250,9 @@ export const useZentaoStore = defineStore('zentao', () => {
     notifyError,
     browse,
     setBrowse,
-    activeBugId,
-    detail,
-    detailLoading,
-    detailError,
-    users,
-    builds,
-    images,
-    submitting,
-    actionMessage,
     refresh,
     ensureLoaded,
     startWatch,
     openBug,
-    openDetail,
-    closeDetail,
-    assign,
-    resolve,
   }
 })

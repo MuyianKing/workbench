@@ -1,15 +1,14 @@
 <script setup lang="ts">
-import type { ZentaoAssignInput, ZentaoBrowse, ZentaoBug, ZentaoResolveInput } from '@/types'
+import type { ZentaoBrowse, ZentaoBug } from '@/types'
 import { Link, Refresh } from '@element-plus/icons-vue'
 import { ZENTAO_BROWSE_OPTIONS, zentaoPriorityColor, zentaoSeverityColor, zentaoStatusLabel } from '@workbench/zentao'
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted } from 'vue'
 import PanelLoading from '@/components/PanelLoading.vue'
-import ZentaoDetailDialog from '@/components/ZentaoDetailDialog.vue'
 import { useZentaoStore } from '@/stores/zentao'
 
 /**
- * 禅道页：会话、取数、详情与写操作都在 store 里（它同时服务后台检查与通知点击），
- * 这一层只管展示与把用户的操作转成 store 调用。
+ * 禅道页：会话与取数在 store 里（它同时服务后台检查与通知点击），这一层只管展示。
+ * Bug 的正文、历史与改动都在禅道页面里做 —— 点标题把那条 Bug 交给系统浏览器打开。
  */
 const store = useZentaoStore()
 const session = computed(() => store.session)
@@ -23,30 +22,8 @@ const checkedAtText = computed(() => {
   return Number.isNaN(date.getTime()) ? '' : date.toLocaleString('zh-CN', { hour12: false })
 })
 
-/** 详情弹窗的开合：store 里的 activeBugId 是「看哪条」，这里是「开没开」 */
-const detailOpen = ref(false)
-
 function openZentao(bug?: ZentaoBug): void {
   void store.openBug(bug)
-}
-
-function openDetail(bug: ZentaoBug): void {
-  detailOpen.value = true
-  void store.openDetail(bug.id)
-}
-
-function onDetailVisible(value: boolean): void {
-  detailOpen.value = value
-  if (!value)
-    store.closeDetail()
-}
-
-function onAssign(input: ZentaoAssignInput): void {
-  void store.assign(input)
-}
-
-function onResolve(input: ZentaoResolveInput): void {
-  void store.resolve(input)
 }
 
 onMounted(() => {
@@ -125,7 +102,7 @@ onMounted(() => {
               class="zentao-view__bug-title truncate"
               type="button"
               :title="row.title"
-              @click="openDetail(row)"
+              @click="openZentao(row)"
             >
               {{ row.title }}
             </button>
@@ -188,22 +165,6 @@ onMounted(() => {
         <span>更新于 {{ checkedAtText }}</span>
       </footer>
     </section>
-
-    <!-- 详情与它的两个写操作（指派 / 解决）都在弹窗里；AppDialog 负责遮罩与拖动 -->
-    <ZentaoDetailDialog
-      :model-value="detailOpen"
-      :detail="store.detail"
-      :loading="store.detailLoading"
-      :error="store.detailError"
-      :users="store.users"
-      :builds="store.builds"
-      :submitting="store.submitting"
-      :message="store.actionMessage"
-      :images="store.images"
-      @update:model-value="onDetailVisible"
-      @assign="onAssign"
-      @resolve="onResolve"
-    />
   </main>
 </template>
 

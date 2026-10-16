@@ -779,10 +779,14 @@ body.is-resizing-video-float * {
 
 /**
  * 分段控件（`el-segmented`）：首页 Token 卡片的天/周/月、工作页的时间范围、工作日志弹窗的
- * 状态与编写/预览 —— 三处原来是各写一遍的「inset 容器 + 白色药丸」，现在共用这一个组件。
+ * 状态与编写/预览、禅道的列表口径 —— 这些原来是各写一遍的「inset 容器 + 药丸」，现在共用这一个组件。
  *
- * 这里把它调回原先那副样子：底色取 `--bg-inset`、选中项是浮起的白色药丸 + 主文字色，
- * 而不是 Element Plus 默认的主色实心块（彩色在这个界面只表达运行状态）。
+ * 外壳（底色 / 圆角 / 内边距）取原先那副样子：底色 `--bg-inset`、内层药丸与外壳同圆角。
+ * **选中项取主色实心**（`--el-color-primary` + `--el-color-white`，就是 Element Plus 的原样）——
+ * 这正是「主题色只接管交互态」里的那个选中态：配了主题色就是主题色高亮，没配时主色是
+ * tokens.css 那对中性值（亮色近黑、暗色近白），不引入任何彩色。
+ * 铺在色块上的文字色 `--el-color-white` 由 accent-color.ts 按主色深浅挑白字还是近黑字
+ * （见 inkOnAccent），所以浅色的主题色上也读得清 —— **别改成写死的 `#fff`**。
  * 排版（字号 / 内边距 / 外边距）由各调用方在自己的 scoped 样式里微调。
  */
 .el-segmented {
@@ -791,10 +795,10 @@ body.is-resizing-video-float * {
   --el-segmented-item-hover-color: var(--ink);
   --el-segmented-item-hover-bg-color: transparent;
   --el-segmented-item-active-bg-color: transparent;
-  --el-segmented-item-selected-bg-color: var(--bg-surface);
-  --el-segmented-item-selected-color: var(--ink);
+  --el-segmented-item-selected-bg-color: var(--el-color-primary);
+  --el-segmented-item-selected-color: var(--el-color-white);
   --el-segmented-padding: 2px;
-  /* 默认那 32px 的最小高度比原先的页签高出一截，会把标题行撑开 */
+  /* 默认那 32px 的最小高度比原先的页签高出一截，会把标题栏撑开 */
   min-height: 0;
   border-radius: var(--r-pill);
 }
@@ -1149,31 +1153,24 @@ body.is-resizing-video-float * {
   height: min(820px, calc(100vh - var(--h-titlebar) - 48px));
 }
 
-.el-dialog__body.mail-preview-dialog__body {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  padding: 0;
-  overflow: hidden;
-}
-
 /**
- * 禅道 Bug 详情弹窗（components/ZentaoDetailDialog.vue 上的 class，正文另挂 body-class）：
- * 两栏（左信息 + 正文 / 右历史）各自滚，动作按钮钉在脚注那一行。
+ * HTML 附件那一档（`--wide`）：那是一整页别人的东西，按窗口给足地方 ——
+ * 高度在这儿定死（宽度由组件的 `width` 传成行内样式，改不动）。
  *
- * 高度**不写死**：内容短就矮（内容不长却占满一屏是最难看的），只给一个上限 ——
- * 写死高度会留出半屏空白。上限要**减掉 EP 自己那份上边距**（`--el-dialog-margin-top`，
- * 默认 15vh）+ 一点下沿，否则窗口一矮，底部那行按钮就被挤出可视区（720 高的窗口里实测过）。
- * 内容超过上限时两栏各自滚（`.detail__grid` 是 flex 项、带 min-height: 0）。
- * 正文内边距与整窗滚动收掉，版式交给组件自己排。
+ * **上边距必须一起改**：EP 自己那条是 `margin: var(--el-dialog-margin-top, 15vh) auto 50px`，
+ * 15vh + 整屏高 + 50px 一定撑破视口，对话框自己就成了「比窗口还高」的那一个 ——
+ * 页脚的「关闭 / 另存为」要滚遮罩才看得见（实测：截图里对话框一直铺到窗口最底下）。
+ * 这里把上边距压到应用标题栏的高度（弹层挂在 body 上、标题栏浮在遮罩之上，
+ * 上边距小于 36px 就会被标题栏压住），下边距留 12px，加起来正好塞进一屏。
+ * 具体度 0,2,0 高于 EP 那条 0,1,0，不靠文件顺序取胜（见本文件开头那节）。
  */
-.el-dialog.zentao-dialog {
-  max-height: calc(100vh - var(--el-dialog-margin-top, 15vh) - 32px);
-  padding: 0;
-  overflow: hidden;
+.el-dialog.mail-preview-dialog--wide {
+  height: calc(100vh - var(--h-titlebar) - 24px);
+  margin-top: var(--h-titlebar);
+  margin-bottom: 12px;
 }
 
-.el-dialog__body.zentao-dialog__body {
+.el-dialog__body.mail-preview-dialog__body {
   display: flex;
   flex-direction: column;
   min-height: 0;

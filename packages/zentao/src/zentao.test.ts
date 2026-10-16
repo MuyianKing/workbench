@@ -3,23 +3,13 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   diffZentaoBugs,
   fetchZentaoBugs,
-  normalizeAssignInput,
-  normalizeResolveInput,
-  parseZentaoBugDetail,
-  parseZentaoBuilds,
-  parseZentaoUsers,
   sanitizeZentaoPollMinutes,
   ZENTAO_DEFAULT_URL,
   ZENTAO_POLL_MINUTES_DEFAULT,
   zentaoBugUrl,
-  zentaoDateTime,
   zentaoPriorityColor,
-  zentaoResolutionLabel,
-  zentaoRichText,
   zentaoSeverityColor,
-  zentaoStationImagePath,
   zentaoStatusLabel,
-  zentaoStepBlocks,
 } from './index'
 
 function product(id: unknown, name = `产品 ${id}`) {
@@ -320,107 +310,6 @@ describe('zentaoStatusLabel', () => {
   })
 })
 
-describe('parseZentaoBugDetail', () => {
-  const raw = {
-    id: '278',
-    title: '医生工作量统计问题',
-    product: '1',
-    productName: '手麻系统',
-    project: '9',
-    status: 'resolved',
-    severity: '2',
-    pri: 3,
-    type: 'others',
-    openedBy: 'zhudl',
-    openedDate: '2026-10-12 13:34:57',
-    assignedTo: 'yangfeng',
-    assignedDate: '2026-10-14 09:51:48',
-    resolvedBy: 'wangqx',
-    resolvedDate: '2026-10-15 10:00:00',
-    resolution: 'fixed',
-    closedBy: '',
-    closedDate: '',
-    steps: '<p>[步骤]</p>',
-    actions: [
-      {
-        id: '10',
-        actor: '张三',
-        action: 'assigned',
-        date: '2026-10-14 09:51:48',
-        comment: '麻烦看下',
-        desc: '2026-10-14 由 张三 指派',
-        history: [{ field: 'assignedTo', old: '', new: 'yangfeng' }, { field: 'bad' }],
-      },
-      { action: '', id: '11' },
-      'not-an-object',
-    ],
-  }
-
-  it('白名单拷贝字段，正文与历史按纯文本保留', () => {
-    const d = parseZentaoBugDetail(raw)
-    expect(d.id).toBe(278)
-    expect(d.productId).toBe(1)
-    expect(d.projectId).toBe(9)
-    expect(d.status).toBe('resolved')
-    expect(d.severity).toBe(2)
-    expect(d.pri).toBe(3)
-    expect(d.assignedTo).toBe('yangfeng')
-    expect(d.resolution).toBe('fixed')
-    expect(d.steps).toBe('[步骤]')
-    expect(d.actions).toHaveLength(1)
-    expect(d.actions[0].actor).toBe('张三')
-    // 有 field 就算一条变更（old/new 缺失给空串）；没 field 的丢掉
-    expect(d.actions[0].history).toEqual([{ field: 'assignedTo', old: '', new: 'yangfeng' }, { field: 'bad', old: '', new: '' }])
-  })
-
-  it('缺字段给安全默认，id 无效直接抛错', () => {
-    const d = parseZentaoBugDetail({ id: '5', title: 't' })
-    expect(d.productId).toBe(0)
-    expect(d.projectId).toBe(0)
-    expect(d.status).toBe('active')
-    expect(d.severity).toBeNull()
-    expect(d.actions).toEqual([])
-    expect(() => parseZentaoBugDetail({ title: 't' })).toThrow()
-    expect(() => parseZentaoBugDetail(null)).toThrow()
-  })
-})
-
-describe('parseZentaoUsers / parseZentaoBuilds', () => {
-  it('按账号去重、缺真实姓名回落到账号', () => {
-    const users = parseZentaoUsers([{ account: 'a', realname: '甲' }, { account: 'a', realname: '甲二' }, { account: '' }, 'x', { account: 'b' }])
-    expect(users).toEqual([{ account: 'a', realname: '甲' }, { account: 'b', realname: 'b' }])
-    expect(() => parseZentaoUsers('nope')).toThrow()
-  })
-
-  it('构建号按 id 去重、缺名字回落到 #id', () => {
-    const builds = parseZentaoBuilds([{ id: '8', name: 'v1.0' }, { id: 8, name: 'dup' }, { id: '9' }, { id: 'bad' }])
-    expect(builds).toEqual([{ id: 8, name: 'v1.0' }, { id: 9, name: '#9' }])
-    expect(() => parseZentaoBuilds({})).toThrow()
-  })
-})
-
-describe('指派 / 解决的入参校验', () => {
-  it('指派要求有效 bugId 与非空账号', () => {
-    expect(normalizeAssignInput({ bugId: 5, assignedTo: ' alice ', comment: '看下' })).toEqual({ bugId: 5, assignedTo: 'alice', comment: '看下' })
-    expect(() => normalizeAssignInput({ bugId: 5, assignedTo: '  ', comment: '' })).toThrow()
-    expect(() => normalizeAssignInput({ bugId: 0, assignedTo: 'a', comment: '' })).toThrow()
-  })
-
-  it('解决要求合法 resolution，fixed/duplicate 各有必填项', () => {
-    expect(normalizeResolveInput({ bugId: 5, resolution: 'fixed', resolvedBuild: '8', duplicateBug: '', comment: 'ok' })).toEqual({ bugId: 5, resolution: 'fixed', resolvedBuild: '8', duplicateBug: '', comment: 'ok' })
-    expect(() => normalizeResolveInput({ bugId: 5, resolution: 'fixed', resolvedBuild: '', duplicateBug: '', comment: '' })).toThrow()
-    expect(() => normalizeResolveInput({ bugId: 5, resolution: 'duplicate', resolvedBuild: '', duplicateBug: '', comment: '' })).toThrow()
-    expect(normalizeResolveInput({ bugId: 5, resolution: 'bydesign', resolvedBuild: '', duplicateBug: '', comment: '' }).resolution).toBe('bydesign')
-    expect(() => normalizeResolveInput({ bugId: 5, resolution: 'nope', resolvedBuild: '', duplicateBug: '', comment: '' })).toThrow()
-  })
-
-  it('解决方案文案表覆盖常用取值', () => {
-    expect(zentaoResolutionLabel('fixed')).toBe('已解决')
-    expect(zentaoResolutionLabel('willnotfix')).toBe('不予解决')
-    expect(zentaoResolutionLabel('unknown-x')).toBe('unknown-x')
-  })
-})
-
 describe('产品清单来自账号资料（/v1/products 为空时的正路）', () => {
   it('产品页只给 id 时，产品名按需补取且只取一次', async () => {
     const nameCalls: number[] = []
@@ -486,115 +375,5 @@ describe('等级色阶（与禅道页面一套）', () => {
   it.each([null, undefined, 9, -1, 1.5])('没有对应等级的 %j 回 null', (level) => {
     expect(zentaoSeverityColor(level)).toBeNull()
     expect(zentaoPriorityColor(level)).toBeNull()
-  })
-})
-
-describe('富文本 → 纯文本（正文与历史说明）', () => {
-  it('去标签、按块级断行、图片给占位', () => {
-    const html = '<p>[步骤]</p><p></p><p>[结果]</p><img onload="x()" src="/zentao/index.php?m=file&f=read" alt="f.png" />'
-    const text = zentaoRichText(html)
-    expect(text).not.toContain('<')
-    expect(text).not.toContain('onload')
-    expect(text).toContain('[步骤]')
-    expect(text).toContain('[结果]')
-    expect(text).toContain('[图片]')
-    // 连续空行收敛成一行
-    expect(text).not.toMatch(/\n{3,}/)
-  })
-
-  it('去掉动作说明里的 markdown 加粗，实体解码', () => {
-    expect(zentaoRichText('由 **<strong>刘家辉</strong>** 创建')).toBe('由 刘家辉 创建')
-    expect(zentaoRichText('指派给 <strong>王勤学</strong>。')).toBe('指派给 王勤学。')
-    expect(zentaoRichText('a &amp; b &lt;x&gt; &nbsp;c')).toBe('a & b <x> c')
-    // 标签内容不会被当成 HTML 执行，只是文本
-    expect(zentaoRichText('<script>alert(1)</script>文本')).toContain('文本')
-  })
-
-  it.each([null, undefined, '', '   ', 42, {}])('空值与非法值给空串：%j', (value) => {
-    expect(zentaoRichText(value)).toBe('')
-  })
-
-  it('详情解析时就把 steps 与历史说明压平', () => {
-    const detail = parseZentaoBugDetail({
-      id: '1',
-      title: 't',
-      steps: '<p>第一段</p><p>第二段</p>',
-      actions: [{ id: '2', action: 'assigned', desc: '由 **<strong>甲</strong>** 指派' }],
-    })
-    expect(detail.steps).toBe('第一段\n第二段')
-    expect(detail.actions[0].desc).toBe('由 甲 指派')
-  })
-})
-
-describe('正文分块与图片地址闸门', () => {
-  it('把文字与图片切成块，图片只留站内路径', () => {
-    const html = '<p>[步骤]</p><p><img src="/zentao/index.php?m=file&amp;f=read&amp;fileID=370&amp;t=png" alt="f.png" /></p><p>[结果]</p>'
-    const blocks = zentaoStepBlocks(html, 'http://115.159.41.157:81/zentao/')
-    expect(blocks.map(b => b.kind)).toEqual(['text', 'image', 'text'])
-    expect(blocks[0]).toEqual({ kind: 'text', text: '[步骤]' })
-    expect(blocks[1]).toEqual({ kind: 'image', src: '/zentao/index.php?m=file&f=read&fileID=370&t=png', alt: 'f.png' })
-    expect(blocks[2]).toEqual({ kind: 'text', text: '[结果]' })
-  })
-
-  it('站外图片一律丢掉（服务端内容不能把请求带去别的主机）', () => {
-    expect(zentaoStationImagePath('http://evil.example/x.png', 'https://zt.example/zentao')).toBeNull()
-    expect(zentaoStationImagePath('//evil.example/x.png', 'https://zt.example')).toBeNull()
-    expect(zentaoStationImagePath('data:image/png;base64,AAAA')).toBeNull()
-    expect(zentaoStationImagePath('javascript:alert(1)')).toBeNull()
-    expect(zentaoStationImagePath('/x.png')).toBe('/x.png')
-    // 同源绝对地址收成站内路径；不同源丢掉
-    expect(zentaoStationImagePath('https://zt.example/zentao/file.php?id=1', 'https://zt.example/zentao')).toBe('/zentao/file.php?id=1')
-    expect(zentaoStationImagePath('https://other.example/file.php?id=1', 'https://zt.example/zentao')).toBeNull()
-    // 没有 baseUrl 时只认相对路径
-    expect(zentaoStationImagePath('https://zt.example/x.png')).toBeNull()
-  })
-
-  it('详情解析时给出 stepBlocks，图片地址同样过闸门', () => {
-    const detail = parseZentaoBugDetail({
-      id: '1',
-      title: 't',
-      steps: '<p>看图</p><img src="/zentao/f.php?id=9"><img src="http://evil.example/x.png">',
-    })
-    expect(detail.stepBlocks.map(b => b.kind)).toEqual(['text', 'image'])
-    expect(detail.stepBlocks[1]).toMatchObject({ kind: 'image', src: '/zentao/f.php?id=9' })
-  })
-})
-
-describe('时间统一成本地可读格式', () => {
-  it('iSO（UTC）转成本地；已经是本地写法的原样返回', () => {
-    const iso = '2026-10-13T12:09:05Z'
-    const text = zentaoDateTime(iso)
-    expect(text).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/)
-    // 同一个时刻，只是换了写法
-    expect(new Date(text.replace(' ', 'T')).getTime()).toBe(new Date(iso).getTime())
-    expect(zentaoDateTime('2026-10-13 20:09:06')).toBe('2026-10-13 20:09:06')
-  })
-
-  it.each([null, undefined, '', '   ', '不是时间', 42])('认不出就原样/空：%j', (value) => {
-    expect(zentaoDateTime(value)).toBe(typeof value === 'string' ? value.trim() : '')
-  })
-})
-
-describe('历史说明：日期只出现一次', () => {
-  it('说明开头的日期被去掉（界面上已单独显示时间）', () => {
-    const detail = parseZentaoBugDetail({
-      id: '1',
-      title: 't',
-      actions: [
-        { id: '1', action: 'opened', date: '2026-10-13 20:09:06', desc: '2026-10-13 20:09:06, 由 <strong>刘家辉</strong> 创建。' },
-        { id: '2', action: 'assigned', date: '2026-10-13 20:09:06', desc: '2026-10-13 20:09:06, 由 <strong>刘家辉</strong> 指派给 <strong>王勤学</strong>。' },
-      ],
-    })
-    expect(detail.actions[0].desc).toBe('由 刘家辉 创建。')
-    expect(detail.actions[1].desc).toBe('由 刘家辉 指派给 王勤学。')
-  })
-
-  it('说明里不带头日期时原样保留', () => {
-    const detail = parseZentaoBugDetail({
-      id: '1',
-      title: 't',
-      actions: [{ id: '1', action: 'commented', date: 'd', desc: '补充一句说明。' }],
-    })
-    expect(detail.actions[0].desc).toBe('补充一句说明。')
   })
 })

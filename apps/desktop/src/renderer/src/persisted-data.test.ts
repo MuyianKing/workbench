@@ -36,7 +36,7 @@ describe('行为记忆那几项设置', () => {
     const value = sanitizeSettings({})
     expect(value.projectSort).toBe('recent')
     expect(value.workRange).toBe('today')
-    expect(value.workSort).toBe('time')
+    expect(value.workSort).toBe('project')
     expect(value.noteTreeExpanded).toEqual([])
   })
 
@@ -62,7 +62,7 @@ describe('行为记忆那几项设置', () => {
     })
     expect(value.projectSort).toBe('recent')
     expect(value.workRange).toBe('today')
-    expect(value.workSort).toBe('time')
+    expect(value.workSort).toBe('project')
     expect(value.noteTreeExpanded).toEqual(['工作/周报'])
   })
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { measureTextBlock, TEXT_LINE_HEIGHT, textLines } from './annotation-render'
+import { measureTextBlock, TEXT_LINE_HEIGHT, textBaselineOffset, textLines } from './annotation-render'
 
 /**
  * 量文字只用到 save / restore / font / measureText 这几样，所以给一个假上下文就够：
@@ -46,5 +46,33 @@ describe('measureTextBlock', () => {
     const three = measureTextBlock(stubContext(), '一\n\n一', 24)
     expect(two.height).toBe(Math.ceil(2 * 24 * TEXT_LINE_HEIGHT))
     expect(three.height).toBe(Math.ceil(3 * 24 * TEXT_LINE_HEIGHT))
+  })
+})
+
+describe('文字第一行的基线落点', () => {
+  /** 只用到 font 与 measureText 的字体度量那几项 */
+  const ctxWith = (ascent: number, descent: number): CanvasRenderingContext2D =>
+    ({
+      font: '',
+      measureText: () => ({ width: 10, fontBoundingBoxAscent: ascent, fontBoundingBoxDescent: descent }),
+    }) as unknown as CanvasRenderingContext2D
+
+  /**
+   * 这里测的是**量不到 DOM 时那条退路**（测试环境里没有 document，浏览器里走的是
+   * `domBaseline` 自己排一行那一条）。模型与输入框那一行的 CSS 行盒一致：
+   * 行盒高 = 字号 × 1.3，字号自带的 ascender + descender 居中落在行盒里，
+   * 基线 = 半行距 + ascender。
+   */
+  it('半行距 + ascender（与输入框里的那一行对齐）', () => {
+    // 24px 字号、ascender 24 / descender 6：行盒 31.2、内容高 30 → 半行距 0.6 → 基线 24.6
+    expect(textBaselineOffset(ctxWith(24, 6), 24)).toBeCloseTo((24 * TEXT_LINE_HEIGHT - 30) / 2 + 24, 6)
+    expect(textBaselineOffset(ctxWith(24, 6), 24)).toBeCloseTo(24.6, 6)
+  })
+
+  /** 度量给不出来时（0 / NaN）宁可粗估，也不要摆到行盒外面去 */
+  it('量不出字体度量时按字号兜底', () => {
+    const fallback = textBaselineOffset(ctxWith(0, 0), 24)
+    expect(fallback).toBeGreaterThan(24)
+    expect(fallback).toBeLessThan(24 * TEXT_LINE_HEIGHT)
   })
 })

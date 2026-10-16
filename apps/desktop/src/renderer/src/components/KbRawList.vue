@@ -15,6 +15,7 @@ import { kbRawSourceNameOf, kbRawTree, kbTreeFolderIds } from '@workbench/kb'
  * 也不碰文件。
  */
 import { computed, ref, watch } from 'vue'
+import EmptyState from '@/components/EmptyState.vue'
 
 const props = defineProps<{
   items: KbRawItem[]
@@ -148,13 +149,20 @@ function sourceHint(row: KbRawSourceRow): string {
         <span class="chip__count">{{ counts[key] }}</span>
       </button>
     </div>
-    <!-- 三种空态分开说：一个来源都没有、这一档筛不出东西 -->
-    <div v-if="!items.length && !sources.length" class="kb-raw__empty">
-      <p>还没有原始数据：添加一个来源文件夹，或者把要整理的文件放进库里的 data/raw。</p>
-    </div>
-    <div v-else-if="filtering && !filtered.length" class="kb-raw__empty">
-      <p>没有「{{ FILTER_LABELS[filter] }}」的原始数据。</p>
-    </div>
+    <!-- 两种空态分开说：一个来源都没有、这一档筛不出东西（都配一张小图，见 EmptyState） -->
+    <EmptyState
+      v-if="!items.length && !sources.length"
+      compact
+      :icon="Document"
+      text="还没有原始数据"
+      hint="添加一个来源文件夹，或者把要整理的文件放进库里的 data/raw。"
+    />
+    <EmptyState
+      v-else-if="filtering && !filtered.length"
+      compact
+      :icon="Document"
+      :text="`没有「${FILTER_LABELS[filter]}」的原始数据`"
+    />
 
     <el-tree
       v-else
@@ -234,18 +242,6 @@ function sourceHint(row: KbRawSourceRow): string {
   flex-wrap: wrap;
   align-items: center;
   gap: 2px;
-}
-
-.kb-raw__empty {
-  padding: var(--sp-4) var(--sp-2);
-  text-align: center;
-}
-
-.kb-raw__empty p {
-  margin: 0;
-  color: var(--ink-3);
-  font-size: var(--fs-meta);
-  line-height: 1.7;
 }
 
 /**

@@ -34,6 +34,7 @@ import { noteChain, noteDropAllowed, parentRel } from '@workbench/notes'
  * 空白区的菜单不弹、拖动关掉、空态那两颗新建按钮不出现 —— 口径见那个 prop 的注释。
  */
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import EmptyState from '@/components/EmptyState.vue'
 import PanelLoading from '@/components/PanelLoading.vue'
 import { useFloatingDismiss } from '@/composables/use-floating-dismiss'
 import { useFloatingPosition } from '@/composables/use-floating-position'
@@ -432,13 +433,15 @@ onBeforeUnmount(() => window.removeEventListener('dragend', onDragEnd))
     <!-- 首次扫盘还没回来：左栏先说一声，别让人对着半屏空白猜在干什么 -->
     <PanelLoading v-if="!loaded && !nodes.length" text="正在读取笔记…" />
 
-    <!-- 一篇都没有：直接给两颗按钮，别让人对着空白猜「怎么开始」 -->
-    <div v-if="loaded && !nodes.length" class="tree__empty">
-      <p class="tree__empty-title">
-        这个文件夹里还没有笔记
-      </p>
-      <!-- 只读下这两颗按钮与下面那句「右击新建」都不作数，一起收掉 -->
-      <div v-if="!readOnly" class="tree__empty-actions">
+    <!-- 一篇都没有：一张小图 + 两颗按钮（只读下按钮与下面那句「右击新建」都不作数，一起收掉） -->
+    <EmptyState
+      v-if="loaded && !nodes.length"
+      compact
+      :icon="Document"
+      text="这个文件夹里还没有笔记"
+      :hint="readOnly ? '' : '也可以在这里右击新建。把现成的 markdown 文件放进这个文件夹，点一下底部那颗刷新也能看到。'"
+    >
+      <template v-if="!readOnly" #actions>
         <el-button
           type="primary"
           size="small"
@@ -451,11 +454,8 @@ onBeforeUnmount(() => window.removeEventListener('dragend', onDragEnd))
           <el-icon><FolderAdd /></el-icon>
           新建文件夹
         </el-button>
-      </div>
-      <p v-if="!readOnly" class="tree__empty-hint">
-        也可以在这里右击新建。把现成的 markdown 文件放进这个文件夹，点一下底部那颗刷新也能看到。
-      </p>
-    </div>
+      </template>
+    </EmptyState>
   </div>
 
   <!-- 空白区的右键菜单：浮层挂在 body 上（定位与层叠都不必看这张卡片的脸色） -->
@@ -598,32 +598,6 @@ onBeforeUnmount(() => window.removeEventListener('dragend', onDragEnd))
 
 .node.is-active .node__icon {
   color: var(--ink);
-}
-
-.tree__empty {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: var(--sp-3);
-  padding: var(--sp-2) var(--sp-1);
-}
-
-.tree__empty-title {
-  margin: 0;
-  font-size: var(--fs-meta);
-  color: var(--ink-2);
-}
-
-.tree__empty-actions {
-  display: flex;
-  gap: var(--sp-2);
-}
-
-.tree__empty-hint {
-  margin: 0;
-  font-size: var(--fs-micro);
-  line-height: 1.7;
-  color: var(--ink-3);
 }
 
 /* ---------- 空白区的右键菜单 ---------- */

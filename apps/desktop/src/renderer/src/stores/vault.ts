@@ -70,10 +70,18 @@ export const useVaultStore = defineStore('vault', () => {
    */
   const unlockError = ref('')
   const saving = ref(false)
-  const syncing = ref(false)
+  /**
+   * 自动同步的排队：`inFlight` 是正在跑的那一轮，`queuedAgain` 记「跑着的时候又动了一条」。
+   *
+   * 一轮是 pull → 合 → 落盘 → push，两轮并行会各自拿着同一个基准去写（后一轮会被 `vault_push`
+   * 挡回来、白跑一趟），所以跑着的时候来的请求只落一个标记，等这轮收场补一趟 ——
+   * 那一趟才带得上刚改的那条（见 `sync`）。
+   */
+  let inFlight: Promise<void> | null = null
+  let queuedAgain = false
   /** 建密钥 / 换密钥进行中：全部条目要重新加密一遍再落盘，期间按钮必须转圈禁点 */
   const creating = ref(false)
-  /** 上一次同步的说明（成功那句 / 失败那句），显示在工具带右侧 */
+  /** 上一次同步**没成功**那件事（失败原因 / 密钥对不上），显示在工具带上；成功时不留字 */
   const syncNote = ref('')
   const syncFailed = ref(false)
   /** 仓库里那份与本机这把密钥对不上 —— 「同步成功却没多出条目」就靠它解释 */
@@ -262,6 +270,8 @@ export const useVaultStore = defineStore('vault', () => {
     unlocked.value = opened.data.unlocked
     fingerprint.value = opened.data.fingerprint
     await reload()
+    // 冷启动进这一页时是锁着的，那次「进页面自动同步」就是从这儿补上的（见 `sync`）
+    sync()
     return true
   }
 
@@ -295,8 +305,23 @@ export const useVaultStore = defineStore('vault', () => {
     applyLoaded(result.data!)
   }
 
+  /**
+   * 建库 / 导入密钥之后的收尾：**这台机器原来没有密钥**（新机器、第一次用）才顺手同步一次 ——
+   * 得把仓库里那份拉下来，不然刚导入完看到的是一个空库，像是密码全丢了。
+   *
+   * **「原来就有密钥」那条不自动走**：那等于换掉本机这份保险库，`adoptKey` 会把两把密钥都读不出来的
+   * 条目留成墓碑，自动推出去就是把那台机器上还好的条目删给所有机器 —— 09-30 那次全量墓碑事故
+   * 正是这么铺开的（见 docs/modules/vault.md）。那种情况下这一轮要等下一个动作（进这一页 / 改一条）
+   * 带来，中间留着「真的解不开吗」那点空档。
+   */
+  function syncAfterKeyChange(hadKey: boolean): void {
+    if (!hadKey)
+      sync()
+  }
+
   /** 建一把新密钥。`replace` 为真时会先把现有条目全作废，所以调用方必须先确认 */
   async function createKey(replace: boolean): Promise<boolean> {
+    const hadKey = keyExists.value
     creating.value = true
     try {
       const result = await window.workbench.vaultCreateKey(replace)
@@ -310,6 +335,7 @@ export const useVaultStore = defineStore('vault', () => {
       fingerprint.value = result.data!.fingerprint
       await reload()
       notifySuccess(replace ? '已经换上一把新密钥' : '保险库已经建好')
+      syncAfterKeyChange(hadKey)
       return true
     }
     finally {
@@ -319,6 +345,7 @@ export const useVaultStore = defineStore('vault', () => {
 
   /** 导入一把别处导出的密钥：自己弹文件选择框，用户取消时什么都不做 */
   async function importKeyFile(): Promise<void> {
+    const hadKey = keyExists.value
     const result = await window.workbench.vaultImportKeyFile()
     if (!result.ok) {
       notifyError(result.error ?? '导入密钥失败')
@@ -332,6 +359,7 @@ export const useVaultStore = defineStore('vault', () => {
     await refreshKey()
     await reload()
     notifySuccess('密钥已导入')
+    syncAfterKeyChange(hadKey)
   }
 
   /** 忘掉本机密钥。仓库里那份数据不动，但本机从此解不开它 */
@@ -382,6 +410,8 @@ export const useVaultStore = defineStore('vault', () => {
     updatedAt.value = Math.max(updatedAt.value, saved.updatedAt)
 
     notifySuccess(index >= 0 ? '已保存' : '已添加')
+    // 改完就推出去（自动同步，见 `sync`）—— 不必等用户再想起「同步」这件事
+    sync()
     return true
   }
 
@@ -394,38 +424,67 @@ export const useVaultStore = defineStore('vault', () => {
     records.value = records.value.filter(record => record.id !== id)
     updatedAt.value = Date.now()
     notifySuccess('已删除')
+    // 删除也要推出去：那条墓碑得让别的机器看见，否则它下次同步会把这条记录带回来
+    sync()
   }
 
   /**
-   * 同步一轮：推本机改动、拉回别的机器的。
+   * 同步一轮：推本机改动、拉回别的机器的。**自动的** —— 进这一页时一次（`onActivated`）、
+   * 增删改之后各一次，工具带上不再有同步按钮。
    *
-   * 与其余几条同步同一个口径 —— 手动点的那次等结果（按钮要给出成功 / 失败），
-   * 没有后台自动同步：保险库改动是「用户自己做的事」，替他在后台推上去没有意义。
+   * 三条口径：
+   *  - **没登录 / 没填地址就安静跳过**：那两样在设置里，这一页不再摆一颗按下去只会报错的按钮；
+   *  - **同一时刻只跑一轮**（`inFlight` / `queuedAgain`）：跑着的时候又改了一条，等这轮完了补一趟；
+   *  - **失败只在工具带上留一行字**，不弹消息 —— 进一次页面弹一次「同步失败」比不说还烦人；
+   *    成功一个字都不写（写「同步完成」的话那条工具带就成了常驻状态栏）。
+   *    重试的路就是再进一次这一页，或者再动一条记录。
    */
-  async function sync(): Promise<void> {
-    if (!syncReady.value) {
-      notifyError(account.value ? '还没有填同步仓库地址' : '同步要先登录账号（设置 → 通用 → 账号）')
+  function sync(): void {
+    if (!unlocked.value || !syncReady.value)
+      return
+    if (inFlight) {
+      queuedAgain = true
       return
     }
 
-    syncing.value = true
-    const result = await window.workbench.vaultSync()
-    syncing.value = false
+    inFlight = (async () => {
+      try {
+        do {
+          queuedAgain = false
+          await syncOnce()
+        } while (queuedAgain)
+      }
+      catch (err) {
+        // 适配层不该抛（通道一律回 Result），真抛了也得在工具带上留一句，
+        // 不能让这一页静默地停在「看着同步过了」的样子上
+        syncFailed.value = true
+        syncNote.value = `同步失败：${err instanceof Error ? err.message : String(err)}`
+      }
+      finally {
+        inFlight = null
+      }
+    })()
+  }
 
+  /** 真跑一轮。结果只反映在工具带那一行与页面上那三条提示里 */
+  async function syncOnce(): Promise<void> {
+    const result = await window.workbench.vaultSync()
     if (!result.ok) {
       syncFailed.value = true
       syncNote.value = result.error ?? '同步失败'
-      notifyError(syncNote.value)
       return
     }
 
+    // 收起密码是「把明文从屏幕与内存撤掉」（见 `lock`）：同步跑着的这一秒里用户按了收起的话，
+    // 这一轮的结果就不要再铺回内存 —— 界面上也看不到（锁着的那一屏是另一张脸）
+    if (!unlocked.value)
+      return
+
+    // 合出来的那份就是这一页接下来要画的（`sync` 收场时会重新解一遍本机那份）
     applyLoaded(result.data!)
     keyMismatch.value = result.data!.keyMismatch
     syncFailed.value = false
-    syncNote.value = result.data!.keyMismatch
-      ? '同步完成，但仓库里那份是用别的密钥加的密 —— 这些条目在这台机器上解不开'
-      : '同步完成'
-    notifySuccess(syncNote.value)
+    syncNote.value = ''
   }
 
   /** 进页面时调一次：读密钥状态，已经解锁过就直接把条目摆出来 */
@@ -449,7 +508,6 @@ export const useVaultStore = defineStore('vault', () => {
     loading,
     unlockError,
     saving,
-    syncing,
     creating,
     syncNote,
     syncFailed,

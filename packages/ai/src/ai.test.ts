@@ -583,7 +583,7 @@ describe('对话按轮切（过程 / 答案 / 收据）', () => {
   })
 
   it('没说过话的那一轮（停了一半 / 只读回历史）：整个过程都收着，没有答案', () => {
-    const turns = aiTurns([line('thinking', '嗯'), line('tool', '调用 bash')])
+    const turns = aiTurns([line('thinking', '嗯'), line('tool', '执行 git status --short')])
     expect(turns).toHaveLength(1)
     expect(turns[0].user).toBeNull()
     expect(turns[0].answer).toBeNull()
@@ -758,6 +758,27 @@ describe('事件流的读法', () => {
     expect(parse({ type: 'tool_execution_start', toolName: 'webfetch', args: {} })).toEqual({
       kind: 'tool',
       text: '调用 webfetch',
+    })
+  })
+
+  it('命令类工具（bash / powershell）把命令原文贴出来，多行照原样', () => {
+    expect(
+      parse({ type: 'tool_execution_start', toolName: 'bash', args: { command: 'git status --short', timeout: 30 } }),
+    ).toEqual({ kind: 'tool', text: '执行 git status --short' })
+
+    expect(
+      parse({ type: 'tool_execution_start', toolName: 'powershell', args: { command: 'Get-ChildItem' } }),
+    ).toEqual({ kind: 'tool', text: '执行 Get-ChildItem' })
+
+    // 多行命令不折：「执行 」之后原样跟一整段（窄行是 pre-wrap，画出来还是几行）
+    expect(
+      parse({ type: 'tool_execution_start', toolName: 'bash', args: { command: 'cd /e/x &&\npnpm test' } }),
+    ).toEqual({ kind: 'tool', text: '执行 cd /e/x &&\npnpm test' })
+
+    // 参数里没有命令（半截的调用）时退回「动词 + 工具名」，不画一个空的「执行 」
+    expect(parse({ type: 'tool_execution_start', toolName: 'bash', args: {} })).toEqual({
+      kind: 'tool',
+      text: '执行 bash',
     })
   })
 
@@ -1040,7 +1061,7 @@ describe('打开旧会话：历史消息 → 日志行（续聊的界面从这�
       },
     ])
     expect(lines).toEqual([
-      { kind: 'tool', text: '调用 bash' },
+      { kind: 'tool', text: '执行 ls' },
       {
         kind: 'error',
         text: 'bash：No bash shell found. Options:',

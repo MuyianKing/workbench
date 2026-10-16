@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { AiConfirm, AiLogLine } from '@workbench/ai'
-import { Download, Loading } from '@element-plus/icons-vue'
+import { ChatLineRound, Download, Loading } from '@element-plus/icons-vue'
 import { aiTurns, visibleInstruction } from '@workbench/ai'
 /**
  * 对话面板：这一段对话（历史 + 这一轮）、收尾与结果。**版式是聊天**：
@@ -39,6 +39,7 @@ import { aiTurns, visibleInstruction } from '@workbench/ai'
  */
 import { computed, nextTick, ref, watch } from 'vue'
 import AiProcess from '@/components/AiProcess.vue'
+import EmptyState from '@/components/EmptyState.vue'
 import MarkdownView from '@/components/MarkdownView.vue'
 import { basenameOf } from '@/format'
 
@@ -311,9 +312,13 @@ const hasHead = computed(() => notice.value !== null || !props.piVersion)
 
       <!-- 这段对话还没开始：说一句就开始（composer 就在下面）。接历史那一会儿不写这句，
            否则会同时出现「正在接上这段对话…」与「还没有开始」两句相反的说明 -->
-      <p v-else-if="!installing && !hydrating" class="run__meta is-quiet">
-        这段对话还没有开始 —— 在下面写点什么。
-      </p>
+      <EmptyState
+        v-else-if="!installing && !hydrating"
+        compact
+        :icon="ChatLineRound"
+        text="这段对话还没有开始"
+        hint="在下面写点什么。"
+      />
     </div>
 
     <div v-if="written.length" class="run__foot">

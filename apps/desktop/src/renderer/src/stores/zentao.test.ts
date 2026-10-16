@@ -33,12 +33,6 @@ let logins: number
 let pageBrowses: string[]
 /** 产品名补取过的编号 */
 let productNameCalls: number[]
-/** 详情请求过的 Bug 编号 */
-let bugDetailCalls: number[]
-/** 指派 / 解决收到的调用 */
-let actionCalls: Array<[string, Record<string, unknown> | undefined]>
-let bugDetailFails: boolean
-let actionFails: boolean
 /** zentao_login 的返回值：模拟「重登后换了账号」 */
 let loginOverride: unknown
 /** 让下一次取数报「认证过期」，逼 store 重登 */
@@ -84,21 +78,6 @@ function invoke(command: string, args?: Record<string, unknown>): Promise<unknow
         return Promise.reject('连接禅道失败，请检查地址与网络')
       return Promise.resolve({ bugs: round.bugs, page: 1, total: round.bugs.length, limit: 100 })
     }
-    case 'zentao_bug':
-      bugDetailCalls.push(Number(args?.bugId))
-      return bugDetailFails
-        ? Promise.reject('读取禅道 Bug 详情失败')
-        : Promise.resolve({ id: String(args?.bugId), title: '详情标题', product: '1', project: '9', status: 'active', actions: [] })
-    case 'zentao_users':
-      return Promise.resolve({ page: 1, total: 1, limit: 20, users: [{ account: 'alice', realname: '甲' }] })
-    case 'zentao_builds':
-      return Promise.resolve({ total: 1, builds: [{ id: '8', name: 'v1.0' }] })
-    case 'zentao_assign':
-      actionCalls.push(['assign', args])
-      return actionFails ? Promise.reject('禅道拒绝了这次操作') : Promise.resolve(null)
-    case 'zentao_resolve':
-      actionCalls.push(['resolve', args])
-      return actionFails ? Promise.reject('禅道拒绝了这次操作') : Promise.resolve(null)
     default:
       return Promise.resolve(null)
   }
@@ -115,10 +94,6 @@ beforeEach(() => {
   logins = 0
   pageBrowses = []
   productNameCalls = []
-  bugDetailCalls = []
-  actionCalls = []
-  bugDetailFails = false
-  actionFails = false
   loginOverride = null
   authExpiresOnce = false
   stubSettings = { ...DEFAULT_SETTINGS }
@@ -305,7 +280,7 @@ describe('禅道后台检查', () => {
   })
 })
 
-describe('禅道详情与写操作', () => {
+describe('禅道列表口径与换账号', () => {
   it('切列表口径会重取，并把 browse 带下去', async () => {
     const store = await bootStore()
     rounds = [{ ok: true, bugs: [bug(1)] }]
@@ -321,70 +296,19 @@ describe('禅道详情与写操作', () => {
     expect(store.bugList?.bugs.map(b => b.id)).toEqual([2, 1])
   })
 
-  it('打开详情会取详情、候选人与版本', async () => {
+  it('换账号重登后基线重立：那一轮不把新账号的存量报成新增', async () => {
     const store = await bootStore()
     rounds = [{ ok: true, bugs: [bug(5)] }]
     await store.refresh()
-    await store.openDetail(5)
-    expect(bugDetailCalls).toEqual([5])
-    expect(store.detail?.id).toBe(5)
-    expect(store.users).toEqual([{ account: 'alice', realname: '甲' }])
-    expect(store.builds).toEqual([{ id: 8, name: 'v1.0' }])
-  })
 
-  it('详情取失败就地提示，不清空弹窗', async () => {
-    const store = await bootStore()
-    rounds = [{ ok: true, bugs: [bug(5)] }]
-    await store.refresh()
-    bugDetailFails = true
-    await store.openDetail(5)
-    expect(store.detailError).toContain('详情')
-    expect(store.activeBugId).toBe(5)
-  })
-
-  it('指派成功后重新取详情与列表，并回一句结果', async () => {
-    const store = await bootStore()
-    rounds = [{ ok: true, bugs: [bug(5)] }]
-    await store.refresh()
-    await store.openDetail(5)
-    const before = bugDetailCalls.length
-
-    const ok = await store.assign({ bugId: 5, assignedTo: 'alice', comment: '看下' })
-    expect(ok).toBe(true)
-    expect(actionCalls[0][0]).toBe('assign')
-    expect(actionCalls[0][1]).toMatchObject({ bugId: 5, assignedTo: 'alice', comment: '看下' })
-    expect(store.actionMessage).toBe('已指派')
-    // 成功后详情重取了一次
-    expect(bugDetailCalls.length).toBe(before + 1)
-  })
-
-  it('解决失败只提示，不改动界面数据', async () => {
-    const store = await bootStore()
-    rounds = [{ ok: true, bugs: [bug(5)] }]
-    await store.refresh()
-    await store.openDetail(5)
-    const detailBefore = store.detail
-    actionFails = true
-    const ok = await store.resolve({ bugId: 5, resolution: 'fixed', resolvedBuild: '8', duplicateBug: '', comment: '' })
-    expect(ok).toBe(false)
-    expect(store.actionMessage).toContain('拒绝')
-    expect(store.detail).toBe(detailBefore)
-  })
-
-  it('换账号会作废详情与候选人缓存', async () => {
-    const store = await bootStore()
-    rounds = [{ ok: true, bugs: [bug(5)] }]
-    await store.refresh()
-    await store.openDetail(5)
-    expect(store.users).toHaveLength(1)
-
-    // 认证过期 → 重登，回来的却是另一个账号：状态、详情与候选人缓存都作废
+    // 认证过期 → 重登，回来的却是另一个账号：基线作废，重新建立
     authExpiresOnce = true
     loginOverride = { id: 'session-2', baseUrl: SESSION.baseUrl, account: 'bob' }
     rounds = [{ ok: true, bugs: [bug(9)] }]
-    await store.refresh()
+    checkHandlers[0]({ payload: null })
+    await settle()
     expect(store.session?.account).toBe('bob')
-    expect(store.activeBugId).toBeNull()
-    expect(store.users).toEqual([])
+    expect(store.bugList?.bugs.map(b => b.id)).toEqual([9])
+    expect(notifyCalls).toEqual([])
   })
 })

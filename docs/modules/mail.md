@@ -104,9 +104,47 @@ RFC 2047 编解码、发信报文构建
   只放行「用户点出来的顶层导航」（脚本自动跳转照样被沙箱掐死）→ main.rs 的
   `on_navigation` 把这次导航拦下：应用自己的页面照常放行，http(s) / mailto 交给系统浏览器
   开，其余 scheme 一律取消。改任何一处都要三处一起看。
+- **HTML 附件：给脚本、不给宿主能力**（2026-10-16 用户点头放开的那一档，正文不受影响）。
+  背景：应用自己的 CSP（`tauri.conf.json`，由 Tauri 按 **meta** 注入到页面里）**会被子框架
+  继承** —— srcdoc / `blob:` / `data:` 三种装载实测一样（真实 Chromium 上跑的），
+  所以「让附件里的脚本跑起来」这件事在应用这一侧**只能靠放宽应用自己的 `script-src`**。
+  用户选了这条路，于是现在有三件必须同时成立、缺一件附件就是一张死版面：
+  ① `tauri.conf.json` 的 `script-src` 带 **`'unsafe-inline'`**（csp 与 devCsp 两处都要）；
+  ② 承载附件的 iframe 给 **`allow-scripts`**（MailAttachmentDialog）；
+  ③ 附件文档自己那份 CSP 放行内联脚本（`ATTACHMENT_CSP`，`attachmentHtml` 用）。
+  **三条边界别动**：1）iframe **绝不能加 `allow-same-origin`** —— 加了它就跟宿主同源，
+  能直接摸到 `window.workbench`；现在是不透明源，摸不到父窗口、表单 / 弹窗 / 下载全禁。
+  2）`ATTACHMENT_CSP` 的 `script-src` **只许有 `'unsafe-inline'`**，不许加 http(s) / `'self'`
+  / 通配（附件跑自己带的代码可以，去 CDN 取代码不行）；`default-src 'none'` 也留着 ——
+  它同时兜住 `connect-src`，脚本连不上 `http://ipc.localhost` 那条 IPC 口。
+  3）**正文那一档一行脚本都不跑**（`SANDBOX_CSP` 里没有 `script-src`、iframe 也不给
+  `allow-scripts`）—— 放开的是「附件」这一路，不是「读信」这一路，别把两份 CSP 合成一份。
+  代价写在这儿：`'unsafe-inline'` 是给**整个界面**开的 —— 今后任何进到应用自己那份文档里的
+  标签都能执行脚本（现有渲染路径都不注入原文标签：markdown 走 `html: false`、正文与附件
+  都在沙箱里）。要再加 `'unsafe-eval'`（某些打包产物需要）得单独说一声，那是更松的一档；
+  **这条改动只能在生产态的真应用里验**（dev 下页面来自 Vite，CSP 不生效），
+  验法：拿一个带 `<script>` 的 html 附件点开，脚本跑起来就成。
+- **HTML 附件的弹窗按窗口给足地方**：近满屏、整页铺满 —— 宽度 `min(1680px, 100vw-32px)`
+  （由组件传 `width`，EP 落成 `--el-dialog-width`），高度 `calc(100vh - 标题栏 - 24px)`、
+  **上边距压成标题栏那 36px、下边距 12px**（`--wide` 那一档的 class，样式在 global.css）。
+  **上边距必须一起改**：EP 自己那条是 `margin: var(--el-dialog-margin-top, 15vh) auto 50px`，
+  15vh + 整屏高 + 50px 一定撑破视口，对话框就成了「比窗口还高」的那一个 —— 页脚的
+  「关闭 / 另存为」要滚遮罩才看得见（2026-10-16 用户截图里就是这样，实测确认）。
+  上边距小于标题栏高度会被浮在遮罩之上的标题栏压住，所以取 `var(--h-titlebar)`。
+  md / docx / pptx / pdf 四档照旧按文稿一页定宽 920px、EP 原来那套边距。
 - **大小上限两侧同源**：发信 30 MB（`mime.ts` 的 `MAX_MESSAGE_BYTES` = Rust `mail.rs` 的
   `MAX_MESSAGE_BYTES`，构建这一步就拦）、拉正文 24 MB（与 AI 预览栏二进制同一口径）。
   改就两边一起改。
+- **PDF 在页面里自己画**（`PdfPreview.vue`，pdf.js / `pdfjs-dist`）：**不要改成 iframe 或 embed
+  内嵌系统查看器** —— webview 里认不认那套（PDF viewer 在不在、CSP 放不放行子框架）是靠不住的，
+  而 pdf.js 画出来的东西在哪都一样。它是**动态引**的（不用这个画法就不进包）。
+  **pdf.js 运行时取的那几样静态资源随包带**（`cmaps` / `standard_fonts` / `wasm` / `iccs`，
+  由 `apps/desktop/scripts/sync-pdfjs-assets.mjs` 在构建 / 开发前复制到
+  `apps/desktop/src/renderer/public/pdfjs/`，不进版本库）：基址走 `import.meta.env.BASE_URL`，
+  一条都不许指到外面去（少了 cmaps，中文正文会空掉；少了 wasm，扫描件那几页只剩空白 ——
+  pdf.js 自己的 JS 兜底解码器会接住，但它慢）。**CSP 别为它开 `wasm-unsafe-eval`**：
+  限制之下的 `WebAssembly.instantiate` 抛错由 pdf.js 自己吞掉、退回 JS 解码（实测那条路子是通的）。
+  密码保护的 PDF 打不开（就地说一句），加密文档不做支持。
 
 ## 实现
 
@@ -140,15 +178,23 @@ RFC 2047 编解码、发信报文构建
   附件一颗一片，按 `attachmentKind`（packages/mail）分三种打开方式：**能在应用里打开的，
   整片都是打开的入口**（片子是「一颗内层按钮 + 右端一颗另存图标」拼的 —— 按钮不能套按钮，
   另存留在外层）—— 图进 EP 的 `el-image-viewer`（页面持一个实例：该封里所有图左右切、
-  滚轮缩放、Esc 或点外面关掉，`teleported` 才不会被子栏的 overflow 裁掉）；**md / docx /
-  pptx 进预览弹层**（MailAttachmentDialog：md 借 MarkdownView、docx 借 AiPreviewDoc、
-  pptx 借 AiPreviewSlides —— 三件都只吃 base64、都在浏览器里画、都不出网，pptx 的
-  pdfjs 兜底在那边显式关着）；应用里画不了的（pdf / 压缩包 / 老式 .doc .ppt）整片点开
-  就是「另存为」（pickSavePath 挑路径 + `mail_attachment_save` 落盘，与 vault_key_export
-  同一个信任模型）。片子的样子：左首是**这张片子的样子** —— 图给缩略图、其余给
-  `attachmentBadge` 出的类型角标（DOCX / MD / PPTX / PDF，定宽所以名字对得齐），
+  滚轮缩放、Esc 或点外面关掉，`teleported` 才不会被子栏的 overflow 裁掉）；**md / html /
+  docx / pptx / pdf 进预览弹层**（MailAttachmentDialog：md 借 MarkdownView、html 借 sandbox
+  的 iframe、docx 借 AiPreviewDoc、pptx 借 AiPreviewSlides、pdf 借 PdfPreview —— 五件都只吃
+  base64、都在浏览器里画、都不出网，pptx 的 pdfjs 兜底在那边显式关着）；应用里画不了的
+  （压缩包 / 老式 .doc .ppt）
+  整片点开就是「另存为」（pickSavePath 挑路径 + `mail_attachment_save` 落盘，与 vault_key_export
+  同一个信任模型）。**html 那一档在弹层里是会跑的页面**（脚本放行，边界见「约束」），
+  弹层自己**按类型定尺寸**：html 近满屏、整页铺满（`--wide`：宽度由组件传、高度与上下边距
+  在 global.css —— 上边距不压掉的话 EP 的 15vh 会把页脚顶出视口）、其余四档按文稿一页定宽 920px。
+  片子的样子：左首是一块**定宽的小方块** —— 图给缩略图、
+  认得出的五种给
+  一枚**按类型着色的图标**（PDF 红 / Word 蓝 / 幻灯片橙 / Markdown 紫 / 网页青，色阶只出自
+  packages/mail 的 `attachmentTint`）、认不出的（zip / rar / 老式 .doc）给
+  `attachmentBadge` 出的扩展名角标（那一档扩展名才是唯一的信息），
   名字走 `--ink`、大小退到 `--ink-3`；图与缩略图都取 `attachmentDataUrl` —— 手里的 base64
-  拼 data URL，预览不落盘。**md 是唯一一处把邮件内容画进宿主 webview 的地方**：
+  拼 data URL，预览不落盘。**md 是唯一一处把邮件的内容画进宿主 webview 的地方**
+  （html 进的是沙箱 iframe，不在此列）：
   走 markdown-it（`html: false`，原文标签早被转义过，v-html 拿到的是安全片段），
   正文里的外链图片跟着信里写的地址加载 —— 与 HTML 正文那条外链图片的口子同一个口径，
   别在这条路上放脚本。
@@ -244,8 +290,10 @@ RFC 2047 编解码、发信报文构建
   `ms-winsoundevent:Notification.Mail`（默认那声太轻，用户注意不到弹窗）。
   `refreshList` 的并发调用共享在途的同一
   个 Promise（页面挂载与通知点击可能前后脚各调一次）。
-- **测试**：@workbench/mail 的 50 个用例（收敛 / 编码词 / 报文构建 / 解析与沙箱正文 /
-  附件的打开方式、类型角标与图片判定 / **附件名的归一（含「自己发的信读回来是原名」整条路）** /
+- **测试**：@workbench/mail 的 64 个用例（收敛 / 编码词 / 报文构建 / 解析与沙箱正文 /
+  附件的打开方式（含 pdf / html 那两档）、类型图标 / 角标与图片判定、每类的着色（`attachmentTint`）/
+  HTML 附件的预览文档（沙箱头 / 没有 head 的片段 / 链接改写 / 声明字符集的解码 /
+  **放行内联脚本而不放行任何外链脚本**）/ **正文那一档照旧一行脚本都不跑** / **附件名的归一（含「自己发的信读回来是原名」整条路）** /
   广告识别 / 收件人列表的拆解）；
   mail.rs 的 `#[cfg(test)]`（字面量标记 / 括号项解析 / 头部折叠展开 / EXISTS /
   UIDVALIDITY / **文件夹：LIST 结果的解析（引号串与字面量两种名字）、`\Sent` 属性与
@@ -287,17 +335,24 @@ apps/desktop/src/renderer/src/stores/mail.ts
   （startWatch）；拉取时机在这层
 apps/desktop/src/renderer/src/components/MailView.vue
   邮箱页：左清单右阅读（头部一颗分段选择器切收件箱 / 已发送 / 联系人）；HTML 正文走 sandbox iframe（外链图片照常显示，脚本全禁，链接经顶层导航转交系统浏览器）；
-  附件片按 attachmentKind 分打开方式：图进 EP 查看器、md / docx / pptx 进 MailAttachmentDialog，其余点开另存为
+  附件片按 attachmentKind 分打开方式：图进 EP 查看器、md / html / docx / pptx / pdf 进 MailAttachmentDialog，其余点开另存为；
+  左首那块小方块按 attachmentTint 着色（唯一按文件类型着色的地方）
 apps/desktop/src/renderer/src/components/MailAttachmentDialog.vue
-  附件预览弹层：md（MarkdownView）/ docx（AiPreviewDoc）/ pptx（AiPreviewSlides）在应用里看；
-  弹窗定高、宽度照 docx 一页（A4 794 / Letter 816）定的 920px —— 页外不再堆一大片白，
-  中间那块自己滚（global.css 的 .mail-preview-dialog 一组），脚上一个「另存为」
+  附件预览弹层：md（MarkdownView）/ html（sandbox iframe，文档由 attachmentHtml 准备）/
+  docx（AiPreviewDoc）/ pptx（AiPreviewSlides）/ pdf（PdfPreview）在应用里看；
+  弹窗定高、宽度照 docx 一页（A4 794 / Letter 816）定的 920px —— html 那一档例外：
+  近满屏、整页铺满（`--wide`；脚本放行、沙箱给 allow-scripts 但不给 allow-same-origin），
+  其余四档页外不再堆一大片白，中间那块自己滚（global.css 的 .mail-preview-dialog 一组），
+  脚上一个「另存为」
 apps/desktop/src/renderer/src/components/MailListRow.vue
   邮件清单行：行首复选框 + 两行内容（收件箱清单、推广邮件段与发件箱共用一副；发件箱里第一行摆收件人）
 apps/desktop/src/renderer/src/components/MailAccountDialog.vue
   账户弹层：连接参数 + 授权码（凭据管理器），163/126 预设自动带出
 apps/desktop/src/renderer/src/components/MailComposer.vue
   写信弹层：收件人 / 主题 / 正文 / 附件，回复预填
+apps/desktop/src/renderer/src/components/PdfPreview.vue
+  PDF 画法：pdf.js 一页一页画到画布上（上下一颗按钮翻页）；cmaps / 标准字体 / wasm 随包带
+  （scripts/sync-pdfjs-assets.mjs → public/pdfjs/），别改成 iframe / embed
 ```
 
 域包：
@@ -312,8 +367,9 @@ packages/mail/src/mime.ts
   Content-Type 猜测
 packages/mail/src/parse.ts
   postal-mime 包装（parseMessage，含附件名的归一 preferExtendedFilenames）、
-  沙箱正文生成（htmlBody：CSP + cid → data URL）、
+  沙箱文档生成（正文 htmlBody：CSP + cid → data URL；HTML 附件 attachmentHtml：
+  同一副沙箱头与链接改写，另按文档声明的字符集解码）、
   发件人 / 收件人（displayRecipients、recipientAddress）与日期的展示拆解、
-  附件的打开方式与片子上的字（attachmentKind、attachmentBadge、isImageAttachment、
+  附件的打开方式与片子上的左首（attachmentKind、attachmentBadge、attachmentTint、isImageAttachment、
   attachmentDataUrl、attachmentText）
 ```

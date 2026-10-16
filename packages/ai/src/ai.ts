@@ -1209,9 +1209,44 @@ function toolVerb(name: string): { verb: string, writes: boolean } {
       return { verb: '修改', writes: true }
     case 'read':
       return { verb: '读取', writes: false }
+    // 命令类工具（Pi 的 bash / powershell 就是这两条，参数都是 { command }）：
+    // 动词之后接的是**命令原文**，不是工具名 —— 见 toolLineText
+    case 'bash':
+    case 'powershell':
+      return { verb: '执行', writes: false }
     default:
       return { verb: '调用', writes: false }
   }
+}
+
+const SHELL_TOOLS = new Set(['bash', 'powershell'])
+
+/**
+ * 命令类工具要跑的那一串命令（别的工具给空串）。
+ *
+ * **界面上必须把它贴出来**：光一行「调用 bash」等于什么都没说，用户看不出它到底跑了什么
+ * （这也是这一行与文件类工具的区别：那边一个路径就够了）。命令可以是多行，
+ * 窄行那套 `white-space: pre-wrap` 撑得住（见 AiRunPanel 的 .run__meta）。
+ */
+function toolCommand(name: string, args: unknown): string {
+  if (!SHELL_TOOLS.has(name) || !args || typeof args !== 'object')
+    return ''
+  const value = (args as Record<string, unknown>).command
+  return typeof value === 'string' && value.trim() ? value.trim() : ''
+}
+
+/**
+ * 工具调用那一行说什么：命令类工具是「执行 <命令原文>」，文件类工具是「读取 / 写入 <路径>」，
+ * 其余是「调用 <工具名>」。**实时那条（parsePiEvent）与读历史那条（sessionMessagesToLines）
+ * 共用它** —— 两处口径要一致，不然同一个调用重开会话就换个说法。
+ */
+function toolLineText(name: string, args: unknown): string {
+  const { verb } = toolVerb(name)
+  const command = toolCommand(name, args)
+  if (command)
+    return `${verb} ${command}`
+  const path = toolPath(args)
+  return path ? `${verb} ${path}` : `${verb} ${name}`
 }
 
 /**
@@ -1327,9 +1362,7 @@ export function sessionMessagesToLines(messages: unknown): AiLogLine[] {
       if (type !== 'toolCall')
         continue
       const name = str(part.name) || '工具'
-      const { verb } = toolVerb(name)
-      const path = toolPath(part.arguments)
-      lines.push({ kind: 'tool', text: path ? `${verb} ${path}` : `${verb} ${name}` })
+      lines.push({ kind: 'tool', text: toolLineText(name, part.arguments) })
     }
   }
   return lines
@@ -1409,9 +1442,9 @@ export function parsePiEvent(rawLine: string): AiLogLine | null {
     }
     case 'tool_execution_start': {
       const name = str(event.toolName) || '工具'
-      const { verb, writes } = toolVerb(name)
+      const { writes } = toolVerb(name)
       const path = toolPath(event.args)
-      const text = path ? `${verb} ${path}` : `${verb} ${name}`
+      const text = toolLineText(name, event.args)
       return writes && path ? { kind: 'tool', text, path } : { kind: 'tool', text }
     }
     case 'tool_execution_end': {

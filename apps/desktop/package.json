@@ -38,9 +38,10 @@
     "@workbench/weather": "workspace:*",
     "@workbench/work-log": "workspace:*",
     "@workbench/zentao": "workspace:*",
-    "docx-preview": "^0.4.1",
     "dayjs": "^1.11.23",
+    "docx-preview": "^0.4.1",
     "element-plus": "^2.14.7",
+    "pdfjs-dist": "^6.4.299",
     "pinia": "^4.0.3",
     "vditor": "^4.0.0",
     "vue": "^3.5.43"

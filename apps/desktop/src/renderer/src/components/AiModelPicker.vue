@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { AiFetchedModel, AiModelEntry } from '@workbench/ai'
-import { Delete, Plus, Refresh } from '@element-plus/icons-vue'
+import { Delete, Plus, Refresh, Search } from '@element-plus/icons-vue'
 import { AI_MODEL_MAX, AI_THINKING_LEVELS, aiModelFromId, aiThinkingLabel, sanitizeAiThinkingLevels } from '@workbench/ai'
 /**
  * 「添加 AI 服务」第二步下面那两栏：左边是**端点报上来的模型**（点一下就加到右边），
@@ -16,6 +16,7 @@ import { AI_MODEL_MAX, AI_THINKING_LEVELS, aiModelFromId, aiThinkingLabel, sanit
  * 点一下把数字填进那一格，真正的值以输入框里的为准。
  */
 import { computed, ref } from 'vue'
+import EmptyState from '@/components/EmptyState.vue'
 import { notifyError } from '@/notify'
 
 const props = defineProps<{
@@ -249,9 +250,7 @@ function contextText(size: number): string {
       </header>
 
       <div class="pick__list">
-        <p v-if="!offeredRows.length" class="pick__empty">
-          {{ hint }}
-        </p>
+        <EmptyState v-if="!offeredRows.length" compact :icon="Search" :text="hint" />
         <ul v-else class="pick__rows">
           <li v-for="row in offeredRows" :key="row.model.id" class="pick__row">
             <button
@@ -301,12 +300,8 @@ function contextText(size: number): string {
       </header>
 
       <div class="pick__list">
-        <p v-if="!models.length" class="pick__empty">
-          尚未选择模型。请在左侧列表中点选。
-        </p>
-        <p v-else-if="!chosen.length" class="pick__empty">
-          这些模型里没有匹配的。
-        </p>
+        <EmptyState v-if="!models.length" compact :icon="Search" text="尚未选择模型" hint="请在左侧列表中点选。" />
+        <EmptyState v-else-if="!chosen.length" compact :icon="Search" text="这些模型里没有匹配的" />
         <ul v-else class="pick__rows">
           <li v-for="entry in chosen" :key="entry.id" class="pick__row is-chosen">
             <div class="pick__line">
@@ -519,14 +514,6 @@ function contextText(size: number): string {
   border: 1px solid var(--border);
   border-radius: var(--r-md);
   background: var(--bg-inset);
-}
-
-.pick__empty {
-  margin: 0;
-  padding: var(--sp-4) var(--sp-3);
-  color: var(--ink-3);
-  font-size: var(--fs-micro);
-  text-align: center;
 }
 
 .pick__rows {

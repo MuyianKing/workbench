@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import type { ProjectGroup } from '@/types'
-import { Close, Plus } from '@element-plus/icons-vue'
+import { Close, Files, Plus } from '@element-plus/icons-vue'
 import { moveToPosition } from '@workbench/core'
 import { ElMessage } from 'element-plus'
 import { computed, ref, watch } from 'vue'
 import AppDialog from '@/components/AppDialog.vue'
+import EmptyState from '@/components/EmptyState.vue'
 import { DRAG_MIME } from '@/drag-mime'
 import { confirmAction } from '@/notify'
 import { useProjectsStore } from '@/stores/projects'
@@ -202,9 +203,13 @@ async function onDrop(group: ProjectGroup, event: DragEvent): Promise<void> {
         </template>
       </div>
 
-      <p v-if="!store.sortedGroups.length" class="groups__empty">
-        还没有分组。分组用于把项目归类，并在顶部筛选栏按组过滤。
-      </p>
+      <EmptyState
+        v-if="!store.sortedGroups.length"
+        compact
+        :icon="Files"
+        text="还没有分组"
+        hint="分组用于把项目归类，并在顶部筛选栏按组过滤。"
+      />
       <p v-else class="hint">
         双击分组改名，悬停标签可删除；拖动标签可调整顺序。
       </p>
@@ -233,12 +238,6 @@ async function onDrop(group: ProjectGroup, event: DragEvent): Promise<void> {
 
 <style scoped>
 /* 对话框里的「还没有分组」：一行淡淡的说明，不是整块居中空态（那是 global.css 的 .empty） */
-.groups__empty {
-  padding: var(--sp-2) 0;
-  font-size: var(--fs-meta);
-  line-height: 1.7;
-  color: var(--ink-3);
-}
 
 .groups {
   display: flex;

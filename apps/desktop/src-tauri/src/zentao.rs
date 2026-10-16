@@ -152,23 +152,6 @@ impl Inner {
         }
         response_json(response)
     }
-
-    /// 写操作（指派 / 解决）：会话校验 + 401 处理之后，非 2xx 一律折成一句给用户看的话，
-    /// **绝不回传上游响应正文**（可能带别的 Bug 内容或内部路径）。
-    fn finish_write(&mut self, id: &str, result: Result<Response, String>) -> Result<(), String> {
-        self.require_session(id)?;
-        let response = result.map_err(|_| "连接禅道失败，请检查地址与网络".to_string())?;
-        match response.status {
-            200..=299 => Ok(()),
-            401 => {
-                self.session = None;
-                Err(AUTH_EXPIRED.into())
-            }
-            403 => Err("没有权限执行这个操作".into()),
-            400..=499 => Err("禅道拒绝了这次操作，请刷新后重试或到禅道页面确认".into()),
-            _ => Err("禅道处理这次操作失败，请稍后重试".into()),
-        }
-    }
 }
 
 /// 支持部署根目录或浏览器中的完整 my-work*.html 地址；统一回不带尾斜杠的根。
@@ -380,15 +363,6 @@ pub fn page(
     )
 }
 
-/// 只允许指到站内固定端点的 GET / 写请求都在这里拼路径：**不接收任意 URL**
-/// （渲染层只说「拿哪个 Bug / 哪个产品的版本」，地址由后端从会话的部署根拼）。
-fn bug_endpoint(base_url: &str, bug_id: u64, suffix: &str) -> Result<String, String> {
-    if bug_id == 0 {
-        return Err("禅道 Bug 编号无效".into());
-    }
-    Ok(api_url(base_url, &format!("bugs/{bug_id}{suffix}")))
-}
-
 /// 读原始 JSON：一次单页 GET，会话匹配，401 清会话。调用方自己投影字段。
 fn read_json<F>(
     state: &ZentaoState,
@@ -407,24 +381,6 @@ where
         None,
     );
     state.lock()?.finish_json(session_id, result)
-}
-
-/// Bug 详情（含 `actions` 历史）：`GET /api.php/v1/bugs/{id}`。
-pub fn bug_detail(
-    state: &ZentaoState,
-    session_id: &str,
-    bug_id: u64,
-) -> Result<Value, String> {
-    let session = state.lock()?.require_session(session_id)?.clone();
-    let url = bug_endpoint(&session.info.base_url, bug_id, "")?;
-    read_json(state, session_id, url, http::request_url_no_redirects)
-}
-
-/// 指派候选人：`GET /api.php/v1/users`（只回账号与真实姓名，不落别的字段）。
-pub fn users(state: &ZentaoState, session_id: &str) -> Result<Value, String> {
-    let session = state.lock()?.require_session(session_id)?.clone();
-    let url = api_url(&session.info.base_url, "users?limit=200");
-    read_json(state, session_id, url, http::request_url_no_redirects)
 }
 
 /// 账号可见产品的 id 清单。
@@ -486,53 +442,6 @@ fn project_product(value: &Value) -> Value {
     Value::Object(out)
 }
 
-/// Bug 正文里的**站内图片**：用当前会话取回来，按 base64 回渲染层（界面拼成 `data:` URL 内联显示）。
-///
-/// 为什么不直接让 webview 按地址取：那是**未认证**的请求（token 只在 Rust 内存里），
-/// 禅道会把它重定向到登录页，图必然裂。走这条路的另一个好处是地址可控 —— 见 `station_path`。
-pub fn image(state: &ZentaoState, session_id: &str, raw_path: &str) -> Result<Value, String> {
-    let path = station_path(raw_path)?;
-    let session = state.lock()?.require_session(session_id)?.clone();
-    let url = format!("{}{path}", session.info.base_url);
-    let result = http::request_url_no_redirects(
-        "GET",
-        &url,
-        &[("Accept", "image/*"), ("Token", &session.token)],
-        None,
-    );
-    let response = match result {
-        Ok(response) => response,
-        Err(_) => return Err("读取禅道图片失败".into()),
-    };
-    if response.status == 401 {
-        state.lock()?.session = None;
-        return Err(AUTH_EXPIRED.into());
-    }
-    if !(200..=299).contains(&response.status) {
-        return Err("禅道图片取不到".into());
-    }
-    // 按文件头认图片：不认就不显示（mime 猜错会让界面裂图），也不回传非图内容
-    let mime = crate::oauth::sniff_image(&response.body).ok_or_else(|| "禅道返回的不是图片".to_string())?;
-    Ok(json!({ "mime": mime, "data": crate::encoding::base64(&response.body) }))
-}
-
-/// 图片地址只认**站内相对路径**：以 `/` 开头、不带 `//`、不夹控制字符、不许 `..` 往上爬。
-/// 正文 HTML 是服务端给的任意内容，这里就是那道闸 —— 它决定请求只可能发往配置的部署根。
-fn station_path(raw: &str) -> Result<String, String> {
-    let invalid = || "禅道图片地址无效".to_string();
-    let text = raw.trim();
-    if text.is_empty() || text.len() > 2048 || !text.starts_with('/') || text.starts_with("//") {
-        return Err(invalid());
-    }
-    if text.chars().any(char::is_control) || text.contains('\\') {
-        return Err(invalid());
-    }
-    if text.split(['/', '?']).any(|seg| seg == ".." || seg == ".") {
-        return Err(invalid());
-    }
-    Ok(text.to_string())
-}
-
 /// `/v1/user` → `profile.view.products`（逗号分隔）里的正整数 id，去重保序。
 fn product_ids_of(user: &Value) -> Vec<u64> {
     let text = user
@@ -569,101 +478,6 @@ fn project_products(value: &Value) -> Result<Value, String> {
     let mut out = project_fields(value, &["page", "total", "limit"])?;
     out.insert("products".into(), Value::Array(rows));
     Ok(Value::Object(out))
-}
-
-/// 某产品的构建号清单（解决 Bug 要选版本）：`GET /api.php/v1/builds?project=...`
-/// 禅道的版本挂在项目下；渲染层传产品所属的项目编号。
-pub fn builds(state: &ZentaoState, session_id: &str, project_id: u64) -> Result<Value, String> {
-    if project_id == 0 {
-        return Err("禅道项目编号无效".into());
-    }
-    let session = state.lock()?.require_session(session_id)?.clone();
-    let url = api_url(
-        &session.info.base_url,
-        &format!("builds?project={project_id}&limit=200"),
-    );
-    read_json(state, session_id, url, http::request_url_no_redirects)
-}
-
-/// 指派：`POST /api.php/v1/bugs/{id}/assign`，body `{assignedTo, comment}`。
-/// 入参已在域包校验过；这里再兜一道（后端不信任前端）。
-pub fn assign(
-    state: &ZentaoState,
-    session_id: &str,
-    bug_id: u64,
-    assigned_to: &str,
-    comment: &str,
-) -> Result<(), String> {
-    let assigned_to = assigned_to.trim();
-    if assigned_to.is_empty() || assigned_to.chars().any(char::is_control) {
-        return Err("请选择有效的指派对象".into());
-    }
-    let session = state.lock()?.require_session(session_id)?.clone();
-    let url = bug_endpoint(&session.info.base_url, bug_id, "/assign")?;
-    let body = json!({ "assignedTo": assigned_to, "comment": comment }).to_string();
-    write_request(state, session_id, &url, &session.token, &body)
-}
-
-/// 解决：`POST /api.php/v1/bugs/{id}/resolve`，`resolution` 必填；`fixed` 要版本号、
-/// `duplicate` 要重复编号（与禅道服务端的硬性校验一致）。状态与 resolvedBy 由服务端写。
-pub fn resolve(
-    state: &ZentaoState,
-    session_id: &str,
-    bug_id: u64,
-    resolution: &str,
-    resolved_build: &str,
-    duplicate_bug: &str,
-    comment: &str,
-) -> Result<(), String> {
-    let resolution = resolution.trim();
-    if resolution.is_empty() || resolution.chars().any(char::is_control) {
-        return Err("请选择解决方案".into());
-    }
-    let resolved_build = resolved_build.trim();
-    let duplicate_bug = duplicate_bug.trim();
-    if resolution == "fixed" && resolved_build.is_empty() {
-        return Err("解决方案为「已解决」时必须选择版本号".into());
-    }
-    if resolution == "duplicate" && duplicate_bug.is_empty() {
-        return Err("解决方案为「重复 Bug」时必须填写重复的 Bug 编号".into());
-    }
-    let session = state.lock()?.require_session(session_id)?.clone();
-    let url = bug_endpoint(&session.info.base_url, bug_id, "/resolve")?;
-    // 空值一律不发：禅道对「传了空字符串」与「没传」的语义不完全一样（如 resolvedBuild）
-    let mut body = Map::new();
-    body.insert("resolution".into(), Value::String(resolution.to_string()));
-    if !resolved_build.is_empty() {
-        body.insert("resolvedBuild".into(), Value::String(resolved_build.to_string()));
-    }
-    if !duplicate_bug.is_empty() {
-        body.insert("duplicateBug".into(), Value::String(duplicate_bug.to_string()));
-    }
-    if !comment.is_empty() {
-        body.insert("comment".into(), Value::String(comment.to_string()));
-    }
-    let text = Value::Object(body).to_string();
-    write_request(state, session_id, &url, &session.token, &text)
-}
-
-/// 写操作共同的那一趟：POST + JSON body，不持锁发请求，回形状由 finish_write 收敛。
-fn write_request(
-    state: &ZentaoState,
-    session_id: &str,
-    url: &str,
-    token: &str,
-    body: &str,
-) -> Result<(), String> {
-    let result = http::request_url_no_redirects(
-        "POST",
-        url,
-        &[
-            ("Accept", "application/json"),
-            ("Content-Type", "application/json"),
-            ("Token", token),
-        ],
-        Some(body),
-    );
-    state.lock()?.finish_write(session_id, result)
 }
 
 /// 登记后台检查周期（分钟，0 = 关闭）。就绪判定与邮件监视同一条：
@@ -884,16 +698,15 @@ mod tests {
         .unwrap()
     }
 
-    /// 详情 / 用户 / 版本走的都是「会话匹配 + 只发到站内固定端点」这条只读路径。
+    /// 单页只读入口（账号资料 / 产品清单 / 单个产品）走的是「会话匹配 + 只发到站内固定端点」这条路径。
     #[test]
     fn read_endpoints_use_fixed_paths_and_match_the_session() {
         let state = ZentaoState::default();
         let info = mock_login(&state, "account");
 
-        for (label, url, call) in [
-            ("详情", "https://zentao.example/zentao/api.php/v1/bugs/7", 0),
-            ("用户", "https://zentao.example/zentao/api.php/v1/users?limit=200", 1),
-            ("版本", "https://zentao.example/zentao/api.php/v1/builds?project=3&limit=200", 2),
+        for (label, url) in [
+            ("产品清单", "https://zentao.example/zentao/api.php/v1/products?limit=500&page=1"),
+            ("单个产品", "https://zentao.example/zentao/api.php/v1/products/17"),
         ] {
             let value = read_json(&state, &info.id, url.to_string(), |method, got, headers, body| {
                 assert!(state.0.try_lock().is_ok(), "请求期间不能持锁：{label}");
@@ -906,7 +719,6 @@ mod tests {
             .unwrap();
             // 只读入口透传原始 JSON，投影在 TS 侧；这里只确认它没被包成别的形状
             assert_eq!(value["id"], "7", "{label}");
-            let _ = call;
         }
 
         // 旧会话不能读到新会话的数据
@@ -916,39 +728,6 @@ mod tests {
         )))
         .is_err());
     }
-
-    /// 图片地址闸门：只认站内相对路径 —— 正文 HTML 是服务端给的任意内容。
-    #[test]
-    fn image_paths_are_limited_to_the_station() {
-        assert_eq!(station_path("/zentao/index.php?m=file&f=read&fileID=370&t=png").unwrap(),
-            "/zentao/index.php?m=file&f=read&fileID=370&t=png");
-        for raw in [
-            "",
-            "   ",
-            "http://evil.example/x.png",
-            "//evil.example/x.png",
-            "data:image/png;base64,AAAA",
-            "/zentao/../../etc/passwd",
-            "/zentao/./x.png",
-            "/zentao/x\\y.png",
-            "/zentao/x\ny.png",
-            "zentao/x.png",
-        ] {
-            assert!(station_path(raw).is_err(), "应拒绝 {raw:?}");
-        }
-        // 超长地址也挡住
-        assert!(station_path(&format!("/{}", "a".repeat(3000))).is_err());
-    }
-
-    /// 图片按文件头认类型：不是图片就不回给渲染层（mime 猜错会让界面裂图）。
-    #[test]
-    fn image_bytes_must_look_like_an_image() {
-        let png = b"\x89PNG\r\n\x1a\n";
-        assert_eq!(crate::oauth::sniff_image(png), Some("image/png"));
-        assert_eq!(crate::oauth::sniff_image(b"not an image"), None);
-        assert_eq!(crate::encoding::base64(png), "iVBORw0KGgo=");
-    }
-
 
     /// 产品清单：优先用账号资料里的 view.products（/v1/products 在本部署下是空的）。
     #[test]
@@ -990,127 +769,6 @@ mod tests {
         assert_eq!(out, json!({ "id": "17", "name": "巩留县人民医院重症系统" }));
         let out2 = project_product(&json!({ "id": "3" }));
         assert_eq!(out2, json!({ "id": "3", "name": "" }));
-    }
-
-    #[test]
-    fn bug_endpoint_rejects_zero_and_builds_require_a_project() {
-        assert!(bug_endpoint("https://zentao.example", 0, "").is_err());
-        assert_eq!(
-            bug_endpoint("https://zentao.example", 7, "/assign").unwrap(),
-            "https://zentao.example/api.php/v1/bugs/7/assign"
-        );
-        let state = ZentaoState::default();
-        let info = mock_login(&state, "account");
-        assert!(builds(&state, &info.id, 0).is_err(), "项目编号 0 要挡下");
-    }
-
-    #[test]
-    fn assign_and_resolve_validate_input_before_network() {
-        let state = ZentaoState::default();
-        let info = mock_login(&state, "account");
-        // 空指派对象 / 空解决方案：一律不发请求
-        assert!(assign(&state, &info.id, 7, "   ", "").is_err());
-        assert!(resolve(&state, &info.id, 7, "", "", "", "").is_err());
-        // fixed 必带版本、duplicate 必带重复编号
-        assert!(resolve(&state, &info.id, 7, "fixed", "", "", "").is_err());
-        assert!(resolve(&state, &info.id, 7, "duplicate", "", "", "").is_err());
-    }
-
-    /// 写请求的地址与 body 形状：只发到固定端点，空值字段不出现，请求期间不持锁。
-    #[test]
-    fn write_requests_target_fixed_endpoints_with_expected_body() {
-        let state = ZentaoState::default();
-        let info = mock_login(&state, "account");
-
-        // 指派：body 只含 assignedTo 与 comment
-        let url = bug_endpoint("https://zentao.example/zentao", 7, "/assign").unwrap();
-        let seen = std::cell::RefCell::new(None);
-        write_probe(&state, &info, &url, "{\"assignedTo\":\"alice\",\"comment\":\"看下\"}", |m, u, h, b| {
-            assert!(state.0.try_lock().is_ok());
-            assert_eq!(m, "POST");
-            assert_eq!(u, "https://zentao.example/zentao/api.php/v1/bugs/7/assign");
-            assert!(h.contains(&("Token", "secret-token")));
-            *seen.borrow_mut() = Some(b.unwrap().to_string());
-            Ok(response(200, json!({})))
-        })
-        .unwrap();
-        assert_eq!(seen.into_inner().unwrap(), "{\"assignedTo\":\"alice\",\"comment\":\"看下\"}");
-
-        // 解决：fixed 带 resolvedBuild、不带 duplicateBug
-        let body = resolve_body("fixed", "8", "", "搞定了");
-        assert_eq!(body["resolution"], "fixed");
-        assert_eq!(body["resolvedBuild"], "8");
-        assert!(body.get("duplicateBug").is_none());
-        assert_eq!(body["comment"], "搞定了");
-        // 非 fixed：不带 resolvedBuild
-        let body2 = resolve_body("bydesign", "", "", "");
-        assert!(body2.get("resolvedBuild").is_none());
-        assert!(body2.get("comment").is_none());
-    }
-
-    #[test]
-    fn write_failures_are_folded_without_echoing_upstream_body() {
-        let state = ZentaoState::default();
-        let info = mock_login(&state, "account");
-        let url = bug_endpoint("https://zentao.example/zentao", 7, "/resolve").unwrap();
-        // 上游 400 带敏感正文：折成一句人话，且不泄漏正文
-        let error = write_probe(&state, &info, &url, "{}", |_, _, _, _| {
-            Ok(Response {
-                status: 400,
-                body: b"{\"internal\":\"secret-bug-content\"}".to_vec(),
-                etag: None,
-                location: None,
-            })
-        })
-        .unwrap_err();
-        assert!(!error.contains("secret-bug-content"));
-        // 401：清会话 + 带 AUTH 前缀
-        let result = write_probe(&state, &info, &url, "{}", |_, _, _, _| {
-            Ok(response(401, json!({})))
-        })
-        .unwrap_err();
-        assert!(result.starts_with("ZENTAO_AUTH_EXPIRED:"));
-        assert!(session(&state).unwrap().is_none());
-    }
-
-    /// 测试用：把写请求的「发请求」那步换成回调，其余（会话校验 / 形状收敛）走真实现。
-    fn write_probe<F>(
-        state: &ZentaoState,
-        info: &SessionInfo,
-        url: &str,
-        body: &str,
-        request: F,
-    ) -> Result<(), String>
-    where
-        F: FnOnce(&str, &str, &[(&str, &str)], Option<&str>) -> Result<Response, String>,
-    {
-        let result = request(
-            "POST",
-            url,
-            &[
-                ("Accept", "application/json"),
-                ("Content-Type", "application/json"),
-                ("Token", "secret-token"),
-            ],
-            Some(body),
-        );
-        state.lock()?.finish_write(&info.id, result)
-    }
-
-    /// 与 `resolve` 里拼 body 的规则同一条，供断言（抽出来便于在测试里直接看形状）。
-    fn resolve_body(resolution: &str, build: &str, duplicate: &str, comment: &str) -> Value {
-        let mut body = Map::new();
-        body.insert("resolution".into(), Value::String(resolution.to_string()));
-        if !build.is_empty() {
-            body.insert("resolvedBuild".into(), Value::String(build.to_string()));
-        }
-        if !duplicate.is_empty() {
-            body.insert("duplicateBug".into(), Value::String(duplicate.to_string()));
-        }
-        if !comment.is_empty() {
-            body.insert("comment".into(), Value::String(comment.to_string()));
-        }
-        Value::Object(body)
     }
 
     #[test]

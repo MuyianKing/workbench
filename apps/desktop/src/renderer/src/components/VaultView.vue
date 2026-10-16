@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { VaultEntry, VaultRecord } from '@workbench/vault'
 import type { InputInstance } from 'element-plus'
-import { ArrowRight, CopyDocument, Document, Hide, Key, Lock, MoreFilled, Plus, Refresh, Search, Setting, Unlock, View } from '@element-plus/icons-vue'
+import { ArrowRight, CopyDocument, Document, Hide, Key, Lock, MoreFilled, Plus, Search, Setting, Unlock, View } from '@element-plus/icons-vue'
 /**
  * 密码页：一张卡片墙。
  *
@@ -26,7 +26,7 @@ import { ArrowRight, CopyDocument, Document, Hide, Key, Lock, MoreFilled, Plus, 
  *
  * 明文只活在内存里：磁盘上那份与仓库里那份都只有密文（见 workbench/vault.ts）。
  */
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onActivated, onMounted, ref, watch } from 'vue'
 import PanelLoading from '@/components/PanelLoading.vue'
 import VaultEntryDialog from '@/components/VaultEntryDialog.vue'
 import VaultGroupDialog from '@/components/VaultGroupDialog.vue'
@@ -93,6 +93,15 @@ const groupDialog = ref(false)
 onMounted(() => {
   void store.init()
 })
+
+/**
+ * **每次进这一页自动同步一次**（`onActivated` 而不是 `onMounted`：这一页被 KeepAlive 留着，
+ * 切走再回来不会重新挂载 —— 而 `onActivated` 首次挂载同样会触发，所以进出各算一次，
+ * 与首页那几块卡片同一个做法，见 ActivityGraph.vue）。
+ *
+ * 锁着的时候同步什么都不做，那一趟由解锁那一步补上（见 stores/vault.ts 的 `applyUnlock`）。
+ */
+onActivated(() => store.sync())
 
 /**
  * 解锁屏一出现就把光标放进密码框：这一屏是「回来接着用」的地方，一进来就该能直接敲，
@@ -184,10 +193,6 @@ async function remove(record: VaultRecord): Promise<void> {
 
   await store.removeEntry(record.id)
   revealed.value = revealed.value.filter(id => id !== record.id)
-}
-
-async function sync(): Promise<void> {
-  await store.sync()
 }
 
 /**
@@ -317,14 +322,11 @@ async function lock(): Promise<void> {
         </div>
 
         <div class="filter__tools">
+          <!-- 同步是自动的（进这一页一次、增删改各一次），所以这一带没有同步按钮：
+               只在**没成功**的时候留一行字（失败原因 / 两边密钥对不上），成功不留字 -->
           <span v-if="store.syncNote" class="vault__note" :class="{ 'is-fail': store.syncFailed }">
             {{ store.syncNote }}
           </span>
-          <el-tooltip content="同步（推本机改动、拉回别的机器的）" placement="bottom">
-            <el-button size="small" :loading="store.syncing" @click="sync">
-              <el-icon><Refresh /></el-icon>
-            </el-button>
-          </el-tooltip>
           <el-tooltip content="密钥与同步" placement="bottom">
             <el-button size="small" @click="keyDialog = true">
               <el-icon><Key /></el-icon>
