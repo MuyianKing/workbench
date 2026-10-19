@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { Project, ProjectStatus } from '@/types'
-import { Box, Download, MoreFilled, Refresh, Search, VideoPause, VideoPlay } from '@element-plus/icons-vue'
-import { projectColorVar, sanitizeProjectColor } from '@workbench/core'
+import { Box, Download, MoreFilled, Refresh, Search, Share, VideoPause, VideoPlay } from '@element-plus/icons-vue'
+import { devServerUrl, projectColorVar, sanitizeProjectColor } from '@workbench/core'
 import { computed, ref } from 'vue'
 import { useWallClock } from '@/composables/use-wall-clock'
 import { DRAG_MIME } from '@/drag-mime'
@@ -58,6 +58,25 @@ const elapsed = computed(() => {
 
 /** 结束（正常退出）后给的才是本次总耗时，跑着的给的是还在走的那段 */
 const elapsedLabel = computed(() => (status.value === 'success' ? '耗时' : '已运行'))
+
+/**
+ * 跑着的时候给一个「在浏览器中打开」的入口。
+ *
+ * 端口先取运行态里那个（卡片上显示的就是它，来自启动日志认出的实际监听端口），
+ * 日志里没认出来时才退回配置里手填的 —— 配置是「我猜它在这个端口」，实际监听的那个更可信
+ * （端口被占时 Vite 这类会自己往上找一个）。两个都没有就没什么可打开的，入口不画。
+ * **只画给跑着的项目**：这是地址，不是「这个项目在哪」。
+ */
+const devUrl = computed(() => {
+  if (!isRunning.value)
+    return ''
+  const port = runtime.value?.port ?? props.project.port
+  return port ? devServerUrl(port) : ''
+})
+
+function openInBrowser(): void {
+  void store.openInBrowser(props.project.id)
+}
 
 function open(): void {
   store.openDrawer(props.project.id)
@@ -146,6 +165,17 @@ function onMore(command: string): void {
         <i class="state__dot" />
         {{ meta.label }}
       </span>
+      <!-- 项目跑着才画：把地址交给系统默认浏览器（不代开，点一下才开） -->
+      <el-tooltip v-if="devUrl" :content="`在浏览器中打开 ${devUrl}`" placement="top" :show-after="400">
+        <button
+          class="card__open"
+          type="button"
+          :aria-label="`在浏览器中打开 ${devUrl}`"
+          @click.stop="openInBrowser"
+        >
+          <el-icon><Share /></el-icon>
+        </button>
+      </el-tooltip>
     </div>
 
     <div class="card__sub">
@@ -337,8 +367,28 @@ function onMore(command: string): void {
   padding: var(--sp-3) var(--sp-4) var(--sp-3) calc(var(--sp-4) + 3px);
   /* 与 .panel（global.css）同一条规则：底色浓度跟着设置里的「卡片不透明度」走 */
   background: rgba(var(--bg-surface-rgb), var(--card-alpha, 1));
-  border: 1px solid var(--border);
+  /**
+   * 毛玻璃（苹果那种磨砂板）：底色只管「有多白」，背后那层壁纸得再磨一道，
+   * 否则透出来的是原样的图案 —— 一片叶子横在卡片上照样看得清叶脉。
+   * 磨砂与上沿高光都取 tokens.css 那一套共用令牌（配方只有那一份，与面板、导航栏、
+   * 下拉、弹窗同源），卡片自己只负责底色跟着「卡片不透明度」走。
+   * 卡片不透明度调到 100% 时磨砂自然不起作用 —— 那正是用户要的实底卡片。
+   */
+  backdrop-filter: var(--glass-filter);
+  /* 四周那条线归设置里的「毛玻璃描边」（默认不画，见 tokens.css 的 --glass-border-color） */
+  border: 1px solid var(--glass-border-color);
+  /**
+   * 左沿这条描边让给灯带。描边取的是 --border 一族的灰（#e1e4e9），灯带取的是状态色
+   * （--st-idle / --st-run / --st-ok / --st-fail），两者本来就不是同一个来源；这 1px 又
+   * 紧贴在灯带左边，看上去就是灯带旁边多出一道颜色对不上的线。卡片这条左沿本来就是
+   * 灯带的地盘（padding-left 也多留了 3px 给灯带），所以只把左边让开。
+   *
+   * 用「颜色透明」而不是 border-left-width: 0 —— 外框尺寸不变，描边整体开 / 关时卡片
+   * 不会横着挪 1px、里面那几行字也不会跟着动（同 tokens.css 那条口径）。
+   */
+  border-left-color: transparent;
   border-radius: var(--r-lg);
+  /* 没有了上沿那条高光（用户不要）：一块玻璃的边界只剩底色与投影 */
   box-shadow: var(--shadow-card);
   cursor: pointer;
   overflow: hidden;
@@ -346,7 +396,7 @@ function onMore(command: string): void {
 }
 
 .card:hover {
-  border-color: var(--border-strong);
+  border-color: var(--glass-border-color-hover);
   box-shadow: var(--shadow-hover);
   transform: translateY(-1px);
 }
@@ -476,6 +526,30 @@ function onMore(command: string): void {
   50% {
     opacity: 0.25;
   }
+}
+
+/*
+ * 「在浏览器中打开」：卡片右上角那颗分享图标。
+ * 与标题栏上那几颗外挂入口（系统状态的刷新、命令的加号）同一形态 —— 无底色、无描边，
+ * 常态是 --ink-3，悬停才转深，免得跟状态胶囊抢视线。卡片本身可点（开抽屉），所以必须 stop。
+ */
+.card__open {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink-3);
+  font-size: 12px;
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+
+.card__open:hover {
+  color: var(--ink);
 }
 
 /* ---------- 路径与时长 ---------- */

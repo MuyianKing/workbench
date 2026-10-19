@@ -1,23 +1,20 @@
-import type { ZentaoBugDiff } from '@workbench/zentao'
-import type { Result, ZentaoBrowse, ZentaoBug, ZentaoBugList, ZentaoSession } from '@/types'
+import type { Result, ZentaoBug, ZentaoBugList, ZentaoSession } from '@/types'
 import { fail } from '@workbench/core'
-import { diffZentaoBugs, sanitizeZentaoPollMinutes, zentaoBugUrl } from '@workbench/zentao'
+import { diffZentaoBugs, sanitizeZentaoPollMinutes } from '@workbench/zentao'
 import { defineStore } from 'pinia'
 import { ref, watch } from 'vue'
-import { bugs as fetchBugs, session as fetchSession, onCheck, onNotifyClick, watch as registerWatch, notify as sendNotify, login as zentaoLogin } from '@/workbench/zentao'
-import { useNavStore } from './nav'
+import { bugs as fetchBugs, session as fetchSession, onCheck, openWindow, watch as registerWatch, notify as sendNotify, login as zentaoLogin } from '@/workbench/zentao'
 import { useSettingsStore } from './settings'
+
 /**
- * 禅道页与后台检查的状态。
+ * 禅道：**只有后台检查与系统通知**。禅道页面本身在独立窗口里（顶栏右上角那颗图标打开，
+ * 见 components/TitleBar.vue 与 Rust 侧 zentao.rs 的 open_window），这一层不维护任何列表。
  *
  * **数据流**：设置里的检查间隔（`zentaoPollMinutes`，默认 30、0 = 关闭）→ 适配层登记给
  * Rust 的计时线程 → 到点发 `zentao:check` → 这一层取完整列表（分页聚合在 @workbench/zentao）、
- * 与上一轮**编号全集**比出新增 → 有新增才调 `zentaoNotify` 弹系统通知（点击唤出主窗口并切回本页）。
- * 取数间隔与新增判定放在这一侧，是因为窗口收进托盘后 WebView 的定时器会被节流 ——
- * 计时必须由 Rust 醒，而分页与判定已经有带单测的域包，不在 Rust 里重写一份。
- *
- * **只看列表，不开详情**：Bug 的正文与历史都在禅道页面里看 —— 点标题交给系统浏览器
- * （`zentaoBugUrl` 只造站内链接，见 openBug）。改动禅道数据同样在浏览器里做。
+ * 与上一轮**编号全集**比出新增 → 有新增才调 `zentaoNotify` 弹系统通知（点通知打开禅道窗口，
+ * 那一下在 Rust 侧接）。取数间隔与新增判定放在这一侧，是因为窗口收进托盘后
+ * WebView 的定时器会被节流 —— 计时必须由 Rust 醒，而分页与判定已经有带单测的域包。
  *
  * **基线（baselineIds）**：第一轮成功只记不报（否则「第一次打开」会把现有 Bug 全报成新增）；
  * 取数失败不推进基线（下一轮照旧能认出中间新增的）；比对的是编号全集而不是最大编号 ——
@@ -25,9 +22,12 @@ import { useSettingsStore } from './settings'
  *
  * **通知失败不吞**：待通知的那批留在 `pendingNotify` 里，下一轮后台检查时重发（成功才清），
  * 因此「弹一次没弹出去」不会变成「永远不知道」，也不会因为重试把同一批报两遍。
- * 手动刷新只更新列表与基线、不弹通知：用户既然已经看见列表了，再弹一条只是噪声。
+ * 失败原因留在 `error` 里（打开窗口失败、或后台检查失败都往这里写，界面自己决定怎么说）。
  */
 const AUTH_PREFIX = 'ZENTAO_AUTH_EXPIRED:'
+
+/** 通知只关心「指派给我的」：没有列表之后口径是固定的 */
+const BROWSE = 'assigntome' as const
 
 /** 会话身份：换账号 / 换部署之后既有的编号基线不再代表「我已经知道的那批」 */
 function identityOf(session: ZentaoSession): string {
@@ -44,23 +44,18 @@ function readableError(message: string): string {
 export const useZentaoStore = defineStore('zentao', () => {
   const settings = useSettingsStore()
 
-  const session = ref<ZentaoSession | null>(null)
-  const bugList = ref<ZentaoBugList | null>(null)
-  /** 手动取数 / 首次进页面的转圈；后台检查不碰它（不打扰界面） */
-  const loading = ref(false)
-  const error = ref('')
-  /** 列表取回来了、但系统通知没发出去（下一轮后台检查会重试） */
-  const notifyError = ref('')
+  /** 只在后台链里用；界面不需要它（窗口里显示的是禅道自己的登录态） */
+  let session: ZentaoSession | null = null
 
-  /** 列表口径：指派给我的 / 未解决 / 未关闭（切换即重取） */
-  const browse = ref<ZentaoBrowse>('assigntome')
+  /** 最近一次后台检查 / 通知失败的原因（页面头部落一行字；成功即清） */
+  const error = ref('')
 
   /** 上一轮成功取回的编号全集；null = 还没建立基线 */
   let baselineIds: number[] | null = null
   let baselineIdentity = ''
   /** 通知失败、等下一轮重发的新增（按编号去重，发成功才清） */
   let pendingNotify: ZentaoBug[] = []
-  /** 在途的那一轮取数：后台检查、进页面与手动刷新共用它，不各自开一轮 */
+  /** 在途的那一轮取数：后台检查与手动重试共用它，不各自开一轮 */
   let inFlight: Promise<void> | null = null
   /** 在途那一轮的序号：`finally` 里按它清 `inFlight`（不能在自己的初始化式里引用自己） */
   let runSeq = 0
@@ -70,46 +65,53 @@ export const useZentaoStore = defineStore('zentao', () => {
 
   /**
    * 认证并取一轮完整列表：本机已有会话就复用；过期（401）只重登一次再取，不循环。
+   *
+   * 另有一条：Rust 侧的会话可能被**窗口里的自动登录**换掉（那边走的是浏览器登录，
+   * 与这里的 API 会话是两份）。取数失败时重读一次本机会话，id 变了就用新的再试一次 ——
+   * 否则后台检查会一直拿着过期 id 报「会话已变更」。
    */
   async function fetchList(): Promise<Result<ZentaoBugList>> {
-    if (!session.value) {
+    if (!session) {
       const existing = await fetchSession()
       if (existing.ok && existing.data)
-        session.value = existing.data
+        session = existing.data
     }
-    if (!session.value) {
+    if (!session) {
       const loginResult = await zentaoLogin()
       if (!loginResult.ok || !loginResult.data)
         return fail(loginResult.error || '禅道登录失败')
-      session.value = loginResult.data
+      session = loginResult.data
     }
-    const current = session.value
-    let result = await fetchBugs(current.id, browse.value)
+    const current = session
+    let result = await fetchBugs(current.id, BROWSE)
     if (!result.ok && (result.error ?? '').startsWith(AUTH_PREFIX)) {
-      session.value = null
+      session = null
       const loginResult = await zentaoLogin()
       if (!loginResult.ok || !loginResult.data)
         return fail(loginResult.error || '禅道重新登录失败')
-      session.value = loginResult.data
-      result = await fetchBugs(loginResult.data.id, browse.value)
+      session = loginResult.data
+      result = await fetchBugs(loginResult.data.id, BROWSE)
+    }
+    if (!result.ok) {
+      const fresh = await fetchSession()
+      if (fresh.ok && fresh.data && fresh.data.id !== current.id) {
+        session = fresh.data
+        result = await fetchBugs(fresh.data.id, BROWSE)
+      }
     }
     return result
   }
 
-  /** 把这一轮结果并进状态：推进基线，后台那一轮再顺手把新增通知出去 */
-  async function applyResult(list: ZentaoBugList, background: boolean): Promise<void> {
-    const current = session.value
-    const identity = current ? identityOf(current) : ''
+  /** 把这一轮结果并进状态：推进基线，有新增加进待发队列并立刻发一次 */
+  async function applyResult(list: ZentaoBugList): Promise<void> {
+    const identity = session ? identityOf(session) : ''
     if (identity !== baselineIdentity) {
       baselineIds = null
       baselineIdentity = identity
       pendingNotify = []
     }
-    const diff: ZentaoBugDiff = diffZentaoBugs(baselineIds, list.bugs)
-    bugList.value = list
+    const diff = diffZentaoBugs(baselineIds, list.bugs)
     baselineIds = diff.ids
-    if (!background)
-      return
     if (diff.added.length) {
       const seen = new Set(pendingNotify.map(bug => bug.id))
       for (const bug of diff.added) {
@@ -122,24 +124,23 @@ export const useZentaoStore = defineStore('zentao', () => {
 
   /** 把待通知的那批发出去；失败就留着等下一轮，成功才清 */
   async function flushNotify(): Promise<void> {
-    const current = session.value
-    if (!current || !pendingNotify.length)
+    if (!session || !pendingNotify.length)
       return
     const first = pendingNotify[0]
-    const result = await sendNotify(current.id, pendingNotify.length, first.title)
+    const result = await sendNotify(session.id, pendingNotify.length, first.title)
     if (!result.ok) {
-      notifyError.value = result.error || '发送系统通知失败'
+      error.value = result.error || '发送系统通知失败'
       return
     }
-    notifyError.value = ''
+    error.value = ''
     pendingNotify = []
   }
 
   /**
-   * 跑一轮取数。`background` 为真时是后台检查：不转圈、失败照实记 ——
-   * 用户回到页面时看到的原因就是最后一次检查失败的原因。
+   * 跑一轮取数。失败照实记（页面头部落一行字）——用户切回页面时看到的原因
+   * 就是最后一次检查失败的原因。
    */
-  function runFetch(background: boolean): Promise<void> {
+  function runFetch(): Promise<void> {
     if (inFlight)
       return inFlight
     const seq = ++runSeq
@@ -151,7 +152,7 @@ export const useZentaoStore = defineStore('zentao', () => {
           return
         }
         error.value = ''
-        await applyResult(result.data, background)
+        await applyResult(result.data)
       }
       finally {
         if (seq === runSeq)
@@ -162,97 +163,49 @@ export const useZentaoStore = defineStore('zentao', () => {
     return task
   }
 
-  /** 进页面 / 手动刷新：转圈，等的是同一轮在途取数（后台那轮在跑就不另开一条） */
-  async function refresh(): Promise<void> {
-    loading.value = true
-    try {
-      await runFetch(false)
-    }
-    finally {
-      loading.value = false
-    }
-  }
-
-  /** 进页面时调：已经有列表或已经有一轮在跑就不重复请求（KeepAlive 切回也不重拉） */
-  function ensureLoaded(): void {
-    if (bugList.value || inFlight)
-      return
-    void refresh()
-  }
-
   /** 后台线程到点：取数、比新增、必要时弹通知；关着（0）不发请求 */
   function checkInBackground(): void {
     if (pollMinutes() === 0)
       return
-    void runFetch(true)
+    void runFetch()
   }
 
-  /** 打开禅道：不带 bug 就开部署首页，带了就开那条 Bug 的页面（正文与历史都在那边看） */
-  async function openBug(bug?: ZentaoBug): Promise<void> {
-    const current = session.value
-    if (!current)
-      return
-    try {
-      const url = bug ? zentaoBugUrl(current.baseUrl, bug.id) : current.baseUrl
-      const result = await window.workbench.openExternal(url)
-      if (!result.ok)
-        error.value = result.error || '打开禅道失败'
+  /**
+   * 打开（或聚焦）禅道窗口；返回错误文案（空串 = 成功）。
+   * 顶栏那颗图标调它，失败时给一句提示。
+   */
+  async function open(): Promise<string> {
+    const result = await openWindow()
+    if (result.ok) {
+      error.value = ''
+      return ''
     }
-    catch (cause) {
-      error.value = cause instanceof Error ? cause.message : '打开禅道失败'
-    }
-  }
-
-  /** 切列表口径：不一样才重取（指派给我的 / 未解决 / 未关闭） */
-  function setBrowse(next: ZentaoBrowse): void {
-    if (browse.value === next)
-      return
-    browse.value = next
-    baselineIds = null
-    bugList.value = null
-    void refresh()
+    error.value = result.error || '打开禅道窗口失败'
+    return error.value
   }
 
   /**
    * 起后台检查（App.vue 挂载时调一次）：订阅要**先挂上**、再登记周期 ——
-   *  Rust 在启用时会立刻发一次检查（那轮用来建立基线），订阅晚一步就漏掉了
+   * Rust 在启用时会立刻发一次检查（那轮用来建立基线），订阅晚一步就漏掉了
    */
   let watchStarted = false
   function startWatch(): void {
     if (watchStarted)
       return
     watchStarted = true
-    void (async () => {
-      await onCheck(checkInBackground)
-      onNotifyClick(() => {
-        const nav = useNavStore()
-        void nav.setActiveView('zentao')
-      })
-      let registered = -1
-      watch(
-        () => pollMinutes(),
-        (minutes) => {
-          if (minutes === registered)
-            return
-          registered = minutes
-          void registerWatch(minutes)
-        },
-        { immediate: true },
-      )
-    })()
+    void onCheck(checkInBackground)
+    watch(
+      () => pollMinutes(),
+      (minutes) => {
+        void registerWatch(minutes)
+      },
+      { immediate: true },
+    )
   }
 
   return {
-    session,
-    bugList,
-    loading,
     error,
-    notifyError,
-    browse,
-    setBrowse,
-    refresh,
-    ensureLoaded,
+    open,
     startWatch,
-    openBug,
   }
 })

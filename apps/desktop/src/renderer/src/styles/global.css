@@ -284,9 +284,15 @@ body.is-resizing-video-float * {
    * 底色浓度由设置里的「卡片不透明度」驱动：--card-alpha 由 App.vue 按设置写在 .app 上，
    * 面板与项目卡（ProjectCard 同款写法）一起跟着变；没这个变量时回退 1，就是原来的实底。
    * 只调背景这一层 —— 边框、阴影与内容不透明度不动，卡片仍然分得清、读得清。
+   *
+   * 底色之下还有一道**毛玻璃**（--glass-filter，配方在 tokens.css 的「毛玻璃」一节）：
+   * 壁纸隔着玻璃只剩色块，不透明度调低时透出来的是磨过的、不是原样的图案。
+   * 这一页里所有面板（首页那几张、笔记 / 邮箱 / 知识库 / AI 的栏）都吃这一条。
    */
   background: rgba(var(--bg-surface-rgb), var(--card-alpha, 1));
-  border: 1px solid var(--border);
+  backdrop-filter: var(--glass-filter);
+  /* 四周那条线归设置里的「毛玻璃描边」（默认不画，见 tokens.css 的 --glass-border-color） */
+  border: 1px solid var(--glass-border-color);
   border-radius: var(--r-lg);
   box-shadow: var(--shadow-card);
   overflow: hidden;
@@ -860,11 +866,13 @@ body.is-resizing-video-float * {
     rgba(var(--ws-veil-rgb), 0.3) 0%,
     rgba(var(--ws-veil-rgb), 0.18) 100%
   );
-  backdrop-filter: blur(26px) saturate(1.7) brightness(1.02);
-  /* 上沿一条高光给玻璃的厚度；下沿一条细边 + 一层又短又柔的投影，让它像浮在画布上 */
-  box-shadow:
-    inset 0 1px 0 var(--glass-edge),
-    0 10px 20px -16px rgba(17, 21, 27, 0.45);
+  /* 磨砂取全站那一份（tokens.css 的 --glass-filter），与面板 / 卡片同一档厚度 ——
+     这条带子只多一层 brightness：它的底色是渐变的，亮一点才像玻璃的厚度。
+     自己另写一份模糊量的话，顶栏会比它下面的卡片更清楚，看着是两种材料 */
+  backdrop-filter: var(--glass-filter) brightness(1.02);
+  /* 只有下沿一层又短又柔的投影，让它像浮在画布上。
+     原先还有一条 `inset 0 1px 0` 的上沿高光（玻璃的厚度），用户看着就是窗口顶上的一道白线，已去掉 */
+  box-shadow: 0 10px 20px -16px rgba(17, 21, 27, 0.45);
 }
 
 /* ---------- clear：两条全透明 ---------- */
@@ -920,6 +928,55 @@ body.is-resizing-video-float * {
 }
 
 /* ---------- Element Plus 局部收敛 ---------- */
+
+/**
+ * ---------- 浮层的玻璃 ----------
+ *
+ * 下拉 / 选择器 / 日期 / popover / 弹窗 / 确认框这些面都压在别的内容之上，做成磨砂板比实底白
+ * 更像苹果那套「材质」：看得见背后的色块、却看不清背后的字。
+ *
+ * 底色那半边不用写在这儿 —— `.el-popper`（连同它的箭头）取 `--el-bg-color-overlay`、
+ * 弹窗取 `--el-dialog-bg-color`，两枚都已在 tokens.css 里换成玻璃的底色；这里只补**磨砂**
+ * 这一道，配方同样只有 tokens.css 那一份（糊多厚、提多少饱和都改那里）。
+ *
+ * **只给面，不给遮罩**：遮罩照旧完全透明（--el-overlay-color 一组见 tokens.css）——
+ * 弹层浮起来靠的是它自己那层磨砂与投影，不是一层压暗的灰。
+ */
+
+/* 深色的 tooltip 是标签不是面（`is-dark` 那档自带实底），排除掉，免得平白多一层合成 */
+.el-popper:not(.is-dark) {
+  backdrop-filter: var(--glass-filter);
+}
+
+/**
+ * EP 给浮层自带一条 `--el-border-color-light` 的边（箭头两侧也各有一条），一并换成
+ * 「毛玻璃描边」那一枚：关掉时它也是 transparent，浮层的边与卡片一起收掉。
+ *
+ * 逐条列选择器是因为 EP 那几条都是两级（`.el-select__popper.el-popper`），
+ * 同具体度下靠这里排在后面取胜 —— 只写 `.el-popper` 会被它们顶掉。
+ */
+.el-popper,
+.el-select__popper.el-popper,
+.el-dropdown__popper.el-popper,
+.el-popper.is-light > .el-popper__arrow::before,
+.el-select__popper.el-popper .el-popper__arrow::before,
+.el-dropdown__popper.el-popper .el-popper__arrow::before,
+.el-autocomplete__popper.el-popper .el-popper__arrow::before {
+  border-color: var(--glass-border-color);
+}
+
+/* 浮层里的「框里的框」（日期格子、输入框）照旧实底：玻璃说的是那张面，不是里头每样东西 */
+.el-popper.is-light {
+  --el-fill-color-blank: var(--bg-surface);
+}
+
+/* 弹窗、详情抽屉、确认框：比卡片厚一档的底色（--glass-fill），因为里面是成句的字 */
+.el-dialog,
+.el-drawer,
+.el-message-box {
+  background: var(--glass-fill);
+  backdrop-filter: var(--glass-filter);
+}
 
 .el-button {
   font-weight: 500;
@@ -1281,16 +1338,19 @@ body.is-resizing-video-float * {
  *    `top`，统一加一段上边距不会打乱它们之间的间距。
  *
  *  - **分量**：默认是「浅色底 + 同色字」（success 那档最淡），压在壁纸与蒙版上几乎看不出是
- *    一条提示。这里换成不透明的面底色 + 一条状态色的左侧竖条 + 卡片阴影，字号提到正文那一档。
+ *    一条提示。这里换成厚一档的玻璃底色（--glass-fill，加上 popover 那道同样的磨砂）+
+ *    一条状态色的左侧竖条 + 卡片阴影，字号提到正文那一档。
  *    颜色仍然只表达状态（`--st-ok` / `--st-fail` / `--st-run`），与全站同一条口径。
  */
 .el-message {
   --el-message-padding: var(--sp-3) var(--sp-4);
   margin-top: calc(var(--h-titlebar) + var(--h-header));
-  border: 1px solid var(--border);
+  /* 四周那条线归「毛玻璃描边」（默认不画），但左侧那条状态色竖条要留着 —— 它不是描边 */
+  border: 1px solid var(--glass-border-color);
   border-left: 3px solid var(--st-idle);
   border-radius: var(--r-md);
-  background: var(--bg-surface);
+  background: var(--glass-fill);
+  backdrop-filter: var(--glass-filter);
   box-shadow: var(--shadow-hover);
 }
 

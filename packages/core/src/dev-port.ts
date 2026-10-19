@@ -237,3 +237,14 @@ export function parsePortFromLog(text: string): number | undefined {
     return undefined
   return port
 }
+
+/**
+ * 开发服务的本地地址。
+ *
+ * 一律写 `localhost` 而不是 `127.0.0.1`：两者都通，但 Vite / vue-cli 的输出、以及用户
+ * 自己敲的地址都是这个名字，卡片上显示什么、点开的就应该是同一个。
+ * 结尾的 `/` 不能省 —— 少一节路径时浏览器补的是空路径，某些 dev server 会走一次重定向。
+ */
+export function devServerUrl(port: number): string {
+  return `http://localhost:${port}/`
+}

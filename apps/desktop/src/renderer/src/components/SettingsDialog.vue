@@ -227,4 +227,13 @@ watch(visible, (open) => {
   line-height: 1.6;
   color: var(--ink-3);
 }
+
+/** 一行字说明某个开关现在为什么不起作用（禅道的后台检查失败用它） */
+.settings :deep(.row__error) {
+  margin: var(--sp-2) 0 0;
+  font-size: var(--fs-meta);
+  line-height: 1.7;
+  color: var(--st-fail);
+  overflow-wrap: anywhere;
+}
 </style>

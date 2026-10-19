@@ -28,7 +28,7 @@
 - 定位：Windows 桌面应用（Tauri 2 + WebView2），一个窗口里管项目、记工作、写笔记、看 AI 用量；pnpm workspace monorepo
   （应用在 `apps/desktop/`，纯逻辑按域拆在 `packages/` 的 17 个 `@workbench/*` 包，见第 2 节），`Cargo.lock` 要提交；
   例外：`vendor-pi.mjs` 内部装 Pi 仍走 `npm install`（`resources/pi/` 要整树打进安装包，不能用符号链接布局）。
-- **联网边界：默认不联网、不上报任何数据；出口只有十一条，且都由用户显式开启** —— 清单与每条细则见
+- **联网边界：默认不联网、不上报任何数据；出口只有十二条，且都由用户显式开启** —— 清单与每条细则见
   [features-and-architecture.md](docs/features-and-architecture.md) 的「数据与隐私」一节，**动联网代码前先读那一节**。
   **不要新增网络出口、不往任何第三方服务发数据**；笔记里的外链图片、密码保险库（推的是用量同步那个仓库的 `vault/vault.json`，
   推上去的只有密文）都**不算**新出口；构建期内嵌 OAuth client_id/secret 与用户指定的禅道个人凭据是明确例外，后者不得随包分发。
@@ -54,7 +54,9 @@
   `data\pi\sessions\`（起进程时传 `--session-id` 与 `--session-dir`，**不要传 `--no-session`**）。跑它时子进程必须带 `PI_TELEMETRY=0`、`PI_SKIP_VERSION_CHECK=1` 与 `PI_OFFLINE=1`
   （它默认会报遥测、向 pi.dev 查最新版本、RPC 启动时还刷一遍模型目录 —— 那三条不在任何已登记的出口里），密钥只经环境变量给，
   **进程直启不经 `cmd /C`**（行内层引号会被 cmd 拆坏，见 session.rs 的 `spawn_args`）。别照着再引别的 Agent。
-- 测试用 Vitest（17 个域包各自跑自己的用例，根目录 `pnpm test` = `pnpm -r test` 聚合；渲染层用例在 `@workbench/desktop` 包里）
+- 测试用 Vitest（各包子目录里的 `vitest.config.ts` 是配置来源；根目录 `pnpm test` 走根 `vitest.config.ts` 的
+  `test.projects`，把 18 个项目收进**一个** vitest 进程跑全量 —— 别退回 `pnpm -r test`，那是 18 次进程启动；
+  渲染层用例在 `@workbench/desktop` 包里）
   + `cargo test`（写在同文件的 `#[cfg(test)] mod tests`）。**TypeScript 与 vue-tsc 的版本不要动**：升到 TS 7 会让 `pnpm run typecheck` 直接不可用。
 - 仅 Windows，不做 macOS / Linux 适配。
 
@@ -68,6 +70,10 @@
   `capture.html`（截图遮罩）、`pin.html`（钉图）、`ball.html`（网速球）。后三个是独立窗口、各自的 JS 上下文，
   **只装适配层，不装 store、不 initState**
   —— 装了会与主窗口抢着读 / 写同一批数据文件（见 [screenshot.md](docs/modules/screenshot.md)、[float-ball.md](docs/modules/float-ball.md)）。
+- **禅道是一扇独立窗口**（顶栏那一排右侧、收起 / 展开菜单那颗右边的图标打开，通知点击也开它），里面直接加载禅道站点、用系统标题栏：
+  它是唯一的**远程来源窗口**，**不登记任何 capability**（远程来源不给 IPC，见 [zentao.md](docs/modules/zentao.md)）。
+  别把它做进页面里当 iframe（服务端 `X-Frame-Options: SAMEORIGIN` 会拒绝渲染），也别自绘窗口按钮
+  （自绘的按钮盖不住远程页面 —— 原生画面与 HTML 是两层）。
 - 域包之间与应用对域包一律**按包名导入**（`@workbench/<包>`，只走各包 `index.ts` 桶）；解析走 pnpm 的 workspace 软链 + 各包
   `exports`（TS 源码直出），TS 检查由根目录唯一的 `tsconfig.json` / `tsconfig.test.json` 的 paths 兜底。渲染层内部别名
   `@` → `apps/desktop/src/renderer/src`（`@shared` 已随拆包删除）。单测与被测模块同目录，命名 `*.test.ts`。
@@ -91,9 +97,7 @@
   `--bg-*` `--ink-*` `--st-*` `--sp-*` `--r-*` `--fs-*` `--ease-*`。暗色只在 `:root[data-theme='dark']` 覆盖令牌。
 - 界面主体灰度，彩色只表达运行状态（`--st-run` / `--st-ok` / `--st-fail`）与项目标识色；用户配的主题色只管
   交互态与首页活跃度图的色阶（口径在 [accent-color.ts](packages/appearance/src/accent-color.ts) 的文件头，别扩到别处）；
-  终端面板始终深色（`--term-*`）。**例外只有两个**：禅道 Bug 的「严重程度 / 优先级」这两个字段按等级着色（列表那两列），
-  色阶口径只在 [zentao.ts](packages/zentao/src/zentao.ts)（见 [zentao.md](docs/modules/zentao.md)），不许扩到别的字段；
-  邮箱附件片左首那枚类型图标按文件类型着色（PDF 红 / Word 蓝 / 幻灯片橙 / Markdown 紫 / 网页青），
+  终端面板始终深色（`--term-*`）。**例外只有一处**：邮箱附件片左首那枚类型图标按文件类型着色（PDF 红 / Word 蓝 / 幻灯片橙 / Markdown 紫 / 网页青），
   色阶口径只在 [parse.ts](packages/mail/src/parse.ts) 的 `attachmentTint`（见 [mail.md](docs/modules/mail.md)），
   名字、大小与其余一切照旧灰度，不许扩到别处、也不许拿它给整片附件上色。
 - **项目标识色**（[project-color.ts](packages/core/src/project-color.ts)）：预设色存名字不存色值，自定义色 `#rrggbb` 一律经
@@ -144,7 +148,7 @@ asset 协议、读取权限在 Rust 侧按单个文件授予）、**通道一律
 | 用量与外观同步、账号登录 | [sync-and-auth](docs/modules/sync-and-auth.md) |
 | 密码保险库（密钥 / 加解密 / 多机共写一份文件） | [vault](docs/modules/vault.md) |
 | 邮箱（IMAP 收信 / SMTP 发信 / 授权码 / 联网出口） | [mail](docs/modules/mail.md) |
-| 禅道（API 登录 / 内存会话 / Bug 列表 / 后台检查与通知 / 点标题走浏览器） | [zentao](docs/modules/zentao.md) |
+| 禅道（API 登录 / 内存会话 / 独立窗口与免登录 / 后台检查与通知） | [zentao](docs/modules/zentao.md) |
 | 截图与钉图（抓屏 / 标注 / 剪贴板 / 置顶图窗口） | [screenshot](docs/modules/screenshot.md) |
 | 网速球（自由摆放 / 贴边收起 / 网卡计数取样） | [float-ball](docs/modules/float-ball.md) |
 
@@ -159,22 +163,28 @@ asset 协议、读取权限在 Rust 侧按单个文件授予）、**通道一律
 - **前端代码格式化走 ESLint**：`pnpm run lint:fix`（检查用 `pnpm run lint`），配置在根目录 `eslint.config.mjs`
   （`@antfu/eslint-config`，范围是渲染层 + 域包，`src-tauri/`、`resources/`、`apps/desktop/scripts/` 不在圈里）；
   **每次改完前端代码都要跑一遍**，只允许这一套，不要再引 Prettier 之类的第二套格式化工具。
+  两条都带 `--cache`：热缓存下全仓库一遍约 5s（不带是 20s，冷启动多付 1s 左右）。
+  `.eslintcache` 是**本地产物**（已 ignore、不提交），CI 上每次都是空的 —— 那 1s 不值得为它加特例。
 - 改了 Rust 要跑 `cargo test` **与 `cargo build`**：`cargo test` 编译的是开着 `cfg(test)` 的那个 bin，被它关起来的东西当生产代码用时
   会 test 一片绿、build 才报错。**生产代码里不许裸 `unwrap()`**（`clippy::unwrap_used` 已在 `src/main.rs` 顶部设成 deny，测试豁免见
   `src-tauri/clippy.toml`）；要显式终止就用 `expect("原因")` —— 它带得走一句话，也会落进 `data/panic.log`。
 - **push / PR 会过 `.github/workflows/ci.yml`**（`pnpm run lint` + `typecheck` + `pnpm test` + `cargo clippy -- -D warnings` + `cargo test`）：
   它是兜底、不是替代，上面那几条本地该跑的照跑。
 - 动过 `.vue` 的模板（加 / 删 / 挪标签）要顺手跑一次 `pnpm run build:renderer`：`typecheck` 查不出模板标签不配平（vue-tsc 全绿而
-  vite 报 `Invalid end tag`、页面白屏），只有真的编译一遍模板才发现得了。**模板里用到的组件必须在脚本里 import**（`el-*` 那几个是全局注册的除外）：
+  vite 报 `Invalid end tag`、页面白屏），只有真的编译一遍模板才发现得了。`pnpm run verify` 已经**无条件**带上这一步了
+  （3s 出头，塞在并行组里等于免费），不必再自己判断「这轮动没动过模板」。
+  **模板里用到的组件必须在脚本里 import**（`el-*` 那几个是全局注册的除外）：
   少了它上面两条都不报错，那个标签被渲染成空 —— 现象是「按钮在、点下去什么都没发生」，`pnpm run lint` 的 `vue/no-undef-components` 才拦得住。
 - **永远不要替用户起应用**（`pnpm run dev` / `tauri dev` / `tauri build` 一律不跑）：验证只到静态检查、单测与构建为止；
   改完说一句「dev 已停、代码已就绪」，起不起、什么时候起由用户自己决定。
 - **别在 cargo 与 dev 之间来回**：`tauri dev` 是 `--no-default-features`，`cargo test` / `cargo build` / `clippy` 是默认 feature 集，
   两套 feature 会把彼此的产物作废，每来回一次就是整棵重编（分钟级）。所以一次改完、cargo 只跑一轮。
-- **一次改完再一次跑齐验证，别拆成多轮**：前端一条命令串起来
-  （`pnpm run lint:fix && pnpm run lint && pnpm run typecheck && pnpm run build:renderer && pnpm test`），
-  Rust 一条命令串起来（`cargo test … && cargo build … && cargo clippy … -- -D warnings`）。
-  改到一半只跑受影响的那个包（`pnpm -F @workbench/<包> test`），全量留到收尾那一次。
+- **一次改完再一次跑齐验证，别拆成多轮**：前端一条命令 `pnpm run verify`（`scripts/verify.mjs`）——
+  里面是 `lint:fix` 先独自跑完（它会写文件），然后 `lint` / `typecheck` / `build:renderer` 三条**并行**，
+  最后 `test` 单独串行（它要独占 CPU）；实测约 27s，原来是 70s。怎么量、坑在哪见
+  [build-performance.md](docs/dev-notes/build-performance.md)。Rust 一条命令串起来
+  （`cargo test … && cargo build … && cargo clippy … -- -D warnings`）。
+  改到一半只跑受影响的那个包（`pnpm -F @workbench/<包> test`，走那个包自己的配置），全量留到收尾那一次。
 - **`pnpm test` 与 `cargo` 不要同时跑**：两边抢 CPU 会让既有那几条基于真实 git 的重测试撞 5 秒超时（假失败）。
   这类超时先单独复跑该包确认，别当成真失败去改代码。
 - **cargo 之前确认没有正在跑的应用**（exe 被占用会「拒绝访问」链接失败，而失败后跑起来的仍是旧二进制）：
@@ -190,7 +200,11 @@ asset 协议、读取权限在 Rust 侧按单个文件授予）、**通道一律
   `docs/modules/<模块>.md`（约束变了就改「约束」一节）；跨模块的通用事实更新
   [features-and-architecture.md](docs/features-and-architecture.md)。
 - **了解业务以文档为主、代码为辅**：先读文档拿结论、再用代码抽验关键点，文档没写或疑似过期才反过来以代码为准。
-- 不提交构建产物与缓存（`out/`、`dist/`、`.preview/`、`*.tsbuildinfo`、`apps/desktop/src-tauri/target/`）；
+- **别用 `git checkout --` / `git restore` / `git stash` 去清自己插进去的探针或临时改动**：它们按**文件**回退，
+  会把用户在同一文件里**未提交的改动一起冲掉**。2026-10-19 在 `App.vue` 上就是这么丢了「禅道页从应用里摘掉」那两行：
+  被冲掉的改动拿不回来（Local History 常是空的；没 `git add` 过就没有悬空 blob，只能靠上一次构建产物反推）。
+  要清探针就用反向补丁精确删那几行；更好的做法是**别往仓库文件里写探针** —— 量耗时夹在命令外面（`date +%s%3N`）就够。
+- 不提交构建产物与缓存（`out/`、`dist/`、`.preview/`、`*.tsbuildinfo`、`.eslintcache`、`apps/desktop/src-tauri/target/`）；
   **绝不提交 `apps/desktop/src-tauri/oauth.local.json`**（client_id / client_secret）。
 - **视觉验证只在用户明确要求时做**：要做就把渲染层单独跑在浏览器里截图比对，用 `.preview/` 作工作区，
   **做完删掉整个 `.preview/` 目录**；`apps/desktop/vite.preview.config.ts` 是常驻入口，不要删。

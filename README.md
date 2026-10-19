@@ -55,7 +55,7 @@
 pnpm install
 
 pnpm run dev        # 开发态（Rust 后端 + 渲染层热更新）
-pnpm test           # Vitest 单元测试（各包聚合）
+pnpm test           # Vitest 单元测试（域包 + 渲染层，一条进程跑全量）
 pnpm run typecheck  # 类型检查
 pnpm run dist       # 打包出 NSIS 安装包
 ```

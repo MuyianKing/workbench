@@ -3,6 +3,8 @@ out
 dist
 *.tsbuildinfo
 .cache
+# ESLint 的 --cache 落盘在这儿（见 scripts/verify.mjs）：本地产物，不进版本库
+.eslintcache
 .tmp
 .DS_Store
 *.log

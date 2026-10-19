@@ -9,7 +9,7 @@ import { ACCENT_PRESETS, BACKGROUND_OPACITY_MAX, BACKGROUND_OPACITY_MIN, builtin
  *
  * 最上面是「从别的机器取外观」（唯一的采用入口，本机这份配置仍留在仓库里）；
  * 下面依次是主题 / 主题色 / 主题色文字、工作区背景与内置壁纸、顶部样式、
- * 卡片不透明度与间距 —— 全是「界面长什么样」，落盘都在 theme.json 那一份里。
+ * 卡片不透明度与间距、毛玻璃描边 —— 全是「界面长什么样」，落盘都在 theme.json 那一份里。
  *
  * 取数时机由外壳传进来的 open / active 驱动：打开弹窗、或切到这一屏时，
  * 把「从别的机器取外观」的设备列表重读一遍 —— 读的是上一次同步取回的仓库快照
@@ -443,6 +443,18 @@ watch(
           size="small"
           controls-position="right"
           @change="changeCardGap"
+        />
+      </div>
+
+      <div class="row">
+        <div class="row__text">
+          <span class="row__label">毛玻璃描边</span>
+          <span class="row__hint">卡片、面板、下拉与弹窗四周那条 1px 的灰色描边。</span>
+        </div>
+        <el-switch
+          :model-value="settings.settings.glassBorder"
+          size="small"
+          @update:model-value="(value: unknown) => void settings.setGlassBorder(Boolean(value))"
         />
       </div>
     </div>

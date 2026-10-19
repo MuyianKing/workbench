@@ -1,57 +1,142 @@
 # 禅道
 
-禅道页通过 REST API 登录，读取「指派给我 / 未解决 / 未关闭」的 Bug 列表，并可弹系统通知。
-**应用只看列表**：Bug 的正文、历史与一切改动都在禅道页面里做，点列表标题交给系统浏览器打开那条 Bug。
-跨模块的导航、主题与联网边界见 [功能与架构](../features-and-architecture.md)，通道规则见
-[ipc-and-state.md](ipc-and-state.md)。
+禅道是一扇**独立窗口**：点顶栏那一行里那颗禅道图标（或点系统通知）打开（或聚焦）它，窗口里直接是禅道站点，
+用内嵌的账号密码自动登录一次。窗口用系统标题栏 —— 右上角正好是关闭 / 最大化 / 最小化三个按钮。
+应用里**没有**禅道页签、没有列表、也没有「点标题走浏览器」：详情、指派与解决都在那扇窗里的禅道界面上做。
+
+**后台检查与系统通知照旧** —— 到点取一轮「指派给我的」编号全集，比出新增就弹 Windows toast，
+点通知打开这扇窗。跨模块的导航、主题与联网边界见 [功能与架构](../features-and-architecture.md)，
+通道规则见 [ipc-and-state.md](ipc-and-state.md)。
 
 ## 约束
 
-- 禅道凭据由 `oauth.local.json` 的 `zentao` 节构建期注入，进入禅道页时由 Rust 自动认证；配置缺失不发请求。
-- **只读**：本模块的请求全是 GET，**不提供任何写通道** —— 没有指派、解决、评论、改状态的路子，
-  域包里也没有对应的入参校验与选项表。要改禅道的数据就去禅道页面改（点标题就过去了）。
-  别为了「顺手」再加一个写接口：那会把一条纯读出口变成会改公司数据的出口。
-- 所有请求都固定在配置的部署根与**固定端点**上，不跟 HTTP 重定向；
-  **不提供任意 URL / 方法 / 请求头通道** —— 渲染层只说「哪个产品、第几页、哪个口径」，地址由后端拼。
-- 账号密码仅由 Rust 读取，不经过渲染层；token 仅在 Rust 内存中保管，不回传渲染层，不写入数据文件、日志或凭据管理器。
-  重启清除 token；切换页面保留会话。个人密码会内嵌到二进制，不分发带密码的构建；HTTP 传输未加密。
-- Rust 只负责认证、会话保管、单页 JSON 读取与字段白名单投影；分页、验证、跨产品去重与排序在 `@workbench/zentao`。
-- 查询完整产品与 Bug 分页，所有产品成功才替换界面列表；失败不能当成零条 Bug，刷新失败保留上次结果。
-- 列表口径是三个**白名单** browseType（`assigntome` / `unresolved` / `unclosed`），由后端再校验一次、
-  不接受别的值；不使用未被 API 读取的 `assignedTo` 查询参数。列表按编号降序。
-- **点标题 = 用系统浏览器打开那条 Bug**（`zentaoBugUrl` 只由部署根 + 编号拼站内链接，见「打开 Bug 页面」），
-  走的是登录授权页也在用的 `open_external` 通道：**不是新的网络出口**（应用自己不去取那个页面，是浏览器去取）。
-  不要把地址拼装搬到界面里，也不要把禅道页面嵌进 webview —— 未认证的 webview 只会被跳到登录页。
+- 凭据由 `oauth.local.json` 的 `zentao` 节构建期注入（部署根 + 账号 + 密码）；配置缺失时窗口打不开，
+  界面弹一句提示（`ElMessage`）。账号密码仅由 Rust 读取，不进渲染层。
+- **窗口里是远程站点，不做 iframe、也不嵌进主窗口**：禅道对每个响应都发 `X-Frame-Options: SAMEORIGIN`，
+  跨源 iframe 会被浏览器直接拒绝渲染（本部署实测）。独立窗口是顶层文档，不受这条限制。
+  同样的理由，窗口里的按钮**只能**用系统标题栏：自绘按钮要盖在远程页面之上，而原生画面与 HTML 是两层。
+- **窗口 label `zentao` 不登记任何 capability**：远程来源是独立执行上下文，本地 capability 不授予它 IPC
+  （tauri 的 `remote_context_denied`），所以公司页面里的脚本够不到任何宿主命令。这是这扇窗的安全前提，
+  别为了「顺手」给它开权限。
+- **应用自己发出的请求只读**（唯一一发 POST 是登录换 token），不提供任何写通道；写操作只发生在窗口里那套禅道自己的界面上。
+  别为了「顺便能改状态」再往 Rust 里加写接口。
+- 应用发出的请求固定在配置的部署根与固定端点，不跟 HTTP 重定向；**不提供任意 URL / 方法 / 请求头通道**。
+- API 会话的 token 仅在 Rust 内存中保管，不回渲染层、不写数据文件、日志或凭据管理器；重启清除。
+  个人密码会内嵌到二进制，**不分发带密码的构建**；部署是明文 HTTP，凭据与页面内容都过公网。
+- **自动登录一轮只试一次**：只在登录页触发，失败就留在登录页让用户手登 —— 禅道对登录失败有计数与冷却，
+  脚本化重试会把账号临时锁住。进到站内页后复位，下次过期还能再来一次。
 - **后台检查默认 30 分钟**（设置「通用」里的检查间隔可改，0 = 关闭，范围 1..1440）：间隔由 Rust 计时线程
-  计时并到点发 `zentao:check`，取数、比新增与弹通知全在渲染层（分页与判定已有带单测的域包）。
-  **计时必须在 Rust**：窗口收进托盘后 WebView 定时器会被节流。只有配置完整、周期非 0 才发检查事件，
-  线程自己不做网络、不持锁 emit。
-- **只有后台检查发现新增才弹通知**：第一轮成功只建立基线（不把存量报成新增）；失败不推进基线；
-  按**编号全集**比对，旧 Bug 重新指派给我也算新增；手动刷新不弹。通知复用现有 Windows toast（`notify.rs`），
-  正文是条数与首条标题（纯文本、控制字符压平），点击唤出主窗口并切到禅道页。通知发失败留着下一轮重试，
-  不吞掉也不重复报同一批。
-- 宿主调用一律经 `window.workbench`，通道返回 `Result<T>`；认证过期只清当前会话并就地显示错误（重登一次即止，
-  不循环），保留上次列表，刷新时再认证。
-- 页面使用现有 `.panel` 外壳、Element Plus 控件与主题令牌，跟随明暗、主题色及卡片不透明度；
-  **外部字符串一律只作文本插值**：Bug 标题是服务端内容，只当纯文本渲染，绝不 `v-html`。
-- **严重程度 / 优先级按等级着色**（这是 AGENTS.md 第 4 节「彩色只表达运行状态与项目标识色」的**唯一例外**，
-  且只限列表这**两个字段的两个色点**）：色阶取自禅道 22.2 的 `config->bug->colorList`，与禅道页面一致；
-  口径**只定义在 `packages/zentao/src/zentao.ts`**，别在界面里另拍一套，也别把这套色扩到别的字段。
+  计时并到点发 `zentao:check`，取数、比新增与弹通知全在渲染层。**计时必须在 Rust**：窗口收进托盘后
+  WebView 定时器会被节流。只有配置完整、周期非 0 才发检查事件，线程自己不做网络、不持锁 emit。
+- **只有后台检查发现新增才弹通知**：第一轮成功只建立基线；失败不推进基线；按**编号全集**比对
+  （旧 Bug 重新指派给我也算新增；类比「指派给我的」这个口径固定）。点通知打开禅道窗口，不唤主窗口。
+- 窗口里的站外链接与 `target=_blank` 交给系统浏览器；`about:` / `data:` / `blob:`（打印与下载会用）放行。
+- 外部字符串（Bug 标题等）只作纯文本用，绝不 `v-html`。
 
 ## 实现
 
-### 导航与页面
+### 窗口
 
-页面 ID 为 `zentao`，导航名为「禅道」。默认顺序放在末尾，旧的 `viewOrder` 收敛时自动补入，
-无需迁移数据。沿用设置 → 菜单的排序 / 显隐与 `KeepAlive`，不增加路由或独立窗口。
+`AppHeader.vue` 那一排里的禅道图标（收起 / 展开菜单那颗的右边）是它唯一的入口：`stores/zentao.ts` 的 `open()` → 适配层
+`workbench/zentao.ts` 的 `openWindow()` → 命令 `zentao_open_window` → `zentao.rs` 的 `open_window`。
+窗口已经开着就只是 show / unminimize / set_focus（**不**顺手再最大化一次：那是用户自己还原的大小）。
 
-会话与取数在 `stores/zentao.ts`（它同时服务后台检查与通知点击），`ZentaoView.vue` 只管展示；
-没有登录表单和退出按钮。首次挂载先读本机会话，没有会话则调用无参 `zentaoLogin()`，再读取列表；
-KeepAlive 切回不重复请求。配置缺失、认证或取数失败都显示错误与重试按钮；手动刷新时没有会话会重新认证。
-`App.vue` 挂载时调 `startWatch()`：**先挂上 `zentao:check` / `zentao:notify-click` 订阅，再登记周期** ——
-后端在启用时会立刻发一次检查（用来立基线），订阅晚一步就漏掉了。
+窗口以**最大化**打开、铺满整屏 —— 禅道是拿去干活的工作台，不该先给一扇小窗；**不用 fullscreen**：
+fullscreen 连系统标题栏一起吃掉，而这扇窗只能靠系统标题栏（见上面「约束」）。系统标题栏那三个按钮
+照旧能把它还原（还原尺寸是 1280×900）。
 
-在 `apps/desktop/src-tauri/oauth.local.json` 顶层新增，与 `github`、`gitee` 并列：
+`open_window` 建窗时挂三样东西（都在 `zentao.rs`）：
+
+- `on_page_load`：页面加载完成时判断这是不是登录页（见下面「免登录」）；
+- `on_navigation`：站内放行，其余 http(s) 交给系统浏览器并取消导航，`about/data/blob` 放行；
+- `on_new_window`：不在应用里开新窗口，能交出去的就交给浏览器。
+
+窗口先以 `visible(false)` 建出来，进到站内或有兜底时限时再显示（见下）。建窗口不能在同步命令里跑，
+所以命令是 `#[tauri::command(async)]`；通知点击那一路跑在 COM 回调线程上，改成丢独立线程再建。
+
+### 免登录
+
+窗口打开时若本机没有禅道登录态，站点会跳到登录页（`user-login.html` 或 `user-login-<base64>.html`）。
+`on_page_load(Finished)` 认出这类地址后，`WebviewWindow::eval()` 注入一小段脚本：
+
+1. 把内嵌配置里的账号与密码写进 `#account` / `#password`；
+2. 调用**页面自己的** `window.safeSubmit(...)` —— 取随机数、按禅道的方案算密码、带 `verifyRand` 提交，
+   全走禅道现成的登录逻辑（**不自己复刻那套 md5 + rand**：它随版本变，复刻迟早分叉）。
+
+窗口先藏着（登录页那一帧不该闪给用户看），进到站内再显示；一直进不去（密码错 / 账号被锁）时由兜底
+线程在 6 秒后把登录页亮出来，用户能看见发生了什么并手动登录。自动登录一轮只试一次，进到站内页后复位。
+
+> **为什么不是「把 token 当 cookie 注入」**：本部署实测，`POST /api.php/v1/tokens` 返回的 token 就是 PHP 的
+> session id（`Set-Cookie: zentaosid` 与 token 同值），而且登录确实写在同一个会话里 —— 但拿这枚 token
+> 无论以 `Token` 头还是以 `zentaosid` cookie 去请求 HTML 页面，都仍然 302 到登录页。网页层的登录态
+> 不只看 session id。所以走的是真实表单登录这条路。
+
+### 会话与传输
+
+`zentao_login` 无凭据入参，由 Rust 读取内嵌配置；token 留在 Tauri managed state，仅返回非机密的本机会话标识、
+部署根与账号。`zentao_session` 只读本机状态；`zentao_logout` 只清本机 token，不变更服务器数据。
+`zentao_page` / `zentao_products` 要求匹配当前会话标识，后端构造固定 GET 请求并做字段白名单投影；
+**这一组全是读**。
+
+后台检查用的 API 会话与窗口里的浏览器会话是**两份**（前者给列表与通知，后者是禅道自己的浏览器会话）。
+Rust 侧的会话可能被窗口里的自动登录换掉，所以渲染层取数失败时会重读一次本机会话，id 变了就用新的再试一次。
+
+HTTP 复用系统 WinHTTP，不增加 Rust 编译单元，也不放宽 WebView CSP（窗口里是远程文档，走它自己的响应头）。
+禅道请求显式关闭重定向，认证失败不回传上游响应正文；`401` 只清理对应会话。
+
+### 后台检查与通知
+
+`zentao_watch(poll_minutes)` 登记周期（0 = 关闭，1..1440 收敛）：**间隔没变时后端不动计时**；
+关闭后再启用、或启用时立刻来一轮（给渲染层一次立基线的机会），改间隔则从现在重新计时。
+`zentao.rs` 的计时线程每 60 秒醒一次，到点给主窗口发 `zentao:check`（不持锁 emit、不做网络）。
+
+渲染层收到 `zentao:check` 后取一轮完整列表：与 `baselineIds`（编号全集）比出新增（`diffZentaoBugs`），
+有新增才调 `zentao_notify(session_id, count, title)`。通知的点击回调在 Rust 侧直接打开禅道窗口
+（不再发事件让渲染层换页）。通知发失败留在待发队列里，下一轮重试；失败原因写在 store 的 `error` 里。
+
+一次取数的顺序：**产品清单**（账号资料里的可见范围）→ 逐产品读该口径的 Bug 分页 → 汇总去重按编号降序。
+产品名不再补取（界面上不显示它了）。
+
+### 22.2 API 契约
+
+核对依据为官方固定标签 `zentaopms_22.2_20260527`：
+
+- 登录：`POST <部署根>/api.php/v1/tokens`，JSON `{account,password}`；成功返回 `201 {token}`。
+- 认证：`Token: <token>`，不使用 Bearer 或新版 `ss_` 前缀。
+- 产品：`GET <部署根>/api.php/v1/products?status=all&page=1&limit=100`。
+- Bug：`GET <部署根>/api.php/v1/products/{非零产品ID}/bugs?status=assigntome&order=id_desc&page=1&limit=100`。
+- 分页响应包含 `page,total,limit,products` 或 `page,total,limit,bugs`，根据 `total` 取完整分页。
+- 其它用到的入口只剩一个：`GET /user`（账号资料里的可见产品）。**v1 无 PATCH**。
+- **本版不用** `GET /bugs/{id}`（详情与历史）、`GET /users`、`GET /builds`、`GET /products/{id}`
+  与两个写入口（`POST /bugs/{id}/assign`、`POST /bugs/{id}/resolve`）：详情与改动都在窗口里做。
+- 网页登录（自动登录脚本走的那条路）：`GET /user-refreshRandom.html` 取随机数，
+  `POST /user-login.html`（`account` / `password` / `passwordStrength` / `referer` / `verifyRand` / `keepLogin` / `captcha`），
+  由页面自己的 `safeSubmit` 组装。
+
+官方来源：[登录](https://github.com/easysoft/zentaopms/blob/zentaopms_22.2_20260527/api/v1/entries/tokens.php)、
+[产品](https://github.com/easysoft/zentaopms/blob/zentaopms_22.2_20260527/api/v1/entries/products.php)、
+[Bug 列表](https://github.com/easysoft/zentaopms/blob/zentaopms_22.2_20260527/api/v1/entries/bugs.php)、
+[路由表](https://github.com/easysoft/zentaopms/blob/zentaopms_22.2_20260527/config/apiv1.php)。
+
+### 产品清单与用户字段（本部署实测的两个坑）
+
+- **产品清单不用 `GET /v1/products`**：那条走 `product/all`，在把产品挂在项目集 / 项目下的部署里
+  **返回空数组**（本部署实测 total=0）。改为读 `GET /v1/user` 的账号资料 `profile.view.products`
+  （逗号分隔的产品 id，即账号可见范围）；万一为空或写成 `all` 这类非数字，再退回 `/v1/products` 枚举。
+- **`assignedTo` 等用户字段在 v1 里是对象**（`format($bug, 'assignedTo:user')` 的结果），
+  后端投影时压成一句可显示文本（真实姓名优先、退回账号），域包解析时 `userText` 再兜一道。
+
+## 涉及文件（窗口与状态）
+
+- [入口图标](../../apps/desktop/src/renderer/src/components/AppHeader.vue)（收起 / 展开菜单那颗的右边）。
+- [状态](../../apps/desktop/src/renderer/src/stores/zentao.ts)、[适配层](../../apps/desktop/src/renderer/src/workbench/zentao.ts)。
+- [域包](../../packages/zentao/src/zentao.ts)：类型、分页聚合、新增判定、周期收敛。
+- [Rust](../../apps/desktop/src-tauri/src/zentao.rs)、[命令层](../../apps/desktop/src-tauri/src/commands.rs)、[主窗口](../../apps/desktop/src-tauri/src/main.rs)。
+- [凭据读取](../../apps/desktop/src-tauri/src/oauth.rs)、[空值模板](../../apps/desktop/src-tauri/oauth.example.json)。
+- [设置](../../apps/desktop/src/renderer/src/components/settings/GeneralPane.vue)、[落盘收敛](../../apps/desktop/src/renderer/src/persisted-data.ts)。
+- [页面挂载](../../apps/desktop/src/renderer/src/App.vue)（只挂 `startWatch()`，没有禅道页签）。
+
+`oauth.local.json` 顶层新增（与 `github`、`gitee` 并列）：
 
 ```json
 "zentao": {
@@ -66,108 +151,28 @@ KeepAlive 切回不重复请求。配置缺失、认证或取数失败都显示�
 该文件已忽略，不能提交；模板 `oauth.example.json` 保持空值。密码保留原值，不做 trim。
 地址由现有后端校验，也接受该部署的 `my-work*.html` 页面地址并收敛到根目录。
 
-列表展示编号、标题、产品、指派给、创建者、状态、严重程度与优先级（后两者带等级色点；
-`openedBy` 与 `assignedTo` 一样经用户字段压平），顶部那颗分段选择器切换
-**指派给我的 / 未解决 / 未关闭** 三个口径（换口径即重取）。**点标题用系统浏览器打开那条 Bug**；
-工具条另有刷新与打开禅道（不带 Bug，就开部署首页）。加载态复用 `PanelLoading`；刷新期间留着旧列表。
+## 已知代价与边界
 
-一次取数的顺序：**产品清单**（账号资料里的可见范围）→ 逐产品读该口径的 Bug 分页 →
-对真有 Bug 的产品补一次名字 → 汇总去重按编号降序。产品名取不到只影响那一列，不挡列表。
+- 窗口用系统标题栏（那三个按钮是系统画的），窗口里的观感与明暗主题都归禅道自己 —— 它不跟随应用的皮肤。
+- 首次打开会晚一两秒才出现（窗口先藏着，进到站内才显示，免得把登录页闪给用户看）；
+  密码错 / 账号被锁时是 6 秒后停在登录页让你手登。
+- 站外链接与 `target=_blank` 交给系统浏览器 —— 浏览器那边没有禅道登录态，打开是未登录的页面。
+- 部署是明文 HTTP：凭据、会话与页面内容都过公网。
 
-### 打开 Bug 页面
+## 验证与边界
 
-`zentaoBugUrl(baseUrl, id)` 造 `<部署根>/bug-view-<id>.html`（清掉基址里的查询与片段，只接受
-不含内嵌凭据的 HTTP(S) 地址，编号必须是正整数），再由 store 经 `window.workbench.openExternal`
-交给系统默认浏览器。这条通道能打开任意 URL，所以拼装只留在域包这一处，界面只交出「哪条 Bug」。
+纯逻辑测试覆盖多产品、多页汇总、分页异常、编号去重排序、新增比较（首轮静默 / 旧编号重新指派 /
+失败不推进基线 / 编号去重）、周期收敛与到点判定、用户对象压成文本；store 测试覆盖首轮静默、
+失败保留基线、通知失败重试不重复、关闭不发请求、并发单航班、换账号后基线重立、
+会话被窗口的自动登录换掉后重读会话、打开窗口的成功与失败；适配层测试覆盖错误收敛、
+单页请求参数、登录 / 会话契约与开窗命令；Rust 测试覆盖地址规范化、会话守卫、
+只读端点构造（含 browse 白名单）、产品清单来自账号资料、用户对象压平与字段白名单投影，
+以及窗口那几处纯逻辑（同源判定、登录页识别、脚本字面量转义）。
 
-### 产品清单与用户字段（本部署实测的两个坑）
+**已在本部署上实测过的**：`user.view.products` 拿到 16 个可见产品 id；`tokens` 返回的 token 就是
+session id（响应里的 `zentaosid` 与 token 同值），但**用它请求 HTML 页面仍被 302 到登录页**；
+登录页里填表并调用 `window.safeSubmit` **可以完成登录**（跳到 `my.html`）。
 
-- **产品清单不用 `GET /v1/products`**：那条走 `product/all`，在把产品挂在项目集 / 项目下的部署里
-  **返回空数组**（本部署实测 total=0），于是「先枚举产品再取 Bug」会一条都拿不到。
-  改为读 `GET /v1/user` 的账号资料 `profile.view.products`（逗号分隔的产品 id，即账号可见范围）；
-  万一为空或写成 `all` 这类非数字，再退回 `/v1/products` 枚举。产品名**按需补**：只对真有 Bug 的
-  产品调一次 `GET /v1/products/{id}`，避免为十几个空产品各发一条请求。
-- **`assignedTo` 等用户字段在 v1 里是对象**（`format($bug, 'assignedTo:user')` 的结果），
-  不是账号字符串。后端投影时压成一句可显示文本（真实姓名优先、退回账号），域包解析时 `userText`
-  再兜一道 —— 直接把对象丢给 `project_fields` 会被当成非法字段，整页读不出来。
-- Bug 列表行**不带产品名**（`bugs.php` 只补 `statusName` 与 `productStatus`），所以产品名必须另取。
-
-## 涉及文件（页面与状态）
-
-- [页面](../../apps/desktop/src/renderer/src/components/ZentaoView.vue)。
-- [状态](../../apps/desktop/src/renderer/src/stores/zentao.ts)、[适配层](../../apps/desktop/src/renderer/src/workbench/zentao.ts)。
-- [域包](../../packages/zentao/src/zentao.ts)：类型、分页聚合、新增判定、Bug 页面地址、色阶与口径文案表。
-- [Rust](../../apps/desktop/src-tauri/src/zentao.rs)、[命令层](../../apps/desktop/src-tauri/src/commands.rs)、[注册](../../apps/desktop/src-tauri/src/main.rs)。
-- [凭据读取](../../apps/desktop/src-tauri/src/oauth.rs)、[空值模板](../../apps/desktop/src-tauri/oauth.example.json)。
-- [设置](../../apps/desktop/src/renderer/src/components/settings/GeneralPane.vue)、[落盘收敛](../../apps/desktop/src/renderer/src/persisted-data.ts)。
-- [导航 ID](../../packages/appearance/src/views.ts)、[导航栏](../../apps/desktop/src/renderer/src/components/NavRail.vue)、[页面挂载](../../apps/desktop/src/renderer/src/App.vue)。
-
-### 22.2 API 契约
-
-核对依据为官方固定标签 `zentaopms_22.2_20260527`：
-
-- 登录：`POST <部署根>/api.php/v1/tokens`，JSON `{account,password}`；成功返回 `201 {token}`。
-- 认证：`Token: <token>`，不使用 Bearer 或新版 `ss_` 前缀。
-- 产品：`GET <部署根>/api.php/v1/products?status=all&page=1&limit=100`。
-- Bug：`GET <部署根>/api.php/v1/products/{非零产品ID}/bugs?status=assigntome&order=id_desc&page=1&limit=100`。
-- 分页响应包含 `page,total,limit,products` 或 `page,total,limit,bugs`，根据 `total` 取完整分页。
-  `product=0` 不代表所有产品；需要枚举当前账号可见产品后分别读取。
-- `assigntome` 筛 `assignedTo` 为 token 对应的当前账号，不额外限制 Bug 状态。
-- 其它用到的入口只有两个：`GET /user`（账号资料里的可见产品）与 `GET /products/{id}`（补产品名）。
-  **v1 无 PATCH**；「未解决」是 browseType `unresolved`（= `status=active`），不是 `status=active` 直接当参数用。
-  **产品可见范围也不来自 `/v1/products`** —— 见上面那条。
-- **本版不用** `GET /bugs/{id}`（详情与历史）、`GET /users`、`GET /builds` 与两个写入口
-  （`POST /bugs/{id}/assign`、`POST /bugs/{id}/resolve`）：正文与改动都在禅道页面里做，见「只读」那条。
-- Bug 页面地址是禅道内置页面的老式路由：`<部署根>/bug-view-<id>.html`。
-
-官方来源：[登录](https://github.com/easysoft/zentaopms/blob/zentaopms_22.2_20260527/api/v1/entries/tokens.php)、
-[产品](https://github.com/easysoft/zentaopms/blob/zentaopms_22.2_20260527/api/v1/entries/products.php)、
-[Bug 列表](https://github.com/easysoft/zentaopms/blob/zentaopms_22.2_20260527/api/v1/entries/bugs.php)、
-[路由表](https://github.com/easysoft/zentaopms/blob/zentaopms_22.2_20260527/config/apiv1.php)、
-[指派筛选](https://github.com/easysoft/zentaopms/blob/zentaopms_22.2_20260527/module/bug/tao.php)。
-
-### 会话与传输
-
-`zentao_login` 无凭据入参，由 Rust 读取内嵌配置；token 留在 Tauri managed state，仅返回非机密的本机会话标识、部署根与账号。
-`zentao_session` 只读本机状态；`zentao_logout` 只清本机 token，不变更服务器数据。
-`zentao_page` / `zentao_products` / `zentao_product` 要求匹配当前会话标识，后端构造固定 GET 请求
-（`zentao_products` 从账号资料取可见产品 id、`zentao_product` 补产品名）；
-**这一组全是读，没有任何写命令**。产品与 Bug 列表响应先按允许字段投影，再回渲染层。
-请求不持有状态锁；旧登录、旧查询与旧退出不能覆盖后来的会话。
-
-HTTP 复用系统 WinHTTP，不增加 Rust 编译单元，也不放宽 WebView CSP。禅道请求显式关闭重定向，
-认证失败不回传上游响应正文，避免秘密出现在错误提示中；`401` 只清理对应会话。
-
-> 一条平台事实：v1 的 `Token` **就是 PHP 的 session id**（`tokens.php` 返回 `session_id()`），`Token` 头会把该
-> 会话还原。所以同一枚 token 也能调禅道内置页面接口（如 `message-ajaxGetMessage` 的未读消息）。本版**没有**
-> 用这条：通知仍走 `assigntome` 列表比对，够用且不必依赖内置页面接口的开关（`message.browser.turnon`）。
-
-### 后台检查与通知
-
-`zentao_watch(poll_minutes)` 登记周期（0 = 关闭，1..1440 收敛）：**间隔没变时后端不动计时**（设置里改
-别的项也会重登一次）；关闭后再启用、或启用时立刻来一轮（给渲染层一次立基线的机会），改间隔则从现在
-重新计时。`zentao.rs` 的计时线程每 60 秒醒一次，到点给主窗口发 `zentao:check`（不持锁 emit、不做网络）。
-周期没登记（默认 0）时只睡。
-
-渲染层收到 `zentao:check` 后取一轮完整列表：与 `baselineIds`（编号全集）比出新增（`diffZentaoBugs`），
-有新增才调 `zentao_notify(session_id, count, title)`。`title` 是首条 Bug 的纯文本标题，后端压平控制字符、
-截断后拼进 toast（XML 转义在 `notify.rs`）。通知的提示音用系统默认音（不与新邮件混同）。点击唤出主窗口、
-发 `zentao:notify-click`，渲染层切到禅道页。`notify.rs` 的 COM 公寓改为**按线程初始化**（原先进程级 `Once`
-只对邮件监视线程成立，禅道通知走 Tauri 命令工作线程）—— `zentao_notify` 会更换会话时拒绝旧会话的通知。
-
-### 验证与边界
-
-纯逻辑测试覆盖多产品、多页汇总、分页异常、编号去重排序与 Bug 页面地址（含拒绝非 HTTP(S) 协议、
-相对地址与内嵌凭据）、新增比较（首轮静默 / 旧编号重新指派 / 失败不推进基线 / 编号去重）、
-周期收敛与到点判定、通知标题压平、产品名按需补取（没有 Bug 的产品不补）、用户对象压成文本、
-状态文案与等级色阶；store 测试覆盖首轮静默、失败保留基线、手动刷新不弹、通知失败重试不重复、
-关闭不发请求、并发单航班、切口径重取与换账号后基线重立；适配层测试覆盖错误收敛、单页请求参数
-与登录 / 会话契约。Rust 测试覆盖地址规范化、会话守卫、只读端点构造（含 browse 白名单与拒绝任意值）、
-产品清单来自账号资料、用户对象压平与字段白名单投影。开发实现与测试不需要访问公司站点。
-
-**已在本部署上实测过的**（只读）：`user.view.products` 拿到 16 个可见产品 id、对产品 17 取 `assigntome`
-取到那两条 Bug（#285 / #286）、产品名「巩留县人民医院重症系统」。
-
-真实部署的权限、定制补丁、账号密码认证与系统通知落地都只在凭据配置完整后才谈得上验证；
-没有真实结果时不宣称联调通过。**真机排查要一次登录、复用同一会话**：禅道对登录失败有计数与冷却，
-反复试探会把账号临时锁住（见 AGENTS.md 第 6 节）。
+真实部署的权限、定制补丁与系统通知落地都只在凭据配置完整后才谈得上验证；没有真实结果时不宣称联调通过。
+**真机排查要一次登录、复用同一会话**：禅道对登录失败有计数与冷却，反复试探会把账号临时锁住
+（见 AGENTS.md 第 6 节）。

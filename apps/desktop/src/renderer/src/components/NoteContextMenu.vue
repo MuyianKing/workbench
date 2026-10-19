@@ -199,12 +199,16 @@ onMounted(place)
 <style scoped>
 /*
  * 浮层卡片：菜单本体与子菜单同一副外壳。
- * 底色用面底色而不是毛玻璃 —— 它压在正文的字上，透出底下的字就没法看了。
+ * 底色取厚一档的玻璃（--glass-fill）—— 它压在正文的字上，所以底下那层必须被磨开
+ * （backdrop-filter 之后只剩色块、认不出字）；早先写实底就是怕「透出底下的字」，
+ * 真磨砂之后这个顾虑没有了。
  */
 .menu,
 .sub__card {
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
+  background: var(--glass-fill);
+  backdrop-filter: var(--glass-filter);
+  /* 四周那条线归设置里的「毛玻璃描边」（默认不画）；菜单里那些小按钮照旧 --border */
+  border: 1px solid var(--glass-border-color);
   border-radius: var(--r-md);
   box-shadow: var(--shadow-pop);
 }

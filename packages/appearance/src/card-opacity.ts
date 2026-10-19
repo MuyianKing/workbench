@@ -12,8 +12,15 @@ export const CARD_OPACITY_MIN = 20
 /** 不透明度上限：100% 就是现在的实底卡片 */
 export const CARD_OPACITY_MAX = 100
 
-/** 默认不透明度：按当前配置固化的一档，卡片半透、壁纸从底下透出来 */
-export const CARD_OPACITY_DEFAULT = 55
+/**
+ * 默认不透明度：卡片半透、壁纸从底下透出来。
+ *
+ * 30% 是照着苹果那套玻璃定的：底色越薄、背后的颜色越穿得过来（草上是暖绿、暗处发灰），
+ * 同一种材料在不同壁纸上颜色不一样 —— 那正是玻璃的样子。定到 55% 那档偏「奶白板」，
+ * 模糊再重也还是板子。**这只是一台新机器的起点**：改默认值不会覆盖已经存下的配置
+ * （theme.json 里有这一项，就按用户的来）。
+ */
+export const CARD_OPACITY_DEFAULT = 30
 
 /** 收敛到合法区间；不是有限数字（缺失 / null / 字符串 / NaN）一律回到默认值 */
 export function clampCardOpacity(value: unknown): number {

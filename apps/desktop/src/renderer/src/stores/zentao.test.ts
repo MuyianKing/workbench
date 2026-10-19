@@ -2,19 +2,18 @@
  * 禅道 store：后台检查这条链上「改坏了不报错」的几条。
  *
  * 挑的都是静默失效类的问题：首轮把存量 Bug 全报成新增、取数失败却推进基线、
- * 手动刷新也弹通知、通知发失败被吞掉不再重试、订阅晚于登记而漏掉启用时那一轮。
+ * 通知发失败被吞掉不再重试、订阅晚于登记而漏掉启用时那一轮、
+ * 会话被禅道窗口的自动登录换掉之后一直报「会话已变更」。
+ *
+ * 列表页与禅道页签都已经删掉（页面是顶栏那颗图标打开的独立窗口），所以这里不再断言 bugList：
+ * 可见的结果只剩「弹不弹通知」「登记了什么周期」「错误文案」，以及开窗那一条命令的入参。
  *
  * 跑在 node 环境里：`window.__TAURI__` 用假桩（`invoke` 按命令名分发、
- * `event.listen` 收住事件处理器），`@/notify` 换成假的（底下是 Element Plus）。
+ * `event.listen` 收住事件处理器）。
  */
 import { createPinia, setActivePinia } from 'pinia'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import { DEFAULT_SETTINGS } from '@/types'
-
-vi.mock('@/notify', () => ({
-  notifyError: vi.fn(),
-  notifySuccess: vi.fn(),
-}))
 
 /** 每一轮后端返回的 Bug 列表：逐轮换内容，模拟后台拿到的新结果 */
 let rounds: Array<{ ok: boolean, bugs: unknown[] }>
@@ -23,16 +22,21 @@ let roundIndex = 0
 let notifyCalls: Array<[string, number, string]>
 /** zentao_notify 是否失败（测「失败留待下轮重试」） */
 let notifyFails = false
-/** 已登记的检查 / 点击事件处理器（适配层的 listen 会把 Tauri 的 { payload } 转一手） */
+/** 已登记的检查事件处理器（适配层的 listen 会把 Tauri 的 { payload } 转一手） */
 let checkHandlers: Array<(event: { payload: null }) => void>
-let clickHandlers: Array<(event: { payload: null }) => void>
 /** zentao_watch 收到的周期（按顺序） */
 let watchRegistrations: number[]
 let logins: number
-/** 每次列页请求带的口径（断言切筛选真的换了 browse） */
-let pageBrowses: string[]
-/** 产品名补取过的编号 */
-let productNameCalls: number[]
+/** zentao_session 的返回值：本机会话（null = 没有，逼 store 登录） */
+let sessionOverride: unknown
+/** 让下一次分页请求报「会话已变更」（窗口里的自动登录换了会话），只报一次 */
+let pageChangedOnce = false
+/** zentao_page 收到的参数（按顺序） */
+let pageArgs: Array<Record<string, unknown>>
+/** zentao_open_window 被调了几次 */
+let openWindowCalls: number
+/** 打开窗口是否失败（模拟配置缺失） */
+let openWindowFails = false
 /** zentao_login 的返回值：模拟「重登后换了账号」 */
 let loginOverride: unknown
 /** 让下一次取数报「认证过期」，逼 store 重登 */
@@ -50,7 +54,7 @@ function bug(id: number, title = `Bug ${id}`) {
 function invoke(command: string, args?: Record<string, unknown>): Promise<unknown> {
   switch (command) {
     case 'zentao_session':
-      return Promise.resolve(null)
+      return Promise.resolve(sessionOverride)
     case 'zentao_login':
       logins += 1
       return Promise.resolve(loginOverride ?? SESSION)
@@ -63,11 +67,15 @@ function invoke(command: string, args?: Record<string, unknown>): Promise<unknow
     // 禅道的 /v1/products 在本部署下是空的：产品清单由后端从账号资料取，且只给 id
     case 'zentao_products':
       return Promise.resolve({ page: 1, total: 1, limit: 1, products: [{ id: 7 }] })
-    case 'zentao_product':
-      productNameCalls.push(Number(args?.productId))
-      return Promise.resolve({ id: args?.productId, name: '产品甲' })
+    case 'zentao_open_window':
+      openWindowCalls += 1
+      return openWindowFails ? Promise.reject('禅道账号密码没配置') : Promise.resolve(null)
     case 'zentao_page': {
-      pageBrowses.push(String(args?.browse))
+      pageArgs.push({ ...args })
+      if (pageChangedOnce) {
+        pageChangedOnce = false
+        return Promise.reject('禅道会话已变更，请重试')
+      }
       const round = rounds[Math.min(roundIndex, rounds.length - 1)]
       roundIndex += 1
       if (authExpiresOnce) {
@@ -89,11 +97,13 @@ beforeEach(() => {
   notifyCalls = []
   notifyFails = false
   checkHandlers = []
-  clickHandlers = []
   watchRegistrations = []
   logins = 0
-  pageBrowses = []
-  productNameCalls = []
+  sessionOverride = null
+  pageChangedOnce = false
+  pageArgs = []
+  openWindowCalls = 0
+  openWindowFails = false
   loginOverride = null
   authExpiresOnce = false
   stubSettings = { ...DEFAULT_SETTINGS }
@@ -102,8 +112,6 @@ beforeEach(() => {
     listen: (name: string, handler: (event: { payload: null }) => void) => {
       if (name === 'zentao:check')
         checkHandlers.push(handler)
-      if (name === 'zentao:notify-click')
-        clickHandlers.push(handler)
       return Promise.resolve(() => {})
     },
   }
@@ -158,22 +166,21 @@ describe('禅道后台检查', () => {
   it('启动登记周期，且订阅先于登记（启用时那轮用来立基线，不能漏）', async () => {
     const settings = useSettingsStore()
     settings.settings.zentaoPollMinutes = 30
-    const store = await bootStore()
+    await bootStore()
     expect(checkHandlers).toHaveLength(1)
-    expect(clickHandlers).toHaveLength(1)
     expect(watchRegistrations).toEqual([30])
 
     rounds = [{ ok: true, bugs: [bug(1), bug(2)] }]
     checkHandlers[0]({ payload: null })
     await settle()
-    expect(store.bugList?.bugs.map(b => b.id)).toEqual([2, 1])
     // 首次建立基线，不弹通知
     expect(notifyCalls).toEqual([])
     expect(logins).toBe(1)
+    expect(pageArgs[0]?.browse).toBe('assigntome')
   })
 
   it('新增才通知：旧编号重新指派也算，且汇总条数与首条标题', async () => {
-    const store = await bootStore()
+    await bootStore()
     rounds = [{ ok: true, bugs: [bug(1)] }]
     checkHandlers[0]({ payload: null })
     await settle()
@@ -187,7 +194,6 @@ describe('禅道后台检查', () => {
     expect(notifyCalls[0][0]).toBe('session-1')
     expect(notifyCalls[0][1]).toBe(2)
     expect(notifyCalls[0][2]).toBe('Bug 5')
-    expect(store.bugList?.bugs.map(b => b.id)).toEqual([5, 2, 1])
   })
 
   it('取数失败不推进基线：下一轮仍能认出中间新增的', async () => {
@@ -209,18 +215,6 @@ describe('禅道后台检查', () => {
     expect(notifyCalls[0][1]).toBe(1)
   })
 
-  it('手动刷新只更新列表与基线，不弹通知', async () => {
-    const store = await bootStore()
-    rounds = [{ ok: true, bugs: [bug(1)] }]
-    await store.refresh()
-    expect(notifyCalls).toEqual([])
-
-    rounds = [{ ok: true, bugs: [bug(1), bug(2)] }]
-    await store.refresh()
-    expect(store.bugList?.bugs.map(b => b.id)).toEqual([2, 1])
-    expect(notifyCalls).toEqual([])
-  })
-
   it('通知发失败留着下轮重试，且成功时不会把同一批报两遍', async () => {
     const store = await bootStore()
     rounds = [{ ok: true, bugs: [bug(1)] }]
@@ -232,7 +226,7 @@ describe('禅道后台检查', () => {
     checkHandlers[0]({ payload: null })
     await settle()
     expect(notifyCalls).toHaveLength(1)
-    expect(store.notifyError).toBe('通知渠道不可用')
+    expect(store.error).toBe('通知渠道不可用')
 
     // 下一轮：没有新 Bug，但待发的那批还在 —— 重试一次
     notifyFails = false
@@ -240,7 +234,7 @@ describe('禅道后台检查', () => {
     await settle()
     expect(notifyCalls).toHaveLength(2)
     expect(notifyCalls[1][1]).toBe(1)
-    expect(store.notifyError).toBe('')
+    expect(store.error).toBe('')
 
     // 再一轮：已经发过了，不再重复
     checkHandlers[0]({ payload: null })
@@ -250,56 +244,64 @@ describe('禅道后台检查', () => {
 
   it('间隔设成 0 就不再后台取数', async () => {
     const settings = useSettingsStore()
-    const store = await bootStore()
+    await bootStore()
     settings.settings.zentaoPollMinutes = 0
     await settle()
     rounds = [{ ok: true, bugs: [bug(1)] }]
     checkHandlers[0]({ payload: null })
     await settle()
-    expect(store.bugList).toBeNull()
+    expect(roundIndex).toBe(0)
     expect(notifyCalls).toEqual([])
   })
 
-  it('通知点击切到禅道页', async () => {
-    await bootStore()
-    const { useNavStore } = await import('./nav')
-    const nav = useNavStore()
-    // 点击监听经适配层的 listen 转一手，事件处理器按 Tauri 的形状收 { payload }
-    clickHandlers[0]({ payload: null })
-    // setActiveView 同步应用视图（落盘是随后的异步），这里不等 —— 免得落桩把设置冲掉
-    expect(nav.activeView).toBe('zentao')
-  })
-
   it('取数在途时并发调用共用同一轮，不各开一条', async () => {
-    const store = await bootStore()
+    await bootStore()
     rounds = [{ ok: true, bugs: [bug(1)] }]
-    await Promise.all([store.refresh(), store.refresh()])
+    checkHandlers[0]({ payload: null })
+    checkHandlers[0]({ payload: null })
+    await settle()
     // 一次完整取数只读一个 Bug 页：并发两条若各开一轮会是两倍
     expect(roundIndex).toBe(1)
     expect(notifyCalls).toEqual([])
   })
+
+  it('会话被禅道窗口的自动登录换掉：重读本机会话再试一次，不重登', async () => {
+    await bootStore()
+    rounds = [{ ok: true, bugs: [bug(1)] }]
+    checkHandlers[0]({ payload: null })
+    await settle()
+    expect(logins).toBe(1)
+
+    // 窗口那边（浏览器登录）换了一枚会话：这一轮先失败，重读会话后成功
+    pageChangedOnce = true
+    sessionOverride = { id: 'session-2', baseUrl: SESSION.baseUrl, account: 'alice' }
+    rounds = [{ ok: true, bugs: [bug(1), bug(2)] }]
+    checkHandlers[0]({ payload: null })
+    await settle()
+    expect(logins).toBe(1)
+    expect(notifyCalls).toHaveLength(1)
+    expect(notifyCalls[0][0]).toBe('session-2')
+    expect(notifyCalls[0][1]).toBe(1)
+  })
 })
 
-describe('禅道列表口径与换账号', () => {
-  it('切列表口径会重取，并把 browse 带下去', async () => {
+describe('禅道窗口', () => {
+  it('打开成功不报错，失败把原因带回给调用方', async () => {
     const store = await bootStore()
-    rounds = [{ ok: true, bugs: [bug(1)] }]
-    await store.refresh()
-    expect(pageBrowses).toContain('assigntome')
+    expect(await store.open()).toBe('')
+    expect(openWindowCalls).toBe(1)
+    expect(store.error).toBe('')
 
-    pageBrowses = []
-    rounds = [{ ok: true, bugs: [bug(2), bug(1)] }]
-    store.setBrowse('unresolved')
-    await settle()
-    expect(store.browse).toBe('unresolved')
-    expect(pageBrowses).toContain('unresolved')
-    expect(store.bugList?.bugs.map(b => b.id)).toEqual([2, 1])
+    openWindowFails = true
+    expect(await store.open()).toBe('禅道账号密码没配置')
+    expect(store.error).toBe('禅道账号密码没配置')
   })
 
   it('换账号重登后基线重立：那一轮不把新账号的存量报成新增', async () => {
-    const store = await bootStore()
+    await bootStore()
     rounds = [{ ok: true, bugs: [bug(5)] }]
-    await store.refresh()
+    checkHandlers[0]({ payload: null })
+    await settle()
 
     // 认证过期 → 重登，回来的却是另一个账号：基线作废，重新建立
     authExpiresOnce = true
@@ -307,8 +309,7 @@ describe('禅道列表口径与换账号', () => {
     rounds = [{ ok: true, bugs: [bug(9)] }]
     checkHandlers[0]({ payload: null })
     await settle()
-    expect(store.session?.account).toBe('bob')
-    expect(store.bugList?.bugs.map(b => b.id)).toEqual([9])
+    expect(logins).toBe(2)
     expect(notifyCalls).toEqual([])
   })
 })

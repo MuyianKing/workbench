@@ -363,6 +363,11 @@ export interface AppSettings {
    */
   cardOpacity: number
   /**
+   * 毛玻璃的面要不要四周那条 1px 的描边（默认不画）。
+   * 收敛与默认值都在 `packages/appearance/src/appearance.ts`，落地见 bootstrap.ts 的 writeGlassBorder。
+   */
+  glassBorder: boolean
+  /**
    * 笔记文件夹（用户自己挑的一个目录）：笔记页的目录树就是它里面的 `.md` 文件。
    *
    * 空串表示还没选过 —— 笔记页据此显示「先选一个文件夹」的引导，
@@ -1558,19 +1563,16 @@ export interface WorkbenchApi {
   zentaoSession: () => Promise<Result<ZentaoSession | null>>
   zentaoLogin: () => Promise<Result<ZentaoSession>>
   zentaoLogout: (sessionId: string) => Promise<Result<null>>
+  /** 后台检查用：取一轮完整 Bug 列表（分页聚合在域包；界面不显示它） */
   zentaoBugs: (sessionId: string) => Promise<Result<ZentaoBugList>>
   /** 登记禅道后台检查周期（分钟，0 = 关闭）；间隔没变时后端不动计时 */
   zentaoWatch: (pollMinutes: number) => Promise<Result<null>>
-  /** 比出新增之后弹系统通知（点击唤出主窗口并切到禅道页） */
+  /** 比出新增之后弹系统通知（点通知打开禅道窗口，那一跳在 Rust 侧接） */
   zentaoNotify: (sessionId: string, count: number, title: string) => Promise<Result<null>>
   /** 后台线程到点该查了（取数、比新增与通知都在渲染层接手） */
   onZentaoCheck: (handler: () => void) => Promise<() => void>
-  /** 禅道系统通知被点了（Rust 已唤出主窗口） */
-  onZentaoNotifyClick: (handler: () => void) => () => void
-  /** 账号可见产品的 id 清单（列表按产品逐个取 Bug；产品名按需补） */
-  zentaoProducts: (sessionId: string) => Promise<Result<{ page: number, total: number, limit: number, products: Array<{ id: number, name?: string }> }>>
-  /** 单个产品的 id 与名称（补产品名用） */
-  zentaoProduct: (sessionId: string, productId: number) => Promise<Result<{ id?: unknown, name: string }>>
+  /** 打开（或聚焦）禅道窗口（免登录在 Rust 侧完成；通知点击也走它） */
+  zentaoOpenWindow: () => Promise<Result<null>>
   /** 用系统默认浏览器打开 http(s) 链接 */
   openExternal: (url: string) => Promise<Result<null>>
   /**

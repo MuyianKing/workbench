@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parsePortFromLog } from './dev-port'
+import { devServerUrl, parsePortFromLog } from './dev-port'
 
 describe('parsePortFromLog', () => {
   it('认得 Vite / vue-cli 常见的启动输出', () => {
@@ -23,5 +23,12 @@ describe('parsePortFromLog', () => {
   it('越界的数字不当端口', () => {
     expect(parsePortFromLog('localhost:99999')).toBeUndefined()
     expect(parsePortFromLog('localhost:0')).toBeUndefined()
+  })
+})
+
+describe('devServerUrl', () => {
+  it('一律拼成 localhost 的根地址', () => {
+    expect(devServerUrl(5173)).toBe('http://localhost:5173/')
+    expect(devServerUrl(8080)).toBe('http://localhost:8080/')
   })
 })

@@ -19,6 +19,10 @@
  * 但配了主题色就要跟着走 —— 否则「主题色只接管交互态」这句话里那个「选中」是空的。
  * 用的还是同一条混色公式，只是比例另有一档（见 SELECTED_BLEND_*）。
  *
+ * 选中块里那几行字（邮箱清单里正在读的那封：主题与发件人）也取主题色，但主色本身铺在
+ * 浅底上多半读不清（亮绿 #1fbb70 在它自己的浅底上只有 2.1:1），所以另给一档按对比度推深 /
+ * 推亮的 --ink-accent（见 accentTextInk）—— 「这些字用主题色」这句话要成立，靠的是它。
+ *
  * 铺在主色上的文字色按主题色的深浅自动挑（红底白字、浅灰底黑字，见 inkOnAccent），
  * 用户也可以在设置里手动指定黑白。
  *
@@ -59,6 +63,7 @@ export const ACCENT_VARIABLE_NAMES = [
   '--el-color-primary-dark-2',
   '--el-color-white',
   '--bg-selected',
+  '--ink-accent',
 ] as const
 
 export type AccentVariableName = (typeof ACCENT_VARIABLE_NAMES)[number]
@@ -187,12 +192,54 @@ export function inkOnAccent(color: string, mode: AccentInkMode = ACCENT_INK_DEFA
 }
 
 /**
+ * 铺在选中块底色上的主题色文字（--ink-accent）要过的对比度。
+ *
+ * 这里按正文那一档取 4.5:1，不跟着上面的 WHITE_INK_FLOOR（3:1）走：那一档是「用户挑的
+ * 主色块上放什么颜色的字」，色块本身是他的选择，只保证基本可读；而这里是**主题色的浅底
+ * 上放标题与发件人那两行 13px 的字**，底色是应用自己算的，没有理由让它读不清。
+ */
+const ACCENT_TEXT_FLOOR = 4.5
+
+/**
+ * 选中块里那几行主题色文字的字色：主题色往黑（亮色）/ 往白（暗色）里推，推到在选中底色上
+ * 够得着 ACCENT_TEXT_FLOOR 为止。
+ *
+ * 不能直接把主色当字色：主色是拿来当色块用的（实心块上配白字），它自己的明度多半
+ * 落在中间 —— 亮绿 #1fbb70 在它自己那层浅底（#d2f1e2）上只有 2.1:1，等于没画。
+ * 推深之后仍是同一个色相（#1fbb70 → 深绿），「这行字是主题色」这件事看得出来。
+ *
+ * 主色本身就够对比（深蓝、靛那几档浅底上本来就在 4.5:1 以上）时原样返回 —— 那种主色
+ * 推一下就发黑了，没必要。对比度对混入比例单调，二分到 24 次够用；万一推到底还够不着
+ * （只有很淡的主色在暗色主题下会这样），给的就是推到底那一档，不再硬凑。
+ */
+function accentTextInk(hex: string, tint: string, theme: 'light' | 'dark'): string {
+  if (contrastRatio(hex, tint) >= ACCENT_TEXT_FLOOR)
+    return hex
+
+  const deep = theme === 'dark' ? WHITE : '#000000'
+  let lo = 0
+  let hi = 1
+  for (let i = 0; i < 24; i++) {
+    const mid = (lo + hi) / 2
+    if (contrastRatio(mixHex(hex, deep, mid), tint) < ACCENT_TEXT_FLOOR)
+      lo = mid
+    else hi = mid
+  }
+
+  // 取 hi 那一侧（已过线的那一档）而不是中点：混色最后要落成 8 位色值，中点取整后
+  // 可能刚好掉回线下（#2f6bd8 那档就差 0.01），而 hi 是拿取整后的颜色比过的。
+  // 推到底都够不着时（只有很淡的主色在暗色主题下会这样）给的就是推到底那一档。
+  return mixHex(hex, deep, hi)
+}
+
+/**
  * 把主题色派生成要写到 :root 上的整族变量；空串（没配）返回空对象，由 tokens.css 接管。
  *
  * theme 决定往哪边混：亮色主题的 light-N 往白里混（浅底上的悬停底色），
  * 暗色主题往画布色里混（深底上的悬停底色），dark-2 则始终往对比度更高的一边混。
  * inkMode 决定铺在主色上的文字色（见 inkOnAccent）。
- * 选中块底色（--bg-selected）走的是同一条混色、另一个比例（见 SELECTED_BLEND_*）。
+ * 选中块底色（--bg-selected）走的是同一条混色、另一个比例（见 SELECTED_BLEND_*），
+ * 铺在它上面的主题色文字（--ink-accent）按对比度另推一档（见 accentTextInk）。
  */
 export function accentVariables(
   color: unknown,
@@ -206,6 +253,7 @@ export function accentVariables(
   const blend = theme === 'dark' ? DARK_BLEND : LIGHT_BLEND
   const deep = theme === 'dark' ? WHITE : '#000000'
   const selected = theme === 'dark' ? SELECTED_BLEND_DARK : SELECTED_BLEND_LIGHT
+  const selectedTint = mixHex(hex, blend, selected)
 
   return {
     '--el-color-primary': hex,
@@ -216,6 +264,7 @@ export function accentVariables(
     '--el-color-primary-light-9': mixHex(hex, blend, 0.9),
     '--el-color-primary-dark-2': mixHex(hex, deep, 0.2),
     '--el-color-white': inkOnAccent(hex, inkMode),
-    '--bg-selected': mixHex(hex, blend, selected),
+    '--bg-selected': selectedTint,
+    '--ink-accent': accentTextInk(hex, selectedTint, theme),
   }
 }

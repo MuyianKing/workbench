@@ -78,9 +78,11 @@ const metaWarn = !props.skill.hasSkillMd
   gap: 9px;
   min-height: 88px;
   padding: var(--sp-3) var(--sp-4);
-  /* 与 .panel（global.css）同一条规则：底色浓度跟着设置里的「卡片不透明度」走 */
+  /* 与项目卡 / .panel 同一条规则：底色浓度跟着设置里的「卡片不透明度」走，磨砂取 tokens 那套玻璃 */
   background: rgba(var(--bg-surface-rgb), var(--card-alpha, 1));
-  border: 1px solid var(--border);
+  backdrop-filter: var(--glass-filter);
+  /* 四周那条线归设置里的「毛玻璃描边」（默认不画） */
+  border: 1px solid var(--glass-border-color);
   border-radius: var(--r-lg);
   box-shadow: var(--shadow-card);
   cursor: pointer;
@@ -89,7 +91,7 @@ const metaWarn = !props.skill.hasSkillMd
 }
 
 .card:hover {
-  border-color: var(--border-strong);
+  border-color: var(--glass-border-color-hover);
   box-shadow: var(--shadow-hover);
   transform: translateY(-1px);
 }

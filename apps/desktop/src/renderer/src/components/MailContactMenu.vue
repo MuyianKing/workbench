@@ -86,7 +86,7 @@ onMounted(place)
 
 <style scoped>
 /*
- * 浮层卡片与邮件清单行的右键菜单同一副外壳；压在名单的字上，底色必须是实底。
+ * 浮层卡片与邮件清单行的右键菜单同一副外壳；压在名单的字上，底色取厚一档的玻璃（--glass-fill）。
  * 入场 150ms 淡入下沉（动效口径：≤300ms、--ease-out；reduced-motion 由 global.css 兜底）。
  */
 .menu {
@@ -95,8 +95,9 @@ onMounted(place)
   z-index: 1200;
   min-width: 148px;
   padding: var(--sp-1);
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
+  background: var(--glass-fill);
+  backdrop-filter: var(--glass-filter);
+  border: 1px solid var(--glass-border-color);
   border-radius: var(--r-md);
   box-shadow: var(--shadow-pop);
   animation: menu-in 0.15s var(--ease-out);

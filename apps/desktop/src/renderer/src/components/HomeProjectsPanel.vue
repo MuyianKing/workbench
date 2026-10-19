@@ -64,6 +64,13 @@ const projects = computed(() => store.homeProjects)
   gap: 0;
   border: 0;
   background: none;
+  /**
+   * 磨砂也得一起清掉。`.panel` 那份 backdrop-filter（global.css）磨的是**背后**的东西，
+   * 与自身有没有底色无关：只写 background: none 的话，底色没了、玻璃还在，整栏连卡片
+   * 之间的缝都是糊的 —— 与项目页同一张网格（ProjectsPanel 的 .projects，压根不在 .panel
+   * 体系里）长得不一样。清掉之后壁纸才是原样透出来，卡片直接摆在画布上。
+   */
+  backdrop-filter: none;
   box-shadow: none;
   /* 外壳自己的裁切会把第一排卡片悬停时那 1px 上浮切掉 */
   overflow: visible;

@@ -260,7 +260,7 @@ writeFileSync(outPng, Buffer.from(shot.result.data, 'base64'))
 | 症状 | 探针怎么问 |
 |---|---|
 | DOM 有内容但画不出来 | 读它的 `getBoundingClientRect()` 与 `getComputedStyle` 的 `visibility` / `opacity`，先确认盒子算成了什么 |
-| 怀疑是毛玻璃（`backdrop-filter`）导致的合成问题 | 把顶部几条栏的 `backdrop-filter` 统一关掉再截一张，对比 |
+| 怀疑是毛玻璃（`backdrop-filter`）导致的合成问题 | 把那一处的 `backdrop-filter` 关掉再截一张，对比（现在面板 / 卡片 / 弹层 / 下拉都有这一层，逐个关） |
 | 怀疑弹层被 `backdrop-filter` 子树拖累 | 把 `.el-overlay` 从 `.app` 子树挪到 `body`（Element Plus 的 `el-dialog` 默认不 Teleport 到 body），再截 |
 | 想截弹窗里某一栏 | 先注入脚本滚到那一行，再截 |
 
@@ -339,6 +339,18 @@ await send('Runtime.evaluate', { expression: `(async () => {
   顶栏显式 `position: relative; z-index` 抬一手即可。**这一档才会露馅**：透明 / 正常两档
   顶栏不构成层叠上下文，面板的 z-index 直接和卡片在同一层比，所以只截那两档是验不出来的 ——
   验证浮动面板时要把顶栏三档都过一遍。
+  **现在面板、卡片、弹层、下拉都带这一层**（见 features-and-architecture.md 的
+  「浮在壁纸上的面一律是毛玻璃」一条），谁里面要放浮动内容，谁就得 Teleport 到 `body` 画
+  （`el-tooltip` / `el-dropdown` 默认就是）。
+- **弹层自己也带 `backdrop-filter` 之后要多看一眼**：`.el-dialog` / `.el-drawer` / `.el-message-box`
+  现在是磨砂面（global.css 的「浮层的玻璃」）。历史上「弹层整块画不出来 / 只画出一截」出过，
+  当时的解法是每个弹层都 **append-to-body**（离开 `.app` 子树）—— 这条前提不能破；
+  真再遇到那个症状，先把这三个选择器的 `backdrop-filter` 关掉对比，再往深里查。
+- **祖先上有 `opacity` / `filter` / `isolation` 时，毛玻璃会「什么都取不到」**：
+  `backdrop-filter` 只在自己那个 backdrop root 里取样，遇到这类祖先就只剩祖先内部那点画面。
+  实例：首页拖卡片时那张卡是 `.board-card.is-floating { opacity: 0.92 }`，卡里面板的磨砂
+  取不到壁纸，看着像一张平的半透白 —— 这一帧的差别接受掉了（要修就把那点透明度去掉）。
+  注意 `transform` **不**构成 backdrop root，所以卡片悬停那 1px 抬升不影响磨砂。
 - **Element Plus 的弹层不信 `offsetParent`**：popper 是 `position: fixed`，可见时
   `offsetParent` 照样是 `null`，拿它当「面板打开了吗」的判据会一直判成没打开。
   用 `getComputedStyle(popper).display !== 'none'`（或 `aria-hidden`）来判断。

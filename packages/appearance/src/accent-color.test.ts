@@ -137,6 +137,36 @@ describe('accentVariables', () => {
     expect(relativeLuminance(dark)).toBeLessThan(relativeLuminance(primary))
   })
 
+  it('选中块里那行标题的字色，在选中底色上一定读得清', () => {
+    for (const preset of ACCENT_PRESETS) {
+      for (const theme of ['light', 'dark'] as const) {
+        const vars = accentVariables(preset, theme)
+        expect(
+          contrastRatio(varOf(vars, '--ink-accent'), varOf(vars, '--bg-selected')),
+          `${preset} / ${theme}`,
+        ).toBeGreaterThanOrEqual(4.5)
+      }
+    }
+  })
+
+  it('主色本身就够对比时原样用它（深色主色推一下就发黑）', () => {
+    // 靛 #4f46e5 在亮色的选中底色上本来就有 4.6:1
+    expect(varOf(accentVariables('#4f46e5', 'light'), '--ink-accent')).toBe('#4f46e5')
+  })
+
+  it('明度落在中间的主色推深到够对比，但仍是同一个色相', () => {
+    // 亮绿 #1fbb70 直接当字色只有 2.1:1
+    expect(contrastRatio('#1fbb70', '#d2f1e2')).toBeLessThan(2.5)
+
+    const light = varOf(accentVariables('#1fbb70', 'light'), '--ink-accent')
+    expect(contrastRatio(light, '#d2f1e2')).toBeGreaterThanOrEqual(4.5)
+
+    // 推深的那一档还是绿的（绿通道明显压过红蓝），不是被推成黑或灰
+    const [r, g, b] = [1, 3, 5].map(at => Number.parseInt(light.slice(at, at + 2), 16))
+    expect(g).toBeGreaterThan(r + 20)
+    expect(g).toBeGreaterThan(b + 20)
+  })
+
   it('暗色主题反过来：浅色档往画布色里压，dark-2 提亮', () => {
     const primary = relativeLuminance(ACCENT_PRESETS[0])
     const vars = accentVariables(ACCENT_PRESETS[0], 'dark')

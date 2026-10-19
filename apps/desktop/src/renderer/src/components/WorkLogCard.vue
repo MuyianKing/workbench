@@ -1,14 +1,16 @@
 <script setup lang="ts">
 import type { ProjectColor } from '@workbench/core'
 import type { WorkLogEntry } from '@/types'
-import { CircleCheck, Delete, EditPen } from '@element-plus/icons-vue'
+import { CircleCheck, Delete, EditPen, RefreshLeft } from '@element-plus/icons-vue'
 import { sanitizeProjectColor } from '@workbench/core'
 import { WORK_STATUS_LABELS } from '@workbench/work-log'
 /**
  * 时间轴上的一条工作记录。
  *
- * 只负责展示，以及把「编辑 / 删除」两个动作抛上去 —— 数据从哪来、改完列表怎么变由页面决定。
+ * 只负责展示，以及把「编辑 / 删除 / 状态开关」三个动作抛上去 —— 数据从哪来、改完列表怎么变由页面决定。
+ * **整条卡片不可点**：改变状态只认右上角那颗开关（点卡片只是看，不顺手动数据）。
  * 内容很长时默认收起，留一个「展开」——一条日志写成一篇长文时，时间轴不该被它整段占满。
+ * 左沿那条灰竖条是卡片的「脊」（见样式里那段：为什么不按项目色上色），认项目看那枚标签。
  */
 import { computed, ref, watch } from 'vue'
 import MarkdownView from '@/components/MarkdownView.vue'
@@ -31,27 +33,12 @@ const props = defineProps<{
 const emit = defineEmits<{
   edit: [entry: WorkLogEntry]
   remove: [entry: WorkLogEntry]
-  /** 点一下切状态：已完成 ⇄ 待办（真正的落盘由页面负责） */
+  /** 右上角那颗状态开关：已完成 ⇄ 待办（真正的落盘由页面负责） */
   toggle: [entry: WorkLogEntry]
 }>()
 
-/** 已完成的那条：勾选圆圈填实，待办则是空圈 + 一个字标 */
+/** 已完成的那条：不挂「待办」标记，右上角那颗开关也翻成「改为待办」 */
 const isDone = computed(() => props.entry.status === 'done')
-
-/**
- * 点整条记录就能标记完成（用户要的手感）。
- *
- * 三种情况不接管：点在链接、按钮上，或者用户正在选文本 ——
- * 复制正文、点开里面的链接都不该顺手把状态改了。
- */
-function onCardClick(event: MouseEvent): void {
-  const target = event.target as HTMLElement | null
-  if (target?.closest('a, button'))
-    return
-  if (window.getSelection()?.toString())
-    return
-  emit('toggle', props.entry)
-}
 
 /** 关联的项目已经不在项目列表里了（删项目不会连带删日志，这里把它说出来） */
 const projectMissing = computed(() => !!props.entry.projectId && !props.projectName)
@@ -78,11 +65,7 @@ watch(
 </script>
 
 <template>
-  <article
-    class="log"
-    :title="isDone ? '点击改为待办' : '点击标记为已完成'"
-    @click="onCardClick"
-  >
+  <article class="log">
     <header class="log__head">
       <span class="log__time mono">
         {{ props.showDate ? formatTimestamp(entry.createdAt) : formatTimeOfDay(entry.createdAt) }}
@@ -112,7 +95,11 @@ watch(
         {{ WORK_STATUS_LABELS.todo }}
       </el-tag>
 
-      <!-- 三个动作统一：平时不占视觉重量，鼠标落在这一条上才显形 -->
+      <!--
+        三个动作统一：平时不占视觉重量，鼠标落在这一条上才显形。
+        最右那颗状态开关是个例外，它**常显**：整条卡片不可点之后，它是改变状态唯一的入口，
+        跟着藏起来就没人找得着了。
+      -->
       <span class="log__actions">
         <button
           class="log__action log__action--hover"
@@ -131,16 +118,21 @@ watch(
           <el-icon><Delete /></el-icon>
         </button>
 
-        <!-- 右上角：待办时的「标记为已完成」，点它即完成 -->
+        <!--
+          状态开关：待办时点它即完成，已完成时点它改回待办。
+          两态共用这一颗，只换图标与提示语 —— 改回待办那条路也得有个看得见的入口。
+        -->
         <button
-          v-if="!isDone"
-          class="log__action log__action--hover"
+          class="log__action"
           type="button"
-          title="标记为已完成"
-          aria-label="标记为已完成"
-          @click.stop="emit('toggle', entry)"
+          :title="isDone ? '改为待办' : '标记为已完成'"
+          :aria-label="isDone ? '改为待办' : '标记为已完成'"
+          @click="emit('toggle', entry)"
         >
-          <el-icon><CircleCheck /></el-icon>
+          <el-icon>
+            <RefreshLeft v-if="isDone" />
+            <CircleCheck v-else />
+          </el-icon>
         </button>
       </span>
     </header>
@@ -163,7 +155,8 @@ watch(
 <style scoped>
 /**
  * 一条记录是一张小卡片：比时间轴所在的页面底色高一档，让「一天里的多条」分得清边界。
- * 半透明底与面板同源（--card-alpha 由 App.vue 按设置写在 .app 上）。
+ * 半透明底与面板同源（--card-alpha 由 App.vue 按设置写在 .app 上），底下同样有一道毛玻璃
+ * （--glass-filter，配方见 tokens.css）—— 记录压在时间轴所在的页面上，磨过之后底下的字不会透上来。
  */
 .log {
   display: flex;
@@ -172,10 +165,10 @@ watch(
   min-width: 0;
   padding: var(--sp-3) var(--sp-4);
   background: rgba(var(--bg-surface-rgb), var(--card-alpha, 1));
-  border: 1px solid var(--border);
+  backdrop-filter: var(--glass-filter);
+  /* 四周那条线归设置里的「毛玻璃描边」（默认不画） */
+  border: 1px solid var(--glass-border-color);
   border-radius: var(--r-md);
-  /* 整条可点 = 切换完成状态，所以给一个可点的光标 */
-  cursor: pointer;
 }
 
 /* 待办 / 已完成只是状态标签上的差别，卡片本身与其它记录长得一样（底色不动） */
@@ -216,8 +209,8 @@ watch(
 }
 
 /*
- * 动作推到最右。整组常显（右上角那个「完成」图标必须在没悬停时也看得见），
- * 淡化的是编辑 / 删除这两个 —— 平时不占视觉重量，鼠标落在这一条上才显形。
+ * 动作推到最右。淡化的是编辑 / 删除这两个 —— 平时不占视觉重量，鼠标落在这一条上才显形；
+ * **状态开关（最右那颗）常显** —— 整条卡片不可点，它是改变状态唯一的路，不能跟着淡掉。
  */
 .log__actions {
   display: flex;

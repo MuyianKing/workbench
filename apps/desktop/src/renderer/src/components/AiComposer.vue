@@ -453,17 +453,19 @@ const sendTitle = computed(() => {
 
 <style scoped>
 /**
- * composer 自己就是一张卡片：底色与边框照 .panel 那一套（卡片的写法见 global.css）——
- * 它比内容面板矮一档，所以圆角与内边距自己定。
+ * composer 自己就是一张卡片：底色与边框照 .panel 那一套（卡片的写法见 global.css），
+ * 磨砂与上沿高光也取同一套玻璃令牌 —— 它比内容面板矮一档，所以圆角与内边距自己定。
  */
 .composer {
   display: flex;
   flex-direction: column;
   gap: var(--sp-2);
   padding: var(--sp-3);
-  border: 1px solid var(--border);
+  /* 四周那条线归设置里的「毛玻璃描边」（默认不画）；里面那些框里的框照旧 --border */
+  border: 1px solid var(--glass-border-color);
   border-radius: var(--r-lg);
   background: rgba(var(--bg-surface-rgb), var(--card-alpha, 1));
+  backdrop-filter: var(--glass-filter);
   box-shadow: var(--shadow-card);
 }
 

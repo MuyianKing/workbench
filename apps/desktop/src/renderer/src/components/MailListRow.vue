@@ -228,14 +228,17 @@ function subjectText(raw: string): string {
   color: var(--ink-3);
 }
 
-/* 选中态文字整体抬一档：主题最重，发件人次之，日期别抢眼 */
+/* 选中态文字整体抬一档：主题最重，发件人次之，日期别抢眼。
+   主题与**发件人**两行取**主题色**（--ink-accent：主色按对比度推深 / 推亮过的那一档，
+   底色不动），这样「现在在读哪封、是谁写的」在清单里一眼认得出，
+   而不是靠比别处深一点的灰 */
 .mail-item.is-active .mail-item__subject {
-  color: var(--ink);
+  color: var(--ink-accent);
   font-weight: 600;
 }
 
 .mail-item.is-active .mail-item__from {
-  color: var(--ink);
+  color: var(--ink-accent);
 }
 
 .mail-item.is-active .mail-item__date,
@@ -243,7 +246,9 @@ function subjectText(raw: string): string {
   color: var(--ink-2);
 }
 
-.mail-item.is-unread .mail-item__subject {
+/* 未读那行整行字重抬一档、字色到 --ink 为止；但**正在读的那封走上面的主题色**
+   （它比未读更该拿这个色），所以这里把选中态排除掉 */
+.mail-item.is-unread:not(.is-active) .mail-item__subject {
   font-weight: 600;
   color: var(--ink);
 }

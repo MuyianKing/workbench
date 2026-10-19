@@ -235,6 +235,7 @@ fn create_main_window(app: &AppHandle) -> tauri::Result<()> {
         // （见 @workbench/mail 的 htmlBody），在这里拦下：应用自己的页面照常放行，
         // 其余 http(s) / mailto 交给系统浏览器开，别的 scheme 一律取消 ——
         // 邮件的 HTML 不带宿主能力，这条边界不因放行链接而破。
+        // 禅道窗口是另一扇窗（zentao.rs），有它自己的导航边界。
         .on_navigation(|url| {
             let url = url.as_str();
             let own = url.starts_with("http://tauri.localhost")
@@ -495,6 +496,7 @@ fn main() {
         .manage(ball::BallState::default())
         .manage(zentao::ZentaoState::default())
         .manage(zentao::ZentaoWatch::default())
+        .manage(zentao::ZentaoWindowState::default())
         .invoke_handler(tauri::generate_handler![
             commands::data_load,
             commands::data_save,
@@ -595,7 +597,7 @@ fn main() {
             commands::zentao_watch,
             commands::zentao_notify,
             commands::zentao_products,
-            commands::zentao_product,
+            commands::zentao_open_window,
             commands::check_port,
             commands::kill_port_process,
             commands::reveal,

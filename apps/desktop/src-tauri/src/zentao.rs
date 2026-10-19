@@ -4,9 +4,11 @@
 
 use serde::Serialize;
 use serde_json::{json, Map, Value};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::webview::{NewWindowResponse, PageLoadEvent};
+use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 use url::Url;
 
 use crate::http::{self, Response};
@@ -14,7 +16,18 @@ use crate::notify;
 
 const WATCH_TICK: Duration = Duration::from_secs(60);
 const CHECK_EVENT: &str = "zentao:check";
-const NOTIFY_CLICK_EVENT: &str = "zentao:notify-click";
+
+/// 禅道窗口的 label。
+///
+/// **不要**在 capabilities 里登记它：远程来源是独立的执行上下文，本地 capability
+/// 不授予它 IPC（tauri 的 `remote_context_denied`）。公司页面里的脚本因此够不到
+/// 任何宿主命令 —— 这是这扇窗的安全前提。
+const WINDOW_LABEL: &str = "zentao";
+const WINDOW_TITLE: &str = "禅道";
+
+/// 窗口建好之后一直没等到「非登录页」时，最多藏这么久就把登录页亮出来。
+/// 密码错了 / 账号被锁时，用户得看得见登录页与错误提示，而不是一扇空白窗口。
+const WINDOW_SHOW_FALLBACK: Duration = Duration::from_secs(6);
 
 /// 后台检查周期的上下限（分钟）：与 @workbench/zentao 的 sanitizeZentaoPollMinutes 同口径。
 const POLL_MIN_MINUTES: u32 = 1;
@@ -69,6 +82,25 @@ struct WatchConfig {
 impl ZentaoWatch {
     fn lock(&self) -> Result<MutexGuard<'_, WatchConfig>, String> {
         self.config.lock().map_err(|_| "禅道监视暂不可用".into())
+    }
+}
+
+/// 禅道窗口的状态：自动登录的防重入。
+///
+/// 登录页那一帧不该闪给用户看，所以窗口建好先藏着，等进到站内再显示
+/// （或由兜底线程把登录页亮出来）。
+#[derive(Default)]
+pub struct ZentaoWindowState {
+    auto_login_fired: AtomicBool,
+}
+
+impl ZentaoWindowState {
+    fn lock_attempt(&self) -> bool {
+        !self.auto_login_fired.swap(true, Ordering::SeqCst)
+    }
+
+    fn reset(&self) {
+        self.auto_login_fired.store(false, Ordering::SeqCst);
     }
 }
 
@@ -206,8 +238,9 @@ fn api_url(base_url: &str, endpoint: &str) -> String {
     format!("{base_url}/api.php/v1/{endpoint}")
 }
 
-/// 列表筛选允许的 browseType（与 @workbench/zentao 的 ZENTAO_BROWSE_OPTIONS 一致）。
+/// 列表筛选允许的 browseType（与 @workbench/zentao 的 ZentaoBrowse 一致）。
 /// **白名单**：这个值是渲染层递进来的，绝不能直接拼进 URL。
+/// 现在界面只剩「指派给我的」这一个口径，但白名单照旧收三个值 —— 域包的类型就这三个。
 fn browse_of(raw: &str) -> Result<&'static str, String> {
     match raw {
         "assigntome" => Ok("assigntome"),
@@ -413,35 +446,6 @@ pub fn products(state: &ZentaoState, session_id: &str) -> Result<Value, String> 
     Ok(json!({ "page": 1, "total": total, "limit": total, "products": rows }))
 }
 
-/// 单个产品（**只回 id 与名称**）：`GET /api.php/v1/products/{id}`，用于补产品名。
-pub fn product(state: &ZentaoState, session_id: &str, product_id: u64) -> Result<Value, String> {
-    if product_id == 0 {
-        return Err("禅道产品编号无效".into());
-    }
-    let session = state.lock()?.require_session(session_id)?.clone();
-    let url = api_url(&session.info.base_url, &format!("products/{product_id}"));
-    let value = read_json(state, session_id, url, http::request_url_no_redirects)?;
-    Ok(project_product(&value))
-}
-
-/// 单个产品 → 只留 `{id, name}`（名称缺失给空串）。
-fn project_product(value: &Value) -> Value {
-    let mut out = Map::new();
-    if let Some(id) = value.get("id") {
-        if !id.is_array() && !id.is_object() {
-            out.insert("id".into(), id.clone());
-        }
-    }
-    let name = value
-        .get("name")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .trim()
-        .to_string();
-    out.insert("name".into(), Value::String(name));
-    Value::Object(out)
-}
-
 /// `/v1/user` → `profile.view.products`（逗号分隔）里的正整数 id，去重保序。
 fn product_ids_of(user: &Value) -> Vec<u64> {
     let text = user
@@ -586,10 +590,153 @@ pub fn notify_new_bugs(
     notify::ensure_aumid_shortcut(&aumid, app.package_info().name.as_str())?;
     // 提示音用系统默认那个：禅道跟新邮件混成一种声音就没法凭耳朵分了
     notify::show_toast_with_sound(&aumid, &name, &body, notify::SOUND_DEFAULT, move || {
-        // 点击：唤出主窗口 + 发事件（渲染层换到禅道页；那儿的列表刚被这一轮检查刷过）
-        crate::show_main_window(&handle);
-        let _ = handle.emit(NOTIFY_CLICK_EVENT, ());
+        // 点击：打开（或聚焦）禅道窗口 —— 用户要看的就是那一页，不绕回主窗口。
+        // 建窗口会阻塞（不能在事件循环里建），点击回调又跑在 COM 线程上，丢给独立线程最稳。
+        let handle = handle.clone();
+        std::thread::spawn(move || {
+            let _ = open_window(&handle);
+        });
     })
+}
+
+// ---------- 禅道窗口（右上角那颗图标与通知点击都走它） ----------
+
+/// 打开（或聚焦）禅道窗口：一扇普通窗口，直接加载禅道站点。
+///
+/// **用系统标题栏**（`decorations` 默认开）：右上角正好是关闭 / 最大化 / 最小化三个按钮，
+/// 而窗口里是一张远程页面 —— 自绘按钮没法盖在它上面（原生画面与 HTML 是两层，见 documents
+/// 里那条「原生画面盖得住 HTML」）。所以这扇窗不做无边框。
+pub fn open_window(app: &AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window(WINDOW_LABEL) {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+        return Ok(());
+    }
+
+    let config = crate::oauth::zentao_config()?;
+    let base = Url::parse(&normalize_base_url(&config.base_url)?)
+        .map_err(|_| "禅道地址无效".to_string())?;
+
+    let login_script = auto_login_script(&config.account, &config.password);
+    let handle = app.clone();
+    let navigation_base = base.clone();
+    let page_base = base.clone();
+    let window = WebviewWindowBuilder::new(app, WINDOW_LABEL, WebviewUrl::External(base))
+        .title(WINDOW_TITLE)
+        // 一开就铺满整屏：禅道是拿去干活的工作台，不该先给一扇 1280×900 的小窗。
+        // **用最大化而不是 fullscreen**：fullscreen 连系统标题栏一起吃掉，而这扇窗只能靠
+        // 系统标题栏（远程页面盖不住自绘按钮，见文件头）；inner_size 留作「向下还原」那一档。
+        // 与下面的「先藏着」不冲突：tao 会把最大化标记攒到真正 show 的那一下再 SW_MAXIMIZE，
+        // 所以亮出来的第一帧就是最大化的，不会先闪一个还原态。
+        .maximized(true)
+        .inner_size(1280.0, 900.0)
+        .min_inner_size(720.0, 480.0)
+        // 先藏起来：登录页那一帧不该闪给用户看（进到站内或兜底时限到再显示）
+        .visible(false)
+        // 「填表 + 提交」要等登录页的脚本都跑完（safeSubmit 是行内脚本定义的）
+        .on_page_load(move |window, payload| {
+            if let PageLoadEvent::Finished = payload.event() {
+                on_page_loaded(&handle, &window, payload.url(), &page_base, &login_script);
+            }
+        })
+        // 站内放行；站外交给系统浏览器 —— 与主窗口同一条边界
+        .on_navigation(move |url| allow_navigation(url, &navigation_base))
+        // 新窗口不在应用里开（会多出一扇不受管的窗口）；能交出去的就交给浏览器
+        .on_new_window(|url, _features| {
+            if matches!(url.scheme(), "http" | "https") {
+                let _ = crate::system::open_external(url.as_str());
+            }
+            NewWindowResponse::Deny
+        })
+        .build()
+        .map_err(|err| format!("打开禅道窗口失败（{err}）"))?;
+
+    // 新窗口 / 新会话：允许下一轮掉登录态时再自动登录一次
+    app.state::<ZentaoWindowState>().reset();
+
+    let fallback = window.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(WINDOW_SHOW_FALLBACK);
+        let _ = fallback.show();
+    });
+    Ok(())
+}
+
+/// 页面加载完成：登录页就自动填一次；进到站内就把窗口显示出来并清掉防重入标记。
+fn on_page_loaded(
+    app: &AppHandle,
+    window: &WebviewWindow,
+    url: &Url,
+    base: &Url,
+    login_script: &str,
+) {
+    let state = app.state::<ZentaoWindowState>();
+    if is_login_url(url) {
+        if state.lock_attempt() {
+            let _ = window.eval(login_script);
+        }
+        return;
+    }
+    if same_origin(url, base) {
+        state.reset();
+        let _ = window.show();
+    }
+}
+
+/// 站内放行；其余 http(s) 交给系统浏览器；about/data/blob 放行（禅道的打印与下载会用）。
+fn allow_navigation(url: &Url, base: &Url) -> bool {
+    if same_origin(url, base) {
+        return true;
+    }
+    match url.scheme() {
+        "about" | "data" | "blob" => true,
+        "http" | "https" => {
+            let _ = crate::system::open_external(url.as_str());
+            false
+        }
+        _ => false,
+    }
+}
+
+/// 协议 + 主机 + 端口一致（部署根可能挂在子路径下，路径不参与判定）。
+fn same_origin(a: &Url, b: &Url) -> bool {
+    a.scheme() == b.scheme()
+        && a.host_str() == b.host_str()
+        && a.port_or_known_default() == b.port_or_known_default()
+}
+
+/// 禅道的登录页路由：`user-login.html` / `user-login-<base64>.html`。
+fn is_login_url(url: &Url) -> bool {
+    url.path()
+        .rsplit('/')
+        .next()
+        .map(|last| last.starts_with("user-login"))
+        .unwrap_or(false)
+}
+
+/// 登录页的自动填写脚本：填账号密码，然后调页面自己的 `safeSubmit`。
+///
+/// 不自己复刻「取 rand + md5」那套细节 —— 它随禅道版本变，复刻迟早分叉；
+/// 页面自己的提交逻辑走的就是人点「登录」那条路。脚本只在登录页注入。
+fn auto_login_script(account: &str, password: &str) -> String {
+    let account = json_string(account);
+    let password = json_string(password);
+    format!(
+        r#"(() => {{
+  const account = document.querySelector('#account');
+  const password = document.querySelector('#password');
+  if (!account || !password || typeof window.safeSubmit !== 'function') return;
+  account.value = {account};
+  password.value = {password};
+  window.safeSubmit({{ preventDefault() {{}}, stopPropagation() {{}} }});
+}})();"#
+    )
+}
+
+/// JS 字符串字面量：引号、反斜杠、控制字符交给 JSON 转义。
+fn json_string(value: &str) -> String {
+    serde_json::to_string(value).unwrap_or_else(|_| "\"\"".to_string())
 }
 
 /// 通知正文里的 Bug 标题：控制字符压成空格、连续空白合成一个、超长截断 ——
@@ -704,22 +851,20 @@ mod tests {
         let state = ZentaoState::default();
         let info = mock_login(&state, "account");
 
-        for (label, url) in [
-            ("产品清单", "https://zentao.example/zentao/api.php/v1/products?limit=500&page=1"),
-            ("单个产品", "https://zentao.example/zentao/api.php/v1/products/17"),
-        ] {
-            let value = read_json(&state, &info.id, url.to_string(), |method, got, headers, body| {
-                assert!(state.0.try_lock().is_ok(), "请求期间不能持锁：{label}");
-                assert_eq!(method, "GET");
-                assert!(body.is_none());
-                assert!(headers.contains(&("Token", "secret-token")));
-                assert_eq!(got, url, "{label} 地址必须由后端拼");
-                Ok(response(200, json!({ "id": "7", "token": "leak" })))
-            })
-            .unwrap();
-            // 只读入口透传原始 JSON，投影在 TS 侧；这里只确认它没被包成别的形状
-            assert_eq!(value["id"], "7", "{label}");
-        }
+        let label = "产品清单";
+        let url = "https://zentao.example/zentao/api.php/v1/products?limit=500&page=1";
+
+        let value = read_json(&state, &info.id, url.to_string(), |method, got, headers, body| {
+            assert!(state.0.try_lock().is_ok(), "请求期间不能持锁：{label}");
+            assert_eq!(method, "GET");
+            assert!(body.is_none());
+            assert!(headers.contains(&("Token", "secret-token")));
+            assert_eq!(got, url, "{label} 地址必须由后端拼");
+            Ok(response(200, json!({ "id": "7", "token": "leak" })))
+        })
+        .unwrap();
+        // 只读入口透传原始 JSON，投影在 TS 侧；这里只确认它没被包成别的形状
+        assert_eq!(value["id"], "7", "{label}");
 
         // 旧会话不能读到新会话的数据
         assert!(read_json(&state, "stale", "https://x/y".into(), |_, _, _, _| Ok(response(
@@ -761,15 +906,7 @@ mod tests {
         assert_eq!(user_text(&json!(["x"])), "");
     }
 
-    /// 单个产品只回 id 与名称（名称缺失给空串，绝不把整份产品丢回去）。
-    #[test]
-    fn single_product_projection_keeps_only_id_and_name() {
-        let value = json!({ "id": "17", "name": "巩留县人民医院重症系统", "desc": "secret", "whitelist": ["a"] });
-        let out = project_product(&value);
-        assert_eq!(out, json!({ "id": "17", "name": "巩留县人民医院重症系统" }));
-        let out2 = project_product(&json!({ "id": "3" }));
-        assert_eq!(out2, json!({ "id": "3", "name": "" }));
-    }
+    // 单个产品只回 id 与名称的那条投影（zentao_product 命令）已随列表页删掉：产品名无人显示。
 
     #[test]
     fn normalizes_deployment_roots_and_my_work_urls() {
@@ -1198,6 +1335,31 @@ mod tests {
         assert!(!is_due(&config, now + Duration::from_secs(30 * 60 - 1)));
         assert!(is_due(&config, now + Duration::from_secs(30 * 60)));
         assert!(is_due(&config, now + Duration::from_secs(31 * 60)));
+    }
+
+    /// 窗口的纯逻辑：同源判定、登录页识别、脚本字面量转义。
+    #[test]
+    fn window_helpers_pin_origin_login_and_script_escaping() {
+        let base = Url::parse("http://115.159.41.157:81/zentao/").unwrap();
+        assert!(same_origin(
+            &Url::parse("http://115.159.41.157:81/zentao/my-work-bug.html").unwrap(),
+            &base
+        ));
+        assert!(!same_origin(&Url::parse("https://115.159.41.157:81/zentao/").unwrap(), &base));
+        assert!(!same_origin(&Url::parse("http://115.159.41.157:82/zentao/").unwrap(), &base));
+        assert!(!same_origin(&Url::parse("http://other.example/zentao/").unwrap(), &base));
+
+        assert!(is_login_url(&Url::parse("http://x/zentao/user-login.html").unwrap()));
+        assert!(is_login_url(&Url::parse("http://x/zentao/user-login-L3plbnRhby8=.html").unwrap()));
+        assert!(!is_login_url(&Url::parse("http://x/zentao/my-work-bug.html").unwrap()));
+        assert!(!is_login_url(&Url::parse("http://x/zentao/user-logout.html").unwrap()));
+
+        // 账号密码进 JS 字面量：引号 / 反斜杠 / 换行都必须转义，不能把脚本截断
+        let script = auto_login_script("a\"b\\c", "p'\n\"w");
+        assert!(script.contains(r#""a\"b\\c""#), "{script}");
+        assert!(script.contains(r#""p'\n\"w""#), "{script}");
+        assert!(script.contains("document.querySelector('#account')"));
+        assert!(script.contains("window.safeSubmit"));
     }
 
     #[test]

@@ -1,7 +1,7 @@
 import type { AccentInkMode } from '@workbench/appearance'
 import type { BootstrapSnapshot, EffectiveTheme } from '@/types'
 /**
- * 首屏快照，以及「把外观落到 DOM」的两个写入口。
+ * 首屏快照，以及「把外观落到 DOM」的三个写入口。
  *
  * 设置是异步加载的，而窗口在渲染层第一帧之后就显示了 —— 只等异步结果的话，用户会先看到
  * 一份默认外观（亮色、无主题色、默认卡片布局），几十到几百毫秒后才被换成自己的设置，
@@ -70,7 +70,28 @@ export function writeAccentColor(color: string, theme: EffectiveTheme, ink: Acce
 }
 
 /**
- * mount 之前调用：把快照里的明暗与主题色先落到 DOM。
+ * 毛玻璃那条描边：关掉时把两个变量在 <html> 上写成 transparent。
+ *
+ * 落点必须与主题色同一处（根元素的内联样式）：描边要管到 Teleport 到 body 的弹层与下拉，
+ * 写在 `.app` 上它们就看不见了。开着时**逐个摘掉内联值**、回落到 tokens.css 里那一份 ——
+ * 两种主题下各自那档灰仍然跟着 `--border` / `--border-strong` 走。
+ *
+ * 只把那两个变量的值改掉、不动 border 本身：面上那条 1px 照旧占位，
+ * 开关一下不会让定高的卡片挪 1px。
+ */
+const GLASS_BORDER_VARIABLES = ['--glass-border-color', '--glass-border-color-hover'] as const
+
+export function writeGlassBorder(enabled: boolean): void {
+  const root = document.documentElement
+  for (const name of GLASS_BORDER_VARIABLES) {
+    if (enabled)
+      root.style.removeProperty(name)
+    else root.style.setProperty(name, 'transparent')
+  }
+}
+
+/**
+ * mount 之前调用：把快照里的明暗、主题色与玻璃描边先落到 DOM。
  *
  * 必须在 Element Plus 的样式表之后执行（本模块由 main.ts 在创建应用前调用，
  * 那几个样式 import 早已完成），否则会看见亮色的一瞥。
@@ -82,4 +103,6 @@ export function applyBootstrapTheme(): void {
 
   writeTheme(snapshot.theme)
   writeAccentColor(snapshot.settings.accentColor, snapshot.theme, snapshot.settings.accentInk)
+  // 老主题文件里没有这一项：缺省就是不画描边（与 sanitizeAppearanceSettings 同一个口径）
+  writeGlassBorder(snapshot.settings.glassBorder === true)
 }

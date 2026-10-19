@@ -43,7 +43,6 @@ describe('导航栏显示哪几页', () => {
       'mail',
       'styles',
       'video',
-      'zentao',
     ])
   })
 
@@ -59,7 +58,6 @@ describe('导航栏显示哪几页', () => {
       'mail',
       'styles',
       'video',
-      'zentao',
     ])
     expect(visibleViews(sanitizeHiddenViews([...VIEW_IDS]))).toEqual(['home'])
   })
@@ -90,7 +88,6 @@ describe('导航栏的顺序', () => {
       'mail',
       'styles',
       'video',
-      'zentao',
     ])
   })
 
@@ -108,7 +105,6 @@ describe('导航栏的顺序', () => {
       'mail',
       'styles',
       'video',
-      'zentao',
     ])
     expect(orderedViews(['work', 'skills', 'vault', 'styles', 'projects'], order)).toEqual([
       'home',
@@ -117,7 +113,6 @@ describe('导航栏的顺序', () => {
       'ai',
       'mail',
       'video',
-      'zentao',
     ])
     // 不带顺序参数时就是老行为：按 VIEW_IDS 的默认顺序
     expect(orderedViews(['home', 'work'])).toEqual([
@@ -130,7 +125,6 @@ describe('导航栏的顺序', () => {
       'mail',
       'styles',
       'video',
-      'zentao',
     ])
   })
 

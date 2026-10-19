@@ -19,12 +19,14 @@ import HotkeyField from '@/components/HotkeyField.vue'
 import { useDraftField } from '@/composables/use-draft-field'
 import { useAuthStore } from '@/stores/auth'
 import { useSettingsStore } from '@/stores/settings'
+import { useZentaoStore } from '@/stores/zentao'
 
 // 这一屏不再需要 open，但设置弹窗统一按这个 prop 传；声明着免得被当成未声明属性透到根元素上
 defineProps<{ open: boolean }>()
 
 const settings = useSettingsStore()
 const auth = useAuthStore()
+const zentao = useZentaoStore()
 
 const account = computed(() => auth.status?.account ?? null)
 
@@ -231,6 +233,14 @@ function saveHotkey(accelerator: string): void {
           @change="(value: number | undefined) => save({ zentaoPollMinutes: sanitizeZentaoPollMinutes(value) })"
         />
       </div>
+
+      <!--
+        后台检查 / 通知失败时的原因。禅道窗口是远程页面，应用自己的话没地方贴在它上面，
+        所以这句话落在配置检查间隔的同一块里 —— 通知突然不响了，来这里看。
+      -->
+      <p v-if="zentao.error" class="row__error" role="alert">
+        {{ zentao.error }}
+      </p>
     </div>
 
     <!--

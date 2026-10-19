@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { bugs, login, logout, session } from './zentao'
+import { bugs, login, logout, openWindow, session } from './zentao'
 
 const invoke = vi.fn<(command: string, args?: Record<string, unknown>) => Promise<unknown>>()
 
@@ -22,13 +22,11 @@ describe('禅道适配层', () => {
     expect(invoke).toHaveBeenLastCalledWith('zentao_logout', { sessionId: '1' })
   })
 
-  it('按当前会话读取产品和 Bug，聚合在 TS 完成', async () => {
+  it('按当前会话读取产品和 Bug，聚合在 TS 完成（列表不再显示，产品名不补）', async () => {
     invoke.mockImplementation(async (command, args) => {
       expect(args?.sessionId).toBe('session-2')
       if (command === 'zentao_products')
         return { page: 1, total: 1, limit: 1, products: [{ id: 7 }] }
-      if (command === 'zentao_product')
-        return { id: 7, name: '产品甲' }
       expect(args?.page).toBe(1)
       expect(args?.browse).toBe('assigntome')
       return { bugs: [{ id: 9, title: '测试问题', status: 'resolved' }], page: 1, total: 1, limit: 100 }
@@ -40,7 +38,7 @@ describe('禅道适配层', () => {
       title: '测试问题',
       status: 'resolved',
       productId: 7,
-      productName: '产品甲',
+      productName: '',
       severity: null,
       pri: null,
       openedDate: '',
@@ -50,8 +48,16 @@ describe('禅道适配层', () => {
     expect(invoke.mock.calls).toEqual([
       ['zentao_products', { sessionId: 'session-2' }],
       ['zentao_page', { sessionId: 'session-2', productId: 7, page: 1, browse: 'assigntome' }],
-      ['zentao_product', { sessionId: 'session-2', productId: 7 }],
     ])
+  })
+
+  it('打开禅道窗口不带参数，失败收敛成 Result', async () => {
+    invoke.mockResolvedValue(null)
+    expect(await openWindow()).toEqual({ ok: true, data: null })
+    expect(invoke).toHaveBeenLastCalledWith('zentao_open_window', undefined)
+
+    invoke.mockRejectedValue('请填写 oauth.local.json 的 zentao 并重新构建')
+    expect(await openWindow()).toEqual({ ok: false, error: '请填写 oauth.local.json 的 zentao 并重新构建' })
   })
 
   it('分页失败不返回部分列表，并保留认证过期标记', async () => {

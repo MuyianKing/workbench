@@ -765,7 +765,7 @@ async function lock(): Promise<void> {
 /* ---------- 卡片 ---------- */
 
 /*
- * 与技能卡同一副外壳（悬停抬一档）。卡里**不套第二层框**：
+ * 与技能卡同一副外壳（悬停抬一档，磨砂与上沿高光取 tokens 那套玻璃）。卡里**不套第二层框**：
  * 密码那一行曾经是「框里一个带边框的输入框」，盒子套盒子看着就笨重 ——
  * 现在它就是一行字加两颗图标。
  */
@@ -775,14 +775,16 @@ async function lock(): Promise<void> {
   gap: var(--sp-2);
   padding: var(--sp-3);
   background: rgba(var(--bg-surface-rgb), var(--card-alpha, 1));
-  border: 1px solid var(--border);
+  backdrop-filter: var(--glass-filter);
+  /* 四周那条线归设置里的「毛玻璃描边」（默认不画） */
+  border: 1px solid var(--glass-border-color);
   border-radius: var(--r-lg);
   box-shadow: var(--shadow-card);
   transition: box-shadow 0.18s ease, border-color 0.18s ease, transform 0.18s ease;
 }
 
 .card:hover {
-  border-color: var(--border-strong);
+  border-color: var(--glass-border-color-hover);
   box-shadow: var(--shadow-hover);
   transform: translateY(-1px);
 }

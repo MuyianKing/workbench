@@ -29,7 +29,7 @@ import type { MailAttachmentKind, MailContact, MailFolder, ParsedAttachment } fr
  */
 import type { Component } from 'vue'
 import type { MailListItem, MailReplyTarget } from '@/stores/mail'
-import { ArrowDown, Document, Download, EditPen, Link, Loading, Memo, Message, Monitor, Notebook, Plus, Refresh, Setting, User } from '@element-plus/icons-vue'
+import { ArrowDown, Document, Download, EditPen, Link, Loading, Memo, Message, Monitor, Notebook, Plus, Reading, Refresh, Setting, User } from '@element-plus/icons-vue'
 import { attachmentBadge, attachmentDataUrl, attachmentKind, attachmentTint, formatMailSize, isImageAttachment, recipientAddress, senderAddress } from '@workbench/mail'
 import { computed, onActivated, onMounted, ref, watch } from 'vue'
 import EmptyState from '@/components/EmptyState.vue'
@@ -797,8 +797,14 @@ const bodyStyle = computed(() => ({
         </div>
       </template>
 
-      <!-- 配置了账户、还没选中邮件：空着，不摆教学式说明 -->
-      <div v-else class="mail-view__blank" />
+      <!-- 配置了账户、还没选中邮件：一副小图 + 一句事实。
+           什么都不摆的话，右边就是一整片空玻璃，看着像没加载出来 -->
+      <EmptyState
+        v-else
+        :icon="Reading"
+        text="还没有打开邮件"
+        hint="在左边的清单里点一封，正文显示在这里。"
+      />
     </section>
 
     <!-- 图片附件的大图：整片附件点开它（多张之间左右切、滚轮缩放、Esc 或点外面关掉 ——
@@ -1077,7 +1083,7 @@ const bodyStyle = computed(() => ({
   overflow: hidden;
 }
 
-/** 空态：没配置时中间那颗入口；配置了没选信就空着 */
+/** 空态：没配置时中间那颗入口；通讯录那一签的右栏也空着（名单本身就在左边） */
 .mail-view__blank {
   flex: 1;
   display: flex;

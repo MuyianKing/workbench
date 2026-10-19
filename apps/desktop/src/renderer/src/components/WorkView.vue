@@ -581,18 +581,6 @@ async function remove(entry: WorkLogEntry): Promise<void> {
   min-width: 0;
 }
 
-/* 每条记录在线上点一个节，与当天头部的圆点同色系 */
-.timeline__item::before {
-  content: '';
-  position: absolute;
-  top: 16px;
-  left: -20px;
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--border-strong);
-}
-
 /**
  * 页脚：左边一句「每页几栏 / 共几条」，右边分页器。
  * 只在有记录时渲染（模板里 v-if="total"）：空态时它是一排无意义的「共 0 条」。

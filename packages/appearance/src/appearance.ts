@@ -63,6 +63,7 @@ export const APPEARANCE_SETTING_KEYS = [
   'accentInk',
   'topBarStyle',
   'cardOpacity',
+  'glassBorder',
   'hiddenViews',
   'viewOrder',
   'navHidden',
@@ -83,6 +84,14 @@ export interface AppearanceSettings {
   accentInk: AccentInkMode
   topBarStyle: TopBarStyle
   cardOpacity: number
+  /**
+   * 毛玻璃的面要不要四周那条 1px 的描边（卡片 / 面板 / 下拉 / 弹窗都吃这一条）。
+   *
+   * 默认**不画**（缺这一项的老主题文件也是不画）：磨砂自己就画得出边界，那条灰线是多余的。
+   * 落地是把 `--glass-border-color` 一族写成 transparent（见 bootstrap.ts）—— 不是把 border
+   * 删掉，保持外廓尺寸不变，开关一下不会让定高的卡片挪 1px。
+   */
+  glassBorder: boolean
   /** 左侧导航栏上关掉的页（见 views.ts）：这是「导航栏长什么样」，同样是配置而不是机器状态 */
   hiddenViews: ViewId[]
   /** 左侧导航栏的显示顺序（见 views.ts）：与 hiddenViews 同属「导航栏长什么样」 */
@@ -106,6 +115,7 @@ export const DEFAULT_APPEARANCE: AppearanceSettings = {
   accentInk: ACCENT_INK_DEFAULT,
   topBarStyle: 'clear',
   cardOpacity: CARD_OPACITY_DEFAULT,
+  glassBorder: false,
   hiddenViews: [],
   viewOrder: [...VIEW_IDS],
   navHidden: false,
@@ -145,6 +155,8 @@ export function sanitizeAppearanceSettings(raw: unknown): AppearanceSettings {
     accentInk: sanitizeAccentInkMode(value.accentInk),
     topBarStyle: sanitizeTopBarStyle(value.topBarStyle),
     cardOpacity: clampCardOpacity(value.cardOpacity),
+    // 与 navHidden 同一口径：只在明确写了 true 时才认（默认不画这条描边）
+    glassBorder: value.glassBorder === true,
     hiddenViews: sanitizeHiddenViews(value.hiddenViews),
     viewOrder: sanitizeViewOrder(value.viewOrder),
     // 收起与否只在明确写了 true 时才认（老主题文件里没有这个字段 = 展开），与卡片的 hidden 同一口径

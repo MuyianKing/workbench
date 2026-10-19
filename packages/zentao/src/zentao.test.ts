@@ -6,10 +6,6 @@ import {
   sanitizeZentaoPollMinutes,
   ZENTAO_DEFAULT_URL,
   ZENTAO_POLL_MINUTES_DEFAULT,
-  zentaoBugUrl,
-  zentaoPriorityColor,
-  zentaoSeverityColor,
-  zentaoStatusLabel,
 } from './index'
 
 function product(id: unknown, name = `产品 ${id}`) {
@@ -287,29 +283,6 @@ describe('fetchZentaoBugs', () => {
   })
 })
 
-describe('zentaoBugUrl', () => {
-  it('保留站点子路径并补分隔符，清除查询与片段', () => {
-    expect(ZENTAO_DEFAULT_URL).toBe('http://115.159.41.157:81/zentao/')
-    expect(zentaoBugUrl(ZENTAO_DEFAULT_URL, 42)).toBe(`${ZENTAO_DEFAULT_URL}bug-view-42.html`)
-    expect(zentaoBugUrl('https://example.invalid/team/zentao?x=1#frag', 42)).toBe('https://example.invalid/team/zentao/bug-view-42.html')
-    expect(zentaoBugUrl('https://example.invalid/', 1)).toBe('https://example.invalid/bug-view-1.html')
-  })
-
-  it.each(['javascript:alert(1)', 'data:text/html,x', 'file:///tmp/x', 'ftp://example.invalid', '/zentao/', '//example.invalid', '', 'http://user:secret@example.invalid/zentao/', 'https://user@example.invalid', 'https://:secret@example.invalid'])('拒绝协议、相对地址或内嵌凭据：%s', (url) => {
-    expect(() => zentaoBugUrl(url, 1)).toThrow()
-  })
-
-  it.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1])('拒绝无效 Bug ID %j', (id) => {
-    expect(() => zentaoBugUrl(ZENTAO_DEFAULT_URL, id)).toThrow()
-  })
-})
-
-describe('zentaoStatusLabel', () => {
-  it.each([['active', '激活'], ['resolved', '已解决'], ['closed', '已关闭'], ['', '未知状态'], ['custom_status', '未知状态'], ['__proto__', '未知状态'], ['constructor', '未知状态'], ['<script>', '未知状态']])('%s → %s', (status, label) => {
-    expect(zentaoStatusLabel(status)).toBe(label)
-  })
-})
-
 describe('产品清单来自账号资料（/v1/products 为空时的正路）', () => {
   it('产品页只给 id 时，产品名按需补取且只取一次', async () => {
     const nameCalls: number[] = []
@@ -357,23 +330,5 @@ describe('产品清单来自账号资料（/v1/products 为空时的正路）', 
     })
     const result = await fetchZentaoBugs(read)
     expect(result.bugs[0].assignedTo).toBe('杨峰')
-  })
-})
-
-describe('等级色阶（与禅道页面一套）', () => {
-  it('严重程度 / 优先级各有自己的色阶，未登记等级回 null', () => {
-    expect(zentaoSeverityColor(1)).toBe('#c62828')
-    expect(zentaoSeverityColor(3)).toBe('#fdd835')
-    expect(zentaoSeverityColor(5)).toBe('#8bc34a')
-    expect(zentaoPriorityColor(1)).toBe('#d50000')
-    expect(zentaoPriorityColor(3)).toBe('#2098ee')
-    expect(zentaoPriorityColor(0)).toBe('#c0c0c0')
-    // 同一等级两边颜色不同（禅道里就是这样：优先级 1 是深红、严重程度 1 是砖红）
-    expect(zentaoSeverityColor(1)).not.toBe(zentaoPriorityColor(1))
-  })
-
-  it.each([null, undefined, 9, -1, 1.5])('没有对应等级的 %j 回 null', (level) => {
-    expect(zentaoSeverityColor(level)).toBeNull()
-    expect(zentaoPriorityColor(level)).toBeNull()
   })
 })

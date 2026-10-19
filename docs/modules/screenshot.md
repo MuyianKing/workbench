@@ -275,7 +275,7 @@ Ctrl+滚轮调透明度。**尺寸与位置一律取整**：`pin_update` 那边�
 
 **验证**：`pnpm run typecheck` → `pnpm run lint` → `pnpm run build:renderer`（**三个 HTML 入口的
 模板都要真的编一遍**：`typecheck` 查不出标签不配平，也查不出模板里用了没 import 的组件）→
-`pnpm -r test` → `cargo test` + `cargo build`。
+`pnpm test` → `cargo test` + `cargo build`。
 
 上面这些管不到「抓屏真的抓到没有、窗口真的起来没有」—— 那几条只能在真应用里验。跑法（配方见
 [dev-notes/browser-preview-verification.md](../dev-notes/browser-preview-verification.md) 的

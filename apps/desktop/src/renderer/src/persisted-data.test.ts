@@ -210,9 +210,8 @@ describe('按落点拆一份设置补丁', () => {
       'mail',
       'styles',
       'video',
-      'zentao',
     ])
-    expect(sanitizeAppearanceSettings({ viewOrder: 'notes' }).viewOrder.length).toBe(12)
+    expect(sanitizeAppearanceSettings({ viewOrder: 'notes' }).viewOrder.length).toBe(11)
   })
 
   it('合回来的设置与拆之前一致', () => {

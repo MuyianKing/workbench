@@ -756,7 +756,7 @@ pub fn zentao_notify(
     crate::zentao::notify_new_bugs(&app, &state, &session_id, count, &title)
 }
 
-/// 账号可见产品的 id 清单（列表要按产品逐个取 Bug）。
+/// 账号可见产品的 id 清单（后台检查要按产品逐个取 Bug）。
 #[tauri::command(async)]
 pub fn zentao_products(
     state: tauri::State<'_, crate::zentao::ZentaoState>,
@@ -765,14 +765,11 @@ pub fn zentao_products(
     crate::zentao::products(&state, &session_id)
 }
 
-/// 单个产品的 id 与名称（产品名按需补取）。
+// 禅道窗口（右上角那颗图标与通知点击都走它）。创建窗口不能在同步命令里跑。
+
 #[tauri::command(async)]
-pub fn zentao_product(
-    state: tauri::State<'_, crate::zentao::ZentaoState>,
-    session_id: String,
-    product_id: u64,
-) -> Result<Value, String> {
-    crate::zentao::product(&state, &session_id, product_id)
+pub fn zentao_open_window(app: tauri::AppHandle) -> Result<(), String> {
+    crate::zentao::open_window(&app)
 }
 
 // ---------- 系统能力 ----------

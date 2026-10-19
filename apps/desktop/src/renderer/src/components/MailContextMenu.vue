@@ -159,7 +159,9 @@ onMounted(place)
 
 <style scoped>
 /*
- * 浮层卡片与笔记右键菜单同一副外壳；压在清单的字上，底色必须是实底。
+ * 浮层卡片与笔记右键菜单同一副外壳；压在清单的字上，所以底色取厚一档的玻璃（--glass-fill）——
+ * 早先这里写的是实底，理由是「半透明会让底下的字透上来」；现在底下那层被 backdrop-filter
+ * 磨开了（只剩色块，认不出字），这个理由不成立。
  * 入场 150ms 淡入下沉（动效口径：≤300ms、--ease-out；reduced-motion 由 global.css 兜底）。
  */
 .menu {
@@ -168,8 +170,9 @@ onMounted(place)
   z-index: 1200;
   min-width: 172px;
   padding: var(--sp-1);
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
+  background: var(--glass-fill);
+  backdrop-filter: var(--glass-filter);
+  border: 1px solid var(--glass-border-color);
   border-radius: var(--r-md);
   box-shadow: var(--shadow-pop);
   animation: menu-in 0.15s var(--ease-out);

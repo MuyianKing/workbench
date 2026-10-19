@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { ViewId } from '@workbench/appearance'
 import type { Component, CSSProperties } from 'vue'
-import { Brush, ChatDotRound, Collection, Document, FolderOpened, Grid, Key, List, MagicStick, Message, Notebook, VideoPlay } from '@element-plus/icons-vue'
+import { Brush, ChatDotRound, Collection, Document, FolderOpened, Grid, Key, MagicStick, Message, Notebook, VideoPlay } from '@element-plus/icons-vue'
 import { orderedViews } from '@workbench/appearance'
 /**
  * 左侧导航栏：应用的一级页面都挂在这里。
@@ -33,7 +33,6 @@ const ICONS: Record<ViewId, Component> = {
   mail: Message,
   styles: Brush,
   video: VideoPlay,
-  zentao: List,
 }
 
 const active = computed(() => store.activeView)
@@ -159,8 +158,11 @@ function select(id: ViewId): void {
   /* 左 / 下留白与卡片间距同源（顶边那一份由 .shell 按顶部样式给，见 global.css），右边靠内容列自己的内边距让开 */
   margin: 0 0 var(--card-gap, 10px) var(--card-gap, 10px);
   padding: 8px;
+  /* 底色跟「卡片不透明度」、磨砂与上沿高光取 tokens 那一套玻璃（与 .panel / 项目卡同一条规矩） */
   background: rgba(var(--bg-surface-rgb), var(--card-alpha, 1));
-  border: 1px solid var(--border);
+  backdrop-filter: var(--glass-filter);
+  /* 四周那条线归设置里的「毛玻璃描边」（默认不画） */
+  border: 1px solid var(--glass-border-color);
   border-radius: var(--r-lg);
   box-shadow: var(--shadow-card);
   user-select: none;

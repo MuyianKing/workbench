@@ -13,10 +13,11 @@
     "build:renderer": "pnpm -F @workbench/desktop build:renderer",
     "preview:renderer": "pnpm -F @workbench/desktop preview:renderer",
     "typecheck": "vue-tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
-    "lint": "eslint .",
-    "lint:fix": "eslint . --fix",
-    "test": "pnpm -r test",
-    "test:watch": "pnpm -r --parallel test:watch",
+    "lint": "eslint . --cache",
+    "lint:fix": "eslint . --fix --cache",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "verify": "node scripts/verify.mjs",
     "icons": "pnpm -F @workbench/desktop icons",
     "vendor:pi": "pnpm -F @workbench/desktop vendor:pi",
     "bump": "node scripts/bump-version.mjs",
@@ -28,6 +29,7 @@
     "@types/node": "^26.6.4",
     "eslint": "^10.12.0",
     "typescript": "^5.9.3",
+    "vitest": "^5.0.3",
     "vue-tsc": "^3.3.11"
   }
 }

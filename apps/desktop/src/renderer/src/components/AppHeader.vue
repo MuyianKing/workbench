@@ -1,25 +1,31 @@
 <script setup lang="ts">
-import { Expand, Fold, Grid, Moon, Setting, Sunny, User } from '@element-plus/icons-vue'
+import { Expand, Fold, Grid, List, Moon, Setting, Sunny, User } from '@element-plus/icons-vue'
 import { accountLabel } from '@workbench/auth'
 /**
- * 顶栏：欢迎语 + 右上三颗工具按钮。
+ * 顶栏：欢迎语 + 右上几颗工具按钮。
  *
  * 这一行的位置原来归全局搜索（输入框 + 结果面板）；搜索移除后由首页的欢迎语顶上，
  * 见 HomeGreeting。布局编辑态下整行换成操作条（LayoutEditBar）：同样是固定高度的一行，
  * 进出编辑态画布不会上下跳，而那颗「编辑布局」按钮本来就在这一行的右端。
+ *
+ * 最左边那颗是「隐藏 / 显示菜单」（折叠左侧导航栏），禅道那颗紧跟在它右边：
+ * 禅道在应用里没有页签，只有一扇独立窗口，入口就放在这一排里（见 docs/modules/zentao.md）。
  */
 import { computed, ref } from 'vue'
 import AccountDialog from '@/components/AccountDialog.vue'
 import HomeGreeting from '@/components/HomeGreeting.vue'
 import LayoutEditBar from '@/components/LayoutEditBar.vue'
 import SettingsDialog from '@/components/SettingsDialog.vue'
+import { notifyError } from '@/notify'
 import { useAuthStore } from '@/stores/auth'
 import { useNavStore } from '@/stores/nav'
 import { useSettingsStore } from '@/stores/settings'
+import { useZentaoStore } from '@/stores/zentao'
 
 const store = useNavStore()
 const settings = useSettingsStore()
 const auth = useAuthStore()
+const zentao = useZentaoStore()
 const settingsVisible = ref(false)
 const accountVisible = ref(false)
 
@@ -49,6 +55,26 @@ const navHidden = computed(() => settings.settings.navHidden)
 function toggleNav(): void {
   void settings.setNavVisible(navHidden.value)
 }
+
+/**
+ * 打开（或聚焦）禅道：那扇独立窗口在 Rust 侧建、免登录也在那边做，这里只管叫一声，
+ * 失败了给一句提示。这条路是禅道唯一的入口 —— 应用里没有禅道页签。
+ */
+const zentaoOpening = ref(false)
+async function openZentao(): Promise<void> {
+  if (zentaoOpening.value)
+    return
+  zentaoOpening.value = true
+  try {
+    const message = await zentao.open()
+    if (message)
+      notifyError(message)
+  }
+  finally {
+    // 开窗失败不该把按钮永远留在禁用态（open() 走的是 Result，不会 reject，这是兜底）
+    zentaoOpening.value = false
+  }
+}
 </script>
 
 <template>
@@ -64,6 +90,16 @@ function toggleNav(): void {
         :title="navHidden ? '显示菜单' : '隐藏菜单'"
         :aria-label="navHidden ? '显示菜单' : '隐藏菜单'"
         @click="toggleNav"
+      />
+
+      <!-- 禅道：独立窗口，见 docs/modules/zentao.md —— 与上面那颗折叠按钮同一排 -->
+      <el-button
+        class="icon-btn"
+        :icon="List"
+        title="打开禅道"
+        aria-label="打开禅道"
+        :disabled="zentaoOpening"
+        @click="openZentao"
       />
 
       <el-button

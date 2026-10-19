@@ -26,7 +26,6 @@ import VaultView from '@/components/VaultView.vue'
 import VideoPlayer from '@/components/VideoPlayer.vue'
 import VideoView from '@/components/VideoView.vue'
 import WorkView from '@/components/WorkView.vue'
-import ZentaoView from '@/components/ZentaoView.vue'
 import { useMailStore } from '@/stores/mail'
 import { useNavStore } from '@/stores/nav'
 import { useProjectsStore } from '@/stores/projects'
@@ -62,7 +61,6 @@ const VIEWS: Record<ViewId, Component> = {
   mail: MailView,
   styles: StylesView,
   video: VideoView,
-  zentao: ZentaoView,
 }
 
 const currentView = computed(() => VIEWS[nav.activeView])

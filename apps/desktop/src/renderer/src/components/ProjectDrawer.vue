@@ -878,7 +878,9 @@ async function removeProject(): Promise<void> {
   display: flex;
   flex-direction: column;
   height: 100%;
-  background: var(--bg-surface);
+  /* 底色不在这里画：整只抽屉（.el-drawer）就是那张毛玻璃面，见 global.css 的「浮层的玻璃」——
+     这里再铺一层实底就把那层磨砂整个盖住了 */
+  background: transparent;
 }
 
 /* ---------- 头部 ---------- */

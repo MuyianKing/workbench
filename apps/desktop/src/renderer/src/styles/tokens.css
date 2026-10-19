@@ -20,6 +20,10 @@
      这里给的是**没配主题色**时的那一档中性灰；配了主题色就由 accent-color.ts 按主色混出
      同一档浓度的浅底，经 bootstrap.ts 写到 <html> 的内联样式上，本行不再生效。 */
   --bg-selected: #dde1e7;
+  /* 选中块里那几行主题色文字（邮箱清单里正在读的那封：主题与发件人）：没配主题色时就是
+     平常那种字色；配了主题色由 accent-color.ts 推一档在选中底色上读得清的主题色
+     （见 accentTextInk）—— 主色直接当字色多半读不清（亮绿那类在它自己的浅底上才 2.1:1）。 */
+  --ink-accent: var(--ink);
   --border: #e1e4e9;
   --border-strong: #c9cfd8;
 
@@ -33,8 +37,34 @@
   /* 背景图蒙版：底色 = --bg-canvas（#edeff2）；alpha 由 App.vue 按浓淡实时覆盖 */
   --ws-veil-rgb: 237, 239, 242;
   --ws-veil-alpha: 0.6;
-  /* 「整条毛玻璃」那条玻璃带上沿的高光：亮色下是玻璃的厚度感，暗色下只能给一点点 */
-  --glass-edge: rgba(255, 255, 255, 0.55);
+
+  /* ---------- 毛玻璃 ----------
+   * 应用里所有「浮在壁纸上的面」（面板、项目卡、导航栏、下拉、弹窗、右键菜单）共用这一套玻璃，
+   * **配方只在这里定义**，各部件别再各写一份：
+   *
+   *   磨砂 --glass-filter  模糊 + 提饱和。模糊把壁纸的图案抹开、只剩下色块，所以压在玻璃上的字照旧
+   *                        读得清（这也是它能用在「压着正文」的浮层上的原因）；提饱和是苹果那套
+   *                        vibrancy —— 不提的话隔着玻璃的颜色会发灰。
+   *                        32px 是照着一张手机桌面的毛玻璃参考定的（那两个参数见 card-opacity.ts
+   *                        的 DEFAULT）：模糊量要够大，背后的图案才真的化开成色块；偏小就还是
+   *                        「隔着毛纱看画」。代价是每张玻璃面各占一层合成，卡多了更吃 GPU。
+   *   底色 卡片 / 面板取 --card-alpha（设置里的「卡片不透明度」，见 App.vue 与 card-opacity.ts）；
+   *        要读成句文字的浮层取 --glass-fill，比卡片厚一档、写死不由用户调（调到 20% 会读不清）。
+   *
+   * 玻璃**没有**上沿那条高光（`--glass-edge` + `--glass-face` 那一对已经删掉）：它在每块面上
+   * 拉出一道 1px 的白线（暗色下也看得见），用户明确不要。现在一块玻璃的边界只剩两样 ——
+   * 底色与壁纸交界处那条线、以及它自己的投影（--shadow-card / --shadow-hover，各部件直接用）。
+   *
+   * 顶栏那条通栏玻璃带（global.css 的 .top-glass）也吃这一枚，只多一层 brightness(1.02)
+   * （它的底色是渐变的，亮一点才像玻璃的厚度）—— **全站只有这一份磨砂配方**。
+   */
+  --glass-filter: blur(32px) saturate(1.7);
+  --glass-fill: rgba(255, 255, 255, 0.78);
+  /* 玻璃四周那条 1px 的线（设置里的「毛玻璃描边」，默认不画）。
+     这里给的是「画」的那一档取值；关掉时由 bootstrap.ts 在 <html> 上把两个变量写成 transparent
+     —— **不是把 border 去掉**，保持外廓尺寸不变，开关一下不会让定高的卡片挪 1px。 */
+  --glass-border-color: var(--border);
+  --glass-border-color-hover: var(--border-strong);
 
   /* ---------- 文本 ---------- */
   /*
@@ -164,7 +194,9 @@
   --el-border-color-lighter: #eef0f3;
 
   --el-fill-color-blank: #ffffff;
-  --el-bg-color-overlay: #ffffff;
+  /* 下拉 / 选择器 / 日期 / popover 的面：EP 的 `.el-popper` 与它的箭头都取这一枚，
+     换成玻璃的底色后它们跟着一起透（磨砂那一道在 global.css 里补） */
+  --el-bg-color-overlay: var(--glass-fill);
 
   --el-font-family: var(--font-ui);
   --el-font-size-base: 13px;
@@ -192,8 +224,8 @@
 
   /* 背景图蒙版：底色 = 暗色的 --bg-canvas（#151a21） */
   --ws-veil-rgb: 21, 26, 33;
-  /* 暗色下玻璃高光只能给一点点，给多了会在深底上拉出一条白线 */
-  --glass-edge: rgba(255, 255, 255, 0.09);
+  /* 暗色的浮层玻璃：同一个厚度，底色换成暗色的面底色（--bg-surface） */
+  --glass-fill: rgba(27, 33, 42, 0.78);
 
   --ink: #e8edf4;
   --ink-2: #b3bdc9;
@@ -249,7 +281,8 @@
   --el-fill-color-light: #20262f;
   --el-fill-color: #20262f;
   --el-bg-color: #1b212a;
-  --el-bg-color-overlay: #1f2631;
+  /* 同上（见亮色那一份的说明）：浮层的面走毛玻璃 */
+  --el-bg-color-overlay: var(--glass-fill);
   --el-bg-color-page: #151a21;
   --el-mask-color: rgba(10, 13, 18, 0.72);
 }

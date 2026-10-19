@@ -34,22 +34,6 @@ export interface ZentaoBugList {
 /** 列表筛选口径：指派给我的 / 未解决（=active）/ 未关闭（含已解决） */
 export type ZentaoBrowse = 'assigntome' | 'unresolved' | 'unclosed'
 
-export const ZENTAO_BROWSE_OPTIONS: ReadonlyArray<{ value: ZentaoBrowse, label: string }> = [
-  { value: 'assigntome', label: '指派给我的' },
-  { value: 'unresolved', label: '未解决' },
-  { value: 'unclosed', label: '未关闭' },
-]
-
-/** 状态的固定文案；未识别的给「未知状态」，不把接口字段当对象键或 HTML。 */
-export function zentaoStatusLabel(status: string): string {
-  switch (status) {
-    case 'active': return '激活'
-    case 'resolved': return '已解决'
-    case 'closed': return '已关闭'
-    default: return '未知状态'
-  }
-}
-
 export interface ZentaoBugDiff {
   ids: number[]
   added: ZentaoBug[]
@@ -87,27 +71,6 @@ export function diffZentaoBugs(previous: readonly number[] | null, bugs: readonl
       added.push(bug)
   }
   return { ids: [...currentIds], added }
-}
-
-/** 只生成 HTTP(S) 的站内 Bug 链接；清除基址查询与片段，不允许 URL 内嵌凭据。 */
-export function zentaoBugUrl(baseUrl: string, id: number): string {
-  if (!Number.isSafeInteger(id) || id <= 0)
-    throw new Error('禅道 Bug ID 必须为正整数')
-
-  let url: URL
-  try {
-    url = new URL(baseUrl)
-  }
-  catch {
-    throw new Error('禅道地址无效')
-  }
-  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password)
-    throw new Error('禅道地址只允许不含凭据的 HTTP(S) URL')
-
-  url.search = ''
-  url.hash = ''
-  url.pathname = `${url.pathname.replace(/\/+$/, '')}/bug-view-${id}.html`
-  return url.href
 }
 
 function recordOf(value: unknown): Record<string, unknown> {
@@ -277,39 +240,4 @@ function userText(value: unknown): string {
     }
   }
   return ''
-}
-
-/**
- * 严重程度 / 优先级的色阶：取自禅道 22.2 `config->bug->colorList`（同一固定标签），
- * 与禅道页面上那套一致 —— 界面上要按等级分色，口径只在这一个文件里定义。
- * 只服务这两列的状态着色，不许扩散到别处（见 AGENTS.md 第 4 节那条例外）。
- */
-const SEVERITY_COLORS: Record<number, string> = {
-  1: '#c62828',
-  2: '#ff8f00',
-  3: '#fdd835',
-  4: '#cddc39',
-  5: '#8bc34a',
-  6: '#b6b4b4',
-  7: '#bdbebd',
-}
-
-const PRIORITY_COLORS: Record<number, string> = {
-  0: '#c0c0c0',
-  1: '#d50000',
-  2: '#ff9800',
-  3: '#2098ee',
-  4: '#009688',
-  5: '#919090',
-  6: '#b6b4b4',
-  7: '#bdbebd',
-}
-
-/** 等级 → 颜色；没有等级（null / 未登记）回 null，界面退回纯文本。 */
-export function zentaoSeverityColor(level: number | null | undefined): string | null {
-  return typeof level === 'number' ? SEVERITY_COLORS[level] ?? null : null
-}
-
-export function zentaoPriorityColor(level: number | null | undefined): string | null {
-  return typeof level === 'number' ? PRIORITY_COLORS[level] ?? null : null
 }

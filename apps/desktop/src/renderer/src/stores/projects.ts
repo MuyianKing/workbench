@@ -2,7 +2,7 @@ import type { ProjectSort } from '@workbench/core'
 import type { ProcessTarget } from './terminal'
 
 import type { ActivityBreakdown, ActivityCounts, ActivityView, AddProjectInput, PackageManager, Project, ProjectGroup, ProjectPatch } from '@/types'
-import { backfillProjectColors as backfillColors, reorderById, sanitizeProjectSort } from '@workbench/core'
+import { backfillProjectColors as backfillColors, devServerUrl, reorderById, sanitizeProjectSort } from '@workbench/core'
 
 import { defineStore } from 'pinia'
 /**
@@ -622,6 +622,22 @@ export const useProjectsStore = defineStore('projects', () => {
       notifyError(result.error ?? '打开 VS Code 失败')
   }
 
+  /**
+   * 把开发服务交给系统默认浏览器打开（用户点卡片上那颗分享图标才走这里，
+   * 不会因为「项目跑起来了」自己弹窗 —— 见 docs/modules/projects.md）。
+   *
+   * 端口与卡片上显示的那个同源：先取运行态里认出来的实际端口，没有才退回配置里手填的。
+   * 两者都没有时什么也不做 —— 入口本来就不该画出来。
+   */
+  async function openInBrowser(id: string): Promise<void> {
+    const port = terminal.runtimeOf(id).port ?? findProject(id)?.port
+    if (!port)
+      return
+    const result = await window.workbench.openExternal(devServerUrl(port))
+    if (!result.ok)
+      notifyError(result.error ?? '打开浏览器失败')
+  }
+
   // ---------- 路径有效性 ----------
 
   /** 未检查过的项目按有效处理，避免首帧误禁用 */
@@ -802,6 +818,7 @@ export const useProjectsStore = defineStore('projects', () => {
     runCustom,
     reveal,
     openInVSCode,
+    openInBrowser,
     isPathValid,
     refreshPaths,
     relocate,

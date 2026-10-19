@@ -16,7 +16,7 @@ import { defineStore } from 'pinia'
  * 只需 `useSettingsStore()`，不必把项目数据一起拖进来。
  */
 import { computed, ref, watch } from 'vue'
-import { bootstrapSnapshot, writeAccentColor, writeTheme } from '@/bootstrap'
+import { bootstrapSnapshot, writeAccentColor, writeGlassBorder, writeTheme } from '@/bootstrap'
 import { notifyError, notifySuccess, notifyWarning } from '@/notify'
 import { applyThemeWithTransition } from '@/theme-transition'
 import { DEFAULT_SETTINGS, TOP_BAR_STYLES } from '@/types'
@@ -404,6 +404,25 @@ export const useSettingsStore = defineStore('settings', () => {
       return
 
     await updateSettings({ cardOpacity: next })
+  }
+
+  /**
+   * 毛玻璃四周那条 1px 的描边（卡片 / 面板 / 下拉 / 弹窗都吃它，默认不画）。
+   *
+   * 与主题色同一套做法：落地只是往 `<html>` 上写两个变量的值（写法见 bootstrap.ts），
+   * 这里只要在设置变了之后调一次 —— 首次加载、别的窗口改完推回来的整份设置都经这条 watch。
+   */
+  function applyGlassBorder(): void {
+    writeGlassBorder(settings.value.glassBorder)
+  }
+
+  watch(() => settings.value.glassBorder, applyGlassBorder, { immediate: true })
+
+  async function setGlassBorder(enabled: boolean): Promise<void> {
+    if (settings.value.glassBorder === enabled)
+      return
+
+    await updateSettings({ glassBorder: enabled })
   }
 
   // ---------- 首页布局 ----------
@@ -824,6 +843,7 @@ export const useSettingsStore = defineStore('settings', () => {
     clearBackground,
     cardOpacity,
     setCardOpacity,
+    setGlassBorder,
     // 布局
     themeConfig,
     cardGap,

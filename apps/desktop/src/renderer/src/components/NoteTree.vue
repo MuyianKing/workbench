@@ -603,8 +603,8 @@ onBeforeUnmount(() => window.removeEventListener('dragend', onDragEnd))
 /* ---------- 空白区的右键菜单 ---------- */
 
 /**
- * 与正文那份右键菜单（NoteContextMenu）同一副外壳：面底色而不是毛玻璃 ——
- * 它压在树的字上，透出底下的字就没法看了。
+ * 与正文那份右键菜单（NoteContextMenu）同一副外壳：厚一档的玻璃（--glass-fill）——
+ * 它压在树的字上，所以底下那层必须被磨开（backdrop-filter 之后只剩色块、认不出字）。
  */
 .root-menu {
   position: fixed;
@@ -615,8 +615,9 @@ onBeforeUnmount(() => window.removeEventListener('dragend', onDragEnd))
   gap: 2px;
   min-width: 150px;
   padding: var(--sp-1);
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
+  background: var(--glass-fill);
+  backdrop-filter: var(--glass-filter);
+  border: 1px solid var(--glass-border-color);
   border-radius: var(--r-md);
   box-shadow: var(--shadow-pop);
 }

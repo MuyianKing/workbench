@@ -42,6 +42,12 @@ describe('收敛一份外观', () => {
     expect(sanitizeThemeSource('DARK')).toBe(DEFAULT_APPEARANCE.theme)
   })
 
+  it('毛玻璃描边只在明确写了 true 时才画（缺这项的老主题文件就是不画）', () => {
+    expect(sanitizeAppearanceSettings({}).glassBorder).toBe(false)
+    expect(sanitizeAppearanceSettings({ glassBorder: 'yes' }).glassBorder).toBe(false)
+    expect(sanitizeAppearanceSettings({ glassBorder: true }).glassBorder).toBe(true)
+  })
+
   it('整份认不出来时就是默认外观', () => {
     expect(sanitizeAppearanceSettings(null)).toEqual(DEFAULT_APPEARANCE)
     expect(sanitizeAppearanceSettings('外观')).toEqual(DEFAULT_APPEARANCE)

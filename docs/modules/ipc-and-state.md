@@ -67,7 +67,7 @@
 - 数据结构变更要同步落盘的 sanitize（[persisted-data.ts](../../apps/desktop/src/renderer/src/persisted-data.ts) 的 `sanitizeSettings` / `parseData`），
   老数据文件缺字段须有默认值，不留未收敛的 `undefined`。
 - **设置项先分清是「外观」还是「行为习惯」，落点完全不同**：
-  - **外观**（明暗、主题色、顶部样式、卡片不透明度、终端高度、程序名、背景、导航菜单、首页布局、笔记树宽度）住
+  - **外观**（明暗、主题色、顶部样式、卡片不透明度、毛玻璃描边、终端高度、程序名、背景、导航菜单、首页布局、笔记树宽度）住
     `theme.json`，判据是它在 [appearance.ts](../../packages/appearance/src/appearance.ts) 的 `APPEARANCE_SETTING_KEYS` 里
     —— **进这张白名单就等于「会被整份同步到另一台机器」**，所以只放「这台机器该长成什么样」的项；
     **没有例外**：技能库在哪儿不是「界面长什么样」，它是**本机的一个目录**
