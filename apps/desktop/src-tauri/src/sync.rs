@@ -8,20 +8,23 @@
 //! 没登录、或登出之后，就退回系统凭据 —— 两条路都要留着：token 过期又续不上时如果只剩它一条路，
 //! 原本能用的同步也会跟着坏掉（所以那种凭据干脆不注入，见 `set_git_auth`）。
 //!
-//! **仓库布局（两个目录，各管一件事）**：
+//! **仓库布局（三个路径，各管一件事）**：
 //!   `token-usage/<设备id>.json` —— 这台机器的用量快照（只增不减的计数）
+//!   `gateway-usage/<设备id>/<YYYY-MM>.jsonl` —— 这台机器的网关请求流水（每月一个文件）
 //!   `config/<设备id>.json`      —— 这台机器 theme.json 的整份副本（外观 + 首页布局）
-//! 一台机器在每个目录里各占一个文件，每个文件只有一个写者，所以两个目录都不存在
-//! 需要人工合并的冲突，流程一律是 pull → 写自己的那份 → commit → push。
-//! 别人的文件我们从不修改，只在读取时汇总（用量求和，见 `packages/usage/src/token-usage.ts`；
-//! 配置则整份采用 —— 什么时候采用由用户在设置里点，见 `packages/usage/src/sync-config.ts`）。
+//! 前两者是「用量」出口，后者是「外观」出口。每台机器只写自己那条路径，单写者，
+//! 所以不存在需要人工合并的冲突，流程一律是 pull → 写自己的那份 → commit → push。
+//! 别人的文件我们从不修改，只在读取时汇总（token 用量求和，见 `packages/usage/src/token-usage.ts`；
+//! 网关流水由 `wb_usage::summarize` 合并；配置则整份采用 —— 什么时候采用由用户在设置里点，
+//! 见 `packages/usage/src/sync-config.ts`）。
 //!
-//! 这一层仍然只做「调系统能力 + 读写文件」：两份文件的内容与合并语义都在 TS 侧。
-//! 它对那两个 payload 的唯一要求是「能原样变成一个 JSON 文件」—— 结构与收敛规则不在这里。
+//! 这一层只做「调系统能力 + 读写文件」：token 用量的内容与合并语义在 TS 侧，网关流水的聚合在
+//! `wb_usage::summarize`；它只负责按月落盘与读取。
 
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use walkdir::WalkDir;
@@ -208,6 +211,198 @@ fn write_json(file: &Path, value: &Value) -> Result<(), String> {
     }
     let text = serde_json::to_string_pretty(value).map_err(|err| format!("序列化失败: {err}"))?;
     fs_util::write_atomic(file, text.as_bytes())
+}
+
+// ---------- 网关请求流水 ----------
+
+/// 本机网关流水 → `gateway-usage/<设备id>/<YYYY-MM>.jsonl`。
+///
+/// **只写自己的目录**：`gateway-usage/` 下每个设备一个子目录，每台机器只 stage 自己那一条路径，
+/// 所以多机同步永远不会撞同一个文件。月份按 UTC+8（与网关用量页的分桶时区一致）。
+///
+/// `git add --ignore-removal`：本机文件被清空 / 月份被删时，**不删仓库里的旧月份** ——
+/// 同步是备份，不能因为本机丢了一次文件就把别的机器还能读到的历史一起抹掉。
+pub fn publish_gateway_usage(
+    repo: &str,
+    device: &str,
+    rows: &[crate::wb_usage::UsageRow],
+) -> Result<Value, String> {
+    publish_gateway_at(&paths::token_sync_dir(), repo, device, rows)
+}
+
+fn publish_gateway_at(
+    clone_dir: &Path,
+    repo: &str,
+    device: &str,
+    rows: &[crate::wb_usage::UsageRow],
+) -> Result<Value, String> {
+    set_git_auth();
+    let (dir, branch) = ensure_clone(clone_dir, repo)?;
+    let safe = safe_name(device);
+    let relative = format!("{}/{safe}", paths::GATEWAY_USAGE_DIR);
+    let target = dir.join(&relative);
+
+    let mut by_month: BTreeMap<String, Vec<&crate::wb_usage::UsageRow>> = BTreeMap::new();
+    for row in rows {
+        let month: String = crate::wb_api_billing::format_wall_clock(row.ts)
+            .chars()
+            .take(7)
+            .collect();
+        by_month.entry(month).or_default().push(row);
+    }
+    let month_count = by_month.len();
+    if !by_month.is_empty() {
+        std::fs::create_dir_all(&target).map_err(|err| format!("创建网关流水目录失败: {err}"))?;
+    }
+    for (month, mut list) in by_month {
+        list.sort_by_key(|row| row.ts);
+        let mut text = String::new();
+        for row in list {
+            text.push_str(
+                &serde_json::to_string(row)
+                    .map_err(|err| format!("序列化网关流水失败: {err}"))?,
+            );
+            text.push('\n');
+        }
+        fs_util::write_atomic(&target.join(format!("{month}.jsonl")), text.as_bytes())?;
+    }
+
+    let mut log: Vec<String> = Vec::new();
+    if month_count == 0 && !target.is_dir() {
+        // 本机一条流水都没有（或第一次同步）：没有可 stage 的路径，`git add` 会报
+        // "paths did not match"。仍然推一次 —— 上一轮可能提交成功而推送失败。
+        push_with_retry(&dir, &branch, &mut log)?;
+        return Ok(json!({
+            "changed": false,
+            "pushed": true,
+            "rows": 0,
+            "months": 0,
+            "log": log.join("\n"),
+        }));
+    }
+    // --ignore-removal：只加 / 改，不因为本机少了某个月就删仓库里的历史
+    run_git(
+        &["add", "--ignore-removal", "--", relative.as_str()],
+        Some(&dir),
+        GIT_TIMEOUT,
+    )?;
+    let staged = ["diff", "--cached", "--quiet", "--", relative.as_str()];
+    let changed = !run_git_quiet(&staged, &dir);
+    if changed {
+        let message = format!("gateway:{safe}");
+        log.push(run_git(
+            &["commit", "-m", message.as_str()],
+            Some(&dir),
+            GIT_TIMEOUT,
+        )?);
+    }
+    push_with_retry(&dir, &branch, &mut log)?;
+    Ok(json!({
+        "changed": changed,
+        "pushed": true,
+        "rows": rows.len(),
+        "months": month_count,
+        "log": log.join("\n"),
+    }))
+}
+
+/// 从同步克隆读**别的机器**的网关流水（不联网、不改克隆）。
+///
+/// `own_device` 的目录跳过：本机以 `usage.jsonl` 为准，再读一遍会双计。
+/// `since_days > 0` 时只读窗口内的月份文件；月份键是 UTC+8（与网关分桶一致）。
+pub fn read_gateway_rows(
+    repo: &str,
+    own_device: &str,
+    since_days: i64,
+) -> Result<Vec<crate::wb_usage::UsageRow>, String> {
+    read_gateway_rows_for(&paths::token_sync_dir(), repo, own_device, since_days)
+}
+
+fn read_gateway_rows_for(
+    clone_dir: &Path,
+    repo: &str,
+    own_device: &str,
+    since_days: i64,
+) -> Result<Vec<crate::wb_usage::UsageRow>, String> {
+    clear_git_auth();
+    if !clone_dir.join(".git").is_dir() || !clone_matches(clone_dir, repo) {
+        return Ok(Vec::new());
+    }
+    let root = clone_dir.join(paths::GATEWAY_USAGE_DIR);
+    let Ok(devices) = std::fs::read_dir(&root) else {
+        return Ok(Vec::new());
+    };
+    let own = safe_name(own_device);
+    let cutoff_ts = if since_days > 0 {
+        Some(now_secs() - since_days.max(1) * 86400)
+    } else {
+        None
+    };
+    let cutoff_month = cutoff_ts.map(|ts| {
+        crate::wb_api_billing::format_wall_clock(ts)
+            .chars()
+            .take(7)
+            .collect::<String>()
+    });
+
+    let mut rows: Vec<crate::wb_usage::UsageRow> = Vec::new();
+    for device in devices.flatten() {
+        let device_path = device.path();
+        if !device_path.is_dir() {
+            continue;
+        }
+        let device_id = device.file_name().to_string_lossy().to_string();
+        if device_id == own {
+            continue;
+        }
+        let Ok(files) = std::fs::read_dir(&device_path) else {
+            continue;
+        };
+        for file in files.flatten() {
+            let path = file.path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("jsonl") {
+                continue;
+            }
+            let month: String = path
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .unwrap_or("")
+                .chars()
+                .take(7)
+                .collect();
+            if let Some(cutoff) = cutoff_month.as_deref() {
+                if !month.is_empty() && month.as_str() < cutoff {
+                    continue;
+                }
+            }
+            let Ok(text) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            for line in text.lines().filter(|line| !line.trim().is_empty()) {
+                let Ok(mut row) = serde_json::from_str::<crate::wb_usage::UsageRow>(line) else {
+                    continue;
+                };
+                if let Some(cutoff) = cutoff_ts {
+                    if row.ts < cutoff {
+                        continue;
+                    }
+                }
+                if row.machine.trim().is_empty() {
+                    row.machine = device_id.clone();
+                }
+                rows.push(row);
+            }
+        }
+    }
+    rows.sort_by_key(|row| row.ts);
+    Ok(rows)
+}
+
+fn now_secs() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs() as i64)
+        .unwrap_or(0)
 }
 
 /// 仓库里两个目录的内容（原始 JSON，收敛与合并由渲染层负责）
@@ -1354,6 +1549,102 @@ mod tests {
             .find(|item| item.get("device").and_then(Value::as_str) == Some("dev-a"))
             .unwrap();
         assert_eq!(usage_a["updatedAt"], json!(1), "用量分片保持原样");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// 网关流水：一台机器一个目录、每月一个文件；读的时候跳过本机目录。
+    #[test]
+    fn 网关流水按月分文件且只读别的机器() {
+        if proc::probe_version("git").is_none() {
+            eprintln!("跳过：本机没有 git");
+            return;
+        }
+
+        let root = std::env::temp_dir().join(format!("wb-gateway-sync-{}", uuid::Uuid::new_v4()));
+        let remote = root.join("remote.git");
+        let clone_a = root.join("clone-a");
+        let clone_b = root.join("clone-b");
+        std::fs::create_dir_all(&root).unwrap();
+        let init = proc::run_direct(
+            "git",
+            &[
+                "init".to_string(),
+                "--bare".to_string(),
+                remote.to_string_lossy().into_owned(),
+            ],
+            GIT_TIMEOUT,
+            None,
+            &GIT_ENVS,
+        )
+        .unwrap();
+        assert!(init.ok(), "git init --bare 失败: {}", init.stderr);
+        let repo = remote.to_string_lossy().into_owned();
+
+        let row = |machine: &str, ts: i64| crate::wb_usage::UsageRow {
+            ts,
+            uid: "u-1".into(),
+            realm: "cn".into(),
+            machine: machine.into(),
+            model: "m".into(),
+            prompt_tokens: 10,
+            completion_tokens: 2,
+            total_tokens: 12,
+            cached_tokens: 0,
+            ttft_ms: 1,
+            duration_ms: 2,
+            ok: true,
+            error: String::new(),
+            ua: "ua".into(),
+            effort: String::new(),
+            stream: Some(true),
+            reasoning_tokens: 0,
+            credit: Some(0.5),
+            api_key: String::new(),
+            cost_cny: None,
+        };
+        let month = |ts: i64| -> String {
+            crate::wb_api_billing::format_wall_clock(ts)
+                .chars()
+                .take(7)
+                .collect()
+        };
+        let first_ts = 0;
+        let second_ts = 1_770_000_000;
+        assert_ne!(month(first_ts), month(second_ts));
+
+        let rows_a = vec![row("A", first_ts), row("A", second_ts)];
+        let first = publish_gateway_at(&clone_a, &repo, "dev-a", &rows_a).unwrap();
+        assert_eq!(first["changed"], json!(true));
+        assert_eq!(first["months"], json!(2));
+
+        let rows_b = vec![row("B", first_ts)];
+        let second = publish_gateway_at(&clone_b, &repo, "dev-b", &rows_b).unwrap();
+        assert_eq!(second["changed"], json!(true));
+
+        // 本机是 dev-b：只能读到 dev-a 的两条，不能把自己的再读一遍
+        let read = read_gateway_rows_for(&clone_b, &repo, "dev-b", 0).unwrap();
+        assert_eq!(read.len(), 2);
+        assert!(read.iter().all(|item| item.machine == "A"));
+        assert!(read.iter().all(|item| item.credit == Some(0.5)));
+
+        // 两个月份各一个文件，内容就是两行 JSONL
+        let dir_a = clone_a.join(paths::GATEWAY_USAGE_DIR).join("dev-a");
+        for ts in [first_ts, second_ts] {
+            let file = dir_a.join(format!("{}.jsonl", month(ts)));
+            assert!(file.is_file(), "缺月份文件: {}", file.display());
+            let text = std::fs::read_to_string(&file).unwrap();
+            assert_eq!(text.lines().count(), 1);
+        }
+
+        // 内容没变就不该再提交
+        let again = publish_gateway_at(&clone_a, &repo, "dev-a", &rows_a).unwrap();
+        assert_eq!(again["changed"], json!(false));
+
+        // 本机一条流水都没有时，不能因为 `git add` 找不到路径而失败
+        let empty = publish_gateway_at(&clone_a, &repo, "dev-c", &[]).unwrap();
+        assert_eq!(empty["changed"], json!(false));
+        assert_eq!(empty["rows"], json!(0));
 
         let _ = std::fs::remove_dir_all(&root);
     }

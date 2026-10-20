@@ -41,9 +41,14 @@ pub fn write_png(png: &[u8]) -> Result<(), String> {
     let image = image::load_from_memory(png)
         .map_err(|err| format!("剪贴板：这张图解不开（{err}）"))?
         .to_rgba8();
+    write_rgba(&image, png)
+}
 
-    let dib_v5 = build_dib_v5(&image);
-    let dib = build_dib(&image);
+/// 把已经解好的像素写进剪贴板。`png` 是这块图对应的 PNG 字节 —— 剪贴板里的 `PNG` 格式
+/// 直接用它，不重编一遍（DIB 那两个格式才需要像素）。
+pub fn write_rgba(image: &image::RgbaImage, png: &[u8]) -> Result<(), String> {
+    // **像素只转一遍**：两份 DIB 的像素段完全一样，共用这一份自底向上的 BGRA 缓冲
+    let (dib_v5, dib) = build_dibs(image);
 
     with_clipboard(|| {
         // 顺序有意义：先放最精确的，后面的格式不会覆盖前面的（格式号不同）
@@ -129,27 +134,33 @@ fn push_u16(out: &mut Vec<u8>, value: u16) {
     out.extend_from_slice(&value.to_le_bytes());
 }
 
-/// 像素：自底向上按行写 BGRA
-fn push_pixels_bottom_up(out: &mut Vec<u8>, image: &image::RgbaImage) {
+/// 像素：自底向上按行写 BGRA。
+///
+/// **一趟转完、两份 DIB 共用这一份缓冲**：从前 `CF_DIBV5` / `CF_DIB` 各走一遍逐像素循环，
+/// 同一张图要写两遍（4K 下是两趟 33MB）。这里换成「先写进一块预分配的缓冲、两份 DIB
+/// 各自 `extend_from_slice` 拷过去」—— 换色与翻行只做一次，剩下的是内存带宽。
+fn bgra_bottom_up(image: &image::RgbaImage) -> Vec<u8> {
     let (width, height) = image.dimensions();
     let stride = (width as usize) * 4;
     let data = image.as_raw();
+    let mut out = vec![0u8; stride * height as usize];
 
-    for row in (0..height as usize).rev() {
-        let start = row * stride;
-        for pixel in data[start..start + stride].chunks_exact(4) {
-            out.push(pixel[2]); // B
-            out.push(pixel[1]); // G
-            out.push(pixel[0]); // R
-            out.push(pixel[3]); // A
+    for row in 0..height as usize {
+        let source = &data[(height as usize - 1 - row) * stride..][..stride];
+        let target = &mut out[row * stride..][..stride];
+        for (src, dst) in source.chunks_exact(4).zip(target.chunks_exact_mut(4)) {
+            dst[0] = src[2]; // B
+            dst[1] = src[1]; // G
+            dst[2] = src[0]; // R
+            dst[3] = src[3]; // A
         }
     }
+    out
 }
 
 /// `BITMAPV5HEADER` + 32 位 BGRA（带 alpha、`BI_BITFIELDS`、sRGB）
-pub fn build_dib_v5(image: &image::RgbaImage) -> Vec<u8> {
-    let (width, height) = image.dimensions();
-    let mut out = Vec::with_capacity((DIBV5_HEADER + width * height * 4) as usize);
+fn build_dib_v5(pixels: &[u8], width: u32, height: u32) -> Vec<u8> {
+    let mut out = Vec::with_capacity(DIBV5_HEADER as usize + pixels.len());
 
     push_u32(&mut out, DIBV5_HEADER);
     push_i32(&mut out, width as i32);
@@ -176,14 +187,13 @@ pub fn build_dib_v5(image: &image::RgbaImage) -> Vec<u8> {
     push_u32(&mut out, 0); // 色彩配置文件长度
     push_u32(&mut out, 0); // 保留
 
-    push_pixels_bottom_up(&mut out, image);
+    out.extend_from_slice(pixels);
     out
 }
 
 /// `BITMAPINFOHEADER` + 32 位 BGRA（`BI_RGB`，alpha 被忽略）—— 最保守的那一档
-pub fn build_dib(image: &image::RgbaImage) -> Vec<u8> {
-    let (width, height) = image.dimensions();
-    let mut out = Vec::with_capacity((DIB_HEADER + width * height * 4) as usize);
+fn build_dib(pixels: &[u8], width: u32, height: u32) -> Vec<u8> {
+    let mut out = Vec::with_capacity(DIB_HEADER as usize + pixels.len());
 
     push_u32(&mut out, DIB_HEADER);
     push_i32(&mut out, width as i32);
@@ -197,8 +207,17 @@ pub fn build_dib(image: &image::RgbaImage) -> Vec<u8> {
     push_u32(&mut out, 0);
     push_u32(&mut out, 0);
 
-    push_pixels_bottom_up(&mut out, image);
+    out.extend_from_slice(pixels);
     out
+}
+
+fn build_dibs(image: &image::RgbaImage) -> (Vec<u8>, Vec<u8>) {
+    let (width, height) = image.dimensions();
+    let pixels = bgra_bottom_up(image);
+    (
+        build_dib_v5(&pixels, width, height),
+        build_dib(&pixels, width, height),
+    )
 }
 
 #[cfg(test)]
@@ -225,7 +244,7 @@ mod tests {
 
     #[test]
     fn dibv5_头长与关键字段() {
-        let bytes = build_dib_v5(&fixture());
+        let (bytes, _) = build_dibs(&fixture());
         assert_eq!(bytes.len(), (DIBV5_HEADER + 16) as usize);
         assert_eq!(read_u32(&bytes, 0), 124);
         assert_eq!(read_i32(&bytes, 4), 2);
@@ -240,7 +259,7 @@ mod tests {
 
     #[test]
     fn dib_头长与关键字段() {
-        let bytes = build_dib(&fixture());
+        let (_, bytes) = build_dibs(&fixture());
         assert_eq!(bytes.len(), (DIB_HEADER + 16) as usize);
         assert_eq!(read_u32(&bytes, 0), 40);
         assert_eq!(read_u32(&bytes, 16), 0); // BI_RGB
@@ -251,7 +270,7 @@ mod tests {
     #[test]
     fn 像素是自底向上的_bgra() {
         // 先写的是最后一行（左下角那个像素）：7,8,9 → B=9 G=8 R=7 A=255
-        let v5 = build_dib_v5(&fixture());
+        let (v5, _) = build_dibs(&fixture());
         assert_eq!(&v5[124..128], &[9, 8, 7, 255]);
         // 再是右下角：10,11,12
         assert_eq!(&v5[128..132], &[12, 11, 10, 255]);
@@ -262,9 +281,7 @@ mod tests {
 
     #[test]
     fn 两种dib的像素段完全一致() {
-        let image = fixture();
-        let v5 = build_dib_v5(&image);
-        let dib = build_dib(&image);
+        let (v5, dib) = build_dibs(&fixture());
         assert_eq!(&v5[124..], &dib[40..]);
     }
 }

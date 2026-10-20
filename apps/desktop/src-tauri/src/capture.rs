@@ -620,7 +620,7 @@ fn overlay_index(label: &str) -> Option<usize> {
 /// 要按行试遍五种滤波再挑最省的，实测一张 1080p 要 1.4 秒（release 也有 166ms）——
 /// 而按热键的整个预算才 200ms，它是这条路上最大的一笔。换成 `Sub` + `Fast`：同屏 34ms，
 /// 体积只多一成多（1.9MB → 2.2MB），快五倍。
-fn encode_png(image: &image::RgbaImage, out: &mut Vec<u8>) -> Result<(), String> {
+pub(crate) fn encode_png(image: &image::RgbaImage, out: &mut Vec<u8>) -> Result<(), String> {
     use image::codecs::png::{CompressionType, FilterType, PngEncoder};
     use image::ImageEncoder;
 
@@ -663,14 +663,18 @@ pub fn capture_context(window: WebviewWindow, app: AppHandle) -> Result<CaptureC
     })
 }
 
-/// 这个遮罩窗口自己那块屏的那一帧（base64 的 PNG）。
+/// 这个遮罩窗口自己那块屏的那一帧（**原始 PNG 字节，走二进制 IPC**）。
 ///
-/// **为什么是 base64 而不是 asset 协议**：渲染层要把这一帧画到画布上，还要 `getImageData`
+/// **为什么不 base64**：这一帧是这条路上最大的一笔载荷，base64 会把 4MB 的 PNG 撑成
+/// 5.7MB 的字符串、再多一次编解码。Tauri 的 `ipc::Response` 直接把这堆字节交给 JS
+/// （`invoke` 收到 `ArrayBuffer`），少那 33% 的体积与两次转换。
+///
+/// **为什么不是 asset 协议**：渲染层要把这一帧画到画布上，还要 `getImageData`
 /// （放大镜取色、马赛克）与 `toBlob`（复制 / 保存 / 钉图）。asset 协议对页面来说是**跨源**的，
 /// 把它的图 `drawImage` 进画布会把画布污染掉 —— `getImageData` 与 `toBlob` 都会抛 SecurityError，
-/// 整条导出链就废了。base64 → Blob 是同源，没有这回事（与邮箱附件、笔记图片同一条路）。
+/// 整条导出链就废了。二进制字节包成 Blob 是同源，没有这回事。
 #[tauri::command(async)]
-pub fn capture_frame(window: WebviewWindow, app: AppHandle) -> Result<String, String> {
+pub fn capture_frame(window: WebviewWindow, app: AppHandle) -> Result<tauri::ipc::Response, String> {
     let index = overlay_index(window.label()).ok_or("这个窗口不是截图遮罩")?;
     let state = app.state::<CaptureState>();
     let guard = state.0.lock().expect("锁中毒");
@@ -681,7 +685,8 @@ pub fn capture_frame(window: WebviewWindow, app: AppHandle) -> Result<String, St
         .find(|frame| frame.info.index == index)
         .ok_or("找不到这块屏的截图")?;
 
-    Ok(crate::encoding::base64(&frame.png))
+    // 会话里的帧还要留着给复制 / 保存用，交给 IPC 的是一份克隆
+    Ok(tauri::ipc::Response::new(frame.png.clone()))
 }
 
 /// 从数据文件里取这次截图要用的设置。缺失 / 类型不对都回默认值 ——
@@ -740,10 +745,105 @@ pub fn capture_abort(app: AppHandle) {
     abort(&app)
 }
 
-/// 把最终的 PNG 放进系统剪贴板
+/// 把最终的 PNG 放进系统剪贴板。
+///
+/// **一进来先把遮罩收掉**：解码 PNG、构两份 DIB、写剪贴板在 4K 上是几百毫秒的活，
+/// 用户按下 Enter 之后不该还盯着遮罩等它。失败经 `report_copy_failure` 推给主窗口
+/// （遮罩已经收了，没有别的地方能说话）。
 #[tauri::command(async)]
-pub fn capture_copy(png: String) -> Result<(), String> {
-    crate::clipboard::write_png(&decode_png(&png)?)
+pub fn capture_copy(app: AppHandle, png: String) -> Result<(), String> {
+    abort(&app);
+    let outcome = decode_png(&png).and_then(|bytes| crate::clipboard::write_png(&bytes));
+    report_copy_failure(&app, outcome)
+}
+
+/// 没画任何标注时的复制快路径：**不用把图搬到渲染层再搬回来** —— Rust 手里就为这一场
+/// 缓存了这块屏的原始 PNG，直接裁出选区写剪贴板。`x` / `y` / `width` / `height` 是这块屏
+/// 的画布坐标（物理像素），由渲染层按选区取整后给。
+///
+/// 有标注时仍走 `capture_copy`：标注只有渲染层会画（见 screenshot.md「显示与导出同一条路」）。
+#[tauri::command(async)]
+pub fn capture_copy_frame(
+    window: WebviewWindow,
+    app: AppHandle,
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+) -> Result<(), String> {
+    // 帧只在会话里，而收工会把会话丢掉：**先把 PNG 克隆出来再 abort**
+    let frame = take_frame_png(&window, &app);
+    abort(&app);
+    let outcome = frame.and_then(|png| copy_region(&png, x, y, width, height));
+    report_copy_failure(&app, outcome)
+}
+
+fn take_frame_png(window: &WebviewWindow, app: &AppHandle) -> Result<Vec<u8>, String> {
+    let index = overlay_index(window.label()).ok_or("这个窗口不是截图遮罩")?;
+    let state = app.state::<CaptureState>();
+    let guard = state.0.lock().expect("锁中毒");
+    let session = guard.session.as_ref().ok_or("截图会话已经结束了")?;
+    let frame = session
+        .frames
+        .iter()
+        .find(|frame| frame.info.index == index)
+        .ok_or("找不到这块屏的截图")?;
+    Ok(frame.png.clone())
+}
+
+/// 从这一场的原始帧裁出选区并写剪贴板。
+///
+/// 剪贴板里的 `PNG` 格式要的是**裁剪后**的图，所以非整屏时得重编一次（`Fast` + `Sub`，
+/// 与抓屏那条路同一个编码档）；整屏就直接复用缓存的那份 PNG 字节。
+fn copy_region(png: &[u8], x: i32, y: i32, width: u32, height: u32) -> Result<(), String> {
+    let image = image::load_from_memory(png)
+        .map_err(|err| format!("这张图解不开（{err}）"))?
+        .to_rgba8();
+    let (left, top, crop_width, crop_height) =
+        clamp_region(image.width(), image.height(), x, y, width, height)?;
+
+    if left == 0 && top == 0 && crop_width == image.width() && crop_height == image.height() {
+        return crate::clipboard::write_rgba(&image, png);
+    }
+
+    let cropped =
+        image::imageops::crop_imm(&image, left, top, crop_width, crop_height).to_image();
+    let mut encoded = Vec::new();
+    encode_png(&cropped, &mut encoded)?;
+    crate::clipboard::write_rgba(&cropped, &encoded)
+}
+
+/// 把选区收敛到这一帧里面（渲染层已经取整并夹过一次，命令参数仍是外部输入，这里再夹一次）。
+fn clamp_region(
+    frame_width: u32,
+    frame_height: u32,
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+) -> Result<(u32, u32, u32, u32), String> {
+    let frame_width = frame_width as i32;
+    let frame_height = frame_height as i32;
+    let left = x.clamp(0, frame_width);
+    let top = y.clamp(0, frame_height);
+    let right = (x + width as i32).clamp(left, frame_width);
+    let bottom = (y + height as i32).clamp(top, frame_height);
+    let crop_width = (right - left) as u32;
+    let crop_height = (bottom - top) as u32;
+    if crop_width == 0 || crop_height == 0 {
+        return Err("还没选好要截的区域".into());
+    }
+    Ok((left as u32, top as u32, crop_width, crop_height))
+}
+
+/// 复制失败时遮罩已经收了：走与「起截图失败」同一条路 —— 把主窗口唤出来并推一条
+/// `capture:failed`（主窗口那边弹一条提示条）。
+fn report_copy_failure(app: &AppHandle, outcome: Result<(), String>) -> Result<(), String> {
+    if let Err(err) = &outcome {
+        crate::show_main_window(app);
+        let _ = app.emit("capture:failed", format!("复制到剪贴板失败：{err}"));
+    }
+    outcome
 }
 
 /// 把最终的 PNG 落盘，返回真正写进去的那个绝对路径。
@@ -761,7 +861,7 @@ pub fn capture_save(
 }
 
 fn decode_png(png: &str) -> Result<Vec<u8>, String> {
-    crate::encoding::base64_decode(png.trim()).ok_or_else(|| "截图数据不完整，存不下来".to_string())
+    crate::encoding::base64_decode(png.trim()).ok_or_else(|| "截图数据不完整".to_string())
 }
 
 /// 写一张 PNG 到 `dir\name`（目录不存在就建）。pin.rs 的「另存为」也走它。
@@ -959,5 +1059,19 @@ mod tests {
     fn 坏_base64_给一句人话() {
         assert!(decode_png("这不是 base64!!").is_err());
         assert_eq!(decode_png("cG5n").unwrap(), b"png");
+    }
+
+    #[test]
+    fn 复制选区的裁剪边界收敛到帧内() {
+        assert_eq!(
+            clamp_region(100, 50, 10, 10, 20, 20).unwrap(),
+            (10, 10, 20, 20)
+        );
+        // 左上角出界：从帧的 (0, 0) 开始，只留伸进来的那一块
+        assert_eq!(clamp_region(100, 50, -5, -5, 20, 20).unwrap(), (0, 0, 15, 15));
+        // 右下角出界：夹到帧边界
+        assert_eq!(clamp_region(100, 50, 90, 40, 20, 20).unwrap(), (90, 40, 10, 10));
+        // 完全在帧外：空选区要报出来，别写一张 0×0 的图进剪贴板
+        assert!(clamp_region(100, 50, 100, 50, 10, 10).is_err());
     }
 }

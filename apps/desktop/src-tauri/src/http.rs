@@ -36,6 +36,14 @@ const TIMEOUT_CONNECT: i32 = 8_000;
 const TIMEOUT_SEND: i32 = 10_000;
 const TIMEOUT_RECEIVE: i32 = 15_000;
 
+/// 普通（收完返回）请求用的超时组，与 [`STREAM_TIMEOUTS`] 相对。
+const DEFAULT_TIMEOUTS: [i32; 4] = [
+    TIMEOUT_RESOLVE,
+    TIMEOUT_CONNECT,
+    TIMEOUT_SEND,
+    TIMEOUT_RECEIVE,
+];
+
 /// 响应体上限。OAuth 回包都是几百字节；AI 那边拉一次模型目录（几百个模型、每个一串元数据）
 /// 能到几 MB，所以这个阀门给到 8 MiB —— 再大说明对面不对劲，别一直收。
 const MAX_BODY: usize = 8 << 20;
@@ -81,7 +89,20 @@ pub fn request(
     headers: &[(&str, &str)],
     body: Option<&str>,
 ) -> Result<Response, String> {
-    send(method, host, HTTPS_PORT, true, path, headers, body, MAX_BODY, false)
+    send(
+        &RequestSpec {
+            method,
+            host,
+            port: HTTPS_PORT,
+            secure: true,
+            path,
+            headers,
+            body,
+            no_redirects: false,
+            timeouts: DEFAULT_TIMEOUTS,
+        },
+        Sink::Buffer { max_body: MAX_BODY },
+    )
 }
 
 /// 发一个请求到**用户自己填的地址**：http / https 都认，端口与路径照原样走
@@ -108,7 +129,20 @@ pub fn request_url_limited(
     max_body: usize,
 ) -> Result<Response, String> {
     let (secure, host, port, path) = split_url(url)?;
-    send(method, &host, port, secure, &path, headers, body, max_body, false)
+    send(
+        &RequestSpec {
+            method,
+            host: &host,
+            port,
+            secure,
+            path: &path,
+            headers,
+            body,
+            no_redirects: false,
+            timeouts: DEFAULT_TIMEOUTS,
+        },
+        Sink::Buffer { max_body },
+    )
 }
 
 /// 带机密请求头的单次请求：发送前关闭 WinHTTP 自动跳转，3xx 原样返回给调用方拒绝。
@@ -134,7 +168,20 @@ pub fn request_url_no_redirects(
         path.push('?');
         path.push_str(query);
     }
-    send(method, host, port, secure, &path, headers, body, MAX_BODY, true)
+    send(
+        &RequestSpec {
+            method,
+            host,
+            port,
+            secure,
+            path: &path,
+            headers,
+            body,
+            no_redirects: true,
+            timeouts: DEFAULT_TIMEOUTS,
+        },
+        Sink::Buffer { max_body: MAX_BODY },
+    )
 }
 
 /// URL → WinHTTP 要的那四样（协议 / 主机 / 端口 / 路径）。只认 http 与 https，
@@ -172,23 +219,71 @@ fn split_url(url: &str) -> Result<(bool, String, u16, String), String> {
     Ok((secure, host, port, path.to_string()))
 }
 
-/// 真正发请求的那一段：会话 → 连接 → 请求 → 读回状态码、ETag / Location 与响应体。
-#[allow(clippy::too_many_arguments)]
-fn send(
-    method: &str,
-    host: &str,
+/// 流式请求的超时（毫秒）：解析 / 建连 / 发送 / 接收。
+///
+/// 与上面那组分开是必须的：对话的首字节可能等十几秒、整段可能跑几分钟，
+/// 15 秒的接收超时会把正常回答打断。这里给到 5 分钟的静默容忍 —— 超过它说明对面
+/// 真的不动了，而不是模型在思考。
+const STREAM_TIMEOUTS: [i32; 4] = [30_000, 30_000, 60_000, 300_000];
+
+/// 一次请求的固定形状。参数本来有九个，与其继续堆位置参数，不如摆成结构体 ——
+/// 调用处也因此读得出哪个是哪个。
+struct RequestSpec<'a> {
+    method: &'a str,
+    host: &'a str,
     port: u16,
     secure: bool,
-    path: &str,
-    headers: &[(&str, &str)],
-    body: Option<&str>,
-    max_body: usize,
+    path: &'a str,
+    headers: &'a [(&'a str, &'a str)],
+    body: Option<&'a str>,
     no_redirects: bool,
-) -> Result<Response, String> {
+    timeouts: [i32; 4],
+}
+
+/// 响应体往哪儿去。
+enum Sink<'a> {
+    /// 收完再返回；超过 `max_body` 就中止
+    Buffer { max_body: usize },
+    /// 边到边交出去。`on_head` 在**正文之前**给出状态码 —— 流式的调用方要拿它
+    /// 决定回给自己客户端的是 200 的流还是一段错误 JSON。
+    /// `on_chunk` 返回 false 表示别再读了。
+    /// **不设上限**：一段长回答本来就是无限的。
+    Stream {
+        on_head: &'a mut dyn FnMut(u16),
+        on_chunk: &'a mut dyn FnMut(&[u8]) -> bool,
+    },
+}
+
+impl Sink<'_> {
+    /// 状态码到了。只有流式那一档在意。
+    fn announce(&mut self, status: u16) {
+        if let Sink::Stream { on_head, .. } = self {
+            on_head(status);
+        }
+    }
+
+    /// 收下一片。返回是否继续读。
+    fn feed(&mut self, piece: &[u8], seen: &mut Vec<u8>) -> Result<bool, String> {
+        match self {
+            Sink::Buffer { max_body } => {
+                seen.extend_from_slice(piece);
+                if seen.len() > *max_body {
+                    return Err("响应内容过大，已中止".into());
+                }
+                Ok(true)
+            }
+            Sink::Stream { on_chunk, .. } => Ok(on_chunk(piece)),
+        }
+    }
+}
+
+/// 真正发请求的那一段：会话 → 连接 → 请求 → 把响应体交给 `sink`。
+fn send(spec: &RequestSpec<'_>, sink: Sink<'_>) -> Result<Response, String> {
     let agent = wide("Workbench");
-    let host_w = wide(host);
-    let method_w = wide(method);
-    let path_w = wide(path);
+    let host_w = wide(spec.host);
+    let method_w = wide(spec.method);
+    let path_w = wide(spec.path);
+    let mut sink = sink;
 
     unsafe {
         let session = Handle(WinHttpOpen(
@@ -201,14 +296,14 @@ fn send(
         check(session.0, "初始化 HTTP 会话失败")?;
         WinHttpSetTimeouts(
             session.0,
-            TIMEOUT_RESOLVE,
-            TIMEOUT_CONNECT,
-            TIMEOUT_SEND,
-            TIMEOUT_RECEIVE,
+            spec.timeouts[0],
+            spec.timeouts[1],
+            spec.timeouts[2],
+            spec.timeouts[3],
         );
 
-        let connection = Handle(WinHttpConnect(session.0, host_w.as_ptr(), port, 0));
-        check(connection.0, &format!("连接 {host} 失败"))?;
+        let connection = Handle(WinHttpConnect(session.0, host_w.as_ptr(), spec.port, 0));
+        check(connection.0, &format!("连接 {} 失败", spec.host))?;
 
         // 第 6 个参数是 Accept 类型列表，传 null 表示默认（application/json 我们自己加）
         let request = Handle(WinHttpOpenRequest(
@@ -219,11 +314,15 @@ fn send(
             std::ptr::null(),
             std::ptr::null(),
             // 只有 https 才要这一位；http 的明文连接加上它反而谈不起来
-            if secure { WINHTTP_FLAG_SECURE } else { 0 },
+            if spec.secure {
+                WINHTTP_FLAG_SECURE
+            } else {
+                0
+            },
         ));
         check(request.0, "构造请求失败")?;
 
-        if no_redirects {
+        if spec.no_redirects {
             let policy = WINHTTP_OPTION_REDIRECT_POLICY_NEVER;
             let set = WinHttpSetOption(
                 request.0,
@@ -235,9 +334,10 @@ fn send(
             check_bool(set, "关闭 HTTP 重定向失败")?;
         }
 
-        if !headers.is_empty() {
+        if !spec.headers.is_empty() {
             // WinHTTP 要的是一整块 CRLF 分隔的 header 文本
-            let text = headers
+            let text = spec
+                .headers
                 .iter()
                 .map(|(name, value)| format!("{name}: {value}"))
                 .collect::<Vec<_>>()
@@ -253,7 +353,7 @@ fn send(
             check_bool(added, "设置请求头失败")?;
         }
 
-        let payload = body.unwrap_or("").as_bytes();
+        let payload = spec.body.unwrap_or("").as_bytes();
         let sent = WinHttpSendRequest(
             request.0,
             std::ptr::null(),
@@ -286,6 +386,9 @@ fn send(
         let etag = header(request.0, WINHTTP_QUERY_ETAG);
         let location = header(request.0, WINHTTP_QUERY_LOCATION);
 
+        // 状态码先出去：流式的调用方要凭它决定回 200 还是回错误
+        sink.announce(status);
+
         let mut bytes: Vec<u8> = Vec::new();
         loop {
             let mut available: u32 = 0;
@@ -309,9 +412,8 @@ fn send(
                 break;
             }
 
-            bytes.extend_from_slice(&chunk[..read as usize]);
-            if bytes.len() > max_body {
-                return Err("响应内容过大，已中止".into());
+            if !sink.feed(&chunk[..read as usize], &mut bytes)? {
+                break;
             }
         }
 
@@ -322,6 +424,37 @@ fn send(
             location,
         })
     }
+}
+
+/// 流式请求：响应体一到就交给 `on_chunk`，不在内存里攒。
+///
+/// `on_head` 在正文之前收到状态码 —— 这是流式调用方唯一能"先判断再决定怎么写"的机会。
+/// **只返回状态码**：这种调用方式下响应体已经在回调里消费掉了，返回一个空 body 的
+/// [`Response`] 只会让调用方以为「响应是空的」。
+///
+/// 关掉自动重定向：带着账号 token 的请求被 302 到别处是事故，不是便利。
+pub fn request_url_stream(
+    method: &str,
+    url: &str,
+    headers: &[(&str, &str)],
+    body: Option<&str>,
+    on_head: &mut dyn FnMut(u16),
+    on_chunk: &mut dyn FnMut(&[u8]) -> bool,
+) -> Result<u16, String> {
+    let (secure, host, port, path) = split_url(url)?;
+    let spec = RequestSpec {
+        method,
+        host: &host,
+        port,
+        secure,
+        path: &path,
+        headers,
+        body,
+        no_redirects: true,
+        timeouts: STREAM_TIMEOUTS,
+    };
+    let response = send(&spec, Sink::Stream { on_head, on_chunk })?;
+    Ok(response.status)
 }
 
 /// 查一个标准响应头（ETag / Location 这类按索引查的）。**查不到不是错误**：返回 None。

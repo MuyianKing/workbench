@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { ViewId } from '@workbench/appearance'
 import type { Component } from 'vue'
-import { backgroundVeilAlpha, cardSurfaceAlpha, veilRgbTriplet } from '@workbench/appearance'
+import { backgroundVeilAlpha, cardSurfaceAlpha } from '@workbench/appearance'
 
 import { ElMessage } from 'element-plus'
 import { computed, onMounted } from 'vue'
@@ -9,6 +9,7 @@ import AddProjectDialog from '@/components/AddProjectDialog.vue'
 import AiView from '@/components/AiView.vue'
 import AppHeader from '@/components/AppHeader.vue'
 import CommandDialog from '@/components/CommandDialog.vue'
+import GatewayView from '@/components/gateway/GatewayView.vue'
 import KbView from '@/components/KbView.vue'
 import MailView from '@/components/MailView.vue'
 import NavRail from '@/components/NavRail.vue'
@@ -57,6 +58,7 @@ const VIEWS: Record<ViewId, Component> = {
   skills: SkillsView,
   kb: KbView,
   ai: AiView,
+  gateway: GatewayView,
   vault: VaultView,
   mail: MailView,
   styles: StylesView,
@@ -89,12 +91,6 @@ const appStyle = computed(() => {
      */
     '--card-gap': `${settings.cardGap}px`,
   }
-
-  // 蒙版底色：用户在设置里指定了就用它（图片「渐淡」进这个颜色），没指定则留空，
-  // 交给 tokens.css 里按主题定义的那一份
-  const veil = veilRgbTriplet(settings.settings.workspaceBackgroundVeil)
-  if (veil)
-    style['--ws-veil-rgb'] = veil
 
   return style
 })

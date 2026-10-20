@@ -206,12 +206,13 @@ describe('按落点拆一份设置补丁', () => {
       'skills',
       'kb',
       'ai',
+      'gateway',
       'vault',
       'mail',
       'styles',
       'video',
     ])
-    expect(sanitizeAppearanceSettings({ viewOrder: 'notes' }).viewOrder.length).toBe(11)
+    expect(sanitizeAppearanceSettings({ viewOrder: 'notes' }).viewOrder.length).toBe(12)
   })
 
   it('合回来的设置与拆之前一致', () => {

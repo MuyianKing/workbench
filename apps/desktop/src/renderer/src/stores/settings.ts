@@ -1,7 +1,7 @@
 import type { AccentInkMode, CardPlacement, ColumnId, HomeCardId, RowId, RowTarget, ThemeConfig, ViewId } from '@workbench/appearance'
 import type { ThemeOrigin } from '@/theme-transition'
 import type { AppSettings, BuiltinWallpaper, EffectiveTheme, Result, SyncDeviceInfo, ThemeSource, TokenUsageResult, TopBarStyle } from '@/types'
-import { addColumn as addColumnTo, clampAiTreeWidth, clampBackgroundOpacity, clampCardGap, clampCardOpacity, clampColumnWidth, clampKbTreeWidth, clampMailListWidth, clampNoteTreeWidth, clampRowHeight, clampVideoTreeWidth, COLUMN_WIDTH_DEFAULT, DEFAULT_THEME, moveCard as placeCard, setColumnWidths as placeColumnWidths, removeColumn as removeColumnFrom, rowHeightMin, rowOf, sanitizeAccentColor, sanitizeAccentInkMode, sanitizeTheme, sanitizeVeilColor, VIEW_LABELS } from '@workbench/appearance'
+import { addColumn as addColumnTo, clampAiTreeWidth, clampBackgroundOpacity, clampCardGap, clampCardOpacity, clampColumnWidth, clampKbTreeWidth, clampMailListWidth, clampNoteTreeWidth, clampRowHeight, clampVideoTreeWidth, COLUMN_WIDTH_DEFAULT, DEFAULT_THEME, moveCard as placeCard, setColumnWidths as placeColumnWidths, removeColumn as removeColumnFrom, rowHeightMin, rowOf, sanitizeAccentColor, sanitizeAccentInkMode, sanitizeTheme, VIEW_LABELS } from '@workbench/appearance'
 
 import { clampVideoFloatHeight, clampVideoFloatPercent, clampVideoFloatWidth } from '@workbench/video'
 import { defineStore } from 'pinia'
@@ -275,18 +275,6 @@ export const useSettingsStore = defineStore('settings', () => {
       return
 
     await updateSettings({ workspaceBackgroundOpacity: next })
-  }
-
-  /**
-   * 蒙版色：图片渐淡进去的那个颜色，空串表示跟随主题的画布色。
-   * 没有背景图时它照样生效 —— 相当于给工作区定一个底色。
-   */
-  async function setBackgroundVeil(color: string): Promise<boolean> {
-    const next = sanitizeVeilColor(color)
-    if (next === settings.value.workspaceBackgroundVeil)
-      return true
-
-    return updateSettings({ workspaceBackgroundVeil: next })
   }
 
   /** 读一张图贴上工作区；读不出来时清空并把原因留在 backgroundError */
@@ -835,7 +823,6 @@ export const useSettingsStore = defineStore('settings', () => {
     backgroundError,
     backgroundOpacity,
     setBackgroundOpacity,
-    setBackgroundVeil,
     wallpapers,
     ensureWallpapers,
     pickBackground,

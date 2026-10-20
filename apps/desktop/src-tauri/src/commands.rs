@@ -641,6 +641,19 @@ pub fn token_sync_publish(repo: String, device: String, shard: Value) -> Result<
     crate::sync::publish(&repo, &device, Some(&shard), None)
 }
 
+/// 把本机网关流水推进同步仓库：`gateway-usage/<设备id>/<YYYY-MM>.jsonl`。
+///
+/// 行由 Rust 侧从本地 `usage.jsonl` 现读并脱敏（`rows_for_sync`），不走 IPC ——
+/// 流水会随时间变长，整份塞进命令参数没有好处。只碰自己设备的目录。
+#[tauri::command(async)]
+pub fn gateway_sync_publish(repo: String, device: String) -> Result<Value, String> {
+    if repo.trim().is_empty() {
+        return Err("没有配置同步仓库".into());
+    }
+    let rows = crate::wb_usage::rows_for_sync(&crate::sync::host_name());
+    crate::sync::publish_gateway_usage(&repo, &device, &rows)
+}
+
 /// 把本机的外观配置（theme.json 整份副本）单独写进同步仓库并推送；
 /// 设置界面「从别的机器取外观」旁的「同步一次」走它（且只有它 —— 没有自动同步）。
 /// 返回 `{ changed, pushed, log }`。

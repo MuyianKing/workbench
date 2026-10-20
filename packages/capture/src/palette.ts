@@ -33,7 +33,7 @@ export const STROKE_WIDTHS: Array<NamedValue<number>> = [
   { name: '粗', value: 8 },
 ]
 
-export const STROKE_WIDTH_DEFAULT = 4
+export const STROKE_WIDTH_DEFAULT = 2
 
 /** 马赛克格子边长（画布像素）：越大越糊 */
 export const MOSAIC_BLOCKS: Array<NamedValue<number>> = [
@@ -42,7 +42,7 @@ export const MOSAIC_BLOCKS: Array<NamedValue<number>> = [
   { name: '大', value: 24 },
 ]
 
-export const MOSAIC_BLOCK_DEFAULT = 12
+export const MOSAIC_BLOCK_DEFAULT = 6
 
 /** 字号（画布像素） */
 export const TEXT_SIZES: Array<NamedValue<number>> = [
@@ -51,7 +51,7 @@ export const TEXT_SIZES: Array<NamedValue<number>> = [
   { name: '大', value: 36 },
 ]
 
-export const TEXT_SIZE_DEFAULT = 24
+export const TEXT_SIZE_DEFAULT = 16
 
 /** 荧光笔的不透明度：它是「铺一层色」，不是画一条实线 */
 export const HIGHLIGHT_ALPHA = 0.35

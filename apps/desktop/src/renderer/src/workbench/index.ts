@@ -19,6 +19,7 @@ import { assetUrl, errorText, guard, hasTauri, invoke, listen, listenReady, notP
 import * as design from './design'
 import { emit } from './events'
 import * as events from './events'
+import { gatewayApi, gatewayUsage, gatewayUsageRecent, gatewayUsageRows, syncGatewayUsage } from './gateway'
 import * as kb from './kb'
 import * as note from './note'
 import * as nrm from './nrm'
@@ -31,7 +32,7 @@ import * as session from './session'
 import * as skill from './skill'
 import * as state from './state'
 import * as system from './system'
-import { getTokenUsage, getTokenUsageSnapshot, listSyncDevices, syncThemeConfig, syncTokenUsage } from './token'
+import { getTokenUsage, getTokenUsageSnapshot, listSyncDevices, localDevice, syncThemeConfig, syncTokenUsage } from './token'
 import * as vault from './vault'
 import * as video from './video'
 import * as workLog from './work-log'
@@ -55,6 +56,18 @@ function resolveTheme(theme: AppSettings['theme']): EffectiveTheme {
  */
 function syncRepo(): string {
   return state.account() ? state.settings().tokenSyncRepo : ''
+}
+
+/**
+ * 网关流水同步要的两样东西：同步仓库与本机设备 id。
+ * 仓库仍然只从 `syncRepo()` 取 —— 没登录就是空串，网关只读本机，不开旁路。
+ */
+async function gatewayContext(): Promise<{ repo: string, device: string }> {
+  const repo = syncRepo()
+  if (!repo)
+    return { repo: '', device: '' }
+  const { id } = await localDevice()
+  return { repo, device: id }
 }
 
 /**
@@ -161,6 +174,12 @@ function hotkeyArgs(settings: AppSettings): Record<string, string | null> {
  * 得让用户知道是「被别的程序占了」而不是功能坏了。
  */
 async function syncSystemIntegration(settings: AppSettings): Promise<void> {
+  // **遮罩池先开始建、而且不排在后面 await**：它要起 WebView2（一块屏一百多毫秒），是这几项里
+  // 最重的一笔；开机自启与快捷键都是毫秒级。并行起来，启动后能尽快具备「按热键即出」的条件。
+  const prewarm = invoke('capture_prewarm', { enabled: settings.captureEnabled }).catch((error) => {
+    console.warn('[workbench] 预建截图遮罩失败', error)
+  })
+
   try {
     await invoke('set_autostart', { enabled: settings.launchAtLogin })
   }
@@ -177,16 +196,6 @@ async function syncSystemIntegration(settings: AppSettings): Promise<void> {
   }
 
   try {
-    // 遮罩窗口先建好（每块屏一块），免得按热键时现等一个 WebView2 起来。
-    // **必须等设置载完再调**：这一步要读的正是 captureEnabled（关掉就把池子收掉）。
-    // 失败不打扰用户：真按热键时 Rust 会现建，只是那一次慢一点
-    await invoke('capture_prewarm', { enabled: settings.captureEnabled })
-  }
-  catch (error) {
-    console.warn('[workbench] 预建截图遮罩失败', error)
-  }
-
-  try {
     // 网速球：开 / 关那一扇独立的置顶窗口。**同样必须等设置载完再调**（它读的正是 ballEnabled）。
     // 失败不打扰用户：设置已经存下了，下次改一下开关还能再试
     await invoke('ball_apply', { visible: settings.ballEnabled })
@@ -194,6 +203,8 @@ async function syncSystemIntegration(settings: AppSettings): Promise<void> {
   catch (error) {
     console.warn('[workbench] 开关悬浮球失败', error)
   }
+
+  await prewarm
 }
 
 /** 起命令要先找到对象：命令构造在这一层，后端拿不到项目/命令数据 */
@@ -215,6 +226,33 @@ function withCommand(
 
 function createApi(): WorkbenchApi {
   const implemented = {
+    ...gatewayApi,
+    // 网关流水：仓库与设备 id 与 token 同步同一个门禁；空仓库时只读本机
+    gatewayUsage: async (days: number) => {
+      const { repo, device } = await gatewayContext()
+      return gatewayUsage(days, repo, device)
+    },
+    gatewayUsageRows: async (days: number) => {
+      const { repo, device } = await gatewayContext()
+      return gatewayUsageRows(days, repo, device)
+    },
+    gatewayUsageRecent: async (limit: number) => {
+      const { repo, device } = await gatewayContext()
+      return gatewayUsageRecent(limit, repo, device)
+    },
+    gatewayUsageSync: async (force = true) => {
+      const { repo, device } = await gatewayContext()
+      if (repo && !device)
+        return fail('没有设备标识，无法同步')
+      return syncGatewayUsage(repo, device, force)
+    },
+    gatewaySyncStatus: async () => {
+      const repo = syncRepo()
+      if (!repo)
+        return { enabled: false, deviceName: '' }
+      const { id, name } = await localDevice()
+      return { enabled: Boolean(id), deviceName: name }
+    },
     // Tauri 下没有 Node 版本；Chromium 版本取 WebView2 的 UA。
     versions: {
       node: '—',
@@ -799,11 +837,15 @@ function createApi(): WorkbenchApi {
       return Promise.resolve()
     },
     captureContext: () => guard(invoke<CaptureContext>('capture_context'), '取截图上下文失败'),
-    captureFrame: () => guard(invoke<string>('capture_frame'), '取不到这一帧截图'),
+    // 原始 PNG 字节：命令返回 `ipc::Response`，Tauri 的二进制回包在 JS 这边是 ArrayBuffer
+    captureFrame: () => guard(invoke<ArrayBuffer>('capture_frame'), '取不到这一帧截图'),
     // 遮罩里的 JS 报「这一场的帧已经画到画布上了」：Rust 等到每一块屏都报齐才显示遮罩 ——
     // 抢在帧前面显示就是先闪一块黑（见 docs/modules/screenshot.md 与 capture.rs 的 capture_show）
     showCapture: (id: number) => guard(invoke<null>('capture_show', { id }), '显示截图遮罩失败'),
     copyImage: (png: string) => guard(invoke<null>('capture_copy', { png }), '复制到剪贴板失败'),
+    // 没画标注时走这条：只给选区，由 Rust 从这一场缓存的原始帧里裁（省掉整圈 base64 往返）
+    copyFrame: (rect: { x: number, y: number, width: number, height: number }) =>
+      guard(invoke<null>('capture_copy_frame', rect), '复制到剪贴板失败'),
     saveImage: (png: string, dir: string, name: string, unique: boolean) =>
       guard(invoke<string>('capture_save', { png, dir, name, unique }), '保存截图失败'),
     pinImage: (png: string, x: number, y: number, width: number, height: number, opacity: number) =>

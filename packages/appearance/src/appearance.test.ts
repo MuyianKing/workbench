@@ -20,7 +20,6 @@ describe('收敛一份外观', () => {
       terminalHeight: -100000,
       cardOpacity: 999,
       workspaceBackgroundOpacity: '60',
-      workspaceBackgroundVeil: 'red',
       workspaceBackground: '  C:\\Users\\me\\wall.png  ',
     })
 
@@ -31,7 +30,6 @@ describe('收敛一份外观', () => {
     expect(clean.accentColor).toBe('')
     expect(clean.cardOpacity).toBe(100)
     expect(clean.workspaceBackgroundOpacity).toBe(DEFAULT_APPEARANCE.workspaceBackgroundOpacity)
-    expect(clean.workspaceBackgroundVeil).toBe('')
     // 背景路径照旧留着（去掉首尾空白）：另一台机器上读不出来是那边的事，不在这里改用户的选择
     expect(clean.workspaceBackground).toBe('C:\\Users\\me\\wall.png')
   })

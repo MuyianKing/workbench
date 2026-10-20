@@ -96,7 +96,7 @@
 - 手写 CSS，不用原子化 CSS；颜色、间距、圆角、字号与动效缓动一律取 [tokens.css](apps/desktop/src/renderer/src/styles/tokens.css) 的
   `--bg-*` `--ink-*` `--st-*` `--sp-*` `--r-*` `--fs-*` `--ease-*`。暗色只在 `:root[data-theme='dark']` 覆盖令牌。
 - 界面主体灰度，彩色只表达运行状态（`--st-run` / `--st-ok` / `--st-fail`）与项目标识色；用户配的主题色只管
-  交互态与首页活跃度图的色阶（口径在 [accent-color.ts](packages/appearance/src/accent-color.ts) 的文件头，别扩到别处）；
+  交互态、首页活跃度图的色阶与网关用量页那张柱状图（口径在 [accent-color.ts](packages/appearance/src/accent-color.ts) 的文件头，别扩到别处）；
   终端面板始终深色（`--term-*`）。**例外只有一处**：邮箱附件片左首那枚类型图标按文件类型着色（PDF 红 / Word 蓝 / 幻灯片橙 / Markdown 紫 / 网页青），
   色阶口径只在 [parse.ts](packages/mail/src/parse.ts) 的 `attachmentTint`（见 [mail.md](docs/modules/mail.md)），
   名字、大小与其余一切照旧灰度，不许扩到别处、也不许拿它给整片附件上色。
@@ -145,6 +145,7 @@ asset 协议、读取权限在 Rust 侧按单个文件授予）、**通道一律
 | 笔记（正文 / 图片 / 素材 / 笔记同步） | [notes](docs/modules/notes.md) |
 | 知识库（原始数据 / 条目 / 一键清洗 / 索引重建 / 同步） | [kb](docs/modules/kb.md) |
 | AI 助手（会话 / 项目 / 驱动本机 Pi / 模型与密钥 / 提示词与出口） | [ai](docs/modules/ai.md) |
+| 网关（WorkBuddy / CodeBuddy 反代：账号 / 流式对话 / 用量） | [gateway](docs/modules/gateway.md) |
 | 用量与外观同步、账号登录 | [sync-and-auth](docs/modules/sync-and-auth.md) |
 | 密码保险库（密钥 / 加解密 / 多机共写一份文件） | [vault](docs/modules/vault.md) |
 | 邮箱（IMAP 收信 / SMTP 发信 / 授权码 / 联网出口） | [mail](docs/modules/mail.md) |

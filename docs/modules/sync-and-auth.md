@@ -38,13 +38,17 @@
 
 ### 同步仓库布局
 
-- 「一个功能一个目录、一台机器一个文件」：`token-usage/<设备id>.json` 是用量快照、`config/<设备id>.json` 是那份 `theme.json` 的整份
-  副本（见 [sync-config.ts](../../packages/usage/src/sync-config.ts)）。两个目录都必须保持**单写者**（只写自己那份、只读别人的）—— 这是
-  「不需要人工合并」的全部依据。
-- **两个目录是两条互不相干的出口，别把它们合回一条**：用量那条（`token_sync_publish`，面板按钮与一小时一轮的自动同步）
-  只 add / diff `token-usage/<自己>.json`，外观那条（`token_sync_config`，设置 → 外观 →「同步一次」）只 add / diff
-  `config/<自己>.json`。`sync.rs` 的 `publish_at` 按传进来的两个 `Option` 决定这次碰哪几个文件，传 `None` 的那个**这次完全不碰**
-  —— 两处都别再把 `config` 塞回 `token_sync_publish`：那正是「用量同步顺手把外观也推了」的来路。
+- 「一个功能一个目录、一台机器一份」：`token-usage/<设备id>.json` 是用量快照、`config/<设备id>.json` 是那份 `theme.json`
+  的整份副本（见 [sync-config.ts](../../packages/usage/src/sync-config.ts)）、
+  `gateway-usage/<设备id>/<YYYY-MM>.jsonl` 是网关请求流水（一台机器一个目录、每月一个文件）。
+  前两个目录一台机器一个文件；所有文件都必须保持**单写者**（只写自己那份、只读别人的）—— 这是「不需要人工合并」的全部依据。
+- **用量与外观是两条互不相干的出口，别把它们合回一条**：用量那条（`token_sync_publish` 推 `token-usage/<自己>.json`，
+  `gateway_sync_publish` 推 `gateway-usage/<自己>/`，面板按钮与一小时一轮的自动同步顺带跑）只 add / diff 自己设备的两条路径；
+  外观那条（`token_sync_config`，设置 → 外观 →「同步一次」）只 add / diff `config/<自己>.json`。`sync.rs` 的 `publish_at`
+  按传进来的两个 `Option` 决定这次碰哪几个文件，传 `None` 的那个**这次完全不碰** —— 两处都别再把 `config` 塞回
+  `token_sync_publish`：那正是「用量同步顺手把外观也推了」的来路。
+- **网关流水先脱敏再进仓库**：`wb_usage::rows_for_sync` 把 `apiKey` 清空、`costCny` 置空；仓库里不出现密钥尾号。
+  `gateway-usage` 只加不删（`git add --ignore-removal`），本机丢文件不会抹掉仓库里的旧月份。
 - **外观没有自动同步这一档**：它的唯一入口是设置界面那颗「同步一次」（`syncThemeConfig`）。用量是只增的计数，重复推无害；
   外观是「以谁的为准」，自动推只会往仓库里堆没意义的提交，两台机器互相自动采用更是永远收敛不了。
 - **旧 `devices/` 目录不读**：升级后仓库里那些老文件就是读不到的，要手工删。
@@ -177,6 +181,19 @@
   —— 那条退路针对 token 过期 / 被撤销，不是「没登录也能同步」。**改了地址不用手动清理**：下次刷新就按
   新地址同步，读的时候核对克隆指向的仓库（换仓库却还在读上一个的数据 —— 踩过）。
 
+### 网关请求流水的多机同步
+
+网关的 `usage.jsonl` 是本机权威账本；同步只把它的一份脱敏副本推到
+`gateway-usage/<设备id>/<YYYY-MM>.jsonl`，读取时只合入**别的设备**的目录（本机目录跳过，避免双计）。
+月份键按 UTC+8，与网关用量页的分桶一致。
+
+- 一小时一轮的 token 用量同步在同一个 `enqueue` 里顺带调 `gateway_sync_publish`；网关用量页页首另有「同步」按钮
+  （`gatewayUsageSync`）强制推一次。内容没变不产生提交。
+- 请求记录页有「机器」列（`UsageRow.machine`）；新流水记账时写主机名，旧流水在同步 / 读取时补
+  （远端行缺这一项时用设备目录名）。
+- 清理历史只能先删本机 `usage.jsonl` 里那个月的行，再手工删仓库文件；只删仓库会被下一次同步写回。
+- 克隆、凭据、登录门禁与单写者布局全部沿用 Token 用量那一套；`gateway-usage/` 只由 `gateway_sync_publish` 写。
+
 ### 外观配置同步
 
 跨机器同步的那份配置认版本（`sync-config.ts`）：仓库里那份版本对不上（v3 及更早）时，
@@ -247,6 +264,7 @@ OAuth 应用构建期内置，所以使用者零配置；代价是**打包的人
 ```
   src/token.rs           ZCode sqlite 聚合 + DSH 多帧 zstd（会话文件用 walkdir 递归找）
   src/sync.rs            同步仓库的 git 操作（克隆 / 拉 / 提交 / 推、读回别人的用量与配置），
+                        网关请求流水的按月写入与读取（publish_gateway_usage / read_gateway_rows），
                         以及笔记图片的上传与清理（同一个机制、另一个仓库：publish_image /
                         list_images / delete_images —— 删图也是一次提交 + 一次推送），
                         还有笔记本身的同步（sync_notes：没有克隆目录，就在用户那个笔记

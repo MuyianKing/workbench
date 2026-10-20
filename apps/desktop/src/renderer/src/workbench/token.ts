@@ -28,7 +28,9 @@ import { captureThemeFile, CODEBUDDY_SOURCE_ID, collectCodeBuddyLogText, collect
 
 import { errorText, guard, invoke } from './bridge'
 import { emit } from './events'
+import { gatewaySyncNow, markGatewaySynced } from './gateway'
 import * as state from './state'
+import { enqueue } from './sync-queue'
 
 /** Rust 侧 `token_zcode_rows` 回来的行：SUM 在无数据时是 NULL，所以全部可空 */
 interface UsageRow {
@@ -349,17 +351,6 @@ let remoteConfigs: ThemeFile[] = []
 /** 上面那两份是从哪个仓库读回来的：换仓库要重读，同一个仓库不必每轮再读一遍 */
 let shardsRepo = ''
 
-/**
- * 同步串行化：面板轮询与手动同步可能正好撞上，
- * 两个 git 进程同时动同一个克隆目录会互相打架（index.lock 冲突）。
- */
-let inflight: Promise<void> = Promise.resolve()
-
-function enqueue(task: () => Promise<void>): Promise<void> {
-  inflight = inflight.then(task, task)
-  return inflight
-}
-
 /** Rust 侧 `token_sync_shards` 回来的形状：仓库里两个目录各一份（见 sync.rs 的 read_shards） */
 interface SyncFiles {
   usage?: unknown
@@ -460,9 +451,9 @@ function buildData(repo: string, ownShard: TokenShard, now: number): TokenDataFi
 }
 
 /**
- * 一轮完整同步：推本机分片（联网）→ 读回所有分片（本地）。
+ * 一轮完整同步：推本机分片（联网）→ 推网关流水（联网，同一仓库）→ 读回所有分片（本地）。
  *
- * 两步各自兜住失败：推送失败（没网 / 凭据过期）不该连带把「读别人的分片」也停掉 ——
+ * 三步各自兜住失败：推送失败（没网 / 凭据过期）不该连带把「读别人的分片」也停掉 ——
  * 克隆目录还在，读是纯本地操作，能读到就还能看到别的机器的最新数据。
  */
 async function runSync(repo: string, shard: TokenShard): Promise<void> {
@@ -479,6 +470,20 @@ async function runSync(repo: string, shard: TokenShard): Promise<void> {
   }
   catch (error) {
     errors.push(errorText(error, '同步失败'))
+  }
+
+  // 用量出口顺带推网关流水：同一个仓库、同一个克隆。这一轮已经在 enqueue 里，
+  // 只能调不排队的 `gatewaySyncNow`，再走 `syncGatewayUsage` 会自己等自己。
+  // 放在读分片之前：它的 pull 会让克隆更新，随后读到的 token 分片也是最新的。
+  try {
+    const result = await gatewaySyncNow(repo, shard.device)
+    if (result.ok)
+      markGatewaySynced(repo)
+    else
+      errors.push(result.error ? `网关流水同步失败：${result.error}` : '网关流水同步失败')
+  }
+  catch (error) {
+    errors.push(errorText(error, '网关流水同步失败'))
   }
 
   try {

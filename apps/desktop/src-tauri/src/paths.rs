@@ -52,6 +52,15 @@ const IMAGE_SYNC_DIR: &str = "image-sync";
 pub(crate) const TOKEN_USAGE_DIR: &str = "token-usage";
 /// 克隆里放**配置**的子目录名：一台机器一份 theme.json 的副本（见 packages/usage/src/sync-config.ts）
 pub(crate) const CONFIG_DIR: &str = "config";
+/// 克隆里放**网关请求流水**的子目录名：一台机器一个子目录、每月一个 `.jsonl`
+pub(crate) const GATEWAY_USAGE_DIR: &str = "gateway-usage";
+/// 网关（WorkBuddy 反代）的目录名。它自带一层完整结构：账号、用量、日志都在里面，
+/// 不跟工作台自己的数据文件混在一起 —— 那是一整套独立的运行时状态
+const GATEWAY_DIR: &str = "wb-gateway";
+pub const GATEWAY_SETTINGS_FILE: &str = "settings.json";
+pub const GATEWAY_ACCOUNTS_DIR: &str = "accounts";
+pub const GATEWAY_USAGE_FILE: &str = "usage.jsonl";
+pub const GATEWAY_MODELS_FILE: &str = "models.json";
 
 /// 老版本直接写在用户数据根目录下的那批文件：搬家清单（见 `relocate_root_files_in`）
 const ROOT_FILES: &[&str] = &[
@@ -129,6 +138,29 @@ pub fn ball_file() -> PathBuf {
 /// 用户只需要找这一处。
 pub fn panic_log_file() -> PathBuf {
     data_dir().join(PANIC_LOG_FILE)
+}
+
+/// 网关的根目录（`data/wb-gateway`）。
+pub fn gateway_dir() -> PathBuf {
+    data_dir().join(GATEWAY_DIR)
+}
+
+pub fn gateway_settings_file() -> PathBuf {
+    gateway_dir().join(GATEWAY_SETTINGS_FILE)
+}
+
+pub fn gateway_accounts_dir() -> PathBuf {
+    gateway_dir().join(GATEWAY_ACCOUNTS_DIR)
+}
+
+/// 网关的用量流水（一行一条请求，只追加）
+pub fn gateway_usage_file() -> PathBuf {
+    gateway_dir().join(GATEWAY_USAGE_FILE)
+}
+
+/// 上一次从上游拉下来的模型目录（见 `wb_models`）。
+pub fn gateway_models_file() -> PathBuf {
+    gateway_dir().join(GATEWAY_MODELS_FILE)
 }
 
 /// 一次性的本地搬家，启动时跑一次（commands.rs 的 `load_all`，必须早于任何 store 载入）：

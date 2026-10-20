@@ -71,26 +71,6 @@ const isLocalBackground = computed(
     && builtinIdOf(settings.settings.workspaceBackground) === null,
 )
 
-/**
- * 渐淡色：给几个跟这套界面同调的低饱和底色，省得每次现调。
- * 前两个就是明暗两套主题的画布色，选它们等于「跟随主题」的显式版本。
- */
-const VEIL_PRESETS = [
-  '#edeff2',
-  '#1b212a',
-  '#f3efe7',
-  '#eef1ec',
-  '#e9edf2',
-  '#f6ece0',
-  '#2a2620',
-]
-
-const veilLabel = computed(() =>
-  settings.settings.workspaceBackgroundVeil
-    ? settings.settings.workspaceBackgroundVeil.toUpperCase()
-    : '默认（主题画布色）',
-)
-
 const accentPresets: string[] = [...ACCENT_PRESETS]
 
 /** 主题色当前值：留空就是界面原本的中性色，得说清楚「没配」不等于没生效 */
@@ -308,26 +288,6 @@ watch(
                 @change="(value: unknown) => void settings.setBackgroundOpacity(Number(value))"
               />
               <span class="slider__value mono">{{ settings.backgroundOpacity }}%</span>
-            </div>
-
-            <!-- 蒙版色：图片渐淡进去的那个颜色；留空就跟着主题的画布色走 -->
-            <div class="slider">
-              <span class="bg__label">渐淡色</span>
-              <el-color-picker
-                :model-value="settings.settings.workspaceBackgroundVeil || null"
-                size="small"
-                :predefine="VEIL_PRESETS"
-                @change="(value: unknown) => void settings.setBackgroundVeil(String(value ?? ''))"
-              />
-              <span class="bg__veil mono">{{ veilLabel }}</span>
-              <el-button
-                link
-                size="small"
-                :disabled="!settings.settings.workspaceBackgroundVeil"
-                @click="settings.setBackgroundVeil('')"
-              >
-                跟随主题
-              </el-button>
             </div>
 
             <p v-if="settings.backgroundError" class="bg__error">
@@ -631,13 +591,6 @@ watch(
   flex-shrink: 0;
   font-size: var(--fs-micro);
   color: var(--ink-3);
-}
-
-.bg__veil {
-  flex: 1;
-  min-width: 0;
-  font-size: var(--fs-micro);
-  color: var(--ink-2);
 }
 
 /* ---------- 内置壁纸 ---------- */

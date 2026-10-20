@@ -32,6 +32,8 @@ let remotes: Record<string, unknown[]> = {}
 /** 同一个仓库的 config/ 目录：按仓库地址分开装各台机器推上来的配置 */
 let remoteConfigs: Record<string, unknown[]> = {}
 let published: Array<Record<string, unknown>> = []
+/** 网关流水那条命令的参数（与 token 用量同一个仓库、同一个克隆） */
+let gatewayPublished: Array<Record<string, unknown>> = []
 /** 落盘次数：用来钉「内容没变就不该重写磁盘那份」 */
 let saveCount = 0
 let failPublish = false
@@ -145,6 +147,12 @@ beforeAll(() => {
             remotes[repo] = [...others, args?.shard]
             return Promise.resolve({ changed: true, pushed: true, log: '' })
           }
+          case 'gateway_sync_publish': {
+            gatewayPublished.push(args ?? {})
+            if (failPublish)
+              return Promise.reject('仓库推不上去')
+            return Promise.resolve({ changed: true, pushed: true, rows: 1, months: 1, log: '' })
+          }
           case 'token_sync_config': {
             // 外观那条出口（设置 → 外观 →「同步一次」）：只写 config/，用量分片一概不碰
             if (hangPublish)
@@ -184,6 +192,7 @@ beforeEach(() => {
   remotes = {}
   remoteConfigs = {}
   published = []
+  gatewayPublished = []
   saveCount = 0
   failPublish = false
   hangPublish = false
@@ -850,6 +859,8 @@ describe('换同步仓库', () => {
     const before = await token.getTokenUsage({ repo: REPO })
     expect(before.sync.devices.map(item => item.id)).toEqual(['dev-old-repo'])
     expect(inputOn(before)).toBe(1009)
+    // 老仓库那一轮同步还在后台跑：等它落定再换地址，否则它会在切换之后把旧分片写回来
+    await flushBackgroundSync()
 
     const after = await token.getTokenUsage({ repo: OTHER })
     // 老仓库那台机器的数据必须从合计里消失，否则面板显示的是一份「不是你要同步的那个仓库」的数字。
@@ -871,15 +882,19 @@ describe('同步节流', () => {
     await token.getTokenUsage({ repo })
     await flushBackgroundSync()
     expect(published).toHaveLength(1)
+    // 用量那一轮同时推网关流水（同一个仓库、同一个克隆）
+    expect(gatewayPublished).toHaveLength(1)
 
     // 每分钟一次的轮询不该每次都去动 git
     await token.getTokenUsage({ repo })
     await flushBackgroundSync()
     expect(published).toHaveLength(1)
+    expect(gatewayPublished).toHaveLength(1)
 
     // 手动同步：自己等结果回来，不用 flush
     await token.syncTokenUsage(repo)
     expect(published).toHaveLength(2)
+    expect(gatewayPublished).toHaveLength(2)
   })
 
   it('自动同步最多一小时一次：59 分钟不推，过了 60 分钟才推', async () => {

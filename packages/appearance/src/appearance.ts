@@ -25,7 +25,7 @@ import { CARD_OPACITY_DEFAULT, clampCardOpacity } from './card-opacity'
 import { clampTerminalHeight, TERMINAL_HEIGHT_DEFAULT } from './terminal-height'
 import { sanitizeHiddenViews, sanitizeViewOrder, VIEW_IDS } from './views'
 import { builtinReference } from './wallpaper'
-import { BACKGROUND_OPACITY_DEFAULT, clampBackgroundOpacity, sanitizeBackgroundPath, sanitizeVeilColor } from './workspace-background'
+import { BACKGROUND_OPACITY_DEFAULT, clampBackgroundOpacity, sanitizeBackgroundPath } from './workspace-background'
 
 /** 主题取值来源：system 跟随系统，light / dark 是手动钉死 */
 export type ThemeSource = 'system' | 'light' | 'dark'
@@ -58,7 +58,6 @@ export const APPEARANCE_SETTING_KEYS = [
   'terminalHeight',
   'workspaceBackground',
   'workspaceBackgroundOpacity',
-  'workspaceBackgroundVeil',
   'accentColor',
   'accentInk',
   'topBarStyle',
@@ -79,7 +78,6 @@ export interface AppearanceSettings {
   /** 工作区背景：磁盘路径或内置壁纸引用，空串表示用默认画布 */
   workspaceBackground: string
   workspaceBackgroundOpacity: number
-  workspaceBackgroundVeil: string
   accentColor: string
   accentInk: AccentInkMode
   topBarStyle: TopBarStyle
@@ -110,7 +108,6 @@ export const DEFAULT_APPEARANCE: AppearanceSettings = {
   terminalHeight: TERMINAL_HEIGHT_DEFAULT,
   workspaceBackground: builtinReference('五星红旗'),
   workspaceBackgroundOpacity: BACKGROUND_OPACITY_DEFAULT,
-  workspaceBackgroundVeil: '',
   accentColor: ACCENT_COLOR_DEFAULT,
   accentInk: ACCENT_INK_DEFAULT,
   topBarStyle: 'clear',
@@ -150,7 +147,6 @@ export function sanitizeAppearanceSettings(raw: unknown): AppearanceSettings {
     // 图片读不出来不在这里拦（路径本来就可能指向别处的文件）：宿主读图时给出具体原因
     workspaceBackground: sanitizeBackgroundPath(value.workspaceBackground),
     workspaceBackgroundOpacity: clampBackgroundOpacity(value.workspaceBackgroundOpacity),
-    workspaceBackgroundVeil: sanitizeVeilColor(value.workspaceBackgroundVeil),
     accentColor: sanitizeAccentColor(value.accentColor),
     accentInk: sanitizeAccentInkMode(value.accentInk),
     topBarStyle: sanitizeTopBarStyle(value.topBarStyle),

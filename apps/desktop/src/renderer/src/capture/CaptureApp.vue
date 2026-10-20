@@ -11,10 +11,10 @@
  *   —— 从 stage 上取会取到暗层，颜色就不准了。**现用现做**（第一次取色时才画），
  *   它是「鼠标动起来之后」才用得上的东西，不该挡在开场那一下上。
  *
- * 那一帧的字节**从 Rust 走 base64 拿到、自己解成 Blob**（见 `capture_frame` 的说明）：
+ * 那一帧的字节**从 Rust 走二进制 IPC 拿到、自己包成 Blob**（见 `capture_frame` 的说明）：
  * 走 asset 协议会把画布污染掉，`getImageData` 与 `toBlob` 都会抛 —— 放大镜取色、
- * 马赛克、复制 / 保存 / 钉图整条链都靠这两个调用。base64 交给浏览器自己解
- * （`fetch` 一个 data: URL），几兆的图走 atob 再逐字节搬家是几十毫秒的 JS 循环。
+ * 马赛克、复制 / 保存 / 钉图整条链都靠这两个调用。二进制字节包成 Blob 与页面同源，
+ * 又不经过 base64 那一趟 33% 的体积与两次转换。
  *
  * ## 开场
  *
@@ -45,6 +45,7 @@ import {
   canvasToViewport,
   clampRect,
   defaultCaptureName,
+  defaultToolStyles,
   fromDrag,
   growRect,
   HANDLE_TOLERANCE,
@@ -118,6 +119,11 @@ const color = ref(ANNOTATION_COLOR_DEFAULT)
 const strokeWidth = ref(STROKE_WIDTH_DEFAULT)
 const block = ref(MOSAIC_BLOCK_DEFAULT)
 const textSize = ref(TEXT_SIZE_DEFAULT)
+/**
+ * 每个工具自己的一份参数档位（见 @workbench/capture 的 tool-style）。参数一变就按工具条上
+ * 正摆着的那个工具写回（`optionTool`，含选中 / 当前那条标注的工具），切工具时读回新工具那份。
+ */
+const toolStyles = defaultToolStyles()
 
 const cursor = ref<Point>({ x: 0, y: 0 })
 const hovering = ref(false)
@@ -176,6 +182,30 @@ const optionTool = computed<AnnotationTool | null>(() => {
     return activeTool.value
   return pickedOf()?.tool ?? null
 })
+
+/** 参数变了：写回工具条上正摆着的那个工具（那排没显示时 optionTool 为 null，不用记） */
+function rememberStyle(): void {
+  const tool = optionTool.value
+  if (!tool)
+    return
+  toolStyles[tool] = {
+    color: color.value,
+    strokeWidth: strokeWidth.value,
+    block: block.value,
+    textSize: textSize.value,
+  }
+}
+
+/** 切到这个工具：把它自己那一份档位读回来（在清掉选中之后调，免得顺带改到上一条标注） */
+function recallStyle(tool: AnnotationTool): void {
+  const style = toolStyles[tool]
+  color.value = style.color
+  strokeWidth.value = style.strokeWidth
+  block.value = style.block
+  textSize.value = style.textSize
+}
+
+watch([color, strokeWidth, block, textSize], rememberStyle)
 
 // ---------- 启动 ----------
 
@@ -284,12 +314,12 @@ async function loadFrame(): Promise<void> {
   if (!result.ok || !result.data)
     throw new Error(result.error ?? '这一帧读不出来')
 
-  // base64 交给浏览器自己解：几兆的图走 atob 再逐字节搬进 Uint8Array 是几十毫秒的 JS 循环，
-  // 而 data: URL 是原生解码。**这条路要 CSP 放行**：`fetch` 归 `connect-src` 管，生产态的
-  // `csp` 里少一个 `data:` 就是一句 `TypeError: Failed to fetch`（装完才现形，dev 下 CSP 不生效）。
-  // 它同源，画布不会被污染 —— 走 asset 协议才会（见 capture_frame 的说明）
-  const response = await fetch(`data:image/png;base64,${result.data}`)
-  bitmap.value = await createImageBitmap(await response.blob())
+  // 帧走二进制 IPC 过来：直接包成 Blob 交给浏览器原生解 PNG（不再 base64 → data: URL）。
+  // Blob 与页面同源，drawImage 进画布不会污染它 —— 走 asset 协议才会（见 capture_frame 的说明）。
+  // 抓屏出来的 PNG 本来就没带色彩配置、按 sRGB 理解即可，跳过色彩空间转换这一趟
+  bitmap.value = await createImageBitmap(new Blob([result.data], { type: 'image/png' }), {
+    colorSpaceConversion: 'none',
+  })
 }
 
 /**
@@ -816,6 +846,25 @@ function settleFresh(): void {
   freshId.value = null
 }
 
+/**
+ * 换工具 = 上一条标注就此定稿、并且取消选中（**只在切到某个工具时**，切回 null 不算）。
+ * 不然刚画完那条的虚线框与把手会一直留着，按在它身上会被判成「移动它」—— 选着文字工具时
+ * 点在矩形里只想打字，却被拖走了（pointerdown 里 fresh 那条分支排在工具前面）。
+ * 参数那一排这时也已经换成工具的档位，留着选中还会把改色错落到旧的那条上（见 applyToPicked）。
+ * 「画完还能马上挪 / 改大小 / 改参数」不受影响：画完时 activeTool 没翻，fresh 照旧留着。
+ * 选中清掉之后再把这个工具自己那一份档位读回来（见 recallStyle）。
+ */
+watch(activeTool, (next) => {
+  if (next === null)
+    return
+  settleFresh()
+  if (pickedAnnotation.value !== null) {
+    pickedAnnotation.value = null
+    redraw()
+  }
+  recallStyle(next)
+})
+
 function undo(): void {
   if (!historyCanUndo(history.value))
     return
@@ -1185,17 +1234,38 @@ async function pngBase64(): Promise<string | null> {
 }
 
 async function copy(): Promise<void> {
+  const rect = selection.value
+  if (!rect || !hasSelection.value) {
+    failure.value = '还没选好要截的区域'
+    return
+  }
+
+  // **没画标注就别把图搬来搬去**：Rust 手里有这一场的原始帧，由它裁出选区直接写剪贴板
+  // （见 docs/modules/screenshot.md 的「复制这条路的快路径」）
+  const token = sessionSeq
+  if (annotations.value.length === 0 && !draft.value && !textEditing.value) {
+    const crop = clampRect({ ...rect, x: Math.round(rect.x), y: Math.round(rect.y) }, fullRect())
+    const result = await window.workbench.copyFrame({
+      x: Math.round(crop.x),
+      y: Math.round(crop.y),
+      width: Math.max(1, Math.round(crop.width)),
+      height: Math.max(1, Math.round(crop.height)),
+    })
+    // 收工由 Rust 在命令一开始做（遮罩不会停在屏幕上等剪贴板）；失败它另推 capture:failed
+    if (!result.ok && token === sessionSeq)
+      failure.value = result.error ?? '复制到剪贴板失败'
+    return
+  }
+
   const png = await pngBase64()
   if (!png) {
     failure.value = '还没选好要截的区域'
     return
   }
   const result = await window.workbench.copyImage(png)
-  if (!result.ok) {
+  // 同上：遮罩在 Rust 那边已经收掉了，这里只兜住「命令压根没送出去」那种失败
+  if (!result.ok && token === sessionSeq)
     failure.value = result.error ?? '复制到剪贴板失败'
-    return
-  }
-  await abort()
 }
 
 async function save(): Promise<void> {

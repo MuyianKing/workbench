@@ -135,10 +135,11 @@ opt-level = "s"
 panic = "abort"
 strip = true
 
-# 截图那条路（BitBlt → PNG 编码）是「几兆像素的循环」：debug 不优化时编一张 1080p 的 PNG
-# 要一秒多（自适应滤波那一趟占大头），而按热键的整个预算才 200ms —— 它是这条路在开发态
-# 最大的一笔开销。只给这条链上的几个 crate 开优化（实测 295ms → 158ms），不为整棵依赖树
-# （tauri / rusqlite / windows-sys……）买单选。release 本来就全是优化过的，这一段对安装包没有影响。
+# 截图 / 复制那条路是「几兆像素的循环」：debug 不优化时编一张 1080p 的 PNG 要一秒多
+# （自适应滤波那一趟占大头），而按热键的整个预算才 200ms；复制还要把 PNG 解码回像素、
+# 再转成两份 DIB。只给这条链上的几个 crate 开优化（实测 295ms → 158ms），不为整棵依赖树
+# （tauri / rusqlite / windows-sys……）买单选。base64 是复制那条路的另一笔：dev 下解
+# 5MB 的字符串也在 opt-level 0 里跑（复制慢的观感有一截来自它）。
 [profile.dev.package.image]
 opt-level = 3
 [profile.dev.package.png]
@@ -148,4 +149,22 @@ opt-level = 3
 [profile.dev.package.fdeflate]
 opt-level = 3
 [profile.dev.package.miniz_oxide]
+opt-level = 3
+[profile.dev.package.base64]
+opt-level = 3
+
+# release 是 opt-level = "s"（体积优先），上面那条注释里「release 本来就全是优化过的」
+# 只对了一半：这几个 crate 在安装包里也是按体积编的，解码 / 编码会慢一截。只覆盖它们，
+# 不为整棵树买速度（体积与编译耗时都跟着涨）。
+[profile.release.package.image]
+opt-level = 3
+[profile.release.package.png]
+opt-level = 3
+[profile.release.package.flate2]
+opt-level = 3
+[profile.release.package.fdeflate]
+opt-level = 3
+[profile.release.package.miniz_oxide]
+opt-level = 3
+[profile.release.package.base64]
 opt-level = 3

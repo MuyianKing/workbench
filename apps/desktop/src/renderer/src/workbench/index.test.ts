@@ -90,7 +90,8 @@ function api(): WorkbenchApi {
 }
 
 describe('未登录时的同步入口', () => {
-  it('取数不推也不读仓库，同步状态是关的', async () => {
+  // boot() 要重新导入整层适配器并跑一遍 initState，满负载跑全量时 5s 的默认超时不够
+  it('取数不推也不读仓库，同步状态是关的', { timeout: 15_000 }, async () => {
     await boot(null)
     const result = await api().getTokenUsage()
     await flush()
@@ -101,7 +102,7 @@ describe('未登录时的同步入口', () => {
     expect(result.data?.sync.enabled).toBe(false)
   })
 
-  it('手动同步与设备列表同样按「没填地址」处理', async () => {
+  it('手动同步与设备列表同样按「没填地址」处理', { timeout: 15_000 }, async () => {
     await boot(null)
     const result = await api().syncTokenUsage()
     await flush()

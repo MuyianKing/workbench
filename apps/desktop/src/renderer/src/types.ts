@@ -340,11 +340,6 @@ export interface AppSettings {
   /** 背景图浓淡（百分比，越大图越清楚，蒙版越淡） */
   workspaceBackgroundOpacity: number
   /**
-   * 背景图之上那层蒙版的颜色（#rrggbb）：图片就是「渐淡」进这个颜色。
-   * 空串表示跟随主题画布色 —— 不动它就是原来的样子。
-   */
-  workspaceBackgroundVeil: string
-  /**
    * 主题色（#rrggbb）：开关、选中、聚焦这类交互态与主按钮用它。
    * 空串表示用默认的中性色（亮色近黑、暗色近白），也就是界面原本的灰度样子；
    * 只接管交互态，状态色（--st-*）与终端（--term-*）不受影响。
@@ -1100,6 +1095,35 @@ export interface AiRunInput {
 }
 
 export interface WorkbenchApi {
+  /**
+   * 网关（WorkBuddy / CodeBuddy 反代）。
+   *
+   * 这一段整体是新增的一处**网络出口**：只有用户自己点「登录」或「启动」之后才会
+   * 连上游；默认不启动、不监听。账号视图里不含 token，余额查询是显式动作
+   * （原项目把它做成了一个带副作用的 GET）。
+   */
+  gatewayStatus: () => Promise<Result<import('./workbench/gateway').GatewayStatus>>
+  gatewayStart: (port: number) => Promise<Result<number>>
+  gatewayStop: () => Promise<Result<null>>
+  gatewayAccounts: () => Promise<Result<import('./workbench/gateway').GatewayAccount[]>>
+  gatewayReload: () => Promise<Result<null>>
+  /** `realm` 收 `workbuddy`（国际）/ `codebuddy`（国内） */
+  gatewayLoginStart: (realm: string) => Promise<Result<import('./workbench/gateway').GatewayLoginStart>>
+  gatewayLoginPoll: (loginState: string) => Promise<Result<import('./workbench/gateway').GatewayLoginPoll>>
+  gatewayCredits: (uid: string) => Promise<Result<import('./workbench/gateway').GatewayCredits>>
+  gatewayModels: () => Promise<Result<import('./workbench/gateway').GatewayModelInfo[]>>
+  /** 从上游拉一次真实目录并落盘（手动触发，没有定时器） */
+  gatewayModelsRefresh: () => Promise<Result<import('./workbench/gateway').GatewayModelInfo[]>>
+  gatewayAccess: () => Promise<Result<import('./workbench/gateway').GatewayAccess>>
+  gatewayRotateKey: () => Promise<Result<string>>
+  gatewayUsage: (days: number) => Promise<Result<import('./workbench/gateway').GatewayUsageSummary>>
+  gatewayUsageRows: (days: number) => Promise<Result<import('./workbench/gateway').GatewayUsageRow[]>>
+  gatewayUsageRecent: (limit: number) => Promise<Result<import('./workbench/gateway').GatewayUsageRow[]>>
+  /** 手动同步网关流水；`force=false` 时一小时内的重复调用会被节流跳过 */
+  gatewayUsageSync: (force?: boolean) => Promise<Result<import('./workbench/gateway').GatewaySyncResult>>
+  gatewaySyncStatus: () => Promise<import('./workbench/gateway').GatewaySyncStatus>
+  gatewayAccountSet: (uid: string, enabled: boolean) => Promise<Result<null>>
+  gatewayAccountDelete: (uid: string) => Promise<Result<null>>
   versions: { node: string, chrome: string }
   /**
    * 挑一个目录。
@@ -1649,14 +1673,15 @@ export interface WorkbenchApi {
   /** 遮罩窗口问：我代表哪块屏、这场会话一共几块、这次要用的设置是什么 */
   captureContext: () => Promise<Result<CaptureContext>>
   /**
-   * 这块屏那一帧的 PNG（base64）。
+   * 这块屏那一帧的原始 PNG 字节（二进制 IPC，`invoke` 拿到 `ArrayBuffer`）。
    *
+   * **不走 base64**：这是截图上最大的一笔载荷，base64 会多 33% 体积与两次编解码。
    * **不用 asset 协议是有原因的**：渲染层要把这一帧画到画布上，还要 `getImageData`
    * （放大镜取色、马赛克）与 `toBlob`（复制 / 保存 / 钉图）；asset 协议对页面是跨源的，
    * 把它的图 drawImage 进画布会**污染画布**，那两个调用都会抛 SecurityError。
-   * base64 → Blob 是同源，没有这回事（与邮箱附件、笔记图片同一条路）。
+   * 字节包成 Blob 是同源，没有这回事。
    */
-  captureFrame: () => Promise<Result<string>>
+  captureFrame: () => Promise<Result<ArrayBuffer>>
   /**
    * 遮罩里的 JS 报「这一场的帧已经画到画布上了」。`id` 取自 `captureContext` 返回的
    * `session`（那才是它真画出来的那一场）。
@@ -1671,6 +1696,11 @@ export interface WorkbenchApi {
    * IPC 只走 JSON，二进制要编一手）。
    */
   copyImage: (png: string) => Promise<Result<null>>
+  /**
+   * 没画标注时的复制快路径：只把这**块屏画布坐标**上的选区交给 Rust，由它从这一场缓存的
+   * 原始帧里裁出来写剪贴板 —— 不走「JS 合成 → PNG → base64 → IPC → Rust 再解码」那一圈。
+   */
+  copyFrame: (rect: { x: number, y: number, width: number, height: number }) => Promise<Result<null>>
   /**
    * 把最终图落盘，返回真正写进去的绝对路径。
    * `unique` 为真时同名加 `-2` / `-3`（自动保存那条路），为假时覆盖（「另存为」用户挑过的那条路）。

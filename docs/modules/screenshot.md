@@ -35,18 +35,21 @@
 - **遮罩与钉图是独立入口，只装适配层，不装 store、不 initState**：它们是各自的 JS 上下文，
   装主界面那套 store 就会与主窗口**抢着读 / 写同一批 JSON**（`workbench-data.json` 等）。
   它们要的设置由 Rust 随 `capture_context` 一起给（见 capture.rs 的 `CaptureOptions`）。
-- **帧与最终图都走 base64**（`capture_frame` / `capture_copy` / `capture_save` / `pin_create`），
-  与邮箱附件、笔记图片同一条路（IPC 只走 JSON，二进制要编一手），别为此去引 `ipc::Response`
-  的原始字节。
+- **方向决定走不走 base64**（`capture_frame` / `capture_copy` / `capture_save` / `pin_create`）：
+  **Rust → 渲染层的整帧走二进制 IPC**（`capture_frame` 返回 `tauri::ipc::Response`，JS 那边是
+  `ArrayBuffer`，包成 Blob 再 `createImageBitmap`）—— 这是这条路上最大的一笔载荷，base64 会
+  多 33% 体积与两次编解码；**渲染层 → Rust 的最终图仍走 base64**（命令参数只走 JSON，Tauri 的
+  命令参数没有等价的原始字节通道，别把这条也改了）。**例外还有复制那条快路径**：没画标注时走
+  `capture_copy_frame`，只把选区矩形给 Rust（那帧本来就是它抓的），连 PNG 都不搬。
   **帧为什么不走 asset 协议（而钉图可以）**：遮罩窗口要把这一帧画到画布上，还要 `getImageData`
   （放大镜取色、马赛克）与 `toBlob`（复制 / 保存 / 钉图）；asset 协议对页面来说是**跨源**的，
   把它的图 `drawImage` 进画布会把画布**污染**掉 —— 那两个调用都会抛 SecurityError，整条导出链就废了
   （这不是纸上推演：冒烟验证时先按 asset 走的，症状是「选区怎么拖都出不来」—— `getImageData` 抛在
-  `onPointerMove` 的最前面，把整个拖拽打断了）。代价是每帧多一次 base64 往返（几兆的 PNG，几十毫秒），
-  换来的是这几条路都能走。钉图窗口只把图摆出来、从不读像素，所以它照旧走 asset（便宜、也不用编字符串）。
-  **解那一手 base64 走 `fetch` 一个 data: URL**（原生解码，不逐字节搬）—— 这条**要 CSP 放行
-  `connect-src` 的 `data:`**：生产态的 `csp` 里少这一个 scheme，`fetch` 直接 `TypeError: Failed to fetch`，
-  遮罩上就一条红字「这一帧读不出来」（踩过一次：dev 下页面来自 Vite、CSP 根本不生效，装完才现形）。
+  `onPointerMove` 的最前面，把整个拖拽打断了）。二进制字节包成 Blob 与页面同源，没有这回事。
+  钉图窗口只把图摆出来、从不读像素，所以它照旧走 asset（便宜、也不用编字符串）。
+  **旧的 base64 帧路径是 `fetch` 一个 data: URL 解的**；改成二进制之后渲染层里已经没有
+  `fetch(data:)` 的调用点，生产态 `csp` 里 `connect-src` 的 `data:` 暂时留着（删它属于改 CSP，
+  得在装好的生产态复验，见 [ipc-and-state](ipc-and-state.md)）。
 - **系统剪贴板自己写 Win32**（`clipboard.rs`）：一次给齐 **CF_DIBV5 + CF_DIB + 注册格式 `PNG`**。
   不走 `navigator.clipboard` —— WebView2 那条要 `CoreWebView2` 的权限回调放行（wry 没暴露，
   失败还是静默的），而且它只写 PNG 一种格式，认 CF_DIB 的老程序粘出来是空的。
@@ -91,6 +94,12 @@
   见 `adoptPickedStyle`；改了才落，值一样不记撤销）—— 于是「没选工具、只选中了一条」时
   参数那一排也照摆（`CaptureToolbar` 的 `optionTool`）。文字的 `size` 与那个量出来的 `box`
   必须成对改（命中判定与选中框都靠它）。
+- **参数档位按工具分开记**（`packages/capture/src/tool-style.ts` 的 `defaultToolStyles` + CaptureApp 的
+  `toolStyles` / `rememberStyle` / `recallStyle`）：每条工具记着自己的颜色、线宽（马赛克格子、文字字号）。
+  参数一变就写回工具条上**正摆着**的那个工具（`optionTool`，包括选中 / 当前那条标注的工具），
+  切工具时把新工具那份读回来 —— 否则在两条工具之间来回切一次，刚调好的线宽 / 字号就被带跑了。
+  **默认一律最小档**（线宽 2 / 马赛克 6 / 字号 16）；遮罩窗口跨场复用，所以上一场记下的档位
+  下一场接着用，不每场回到默认。
 - **松手不算定稿，去画下一个才算**（`freshId` / `freshOf` / `settleFresh` / `commitEdit`）：
   刚画完的那一条（矩形 / 椭圆 / 箭头 / 马赛克 / 笔迹，以及落下的文字）**仍是「当前」那条** ——
   松手就把它设成选中（虚线框 + 把手 + `Delete` 可删）、工具条参数那一排跟着它
@@ -98,9 +107,13 @@
   （命中用 `hitTestAnnotation`，排在「有工具就起笔」之前，指针形状给 `move`），
   也就是刚画完能立刻挪 / 改大小 / 改参数，不用先退出工具。
   **它一直「当前」到你再去干别的**（也是现在唯一的「定稿」时刻）：起下一笔、开新输入框、
-  动别的标注、重选 / 挪选区，或者它被撤销 / 删掉 —— 每一个这样的分支都要叫一次 `settleFresh()`
-  （只清那个标记，选中照旧留着，它已经落地了，要动得重新点选）。代价（有意的）：想在上一条
-  **里面**起笔，第一下会被当成拖它，得先按一下别处或按 Esc 让它退位。
+  动别的标注、重选 / 挪选区、换工具，或者它被撤销 / 删掉 —— 每一个这样的分支都要叫一次 `settleFresh()`
+  （只清那个标记，选中照旧留着，它已经落地了，要动得重新点选）。代价（有意的）：**在同一种工具下**
+  想在上一条**里面**起笔，第一下会被当成拖它，得先按一下别处或按 Esc 让它退位。
+  **切到另一个工具还要把选中一起清掉**（`watch(activeTool)`，只认切到非 null 的那一下）：留着的话
+  新工具的第一次按下仍会被「按在当前那条身上 = 移动它」抢走 —— 文字工具就完全点不开输入框
+  （用户报过：画完矩形点文字，矩形还带着把手、点进去只挪矩形）；参数那一排也已经换成新工具的档位，
+  再改颜色会错落到旧的那条上。
   **这段期间的微调不压撤销栈**（`commitEdit`：改的是「当前」那条就只换 `present`、不动 `past`），
   于是「画 + 接着挪 / 改大小 / 改参数」算**一步**，`Ctrl+Z` 一下整条连着微调一起退。
   **文字也走同一条**（`commitText` 落完字就选中它、顺手把文字工具收掉）—— 不收的话，
@@ -142,13 +155,17 @@
 7. 做完动作（复制 / 保存 / 钉图）或取消 → `capture_abort`：把遮罩**藏起来**（窗口留着复用）、
    丢掉这场会话的帧，再推一条**不带编号**的 `capture:sync` —— 那一条的意思就是
    「把上一场的帧、选区与标注清掉」。没有落盘的东西，也就没有清不干净的风险。
+   **复制这一条是反过来的**：`capture_copy` / `capture_copy_frame` 一进来就先 `abort`，
+   再解码 / 裁图 / 构 DIB / 写剪贴板 —— 遮罩不该停在屏幕上等这几百毫秒；失败经
+   `capture:failed` 推给主窗口（与「起截图失败」同一条路）。
 
 **为什么要养一池遮罩窗口（预建 + 复用）**：
 
 「按下热键到看见遮罩」要压到两百毫秒级，靠的就只有这一条：**建一块 WebView2 窗口本身就比
 整个预算还贵**（要起 webview、加载 JS 包、跑起 Vue）。所以窗口在 `capture_prewarm`
-（渲染层载入设置之后调一次，见 workbench/index.ts 的 `syncSystemIntegration`）里就建好、藏在屏幕外，
-之后每场截图只是「塞帧 → 摆位置 → 显示」。五条边界：
+（渲染层载入设置之后调一次，见 workbench/index.ts 的 `syncSystemIntegration` —— 它是那几项里
+**最先发起**的，不排在开机自启 / 快捷键之后 await，启动后尽快具备「按热键即出」的条件）里就建好、
+藏在屏幕外，之后每场截图只是「塞帧 → 摆位置 → 显示」。五条边界：
 
 - **每块屏常驻一块 webview**（有意换来的，不是漏掉的）；设置里关掉截图会经 `capture_prewarm(false)` 收掉池子；
 - 屏幕数变了（插拔显示器）池子就对不上，那就**整批重建**：旧的一代先 `close()`（异步的，还在
@@ -179,18 +196,40 @@
 | 复用遮罩窗口 | ~1ms | 池子命中时只有一次查找。**一场一建的话，光 `build()` 返回就要 124~155ms**，之后还得等那一屏的 JS 包加载、Vue 起来 |
 | BitBlt + GetDIBits + BGRA→RGBA | ~40ms | 都是系统调用；换通道那一趟按 DWORD 走（见 screen.rs）。`CreateDIBSection` 那条路量过，没有更快 |
 | PNG 编码 | ~36ms | `Fast` + `Sub`；换成默认的「自适应滤波」同屏要 166ms（多屏成倍） |
-| base64 编码 | ~2ms | |
-| 取帧（base64 走 IPC） | 75~81ms | 4.28MB 的 PNG 编成 5.7MB 字符串，**约 13ms/MB** —— 按字节线性涨，帧一大它跟着涨 |
-| `fetch` 解 data: URL | 1~2ms | 交给浏览器原生解，不是 JS 逐字节搬 |
+| 取帧（二进制 IPC） | 原 base64 为 75~81ms，改后待复测 | 直接传 4.28MB PNG 原始字节（不再撑成 5.7MB 字符串）；省掉 base64 编解码，量级仍按字节线性涨 |
+| 包成 Blob | ~1ms | 不再 `fetch` data: URL |
 | `createImageBitmap` 解 PNG | ~26ms | |
 | 重画到画布 | ~30ms | 取样画布挪到「第一次取色时」做了，不在这一笔里 |
-| **合计（按下 → 遮罩出现）** | **248~276ms** | Rust 侧 ~80ms、IPC 那一段 ~80ms、剩下 ~100ms 在遮罩窗口里。**遮罩就是在这时候出现的**（画布上已经有画面，见上面那条），不是提前出现再等画面 |
+| **合计（按下 → 遮罩出现）** | **原 248~276ms，改后待复测** | 去掉 base64 那一段后应当少一截（载荷少 25% + 两次编解码）；**遮罩仍然是在画布有画面之后才出现**，不是提前出现再等画面 |
+
+**这张表是在把帧改成二进制 IPC 之前量的**（2026-10）：帧那一行与合计需要按新路径复测；
+其余几行不受影响。
 
 三件事值得记住：**建窗口那一笔是热身省掉的**（也是它最值钱）；**取帧那一段是内容相关的**
 （这张屏的帧 4.28MB 就是这么来的，画面干净时它小得多，整串跟着小）；
 **dev 下要多几百毫秒**，那是没优化的 Rust 代码在前面三笔上多花的 —— PNG 编码首当其冲，
 已经在 Cargo.toml 里给 `image` / `png` / `flate2` / `fdeflate` / `miniz_oxide` 开了 `opt-level = 3`
 （同屏 295ms → 158ms）。
+
+**复制到剪贴板这条路**（用户报过「复制有点慢」）：
+
+- **没画标注走 `capture_copy_frame`**：渲染层只给选区矩形（这块屏的画布坐标），Rust 从这一场
+  缓存的原始 PNG 里裁。省掉的是「JS 在整帧画布上合成 → 选区 PNG 编码 → base64 → IPC →
+  Rust 再 base64 解码」一整圈。
+- **画了标注才走 `capture_copy`**：标注只有渲染层会画（与显示共用 `drawAnnotations`），
+  图的那一圈往返躲不掉。
+- **DIB 只转换一遍像素**（`clipboard.rs` 的 `bgra_bottom_up`）：两份 DIB 的像素段完全一样，
+  先写一份自底向上的 BGRA 缓冲，两个头各自 `extend_from_slice` 拷过去。从前是两趟逐像素
+  `Vec::push`，4K 下就是两趟 33MB。
+- **遮罩在命令一开始就收**，剪贴板在后台写完；失败时遮罩已经没了，所以经 `capture:failed`
+  把主窗口唤出来并弹提示（与「起截图失败」同一条口径）。
+- **剪贴板里的 `PNG` 格式仍是裁剪后的图**：整屏时直接复用缓存的 PNG 字节，非整屏时用抓屏
+  同一个编码档（`Fast` + `Sub`）在 Rust 里重编一次 —— 这是快路径唯一多出来的一笔。
+- 依赖档位见 `Cargo.toml`：`base64` 在 dev 下、`image` / `png` / `flate2` / `fdeflate` /
+  `miniz_oxide` 在 release 下都按 `opt-level = 3` 编（release 全局是 `s`，按体积编的解码
+  会慢一截）。
+- **这些数要在 release 里量**：dev 下我们自己的像素循环（DIB 转换）没开优化，观感会明显
+  更慢；拿 dev 的数字判断这条路会误判。
 
 **坐标有三层**（写清楚免得混，口径在 `packages/capture/src/coords.ts` 的文件头）：
 虚拟桌面物理坐标（Rust 摆窗口、钉图定位用）→ 画布像素（某块屏自己的物理像素，与那帧 PNG 一一对应）
@@ -283,7 +322,7 @@ Ctrl+滚轮调透明度。**尺寸与位置一律取整**：`pin_update` 那边�
 `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="--remote-debugging-port=9222" pnpm run dev`，连 CDP
 在页面里求值驱动一遍，逐条看：**应用起来之后 `/json/list` 里就已经有 `capture.html` 那个 target**
 （窗口是预建的 —— 这是预热生效的判据）→ `beginCapture` 的屏数 → `.capture__stage`
-的尺寸等于这块屏的物理像素 → **画布上取一个像素、alpha 是 255**（证明 BitBlt → PNG → base64 →
+的尺寸等于这块屏的物理像素 → **画布上取一个像素、alpha 是 255**（证明 BitBlt → PNG → 二进制 IPC →
 Blob → `drawImage` 这一串真的通了）→ 合成出来的 PNG 有几十上百 KB → `abortCapture` 之后
 **target 还在**（窗口复用，只藏起来）、画布 alpha 回到 0（收工清干净了）、再问一次
 `captureContext` 应当回「截图会话已经结束了」→ 再 `beginCapture` 一次应当照常（第二场走的是复用那条路）
@@ -292,8 +331,9 @@ Blob → `drawImage` 这一串真的通了）→ 合成出来的 PNG 有几十�
 **这一串里「帧画上去了没有」那一条必须另起一遍生产态**（`pnpm run build` 出来的那个 exe，或者按
 [dev-notes/browser-preview-verification.md](../dev-notes/browser-preview-verification.md) 里那条手搓一个 ——
 关键是 `cargo build` 要带 `--features tauri/custom-protocol`，漏了编出来是 dev 语义）：
-dev 下页面来自 Vite、CSP 根本不生效，`fetch` 那一笔被拦只有装完才现形（踩过一次，见「帧与最终图都走 base64」
-那条）。判据一样 —— 遮罩上**没有**「这一帧读不出来」那条红字、画布 alpha 是 255。
+dev 下页面来自 Vite、CSP 根本不生效，资源或通道被拦只有装完才现形（踩过一次：旧的 base64 帧路径要
+`fetch` data: URL，生产态 `connect-src` 少一个 `data:` 就整条读不出来）。判据一样 —— 遮罩上**没有**
+「这一帧读不出来」那条红字、画布 alpha 是 255。
 两个 exe 不能同时开（单实例按 identifier 认名 —— 装着的那份与 `target/release` 那份算同一个）。
 
 **「显示的那一瞬间闪不闪」只能靠外部抓屏量**（CDP 合成事件与 `Runtime.evaluate` 都看不见合成器那一下）：
@@ -312,15 +352,18 @@ dev 下页面来自 Vite、CSP 根本不生效，`fetch` 那一笔被拦只有�
 两个判据：**`showCapture` 被调用的那一刻画布 alpha 就是 255**（包 `showCapture` 时顺手读一次
 `getImageData` 即可）—— 那就是「显示时已经有画面」；窗口真假可以按进程枚举顶层窗口核对
 （`EnumWindows` + `IsWindowVisible`：藏着的时候 `visible=False`，截图进行中是 `True`）。
-剪贴板那条**读回来核对**：`copyImage` 之后用 PowerShell 的
+剪贴板那条**读回来核对**：`copyImage`（有标注）/ `copyFrame`（没标注）之后用 PowerShell 的
 `[System.Windows.Forms.Clipboard]::GetImage()` 看有没有图、`GetFormats()` 里该有
-`Format17`(CF_DIBV5)、`DeviceIndependentBitmap`(CF_DIB) 与 `PNG` 三种。收工别忘了
+`Format17`(CF_DIBV5)、`DeviceIndependentBitmap`(CF_DIB) 与 `PNG` 三种。**这两条命令都是先把
+遮罩收掉再写剪贴板**，所以「遮罩已经没了、剪贴板里暂时还没有」是正常的，读之前等一小会儿
+（或者把 `GetFormats()` 放进一个短轮询里）。收工别忘了
 `taskkill /F /T /IM workbench.exe` 与那串 vite / cargo 子进程（见 AGENTS.md 第 6 节）。
 
 **文字那一摊（输入框跟着合成长、落点与输入框对齐）在浏览器里就能验，不必起应用**：
 `pnpm run build:renderer` 之后把 `out/renderer` 拷到**临时目录**，在 `capture.html` 的 `<head>` 里插一个
 经典脚本假造 `window.__TAURI__`（`core.invoke` 认 `capture_context` / `capture_frame` / `capture_show`，
-帧用一张现造的画布 PNG 现算，`event.listen` 给个空订阅），再用几十行的 node 静态服务起在临时端口上
+帧用一张现造的画布 PNG 现算 —— **`capture_frame` 现在要回 `Blob` 的 `arrayBuffer()`（`ArrayBuffer`）**，
+不再是 base64 字符串，`event.listen` 给个空订阅），再用几十行的 node 静态服务起在临时端口上
 （**仓库里一个文件都不用加**，验完把临时目录与那份产物一起删掉）。判据：拖一块选区 → 点文字工具
 （工具条里第 7 颗 `overlay-tool`）→ 画布上点一下；**`compositionstart` 之后只改 `value` 不发 input，
 框不跟着长（= 修复前的样子），补一条原生 `input` 就跟着长**（合成中的拼音就是这么进 DOM 的）；

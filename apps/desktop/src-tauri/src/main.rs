@@ -43,6 +43,24 @@ mod system;
 mod token;
 mod vault;
 mod video;
+mod wb_account;
+mod wb_api_auth;
+mod wb_api_billing;
+mod wb_api_chat;
+mod wb_credits;
+mod wb_fingerprint;
+mod wb_gateway;
+mod wb_identity;
+mod wb_jwt;
+mod wb_models;
+mod wb_relay;
+mod wb_pricing;
+mod wb_realm;
+mod wb_router;
+mod wb_sanitize;
+mod wb_server;
+mod wb_sse;
+mod wb_usage;
 mod weather;
 mod zentao;
 
@@ -487,6 +505,7 @@ fn main() {
                 .build(),
         )
         .manage(MaximizedFlag(Mutex::new(false)))
+        .manage(wb_gateway::Gateway::default())
         .manage(Hotkeys::default())
         .manage(session::Sessions::default())
         .manage(PendingQuit(Mutex::new(None)))
@@ -583,6 +602,7 @@ fn main() {
             commands::token_sync_publish,
             commands::token_sync_config,
             commands::token_sync_shards,
+            commands::gateway_sync_publish,
             commands::auth_status,
             commands::auth_refresh_account,
             commands::auth_login_start,
@@ -651,6 +671,7 @@ fn main() {
             capture::capture_frame,
             capture::capture_show,
             capture::capture_copy,
+            capture::capture_copy_frame,
             capture::capture_save,
             pin::pin_create,
             pin::pin_context,
@@ -659,6 +680,23 @@ fn main() {
             pin::pin_close_all,
             pin::pin_copy,
             pin::pin_save,
+            wb_gateway::wb_gateway_status,
+            wb_gateway::wb_gateway_start,
+            wb_gateway::wb_gateway_stop,
+            wb_gateway::wb_gateway_accounts,
+            wb_gateway::wb_gateway_reload,
+            wb_gateway::wb_gateway_login_start,
+            wb_gateway::wb_gateway_login_poll,
+            wb_gateway::wb_gateway_credits,
+            wb_gateway::wb_gateway_account_set,
+            wb_gateway::wb_gateway_account_delete,
+            wb_gateway::wb_gateway_models,
+            wb_gateway::wb_gateway_models_refresh,
+            wb_gateway::wb_gateway_access,
+            wb_gateway::wb_gateway_rotate_key,
+            wb_gateway::wb_gateway_usage,
+            wb_gateway::wb_gateway_usage_rows,
+            wb_gateway::wb_gateway_usage_recent,
             ball::ball_apply,
             ball::ball_context,
             ball::ball_open,
