@@ -1123,6 +1123,8 @@ export interface WorkbenchApi {
   gatewayUsageSync: (force?: boolean) => Promise<Result<import('./workbench/gateway').GatewaySyncResult>>
   gatewaySyncStatus: () => Promise<import('./workbench/gateway').GatewaySyncStatus>
   gatewayAccountSet: (uid: string, enabled: boolean) => Promise<Result<null>>
+  /** 选号优先级：1..=100，数大的先用 */
+  gatewayAccountPriority: (uid: string, priority: number) => Promise<Result<null>>
   gatewayAccountDelete: (uid: string) => Promise<Result<null>>
   versions: { node: string, chrome: string }
   /**

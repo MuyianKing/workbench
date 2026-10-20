@@ -53,6 +53,8 @@ mod wb_gateway;
 mod wb_identity;
 mod wb_jwt;
 mod wb_models;
+mod wb_pool;
+mod wb_quota;
 mod wb_relay;
 mod wb_pricing;
 mod wb_realm;
@@ -471,11 +473,17 @@ fn main() {
     // 第一件事：release 档 panic 直接中止进程，只有这个钩子能把那一下记下来
     panic_log::install();
 
-    tauri::Builder::default()
-        // 单实例必须最先注册：两个进程各持一份内存数据，后写的一次会把前一次的改动整个覆盖掉
-        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
-            show_main_window(app);
-        }))
+    let builder = tauri::Builder::default();
+
+    // 单实例只在正式版注册（必须最先注册）：两个进程各持一份内存数据，后写的一次会把前一次的改动整个覆盖掉。
+    // 开发版（`pnpm dev`）刻意不注册：它要和装着的那份同时开，两边共用同一份数据目录，
+    // 代价（同时改数据以后写的为准、后台轮询与通知各跑一遍）见 docs/dev-notes/browser-preview-verification.md。
+    #[cfg(not(dev))]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+        show_main_window(app);
+    }));
+
+    builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         // 开机自启：设置里改了就落一条注册表项（Windows 走的是启动项）
@@ -689,6 +697,7 @@ fn main() {
             wb_gateway::wb_gateway_login_poll,
             wb_gateway::wb_gateway_credits,
             wb_gateway::wb_gateway_account_set,
+            wb_gateway::wb_gateway_account_priority,
             wb_gateway::wb_gateway_account_delete,
             wb_gateway::wb_gateway_models,
             wb_gateway::wb_gateway_models_refresh,

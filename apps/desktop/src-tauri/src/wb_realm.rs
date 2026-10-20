@@ -28,7 +28,8 @@ pub enum Realm {
 /// 一个区域的全部固定参数。`&'static str` 是因为它们全是编译期常量。
 #[derive(Debug)]
 pub struct RealmConfig {
-    /// 界面上的名字（与账号标签一致）
+    /// 界面上的账号类型名。区域不跟在后面：WorkBuddy 就是国际版、CodeBuddy 就是国内版，
+    /// 这两件事一一对应，写两遍只是噪音。
     pub label: &'static str,
     /// 对话 / 鉴权 / 上报的 base
     pub chat_upstream: &'static str,
@@ -54,7 +55,7 @@ pub struct RealmConfig {
 ///
 /// 注意别拿 Electron 主进程自己的旁路请求来抄：那一路的 UA 两段都是 `workbuddy-ai`。
 pub const WORKBUDDY: RealmConfig = RealmConfig {
-    label: "WorkBuddy（国际）",
+    label: "WorkBuddy",
     chat_upstream: "https://www.workbuddy.ai",
     billing_upstream: "https://www.workbuddy.ai",
     origin: "https://www.workbuddy.ai",
@@ -72,7 +73,7 @@ pub const WORKBUDDY: RealmConfig = RealmConfig {
 /// 2. 记账 base 又是第三个域 `www.codebuddy.cn`（与 origin 同域但语义不同）；
 /// 3. `X-Domain` 用 `copilot.tencent.com`，不是 origin。
 pub const CODEBUDDY: RealmConfig = RealmConfig {
-    label: "CodeBuddy（国内）",
+    label: "CodeBuddy",
     chat_upstream: "https://copilot.tencent.com",
     billing_upstream: "https://www.codebuddy.cn",
     origin: "https://www.codebuddy.cn",

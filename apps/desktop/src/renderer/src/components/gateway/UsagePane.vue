@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import type { GatewayUsageSummary } from '@workbench/usage'
-import { Histogram } from '@element-plus/icons-vue'
-import { gatewayBucketUnit, summarizeGatewayRows } from '@workbench/usage'
-import { ElMessage } from 'element-plus'
+import type { GatewayUsageRow } from '@/workbench/gateway'
+import { Bottom, CircleCheck, DataLine, Histogram, Timer, Top } from '@element-plus/icons-vue'
+import { gatewayBucketUnit, recentHourBuckets, summarizeGatewayRows } from '@workbench/usage'
 import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref } from 'vue'
 import EmptyState from '@/components/EmptyState.vue'
 import { gatewayAccountNames } from '@/workbench/gateway'
@@ -11,14 +11,15 @@ import { gatewayAccountNames } from '@/workbench/gateway'
  * 用量总览。
  *
  * 布局照 Hub 的看板：一排 KPI、一张时序柱状图、一张可切换维度的明细表 ——
- * 积分与缓存的五张汇总卡并在这张面板的表格下面，不再另起一栏。
+ * 积分与缓存的汇总并在这张面板里，做成一块「积分总账」（左侧主数字 + 右侧 2×2 佐证），
+ * 放在表格上面，不再另起一栏。
  * 明细表**只有一张**：用量（请求 / 失败 / token / 延迟 / 速度）与积分（扣除积分 / 匹配 Token /
  * 比率 / 缓存命中率）是同一行上的两截，按账号或按模型由同一个切换控制 ——
  * 两处各摆一张表时，同一个账号要在上下两处对齐看，请求数还写了两遍。
  * 图是手绘的（一排 div），不引图表库 —— 仓库的依赖规矩不允许为几张柱状图引一整套运行时。
  *
- * 时序的粒度不在这一页定：一周以内按小时、再长按天，由 Rust 的 `bucket_unit` 给，
- * 这一页只照着 `bucketUnit` 排柱子与标签（见 `bars`）。
+ * 时序图固定看**最近 24 小时**（逐小时，带纵轴）：页面顶上的时间范围只管 KPI 与明细表，
+ * 不再决定图表的粒度 —— 两者回答的不是同一个问题（「这段时间一共多少」vs「最近这一天的节奏」）。
  *
  * 所有数字来自 Rust 的 `wb_gateway_usage`，这一页只做格式化。
  */
@@ -33,16 +34,16 @@ const DIMENSIONS = [
   { label: '按模型', value: 'model' },
 ]
 
-const days = ref(3)
+/** 默认「今日」：进页面先看当天，要更长的窗口再手动切 */
+const days = ref(1)
 /** 明细表唯一的维度切换：用量列与积分列一起切，不再各留一个 */
 const dimension = ref<'account' | 'model'>('account')
 const summary = ref<GatewayUsageSummary | null>(null)
+/** 窗口内的原始流水：图表固定看最近 24 小时，要从这里重新分桶 */
+const rows = ref<GatewayUsageRow[]>([])
 const loading = ref(false)
 /** 读取失败的原因：失败时页面不能只留一排 0 */
 const loadError = ref('')
-/** 同步开关（登录 + 配了仓库才有）；关着的时候不显示「同步」按钮 */
-const syncEnabled = ref(false)
-const syncing = ref(false)
 /** uid → 账号名：明细表里要显示名字，流水里只有 uid */
 const names = ref<Record<string, string>>({})
 
@@ -64,27 +65,52 @@ interface DetailRow {
 }
 
 /**
- * 柱状图的柱子。粒度由后端定：一周以内一小时一根（看尖峰），长窗口一天一根。
- * 按天那档最多三十根，标签全画得下；按小时那档一周有 168 根，标签要抽稀，
- * 否则每个柱子底下一串数字会糊成一条灰带 —— 抽到十来个，够读节奏就行。
+ * 图表固定看最近 24 小时，不跟页面上选的时间范围走：从当前小时往前数 24 格，
+ * 没有请求的小时补 0，横轴的格数与位置才是稳定的。
+ */
+const chartBuckets = computed(() => recentHourBuckets(rows.value, 24, Date.now() / 1000))
+
+/** 这 24 小时里有没有请求：全为 0 就显示空态，不画一排零高度的柱子 */
+const hasChartData = computed(() => chartBuckets.value.some(item => item.requests > 0))
+
+/**
+ * 柱状图的柱子。24 小时的标签要抽稀（隔一根标一个），
+ * 否则每个柱子底下一串日期会糊成一条灰带 —— 抽到十来个，够读节奏就行。
  */
 const bars = computed(() => {
-  const list = summary.value?.byBucket ?? []
+  const list = chartBuckets.value
   const max = Math.max(1, ...list.map(item => item.totalTokens))
   const every = Math.max(1, Math.ceil(list.length / 12))
   return list.map((item, index) => ({
     ...item,
-    height: Math.max(2, Math.round(item.totalTokens / max * 100)),
+    height: item.totalTokens > 0 ? Math.max(2, Math.round(item.totalTokens / max * 100)) : 0,
     label: index % every === 0 ? item.bucket.slice(5) : '',
   }))
 })
 
-const bucketLabel = computed(() => (summary.value?.bucketUnit === 'hour' ? '按小时' : '按天'))
+/**
+ * 纵轴：刻度取整数，单位只写在轴顶一次（M / K）。
+ * 单位按峰值挑一档，保证四格刻度在缩放后仍是不同的整数（1.2M 用 K 而不是 1/1/1）。
+ */
+const yAxis = computed(() => {
+  const max = Math.max(0, ...chartBuckets.value.map(item => item.totalTokens))
+  if (max <= 0)
+    return { unit: '', ticks: [] as { pct: number, label: string }[] }
 
-/** 悬停时看全：按小时那档把 `14` 补成 `14:00`，按天那档原样 */
+  const divisor = max >= 4_000_000 ? 1_000_000 : max >= 4_000 ? 1_000 : 1
+  const unit = divisor === 1_000_000 ? 'M' : divisor === 1_000 ? 'K' : ''
+  return {
+    unit,
+    ticks: [0.25, 0.5, 0.75, 1].map(ratio => ({
+      pct: ratio * 100,
+      label: String(Math.round(max * ratio / divisor)),
+    })),
+  }
+})
+
+/** 悬停时看全：小时桶补上 `:00` */
 function barTitle(item: { bucket: string, totalTokens: number, requests: number }): string {
-  const when = summary.value?.bucketUnit === 'hour' ? `${item.bucket}:00` : item.bucket
-  return `${when} · ${compact(item.totalTokens)} token · ${item.requests} 次`
+  return `${item.bucket}:00 · ${compact(item.totalTokens)} token · ${item.requests} 次`
 }
 
 const detailRows = computed<DetailRow[]>(() => {
@@ -125,7 +151,7 @@ const detailRows = computed<DetailRow[]>(() => {
   }))
 })
 
-/** 没有积分观测的模型数：有 token、但上游没给 credit —— 这部分不参与折算，也不该显示成 0 */
+/** 没有有效积分样本的模型数：有 token、但 credit 缺失或为 0 —— 这部分不参与折算，也不该显示成 0 */
 const missingCreditCount = computed(() =>
   (summary.value?.byModel ?? []).filter(item => item.creditSamples === 0 && item.totalTokens > 0).length,
 )
@@ -148,14 +174,21 @@ function credit(value: number): string {
 }
 
 /**
- * 积分 / 1M Token。分母是**与积分同时观测到的总 token**（`creditTokens`）——
- * 缺积分的历史不进分母，否则比率会被无积分的 token 稀释。没有样本就显示 `—`，
+ * 积分 / 1M Token。分母是**积分大于 0 的请求的总 token**（`creditTokens`）——
+ * 缺积分与 credit = 0 的免费请求都不进分母，否则比率会被零消耗的 token 稀释。没有样本就显示 `—`，
  * 不拿 0 冒充「测出来是零」。跨模型时后端用两个总量直接除，不是各组比率的平均。
  */
+function ratioValue(value: number, samples: number): string {
+  if (samples <= 0)
+    return '—'
+  return String(Number(value.toFixed(4)))
+}
+
+/** 表格那列的单位已经写在表头里，这里带上一截，方便单独读 */
 function creditRatio(value: number, samples: number): string {
   if (samples <= 0)
     return '—'
-  return `${String(Number(value.toFixed(4)))} / 1M`
+  return `${ratioValue(value, samples)} / 1M`
 }
 
 /**
@@ -182,6 +215,7 @@ function load(): void {
   void window.workbench.gatewayUsageRows(days.value).then((result) => {
     if (result.ok && result.data) {
       // Rust 只取数：分组 / 分桶 / 比率的口径在 @workbench/usage
+      rows.value = result.data
       summary.value = summarizeGatewayRows(result.data, gatewayBucketUnit(days.value))
       loadError.value = ''
     }
@@ -198,32 +232,6 @@ function load(): void {
   void gatewayAccountNames().then((map) => {
     names.value = map
   })
-}
-
-/** 手动同步：强制走一次 git（不受一小时节流影响），成功后重新读一遍用量 */
-async function syncNow(): Promise<void> {
-  if (syncing.value)
-    return
-  syncing.value = true
-  try {
-    const result = await window.workbench.gatewayUsageSync(true)
-    if (!result.ok || !result.data) {
-      ElMessage.error(result.error ?? '同步失败')
-      return
-    }
-    if (!result.data.enabled) {
-      ElMessage.info('未开启同步')
-      return
-    }
-    ElMessage.success(result.data.changed ? '已同步' : '已是最新')
-    load()
-  }
-  catch {
-    ElMessage.error('同步失败')
-  }
-  finally {
-    syncing.value = false
-  }
 }
 
 /**
@@ -244,10 +252,6 @@ onMounted(() => {
     if (active)
       load()
   }, POLL_INTERVAL)
-  // 同步开关跟登录态 / 仓库地址走；拿不到就当作没开，页面照常读本机
-  void window.workbench.gatewaySyncStatus().then((status) => {
-    syncEnabled.value = status.enabled
-  }).catch(() => undefined)
 })
 
 onActivated(() => {
@@ -275,18 +279,7 @@ onBeforeUnmount(() => {
   <div class="usage">
     <div class="panel usage__head">
       <div class="panel__head">
-        <h2 class="usage__panel-title">
-          用量总览
-        </h2>
-        <div class="usage__head-right">
-          <el-segmented v-model="days" :options="RANGES" size="small" @change="load" />
-          <el-button v-if="syncEnabled" size="small" text :loading="syncing" @click="syncNow">
-            同步
-          </el-button>
-          <el-button size="small" text :loading="loading" @click="load">
-            刷新
-          </el-button>
-        </div>
+        <el-segmented v-model="days" :options="RANGES" size="small" @change="load" />
       </div>
       <p v-if="loadError" class="usage__error">
         {{ loadError }}
@@ -294,176 +287,206 @@ onBeforeUnmount(() => {
     </div>
 
     <div class="usage__cards">
-      <div class="usage__card">
-        <span class="usage__label">请求数</span>
-        <span class="usage__value">{{ summary?.requests ?? 0 }}</span>
-        <span class="usage__sub">其中失败 {{ summary?.failed ?? 0 }} 次</span>
+      <div class="usage__card is-requests">
+        <span class="usage__card-icon"><el-icon><DataLine /></el-icon></span>
+        <div class="usage__card-body">
+          <span class="usage__label">请求数</span>
+          <span class="usage__value">{{ summary?.requests ?? 0 }}</span>
+          <span class="usage__sub">其中失败 {{ summary?.failed ?? 0 }} 次</span>
+        </div>
       </div>
-      <div class="usage__card">
-        <span class="usage__label">总 token</span>
-        <span class="usage__value">{{ compact(summary?.totalTokens ?? 0) }}</span>
-        <span class="usage__sub">入 {{ percent((summary?.promptTokens ?? 0) / Math.max(1, summary?.totalTokens ?? 1) * 100) }} · 出 {{ percent((summary?.completionTokens ?? 0) / Math.max(1, summary?.totalTokens ?? 1) * 100) }}</span>
+      <div class="usage__card is-tokens">
+        <span class="usage__card-icon"><el-icon><Histogram /></el-icon></span>
+        <div class="usage__card-body">
+          <span class="usage__label">总 token</span>
+          <span class="usage__value">{{ compact(summary?.totalTokens ?? 0) }}</span>
+          <span class="usage__sub">入 {{ percent((summary?.promptTokens ?? 0) / Math.max(1, summary?.totalTokens ?? 1) * 100) }} · 出 {{ percent((summary?.completionTokens ?? 0) / Math.max(1, summary?.totalTokens ?? 1) * 100) }}</span>
+        </div>
       </div>
-      <div class="usage__card">
-        <span class="usage__label">输入</span>
-        <span class="usage__value is-run">{{ compact(summary?.promptTokens ?? 0) }}</span>
+      <div class="usage__card is-input">
+        <span class="usage__card-icon"><el-icon><Bottom /></el-icon></span>
+        <div class="usage__card-body">
+          <span class="usage__label">输入</span>
+          <span class="usage__value">{{ compact(summary?.promptTokens ?? 0) }}</span>
+        </div>
       </div>
-      <div class="usage__card">
-        <span class="usage__label">输出</span>
-        <span class="usage__value is-ok">{{ compact(summary?.completionTokens ?? 0) }}</span>
+      <div class="usage__card is-output">
+        <span class="usage__card-icon"><el-icon><Top /></el-icon></span>
+        <div class="usage__card-body">
+          <span class="usage__label">输出</span>
+          <span class="usage__value">{{ compact(summary?.completionTokens ?? 0) }}</span>
+        </div>
       </div>
-      <div class="usage__card">
-        <span class="usage__label">成功率</span>
-        <span class="usage__value">{{ percent(summary?.successPct ?? 0) }}</span>
-        <span class="usage__sub">失败 {{ summary?.failed ?? 0 }} 次</span>
+      <div class="usage__card is-success">
+        <span class="usage__card-icon"><el-icon><CircleCheck /></el-icon></span>
+        <div class="usage__card-body">
+          <span class="usage__label">成功率</span>
+          <span class="usage__value">{{ percent(summary?.successPct ?? 0) }}</span>
+          <span class="usage__sub">失败 {{ summary?.failed ?? 0 }} 次</span>
+        </div>
       </div>
-      <div class="usage__card">
-        <span class="usage__label">平均延迟</span>
-        <span class="usage__value">{{ ((summary?.avgTtftMs ?? 0) / 1000).toFixed(2) }}s</span>
-        <span class="usage__sub">吐字 {{ (summary?.tokensPerSec ?? 0).toFixed(1) }} tok/s</span>
+      <div class="usage__card is-latency">
+        <span class="usage__card-icon"><el-icon><Timer /></el-icon></span>
+        <div class="usage__card-body">
+          <span class="usage__label">平均延迟</span>
+          <span class="usage__value">{{ ((summary?.avgTtftMs ?? 0) / 1000).toFixed(2) }}s</span>
+          <span class="usage__sub">吐字 {{ (summary?.tokensPerSec ?? 0).toFixed(1) }} tok/s</span>
+        </div>
       </div>
     </div>
 
     <section class="panel usage__section">
       <div class="usage__section-head">
         <h3>Token 时序</h3>
-        <span class="usage__dim">{{ bucketLabel }} · 峰值 {{ compact(Math.max(0, ...(summary?.byBucket ?? []).map(item => item.totalTokens))) }}</span>
+        <span class="usage__dim">近 24 小时</span>
       </div>
-      <EmptyState v-if="!bars.length" compact :icon="Histogram" text="这段时间还没有请求" />
-      <template v-else>
-        <div class="usage__chart" :class="{ 'usage__chart--hour': summary?.bucketUnit === 'hour' }">
-          <div v-for="item in bars" :key="item.bucket" class="usage__bar" :title="barTitle(item)">
-            <span class="usage__bar-fill" :style="{ height: `${item.height}%` }" />
+      <template v-if="hasChartData">
+        <div class="usage__plot">
+          <!-- 纵轴：整数刻度，单位统一标在轴顶 -->
+          <div class="usage__yaxis" aria-hidden="true">
+            <span v-if="yAxis.unit" class="usage__yunit">{{ yAxis.unit }}</span>
+            <span
+              v-for="tick in yAxis.ticks"
+              :key="tick.pct"
+              class="usage__ytick"
+              :style="{ bottom: `${tick.pct}%` }"
+            >{{ tick.label }}</span>
+          </div>
+          <div class="usage__plot-main">
+            <div class="usage__chart">
+              <!-- 虚线网格画在柱子后面 -->
+              <div class="usage__grid" aria-hidden="true">
+                <span
+                  v-for="tick in yAxis.ticks"
+                  :key="tick.pct"
+                  class="usage__gridline"
+                  :style="{ bottom: `${tick.pct}%` }"
+                />
+              </div>
+              <div v-for="item in bars" :key="item.bucket" class="usage__bar" :title="barTitle(item)">
+                <span class="usage__bar-fill" :style="{ height: `${item.height}%` }" />
+              </div>
+            </div>
+            <!-- 刻度单独一行：塞进柱子底下会被矮柱子压住 -->
+            <div class="usage__axis">
+              <span v-for="item in bars" :key="item.bucket" class="usage__axis-slot">{{ item.label }}</span>
+            </div>
           </div>
         </div>
-        <!-- 刻度单独一行：塞进柱子底下会被矮柱子压住，按小时那档还会跟邻柱撞在一起 -->
-        <div class="usage__axis" :class="{ 'usage__axis--hour': summary?.bucketUnit === 'hour' }">
-          <span v-for="item in bars" :key="item.bucket" class="usage__axis-slot">{{ item.label }}</span>
-        </div>
       </template>
+      <EmptyState v-else compact :icon="Histogram" text="最近 24 小时还没有请求" />
     </section>
 
     <section class="panel usage__section">
+      <!-- 积分总账：一句「花了多少、划不划算」—— 左侧主数字，右侧 2×2 佐证，不是五张并列小卡 -->
+      <div class="usage__cost">
+        <div class="usage__cost-hero">
+          <span class="usage__cost-label">扣除积分</span>
+          <span class="usage__cost-value">{{ (summary?.creditSamples ?? 0) > 0 ? credit(summary?.credits ?? 0) : '—' }}</span>
+          <span class="usage__cost-sub">按上游 usage.credit 累计</span>
+        </div>
+        <div class="usage__cost-item is-avg">
+          <span class="usage__cost-label">平均积分 / 1M Token</span>
+          <span class="usage__cost-value is-ok">{{ ratioValue(summary?.creditsPer1MTokens ?? 0, summary?.creditSamples ?? 0) }}</span>
+          <span class="usage__cost-sub">分母为总 token · 越低越省</span>
+        </div>
+        <div class="usage__cost-item is-match">
+          <span class="usage__cost-label">匹配 Token</span>
+          <span class="usage__cost-value">{{ (summary?.creditSamples ?? 0) > 0 ? compact(summary?.creditTokens ?? 0) : '—' }}</span>
+          <span class="usage__cost-sub">与积分同时观测到的总 token</span>
+        </div>
+        <div class="usage__cost-item is-samples">
+          <span class="usage__cost-label">有效积分样本</span>
+          <span class="usage__cost-value">{{ summary?.creditSamples ?? 0 }}</span>
+          <span class="usage__cost-sub">{{ missingCreditCount }} 个模型不参与折算</span>
+        </div>
+        <div class="usage__cost-item is-hit">
+          <span class="usage__cost-label">缓存命中率</span>
+          <span class="usage__cost-value">{{ percent(summary?.cacheHitPct ?? 0) }}</span>
+          <span class="usage__cost-sub">命中 / 输入 token · 低命中更贵</span>
+        </div>
+      </div>
+
       <div class="usage__section-head">
         <h3>用量明细</h3>
         <el-segmented v-model="dimension" :options="DIMENSIONS" size="small" />
       </div>
 
-      <table v-if="detailRows.length" class="usage__table">
-        <thead>
-          <tr>
-            <th>{{ dimension === 'account' ? '账号' : '模型' }}</th>
-            <th class="usage__num">
-              请求
-            </th>
-            <th class="usage__num">
-              失败
-            </th>
-            <th class="usage__num">
-              输入
-            </th>
-            <th class="usage__num">
-              输出
-            </th>
-            <th class="usage__num">
-              合计
-            </th>
-            <th class="usage__num">
-              均延迟
-            </th>
-            <th class="usage__num">
-              均速率
-            </th>
-            <th class="usage__num">
-              扣除积分
-            </th>
-            <th class="usage__num">
-              匹配 Token
-            </th>
-            <th class="usage__num">
-              积分 / 1M Token
-            </th>
-            <th class="usage__num">
-              缓存命中率
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="row in detailRows" :key="row.key">
-            <td v-if="dimension === 'account'" :title="row.key">
+      <!-- 列宽交给内容（table-layout="auto"）：不再写死每列的像素宽 -->
+      <el-table
+        v-if="detailRows.length"
+        :data="detailRows"
+        row-key="key"
+        table-layout="auto"
+        class="usage__table"
+      >
+        <el-table-column :label="dimension === 'account' ? '账号' : '模型'" align="center">
+          <template #default="{ row }">
+            <template v-if="dimension === 'account'">
               <span class="usage__cell-name">{{ nameOf(row.key) }}</span>
               <span class="usage__cell-id">{{ row.realm }} · {{ row.key.slice(0, 8) }}</span>
-            </td>
-            <td v-else class="usage__mono" :title="row.key">
-              {{ row.key }}
-            </td>
-            <td class="usage__num">
-              {{ row.requests }}
-            </td>
-            <td class="usage__num" :class="{ usage__fail: row.failed > 0 }">
-              {{ row.failed || '—' }}
-            </td>
-            <td class="usage__num">
-              {{ compact(row.promptTokens) }}
-            </td>
-            <td class="usage__num">
-              {{ compact(row.completionTokens) }}
-            </td>
-            <td class="usage__num">
-              {{ compact(row.promptTokens + row.completionTokens) }}
-            </td>
-            <td class="usage__num">
-              {{ (row.avgTtftMs / 1000).toFixed(2) }}s
-            </td>
-            <td class="usage__num">
-              {{ row.tokensPerSec.toFixed(1) }} tok/s
-            </td>
-            <td class="usage__num">
-              {{ row.creditSamples > 0 ? credit(row.credits) : '未记录' }}
-            </td>
-            <td class="usage__num">
-              {{ row.creditSamples > 0 ? compact(row.creditTokens) : '—' }}
-            </td>
-            <td class="usage__num">
-              {{ creditRatio(row.creditsPer1MTokens, row.creditSamples) }}
-            </td>
-            <td class="usage__num" :class="hitClass(row.cacheHitPct)">
-              {{ percent(row.cacheHitPct) }}
-            </td>
-          </tr>
-        </tbody>
-      </table>
+            </template>
+            <span v-else class="usage__mono" :title="row.key">{{ row.key }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="请求" align="center" class-name="usage__num" label-class-name="usage__num">
+          <template #default="{ row }">
+            {{ row.requests }}
+          </template>
+        </el-table-column>
+        <el-table-column label="失败" align="center" class-name="usage__num" label-class-name="usage__num">
+          <template #default="{ row }">
+            <span :class="{ usage__fail: row.failed > 0 }">{{ row.failed || '—' }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="输入" align="center" class-name="usage__num" label-class-name="usage__num">
+          <template #default="{ row }">
+            {{ compact(row.promptTokens) }}
+          </template>
+        </el-table-column>
+        <el-table-column label="输出" align="center" class-name="usage__num" label-class-name="usage__num">
+          <template #default="{ row }">
+            {{ compact(row.completionTokens) }}
+          </template>
+        </el-table-column>
+        <el-table-column label="合计" align="center" class-name="usage__num" label-class-name="usage__num">
+          <template #default="{ row }">
+            {{ compact(row.promptTokens + row.completionTokens) }}
+          </template>
+        </el-table-column>
+        <el-table-column label="均延迟" align="center" class-name="usage__num" label-class-name="usage__num">
+          <template #default="{ row }">
+            {{ (row.avgTtftMs / 1000).toFixed(2) }}s
+          </template>
+        </el-table-column>
+        <el-table-column label="均速率" align="center" class-name="usage__num" label-class-name="usage__num">
+          <template #default="{ row }">
+            {{ row.tokensPerSec.toFixed(1) }} tok/s
+          </template>
+        </el-table-column>
+        <el-table-column label="扣除积分" align="center" class-name="usage__num" label-class-name="usage__num">
+          <template #default="{ row }">
+            {{ row.creditSamples > 0 ? credit(row.credits) : '未记录' }}
+          </template>
+        </el-table-column>
+        <el-table-column label="匹配 Token" align="center" class-name="usage__num" label-class-name="usage__num">
+          <template #default="{ row }">
+            {{ row.creditSamples > 0 ? compact(row.creditTokens) : '—' }}
+          </template>
+        </el-table-column>
+        <el-table-column label="积分 / 1M Token" align="center" class-name="usage__num" label-class-name="usage__num">
+          <template #default="{ row }">
+            {{ creditRatio(row.creditsPer1MTokens, row.creditSamples) }}
+          </template>
+        </el-table-column>
+        <el-table-column label="缓存命中率" align="center" class-name="usage__num" label-class-name="usage__num">
+          <template #default="{ row }">
+            <span :class="hitClass(row.cacheHitPct)">{{ percent(row.cacheHitPct) }}</span>
+          </template>
+        </el-table-column>
+      </el-table>
 
       <EmptyState v-else compact :icon="Histogram" text="还没有数据" />
-
-      <!-- 汇总卡跟明细同一张面板：表是逐行、卡是这几列的总账，不再另起一栏 -->
-      <div class="usage__kpis">
-        <div class="usage__kpi is-accent">
-          <span class="usage__kpi-label">扣除积分</span>
-          <span class="usage__kpi-value">{{ (summary?.creditSamples ?? 0) > 0 ? credit(summary?.credits ?? 0) : '—' }}</span>
-          <span class="usage__kpi-sub">按上游 usage.credit 累计</span>
-        </div>
-        <div class="usage__kpi">
-          <span class="usage__kpi-label">匹配 Token</span>
-          <span class="usage__kpi-value">{{ (summary?.creditSamples ?? 0) > 0 ? compact(summary?.creditTokens ?? 0) : '—' }}</span>
-          <span class="usage__kpi-sub">与积分同时观测到的总 token</span>
-        </div>
-        <div class="usage__kpi is-ok">
-          <span class="usage__kpi-label">平均积分 / 1M Token</span>
-          <span class="usage__kpi-value">{{ creditRatio(summary?.creditsPer1MTokens ?? 0, summary?.creditSamples ?? 0) }}</span>
-          <span class="usage__kpi-sub">分母为总 token · 越低越省</span>
-        </div>
-        <div class="usage__kpi">
-          <span class="usage__kpi-label">有效积分样本</span>
-          <span class="usage__kpi-value">{{ summary?.creditSamples ?? 0 }}</span>
-          <span class="usage__kpi-sub">缺字段 {{ missingCreditCount }} 个模型不参与折算</span>
-        </div>
-        <div class="usage__kpi">
-          <span class="usage__kpi-label">缓存命中率</span>
-          <span class="usage__kpi-value">{{ percent(summary?.cacheHitPct ?? 0) }}</span>
-          <span class="usage__kpi-sub">命中 / 输入 token · 低命中更贵</span>
-        </div>
-      </div>
     </section>
   </div>
 </template>
@@ -471,8 +494,8 @@ onBeforeUnmount(() => {
 <style scoped>
 /*
  * 统一用全局 .panel 外壳，这里只排内容。
- * 彩色只有两处：顶上那几格运行状态，以及这张柱状图 —— 柱子取**主题色**，
- * 与选中块同一条色相（口径见 accent-color.ts 的文件头）。
+ * 彩色只有这三处：顶上六格的图标、运行状态，以及这张柱状图 —— 柱子取**主题色**，
+ * 与选中块同一条色相（口径见 accent-color.ts 的文件头；KPI 图标的色板见 gateway.md 的彩色例外）。
  */
 .usage {
   display: flex;
@@ -480,17 +503,10 @@ onBeforeUnmount(() => {
   gap: var(--sp-3);
 }
 
-.usage__panel-title {
-  margin: 0;
-  font-size: var(--gw-fs-title);
-  font-weight: 600;
-  color: var(--ink);
-}
-
 /**
- * 顶上这条只放标题与范围选择：**不画卡片**（`.panel` 那套底、磨砂、描边、阴影全撤掉），
+ * 顶上这条只放范围选择（靠左）与右侧按钮：**不画卡片**（`.panel` 那套底、磨砂、描边、阴影全撤掉），
  * 让它和下面那排玻璃格子分开层级 —— 一条带子 + 一排卡片，比两张卡叠着干净。
- * 内边距也归零：左边那几格是贴着画布边（12px）的卡片，标题跟着落到同一条线上才对得上。
+ * 内边距也归零：范围选择要跟下面那排卡片贴着同一条画布边（12px），才对得上。
  */
 .usage__head {
   padding: 0;
@@ -498,12 +514,6 @@ onBeforeUnmount(() => {
   backdrop-filter: none;
   border-color: transparent;
   box-shadow: none;
-}
-
-.usage__head-right {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
 }
 
 /* 读取失败的原因：不能拿一排 0 假装「这段时间真的没有请求」 */
@@ -515,32 +525,70 @@ onBeforeUnmount(() => {
 
 .usage__cards {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: var(--sp-2);
 }
 
-/* 底子是「不画底」：这两排格子本身不是卡片 */
-.usage__card {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: var(--sp-1) 0;
-}
-
 /**
- * 但直接铺在画布上的那排 KPI **自成一格毛玻璃** —— 与 `.panel` 同一套配方
- * （底色跟着「卡片不透明度」走、磨砂取 `--glass-filter`、描边取设置里那档），只是不叠阴影：
- * 六块小卡各带一片阴影太吵。
- *
- * 用子代选择器只挑这一排：下面明细面板里的五张汇总卡（`.usage__kpis`）本身就是带底的面，
- * 再套一层就是卡片套卡片，里外的磨砂还会互相叠着采一次样。
+ * 六张 KPI 小卡：左图标、右三行（标签 / 数值 / 补充行）。
+ * 玻璃与 `.panel` 同一套配方（底色跟着「卡片不透明度」走、磨砂取 `--glass-filter`、
+ * 描边取设置里那档），只是不叠阴影 —— 六块小卡各带一片阴影太吵。
+ * 用子代选择器只挑这一排：下面明细面板里的积分总账（`.usage__cost`）本身就是带底的面。
  */
 .usage > .usage__cards > .usage__card {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
   padding: var(--sp-2) var(--sp-3);
   border: 1px solid var(--glass-border-color);
   border-radius: var(--r-md);
   background: rgba(var(--bg-surface-rgb), var(--card-alpha, 1));
   backdrop-filter: var(--glass-filter);
+}
+
+.usage__card-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--usage-icon) 16%, transparent);
+  color: var(--usage-icon);
+  font-size: 16px;
+}
+
+/* 每张卡一档色：与账号统计卡同一套语汇（蓝 / 紫 / 青 / 橙 / 绿 / 琥珀） */
+.usage__card.is-requests {
+  --usage-icon: #2f6bd8;
+}
+
+.usage__card.is-tokens {
+  --usage-icon: #7c3aed;
+}
+
+.usage__card.is-input {
+  --usage-icon: #0e7490;
+}
+
+.usage__card.is-output {
+  --usage-icon: #c2410c;
+}
+
+.usage__card.is-success {
+  --usage-icon: var(--st-ok);
+}
+
+.usage__card.is-latency {
+  --usage-icon: var(--st-run);
+}
+
+.usage__card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
 }
 
 .usage__label {
@@ -558,6 +606,9 @@ onBeforeUnmount(() => {
 .usage__sub {
   font-size: var(--gw-fs-micro);
   color: var(--ink-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .usage__section {
@@ -584,71 +635,121 @@ onBeforeUnmount(() => {
 }
 
 /**
- * 五张汇总卡：明细表下面同一张面板里的「总账」，用一条细线跟表格隔开。
- * 卡底不是实色灰块：一层从上到下渐淡的面（取面板底色的 RGB），落在玻璃上还透得上来，
- * 比 `--bg-subtle` 轻一档；左沿只给两张有语义的卡留一截 2px 圆角色标，其余不画。
+ * 积分总账：不是五张并列小卡，而是一句「花了多少、划不划算」。
+ * 左边一格主数字（扣除积分）占满两行，右边 2×2 放佐证（平均成本 / 匹配 token / 样本 / 命中率）——
+ * 一整块面 + 发丝分隔线，层级靠字号与留白拉开，不靠五个各自带边框的盒子。
  */
-.usage__kpis {
+.usage__cost {
   display: grid;
-  /* 五张卡一行排满：这一组是一句话（扣了多少、按多少 token），断行会把「积分」和「效率」分开看 */
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: var(--sp-3);
-  margin-top: var(--sp-4);
-  padding-top: var(--sp-4);
+  grid-template-columns: minmax(210px, 0.72fr) repeat(2, minmax(0, 1fr));
+  grid-template-areas:
+    'hero avg match'
+    'hero samples hit';
+  margin-bottom: var(--sp-4);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  /* 上亮下淡：一层薄薄的受光面，落在玻璃面板上不会像灰块那样平 */
+  background: linear-gradient(
+    180deg,
+    rgba(var(--bg-surface-rgb), 0.66),
+    rgba(var(--bg-surface-rgb), 0.3)
+  );
+  overflow: hidden;
+}
+
+.usage__cost-hero {
+  grid-area: hero;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
+  padding: var(--sp-5) var(--sp-5) var(--sp-5) var(--sp-6);
+  border-right: 1px solid var(--border);
+}
+
+/* 左侧一截主题色标：这一格是整块的总数，其余四格都是它的注脚 */
+.usage__cost-hero::before {
+  content: '';
+  position: absolute;
+  top: var(--sp-4);
+  bottom: var(--sp-4);
+  left: 0;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--ink-accent);
+}
+
+.usage__cost-item {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: var(--sp-4) var(--sp-5);
+}
+
+.usage__cost-item.is-avg {
+  grid-area: avg;
+}
+
+.usage__cost-item.is-match {
+  grid-area: match;
+  border-left: 1px solid var(--border);
+}
+
+.usage__cost-item.is-samples {
+  grid-area: samples;
   border-top: 1px solid var(--border);
 }
 
-/* 窗口窄到放不下五列时先塌成三列、再塌成两列：数字是等宽体，压到 140px 以下就要截断了 */
+.usage__cost-item.is-hit {
+  grid-area: hit;
+  border-top: 1px solid var(--border);
+  border-left: 1px solid var(--border);
+}
+
+/* 窗口窄到主数字与 2×2 并排放不下时，主数字占满一行，佐证仍按两列排 */
 @media (max-width: 1240px) {
-  .usage__kpis {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+  .usage__cost {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-areas:
+      'hero hero'
+      'avg match'
+      'samples hit';
+  }
+
+  .usage__cost-hero {
+    border-right: none;
+    border-bottom: 1px solid var(--border);
   }
 }
 
 @media (max-width: 760px) {
-  .usage__kpis {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  .usage__cost {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      'hero'
+      'avg'
+      'match'
+      'samples'
+      'hit';
+  }
+
+  .usage__cost-hero {
+    border-bottom: none;
+  }
+
+  /* 单列时每个格子都靠上边框分隔，横向那两条不再需要 */
+  .usage__cost-item {
+    border-top: 1px solid var(--border);
+  }
+
+  .usage__cost-item.is-match,
+  .usage__cost-item.is-hit {
+    border-left: none;
   }
 }
 
-.usage__kpi {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  overflow: hidden;
-  padding: var(--sp-3) var(--sp-4) calc(var(--sp-3) + 2px);
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  /* 上亮下淡：一层薄薄的受光面，在玻璃面板里不会像灰块那样平 */
-  background: linear-gradient(
-    180deg,
-    rgba(var(--bg-surface-rgb), 0.62),
-    rgba(var(--bg-surface-rgb), 0.34)
-  );
-}
-
-.usage__kpi::before {
-  content: '';
-  position: absolute;
-  top: var(--sp-3);
-  bottom: var(--sp-3);
-  left: 0;
-  width: 2px;
-  border-radius: 0 2px 2px 0;
-  background: var(--kpi-color, transparent);
-}
-
-/* 两张带色的卡各表达一件事：点一次花掉多少（主题色）、折算率划不划算（状态色的绿） */
-.usage__kpi.is-accent {
-  --kpi-color: var(--ink-accent);
-}
-
-.usage__kpi.is-ok {
-  --kpi-color: var(--st-ok);
-}
-
-.usage__kpi-label {
+.usage__cost-label {
   font-size: var(--gw-fs-micro);
   color: var(--ink-3);
   white-space: nowrap;
@@ -656,28 +757,32 @@ onBeforeUnmount(() => {
   text-overflow: ellipsis;
 }
 
-/* 数字用等宽体：五张卡并排时位数才会对齐，扫一眼就能读出量级 */
-.usage__kpi-value {
+/* 数字用等宽体：位数对齐后，主数字与四个佐证一眼分得出主次 */
+.usage__cost-value {
   margin-top: 6px;
   font-family: var(--font-mono);
-  font-size: 25px;
+  font-size: 22px;
   font-weight: 600;
-  line-height: 1.08;
-  letter-spacing: -0.03em;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
   color: var(--ink);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
-.usage__kpi.is-accent .usage__kpi-value {
+.usage__cost-hero .usage__cost-value {
+  margin-top: 8px;
+  font-size: 36px;
+  letter-spacing: -0.035em;
   color: var(--ink-accent);
 }
 
-.usage__kpi.is-ok .usage__kpi-value {
+/* 折算率划不划算用状态色的绿：它是这四格里唯一带判断的一项 */
+.usage__cost-value.is-ok {
   color: var(--st-ok);
 }
 
-.usage__kpi-sub {
+.usage__cost-sub {
   margin-top: 6px;
   font-size: var(--gw-fs-micro);
   color: var(--ink-3);
@@ -686,9 +791,8 @@ onBeforeUnmount(() => {
   text-overflow: ellipsis;
 }
 
-/* 数字列右对齐：位数对齐后纵向扫一列才读得出大小（表头与单元格一起转） */
-.usage__table .usage__num {
-  text-align: right;
+/* 数字列用等宽体：位数对齐后纵向扫一列才读得出大小（居中由列自己的 align 给） */
+.usage__table :deep(.usage__num) {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
@@ -718,27 +822,77 @@ onBeforeUnmount(() => {
   color: var(--st-fail);
 }
 
+/* ---------- 时序图：纵轴 + 24 根小时柱 ---------- */
+
+.usage__plot {
+  display: flex;
+  gap: var(--sp-2);
+  /* 轴顶那枚单位标签在 132px 之外，留出它的位置 */
+  margin-top: var(--sp-6);
+}
+
+/* 纵轴与柱子共用 132px：刻度按 25 / 50 / 75 / 100% 定位 */
+.usage__yaxis {
+  position: relative;
+  flex: none;
+  width: 48px;
+  height: 132px;
+}
+
+/* 单位只写一次，落在轴顶（100% 刻度标签的上方） */
+.usage__yunit {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 10px);
+  font-family: var(--font-mono);
+  font-size: var(--gw-fs-micro);
+  color: var(--ink-3);
+}
+
+.usage__ytick {
+  position: absolute;
+  right: 0;
+  transform: translateY(50%);
+  font-family: var(--font-mono);
+  font-size: var(--gw-fs-micro);
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+
+.usage__plot-main {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .usage__chart {
+  position: relative;
   display: flex;
   align-items: flex-end;
   justify-content: flex-start;
-  gap: var(--sp-2);
+  gap: var(--sp-3);
   height: 132px;
-  padding-top: var(--sp-1);
   border-bottom: 1px solid var(--border);
 }
 
-/**
- * 按小时那档一周有 168 根，间隔收到 3px 才放得下 ——
- * 柱子本身靠 flex 摊薄，留白比柱子还宽的话图就散成点阵了。
- */
-.usage__chart--hour {
-  gap: 3px;
+/* 横向网格：虚线、压淡，画在柱子后面 */
+.usage__grid {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.usage__gridline {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-top: 1px dashed var(--border);
 }
 
 .usage__bar {
+  position: relative;
+  z-index: 1;
   flex: 1 1 0;
-  max-width: 56px;
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
@@ -747,9 +901,13 @@ onBeforeUnmount(() => {
   min-width: 0;
 }
 
-/* 柱子取主题色：它表达「多与少」，主题色正好是用户自己挑的那条色相 */
+/**
+ * 柱子只占槽的一半（最宽 28px）：24 根柱子铺满整行，间隙靠槽宽撑开。
+ * 颜色取主题色：它表达「多与少」，主题色正好是用户自己挑的那条色相。
+ */
 .usage__bar-fill {
   width: 100%;
+  max-width: 28px;
   border-radius: var(--r-sm) var(--r-sm) 0 0;
   background: var(--el-color-primary);
 }
@@ -760,53 +918,65 @@ onBeforeUnmount(() => {
 }
 
 /**
- * 刻度行：每一格与柱子**同宽同序**（同样的 flex 权重与 max-width、同样的 gap），
+ * 刻度行：每一格与柱子的槽同宽同序（同样的 flex 权重与 gap），
  * 所以抽稀之后剩下的那几个数字仍然落在自己那根柱子底下。
  * 空的格子照样占位 —— 位置是靠它们撑出来的，不是靠文字。
  */
 .usage__axis {
   display: flex;
-  gap: var(--sp-2);
+  gap: var(--sp-3);
   margin-top: var(--sp-1);
-}
-
-.usage__axis--hour {
-  gap: 3px;
 }
 
 .usage__axis-slot {
   flex: 1 1 0;
   min-width: 0;
-  max-width: 56px;
   text-align: center;
   font-size: var(--gw-fs-micro);
   color: var(--ink-3);
   white-space: nowrap;
 }
 
+/**
+ * 表格交给 Element Plus：`table-layout="auto"` 让列宽由内容决定，不再写死每列宽度。
+ * 这里只把 EP 的外观收成面板的一部分 —— 去掉自带底色与四周边线，行间只留一条横线。
+ */
 .usage__table {
-  width: 100%;
-  border-collapse: collapse;
+  --el-table-border-color: var(--border);
+  --el-table-header-bg-color: transparent;
+  --el-table-tr-bg-color: transparent;
+  --el-table-bg-color: transparent;
+  --el-table-header-text-color: var(--ink-3);
+  --el-table-text-color: var(--ink-2);
+  --el-table-row-hover-bg-color: transparent;
   font-size: var(--gw-fs-meta);
 }
 
-.usage__table th {
-  text-align: left;
+/* 面板已经画了外框，表格自己那条底线不要 */
+.usage__table :deep(.el-table__inner-wrapper::before) {
+  display: none;
+}
+
+.usage__table :deep(.el-table__cell) {
+  padding: var(--sp-2) 0;
+}
+
+.usage__table :deep(.cell) {
+  padding: 0 var(--sp-2);
+  line-height: 1.5;
+}
+
+.usage__table :deep(th.el-table__cell) {
   font-weight: 400;
-  color: var(--ink-3);
-  padding: var(--sp-2) var(--sp-2) var(--sp-2) 0;
-  white-space: nowrap;
+  border-bottom: 1px solid var(--border);
 }
 
-.usage__table td {
-  padding: var(--sp-2) var(--sp-2) var(--sp-2) 0;
-  color: var(--ink-2);
-  border-top: 1px solid var(--border);
-  white-space: nowrap;
+.usage__table :deep(td.el-table__cell) {
+  border-bottom: 1px solid var(--border);
 }
 
-.usage__table tbody tr:first-child td {
-  border-top: none;
+.usage__table :deep(.el-table__body tr:last-child td.el-table__cell) {
+  border-bottom: none;
 }
 
 .usage__mono {

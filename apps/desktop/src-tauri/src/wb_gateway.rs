@@ -303,7 +303,24 @@ pub struct AccountView {
     pub enabled: bool,
     pub ready: bool,
     pub needs_refresh: bool,
+    /// 选号优先级（账号文件里的 `weight`，数大的先用）
+    pub priority: u8,
+    /// 额度标记是否还在生效（生效时这个号不会被选中）
+    pub quota_exhausted: bool,
+    /// 额度预计恢复的时刻（Unix 秒）。没标记是 `None`
+    pub quota_resets_at: Option<i64>,
+    /// 按模型记的额度用完标记（上游 code 6004）：只挡列表里这些模型
+    pub model_quotas: Vec<ModelQuotaView>,
     pub note: String,
+}
+
+/// 账号行上的一个「这个模型额度用完」标记。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelQuotaView {
+    pub model: String,
+    /// 预计恢复的时刻（Unix 秒）
+    pub resets_at: i64,
 }
 
 // ---------- 登录 ----------
@@ -400,13 +417,38 @@ pub fn wb_gateway_credits(
     }
     let credits = crate::wb_api_billing::fetch(&account)?;
 
-    // 续期过的 token 必须写回：不落盘的话下次启动还拿着旧 token，
-    // 内存里也不换回去的话，进程里继续用旧的（下一轮又会续期一次）
-    if renewed {
-        account.save(&crate::paths::gateway_accounts_dir())?;
+    // 余额是额度标记的第二个来源（第一个是对话失败时的错误正文）：
+    // 上游明确说「一分不剩」就打标记；查到还有余额就把旧标记（可能是 24 小时兜底）清掉。
+    let now = now_secs();
+    let mut quota_changed = false;
+    if credits.size > 0.0 && credits.remain <= 0.0 {
+        let resets = crate::wb_quota::recovery_at(now, Some(&credits));
+        if !account.quota_blocked(now) || account.quota_until() != resets {
+            account.mark_quota_exhausted(now, resets);
+            quota_changed = true;
+        }
+    } else if credits.remain > 0.0 {
+        quota_changed = account.clear_quota();
+    }
+
+    // 只把这次真的动过的字段写回内存里那一份：查询期间用户可能改过优先级 / 启停，
+    // 拿整份快照覆盖会把那些改动一起冲掉。
+    if renewed || quota_changed {
         let mut inner = state.lock()?;
         if let Some(slot) = inner.accounts.iter_mut().find(|item| item.uid == uid) {
-            *slot = account;
+            if renewed {
+                slot.access_token = account.access_token;
+                slot.refresh_token = account.refresh_token;
+                slot.expires_at = account.expires_at;
+                slot.domain = account.domain;
+                slot.enterprise_id = account.enterprise_id;
+                slot.token_expired = account.token_expired;
+            }
+            if quota_changed {
+                slot.quota_exhausted_at = account.quota_exhausted_at;
+                slot.quota_resets_at = account.quota_resets_at;
+            }
+            slot.save(&crate::paths::gateway_accounts_dir())?;
         }
     }
     Ok(credits)
@@ -529,23 +571,28 @@ pub fn wb_gateway_models_refresh(
     let mut account = {
         let mut inner = state.lock()?;
         inner.ensure_loaded();
-        inner
-            .accounts
-            .iter()
-            .find(|item| item.enabled && item.is_ready())
+        // 与对话同一条选号顺序：优先用池子里优先级最高、且没被额度挡住的号
+        crate::wb_pool::first(&inner.accounts, now_secs())
+            .map(|index| &inner.accounts[index])
             .or_else(|| inner.accounts.iter().find(|item| item.enabled))
             .cloned()
             .ok_or_else(|| "没有可用的账号：先登录一个再拉模型目录".to_string())?
     };
 
-    // 与查余额同一条规矩：网络请求不占状态锁；续期过就把 token 写回去
+    // 与查余额同一条规矩：网络请求不占状态锁；续期过就只把 token 字段写回
+    // （整份覆盖会冲掉查询期间用户改过的优先级 / 启停）
     let renewed = account.needs_refresh();
     if renewed {
         wb_api_auth::refresh(&mut account)?;
-        account.save(&crate::paths::gateway_accounts_dir())?;
         let mut inner = state.lock()?;
         if let Some(slot) = inner.accounts.iter_mut().find(|item| item.uid == account.uid) {
-            *slot = account.clone();
+            slot.access_token = account.access_token.clone();
+            slot.refresh_token = account.refresh_token.clone();
+            slot.expires_at = account.expires_at;
+            slot.domain = account.domain.clone();
+            slot.enterprise_id = account.enterprise_id.clone();
+            slot.token_expired = account.token_expired;
+            slot.save(&crate::paths::gateway_accounts_dir())?;
         }
     }
 
@@ -569,6 +616,31 @@ pub fn wb_gateway_account_set(
         .find(|item| item.uid == uid)
         .ok_or_else(|| format!("没有这个账号：{uid}"))?;
     account.enabled = enabled;
+    // 手动启用等于把号放回池子：两档额度标记一并清掉，
+    // 不然点一次「启用」还是不会被选中（某个模型上也不会）
+    if enabled {
+        account.clear_quota();
+        account.clear_model_quota();
+    }
+    account.save(&crate::paths::gateway_accounts_dir())
+}
+
+/// 改一个号的选号优先级（账号文件里的 `weight`，1..=100，数大的先用）。
+#[tauri::command(async)]
+pub fn wb_gateway_account_priority(
+    state: tauri::State<'_, Gateway>,
+    uid: String,
+    priority: u8,
+) -> Result<(), String> {
+    let priority = priority.clamp(1, 100);
+    let mut inner = state.lock()?;
+    inner.ensure_loaded();
+    let account = inner
+        .accounts
+        .iter_mut()
+        .find(|item| item.uid == uid)
+        .ok_or_else(|| format!("没有这个账号：{uid}"))?;
+    account.weight = priority;
     account.save(&crate::paths::gateway_accounts_dir())
 }
 
@@ -585,6 +657,8 @@ pub fn wb_gateway_account_delete(
 }
 
 fn view_of(account: &Account) -> AccountView {
+    let now = now_secs();
+    let quota_exhausted = account.quota_blocked(now);
     AccountView {
         uid: account.uid.clone(),
         label: account.label(),
@@ -595,6 +669,25 @@ fn view_of(account: &Account) -> AccountView {
         enabled: account.enabled,
         ready: account.is_ready(),
         needs_refresh: account.needs_refresh(),
+        priority: account.weight,
+        quota_exhausted,
+        quota_resets_at: if quota_exhausted {
+            Some(account.quota_until())
+        } else {
+            None
+        },
+        model_quotas: {
+            let mut list: Vec<ModelQuotaView> = account
+                .model_quotas(now)
+                .map(|item| ModelQuotaView {
+                    model: item.model.clone(),
+                    resets_at: item.resets_at,
+                })
+                .collect();
+            // 先恢复的排前面：界面上那行小字只写第一个，剩下的合并成个数
+            list.sort_by_key(|item| item.resets_at);
+            list
+        },
         note: account.note.clone(),
     }
 }
@@ -705,6 +798,9 @@ mod tests {
             enabled: true,
             weight: 1,
             note: String::new(),
+            quota_exhausted_at: 0,
+            quota_resets_at: 0,
+            quota_models: Vec::new(),
             token_expired: false,
         }
     }
@@ -795,5 +891,44 @@ mod tests {
         let status = gateway.status().unwrap();
         assert_eq!(status.accounts, 2);
         assert_eq!(status.ready, 1, "停用的不算可用");
+    }
+
+    #[test]
+    fn 账号视图带上优先级与额度标记() {
+        let now = now_secs();
+        let mut account = ready_account("u-1");
+        account.weight = 7;
+        account.mark_quota_exhausted(now, now + 3600);
+        let view = view_of(&account);
+        assert_eq!(view.priority, 7);
+        assert!(view.quota_exhausted);
+        assert!(view.quota_resets_at.expect("标记中要给恢复时间") > now);
+    }
+
+    #[test]
+    fn 额度标记过期后视图恢复可用() {
+        let now = now_secs();
+        let mut account = ready_account("u-1");
+        account.mark_quota_exhausted(now - 7200, now - 3600);
+        let view = view_of(&account);
+        assert!(!view.quota_exhausted);
+        assert!(view.quota_resets_at.is_none());
+        assert!(view.ready);
+    }
+
+    #[test]
+    fn 视图带上按模型的额度标记_只列还在生效的() {
+        let now = now_secs();
+        let mut account = ready_account("u-1");
+        account.mark_model_exhausted("deepseek", now, now + 7200);
+        account.mark_model_exhausted("glm", now - 7200, now - 3600);
+
+        let view = view_of(&account);
+        assert_eq!(view.model_quotas.len(), 1, "视图只列还在生效的");
+        assert_eq!(view.model_quotas[0].model, "deepseek");
+        assert!(view.model_quotas[0].resets_at > now);
+        // 按模型的标记不是整号用完：号的可用状态不受影响
+        assert!(!view.quota_exhausted);
+        assert!(view.ready);
     }
 }

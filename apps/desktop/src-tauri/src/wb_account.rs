@@ -37,6 +37,20 @@ pub struct TokenGrant {
     pub domain: String,
 }
 
+/// 一个模型上的额度用完标记。
+///
+/// 上游的限额是**按模型**的（code 6004：同一个号这个模型 429、换个模型照样能用），
+/// 所以它不能和整号的 [`Account::quota_exhausted_at`] 混成一个字段。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelQuota {
+    pub model: String,
+    /// Unix 秒
+    pub exhausted_at: i64,
+    /// 预计恢复的时刻（Unix 秒）。总是大于 `exhausted_at`
+    pub resets_at: i64,
+}
+
 /// 一个账号。持久化字段之外的东西一律不写盘（`#[serde(skip)]`）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -66,11 +80,20 @@ pub struct Account {
     pub source: String,
     #[serde(default = "default_true")]
     pub enabled: bool,
-    /// 手动权重，1..=100。多号轮转时的优先级
+    /// 手动权重，1..=100。多号轮转时的优先级（数大的先用）
     #[serde(default = "default_weight")]
     pub weight: u8,
     #[serde(default)]
     pub note: String,
+    /// 额度用完的时刻（Unix 秒）。0 = 没标记
+    #[serde(default)]
+    pub quota_exhausted_at: i64,
+    /// 预计恢复的时刻（Unix 秒）。0 = 不知道，按 [`crate::wb_quota::QUOTA_COOLDOWN_SECS`] 算
+    #[serde(default)]
+    pub quota_resets_at: i64,
+    /// 按模型记的额度用完标记（上游 code 6004）。只挡列表里那些模型
+    #[serde(default)]
+    pub quota_models: Vec<ModelQuota>,
 
     /// 运行时：续期失败过、需要重新登录。不写盘 —— 重启后重试一次比记住"过期"更有用
     #[serde(skip)]
@@ -104,6 +127,9 @@ impl Account {
             enabled: true,
             weight: 1,
             note: String::new(),
+            quota_exhausted_at: 0,
+            quota_resets_at: 0,
+            quota_models: Vec::new(),
             token_expired: false,
         };
         account.absorb_grant(grant);
@@ -156,6 +182,92 @@ impl Account {
     /// 能不能拿去发请求。
     pub fn is_ready(&self) -> bool {
         self.enabled && !self.token_expired && !self.access_token.trim().is_empty()
+    }
+
+    /// 额度标记是否还在生效。标记过期后自动失效，不写盘 —— 下次真正选号时再看一遍即可。
+    pub fn quota_blocked(&self, now: i64) -> bool {
+        self.quota_exhausted_at > 0 && now < self.quota_until()
+    }
+
+    /// 额度的恢复时刻（Unix 秒）。没标记是 0；记了恢复时间就用它，否则标记 + 24 小时。
+    pub fn quota_until(&self) -> i64 {
+        if self.quota_exhausted_at <= 0 {
+            return 0;
+        }
+        if self.quota_resets_at > self.quota_exhausted_at {
+            self.quota_resets_at
+        } else {
+            self.quota_exhausted_at + crate::wb_quota::QUOTA_COOLDOWN_SECS
+        }
+    }
+
+    /// 现在能不能被选去发请求（整号口径）：token 可用、且整个号不在额度冷却里。
+    /// 具体某个模型还要再过 [`Self::is_available_for`]。
+    pub fn is_available(&self, now: i64) -> bool {
+        self.is_ready() && !self.quota_blocked(now)
+    }
+
+    /// 打上「额度用完」标记。`resets_at` 为 0 时按 24 小时算（见 [`Self::quota_until`]）。
+    pub fn mark_quota_exhausted(&mut self, now: i64, resets_at: i64) {
+        self.quota_exhausted_at = now;
+        self.quota_resets_at = resets_at.max(0);
+    }
+
+    /// 清掉额度标记。返回是否真的清掉了（调用方据此决定要不要写盘）。
+    pub fn clear_quota(&mut self) -> bool {
+        let changed = self.quota_exhausted_at > 0 || self.quota_resets_at > 0;
+        self.quota_exhausted_at = 0;
+        self.quota_resets_at = 0;
+        changed
+    }
+
+    /// 这个模型现在能不能用：整个号可用，且这个模型不在额度冷却里。
+    pub fn is_available_for(&self, model: &str, now: i64) -> bool {
+        self.is_available(now) && !self.model_blocked(model, now)
+    }
+
+    /// 这个模型是否还在额度冷却里。过期就是自动失效，不写盘。
+    pub fn model_blocked(&self, model: &str, now: i64) -> bool {
+        self.quota_models
+            .iter()
+            .any(|item| item.model == model && now < item.resets_at)
+    }
+
+    /// 还在生效的按模型标记。
+    pub fn model_quotas(&self, now: i64) -> impl Iterator<Item = &ModelQuota> {
+        self.quota_models.iter().filter(move |item| now < item.resets_at)
+    }
+
+    /// 给一个模型打上「额度用完」。同一个模型重复打标就是刷新时刻；
+    /// `resets_at` 早于现在（或为 0）按 24 小时兜底。
+    pub fn mark_model_exhausted(&mut self, model: &str, now: i64, resets_at: i64) {
+        // 先把过期的摘掉：模型清单是有限集，但上游改口径时旧条目不该一直留着
+        self.quota_models.retain(|item| now < item.resets_at);
+        let resets_at = if resets_at > now {
+            resets_at
+        } else {
+            now + crate::wb_quota::QUOTA_COOLDOWN_SECS
+        };
+        match self.quota_models.iter_mut().find(|item| item.model == model) {
+            Some(item) => {
+                item.exhausted_at = now;
+                item.resets_at = resets_at;
+            }
+            None => self.quota_models.push(ModelQuota {
+                model: model.to_string(),
+                exhausted_at: now,
+                resets_at,
+            }),
+        }
+    }
+
+    /// 清掉所有按模型的标记。返回是否真的动过。
+    pub fn clear_model_quota(&mut self) -> bool {
+        if self.quota_models.is_empty() {
+            return false;
+        }
+        self.quota_models.clear();
+        true
     }
 
     /// `X-Domain` 的生效值：账号自己记的优先，否则区域的规范域。
@@ -297,6 +409,9 @@ mod tests {
             enabled: true,
             weight: 1,
             note: String::new(),
+            quota_exhausted_at: 0,
+            quota_resets_at: 0,
+            quota_models: Vec::new(),
             token_expired: false,
         }
     }
@@ -349,6 +464,97 @@ mod tests {
         assert_eq!(accounts.len(), 1);
         assert_eq!(accounts[0].uid, "u-1");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn 额度标记到期后自动失效() {
+        let mut account = sample();
+        account.mark_quota_exhausted(1_000, 1_000 + 600);
+        assert!(account.quota_blocked(1_000));
+        assert!(account.quota_blocked(1_599));
+        assert!(!account.quota_blocked(1_600));
+
+        // token 本身可用，标记期内不进池子；到期后回来
+        assert!(account.is_ready());
+        assert!(!account.is_available(1_200));
+        assert!(account.is_available(1_600));
+    }
+
+    #[test]
+    fn 没给恢复时间就按二十四小时() {
+        let mut account = sample();
+        account.mark_quota_exhausted(10_000, 0);
+        assert_eq!(
+            account.quota_until(),
+            10_000 + crate::wb_quota::QUOTA_COOLDOWN_SECS
+        );
+        assert!(account.quota_blocked(10_000 + 86_399));
+        assert!(!account.quota_blocked(10_000 + 86_400));
+    }
+
+    #[test]
+    fn 清额度标记只清一次() {
+        let mut account = sample();
+        assert!(!account.clear_quota(), "本来就没标记");
+        account.mark_quota_exhausted(1_000, 0);
+        assert!(account.clear_quota());
+        assert_eq!(account.quota_exhausted_at, 0);
+        assert_eq!(account.quota_resets_at, 0);
+        assert!(!account.quota_blocked(1_001));
+    }
+
+    #[test]
+    fn 额度字段会落盘() {
+        let dir = temp_dir("quota");
+        let mut account = sample();
+        account.mark_quota_exhausted(1_700_000_000, 1_700_003_600);
+        account.mark_model_exhausted("deepseek-v4.1-flash", 1_700_000_000, 1_700_003_600);
+        account.save(&dir).unwrap();
+        let loaded = load(&dir, "u-1").unwrap();
+        assert_eq!(loaded.quota_exhausted_at, 1_700_000_000);
+        assert_eq!(loaded.quota_resets_at, 1_700_003_600);
+        assert_eq!(loaded.quota_models.len(), 1);
+        assert_eq!(loaded.quota_models[0].model, "deepseek-v4.1-flash");
+        assert_eq!(loaded.quota_models[0].resets_at, 1_700_003_600);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn 按模型的标记只挡那一个模型() {
+        let mut account = sample();
+        account.mark_model_exhausted("deepseek", 1_000, 1_600);
+
+        assert!(!account.is_available_for("deepseek", 1_200), "标记期内这个模型不可用");
+        assert!(account.is_available_for("glm-5.3-flash", 1_200), "别的模型照常可用");
+        assert!(!account.model_blocked("deepseek", 1_600), "到期自动失效");
+        assert!(account.is_available_for("deepseek", 1_600));
+    }
+
+    #[test]
+    fn 按模型的标记没给恢复时间就按二十四小时() {
+        let mut account = sample();
+        account.mark_model_exhausted("deepseek", 10_000, 0);
+        assert_eq!(
+            account.quota_models[0].resets_at,
+            10_000 + crate::wb_quota::QUOTA_COOLDOWN_SECS
+        );
+        // 同一个模型再打一次是刷新时刻，不是加一条
+        account.mark_model_exhausted("deepseek", 20_000, 21_000);
+        assert_eq!(account.quota_models.len(), 1);
+        assert_eq!(account.quota_models[0].exhausted_at, 20_000);
+        assert_eq!(account.quota_models[0].resets_at, 21_000);
+    }
+
+    #[test]
+    fn 过期的按模型标记不再算数并会被新标记清掉() {
+        let mut account = sample();
+        account.mark_model_exhausted("old", 1_000, 2_000);
+        account.mark_model_exhausted("new", 3_000, 4_000);
+        assert_eq!(account.quota_models.len(), 1, "过期的那条在打新标时被摘掉");
+        assert_eq!(account.quota_models[0].model, "new");
+        assert!(account.clear_model_quota());
+        assert!(account.quota_models.is_empty());
+        assert!(!account.clear_model_quota(), "空的时候不算动过");
     }
 
     #[test]

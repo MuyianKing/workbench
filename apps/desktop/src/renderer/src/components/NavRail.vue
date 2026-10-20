@@ -261,10 +261,13 @@ function select(id: ViewId): void {
 }
 
 /* 当前项不用自己画底 —— 那块底在 .nav__pill 上（同一颜色，只是会滑）；
-   这里留着 background: transparent 是为了压住上面那条 :hover：悬停当前项不该换成悬停色 */
+   这里留着 background: transparent 是为了压住上面那条 :hover：悬停当前项不该换成悬停色。
+   图标与文字取 --ink-accent：主色按对比度推到 4.5:1 的那一档（没配主题色时就是 --ink）。
+   只靠那块底不够 —— 导航栏是半透的毛玻璃，浅色壁纸透上来时底色的明暗差会被吃得很薄，
+   字与图标的颜色差才是「现在在哪一屏」最稳的那条线索（与邮箱清单里正在读的那封同一套）。 */
 .nav__item.is-active {
   background: transparent;
-  color: var(--ink);
+  color: var(--ink-accent);
   font-weight: 600;
 }
 

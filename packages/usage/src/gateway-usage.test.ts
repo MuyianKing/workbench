@@ -1,6 +1,6 @@
 import type { GatewayUsageRowLike } from './gateway-usage'
 import { describe, expect, it } from 'vitest'
-import { gatewayBucketUnit, summarizeGatewayRows } from './gateway-usage'
+import { gatewayBucketUnit, recentHourBuckets, summarizeGatewayRows } from './gateway-usage'
 
 function row(overrides: Partial<GatewayUsageRowLike> = {}): GatewayUsageRowLike {
   return {
@@ -22,7 +22,7 @@ function row(overrides: Partial<GatewayUsageRowLike> = {}): GatewayUsageRowLike 
 }
 
 describe('summarizeGatewayRows', () => {
-  it('积分只认明确给过的行，0 也算样本', () => {
+  it('积分只认大于 0 的行，0 与缺字段都不进样本', () => {
     const summary = summarizeGatewayRows([
       row({ credit: 0.5 }),
       row({ credit: 0 }),
@@ -31,10 +31,10 @@ describe('summarizeGatewayRows', () => {
 
     expect(summary.requests).toBe(3)
     expect(summary.credits).toBe(0.5)
-    expect(summary.creditSamples).toBe(2)
-    // 缺积分的行不进分母
-    expect(summary.creditTokens).toBe(2200)
-    expect(summary.creditsPer1MTokens).toBeCloseTo(0.5 / 2200 * 1_000_000)
+    expect(summary.creditSamples).toBe(1)
+    // 免费与缺积分的 token 都不进分母
+    expect(summary.creditTokens).toBe(1100)
+    expect(summary.creditsPer1MTokens).toBeCloseTo(0.5 / 1100 * 1_000_000)
   })
 
   it('命中率与分数各算各的', () => {
@@ -107,5 +107,31 @@ describe('summarizeGatewayRows', () => {
     expect(gatewayBucketUnit(1)).toBe('hour')
     expect(gatewayBucketUnit(7)).toBe('hour')
     expect(gatewayBucketUnit(30)).toBe('day')
+  })
+})
+
+describe('recentHourBuckets', () => {
+  // 2026-10-20 16:00:00 UTC+8
+  const hourStart = 1_792_483_200
+
+  it('固定 24 格，从当前小时往前数，空档补 0', () => {
+    const buckets = recentHourBuckets([], 24, hourStart + 13 * 60 + 9)
+    expect(buckets).toHaveLength(24)
+    expect(buckets[0].bucket).toBe('2026-10-19 17')
+    expect(buckets[23].bucket).toBe('2026-10-20 16')
+    expect(buckets.every(item => item.totalTokens === 0)).toBe(true)
+  })
+
+  it('窗口内的行按小时落格，窗口外的不算', () => {
+    const buckets = recentHourBuckets([
+      row({ ts: hourStart - 25 * 3600, totalTokens: 999 }),
+      row({ ts: hourStart - 23 * 3600, totalTokens: 10 }),
+      row({ ts: hourStart + 30, totalTokens: 5 }),
+    ], 24, hourStart + 60)
+
+    expect(buckets[0].totalTokens).toBe(10)
+    expect(buckets[0].requests).toBe(1)
+    expect(buckets[23].totalTokens).toBe(5)
+    expect(buckets.reduce((sum, item) => sum + item.totalTokens, 0)).toBe(15)
   })
 })

@@ -4,12 +4,12 @@ import { CARD_OPACITY_DEFAULT, CARD_OPACITY_MAX, CARD_OPACITY_MIN, cardSurfaceAl
 describe('clampCardOpacity', () => {
   it('区间内的值原样返回', () => {
     expect(clampCardOpacity(60)).toBe(60)
+    expect(clampCardOpacity(0)).toBe(0)
     expect(clampCardOpacity(CARD_OPACITY_MIN)).toBe(CARD_OPACITY_MIN)
     expect(clampCardOpacity(CARD_OPACITY_MAX)).toBe(CARD_OPACITY_MAX)
   })
 
   it('过小 / 过大收敛到边界', () => {
-    expect(clampCardOpacity(0)).toBe(CARD_OPACITY_MIN)
     expect(clampCardOpacity(-10)).toBe(CARD_OPACITY_MIN)
     expect(clampCardOpacity(1000)).toBe(CARD_OPACITY_MAX)
   })
@@ -32,7 +32,7 @@ describe('cardSurfaceAlpha', () => {
   it('按百分比换算成 0~1 的 alpha', () => {
     expect(cardSurfaceAlpha(100)).toBe(1)
     expect(cardSurfaceAlpha(70)).toBe(0.7)
-    expect(cardSurfaceAlpha(CARD_OPACITY_MIN)).toBe(0.2)
+    expect(cardSurfaceAlpha(CARD_OPACITY_MIN)).toBe(0)
   })
 
   it('非法值按默认不透明度换算', () => {

@@ -92,6 +92,11 @@ function creditOf(row: GatewayUsageRow): string {
   return row.credit === null ? '—' : String(Number(row.credit.toFixed(2)))
 }
 
+/** 一条流水的键：机器 + 时间 + 模型 + 账号，足够区分（同一毫秒同模型同账号极少） */
+function rowKey(row: GatewayUsageRow): string {
+  return `${row.machine}-${row.ts}-${row.model}-${row.uid}`
+}
+
 function load(): void {
   loading.value = true
   void window.workbench.gatewayUsageRecent(limit.value).then((reply) => {
@@ -142,96 +147,94 @@ onMounted(load)
     </div>
 
     <div v-else class="panel req__table-wrap">
-      <table class="req__table">
-        <thead>
-          <tr>
-            <th class="req__left">
-              时间
-            </th>
-            <th class="req__left">
-              模型
-            </th>
-            <th>推理强度</th>
-            <th>账号</th>
-            <th>模式</th>
-            <th>结果</th>
-            <th>耗时</th>
-            <th>首字</th>
-            <th>速度</th>
-            <th class="req__num">
-              输入
-            </th>
-            <th class="req__num">
-              输出
-            </th>
-            <th class="req__num">
-              思考
-            </th>
-            <th class="req__num">
-              缓存
-            </th>
-            <th class="req__num req__total">
-              总 token
-            </th>
-            <th class="req__num">
-              扣除积分
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="row in filtered" :key="`${row.machine}-${row.ts}-${row.model}-${row.uid}`">
-            <td class="req__mono req__left">
-              {{ timeOf(row.ts) }}
-            </td>
-            <td class="req__mono req__model req__left" :title="`${row.model} · ${row.ua}`">
-              {{ row.model }}
-            </td>
-            <td>
-              <span v-if="row.effort" class="req__pill">{{ row.effort }}</span>
-              <span v-else class="req__none">—</span>
-            </td>
-            <td :title="row.uid">
-              {{ nameOf(row.uid) }}
-            </td>
-            <td>
-              <span v-if="row.stream === null" class="req__none">—</span>
-              <span v-else class="req__pill req__pill--mode">{{ row.stream ? '流式' : '非流式' }}</span>
-            </td>
-            <td>
-              <span class="req__flag" :class="row.ok ? 'is-ok' : 'is-fail'" :title="row.error || undefined">
-                {{ row.ok ? '完成' : '失败' }}
-              </span>
-            </td>
-            <td class="req__mono">
-              {{ secs(row.durationMs) }}
-            </td>
-            <td class="req__mono">
-              {{ secs(row.ttftMs) }}
-            </td>
-            <td class="req__mono">
-              {{ speedOf(row) }}
-            </td>
-            <td class="req__mono req__num">
-              {{ int(row.promptTokens) }}
-            </td>
-            <td class="req__mono req__num">
-              {{ int(row.completionTokens) }}
-            </td>
-            <td class="req__mono req__num">
-              {{ int(row.reasoningTokens) }}
-            </td>
-            <td class="req__mono req__num">
-              {{ hitOf(row) }}
-            </td>
-            <td class="req__mono req__num req__total">
-              {{ int(row.totalTokens) }}
-            </td>
-            <td class="req__mono req__num">
-              {{ creditOf(row) }}
-            </td>
-          </tr>
-        </tbody>
-      </table>
+      <!-- 列宽交给内容（table-layout="auto"）：不再写死每列的像素宽 -->
+      <el-table
+        :data="filtered"
+        :row-key="rowKey"
+        height="100%"
+        table-layout="auto"
+        class="req__table"
+      >
+        <el-table-column label="时间" align="center">
+          <template #default="{ row }">
+            <span class="req__mono">{{ timeOf(row.ts) }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="模型" align="center">
+          <template #default="{ row }">
+            <span class="req__mono req__model" :title="`${row.model} · ${row.ua}`">{{ row.model }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="推理强度" align="center">
+          <template #default="{ row }">
+            <span v-if="row.effort" class="req__pill">{{ row.effort }}</span>
+            <span v-else class="req__none">—</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="账号" align="center">
+          <template #default="{ row }">
+            <span :title="row.uid">{{ nameOf(row.uid) }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="模式" align="center">
+          <template #default="{ row }">
+            <span v-if="row.stream === null" class="req__none">—</span>
+            <span v-else class="req__pill req__pill--mode">{{ row.stream ? '流式' : '非流式' }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="结果" align="center">
+          <template #default="{ row }">
+            <span class="req__flag" :class="row.ok ? 'is-ok' : 'is-fail'" :title="row.error || undefined">
+              {{ row.ok ? '完成' : '失败' }}
+            </span>
+          </template>
+        </el-table-column>
+        <el-table-column label="耗时" align="center">
+          <template #default="{ row }">
+            <span class="req__mono">{{ secs(row.durationMs) }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="首字" align="center">
+          <template #default="{ row }">
+            <span class="req__mono">{{ secs(row.ttftMs) }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="速度" align="center">
+          <template #default="{ row }">
+            <span class="req__mono">{{ speedOf(row) }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="输入" align="center">
+          <template #default="{ row }">
+            <span class="req__mono">{{ int(row.promptTokens) }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="输出" align="center">
+          <template #default="{ row }">
+            <span class="req__mono">{{ int(row.completionTokens) }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="思考" align="center">
+          <template #default="{ row }">
+            <span class="req__mono">{{ int(row.reasoningTokens) }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="缓存" align="center">
+          <template #default="{ row }">
+            <span class="req__mono">{{ hitOf(row) }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="总 token" align="center">
+          <template #default="{ row }">
+            <span class="req__mono req__total">{{ int(row.totalTokens) }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="扣除积分" align="center">
+          <template #default="{ row }">
+            <span class="req__mono">{{ creditOf(row) }}</span>
+          </template>
+        </el-table-column>
+      </el-table>
     </div>
   </div>
 </template>
@@ -302,55 +305,56 @@ onMounted(load)
 }
 
 .req__table-wrap {
-  overflow: auto;
+  flex: 1 1 auto;
   min-height: 0;
-  /* 条件带就贴在面板上沿，表头再留一圈 16px 会显得中间空了一截；下边距沿用 .panel 的收法 */
-  padding-top: var(--sp-1);
-  padding-bottom: var(--sp-2);
-}
-
-.req__table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: var(--gw-fs-meta);
+  /* 表格铺满面板：上下左右不再留边，表头与首列直接贴到卡片边缘 */
+  overflow: hidden;
+  padding: 0;
 }
 
 /**
- * 表头钉在面板顶部：这一栏一屏就是十几行，滚下去还要知道每列是什么。
- * **底必须是实的**：sticky 元素在滚动容器里拿不到背景模糊 —— `backdrop-filter` 不会采样
- * 同一个滚动容器里滚过的内容（在浏览器里实测过，加 transform / will-change 也救不回来），
- * 半透明底只会变成一条「行从字底下穿过去」的透明带。取 `--bg-subtle`，与面板里的 KPI 卡同档，
- * 暗色下也不刺眼；下沿补一条线，滚起来才分得清表头与第一行。
+ * 表格交给 Element Plus：`table-layout="auto"` 让列宽由内容决定，不再手写每列宽度。
+ * 这里只把 EP 的外观收成面板的一部分 —— 去掉自带底色与四周边线，
+ * 表头取实底（钉住时不能透出下面的行），行间只留一条横线。
  */
-.req__table th {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  text-align: center;
-  font-weight: 400;
-  color: var(--ink-3);
-  background: var(--bg-subtle);
-  padding: var(--sp-2);
+.req__table {
+  --el-table-border-color: var(--border);
+  --el-table-header-bg-color: var(--bg-subtle);
+  --el-table-tr-bg-color: transparent;
+  --el-table-bg-color: transparent;
+  --el-table-header-text-color: var(--ink-3);
+  --el-table-text-color: var(--ink-2);
+  --el-table-row-hover-bg-color: transparent;
+  font-size: var(--gw-fs-meta);
+}
+
+/* 面板已经画了外框，表格自己那条底线不要 */
+.req__table :deep(.el-table__inner-wrapper::before) {
+  display: none;
+}
+
+.req__table :deep(.el-table__cell) {
+  padding: var(--sp-2) 0;
+}
+
+.req__table :deep(.cell) {
+  padding: 0 var(--sp-2);
+  line-height: 1.5;
   white-space: nowrap;
+}
+
+.req__table :deep(th.el-table__cell) {
+  font-weight: 400;
+  font-size: var(--gw-fs-micro);
   border-bottom: 1px solid var(--border);
 }
 
-/* 短值列居中：秒数、token 数这类两边留白平均才不显得歪；时间与模型靠左，见 `.req__left` */
-.req__table td {
-  padding: var(--sp-2);
-  color: var(--ink-2);
-  border-top: 1px solid var(--border);
-  white-space: nowrap;
-  text-align: center;
+.req__table :deep(td.el-table__cell) {
+  border-bottom: 1px solid var(--border);
 }
 
-/* 时间与模型是这一行的「何时 / 用什么」，贴着左边读更快；只有这两列例外 */
-.req__table .req__left {
-  text-align: left;
-}
-
-.req__table tbody tr:first-child td {
-  border-top: none;
+.req__table :deep(.el-table__body tr:last-child td.el-table__cell) {
+  border-bottom: none;
 }
 
 .req__mono {
@@ -359,14 +363,11 @@ onMounted(load)
 }
 
 .req__model {
+  display: inline-block;
   max-width: 200px;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-/* 数字列只做等宽与等位对齐（居中已由上面的 td 规则统一给） */
-.req__table .req__num {
-  font-variant-numeric: tabular-nums;
+  vertical-align: bottom;
 }
 
 /* 总 token 是这一行的结论，加粗一档；其余数字保持常规 */

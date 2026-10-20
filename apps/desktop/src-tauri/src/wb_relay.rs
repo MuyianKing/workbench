@@ -4,8 +4,9 @@
 //! 帧的处理交给 [`crate::wb_sse`]，网络交给 [`crate::wb_api_chat`]。
 //! 它只负责把这几段按顺序接起来，并在每一步失败时给出一个 OpenAI 形状的错误。
 //!
-//! 选号在这里是"第一个能用的" —— 真正的池调度（权重 / 临期 / 熔断）是 S4 的事，
-//! 现在不装作已经有了。
+//! 选号按 `wb_pool` 的优先级顺序：额度用完的号先打标记再换下一个；
+//! 不是额度问题的错误不换号，原样翻给调用方。续期失败也会跳到下一个号，
+//! 一个坏号不该把整池拖住。
 
 use std::time::Instant;
 
@@ -53,58 +54,169 @@ pub fn chat(request: &Request, accounts: &mut [Account], api_key: &str) -> Respo
         }
     };
 
-    let Some(account) = accounts.iter_mut().find(|item| item.is_ready()) else {
-        return Response::error(
-            503,
-            "no_account",
-            "没有可用的账号：先去网关页登录一个，或把已停用的账号启用",
-        );
-    };
-
-    if account.needs_refresh() {
-        if let Err(message) = crate::wb_api_auth::refresh(account) {
-            return Response::error(401, "token_expired", &message);
-        }
-        // 续期成功后顺手落盘，下次启动不用再续一次
-        let _ = account.save(&crate::paths::gateway_accounts_dir());
+    // 选号：优先级高的先用，整号额度标记与本模型额度标记没过期的都跳过
+    // （顺序见 wb_pool）。每次请求都重新取一次 now —— 额度标记的到期判定跟着墙钟走。
+    let now = now_secs();
+    let order = crate::wb_pool::order(accounts, &model, now);
+    if order.is_empty() {
+        return unavailable(accounts, &model, now);
     }
 
-    let ids = wb_identity::new_ids(
-        account.product,
-        &account.uid,
-        request.header("x-conversation-id"),
-        request
-            .header("x-session-id")
-            .or_else(|| prepared.get("conversation_id").and_then(Value::as_str)),
-        None,
-    );
+    let ua: String = request
+        .header("user-agent")
+        .unwrap_or("未知")
+        .chars()
+        .take(120)
+        .collect();
+    let effort = effort_of(&prepared);
+    let api_key_tail = key_tail(api_key);
+    let mut last_error: Option<String> = None;
+    let mut last_meta: Option<UsageMeta> = None;
+    let mut saw_quota = false;
 
-    let handle = wb_api_chat::spawn(ChatCall {
-        account: account.clone(),
-        ids,
-        model: Some(model.clone()),
-        body,
-    });
+    for index in order {
+        let account = &mut accounts[index];
 
-    let meta = UsageMeta {
-        uid: account.uid.clone(),
-        realm: account.realm.as_str().to_string(),
-        model,
-        ua: request
-            .header("user-agent")
-            .unwrap_or("未知")
-            .chars()
-            .take(120)
-            .collect(),
-        effort: effort_of(&prepared),
-        stream: wants_stream,
-        api_key: key_tail(api_key),
-    };
+        if account.needs_refresh() {
+            if let Err(message) = crate::wb_api_auth::refresh(account) {
+                // 这个号续不上就先换下一个；一个坏号不该把整池拖住
+                last_error = Some(message);
+                continue;
+            }
+            // 续期成功后顺手落盘，下次启动不用再续一次
+            let _ = account.save(&crate::paths::gateway_accounts_dir());
+        }
 
-    if wants_stream {
-        stream_response(handle, meta)
+        let ids = wb_identity::new_ids(
+            account.product,
+            &account.uid,
+            request.header("x-conversation-id"),
+            request
+                .header("x-session-id")
+                .or_else(|| prepared.get("conversation_id").and_then(Value::as_str)),
+            None,
+        );
+
+        let meta = UsageMeta {
+            uid: account.uid.clone(),
+            realm: account.realm.as_str().to_string(),
+            model: model.clone(),
+            ua: ua.clone(),
+            effort: effort.clone(),
+            stream: wants_stream,
+            api_key: api_key_tail.clone(),
+        };
+
+        // 请求体每个号一份：第一个号失败后还要留给下一个（clone 的是几 KB 的 JSON）
+        let mut handle = wb_api_chat::spawn(ChatCall {
+            account: account.clone(),
+            ids,
+            model: Some(model.clone()),
+            body: body.clone(),
+        });
+
+        match handle.head() {
+            Ok(200) => {
+                return if wants_stream {
+                    stream_response(handle, meta)
+                } else {
+                    aggregate_response(handle, meta)
+                };
+            }
+            Ok(status) => {
+                let text = drain_text(&mut handle);
+                // 上游的限额是按模型的（code 6004）：只挡这一个模型，别的照用。
+                // 正文里通常带「将在 … UTC+8 重置」，能解出来就按它，解不出按 24 小时兜底。
+                if crate::wb_quota::model_scoped(status, &text) {
+                    saw_quota = true;
+                    let resets = crate::wb_quota::reset_in_body(&text)
+                        .unwrap_or(now + crate::wb_quota::QUOTA_COOLDOWN_SECS);
+                    account.mark_model_exhausted(&model, now, resets);
+                    let _ = account.save(&crate::paths::gateway_accounts_dir());
+                    last_error = Some(text);
+                    last_meta = Some(meta);
+                    continue;
+                }
+                if crate::wb_quota::looks_exhausted(status, &text) {
+                    // 整号额度用完（余额 / 积分）：打标记后换下一个号重试。
+                    // 恢复时间先用正文里的重置时刻；下一次「查余额」拿到企业周期
+                    // 结束时间时会覆盖成更准的那一个。
+                    saw_quota = true;
+                    let resets = crate::wb_quota::reset_in_body(&text)
+                        .unwrap_or(now + crate::wb_quota::QUOTA_COOLDOWN_SECS);
+                    account.mark_quota_exhausted(now, resets);
+                    let _ = account.save(&crate::paths::gateway_accounts_dir());
+                    last_error = Some(text);
+                    last_meta = Some(meta);
+                    continue;
+                }
+                // 不是额度问题：不换号，原样翻给调用方
+                record(&meta, &Capture::new(), false, &format!("HTTP {status}"));
+                return Response::error(status, "upstream_error", &upstream_text(status, &text));
+            }
+            Err(message) => {
+                record(&meta, &Capture::new(), false, &message);
+                return Response::error(502, "upstream_error", &message);
+            }
+        }
+    }
+
+    // 走到这里说明每个号都试过了：只有「续期失败」与「额度用完」两种可能
+    if saw_quota {
+        if let Some(meta) = last_meta.as_ref() {
+            record(meta, &Capture::new(), false, "额度用完");
+        }
+        return Response::error(
+            429,
+            "quota_exhausted",
+            &format!("{model} 的额度都用完了：已自动跳过这些账号，恢复后会自动放回池子"),
+        );
+    }
+    let message = last_error.unwrap_or_else(|| "没有可用的账号".to_string());
+    Response::error(401, "token_expired", &message)
+}
+
+/// 池子里一个能用的号都没有时的回复。整号额度用完、这个模型额度用完与
+/// 「没登录 / 全停用」分开说，否则用户会以为要重新登录。
+fn unavailable(accounts: &[Account], model: &str, now: i64) -> Response {
+    if !accounts.is_empty() && accounts.iter().any(|account| account.quota_blocked(now)) {
+        return Response::error(
+            429,
+            "quota_exhausted",
+            "没有可用的账号：额度用完的号还没到恢复时间",
+        );
+    }
+    // 整号都好的，只是这个模型被上游按模型限流了 —— 给出最近的一个恢复时刻
+    let resets = accounts
+        .iter()
+        .filter(|account| account.is_ready())
+        .flat_map(|account| account.model_quotas(now))
+        .filter(|item| item.model == model)
+        .map(|item| item.resets_at)
+        .min();
+    if let Some(at) = resets {
+        return Response::error(
+            429,
+            "quota_exhausted",
+            &format!(
+                "{model} 的额度都用完了：预计 {} 恢复，先换个模型",
+                crate::wb_api_billing::format_wall_clock(at)
+            ),
+        );
+    }
+    Response::error(
+        503,
+        "no_account",
+        "没有可用的账号：先去网关页登录一个，或把已停用的账号启用",
+    )
+}
+
+/// 上游错误正文：空正文时给一句能读的话，别把空串交给客户端。
+fn upstream_text(status: u16, text: &str) -> String {
+    if text.trim().is_empty() {
+        format!("上游返回 HTTP {status}")
     } else {
-        aggregate_response(handle, meta)
+        text.to_string()
     }
 }
 
@@ -260,66 +372,46 @@ fn now_secs() -> i64 {
         .unwrap_or(0)
 }
 
-/// 流式：先判状态码，再决定回 200 的流还是一段错误。
+/// 流式：上游已经回了 200，这里只管把帧翻出去。
 fn stream_response(mut handle: wb_api_chat::StreamHandle, meta: UsageMeta) -> Response {
-    match handle.head() {
-        Ok(200) => Response::sse(move |writer| {
-            let mut decoder = Decoder::new();
-            let mut normalizer = Normalizer::new();
-            let mut capture = Capture::new();
-            let mut emitted = false;
+    Response::sse(move |writer| {
+        let mut decoder = Decoder::new();
+        let mut normalizer = Normalizer::new();
+        let mut capture = Capture::new();
+        let mut emitted = false;
 
-            while let Some(event) = handle.next() {
-                let UpstreamEvent::Chunk(bytes) = event else {
-                    continue;
-                };
-                for payload in decoder.push(&bytes) {
-                    if !emit(&payload, writer, &mut normalizer, &mut capture, &mut emitted)? {
-                        record(&meta, &capture, true, "");
-                        return Ok(());
-                    }
-                }
-            }
-            for payload in decoder.finish() {
+        while let Some(event) = handle.next() {
+            let UpstreamEvent::Chunk(bytes) = event else {
+                continue;
+            };
+            for payload in decoder.push(&bytes) {
                 if !emit(&payload, writer, &mut normalizer, &mut capture, &mut emitted)? {
                     record(&meta, &capture, true, "");
                     return Ok(());
                 }
             }
-
-            // 一帧有效内容都没有：按上游空流报错，别让客户端干等
-            if !emitted {
-                writer.write_text(&wb_sse::frame_text(&serde_json::json!({
-                    "error": {
-                        "message": "上游返回了空流",
-                        "type": "upstream_error",
-                        "code": "empty_stream"
-                    }
-                })))?;
+        }
+        for payload in decoder.finish() {
+            if !emit(&payload, writer, &mut normalizer, &mut capture, &mut emitted)? {
+                record(&meta, &capture, true, "");
+                return Ok(());
             }
-            writer.write_text(DONE_FRAME)?;
-            record(&meta, &capture, true, "");
-            Ok(())
-        }),
-        Ok(status) => {
-            // 非 200：正文就是上游的错误说明，收下来原样翻给调用方
-            let text = drain_text(&mut handle);
-            record(&meta, &Capture::new(), false, &format!("HTTP {status}"));
-            Response::error(
-                status,
-                "upstream_error",
-                &if text.trim().is_empty() {
-                    format!("上游返回 HTTP {status}")
-                } else {
-                    text
-                },
-            )
         }
-        Err(message) => {
-            record(&meta, &Capture::new(), false, &message);
-            Response::error(502, "upstream_error", &message)
+
+        // 一帧有效内容都没有：按上游空流报错，别让客户端干等
+        if !emitted {
+            writer.write_text(&wb_sse::frame_text(&serde_json::json!({
+                "error": {
+                    "message": "上游返回了空流",
+                    "type": "upstream_error",
+                    "code": "empty_stream"
+                }
+            })))?;
         }
-    }
+        writer.write_text(DONE_FRAME)?;
+        record(&meta, &capture, true, "");
+        Ok(())
+    })
 }
 
 /// 处理一帧。返回 false 表示这一轮该收尾了。
@@ -357,65 +449,48 @@ fn emit(
     }
 }
 
-/// 非流式：把整条流聚合成一个 `chat.completion`。
+/// 非流式：把整条流聚合成一个 `chat.completion`。上游已经回了 200。
 fn aggregate_response(mut handle: wb_api_chat::StreamHandle, meta: UsageMeta) -> Response {
-    match handle.head() {
-        Ok(200) => {
-            let mut decoder = Decoder::new();
-            let mut aggregator = Aggregator::new();
-            let mut capture = Capture::new();
-            let mut saw_done = false;
+    let mut decoder = Decoder::new();
+    let mut aggregator = Aggregator::new();
+    let mut capture = Capture::new();
+    let mut saw_done = false;
 
-            while let Some(event) = handle.next() {
-                let UpstreamEvent::Chunk(bytes) = event else {
-                    continue;
-                };
-                for payload in decoder.push(&bytes) {
-                    match wb_sse::parse_frame(&payload) {
-                        Frame::Done => {
-                            saw_done = true;
-                            break;
-                        }
-                        Frame::Error { code, message } => {
-                            return Response::error(
-                                502,
-                                "upstream_error",
-                                &match code {
-                                    Some(code) => format!("{message}（code {code}）"),
-                                    None => message,
-                                },
-                            )
-                        }
-                        Frame::Ignore => {}
-                        Frame::Json(chunk) => {
-                            capture.see(&chunk);
-                            aggregator.push(&chunk);
-                        }
-                    }
-                }
-                if saw_done {
+    while let Some(event) = handle.next() {
+        let UpstreamEvent::Chunk(bytes) = event else {
+            continue;
+        };
+        for payload in decoder.push(&bytes) {
+            match wb_sse::parse_frame(&payload) {
+                Frame::Done => {
+                    saw_done = true;
                     break;
                 }
+                Frame::Error { code, message } => {
+                    return Response::error(
+                        502,
+                        "upstream_error",
+                        &match code {
+                            Some(code) => format!("{message}（code {code}）"),
+                            None => message,
+                        },
+                    )
+                }
+                Frame::Ignore => {}
+                Frame::Json(chunk) => {
+                    capture.see(&chunk);
+                    aggregator.push(&chunk);
+                }
             }
-
-            // 没等到 [DONE] 就是被截断了：聚合时丢掉半截工具调用
-            record(&meta, &capture, true, "");
-            Response::json(&aggregator.finish(!saw_done))
         }
-        Ok(status) => {
-            let text = drain_text(&mut handle);
-            Response::error(
-                status,
-                "upstream_error",
-                &if text.trim().is_empty() {
-                    format!("上游返回 HTTP {status}")
-                } else {
-                    text
-                },
-            )
+        if saw_done {
+            break;
         }
-        Err(message) => Response::error(502, "upstream_error", &message),
     }
+
+    // 没等到 [DONE] 就是被截断了：聚合时丢掉半截工具调用
+    record(&meta, &capture, true, "");
+    Response::json(&aggregator.finish(!saw_done))
 }
 
 fn drain_text(handle: &mut wb_api_chat::StreamHandle) -> String {

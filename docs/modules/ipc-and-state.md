@@ -60,6 +60,10 @@
   [zentao.md](zentao.md)），周期住 `workbench-data.json` 的 `zentaoPollMinutes`。
   **技能没有数据文件**：技能库是用户挑的一个目录（设置里的 `skillDir`，与笔记文件夹互不相干），
   磁盘上的文件就是数据本身；它在哪个仓库里由 `skills.rs` 的 `state` 从那个目录往上找。
+- **开发版（`pnpm dev`）不注册单实例**，可以与装着的那份同时开、共用同一份数据目录（正式版之间仍按
+  identifier 互斥）。代价是两边各持一份内存状态、按整份文件落盘：同时改过的字段以后写的为准，
+  邮件 / 禅道的后台轮询与通知也会各跑一遍（见
+  [dev-notes/browser-preview-verification.md](../dev-notes/browser-preview-verification.md)）。
 - **数据目录固定 `%APPDATA%\Workbench\data`**（根目录 `%APPDATA%\Workbench` 是 Electron 版留下的 Chromium 配置目录，
   数据文件收进 `data` 子目录，两边不混），**没有「换目录」这回事**：不要图省事改用 Tauri 的
   `app_config_dir()`（它按 identifier 生成 `%APPDATA%\com.muyian.workbench`，换了位置用户就等于丢了项目列表）；

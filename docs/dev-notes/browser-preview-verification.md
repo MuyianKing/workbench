@@ -151,6 +151,10 @@ WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="--remote-debugging-port=9222" pnpm run de
 - `Runtime.evaluate` 里的字符串常量小心被 shell 吃转义：Windows 路径用正斜杠最省事
   （项目里的路径工具本来就会归一方向），`\\` 在两层引号之后很可能变成别的字符，
   那时量到的「相对路径没生效」其实是路径串本身就不是你想的那样
+- **`pnpm dev` 起来的开发版不注册单实例，可以和装着的那份同时开**（正式版之间、以及
+  `target/release` 那份与安装版之间仍按 identifier 互斥）。两边数据都落在
+  `%APPDATA%\Workbench\data`：各持一份内存状态、按整份文件落盘，同时改数据时后写的为准；
+  邮件 / 禅道的后台轮询与通知也会各跑一遍。只验界面时两边都开着没问题，要动会写数据的功能就先关掉一份。
 - **要动设置又不想污染自己的配置，就把整个 `APPDATA` 指到临时目录再起应用**：
   `APPDATA='C:\Users\...\Temp\wb-smoke' pnpm run dev`。数据目录是 `%APPDATA%\Workbench\data`
   （**不是 `%APPDATA%` 本身**），所以这一下连项目列表、设置、笔记文件夹一起隔离了；

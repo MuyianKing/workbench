@@ -9,9 +9,9 @@ import EmptyState from '@/components/EmptyState.vue'
 /**
  * 模型：网关能转发的模型清单。
  *
- * **目录是拉下来的，不是写死的**：点「重新获取」时用第一个可用账号去上游探一次
- * （Rust 的 `wb_models`），结果落进 `models.json`，下次进页面直接读那一份。
- * 不挂定时器 —— 拉一次就是一次真实的对上游往返，而模型一天也不变几回。
+ * **目录是拉下来的，不是写死的**：每次进入这一栏都用第一个可用账号去上游探一次
+ * （Rust 的 `wb_models`），结果落进 `models.json`；先把缓存读上屏，再在后台刷新。
+ * 不挂定时器 —— 进一次拉一次，停在这一栏时不重复请求。
  *
  * 上下文、最大输出、思考档位、消费倍率都是上游给的；**拿不到就是 0 / 空，界面显示 `—` 或「未知」**，
  * 不拿本地推断冒充事实（`inferModelMeta` 只在没有上游数据的兜底路径上参与）。
@@ -84,25 +84,27 @@ function load(): void {
   loading.value = true
   void window.workbench.gatewayModels().then((result) => {
     loading.value = false
-    if (!result.ok || !result.data) {
-      ElMessage.error(result.error ?? '读取模型清单失败')
-      return
-    }
-    models.value = result.data
+    if (result.ok && result.data)
+      models.value = result.data
+    // 缓存先上屏，再去上游拉一次；拉取失败也不挡着看缓存
+    refresh()
   })
 }
 
-/** 手动刷新：唯一会真的去打上游的入口 */
+/**
+ * 从上游拉一次。进入这一栏时由 `load` 调起；失败只在空表时提示 ——
+ * 有缓存就继续看缓存，不为一次刷新失败弹红条。
+ */
 function refresh(): void {
   fetching.value = true
   void window.workbench.gatewayModelsRefresh().then((result) => {
     fetching.value = false
     if (!result.ok || !result.data) {
-      ElMessage.error(result.error ?? '拉取模型目录失败')
+      if (!models.value.length)
+        ElMessage.error(result.error ?? '拉取模型目录失败')
       return
     }
     models.value = result.data
-    ElMessage.success(`已拉取 ${result.data.length} 个模型`)
   })
 }
 
@@ -121,85 +123,62 @@ onMounted(load)
 
 <template>
   <div class="models">
-    <!-- 条件带在毛玻璃外面：页签已经写着「模型」，这里只留计数与重新获取 -->
-    <div class="models__head">
-      <span class="models__dim">{{ models.length }} 个模型 · 单价按每百万 token</span>
-      <el-button size="small" text :loading="fetching" :disabled="fetching" @click="refresh">
-        重新获取
-      </el-button>
-    </div>
-
-    <section class="panel models__panel">
+    <div v-if="!models.length && !loading && !fetching" class="panel">
       <EmptyState
-        v-if="!models.length && !loading"
         compact
         :icon="Cpu"
-        text="还没拉过模型目录"
-        hint="点右上角「重新获取」从上游拉一份"
+        text="还没拿到模型目录"
+        hint="登录一个可用账号后会自动拉取"
       />
+    </div>
 
-      <table v-else class="models__table">
-        <thead>
-          <tr>
-            <th>模型</th>
-            <th>名称</th>
-            <th class="models__cell-num">
-              上下文窗口
-            </th>
-            <th class="models__cell-num">
-              最大输出
-            </th>
-            <th>
-              思考档位
-            </th>
-            <th class="models__cell-num">
-              倍率
-            </th>
-            <th class="models__cell-num">
-              单价
-            </th>
-            <th class="models__col-actions">
-              操作
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="model in models" :key="model.id">
-            <td class="models__mono">
-              {{ model.id }}
-            </td>
-            <td :title="model.name">
-              {{ model.name || '—' }}
-            </td>
-            <td class="models__cell-num">
-              {{ contextOf(model) }}
-            </td>
-            <td class="models__cell-num">
-              {{ maxOutputOf(model) }}
-            </td>
-            <td class="models__efforts" :title="effortsOf(model)">
-              {{ effortsOf(model) }}
-            </td>
-            <td class="models__cell-num models__mono">
-              {{ model.rate || '—' }}
-            </td>
-            <td class="models__cell-num models__mono">
-              {{ priceOf(model) }}
-            </td>
-            <td class="models__col-actions">
-              <el-tooltip content="复制模型 ID" placement="top">
-                <el-button size="small" text :icon="CopyDocument" aria-label="复制模型 ID" @click="copy(model.id)" />
-              </el-tooltip>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </section>
+    <div v-else v-loading="fetching && !models.length" class="models__grid">
+      <article v-for="model in models" :key="model.id" class="panel models__card">
+        <div class="models__card-head">
+          <span class="models__avatar">
+            <el-icon><Cpu /></el-icon>
+          </span>
+          <div class="models__titles">
+            <span class="models__id" :title="model.id">{{ model.id }}</span>
+            <span class="models__name" :title="model.name">{{ model.name || '—' }}</span>
+          </div>
+          <el-tooltip content="复制模型 ID" placement="top">
+            <el-button size="small" text :icon="CopyDocument" aria-label="复制模型 ID" @click="copy(model.id)" />
+          </el-tooltip>
+        </div>
+
+        <div class="models__facts">
+          <div class="models__fact">
+            <span class="models__fact-label">上下文窗口</span>
+            <span class="models__fact-value">{{ contextOf(model) }}</span>
+          </div>
+          <div class="models__fact">
+            <span class="models__fact-label">最大输出</span>
+            <span class="models__fact-value">{{ maxOutputOf(model) }}</span>
+          </div>
+          <div class="models__fact">
+            <span class="models__fact-label">倍率</span>
+            <span class="models__fact-value">{{ model.rate || '—' }}</span>
+          </div>
+        </div>
+
+        <div class="models__rows">
+          <div class="models__row">
+            <span class="models__row-label">思考档位</span>
+            <span class="models__row-value" :title="effortsOf(model)">{{ effortsOf(model) }}</span>
+          </div>
+          <div class="models__row">
+            <span class="models__row-label">单价</span>
+            <span class="models__row-value models__price" :class="{ 'is-unpriced': model.inputCny === null && model.outputCny === null }">{{ priceOf(model) }}</span>
+          </div>
+        </div>
+      </article>
+    </div>
   </div>
 </template>
 
 <style scoped>
-/* 外壳交给全局 .panel，这里只排条件带与表格（字号取网关那一档 --gw-fs-*） */
+/* 外壳交给全局 .panel，这里只排卡片网格（字号取网关那一档 --gw-fs-*） */
 .models {
   display: flex;
   flex-direction: column;
@@ -207,95 +186,139 @@ onMounted(load)
   min-height: 0;
 }
 
-/* 条件带不套卡片：毛玻璃留给下面那张表，这条带子自己铺在画布上 */
-.models__head {
+/* 卡片网格：一行放不下五张时自动往下排 */
+.models__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: var(--sp-3);
+}
+
+.panel.models__card {
+  gap: var(--sp-2);
+  padding: var(--sp-4);
+  /* 与账号卡同一套玻璃，只多一层极淡的主题色柔光做区分 */
+  background-image: radial-gradient(
+    120% 120% at 100% 0%,
+    color-mix(in srgb, var(--el-color-primary) 6%, transparent),
+    transparent 55%
+  );
+}
+
+.models__card-head {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
   gap: var(--sp-2);
+}
+
+/* 模型图标取主题色：与页签的选中态、刷新按钮同一条色相 */
+.models__avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--el-color-primary) 15%, transparent);
+  color: var(--el-color-primary);
+  font-size: 17px;
 }
 
-.models__dim {
-  font-size: var(--gw-fs-micro);
-  color: var(--ink-3);
-}
-
-/**
- * 面板自己滚：`.gw` 是整页滚动，而 `.panel` 的 `overflow: hidden` 会让 sticky 失效，
- * 所以模型清单要像「请求」栏那样把滚动收进面板里，表头才钉得住。
- */
-.models__panel {
+.models__titles {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
   flex: 1 1 auto;
-  min-height: 0;
-  overflow: auto;
+  min-width: 0;
 }
 
-.models__table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: var(--gw-fs-meta);
+.models__id {
+  font-family: var(--font-mono);
+  font-size: var(--gw-fs-body);
+  font-weight: 600;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-/**
- * 表头钉在面板顶部：这一栏一屏放不下二十多个模型，滚下去还要知道每列是什么。
- * **底必须是实的**：sticky 元素在滚动容器里拿不到背景模糊 —— `backdrop-filter` 不会采样
- * 同一个滚动容器里滚过的内容，半透明底只会变成一条「行从字底下穿过去」的透明带。
- * 取 `--bg-subtle`（与面板里的 KPI 卡同档），下沿补一条线。
- */
-.models__table th {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  text-align: left;
-  font-weight: 400;
+.models__name {
   font-size: var(--gw-fs-micro);
   color: var(--ink-3);
-  padding: var(--sp-2) var(--sp-2) var(--sp-2) 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
-  background: var(--bg-subtle);
-  border-bottom: 1px solid var(--border);
 }
 
-.models__table td {
-  padding: var(--sp-2) var(--sp-2) var(--sp-2) 0;
-  color: var(--ink-2);
+.models__facts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--sp-2);
+  padding-top: var(--sp-2);
   border-top: 1px solid var(--border);
+}
+
+.models__fact {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.models__fact-label,
+.models__row-label {
+  font-size: var(--gw-fs-micro);
+  color: var(--ink-3);
+}
+
+.models__fact-value {
+  font-family: var(--font-mono);
+  font-size: var(--gw-fs-meta);
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
-}
-
-.models__table tbody tr:first-child td {
-  border-top: none;
-}
-
-/* 定宽列居中：几行的值才会竖着对齐 */
-.models__cell-num {
-  width: 120px;
-  text-align: center;
-}
-
-.models__table th.models__cell-num {
-  text-align: center;
-}
-
-/* 思考档位是一串短词，宽度留给它、超出用省略号（全名在 title 里） */
-.models__efforts {
-  max-width: 260px;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.models__mono {
+.models__rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding-top: var(--sp-2);
+  border-top: 1px solid var(--border);
+}
+
+.models__row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.models__row-label {
+  flex: none;
+  width: 52px;
+}
+
+.models__row-value {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--gw-fs-meta);
+  color: var(--ink-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 单价是数字串，用等宽体；思考档位仍用正文字体 */
+.models__price {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
 
-.models__col-actions {
-  width: 72px;
-  text-align: right;
-}
-
-.models__table th.models__col-actions {
-  text-align: right;
+/* 未定价用琥珀，与账号卡的「额度用完」同一档提示色 */
+.models__row-value.is-unpriced {
+  color: var(--st-run);
 }
 </style>

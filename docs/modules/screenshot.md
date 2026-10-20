@@ -334,7 +334,9 @@ Blob → `drawImage` 这一串真的通了）→ 合成出来的 PNG 有几十�
 dev 下页面来自 Vite、CSP 根本不生效，资源或通道被拦只有装完才现形（踩过一次：旧的 base64 帧路径要
 `fetch` data: URL，生产态 `connect-src` 少一个 `data:` 就整条读不出来）。判据一样 —— 遮罩上**没有**
 「这一帧读不出来」那条红字、画布 alpha 是 255。
-两个 exe 不能同时开（单实例按 identifier 认名 —— 装着的那份与 `target/release` 那份算同一个）。
+两个 exe 不能同时开（单实例按 identifier 认名 —— 装着的那份与 `target/release` 那份算同一个；
+`pnpm dev` 的开发版是例外，它不注册单实例，可与安装版同时开，见
+[dev-notes/browser-preview-verification.md](../dev-notes/browser-preview-verification.md)）。
 
 **「显示的那一瞬间闪不闪」只能靠外部抓屏量**（CDP 合成事件与 `Runtime.evaluate` 都看不见合成器那一下）：
 写个抓屏循环，**抓一条窄带而不是整屏** —— 整屏 `CopyFromScreen` 一次 35~55ms（约 25fps）追不上

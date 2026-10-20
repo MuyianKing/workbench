@@ -4,8 +4,8 @@
  * Rust 只负责把窗口内的流水取齐（本机 `usage.jsonl` + 同步仓库里别的机器），
  * 分组 / 分桶 / 比率这些**口径**留在这里 —— 与 Rust 的 `wb_usage::summarize` 同口径：
  *
- *  - 积分只认上游 `usage.credit` 明确给过的行：缺字段的行既不进样本数，也不进比率分母；
- *    `credit = 0` 是真实的免费请求，照常计样本。
+ *  - 积分只认上游 `usage.credit` 明确给过、且大于 0 的行：缺字段与 `credit = 0`
+ *    的免费请求都不进样本数、也不进比率分母（零消耗的 token 不参与折算）。
  *  - 比率 = credits / creditTokens × 1_000_000；跨账号 / 跨模型由两个总量**直接除**，
  *    不是各组比率的平均。
  *  - 桶键按 UTC+8 的墙钟（`YYYY-MM-DD HH` / `YYYY-MM-DD`），与网关用量页的分桶时区一致。
@@ -181,7 +181,8 @@ function accumulate(target: GroupAccumulator, row: GatewayUsageRowLike): void {
     target.ttftCount += 1
     target.ttftMs += row.ttftMs
   }
-  if (row.credit !== null) {
+  // 积分只认上游明确给的、且大于 0 的数：缺字段与 credit = 0 都不进样本 / 分母
+  if (row.credit !== null && row.credit > 0) {
     target.credits += row.credit
     target.creditSamples += 1
     if (row.totalTokens > 0)
@@ -300,4 +301,41 @@ export function summarizeGatewayRows(rows: GatewayUsageRowLike[], unit: 'hour' |
     bucketUnit: unit,
     byAccount: accountList,
   }
+}
+
+/**
+ * 最近 N 小时的逐小时序列（UTC+8 桶）。
+ *
+ * 图表固定看最近 24 小时，不跟页面上选的时间范围走：从 `now` 所在那一小时往前数 N 格，
+ * 空档补 0 —— 横轴的格数与位置因此是稳定的，不会因为这段时间没有请求就把图缩掉。
+ * 传入的 `rows` 覆盖住这 N 小时即可（`read_since(1)` 的滚动 24 小时窗口够用）。
+ */
+export function recentHourBuckets(
+  rows: GatewayUsageRowLike[],
+  hours: number,
+  now: number,
+): GatewayBucketUsage[] {
+  const count = Math.max(1, Math.floor(hours))
+  const end = Math.floor(now / HOUR_SECS) * HOUR_SECS
+  const start = end - (count - 1) * HOUR_SECS
+
+  const buckets = new Map<string, GatewayBucketUsage>()
+  for (let ts = start; ts <= end; ts += HOUR_SECS) {
+    const bucket = bucketKey(ts, 'hour')
+    buckets.set(bucket, { bucket, requests: 0, totalTokens: 0, costCny: 0 })
+  }
+
+  for (const row of rows) {
+    if (row.ts < start || row.ts >= end + HOUR_SECS)
+      continue
+    const cell = buckets.get(bucketKey(row.ts, 'hour'))
+    if (!cell)
+      continue
+    cell.requests += 1
+    cell.totalTokens += row.totalTokens
+    if (row.costCny !== null)
+      cell.costCny = round2(cell.costCny + row.costCny)
+  }
+
+  return [...buckets.values()]
 }

@@ -422,7 +422,7 @@ function closePlayer(): void {
               <el-button size="small" type="primary" @click="goUpNext">
                 立即播放
               </el-button>
-              <el-button size="small" @click="cancelUpNext">
+              <el-button size="small" text @click="cancelUpNext">
                 取消
               </el-button>
             </div>
@@ -576,13 +576,15 @@ user-select: none;
  * 居中用「容器 margin: auto」而不是 align-items: center：悬浮小窗最小只有 240×135
  * （画布剩一百来像素高），卡片装不下时 align-items: center 会把上下两头一起切掉；
  * margin: auto 至少把标签与名字留在看得见的上沿。滚动条不画（指针压根进不来）。
+ * 四周只留 --sp-1：这点余量是留给最小那个小窗的 —— 卡片本身比原先高了一档（见下），
+ * 这里不收一收，画布最矮时底缘那条进度线就先被顶出去。
  */
 .vplayer__next {
   position: absolute;
   inset: 0;
   z-index: 5;
   display: flex;
-  padding: var(--sp-2);
+  padding: var(--sp-1);
   background: color-mix(in srgb, var(--term-bg) 62%, transparent);
   overflow: auto;
   scrollbar-width: none;
@@ -595,17 +597,19 @@ user-select: none;
 }
 
 /**
- * 卡片本身：三行 + 底缘一条进度线，行距按最小的小窗（画布一百来像素高）也放得下定。
+ * 卡片本身：三行 + 底缘一条进度线。行距与内边距都卡着最小的小窗给（240×135 —— 画布只剩
+ * 一百来像素高，卡片再松一点底缘那条进度线就先被切掉），所以用的是「行距拉开、四周收紧」：
+ * 三行之间各留 --sp-2，比原先的 --sp-1 松出一倍；上下内边距不对称 —— 底下多留一档给进度线。
  * 内容一律左对齐 —— 居中的三行在窄卡片里会显得散（同一句话在宽窄两种窗口下都要收得住）。
  */
 .vplayer__next-card {
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: var(--sp-1);
-  width: min(320px, 100%);
+  gap: var(--sp-2);
+  width: min(340px, 100%);
   margin: auto;
-  padding: var(--sp-2) var(--sp-3);
+  padding: var(--sp-2) var(--sp-3) var(--sp-3);
   background: var(--bg-surface);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
@@ -615,10 +619,22 @@ user-select: none;
   animation: vplayer-next-in 0.18s ease-out;
 }
 
-/* 标签与秒数同一行：左边说「接下来是什么事」，右边是那个一直在动的数字 */
+/* 进度线的底槽：极淡的一条痕，让那条进行色的线读起来是「走了多久」而不是一条下划线 */
+.vplayer__next-card::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+  background: var(--st-run-soft);
+}
+
+/* 头一行：左边说「接下来是什么事」，右边那枚小徽章是那个一直在动的数字 ——
+   秒数靠右单成一块（margin-left: auto），两句话不再挤在一起，窄卡片上先让左边截断 */
 .vplayer__next-head {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: var(--sp-2);
 }
 
@@ -634,9 +650,13 @@ user-select: none;
 /* 秒数：倒计时是这个浮层里唯一「在动」的东西，用进行色（--st-run）标出来 */
 .vplayer__next-left {
   flex-shrink: 0;
+  margin-left: auto;
+  padding: 0 var(--sp-1);
   font-size: var(--fs-micro);
   font-weight: 600;
   color: var(--st-run);
+  background: var(--st-run-soft);
+  border-radius: var(--r-pill);
   font-variant-numeric: tabular-nums;
 }
 
@@ -646,20 +666,29 @@ user-select: none;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+  line-height: 1.35;
   font-size: var(--fs-title);
   font-weight: 600;
   color: var(--ink);
 }
 
+/* 两颗按钮：主动作是实底那颗，「取消」退成纯文字（同 MailView 挑信那一排）——
+   两个同重的方框并排，在这张三行的小卡片上会显得吵 */
 .vplayer__next-actions {
   display: flex;
   align-items: center;
   gap: var(--sp-2);
 }
 
+/* EP 会在相邻按钮之间再垫 12px 的 margin-left，与上面那道 gap 叠起来把两颗推得太开；
+   间距统一交给 gap —— 「取消」自带内边距，加起来正好是看得惯的一段留白 */
+.vplayer__next-actions .el-button + .el-button {
+  margin-left: 0;
+}
+
 /**
  * 底缘那条进度线：照 VIDEO_NEXT_SECONDS 秒**从左往右拉满**（时长由模板按常量绑定）——
- * 进度就是「离自动播放还有多久」，走完就切下一个。
+ * 进度就是「离自动播放还有多久」，走完就切下一个。底下压着卡片 ::before 那一条底槽。
  */
 .vplayer__next-bar {
   position: absolute;

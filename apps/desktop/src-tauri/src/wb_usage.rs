@@ -234,11 +234,11 @@ pub struct Summary {
     pub completion_tokens: i64,
     pub total_tokens: i64,
     pub cached_tokens: i64,
-    /// 上游 `usage.credit` 累计。**只累计明确存在的观测**，缺字段的历史不参与
+    /// 上游 `usage.credit` 累计。**只累计大于 0 的观测**，缺字段与 0 消耗都不参与
     pub credits: f64,
-    /// 有积分观测的请求数：区分「缺字段」与「真实 0 积分」
+    /// 积分大于 0 的请求数（0 消耗 / 缺字段都不算）
     pub credit_samples: i64,
-    /// 与积分同时观测到的总 token（比率的分子分母来自同一批请求）
+    /// 积分大于 0 的请求的总 token（比率的分子分母来自同一批请求）
     pub credit_tokens: i64,
     /// 积分 / 1M Token：`credits / credit_tokens`，**按总量直接除**
     pub credits_per_1m_tokens: f64,
@@ -413,9 +413,8 @@ pub fn summarize(rows: &[UsageRow], unit: BucketUnit) -> Summary {
             summary.priced_requests += 1;
         }
 
-        // 积分只认上游明确给的数：缺字段的行既不进样本数，也不进分母。
-        // 0 是一次真实的免费请求，照常计样本。
-        if let Some(credit) = row.credit {
+        // 积分只认上游明确给的、且大于 0 的数：缺字段与 credit = 0 都不进样本 / 分母。
+        if let Some(credit) = row.credit.filter(|amount| *amount > 0.0) {
             summary.credits += credit;
             summary.credit_samples += 1;
             if row.total_tokens > 0 {
@@ -537,7 +536,7 @@ fn accumulate_model(list: &mut Vec<ModelSummary>, row: &UsageRow, row_cost: Opti
     entry.completion_tokens += row.completion_tokens;
     entry.total_tokens += row.total_tokens;
     entry.cached_tokens += row.cached_tokens;
-    if let Some(credit) = row.credit {
+    if let Some(credit) = row.credit.filter(|amount| *amount > 0.0) {
         entry.credits += credit;
         entry.credit_samples += 1;
         if row.total_tokens > 0 {
@@ -612,7 +611,7 @@ fn accumulate_account(list: &mut Vec<AccountSummary>, row: &UsageRow, row_cost: 
     entry.completion_tokens += row.completion_tokens;
     entry.total_tokens += row.total_tokens;
     entry.cached_tokens += row.cached_tokens;
-    if let Some(credit) = row.credit {
+    if let Some(credit) = row.credit.filter(|amount| *amount > 0.0) {
         entry.credits += credit;
         entry.credit_samples += 1;
         if row.total_tokens > 0 {
@@ -767,9 +766,8 @@ mod tests {
         assert_eq!(unknown.cost_cny, 0.0);
     }
 
-    /// 积分只累计上游明确给过的样本：缺字段的行不进样本数、也不进分母；
-    /// 0 积分是一次真实的免费请求，照常计样本。跨模型的总比率是总量直接除，
-    /// 不是各组比率的平均。
+    /// 积分只累计上游明确给过、且大于 0 的样本：缺字段的行与 0 积分都不进样本数、也不进分母。
+    /// 跨模型的总比率是总量直接除，不是各组比率的平均。
     #[test]
     fn 积分按有观测的样本聚合且跨模型总量直接除() {
         let mut first = row("a", "m1", 1_000_000, 0, 0);
@@ -778,17 +776,17 @@ mod tests {
         second.credit = Some(12.0);
         // 缺 credit：这条的 token 不进分母，也不计样本
         let missing = row("a", "m1", 1_000_000, 0, 0);
-        // 真实的 0 积分：样本照记，比率是 0
+        // 0 积分（免费请求）：同样不进样本 / 分母
         let mut free = row("b", "m3", 1_000_000, 0, 0);
         free.credit = Some(0.0);
 
         let summary = summarize(&[first, second, missing, free], BucketUnit::Day);
 
-        assert_eq!(summary.credit_samples, 3);
-        assert_eq!(summary.credit_tokens, 6_000_000);
+        assert_eq!(summary.credit_samples, 2);
+        assert_eq!(summary.credit_tokens, 5_000_000);
         assert!((summary.credits - 13.0).abs() < 1e-9);
-        // 13 / 6M；不是三个模型比率 (1 + 3 + 0) / 3 = 1.333…
-        assert!((summary.credits_per_1m_tokens - 13.0 / 6.0).abs() < 1e-9);
+        // 13 / 5M；不是三个模型比率 (1 + 3 + 0) / 3 = 1.333…
+        assert!((summary.credits_per_1m_tokens - 13.0 / 5.0).abs() < 1e-9);
 
         let m1 = summary.by_model.iter().find(|item| item.model == "m1").unwrap();
         assert_eq!(m1.credit_samples, 1);
@@ -796,7 +794,7 @@ mod tests {
         assert!((m1.credits_per_1m_tokens - 1.0).abs() < 1e-9);
 
         let free_model = summary.by_model.iter().find(|item| item.model == "m3").unwrap();
-        assert_eq!(free_model.credit_samples, 1);
+        assert_eq!(free_model.credit_samples, 0);
         assert_eq!(free_model.credits, 0.0);
         assert_eq!(free_model.credits_per_1m_tokens, 0.0);
 
@@ -806,7 +804,7 @@ mod tests {
         assert!((account_a.credits_per_1m_tokens - 13.0 / 5.0).abs() < 1e-9);
 
         let account_b = summary.by_account.iter().find(|item| item.uid == "b").unwrap();
-        assert_eq!(account_b.credit_samples, 1);
+        assert_eq!(account_b.credit_samples, 0);
         assert_eq!(account_b.credits_per_1m_tokens, 0.0);
     }
 

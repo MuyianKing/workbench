@@ -123,7 +123,7 @@ describe('accentVariables', () => {
     expect(relativeLuminance(varOf(vars, '--el-color-primary-dark-2'))).toBeLessThan(primary)
   })
 
-  it('选中块底色跟着主色走，且仍是一档看得见的高一档', () => {
+  it('选中块底色跟着主色走，且在浅色玻璃上仍看得出那一档', () => {
     const primary = ACCENT_PRESETS[0]
     const light = varOf(accentVariables(primary, 'light'), '--bg-selected')
     const dark = varOf(accentVariables(primary, 'dark'), '--bg-selected')
@@ -131,9 +131,13 @@ describe('accentVariables', () => {
     // 换个主色就换个底色 —— 这正是「选中块跟着主题色」要看的效果
     expect(light).not.toBe(varOf(accentVariables(ACCENT_PRESETS[1], 'light'), '--bg-selected'))
 
-    // 亮色下比主色浅（白底上仍与中性灰那一档同量级，没有化成白板）、暗色下比主色深
+    // 亮色下比主色浅，但不许滑到近白：卡片是 20% 白底的毛玻璃，浅底上的近白块等于没画
+    // （上限 0.75 对应「比纯白面至少深 1.3:1」，是这一档的底线而不是外观偏好）
+    for (const preset of ACCENT_PRESETS) {
+      const tint = varOf(accentVariables(preset, 'light'), '--bg-selected')
+      expect(relativeLuminance(tint), preset).toBeLessThan(0.75)
+    }
     expect(relativeLuminance(light)).toBeGreaterThan(relativeLuminance(primary))
-    expect(relativeLuminance(light)).toBeLessThan(0.9)
     expect(relativeLuminance(dark)).toBeLessThan(relativeLuminance(primary))
   })
 
@@ -150,8 +154,8 @@ describe('accentVariables', () => {
   })
 
   it('主色本身就够对比时原样用它（深色主色推一下就发黑）', () => {
-    // 靛 #4f46e5 在亮色的选中底色上本来就有 4.6:1
-    expect(varOf(accentVariables('#4f46e5', 'light'), '--ink-accent')).toBe('#4f46e5')
+    // 深海军蓝 #0a2540 在它自己那层选中底色（一半混白，成了 #8592a0）上有 4.9:1
+    expect(varOf(accentVariables('#0a2540', 'light'), '--ink-accent')).toBe('#0a2540')
   })
 
   it('明度落在中间的主色推深到够对比，但仍是同一个色相', () => {

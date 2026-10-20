@@ -254,6 +254,9 @@ mod tests {
             enabled: true,
             weight: 1,
             note: String::new(),
+            quota_exhausted_at: 0,
+            quota_resets_at: 0,
+            quota_models: Vec::new(),
             token_expired: false,
         }
     }

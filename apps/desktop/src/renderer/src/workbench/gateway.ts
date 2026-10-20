@@ -34,7 +34,22 @@ export interface GatewayAccount {
   enabled: boolean
   ready: boolean
   needsRefresh: boolean
+  /** 选号优先级：数大的先用（1..=100） */
+  priority: number
+  /** 额度标记还在生效：这个号暂时不会被选中 */
+  quotaExhausted: boolean
+  /** 额度预计恢复的时刻（Unix 秒）；没标记是 null */
+  quotaResetsAt: number | null
+  /** 按模型记的额度用完标记（上游按模型限流）：只挡这些模型，别的照用 */
+  modelQuotas: GatewayModelQuota[]
   note: string
+}
+
+/** 一个模型上的额度用完标记 */
+export interface GatewayModelQuota {
+  model: string
+  /** 预计恢复的时刻（Unix 秒） */
+  resetsAt: number
 }
 
 /** 发起登录的结果：把 authUrl 交给浏览器，把 state 留着轮询 */
@@ -120,6 +135,11 @@ export function gatewayAccountSet(uid: string, enabled: boolean): Promise<Result
   return call('wb_gateway_account_set', { uid, enabled }, '修改账号失败')
 }
 
+/** 选号优先级：1..=100，数大的先用 */
+export function gatewayAccountPriority(uid: string, priority: number): Promise<Result<null>> {
+  return call('wb_gateway_account_priority', { uid, priority }, '修改优先级失败')
+}
+
 /** 清单里的一行模型：上游目录 + 本地价表单价。未定价时两个单价字段都是 null */
 export interface GatewayModelInfo {
   id: string
@@ -172,9 +192,9 @@ export interface GatewayModelUsage {
   cachedTokens: number
   /** 上游 `usage.credit` 累计（只含有观测的请求） */
   credits: number
-  /** 有积分观测的请求数（区分「缺字段」与真实 0） */
+  /** 积分大于 0 的请求数（0 消耗 / 缺字段都不进样本） */
   creditSamples: number
-  /** 与积分同时观测到的总 token：积分比率的**分母 */
+  /** 积分大于 0 的请求的总 token：积分比率的**分母 */
   creditTokens: number
   /** 积分 / 1M Token = credits / creditTokens */
   creditsPer1MTokens: number
@@ -197,9 +217,9 @@ export interface GatewayAccountUsage {
   cachedTokens: number
   /** 上游 `usage.credit` 累计（只含有观测的请求） */
   credits: number
-  /** 有积分观测的请求数（区分「缺字段」与真实 0） */
+  /** 积分大于 0 的请求数（0 消耗 / 缺字段都不进样本） */
   creditSamples: number
-  /** 与积分同时观测到的总 token：积分比率的**分母 */
+  /** 积分大于 0 的请求的总 token：积分比率的**分母 */
   creditTokens: number
   /** 积分 / 1M Token = credits / creditTokens */
   creditsPer1MTokens: number
@@ -229,9 +249,9 @@ export interface GatewayUsageSummary {
   cachedTokens: number
   /** 上游 `usage.credit` 累计（只含有观测的请求） */
   credits: number
-  /** 有积分观测的请求数（区分「缺字段」与真实 0） */
+  /** 积分大于 0 的请求数（0 消耗 / 缺字段都不进样本） */
   creditSamples: number
-  /** 与积分同时观测到的总 token：积分比率的**分母 */
+  /** 积分大于 0 的请求的总 token：积分比率的**分母 */
   creditTokens: number
   /** 积分 / 1M Token = credits / creditTokens；跨模型时由两个总量直接除 */
   creditsPer1MTokens: number
@@ -416,5 +436,6 @@ export const gatewayApi = {
   gatewayAccess,
   gatewayRotateKey,
   gatewayAccountSet,
+  gatewayAccountPriority,
   gatewayAccountDelete,
 }
