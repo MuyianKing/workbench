@@ -237,7 +237,12 @@ onMounted(load)
   font-size: var(--gw-fs-meta);
 }
 
-/* 表头钉在面板顶部：底要画出来，否则滚上来的行会从表头文字底下穿过去 */
+/**
+ * 表头钉在面板顶部：这一栏一屏放不下二十多个模型，滚下去还要知道每列是什么。
+ * **底必须是实的**：sticky 元素在滚动容器里拿不到背景模糊 —— `backdrop-filter` 不会采样
+ * 同一个滚动容器里滚过的内容，半透明底只会变成一条「行从字底下穿过去」的透明带。
+ * 取 `--bg-subtle`（与面板里的 KPI 卡同档），下沿补一条线。
+ */
 .models__table th {
   position: sticky;
   top: 0;
@@ -248,8 +253,8 @@ onMounted(load)
   color: var(--ink-3);
   padding: var(--sp-2) var(--sp-2) var(--sp-2) 0;
   white-space: nowrap;
-  background: rgba(var(--bg-surface-rgb), var(--card-alpha, 1));
-  backdrop-filter: var(--glass-filter);
+  background: var(--bg-subtle);
+  border-bottom: 1px solid var(--border);
 }
 
 .models__table td {

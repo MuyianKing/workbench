@@ -317,8 +317,10 @@ onMounted(load)
 
 /**
  * 表头钉在面板顶部：这一栏一屏就是十几行，滚下去还要知道每列是什么。
- * 底必须画出来 —— 透明表头钉住时，滚上来的行会从文字底下穿过去；取面板同一档底 + 毛玻璃，
- * 看着仍是那块玻璃，只是更实一点，圆角与描边由外层面板裁。
+ * **底必须是实的**：sticky 元素在滚动容器里拿不到背景模糊 —— `backdrop-filter` 不会采样
+ * 同一个滚动容器里滚过的内容（在浏览器里实测过，加 transform / will-change 也救不回来），
+ * 半透明底只会变成一条「行从字底下穿过去」的透明带。取 `--bg-subtle`，与面板里的 KPI 卡同档，
+ * 暗色下也不刺眼；下沿补一条线，滚起来才分得清表头与第一行。
  */
 .req__table th {
   position: sticky;
@@ -327,10 +329,10 @@ onMounted(load)
   text-align: center;
   font-weight: 400;
   color: var(--ink-3);
-  background: rgba(var(--bg-surface-rgb), var(--card-alpha, 1));
-  backdrop-filter: var(--glass-filter);
+  background: var(--bg-subtle);
   padding: var(--sp-2);
   white-space: nowrap;
+  border-bottom: 1px solid var(--border);
 }
 
 /* 短值列居中：秒数、token 数这类两边留白平均才不显得歪；时间与模型靠左，见 `.req__left` */
