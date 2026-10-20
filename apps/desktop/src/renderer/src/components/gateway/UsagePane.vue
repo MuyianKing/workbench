@@ -10,8 +10,8 @@ import { gatewayAccountNames } from '@/workbench/gateway'
 /**
  * 用量总览。
  *
- * 布局照 Hub 的看板：一排 KPI、一张时序柱状图、一张可切换维度的明细表，
- * 末尾是「积分与缓存」那一组 KPI 卡。
+ * 布局照 Hub 的看板：一排 KPI、一张时序柱状图、一张可切换维度的明细表 ——
+ * 积分与缓存的五张汇总卡并在这张面板的表格下面，不再另起一栏。
  * 明细表**只有一张**：用量（请求 / 失败 / token / 延迟 / 速度）与积分（扣除积分 / 匹配 Token /
  * 比率 / 缓存命中率）是同一行上的两截，按账号或按模型由同一个切换控制 ——
  * 两处各摆一张表时，同一个账号要在上下两处对齐看，请求数还写了两遍。
@@ -435,13 +435,8 @@ onBeforeUnmount(() => {
       </table>
 
       <EmptyState v-else compact :icon="Histogram" text="还没有数据" />
-    </section>
 
-    <section class="panel usage__section usage__credit">
-      <div class="usage__section-head usage__section-head--rule">
-        <h3>积分与缓存</h3>
-      </div>
-
+      <!-- 汇总卡跟明细同一张面板：表是逐行、卡是这几列的总账，不再另起一栏 -->
       <div class="usage__kpis">
         <div class="usage__kpi is-accent">
           <span class="usage__kpi-label">扣除积分</span>
@@ -537,7 +532,7 @@ onBeforeUnmount(() => {
  * （底色跟着「卡片不透明度」走、磨砂取 `--glass-filter`、描边取设置里那档），只是不叠阴影：
  * 六块小卡各带一片阴影太吵。
  *
- * 用子代选择器只挑这一排：「积分与缓存」那排（`.usage__kpis`）本身就是卡片，
+ * 用子代选择器只挑这一排：下面明细面板里的五张汇总卡（`.usage__kpis`）本身就是带底的面，
  * 再套一层就是卡片套卡片，里外的磨砂还会互相叠着采一次样。
  */
 .usage > .usage__cards > .usage__card {
@@ -589,21 +584,18 @@ onBeforeUnmount(() => {
 }
 
 /**
- * 「积分与缓存」这一段的排法：标题在左，再往下一行五格积分卡 ——
- * 明细已经并进上面「用量明细」那一张表，这里只剩汇总卡，不再有第二张表。
- *
- * 卡片的左沿是 3px 色轨 —— 这一组里唯一的重色，用来一眼分出「扣了多少、效率如何」；
- * 卡底取 `--bg-subtle`（比面板底低一档），落在这张玻璃面板里才有「卡中卡」的层次。
+ * 五张汇总卡：明细表下面同一张面板里的「总账」，用一条细线跟表格隔开。
+ * 卡底不是实色灰块：一层从上到下渐淡的面（取面板底色的 RGB），落在玻璃上还透得上来，
+ * 比 `--bg-subtle` 轻一档；左沿只给两张有语义的卡留一截 2px 圆角色标，其余不画。
  */
-.usage__section-head--rule {
-  margin-bottom: var(--sp-4);
-}
-
 .usage__kpis {
   display: grid;
   /* 五张卡一行排满：这一组是一句话（扣了多少、按多少 token），断行会把「积分」和「效率」分开看 */
   grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 10px;
+  gap: var(--sp-3);
+  margin-top: var(--sp-4);
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--border);
 }
 
 /* 窗口窄到放不下五列时先塌成三列、再塌成两列：数字是等宽体，压到 140px 以下就要截断了 */
@@ -625,21 +617,26 @@ onBeforeUnmount(() => {
   flex-direction: column;
   min-width: 0;
   overflow: hidden;
-  padding: 11px 14px 12px 16px;
+  padding: var(--sp-3) var(--sp-4) calc(var(--sp-3) + 2px);
   border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--bg-subtle);
+  border-radius: var(--r-md);
+  /* 上亮下淡：一层薄薄的受光面，在玻璃面板里不会像灰块那样平 */
+  background: linear-gradient(
+    180deg,
+    rgba(var(--bg-surface-rgb), 0.62),
+    rgba(var(--bg-surface-rgb), 0.34)
+  );
 }
 
 .usage__kpi::before {
   content: '';
   position: absolute;
-  top: 0;
-  bottom: 0;
+  top: var(--sp-3);
+  bottom: var(--sp-3);
   left: 0;
-  width: 3px;
-  background: var(--kpi-color, var(--border-strong));
-  opacity: 0.9;
+  width: 2px;
+  border-radius: 0 2px 2px 0;
+  background: var(--kpi-color, transparent);
 }
 
 /* 两张带色的卡各表达一件事：点一次花掉多少（主题色）、折算率划不划算（状态色的绿） */
@@ -659,14 +656,14 @@ onBeforeUnmount(() => {
   text-overflow: ellipsis;
 }
 
-/* 数字用等宽体：四张卡并排时位数才会对齐，扫一眼就能读出量级 */
+/* 数字用等宽体：五张卡并排时位数才会对齐，扫一眼就能读出量级 */
 .usage__kpi-value {
-  margin-top: 5px;
+  margin-top: 6px;
   font-family: var(--font-mono);
-  font-size: 23px;
+  font-size: 25px;
   font-weight: 600;
-  line-height: 1.15;
-  letter-spacing: -0.02em;
+  line-height: 1.08;
+  letter-spacing: -0.03em;
   color: var(--ink);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
@@ -681,7 +678,7 @@ onBeforeUnmount(() => {
 }
 
 .usage__kpi-sub {
-  margin-top: 4px;
+  margin-top: 6px;
   font-size: var(--gw-fs-micro);
   color: var(--ink-3);
   white-space: nowrap;
