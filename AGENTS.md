@@ -180,8 +180,9 @@ asset 协议、读取权限在 Rust 侧按单个文件授予）、**通道一律
 - **别在 cargo 与 dev 之间来回**：`tauri dev` 是 `--no-default-features`，`cargo test` / `cargo build` / `clippy` 是默认 feature 集，
   两套 feature 会把彼此的产物作废，每来回一次就是整棵重编（分钟级）。所以一次改完、cargo 只跑一轮。
 - **一次改完再一次跑齐验证，别拆成多轮**：前端一条命令 `pnpm run verify`（`scripts/verify.mjs`）——
-  里面是 `lint:fix` 先独自跑完（它会写文件），然后 `lint` / `typecheck` / `build:renderer` 三条**并行**，
-  最后 `test` 单独串行（它要独占 CPU）；实测约 27s，原来是 70s。怎么量、坑在哪见
+  里面是 `lint:fix` 先独自跑完（它会写文件），然后 `lint` / `typecheck:code` / `typecheck:test` /
+  `build:renderer` 四条**并行**（typecheck 拆两段就是为了能并行 —— `pnpm run typecheck` 本身仍是两段串行），
+  最后 `test` 单独串行（它要独占 CPU）；实测约 24s，原来是 70s。怎么量、坑在哪见
   [build-performance.md](docs/dev-notes/build-performance.md)。Rust 一条命令串起来
   （`cargo test … && cargo build … && cargo clippy … -- -D warnings`）。
   改到一半只跑受影响的那个包（`pnpm -F @workbench/<包> test`，走那个包自己的配置），全量留到收尾那一次。

@@ -11,8 +11,9 @@
 ### 调整
 
 - **本地验证链提速**：ESLint 两条走 `--cache`（热缓存下全仓库一遍 4.8s，原来约 20s），
-  `lint` / `typecheck` / `build:renderer` 改并行，`pnpm test` 改成一条 vitest 进程收 18 个项目
-  （17.1s → 12.1s），新增 `pnpm run verify` 把这套收成一个命令（实测 70s → 27.4s；
+  `lint` / `typecheck` / `build:renderer` 改并行（`typecheck` 拆成 `typecheck:code` / `typecheck:test`
+  两条才并得起来，10.4s → 5.7s），`pnpm test` 改成一条 vitest 进程收 18 个项目（17.1s → 12.1s），
+  新增 `pnpm run verify` 把这套收成一个命令（实测 70s → 23.5s，冷缓存首遍 40s；
   明细、怎么量与坑见 [构建与打包性能](docs/dev-notes/build-performance.md)）。
   `.eslintcache` 是本地产物，不进版本库。
 

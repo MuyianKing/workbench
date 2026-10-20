@@ -5,11 +5,12 @@
  *
  *   lint:fix              串行：它会写文件，必须最先跑完、且独自跑
  *   ├─ lint               ┐
- *   ├─ typecheck          ├ 并行：三条互不写同一批文件，串起来是它们的「和」、并行是它们的「最慢那条」
+ *   ├─ typecheck:code     │ 并行：几条互不写同一批文件，串起来是它们的「和」、
+ *   ├─ typecheck:test     │ 并行是它们的「最慢那条」
  *   └─ build:renderer     ┘
  *   test                  串行：它要独占 CPU（既有那几条基于真实 git 的用例撞 5 秒超时就是假失败）
  *
- * 实测（2026-10-19，热盘、全绿）：原来那条串行链约 70s，这里约 30s。明细见
+ * 实测（2026-10-19，热盘、全绿）：原来那条串行链约 70s，这里 23.5s（冷缓存首遍 40s）。明细见
  * docs/dev-notes/build-performance.md 的「验证链的耗时」。
  *
  * `build:renderer` 只有 3s 出头，塞在并行组里等于免费，所以不再需要人工判断「这轮动没动过 `.vue` 模板」；
@@ -20,8 +21,15 @@
 import { spawn } from 'node:child_process'
 import process from 'node:process'
 
-/** 并行组：三条互不依赖，谁先完谁先报 */
-const PARALLEL = ['lint', 'typecheck', 'build:renderer']
+/**
+ * 并行组：几条互不依赖，谁先完谁先报。
+ *
+ * typecheck 拆成两段（两份 tsconfig 各查一半）是为了能并行：串行实测 10.4s，
+ * 并行是它们里最慢的那条 5.7s —— 两段互不写同一批文件，可以同时起。
+ * 注意别顺手给 tsconfig.test.json 加 `incremental`：`noEmit` 下它还要读写 tsbuildinfo，
+ * 实测反而更慢（串行 11.2s、并行 8.6s）。见 docs/dev-notes/build-performance.md。
+ */
+const PARALLEL = ['lint', 'typecheck:code', 'typecheck:test', 'build:renderer']
 
 /**
  * 跑一个 pnpm 脚本，回传耗时与退出码。
