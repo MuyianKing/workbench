@@ -108,6 +108,8 @@
   30 天总 token 每新增 10M 就强制推一次 git（`GatewayView` 的 15 秒轮询里判定，用量页只是其中一栏）。
   第一次刷新只记基线、不立刻推；流水被清或老行滚出 30 天窗口时把基线压回当前值；
   失败 5 分钟后再试，不顺带每 15 秒撞一次；没登录 / 没配仓库时什么都不做。
+  **进页面还会只拉不推地刷新一次远端克隆**（`gateway_sync_pull`，一分钟节流）：读路径只读本地副本，
+  而克隆平时只有本机推送时才顺带 pull —— 本机一天没有流水时，别的机器推上来的今天会一直「没同步到」。
 - **时序图固定看最近 24 小时，并且排在最底下**：横轴是 24 个 UTC+8 小时桶（`recentHourBuckets`，
   没有请求的小时补 0），纵轴四档 25 / 50 / 75 / 100%，刻度取整数、单位（M / K）只标在轴顶一次；
   网格线是压淡的虚线，画在柱子后面；顺序是 KPI → 积分总账 → 明细表 → 时序图 ——
@@ -301,6 +303,10 @@ state 存在内存里（10 分钟过期），不落盘。上游签发 state，�
   同步失败只影响「看到别的机器」，不影响本机出数与聚合。
 - 节奏：**30 天总 token 每新增 10M 自动推一次**（TBuddy 页的 15 秒轮询里判定；用量页不再有手动按钮），
   现有的一小时一轮 token 同步也仍会顺带推一次。内容没变时 `git diff` 会挡住空提交。
+- **读永远只读本地克隆，进页面时补一次 pull**：`read_gateway_rows` 不联网；克隆平时只在推送时
+  （`ensure_clone`）顺带更新，本机没有流水就不会推送 —— 别的机器推上来的今天因此进不来。
+  `GatewayView` 进页面（含从别的页面切回来）在首屏之后调一次 `gateway_sync_pull`（只 pull、不写不提交不推），
+  有变化再重读。一分钟内不重复拉（适配层的节流），失败静默、只影响「看到别的机器」。
 - 同步只加不删：本机流水被清空 / 删掉某个月时，仓库里已有的旧月份**不会被删**
   （`git add --ignore-removal`）。要清理某个月：先删本机 `usage.jsonl` 里那个月的行，再在仓库里手工删
   对应文件；只删仓库那边，下一次同步会按本机流水写回来。
@@ -345,7 +351,7 @@ state 存在内存里（10 分钟过期），不落盘。上游签发 state，�
 - `apps/desktop/src-tauri/src/http.rs`（流式接口、`request_url_stream_capture`）
 - `apps/desktop/src-tauri/src/paths.rs`（`gateway_dir` / `gateway-usage` / `gateway_activity_file` 系列）
 - `apps/desktop/src-tauri/src/sync.rs`（网关流水的 git 写入 / 读取、按月分文件）
-- `apps/desktop/src-tauri/src/commands.rs`（`gateway_sync_publish`）
+- `apps/desktop/src-tauri/src/commands.rs`（`gateway_sync_publish` / `gateway_sync_pull`）
 - `apps/desktop/src-tauri/src/main.rs`（模块、managed state、命令注册）
 - `apps/desktop/src/renderer/src/components/gateway/{GatewayView,AccessDialog,PerksPane,UsagePane,RequestsPane,ModelsPane}.vue`
 - `apps/desktop/src/renderer/src/workbench/{gateway,sync-queue}.ts`

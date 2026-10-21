@@ -654,6 +654,15 @@ pub fn gateway_sync_publish(repo: String, device: String) -> Result<Value, Strin
     crate::sync::publish_gateway_usage(&repo, &device, &rows)
 }
 
+/// 只把同步克隆更新到最新（不写本机流水、不提交、不推送），读完刷新用量页。
+///
+/// 网关用量的读路径只读本地克隆；本机没有流水就不会触发推送，也就没人顺带把
+/// 别的机器推上来的今天拉下来（见 `sync::refresh_gateway_clone`）。
+#[tauri::command(async)]
+pub fn gateway_sync_pull(repo: String) -> Result<Value, String> {
+    crate::sync::refresh_gateway_clone(&repo)
+}
+
 /// 把本机的外观配置（theme.json 整份副本）单独写进同步仓库并推送；
 /// 设置界面「从别的机器取外观」旁的「同步一次」走它（且只有它 —— 没有自动同步）。
 /// 返回 `{ changed, pushed, log }`。

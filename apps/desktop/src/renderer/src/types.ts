@@ -1121,6 +1121,8 @@ export interface WorkbenchApi {
   gatewayUsageRecent: (limit: number) => Promise<Result<import('./workbench/gateway').GatewayUsageRow[]>>
   /** 手动同步网关流水；`force=false` 时一小时内的重复调用会被节流跳过 */
   gatewayUsageSync: (force?: boolean) => Promise<Result<import('./workbench/gateway').GatewaySyncResult>>
+  /** 只拉一次远端克隆（不推送）；读路径只读本地副本，靠它补上别的机器的新流水 */
+  gatewayUsagePull: () => Promise<Result<import('./workbench/gateway').GatewayPullResult>>
   gatewaySyncStatus: () => Promise<import('./workbench/gateway').GatewaySyncStatus>
   gatewayAccountSet: (uid: string, enabled: boolean) => Promise<Result<null>>
   /** 选号优先级：1..=100，数大的先用 */

@@ -19,7 +19,7 @@ import { assetUrl, errorText, guard, hasTauri, invoke, listen, listenReady, notP
 import * as design from './design'
 import { emit } from './events'
 import * as events from './events'
-import { gatewayApi, gatewayUsage, gatewayUsageRecent, gatewayUsageRows, syncGatewayUsage } from './gateway'
+import { gatewayApi, gatewayUsage, gatewayUsageRecent, gatewayUsageRows, pullGatewayUsage, syncGatewayUsage } from './gateway'
 import * as kb from './kb'
 import * as note from './note'
 import * as nrm from './nrm'
@@ -245,6 +245,11 @@ function createApi(): WorkbenchApi {
       if (repo && !device)
         return fail('没有设备标识，无法同步')
       return syncGatewayUsage(repo, device, force)
+    },
+    // 只拉不推：读路径只读本地克隆，进页面时先把别的机器推上来的补进来
+    gatewayUsagePull: async () => {
+      const { repo } = await gatewayContext()
+      return pullGatewayUsage(repo)
     },
     gatewaySyncStatus: async () => {
       const repo = syncRepo()

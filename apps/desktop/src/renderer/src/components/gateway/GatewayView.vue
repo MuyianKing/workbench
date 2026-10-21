@@ -439,15 +439,32 @@ async function rotateKey(): Promise<void> {
 }
 
 /** 同步开关跟着登录态 / 仓库地址走：进页面与每次切回来都重新对一下 */
-function loadSyncStatus(): void {
-  void window.workbench.gatewaySyncStatus().then((status) => {
+async function loadSyncStatus(): Promise<void> {
+  try {
+    const status = await window.workbench.gatewaySyncStatus()
     syncEnabled.value = status.enabled
-  }).catch(() => undefined)
+  }
+  catch {
+    // 读不到就按关闭处理：只读本机
+  }
+}
+
+/**
+ * 后台拉一次远端克隆，读到新流水后重读本地副本。
+ *
+ * 用量页的读路径只读本地克隆，而克隆平时只有在本机推送时才会被顺带 pull ——
+ * 本机一天没有流水时，别的机器推上来的今天永远进不来。节流在适配层（一分钟一次）。
+ */
+async function pullRemote(): Promise<void> {
+  if (!syncEnabled.value)
+    return
+  const result = await window.workbench.gatewayUsagePull()
+  if (result.ok && result.data?.changed)
+    await refresh()
 }
 
 onMounted(() => {
   void enter()
-  loadSyncStatus()
   pollTimer = setInterval(() => {
     void refresh()
   }, 15000)
@@ -465,7 +482,10 @@ async function enter(): Promise<void> {
     return
   entering = true
   try {
+    await loadSyncStatus()
     await refresh()
+    // 放在首屏之后：拉远端要走网络，不该挡住本机数字上屏
+    void pullRemote()
     await queryAllCredits()
   }
   finally {
@@ -474,7 +494,6 @@ async function enter(): Promise<void> {
 }
 
 onActivated(() => {
-  loadSyncStatus()
   void enter()
 })
 

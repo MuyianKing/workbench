@@ -363,6 +363,47 @@ export interface GatewaySyncResult {
   months?: number
 }
 
+/** 只拉一次克隆的结果；`skipped=true` 表示一分钟内刚拉过，这次没走 git */
+export interface GatewayPullResult {
+  pulled: boolean
+  changed: boolean
+  skipped?: boolean
+}
+
+/** 拉取的节流窗口：每次进页面都 fetch 一次太费，一分钟内不重复 */
+const GATEWAY_PULL_INTERVAL_MS = 60_000
+let lastGatewayPullAt = 0
+let gatewayPulling: Promise<Result<GatewayPullResult>> | null = null
+
+/**
+ * 只拉不推：把同步克隆更新到最新，别的机器推上来的流水才读得到。
+ *
+ * 用量页的读路径只读本地克隆，而克隆平时只有在本机推送时才会被顺带 pull ——
+ * 本机一天没有流水时，别的机器推的今天就永远进不来。这里不排队、不写本机那份，
+ * 也不会自己等自己（与推送用的是不同入口，但 git 侧仍有同一把工作流锁）。
+ */
+export function pullGatewayUsage(repo: string): Promise<Result<GatewayPullResult>> {
+  if (!repo)
+    return Promise.resolve(ok({ pulled: false, changed: false }))
+  if (gatewayPulling)
+    return gatewayPulling
+  if (Date.now() - lastGatewayPullAt < GATEWAY_PULL_INTERVAL_MS)
+    return Promise.resolve(ok({ pulled: false, changed: false, skipped: true }))
+
+  gatewayPulling = call<{ changed: boolean }>('gateway_sync_pull', { repo }, '刷新 TBuddy 流水失败')
+    .then(result => (result.ok
+      ? ok({ pulled: true, changed: result.data?.changed === true })
+      : fail(result.error ?? '刷新 TBuddy 流水失败')))
+    .finally(() => {
+      gatewayPulling = null
+    })
+  return gatewayPulling.then((result) => {
+    if (result.ok)
+      lastGatewayPullAt = Date.now()
+    return result
+  })
+}
+
 /** 自动同步的节流窗口：与 token 用量同一个节奏（一小时） */
 const GATEWAY_SYNC_INTERVAL_MS = 60 * 60_000
 let lastGatewaySyncAt = 0

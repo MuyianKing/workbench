@@ -343,6 +343,28 @@ fn publish_gateway_at(
     }))
 }
 
+/// 只把同步克隆更新到最新：**不写本机流水、不提交、不推送**。
+///
+/// 网关用量的读路径不联网、只读克隆里的副本，而克隆平时只有在本机推送时才会被
+/// `ensure_clone` 顺带 pull 一次 —— 本机一天都没有流水时，别的机器推上来的今天
+/// 就会一直「没同步到」。用量页进页面时调这个补一趟。
+pub fn refresh_gateway_clone(repo: &str) -> Result<Value, String> {
+    refresh_gateway_clone_at(&paths::token_sync_dir(), repo)
+}
+
+fn refresh_gateway_clone_at(clone_dir: &Path, repo: &str) -> Result<Value, String> {
+    if repo.trim().is_empty() {
+        return Err("没有配置同步仓库".into());
+    }
+    let _workflow = lock_workflow(clone_dir);
+    set_git_auth();
+    // 克隆还不存在时 head_of 只会回空串，ensure_clone 会现克隆一份
+    let before = head_of(clone_dir);
+    let (dir, _branch) = ensure_clone(clone_dir, repo)?;
+    let after = head_of(&dir);
+    Ok(json!({ "changed": before != after, "head": after }))
+}
+
 /// 从同步克隆读**别的机器**的网关流水（不联网、不改克隆）。
 ///
 /// `own_device` 的目录跳过：本机以 `usage.jsonl` 为准，再读一遍会双计。
@@ -1721,6 +1743,88 @@ mod tests {
         let empty = publish_gateway_at(&clone_a, &repo, "dev-c", &[]).unwrap();
         assert_eq!(empty["changed"], json!(false));
         assert_eq!(empty["rows"], json!(0));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// 只拉不推：本机克隆停在旧提交时，刷新要把别的机器后来推的流水补进来。
+    ///
+    /// 踩过的现场：另一台机器推了一整天的流水，本机一天没流水、也就没推送，
+    /// 克隆一直停在旧提交，用量页上「今天的量」永远不出现。
+    #[test]
+    fn 刷新克隆能拿到别的机器后来推的流水() {
+        if proc::probe_version("git").is_none() {
+            eprintln!("跳过：本机没有 git");
+            return;
+        }
+
+        let root = std::env::temp_dir().join(format!("wb-gateway-pull-{}", uuid::Uuid::new_v4()));
+        let remote = root.join("remote.git");
+        let clone_a = root.join("clone-a");
+        let clone_b = root.join("clone-b");
+        std::fs::create_dir_all(&root).unwrap();
+        let init = proc::run_direct(
+            "git",
+            &[
+                "init".to_string(),
+                "--bare".to_string(),
+                remote.to_string_lossy().into_owned(),
+            ],
+            GIT_TIMEOUT,
+            None,
+            &GIT_ENVS,
+        )
+        .unwrap();
+        assert!(init.ok(), "git init --bare 失败: {}", init.stderr);
+        let repo = remote.to_string_lossy().into_owned();
+
+        let row = |machine: &str, ts: i64| crate::wb_usage::UsageRow {
+            ts,
+            uid: "u-1".into(),
+            realm: "cn".into(),
+            machine: machine.into(),
+            model: "m".into(),
+            prompt_tokens: 10,
+            completion_tokens: 2,
+            total_tokens: 12,
+            cached_tokens: 0,
+            ttft_ms: 1,
+            duration_ms: 2,
+            ok: true,
+            error: String::new(),
+            ua: "ua".into(),
+            effort: String::new(),
+            stream: Some(true),
+            reasoning_tokens: 0,
+            credit: Some(0.5),
+            api_key: String::new(),
+            cost_cny: None,
+        };
+
+        // A 推一条，B 随后克隆（此时看到的就是 A 的那一条）
+        publish_gateway_at(&clone_a, &repo, "dev-a", &[row("A", 100)]).unwrap();
+        publish_gateway_at(&clone_b, &repo, "dev-b", &[row("B", 101)]).unwrap();
+        assert_eq!(
+            read_gateway_rows_for(&clone_b, &repo, "dev-b", 0).unwrap().len(),
+            1
+        );
+
+        // A 又推了一条：B 不推送就看不到
+        publish_gateway_at(&clone_a, &repo, "dev-a", &[row("A", 100), row("A", 102)]).unwrap();
+        assert_eq!(
+            read_gateway_rows_for(&clone_b, &repo, "dev-b", 0).unwrap().len(),
+            1,
+            "本地克隆没更新之前不该看见"
+        );
+
+        let pulled = refresh_gateway_clone_at(&clone_b, &repo).unwrap();
+        assert_eq!(pulled["changed"], json!(true));
+        let fresh = read_gateway_rows_for(&clone_b, &repo, "dev-b", 0).unwrap();
+        assert_eq!(fresh.len(), 2, "刷新之后要读到 A 后来推的那条");
+
+        // 已经是最新时不该再报变化
+        let again = refresh_gateway_clone_at(&clone_b, &repo).unwrap();
+        assert_eq!(again["changed"], json!(false));
 
         let _ = std::fs::remove_dir_all(&root);
     }

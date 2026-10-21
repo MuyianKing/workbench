@@ -612,6 +612,7 @@ fn main() {
             commands::token_sync_config,
             commands::token_sync_shards,
             commands::gateway_sync_publish,
+            commands::gateway_sync_pull,
             commands::auth_status,
             commands::auth_refresh_account,
             commands::auth_login_start,
