@@ -62,6 +62,7 @@ mod wb_router;
 mod wb_sanitize;
 mod wb_server;
 mod wb_sse;
+mod wb_tasks;
 mod wb_usage;
 mod weather;
 mod zentao;
@@ -706,6 +707,13 @@ fn main() {
             wb_gateway::wb_gateway_usage,
             wb_gateway::wb_gateway_usage_rows,
             wb_gateway::wb_gateway_usage_recent,
+            wb_gateway::wb_gateway_tasks,
+            wb_gateway::wb_gateway_tasks_run,
+            wb_gateway::wb_gateway_tasks_travel,
+            wb_gateway::wb_gateway_tasks_streak,
+            wb_gateway::wb_gateway_checkin,
+            wb_gateway::wb_gateway_daily_chat,
+            wb_gateway::wb_gateway_activity_today,
             ball::ball_apply,
             ball::ball_context,
             ball::ball_open,

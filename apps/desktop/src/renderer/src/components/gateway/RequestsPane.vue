@@ -4,6 +4,7 @@ import { List } from '@element-plus/icons-vue'
 import { computed, onMounted, ref } from 'vue'
 import EmptyState from '@/components/EmptyState.vue'
 import { gatewayAccountNames } from '@/workbench/gateway'
+import GatewayTable from './GatewayTable.vue'
 
 /**
  * 请求记录：最近若干条流水的表格。
@@ -143,99 +144,97 @@ onMounted(load)
     </div>
 
     <div v-if="!filtered.length" class="panel">
-      <EmptyState compact :icon="List" text="还没有请求" hint="网关启动后，客户端来的请求会出现在这里" />
+      <EmptyState compact :icon="List" text="还没有请求" hint="TBuddy 启动后，客户端来的请求会出现在这里" />
     </div>
 
-    <div v-else class="panel req__table-wrap">
-      <!-- 列宽交给内容（table-layout="auto"）：不再写死每列的像素宽 -->
-      <el-table
-        :data="filtered"
-        :row-key="rowKey"
-        height="100%"
-        table-layout="auto"
-        class="req__table"
-      >
-        <el-table-column label="时间" align="center">
-          <template #default="{ row }">
-            <span class="req__mono">{{ timeOf(row.ts) }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="模型" align="center">
-          <template #default="{ row }">
-            <span class="req__mono req__model" :title="`${row.model} · ${row.ua}`">{{ row.model }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="推理强度" align="center">
-          <template #default="{ row }">
-            <span v-if="row.effort" class="req__pill">{{ row.effort }}</span>
-            <span v-else class="req__none">—</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="账号" align="center">
-          <template #default="{ row }">
-            <span :title="row.uid">{{ nameOf(row.uid) }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="模式" align="center">
-          <template #default="{ row }">
-            <span v-if="row.stream === null" class="req__none">—</span>
-            <span v-else class="req__pill req__pill--mode">{{ row.stream ? '流式' : '非流式' }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="结果" align="center">
-          <template #default="{ row }">
-            <span class="req__flag" :class="row.ok ? 'is-ok' : 'is-fail'" :title="row.error || undefined">
-              {{ row.ok ? '完成' : '失败' }}
-            </span>
-          </template>
-        </el-table-column>
-        <el-table-column label="耗时" align="center">
-          <template #default="{ row }">
-            <span class="req__mono">{{ secs(row.durationMs) }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="首字" align="center">
-          <template #default="{ row }">
-            <span class="req__mono">{{ secs(row.ttftMs) }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="速度" align="center">
-          <template #default="{ row }">
-            <span class="req__mono">{{ speedOf(row) }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="输入" align="center">
-          <template #default="{ row }">
-            <span class="req__mono">{{ int(row.promptTokens) }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="输出" align="center">
-          <template #default="{ row }">
-            <span class="req__mono">{{ int(row.completionTokens) }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="思考" align="center">
-          <template #default="{ row }">
-            <span class="req__mono">{{ int(row.reasoningTokens) }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="缓存" align="center">
-          <template #default="{ row }">
-            <span class="req__mono">{{ hitOf(row) }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="总 token" align="center">
-          <template #default="{ row }">
-            <span class="req__mono req__total">{{ int(row.totalTokens) }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="扣除积分" align="center">
-          <template #default="{ row }">
-            <span class="req__mono">{{ creditOf(row) }}</span>
-          </template>
-        </el-table-column>
-      </el-table>
-    </div>
+    <GatewayTable
+      v-else
+      class="req__table-wrap"
+      :data="filtered"
+      :row-key="rowKey"
+      height="100%"
+      nowrap
+    >
+      <el-table-column label="时间" align="center">
+        <template #default="{ row }">
+          <span class="req__mono">{{ timeOf(row.ts) }}</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="模型" align="center">
+        <template #default="{ row }">
+          <span class="req__mono req__model" :title="`${row.model} · ${row.ua}`">{{ row.model }}</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="推理强度" align="center">
+        <template #default="{ row }">
+          <span v-if="row.effort" class="req__pill">{{ row.effort }}</span>
+          <span v-else class="req__none">—</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="账号" align="center">
+        <template #default="{ row }">
+          <span :title="row.uid">{{ nameOf(row.uid) }}</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="模式" align="center">
+        <template #default="{ row }">
+          <span v-if="row.stream === null" class="req__none">—</span>
+          <span v-else class="req__pill req__pill--mode">{{ row.stream ? '流式' : '非流式' }}</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="结果" align="center">
+        <template #default="{ row }">
+          <span class="req__flag" :class="row.ok ? 'is-ok' : 'is-fail'" :title="row.error || undefined">
+            {{ row.ok ? '完成' : '失败' }}
+          </span>
+        </template>
+      </el-table-column>
+      <el-table-column label="耗时" align="center">
+        <template #default="{ row }">
+          <span class="req__mono">{{ secs(row.durationMs) }}</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="首字" align="center">
+        <template #default="{ row }">
+          <span class="req__mono">{{ secs(row.ttftMs) }}</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="速度" align="center">
+        <template #default="{ row }">
+          <span class="req__mono">{{ speedOf(row) }}</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="输入" align="center">
+        <template #default="{ row }">
+          <span class="req__mono">{{ int(row.promptTokens) }}</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="输出" align="center">
+        <template #default="{ row }">
+          <span class="req__mono">{{ int(row.completionTokens) }}</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="思考" align="center">
+        <template #default="{ row }">
+          <span class="req__mono">{{ int(row.reasoningTokens) }}</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="缓存" align="center">
+        <template #default="{ row }">
+          <span class="req__mono">{{ hitOf(row) }}</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="总 token" align="center">
+        <template #default="{ row }">
+          <span class="req__mono req__total">{{ int(row.totalTokens) }}</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="扣除积分" align="center">
+        <template #default="{ row }">
+          <span class="req__mono">{{ creditOf(row) }}</span>
+        </template>
+      </el-table-column>
+    </GatewayTable>
   </div>
 </template>
 
@@ -307,54 +306,6 @@ onMounted(load)
 .req__table-wrap {
   flex: 1 1 auto;
   min-height: 0;
-  /* 表格铺满面板：上下左右不再留边，表头与首列直接贴到卡片边缘 */
-  overflow: hidden;
-  padding: 0;
-}
-
-/**
- * 表格交给 Element Plus：`table-layout="auto"` 让列宽由内容决定，不再手写每列宽度。
- * 这里只把 EP 的外观收成面板的一部分 —— 去掉自带底色与四周边线，
- * 表头取实底（钉住时不能透出下面的行），行间只留一条横线。
- */
-.req__table {
-  --el-table-border-color: var(--border);
-  --el-table-header-bg-color: var(--bg-subtle);
-  --el-table-tr-bg-color: transparent;
-  --el-table-bg-color: transparent;
-  --el-table-header-text-color: var(--ink-3);
-  --el-table-text-color: var(--ink-2);
-  --el-table-row-hover-bg-color: transparent;
-  font-size: var(--gw-fs-meta);
-}
-
-/* 面板已经画了外框，表格自己那条底线不要 */
-.req__table :deep(.el-table__inner-wrapper::before) {
-  display: none;
-}
-
-.req__table :deep(.el-table__cell) {
-  padding: var(--sp-2) 0;
-}
-
-.req__table :deep(.cell) {
-  padding: 0 var(--sp-2);
-  line-height: 1.5;
-  white-space: nowrap;
-}
-
-.req__table :deep(th.el-table__cell) {
-  font-weight: 400;
-  font-size: var(--gw-fs-micro);
-  border-bottom: 1px solid var(--border);
-}
-
-.req__table :deep(td.el-table__cell) {
-  border-bottom: 1px solid var(--border);
-}
-
-.req__table :deep(.el-table__body tr:last-child td.el-table__cell) {
-  border-bottom: none;
 }
 
 .req__mono {

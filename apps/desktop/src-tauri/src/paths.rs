@@ -61,6 +61,8 @@ pub const GATEWAY_SETTINGS_FILE: &str = "settings.json";
 pub const GATEWAY_ACCOUNTS_DIR: &str = "accounts";
 pub const GATEWAY_USAGE_FILE: &str = "usage.jsonl";
 pub const GATEWAY_MODELS_FILE: &str = "models.json";
+/// 签到 / 每日活跃的尝试记录（一行一次真实尝试，见 `wb_tasks::record_activity`）
+pub const GATEWAY_ACTIVITY_FILE: &str = "activity.jsonl";
 
 /// 老版本直接写在用户数据根目录下的那批文件：搬家清单（见 `relocate_root_files_in`）
 const ROOT_FILES: &[&str] = &[
@@ -161,6 +163,11 @@ pub fn gateway_usage_file() -> PathBuf {
 /// 上一次从上游拉下来的模型目录（见 `wb_models`）。
 pub fn gateway_models_file() -> PathBuf {
     gateway_dir().join(GATEWAY_MODELS_FILE)
+}
+
+/// 签到 / 每日活跃的尝试记录（见 `wb_tasks`）。只追加，按自然日读今天那一段。
+pub fn gateway_activity_file() -> PathBuf {
+    gateway_dir().join(GATEWAY_ACTIVITY_FILE)
 }
 
 /// 一次性的本地搬家，启动时跑一次（commands.rs 的 `load_all`，必须早于任何 store 载入）：

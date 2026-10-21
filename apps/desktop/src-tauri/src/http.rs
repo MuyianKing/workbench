@@ -19,8 +19,8 @@ use windows_sys::Win32::Networking::WinHttp::{
     WinHttpQueryDataAvailable, WinHttpQueryHeaders, WinHttpReadData, WinHttpReceiveResponse,
     WinHttpSendRequest, WinHttpSetOption, WinHttpSetTimeouts, WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
     WINHTTP_ADDREQ_FLAG_ADD, WINHTTP_FLAG_SECURE, WINHTTP_OPTION_REDIRECT_POLICY,
-    WINHTTP_OPTION_REDIRECT_POLICY_NEVER, WINHTTP_QUERY_ETAG, WINHTTP_QUERY_FLAG_NUMBER,
-    WINHTTP_QUERY_LOCATION, WINHTTP_QUERY_STATUS_CODE,
+    WINHTTP_OPTION_REDIRECT_POLICY_NEVER, WINHTTP_QUERY_CUSTOM, WINHTTP_QUERY_ETAG,
+    WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_QUERY_LOCATION, WINHTTP_QUERY_STATUS_CODE,
 };
 
 use crate::encoding::wide;
@@ -244,21 +244,24 @@ struct RequestSpec<'a> {
 enum Sink<'a> {
     /// 收完再返回；超过 `max_body` 就中止
     Buffer { max_body: usize },
-    /// 边到边交出去。`on_head` 在**正文之前**给出状态码 —— 流式的调用方要拿它
-    /// 决定回给自己客户端的是 200 的流还是一段错误 JSON。
+    /// 边到边交出去。`on_head` 在**正文之前**给出状态码与（可选）一个捕获的响应头 ——
+    /// 流式的调用方要拿状态码决定回给自己客户端的是 200 的流还是一段错误 JSON；
+    /// 网页通道的 ACP 还要先读到 `Acp-Connection-Id` 才能发后续请求。
     /// `on_chunk` 返回 false 表示别再读了。
     /// **不设上限**：一段长回答本来就是无限的。
     Stream {
-        on_head: &'a mut dyn FnMut(u16),
+        /// 要捕获的响应头名（大小写不敏感）。`None` 表示不要
+        capture: Option<&'a str>,
+        on_head: &'a mut dyn FnMut(u16, Option<String>),
         on_chunk: &'a mut dyn FnMut(&[u8]) -> bool,
     },
 }
 
 impl Sink<'_> {
     /// 状态码到了。只有流式那一档在意。
-    fn announce(&mut self, status: u16) {
+    fn announce(&mut self, status: u16, captured: Option<String>) {
         if let Sink::Stream { on_head, .. } = self {
-            on_head(status);
+            on_head(status, captured);
         }
     }
 
@@ -387,7 +390,12 @@ fn send(spec: &RequestSpec<'_>, sink: Sink<'_>) -> Result<Response, String> {
         let location = header(request.0, WINHTTP_QUERY_LOCATION);
 
         // 状态码先出去：流式的调用方要凭它决定回 200 还是回错误
-        sink.announce(status);
+        let capture = match &sink {
+            Sink::Stream { capture, .. } => *capture,
+            Sink::Buffer { .. } => None,
+        };
+        let captured = capture.and_then(|name| header_named(request.0, name));
+        sink.announce(status, captured);
 
         let mut bytes: Vec<u8> = Vec::new();
         loop {
@@ -453,21 +461,78 @@ pub fn request_url_stream(
         no_redirects: true,
         timeouts: STREAM_TIMEOUTS,
     };
-    let response = send(&spec, Sink::Stream { on_head, on_chunk })?;
+    let mut head = |status: u16, _captured: Option<String>| on_head(status);
+    let response = send(
+        &spec,
+        Sink::Stream {
+            capture: None,
+            on_head: &mut head,
+            on_chunk,
+        },
+    )?;
+    Ok(response.status)
+}
+
+/// 流式请求 + 顺手捕获一个响应头。给网页通道的 ACP 用：那条 SSE 流必须在
+/// 建立时就拿到 `Acp-Connection-Id`，而正文要边收边算，不能等它结束。
+///
+/// `timeouts` 由调用方给：这条流的正文可能长时间静默（agent 在跑），
+/// 但也不能像对话那样给 5 分钟 —— 收尾之后线程要能自己退出来。
+#[allow(clippy::too_many_arguments)] // 与 request_url_stream 同形，再包一层只会多一个壳
+pub fn request_url_stream_capture(
+    method: &str,
+    url: &str,
+    headers: &[(&str, &str)],
+    body: Option<&str>,
+    capture: &str,
+    timeouts: [i32; 4],
+    on_head: &mut dyn FnMut(u16, Option<String>),
+    on_chunk: &mut dyn FnMut(&[u8]) -> bool,
+) -> Result<u16, String> {
+    let (secure, host, port, path) = split_url(url)?;
+    let spec = RequestSpec {
+        method,
+        host: &host,
+        port,
+        secure,
+        path: &path,
+        headers,
+        body,
+        no_redirects: true,
+        timeouts,
+    };
+    let response = send(
+        &spec,
+        Sink::Stream {
+            capture: Some(capture),
+            on_head,
+            on_chunk,
+        },
+    )?;
     Ok(response.status)
 }
 
 /// 查一个标准响应头（ETag / Location 这类按索引查的）。**查不到不是错误**：返回 None。
-///
+fn header(request: *mut c_void, level: u32) -> Option<String> {
+    query_header(request, level, std::ptr::null())
+}
+
+/// 按名字查一个自定义响应头（`WINHTTP_QUERY_CUSTOM` + 宽字符头名）。
+/// 同样：查不到返回 None，不当事失败。
+fn header_named(request: *mut c_void, name: &str) -> Option<String> {
+    let name_w = wide(name);
+    query_header(request, WINHTTP_QUERY_CUSTOM, name_w.as_ptr())
+}
+
 /// 两步：先问尺寸（WinHTTP 要一块够大的缓冲），再取内容 —— 值本身是宽字符，
 /// 长度按字节给（含结尾的 0）。
-fn header(request: *mut c_void, level: u32) -> Option<String> {
+fn query_header(request: *mut c_void, level: u32, name: *const u16) -> Option<String> {
     unsafe {
         let mut size: u32 = 0;
         let _ = WinHttpQueryHeaders(
             request,
             level,
-            std::ptr::null(),
+            name,
             std::ptr::null_mut(),
             &mut size,
             std::ptr::null_mut(),
@@ -481,7 +546,7 @@ fn header(request: *mut c_void, level: u32) -> Option<String> {
         let found = WinHttpQueryHeaders(
             request,
             level,
-            std::ptr::null(),
+            name,
             buffer.as_mut_ptr() as *mut c_void,
             &mut length,
             std::ptr::null_mut(),

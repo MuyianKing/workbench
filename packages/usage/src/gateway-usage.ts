@@ -308,7 +308,8 @@ export function summarizeGatewayRows(rows: GatewayUsageRowLike[], unit: 'hour' |
  *
  * 图表固定看最近 24 小时，不跟页面上选的时间范围走：从 `now` 所在那一小时往前数 N 格，
  * 空档补 0 —— 横轴的格数与位置因此是稳定的，不会因为这段时间没有请求就把图缩掉。
- * 传入的 `rows` 覆盖住这 N 小时即可（`read_since(1)` 的滚动 24 小时窗口够用）。
+ * 传入的 `rows` 覆盖住这 N 小时即可：`wb_gateway_usage_rows` 的取数起点至少铺满 24 小时
+ * （即使页面上选的是自然日的「今日」也够，见 Rust 的 `wb_usage::fetch_start`）。
  */
 export function recentHourBuckets(
   rows: GatewayUsageRowLike[],

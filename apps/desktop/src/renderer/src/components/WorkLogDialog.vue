@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { WorkLogStatus } from '@workbench/work-log'
 import type { WorkLogEntry } from '@/types'
 import { dayKey, projectColorVar, sanitizeProjectColor } from '@workbench/core'
 
@@ -23,6 +24,8 @@ const props = defineProps<{
   entry: WorkLogEntry | null
   /** 新增时的默认日期（跟随当前时间范围，例如停在「昨天」时默认记到昨天） */
   defaultDate: string
+  /** 新增时的默认状态（停在「待办」那一档时页面传 todo，否则按默认的「已完成」） */
+  defaultStatus?: WorkLogStatus
 }>()
 
 const emit = defineEmits<{
@@ -88,8 +91,9 @@ function reset(): void {
   form.date = entry?.date ?? (props.defaultDate || dayKey(Date.now()))
   form.projectId = entry?.projectId ?? ''
   form.content = entry?.content ?? ''
-  // 新增默认「已完成」（写下这条时事情多半已经做完了），要记待办就点一下
-  form.status = entry?.status ?? WORK_STATUS_DEFAULT
+  // 新增默认「已完成」（写下这条时事情多半已经做完了），要记待办就点一下；
+  // 停在「待办」那一档时页面会把默认状态改成 todo（见 WorkView 的 defaultStatus）
+  form.status = entry?.status ?? props.defaultStatus ?? WORK_STATUS_DEFAULT
   mode.value = 'write'
 }
 

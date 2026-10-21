@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import type { ProjectColor } from '@workbench/core'
-import type { WorkLogEntry, WorkRange, WorkSort } from '@workbench/work-log'
+import type { WorkLogEntry, WorkLogStatus, WorkRange, WorkSort } from '@workbench/work-log'
 import { ArrowDown, Memo, Plus } from '@element-plus/icons-vue'
 import { addDays, dayKey, markdownToPlainText, projectColorVar, sanitizeProjectColor } from '@workbench/core'
-import { dayMeta, DELETED_PROJECT_ID, groupByProject, isWorkSort, paginate, sanitizeWorkRange, sanitizeWorkSort, timelineOf, toggleWorkLogStatus, WORK_PAGE_DAYS, WORK_RANGE_LABELS, WORK_RANGES, WORK_SORT_LABELS, WORK_SORTS, WORK_STATUS_LABELS } from '@workbench/work-log'
+import { dayMeta, DELETED_PROJECT_ID, groupByProject, isWorkSort, paginate, sanitizeWorkRange, sanitizeWorkSort, timelineOf, toggleWorkLogStatus, WORK_PAGE_DAYS, WORK_RANGE_LABELS, WORK_RANGES, WORK_SORT_LABELS, WORK_SORTS, WORK_STATUS_DEFAULT } from '@workbench/work-log'
 import { ElMessage } from 'element-plus'
 /**
  * 工作页：按天分组的工作日志时间轴。
@@ -33,7 +33,7 @@ const loading = ref(true)
 /** 读盘失败与「一条都还没写过」是两回事，不能都显示成空列表 */
 const loadError = ref('')
 const range = ref<WorkRange>(sanitizeWorkRange(settings.settings.workRange))
-/** 时间范围的选项：Element Plus 的分段控件要 { label, value }，标签表在 shared 里 */
+/** 时间范围的选项：Element Plus 的分段控件要 { label, value }，标签表在 shared 里（最左是「待办」） */
 const rangeOptions = WORK_RANGES.map(value => ({ label: WORK_RANGE_LABELS[value], value }))
 /** 排序维度：按时间（天为轴）或按项目（项目为轴） */
 const sort = ref<WorkSort>(sanitizeWorkSort(settings.settings.workSort))
@@ -52,8 +52,7 @@ watch(
     sort.value = sanitizeWorkSort(value)
   },
 )
-/** 只看待办：把已完成的筛掉（默认关） */
-const todoOnly = ref(false)
+
 const page = ref(1)
 /** 当前时刻：决定「今天 / 本周 / 本月」的边界，也决定时间轴上的「今天」标记 */
 const now = ref(Date.now())
@@ -104,15 +103,12 @@ onBeforeUnmount(() => {
  * 两种维度共用同一套分页：页大小还是「7」，只是单位从天变成项目 ——
  * 项目通常只有几个，所以项目模式基本上一页装得下，页脚会把当前单位写清楚。
  *
- * 「只看待办」在分组之前先把已完成筛掉：分组函数只管怎么摆，不管该不该出现。
+ * 「待办」这一档在包里就把已完成的筛掉了（见 `entriesInRange`）：分组函数只管怎么摆，
+ * 不管该不该出现。
  */
 const sections = computed(() => {
-  const visible = todoOnly.value
-    ? entries.value.filter(entry => entry.status !== 'done')
-    : entries.value
-
   if (sort.value === 'time') {
-    return timelineOf(visible, range.value, now.value).map(group => ({
+    return timelineOf(entries.value, range.value, now.value).map(group => ({
       key: group.day,
       day: group.day,
       projectId: null as string | null,
@@ -121,7 +117,7 @@ const sections = computed(() => {
   }
 
   return groupByProject(
-    visible,
+    entries.value,
     range.value,
     now.value,
     store.projects.map(project => ({ id: project.id, name: project.name })),
@@ -169,19 +165,34 @@ const lastLoggedText = computed(() => {
 })
 
 /**
- * 当前范围里的待办条数：筛选标签上那个数字。
- * 从**全部**记录里数（不受筛选影响），否则一打开筛选它自己就归零了。
+ * 空态的第一句。「待办」那一档不是时段，说「待办还没有记录」读着别扭，直接说「没有待办」。
  */
-const todoCount = computed(
-  () =>
-    timelineOf(entries.value, range.value, now.value).reduce(
-      (sum, group) => sum + group.entries.filter(entry => entry.status !== 'done').length,
-      0,
-    ),
+const emptyTitle = computed(() =>
+  range.value === 'todo' ? '没有待办' : `${WORK_RANGE_LABELS[range.value]}还没有记录`,
 )
 
-/** 换范围、换维度或开关筛选后回到第一页，否则会停在一个新视图里并不存在的页码上 */
-watch([range, sort, todoOnly], () => {
+/**
+ * 空态的第二句。
+ *
+ * 日期那一档在「有记录、只是不在这段时间里」时会把「最近一次是哪天」说出来 —— 只说
+ * 「本月还没有记录」的话，用户分不清是自己没记、还是记录丢了。「待办」档同样要区分
+ * 「一条记录都没有」与「都做完了」：前者才是原来那句引导。
+ */
+const emptyHint = computed(() => {
+  if (range.value === 'todo') {
+    return entries.value.length
+      ? '所有记录都已完成。'
+      : '点右上角「记一条」写下待办；一天可以记多条，记录只保存在本机。'
+  }
+
+  if (lastLoggedText.value)
+    return `最近一次是${lastLoggedText.value}，点右上角「记一条」写下做了什么。`
+
+  return '点右上角「记一条」写下做了什么；一天可以记多条，记录只保存在本机。'
+})
+
+/** 换范围或维度后回到第一页，否则会停在一个新视图里并不存在的页码上 */
+watch([range, sort], () => {
   page.value = 1
 })
 
@@ -189,8 +200,8 @@ watch([range, sort, todoOnly], () => {
  * 范围与维度是**行为记忆**（见 apps/desktop/src/renderer/src/types.ts 的那一段）：初值来自设置，改了写回去，
  * 下次打开还停在上一眼看的那一档，不必每次重新拉一遍。
  *
- * 「只看待办」不进去：它是一个临时的镜片（想找一件事时才戴），记住了反而会让
- * 下次打开的时间轴莫名其妙地少一半 —— 与项目页不记关键词是同一条口径。
+ * 「待办」是这一排里的一档，跟其余四档一样会记住：它现在是一个视图（所有还欠着的事），
+ * 不是临时戴上的镜片。
  */
 watch([range, sort], () => {
   void settings.updateSettings({ workRange: range.value, workSort: sort.value })
@@ -230,9 +241,17 @@ function entryColorOf(entry: WorkLogEntry): ProjectColor | undefined {
   return projectColorOf(entry.projectId)
 }
 
-/** 新增时的默认日期：停在「昨天」就默认记到昨天，其余档位按今天 */
+/** 新增时的默认日期：停在「昨天」就默认记到昨天，其余档位按今天（待办不属于某一天，就是今天） */
 const defaultDate = computed(() =>
   range.value === 'yesterday' ? dayKey(addDays(now.value, -1)) : dayKey(now.value),
+)
+
+/**
+ * 新增时的默认状态：停在「待办」这一档就默认记一条待办 ——
+ * 否则刚记下的那条（默认已完成）会立刻从眼前的列表里消失，看着像没存上。
+ */
+const defaultStatus = computed<WorkLogStatus>(() =>
+  range.value === 'todo' ? 'todo' : WORK_STATUS_DEFAULT,
 )
 
 function openCreate(): void {
@@ -303,26 +322,13 @@ async function remove(entry: WorkLogEntry): Promise<void> {
     <!-- 工具条与项目页那条同款（底色由 global.css 按顶部样式给），顶栏以下的第一条 -->
     <div class="filter">
       <div class="filter__head">
+        <!-- 五档：最左是「待办」（所有还没做完的事），其余四档是时间范围 -->
         <el-segmented
           v-model="range"
           class="ranges"
           :options="rangeOptions"
-          aria-label="时间范围"
+          aria-label="范围"
         />
-
-        <!-- 只看待办：一枚筛选标签，带当前范围里的待办条数（与项目页那些筛选标签同一副样子） -->
-        <button
-          class="chip"
-          :class="{ 'is-active': todoOnly }"
-          type="button"
-          role="switch"
-          :aria-checked="todoOnly"
-          :disabled="!todoCount && !todoOnly"
-          @click="todoOnly = !todoOnly"
-        >
-          {{ WORK_STATUS_LABELS.todo }}
-          <span class="chip__count mono">{{ todoCount }}</span>
-        </button>
       </div>
 
       <div class="filter__tools">
@@ -371,21 +377,9 @@ async function remove(entry: WorkLogEntry): Promise<void> {
         <el-icon class="empty__icon">
           <Memo />
         </el-icon>
-        <p>{{ WORK_RANGE_LABELS[range] }}{{ todoOnly ? '没有待办' : '还没有记录' }}</p>
+        <p>{{ emptyTitle }}</p>
         <p class="empty__hint">
-          <template v-if="todoOnly">
-            这个范围里的记录都已完成。
-          </template>
-          <!--
-            有记录、只是不在这段时间里：把「最近一次是哪天」说出来。
-            只说「还没有记录」会让人以为东西丢了，而此刻真正要知道的是这个。
-          -->
-          <template v-else-if="lastLoggedText">
-            最近一次是{{ lastLoggedText }}，点右上角「记一条」写下做了什么。
-          </template>
-          <template v-else>
-            点右上角「记一条」写下做了什么；一天可以记多条，记录只保存在本机。
-          </template>
+          {{ emptyHint }}
         </p>
       </div>
 
@@ -449,6 +443,7 @@ async function remove(entry: WorkLogEntry): Promise<void> {
       v-model="dialogVisible"
       :entry="editing"
       :default-date="defaultDate"
+      :default-status="defaultStatus"
       @saved="onSaved"
     />
   </main>

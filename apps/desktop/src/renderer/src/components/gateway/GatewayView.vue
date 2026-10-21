@@ -8,6 +8,7 @@ import EmptyState from '@/components/EmptyState.vue'
 import { formatTimestamp } from '@/format'
 import AccessDialog from './AccessDialog.vue'
 import ModelsPane from './ModelsPane.vue'
+import PerksPane from './PerksPane.vue'
 import RequestsPane from './RequestsPane.vue'
 import UsagePane from './UsagePane.vue'
 
@@ -29,7 +30,7 @@ const POLL_INTERVAL = 2000
 /** 自动查余额的最小间隔：一个号一次上游往返，切个页签就重查一遍太费 */
 const CREDIT_THROTTLE = 60_000
 
-const tab = ref<'accounts' | 'usage' | 'requests' | 'models'>('accounts')
+const tab = ref<'accounts' | 'perks' | 'usage' | 'requests' | 'models'>('accounts')
 const status = ref<GatewayStatus | null>(null)
 const accounts = ref<GatewayAccount[]>([])
 const credits = ref<Record<string, GatewayCredits>>({})
@@ -118,7 +119,7 @@ function stopLoginPolling(): void {
 async function refresh(): Promise<void> {
   const result = await window.workbench.gatewayStatus()
   if (!result.ok || !result.data) {
-    ElMessage.error(result.error ?? '读取网关状态失败')
+    ElMessage.error(result.error ?? '读取 TBuddy 状态失败')
     return
   }
   status.value = result.data
@@ -142,7 +143,8 @@ async function refresh(): Promise<void> {
     )
   }
   if (rows.ok && rows.data) {
-    const next = summarizeGatewayRows(rows.data, gatewayBucketUnit(30))
+    // 30 天的自然日窗口本来就比 24 小时长，取数不会多带行，整批汇总即可
+    const next = summarizeGatewayRows(rows.data.rows, gatewayBucketUnit(30))
     usage.value = next
     maybeAutoSync(next.totalTokens)
   }
@@ -493,6 +495,7 @@ onBeforeUnmount(() => {
         <el-tab-pane label="账号" name="accounts" />
         <el-tab-pane label="用量" name="usage" />
         <el-tab-pane label="请求" name="requests" />
+        <el-tab-pane label="福利" name="perks" />
         <el-tab-pane label="模型" name="models" />
       </el-tabs>
       <div class="gw__run">
@@ -617,7 +620,12 @@ onBeforeUnmount(() => {
               </span>
             </div>
 
-            <span v-if="quotaHint(account)" class="gw__sub">{{ quotaHint(account) }}</span>
+            <!-- 额度恢复时间只有部分账号有，但这行**始终占位**：少了它，同一排卡片的积分条与三格会错开 -->
+            <span
+              class="gw__sub"
+              :class="{ 'is-empty': !quotaHint(account) }"
+              :title="quotaHint(account) || undefined"
+            >{{ quotaHint(account) || '—' }}</span>
 
             <div class="gw__account-credits">
               <div class="gw__credits-line">
@@ -631,8 +639,14 @@ onBeforeUnmount(() => {
                 </template>
                 <span v-else class="gw__dim">未查询</span>
               </div>
-              <span v-if="credits[account.uid]" class="gw__meter">
-                <span class="gw__meter-fill" :class="meterClass(credits[account.uid]!)" :style="{ width: `${remainPercent(credits[account.uid]!)}%` }" />
+              <!-- 余额条同样始终占位：没查过余额的卡不能比查过的卡少一截，否则三格又错开 -->
+              <span class="gw__meter" :class="{ 'is-empty': !credits[account.uid] }">
+                <span
+                  v-if="credits[account.uid]"
+                  class="gw__meter-fill"
+                  :class="meterClass(credits[account.uid]!)"
+                  :style="{ width: `${remainPercent(credits[account.uid]!)}%` }"
+                />
               </span>
             </div>
 
@@ -700,6 +714,12 @@ onBeforeUnmount(() => {
       </div>
     </template>
 
+    <PerksPane
+      v-else-if="tab === 'perks'"
+      :accounts="accounts"
+      :credits="credits"
+      @credits-refresh="queryAllCredits(true)"
+    />
     <UsagePane v-else-if="tab === 'usage'" />
     <RequestsPane v-else-if="tab === 'requests'" />
     <ModelsPane v-else />
@@ -1142,10 +1162,19 @@ onBeforeUnmount(() => {
   width: 76px;
 }
 
-/* 状态标签下面那行小字（目前只有额度恢复时间） */
+/* 状态标签下面那行小字（目前只有额度恢复时间）。
+   它**始终占位**（没有内容时隐藏而不是删掉）：同一排卡片的高度才能一致，
+   积分条与成功 / 失败那三格才对得齐；太长时截断，完整内容在 title 里。 */
 .gw__sub {
+  overflow: hidden;
   font-size: var(--gw-fs-micro);
+  white-space: nowrap;
+  text-overflow: ellipsis;
   color: var(--ink-3);
+}
+
+.gw__sub.is-empty {
+  visibility: hidden;
 }
 
 .gw__account-credits {
@@ -1197,6 +1226,11 @@ onBeforeUnmount(() => {
   border-radius: var(--r-pill);
   background: var(--bg-inset);
   overflow: hidden;
+}
+
+/* 没查过余额时留出同一条的高度，别让这张卡的三格比旁边高 */
+.gw__meter.is-empty {
+  visibility: hidden;
 }
 
 .gw__meter-fill {

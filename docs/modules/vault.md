@@ -103,6 +103,10 @@
   挡回来，白跑一趟还多一次网络往返。
   **失败只在工具带上留一行字**（`syncNote` / `syncFailed`），不弹消息 —— 进一次页面弹一次
   「同步失败」比不说还烦人；重试的路就是再进一次这一页、或者再动一条记录。成功一个字都不写。
+- **拉和推整段拿在 `token-sync` 那把锁里**（`vault.rs` 的 `pull_at` / `push_at` 开头 `sync::lock_workflow`）：
+  用量 / 外观 / 网关三条同步也落在这个克隆上，并发时 git 会互相踩（`index.lock`、pull 的
+  `Cannot fast-forward`）。另一个窗口（安装版 + dev）不在同一把锁里，那一路由 `pull_with_race_retry`
+  重拉一次兜住；口径与失败提示见 [sync-and-auth.md](sync-and-auth.md) 的「同一个克隆上的并发」。
 - **换 / 建 / 导入密钥不自动推**（只有「本机原来没有密钥」那份新机器的场景才顺手拉一次，
   见 `syncAfterKeyChange`）：`adoptKey` 会把两把密钥都读不出来的条目留成墓碑，
   自动推出去等于把那台机器上还好的条目删给所有机器 —— 09-30 那次全量墓碑事故就是这么铺开的

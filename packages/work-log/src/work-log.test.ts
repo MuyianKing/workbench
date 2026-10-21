@@ -128,6 +128,20 @@ describe('timelineOf', () => {
   it('没有记录时是空时间轴', () => {
     expect(timelineOf([], 'month', NOW)).toEqual([])
   })
+
+  it('「待办」档不分日期，只留还没做完的', () => {
+    const mixed = [
+      entry('2026-09-15', NOW - 60_000, '今天的待办', undefined, 'todo'),
+      entry('2026-09-15', NOW - 120_000, '今天做完了的'),
+      entry('2026-08-01', NOW - 2_000_000_000, '上上个月的待办', undefined, 'todo'),
+    ]
+    const days = timelineOf(mixed, 'todo', NOW)
+    expect(days.map(group => group.day)).toEqual(['2026-09-15', '2026-08-01'])
+    expect(days.flatMap(group => group.entries.map(item => item.content))).toEqual([
+      '今天的待办',
+      '上上个月的待办',
+    ])
+  })
 })
 
 describe('completedEntriesOn', () => {
@@ -219,6 +233,20 @@ describe('groupByProject', () => {
 
   it('没有记录时是空列表', () => {
     expect(groupByProject([], 'month', NOW, projects)).toEqual([])
+  })
+
+  it('「待办」档里只剩待办，仍按项目分栏', () => {
+    const mixed = [
+      entry('2026-09-15', NOW - 60_000, 'p1 的待办', 'p1', 'todo'),
+      entry('2026-09-15', NOW - 120_000, 'p1 做完了的', 'p1'),
+      entry('2026-08-02', NOW - 2_000_000_000, 'p2 上个月的待办', 'p2', 'todo'),
+    ]
+    const groups = groupByProject(mixed, 'todo', NOW, projects)
+    expect(groups.map(group => group.projectId)).toEqual(['p1', 'p2'])
+    expect(groups.flatMap(group => group.entries.map(item => item.content))).toEqual([
+      'p1 的待办',
+      'p2 上个月的待办',
+    ])
   })
 })
 

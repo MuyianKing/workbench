@@ -151,18 +151,44 @@ pub fn append(row: &UsageRow) -> Result<(), String> {
         .map_err(|err| format!("写用量失败: {err}"))
 }
 
-/// 读最近 `days` 天的行（新→旧）。坏行跳过。
-pub fn read_since(days: i64) -> Vec<UsageRow> {
+/// 自然日窗口的起点（Unix 秒，UTC+8 的 0 点）：`days = 1` 是今天 0 点，`days = 3` 是前天 0 点。
+///
+/// **「今日」是自然日，不是滚动的 24 小时**：滚动窗口在上午打开时会把昨天下午的流水也算进去，
+/// 页面上「今日」与「近 3 天」于是是一批数（看起来像切换没生效）。时区取 UTC+8，
+/// 与分桶、`format_wall_clock` 同一套口径。
+pub fn window_start(days: i64) -> i64 {
+    window_start_at(now_secs(), days)
+}
+
+fn window_start_at(now: i64, days: i64) -> i64 {
+    let local = now + 8 * 3600;
+    let midnight = local - local.rem_euclid(86400);
+    midnight - (days.max(1) - 1) * 86400 - 8 * 3600
+}
+
+/// 取数起点：统计窗口的起点，但至少往前铺满 24 小时。
+///
+/// 时序图固定看最近 24 小时，而「今日」的自然日窗口在上午比 24 小时短 ——
+/// 只按窗口取数的话，图上昨天那半天会被画成空的。
+pub fn fetch_start(days: i64) -> i64 {
+    fetch_start_at(now_secs(), days)
+}
+
+fn fetch_start_at(now: i64, days: i64) -> i64 {
+    window_start_at(now, days).min(now - 86400)
+}
+
+/// 读 `ts >= since` 的行（旧→新）。坏行跳过。
+pub fn read_since(since: i64) -> Vec<UsageRow> {
     let path = crate::paths::gateway_usage_file();
     let Ok(text) = std::fs::read_to_string(&path) else {
         return Vec::new();
     };
-    let cutoff = now_secs() - days.max(1) * 86400;
     let mut rows: Vec<UsageRow> = text
         .lines()
         .filter(|line| !line.trim().is_empty())
         .filter_map(|line| serde_json::from_str::<UsageRow>(line).ok())
-        .filter(|row| row.ts >= cutoff)
+        .filter(|row| row.ts >= since)
         .collect();
     rows.sort_by_key(|row| row.ts);
     rows
@@ -844,6 +870,26 @@ mod tests {
         assert_eq!(bucket_unit(7), BucketUnit::Hour);
         // 三十天按小时是 720 根柱子，谁也读不动
         assert_eq!(bucket_unit(30), BucketUnit::Day);
+    }
+
+    /// 「今日」是自然日：上午 9 点的「今日」从当天 0 点起算，不是从昨天 9 点。
+    #[test]
+    fn 窗口起点是自然日零点() {
+        // 2026-10-21 01:00:00Z = 10-21 09:00（UTC+8）
+        let now = 1_792_544_400;
+        // 10-20T16:00:00Z = 10-21 00:00
+        assert_eq!(window_start_at(now, 1), 1_792_512_000);
+        // 前天零点
+        assert_eq!(window_start_at(now, 3), 1_792_512_000 - 2 * 86_400);
+        // 凌晨 00:30 也只回到当天 0 点，不回到昨天
+        assert_eq!(window_start_at(now - 8 * 3600 - 1800, 1), 1_792_512_000);
+        // 0 / 负数当 1 天处理
+        assert_eq!(window_start_at(now, 0), window_start_at(now, 1));
+        // 取数起点至少铺满 24 小时：上午 9 点时它比「今日」的零点更早
+        assert_eq!(fetch_start_at(now, 1), now - 86_400);
+        assert!(fetch_start_at(now, 1) < window_start_at(now, 1));
+        // 三天窗口本身就比 24 小时长，取数起点就是窗口起点
+        assert_eq!(fetch_start_at(now, 3), window_start_at(now, 3));
     }
 
     /// 思考 token 藏在 completion 的 details 里；积分没有就是 None —— 0 会被读成「免费」。

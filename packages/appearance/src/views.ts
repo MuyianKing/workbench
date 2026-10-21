@@ -30,7 +30,7 @@ export const VIEW_LABELS: Record<ViewId, string> = {
   skills: '技能',
   kb: '知识库',
   ai: 'AI 助手',
-  gateway: '网关',
+  gateway: 'TBuddy',
   vault: '密码',
   mail: '邮箱',
   styles: '样式',

@@ -489,8 +489,8 @@ fn fill_machine(rows: &mut [crate::wb_usage::UsageRow]) {
 }
 
 /// 同步仓库里别的机器的流水。读失败只记一行日志，**不挡本机出数**。
-fn remote_rows(repo: &str, device: &str, days: i64) -> Vec<crate::wb_usage::UsageRow> {
-    match crate::sync::read_gateway_rows(repo, device, days) {
+fn remote_rows(repo: &str, device: &str, since: i64) -> Vec<crate::wb_usage::UsageRow> {
+    match crate::sync::read_gateway_rows(repo, device, since) {
         Ok(rows) => rows,
         Err(err) => {
             eprintln!("[workbench] 读取网关同步流水失败：{err}");
@@ -499,31 +499,42 @@ fn remote_rows(repo: &str, device: &str, days: i64) -> Vec<crate::wb_usage::Usag
     }
 }
 
-/// 一段时间（天）内的用量汇总。`repo` 非空时把同步仓库里别的机器的流水也合进来。
+/// 一段时间（自然日）内的用量汇总。`repo` 非空时把同步仓库里别的机器的流水也合进来。
 #[tauri::command(async)]
 pub fn wb_gateway_usage(days: i64, repo: String, device: String) -> crate::wb_usage::Summary {
     let days = days.max(1);
-    let rows = usage_rows(days, &repo, &device);
+    let rows = usage_rows_since(crate::wb_usage::window_start(days), &repo, &device);
     // 粒度跟着窗口走：一周以内按小时，再长退回按天（见 `bucket_unit` 的说明）
     crate::wb_usage::summarize(&rows, crate::wb_usage::bucket_unit(days))
 }
 
-/// 一段时间（天）内的流水（旧→新）。**统计在前端算**（见 packages/usage 的 gateway-usage）：
-/// Rust 只负责把本机与同步仓库里的行按窗口取齐，分组 / 分桶 / 比率的语义留在 TS 侧。
-#[tauri::command(async)]
-pub fn wb_gateway_usage_rows(
-    days: i64,
-    repo: String,
-    device: String,
-) -> Vec<crate::wb_usage::UsageRow> {
-    usage_rows(days.max(1), &repo, &device)
+/// 一段流水：统计窗口的起点 + 覆盖到它的行（旧→新）。
+///
+/// 行可能比 `since` **更早**：时序图固定看最近 24 小时，取数窗口至少要铺满它
+/// （见 `wb_usage::fetch_start`）。KPI 与明细表由渲染层按 `since` 再裁一次。
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageWindow {
+    pub since: i64,
+    pub rows: Vec<crate::wb_usage::UsageRow>,
 }
 
-fn usage_rows(days: i64, repo: &str, device: &str) -> Vec<crate::wb_usage::UsageRow> {
-    let mut rows = crate::wb_usage::read_since(days);
+/// 一段时间（自然日）内的流水（旧→新）。**统计在前端算**（见 packages/usage 的 gateway-usage）：
+/// Rust 只负责把本机与同步仓库里的行按窗口取齐，分组 / 分桶 / 比率的语义留在 TS 侧。
+#[tauri::command(async)]
+pub fn wb_gateway_usage_rows(days: i64, repo: String, device: String) -> UsageWindow {
+    let since = crate::wb_usage::window_start(days);
+    UsageWindow {
+        since,
+        rows: usage_rows_since(crate::wb_usage::fetch_start(days), &repo, &device),
+    }
+}
+
+fn usage_rows_since(since: i64, repo: &str, device: &str) -> Vec<crate::wb_usage::UsageRow> {
+    let mut rows = crate::wb_usage::read_since(since);
     fill_machine(&mut rows);
     if !repo.trim().is_empty() {
-        rows.append(&mut remote_rows(repo.trim(), device.trim(), days));
+        rows.append(&mut remote_rows(repo.trim(), device.trim(), since));
     }
     rows.sort_by_key(|row| row.ts);
     rows
@@ -541,7 +552,7 @@ pub fn wb_gateway_usage_recent(
     fill_machine(&mut rows);
     if !repo.trim().is_empty() {
         // 近 90 天足够覆盖「最近请求」；不够再放宽到全部（长时间没用的机器）
-        let mut remote = remote_rows(repo.trim(), device.trim(), 90);
+        let mut remote = remote_rows(repo.trim(), device.trim(), crate::wb_usage::window_start(90));
         if rows.len() + remote.len() < limit {
             remote = remote_rows(repo.trim(), device.trim(), 0);
         }
@@ -654,6 +665,358 @@ pub fn wb_gateway_account_delete(
     let mut inner = state.lock()?;
     inner.accounts.retain(|item| item.uid != uid);
     Ok(())
+}
+
+// ---------- 任务福利 ----------
+
+/// 福利页顶上的账号选择项。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskAccount {
+    pub uid: String,
+    pub label: String,
+}
+
+/// 福利页的任务快照。任务与汇总都是**当前选中那个号**的，不是全部账号的。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TasksSnapshot {
+    pub tasks: Vec<crate::wb_tasks::GrowthTask>,
+    pub summary: crate::wb_tasks::GrowthSummary,
+    /// 这份快照属于哪个号；没有国内账号时是空串
+    pub account: String,
+    pub accounts: Vec<TaskAccount>,
+    pub msg: String,
+}
+
+/// 一轮成长任务的执行结果。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskRun {
+    pub ok: bool,
+    pub logs: Vec<String>,
+    pub credit_added: i64,
+}
+
+/// 签到 / 每日活跃 / 猫猫旅行 / 连登管家：每个号一条结果。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActionResult {
+    pub uid: String,
+    pub nickname: String,
+    pub ok: bool,
+    pub message: String,
+    /// 猫猫旅行的动作名（`claim` / `depart` / `traveling`…），其余动作是空串
+    pub action: String,
+    pub credit: i64,
+}
+
+fn snapshot_accounts(state: &tauri::State<'_, Gateway>) -> Result<Vec<Account>, String> {
+    let mut inner = state.lock()?;
+    inner.ensure_loaded();
+    Ok(inner.accounts.clone())
+}
+
+/// 按区域与 uid 选目标：`uid` 为空 / `all` 时取该区域全部**已启用**的号。
+fn targets_of(accounts: Vec<Account>, realm: Realm, uid: Option<&str>) -> Vec<Account> {
+    match uid.map(str::trim).filter(|value| !value.is_empty() && *value != "all") {
+        Some(uid) => accounts
+            .into_iter()
+            .filter(|item| item.uid == uid && item.realm == realm)
+            .collect(),
+        None => accounts
+            .into_iter()
+            .filter(|item| item.realm == realm && item.enabled)
+            .collect(),
+    }
+}
+
+/// token 快过期时续一次。返回是否真的续过（续过就要把 token 字段写回）。
+fn refresh_if_needed(account: &mut Account) -> Result<bool, String> {
+    if !account.needs_refresh() {
+        return Ok(false);
+    }
+    wb_api_auth::refresh(account)?;
+    Ok(true)
+}
+
+/// 把续期后的 token 字段写回内存与磁盘。只动这几个字段：任务跑几分钟，
+/// 期间用户可能改过优先级 / 启停，整份覆盖会把那些改动一起冲掉。
+fn persist_tokens(state: &tauri::State<'_, Gateway>, account: &Account) {
+    let Ok(mut inner) = state.lock() else {
+        return;
+    };
+    let Some(slot) = inner.accounts.iter_mut().find(|item| item.uid == account.uid) else {
+        return;
+    };
+    slot.access_token = account.access_token.clone();
+    slot.refresh_token = account.refresh_token.clone();
+    slot.expires_at = account.expires_at;
+    slot.domain = account.domain.clone();
+    slot.enterprise_id = account.enterprise_id.clone();
+    slot.token_expired = account.token_expired;
+    let _ = slot.save(&crate::paths::gateway_accounts_dir());
+}
+
+/// 福利页的任务快照：读当前号的成长任务与汇总。任务清单与汇总（合计四五次请求）
+/// 并行发出去，等的是两边都到齐。
+#[tauri::command(async)]
+pub fn wb_gateway_tasks(
+    state: tauri::State<'_, Gateway>,
+    uid: Option<String>,
+) -> Result<TasksSnapshot, String> {
+    let cn = targets_of(snapshot_accounts(&state)?, Realm::Codebuddy, None);
+    if cn.is_empty() {
+        return Ok(TasksSnapshot {
+            tasks: Vec::new(),
+            summary: Default::default(),
+            account: String::new(),
+            accounts: Vec::new(),
+            msg: "未找到可用的国内版账号".into(),
+        });
+    }
+    let accounts = cn
+        .iter()
+        .map(|item| TaskAccount {
+            uid: item.uid.clone(),
+            label: item.label(),
+        })
+        .collect();
+    let mut target = match uid.as_deref().map(str::trim).filter(|value| !value.is_empty() && *value != "all") {
+        Some(wanted) => cn
+            .iter()
+            .find(|item| item.uid == wanted)
+            .cloned()
+            .or_else(|| cn.first().cloned()),
+        None => cn.first().cloned(),
+    }
+    .ok_or_else(|| "未找到可用的国内版账号".to_string())?;
+
+    if refresh_if_needed(&mut target)? {
+        persist_tokens(&state, &target);
+    }
+
+    let tasks = crate::wb_tasks::fetch_growth_tasks(&target)?;
+    // 汇总要打四五次上游，和任务清单并行：这一栏等的是「两块都到齐」，
+    // 串着来就是白白多等一倍。
+    let summary_account = target.clone();
+    let summary = std::thread::spawn(move || crate::wb_tasks::fetch_growth_summary(&summary_account))
+        .join()
+        .unwrap_or_default();
+    Ok(TasksSnapshot {
+        tasks,
+        summary,
+        account: target.uid,
+        accounts,
+        msg: String::new(),
+    })
+}
+
+/// 一键做任务领积分。`uid` 为空 / `all` 时对全部已启用的国内账号逐个跑。
+#[tauri::command(async)]
+pub fn wb_gateway_tasks_run(
+    state: tauri::State<'_, Gateway>,
+    uid: Option<String>,
+) -> Result<TaskRun, String> {
+    let targets = targets_of(snapshot_accounts(&state)?, Realm::Codebuddy, uid.as_deref());
+    if targets.is_empty() {
+        return Err("未找到已启用的国内版账号".into());
+    }
+
+    let mut logs: Vec<String> = Vec::new();
+    let mut total = 0;
+    for (index, mut account) in targets.iter().cloned().enumerate() {
+        let nickname = account.label();
+        logs.push(format!(
+            "====== 正在为账号 [{nickname} ({})] 执行全自动成长任务 ({}/{}) ======",
+            account.uid,
+            index + 1,
+            targets.len()
+        ));
+        if let Err(message) = refresh_if_needed(&mut account) {
+            logs.push(format!("  ! 续期失败，跳过：{message}"));
+            continue;
+        }
+        persist_tokens(&state, &account);
+        let outcome = crate::wb_tasks::run_growth_tasks(&account, 1.0);
+        total += outcome.earned_credit;
+        logs.extend(outcome.logs.into_iter().map(|line| format!("  {line}")));
+        if !outcome.msg.is_empty() {
+            logs.push(format!("  {}", outcome.msg));
+        }
+        if index + 1 < targets.len() {
+            std::thread::sleep(std::time::Duration::from_millis(1500));
+        }
+    }
+    logs.push(format!(
+        "====== 全部 {} 个账号任务执行完毕，累计新增积分：+{total} ======",
+        targets.len()
+    ));
+    Ok(TaskRun {
+        ok: true,
+        logs,
+        credit_added: total,
+    })
+}
+
+/// 猫猫旅行：到站领奖 / 在家出发 / 报告正在路上。
+#[tauri::command(async)]
+pub fn wb_gateway_tasks_travel(
+    state: tauri::State<'_, Gateway>,
+    uid: Option<String>,
+) -> Result<Vec<ActionResult>, String> {
+    let targets = targets_of(snapshot_accounts(&state)?, Realm::Codebuddy, uid.as_deref());
+    if targets.is_empty() {
+        return Err("未找到已启用的国内版账号".into());
+    }
+    let mut results = Vec::new();
+    for mut account in targets {
+        if let Err(message) = refresh_if_needed(&mut account) {
+            results.push(ActionResult {
+                uid: account.uid.clone(),
+                nickname: account.label(),
+                ok: false,
+                message: format!("续期失败：{message}"),
+                action: String::new(),
+                credit: 0,
+            });
+            continue;
+        }
+        persist_tokens(&state, &account);
+        let outcome = crate::wb_tasks::do_cat_travel(&account);
+        results.push(ActionResult {
+            uid: account.uid.clone(),
+            nickname: account.label(),
+            ok: outcome.ok,
+            message: outcome.msg,
+            action: outcome.action,
+            credit: outcome.credit,
+        });
+        std::thread::sleep(std::time::Duration::from_millis(1000));
+    }
+    Ok(results)
+}
+
+/// 连登管家与抽奖：补签 → 礼包 / 补偿 → 档位兑换 → 抽奖。
+#[tauri::command(async)]
+pub fn wb_gateway_tasks_streak(
+    state: tauri::State<'_, Gateway>,
+    uid: Option<String>,
+) -> Result<Vec<ActionResult>, String> {
+    let targets = targets_of(snapshot_accounts(&state)?, Realm::Codebuddy, uid.as_deref());
+    if targets.is_empty() {
+        return Err("未找到已启用的国内版账号".into());
+    }
+    let mut results = Vec::new();
+    for mut account in targets {
+        if let Err(message) = refresh_if_needed(&mut account) {
+            results.push(ActionResult {
+                uid: account.uid.clone(),
+                nickname: account.label(),
+                ok: false,
+                message: format!("续期失败：{message}"),
+                action: String::new(),
+                credit: 0,
+            });
+            continue;
+        }
+        persist_tokens(&state, &account);
+        let outcome = crate::wb_tasks::run_streak_bonus(&account);
+        results.push(ActionResult {
+            uid: account.uid.clone(),
+            nickname: account.label(),
+            ok: outcome.ok,
+            message: outcome.msg,
+            action: String::new(),
+            credit: 0,
+        });
+        std::thread::sleep(std::time::Duration::from_millis(1000));
+    }
+    Ok(results)
+}
+
+/// Buddy 加油站签到（国内版）。
+#[tauri::command(async)]
+pub fn wb_gateway_checkin(
+    state: tauri::State<'_, Gateway>,
+    uid: Option<String>,
+) -> Result<Vec<ActionResult>, String> {
+    let targets = targets_of(snapshot_accounts(&state)?, Realm::Codebuddy, uid.as_deref());
+    if targets.is_empty() {
+        return Err("未找到已启用的国内版账号".into());
+    }
+    let mut results = Vec::new();
+    for mut account in targets {
+        if let Err(message) = refresh_if_needed(&mut account) {
+            results.push(ActionResult {
+                uid: account.uid.clone(),
+                nickname: account.label(),
+                ok: false,
+                message: format!("续期失败：{message}"),
+                action: String::new(),
+                credit: 0,
+            });
+            continue;
+        }
+        persist_tokens(&state, &account);
+        let outcome = crate::wb_tasks::checkin(&account);
+        results.push(ActionResult {
+            uid: account.uid.clone(),
+            nickname: account.label(),
+            ok: outcome.ok,
+            message: outcome.msg,
+            action: String::new(),
+            credit: 0,
+        });
+    }
+    Ok(results)
+}
+
+/// 国际版每日活跃打卡。`uids` 给了就只打名单里那批（「未活跃一键打卡」），
+/// 给空数组就是一个都不打 —— 名单是调用方的明确意图，不能悄悄回落成「全部」。
+#[tauri::command(async)]
+pub fn wb_gateway_daily_chat(
+    state: tauri::State<'_, Gateway>,
+    uids: Option<Vec<String>>,
+) -> Result<Vec<ActionResult>, String> {
+    let mut targets = targets_of(snapshot_accounts(&state)?, Realm::Workbuddy, None);
+    if let Some(wanted) = uids {
+        targets.retain(|item| wanted.iter().any(|uid| uid == &item.uid));
+    }
+    if targets.is_empty() {
+        return Err("未找到已启用的国际版账号".into());
+    }
+    let mut results = Vec::new();
+    for mut account in targets {
+        if let Err(message) = refresh_if_needed(&mut account) {
+            results.push(ActionResult {
+                uid: account.uid.clone(),
+                nickname: account.label(),
+                ok: false,
+                message: format!("续期失败：{message}"),
+                action: String::new(),
+                credit: 0,
+            });
+            continue;
+        }
+        persist_tokens(&state, &account);
+        let outcome = crate::wb_tasks::daily_chat(&account);
+        results.push(ActionResult {
+            uid: account.uid.clone(),
+            nickname: account.label(),
+            ok: outcome.ok,
+            message: outcome.msg,
+            action: String::new(),
+            credit: 0,
+        });
+    }
+    Ok(results)
+}
+
+/// 今天的签到 / 每日活跃尝试（`activity.jsonl` 里今天那一段）。
+#[tauri::command(async)]
+pub fn wb_gateway_activity_today() -> Vec<crate::wb_tasks::ActivityRow> {
+    crate::wb_tasks::read_today()
 }
 
 fn view_of(account: &Account) -> AccountView {

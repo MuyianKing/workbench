@@ -6,13 +6,14 @@ import { gatewayBucketUnit, recentHourBuckets, summarizeGatewayRows } from '@wor
 import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref } from 'vue'
 import EmptyState from '@/components/EmptyState.vue'
 import { gatewayAccountNames } from '@/workbench/gateway'
+import GatewayTable from './GatewayTable.vue'
 
 /**
  * 用量总览。
  *
- * 布局照 Hub 的看板：一排 KPI、一张时序柱状图、一张可切换维度的明细表 ——
- * 积分与缓存的汇总并在这张面板里，做成一块「积分总账」（左侧主数字 + 右侧 2×2 佐证），
- * 放在表格上面，不再另起一栏。
+ * 布局照 Hub 的看板：一排 KPI、一张独立的「积分总账」面板 + 一张可切换维度的明细表、最后是时序柱状图。
+ * 积分与缓存的汇总单独成一张毛玻璃面板（左侧主数字 + 右侧 2×2 佐证），放在表格上面，不再与明细同面板；
+ * **时序图在最底下**——先看这段时间花了多少、分在谁身上，再往下看最近这一天的节奏。
  * 明细表**只有一张**：用量（请求 / 失败 / token / 延迟 / 速度）与积分（扣除积分 / 匹配 Token /
  * 比率 / 缓存命中率）是同一行上的两截，按账号或按模型由同一个切换控制 ——
  * 两处各摆一张表时，同一个账号要在上下两处对齐看，请求数还写了两遍。
@@ -20,6 +21,8 @@ import { gatewayAccountNames } from '@/workbench/gateway'
  *
  * 时序图固定看**最近 24 小时**（逐小时，带纵轴）：页面顶上的时间范围只管 KPI 与明细表，
  * 不再决定图表的粒度 —— 两者回答的不是同一个问题（「这段时间一共多少」vs「最近这一天的节奏」）。
+ * 时间范围按**自然日**算（UTC+8 零点起）：`今日` = 今天 0 点到现在，`近 3 天` = 今天加前两天。
+ * 取回的行会盖住最近 24 小时（图要用），统计前按 `since` 再裁一次。
  *
  * 所有数字来自 Rust 的 `wb_gateway_usage`，这一页只做格式化。
  */
@@ -214,9 +217,14 @@ function load(): void {
   loading.value = true
   void window.workbench.gatewayUsageRows(days.value).then((result) => {
     if (result.ok && result.data) {
-      // Rust 只取数：分组 / 分桶 / 比率的口径在 @workbench/usage
-      rows.value = result.data
-      summary.value = summarizeGatewayRows(result.data, gatewayBucketUnit(days.value))
+      // Rust 只取数：分组 / 分桶 / 比率的口径在 @workbench/usage。
+      // 取回来的行盖住了最近 24 小时（图表要用），统计只算 `since` 之后的那一段。
+      const { since, rows: fetched } = result.data
+      rows.value = fetched
+      summary.value = summarizeGatewayRows(
+        fetched.filter(row => row.ts >= since),
+        gatewayBucketUnit(days.value),
+      )
       loadError.value = ''
     }
     else {
@@ -335,6 +343,120 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
+    <!--
+      积分总账：独立一张面板（外壳就是 .panel 的毛玻璃），左侧主数字占满两行、右侧 2×2 佐证；
+      与下面的明细表各成一块 —— 明细面板不再把它套在里面。
+    -->
+    <section class="panel usage__cost">
+      <div class="usage__cost-hero">
+        <span class="usage__cost-label">扣除积分</span>
+        <span class="usage__cost-value">{{ (summary?.creditSamples ?? 0) > 0 ? credit(summary?.credits ?? 0) : '—' }}</span>
+        <span class="usage__cost-sub">按上游 usage.credit 累计</span>
+      </div>
+      <div class="usage__cost-item is-avg">
+        <span class="usage__cost-label">平均积分 / 1M Token</span>
+        <span class="usage__cost-value is-ok">{{ ratioValue(summary?.creditsPer1MTokens ?? 0, summary?.creditSamples ?? 0) }}</span>
+        <span class="usage__cost-sub">分母为总 token · 越低越省</span>
+      </div>
+      <div class="usage__cost-item is-match">
+        <span class="usage__cost-label">匹配 Token</span>
+        <span class="usage__cost-value">{{ (summary?.creditSamples ?? 0) > 0 ? compact(summary?.creditTokens ?? 0) : '—' }}</span>
+        <span class="usage__cost-sub">与积分同时观测到的总 token</span>
+      </div>
+      <div class="usage__cost-item is-samples">
+        <span class="usage__cost-label">有效积分样本</span>
+        <span class="usage__cost-value">{{ summary?.creditSamples ?? 0 }}</span>
+        <span class="usage__cost-sub">{{ missingCreditCount }} 个模型不参与折算</span>
+      </div>
+      <div class="usage__cost-item is-hit">
+        <span class="usage__cost-label">缓存命中率</span>
+        <span class="usage__cost-value">{{ percent(summary?.cacheHitPct ?? 0) }}</span>
+        <span class="usage__cost-sub">命中 / 输入 token · 低命中更贵</span>
+      </div>
+    </section>
+
+    <section class="panel usage__section">
+      <div class="usage__section-head">
+        <h3>用量明细</h3>
+        <el-segmented v-model="dimension" :options="DIMENSIONS" size="small" />
+      </div>
+
+      <!-- 列宽交给内容（table-layout="auto"）：不再写死每列的像素宽 -->
+      <GatewayTable
+        v-if="detailRows.length"
+        :data="detailRows"
+        row-key="key"
+        flat
+      >
+        <el-table-column :label="dimension === 'account' ? '账号' : '模型'" align="center">
+          <template #default="{ row }">
+            <template v-if="dimension === 'account'">
+              <span class="usage__cell-name">{{ nameOf(row.key) }}</span>
+              <span class="usage__cell-id">{{ row.realm }} · {{ row.key.slice(0, 8) }}</span>
+            </template>
+            <span v-else class="usage__mono" :title="row.key">{{ row.key }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="请求" align="center" class-name="gw-num" label-class-name="gw-num">
+          <template #default="{ row }">
+            {{ row.requests }}
+          </template>
+        </el-table-column>
+        <el-table-column label="失败" align="center" class-name="gw-num" label-class-name="gw-num">
+          <template #default="{ row }">
+            <span :class="{ usage__fail: row.failed > 0 }">{{ row.failed || '—' }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="输入" align="center" class-name="gw-num" label-class-name="gw-num">
+          <template #default="{ row }">
+            {{ compact(row.promptTokens) }}
+          </template>
+        </el-table-column>
+        <el-table-column label="输出" align="center" class-name="gw-num" label-class-name="gw-num">
+          <template #default="{ row }">
+            {{ compact(row.completionTokens) }}
+          </template>
+        </el-table-column>
+        <el-table-column label="合计" align="center" class-name="gw-num" label-class-name="gw-num">
+          <template #default="{ row }">
+            {{ compact(row.promptTokens + row.completionTokens) }}
+          </template>
+        </el-table-column>
+        <el-table-column label="均延迟" align="center" class-name="gw-num" label-class-name="gw-num">
+          <template #default="{ row }">
+            {{ (row.avgTtftMs / 1000).toFixed(2) }}s
+          </template>
+        </el-table-column>
+        <el-table-column label="均速率" align="center" class-name="gw-num" label-class-name="gw-num">
+          <template #default="{ row }">
+            {{ row.tokensPerSec.toFixed(1) }} tok/s
+          </template>
+        </el-table-column>
+        <el-table-column label="扣除积分" align="center" class-name="gw-num" label-class-name="gw-num">
+          <template #default="{ row }">
+            {{ row.creditSamples > 0 ? credit(row.credits) : '未记录' }}
+          </template>
+        </el-table-column>
+        <el-table-column label="匹配 Token" align="center" class-name="gw-num" label-class-name="gw-num">
+          <template #default="{ row }">
+            {{ row.creditSamples > 0 ? compact(row.creditTokens) : '—' }}
+          </template>
+        </el-table-column>
+        <el-table-column label="积分 / 1M Token" align="center" class-name="gw-num" label-class-name="gw-num">
+          <template #default="{ row }">
+            {{ creditRatio(row.creditsPer1MTokens, row.creditSamples) }}
+          </template>
+        </el-table-column>
+        <el-table-column label="缓存命中率" align="center" class-name="gw-num" label-class-name="gw-num">
+          <template #default="{ row }">
+            <span :class="hitClass(row.cacheHitPct)">{{ percent(row.cacheHitPct) }}</span>
+          </template>
+        </el-table-column>
+      </GatewayTable>
+
+      <EmptyState v-else compact :icon="Histogram" text="还没有数据" />
+    </section>
+
     <section class="panel usage__section">
       <div class="usage__section-head">
         <h3>Token 时序</h3>
@@ -375,118 +497,6 @@ onBeforeUnmount(() => {
         </div>
       </template>
       <EmptyState v-else compact :icon="Histogram" text="最近 24 小时还没有请求" />
-    </section>
-
-    <section class="panel usage__section">
-      <!-- 积分总账：一句「花了多少、划不划算」—— 左侧主数字，右侧 2×2 佐证，不是五张并列小卡 -->
-      <div class="usage__cost">
-        <div class="usage__cost-hero">
-          <span class="usage__cost-label">扣除积分</span>
-          <span class="usage__cost-value">{{ (summary?.creditSamples ?? 0) > 0 ? credit(summary?.credits ?? 0) : '—' }}</span>
-          <span class="usage__cost-sub">按上游 usage.credit 累计</span>
-        </div>
-        <div class="usage__cost-item is-avg">
-          <span class="usage__cost-label">平均积分 / 1M Token</span>
-          <span class="usage__cost-value is-ok">{{ ratioValue(summary?.creditsPer1MTokens ?? 0, summary?.creditSamples ?? 0) }}</span>
-          <span class="usage__cost-sub">分母为总 token · 越低越省</span>
-        </div>
-        <div class="usage__cost-item is-match">
-          <span class="usage__cost-label">匹配 Token</span>
-          <span class="usage__cost-value">{{ (summary?.creditSamples ?? 0) > 0 ? compact(summary?.creditTokens ?? 0) : '—' }}</span>
-          <span class="usage__cost-sub">与积分同时观测到的总 token</span>
-        </div>
-        <div class="usage__cost-item is-samples">
-          <span class="usage__cost-label">有效积分样本</span>
-          <span class="usage__cost-value">{{ summary?.creditSamples ?? 0 }}</span>
-          <span class="usage__cost-sub">{{ missingCreditCount }} 个模型不参与折算</span>
-        </div>
-        <div class="usage__cost-item is-hit">
-          <span class="usage__cost-label">缓存命中率</span>
-          <span class="usage__cost-value">{{ percent(summary?.cacheHitPct ?? 0) }}</span>
-          <span class="usage__cost-sub">命中 / 输入 token · 低命中更贵</span>
-        </div>
-      </div>
-
-      <div class="usage__section-head">
-        <h3>用量明细</h3>
-        <el-segmented v-model="dimension" :options="DIMENSIONS" size="small" />
-      </div>
-
-      <!-- 列宽交给内容（table-layout="auto"）：不再写死每列的像素宽 -->
-      <el-table
-        v-if="detailRows.length"
-        :data="detailRows"
-        row-key="key"
-        table-layout="auto"
-        class="usage__table"
-      >
-        <el-table-column :label="dimension === 'account' ? '账号' : '模型'" align="center">
-          <template #default="{ row }">
-            <template v-if="dimension === 'account'">
-              <span class="usage__cell-name">{{ nameOf(row.key) }}</span>
-              <span class="usage__cell-id">{{ row.realm }} · {{ row.key.slice(0, 8) }}</span>
-            </template>
-            <span v-else class="usage__mono" :title="row.key">{{ row.key }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="请求" align="center" class-name="usage__num" label-class-name="usage__num">
-          <template #default="{ row }">
-            {{ row.requests }}
-          </template>
-        </el-table-column>
-        <el-table-column label="失败" align="center" class-name="usage__num" label-class-name="usage__num">
-          <template #default="{ row }">
-            <span :class="{ usage__fail: row.failed > 0 }">{{ row.failed || '—' }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="输入" align="center" class-name="usage__num" label-class-name="usage__num">
-          <template #default="{ row }">
-            {{ compact(row.promptTokens) }}
-          </template>
-        </el-table-column>
-        <el-table-column label="输出" align="center" class-name="usage__num" label-class-name="usage__num">
-          <template #default="{ row }">
-            {{ compact(row.completionTokens) }}
-          </template>
-        </el-table-column>
-        <el-table-column label="合计" align="center" class-name="usage__num" label-class-name="usage__num">
-          <template #default="{ row }">
-            {{ compact(row.promptTokens + row.completionTokens) }}
-          </template>
-        </el-table-column>
-        <el-table-column label="均延迟" align="center" class-name="usage__num" label-class-name="usage__num">
-          <template #default="{ row }">
-            {{ (row.avgTtftMs / 1000).toFixed(2) }}s
-          </template>
-        </el-table-column>
-        <el-table-column label="均速率" align="center" class-name="usage__num" label-class-name="usage__num">
-          <template #default="{ row }">
-            {{ row.tokensPerSec.toFixed(1) }} tok/s
-          </template>
-        </el-table-column>
-        <el-table-column label="扣除积分" align="center" class-name="usage__num" label-class-name="usage__num">
-          <template #default="{ row }">
-            {{ row.creditSamples > 0 ? credit(row.credits) : '未记录' }}
-          </template>
-        </el-table-column>
-        <el-table-column label="匹配 Token" align="center" class-name="usage__num" label-class-name="usage__num">
-          <template #default="{ row }">
-            {{ row.creditSamples > 0 ? compact(row.creditTokens) : '—' }}
-          </template>
-        </el-table-column>
-        <el-table-column label="积分 / 1M Token" align="center" class-name="usage__num" label-class-name="usage__num">
-          <template #default="{ row }">
-            {{ creditRatio(row.creditsPer1MTokens, row.creditSamples) }}
-          </template>
-        </el-table-column>
-        <el-table-column label="缓存命中率" align="center" class-name="usage__num" label-class-name="usage__num">
-          <template #default="{ row }">
-            <span :class="hitClass(row.cacheHitPct)">{{ percent(row.cacheHitPct) }}</span>
-          </template>
-        </el-table-column>
-      </el-table>
-
-      <EmptyState v-else compact :icon="Histogram" text="还没有数据" />
     </section>
   </div>
 </template>
@@ -533,7 +543,7 @@ onBeforeUnmount(() => {
  * 六张 KPI 小卡：左图标、右三行（标签 / 数值 / 补充行）。
  * 玻璃与 `.panel` 同一套配方（底色跟着「卡片不透明度」走、磨砂取 `--glass-filter`、
  * 描边取设置里那档），只是不叠阴影 —— 六块小卡各带一片阴影太吵。
- * 用子代选择器只挑这一排：下面明细面板里的积分总账（`.usage__cost`）本身就是带底的面。
+ * 用子代选择器只挑这一排：下面那张积分总账面板（`.usage__cost`）本身就是带底的面。
  */
 .usage > .usage__cards > .usage__card {
   display: flex;
@@ -635,26 +645,21 @@ onBeforeUnmount(() => {
 }
 
 /**
- * 积分总账：不是五张并列小卡，而是一句「花了多少、划不划算」。
- * 左边一格主数字（扣除积分）占满两行，右边 2×2 放佐证（平均成本 / 匹配 token / 样本 / 命中率）——
- * 一整块面 + 发丝分隔线，层级靠字号与留白拉开，不靠五个各自带边框的盒子。
+ * 积分总账：一张独立面板，回答一句「花了多少、划不划算」。
+ *
+ * 外壳就是 `.panel` 的那层毛玻璃（底色跟卡片不透明度、磨砂取 --glass-filter）—— 所以这里只把
+ * 五格排开：左边一格主数字（扣除积分）占满两行，右边 2×2 放佐证（平均成本 / 匹配 token / 样本 / 命中率）。
+ * 发丝分隔线要铺到卡片四边，因此把 .panel 的内边距与间距都收掉，留白由每个格子自己给。
+ * 具体度要比 `.panel` 高一层（两条规则的权重相同的话，组件样式排在全局样式之前，覆盖会静默失效）。
  */
-.usage__cost {
+.usage__cost.panel {
   display: grid;
   grid-template-columns: minmax(210px, 0.72fr) repeat(2, minmax(0, 1fr));
   grid-template-areas:
     'hero avg match'
     'hero samples hit';
-  margin-bottom: var(--sp-4);
-  border: 1px solid var(--border);
-  border-radius: var(--r-lg);
-  /* 上亮下淡：一层薄薄的受光面，落在玻璃面板上不会像灰块那样平 */
-  background: linear-gradient(
-    180deg,
-    rgba(var(--bg-surface-rgb), 0.66),
-    rgba(var(--bg-surface-rgb), 0.3)
-  );
-  overflow: hidden;
+  gap: 0;
+  padding: 0;
 }
 
 .usage__cost-hero {
@@ -709,7 +714,7 @@ onBeforeUnmount(() => {
 
 /* 窗口窄到主数字与 2×2 并排放不下时，主数字占满一行，佐证仍按两列排 */
 @media (max-width: 1240px) {
-  .usage__cost {
+  .usage__cost.panel {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     grid-template-areas:
       'hero hero'
@@ -724,7 +729,7 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 760px) {
-  .usage__cost {
+  .usage__cost.panel {
     grid-template-columns: minmax(0, 1fr);
     grid-template-areas:
       'hero'
@@ -789,12 +794,6 @@ onBeforeUnmount(() => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-/* 数字列用等宽体：位数对齐后纵向扫一列才读得出大小（居中由列自己的 align 给） */
-.usage__table :deep(.usage__num) {
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
 }
 
 /* 账号格两行：名字在上、域与 uid 前缀在下（流水里只有 uid，名字查不到就退回它） */
@@ -935,48 +934,6 @@ onBeforeUnmount(() => {
   font-size: var(--gw-fs-micro);
   color: var(--ink-3);
   white-space: nowrap;
-}
-
-/**
- * 表格交给 Element Plus：`table-layout="auto"` 让列宽由内容决定，不再写死每列宽度。
- * 这里只把 EP 的外观收成面板的一部分 —— 去掉自带底色与四周边线，行间只留一条横线。
- */
-.usage__table {
-  --el-table-border-color: var(--border);
-  --el-table-header-bg-color: transparent;
-  --el-table-tr-bg-color: transparent;
-  --el-table-bg-color: transparent;
-  --el-table-header-text-color: var(--ink-3);
-  --el-table-text-color: var(--ink-2);
-  --el-table-row-hover-bg-color: transparent;
-  font-size: var(--gw-fs-meta);
-}
-
-/* 面板已经画了外框，表格自己那条底线不要 */
-.usage__table :deep(.el-table__inner-wrapper::before) {
-  display: none;
-}
-
-.usage__table :deep(.el-table__cell) {
-  padding: var(--sp-2) 0;
-}
-
-.usage__table :deep(.cell) {
-  padding: 0 var(--sp-2);
-  line-height: 1.5;
-}
-
-.usage__table :deep(th.el-table__cell) {
-  font-weight: 400;
-  border-bottom: 1px solid var(--border);
-}
-
-.usage__table :deep(td.el-table__cell) {
-  border-bottom: 1px solid var(--border);
-}
-
-.usage__table :deep(.el-table__body tr:last-child td.el-table__cell) {
-  border-bottom: none;
 }
 
 .usage__mono {

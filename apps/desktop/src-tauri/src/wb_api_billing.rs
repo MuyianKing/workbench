@@ -95,6 +95,17 @@ fn fetch_enterprise(account: &Account) -> Result<Credits, String> {
 }
 
 /// 发一次 POST 并解信封。`code != 0` 一律当失败 —— 上游的 200 里什么都可能装。
+///
+/// 公开给任务福利那几条路：签到、新手礼包、活动补偿都走计费域，头与信封口径必须
+/// 与余额查询完全一致，不能再抄一份。
+pub fn call(
+    account: &Account,
+    path: &str,
+    body: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    post(account, path, body)
+}
+
 fn post(account: &Account, path: &str, body: &serde_json::Value) -> Result<serde_json::Value, String> {
     let url = account.realm.billing_url(path);
     let payload = body.to_string();
@@ -126,6 +137,12 @@ fn post(account: &Account, path: &str, body: &serde_json::Value) -> Result<serde
         }
     }
     Ok(value)
+}
+
+/// 计费头（对外只读一份）。任务福利里的签到 / 礼包 / 补偿都用它，
+/// 别在别处再拼一套 —— 国内版的三个域与 `X-*` 系列很容易漏一个。
+pub fn headers(account: &Account) -> Vec<(String, String)> {
+    billing_headers(account)
 }
 
 /// 计费头。与聊天头是**两套**：这里没有会话 id 家族，但有机器码与会话标识

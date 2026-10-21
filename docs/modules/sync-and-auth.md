@@ -55,6 +55,22 @@
 - 应用侧的克隆目录在 `%APPDATA%/Workbench/token-sync/`（与笔记图片那个 `image-sync` 分开两份），它是应用自己的缓存，可以整个删掉重来
   —— 与笔记同步相反，那边动的是用户自己的文件夹。
 
+### 同一个克隆上的并发
+
+- **几条同步共用同一个克隆，必须排队**：用量 / 外观 / 网关 / 保险库四条同步各走各的线程，落在同一个
+  `token-sync` 上；两条同时跑时 git 自己的步骤会互相踩 —— 一条在 pull 的当口另一条提交了，pull 会以为
+  工作区要从旧提交快进，die 出 `Cannot fast-forward your working tree`（`builtin/pull.c`）；两条同时
+  `add` / `commit` 还会撞 `index.lock`。所以每个入口在动 git 之前先拿 `sync::lock_workflow(dir)`：
+  `publish_at` / `publish_gateway_at` / 图片的读、写、删 / `sync_notes` / 保险库的 `pull_at` 与 `push_at`。
+  **新增一条同步路径要照这个来**（锁按目录分，不同仓库互不牵连）；锁要一直拿在整段流程上，
+  不能只包 `ensure_clone` —— 危险窗口是「拉完到提交完」这一段。
+- **另一个窗口不在同一把锁里**：安装版与 dev 可以同时开着（见 AGENTS.md），它们各拿各的进程内锁。
+  跨窗口撞车由 `sync::pull_with_race_retry` 兜底：只在「这次 pull 期间 HEAD 被挪过、且没留下 rebase 现场」
+  时才重拉（最多 `PULL_RACE_RETRIES` 次），真冲突照旧原样交回给用户。**别把它换成「失败就当没看见」**。
+- 那句 `Cannot fast-forward` 的英文（教用户 `git diff` / `git reset --hard`）**不上屏**：`describe` 把它换成
+  「另一条同步正在同一个仓库上提交，这次没接上；稍后再同步一次即可」。原文的标题行在倒数第五行，
+  按「最后四行」裁完只剩一句带 40 位提交号的 `$ git diff …` —— 2026-10-21 保险库工具带上那行红字就是这么来的。
+
 ### 外观与首页布局（theme.json）
 
 - 外观设置与首页布局都住在 [theme.json](../../packages/appearance/src/theme.ts) 里（哪些项算外观由

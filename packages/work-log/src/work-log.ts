@@ -85,13 +85,16 @@ export interface WorkLogFile {
 }
 
 /**
- * 时间轴的范围档位。
- * 刻意不做「自定义区间」：日常最多的就是这四问，多一个日期选择器只是多一步操作。
+ * 顶栏那排档位（数组顺序就是控件里的顺序）。
+ *
+ * 最左的「待办」不是一个时间段，而是**所有还没做完的事**（不分日期铺开），其余四档才是日期范围。
+ * 刻意不做「自定义区间」：日常最多的就是这几问，多一个日期选择器只是多一步操作。
  */
-export const WORK_RANGES = ['today', 'yesterday', 'week', 'month'] as const
+export const WORK_RANGES = ['todo', 'today', 'yesterday', 'week', 'month'] as const
 export type WorkRange = (typeof WORK_RANGES)[number]
 
 export const WORK_RANGE_LABELS: Record<WorkRange, string> = {
+  todo: '待办',
   today: '今天',
   yesterday: '昨天',
   week: '本周',
@@ -325,12 +328,17 @@ export function dateOfDayKey(day: string): Date {
 }
 
 /**
- * 某一档范围覆盖的起止日期（含两端，本地日期键）。
+ * 某一档**日期**范围覆盖的起止日期（含两端，本地日期键）。
+ *
+ * 只收四档日期范围：「待办」筛的是状态、不看日期（见 `entriesInRange`），拿它算边界没有意义。
  *
  * 「本周」从**周一**起算：项目里另一处 startOfWeek 是按周日切的（贡献图那一列的起点），
  * 那是网格的排版约定，跟用户嘴里的「本周」不是一回事，别把两者合并。
  */
-export function rangeBounds(range: WorkRange, now: number): { from: string, to: string } {
+export function rangeBounds(
+  range: Exclude<WorkRange, 'todo'>,
+  now: number,
+): { from: string, to: string } {
   const today = startOfDay(now)
 
   switch (range) {
@@ -356,7 +364,7 @@ export function rangeBounds(range: WorkRange, now: number): { from: string, to: 
 }
 
 /**
- * 铺出时间轴：只留范围内的记录，按天分组。
+ * 铺出时间轴：只留这一档里的记录，按天分组（「待办」档是所有待办，不分日期）。
  *
  * 没有记录的日子不占一栏 —— 本月按自然日铺会有大半是空行，滚起来像翻日历而不是看日志。
  */
@@ -396,7 +404,7 @@ export interface WorkLogProjectRef {
 }
 
 /**
- * 按项目铺开：一个项目一栏，栏内从新到旧。
+ * 按项目铺开：一个项目一栏，栏内从新到旧（「待办」档是所有待办，不分日期）。
  *
  * 关联的项目已经被删掉的记录**合并成一栏**（否则会按那串悬空 id 裂成好几栏，
  * 看上去像好几个不同的项目，其实都是同一种情况）。
@@ -442,12 +450,15 @@ export function groupByProject(
     }))
 }
 
-/** 范围内的记录（两端闭区间） */
+/** 这一档里的记录：「待办」不看日期、只要还欠着的，其余四档按日期闭区间收 */
 function entriesInRange(
   entries: readonly WorkLogEntry[],
   range: WorkRange,
   now: number,
 ): WorkLogEntry[] {
+  if (range === 'todo')
+    return entries.filter(entry => entry.status !== 'done')
+
   const { from, to } = rangeBounds(range, now)
   return entries.filter(entry => entry.date >= from && entry.date <= to)
 }

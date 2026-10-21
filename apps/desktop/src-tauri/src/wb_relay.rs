@@ -19,6 +19,12 @@ use crate::wb_server::{Request, Response};
 use crate::wb_sse::{self, Aggregator, Decoder, Frame, Normalizer, DONE_FRAME};
 use crate::wb_usage::{self, UsageRow};
 
+/// 认不出的 429（上游 `code 14003`「模型繁忙 / too many requests」这类）最多再换几个号。
+///
+/// 只多试一个：限流要是整站的，把整池跑一遍只会让客户端白等 ——
+/// 实测一次 429 往返要 2–7 秒，四个号全试最坏多等十几秒。
+const THROTTLE_RETRIES: u8 = 1;
+
 /// 处理 `POST /v1/chat/completions`（以及 `/v1/completions` —— 上游只有 chat，
 /// 老式 completions 也按 chat 语义走）。
 ///
@@ -73,6 +79,8 @@ pub fn chat(request: &Request, accounts: &mut [Account], api_key: &str) -> Respo
     let mut last_error: Option<String> = None;
     let mut last_meta: Option<UsageMeta> = None;
     let mut saw_quota = false;
+    let mut saw_throttle = false;
+    let mut throttle_retries = 0u8;
 
     for index in order {
         let account = &mut accounts[index];
@@ -150,8 +158,24 @@ pub fn chat(request: &Request, accounts: &mut [Account], api_key: &str) -> Respo
                     last_meta = Some(meta);
                     continue;
                 }
+                // 裸 429（上游 code 14003「模型繁忙」这类）：不封号 —— 实测同一个号
+                // 几秒后就正常出数 —— 但换一个号再试一次；还被拒就原样报给客户端。
+                if status == 429 {
+                    let message = upstream_text(status, &text);
+                    saw_throttle = true;
+                    last_meta = Some(meta);
+                    if throttle_retries < THROTTLE_RETRIES {
+                        throttle_retries += 1;
+                        last_error = Some(message);
+                        continue;
+                    }
+                    if let Some(meta) = last_meta.as_ref() {
+                        record(meta, &Capture::new(), false, &error_summary(status, &text));
+                    }
+                    return Response::error(429, "rate_limit_error", &message);
+                }
                 // 不是额度问题：不换号，原样翻给调用方
-                record(&meta, &Capture::new(), false, &format!("HTTP {status}"));
+                record(&meta, &Capture::new(), false, &error_summary(status, &text));
                 return Response::error(status, "upstream_error", &upstream_text(status, &text));
             }
             Err(message) => {
@@ -161,7 +185,7 @@ pub fn chat(request: &Request, accounts: &mut [Account], api_key: &str) -> Respo
         }
     }
 
-    // 走到这里说明每个号都试过了：只有「续期失败」与「额度用完」两种可能
+    // 走到这里说明每个号都试过了：只有「续期失败」「额度用完」与「限流」三种可能
     if saw_quota {
         if let Some(meta) = last_meta.as_ref() {
             record(meta, &Capture::new(), false, "额度用完");
@@ -171,6 +195,13 @@ pub fn chat(request: &Request, accounts: &mut [Account], api_key: &str) -> Respo
             "quota_exhausted",
             &format!("{model} 的额度都用完了：已自动跳过这些账号，恢复后会自动放回池子"),
         );
+    }
+    if saw_throttle {
+        let message = last_error.unwrap_or_else(|| "上游限流".to_string());
+        if let Some(meta) = last_meta.as_ref() {
+            record(meta, &Capture::new(), false, &error_summary(429, &message));
+        }
+        return Response::error(429, "rate_limit_error", &message);
     }
     let message = last_error.unwrap_or_else(|| "没有可用的账号".to_string());
     Response::error(401, "token_expired", &message)
@@ -217,6 +248,24 @@ fn upstream_text(status: u16, text: &str) -> String {
         format!("上游返回 HTTP {status}")
     } else {
         text.to_string()
+    }
+}
+
+/// 落盘的失败摘要：状态码 + 正文前一段（空白压平）。
+///
+/// 上游用同一个 429 表达「模型繁忙」与「模型额度用完」，不记正文事后分不出来；
+/// 但流水会被人翻着看，整段正文（含 requestId）没有留存价值，截断就好。
+fn error_summary(status: u16, text: &str) -> String {
+    let flat: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if flat.is_empty() {
+        return format!("HTTP {status}");
+    }
+    let truncated = flat.chars().count() > 200;
+    let body: String = flat.chars().take(200).collect();
+    if truncated {
+        format!("HTTP {status}: {body}…")
+    } else {
+        format!("HTTP {status}: {body}")
     }
 }
 
@@ -664,6 +713,24 @@ mod tests {
         assert_eq!(
             out["messages"][0]["content"],
             "Default branch (you will usually use this for PRs): main"
+        );
+    }
+
+    /// 非额度失败也要留下上游的说法：同一个 429 既可能是模型繁忙，也可能是额度用完
+    #[test]
+    fn 失败摘要带正文前一段_超长截断() {
+        assert_eq!(error_summary(500, ""), "HTTP 500");
+        assert_eq!(
+            error_summary(400, "{\"msg\":\"a\n b\"}"),
+            "HTTP 400: {\"msg\":\"a b\"}"
+        );
+        let long = "中".repeat(300);
+        let summary = error_summary(429, &long);
+        assert!(summary.starts_with("HTTP 429: 中中"));
+        assert!(summary.ends_with('…'));
+        assert_eq!(
+            summary.chars().count(),
+            "HTTP 429: ".chars().count() + 200 + 1
         );
     }
 

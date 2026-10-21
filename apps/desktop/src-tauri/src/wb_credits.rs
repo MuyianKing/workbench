@@ -22,6 +22,9 @@ pub const EXPIRY_SENTINEL_DAYS: f64 = 730.0;
 pub struct Package {
     pub name: String,
     pub code: String,
+    /// 发放原因（`AccountAttributes` 里的 `grantReason`）。福利页按它筛「签到 / 成长 / 活动」
+    /// 那几类包；上游没给就是空串，不拿包名去猜。
+    pub grant_reason: String,
     pub remain: f64,
     pub used: f64,
     pub size: f64,
@@ -121,6 +124,7 @@ pub fn parse_package(raw: &Value) -> Package {
     Package {
         name: text(raw, "PackageName").unwrap_or_else(|| "资源包".to_string()),
         code: text(raw, "PackageCode").unwrap_or_default(),
+        grant_reason: grant_reason(raw),
         remain,
         used,
         size,
@@ -128,6 +132,28 @@ pub fn parse_package(raw: &Value) -> Package {
         no_expiry,
         days_left,
     }
+}
+
+/// 发放原因：`AccountAttributes` 里 `Key == "grantReason"` 那条的 `Value`。
+///
+/// 上游只在这条属性里说「这包是怎么来的」（签到 / 成长任务 / 活动…），
+/// 包名里没有；福利页按它筛出福利积分，缺了就当空串，不用包名去猜。
+fn grant_reason(raw: &Value) -> String {
+    let Some(items) = raw.get("AccountAttributes").and_then(Value::as_array) else {
+        return String::new();
+    };
+    for item in items {
+        if item.get("Key").and_then(Value::as_str) != Some("grantReason") {
+            continue;
+        }
+        // 上游给字符串也见过，给数字也见过
+        return match item.get("Value") {
+            Some(Value::String(text)) => text.clone(),
+            Some(Value::Number(number)) => number.to_string(),
+            _ => String::new(),
+        };
+    }
+    String::new()
 }
 
 /// 到期时刻。先看 `DeductionEndTime`（epoch 毫秒），再退回墙钟字符串。
@@ -194,6 +220,7 @@ pub fn enterprise(credit: f64, limit: f64, cycle_end: &str) -> Credits {
     let package = Package {
         name: if size > 0.0 { "企业额度" } else { "企业周期额度" }.to_string(),
         code: "enterprise".to_string(),
+        grant_reason: String::new(),
         remain,
         used,
         size,
@@ -374,6 +401,26 @@ mod tests {
         }));
         assert!(package.no_expiry);
         assert!(package.days_left.is_none());
+    }
+
+    #[test]
+    fn 发放原因从账号属性里取() {
+        let package = parse_package(&serde_json::json!({
+            "PackageName": "签到奖励",
+            "CapacitySize": 100,
+            "AccountAttributes": [
+                { "Key": "other", "Value": "忽略" },
+                { "Key": "grantReason", "Value": "每日签到" }
+            ]
+        }));
+        assert_eq!(package.grant_reason, "每日签到");
+
+        // 上游没给这条属性就是空串，不拿包名去猜
+        let missing = parse_package(&serde_json::json!({
+            "PackageName": "签到奖励",
+            "CapacitySize": 100
+        }));
+        assert!(missing.grant_reason.is_empty());
     }
 
     #[test]

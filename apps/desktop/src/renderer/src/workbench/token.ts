@@ -480,10 +480,10 @@ async function runSync(repo: string, shard: TokenShard): Promise<void> {
     if (result.ok)
       markGatewaySynced(repo)
     else
-      errors.push(result.error ? `网关流水同步失败：${result.error}` : '网关流水同步失败')
+      errors.push(result.error ? `TBuddy 流水同步失败：${result.error}` : 'TBuddy 流水同步失败')
   }
   catch (error) {
-    errors.push(errorText(error, '网关流水同步失败'))
+    errors.push(errorText(error, 'TBuddy 流水同步失败'))
   }
 
   try {

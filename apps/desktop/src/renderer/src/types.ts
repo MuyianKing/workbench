@@ -579,7 +579,7 @@ export interface AppSettings {
    * 会整份同步到别的机器；而「我上一眼在看什么」换台机器不成立（与 `activeView` 同一条口径）。
    */
   projectSort: ProjectSort
-  /** 工作页的时间范围（今天 / 昨天 / 本周 / 本月），同上 */
+  /** 工作页顶栏那一排的范围（待办 / 今天 / 昨天 / 本周 / 本月），同上 */
   workRange: WorkRange
   /** 工作页的排序维度（按时间 / 按项目） */
   workSort: WorkSort
@@ -1117,7 +1117,7 @@ export interface WorkbenchApi {
   gatewayAccess: () => Promise<Result<import('./workbench/gateway').GatewayAccess>>
   gatewayRotateKey: () => Promise<Result<string>>
   gatewayUsage: (days: number) => Promise<Result<import('./workbench/gateway').GatewayUsageSummary>>
-  gatewayUsageRows: (days: number) => Promise<Result<import('./workbench/gateway').GatewayUsageRow[]>>
+  gatewayUsageRows: (days: number) => Promise<Result<import('./workbench/gateway').GatewayUsageWindow>>
   gatewayUsageRecent: (limit: number) => Promise<Result<import('./workbench/gateway').GatewayUsageRow[]>>
   /** 手动同步网关流水；`force=false` 时一小时内的重复调用会被节流跳过 */
   gatewayUsageSync: (force?: boolean) => Promise<Result<import('./workbench/gateway').GatewaySyncResult>>
@@ -1126,6 +1126,17 @@ export interface WorkbenchApi {
   /** 选号优先级：1..=100，数大的先用 */
   gatewayAccountPriority: (uid: string, priority: number) => Promise<Result<null>>
   gatewayAccountDelete: (uid: string) => Promise<Result<null>>
+  /** 福利页：当前号的成长任务 + 汇总（`uid` 为空取第一个已启用的国内号） */
+  gatewayTasks: (uid?: string) => Promise<Result<import('./workbench/gateway').GatewayTasksSnapshot>>
+  /** 一键做任务领积分；`uid` 为空时跑全部已启用的国内账号 */
+  gatewayTasksRun: (uid?: string) => Promise<Result<import('./workbench/gateway').GatewayTaskRun>>
+  gatewayTasksTravel: (uid?: string) => Promise<Result<import('./workbench/gateway').GatewayActionResult[]>>
+  gatewayTasksStreak: (uid?: string) => Promise<Result<import('./workbench/gateway').GatewayActionResult[]>>
+  /** Buddy 加油站签到（国内版） */
+  gatewayCheckin: (uid?: string) => Promise<Result<import('./workbench/gateway').GatewayActionResult[]>>
+  /** 国际版每日活跃；传 `uids` 只打名单里那批 */
+  gatewayDailyChat: (uids?: string[]) => Promise<Result<import('./workbench/gateway').GatewayActionResult[]>>
+  gatewayActivityToday: () => Promise<Result<import('./workbench/gateway').GatewayActivityRow[]>>
   versions: { node: string, chrome: string }
   /**
    * 挑一个目录。

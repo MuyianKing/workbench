@@ -69,6 +69,8 @@ export interface GatewayLoginPoll {
 export interface GatewayPackage {
   name: string
   code: string
+  /** 发放原因（上游 `AccountAttributes.grantReason`），没给是空串 */
+  grantReason: string
   remain: number
   used: number
   size: number
@@ -98,15 +100,15 @@ async function call<T>(command: string, args: Record<string, unknown>, fallback:
 }
 
 export function gatewayStatus(): Promise<Result<GatewayStatus>> {
-  return call('wb_gateway_status', {}, '读取网关状态失败')
+  return call('wb_gateway_status', {}, '读取 TBuddy 状态失败')
 }
 
 export function gatewayStart(port: number): Promise<Result<number>> {
-  return call('wb_gateway_start', { port }, '启动网关失败')
+  return call('wb_gateway_start', { port }, '启动 TBuddy 失败')
 }
 
 export function gatewayStop(): Promise<Result<null>> {
-  return call('wb_gateway_stop', {}, '停止网关失败')
+  return call('wb_gateway_stop', {}, '停止 TBuddy 失败')
 }
 
 export function gatewayAccounts(): Promise<Result<GatewayAccount[]>> {
@@ -301,6 +303,18 @@ export interface GatewayUsageRow {
   costCny: number | null
 }
 
+/**
+ * 一段流水：统计窗口的起点 + 覆盖到它的行（旧→新）。
+ *
+ * `rows` 里可能比 `since` **更早**：时序图固定看最近 24 小时，取数窗口至少铺满它，
+ * 而「今日」的自然日窗口在上午比 24 小时短。KPI 与明细表要按 `since` 再裁一次。
+ */
+export interface GatewayUsageWindow {
+  /** 统计窗口的起点（Unix 秒，UTC+8 自然日 0 点） */
+  since: number
+  rows: GatewayUsageRow[]
+}
+
 export function gatewayAccess(): Promise<Result<GatewayAccess>> {
   return call('wb_gateway_access', {}, '读取接入信息失败')
 }
@@ -319,10 +333,12 @@ export function gatewayUsage(days: number, repo = '', device = ''): Promise<Resu
 }
 
 /**
- * 窗口内的流水（旧→新）。**只取数**：分组 / 分桶 / 比率的语义在
+ * 窗口内的流水（旧→新），连统计窗口的起点一起回。**只取数**：分组 / 分桶 / 比率的语义在
  * `@workbench/usage` 的 `summarizeGatewayRows`，与 Rust 的 `summarize` 同口径。
+ *
+ * 窗口是**自然日**（UTC+8 零点起算）：`days = 1` 是今天，`days = 3` 是今天加前两天。
  */
-export function gatewayUsageRows(days: number, repo = '', device = ''): Promise<Result<GatewayUsageRow[]>> {
+export function gatewayUsageRows(days: number, repo = '', device = ''): Promise<Result<GatewayUsageWindow>> {
   return call('wb_gateway_usage_rows', { days, repo, device }, '读取用量失败')
 }
 
@@ -364,12 +380,12 @@ export async function gatewaySyncNow(repo: string, device: string): Promise<Resu
   const result = await call<Omit<GatewaySyncResult, 'enabled'>>(
     'gateway_sync_publish',
     { repo, device },
-    '同步网关流水失败',
+    '同步 TBuddy 流水失败',
   )
   if (!result.ok)
-    return fail(result.error ?? '同步网关流水失败')
+    return fail(result.error ?? '同步 TBuddy 流水失败')
   if (!result.data)
-    return fail('同步网关流水失败')
+    return fail('同步 TBuddy 流水失败')
   return ok({ enabled: true, ...result.data })
 }
 
@@ -438,4 +454,127 @@ export const gatewayApi = {
   gatewayAccountSet,
   gatewayAccountPriority,
   gatewayAccountDelete,
+  gatewayTasks,
+  gatewayTasksRun,
+  gatewayTasksTravel,
+  gatewayTasksStreak,
+  gatewayCheckin,
+  gatewayDailyChat,
+  gatewayActivityToday,
+}
+
+// ---------- 任务福利 ----------
+
+/** 一个成长任务（国内版） */
+export interface GatewayGrowthTask {
+  taskCode: string
+  name: string
+  description: string
+  jumpUrl: string
+  /** `not_accepted` / `accepted` / `completed` / `claimed`… */
+  status: string
+  taskType: string
+  current: number
+  target: number
+  rewardCredit: number
+  rewardEnergy: number
+  /** 需真实操作才能完成，事件伪造不会推进度 */
+  unforgeable: boolean
+  reason: string
+}
+
+/** 猫猫旅行状态 */
+export interface GatewayTravelState {
+  state: string
+  dailyLimitReached: boolean
+  rewardCredit: number
+}
+
+/** 连续打卡 / 补签卡 / 抽奖次数 / 能量 / 猫猫旅行 */
+export interface GatewayGrowthSummary {
+  energy: number
+  streakDays: number
+  makeupCards: number
+  lotteryChances: number
+  travel: GatewayTravelState
+}
+
+/** 福利页顶上的账号选项 */
+export interface GatewayTaskAccount {
+  uid: string
+  label: string
+}
+
+/** 当前选中账号的成长任务快照 */
+export interface GatewayTasksSnapshot {
+  tasks: GatewayGrowthTask[]
+  summary: GatewayGrowthSummary
+  /** 这份快照属于哪个号；没有国内账号时是空串 */
+  account: string
+  accounts: GatewayTaskAccount[]
+  msg: string
+}
+
+/** 一轮成长任务的执行结果 */
+export interface GatewayTaskRun {
+  ok: boolean
+  logs: string[]
+  creditAdded: number
+}
+
+/** 签到 / 每日活跃 / 猫猫旅行 / 连登管家：每个号一条 */
+export interface GatewayActionResult {
+  uid: string
+  nickname: string
+  ok: boolean
+  message: string
+  /** 猫猫旅行的动作名，其余动作是空串 */
+  action: string
+  credit: number
+}
+
+/** 今天的一次签到 / 每日活跃尝试 */
+export interface GatewayActivityRow {
+  ts: number
+  date: string
+  uid: string
+  nickname: string
+  realm: string
+  /** `checkin` / `daily_chat` */
+  task: string
+  ok: boolean
+  message: string
+}
+
+/** 当前号的成长任务 + 汇总。`uid` 为空时后端取第一个已启用的国内号。 */
+export function gatewayTasks(uid?: string): Promise<Result<GatewayTasksSnapshot>> {
+  return call('wb_gateway_tasks', { uid: uid ?? null }, '读取成长任务失败')
+}
+
+/** 一键做任务领积分。`uid` 为空时对全部已启用的国内账号逐个跑。 */
+export function gatewayTasksRun(uid?: string): Promise<Result<GatewayTaskRun>> {
+  return call('wb_gateway_tasks_run', { uid: uid ?? null }, '执行成长任务失败')
+}
+
+export function gatewayTasksTravel(uid?: string): Promise<Result<GatewayActionResult[]>> {
+  return call('wb_gateway_tasks_travel', { uid: uid ?? null }, '猫猫旅行失败')
+}
+
+export function gatewayTasksStreak(uid?: string): Promise<Result<GatewayActionResult[]>> {
+  return call('wb_gateway_tasks_streak', { uid: uid ?? null }, '连登管家失败')
+}
+
+/** Buddy 加油站签到（国内版） */
+export function gatewayCheckin(uid?: string): Promise<Result<GatewayActionResult[]>> {
+  return call('wb_gateway_checkin', { uid: uid ?? null }, '签到失败')
+}
+
+/** 国际版每日活跃打卡。传 `uids` 就只打名单里那批 */
+export function gatewayDailyChat(uids?: string[]): Promise<Result<GatewayActionResult[]>> {
+  return call('wb_gateway_daily_chat', { uids: uids ?? null }, '每日活跃打卡失败')
+}
+
+/** 今天的签到 / 每日活跃尝试 */
+export function gatewayActivityToday(): Promise<Result<GatewayActivityRow[]>> {
+  return call('wb_gateway_activity_today', {}, '读取今日打卡记录失败')
 }

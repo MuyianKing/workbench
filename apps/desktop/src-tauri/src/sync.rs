@@ -26,6 +26,7 @@ use serde_json::{json, Value};
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, MutexGuard};
 use std::time::Duration;
 use walkdir::WalkDir;
 
@@ -58,6 +59,39 @@ const GIT_ENVS: [(&str, &str); 1] = [("GIT_TERMINAL_PROMPT", "0")];
 /// 不能指望本机的 git 配置：这是个**每台机器都可能不同**的全局项（用户自己在
 /// `~/.gitconfig` 里设过就不同），而我们每次都要拿到能直接上屏的名字。
 const GIT_GLOBAL_ARGS: [&str; 2] = ["-c", "core.quotepath=false"];
+
+/// 一轮 pull 因为「别的同步刚好在中间提交」失败时，最多再试几次。
+/// 每次之间退避一下，让先动手的那条把 commit / push 走完。
+const PULL_RACE_RETRIES: usize = 3;
+
+/// 每个仓库目录一把锁，同一个目录上的 git 流程一次只跑一条。
+///
+/// **为什么需要**：用量 / 外观 / 网关 / 保险库几条同步各走各的线程，却共用同一个克隆
+/// （`token-sync`）。两条同时跑时 git 自己的步骤会互相踩：一条在 pull 的当口另一条提交了，
+/// pull 会以为自己的工作区要从旧提交快进，于是 die 出一句
+/// `Cannot fast-forward your working tree`；两条同时 `add` / `commit` 还会撞 `index.lock`。
+/// 排成一队之后这些窗口就不存在了。
+///
+/// 锁按**目录**分：token-sync 上排队，笔记文件夹 / 技能库 / 图片各排各的，互不牵连。
+/// 只覆盖本进程内的调用 —— 另一个 Workbench 窗口（安装版 + dev 可以同时开着）不在同一把锁里，
+/// 那一路由 `pull_with_race_retry` 兜。
+fn workflow_lock(dir: &Path) -> &'static Mutex<()> {
+    static LOCKS: Mutex<Vec<(PathBuf, &'static Mutex<()>)>> = Mutex::new(Vec::new());
+
+    let mut locks = LOCKS.lock().unwrap_or_else(|err| err.into_inner());
+    if let Some(entry) = locks.iter().find(|(path, _)| path == dir) {
+        return entry.1;
+    }
+    // 目录就那几处（两个克隆 + 用户的笔记 / 技能库），泄漏一把锁换 'static 是划算的
+    let lock: &'static Mutex<()> = Box::leak(Box::new(Mutex::new(())));
+    locks.push((dir.to_path_buf(), lock));
+    lock
+}
+
+/// 拿住某个仓库目录的同步锁。锁中毒只说明上一次跑到一半 panic 了，照常拿回来接着用。
+pub(crate) fn lock_workflow(dir: &Path) -> MutexGuard<'static, ()> {
+    workflow_lock(dir).lock().unwrap_or_else(|err| err.into_inner())
+}
 
 thread_local! {
     /// 本次 git 调用额外要带的 git 配置（host 限定的 Authorization 头，见 `oauth::git_credentials`）。
@@ -164,6 +198,8 @@ fn publish_at(
     if usage.is_none() && config.is_none() {
         return Err("没有要同步的内容".into());
     }
+    // 与另外三条同步共用这一个克隆：同一时刻只跑一条（见 workflow_lock）
+    let _workflow = lock_workflow(clone_dir);
     // 必须在任何 git 调用之前设好：下面的 ensure_clone 就要走网络
     set_git_auth();
     let (dir, branch) = ensure_clone(clone_dir, repo)?;
@@ -236,6 +272,7 @@ fn publish_gateway_at(
     device: &str,
     rows: &[crate::wb_usage::UsageRow],
 ) -> Result<Value, String> {
+    let _workflow = lock_workflow(clone_dir);
     set_git_auth();
     let (dir, branch) = ensure_clone(clone_dir, repo)?;
     let safe = safe_name(device);
@@ -309,20 +346,21 @@ fn publish_gateway_at(
 /// 从同步克隆读**别的机器**的网关流水（不联网、不改克隆）。
 ///
 /// `own_device` 的目录跳过：本机以 `usage.jsonl` 为准，再读一遍会双计。
-/// `since_days > 0` 时只读窗口内的月份文件；月份键是 UTC+8（与网关分桶一致）。
+/// `since > 0` 时只读窗口内的月份文件；月份键是 UTC+8（与网关分桶一致）。
+/// `since` 是 Unix 秒，由调用方按窗口算好（见 `wb_usage::window_start`）。
 pub fn read_gateway_rows(
     repo: &str,
     own_device: &str,
-    since_days: i64,
+    since: i64,
 ) -> Result<Vec<crate::wb_usage::UsageRow>, String> {
-    read_gateway_rows_for(&paths::token_sync_dir(), repo, own_device, since_days)
+    read_gateway_rows_for(&paths::token_sync_dir(), repo, own_device, since)
 }
 
 fn read_gateway_rows_for(
     clone_dir: &Path,
     repo: &str,
     own_device: &str,
-    since_days: i64,
+    since: i64,
 ) -> Result<Vec<crate::wb_usage::UsageRow>, String> {
     clear_git_auth();
     if !clone_dir.join(".git").is_dir() || !clone_matches(clone_dir, repo) {
@@ -333,11 +371,7 @@ fn read_gateway_rows_for(
         return Ok(Vec::new());
     };
     let own = safe_name(own_device);
-    let cutoff_ts = if since_days > 0 {
-        Some(now_secs() - since_days.max(1) * 86400)
-    } else {
-        None
-    };
+    let cutoff_ts = if since > 0 { Some(since) } else { None };
     let cutoff_month = cutoff_ts.map(|ts| {
         crate::wb_api_billing::format_wall_clock(ts)
             .chars()
@@ -398,13 +432,6 @@ fn read_gateway_rows_for(
     Ok(rows)
 }
 
-fn now_secs() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|elapsed| elapsed.as_secs() as i64)
-        .unwrap_or(0)
-}
-
 /// 仓库里两个目录的内容（原始 JSON，收敛与合并由渲染层负责）
 #[derive(Serialize)]
 pub struct SyncFiles {
@@ -447,6 +474,7 @@ fn publish_image_at(
         return Err("这是一张空图片".into());
     }
 
+    let _workflow = lock_workflow(clone_dir);
     // 必须在任何 git 调用之前设好：下面的 ensure_clone 就要走网络
     set_git_auth();
     let relative = image_relative_path(dir, name)?;
@@ -496,6 +524,7 @@ fn list_images_at(
     let clean = require_image_repo(repo)?;
     let clean_dir = normalize_image_dir(dir)?;
 
+    let _workflow = lock_workflow(clone_dir);
     // 必须在任何 git 调用之前设好：ensure_clone 要走网络
     set_git_auth();
     let (root, branch) = ensure_clone(clone_dir, &clean)?;
@@ -559,6 +588,7 @@ fn delete_images_at(
         return Err("没有选中要删除的图片".into());
     }
 
+    let _workflow = lock_workflow(clone_dir);
     set_git_auth();
     let (root, branch) = ensure_clone(clone_dir, &clean)?;
 
@@ -733,6 +763,9 @@ pub fn sync_notes(dir: &str) -> Result<Value, String> {
     if !run_git_quiet(&["remote", "get-url", "origin"], &root) {
         return Err("这个笔记文件夹还没连远端仓库：在它里面跑 `git remote add origin <地址>` 就能同步".into());
     }
+
+    // 同一个文件夹被两个窗口同时同步时，走同一条队（见 workflow_lock）
+    let _workflow = lock_workflow(&root);
     if let Some(message) = busy_message(&root, "这个笔记文件夹") {
         return Err(message);
     }
@@ -893,11 +926,7 @@ pub(crate) fn pull_with_rebase(root: &Path, branch: &str, log: &mut Vec<String>)
         return Ok(());
     }
 
-    let outcome = run(
-        &["pull", "--rebase", "--autostash", "--no-edit", "origin", branch],
-        Some(root),
-        GIT_TIMEOUT,
-    )?;
+    let outcome = pull_with_race_retry(root, branch)?;
 
     if outcome.timed_out {
         return Err("git pull 超时（网络不通或被防火墙拦了）".into());
@@ -926,6 +955,38 @@ pub(crate) fn pull_with_rebase(root: &Path, branch: &str, log: &mut Vec<String>)
     }
     Ok(())
 }
+
+/// 拉一次；撞上「另一条同步刚好在这中间提交」时再拉一遍。
+///
+/// git 的 pull 在**自己那次 fetch 的前后各读一次 HEAD**（`builtin/pull.c`）。中间 HEAD 被
+/// 别的进程挪了，它就把工作区当成要从旧提交快进到新提交；工作区里还压着未提交的改动时，
+/// 它宁可不猜，直接 die 出 `Cannot fast-forward your working tree` 那段英文。
+/// 那是**两条同步撞在一起**，不是仓库坏了：再拉一次时 HEAD 与工作区已经对齐，不会重演。
+///
+/// 只在 HEAD 真的变过、且没留下 rebase 现场时才重试 —— 真正的冲突（HEAD 没动，或者
+/// 已经停在 rebase 中途）照旧原样交回去，那要用户自己处理。
+fn pull_with_race_retry(dir: &Path, branch: &str) -> Result<proc::Outcome, String> {
+    let mut attempt = 0;
+    loop {
+        let before = head_of(dir);
+        let outcome = run(
+            &["pull", "--rebase", "--autostash", "--no-edit", "origin", branch],
+            Some(dir),
+            GIT_TIMEOUT,
+        )?;
+
+        if outcome.timed_out || outcome.ok() || in_rebase(dir) || attempt >= PULL_RACE_RETRIES {
+            return Ok(outcome);
+        }
+        if head_of(dir) == before {
+            return Ok(outcome);
+        }
+
+        attempt += 1;
+        std::thread::sleep(Duration::from_millis(200 * attempt as u64));
+    }
+}
+
 
 /// 推上去；推不动（远端在拉之后又动了）时再拉一次 rebase 重试 —— 与另外两处同步同一个套路。
 pub(crate) fn push_with_retry(root: &Path, branch: &str, log: &mut Vec<String>) -> Result<(), String> {
@@ -1088,11 +1149,13 @@ pub(crate) fn ensure_clone(dir: &Path, repo: &str) -> Result<(PathBuf, String), 
     // 远端还没有这个分支（空仓库的第一次推送）就没东西可拉，那时 `git pull` 只会报错
     let remote_ref = format!("refs/remotes/origin/{branch}");
     if run_git_quiet(&["rev-parse", "--verify", "--quiet", &remote_ref], dir) {
-        run_git(
-            &["pull", "--rebase", "--autostash", "--no-edit", "origin", &branch],
-            Some(dir),
-            GIT_TIMEOUT,
-        )?;
+        let outcome = pull_with_race_retry(dir, &branch)?;
+        if outcome.timed_out {
+            return Err("git pull 超时（网络不通或被防火墙拦了）".into());
+        }
+        if !outcome.ok() {
+            return Err(describe("pull", &outcome));
+        }
     }
 
     Ok((dir.to_path_buf(), branch))
@@ -1250,6 +1313,19 @@ pub(crate) fn describe(command: &str, outcome: &proc::Outcome) -> String {
     } else {
         outcome.stderr.trim()
     };
+
+    /*
+     * git 在「自己 fetch 期间 HEAD 被别的进程挪了、工作区又不能快进」时 die 出一段
+     * 面向手工排障的英文（教用户 `git diff` 与 `git reset --hard`）。
+     * 那是两条同步撞在了一起（见 `pull_with_race_retry`），不是让用户在仓库里动手：
+     * 那句原文里的 40 位提交号对用户没有任何用处，换成一句能照做的。
+     * 要按整段 detail 判 —— 标题行是倒数第五行，等按「最后四行」裁完就看不见了。
+     */
+    if detail.contains("Cannot fast-forward your working tree") {
+        return format!(
+            "git {command} 失败: 另一条同步（或另一个 Workbench 窗口）正在同一个仓库上提交，这次没接上；稍后再同步一次即可"
+        );
+    }
 
     let mut lines: Vec<&str> = detail.lines().map(str::trim).filter(|line| !line.is_empty()).collect();
     if lines.len() > 4 {
@@ -2243,5 +2319,40 @@ mod tests {
         GIT_AUTH_HINT.with(|slot| *slot.borrow_mut() = Some(note.to_string()));
         let external = describe("push", &outcome("error: The requested URL returned error: 403"));
         assert!(!external.contains(note), "系统凭据的失败不该甩给账号：{external}");
+    }
+
+    /// 两条同步撞在一起时，git 那段排障英文（要用户 `git diff` / `git reset --hard`）不能上屏。
+    ///
+    /// 现场（2026-10-21）：pull 的 fetch 前后 HEAD 被另一条同步挪过，git die 出这段；
+    /// describe 按「最后四行」裁完只剩一句 `$ git diff 5fa840c…`，界面上就是那行看不懂的红字。
+    #[test]
+    fn concurrent_sync_failure_is_explained_in_chinese() {
+        let outcome = crate::proc::Outcome {
+            status: Some(128),
+            timed_out: false,
+            stdout: String::new(),
+            stderr: "warning: fetch updated the current branch head.\n\
+                     fatal: Cannot fast-forward your working tree.\n\
+                     After making sure that you saved anything precious from\n\
+                     $ git diff 5fa840c2f66c3a10388143a15f65017de760dca2\n\
+                     output, run\n\
+                     $ git reset --hard\n\
+                     to recover."
+                .to_string(),
+        };
+
+        let message = describe("pull", &outcome);
+        assert!(message.contains("另一条同步"), "要说清是两条同步撞了：{message}");
+        assert!(!message.contains("git diff"), "别把 git 的排障原文抄给用户：{message}");
+        assert!(!message.contains("reset --hard"), "{message}");
+    }
+
+    /// 同一目录拿到同一把锁，不同目录各是各的 —— 排队只发生在共用同一个克隆的那几条同步之间
+    #[test]
+    fn workflow_locks_are_per_directory() {
+        let a = std::env::temp_dir().join("wb-lock-a");
+        let b = std::env::temp_dir().join("wb-lock-b");
+        assert!(std::ptr::eq(workflow_lock(&a), workflow_lock(&a)));
+        assert!(!std::ptr::eq(workflow_lock(&a), workflow_lock(&b)));
     }
 }

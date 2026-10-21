@@ -145,7 +145,7 @@ asset 协议、读取权限在 Rust 侧按单个文件授予）、**通道一律
 | 笔记（正文 / 图片 / 素材 / 笔记同步） | [notes](docs/modules/notes.md) |
 | 知识库（原始数据 / 条目 / 一键清洗 / 索引重建 / 同步） | [kb](docs/modules/kb.md) |
 | AI 助手（会话 / 项目 / 驱动本机 Pi / 模型与密钥 / 提示词与出口） | [ai](docs/modules/ai.md) |
-| 网关（WorkBuddy / CodeBuddy 反代：账号 / 流式对话 / 用量） | [gateway](docs/modules/gateway.md) |
+| TBuddy（网关：WorkBuddy / CodeBuddy 反代；账号 / 流式对话 / 用量） | [gateway](docs/modules/gateway.md) |
 | 用量与外观同步、账号登录 | [sync-and-auth](docs/modules/sync-and-auth.md) |
 | 密码保险库（密钥 / 加解密 / 多机共写一份文件） | [vault](docs/modules/vault.md) |
 | 邮箱（IMAP 收信 / SMTP 发信 / 授权码 / 联网出口） | [mail](docs/modules/mail.md) |
@@ -189,8 +189,13 @@ asset 协议、读取权限在 Rust 侧按单个文件授予）、**通道一律
   改到一半只跑受影响的那个包（`pnpm -F @workbench/<包> test`，走那个包自己的配置），全量留到收尾那一次。
 - **`pnpm test` 与 `cargo` 不要同时跑**：两边抢 CPU 会让既有那几条基于真实 git 的重测试撞 5 秒超时（假失败）。
   这类超时先单独复跑该包确认，别当成真失败去改代码。
-- **cargo 之前确认没有正在跑的应用**（exe 被占用会「拒绝访问」链接失败，而失败后跑起来的仍是旧二进制）：
-  查 `workbench.exe` 是否在；**要停就停，但不要顺手再起回来**，也不要在用户可能正用着应用时静默杀掉它 —— 先说一句。
+- **cargo 之前只确认「本仓库的构建产物」没在跑，不是「没有 workbench.exe」**（exe 被占用会「拒绝访问」链接失败，
+  而失败后跑起来的仍是旧二进制）。**开发环境与真实环境是分开的**，进程名却都叫 `workbench.exe` ——
+  先查路径再决定：`Get-Process workbench | Select-Object Id,Path`（或
+  `wmic process where name='workbench.exe' get ProcessId,ExecutablePath`），**只有路径落在本仓库
+  `apps/desktop/src-tauri/target/` 下**才是锁住本次构建的那一个；别的路径（真实安装版）一律不要动。
+  确实要停就停，但不要顺手再起回来，也不要在用户可能正用着应用时静默杀掉它 —— 先说一句。
+  **不许按进程名直接 `taskkill`**：2026-10-21 就是这么把用户正在用的那份连同子进程一起停掉的。
 - **停应用的进程树要连子孙一起收**（Windows 上杀掉外层命令不会带走它的子孙）：`taskkill /F /T /PID <pid>`，
   停完按进程名与端口各复查一遍（`tasklist | grep -i workbench`、`netstat -ano | grep LISTENING | grep -E ":(5274|9222)"`）。
 - `cargo test` 卡在链接或执行上时、以及排查 WebView2 里的运行时问题（未捕获异常、控制台警告、接口实际返回值）时，

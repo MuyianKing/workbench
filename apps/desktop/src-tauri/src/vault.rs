@@ -377,6 +377,8 @@ pub fn vault_push(repo: String, content: Value, base: Option<Value>) -> Result<V
 /// 与 `vault_pull` 同一条路，克隆目录由调用方给（单测用临时目录跑真实的 git 流程）。
 fn pull_at(clone: &Path, repo: &str) -> Result<Option<Value>, String> {
     let repo = checked_repo(repo)?;
+    // 与用量 / 外观 / 网关三条同步共用 token-sync：同一时刻只跑一条（见 sync::lock_workflow）
+    let _workflow = sync::lock_workflow(clone);
     sync::set_git_auth();
     drop_stale_rebase(clone);
     let (dir, branch) = sync::ensure_clone(clone, &repo)?;
@@ -392,6 +394,8 @@ fn pull_at(clone: &Path, repo: &str) -> Result<Option<Value>, String> {
 /// 与 `vault_push` 同一条路，克隆目录由调用方给（单测用临时目录跑真实的 git 流程）。
 fn push_at(clone: &Path, repo: &str, content: &Value, base: Option<&Value>) -> Result<Value, String> {
     let repo = checked_repo(repo)?;
+    // 拉 → 读 → 写 → 提交 → 推整段都在锁里：中间被别人插进一笔提交，基准就对不上了
+    let _workflow = sync::lock_workflow(clone);
     sync::set_git_auth();
     drop_stale_rebase(clone);
     let (dir, branch) = sync::ensure_clone(clone, &repo)?;
