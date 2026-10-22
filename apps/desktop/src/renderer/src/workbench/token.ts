@@ -306,7 +306,8 @@ async function readQoderLive(): Promise<LiveRead> {
 let device: { id: string, name: string } | null = null
 
 /**
- * 本机设备标识（`%APPDATA%/Workbench/data/device.json`，没有就现生成一份）。
+ * 本机设备标识（数据目录的 `device.json`：安装版 `%APPDATA%/Workbench/data/`，
+ * 开发版 `%APPDATA%/Workbench-dev/data/`，没有就现生成一份）。
  *
  * 除了 Token 分片，笔记图片的落点也要用它（见 `workbench/note.ts` 的 `imageScope`），
  * 所以这里是导出的：它描述的是「这台机器」，不是「Token 面板」。

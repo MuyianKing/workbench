@@ -1,7 +1,12 @@
 //! 路径解析：数据目录与各数据文件名。
 //!
-//! 关键约定：数据文件固定放在 `%APPDATA%\Workbench\data`。
-//! 根目录 `%APPDATA%\Workbench` 是迁到 Tauri 之前的 Electron 版留下的 Chromium 配置目录
+//! 关键约定：**安装版**的数据文件固定放在 `%APPDATA%\Workbench\data`；
+//! **开发版**（`pnpm dev` / `cargo build` 不带 `custom-protocol`）落在 `%APPDATA%\Workbench-dev\data`。
+//! 两边不共用：开发时改的设置（截图开关、全局快捷键、项目列表……）不会盖掉装着的那份，
+//! 两个进程同时开着也不会互相覆盖同一份数据文件（判据同 main.rs 的单实例与 commands.rs 的开机自启：
+//! 编译期 `dev` cfg）。
+//!
+//! 安装版的根目录 `%APPDATA%\Workbench` 是迁到 Tauri 之前的 Electron 版留下的 Chromium 配置目录
 //! （`Cache` / `GPUCache` / `DIPS` / `Preferences` 那一堆），数据文件收在 `data` 子目录里，两边不混。
 //! 不能图省事用 Tauri 的 `app_config_dir()` —— 它按 identifier 生成
 //! `%APPDATA%\com.muyian.workbench`，换了位置用户就等于「丢了」项目列表。
@@ -76,12 +81,22 @@ const ROOT_FILES: &[&str] = &[
     LEGACY_NOTE_DATA_FILE,
 ];
 
+/// 用户数据根目录名。开发版单独一个根：与安装版共用会让两边的设置互相盖掉
+/// （最典型的是截图开关与全局快捷键：一边关掉，另一边也跟着关）。
+///
+/// 抽成 const fn 是为了让单测能同时断言两个环境的取值；生产代码只用下面那个常量。
+const fn app_dir_name(dev: bool) -> &'static str {
+    if dev { "Workbench-dev" } else { "Workbench" }
+}
+
+const APP_DIR: &str = app_dir_name(cfg!(dev));
+
 /// 用户数据根目录，等价于 Electron 的 `getAppData`。
 pub fn user_data_dir() -> PathBuf {
     match std::env::var_os("APPDATA") {
-        Some(base) => PathBuf::from(base).join("Workbench"),
+        Some(base) => PathBuf::from(base).join(APP_DIR),
         // 理论上 Windows 上 APPDATA 一定有；兜底到临时目录，至少不 panic
-        None => std::env::temp_dir().join("Workbench"),
+        None => std::env::temp_dir().join(APP_DIR),
     }
 }
 
@@ -253,6 +268,14 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("wb-paths-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    /// 开发版与安装版必须落在两个根目录下：共用一个根目录会让两边的设置互相覆盖
+    #[test]
+    fn dev_and_installed_roots_differ() {
+        assert_eq!(app_dir_name(false), "Workbench");
+        assert_eq!(app_dir_name(true), "Workbench-dev");
+        assert_ne!(app_dir_name(true), app_dir_name(false));
     }
 
     /// 老名字的用量快照要能搬到新名字上，历史不能丢

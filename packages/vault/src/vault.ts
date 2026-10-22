@@ -64,7 +64,7 @@ export interface VaultItem {
   id: string
   /** 最后改动时刻（毫秒）。跨设备合并判新旧就靠它 */
   updatedAt: number
-  /** 最后改动的设备 id（`%APPDATA%/Workbench/data/device.json`）。时间撞上时用它破平 */
+  /** 最后改动的设备 id（数据目录的 `device.json`；安装版 `%APPDATA%/Workbench/data/`、开发版 `%APPDATA%/Workbench-dev/data/`）。时间撞上时用它破平 */
   by: string
   /** 墓碑：这一条已经被删了。只留个空壳，好让别的机器别把它复活 */
   deleted?: true

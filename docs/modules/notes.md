@@ -132,7 +132,8 @@ true、清单里不能放选中项自己）只在那里写清楚了，下面不�
   7. **`apps/desktop/src/renderer/index.html` 里那条 `<meta name="referrer" content="no-referrer">` 不能删**：Gitee 的 `/raw/` 有防盗链 ——
      请求带 `Referer`（且不是 gitee.com）时直接 403，而 WebView 里 `<img>` **一定会带** —— 少了这一条，所有 Gitee 图都会裂：
      上传成功、地址也对、curl 也 200，就是显示不出来。顺手也是个隐私改进。
-- 克隆目录是 `%APPDATA%/Workbench/image-sync`，**与用量同步那个分开两份**（两个仓库地址可以完全不同）。
+- 克隆目录是用户数据根目录下的 `image-sync`（安装版 `%APPDATA%/Workbench/image-sync`，开发版
+  `%APPDATA%/Workbench-dev/image-sync`），**与用量同步那个分开两份**（两个仓库地址可以完全不同）。
 
 ### 素材管理
 

@@ -158,11 +158,20 @@ WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="--remote-debugging-port=9222" pnpm run de
   （项目里的路径工具本来就会归一方向），`\\` 在两层引号之后很可能变成别的字符，
   那时量到的「相对路径没生效」其实是路径串本身就不是你想的那样
 - **`pnpm dev` 起来的开发版不注册单实例，可以和装着的那份同时开**（正式版之间、以及
-  `target/release` 那份与安装版之间仍按 identifier 互斥）。两边数据都落在
-  `%APPDATA%\Workbench\data`：各持一份内存状态、按整份文件落盘，同时改数据时后写的为准；
-  邮件 / 禅道的后台轮询与通知也会各跑一遍。只验界面时两边都开着没问题，要动会写数据的功能就先关掉一份。
+  `target/release` 那份与安装版之间仍按 identifier 互斥）。两边的数据目录按环境分开：安装版在
+  `%APPDATA%\Workbench\data`，开发版在 `%APPDATA%\Workbench-dev\data`（见 `paths.rs` 的 `APP_DIR`）——
+  设置、项目列表、同步克隆、设备 id 各一份，开发时改截图开关 / 快捷键不会盖掉装着的那份。
+  邮件 / 禅道的后台轮询与通知仍会各跑一遍。开发版首次启动是空数据目录；要把现有配置带过去，
+  **先停掉开发版**（它按整份文件落盘，运行中复制会被内存里那份盖回去），再把安装版 `data\` 下的
+  `workbench-data.json` 与 `theme.json` 复制到 `Workbench-dev\data\` 即可。AI 会话的正文在
+  `pi\sessions\`（不复制的话左栏那些会话点不开，要带就连目录一起带）；钉图与网关流水这类本机状态
+  建议不要带。**别复制 `device.json`**（两个环境用同一个设备 id 会往同步仓库的同一个分片里写）。
+  复制过去的 `workbench-data.json` 也带着同步仓库地址与邮件 / 禅道账号：开发版会把它们再轮询一遍、
+  并作为一个新设备往同步仓库推；不想这样就在开发版设置里把仓库地址清空、把轮询周期设成 0。
+  **凭据管理器里的密钥仍然共用**（AI / 邮箱 / 保险库，按 Windows 用户存、不分环境）：开发版不用重新配密钥，
+  但在开发版里改密钥、或重新导入保险库密钥，会同时影响安装版。
 - **要动设置又不想污染自己的配置，就把整个 `APPDATA` 指到临时目录再起应用**：
-  `APPDATA='C:\Users\...\Temp\wb-smoke' pnpm run dev`。数据目录是 `%APPDATA%\Workbench\data`
+  `APPDATA='C:\Users\...\Temp\wb-smoke' pnpm run dev`。数据目录是 `%APPDATA%\Workbench-dev\data`
   （**不是 `%APPDATA%` 本身**），所以这一下连项目列表、设置、笔记文件夹一起隔离了；
   想从某个状态起步（例如「已经选好笔记文件夹」）就先把 `workbench-data.json` 写进去再启动 ——
   比在页面上找入口省事，也不用像上一节那样记着「测完还原」。收尾时连临时目录一起删掉。

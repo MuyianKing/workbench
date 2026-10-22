@@ -489,7 +489,7 @@ export function dropSession(pid: number): void {
 
 // ---------- 数据目录 ----------
 
-/** 数据目录固定在 `%APPDATA%\Workbench\data`（宿主侧唯一真源），这里只是问一次给界面显示 */
+/** 数据目录按环境固定（安装版 `%APPDATA%\Workbench\data`、开发版 `%APPDATA%\Workbench-dev\data`；宿主侧唯一真源），这里只是问一次给界面显示 */
 export async function dataDir(): Promise<string> {
   return invoke<string>('data_dir')
 }

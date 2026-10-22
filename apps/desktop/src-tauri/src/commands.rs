@@ -515,7 +515,8 @@ pub fn pi_skill_remove(root: String, id: String) -> Result<(), String> {
     crate::pi_skills::remove(&root, &id)
 }
 
-/// 数据目录。**固定一个位置**（`%APPDATA%\Workbench\data`，见 paths.rs 的文件头），
+/// 数据目录。**固定一个位置**（安装版 `%APPDATA%\Workbench\data`，开发版
+/// `%APPDATA%\Workbench-dev\data`，见 paths.rs 的文件头），
 /// 这里只是把它报给界面 —— 设置里「关于」那一屏要如实显示数据放在哪儿。
 #[tauri::command]
 pub fn data_dir() -> String {

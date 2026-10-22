@@ -184,7 +184,8 @@ function shortHash(text: string): string {
 }
 
 /**
- * 设备那一段：本机的设备标识（`%APPDATA%/Workbench/data/device.json`，与 Token 分片同一个 id），
+ * 设备那一段：本机的设备标识（数据目录的 `device.json`，安装版 `%APPDATA%/Workbench/data/`、
+ * 开发版 `%APPDATA%/Workbench-dev/data/`，与 Token 分片同一个 id），
  * 收敛成一段目录名。
  *
  * 空串表示拿不到标识：那时**不要**退回上一层去上传 / 列图 / 删图 ——

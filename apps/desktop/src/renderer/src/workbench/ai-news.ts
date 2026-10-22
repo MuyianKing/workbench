@@ -3,7 +3,8 @@ import type { Result } from '@/types'
 /**
  * AI 热点（首页「AI 热点」卡片）的适配层实现。
  *
- * **数据流**：缓存住在 `%APPDATA%\Workbench\data\ai-news.json`（Rust 侧 JsonStore 管读写），
+ * **数据流**：缓存住在数据目录的 `ai-news.json`（安装版 `%APPDATA%\Workbench\data\`，
+ * 开发版 `%APPDATA%\Workbench-dev\data\`；Rust 侧 JsonStore 管读写），
  * 源清单住在 Rust 的 `SOURCES`。这一层做的是「读缓存 + 清单 → 挑出到期的源 → 并发拉 → 解析 →
  * 按源写回 → 合并出视图」，一切策略来自 packages/ai/src/ai-news.ts（每源 TTL / 退避 / 合并去重），
  * 这里不自己拍一套。

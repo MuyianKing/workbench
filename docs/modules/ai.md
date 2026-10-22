@@ -112,7 +112,8 @@ AI 助手（ai）的文档：先读「约束」一节（不能破的规矩）；
   上下文窗口、最大输出、思考档位、能看图（形状见 [ai.ts](../../packages/ai/src/ai.ts) 的
   `AiProvider` / `sanitizeAiProviders`）。落点：名称 / 地址 / 形态 / 清单进设置（`aiProviders`）；
   密钥进凭据管理器（`Workbench/ai/<服务名>/token`，只写不回显）；端点由 `models_write` **一次写整份**成
-  `models.json`（`%APPDATA%\Workbench\data\pi\`，不做增量 —— 增量会留残影）；**停用的服务与模型不进文件**
+  `models.json`（数据目录下的 `pi\`：安装版 `%APPDATA%\Workbench\data\pi\`，开发版
+  `%APPDATA%\Workbench-dev\data\pi\`；不做增量 —— 增量会留残影）；**停用的服务与模型不进文件**
   （`aiProviderPayload`），界面能挑的与 Pi 看到的一致。**`apiKey` 是环境变量引用**（`$WORKBENCH_AI_KEY`），
   文件里不落明文（几个服务共用一个变量名是安全的：一轮只起一个进程）。**API 形态只认
   `openai-completions` / `anthropic-messages`**（`AI_API_FORMATS`），别凭印象加。**服务名只收小写字母 /
@@ -345,7 +346,9 @@ AI 助手（ai）的文档：先读「约束」一节（不能破的规矩）；
   src/ai.rs             AI 助手的宿主侧：把提示词写成子进程 stdin 的第一行（RPC 的 prompt、
                         含中文与换行的东西走命令行必炸）、写「自动编辑」那份权限扩展
                         （permission.js，`tool_call` 钩子问宿主）、把 AI 服务整份写成 Pi 的
-                        models.json（多服务一份文件，`%APPDATA%\Workbench\data\pi\`，
+                        models.json（多服务一份文件，数据目录下的 pi\，
+                        安装版 %APPDATA%\Workbench\data\pi\、开发版
+                        %APPDATA%\Workbench-dev\data\pi\，
                         apiKey 只写环境变量引用；模型那几条带上下文 / 最大输出 /
                         thinkingLevelMap / 能看图的 input）、
                         **按用户填的 Base URL 拉一次模型列表**（`{baseUrl}/models`，

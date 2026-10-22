@@ -112,6 +112,20 @@ watch(visible, (open) => {
   --el-component-size-small: 28px;
 }
 
+/**
+ * 数字框右侧那两个加减按钮：EP 按 24px 的框算死 —— 每个 11px、上下各让 1px，刚好铺满；
+ * 上面把 small 控件抬到 28px 之后那套数字就不成立了，按钮还是 11px，中间空出 4px 一道白缝。
+ * 这里让它们跟着框长：各占一半（减掉上下各 1px）。24px 的框算出来仍是 11px，与 EP 原样一致。
+ *
+ * **选择器必须比 EP 那条更具体**：EP 是 `.el-input-number.is-controls-right[class*=small]
+ * [class*=increase]`（四级），而本项目的样式表排在 element-plus 之前 —— 同具体度会输。
+ * `.settings` + scope 属性 + 三个类正好五级，压得住。
+ */
+.settings :deep(.el-input-number.is-controls-right .el-input-number__increase),
+.settings :deep(.el-input-number.is-controls-right .el-input-number__decrease) {
+  height: calc(50% - 1px);
+}
+
 .settings__nav {
   flex-shrink: 0;
   display: flex;

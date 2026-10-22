@@ -218,13 +218,20 @@ function select(id: ViewId): void {
  * 换页时靠 transform 滑过去 —— 位移只走合成，滑的过程中不触发布局。
  * 它比按钮低一层（按钮 position: relative + z-index 1），滑过中间几项时压在图标与文字下面；
  * 高度理论上一直不变，留一条过渡是防着将来项高变了它跟不上。
+ *
+ * 底色取主色的**浅底**（`--el-color-primary-light-7`：亮色往白里混七成、暗色往画布色里混七成），
+ * 比列表选中行那档（`--bg-selected`，五成）更淡一档 —— 导航栏是一列紧凑的方块，
+ * 深一档会整块盖过图标与文字本身。**不铺主色实心**：那档要配白字才读得清，
+ * 而实心块在这条竖列里比分段控件里的小药丸重得多。
+ * 字与图标取 `--ink`（见 .nav__item.is-active）：浅底上压白字读不清（半亮的那档绿上白字只剩 2.6:1），
+ * 也不跟主色走 —— 同色系浅底配同色系深字，整块会糊成一片（项目标签那边同一条规矩）。
  */
 .nav__pill {
   position: absolute;
   top: 0;
   z-index: 0;
   border-radius: var(--r-md);
-  background: var(--bg-selected);
+  background: var(--el-color-primary-light-7);
   pointer-events: none;
   transition:
     transform 0.24s var(--ease-out),
@@ -262,12 +269,12 @@ function select(id: ViewId): void {
 
 /* 当前项不用自己画底 —— 那块底在 .nav__pill 上（同一颜色，只是会滑）；
    这里留着 background: transparent 是为了压住上面那条 :hover：悬停当前项不该换成悬停色。
-   图标与文字取 --ink-accent：主色按对比度推到 4.5:1 的那一档（没配主题色时就是 --ink）。
-   只靠那块底不够 —— 导航栏是半透的毛玻璃，浅色壁纸透上来时底色的明暗差会被吃得很薄，
-   字与图标的颜色差才是「现在在哪一屏」最稳的那条线索（与邮箱清单里正在读的那封同一套）。 */
+   图标与文字取 --ink（不取 --el-color-white，也不取 --ink-accent）：
+   那块底是主色的浅底，压白字读不清，跟主色走又会与底色同色系、整块糊成一片。
+   加粗那一档负责「现在在哪一屏」的第二条线索（与底色一起，壁纸再亮也认得出）。 */
 .nav__item.is-active {
   background: transparent;
-  color: var(--ink-accent);
+  color: var(--ink);
   font-weight: 600;
 }
 

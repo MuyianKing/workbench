@@ -33,7 +33,8 @@ export const useEnvironmentStore = defineStore('environment', () => {
    */
   const probing = ref(true)
   /**
-   * 数据目录：固定在 `%APPDATA%\Workbench\data`（宿主侧唯一真源）。
+   * 数据目录按环境固定（安装版 `%APPDATA%\Workbench\data`、开发版
+   * `%APPDATA%\Workbench-dev\data`；宿主侧唯一真源）。
    * 界面只在「关于」那一屏如实显示它 —— 没有「换目录」这回事。
    */
   const dataDir = ref('')

@@ -59,7 +59,8 @@ Rust 侧 `nvm.rs` / `nrm.rs` / `proc.rs`（残留清理的进程判据）、`sys
 - 项目卡的「⋯」里有**在 VS Code 中打开**：走 `vscode://file/<路径>/` 协议（`system.rs` 直启
   ShellExecute），不去猜 `Code.exe` 装在哪 —— 只有协议处理器是「这台机器现在用哪个 VS Code」的可靠答案。
   路径按 URL 规则转义、结尾 `/` 表示目录；没装时按 ShellExecute 错误码给一句明确提示，而不是点了没反应
-- 列表与设置写在数据目录 `%APPDATA%/Workbench/data/` 下（固定位置，没有「换目录」这一说）
+- 列表与设置写在数据目录下（安装版 `%APPDATA%/Workbench/data/`，开发版
+  `%APPDATA%/Workbench-dev/data/`；位置固定，没有「换目录」这一说）
 - **项目卡是毛玻璃**：底色跟「卡片不透明度」走，底下还有一道共用的磨砂 ——
   配方与「哪些面吃这一套」的清单在
   [features-and-architecture.md](../features-and-architecture.md) 的「浮在壁纸上的面一律是毛玻璃」一条，

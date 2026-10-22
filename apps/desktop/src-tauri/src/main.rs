@@ -477,8 +477,9 @@ fn main() {
     let builder = tauri::Builder::default();
 
     // 单实例只在正式版注册（必须最先注册）：两个进程各持一份内存数据，后写的一次会把前一次的改动整个覆盖掉。
-    // 开发版（`pnpm dev`）刻意不注册：它要和装着的那份同时开，两边共用同一份数据目录，
-    // 代价（同时改数据以后写的为准、后台轮询与通知各跑一遍）见 docs/dev-notes/browser-preview-verification.md。
+    // 开发版（`pnpm dev`）刻意不注册：它要和装着的那份同时开。数据目录已经按环境分开
+    // （`Workbench-dev` 与 `Workbench`，见 paths.rs），两边各写各的文件；后台轮询与通知仍会各跑一遍，
+    // 见 docs/dev-notes/browser-preview-verification.md。
     #[cfg(not(dev))]
     let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
         show_main_window(app);

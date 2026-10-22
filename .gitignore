@@ -21,5 +21,7 @@ apps/desktop/resources/pi/
 /src-tauri/
 .preview
 .zcode/plans/
+# 另一个 AI 工具留在这儿的本地会话记忆：本地产物，不进版本库
+.workbuddy-ai/
 .tmp-skill
 AGENT-DOC.md

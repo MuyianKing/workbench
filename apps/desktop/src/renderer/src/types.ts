@@ -458,7 +458,8 @@ export interface AppSettings {
    * 在 AI 助手页左栏那棵两层树上就是「项目 → 会话」里的第二层。
    *
    * 这里只存**调度用的那点东西**（id / 目录 / 标题 / 时间），对话本身不在应用的数据文件里
-   * —— 它由 Pi 自己写进会话文件（`%APPDATA%\Workbench\data\pi\sessions\`，同一条 id），
+   * —— 它由 Pi 自己写进会话文件（数据目录的 `pi\sessions\`：安装版
+   * `%APPDATA%\Workbench\data\`、开发版 `%APPDATA%\Workbench-dev\data\`，同一条 id），
    * 打开会话时经 RPC 的 `get_messages` 读回来画（见 packages/ai/src/ai.ts 的 sessionMessagesToLines）。
    * 收敛（去空、去重、限量）在 packages/ai/src/ai.ts 的 sanitizeAiSessions。
    */
@@ -1673,7 +1674,7 @@ export interface WorkbenchApi {
   getThemeConfig: () => Promise<ThemeConfig>
   /** 合并保存首页布局；返回收敛后的最终值 */
   updateThemeConfig: (patch: Partial<ThemeConfig>) => Promise<Result<ThemeConfig>>
-  /** 数据目录：固定 `%APPDATA%\Workbench\data`，界面只用来如实显示数据放在哪儿 */
+  /** 数据目录：安装版 `%APPDATA%\Workbench\data`、开发版 `%APPDATA%\Workbench-dev\data`，界面只用来如实显示数据放在哪儿 */
   getDataDir: () => Promise<string>
   // ---------- 截图与钉图（见 docs/modules/screenshot.md） ----------
   /**

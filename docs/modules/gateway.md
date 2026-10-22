@@ -243,6 +243,9 @@ state 存在内存里（10 分钟过期），不落盘。上游签发 state，�
 
 ### 数据落位
 
+数据目录下的 `wb-gateway\`（安装版 `%APPDATA%\Workbench\data\`，开发版
+`%APPDATA%\Workbench-dev\data\`；下面按安装版写）：
+
 ```
 %APPDATA%\Workbench\data\wb-gateway\
   settings.json      端口与自启开关

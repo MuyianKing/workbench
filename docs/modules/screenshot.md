@@ -128,7 +128,8 @@
   **不在这一版**（云 OCR 会多出一条出口，见 features-and-architecture 的「数据与隐私」；
   它要做也只能是本机模型，那是另一件大事）。
 - **数据落点**：截图的每一帧**只在内存里**（见上面那条，不落盘、也没有临时目录要收拾，进程没了就没了）；
-  钉图的图在 `%APPDATA%\Workbench\data\pins\<id>.png`、记账在 `data\pins.json`（进 JsonStore 防抖落盘，
+  钉图的图在数据目录的 `pins\<id>.png`（安装版 `%APPDATA%\Workbench\data\`，开发版
+  `%APPDATA%\Workbench-dev\data\`）、记账在同目录的 `pins.json`（进 JsonStore 防抖落盘，
   退出前 `flush_all` 一起写）。都没进同步仓库。
 - **设置项住数据文件、不进外观同步**（都是「这台机器」的事）：`captureEnabled` / `captureHotkey` /
   `captureSaveDir` / `capturePinOpacity` / `captureMagnifier`（开着时放大镜读数按 Shift 进剪贴板）。

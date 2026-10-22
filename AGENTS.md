@@ -141,7 +141,8 @@
 **宿主能力一律经 `window.workbench`**（唯一例外是工作区背景图、视频播放与 AI 预览栏的图片走
 asset 协议、读取权限在 Rust 侧按单个文件授予）、**通道一律返回 `Result<T>` 不 reject**、
 **业务语义（合并 / 排序 / 修剪 / 状态机 / 命令构造）
-留在 TS 适配层**、**数据文件与数据目录固定在 `%APPDATA%\Workbench\data`**。其余模块没有额外的硬约束。
+留在 TS 适配层**、**数据文件与数据目录固定在 `%APPDATA%\Workbench\data`（开发版另用
+`%APPDATA%\Workbench-dev\data`，两边不共用）**。其余模块没有额外的硬约束。
 
 | 要动的模块 | 先看 |
 | --- | --- |

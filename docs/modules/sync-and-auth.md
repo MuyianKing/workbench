@@ -30,7 +30,8 @@
 - 计数里 `credits` 与五类 token 是**两个口径**（`UsageAxis`，面板上二选一展示）：`credits` 单独一个字段、不参与 `totalTokens`，
   面板按口径筛工具与排序也都走 `axisTotal`。别把它并进 token 总量，也别在 `sanitizeCounters` 里对它取整 ——
   额度是小数记账（一条请求不到 1 个是常态），取整等于把这份数据抹平。
-- 一台机器一份文件、文件名就是设备 id，设备 id 存在 `%APPDATA%/Workbench/data/device.json`，**不进同步仓库**
+- 一台机器一份文件、文件名就是设备 id，设备 id 存在数据目录的 `device.json`（安装版
+  `%APPDATA%/Workbench/data/`，开发版 `%APPDATA%/Workbench-dev/data/`；两边各一份），**不进同步仓库**
   （两台机器撞 id 会互相覆盖文件，且没有任何报错）。
 - 版本号**不能**按「版本不等就整份弃用」处理：v4 起文件里装着别的机器的历史，弃掉就再也读不回来（对端不开机就不会重写分片）。能接受
   哪些版本由 [token-usage.ts](../../packages/usage/src/token-usage.ts) 的 `TOKEN_DATA_COMPATIBLE_VERSIONS` 显式列出，新增口径版本要手工往表里
@@ -52,7 +53,8 @@
 - **外观没有自动同步这一档**：它的唯一入口是设置界面那颗「同步一次」（`syncThemeConfig`）。用量是只增的计数，重复推无害；
   外观是「以谁的为准」，自动推只会往仓库里堆没意义的提交，两台机器互相自动采用更是永远收敛不了。
 - **旧 `devices/` 目录不读**：升级后仓库里那些老文件就是读不到的，要手工删。
-- 应用侧的克隆目录在 `%APPDATA%/Workbench/token-sync/`（与笔记图片那个 `image-sync` 分开两份），它是应用自己的缓存，可以整个删掉重来
+- 应用侧的克隆目录在用户数据根目录下的 `token-sync/`（安装版 `%APPDATA%/Workbench/token-sync/`，
+  开发版 `%APPDATA%/Workbench-dev/token-sync/`；与笔记图片那个 `image-sync` 分开两份），它是应用自己的缓存，可以整个删掉重来
   —— 与笔记同步相反，那边动的是用户自己的文件夹。
 
 ### 同一个克隆上的并发

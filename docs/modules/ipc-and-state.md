@@ -54,20 +54,24 @@
   `work-log.json` 与 `ai-news.json`（都只在本机）、`vault.json`（密码保险库，**里面只有密文**，
   密钥在 Windows 凭据管理器里，见 [vault.md](vault.md)）、`mail-watch.json`（邮件后台监视的
   UID 基准与上轮检查时间，见 [mail.md](mail.md)，只是通知的记账，不进同步仓库），
-  加上设备标识 `device.json`，以及 `panic.log`（崩溃落痕，见「实现」一节）—— 全都在 `%APPDATA%/Workbench/data/` 下
-  （根目录 `%APPDATA%/Workbench` 是 Electron 版留下的 Chromium 配置目录；老版本也把数据文件写在那儿，启动时由 `migrate_legacy_files` 搬进 `data/`）。
+  加上设备标识 `device.json`，以及 `panic.log`（崩溃落痕，见「实现」一节）—— 全都在数据目录下
+  （安装版 `%APPDATA%/Workbench/data/`，开发版 `%APPDATA%/Workbench-dev/data/`；
+  根目录 `%APPDATA%/Workbench` 是 Electron 版留下的 Chromium 配置目录；老版本也把数据文件写在那儿，启动时由 `migrate_legacy_files` 搬进 `data/`）。
   **禅道没有数据文件**：后台检查的编号基线只在本机内存里（应用重启后第一轮重新建立，见
   [zentao.md](zentao.md)），周期住 `workbench-data.json` 的 `zentaoPollMinutes`。
   **技能没有数据文件**：技能库是用户挑的一个目录（设置里的 `skillDir`，与笔记文件夹互不相干），
   磁盘上的文件就是数据本身；它在哪个仓库里由 `skills.rs` 的 `state` 从那个目录往上找。
-- **开发版（`pnpm dev`）不注册单实例**，可以与装着的那份同时开、共用同一份数据目录（正式版之间仍按
-  identifier 互斥）。代价是两边各持一份内存状态、按整份文件落盘：同时改过的字段以后写的为准，
-  邮件 / 禅道的后台轮询与通知也会各跑一遍（见
+- **开发版（`pnpm dev`）不注册单实例**，可以与装着的那份同时开（正式版之间仍按 identifier 互斥）。
+  两边的数据目录按环境分开（`Workbench-dev` 与 `Workbench`，见下一条），各写各的文件；
+  代价是邮件 / 禅道的后台轮询与通知仍会各跑一遍（见
   [dev-notes/browser-preview-verification.md](../dev-notes/browser-preview-verification.md)）。
-- **数据目录固定 `%APPDATA%\Workbench\data`**（根目录 `%APPDATA%\Workbench` 是 Electron 版留下的 Chromium 配置目录，
+- **数据目录按环境固定**：安装版 `%APPDATA%\Workbench\data`，开发版 `%APPDATA%\Workbench-dev\data`
+  （根目录 `%APPDATA%\Workbench` 是 Electron 版留下的 Chromium 配置目录，
   数据文件收进 `data` 子目录，两边不混），**没有「换目录」这回事**：不要图省事改用 Tauri 的
   `app_config_dir()`（它按 identifier 生成 `%APPDATA%\com.muyian.workbench`，换了位置用户就等于丢了项目列表）；
   路径一律经 `paths.rs` 的 `data_dir()` / `data_file()` 现取，不要缓存写死，也不要在别处另拍一个数据目录。
+  开发版与安装版共用同一份设置会让两边互相盖掉（截图开关、全局快捷键、项目列表都是），所以判据用编译期
+  `dev` cfg（`tauri dev` / `cargo build` 为真，`tauri build` 为假），与单实例、开机自启同一条口径。
 - 数据结构变更要同步落盘的 sanitize（[persisted-data.ts](../../apps/desktop/src/renderer/src/persisted-data.ts) 的 `sanitizeSettings` / `parseData`），
   老数据文件缺字段须有默认值，不留未收敛的 `undefined`。
 - **设置项先分清是「外观」还是「行为习惯」，落点完全不同**：
@@ -146,7 +150,7 @@
   src/session.rs         子进程会话：起命令、按批回传输出、按进程树终止
   src/proc.rs            带超时的子进程原语 + 进程树终止
   src/store.rs           去抖 JSON 落盘（300ms 合并 + 临时文件 rename）
-  src/paths.rs           数据目录与指针（与旧 Electron 版同一位置）
+  src/paths.rs           数据目录与指针（安装版与旧 Electron 版同一位置，开发版另用 Workbench-dev）
   src/system.rs          端口检测（GetExtendedTcpTable）、资源管理器、ShellExecute
   src/http.rs            WinHTTP 极简 HTTP 客户端（登录、AI 热点与天气的取数都走它）。
                          默认那条是「HTTPS + 443 + 主机名」的固定形状（那几家的地址钉死在代码里）；
