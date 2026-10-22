@@ -83,11 +83,17 @@ vite 配置，把 `root` 指到工作区内的一个小目录，只挂那一个�
 root: resolve(__dirname, 'harness'),                       // 工作区里的 index.html + main.ts
 publicDir: resolve(__dirname, '../apps/desktop/src/renderer/public'),   // 见下面那条：Vditor 要靠它
 resolve: { alias: { '@': '…/apps/desktop/src/renderer/src' } },   // 域包（@workbench/*）按包名解析，不配别名
-plugins: [vue(), vditorAssets()]                           // sync-vditor-assets.mjs 导出的那个插件
+plugins: [
+  vue(),
+  // Element Plus 是按需的：少了这层，<el-*> 只会渲染成空标签（主构建同款配置见 vite.config.ts）
+  Components({ resolvers: [ElementPlusResolver({ importStyle: 'css' })], dirs: [], dts: false }),
+  vditorAssets(),                                          // sync-vditor-assets.mjs 导出的那个插件
+]
 ```
 
-`main.ts` 里照旧 import `element-plus/dist/index.css`、`theme-chalk/dark/css-vars.css`、
-`@/styles/tokens.css`、`@/styles/global.css`（少了这几样配色与令牌就不是线上的样子），
+`main.ts` 里照旧 import `@/element-plus-styles`（命令式 API 与 v-loading 的样式）、
+`element-plus/theme-chalk/dark/css-vars.css`、`@/styles/tokens.css`、`@/styles/global.css`
+（少了这几样配色与令牌就不是线上的样子；**整包 `element-plus/dist/index.css` 已经不用了**），
 把组件挂进一个**尺寸等于真实卡片**的盒子里（卡片内边距由组件自己带，外面别再补一圈，
 否则量出来的宽度会比线上窄一截），`window.workbench` 只实现这一个组件用到的通道。
 暗色靠 `document.documentElement.dataset.theme` 加 `.dark` 类切。

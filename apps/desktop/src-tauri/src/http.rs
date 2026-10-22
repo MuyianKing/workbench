@@ -603,31 +603,33 @@ fn fail(what: &str) -> String {
 mod tests {
     use super::*;
 
-    /// 真发一个请求。GitHub 的 404 页不需要凭据，也永远存在，正好当靶子。
+    /// 真发一个请求。靶子用 example.com：IANA 的保留域名，不需要凭据、不限流，永远 200。
+    /// 别换回 GitHub 的根接口 —— 它按 IP 限流未认证请求（60 次/小时），CI 的 runner 是共享 IP，
+    /// 常年直接 403，与 WinHTTP 本身好不好使无关。
     /// 没网就跳过 —— 与 sync.rs 里「本机没有 git 就跳过」同一约定。
     #[test]
     fn fetches_a_real_https_endpoint() {
         let response = request(
             "GET",
-            "api.github.com",
+            "example.com",
             "/",
-            &[("Accept", "application/json"), ("User-Agent", "Workbench")],
+            &[("User-Agent", "Workbench")],
             None,
         );
 
         let response = match response {
             Ok(response) => response,
             Err(err) => {
-                println!("跳过：本机访问不了 api.github.com（{err}）");
+                println!("跳过：本机访问不了 example.com（{err}）");
                 return;
             }
         };
 
-        assert_eq!(response.status, 200);
+        let text = response.text();
+        assert_eq!(response.status, 200, "响应不像 example.com: {text}");
         assert!(
-            response.text().contains("current_user_url"),
-            "响应体不像 GitHub 的根接口: {}",
-            response.text()
+            text.contains("Example Domain"),
+            "响应体不像 example.com 的首页: {text}"
         );
     }
 

@@ -9,6 +9,10 @@ import type { MailListItem } from '@/stores/mail'
  * **发件箱里第一行摆的是收件人**（`sent`）：那儿的「发件人」是自己，摆出来没信息；
  * 未读点也一并收起来 —— 自己发出去的信没有未读这回事。
  *
+ * **整行都是开信面**：点击挂在行容器上，内边距与字与字之间的空白都算数，不只有
+ * 文字本身。行内那颗按钮留着只为键盘（Enter / Space 的原生 click 照样冒泡到行上）；
+ * 复选框自己 `@click.stop`，点它只勾选、不开信。
+ *
  * 只管摆：勾选 / 开信 / 右键都原样交回父级（MailView）处置 —— 多选态、勾选批次、
  * 菜单与删除的策略都在那边。
  */
@@ -67,17 +71,20 @@ function subjectText(raw: string): string {
       'is-picked': picked,
       'is-deleting': deleting,
     }"
+    @click="emit('open', $event)"
     @contextmenu.prevent="emit('menu', $event)"
   >
-    <!-- 行首复选框：只在多选态出现（右键「多选删除」进入），平时不占位 -->
+    <!-- 行首复选框：只在多选态出现（右键「多选删除」进入），平时不占位。
+         `@click.stop`：点它只勾选 —— 别冒泡到行上变成「又开了一次信」 -->
     <el-checkbox
       v-if="picking"
       class="mail-item__check"
       :model-value="picked"
       :aria-label="`选择：${subjectText(item.subject)}`"
+      @click.stop
       @change="emit('toggle-pick')"
     />
-    <button class="mail-item__main" type="button" @click="emit('open', $event)">
+    <button class="mail-item__main" type="button">
       <span class="mail-item__row">
         <span class="mail-item__dot" aria-hidden="true" />
         <span class="mail-item__from" :title="party">{{ party }}</span>
@@ -105,6 +112,8 @@ function subjectText(raw: string): string {
   width: 100%;
   padding: var(--sp-2);
   border-radius: var(--r-md);
+  /* 整行都是开信面（含内边距），指针在哪儿落都是这只手 */
+  cursor: pointer;
   /* Shift 点范围时别把正文选中（勾选走的是行状态，不是 DOM 选区） */
   user-select: none;
 }
@@ -136,7 +145,7 @@ function subjectText(raw: string): string {
   margin-right: 0;
 }
 
-/* 主体：开信在它身上，铺满复选框之外的整行 */
+/* 主体：只管排两行字（开信挂在行容器上，键盘靠这颗按钮的原生 click 冒泡） */
 .mail-item__main {
   flex: 1;
   min-width: 0;
@@ -147,7 +156,7 @@ function subjectText(raw: string): string {
   color: inherit;
   font: inherit;
   text-align: left;
-  cursor: pointer;
+  cursor: inherit;
 }
 
 /* 第一行：未读点 + 发件人 + 日期（未读的整行字重抬一档，这是第二个未读信号） */

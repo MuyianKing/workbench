@@ -192,4 +192,11 @@ describe('accentVariables', () => {
     expect(varOf(accentVariables('#fde68a', 'light', 'white'), '--el-color-white')).toBe('#ffffff')
     expect(varOf(accentVariables('#2f6bd8', 'dark', 'dark'), '--el-color-white')).toBe('#11151b')
   })
+
+  it('选中块上的字取「主题色文字」那一档（AI 助手页那两处）', () => {
+    const auto = varOf(accentVariables('#2f6bd8', 'light'), '--ink-on-selected')
+    expect(auto).toBe(varOf(accentVariables('#2f6bd8', 'light'), '--el-color-white'))
+    expect(varOf(accentVariables('#2f6bd8', 'light', 'white'), '--ink-on-selected')).toBe('#ffffff')
+    expect(varOf(accentVariables('#2f6bd8', 'light', 'dark'), '--ink-on-selected')).toBe('#11151b')
+  })
 })

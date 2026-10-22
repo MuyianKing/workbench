@@ -10,9 +10,9 @@
 
 | 首页 —— 可自由布局的工作台 | 项目 —— 一键启停与打包 |
 |---|---|
-| ![首页](apps/desktop/resources/cap/首页.png) | ![项目](apps/desktop/resources/cap/项目.png) |
+| ![首页](docs/assets/首页.png) | ![项目](docs/assets/项目.png) |
 | 工作 —— 按天分组的工作日志 | 设置 —— 外观 / 菜单 / 通用 / 关于 |
-| ![工作](apps/desktop/resources/cap/工作.png) | ![设置](apps/desktop/resources/cap/设置.png) |
+| ![工作](docs/assets/工作.png) | ![设置](docs/assets/设置.png) |
 
 ## 能做什么
 

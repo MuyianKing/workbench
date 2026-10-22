@@ -67,6 +67,22 @@ Rust 两行与前端用什么打包器无关；**合计两行仍是 vite 7 那�
 - NSIS 工具链只下载一次，缓存在 `%LOCALAPPDATA%\tauri\NSIS`
   （`nsis-3.11.zip` 与 `nsis_tauri_utils-v0.5.3.dll`）。首次打包要联网。
 
+### Pi 的随包内置（`vendor-pi.mjs`）
+
+`pnpm run dist` 与 `pnpm run dev` 都会先跑它。**不要整棵 `npm install`**：pi-coding-agent
+声明的依赖树（云厂商 SDK、protobuf…）装出来 139MB / 15,165 个文件，裁完只剩 12.8MB ——
+那 126MB 纯属「装完就删」。现在改成 `npm pack` 只取 Pi 自己的 tarball（7.5MB）+
+`pi-ai` 的模型数据（0.8MB，生成完预填表就删），再 `npm install` 两个运行期小包
+（`jiti` 0.4MB、`photon-node` 0.7MB）。实测（npm 缓存都是热的）：
+
+| | 装出来的 | 文件数 | 耗时 |
+|---|---|---|---|
+| 旧：整棵 `npm install` | 139MB | 15,165 | 12.1s |
+| 新：tarball + 两个包 | ~26MB | ~1,250 | **5.7s** |
+
+冷缓存时差距更大（下载量约 9.4MB，旧的要几十兆）。stamp（`resources/pi/.pi-version`）命中时
+整步 <0.3s，所以热构建里它基本不占时间。
+
 ## 验证链的耗时
 
 打包那条链是几分钟一次，这条是**每改完一轮都要付一次**：
@@ -162,6 +178,16 @@ cargo 按 mtime 判定新鲜度，所以 `touch` 既触发了重编，又没往�
 把命令换成 `pnpm run dist:dir`。）
 
 ## 坑
+
+### `vendor-pi.mjs` 解 tarball：别把 Windows 盘符交给 GNU tar
+
+`npm pack` 出来的 tarball 用系统的 `tar` 解（Windows 10 1803+ 与 Git 都带）。两个坑都撞过：
+
+- **`-f` 别传 `E:\...`**：GNU tar 会把冒号前那段当远程主机名，报
+  `tar (child): Cannot connect to E: resolve failed`。做法是把 `cwd` 设在 tarball 那一层、
+  `-f` 只给文件名；
+- **`-C` 的盘符路径换成正斜杠**：MSYS 版 tar 会把反斜杠参数再转义一次
+  （`E\:\\muyian\\…` → `Cannot open: No such file or directory`）。
 
 ### 打包时不要在同一个仓库里跑 `tauri dev`
 

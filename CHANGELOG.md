@@ -20,6 +20,23 @@
 
 ### 调整
 
+- **Element Plus 改成按需引入**：模板里的 `<el-*>` 由 vite 的 `Components` 插件在编译期换成单组件
+  import（连同该组件的 css），三个入口不再 `app.use(ElementPlus)`、不再引整包 `dist/index.css`；
+  插件管不到的 `ElMessage` / `ElMessageBox` / `v-loading` 样式收在 `element-plus-styles.ts`，
+  locale 改走 `provideGlobalConfig`。渲染层的 JS+CSS 少 466KB（10719 → 10253KB）。
+  **收益主要在两个小窗口**：截图遮罩 1934 → 910KB（-53%）、钉图 1906 → 841KB（-56%）——
+  它们原来跟着主窗口一起装整包 EP；主窗口 2984 → 2518KB（-16%）。
+- **安装包瘦身约 9.5MB（21.8MB → 预计 12.3MB）**：随包内置的 Pi 改成按**保留清单**裁剪 ——
+  只留运行时真会加载的三个包（CLI 的 `dist/bundle`、扩展加载器 `jiti`、贴图缩放 `photon-node`），
+  其余整包、源码映射、类型声明、`bundle` 之外的构建产物、文档配图、示例与 CHANGELOG 全删，
+  依赖树从 55.6MB / 6885 个文件降到 **12.8MB / 147 个**（压缩后 9.7MB → 2.3MB）；脚本末尾加了
+  `cli.js --version` 自检，裁错包当场失败。内置壁纸按长边 2560 / q82 重新压过，4.2MB → 2.2MB
+  （JPEG 在安装包里压不动，图上省多少包就省多少）。另外不再随包带 pdf.js 那两份
+  `*_nowasm_fallback.js` 与 `quickjs-eval.*`（WebView2 走不到，约 1.1MB）。
+- **README 截图挪到 `docs/assets/`**：那 4 张图只服务 README，原先放在应用的 `resources/cap/` 下，
+  容易被当成随包资源；现在与代码分开，也不在打包范围里。
+- **内置模型预填表重新生成**：跟随 Pi 的模型目录快照更新（数据截至 2026-10-21），并修掉一个误生成的
+  `.manifest` 条目 —— `pi-ai` 的 `data/.manifest.json` 是清单不是厂商，原来被当成一家厂商读进去了。
 - **积分总账与用量明细拆成两张独立面板**：积分总账不再套在明细面板里，自己一块毛玻璃面板
   （外壳就是全站那张 `.panel`，左侧主数字 + 右侧 2×2 佐证不变）；用量明细仍是自己一块。
 - **网关页改名为 TBuddy**：只改界面上看得见的名字（导航栏、空态提示、报错文案），页 id `gateway`、

@@ -106,7 +106,12 @@
   调用方只负责限宽、给 `.el-tag__content` 加 `overflow: hidden`，行盒高度由它兜着。
 - 组件样式写 `<style scoped>`；要穿透 Element Plus 或供多页共用的外壳（`.panel`、`.facts`、`.filter`、`.sort` 等）写进
   [global.css](apps/desktop/src/renderer/src/styles/global.css)。
-- **Element Plus 是全量引入的**（`main.ts` 的 `app.use(ElementPlus)` + 整包 CSS），不要手搓 EP 已有的控件。已定下来的用法：
+- **Element Plus 是按需引入的**（vite 的 `Components` 插件在编译期把模板里的 `<el-*>` 换成单组件 import +
+  该组件的 css，配置只在 `vite.config.ts` 与 `vite.preview.config.ts`）：**不要**再写回
+  `app.use(ElementPlus)` 或引整包 `dist/index.css`。插件管不到的三样（`ElMessage` / `ElMessageBox` /
+  `v-loading` 的样式）集中在 [element-plus-styles.ts](apps/desktop/src/renderer/src/element-plus-styles.ts)，
+  指令本身由 `main.ts` 的 `app.use(ElLoading)` 注册 —— **新增这类「命令式 API / 指令」用法时要往那儿补一行**，
+  否则样式静默缺失。不要手搓 EP 已有的控件。已定下来的用法：
   分段选择 `el-segmented`（外壳与选中态的口径只在 global.css 的 `.el-segmented` 一处；**选中项取主色实心** `--el-color-primary` + `--el-color-white`，别改回白底药丸）；弹窗字段 `el-form` + `el-form-item`（`label-position="top"`，校验失败就地显示，不弹 `ElMessage`）；
   图标按钮与关键操作用 `el-tooltip`，纯截断文字的全名用原生 `title`。
 - **空态要配图**：一栏 / 一整页 / 弹层正文区空着时用 [EmptyState.vue](apps/desktop/src/renderer/src/components/EmptyState.vue)

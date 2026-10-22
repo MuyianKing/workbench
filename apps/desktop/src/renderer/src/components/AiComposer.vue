@@ -545,7 +545,9 @@ const sendTitle = computed(() => {
  * EP 的默认外观是「一个描了边的输入框」，一排三个摆在一起就成了表单 —— 这一行要的是
  * 一排工具。**只改外观，不动它自己的行为**（悬停 / 聚焦、下拉面板都照旧）：
  * 边框是 `box-shadow: 0 0 0 1px … inset` 画的、底色是 `background-color`，把这两条按住即可。
- * 悬停 / 聚焦时 EP 会各加一道 `--el-color-primary` 的描边（黑框），一并换成「底色深一档」。
+ * 悬停 / 聚焦时 EP 会各加一道 `--el-color-primary` 的描边（黑框），一并换成「底色深一档」——
+ * 那一档就是选中块的底色（--bg-selected），铺在上面的字与图标跟着取**设置里那档「主题色文字」**
+ * （--ink-on-selected：自动 / 白字 / 黑字，见 packages/appearance/src/accent-color.ts）。
  */
 .composer__row :deep(.el-select__wrapper) {
   padding: 0 var(--sp-2);
@@ -558,11 +560,26 @@ const sendTitle = computed(() => {
 .composer__row :deep(.el-select__wrapper.is-focus) {
   background: var(--bg-selected);
   box-shadow: none;
+  /* EP 把选中的值画在 .el-select__placeholder 里、自己钉了字色（读 --el-input-text-color），
+     外层的 color 传不进去 —— 借这几个变量把主题色文字递给值、右侧那颗箭头与左边那颗图标 */
+  --el-input-text-color: var(--ink-on-selected);
+  --el-select-input-color: var(--ink-on-selected);
+  --composer-chip-ink: var(--ink-on-selected);
+}
+
+/**
+ * 下拉一展开，EP 就给那一格加 `is-transparent`、把字改成占位灰（绕开了上面那个变量）——
+ * 按下去的这颗 chip 整格字都取主题色文字，值 / 占位与图标一个颜色。
+ */
+.composer__row :deep(.el-select__wrapper.is-hovering:not(.is-focused) .el-select__placeholder),
+.composer__row :deep(.el-select__wrapper.is-focused .el-select__placeholder),
+.composer__row :deep(.el-select__wrapper.is-focus .el-select__placeholder) {
+  color: var(--ink-on-selected);
 }
 
 /* 图标那一格（每颗 chip 都有的那个图标）：比选中的值浅一档，压在值的左缘 */
 .composer__row :deep(.el-select__prefix) {
-  color: var(--ink-3);
+  color: var(--composer-chip-ink, var(--ink-3));
 }
 
 /* 权限那一栏在左边这一格：宽度放得下「完全访问」四个字 + 那颗图标（下拉本身比它宽，

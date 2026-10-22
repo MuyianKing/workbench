@@ -25,6 +25,29 @@ const TARGET = join(root, 'src', 'renderer', 'public', 'pdfjs')
 /** 整目录带走（pdf.js 按文件名取里面的条目，不许改名） */
 const DIRS = ['cmaps', 'standard_fonts', 'wasm', 'iccs']
 
+/**
+ * 不带的那几份（相对 `wasm/`，合计约 1.1MB）：
+ *
+ *  - `*_nowasm_fallback.js`（jbig2 / openjpeg）是「WebAssembly 不可用」时的退路，
+ *    WebView2 永远有 wasm，这两份取不到也用不上；
+ *  - `quickjs-eval.js` / `.wasm` 只服务 `pdf.sandbox`（在 PDF 内嵌 JS 里跑沙箱），
+ *    这个应用只渲染不执行，连 `pdf.sandbox` 都没 import。
+ *
+ * 别顺手把 LICENSE 那几份也删了 —— 它们是随包分发 PDF 解码器要带的。
+ */
+const EXCLUDE = [
+  'jbig2_nowasm_fallback.js',
+  'openjpeg_nowasm_fallback.js',
+  'quickjs-eval.js',
+  'quickjs-eval.wasm',
+]
+
+/**
+ * 排除清单的版本号：**这份清单变了就要 +1**，否则 `.version` 对得上、本地那份已经
+ * 同步过的目录不会重来一遍，新加的排除项就落不到盘上。
+ */
+const REVISION = '2'
+
 function installedVersion() {
   return JSON.parse(readFileSync(join(SOURCE, 'package.json'), 'utf8')).version
 }
@@ -34,7 +57,7 @@ export function syncPdfjsAssets() {
     throw new Error('没有找到 node_modules/pdfjs-dist，先跑一次 pnpm install')
   }
 
-  const version = installedVersion()
+  const version = `${installedVersion()}+r${REVISION}`
   const marker = join(TARGET, '.version')
   if (existsSync(marker) && readFileSync(marker, 'utf8').trim() === version)
     return
@@ -44,6 +67,8 @@ export function syncPdfjsAssets() {
 
   for (const dir of DIRS)
     cpSync(join(SOURCE, dir), join(TARGET, dir), { recursive: true })
+  for (const file of EXCLUDE)
+    rmSync(join(TARGET, 'wasm', file), { force: true })
 
   mkdirSync(TARGET, { recursive: true })
   writeFileSync(marker, `${version}\n`)

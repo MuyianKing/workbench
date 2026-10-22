@@ -30,7 +30,8 @@ AI 助手（ai）的文档：先读「约束」一节（不能破的规矩）；
   对话本身不在应用的数据文件里；左栏按 `dir` 分组（`aiSessionGroups`），第一层项目、第二层会话。
   **工作目录创建后定死**（Pi 按目录分组，换目录等于换对话），要换就新建；`aiActiveSession` 记上次打开的那个
   （认不出回最近说过话的）。**「起一段新的」只是切屏**（`drafting` / `startNew`），**不先建空会话**；
-  `drafting` 期间 `activeId` 为空（左栏哪行都不铺底色）。
+  `drafting` 期间 `activeId` 为空（左栏哪行都不铺底色）；选中那行铺 `--bg-selected`、字与图标取
+  `--ink-on-selected`（设置里那档「主题色文字」，自动 / 白字 / 黑字；没配主题色时回落 `--ink`）。
 - **这一页是通用控制台，与知识库无关**：目录由用户挑（与 `kbDir` 互不相干）、指令由用户写（`taskPrompt`
   只把「在哪儿干活」说清楚）；**不内置任务提示词、跑完不做任何与任务绑定的事**（不重建索引、不刷新列表）——
   要做专用任务就在这层上面加模板。起始屏**不摆「用过的指令」**（`aiHistory` 已整体去掉，2026-09-29）——
@@ -84,13 +85,25 @@ AI 助手（ai）的文档：先读「约束」一节（不能破的规矩）；
   例外是**技能弹窗组头的根路径与计数徽标**（那是数据不是说明句）。别加「点这里开始」类引导。
 - **干活的不是应用，是本机 Pi**：**随包内置**，Node 用系统里的（≥ 22.19，判定在 `nodeSatisfiesPi`，
   跑不起来整页明说原因）。内置形态由 [scripts/vendor-pi.mjs](../../apps/desktop/scripts/vendor-pi.mjs)
-  在构建 / 开发前生成到 `resources/pi/`（不进版本库）：钉死版本、删掉运行时用不到的云厂商 SDK ——
-  真正被执行的只有 `dist/bundle/cli.js`，它只要 `@earendil-works/chord`、`typebox`、`undici`、
-  `@silvia-odwyer/photon-node` 几个外部包；pi-coding-agent 自带 `npm-shrinkwrap.json`、整棵树嵌在自己的
-  `node_modules` 下，按顶层路径删会一声不响地空转（`findDeps` 就为此写）。瘦身后 55.5MB（Pi 1.0.4；这一轮删掉 62.3MB，2026-10-06 实测）。
-  **升级 Pi** = 改版本常量 + 重跑 `pnpm run vendor:pi` + 瘦身验证重做（假 key 打一轮每个提供方），
-  会话 / 续聊 / 权限扩展 / 确认帧那条链照 [dev-notes/pi-session-probe.md](../dev-notes/pi-session-probe.md)
-  的假端点探针重跑。
+  在构建 / 开发前生成到 `resources/pi/`（不进版本库）：**不整棵 `npm install`** —— `npm pack`
+  只取 Pi 本体的 tarball，预填表的数据源（`pi-ai`）单下一份、读完就删（版本钉在 `CATALOG_VERSION`），
+  再装 `jiti` / `photon-node` 两个运行期小包；然后按**保留清单**（`KEEP`）裁到运行时真的会加载的
+  那**三个**包：
+  `pi-coding-agent` 的 `dist/bundle/`（实际执行的就是它的 `cli.js`，提供方实现已内联在 chunks 里）、
+  `jiti`（扩展加载器，**删了 `-e` 那份扩展会静默不加载**、权限确认整条消失）、
+  `@silvia-odwyer/photon-node`（贴图缩放）。其余整包（云厂商 SDK、protobuf、gaxios、
+  highlight.js、quickjs-wasi…）与树里的 `*.map` / `*.d.ts` / `docs/images` / `examples/` /
+  `CHANGELOG.md` / `bundle` 之外的 `dist` 全删；`docs/*.md` 留着（系统提示词会把 `docs/` 指给模型）。
+  **`typebox` / `pi-ai` / `pi-tui` / `pi-agent-core` / `chord` 也不留**：它们是「扩展里 import Pi SDK」
+  时的 alias 目标，只有 `getAliases()` 被调到时才用得上，当前那份 permission.js 一个 import 都没有。
+  树里只有一层（`npm pack` 直接解到 `node_modules/@earendil-works/pi-coding-agent`），不再有 npm
+  那种「整棵树嵌进自己的 `node_modules`」的嵌套。裁完 **12.8MB / 147 个文件**（进安装包压缩后约 2.3MB；
+  没裁之前那套 55.6MB 的树是 9.7MB，2026-10-22 实测），脚本末尾跑一次 `cli.js --version` 自检 ——
+  裁错包时 Pi 往往还能启动，只检查文件存在拦不住。
+  **加回条件**：哪天应用开始带会 import Pi SDK 的扩展，把那几个包名放回 `KEEP` 再重跑探针。
+  **升级 Pi 或改裁剪规则** = 改版本常量 / `PRUNE_REVISION` + 重跑 `pnpm run vendor:pi` + 瘦身验证重做
+  （假 key 打一轮每个提供方），会话 / 续聊 / 权限扩展 / 确认帧那条链照
+  [dev-notes/pi-session-probe.md](../dev-notes/pi-session-probe.md) 的假端点探针重跑。
 - **进程直启、不经 `cmd /C`**（`session::spawn_args`，带一根可写 stdin）：整行交给 cmd 会被它的引号剥离规则拆坏
   （实测 node 收到只剩盘符的路径）。提示词与确认答复都走那根 stdin，不落临时文件、不走 shell。
 - **内置 cli.js 路径两处候选**（`resolve_cli`，与内置壁纸同一条路子）：打包走 `resource_dir()/pi/...`，

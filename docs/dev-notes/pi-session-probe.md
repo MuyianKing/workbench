@@ -53,5 +53,22 @@
   （zai 全线 `chat:` 前缀、deepseek-v4.1-flash 没了）—— 内置模型目录跟着再生，
   ai.test.ts 的夹具换成了新表里真实存在的 id。
 
+- **按保留清单裁剪之后（2026-10-22）**：`vendor-pi.mjs` 从「删几个包」改成「保留清单」、
+  又收窄到运行时真正会加载的三个包（`PRUNE_REVISION=4`）之后重跑了一遍，`resources/pi`
+  从 55.6MB 降到 **12.8MB（147 个文件）**，下面这些仍然成立：
+  - `node cli.js --version` → `1.0.4`；
+  - 假端点一轮：`extension_ui_request` 一问一答 → `bash` 真跑出 `probe-ok` → `agent_settled`；
+  - `openai-completions` 与 `anthropic-messages` 两种形态各跑一轮都能到达假端点；
+  - `read` / `write` / `edit` 三个工具各成功一次（`grep` / `find` / `ls` 在 1.0.4 的默认工具集里
+    本来就没有，裁前裁后都是 `Tool … not found`，不是裁剪裁掉的）；
+  - `-ns --skill <目录>` 之后 `get_commands` 里能列出 `skill:myskill`。
+  **逐包删回去验过的三条**：删 `jiti` 时 Pi 照常启动、但扩展加载失败
+  （`Cannot find module 'jiti'` → 确认次数 0、命令没人问就跑了），所以它在 KEEP 里；
+  删 `typebox` / `pi-ai` / `pi-tui` / `pi-agent-core` / `chord` 时上面这一整轮探针仍然全过 ——
+  它们只在扩展 `import` Pi SDK 时才会被 `getAliases()` 解析，当前那份 permission.js
+  不 import 任何东西，所以这五个包已经不放进树里了（加回条件见 [ai.md](../modules/ai.md)）。
+- 裁剪后启动耗时没有变化（`--version` 五次各 ~410ms，两边一致）—— 省的是体积，不是启动。
+- 裁剪后启动耗时没有变化（`--version` 五次各 ~410ms，两边一致）—— 省的是体积，不是启动。
+
 **换 Pi 版本后重跑一遍**这些点 —— CLI 与事件协议是外部契约（见
-[ai.md](../modules/ai.md) 的文件头）。
+[ai.md](../modules/ai.md) 的文件头）。改裁剪规则（`KEEP` / `PRUNE_REVISION`）同样要重跑。

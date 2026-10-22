@@ -25,6 +25,11 @@
  * 浅底上多半读不清（亮绿 #1fbb70 在它自己的浅底上只有 2.1:1），所以另给一档按对比度推深 /
  * 推亮的 --ink-accent（见 accentTextInk）—— 「这些字用主题色」这句话要成立，靠的是它。
  *
+ * AI 助手页那两处选中块（左栏选中的那段会话、composer 那排 chip 悬停 / 聚焦时）要的不是这一档：
+ * 那里取**设置里「主题色文字」那一档**（自动 / 白字 / 黑字），与主色实心块上那层字同一条判定
+ * （见 inkOnAccent），另给一个 --ink-on-selected；没配主题色时它回落 tokens.css 里的 --ink
+ * （--el-color-white 在那一档是白的，浅色主题的浅灰选中底上会读不清）。
+ *
  * 铺在主色上的文字色按主题色的深浅自动挑（红底白字、浅灰底黑字，见 inkOnAccent），
  * 用户也可以在设置里手动指定黑白。
  *
@@ -66,6 +71,7 @@ export const ACCENT_VARIABLE_NAMES = [
   '--el-color-white',
   '--bg-selected',
   '--ink-accent',
+  '--ink-on-selected',
 ] as const
 
 export type AccentVariableName = (typeof ACCENT_VARIABLE_NAMES)[number]
@@ -269,5 +275,6 @@ export function accentVariables(
     '--el-color-white': inkOnAccent(hex, inkMode),
     '--bg-selected': selectedTint,
     '--ink-accent': accentTextInk(hex, selectedTint, theme),
+    '--ink-on-selected': inkOnAccent(hex, inkMode),
   }
 }

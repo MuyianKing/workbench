@@ -149,14 +149,18 @@ const running = computed(() => new Set(props.runningIds))
   padding-left: 22px;
 }
 
+/**
+ * 选中的那一段铺选中块的底色，字与图标取**设置里那档「主题色文字」**（--ink-on-selected：
+ * 自动 / 白字 / 黑字；没配主题色时就是 --ink）—— 与 composer 那排 chip 按下去时同一套。
+ */
 .row.is-active {
   background: var(--bg-selected);
-  color: var(--ink);
+  color: var(--ink-on-selected);
   font-weight: 600;
 }
 
 .row.is-active .row__icon {
-  color: var(--ink);
+  color: var(--ink-on-selected);
 }
 
 .row__caret {
