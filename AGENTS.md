@@ -57,7 +57,8 @@
 - 测试用 Vitest（各包子目录里的 `vitest.config.ts` 是配置来源；根目录 `pnpm test` 走根 `vitest.config.ts` 的
   `test.projects`，把 18 个项目收进**一个** vitest 进程跑全量 —— 别退回 `pnpm -r test`，那是 18 次进程启动；
   渲染层用例在 `@workbench/desktop` 包里）
-  + `cargo test`（写在同文件的 `#[cfg(test)] mod tests`）。**TypeScript 与 vue-tsc 的版本不要动**：升到 TS 7 会让 `pnpm run typecheck` 直接不可用。
+  + `cargo test`（写在同文件的 `#[cfg(test)] mod tests`）。**TypeScript 锁 6.0.x、vue-tsc 3.3.x**：vue-tsc 还跑不了 TS 7
+    （原生编译器不再导出 `./lib/tsc`，`pnpm run typecheck` 会直接崩），别升 7。
 - 仅 Windows，不做 macOS / Linux 适配。
 
 ## 2. 文件落位

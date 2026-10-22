@@ -20,10 +20,9 @@
     "noEmit": true,
     "esModuleInterop": true,
     "resolveJsonModule": true,
-    "baseUrl": ".",
     "paths": {
-      "@/*": ["apps/desktop/src/renderer/src/*"],
-      "@workbench/*": ["packages/*/src/index.ts"]
+      "@/*": ["./apps/desktop/src/renderer/src/*"],
+      "@workbench/*": ["./packages/*/src/index.ts"]
     }
   }
 }
