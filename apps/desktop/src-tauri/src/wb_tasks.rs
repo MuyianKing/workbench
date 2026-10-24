@@ -1,11 +1,11 @@
-//! 任务福利：国内版成长任务 / 每日签到 / 连登管家 / 猫猫旅行，以及国际版每日活跃。
+//! 任务福利：成长任务 / 每日签到 / 连登管家 / 猫猫旅行。
 //!
-//! 口径来自 workbuddy2api-hub 的 `wb_tasks.py` + `wb_activity.py` + `wb_webagent.py`，
+//! 口径来自 workbuddy2api-hub 的 `wb_tasks.py` + `wb_activity.py`，
 //! 这里只做两件事上的收敛：
 //!
-//! 1. **每一次尝试都落一行** [`ActivityRow`]（`activity.jsonl`）：签到与每日活跃过去只
-//!    留在日志里，重启即散，回答不了「这个号昨天到底签成没有」。写进去的是运维元数据，
-//!    不是凭据：uid / 昵称 / 区域 / 任务 / 结果 / 一句截断并脱敏过的说明。
+//! 1. **每一次尝试都落一行** [`ActivityRow`]（`activity.jsonl`）：签到过去只留在
+//!    日志里，重启即散，回答不了「这个号昨天到底签成没有」。写进去的是运维元数据，
+//!    不是凭据：uid / 昵称 / 任务 / 结果 / 一句截断并脱敏过的说明。
 //! 2. **只给用户点了按钮才动**：没有调度器、没有定时器。这一页的每个动作都是一次显式
 //!    的上游请求，默认什么也不做。
 //!
@@ -15,16 +15,11 @@
 //!   不推进度；
 //! - 只认桌面端真实行为的任务（`DESKTOP_ONLY_TASKS`）伪造事件不会涨进度，诚实跳过；
 //! - 夜猫子任务只在 23:00–08:00 上报才计数，每天一次、累计三天；
-//! - 未接取的任务上报不计进度，所以先接取、再复核、再不成就跳过；
-//! - 国际版每日活跃**算数的是网页端跑完的会话**（桌面端那条轻量对话只作第一步），
-//!   网页腿失败时整次算失败，不然「今天 30/50 积分没到账」在界面上一直看不见。
+//! - 未接取的任务上报不计进度，所以先接取、再复核、再不成就跳过。
 
 use std::io::Write;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{mpsc, Arc};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -33,15 +28,12 @@ use crate::wb_account::Account;
 use crate::wb_api_billing;
 use crate::wb_credits::Credits;
 use crate::wb_identity;
-use crate::wb_realm::Realm;
+use crate::wb_upstream;
 
 /// 网页端的浏览器 UA（与桌面端的三段式 UA 不同：网页通道走的是浏览器形态）。
 const WEB_UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36";
 /// 国内版网页端的域。领奖在桌面端点不通时降级到那里（参考项目的实测口径）。
 const CN_WEB_ORIGIN: &str = "https://www.workbuddy.cn";
-/// 国际版网页端。每日活跃的会话建在这里。
-const INTL_WEB_ORIGIN: &str = "https://www.workbuddy.ai";
-const INTL_CONVERSATIONS: &str = "https://www.workbuddy.ai/console/as/conversations/";
 
 const TASKS_PATH: &str = "/v2/activity/growth/tasks";
 const ACCEPT_PATH: &str = "/v2/activity/growth/tasks/accept";
@@ -60,25 +52,6 @@ const REPORT_PATH: &str = "/v2/report";
 const CHECKIN_PATH: &str = "/v2/billing/meter/daily-checkin";
 const GIFT_PATH: &str = "/billing/meter/claim-gift";
 const COMPENSATION_PATH: &str = "/billing/meter/claim-compensation";
-
-/// 国际版每日活跃用的模型。参考项目取的就是这条（免费 / 极低倍率）。
-const DAILY_CHAT_MODEL: &str = "deepseek-v4.1-flash";
-/// 首个模型繁忙（429 / 14003 Model busy）时按顺序换的备用模型。
-/// 只用目录里确实存在的 id；`hy4-preview-f` 那条参考项目的别名在本地目录里没有。
-const DAILY_CHAT_MODELS: &[&str] = &[
-    DAILY_CHAT_MODEL,
-    "hy3",
-    "hy4-preview",
-    "glm-5.3-flash",
-    "deepseek-v4-flash",
-];
-const DAILY_CHAT_PROMPT: &str = "Hi";
-/// 上游要求第一条消息必须是 system（否则 400 `11-128 first message is not system prompt`）。
-/// 每日活跃只发一句「Hi」，所以这里补上参考项目的默认值。
-const DEFAULT_SYSTEM_PROMPT: &str = "You are a helpful assistant.";
-/// 网页通道首轮等待与最多尝试次数：第 N 轮的等待是首轮的 2^(N-1) 倍。
-const WEB_TURN_TIMEOUT_SECS: u64 = 120;
-const WEB_TURN_ATTEMPTS: u32 = 3;
 
 /// 任务代码 → 种类 / 目标 / 奖励 / 名称。上游没给的字段从这张表兜底。
 struct TaskSpec {
@@ -285,8 +258,7 @@ pub struct ActivityRow {
     pub date: String,
     pub uid: String,
     pub nickname: String,
-    pub realm: String,
-    /// `checkin` / `daily_chat`
+    /// `checkin`
     pub task: String,
     pub ok: bool,
     pub message: String,
@@ -352,7 +324,6 @@ fn excerpt(text: &str, max: usize) -> String {
 fn chat_headers(account: &Account, model: Option<&str>) -> Vec<(String, String)> {
     let ids = wb_identity::new_ids(account.product, &account.uid, None, None, None);
     let input = wb_identity::ChatHeaders {
-        realm: account.realm,
         identity: account.product,
         uid: &account.uid,
         token: &account.access_token,
@@ -395,12 +366,12 @@ fn send_json(
 }
 
 fn chat_get(account: &Account, path: &str) -> Result<Value, String> {
-    let url = account.realm.chat_url(path);
+    let url = wb_upstream::chat_url(path);
     send_json(account, "GET", &url, &chat_headers(account, None), None)
 }
 
 fn chat_post(account: &Account, path: &str, body: &Value) -> Result<Value, String> {
-    let url = account.realm.chat_url(path);
+    let url = wb_upstream::chat_url(path);
     let payload = body.to_string();
     send_json(
         account,
@@ -633,7 +604,7 @@ struct ClaimOutcome {
 /// 领奖。桌面端点不通（HTTP 400）时降级到国内网页端再试一次。
 fn claim_task(account: &Account, code: &str) -> ClaimOutcome {
     let path = format!("/activity/growth/tasks/{code}/claim");
-    let url = account.realm.chat_url(&path);
+    let url = wb_upstream::chat_url(&path);
     let headers = chat_headers(account, None);
     let refs = as_refs(&headers);
     match http::request_url("POST", &url, &refs, Some("{}")) {
@@ -675,9 +646,6 @@ fn claim_task(account: &Account, code: &str) -> ClaimOutcome {
 
 /// 国内网页端的领奖。只在桌面端回 400 时走这一跳（参考项目的实测口径）。
 fn claim_web(account: &Account, code: &str) -> Result<ClaimOutcome, String> {
-    if account.realm != Realm::Codebuddy {
-        return Err("仅国内版支持网页端领奖".into());
-    }
     let url = format!("{CN_WEB_ORIGIN}/activity/growth/tasks/{code}/claim");
     let headers = vec![
         (
@@ -806,7 +774,7 @@ fn build_event(account: &Account, kind: &str, idx: usize, expert: Option<(&str, 
 }
 
 fn report_events(account: &Account, events: &[Value]) -> bool {
-    let url = account.realm.chat_url(REPORT_PATH);
+    let url = wb_upstream::chat_url(REPORT_PATH);
     let body = Value::Array(events.to_vec()).to_string();
     let headers = chat_headers(account, None);
     match send_json(account, "POST", &url, &headers, Some(&body)) {
@@ -989,13 +957,6 @@ fn needs_accept(task: &GrowthTask) -> bool {
 /// 完整执行一轮成长任务：auto 类先点亮（first_buddy 是前置）→ 批量接取 → 逐个推进
 /// → 顺手看猫猫旅行 → 刷新积分。
 pub fn run_growth_tasks(account: &Account, gap: f64) -> RunOutcome {
-    if account.realm != Realm::Codebuddy {
-        return RunOutcome {
-            ok: false,
-            msg: "国际版不适用国内成长任务中心".into(),
-            ..RunOutcome::default()
-        };
-    }
     if is_enterprise(account) {
         return RunOutcome {
             ok: true,
@@ -1240,7 +1201,7 @@ pub fn do_cat_travel(account: &Account) -> TravelOutcome {
 }
 
 fn travel_depart(account: &Account, location: i64) -> Result<Value, String> {
-    let url = account.realm.chat_url(TRAVEL_DEPART_PATH);
+    let url = wb_upstream::chat_url(TRAVEL_DEPART_PATH);
     let body = json!({ "location_id": location }).to_string();
     let headers = chat_headers(account, None);
     let value = send_json(account, "POST", &url, &headers, Some(&body))?;
@@ -1279,13 +1240,6 @@ fn ensure_buddy(account: &Account, gap: f64) -> bool {
 /// 连登管家：补签保连登 → 礼包 / 补偿 → 7d/14d/28d 档位兑换 → 抽奖。
 /// 未解锁 / 已领 / 无次数 / 企业版一律安全跳过。
 pub fn run_streak_bonus(account: &Account) -> StreakOutcome {
-    if account.realm != Realm::Codebuddy {
-        return StreakOutcome {
-            ok: false,
-            msg: "连登管家仅限国内版账号".into(),
-            ..StreakOutcome::default()
-        };
-    }
     if !account.enterprise_id.trim().is_empty() {
         return StreakOutcome {
             ok: true,
@@ -1394,14 +1348,8 @@ pub fn run_streak_bonus(account: &Account) -> StreakOutcome {
     }
 }
 
-/// 国内版每日签到（Buddy 加油站）。`10001` / 「今天已签到」按成功处理。
+/// 每日签到（Buddy 加油站）。`10001` / 「今天已签到」按成功处理。
 pub fn checkin(account: &Account) -> ActivityOutcome {
-    if account.realm != Realm::Codebuddy {
-        return ActivityOutcome {
-            ok: false,
-            msg: "签到仅限国内版账号".into(),
-        };
-    }
     if is_enterprise(account) {
         return ActivityOutcome {
             ok: false,
@@ -1409,7 +1357,7 @@ pub fn checkin(account: &Account) -> ActivityOutcome {
         };
     }
 
-    let url = account.realm.billing_url(CHECKIN_PATH);
+    let url = wb_upstream::billing_url(CHECKIN_PATH);
     let headers = wb_api_billing::headers(account);
     let refs = as_refs(&headers);
     let outcome = match http::request_url("POST", &url, &refs, Some("{}")) {
@@ -1465,486 +1413,6 @@ pub fn checkin(account: &Account) -> ActivityOutcome {
     outcome
 }
 
-// ---------- 国际版每日活跃 ----------
-
-/// 每日活跃：桌面端轻量对话 → 网页端会话。网页腿失败时整次算失败 ——
-/// 计入官方「每日活跃」的是网页端跑完的会话。
-pub fn daily_chat(account: &Account) -> ActivityOutcome {
-    if account.realm != Realm::Workbuddy {
-        return ActivityOutcome {
-            ok: false,
-            msg: "每日活跃打卡仅限国际版账号".into(),
-        };
-    }
-
-    let outcome = daily_chat_inner(account);
-    record_activity(
-        account,
-        "daily_chat",
-        outcome.ok,
-        if outcome.ok {
-            "每日活跃打卡成功"
-        } else {
-            &outcome.msg
-        },
-    );
-    outcome
-}
-
-fn daily_chat_inner(account: &Account) -> ActivityOutcome {
-    let model = match daily_chat_desktop(account) {
-        Ok(model) => model,
-        Err(message) => {
-            return ActivityOutcome {
-                ok: false,
-                msg: format!("桌面端活跃对话失败：{message}"),
-            };
-        }
-    };
-
-    match daily_chat_web(account, &model) {
-        Ok(turn) => ActivityOutcome {
-            ok: true,
-            msg: format!(
-                "每日活跃打卡成功（网页通道 {}：{} 段输出，{} ms{}）",
-                turn.status,
-                turn.chunks,
-                turn.elapsed_ms,
-                if model == DAILY_CHAT_MODEL {
-                    String::new()
-                } else {
-                    format!("，模型 {model}")
-                }
-            ),
-        },
-        Err(message) => ActivityOutcome {
-            ok: false,
-            msg: format!("网页通道失败：{message}"),
-        },
-    }
-}
-
-/// 桌面端那条轻量对话的请求体。单独抽出来是为了钉住「首条必须是 system」这条上游要求。
-fn daily_chat_body(model: &str) -> String {
-    json!({
-        "model": model,
-        "messages": [
-            { "role": "system", "content": DEFAULT_SYSTEM_PROMPT },
-            { "role": "user", "content": DAILY_CHAT_PROMPT }
-        ],
-        "stream": true,
-        "max_tokens": 10,
-        "reasoning_effort": "none"
-    })
-    .to_string()
-}
-
-/// 桌面端那条轻量对话。它不单独计入官方奖励，但参考项目的流程里有这一步，
-/// 而且上游对请求形状有要求（首条必须是 system）—— 失败就不必再建网页会话。
-///
-/// 上游按模型限流（429 / `14003` Model busy）时换一条免费模型再试：每日活跃是
-/// 一次一次性的 `Hi`，不该被真实流量正在用的那个模型的窗口额度挡住。返回最终
-/// 成功的模型名，网页腿用同一条。
-fn daily_chat_desktop(account: &Account) -> Result<String, String> {
-    let url = account.realm.chat_url("/v2/chat/completions");
-    let mut last_error = String::new();
-    for (index, model) in DAILY_CHAT_MODELS.iter().enumerate() {
-        let body = daily_chat_body(model);
-        let headers = chat_headers(account, Some(model));
-        let refs = as_refs(&headers);
-        // 这一腿回的是 SSE，不按 JSON 解；只要请求本身成功就往下走。
-        match http::request_url("POST", &url, &refs, Some(&body)) {
-            Ok(response) if response.status == 200 => return Ok((*model).to_string()),
-            Ok(response) => {
-                let text = response.text();
-                let retryable = response.status == 429 || text.contains("14003");
-                last_error = format!("HTTP {} {}", response.status, excerpt(&text, 160));
-                if !retryable || index + 1 == DAILY_CHAT_MODELS.len() {
-                    return Err(last_error);
-                }
-                eprintln!("[workbench] 每日活跃模型 {model} 繁忙，换下一条：{last_error}");
-            }
-            Err(message) => return Err(message),
-        }
-    }
-    Err(last_error)
-}
-
-#[derive(Debug, Clone, Default)]
-struct WebTurn {
-    status: String,
-    chunks: usize,
-    elapsed_ms: i64,
-}
-
-fn web_headers(account: &Account) -> Vec<(String, String)> {
-    vec![
-        (
-            "Authorization".to_string(),
-            format!("Bearer {}", account.access_token),
-        ),
-        ("X-User-Id".to_string(), account.uid.clone()),
-        ("Content-Type".to_string(), "application/json".to_string()),
-        (
-            "Accept".to_string(),
-            "application/json, text/plain, */*".to_string(),
-        ),
-        ("Origin".to_string(), INTL_WEB_ORIGIN.to_string()),
-        ("Referer".to_string(), format!("{INTL_WEB_ORIGIN}/app")),
-        ("User-Agent".to_string(), WEB_UA.to_string()),
-    ]
-}
-
-fn conversation_url(conversation: &str, suffix: &str) -> String {
-    let id = utf8_percent_encode(conversation, NON_ALPHANUMERIC);
-    format!("{INTL_CONVERSATIONS}{id}{suffix}")
-}
-
-/// 网页通道：建会话 → 取沙箱 link/token → ACP 跑一轮 → 轮询到 completed。
-/// 失败会按 120 / 240 / 480 秒重试，最多三轮（参考项目的 `daily_chat_web_policy`）。
-fn daily_chat_web(account: &Account, model: &str) -> Result<WebTurn, String> {
-    let mut attempt = 0;
-    loop {
-        let wait = WEB_TURN_TIMEOUT_SECS * (1 << attempt);
-        let result = daily_chat_web_once(account, wait, model);
-        match result {
-            Ok(turn) => return Ok(turn),
-            Err(message) => {
-                attempt += 1;
-                if attempt >= WEB_TURN_ATTEMPTS {
-                    return Err(format!("{message}（已重试 {} 次）", attempt - 1));
-                }
-            }
-        }
-    }
-}
-
-fn daily_chat_web_once(
-    account: &Account,
-    wait_seconds: u64,
-    model: &str,
-) -> Result<WebTurn, String> {
-    let headers = web_headers(account);
-    let create_body = json!({
-        "prompt": DAILY_CHAT_PROMPT,
-        "model": model,
-        "conversationOrigin": "workbuddy-app",
-        "plugins": [{ "name": "weixinpay", "marketplace": "codebuddy-builtin" }]
-    })
-    .to_string();
-    let created = send_json(
-        account,
-        "POST",
-        INTL_CONVERSATIONS,
-        &headers,
-        Some(&create_body),
-    )?;
-    let conversation = text_at(data(&created), "id");
-    if conversation.is_empty() {
-        return Err(format!(
-            "建会话没有返回 id（code={}）",
-            text_at(&created, "code")
-        ));
-    }
-
-    let session = send_json(
-        account,
-        "GET",
-        &conversation_url(&conversation, "/session"),
-        &headers,
-        None,
-    )
-    .map_err(|message| format!("session 查询失败：{message}"))?;
-    let session = data(&session);
-    let link = {
-        let link = text_at(session, "link");
-        if link.is_empty() {
-            text_at(session, "endpoint")
-        } else {
-            link
-        }
-    };
-    let token = text_at(session, "token");
-    if link.is_empty() || token.is_empty() {
-        return Err("沙箱未就绪（没有 link/token）".into());
-    }
-    let session_id = {
-        let id = text_at(session, "sessionId");
-        if id.is_empty() {
-            text_at(session, "session_id")
-        } else {
-            id
-        }
-    };
-    let session_id = if session_id.is_empty() {
-        conversation.clone()
-    } else {
-        session_id
-    };
-    let cwd = {
-        let value = text_at(session, "cwd");
-        if value.is_empty() {
-            "/workspace".to_string()
-        } else {
-            value
-        }
-    };
-
-    let turn = acp_turn(
-        account,
-        &link,
-        &token,
-        &session_id,
-        &cwd,
-        DAILY_CHAT_PROMPT,
-        model,
-        &conversation,
-        wait_seconds,
-    )?;
-    Ok(turn)
-}
-
-/// ACP over streamable HTTP：一条 SSE 收事件、POST 发 JSON-RPC。
-#[allow(clippy::too_many_arguments)] // 这一轮的输入就是这九样，包一层结构体只是换个地方摆
-fn acp_turn(
-    account: &Account,
-    link: &str,
-    token: &str,
-    session_id: &str,
-    cwd: &str,
-    prompt: &str,
-    model: &str,
-    conversation: &str,
-    wait_seconds: u64,
-) -> Result<WebTurn, String> {
-    let started = std::time::Instant::now();
-    let stop = Arc::new(AtomicBool::new(false));
-    let updates = Arc::new(AtomicUsize::new(0));
-    let chunks = Arc::new(AtomicUsize::new(0));
-    let (head_sender, head_receiver) = mpsc::channel();
-
-    let stream_stop = Arc::clone(&stop);
-    let stream_updates = Arc::clone(&updates);
-    let stream_chunks = Arc::clone(&chunks);
-    let stream_link = link.to_string();
-    let stream_token = token.to_string();
-    let worker = std::thread::Builder::new()
-        .name("wb-acp-stream".into())
-        .spawn(move || {
-            let authorization = format!("Bearer {stream_token}");
-            let headers = vec![
-                ("Accept", "text/event-stream"),
-                ("Authorization", authorization.as_str()),
-                ("User-Agent", WEB_UA),
-            ];
-            let mut reader = SseReader::default();
-            // 主线程可能已经走了（recv 超时），读线程的失败不必再上报
-            let _ = http::request_url_stream_capture(
-                "GET",
-                &stream_link,
-                &headers,
-                None,
-                "Acp-Connection-Id",
-                // 正文可能长时间静默（agent 在跑），但收尾后线程要能自己退出来
-                [30_000, 30_000, 60_000, 120_000],
-                &mut |status, captured| {
-                    let _ = head_sender.send((status, captured));
-                },
-                &mut |piece| {
-                    reader.feed(piece, &stream_updates, &stream_chunks);
-                    !stream_stop.load(Ordering::Relaxed)
-                },
-            );
-        })
-        .map_err(|err| format!("起 ACP 读线程失败：{err}"))?;
-
-    let (status, connection_id) = match head_receiver.recv_timeout(Duration::from_secs(40)) {
-        Ok(head) => head,
-        Err(_) => {
-            // 主线程不再等它了：让读线程在下一片数据 / 读超时后自己退出
-            stop.store(true, Ordering::Relaxed);
-            return Err("ACP 通道建立超时".into());
-        }
-    };
-    if status != 200 {
-        stop.store(true, Ordering::Relaxed);
-        return Err(format!("SSE 通道返回 HTTP {status}"));
-    }
-    let Some(connection_id) = connection_id.filter(|value| !value.trim().is_empty()) else {
-        stop.store(true, Ordering::Relaxed);
-        return Err("SSE 通道没有返回 Acp-Connection-Id".into());
-    };
-
-    let rpc = |method: &str, params: Value, id: i64| -> Result<(), String> {
-        acp_request(
-            link,
-            token,
-            &connection_id,
-            &json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params }),
-        )
-    };
-
-    let result = (|| -> Result<(), String> {
-        rpc(
-            "initialize",
-            json!({
-                "protocolVersion": 1,
-                "clientCapabilities": {
-                    "fs": { "readTextFile": false, "writeTextFile": false },
-                    "terminal": false
-                }
-            }),
-            1,
-        )?;
-        rpc(
-            "session/load",
-            json!({ "sessionId": session_id, "cwd": cwd, "mcpServers": [] }),
-            2,
-        )?;
-        // 把这一轮钉在免费模型上；失败不当致命错（这一轮还是要跑完）
-        if let Err(message) = rpc(
-            "session/set_model",
-            json!({ "sessionId": session_id, "modelId": model }),
-            3,
-        ) {
-            eprintln!("[workbench] 网页通道设置模型失败：{message}");
-        }
-        rpc(
-            "session/prompt",
-            json!({
-                "sessionId": session_id,
-                "prompt": [{ "type": "text", "text": prompt }]
-            }),
-            4,
-        )?;
-        Ok(())
-    })();
-
-    let deadline = std::time::Instant::now() + Duration::from_secs(wait_seconds);
-    let mut status_text = String::new();
-    let mut error = String::new();
-    let mut finished = false;
-    if result.is_ok() {
-        while std::time::Instant::now() < deadline {
-            match conversation_status(account, conversation) {
-                Ok(value) => {
-                    status_text = value;
-                    if status_text == "completed" {
-                        finished = true;
-                        break;
-                    }
-                    if status_text == "failed" || status_text == "error" {
-                        error = format!("会话状态={status_text}");
-                        break;
-                    }
-                }
-                Err(message) => eprintln!("[workbench] 查询会话状态失败：{message}"),
-            }
-            std::thread::sleep(Duration::from_secs(3));
-        }
-    } else if let Err(message) = result {
-        error = message;
-    }
-
-    stop.store(true, Ordering::Relaxed);
-    // 读线程自己会在下一次读到数据或超时后退出；不 join，避免收尾时被它拖住。
-    drop(worker);
-
-    if !finished && error.is_empty() {
-        error = format!(
-            "会话在 {wait_seconds}s 内没有跑完（状态={}）",
-            if status_text.is_empty() {
-                "未知"
-            } else {
-                &status_text
-            }
-        );
-    }
-    if !error.is_empty() {
-        return Err(error);
-    }
-    Ok(WebTurn {
-        status: if status_text.is_empty() {
-            "completed".to_string()
-        } else {
-            status_text
-        },
-        chunks: chunks.load(Ordering::Relaxed),
-        elapsed_ms: started.elapsed().as_millis() as i64,
-    })
-}
-
-fn acp_request(link: &str, token: &str, connection_id: &str, body: &Value) -> Result<(), String> {
-    let authorization = format!("Bearer {token}");
-    let headers = vec![
-        ("Content-Type", "application/json"),
-        ("Accept", "application/json, text/event-stream"),
-        ("Acp-Connection-Id", connection_id),
-        ("Authorization", authorization.as_str()),
-        ("User-Agent", WEB_UA),
-    ];
-    let payload = body.to_string();
-    // 带着网页会话的 bearer：不跟跳转，免得被 302 到别处
-    let response = http::request_url_no_redirects("POST", link, &headers, Some(&payload))?;
-    if response.status != 200 && response.status != 202 {
-        return Err(format!(
-            "{} 返回 HTTP {}",
-            text_at(body, "method"),
-            response.status
-        ));
-    }
-    Ok(())
-}
-
-fn conversation_status(account: &Account, conversation: &str) -> Result<String, String> {
-    let value = send_json(
-        account,
-        "GET",
-        &conversation_url(conversation, ""),
-        &web_headers(account),
-        None,
-    )?;
-    Ok(text_at(data(&value), "status"))
-}
-
-/// SSE 增量解析：只数事件与输出段，正文本身不要。
-#[derive(Default)]
-struct SseReader {
-    buffer: Vec<u8>,
-}
-
-impl SseReader {
-    fn feed(&mut self, piece: &[u8], updates: &AtomicUsize, chunks: &AtomicUsize) {
-        self.buffer.extend_from_slice(piece);
-        while let Some(index) = self.buffer.iter().position(|byte| *byte == b'\n') {
-            let line: Vec<u8> = self.buffer.drain(..=index).collect();
-            let text = String::from_utf8_lossy(&line);
-            let Some(payload) = text.trim().strip_prefix("data:") else {
-                continue;
-            };
-            let payload = payload.trim();
-            if payload.is_empty() || payload == "[DONE]" {
-                continue;
-            }
-            let Ok(message) = serde_json::from_str::<Value>(payload) else {
-                continue;
-            };
-            if message.get("method").and_then(Value::as_str) != Some("session/update") {
-                continue;
-            }
-            updates.fetch_add(1, Ordering::Relaxed);
-            let update = message
-                .get("params")
-                .and_then(|params| params.get("update"))
-                .cloned()
-                .unwrap_or(Value::Null);
-            if update.get("sessionUpdate").and_then(Value::as_str) == Some("agent_message_chunk") {
-                chunks.fetch_add(1, Ordering::Relaxed);
-            }
-        }
-    }
-}
-
 // ---------- 活动记录 ----------
 
 /// 一行尝试。返回是否写成功；**写失败绝不影响签到本身**。
@@ -1954,7 +1422,6 @@ pub fn record_activity(account: &Account, task: &str, ok: bool, message: &str) {
         date: local_date(),
         uid: account.uid.clone(),
         nickname: account.label(),
-        realm: account.realm.as_str().to_string(),
         task: task.to_string(),
         ok,
         message: safe_message(message),
@@ -2127,12 +1594,11 @@ fn civil_from_days(days: i64) -> (i64, i64, i64) {
 mod tests {
     use super::*;
 
-    fn sample_account(realm: Realm) -> Account {
+    fn sample_account() -> Account {
         Account {
             uid: "u-1".into(),
             nickname: "小明".into(),
             domain: String::new(),
-            realm,
             product: wb_identity::Identity::Workbuddy,
             enterprise_id: String::new(),
             access_token: "tok".into(),
@@ -2192,7 +1658,7 @@ mod tests {
 
     #[test]
     fn 事件里的专家_id_随下标轮换() {
-        let account = sample_account(Realm::Codebuddy);
+        let account = sample_account();
         let first = build_event(&account, "expert", 0, Some(EXPERT_ID_POOL[0]));
         let second = build_event(&account, "expert", 1, Some(EXPERT_ID_POOL[1]));
         assert_eq!(first["eventCode"], "expert_actual_use");
@@ -2205,7 +1671,7 @@ mod tests {
 
     #[test]
     fn 夜猫子事件带夜间模式与_glm_模型() {
-        let account = sample_account(Realm::Codebuddy);
+        let account = sample_account();
         let event = build_event(&account, "cat", 0, None);
         assert_eq!(event["mode"], "night");
         assert_eq!(event["requestModelId"], "glm-5.2");
@@ -2214,7 +1680,7 @@ mod tests {
 
     #[test]
     fn 未接取任务不推进度() {
-        let account = sample_account(Realm::Codebuddy);
+        let account = sample_account();
         let task = GrowthTask {
             task_code: "chat_5".into(),
             name: "发起 5 次对话".into(),
@@ -2238,7 +1704,7 @@ mod tests {
 
     #[test]
     fn 无法自动化的任务跳过并给出原因() {
-        let account = sample_account(Realm::Codebuddy);
+        let account = sample_account();
         let task = GrowthTask {
             task_code: "Expert_Philanthropy".into(),
             name: "公益爱心捐赠".into(),
@@ -2286,65 +1752,5 @@ mod tests {
         let yesterday = local_date_offset(-1);
         assert_eq!(yesterday.len(), 10);
         assert_ne!(yesterday, date);
-    }
-
-    #[test]
-    fn 国际版账号不跑国内任务() {
-        let account = sample_account(Realm::Workbuddy);
-        let outcome = run_growth_tasks(&account, 0.0);
-        assert!(!outcome.ok);
-        assert!(outcome.msg.contains("国际版"));
-    }
-
-    #[test]
-    fn 每日活跃请求的首条消息是_system() {
-        let body: Value = serde_json::from_str(&daily_chat_body(DAILY_CHAT_MODEL)).unwrap();
-        let messages = body["messages"].as_array().unwrap();
-        assert_eq!(messages[0]["role"], "system");
-        assert_eq!(messages[0]["content"], DEFAULT_SYSTEM_PROMPT);
-        assert_eq!(messages[1]["role"], "user");
-        assert_eq!(body["reasoning_effort"], "none");
-    }
-
-    /// 真打上游：拿本机已登录的国际版账号只跑桌面腿（不建网页会话）。
-    ///
-    /// 跑法：`cargo test wb_tasks::tests::真打一次每日活跃桌面腿 -- --ignored --nocapture`
-    /// 只打印结果，不打印任何 token。
-    #[test]
-    #[ignore = "真打上游，需要本机已登录国际版账号且在网"]
-    fn 真打一次每日活跃桌面腿() {
-        let accounts = crate::wb_account::load_all(&crate::paths::gateway_accounts_dir());
-        let account = accounts
-            .iter()
-            .find(|item| item.realm == Realm::Workbuddy && item.enabled)
-            .expect("本机还没有国际版账号，先在网关页登录一个");
-        match daily_chat_desktop(account) {
-            Ok(model) => println!("{} · 桌面腿成功（模型 {model}）", account.label()),
-            Err(message) => panic!("{} · 桌面腿失败：{message}", account.label()),
-        }
-    }
-
-    /// 真打上游：桌面腿 + 网页通道各跑一次（会真的建一个网页会话）。
-    ///
-    /// 跑法：`cargo test wb_tasks::tests::真打一次网页通道 -- --ignored --nocapture`
-    #[test]
-    #[ignore = "真打上游，会真的建网页会话"]
-    fn 真打一次网页通道() {
-        let accounts = crate::wb_account::load_all(&crate::paths::gateway_accounts_dir());
-        let account = accounts
-            .iter()
-            .find(|item| item.realm == Realm::Workbuddy && item.enabled)
-            .expect("本机还没有国际版账号，先在网关页登录一个");
-        let model = daily_chat_desktop(account).expect("桌面腿失败");
-        match daily_chat_web_once(account, WEB_TURN_TIMEOUT_SECS, &model) {
-            Ok(turn) => println!(
-                "{} · 网页通道成功（模型 {model}，状态 {}，{} 段输出，{} ms）",
-                account.label(),
-                turn.status,
-                turn.chunks,
-                turn.elapsed_ms
-            ),
-            Err(message) => panic!("{} · 网页通道失败：{message}", account.label()),
-        }
     }
 }

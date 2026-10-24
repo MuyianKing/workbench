@@ -208,6 +208,9 @@ importers:
       '@workbench/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@workbench/etf':
+        specifier: workspace:*
+        version: link:../../packages/etf
       '@workbench/kb':
         specifier: workspace:*
         version: link:../../packages/kb
@@ -338,6 +341,12 @@ importers:
       '@types/markdown-it':
         specifier: ^14.2.0
         version: 14.2.0
+      vitest:
+        specifier: ^5.0.3
+        version: 5.0.3(@types/node@26.6.4)(vite@8.3.2(@types/node@26.6.4)(yaml@2.9.1))
+
+  packages/etf:
+    devDependencies:
       vitest:
         specifier: ^5.0.3
         version: 5.0.3(@types/node@26.6.4)(vite@8.3.2(@types/node@26.6.4)(yaml@2.9.1))

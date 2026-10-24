@@ -1097,7 +1097,7 @@ export interface AiRunInput {
 
 export interface WorkbenchApi {
   /**
-   * 网关（WorkBuddy / CodeBuddy 反代）。
+   * 网关（CodeBuddy 反代）。
    *
    * 这一段整体是新增的一处**网络出口**：只有用户自己点「登录」或「启动」之后才会
    * 连上游；默认不启动、不监听。账号视图里不含 token，余额查询是显式动作
@@ -1108,8 +1108,7 @@ export interface WorkbenchApi {
   gatewayStop: () => Promise<Result<null>>
   gatewayAccounts: () => Promise<Result<import('./workbench/gateway').GatewayAccount[]>>
   gatewayReload: () => Promise<Result<null>>
-  /** `realm` 收 `workbuddy`（国际）/ `codebuddy`（国内） */
-  gatewayLoginStart: (realm: string) => Promise<Result<import('./workbench/gateway').GatewayLoginStart>>
+  gatewayLoginStart: () => Promise<Result<import('./workbench/gateway').GatewayLoginStart>>
   gatewayLoginPoll: (loginState: string) => Promise<Result<import('./workbench/gateway').GatewayLoginPoll>>
   gatewayCredits: (uid: string) => Promise<Result<import('./workbench/gateway').GatewayCredits>>
   gatewayModels: () => Promise<Result<import('./workbench/gateway').GatewayModelInfo[]>>
@@ -1135,10 +1134,8 @@ export interface WorkbenchApi {
   gatewayTasksRun: (uid?: string) => Promise<Result<import('./workbench/gateway').GatewayTaskRun>>
   gatewayTasksTravel: (uid?: string) => Promise<Result<import('./workbench/gateway').GatewayActionResult[]>>
   gatewayTasksStreak: (uid?: string) => Promise<Result<import('./workbench/gateway').GatewayActionResult[]>>
-  /** Buddy 加油站签到（国内版） */
+  /** Buddy 加油站签到 */
   gatewayCheckin: (uid?: string) => Promise<Result<import('./workbench/gateway').GatewayActionResult[]>>
-  /** 国际版每日活跃；传 `uids` 只打名单里那批 */
-  gatewayDailyChat: (uids?: string[]) => Promise<Result<import('./workbench/gateway').GatewayActionResult[]>>
   gatewayActivityToday: () => Promise<Result<import('./workbench/gateway').GatewayActivityRow[]>>
   versions: { node: string, chrome: string }
   /**
@@ -1752,6 +1749,12 @@ export interface WorkbenchApi {
   ballContext: () => Promise<Result<BallContext>>
   /** 收起 / 展开（意图与防抖在渲染层，窗口尺寸与位置在 Rust） */
   ballOpen: (open: boolean) => Promise<Result<BallContext>>
+  /**
+   * 按住球开始拖：**跑到松手才返回**，回包是落定之后的状态（贴边收起 / 浮着摊开）。
+   * 窗口由 Rust 按光标位置自己搬 —— 系统那条移动循环对这扇窗只画一个矩形轮廓
+   * （见 docs/modules/float-ball.md）。
+   */
+  ballDrag: () => Promise<Result<BallContext>>
   /** 双击球：把主界面唤出来（它可能收在托盘里） */
   ballOpenMain: () => Promise<Result<null>>
   /**

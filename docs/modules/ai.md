@@ -15,6 +15,7 @@ AI 助手（ai）的文档：先读「约束」一节（不能破的规矩）；
 `workbench/pi-skill.ts`（技能四条通道适配）、`stores/ai.ts`（编排、每会话运行态、确认队列、服务增删改与 models.json 对齐）、
 `stores/ai-skills.ts`（两栏扫描、开关、装 / 卸）；组件：`AiView.vue`（左树右对话，左栏底部一行是技能入口与收起开关）、
 `AiSessionTree.vue`、`AiLocationBar.vue`（两屏共用）、`AiComposer.vue`（贴图缩略图与 `/skill:` 候选）、
+`AiModelMenu.vue`（composer 那颗「模型」chip 与它的浮层：模型管理入口、模型清单、思考强度滑杆）、
 `AiSkillDialog.vue`、`AiRunPanel.vue`（对话画法与确认条）、`AiPreviewPane.vue`（右侧预览栏）、
 `AiModelDialog.vue` / `AiProviderDialog.vue` / `AiPresetGrid.vue` / `AiModelPicker.vue`（模型管理三层）。
 
@@ -268,8 +269,13 @@ AI 助手（ai）的文档：先读「约束」一节（不能破的规矩）；
   Pi 按目录分组，换目录 = 新建会话），起始屏上它**就是挑目录的地方**（最近目录 + 「选择其他目录…」，
   只记在 `newDir`）；不是仓库或分离头指针时分支格不出现（分支来自 `note_repo_state` 那条通用探测，见
   [../notes/constraints.md](notes.md)；探测是 AiView 的 `refreshRepo`，分支值作 prop 递进位置栏）。
-  `AiComposer.vue`：输入框 + 一行控件（左权限、右模型 / 思考 / 发送-停止），Enter 发送
-  （Shift+Enter 换行，输入法选字的 Enter 不算）。**指令与贴的图归 AiView 持有**（两屏各一条 composer
+  `AiComposer.vue`：输入框 + 一行控件（左权限，右「模型」chip 与发送-停止），Enter 发送
+  （Shift+Enter 换行，输入法选字的 Enter 不算）。**挑模型与换思考档合成一颗 chip**：点开
+  `AiModelMenu.vue` 的浮层（照用户点名的参考设计画）—— 顶行「模型管理」入口（深色圆角方块
+  图标 + 右箭头，报给页面开模型管理弹层）、模型清单（行上模型名 + 服务名描边小签，选中行末尾
+  打勾、清单多了自己滚）、底部思考强度滑杆（只列这个模型支持的档位，整条绿→蓝渐变 + 白圆钮
+  是参考样式的彩色，不进全局令牌；不支持思考的模型只有档名没有滑杆）；收放走
+  `use-floating-dismiss`（点别处 / Esc / 面板外滚轮收，**面板里的滚轮不收** —— 清单要能滚），**指令与贴的图归 AiView 持有**（两屏各一条 composer
   实例，放页面这层才换屏不丢；composer 经 `update:instruction` / `add-images` / `remove-image` 回报，
   `send` 事件把那句交给页面、页面转 `run`，store 说收下了才清空输入框），`canRun` / `blocking` 也长在
   composer 上。贴图（Ctrl+V）一行缩略图、上限 `AI_IMAGE_MAX` 张、点开 `el-image` 看大图、

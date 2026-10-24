@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "capture",
-  "description": "截图遮罩、钉图与悬浮球窗口的能力。这几族窗口只做三件事，所以权限是刻意最小的：一，调自己那几条 capture_* / pin_* / ball_* 命令（命令本身不走 ACL）；二，「另存为」要弹系统对话框（dialog:default）；三，钉图与悬浮球整张标了 data-tauri-drag-region，拖动要放行 core:window:allow-start-dragging —— 被 ACL 拦下是静默失效（拖不动，也不报错）。窗口的位置 / 尺寸 / 置顶 / 鼠标穿透都由 Rust 自己设（见 capture.rs / pin.rs / ball.rs），前端一条都不碰，所以那几项权限一个都不给。",
+  "description": "截图遮罩、钉图与悬浮球窗口的能力。这几族窗口只做三件事，所以权限是刻意最小的：一，调自己那几条 capture_* / pin_* / ball_* 命令（命令本身不走 ACL）；二，「另存为」要弹系统对话框（dialog:default）；三，钉图整张标了 data-tauri-drag-region，拖动要放行 core:window:allow-start-dragging —— 被 ACL 拦下是静默失效（拖不动，也不报错）；悬浮球不走这条（系统移动循环对那扇透明小窗只画轮廓，改由 ball.rs 自己搬，见 docs/modules/float-ball.md）。窗口的位置 / 尺寸 / 置顶 / 鼠标穿透都由 Rust 自己设（见 capture.rs / pin.rs / ball.rs），前端一条都不碰，所以那几项权限一个都不给。",
   "windows": ["capture-*", "pin-*", "ball"],
   "permissions": [
     "core:default",

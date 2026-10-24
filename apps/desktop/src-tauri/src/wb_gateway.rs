@@ -14,7 +14,6 @@ use serde::{Deserialize, Serialize};
 use crate::wb_account::{self, Account};
 use crate::wb_api_auth::{self, LoginStart, PollOutcome};
 use crate::wb_credits::Credits;
-use crate::wb_realm::Realm;
 use crate::wb_server::{self, Server};
 
 /// 持久化配置。字段少，所以直接读写文件（不必上 `JsonStore` 的防抖那一套 ——
@@ -52,14 +51,13 @@ struct Inner {
     /// 从磁盘载入的账号。第一次用到时载入，之后由命令与对话路径共同维护
     accounts: Vec<Account>,
     loaded: bool,
-    /// 进行中的登录：state → 区域与发起时刻。十分钟不用就回收
+    /// 进行中的登录：state → 发起时刻。十分钟不用就回收
     logins: HashMap<String, LoginSession>,
     /// 生效中的访问密钥（启动时从配置里取，没有就现生成）
     api_key: String,
 }
 
 struct LoginSession {
-    realm: Realm,
     created: i64,
 }
 
@@ -296,8 +294,6 @@ pub struct Access {
 pub struct AccountView {
     pub uid: String,
     pub label: String,
-    pub realm: String,
-    pub realm_label: String,
     pub product: String,
     pub enterprise: bool,
     pub enabled: bool,
@@ -329,16 +325,13 @@ pub struct ModelQuotaView {
 #[tauri::command(async)]
 pub fn wb_gateway_login_start(
     state: tauri::State<'_, Gateway>,
-    realm: String,
 ) -> Result<LoginStart, String> {
-    let realm = Realm::parse(&realm).ok_or_else(|| format!("不认识的区域：{realm}"))?;
-    let start = wb_api_auth::start_login(realm)?;
+    let start = wb_api_auth::start_login()?;
     let mut inner = state.lock()?;
     inner.prune_logins();
     inner.logins.insert(
         start.state.clone(),
         LoginSession {
-            realm,
             created: now_secs(),
         },
     );
@@ -351,15 +344,14 @@ pub fn wb_gateway_login_poll(
     state: tauri::State<'_, Gateway>,
     login_state: String,
 ) -> Result<LoginPoll, String> {
-    let realm = {
+    {
         let inner = state.lock()?;
-        match inner.logins.get(login_state.trim()) {
-            Some(session) => session.realm,
-            None => return Err("这个登录已过期或不存在，请重新发起".into()),
+        if !inner.logins.contains_key(login_state.trim()) {
+            return Err("这个登录已过期或不存在，请重新发起".into());
         }
-    };
+    }
 
-    match wb_api_auth::poll_login(realm, &login_state)? {
+    match wb_api_auth::poll_login(&login_state)? {
         PollOutcome::Pending(message) => Ok(LoginPoll {
             done: false,
             message,
@@ -717,17 +709,11 @@ fn snapshot_accounts(state: &tauri::State<'_, Gateway>) -> Result<Vec<Account>, 
     Ok(inner.accounts.clone())
 }
 
-/// 按区域与 uid 选目标：`uid` 为空 / `all` 时取该区域全部**已启用**的号。
-fn targets_of(accounts: Vec<Account>, realm: Realm, uid: Option<&str>) -> Vec<Account> {
+/// 按 uid 选目标：`uid` 为空 / `all` 时取全部**已启用**的号。
+fn targets_of(accounts: Vec<Account>, uid: Option<&str>) -> Vec<Account> {
     match uid.map(str::trim).filter(|value| !value.is_empty() && *value != "all") {
-        Some(uid) => accounts
-            .into_iter()
-            .filter(|item| item.uid == uid && item.realm == realm)
-            .collect(),
-        None => accounts
-            .into_iter()
-            .filter(|item| item.realm == realm && item.enabled)
-            .collect(),
+        Some(uid) => accounts.into_iter().filter(|item| item.uid == uid).collect(),
+        None => accounts.into_iter().filter(|item| item.enabled).collect(),
     }
 }
 
@@ -765,14 +751,14 @@ pub fn wb_gateway_tasks(
     state: tauri::State<'_, Gateway>,
     uid: Option<String>,
 ) -> Result<TasksSnapshot, String> {
-    let cn = targets_of(snapshot_accounts(&state)?, Realm::Codebuddy, None);
+    let cn = targets_of(snapshot_accounts(&state)?, None);
     if cn.is_empty() {
         return Ok(TasksSnapshot {
             tasks: Vec::new(),
             summary: Default::default(),
             account: String::new(),
             accounts: Vec::new(),
-            msg: "未找到可用的国内版账号".into(),
+            msg: "未找到可用的账号".into(),
         });
     }
     let accounts = cn
@@ -790,7 +776,7 @@ pub fn wb_gateway_tasks(
             .or_else(|| cn.first().cloned()),
         None => cn.first().cloned(),
     }
-    .ok_or_else(|| "未找到可用的国内版账号".to_string())?;
+    .ok_or_else(|| "未找到可用的账号".to_string())?;
 
     if refresh_if_needed(&mut target)? {
         persist_tokens(&state, &target);
@@ -818,9 +804,9 @@ pub fn wb_gateway_tasks_run(
     state: tauri::State<'_, Gateway>,
     uid: Option<String>,
 ) -> Result<TaskRun, String> {
-    let targets = targets_of(snapshot_accounts(&state)?, Realm::Codebuddy, uid.as_deref());
+    let targets = targets_of(snapshot_accounts(&state)?, uid.as_deref());
     if targets.is_empty() {
-        return Err("未找到已启用的国内版账号".into());
+        return Err("未找到已启用的账号".into());
     }
 
     let mut logs: Vec<String> = Vec::new();
@@ -865,9 +851,9 @@ pub fn wb_gateway_tasks_travel(
     state: tauri::State<'_, Gateway>,
     uid: Option<String>,
 ) -> Result<Vec<ActionResult>, String> {
-    let targets = targets_of(snapshot_accounts(&state)?, Realm::Codebuddy, uid.as_deref());
+    let targets = targets_of(snapshot_accounts(&state)?, uid.as_deref());
     if targets.is_empty() {
-        return Err("未找到已启用的国内版账号".into());
+        return Err("未找到已启用的账号".into());
     }
     let mut results = Vec::new();
     for mut account in targets {
@@ -903,9 +889,9 @@ pub fn wb_gateway_tasks_streak(
     state: tauri::State<'_, Gateway>,
     uid: Option<String>,
 ) -> Result<Vec<ActionResult>, String> {
-    let targets = targets_of(snapshot_accounts(&state)?, Realm::Codebuddy, uid.as_deref());
+    let targets = targets_of(snapshot_accounts(&state)?, uid.as_deref());
     if targets.is_empty() {
-        return Err("未找到已启用的国内版账号".into());
+        return Err("未找到已启用的账号".into());
     }
     let mut results = Vec::new();
     for mut account in targets {
@@ -941,9 +927,9 @@ pub fn wb_gateway_checkin(
     state: tauri::State<'_, Gateway>,
     uid: Option<String>,
 ) -> Result<Vec<ActionResult>, String> {
-    let targets = targets_of(snapshot_accounts(&state)?, Realm::Codebuddy, uid.as_deref());
+    let targets = targets_of(snapshot_accounts(&state)?, uid.as_deref());
     if targets.is_empty() {
-        return Err("未找到已启用的国内版账号".into());
+        return Err("未找到已启用的账号".into());
     }
     let mut results = Vec::new();
     for mut account in targets {
@@ -972,48 +958,7 @@ pub fn wb_gateway_checkin(
     Ok(results)
 }
 
-/// 国际版每日活跃打卡。`uids` 给了就只打名单里那批（「未活跃一键打卡」），
-/// 给空数组就是一个都不打 —— 名单是调用方的明确意图，不能悄悄回落成「全部」。
-#[tauri::command(async)]
-pub fn wb_gateway_daily_chat(
-    state: tauri::State<'_, Gateway>,
-    uids: Option<Vec<String>>,
-) -> Result<Vec<ActionResult>, String> {
-    let mut targets = targets_of(snapshot_accounts(&state)?, Realm::Workbuddy, None);
-    if let Some(wanted) = uids {
-        targets.retain(|item| wanted.iter().any(|uid| uid == &item.uid));
-    }
-    if targets.is_empty() {
-        return Err("未找到已启用的国际版账号".into());
-    }
-    let mut results = Vec::new();
-    for mut account in targets {
-        if let Err(message) = refresh_if_needed(&mut account) {
-            results.push(ActionResult {
-                uid: account.uid.clone(),
-                nickname: account.label(),
-                ok: false,
-                message: format!("续期失败：{message}"),
-                action: String::new(),
-                credit: 0,
-            });
-            continue;
-        }
-        persist_tokens(&state, &account);
-        let outcome = crate::wb_tasks::daily_chat(&account);
-        results.push(ActionResult {
-            uid: account.uid.clone(),
-            nickname: account.label(),
-            ok: outcome.ok,
-            message: outcome.msg,
-            action: String::new(),
-            credit: 0,
-        });
-    }
-    Ok(results)
-}
-
-/// 今天的签到 / 每日活跃尝试（`activity.jsonl` 里今天那一段）。
+/// 今天的签到尝试（`activity.jsonl` 里今天那一段）。
 #[tauri::command(async)]
 pub fn wb_gateway_activity_today() -> Vec<crate::wb_tasks::ActivityRow> {
     crate::wb_tasks::read_today()
@@ -1025,8 +970,6 @@ fn view_of(account: &Account) -> AccountView {
     AccountView {
         uid: account.uid.clone(),
         label: account.label(),
-        realm: account.realm.as_str().to_string(),
-        realm_label: account.realm.config().label.to_string(),
         product: account.product.as_str().to_string(),
         enterprise: !account.enterprise_id.trim().is_empty(),
         enabled: account.enabled,
@@ -1150,7 +1093,6 @@ mod tests {
             uid: uid.into(),
             nickname: String::new(),
             domain: String::new(),
-            realm: Realm::Workbuddy,
             product: crate::wb_identity::Identity::Workbuddy,
             enterprise_id: String::new(),
             access_token: "tok".into(),

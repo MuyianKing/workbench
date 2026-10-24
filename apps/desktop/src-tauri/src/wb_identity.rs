@@ -15,7 +15,7 @@
 //! 取熵（`uuid` 本来就在依赖里，不为四个随机 bit 再引 `rand`）。
 
 use crate::encoding::sha256;
-use crate::wb_realm::Realm;
+use crate::wb_upstream;
 
 /// 出站身分。序列化用上游那套词（`workbuddy` / `vscode` / `cli`）。
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -204,7 +204,6 @@ pub fn conversation_id_for(uid: &str, session_key: &str) -> Option<String> {
 
 /// 拼一份聊天请求所需的全部头。`ids` 由 [`new_ids`] 预先算好，这里纯函数。
 pub struct ChatHeaders<'a> {
-    pub realm: Realm,
     pub identity: Identity,
     pub uid: &'a str,
     pub token: &'a str,
@@ -213,7 +212,7 @@ pub struct ChatHeaders<'a> {
     pub tenant_id: &'a str,
     pub department: &'a str,
     pub model: Option<&'a str>,
-    /// 国内版才用得上；客户端真实设备 token，网关一般拿不到
+    /// 客户端真实设备 token，网关一般拿不到
     pub device_token: Option<&'a str>,
 }
 
@@ -226,7 +225,6 @@ fn push(headers: &mut Headers, name: &str, value: impl Into<String>) {
 
 /// 聊天请求头。顺序按原项目的字面顺序，方便与抓包对照。
 pub fn chat_headers(input: &ChatHeaders<'_>) -> Headers {
-    let cfg = input.realm.config();
     let uid = if input.uid.trim().is_empty() {
         "anonymous"
     } else {
@@ -239,10 +237,10 @@ pub fn chat_headers(input: &ChatHeaders<'_>) -> Headers {
         push(&mut headers, "Content-Type", "application/json");
         push(&mut headers, "Accept", "application/json, text/plain, */*");
         push(&mut headers, "X-Requested-With", "XMLHttpRequest");
-        push(&mut headers, "Origin", cfg.origin);
-        push(&mut headers, "Referer", format!("{}/", cfg.origin));
+        push(&mut headers, "Origin", wb_upstream::ORIGIN);
+        push(&mut headers, "Referer", format!("{}/", wb_upstream::ORIGIN));
         push(&mut headers, "X-CodeBuddy-Request", "1");
-        push(&mut headers, "Accept-Language", cfg.accept_language);
+        push(&mut headers, "Accept-Language", wb_upstream::ACCEPT_LANGUAGE);
     } else {
         push(&mut headers, "Content-Type", "application/json");
         push(&mut headers, "Accept", "application/json");
@@ -256,11 +254,11 @@ pub fn chat_headers(input: &ChatHeaders<'_>) -> Headers {
             push(&mut headers, "X-Agent-Type", "main");
             push(&mut headers, "X-IDE-Name", "WorkBuddy");
             push(&mut headers, "X-IDE-Type", "WorkBuddy");
-            push(&mut headers, "X-IDE-Version", client_version(input.realm));
+            push(&mut headers, "X-IDE-Version", client_version());
             push(&mut headers, "X-Private-Data", "true");
             push(&mut headers, "X-Product", "SaaS");
-            push(&mut headers, "X-Domain", cfg.domain);
-            push(&mut headers, "User-Agent", cfg.chat_ua);
+            push(&mut headers, "X-Domain", wb_upstream::DOMAIN);
+            push(&mut headers, "User-Agent", wb_upstream::CHAT_UA);
             push(&mut headers, "X-User-Id", uid);
             push(&mut headers, "Authorization", format!("Bearer {}", input.token));
             push(&mut headers, "X-Conversation-ID", &input.ids.conversation);
@@ -293,7 +291,7 @@ pub fn chat_headers(input: &ChatHeaders<'_>) -> Headers {
             // 主 chat 路径官方代码里没有 X-Product；这里保留是原项目的现状，
             // 「主 chat 到底发不发」还等抓包确认，先不动。
             push(&mut headers, "X-Product", "SaaS");
-            push(&mut headers, "X-Domain", cfg.domain);
+            push(&mut headers, "X-Domain", wb_upstream::DOMAIN);
             push(&mut headers, "User-Agent", vscode_ua());
             push(&mut headers, "X-User-Id", uid);
             push(&mut headers, "Authorization", format!("Bearer {}", input.token));
@@ -318,10 +316,6 @@ pub fn chat_headers(input: &ChatHeaders<'_>) -> Headers {
                 push(&mut headers, "monitor_promptPrepareStartTime", &now_ms);
                 push(&mut headers, "monitor_httpSendTime", &now_ms);
             }
-            // 官方按 endpoint 判断：只有国内站不发 X-Private-Data
-            if input.realm == Realm::Workbuddy {
-                push(&mut headers, "X-Private-Data", "true");
-            }
             push_trace(&mut headers, TraceStyle::Vscode);
         }
         Identity::Cli => {
@@ -333,7 +327,7 @@ pub fn chat_headers(input: &ChatHeaders<'_>) -> Headers {
             push(&mut headers, "X-IDE-Name", "CLI");
             push(&mut headers, "X-IDE-Version", CLI_IDE_VERSION);
             push(&mut headers, "X-Product", "SaaS");
-            push(&mut headers, "X-Domain", cfg.domain);
+            push(&mut headers, "X-Domain", wb_upstream::DOMAIN);
             push(
                 &mut headers,
                 "User-Agent",
@@ -387,18 +381,12 @@ pub fn chat_headers(input: &ChatHeaders<'_>) -> Headers {
         push(&mut headers, "X-Department-Info", input.department);
     }
 
-    // 设备 token：只有国内版会发（国际版客户端根本没有这个头）。
-    // CLI 身份不发；VSCode 非企业号按官方失败态发 error 占位 —— 官方是
-    // `token || error` 二选一，两者都不发是官方不存在的状态。
+    // 设备 token：国内版客户端会发。CLI 身份不发；VSCode 非企业号按官方失败态
+    // 发 error 占位 —— 官方是 `token || error` 二选一，两者都不发是官方不存在的状态。
     if input.identity != Identity::Cli {
         if let Some(token) = input.device_token.map(str::trim).filter(|v| !v.is_empty()) {
-            if input.realm == Realm::Codebuddy {
-                push(&mut headers, "X-Device-Token", token);
-            }
-        } else if input.identity == Identity::Vscode
-            && input.enterprise_id.trim().is_empty()
-            && input.realm == Realm::Codebuddy
-        {
+            push(&mut headers, "X-Device-Token", token);
+        } else if input.identity == Identity::Vscode && input.enterprise_id.trim().is_empty() {
             push(&mut headers, "X-Device-Token-Error", "sdk_not_initialized");
         }
     }
@@ -406,11 +394,10 @@ pub fn chat_headers(input: &ChatHeaders<'_>) -> Headers {
     headers
 }
 
-fn client_version(realm: Realm) -> &'static str {
+fn client_version() -> &'static str {
     // 桌面端的版本段与 UA 首段的版本是同一个数，从 UA 里抠出来会绕，
-    // 但写两份又回到原项目"漏改一份"的老路 —— 所以从配置里派生。
-    let ua = realm.config().chat_ua;
-    let after_prefix = ua.trim_start_matches("WorkBuddy/");
+    // 但写两份又回到原项目"漏改一份"的老路 —— 所以从常量里派生。
+    let after_prefix = wb_upstream::CHAT_UA.trim_start_matches("WorkBuddy/");
     after_prefix
         .split_whitespace()
         .next()
@@ -505,9 +492,8 @@ pub fn header_value<'a>(headers: &'a Headers, name: &str) -> Option<&'a str> {
 mod tests {
     use super::*;
 
-    fn input<'a>(realm: Realm, identity: Identity, ids: &'a Ids) -> ChatHeaders<'a> {
+    fn input<'a>(identity: Identity, ids: &'a Ids) -> ChatHeaders<'a> {
         ChatHeaders {
-            realm,
             identity,
             uid: "uid-1",
             token: "tok",
@@ -586,18 +572,18 @@ mod tests {
     #[test]
     fn 桌面端的头是完整的一套() {
         let ids = new_ids(Identity::Workbuddy, "u", None, None, None);
-        let headers = chat_headers(&input(Realm::Workbuddy, Identity::Workbuddy, &ids));
+        let headers = chat_headers(&input(Identity::Workbuddy, &ids));
 
-        // wrapper
-        assert_eq!(header_value(&headers, "Origin"), Some("https://www.workbuddy.ai"));
+        // wrapper：Origin 是 codebuddy.cn，X-Domain 仍是 copilot
+        assert_eq!(header_value(&headers, "Origin"), Some("https://www.codebuddy.cn"));
         assert_eq!(header_value(&headers, "X-CodeBuddy-Request"), Some("1"));
-        assert_eq!(header_value(&headers, "Accept-Language"), Some("en-US"));
+        assert_eq!(header_value(&headers, "Accept-Language"), Some("zh-CN"));
         // 身分
         assert_eq!(header_value(&headers, "X-IDE-Name"), Some("WorkBuddy"));
-        assert_eq!(header_value(&headers, "X-IDE-Version"), Some("5.8.4"));
+        assert_eq!(header_value(&headers, "X-IDE-Version"), Some("5.5.6"));
         assert_eq!(header_value(&headers, "X-Product"), Some("SaaS"));
         assert_eq!(header_value(&headers, "X-Private-Data"), Some("true"));
-        assert_eq!(header_value(&headers, "X-Domain"), Some("www.workbuddy.ai"));
+        assert_eq!(header_value(&headers, "X-Domain"), Some("copilot.tencent.com"));
         assert_eq!(header_value(&headers, "Authorization"), Some("Bearer tok"));
         // root 与 conversation_request 同值
         assert_eq!(
@@ -618,18 +604,16 @@ mod tests {
     #[test]
     fn 国内版的_origin_与_domain_不是一回事() {
         let ids = new_ids(Identity::Workbuddy, "u", None, None, None);
-        let headers = chat_headers(&input(Realm::Codebuddy, Identity::Workbuddy, &ids));
+        let headers = chat_headers(&input(Identity::Workbuddy, &ids));
         assert_eq!(header_value(&headers, "Origin"), Some("https://www.codebuddy.cn"));
         assert_eq!(header_value(&headers, "Referer"), Some("https://www.codebuddy.cn/"));
         assert_eq!(header_value(&headers, "X-Domain"), Some("copilot.tencent.com"));
-        assert_eq!(header_value(&headers, "Accept-Language"), Some("zh-CN"));
-        assert_eq!(header_value(&headers, "X-IDE-Version"), Some("5.5.6"));
     }
 
     #[test]
     fn vscode_不发_root_request_id_也不发_x_trace_id() {
         let ids = new_ids(Identity::Vscode, "u", None, None, None);
-        let headers = chat_headers(&input(Realm::Workbuddy, Identity::Vscode, &ids));
+        let headers = chat_headers(&input(Identity::Vscode, &ids));
         assert!(header_value(&headers, "X-Root-Request-ID").is_none());
         assert!(header_value(&headers, "X-Trace-ID").is_none());
         assert!(header_value(&headers, "traceparent").is_none());
@@ -642,10 +626,10 @@ mod tests {
     #[test]
     fn vscode_带_model_时才有_model_id() {
         let ids = new_ids(Identity::Vscode, "u", None, None, None);
-        let plain = chat_headers(&input(Realm::Workbuddy, Identity::Vscode, &ids));
+        let plain = chat_headers(&input(Identity::Vscode, &ids));
         assert!(header_value(&plain, "X-Model-ID").is_none());
 
-        let mut with_model = input(Realm::Workbuddy, Identity::Vscode, &ids);
+        let mut with_model = input(Identity::Vscode, &ids);
         with_model.model = Some("glm-5.2");
         let headers = chat_headers(&with_model);
         assert_eq!(header_value(&headers, "X-Model-ID"), Some("glm-5.2"));
@@ -653,15 +637,13 @@ mod tests {
     }
 
     #[test]
-    fn vscode_只在国际站发_private_data() {
+    fn vscode_不发_private_data_而是补设备占位() {
         let ids = new_ids(Identity::Vscode, "u", None, None, None);
-        let intl = chat_headers(&input(Realm::Workbuddy, Identity::Vscode, &ids));
-        assert_eq!(header_value(&intl, "X-Private-Data"), Some("true"));
-        let cn = chat_headers(&input(Realm::Codebuddy, Identity::Vscode, &ids));
-        assert!(header_value(&cn, "X-Private-Data").is_none());
-        // 国内站非企业号补失败态占位
+        let headers = chat_headers(&input(Identity::Vscode, &ids));
+        assert!(header_value(&headers, "X-Private-Data").is_none());
+        // 非企业号补失败态占位
         assert_eq!(
-            header_value(&cn, "X-Device-Token-Error"),
+            header_value(&headers, "X-Device-Token-Error"),
             Some("sdk_not_initialized")
         );
     }
@@ -669,7 +651,7 @@ mod tests {
     #[test]
     fn cli_没有浏览器头_但带_stainless() {
         let ids = new_ids(Identity::Cli, "u", None, Some("s"), None);
-        let headers = chat_headers(&input(Realm::Workbuddy, Identity::Cli, &ids));
+        let headers = chat_headers(&input(Identity::Cli, &ids));
         assert!(header_value(&headers, "Origin").is_none());
         assert!(header_value(&headers, "Referer").is_none());
         assert!(header_value(&headers, "X-CodeBuddy-Request").is_none());
@@ -688,10 +670,10 @@ mod tests {
     #[test]
     fn cli_的_private_data_按企业号分流() {
         let ids = new_ids(Identity::Cli, "u", None, Some("s"), None);
-        let personal = chat_headers(&input(Realm::Workbuddy, Identity::Cli, &ids));
+        let personal = chat_headers(&input(Identity::Cli, &ids));
         assert_eq!(header_value(&personal, "X-Private-Data"), Some("false"));
 
-        let mut enterprise = input(Realm::Workbuddy, Identity::Cli, &ids);
+        let mut enterprise = input(Identity::Cli, &ids);
         enterprise.enterprise_id = "ent-1";
         let headers = chat_headers(&enterprise);
         assert_eq!(header_value(&headers, "X-Private-Data"), Some("true"));
@@ -701,24 +683,19 @@ mod tests {
     }
 
     #[test]
-    fn 设备_token_只在国内版与桌面端出现() {
+    fn 设备_token_只在桌面端出现() {
         let ids = new_ids(Identity::Workbuddy, "u", None, None, None);
 
-        let mut cn = input(Realm::Codebuddy, Identity::Workbuddy, &ids);
-        cn.device_token = Some("dev-token");
+        let mut desktop = input(Identity::Workbuddy, &ids);
+        desktop.device_token = Some("dev-token");
         assert_eq!(
-            header_value(&chat_headers(&cn), "X-Device-Token"),
+            header_value(&chat_headers(&desktop), "X-Device-Token"),
             Some("dev-token")
         );
 
-        // 国际版即使配了也不发
-        let mut intl = input(Realm::Workbuddy, Identity::Workbuddy, &ids);
-        intl.device_token = Some("dev-token");
-        assert!(header_value(&chat_headers(&intl), "X-Device-Token").is_none());
-
         // CLI 身份无论如何不发
         let cli_ids = new_ids(Identity::Cli, "u", None, Some("s"), None);
-        let mut cli = input(Realm::Codebuddy, Identity::Cli, &cli_ids);
+        let mut cli = input(Identity::Cli, &cli_ids);
         cli.device_token = Some("dev-token");
         let headers = chat_headers(&cli);
         assert!(header_value(&headers, "X-Device-Token").is_none());
@@ -728,7 +705,7 @@ mod tests {
     #[test]
     fn 空_uid_回落成_anonymous() {
         let ids = new_ids(Identity::Workbuddy, "", None, None, None);
-        let mut request = input(Realm::Workbuddy, Identity::Workbuddy, &ids);
+        let mut request = input(Identity::Workbuddy, &ids);
         request.uid = "";
         assert_eq!(
             header_value(&chat_headers(&request), "X-User-Id"),

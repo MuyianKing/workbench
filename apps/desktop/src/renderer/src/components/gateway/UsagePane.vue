@@ -53,7 +53,6 @@ const names = ref<Record<string, string>>({})
 /** 明细表的一行：账号与模型两种维度摊平成同一个形状，模板只写一遍 */
 interface DetailRow {
   key: string
-  realm: string
   requests: number
   failed: number
   promptTokens: number
@@ -123,7 +122,6 @@ const detailRows = computed<DetailRow[]>(() => {
   if (dimension.value === 'model') {
     return data.byModel.map(item => ({
       key: item.model,
-      realm: '',
       requests: item.requests,
       failed: item.failed,
       promptTokens: item.promptTokens,
@@ -139,7 +137,6 @@ const detailRows = computed<DetailRow[]>(() => {
   }
   return data.byAccount.map(item => ({
     key: item.uid,
-    realm: item.realm,
     requests: item.requests,
     failed: item.failed,
     promptTokens: item.promptTokens,
@@ -392,7 +389,7 @@ onBeforeUnmount(() => {
           <template #default="{ row }">
             <template v-if="dimension === 'account'">
               <span class="usage__cell-name">{{ nameOf(row.key) }}</span>
-              <span class="usage__cell-id">{{ row.realm }} · {{ row.key.slice(0, 8) }}</span>
+              <span class="usage__cell-id">{{ row.key.slice(0, 8) }}</span>
             </template>
             <span v-else class="usage__mono" :title="row.key">{{ row.key }}</span>
           </template>

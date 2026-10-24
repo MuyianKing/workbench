@@ -879,6 +879,7 @@ function createApi(): WorkbenchApi {
     ballContext: () => guard(invoke<BallContext>('ball_context'), '取悬浮球状态失败'),
     ballOpen: (open: boolean) =>
       guard(invoke<BallContext>('ball_open', { open }), '收起 / 展开悬浮球失败'),
+    ballDrag: () => guard(invoke<BallContext>('ball_drag'), '拖动悬浮球失败'),
     ballOpenMain: () => {
       void invoke('ball_open_main')
       return Promise.resolve(ok(null))

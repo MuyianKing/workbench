@@ -8,12 +8,12 @@
  *  一，每秒问一次 `net_counters`，用 `@workbench/net-meter` 把累计字节算成速率与显示值；
  *  二，鼠标进出时告诉 Rust 收起 / 展开 —— 意图（含防抖）在这一侧，窗口操作在 Rust 那一侧；
  *      **浮在桌面上的球不收**（收起是「贴边」的形态），Rust 那边再拦一道；
- *  三，整块标 `data-tauri-drag-region="deep"` 把拖动交给系统（Rust 在 Moved / Resized 里把
- *      两个方向都夹进工作区，松手后判贴没贴边 —— 拖到哪就停在哪儿，不吸附）。
- *      **必须是 `deep`（整棵子树）**：裸属性只认「正好按在带属性的那个元素上」，
- *      球中间的数字、单位与刻度线都是子元素，按在那儿起不了拖动 —— 现象是「球抓不住、
- *      只能摸到某几处才拖得动」。球里没有一个可点元素（没有 a / button / tabindex），
- *      deep 不会顺手把别的交互吃掉。
+ *  三，`pointerdown` 时喊一声 `ball_drag`，窗口由 **Rust 按光标位置自己搬**（见 ball.rs 的
+ *      drag_loop）—— 系统那条 `data-tauri-drag-region` 的模态移动循环对这扇窗只画一个矩形
+ *      轮廓、不搬里面的内容（用户报的「拖动的时候球不走，只有一个矩形边框在走」）。
+ *      位置仍然一条都不经前端：这条命令跑到松手才返回，回包就是落定之后的状态。
+ *      **拖动期间不推收起 / 展开**：窗口在跟着光标跑，中途的 mouseenter / mouseleave
+ *      不是用户的意图，照着推会把球从手里摆回边上去。
  *
  * 尺寸单位一律用 vmin / vh / vw：窗口本身就是视口，而窗口尺寸（6×48 / 76×76 逻辑像素）
  * 由 Rust 按 DPI 设 —— 用百分比或 v* 单位，缩放屏上就自动跟着对。
@@ -53,6 +53,13 @@ const ready = ref(false)
 /** 贴着屏幕哪一侧；null = 浮在桌面上（这时鼠标移开也不收，见 onLeave） */
 const side = ref<BallSide | null>(null)
 const open = ref(false)
+/**
+ * 手上正按着球在拖（`ball_drag` 那条命令还没回来）。
+ *
+ * 拖动期间窗口在跟着光标跑，中途的进进出出不是用户的意图 —— 一概不推收起 / 展开：
+ * 那两条命令都会顺手摆一次窗口，正好把球从手底下摆回原来的位置。
+ */
+const dragging = ref(false)
 const rate = ref<NetRate>({ down: 0, up: 0 })
 const link = ref({ down: 0, up: 0 })
 
@@ -129,11 +136,16 @@ async function applyOpen(next: boolean): Promise<void> {
 }
 
 function onEnter(): void {
+  if (dragging.value)
+    return
   window.clearTimeout(collapseTimer)
   void applyOpen(true)
 }
 
 function onLeave(): void {
+  // 拖着的时候指针从窗口上滑出去（贴边被夹住那一档）不算「移开」
+  if (dragging.value)
+    return
   // **浮着的不收**：收起是「贴边」的形态 —— 屏幕中间摆着的一条 6×48 竖条既不像东西、
   // 也没地方可贴。只有贴着左右边的球才按延迟收回去（Rust 那边也拦一道）
   if (!side.value)
@@ -144,6 +156,33 @@ function onLeave(): void {
     ? OPEN_GUARD_MS - sinceOpen + COLLAPSE_DELAY_MS
     : COLLAPSE_DELAY_MS
   collapseTimer = window.setTimeout(() => void applyOpen(false), delay)
+}
+
+/**
+ * 按下左键：把拖动交给 Rust（`ball_drag` 跑到松手才返回）。
+ *
+ * 不做 `preventDefault`（它会影响随后的 dblclick），文字选中由 `.ball` 上的
+ * `user-select: none` 挡掉。回包里是**落定之后**的状态 —— 松手贴边就会收起，
+ * 所以顺手用它对齐 `open` / `side` / `requested`，不用等 resize 事件。
+ */
+async function onPointerDown(event: PointerEvent): Promise<void> {
+  if (event.button !== 0 || dragging.value)
+    return
+  window.clearTimeout(collapseTimer)
+  dragging.value = true
+  try {
+    const result = await window.workbench.ballDrag()
+    if (!result.ok || !result.data)
+      return
+    open.value = result.data.open
+    side.value = result.data.side
+    requested = result.data.open
+    if (result.data.open)
+      openedAt = Date.now()
+  }
+  finally {
+    dragging.value = false
+  }
 }
 
 /** 双击把主界面唤出来（球本身是常驻的，主窗口可能收在托盘里） */
@@ -195,7 +234,7 @@ onBeforeUnmount(() => {
     v-if="ready"
     class="ball"
     :class="[open ? 'ball--open' : 'ball--tucked', { 'is-busy': busy }]"
-    data-tauri-drag-region="deep"
+    @pointerdown="onPointerDown"
     @mouseenter="onEnter"
     @mouseleave="onLeave"
     @dblclick="openMain"
@@ -251,6 +290,8 @@ onBeforeUnmount(() => {
   justify-content: center;
   background: transparent;
   font-family: var(--font-mono);
+  /* 按下就开始拖窗口（见 onPointerDown）：不许顺手把中心那几个数字框选出来 */
+  user-select: none;
 }
 
 /*

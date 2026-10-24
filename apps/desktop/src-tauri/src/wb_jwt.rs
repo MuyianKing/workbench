@@ -1,7 +1,7 @@
-//! JWT 的最小解析：只要两个字段 —— 签发方（判区域）与过期时间（判断要不要续期）。
+//! JWT 的最小解析：只要过期时间与账号标识。
 //!
 //! **不验签**。我们要的不是"这 token 可信吗"（可信与否由上游说了算），而是
-//! "它是哪个区的、什么时候过期"。这两件事都在明文段里。
+//! "它什么时候过期、属于谁"。这两件事都在明文段里。
 //!
 //! 纯逻辑：吃字符串，吐结构体。
 
@@ -10,9 +10,6 @@ use serde_json::Value;
 /// 解出来的载荷里我们关心的部分。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Claims {
-    /// `iss`：判区域用（国内 `codebuddy.cn` / `workbuddy.cn` / `copilot.tencent.com`，
-    /// 国际 `workbuddy.ai`）
-    pub issuer: String,
     /// `sub`：有些凭据文件不带 uid，靠它兜底
     pub subject: String,
     /// `exp`：Unix 秒
@@ -36,7 +33,6 @@ pub fn claims(token: &str) -> Option<Claims> {
     let value: Value = serde_json::from_slice(&decoded).ok()?;
 
     Some(Claims {
-        issuer: string_field(&value, "iss"),
         subject: string_field(&value, "sub"),
         expires_at: value.get("exp").and_then(Value::as_i64).unwrap_or(0),
         // 上游有时把它写成 enterprise_id，有时在嵌套对象里；两种都试
@@ -121,10 +117,9 @@ mod tests {
     }
 
     #[test]
-    fn 解出签发方与过期时间() {
-        let raw = token(r#"{"iss":"https://www.workbuddy.cn/oauth","exp":1760000000,"sub":"u-1"}"#);
+    fn 解出过期时间与_sub() {
+        let raw = token(r#"{"iss":"https://www.codebuddy.cn/oauth","exp":1760000000,"sub":"u-1"}"#);
         let claims = claims(&raw).unwrap();
-        assert_eq!(claims.issuer, "https://www.workbuddy.cn/oauth");
         assert_eq!(claims.expires_at, 1760000000);
         assert_eq!(claims.subject, "u-1");
     }

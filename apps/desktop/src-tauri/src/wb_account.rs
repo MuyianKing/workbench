@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::wb_identity::Identity;
 use crate::wb_jwt;
-use crate::wb_realm::{self, Realm};
+use crate::wb_upstream;
 
 /// 提前多久算「该续期了」。上游 refresh token 有效期很长，access token 到期前
 /// 留出十分钟，够一次网络往返。
@@ -58,10 +58,9 @@ pub struct Account {
     pub uid: String,
     #[serde(default)]
     pub nickname: String,
-    /// `X-Domain` 用。空则回落到区域的规范值
+    /// `X-Domain` 用。空则回落到规范值
     #[serde(default)]
     pub domain: String,
-    pub realm: Realm,
     /// 出站身分。默认桌面端
     #[serde(default)]
     pub product: Identity,
@@ -111,12 +110,11 @@ fn default_weight() -> u8 {
 impl Account {
     /// 新建一个账号（登录成功后调用）。
     #[allow(dead_code)] // S2 接入前还没有调用方
-    pub fn from_grant(uid: &str, grant: &TokenGrant, realm: Realm, nickname: &str) -> Self {
+    pub fn from_grant(uid: &str, grant: &TokenGrant, nickname: &str) -> Self {
         let mut account = Self {
             uid: uid.to_string(),
             nickname: nickname.to_string(),
             domain: grant.domain.clone(),
-            realm,
             product: Identity::default(),
             enterprise_id: String::new(),
             access_token: grant.access_token.clone(),
@@ -270,22 +268,10 @@ impl Account {
         true
     }
 
-    /// `X-Domain` 的生效值：账号自己记的优先，否则区域的规范域。
+    /// `X-Domain` 的生效值：账号自己记的优先，否则上游的规范域。
     #[allow(dead_code)] // S2 接入前还没有调用方
     pub fn effective_domain(&self) -> String {
-        wb_realm::align_domain(self.realm, &self.domain)
-    }
-
-    /// 从 token / 域名推断区域。看不出返回 None（**不要瞎猜**）。
-    ///
-    /// S2 的登录流程用它核对「用户选的区域」与「token 说的区域」是否一致，
-    /// 现在还没有调用方。
-    #[allow(dead_code)]
-    pub fn detect_realm(&self) -> Option<Realm> {
-        let issuer = wb_jwt::claims(&self.access_token)
-            .map(|claims| claims.issuer)
-            .unwrap_or_default();
-        wb_realm::detect(&issuer, &self.domain)
+        wb_upstream::effective_domain(&self.domain)
     }
 
     /// 显示名：没有昵称就用 uid 前 8 位。
@@ -331,6 +317,14 @@ pub fn sanitize_uid(raw: &str) -> Option<String> {
     Some(text.to_string())
 }
 
+/// 旧账号文件里记过 `realm`。现在只接国内版，见到非国内版的值就跳过 ——
+/// 把国际版账号当成国内版去发请求，只会拿到一串 401，用户还看不出是为什么。
+#[derive(Deserialize)]
+struct LegacyRealm {
+    #[serde(default)]
+    realm: String,
+}
+
 /// 目录里的全部账号，按添加时间排。坏文件跳过并记一行 —— 一个坏文件不该让整池起不来。
 pub fn load_all(dir: &Path) -> Vec<Account> {
     let Ok(entries) = std::fs::read_dir(dir) else {
@@ -345,6 +339,17 @@ pub fn load_all(dir: &Path) -> Vec<Account> {
         let Ok(text) = std::fs::read_to_string(&path) else {
             continue;
         };
+        // 旧格式才有 realm；新格式没有这个字段，读出来是空串
+        let legacy = serde_json::from_str::<LegacyRealm>(&text)
+            .map(|probe| probe.realm)
+            .unwrap_or_default();
+        if !legacy.is_empty() && legacy != "codebuddy" {
+            eprintln!(
+                "[workbench] 跳过非国内版账号文件 {}（realm={legacy}）",
+                path.display()
+            );
+            continue;
+        }
         match serde_json::from_str::<Account>(&text) {
             Ok(account) => accounts.push(account),
             Err(err) => {
@@ -397,8 +402,7 @@ mod tests {
         Account {
             uid: "u-1".into(),
             nickname: "小明".into(),
-            domain: "www.workbuddy.ai".into(),
-            realm: Realm::Workbuddy,
+            domain: "copilot.tencent.com".into(),
             product: Identity::Workbuddy,
             enterprise_id: String::new(),
             access_token: "tok".into(),
@@ -424,11 +428,10 @@ mod tests {
 
         let loaded = load(&dir, "u-1").unwrap();
         assert_eq!(loaded.uid, account.uid);
-        assert_eq!(loaded.realm, Realm::Workbuddy);
         assert_eq!(loaded.product, Identity::Workbuddy);
         assert_eq!(loaded.access_token, "tok");
         assert_eq!(loaded.nickname, "小明");
-        assert_eq!(loaded.effective_domain(), "www.workbuddy.ai");
+        assert_eq!(loaded.effective_domain(), "copilot.tencent.com");
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -595,7 +598,7 @@ mod tests {
             access_token: "new".into(),
             refresh_token: "new-ref".into(),
             expires_in: 3600,
-            domain: "www.workbuddy.ai".into(),
+            domain: "copilot.tencent.com".into(),
         });
         assert_eq!(account.access_token, "new");
         assert_eq!(account.refresh_token, "new-ref");
@@ -604,11 +607,19 @@ mod tests {
     }
 
     #[test]
-    fn 跨区域域名会被对齐() {
-        let mut account = sample();
-        account.realm = Realm::Codebuddy;
-        account.domain = "www.workbuddy.ai".into();
-        assert_eq!(account.effective_domain(), "copilot.tencent.com");
+    fn 载入时跳过旧国际版账号() {
+        let dir = temp_dir("legacy-intl");
+        sample().save(&dir).unwrap();
+
+        // 同一份账号加上旧的 realm 标记，模拟国际版时代留下的文件
+        let path = account_path(&dir, "u-1").unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        let mut value: serde_json::Value = serde_json::from_str(&text).unwrap();
+        value["realm"] = serde_json::Value::String("workbuddy".into());
+        std::fs::write(&path, value.to_string()).unwrap();
+
+        assert!(load_all(&dir).is_empty(), "国际版账号不该被当国内版载入");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

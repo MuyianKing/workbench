@@ -21,7 +21,6 @@ pub struct UsageRow {
     /// Unix 秒（请求开始时刻）
     pub ts: i64,
     pub uid: String,
-    pub realm: String,
     /// 产生这条流水的机器名（主机名）。旧行没有这个字段，读出来是空串
     #[serde(default)]
     pub machine: String,
@@ -299,7 +298,6 @@ pub struct Summary {
 #[serde(rename_all = "camelCase")]
 pub struct AccountSummary {
     pub uid: String,
-    pub realm: String,
     pub requests: i64,
     pub failed: i64,
     pub prompt_tokens: i64,
@@ -608,7 +606,6 @@ fn accumulate_account(list: &mut Vec<AccountSummary>, row: &UsageRow, row_cost: 
         None => {
             list.push(AccountSummary {
                 uid: row.uid.clone(),
-                realm: row.realm.clone(),
                 requests: 0,
                 failed: 0,
                 prompt_tokens: 0,
@@ -691,7 +688,6 @@ mod tests {
         UsageRow {
             ts: 1_770_000_000,
             uid: uid.to_string(),
-            realm: "cn".to_string(),
             machine: String::new(),
             model: model.to_string(),
             prompt_tokens: prompt,

@@ -14,10 +14,13 @@
 //!
 //! ## 拖动：完全自由，只有撞到屏幕边才被夹住
 //!
-//! 拖动交给系统（页面上的 `data-tauri-drag-region`，跟手），Rust 挂在窗口的 `Moved` / `Resized`
-//! 上把几何读回来：**两个方向都只夹进工作区**（不出屏幕、不压任务栏），横向不往边上吸 ——
-//! 一吸球就飞回原来那条边，也就摆不到桌子中间去。贴没贴边留到松手之后再判（见 `settle_drop`）。
-//! 判「松手了没有」认左键（见 `dragging`）：只判静默分不出「拖着停住」与「已经松手」。
+//! 拖动由 **Rust 自己搬**（`drag_loop`，前端在 `pointerdown` 时经 `ball_drag` 叫起来）：
+//! 按下那一刻记下光标在窗口里的偏移，之后每帧按光标位置摆一次，**两个方向都只夹进工作区**
+//! （不出屏幕、不压任务栏），横向不往边上吸 —— 一吸球就飞回原来那条边，也就摆不到桌子中间去。
+//! 交给系统那条路（`data-tauri-drag-region` → Windows 的模态移动循环）在这扇「透明 + 不抢焦点 +
+//! 置顶」的小窗上**只画一个矩形轮廓、不搬内容**（用户报的），所以不走它。
+//! 贴没贴边留到松手之后再判（见 `settle_drop`）。判「松手了没有」认左键（见 `dragging`）：
+//! 只判静默分不出「拖着停住」与「已经松手」。
 //!
 //! ## 记账
 //!
@@ -38,6 +41,7 @@ use tauri::{
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON};
 
 use crate::paths;
+use crate::screen;
 use crate::store::JsonStore;
 
 /// 窗口标签（capabilities/capture.json 里按它放行）
@@ -90,10 +94,18 @@ pub struct BallContext {
 
 /// 松手之后多久落定（判贴没贴边 + 摆位）。
 ///
-/// 拖动是交给系统的（页面上的 `data-tauri-drag-region`），而系统那条 `WM_EXITSIZEMOVE`
-/// 到不了这一层，所以「松手了没有」得自己认：**左键抬起**（见 `dragging`）+ 静默这么久。
+/// 「松手了没有」自己认：**左键抬起**（见 `dragging`）+ 静默这么久。
 /// 静默那一半是给「抬起后画面还在动」留的余量。
 const DRAG_SETTLE_MS: u64 = 250;
+
+/// 自己搬窗口时每帧的间隔（约 60fps）。够跟手，也不至于让 Moved 事件刷爆。
+const DRAG_TICK_MS: u64 = 16;
+
+/// 起手这点距离之内不算拖动（物理像素）。
+///
+/// 双击球是「唤出主界面」，按的那两下不该把球挪走；手也总会抖一两个像素。
+/// 只有真越过这条线才开始搬窗口 —— 没搬过就**不落定**（见 `ball_drag`）。
+const DRAG_SLOP: i32 = 3;
 
 /// 左键现在按着吗。
 ///
@@ -200,6 +212,26 @@ fn place(work: WorkArea, record: BallRecord, open: bool, scale: f64) -> Placemen
     }
 }
 
+/// 拖动中的一次摆位：光标位置减掉「按下那一刻光标在窗口里的偏移」，再夹进工作区。
+///
+/// **纯函数**（`drag_loop` 每帧调它一次）：两边都是物理像素，DPI 不参与 ——
+/// 位置给的就是物理像素（与 `place` 同一条口径）。夹取跟 `sync_from_window` 一模一样：
+/// 拖出屏幕就看不见了，拖到任务栏底下也不行；横向**不往边上吸**，贴没贴边等松手再判。
+fn drag_target(
+    work: WorkArea,
+    width: i32,
+    height: i32,
+    offset: (i32, i32),
+    cursor: (i32, i32),
+) -> (i32, i32) {
+    let max_x = (work.right - width).max(work.left);
+    let max_y = (work.bottom - height).max(work.top);
+    (
+        (cursor.0 - offset.0).clamp(work.left, max_x),
+        (cursor.1 - offset.1).clamp(work.top, max_y),
+    )
+}
+
 fn work_area(window: &WebviewWindow) -> Option<WorkArea> {
     let monitor = window
         .current_monitor()
@@ -303,7 +335,7 @@ fn place_now(window: &WebviewWindow, record: BallRecord, open: bool) -> Result<(
 
 /// 窗口现在是不是贴住了屏幕左右那条边；贴住了就是那条边，浮着就是 `None`。
 ///
-/// 判据是**撞到墙**：拖动中 `sync_from_window` 会把横向夹进工作区（见那儿），
+/// 判据是**撞到墙**：拖动中 `drag_target` / `sync_from_window` 会把横向夹进工作区（见那两处），
 /// 所以「往屏幕外拖」落到这儿是精确贴边 —— 不留容差、也不是磁吸。
 /// 拖到屏幕中间就返回 `None`：球停在人家中间，不收起来（用户要的就是这个）。
 fn dock_of(work: WorkArea, x: i32, width: i32) -> Option<BallSide> {
@@ -466,6 +498,46 @@ fn settle_drop(app: &AppHandle) {
     }
 }
 
+/// 按住球的时候由我们自己搬窗口。**返回最后一帧摆到的位置**（一次都没搬就是 `None`）。
+///
+/// 原先交给系统（页面上的 `data-tauri-drag-region` → Windows 的模态移动循环），可这颗球是
+/// 「透明 + 不抢焦点（`focused(false)`）+ 置顶」的一扇小窗，那条循环对它**只画一个矩形轮廓、
+/// 不搬里面的内容**（用户报的「拖动的时候球不走，只有一个矩形边框在走」）。所以改成自己搬：
+/// 按下那一刻记下「光标在窗口里的偏移」，之后按光标位置一帧一帧地摆，松开左键收工。
+/// 位置仍然一条都不经前端 —— 前端只喊一声「按下了」（见 `ball_drag`）。
+///
+/// 光标读的是系统坐标，所以窗口跟着走的时候指针一直压在同一个相对位置；拖到屏幕边被夹住
+/// 之后指针会跑到窗口外面，这一轮照样继续 —— 判据是左键（`dragging`），不是指针在不在窗口里。
+fn drag_loop(window: &WebviewWindow) -> Option<(i32, i32)> {
+    let start = screen::cursor_point()?;
+    let at = window.outer_position().ok()?;
+    // 偏移只跟窗口有关：窗口还没动过，所以这个偏移跟按下那一刻是同一个
+    let offset = (start.0 - at.x, start.1 - at.y);
+    let mut last: Option<(i32, i32)> = None;
+
+    while dragging() {
+        let Some(cursor) = screen::cursor_point() else {
+            break;
+        };
+        if last.is_none() {
+            // 起手那几像素不算拖动：双击唤主界面、手抖，都不该把球挪走
+            if (cursor.0 - start.0).abs() < DRAG_SLOP && (cursor.1 - start.1).abs() < DRAG_SLOP {
+                std::thread::sleep(Duration::from_millis(DRAG_TICK_MS));
+                continue;
+            }
+        }
+        let (Ok(size), Some(work)) = (window.inner_size(), work_area(window)) else {
+            break;
+        };
+        let (x, y) = drag_target(work, size.width as i32, size.height as i32, offset, cursor);
+        let _ = window.set_position(PhysicalPosition::new(x, y));
+        last = Some((x, y));
+        std::thread::sleep(Duration::from_millis(DRAG_TICK_MS));
+    }
+
+    last
+}
+
 fn create_window(app: &AppHandle, record: BallRecord) -> Result<(), String> {
     let window = WebviewWindowBuilder::new(app, BALL_LABEL, WebviewUrl::App("ball.html".into()))
         .decorations(false)
@@ -482,7 +554,7 @@ fn create_window(app: &AppHandle, record: BallRecord) -> Result<(), String> {
         .build()
         .map_err(|err| format!("开悬浮球窗口失败：{err}"))?;
 
-    // 拖动与 DPI 变化都靠这两个事件把几何读回来（拖动是系统在搬窗口，前端不知道新位置）
+    // DPI 变化与别处的摆位都靠这两个事件把几何读回来（拖动是 `drag_loop` 在搬，前端不碰）
     let handle = app.clone();
     window.on_window_event(move |event| match event {
         tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_) => sync_from_window(&handle),
@@ -580,6 +652,33 @@ pub fn ball_open(app: AppHandle, open: bool) -> Result<BallContext, String> {
 #[tauri::command(async)]
 pub fn ball_open_main(app: AppHandle) {
     crate::show_main_window(&app);
+}
+
+/// 按住球开始拖（前端在 `pointerdown` 里喊一声，见 BallApp.vue）。
+///
+/// **跑到松手才返回**：前端 `await` 它就知道「搬完了、落定也做完了」，回包里直接拿到最终
+/// 那一档（贴边收起 / 浮着摊开），不用等着 resize 事件再猜。
+/// 没真的挪动（只是一次点击 / 双击）时**不落定**：展开着的贴边球被点一下不该顺势收回去
+/// —— 那会把双击的第二下甩到球外面去。
+#[tauri::command(async)]
+pub fn ball_drag(app: AppHandle) -> Result<BallContext, String> {
+    let window = app
+        .get_webview_window(BALL_LABEL)
+        .ok_or("悬浮球没开着")?;
+    let Some(last) = drag_loop(&window) else {
+        return Ok(context_of(&app));
+    };
+    // 最后一笔 `set_position` 是排队下发的：等它真落到窗口上再判贴边，
+    // 不然会拿上一帧的位置去决定「收不收起」（最多等 200ms，窗口关了就直接往下走）
+    let deadline = now_ms() + 200;
+    while now_ms() < deadline {
+        match window.outer_position() {
+            Ok(at) if (at.x, at.y) == last => break,
+            _ => std::thread::sleep(Duration::from_millis(4)),
+        }
+    }
+    settle_drop(&app);
+    Ok(context_of(&app))
 }
 
 #[cfg(test)]
@@ -726,6 +825,47 @@ mod tests {
         assert_eq!(dock_of(work, -1920, 76), Some(BallSide::Left));
         assert_eq!(dock_of(work, -76, 76), Some(BallSide::Right));
         assert_eq!(dock_of(work, -1000, 76), None);
+    }
+
+    #[test]
+    fn 拖动中光标在哪球就跟到哪() {
+        // 按下时光标落在球的 (10, 20)：之后光标往右下走，窗口整颗跟着平移
+        assert_eq!(drag_target(screen(), 76, 76, (10, 20), (300, 400)), (290, 380));
+    }
+
+    #[test]
+    fn 拖动中拖出屏幕会被夹回工作区() {
+        // 出左沿 / 出右沿
+        assert_eq!(drag_target(screen(), 76, 76, (10, 20), (-500, 400)), (0, 380));
+        assert_eq!(
+            drag_target(screen(), 76, 76, (10, 20), (5000, 400)),
+            (1920 - 76, 380)
+        );
+        // 下沿不压任务栏（工作区到 1040）
+        assert_eq!(drag_target(screen(), 76, 76, (10, 20), (300, 5000)).1, 1040 - 76);
+        // 收起态更窄更矮，能压得更靠边、更靠下
+        assert_eq!(
+            drag_target(screen(), 6, 48, (1, 10), (5000, 5000)),
+            (1920 - 6, 1040 - 48)
+        );
+    }
+
+    #[test]
+    fn 拖到另一块屏按那块屏的工作区夹() {
+        let left_screen = WorkArea {
+            left: -1920,
+            top: 0,
+            right: 0,
+            bottom: 1040,
+        };
+        assert_eq!(
+            drag_target(left_screen, 76, 76, (10, 20), (-1500, 300)),
+            (-1510, 280)
+        );
+        assert_eq!(
+            drag_target(left_screen, 76, 76, (10, 20), (-3000, 300)),
+            (-1920, 280)
+        );
     }
 
     #[test]

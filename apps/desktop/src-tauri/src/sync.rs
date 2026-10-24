@@ -1682,7 +1682,6 @@ mod tests {
         let row = |machine: &str, ts: i64| crate::wb_usage::UsageRow {
             ts,
             uid: "u-1".into(),
-            realm: "cn".into(),
             machine: machine.into(),
             model: "m".into(),
             prompt_tokens: 10,
@@ -1781,7 +1780,6 @@ mod tests {
         let row = |machine: &str, ts: i64| crate::wb_usage::UsageRow {
             ts,
             uid: "u-1".into(),
-            realm: "cn".into(),
             machine: machine.into(),
             model: "m".into(),
             prompt_tokens: 10,

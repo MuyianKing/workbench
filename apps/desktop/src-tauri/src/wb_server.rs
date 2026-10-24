@@ -468,11 +468,11 @@ mod tests {
 
     #[test]
     fn 解析请求行与查询串() {
-        let request = parse("GET /v1/models?realm=workbuddy&x=1 HTTP/1.1\r\nHost: a\r\n\r\n").unwrap();
+        let request = parse("GET /v1/models?tag=gateway&x=1 HTTP/1.1\r\nHost: a\r\n\r\n").unwrap();
         assert_eq!(request.method, "GET");
         assert_eq!(request.path, "/v1/models");
-        assert_eq!(request.query, "realm=workbuddy&x=1");
-        assert_eq!(request.query_param("realm"), Some("workbuddy"));
+        assert_eq!(request.query, "tag=gateway&x=1");
+        assert_eq!(request.query_param("tag"), Some("gateway"));
         assert_eq!(request.query_param("x"), Some("1"));
         assert_eq!(request.query_param("nope"), None);
     }

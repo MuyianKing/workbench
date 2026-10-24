@@ -20,6 +20,8 @@ withDefaults(defineProps<{
   rowKey?: string | ((row: never) => string)
   /** 表体高度；钉住表头时传 `100%`，外层必须有确定高度 */
   height?: string
+  /** 表体最大高度：行多了表内滚动、表头钉住（行少时照内容收，不垫空白） */
+  maxHeight?: string
   /** 不铺面板外壳：调用方自己已经有面板了 */
   flat?: boolean
   /** 单元格不换行（一条流水就是一行） */
@@ -27,6 +29,7 @@ withDefaults(defineProps<{
 }>(), {
   rowKey: undefined,
   height: undefined,
+  maxHeight: undefined,
   flat: false,
   nowrap: false,
 })
@@ -45,6 +48,7 @@ function onScroll(payload: { scrollTop: number }): void {
       :data="data"
       :row-key="rowKey"
       :height="height"
+      :max-height="maxHeight"
       table-layout="auto"
       class="gw-table__el"
       :class="{ 'is-nowrap': nowrap, 'is-scrolled': scrolled }"
@@ -69,9 +73,10 @@ function onScroll(payload: { scrollTop: number }): void {
 
 .gw-table__el {
   width: 100%;
-  /* 去掉 EP 自带底色与四周边线，行间只留一条横线 */
+  /* 去掉 EP 自带底色与四周边线，行间只留一条横线；表头平时也全透底 ——
+     停在顶部时整个表跟面板是同一个面，只有滚起来才补实心底（见下面 .is-scrolled） */
   --el-table-border-color: var(--border);
-  --el-table-header-bg-color: var(--gw-head-bg);
+  --el-table-header-bg-color: transparent;
   --el-table-tr-bg-color: transparent;
   --el-table-bg-color: transparent;
   --el-table-header-text-color: var(--ink-3);
@@ -79,7 +84,7 @@ function onScroll(payload: { scrollTop: number }): void {
   --el-table-row-hover-bg-color: transparent;
   font-size: var(--gw-fs-meta);
 
-  /* 表头底色：面底色与画布色对半混，两个都是实色 —— 滚过的行不会从表头底下透出来 */
+  /* 表头滚动后的补底：面底色与画布色对半混，两个都是实色 —— 滚过的行不会从表头底下透出来 */
   --gw-head-bg: color-mix(in srgb, var(--bg-surface) 50%, var(--bg-canvas));
   --gw-head-top: color-mix(in srgb, var(--gw-head-bg) 70%, var(--bg-surface));
 }

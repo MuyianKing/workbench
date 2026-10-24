@@ -83,8 +83,9 @@ windows-sys = { version = "0.61", features = [
     # 不引日期格式化 crate
     "Win32_System_SystemInformation",
     "Win32_System_Threading",
-    # 悬浮球判断「左键还按着没有」（GetAsyncKeyState，见 ball.rs）：拖动是系统在搬窗口，
-    # 松手那一下不产生 Moved，只看「多久没动」分不出「拖着停住」和「已经松手」。
+    # 悬浮球判断「左键还按着没有」（GetAsyncKeyState，见 ball.rs 的 drag_loop）：拖动由 Rust
+    # 自己按光标位置搬窗口，左键就是「还在拖 / 该收工」的唯一凭据（松手那一下不产生任何
+    # 窗口事件）。光标位置走 screen.rs 的 GetCursorPos，在已经开着的 WindowsAndMessaging 里。
     # 同样只是给已在这里的 windows-sys 加 feature，不新增编译单元
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_UI_Shell",

@@ -22,6 +22,9 @@ pub const THEME_FILE: &str = "theme.json";
 pub const WORK_LOG_FILE: &str = "work-log.json";
 /// AI 热点缓存（见 packages/ai/src/ai-news.ts）。与工作日志同一待遇：只在本机、不进同步仓库
 pub const AI_NEWS_FILE: &str = "ai-news.json";
+/// ETF 资金流缓存（见 packages/etf/src/etf.ts）：份额 / 净值 / 指数的本地回填，
+/// 只在本机、不进同步仓库
+pub const ETF_FILE: &str = "etf.json";
 /// 密码保险库（见 packages/vault/src/vault.ts）。**文件本身只有密文**：明文从不落盘，
 /// 本机这把密钥在 Windows 凭据管理器里（见 vault.rs），仓库里那份在 `vault/vault.json`
 pub const VAULT_FILE: &str = "vault.json";
@@ -124,6 +127,10 @@ pub fn work_log_file() -> PathBuf {
 
 pub fn ai_news_file() -> PathBuf {
     data_dir().join(AI_NEWS_FILE)
+}
+
+pub fn etf_file() -> PathBuf {
+    data_dir().join(ETF_FILE)
 }
 
 /// 本机那份保险库（密文）。仓库里那份由同步流程读写（见 vault.rs），

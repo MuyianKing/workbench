@@ -52,8 +52,6 @@ pub struct ModelEntry {
 pub struct Catalog {
     /// 拉取时刻（Unix 秒）
     pub fetched_at: i64,
-    /// 从哪个域的账号拉的（`workbuddy` / `codebuddy`）。两个域目录可能不一样，排查时有用
-    pub realm: String,
     pub models: Vec<ModelEntry>,
 }
 
@@ -68,7 +66,6 @@ pub fn fetch(account: &Account) -> Result<Catalog, String> {
             Ok(models) if !models.is_empty() => {
                 return Ok(Catalog {
                     fetched_at: now_secs(),
-                    realm: account.realm.as_str().to_string(),
                     models,
                 });
             }
@@ -101,7 +98,7 @@ pub fn cached() -> Vec<ModelEntry> {
 }
 
 fn probe(account: &Account, path: &str) -> Result<Vec<ModelEntry>, String> {
-    let url = account.realm.chat_url(path);
+    let url = crate::wb_upstream::chat_url(path);
     let headers = headers(account);
     let refs: Vec<(&str, &str)> = headers
         .iter()
@@ -235,16 +232,15 @@ fn flag_of(item: &Value, key: &str) -> bool {
 /// 拉目录用的头。与记账那套同源（Authorization / X-User-Id / X-Domain…），
 /// 但 UA 取**对话**那条三段式的：`/v3/config` 要的是客户端身份，不是计费那套短 UA。
 fn headers(account: &Account) -> Vec<(String, String)> {
-    let cfg = account.realm.config();
     let mut headers = vec![
         ("Accept".to_string(), "application/json, text/plain, */*".to_string()),
         ("X-Requested-With".to_string(), "XMLHttpRequest".to_string()),
-        ("Origin".to_string(), cfg.origin.to_string()),
-        ("Referer".to_string(), format!("{}/", cfg.origin)),
-        ("User-Agent".to_string(), cfg.chat_ua.to_string()),
+        ("Origin".to_string(), crate::wb_upstream::ORIGIN.to_string()),
+        ("Referer".to_string(), format!("{}/", crate::wb_upstream::ORIGIN)),
+        ("User-Agent".to_string(), crate::wb_upstream::CHAT_UA.to_string()),
         ("X-CodeBuddy-Request".to_string(), "1".to_string()),
         ("X-Product".to_string(), "SaaS".to_string()),
-        ("Accept-Language".to_string(), cfg.accept_language.to_string()),
+        ("Accept-Language".to_string(), crate::wb_upstream::ACCEPT_LANGUAGE.to_string()),
         (
             "Authorization".to_string(),
             format!("Bearer {}", account.access_token),

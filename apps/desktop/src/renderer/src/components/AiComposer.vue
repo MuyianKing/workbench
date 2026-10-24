@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { AiImage, AiSkillRow } from '@workbench/ai'
-import { Close, Cpu, Lock, Odometer, Setting, Top, Unlock, VideoPause } from '@element-plus/icons-vue'
-import { AI_IMAGE_TYPES, AI_PERMISSION_MODES, AI_SKILL_COMMAND, aiImageAccepted, aiThinkingLabel } from '@workbench/ai'
+import { Close, Lock, Top, Unlock, VideoPause } from '@element-plus/icons-vue'
+import { AI_IMAGE_TYPES, AI_PERMISSION_MODES, AI_SKILL_COMMAND, aiImageAccepted } from '@workbench/ai'
 /**
  * 写指令的那一条：输入框 + 一行控件（工具权限、这一轮用哪个模型、思考几档、发送 / 停止）。
  *
@@ -17,9 +17,10 @@ import { AI_IMAGE_TYPES, AI_PERMISSION_MODES, AI_SKILL_COMMAND, aiImageAccepted,
  * 模型看不看得见图不归这里管：贴上的图先留着，发不出去时由发送按钮的悬停说（`blocking`）。
  *
  * **底下那一行按「一排 chip」画，不按表单画**（这是这一页最像工具的地方，照通用客户端
- * 那一排的样子）：三个控件**只挂一个图标**（锁 / cpu / 表盘，见下面 template 里那句），
- * 不带「权限」「模型」「思考」这样的文字标签 —— 标签是把控件当输入项，一排箭头看下来
- * 全是重复的字；做成**没有边框的浅底 chip**（与位置栏那颗 `.pick__item` 同一副样子），
+ * 那一排的样子）：左边权限一颗 chip **只挂一个锁图标**（不带「权限」这样的文字标签 ——
+ * 标签是把控件当输入项），右边「模型」一颗 chip（cpu 图标，当前「服务 · 模型」）——
+ * 挑模型与换思考档都在它点开的那块浮层里（AiModelMenu，原先两个下拉合成了一处）；
+ * 都做成**没有边框的浅底 chip**（与位置栏那颗 `.pick__item` 同一副样子），
  * 发送是一颗**圆形实心**的箭头。**别把文字标签加回来、也别给 chip 描边**。
  *
  * 与 store 的分工：**说一句是报给页面**（`send` 事件，指令与图跟着走，页面转给 store 跑一轮；
@@ -36,6 +37,7 @@ import { AI_IMAGE_TYPES, AI_PERMISSION_MODES, AI_SKILL_COMMAND, aiImageAccepted,
  * 那两行字的样式在 global.css（`.composer-permission-pop`）。
  */
 import { computed, ref, watch } from 'vue'
+import AiModelMenu from '@/components/AiModelMenu.vue'
 import { notifyWarning } from '@/notify'
 import { useAiStore } from '@/stores/ai'
 import { useAiSkillsStore } from '@/stores/ai-skills'
@@ -57,28 +59,6 @@ const emit = defineEmits<{
 
 const ai = useAiStore()
 const skillsStore = useAiSkillsStore()
-
-/**
- * 模型下拉里那几项：**把服务名顶在前面**（`服务名 · 模型显示名`）——
- * 下拉收起时那一格也只显示这一串，光有「Kimi K2」看不出它挂在哪个服务上
- * （几个服务可能都有同名模型）。挑的是 packages/ai/src/ai.ts 的 AiModelChoice.key。
- */
-const modelOptions = computed(() =>
-  ai.choices.map(choice => ({
-    key: choice.key,
-    label: `${choice.providerLabel} · ${choice.name}`,
-    id: choice.model,
-  })),
-)
-
-/** 下拉挑了什么就记进设置（el-select 的 change 给的是宽联合，这里只可能是字符串） */
-function chooseModel(value: unknown): void {
-  void ai.setChoice(String(value))
-}
-
-function chooseThinking(value: unknown): void {
-  void ai.setThinking(String(value))
-}
 
 function choosePermission(value: unknown): void {
   void ai.setPermission(String(value))
@@ -389,53 +369,12 @@ const sendTitle = computed(() => {
 
       <div class="composer__tools">
         <!--
-          三个控件都不带 size：一行里得同高。EP 的默认尺寸是 32px（按钮与下拉各有一份
-          「小」尺寸实现，下拉那边是写死的 24px，调不成同一个高度），所以统一走默认。
+          这一行里的控件都得同高（32px）：EP 控件统一走默认尺寸（「小」尺寸那套是写死的
+          24px，调不成同一个高度），AiModelMenu 那颗 chip 也照这个高度画。
         -->
-        <el-select
-          class="composer__model"
-          :model-value="ai.activeChoiceKey"
-          placeholder="还没配模型"
-          @change="chooseModel"
-        >
-          <template #prefix>
-            <el-icon><Cpu /></el-icon>
-          </template>
-          <el-option
-            v-for="option in modelOptions"
-            :key="option.key"
-            :label="option.label"
-            :value="option.key"
-          />
-          <template #empty>
-            <p class="composer__empty">
-              还没有能挑的模型：先在模型管理里加一个服务
-            </p>
-          </template>
-          <template #footer>
-            <el-button link size="small" :icon="Setting" @click="emit('configure')">
-              模型管理…
-            </el-button>
-          </template>
-        </el-select>
-
-        <el-select
-          class="composer__thinking"
-          :model-value="ai.thinking"
-          @change="chooseThinking"
-        >
-          <template #prefix>
-            <el-icon><Odometer /></el-icon>
-          </template>
-          <!-- 只列**这个模型支持的档位**（Pi 也照 models.json 里那份收敛）：
-               不支持思考的模型只剩「关闭」一档 -->
-          <el-option
-            v-for="level in ai.thinkingLevels"
-            :key="level"
-            :label="aiThinkingLabel(level)"
-            :value="level"
-          />
-        </el-select>
+        <!-- 模型与思考档合成这一颗 chip：点开是 AiModelMenu 的浮层（模型管理入口、
+             模型清单、思考强度滑杆）；「模型管理」仍报给页面开那个弹层 -->
+        <AiModelMenu @configure="emit('configure')" />
 
         <el-tooltip :content="sendTitle" placement="top">
           <el-button
@@ -657,30 +596,6 @@ const sendTitle = computed(() => {
   white-space: nowrap;
   color: var(--ink-3);
   font-size: var(--fs-meta);
-}
-
-/* 模型那一栏要能放下「提供方/模型 id」，思考那一栏只要放得下「极高」两个字。
-   字号随默认尺寸涨到 14px 了，宽度跟着放宽一点，不然模型名比原来还早被截断 */
-.composer__model {
-  width: 280px;
-  max-width: 100%;
-}
-
-.composer__thinking {
-  width: 92px;
-}
-
-/* 下拉底部的「模型管理…」：挨着最后一条模型，点开就是那个弹层 */
-.composer__tools :deep(.el-select-dropdown__footer) {
-  padding: var(--sp-1) var(--sp-2);
-  border-top: 1px solid var(--border);
-}
-
-.composer__empty {
-  margin: 0;
-  padding: var(--sp-2) var(--sp-3);
-  color: var(--ink-3);
-  font-size: var(--fs-micro);
 }
 
 /* 发送那颗：**圆的实心箭头**（primary 就是那个近黑，两档主题各自有值）——

@@ -1,15 +1,15 @@
 //! 上游鉴权：续期。这是**唯一**会改写账号 token 的地方。
 //!
-//! 端点与头都照官方插件那条路：`POST {chat_upstream}/v2/plugin/auth/token/refresh`，
+//! 端点与头都照官方插件那条路：`POST {CHAT_UPSTREAM}/v2/plugin/auth/token/refresh`，
 //! 凭证放在 `X-Refresh-Token` 里（不是 `Authorization`），并带一个来源标记 ——
-//! 国内版要 `workbuddy`，国际版要 `plugin`，写错了上游不认。
+//! 国内版要 `workbuddy`（官方插件报的自己的身份名），写错了上游不认。
 //!
 //! 纯 I/O 适配：只发请求、解响应、把结果写回 `Account`。要不要续、什么时候续，
 //! 由调用方按 [`Account::needs_refresh`] 决定。
 
 use crate::http;
 use crate::wb_account::{Account, TokenGrant};
-use crate::wb_realm::Realm;
+use crate::wb_upstream;
 
 const REFRESH_PATH: &str = "/v2/plugin/auth/token/refresh";
 
@@ -22,13 +22,10 @@ pub fn refresh(account: &mut Account) -> Result<(), String> {
         return Err("没有 refresh token，需要重新登录".into());
     }
 
-    let url = account.realm.chat_url(REFRESH_PATH);
-    let source = match account.realm {
-        // 国内版插件报自己的身份；国际版报 plugin
-        Realm::Codebuddy => "workbuddy",
-        Realm::Workbuddy => "plugin",
-    };
-    let mut headers = common_headers(account.realm);
+    let url = wb_upstream::chat_url(REFRESH_PATH);
+    // 国内版插件报自己的身份；上游按这个值区分客户端来源
+    let source = "workbuddy";
+    let mut headers = common_headers();
     headers.push(("X-Refresh-Token", account.refresh_token.as_str()));
     headers.push(("X-Auth-Refresh-Source", source));
     // 企业号续期要带空间 id，否则拿到的是个人空间的新 token
@@ -77,16 +74,15 @@ fn parse_grant(text: &str) -> Result<TokenGrant, String> {
 }
 
 /// 与聊天头那套分开：续期走的是浏览器形态的轻量头，没有会话 id 家族。
-fn common_headers(realm: Realm) -> Vec<(&'static str, &'static str)> {
-    let cfg = realm.config();
+fn common_headers() -> Vec<(&'static str, &'static str)> {
     vec![
         ("Content-Type", "application/json"),
         ("Accept", "application/json"),
         ("X-Requested-With", "XMLHttpRequest"),
-        ("Origin", cfg.origin),
-        ("User-Agent", cfg.billing_ua),
+        ("Origin", wb_upstream::ORIGIN),
+        ("User-Agent", wb_upstream::BILLING_UA),
         ("X-CodeBuddy-Request", "1"),
-        ("Accept-Language", cfg.accept_language),
+        ("Accept-Language", wb_upstream::ACCEPT_LANGUAGE),
     ]
 }
 
@@ -129,13 +125,13 @@ pub enum PollOutcome {
 }
 
 /// 发起登录，拿到授权链接。
-pub fn start_login(realm: Realm) -> Result<LoginStart, String> {
+pub fn start_login() -> Result<LoginStart, String> {
     let url = format!(
         "{}{}?platform=CLI",
-        realm.config().chat_upstream,
+        wb_upstream::CHAT_UPSTREAM,
         AUTH_STATE_PATH
     );
-    let headers = login_headers(realm);
+    let headers = login_headers();
     let refs: Vec<(&str, &str)> = headers.to_vec();
 
     let response = http::request_url("POST", &url, &refs, Some("{}"))?;
@@ -169,18 +165,18 @@ pub fn start_login(realm: Realm) -> Result<LoginStart, String> {
 }
 
 /// 轮询一次。`Pending` 不是错误 —— 用户在浏览器里还没点完。
-pub fn poll_login(realm: Realm, state: &str) -> Result<PollOutcome, String> {
+pub fn poll_login(state: &str) -> Result<PollOutcome, String> {
     let state = state.trim();
     if state.is_empty() {
         return Err("缺少 state，请重新发起登录".into());
     }
     let url = format!(
         "{}{}?state={}",
-        realm.config().chat_upstream,
+        wb_upstream::CHAT_UPSTREAM,
         AUTH_TOKEN_PATH,
         urlencode(state)
     );
-    let headers = login_headers(realm);
+    let headers = login_headers();
     let refs: Vec<(&str, &str)> = headers.to_vec();
 
     let response = http::request_url("GET", &url, &refs, None)?;
@@ -216,7 +212,7 @@ pub fn poll_login(realm: Realm, state: &str) -> Result<PollOutcome, String> {
         return Ok(PollOutcome::Pending("等待 token".into()));
     }
 
-    let profile = fetch_profile(realm, state, &grant.access_token).unwrap_or_default();
+    let profile = fetch_profile(state, &grant.access_token).unwrap_or_default();
     let uid = if profile.uid.trim().is_empty() {
         // 兜底：token 自己带 sub
         crate::wb_jwt::claims(&grant.access_token)
@@ -229,7 +225,7 @@ pub fn poll_login(realm: Realm, state: &str) -> Result<PollOutcome, String> {
         return Err("登录成功但拿不到账号标识（uid）".into());
     }
 
-    let mut account = Account::from_grant(&uid, &grant, realm, &profile.nickname);
+    let mut account = Account::from_grant(&uid, &grant, &profile.nickname);
     account.enterprise_id = profile.enterprise_id;
     account.save(&crate::paths::gateway_accounts_dir())?;
     Ok(PollOutcome::Ready(Box::new(account)))
@@ -243,14 +239,14 @@ struct Profile {
 }
 
 /// 取昵称与企业 id。失败不算错 —— 这两个字段只影响展示。
-fn fetch_profile(realm: Realm, state: &str, token: &str) -> Result<Profile, String> {
+fn fetch_profile(state: &str, token: &str) -> Result<Profile, String> {
     let url = format!(
         "{}{}?state={}",
-        realm.config().chat_upstream,
+        wb_upstream::CHAT_UPSTREAM,
         LOGIN_ACCOUNT_PATH,
         urlencode(state)
     );
-    let mut owned: Vec<(String, String)> = login_headers(realm)
+    let mut owned: Vec<(String, String)> = login_headers()
         .iter()
         .map(|(name, value)| (name.to_string(), value.to_string()))
         .collect();
@@ -297,15 +293,14 @@ fn check_code(value: &serde_json::Value) -> Result<(), String> {
 }
 
 /// 登录用的头。与聊天头不同：这套不带会话 id 家族，也不带 `X-CodeBuddy-Request`。
-fn login_headers(realm: Realm) -> Vec<(&'static str, &'static str)> {
-    let cfg = realm.config();
+fn login_headers() -> Vec<(&'static str, &'static str)> {
     vec![
         ("Content-Type", "application/json"),
         ("Accept", "application/json, text/plain, */*"),
         ("X-Requested-With", "XMLHttpRequest"),
-        ("User-Agent", cfg.billing_ua),
-        ("Origin", cfg.origin),
-        ("Referer", cfg.origin),
+        ("User-Agent", wb_upstream::BILLING_UA),
+        ("Origin", wb_upstream::ORIGIN),
+        ("Referer", wb_upstream::ORIGIN),
     ]
 }
 
@@ -334,19 +329,17 @@ mod tests {
     #[test]
     #[ignore = "真打上游，需要网络；手动跑"]
     fn 真发起一次登录能拿到授权链接() {
-        for realm in Realm::ALL {
-            match start_login(realm) {
-                Ok(start) => {
-                    assert!(!start.state.is_empty(), "{realm:?} 没给 state");
-                    assert!(
-                        start.auth_url.starts_with("http"),
-                        "{realm:?} 授权链接不像链接：{}",
-                        start.auth_url
-                    );
-                    println!("{:?} → {}", realm, start.auth_url);
-                }
-                Err(message) => panic!("{realm:?} 发起登录失败：{message}"),
+        match start_login() {
+            Ok(start) => {
+                assert!(!start.state.is_empty(), "没给 state");
+                assert!(
+                    start.auth_url.starts_with("http"),
+                    "授权链接不像链接：{}",
+                    start.auth_url
+                );
+                println!("{}", start.auth_url);
             }
+            Err(message) => panic!("发起登录失败：{message}"),
         }
     }
 
@@ -358,12 +351,12 @@ mod tests {
 
     #[test]
     fn 解出信封里的授予() {
-        let text = r#"{"code":0,"msg":"ok","data":{"accessToken":"a1","refreshToken":"r1","expiresIn":5184000,"domain":"www.workbuddy.ai"}}"#;
+        let text = r#"{"code":0,"msg":"ok","data":{"accessToken":"a1","refreshToken":"r1","expiresIn":5184000,"domain":"copilot.tencent.com"}}"#;
         let grant = parse_grant(text).unwrap();
         assert_eq!(grant.access_token, "a1");
         assert_eq!(grant.refresh_token, "r1");
         assert_eq!(grant.expires_in, 5184000);
-        assert_eq!(grant.domain, "www.workbuddy.ai");
+        assert_eq!(grant.domain, "copilot.tencent.com");
     }
 
     #[test]
@@ -388,7 +381,6 @@ mod tests {
                 access_token: "a".into(),
                 ..TokenGrant::default()
             },
-            Realm::Workbuddy,
             "",
         );
         account.refresh_token.clear();

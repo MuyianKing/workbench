@@ -24,7 +24,7 @@ Workbench 的文档按「通用 / 模块」分层：
 | 技能（skill） | [skills.md](modules/skills.md) |
 | 知识库（kb） | [kb.md](modules/kb.md) |
 | AI 助手（ai） | [ai.md](modules/ai.md) |
-| TBuddy（网关：WorkBuddy / CodeBuddy 反代） | [gateway.md](modules/gateway.md) |
+| TBuddy（网关：CodeBuddy 反代） | [gateway.md](modules/gateway.md) |
 | 密码保险库 | [vault.md](modules/vault.md) |
 | 邮箱（IMAP 收发） | [mail.md](modules/mail.md) |
 | 禅道（独立窗口 + 后台检查与通知） | [zentao.md](modules/zentao.md) |
@@ -73,13 +73,14 @@ Workbench 的文档按「通用 / 模块」分层：
 - 当前页只是 store 里的一个 id（取值登记在 `packages/appearance/src/views.ts`），**不引入 Vue Router**：
   换页就是换这个值，`App.vue` 用 `<KeepAlive><component :is>` 渲染，滚动位置不丢；
   当前页随数据文件落盘，重启回到上次那一页。新增一页 = 登记 id + 挂组件两处
-- 当前十二页：**首页**（可自由布局的卡片画布）、**项目**（项目卡网格 + 分组筛选工具条）、
+- 当前十三页：**首页**（可自由布局的卡片画布）、**项目**（项目卡网格 + 分组筛选工具条）、
   **工作**（工作日志时间轴）、**笔记**（左目录树 + 右 markdown 编辑器）、
   **技能**（技能库管理，见[「技能」](modules/skills.md)一节）、**知识库**（看一个独立的知识库项目、一键清洗，
   见[「知识库（kb）」](modules/kb.md)一节）、**AI 助手**（请本机的 Pi 干活的通用控制台，
   见[「AI 助手（ai）」](modules/ai.md)一节）、**密码**（密码保险库，见[「密码保险库」](modules/vault.md)一节）、
   **样式**（74 套设计语言的参考库，见[「样式」](modules/styles.md)一节）、**视频**（本地 MP4 播放器，见[「视频」](modules/video.md)一节）、
-  **邮箱**（IMAP 收发，见[「邮箱」](modules/mail.md)）与**禅道**（顶栏右侧那颗图标打开的独立窗口 + 后台检查与通知，见[「禅道」](modules/zentao.md)）。
+  **邮箱**（IMAP 收发，见[「邮箱」](modules/mail.md)）、**禅道**（顶栏右侧那颗图标打开的独立窗口 + 后台检查与通知，见[「禅道」](modules/zentao.md)）
+  与**ETF**（国家队重仓宽基 ETF 的每日净申赎，见[「ETF 资金流」](modules/etf.md)）。
   布局编辑态由顶栏那颗「编辑布局」进入，欢迎语那一行原地换成操作条，行高不变、画布不跳。
   那行提示**不换行**，窄窗口下让位给右侧按钮而不把顶栏顶宽：`.app` 与 `.topbar` 的列定义带 `minmax(0, 1fr)`、
   `.header` 与提示自己带 `min-width: 0` + `overflow: hidden` + 省略号 —— 这条链少一环，
@@ -263,7 +264,7 @@ Workbench 的文档按「通用 / 模块」分层：
 | 工作日志渲染 | markdown-it（只服务工作日志正文：`html: false` 转义原文里的标签、`linkify` 认裸地址、`breaks` 让单个换行就是 `<br>`，链接统一新窗口 + 交系统浏览器打开） |
 | 笔记编辑器 | Vditor（只服务笔记正文；静态资源随包带一份、不走 CDN，见[「笔记」](modules/notes.md)那一节） |
 | 构建 | Vite 8（渲染层，打包器是 rolldown）+ cargo / Tauri CLI（后端）。根与 `apps/desktop` 的 `package.json` 都是 `"type": "module"`，所以各 vite / vitest 配置里用 `import.meta.dirname`（`__dirname` 只在旧的打包式加载器下被 shim 出来；仓库里也不要有 CJS 的 `.js` / `.cjs`，它们会被当成 ESM） |
-| 语言 | TypeScript（渲染层）+ Rust（后端）；契约与纯逻辑按域拆在 `packages/` 的 17 个 `@workbench/*` 包 |
+| 语言 | TypeScript（渲染层）+ Rust（后端）；契约与纯逻辑按域拆在 `packages/` 的 18 个 `@workbench/*` 包 |
 | 持久化 | 本地 JSON，由 Rust 侧 `store.rs` 负责（防抖 300ms、临时文件 + rename、退出前同步落盘） |
 | 子进程 | `std::process` 起 shell 命令（按批回传输出，Windows 下 `taskkill /T /F` 结束整棵进程树） |
 | 端口 → 进程 | `GetExtendedTcpTable`（iphlpapi，一次系统调用拿到监听表）+ `QueryFullProcessImageNameW`；不再起 `netstat` / `tasklist` 解析文本输出（全量检测会并发问十几个端口，原先每个端口两个子进程） |
@@ -345,6 +346,7 @@ apps/desktop/            桌面应用（自包含：渲染层 + Rust + 随包资
   src/credentials.rs     Windows 凭据管理器读写 —— 注解见 modules/ipc-and-state.md
   src/vault.rs           密码保险库宿主侧 —— 注解见 modules/vault.md
   src/encoding.rs        base64 / SHA-256 / UTF-16 —— 注解见 modules/ipc-and-state.md
+  src/etf.rs             ETF 资金流：三个行情主机的白名单与拉取、缓存落盘 —— 注解见 modules/etf.md
   src/icon.rs            程序图标抽取 —— 注解见 modules/quick-launch.md
   src/imaging.rs         图片解码校验与缩略（背景图核文件头、壁纸缩略图）—— 注解见 modules/ipc-and-state.md
   oauth.example.json     OAuth 应用凭据与禅道账号密码模板（真实凭据放 oauth.local.json，不入库）
@@ -374,7 +376,7 @@ apps/desktop/            桌面应用（自包含：渲染层 + Rust + 随包资
                          DEFAULT_SETTINGS），并从各域包 re-export 保持 `@/types` 一站式取类型
   persisted-data.ts      数据文件的收敛编排 + theme.json ↔ 数据文件的分流桥接
 
-packages/                按域拆出的 17 个 @workbench/* 包（TS 源码直出、各自带 vitest；
+packages/                按域拆出的 18 个 @workbench/* 包（TS 源码直出、各自带 vitest；
                          包之间与应用都只按包名走各自的 index.ts 桶导入）：
   core/                  平台原语：Result 与 ok/fail、端口与项目路径、dev-port、扫描
                          （scanner，fs 注入）、命令与快捷启动的收敛、图标缓存、残留进程判定、
@@ -411,6 +413,9 @@ packages/                按域拆出的 17 个 @workbench/* 包（TS 源码直�
                           单位进位（B/K/M/G，进位在取整之后复查一遍）、
                           表盘量程的自动换挡（1M / 2M / 4M / 8M…，换挡点是量程的一半）、
                           刻度环表盘的几何与尺寸常量（与 ball.rs 必须一致的那几个），以及 IPC 契约（wire.ts）
+  etf/                   ETF 资金流的纯逻辑：23 只宽基名单、沪深交易所 / 天天基金三个源的
+                          解析、增量缓存的收敛与合并、五年回填规划、净买卖计算（含折算置零）与
+                          窗口聚合（见 modules/etf.md）
 
 apps/desktop/scripts/    make-icons.mjs（程序化生成应用图标与托盘图标）、
                          vendor-pi.mjs（Pi 随包内置与瘦身）、
@@ -432,7 +437,7 @@ pnpm install
 
 pnpm run dev             # 启动开发态（Rust 后端 + 渲染层热更新）
 pnpm run typecheck       # 根目录单一 TS 工程覆盖渲染层与全部域包
-pnpm test                # Vitest 单元测试（根配置收 18 个项目，一条进程跑全量）
+pnpm test                # Vitest 单元测试（根配置收 19 个项目，一条进程跑全量）
 cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml   # Rust 侧测试
 pnpm run build:renderer  # 只编渲染层，产物落 apps/desktop/out/renderer
 pnpm run preview:renderer # 只把渲染层跑在浏览器里，方便看布局（产物落 apps/desktop/.preview/）
@@ -487,7 +492,7 @@ pnpm run dist         # 产出 NSIS 安装包
 
 ## 数据与隐私
 
-应用**默认不联网**。对外发请求的只有十三处，且都是你自己开出来的。
+应用**默认不联网**。对外发请求的只有十四处，且都是你自己开出来的。
 **截图与钉图一处都不占**：抓屏走 Win32（BitBlt）、剪贴板与落盘都在本机、钉图只是一扇置顶窗口，
 整个过程没有一次网络请求（也正因如此，取字 / OCR 这一版不做：云端那条会多出一处出口）。
 
@@ -499,13 +504,12 @@ pnpm run dist         # 产出 NSIS 安装包
   它**没有同步按钮** —— 登录且填了地址之后，进密码页、或在那一页增删改一条，就自动推拉一次
   （换 / 导入密钥那几步不自动推，理由见那一节）
 - **TBuddy（网关，可选、默认关闭）**：在「TBuddy」页点「启动」才绑 `127.0.0.1` 的一个端口，点「登录」才连
-  WorkBuddy / CodeBuddy 的登录与计费接口（国际版 `www.workbuddy.ai`，国内版 `copilot.tencent.com`
-  与 `www.codebuddy.cn`）。它把账号额度包成一条本机 OpenAI 兼容接口给别的客户端用；**只监听回环**，
+  CodeBuddy 的登录与计费接口（对话 `copilot.tencent.com`，计费 `www.codebuddy.cn`）。
+  它把账号额度包成一条本机 OpenAI 兼容接口给别的客户端用；**只监听回环**，
   不对外暴露、不上报任何数据（历史流水只在开启上面的用量同步时随那个仓库走）。定价估算用的是随包价表，不联网取价。
-  「福利」栏的签到 / 成长任务 / 猫猫旅行 / 连登管家 / 国际版每日活跃**也走同一条出口**，但只认
-  用户点出来的动作（没有调度器、没有定时器）：国际版每日活跃还在 `www.workbuddy.ai` 上建网页端会话，
-  国内版领奖在桌面端回 400 时降级到 `www.workbuddy.cn`（这一页唯一会碰那个主机的地方）；
-  尝试记录只写本机 `activity.jsonl`，不随任何仓库同步
+  「福利」栏的签到 / 成长任务 / 猫猫旅行 / 连登管家**也走同一条出口**，但只认
+  用户点出来的动作（没有调度器、没有定时器）：领奖在桌面端回 400 时降级到 `www.workbuddy.cn`
+  （这一页唯一会碰那个主机的地方）；尝试记录只写本机 `activity.jsonl`，不随任何仓库同步
 - **账号登录**（可选）：点登录时才访问 GitHub / Gitee 的授权接口，之后不在后台反复打请求
   （头像只在打开账号弹窗时重拉）；唯一例外是 access_token 到期后的**续期** ——
   只在同步之前（或刷新账号资料时）按需发生一次，走的还是换 token 的接口
@@ -587,9 +591,18 @@ pnpm run dist         # 产出 NSIS 安装包
   站外链接与 `target=_blank` 交给系统浏览器，不在应用里开新窗口。
   实现与代价见 [zentao.md](modules/zentao.md)。
 
-十二处都没有自建服务端：四处 git 同步发往你自己的仓库（知识库的同步与笔记共用同一条路、不另算），
+- **ETF 资金流**（可选；第十四条出口，**三个公开行情主机、全部只读 GET、不发用户内容**）：
+  打开「ETF」页（或点那一页的刷新）才会拉：沪深交易所的份额披露（`query.sse.com.cn` 单日一份、
+  `www.szse.cn` 区间批量）与天天基金的单位净值脚本（`fund.eastmoney.com`）。
+  主机白名单钉死在 `etf.rs`，渲染层只给得出日期 / 基金代码 / 页码；
+  请求串里没有任何用户数据。首次使用回填五年份额（上千个请求、断点续传，进度与数据都在本机
+  `data\etf.json`，不进同步仓库），之后每次进页面只增量补缺。没有定时器、没有后台轮询。
+  实现与边界见 [etf.md](modules/etf.md)。
+
+十四处都没有自建服务端：四处 git 同步发往你自己的仓库（知识库的同步与笔记共用同一条路、不另算），
 登录走两家平台官方 OAuth，AI 热点与天气只 GET 白名单里的公开源，AI 助手发给你自己配的端点，
-装技能只 GET 你粘的地址，邮箱连的是你自己配的收发服务器，禅道只访问凭据配置中的部署地址 ——
+装技能只 GET 你粘的地址，邮箱连的是你自己配的收发服务器，禅道只访问凭据配置中的部署地址，
+ETF 资金流只 GET 交易所与行情的四个公开主机 ——
 不上报任何数据。落盘除了数据文件，还有一处**应用之外**的：
 
 - **Windows 凭据管理器**：登录凭据（access_token / refresh_token / 到期时刻）存成一条

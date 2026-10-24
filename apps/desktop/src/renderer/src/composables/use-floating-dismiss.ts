@@ -1,5 +1,5 @@
 /**
- * 浮层的收起骨架：点别处 / 右键别处 / Esc / 滚轮 / 窗口缩放或失焦时收起。
+ * 浮层的收起骨架：点别处 / 右键别处 / Esc / 面板外的滚轮 / 窗口缩放或失焦时收起。
  *
  * 界面上有两处浮层是「跟着指针冒出来、点别处就收」的菜单（正文的右键菜单、
  * 目录树空白区的右键菜单），原先各写一遍同样的一串监听。这里只收「什么时候收」，
@@ -10,7 +10,9 @@
  *     中间那几十毫秒会白闪一下；
  *   - **落在面板里的不算「别处」**（点菜单自己的项不能先把自己收掉）；
  *   - **右键别处也收**：在正文 / 目录树里换个位置右击时，新的那份菜单会紧接着开出来，
- *     两件事在同一个事件里闭环，不会先消失再出现。
+ *     两件事在同一个事件里闭环，不会先消失再出现；
+ *   - **落在面板里的滚轮不收**：浮层自己可以有要滚的清单（AI 助手的模型浮层就有一截
+ *     可滚的模型列表），滚它不等于「在别处滚」。
  */
 import { onBeforeUnmount, onMounted } from 'vue'
 
@@ -56,11 +58,17 @@ export function attachFloatingDismiss(options: FloatingDismissOptions): () => vo
       dismiss()
   }
 
+  function onWheel(event: WheelEvent): void {
+    if (insidePanel(event.target))
+      return
+    dismiss()
+  }
+
   // 捕获阶段：这几件事一旦发生，浮层原来的位置就不再对了
   window.addEventListener('pointerdown', onPointerDown, true)
   window.addEventListener('contextmenu', onContextMenu, true)
   window.addEventListener('keydown', onKeyDown, true)
-  window.addEventListener('wheel', dismiss, true)
+  window.addEventListener('wheel', onWheel, true)
   window.addEventListener('resize', dismiss)
   window.addEventListener('blur', dismiss)
 
@@ -68,7 +76,7 @@ export function attachFloatingDismiss(options: FloatingDismissOptions): () => vo
     window.removeEventListener('pointerdown', onPointerDown, true)
     window.removeEventListener('contextmenu', onContextMenu, true)
     window.removeEventListener('keydown', onKeyDown, true)
-    window.removeEventListener('wheel', dismiss, true)
+    window.removeEventListener('wheel', onWheel, true)
     window.removeEventListener('resize', dismiss)
     window.removeEventListener('blur', dismiss)
   }

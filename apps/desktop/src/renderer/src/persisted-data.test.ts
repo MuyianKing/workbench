@@ -211,8 +211,9 @@ describe('按落点拆一份设置补丁', () => {
       'mail',
       'styles',
       'video',
+      'etf',
     ])
-    expect(sanitizeAppearanceSettings({ viewOrder: 'notes' }).viewOrder.length).toBe(12)
+    expect(sanitizeAppearanceSettings({ viewOrder: 'notes' }).viewOrder.length).toBe(13)
   })
 
   it('合回来的设置与拆之前一致', () => {

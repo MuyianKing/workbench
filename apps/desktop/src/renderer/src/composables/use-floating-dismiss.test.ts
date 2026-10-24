@@ -5,7 +5,7 @@
  * `addEventListener` / `removeEventListener`。
  *
  * 钉住的是两处菜单共同的边界：左键点别处才收（右键按下去那一下不能收，否则会白闪）、
- * 点在面板里不收、Esc 与滚轮 / 窗口变化都收、卸载后一个监听都不留。
+ * 点在面板里不收、Esc 与面板外的滚轮 / 窗口变化都收、卸载后一个监听都不留。
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { attachFloatingDismiss } from './use-floating-dismiss'
@@ -120,6 +120,17 @@ describe('attachFloatingDismiss', () => {
     dispatch('blur', {})
 
     expect(onDismiss).toHaveBeenCalledTimes(3)
+  })
+
+  /** 浮层自己可以有要滚的清单（AI 助手的模型浮层就是）：滚它不算「在别处滚」 */
+  it('面板里滚轮不收起', () => {
+    const { dispatch } = stubWindow()
+    const onDismiss = vi.fn()
+
+    attachFloatingDismiss({ panel: () => panelContaining(INSIDE), onDismiss })
+    dispatch('wheel', { target: INSIDE })
+
+    expect(onDismiss).not.toHaveBeenCalled()
   })
 
   /** 面板还没渲染出来（v-if 还没成真）时不该报错，也不该把事件当成「在里面」 */

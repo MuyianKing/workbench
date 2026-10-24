@@ -9,6 +9,7 @@ import AddProjectDialog from '@/components/AddProjectDialog.vue'
 import AiView from '@/components/AiView.vue'
 import AppHeader from '@/components/AppHeader.vue'
 import CommandDialog from '@/components/CommandDialog.vue'
+import EtfView from '@/components/etf/EtfView.vue'
 import GatewayView from '@/components/gateway/GatewayView.vue'
 import KbView from '@/components/KbView.vue'
 import MailView from '@/components/MailView.vue'
@@ -63,6 +64,7 @@ const VIEWS: Record<ViewId, Component> = {
   mail: MailView,
   styles: StylesView,
   video: VideoView,
+  etf: EtfView,
 }
 
 const currentView = computed(() => VIEWS[nav.activeView])

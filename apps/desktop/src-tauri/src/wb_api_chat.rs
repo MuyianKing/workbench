@@ -1,5 +1,4 @@
-//! 上游对话调用：网关唯一一条真正发聊天请求的缝。
-//!
+//! 上游对话调用：网关唯一一条真正发聊天请求的缝。//!
 //! **为什么要多起一根线程**：网关得先知道上游的状态码，才能决定回给客户端的是
 //! 「200 + SSE 流」还是「401 + 一段错误 JSON」。而这两件事发生在读正文之前 ——
 //! 一根线程同步做完就只能要么先缓存整段（丢掉流式），要么盲猜 200。
@@ -35,7 +34,7 @@ pub struct ChatCall {
     pub body: String,
 }
 
-/// 上游对话端点。国内与国际共用同一个路径。
+/// 对话端点路径。
 const CHAT_PATH: &str = "/v2/chat/completions";
 
 /// 发起调用，立刻返回句柄。真正的网络动作在后台线程里。
@@ -45,10 +44,9 @@ pub fn spawn(call: ChatCall) -> StreamHandle {
     let spawned = std::thread::Builder::new()
         .name("wb-chat-upstream".into())
         .spawn(move || {
-            let url = call.account.realm.chat_url(CHAT_PATH);
+            let url = crate::wb_upstream::chat_url(CHAT_PATH);
 
             let input = wb_identity::ChatHeaders {
-                realm: call.account.realm,
                 identity: call.account.product,
                 uid: &call.account.uid,
                 token: &call.account.access_token,

@@ -1,7 +1,7 @@
 //! 计费查询：向"记账的那个域"要余额。
 //!
-//! 注意**出口与对话不是同一个域**：国际版两者都在 `workbuddy.ai`，但国内版对话走
-//! `copilot.tencent.com`、记账走 `www.codebuddy.cn`。写成一个的话国内号查余额就是 403。
+//! 注意**出口与对话不是同一个域**：对话走 `copilot.tencent.com`、记账走
+//! `www.codebuddy.cn`。写成一个的话国内号查余额就是 403。
 //!
 //! 两条路：
 //! - **个人号**：`/v2/billing/meter/get-user-resource`，带 `ProductCode: p_tcaca`，
@@ -18,6 +18,7 @@ use crate::wb_account::Account;
 use crate::wb_credits::{self, Credits};
 use crate::wb_fingerprint;
 use crate::wb_identity;
+use crate::wb_upstream;
 
 /// 个人资源包。两个仓库都只查这一个产品码 —— 另一本账（评测/CodeBuddy 侧）
 /// 网关看不到，这是已确认的边界，不是遗漏。
@@ -107,7 +108,7 @@ pub fn call(
 }
 
 fn post(account: &Account, path: &str, body: &serde_json::Value) -> Result<serde_json::Value, String> {
-    let url = account.realm.billing_url(path);
+    let url = wb_upstream::billing_url(path);
     let payload = body.to_string();
     let headers = billing_headers(account);
     let refs: Vec<(&str, &str)> = headers
@@ -148,7 +149,6 @@ pub fn headers(account: &Account) -> Vec<(String, String)> {
 /// 计费头。与聊天头是**两套**：这里没有会话 id 家族，但有机器码与会话标识
 /// （官方客户端在计费路径上确实带它们，聊天路径反而不带）。
 fn billing_headers(account: &Account) -> Vec<(String, String)> {
-    let cfg = account.realm.config();
     let uid = if account.uid.trim().is_empty() {
         "anonymous"
     } else {
@@ -158,14 +158,15 @@ fn billing_headers(account: &Account) -> Vec<(String, String)> {
         ("Content-Type".into(), "application/json".into()),
         ("Accept".into(), "application/json, text/plain, */*".into()),
         ("X-Requested-With".into(), "XMLHttpRequest".into()),
-        ("User-Agent".into(), cfg.billing_ua.into()),
-        ("Origin".into(), cfg.origin.into()),
-        ("Referer".into(), format!("{}/", cfg.origin)),
+        ("User-Agent".into(), wb_upstream::BILLING_UA.into()),
+        ("Origin".into(), wb_upstream::ORIGIN.into()),
+        ("Referer".into(), format!("{}/", wb_upstream::ORIGIN)),
         ("Authorization".into(), format!("Bearer {}", account.access_token)),
         ("X-User-Id".into(), uid.into()),
         ("X-Domain".into(), account.effective_domain()),
         ("X-CodeBuddy-Request".into(), "1".into()),
-        ("Accept-Language".into(), cfg.accept_language.into()),
+        ("Accept-Language".into(), wb_upstream::ACCEPT_LANGUAGE.into()),
+        ("X-Product".into(), "SaaS".into()),
         ("X-Request-ID".into(), wb_identity::request_id_hex()),
         (
             "X-Machine-ID".into(),
@@ -183,9 +184,6 @@ fn billing_headers(account: &Account) -> Vec<(String, String)> {
     } else {
         // 官方用 X-No-* 表达"这个头确实没有"，缺头不是同一个意思
         headers.push(("X-No-Enterprise-Id".into(), "1".into()));
-    }
-    if account.realm == crate::wb_realm::Realm::Codebuddy {
-        headers.push(("X-Product".into(), "SaaS".into()));
     }
     headers
 }
@@ -253,14 +251,12 @@ fn excerpt(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::wb_realm::Realm;
 
-    fn account(realm: Realm) -> Account {
+    fn account() -> Account {
         Account {
             uid: "u-1".into(),
             nickname: String::new(),
             domain: String::new(),
-            realm,
             product: crate::wb_identity::Identity::Workbuddy,
             enterprise_id: String::new(),
             access_token: "tok".into(),
@@ -291,7 +287,7 @@ mod tests {
 
     #[test]
     fn 计费头带机器码与域名() {
-        let headers = billing_headers(&account(Realm::Codebuddy));
+        let headers = billing_headers(&account());
         let find = |name: &str| {
             headers
                 .iter()
@@ -300,15 +296,11 @@ mod tests {
         };
         assert!(find("X-Machine-ID").is_some());
         assert!(find("X-Session-ID").is_some());
-        // 国内版 X-Domain 是 copilot，不是记账域的 codebuddy.cn
+        // X-Domain 是 copilot，不是记账域的 codebuddy.cn
         assert_eq!(find("X-Domain"), Some("copilot.tencent.com"));
         assert_eq!(find("Origin"), Some("https://www.codebuddy.cn"));
         assert_eq!(find("X-No-Enterprise-Id"), Some("1"));
         assert_eq!(find("X-Product"), Some("SaaS"));
-
-        // 国际版不发 X-Product
-        let intl = billing_headers(&account(Realm::Workbuddy));
-        assert!(!intl.iter().any(|(key, _)| key == "X-Product"));
     }
 
     /// 真打上游：拿本机已登录的账号查一次余额。
@@ -323,9 +315,8 @@ mod tests {
         for account in &accounts {
             match fetch(account) {
                 Ok(credits) => println!(
-                    "{} · {} · 剩余 {} / 总 {} · {} 个包 · 企业={}",
+                    "{} · 剩余 {} / 总 {} · {} 个包 · 企业={}",
                     account.label(),
-                    account.realm.as_str(),
                     credits.remain,
                     credits.size,
                     credits.packages.len(),
@@ -338,7 +329,7 @@ mod tests {
 
     #[test]
     fn 企业号判定看账号或_token() {
-        let mut personal = account(Realm::Workbuddy);
+        let mut personal = account();
         assert!(!is_enterprise(&personal));
 
         personal.enterprise_id = "ent-1".into();

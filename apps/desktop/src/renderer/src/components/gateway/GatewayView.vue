@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { GatewayAccess, GatewayAccount, GatewayCredits, GatewayStatus, GatewayUsageSummary } from '@/workbench/gateway'
-import { CircleCheck, CircleClose, Clock, Coin, Connection, Plus, Refresh, User, Warning } from '@element-plus/icons-vue'
+import { CircleCheck, CircleClose, Clock, Coin, Connection, Plus, User, Warning } from '@element-plus/icons-vue'
 import { gatewayBucketUnit, summarizeGatewayRows } from '@workbench/usage'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { computed, onActivated, onBeforeUnmount, onMounted, ref } from 'vue'
@@ -202,9 +202,9 @@ async function toggle(): Promise<void> {
   }
 }
 
-async function startLogin(realm: 'workbuddy' | 'codebuddy'): Promise<void> {
+async function startLogin(): Promise<void> {
   stopLoginPolling()
-  const result = await window.workbench.gatewayLoginStart(realm)
+  const result = await window.workbench.gatewayLoginStart()
   if (!result.ok || !result.data) {
     ElMessage.error(result.error ?? '发起登录失败')
     return
@@ -365,11 +365,6 @@ function statusClass(account: GatewayAccount): string {
   if (!account.ready)
     return 'is-muted'
   return quotaActive(account) || modelQuotaActive(account) ? 'is-warn' : 'is-ok'
-}
-
-/** 账号类型的颜色：WorkBuddy 蓝、CodeBuddy 紫（与统计卡的蓝 / 紫同一套） */
-function typeClass(account: GatewayAccount): string {
-  return account.realm === 'workbuddy' ? 'is-workbuddy' : 'is-codebuddy'
 }
 
 /** 余额条的底色：≥50% 绿、20–50% 琥珀、<20% 红；总量未知时不上色 */
@@ -594,7 +589,7 @@ onBeforeUnmount(() => {
         </p>
 
         <div v-if="!accounts.length" class="panel">
-          <EmptyState compact :icon="Connection" text="还没有账号" hint="点右上角登录一个" />
+          <EmptyState compact :icon="Connection" text="还没有账号" hint="点右下角加号登录一个" />
         </div>
 
         <div v-else class="gw__accounts">
@@ -605,7 +600,7 @@ onBeforeUnmount(() => {
             :class="statusClass(account)"
           >
             <div class="gw__account-head">
-              <span class="gw__avatar" :class="typeClass(account)">{{ account.label.slice(0, 1) }}</span>
+              <span class="gw__avatar">{{ account.label.slice(0, 1) }}</span>
               <div class="gw__account-id">
                 <span class="gw__name">{{ account.label }}</span>
                 <span class="gw__tag" :class="statusClass(account)">{{ statusText(account) }}</span>
@@ -624,7 +619,6 @@ onBeforeUnmount(() => {
             </div>
 
             <div class="gw__account-meta">
-              <span class="gw__type" :class="typeClass(account)">{{ account.realmLabel }}</span>
               <span class="gw__priority">
                 <span class="gw__dim">优先级</span>
                 <el-input-number
@@ -696,40 +690,31 @@ onBeforeUnmount(() => {
         </div>
       </section>
 
-      <!-- 右下角：两颗常驻工具 + 悬停展开的登录按钮 -->
+      <!-- 右下角：刷新积分 + 登录。页面数据走 15 秒轮询，不再放手动键 -->
       <div class="gw__fab">
-        <div class="gw__fab-tools">
-          <el-tooltip content="刷新页面数据" placement="top">
-            <button type="button" class="gw__fab-tool" aria-label="刷新页面数据" @click="refresh">
-              <el-icon><Refresh /></el-icon>
-            </button>
-          </el-tooltip>
-          <el-tooltip content="刷新积分" placement="top">
-            <button
-              type="button"
-              class="gw__fab-tool"
-              :class="{ 'is-busy': creditBusy }"
-              :disabled="!accounts.length || creditBusy"
-              aria-label="刷新积分"
-              @click="queryAllCredits(true)"
-            >
-              <el-icon><Coin /></el-icon>
-            </button>
-          </el-tooltip>
-        </div>
-        <div class="gw__fab-login">
-          <div class="gw__fab-actions">
-            <el-button size="small" :disabled="!!loggingIn" @click="startLogin('workbuddy')">
-              WorkBuddy
-            </el-button>
-            <el-button size="small" :disabled="!!loggingIn" @click="startLogin('codebuddy')">
-              CodeBuddy
-            </el-button>
-          </div>
-          <button type="button" class="gw__fab-main" aria-label="登录账号" aria-haspopup="true">
+        <el-tooltip content="刷新积分" placement="top">
+          <button
+            type="button"
+            class="gw__fab-tool"
+            :class="{ 'is-busy': creditBusy }"
+            :disabled="!accounts.length || creditBusy"
+            aria-label="刷新积分"
+            @click="queryAllCredits(true)"
+          >
+            <el-icon><Coin /></el-icon>
+          </button>
+        </el-tooltip>
+        <el-tooltip content="登录账号" placement="top">
+          <button
+            type="button"
+            class="gw__fab-main"
+            :disabled="!!loggingIn"
+            aria-label="登录账号"
+            @click="startLogin"
+          >
             <el-icon><Plus /></el-icon>
           </button>
-        </div>
+        </el-tooltip>
       </div>
     </template>
 
@@ -1083,7 +1068,7 @@ onBeforeUnmount(() => {
   gap: var(--sp-2);
 }
 
-/* 账号头像：首字 + 类型色，给每张卡一个颜色锚点 */
+/* 账号头像：首字 + 账号色（紫，与统计卡的紫同一套），给每张卡一个颜色锚点 */
 .gw__avatar {
   display: inline-flex;
   align-items: center;
@@ -1096,21 +1081,7 @@ onBeforeUnmount(() => {
   color: var(--type-color);
   font-size: var(--gw-fs-title);
   font-weight: 600;
-}
-
-/* 类型色：WorkBuddy 蓝、CodeBuddy 紫（与统计卡的蓝 / 紫同一套） */
-.gw__avatar.is-workbuddy,
-.gw__type.is-workbuddy {
-  --type-color: #2f6bd8;
-}
-
-.gw__avatar.is-codebuddy,
-.gw__type.is-codebuddy {
   --type-color: #7c3aed;
-}
-
-.gw__type {
-  color: var(--type-color);
 }
 
 .gw__account-id {
@@ -1165,7 +1136,7 @@ onBeforeUnmount(() => {
 .gw__account-meta {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: var(--sp-2);
   font-size: var(--gw-fs-micro);
   color: var(--ink-3);
@@ -1321,13 +1292,7 @@ onBeforeUnmount(() => {
   gap: var(--sp-2);
 }
 
-/* 两颗常驻工具：刷新页面 / 刷新积分 */
-.gw__fab-tools {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-}
-
+/* 唯一一颗常驻工具：刷新积分（页面数据走 15 秒轮询，不必手动） */
 .gw__fab-tool {
   display: inline-flex;
   align-items: center;
@@ -1371,47 +1336,7 @@ onBeforeUnmount(() => {
   }
 }
 
-/* 登录：加号 + 悬停向上展开的两个入口 */
-.gw__fab-login {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: var(--sp-2);
-}
-
-/**
- * 登录入口默认收起（透明 + 往下缩 + 不可点），
- * 悬停或键盘聚焦到登录这块时向上展开 —— 位移朝加号收拢，像从按钮里长出来。
- */
-.gw__fab-actions {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: var(--sp-2);
-  padding-bottom: var(--sp-1);
-  opacity: 0;
-  visibility: hidden;
-  transform: translateY(10px);
-  transition:
-    opacity 0.18s var(--ease-out),
-    transform 0.22s var(--ease-out),
-    visibility 0.22s;
-  pointer-events: none;
-}
-
-.gw__fab-login:hover .gw__fab-actions,
-.gw__fab-login:focus-within .gw__fab-actions {
-  opacity: 1;
-  visibility: visible;
-  transform: translateY(0);
-  pointer-events: auto;
-}
-
-/* 白底按钮落在壁纸上要有一层薄影，不然边界糊掉 */
-.gw__fab-actions :deep(.el-button) {
-  box-shadow: var(--shadow-card);
-}
-
+/* 登录：一颗常驻加号 */
 .gw__fab-main {
   display: inline-flex;
   align-items: center;
@@ -1428,11 +1353,14 @@ onBeforeUnmount(() => {
   transition: transform 0.22s var(--ease-out), box-shadow 0.22s var(--ease-out);
 }
 
-/* 展开时加号转成叉：既是提示，也说明这块是可以收起的 */
-.gw__fab-login:hover .gw__fab-main,
-.gw__fab-login:focus-within .gw__fab-main {
-  transform: translateY(-2px) rotate(45deg);
+.gw__fab-main:hover:not(:disabled) {
+  transform: translateY(-2px);
   box-shadow: var(--shadow-pop);
+}
+
+.gw__fab-main:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 
 .gw__fab-main:focus-visible {

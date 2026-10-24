@@ -47,14 +47,12 @@ fn ranked(accounts: &[Account], usable: impl Fn(&Account) -> bool) -> Vec<usize>
 mod tests {
     use super::*;
     use crate::wb_identity::Identity;
-    use crate::wb_realm::Realm;
 
     fn account(uid: &str, weight: u8, added_at: i64) -> Account {
         Account {
             uid: uid.into(),
             nickname: String::new(),
             domain: String::new(),
-            realm: Realm::Workbuddy,
             product: Identity::Workbuddy,
             enterprise_id: String::new(),
             access_token: "tok".into(),

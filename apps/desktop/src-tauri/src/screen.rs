@@ -143,13 +143,18 @@ unsafe fn capture_from(
     image::RgbaImage::from_raw(width, height, buffer).ok_or_else(|| "屏幕像素尺寸对不上".into())
 }
 
-/// 光标位置（虚拟桌面物理坐标）。取不到时回 (0, 0)。
-pub fn cursor_position() -> (i32, i32) {
+/// 光标位置（虚拟桌面物理坐标）。取不到时回 `None`（锁屏 / 安全桌面上会这样）。
+pub fn cursor_point() -> Option<(i32, i32)> {
     let mut point = POINT::default();
     if unsafe { GetCursorPos(&mut point) } == 0 {
-        return (0, 0);
+        return None;
     }
-    (point.x, point.y)
+    Some((point.x, point.y))
+}
+
+/// 光标位置，取不到时回 (0, 0)：抓屏那一摊只拿它算选框，兜个底就够了。
+pub fn cursor_position() -> (i32, i32) {
+    cursor_point().unwrap_or((0, 0))
 }
 
 /// 整块虚拟桌面的位置与尺寸（所有显示器都包进去的那个矩形）。

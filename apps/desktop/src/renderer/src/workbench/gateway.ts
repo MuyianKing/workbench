@@ -4,7 +4,7 @@ import { errorText, invoke } from './bridge'
 import { enqueue } from './sync-queue'
 
 /**
- * 网关（WorkBuddy / CodeBuddy 反代）的适配层。
+ * 网关（CodeBuddy 反代）的适配层。
  *
  * 只做形状收敛与命令名对齐：业务规则全在 Rust 侧（`wb_gateway.rs` 那几个命令）。
  * 一条约定要记住：**账号视图里没有 token** —— Rust 侧只回展示用的字段，
@@ -25,9 +25,6 @@ export interface GatewayStatus {
 export interface GatewayAccount {
   uid: string
   label: string
-  /** `workbuddy` / `codebuddy` */
-  realm: string
-  realmLabel: string
   /** `workbuddy` / `vscode` / `cli` */
   product: string
   enterprise: boolean
@@ -119,9 +116,8 @@ export function gatewayReload(): Promise<Result<null>> {
   return call('wb_gateway_reload', {}, '重新载入账号失败')
 }
 
-/** `realm` 收 `workbuddy` / `codebuddy` */
-export function gatewayLoginStart(realm: string): Promise<Result<GatewayLoginStart>> {
-  return call('wb_gateway_login_start', { realm }, '发起登录失败')
+export function gatewayLoginStart(): Promise<Result<GatewayLoginStart>> {
+  return call('wb_gateway_login_start', {}, '发起登录失败')
 }
 
 /** `loginState` 是 `gatewayLoginStart` 回来的那个 state */
@@ -210,7 +206,6 @@ export interface GatewayModelUsage {
 /** 单账号汇总 */
 export interface GatewayAccountUsage {
   uid: string
-  realm: string
   requests: number
   failed: number
   promptTokens: number
@@ -276,7 +271,6 @@ export interface GatewayUsageSummary {
 export interface GatewayUsageRow {
   ts: number
   uid: string
-  realm: string
   /** 产生这条流水的机器名；老流水没有这个字段，读出来是空串 */
   machine: string
   model: string
@@ -500,13 +494,12 @@ export const gatewayApi = {
   gatewayTasksTravel,
   gatewayTasksStreak,
   gatewayCheckin,
-  gatewayDailyChat,
   gatewayActivityToday,
 }
 
 // ---------- 任务福利 ----------
 
-/** 一个成长任务（国内版） */
+/** 一个成长任务 */
 export interface GatewayGrowthTask {
   taskCode: string
   name: string
@@ -550,7 +543,7 @@ export interface GatewayTaskAccount {
 export interface GatewayTasksSnapshot {
   tasks: GatewayGrowthTask[]
   summary: GatewayGrowthSummary
-  /** 这份快照属于哪个号；没有国内账号时是空串 */
+  /** 这份快照属于哪个号；没有可用账号时是空串 */
   account: string
   accounts: GatewayTaskAccount[]
   msg: string
@@ -574,25 +567,24 @@ export interface GatewayActionResult {
   credit: number
 }
 
-/** 今天的一次签到 / 每日活跃尝试 */
+/** 今天的一次签到尝试 */
 export interface GatewayActivityRow {
   ts: number
   date: string
   uid: string
   nickname: string
-  realm: string
-  /** `checkin` / `daily_chat` */
+  /** `checkin` */
   task: string
   ok: boolean
   message: string
 }
 
-/** 当前号的成长任务 + 汇总。`uid` 为空时后端取第一个已启用的国内号。 */
+/** 当前号的成长任务 + 汇总。`uid` 为空时后端取第一个已启用的号。 */
 export function gatewayTasks(uid?: string): Promise<Result<GatewayTasksSnapshot>> {
   return call('wb_gateway_tasks', { uid: uid ?? null }, '读取成长任务失败')
 }
 
-/** 一键做任务领积分。`uid` 为空时对全部已启用的国内账号逐个跑。 */
+/** 一键做任务领积分。`uid` 为空时对全部已启用的账号逐个跑。 */
 export function gatewayTasksRun(uid?: string): Promise<Result<GatewayTaskRun>> {
   return call('wb_gateway_tasks_run', { uid: uid ?? null }, '执行成长任务失败')
 }
@@ -605,17 +597,12 @@ export function gatewayTasksStreak(uid?: string): Promise<Result<GatewayActionRe
   return call('wb_gateway_tasks_streak', { uid: uid ?? null }, '连登管家失败')
 }
 
-/** Buddy 加油站签到（国内版） */
+/** Buddy 加油站签到 */
 export function gatewayCheckin(uid?: string): Promise<Result<GatewayActionResult[]>> {
   return call('wb_gateway_checkin', { uid: uid ?? null }, '签到失败')
 }
 
-/** 国际版每日活跃打卡。传 `uids` 就只打名单里那批 */
-export function gatewayDailyChat(uids?: string[]): Promise<Result<GatewayActionResult[]>> {
-  return call('wb_gateway_daily_chat', { uids: uids ?? null }, '每日活跃打卡失败')
-}
-
-/** 今天的签到 / 每日活跃尝试 */
+/** 今天的签到尝试 */
 export function gatewayActivityToday(): Promise<Result<GatewayActivityRow[]>> {
   return call('wb_gateway_activity_today', {}, '读取今日打卡记录失败')
 }

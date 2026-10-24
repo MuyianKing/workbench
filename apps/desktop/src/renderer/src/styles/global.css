@@ -70,6 +70,19 @@ body.is-resizing-notes-tree * {
   user-select: none !important;
 }
 
+/* 拖 ETF 总规模那条范围选择条：改窗口宽度（两侧把手）是 ew-resize，平移窗口是 grabbing */
+body.is-resizing-etf-range,
+body.is-resizing-etf-range * {
+  cursor: ew-resize !important;
+  user-select: none !important;
+}
+
+body.is-panning-etf-range,
+body.is-panning-etf-range * {
+  cursor: grabbing !important;
+  user-select: none !important;
+}
+
 /* 拖视频页那条左右分隔条：与笔记页同一条缝、同一副兜法（指针会扫过播放画布） */
 body.is-resizing-video-tree,
 body.is-resizing-video-tree * {
@@ -324,6 +337,19 @@ body.is-resizing-video-float * {
   justify-content: space-between;
   gap: var(--sp-2);
   flex-shrink: 0;
+}
+
+/* 面板标题前的小图标（ETF 页起的写法）：取弱一档墨色，不抢标题与数值的戏 */
+.panel__head h3 {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+
+.panel__head h3 .el-icon {
+  flex: none;
+  font-size: 14px;
+  color: var(--ink-3);
 }
 
 /* ---------- 弹窗表单（el-form） ---------- */

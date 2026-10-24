@@ -6,7 +6,6 @@ function row(overrides: Partial<GatewayUsageRowLike> = {}): GatewayUsageRowLike 
   return {
     ts: 1_792_483_989,
     uid: 'a',
-    realm: 'codebuddy',
     model: 'm',
     promptTokens: 1000,
     completionTokens: 100,

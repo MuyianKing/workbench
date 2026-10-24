@@ -10,17 +10,15 @@ import type {
 } from '@/workbench/gateway'
 import {
   Calendar,
-  Check,
   Coin,
   Lightning,
   MagicStick,
   Position,
-  Promotion,
   Refresh,
   Ticket,
   Trophy,
 } from '@element-plus/icons-vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import { computed, onMounted, ref } from 'vue'
 import EmptyState from '@/components/EmptyState.vue'
 import GatewayTable from './GatewayTable.vue'
@@ -28,10 +26,9 @@ import GatewayTable from './GatewayTable.vue'
 /**
  * 任务福利栏。
  *
- * 口径来自 workbuddy2api-hub 的「任务与福利」页：国际版每日活跃 + 国内版成长任务 /
- * 签到 / 猫猫旅行 / 连登管家。与参考项目的差别只有「什么时候去要数据」——这里
- * 只在**进这一栏、切账号、点按钮**时取一次，没有定时器；每个动作都是用户点出来的
- * 一次真实上游请求。
+ * 口径来自 workbuddy2api-hub 的「任务与福利」页：成长任务 / 签到 / 猫猫旅行 /
+ * 连登管家。与参考项目的差别只有「什么时候去要数据」——这里只在**进这一栏、
+ * 切账号、点按钮**时取一次，没有定时器；每个动作都是用户点出来的一次真实上游请求。
  *
  * 这一栏自己不查余额：积分总额取父组件已经查过的快照（`credits`），动作做完由
  * 这一栏发 `credits-refresh` 让父组件重查一遍。这样进这一栏不会多打 N 次上游。
@@ -45,7 +42,7 @@ const emit = defineEmits<{
   (event: 'credits-refresh'): void
 }>()
 
-type ActionKind = 'tasks' | 'checkin' | 'travel' | 'streak' | 'daily' | 'dailyPending'
+type ActionKind = 'tasks' | 'checkin' | 'travel' | 'streak'
 
 const selected = ref('all')
 const taskAccounts = ref<GatewayTaskAccount[]>([])
@@ -67,15 +64,14 @@ function emptySummary(): GatewayGrowthSummary {
   }
 }
 
-const cnAccounts = computed(() => props.accounts.filter(item => item.realm === 'codebuddy' && item.enabled))
-const intlAccounts = computed(() => props.accounts.filter(item => item.realm === 'workbuddy' && item.enabled))
+const accounts = computed(() => props.accounts.filter(item => item.enabled))
 const busy = computed(() => running.value !== '')
 
-/** 当前选择下要看的国内号：`all` 是全部已启用的国内号 */
-const cnScope = computed(() => {
+/** 当前选择下要看的号：`all` 是全部已启用的号 */
+const scope = computed(() => {
   if (selected.value === 'all')
-    return cnAccounts.value
-  return cnAccounts.value.filter(item => item.uid === selected.value)
+    return accounts.value
+  return accounts.value.filter(item => item.uid === selected.value)
 })
 
 /** 今天的某一次尝试（同一 uid + task 取最新一条） */
@@ -84,42 +80,12 @@ function todayOf(uid: string, task: string) {
   return rows.filter(row => row.uid === uid && row.task === task).pop()
 }
 
-const intlDone = computed(() => intlAccounts.value.filter(item => todayOf(item.uid, 'daily_chat')?.ok === true))
-const intlPending = computed(() => intlAccounts.value.filter(item => todayOf(item.uid, 'daily_chat')?.ok !== true))
-const intlText = computed(() => {
-  if (!intlAccounts.value.length)
-    return '无国际账号'
-  const done = intlDone.value.length
-  const total = intlAccounts.value.length
-  if (done === total)
-    return `今日已打卡 (${done}/${total})`
-  if (done > 0)
-    return `部分已打卡 (${done}/${total})`
-  return `今日未打卡 (0/${total})`
-})
-const intlTone = computed(() => {
-  if (!intlAccounts.value.length)
-    return 'is-muted'
-  const done = intlDone.value.length
-  if (done === intlAccounts.value.length)
-    return 'is-ok'
-  return done > 0 ? 'is-warn' : 'is-fail'
-})
-const intlPendingTip = computed(() => {
-  if (!intlPending.value.length)
-    return '国际版账号今天都已打卡'
-  const names = intlPending.value.slice(0, 30).map(item => `· ${item.label}`)
-  if (intlPending.value.length > 30)
-    names.push('· …')
-  return `今日未打卡账号 (${intlPending.value.length})：\n${names.join('\n')}`
-})
-
-const cnDone = computed(() => cnScope.value.filter(item => todayOf(item.uid, 'checkin')?.ok === true))
+const cnDone = computed(() => scope.value.filter(item => todayOf(item.uid, 'checkin')?.ok === true))
 const cnCheckinText = computed(() => {
-  if (!cnScope.value.length)
-    return '无国内账号'
+  if (!scope.value.length)
+    return '无可用账号'
   const done = cnDone.value.length
-  const total = cnScope.value.length
+  const total = scope.value.length
   if (done === total)
     return `今日已领 (${done}/${total})`
   if (done > 0)
@@ -127,10 +93,10 @@ const cnCheckinText = computed(() => {
   return `今日未领 (0/${total})`
 })
 const cnCheckinTone = computed(() => {
-  if (!cnScope.value.length)
+  if (!scope.value.length)
     return 'is-muted'
   const done = cnDone.value.length
-  if (done === cnScope.value.length)
+  if (done === scope.value.length)
     return 'is-ok'
   return done > 0 ? 'is-warn' : 'is-fail'
 })
@@ -148,14 +114,10 @@ const catState = computed(() => {
   return { text: '未知', tone: 'is-muted' }
 })
 
-/** 福利积分：国内版看发放原因里的「签到 / 成长 / 活动 / 裂变」，国际版看 Bonus Pack / 活跃 */
-function isCnPerk(pkg: GatewayCredits['packages'][number]): boolean {
+/** 福利积分：看发放原因里的「签到 / 成长 / 活动 / 裂变」 */
+function isPerk(pkg: GatewayCredits['packages'][number]): boolean {
   const reason = pkg.grantReason ?? ''
   return ['签到', '成长', '活动', '裂变'].some(word => reason.includes(word)) || pkg.name.includes('裂变')
-}
-
-function isIntlPerk(pkg: GatewayCredits['packages'][number]): boolean {
-  return pkg.name === 'Bonus Pack' || (pkg.grantReason ?? '').includes('活跃')
 }
 
 function perkTotal(list: GatewayAccount[], pick: (pkg: GatewayCredits['packages'][number]) => boolean): number | null {
@@ -174,8 +136,7 @@ function perkTotal(list: GatewayAccount[], pick: (pkg: GatewayCredits['packages'
   return total
 }
 
-const cnGranted = computed(() => perkTotal(cnScope.value, isCnPerk))
-const intlGranted = computed(() => perkTotal(intlAccounts.value, isIntlPerk))
+const granted = computed(() => perkTotal(scope.value, isPerk))
 
 function fmt(value: number): string {
   return value.toLocaleString('en-US', { maximumFractionDigits: 2 })
@@ -223,7 +184,7 @@ async function loadActivity(): Promise<void> {
 }
 
 async function loadTasks(): Promise<void> {
-  if (!cnAccounts.value.length) {
+  if (!accounts.value.length) {
     taskAccounts.value = []
     tasks.value = []
     summary.value = emptySummary()
@@ -261,38 +222,6 @@ async function runAction(kind: ActionKind): Promise<void> {
   const uid = selected.value === 'all' ? undefined : selected.value
   running.value = kind
   try {
-    if (kind === 'daily' || kind === 'dailyPending') {
-      const pending = kind === 'dailyPending' ? intlPending.value : intlAccounts.value
-      if (!pending.length) {
-        ElMessage.success(kind === 'dailyPending' ? '国际版账号今天都已打卡' : '没有可打卡的国际版账号')
-        return
-      }
-      try {
-        await ElMessageBox.confirm(
-          `将为 ${pending.length} 个国际版账号各建一个网页端会话，这会真的跑一次任务。继续？`,
-          kind === 'dailyPending' ? '未活跃打卡一键打卡' : '每日活跃打卡',
-          { confirmButtonText: '继续', cancelButtonText: '取消', type: 'warning' },
-        )
-      }
-      catch {
-        return
-      }
-      const result = await window.workbench.gatewayDailyChat(kind === 'dailyPending' ? pending.map(item => item.uid) : undefined)
-      if (!result.ok || !result.data) {
-        ElMessage.error(result.error ?? '每日活跃打卡失败')
-        return
-      }
-      const ok = result.data.some(item => item.ok)
-      const text = summarize(result.data)
-      if (ok)
-        ElMessage.success(text)
-      else
-        ElMessage.warning(text)
-      await loadActivity()
-      emit('credits-refresh')
-      return
-    }
-
     if (kind === 'tasks') {
       logs.value = []
       const result = await window.workbench.gatewayTasksRun(uid)
@@ -338,65 +267,12 @@ onMounted(() => {
 
 <template>
   <div class="perks">
-    <!-- 国际版每日活跃 -->
+    <!-- 成长任务与日常福利 -->
     <section class="panel perks__section">
       <header class="perks__head">
         <div class="perks__head-text">
           <h3 class="perks__title">
-            国际版每日活跃福利
-          </h3>
-          <p class="perks__hint">
-            每日轻量会话与网页通道打卡，触发官方发放每日活跃 Bonus Pack（+30 / +50 积分）
-          </p>
-        </div>
-        <div class="perks__actions">
-          <el-button
-            size="small"
-            :disabled="busy || !intlAccounts.length"
-            :loading="running === 'daily'"
-            @click="runAction('daily')"
-          >
-            每日活跃打卡
-          </el-button>
-          <el-button
-            size="small"
-            :disabled="busy || !intlPending.length"
-            :loading="running === 'dailyPending'"
-            @click="runAction('dailyPending')"
-          >
-            未活跃打卡一键打卡
-          </el-button>
-        </div>
-      </header>
-
-      <div class="perks__summary is-two">
-        <div class="perks__cell is-ok" :title="intlPendingTip">
-          <span class="perks__icon">
-            <el-icon><Check /></el-icon>
-          </span>
-          <div class="perks__cell-body">
-            <span class="perks__label">今日活跃打卡状态</span>
-            <span class="perks__value" :class="intlTone">{{ intlText }}</span>
-          </div>
-        </div>
-        <div class="perks__cell is-grant" title="取最近一次查询到的积分包快照">
-          <span class="perks__icon">
-            <el-icon><Promotion /></el-icon>
-          </span>
-          <div class="perks__cell-body">
-            <span class="perks__label">累计活跃奖励积分</span>
-            <span class="perks__value">{{ grantedText(intlGranted) }}</span>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- 国内版成长任务与日常福利 -->
-    <section class="panel perks__section">
-      <header class="perks__head">
-        <div class="perks__head-text">
-          <h3 class="perks__title">
-            国内版任务与福利
+            任务与福利
           </h3>
           <p class="perks__hint">
             全自动批量接取、事件上报点亮并领取官方成长积分，以及猫猫日常与打卡
@@ -407,10 +283,10 @@ onMounted(() => {
             v-model="selected"
             size="small"
             class="perks__select"
-            :disabled="busy || !cnAccounts.length"
+            :disabled="busy || !accounts.length"
             @change="switchAccount"
           >
-            <el-option value="all" label="全部国内账号（批量）" />
+            <el-option value="all" label="全部账号（批量）" />
             <el-option
               v-for="item in taskAccounts"
               :key="item.uid"
@@ -420,7 +296,7 @@ onMounted(() => {
           </el-select>
           <el-button
             size="small"
-            :disabled="busy || !cnAccounts.length"
+            :disabled="busy || !accounts.length"
             :loading="running === 'checkin'"
             @click="runAction('checkin')"
           >
@@ -429,7 +305,7 @@ onMounted(() => {
           <el-button
             size="small"
             type="primary"
-            :disabled="busy || !cnAccounts.length"
+            :disabled="busy || !accounts.length"
             :loading="running === 'tasks'"
             @click="runAction('tasks')"
           >
@@ -437,7 +313,7 @@ onMounted(() => {
           </el-button>
           <el-button
             size="small"
-            :disabled="busy || !cnAccounts.length"
+            :disabled="busy || !accounts.length"
             :loading="running === 'travel'"
             @click="runAction('travel')"
           >
@@ -445,7 +321,7 @@ onMounted(() => {
           </el-button>
           <el-button
             size="small"
-            :disabled="busy || !cnAccounts.length"
+            :disabled="busy || !accounts.length"
             :loading="running === 'streak'"
             @click="runAction('streak')"
           >
@@ -515,7 +391,7 @@ onMounted(() => {
           </span>
           <div class="perks__cell-body">
             <span class="perks__label">已获取福利总积分</span>
-            <span class="perks__value">{{ grantedText(cnGranted) }}</span>
+            <span class="perks__value">{{ grantedText(granted) }}</span>
           </div>
         </div>
       </div>
@@ -526,8 +402,8 @@ onMounted(() => {
       </div>
 
       <div class="perks__table-wrap">
-        <div v-if="!cnAccounts.length" class="panel perks__empty">
-          <EmptyState compact :icon="Trophy" text="还没有启用的国内版账号" hint="先在「账号」栏登录一个 CodeBuddy 账号" />
+        <div v-if="!accounts.length" class="panel perks__empty">
+          <EmptyState compact :icon="Trophy" text="还没有启用的账号" hint="先在「账号」栏登录一个" />
         </div>
         <div v-else-if="taskLoading && !loaded" class="panel perks__loading">
           <el-icon class="perks__spin">
@@ -641,10 +517,6 @@ onMounted(() => {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
   gap: var(--sp-3);
-}
-
-.perks__summary.is-two {
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
 }
 
 .perks__cell {

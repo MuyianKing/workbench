@@ -16,7 +16,6 @@
 export interface GatewayUsageRowLike {
   ts: number
   uid: string
-  realm: string
   model: string
   promptTokens: number
   completionTokens: number
@@ -62,7 +61,6 @@ export interface GatewayModelUsage extends GatewayUsageGroup, GatewayTimingStats
 
 export interface GatewayAccountUsage extends GatewayUsageGroup, GatewayTimingStats {
   uid: string
-  realm: string
 }
 
 export interface GatewayBucketUsage {
@@ -225,7 +223,7 @@ function finishTiming(target: GroupAccumulator): GatewayTimingStats {
 export function summarizeGatewayRows(rows: GatewayUsageRowLike[], unit: 'hour' | 'day'): GatewayUsageSummary {
   const total = emptyAccumulator()
   const byModel = new Map<string, GroupAccumulator>()
-  const byAccount = new Map<string, GroupAccumulator & { uid: string, realm: string }>()
+  const byAccount = new Map<string, GroupAccumulator & { uid: string }>()
   const buckets = new Map<string, GatewayBucketUsage>()
 
   for (const row of rows) {
@@ -235,7 +233,7 @@ export function summarizeGatewayRows(rows: GatewayUsageRowLike[], unit: 'hour' |
     accumulate(model, row)
     byModel.set(row.model, model)
 
-    const account = byAccount.get(row.uid) ?? { ...emptyAccumulator(), uid: row.uid, realm: row.realm }
+    const account = byAccount.get(row.uid) ?? { ...emptyAccumulator(), uid: row.uid }
     accumulate(account, row)
     byAccount.set(row.uid, account)
 
@@ -271,7 +269,6 @@ export function summarizeGatewayRows(rows: GatewayUsageRowLike[], unit: 'hour' |
   const accountList = [...byAccount.values()]
     .map(value => ({
       uid: value.uid,
-      realm: value.realm,
       ...finishGroup(value),
       ...finishTiming(value),
     }))

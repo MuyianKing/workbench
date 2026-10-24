@@ -61,6 +61,7 @@ pub fn load_all() {
     token_store().load();
     work_log_store().load();
     crate::ai_news::ai_news_store().load();
+    crate::etf::etf_store().load();
     crate::vault::vault_store().load();
 }
 
@@ -71,6 +72,7 @@ pub fn flush_all() {
     token_store().flush_sync();
     work_log_store().flush_sync();
     crate::ai_news::ai_news_store().flush_sync();
+    crate::etf::etf_store().flush_sync();
     crate::vault::vault_store().flush_sync();
     crate::pin::pin_store().flush_sync();
 }

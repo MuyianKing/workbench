@@ -16,6 +16,7 @@ mod commands;
 mod credentials;
 mod design;
 mod encoding;
+mod etf;
 mod fs_util;
 mod http;
 mod icon;
@@ -57,12 +58,12 @@ mod wb_pool;
 mod wb_quota;
 mod wb_relay;
 mod wb_pricing;
-mod wb_realm;
 mod wb_router;
 mod wb_sanitize;
 mod wb_server;
 mod wb_sse;
 mod wb_tasks;
+mod wb_upstream;
 mod wb_usage;
 mod weather;
 mod zentao;
@@ -540,6 +541,11 @@ fn main() {
             ai_news::ai_news_fetch,
             ai_news::ai_news_article,
             ai_news::ai_news_sources,
+            etf::etf_load,
+            etf::etf_save,
+            etf::etf_fetch_sse,
+            etf::etf_fetch_szse,
+            etf::etf_fetch_nav,
             weather::weather_geocode,
             weather::weather_forecast,
             mail::mail_key_save,
@@ -714,12 +720,12 @@ fn main() {
             wb_gateway::wb_gateway_tasks_travel,
             wb_gateway::wb_gateway_tasks_streak,
             wb_gateway::wb_gateway_checkin,
-            wb_gateway::wb_gateway_daily_chat,
             wb_gateway::wb_gateway_activity_today,
             ball::ball_apply,
             ball::ball_context,
             ball::ball_open,
             ball::ball_open_main,
+            ball::ball_drag,
             net::net_counters,
         ])
         .setup(|app| {

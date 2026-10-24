@@ -107,7 +107,6 @@ pub fn chat(request: &Request, accounts: &mut [Account], api_key: &str) -> Respo
 
         let meta = UsageMeta {
             uid: account.uid.clone(),
-            realm: account.realm.as_str().to_string(),
             model: model.clone(),
             ua: ua.clone(),
             effort: effort.clone(),
@@ -272,7 +271,6 @@ fn error_summary(status: u16, text: &str) -> String {
 /// 一条请求记账时要用的固定信息。
 struct UsageMeta {
     uid: String,
-    realm: String,
     model: String,
     ua: String,
     /// 客户端要求的推理强度（见 `effort_of`）
@@ -389,7 +387,6 @@ fn record(meta: &UsageMeta, capture: &Capture, ok: bool, error: &str) {
     let row = UsageRow {
         ts: now_secs(),
         uid: meta.uid.clone(),
-        realm: meta.realm.clone(),
         machine: crate::sync::host_name(),
         model: meta.model.clone(),
         prompt_tokens: capture.prompt,
