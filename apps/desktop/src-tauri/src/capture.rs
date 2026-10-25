@@ -778,7 +778,7 @@ pub fn capture_copy_frame(
     report_copy_failure(&app, outcome)
 }
 
-fn take_frame_png(window: &WebviewWindow, app: &AppHandle) -> Result<Vec<u8>, String> {
+pub(crate) fn take_frame_png(window: &WebviewWindow, app: &AppHandle) -> Result<Vec<u8>, String> {
     let index = overlay_index(window.label()).ok_or("这个窗口不是截图遮罩")?;
     let state = app.state::<CaptureState>();
     let guard = state.0.lock().expect("锁中毒");
@@ -814,7 +814,7 @@ fn copy_region(png: &[u8], x: i32, y: i32, width: u32, height: u32) -> Result<()
 }
 
 /// 把选区收敛到这一帧里面（渲染层已经取整并夹过一次，命令参数仍是外部输入，这里再夹一次）。
-fn clamp_region(
+pub(crate) fn clamp_region(
     frame_width: u32,
     frame_height: u32,
     x: i32,

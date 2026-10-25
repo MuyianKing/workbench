@@ -30,6 +30,7 @@ mod notes;
 mod notify;
 mod nvm;
 mod oauth;
+mod ocr;
 mod panic_log;
 mod paths;
 mod pi_skills;
@@ -690,6 +691,7 @@ fn main() {
             capture::capture_copy,
             capture::capture_copy_frame,
             capture::capture_save,
+            ocr::capture_ocr,
             pin::pin_create,
             pin::pin_context,
             pin::pin_update,

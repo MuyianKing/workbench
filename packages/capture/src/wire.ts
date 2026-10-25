@@ -71,3 +71,22 @@ export interface PinPatch {
   height?: number
   opacity?: number
 }
+
+// ---------- 取字（capture_ocr，见 src-tauri/src/ocr.rs） ----------
+
+/**
+ * OCR 认出的一个词：中文通常一字一框、英文一空格一框。
+ * 坐标是**选区裁剪图上的物理像素**（原点在选区左上角）。
+ */
+export interface OcrWord {
+  text: string
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
+/** OCR 认出的一行（行内词已按阅读顺序排好，空行不会进来） */
+export interface OcrLine {
+  words: OcrWord[]
+}

@@ -555,19 +555,27 @@ async function lock(): Promise<void> {
 }
 
 /**
- * 引导屏的文字收在一个可读的宽度里，并**左对齐**。
+ * 引导屏的文字与按钮排共用一条宽度，并**左对齐**。
  *
- * 这些段落原来没有任何宽度约束，于是各自铺成一行一千来像素的居中长句 ——
+ * 这几段原来没有任何宽度约束，于是各自铺成一行一千来像素的居中长句 ——
  * 左缘右缘都参差，既读不了，整屏也看着散。`.empty` 那套（居中 + 无宽度上限）
  * 是给「一句话 + 一颗按钮」准备的，句子一长就不成立。
  *
- * 宽度写在**段落自己**身上（`width` 而不是 `max-width`）：`.empty` 是 `align-items: center`，
+ * 宽度写在**元素自己**身上（`width` 而不是 `max-width`）：`.empty` 是 `align-items: center`，
  * 每段都会收缩到刚好包住文字 —— 只给上限的话，短句仍然比长句窄，左缘照样不齐。
  * 统一成一个宽度，几段的左缘才是同一条竖线（`max-width: 100%` 兜着窄窗口）。
- * 图标与按钮仍然居中（空状态的惯例），只把文字那一段的左缘拉直。
+ * 图标仍然居中（空状态的惯例），文字与按钮的左缘拉直。
+ *
+ * **别写成 `32em`**：`em` 按各自那一行的字号折算 —— 段落是 --fs-meta（12px），
+ * 按钮排继承 `.empty` 的 --fs-title（15px），两个 32em 差 96px，块级居中之后按钮
+ * 比文字往左凸出 48px。收进变量、按 --fs-meta 折算，字号就不参与。
  */
+.vault__intro .empty {
+  --vault-intro-width: calc(var(--fs-meta) * 32);
+}
+
 .vault__intro .empty > p {
-  width: 32em;
+  width: var(--vault-intro-width);
   max-width: 100%;
   font-size: var(--fs-meta);
   line-height: 1.7;
@@ -575,13 +583,16 @@ async function lock(): Promise<void> {
 }
 
 /*
- * 按钮那一排与上面那段文字**等宽并左对齐**：宽度取同一个 32em，两段的左缘才是同一条竖线。
+ * 按钮那一排与上面那段文字**等宽并左对齐**：两者取同一个宽度，左缘才是同一条竖线。
  * 各自居中时图标、文字、按钮三条左缘各不相同 —— 一排按钮缩在中间看着像另一块东西。
  * （量过：文字块 577→961、按钮排 648.5→889.5，改完两者左缘都是 577。）
  */
 .vault__intro-actions {
   display: flex;
-  width: 32em;
+  /* 这一行与上面那几段文字同宽（32 个字宽、块级居中），内容从左缘起排 ——
+     按钮与文字块拉直在同一条左边线上（用户拍板：按钮左对齐，不居中） */
+  justify-content: flex-start;
+  width: var(--vault-intro-width);
   max-width: 100%;
   gap: var(--sp-2);
 }

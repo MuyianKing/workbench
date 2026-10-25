@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { WorkLogEntry } from '@workbench/work-log'
-import { Finished } from '@element-plus/icons-vue'
+import { Finished, Warning } from '@element-plus/icons-vue'
 
 import { dayKey, markdownToPlainText, sanitizeProjectColor } from '@workbench/core'
 import { completedEntriesOn } from '@workbench/work-log'
@@ -117,6 +117,9 @@ function openWorkView(): void {
 
     <!-- 读盘失败：把原因说出来并给一次重试，不能显示成「今天什么也没做」 -->
     <div v-if="error" class="panel__empty">
+      <el-icon class="empty__icon">
+        <Warning />
+      </el-icon>
       <p>{{ error }}</p>
       <button class="panel__link" type="button" @click="load">
         重试

@@ -1,33 +1,13 @@
 <script setup lang="ts">
-import type { PackageManagerKey } from '@/managers'
 import { Plus } from '@element-plus/icons-vue'
 /**
- * 一个项目都还没有时的首页。
+ * 一个项目都还没有时的项目页：上手三步 + 添加项目。
  *
- * 原来这里只有一个居中的「添加项目」按钮，整屏都是空的。现在左边是上手三步，
- * 右边是本机环境与快捷操作——第一次打开就能看清这个应用会替你做哪些事。
+ * 原来这里只有一个居中的「添加项目」按钮，整屏都是空的。
  */
-import { computed } from 'vue'
-import { buildHints } from '@/hints'
-import { PACKAGE_MANAGERS, VERSIONS_FALLBACK } from '@/managers'
-import { useEnvironmentStore } from '@/stores/environment'
 import { useProjectsStore } from '@/stores/projects'
-import { useSettingsStore } from '@/stores/settings'
 
 const store = useProjectsStore()
-const settings = useSettingsStore()
-const environment = useEnvironmentStore()
-
-const versions = window.workbench?.versions ?? VERSIONS_FALLBACK
-
-const managers = PACKAGE_MANAGERS
-
-function available(key: PackageManagerKey): boolean {
-  return environment.packageManagers?.[key] ?? false
-}
-
-/** 探测还没回来时不把环境说成「未检测到」：还没问到与没装是两回事 */
-const pmProbing = computed(() => !environment.packageManagers && environment.probing)
 
 const steps = [
   {
@@ -46,8 +26,6 @@ const steps = [
     desc: '装依赖 / 启动 dev server / 打包，输出在底部终端面板里实时可见，随时可停。',
   },
 ]
-
-const hints = computed(() => buildHints(settings.settings))
 </script>
 
 <template>
@@ -92,71 +70,13 @@ const hints = computed(() => buildHints(settings.settings))
         </li>
       </ol>
     </article>
-
-    <div class="side">
-      <article class="panel">
-        <header class="panel__head">
-          <span class="eyebrow">运行环境</span>
-        </header>
-
-        <dl class="facts">
-          <div class="fact">
-            <dt>node</dt>
-            <dd class="mono">
-              {{ environment.packageManagers?.node || (environment.probing ? '检测中…' : '未检测到') }}
-            </dd>
-          </div>
-          <div class="fact">
-            <dt>chromium</dt>
-            <dd class="mono">
-              {{ versions.chrome }}
-            </dd>
-          </div>
-        </dl>
-
-        <div class="panel__foot">
-          <span class="eyebrow">包管理器</span>
-          <!-- 探测没回来前不画「未安装」的圆点：那只是还没问到 -->
-          <span v-if="pmProbing" class="pms">检测中…</span>
-          <span v-else class="pms">
-            <span
-              v-for="m in managers"
-              :key="m.key"
-              class="pm"
-              :title="available(m.key) ? `${m.label} 可用` : `${m.label} 未安装`"
-            >
-              <i class="pm__dot" :class="available(m.key) ? 'is-ok' : 'is-off'" aria-hidden="true" />
-              {{ m.label }}
-            </span>
-          </span>
-        </div>
-      </article>
-
-      <article class="panel">
-        <header class="panel__head">
-          <span class="eyebrow">快捷操作</span>
-        </header>
-
-        <ul class="tips">
-          <li v-for="item in hints" :key="item.text" class="tip">
-            <span class="tip__text truncate" :title="item.text">{{ item.text }}</span>
-            <kbd class="tip__key mono">{{ item.hint }}</kbd>
-          </li>
-        </ul>
-
-        <p class="side__note">
-          主题、托盘、开机自启在右上角的设置里。
-        </p>
-      </article>
-    </div>
   </section>
 </template>
 
 <style scoped>
 .welcome {
   display: grid;
-  grid-template-columns: minmax(0, 1.3fr) minmax(272px, 0.7fr);
-  gap: 14px;
+  grid-template-columns: minmax(0, 1fr);
   flex: 1 1 auto;
   min-height: 420px;
 }
@@ -284,43 +204,5 @@ const hints = computed(() => buildHints(settings.settings))
   font-size: var(--fs-meta);
   line-height: 1.7;
   color: var(--ink-3);
-}
-
-/* ---------- 右侧：环境 + 快捷操作 ---------- */
-.side {
-  display: grid;
-  /* 两张面板都按内容高度，贴顶排列——原来第二行用 1fr 撑满，
-     内容不够高时多出来的高度只能堆在面板里，显得上下不匀 */
-  grid-template-rows: auto auto;
-  align-content: start;
-  gap: 14px;
-  min-height: 0;
-}
-
-.panel__foot .pms {
-  margin-left: auto;
-}
-
-.side__note {
-  /* 说明是列表的补充；和「快捷操作」面板的 .tips__note 保持同一套层次处理：
-     实线把它划到列表外面（行间是虚线），线上 4px 贴住最后一条提示，
-     上内距 10px、下内距 0 */
-  margin-top: calc(var(--sp-3) * -1 + 4px);
-  padding: calc(var(--sp-2) + 2px) 0 0;
-  border-top: 1px solid var(--border);
-  font-size: var(--fs-micro);
-  color: var(--ink-3);
-}
-
-/* 窗口窄到摆不下两栏时堆起来，不要让文字被挤成一条 */
-@media (max-width: 960px) {
-  .welcome {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: auto auto;
-  }
-
-  .side {
-    grid-template-rows: auto auto;
-  }
 }
 </style>

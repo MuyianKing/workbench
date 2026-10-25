@@ -9,7 +9,7 @@
 import type { AiImagePayload, AiNewsArticle, AiNewsRefreshResult, AiNewsSourceInfo, AiNewsView, AiProvider, AiSession, AiSkillRef } from '@workbench/ai'
 import type { AccentInkMode, AppearanceSettingKey, EffectiveTheme, ThemeConfig, ThemeSource, TopBarStyle, ViewId } from '@workbench/appearance'
 import type { AccountProfile, AuthProvider } from '@workbench/auth'
-import type { CaptureContext, PinPatch, PinRecord } from '@workbench/capture'
+import type { CaptureContext, OcrLine, PinPatch, PinRecord } from '@workbench/capture'
 import type { ActiveSession, ActivityBreakdown, ActivityKind, ActivityView, CommandEntry, IconCacheEntry, PackageManager, ProjectColor, ProjectSort, QuickApp, Result, ScanResult } from '@workbench/core'
 import type { KbRawSource, KbRepoState, KbScanResult, KbSyncInput, KbSyncSummary } from '@workbench/kb'
 import type { MailAccount, MailContact } from '@workbench/mail'
@@ -55,6 +55,8 @@ export type {
   HandleId,
   MagnifierView,
   MonitorGeometry,
+  OcrLine,
+  OcrWord,
   PinPatch,
   PinRecord,
   Point,
@@ -1714,6 +1716,13 @@ export interface WorkbenchApi {
    * 原始帧里裁出来写剪贴板 —— 不走「JS 合成 → PNG → base64 → IPC → Rust 再解码」那一圈。
    */
   copyFrame: (rect: { x: number, y: number, width: number, height: number }) => Promise<Result<null>>
+  /**
+   * 取字：把选区那一块交给 **Windows 自带的 OCR**（本机识别，不新增联网出口、不随包带模型）。
+   * 回来的是行与词，坐标是**选区内**的物理像素（原点在选区左上角）—— 中文一字一框、
+   * 英文一词一框，文字层照着摆就能逐字选中（见 ocr.rs 与 @workbench/capture 的 layoutOcrSpans）。
+   * 遮罩不收：取完字还要回到遮罩里拖选、复制。
+   */
+  ocrRegion: (rect: { x: number, y: number, width: number, height: number }) => Promise<Result<OcrLine[]>>
   /**
    * 把最终图落盘，返回真正写进去的绝对路径。
    * `unique` 为真时同名加 `-2` / `-3`（自动保存那条路），为假时覆盖（「另存为」用户挑过的那条路）。

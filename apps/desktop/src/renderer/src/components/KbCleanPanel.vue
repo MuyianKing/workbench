@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { AiLogLine } from '@workbench/ai'
 import type { KbCleanPhase } from '@workbench/kb'
-import { ArrowLeft, Loading, MagicStick } from '@element-plus/icons-vue'
+import { ArrowLeft, Document, Loading, MagicStick } from '@element-plus/icons-vue'
 /**
  * 清洗面板（右栏的第三态）：一键清洗的整个过程都在这里看得见。
  *
@@ -131,9 +131,12 @@ watch(
       <p v-else-if="phase === 'cleaning'" class="clean__meta">
         正在把清洗清单交给 {{ settings.settings.appName }}…
       </p>
-      <p v-else-if="phase !== 'blocked'" class="clean__meta">
-        还没有日志。
-      </p>
+      <div v-else-if="phase !== 'blocked'" class="empty clean__empty">
+        <el-icon class="empty__icon">
+          <Document />
+        </el-icon>
+        <p>还没有日志。</p>
+      </div>
     </div>
 
     <footer v-if="created.length || updated.length" class="clean__foot">
@@ -286,6 +289,11 @@ watch(
   line-height: 1.7;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+/* 日志框里的空态：图标收一档（框不大，48 那档会顶满） */
+.clean__empty .empty__icon {
+  font-size: 32px;
 }
 
 .msg.is-tool .clean__meta {

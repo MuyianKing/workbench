@@ -7,7 +7,7 @@
 ## 约束
 
 关键落点：`packages/capture/src/`（选区几何 / 把手 / 标注模型 / 撤销栈 / 放大镜取样 / 坐标换算 /
-文件名，全部带单测）、`apps/desktop/src-tauri/src/{capture,screen,clipboard,pin}.rs`、
+取字摆位（`ocr.ts`），全部带单测）、`apps/desktop/src-tauri/src/{capture,screen,clipboard,ocr,pin}.rs`、
 `workbench/index.ts` 里那一段通道、三个 HTML 入口（`index.html` / `capture.html` / `pin.html`）、
 `components/settings/CapturePane.vue`。
 
@@ -124,9 +124,31 @@
   偏向左上、被裁掉大半甚至完全看不见；导出侧图省事只在「选区那么大」的画布上画，画布尺寸与原点的
   小数部分一变，马赛克的块色就差几个点、普通标注的抗锯齿也差一点；马赛克的格子必须落在**绝对坐标**
   的网格上，两侧各自按自己的原点对齐会错半格。这几条做到了，看到什么就存下来什么。
-- **本功能没有任何新的联网出口**：抓屏、标注、剪贴板、落盘、钉图全在本机。所以「取字 / OCR」
-  **不在这一版**（云 OCR 会多出一条出口，见 features-and-architecture 的「数据与隐私」；
-  它要做也只能是本机模型，那是另一件大事）。
+- **本功能没有任何新的联网出口**：抓屏、标注、剪贴板、落盘、钉图、取字全在本机。
+  **取字走 Windows 自带的 OCR**（`ocr.rs` 的 `capture_ocr`，`Windows.Media.Ocr`）：不随包带模型、
+  不引 wasm 引擎（前端那套 onnxruntime-web 要给 CSP 开 `wasm-unsafe-eval` 还要背 10MB 级的模型），
+  只是给编译图里已有的 `windows` crate 加 `Media_Ocr` / `Graphics_Imaging` / `Storage_Streams` 几个
+  feature。引擎按**用户语言列表**建（zh-Hans 的引擎认得了拉丁字母，中英混排不用换引擎）；
+  没装「文本识别」语言包时建不出引擎，给一句人话了事。**小选区先放大再认**：这个引擎对
+  20px 上下的界面小字明显吃力（本机实测同一句中文：20px 原样「把」拆成「扌巴」，放大 3 倍后
+  全对），所以长边 ≤1365 的选区放 3 倍、≤2048 的放 2 倍、更大的不放大（喂给引擎的长边封顶
+  4096，实测全字的 4096² 也就 0.5s），词框坐标再除回去。**只认横排**。**别改成云 OCR**
+  （多出一条出口），也别往渲染层搬推理。
+- **取字是一个「模式」，不是一次动作**（遮罩不收，直到复制 / 退出）：认出来的行与词
+  （词框是**选区内的物理像素**，中文一字一框、英文一词一框）摆成一层**可拖选**的透明文字 ——
+  字透明、`::selection` 半透明主题蓝，高亮贴着原字走。**Ctrl+C / Enter / 工具条那颗「复制」是
+  同一个动作：复制所选（没选就全部）并收工** —— 与遮罩其余地方「按下去就完事」的肌肉记忆一致，
+  复制但不收工的话界面上没有任何反馈、看着就像没复制。Esc / 右键退出回到标注。
+  **不想在图上挑就用旁边那颗「复制文字」**：识别选区全部文字、整段直接进剪贴板并收工
+  （不进文字层 —— 大多数时候「要哪段字」在框选那一刻就定了），串文本与文字层同一套规则。
+  这层 `inset: 0` 盖满画布、**必须压在工具条下面**（模板顺序在它前面 + 一道 z-index 双保险：
+  排在后面的话按钮看着在、点不到），选区与标注的指针交互也自然进不来；
+  **键盘只接 Esc / Enter / Ctrl+C / Ctrl+A 四个键**，
+  其余交给浏览器原生的文字选区（方向键挪光标那类）—— 不分流的话 Ctrl+Z 会动底下的标注、
+  Enter 会把**图**复制走。词内字符按框宽均分（选中粒度到字）、**空格只补在字母数字词身边**
+  （中文不用空格分词，小字上 OCR 的字框松、见缝就补会把「直接把」拆成「直 接 把」）、
+  非末行行尾补换行位 —— 摆位纯逻辑在 `packages/capture/src/ocr.ts`（带单测），换算到视口
+  在 CaptureApp 的 `ocrSpans`（与 `canvasToViewport` 同一套比例）。
 - **数据落点**：截图的每一帧**只在内存里**（见上面那条，不落盘、也没有临时目录要收拾，进程没了就没了）；
   钉图的图在数据目录的 `pins\<id>.png`（安装版 `%APPDATA%\Workbench\data\`，开发版
   `%APPDATA%\Workbench-dev\data\`）、记账在同目录的 `pins.json`（进 JsonStore 防抖落盘，
@@ -232,6 +254,36 @@
 - **这些数要在 release 里量**：dev 下我们自己的像素循环（DIB 转换）没开优化，观感会明显
   更慢；拿 dev 的数字判断这条路会误判。
 
+**取字这条路**（`ocr.rs` + CaptureApp 的取字那一节 + `@workbench/capture` 的 `layoutOcrSpans`）：
+
+- **图不过渲染层**：Rust 手里就有这一场的原始帧，`capture_ocr` 收的只是选区矩形
+  （画布像素、渲染层取整后给，与 `capture_copy_frame` 同一套口径再夹一次）—— 从缓帧里裁出
+  选区那块、按长边档位放大（见上面那条实测）、RGBA 换 BGRA（WinRT 只吃 Bgra8 / Gray8）、
+  灌进 `SoftwareBitmap` 交给 `OcrEngine::RecognizeAsync`，词框再除回放大倍数。
+  **标注不算在内**：取字读的是屏幕当时的样子，不是画了标注之后的。
+  全程在 `#[tauri::command(async)]` 的工作线程上，遮罩不收（取完还要回去拖选）。
+- **像素怎么进 WinRT**：`Buffer::Create` 只给容量，**不能直接 QI 出字节接口**（实测
+  E_NOINTERFACE）、`IBuffer` 上也没有 `CreateReference` —— 得经 `IBufferStatics` 的
+  `CreateMemoryBufferOverIBuffer` 架一个共享同一块内存的 `MemoryBuffer`，从它的引用 QI
+  `IMemoryBufferByteAccess` 拿原始指针拷像素；拷完还要显式 `IBuffer::SetLength`（经字节接口写
+  不会带长，`CreateCopyFromBuffer` 按 Length 拷贝，0 就报 0xC00D7170，消息是「响应内存不足」、
+  看着像内存问题）。等异步收场用 `windows_future` 的 `join` —— 与保险库 Windows Hello
+  （vault.rs）同一条口径。
+- **词框 → 文字层**：词框是选区内的物理像素，`layoutOcrSpans`（纯逻辑、带单测）把它摊成逐字位：
+  词内字符均分框宽、词间空隙过门槛补空格位、非末行行尾补换行位（那层全是绝对定位的 span，
+  浏览器串选区文本**不会自己**在两行之间补 `\n`）。渲染层 `ocrSpans` 再按 `canvasToViewport`
+  同一套比例换算成 CSS 像素摆 span —— 字透明，只借盒子接选区；`user-select` 要在层上显式开回
+  `text`（遮罩整页是 `none`）。
+- **复制**：`navigator.clipboard.writeText`（与取色的 Shift 那条同一条路，遮罩窗口里实测是通的）。
+  Ctrl+C / Enter / 工具条那颗「复制」都走 `copyOcr`：有所选复制所选、没选复制全部，
+  **复制完收工**（与「复制图片」同一个出口）。失败提示走「两秒自己收」的短提示（`failTransient`）：
+  取字的失败都是「换一块再试」的事，不该像帧读不出来那样一直挂着。
+- **这套管不到「语言包在不在」**：`TryCreateFromUserProfileLanguages` 建不出引擎时 Rust 回一句
+  人话（怎么装语言包），渲染层照实显示。真机验「取到字没有」只能真按一遍热键（判据见「验证」）；
+  单测只钉住换算与摆位（BGRA 转换、字位摊分、空格 / 换行位）。`ocr_probe` 是 `#[ignore]` 的
+  手动探针（空白图跑通整条 WinRT 链）：`cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
+  ocr_probe -- --ignored`。
+
 **坐标有三层**（写清楚免得混，口径在 `packages/capture/src/coords.ts` 的文件头）：
 虚拟桌面物理坐标（Rust 摆窗口、钉图定位用）→ 画布像素（某块屏自己的物理像素，与那帧 PNG 一一对应）
 → 视口 CSS 像素（鼠标事件）。**鼠标事件一律经 `viewportToCanvas` 换算**，不自己乘
@@ -316,6 +368,13 @@ Ctrl+滚轮调透明度。**尺寸与位置一律取整**：`pin_update` 那边�
 **验证**：`pnpm run typecheck` → `pnpm run lint` → `pnpm run build:renderer`（**三个 HTML 入口的
 模板都要真的编一遍**：`typecheck` 查不出标签不配平，也查不出模板里用了没 import 的组件）→
 `pnpm test` → `cargo test` + `cargo build`。
+
+**取字也只能在真应用里验**（WinRT 那条链与语言包都吃真机）：框选一块有文字的区域 → 工具条「取字」
+→ 字位应当原样贴在图上那些字的位置（中文逐字、英文逐词）、拖选的高亮贴着原字走；Ctrl+C 后剪贴板里
+是**文字**（PowerShell `[Windows.Forms.Clipboard]::GetText()` 核对，空格与换行都该在）；
+Enter 复制并收工、Esc 退出后回到标注那套（选区还在）、右键同理；对着一块没字的区域取字应当说
+「这一块里没认出文字」并在两秒后自己收掉。**文字层本身（摆位、选中、复制）在浏览器里就能验** ——
+与「文字那一摊」同一个搭法，把 `ocrRegion` 桩成回一份现造的行与词即可，仓库里一个文件都不用加。
 
 上面这些管不到「抓屏真的抓到没有、窗口真的起来没有」—— 那几条只能在真应用里验。跑法（配方见
 [dev-notes/browser-preview-verification.md](../dev-notes/browser-preview-verification.md) 的

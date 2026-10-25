@@ -6,8 +6,8 @@
  * 超长名会把标题栏撑开、把右上角的窗口按钮挤走，换行更是直接把一条标题栏变成两行。
  */
 
-/** 默认程序名：brand 那条标题栏上的原始字样（按当前配置固化） */
-export const APP_NAME_DEFAULT = 'MUYIAN'
+/** 默认程序名（用户定的品牌名，按当前配置固化）：标题栏、托盘提示与窗口标题上都是它 */
+export const APP_NAME_DEFAULT = '小慕'
 
 /** 名称长度上限：再长就不像程序名，也会挤坏标题栏 */
 export const APP_NAME_MAX_LENGTH = 24

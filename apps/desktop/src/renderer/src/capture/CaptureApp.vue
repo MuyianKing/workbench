@@ -36,7 +36,7 @@
  * **别改回「只在选区那么大的画布上平移到选区坐标系再画」**：画布尺寸与原点的小数部分一变，
  * 马赛克的块色会差几个点、普通标注的抗锯齿也会差一点（两样都踩过）。
  */
-import type { Annotation, AnnotationStylePatch, AnnotationTool, CaptureContext, Point, Rect } from '@/types'
+import type { Annotation, AnnotationStylePatch, AnnotationTool, CaptureContext, OcrLine, Point, Rect } from '@/types'
 import {
   ANNOTATION_COLOR_DEFAULT,
   ANNOTATION_TOLERANCE,
@@ -62,6 +62,7 @@ import {
   hitTestAnnotation,
   hitTestAnnotations,
   initialPinSize,
+  layoutOcrSpans,
   MAGNIFIER_SIDE,
   MAGNIFIER_ZOOM,
   MIN_SELECTION,
@@ -83,6 +84,7 @@ import {
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { drawAnnotation, drawAnnotations, measureTextSize, TEXT_LINE_HEIGHT } from './annotation-render'
 import CaptureMagnifier from './CaptureMagnifier.vue'
+import CaptureOcrBar from './CaptureOcrBar.vue'
 import CaptureToolbar from './CaptureToolbar.vue'
 
 const context = ref<CaptureContext | null>(null)
@@ -135,6 +137,18 @@ const draft = shallowRef<Annotation | null>(null)
 const textEditing = ref<{ at: Point, text: string } | null>(null)
 const busy = ref(false)
 const failure = ref('')
+
+// ---------- 取字（见 docs/modules/screenshot.md 的「取字」） ----------
+//
+// 认出来的行。**遮罩不收**：取完字还要回到遮罩里拖选、复制 —— 它是一个盖在画布上的
+// 「模式」，Esc / 右键退出回到标注那套，不是一次动作。
+const ocrLines = ref<OcrLine[] | null>(null)
+/** 取字用的那块选区（取整后的画布像素）：文字层按它换算摆位 */
+const ocrRect = ref<Rect | null>(null)
+/** 文字层本体（全选要圈它的范围） */
+const ocrLayer = ref<HTMLElement | null>(null)
+/** 短暂失败提示的收尾（取字那几条都是「换一块再试」的事，不该一直挂着） */
+let failureTimer: number | undefined
 
 type DragMode = 'none' | 'create' | 'move-selection' | 'resize-selection' | 'draw' | 'move-annotation' | 'resize-annotation'
 let mode: DragMode = 'none'
@@ -230,6 +244,9 @@ function reset(): void {
   textEditing.value = null
   busy.value = false
   failure.value = ''
+  ocrLines.value = null
+  ocrRect.value = null
+  window.clearTimeout(failureTimer)
   mode = 'none'
   creating.value = false
   dragHandle = null
@@ -306,6 +323,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('pointerup', onPointerUp)
   stopSync?.()
   window.clearTimeout(copyNoteTimer)
+  window.clearTimeout(failureTimer)
   bitmap.value?.close()
 })
 
@@ -406,16 +424,19 @@ function redraw(): void {
     ctx.rect(rect.x, rect.y, rect.width, rect.height)
     ctx.fill('evenodd')
 
-    drawSelectionChrome(ctx, rect)
-    drawSizeLabel(ctx, rect)
+    // 取字模式不画选区与标注的选中框：文字层盖在上面，那些框只会添乱
+    if (!ocrLines.value) {
+      drawSelectionChrome(ctx, rect)
+      drawSizeLabel(ctx, rect)
 
-    // 选中那条的样子：拖把手改大小时画的是**正被你拖的那一份**（draft），
-    // 不然把手会留在旧的位置上、看着像没跟上
-    const index = pickedAnnotation.value
-    const picked = index === null ? null : annotations.value[index]
-    const chrome = draft.value && picked && draft.value.id === picked.id ? draft.value : picked
-    if (chrome)
-      drawPickedChrome(ctx, chrome)
+      // 选中那条的样子：拖把手改大小时画的是**正被你拖的那一份**（draft），
+      // 不然把手会留在旧的位置上、看着像没跟上
+      const index = pickedAnnotation.value
+      const picked = index === null ? null : annotations.value[index]
+      const chrome = draft.value && picked && draft.value.id === picked.id ? draft.value : picked
+      if (chrome)
+        drawPickedChrome(ctx, chrome)
+    }
   }
   else if (!draft.value) {
     drawCrosshair(ctx)
@@ -717,8 +738,13 @@ function onPointerUp(): void {
 /**
  * 右键：**一次就取消整场截图**（与提示条上那句「右键取消」一致）。
  * 只清选区用 Esc —— 它才是逐层退的那一条。
+ * 取字模式里右键先退那层（文字层自己接住了 contextmenu，这里兜的是没盖到的缝）。
  */
 function onContextMenu(): void {
+  if (ocrLines.value) {
+    exitOcr()
+    return
+  }
   cancel()
 }
 
@@ -964,6 +990,33 @@ function onKeyDown(event: KeyboardEvent): void {
   const ctrl = event.ctrlKey || event.metaKey
   const key = event.key.toLowerCase()
 
+  // 取字模式先于选区 / 标注那套：这层里拖选、挪光标都交给浏览器原生行为，
+  // 我们只接四个键，其余一概不落到下面去（Ctrl+Z 会动底下的标注、Enter 会把图复制走）。
+  // Ctrl+C / Enter 与「复制」按钮同一个动作：复制所选（没选就全部）并收工。
+  if (ocrLines.value) {
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      exitOcr()
+      return
+    }
+    if (event.key === 'Enter') {
+      event.preventDefault()
+      void copyOcr()
+      return
+    }
+    if (ctrl && key === 'c') {
+      event.preventDefault()
+      void copyOcr()
+      return
+    }
+    if (ctrl && key === 'a') {
+      event.preventDefault()
+      selectAllOcr()
+      return
+    }
+    return
+  }
+
   // Shift：把当前像素的颜色写进剪贴板。**只在放大镜露着的时候认** —— 有选区时它让开了，
   // 那会儿的 Shift+方向键是「步进十格」，不该顺手往剪贴板里塞东西
   if (event.key === 'Shift') {
@@ -1169,6 +1222,145 @@ function commitText(): void {
   if (activeTool.value === 'text')
     activeTool.value = null
   redraw()
+}
+
+// ---------- 取字 ----------
+
+/** 文字层的摆位：layoutOcrSpans 给的是选区内的物理像素，这里换成遮罩上的 CSS 像素 */
+const ocrSpans = computed(() => {
+  const rect = ocrRect.value
+  const lines = ocrLines.value
+  if (!rect || !lines)
+    return null
+
+  const box = viewportBox()
+  const canvas = canvasSize.value
+  const scaleX = box.width > 0 ? canvas.width / box.width : 1
+  const scaleY = box.height > 0 ? canvas.height / box.height : 1
+  // 选区左上角（画布像素）→ 视口，词坐标再除同一套比例加过去（与 canvasToViewport 严格同源）
+  const origin = canvasToViewport({ x: rect.x, y: rect.y }, box, canvas)
+  return layoutOcrSpans(lines).map(line =>
+    line.map(span => ({
+      text: span.text,
+      left: origin.x + span.x / scaleX,
+      top: origin.y + span.y / scaleY,
+      width: span.w / scaleX,
+      height: span.h / scaleY,
+    })))
+})
+
+/** 短暂的失败提示（两秒后自己收）：取字的失败都是「换一块再试」的事，不该一直挂在画面上 */
+function failTransient(message: string): void {
+  failure.value = message
+  window.clearTimeout(failureTimer)
+  failureTimer = window.setTimeout(() => {
+    failure.value = ''
+  }, 2000)
+}
+
+/** 工具条上「取字」：把选区那一块交给 Windows OCR（Rust 从缓帧里裁，图不过渲染层），遮罩不收 */
+/** 选区取整夹好（取字与「复制文字」同一个口径：画布像素，Rust 那边再夹一次到帧内） */
+function ocrRegionOfSelection(): { x: number, y: number, width: number, height: number } | null {
+  const rect = selection.value
+  if (!rect || !hasSelection.value)
+    return null
+  const crop = clampRect({ ...rect, x: Math.round(rect.x), y: Math.round(rect.y) }, fullRect())
+  return {
+    x: Math.round(crop.x),
+    y: Math.round(crop.y),
+    width: Math.max(1, Math.round(crop.width)),
+    height: Math.max(1, Math.round(crop.height)),
+  }
+}
+
+async function startOcr(): Promise<void> {
+  const region = ocrRegionOfSelection()
+  if (!region)
+    return
+
+  const token = sessionSeq
+  settleFresh()
+  const result = await window.workbench.ocrRegion(region)
+  if (token !== sessionSeq)
+    return
+  if (!result.ok || !result.data?.length) {
+    failTransient(result.ok ? '这一块里没认出文字' : result.error ?? '取字失败')
+    return
+  }
+  ocrRect.value = region
+  ocrLines.value = result.data
+  redraw()
+}
+
+/**
+ * 工具条上「复制文字」：识别选区里的字，**整段直接进剪贴板并收工** —— 不进文字层。
+ * 大多数时候「要哪段字」在框选那一刻就定了；串文本与文字层同一套规则
+ * （空格只补在字母数字词身边、行与行之间换行）。
+ */
+async function ocrCopy(): Promise<void> {
+  const region = ocrRegionOfSelection()
+  if (!region)
+    return
+
+  const token = sessionSeq
+  const result = await window.workbench.ocrRegion(region)
+  if (token !== sessionSeq)
+    return
+  if (!result.ok || !result.data?.length) {
+    failTransient(result.ok ? '这一块里没认出文字' : result.error ?? '取字失败')
+    return
+  }
+
+  const text = layoutOcrSpans(result.data)
+    .map(line => line.map(span => span.text).join(''))
+    .join('\n')
+  if (!text.trim())
+    return
+  try {
+    await navigator.clipboard.writeText(text)
+  }
+  catch {
+    failTransient('复制失败')
+    return
+  }
+  await abort()
+}
+
+/** 退出取字：回到标注那套（选区原样留着） */
+function exitOcr(): void {
+  ocrLines.value = null
+  ocrRect.value = null
+  window.getSelection()?.removeAllRanges()
+  redraw()
+}
+
+/**
+ * 取字里的复制：有所选就复制所选，没选就全部，**复制完就收工** ——
+ * Ctrl+C / Enter / 工具条那颗「复制」都走它，与遮罩其余地方「按下去就完事」的肌肉记忆一致
+ * （复制但不收工的话，界面上没有任何反馈，看着就像没复制）。
+ */
+async function copyOcr(): Promise<void> {
+  const picked = window.getSelection()?.toString() ?? ''
+  const all = ocrSpans.value?.map(line => line.map(span => span.text).join('')).join('\n') ?? ''
+  const text = picked.trim() ? picked : all
+  if (!text.trim())
+    return
+  try {
+    await navigator.clipboard.writeText(text)
+  }
+  catch {
+    failTransient('复制失败')
+    return
+  }
+  await abort()
+}
+
+/** 全选文字层里的字位（没摆出来就什么都不做） */
+function selectAllOcr(): void {
+  const element = ocrLayer.value
+  const domSelection = window.getSelection()
+  if (element && domSelection)
+    domSelection.selectAllChildren(element)
 }
 
 // ---------- 导出与动作 ----------
@@ -1397,8 +1589,9 @@ function measureToolbar(): void {
     toolbarSize.value = { width: element.offsetWidth, height: element.offsetHeight }
 }
 
-// freshId 也在名单里：它一翻，参数那一排跟着换（见 optionTool），高度可能跟着变
-watch([toolbarVisible, activeTool, freshId, () => annotations.value.length], () => {
+// freshId 也在名单里：它一翻，参数那一排跟着换（见 optionTool），高度可能跟着变；
+// 取字那一层进出时工具条整个换了一副，也要重量一次
+watch([toolbarVisible, activeTool, freshId, ocrLines, () => annotations.value.length], () => {
   void nextTick(measureToolbar)
 })
 
@@ -1485,8 +1678,43 @@ const redoAble = computed(() => historyCanRedo(history.value))
       @blur="commitText"
     />
 
+    <!--
+      取字的文字层：盖住整块画布，按 OCR 的字框逐字摆**透明**的 span ——
+      选中高亮贴着原字走（::selection 半透明主题蓝、字保持透明），Ctrl+C / Enter
+      复制的是文字而不是图。词间空隙与行末的换行位让串出来的文本有分词、有行界。
+      这层盖住画布后，选区 / 标注那套指针交互自然进不来（退出走 Esc / 右键 / 工具条）。
+      **必须排在工具条前面（z-index 也压它一头）**：它 inset: 0 盖满全屏，排在后面的话
+      三颗按钮的点击全被这层接走 —— 看着在、就是点不动（踩过）。
+    -->
+    <div
+      v-if="ocrSpans"
+      ref="ocrLayer"
+      class="capture-ocr"
+      @contextmenu.prevent="exitOcr"
+    >
+      <span
+        v-for="(span, index) in ocrSpans.flat()"
+        :key="index"
+        :style="{
+          left: `${span.left}px`,
+          top: `${span.top}px`,
+          width: `${span.width}px`,
+          height: `${span.height}px`,
+          fontSize: `${span.height}px`,
+        }"
+      >{{ span.text }}</span>
+    </div>
+
     <div v-if="toolbarVisible" ref="toolbarRef" class="capture__toolbar" :style="toolbarStyle">
+      <!-- 取字模式下工具条换成那一副：全选 / 复制 / 退出（动作都在这边，bar 只摆样子） -->
+      <CaptureOcrBar
+        v-if="ocrLines"
+        @select-all="selectAllOcr"
+        @copy="copyOcr"
+        @exit="exitOcr"
+      />
       <CaptureToolbar
+        v-else
         v-model:tool="activeTool"
         v-model:color="color"
         v-model:stroke-width="strokeWidth"
@@ -1502,6 +1730,8 @@ const redoAble = computed(() => historyCanRedo(history.value))
         @copy="finishWith(copy)"
         @save="finishWith(save)"
         @pin="finishWith(pin)"
+        @ocr="finishWith(startOcr)"
+        @ocr-copy="finishWith(ocrCopy)"
       />
     </div>
 
@@ -1572,7 +1802,42 @@ const redoAble = computed(() => historyCanRedo(history.value))
 
 .capture__toolbar {
   position: absolute;
+  /* 取字的文字层（inset: 0）盖满全屏，工具条必须压在它上面 —— 排序之外再给一道 z-index
+     双保险：排在它后面的话三颗按钮看着在、点不到 */
+  z-index: 2;
   cursor: default;
+}
+
+/*
+ * 取字的文字层。遮罩整页被 capture.html 禁了选中，**这层是唯一要选中的地方**，
+ * user-select 得显式开回 text。span 一律绝对定位：摆位由 OCR 的字框换算而来
+ * （ocrSpans），字号贴着框高走 —— 字本身透明，只借它的盒子接选区。
+ */
+.capture-ocr {
+  position: absolute;
+  inset: 0;
+  /* 压在工具条下面（按钮要能点），其余绝对定位的兄弟都在它后面、自然盖住它 */
+  z-index: 1;
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: text;
+}
+
+.capture-ocr span {
+  position: absolute;
+  display: inline-block;
+  line-height: 1;
+  white-space: pre;
+  overflow: hidden;
+  text-align: center;
+  color: transparent;
+  font-family: 'Segoe UI', 'Microsoft YaHei', system-ui, sans-serif;
+}
+
+/* 选中高亮：一层半透明的主题蓝盖在原字上，字保持透明 —— 原图上的字透出来，高亮贴着它走 */
+.capture-ocr span::selection {
+  background: rgb(64 158 255 / 45%);
+  color: transparent;
 }
 
 .capture__magnifier {
@@ -1602,5 +1867,6 @@ const redoAble = computed(() => historyCanRedo(history.value))
   border-radius: 6px;
   background: rgb(160 40 40 / 94%);
   color: #fff;
+  pointer-events: none;
 }
 </style>

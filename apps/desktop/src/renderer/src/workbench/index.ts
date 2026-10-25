@@ -1,4 +1,4 @@
-import type { AddProjectInput, AppSettings, AuthProvider, BackgroundImage, BallContext, BuiltinWallpaper, CaptureContext, CommandEntry, EffectiveTheme, InstallablePackageManager, MailNotifyPayload, NetCounters, PinPatch, PinRecord, Project, Result, TerminalKind, ThemeConfig, WindowState, WorkbenchApi } from '@/types'
+import type { AddProjectInput, AppSettings, AuthProvider, BackgroundImage, BallContext, BuiltinWallpaper, CaptureContext, CommandEntry, EffectiveTheme, InstallablePackageManager, MailNotifyPayload, NetCounters, OcrLine, PinPatch, PinRecord, Project, Result, TerminalKind, ThemeConfig, WindowState, WorkbenchApi } from '@/types'
 /**
  * `window.workbench` 的 Tauri 实现。
  *
@@ -851,6 +851,9 @@ function createApi(): WorkbenchApi {
     // 没画标注时走这条：只给选区，由 Rust 从这一场缓存的原始帧里裁（省掉整圈 base64 往返）
     copyFrame: (rect: { x: number, y: number, width: number, height: number }) =>
       guard(invoke<null>('capture_copy_frame', rect), '复制到剪贴板失败'),
+    // 取字：Windows 自带的 OCR，Rust 从缓帧里裁选区识别，遮罩不收（还要回去拖选）
+    ocrRegion: (rect: { x: number, y: number, width: number, height: number }) =>
+      guard(invoke<OcrLine[]>('capture_ocr', rect), '取字失败'),
     saveImage: (png: string, dir: string, name: string, unique: boolean) =>
       guard(invoke<string>('capture_save', { png, dir, name, unique }), '保存截图失败'),
     pinImage: (png: string, x: number, y: number, width: number, height: number, opacity: number) =>

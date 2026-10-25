@@ -9,7 +9,7 @@ import type { AnnotationTool } from '@/types'
 import { Close, CopyDocument, Download } from '@element-plus/icons-vue'
 import { ANNOTATION_COLORS, ANNOTATION_TOOLS, MOSAIC_BLOCKS, STROKE_WIDTHS, TEXT_SIZES } from '@workbench/capture'
 import { computed } from 'vue'
-import { PIN_ICON, REDO_ICON, TOOL_ICONS, UNDO_ICON } from './tool-icons'
+import { OCR_COPY_ICON, OCR_ICON, PIN_ICON, REDO_ICON, TOOL_ICONS, UNDO_ICON } from './tool-icons'
 
 const props = defineProps<{
   canUndo: boolean
@@ -23,12 +23,14 @@ const props = defineProps<{
   optionTool: AnnotationTool | null
 }>()
 const emit = defineEmits<{
-  undo: []
-  redo: []
-  cancel: []
-  copy: []
-  save: []
-  pin: []
+  'undo': []
+  'redo': []
+  'cancel': []
+  'copy': []
+  'save': []
+  'pin': []
+  'ocr': []
+  'ocr-copy': []
 }>()
 const tool = defineModel<AnnotationTool | null>('tool', { required: true })
 const color = defineModel<string>('color', { required: true })
@@ -98,6 +100,24 @@ function pick(next: AnnotationTool): void {
         <button type="button" class="overlay-tool" :disabled="props.busy" @click="emit('pin')">
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6">
             <path :d="PIN_ICON" />
+          </svg>
+        </button>
+      </el-tooltip>
+
+      <!-- 取字：识别选区里的文字，进「拖选 / 复制文字」那层（遮罩不收） -->
+      <el-tooltip content="取字（识别选区里的文字）" placement="top">
+        <button type="button" class="overlay-tool" :disabled="props.busy" @click="emit('ocr')">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6">
+            <path :d="OCR_ICON" />
+          </svg>
+        </button>
+      </el-tooltip>
+
+      <!-- 复制文字：识别完整段直接进剪贴板并收工 —— 「要哪段字」在框选那一刻就定了的话用这颗 -->
+      <el-tooltip content="复制文字（识别后直接进剪贴板）" placement="top">
+        <button type="button" class="overlay-tool" :disabled="props.busy" @click="emit('ocr-copy')">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6">
+            <path :d="OCR_COPY_ICON" />
           </svg>
         </button>
       </el-tooltip>

@@ -16,8 +16,9 @@ import { defineStore } from 'pinia'
  *     立刻播它，点文件夹只是选中并切换展开态；恢复上次的那个是唯一的例外
  *     （只加载不播，见 `autoplayNext`）。
  *
- * 播放本身的状态（进度、暂停、速率的实际值）只活在 VideoView 里：它不跨页共享，
- * 页面被 KeepAlive 包着，切走再回来播放还在原地，不需要一份全局状态。
+ * 播放本身的状态里，只有**要跨组件共享的那部分**住在这里（速率、悬浮意图 ——
+ * 播放器本体与视频页头部各要读一份）；进度与暂停的实际值活在 `<video>` 元素上，
+ * 不另立全局状态。
  */
 import { computed, ref, watch } from 'vue'
 import { useSettingsStore } from '@/stores/settings'
@@ -37,6 +38,14 @@ export const useVideoStore = defineStore('video', () => {
    * 一份速率两处读：悬浮小窗里改了，回视频页还得是同一个值（换视频沿用这一份）。
    */
   const rate = ref(1)
+
+  /**
+   * 悬浮播放的显式意图（会话里的记忆，不落盘）：离开视频页**不**自动浮窗 ——
+   * 没点过「悬浮播放」就只是接着出声（画面随视频页待在后台）；点过才浮，
+   * 回到视频页或停播时收回。住在 store 里是因为发起方（视频页头部）与执行方
+   * （全局单例播放器）是两个组件，一份意图两边读写。
+   */
+  const floatRequested = ref(false)
 
   /** 目录树的顶层（文件夹与视频，已按「文件夹在前、同层按名字」排好） */
   const nodes = ref<VideoNode[]>([])
@@ -259,6 +268,17 @@ export const useVideoStore = defineStore('video', () => {
   function closeVideo(): void {
     active.value = null
     openError.value = ''
+    floatRequested.value = false
+  }
+
+  /** 点「悬浮播放」：把手上的视频浮成小窗带走（没有正播的视频时那颗按钮不在） */
+  function requestFloat(): void {
+    floatRequested.value = true
+  }
+
+  /** 收回悬浮：进视频页、小窗上点「回到视频页」、停播都走这里 */
+  function dockFloat(): void {
+    floatRequested.value = false
   }
 
   return {
@@ -266,6 +286,7 @@ export const useVideoStore = defineStore('video', () => {
     rootName,
     recentRoots,
     rate,
+    floatRequested,
     nodes,
     activeRel,
     active,
@@ -282,5 +303,7 @@ export const useVideoStore = defineStore('video', () => {
     forgetRoot,
     select,
     closeVideo,
+    requestFloat,
+    dockFloat,
   }
 })

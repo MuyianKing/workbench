@@ -140,7 +140,7 @@ describe('sanitizeTheme', () => {
     expect(result.columns[0].rows).toEqual([
       { id: 'row-1', mode: 'fixed', height: 183 },
       { id: 'row-2', mode: 'fixed', height: 103 },
-      { id: 'row-3', mode: 'fixed', height: 170 },
+      { id: 'row-3', mode: 'fixed', height: 132 },
       { id: 'row-4', mode: 'fixed', height: 198 },
       { id: 'row-5', mode: 'flex', height: 727 },
     ])
@@ -343,9 +343,9 @@ describe('sanitizeTheme', () => {
 
   it('默认布局：三栏各自的行高与模式，一张卡片一行', () => {
     expect(DEFAULT_THEME.columns.map(column => [column.id, column.width])).toEqual([
-      ['col-1', 373],
+      ['col-1', 441],
       ['col-2', null],
-      ['col-3', 345],
+      ['col-3', 413],
     ])
     expect(rowIds(DEFAULT_THEME.columns)).toEqual([
       'row-1',

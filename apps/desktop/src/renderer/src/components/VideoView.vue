@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Expand, Fold, FolderOpened, Refresh, VideoPlay } from '@element-plus/icons-vue'
+import { Expand, Fold, FolderOpened, Refresh, TopRight, VideoPlay } from '@element-plus/icons-vue'
 import { findVideoNode, VIDEO_SEEK_SECONDS, videoRootName } from '@workbench/video'
 import { ElMessage } from 'element-plus'
 /**
@@ -8,13 +8,15 @@ import { ElMessage } from 'element-plus'
  * 它就是一个**本地 MP4 播放器**的「页面」：目录树、头部与空态在这里，
  * **播放器本体不在** —— `<video>` 与它周围那一圈（速率、快捷键、播完自动接续）
  * 住在全局单例 VideoPlayer（挂在 App.vue 上）：在视频页时它经 Teleport 落进
- * `.video__stage` 那个宿主里，切到别的页就缩成悬浮小窗继续播（画中画），
- * 元素不重建，播放一秒不断。所以这一页管的是「这一页长什么样」：
+ * `.video__stage` 那个宿主里；离开这一页**不**自动浮窗（接着当背景音播），
+ * 想带走就点头部的「悬浮播放」（store 的显式意图），元素不重建，播放一秒不断。
+ * 所以这一页管的是「这一页长什么样」：
  *   - **还没选文件夹**：整页只有一句引导与那颗「选择文件夹」按钮；
  *   - **选好了**：左树右播放器，点树上的视频立刻开播（走 store.select），
- *     左栏底部是目录本身与「最近打开」那一份历史记录；
+ *     左栏底部是目录本身与「最近打开」的那一份历史记录；
  *   - **没有正播的视频时**：画布上是一块空态提示（读不出 / 正在读取 / 打不开 /
- *     是文件夹 / 没有视频 / 还没挑），宿主空着、不接事件，按钮照常点得到。
+ *     是文件夹 / 没有视频 / 还没挑），宿主空着、不接事件，按钮照常点得到；
+ *   - **悬浮播放中**（点过「悬浮播放」）：播放器浮在界面上，画布说明一句、给「收回画布」。
  *
  * 换页由 App.vue 的 KeepAlive 负责 —— 切走的页面留在内存里，播放器也在全局
  * 单例里接着播。数据与动作都在 store 里，这一层负责编排：谁被选中、什么时候弹
@@ -115,6 +117,12 @@ async function chooseFolder(): Promise<void> {
 function openRecentRoot(dir: string): void {
   void store.setRoot(dir)
 }
+
+/** 点树上的条目：在视频页里挑的就是要在画布里看 —— 先收回悬浮，再走 store.select */
+function pickFromTree(rel: string): void {
+  store.dockFloat()
+  store.select(rel)
+}
 </script>
 
 <template>
@@ -153,7 +161,7 @@ function openRecentRoot(dir: string): void {
           :nodes="store.nodes"
           :active-rel="store.activeRel"
           :loaded="store.loaded && !store.loading"
-          @select="store.select"
+          @select="pickFromTree"
         />
 
         <!--
@@ -223,6 +231,11 @@ function openRecentRoot(dir: string): void {
             title="播放速率（快捷键 ↑ / ↓）"
             @change="(value: number) => (store.rate = value)"
           />
+
+          <!-- 悬浮播放：把视频浮成小窗带走。离开这一页不会自动浮 —— 这颗按钮是唯一的入口 -->
+          <el-tooltip v-if="store.active && !store.floatRequested" content="悬浮播放" placement="bottom">
+            <el-button size="small" text :icon="TopRight" aria-label="悬浮播放" @click="store.requestFloat()" />
+          </el-tooltip>
         </header>
 
         <!-- 播放画布：始终深色（与终端面板同一族令牌），视频居中、按比例缩进画布里 -->
@@ -284,10 +297,18 @@ function openRecentRoot(dir: string): void {
               </p>
             </template>
           </div>
+
+          <!-- 悬浮播放中：播放器浮在界面上、宿主空着 —— 说一句在哪，给一条收回的路 -->
+          <div v-else-if="store.floatRequested" class="empty video__hint">
+            <p>「{{ store.active?.name }}」正在悬浮播放。</p>
+            <el-button size="small" @click="store.dockFloat()">
+              收回画布
+            </el-button>
+          </div>
         </div>
 
-        <!-- 快捷键提示：只挂在「正播着」的时候 —— 没播视频时这些键一个都不生效 -->
-        <footer v-if="store.active" class="video__keys">
+        <!-- 快捷键提示：只挂在画布内嵌播放时 —— 悬浮小窗浮着的那几个键是另一套（只有空格） -->
+        <footer v-if="store.active && !store.floatRequested" class="video__keys">
           <span class="video__key"><kbd>空格</kbd>播放 / 暂停</span>
           <span class="video__key"><kbd>←</kbd><kbd>→</kbd>快退 / 快进 {{ VIDEO_SEEK_SECONDS }} 秒</span>
           <span class="video__key"><kbd>↑</kbd><kbd>↓</kbd>播放速率</span>

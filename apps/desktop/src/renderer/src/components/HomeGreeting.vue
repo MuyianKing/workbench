@@ -17,7 +17,7 @@ import { formatWeatherView } from '@workbench/weather'
  * 而不是给程序起的名字。取登录名而不是昵称 —— 昵称是平台上的展示名（可能重名、也可能没填过），
  * 登录名才是「哪个账号」。
  *
- * **没登录时回落到设置里的「程序名称」**（`packages/appearance/src/app-name.ts` 收敛，默认 `MUYIAN`，
+ * **没登录时回落到设置里的「程序名称」**（`packages/appearance/src/app-name.ts` 收敛，默认 `小慕`，
  * 与标题栏、托盘提示、窗口标题同一个值）：登录是可选的，而这一行不该因为没登录就少半句。
  *
  * 数据全在 projects / settings / auth 三个 store 里，**一次 IPC 都不发**：账号状态由

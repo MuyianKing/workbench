@@ -8,6 +8,7 @@ import type { MailAttachmentKind, MailContact, MailFolder, ParsedAttachment } fr
  *    清单（Rust 侧现认服务器上的文件夹名，见 docs/modules/mail.md）：当前那个文件夹里
  *    所有账户合并的一份（各账户并行各拉最近的 50 封，按时间新在前，不按来源分组；
  *    进页面 / 切签 / 点刷新才拉，不后台轮询 —— 这个应用没有「自己偷偷跑流量」这回事）。
+ *    没配置账户时这一片是空态配图 + 一句事实（清单无从拉起）。
  *    右键「多选删除」进入多选态：
  *    行首亮出复选框、点行就是勾 / 撤，勾选条出「已选 N 封」；收件箱里识别成推广 / 广告
  *    的信不混在这里 —— 收进清单底部分开的一段（默认折叠，展开也是自己的一段）。
@@ -16,7 +17,7 @@ import type { MailAttachmentKind, MailContact, MailFolder, ParsedAttachment } fr
  *    新增与编辑都开 MailContactEditDialog 那颗小弹窗（列表归列表、编辑归弹窗）。
  *    底部一行是两个不跟邮件走的入口：
  *    **账户**（多账户的管理弹层）与**写邮件**。
- *  - **右栏**：没配置账户时是一颗「配置邮箱账户」；配置了就是阅读栏 ——
+ *  - **右栏**：没配置账户时是空态配图 + 一句事实 + 那颗「配置邮箱账户」；配置了就是阅读栏 ——
  *    头部是主题、发件人（发件箱里是收件人）、日期与「回复」，正文按信里的形态画：
  *    有 HTML 走 sandbox 的 iframe（外链图片照常显示、脚本照旧全禁，
  *    见 @workbench/mail 的 htmlBody），没有就按纯文本排版。附件里**能在应用里打开的**
@@ -607,6 +608,10 @@ const bodyStyle = computed(() => ({
           @menu="openMenu($event, item)"
         />
 
+        <!-- 没配置账户：清单无从拉起 —— 也摆空态配图 + 一句事实
+             （配置入口在右栏那颗与左栏底部「账户」） -->
+        <EmptyState v-if="!mail.configured" :icon="Message" text="还没有配置邮箱账户" />
+
         <!-- 空态只说事实：没配置 / 拉完是空的（推广段不算空，有账户拉挂了也不算空）。
              教学式引导一律不加 -->
         <EmptyState
@@ -673,12 +678,18 @@ const bodyStyle = computed(() => ({
       <!-- 通讯录那一签：左边那份名单才是这一签的内容，右栏空着 -->
       <div v-if="mail.tab === 'contacts'" class="mail-view__blank" />
 
-      <!-- 没配置账户：中间就一颗入口（地址、授权码都在那个弹层里填） -->
-      <div v-else-if="!mail.configured" class="mail-view__blank">
-        <el-button type="primary" :icon="Message" @click="accountVisible = true">
-          配置邮箱账户
-        </el-button>
-      </div>
+      <!-- 没配置账户：空态配图 + 一句事实 + 那颗入口（地址、授权码都在那个弹层里填） -->
+      <EmptyState
+        v-else-if="!mail.configured"
+        :icon="Message"
+        text="还没有配置邮箱账户"
+      >
+        <template #actions>
+          <el-button type="primary" :icon="Message" @click="accountVisible = true">
+            配置邮箱账户
+          </el-button>
+        </template>
+      </EmptyState>
 
       <!-- 拉正文期间整个阅读区让位给骨架屏：铺满整栏（头像 / 落款 / 主题 / 撑满高度的正文段落），
            段落不足时均匀铺开、超出时裁掉 —— 任何窗口高度下都不留空白，内容看着正在成形 -->
@@ -1083,7 +1094,7 @@ const bodyStyle = computed(() => ({
   overflow: hidden;
 }
 
-/** 空态：没配置时中间那颗入口；通讯录那一签的右栏也空着（名单本身就在左边） */
+/** 通讯录那一签的右栏空着占位（名单本身就在左边；没配置账户那档已换成 EmptyState） */
 .mail-view__blank {
   flex: 1;
   display: flex;

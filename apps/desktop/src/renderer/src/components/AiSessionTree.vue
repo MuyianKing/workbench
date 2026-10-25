@@ -58,11 +58,11 @@ const running = computed(() => new Set(props.runningIds))
 
 <template>
   <div class="tree scrollbar">
-    <!-- 一个会话都还没有：一张小图 + 一句事实（起一段在那颗「+」与中间那条
-         composer 上，这儿只把「项目 → 会话」这层关系说清楚） -->
+    <!-- 一个会话都还没有：与右栏起始屏同一档的空态（不缩档 —— 窄栏里 compact 那张
+         小卡淡得像没画；起一段在那颗「+」与中间那条 composer 上，这儿只把
+         「项目 → 会话」这层关系说清楚） -->
     <EmptyState
       v-if="!groups.length"
-      compact
       :icon="ChatDotRound"
       text="还没有会话"
       hint="点上面的「+」开一段新的：一个目录是一个「项目」，它下面可以有好几段对话。"

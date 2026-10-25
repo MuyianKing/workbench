@@ -269,6 +269,9 @@ async function remove(): Promise<void> {
   >
     <!-- 没配仓库：这一页没什么可管的，说清楚去哪儿配 -->
     <div v-if="repoMissing" class="empty asset-empty">
+      <el-icon class="empty__icon">
+        <Picture />
+      </el-icon>
       <p>还没有配置图片仓库。</p>
       <p class="empty__hint">
         笔记里粘贴的图片都推到一个你自己的 git 仓库（设置 → 笔记图片），
@@ -278,6 +281,9 @@ async function remove(): Promise<void> {
 
     <!-- 没打开笔记本：素材是按笔记本来分的，这时列不出「这个笔记本的图」，也不该拿上一层去猜 -->
     <div v-else-if="rootMissing" class="empty asset-empty">
+      <el-icon class="empty__icon">
+        <Picture />
+      </el-icon>
       <p>还没有打开笔记本。</p>
       <p class="empty__hint">
         图片仓库是所有笔记本共用的一份，而素材是按笔记本来管的 ——
@@ -323,9 +329,12 @@ async function remove(): Promise<void> {
       </p>
 
       <div v-loading="scanning" class="assets">
-        <p v-if="!assets.length && !scanning" class="assets__none">
-          {{ onlyUnused === 'unused' ? '没有未引用的图片。' : '这个笔记本还没有传过图片。' }}
-        </p>
+        <div v-if="!assets.length && !scanning" class="empty assets__none">
+          <el-icon class="empty__icon">
+            <Picture />
+          </el-icon>
+          <p>{{ onlyUnused === 'unused' ? '没有未引用的图片。' : '这个笔记本还没有传过图片。' }}</p>
+        </div>
 
         <div
           v-for="asset in visible"
@@ -457,12 +466,13 @@ async function remove(): Promise<void> {
   overflow-y: auto;
 }
 
+/* 列表区里那格空态：沿用全局 .empty（居中 + 图标），只收 paddings 与图标的尺寸 */
 .assets__none {
-  margin: 0;
   padding: var(--sp-4) 0;
-  text-align: center;
-  font-size: var(--fs-meta);
-  color: var(--ink-3);
+}
+
+.assets__none .empty__icon {
+  font-size: 32px;
 }
 
 .asset {

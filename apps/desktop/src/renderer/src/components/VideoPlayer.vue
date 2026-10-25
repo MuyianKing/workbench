@@ -9,12 +9,13 @@ import { fitVideoFloatGeometry, nextVideoNode, nextVideoRate, resizeVideoFloat, 
  * 但画面看不见，想边看教学视频边记笔记就得来回切页。现在把 `<video>` 与它周围
  * 那一圈（速率、快捷键、播完自动接续）整体搬到这里，**内嵌与悬浮是同一个元素**：
  *   - 在视频页：Teleport 进视频页画布注册的宿主（use-video-stage），与原来内嵌一样；
- *   - 切到别的页（手上还有视频）：小窗改为固定定位的悬浮窗浮在界面上 —— 传送只是
- *     把同一个元素在两处之间搬，元素不重建，**播放因此一秒不断**。
+ *   - 悬浮小窗：**点「悬浮播放」才浮**（store 里的显式意图）—— 离开视频页不自动弹窗，
+ *     没点过就只是接着出声、画面随视频页待在后台；点过则同一个元素改为固定定位的
+ *     悬浮窗浮在界面上。传送只是把同一个元素在两处之间搬，元素不重建，**播放因此一秒不断**。
  *
  * 悬浮窗带一条拖动手柄（视频名 / 速率 / 回视频页 / 关闭）与右下角的缩放手柄；
  * 位置与尺寸落 theme.json（videoFloatX/Y/W/H，两段式跟手 / 落盘与视频树宽同一套）。
- * 「回到视频页」只是把当前页切回去 —— 小窗内容原地传送进画布；「关闭」是停止播放。
+ * 「回到视频页」= 收回悬浮 + 把当前页切回去 —— 小窗内容原地传送进画布；「关闭」是停止播放。
  *
  * 快捷键跟着播放器走而不是跟着页面走：视频页内仍是整套（空格 / 方向键 / 速率），
  * 悬浮时只拦空格 —— 笔记页的树还要用方向键导航，而 Vditor 里打字由 typingOn 挡住。
@@ -35,10 +36,19 @@ const nav = useNavStore()
 
 const stageHost = useVideoStageHost()
 
-/** 在视频页：内嵌（传送进画布）；不在：悬浮小窗。传送的开 / 关就是它 */
+/** 在视频页：内嵌（传送进画布）；不在：宿主随视频页一起脱离文档，接着出声 */
 const inline = computed(() => nav.activeView === 'video')
-/** 小窗显示没有：不在视频页且手上还有视频（播的、暂停的都算 —— 小窗是遥控器也是画面） */
-const floating = computed(() => !inline.value && !!store.active)
+/**
+ * 小窗显示没有：手上还有视频、且用户点过「悬浮播放」（store 的显式意图 —— 离开
+ * 视频页**不**自动浮）。播的、暂停的都算：小窗是遥控器也是画面。
+ */
+const floating = computed(() => !!store.active && store.floatRequested)
+
+// 进视频页就收回悬浮：画布才是视频在那一页的正位（与悬浮窗上「回到视频页」同一语义）
+watch(inline, (value) => {
+  if (value)
+    store.dockFloat()
+})
 
 // ---------- 播放器 ----------
 
@@ -224,7 +234,7 @@ function onKeyup(event: KeyboardEvent): void {
   event.stopPropagation()
 }
 
-/** 内嵌或悬浮着就挂键，两样都不是（没视频、也没在视频页）就摘掉 —— 捕获监听成对摘挂 */
+/** 内嵌或悬浮着就挂键，两样都不是（不在视频页、也没悬浮 —— 背景音接着播也算）就摘掉 —— 捕获监听成对摘挂 */
 function bindKeys(bind: boolean): void {
   if (bind) {
     window.addEventListener('keydown', onKeydown, true)
@@ -345,8 +355,9 @@ function onGripDown(event: PointerEvent, edge: 'left' | 'right'): void {
   })
 }
 
-/** 悬浮窗上的「回到视频页」：切回去，小窗内容原地传送进画布 */
+/** 悬浮窗上的「回到视频页」：收回悬浮并切回去，小窗内容原地传送进画布 */
 function backToVideoView(): void {
+  store.dockFloat()
   void nav.setActiveView('video')
 }
 
@@ -390,13 +401,18 @@ function closePlayer(): void {
           :key 让每个视频都是一只新元素：旧视频的缓冲、进度与事件监听一起随它销毁。
           不放 autoplay 属性 —— 开播只由上面的 watch 按 store 的意图调 play()。
           play / seeking 是「用户接手了」的信号：倒计时摆着的时候用户重新播放或拖回
-          进度条，说明他想重看这一部，自动接下去就得撤
+          进度条，说明他想重看这一部，自动接下去就得撤。
+          原生控件右下角 ⋮ 菜单整份关掉（controlslist + disablepictureinpicture）：
+          下载对本地播放器没意义，原生速率会与 store 的 rate 脱钩，系统级画中画会把
+          视频搬出应用自己的传送小窗 —— 三项各有应用内的一套，留原生那份只会两处打架
         -->
         <video
           ref="playerRef"
           class="vplayer__screen"
           :src="store.active.url"
           controls
+          controlslist="nodownload noplaybackrate"
+          disablepictureinpicture
           preload="metadata"
           @loadedmetadata="applyRate"
           @play="cancelUpNext"

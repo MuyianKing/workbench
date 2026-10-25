@@ -65,9 +65,8 @@ defineProps<{
 
 .empty-state__stage {
   position: relative;
-  width: 120px;
-  height: 96px;
-  animation: empty-state-in 0.4s var(--ease-out) both;
+  width: 140px;
+  height: 110px;
 }
 
 /* 卡片就是「图」的主体：里头那枚图标说这是什么，投影让它浮起来（不然只是一块灰方块） */
@@ -78,16 +77,16 @@ defineProps<{
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 68px;
-  height: 52px;
-  margin-left: -34px;
+  width: 82px;
+  height: 62px;
+  margin-left: -41px;
   border-radius: var(--r-md);
   background: var(--bg-inset);
   animation: empty-state-hop 2.4s ease-in-out infinite;
 }
 
 .empty-state__icon {
-  font-size: 28px;
+  font-size: 34px;
   color: var(--ink-2);
 }
 
@@ -106,9 +105,9 @@ defineProps<{
   position: absolute;
   left: 50%;
   bottom: 6px;
-  width: 44px;
+  width: 50px;
   height: 8px;
-  margin-left: -22px;
+  margin-left: -25px;
   border-radius: var(--r-pill);
   background: var(--ink);
   opacity: 0.1;
@@ -118,15 +117,14 @@ defineProps<{
 .empty-state__text {
   margin: 0;
   color: var(--ink-3);
-  font-size: var(--fs-body);
-  animation: empty-state-text-in 0.45s var(--ease-out) 0.1s both;
+  font-size: var(--fs-title);
 }
 
 .empty-state__hint {
   max-width: 34ch;
   margin: 0;
   color: var(--ink-3);
-  font-size: var(--fs-micro);
+  font-size: var(--fs-meta);
   line-height: 1.7;
   opacity: 0.85;
 }
@@ -145,19 +143,19 @@ defineProps<{
 }
 
 .is-compact .empty-state__stage {
-  width: 76px;
-  height: 62px;
+  width: 92px;
+  height: 74px;
 }
 
 .is-compact .empty-state__card {
-  width: 46px;
-  height: 36px;
-  margin-left: -23px;
+  width: 56px;
+  height: 44px;
+  margin-left: -28px;
   border-radius: var(--r-sm);
 }
 
 .is-compact .empty-state__icon {
-  font-size: 20px;
+  font-size: 26px;
 }
 
 .is-compact .empty-state__dot {
@@ -169,32 +167,18 @@ defineProps<{
 
 .is-compact .empty-state__shadow {
   bottom: 4px;
-  width: 32px;
+  width: 38px;
   height: 6px;
-  margin-left: -16px;
+  margin-left: -19px;
 }
 
 /*
- * 动效口径与原来邮箱那一栏一致：循环用 ease-in-out、入场用 --ease-out
- * （AGENTS.md 第 4 节）；reduced-motion 由 global.css 全局兜底。
+ * 动效只剩卡片轻跳那一档循环（ease-in-out；reduced-motion 由 global.css 全局兜底）。
+ * **没有入场动画**：原先 stage / 文字各有一道 opacity:0 起步的入场（both 回填），
+ * 在 WebView2 的某些时序下会冻在起始帧 —— 图那条冻住就「只有字」、字那条冻住就
+ * 「只有图」，两种都真出现过（2026-10 无头环境复现）。可见性不交给动画。
  * 颜色全走灰度令牌 —— 活泼靠构图与动效，不靠彩色。
  */
-
-/* 入场：整组缩一点淡进来 */
-@keyframes empty-state-in {
-  from {
-    opacity: 0;
-    transform: scale(0.92);
-  }
-}
-
-/* 文字随后浮上来 */
-@keyframes empty-state-text-in {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-}
 
 /* 跳的节奏里织进姿态：跳起顺势摆正一点，回弹时歪回去，落地归位（卡片常驻微微左倾） */
 @keyframes empty-state-hop {

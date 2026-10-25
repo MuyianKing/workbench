@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { SkillEntry } from '@workbench/skills'
-import { FolderOpened, Plus, Refresh, RefreshRight, Upload } from '@element-plus/icons-vue'
+import { FolderOpened, MagicStick, Plus, Refresh, RefreshRight, Upload, Warning } from '@element-plus/icons-vue'
 /**
  * 技能页：卡片网格铺开技能库，点一张卡片打开详情弹窗（编辑 / 安装 / 历史 / 删除都在那里）。
  *
@@ -11,8 +11,10 @@ import { FolderOpened, Plus, Refresh, RefreshRight, Upload } from '@element-plus
  * 「同步」按钮推的也是那个仓库（只提交技能库那一层，再拉、再推），
  * 而它只在这个仓库有远端时出现。
  * 所以这一页有两种空态：
- *   - **还没选技能库目录**（或那个目录已经不在了）：整页只有标题与一颗按钮 ——
- *     说明不写在这儿（要同步就先 clone 之类的在文档里），页面只提醒挑一个文件夹；
+ *   - **还没选技能库目录**（或那个目录已经不在了）：空态配图 + 一句事实 + 那颗
+ *     「选择技能文件夹」（EmptyState，整块垂直居中）；这块**整个不要卡片外壳**
+ *     （不吃 .panel 的玻璃、也不铺底色），内容直接坐在壁纸上 —— 空态有自己的图
+ *     （要同步就先自己 clone 之类的说明在文档里，不上界面）；
  *   - **文件夹里还没有技能**：网格处给「新建 / 导入」两个入口，任何状态下都找得到门。
  *
  * 卡片只负责展示（名字、描述、文件数，全部来自 SKILL.md 的自动解析）与「点开它」，
@@ -20,6 +22,7 @@ import { FolderOpened, Plus, Refresh, RefreshRight, Upload } from '@element-plus
  * （见 packages/appearance/src/views.ts），换页由 App.vue 的 KeepAlive 负责，数据与动作都在 store 里。
  */
 import { computed, onMounted, ref } from 'vue'
+import EmptyState from '@/components/EmptyState.vue'
 import PanelLoading from '@/components/PanelLoading.vue'
 import SkillCard from '@/components/SkillCard.vue'
 import SkillCreateDialog from '@/components/SkillCreateDialog.vue'
@@ -112,20 +115,22 @@ function installActive(): void {
 <template>
   <main class="skills-view">
     <!--
-      还没选技能库目录（或者它已经不在磁盘上了）：只有标题与那颗按钮 ——
-      说明不写在这里（想同步就先自己 clone 之类的在文档里），页面只提醒挑一个文件夹。
+      还没选技能库目录（或者它已经不在磁盘上了）：空态配图 + 一句事实 + 那颗按钮，
+      整块垂直居中（EmptyState 自己管居中），下面直接就是壁纸（不要卡片外壳）。
       目录不在时那行原因是必须的：不说的话这一页看着就像「技能没了」。
     -->
-    <div v-if="!store.root || store.stateError" class="guide panel">
-      <h2 class="guide__title">
-        技能
-      </h2>
-      <p v-if="store.stateError" class="guide__text">
-        {{ store.stateError }}
-      </p>
-      <el-button type="primary" :icon="FolderOpened" @click="pickRoot">
-        {{ store.root ? '换一个技能文件夹' : '选择技能文件夹' }}
-      </el-button>
+    <div v-if="!store.root || store.stateError" class="guide">
+      <EmptyState
+        :icon="FolderOpened"
+        :text="store.stateError || '还没有选择技能文件夹'"
+        hint="挑一个文件夹当技能库：里面的每个子文件夹带一份 SKILL.md 就是一项技能"
+      >
+        <template #actions>
+          <el-button type="primary" :icon="FolderOpened" @click="pickRoot">
+            {{ store.root ? '换一个技能文件夹' : '选择技能文件夹' }}
+          </el-button>
+        </template>
+      </EmptyState>
     </div>
 
     <template v-else>
@@ -178,11 +183,17 @@ function installActive(): void {
           <PanelLoading text="正在读取技能…" />
         </div>
         <div v-else-if="store.loadError" class="empty panel">
+          <el-icon class="empty__icon">
+            <Warning />
+          </el-icon>
           <p class="empty__text">
             {{ store.loadError }}
           </p>
         </div>
         <div v-else-if="!store.skills.length" class="empty panel">
+          <el-icon class="empty__icon">
+            <MagicStick />
+          </el-icon>
           <p class="empty__text">
             技能库里还没有技能。每个技能就是一个文件夹加一份 SKILL.md。
           </p>
@@ -230,28 +241,16 @@ function installActive(): void {
   padding: var(--card-gap, 10px);
 }
 
-/* 还没选技能库目录时的引导（只有标题与那颗按钮） */
+/*
+ * 还没选技能库目录时的引导：不要 .panel 那副外壳 —— 不吃毛玻璃、不铺底色，
+ * 内容直接坐在壁纸上（空态有自己的图）。EmptyState 自己管「图 + 事实 + 按钮」的
+ * 垂直居中（flex: 1 + min-height: 100%），这里只负责把这块撑满整个网格
+ * （此时后两行是空的）。
+ */
 .guide {
-  align-items: center;
-  justify-content: center;
-  gap: var(--sp-4);
-  height: 100%;
-  padding: var(--sp-6);
-  text-align: center;
-}
-
-.guide__title {
-  margin: 0;
-  color: var(--ink);
-  font-size: var(--fs-title);
-}
-
-.guide__text {
-  max-width: 520px;
-  margin: 0;
-  color: var(--ink-2);
-  font-size: var(--fs-body);
-  line-height: 1.7;
+  display: flex;
+  flex-direction: column;
+  grid-row: 1 / -1;
 }
 
 /* 工具条上的标题与库位置 */
@@ -311,7 +310,7 @@ function installActive(): void {
 .empty__text {
   margin: 0;
   color: var(--ink-3);
-  font-size: var(--fs-meta);
+  font-size: var(--fs-body);
   line-height: 1.7;
 }
 

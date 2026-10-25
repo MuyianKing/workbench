@@ -441,29 +441,29 @@ body.is-resizing-video-float * {
   justify-content: center;
   gap: var(--sp-2);
   text-align: center;
-  font-size: var(--fs-meta);
+  font-size: var(--fs-title);
   color: var(--ink-2);
 }
 
 .empty__hint {
   margin: 0;
-  font-size: var(--fs-micro);
+  font-size: var(--fs-meta);
   color: var(--ink-3);
 }
 
 /**
  * 空态文字上方那枚淡淡的图标：给空荡的画面一个视觉锚点。
  * 它只当点缀，不表达状态（状态归彩色那套令牌管），所以压到 --ink-3 再淡一档；
- * 整页的空态（工作页、笔记 intro）体量大，给 40px，面板内的（今日完成、命令这些）给 26px。
+ * 整页的空态（工作页、笔记 intro）体量大，给 48px，面板内的（今日完成、命令这些）给 32px。
  */
 .empty__icon {
-  font-size: 40px;
+  font-size: 48px;
   color: var(--ink-3);
   opacity: 0.5;
 }
 
 .panel__empty .empty__icon {
-  font-size: 26px;
+  font-size: 32px;
   margin-bottom: 2px;
 }
 
@@ -477,7 +477,7 @@ body.is-resizing-video-float * {
   flex: 1;
   min-height: 0;
   text-align: center;
-  font-size: var(--fs-meta);
+  font-size: var(--fs-body);
   line-height: 1.7;
   color: var(--ink-3);
 }

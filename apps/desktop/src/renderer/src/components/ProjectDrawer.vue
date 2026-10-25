@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { ProjectColorPreset } from '@workbench/core'
 import type { ProjectStatus, RunRecord } from '@/types'
-import { Box, Close, Download, FolderOpened, Plus, Refresh, VideoPause, VideoPlay } from '@element-plus/icons-vue'
+import { Box, Close, Download, FolderOpened, Operation, Plus, Refresh, VideoPause, VideoPlay } from '@element-plus/icons-vue'
 
 import { isProjectColorPreset, parsePort, PROJECT_COLOR_LABELS, PROJECT_COLOR_PRESETS, projectColorVar, relativeToProject, resolveWithinProject, sanitizeProjectColor, satisfiesNodeVersion } from '@workbench/core'
 
@@ -701,9 +701,12 @@ async function removeProject(): Promise<void> {
                 />
               </li>
             </ul>
-            <p v-else class="field__hint">
-              还没有自定义命令。常用的检查 / 发布命令挂到这里后，卡片「⋯」菜单里可以一键运行。
-            </p>
+            <div v-else class="empty customs__empty">
+              <el-icon class="empty__icon">
+                <Operation />
+              </el-icon>
+              <p>还没有自定义命令。常用的检查 / 发布命令挂到这里后，卡片「⋯」菜单里可以一键运行。</p>
+            </div>
 
             <div class="customs__form">
               <el-input
@@ -1027,6 +1030,24 @@ async function removeProject(): Promise<void> {
 .customs__form :deep(.el-input.customs__input-name) {
   flex: 0 0 110px;
   width: 110px;
+}
+
+/* 自定义命令的空栏：表单格里塞不下整页那档的图，收成面板那一档 */
+.customs__empty {
+  flex: none;
+  gap: var(--sp-1);
+  padding: var(--sp-2) 0;
+}
+
+.customs__empty .empty__icon {
+  font-size: 26px;
+}
+
+.customs__empty p {
+  margin: 0;
+  font-size: var(--fs-meta);
+  color: var(--ink-3);
+  line-height: 1.7;
 }
 
 /* ---------- 内容区 ---------- */

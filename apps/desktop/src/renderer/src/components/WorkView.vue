@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { ProjectColor } from '@workbench/core'
 import type { WorkLogEntry, WorkLogStatus, WorkRange, WorkSort } from '@workbench/work-log'
-import { ArrowDown, Memo, Plus } from '@element-plus/icons-vue'
+import { ArrowDown, Memo, Plus, Warning } from '@element-plus/icons-vue'
 import { addDays, dayKey, markdownToPlainText, projectColorVar, sanitizeProjectColor } from '@workbench/core'
 import { dayMeta, DELETED_PROJECT_ID, groupByProject, isWorkSort, paginate, sanitizeWorkRange, sanitizeWorkSort, timelineOf, toggleWorkLogStatus, WORK_PAGE_DAYS, WORK_RANGE_LABELS, WORK_RANGES, WORK_SORT_LABELS, WORK_SORTS, WORK_STATUS_DEFAULT } from '@workbench/work-log'
 import { ElMessage } from 'element-plus'
@@ -365,6 +365,9 @@ async function remove(entry: WorkLogEntry): Promise<void> {
     <div class="work-view__body">
       <!-- 读盘失败：把原因说出来并给一次重试，不能显示成「还没有记录」 -->
       <div v-if="loadError" class="empty">
+        <el-icon class="empty__icon">
+          <Warning />
+        </el-icon>
         <p>{{ loadError }}</p>
         <el-button size="small" @click="load()">
           重试

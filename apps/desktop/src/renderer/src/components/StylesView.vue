@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { DesignStyle, DesignStyleSort, FamilyFilter, ThemeFilter } from '@workbench/appearance'
-import { Search } from '@element-plus/icons-vue'
+import { MagicStick, Search, Warning } from '@element-plus/icons-vue'
 import { SORT_LABELS, THEME_LABELS } from '@workbench/appearance'
 /**
  * 样式页：74 套设计语言（DESIGN.md 的解析结果）的一页浏览。
@@ -149,6 +149,9 @@ const failed = computed(() => !store.loaded && !store.loading && Boolean(store.l
       </div>
 
       <div v-else-if="failed" class="empty">
+        <el-icon class="empty__icon">
+          <Warning />
+        </el-icon>
         <p>读不出样式清单</p>
         <p class="empty__hint">
           这份清单随包带着（public/design-styles.json），正常情况下不会读不到。
@@ -159,6 +162,9 @@ const failed = computed(() => !store.loaded && !store.loading && Boolean(store.l
       </div>
 
       <div v-else-if="!store.visible.length" class="empty">
+        <el-icon class="empty__icon">
+          <MagicStick />
+        </el-icon>
         <p>{{ store.filtering ? '没有匹配的样式' : '还没有样式数据' }}</p>
         <p v-if="store.filtering" class="empty__hint">
           换个关键词，或者把筛选条件清掉。

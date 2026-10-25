@@ -210,11 +210,11 @@ export const THEME_VERSION = 4
 
 /**
  * 卡片间距的可配区间（px）。
- * 下限 0 允许卡片紧贴（想要一整面连排时用），上限 40 再大就只剩缝了；默认 10 为按当前配置固化。
+ * 下限 0 允许卡片紧贴（想要一整面连排时用），上限 40 再大就只剩缝了；默认 5 为按当前布局固化。
  */
 export const CARD_GAP_MIN = 0
 export const CARD_GAP_MAX = 40
-export const CARD_GAP_DEFAULT = 10
+export const CARD_GAP_DEFAULT = 5
 
 /**
  * 栏宽区间（只对固定宽度的栏有效）。
@@ -274,60 +274,62 @@ export const ROW_HEIGHT_MIN_DEFAULT = Math.min(...Object.values(CARD_HEIGHT_MIN)
  *
  * 下限要放得下「笔记本名字 + 右键菜单的入口」，上限只防手改数据把正文挤没。
  * 它与首页那两栏同一个存放处（theme.json）：都是「界面长什么样」，也一起被同步带走。
+ * 默认 398 为按当前布局固化。
  */
 export const NOTE_TREE_WIDTH_MIN = 180
 export const NOTE_TREE_WIDTH_MAX = 520
-export const NOTE_TREE_WIDTH_DEFAULT = 232
+export const NOTE_TREE_WIDTH_DEFAULT = 398
 
 /**
  * 视频页左栏（目录树）的宽度区间。
  *
  * 下限要放得下树行与底部「目录名 + 计数 + 按钮」那行，上限只防手改数据把播放器挤没。
- * 默认 264 是「可以拖」之前的定宽 —— 老用户拖之前看到的还是原来那个宽度。
+ * 默认 291 为按当前布局固化（原来是「可以拖」之前的定宽 264）。
  */
 export const VIDEO_TREE_WIDTH_MIN = 180
 export const VIDEO_TREE_WIDTH_MAX = 520
-export const VIDEO_TREE_WIDTH_DEFAULT = 264
+export const VIDEO_TREE_WIDTH_DEFAULT = 291
 
 /**
  * AI 助手页左栏（项目 → 会话那棵树）的宽度区间。
  *
  * 下限要放得下「目录名 + 悬停才出来的那颗按钮」，上限只防手改数据把对话挤没。
- * 默认与笔记树同一个宽度（两页的左栏读起来是一回事）。
+ * 默认 321 为按当前布局固化。
  */
 export const AI_TREE_WIDTH_MIN = 180
 export const AI_TREE_WIDTH_MAX = 520
-export const AI_TREE_WIDTH_DEFAULT = 232
+export const AI_TREE_WIDTH_DEFAULT = 321
 
 /**
  * 知识库页左栏（条目 / 原始数据清单）的宽度区间。
  *
  * 下限要放得下树行与「条目 / 原始数据」那个切换，上限只防手改数据把阅读区挤没。
- * 与笔记 / AI 树同一个存放处（theme.json）、同一套做法。
+ * 与笔记 / AI 树同一个存放处（theme.json）、同一套做法。默认 353 为按当前布局固化。
  */
 export const KB_TREE_WIDTH_MIN = 180
 export const KB_TREE_WIDTH_MAX = 520
-export const KB_TREE_WIDTH_DEFAULT = 232
+export const KB_TREE_WIDTH_DEFAULT = 353
 
 /**
  * 邮箱页左栏（收件箱清单）的宽度区间。
  *
  * 下限要放得下「发件人 + 主题 + 日期」一行的开头，上限只防手改数据把阅读区挤没。
- * 与笔记 / AI / 知识库树同一个存放处（theme.json）、同一套做法。
+ * 与笔记 / AI / 知识库树同一个存放处（theme.json）、同一套做法。默认 331 为按当前布局固化。
  */
 export const MAIL_LIST_WIDTH_MIN = 220
 export const MAIL_LIST_WIDTH_MAX = 520
-export const MAIL_LIST_WIDTH_DEFAULT = 300
+export const MAIL_LIST_WIDTH_DEFAULT = 331
 
 /**
- * 默认布局（按当前配置固化）。
+ * 默认布局（按用户日常调好的那份首页布局固化：2026-10 从安装版的 theme.json 逐字段抄过来的，
+ * 数值本身没有别的讲究 —— 以后调出更喜欢的样子，照样抄一遍换掉就是）。
  *
- * 第一栏（左，373 固定）自上而下是活跃度、快捷启动、系统状态、快捷操作、命令五张定高卡，
+ * 第一栏（左，441 固定）自上而下是活跃度、快捷启动、系统状态、快捷操作、命令五张定高卡，
  * 最底下是吃剩余高度的今日完成（条目数不确定，在卡内自己滚）；第二栏（中，自适应）整栏留给
- * 我的项目 —— 那张里排的是整张项目卡，宽度富余时读起来最舒服；第三栏（右，345 固定）上面是
+ * 我的项目 —— 那张里排的是整张项目卡，宽度富余时读起来最舒服；第三栏（右，413 固定）上面是
  * 吃剩余高度的 Coding 用量，下面是固定高度的 AI 热点（名单卡，条目多了在卡内滚）。
  *
- * **行 id 是顺次编号的（row-1 … row-9），不是随手起的**：认不出来的老文件整份回默认布局，
+ * **行 id 是顺次编号的（row-1 … row-9），不是随手起的**：认不出的老文件整份回默认布局，
  * 而那条路要先按「一张卡片一行」把老布局翻一遍（见 migrateLegacyLayout），翻出来的行 id
  * 就是这个顺序 —— 它是**按栏、再按行**顺次下来的（左栏六行、中栏一行、右栏两行）。
  * 两边对不上，`sanitizeTheme(null)` 就不再等于这一份默认布局了（sanitizeTheme 那条用例盯着这件事）。
@@ -338,15 +340,13 @@ export const DEFAULT_THEME: ThemeConfig = {
   columns: [
     {
       id: 'col-1',
-      width: 373,
+      width: 441,
       rows: [
         { id: 'row-1', mode: 'fixed', height: 183 },
         { id: 'row-2', mode: 'fixed', height: 103 },
-        /* 系统状态：node / 包管理器 / nvm / nrm 四行。
-           170 是四行放全的高度（147 是按三行定的，加一行后明细区会被挤进滚动） */
-        { id: 'row-3', mode: 'fixed', height: 170 },
+        { id: 'row-3', mode: 'fixed', height: 132 },
         { id: 'row-4', mode: 'fixed', height: 198 },
-        { id: 'row-5', mode: 'fixed', height: 90 },
+        { id: 'row-5', mode: 'fixed', height: 128 },
         // 今日完成：条目数不确定，让它吃掉这一栏剩下的高度、在里面自己滚
         { id: 'row-6', mode: 'flex', height: 727 },
       ],
@@ -362,7 +362,7 @@ export const DEFAULT_THEME: ThemeConfig = {
     },
     {
       id: 'col-3',
-      width: 345,
+      width: 413,
       rows: [
         { id: 'row-8', mode: 'flex', height: 727 },
         // AI 热点：名单卡，固定高度（条目多了在卡内滚）

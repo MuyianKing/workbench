@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import type { AiImage, AiPreviewState, AiPreviewTarget } from '@workbench/ai'
-import { Download, Expand, Fold, MagicStick, Plus } from '@element-plus/icons-vue'
+import { ChatDotRound, Download, Expand, Fold, FolderAdd, MagicStick, Plus } from '@element-plus/icons-vue'
 import { AI_IMAGE_MAX, AI_PREVIEW_MAX_BINARY_CHARS, AI_PREVIEW_MAX_CHARS, htmlImageSrcs, resolveAiPreview } from '@workbench/ai'
 import { markdownImages } from '@workbench/core'
+import { noteRootName } from '@workbench/notes'
 /**
  * AI 助手页：一个**通用的 agent 控制台** —— 左栏挑一段会话，右栏跟它说下去。
  *
@@ -16,9 +17,9 @@ import { markdownImages } from '@workbench/core'
  *    底部那一行是两个不跟会话走的入口：**技能**（装卸与开关的管理弹窗）与**收起整栏**。
  *  - **右栏**：挑中一个会话就是**控制台** —— 上面是这段对话（历史 + 这一轮，自己往下滚），
  *    下面还是那一栏目录与分支 + composer（跑着的时候那颗按钮就是停止）。
- *    没挑中会话时是**起始那一屏**（一段会话都还没有，或者刚点了「+」）：中间就是控制台
- *    那一屏那条 composer，上面是位置那一栏（这一屏由它**挑目录**）——
- *    **一进来就能直接写**，会话在发出第一句时才建（见 stores/ai.ts 的 run）。
+ *    没挑中会话时是**起始那一屏**（一段会话都还没有，或者刚点了「+」）：一副缺省空态
+ *    （图 + 一句事实 + 居中的选目录按钮，最近目录在那颗按钮的下拉里）压在 composer
+ *    上方 —— **一进来就能直接写**，会话在发出第一句时才建（见 stores/ai.ts 的 run）。
  *    **两屏都没有顶部工具条**：标题、目录那些要么与导航栏重复、要么下面那一栏已经说了。
  *
  * **页面不摆提示行**（说明、问候、还差什么）：这个应用是给作者自己用的，页面上把控件本身
@@ -38,6 +39,7 @@ import AiPreviewPane from '@/components/AiPreviewPane.vue'
 import AiRunPanel from '@/components/AiRunPanel.vue'
 import AiSessionTree from '@/components/AiSessionTree.vue'
 import AiSkillDialog from '@/components/AiSkillDialog.vue'
+import EmptyState from '@/components/EmptyState.vue'
 import PanelResizer from '@/components/PanelResizer.vue'
 import { basenameOf } from '@/format'
 import { notifyWarning } from '@/notify'
@@ -91,6 +93,14 @@ async function send(text: string, attached: AiImage[]): Promise<void> {
     instruction.value = ''
     images.value = []
   }
+}
+
+/** 起始屏那颗目录按钮的下拉：选最近用过的目录，或者去挑一个新的（挑完只记下来，会话发出第一句才建） */
+function onLandingDir(command: string): void {
+  if (command === 'pick')
+    void ai.pickNewDir()
+  else if (command)
+    ai.setNewDir(command)
 }
 
 /**
@@ -424,11 +434,34 @@ const runningIds = computed(() =>
       </template>
 
       <!-- 起始那一屏：没挑中会话（一段都还没有 / 都删光了 / 刚点了左栏那颗「+」）——
-           中间就是那条 composer，一进来就能直接写；**会话在发出第一句时才建**
-           （见 stores/ai.ts 的 run），所以上面那条从「挑目录」说起：下一个在哪个目录里干活。 -->
+           一副缺省空态（图 + 一句事实 + 居中的选目录按钮）压在 composer 上方，
+           **一进来就能直接写**；会话在发出第一句时才建（见 stores/ai.ts 的 run）。 -->
       <div v-else class="landing">
+        <EmptyState
+          class="landing__intro"
+          :icon="ChatDotRound"
+          text="下一段对话还没开始"
+          hint="一个目录是一个项目，下面可以有好几段对话 —— 选好目录，在下面写下第一句。"
+        >
+          <template #actions>
+            <el-dropdown trigger="click" @command="onLandingDir">
+              <el-button size="small" :icon="FolderAdd">
+                {{ ai.newDir ? noteRootName(ai.newDir) : '选择工作目录' }}
+              </el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item v-for="item in ai.recentDirs" :key="item" :command="item">
+                    {{ noteRootName(item) }}
+                  </el-dropdown-item>
+                  <el-dropdown-item command="pick" :divided="ai.recentDirs.length > 0" :icon="FolderAdd">
+                    选择其他目录…
+                  </el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
+          </template>
+        </EmptyState>
         <div class="landing__box">
-          <AiLocationBar :repo-branch="repoBranch" />
           <AiComposer
             v-model:instruction="instruction"
             :images="images"
@@ -605,12 +638,10 @@ body.is-resizing-ai-tree .ai-view__side {
 /* ---------- 起始那一屏 ---------- */
 
 /**
- * 居中的一屏：位置那一栏 + composer —— **中间那条 composer 就是主角**
- * （与 ZCode 的起始屏同一副样子：一进来就能写），它自己不套卡片，那条输入框本身就是卡片。
- *
- * 竖着居中靠 `.landing__box` 的 `margin: auto 0`，不靠 `justify-content`：窗口拉得很矮、
- * 内容比一屏高时，`justify-content: center` 会把顶上那半截永远推出可视区（滚不到），
- * auto 边距这会儿自动归零，从顶上开始排。
+ * 上面一副缺省空态、下面 composer：空态（EmptyState）自带 flex:1，图与文字在剩余空间里
+ * 居中；composer 落在底下，一进来就能写（那条输入框本身就是卡片，不再套）。
+ * 窗口拉得很矮、内容比一屏高时由这一栏自己滚（不靠 `justify-content: center` 居中 ——
+ * 那会把顶上那半截永远推出可视区，滚不到）。
  */
 .landing {
   display: flex;
@@ -619,6 +650,11 @@ body.is-resizing-ai-tree .ai-view__side {
   min-height: 0;
   overflow-y: auto;
   padding: var(--sp-4) 0;
+}
+
+/* 宽度撑满（.landing 是 align-items: center，不撑的话空态挤成内容宽、提示行折得很难看） */
+.landing__intro {
+  align-self: stretch;
 }
 
 .landing__box {

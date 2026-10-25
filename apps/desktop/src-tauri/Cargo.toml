@@ -108,6 +108,11 @@ windows-sys = { version = "0.61", features = [
 windows = { version = "0.62", features = [
     "Data_Xml_Dom",
     "Foundation",
+    # 截图取字（ocr.rs）：Windows.Media.Ocr 认字 + SoftwareBitmap 装像素；像素灌进 WinRT 的
+    # Buffer 要 Storage_Streams（它自带 Storage）—— 仍是同一个 crate 的 feature，不新增编译单元
+    "Graphics_Imaging",
+    "Media_Ocr",
+    "Storage_Streams",
     "Security_Credentials_UI",
     "UI_Notifications",
     "Win32_Foundation",
