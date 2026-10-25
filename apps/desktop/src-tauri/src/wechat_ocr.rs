@@ -878,37 +878,110 @@ impl Drop for TempPng {
     }
 }
 
-/// 行 → wire（文字层摆位）。**只摆字框，不拿 line.text 对齐** —— 实测引擎只给约八成的字
-/// 发独立框（一段 87 字的行只有 66 框），文本与框对不上，按 1:1 配对会整体错位；
-/// 空格交给渲染层 layoutOcrSpans 的 gap 检测（与 Windows OCR 的词同一套机制）。
-/// 没有字框的行整行一框（layoutOcrSpans 会把文本按框宽均分）。行按 (y, x) 排成阅读顺序。
+/// 子序列对齐向前看的步数：块的字符在文本里隔这么远还找得到就当「中间的字缺框」
+const ALIGN_LOOKAHEAD: usize = 4;
+
+/// 一行 → 逐字位。**line.text 是权威文本，字框只覆盖约八成的字**（实测 87 字的行只有 66 框，
+/// 且「文本去空白 == 字框拼接」一字不差）——按字符相等做子序列对齐：对上的字用真框，
+/// 缺框的字（含空格，块里没有空格框）夹在相邻两块之间插值出位。整行每个字都有位，
+/// 选中高亮才连得起来、复制才不丢字；两边认得不一样的以块为准（框是真像素）。
+fn line_words(line: &WxLine) -> Vec<OcrWord> {
+    let block_word = |word: &WxChar| OcrWord {
+        text: word.text.clone(),
+        x: f64::from(word.left),
+        y: f64::from(word.top),
+        w: f64::from(word.right - word.left),
+        h: f64::from(word.bottom - word.top),
+    };
+    let text_chars: Vec<char> = line.text.chars().collect();
+    let line_height = f64::from(line.bottom - line.top);
+    let mut words: Vec<OcrWord> = Vec::new();
+    let mut at = 0usize;
+    let mut block = 0usize;
+    while at < text_chars.len() {
+        let tc = text_chars[at];
+        // 在文本里向前找当前块的首字符：找到 → 中间的字缺框；找不到 → 两边认得不一样
+        let mut matched_at = None;
+        if let Some(next) = line.chars.get(block) {
+            let first = next.text.chars().next();
+            if first == Some(tc) {
+                matched_at = Some(at);
+            } else {
+                let window_end = (at + 1 + ALIGN_LOOKAHEAD).min(text_chars.len());
+                for (offset, other) in text_chars[at + 1..window_end].iter().enumerate() {
+                    if Some(*other) == first {
+                        matched_at = Some(at + 1 + offset);
+                        break;
+                    }
+                }
+            }
+        }
+        match matched_at {
+            Some(pos) => {
+                // [at, pos) 缺框：与当前块均分「上一已发位右缘 → 块左缘」这段区间
+                let (run_left, height) = match words.last() {
+                    Some(prev) => (prev.x + prev.w, prev.h),
+                    None => (f64::from(line.left), line_height),
+                };
+                let run_right = f64::from(line.chars[block].left);
+                // 缺框的字把「上一已发位右缘 → 块左缘」整段分掉（真块有自己的框，不占这段）
+                let step =
+                    ((run_right - run_left) / ((pos - at) as f64)).max(1.0);
+                for (offset, missed) in text_chars[at..pos].iter().enumerate() {
+                    words.push(OcrWord {
+                        text: missed.to_string(),
+                        x: run_left + step * offset as f64,
+                        y: f64::from(line.chars[block].top),
+                        w: step,
+                        h: height,
+                    });
+                }
+                words.push(block_word(&line.chars[block]));
+                at = pos + 1;
+                block += 1;
+            }
+            None => {
+                match line.chars.get(block) {
+                    Some(word) => {
+                        // 块的字符在附近找不到（两边认得不一样）：块为准，文本这个字让位
+                        words.push(block_word(word));
+                        block += 1;
+                        at += 1;
+                    }
+                    None => {
+                        // 块用完了：剩下的文本按行框剩余宽度摊成一块
+                        let rest: String =
+                            text_chars[at..].iter().filter(|c| !c.is_whitespace()).collect();
+                        let (x, y, h) = match words.last() {
+                            Some(prev) => (prev.x + prev.w, prev.y, prev.h),
+                            None => (f64::from(line.left), f64::from(line.top), line_height),
+                        };
+                        if !rest.is_empty() {
+                            words.push(OcrWord {
+                                text: rest,
+                                x,
+                                y,
+                                w: (f64::from(line.right) - x).max(1.0),
+                                h,
+                            });
+                        }
+                        at = text_chars.len();
+                    }
+                }
+            }
+        }
+    }
+    // 文本走完了块还有剩：照常摆（框是真像素）
+    words.extend(line.chars[block..].iter().map(block_word));
+    words
+}
+
+/// 行 → wire（文字层摆位）；行按 (y, x) 排成阅读顺序
 fn to_wire(lines: Vec<WxLine>) -> Vec<OcrLine> {
     let mut rows: Vec<OcrLine> = lines
         .into_iter()
         .filter(|line| !line.text.trim().is_empty())
-        .map(|line| {
-            let words = if line.chars.is_empty() {
-                vec![OcrWord {
-                    text: line.text,
-                    x: f64::from(line.left),
-                    y: f64::from(line.top),
-                    w: f64::from(line.right - line.left),
-                    h: f64::from(line.bottom - line.top),
-                }]
-            } else {
-                line.chars
-                    .into_iter()
-                    .map(|word| OcrWord {
-                        text: word.text,
-                        x: f64::from(word.left),
-                        y: f64::from(word.top),
-                        w: f64::from(word.right - word.left),
-                        h: f64::from(word.bottom - word.top),
-                    })
-                    .collect()
-            };
-            OcrLine { words }
-        })
+        .map(|line| OcrLine { words: line_words(&line) })
         .collect();
     rows.sort_by(|a, b| {
         let (ay, ax) = line_origin(a);
@@ -1027,6 +1100,87 @@ mod tests {
         assert_eq!(version_key("abc"), None);
     }
 
+    /// 行对齐出逐字位：块按字符相等做子序列匹配，缺框的字（含空格）在相邻两块间插值，
+    /// 整行每个文本字符都有位 —— 高亮才连续、复制才不丢字
+    #[test]
+    fn 行对齐出逐字位缺框的插值() {
+        let char_at = |text: &str, left: f32| WxChar {
+            text: text.into(),
+            left,
+            top: 0.0,
+            right: left + 10.0,
+            bottom: 12.0,
+        };
+        // text「成熟得多」 blocks 成、多（熟、得缺框）：4 个位，中间两个在成右缘与多左缘间均分
+        let line = WxLine {
+            text: "成熟得多".into(),
+            left: 0.0,
+            top: 0.0,
+            right: 100.0,
+            bottom: 12.0,
+            chars: vec![char_at("成", 0.0), char_at("多", 60.0)],
+        };
+        let words = line_words(&line);
+        assert_eq!(words.len(), 4);
+        assert_eq!(words[0].text, "成");
+        assert_eq!((words[0].x, words[0].w), (0.0, 10.0));
+        assert_eq!(words[1].text, "熟");
+        assert_eq!(words[2].text, "得");
+        // 缺框的两个字均分 (60 - 10) 的区间
+        assert_eq!((words[1].x, words[1].w), (10.0, 25.0));
+        assert_eq!((words[2].x, words[2].w), (35.0, 25.0));
+        assert_eq!(words[3].text, "多");
+        assert_eq!((words[3].x, words[3].w), (60.0, 10.0));
+
+        // 空格没有框：夹在 m 与 r 之间，撑满真实间隙
+        let mut chars = Vec::new();
+        for (at, text) in ["p", "n", "p", "m", "r", "u", "n"].iter().enumerate() {
+            let left = if at < 4 { at as f32 * 10.0 } else { 45.0 + (at - 4) as f32 * 10.0 };
+            chars.push(char_at(text, left));
+        }
+        let line = WxLine {
+            text: "pnpm run".into(),
+            left: 0.0,
+            top: 0.0,
+            right: 75.0,
+            bottom: 12.0,
+            chars,
+        };
+        let words = line_words(&line);
+        assert_eq!(words.len(), 8);
+        assert_eq!(words[4].text, " ");
+        assert_eq!((words[4].x, words[4].w), (40.0, 5.0));
+        assert_eq!(words[5].text, "r");
+
+        // 块用完了：剩下的文本按行框剩余宽度摊成一块（内容不丢）
+        let line = WxLine {
+            text: "abcd".into(),
+            left: 0.0,
+            top: 0.0,
+            right: 40.0,
+            bottom: 12.0,
+            chars: vec![char_at("a", 0.0), char_at("b", 10.0)],
+        };
+        let words = line_words(&line);
+        assert_eq!(words.len(), 3);
+        assert_eq!(words[2].text, "cd");
+        assert_eq!((words[2].x, words[2].w), (20.0, 20.0));
+
+        // 两边认得不一样：块为准（框是真像素），剩下的文本进尾巴
+        let line = WxLine {
+            text: "abc".into(),
+            left: 0.0,
+            top: 0.0,
+            right: 40.0,
+            bottom: 12.0,
+            chars: vec![char_at("a", 0.0), char_at("x", 10.0)],
+        };
+        let words = line_words(&line);
+        assert_eq!(words.len(), 3);
+        assert_eq!(words[1].text, "x");
+        assert_eq!(words[2].text, "c");
+    }
+
     /// 手动探针：走一遍微信引擎（要装着微信 4.x 且解出过 wxocr.dll）
     /// `WXOCR_PROBE_IMAGE=<png> cargo test ... wechat_ocr_probe -- --ignored --nocapture`
     /// 行 → wire：有字框逐字摆，没有就整行一框；行按 (y, x) 排阅读顺序
@@ -1078,8 +1232,15 @@ mod tests {
         println!("耗时 {:?}，{} 行", started.elapsed(), lines.len());
         for line in &lines {
             let joined: String = line.chars.iter().map(|c| c.text.as_str()).collect();
-            println!("  行文本（{:?}）：{:?}", line.text.chars().count(), line.text);
-            println!("  字框（{} 个）：{:?}", line.chars.len(), joined);
+            let wired = line_words(line);
+            println!(
+                "  行文本 {} 字 / 字框 {} / 输出位 {}：{:?}",
+                line.text.chars().count(),
+                line.chars.len(),
+                wired.len(),
+                line.text
+            );
+            println!("  字框拼：{:?}", joined);
         }
     }
 }
