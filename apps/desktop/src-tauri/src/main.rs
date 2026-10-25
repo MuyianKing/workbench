@@ -67,6 +67,7 @@ mod wb_tasks;
 mod wb_upstream;
 mod wb_usage;
 mod weather;
+mod wechat_ocr;
 mod zentao;
 
 use serde_json::{json, Value};

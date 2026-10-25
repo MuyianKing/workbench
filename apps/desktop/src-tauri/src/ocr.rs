@@ -67,7 +67,12 @@ pub fn capture_ocr(
     let (left, top, crop_width, crop_height) =
         capture::clamp_region(image.width(), image.height(), x, y, width, height)?;
     let cropped = image::imageops::crop_imm(&image, left, top, crop_width, crop_height).to_image();
-    recognize(&cropped)
+    // 微信的引擎对小字明显更准、逐字带框（见 wechat_ocr.rs 文件头）：起得来就用它，
+    // 没装微信 / 引擎没起来回退系统 OCR（这条口径写在 screenshot.md）
+    match crate::wechat_ocr::recognize(&cropped) {
+        Ok(lines) => Ok(lines),
+        Err(_) => recognize(&cropped),
+    }
 }
 
 /// 对一块 RGBA 像素跑一遍识别。抽出成独立函数：单测与探针都从这儿进。

@@ -45,8 +45,12 @@
   子进程一律带 `GIT_TERMINAL_PROMPT=0` 与 `-c core.quotepath=false`（前者：没有终端可问，挂着只会等超时；后者：中文文件名在冲突提示里会变乱码）；
   超时与失败收敛成给用户看的提示。**只在用户自己那两个文件夹（笔记本、技能库）所在的仓库里跑 git，且从不写它们的远端配置**
   （不 `init`、不 `remote add` / `set-url`；只在仓库没配过身份时写一次本地 `user.email` / `user.name` 兜底）。别处不新增这类外部依赖。
-- VS Code 是唯一**可选**的外部程序，只服务项目卡的「在 VS Code 中打开」：走它自己注册的 `vscode://` 协议（`system.rs` 的
-  `open_in_vscode`），不去找 `Code.exe` 的安装路径；没装只影响那一个菜单项，不要照着再引别的编辑器。
+- VS Code 与微信是仅有的两个**可选**外部程序，各只服务一个功能，没装只影响那一处：
+  - VS Code 只服务项目卡的「在 VS Code 中打开」：走它自己注册的 `vscode://` 协议（`system.rs` 的
+    `open_in_vscode`），不去找 `Code.exe` 的安装路径；不要照着再引别的编辑器。
+  - 微信只服务截图取字的引擎（`wechat_ocr.rs`，装了微信 4.x 才有、没装回退 Windows OCR）：
+    运行时定位微信自带的 `mmmojo_64.dll` / weixin.exe / XPlugin 解出的 `wxocr.dll`，**一个字节
+    不随包带**；调用全程在本机（mojo IPC），不新增网络出口。细则见 [screenshot.md](docs/modules/screenshot.md)。
 - **Pi**（开源编码 Agent）只服务 AI 助手页（一个通用控制台：左栏按项目列会话、右栏跟一段对话，它去干活）：**随包内置** —— `apps/desktop/scripts/vendor-pi.mjs` 在构建 / 开发前
   生成瘦身的 `apps/desktop/resources/pi/`（钉死版本、删掉运行时用不到的云厂商 SDK，细则见 [ai.md](docs/modules/ai.md)），
   Node 用系统里的（≥ 22.19，门槛判定在 `packages/ai/src/ai.ts`）。它跑 **RPC 模式**（提示词与「命令让不让跑」的答复都走子进程的 stdin，

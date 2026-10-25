@@ -22,6 +22,9 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rusqlite = { version = "0.40", features = ["bundled"] }
 zstd = "0.14"
+# 微信取字（wechat_ocr.rs）的临时图路径要绝对路径且不带 \\?\ 前缀（微信子进程吃不下）；
+# dunce 已在编译图里（tauri / open 都在用），只新增这一个声明，不新增编译单元
+dunce = "1"
 # 图片解码：现在只剩「内置壁纸的缩略图」用到（背景图已改走 asset 协议，不再过这里）
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "bmp", "gif"] }
 uuid = { version = "1", features = ["v4"] }
@@ -120,6 +123,10 @@ windows = { version = "0.62", features = [
     "Win32_Foundation",
     "Win32_System_Com",
     "Win32_System_Com_StructuredStorage",
+    # 微信取字（wechat_ocr.rs）：LoadLibraryW / GetProcAddress 装 mmmojo_64.dll、
+    # RegGetValueW 读微信安装路径 —— 同一个 crate 加 feature，不新增编译单元
+    "Win32_System_LibraryLoader",
+    "Win32_System_Registry",
     "Win32_System_WinRT",
     "Win32_UI_Shell",
     "Win32_UI_Shell_PropertiesSystem",

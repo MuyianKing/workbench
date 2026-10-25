@@ -5204,6 +5204,7 @@ name = "workbench"
 version = "0.3.0"
 dependencies = [
  "base64 0.23.1",
+ "dunce",
  "flate2",
  "form_urlencoded",
  "image",
