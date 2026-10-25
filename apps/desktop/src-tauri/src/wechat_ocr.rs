@@ -886,12 +886,23 @@ const ALIGN_LOOKAHEAD: usize = 4;
 /// 缺框的字（含空格，块里没有空格框）夹在相邻两块之间插值出位。整行每个字都有位，
 /// 选中高亮才连得起来、复制才不丢字；两边认得不一样的以块为准（框是真像素）。
 fn line_words(line: &WxLine) -> Vec<OcrWord> {
-    let block_word = |word: &WxChar| OcrWord {
-        text: word.text.clone(),
-        x: f64::from(word.left),
-        y: f64::from(word.top),
-        w: f64::from(word.right - word.left),
-        h: f64::from(word.bottom - word.top),
+    // 真框发位时**裁到下一块的左缘**：微信的四角框普遍比步进宽 2~5px（小字号外扩），
+    // 不裁的话相邻选中底色叠两层，深浅斑驳 —— 高亮只需盖住笔画，笔画不会伸进下一个字
+    let block_word = |word: &WxChar, next: Option<&WxChar>| {
+        let mut w = f64::from(word.right - word.left);
+        if let Some(next) = next {
+            let next_left = f64::from(next.left);
+            if next_left > f64::from(word.left) {
+                w = w.min(next_left - f64::from(word.left));
+            }
+        }
+        OcrWord {
+            text: word.text.clone(),
+            x: f64::from(word.left),
+            y: f64::from(word.top),
+            w,
+            h: f64::from(word.bottom - word.top),
+        }
     };
     let text_chars: Vec<char> = line.text.chars().collect();
     let line_height = f64::from(line.bottom - line.top);
@@ -924,19 +935,20 @@ fn line_words(line: &WxLine) -> Vec<OcrWord> {
                     None => (f64::from(line.left), line_height),
                 };
                 let run_right = f64::from(line.chars[block].left);
-                // 缺框的字把「上一已发位右缘 → 块左缘」整段分掉（真块有自己的框，不占这段）
-                let step =
-                    ((run_right - run_left) / ((pos - at) as f64)).max(1.0);
+                // 缺框的字把「上一已发位右缘 → 块左缘」整段分掉（真块有自己的框，不占这段），
+                // 步进被 1px 下限撑出去时按区间右缘裁住，不许搭到真块上
+                let step = ((run_right - run_left) / ((pos - at) as f64)).max(1.0);
                 for (offset, missed) in text_chars[at..pos].iter().enumerate() {
+                    let x = run_left + step * offset as f64;
                     words.push(OcrWord {
                         text: missed.to_string(),
-                        x: run_left + step * offset as f64,
+                        x,
                         y: f64::from(line.chars[block].top),
-                        w: step,
+                        w: step.min((run_right - x).max(0.5)),
                         h: height,
                     });
                 }
-                words.push(block_word(&line.chars[block]));
+                words.push(block_word(&line.chars[block], line.chars.get(block + 1)));
                 at = pos + 1;
                 block += 1;
             }
@@ -944,7 +956,7 @@ fn line_words(line: &WxLine) -> Vec<OcrWord> {
                 match line.chars.get(block) {
                     Some(word) => {
                         // 块的字符在附近找不到（两边认得不一样）：块为准，文本这个字让位
-                        words.push(block_word(word));
+                        words.push(block_word(word, line.chars.get(block + 1)));
                         block += 1;
                         at += 1;
                     }
@@ -972,7 +984,9 @@ fn line_words(line: &WxLine) -> Vec<OcrWord> {
         }
     }
     // 文本走完了块还有剩：照常摆（框是真像素）
-    words.extend(line.chars[block..].iter().map(block_word));
+    for index in block..line.chars.len() {
+        words.push(block_word(&line.chars[index], line.chars.get(index + 1)));
+    }
     words
 }
 
@@ -1179,6 +1193,20 @@ mod tests {
         assert_eq!(words.len(), 3);
         assert_eq!(words[1].text, "x");
         assert_eq!(words[2].text, "c");
+
+        // 真框外扩（比下一块的左缘宽）：裁到下一块左缘，选中底色不叠两层
+        let line = WxLine {
+            text: "修法".into(),
+            left: 0.0,
+            top: 0.0,
+            right: 30.0,
+            bottom: 12.0,
+            chars: vec![char_at("修", 4.6), char_at("法", 14.1)],
+        };
+        // 修 的框本来到 14.6（4.6 + 10），裁到 14.1 就停
+        let words = line_words(&line);
+        assert!((words[0].x - 4.6).abs() < 1e-4 && (words[0].w - 9.5).abs() < 1e-4);
+        assert!((words[1].x - 14.1).abs() < 1e-4 && (words[1].w - 10.0).abs() < 1e-4);
     }
 
     /// 手动探针：走一遍微信引擎（要装着微信 4.x 且解出过 wxocr.dll）
@@ -1241,6 +1269,16 @@ mod tests {
                 line.text
             );
             println!("  字框拼：{:?}", joined);
+            // 重叠检测：半透明选中底色叠两层就会更深，量出哪些位搭在一起
+            for pair in wired.windows(2) {
+                let overlap = pair[0].x + pair[0].w - pair[1].x;
+                if overlap > 0.3 {
+                    println!(
+                        "    重叠 {:.1}px：{:?}({:.1}+{:.1}) → {:?}({:.1})",
+                        overlap, pair[0].text, pair[0].x, pair[0].w, pair[1].text, pair[1].x
+                    );
+                }
+            }
         }
     }
 }
