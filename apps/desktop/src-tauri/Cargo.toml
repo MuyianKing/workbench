@@ -111,6 +111,8 @@ windows = { version = "0.62", features = [
     # 截图取字（ocr.rs）：Windows.Media.Ocr 认字 + SoftwareBitmap 装像素；像素灌进 WinRT 的
     # Buffer 要 Storage_Streams（它自带 Storage）—— 仍是同一个 crate 的 feature，不新增编译单元
     "Graphics_Imaging",
+    # 取字探针按语言建对照引擎（TryCreateFromLanguage 的入参 Language 在 Globalization）—— 同上
+    "Globalization",
     "Media_Ocr",
     "Storage_Streams",
     "Security_Credentials_UI",

@@ -71,12 +71,30 @@ pub fn capture_ocr(
 }
 
 /// 对一块 RGBA 像素跑一遍识别。抽出成独立函数：单测与探针都从这儿进。
+///
+/// 两遍法：第一遍按选区长边给档位（选区尺寸是小字的**代理** —— 小选区装的多半是小字，
+/// 但代理会失手：大段的小字长边落在低档，就放不够）；认完**量真实字高**（词框高度的
+/// 中位数，抗得住零星异常框），喂字高不在全对线附近就重认。**倍数不是越大越好** ——
+/// 探针实测（`ocr_factor_probe`，见 tests）：喂字高 40px 上下是甜点，39px 编辑距离 15、
+/// 52px 反而 17、26px 23（同一段 152 字），所以第二遍取**离线最近**的倍数，不追大。
 fn recognize(image: &image::RgbaImage) -> Result<Vec<OcrLine>, String> {
-    // 小选区**先放大再认**：这个引擎对十几二十物理像素的界面小字明显吃力
-    // （本机实测同一句「钮看得见，直接把全金」：14px 错一半、20px 把「把」拆成「扌巴」、
-    // 40px 起全对）。选区尺寸是小字的最好代理 —— 小选区里装的多半就是小字。
-    // 放大后仍在 10000px 上限内（2048×2 = 4096），大选区（整屏那类）不放大：本来就慢。
     let factor = upscale_factor(image.width().max(image.height()));
+    let mut lines = recognize_at(image, factor)?;
+    if let Some(more) = second_pass_factor(
+        median_word_height(&lines),
+        image.width(),
+        image.height(),
+        factor,
+    ) {
+        lines = recognize_at(image, more)?;
+    }
+    Ok(lines)
+}
+
+/// 放大 → 引擎识别 → 词框除回倍数，喂图口径见 [recognize] 与 [upscale_factor] 的注释。
+fn recognize_at(image: &image::RgbaImage, factor: u32) -> Result<Vec<OcrLine>, String> {
+    // 小选区**先放大再认**：这个引擎对十几二十物理像素的界面小字明显吃力
+    // （本机实测同一句「钮看得见，直接把全金」：14px 错一半、20px 把「把」拆成「扌巴」）。
     let fed = if factor > 1 {
         image::imageops::resize(
             image,
@@ -88,20 +106,31 @@ fn recognize(image: &image::RgbaImage) -> Result<Vec<OcrLine>, String> {
     else {
         image.clone()
     };
+    recognize_fed(&fed, factor as f64)
+}
 
+/// 引擎识别一块**已备好**的图，词框除回 `scale`（放大在调用方：探针要换插值试）。
+fn recognize_fed(fed: &image::RgbaImage, scale: f64) -> Result<Vec<OcrLine>, String> {
     // 引擎按「用户配置的语言列表」挑（zh-Hans 的引擎认得了拉丁字母，中英混排不用换引擎）；
     // 没有任何可用的语言包时它建不出来 —— 这是这台机器的事，如实说一句
     let engine = OcrEngine::TryCreateFromUserProfileLanguages()
         .map_err(|_| "本机没有装文字识别语言包（设置 → 时间和语言 → 语言 → 添加语言，勾选「文本识别」）".to_string())?;
+    recognize_with(&engine, fed, scale)
+}
 
-    let bitmap = software_bitmap(&fed)?;
+/// 指定引擎认一块图（探针要换引擎对照，生产走 [recognize_fed]）。
+fn recognize_with(
+    engine: &OcrEngine,
+    fed: &image::RgbaImage,
+    scale: f64,
+) -> Result<Vec<OcrLine>, String> {
+    let bitmap = software_bitmap(fed)?;
     let result = engine
         .RecognizeAsync(&bitmap)
         .map_err(|err| format!("起文字识别失败（{err}）"))?
         .join()
         .map_err(|err| format!("文字识别没有完成（{err}）"))?;
 
-    let scale = factor as f64;
     let mut lines = Vec::new();
     for line in result.Lines().map_err(|err| format!("读识别结果失败（{err}）"))? {
         let mut words = Vec::new();
@@ -128,9 +157,50 @@ fn recognize(image: &image::RgbaImage) -> Result<Vec<OcrLine>, String> {
     Ok(lines)
 }
 
+/// 词框高度的中位数（选区原图口径）。取中位是为了抗住零星的异常框（图标误框、孤立标点）；
+/// 一个词都没有（空白图那类）返回 None —— 无从量起。
+fn median_word_height(lines: &[OcrLine]) -> Option<f64> {
+    let mut heights: Vec<f64> = lines
+        .iter()
+        .flat_map(|line| line.words.iter())
+        .map(|word| word.h)
+        .collect();
+    if heights.is_empty() {
+        return None;
+    }
+    heights.sort_by(|a, b| a.total_cmp(b));
+    Some(heights[heights.len() / 2])
+}
+
+/// 喂给引擎的词高全对线（探针实测：喂字高落在它附近最准，见 [recognize]）。
+const FED_WORD_HEIGHT_TARGET: f64 = 40.0;
+
+/// 第二遍喂图的长边上限：引擎的硬红线是 10000px（`OcrEngine::MaxImageDimension`），留一步余量。
+const FED_MAX_DIM: u32 = 9999;
+
+/// 第二遍喂图的像素总量上限：4096²（1670 万）实测 0.5s 出头，40M 约 1~2s —— 只发生在
+/// 字确实小的选区上（4K 整屏 2 倍是 3300 万，也在它之内：实测整屏小字 2 倍比原样强一截）。
+const FED_MAX_AREA: u64 = 40_000_000;
+
+/// 第二遍的放大倍数：喂字高**最接近**全对线的那一档（受长边与像素总量两个上限约束）。
+/// None 表示不用重认（已在线附近 / 认不出词 / 上限内升不动）。
+fn second_pass_factor(h_med: Option<f64>, width: u32, height: u32, first: u32) -> Option<u32> {
+    let h_med = h_med?;
+    let want = (FED_WORD_HEIGHT_TARGET / h_med).round();
+    if want < 1.0 {
+        return None;
+    }
+    let dim_cap = (FED_MAX_DIM / width.max(height)).max(1);
+    let area = u64::from(width) * u64::from(height);
+    let area_cap = ((FED_MAX_AREA as f64 / area as f64).sqrt().floor()) as u32;
+    let more = (want as u32).min(dim_cap).min(area_cap.max(1));
+    (more > first).then_some(more)
+}
+
 /// 放大倍数按选区长边分档，**喂给引擎的长边封顶 4096**（实测 4096×4096 全是字的图 0.5s 出头，
 /// 再大就往秒级走了）：小选区装的多半是小字，放得越多错字越少 —— 20px 的界面字放 3 倍
-/// 后同一句全对（见 recognize 里那条实测）。整屏那一档（长边 > 2048）不放大：内容杂、本来就慢。
+/// 后同一句全对。整屏那一档（长边 > 2048）不放大：内容杂、本来就慢。
+/// 第一遍只是「字高」的代理，第二遍按量出的真实字高校正（见 [recognize]）。
 fn upscale_factor(max_dim: u32) -> u32 {
     if max_dim <= 1365 {
         3
@@ -234,6 +304,46 @@ mod tests {
         assert_eq!(upscale_factor(3840), 1);
     }
 
+    /// 两遍法的根：第二遍取「离全对线最近」的倍数，不是越大越好 —— 探针实测喂字高
+    /// 39px 编辑距离 15、52px 反而 17（见 ocr_factor_probe 的注释），这些边界钉住这个口径
+    #[test]
+    fn 第二遍取最接近全对线的倍数() {
+        // 12.5px 字在 3x 已到 37.5（离 40 差 2.5；4x 的 50 差 10）：留在 3x，不重认
+        assert_eq!(second_pass_factor(Some(12.5), 1137, 52, 3), None);
+        // 10px 字：round(40/10)=4，正好落在线上 → 补到 4x
+        assert_eq!(second_pass_factor(Some(10.0), 1322, 76, 3), Some(4));
+        // 4K 整屏不放大、字又小：长边与像素总量双重封顶后还能到 2x（实测整屏小字 2x 强一截）
+        assert_eq!(second_pass_factor(Some(12.0), 3840, 2160, 1), Some(2));
+        // 要 5 倍，上限内要多少给多少
+        assert_eq!(second_pass_factor(Some(8.0), 1000, 400, 3), Some(5));
+        // 要 7 倍但长边只许 6（9999/1600）：按封顶来
+        assert_eq!(second_pass_factor(Some(6.0), 1600, 100, 2), Some(6));
+        // 字已经在线上方：不重认
+        assert_eq!(second_pass_factor(Some(20.0), 1000, 400, 3), None);
+        assert_eq!(second_pass_factor(Some(41.0), 900, 300, 1), None);
+        // 离谱大字（want 不足 1）：不重认
+        assert_eq!(second_pass_factor(Some(100.0), 2000, 500, 1), None);
+        // 一个词都没认出来：无从量起
+        assert_eq!(second_pass_factor(None, 500, 100, 1), None);
+    }
+
+    /// 中位数要抗住零星异常框：混着几框高的也不把字高带偏
+    #[test]
+    fn 词高中位数抗得住异常框() {
+        let line = |hs: &[f64]| OcrLine {
+            words: hs
+                .iter()
+                .map(|&h| OcrWord { text: "字".into(), x: 0.0, y: 0.0, w: h, h })
+                .collect(),
+        };
+        // 十几框正常字高里混两框离谱的（图标误框 80、孤立标点 2）：中位数仍是正常档
+        let normal = [16.0, 15.0, 17.0, 16.0, 15.0, 16.0, 80.0, 2.0, 16.0, 15.0, 17.0, 16.0];
+        assert_eq!(median_word_height(&[line(&normal)]), Some(16.0));
+        // 没有词：None（空白图那类）
+        assert_eq!(median_word_height(&[]), None);
+        assert_eq!(median_word_height(&[line(&[])]), None);
+    }
+
     /// 手动探针：验整条 WinRT 链路在这台机器上通不通（不认任何字，只看调用都成立），
     /// `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml ocr_probe -- --ignored`。
     /// 空白图认不出东西是正常结果；要认字得拿真截图在应用里走「取字」那颗按钮。
@@ -243,5 +353,176 @@ mod tests {
         let blank = image::RgbaImage::from_pixel(32, 32, image::Rgba([255, 255, 255, 255]));
         let lines = recognize(&blank).expect("空白图的识别调用不该失败");
         assert!(lines.is_empty(), "空白图不该认出字：{lines:?}");
+    }
+
+    /// 手动探针：拿一张真实截图扫「放大倍数 × 预处理 × 引擎」，量这段字怎么喂才认得全
+    /// —— 生产档位与预处理就照它调。
+    /// ```
+    /// OCR_PROBE_IMAGE=<png> [OCR_PROBE_TRUTH=<原文>] \
+    ///   cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml ocr_factor_probe -- --ignored --nocapture
+    /// ```
+    /// 给了原文就打印编辑距离（去空白后比）；预处理四种：raw（原样）、otsu（放大后全局阈值
+    /// 二值化）、stretch（对比度拉伸）、otsu-dark（反相后二值化，模拟暗色模式）。
+    #[test]
+    #[ignore = "手动探针：传 OCR_PROBE_IMAGE 看各倍数 / 预处理 / 引擎下的识别结果"]
+    fn ocr_factor_probe() {
+        let path = std::env::var("OCR_PROBE_IMAGE").expect("设 OCR_PROBE_IMAGE 指到截图 png");
+        let image = image::open(&path).expect("图解不开").to_rgba8();
+        let truth: Option<Vec<char>> = std::env::var("OCR_PROBE_TRUTH").ok().map(|text| {
+            text.chars().filter(|c| !c.is_whitespace()).collect()
+        });
+        println!("原图 {}×{}", image.width(), image.height());
+
+        // 主引擎 + （装了语言包的话）en-US 对照：zh 引擎常把标点与数字段认歪
+        let zh = OcrEngine::TryCreateFromUserProfileLanguages().expect("主引擎建不出来");
+        let mut engines = vec![("zh", zh)];
+        if let Ok(lang) = windows::Globalization::Language::CreateLanguage(&"en-US".into()) {
+            if let Ok(en) = OcrEngine::TryCreateFromLanguage(&lang) {
+                engines.push(("en", en));
+            }
+            else {
+                println!("（en-US 引擎建不出来，只跑 zh）");
+            }
+        }
+
+        for factor in [2u32, 3, 4] {
+            let fed = image::imageops::resize(
+                &image,
+                image.width() * factor,
+                image.height() * factor,
+                image::imageops::FilterType::CatmullRom,
+            );
+            for (pre_name, prepared) in [
+                ("raw", fed.clone()),
+                ("sharpen", sharpen(&fed)),
+                ("otsu", otsu_binarize(&fed)),
+                ("stretch", contrast_stretch(&fed)),
+            ] {
+                for (engine_name, engine) in &engines {
+                    let lines = match recognize_with(engine, &prepared, factor as f64) {
+                        Ok(lines) => lines,
+                        Err(err) => {
+                            println!("{factor}x {pre_name}/{engine_name}: 失败（{err}）");
+                            continue;
+                        }
+                    };
+                    let text: String = lines
+                        .iter()
+                        .flat_map(|line| line.words.iter().map(|word| word.text.as_str()))
+                        .collect::<Vec<_>>()
+                        .join("");
+                    let score = match &truth {
+                        Some(truth) => {
+                            let got: Vec<char> =
+                                text.chars().filter(|c| !c.is_whitespace()).collect();
+                            format!("距离 {}/{} ", levenshtein(truth, &got), truth.len())
+                        }
+                        None => String::new(),
+                    };
+                    println!("{factor}x {pre_name}/{engine_name}: {score}\n    {text}");
+                }
+            }
+        }
+    }
+
+    /// 亮度（0~255，BT.601 加权）
+    fn luma(px: &image::Rgba<u8>) -> u32 {
+        (u32::from(px[0]) * 299 + u32::from(px[1]) * 587 + u32::from(px[2]) * 114) / 1000
+    }
+
+    /// Otsu 全局阈值二值化：直方图上找类间方差最大的切点，暗的一侧压黑、亮的压白
+    /// （暗色模式的白字黑底自动同极，反相与否都试）
+    fn otsu_binarize(image: &image::RgbaImage) -> image::RgbaImage {
+        let mut hist = [0u64; 256];
+        for px in image.pixels() {
+            hist[luma(px) as usize] += 1;
+        }
+        let total = u64::from(image.width()) * u64::from(image.height());
+        let sum: u64 = hist.iter().enumerate().map(|(t, n)| *n * t as u64).sum();
+        let (mut w_b, mut sum_b, mut best, mut threshold) = (0u64, 0u64, 0f64, 128u32);
+        for (t, &n) in hist.iter().enumerate() {
+            w_b += n;
+            if w_b == 0 {
+                continue;
+            }
+            let w_f = total - w_b;
+            if w_f == 0 {
+                break;
+            }
+            sum_b += n * t as u64;
+            let m_b = sum_b as f64 / w_b as f64;
+            let m_f = (sum - sum_b) as f64 / w_f as f64;
+            let between = w_b as f64 * w_f as f64 * (m_b - m_f).powi(2);
+            if between > best {
+                best = between;
+                threshold = t as u32;
+            }
+        }
+        let mut out = image.clone();
+        for px in out.pixels_mut() {
+            let v = if luma(px) <= threshold { 0 } else { 255 };
+            *px = image::Rgba([v, v, v, 255]);
+        }
+        out
+    }
+
+    /// 对比度拉伸：亮度 1%~99% 分位拉到全幅，三通道同乘同减（色相基本不动）
+    fn contrast_stretch(image: &image::RgbaImage) -> image::RgbaImage {
+        let mut lums: Vec<u32> = image.pixels().map(luma).collect();
+        lums.sort_unstable();
+        let at = |q: usize| lums[lums.len() * q / 100];
+        let (lo, hi) = (at(1), at(99).max(at(1) + 1));
+        let mut out = image.clone();
+        for px in out.pixels_mut() {
+            for c in &mut px.0[..3] {
+                let stretched = (u32::from(*c)).saturating_sub(lo) * 255 / (hi - lo);
+                *c = stretched.min(255) as u8;
+            }
+        }
+        out
+    }
+
+    /// 拉普拉斯锐化（out = 5·c − 上 − 下 − 左 − 右）：插值放大会抹平笔画边缘，锐化补回来
+    fn sharpen(image: &image::RgbaImage) -> image::RgbaImage {
+        let (w, h) = (i64::from(image.width()), i64::from(image.height()));
+        let at = |x: i64, y: i64| {
+            *image.get_pixel(x.clamp(0, w - 1) as u32, y.clamp(0, h - 1) as u32)
+        };
+        let mut out = image.clone();
+        for y in 0..h {
+            for x in 0..w {
+                let c = at(x, y);
+                let up = at(x, y - 1);
+                let down = at(x, y + 1);
+                let left = at(x - 1, y);
+                let right = at(x + 1, y);
+                let mut px = [0u8; 4];
+                for (ch, v) in px.iter_mut().enumerate().take(3) {
+                    let sharp = 5 * i32::from(c[ch])
+                        - i32::from(up[ch])
+                        - i32::from(down[ch])
+                        - i32::from(left[ch])
+                        - i32::from(right[ch]);
+                    *v = sharp.clamp(0, 255) as u8;
+                }
+                px[3] = c[3];
+                out.get_pixel_mut(x as u32, y as u32).0 = px;
+            }
+        }
+        out
+    }
+
+    /// 编辑距离（两行 DP）：探针给各倍数的识别结果打个可比的分
+    fn levenshtein(a: &[char], b: &[char]) -> usize {
+        let mut row: Vec<usize> = (0..=b.len()).collect();
+        for (i, ca) in a.iter().enumerate() {
+            let mut next = vec![i + 1];
+            for (j, cb) in b.iter().enumerate() {
+                let cost = usize::from(ca != cb);
+                next.push((row[j] + cost).min(row[j + 1] + 1).min(next[j] + 1));
+            }
+            row = next;
+        }
+        row[b.len()]
     }
 }
