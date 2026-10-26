@@ -52,24 +52,53 @@ describe('parseSseShares', () => {
 // ---------- 深交所份额 ----------
 
 describe('parseSzseShares', () => {
-  it('按中文列名宽松认键，剥千分位逗号，只留名单里的深市代码', () => {
+  it('按现在的英文列名认键，把「万份」折成份，只留名单里的深市代码', () => {
     const body = JSON.stringify([
       {
-        name: '基金每日规模',
-        PagesCount: 3,
+        metadata: { pagesize: 20, pageno: 1, pagecount: 3, recordcount: 41 },
         data: [
-          { '基金代码': '159919', '基金简称': '沪深300ETF', '基金规模(份)': '9,987,516,676', '日期': '2026-10-23' },
-          { '基金代码': '159915', '基金简称': '创业板ETF', '基金规模(份)': '33,759,000,000', '日期': '2026-10-23' },
-          { '基金代码': '510300', '基金简称': '沪市代码不该进来', '基金规模(份)': '1', '日期': '2026-10-23' },
-          { '基金代码': '159901', '基金简称': '全角逗号也剥', '基金规模(份)': '1，234', '日期': '2026/10/22' },
+          { size_date: '2026-10-23', fund_code: '159919', security_short_name: '沪深300ETF嘉实', current_size: '998,751.66' },
+          { size_date: '2026-10-23', fund_code: '159915', security_short_name: '创业板ETF易方达', current_size: '3,375,745.49' },
+          { size_date: '2026-10-23', fund_code: '510300', security_short_name: '沪市代码不该进来', current_size: '1' },
+          { size_date: '2026/10/22', fund_code: '159901', security_short_name: '深证100ETF易方达', current_size: '1，234' },
         ],
       },
     ])
     const parsed = parseSzseShares(body)
     expect(parsed).not.toBeNull()
     expect(parsed?.pages).toBe(3)
-    expect(parsed?.days['20261023']).toEqual({ 159919: 9987516676, 159915: 33759000000 })
-    expect(parsed?.days['20261022']).toEqual({ 159901: 1234 })
+    expect(parsed?.rows).toBe(4)
+    expect(parsed?.days['20261023']).toEqual({ 159919: 9987516600, 159915: 33757454900 })
+    expect(parsed?.days['20261022']).toEqual({ 159901: 12340000 })
+  })
+
+  it('旧的中文列名也认：「份」不乘万，「万份」照乘', () => {
+    const body = JSON.stringify([
+      {
+        name: '基金每日规模',
+        PagesCount: 3,
+        data: [
+          { '基金代码': '159919', '基金简称': '沪深300ETF', '基金规模(份)': '9,987,516,676', '日期': '2026-10-23' },
+          { '基金代码': '159915', '基金简称': '创业板ETF', '基金规模(万份)': '1,234.5', '日期': '2026-10-23' },
+        ],
+      },
+    ])
+    const parsed = parseSzseShares(body)
+    expect(parsed?.pages).toBe(3)
+    expect(parsed?.days['20261023']).toEqual({ 159919: 9987516676, 159915: 12345000 })
+  })
+
+  it('这一页没有目标代码时 rows 不为 0（调用方不能当成空页收尾）', () => {
+    const body = JSON.stringify([
+      {
+        metadata: { pagesize: 20, pageno: 1, pagecount: 39, recordcount: 766 },
+        data: [{ size_date: '2026-10-23', fund_code: '158000', security_short_name: '别的基金', current_size: '3,292.58' }],
+      },
+    ])
+    const parsed = parseSzseShares(body)
+    expect(parsed?.days).toEqual({})
+    expect(parsed?.rows).toBe(1)
+    expect(parsed?.pages).toBe(39)
   })
 
   it('回包不是预期结构返回 null', () => {

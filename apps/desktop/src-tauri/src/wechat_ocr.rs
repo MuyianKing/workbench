@@ -4,10 +4,10 @@
 //!
 //! Windows 自带的 `Windows.Media.Ocr` 对 12px 上下的界面小字有天花板（`ocr.rs` 的探针实测：
 //! 放大、二值化、锐化都绕不过去）。微信截图那个「提取文字」用的引擎对小字明显更准，
-//! 而且结果**每个字都带独立框**（Windows OCR 只到词）。引擎就在用户装的微信里：
-//! 本进程加载微信目录的 `mmmojo_64.dll`，由它拉起 weixin.exe 子进程（`--type=wxocr`，
-//! 跑 XPlugin 解出来的 `wxocr.dll`）——一个字节都不随包带；没装微信或引擎没起来，
-//! `capture_ocr` 回退 [ocr::recognize]（Windows OCR）。
+//! 而且结果逐块带框（中文一字一块、拉丁字母 / 数字串整词一块；Windows OCR 只到词）。引擎就在
+//! 用户装的微信里：本进程加载微信目录的 `mmmojo_64.dll`，由它拉起 weixin.exe 子进程
+//! （`--type=wxocr`，跑 XPlugin 解出来的 `wxocr.dll`）——一个字节都不随包带；没装微信或引擎
+//! 没起来，`capture_ocr` 回退 [ocr::recognize]（Windows OCR）。
 //!
 //! ## 协议
 //!
@@ -21,7 +21,8 @@
 //! - 请求：`ParseOCRReqMessage{task_id, pic_path, rt}` 以 kMMPush 发（request_id=`REQ_OCR`）。
 //!   **图片走文件路径**（子进程自己读）：选区先落临时 PNG，认完即删（[TempPng] 兜底）；
 //! - 响应：`RESP_OCR` 推回 `ParseOCRRespMessage{task_id, err_code, res{lines}}`，每行
-//!   text + 行框 + 逐字框，坐标是喂进去的图上的像素（浮点）。
+//!   text + 行框 + 逐块框（中文一字一块、拉丁字母 / 数字串整词一块），坐标是喂进去的图上的
+//!   像素（浮点）。
 //!
 //! ## 生命周期与线程
 //!
@@ -228,7 +229,7 @@ fn decode_supported(buf: &[u8]) -> bool {
     supported
 }
 
-/// 微信认出来的一行：文本 + 行框 + 逐字框（选区图上的像素）
+/// 微信认出来的一行：文本 + 行框 + 逐块框（中文一字、拉丁字母 / 数字串整词；选区图上的像素）
 struct WxLine {
     text: String,
     left: f32,
@@ -878,13 +879,28 @@ impl Drop for TempPng {
     }
 }
 
-/// 子序列对齐向前看的步数：块的字符在文本里隔这么远还找得到就当「中间的字缺框」
+/// 子序列对齐向前看的步数：块的文本在行文本里隔这么远还找得到就当「中间的字缺框」
 const ALIGN_LOOKAHEAD: usize = 4;
 
-/// 一行 → 逐字位。**line.text 是权威文本，字框只覆盖约八成的字**（实测 87 字的行只有 66 框，
-/// 且「文本去空白 == 字框拼接」一字不差）——按字符相等做子序列对齐：对上的字用真框，
-/// 缺框的字（含空格，块里没有空格框）夹在相邻两块之间插值出位。整行每个字都有位，
-/// 选中高亮才连得起来、复制才不丢字；两边认得不一样的以块为准（框是真像素）。
+/// 行文本的 `at` 起（含）最多 [ALIGN_LOOKAHEAD] 个字以内，找这一块的**整段文本**。
+/// 块里没有空格，所以「两块之间的空格」自然落进缺框那一段去插值。
+fn find_block(text: &[char], at: usize, block: &[char]) -> Option<usize> {
+    if block.is_empty() || at + block.len() > text.len() {
+        return None;
+    }
+    let last = (at + ALIGN_LOOKAHEAD).min(text.len() - block.len());
+    (at..=last).find(|&pos| text[pos..].starts_with(block))
+}
+
+/// 一行 → 逐字位。**line.text 是权威文本**（实测「文本去空白 == 块拼接」一字不差），
+/// 但**块不是一字一块**：中文一字一块，拉丁字母 / 数字串是**整词一块**（`ESLint`、`npm`、
+/// `v4.1`，块里没有空格），且块只覆盖约八成的字。按整块文本做子序列对齐：对上的块用真框，
+/// 缺框的字（含空格）夹在相邻两块之间插值出位 —— 整行每个字符都有位，选中高亮才连得起来、
+/// 复制才不丢字；两边认得不一样的以块为准（框是真像素）。
+///
+/// **匹配要按整段块文本、命中后文本指针一次前进块的字数**：只比首字符 + 前进一个字的话，
+/// 整词块一命中后面就全体错位，剩下的文本还会被当成「块用完了」再补一遍 —— 症状是复制出来的
+/// 字重复（「npm run build 均通过。」变成「npmrunbuild均通过。runbuild均通过。」）。
 fn line_words(line: &WxLine) -> Vec<OcrWord> {
     // 真框发位时**裁到下一块的左缘**：微信的四角框普遍比步进宽 2~5px（小字号外扩），
     // 不裁的话相邻选中底色叠两层，深浅斑驳 —— 高亮只需盖住笔画，笔画不会伸进下一个字
@@ -910,76 +926,59 @@ fn line_words(line: &WxLine) -> Vec<OcrWord> {
     let mut at = 0usize;
     let mut block = 0usize;
     while at < text_chars.len() {
-        let tc = text_chars[at];
-        // 在文本里向前找当前块的首字符：找到 → 中间的字缺框；找不到 → 两边认得不一样
-        let mut matched_at = None;
-        if let Some(next) = line.chars.get(block) {
-            let first = next.text.chars().next();
-            if first == Some(tc) {
-                matched_at = Some(at);
-            } else {
-                let window_end = (at + 1 + ALIGN_LOOKAHEAD).min(text_chars.len());
-                for (offset, other) in text_chars[at + 1..window_end].iter().enumerate() {
-                    if Some(*other) == first {
-                        matched_at = Some(at + 1 + offset);
-                        break;
+        let Some(current) = line.chars.get(block) else {
+            // 块用完了：剩下的文本按行框剩余宽度摊成一块
+            let rest: String =
+                text_chars[at..].iter().filter(|c| !c.is_whitespace()).collect();
+            let (x, y, h) = match words.last() {
+                Some(prev) => (prev.x + prev.w, prev.y, prev.h),
+                None => (f64::from(line.left), f64::from(line.top), line_height),
+            };
+            if !rest.is_empty() {
+                words.push(OcrWord {
+                    text: rest,
+                    x,
+                    y,
+                    w: (f64::from(line.right) - x).max(1.0),
+                    h,
+                });
+            }
+            break;
+        };
+        let block_chars: Vec<char> = current.text.chars().collect();
+        // 在文本里向前找这一块：找到 → 中间的字缺框；找不到 → 两边认得不一样
+        match find_block(&text_chars, at, &block_chars) {
+            Some(pos) => {
+                if pos > at {
+                    // [at, pos) 缺框：与当前块均分「上一已发位右缘 → 块左缘」这段区间
+                    let (run_left, height) = match words.last() {
+                        Some(prev) => (prev.x + prev.w, prev.h),
+                        None => (f64::from(line.left), line_height),
+                    };
+                    let run_right = f64::from(current.left);
+                    // 缺框的字把「上一已发位右缘 → 块左缘」整段分掉（真块有自己的框，不占这段），
+                    // 步进被 1px 下限撑出去时按区间右缘裁住，不许搭到真块上
+                    let step = ((run_right - run_left) / ((pos - at) as f64)).max(1.0);
+                    for (offset, missed) in text_chars[at..pos].iter().enumerate() {
+                        let x = run_left + step * offset as f64;
+                        words.push(OcrWord {
+                            text: missed.to_string(),
+                            x,
+                            y: f64::from(current.top),
+                            w: step.min((run_right - x).max(0.5)),
+                            h: height,
+                        });
                     }
                 }
-            }
-        }
-        match matched_at {
-            Some(pos) => {
-                // [at, pos) 缺框：与当前块均分「上一已发位右缘 → 块左缘」这段区间
-                let (run_left, height) = match words.last() {
-                    Some(prev) => (prev.x + prev.w, prev.h),
-                    None => (f64::from(line.left), line_height),
-                };
-                let run_right = f64::from(line.chars[block].left);
-                // 缺框的字把「上一已发位右缘 → 块左缘」整段分掉（真块有自己的框，不占这段），
-                // 步进被 1px 下限撑出去时按区间右缘裁住，不许搭到真块上
-                let step = ((run_right - run_left) / ((pos - at) as f64)).max(1.0);
-                for (offset, missed) in text_chars[at..pos].iter().enumerate() {
-                    let x = run_left + step * offset as f64;
-                    words.push(OcrWord {
-                        text: missed.to_string(),
-                        x,
-                        y: f64::from(line.chars[block].top),
-                        w: step.min((run_right - x).max(0.5)),
-                        h: height,
-                    });
-                }
-                words.push(block_word(&line.chars[block], line.chars.get(block + 1)));
-                at = pos + 1;
+                words.push(block_word(current, line.chars.get(block + 1)));
+                at = pos + block_chars.len();
                 block += 1;
             }
             None => {
-                match line.chars.get(block) {
-                    Some(word) => {
-                        // 块的字符在附近找不到（两边认得不一样）：块为准，文本这个字让位
-                        words.push(block_word(word, line.chars.get(block + 1)));
-                        block += 1;
-                        at += 1;
-                    }
-                    None => {
-                        // 块用完了：剩下的文本按行框剩余宽度摊成一块
-                        let rest: String =
-                            text_chars[at..].iter().filter(|c| !c.is_whitespace()).collect();
-                        let (x, y, h) = match words.last() {
-                            Some(prev) => (prev.x + prev.w, prev.y, prev.h),
-                            None => (f64::from(line.left), f64::from(line.top), line_height),
-                        };
-                        if !rest.is_empty() {
-                            words.push(OcrWord {
-                                text: rest,
-                                x,
-                                y,
-                                w: (f64::from(line.right) - x).max(1.0),
-                                h,
-                            });
-                        }
-                        at = text_chars.len();
-                    }
-                }
+                // 块的整段文本在附近找不到（两边认得不一样）：块为准，文本这个字让位
+                words.push(block_word(current, line.chars.get(block + 1)));
+                block += 1;
+                at += 1;
             }
         }
     }
@@ -1114,7 +1113,7 @@ mod tests {
         assert_eq!(version_key("abc"), None);
     }
 
-    /// 行对齐出逐字位：块按字符相等做子序列匹配，缺框的字（含空格）在相邻两块间插值，
+    /// 行对齐出逐字位：块按整段文本做子序列匹配，缺框的字（含空格）在相邻两块间插值，
     /// 整行每个文本字符都有位 —— 高亮才连续、复制才不丢字
     #[test]
     fn 行对齐出逐字位缺框的插值() {
@@ -1209,9 +1208,73 @@ mod tests {
         assert!((words[1].x - 14.1).abs() < 1e-4 && (words[1].w - 10.0).abs() < 1e-4);
     }
 
+    /// 块不是一字一块：中文一字一块，拉丁字母 / 数字串是**整词一块**（探针实测
+    /// 「ESLint和npm run build 均通过。」22 个非空格字符只有 9 块）。对齐要按整段块文本走、
+    /// 命中后指针一次前进块的字数 —— 只比首字符 + 前进一个字的话整行错位，
+    /// 剩下的文本会被当成「块用完了」再补一遍，复制出来就是重复字。
+    #[test]
+    fn 行对齐按整块文本走多字符块() {
+        let block = |text: &str, left: f32, right: f32| WxChar {
+            text: text.into(),
+            left,
+            top: 0.0,
+            right,
+            bottom: 12.0,
+        };
+        let line = WxLine {
+            text: "ESLint和npm run build 均通过。".into(),
+            left: 0.0,
+            top: 0.0,
+            right: 200.0,
+            bottom: 12.0,
+            chars: vec![
+                block("ESLint", 0.0, 42.0),
+                block("和", 43.0, 55.0),
+                block("npm", 61.0, 82.0),
+                block("run", 88.0, 109.0),
+                block("build", 115.0, 150.0),
+                block("均", 156.0, 168.0),
+                block("通", 168.0, 180.0),
+                block("过", 180.0, 192.0),
+                block("。", 192.0, 200.0),
+            ],
+        };
+        let words = line_words(&line);
+        let joined: String = words.iter().map(|word| word.text.as_str()).collect();
+        assert_eq!(joined, line.text, "整块对齐不许重复、不许丢空格");
+        // 9 个整词块 + 3 个插值出来的空格位
+        assert_eq!(words.len(), 12);
+        // 块与块之间的空格按缺框插值补回来
+        assert_eq!((words[3].text.as_str(), words[5].text.as_str(), words[7].text.as_str()), (" ", " ", " "));
+
+        // 数字串整块：「700mss」不能再多出「ss」
+        let line = WxLine {
+            text: "700mss".into(),
+            left: 0.0,
+            top: 0.0,
+            right: 60.0,
+            bottom: 12.0,
+            chars: vec![block("700", 0.0, 30.0), block("mss", 30.0, 60.0)],
+        };
+        let joined: String = line_words(&line).iter().map(|word| word.text.as_str()).collect();
+        assert_eq!(joined, "700mss");
+
+        // 两边认得不一样时仍是块为准（整块找不到 → 只让位一个字，剩下的进尾巴）
+        let line = WxLine {
+            text: "abcde".into(),
+            left: 0.0,
+            top: 0.0,
+            right: 60.0,
+            bottom: 12.0,
+            chars: vec![block("ab", 0.0, 20.0), block("x", 30.0, 40.0)],
+        };
+        let joined: String = line_words(&line).iter().map(|word| word.text.as_str()).collect();
+        assert_eq!(joined, "abxde");
+    }
+
     /// 手动探针：走一遍微信引擎（要装着微信 4.x 且解出过 wxocr.dll）
     /// `WXOCR_PROBE_IMAGE=<png> cargo test ... wechat_ocr_probe -- --ignored --nocapture`
-    /// 行 → wire：有字框逐字摆，没有就整行一框；行按 (y, x) 排阅读顺序
+    /// 行 → wire：有块逐块摆，没有就整行一框；行按 (y, x) 排阅读顺序
     #[test]
     fn 行映射成wire并按阅读顺序排() {
         let make = |text: &str, top: f32, left: f32| WxLine {
@@ -1269,6 +1332,9 @@ mod tests {
                 line.text
             );
             println!("  字框拼：{:?}", joined);
+            // 摆位后的文本：重复字 / 丢空格会直接露在这儿（复制走的就是这一份）
+            let wired_text: String = wired.iter().map(|word| word.text.as_str()).collect();
+            println!("  摆位文本：{:?}", wired_text);
             // 重叠检测：半透明选中底色叠两层就会更深，量出哪些位搭在一起
             for pair in wired.windows(2) {
                 let overlap = pair[0].x + pair[0].w - pair[1].x;

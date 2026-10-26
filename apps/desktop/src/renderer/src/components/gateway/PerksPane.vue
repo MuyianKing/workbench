@@ -51,7 +51,6 @@ const summary = ref<GatewayGrowthSummary>(emptySummary())
 const activity = ref<GatewayActivityRow[]>([])
 const taskLoading = ref(false)
 const running = ref<ActionKind | ''>('')
-const logs = ref<string[]>([])
 const loaded = ref(false)
 
 function emptySummary(): GatewayGrowthSummary {
@@ -223,13 +222,11 @@ async function runAction(kind: ActionKind): Promise<void> {
   running.value = kind
   try {
     if (kind === 'tasks') {
-      logs.value = []
       const result = await window.workbench.gatewayTasksRun(uid)
       if (!result.ok || !result.data) {
         ElMessage.error(result.error ?? '执行成长任务失败')
         return
       }
-      logs.value = result.data.logs
       ElMessage.success(`成长任务流水执行完成，共增加 +${result.data.creditAdded} 积分`)
       await Promise.all([loadActivity(), loadTasks()])
       emit('credits-refresh')
@@ -447,15 +444,6 @@ onMounted(() => {
             </template>
           </el-table-column>
         </GatewayTable>
-      </div>
-
-      <div v-if="logs.length || running === 'tasks'" class="perks__log">
-        <div v-if="!logs.length" class="perks__log-line is-dim">
-          正在启动全自动任务接取、事件上报与奖励领取流水…
-        </div>
-        <div v-for="(line, index) in logs" :key="index" class="perks__log-line">
-          {{ line }}
-        </div>
       </div>
     </section>
   </div>
@@ -724,27 +712,5 @@ onMounted(() => {
   to {
     transform: rotate(360deg);
   }
-}
-
-.perks__log {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  max-height: 240px;
-  padding: var(--sp-3) var(--sp-4);
-  overflow-y: auto;
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  background: var(--bg-inset);
-  font-family: var(--font-mono);
-  font-size: var(--gw-fs-micro);
-  line-height: 1.65;
-  color: var(--ink-2);
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.perks__log-line.is-dim {
-  color: var(--ink-3);
 }
 </style>

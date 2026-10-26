@@ -4,7 +4,7 @@
 //! 三个主机全部钉死在下面的常量里 —— 都是公开的只读行情 / 信息披露接口，
 //! **不需要凭据、不发任何用户内容**（请求串里只有日期、基金代码与页码）：
 //! 沪市份额 **上交所**（query.sse.com.cn，单日一份）、深市份额 **深交所**（www.szse.cn，
-//! 区间批量、分页）、单位净值 **天天基金**（fund.eastmoney.com，每只基金一份全历史脚本）。
+//! 按基金代码过滤、区间批量、分页）、单位净值 **天天基金**（fund.eastmoney.com，每只基金一份全历史脚本）。
 //! 渲染层拼不出地址：参数进地址前逐个校验形状（8 位日期、6 位基金代码、页码区间）。
 //!
 //! **职责分工与天气 / AI 热点一致**：这一层只取原始文本（JSON / 脚本不解析），
@@ -99,26 +99,32 @@ fn sse_path(stat_date: &str) -> String {
     )
 }
 
-/// 深市一段区间（≤ 6 个自然月）的基金每日规模，第 `page` 页。区间切批与翻页节奏由 TS 侧规划。
+/// 深市某只基金、一段区间（≤ 6 个自然月，服务端限制）的每日规模，第 `page` 页。
+/// `txtDm` 是报表的「代码或简称」过滤条件（页面上没露出输入框，接口认）：不给它，
+/// 一页 20 条的全市场表要翻几十页 —— 五年回填就是几万个请求。区间切批、每只的翻页
+/// 与请求间隔都由 TS 侧规划。
 #[tauri::command(async)]
-pub fn etf_fetch_szse(start: String, end: String, page: u32) -> Result<EtfFetchResult, String> {
+pub fn etf_fetch_szse(code: String, start: String, end: String, page: u32) -> Result<EtfFetchResult, String> {
     let txt_start = dashed_date(&start, "深市起始日期")?;
     let txt_end = dashed_date(&end, "深市截止日期")?;
+    if code.len() != 6 || !code.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Err(format!("基金代码得是 6 位数字：{code}"));
+    }
     if !(1..=500).contains(&page) {
         return Err(format!("页码越界：{page}"));
     }
     fetch(
         SZSE_HOST,
-        &szse_path(&txt_start, &txt_end, page),
+        &szse_path(&code, &txt_start, &txt_end, page),
         "https://www.szse.cn/market/fund/volume/etf/index.html",
     )
 }
 
-fn szse_path(txt_start: &str, txt_end: &str, page: u32) -> String {
+fn szse_path(code: &str, txt_start: &str, txt_end: &str, page: u32) -> String {
     // random 是深交所页面上带着的防缓存参数，给个定值即可
     format!(
         "/api/report/ShowReport/data?SHOWTYPE=JSON&CATALOGID=scsj_fund_jjgm&TABKEY=tab1\
-         &txtStart={txt_start}&txtEnd={txt_end}&jjlb=ETF&PAGENO={page}&random=0.618"
+         &txtDm={code}&txtStart={txt_start}&txtEnd={txt_end}&jjlb=ETF&PAGENO={page}&random=0.618"
     )
 }
 
@@ -151,12 +157,14 @@ mod tests {
     #[test]
     fn rejects_bad_params_before_building_paths() {
         assert!(etf_fetch_sse("2024-02-05".into()).is_err());
-        assert!(etf_fetch_szse("20240205".into(), "20240430".into(), 0).is_err());
-        assert!(etf_fetch_szse("20240205".into(), "20240430".into(), 501).is_err());
+        assert!(etf_fetch_szse("159919".into(), "20240205".into(), "20240430".into(), 0).is_err());
+        assert!(etf_fetch_szse("159919".into(), "20240205".into(), "20240430".into(), 501).is_err());
+        assert!(etf_fetch_szse("15991".into(), "20240205".into(), "20240430".into(), 1).is_err());
+        assert!(etf_fetch_szse("159919.html".into(), "20240205".into(), "20240430".into(), 1).is_err());
         assert!(etf_fetch_nav("51030".into()).is_err());
         assert!(etf_fetch_nav("510300.html".into()).is_err());
-        // 日期先于页码校验：日期坏了报的是日期那句
-        let err = etf_fetch_szse("bad".into(), "20240430".into(), 3).unwrap_err();
+        // 日期先于代码与页码校验：日期坏了报的是日期那句
+        let err = etf_fetch_szse("159919".into(), "bad".into(), "20240430".into(), 3).unwrap_err();
         assert!(err.contains("深市起始日期"));
     }
 
@@ -170,12 +178,13 @@ mod tests {
         assert!(path.contains("pageHelp.pageSize=10000"));
     }
 
-    /// 深市路径带区间、类别与页码（区间超长由 TS 侧切批，这里只管拼装）
+    /// 深市路径带代码过滤、区间、类别与页码（区间超长由 TS 侧切批，这里只管拼装）
     #[test]
-    fn szse_path_carries_range_and_page() {
-        let path = szse_path("2024-02-05", "2024-04-30", 3);
+    fn szse_path_carries_code_range_and_page() {
+        let path = szse_path("159919", "2024-02-05", "2024-04-30", 3);
         assert!(path.starts_with("/api/report/ShowReport/data?"));
         assert!(path.contains("CATALOGID=scsj_fund_jjgm"));
+        assert!(path.contains("txtDm=159919"));
         assert!(path.contains("txtStart=2024-02-05"));
         assert!(path.contains("txtEnd=2024-04-30"));
         assert!(path.contains("jjlb=ETF"));

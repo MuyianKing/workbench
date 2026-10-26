@@ -7,7 +7,7 @@ import type { EtfCache, EtfOverview } from '@workbench/etf'
  * 策略全在 `packages/etf/src/etf.ts`（解析、合并、窗口计算），这里只做「读缓存 → 规划缺口 →
  * 拉取 → 合并 → 落盘 → 出视图」的编排：
  *
- * - **深市先行**（区间批量，快）：从五年前回填起点拉到今天，拉完就能出完整序列；
+ * - **深市先行**（按代码过滤、区间批量）：从五年前回填起点拉到今天，拉完就能出完整序列；
  * - **沪市逐日**：一天一个请求，串行小间隔（交易所的接口别连打）；进度记在 `sseDone`，
  *   **断点续传** —— 中断后下次从推进到的下一天继续；
  * - **净值**：一只一份全历史，超过 5 天没更新才重拉，日常刷新零请求。
@@ -54,6 +54,8 @@ export interface EtfRefreshOutcome {
 
 /** 沪市逐日请求之间的间隔：交易所的接口，别连打 */
 const SSE_GAP_MS = 150
+/** 深市逐只、逐页请求之间的间隔（同一个交易所，同一口径） */
+const SZSE_GAP_MS = 150
 /** 同一个请求的重试：偶发抖动不该让整轮回填停下来 */
 const RETRIES = 2
 const RETRY_GAP_MS = 1200
@@ -139,9 +141,11 @@ async function refreshNavs(cache: EtfCache, staleBefore: string, onProgress: (p:
 }
 
 /**
- * 深市份额：从「回填起点（或已推进到的下一天）」到今天按 ≤150 天切批，逐批翻页。
- * 批内按页全收齐才合并（半批合并会留洞）；一批失败就停在这里 ——
- * 已成功的批照留，下次刷新从已推进到的位置接着来，断点续传。
+ * 深市份额：报表的「代码或简称」过滤（`txtDm`）只认单个代码，所以按「区间 → 标的」拉：
+ * 区间 ≤150 天（接口自身限 6 个月），一只一页 20 个交易日 —— 五年回填八只加起来几百个请求，
+ * 比不带过滤地翻全市场（一天 39 页、前后几万个请求）小两个数量级。
+ * 一个区间内八只全收齐才合并（半批合并会留洞）；失败就停在这里，已成功的区间照留，
+ * 下次刷新从已推进到的位置接着来，断点续传。
  */
 async function refreshSzse(cache: EtfCache, today: string, onProgress: (p: EtfProgress) => void, notes: string[]): Promise<boolean> {
   const covered = szseCoveredThrough(cache)
@@ -149,22 +153,30 @@ async function refreshSzse(cache: EtfCache, today: string, onProgress: (p: EtfPr
   const ranges = planSzseRanges(start, today)
   if (ranges.length === 0)
     return false
-  onProgress({ phase: 'szse', done: 0, total: ranges.length })
+  const codes = ETF_TARGETS.filter(target => target.market === 'sz')
+  const total = ranges.length * codes.length
+  onProgress({ phase: 'szse', done: 0, total })
   let changed = false
-  for (let i = 0; i < ranges.length; i++) {
-    const { start: rangeStart, end } = ranges[i]
+  let done = 0
+  for (const { start: rangeStart, end } of ranges) {
     try {
       const merged: Record<string, Record<string, number>> = {}
-      for (let page = 1; ; page++) {
-        const parsed = parseSzseShares(await fetchBody('etf_fetch_szse', { start: rangeStart, end, page }))
-        if (!parsed)
-          throw new Error('回包不是预期的结构')
-        for (const [date, values] of Object.entries(parsed.days))
-          merged[date] = { ...(merged[date] ?? {}), ...values }
-        // 服务端声明了页数就按页数收尾；没声明就翻到空页为止
-        const pages = parsed.pages > 0 ? parsed.pages : page + 1
-        if (page >= pages || Object.keys(parsed.days).length === 0)
-          break
+      for (const { code } of codes) {
+        for (let page = 1; ; page++) {
+          const parsed = parseSzseShares(await fetchBody('etf_fetch_szse', { code, start: rangeStart, end, page }))
+          if (!parsed)
+            throw new Error(`${code} 的回包不是预期的结构`)
+          for (const [date, values] of Object.entries(parsed.days))
+            merged[date] = { ...(merged[date] ?? {}), ...values }
+          // 服务端声明了页数就按页数收尾；没声明就翻到空页为止（这页没有目标代码不算空页）
+          const pages = parsed.pages > 0 ? parsed.pages : page + 1
+          if (page >= pages || parsed.rows === 0)
+            break
+          await sleep(SZSE_GAP_MS)
+        }
+        done++
+        onProgress({ phase: 'szse', done, total })
+        await sleep(SZSE_GAP_MS)
       }
       for (const [date, values] of Object.entries(merged))
         mergeSharesInto(cache, date, values)
@@ -174,7 +186,6 @@ async function refreshSzse(cache: EtfCache, today: string, onProgress: (p: EtfPr
       notes.push(`深市份额（${rangeStart} ~ ${end}）没拉全：${errorText(error, '取数失败')}`)
       break
     }
-    onProgress({ phase: 'szse', done: i + 1, total: ranges.length })
   }
   return changed
 }

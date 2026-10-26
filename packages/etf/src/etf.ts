@@ -21,7 +21,7 @@ export interface EtfTarget {
 }
 
 /**
- * 标的清单：汇金 2025 年报持仓里的主要宽基（沪 14 只 + 深 9 只）。
+ * 标的清单：汇金 2025 年报持仓里的主要宽基（沪 15 只 + 深 8 只）。
  * 换名单只改这里；解析与收敛都按 `etfTargetOf` 过滤，不在此列的代码进不了缓存。
  */
 export const ETF_TARGETS: readonly EtfTarget[] = [
@@ -174,22 +174,58 @@ export function parseSseShares(body: string): Record<string, number> | null {
       continue
     if (!Number.isFinite(volume) || volume <= 0)
       continue
-    values[code] = volume * 10000
+    values[code] = Math.round(volume * 10000)
   }
   return values
 }
 
-/** 深交所「基金每日规模」JSON 的解析结论：按日合并的份额 + 分页总数 */
+/** 深交所「基金每日规模」JSON 的解析结论：按日合并的份额 + 分页数 + 本页行数 */
 export interface SzseParseResult {
   days: Record<string, Record<string, number>>
   /** 服务端声明的总页数；0 = 没声明（调用方用「空页」判定收尾） */
   pages: number
+  /** 这一页的数据行数：用来区分「翻到空页」与「这页没有目标代码」—— 后者不能当收尾 */
+  rows: number
+}
+
+/** 行键 → 语义。深交所现在的回包是英文键，旧样本里的中文列名一并认（键名随栏目配置漂移） */
+function szseFieldOf(key: string): 'code' | 'share' | 'date' | null {
+  if (key === 'fund_code' || key.includes('代码'))
+    return 'code'
+  if (key === 'current_size' || key.includes('规模'))
+    return 'share'
+  if (key === 'size_date' || key.includes('日期'))
+    return 'date'
+  return null
+}
+
+/**
+ * 份额列的倍数：现在的列是「基金规模(万份)」（`current_size`，值如 998,751.66），
+ * 要乘回 10000 才是份；带「份」字样的旧键本来就已经是份。
+ */
+function szseShareScale(key: string): number {
+  return key === 'current_size' || key.includes('万份') ? 1e4 : 1
+}
+
+/** 页数：可能挂在 Sheet 顶层（旧样本），也可能在 `metadata` 里（现在的回包是后者） */
+function szsePageCount(sheet: Record<string, unknown>): number {
+  let pages = 0
+  const holders = [sheet, sheet.metadata].filter(
+    holder => holder !== null && typeof holder === 'object',
+  ) as Record<string, unknown>[]
+  for (const holder of holders) {
+    for (const [key, value] of Object.entries(holder)) {
+      if (/page/i.test(key) && !/size/i.test(key) && typeof value === 'number' && value > pages)
+        pages = Math.floor(value)
+    }
+  }
+  return pages
 }
 
 /**
  * 深交所 ShowReport JSON → 日期 → 代码 → 份额（份）。
- * 行对象的键是中文列名（随栏目配置漂移），这里按「含『代码』/『规模』/『日期』」宽松认键，
- * 千分位逗号（中英文都见得到）先剥掉再转数。只留名单里的深市代码。
+ * 行键按 `szseFieldOf` 认（英文 `size_date` / `fund_code` / `current_size` 与中文列名都行），
+ * 千分位逗号（中英文都见得到）先剥掉再转数，份额按列单位折成份。只留名单里的深市代码。
  * 返回 `null` = 回包不是预期结构。
  */
 export function parseSzseShares(body: string): SzseParseResult | null {
@@ -215,14 +251,20 @@ export function parseSzseShares(body: string): SzseParseResult | null {
       continue
     let code = ''
     let share = Number.NaN
+    let scale = 1
     let date = ''
     for (const [key, value] of Object.entries(row as Record<string, unknown>)) {
-      if (key.includes('代码'))
+      const field = szseFieldOf(key)
+      if (field === 'code') {
         code = String(value).replace(/\D/g, '')
-      else if (key.includes('规模'))
+      }
+      else if (field === 'share') {
         share = Number.parseFloat(String(value).replace(/[,，\s]/g, ''))
-      else if (key.includes('日期'))
+        scale = szseShareScale(key)
+      }
+      else if (field === 'date') {
         date = String(value).replace(/\D/g, '')
+      }
     }
     if (!code || !isDateKey(date))
       continue
@@ -231,17 +273,11 @@ export function parseSzseShares(body: string): SzseParseResult | null {
     if (!Number.isFinite(share) || share <= 0)
       continue
     const day = days[date] ?? {}
-    day[code] = share
+    day[code] = Math.round(share * scale)
     days[date] = day
   }
 
-  // 分页数：Sheet 对象上带一个数值型的页数字段（键名见过 PagesCount / pagecount 几种写法）
-  let pages = 0
-  for (const [key, value] of Object.entries(sheet ?? {})) {
-    if (/page/i.test(key) && !/size/i.test(key) && typeof value === 'number' && value > pages)
-      pages = Math.floor(value)
-  }
-  return { days, pages }
+  return { days, pages: szsePageCount(sheet ?? {}), rows: rows.length }
 }
 
 /**
