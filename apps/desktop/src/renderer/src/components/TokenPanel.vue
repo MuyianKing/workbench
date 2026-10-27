@@ -20,8 +20,8 @@ import { axisTotal, bucketRangeOf, buildSeriesRange, emptyCounters, flattenSourc
  * 占比默认统计整个窗口(全部);点击某根柱子则把占比切到那个桶(那天/那周/那月),再点一下回到全部。
  *
  * 数据是主进程「实读 + max 合并进快照」后的结果,这里不做任何持久化,只拉取与展示:
- * 挂载时**先出本地那份快照**、再实读覆盖它(boot),之后每分钟刷新(与主进程的落盘节奏一致,
- * 轮询只在首页可见时跑 —— 见 startPolling),
+ * 挂载时**先出本地那份快照**、再实读覆盖它(boot),之后每分钟刷新(轮询只在首页可见时跑,
+ * 切回来会立刻补读一次 —— 见 startPolling 与 onActivated),
  * 「⋯」外还有标题栏右侧的手动刷新按钮(与系统状态卡片同款)。后台的自动同步跑完还会广播一次,
  * 收到也重取 —— 同步不挡出数,别的机器的新数据靠这一下补上。
  * 缓存读取通常占九成以上,构成拆分收在悬停里,总量数字才不会因缓存命中波动而误导。
@@ -155,7 +155,18 @@ function stopPolling(): void {
   unsubscribe = null
 }
 
-onActivated(startPolling)
+/**
+ * 切回首页时立刻补读一次，不必等下一个轮询整点。
+ *
+ * 停表那段时间里跑完的请求，等回来之后最长要再等 60 秒才看得见 —— 明明刚用过，
+ * 切回来却还是旧数字，看着就像刷新很慢。首次激活时 boot 还在跑（快照 → 实读），
+ * 用 readOnce 把它让过去：插进去的同时发一条实读，先到的快照会盖掉后到的实读结果（数字往回缩）。
+ */
+onActivated(() => {
+  if (readOnce.value)
+    void refresh()
+  startPolling()
+})
 onDeactivated(stopPolling)
 onBeforeUnmount(stopPolling)
 

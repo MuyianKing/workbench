@@ -767,10 +767,11 @@ onBeforeUnmount(() => {
 }
 
 /**
- * 请求栏与模型栏例外：它们自己撑满剩下的高度，表格在卡片里滚、表头钉住
- * （这两栏的根节点都给了 min-height: 0）。
+ * 请求栏、福利栏与模型栏例外：它们自己撑满剩下的高度，表格在卡片里滚、表头钉住
+ * （这几栏的根节点都给了 min-height: 0）。
  */
 .gw > :deep(.req),
+.gw > :deep(.perks),
 .gw > :deep(.models) {
   flex: 1 1 auto;
 }

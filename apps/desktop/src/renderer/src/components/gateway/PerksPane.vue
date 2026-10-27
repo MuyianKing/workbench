@@ -450,17 +450,20 @@ onMounted(() => {
 </template>
 
 <style scoped>
+/* 整栏撑满页签下面剩下的高度（增长由 GatewayView 给），表格才能吃到窗口底部 */
 .perks {
   display: flex;
   flex-direction: column;
   gap: var(--sp-5);
-  flex: none;
+  min-height: 0;
   font-size: var(--gw-fs-body);
 }
 
 /* 每一段是一张完整的面板：标题、动作、数字与表格都在同一张卡里，
    不再把标题直接摆在壁纸上（那样它和下面的玻璃卡是两个层级）。 */
 .panel.perks__section {
+  flex: 1 1 auto;
+  min-height: 0;
   gap: var(--sp-3);
   padding-bottom: var(--sp-4);
 }
@@ -471,6 +474,7 @@ onMounted(() => {
   justify-content: space-between;
   gap: var(--sp-3);
   flex-wrap: wrap;
+  flex: none;
 }
 
 .perks__head-text {
@@ -505,6 +509,7 @@ onMounted(() => {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
   gap: var(--sp-3);
+  flex: none;
 }
 
 .perks__cell {
@@ -612,6 +617,7 @@ onMounted(() => {
   justify-content: space-between;
   gap: var(--sp-2);
   margin-top: var(--sp-1);
+  flex: none;
 }
 
 .perks__subhead h4 {
@@ -626,13 +632,14 @@ onMounted(() => {
   color: var(--ink-3);
 }
 
-/* 表格区域定高：表头钉住、表体在卡片里滚，高度必须在这一处定死
-   （用 max-height 会让 EP 把布局切成 fixed，列宽就不再跟内容走）。
+/* 表格填满面板剩下的高度（窗口多高就多高，不写死档位）：表头钉住、表体在卡片里滚。
+   高度由外层 flex 链给出 —— 这一栏与这张面板都撑满剩余高度，所以这里的 `height: 100%`
+   有确定的参照；**不要改用 max-height**（EP 会把布局切成 fixed，列宽就不再跟内容走）。
    表与空态都是这一格的子项，都由它们自己填满。 */
 .perks__table-wrap {
   display: flex;
   flex-direction: column;
-  height: clamp(320px, 52vh, 620px);
+  flex: 1 1 auto;
   min-height: 0;
 }
 
