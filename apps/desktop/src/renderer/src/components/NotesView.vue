@@ -622,8 +622,13 @@ function syncDoneText(summary: NoteSyncSummary): string {
 }
 
 /**
- * 只读那一档的标记：与知识库信息面板里那种小片同一副样子（浅底 + 小圆角），
- * 只是**一行纯字** —— 标题这一行是 `align-items: baseline` 的，里面放图标就得去猜
+ * 只读那一档的标记：**实心深片**（墨底反白字；暗色下两个令牌互换，反成亮片深字）。
+ * 它是一档模式徽章、不是普通的信息小片：默认档几乎一直挂在标题行里，浅底那副
+ * （知识库信息面板小片的同款）压不出存在感 —— 得一眼能找到它、也一眼能看出
+ * 「现在打不了字是因为它」。首页看板行那颗模式片需要打眼时也是切实心
+ * （`.board-row__mode`），同一副处理。
+ *
+ * 仍是**一行纯字** —— 标题这一行是 `align-items: baseline` 的，里面放图标就得去猜
  * 那颗 svg 的基线落在哪儿（多半会把整片顶高、看着比旁边那行字浮起来）。
  *
  * 高度按标题那一档字号的自然行盒算（18px 行高，比标题的 22px 矮）：
@@ -639,10 +644,10 @@ function syncDoneText(summary: NoteSyncSummary): string {
   flex-shrink: 0;
   padding: 0 var(--sp-2);
   border-radius: var(--r-sm);
-  background: var(--bg-inset);
+  background: var(--ink);
   font-size: var(--fs-meta);
   line-height: 18px;
-  color: var(--ink-2);
+  color: var(--ink-inverse);
 }
 
 .notes__saved.is-error {
