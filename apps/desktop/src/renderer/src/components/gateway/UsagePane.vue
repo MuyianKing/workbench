@@ -21,16 +21,34 @@ import GatewayTable from './GatewayTable.vue'
  *
  * 时序图固定看**最近 24 小时**（逐小时，带纵轴）：页面顶上的时间范围只管 KPI 与明细表，
  * 不再决定图表的粒度 —— 两者回答的不是同一个问题（「这段时间一共多少」vs「最近这一天的节奏」）。
- * 时间范围按**自然日**算（UTC+8 零点起）：`今日` = 今天 0 点到现在，`近 3 天` = 今天加前两天。
- * 取回的行会盖住最近 24 小时（图要用），统计前按 `since` 再裁一次。
+ * 时间范围按**自然日**算（UTC+8 零点起）：`今日` = 今天 0 点到现在，`昨日` = 昨天一整天，
+ * `近 3 天` = 今天加前两天。取回的行会盖住最近 24 小时（图要用），统计前按 `since` 再裁一次。
  *
  * 所有数字来自 Rust 的 `wb_gateway_usage`，这一页只做格式化。
  */
-const RANGES = [
-  { label: '今日', value: 1 },
-  { label: '近 3 天', value: 3 },
-  { label: '近 7 天', value: 7 },
-  { label: '近 30 天', value: 30 },
+
+/** 一天的秒数：`since` 一定是自然日零点，加它正好是次日零点 */
+const DAY_SECONDS = 86_400
+
+interface RangeOption {
+  label: string
+  value: string
+  /** 传给 Rust 的窗口天数（从今天零点往前数，含今天） */
+  days: number
+  /** 「昨日」：窗口取两天（昨天 + 今天），统计前把今天那一段裁掉 */
+  previousDay?: boolean
+}
+
+/**
+ * 时间范围。Rust 只认「从今天零点往前数 N 天」这一种窗口，所以「昨日」取 `days = 2`，
+ * 再用 `previousDay` 把今天裁掉（上界是 `since` 加一整天）。
+ */
+const RANGES: RangeOption[] = [
+  { label: '今日', value: 'today', days: 1 },
+  { label: '昨日', value: 'yesterday', days: 2, previousDay: true },
+  { label: '近 3 天', value: 'last3', days: 3 },
+  { label: '近 7 天', value: 'last7', days: 7 },
+  { label: '近 30 天', value: 'last30', days: 30 },
 ]
 const DIMENSIONS = [
   { label: '按账号', value: 'account' },
@@ -38,7 +56,7 @@ const DIMENSIONS = [
 ]
 
 /** 默认「今日」：进页面先看当天，要更长的窗口再手动切 */
-const days = ref(1)
+const rangeKey = ref('today')
 /** 明细表唯一的维度切换：用量列与积分列一起切，不再各留一个 */
 const dimension = ref<'account' | 'model'>('account')
 const summary = ref<GatewayUsageSummary | null>(null)
@@ -211,16 +229,19 @@ function nameOf(uid: string): string {
 }
 
 function load(): void {
+  const range = RANGES.find(item => item.value === rangeKey.value) ?? RANGES[0]
   loading.value = true
-  void window.workbench.gatewayUsageRows(days.value).then((result) => {
+  void window.workbench.gatewayUsageRows(range.days).then((result) => {
     if (result.ok && result.data) {
       // Rust 只取数：分组 / 分桶 / 比率的口径在 @workbench/usage。
-      // 取回来的行盖住了最近 24 小时（图表要用），统计只算 `since` 之后的那一段。
+      // 取回来的行盖住了最近 24 小时（图表要用），统计只算 `since` 之后的那一段；
+      // 「昨日」取的是昨天 + 今天两天，上界再收在 `since` 加一天（今天零点）。
       const { since, rows: fetched } = result.data
+      const until = range.previousDay ? since + DAY_SECONDS : Number.POSITIVE_INFINITY
       rows.value = fetched
       summary.value = summarizeGatewayRows(
-        fetched.filter(row => row.ts >= since),
-        gatewayBucketUnit(days.value),
+        fetched.filter(row => row.ts >= since && row.ts < until),
+        gatewayBucketUnit(range.days),
       )
       loadError.value = ''
     }
@@ -284,7 +305,7 @@ onBeforeUnmount(() => {
   <div class="usage">
     <div class="panel usage__head">
       <div class="panel__head">
-        <el-segmented v-model="days" :options="RANGES" size="small" @change="load" />
+        <el-segmented v-model="rangeKey" :options="RANGES" size="small" @change="load" />
       </div>
       <p v-if="loadError" class="usage__error">
         {{ loadError }}

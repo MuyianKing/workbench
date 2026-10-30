@@ -4,6 +4,7 @@ import type {
   GatewayActionResult,
   GatewayActivityRow,
   GatewayCredits,
+  GatewayGrantAccount,
   GatewayGrowthSummary,
   GatewayGrowthTask,
   GatewayTaskAccount,
@@ -18,20 +19,24 @@ import {
   Ticket,
   Trophy,
 } from '@element-plus/icons-vue'
+import { dailyGrowthCredits, isGrowthPerkPackage } from '@workbench/usage'
 import { ElMessage } from 'element-plus'
 import { computed, onMounted, ref } from 'vue'
 import EmptyState from '@/components/EmptyState.vue'
 import GatewayTable from './GatewayTable.vue'
+import PerksCreditsChart from './PerksCreditsChart.vue'
 
 /**
  * 任务福利栏。
  *
  * 口径来自 workbuddy2api-hub 的「任务与福利」页：成长任务 / 签到 / 猫猫旅行 /
- * 连登管家。与参考项目的差别只有「什么时候去要数据」——这里只在**进这一栏、
- * 切账号、点按钮**时取一次，没有定时器；每个动作都是用户点出来的一次真实上游请求。
+ * 连登管家，外加近一个月的积分柱状图（积分包流水）。与参考项目的差别只有
+ * 「什么时候去要数据」——这里只在**进这一栏、切账号、点按钮**时取一次，没有定时器；
+ * 每个动作都是用户点出来的一次真实上游请求。
  *
  * 这一栏自己不查余额：积分总额取父组件已经查过的快照（`credits`），动作做完由
- * 这一栏发 `credits-refresh` 让父组件重查一遍。这样进这一栏不会多打 N 次上游。
+ * 这一栏发 `credits-refresh` 让父组件重查一遍。这样进这一栏不会为了数字格多打
+ * N 次余额查询；柱状图读的是积分流水（每个号一次只读 POST）。
  */
 const props = defineProps<{
   accounts: GatewayAccount[]
@@ -52,6 +57,11 @@ const activity = ref<GatewayActivityRow[]>([])
 const taskLoading = ref(false)
 const running = ref<ActionKind | ''>('')
 const loaded = ref(false)
+const grants = ref<GatewayGrantAccount[]>([])
+const grantsLoading = ref(false)
+const grantsError = ref('')
+/** 积分流水的请求序号：切账号切得快时只认最后一次的结果 */
+let grantsSeq = 0
 
 function emptySummary(): GatewayGrowthSummary {
   return {
@@ -113,10 +123,9 @@ const catState = computed(() => {
   return { text: '未知', tone: 'is-muted' }
 })
 
-/** 福利积分：看发放原因里的「签到 / 成长 / 活动 / 裂变」 */
+/** 福利积分：与柱状图同一条口径（发放来源 / 包名 / 发放原因，见 @workbench/usage） */
 function isPerk(pkg: GatewayCredits['packages'][number]): boolean {
-  const reason = pkg.grantReason ?? ''
-  return ['签到', '成长', '活动', '裂变'].some(word => reason.includes(word)) || pkg.name.includes('裂变')
+  return isGrowthPerkPackage({ source: pkg.grantSource, name: pkg.name, reason: pkg.grantReason })
 }
 
 function perkTotal(list: GatewayAccount[], pick: (pkg: GatewayCredits['packages'][number]) => boolean): number | null {
@@ -136,6 +145,16 @@ function perkTotal(list: GatewayAccount[], pick: (pkg: GatewayCredits['packages'
 }
 
 const granted = computed(() => perkTotal(scope.value, isPerk))
+
+/** 柱状图：当前范围内的积分发放按发放日相加，只留最近 30 天（含今天） */
+const creditDays = computed(() => dailyGrowthCredits(grants.value, 30))
+const creditTotal = computed(() => creditDays.value.reduce((sum, day) => sum + day.credit, 0))
+const creditFailed = computed(() => grants.value.filter(item => item.error).length)
+const scopeLabel = computed(() => {
+  if (selected.value === 'all')
+    return '全部账号合计'
+  return accounts.value.find(item => item.uid === selected.value)?.label ?? '当前账号'
+})
 
 function fmt(value: number): string {
   return value.toLocaleString('en-US', { maximumFractionDigits: 2 })
@@ -182,6 +201,42 @@ async function loadActivity(): Promise<void> {
     activity.value = result.data
 }
 
+/**
+ * 读当前范围的积分流水。选「全部账号」时后端逐个已启用账号各读一次（只读 POST），
+ * 界面按发放日相加；某个号失败只让它自己那条带 `error`，整张图照样画。
+ */
+async function loadGrants(): Promise<void> {
+  const seq = ++grantsSeq
+  if (!accounts.value.length) {
+    grants.value = []
+    grantsError.value = ''
+    grantsLoading.value = false
+    return
+  }
+  grantsLoading.value = true
+  try {
+    const result = await window.workbench.gatewayCreditGrants(
+      selected.value === 'all' ? undefined : selected.value,
+    )
+    if (seq !== grantsSeq)
+      return
+    if (!result.ok || !result.data) {
+      grants.value = []
+      grantsError.value = result.error ?? '读取积分流水失败'
+      return
+    }
+    grants.value = result.data
+    // 全都失败时不能显示「还没有获得积分」：那是在拿「没读到」冒充「没有」
+    grantsError.value = result.data.length > 0 && result.data.every(item => item.error)
+      ? result.data.find(item => item.error)?.error ?? '读取积分流水失败'
+      : ''
+  }
+  finally {
+    if (seq === grantsSeq)
+      grantsLoading.value = false
+  }
+}
+
 async function loadTasks(): Promise<void> {
   if (!accounts.value.length) {
     taskAccounts.value = []
@@ -211,7 +266,7 @@ async function loadTasks(): Promise<void> {
 }
 
 async function switchAccount(): Promise<void> {
-  await loadTasks()
+  await Promise.all([loadTasks(), loadGrants()])
 }
 
 async function runAction(kind: ActionKind): Promise<void> {
@@ -228,7 +283,7 @@ async function runAction(kind: ActionKind): Promise<void> {
         return
       }
       ElMessage.success(`成长任务流水执行完成，共增加 +${result.data.creditAdded} 积分`)
-      await Promise.all([loadActivity(), loadTasks()])
+      await Promise.all([loadActivity(), loadTasks(), loadGrants()])
       emit('credits-refresh')
       return
     }
@@ -248,7 +303,7 @@ async function runAction(kind: ActionKind): Promise<void> {
       ElMessage.success(text)
     else
       ElMessage.warning(text)
-    await Promise.all([loadActivity(), loadTasks()])
+    await Promise.all([loadActivity(), loadTasks(), loadGrants()])
     emit('credits-refresh')
   }
   finally {
@@ -259,6 +314,7 @@ async function runAction(kind: ActionKind): Promise<void> {
 onMounted(() => {
   void loadActivity()
   void loadTasks()
+  void loadGrants()
 })
 </script>
 
@@ -392,6 +448,16 @@ onMounted(() => {
           </div>
         </div>
       </div>
+
+      <PerksCreditsChart
+        v-if="accounts.length"
+        :days="creditDays"
+        :total="creditTotal"
+        :scope="scopeLabel"
+        :failed="creditFailed"
+        :loading="grantsLoading"
+        :error="grantsError"
+      />
 
       <div class="perks__subhead">
         <h4>成长任务</h4>

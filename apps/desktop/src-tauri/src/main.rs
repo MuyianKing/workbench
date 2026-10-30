@@ -724,6 +724,7 @@ fn main() {
             wb_gateway::wb_gateway_tasks_streak,
             wb_gateway::wb_gateway_checkin,
             wb_gateway::wb_gateway_activity_today,
+            wb_gateway::wb_gateway_credit_grants,
             ball::ball_apply,
             ball::ball_context,
             ball::ball_open,

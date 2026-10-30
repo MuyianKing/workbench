@@ -690,7 +690,8 @@ onBeforeUnmount(() => {
         </div>
       </section>
 
-      <!-- 右下角：刷新积分 + 登录。页面数据走 15 秒轮询，不再放手动键 -->
+      <!-- 页面右下角：刷新积分 + 登录（用 sticky 钉在页面可视区里，终端展开时跟着上移）。
+           页面数据走 15 秒轮询，不再放手动键 -->
       <div class="gw__fab">
         <el-tooltip content="刷新积分" placement="top">
           <button
@@ -1283,10 +1284,25 @@ onBeforeUnmount(() => {
 
 /* ---------- 右下角悬浮动作 ---------- */
 
+/*
+ * 钉在**页面**右下角，不是窗口右下角。
+ *
+ * 用 sticky 而不是 fixed：它属于「账号」栏，只该浮在这一页自己的可视区里。
+ * 终端面板是内容列里的一行 —— 展开后页面变矮，fixed 会照旧贴在窗口底边、
+ * 正落在终端面板身上（还被面板的暗底衬出来）；sticky 约束在滚动容器（.gw）内部，
+ * 页面可视区一矮它就跟着上移到面板上沿，永远不会压在终端上。
+ * 内容不满一屏时靠 margin-top: auto 压到底（没有可滚的余量时 sticky 不生效）。
+ *
+ * 那几处 sp-5 - sp-3：sticky 的 bottom 与下面的外边距都从滚动容器的**内容盒**量起，
+ * 而 .gw 自己有一圈 sp-3 内边距 —— 各减掉这圈，落地才是离页面边 sp-5（与原先贴窗口时一致）。
+ */
 .gw__fab {
-  position: fixed;
-  right: var(--sp-5);
-  bottom: var(--sp-5);
+  position: sticky;
+  bottom: calc(var(--sp-5) - var(--sp-3));
+  margin-top: auto;
+  margin-right: calc(var(--sp-5) - var(--sp-3));
+  margin-bottom: calc(var(--sp-5) - var(--sp-3));
+  align-self: flex-end;
   z-index: 30;
   display: flex;
   align-items: flex-end;

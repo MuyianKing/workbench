@@ -690,6 +690,17 @@ pub struct TaskRun {
     pub credit_added: i64,
 }
 
+/// 一个账号的积分发放流水（界面上按发放日汇总成近一个月）。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GrantAccount {
+    pub uid: String,
+    pub nickname: String,
+    pub grants: Vec<crate::wb_credits::Grant>,
+    /// 这次没读到时的原因；空串表示读到了
+    pub error: String,
+}
+
 /// 签到 / 每日活跃 / 猫猫旅行 / 连登管家：每个号一条结果。
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -796,6 +807,53 @@ pub fn wb_gateway_tasks(
         accounts,
         msg: String::new(),
     })
+}
+
+/// 积分发放流水：福利页那张「近一个月每天积分」的柱状图。
+///
+/// `uid` 为空 / `all` 时取全部已启用的号，界面按发放日相加；每个号一次只读 POST。
+/// 某个号失败只把 `error` 填上，其余账号照常返回 —— 一个号的 token 过期不该把整张图清空。
+/// 整段包历史原样回去，裁最近 30 天是界面那一层的事（与用量流水的分工一致）。
+#[tauri::command(async)]
+pub fn wb_gateway_credit_grants(
+    state: tauri::State<'_, Gateway>,
+    uid: Option<String>,
+) -> Result<Vec<GrantAccount>, String> {
+    let targets = targets_of(snapshot_accounts(&state)?, uid.as_deref());
+    if targets.is_empty() {
+        return Err("未找到已启用的账号".into());
+    }
+
+    let mut rows = Vec::new();
+    for mut account in targets {
+        let mut error = String::new();
+        match refresh_if_needed(&mut account) {
+            Ok(refreshed) => {
+                if refreshed {
+                    persist_tokens(&state, &account);
+                }
+            }
+            Err(message) => error = format!("续期失败：{message}"),
+        }
+        let grants = if error.is_empty() {
+            match crate::wb_api_billing::fetch_credit_grants(&account) {
+                Ok(grants) => grants,
+                Err(message) => {
+                    error = message;
+                    Vec::new()
+                }
+            }
+        } else {
+            Vec::new()
+        };
+        rows.push(GrantAccount {
+            uid: account.uid.clone(),
+            nickname: account.label(),
+            grants,
+            error,
+        });
+    }
+    Ok(rows)
 }
 
 /// 一键做任务领积分。`uid` 为空 / `all` 时对全部已启用的国内账号逐个跑。

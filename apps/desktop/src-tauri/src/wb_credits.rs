@@ -25,6 +25,9 @@ pub struct Package {
     /// 发放原因（`AccountAttributes` 里的 `grantReason`）。福利页按它筛「签到 / 成长 / 活动」
     /// 那几类包；上游没给就是空串，不拿包名去猜。
     pub grant_reason: String,
+    /// 发放来源（`AccountAttributes` 里的 `grantSource`：`daily_checkin` / `growth_task_*` /
+    /// `growth_travel`…）。与 `grant_reason` 是两条属性，福利页两样都认。
+    pub grant_source: String,
     pub remain: f64,
     pub used: f64,
     pub size: f64,
@@ -34,6 +37,26 @@ pub struct Package {
     pub no_expiry: bool,
     /// 还剩几天。`None` 表示不知道
     pub days_left: Option<f64>,
+}
+
+/// 一次积分发放（积分包流水里的一行）。
+///
+/// 上游的「积分」是逐包记账：签到、成长任务、猫猫旅行各发一个包，包上带发放时刻与
+/// `grantSource`。福利页那张「近一个月每天积分」的柱状图按发放日把这些包相加 ——
+/// 所以这里要的是**包的总量（size）**与**发放时刻**，不是剩余。
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Grant {
+    /// 发放时刻（Unix 秒）
+    pub created_at: i64,
+    /// 这个包一共发了多少积分（不是剩余）
+    pub credit: f64,
+    /// `AccountAttributes` 里的 `grantSource`（`daily_checkin` / `growth_task_*` / `growth_travel`…）
+    pub source: String,
+    /// 包名：没有 `grantSource` 的包（例如「国内运营裂变包」中的一部分）靠它认
+    pub name: String,
+    /// `grantReason` 属性（有的包有，有的没有）
+    pub reason: String,
 }
 
 /// 一次余额快照。
@@ -125,6 +148,7 @@ pub fn parse_package(raw: &Value) -> Package {
         name: text(raw, "PackageName").unwrap_or_else(|| "资源包".to_string()),
         code: text(raw, "PackageCode").unwrap_or_default(),
         grant_reason: grant_reason(raw),
+        grant_source: attribute(raw, "grantSource"),
         remain,
         used,
         size,
@@ -134,19 +158,78 @@ pub fn parse_package(raw: &Value) -> Package {
     }
 }
 
+/// 从 `get-user-resource` 的响应里取全部积分发放。
+///
+/// 层级与余额查询同一套：通常是 `data.Response.Data.Accounts`，有些部署直接是
+/// `data.Accounts`。没有发放时刻的包（极少）跳过 —— 它画不进任何一天。
+pub fn grants(value: &Value) -> Vec<Grant> {
+    value
+        .get("data")
+        .and_then(|data| {
+            data.get("Response")
+                .and_then(|response| response.get("Data"))
+                .or(Some(data))
+        })
+        .and_then(|payload| payload.get("Accounts"))
+        .and_then(Value::as_array)
+        .map(|list| list.iter().filter_map(parse_grant).collect())
+        .unwrap_or_default()
+}
+
+fn parse_grant(raw: &Value) -> Option<Grant> {
+    Some(Grant {
+        created_at: grant_time(raw)?,
+        credit: number(raw, &[
+            "CycleCapacitySizePrecise",
+            "CycleCapacitySize",
+            "CapacitySizePrecise",
+            "CapacitySize",
+        ]),
+        source: attribute(raw, "grantSource"),
+        name: text(raw, "PackageName").unwrap_or_default(),
+        reason: attribute(raw, "grantReason"),
+    })
+}
+
+/// 发放时刻：`CreateTime` 是毫秒；缺了退回 `DeductionStartTime`（毫秒）与周期起点（墙钟）。
+fn grant_time(raw: &Value) -> Option<i64> {
+    for key in ["CreateTime", "DeductionStartTime"] {
+        if let Some(value) = raw.get(key).and_then(Value::as_i64) {
+            if value > 0 {
+                return Some(if value > 100_000_000_000 {
+                    value / 1000
+                } else {
+                    value
+                });
+            }
+        }
+    }
+    ["CycleStartTime", "CycleEndTime"]
+        .iter()
+        .find_map(|key| {
+            raw.get(*key)
+                .and_then(Value::as_str)
+                .and_then(parse_wall_clock)
+        })
+}
+
 /// 发放原因：`AccountAttributes` 里 `Key == "grantReason"` 那条的 `Value`。
 ///
 /// 上游只在这条属性里说「这包是怎么来的」（签到 / 成长任务 / 活动…），
 /// 包名里没有；福利页按它筛出福利积分，缺了就当空串，不用包名去猜。
 fn grant_reason(raw: &Value) -> String {
+    attribute(raw, "grantReason")
+}
+
+/// 从 `AccountAttributes` 里取一条键值（上游给字符串也见过，给数字也见过）。
+fn attribute(raw: &Value, key: &str) -> String {
     let Some(items) = raw.get("AccountAttributes").and_then(Value::as_array) else {
         return String::new();
     };
     for item in items {
-        if item.get("Key").and_then(Value::as_str) != Some("grantReason") {
+        if item.get("Key").and_then(Value::as_str) != Some(key) {
             continue;
         }
-        // 上游给字符串也见过，给数字也见过
         return match item.get("Value") {
             Some(Value::String(text)) => text.clone(),
             Some(Value::Number(number)) => number.to_string(),
@@ -221,6 +304,7 @@ pub fn enterprise(credit: f64, limit: f64, cycle_end: &str) -> Credits {
         name: if size > 0.0 { "企业额度" } else { "企业周期额度" }.to_string(),
         code: "enterprise".to_string(),
         grant_reason: String::new(),
+        grant_source: String::new(),
         remain,
         used,
         size,
@@ -410,10 +494,12 @@ mod tests {
             "CapacitySize": 100,
             "AccountAttributes": [
                 { "Key": "other", "Value": "忽略" },
-                { "Key": "grantReason", "Value": "每日签到" }
+                { "Key": "grantReason", "Value": "每日签到" },
+                { "Key": "grantSource", "Value": "daily_checkin" }
             ]
         }));
         assert_eq!(package.grant_reason, "每日签到");
+        assert_eq!(package.grant_source, "daily_checkin");
 
         // 上游没给这条属性就是空串，不拿包名去猜
         let missing = parse_package(&serde_json::json!({
@@ -421,6 +507,43 @@ mod tests {
             "CapacitySize": 100
         }));
         assert!(missing.grant_reason.is_empty());
+    }
+
+    #[test]
+    fn 积分发放取包总量与发放时刻() {
+        let value = serde_json::json!({
+            "data": { "Response": { "Data": { "Accounts": [
+                {
+                    "PackageName": "CodeBuddy个人版国内运营裂变包",
+                    "CapacitySize": 100,
+                    "CapacityRemain": 40,
+                    "CreateTime": 1_792_483_989_000i64,
+                    "AccountAttributes": [
+                        { "Key": "grantSource", "Value": "daily_checkin" },
+                        { "Key": "payerType", "Value": "0" }
+                    ]
+                },
+                {
+                    "PackageName": "旧包",
+                    "CapacitySize": 50,
+                    "CycleStartTime": "2026-10-26 09:00:00"
+                },
+                {
+                    "PackageName": "没有时刻的包",
+                    "CapacitySize": 10
+                }
+            ]}}}
+        });
+        let list = grants(&value);
+        // 没有发放时刻的那条不进流水
+        assert_eq!(list.len(), 2);
+        assert_eq!(list[0].created_at, 1_792_483_989);
+        assert_eq!(list[0].credit, 100.0);
+        assert_eq!(list[0].source, "daily_checkin");
+        assert_eq!(list[0].name, "CodeBuddy个人版国内运营裂变包");
+        // 退回周期起点，并按 UTC+8 折算
+        assert_eq!(list[1].created_at, 1_792_976_400);
+        assert!(list[1].source.is_empty());
     }
 
     #[test]

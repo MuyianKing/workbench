@@ -76,6 +76,28 @@ fn fetch_personal(account: &Account) -> Result<Credits, String> {
     Ok(wb_credits::aggregate(packages))
 }
 
+/// 积分发放流水：与余额同一个接口，但把时间窗放宽到整段包历史。
+///
+/// 余额查询只看「还没结束」的包（begin = now）；这里要的是**发放记录** ——
+/// 花光 / 过期的包也得在，否则近一个月的柱状图会缺几天。福利页只取最近 30 天，
+/// 多回来的旧包由界面裁掉。
+pub fn fetch_credit_grants(account: &Account) -> Result<Vec<wb_credits::Grant>, String> {
+    if is_enterprise(account) {
+        // 企业号是周期额度，没有逐包发放记录
+        return Ok(Vec::new());
+    }
+    let body = serde_json::json!({
+        "PageNumber": 1,
+        "PageSize": 500,
+        "ProductCode": PRODUCT_CODE,
+        "Status": [0, 3],
+        "PackageEndTimeRangeBegin": "2020-01-01 00:00:00",
+        "PackageEndTimeRangeEnd": "2036-01-01 00:00:00",
+    });
+    let value = post(account, RESOURCE_PATH, &body)?;
+    Ok(wb_credits::grants(&value))
+}
+
 fn fetch_enterprise(account: &Account) -> Result<Credits, String> {
     let value = post(account, ENTERPRISE_PATH, &serde_json::json!({}))?;
     let data = value.get("data").unwrap_or(&value);

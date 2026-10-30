@@ -1,4 +1,5 @@
 import type { Result } from '@workbench/core'
+import type { GrowthCreditGrant } from '@workbench/usage'
 import { fail, ok } from '@workbench/core'
 import { errorText, invoke } from './bridge'
 import { enqueue } from './sync-queue'
@@ -68,6 +69,8 @@ export interface GatewayPackage {
   code: string
   /** 发放原因（上游 `AccountAttributes.grantReason`），没给是空串 */
   grantReason: string
+  /** 发放来源（上游 `AccountAttributes.grantSource`：`daily_checkin` / `growth_task_*`…），没给是空串 */
+  grantSource: string
   remain: number
   used: number
   size: number
@@ -495,6 +498,7 @@ export const gatewayApi = {
   gatewayTasksStreak,
   gatewayCheckin,
   gatewayActivityToday,
+  gatewayCreditGrants,
 }
 
 // ---------- 任务福利 ----------
@@ -579,6 +583,15 @@ export interface GatewayActivityRow {
   message: string
 }
 
+/** 一个账号的积分发放流水（界面按发放日汇总成近一个月） */
+export interface GatewayGrantAccount {
+  uid: string
+  nickname: string
+  grants: GrowthCreditGrant[]
+  /** 这次没读到时的原因；空串表示读到了 */
+  error: string
+}
+
 /** 当前号的成长任务 + 汇总。`uid` 为空时后端取第一个已启用的号。 */
 export function gatewayTasks(uid?: string): Promise<Result<GatewayTasksSnapshot>> {
   return call('wb_gateway_tasks', { uid: uid ?? null }, '读取成长任务失败')
@@ -605,4 +618,12 @@ export function gatewayCheckin(uid?: string): Promise<Result<GatewayActionResult
 /** 今天的签到尝试 */
 export function gatewayActivityToday(): Promise<Result<GatewayActivityRow[]>> {
   return call('wb_gateway_activity_today', {}, '读取今日打卡记录失败')
+}
+
+/**
+ * 积分发放流水（整段包历史）。`uid` 为空时取全部已启用的号，
+ * 每个号一次只读 POST；某个号失败只在它自己那一条上带 `error`。
+ */
+export function gatewayCreditGrants(uid?: string): Promise<Result<GatewayGrantAccount[]>> {
+  return call('wb_gateway_credit_grants', { uid: uid ?? null }, '读取积分流水失败')
 }

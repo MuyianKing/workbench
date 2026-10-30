@@ -1139,6 +1139,8 @@ export interface WorkbenchApi {
   /** Buddy 加油站签到 */
   gatewayCheckin: (uid?: string) => Promise<Result<import('./workbench/gateway').GatewayActionResult[]>>
   gatewayActivityToday: () => Promise<Result<import('./workbench/gateway').GatewayActivityRow[]>>
+  /** 福利页：积分发放流水（`uid` 为空时取全部已启用账号，界面按发放日汇总近 30 天） */
+  gatewayCreditGrants: (uid?: string) => Promise<Result<import('./workbench/gateway').GatewayGrantAccount[]>>
   versions: { node: string, chrome: string }
   /**
    * 挑一个目录。
