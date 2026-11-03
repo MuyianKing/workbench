@@ -1,7 +1,7 @@
 import type { ProjectSort } from '@workbench/core'
 import type { ProcessTarget } from './terminal'
 
-import type { ActivityBreakdown, ActivityCounts, ActivityView, AddProjectInput, PackageManager, Project, ProjectGroup, ProjectPatch } from '@/types'
+import type { ActivityBreakdown, ActivityCounts, ActivityView, AddProjectInput, PackageManager, ProcessStatusEvent, Project, ProjectGroup, ProjectPatch } from '@/types'
 import { backfillProjectColors as backfillColors, devServerUrl, reorderById, sanitizeProjectSort } from '@workbench/core'
 
 import { defineStore } from 'pinia'
@@ -140,6 +140,8 @@ export const useProjectsStore = defineStore('projects', () => {
 
     // 主进程更新了项目（执行记录、最近使用时间），同步回本地列表
     window.workbench.onProjectChanged(onProjectChanged)
+    // 端口的自动维护跟着会话状态走（写回 / 清空，见 onProjectStatus）
+    window.workbench.onStatus(onProjectStatus)
     // 活跃度记了一笔（任何一种来源，见 workbench/activity.ts）：重新拉一次计数。
     // 与 onProjectChanged 分开挂 —— 改项目名 / 改分组也会推 projectChanged，那些不改活跃度，
     // 顺手重拉一次纯属白跑（原先就是这么绑的，拆开之后各走各的）
@@ -259,7 +261,6 @@ export const useProjectsStore = defineStore('projects', () => {
       serve: input.serve,
       build: [...input.build],
       defaultBuild: input.defaultBuild,
-      port: input.port,
       // 「仅管理目录」的放行标志，漏掉它会让勾选项静默失效
       allowInvalid: input.allowInvalid,
       // 同上：漏掉它勾了「在首页展示」也会静默失效
@@ -491,7 +492,7 @@ export const useProjectsStore = defineStore('projects', () => {
       id: project.id,
       name: project.name,
       subject: '项目',
-      noPortHint: '未配置监听端口，请先在项目详情里填写',
+      noPortHint: '这个项目还没有记下监听端口：启动一次后会自动识别，之后才能检测',
       busyHint: '项目正在执行 Workbench 启动的命令，无需检测',
     }
   }
@@ -506,6 +507,36 @@ export const useProjectsStore = defineStore('projects', () => {
       notifyError(result.error ?? '安装依赖失败')
   }
 
+  // ---------- 端口：应用自己维护 ----------
+
+  /** 改端口只走这里：上面那条「配置变更自动落盘」的 watch 会把它写进数据文件 */
+  function setProjectPort(id: string, port: number | undefined): void {
+    const project = findProject(id)
+    if (!project || project.port === port)
+      return
+    project.port = port
+  }
+
+  /**
+   * 开发服务的端口由应用自己维护，用户不再手填。
+   *
+   * 只认「启动」那条会话：日志里认出监听端口就写回项目，那条会话结束（停止 / 自己退出 /
+   * 启动失败）就清空。应用直接关掉时走不到这里，端口会留到下次启动 ——
+   * detectAll 靠它认出「在 Workbench 之外还跑着」的服务（见 docs/modules/projects.md）。
+   */
+  function onProjectStatus(event: ProcessStatusEvent): void {
+    if (terminal.terminalOf(event.terminal)?.kind !== 'start')
+      return
+
+    if (event.port !== undefined) {
+      setProjectPort(event.projectId, event.port)
+      return
+    }
+
+    if (!RUNNING_STATUS.includes(event.status))
+      setProjectPort(event.projectId, undefined)
+  }
+
   async function start(id: string): Promise<void> {
     const project = await guardProject(id)
     if (!project)
@@ -517,7 +548,7 @@ export const useProjectsStore = defineStore('projects', () => {
       notifyWarning(`项目要求 Node ${node.required}，当前为 ${node.actual}，启动可能失败`)
     }
 
-    // 先看项目配置的监听端口，其次用本次会话里从启动日志识别到的那个。
+    // 先看项目上一次记下的端口，其次用本次会话里从启动日志识别到的那个。
     // 两个都没有就静默跳过 —— 不知道端口就无从检测占用。
     const rt = terminal.runtimeOf(id)
     if (!(await terminal.ensurePortFree(project.port ?? rt.port, rt)))
@@ -547,23 +578,33 @@ export const useProjectsStore = defineStore('projects', () => {
   }
 
   /** 停止项目；外部启动的那种按端口结束，先确认一次（实现见 terminal store） */
-  function stop(id: string): Promise<boolean> {
+  async function stop(id: string): Promise<boolean> {
     const project = findProject(id)
     if (!project)
-      return Promise.resolve(false)
+      return false
 
     // 卡片显示的是哪一类操作就停哪一类：一个项目可以同时挂着 dev server 和一次打包
-    const kind = terminal.runtimeOf(id).kind
-    return terminal.stopTarget(targetOf(project), () => window.workbench.stop(id, kind))
+    const rt = terminal.runtimeOf(id)
+    const kind = rt.kind
+    // 停在应用之外启动的那种：端口线索随结束一起清掉（Workbench 自己的会话由 onProjectStatus 清）
+    const external = rt.external === true
+    const stopped = await terminal.stopTarget(targetOf(project), () => window.workbench.stop(id, kind))
+    if (stopped && external)
+      setProjectPort(id, undefined)
+    return stopped
   }
 
   /** 检测项目是否已经在运行（判据是端口占用，实现见 terminal store） */
-  function detect(id: string, options: { silent?: boolean } = {}): Promise<boolean> {
+  async function detect(id: string, options: { silent?: boolean } = {}): Promise<boolean> {
     const project = findProject(id)
     if (!project)
-      return Promise.resolve(false)
+      return false
 
-    return terminal.detectTarget({ ...targetOf(project), port: project.port }, options)
+    const running = await terminal.detectTarget({ ...targetOf(project), port: project.port }, options)
+    // 端口空着：上次留下的那个已经失效，清掉（下次启动才不会拿它去查占用）
+    if (!running)
+      setProjectPort(id, undefined)
+    return running
   }
 
   /** 启动应用后做一次全量检测：项目可能是在 Workbench 之外启动、至今还跑着的 */
@@ -626,7 +667,7 @@ export const useProjectsStore = defineStore('projects', () => {
    * 把开发服务交给系统默认浏览器打开（用户点卡片上那颗分享图标才走这里，
    * 不会因为「项目跑起来了」自己弹窗 —— 见 docs/modules/projects.md）。
    *
-   * 端口与卡片上显示的那个同源：先取运行态里认出来的实际端口，没有才退回配置里手填的。
+   * 端口与卡片上显示的那个同源：先取运行态里认出来的实际端口，没有才退回上次运行记下的。
    * 两者都没有时什么也不做 —— 入口本来就不该画出来。
    */
   async function openInBrowser(id: string): Promise<void> {

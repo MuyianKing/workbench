@@ -441,9 +441,11 @@ const bodyObserver = new ResizeObserver(() => {
 /**
  * 一行实测高度。
  *
- * 用来喂给分块的 `contain-intrinsic-size`：`content-visibility: auto` 让屏外的块
+ * 用来喂给分块的 `contain-intrinsic-height`：`content-visibility: auto` 让屏外的块
  * 按「估算高度」计入 scrollHeight，估算值与真实值不一致时，跳到底部会停在离底部
  * 一截的地方。行高由字体与缩放决定，实测一次就基本稳定，之后再变也只是微调。
+ *
+ * 只喂高度、不喂 `contain-intrinsic-size`（单值会连**宽度**一起算），原因见样式里 .chunk 的说明。
  */
 const lineHeight = ref(0)
 const chunkEstimatePx = computed(() => Math.round((lineHeight.value || 22) * CHUNK_SIZE))
@@ -643,7 +645,7 @@ function clearLogs(): void {
             v-for="(chunk, index) in chunks"
             :key="chunk[0]?.id ?? index"
             class="chunk"
-            :style="{ containIntrinsicSize: `auto ${chunkEstimatePx}px` }"
+            :style="{ containIntrinsicHeight: `auto ${chunkEstimatePx}px` }"
           >
             <div v-for="line in chunk" :key="line.id" class="line" :class="`line--${line.stream}`">
               <span class="line__time mono">{{ line.time }}</span>
@@ -1077,12 +1079,17 @@ function clearLogs(): void {
 
 /*
  * 渲染分块：屏幕外的块不必布局，也不必绘制。
- * contain-intrinsic-size 给出「没渲染时按多高估算」，滚动条长度才不会
+ * 高度估算（contain-intrinsic-height）给出「没渲染时按多高算」，滚动条长度才不会
  * 随着内容进出视口来回跳；这里的值按 100 行 × 1.65 行高估一个中间数。
+ *
+ * **只许用高度那一条长属性**：`contain-intrinsic-size` 给一个值等于宽、高各一份，
+ * 而 `content-visibility: auto` 在块被跳过时会把这份「内在宽度」（1800px / 行高 × 100）
+ * 算进分块的尺寸里 —— 整块终端的最小宽度随之变成两千多像素，把 `.content` 那一列
+ * 顶得比窗口还宽，页面右侧（网关那排统计卡的最后一张）被裁掉一截。
  */
 .chunk {
   content-visibility: auto;
-  contain-intrinsic-size: auto 1800px;
+  contain-intrinsic-height: auto 1800px;
 }
 
 .line {

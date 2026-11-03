@@ -286,8 +286,8 @@ export function installSessionListeners(): void {
       if (!meta)
         return
 
-      // 从输出里认监听端口：项目没手填端口时，这是唯一的线索
-      // （界面据此显示端口，也据此做「端口被占用」的提醒）
+      // 从输出里认监听端口：项目这边不再手填端口，日志是唯一的来源
+      // （界面据此显示端口、写回项目，也据此做「端口被占用」的提醒）
       for (const line of lines) {
         const port = parsePortFromLog(line.text)
         if (port !== undefined && port !== meta.port) {

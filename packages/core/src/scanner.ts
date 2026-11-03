@@ -1,5 +1,4 @@
-import type { BuildTool, DevPortGuess, PortSource } from './dev-port'
-import { BUILD_TOOLS, detectBuildTool, guessDevPort, TOOL_CONFIG_FILES } from './dev-port'
+import { TOOL_CONFIG_FILES } from './dev-port'
 /**
  * 项目目录扫描：读 package.json / 锁文件 / 构建配置，得出添加项目预览所需的一切。
  *
@@ -31,14 +30,6 @@ export interface ScanResult {
   enginesNode?: string
   /** enginesNode 的来源，用于提示文案 */
   nodeRequirementFrom?: 'engines' | 'nvmrc'
-  /** 识别到的构建工具，决定端口按哪家的规则找 */
-  buildTool?: BuildTool
-  /** 自动识别出的开发服务监听端口 */
-  port?: number
-  /** 端口的来源：配置文件 / 启动脚本参数 / 工具默认值 */
-  portFrom?: PortSource
-  /** portFrom 为 config 时的配置文件名 */
-  portFile?: string
 }
 
 /** 扫描需要的最小文件系统能力；由宿主提供（生产走 Rust 命令，测试走 node:fs） */
@@ -233,57 +224,6 @@ async function detectNodeRequirement(
   return {}
 }
 
-/** 读出该工具实际存在的那份配置文件 */
-async function readToolConfig(
-  scan: ScanFs,
-  root: string,
-  tool: BuildTool,
-): Promise<{ name: string, text: string } | undefined> {
-  for (const name of TOOL_CONFIG_FILES[tool]) {
-    const text = await scan.readText(joinPath(root, name))
-    if (text !== null)
-      return { name, text }
-  }
-  return undefined
-}
-
-/** 依赖里看不出工具时，退一步看项目里放着哪家的配置文件 */
-async function detectToolByConfigFile(
-  scan: ScanFs,
-  root: string,
-): Promise<{ tool: BuildTool, file: { name: string, text: string } } | undefined> {
-  for (const tool of BUILD_TOOLS) {
-    const file = await readToolConfig(scan, root, tool)
-    if (file)
-      return { tool, file }
-  }
-  return undefined
-}
-
-/**
- * 监听端口推断：配置文件 → 启动脚本参数 → 工具默认值。
- * 工具本身也在这里定下来（依赖优先，配置文件兜底），界面据此解释端口是怎么来的。
- */
-async function detectDevPort(
-  scan: ScanFs,
-  root: string,
-  deps: Record<string, string | undefined>,
-  serveCommand?: string,
-): Promise<{ tool?: BuildTool, guess?: DevPortGuess }> {
-  let tool = detectBuildTool(deps)
-  let configFile = tool ? await readToolConfig(scan, root, tool) : undefined
-
-  if (!tool) {
-    const byFile = await detectToolByConfigFile(scan, root)
-    if (byFile) {
-      tool = byFile.tool
-      configFile = byFile.file
-    }
-  }
-
-  return { tool, guess: guessDevPort({ tool, configFile, serveCommand }) }
-}
-
 /** 读取并分析一个项目目录，得到可用于添加项目预览的结果 */
 export async function scanProject(scan: ScanFs, dirPath: string): Promise<ScanResult> {
   const empty: ScanResult = {
@@ -334,12 +274,6 @@ export async function scanProject(scan: ScanFs, dirPath: string): Promise<ScanRe
   const serve = pickServe(scripts)
   const serveScript = serve && isValidScriptName(serve) ? serve : undefined
   const nodeRequirement = await detectNodeRequirement(scan, dirPath, pkg.engines?.node)
-  const { tool, guess } = await detectDevPort(
-    scan,
-    dirPath,
-    deps,
-    serveScript ? scripts[serveScript] : undefined,
-  )
 
   return {
     ok: true,
@@ -354,9 +288,5 @@ export async function scanProject(scan: ScanFs, dirPath: string): Promise<ScanRe
     outputDir,
     enginesNode: nodeRequirement.value,
     nodeRequirementFrom: nodeRequirement.from,
-    buildTool: tool,
-    port: guess?.port,
-    portFrom: guess?.from,
-    portFile: guess?.file,
   }
 }

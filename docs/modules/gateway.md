@@ -40,6 +40,8 @@
   下面依次是类型与优先级、积分与余额条、成功失败 / 用量 / 均速三格；
   积分一行同时给「剩余 / 总额」与「已用」，余额条的彩色段是剩余、灰底是已用；
   左侧一截 3px 状态色标（可用绿 / 待续期灰 / 额度用完与部分模型用完琥珀 / 已停用红），颜色只表达状态。
+  **积分那一行整块可点开明细**（点与回车 / 空格都行）：卡上只放得下剩余 / 总额，逐包的到期时间
+  放在 `CreditsDialog` 里 —— 按到期从近到远排，只列还有剩余的包。
   **卡片里的每一格高度固定**：额度恢复时间那行小字与余额条即使没有内容也 `visibility: hidden` 留位 ——
   它们只有部分账号才有，按条件删掉会把同一排卡片下面的积分条与三格顶得错开。
 - **模型栏也是卡片网格**：每个模型一张玻璃卡（极淡的主题色柔光 + `Cpu` 图标，图标与底都取主题色），
@@ -51,6 +53,8 @@
   用量页六张 KPI 的图标（请求蓝 / 总 token 紫 / 输入青 `#0e7490` / 输出橙 `#c2410c` /
   成功率绿 / 延迟琥珀）、账号头像（紫 `#7c3aed`）、
   余额条（≥50% 绿 / 20–50% 琥珀 / <20% 红）、
+  积分明细弹层里的到期档位标签（≤10 天琥珀 / ≤5 天橙 / ≤3 天红 / 今日红实心；
+  已过期 / 无期限 / 到期未知保持灰）、
   福利栏的数字格图标（Buddy 加油站蓝 / 连登绿 / 补签灰 / 抽奖琥珀 / 猫猫紫 / 能量青 / 福利积分橙，
   与统计卡同一套图标底）、福利栏里「今日已打卡 / 未打卡」这类状态字与任务状态标签（只取
   `--st-ok` / `--st-run` / `--st-fail` / 灰）。
@@ -178,6 +182,11 @@
   时逐个已启用账号各读一次；某个号失败只在标题旁标出个数，其余账号照常画。企业版是周期额度、
   没有逐包发放记录，直接回空。柱子取「已获取福利总积分」那枚图标的橙，**不是主题色**
   （主题色的适用范围没有扩大）；没有启用账号时不画这一块，整月为 0 时给空态。
+  **图用 ECharts 按需画**（`echarts/core` + Bar / Grid / Tooltip + Canvas，不引整包）：
+  纵轴仍只标半程与顶格，横轴标签抽稀到七来个、今天必标，悬停按整列高亮（axis 触发）；
+  文字 / 网格线每次画图现读设计令牌，明暗切换跟着 store 的 `effectiveTheme` 重画。
+  echarts 本来就是 pptx 预览的传递依赖，这里只是提成直接依赖 —— **别改成 `import * as echarts`**，
+  那会把整包拉进首屏。
 
 ## 实现
 
@@ -299,6 +308,22 @@ state 存在内存里（10 分钟过期），不落盘。上游签发 state，�
   `summarizeGatewayRows`（单测同目录），与 Rust 的 `wb_usage::summarize` 同口径 —— 改口径时两边一起看
   （界面走的是 TS 那份）。
 
+### 积分明细弹层
+
+- 账号卡上的积分区整块可点（`role="button"` + 回车 / 空格），打开 `CreditsDialog`。
+  **弹层只读**：快照取自网关页的 `credits` map（与账号卡同一份），查余额由网关页发起，
+  弹层只 emit `refresh`，不另打上游 —— 同一份数据不在两个地方各存一份。
+- 列的是 `Credits.packages` 里**还有剩余**的包，按到期时间从近到远排；无期限 / 到期未知沉底。
+  一个号往往有多个包、到期日各不相同，所以到期时间只能逐包看，汇总成一行没有意义。
+- 到期档位按 **UTC+8 自然日**算（`packages/usage` 的 `creditExpiry`，与福利柱状图同一条口径）：
+  今晚 23:00 到期算今天、明天 01:00 算明天（拿毫秒差除一天会把后者算成今天）。
+  ≤10 天琥珀、≤5 天橙（琥珀与红混出来的一档）、≤3 天红、今日红实心；
+  已过期（`expiresAt` 已过）与到期未知保持灰 —— 它们不催任何动作。
+- 企业额度的包 `no_expiry = true`：日期照给（周期结束），标签写「周期重置」而不是「无期限」——
+  它是回满不是作废，不进临期档位。个人号的 `no_expiry` 才显示「无期限」。
+- 没有快照时给空态 + 「查余额」按钮；有快照但没有剩余包时给「没有还有剩余的包」。
+  「刷新」只在弹层里重查这一个号，与账号卡上的「查余额」是同一段逻辑（`queryOne`）。
+
 ### 多机流水同步
 
 `usage.jsonl` 是本机账本；把它同步到设置里那个 git 仓库（与 token 用量同一个仓库、同一个克隆）之后，
@@ -364,6 +389,7 @@ state 存在内存里（10 分钟过期），不落盘。上游签发 state，�
 - `apps/desktop/src-tauri/src/sync.rs`（网关流水的 git 写入 / 读取、按月分文件）
 - `apps/desktop/src-tauri/src/commands.rs`（`gateway_sync_publish` / `gateway_sync_pull`）
 - `apps/desktop/src-tauri/src/main.rs`（模块、managed state、命令注册）
-- `apps/desktop/src/renderer/src/components/gateway/{GatewayView,AccessDialog,PerksPane,UsagePane,RequestsPane,ModelsPane}.vue`
+- `apps/desktop/src/renderer/src/components/gateway/{GatewayView,CreditsDialog,AccessDialog,PerksPane,PerksCreditsChart,UsagePane,RequestsPane,ModelsPane}.vue`
 - `apps/desktop/src/renderer/src/workbench/{gateway,sync-queue}.ts`
+- `packages/usage/src/{credit-expiry,growth-credits,gateway-usage}.ts`（到期档位 / 福利流水 / 用量汇总的纯逻辑）
 - `packages/appearance/src/views.ts`（`gateway` 页签）

@@ -70,7 +70,9 @@ KPI 窗口卡、近 21 交易日柱状图、总规模曲线（**默认近一年*
 - `components/etf/` —— `EtfView.vue`（页壳与编排，照网关页的 KeepAlive 进入模式）、
   `EtfSummaryCards` / `EtfFlowPanel` / `EtfScalePanel` / `EtfHoldingsPanel` / `EtfCategoryPanel` /
   `EtfMatrixPanel`（子组件一律 props 收数据）。面板标题与 KPI 卡标签配 `@element-plus/icons-vue`
-  小图标（面板标题那套外壳规则在 global.css 的 `.panel__head h3`：14px、`--ink-3` 弱墨色，不抢数值的戏）
+  小图标（面板标题那套外壳规则在 global.css 的 `.panel__head h3`：14px、`--ink-3` 弱墨色，不抢数值的戏）。
+  **分品种表是页里唯一的弹性块**（`.etf-grow`，`flex: 1 1 auto`）：窗口富余时吃掉剩余高度、
+  表内滚动，窗口太矮时保 560px 下限（面板头 + 表头 + 十来行可见），再多由整页滚动兜
 - `packages/appearance/src/views.ts` + `components/NavRail.vue` + `App.vue` —— 页面注册（`etf`）
 
 **数据源端点**（钉死在 `etf.rs`，改参数先看那边有没有校验）

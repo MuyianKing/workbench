@@ -190,9 +190,14 @@ onMounted(() => {
 /**
  * 内容列：当前页面（吃掉剩余高度）+ 终端面板。
  * 多出来的子元素会凭空多出一行，所以弹窗一律留在 .app 上（它们是 fixed 定位，不进网格流）。
+ *
+ * 列定义必须显式带 `minmax(0, 1fr)`（同 `.app` / `.topbar`）：隐式的 `auto` 列会按子元素的
+ * 最小宽度撑开，终端日志里只要有一段估宽的东西（曾经是分块的 intrinsic 宽度），
+ * 整列就被顶得比窗口还宽、右侧被裁掉。
  */
 .content {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr) auto;
   min-width: 0;
   min-height: 0;

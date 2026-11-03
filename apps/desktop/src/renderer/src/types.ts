@@ -201,10 +201,11 @@ export interface Project {
   /** 项目声明的 Node 版本要求（engines.node 或 .nvmrc），仅用于提示 */
   nodeRequirement?: string
   /**
-   * 开发服务的监听端口。
-   * 它是「项目是否已经在运行」的判据：启动应用后按它探测一次，
-   * 就能认出上一次（可能是在 Workbench 之外）启动、至今还占着端口的服务。
-   * 留空表示不检测 —— 此时只能靠本次会话里从启动日志识别到的端口。
+   * 开发服务上一次的监听端口 —— **由应用自动维护，不是用户配置**。
+   *
+   * 启动后从日志里认出实际监听的那个就写回来；点「停止」时清空。应用是直接关掉、
+   * 服务还在跑的时候它会留到下次启动，用来认出「在 Workbench 之外还跑着」的服务
+   * （见 packages/core/src/dev-port.ts）。
    */
   port?: number
   /**
@@ -838,8 +839,6 @@ export interface AddProjectInput {
   serve?: string
   build: string[]
   defaultBuild?: string
-  /** 监听端口；显式传 null 表示用户清空了它，按「不检测」落盘 */
-  port?: number | null
   /** package.json 解析失败时，是否以「仅管理目录」的方式加入 */
   allowInvalid?: boolean
   /** 加入后是否放到首页展示（见 Project.home）；缺省不展示 */
@@ -854,7 +853,7 @@ export interface ProjectPatch {
   outputDir?: string
   autoOpenExplorer?: boolean
   nodeVersion?: string
-  /** 监听端口；null 或非法值表示清空 */
+  /** 监听端口由应用自己维护（启动时写回、停止时清空）；null 表示清空 */
   port?: number | null
   groupId?: string
   /** 标识色（见 Project.color） */

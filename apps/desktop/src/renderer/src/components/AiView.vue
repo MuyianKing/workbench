@@ -19,7 +19,8 @@ import { noteRootName } from '@workbench/notes'
  *    下面还是那一栏目录与分支 + composer（跑着的时候那颗按钮就是停止）。
  *    没挑中会话时是**起始那一屏**（一段会话都还没有，或者刚点了「+」）：一副缺省空态
  *    （图 + 一句事实 + 居中的选目录按钮，最近目录在那颗按钮的下拉里）压在 composer
- *    上方 —— **一进来就能直接写**，会话在发出第一句时才建（见 stores/ai.ts 的 run）。
+ *    上方 —— **还没选定工作目录时那条 composer 不画**（没有落处，写了也发不出去），
+ *    选好目录它才出现在空态下面；会话在发出第一句时才建（见 stores/ai.ts 的 run）。
  *    **两屏都没有顶部工具条**：标题、目录那些要么与导航栏重复、要么下面那一栏已经说了。
  *
  * **页面不摆提示行**（说明、问候、还差什么）：这个应用是给作者自己用的，页面上把控件本身
@@ -434,8 +435,9 @@ const runningIds = computed(() =>
       </template>
 
       <!-- 起始那一屏：没挑中会话（一段都还没有 / 都删光了 / 刚点了左栏那颗「+」）——
-           一副缺省空态（图 + 一句事实 + 居中的选目录按钮）压在 composer 上方，
-           **一进来就能直接写**；会话在发出第一句时才建（见 stores/ai.ts 的 run）。 -->
+           一副缺省空态（图 + 一句事实 + 居中的选目录按钮）压在 composer 上方。
+           **还没选定工作目录（`newDir` 为空）时下面那条 composer 不画**：没有落处，
+           写了也发不出去；选好目录它才出现在空态下面。会话在发出第一句时才建（见 stores/ai.ts 的 run）。 -->
       <div v-else class="landing">
         <EmptyState
           class="landing__intro"
@@ -462,7 +464,9 @@ const runningIds = computed(() =>
           </template>
         </EmptyState>
         <div class="landing__box">
+          <!-- 没选定目录就整条不画（见上面那段注释）；「安装 Pi」那颗不归它管，照旧留着 -->
           <AiComposer
+            v-if="ai.newDir"
             v-model:instruction="instruction"
             :images="images"
             @add-images="addImages"

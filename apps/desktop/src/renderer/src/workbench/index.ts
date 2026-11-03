@@ -9,7 +9,7 @@ import type { AddProjectInput, AppSettings, AuthProvider, BackgroundImage, BallC
  * 界面降级成空态而不是崩掉 —— 迁移期间的缺口因此可见、可控。
  * 通道补齐后应当去掉兜底（那时 `as` 断言也就不需要了）。
  */
-import { fail, nextProjectColor, ok, parsePort, samePath } from '@workbench/core'
+import { fail, nextProjectColor, ok, samePath } from '@workbench/core'
 import { notifyWarning } from '@/notify'
 import * as activity from './activity'
 import * as ai from './ai'
@@ -303,8 +303,6 @@ function createApi(): WorkbenchApi {
 
       const manageOnly = !scan.ok
       const buildList = Array.isArray(input.build) ? input.build : scan.build
-      // 界面上传了端口就用它（用户可能改过或清空），没传才回退到自动识别的结果
-      const port = 'port' in input ? parsePort(input.port) : parsePort(scan.port)
 
       const project: Project = {
         id: crypto.randomUUID(),
@@ -323,7 +321,6 @@ function createApi(): WorkbenchApi {
         },
         outputDir: scan.outputDir ?? '',
         nodeRequirement: scan.enginesNode,
-        port,
         autoOpenExplorer: true,
         manageOnly: manageOnly || undefined,
         // 首页展示：只有界面明确勾了才写 true —— 缺省与老项目都是不展示（见 Project.home）

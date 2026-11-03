@@ -79,9 +79,9 @@ export interface ProcessTarget {
   name: string
   /** 状态提示里的主语（「项目」「命令」） */
   subject: string
-  /** 目标自己配置的监听端口；没配置就退回运行态里记着的那个 */
+  /** 命令自己配置、或项目上次运行记下的监听端口；没有就退回运行态里记着的那个 */
   port?: number
-  /** 没配置监听端口时的提示语 */
+  /** 没有端口可查时的提示语 */
   noPortHint: string
   /** 它自己在跑、不必再探时的提示语 */
   busyHint: string
@@ -492,6 +492,13 @@ export const useTerminalStore = defineStore('terminal', () => {
       target.startedAt = undefined
       if (event.status !== 'failed')
         target.pid = undefined
+
+      // 开发服务结束：端口随会话一起失效（下次启动由日志里认出的新端口写回）。
+      // 只认「启动」这条会话 —— 打包 / 安装也共用项目运行态，别把旁边跑着的 dev server 端口抹掉。
+      if (target.kind === 'start') {
+        rt.port = undefined
+        target.port = undefined
+      }
     }
 
     if (RUNNING_STATUS.includes(event.status))
@@ -560,6 +567,7 @@ export const useTerminalStore = defineStore('terminal', () => {
         rt.status = 'idle'
         rt.external = false
         rt.pid = undefined
+        rt.port = undefined
       }
       return true
     }

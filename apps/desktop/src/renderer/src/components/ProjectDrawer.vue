@@ -3,7 +3,7 @@ import type { ProjectColorPreset } from '@workbench/core'
 import type { ProjectStatus, RunRecord } from '@/types'
 import { Box, Close, Download, FolderOpened, Operation, Plus, Refresh, VideoPause, VideoPlay } from '@element-plus/icons-vue'
 
-import { isProjectColorPreset, parsePort, PROJECT_COLOR_LABELS, PROJECT_COLOR_PRESETS, projectColorVar, relativeToProject, resolveWithinProject, sanitizeProjectColor, satisfiesNodeVersion } from '@workbench/core'
+import { isProjectColorPreset, PROJECT_COLOR_LABELS, PROJECT_COLOR_PRESETS, projectColorVar, relativeToProject, resolveWithinProject, sanitizeProjectColor, satisfiesNodeVersion } from '@workbench/core'
 
 import { ElMessage } from 'element-plus'
 import { computed, onMounted, ref, watch } from 'vue'
@@ -244,31 +244,16 @@ function runCustom(index: number): void {
 
 // ---------- 监听端口 ----------
 
-/** 端口先进草稿，失焦或回车才提交，避免把半截数字写进配置 */
-const portDraft = useDraftField(
-  () => project.value?.id ?? '',
-  () => (project.value?.port ? String(project.value.port) : ''),
-)
-
-function commitPort(): void {
-  const current = project.value
-  if (!current)
-    return
-
-  const raw = portDraft.value.trim()
-  if (!raw) {
-    current.port = undefined
-    return
-  }
-
-  const next = parsePort(raw)
-  if (!next) {
-    ElMessage.warning('监听端口需为 1–65535 的整数')
-    portDraft.value = current.port ? String(current.port) : ''
-    return
-  }
-  current.port = next
-}
+/**
+ * 端口由应用自己维护（启动后从日志写回、停止时清空），这里只读：
+ * 运行态里那个是本次认出的；没有运行态还留着值，就是上次运行留下的。
+ */
+const portText = computed(() => {
+  const port = runtime.value?.port ?? project.value?.port
+  if (!port)
+    return '未识别'
+  return runtime.value?.port ? `:${port}` : `:${port}（上次运行）`
+})
 
 // ---------- 环境 ----------
 
@@ -441,19 +426,20 @@ async function removeProject(): Promise<void> {
       <!-- 主操作 -->
       <div class="drawer__actions">
         <!-- 安装 / 打包进行中：只能停，不能启动，否则按钮全是灰的没处下手 -->
-        <el-button v-if="isBusy" :icon="VideoPause" @click="store.stop(project.id)">
+        <el-button v-if="isBusy" size="small" :icon="VideoPause" @click="store.stop(project.id)">
           停止
         </el-button>
         <template v-else-if="isRunning">
-          <el-button :icon="VideoPause" @click="store.stop(project.id)">
+          <el-button size="small" :icon="VideoPause" @click="store.stop(project.id)">
             停止
           </el-button>
-          <el-button :icon="Refresh" @click="restart">
+          <el-button size="small" :icon="Refresh" @click="restart">
             重启
           </el-button>
         </template>
         <el-button
           v-else
+          size="small"
           type="primary"
           :icon="VideoPlay"
           :disabled="!pathValid || !project.scripts.serve || !!project.manageOnly"
@@ -464,6 +450,7 @@ async function removeProject(): Promise<void> {
 
         <el-dropdown
           split-button
+          size="small"
           :disabled="isBusy || isRunning || !pathValid || !!project.manageOnly || !project.scripts.build.length"
           @click="onBuild()"
           @command="onBuild"
@@ -484,6 +471,7 @@ async function removeProject(): Promise<void> {
         </el-dropdown>
 
         <el-button
+          size="small"
           :icon="Download"
           :loading="status === 'installing'"
           :disabled="isBusy || isRunning || !pathValid || !!project.manageOnly"
@@ -623,17 +611,8 @@ async function removeProject(): Promise<void> {
 
           <div class="field">
             <label class="field__label">监听端口</label>
-            <el-input
-              v-model="portDraft"
-              size="small"
-              placeholder="如 5173"
-              clearable
-              @change="commitPort"
-              @keyup.enter="commitPort"
-            />
-            <p class="field__hint">
-              开发服务占用的端口，用来判断项目是否已经在运行（含 Workbench 之外启动的）。
-              启动应用时会自动探测一次，卡片上的「检测」也用它。留空则不检测。
+            <p class="port mono" :class="{ 'port--empty': portText === '未识别' }">
+              {{ portText }}
             </p>
           </div>
 
@@ -1089,6 +1068,17 @@ async function removeProject(): Promise<void> {
   font-size: var(--fs-meta);
   color: var(--ink-3);
   line-height: 1.7;
+}
+
+/* 监听端口只读展示：应用自己写回 / 清空，不提供输入框（见 docs/modules/projects.md） */
+.port {
+  margin: 0;
+  font-size: var(--fs-body);
+  color: var(--ink-2);
+}
+
+.port--empty {
+  color: var(--ink-3);
 }
 
 /* 标识色那一行：下拉吃剩余宽度，选了自定义时右边多一个取色器 */

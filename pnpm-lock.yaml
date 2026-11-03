@@ -253,6 +253,9 @@ importers:
       docx-preview:
         specifier: ^0.4.1
         version: 0.4.1
+      echarts:
+        specifier: ^6.1.0
+        version: 6.1.0
       element-plus:
         specifier: ^2.14.7
         version: 2.14.7(vue@3.5.43(typescript@6.0.3))

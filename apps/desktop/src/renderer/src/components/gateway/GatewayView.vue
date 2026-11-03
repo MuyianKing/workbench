@@ -7,6 +7,7 @@ import { computed, onActivated, onBeforeUnmount, onMounted, ref } from 'vue'
 import EmptyState from '@/components/EmptyState.vue'
 import { formatTimestamp } from '@/format'
 import AccessDialog from './AccessDialog.vue'
+import CreditsDialog from './CreditsDialog.vue'
 import ModelsPane from './ModelsPane.vue'
 import PerksPane from './PerksPane.vue'
 import RequestsPane from './RequestsPane.vue'
@@ -37,6 +38,9 @@ const credits = ref<Record<string, GatewayCredits>>({})
 const usage = ref<GatewayUsageSummary | null>(null)
 const access = ref<GatewayAccess | null>(null)
 const accessOpen = ref(false)
+/** 积分明细弹层：点账号卡上的积分打开，`creditsUid` 记着在看哪个号 */
+const creditsOpen = ref(false)
+const creditsUid = ref('')
 const busy = ref(false)
 const port = ref(17878)
 const loginHint = ref('')
@@ -88,6 +92,26 @@ const stats = computed(() => {
 
 function usageOf(uid: string) {
   return usage.value?.byAccount.find(item => item.uid === uid)
+}
+
+/** 明细弹层在看哪个号（账号删掉后就是 null） */
+const creditsAccount = computed(() => accounts.value.find(item => item.uid === creditsUid.value) ?? null)
+/** 弹层读的快照与账号卡是同一份：查完余额两处一起变 */
+const creditsDetail = computed(() => (creditsUid.value ? credits.value[creditsUid.value] ?? null : null))
+
+function openCredits(account: GatewayAccount): void {
+  creditsUid.value = account.uid
+  creditsOpen.value = true
+}
+
+/**
+ * 弹层里点「查余额 / 刷新」：走单号查询，结果写回 `credits`，弹层跟着更新。
+ * 弹层自己不碰网络 —— 快照只存一份。
+ */
+async function refreshDetail(): Promise<void> {
+  const account = creditsAccount.value
+  if (account)
+    await queryOne(account)
 }
 
 function remainPercent(value: GatewayCredits): number {
@@ -411,6 +435,11 @@ async function removeAccount(account: GatewayAccount): Promise<void> {
     ElMessage.error(result.error ?? '删除失败')
     return
   }
+  // 正在看这个号的明细就一并关掉：剩下的快照已经没主了
+  if (creditsUid.value === account.uid) {
+    creditsOpen.value = false
+    creditsUid.value = ''
+  }
   await refresh()
 }
 
@@ -640,7 +669,16 @@ onBeforeUnmount(() => {
               :title="quotaHint(account) || undefined"
             >{{ quotaHint(account) || '—' }}</span>
 
-            <div class="gw__account-credits">
+            <!-- 点这一块看逐包到期：账号卡只放得下「剩余 / 总额」，说不出哪天作废 -->
+            <div
+              class="gw__account-credits"
+              role="button"
+              tabindex="0"
+              :aria-label="`查看 ${account.label} 的积分明细`"
+              @click="openCredits(account)"
+              @keydown.enter.prevent="openCredits(account)"
+              @keydown.space.prevent="openCredits(account)"
+            >
               <div class="gw__credits-line">
                 <span class="gw__dim">积分</span>
                 <template v-if="credits[account.uid]">
@@ -737,6 +775,15 @@ onBeforeUnmount(() => {
       :base-url="baseUrl"
       :api-key="apiKey"
       @rotate="rotateKey"
+    />
+
+    <!-- 积分明细：点账号卡上的积分打开（只读展示，查余额仍走网关页） -->
+    <CreditsDialog
+      v-model="creditsOpen"
+      :label="creditsAccount?.label ?? ''"
+      :credits="creditsDetail"
+      :loading="creditsAccount ? creditPending[creditsAccount.uid] === true : false"
+      @refresh="refreshDetail"
     />
   </section>
 </template>
@@ -1173,6 +1220,22 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: var(--sp-1);
+  /* 整块可点开积分明细：手型 + 悬停浅底给反馈。
+     热区用「内边距 + 等量负外边距」撑开，内容位置不动 */
+  padding: var(--sp-1) var(--sp-2);
+  margin: calc(var(--sp-1) * -1) calc(var(--sp-2) * -1);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: background 120ms var(--ease-out);
+}
+
+.gw__account-credits:hover {
+  background: color-mix(in srgb, var(--ink-3) 8%, transparent);
+}
+
+.gw__account-credits:focus-visible {
+  outline: 2px solid var(--el-color-primary);
+  outline-offset: -2px;
 }
 
 .gw__credits-line {

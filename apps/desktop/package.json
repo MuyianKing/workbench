@@ -41,6 +41,7 @@
     "@workbench/zentao": "workspace:*",
     "dayjs": "^1.11.23",
     "docx-preview": "^0.4.1",
+    "echarts": "^6.1.0",
     "element-plus": "^2.14.7",
     "pdfjs-dist": "^6.4.299",
     "pinia": "^4.0.3",

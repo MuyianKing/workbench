@@ -201,7 +201,8 @@ export const useAiStore = defineStore('ai', () => {
   /**
    * 还没有会话时那一屏（`AiView` 的起始屏）：**下一个会话在哪个目录里干活**。
    * 它是那一屏上唯一要先定下来的东西 —— 用户在位置那一栏挑过就是挑的那个，没挑过接着
-   * 最近用过的那个，一进页面就能直接写（会话在发出第一句时才建，见 run）。
+   * 最近用过的那个；**一个都没有（`newDir` 为空）时起始屏不画 composer**（没有落处，
+   * 写了也发不出去），会话在发出第一句时才建（见 run）。
    */
   const pickedDir = ref('')
   const newDir = computed(() => pickedDir.value || recentDirs.value[0] || '')
