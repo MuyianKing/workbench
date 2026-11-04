@@ -13,7 +13,7 @@ import { axisTotal, bucketRangeOf, buildSeriesRange, emptyCounters, flattenSourc
  * credits 那边不画模型占比(那一维在额度上没有意义,见 showModels),只留工具占比。
  *
  * 趋势窗口由头部的预设下拉给出(默认「近 30 天」,与 DeepSeek 用量页同款:
- * 近 7 天 / 近 30 天 / 本月 / 上月 / 自定义;可选的日子限于当前口径下有记录的那段),
+ * 近 7 天 / 近 30 天 / 本月 / 上月 / 全部 / 自定义;可选的日子限于当前口径下有记录的那段),
  * 右侧 天/周/月 页签只切换柱子的分桶宽度,窗口本身不变;
  * 概览那一行的第三格**跟着这个窗口走**(标签与数字都换) —— 前两格是「此刻」的口径
  * (今天 / 本周至今),第三格报当前看的那一段,数字等于图上柱子之和;
@@ -270,11 +270,17 @@ const earliestKey = computed(
 /**
  * 把趋势窗口收敛回可选范围:终点不晚于今天,起点不早于快照最早那天。
  * 预设档每次都按「现在」重新解析 —— 跨过午夜后「今天 / 近 7 天 / 本月」才会跟着时钟走;
+ * 「全部」没有固定的字面区间,起点取快照里最早有数的那天,重读把历史补得更早时它也跟着前移;
  * 自定义档只做边界收敛,不动用户选的那一段。
  */
 function clampRange(): void {
   const earliest = earliestKey.value
   const latest = todayKey.value
+  if (rangePreset.value === 'all') {
+    fromKey.value = earliest
+    toKey.value = latest
+    return
+  }
   if (rangePreset.value !== 'custom') {
     const range = resolvePresetRange(rangePreset.value, nowTick.value)
     if (range) {
@@ -299,9 +305,16 @@ function clampRange(): void {
     fromKey.value = toKey.value
 }
 
-/** 下拉里点了某一档:窗口交给预设解析,再按快照范围收敛 */
+/**
+ * 下拉里点了某一档:窗口交给预设解析,再按快照范围收敛。
+ *
+ * 「全部」铺满整个快照(最长 53 周),逐日柱子在那里既挤不下也看不出形状 ——
+ * 当前还是「天」就顺手落到「月」;已经是周 / 月则不动,那是用户自己定的宽度。
+ */
 function pickPreset(preset: TokenRangePreset): void {
   rangePreset.value = preset
+  if (preset === 'all' && granularity.value === 'day')
+    granularity.value = 'month'
   clampRange()
 }
 

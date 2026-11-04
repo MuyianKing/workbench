@@ -719,9 +719,10 @@ export function shareBySource(
 
 /**
  * 时间筛选的档位:与 DeepSeek 用量页的「时间维度」同款。
- * custom 不携带固定区间,由日历上选出的起止日期决定。
+ * all 与 custom 不携带固定区间:前者的起点是快照里最早有数的那天(只有面板知道),
+ * 后者由日历上选出的起止日期决定。
  */
-export type TokenRangePreset = 'last7' | 'last30' | 'thisMonth' | 'lastMonth' | 'custom'
+export type TokenRangePreset = 'all' | 'last7' | 'last30' | 'thisMonth' | 'lastMonth' | 'custom'
 
 /** 面板里的固定顺序:自定义放最后,选中它才展开右侧的区间日历 */
 export const TOKEN_RANGE_PRESETS: ReadonlyArray<{ key: TokenRangePreset, label: string }> = [
@@ -729,6 +730,7 @@ export const TOKEN_RANGE_PRESETS: ReadonlyArray<{ key: TokenRangePreset, label: 
   { key: 'last30', label: '近 30 天' },
   { key: 'thisMonth', label: '本月' },
   { key: 'lastMonth', label: '上月' },
+  { key: 'all', label: '全部' },
   { key: 'custom', label: '自定义' },
 ]
 
@@ -740,7 +742,8 @@ export function presetLabel(preset: TokenRangePreset): string {
 /**
  * 预设 → 日期区间(含两端),锚点是「今天」:近 N 天与本月都截至今天,上个月是已经走完的整月。
  * 调用方每次刷新重新解析,跨过午夜后「近 7 天 / 本月」才会跟着走。
- * 自定义没有固定区间,返回 null,由调用方保留已选的那段。
+ * 全部与自定义没有固定区间,返回 null:「全部」的起点是快照里最早有数的那天(只有面板知道),
+ * 自定义由调用方保留已选的那段。
  */
 export function resolvePresetRange(
   preset: TokenRangePreset,

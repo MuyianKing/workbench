@@ -542,17 +542,20 @@ describe('时间维度预设', () => {
     })
   })
 
-  it('自定义没有固定区间,时间戳非法时返回 null', () => {
+  it('全部与自定义都没有固定区间,时间戳非法时返回 null', () => {
+    // 「全部」的起点是快照里最早有数的那天,只有面板知道,解析函数只报「没有字面区间」
+    expect(resolvePresetRange('all', NOW)).toBeNull()
     expect(resolvePresetRange('custom', NOW)).toBeNull()
     expect(resolvePresetRange('last7', new Date(NaN))).toBeNull()
   })
 
-  it('面板里的五档与界面名一一对应', () => {
+  it('面板里的六档与界面名一一对应', () => {
     expect(TOKEN_RANGE_PRESETS.map(option => option.key)).toEqual([
       'last7',
       'last30',
       'thisMonth',
       'lastMonth',
+      'all',
       'custom',
     ])
     for (const option of TOKEN_RANGE_PRESETS) {
