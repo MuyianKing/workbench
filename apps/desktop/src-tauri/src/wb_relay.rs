@@ -10,7 +10,7 @@
 
 use std::time::Instant;
 
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 use crate::wb_account::Account;
 use crate::wb_api_chat::{self, ChatCall, UpstreamEvent};
@@ -425,21 +425,46 @@ fn stream_response(mut handle: wb_api_chat::StreamHandle, meta: UsageMeta) -> Re
         let mut normalizer = Normalizer::new();
         let mut capture = Capture::new();
         let mut emitted = false;
+        let mut failure: Option<String> = None;
 
         while let Some(event) = handle.next() {
             let UpstreamEvent::Chunk(bytes) = event else {
                 continue;
             };
             for payload in decoder.push(&bytes) {
-                if !emit(&payload, writer, &mut normalizer, &mut capture, &mut emitted)? {
-                    record(&meta, &capture, true, "");
+                if !emit(
+                    &payload,
+                    writer,
+                    &mut normalizer,
+                    &mut capture,
+                    &mut emitted,
+                    &mut failure,
+                )? {
+                    record(
+                        &meta,
+                        &capture,
+                        failure.is_none(),
+                        failure.as_deref().unwrap_or(""),
+                    );
                     return Ok(());
                 }
             }
         }
         for payload in decoder.finish() {
-            if !emit(&payload, writer, &mut normalizer, &mut capture, &mut emitted)? {
-                record(&meta, &capture, true, "");
+            if !emit(
+                &payload,
+                writer,
+                &mut normalizer,
+                &mut capture,
+                &mut emitted,
+                &mut failure,
+            )? {
+                record(
+                    &meta,
+                    &capture,
+                    failure.is_none(),
+                    failure.as_deref().unwrap_or(""),
+                );
                 return Ok(());
             }
         }
@@ -453,20 +478,30 @@ fn stream_response(mut handle: wb_api_chat::StreamHandle, meta: UsageMeta) -> Re
                     "code": "empty_stream"
                 }
             })))?;
+            writer.write_text(DONE_FRAME)?;
+            record(&meta, &capture, false, "上游返回了空流");
+            return Ok(());
         }
         writer.write_text(DONE_FRAME)?;
-        record(&meta, &capture, true, "");
+        record(
+            &meta,
+            &capture,
+            failure.is_none(),
+            failure.as_deref().unwrap_or(""),
+        );
         Ok(())
     })
 }
 
-/// 处理一帧。返回 false 表示这一轮该收尾了。
+/// 处理一帧。返回 false 表示这一轮该收尾了；`failure` 记下流内错误，
+/// 让调用方按失败记账（否则上游 200 之后的 error 帧会被算成成功）。
 fn emit(
     payload: &str,
     writer: &mut crate::wb_server::ChunkedWriter<'_>,
     normalizer: &mut Normalizer,
     capture: &mut Capture,
     emitted: &mut bool,
+    failure: &mut Option<String>,
 ) -> Result<bool, String> {
     match wb_sse::parse_frame(payload) {
         Frame::Done => {
@@ -477,14 +512,21 @@ fn emit(
         }
         Frame::Error { code, message } => {
             writer.write_text(&wb_sse::frame_text(&serde_json::json!({
-                "error": { "message": message, "type": "upstream_error", "code": code }
+                "error": { "message": &message, "type": "upstream_error", "code": &code }
             })))?;
             writer.write_text(DONE_FRAME)?;
             *emitted = true;
+            *failure = Some(match code {
+                Some(code) => format!("{message}（code {code}）"),
+                None => message,
+            });
             Ok(false)
         }
         Frame::Ignore => Ok(true),
         Frame::Json(chunk) => {
+            if let Some(message) = chunk_failure(&chunk) {
+                *failure = Some(message);
+            }
             capture.see(&chunk);
             if let Some(clean) = normalizer.normalize(&chunk) {
                 writer.write_text(&wb_sse::frame_text(&clean))?;
@@ -495,12 +537,39 @@ fn emit(
     }
 }
 
+/// 上游把错误塞进普通 JSON 帧的两种形状：顶层 `error`，或
+/// `finish_reason: "error"`。
+fn chunk_failure(chunk: &Value) -> Option<String> {
+    if let Some(error) = chunk.get("error") {
+        let message = error
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("上游流内错误");
+        return Some(message.to_string());
+    }
+    let failed = chunk
+        .get("choices")
+        .and_then(Value::as_array)
+        .map(|choices| {
+            choices.iter().any(|choice| {
+                choice.get("finish_reason").and_then(Value::as_str) == Some("error")
+            })
+        })
+        .unwrap_or(false);
+    if failed {
+        Some("上游流内错误".to_string())
+    } else {
+        None
+    }
+}
+
 /// 非流式：把整条流聚合成一个 `chat.completion`。上游已经回了 200。
 fn aggregate_response(mut handle: wb_api_chat::StreamHandle, meta: UsageMeta) -> Response {
     let mut decoder = Decoder::new();
     let mut aggregator = Aggregator::new();
     let mut capture = Capture::new();
     let mut saw_done = false;
+    let mut failure: Option<String> = None;
 
     while let Some(event) = handle.next() {
         let UpstreamEvent::Chunk(bytes) = event else {
@@ -513,17 +582,18 @@ fn aggregate_response(mut handle: wb_api_chat::StreamHandle, meta: UsageMeta) ->
                     break;
                 }
                 Frame::Error { code, message } => {
-                    return Response::error(
-                        502,
-                        "upstream_error",
-                        &match code {
-                            Some(code) => format!("{message}（code {code}）"),
-                            None => message,
-                        },
-                    )
+                    let message = match code {
+                        Some(code) => format!("{message}（code {code}）"),
+                        None => message,
+                    };
+                    record(&meta, &capture, false, &message);
+                    return Response::error(502, "upstream_error", &message);
                 }
                 Frame::Ignore => {}
                 Frame::Json(chunk) => {
+                    if let Some(message) = chunk_failure(&chunk) {
+                        failure = Some(message);
+                    }
                     capture.see(&chunk);
                     aggregator.push(&chunk);
                 }
@@ -535,7 +605,12 @@ fn aggregate_response(mut handle: wb_api_chat::StreamHandle, meta: UsageMeta) ->
     }
 
     // 没等到 [DONE] 就是被截断了：聚合时丢掉半截工具调用
-    record(&meta, &capture, true, "");
+    record(
+        &meta,
+        &capture,
+        failure.is_none(),
+        failure.as_deref().unwrap_or(""),
+    );
     Response::json(&aggregator.finish(!saw_done))
 }
 
@@ -555,9 +630,12 @@ fn drain_text(handle: &mut wb_api_chat::StreamHandle) -> String {
 /// 请求体归一化。**只做上游要求的那几件事**，不偷偷改写用户的消息：
 /// 1. 强制 `stream: true` —— 上游拒绝非流式（这是硬要求，不是优化）；
 /// 2. 缺 `stream_options.include_usage` 就补上，否则拿不到 token 数；
-/// 3. `developer` 角色改 `system` —— 上游只认 system。
+/// 3. `developer` 角色改 `system` —— 上游只认 system；
+/// 4. `tool_choice` / `tools` / `stop` 收敛成上游认的形状（对象形式的 tool_choice、
+///    无效的 function.name、字符串 stop 都会 11101 / 11133）；
+/// 5. 要求显式思考档位的模型（glm-5.1）补目录默认档（缺档 / 关思考会 11150）。
 ///
-/// 工具配对、思考档位、指纹清洗那些不在这里：它们各自有归属（S3）。
+/// 指纹清洗与 reasoning 内容归一在 [`crate::wb_sanitize`]。
 pub fn normalize_body(mut value: Value) -> Value {
     let Some(object) = value.as_object_mut() else {
         return value;
@@ -596,11 +674,249 @@ pub fn normalize_body(mut value: Value) -> Value {
         }
     }
 
+    let model = object
+        .get("model")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
+    normalize_tool_choice(object);
+    normalize_tools(object);
+    normalize_stop(object);
+    ensure_explicit_effort(object, &model);
+
     // 上游的渠道校验会拦 Claude Code / Codex 的 system 模板句；reasoning 片段与
     // DeepSeek 的 reasoning_content 也在这里归一。见 wb_sanitize 的文件头。
     crate::wb_sanitize::sanitize_body(&mut value);
 
     value
+}
+
+/// `tool_choice` 上游只认字符串。对象形式（OpenAI 规范允许）要降级：
+/// `{"type":"function","function":{"name":…}}` → 函数名；`auto` / `required` / `none`
+/// 收敛成同名字符串。`none` 时**不删 tools** —— 删了模型会失去工具签名，
+/// 把调用退化成正文里的伪 JSON，Agent 客户端反而空转。
+fn normalize_tool_choice(object: &mut Map<String, Value>) {
+    let Some(value) = object.get("tool_choice").cloned() else {
+        return;
+    };
+    let replacement = match &value {
+        Value::String(text) => {
+            let lower = text.trim().to_ascii_lowercase();
+            if lower == "none" {
+                Some(Value::String("none".into()))
+            } else {
+                Some(value.clone())
+            }
+        }
+        Value::Object(choice) => {
+            let kind = choice
+                .get("type")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim()
+                .to_ascii_lowercase();
+            match kind.as_str() {
+                "none" => Some(Value::String("none".into())),
+                "auto" | "required" => Some(Value::String(kind)),
+                "function" => {
+                    let name = choice
+                        .get("function")
+                        .and_then(|function| function.get("name"))
+                        .and_then(Value::as_str)
+                        .or_else(|| choice.get("name").and_then(Value::as_str))
+                        .unwrap_or("")
+                        .trim()
+                        .to_string();
+                    Some(Value::String(if name.is_empty() {
+                        "auto".into()
+                    } else {
+                        name
+                    }))
+                }
+                _ => None,
+            }
+        }
+        _ => None,
+    };
+    match replacement {
+        Some(value) => {
+            object.insert("tool_choice".to_string(), value);
+        }
+        None => {
+            object.remove("tool_choice");
+        }
+    }
+}
+
+/// `tools` 收敛成上游的 function schema。上游客不认的东西一律丢掉：
+/// 空 `function`、裸服务端工具（`{"type":"web_search"}`）、不合法的 function.name、
+/// 重名。全部不可用时连 `tools` / `tool_choice` 一起删，避免上游按路径报 11133。
+fn normalize_tools(object: &mut Map<String, Value>) {
+    // 老客户端可能还发根级 `functions`。
+    if !object.contains_key("tools") {
+        if let Some(Value::Array(functions)) = object.remove("functions") {
+            let tools: Vec<Value> = functions
+                .into_iter()
+                .filter(Value::is_object)
+                .map(|function| serde_json::json!({"type": "function", "function": function}))
+                .collect();
+            if !tools.is_empty() {
+                object.insert("tools".to_string(), Value::Array(tools));
+            }
+        }
+    }
+
+    let Some(Value::Array(tools)) = object.get("tools").cloned() else {
+        object.remove("tools");
+        object.remove("tool_choice");
+        return;
+    };
+
+    let mut seen = std::collections::HashSet::new();
+    let mut normalized = Vec::new();
+    for tool in tools {
+        let Some(item) = tool.as_object() else {
+            continue;
+        };
+        let (mut function, wrapped) = if let Some(existing) = item
+            .get("function")
+            .and_then(Value::as_object)
+        {
+            (existing.clone(), false)
+        } else if item.contains_key("name") {
+            let mut function = Map::new();
+            for key in ["name", "description", "parameters", "strict"] {
+                if let Some(value) = item.get(key) {
+                    function.insert(key.to_string(), value.clone());
+                }
+            }
+            (function, true)
+        } else {
+            continue;
+        };
+        let parameters_ok = function
+            .get("parameters")
+            .map(Value::is_object)
+            .unwrap_or(false);
+        if !parameters_ok {
+            function.insert(
+                "parameters".to_string(),
+                serde_json::json!({"type": "object", "properties": {}}),
+            );
+        }
+        let name = function
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        if !valid_tool_name(&name) || !seen.insert(name) {
+            continue;
+        }
+        let mut entry = if wrapped { Map::new() } else { item.clone() };
+        entry.insert("type".to_string(), Value::String("function".into()));
+        entry.insert("function".to_string(), Value::Object(function));
+        normalized.push(Value::Object(entry));
+    }
+
+    if normalized.is_empty() {
+        object.remove("tools");
+        object.remove("tool_choice");
+    } else {
+        object.insert("tools".to_string(), Value::Array(normalized));
+    }
+}
+
+fn valid_tool_name(name: &str) -> bool {
+    let length = name.chars().count();
+    (1..=64).contains(&length)
+        && name
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
+}
+
+/// OpenAI 的 `stop` 既可以是字符串也可以是数组；上游把该字段定死成 `[]string`，
+/// 收到字符串直接 11101。单字符串 = 单元素数组，语义完全等价。
+fn normalize_stop(object: &mut Map<String, Value>) {
+    let Some(value) = object.remove("stop") else {
+        return;
+    };
+    let normalized = match value {
+        Value::String(text) if !text.is_empty() => Some(Value::Array(vec![Value::String(text)])),
+        Value::Array(items) => {
+            let kept: Vec<Value> = items
+                .into_iter()
+                .filter(|item| item.as_str().map(|text| !text.is_empty()).unwrap_or(false))
+                .collect();
+            if kept.is_empty() {
+                None
+            } else {
+                Some(Value::Array(kept))
+            }
+        }
+        _ => None,
+    };
+    if let Some(value) = normalized {
+        object.insert("stop".to_string(), value);
+    }
+}
+
+/// 上游要求显式思考档位的模型。实测 glm-5.1 缺档 / 关思考一律 400 / 11150。
+const EXPLICIT_EFFORT_MODELS: [&str; 1] = ["glm-5.1"];
+
+fn ensure_explicit_effort(object: &mut Map<String, Value>, model: &str) {
+    if !EXPLICIT_EFFORT_MODELS
+        .iter()
+        .any(|item| model.eq_ignore_ascii_case(item))
+    {
+        return;
+    }
+    let disabled = object
+        .get("thinking")
+        .and_then(|item| item.get("type"))
+        .and_then(Value::as_str)
+        .map(|kind| kind.trim().eq_ignore_ascii_case("disabled"))
+        .unwrap_or(false);
+    if disabled {
+        object.remove("thinking");
+    }
+    let key = if object.contains_key("reasoning_effort") {
+        "reasoning_effort"
+    } else if object.contains_key("reasoningEffort") {
+        "reasoningEffort"
+    } else {
+        "reasoning_effort"
+    };
+    let current = object
+        .get(key)
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    if !current.is_empty() && !is_off_effort(&current) {
+        return;
+    }
+    let effort = default_effort_for(model).unwrap_or_else(|| "medium".to_string());
+    object.insert(key.to_string(), Value::String(effort));
+}
+
+fn is_off_effort(value: &str) -> bool {
+    matches!(
+        value.trim().to_ascii_lowercase().as_str(),
+        "off" | "none" | "disabled" | "disable"
+    )
+}
+
+/// 目录里的默认档；目录没声明就交给调用方兜底 `medium`。
+fn default_effort_for(model: &str) -> Option<String> {
+    let entry = crate::wb_models::cached()
+        .into_iter()
+        .find(|item| item.id.eq_ignore_ascii_case(model))?;
+    if !entry.default_effort.trim().is_empty() {
+        return Some(entry.default_effort);
+    }
+    entry.efforts.first().cloned()
 }
 
 /// `GET /v1/models`。优先给缓存里的真实目录（用户点「重新获取」时拉的，见 `wb_models`）；
@@ -774,5 +1090,121 @@ mod tests {
         assert_eq!(value["object"], "list");
         assert!(value["data"].as_array().unwrap().len() >= 4);
         assert_eq!(value["data"][0]["object"], "model");
+    }
+
+    #[test]
+    fn glm_5_1_缺档补默认档并去掉关思考() {
+        let out = body(serde_json::json!({
+            "model": "glm-5.1",
+            "thinking": {"type": "disabled"},
+            "messages": [{"role": "user", "content": "hi"}]
+        }));
+        assert!(out.get("thinking").is_none());
+        let effort = out["reasoning_effort"].as_str().unwrap();
+        assert!(!effort.is_empty() && effort != "none");
+    }
+
+    #[test]
+    fn glm_5_1_显式档位不被覆盖() {
+        let out = body(serde_json::json!({
+            "model": "glm-5.1",
+            "reasoning_effort": "high",
+            "messages": [{"role": "user", "content": "hi"}]
+        }));
+        assert_eq!(out["reasoning_effort"], "high");
+    }
+
+    #[test]
+    fn 字符串_stop_归一成数组() {
+        let out = body(serde_json::json!({"model": "glm-5.2", "stop": "END"}));
+        assert_eq!(out["stop"], serde_json::json!(["END"]));
+        let out = body(serde_json::json!({"model": "glm-5.2", "stop": ""}));
+        assert!(out.get("stop").is_none());
+        let out = body(serde_json::json!({"model": "glm-5.2", "stop": ["END", "", 1]}));
+        assert_eq!(out["stop"], serde_json::json!(["END"]));
+    }
+
+    #[test]
+    fn tool_choice_对象降级成字符串() {
+        let out = body(serde_json::json!({
+            "model": "glm-5.2",
+            "tools": [{"type": "function", "function": {"name": "Read"}}],
+            "tool_choice": {"type": "function", "function": {"name": "Read"}}
+        }));
+        assert_eq!(out["tool_choice"], "Read");
+        let out = body(serde_json::json!({
+            "model": "glm-5.2",
+            "tools": [{"type": "function", "function": {"name": "Read"}}],
+            "tool_choice": {"type": "none"}
+        }));
+        assert_eq!(out["tool_choice"], "none");
+        assert!(out["tools"].as_array().is_some(), "none 时不该删 tools");
+    }
+
+    #[test]
+    fn 无效工具声明被丢掉_参数补空_schema() {
+        let out = body(serde_json::json!({
+            "model": "glm-5.2",
+            "tools": [
+                {"type": "web_search"},
+                {"type": "function", "function": {"name": "bad name"}},
+                {"type": "function", "function": {"name": "Read"}},
+                {"type": "function", "function": {"name": "Read"}},
+                {"name": "Write", "description": "写文件"}
+            ]
+        }));
+        let tools = out["tools"].as_array().unwrap();
+        assert_eq!(tools.len(), 2);
+        assert_eq!(tools[0]["function"]["name"], "Read");
+        assert_eq!(
+            tools[0]["function"]["parameters"],
+            serde_json::json!({"type": "object", "properties": {}})
+        );
+        assert_eq!(tools[1]["function"]["name"], "Write");
+        assert_eq!(tools[1]["type"], "function");
+    }
+
+    #[test]
+    fn 工具全部不可用时连_tool_choice_一起删() {
+        let out = body(serde_json::json!({
+            "model": "glm-5.2",
+            "tools": [{"type": "web_search"}],
+            "tool_choice": "auto"
+        }));
+        assert!(out.get("tools").is_none());
+        assert!(out.get("tool_choice").is_none());
+    }
+
+    #[test]
+    fn 流内错误帧被认出来() {
+        assert_eq!(
+            chunk_failure(&serde_json::json!({"error": {"message": "boom"}})).as_deref(),
+            Some("boom")
+        );
+        assert!(chunk_failure(&serde_json::json!({
+            "choices": [{"delta": {}, "finish_reason": "error"}]
+        }))
+        .is_some());
+        assert!(chunk_failure(&serde_json::json!({
+            "choices": [{"delta": {"content": "hi"}, "finish_reason": null}]
+        }))
+        .is_none());
+    }
+
+    #[test]
+    fn 根级_functions_也归一成_tools() {
+        let out = body(serde_json::json!({
+            "model": "glm-5.2",
+            "functions": [{"name": "Read", "parameters": {"type": "object"}}]
+        }));
+        assert_eq!(out["tools"][0]["type"], "function");
+        assert_eq!(out["tools"][0]["function"]["name"], "Read");
+        assert!(out.get("functions").is_none());
+
+        let out = body(serde_json::json!({
+            "model": "glm-5.2",
+            "functions": [{"name": "bad name"}]
+        }));
+        assert!(out.get("tools").is_none());
     }
 }

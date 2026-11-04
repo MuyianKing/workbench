@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { AiImage, AiPreviewState, AiPreviewTarget } from '@workbench/ai'
-import { ChatDotRound, Download, Expand, Fold, FolderAdd, MagicStick, Plus } from '@element-plus/icons-vue'
+import { ArrowDown, Download, Expand, Fold, Folder, FolderAdd, FolderOpened, MagicStick, Plus, Share } from '@element-plus/icons-vue'
 import { AI_IMAGE_MAX, AI_PREVIEW_MAX_BINARY_CHARS, AI_PREVIEW_MAX_CHARS, htmlImageSrcs, resolveAiPreview } from '@workbench/ai'
 import { markdownImages } from '@workbench/core'
 import { noteRootName } from '@workbench/notes'
@@ -17,15 +17,15 @@ import { noteRootName } from '@workbench/notes'
  *    底部那一行是两个不跟会话走的入口：**技能**（装卸与开关的管理弹窗）与**收起整栏**。
  *  - **右栏**：挑中一个会话就是**控制台** —— 上面是这段对话（历史 + 这一轮，自己往下滚），
  *    下面还是那一栏目录与分支 + composer（跑着的时候那颗按钮就是停止）。
- *    没挑中会话时是**起始那一屏**（一段会话都还没有，或者刚点了「+」）：一副缺省空态
- *    （图 + 一句事实 + 居中的选目录按钮，最近目录在那颗按钮的下拉里）压在 composer
- *    上方 —— **还没选定工作目录时那条 composer 不画**（没有落处，写了也发不出去），
- *    选好目录它才出现在空态下面；会话在发出第一句时才建（见 stores/ai.ts 的 run）。
+ *    没挑中会话时是**起始那一屏**（一段会话都还没有，或者刚点了「+」）：一句居中的开场白，
+ *    下面先是目录与分支那一行（**不进 composer 的玻璃面**，最近目录在那颗目录键的下拉里），
+ *    再是同一条 composer —— 没选目录也画：发送按钮按不动，悬停里说差什么；会话在发出
+ *    第一句时才建（见 stores/ai.ts 的 run）。
  *    **两屏都没有顶部工具条**：标题、目录那些要么与导航栏重复、要么下面那一栏已经说了。
  *
- * **页面不摆提示行**（说明、问候、还差什么）：这个应用是给作者自己用的，页面上把控件本身
+ * **页面不摆提示行**（说明、还差什么）：这个应用是给作者自己用的，页面上把控件本身
  * 已经说清的事再讲一遍就是噪音。缺什么由 composer 自己的 `blocking` 说，而它只出现在
- * 发送按钮的悬停里；问候在顶栏那一行（见 HomeGreeting），这一页只说这件事本身。
+ * 发送按钮的悬停里；问候在顶栏那一行（见 HomeGreeting），起始屏这句开场白不再重复时段。
  *
  * 页面自己只做编排与状态呈现：会话的增删选、起进程、读历史、停止都在 stores/ai.ts，
  * 模型与档位那两个下拉直接写设置（行为记忆，下次打开还是它）。**输入框里那句指令与贴上的
@@ -40,7 +40,6 @@ import AiPreviewPane from '@/components/AiPreviewPane.vue'
 import AiRunPanel from '@/components/AiRunPanel.vue'
 import AiSessionTree from '@/components/AiSessionTree.vue'
 import AiSkillDialog from '@/components/AiSkillDialog.vue'
-import EmptyState from '@/components/EmptyState.vue'
 import PanelResizer from '@/components/PanelResizer.vue'
 import { basenameOf } from '@/format'
 import { notifyWarning } from '@/notify'
@@ -435,58 +434,64 @@ const runningIds = computed(() =>
       </template>
 
       <!-- 起始那一屏：没挑中会话（一段都还没有 / 都删光了 / 刚点了左栏那颗「+」）——
-           一副缺省空态（图 + 一句事实 + 居中的选目录按钮）压在 composer 上方。
-           **还没选定工作目录（`newDir` 为空）时下面那条 composer 不画**：没有落处，
-           写了也发不出去；选好目录它才出现在空态下面。会话在发出第一句时才建（见 stores/ai.ts 的 run）。 -->
+           一句开场白压在上面，下面是同一条 composer；目录与分支是 composer 上面那一行
+           （不进卡片 —— 里面是半透明的玻璃面），没选目录也画 —— 发送按钮按不动，悬停里说差什么。
+           会话在发出第一句时才建（见 stores/ai.ts 的 run）。 -->
       <div v-else class="landing">
-        <EmptyState
-          class="landing__intro"
-          :icon="ChatDotRound"
-          text="下一段对话还没开始"
-          hint="一个目录是一个项目，下面可以有好几段对话 —— 选好目录，在下面写下第一句。"
-        >
-          <template #actions>
-            <el-dropdown trigger="click" @command="onLandingDir">
-              <el-button size="small" :icon="FolderAdd">
-                {{ ai.newDir ? noteRootName(ai.newDir) : '选择工作目录' }}
-              </el-button>
-              <template #dropdown>
-                <el-dropdown-menu>
-                  <el-dropdown-item v-for="item in ai.recentDirs" :key="item" :command="item">
-                    {{ noteRootName(item) }}
-                  </el-dropdown-item>
-                  <el-dropdown-item command="pick" :divided="ai.recentDirs.length > 0" :icon="FolderAdd">
-                    选择其他目录…
-                  </el-dropdown-item>
-                </el-dropdown-menu>
-              </template>
-            </el-dropdown>
-          </template>
-        </EmptyState>
-        <div class="landing__box">
-          <!-- 没选定目录就整条不画（见上面那段注释）；「安装 Pi」那颗不归它管，照旧留着 -->
-          <AiComposer
-            v-if="ai.newDir"
-            v-model:instruction="instruction"
-            :images="images"
-            @add-images="addImages"
-            @remove-image="removeImage"
-            @send="send"
-            @configure="modelVisible = true"
-          />
+        <div class="landing__group">
+          <p class="landing__hello">
+            有什么想让我帮忙的吗
+          </p>
+          <div class="landing__box">
+            <!-- 目录与分支：与挑中会话那一屏的位置栏同一个位置（composer 上面、不进它的玻璃面） -->
+            <div class="landing__dir">
+              <el-dropdown trigger="click" @command="onLandingDir">
+                <button type="button" class="dir" :title="ai.newDir">
+                  <el-icon><FolderOpened v-if="ai.newDir" /><Folder v-else /></el-icon>
+                  <span class="dir__name">{{ ai.newDir ? noteRootName(ai.newDir) : '选择工作目录' }}</span>
+                  <el-icon class="dir__caret">
+                    <ArrowDown />
+                  </el-icon>
+                </button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item v-for="item in ai.recentDirs" :key="item" :command="item">
+                      {{ noteRootName(item) }}
+                    </el-dropdown-item>
+                    <el-dropdown-item command="pick" :divided="ai.recentDirs.length > 0" :icon="FolderAdd">
+                      选择其他目录…
+                    </el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
+              <span v-if="repoBranch" class="dir__branch" title="这个目录当前的 git 分支">
+                <el-icon><Share /></el-icon>
+                {{ repoBranch }}
+              </span>
+            </div>
 
-          <!-- 只在没探到 Pi 时才有东西的一行（它随包内置，正常看不到）。控制台那一屏那颗
-               长在运行面板的顶部通知条上（见 AiRunPanel），这一屏没有那一条，所以在这儿
-               补一颗；发送那颗按钮按不动时说的就是它（见 stores/ai.ts 的 blocking） -->
-          <div v-if="!ai.piVersion" class="landing__foot">
-            <el-button
-              size="small"
-              :icon="Download"
-              :loading="ai.installing"
-              @click="ai.installPi()"
-            >
-              安装 Pi
-            </el-button>
+            <AiComposer
+              v-model:instruction="instruction"
+              :images="images"
+              @add-images="addImages"
+              @remove-image="removeImage"
+              @send="send"
+              @configure="modelVisible = true"
+            />
+
+            <!-- 只在没探到 Pi 时才有东西的一行（它随包内置，正常看不到）。控制台那一屏那颗
+                 长在运行面板的顶部通知条上（见 AiRunPanel），这一屏没有那一条，所以在这儿
+                 补一颗；发送那颗按钮按不动时说的就是它（见 stores/ai.ts 的 blocking） -->
+            <div v-if="!ai.piVersion" class="landing__foot">
+              <el-button
+                size="small"
+                :icon="Download"
+                :loading="ai.installing"
+                @click="ai.installPi()"
+              >
+                安装 Pi
+              </el-button>
+            </div>
           </div>
         </div>
       </div>
@@ -642,10 +647,9 @@ body.is-resizing-ai-tree .ai-view__side {
 /* ---------- 起始那一屏 ---------- */
 
 /**
- * 上面一副缺省空态、下面 composer：空态（EmptyState）自带 flex:1，图与文字在剩余空间里
- * 居中；composer 落在底下，一进来就能写（那条输入框本身就是卡片，不再套）。
- * 窗口拉得很矮、内容比一屏高时由这一栏自己滚（不靠 `justify-content: center` 居中 ——
- * 那会把顶上那半截永远推出可视区，滚不到）。
+ * 开场白 + composer 作为一组居中：`.landing__group` 的 auto 上下外边距在放得下时居中，
+ * 放不下时照常从顶上排、由这一栏自己滚（不靠 `justify-content: center` 居中 ——
+ * 那会把上面那半截永远推出可视区）。
  */
 .landing {
   display: flex;
@@ -656,17 +660,83 @@ body.is-resizing-ai-tree .ai-view__side {
   padding: var(--sp-4) 0;
 }
 
-/* 宽度撑满（.landing 是 align-items: center，不撑的话空态挤成内容宽、提示行折得很难看） */
-.landing__intro {
-  align-self: stretch;
+.landing__group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+  width: min(100%, 720px);
+  margin: auto 0;
+}
+
+/* 那一句开场白：这一屏唯一的大字，居中；时段问候只在顶栏那一行，这里不重复 */
+.landing__hello {
+  margin: 0;
+  color: var(--ink);
+  font-size: var(--fs-display);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  text-align: center;
 }
 
 .landing__box {
   display: flex;
   flex-direction: column;
   gap: var(--sp-3);
-  width: min(100%, 720px);
-  margin: auto 0;
+}
+
+/* 目录与分支那一行：与挑中会话那一屏的位置栏同一个位置（composer 上面、不进它的玻璃面） */
+.landing__dir {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+/* 目录键：与位置栏那颗同一副样子（浅底 chip） */
+.dir {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 var(--sp-3);
+  border: 0;
+  border-radius: var(--r-md);
+  background: var(--bg-inset);
+  color: var(--ink-2);
+  font-family: inherit;
+  font-size: var(--fs-meta);
+  cursor: pointer;
+}
+
+.dir:hover {
+  background: var(--bg-selected);
+}
+
+.dir__name {
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dir__caret {
+  flex-shrink: 0;
+  color: var(--ink-3);
+  font-size: 12px;
+}
+
+/* 后面那截分支：只是说事实，点不动；没仓库 / 没装 git 时整截不画 */
+.dir__branch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink-3);
+  font-size: var(--fs-meta);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* 输入框底下那一行：只在没探到 Pi 时才出现（那颗「安装 Pi」，居中） */

@@ -14,8 +14,8 @@ AI 助手（ai）的文档：先读「约束」一节（不能破的规矩）；
 `workbench/ai.ts`（按会话 id 认领进程事件、确认帧应答、`aiRequest` / `aiAbort` 与会话删除）、
 `workbench/pi-skill.ts`（技能四条通道适配）、`stores/ai.ts`（编排、每会话运行态、确认队列、服务增删改与 models.json 对齐）、
 `stores/ai-skills.ts`（两栏扫描、开关、装 / 卸）；组件：`AiView.vue`（左树右对话，左栏底部一行是技能入口与收起开关）、
-`AiSessionTree.vue`、`AiLocationBar.vue`（两屏共用）、`AiComposer.vue`（贴图缩略图与 `/skill:` 候选）、
-`AiModelMenu.vue`（composer 那颗「模型」chip 与它的浮层：模型管理入口、模型清单、思考强度滑杆）、
+`AiSessionTree.vue`、`AiLocationBar.vue`（挑中会话那一屏）、`AiComposer.vue`（贴图缩略图与 `/skill:` 候选）、
+`AiModelMenu.vue`（composer 那颗「模型」chip 与它的浮层：服务卡、模型清单、思考强度滑杆）、
 `AiSkillDialog.vue`、`AiRunPanel.vue`（对话画法与确认条）、`AiPreviewPane.vue`（右侧预览栏）、
 `AiModelDialog.vue` / `AiProviderDialog.vue` / `AiPresetGrid.vue` / `AiModelPicker.vue`（模型管理三层）。
 
@@ -37,14 +37,12 @@ AI 助手（ai）的文档：先读「约束」一节（不能破的规矩）；
   只把「在哪儿干活」说清楚）；**不内置任务提示词、跑完不做任何与任务绑定的事**（不重建索引、不刷新列表）——
   要做专用任务就在这层上面加模板。起始屏**不摆「用过的指令」**（`aiHistory` 已整体去掉，2026-09-29）——
   别加回来，也别拿预设模板填。
-- **起始屏是「缺省空态 + composer」**：上面一副 EmptyState 缺省空态（图 + 一句事实 + **居中的
-  选目录按钮**，最近目录与「选择其他目录…」在那颗按钮的下拉里，只记在 `newDir`、不建会话；
-  2026-10 前是一条半透明的位置栏长条，已去掉），下面就是那条 composer —— **还没选定目录
-  （`newDir` 为空）时 composer 不画**：没有落处，写了也发不出去；选定后它才出现在空态下面
-  （`newDir` 回落到最近用过的目录，所以只有一段会话都没有的干净状态下才会缺）。
+- **起始屏是「开场白 + 一行目录 + 一条 composer」**：开场白「有什么想让我帮忙的吗」居中
+  （不问时段 —— 顶栏那一行已经在问）；下面是**目录与分支那一行**（在 composer **外面**，
+  不进它的玻璃面；最近目录与「选择其他目录…」在目录键的下拉里，只记在 `newDir`、不建会话），
+  再是那条 composer；**没选定目录（`newDir` 为空）也画**：发送按钮按不动、悬停里说差什么（`blocking`）。
   **会话在发出第一句时才建**（`run` → `ensureSession`，用那一屏挑好的目录）—— 别改回
-  「先建会话再跳过去」。空会话时左栏也是一副空态（与起始屏同一档、不缩 compact ——
-  窄栏里 compact 那张小卡淡得像没画图）。
+  「先建会话再跳过去」。空会话时左栏也是一副空态（不缩 compact —— 窄栏里 compact 那张小卡淡得像没画图）。
 - **位置栏（`AiLocationBar.vue`）只在挑中会话那一屏**：目录定死（下拉只有「打开 / 复制路径」），
   贴着左缘与 composer 对齐。
   那格 git 分支是**页面自己的显示**：AiView 拿着 `watchedDir` 去探（`aiRepoState`），store 只留
@@ -267,19 +265,28 @@ AI 助手（ai）的文档：先读「约束」一节（不能破的规矩）；
     会话行的小圆点表示正在跑（几个会话可同时在跑）。一段会话都没有时左栏给一句空态说明。
     **底部一行是两个不跟会话走的入口**：**技能**（管理弹窗）与**收起整栏** —— 不占 composer 工具行。
   - **右栏**挑中会话即**控制台**（上面对话、下面目录与分支 + 同一条 composer）；没挑中是**起始屏**
-    （上面缺省空态 + 居中的选目录按钮；选定目录后下面才出 composer）。**「起一段新的」只是切屏**（`drafting` / `startNew`），
+    （一句居中的开场白 + 一行目录与分支 + 同一条 composer，目录那一行在 composer **外面**；没选目录也画）。
+    **「起一段新的」只是切屏**（`drafting` / `startNew`），
     **会话在发出第一句时才建**（`run` → `ensureSession`）—— 还没说过话的会话不在左栏占一行。
     两屏都没有顶部工具条（标题与导航栏重复）。
-  两屏共用 `AiLocationBar.vue`：挑中会话时目录定死（没有「换一个工作目录」—— 目录跟着会话走，
-  Pi 按目录分组，换目录 = 新建会话），起始屏上它**就是挑目录的地方**（最近目录 + 「选择其他目录…」，
-  只记在 `newDir`）；不是仓库或分离头指针时分支格不出现（分支来自 `note_repo_state` 那条通用探测，见
-  [../notes/constraints.md](notes.md)；探测是 AiView 的 `refreshRepo`，分支值作 prop 递进位置栏）。
+  `AiLocationBar.vue` 只在挑中会话那一屏：目录定死（没有「换一个工作目录」—— 目录跟着会话走，
+  Pi 按目录分组，换目录 = 新建会话；下拉只有「打开 / 复制路径」）—— 起始屏的目录键在 composer
+  上面那一行（最近目录 + 「选择其他目录…」，只记在 `newDir`）；不是仓库或分离头指针时分支格
+  不出现（分支来自 `note_repo_state` 那条通用探测，见 [../notes/constraints.md](notes.md)；
+  探测是 AiView 的 `refreshRepo`，分支值作 prop 递进位置栏）。
   `AiComposer.vue`：输入框 + 一行控件（左权限，右「模型」chip 与发送-停止），Enter 发送
   （Shift+Enter 换行，输入法选字的 Enter 不算）。**挑模型与换思考档合成一颗 chip**：点开
-  `AiModelMenu.vue` 的浮层（照用户点名的参考设计画）—— 顶行「模型管理」入口（深色圆角方块
-  图标 + 右箭头，报给页面开模型管理弹层）、模型清单（行上模型名 + 服务名描边小签，选中行末尾
-  打勾、清单多了自己滚）、底部思考强度滑杆（只列这个模型支持的档位，整条绿→蓝渐变 + 白圆钮
-  是参考样式的彩色，不进全局令牌；不支持思考的模型只有档名没有滑杆）；收放走
+  `AiModelMenu.vue` 的浮层（照用户点名的参考设计画）—— 顶行是**当前服务**（字母头像 + 服务名
+  + API 小签 + 右箭头）：点开主面板**左边**那张服务卡（主面板贴着窗口右缘，往右开就出去了），
+  卡里列启用的服务（行上名称 + API 小签，当前那个打勾；服务多了在卡里滚），点一个就落到这个
+  服务的第一个能挑的模型，卡底「管理模型」报给页面开模型管理弹层；中间「模型」清单**只列当前
+  服务**的模型（模型名 +「视觉」小签，选中行末尾打勾、清单多了自己滚）；底部思考强度滑杆
+  （只列这个模型支持的档位；照参考设计做成 24px 粗药丸跑道 + 28px 白圆钮，每个档位一颗白点
+  （位置与钮同刻度，选中那颗压在钮下），整条绿→蓝渐变是参考样式的彩色，不进全局令牌；
+  **换档时钮横向滑过去** —— 点跑道那一下由 `pickLevel` 自己算档位写值（经 EP 的拖动会被
+  `.dragging` 掐掉过渡、钮会瞬移），钮上那条 `left` 过渡只在非拖动时生效；**钮不跟悬停 /
+  拖动缩放**（EP 默认 `scale(1.2)` 与 button 的 all 过渡都按掉），这一块只留滑这一处动画；
+  不支持思考的模型只有档名没有滑杆）；收放走
   `use-floating-dismiss`（点别处 / Esc / 面板外滚轮收，**面板里的滚轮不收** —— 清单要能滚），**指令与贴的图归 AiView 持有**（两屏各一条 composer
   实例，放页面这层才换屏不丢；composer 经 `update:instruction` / `add-images` / `remove-image` 回报，
   `send` 事件把那句交给页面、页面转 `run`，store 说收下了才清空输入框），`canRun` / `blocking` 也长在
@@ -333,7 +340,10 @@ AI 助手（ai）的文档：先读「约束」一节（不能破的规矩）；
   两屏排版与 composer 归
   [AiView.vue](../../apps/desktop/src/renderer/src/components/AiView.vue) 与
   [AiComposer.vue](../../apps/desktop/src/renderer/src/components/AiComposer.vue)（composer 自己一张卡片，
-  父级只决定摆哪儿）；回答里的文件链接点开的右侧预览栏归
+  父级只决定摆哪儿）；起始屏里开场白与 composer 是**一组**（`.landing__group` 用 auto 上下
+  外边距居中，不写 `justify-content: center` —— 窗口矮时那半截会滚不到）；目录与分支那一行
+  **是 composer 的同级**（`.landing__dir`，在卡片外面，与挑中会话那一屏的位置栏同一位）；
+  回答里的文件链接点开的右侧预览栏归
   [AiPreviewPane.vue](../../apps/desktop/src/renderer/src/components/AiPreviewPane.vue)（页内分栏不是弹层，
   取数与授权都在 AiView）；模型管理两屏各自一个组件：
   [AiModelDialog.vue](../../apps/desktop/src/renderer/src/components/AiModelDialog.vue)（默认模型 + 服务列表）

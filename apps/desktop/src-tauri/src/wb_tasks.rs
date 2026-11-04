@@ -48,6 +48,8 @@ const TRAVEL_STATUS_PATH: &str = "/activity/growth/buddy/travel/status";
 const TRAVEL_CONFIG_PATH: &str = "/activity/growth/buddy/travel/config";
 const TRAVEL_DEPART_PATH: &str = "/activity/growth/buddy/travel/depart";
 const TRAVEL_CLAIM_PATH: &str = "/activity/growth/buddy/travel/claim";
+const BUDDY_QUOTA_PATH: &str = "/v2/activity/growth/buddy/quota";
+const BUDDY_OPEN_PATH: &str = "/v2/activity/growth/buddy/open";
 const REPORT_PATH: &str = "/v2/report";
 const CHECKIN_PATH: &str = "/v2/billing/meter/daily-checkin";
 const GIFT_PATH: &str = "/billing/meter/claim-gift";
@@ -61,6 +63,8 @@ struct TaskSpec {
     name: &'static str,
     unforgeable: bool,
     reason: &'static str,
+    /// 任务指定的专家 / 团队 id 与名字。空的走通用池轮换。
+    expert: Option<(&'static str, &'static str)>,
 }
 
 const fn spec(kind: &'static str, target: i64, reward: i64, name: &'static str) -> TaskSpec {
@@ -71,6 +75,25 @@ const fn spec(kind: &'static str, target: i64, reward: i64, name: &'static str) 
         name,
         unforgeable: false,
         reason: "",
+        expert: None,
+    }
+}
+
+/// 带固定专家 id 的任务。上游只按事件里的真实 id 推进度，通用池轮换上报不计数。
+const fn expert_spec(
+    target: i64,
+    reward: i64,
+    name: &'static str,
+    expert: (&'static str, &'static str),
+) -> TaskSpec {
+    TaskSpec {
+        kind: "expert",
+        target,
+        reward,
+        name,
+        unforgeable: false,
+        reason: "",
+        expert: Some(expert),
     }
 }
 
@@ -94,6 +117,37 @@ const TASK_SPECS: &[(&str, TaskSpec)] = &[
     ("black_cat", spec("cat", 3, 100, "夜猫子任务 (23:00-08:00)")),
     ("RichMeow_Chat", spec("richmeow", 1, 100, "桌面对话事件链")),
     ("Library_read", spec("library", 1, 100, "浏览资料库")),
+    // 活动 / 专项任务：事件里的 id 必须是对应专家的真实 id，否则上游只收事件不涨进度。
+    (
+        "WorkBuddy_Valorant",
+        expert_spec(1, 100, "体验「无畏契约拼豆专家」", ("ex_xQHHD1u5Jkua", "无畏契约拼豆专家")),
+    ),
+    (
+        "workstation_expert",
+        expert_spec(1, 100, "工作台搭建师", ("WorkspaceBuilder", "工作台搭建师")),
+    ),
+    (
+        "expert_use_maidehao",
+        expert_spec(1, 100, "中国电商运营专家", ("ex_GDl31WahyIH0", "中国电商运营专家")),
+    ),
+    (
+        "expert_use_douyinyin",
+        expert_spec(1, 100, "抖音策略师", ("ex_FbY5nlWTqDod", "抖音策略师")),
+    ),
+    (
+        "expert_use_shangjia_xuanchuan",
+        expert_spec(
+            1,
+            100,
+            "商家宣传页与海报设计师",
+            ("ex_Weo3x2EZuSDm", "商家宣传页与海报设计师"),
+        ),
+    ),
+    (
+        "expert_use_bowangwang",
+        expert_spec(1, 100, "直播电商教练", ("ex_WZY136wV5aMt", "直播电商教练")),
+    ),
+    ("Sequential_Tasks_7", spec("playbook", 1, 100, "PC 灵感功能")),
     // first_buddy 是 auto 类（上游不接受接取），完成后领奖才发放 Buddy 实例；
     // 它是所有 single 任务与猫猫旅行的前置（"prerequisite not met: first_buddy"）。
     ("first_buddy", spec("chat", 1, 300, "领取一只 Buddy")),
@@ -106,6 +160,7 @@ const TASK_SPECS: &[(&str, TaskSpec)] = &[
             name: "关注官方公众号",
             unforgeable: true,
             reason: "需在微信关注「腾讯 WorkBuddy」公众号满 24 小时",
+            expert: None,
         },
     ),
     (
@@ -117,6 +172,7 @@ const TASK_SPECS: &[(&str, TaskSpec)] = &[
             name: "公益爱心捐赠",
             unforgeable: true,
             reason: "真实捐款动作",
+            expert: None,
         },
     ),
 ];
@@ -795,6 +851,77 @@ fn desktop_only_hint(code: &str) -> Option<&'static str> {
         .map(|(_, hint)| *hint)
 }
 
+/// 从任务自带的 `jump_url` 里解专家 id。深链可能套两层：
+/// `...?deeplink=workbuddy%3A%2F%2F...%3FexpertId%3Dex_xxx`，所以解完还要再解一层。
+fn expert_from_jump(task: &GrowthTask) -> Option<(String, String)> {
+    let direct = query_param(&task.jump_url, "expertId");
+    let nested = query_param(&task.jump_url, "deeplink")
+        .and_then(|inner| query_param(&inner, "expertId"));
+    let id = direct.or(nested)?;
+    let id = id.trim();
+    if !valid_expert_id(id) {
+        return None;
+    }
+    let name = if task.name.trim().is_empty() {
+        "专家".to_string()
+    } else {
+        task.name.clone()
+    };
+    Some((id.to_string(), name))
+}
+
+/// `ex_` + 6~64 位字母数字。上游的专家 id 都是这个形状。
+fn valid_expert_id(id: &str) -> bool {
+    let Some(rest) = id.strip_prefix("ex_") else {
+        return false;
+    };
+    (6..=64).contains(&rest.len()) && rest.chars().all(|ch| ch.is_ascii_alphanumeric())
+}
+
+fn query_param(url: &str, key: &str) -> Option<String> {
+    let (_, query) = url.split_once('?')?;
+    for pair in query.split('&') {
+        let Some((name, value)) = pair.split_once('=') else {
+            continue;
+        };
+        if percent_decode(name).eq_ignore_ascii_case(key) {
+            return Some(percent_decode(value));
+        }
+    }
+    None
+}
+
+/// 只为解深链里的 query 参数：`%XX` 与 `+`，不做完整 URL 规范化。
+fn percent_decode(input: &str) -> String {
+    let bytes = input.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'%' if index + 2 < bytes.len() => {
+                let high = (bytes[index + 1] as char).to_digit(16);
+                let low = (bytes[index + 2] as char).to_digit(16);
+                if let (Some(high), Some(low)) = (high, low) {
+                    out.push((high * 16 + low) as u8);
+                    index += 3;
+                    continue;
+                }
+                out.push(b'%');
+                index += 1;
+            }
+            b'+' => {
+                out.push(b' ');
+                index += 1;
+            }
+            byte => {
+                out.push(byte);
+                index += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
 /// 推进单个任务并返回本次到账积分。auto 类不需要接取；single 类未接取时上报
 /// 不计进度，跳过等接取成功。
 fn progress_one(account: &Account, task: &GrowthTask, logs: &mut Vec<String>, gap: f64) -> i64 {
@@ -873,12 +1000,22 @@ fn progress_one(account: &Account, task: &GrowthTask, logs: &mut Vec<String>, ga
         "expert" => Some(EXPERT_ID_POOL),
         _ => None,
     };
+    // 固定专家优先；没预录入的再从任务自己的 jump_url 里解 expertId。
+    let dynamic = if spec.expert.is_none() {
+        expert_from_jump(task)
+    } else {
+        None
+    };
     let mut report_ok = true;
     for index in 0..need {
-        let expert = pool.map(|items| {
+        let from_pool = pool.map(|items| {
             let index = ((task.current + index) as usize) % items.len();
             items[index]
         });
+        let expert = spec
+            .expert
+            .or_else(|| dynamic.as_ref().map(|(id, name)| (id.as_str(), name.as_str())))
+            .or(from_pool);
         let event = build_event(account, spec.kind, index as usize, expert);
         if !report_events(account, &[event]) {
             report_ok = false;
@@ -1069,6 +1206,13 @@ pub fn run_growth_tasks(account: &Account, gap: f64) -> RunOutcome {
             earned += travel.credit;
         }
     }
+    // 领奖那条已经在 `do_cat_travel` 里顺手开过了；其余状态（旅行中 / 今日已完成）
+    // 仍可能有任务攒下的能量，这里再补一次。
+    if travel.action != "claim" {
+        if let Some(line) = open_buddy(account) {
+            logs.push(format!("Buddy 盲盒：{line}"));
+        }
+    }
 
     let credits = wb_api_billing::fetch(account).ok();
     let remain = credits.as_ref().map(|item| item.remain).unwrap_or(0.0);
@@ -1119,10 +1263,15 @@ pub fn do_cat_travel(account: &Account) -> TravelOutcome {
             Ok(value) => {
                 let credit = int_at(data(&value), "reward_credit");
                 let _ = wb_api_billing::fetch(account);
+                // 领奖后顺手看一次成长能量：够开盲盒就开，不够就什么都不做。
+                let opened = open_buddy(account);
+                let suffix = opened
+                    .map(|line| format!("；{line}"))
+                    .unwrap_or_default();
                 TravelOutcome {
                     ok: true,
                     action: "claim".into(),
-                    msg: format!("旅行归来领奖成功！获得 {credit} 积分"),
+                    msg: format!("旅行归来领奖成功！获得 {credit} 积分{suffix}"),
                     credit,
                 }
             }
@@ -1197,6 +1346,57 @@ pub fn do_cat_travel(account: &Account) -> TravelOutcome {
             msg: format!("当前状态：{other}"),
             credit: 0,
         },
+    }
+}
+
+/// 用成长能量开 Buddy 盲盒。**只在能量够的时候动**；企业版没有成长体系。
+///
+/// 返回一句给日志的说明（开了几个 / 为什么失败）；没有可开的返回 `None`，
+/// 这样调用方不用为「能量不足」这种正常状态写一行日志。
+fn open_buddy(account: &Account) -> Option<String> {
+    if is_enterprise(account) {
+        return None;
+    }
+    let quota = match chat_get(account, BUDDY_QUOTA_PATH) {
+        Ok(value) => value,
+        Err(_) => return None,
+    };
+    if quota.get("code").and_then(Value::as_i64) != Some(0) {
+        return None;
+    }
+    let quota = data(&quota);
+    let affordable = int_at(quota, "affordable");
+    if affordable <= 0 {
+        return None;
+    }
+    // 上游一次最多开 `max_open_count` 个；它没给就按 1 个。
+    let count = affordable.min(int_at(quota, "max_open_count").max(1));
+    let body = json!({
+        "count": count,
+        "client_token": wb_identity::uuid7().to_string(),
+    });
+    match chat_post(account, BUDDY_OPEN_PATH, &body) {
+        Ok(value) if value.get("code").and_then(Value::as_i64) == Some(0) => {
+            let data = data(&value);
+            let mut name = text_at(data, "buddy");
+            if name.is_empty() {
+                name = text_at(data, "name");
+            }
+            if name.is_empty() {
+                Some(format!("开 Buddy 盲盒 ×{count} 成功"))
+            } else {
+                Some(format!("开 Buddy 盲盒 ×{count} 成功：{name}"))
+            }
+        }
+        Ok(value) => {
+            let msg = text_at(&value, "msg");
+            Some(if msg.is_empty() {
+                "开 Buddy 盲盒失败（上游没给原因）".to_string()
+            } else {
+                format!("开 Buddy 盲盒失败：{msg}")
+            })
+        }
+        Err(message) => Some(format!("开 Buddy 盲盒失败：{message}")),
     }
 }
 
@@ -1348,7 +1548,43 @@ pub fn run_streak_bonus(account: &Account) -> StreakOutcome {
     }
 }
 
-/// 每日签到（Buddy 加油站）。`10001` / 「今天已签到」按成功处理。
+/// 签到回执的四档。`10001` 不是「已签到」专属码：活动补偿、重复操作都用它；
+/// 只有文案明确说「已签到」才算 `Already`，否则记失败。
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum CheckinState {
+    Checked,
+    Already,
+    Pending,
+    Failed,
+}
+
+const CHECKIN_PENDING_HINTS: [&str; 4] = ["处理中", "请勿重复操作", "系统繁忙", "稍后再试"];
+const CHECKIN_ALREADY_HINTS: [&str; 1] = ["已签到"];
+const CHECKIN_FAILURE_HINTS: [&str; 1] = ["失败"];
+
+fn checkin_state(code: i64, msg: &str) -> CheckinState {
+    if CHECKIN_PENDING_HINTS.iter().any(|hint| msg.contains(hint)) {
+        return CheckinState::Pending;
+    }
+    if code == 0 {
+        return if CHECKIN_FAILURE_HINTS.iter().any(|hint| msg.contains(hint)) {
+            CheckinState::Failed
+        } else {
+            CheckinState::Checked
+        };
+    }
+    if code == 10001 {
+        return if CHECKIN_ALREADY_HINTS.iter().any(|hint| msg.contains(hint)) {
+            CheckinState::Already
+        } else {
+            CheckinState::Failed
+        };
+    }
+    CheckinState::Failed
+}
+
+/// 每日签到（Buddy 加油站）。只有「真签成」与「今天已签到」算成功；
+/// 「请求处理中」这类明确没签成的回执不能记成功。
 pub fn checkin(account: &Account) -> ActivityOutcome {
     if is_enterprise(account) {
         return ActivityOutcome {
@@ -1365,21 +1601,21 @@ pub fn checkin(account: &Account) -> ActivityOutcome {
             let value: Value = serde_json::from_str(&response.text()).unwrap_or(Value::Null);
             let code = value.get("code").and_then(Value::as_i64).unwrap_or(-1);
             let msg = text_at(&value, "msg");
-            let already = code == 10001 || msg.contains("已签到") || msg.contains("今天已签到");
-            if response.status == 200 && (code == 0 || already) {
+            let state = checkin_state(code, &msg);
+            let ok = match state {
+                CheckinState::Checked => response.status == 200,
+                CheckinState::Already => response.status == 200 || response.status == 400,
+                CheckinState::Pending | CheckinState::Failed => false,
+            };
+            if ok {
                 ActivityOutcome {
                     ok: true,
                     msg: if msg.is_empty() {
-                        "签到成功".into()
-                    } else {
-                        msg
-                    },
-                }
-            } else if response.status == 400 && already {
-                ActivityOutcome {
-                    ok: true,
-                    msg: if msg.is_empty() {
-                        "今天已签到".into()
+                        if state == CheckinState::Already {
+                            "今天已签到".into()
+                        } else {
+                            "签到成功".into()
+                        }
                     } else {
                         msg
                     },
@@ -1752,5 +1988,75 @@ mod tests {
         let yesterday = local_date_offset(-1);
         assert_eq!(yesterday.len(), 10);
         assert_ne!(yesterday, date);
+    }
+
+    #[test]
+    fn 新增专家任务带固定_expert_id() {
+        assert_eq!(
+            spec_of("expert_use_douyinyin").and_then(|spec| spec.expert),
+            Some(("ex_FbY5nlWTqDod", "抖音策略师"))
+        );
+        assert_eq!(
+            spec_of("workstation_expert").and_then(|spec| spec.expert),
+            Some(("WorkspaceBuilder", "工作台搭建师"))
+        );
+        assert!(spec_of("Sequential_Tasks_7").is_some());
+    }
+
+    #[test]
+    fn 从_jump_url_的_deeplink_里解专家_id() {
+        let task = GrowthTask {
+            task_code: "some_new_expert".into(),
+            name: "新专家任务".into(),
+            description: String::new(),
+            jump_url:
+                "workbuddy://chat?deeplink=workbuddy%3A%2F%2Fexpert%3FexpertId%3Dex_Abc12345"
+                    .into(),
+            status: "accepted".into(),
+            task_type: "single".into(),
+            current: 0,
+            target: 1,
+            reward_credit: 100,
+            reward_energy: 0,
+            unforgeable: false,
+            reason: String::new(),
+        };
+        let (id, name) = expert_from_jump(&task).unwrap();
+        assert_eq!(id, "ex_Abc12345");
+        assert_eq!(name, "新专家任务");
+    }
+
+    #[test]
+    fn 非法专家_id_不被采纳() {
+        let task = GrowthTask {
+            task_code: "some_new_expert".into(),
+            name: String::new(),
+            description: String::new(),
+            jump_url: "workbuddy://chat?expertId=../evil".into(),
+            status: "accepted".into(),
+            task_type: "single".into(),
+            current: 0,
+            target: 1,
+            reward_credit: 100,
+            reward_energy: 0,
+            unforgeable: false,
+            reason: String::new(),
+        };
+        assert!(expert_from_jump(&task).is_none());
+    }
+
+    #[test]
+    fn 签到回执按文案分档() {
+        assert_eq!(
+            checkin_state(10001, "请求处理中，请勿重复操作"),
+            CheckinState::Pending
+        );
+        assert_eq!(checkin_state(10001, "今天已签到"), CheckinState::Already);
+        assert_eq!(checkin_state(10001, "未知错误"), CheckinState::Failed);
+        assert_eq!(
+            checkin_state(0, "签到失败，已签到天数不足 7 天"),
+            CheckinState::Failed
+        );
+        assert_eq!(checkin_state(0, "签到成功"), CheckinState::Checked);
     }
 }

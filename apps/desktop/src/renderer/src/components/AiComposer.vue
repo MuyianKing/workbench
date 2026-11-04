@@ -108,7 +108,7 @@ const blocking = computed(() => {
   if (!ai.probed)
     return ''
   if (!ai.activeSession && !ai.newDir)
-    return '先挑一个工作目录：位置那一栏那个下拉 —— 对话就在它里面干活，一个目录就是一个「项目」。'
+    return '先挑一个工作目录：输入框顶上那颗目录键 —— 对话就在它里面干活，一个目录就是一个「项目」。'
   if (ai.hydrating)
     return '正在接上这段对话…等它读完就能接着说。'
   switch (ai.envGap()) {
