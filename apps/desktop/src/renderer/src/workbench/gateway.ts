@@ -20,6 +20,8 @@ export interface GatewayStatus {
   baseUrl: string | null
   accounts: number
   ready: number
+  /** 下次应用启动时是否自动监听（「随程序启动」开关） */
+  autoStart: boolean
 }
 
 /** 账号行（不含任何凭据） */
@@ -109,6 +111,11 @@ export function gatewayStart(port: number): Promise<Result<number>> {
 
 export function gatewayStop(): Promise<Result<null>> {
   return call('wb_gateway_stop', {}, '停止 TBuddy 失败')
+}
+
+/** 「随程序启动」：只改配置，下次应用启动时生效；不立刻启停 */
+export function gatewayAutoStartSet(enabled: boolean): Promise<Result<null>> {
+  return call('wb_gateway_auto_start_set', { enabled }, '保存随程序启动失败')
 }
 
 export function gatewayAccounts(): Promise<Result<GatewayAccount[]>> {
@@ -480,6 +487,7 @@ export const gatewayApi = {
   gatewayStatus,
   gatewayStart,
   gatewayStop,
+  gatewayAutoStartSet,
   gatewayAccounts,
   gatewayReload,
   gatewayLoginStart,

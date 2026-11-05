@@ -164,19 +164,21 @@ impl Gateway {
         let mut inner = self.lock()?;
         inner.ensure_loaded();
         let ready = inner.accounts.iter().filter(|item| item.is_ready()).count();
+        let config = load_config();
         Ok(Status {
             running: inner.server.is_some(),
             port: inner
                 .server
                 .as_ref()
                 .map(Server::port)
-                .unwrap_or_else(|| load_config().port),
+                .unwrap_or(config.port),
             base_url: inner
                 .server
                 .as_ref()
                 .map(|server| wb_server::api_base(server.port())),
             accounts: inner.accounts.len(),
             ready,
+            auto_start: config.auto_start,
         })
     }
 
@@ -263,6 +265,8 @@ pub struct Status {
     pub base_url: Option<String>,
     pub accounts: usize,
     pub ready: usize,
+    /// 下次应用启动时是否自动监听（页首「随程序启动」开关）
+    pub auto_start: bool,
 }
 
 /// 清单里的一行模型：id 加上价表查出来的单价（每百万 token，人民币）。
@@ -1360,6 +1364,14 @@ pub fn wb_gateway_start(state: tauri::State<'_, Gateway>, port: u16) -> Result<u
 #[tauri::command(async)]
 pub fn wb_gateway_stop(state: tauri::State<'_, Gateway>) -> Result<(), String> {
     state.stop()
+}
+
+/// 「随程序启动」开关：只改配置，不立刻启停；下次应用启动由 main.rs 的 setup 读它。
+#[tauri::command(async)]
+pub fn wb_gateway_auto_start_set(enabled: bool) -> Result<(), String> {
+    let mut config = load_config();
+    config.auto_start = enabled;
+    save_config(&config)
 }
 
 /// 账号列表（不含 token）。

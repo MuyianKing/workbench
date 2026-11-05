@@ -1107,6 +1107,8 @@ export interface WorkbenchApi {
   gatewayStatus: () => Promise<Result<import('./workbench/gateway').GatewayStatus>>
   gatewayStart: (port: number) => Promise<Result<number>>
   gatewayStop: () => Promise<Result<null>>
+  /** 「随程序启动」：只改配置，下次应用启动时生效 */
+  gatewayAutoStartSet: (enabled: boolean) => Promise<Result<null>>
   gatewayAccounts: () => Promise<Result<import('./workbench/gateway').GatewayAccount[]>>
   gatewayReload: () => Promise<Result<null>>
   gatewayLoginStart: () => Promise<Result<import('./workbench/gateway').GatewayLoginStart>>

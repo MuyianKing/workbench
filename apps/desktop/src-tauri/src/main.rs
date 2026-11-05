@@ -703,6 +703,7 @@ fn main() {
             wb_gateway::wb_gateway_status,
             wb_gateway::wb_gateway_start,
             wb_gateway::wb_gateway_stop,
+            wb_gateway::wb_gateway_auto_start_set,
             wb_gateway::wb_gateway_accounts,
             wb_gateway::wb_gateway_reload,
             wb_gateway::wb_gateway_login_start,
@@ -739,6 +740,17 @@ fn main() {
             let handle = app.handle().clone();
             // 数据先载入：窗口的初始化脚本要用到设置与布局
             commands::load_all();
+            // 网关随程序启动：配置里打开过就在这里绑端口，不必等渲染层进入 TBuddy 页。
+            // 失败只记一笔 —— 端口被占时界面仍显示「已停止」，用户可手动重试。
+            let gateway_config = wb_gateway::load_config();
+            if gateway_config.auto_start {
+                if let Err(message) = app
+                    .state::<wb_gateway::Gateway>()
+                    .start(gateway_config.port)
+                {
+                    eprintln!("[workbench] 网关随程序启动失败：{message}");
+                }
+            }
             // 钉图的记账要早于窗口：restore 照着它把上次钉着的图开回来
             pin::load(&handle);
             // 悬浮球只读记账、不开窗：开不开由设置决定，值由渲染层在 initState 之后推
