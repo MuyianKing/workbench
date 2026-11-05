@@ -553,7 +553,8 @@ onBeforeUnmount(() => {
 
 .usage__cards {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  /* 固定 6 列、不折行：窗口最小 1080，内容区约 980 均分也放得下六张 KPI */
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: var(--sp-2);
 }
 

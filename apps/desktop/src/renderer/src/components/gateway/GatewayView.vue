@@ -43,10 +43,6 @@ const creditsOpen = ref(false)
 const creditsUid = ref('')
 const busy = ref(false)
 const port = ref(17878)
-const autoStart = ref(false)
-const autoSaving = ref(false)
-/** 用户动过开关之后，15 秒轮询不再用状态覆盖它（避免保存与在途刷新竞态） */
-let autoTouched = false
 const loginHint = ref('')
 const loggingIn = ref('')
 /** 全量查余额在途（整排一起转） */
@@ -152,8 +148,6 @@ async function refresh(): Promise<void> {
   }
   status.value = result.data
   port.value = result.data.port
-  if (!autoTouched)
-    autoStart.value = result.data.autoStart
 
   const [list, rows, info] = await Promise.all([
     window.workbench.gatewayAccounts(),
@@ -229,26 +223,6 @@ async function toggle(): Promise<void> {
   }
   finally {
     busy.value = false
-  }
-}
-
-async function toggleAutoStart(value: boolean | string | number): Promise<void> {
-  if (autoSaving.value)
-    return
-  autoTouched = true
-  const enabled = value === true
-  autoSaving.value = true
-  try {
-    const result = await window.workbench.gatewayAutoStartSet(enabled)
-    if (!result.ok) {
-      autoStart.value = !enabled
-      ElMessage.error(result.error ?? '保存随程序启动失败')
-      return
-    }
-    autoStart.value = enabled
-  }
-  finally {
-    autoSaving.value = false
   }
 }
 
@@ -573,20 +547,6 @@ onBeforeUnmount(() => {
           <span class="gw__run-text">{{ running ? '运行中' : '已停止' }}</span>
           <span class="gw__run-addr">{{ running ? `127.0.0.1:${port}` : '未监听' }}</span>
         </button>
-        <el-tooltip
-          content="下次启动应用时自动监听；当前运行状态仍由右侧按钮控制"
-          placement="top"
-        >
-          <span class="gw__auto">
-            <span class="gw__auto-label">随程序启动</span>
-            <el-switch
-              v-model="autoStart"
-              size="small"
-              :loading="autoSaving"
-              @change="toggleAutoStart"
-            />
-          </span>
-        </el-tooltip>
         <el-button size="small" text :loading="busy" @click="toggle">
           {{ running ? '停止' : '启动' }}
         </el-button>
@@ -983,27 +943,15 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
-/* 「随程序启动」与启停按钮分开：它是配置，不是一次启停动作 */
-.gw__auto {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--sp-2);
-  margin-left: var(--sp-1);
-  padding-left: var(--sp-3);
-  border-left: 1px solid var(--border);
-}
-
-.gw__auto-label {
-  font-size: var(--gw-fs-micro);
-  color: var(--ink-3);
-  white-space: nowrap;
-}
-
 /* ---------- 统计卡 ---------- */
 
 .gw__stats {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  /*
+   * 固定 6 列、不折行：窗口最小 1080，内容区约 980 也放得下。
+   * 末列（积分剩余 / 总额）多分 0.5fr —— 它的数字最长，均分会在 1100 以内被省略号截掉。
+   */
+  grid-template-columns: repeat(5, minmax(0, 1fr)) minmax(0, 1.5fr);
   gap: var(--sp-3);
   flex: none;
 }

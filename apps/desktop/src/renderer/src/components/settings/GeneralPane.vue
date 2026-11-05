@@ -4,8 +4,10 @@ import { APP_NAME_DEFAULT, APP_NAME_MAX_LENGTH } from '@workbench/appearance'
 import { accountLabel } from '@workbench/auth'
 import { WEATHER_CITY_MAX } from '@workbench/weather'
 import { sanitizeZentaoPollMinutes } from '@workbench/zentao'
+import { ElMessage } from 'element-plus'
 /**
- * 设置 · 通用：程序（名称 / 快捷键 / 开机自启）、天气、禅道、笔记（图片仓库）、账号与同步仓库。
+ * 设置 · 通用：程序（名称 / 快捷键 / 开机自启 / 网速球）、TBuddy（随程序启动 /
+ * 福利每天自动）、天气、禅道、笔记（图片仓库）、账号与同步仓库。
  *
  * 四个文本项都是「草稿字段」（useDraftField）：边打边存会把半截内容写进设置，
  * 失焦 / 回车才提交，提交后由 store 收敛、收敛后的值回推草稿。
@@ -13,16 +15,17 @@ import { sanitizeZentaoPollMinutes } from '@workbench/zentao'
  * 快捷键那一行是一块共用件（HotkeyField）：录制态自己管、失焦即放弃，
  * 所以这一屏不再需要盯着弹窗开关去复位它。
  */
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import AccountDialog from '@/components/AccountDialog.vue'
 import HotkeyField from '@/components/HotkeyField.vue'
 import { useDraftField } from '@/composables/use-draft-field'
 import { useAuthStore } from '@/stores/auth'
+import { usePerksAutoStore } from '@/stores/perks-auto'
 import { useSettingsStore } from '@/stores/settings'
 import { useZentaoStore } from '@/stores/zentao'
 
-// 这一屏不再需要 open，但设置弹窗统一按这个 prop 传；声明着免得被当成未声明属性透到根元素上
-defineProps<{ open: boolean }>()
+// 设置弹窗统一按这个 prop 传；本屏用它来重新读网关的「随程序启动」开关
+const props = defineProps<{ open: boolean }>()
 
 const settings = useSettingsStore()
 const auth = useAuthStore()
@@ -32,6 +35,72 @@ const account = computed(() => auth.status?.account ?? null)
 
 /** 「账号」那一行开的弹窗。顶栏也有一颗入口，两处各自开各自的 */
 const accountVisible = ref(false)
+
+/**
+ * TBuddy 的两个开关都住在网关自己的目录里（`settings.json` 的 `autoStart`、
+ * `perks-auto.json` 的 `enabled`），不走应用设置。每次打开设置弹窗重新读一次，
+ * 免得与网关页的旧状态打架。
+ */
+const gatewayAutoStart = ref(false)
+const gatewayAutoSaving = ref(false)
+const gatewayPerksAuto = ref(false)
+const gatewayPerksSaving = ref(false)
+const perksAuto = usePerksAutoStore()
+
+async function loadGatewaySettings(): Promise<void> {
+  const [status, perks] = await Promise.all([
+    window.workbench.gatewayStatus(),
+    window.workbench.gatewayPerksAutoConfig(),
+  ])
+  if (status.ok && status.data)
+    gatewayAutoStart.value = status.data.autoStart
+  if (perks.ok && perks.data)
+    gatewayPerksAuto.value = perks.data.enabled
+}
+
+async function toggleGatewayAutoStart(value: unknown): Promise<void> {
+  if (gatewayAutoSaving.value)
+    return
+  const enabled = Boolean(value)
+  gatewayAutoSaving.value = true
+  try {
+    const result = await window.workbench.gatewayAutoStartSet(enabled)
+    if (!result.ok) {
+      ElMessage.error(result.error ?? '保存随程序启动失败')
+      return
+    }
+    gatewayAutoStart.value = enabled
+  }
+  finally {
+    gatewayAutoSaving.value = false
+  }
+}
+
+async function toggleGatewayPerksAuto(value: unknown): Promise<void> {
+  if (gatewayPerksSaving.value)
+    return
+  const enabled = Boolean(value)
+  gatewayPerksSaving.value = true
+  try {
+    const result = await window.workbench.gatewayPerksAutoSet(enabled)
+    if (!result.ok) {
+      ElMessage.error(result.error ?? '保存福利每天自动失败')
+      return
+    }
+    gatewayPerksAuto.value = enabled
+    // 打开后立刻补跑一次；今天已跑过 / 不在夜间窗口时后端会直接返回
+    if (enabled)
+      void perksAuto.runNow()
+  }
+  finally {
+    gatewayPerksSaving.value = false
+  }
+}
+
+watch(() => props.open, (open) => {
+  if (open)
+    void loadGatewaySettings()
+})
 
 const isPackaged = computed(() => !import.meta.env.DEV)
 
@@ -179,6 +248,47 @@ function saveHotkey(accelerator: string): void {
           :model-value="settings.settings.ballEnabled"
           size="small"
           @update:model-value="(value: unknown) => save({ ballEnabled: Boolean(value) })"
+        />
+      </div>
+    </div>
+
+    <!--
+      TBuddy：网关的两个常驻开关。都住在网关自己的配置里 ——
+      随程序启动决定应用启动时绑不绑回环端口，福利每天自动决定要不要自己打上游。
+    -->
+    <div class="block">
+      <h3 class="block__title">
+        TBuddy
+      </h3>
+
+      <div class="row">
+        <div class="row__text">
+          <span class="row__label">随程序启动</span>
+          <span class="row__hint">
+            应用启动时自动在 127.0.0.1 监听（端口在 TBuddy 页的接入信息里改）；关掉后需要手动点「启动」。
+          </span>
+        </div>
+        <el-switch
+          :model-value="gatewayAutoStart"
+          size="small"
+          :loading="gatewayAutoSaving"
+          @update:model-value="toggleGatewayAutoStart"
+        />
+      </div>
+
+      <div class="row">
+        <div class="row__text">
+          <span class="row__label">福利每天自动</span>
+          <span class="row__hint">
+            启动后补跑签到与一键做任务；夜猫子任务在 23:00–08:00 单独跑一次。
+            连登管家与抽奖不自动。
+          </span>
+        </div>
+        <el-switch
+          :model-value="gatewayPerksAuto"
+          size="small"
+          :loading="gatewayPerksSaving"
+          @update:model-value="toggleGatewayPerksAuto"
         />
       </div>
     </div>

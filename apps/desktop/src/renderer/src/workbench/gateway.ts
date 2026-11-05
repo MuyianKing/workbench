@@ -20,7 +20,7 @@ export interface GatewayStatus {
   baseUrl: string | null
   accounts: number
   ready: number
-  /** 下次应用启动时是否自动监听（「随程序启动」开关） */
+  /** 设置·通用里的「随程序启动」开关 */
   autoStart: boolean
 }
 
@@ -603,7 +603,7 @@ export interface GatewayGrantAccount {
   error: string
 }
 
-/** 福利自动跑的开关（日期标记是后端内部状态，不往界面回） */
+/** 福利自动跑的开关（设置·通用 → TBuddy） */
 export interface GatewayPerksAutoConfig {
   enabled: boolean
 }

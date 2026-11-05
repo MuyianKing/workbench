@@ -21,8 +21,9 @@ use crate::wb_server::{self, Server};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Config {
-    /// 下次启动后自动把网关拉起来
-    #[serde(default)]
+    /// 应用启动时自动把网关拉起来。默认开（设置·通用里可关）；
+    /// 显式写成 false 才不监听，缺字段按开处理。
+    #[serde(default = "default_auto_start")]
     pub auto_start: bool,
     pub port: u16,
     /// 访问密钥。第三方客户端大多要填一个非空的 key 才肯保存配置；
@@ -31,10 +32,14 @@ pub struct Config {
     pub api_key: String,
 }
 
+fn default_auto_start() -> bool {
+    true
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
-            auto_start: false,
+            auto_start: true,
             port: DEFAULT_PORT,
             api_key: String::new(),
         }
@@ -1432,9 +1437,9 @@ mod tests {
     }
 
     #[test]
-    fn 默认配置不自动启动() {
+    fn 默认配置随程序启动() {
         let config = Config::default();
-        assert!(!config.auto_start, "默认不联网、不自启");
+        assert!(config.auto_start, "默认随程序启动（设置·通用里可关）");
         assert_eq!(config.port, DEFAULT_PORT);
     }
 
@@ -1495,8 +1500,12 @@ mod tests {
     #[test]
     fn 缺字段时用默认值补齐() {
         let back: Config = serde_json::from_str(r#"{"port":9999}"#).unwrap();
-        assert!(!back.auto_start);
+        assert!(back.auto_start, "缺字段按默认开处理");
         assert_eq!(back.port, 9999);
+
+        // 显式关掉要尊重：设置里关过一次之后，缺别的字段不能把它又打开
+        let off: Config = serde_json::from_str(r#"{"autoStart":false,"port":9999}"#).unwrap();
+        assert!(!off.auto_start);
     }
 
     #[test]
