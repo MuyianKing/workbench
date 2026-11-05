@@ -41,6 +41,45 @@ impl Default for Config {
     }
 }
 
+/// 福利自动跑的开关与「每个号上次跑过的本地自然日」。
+///
+/// 单独一份文件（`perks-auto.json`），不与 `settings.json` 混在一起：开关是用户配置，
+/// 日期标记是运行状态，而且自动跑可能持续几分钟，别和端口 / 密钥的写入互相覆盖。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct PerksAuto {
+    /// 用户显式打开的开关；关着时不做任何自动请求
+    pub enabled: bool,
+    /// uid → `YYYY-MM-DD`：白天轮（签到 + 一键做任务）
+    pub daily: HashMap<String, String>,
+    /// uid → `YYYY-MM-DD`：夜间轮（只跑夜猫子）
+    pub night: HashMap<String, String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PerksAutoConfig {
+    pub enabled: bool,
+}
+
+/// 一轮自动跑的结果。`ran` 为 false 表示当前没有该跑的事（已跑过 / 不在窗口）。
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PerksAutoRun {
+    pub ran: bool,
+    pub accounts: usize,
+    /// 签到成功（含「今天已签到」）的账号数
+    pub checkin: usize,
+    /// 本轮新增积分
+    pub credit_added: i64,
+    /// 夜间轮推进的账号数
+    pub night: usize,
+    /// 这一轮里没成功的动作数（签到 / 任务 / 夜猫子 / 续期）
+    pub failed: usize,
+    /// 给用户的一句话；空串表示无事发生
+    pub message: String,
+}
+
 /// 默认端口。避开原项目的 8788（用户可能两个都装）。
 pub const DEFAULT_PORT: u16 = 17878;
 
@@ -728,6 +767,11 @@ fn targets_of(accounts: Vec<Account>, uid: Option<&str>) -> Vec<Account> {
     }
 }
 
+/// 这个号今天还没跑过（没有标记 = 该跑；标记是别的日期 = 跨天了，也该跑）。
+fn day_due(marks: &HashMap<String, String>, uid: &str, today: &str) -> bool {
+    marks.get(uid).map_or(true, |date| date != today)
+}
+
 /// token 快过期时续一次。返回是否真的续过（续过就要把 token 字段写回）。
 fn refresh_if_needed(account: &mut Account) -> Result<bool, String> {
     if !account.needs_refresh() {
@@ -1022,6 +1066,175 @@ pub fn wb_gateway_activity_today() -> Vec<crate::wb_tasks::ActivityRow> {
     crate::wb_tasks::read_today()
 }
 
+/// 福利自动跑的开关（只回开关；日期标记是内部状态）。
+#[tauri::command(async)]
+pub fn wb_gateway_perks_auto_config() -> PerksAutoConfig {
+    PerksAutoConfig {
+        enabled: load_perks_auto().enabled,
+    }
+}
+
+#[tauri::command(async)]
+pub fn wb_gateway_perks_auto_set(enabled: bool) -> Result<PerksAutoConfig, String> {
+    let mut config = load_perks_auto();
+    config.enabled = enabled;
+    save_perks_auto(&config)?;
+    Ok(PerksAutoConfig { enabled })
+}
+
+/// 启动后补跑 / 跨天补跑的入口。没有调度器：由渲染层每隔十分钟问一次，
+/// 这里按本地自然日与 23:00–08:00 窗口判断**该不该动**；不该动就直接返回，不联网。
+///
+/// 白天轮是「签到 + 一键做任务」，夜间轮只跑夜猫子（`black_cat`），每个号每个自然日各一次。
+/// 续期失败不记完成，下一轮还会再试；其余失败记完成，避免每十分钟锤一次上游。
+#[tauri::command(async)]
+pub fn wb_gateway_perks_auto_run(
+    state: tauri::State<'_, Gateway>,
+) -> Result<PerksAutoRun, String> {
+    let mut auto = load_perks_auto();
+    if !auto.enabled {
+        return Ok(PerksAutoRun::default());
+    }
+
+    let today = crate::wb_tasks::local_date();
+    let night_now = crate::wb_tasks::in_night_window();
+    let accounts: Vec<Account> = targets_of(snapshot_accounts(&state)?, None)
+        .into_iter()
+        .filter(|item| item.enterprise_id.trim().is_empty())
+        .collect();
+    if accounts.is_empty() {
+        return Ok(PerksAutoRun::default());
+    }
+
+    // 今天已经签成功过的号：不再重复请求，也不往 activity.jsonl 补一行「已签到」
+    let signed_today: Vec<String> = crate::wb_tasks::read_today()
+        .into_iter()
+        .filter(|row| row.ok && row.task == "checkin")
+        .map(|row| row.uid)
+        .collect();
+
+    let mut report = PerksAutoRun::default();
+    let mut notes: Vec<String> = Vec::new();
+    let mut checkin_failed = 0usize;
+    let mut task_failed = 0usize;
+    let mut night_failed = 0usize;
+    let mut route_failed = 0usize;
+
+    for mut account in accounts {
+        let uid = account.uid.clone();
+        let nickname = account.label();
+        let daily_due = day_due(&auto.daily, &uid, &today);
+
+        if daily_due {
+            if let Err(message) = refresh_if_needed(&mut account) {
+                route_failed += 1;
+                notes.push(format!("{nickname} 续期失败：{message}"));
+                continue;
+            }
+            persist_tokens(&state, &account);
+            report.ran = true;
+            report.accounts += 1;
+
+            if signed_today.iter().any(|item| item == &uid) {
+                report.checkin += 1;
+            } else {
+                let outcome = crate::wb_tasks::checkin(&account);
+                if outcome.ok {
+                    report.checkin += 1;
+                } else {
+                    checkin_failed += 1;
+                    notes.push(format!("{nickname} 签到：{}", outcome.msg));
+                }
+            }
+
+            let outcome = crate::wb_tasks::run_growth_tasks(&account, 1.0);
+            report.credit_added += outcome.earned_credit;
+            let task_list_ok = outcome.ok;
+            if !outcome.ok {
+                task_failed += 1;
+                let reason = outcome
+                    .logs
+                    .last()
+                    .cloned()
+                    .unwrap_or_else(|| outcome.msg.clone());
+                if !reason.is_empty() {
+                    notes.push(format!("{nickname} 任务：{reason}"));
+                }
+            }
+
+            // 窗口内这一轮已经把夜猫子顺手做了；任务清单都没读到时别记，
+            // 留给夜间轮再试一次。
+            mark_perks(
+                &mut auto,
+                &uid,
+                true,
+                night_now && task_list_ok,
+                &today,
+            )?;
+            std::thread::sleep(std::time::Duration::from_millis(1500));
+            continue;
+        }
+
+        if night_now && day_due(&auto.night, &uid, &today) {
+            if let Err(message) = refresh_if_needed(&mut account) {
+                route_failed += 1;
+                notes.push(format!("{nickname} 续期失败：{message}"));
+                continue;
+            }
+            persist_tokens(&state, &account);
+            let outcome = crate::wb_tasks::run_night_owl(&account);
+            if outcome.attempted {
+                report.ran = true;
+                report.accounts += 1;
+            }
+            if outcome.attempted && outcome.ok {
+                report.night += 1;
+            }
+            report.credit_added += outcome.credit;
+            if !outcome.ok {
+                night_failed += 1;
+                notes.push(format!("{nickname} 夜猫子：{}", outcome.msg));
+            }
+            mark_perks(&mut auto, &uid, false, true, &today)?;
+            std::thread::sleep(std::time::Duration::from_millis(1000));
+        }
+    }
+
+    if report.ran {
+        report.failed = checkin_failed + task_failed + night_failed + route_failed;
+        let mut parts = Vec::new();
+        if report.checkin > 0 {
+            parts.push(format!("签到 {} 个号", report.checkin));
+        }
+        if report.credit_added > 0 {
+            parts.push(format!("新增 +{} 积分", report.credit_added));
+        }
+        if report.night > 0 {
+            parts.push(format!("夜猫子推进 {} 个号", report.night));
+        }
+        let mut message = if parts.is_empty() {
+            "自动福利已跑完".to_string()
+        } else {
+            format!("自动福利：{}", parts.join("，"))
+        };
+        if checkin_failed > 0 {
+            notes.push(format!("{checkin_failed} 个号签到失败"));
+        }
+        if task_failed > 0 {
+            notes.push(format!("{task_failed} 个号任务未完成"));
+        }
+        if !notes.is_empty() {
+            let detail = notes.iter().take(3).cloned().collect::<Vec<_>>().join("；");
+            message.push_str(&format!(
+                "（{detail}{}）",
+                if notes.len() > 3 { " …" } else { "" }
+            ));
+        }
+        report.message = message;
+    }
+    Ok(report)
+}
+
 fn view_of(account: &Account) -> AccountView {
     let now = now_secs();
     let quota_exhausted = account.quota_blocked(now);
@@ -1081,6 +1294,44 @@ pub fn save_config(config: &Config) -> Result<(), String> {
     let text = serde_json::to_string_pretty(config)
         .map_err(|err| format!("序列化网关配置失败: {err}"))?;
     crate::fs_util::write_atomic(&path, text.as_bytes())
+}
+
+pub fn load_perks_auto() -> PerksAuto {
+    let path = crate::paths::gateway_perks_file();
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return PerksAuto::default();
+    };
+    serde_json::from_str(&text).unwrap_or_default()
+}
+
+fn save_perks_auto(config: &PerksAuto) -> Result<(), String> {
+    let path = crate::paths::gateway_perks_file();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|err| format!("建网关目录失败: {err}"))?;
+    }
+    let text = serde_json::to_string_pretty(config)
+        .map_err(|err| format!("序列化福利自动跑配置失败: {err}"))?;
+    crate::fs_util::write_atomic(&path, text.as_bytes())
+}
+
+/// 记一个号今天已经跑过。落盘前重读一次，避免把用户这期间关掉的开关又写回去。
+fn mark_perks(
+    auto: &mut PerksAuto,
+    uid: &str,
+    daily: bool,
+    night: bool,
+    today: &str,
+) -> Result<(), String> {
+    let mut latest = load_perks_auto();
+    if daily {
+        latest.daily.insert(uid.to_string(), today.to_string());
+    }
+    if night {
+        latest.night.insert(uid.to_string(), today.to_string());
+    }
+    save_perks_auto(&latest)?;
+    *auto = latest;
+    Ok(())
 }
 
 // ---------- Tauri 命令 ----------
@@ -1234,6 +1485,24 @@ mod tests {
         let back: Config = serde_json::from_str(r#"{"port":9999}"#).unwrap();
         assert!(!back.auto_start);
         assert_eq!(back.port, 9999);
+    }
+
+    #[test]
+    fn 福利自动跑缺字段时默认关闭且没有标记() {
+        let back: PerksAuto = serde_json::from_str("{}").unwrap();
+        assert!(!back.enabled, "默认不自动跑");
+        assert!(back.daily.is_empty());
+        assert!(back.night.is_empty());
+    }
+
+    #[test]
+    fn 福利自动跑按自然日判断每号是否该跑() {
+        let mut marks = HashMap::new();
+        assert!(day_due(&marks, "u-1", "2026-11-05"), "没跑过就该跑");
+        marks.insert("u-1".into(), "2026-11-05".into());
+        assert!(!day_due(&marks, "u-1", "2026-11-05"), "同一天不重复");
+        assert!(day_due(&marks, "u-1", "2026-11-06"), "跨天要再跑");
+        assert!(day_due(&marks, "u-2", "2026-11-05"), "新加的号当天要跑");
     }
 
     #[test]

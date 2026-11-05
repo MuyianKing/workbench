@@ -1140,6 +1140,11 @@ export interface WorkbenchApi {
   gatewayActivityToday: () => Promise<Result<import('./workbench/gateway').GatewayActivityRow[]>>
   /** 福利页：积分发放流水（`uid` 为空时取全部已启用账号，界面按发放日汇总近 30 天） */
   gatewayCreditGrants: (uid?: string) => Promise<Result<import('./workbench/gateway').GatewayGrantAccount[]>>
+  /** 福利自动跑：开关（默认关；日期标记由后端维护） */
+  gatewayPerksAutoConfig: () => Promise<Result<import('./workbench/gateway').GatewayPerksAutoConfig>>
+  gatewayPerksAutoSet: (enabled: boolean) => Promise<Result<import('./workbench/gateway').GatewayPerksAutoConfig>>
+  /** 按自然日与夜间窗口判断该不该跑；关着时不发请求 */
+  gatewayPerksAutoRun: () => Promise<Result<import('./workbench/gateway').GatewayPerksAutoRun>>
   versions: { node: string, chrome: string }
   /**
    * 挑一个目录。

@@ -30,6 +30,7 @@ import VideoView from '@/components/VideoView.vue'
 import WorkView from '@/components/WorkView.vue'
 import { useMailStore } from '@/stores/mail'
 import { useNavStore } from '@/stores/nav'
+import { usePerksAutoStore } from '@/stores/perks-auto'
 import { useProjectsStore } from '@/stores/projects'
 import { useSettingsStore } from '@/stores/settings'
 import { useWeatherStore } from '@/stores/weather'
@@ -44,6 +45,8 @@ const weather = useWeatherStore()
 const mail = useMailStore()
 // 禅道的后台检查同理：到点由 Rust 唤醒，取数 / 比新增 / 弹通知在 store 里（stores/zentao.ts）
 const zentao = useZentaoStore()
+// 福利自动跑：启动后问一次、之后每十分钟问一次；该不该跑由 Rust 按自然日与夜间窗口判断
+const perksAuto = usePerksAutoStore()
 
 /**
  * 页面清单：id 在 packages/appearance/src/views.ts 里登记，这里给出对应的组件。
@@ -102,6 +105,7 @@ onMounted(() => {
   weather.start()
   mail.startWatch()
   zentao.startWatch()
+  perksAuto.startWatch()
   // 截图失败（抓屏 / 铺遮罩出错）：那是工作线程里跑的动作，没有别的地方能报回来。
   // Rust 会先把窗口唤出来再推这条事件，所以提示条一定冒在一个看得见的窗口上
   window.workbench.onCaptureFailed(message => ElMessage.error(message))

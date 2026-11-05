@@ -23,6 +23,7 @@ import { dailyGrowthCredits, isGrowthPerkPackage } from '@workbench/usage'
 import { ElMessage } from 'element-plus'
 import { computed, onMounted, ref } from 'vue'
 import EmptyState from '@/components/EmptyState.vue'
+import { usePerksAutoStore } from '@/stores/perks-auto'
 import GatewayTable from './GatewayTable.vue'
 import PerksCreditsChart from './PerksCreditsChart.vue'
 
@@ -31,8 +32,9 @@ import PerksCreditsChart from './PerksCreditsChart.vue'
  *
  * 口径来自 workbuddy2api-hub 的「任务与福利」页：成长任务 / 签到 / 猫猫旅行 /
  * 连登管家，外加近一个月的积分柱状图（积分包流水）。与参考项目的差别只有
- * 「什么时候去要数据」——这里只在**进这一栏、切账号、点按钮**时取一次，没有定时器；
- * 每个动作都是用户点出来的一次真实上游请求。
+ * 「什么时候去要数据」——手动动作只在**进这一栏、切账号、点按钮**时取一次；
+ * 自动跑要用户在这里显式打开「每天自动」（默认关，见 stores/perks-auto.ts），
+ * 打开后才是启动补跑 + 每十分钟问一次该不该跑，夜猫子另有 23:00–08:00 的夜间轮。
  *
  * 这一栏自己不查余额：积分总额取父组件已经查过的快照（`credits`），动作做完由
  * 这一栏发 `credits-refresh` 让父组件重查一遍。这样进这一栏不会为了数字格多打
@@ -56,7 +58,10 @@ const summary = ref<GatewayGrowthSummary>(emptySummary())
 const activity = ref<GatewayActivityRow[]>([])
 const taskLoading = ref(false)
 const running = ref<ActionKind | ''>('')
+const autoEnabled = ref(false)
+const autoSaving = ref(false)
 const loaded = ref(false)
+const perksAuto = usePerksAutoStore()
 const grants = ref<GatewayGrantAccount[]>([])
 const grantsLoading = ref(false)
 const grantsError = ref('')
@@ -311,10 +316,49 @@ async function runAction(kind: ActionKind): Promise<void> {
   }
 }
 
+async function loadAutoConfig(): Promise<void> {
+  const result = await window.workbench.gatewayPerksAutoConfig()
+  if (result.ok && result.data)
+    autoEnabled.value = result.data.enabled
+}
+
+/**
+ * 开关：保存后立刻补跑一次。今天已经跑过 / 不在夜间窗口时后端会直接返回，
+ * 所以这里不必自己判断日期；真正跑起来才有提示。
+ */
+async function toggleAuto(value: boolean | string | number): Promise<void> {
+  if (autoSaving.value)
+    return
+  const enabled = value === true
+  autoSaving.value = true
+  try {
+    const result = await window.workbench.gatewayPerksAutoSet(enabled)
+    if (!result.ok || !result.data) {
+      autoEnabled.value = !enabled
+      ElMessage.error(result.error ?? '保存自动跑配置失败')
+      return
+    }
+    autoEnabled.value = result.data.enabled
+    if (!result.data.enabled)
+      return
+    // 后台补跑一次，别把开关卡在 loading 上：一轮可能要跑几分钟
+    void perksAuto.runNow().then(async (run) => {
+      if (run?.ran) {
+        await Promise.all([loadActivity(), loadTasks(), loadGrants()])
+        emit('credits-refresh')
+      }
+    })
+  }
+  finally {
+    autoSaving.value = false
+  }
+}
+
 onMounted(() => {
   void loadActivity()
   void loadTasks()
   void loadGrants()
+  void loadAutoConfig()
 })
 </script>
 
@@ -380,6 +424,20 @@ onMounted(() => {
           >
             连登管家与抽奖
           </el-button>
+          <el-tooltip
+            content="启动 / 跨天后补跑签到与一键做任务；夜猫子只在 23:00–08:00 单独跑"
+            placement="top"
+          >
+            <span class="perks__auto">
+              <span class="perks__auto-label">每天自动</span>
+              <el-switch
+                v-model="autoEnabled"
+                size="small"
+                :loading="autoSaving"
+                @change="toggleAuto"
+              />
+            </span>
+          </el-tooltip>
         </div>
       </header>
 
@@ -565,6 +623,21 @@ onMounted(() => {
   align-items: center;
   gap: var(--sp-2);
   flex-wrap: wrap;
+}
+
+.perks__auto {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-left: var(--sp-2);
+  padding-left: var(--sp-3);
+  border-left: 1px solid var(--border);
+}
+
+.perks__auto-label {
+  font-size: var(--gw-fs-micro);
+  color: var(--ink-3);
+  white-space: nowrap;
 }
 
 .perks__select {

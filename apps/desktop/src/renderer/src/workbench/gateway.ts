@@ -499,6 +499,9 @@ export const gatewayApi = {
   gatewayCheckin,
   gatewayActivityToday,
   gatewayCreditGrants,
+  gatewayPerksAutoConfig,
+  gatewayPerksAutoSet,
+  gatewayPerksAutoRun,
 }
 
 // ---------- 任务福利 ----------
@@ -592,6 +595,26 @@ export interface GatewayGrantAccount {
   error: string
 }
 
+/** 福利自动跑的开关（日期标记是后端内部状态，不往界面回） */
+export interface GatewayPerksAutoConfig {
+  enabled: boolean
+}
+
+/** 一轮自动跑的结果。`ran` 为 false 表示当前没有该跑的事（已跑过 / 不在夜间窗口）。 */
+export interface GatewayPerksAutoRun {
+  ran: boolean
+  accounts: number
+  /** 签到成功（含「今天已签到」）的账号数 */
+  checkin: number
+  creditAdded: number
+  /** 夜间轮推进的账号数 */
+  night: number
+  /** 这一轮里没成功的动作数（签到 / 任务 / 夜猫子 / 续期） */
+  failed: number
+  /** 给用户的一句话；空串表示无事发生 */
+  message: string
+}
+
 /** 当前号的成长任务 + 汇总。`uid` 为空时后端取第一个已启用的号。 */
 export function gatewayTasks(uid?: string): Promise<Result<GatewayTasksSnapshot>> {
   return call('wb_gateway_tasks', { uid: uid ?? null }, '读取成长任务失败')
@@ -626,4 +649,21 @@ export function gatewayActivityToday(): Promise<Result<GatewayActivityRow[]>> {
  */
 export function gatewayCreditGrants(uid?: string): Promise<Result<GatewayGrantAccount[]>> {
   return call('wb_gateway_credit_grants', { uid: uid ?? null }, '读取积分流水失败')
+}
+
+/** 福利自动跑的开关 */
+export function gatewayPerksAutoConfig(): Promise<Result<GatewayPerksAutoConfig>> {
+  return call('wb_gateway_perks_auto_config', {}, '读取福利自动跑配置失败')
+}
+
+export function gatewayPerksAutoSet(enabled: boolean): Promise<Result<GatewayPerksAutoConfig>> {
+  return call('wb_gateway_perks_auto_set', { enabled }, '保存福利自动跑配置失败')
+}
+
+/**
+ * 按本地自然日与 23:00–08:00 窗口判断该不该跑；关着时直接返回。
+ * 白天轮 = 签到 + 一键做任务，夜间轮只跑夜猫子。
+ */
+export function gatewayPerksAutoRun(): Promise<Result<GatewayPerksAutoRun>> {
+  return call('wb_gateway_perks_auto_run', {}, '自动福利执行失败')
 }

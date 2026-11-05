@@ -6,8 +6,9 @@
 //! 1. **每一次尝试都落一行** [`ActivityRow`]（`activity.jsonl`）：签到过去只留在
 //!    日志里，重启即散，回答不了「这个号昨天到底签成没有」。写进去的是运维元数据，
 //!    不是凭据：uid / 昵称 / 任务 / 结果 / 一句截断并脱敏过的说明。
-//! 2. **只给用户点了按钮才动**：没有调度器、没有定时器。这一页的每个动作都是一次显式
-//!    的上游请求，默认什么也不做。
+//! 2. **默认只给用户点了按钮才动**：这一页的每个动作都是一次显式的上游请求；
+//!    福利自动跑是用户显式打开的开关（见 `wb_gateway` 的 `PerksAuto`），关着时
+//!    什么也不做，打开后也只在启动 / 自然日翻篇 / 夜间窗口里各补一次。
 //!
 //! 上游口径里几个不能改的细节：
 //!
@@ -52,6 +53,8 @@ const BUDDY_QUOTA_PATH: &str = "/v2/activity/growth/buddy/quota";
 const BUDDY_OPEN_PATH: &str = "/v2/activity/growth/buddy/open";
 const REPORT_PATH: &str = "/v2/report";
 const CHECKIN_PATH: &str = "/v2/billing/meter/daily-checkin";
+/// 夜猫子任务：只在 23:00–08:00 上报计数，每天一次、累计三天。
+const NIGHT_TASK: &str = "black_cat";
 const GIFT_PATH: &str = "/billing/meter/claim-gift";
 const COMPENSATION_PATH: &str = "/billing/meter/claim-compensation";
 
@@ -839,9 +842,13 @@ fn report_events(account: &Account, events: &[Value]) -> bool {
     }
 }
 
-fn in_night_window() -> bool {
-    let hour = local_parts().3;
+/// 夜猫子任务的计分窗口：23:00–08:00（本地时间）。抽成纯函数是为了能测边界。
+fn night_window(hour: i32) -> bool {
     !(8..23).contains(&hour)
+}
+
+pub(crate) fn in_night_window() -> bool {
+    night_window(local_parts().3)
 }
 
 fn desktop_only_hint(code: &str) -> Option<&'static str> {
@@ -924,7 +931,13 @@ fn percent_decode(input: &str) -> String {
 
 /// 推进单个任务并返回本次到账积分。auto 类不需要接取；single 类未接取时上报
 /// 不计进度，跳过等接取成功。
-fn progress_one(account: &Account, task: &GrowthTask, logs: &mut Vec<String>, gap: f64) -> i64 {
+fn progress_one(
+    account: &Account,
+    task: &GrowthTask,
+    logs: &mut Vec<String>,
+    gap: f64,
+    report_limit: Option<i64>,
+) -> i64 {
     let Some(spec) = spec_of(&task.task_code) else {
         return 0;
     };
@@ -977,7 +990,7 @@ fn progress_one(account: &Account, task: &GrowthTask, logs: &mut Vec<String>, ga
         return 0;
     }
 
-    if task.task_code == "black_cat" && !in_night_window() {
+    if task.task_code == NIGHT_TASK && !in_night_window() {
         logs.push(format!(
             "🌙 任务 [{}] 仅 23:00–08:00 上报计数，当前不在窗口，跳过",
             spec.name
@@ -994,6 +1007,8 @@ fn progress_one(account: &Account, task: &GrowthTask, logs: &mut Vec<String>, ga
     }
 
     let need = (task.target - task.current).max(1);
+    // 夜猫子每天只计一次：夜间轮传 `Some(1)`，别把剩余次数在同一晚全报掉。
+    let need = report_limit.map_or(need, |limit| need.min(limit.max(1)));
     logs.push(format!("正在点亮任务 [{}]（需上报 {need} 次）…", spec.name));
     let pool = match spec.kind {
         "team" => Some(TEAM_ID_POOL),
@@ -1130,7 +1145,7 @@ pub fn run_growth_tasks(account: &Account, gap: f64) -> RunOutcome {
 
     // 0. auto 类（first_buddy）：不接受接取，且是猫猫旅行与 single 任务的前置。
     for task in tasks.iter().filter(|item| item.task_type == "auto") {
-        earned += progress_one(account, task, &mut logs, gap);
+        earned += progress_one(account, task, &mut logs, gap, None);
     }
 
     // 1. 批量接取 + 复核一次 + 再复核。
@@ -1196,7 +1211,7 @@ pub fn run_growth_tasks(account: &Account, gap: f64) -> RunOutcome {
     }
 
     for task in tasks.iter().filter(|item| item.task_type != "auto") {
-        earned += progress_one(account, task, &mut logs, gap);
+        earned += progress_one(account, task, &mut logs, gap, None);
     }
 
     let travel = do_cat_travel(account);
@@ -1227,6 +1242,121 @@ pub fn run_growth_tasks(account: &Account, gap: f64) -> RunOutcome {
         credits,
         msg: String::new(),
     }
+}
+
+/// 夜间单跑一轮的结果。`attempted` 为 false 表示本轮没动上游（不在窗口 / 已领取 / 企业版）；
+/// `ok` 表示这一晚的动作走通了（上报被接受或领奖成功），不是任务已累计满。
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct NightOutcome {
+    pub attempted: bool,
+    pub ok: bool,
+    pub msg: String,
+    pub credit: i64,
+}
+
+/// 夜猫子任务的单独一轮：只在 23:00–08:00 内推进，每晚只上报一次。
+///
+/// 白天那轮 `run_growth_tasks` 在窗口外会跳过它、在窗口内会顺手做掉；这个入口只服务
+/// 「应用一直开着、跨到 23:00」的夜间补跑，不碰别的任务，也不碰猫猫旅行 / 盲盒。
+pub fn run_night_owl(account: &Account) -> NightOutcome {
+    if is_enterprise(account) {
+        return NightOutcome {
+            ok: true,
+            msg: "企业版账号无成长体系，跳过".into(),
+            ..NightOutcome::default()
+        };
+    }
+    if !in_night_window() {
+        return NightOutcome {
+            msg: "不在 23:00–08:00 窗口".into(),
+            ..NightOutcome::default()
+        };
+    }
+
+    let tasks = match fetch_growth_tasks(account) {
+        Ok(tasks) => tasks,
+        Err(message) => {
+            return NightOutcome {
+                attempted: true,
+                msg: format!("读取任务清单失败：{message}"),
+                ..NightOutcome::default()
+            }
+        }
+    };
+    let Some(mut task) = tasks
+        .iter()
+        .find(|item| item.task_code == NIGHT_TASK)
+        .cloned()
+    else {
+        return NightOutcome {
+            msg: "任务清单里没有夜猫子任务".into(),
+            ..NightOutcome::default()
+        };
+    };
+    if task.status == "claimed" {
+        return NightOutcome {
+            ok: true,
+            msg: "夜猫子任务已领取".into(),
+            ..NightOutcome::default()
+        };
+    }
+
+    // 未接取的任务上报不计进度：先单独接它，再复核一次。
+    if needs_accept(&task) {
+        let accepted = accept_tasks(account, &[task.task_code.clone()]);
+        if !accepted.accepted.iter().any(|code| code == &task.task_code) {
+            return NightOutcome {
+                attempted: true,
+                msg: if accepted.msg.trim().is_empty() {
+                    "夜猫子任务接取失败".into()
+                } else {
+                    format!("夜猫子任务接取失败：{}", accepted.msg.trim_end_matches("; "))
+                },
+                ..NightOutcome::default()
+            };
+        }
+        sleep_secs(1.0);
+        let fresh = fetch_growth_tasks(account).unwrap_or_default();
+        let Some(next) = fresh.into_iter().find(|item| item.task_code == NIGHT_TASK) else {
+            return NightOutcome {
+                attempted: true,
+                msg: "接取后读不到夜猫子任务".into(),
+                ..NightOutcome::default()
+            };
+        };
+        task = next;
+    }
+
+    let mut logs = Vec::new();
+    let credit = progress_one(account, &task, &mut logs, 1.0, Some(1));
+    let ok = night_action_ok(&logs);
+    NightOutcome {
+        attempted: true,
+        ok,
+        msg: if ok {
+            if credit > 0 {
+                format!("夜猫子领奖 +{credit} 积分")
+            } else {
+                "夜猫子已上报一次".into()
+            }
+        } else if logs.is_empty() {
+            "夜猫子任务没有可推进的步骤".into()
+        } else {
+            logs.join("；")
+        },
+        credit,
+    }
+}
+
+/// 夜猫子要累计三天：前两晚只会把进度推到 1/3、2/3，日志里是 `?` 而不是 `✓`。
+/// `ok` 表示「这一晚的动作走通了」（上报被接受 / 领奖成功），不是任务已完成。
+fn night_action_ok(logs: &[String]) -> bool {
+    let failed = logs.iter().any(|line| line.starts_with('!'));
+    let progressed = logs
+        .iter()
+        .any(|line| line.starts_with('✓') || line.starts_with('?'));
+    !failed && progressed
 }
 
 fn trim_number(value: f64) -> String {
@@ -1428,7 +1558,7 @@ fn ensure_buddy(account: &Account, gap: f64) -> bool {
     if buddy.status == "claimed" {
         return true;
     }
-    progress_one(account, &buddy, &mut Vec::new(), gap);
+    progress_one(account, &buddy, &mut Vec::new(), gap, None);
     fetch_growth_tasks(account)
         .unwrap_or_default()
         .iter()
@@ -1783,7 +1913,7 @@ fn local_parts() -> (i32, i32, i32, i32) {
     )
 }
 
-fn local_date() -> String {
+pub(crate) fn local_date() -> String {
     let (year, month, day, _) = local_parts();
     format!("{year:04}-{month:02}-{day:02}")
 }
@@ -1893,6 +2023,30 @@ mod tests {
     }
 
     #[test]
+    fn 夜猫子窗口跨午夜() {
+        // 23:00–07:59 计数；08:00 与 22:59 各自在窗口外
+        assert!(night_window(23));
+        assert!(night_window(0));
+        assert!(night_window(7));
+        assert!(!night_window(8));
+        assert!(!night_window(22));
+    }
+
+    #[test]
+    fn 夜猫子夜间轮以走通为准不是以累计满为准() {
+        assert!(night_action_ok(&[
+            "正在点亮任务".into(),
+            "? 任务已上报但进度 1/3 未达成，领奖顺延到下次运行".into(),
+        ]));
+        assert!(night_action_ok(&["✓ 任务领奖成功".into()]));
+        assert!(!night_action_ok(&[
+            "! 部分事件上报失败（上游拒绝）".into(),
+            "? 任务已上报但进度 0/3 未达成".into(),
+        ]));
+        assert!(!night_action_ok(&[]));
+    }
+
+    #[test]
     fn 事件里的专家_id_随下标轮换() {
         let account = sample_account();
         let first = build_event(&account, "expert", 0, Some(EXPERT_ID_POOL[0]));
@@ -1933,7 +2087,7 @@ mod tests {
         };
         let mut logs = Vec::new();
         // 只走到「仍未接取」那一支就会返回，不会发请求
-        let earned = progress_one(&account, &task, &mut logs, 0.0);
+        let earned = progress_one(&account, &task, &mut logs, 0.0, None);
         assert_eq!(earned, 0);
         assert!(logs.iter().any(|line| line.contains("仍未接取")));
     }
@@ -1956,7 +2110,7 @@ mod tests {
             reason: "真实捐款动作".into(),
         };
         let mut logs = Vec::new();
-        assert_eq!(progress_one(&account, &task, &mut logs, 0.0), 0);
+        assert_eq!(progress_one(&account, &task, &mut logs, 0.0, None), 0);
         assert!(logs[0].contains("真实捐款动作"));
     }
 

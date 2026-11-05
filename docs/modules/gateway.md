@@ -145,9 +145,13 @@
   字符串（`none` 时保留 `tools`）、`tools` 丢掉空 function / 裸服务端工具 / 非法 function.name / 重名并补空
   `parameters`、`stop` 字符串包成数组、glm-5.1 缺思考档补目录默认档（拿不到回 `medium`）。这些分别对应
   上游的 11101 / 11133 / 11150；**只做形状归一**，不要借这一步删消息或改提示词。
-- **任务福利只认用户点出来的动作**：`wb_tasks` 里没有调度器、没有定时器、没有「进页面自动签到」。
-  进「福利」栏只做只读查询（当前号的成长任务与汇总两块并行，外加积分流水，见下），
-  切账号 / 点按钮才会再打上游；这一点与参考项目的自动巡检明确不同 —— 本应用不替用户决定什么时候花额度。
+- **任务福利默认只认用户点出来的动作**：`wb_tasks` 本身没有调度器；进「福利」栏只做只读查询
+  （当前号的成长任务与汇总两块并行，外加积分流水，见下），切账号 / 点按钮才会再打上游。
+  **唯一例外是用户显式打开的「每天自动」开关（默认关）**：打开后应用启动时补跑一次，之后
+  每十分钟由渲染层问一次该不该跑（判断全在 Rust 侧，不该跑时不联网）。白天轮 = 签到 +
+  一键做任务（成长任务 / 猫猫旅行 / 盲盒），夜间轮 = 夜猫子（只在 23:00–08:00，每号每自然日一次）。
+  **连登管家与抽奖不自动跑**（会消耗补签卡）；应用关着的那天不跑，下次启动补。
+  这与参考项目的自动巡检仍不同 —— 不替用户决定什么时候花额度。
 - **每一次签到尝试都落一行**（`activity.jsonl`）：时间、uid、昵称、任务、结果、
   一句截断并脱敏过的说明。**不落 token / cookie / 请求体**；上游错误原文先折叠换行、把
   `Bearer …` 与 32 位以上的连续十六进制 / `sk-` 形态打码，再截到 200 字。这是「今日已签到」
@@ -267,11 +271,30 @@ state 存在内存里（10 分钟过期），不落盘。上游签发 state，�
 | 连登管家与抽奖 | `wb_gateway_tasks_streak` | 补签 → 礼包 / 补偿 → 档位兑换 → 抽奖 |
 | 积分流水 | `wb_gateway_credit_grants` | 计费域 `get-user-resource`（宽时间窗，每个号一次只读 POST） |
 | 今日尝试 | `wb_gateway_activity_today` | 只读 `activity.jsonl` |
+| 自动跑开关 | `wb_gateway_perks_auto_config` / `wb_gateway_perks_auto_set` | 无（只读写 `perks-auto.json`） |
+| 自动跑一轮 | `wb_gateway_perks_auto_run` | 白天到点：签到 + 一键做任务；夜间窗口：只跑夜猫子 |
 
 跑任务前会按需续期一次 token（与查余额同一条规矩：网络请求不占状态锁），跑完只把 token 字段
 写回磁盘。单个号失败不会带走后面的号；批量执行时每一轮前面都有一行 `====== 账号 … ======`。
 跑完任务会顺手做一次猫猫旅行；旅行领奖后与其它状态下各查一次成长能量开 Buddy 盲盒
 （`/v2/activity/growth/buddy/quota` → `/buddy/open`，能量不够就跳过）。
+
+#### 福利自动跑
+
+开关在福利栏顶栏右端（「每天自动」，默认关），存在 `perks-auto.json`；`App.vue` 启动时调用
+`stores/perks-auto.ts` 的 `startWatch()`，立刻问一次、之后每十分钟问一次。**判断在
+`wb_gateway_perks_auto_run` 里做**：开关关着直接返回，不读账号、不联网。
+
+- 白天轮（每号每本地自然日一次）：续期 → 今天已签成功的号跳过签到 → `checkin` →
+  `run_growth_tasks`。企业版直接跳过（没有成长体系）。跑完把 `daily[uid] = 今天`。
+- 夜间轮（每号每自然日一次，只在 23:00–08:00）：`run_night_owl` 只找 `black_cat`，
+  未接取就先接取，然后**只上报一次**（`progress_one` 的 `report_limit = Some(1)`），
+  进度够了再领奖。白天轮如果本来就在窗口内跑过，夜猫子已被顺手做掉，就把 `night[uid]`
+  一起记成今天，23:00 不再重复（任务清单都没读到时除外，留给夜间轮再试）。
+- 续期失败不记完成（下一轮十分钟后再试）；其余失败记完成（避免每十分钟锤上游），
+  手动按钮仍可重试。自动跑只处理个人号；「连登管家与抽奖」不在自动范围内。
+- 应用进程关着时不会跑 —— 桌面应用没有常驻服务，「每天」实际是「应用至少打开过一次的那天」，
+  下次打开补。
 
 ### 数据落位
 
@@ -286,7 +309,11 @@ state 存在内存里（10 分钟过期），不落盘。上游签发 state，�
   usage.jsonl        请求流水（一行一条，只追加）
   models.json        上一次从上游拉下来的模型目录（含 fetchedAt）
   activity.jsonl     签到尝试记录（一行一次真实尝试，见「任务福利」）
+  perks-auto.json    福利自动跑的开关与每号上次跑的日期（uid → YYYY-MM-DD，见「福利自动跑」）
 ```
+
+`perks-auto.json` 的 `enabled` 默认 false；`daily` / `night` 是两张 `uid → 本地自然日` 的表。
+它只在本机，不参与用量同步 —— 换一台机器视为「今天还没跑过」，会在那台机器上再跑一次。
 
 `activity.jsonl` 的一行只有 `ts`（Unix 秒）、`date`（本地自然日，读「今天」不必再猜时区）、
 `uid`、`nickname`、`task`（`checkin`）、`ok` 与 `message`（折叠换行、
@@ -402,16 +429,21 @@ state 存在内存里（10 分钟过期），不落盘。上游签发 state，�
 - 同步仓库会随月份文件长期增长，**不做自动清理**；清理办法见「多机流水同步」。
 - 两台机器共用同一个 `device.json` 会写同一个设备目录并互相覆盖；本机 `usage.jsonl` 丢了但设备 id
   还在时，自己的远端目录会被跳过（避免双计），那段历史在界面上看不到。
+- **福利自动跑没有后台服务**：应用关着时不会执行，只能在启动后补跑或应用开着时补；
+  「每天」按本地自然日算，同一台机器上的同一账号每天最多自动跑一次。夜猫子按上游口径
+  每晚只上报一次，进度要累计三天，所以不会因为打开了自动跑就当天领完。
+  自动跑只写本机 `perks-auto.json`，不参与多机同步：换一台机器视为「今天还没跑过」。
 
 ## 涉及文件
 
 - `apps/desktop/src-tauri/src/wb_*.rs`（21 个，`wb_tasks` 是任务福利）
 - `apps/desktop/src-tauri/src/http.rs`（流式接口）
-- `apps/desktop/src-tauri/src/paths.rs`（`gateway_dir` / `gateway-usage` / `gateway_activity_file` 系列）
+- `apps/desktop/src-tauri/src/paths.rs`（`gateway_dir` / `gateway-usage` / `gateway_activity_file` / `gateway_perks_file` 系列）
 - `apps/desktop/src-tauri/src/sync.rs`（网关流水的 git 写入 / 读取、按月分文件）
 - `apps/desktop/src-tauri/src/commands.rs`（`gateway_sync_publish` / `gateway_sync_pull`）
 - `apps/desktop/src-tauri/src/main.rs`（模块、managed state、命令注册）
 - `apps/desktop/src/renderer/src/components/gateway/{GatewayView,CreditsDialog,AccessDialog,PerksPane,PerksCreditsChart,UsagePane,RequestsPane,ModelsPane}.vue`
 - `apps/desktop/src/renderer/src/workbench/{gateway,sync-queue}.ts`
+- `apps/desktop/src/renderer/src/stores/perks-auto.ts`（福利自动跑的后台节拍）
 - `packages/usage/src/{credit-expiry,growth-credits,gateway-usage}.ts`（到期档位 / 福利流水 / 用量汇总的纯逻辑）
 - `packages/appearance/src/views.ts`（`gateway` 页签）
