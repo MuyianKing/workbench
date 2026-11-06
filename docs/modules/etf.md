@@ -5,7 +5,7 @@ KPI 窗口卡、近 21 交易日柱状图、总规模曲线（**默认近一年*
 下方概览条可拖：平移窗口 / 两侧把手改宽度，头部有近 1 年 / 近 3 年 / 全部快捷档）、
 分品种表（**默认近一月降序、表头各列可点排序**）、按指数归集表与最近 10 日明细矩阵。图表悬停统一走
 `composables/use-plot-hover` + `EtfPlotTip` 浮卡。数据来自沪深交易所的份额披露与
-天天基金的净值，全部缓存在本机。
+天天基金的净值，缓存在本机；开了同步的话另有一份副本在用户自己的仓库里，供别的机器直接复用。
 
 ## 约束
 
@@ -22,7 +22,13 @@ KPI 窗口卡、近 21 交易日柱状图、总规模曲线（**默认近一年*
   按基金代码过滤、区间批量、分页）、单位净值 **天天基金**（`fund.eastmoney.com`，每只一份全历史脚本）。
   主机白名单钉死在 [etf.rs](../../apps/desktop/src-tauri/src/etf.rs) 的常量里，渲染层只给得出
   日期 / 基金代码 / 页码（形状入地址前逐一校验），拼不出任意 URL。
+  **深市那一路有明文退路**（全项目唯一一处 http）：HTTPS 拿不到响应时只把协议换成 `http://`、主机与
+  全部参数原样重发一次 —— 深交所会对回填到几百个请求后的出口 IP 在 TLS 层直接断连（握手成功、
+  不给 HTTP 响应，WinHTTP 报 12152，2026-11 实测同路径 http 照常 200）。同一份公开只读 JSON、
+  不带凭据、不发用户内容；沪市与净值两路仍只走 HTTPS，别把这条退路搬到别处。
   **进 ETF 页（或点页面「刷新」）才出网**，没有定时器、没有后台轮询 —— 与 AI 热点同一「打开才算数」口径。
+  开同步时同一趟里还会连**你自己的同步仓库**（git 推拉，登记在用量同步那条出口里，不新增主机 / 出口），
+  先拉别人的缓存再规划缺口（见下文「本机缓存是权威」一条）。
   端点教训（2026-10 实测）：净值脚本路径**没有 `/js/` 段**（`/pingzhongdata/js/{code}.js`
   301 到 notfound）。
 - **首次回填五年、断点续传**：沪市要按交易日逐日拉（约 1250 个请求），进度记在缓存的 `sseDone`
@@ -43,8 +49,15 @@ KPI 窗口卡、近 21 交易日柱状图、总规模曲线（**默认近一年*
   A 股红涨绿跌惯例；总规模曲线走中性灰（`--ink-2` / `--ink-3`）。**主题色只进一处**：
   总规模概览条的可拖亮窗（主色浅纱 + 主色描边、悬停加深 —— 交互控件，「当前看哪段」的标记，
   与导航栏当前项同一条口径；没配主题色时主色是中性灰，整条照旧灰阶）。数字列等宽（`--font-mono`）。
-- **缓存只在本机**：`data\etf.json`（JsonStore，约 1.5MB），与工作日志 / AI 热点同一待遇 ——
-  不进同步仓库、不上云。磁盘读回收敛（`sanitizeEtfCache`）：坏日期、坏数值、名单外的代码一律丢。
+- **本机缓存是权威，同步只是一份给别的机器复用的副本**：`data\etf.json`（JsonStore，约 1.5MB）
+  仍是本机唯一读写的落点；开同步（登录 + 设置里填了仓库地址，与用量同步同一个门禁）时另推
+  `etf/<设备id>.json` 进同一个 `token-sync` 克隆 —— 每台机器只写自己那份（单写者），读的时候跳过
+  本机那份、把别的机器的并进本机。合并口径只在 [etf.ts](../../packages/etf/src/etf.ts) 的
+  `mergeEtfCacheInto`：份额 / 净值逐日取并集（**本机已有的值不改**），`sseDone` 取较晚的。
+  于是**一台机器跑完五年回填，其他机器进页面直接复用**：合并完再规划缺口，这一轮不再向交易所要同一批日期。
+  进页面 / 点刷新时先拉后推各一次 git（同一个克隆、走 `sync::lock_workflow`），三个行情主机没有新增请求；
+  没登录或没填地址时完全只读本机。磁盘读回收敛（`sanitizeEtfCache`）：坏日期、坏数值、名单外的代码
+  一律丢 —— **远端那份也过同一道**，坏文件只是被跳过。
 - **图表全手写，不引图表库**：柱状图一排 div（与网关用量页同一套画法，零线居中、正负各占半区）；
   折线是总规模曲线那张 SVG 数据图（`preserveAspectRatio="none"` 拉通整宽 + `vector-effect="non-scaling-stroke"`，
   缺日断开成多段）。悬停只有柱子的原生 `title`。
@@ -58,16 +71,21 @@ KPI 窗口卡、近 21 交易日柱状图、总规模曲线（**默认近一年*
 **涉及文件**
 
 - `packages/etf/src/etf.ts` —— 纯逻辑：`ETF_TARGETS` 名单、三个源的解析（`parseSseShares` /
-  `parseSzseShares` / `parseNavScript`）、缓存收敛与合并、回填规划
+  `parseSzseShares` / `parseNavScript`）、缓存收敛与合并（本日增量 `mergeSharesInto` /
+  `mergeNavInto`、跨机 `mergeEtfCacheInto`）、回填规划
   （`planSseDates` / `planSzseRanges` / `isStaleEmptyDate`）、净买卖与聚合（`buildOverview`）、
   展示格式（`formatYi` 一族）
 - `packages/etf/src/etf.test.ts` —— 上列全部的单测
 - `apps/desktop/src-tauri/src/etf.rs` —— 三个只读源的白名单与拉取命令（`etf_fetch_sse` /
   `etf_fetch_szse` / `etf_fetch_nav`）+ `etf_load` / `etf_save`（JsonStore）
-- `apps/desktop/src-tauri/src/paths.rs` —— `etf_file()`（`data\etf.json`）
+- `apps/desktop/src-tauri/src/commands.rs` —— `etf_sync_pull`（刷新克隆 + 读别人的缓存）与
+  `etf_sync_publish`（写 `etf/<设备id>.json` 并推送），转发给 `sync.rs`
+- `apps/desktop/src-tauri/src/sync.rs` —— `publish_at` 的 ETF 一路（`etf/` 目录）、`read_etf_shards`
+- `apps/desktop/src-tauri/src/paths.rs` —— `etf_file()`（`data\etf.json`）、`ETF_SYNC_DIR`（`etf/`）
 - `apps/desktop/src/renderer/src/workbench/etf.ts` —— 适配层编排（`loadEtfOverview` 只读缓存、
-  `refreshEtf` 增量刷新）、进度回调
-- `components/etf/` —— `EtfView.vue`（页壳与编排，照网关页的 KeepAlive 进入模式）、
+  `refreshEtf` 增量刷新、`pullEtfCache` / `publishEtfCache` 跨机复用）、进度回调
+- `components/etf/` —— `EtfView.vue`（页壳与编排：刷新前先拉别人的缓存、刷新后推本机那份，
+  照网关页的 KeepAlive 进入模式）、
   `EtfSummaryCards` / `EtfFlowPanel` / `EtfScalePanel` / `EtfHoldingsPanel` / `EtfCategoryPanel` /
   `EtfMatrixPanel`（子组件一律 props 收数据）。面板标题与 KPI 卡标签配 `@element-plus/icons-vue`
   小图标（面板标题那套外壳规则在 global.css 的 `.panel__head h3`：14px、`--ink-3` 弱墨色，不抢数值的戏）。
@@ -99,7 +117,10 @@ KPI 窗口卡、近 21 交易日柱状图、总规模曲线（**默认近一年*
 **刷新节奏**
 
 进页面（`onActivated`，KeepAlive 首次 mounted+activated 用闸去重）→ 先读缓存上屏 →
+**开同步时先 `etf_sync_pull` 把别的机器的缓存并进来**（这一下会 pull 一次克隆）→
 后台 `refreshEtf`：净值（过期才拉）→ 深市（区间 × 标的，逐页）→ 沪市（逐日），两处交易所的
-请求之间都留 150ms。没有自动轮询：份额数据一天只发一次（T 日晚间，深交所页面还写着
-「T 日晚间更新的 T 日规模仅供参考，以 T+1 日早间更新的 T 日规模为准」），净值也是盘后陆续披露，
-**盘中刷新只会拿到上一交易日**，靠每次进页面 / 手动刷新补缺就够。
+请求之间都留 150ms → 同步可用时再 `etf_sync_publish` 把本机这份推回去。没有自动轮询：
+份额数据一天只发一次（T 日晚间，深交所页面还写着「T 日晚间更新的 T 日规模仅供参考，
+以 T+1 日早间更新的 T 日规模为准」），净值也是盘后陆续披露，**盘中刷新只会拿到上一交易日**，
+靠每次进页面 / 手动刷新补缺就够。同步失败只在该页那行提示里说一句（与取数失败同一种待遇），
+已经上屏的数据不受影响。

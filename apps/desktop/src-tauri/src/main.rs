@@ -36,6 +36,23 @@ mod paths;
 mod pi_skills;
 mod pin;
 mod proc;
+mod qd_account;
+mod qd_api_chat;
+mod qd_auth;
+mod qd_body;
+mod qd_credits;
+mod qd_gateway;
+mod qd_models;
+mod qd_pool;
+mod qd_quota;
+mod qd_relay;
+mod qd_router;
+mod qd_sign;
+mod qd_sse;
+mod qd_tasks;
+mod qd_tools;
+mod qd_upstream;
+mod qd_usage;
 mod screen;
 mod session;
 mod skills;
@@ -519,6 +536,7 @@ fn main() {
         )
         .manage(MaximizedFlag(Mutex::new(false)))
         .manage(wb_gateway::Gateway::default())
+        .manage(qd_gateway::Qoder::default())
         .manage(Hotkeys::default())
         .manage(session::Sessions::default())
         .manage(PendingQuit(Mutex::new(None)))
@@ -622,6 +640,10 @@ fn main() {
             commands::token_sync_shards,
             commands::gateway_sync_publish,
             commands::gateway_sync_pull,
+            commands::qoder_earnings_publish,
+            commands::qoder_earnings_pull,
+            commands::etf_sync_publish,
+            commands::etf_sync_pull,
             commands::auth_status,
             commands::auth_refresh_account,
             commands::auth_login_start,
@@ -705,6 +727,8 @@ fn main() {
             wb_gateway::wb_gateway_stop,
             wb_gateway::wb_gateway_auto_start_set,
             wb_gateway::wb_gateway_accounts,
+            wb_gateway::wb_gateway_accounts_export,
+            wb_gateway::wb_gateway_accounts_import,
             wb_gateway::wb_gateway_reload,
             wb_gateway::wb_gateway_login_start,
             wb_gateway::wb_gateway_login_poll,
@@ -729,6 +753,37 @@ fn main() {
             wb_gateway::wb_gateway_perks_auto_config,
             wb_gateway::wb_gateway_perks_auto_set,
             wb_gateway::wb_gateway_perks_auto_run,
+            qd_gateway::wb_qoder_status,
+            qd_gateway::wb_qoder_start,
+            qd_gateway::wb_qoder_stop,
+            qd_gateway::wb_qoder_auto_start_set,
+            qd_gateway::wb_qoder_accounts,
+            qd_gateway::wb_qoder_accounts_export,
+            qd_gateway::wb_qoder_accounts_import,
+            qd_gateway::wb_qoder_reload,
+            qd_gateway::wb_qoder_login_start,
+            qd_gateway::wb_qoder_login_poll,
+            qd_gateway::wb_qoder_account_set,
+            qd_gateway::wb_qoder_account_priority,
+            qd_gateway::wb_qoder_account_delete,
+            qd_gateway::wb_qoder_account_names,
+            qd_gateway::wb_qoder_models,
+            qd_gateway::wb_qoder_models_refresh,
+            qd_gateway::wb_qoder_access,
+            qd_gateway::wb_qoder_rotate_key,
+            qd_gateway::wb_qoder_usage,
+            qd_gateway::wb_qoder_usage_rows,
+            qd_gateway::wb_qoder_usage_recent,
+            qd_gateway::wb_qoder_credits,
+            qd_gateway::wb_qoder_perks_status,
+            qd_gateway::wb_qoder_checkin,
+            qd_gateway::wb_qoder_claim_campaigns,
+            qd_gateway::wb_qoder_credit_heatmap,
+            qd_gateway::wb_qoder_activity_today,
+            qd_gateway::wb_qoder_earnings,
+            qd_gateway::wb_qoder_perks_auto_config,
+            qd_gateway::wb_qoder_perks_auto_set,
+            qd_gateway::wb_qoder_perks_auto_run,
             ball::ball_apply,
             ball::ball_context,
             ball::ball_open,
@@ -740,8 +795,8 @@ fn main() {
             let handle = app.handle().clone();
             // 数据先载入：窗口的初始化脚本要用到设置与布局
             commands::load_all();
-            // 网关随程序启动：配置里打开过就在这里绑端口，不必等渲染层进入 TBuddy 页。
-            // 失败只记一笔 —— 端口被占时界面仍显示「已停止」，用户可手动重试。
+            // 本地代理随程序启动：两个代理各自的开关、各自的端口与密钥，互不相干，
+            // 可以同时跑。哪一边失败都只记一笔，界面仍显示「已停止」，用户可手动重试。
             let gateway_config = wb_gateway::load_config();
             if gateway_config.auto_start {
                 if let Err(message) = app
@@ -749,6 +804,12 @@ fn main() {
                     .start(gateway_config.port)
                 {
                     eprintln!("[workbench] 网关随程序启动失败：{message}");
+                }
+            }
+            let qoder_config = qd_gateway::load_config();
+            if qoder_config.auto_start {
+                if let Err(message) = app.state::<qd_gateway::Qoder>().start(qoder_config.port) {
+                    eprintln!("[workbench] Qoder 网关随程序启动失败：{message}");
                 }
             }
             // 钉图的记账要早于窗口：restore 照着它把上次钉着的图开回来

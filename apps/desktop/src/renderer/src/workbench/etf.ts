@@ -12,7 +12,9 @@ import type { EtfCache, EtfOverview } from '@workbench/etf'
  *   **断点续传** —— 中断后下次从推进到的下一天继续；
  * - **净值**：一只一份全历史，超过 5 天没更新才重拉，日常刷新零请求。
  *
- * **为什么会出网**：只在用户打开 ETF 页（或点页面上的刷新）时走这一趟。
+ * **为什么会出网**：只在用户打开 ETF 页（或点页面上的刷新）时走这一趟。开同步时先经
+ * `pullEtfCache` 把别的机器推在用户仓库里的那份并进来，再规划缺口 —— 已经有人跑过回填的
+ * 机器不会再把同一批日期向交易所要一遍；这一轮真拉到了东西，结束时 `publishEtfCache` 推回去。
  */
 import {
   backfillFrom,
@@ -20,6 +22,7 @@ import {
   dateKey,
   ETF_TARGETS,
   isStaleEmptyDate,
+  mergeEtfCacheInto,
   mergeNavInto,
   mergeSharesInto,
   parseNavScript,
@@ -50,6 +53,16 @@ export interface EtfRefreshOutcome {
   overview: EtfOverview
   updated: boolean
   notes: string[]
+}
+
+/** 从同步仓库拉回别的机器那几份缓存的结果 */
+export interface EtfSyncPullOutcome {
+  /** 有没有同步可用（没登录 / 没填仓库地址时为 false） */
+  enabled: boolean
+  /** 仓库里已经有本机那一份（第一次同步完之前是 false） */
+  own: boolean
+  /** 并进本机之后缓存有没有变 */
+  changed: boolean
 }
 
 /** 沪市逐日请求之间的间隔：交易所的接口，别连打 */
@@ -257,4 +270,36 @@ export async function refreshEtf(onProgress: (p: EtfProgress) => void): Promise<
   await saveCache(cache)
 
   return { overview: buildOverview(cache), updated, notes }
+}
+
+/**
+ * 把同步仓库里**别的机器**推上来的 ETF 缓存并进本机。
+ *
+ * 「一台机器同步过，其他机器直接复用」就靠这一步：合并进来的份额与 `sseDone` 会让下面的
+ * 刷新计划发现没有缺口，于是这一轮**一个交易所请求都不发**（净值同理）。
+ * 联网只有 git 这一路（用户自己的同步仓库），三个行情主机一个都不碰。
+ */
+export async function pullEtfCache(repo: string, device: string): Promise<EtfSyncPullOutcome> {
+  if (!repo || !device)
+    return { enabled: false, own: false, changed: false }
+
+  const remote = await invoke<{ own?: unknown, files?: unknown }>('etf_sync_pull', { repo, device })
+  const cache = await loadCache()
+  let changed = false
+  for (const file of Array.isArray(remote?.files) ? remote.files : []) {
+    if (mergeEtfCacheInto(cache, sanitizeEtfCache(file)))
+      changed = true
+  }
+  if (changed)
+    await saveCache(cache)
+
+  return { enabled: true, own: remote?.own === true, changed }
+}
+
+/** 把本机缓存写进 `etf/<设备id>.json` 并推送；内容没变时 git 那边不产生提交 */
+export async function publishEtfCache(repo: string, device: string): Promise<null> {
+  if (!repo || !device)
+    return null
+  await invoke('etf_sync_publish', { repo, device, cache: await loadCache() })
+  return null
 }

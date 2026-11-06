@@ -385,6 +385,144 @@ pub fn delete(dir: &Path, uid: &str) -> Result<(), String> {
     }
 }
 
+/// 账号导出内容的格式标识。导入时按它认「这段 JSON 是不是 TBuddy 的账号」。
+pub const EXPORT_KIND: &str = "workbench-gateway-accounts";
+pub const EXPORT_VERSION: u32 = 1;
+/// 粘贴进来的那段 JSON 的大小上限。正常一份账号导出只有几 KB，
+/// 定个闸只是别让一段异常内容把内存拉满。
+const MAX_IMPORT_BYTES: usize = 1 << 20;
+
+/// 导出文件的外壳。`kind` / `version` 让导入能拒绝贴错的那一段，
+/// 以后格式真要变也留了升级位。
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ExportFile {
+    kind: String,
+    version: u32,
+    exported_at: i64,
+    accounts: Vec<ExportAccount>,
+}
+
+/// 一份导出账号。**只放能搬走的东西**：凭据、身份与偏好。
+/// 额度标记、积分到期这些是本机瞬时状态，换一台机器应当重新查。
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ExportAccount {
+    uid: String,
+    #[serde(default)]
+    nickname: String,
+    #[serde(default)]
+    domain: String,
+    #[serde(default = "default_product")]
+    product: String,
+    #[serde(default)]
+    enterprise_id: String,
+    #[serde(default)]
+    access_token: String,
+    #[serde(default)]
+    refresh_token: String,
+    #[serde(default)]
+    expires_at: i64,
+    #[serde(default)]
+    added_at: i64,
+    #[serde(default = "default_true")]
+    enabled: bool,
+    #[serde(default = "default_weight")]
+    weight: u8,
+    #[serde(default)]
+    note: String,
+}
+
+fn default_product() -> String {
+    Identity::default().as_str().to_string()
+}
+
+impl ExportAccount {
+    fn of(account: &Account) -> Self {
+        Self {
+            uid: account.uid.clone(),
+            nickname: account.nickname.clone(),
+            domain: account.domain.clone(),
+            product: account.product.as_str().to_string(),
+            enterprise_id: account.enterprise_id.clone(),
+            access_token: account.access_token.clone(),
+            refresh_token: account.refresh_token.clone(),
+            expires_at: account.expires_at,
+            added_at: account.added_at,
+            enabled: account.enabled,
+            weight: account.weight,
+            note: account.note.clone(),
+        }
+    }
+}
+
+/// 把账号池导成一段 JSON 字符串，交给用户自己保管（密码管理器之类）。
+pub fn export_accounts(accounts: &[Account]) -> Result<String, String> {
+    let file = ExportFile {
+        kind: EXPORT_KIND.to_string(),
+        version: EXPORT_VERSION,
+        exported_at: now_secs(),
+        accounts: accounts.iter().map(ExportAccount::of).collect(),
+    };
+    serde_json::to_string_pretty(&file).map_err(|err| format!("生成导出内容失败: {err}"))
+}
+
+/// 解析一段导出的 JSON 并转回账号。校验全部做完才返回，调用方可以放心先解析再落盘。
+pub fn parse_import(text: &str) -> Result<Vec<Account>, String> {
+    if text.len() > MAX_IMPORT_BYTES {
+        return Err("导入内容太大（上限 1 MiB）".into());
+    }
+    let file: ExportFile = serde_json::from_str(text)
+        .map_err(|err| format!("导入内容不是 TBuddy 账号导出文件：{err}"))?;
+    if file.kind != EXPORT_KIND {
+        return Err(format!("这不是 TBuddy 账号的导出内容（kind={}）", file.kind));
+    }
+    if file.version > EXPORT_VERSION {
+        return Err(format!(
+            "导出内容版本太新（v{}），请先升级应用",
+            file.version
+        ));
+    }
+    if file.accounts.is_empty() {
+        return Err("导入内容里没有账号".into());
+    }
+
+    let now = now_secs();
+    let mut seen = std::collections::HashSet::new();
+    let mut accounts = Vec::with_capacity(file.accounts.len());
+    for (index, item) in file.accounts.into_iter().enumerate() {
+        let uid = sanitize_uid(&item.uid)
+            .ok_or_else(|| format!("第 {} 个账号的 uid 不合法：{:?}", index + 1, item.uid))?;
+        if !seen.insert(uid.clone()) {
+            return Err(format!("导出内容里有重复的账号：{uid}"));
+        }
+        if item.access_token.trim().is_empty() {
+            return Err(format!("账号 {uid} 缺少 accessToken"));
+        }
+        accounts.push(Account {
+            uid,
+            nickname: item.nickname,
+            domain: item.domain,
+            product: Identity::parse(&item.product).unwrap_or_default(),
+            enterprise_id: item.enterprise_id,
+            access_token: item.access_token,
+            refresh_token: item.refresh_token,
+            expires_at: item.expires_at,
+            added_at: if item.added_at > 0 { item.added_at } else { now },
+            source: "import".to_string(),
+            enabled: item.enabled,
+            weight: item.weight.clamp(1, 100),
+            credit_expires_at: 0,
+            note: item.note,
+            quota_exhausted_at: 0,
+            quota_resets_at: 0,
+            quota_models: Vec::new(),
+            token_expired: false,
+        });
+    }
+    Ok(accounts)
+}
+
 fn now_secs() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -643,5 +781,102 @@ mod tests {
         let dir = temp_dir("delete");
         assert!(delete(&dir, "nope").is_ok());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn exported_value() -> serde_json::Value {
+        let text = export_accounts(&[sample()]).unwrap();
+        serde_json::from_str(&text).unwrap()
+    }
+
+    #[test]
+    fn 导出再导入保住凭据与偏好() {
+        let mut account = sample();
+        account.weight = 7;
+        account.note = "备用".into();
+        account.credit_expires_at = 123;
+        account.mark_quota_exhausted(1_000, 2_000);
+
+        let text = export_accounts(&[account]).unwrap();
+        let parsed = parse_import(&text).unwrap();
+        assert_eq!(parsed.len(), 1);
+        let item = &parsed[0];
+        assert_eq!(item.uid, "u-1");
+        assert_eq!(item.access_token, "tok");
+        assert_eq!(item.refresh_token, "ref");
+        assert_eq!(item.product, Identity::Workbuddy);
+        assert_eq!(item.weight, 7);
+        assert_eq!(item.note, "备用");
+        assert_eq!(item.source, "import", "导入的号按来源标成 import");
+        // 本机瞬时状态不跟着搬
+        assert_eq!(item.credit_expires_at, 0);
+        assert_eq!(item.quota_exhausted_at, 0);
+        assert!(item.quota_models.is_empty());
+        assert!(!item.token_expired);
+    }
+
+    #[test]
+    fn 导出内容不含额度与运行时字段() {
+        let mut account = sample();
+        account.mark_quota_exhausted(1_000, 2_000);
+        account.credit_expires_at = 123;
+        account.token_expired = true;
+        let text = export_accounts(&[account]).unwrap();
+        for key in [
+            "quotaExhaustedAt",
+            "quotaResetsAt",
+            "quotaModels",
+            "creditExpiresAt",
+            "tokenExpired",
+        ] {
+            assert!(!text.contains(key), "导出内容不该含 {key}");
+        }
+        assert!(text.contains("\"accessToken\""));
+    }
+
+    #[test]
+    fn 导入拒绝错_kind_与版本过高() {
+        let mut value = exported_value();
+        value["kind"] = "workbench-qoder-accounts".into();
+        let error = parse_import(&value.to_string()).unwrap_err();
+        assert!(error.contains("不是 TBuddy 账号"), "{error}");
+
+        let mut value = exported_value();
+        value["version"] = 2.into();
+        let error = parse_import(&value.to_string()).unwrap_err();
+        assert!(error.contains("版本太新"), "{error}");
+    }
+
+    #[test]
+    fn 导入拒绝缺_token_非法_uid_与重复号() {
+        let mut value = exported_value();
+        value["accounts"][0]["accessToken"] = "".into();
+        let error = parse_import(&value.to_string()).unwrap_err();
+        assert!(error.contains("accessToken"), "{error}");
+
+        let mut value = exported_value();
+        value["accounts"][0]["uid"] = "../evil".into();
+        let error = parse_import(&value.to_string()).unwrap_err();
+        assert!(error.contains("uid 不合法"), "{error}");
+
+        let mut value = exported_value();
+        let duplicate = value["accounts"][0].clone();
+        value["accounts"].as_array_mut().unwrap().push(duplicate);
+        let error = parse_import(&value.to_string()).unwrap_err();
+        assert!(error.contains("重复"), "{error}");
+
+        let mut value = exported_value();
+        value["accounts"] = serde_json::Value::Array(Vec::new());
+        let error = parse_import(&value.to_string()).unwrap_err();
+        assert!(error.contains("没有账号"), "{error}");
+    }
+
+    #[test]
+    fn 导入容忍认不出的身份并把权重收进范围() {
+        let mut value = exported_value();
+        value["accounts"][0]["product"] = "unknown-client".into();
+        value["accounts"][0]["weight"] = 250.into();
+        let parsed = parse_import(&value.to_string()).unwrap();
+        assert_eq!(parsed[0].product, Identity::Workbuddy);
+        assert_eq!(parsed[0].weight, 100);
     }
 }

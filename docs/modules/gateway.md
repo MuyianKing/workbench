@@ -4,6 +4,8 @@
 
 - **只监听 `127.0.0.1`**。这不是默认值可以改的配置项 —— 网关进程里带着账号 token，任何监听
   `0.0.0.0` 的版本都不该存在。端口可改，回环地址不可改。
+- **Qoder 网关是另一套独立实现**（自己的端口 17879、密钥与 `wb-qoder/settings.json`），
+  与这一页互不相干、可以同时跑；换这一页的密钥不影响 Qoder。细则见 [qoder.md](qoder.md)。
 - **监听默认随程序启动，可在设置·通用里关掉**。打开时应用启动即绑 `127.0.0.1`（不连上游；
   点「登录」才连）。手动「停止」只在本次会话有效，下次启动照旧监听；关掉开关后仍需手动点「启动」。
   开关只改配置，不立刻启停；监听地址不可改。
@@ -39,6 +41,8 @@
 - **两排统计卡固定 6 列、不折行**：账号页六张（末列积分卡给 `1.5fr`，它的数字最长）与用量页
   六张 KPI 在内容宽度 1100 以内都不换行；窗口最小 1080（内容约 980）也放得下。
   **别写回 `repeat(auto-fit, minmax(...))`** —— 它会在 1100 左右把第六张挤到下一行。
+- **用量栏与 Qoder 共用同一份 `UsagePane.vue`**：Qoder 通过 `:load-rows` / `:load-names` 注入自己的
+  `wb_qoder_usage_rows` 与账号名，布局、统计口径与刷新节奏都跟着这一页走 —— 改用量页时两边一起看。
 - **账号池是卡片网格，不是表格**：每个号一张毛玻璃卡（与统计卡同一套 `.panel` 玻璃），
   卡头是名字 + 状态、右上角是查余额 / 启停 / 删除（**不显示 uid**：一串 36 位的号没有信息量），
   下面依次是类型与优先级、积分与余额条、成功失败 / 用量 / 均速三格；
@@ -73,17 +77,20 @@
   之前那套「平时透底、滚起来才补底」会在回到顶部的一瞬跳回全透明，2026-10 起改成常驻。
 - **表格铺满面板**：`GatewayTable` 的面板外壳内边距归零（`padding: 0`），表头与首行直接贴到
   卡片四边，单元格自己的间距保留；已经在页面自己的面板里的表传 `flat`（用量明细），不再套第二层卡。
-- **页签与筛选不要长一个样**：页签（账号 / 用量 / 请求 / 福利 / 模型）用 `el-tabs` 的下划线式导航
-  （文字 + 2px 主色下划线，不铺底色），时间范围这类筛选继续用 `el-segmented` 药丸 ——
-  两排一模一样的药丸叠在一起时，分不清哪个是「在哪一栏」、哪个是「看多长时间」。
+- **页签与筛选不要长一个样**：页签（账号 / 用量 / 请求 / 福利 / 模型）用共用组件
+  [GatewayTabs.vue](../../apps/desktop/src/renderer/src/components/gateway/GatewayTabs.vue)
+  （与 Qoder 同一份）：下划线式导航，文字 + 2px 主色下划线、不铺底色、字号走 `--gw-fs-body`（14px）、
+  项间 `--sp-5`；**页面里别再自己写 `el-tabs` 的 deep 规则**。时间范围这类筛选继续用
+  `el-segmented` 药丸 —— 两排一模一样的药丸叠在一起时，分不清哪个是「在哪一栏」、哪个是「看多长时间」。
 - **启停就在页首那一行**：页签靠左、网关状态与启停靠右，每个页签下都看得到 ——
   这一页最高频的动作不该先点开一层，也不该只在「账号」栏才有。点状态开接入弹层，
-  旁边那枚按钮就地启停，所以弹层里也不再放第二份。「随程序启动」与「福利每天自动」
-  两个常驻开关在设置·通用 → TBuddy，不占页首这一行。
+  旁边那枚按钮就地启停，所以弹层里也不再放第二份。「随程序启动」在设置·通用 → TBuddy；
+  「福利每天自动」也在那一块（TBuddy 与 Qoder 共用一个开关），都不占页首这一行。
 - **密钥默认开启**：首次启动自动生成（`wbg-` + 32 位 hex），除 `/health` 外一律校验。
   它不是防外人的（只监听回环），是防本机其它程序随手调，以及满足客户端"key 不能为空"的要求。
 - 账号视图**不含 token**。`wb_gateway_accounts` 只回展示字段，界面拿不到凭据；想加"顺便把令牌读回来"
-  的接口，先读这一条。**账号卡上不写类型**：只接国内版（CodeBuddy），一行类型标签只是把同一件事写两遍。
+  的接口，先读这一条（**唯一例外**是用户显式点「导出」时走的 `wb_gateway_accounts_export`，见「账号导出 / 导入」）。
+  **账号卡上不写类型**：只接国内版（CodeBuddy），一行类型标签只是把同一件事写两遍。
 - **账号池先按积分到期时刻、再按优先级选号，额度用完自动让位**：账号文件里的
   `creditExpiresAt`（最近一笔还有剩余、明确会作废的包的到期时刻，查余额时由 `wb_gateway_credits`
   写回）最早的那个号先用 —— **谁家的流量先作废就先花谁家的**；没有已知到期（无期限 / 没查过 /
@@ -114,6 +121,10 @@
   跨账号 / 跨模型汇总时，先把积分与 token 两个总量分别累加，再**直接相除**，
   不平均各组比率。总 token 含缓存命中的 token，而缓存 token 的积分单价远低于输出 token —— 比较两个账号 /
   模型时先把缓存命中率一起看，别把这个数当模型单价。
+  **序列化名是大写的 `creditsPer1MTokens`**：serde 的 `camelCase` 会把 `credits_per_1m_tokens`
+  中间的 `1m` 原样留下（`creditsPer1mTokens`），与前端契约对不上；三个汇总结构上都要显式
+  `#[serde(rename = "creditsPer1MTokens")]`，`wb_usage` 的「积分比率字段按前端契约序列化」
+  用例守着这一条。名字对不上时 KPI 会静默显示 0、明细表在 `undefined.toFixed` 上抛错。
 - **明细只有一张表、积分总账单独一张面板**：「用量明细」的每一行同时给用量（请求 / 失败 / token / 延迟 / 速度）
   与积分（扣除积分 / 匹配 Token / 比率 / 缓存命中率），由同一个「按账号 / 按模型」切换控制；
   积分汇总（扣除积分 / 匹配 Token / 平均积分每百万 / 有效样本 / 命中率）放在表格**上面**，
@@ -158,7 +169,7 @@
   上游的 11101 / 11133 / 11150；**只做形状归一**，不要借这一步删消息或改提示词。
 - **任务福利默认只认用户点出来的动作**：`wb_tasks` 本身没有调度器；进「福利」栏只做只读查询
   （当前号的成长任务与汇总两块并行，外加积分流水，见下），切账号 / 点按钮才会再打上游。
-  **唯一例外是设置·通用 → TBuddy 的「福利每天自动」开关（默认关）**：打开后应用启动时补跑一次，之后
+  **唯一例外是设置·通用里的「福利每天自动」开关（TBuddy 与 Qoder 共用，默认关）**：打开后应用启动时补跑一次，之后
   每十分钟由渲染层问一次该不该跑（判断全在 Rust 侧，不该跑时不联网）。白天轮 = 签到 +
   一键做任务（成长任务 / 猫猫旅行 / 盲盒），夜间轮 = 夜猫子（只在 23:00–08:00，每号每自然日一次）。
   **成长连登与抽奖不自动跑**（会消耗补签卡）；应用关着的那天不跑，下次启动补。
@@ -268,13 +279,35 @@ state 存在内存里（10 分钟过期），不落盘。上游签发 state，�
 
 之后靠 `POST /v2/plugin/auth/token/refresh`（`X-Refresh-Token` 头）续期，**永不再走登录**。
 
+### 账号导出 / 导入
+
+账号栏顶上那排「导出 / 导入」把整套凭据在设备之间搬：导出一段 JSON 让用户抄进密码管理器，
+另一台设备把它贴回来，**不必每台机器重新登录一次**。全程本地，不走文件对话框、不联网、
+也不进 git 同步仓库（同步仓库里只有脱敏后的请求流水）。
+
+- 格式是一层外壳 `{ kind, version, exportedAt, accounts }`：TBuddy 的 `kind` 是
+  `"workbench-gateway-accounts"`；Qoder 是 `"workbench-qoder-accounts"`，账号字段按各自的模型，
+  互不混用。导入只认自己的 `kind`，版本高于 1 直接拒绝。
+- **只导出凭据、身份与偏好**（`accessToken` / `refreshToken` / `expiresAt` / `nickname` / 企业或组织 /
+  `product` 或 `userType` / `weight` / `enabled` / `note`）。额度标记、`creditExpiresAt`、Qoder 的
+  签到与活动记录、`tokenExpired` 这些是本机瞬时状态，一律不导出；导入时按默认值重建。
+- 同 uid 怎么办由用户当场选：「跳过已有」（默认，本机那份可能更新）或「覆盖本机」。
+  导入的号 `source` 写 `"import"`；先写盘成功再改内存，最后按 `addedAt` 排序（与 `load_all` 一致）。
+- **导出内容含明文 token**，这是账号文件本来就不加密的直接后果：拿到那段 JSON 等于拿到这些号。
+  它只由用户点「导出」触发，`wb_gateway_accounts_export` 是账号视图之外唯一回读 token 的通道；
+  复制走 `navigator.clipboard`，不加新的 Tauri 权限。
+- 两台机器同时长期使用同一个号时，续期可能各自拿到新的 refresh token（上游若轮换，先换的那份会让
+  另一份失效）。要长期并行就各登录一次；只做搬家就「导出 → 导入 → 旧机器停用」。
+
 ### 随程序启动
 
-设置·通用 → TBuddy 的「随程序启动」经 `wb_gateway_auto_start_set` 写 `settings.json` 的
-`autoStart`（只写配置，不启停；**默认开**，缺字段按开处理，显式写 false 才关）。
-`main.rs` 的 setup 在 `commands::load_all()` 之后读它：为 true 就调 `Gateway::start(port)`；
+设置·通用 → 网关里是**两个独立的「随程序启动」开关**：TBuddy 的经
+`wb_gateway_auto_start_set` 写 `wb-gateway/settings.json` 的 `autoStart`，Qoder 的经
+`wb_qoder_auto_start_set` 写 `wb-qoder/settings.json` 的 `autoStart`（都只写配置，不启停；
+**默认开**，缺字段按开处理，显式写 false 才关）。
+`main.rs` 的 setup 在 `commands::load_all()` 之后分别读两份配置：谁开了就拉谁，
 端口被占等失败只往标准错误记一笔，不阻塞应用启动，界面照旧显示「已停止」并允许手动重试。
-`Gateway::status` 把 `autoStart` 一起回给界面，设置屏每次打开弹窗时读一次（不再与网关页共享开关状态）。
+两个 `status` 都把 `autoStart` 一起回给界面，设置屏每次打开弹窗时读一次。
 `wb_gateway_start` 成功后仍把实际绑定的端口写回配置；「停止」不改 `autoStart`。
 
 ### 任务福利
@@ -312,9 +345,11 @@ state 存在内存里（10 分钟过期），不落盘。上游签发 state，�
 
 #### 福利自动跑
 
-开关在设置·通用 → TBuddy（「福利每天自动」，默认关），存在 `perks-auto.json`；`App.vue` 启动时调用
-`stores/perks-auto.ts` 的 `startWatch()`，立刻问一次、之后每十分钟问一次。**判断在
-`wb_gateway_perks_auto_run` 里做**：开关关着直接返回，不读账号、不联网。
+开关只有一处：设置·通用 → 网关的「福利每天自动」（TBuddy 与 Qoder 共用，默认关）。拨一次同时写
+TBuddy 的 `perks-auto.json` 与 Qoder 的 `wb-qoder/perks-auto.json`（两边各读自己的；打开设置时若两份
+不一致，按「任一边开着就算开着」对齐）。`App.vue` 启动时调用 `stores/perks-auto.ts` 的
+`startWatch()`，立刻问一次、之后每十分钟问一次，一次问两边。**判断在
+`wb_gateway_perks_auto_run` / `wb_qoder_perks_auto_run` 里各自做**：开关关着直接返回，不读账号、不联网。
 
 - 白天轮（每号每本地自然日一次）：续期 → 先查服务端 `checkin-activity-status` 的
   `today_checked_in`（查不到回退本地 `activity.jsonl`）→ 已签跳过、未签 `checkin` →
@@ -335,7 +370,7 @@ state 存在内存里（10 分钟过期），不落盘。上游签发 state，�
 
 ```
 %APPDATA%\Workbench\data\wb-gateway\
-  settings.json      端口与自启开关
+  settings.json      端口与自启开关（Qoder 网关有自己的一份，见 [qoder.md](qoder.md)）
   accounts\<uid>.json  账号（token 明文；weight 是选号优先级，creditExpiresAt 是查余额时写回的
                        最近到期时刻，quotaExhaustedAt / quotaResetsAt 是整号额度标记，
                        quotaModels 是按模型的额度标记）
@@ -492,7 +527,7 @@ state 存在内存里（10 分钟过期），不落盘。上游签发 state，�
 - `apps/desktop/src-tauri/src/sync.rs`（网关流水的 git 写入 / 读取、按月分文件）
 - `apps/desktop/src-tauri/src/commands.rs`（`gateway_sync_publish` / `gateway_sync_pull`）
 - `apps/desktop/src-tauri/src/main.rs`（模块、managed state、命令注册）
-- `apps/desktop/src/renderer/src/components/gateway/{GatewayView,CreditsDialog,AccessDialog,PerksPane,PerksCreditsChart,UsagePane,RequestsPane,ModelsPane}.vue`
+- `apps/desktop/src/renderer/src/components/gateway/{GatewayView,CreditsDialog,AccessDialog,AccountTransferDialog,PerksPane,PerksCreditsChart,UsagePane,RequestsPane,ModelsPane}.vue`
 - `apps/desktop/src/renderer/src/workbench/{gateway,sync-queue}.ts`
 - `apps/desktop/src/renderer/src/stores/perks-auto.ts`（福利自动跑的后台节拍）
 - `packages/usage/src/{credit-expiry,growth-credits,gateway-usage}.ts`（到期档位 / 福利流水 / 用量汇总的纯逻辑）

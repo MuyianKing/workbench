@@ -46,6 +46,30 @@ impl Default for Config {
     }
 }
 
+pub fn load_config() -> Config {
+    let path = crate::paths::gateway_settings_file();
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return Config::default();
+    };
+    serde_json::from_str(&text).unwrap_or_default()
+}
+
+pub fn save_config(config: &Config) -> Result<(), String> {
+    let path = crate::paths::gateway_settings_file();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|err| format!("建网关目录失败: {err}"))?;
+    }
+    let text =
+        serde_json::to_string_pretty(config).map_err(|err| format!("序列化网关配置失败: {err}"))?;
+    crate::fs_util::write_atomic(&path, text.as_bytes())
+}
+
+/// 一段随机密钥。`wbg-` 前缀只是让它在配置里认得出来。
+pub fn new_key() -> String {
+    format!("wbg-{}", uuid::Uuid::new_v4().simple())
+}
+
+
 /// 福利自动跑的开关与「每个号上次跑过的本地自然日」。
 ///
 /// 单独一份文件（`perks-auto.json`），不与 `settings.json` 混在一起：开关是用户配置，
@@ -97,7 +121,7 @@ struct Inner {
     loaded: bool,
     /// 进行中的登录：state → 发起时刻。十分钟不用就回收
     logins: HashMap<String, LoginSession>,
-    /// 生效中的访问密钥（启动时从配置里取，没有就现生成）
+    /// 本代理自己的访问密钥（与 Qoder 各用各的）
     api_key: String,
 }
 
@@ -108,8 +132,6 @@ struct LoginSession {
 /// 登录窗口的有效期。用户"开了浏览器就走开"是常事，过期就让他重来，
 /// 别把一个 state 无限留在内存里。
 const LOGIN_TTL_SECS: i64 = 600;
-
-
 
 /// Tauri managed state。Clone 只是为了把它交给监听线程，成本是一次 `Arc` 克隆。
 #[derive(Default, Clone)]
@@ -125,16 +147,7 @@ impl Gateway {
             return Ok(server.port());
         }
         inner.ensure_loaded();
-
-        // 首次启动生成密钥：客户端要它，也挡住本机其它程序随手调
-        if inner.api_key.is_empty() {
-            let mut config = load_config();
-            if config.api_key.trim().is_empty() {
-                config.api_key = new_key();
-                save_config(&config)?;
-            }
-            inner.api_key = config.api_key;
-        }
+        inner.api_key = ensure_key()?;
 
         // 处理函数要一个 'static 的东西，所以把共享状态克隆进去，而不是借用 self
         let shared = Arc::clone(&self.inner);
@@ -198,6 +211,43 @@ impl Gateway {
             .collect())
     }
 
+    /// 导出全部账号的完整凭据（含明文 token）。
+    ///
+    /// **这是账号视图之外唯一回读 token 的通道**：只由用户显式点「导出」触发，
+    /// 结果直接交给渲染层供复制，不进任何列表 / 同步仓库。
+    pub fn export_accounts(&self) -> Result<String, String> {
+        let mut inner = self.lock()?;
+        inner.ensure_loaded();
+        wb_account::export_accounts(&inner.accounts)
+    }
+
+    /// 导入一批账号：`overwrite` 决定同 uid 是覆盖本机那份还是跳过。
+    ///
+    /// 先全部解析、再逐个落盘，写成功之后才改内存；任一文件写失败就带着 uid 返回，
+    /// 内存保持原样（已写成的文件下次 reload 会被读回来）。
+    pub fn import_accounts(
+        &self,
+        imported: Vec<Account>,
+        overwrite: bool,
+    ) -> Result<ImportResult, String> {
+        let dir = crate::paths::gateway_accounts_dir();
+        let mut inner = self.lock()?;
+        inner.ensure_loaded();
+        let (plan, result) = plan_import(&inner.accounts, imported, overwrite);
+        for account in &plan {
+            account.save(&dir)?;
+        }
+        for account in plan {
+            match inner.accounts.iter().position(|item| item.uid == account.uid) {
+                Some(index) => inner.accounts[index] = account,
+                None => inner.accounts.push(account),
+            }
+        }
+        // 与 `load_all` 同一口径：重启前后账号池顺序一致
+        inner.accounts.sort_by_key(|account| account.added_at);
+        Ok(result)
+    }
+
     /// 重新从磁盘载入账号（登录完成、导入之后调用）。
     pub fn reload(&self) -> Result<(), String> {
         let mut inner = self.lock()?;
@@ -208,13 +258,11 @@ impl Gateway {
 
     /// 接入信息：地址、密钥、模型清单。界面直接展示这一块。
     pub fn access(&self) -> Result<Access, String> {
-        let inner = self.lock()?;
+        let mut inner = self.lock()?;
         let config = load_config();
-        let key = if inner.api_key.is_empty() {
-            config.api_key.clone()
-        } else {
-            inner.api_key.clone()
-        };
+        if inner.api_key.is_empty() {
+            inner.api_key = ensure_key()?;
+        }
         Ok(Access {
             base_url: wb_server::api_base(
                 inner
@@ -223,7 +271,7 @@ impl Gateway {
                     .map(Server::port)
                     .unwrap_or(config.port),
             ),
-            api_key: key,
+            api_key: inner.api_key.clone(),
             models: model_views().into_iter().map(|item| item.id).collect(),
         })
     }
@@ -233,6 +281,16 @@ impl Gateway {
             .lock()
             .map_err(|_| "网关状态被上一次失败污染了，重启应用即可".to_string())
     }
+}
+
+/// 读 TBuddy 自己的密钥；没有就生成并落盘。
+fn ensure_key() -> Result<String, String> {
+    let mut config = load_config();
+    if config.api_key.trim().is_empty() {
+        config.api_key = new_key();
+        save_config(&config)?;
+    }
+    Ok(config.api_key)
 }
 
 impl Inner {
@@ -509,21 +567,15 @@ pub fn wb_gateway_access(state: tauri::State<'_, Gateway>) -> Result<Access, Str
     state.access()
 }
 
-/// 重新生成一个访问密钥。旧密钥立刻失效。
+/// 重新生成一个访问密钥。旧密钥立刻失效（Qoder 的密钥是另一把，不受影响）。
 #[tauri::command(async)]
 pub fn wb_gateway_rotate_key(state: tauri::State<'_, Gateway>) -> Result<String, String> {
     let key = new_key();
     let mut config = load_config();
     config.api_key = key.clone();
     save_config(&config)?;
-    let mut inner = state.lock()?;
-    inner.api_key = key.clone();
+    state.lock()?.api_key = key.clone();
     Ok(key)
-}
-
-/// 一段随机密钥。`wbg-` 前缀只是让它在配置里认得出来。
-fn new_key() -> String {
-    format!("wbg-{}", uuid::Uuid::new_v4().simple())
 }
 
 /// 本机旧流水没有 `machine`，读出来补上主机名；远端行缺这个字段时由
@@ -659,6 +711,56 @@ pub fn wb_gateway_models_refresh(
     let catalog = crate::wb_models::fetch(&account)?;
     crate::wb_models::save(&catalog)?;
     Ok(catalog.models.iter().map(ModelView::of).collect())
+}
+
+/// 导入结果：界面拿它拼一句「新增 N 个 / 覆盖 N 个 / 跳过 N 个」。
+#[derive(Debug, Default, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportResult {
+    pub added: usize,
+    pub updated: usize,
+    pub skipped: usize,
+}
+
+/// 合并判定（纯逻辑，不碰磁盘）：返回需要落盘的账号与计数。
+fn plan_import(
+    existing: &[Account],
+    imported: Vec<Account>,
+    overwrite: bool,
+) -> (Vec<Account>, ImportResult) {
+    let mut plan = Vec::new();
+    let mut result = ImportResult::default();
+    for account in imported {
+        match existing.iter().find(|item| item.uid == account.uid) {
+            Some(_) if !overwrite => result.skipped += 1,
+            Some(_) => {
+                result.updated += 1;
+                plan.push(account);
+            }
+            None => {
+                result.added += 1;
+                plan.push(account);
+            }
+        }
+    }
+    (plan, result)
+}
+
+/// 把账号池导成一段 JSON（含明文 token，只给用户点「导出」时用）。
+#[tauri::command(async)]
+pub fn wb_gateway_accounts_export(state: tauri::State<'_, Gateway>) -> Result<String, String> {
+    state.export_accounts()
+}
+
+/// 从一段导出的 JSON 导入账号。`overwrite=false` 时同 uid 跳过。
+#[tauri::command(async)]
+pub fn wb_gateway_accounts_import(
+    state: tauri::State<'_, Gateway>,
+    payload: String,
+    overwrite: bool,
+) -> Result<ImportResult, String> {
+    let accounts = wb_account::parse_import(&payload)?;
+    state.import_accounts(accounts, overwrite)
 }
 
 /// 启停一个账号。
@@ -1314,24 +1416,6 @@ fn now_secs() -> i64 {
 
 // ---------- 配置 ----------
 
-pub fn load_config() -> Config {
-    let path = crate::paths::gateway_settings_file();
-    let Ok(text) = std::fs::read_to_string(path) else {
-        return Config::default();
-    };
-    serde_json::from_str(&text).unwrap_or_default()
-}
-
-pub fn save_config(config: &Config) -> Result<(), String> {
-    let path = crate::paths::gateway_settings_file();
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|err| format!("建网关目录失败: {err}"))?;
-    }
-    let text = serde_json::to_string_pretty(config)
-        .map_err(|err| format!("序列化网关配置失败: {err}"))?;
-    crate::fs_util::write_atomic(&path, text.as_bytes())
-}
-
 pub fn load_perks_auto() -> PerksAuto {
     let path = crate::paths::gateway_perks_file();
     let Ok(text) = std::fs::read_to_string(path) else {
@@ -1611,5 +1695,35 @@ mod tests {
         // 按模型的标记不是整号用完：号的可用状态不受影响
         assert!(!view.quota_exhausted);
         assert!(view.ready);
+    }
+
+    #[test]
+    fn 导入按开关跳过或覆盖已有账号() {
+        let existing = vec![ready_account("u-1")];
+        let mut incoming = ready_account("u-1");
+        incoming.access_token = "new".into();
+        let fresh = ready_account("u-2");
+
+        let (plan, result) = plan_import(&existing, vec![incoming.clone()], false);
+        assert!(plan.is_empty(), "跳过时不产生写入");
+        assert_eq!(
+            result,
+            ImportResult {
+                added: 0,
+                updated: 0,
+                skipped: 1,
+            }
+        );
+
+        let (plan, result) = plan_import(&existing, vec![incoming, fresh], true);
+        assert_eq!(plan.len(), 2);
+        assert_eq!(
+            result,
+            ImportResult {
+                added: 1,
+                updated: 1,
+                skipped: 0,
+            }
+        );
     }
 }

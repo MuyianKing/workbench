@@ -21,10 +21,19 @@ pub fn route(request: &Request, accounts: &mut [Account], api_key: &str) -> Resp
         return health(accounts);
     }
     if !api_key.trim().is_empty() && !key_matches(request, api_key) {
+        let expected = key_tail(api_key);
+        let supplied = supplied_key(request);
+        let supplied = if supplied.is_empty() {
+            "未带".to_string()
+        } else {
+            format!("…{}", key_tail(supplied))
+        };
         return Response::error(
             401,
             "invalid_api_key",
-            "缺少或错误的 API Key：请在请求头带 Authorization: Bearer <网关密钥>",
+            &format!(
+                "缺少或错误的 API Key：请在请求头带 Authorization: Bearer <网关密钥>（当前密钥末四位 …{expected}；请求带的密钥末四位 {supplied}）"
+            ),
         );
     }
 
@@ -45,16 +54,29 @@ pub fn route(request: &Request, accounts: &mut [Account], api_key: &str) -> Resp
 }
 
 /// 请求里的密钥是否匹配。`Authorization: Bearer x` 为主，`x-api-key` 兼容一些客户端。
-fn key_matches(request: &Request, expected: &str) -> bool {
+fn supplied_key(request: &Request) -> &str {
     let bearer = request
         .header("authorization")
         .and_then(|value| value.split_once(' '))
         .map(|(scheme, rest)| (scheme.eq_ignore_ascii_case("bearer"), rest.trim()))
         .filter(|(is_bearer, _)| *is_bearer)
         .map(|(_, rest)| rest);
-    let supplied = bearer.or_else(|| request.header("x-api-key")).unwrap_or("");
-    // 长度不同直接 false，再逐字节比 —— 本机场景不做常数时间，但别用 == 比较 String 的分支
+    bearer.or_else(|| request.header("x-api-key")).unwrap_or("")
+}
+
+fn key_matches(request: &Request, expected: &str) -> bool {
+    let supplied = supplied_key(request);
     supplied.len() == expected.len() && supplied == expected
+}
+
+fn key_tail(key: &str) -> String {
+    key.chars()
+        .rev()
+        .take(4)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect()
 }
 
 /// 健康检查。**不要求鉴权** —— 它是给界面和 curl 探活用的，不含任何账号信息。

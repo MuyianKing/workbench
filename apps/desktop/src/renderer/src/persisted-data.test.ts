@@ -207,13 +207,14 @@ describe('按落点拆一份设置补丁', () => {
       'kb',
       'ai',
       'gateway',
+      'qoder',
       'vault',
       'mail',
       'styles',
       'video',
       'etf',
     ])
-    expect(sanitizeAppearanceSettings({ viewOrder: 'notes' }).viewOrder.length).toBe(13)
+    expect(sanitizeAppearanceSettings({ viewOrder: 'notes' }).viewOrder.length).toBe(14)
   })
 
   it('合回来的设置与拆之前一致', () => {

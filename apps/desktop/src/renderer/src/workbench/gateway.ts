@@ -52,6 +52,13 @@ export interface GatewayModelQuota {
   resetsAt: number
 }
 
+/** 导入结果：新增 / 覆盖 / 跳过各几个 */
+export interface GatewayAccountImport {
+  added: number
+  updated: number
+  skipped: number
+}
+
 /** 发起登录的结果：把 authUrl 交给浏览器，把 state 留着轮询 */
 export interface GatewayLoginStart {
   state: string
@@ -181,6 +188,16 @@ export function gatewayModelsRefresh(): Promise<Result<GatewayModelInfo[]>> {
 
 export function gatewayAccountDelete(uid: string): Promise<Result<null>> {
   return call('wb_gateway_account_delete', { uid }, '删除账号失败')
+}
+
+/** 导出账号：返回一段含明文 token 的 JSON，交给用户自己保管 */
+export function gatewayAccountsExport(): Promise<Result<string>> {
+  return call('wb_gateway_accounts_export', {}, '导出账号失败')
+}
+
+/** 导入账号；`overwrite=false` 时同 uid 跳过 */
+export function gatewayAccountsImport(payload: string, overwrite: boolean): Promise<Result<GatewayAccountImport>> {
+  return call('wb_gateway_accounts_import', { payload, overwrite }, '导入账号失败')
 }
 
 /** 接入信息：第三方客户端要填的那三样 */
@@ -500,6 +517,8 @@ export const gatewayApi = {
   gatewayAccountSet,
   gatewayAccountPriority,
   gatewayAccountDelete,
+  gatewayAccountsExport,
+  gatewayAccountsImport,
   gatewayTasks,
   gatewayTasksRun,
   gatewayTasksTravel,

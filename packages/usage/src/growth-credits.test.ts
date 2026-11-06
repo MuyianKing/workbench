@@ -1,6 +1,6 @@
 import type { GrowthCreditGrant } from './growth-credits'
 import { describe, expect, it } from 'vitest'
-import { dailyGrowthCredits } from './growth-credits'
+import { dailyCreditSeries, dailyGrowthCredits } from './growth-credits'
 
 /** 2026-10-29 10:00 UTC+8 的 Unix 秒 */
 const NOW = Date.UTC(2026, 9, 29, 2) / 1000
@@ -83,5 +83,39 @@ describe('dailyGrowthCredits', () => {
     expect(days).toHaveLength(30)
     expect(days.every(item => item.credit === 0 && !item.active)).toBe(true)
     expect(days.at(-1)?.date).toBe('2026-10-29')
+  })
+})
+
+describe('dailyCreditSeries', () => {
+  it('同一天相加、缺的天补 0、窗口外的点丢掉', () => {
+    const days = dailyCreditSeries([
+      { date: '2026-10-29', credit: 100 },
+      { date: '2026-10-29', credit: 50 },
+      { date: '2026-10-27', credit: 7 },
+      { date: '2026-09-29', credit: 999 },
+      { date: '2026-10-30', credit: 999 },
+    ], 30, NOW)
+
+    expect(days).toHaveLength(30)
+    expect(days[0].date).toBe('2026-09-30')
+    expect(days.at(-1)).toEqual({ date: '2026-10-29', credit: 150, active: true })
+    expect(days.find(item => item.date === '2026-10-27')).toEqual({
+      date: '2026-10-27',
+      credit: 7,
+      active: true,
+    })
+    expect(days.find(item => item.date === '2026-10-28')).toEqual({
+      date: '2026-10-28',
+      credit: 0,
+      active: false,
+    })
+  })
+
+  it('负分与非有限值当成没有', () => {
+    const days = dailyCreditSeries([
+      { date: '2026-10-29', credit: -5 },
+      { date: '2026-10-29', credit: Number.NaN },
+    ], 30, NOW)
+    expect(days.at(-1)).toEqual({ date: '2026-10-29', credit: 0, active: false })
   })
 })

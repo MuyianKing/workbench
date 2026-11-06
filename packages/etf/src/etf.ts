@@ -144,6 +144,57 @@ export function mergeNavInto(cache: EtfCache, code: string, values: Record<strin
   cache.nav[code] = values
 }
 
+/**
+ * 把别的机器同步上来的缓存并进本机（两端都已过 `sanitizeEtfCache`）。
+ *
+ * 三处口径：
+ * - **份额 / 净值逐日取并集，本机已有的值不改**：两边来自同一批公开数据，值本来就该一样；
+ *   本机那份是逐日拉回来的一手数据，保留它就不必为「同一格该听谁的」猜一个时间戳。
+ * - **`sseDone` 取较晚的**：过线意味着那一天之前的沪市都逐日拉过了，别的机器跑完的回填
+ *   不该在本机从头上再来一遍（这正是「一台机器同步过，其他机器直接复用」的关键）。
+ * - 返回**本机缓存真的变过没有**：没变就不落盘、也不推仓库。
+ */
+export function mergeEtfCacheInto(target: EtfCache, incoming: EtfCache): boolean {
+  let changed = false
+
+  for (const [date, codes] of Object.entries(incoming.shares)) {
+    const day = target.shares[date]
+    if (!day) {
+      target.shares[date] = { ...codes }
+      changed = true
+      continue
+    }
+    for (const [code, share] of Object.entries(codes)) {
+      if (day[code] === undefined) {
+        day[code] = share
+        changed = true
+      }
+    }
+  }
+
+  for (const [code, days] of Object.entries(incoming.nav)) {
+    const local = target.nav[code]
+    if (!local) {
+      target.nav[code] = { ...days }
+      changed = true
+      continue
+    }
+    for (const [date, nav] of Object.entries(days)) {
+      if (local[date] === undefined) {
+        local[date] = nav
+        changed = true
+      }
+    }
+  }
+
+  if (incoming.sseDone > target.sseDone) {
+    target.sseDone = incoming.sseDone
+    changed = true
+  }
+
+  return changed
+}
+
 // ---------- 解析（三个数据源） ----------
 
 /**

@@ -6,8 +6,8 @@ import { WEATHER_CITY_MAX } from '@workbench/weather'
 import { sanitizeZentaoPollMinutes } from '@workbench/zentao'
 import { ElMessage } from 'element-plus'
 /**
- * 设置 · 通用：程序（名称 / 快捷键 / 开机自启 / 网速球）、TBuddy（随程序启动 /
- * 福利每天自动）、天气、禅道、笔记（图片仓库）、账号与同步仓库。
+ * 设置 · 通用：程序（名称 / 快捷键 / 开机自启 / 网速球）、网关（TBuddy / Qoder
+ * 各自的随程序启动与共用的福利每天自动）、天气、禅道、笔记（图片仓库）、账号与同步仓库。
  *
  * 四个文本项都是「草稿字段」（useDraftField）：边打边存会把半截内容写进设置，
  * 失焦 / 回车才提交，提交后由 store 收敛、收敛后的值回推草稿。
@@ -37,25 +37,68 @@ const account = computed(() => auth.status?.account ?? null)
 const accountVisible = ref(false)
 
 /**
- * TBuddy 的两个开关都住在网关自己的目录里（`settings.json` 的 `autoStart`、
+ * 网关的常驻开关都住在各自网关的目录里（`settings.json` 的 `autoStart`、
  * `perks-auto.json` 的 `enabled`），不走应用设置。每次打开设置弹窗重新读一次，
  * 免得与网关页的旧状态打架。
+ *
+ * 「福利每天自动」只有一个开关，但两边的自动跑各读自己的 `perks-auto.json`，
+ * 所以拨一次要写两份；读的时候任一边开着就算开着（旧版本可能只写过一边）。
  */
 const gatewayAutoStart = ref(false)
 const gatewayAutoSaving = ref(false)
-const gatewayPerksAuto = ref(false)
-const gatewayPerksSaving = ref(false)
+const qoderAutoStart = ref(false)
+const qoderAutoSaving = ref(false)
+const perksAutoEnabled = ref(false)
+const perksAutoSaving = ref(false)
 const perksAuto = usePerksAutoStore()
 
 async function loadGatewaySettings(): Promise<void> {
-  const [status, perks] = await Promise.all([
+  const [status, perks, qoder, qoderPerks] = await Promise.all([
     window.workbench.gatewayStatus(),
     window.workbench.gatewayPerksAutoConfig(),
+    window.workbench.qoderStatus(),
+    window.workbench.qoderPerksAutoConfig(),
   ])
   if (status.ok && status.data)
     gatewayAutoStart.value = status.data.autoStart
-  if (perks.ok && perks.data)
-    gatewayPerksAuto.value = perks.data.enabled
+  if (qoder.ok && qoder.data)
+    qoderAutoStart.value = qoder.data.autoStart
+  const gatewayEnabled = perks.ok && perks.data ? perks.data.enabled : false
+  const qoderEnabled = qoderPerks.ok && qoderPerks.data ? qoderPerks.data.enabled : false
+  const enabled = gatewayEnabled || qoderEnabled
+  perksAutoEnabled.value = enabled
+  // 两份配置不一致（旧版本只写过一边）：按这个开关对齐，别让 Qoder 那份留在关着
+  if (gatewayEnabled !== enabled || qoderEnabled !== enabled)
+    void setPerksAuto(enabled)
+}
+
+/** 把「福利每天自动」写进两个网关各自的配置；失败时返回给用户看的一句话。 */
+async function setPerksAuto(enabled: boolean): Promise<string | null> {
+  const [gateway, qoder] = await Promise.all([
+    window.workbench.gatewayPerksAutoSet(enabled),
+    window.workbench.qoderPerksAutoSet(enabled),
+  ])
+  if (!gateway.ok || !qoder.ok)
+    return gateway.error ?? qoder.error ?? '保存福利每天自动失败'
+  return null
+}
+
+async function toggleQoderAutoStart(value: unknown): Promise<void> {
+  if (qoderAutoSaving.value)
+    return
+  const enabled = Boolean(value)
+  qoderAutoSaving.value = true
+  try {
+    const result = await window.workbench.qoderAutoStartSet(enabled)
+    if (!result.ok) {
+      ElMessage.error(result.error ?? '保存随程序启动失败')
+      return
+    }
+    qoderAutoStart.value = enabled
+  }
+  finally {
+    qoderAutoSaving.value = false
+  }
 }
 
 async function toggleGatewayAutoStart(value: unknown): Promise<void> {
@@ -76,24 +119,24 @@ async function toggleGatewayAutoStart(value: unknown): Promise<void> {
   }
 }
 
-async function toggleGatewayPerksAuto(value: unknown): Promise<void> {
-  if (gatewayPerksSaving.value)
+async function togglePerksAuto(value: unknown): Promise<void> {
+  if (perksAutoSaving.value)
     return
   const enabled = Boolean(value)
-  gatewayPerksSaving.value = true
+  perksAutoSaving.value = true
   try {
-    const result = await window.workbench.gatewayPerksAutoSet(enabled)
-    if (!result.ok) {
-      ElMessage.error(result.error ?? '保存福利每天自动失败')
+    const error = await setPerksAuto(enabled)
+    if (error) {
+      ElMessage.error(error)
       return
     }
-    gatewayPerksAuto.value = enabled
+    perksAutoEnabled.value = enabled
     // 打开后立刻补跑一次；今天已跑过 / 不在夜间窗口时后端会直接返回
     if (enabled)
       void perksAuto.runNow()
   }
   finally {
-    gatewayPerksSaving.value = false
+    perksAutoSaving.value = false
   }
 }
 
@@ -253,17 +296,17 @@ function saveHotkey(accelerator: string): void {
     </div>
 
     <!--
-      TBuddy：网关的两个常驻开关。都住在网关自己的配置里 ——
-      随程序启动决定应用启动时绑不绑回环端口，福利每天自动决定要不要自己打上游。
+      网关：TBuddy 与 Qoder 各有各的端口、密钥与「随程序启动」，可以同时跑。
+      开关都住在各自网关的配置里，不走应用设置。
     -->
     <div class="block">
       <h3 class="block__title">
-        TBuddy
+        网关（TBuddy / Qoder）
       </h3>
 
       <div class="row">
         <div class="row__text">
-          <span class="row__label">随程序启动</span>
+          <span class="row__label">TBuddy 随程序启动</span>
           <span class="row__hint">
             应用启动时自动在 127.0.0.1 监听（端口在 TBuddy 页的接入信息里改）；关掉后需要手动点「启动」。
           </span>
@@ -278,17 +321,32 @@ function saveHotkey(accelerator: string): void {
 
       <div class="row">
         <div class="row__text">
+          <span class="row__label">Qoder 随程序启动</span>
+          <span class="row__hint">
+            同上，但用的是 Qoder 自己的端口与密钥（两个代理互不相干，可以同时跑）。
+          </span>
+        </div>
+        <el-switch
+          :model-value="qoderAutoStart"
+          size="small"
+          :loading="qoderAutoSaving"
+          @update:model-value="toggleQoderAutoStart"
+        />
+      </div>
+
+      <div class="row">
+        <div class="row__text">
           <span class="row__label">福利每天自动</span>
           <span class="row__hint">
-            启动后补跑签到与一键做任务；夜猫子任务在 23:00–08:00 单独跑一次。
+            TBuddy 与 Qoder 一起：启动后补跑签到与一键做任务；夜猫子任务在 23:00–08:00 单独跑一次。
             成长连登与抽奖不自动。
           </span>
         </div>
         <el-switch
-          :model-value="gatewayPerksAuto"
+          :model-value="perksAutoEnabled"
           size="small"
-          :loading="gatewayPerksSaving"
-          @update:model-value="toggleGatewayPerksAuto"
+          :loading="perksAutoSaving"
+          @update:model-value="togglePerksAuto"
         />
       </div>
     </div>

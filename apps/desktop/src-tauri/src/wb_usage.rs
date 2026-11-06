@@ -135,7 +135,11 @@ fn first_int_opt(usage: &Value, keys: &[&str]) -> Option<i64> {
 
 /// 追加一行。失败**不阻断请求** —— 记账写不进去是账本的问题，不该让对话失败。
 pub fn append(row: &UsageRow) -> Result<(), String> {
-    let path = crate::paths::gateway_usage_file();
+    append_at(&crate::paths::gateway_usage_file(), row)
+}
+
+/// 追加到指定流水文件（Qoder 用自己的文件，不混进 TBuddy 的流水）。
+pub(crate) fn append_at(path: &std::path::Path, row: &UsageRow) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|err| format!("建用量目录失败: {err}"))?;
     }
@@ -144,7 +148,7 @@ pub fn append(row: &UsageRow) -> Result<(), String> {
     let mut file = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(&path)
+        .open(path)
         .map_err(|err| format!("打开用量文件失败: {err}"))?;
     file.write_all(line.as_bytes())
         .map_err(|err| format!("写用量失败: {err}"))
@@ -266,6 +270,11 @@ pub struct Summary {
     /// 积分大于 0 的请求的总 token（比率的分子分母来自同一批请求）
     pub credit_tokens: i64,
     /// 积分 / 1M Token：`credits / credit_tokens`，**按总量直接除**
+    ///
+    /// `rename` 必须显式写：serde 的 camelCase 会把 `1m` 原样留在中间
+    /// （`creditsPer1mTokens`），而前端契约是大写的 `creditsPer1MTokens` ——
+    /// 少了这一行，界面读到的永远是 undefined（比率被 `?? 0` 静默显示成 0）。
+    #[serde(rename = "creditsPer1MTokens")]
     pub credits_per_1m_tokens: f64,
     /// 平均首字延迟（毫秒）。只算成功的流式请求
     pub avg_ttft_ms: i64,
@@ -308,6 +317,8 @@ pub struct AccountSummary {
     pub credits: f64,
     pub credit_samples: i64,
     pub credit_tokens: i64,
+    /// 前端契约里的名字是大写的 `1M`（理由见 `Summary` 的同名字段）
+    #[serde(rename = "creditsPer1MTokens")]
     pub credits_per_1m_tokens: f64,
     /// 命中率：缓存 token / 输入 token（这一组自己的口径，不是全量的）
     pub cache_hit_pct: f64,
@@ -332,6 +343,8 @@ pub struct ModelSummary {
     pub credits: f64,
     pub credit_samples: i64,
     pub credit_tokens: i64,
+    /// 前端契约里的名字是大写的 `1M`（理由见 `Summary` 的同名字段）
+    #[serde(rename = "creditsPer1MTokens")]
     pub credits_per_1m_tokens: f64,
     pub cache_hit_pct: f64,
     pub cost_cny: f64,
@@ -828,6 +841,28 @@ mod tests {
         let account_b = summary.by_account.iter().find(|item| item.uid == "b").unwrap();
         assert_eq!(account_b.credit_samples, 0);
         assert_eq!(account_b.credits_per_1m_tokens, 0.0);
+    }
+
+    /// 比率字段出给前端时名字是大写的 `1M`：serde 的 camelCase 会把 `1m` 原样留下
+    /// （`creditsPer1mTokens`），前端契约读的是 `creditsPer1MTokens` —— 不对上，界面上
+    /// 那一格永远是 undefined（KPI 被 `?? 0` 显示成 0、明细表在渲染时抛错）。
+    #[test]
+    fn 积分比率字段按前端契约序列化() {
+        let mut sample = row("a", "m1", 1_000_000, 0, 0);
+        sample.credit = Some(1.0);
+        let summary = summarize(&[sample], BucketUnit::Hour);
+
+        let json = serde_json::to_value(&summary).unwrap_or_else(|err| panic!("{err}"));
+        assert!(json.get("creditsPer1MTokens").is_some());
+        assert!(json.get("creditsPer1mTokens").is_none());
+
+        let account = &json["byAccount"][0];
+        assert!(account.get("creditsPer1MTokens").is_some());
+        assert!(account.get("creditsPer1mTokens").is_none());
+
+        let model = &json["byModel"][0];
+        assert!(model.get("creditsPer1MTokens").is_some());
+        assert!(model.get("creditsPer1mTokens").is_none());
     }
 
     /// 时序：短窗口按小时，而且空闲的那一格要补 0 —— 不补的话柱子会并排成一根，

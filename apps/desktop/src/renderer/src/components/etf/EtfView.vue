@@ -92,9 +92,21 @@ async function refresh(): Promise<void> {
   refreshing.value = true
   notes.value = []
   try {
+    // 先并别的机器的缓存：并完再规划缺口，已经有人跑过回填的日期这一轮一个请求都不发
+    const pulled = await window.workbench.etfSyncPull()
+    if (!pulled.ok)
+      notes.value.push(`读取其他设备的缓存失败：${pulled.error ?? '未知原因'}`)
+
     const outcome = await refreshEtf(onProgress)
     overview.value = outcome.overview
-    notes.value = outcome.notes
+    notes.value.push(...outcome.notes)
+
+    // 同步可用就推回去（内容没变 git 那边不产生提交）：上一次推送失败的那笔也能在这里补上
+    if (pulled.ok && pulled.data?.enabled) {
+      const pushed = await window.workbench.etfSyncPublish()
+      if (!pushed.ok)
+        notes.value.push(`缓存推送到同步仓库失败：${pushed.error ?? '未知原因'}`)
+    }
   }
   catch (error) {
     notes.value = [error instanceof Error ? error.message : String(error)]

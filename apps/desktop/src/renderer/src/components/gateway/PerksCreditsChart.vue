@@ -37,6 +37,8 @@ const props = defineProps<{
   loading: boolean
   /** 整张图没读到的原因 */
   error: string
+  /** 空态第二行：Qoder 没有成长任务，用它换掉默认文案 */
+  hint?: string
 }>()
 
 // ECharts 按需注册：只登记这张图用到的能力，不引整包
@@ -212,7 +214,7 @@ onBeforeUnmount(disposeChart)
       compact
       :icon="Coin"
       :text="error ? '读取积分流水失败' : '近一个月还没有获得积分'"
-      :hint="error || '签到或做成长任务后会记在这里'"
+      :hint="error || hint || '签到或做成长任务后会记在这里'"
     />
     <div v-else ref="host" class="credits-chart__plot" />
   </section>

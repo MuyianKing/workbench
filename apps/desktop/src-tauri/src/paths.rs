@@ -22,8 +22,8 @@ pub const THEME_FILE: &str = "theme.json";
 pub const WORK_LOG_FILE: &str = "work-log.json";
 /// AI 热点缓存（见 packages/ai/src/ai-news.ts）。与工作日志同一待遇：只在本机、不进同步仓库
 pub const AI_NEWS_FILE: &str = "ai-news.json";
-/// ETF 资金流缓存（见 packages/etf/src/etf.ts）：份额 / 净值 / 指数的本地回填，
-/// 只在本机、不进同步仓库
+/// ETF 资金流缓存（见 packages/etf/src/etf.ts）：份额 / 净值 / 指数的本地回填。
+/// 本机这份是权威；开同步时另推一份 `etf/<设备id>.json` 进仓库给别的机器复用
 pub const ETF_FILE: &str = "etf.json";
 /// 密码保险库（见 packages/vault/src/vault.ts）。**文件本身只有密文**：明文从不落盘，
 /// 本机这把密钥在 Windows 凭据管理器里（见 vault.rs），仓库里那份在 `vault/vault.json`
@@ -62,6 +62,12 @@ pub(crate) const TOKEN_USAGE_DIR: &str = "token-usage";
 pub(crate) const CONFIG_DIR: &str = "config";
 /// 克隆里放**网关请求流水**的子目录名：一台机器一个子目录、每月一个 `.jsonl`
 pub(crate) const GATEWAY_USAGE_DIR: &str = "gateway-usage";
+/// 克隆里放 **Qoder 领取账本**的子目录名：一台机器一个子目录、每年一个 `.jsonl`。
+/// 与 `gateway-usage/` 分开 —— 两个上游的账号和积分口径不能混进同一本账。
+pub(crate) const QODER_EARNINGS_DIR: &str = "qoder-earnings";
+/// 克隆里放 **ETF 缓存**的子目录名：一台机器一个文件（份额 / 净值都是公开行情，
+/// 别的机器读到就并进本机，不必各自再向交易所重拉，见 packages/etf/src/etf.ts 的 mergeEtfCacheInto）
+pub(crate) const ETF_SYNC_DIR: &str = "etf";
 /// 网关（WorkBuddy 反代）的目录名。它自带一层完整结构：账号、用量、日志都在里面，
 /// 不跟工作台自己的数据文件混在一起 —— 那是一整套独立的运行时状态
 const GATEWAY_DIR: &str = "wb-gateway";
@@ -73,6 +79,15 @@ pub const GATEWAY_MODELS_FILE: &str = "models.json";
 pub const GATEWAY_ACTIVITY_FILE: &str = "activity.jsonl";
 /// 福利自动跑的开关与「每个号今天跑过没有」（见 `wb_gateway::PerksAuto`）
 pub const GATEWAY_PERKS_FILE: &str = "perks-auto.json";
+
+/// Qoder 网关的目录名（与 `wb-gateway` 并列）。端口与密钥共用后者的 settings.json。
+const QODER_DIR: &str = "wb-qoder";
+pub const QODER_SETTINGS_FILE: &str = "settings.json";
+pub const QODER_ACCOUNTS_DIR: &str = "accounts";
+pub const QODER_USAGE_FILE: &str = "usage.jsonl";
+pub const QODER_MODELS_FILE: &str = "models.json";
+pub const QODER_ACTIVITY_FILE: &str = "activity.jsonl";
+pub const QODER_PERKS_FILE: &str = "perks-auto.json";
 
 /// 老版本直接写在用户数据根目录下的那批文件：搬家清单（见 `relocate_root_files_in`）
 const ROOT_FILES: &[&str] = &[
@@ -197,6 +212,40 @@ pub fn gateway_activity_file() -> PathBuf {
 /// 福利自动跑的开关与每号上次跑的日期（见 `wb_gateway`）。
 pub fn gateway_perks_file() -> PathBuf {
     gateway_dir().join(GATEWAY_PERKS_FILE)
+}
+
+/// Qoder 网关的根目录（`data/wb-qoder`）。端口与密钥在它自己的 `settings.json` 里，
+/// 与 TBuddy 各用各的；两个代理端口不同，可以同时跑。
+pub fn qoder_dir() -> PathBuf {
+    data_dir().join(QODER_DIR)
+}
+
+pub fn qoder_settings_file() -> PathBuf {
+    qoder_dir().join(QODER_SETTINGS_FILE)
+}
+
+pub fn qoder_accounts_dir() -> PathBuf {
+    qoder_dir().join(QODER_ACCOUNTS_DIR)
+}
+
+/// Qoder 的用量流水（一行一条请求，只追加；只存本机，不参与多机同步）。
+pub fn qoder_usage_file() -> PathBuf {
+    qoder_dir().join(QODER_USAGE_FILE)
+}
+
+/// 上一次从上游拉下来的 Qoder 模型目录（见 `qd_models`）。
+pub fn qoder_models_file() -> PathBuf {
+    qoder_dir().join(QODER_MODELS_FILE)
+}
+
+/// Qoder 的签到尝试记录。
+pub fn qoder_activity_file() -> PathBuf {
+    qoder_dir().join(QODER_ACTIVITY_FILE)
+}
+
+/// Qoder 的自动签到开关与每号上次跑的日期。
+pub fn qoder_perks_file() -> PathBuf {
+    qoder_dir().join(QODER_PERKS_FILE)
 }
 
 /// 一次性的本地搬家，启动时跑一次（commands.rs 的 `load_all`，必须早于任何 store 载入）：

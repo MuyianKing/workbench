@@ -9,6 +9,7 @@ import {
   formatYi,
   formatYiNumber,
   isStaleEmptyDate,
+  mergeEtfCacheInto,
   mergeNavInto,
   mergeSharesInto,
   parseNavScript,
@@ -160,6 +161,30 @@ describe('合并', () => {
     mergeNavInto(cache, '510300', { 20240102: 3.9 })
     mergeNavInto(cache, '510300', { 20240103: 3.92 })
     expect(cache.nav['510300']).toEqual({ 20240103: 3.92 })
+  })
+
+  it('别的机器的缓存并进来：只补缺、本机已有的值不动，sseDone 取更晚的', () => {
+    const cache = cacheWith({
+      shares: { 20240102: { 510300: 100e8 } },
+      nav: { 510300: { 20240102: 3.9 } },
+      sseDone: '20240102',
+    })
+    const remote = cacheWith({
+      shares: { 20240102: { 510300: 999e8, 159919: 50e8 }, 20240103: { 510300: 101e8 } },
+      nav: { 510300: { 20240102: 9.9, 20240103: 3.92 } },
+      sseDone: '20240103',
+    })
+
+    expect(mergeEtfCacheInto(cache, remote)).toBe(true)
+    expect(cache.shares).toEqual({
+      20240102: { 510300: 100e8, 159919: 50e8 },
+      20240103: { 510300: 101e8 },
+    })
+    expect(cache.nav['510300']).toEqual({ 20240102: 3.9, 20240103: 3.92 })
+    expect(cache.sseDone).toBe('20240103')
+
+    // 再并一次：什么都不缺了，不该再报「变过」（否则每次进页面都会白推一次仓库）
+    expect(mergeEtfCacheInto(cache, remote)).toBe(false)
   })
 })
 

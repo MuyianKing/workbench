@@ -148,22 +148,28 @@ function tipOf(day: ActivityDay): string {
   overflow-y: auto;
 
   /**
-   * 深浅五档：**从主题色掺出来** —— 四档是主色按 20 / 45 / 70 / 100% 掺进面底色，
-   * 掺得越少那天跑得越少，最深一档就是主题色本身。
+   * 深浅五档：**从主题色掺出来** —— 四档是主色按 38 / 60 / 80 / 100% 掺进空格子那一档
+   * （`--bg-inset`），掺得越少那天做得越少，最深一档就是主题色本身。
+   *
+   * **底色取的是空格子那一档，不是面底色（纯白）**：浅色主题色掺进白色就被白色吃掉了。
+   * 亮绿 #6fb684 掺 20% 出来是 #e2f0e6，与空格子的 #e8eaee 只差几个色阶 —— 10px 的方块上
+   * 等于没画，「一年里只做了一件事」看起来和「一年什么都没做」一模一样（2026-10-30 就是这么
+   * 被当成「活跃度不显示了」的）。从空格子起掺，第一档相对「这天没动手」就一定有台阶，
+   * 四档之间的间距也不再被白色稀释。
    *
    * 为什么不直接用 Element Plus 那族 `--el-color-primary-light-N`：那几档是给**悬停底色**用的
    * （亮色往白里混、暗色往画布色里混，比例固定），而 tokens.css 里那套中性灰还是手调过的
    * ——它的 light-5 已经到七成主色，拿它当数据色阶，中间两档会明显偏深、四档的间距也不匀。
-   * 这里要的是一条「掺得越少越浅」的等比色阶，所以比例自己定，底色取面底色（卡片那张纸）。
+   * 这里要的是一条「掺得越少越浅」的等比色阶，所以比例自己定。
    *
    * **没配主题色时主色就是中性色**（亮色近黑、暗色近白，见 tokens.css 的 --el-color-primary），
    * 于是这一页仍旧是灰阶的样子；配了主题色（比如绿色）它就整条跟着走，与设置里那颗色一致。
    * 图里的颜色只表达「多与少」，不表达运行状态 —— 所以不上 --st-* 那套状态色。
    */
   --lv-0: var(--bg-inset);
-  --lv-1: color-mix(in srgb, var(--el-color-primary) 20%, var(--bg-surface));
-  --lv-2: color-mix(in srgb, var(--el-color-primary) 45%, var(--bg-surface));
-  --lv-3: color-mix(in srgb, var(--el-color-primary) 70%, var(--bg-surface));
+  --lv-1: color-mix(in srgb, var(--el-color-primary) 38%, var(--bg-inset));
+  --lv-2: color-mix(in srgb, var(--el-color-primary) 60%, var(--bg-inset));
+  --lv-3: color-mix(in srgb, var(--el-color-primary) 80%, var(--bg-inset));
   --lv-4: var(--el-color-primary);
 }
 

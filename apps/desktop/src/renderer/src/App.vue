@@ -18,6 +18,7 @@ import NotesView from '@/components/NotesView.vue'
 import ProjectDrawer from '@/components/ProjectDrawer.vue'
 import ProjectGrid from '@/components/ProjectGrid.vue'
 import ProjectsView from '@/components/ProjectsView.vue'
+import QoderView from '@/components/qoder/QoderView.vue'
 import QuickAppDialog from '@/components/QuickAppDialog.vue'
 import QuitConfirmDialog from '@/components/QuitConfirmDialog.vue'
 import SkillsView from '@/components/SkillsView.vue'
@@ -63,6 +64,7 @@ const VIEWS: Record<ViewId, Component> = {
   kb: KbView,
   ai: AiView,
   gateway: GatewayView,
+  qoder: QoderView,
   vault: VaultView,
   mail: MailView,
   styles: StylesView,

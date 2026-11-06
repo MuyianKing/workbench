@@ -28,7 +28,7 @@
 - 定位：Windows 桌面应用（Tauri 2 + WebView2），一个窗口里管项目、记工作、写笔记、看 AI 用量；pnpm workspace monorepo
   （应用在 `apps/desktop/`，纯逻辑按域拆在 `packages/` 的 18 个 `@workbench/*` 包，见第 2 节），`Cargo.lock` 要提交；
   例外：`vendor-pi.mjs` 内部装 Pi 仍走 `npm install`（`resources/pi/` 要整树打进安装包，不能用符号链接布局）。
-- **联网边界：默认不联网、不上报任何数据；出口只有十四条，且都由用户显式开启** —— 清单与每条细则见
+- **联网边界：默认不联网、不上报任何数据；出口只有十五条，且都由用户显式开启** —— 清单与每条细则见
   [features-and-architecture.md](docs/features-and-architecture.md) 的「数据与隐私」一节，**动联网代码前先读那一节**。
   **不要新增网络出口、不往任何第三方服务发数据**；笔记里的外链图片、密码保险库（推的是用量同步那个仓库的 `vault/vault.json`，
   推上去的只有密文）都**不算**新出口；构建期内嵌 OAuth client_id/secret 与用户指定的禅道个人凭据是明确例外，后者不得随包分发。
@@ -58,6 +58,12 @@
   `data\pi\sessions\`（起进程时传 `--session-id` 与 `--session-dir`，**不要传 `--no-session`**）。跑它时子进程必须带 `PI_TELEMETRY=0`、`PI_SKIP_VERSION_CHECK=1` 与 `PI_OFFLINE=1`
   （它默认会报遥测、向 pi.dev 查最新版本、RPC 启动时还刷一遍模型目录 —— 那三条不在任何已登记的出口里），密钥只经环境变量给，
   **进程直启不经 `cmd /C`**（行内层引号会被 cmd 拆坏，见 session.rs 的 `spawn_args`）。别照着再引别的 Agent。
+- **Qoder 网关与 TBuddy 是两套独立实现**：各自的端口（17878 / 17879）、密钥与
+  `settings.json`、随程序启动开关，**可以同时跑**，谁也不碰谁的配置。只接国内版
+  （`qoder.com.cn` / `openapi.qoder.com.cn` / `gateway.qoder.com.cn`），只做 OAuth 设备授权；COSY 签名
+  （自定义 Base64 / AES-128-CBC / RSA-1024）是协议层硬约束，不许单方面「加固」；上游模板与 CN 目录随包
+  （`src-tauri/src/qoder/`，MIT，来自 qoder2api-hub），改协议只换这两份与 `qd_upstream` 常量。
+  请求流水只存本机 `data\wb-qoder\usage.jsonl`，不并入 `gateway-usage/` 同步。细则见 [qoder.md](docs/modules/qoder.md)。
 - 测试用 Vitest（各包子目录里的 `vitest.config.ts` 是配置来源；根目录 `pnpm test` 走根 `vitest.config.ts` 的
   `test.projects`，把 19 个项目收进**一个** vitest 进程跑全量 —— 别退回 `pnpm -r test`，那是 19 次进程启动；
   渲染层用例在 `@workbench/desktop` 包里）
@@ -157,6 +163,7 @@ asset 协议、读取权限在 Rust 侧按单个文件授予）、**通道一律
 | 知识库（原始数据 / 条目 / 一键清洗 / 索引重建 / 同步） | [kb](docs/modules/kb.md) |
 | AI 助手（会话 / 项目 / 驱动本机 Pi / 模型与密钥 / 提示词与出口） | [ai](docs/modules/ai.md) |
 | TBuddy（网关：CodeBuddy 反代；账号 / 流式对话 / 用量） | [gateway](docs/modules/gateway.md) |
+| Qoder（网关：Qoder 国内版反代；独立端口 / 密钥，可同时跑） | [qoder](docs/modules/qoder.md) |
 | 用量与外观同步、账号登录 | [sync-and-auth](docs/modules/sync-and-auth.md) |
 | 密码保险库（密钥 / 加解密 / 多机共写一份文件） | [vault](docs/modules/vault.md) |
 | 邮箱（IMAP 收信 / SMTP 发信 / 授权码 / 联网出口） | [mail](docs/modules/mail.md) |

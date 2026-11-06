@@ -27,7 +27,6 @@ pub enum Identity {
     Cli,
 }
 
-#[allow(dead_code)] // parse 由账号文件与导入接入（S2）
 impl Identity {
     pub fn parse(raw: &str) -> Option<Identity> {
         match raw.trim().to_ascii_lowercase().as_str() {

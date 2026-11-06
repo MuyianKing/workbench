@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { ViewId } from '@workbench/appearance'
 import type { Component, CSSProperties } from 'vue'
-import { Brush, ChatDotRound, Collection, Connection, Document, FolderOpened, Grid, Key, MagicStick, Message, Notebook, TrendCharts, VideoPlay } from '@element-plus/icons-vue'
+import { Brush, ChatDotRound, Collection, Connection, Cpu, Document, FolderOpened, Grid, Key, MagicStick, Message, Notebook, TrendCharts, VideoPlay } from '@element-plus/icons-vue'
 import { orderedViews } from '@workbench/appearance'
 /**
  * 左侧导航栏：应用的一级页面都挂在这里。
@@ -30,6 +30,7 @@ const ICONS: Record<ViewId, Component> = {
   kb: Collection,
   ai: ChatDotRound,
   gateway: Connection,
+  qoder: Cpu,
   vault: Key,
   mail: Message,
   styles: Brush,

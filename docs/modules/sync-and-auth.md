@@ -41,8 +41,13 @@
 
 - 「一个功能一个目录、一台机器一份」：`token-usage/<设备id>.json` 是用量快照、`config/<设备id>.json` 是那份 `theme.json`
   的整份副本（见 [sync-config.ts](../../packages/usage/src/sync-config.ts)）、
-  `gateway-usage/<设备id>/<YYYY-MM>.jsonl` 是网关请求流水（一台机器一个目录、每月一个文件）。
-  前两个目录一台机器一个文件；所有文件都必须保持**单写者**（只写自己那份、只读别人的）—— 这是「不需要人工合并」的全部依据。
+  `gateway-usage/<设备id>/<YYYY-MM>.jsonl` 是网关请求流水（一台机器一个目录、每月一个文件）、
+  `etf/<设备id>.json` 是这台机器抓到的 ETF 份额 / 净值缓存（公开行情，读侧逐日并集，见
+  [etf.md](etf.md)）。前两个目录一台机器一个文件；所有文件都必须保持**单写者**（只写自己那份、只读别人的）——
+  这是「不需要人工合并」的全部依据。
+- **ETF 是第三条独立的出口**：它只由 ETF 页自己推拉（进页面先拉、刷新完推，见 [etf.md](etf.md)），
+  面板按钮、一小时一轮的用量同步、外观的「同步一次」都不碰它。内容是交易所 / 天天基金的公开数据，
+  与用量、外观、网关流水都不相干，别把它折进任何一条现有流程。
 - **用量与外观是两条互不相干的出口，别把它们合回一条**：用量那条（`token_sync_publish` 推 `token-usage/<自己>.json`，
   `gateway_sync_publish` 推 `gateway-usage/<自己>/`，面板按钮与一小时一轮的自动同步顺带跑）只 add / diff 自己设备的两条路径；
   外观那条（`token_sync_config`，设置 → 外观 →「同步一次」）只 add / diff `config/<自己>.json`。`sync.rs` 的 `publish_at`
@@ -59,11 +64,12 @@
 
 ### 同一个克隆上的并发
 
-- **几条同步共用同一个克隆，必须排队**：用量 / 外观 / 网关 / 保险库四条同步各走各的线程，落在同一个
+- **几条同步共用同一个克隆，必须排队**：用量 / 外观 / 网关 / 保险库 / ETF 五条同步各走各的线程，落在同一个
   `token-sync` 上；两条同时跑时 git 自己的步骤会互相踩 —— 一条在 pull 的当口另一条提交了，pull 会以为
   工作区要从旧提交快进，die 出 `Cannot fast-forward your working tree`（`builtin/pull.c`）；两条同时
   `add` / `commit` 还会撞 `index.lock`。所以每个入口在动 git 之前先拿 `sync::lock_workflow(dir)`：
-  `publish_at` / `publish_gateway_at` / 图片的读、写、删 / `sync_notes` / 保险库的 `pull_at` 与 `push_at`。
+  `publish_at` / `publish_gateway_at` / 图片的读、写、删 / `sync_notes` / 保险库的 `pull_at` 与 `push_at` /
+  `refresh_clone`。
   **新增一条同步路径要照这个来**（锁按目录分，不同仓库互不牵连）；锁要一直拿在整段流程上，
   不能只包 `ensure_clone` —— 危险窗口是「拉完到提交完」这一段。
 - **另一个窗口不在同一把锁里**：安装版与 dev 可以同时开着（见 AGENTS.md），它们各拿各的进程内锁。

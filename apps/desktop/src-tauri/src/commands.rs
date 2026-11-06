@@ -660,10 +660,48 @@ pub fn gateway_sync_publish(repo: String, device: String) -> Result<Value, Strin
 /// 只把同步克隆更新到最新（不写本机流水、不提交、不推送），读完刷新用量页。
 ///
 /// 网关用量的读路径只读本地克隆；本机没有流水就不会触发推送，也就没人顺带把
-/// 别的机器推上来的今天拉下来（见 `sync::refresh_gateway_clone`）。
+/// 别的机器推上来的今天拉下来（见 `sync::refresh_clone`）。
 #[tauri::command(async)]
 pub fn gateway_sync_pull(repo: String) -> Result<Value, String> {
-    crate::sync::refresh_gateway_clone(&repo)
+    crate::sync::refresh_clone(&repo)
+}
+
+/// 把本机 Qoder 领取记录推进同步仓库：只推成功领取的脱敏行
+/// （uid / 日期 / 任务 / 积分 / 标题），不含昵称与 token。
+#[tauri::command(async)]
+pub fn qoder_earnings_publish(repo: String, device: String) -> Result<Value, String> {
+    if repo.trim().is_empty() {
+        return Err("没有配置同步仓库".into());
+    }
+    let rows = crate::qd_tasks::earning_rows(0);
+    crate::sync::publish_qoder_earnings(&repo, &device, &rows)
+}
+
+/// 只刷新同步克隆（不写本机、不提交、不推送），读完重读领取记录。
+#[tauri::command(async)]
+pub fn qoder_earnings_pull(repo: String) -> Result<Value, String> {
+    crate::sync::refresh_clone(&repo)
+}
+
+/// ETF 缓存的多机复用：先拉一次克隆，再把别的机器那份读回来（合并由渲染层做）。
+/// 返回 `{ own, files }`；`own` 表示仓库里有没有本机那一份（第一次同步完之前是 false，
+/// 界面上据此知道这轮之前从没推过，诊断用）。
+#[tauri::command(async)]
+pub fn etf_sync_pull(repo: String, device: String) -> Result<Value, String> {
+    if repo.trim().is_empty() {
+        return Err("没有配置同步仓库".into());
+    }
+    crate::sync::refresh_clone(&repo)?;
+    crate::sync::read_etf_shards(&repo, &device)
+}
+
+/// 把本机 ETF 缓存推进同步仓库：`etf/<设备id>.json`（只写自己那份，单写者）。
+#[tauri::command(async)]
+pub fn etf_sync_publish(repo: String, device: String, cache: Value) -> Result<Value, String> {
+    if repo.trim().is_empty() {
+        return Err("没有配置同步仓库".into());
+    }
+    crate::sync::publish_etf(&repo, &device, &cache)
 }
 
 /// 把本机的外观配置（theme.json 整份副本）单独写进同步仓库并推送；

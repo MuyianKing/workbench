@@ -7,7 +7,9 @@ import { computed, onActivated, onBeforeUnmount, onMounted, ref } from 'vue'
 import EmptyState from '@/components/EmptyState.vue'
 import { formatTimestamp } from '@/format'
 import AccessDialog from './AccessDialog.vue'
+import AccountTransferDialog from './AccountTransferDialog.vue'
 import CreditsDialog from './CreditsDialog.vue'
+import GatewayTabs from './GatewayTabs.vue'
 import ModelsPane from './ModelsPane.vue'
 import PerksPane from './PerksPane.vue'
 import RequestsPane from './RequestsPane.vue'
@@ -31,6 +33,15 @@ const POLL_INTERVAL = 2000
 /** 自动查余额的最小间隔：一个号一次上游往返，切个页签就重查一遍太费 */
 const CREDIT_THROTTLE = 60_000
 
+/** 页签（顺序即显示顺序） */
+const TABS = [
+  { label: '账号', value: 'accounts' },
+  { label: '用量', value: 'usage' },
+  { label: '请求', value: 'requests' },
+  { label: '福利', value: 'perks' },
+  { label: '模型', value: 'models' },
+] as const
+
 const tab = ref<'accounts' | 'perks' | 'usage' | 'requests' | 'models'>('accounts')
 const status = ref<GatewayStatus | null>(null)
 const accounts = ref<GatewayAccount[]>([])
@@ -38,6 +49,9 @@ const credits = ref<Record<string, GatewayCredits>>({})
 const usage = ref<GatewayUsageSummary | null>(null)
 const access = ref<GatewayAccess | null>(null)
 const accessOpen = ref(false)
+/** 账号导出 / 导入弹层：两个模式共用一个实例，`transferMode` 决定打开哪个 */
+const transferOpen = ref(false)
+const transferMode = ref<'export' | 'import'>('export')
 /** 积分明细弹层：点账号卡上的积分打开，`creditsUid` 记着在看哪个号 */
 const creditsOpen = ref(false)
 const creditsUid = ref('')
@@ -102,6 +116,12 @@ const creditsDetail = computed(() => (creditsUid.value ? credits.value[creditsUi
 function openCredits(account: GatewayAccount): void {
   creditsUid.value = account.uid
   creditsOpen.value = true
+}
+
+/** 打开账号导出 / 导入弹层（同一个实例，切模式） */
+function openTransfer(mode: 'export' | 'import'): void {
+  transferMode.value = mode
+  transferOpen.value = true
 }
 
 /**
@@ -558,13 +578,7 @@ onBeforeUnmount(() => {
   <section class="gw">
     <!-- 页首：左页签、右全局状态。启停不跟着「账号」页签走 —— 在哪一栏都能看到网关开没开 -->
     <div class="gw__head">
-      <el-tabs v-model="tab" class="gw__tabs">
-        <el-tab-pane label="账号" name="accounts" />
-        <el-tab-pane label="用量" name="usage" />
-        <el-tab-pane label="请求" name="requests" />
-        <el-tab-pane label="福利" name="perks" />
-        <el-tab-pane label="模型" name="models" />
-      </el-tabs>
+      <GatewayTabs v-model="tab" :items="TABS" />
       <div class="gw__run">
         <button type="button" class="gw__run-status" title="接入信息" @click="accessOpen = true">
           <span class="gw__run-dot" :class="{ 'is-ok': running }" />
@@ -637,6 +651,16 @@ onBeforeUnmount(() => {
       </section>
 
       <section class="gw__pool">
+        <!-- 账号搬运用：导出成一段 JSON 抄进密码管理器，另一台机器导入后不必再登录一次 -->
+        <div class="gw__pool-tools">
+          <el-button size="small" text :disabled="!accounts.length" @click="openTransfer('export')">
+            导出
+          </el-button>
+          <el-button size="small" text @click="openTransfer('import')">
+            导入
+          </el-button>
+        </div>
+
         <p v-if="loginHint" class="gw__hint">
           {{ loginHint }}
         </p>
@@ -816,6 +840,14 @@ onBeforeUnmount(() => {
       :loading="creditsAccount ? creditPending[creditsAccount.uid] === true : false"
       @refresh="refreshDetail"
     />
+
+    <!-- 账号导出 / 导入：导出给一段 JSON，导入把它贴回来（同 uid 跳过或覆盖当场选） -->
+    <AccountTransferDialog
+      v-model="transferOpen"
+      kind="gateway"
+      :mode="transferMode"
+      @imported="refresh"
+    />
   </section>
 </template>
 
@@ -866,55 +898,7 @@ onBeforeUnmount(() => {
   min-width: 0;
 }
 
-/**
- * 页签用下划线式导航（`el-tabs`），与下面的范围筛选（`el-segmented` 药丸）分开：
- * 两个一模一样的药丸叠在一起时，分不清哪个是「在哪一栏」、哪个是「看多长时间」。
- * 这里只留文字 + 2px 主色下划线，不铺底色、也不拉满整行。
- */
-.gw__tabs {
-  flex: none;
-}
-
-.gw__tabs :deep(.el-tabs__header) {
-  margin: 0;
-}
-
-/* 不要 EP 那条贯穿整行的底线，只保留选中项下面那一截 */
-.gw__tabs :deep(.el-tabs__nav-wrap::after) {
-  display: none;
-}
-
-.gw__tabs :deep(.el-tabs__item) {
-  height: 34px;
-  padding: 0;
-  margin-right: var(--sp-5);
-  font-size: var(--gw-fs-body);
-  color: var(--ink-3);
-}
-
-.gw__tabs :deep(.el-tabs__item:last-child) {
-  margin-right: 0;
-}
-
-.gw__tabs :deep(.el-tabs__item.is-active) {
-  color: var(--ink);
-  font-weight: 600;
-}
-
-.gw__tabs :deep(.el-tabs__item:hover) {
-  color: var(--ink);
-}
-
-.gw__tabs :deep(.el-tabs__active-bar) {
-  height: 2px;
-  border-radius: var(--r-pill);
-  background: var(--el-color-primary);
-}
-
-/* 页签只是导航，内容由下面几栏自己渲染 */
-.gw__tabs :deep(.el-tabs__content) {
-  display: none;
-}
+/* 页签本体在 GatewayTabs.vue（TBuddy 与 Qoder 共用同一副大小） */
 
 .gw__run {
   display: flex;
@@ -1092,6 +1076,14 @@ onBeforeUnmount(() => {
   margin: 0;
   font-size: var(--gw-fs-meta);
   color: var(--ink-3);
+}
+
+/* 导出 / 导入：账号栏自己的小工具行，不占页首状态区 */
+.gw__pool-tools {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--sp-1);
+  margin-bottom: calc(var(--sp-2) * -1);
 }
 
 /* 账号卡：一行放不下四张时自动往下排 */

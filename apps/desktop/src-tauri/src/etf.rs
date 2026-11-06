@@ -9,7 +9,9 @@
 //!
 //! **职责分工与天气 / AI 热点一致**：这一层只取原始文本（JSON / 脚本不解析），
 //! 解析、合并、净买卖计算全在 TS 侧（`packages/etf/src/etf.ts`，有单测、改起来走热更新）；
-//! 缓存经 JsonStore 落在数据目录的 `etf.json`（只在本机，不进同步仓库）。
+//! 缓存经 JsonStore 落在数据目录的 `etf.json`。开同步时另有一份 `etf/<设备id>.json` 在用户的
+//! 同步仓库里（推 / 拉走 `sync.rs`，合并语义在 `mergeEtfCacheInto`）—— 别的机器复用同一批公开
+//! 行情，不必各自再向交易所重拉；三个行情主机本身没有多出任何请求路径。
 
 use serde::Serialize;
 use serde_json::Value;
@@ -29,6 +31,9 @@ const NAV_HOST: &str = "fund.eastmoney.com";
 
 /// 交易所的接口要浏览器样子的请求头（Referer 缺了会被当作来路不明拒掉）
 const BROWSER_UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
+
+/// 深市报表页（Referer 口径，与下面 `szse_path` 用的是同一份报表）
+const SZSE_REFERER: &str = "https://www.szse.cn/market/fund/volume/etf/index.html";
 
 /// `etf.json` 的去抖存储：份额 / 净值缓存的唯一落点，与 AI 热点同一待遇（只在本机）
 static ETF: OnceLock<JsonStore> = OnceLock::new();
@@ -76,6 +81,29 @@ fn fetch(host: &str, path: &str, referer: &str) -> Result<EtfFetchResult, String
     })
 }
 
+/// 深市份额：HTTPS 被断连时退回明文 HTTP 再试一次。
+///
+/// 2026-11 实测：回填到几百个请求之后，交易所会对这条出口 IP 在 TLS 层直接断连 ——
+/// 握手成功、不给任何 HTTP 响应（WinHTTP 报 12152 invalid server response，curl 也是
+/// empty reply），而同主机同路径的 `http://` 照常 200。没有这条退路，那个区间会一直停在原地。
+/// **这是全项目唯一的明文出口**：同一主机、同一路径、同一份公开只读 JSON，不带凭据、
+/// 不发用户内容；别照搬到别处（也只在 HTTPS 拿不到响应时才走）。
+fn fetch_szse(path: &str) -> Result<EtfFetchResult, String> {
+    let headers = [("User-Agent", BROWSER_UA), ("Referer", SZSE_REFERER)];
+    match http::request("GET", SZSE_HOST, path, &headers, None) {
+        Ok(response) => Ok(EtfFetchResult {
+            status: response.status,
+            body: response.text(),
+        }),
+        Err(secure) => http::request_url("GET", &szse_plain_url(path), &headers, None)
+            .map(|response| EtfFetchResult {
+                status: response.status,
+                body: response.text(),
+            })
+            .map_err(|plain| format!("{secure}；退回明文 HTTP 也失败：{plain}")),
+    }
+}
+
 /// 8 位数字日期（YYYYMMDD）→ 接口要的 `YYYY-MM-DD`；形状不对在拼地址之前就挡下。
 fn dashed_date(value: &str, label: &str) -> Result<String, String> {
     if value.len() != 8 || !value.bytes().all(|byte| byte.is_ascii_digit()) {
@@ -113,11 +141,7 @@ pub fn etf_fetch_szse(code: String, start: String, end: String, page: u32) -> Re
     if !(1..=500).contains(&page) {
         return Err(format!("页码越界：{page}"));
     }
-    fetch(
-        SZSE_HOST,
-        &szse_path(&code, &txt_start, &txt_end, page),
-        "https://www.szse.cn/market/fund/volume/etf/index.html",
-    )
+    fetch_szse(&szse_path(&code, &txt_start, &txt_end, page))
 }
 
 fn szse_path(code: &str, txt_start: &str, txt_end: &str, page: u32) -> String {
@@ -126,6 +150,11 @@ fn szse_path(code: &str, txt_start: &str, txt_end: &str, page: u32) -> String {
         "/api/report/ShowReport/data?SHOWTYPE=JSON&CATALOGID=scsj_fund_jjgm&TABKEY=tab1\
          &txtDm={code}&txtStart={txt_start}&txtEnd={txt_end}&jjlb=ETF&PAGENO={page}&random=0.618"
     )
+}
+
+/// 深市的明文退路：只把协议换掉，主机与参数（含全部查询串）原样不动。
+fn szse_plain_url(path: &str) -> String {
+    format!("http://{SZSE_HOST}{path}")
 }
 
 /// 一只基金的单位净值全历史脚本。基金代码只是行情接口的参数（与天气那条出口的
@@ -189,5 +218,16 @@ mod tests {
         assert!(path.contains("txtEnd=2024-04-30"));
         assert!(path.contains("jjlb=ETF"));
         assert!(path.contains("PAGENO=3"));
+    }
+
+    /// 深市的明文退路只换协议：主机、路径与全部查询串原样带过去
+    #[test]
+    fn szse_plain_fallback_only_changes_the_scheme() {
+        let path = szse_path("159919", "2022-04-02", "2022-08-29", 1);
+        let url = szse_plain_url(&path);
+        assert_eq!(url, format!("http://www.szse.cn{path}"));
+        assert!(url.starts_with("http://www.szse.cn/api/report/ShowReport/data?"));
+        assert!(url.contains("txtDm=159919"));
+        assert!(url.contains("txtStart=2022-04-02"));
     }
 }

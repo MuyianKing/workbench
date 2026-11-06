@@ -36,6 +36,12 @@ export interface GrowthCreditDay {
   active: boolean
 }
 
+/** 已经按日聚合好的积分散点（Qoder 的本机领取记录走这一种） */
+export interface CreditDayPoint {
+  date: string
+  credit: number
+}
+
 /** 福利页固定看最近 30 天（含今天） */
 export const GROWTH_CREDIT_DAYS = 30
 
@@ -91,6 +97,44 @@ export function isGrowthPerk(grant: GrowthCreditGrant): boolean {
 }
 
 /**
+ * 把「日期 → 已领到的积分」的散点铺成最近 `days` 天的连续序列（旧→新）。
+ *
+ * - 日期是 UTC+8 的 `YYYY-MM-DD`，窗口最后一天是 `now` 按 UTC+8 的那一天；
+ * - 同一天的多条相加；缺的日期补 0；窗口外的点丢掉；
+ * - 负数与非有限值当成没有。
+ *
+ * Qoder 的福利栏直接用这一份：本机 `activity.jsonl` 只回有进账的日期，
+ * 补日历与裁窗口都在这里，和 TBuddy 的 `dailyGrowthCredits` 同一条口径。
+ */
+export function dailyCreditSeries(
+  points: CreditDayPoint[],
+  days: number = GROWTH_CREDIT_DAYS,
+  now: number = Date.now() / 1000,
+): GrowthCreditDay[] {
+  const count = Number.isFinite(days) && days > 0 ? Math.floor(days) : GROWTH_CREDIT_DAYS
+  const end = utc8DayKey(Number.isFinite(now) ? now : Date.now() / 1000)
+  const endMs = dayMs(end)
+  const startMs = endMs - (count - 1) * DAY_MS
+  const start = msDayKey(startMs)
+
+  const totals = new Map<string, number>()
+  for (const point of points) {
+    if (point.date < start || point.date > end)
+      continue
+    const credit = Number.isFinite(point.credit) && point.credit > 0 ? point.credit : 0
+    totals.set(point.date, (totals.get(point.date) ?? 0) + credit)
+  }
+
+  const result: GrowthCreditDay[] = []
+  for (let index = 0; index < count; index += 1) {
+    const date = msDayKey(startMs + index * DAY_MS)
+    const credit = totals.get(date) ?? 0
+    result.push({ date, credit, active: credit > 0 })
+  }
+  return result
+}
+
+/**
  * 把当前范围内的积分发放按发放日相加，铺成最近 `days` 天的连续序列（旧→新）。
  *
  * - `now` 是当前时刻（Unix 秒），默认取本机时钟；窗口的最后一天是它按 UTC+8 的那一天；
@@ -102,32 +146,15 @@ export function dailyGrowthCredits(
   days: number = GROWTH_CREDIT_DAYS,
   now: number = Date.now() / 1000,
 ): GrowthCreditDay[] {
-  const count = Number.isFinite(days) && days > 0 ? Math.floor(days) : GROWTH_CREDIT_DAYS
-  const end = utc8DayKey(Number.isFinite(now) ? now : Date.now() / 1000)
-  const endMs = dayMs(end)
-  const startMs = endMs - (count - 1) * DAY_MS
-  const start = msDayKey(startMs)
-
-  const totals = new Map<string, number>()
+  const points: CreditDayPoint[] = []
   for (const source of sources) {
     for (const grant of source.grants) {
       if (!Number.isFinite(grant.createdAt) || grant.createdAt <= 0)
         continue
       if (!isGrowthPerk(grant))
         continue
-      const date = utc8DayKey(grant.createdAt)
-      if (date < start || date > end)
-        continue
-      const credit = Number.isFinite(grant.credit) && grant.credit > 0 ? grant.credit : 0
-      totals.set(date, (totals.get(date) ?? 0) + credit)
+      points.push({ date: utc8DayKey(grant.createdAt), credit: grant.credit })
     }
   }
-
-  const result: GrowthCreditDay[] = []
-  for (let index = 0; index < count; index += 1) {
-    const date = msDayKey(startMs + index * DAY_MS)
-    const credit = totals.get(date) ?? 0
-    result.push({ date, credit, active: credit > 0 })
-  }
-  return result
+  return dailyCreditSeries(points, days, now)
 }

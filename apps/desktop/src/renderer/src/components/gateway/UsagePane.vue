@@ -5,7 +5,7 @@ import { Bottom, CircleCheck, DataLine, Histogram, Timer, Top } from '@element-p
 import { gatewayBucketUnit, recentHourBuckets, summarizeGatewayRows } from '@workbench/usage'
 import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref } from 'vue'
 import EmptyState from '@/components/EmptyState.vue'
-import { gatewayAccountNames } from '@/workbench/gateway'
+import { gatewayAccountNames, gatewayUsageRows } from '@/workbench/gateway'
 import GatewayTable from './GatewayTable.vue'
 
 /**
@@ -24,8 +24,20 @@ import GatewayTable from './GatewayTable.vue'
  * 时间范围按**自然日**算（UTC+8 零点起）：`今日` = 今天 0 点到现在，`昨日` = 昨天一整天，
  * `近 3 天` = 今天加前两天。取回的行会盖住最近 24 小时（图要用），统计前按 `since` 再裁一次。
  *
- * 所有数字来自 Rust 的 `wb_gateway_usage`，这一页只做格式化。
+ * 所有数字来自 `usage_rows`（默认 `wb_gateway_usage_rows`，Qoder 页注入自己的命令），这一页只做格式化。
+ * 两边流水形状相同、汇总都走 `summarizeGatewayRows`，所以 TBuddy 与 Qoder 共用这一份：
+ * 改布局或口径时两个页面一起生效，别再给 Qoder 另抄一份。
  */
+
+/** 取数窗口：TBuddy 与 Qoder 的 `usage_rows` 同形（`since` + 行） */
+type UsageWindow = Awaited<ReturnType<typeof gatewayUsageRows>>
+
+const props = defineProps<{
+  /** 取数入口：默认走 TBuddy 网关；Qoder 页注入自己的命令 */
+  loadRows?: (days: number) => Promise<UsageWindow>
+  /** uid → 账号名：默认走 TBuddy 账号池；Qoder 页注入自己的账号名 */
+  loadNames?: () => Promise<Record<string, string>>
+}>()
 
 /** 一天的秒数：`since` 一定是自然日零点，加它正好是次日零点 */
 const DAY_SECONDS = 86_400
@@ -230,8 +242,10 @@ function nameOf(uid: string): string {
 
 function load(): void {
   const range = RANGES.find(item => item.value === rangeKey.value) ?? RANGES[0]
+  const fetchRows = props.loadRows ?? gatewayUsageRows
+  const fetchNames = props.loadNames ?? gatewayAccountNames
   loading.value = true
-  void window.workbench.gatewayUsageRows(range.days).then((result) => {
+  void fetchRows(range.days).then((result) => {
     if (result.ok && result.data) {
       // Rust 只取数：分组 / 分桶 / 比率的口径在 @workbench/usage。
       // 取回来的行盖住了最近 24 小时（图表要用），统计只算 `since` 之后的那一段；
@@ -255,7 +269,7 @@ function load(): void {
     loading.value = false
   })
   // 名字跟着刷新一起取：新登录的号在这一栏出现时，不该先看到一串数字
-  void gatewayAccountNames().then((map) => {
+  void fetchNames().then((map) => {
     names.value = map
   })
 }

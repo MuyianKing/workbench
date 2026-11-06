@@ -1131,6 +1131,10 @@ export interface WorkbenchApi {
   /** 选号优先级：1..=100，数大的先用 */
   gatewayAccountPriority: (uid: string, priority: number) => Promise<Result<null>>
   gatewayAccountDelete: (uid: string) => Promise<Result<null>>
+  /** 导出账号：返回一段含明文 token 的 JSON，交给用户自己保管（不进同步仓库） */
+  gatewayAccountsExport: () => Promise<Result<string>>
+  /** 导入账号；`overwrite=false` 时同 uid 跳过 */
+  gatewayAccountsImport: (payload: string, overwrite: boolean) => Promise<Result<import('./workbench/gateway').GatewayAccountImport>>
   /** 福利页：当前号的成长任务 + 汇总（`uid` 为空取第一个已启用的国内号） */
   gatewayTasks: (uid?: string) => Promise<Result<import('./workbench/gateway').GatewayTasksSnapshot>>
   /** 一键做任务领积分；`uid` 为空时跑全部已启用的国内账号 */
@@ -1147,6 +1151,42 @@ export interface WorkbenchApi {
   gatewayPerksAutoSet: (enabled: boolean) => Promise<Result<import('./workbench/gateway').GatewayPerksAutoConfig>>
   /** 按自然日与夜间窗口判断该不该跑；关着时不发请求 */
   gatewayPerksAutoRun: () => Promise<Result<import('./workbench/gateway').GatewayPerksAutoRun>>
+  /** Qoder（国内版反代）。端口与密钥与 TBuddy 共用，两个代理同时只能跑一个。 */
+  qoderStatus: () => Promise<Result<import('./workbench/qoder').QoderStatus>>
+  qoderStart: (port: number) => Promise<Result<number>>
+  qoderStop: () => Promise<Result<null>>
+  qoderAutoStartSet: (enabled: boolean) => Promise<Result<null>>
+  qoderAccounts: () => Promise<Result<import('./workbench/qoder').QoderAccount[]>>
+  qoderReload: () => Promise<Result<null>>
+  qoderLoginStart: () => Promise<Result<import('./workbench/qoder').QoderLoginStart>>
+  qoderLoginPoll: (loginState: string) => Promise<Result<import('./workbench/qoder').QoderLoginPoll>>
+  qoderCredits: (uid: string) => Promise<Result<import('./workbench/qoder').QoderCredits>>
+  qoderAccountSet: (uid: string, enabled: boolean) => Promise<Result<null>>
+  qoderAccountPriority: (uid: string, priority: number) => Promise<Result<null>>
+  qoderAccountDelete: (uid: string) => Promise<Result<null>>
+  /** 导出 Qoder 账号：返回一段含明文 token 的 JSON，交给用户自己保管 */
+  qoderAccountsExport: () => Promise<Result<string>>
+  /** 导入 Qoder 账号；`overwrite=false` 时同 uid 跳过 */
+  qoderAccountsImport: (payload: string, overwrite: boolean) => Promise<Result<import('./workbench/qoder').QoderAccountImport>>
+  qoderAccountNames: () => Promise<Result<Record<string, string>>>
+  qoderModels: () => Promise<Result<import('./workbench/qoder').QoderModelInfo[]>>
+  qoderModelsRefresh: () => Promise<Result<import('./workbench/qoder').QoderModelInfo[]>>
+  qoderAccess: () => Promise<Result<import('./workbench/qoder').QoderAccess>>
+  qoderRotateKey: () => Promise<Result<string>>
+  qoderUsage: (days: number) => Promise<Result<import('./workbench/gateway').GatewayUsageSummary>>
+  qoderUsageRows: (days: number) => Promise<Result<import('./workbench/qoder').QoderUsageWindow>>
+  qoderUsageRecent: (limit: number) => Promise<Result<import('./workbench/gateway').GatewayUsageRow[]>>
+  qoderPerksStatus: (uid?: string) => Promise<Result<import('./workbench/qoder').QoderTaskSnapshot[]>>
+  qoderCheckin: (uid: string) => Promise<Result<import('./workbench/qoder').QoderClaimResult>>
+  qoderClaimCampaigns: (uid: string) => Promise<Result<import('./workbench/qoder').QoderClaimResult>>
+  qoderCreditHeatmap: (uid: string) => Promise<Result<import('./workbench/qoder').QoderHeatmapPoint[]>>
+  qoderActivityToday: () => Promise<Result<import('./workbench/qoder').QoderActivityRow[]>>
+  qoderEarnings: (days: number) => Promise<Result<import('./workbench/qoder').QoderEarningPoint[]>>
+  qoderEarningsPublish: () => Promise<Result<unknown>>
+  qoderEarningsPull: () => Promise<Result<unknown>>
+  qoderPerksAutoConfig: () => Promise<Result<import('./workbench/qoder').QoderPerksAutoConfig>>
+  qoderPerksAutoSet: (enabled: boolean) => Promise<Result<import('./workbench/qoder').QoderPerksAutoConfig>>
+  qoderPerksAutoRun: () => Promise<Result<import('./workbench/qoder').QoderPerksAutoRun>>
   versions: { node: string, chrome: string }
   /**
    * 挑一个目录。
@@ -1219,6 +1259,16 @@ export interface WorkbenchApi {
    * 内容是上一次同步取回来的样子。地址没填时返回空数组。
    */
   listSyncDevices: () => Promise<Result<SyncDeviceInfo[]>>
+  /**
+   * ETF 缓存的多机复用：拉一次同步仓库，把别的机器推上来的份额 / 净值并进本机。
+   *
+   * 「一台机器跑完回填，其他机器直接复用」靠的就是它 —— 合并完再规划缺口，这一轮
+   * 就不会再向交易所要同样的数据（见 workbench/etf.ts 的 pullEtfCache）。
+   * 没登录 / 没填仓库地址时给 `enabled: false`，页面照旧只读本机。
+   */
+  etfSyncPull: () => Promise<Result<import('./workbench/etf').EtfSyncPullOutcome>>
+  /** 把本机 ETF 缓存写进 `etf/<设备id>.json` 并推送；内容没变时 git 那边不产生提交 */
+  etfSyncPublish: () => Promise<Result<null>>
   createGroup: (name: string) => Promise<Result<ProjectGroup>>
   renameGroup: (id: string, name: string) => Promise<Result<ProjectGroup>>
   removeGroup: (id: string) => Promise<Result<null>>

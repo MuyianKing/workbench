@@ -17,6 +17,7 @@ import * as aiNews from './ai-news'
 import * as auth from './auth'
 import { assetUrl, errorText, guard, hasTauri, invoke, listen, listenReady, notPorted } from './bridge'
 import * as design from './design'
+import * as etf from './etf'
 import { emit } from './events'
 import * as events from './events'
 import { gatewayApi, gatewayUsage, gatewayUsageRecent, gatewayUsageRows, pullGatewayUsage, syncGatewayUsage } from './gateway'
@@ -26,6 +27,7 @@ import * as nrm from './nrm'
 import * as nvm from './nvm'
 import * as orphan from './orphan'
 import * as piSkill from './pi-skill'
+import { publishQoderEarnings, pullQoderEarnings, qoderApi, qoderEarnings } from './qoder'
 import * as quick from './quick-launch'
 import * as scanner from './scanner'
 import * as session from './session'
@@ -227,6 +229,7 @@ function withCommand(
 function createApi(): WorkbenchApi {
   const implemented = {
     ...gatewayApi,
+    ...qoderApi,
     // 网关流水：仓库与设备 id 与 token 同步同一个门禁；空仓库时只读本机
     gatewayUsage: async (days: number) => {
       const { repo, device } = await gatewayContext()
@@ -250,6 +253,24 @@ function createApi(): WorkbenchApi {
     gatewayUsagePull: async () => {
       const { repo } = await gatewayContext()
       return pullGatewayUsage(repo)
+    },
+    // Qoder 领取账本：与 token 同步同一个仓库门禁；本机 activity.jsonl 是权威，
+    // 读的时候再并入别的设备推上来的分片。
+    qoderEarnings: async (days: number) => {
+      const { repo, device } = await gatewayContext()
+      return qoderEarnings(days, repo, device)
+    },
+    qoderEarningsPublish: async () => {
+      const { repo, device } = await gatewayContext()
+      if (!repo || !device)
+        return ok(null)
+      return publishQoderEarnings(repo, device)
+    },
+    qoderEarningsPull: async () => {
+      const { repo } = await gatewayContext()
+      if (!repo)
+        return ok(null)
+      return pullQoderEarnings(repo)
     },
     gatewaySyncStatus: async () => {
       const repo = syncRepo()
@@ -561,6 +582,29 @@ function createApi(): WorkbenchApi {
      * 与上面两个同理，地址从设置现取：用户刚填完就该看到新仓库里的机器。
      */
     listSyncDevices: () => listSyncDevices(syncRepo()),
+
+    /**
+     * ETF 缓存的多机复用：开同步时先把别的机器那份并进本机，刷新完再推回去。
+     * 仓库地址同样只在登录后取（`syncRepo`）；没同步可用时两个方法都直接给「未启用」。
+     */
+    etfSyncPull: async () => {
+      const repo = syncRepo()
+      if (!repo)
+        return ok({ enabled: false, own: false, changed: false })
+      const { id } = await localDevice()
+      if (!id)
+        return ok({ enabled: false, own: false, changed: false })
+      return guard(etf.pullEtfCache(repo, id), '同步 ETF 缓存失败')
+    },
+    etfSyncPublish: async () => {
+      const repo = syncRepo()
+      if (!repo)
+        return ok(null)
+      const { id } = await localDevice()
+      if (!id)
+        return ok(null)
+      return guard(etf.publishEtfCache(repo, id), '同步 ETF 缓存失败')
+    },
 
     // ---------- 设置与布局 ----------
     getSettings: () => Promise.resolve(state.settings()),
