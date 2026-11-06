@@ -715,8 +715,10 @@ fn is_login_url(url: &Url) -> bool {
         .unwrap_or(false)
 }
 
-/// 登录页的自动填写脚本：填账号密码，然后调页面自己的 `safeSubmit`。
+/// 登录页的自动填写脚本：填账号密码、勾上「保持登录」，然后调页面自己的 `safeSubmit`。
 ///
+/// **勾「保持登录」**：不勾只拿得到会话 cookie（`zentaosid` 没有 Max-Age），应用一重启就得再登一次；
+/// 勾上后禅道种 `za` / `zp` 两个 30 天 cookie（每次访问续期），重启后站点自己认回登录态。
 /// 不自己复刻「取 rand + md5」那套细节 —— 它随禅道版本变，复刻迟早分叉；
 /// 页面自己的提交逻辑走的就是人点「登录」那条路。脚本只在登录页注入。
 fn auto_login_script(account: &str, password: &str) -> String {
@@ -729,6 +731,9 @@ fn auto_login_script(account: &str, password: &str) -> String {
   if (!account || !password || typeof window.safeSubmit !== 'function') return;
   account.value = {account};
   password.value = {password};
+  // safeSubmit 提交时读这个复选框；勾上才会种 30 天的 za / zp
+  const keepLogin = document.querySelector('#keepLoginon');
+  if (keepLogin) keepLogin.checked = true;
   window.safeSubmit({{ preventDefault() {{}}, stopPropagation() {{}} }});
 }})();"#
     )
@@ -1360,6 +1365,9 @@ mod tests {
         assert!(script.contains(r#""p'\n\"w""#), "{script}");
         assert!(script.contains("document.querySelector('#account')"));
         assert!(script.contains("window.safeSubmit"));
+        // 「保持登录」要勾上，否则只剩会话 cookie，应用重启后还得再登一次
+        assert!(script.contains("document.querySelector('#keepLoginon')"));
+        assert!(script.contains("keepLogin.checked = true"));
     }
 
     #[test]
