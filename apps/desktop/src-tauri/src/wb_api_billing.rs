@@ -288,6 +288,7 @@ mod tests {
             source: "oauth".into(),
             enabled: true,
             weight: 1,
+            credit_expires_at: 0,
             note: String::new(),
             quota_exhausted_at: 0,
             quota_resets_at: 0,

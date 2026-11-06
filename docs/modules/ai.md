@@ -101,8 +101,9 @@ AI 助手（ai）的文档：先读「约束」一节（不能破的规矩）；
   **`typebox` / `pi-ai` / `pi-tui` / `pi-agent-core` / `chord` 也不留**：它们是「扩展里 import Pi SDK」
   时的 alias 目标，只有 `getAliases()` 被调到时才用得上，当前那份 permission.js 一个 import 都没有。
   树里只有一层（`npm pack` 直接解到 `node_modules/@earendil-works/pi-coding-agent`），不再有 npm
-  那种「整棵树嵌进自己的 `node_modules`」的嵌套。裁完 **12.8MB / 147 个文件**（进安装包压缩后约 2.3MB；
-  没裁之前那套 55.6MB 的树是 9.7MB，2026-10-22 实测），脚本末尾跑一次 `cli.js --version` 自检 ——
+  那种「整棵树嵌进自己的 `node_modules`」的嵌套。裁完 **13.5MB / 160 个文件**（Pi 1.5.0，2026-11-06
+  实测；整棵树 tar.gz 3.3MB。没裁之前那套 55.6MB 的树是 9.7MB —— 那一组是 1.0.4 时量的），
+  脚本末尾跑一次 `cli.js --version` 自检 ——
   裁错包时 Pi 往往还能启动，只检查文件存在拦不住。
   **加回条件**：哪天应用开始带会 import Pi SDK 的扩展，把那几个包名放回 `KEEP` 再重跑探针。
   **升级 Pi 或改裁剪规则** = 改版本常量 / `PRUNE_REVISION` + 重跑 `pnpm run vendor:pi` + 瘦身验证重做
@@ -216,10 +217,11 @@ AI 助手（ai）的文档：先读「约束」一节（不能破的规矩）；
   工具侧在事件 `result.content[].text`（`tool_execution_end` **没有 `error` 字段** —— 只认 error 会把
   「找不到 bash」「EISDIR」全显示成同一句兜底文案），多行只留第一句、全文进悬停。
   **有报错不能装顺利；顺利跑完不留状态行**。
-- **技能 = `--no-skills` + 逐条 `--skill`，两头合起来才成立**：Pi（1.0.4）有显式 `--skill <路径>`（可重复）与
+- **技能 = `--no-skills` + 逐条 `--skill`，两头合起来才成立**：Pi（1.5.0）有显式 `--skill <路径>`（可重复）与
   **自动发现**（`~/.agents/skills`、信任项目的 `.agents/skills`（还往上找）、`<agentDir>/skills`、`<cwd>/.pi/skills`、
   package 与扩展）。**自动发现必须关**（`-ns`），否则「关掉」是假的（实测只给 `--skill` 时 `~/.agents/skills`
-  仍在清单里，加 `-ns` 才只剩给出去的）。于是**应用那份表是唯一真源**：起进程先 `-ns`，再把开着的逐个
+  仍在清单里，加 `-ns` 才只剩给出去的；`get_commands` 里另会列 `llama` / `mcp` 两条内置命令，
+  它们不随技能表变，应用也不读这份清单）。于是**应用那份表是唯一真源**：起进程先 `-ns`，再把开着的逐个
   `--skill <目录>`（目录不存在跳过、按整条路径去重、上限 200）。代价：**用户在应用之外装给 Pi 的技能
   在应用的会话里看不见**，想用就在弹窗里装一份。`--skill` 认「一个目录 + SKILL.md」、不往里递归；
   项目技能**不依赖「项目被信任」**（显式路径总是加载）。

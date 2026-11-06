@@ -6,7 +6,8 @@
  * 源码映射、类型声明、`pi-coding-agent/dist` 里除 `bundle/` 之外的那几兆
  * （实际跑的是 `dist/bundle/cli.js` 这份自带全部提供方实现的 bundle）、文档配图 / 示例 /
  * CHANGELOG，以及云厂商 SDK、protobuf、google-auth、highlight.js、quickjs-wasi 这些整包。
- * 裁完 **12.8MB / 147 个文件**（固定压缩后进安装包约 2.3MB；没裁之前那套 55.6MB 的树是 9.7MB）。
+ * 裁完 **13.5MB / 160 个文件**（Pi 1.5.0，2026-11-06 实测；整棵树 tar.gz 3.3MB。没裁之前那套
+ * 55.6MB 的树是 9.7MB —— 那一组是 1.0.4 时量的）。
  *
  * 连「装什么」也一起省了：**不再 `npm install` 整棵树**（那等于把 108MB 下下来再删九成），
  * 改成 `npm pack` 只取 Pi 自己的 tarball、再装 `jiti` 与 `photon-node` 两个小包 ——
@@ -45,7 +46,7 @@ import { fileURLToPath } from 'node:url'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 /** 钉死的 Pi 版本；升级要连着 docs/dev-notes/pi-session-probe.md 的验证一起重做 */
-const PI_VERSION = '1.0.4'
+const PI_VERSION = '1.5.0'
 /**
  * 裁剪方案的版本号。**动了 KEEP 或下面那几条文件级规则就必须 +1**：
  * 跳过判据比的是 stamp 文件内容，对不上才会重装重裁。
@@ -53,10 +54,11 @@ const PI_VERSION = '1.0.4'
 const PRUNE_REVISION = '5'
 /**
  * 预填表的数据源版本：`@earendil-works/pi-ai` 里那份 models.dev 快照（`dist/providers/data`）。
- * 它只被 `npm pack` 下来读一次、生成完就删 —— **不进树**，也不用跟着 pi-coding-agent 的
- * `^1.0.4` 范围漂。**升级 Pi 时这个版本要一起看**（数据变了，预填表的内容就会变）。
+ * 它只被 `npm pack` 下来读一次、生成完就删 —— **不进树**。pi-coding-agent 从 1.3.0 起把
+ * 内部 Pi 包钉成精确版本（1.5.0），这里仍单独写死：**升级 Pi 时这个版本要一起看**
+ * （数据变了，预填表的内容就会变）。
  */
-const CATALOG_VERSION = '1.4.0'
+const CATALOG_VERSION = '1.5.0'
 /**
  * 树里除 Pi 本体之外真正需要的两个外部包。版本照 pi-coding-agent 自己 package.json 里钉的抄：
  * `jiti`（扩展加载器）与 `@silvia-odwyer/photon-node`（贴图缩放的 wasm）。
@@ -94,7 +96,8 @@ const CATALOG_TARGET = join(
 /**
  * 要留下的包（`node_modules/` 下的名字，`@scope/name` 与树里写法一致）。**清单外的一律删掉。**
  *
- * 判据只有一条：**运行时真的会加载**。这一版缩到三样（2026-10-22 逐包删掉跑探针验过）：
+ * 判据只有一条：**运行时真的会加载**。这一版缩到三样（2026-10-22 逐包删掉跑探针验过；
+ * 1.5.0 换版本后又整轮复验过，仍然只需要这三样，见 docs/dev-notes/pi-session-probe.md）：
  *
  *  - `@earendil-works/pi-coding-agent`：CLI 本体。只留 `dist/bundle/` —— 应用跑的是它自带的
  *    `cli.js`，提供方实现、typebox 之类都已经内联在 `dist/bundle/chunks` 里；其余 `dist/`
@@ -106,7 +109,8 @@ const CATALOG_TARGET = join(
  * **不再留 `typebox` / `pi-ai` / `pi-tui` / `pi-agent-core` / `chord`**：它们是「扩展里 import
  * Pi SDK」时的别名目标，只有 `getAliases()` 被调到时才用得上 —— 当前那份 permission.js
  * 一个 import 都没有，删掉之后 RPC 一轮、两种 API 形态、read/write/edit、`--skill` 全照旧
- * （2026-10-22 实测）。这五样加起来 4.4MB（压缩后约 1.1MB），为「以后可能写的扩展」付不划算。
+ * （2026-10-22 实测；1.5.0 复验同样全过，2026-11-06）。这五样加起来 4.4MB（压缩后约 1.1MB），
+ * 为「以后可能写的扩展」付不划算。
  * **加回条件**：哪天应用自己开始带会 import Pi SDK 的扩展，把对应的包名放回 KEEP 并重跑探针；
  * 只加 `typebox` 不够 —— `getAliases()` 里对 `pi-ai` / `pi-tui` / `pi-agent-core` 也会 resolve。
  *

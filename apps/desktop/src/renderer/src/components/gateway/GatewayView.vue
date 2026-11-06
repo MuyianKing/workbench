@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { GatewayAccess, GatewayAccount, GatewayCredits, GatewayStatus, GatewayUsageSummary } from '@/workbench/gateway'
 import { CircleCheck, CircleClose, Clock, Coin, Connection, Plus, User, Warning } from '@element-plus/icons-vue'
-import { gatewayBucketUnit, summarizeGatewayRows } from '@workbench/usage'
+import { creditExpiry, creditExpiryDate, gatewayBucketUnit, soonestExpiry, summarizeGatewayRows } from '@workbench/usage'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { computed, onActivated, onBeforeUnmount, onMounted, ref } from 'vue'
 import EmptyState from '@/components/EmptyState.vue'
@@ -122,6 +122,30 @@ function remainPercent(value: GatewayCredits): number {
 
 function number(value: number): string {
   return Number.isInteger(value) ? String(value) : value.toFixed(2)
+}
+
+/**
+ * 账号卡行尾那枚临期天数：取还花得出去、到期最近的那个包。
+ *
+ * 卡上只答一个问题 —— 这个号该先花哪一批；逐包的到期在弹层里。
+ * 无期限 / 到期未知 / 已过期 / 已花光都不占位（与弹层那些灰档同一口径：不催动作）。
+ * 天数按 UTC+8 自然日（`creditExpiry`），所以和弹层里同一个包的标签一致。
+ * 每次都按当前时刻重算，不读快照里的 `earliestExpiring` —— 后者是查询那一刻算的。
+ */
+function expiryHint(account: GatewayAccount): { text: string, title: string } | null {
+  const snapshot = credits.value[account.uid]
+  if (!snapshot)
+    return null
+  const now = Math.floor(Date.now() / 1000)
+  const pack = soonestExpiry(snapshot.packages, now)
+  if (!pack || pack.expiresAt === null)
+    return null
+  const verdict = creditExpiry(pack, now, { enterprise: snapshot.enterprise })
+  const days = verdict.days ?? 0
+  return {
+    text: verdict.tier === 'today' ? '今日到期' : `${days} 天后到期`,
+    title: `最早到期：${pack.name} 还剩 ${number(pack.remain)}，${creditExpiryDate(pack.expiresAt)} 作废`,
+  }
 }
 
 function compact(value: number): string {
@@ -684,8 +708,15 @@ onBeforeUnmount(() => {
                 <template v-if="credits[account.uid]">
                   <span class="gw__num">{{ number(credits[account.uid]!.remain) }}</span>
                   <span class="gw__dim">/ {{ number(credits[account.uid]!.size) }}</span>
-                  <span v-if="credits[account.uid]!.size > 0" class="gw__used">
-                    已用 <span class="gw__used-num">{{ number(Math.max(0, credits[account.uid]!.size - credits[account.uid]!.remain)) }}</span>
+                  <span v-if="credits[account.uid]!.size > 0 || expiryHint(account)" class="gw__aside">
+                    <span v-if="credits[account.uid]!.size > 0" class="gw__used">
+                      已用 <span class="gw__used-num">{{ number(Math.max(0, credits[account.uid]!.size - credits[account.uid]!.remain)) }}</span>
+                    </span>
+                    <span
+                      v-if="expiryHint(account)"
+                      class="gw__expiry"
+                      :title="expiryHint(account)!.title"
+                    >{{ expiryHint(account)!.text }}</span>
                   </span>
                 </template>
                 <span v-else class="gw__dim">未查询</span>
@@ -1249,17 +1280,33 @@ onBeforeUnmount(() => {
   font-variant-numeric: tabular-nums;
 }
 
-/* 已用量贴着行尾：剩多少、用了多少在同一行读完 */
-.gw__used {
+/* 已用量与临期天数一起贴着行尾：剩多少、用了多少、哪天作废在同一行读完 */
+.gw__aside {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
   margin-left: auto;
+}
+
+.gw__used {
   font-size: var(--gw-fs-micro);
   color: var(--ink-3);
+  white-space: nowrap;
 }
 
 .gw__used-num {
   font-family: var(--font-mono);
   font-weight: 600;
   color: var(--ink-2);
+}
+
+/* 临期天数：与「已用」用一条细竖线隔开 —— 一个是已经发生的，一个是接下来要来的 */
+.gw__expiry {
+  padding-left: var(--sp-2);
+  border-left: 1px solid var(--border);
+  font-size: var(--gw-fs-micro);
+  color: var(--ink-3);
+  white-space: nowrap;
 }
 
 .gw__num {

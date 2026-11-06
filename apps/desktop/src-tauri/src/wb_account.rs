@@ -82,6 +82,12 @@ pub struct Account {
     /// 手动权重，1..=100。多号轮转时的优先级（数大的先用）
     #[serde(default = "default_weight")]
     pub weight: u8,
+    /// 最早一笔积分包的到期时刻（Unix 秒）。0 = 没有已知到期（无期限 / 没查过 / 已过期）
+    ///
+    /// 查余额时写回（`wb_gateway_credits`），选号时当**第一关键字**：
+    /// 谁家的流量先作废就先花谁家的。它是派生数据，不是用户配置。
+    #[serde(default)]
+    pub credit_expires_at: i64,
     #[serde(default)]
     pub note: String,
     /// 额度用完的时刻（Unix 秒）。0 = 没标记
@@ -124,6 +130,7 @@ impl Account {
             source: "oauth".to_string(),
             enabled: true,
             weight: 1,
+            credit_expires_at: 0,
             note: String::new(),
             quota_exhausted_at: 0,
             quota_resets_at: 0,
@@ -412,6 +419,7 @@ mod tests {
             source: "oauth".into(),
             enabled: true,
             weight: 1,
+            credit_expires_at: 0,
             note: String::new(),
             quota_exhausted_at: 0,
             quota_resets_at: 0,

@@ -72,6 +72,35 @@ export function creditExpiry(
   return { tier: 'far', hint: `剩 ${days} 天`, days }
 }
 
+/** 判「最早到期」只需要这三样（`GatewayPackage` 的一个子集） */
+export interface SoonestExpiryInput extends CreditExpiryInput {
+  /** 包还剩多少；花光的包没有「什么时候作废」可言 */
+  remain: number
+}
+
+/**
+ * 还花得出去、到期最近的包 —— 账号卡行尾只放得下一个天数，取它。
+ *
+ * 已过期、无期限、到期时间未知与已花光的包都不参与：它们没有「即将过期」可言，
+ * 不该在卡上占一个位置。比较的是**绝对时刻**（同一自然日到期的两个包也要挑更早的），
+ * 天数仍交给 `creditExpiry` 按 UTC+8 自然日算 —— 两边口径不混。
+ */
+export function soonestExpiry<T extends SoonestExpiryInput>(
+  packages: readonly T[],
+  now: number,
+): T | null {
+  let soonest: T | null = null
+  let soonestAt = Number.POSITIVE_INFINITY
+  for (const item of packages) {
+    const at = item.expiresAt
+    if (item.remain <= 0 || item.noExpiry || at === null || at <= now || at >= soonestAt)
+      continue
+    soonest = item
+    soonestAt = at
+  }
+  return soonest
+}
+
 /** 包上的 Unix 秒 → UTC+8 日期键（`YYYY-MM-DD`），弹层里那列日期用它 */
 export function creditExpiryDate(ts: number): string {
   const date = new Date(ts * 1000 + 8 * HOUR_MS)

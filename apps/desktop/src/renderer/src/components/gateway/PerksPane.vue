@@ -3,6 +3,7 @@ import type {
   GatewayAccount,
   GatewayActionResult,
   GatewayActivityRow,
+  GatewayCheckinStatus,
   GatewayCredits,
   GatewayGrantAccount,
   GatewayGrowthSummary,
@@ -30,7 +31,7 @@ import PerksCreditsChart from './PerksCreditsChart.vue'
  * 任务福利栏。
  *
  * 口径来自 workbuddy2api-hub 的「任务与福利」页：成长任务 / 签到 / 猫猫旅行 /
- * 连登管家，外加近一个月的积分柱状图（积分包流水）。与参考项目的差别只有
+ * 成长连登，外加近一个月的积分柱状图（积分包流水）。与参考项目的差别只有
  * 「什么时候去要数据」——手动动作只在**进这一栏、切账号、点按钮**时取一次；
  * 自动跑由设置·通用里的「福利每天自动」控制（默认关，见 stores/perks-auto.ts），
  * 打开后才是启动补跑 + 每十分钟问一次该不该跑，夜猫子另有 23:00–08:00 的夜间轮。
@@ -54,6 +55,7 @@ const selected = ref('all')
 const taskAccounts = ref<GatewayTaskAccount[]>([])
 const tasks = ref<GatewayGrowthTask[]>([])
 const summary = ref<GatewayGrowthSummary>(emptySummary())
+const checkin = ref<GatewayCheckinStatus>(emptyCheckin())
 const activity = ref<GatewayActivityRow[]>([])
 const taskLoading = ref(false)
 const running = ref<ActionKind | ''>('')
@@ -68,9 +70,23 @@ function emptySummary(): GatewayGrowthSummary {
   return {
     energy: 0,
     streakDays: 0,
+    nextTierRemaining: 0,
     makeupCards: 0,
     lotteryChances: 0,
     travel: { state: 'unknown', dailyLimitReached: false, rewardCredit: 0 },
+  }
+}
+
+function emptyCheckin(): GatewayCheckinStatus {
+  return {
+    active: false,
+    checkedInToday: false,
+    currentStreak: 0,
+    seasonDays: 0,
+    weekDays: 0,
+    todayCredit: 0,
+    totalCredits: 0,
+    activityName: '',
   }
 }
 
@@ -122,6 +138,15 @@ const catState = computed(() => {
   if (travel.state === 'idle')
     return { text: '在家待命', tone: 'is-ok' }
   return { text: '未知', tone: 'is-muted' }
+})
+
+/** 成长连登的提示：它和 Buddy 签到连签是两套账，别混成一个数 */
+const streakHint = computed(() => {
+  const days = summary.value.streakDays
+  const remain = summary.value.nextTierRemaining
+  if (remain > 0)
+    return `成长连登 ${days} 天 · 距下一档还差 ${remain} 天`
+  return `成长连登 ${days} 天`
 })
 
 /** 福利积分：与柱状图同一条口径（发放来源 / 包名 / 发放原因，见 @workbench/usage） */
@@ -243,6 +268,7 @@ async function loadTasks(): Promise<void> {
     taskAccounts.value = []
     tasks.value = []
     summary.value = emptySummary()
+    checkin.value = emptyCheckin()
     loaded.value = true
     return
   }
@@ -256,6 +282,7 @@ async function loadTasks(): Promise<void> {
     taskAccounts.value = result.data.accounts
     tasks.value = result.data.tasks
     summary.value = result.data.summary
+    checkin.value = result.data.checkin
     // 选中的号被删 / 停用后回到「全部」，下次取数不会空转
     if (selected.value !== 'all' && !result.data.accounts.some(item => item.uid === selected.value))
       selected.value = 'all'
@@ -373,14 +400,16 @@ onMounted(() => {
           >
             猫猫旅行
           </el-button>
-          <el-button
-            size="small"
-            :disabled="busy || !accounts.length"
-            :loading="running === 'streak'"
-            @click="runAction('streak')"
-          >
-            连登管家与抽奖
-          </el-button>
+          <el-tooltip :content="streakHint" placement="top">
+            <el-button
+              size="small"
+              :disabled="busy || !accounts.length"
+              :loading="running === 'streak'"
+              @click="runAction('streak')"
+            >
+              成长连登与抽奖
+            </el-button>
+          </el-tooltip>
         </div>
       </header>
 
@@ -394,13 +423,13 @@ onMounted(() => {
             <span class="perks__value" :class="cnCheckinTone">{{ cnCheckinText }}</span>
           </div>
         </div>
-        <div class="perks__cell is-streak">
+        <div class="perks__cell is-streak" title="当前汇总账号的 Buddy 加油站签到；成长连登另计">
           <span class="perks__icon">
             <el-icon><Trophy /></el-icon>
           </span>
           <div class="perks__cell-body">
-            <span class="perks__label">当前连续登录天数</span>
-            <span class="perks__value">{{ summary.streakDays }} 天</span>
+            <span class="perks__label">Buddy 签到连签</span>
+            <span class="perks__value">{{ checkin.currentStreak }} 天</span>
           </div>
         </div>
         <div class="perks__cell is-muted">
@@ -408,7 +437,7 @@ onMounted(() => {
             <el-icon><Ticket /></el-icon>
           </span>
           <div class="perks__cell-body">
-            <span class="perks__label">补签卡余额</span>
+            <span class="perks__label">成长补签卡</span>
             <span class="perks__value">{{ summary.makeupCards }} 张</span>
           </div>
         </div>

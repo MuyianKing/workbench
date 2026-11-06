@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { creditExpiry, creditExpiryDate } from './credit-expiry'
+import { creditExpiry, creditExpiryDate, soonestExpiry } from './credit-expiry'
 
 /** `2026-11-03 10:00` 这种 UTC+8 墙钟 → Unix 秒 */
 function utc8(text: string): number {
@@ -49,6 +49,39 @@ describe('creditExpiry', () => {
     expect(tier('2026-11-09 10:00')).toBe('d10') // 6 天
     expect(tier('2026-11-13 10:00')).toBe('d10') // 10 天
     expect(tier('2026-11-14 10:00')).toBe('far') // 11 天
+  })
+})
+
+describe('soonestExpiry', () => {
+  /** 一个还有剩余的包，默认到期与档位都不重要 */
+  function pack(over: Partial<{ expiresAt: number | null, noExpiry: boolean, remain: number }> = {}) {
+    return { expiresAt: utc8('2026-11-06 10:00'), noExpiry: false, remain: 10, ...over }
+  }
+
+  it('取还有剩余、到期最近的那个', () => {
+    const near = pack({ expiresAt: utc8('2026-11-05 10:00') })
+    const far = pack({ expiresAt: utc8('2026-12-01 10:00') })
+    expect(soonestExpiry([far, near], NOW)).toBe(near)
+    // 不看数组顺序
+    expect(soonestExpiry([near, far], NOW)).toBe(near)
+  })
+
+  it('花光 / 无期限 / 到期未知 / 已过期的包都不参与', () => {
+    const ok = pack({ expiresAt: utc8('2026-11-07 10:00') })
+    const ignored = [
+      pack({ expiresAt: utc8('2026-11-04 10:00'), remain: 0 }),
+      pack({ expiresAt: utc8('2026-11-05 10:00'), noExpiry: true }),
+      pack({ expiresAt: null, noExpiry: false }),
+      pack({ expiresAt: NOW - 1 }),
+    ]
+    expect(soonestExpiry([...ignored, ok], NOW)).toBe(ok)
+    expect(soonestExpiry(ignored, NOW)).toBeNull()
+  })
+
+  it('同一自然日也要挑绝对时刻更早的那个', () => {
+    const morning = pack({ expiresAt: utc8('2026-11-05 08:00') })
+    const night = pack({ expiresAt: utc8('2026-11-05 23:00') })
+    expect(soonestExpiry([night, morning], NOW)).toBe(morning)
   })
 })
 

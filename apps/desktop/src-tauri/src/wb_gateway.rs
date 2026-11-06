@@ -471,9 +471,15 @@ pub fn wb_gateway_credits(
         quota_changed = account.clear_quota();
     }
 
+    // 选号的第一关键字（`wb_pool`）：落地「最早一笔快作废的流量」到什么时刻。
+    // 它跟着这次查询刷新，用户没查过余额的号保持旧值 / 0，按「没有紧迫的包」处理。
+    let expiry = crate::wb_credits::earliest_expiry(&credits, now);
+    let expiry_changed = account.credit_expires_at != expiry;
+    account.credit_expires_at = expiry;
+
     // 只把这次真的动过的字段写回内存里那一份：查询期间用户可能改过优先级 / 启停，
     // 拿整份快照覆盖会把那些改动一起冲掉。
-    if renewed || quota_changed {
+    if renewed || quota_changed || expiry_changed {
         let mut inner = state.lock()?;
         if let Some(slot) = inner.accounts.iter_mut().find(|item| item.uid == uid) {
             if renewed {
@@ -487,6 +493,9 @@ pub fn wb_gateway_credits(
             if quota_changed {
                 slot.quota_exhausted_at = account.quota_exhausted_at;
                 slot.quota_resets_at = account.quota_resets_at;
+            }
+            if expiry_changed {
+                slot.credit_expires_at = expiry;
             }
             slot.save(&crate::paths::gateway_accounts_dir())?;
         }
@@ -723,6 +732,8 @@ pub struct TaskAccount {
 pub struct TasksSnapshot {
     pub tasks: Vec<crate::wb_tasks::GrowthTask>,
     pub summary: crate::wb_tasks::GrowthSummary,
+    /// Buddy 加油站的签到状态（真实连签 / 赛季累计 / 今日是否已签）
+    pub checkin: crate::wb_tasks::CheckinStatus,
     /// 这份快照属于哪个号；没有国内账号时是空串
     pub account: String,
     pub accounts: Vec<TaskAccount>,
@@ -749,7 +760,7 @@ pub struct GrantAccount {
     pub error: String,
 }
 
-/// 签到 / 每日活跃 / 猫猫旅行 / 连登管家：每个号一条结果。
+/// 签到 / 每日活跃 / 猫猫旅行 / 成长连登：每个号一条结果。
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ActionResult {
@@ -820,6 +831,7 @@ pub fn wb_gateway_tasks(
         return Ok(TasksSnapshot {
             tasks: Vec::new(),
             summary: Default::default(),
+            checkin: Default::default(),
             account: String::new(),
             accounts: Vec::new(),
             msg: "未找到可用的账号".into(),
@@ -847,15 +859,20 @@ pub fn wb_gateway_tasks(
     }
 
     let tasks = crate::wb_tasks::fetch_growth_tasks(&target)?;
-    // 汇总要打四五次上游，和任务清单并行：这一栏等的是「两块都到齐」，
-    // 串着来就是白白多等一倍。
+    // 汇总要打四五次上游、签到状态也要一次 POST，都和任务清单并行：这一栏等的是
+    // 「几块都到齐」，串着来就是白白多等一倍。
     let summary_account = target.clone();
-    let summary = std::thread::spawn(move || crate::wb_tasks::fetch_growth_summary(&summary_account))
-        .join()
-        .unwrap_or_default();
+    let checkin_account = target.clone();
+    let summary_handle =
+        std::thread::spawn(move || crate::wb_tasks::fetch_growth_summary(&summary_account));
+    let checkin_handle =
+        std::thread::spawn(move || crate::wb_tasks::checkin_status(&checkin_account));
+    let summary = summary_handle.join().unwrap_or_default();
+    let checkin = checkin_handle.join().ok().flatten().unwrap_or_default();
     Ok(TasksSnapshot {
         tasks,
         summary,
+        checkin,
         account: target.uid,
         accounts,
         msg: String::new(),
@@ -994,7 +1011,7 @@ pub fn wb_gateway_tasks_travel(
     Ok(results)
 }
 
-/// 连登管家与抽奖：补签 → 礼包 / 补偿 → 档位兑换 → 抽奖。
+/// 成长连登与抽奖：补签 → 礼包 / 补偿 → 档位兑换 → 抽奖。
 #[tauri::command(async)]
 pub fn wb_gateway_tasks_streak(
     state: tauri::State<'_, Gateway>,
@@ -1144,7 +1161,17 @@ pub fn wb_gateway_perks_auto_run(
             report.ran = true;
             report.accounts += 1;
 
-            if signed_today.iter().any(|item| item == &uid) {
+            // 服务端签到状态优先：官方客户端 / 另一台机器签过也能认出来，不重复请求；
+            // 查不到再回退本地 activity.jsonl。
+            let status = crate::wb_tasks::checkin_status(&account);
+            let checked_in = status.as_ref().map_or_else(
+                || signed_today.iter().any(|item| item == &uid),
+                |item| item.checked_in_today,
+            );
+            let active = status.as_ref().map_or(true, |item| item.active);
+            if !active {
+                notes.push(format!("{nickname} 签到活动未开启"));
+            } else if checked_in {
                 report.checkin += 1;
             } else {
                 let outcome = crate::wb_tasks::checkin(&account);
@@ -1428,6 +1455,7 @@ mod tests {
             source: "oauth".into(),
             enabled: true,
             weight: 1,
+            credit_expires_at: 0,
             note: String::new(),
             quota_exhausted_at: 0,
             quota_resets_at: 0,

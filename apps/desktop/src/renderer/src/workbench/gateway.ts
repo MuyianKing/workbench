@@ -543,9 +543,25 @@ export interface GatewayTravelState {
 export interface GatewayGrowthSummary {
   energy: number
   streakDays: number
+  /** 成长连登 7d 档还差几天 */
+  nextTierRemaining: number
   makeupCards: number
   lotteryChances: number
   travel: GatewayTravelState
+}
+
+/** Buddy 加油站签到状态（服务端 `checkin-activity-status`） */
+export interface GatewayCheckinStatus {
+  active: boolean
+  checkedInToday: boolean
+  /** 当前连续签到天数（从 checkin_dates 算；不是赛季累计） */
+  currentStreak: number
+  /** 本赛季累计签到天数（上游 `streak_days` 原值） */
+  seasonDays: number
+  weekDays: number
+  todayCredit: number
+  totalCredits: number
+  activityName: string
 }
 
 /** 福利页顶上的账号选项 */
@@ -558,6 +574,8 @@ export interface GatewayTaskAccount {
 export interface GatewayTasksSnapshot {
   tasks: GatewayGrowthTask[]
   summary: GatewayGrowthSummary
+  /** Buddy 加油站的签到状态（当前汇总账号） */
+  checkin: GatewayCheckinStatus
   /** 这份快照属于哪个号；没有可用账号时是空串 */
   account: string
   accounts: GatewayTaskAccount[]
@@ -571,7 +589,7 @@ export interface GatewayTaskRun {
   creditAdded: number
 }
 
-/** 签到 / 每日活跃 / 猫猫旅行 / 连登管家：每个号一条 */
+/** 签到 / 每日活跃 / 猫猫旅行 / 成长连登：每个号一条 */
 export interface GatewayActionResult {
   uid: string
   nickname: string
@@ -638,7 +656,7 @@ export function gatewayTasksTravel(uid?: string): Promise<Result<GatewayActionRe
 }
 
 export function gatewayTasksStreak(uid?: string): Promise<Result<GatewayActionResult[]>> {
-  return call('wb_gateway_tasks_streak', { uid: uid ?? null }, '连登管家失败')
+  return call('wb_gateway_tasks_streak', { uid: uid ?? null }, '成长连登失败')
 }
 
 /** Buddy 加油站签到 */

@@ -1,4 +1,4 @@
-//! 任务福利：成长任务 / 每日签到 / 连登管家 / 猫猫旅行。
+//! 任务福利：成长任务 / 每日签到 / 成长连登 / 猫猫旅行。
 //!
 //! 口径来自 workbuddy2api-hub 的 `wb_tasks.py` + `wb_activity.py`，
 //! 这里只做两件事上的收敛：
@@ -18,6 +18,7 @@
 //! - 夜猫子任务只在 23:00–08:00 上报才计数，每天一次、累计三天；
 //! - 未接取的任务上报不计进度，所以先接取、再复核、再不成就跳过。
 
+use std::collections::HashSet;
 use std::io::Write;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -43,8 +44,8 @@ const STREAK_PATH: &str = "/activity/growth/streak";
 const HEATMAP_PATH: &str = "/activity/growth/heatmap";
 const MAKEUP_USE_PATH: &str = "/activity/growth/makeup-cards/use";
 const REDEEM_PATH: &str = "/activity/growth/redeem";
-const LOTTERY_SUMMARY_PATH: &str = "/activity/growth/lottery/summary";
-const LOTTERY_DRAW_PATH: &str = "/activity/growth/lottery/draw";
+const LOTTERY_CHANCES_PATH: &str = "/v2/activity/growth/lottery/chances";
+const LOTTERY_DRAW_PATH: &str = "/v2/activity/growth/lottery/draw";
 const TRAVEL_STATUS_PATH: &str = "/activity/growth/buddy/travel/status";
 const TRAVEL_CONFIG_PATH: &str = "/activity/growth/buddy/travel/config";
 const TRAVEL_DEPART_PATH: &str = "/activity/growth/buddy/travel/depart";
@@ -53,6 +54,8 @@ const BUDDY_QUOTA_PATH: &str = "/v2/activity/growth/buddy/quota";
 const BUDDY_OPEN_PATH: &str = "/v2/activity/growth/buddy/open";
 const REPORT_PATH: &str = "/v2/report";
 const CHECKIN_PATH: &str = "/v2/billing/meter/daily-checkin";
+/// 签到状态（只读 POST）：返回今天签没签、本赛季累计天数与逐日签到记录。
+const CHECKIN_STATUS_PATH: &str = "/v2/billing/meter/checkin-activity-status";
 /// 夜猫子任务：只在 23:00–08:00 上报计数，每天一次、累计三天。
 const NIGHT_TASK: &str = "black_cat";
 const GIFT_PATH: &str = "/billing/meter/claim-gift";
@@ -263,9 +266,28 @@ pub struct TravelState {
 pub struct GrowthSummary {
     pub energy: i64,
     pub streak_days: i64,
+    /// 成长连登 7d 档还差几天（上游 `streak.next_tier_remaining`）
+    pub next_tier_remaining: i64,
     pub makeup_cards: i64,
     pub lottery_chances: i64,
     pub travel: TravelState,
+}
+
+/// Buddy 加油站签到状态（计费域 `checkin-activity-status`）。
+///
+/// 上游 `streak_days` 是**本赛季累计签到天数**，不是当前连签；`current_streak`
+/// 才是从 `checkin_dates` 里算出来的当前连续段。两个数都给界面，别混用。
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CheckinStatus {
+    pub active: bool,
+    pub checked_in_today: bool,
+    pub current_streak: i64,
+    pub season_days: i64,
+    pub week_days: i64,
+    pub today_credit: i64,
+    pub total_credits: i64,
+    pub activity_name: String,
 }
 
 /// 一次成长任务的执行结果。
@@ -290,7 +312,7 @@ pub struct TravelOutcome {
     pub credit: i64,
 }
 
-/// 连登管家与抽奖的结果。
+/// 成长连登与抽奖的结果。
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct StreakOutcome {
@@ -559,14 +581,16 @@ pub fn fetch_growth_summary(account: &Account) -> GrowthSummary {
 
     if let Ok(value) = chat_get(account, STREAK_PATH) {
         let data = data(&value);
-        summary.streak_days = int_at(data.get("streak").unwrap_or(&Value::Null), "days");
+        let streak = data.get("streak").unwrap_or(&Value::Null);
+        summary.streak_days = int_at(streak, "days");
+        summary.next_tier_remaining = int_at(streak, "next_tier_remaining");
         summary.makeup_cards = int_at(data.get("makeup_cards").unwrap_or(&Value::Null), "balance");
     } else {
         eprintln!("[workbench] 查询连续打卡失败");
     }
 
-    if let Ok(value) = chat_get(account, LOTTERY_SUMMARY_PATH) {
-        summary.lottery_chances = int_at(data(&value), "chances");
+    if let Ok(value) = chat_get(account, LOTTERY_CHANCES_PATH) {
+        summary.lottery_chances = int_at(data(&value), "balance");
     } else {
         eprintln!("[workbench] 查询抽奖次数失败");
     }
@@ -577,6 +601,81 @@ pub fn fetch_growth_summary(account: &Account) -> GrowthSummary {
         eprintln!("[workbench] 查询猫猫旅行状态失败");
     }
     summary
+}
+
+/// 读 Buddy 加油站的签到状态。失败返回 None：调用方回退到本地 activity 记录。
+pub fn checkin_status(account: &Account) -> Option<CheckinStatus> {
+    if is_enterprise(account) {
+        return None;
+    }
+    let value = billing_post(account, CHECKIN_STATUS_PATH, &json!({})).ok()?;
+    if value.get("code").and_then(Value::as_i64) != Some(0) {
+        return None;
+    }
+    let data = data(&value);
+    let dates: Vec<String> = data
+        .get("checkin_dates")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default();
+    Some(CheckinStatus {
+        active: data.get("active").and_then(Value::as_bool).unwrap_or(true),
+        checked_in_today: data
+            .get("today_checked_in")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        current_streak: current_checkin_streak(&dates, &local_date()),
+        season_days: int_at(data, "streak_days"),
+        week_days: int_at(data, "week_checkin_days"),
+        today_credit: int_at(data, "today_credit"),
+        total_credits: int_at(data, "total_credits"),
+        activity_name: text_at(data, "activity_name"),
+    })
+}
+
+/// 从服务端给的签到日期算当前连签：最近一次必须落在今天或昨天，再向前数连续自然日。
+/// 上游 `streak_days` 是本赛季累计，不能直接当连签。
+fn current_checkin_streak(dates: &[String], today: &str) -> i64 {
+    let Some(today_days) = date_days(today) else {
+        return 0;
+    };
+    let mut days: Vec<i64> = dates.iter().filter_map(|value| date_days(value)).collect();
+    days.sort_unstable();
+    days.dedup();
+    let Some(&last) = days.last() else {
+        return 0;
+    };
+    if last < today_days - 1 {
+        return 0;
+    }
+    let mut streak = 1;
+    let mut expected = last - 1;
+    for &day in days.iter().rev().skip(1) {
+        if day != expected {
+            break;
+        }
+        streak += 1;
+        expected -= 1;
+    }
+    streak
+}
+
+/// `YYYY-MM-DD` → 距 1970-01-01 的天数。格式不对返回 None，不猜。
+fn date_days(value: &str) -> Option<i64> {
+    let mut parts = value.trim().split('-');
+    let year = parts.next()?.parse::<i64>().ok()?;
+    let month = parts.next()?.parse::<i64>().ok()?;
+    let day = parts.next()?.parse::<i64>().ok()?;
+    if parts.next().is_some() || !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+        return None;
+    }
+    Some(days_from_civil(year, month, day))
 }
 
 fn travel_from(value: &Value) -> TravelState {
@@ -1567,7 +1666,56 @@ fn ensure_buddy(account: &Account, gap: f64) -> bool {
         .unwrap_or(false)
 }
 
-/// 连登管家：补签保连登 → 礼包 / 补偿 → 7d/14d/28d 档位兑换 → 抽奖。
+/// 每轮最多补一张：补签会改变连登天数，剩下的留给下一轮，写操作也不重试。
+const MAKEUP_MAX_PER_RUN: usize = 1;
+
+/// 补签卡余额，兼容 `{"balance":2}` 与裸数字 `2` 两种形状。
+fn makeup_card_count(value: &Value) -> i64 {
+    value
+        .get("balance")
+        .and_then(Value::as_i64)
+        .or_else(|| value.as_i64())
+        .unwrap_or(0)
+}
+
+/// 从服务端活跃日历里挑可补签的日期：当月、今天之前、活动上线之后、score = 0、
+/// 不在 `makeup_dates` 里；最近的断点优先。`today` 用热力墙的服务端日期，避免本机时区
+/// 把月初 / 午夜算错。结构不对就返回空，不拿猜测去消耗补签卡。
+fn makeup_candidates(
+    today: &str,
+    launch: &str,
+    made_up: &[String],
+    cells: &[(String, i64)],
+) -> Vec<String> {
+    let Some(today_days) = date_days(today) else {
+        return Vec::new();
+    };
+    let Some(launch_days) = date_days(launch) else {
+        return Vec::new();
+    };
+    let (year, month, _) = civil_from_days(today_days);
+    let start = days_from_civil(year, month, 1)
+        .max(launch_days)
+        .max(days_from_civil(2026, 6, 17));
+    let made_up: HashSet<i64> = made_up.iter().filter_map(|value| date_days(value)).collect();
+    let mut days: Vec<i64> = cells
+        .iter()
+        .filter(|(_, score)| *score == 0)
+        .filter_map(|(date, _)| date_days(date))
+        .filter(|day| *day >= start && *day < today_days && !made_up.contains(day))
+        .collect();
+    days.sort_unstable();
+    days.dedup();
+    days.into_iter()
+        .rev()
+        .map(|day| {
+            let (year, month, day) = civil_from_days(day);
+            format!("{year:04}-{month:02}-{day:02}")
+        })
+        .collect()
+}
+
+/// 成长连登：补签保连登 → 礼包 / 补偿 → 7d/14d/28d 档位兑换 → 抽奖。
 /// 未解锁 / 已领 / 无次数 / 企业版一律安全跳过。
 pub fn run_streak_bonus(account: &Account) -> StreakOutcome {
     if !account.enterprise_id.trim().is_empty() {
@@ -1580,35 +1728,80 @@ pub fn run_streak_bonus(account: &Account) -> StreakOutcome {
 
     let mut logs: Vec<String> = Vec::new();
 
-    // 0. 昨日漏签 -> 用补签卡补上
-    if let Ok(value) = chat_get(account, HEATMAP_PATH) {
-        let yesterday = local_date_offset(-1);
-        let missed = data(&value)
-            .get("cells")
-            .and_then(Value::as_array)
-            .and_then(|items| items.iter().find(|cell| text_at(cell, "date") == yesterday))
-            .map(|cell| int_at(cell, "score") == 0)
-            .unwrap_or(false);
-        if missed {
-            if let Ok(streak) = chat_get(account, STREAK_PATH) {
-                let cards = int_at(
-                    data(&streak).get("makeup_cards").unwrap_or(&Value::Null),
-                    "balance",
-                );
-                if cards > 0
-                    && chat_post(
-                        account,
-                        MAKEUP_USE_PATH,
-                        &json!({ "target_date": yesterday }),
-                    )
-                    .is_ok()
-                {
-                    logs.push(format!("已消耗 1 张补签卡补签昨日（{yesterday}）"));
+    // 0. 断登补签：从活跃日历里挑最近的断点，每轮最多一张。
+    //    上游 streak_days 是赛季累计；真正能补的是当月、今天之前、score = 0 且不在
+    //    makeup_dates 里的日期。先查 streak：没有补签卡就不必再拉热力墙。
+    match chat_get(account, STREAK_PATH) {
+        Ok(streak) => {
+            let streak_data = data(&streak);
+            let cards = makeup_card_count(streak_data.get("makeup_cards").unwrap_or(&Value::Null));
+            if cards > 0 {
+                match chat_get(account, HEATMAP_PATH) {
+                    Ok(heatmap) => {
+                        let heatmap_data = data(&heatmap);
+                        let today =
+                            text_at(heatmap_data.get("today").unwrap_or(&Value::Null), "date");
+                        let launch = text_at(streak_data, "launch_date");
+                        let made_up: Vec<String> = streak_data
+                            .get("streak")
+                            .and_then(|item| item.get("makeup_dates"))
+                            .and_then(Value::as_array)
+                            .map(|items| {
+                                items
+                                    .iter()
+                                    .filter_map(Value::as_str)
+                                    .map(str::to_string)
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+                        let cells: Vec<(String, i64)> = heatmap_data
+                            .get("cells")
+                            .and_then(Value::as_array)
+                            .map(|items| {
+                                items
+                                    .iter()
+                                    .map(|cell| (text_at(cell, "date"), int_at(cell, "score")))
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+                        let dates = makeup_candidates(&today, &launch, &made_up, &cells);
+                        for target in dates.iter().take(MAKEUP_MAX_PER_RUN) {
+                            match chat_post(
+                                account,
+                                MAKEUP_USE_PATH,
+                                &json!({ "target_date": target }),
+                            ) {
+                                Ok(value)
+                                    if value.get("code").and_then(Value::as_i64) == Some(0) =>
+                                {
+                                    logs.push(format!("已消耗 1 张补签卡补签 {target}"));
+                                }
+                                Ok(value) => {
+                                    let message = text_at(&value, "msg");
+                                    if message.contains("date is not broken") {
+                                        logs.push(format!("{target} 已活跃或已补登，无需补签"));
+                                    } else {
+                                        logs.push(format!(
+                                            "补签 {target} 失败：{}",
+                                            if message.is_empty() {
+                                                "上游拒绝"
+                                            } else {
+                                                &message
+                                            }
+                                        ));
+                                    }
+                                }
+                                Err(message) => logs.push(format!("补签 {target} 失败：{message}")),
+                            }
+                        }
+                    }
+                    Err(message) => {
+                        logs.push(format!("查询补签热力图失败：{message}"));
+                    }
                 }
             }
         }
-    } else {
-        eprintln!("[workbench] 查询补签热力图失败");
+        Err(message) => logs.push(format!("查询连登状态失败：{message}")),
     }
 
     // 1. 新手礼包 / 活动补偿（每号一次，无则业务错误静默）
@@ -1650,8 +1843,8 @@ pub fn run_streak_bonus(account: &Account) -> StreakOutcome {
 
     // 3. 抽奖：有次数就抽完
     let mut drawn = 0;
-    if let Ok(value) = chat_get(account, LOTTERY_SUMMARY_PATH) {
-        let chances = int_at(data(&value), "chances").max(0);
+    if let Ok(value) = chat_get(account, LOTTERY_CHANCES_PATH) {
+        let chances = int_at(data(&value), "balance").max(0);
         for _ in 0..chances {
             let body = json!({ "client_token": uuid::Uuid::new_v4().to_string() });
             if chat_post(account, LOTTERY_DRAW_PATH, &body).is_ok() {
@@ -1919,6 +2112,8 @@ pub(crate) fn local_date() -> String {
 }
 
 /// 本地自然日偏移（`offset` 为天数）。用公历天数换算，跨月 / 跨年都对。
+/// 目前只有日期形状的测试在用（补签已改成按服务端日历选日期）。
+#[cfg(test)]
 fn local_date_offset(offset: i64) -> String {
     let (year, month, day, _) = local_parts();
     let days = days_from_civil(year as i64, month as i64, day as i64) + offset;
@@ -1974,6 +2169,7 @@ mod tests {
             source: "oauth".into(),
             enabled: true,
             weight: 1,
+            credit_expires_at: 0,
             note: String::new(),
             quota_exhausted_at: 0,
             quota_resets_at: 0,
@@ -2030,6 +2226,69 @@ mod tests {
         assert!(night_window(7));
         assert!(!night_window(8));
         assert!(!night_window(22));
+    }
+
+    #[test]
+    fn 签到连签从服务端日期算当前连续段() {
+        let dates: Vec<String> = [
+            "2026-11-02",
+            "2026-11-03",
+            "2026-11-04",
+            "2026-11-05",
+            "2026-11-06",
+        ]
+        .iter()
+        .map(|value| value.to_string())
+        .collect();
+        assert_eq!(current_checkin_streak(&dates, "2026-11-06"), 5);
+        assert_eq!(
+            current_checkin_streak(&dates, "2026-11-07"),
+            5,
+            "今天还没签时，连签停在昨天"
+        );
+        assert_eq!(
+            current_checkin_streak(&dates, "2026-11-08"),
+            0,
+            "最近一次早于昨天，连签已断"
+        );
+
+        // 赛季累计不是连签：中间断一天只数最近一段
+        let broken: Vec<String> = [
+            "2026-10-20",
+            "2026-10-21",
+            "2026-11-04",
+            "2026-11-05",
+            "2026-11-06",
+        ]
+        .iter()
+        .map(|value| value.to_string())
+        .collect();
+        assert_eq!(current_checkin_streak(&broken, "2026-11-06"), 3);
+    }
+
+    #[test]
+    fn 补签只选当月今天之前且没补过的断点() {
+        let cells: Vec<(String, i64)> = [
+            ("2026-10-20", 0),
+            ("2026-10-31", 0),
+            ("2026-11-02", 0),
+            ("2026-11-03", 0),
+            ("2026-11-04", 40),
+            ("2026-11-05", 0),
+            ("2026-11-06", 0),
+        ]
+        .iter()
+        .map(|(date, score)| (date.to_string(), *score))
+        .collect();
+        let made_up = vec!["2026-11-05".to_string()];
+        assert_eq!(
+            makeup_candidates("2026-11-06", "2026-06-17", &made_up, &cells),
+            vec!["2026-11-03".to_string(), "2026-11-02".to_string()]
+        );
+        // 活动上线之前的日期不补
+        assert!(makeup_candidates("2026-11-06", "2026-11-03", &[], &cells)
+            .iter()
+            .all(|date| date.as_str() >= "2026-11-03"));
     }
 
     #[test]

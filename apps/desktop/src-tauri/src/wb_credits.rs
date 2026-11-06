@@ -287,6 +287,21 @@ pub fn aggregate(packages: Vec<Package>) -> Credits {
     }
 }
 
+/// 最早一笔「还花得出去、有明确到期时刻」的包的作废时刻（Unix 秒）。
+///
+/// 选号（`wb_pool`）只认这一个数：**到期越早越先花**。无期限、到期未知、已过期与
+/// 已花光的包都不算 —— 它们不构成「赶紧花掉」的理由。一个都没有就是 0。
+pub fn earliest_expiry(credits: &Credits, now: i64) -> i64 {
+    credits
+        .packages
+        .iter()
+        .filter(|item| item.remain > 0.0 && !item.no_expiry)
+        .filter_map(|item| item.expires_at)
+        .filter(|at| *at > now)
+        .min()
+        .unwrap_or(0)
+}
+
 /// 企业额度：上游只给「本周期已用」与「周期额度」，没有包列表。
 ///
 /// `credit` 是**已用**（与个人口径的"剩余"正好相反），剩余 = 额度 − 已用。
@@ -581,6 +596,42 @@ mod tests {
         }));
         let credits = aggregate(vec![empty]);
         assert!(credits.earliest_expiring.is_none());
+    }
+
+    #[test]
+    fn 最早到期只认还能花且未过期的绝对时刻() {
+        let now = now_secs();
+        let credits = aggregate(vec![
+            parse_package(&serde_json::json!({
+                "CapacitySize": 100,
+                "CapacityRemain": 0,
+                "DeductionEndTime": ((now + 3600) * 1000)
+            })),
+            parse_package(&serde_json::json!({
+                "CapacitySize": 100,
+                "CapacityRemain": 10,
+                "DeductionEndTime": ((now + 2 * 86400) * 1000)
+            })),
+            parse_package(&serde_json::json!({
+                "CapacitySize": 100,
+                "CapacityRemain": 10,
+                "DeductionEndTime": ((now + 5 * 86400) * 1000)
+            })),
+            parse_package(&serde_json::json!({
+                "CapacitySize": 100,
+                "CapacityRemain": 10,
+                "DeductionEndTime": ((now - 3600) * 1000)
+            })),
+        ]);
+        assert_eq!(earliest_expiry(&credits, now), now + 2 * 86400);
+
+        // 无期限（上游拿超远周期表示）不算「快作废」
+        let forever = aggregate(vec![parse_package(&serde_json::json!({
+            "CapacitySize": 100,
+            "CapacityRemain": 10,
+            "CycleEndTime": "2126-01-01 00:00:00"
+        }))]);
+        assert_eq!(earliest_expiry(&forever, now), 0);
     }
 
     #[test]

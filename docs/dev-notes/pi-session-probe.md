@@ -68,7 +68,27 @@
   它们只在扩展 `import` Pi SDK 时才会被 `getAliases()` 解析，当前那份 permission.js
   不 import 任何东西，所以这五个包已经不放进树里了（加回条件见 [ai.md](../modules/ai.md)）。
 - 裁剪后启动耗时没有变化（`--version` 五次各 ~410ms，两边一致）—— 省的是体积，不是启动。
-- 裁剪后启动耗时没有变化（`--version` 五次各 ~410ms，两边一致）—— 省的是体积，不是启动。
+
+- **Pi 1.5.0（2026-11-06 重验）**：`PI_VERSION` / `CATALOG_VERSION` 都到 1.5.0 之后，按上面同一套假端点
+  探针（放 `%TEMP%`，不进版本库）重跑，**17 项全过**：
+  - `node cli.js --version` → `1.5.0`；裁完 `resources/pi` 是 **13.5MB / 160 个文件**（1.0.4 是 12.8MB / 147，
+    整棵树 tar.gz 3.3MB）；
+  - openai-completions：`extension_ui_request`（confirm）一问一答 → `bash` 真跑出 `probe-ok` →
+    `agent_settled`（`aborted:false`）；read / write / edit 各成功一次，write 真的落盘、edit 真的改了内容；
+  - prompt 带图：上游收到的是 `image_url` 的 data URL，base64 一字不差；
+  - `-ns --skill <目录>` 之后 `get_commands` 里有 `skill:myskill` —— 同一条应答里还多了 `llama` / `mcp`
+    两条内置命令（技能表本身仍只有给出去的那条；应用不读 `get_commands`，不影响界面）；
+  - abort 一轮：应答成功、`agent_settled` 的 `aborted:true`（这个字段是 1.1.0 才加的，1.0.4 时还没有）、
+    进程留着（`get_state` 照常应答）；
+  - 硬杀后按同一个 `--session-id` 重开：`get_messages` 读得回 21 条历史，应答仍是
+    `{success,data:{messages:[…]}}`；会话文件仍是 `<ISO 时间戳>_<id>.jsonl`、首行
+    `{"type":"session","version":3,"id":…}`；
+  - anthropic-messages：打 `/v1/messages`、带 `x-api-key`、正文照常回到事件流；
+  - 默认工具集仍是 `read` / `bash` / `edit` / `write`（不多不少），应用那份 `models.json`（`build_models_json`
+    的输出）原样能用；两个运行期外部包的版本没变（`jiti` 2.7.0 / `photon-node` 0.3.4），所以 `KEEP` 不用动。
+  - 顺带记一条**地址口径**：anthropic-messages 的 `baseUrl` 结尾**不能带 `/v1`** —— Pi 自己拼 `/v1/messages`
+    （探针里写成带 `/v1` 的地址，实际打的就是 `/v1/v1/messages`）。`AI_PROVIDER_PRESETS` 里 Anthropic
+    预设给的是 `https://api.anthropic.com`，别照着 OpenAI 那种带 `/v1` 的地址改。
 
 **换 Pi 版本后重跑一遍**这些点 —— CLI 与事件协议是外部契约（见
 [ai.md](../modules/ai.md) 的文件头）。改裁剪规则（`KEEP` / `PRUNE_REVISION`）同样要重跑。

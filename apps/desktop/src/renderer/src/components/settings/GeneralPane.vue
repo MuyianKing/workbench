@@ -281,7 +281,7 @@ function saveHotkey(accelerator: string): void {
           <span class="row__label">福利每天自动</span>
           <span class="row__hint">
             启动后补跑签到与一键做任务；夜猫子任务在 23:00–08:00 单独跑一次。
-            连登管家与抽奖不自动。
+            成长连登与抽奖不自动。
           </span>
         </div>
         <el-switch
