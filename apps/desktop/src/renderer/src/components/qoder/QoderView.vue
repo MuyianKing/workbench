@@ -2,7 +2,7 @@
 import type { GatewayUsageSummary } from '@workbench/usage'
 import type { GatewayCredits, GatewayUsageRow } from '@/workbench/gateway'
 import type { QoderAccount, QoderCredits, QoderEarningPoint, QoderHeatmapPoint, QoderModelInfo, QoderStatus, QoderTaskSnapshot } from '@/workbench/qoder'
-import { Calendar, Coin, Cpu, Histogram, MagicStick, Plus, Refresh, User } from '@element-plus/icons-vue'
+import { Calendar, Coin, Cpu, Download, Histogram, MagicStick, Plus, Refresh, Upload, User } from '@element-plus/icons-vue'
 import { dailyCreditSeries, gatewayBucketUnit, GROWTH_CREDIT_DAYS, summarizeGatewayRows } from '@workbench/usage'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { computed, onActivated, onBeforeUnmount, onMounted, ref, watch } from 'vue'
@@ -514,7 +514,10 @@ function statusText(account: QoderAccount): string {
   return poolStatusText(account, { readyLabel: '待登录' })
 }
 
-/** 签到标签只看上游 status：请求成功不等于「可签」 */
+/**
+ * 签到标签只看上游 status：请求成功不等于「可签」。
+ * 上游说活动没开时回空串 —— 卡上不摆这条状态，标签整个不出来。
+ */
 function checkinLabel(
   status: { ok: boolean, todayCheckedIn: boolean, status: string },
 ): string {
@@ -524,7 +527,7 @@ function checkinLabel(
     return '可签到'
   if (!status.ok)
     return '读取失败'
-  return status.status === 'CLAIMED' ? '今日已签' : '活动未开放'
+  return status.status === 'CLAIMED' ? '今日已签' : ''
 }
 
 /** 请求栏按条件过滤后的行：结果 → 关键字，顺序保持新→旧 */
@@ -589,11 +592,12 @@ onBeforeUnmount(() => {
     <div class="qd__head">
       <GatewayTabs v-model="tab" :items="TABS" />
       <div class="qd__status">
-        <button class="qd__pill" type="button" @click="accessOpen = true">
-          <span class="qd__dot" :class="running ? 'is-on' : 'is-off'" />
-          {{ running ? `Qoder · 运行中 ${port}` : 'Qoder · 已停止' }}
+        <button type="button" class="qd__run-status" title="接入信息" @click="accessOpen = true">
+          <span class="qd__run-dot" :class="{ 'is-ok': running }" />
+          <span class="qd__run-text">{{ running ? '运行中' : '已停止' }}</span>
+          <span class="qd__run-addr">{{ running ? `127.0.0.1:${port}` : '未监听' }}</span>
         </button>
-        <el-button size="small" :loading="busy" @click="toggleRun">
+        <el-button size="small" text :loading="busy" @click="toggleRun">
           {{ running ? '停止' : '启动' }}
         </el-button>
       </div>
@@ -602,16 +606,6 @@ onBeforeUnmount(() => {
     <!-- 账号：登录与刷新积分在右下角（与 TBuddy 同一套浮动键） -->
     <template v-if="tab === 'accounts'">
       <section class="qd__pane is-accounts" :class="{ 'is-empty': !accounts.length }">
-        <!-- 账号搬运用：导出成一段 JSON 抄进密码管理器，另一台机器导入后不必再登录一次 -->
-        <div class="qd__transfer">
-          <el-button size="small" text :disabled="!accounts.length" @click="openTransfer('export')">
-            导出
-          </el-button>
-          <el-button size="small" text @click="openTransfer('import')">
-            导入
-          </el-button>
-        </div>
-
         <p v-if="loginHint" class="qd__hint">
           {{ loginHint }}
         </p>
@@ -646,7 +640,14 @@ onBeforeUnmount(() => {
               </div>
             </div>
 
+            <!-- 额度恢复提示（多数账号平时没有）与优先级并作一排：提示在左、优先级在右，
+                 省下单独一行；行高由优先级输入框兜着，提示空着（隐藏但占位）也不影响同排卡片对齐 -->
             <div class="qd-account__meta">
+              <span
+                class="qd-account__sub"
+                :class="{ 'is-empty': !quotaHint(account) }"
+                :title="quotaHint(account) || undefined"
+              >{{ quotaHint(account) || '—' }}</span>
               <span class="qd-account__priority">
                 <span class="qd-account__dim">优先级</span>
                 <el-input-number
@@ -660,13 +661,6 @@ onBeforeUnmount(() => {
                 />
               </span>
             </div>
-
-            <!-- 额度恢复时间只有部分账号有，但这一行**始终占位**：同一排卡片的积分条与三格才对得齐 -->
-            <span
-              class="qd-account__sub"
-              :class="{ 'is-empty': !quotaHint(account) }"
-              :title="quotaHint(account) || undefined"
-            >{{ quotaHint(account) || '—' }}</span>
 
             <!-- 点这一块看逐包到期：卡片只放得下「剩余 / 总额」，说不出哪天作废 -->
             <div
@@ -734,8 +728,30 @@ onBeforeUnmount(() => {
         </div>
       </section>
 
-      <!-- 右下角：刷新积分 + 登录（页面数据走 5 秒轮询，这颗只用于手动催一次） -->
+      <!-- 右下角：导出 / 导入 + 刷新积分 + 登录（页面数据走 5 秒轮询，刷新这颗只用于手动催一次） -->
       <div class="qd__fab">
+        <!-- 账号搬运用：导出成一段 JSON 抄进密码管理器，另一台机器导入后不必再登录一次 -->
+        <el-tooltip content="导出账号" placement="top">
+          <button
+            type="button"
+            class="qd__fab-tool"
+            :disabled="!accounts.length"
+            aria-label="导出账号"
+            @click="openTransfer('export')"
+          >
+            <el-icon><Download /></el-icon>
+          </button>
+        </el-tooltip>
+        <el-tooltip content="导入账号" placement="top">
+          <button
+            type="button"
+            class="qd__fab-tool"
+            aria-label="导入账号"
+            @click="openTransfer('import')"
+          >
+            <el-icon><Upload /></el-icon>
+          </button>
+        </el-tooltip>
         <el-tooltip content="刷新积分" placement="top">
           <button
             type="button"
@@ -785,24 +801,25 @@ onBeforeUnmount(() => {
         <article v-for="item in taskSnapshots" :key="item.uid" class="qd-card panel">
           <header class="qd-card__head">
             <div class="qd-card__title">
+              <span class="qd-card__avatar" aria-hidden="true">{{ item.account.slice(0, 1).toUpperCase() }}</span>
               <span class="qd-card__name">{{ item.account }}</span>
-              <el-tag size="small" effect="dark">
+              <el-tag v-if="checkinLabel(item.checkin)" size="small" effect="dark">
                 {{ checkinLabel(item.checkin) }}
               </el-tag>
             </div>
           </header>
-          <div class="qd-card__facts">
-            <div>
+          <div class="qd-card__facts is-toned">
+            <div class="is-streak">
               <span class="qd-card__fact-icon"><el-icon><Calendar /></el-icon></span>
               <span>连签</span>
               <strong>{{ item.checkin.streakDays }} 天</strong>
             </div>
-            <div>
+            <div class="is-total">
               <span class="qd-card__fact-icon"><el-icon><Histogram /></el-icon></span>
               <span>累计</span>
               <strong>{{ item.checkin.totalClaimDays }} 天</strong>
             </div>
-            <div>
+            <div class="is-credit">
               <span class="qd-card__fact-icon"><el-icon><Coin /></el-icon></span>
               <span>每日签到</span>
               <strong>{{ item.checkin.rewardCredits }}</strong>
@@ -991,30 +1008,58 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: var(--sp-2);
+  min-width: 0;
 }
 
-.qd__pill {
-  display: inline-flex;
+/* 与 TBuddy 页首同一套：裸按钮（状态点 + 状态字 + 地址），点开接入信息；启停是文字按钮 */
+.qd__run-status {
+  display: flex;
   align-items: center;
-  gap: var(--sp-1);
-  padding: 4px 10px;
-  border: 1px solid var(--glass-border-color);
-  border-radius: var(--r-full);
-  background: rgba(var(--bg-surface-rgb), var(--card-alpha, 1));
-  color: var(--ink-2);
-  font-size: var(--fs-sm);
+  gap: var(--sp-2);
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
   cursor: pointer;
 }
 
-.qd__dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--ink-3);
+.qd__run-status:hover .qd__run-text {
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
-.qd__dot.is-on {
+.qd__run-status:focus-visible {
+  outline: 2px solid var(--el-color-primary);
+  outline-offset: 2px;
+  border-radius: var(--r-sm);
+}
+
+/* 状态点：彩色只表达运行状态，这里正好是它该出现的地方 */
+.qd__run-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: var(--r-pill);
+  background: var(--st-idle);
+}
+
+.qd__run-dot.is-ok {
   background: var(--st-ok);
+}
+
+.qd__run-text {
+  font-size: var(--gw-fs-meta);
+  font-weight: 600;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.qd__run-addr {
+  font-family: var(--font-mono);
+  font-size: var(--gw-fs-micro);
+  color: var(--ink-3);
+  white-space: nowrap;
 }
 
 .qd__pane {
@@ -1036,14 +1081,6 @@ onBeforeUnmount(() => {
 
 .qd__pane.is-accounts.is-empty {
   flex: 1 1 auto;
-}
-
-/* 导出 / 导入：账号栏自己的小工具行，不占页首状态区 */
-.qd__transfer {
-  display: flex;
-  justify-content: flex-end;
-  gap: var(--sp-1);
-  margin-bottom: calc(var(--sp-2) * -1);
 }
 
 .qd__toolbar {
@@ -1085,8 +1122,8 @@ onBeforeUnmount(() => {
 /* ---------- 账号卡：与 TBuddy 的账号卡同一套（头像 / 状态色标 / 积分条 / 三格） ---------- */
 .panel.qd-account {
   position: relative;
-  gap: var(--sp-3);
-  padding: var(--sp-4);
+  gap: var(--sp-2);
+  padding: var(--sp-3);
   overflow: hidden;
   /* 卡面铺一层极淡的状态色，整页才不至于一片灰 */
   background-image: radial-gradient(
@@ -1203,7 +1240,7 @@ onBeforeUnmount(() => {
 .qd-account__meta {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: space-between;
   gap: var(--sp-2);
   font-size: var(--gw-fs-micro);
   color: var(--ink-3);
@@ -1219,7 +1256,9 @@ onBeforeUnmount(() => {
   width: 76px;
 }
 
-/* 额度恢复时间只有部分账号有，但这一行**始终占位**：同一排卡片的积分条与三格才对得齐 */
+/* 与优先级同一排的那行小字（目前只有额度恢复时间）。
+   空着时也**隐藏而不是删掉**：这一排的高度由优先级输入框兜着，
+   它占住左边的位子，同排卡片的积分条与三格才对得齐；太长时截断，完整内容在 title 里。 */
 .qd-account__sub {
   overflow: hidden;
   font-size: var(--gw-fs-micro);
@@ -1384,8 +1423,27 @@ onBeforeUnmount(() => {
 .qd-card__title {
   display: flex;
   align-items: center;
-  gap: var(--sp-1);
+  gap: var(--sp-2);
   min-width: 0;
+}
+
+/* 卡首首字头像：给每张福利卡一个颜色锚点（紫与账号栏同一个），名字与状态标签跟在后面 */
+.qd-card__avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--r-pill);
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, #8b5cf6 34%, transparent),
+    color-mix(in srgb, #4f46e5 22%, transparent)
+  );
+  color: #7c3aed;
+  font-size: var(--fs-sm);
+  font-weight: 600;
 }
 
 .qd-card__name {
@@ -1426,7 +1484,7 @@ onBeforeUnmount(() => {
   background: rgba(var(--bg-surface-rgb), 0.5);
 }
 
-/* 三格各带一枚灰度图标：跨标签与数值两行，像一枚小徽章（彩色仍只留给 KPI） */
+/* 三格各带一枚图标：跨标签与数值两行，像一枚小徽章；默认灰度，福利卡那三格由 is-toned 着色 */
 .qd-card__facts .qd-card__fact-icon {
   grid-row: 1 / span 2;
   display: inline-flex;
@@ -1438,6 +1496,38 @@ onBeforeUnmount(() => {
   background: rgba(var(--bg-surface-rgb), 0.65);
   color: var(--ink-3);
   font-size: 16px;
+}
+
+/*
+ * 福利卡三格的彩色（这一页的彩色例外，与 TBuddy 福利栏的数字格同一套色板）：
+ * 图标取语义色、底是同色 16%，格子本身铺一层更淡的同色渐变 + 内描边 —— 卡面才不至于一片灰。
+ * 色板口径只在 docs/modules/qoder.md 的「福利栏」一处，别往别处扩。
+ */
+.qd-card__facts.is-toned > div {
+  background:
+    linear-gradient(
+      color-mix(in srgb, var(--stat-color) 9%, transparent),
+      color-mix(in srgb, var(--stat-color) 5%, transparent)
+    ),
+    rgba(var(--bg-surface-rgb), 0.5);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--stat-color) 14%, transparent);
+}
+
+.qd-card__facts.is-toned .qd-card__fact-icon {
+  background: color-mix(in srgb, var(--stat-color) 16%, transparent);
+  color: var(--stat-color);
+}
+
+.qd-card__facts .is-streak {
+  --stat-color: var(--st-ok);
+}
+
+.qd-card__facts .is-total {
+  --stat-color: #2f6bd8;
+}
+
+.qd-card__facts .is-credit {
+  --stat-color: #c2410c;
 }
 
 .qd-card__facts span {

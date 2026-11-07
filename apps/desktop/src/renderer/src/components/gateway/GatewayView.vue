@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { GatewayAccess, GatewayAccount, GatewayCredits, GatewayStatus, GatewayUsageSummary } from '@/workbench/gateway'
-import { CircleCheck, CircleClose, Clock, Coin, Connection, Plus, User, Warning } from '@element-plus/icons-vue'
+import { CircleCheck, CircleClose, Clock, Coin, Connection, Download, Plus, Upload, User, Warning } from '@element-plus/icons-vue'
 import { gatewayBucketUnit, summarizeGatewayRows } from '@workbench/usage'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { computed, onActivated, onBeforeUnmount, onMounted, ref } from 'vue'
@@ -550,16 +550,6 @@ onBeforeUnmount(() => {
       </section>
 
       <section class="gw__pool">
-        <!-- 账号搬运用：导出成一段 JSON 抄进密码管理器，另一台机器导入后不必再登录一次 -->
-        <div class="gw__pool-tools">
-          <el-button size="small" text :disabled="!accounts.length" @click="openTransfer('export')">
-            导出
-          </el-button>
-          <el-button size="small" text @click="openTransfer('import')">
-            导入
-          </el-button>
-        </div>
-
         <p v-if="loginHint" class="gw__hint">
           {{ loginHint }}
         </p>
@@ -594,7 +584,14 @@ onBeforeUnmount(() => {
               </div>
             </div>
 
+            <!-- 额度恢复提示（多数账号平时没有）与优先级并作一排：提示在左、优先级在右，
+                 省下单独一行；行高由优先级输入框兜着，提示空着（隐藏但占位）也不影响同排卡片对齐 -->
             <div class="gw__account-meta">
+              <span
+                class="gw__sub"
+                :class="{ 'is-empty': !quotaHint(account) }"
+                :title="quotaHint(account) || undefined"
+              >{{ quotaHint(account) || '—' }}</span>
               <span class="gw__priority">
                 <span class="gw__dim">优先级</span>
                 <el-input-number
@@ -608,13 +605,6 @@ onBeforeUnmount(() => {
                 />
               </span>
             </div>
-
-            <!-- 额度恢复时间只有部分账号有，但这行**始终占位**：少了它，同一排卡片的积分条与三格会错开 -->
-            <span
-              class="gw__sub"
-              :class="{ 'is-empty': !quotaHint(account) }"
-              :title="quotaHint(account) || undefined"
-            >{{ quotaHint(account) || '—' }}</span>
 
             <!-- 点这一块看逐包到期：账号卡只放得下「剩余 / 总额」，说不出哪天作废 -->
             <div
@@ -682,9 +672,31 @@ onBeforeUnmount(() => {
         </div>
       </section>
 
-      <!-- 页面右下角：刷新积分 + 登录（用 sticky 钉在页面可视区里，终端展开时跟着上移）。
-           页面数据走 15 秒轮询，不再放手动键 -->
+      <!-- 页面右下角：导出 / 导入 + 刷新积分 + 登录（用 sticky 钉在页面可视区里，终端展开时跟着上移）。
+           页面数据走 15 秒轮询，刷新不放手动键之外不再有别的常驻按钮 -->
       <div class="gw__fab">
+        <!-- 账号搬运用：导出成一段 JSON 抄进密码管理器，另一台机器导入后不必再登录一次 -->
+        <el-tooltip content="导出账号" placement="top">
+          <button
+            type="button"
+            class="gw__fab-tool"
+            :disabled="!accounts.length"
+            aria-label="导出账号"
+            @click="openTransfer('export')"
+          >
+            <el-icon><Download /></el-icon>
+          </button>
+        </el-tooltip>
+        <el-tooltip content="导入账号" placement="top">
+          <button
+            type="button"
+            class="gw__fab-tool"
+            aria-label="导入账号"
+            @click="openTransfer('import')"
+          >
+            <el-icon><Upload /></el-icon>
+          </button>
+        </el-tooltip>
         <el-tooltip content="刷新积分" placement="top">
           <button
             type="button"
@@ -977,14 +989,6 @@ onBeforeUnmount(() => {
   color: var(--ink-3);
 }
 
-/* 导出 / 导入：账号栏自己的小工具行，不占页首状态区 */
-.gw__pool-tools {
-  display: flex;
-  justify-content: flex-end;
-  gap: var(--sp-1);
-  margin-bottom: calc(var(--sp-2) * -1);
-}
-
 /* 账号卡：一行放不下四张时自动往下排 */
 .gw__accounts {
   display: grid;
@@ -994,8 +998,8 @@ onBeforeUnmount(() => {
 
 .panel.gw__account-card {
   position: relative;
-  gap: var(--sp-3);
-  padding: var(--sp-4);
+  gap: var(--sp-2);
+  padding: var(--sp-3);
   overflow: hidden;
   /* 卡面也铺一层极淡的状态色：整页才不至于一片灰 */
   background-image: radial-gradient(
@@ -1111,7 +1115,7 @@ onBeforeUnmount(() => {
 .gw__account-meta {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: space-between;
   gap: var(--sp-2);
   font-size: var(--gw-fs-micro);
   color: var(--ink-3);
@@ -1127,9 +1131,9 @@ onBeforeUnmount(() => {
   width: 76px;
 }
 
-/* 状态标签下面那行小字（目前只有额度恢复时间）。
-   它**始终占位**（没有内容时隐藏而不是删掉）：同一排卡片的高度才能一致，
-   积分条与成功 / 失败那三格才对得齐；太长时截断，完整内容在 title 里。 */
+/* 与优先级同一排的那行小字（目前只有额度恢复时间）。
+   空着时也**隐藏而不是删掉**：这一排的高度由优先级输入框兜着，
+   它占住左边的位子，同排卡片的积分条与三格才对得齐；太长时截断，完整内容在 title 里。 */
 .gw__sub {
   overflow: hidden;
   font-size: var(--gw-fs-micro);

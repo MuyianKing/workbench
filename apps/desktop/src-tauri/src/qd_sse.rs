@@ -12,8 +12,6 @@
 
 use serde_json::{Map, Value};
 
-use crate::qd_tools::LEAK_MARKER;
-
 /// 解包后的事件。
 pub enum Envelope {
     Chunk(Value),
@@ -214,12 +212,25 @@ pub fn normalize_usage(usage: &mut Value) {
     }
 }
 
-/// 流内泄漏工具调用的缓冲：正文里出现 [`LEAK_MARKER`] 时先扣住，收尾再决定。
+/// 流内泄漏工具调用的缓冲：正文里出现触发词（泄漏标记或 DSML 标签头）时扣住，
+/// 收尾再决定。触发词可能被切在帧边界上：先进入「探针」态扣住候选后缀，
+/// 下一帧要么坐实（转为扣留）、要么立刻放行 —— 不再像旧实现那样一看到
+/// 疑似前缀就扣到收尾（正文里一个 `[` 就能把整段流卡到结束）。
 #[derive(Default)]
 pub struct LeakGuard {
     held: String,
+    probe: String,
     active: bool,
 }
+
+/// 触发词：泄漏标记与 DSML 标签头（宽松间距两款都认）。
+const TRIGGERS: [&str; 5] = [
+    crate::qd_tools::LEAK_MARKER,
+    "<| DSML |",
+    "</| DSML |",
+    "<|DSML|",
+    "</|DSML|",
+];
 
 impl LeakGuard {
     /// 喂一段正文，返回现在可以立刻发给客户端的那部分。
@@ -231,47 +242,70 @@ impl LeakGuard {
             self.held.push_str(text);
             return String::new();
         }
-        if let Some(at) = text.find(LEAK_MARKER) {
+        let mut buf = std::mem::take(&mut self.probe);
+        buf.push_str(text);
+        // 完整触发词出现：从这里起全部扣住
+        let mut latch: Option<usize> = None;
+        for trigger in TRIGGERS {
+            if let Some(at) = buf.find(trigger) {
+                latch = Some(match latch {
+                    Some(prev) => prev.min(at),
+                    None => at,
+                });
+            }
+        }
+        if let Some(at) = latch {
             self.active = true;
-            self.held.push_str(&text[at..]);
-            return text[..at].to_string();
+            self.held.push_str(&buf[at..]);
+            return buf[..at].to_string();
         }
-        // 标记可能被切在帧边界上：尾部与标记前缀相同的部分先扣住
-        let hold = suffix_prefix(text, LEAK_MARKER);
+        // 尾部是某个触发词的前缀：先扣住，等下一帧再判
+        let hold = longest_trigger_prefix(&buf);
         if hold == 0 {
-            return text.to_string();
+            return buf;
         }
-        let split = text.len() - hold;
-        self.held.push_str(&text[split..]);
-        self.active = true;
-        text[..split].to_string()
+        let split = buf.len() - hold;
+        self.probe.push_str(&buf[split..]);
+        buf[..split].to_string()
     }
 
-    /// 收尾。返回 `(标记前的残留正文, 还原出的调用)`；不是调用形态就原样吐出。
-    pub fn finish(&mut self, allowed: &[String]) -> (String, Vec<Value>) {
+    /// 收尾。返回 `(标记前的残留正文, 还原出的调用)`；认不出调用就剥掉
+    /// DSML 标签后原样吐出。
+    pub fn finish(&mut self, schemas: &[crate::qd_tools::ToolSchema]) -> (String, Vec<Value>) {
+        if !self.active {
+            let probe = std::mem::take(&mut self.probe);
+            self.held.push_str(&probe);
+        }
+        self.probe.clear();
         let held = std::mem::take(&mut self.held);
         self.active = false;
         if held.is_empty() {
             return (String::new(), Vec::new());
         }
-        match crate::qd_tools::parse_leaked_calls(&held, allowed) {
+        match crate::qd_tools::restore_leak(&held, schemas) {
             Some((before, calls)) => (before, calls),
-            None => (held, Vec::new()),
+            None => (crate::qd_tools::strip_dsml_tags(&held), Vec::new()),
         }
     }
 }
 
-/// `text` 的尾部有多少字符是 `marker` 的前缀（用于跨帧扣住标记）。
-fn suffix_prefix(text: &str, marker: &str) -> usize {
-    let text_chars: Vec<char> = text.chars().collect();
-    let marker_chars: Vec<char> = marker.chars().collect();
-    let max = text_chars.len().min(marker_chars.len().saturating_sub(1));
+/// `text` 尾部有多少字节是某个触发词的前缀（用于跨帧扣住候选）。
+/// 匹配的字节都是 ASCII，切点必在字符边界上。
+fn longest_trigger_prefix(text: &str) -> usize {
+    let text_bytes = text.as_bytes();
+    let max = TRIGGERS
+        .iter()
+        .map(|trigger| trigger.len() - 1)
+        .max()
+        .unwrap_or(0)
+        .min(text_bytes.len());
     for len in (1..=max).rev() {
-        if text_chars[text_chars.len() - len..] == marker_chars[..len] {
-            return text_chars[text_chars.len() - len..]
-                .iter()
-                .map(|ch| ch.len_utf8())
-                .sum();
+        let suffix = &text_bytes[text_bytes.len() - len..];
+        if TRIGGERS
+            .iter()
+            .any(|trigger| trigger.as_bytes().starts_with(suffix))
+        {
+            return len;
         }
     }
     0
@@ -334,16 +368,18 @@ impl Aggregator {
         }
     }
 
-    pub fn into_completion(mut self, allowed: &[String]) -> Value {
-        // 泄漏回读：正文里如果带标记 + JSON 数组，就还原成结构化调用
+    pub fn into_completion(mut self, schemas: &[crate::qd_tools::ToolSchema]) -> Value {
+        // 泄漏回读：正文里如果带调用形态（标记 / DSML / 对象），就还原成结构化调用
         let mut content = std::mem::take(&mut self.content);
         if self.calls.is_empty() {
-            if let Some((before, calls)) = crate::qd_tools::parse_leaked_calls(&content, allowed) {
+            if let Some((before, calls)) = crate::qd_tools::restore_leak(&content, schemas) {
                 content = before;
                 self.calls = calls;
                 self.finish = "tool_calls".into();
             }
         }
+        // DSML 特殊标签不是给人看的：无论还原成败都剥掉
+        let content = crate::qd_tools::strip_dsml_tags(&content);
         let mut message = Map::new();
         message.insert("role".into(), Value::String("assistant".into()));
         message.insert("content".into(), Value::String(content));
@@ -444,12 +480,32 @@ pub fn fill_call_ids(chunk: &mut Value, ids: &mut std::collections::HashMap<i64,
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::qd_tools::LEAK_MARKER;
 
     fn envelope(body: &str) -> String {
         format!(
             "data:{}\n",
             serde_json::json!({ "headers": {}, "body": body, "statusCodeValue": 200 })
         )
+    }
+
+    fn schema(name: &str, required: &[&str]) -> crate::qd_tools::ToolSchema {
+        crate::qd_tools::ToolSchema {
+            name: name.to_string(),
+            properties: required.iter().map(|key| key.to_string()).collect(),
+            required: required.iter().map(|key| key.to_string()).collect(),
+        }
+    }
+
+    fn read_schema() -> crate::qd_tools::ToolSchema {
+        crate::qd_tools::ToolSchema {
+            name: "read".into(),
+            properties: ["path", "description"]
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
+            required: ["path".to_string()].into_iter().collect(),
+        }
     }
 
     #[test]
@@ -525,10 +581,10 @@ mod tests {
         let first = guard.feed("我先读文件 ");
         assert_eq!(first, "我先读文件 ");
         let second = guard.feed(&format!(
-            "{LEAK_MARKER}\n[{{\"name\":\"read\",\"arguments\":\"{{}}\"}}]"
+            "{LEAK_MARKER}\n[{{\"name\":\"read\",\"arguments\":\"{{\\\"path\\\":\\\"a\\\"}}\"}}]"
         ));
         assert_eq!(second, "");
-        let (before, calls) = guard.finish(&["read".to_string()]);
+        let (before, calls) = guard.finish(&[read_schema()]);
         assert!(before.is_empty());
         assert_eq!(calls.len(), 1);
     }
@@ -540,5 +596,85 @@ mod tests {
         let (tail, calls) = guard.finish(&[]);
         assert!(tail.is_empty());
         assert!(calls.is_empty());
+    }
+
+    #[test]
+    fn 探针不匹配立即放行不卡流() {
+        let mut guard = LeakGuard::default();
+        // 正文里一个孤零零的 `[`（旧实现会从这里扣到收尾）
+        assert_eq!(guard.feed("数组 ["), "数组 ");
+        // 下一帧不是标记：扣住的 `[` 跟着正文一起放行
+        assert_eq!(guard.feed("1,2,3] 后续"), "[1,2,3] 后续");
+        let (tail, calls) = guard.finish(&[]);
+        assert!(tail.is_empty());
+        assert!(calls.is_empty());
+    }
+
+    #[test]
+    fn 标记被切在帧边界上仍能扣住() {
+        let mut guard = LeakGuard::default();
+        let marker = LEAK_MARKER;
+        let at = marker.char_indices().nth(5).map(|(at, _)| at).unwrap_or(marker.len());
+        let (head, rest) = marker.split_at(at);
+        let at2 = rest.char_indices().nth(4).map(|(at, _)| at).unwrap_or(rest.len());
+        let (mid, tail) = rest.split_at(at2);
+        assert_eq!(guard.feed(&format!("正文{head}")), "正文");
+        assert_eq!(guard.feed(mid), "");
+        assert_eq!(
+            guard.feed(&format!("{tail}\n[{{\"name\":\"read\",\"arguments\":\"{{\\\"path\\\":\\\"a\\\"}}\"}}]")),
+            ""
+        );
+        let (before, calls) = guard.finish(&[read_schema()]);
+        // 标记前的正文在扣住前就已放行，收尾只剩还原出的调用
+        assert!(before.is_empty());
+        assert_eq!(calls.len(), 1);
+    }
+
+    #[test]
+    fn dsml_开启标签在流中出现即扣住并还原() {
+        let mut guard = LeakGuard::default();
+        assert_eq!(guard.feed("我来跑 "), "我来跑 ");
+        assert_eq!(
+            guard.feed("<| DSML | invoke name=\"read\"><| DSML | parameter name=\"path\">a.ts"),
+            ""
+        );
+        assert_eq!(guard.feed("</| DSML | parameter></| DSML | invoke>"), "");
+        let (before, calls) = guard.finish(&[read_schema()]);
+        // 标记前的正文在第一帧就已放行，收尾只剩还原出的调用
+        assert!(before.is_empty());
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0]["function"]["name"], Value::String("read".into()));
+    }
+
+    #[test]
+    fn 截图形态的泄漏在流式收尾还原() {
+        // 2026-11-07 真机泄漏（DeepSeek-Flash）：标记 + 无名 JSON + 孤儿闭合标签
+        let leak = r#"[assistant 请求调用工具] {"arguments":"{\"command\":\"grep -n 'formatMailSize' packages/mail/src/.ts\",\"description\":\"定位函数\"}"}</| DSML | parameter> </| DSML | invoke> </| DSML | calls>"#;
+        let mut guard = LeakGuard::default();
+        assert_eq!(guard.feed("实现下沉：\n\n"), "实现下沉：\n\n");
+        assert_eq!(guard.feed(leak), "");
+        let bash = crate::qd_tools::ToolSchema {
+            name: "bash".into(),
+            properties: ["command", "description"].into_iter().map(str::to_string).collect(),
+            required: ["command".to_string()].into_iter().collect(),
+        };
+        let (before, calls) = guard.finish(&[bash]);
+        // 标记前的正文在第一帧就已放行
+        assert!(before.is_empty());
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0]["function"]["name"], Value::String("bash".into()));
+        let arguments = calls[0]["function"]["arguments"].as_str().unwrap_or("");
+        assert!(arguments.contains("formatMailSize"));
+        assert!(arguments.contains("定位函数"));
+    }
+
+    #[test]
+    fn 收尾释放时剥掉孤儿闭合标签() {
+        let mut guard = LeakGuard::default();
+        assert_eq!(guard.feed("正文"), "正文");
+        assert_eq!(guard.feed("</| DSML | parameter></| DSML | invoke>"), "");
+        let (tail, calls) = guard.finish(&[]);
+        assert!(calls.is_empty());
+        assert!(!tail.contains("DSML"));
     }
 }

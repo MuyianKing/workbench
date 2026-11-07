@@ -315,8 +315,8 @@ pub fn encode(body: &Value) -> Result<String, String> {
     Ok(crate::qd_sign::qoder_encode(text.as_bytes()))
 }
 
-/// 取请求体里声明的工具名（泄漏回读的白名单）。
-pub fn tool_names(payload: &Value) -> Vec<String> {
+/// 取请求体里声明的工具 schema（泄漏回读用：名字、参数属性、必填）。
+pub fn tool_schemas(payload: &Value) -> Vec<qd_tools::ToolSchema> {
     payload
         .get("tools")
         .and_then(Value::as_array)
@@ -324,11 +324,37 @@ pub fn tool_names(payload: &Value) -> Vec<String> {
             tools
                 .iter()
                 .filter_map(|tool| {
-                    tool.get("function")
-                        .and_then(|function| function.get("name"))
-                        .or_else(|| tool.get("name"))
-                        .and_then(Value::as_str)
-                        .map(str::to_string)
+                    let function = tool
+                        .get("function")
+                        .and_then(Value::as_object)
+                        .or_else(|| tool.as_object());
+                    let function = function?;
+                    let name = function.get("name").and_then(Value::as_str)?;
+                    if name.trim().is_empty() {
+                        return None;
+                    }
+                    let parameters = function.get("parameters").and_then(Value::as_object);
+                    let properties: std::collections::HashSet<String> = parameters
+                        .and_then(|parameters| parameters.get("properties"))
+                        .and_then(Value::as_object)
+                        .map(|properties| properties.keys().cloned().collect())
+                        .unwrap_or_default();
+                    let required: std::collections::HashSet<String> = parameters
+                        .and_then(|parameters| parameters.get("required"))
+                        .and_then(Value::as_array)
+                        .map(|required| {
+                            required
+                                .iter()
+                                .filter_map(Value::as_str)
+                                .map(str::to_string)
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    Some(qd_tools::ToolSchema {
+                        name: name.to_string(),
+                        properties,
+                        required,
+                    })
                 })
                 .collect()
         })

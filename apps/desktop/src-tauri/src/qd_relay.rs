@@ -165,7 +165,7 @@ pub fn chat(
             stream: wants_stream,
             api_key_tail: api_key_tail.clone(),
         };
-        let allowed = qd_body::tool_names(&value);
+        let schemas = qd_body::tool_schemas(&value);
 
         // 同一账号内的排队 / 瞬时故障重试
         let mut transient = 0u8;
@@ -194,9 +194,9 @@ pub fn chat(
 
             if status == 200 {
                 return if wants_stream {
-                    stream_response(handle, meta, allowed.clone())
+                    stream_response(handle, meta, schemas.clone())
                 } else {
-                    aggregate_response(handle, meta, allowed.clone())
+                    aggregate_response(handle, meta, schemas.clone())
                 };
             }
 
@@ -321,9 +321,9 @@ pub fn chat(
             match handle.head() {
                 Ok(200) => {
                     return if wants_stream {
-                        stream_response(handle, meta, qd_body::tool_names(&value))
+                        stream_response(handle, meta, qd_body::tool_schemas(&value))
                     } else {
-                        aggregate_response(handle, meta, qd_body::tool_names(&value))
+                        aggregate_response(handle, meta, qd_body::tool_schemas(&value))
                     };
                 }
                 Ok(status) => {
@@ -413,7 +413,7 @@ fn unavailable(accounts: &[Account], model: &str, now: i64) -> Response {
 }
 
 /// 流式返回。
-fn stream_response(mut handle: StreamHandle, meta: Meta, allowed: Vec<String>) -> Response {
+fn stream_response(mut handle: StreamHandle, meta: Meta, schemas: Vec<crate::qd_tools::ToolSchema>) -> Response {
     Response::sse(move |writer| {
         let started = Instant::now();
         let mut decoder = Decoder::default();
@@ -484,7 +484,7 @@ fn stream_response(mut handle: StreamHandle, meta: Meta, allowed: Vec<String>) -
             }
         }
 
-        let (tail, calls) = guard.finish(&allowed);
+        let (tail, calls) = guard.finish(&schemas);
         if !tail.is_empty() {
             let chunk = json!({
                 "id": "chatcmpl-qoder",
@@ -515,14 +515,14 @@ fn stream_response(mut handle: StreamHandle, meta: Meta, allowed: Vec<String>) -
             }
         }
         let _ = writer.write_text("\n");
-        let completion = aggregator.into_completion(&allowed);
+        let completion = aggregator.into_completion(&schemas);
         record_success(&meta, &completion, started, first_at);
         Ok(())
     })
 }
 
 /// 非流式：把流折成一个完整响应。
-fn aggregate_response(mut handle: StreamHandle, meta: Meta, allowed: Vec<String>) -> Response {
+fn aggregate_response(mut handle: StreamHandle, meta: Meta, schemas: Vec<crate::qd_tools::ToolSchema>) -> Response {
     let started = Instant::now();
     let mut decoder = Decoder::default();
     let mut aggregator = Aggregator::default();
@@ -569,7 +569,7 @@ fn aggregate_response(mut handle: StreamHandle, meta: Meta, allowed: Vec<String>
         let (text, kind) = qd_quota::friendly(status, &message);
         return Response::error(if status >= 400 { status } else { 502 }, kind, &text);
     }
-    let completion = aggregator.into_completion(&allowed);
+    let completion = aggregator.into_completion(&schemas);
     record_success(&meta, &completion, started, first_at);
     Response::json(&completion)
 }
