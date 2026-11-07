@@ -23,7 +23,6 @@ import { defineStore } from 'pinia'
  */
 import { computed, ref, watch } from 'vue'
 import { confirmAction, notifyError, notifySuccess } from '@/notify'
-import { useAiStore } from '@/stores/ai'
 import { useSettingsStore } from '@/stores/settings'
 import { piSkillInstallDir, piSkillInstallUrl, piSkillInstallZip, piSkillList, piSkillRemove } from '@/workbench/pi-skill'
 
@@ -34,13 +33,25 @@ export type PiSkillSource
     | { kind: 'url', value: string }
 
 export const useAiSkillsStore = defineStore('aiSkills', () => {
-  const ai = useAiStore()
   const settings = useSettingsStore()
 
-  /** 全局那份技能根（探测运行时带回来的；拿不到用户目录时是空串） */
-  const globalRoot = computed(() => ai.skillRoot)
-  /** 项目那份：跟着页面当前盯着的那个目录走（挑中会话就是会话那个目录） */
-  const projectRoot = computed(() => projectSkillsRoot(ai.watchedDir))
+  /** 全局那份技能根（探测运行时带回来的；拿不到用户目录时是空串）—— 由 ai store 注册进来 */
+  const globalRoot = ref('')
+  /** 项目那份盯着的目录（挑中会话就是会话那个目录）—— 同上 */
+  const projectDir = ref('')
+
+  /**
+   * ai store 把两条根注册进来。**不做反向 import**：ai 要调这边的 ensure / enabledRefs，
+   * 再让这边 import ai 就成了环（原先靠 Pinia 懒创建才没炸）；根变了那边负责推过来，
+   * 推完 `keyOf()` 变化，下面的 watch 自然重扫。
+   */
+  function setRoots(skillRoot: string, watchedDir: string): void {
+    globalRoot.value = skillRoot
+    projectDir.value = watchedDir
+  }
+
+  /** 项目那份的技能根目录 */
+  const projectRoot = computed(() => projectSkillsRoot(projectDir.value))
 
   const globalRows = ref<AiSkillRow[]>([])
   const projectRows = ref<AiSkillRow[]>([])
@@ -229,6 +240,7 @@ export const useAiSkillsStore = defineStore('aiSkills', () => {
   )
 
   return {
+    setRoots,
     globalRoot,
     projectRoot,
     globalReady,

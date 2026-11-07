@@ -14,6 +14,7 @@
 //! **本文件只造头，不做网络、不读文件。** 需要随机数的地方直接从 `uuid::Uuid::new_v4()`
 //! 取熵（`uuid` 本来就在依赖里，不为四个随机 bit 再引 `rand`）。
 
+use crate::common::now_millis;
 use crate::encoding::sha256;
 use crate::wb_upstream;
 
@@ -469,12 +470,6 @@ fn random_hex(bytes: usize) -> String {
     out
 }
 
-fn now_millis() -> u128 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|elapsed| elapsed.as_millis())
-        .unwrap_or(0)
-}
 
 // ---------- 查找 ----------
 

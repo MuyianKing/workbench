@@ -1,947 +1,251 @@
-import type { AddProjectInput, AppSettings, AuthProvider, BackgroundImage, BallContext, BuiltinWallpaper, CaptureContext, CommandEntry, EffectiveTheme, InstallablePackageManager, MailNotifyPayload, NetCounters, OcrLine, PinPatch, PinRecord, Project, Result, TerminalKind, ThemeConfig, WindowState, WorkbenchApi } from '@/types'
+import type { AppSettings, AuthProvider, MailNotifyPayload, Result, ThemeConfig, WorkbenchApi } from '@/types'
 /**
- * `window.workbench` 的 Tauri 实现。
+ * `window.workbench` 的 Tauri 实现 —— **装配根**。
  *
  * 这一层替代了 Electron 主进程 + preload：preload 已随 Electron 一起删除，
  * 而渲染层仍然只认同一个契约，所以 78 处调用一行都不用改。
+ *
+ * 通道实现按域分文件：`api-sync.ts`（同步门禁那几组）、`api-project.ts`（项目与进程）、
+ * `api-domains.ts`（域模块的薄转发，就在本文件）、`api-background.ts`（背景图与图片授权）、
+ * `api-system.ts`（系统 / 窗口 / 对话框 / 系统集成）、`api-events.ts`（事件订阅与跨窗口通道）；
+ * 网关与 Qoder 各自的整组通道住在 `gateway.ts` / `qoder.ts`。本文件只做 spreads、
+ * 未移植兜底与安装时序。
  *
  * 尚未移植的通道由 `createApi` 的兜底接管：返回 `Result` 形状的失败值并打一次警告，
  * 界面降级成空态而不是崩掉 —— 迁移期间的缺口因此可见、可控。
  * 通道补齐后应当去掉兜底（那时 `as` 断言也就不需要了）。
  */
-import { fail, nextProjectColor, ok, samePath } from '@workbench/core'
-import { notifyWarning } from '@/notify'
+import { fail, ok } from '@workbench/core'
 import * as activity from './activity'
 import * as ai from './ai'
 import * as aiNews from './ai-news'
+import { backgroundApi } from './api-background'
+import { eventsApi } from './api-events'
+import { projectApi } from './api-project'
+import { syncApi, syncRepo } from './api-sync'
+import { openDialog, saveDialog, syncSystemIntegration, systemApi } from './api-system'
 import * as auth from './auth'
-import { assetUrl, errorText, guard, hasTauri, invoke, listen, listenReady, notPorted } from './bridge'
+import { hasTauri, listen, notPorted } from './bridge'
 import * as design from './design'
-import * as etf from './etf'
 import { emit } from './events'
 import * as events from './events'
-import { gatewayApi, gatewayUsage, gatewayUsageRecent, gatewayUsageRows, pullGatewayUsage, syncGatewayUsage } from './gateway'
+import { gatewayApi } from './gateway'
 import * as kb from './kb'
 import * as note from './note'
-import * as nrm from './nrm'
-import * as nvm from './nvm'
 import * as orphan from './orphan'
 import * as piSkill from './pi-skill'
-import { publishQoderEarnings, pullQoderEarnings, qoderApi, qoderEarnings } from './qoder'
-import * as quick from './quick-launch'
-import * as scanner from './scanner'
+import { qoderApi } from './qoder'
 import * as session from './session'
 import * as skill from './skill'
 import * as state from './state'
-import * as system from './system'
-import { getTokenUsage, getTokenUsageSnapshot, listSyncDevices, localDevice, syncThemeConfig, syncTokenUsage } from './token'
 import * as vault from './vault'
 import * as video from './video'
 import * as workLog from './work-log'
 import * as zentao from './zentao'
 
-/**
- * 把设置里的 system 解析成实际明暗
- */
-function resolveTheme(theme: AppSettings['theme']): EffectiveTheme {
-  if (theme === 'light' || theme === 'dark')
-    return theme
-  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
-}
+/** 域模块的薄转发：一个域一组通道，实现都在各自的适配文件里（注释也留在那边） */
+const domainsApi = {
+  // ---------- 工作日志（本地文件，不进同步仓库） ----------
+  listWorkLogs: () => workLog.listWorkLogs(),
+  addWorkLog: (input: Parameters<WorkbenchApi['addWorkLog']>[0]) => workLog.addWorkLog(input),
+  updateWorkLog: (id: string, patch: Parameters<WorkbenchApi['updateWorkLog']>[1]) =>
+    workLog.updateWorkLog(id, patch),
+  removeWorkLog: (id: string) => workLog.removeWorkLog(id),
 
-/**
- * 当前该用的同步仓库地址：**没登录一律当没填**。
- *
- * 同步的凭据来自账号，所以未登录时既不推也不拉，界面上的数字全部出自本机（别人机器上
- * 读回来的分片也一并撤掉，见 token.ts 的 syncLocalShards）。设置里的地址不动它 ——
- * 登录回来接着用，不必重填一遍。
- */
-function syncRepo(): string {
-  return state.account() ? state.settings().tokenSyncRepo : ''
-}
+  // ---------- AI 热点（本地缓存 + 宿主侧的内置源白名单） ----------
+  getAiNews: () => aiNews.getAiNews(),
+  refreshAiNews: () => aiNews.refreshAiNews(),
+  loadAiNewsArticle: (url: string) => aiNews.loadAiNewsArticle(url),
 
-/**
- * 网关流水同步要的两样东西：同步仓库与本机设备 id。
- * 仓库仍然只从 `syncRepo()` 取 —— 没登录就是空串，网关只读本机，不开旁路。
- */
-async function gatewayContext(): Promise<{ repo: string, device: string }> {
-  const repo = syncRepo()
-  if (!repo)
-    return { repo: '', device: '' }
-  const { id } = await localDevice()
-  return { repo, device: id }
-}
+  // ---------- 笔记（用户自己挑的一个文件夹里的 markdown 文件） ----------
+  listNotes: (root: string) => note.listNotes(root),
+  readNote: (root: string, rel: string) => note.readNote(root, rel),
+  writeNote: (root: string, rel: string, content: string) => note.writeNote(root, rel, content),
+  createNote: (root: string, input: Parameters<WorkbenchApi['createNote']>[1]) =>
+    note.createNote(root, input),
+  renameNote: (root: string, rel: string, name: string) => note.renameNote(root, rel, name),
+  removeNote: (root: string, rel: string) => note.removeNote(root, rel),
+  moveNote: (root: string, rel: string, targetDir: string) =>
+    note.moveNote(root, rel, targetDir),
+  syncNotes: (input: Parameters<WorkbenchApi['syncNotes']>[0]) => note.syncNotes(input),
+  noteRepoState: (dir: string) => note.noteRepoState(dir),
+  uploadNoteImage: (input: Parameters<WorkbenchApi['uploadNoteImage']>[0]) =>
+    note.uploadNoteImage(input),
+  listNoteImages: (input: Parameters<WorkbenchApi['listNoteImages']>[0]) =>
+    note.listNoteImages(input),
+  deleteNoteImages: (input: Parameters<WorkbenchApi['deleteNoteImages']>[0]) =>
+    note.deleteNoteImages(input),
+  scanNoteTexts: (root: string) => note.scanNoteTexts(root),
 
-/**
- * 交给资源管理器 / 文件对话框的路径：**分隔符一律换成反斜杠**。
- *
- * 设置里的路径可能是 `E:/a/b` 这种写法（技能库那一项就是），而 Shell 侧的路径解析
- * 只认反斜杠：`E:/a\b` 这种混写的 `SHParseDisplayName` 直接解析失败，explorer 就开到
- * 别处去了（实测：混写的解析不出来，整条换成反斜杠的能）。Rust 侧的文件操作两种都认，
- * 所以只在「要给 Shell」的这两个口子上换。
- */
-function windowsPath(raw: string): string {
-  return raw.replace(/\//g, '\\')
-}
+  // ---------- 视频（用户自己挑的一个文件夹里的 MP4） ----------
+  listVideos: (root: string) => video.listVideos(root),
+  loadVideo: (root: string, rel: string) => video.loadVideo(root, rel),
 
-/** 对话框选项里的 `defaultPath` 也要过一道（它同样交给 Shell 去定位起始目录） */
-function withShellPath(options: Record<string, unknown>): Record<string, unknown> {
-  const value = options.defaultPath
-  return typeof value === 'string' ? { ...options, defaultPath: windowsPath(value) } : options
-}
+  // ---------- 技能（住在笔记仓库的一个子目录里，见 packages/skills/src/skills.ts） ----------
+  listSkills: (root: string, dir: string) => skill.listSkills(root, dir),
+  skillState: (dir: string) => skill.skillState(dir),
+  skillSync: (root: string, dir: string) => skill.skillSync(root, dir),
+  createSkill: (root: string, dir: string, input: Parameters<WorkbenchApi['createSkill']>[2]) =>
+    skill.createSkill(root, dir, input),
+  saveSkillFile: (root: string, dir: string, id: string, rel: string, content: string) =>
+    skill.saveSkillFile(root, dir, id, rel, content),
+  listSkillFiles: (root: string, dir: string, id: string) => skill.listSkillFiles(root, dir, id),
+  readSkillFile: (root: string, dir: string, id: string, rel: string) =>
+    skill.readSkillFile(root, dir, id, rel),
+  removeSkill: (root: string, dir: string, id: string) => skill.removeSkill(root, dir, id),
+  importSkill: (root: string, dir: string, source: string, id: string) =>
+    skill.importSkill(root, dir, source, id),
+  skillHistory: (root: string, dir: string, id: string, limit?: number) =>
+    skill.skillHistory(root, dir, id, limit),
+  restoreSkill: (root: string, dir: string, id: string, hash: string) =>
+    skill.restoreSkill(root, dir, id, hash),
+  compareSkillVersion: (root: string, dir: string, id: string, hash: string) =>
+    skill.compareSkillVersion(root, dir, id, hash),
+  installSkill: (root: string, dir: string, id: string, projectDir: string, overwrite: boolean) =>
+    skill.installSkill(root, dir, id, projectDir, overwrite),
+  scanSkillCopies: (root: string, dir: string, id: string, projectDirs: string[]) =>
+    skill.scanSkillCopies(root, dir, id, projectDirs),
 
-/**
- * 文件对话框：直接调插件命令，不引 @tauri-apps/plugin-dialog 包
- * （tauri.conf.json 里开了 withGlobalTauri，走 __TAURI__ 即可）。
- */
-async function openDialog(options: Record<string, unknown>): Promise<string | null> {
-  const selected = await invoke<string | string[] | null>('plugin:dialog|open', {
-    options: withShellPath(options),
-  })
-  if (typeof selected === 'string')
-    return selected
-  if (Array.isArray(selected))
-    return selected[0] ?? null
-  return null
-}
+  // ---------- 密码保险库 ----------
+  // 密钥与条目都在适配层那边（workbench/vault.ts）：Rust 只管落盘、凭据管理器与 git。
+  // 同步仓库地址与其余几条同步同一个入口 —— 没登录一律当没填（见 api-sync 的 syncRepo）。
+  vaultKeyState: () => vault.keyState(),
+  vaultCreateKey: (replace: boolean) => vault.createKey(replace),
+  vaultHello: () => vault.helloState(),
+  vaultUnlock: (password: string) => vault.unlock(password),
+  vaultUnlockHello: () => vault.unlockHello(),
+  vaultLock: () => Promise.resolve(vault.lock()),
+  // 导出 / 导入都自己弹对话框：密钥是一段三百来字符的 base64，让人手抄错一个字符的后果
+  // 是另一台机器上一条都解不开，所以只走文件这条路（取消返回 false，不是失败）
+  vaultExportKey: async (): Promise<Result<boolean>> => {
+    const path = await saveDialog({
+      title: '导出保险库密钥',
+      defaultPath: 'workbench-vault-key.txt',
+      filters: [{ name: '密钥文件', extensions: ['txt'] }],
+    })
+    if (!path)
+      return ok(false)
 
-/**
- * 多选版：返回全部选中的路径（邮箱发信的附件要一次挑好几个）。
- * 单选环境里插件回的是单个字符串，也包成单元素数组 —— 调用方只面对一种形状。
- */
-async function openDialogMultiple(options: Record<string, unknown>): Promise<string[] | null> {
-  const selected = await invoke<string | string[] | null>('plugin:dialog|open', {
-    options: withShellPath(options),
-  })
-  if (Array.isArray(selected))
-    return selected
-  return typeof selected === 'string' && selected.trim() ? [selected] : null
-}
+    const written = await vault.exportKey(path)
+    return written.ok ? ok(true) : fail(written.error ?? '导出密钥失败')
+  },
+  vaultImportKeyFile: async (): Promise<Result<boolean>> => {
+    const path = await openDialog({
+      directory: false,
+      multiple: false,
+      title: '选择密钥文件',
+      filters: [
+        { name: '密钥文件', extensions: ['txt'] },
+        { name: '全部文件', extensions: ['*'] },
+      ],
+    })
+    if (!path)
+      return ok(false)
 
-/**
- * 「另存为」对话框（保险库密钥导出用）。与 openDialog 同一个理由：直接调插件命令，
- * 不引 @tauri-apps/plugin-dialog 包。用户在对话框里取消时返回 null。
- */
-async function saveDialog(options: Record<string, unknown>): Promise<string | null> {
-  const selected = await invoke<string | null>('plugin:dialog|save', {
-    options: withShellPath(options),
-  })
-  return typeof selected === 'string' && selected.trim() ? selected : null
-}
+    const imported = await vault.importKeyFile(path)
+    return imported.ok ? ok(true) : fail(imported.error ?? '导入密钥失败')
+  },
+  vaultForgetKey: () => vault.forgetKey(),
+  vaultLoad: () => vault.load(),
+  vaultSaveEntry: (id: string, entry: Parameters<WorkbenchApi['vaultSaveEntry']>[1]) =>
+    vault.save({ id, entry }),
+  vaultRemoveEntry: (id: string) => vault.remove(id),
+  vaultSync: () => vault.sync(syncRepo()),
+  vaultRemoteKeyStatus: () => vault.remoteKeyStatus(syncRepo()),
 
-const IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'webp', 'bmp', 'gif']
+  // ---------- 知识库（用户在别处维护的独立项目，见 workbench/kb.ts） ----------
+  // 后两个参数是原始数据的来源清单（来源名 → 本机一个文件夹）：扫与读都要带上它
+  kbScan: (root: string, sources: Parameters<WorkbenchApi['kbScan']>[1]) => kb.kbScan(root, sources),
+  kbRead: (root: string, rel: string, sources: Parameters<WorkbenchApi['kbRead']>[2]) =>
+    kb.kbRead(root, rel, sources),
+  // 目录与索引的重建由应用自己做（对齐仓库脚本的输出）；内容由 AI 助手那一轮写入
+  kbIndexBuild: (root: string, generatedAt: string) => kb.kbIndexBuild(root, generatedAt),
+  // 同步与仓库探测复用笔记那两条通用通道（对任意文件夹、认它自己的 origin），技能页同款
+  kbSync: (input: Parameters<WorkbenchApi['kbSync']>[0]) => kb.kbSync(input),
+  kbRepoState: (dir: string) => kb.kbRepoState(dir),
+  // AI 助手那几条不在这里：它们要回传进程输出、按会话 id 认领事件，
+  // 与 spawn_session 同一条路子住在适配层（见 workbench/ai.ts）
 
-/** 设置里内置壁纸的引用前缀，与 shared 侧的约定一致 */
-const BUILTIN_PREFIX = 'builtin:'
+  // ---------- Pi 的技能（AI 助手页那颗「技能」按钮，见 workbench/pi-skill.ts） ----------
+  // 与上面技能页那组不是一回事：那组管「技能库 + 装到项目 + 版本提交」，
+  // 这一组只管 AI 助手页那两个 `.agents/skills` 根里的目录
+  piSkillList: (root: string) => piSkill.piSkillList(root),
+  piSkillInstallZip: (root: string, zip: string, id: string | null, overwrite: boolean) =>
+    piSkill.piSkillInstallZip(root, zip, id, overwrite),
+  piSkillInstallDir: (root: string, source: string, id: string | null, overwrite: boolean) =>
+    piSkill.piSkillInstallDir(root, source, id, overwrite),
+  piSkillInstallUrl: (root: string, url: string, id: string | null, overwrite: boolean) =>
+    piSkill.piSkillInstallUrl(root, url, id, overwrite),
+  piSkillRemove: (root: string, id: string) => piSkill.piSkillRemove(root, id),
 
-/** 内置壁纸的缩略图：面板里就那么点大 */
-const THUMBNAIL_MAX_EDGE = 320
-const THUMBNAIL_QUALITY = 75
+  // ---------- 统计：活跃度（token 用量 / 外观 / ETF 那几条在 api-sync） ----------
+  getActivity: () => Promise.resolve(state.activityView()),
+  /**
+   * 记一次活跃度。适配层内部那几个来源直接调 `activity.recordActivity`，
+   * 这条通道只给渲染层里那一处 —— AI 助手跑完一轮是在 store 里才知道的（见 stores/ai.ts 的 settle）。
+   */
+  recordActivity: async (kind: Parameters<WorkbenchApi['recordActivity']>[0]) => {
+    activity.recordActivity(kind)
+    return ok(null)
+  },
 
-/** 内置壁纸的 id 就是文件名主干；写进设置的引用串为 builtin:<id> */
-function wallpaperFrom(filePath: string): BuiltinWallpaper {
-  const name = filePath.split(/[\\/]/).pop() ?? filePath
-  const id = name.replace(/\.[^.]+$/, '')
-  return { id, name, reference: `${BUILTIN_PREFIX}${id}`, thumbnail: '' }
-}
+  // ---------- 设置与布局 ----------
+  getSettings: () => Promise.resolve(state.settings()),
+  updateSettings: (patch: Partial<AppSettings>) => {
+    const next = state.updateSettings(patch)
+    // 开机自启与全局快捷键是「设置即系统状态」：改完要立刻落到系统上
+    void syncSystemIntegration(next)
+    return Promise.resolve(ok(next))
+  },
+  getThemeConfig: () => Promise.resolve(state.themeConfig()),
+  /**
+   * 首页布局与外观同一个文件（theme.json），所以改主题也可能改了设置 ——
+   * 把合并后的那份推一遍，渲染层的 settings 才会跟着刷新（应用别的机器的配置就走这条路）。
+   */
+  updateThemeConfig: (patch: Partial<ThemeConfig>) => {
+    const next = state.updateThemeConfig(patch)
+    emit('settingsChanged', state.settings())
+    return Promise.resolve(ok(next))
+  },
 
-/** 内置壁纸引用 → 真实文件路径；清单由 Rust 提供（打包后走 resource_dir，开发态读仓库） */
-async function resolveBuiltin(id: string): Promise<string | null> {
-  const files = await invoke<string[]>('list_wallpapers')
-  return files.find(file => wallpaperFrom(file).id === id) ?? null
-}
+  // ---------- 数据目录 ----------
+  getDataDir: () => state.dataDir(),
 
-function noop(): void {}
+  // ---------- 样式参考库（token 是随包静态资源，导出到项目时只往后端递内容） ----------
+  writeDesign: (projectDir: string, content: string) => design.writeDesign(projectDir, content),
 
-/**
- * 三条全局快捷键的值。
- *
- * **值由这一侧给**（Rust 不读设置）：默认值（截图是 F1）只活在 `@workbench/capture` 里，
- * Rust 去数据文件里读的话，「刚加上的字段还没被写回盘」那一段读到的是空的 ——
- * 首启按 F1 就没反应，而且之后再也不会补注册（踩过一次）。
- * 关掉的开关、空串都收敛成 null = 不要那一条。
- */
-function hotkeyArgs(settings: AppSettings): Record<string, string | null> {
-  return {
-    main: settings.hotkeyEnabled ? settings.hotkey : null,
-    capture: settings.captureEnabled ? settings.captureHotkey : null,
-  }
-}
+  // ---------- 禅道 ----------
+  zentaoSession: zentao.session,
+  zentaoLogin: zentao.login,
+  zentaoLogout: zentao.logout,
+  zentaoBugs: zentao.bugs,
+  zentaoWatch: zentao.watch,
+  zentaoNotify: zentao.notify,
+  onZentaoCheck: zentao.onCheck,
+  zentaoOpenWindow: zentao.openWindow,
 
-/**
- * 把设置里的系统集成项落到系统上：开机自启、全局快捷键、截图遮罩预热、网速球。
- *
- * 失败只记一笔就够：设置已经存下了，注册不上（被占用、被策略拦）不该连带让改设置这件事失败。
- * 只有快捷键那条会**说一句**：界面上看着「设过了」、按下去却没反应是最难查的那种，
- * 得让用户知道是「被别的程序占了」而不是功能坏了。
- */
-async function syncSystemIntegration(settings: AppSettings): Promise<void> {
-  // **遮罩池先开始建、而且不排在后面 await**：它要起 WebView2（一块屏一百多毫秒），是这几项里
-  // 最重的一笔；开机自启与快捷键都是毫秒级。并行起来，启动后能尽快具备「按热键即出」的条件。
-  const prewarm = invoke('capture_prewarm', { enabled: settings.captureEnabled }).catch((error) => {
-    console.warn('[workbench] 预建截图遮罩失败', error)
-  })
-
-  try {
-    await invoke('set_autostart', { enabled: settings.launchAtLogin })
-  }
-  catch (error) {
-    console.warn('[workbench] 设置开机自启失败', error)
-  }
-
-  try {
-    // 三条一起装：插件注册是「先全清再逐条注册」，分几次调会互相注销（见 main.rs）
-    await invoke('apply_hotkeys', hotkeyArgs(settings))
-  }
-  catch (error) {
-    notifyWarning(errorText(error, '全局快捷键注册失败，可能被别的程序占用了'))
-  }
-
-  try {
-    // 网速球：开 / 关那一扇独立的置顶窗口。**同样必须等设置载完再调**（它读的正是 ballEnabled）。
-    // 失败不打扰用户：设置已经存下了，下次改一下开关还能再试
-    await invoke('ball_apply', { visible: settings.ballEnabled })
-  }
-  catch (error) {
-    console.warn('[workbench] 开关悬浮球失败', error)
-  }
-
-  await prewarm
-}
-
-/** 起命令要先找到对象：命令构造在这一层，后端拿不到项目/命令数据 */
-function withProject(
-  id: string,
-  task: (project: Project) => Promise<Result<null>>,
-): Promise<Result<null>> {
-  const project = state.projects().find(item => item.id === id)
-  return project ? task(project) : Promise.resolve(fail('找不到该项目'))
-}
-
-function withCommand(
-  id: string,
-  task: (entry: CommandEntry) => Promise<Result<null>>,
-): Promise<Result<null>> {
-  const entry = state.commandList().find(item => item.id === id)
-  return entry ? task(entry) : Promise.resolve(fail('找不到该命令'))
-}
+  // ---------- 账号 ----------
+  // 换 token、回环监听、凭据落盘都在 Rust 侧；这里只驱动轮询并落显示资料，
+  // 全程不会有 token 回到渲染层（见 workbench/auth.ts）
+  authStatus: () => auth.authStatus(),
+  authRefreshAccount: (provider: AuthProvider) => auth.refreshAccount(provider),
+  authLogin: (provider: AuthProvider, onAuthUrl?: (authUrl: string, opened: boolean) => void) =>
+    auth.login(provider, onAuthUrl),
+  authLoginSubmit: (url: string) => auth.submit(url),
+  authLoginCancel: () => auth.cancel(),
+  authLogout: (provider: AuthProvider) => auth.logout(provider),
+} as Partial<WorkbenchApi>
 
 function createApi(): WorkbenchApi {
   const implemented = {
     ...gatewayApi,
     ...qoderApi,
-    // 网关流水：仓库与设备 id 与 token 同步同一个门禁；空仓库时只读本机
-    gatewayUsage: async (days: number) => {
-      const { repo, device } = await gatewayContext()
-      return gatewayUsage(days, repo, device)
-    },
-    gatewayUsageRows: async (days: number) => {
-      const { repo, device } = await gatewayContext()
-      return gatewayUsageRows(days, repo, device)
-    },
-    gatewayUsageRecent: async (limit: number) => {
-      const { repo, device } = await gatewayContext()
-      return gatewayUsageRecent(limit, repo, device)
-    },
-    gatewayUsageSync: async (force = true) => {
-      const { repo, device } = await gatewayContext()
-      if (repo && !device)
-        return fail('没有设备标识，无法同步')
-      return syncGatewayUsage(repo, device, force)
-    },
-    // 只拉不推：读路径只读本地克隆，进页面时先把别的机器推上来的补进来
-    gatewayUsagePull: async () => {
-      const { repo } = await gatewayContext()
-      return pullGatewayUsage(repo)
-    },
-    // Qoder 领取账本：与 token 同步同一个仓库门禁；本机 activity.jsonl 是权威，
-    // 读的时候再并入别的设备推上来的分片。
-    qoderEarnings: async (days: number) => {
-      const { repo, device } = await gatewayContext()
-      return qoderEarnings(days, repo, device)
-    },
-    qoderEarningsPublish: async () => {
-      const { repo, device } = await gatewayContext()
-      if (!repo || !device)
-        return ok(null)
-      return publishQoderEarnings(repo, device)
-    },
-    qoderEarningsPull: async () => {
-      const { repo } = await gatewayContext()
-      if (!repo)
-        return ok(null)
-      return pullQoderEarnings(repo)
-    },
-    gatewaySyncStatus: async () => {
-      const repo = syncRepo()
-      if (!repo)
-        return { enabled: false, deviceName: '' }
-      const { id, name } = await localDevice()
-      return { enabled: Boolean(id), deviceName: name }
-    },
-    // Tauri 下没有 Node 版本；Chromium 版本取 WebView2 的 UA。
-    versions: {
-      node: '—',
-      chrome: navigator.userAgent.match(/Chrome\/([\d.]+)/)?.[1] ?? '—',
-    },
-
-    getBootstrap: () => ({
-      theme: resolveTheme(state.initialSettings().theme),
-      settings: state.initialSettings(),
-      themeConfig: state.initialTheme(),
-    }),
-
-    // ---------- 项目 ----------
-    scanProject: (dirPath: string) =>
-      guard(Promise.resolve(scanner.scan(dirPath)), '扫描项目失败'),
-
-    /**
-     * 新增项目：校验目录 → 扫描 package.json → 组装并落盘。
-     * 组装规则照着 Electron 版 ipc.ts 的 addProject 搬过来（含「仅管理目录」那条分支）。
-     */
-    addProject: async (input: AddProjectInput): Promise<Result<Project>> => {
-      if (!input || typeof input.path !== 'string')
-        return fail('参数不合法')
-
-      const dirPath = input.path.trim()
-      if (!(await invoke<boolean>('fs_is_dir', { path: dirPath }))) {
-        return fail('目录不存在或不是文件夹')
-      }
-
-      // 界面已经拦过一次，这里是兜底：路径写法不同（盘符大小写、斜杠方向）也算同一个目录
-      const existing = state.projects().find(project => samePath(project.path, dirPath))
-      if (existing)
-        return fail(`该目录已经添加过了（「${existing.name}」）`)
-
-      const scan = await scanner.scan(dirPath)
-
-      // 解析失败的 package.json 允许以「仅管理目录」的方式加入（设计文档 §7）
-      if (!scan.ok && !scan.parseError)
-        return fail(scan.error ?? '项目扫描失败')
-      if (scan.parseError && input.allowInvalid !== true) {
-        return fail(scan.error ?? 'package.json 解析失败')
-      }
-
-      const manageOnly = !scan.ok
-      const buildList = Array.isArray(input.build) ? input.build : scan.build
-
-      const project: Project = {
-        id: crypto.randomUUID(),
-        name: input.name?.trim() || scan.name,
-        path: dirPath,
-        // 标识色：自动取一个当前用得最少的颜色，前五个项目因此两两不同（见 packages/core/src/project-color.ts）
-        color: nextProjectColor(state.projects().map(item => item.color)),
-        packageManager: 'auto',
-        detectedPackageManager: scan.detectedPackageManager,
-        framework: scan.framework || 'Node',
-        version: scan.version || '0.0.0',
-        scripts: {
-          serve: input.serve || scan.serve,
-          build: manageOnly ? [] : buildList,
-          defaultBuild: manageOnly ? undefined : input.defaultBuild || buildList[0],
-        },
-        outputDir: scan.outputDir ?? '',
-        nodeRequirement: scan.enginesNode,
-        autoOpenExplorer: true,
-        manageOnly: manageOnly || undefined,
-        // 首页展示：只有界面明确勾了才写 true —— 缺省与老项目都是不展示（见 Project.home）
-        home: input.home === true || undefined,
-        groupId: input.groupId,
-        order: state.projects().length,
-        createdAt: Date.now(),
-        lastUsedAt: Date.now(),
-      }
-
-      state.addProject(project)
-      emit('projectChanged', project)
-      return ok(project)
-    },
-
-    listProjects: () => Promise.resolve(state.listProjects()),
-    updateProject: (id: string, patch: Parameters<WorkbenchApi['updateProject']>[1]) =>
-      guard(Promise.resolve(state.updateProject(id, patch)), '更新项目失败'),
-    removeProject: (id: string) => {
-      state.removeProject(id)
-      return Promise.resolve(ok(null))
-    },
-    relocateProject: (id: string, newPath: string) =>
-      guard(Promise.resolve(state.relocateProject(id, newPath)), '重新绑定路径失败'),
-    checkProjectPaths: () => state.checkProjectPaths(),
-
-    // ---------- 分组 ----------
-    createGroup: (name: string) =>
-      guard(Promise.resolve(state.createGroup(name)), '创建分组失败'),
-    renameGroup: (id: string, name: string) =>
-      guard(Promise.resolve(state.renameGroup(id, name)), '重命名分组失败'),
-    removeGroup: (id: string) => {
-      state.removeGroup(id)
-      return Promise.resolve(ok(null))
-    },
-    reorderGroups: (ids: string[]) =>
-      guard(Promise.resolve(state.reorderGroups(ids)), '重排分组失败'),
-
-    // ---------- 快捷启动 ----------
-    // 这几个是数组 / 对象形状的取值接口，必须真实现：落到「未移植」兜底会返回 Result 对象，
-    // 而 store 会当数组遍历，直接抛错并把整条 init() 打断（系统状态探测就因此一直没跑起来）。
-    listQuickApps: () => state.quickAppList(),
-    pickQuickTarget: () =>
-      openDialog({
-        directory: false,
-        multiple: false,
-        title: '选择要启动的程序',
-        filters: [
-          { name: '程序', extensions: ['exe', 'lnk', 'bat', 'cmd'] },
-          { name: '全部文件', extensions: ['*'] },
-        ],
-      }),
-    addQuickApp: (input: Parameters<WorkbenchApi['addQuickApp']>[0]) =>
-      guard(Promise.resolve(state.addQuickApp(input)), '添加快捷启动失败'),
-    updateQuickApp: (id: string, patch: Parameters<WorkbenchApi['updateQuickApp']>[1]) =>
-      guard(Promise.resolve(state.updateQuickApp(id, patch)), '更新快捷启动失败'),
-    removeQuickApp: (id: string) => {
-      state.removeQuickApp(id)
-      return Promise.resolve(ok(null))
-    },
-    reorderQuickApps: (ids: string[]) =>
-      guard(Promise.resolve(state.reorderQuickApps(ids)), '重排快捷启动失败'),
-
-    /** 启动：走 ShellExecute，进程不归 Workbench 管 */
-    launchQuickApp: (id: string) => quick.launch(id),
-
-    /** 取程序图标（data URL）；取不到就失败，界面用首字母兜底 */
-    quickAppIcon: (target: string) => quick.icon(target),
-
-    // ---------- 独立命令 ----------
-    listCommands: () => Promise.resolve(state.commandList()),
-    addCommand: (input: Parameters<WorkbenchApi['addCommand']>[0]) =>
-      guard(Promise.resolve(state.addCommand(input)), '添加命令失败'),
-    updateCommand: (id: string, patch: Parameters<WorkbenchApi['updateCommand']>[1]) =>
-      guard(Promise.resolve(state.updateCommand(id, patch)), '更新命令失败'),
-    removeCommand: (id: string) => {
-      state.removeCommand(id)
-      return Promise.resolve(ok(null))
-    },
-
-    // ---------- 工作日志（本地文件，不进同步仓库） ----------
-    listWorkLogs: () => workLog.listWorkLogs(),
-    addWorkLog: (input: Parameters<WorkbenchApi['addWorkLog']>[0]) => workLog.addWorkLog(input),
-    updateWorkLog: (id: string, patch: Parameters<WorkbenchApi['updateWorkLog']>[1]) =>
-      workLog.updateWorkLog(id, patch),
-    removeWorkLog: (id: string) => workLog.removeWorkLog(id),
-
-    // ---------- AI 热点（本地缓存 + 宿主侧的内置源白名单） ----------
-    getAiNews: () => aiNews.getAiNews(),
-    refreshAiNews: () => aiNews.refreshAiNews(),
-    loadAiNewsArticle: (url: string) => aiNews.loadAiNewsArticle(url),
-
-    // ---------- 笔记（用户自己挑的一个文件夹里的 markdown 文件） ----------
-    listNotes: (root: string) => note.listNotes(root),
-    readNote: (root: string, rel: string) => note.readNote(root, rel),
-    writeNote: (root: string, rel: string, content: string) => note.writeNote(root, rel, content),
-    createNote: (root: string, input: Parameters<WorkbenchApi['createNote']>[1]) =>
-      note.createNote(root, input),
-    renameNote: (root: string, rel: string, name: string) => note.renameNote(root, rel, name),
-    removeNote: (root: string, rel: string) => note.removeNote(root, rel),
-    moveNote: (root: string, rel: string, targetDir: string) =>
-      note.moveNote(root, rel, targetDir),
-    syncNotes: (input: Parameters<WorkbenchApi['syncNotes']>[0]) => note.syncNotes(input),
-    noteRepoState: (dir: string) => note.noteRepoState(dir),
-    uploadNoteImage: (input: Parameters<WorkbenchApi['uploadNoteImage']>[0]) =>
-      note.uploadNoteImage(input),
-    listNoteImages: (input: Parameters<WorkbenchApi['listNoteImages']>[0]) =>
-      note.listNoteImages(input),
-    deleteNoteImages: (input: Parameters<WorkbenchApi['deleteNoteImages']>[0]) =>
-      note.deleteNoteImages(input),
-    scanNoteTexts: (root: string) => note.scanNoteTexts(root),
-
-    // ---------- 视频（用户自己挑的一个文件夹里的 MP4） ----------
-    listVideos: (root: string) => video.listVideos(root),
-    loadVideo: (root: string, rel: string) => video.loadVideo(root, rel),
-
-    // ---------- 技能（住在笔记仓库的一个子目录里，见 packages/skills/src/skills.ts） ----------
-    listSkills: (root: string, dir: string) => skill.listSkills(root, dir),
-    skillState: (dir: string) => skill.skillState(dir),
-    skillSync: (root: string, dir: string) => skill.skillSync(root, dir),
-    createSkill: (root: string, dir: string, input: Parameters<WorkbenchApi['createSkill']>[2]) =>
-      skill.createSkill(root, dir, input),
-    saveSkillFile: (root: string, dir: string, id: string, rel: string, content: string) =>
-      skill.saveSkillFile(root, dir, id, rel, content),
-    listSkillFiles: (root: string, dir: string, id: string) => skill.listSkillFiles(root, dir, id),
-    readSkillFile: (root: string, dir: string, id: string, rel: string) =>
-      skill.readSkillFile(root, dir, id, rel),
-
-    // ---------- 密码保险库 ----------
-    // 密钥与条目都在适配层那边（workbench/vault.ts）：Rust 只管落盘、凭据管理器与 git。
-    // 同步仓库地址与其余几条同步同一个入口 —— 没登录一律当没填（见 syncRepo 的说明）。
-    vaultKeyState: () => vault.keyState(),
-    vaultCreateKey: (replace: boolean) => vault.createKey(replace),
-    vaultHello: () => vault.helloState(),
-    vaultUnlock: (password: string) => vault.unlock(password),
-    vaultUnlockHello: () => vault.unlockHello(),
-    vaultLock: () => Promise.resolve(vault.lock()),
-    // 导出 / 导入都自己弹对话框：密钥是一段三百来字符的 base64，让人手抄错一个字符的后果
-    // 是另一台机器上一条都解不开，所以只走文件这条路（取消返回 false，不是失败）
-    vaultExportKey: async (): Promise<Result<boolean>> => {
-      const path = await saveDialog({
-        title: '导出保险库密钥',
-        defaultPath: 'workbench-vault-key.txt',
-        filters: [{ name: '密钥文件', extensions: ['txt'] }],
-      })
-      if (!path)
-        return ok(false)
-
-      const written = await vault.exportKey(path)
-      return written.ok ? ok(true) : fail(written.error ?? '导出密钥失败')
-    },
-    vaultImportKeyFile: async (): Promise<Result<boolean>> => {
-      const path = await openDialog({
-        directory: false,
-        multiple: false,
-        title: '选择密钥文件',
-        filters: [
-          { name: '密钥文件', extensions: ['txt'] },
-          { name: '全部文件', extensions: ['*'] },
-        ],
-      })
-      if (!path)
-        return ok(false)
-
-      const imported = await vault.importKeyFile(path)
-      return imported.ok ? ok(true) : fail(imported.error ?? '导入密钥失败')
-    },
-    vaultForgetKey: () => vault.forgetKey(),
-    vaultLoad: () => vault.load(),
-    vaultSaveEntry: (id: string, entry: Parameters<WorkbenchApi['vaultSaveEntry']>[1]) =>
-      vault.save({ id, entry }),
-    vaultRemoveEntry: (id: string) => vault.remove(id),
-    vaultSync: () => vault.sync(syncRepo()),
-    vaultRemoteKeyStatus: () => vault.remoteKeyStatus(syncRepo()),
-    removeSkill: (root: string, dir: string, id: string) => skill.removeSkill(root, dir, id),
-    importSkill: (root: string, dir: string, source: string, id: string) =>
-      skill.importSkill(root, dir, source, id),
-    skillHistory: (root: string, dir: string, id: string, limit?: number) =>
-      skill.skillHistory(root, dir, id, limit),
-    restoreSkill: (root: string, dir: string, id: string, hash: string) =>
-      skill.restoreSkill(root, dir, id, hash),
-    compareSkillVersion: (root: string, dir: string, id: string, hash: string) =>
-      skill.compareSkillVersion(root, dir, id, hash),
-    installSkill: (root: string, dir: string, id: string, projectDir: string, overwrite: boolean) =>
-      skill.installSkill(root, dir, id, projectDir, overwrite),
-    scanSkillCopies: (root: string, dir: string, id: string, projectDirs: string[]) =>
-      skill.scanSkillCopies(root, dir, id, projectDirs),
-
-    // ---------- 知识库（用户在别处维护的独立项目，见 workbench/kb.ts） ----------
-    // 后两个参数是原始数据的来源清单（来源名 → 本机一个文件夹）：扫与读都要带上它
-    kbScan: (root: string, sources: Parameters<WorkbenchApi['kbScan']>[1]) => kb.kbScan(root, sources),
-    kbRead: (root: string, rel: string, sources: Parameters<WorkbenchApi['kbRead']>[2]) =>
-      kb.kbRead(root, rel, sources),
-    // 目录与索引的重建由应用自己做（对齐仓库脚本的输出）；内容由 AI 助手那一轮写入
-    kbIndexBuild: (root: string, generatedAt: string) => kb.kbIndexBuild(root, generatedAt),
-    // 同步与仓库探测复用笔记那两条通用通道（对任意文件夹、认它自己的 origin），技能页同款
-    kbSync: (input: Parameters<WorkbenchApi['kbSync']>[0]) => kb.kbSync(input),
-    kbRepoState: (dir: string) => kb.kbRepoState(dir),
-    // AI 助手那几条不在这里：它们要回传进程输出、按会话 id 认领事件，
-    // 与 spawn_session 同一条路子住在适配层（见 workbench/ai.ts）
-
-    // ---------- Pi 的技能（AI 助手页那颗「技能」按钮，见 workbench/pi-skill.ts） ----------
-    // 与上面技能页那组不是一回事：那组管「技能库 + 装到项目 + 版本提交」，
-    // 这一组只管 AI 助手页那两个 `.agents/skills` 根里的目录
-    piSkillList: (root: string) => piSkill.piSkillList(root),
-    piSkillInstallZip: (root: string, zip: string, id: string | null, overwrite: boolean) =>
-      piSkill.piSkillInstallZip(root, zip, id, overwrite),
-    piSkillInstallDir: (root: string, source: string, id: string | null, overwrite: boolean) =>
-      piSkill.piSkillInstallDir(root, source, id, overwrite),
-    piSkillInstallUrl: (root: string, url: string, id: string | null, overwrite: boolean) =>
-      piSkill.piSkillInstallUrl(root, url, id, overwrite),
-    piSkillRemove: (root: string, id: string) => piSkill.piSkillRemove(root, id),
-
-    // ---------- 统计 ----------
-    getActivity: () => Promise.resolve(state.activityView()),
-    /**
-     * 记一次活跃度。适配层内部那几个来源直接调 `activity.recordActivity`，
-     * 这条通道只给渲染层里那一处 —— AI 助手跑完一轮是在 store 里才知道的（见 stores/ai.ts 的 settle）。
-     */
-    recordActivity: async (kind: Parameters<WorkbenchApi['recordActivity']>[0]) => {
-      activity.recordActivity(kind)
-      return ok(null)
-    },
-    /**
-     * Token 用量：实读 + 合并 + 按需同步。
-     * 同步仓库地址从设置里现取 —— 用户刚在设置里填完，下一次刷新就该用上新地址。
-     */
-    getTokenUsage: () => guard(getTokenUsage({ repo: syncRepo() }), '读取 token 用量失败'),
-    /** 首屏先手：只读本地那份快照，实读结果随后覆盖它（见 apps/desktop/src/renderer/src/types.ts 的说明） */
-    getTokenUsageSnapshot: () =>
-      guard(getTokenUsageSnapshot({ repo: syncRepo() }), '读取 token 快照失败'),
-    /** 手动同步：绕过自动同步的节流（面板上的同步按钮），只推拉用量分片 */
-    syncTokenUsage: () => guard(syncTokenUsage(syncRepo()), '同步 token 用量失败'),
-    /** 只同步外观配置（设置 → 外观 →「同步一次」）：推本机 theme.json、拉回别的机器的 */
-    syncThemeConfig: () => guard(syncThemeConfig(syncRepo()), '同步外观配置失败'),
-    /**
-     * 仓库里的其它机器（含各自的外观配置），设置界面「从别的机器取外观」用。
-     * 与上面两个同理，地址从设置现取：用户刚填完就该看到新仓库里的机器。
-     */
-    listSyncDevices: () => listSyncDevices(syncRepo()),
-
-    /**
-     * ETF 缓存的多机复用：开同步时先把别的机器那份并进本机，刷新完再推回去。
-     * 仓库地址同样只在登录后取（`syncRepo`）；没同步可用时两个方法都直接给「未启用」。
-     */
-    etfSyncPull: async () => {
-      const repo = syncRepo()
-      if (!repo)
-        return ok({ enabled: false, own: false, changed: false })
-      const { id } = await localDevice()
-      if (!id)
-        return ok({ enabled: false, own: false, changed: false })
-      return guard(etf.pullEtfCache(repo, id), '同步 ETF 缓存失败')
-    },
-    etfSyncPublish: async () => {
-      const repo = syncRepo()
-      if (!repo)
-        return ok(null)
-      const { id } = await localDevice()
-      if (!id)
-        return ok(null)
-      return guard(etf.publishEtfCache(repo, id), '同步 ETF 缓存失败')
-    },
-
-    // ---------- 设置与布局 ----------
-    getSettings: () => Promise.resolve(state.settings()),
-    updateSettings: (patch: Partial<AppSettings>) => {
-      const next = state.updateSettings(patch)
-      // 开机自启与全局快捷键是「设置即系统状态」：改完要立刻落到系统上
-      void syncSystemIntegration(next)
-      return Promise.resolve(ok(next))
-    },
-    getThemeConfig: () => Promise.resolve(state.themeConfig()),
-    /**
-     * 首页布局与外观同一个文件（theme.json），所以改主题也可能改了设置 ——
-     * 把合并后的那份推一遍，渲染层的 settings 才会跟着刷新（应用别的机器的配置就走这条路）。
-     */
-    updateThemeConfig: (patch: Partial<ThemeConfig>) => {
-      const next = state.updateThemeConfig(patch)
-      emit('settingsChanged', state.settings())
-      return Promise.resolve(ok(next))
-    },
-
-    // ---------- 背景图 ----------
-    pickBackground: () =>
-      openDialog({
-        directory: false,
-        multiple: false,
-        title: '选择工作区背景图',
-        filters: [{ name: '图片', extensions: IMAGE_EXTENSIONS }],
-      }),
-
-    /**
-     * 取工作区背景图。
-     *
-     * 只做两件事：把 `builtin:<id>` 解析成真实路径，再让后端把这张图的读取权限授给 asset 协议。
-     * 图片本身交给 webview 按文件加载，我们这边不解码、不缩放、不编码，也不生成 base64 字符串。
-     *
-     * 之前是后端解码 → 缩到 2560 → 编成 JPEG → base64 回传：实测一张 3824×2400 的壁纸要 249ms、
-     * 产物 270KB，而且**每次启动都重算一遍**，那 249ms 正好落在首屏之后，表现成「背景图晚一步才出来」。
-     * 现在这条路只剩一次「读文件头校验 + 授权」，1ms 量级。
-     *
-     * 失败原因依旧照实带回去：坏图 / 不存在的图在设置面板里会被提示，而不是静默地什么都不显示。
-     */
-    loadBackground: async (path: string): Promise<Result<BackgroundImage>> => {
-      try {
-        const target = path.startsWith(BUILTIN_PREFIX)
-          ? await resolveBuiltin(path.slice(BUILTIN_PREFIX.length))
-          : path
-        if (!target)
-          return fail(`内置壁纸已不存在：${path}`)
-
-        await invoke('allow_background', { path: target })
-        return ok({ path, name: target.split(/[\\/]/).pop() ?? target, url: assetUrl(target) })
-      }
-      catch (error) {
-        return fail(errorText(error, '读取背景图失败'))
-      }
-    },
-
-    /** 内置壁纸清单（含缩略图）：缩略图压到 320 就够面板里看了 */
-    listWallpapers: async (): Promise<BuiltinWallpaper[]> => {
-      const files = await invoke<string[]>('list_wallpapers')
-      const items = await Promise.all(
-        files.map(async (file) => {
-          const item = wallpaperFrom(file)
-          try {
-            return {
-              ...item,
-              thumbnail: await invoke<string>('image_data_url', {
-                path: file,
-                maxEdge: THUMBNAIL_MAX_EDGE,
-                quality: THUMBNAIL_QUALITY,
-              }),
-            }
-          }
-          catch {
-            return item
-          }
-        }),
-      )
-      return items
-    },
-
-    // ---------- 数据目录 ----------
-    getDataDir: () => state.dataDir(),
-
-    // ---------- 进程：项目十件事 ----------
-    // 起什么命令由这里决定（后端只认整行命令），所以项目查找也要在这一层做
-    install: (id: string) => withProject(id, project => session.installProject(project)),
-    start: (id: string) => withProject(id, project => session.startProject(project)),
-    build: (id: string, script: string) =>
-      withProject(id, project => session.buildProject(project, script)),
-    runCustom: (id: string, index: number) =>
-      withProject(id, project => session.runCustom(project, index)),
-    stop: (id: string, kind?: TerminalKind) => session.stopOwner(id, kind),
-    startCommand: (id: string) => withCommand(id, entry => session.startCommand(entry)),
-    stopCommand: (id: string) => session.stopCommand(id),
-
-    // ---------- 系统 ----------
-    checkPackageManagers: () => system.checkPackageManagers(),
-    installPackageManager: (pm: InstallablePackageManager) => system.installPackageManager(pm),
-
-    checkNodeVersion: (id: string) => nvm.checkNodeVersion(id),
-
-    /** nvm 只读探测：目录、settings.txt、软链都由 Rust 扫，形状与 NvmStatus 一致 */
-    getNvmStatus: () => nvm.status(),
-
-    /** nrm：镜像清单与「当前是哪个」都问 nrm 自己（见 src-tauri/src/nrm.rs） */
-    getNrmStatus: () => nrm.status(),
-    installNrm: () => nrm.install(),
-    useNrmRegistry: (name: string) => nrm.useRegistry(name),
-
-    pickDirectory: (title?: string, defaultPath?: string) =>
-      openDialog({
-        directory: true,
-        multiple: false,
-        title: title ?? '选择项目目录',
-        ...(defaultPath ? { defaultPath } : {}),
-      }),
-    // 挑一个文件（技能包那种要按后缀过滤的走这条；取消回 null，不是失败）
-    pickFile: (title?: string, filters?: Array<{ name: string, extensions: string[] }>) =>
-      openDialog({
-        directory: false,
-        multiple: false,
-        title: title ?? '选择文件',
-        ...(filters && filters.length ? { filters } : {}),
-      }),
-    // 挑多个文件（邮箱发信的附件用）；全取消回 null
-    pickFiles: (title?: string, filters?: Array<{ name: string, extensions: string[] }>) =>
-      openDialogMultiple({
-        directory: false,
-        multiple: true,
-        title: title ?? '选择文件',
-        ...(filters && filters.length ? { filters } : {}),
-      }),
-    // 「另存为」挑保存路径（邮箱附件下载用）；取消回 null，不是失败
-    pickSavePath: (options: { title?: string, defaultPath?: string, filters?: Array<{ name: string, extensions: string[] }> }) =>
-      saveDialog({
-        title: options.title ?? '另存为',
-        ...(options.defaultPath ? { defaultPath: options.defaultPath } : {}),
-        ...(options.filters && options.filters.length ? { filters: options.filters } : {}),
-      }),
-    checkPort: (port: number) => invoke('check_port', { port }),
-    killPortProcess: (port: number) =>
-      guard(invoke<null>('kill_port_process', { port }), '结束进程失败'),
-    reveal: (targetPath: string) => {
-      // 资源管理器只认反斜杠：给它的路径一律换过（见 windowsPath），否则会开到别处
-      void invoke('reveal', { path: windowsPath(targetPath) })
-      return Promise.resolve(ok(null))
-    },
-    // 这条**要**等结果：没装 VS Code 时 ShellExecute 会失败，得把原因说出来
-    openInVSCode: (path: string) =>
-      guard(invoke<null>('open_in_vscode', { path }), '打开 VS Code 失败'),
-    openExternal: (url: string) =>
-      guard(invoke<null>('open_external', { url }), '打开链接失败'),
-    /** 用系统默认程序打开本地文件（与快捷启动同走 open_path，不新增 Rust 命令） */
-    openPath: (path: string) => guard(invoke<null>('open_path', { path }), '打开文件失败'),
-    /** 按路径读一个文本文件（AI 预览栏用；fs_read_text 一直在，这里给个能判 ok 的门面） */
-    readTextFile: (path: string) => guard(invoke<string>('fs_read_text', { path }), '读取文件失败'),
-    /**
-     * 按路径读一个二进制文件、以 base64 回传（AI 预览栏的 DOCX / PPTX 是 zip 容器，
-     * 文本通道读不了；解码见 decodeBase64ToBuffer）。
-     */
-    readBinaryFile: (path: string) =>
-      guard(invoke<string>('fs_read_base64', { path }), '读取文件失败'),
-    /**
-     * 把一张图片按**单个文件**授权给 asset 协议，回传 webview 能直接加载的 URL。
-     * 与工作区背景图同一条命令（`allow_background`：读文件头验图 + 授权）——
-     * AI 预览栏显示回答里提到的图片走的就是这条边界，不另开命令。
-     */
-    allowPreviewImage: async (path: string): Promise<Result<{ url: string }>> => {
-      try {
-        await invoke('allow_background', { path })
-        return ok({ url: assetUrl(path) })
-      }
-      catch (error) {
-        return fail(errorText(error, '这张图交不到预览里'))
-      }
-    },
-
-    // ---------- 窗口 ----------
-    minimizeWindow: () => {
-      void invoke('window_minimize')
-    },
-    toggleMaximizeWindow: () => {
-      void invoke('window_toggle_maximize')
-    },
-    closeWindow: () => {
-      void invoke('window_close')
-    },
-    getWindowState: () =>
-      invoke<boolean>('window_is_maximized').then((maximized): WindowState => ({ maximized })),
-    // 窗口标题与托盘提示归系统，只能在 Rust 侧设；失败无处可报（它不影响任何功能），
-    // 名字的收敛已经在上游做过了
-    setAppName: (name: string) => {
-      void invoke('set_app_name', { name })
-    },
-    getAppVersion: () => invoke<string>('app_version').catch(() => '—'),
-
-    // ---------- 样式参考库（token 是随包静态资源，导出到项目时只往后端递内容） ----------
-    writeDesign: (projectDir: string, content: string) => design.writeDesign(projectDir, content),
-
-    // ---------- 禅道 ----------
-    zentaoSession: zentao.session,
-    zentaoLogin: zentao.login,
-    zentaoLogout: zentao.logout,
-    zentaoBugs: zentao.bugs,
-    zentaoWatch: zentao.watch,
-    zentaoNotify: zentao.notify,
-    onZentaoCheck: zentao.onCheck,
-    zentaoOpenWindow: zentao.openWindow,
-
-    // ---------- 账号 ----------
-    // 换 token、回环监听、凭据落盘都在 Rust 侧；这里只驱动轮询并落显示资料，
-    // 全程不会有 token 回到渲染层（见 workbench/auth.ts）
-    authStatus: () => auth.authStatus(),
-    authRefreshAccount: (provider: AuthProvider) => auth.refreshAccount(provider),
-    authLogin: (provider: AuthProvider, onAuthUrl?: (authUrl: string, opened: boolean) => void) =>
-      auth.login(provider, onAuthUrl),
-    authLoginSubmit: (url: string) => auth.submit(url),
-    authLoginCancel: () => auth.cancel(),
-    authLogout: (provider: AuthProvider) => auth.logout(provider),
-
-    // ---------- 事件订阅 ----------
-    // 窗口状态来自 Tauri 事件；其余来自适配层内部的广播（见 events.ts），
-    // 契约与 preload 版完全一致，组件不需要知道底下换了实现。
-    onWindowState: (handler: (value: WindowState) => void) =>
-      listen<WindowState>('window:state-changed', handler),
-    onLog: (handler: Parameters<WorkbenchApi['onLog']>[0]) => events.subscribe('log', handler),
-    onStatus: (handler: Parameters<WorkbenchApi['onStatus']>[0]) =>
-      events.subscribe('status', handler),
-    onTerminalOpen: (handler: Parameters<WorkbenchApi['onTerminalOpen']>[0]) =>
-      events.subscribe('terminalOpen', handler),
-    onClear: (handler: (event: { terminal: string }) => void) =>
-      events.subscribe('clear', handler),
-    onPmInstallLog: (handler: Parameters<WorkbenchApi['onPmInstallLog']>[0]) =>
-      events.subscribe('pmInstallLog', handler),
-    onProjectChanged: (handler: Parameters<WorkbenchApi['onProjectChanged']>[0]) =>
-      events.subscribe('projectChanged', handler),
-    /** 活跃度记了一笔（任何一种来源，见 workbench/activity.ts）：首页那张图据此重拉 */
-    onActivityChanged: (handler: () => void) => events.subscribe('activityChanged', handler),
-    onSettingsChanged: (handler: Parameters<WorkbenchApi['onSettingsChanged']>[0]) =>
-      events.subscribe('settingsChanged', handler),
-    onTheme: (handler: Parameters<WorkbenchApi['onTheme']>[0]) =>
-      events.subscribe('theme', handler),
-
-    onQuickApps: (handler: Parameters<WorkbenchApi['onQuickApps']>[0]) =>
-      events.subscribe('quickApps', handler),
-
-    /** 后台自动同步跑完一轮（见 token.ts 的 getTokenUsage）：Token 面板据此立刻重取 */
-    onTokenSynced: (handler: () => void) => events.subscribe('tokenSynced', handler),
-
-    onQuitConfirm: (handler: Parameters<WorkbenchApi['onQuitConfirm']>[0]) =>
-      events.subscribe('quitConfirm', handler),
-
-    /** 邮件系统通知被点了（Rust 已唤出主窗口）：换页并打开那封信由 store 接手 */
-    onMailNotifyClick: (handler: Parameters<WorkbenchApi['onMailNotifyClick']>[0]) =>
-      events.subscribe('mailNotifyClick', handler),
-
-    /** 把用户的选择回传后端：后端在另一个线程里等着它决定「停进程还是留着」 */
-    respondQuitConfirm: (choice: Parameters<WorkbenchApi['respondQuitConfirm']>[0]) => {
-      void invoke('resolve_quit_choice', { choice })
-    },
-
-    // ---------- 截图与钉图（见 docs/modules/screenshot.md） ----------
-    //
-    // 这两组通道三个窗口共用：主窗口（托盘提示、设置里的快捷键）、
-    // 遮罩窗口（capture.html）、钉图窗口（pin.html）。后两个入口只装这一层适配层，
-    // **不装 store、不 initState** —— 装了就会与主窗口抢着写同一批 JSON。
-    // 只给验证配方用（界面上没有入口，见 docs/modules/screenshot.md 的「验证」一节）
-    beginCapture: () => guard(invoke<number>('capture_begin'), '开始截图失败'),
-    // 把「按下热键到看见遮罩」压到两百毫秒级的就这一条：Rust 据此把遮罩窗口先建好，
-    // 之后每场截图只是「塞帧 → 摆位置 → 显示」（见 docs/modules/screenshot.md）
-    capturePrewarm: (enabled: boolean) =>
-      guard(invoke<null>('capture_prewarm', { enabled }), '预建截图遮罩失败'),
-    abortCapture: () => {
-      void invoke('capture_abort')
-      return Promise.resolve()
-    },
-    captureContext: () => guard(invoke<CaptureContext>('capture_context'), '取截图上下文失败'),
-    // 原始 PNG 字节：命令返回 `ipc::Response`，Tauri 的二进制回包在 JS 这边是 ArrayBuffer
-    captureFrame: () => guard(invoke<ArrayBuffer>('capture_frame'), '取不到这一帧截图'),
-    // 遮罩里的 JS 报「这一场的帧已经画到画布上了」：Rust 等到每一块屏都报齐才显示遮罩 ——
-    // 抢在帧前面显示就是先闪一块黑（见 docs/modules/screenshot.md 与 capture.rs 的 capture_show）
-    showCapture: (id: number) => guard(invoke<null>('capture_show', { id }), '显示截图遮罩失败'),
-    copyImage: (png: string) => guard(invoke<null>('capture_copy', { png }), '复制到剪贴板失败'),
-    // 没画标注时走这条：只给选区，由 Rust 从这一场缓存的原始帧里裁（省掉整圈 base64 往返）
-    copyFrame: (rect: { x: number, y: number, width: number, height: number }) =>
-      guard(invoke<null>('capture_copy_frame', rect), '复制到剪贴板失败'),
-    // 取字：Windows 自带的 OCR，Rust 从缓帧里裁选区识别，遮罩不收（还要回去拖选）
-    ocrRegion: (rect: { x: number, y: number, width: number, height: number }) =>
-      guard(invoke<OcrLine[]>('capture_ocr', rect), '取字失败'),
-    saveImage: (png: string, dir: string, name: string, unique: boolean) =>
-      guard(invoke<string>('capture_save', { png, dir, name, unique }), '保存截图失败'),
-    pinImage: (png: string, x: number, y: number, width: number, height: number, opacity: number) =>
-      guard(invoke<PinRecord>('pin_create', { png, x, y, width, height, opacity }), '钉图失败'),
-    pinContext: () => guard(invoke<PinRecord>('pin_context'), '取钉图信息失败'),
-    pinState: (patch: PinPatch) => guard(invoke<PinRecord>('pin_update', { patch }), '改钉图状态失败'),
-    pinClose: () => {
-      void invoke('pin_close')
-      return Promise.resolve()
-    },
-    pinCloseAll: () => {
-      void invoke('pin_close_all')
-      return Promise.resolve()
-    },
-    pinCopy: () => guard(invoke<null>('pin_copy'), '复制到剪贴板失败'),
-    pinSave: (dir: string, name: string, unique: boolean) =>
-      guard(invoke<string>('pin_save', { dir, name, unique }), '保存钉图失败'),
-
-    // ---------- 网速球（见 docs/modules/float-ball.md） ----------
-    //
-    // 角色与 capturePrewarm 一样：**值由渲染层推**，Rust 不去数据文件里读设置
-    // （盘上那份在「刚加的字段还没写回盘」那一段是空的）。球窗口与主窗口共用这一层，
-    // 它自己只装适配层、不装 store。
-    ballApply: (visible: boolean) =>
-      guard(invoke<null>('ball_apply', { visible }), '开悬浮球失败'),
-    ballContext: () => guard(invoke<BallContext>('ball_context'), '取悬浮球状态失败'),
-    ballOpen: (open: boolean) =>
-      guard(invoke<BallContext>('ball_open', { open }), '收起 / 展开悬浮球失败'),
-    ballDrag: () => guard(invoke<BallContext>('ball_drag'), '拖动悬浮球失败'),
-    ballOpenMain: () => {
-      void invoke('ball_open_main')
-      return Promise.resolve(ok(null))
-    },
-    netCounters: () => guard(invoke<NetCounters>('net_counters'), '取网速失败'),
-
-    applyHotkeys: () => guard(invoke<null>('apply_hotkeys', hotkeyArgs(state.settings())), '注册全局快捷键失败'),
-    // 截图是在工作线程里抓的，失败没法就地报给谁：Rust 推一条事件过来，
-    // 主窗口弹提示（那时界面多半藏在托盘里 / 根本没显示）
-    onCaptureFailed: (fn: (message: string) => void) => listen<string>('capture:failed', fn),
-    // 跟当前这场会话对一次：开场与收工各推一条（开场带这一场的编号，收工带 null）。
-    // 遮罩窗口是**跨场复用**的（预建、藏起来），显示 / 隐藏它不会让里面的 JS 重新开场，
-    // 两边都靠这一条（见 docs/modules/screenshot.md）。用 listenReady：遮罩要先挂上订阅、
-    // 再补问一次当前有没有会话，顺序反了会漏掉中间那一条
-    onCaptureSync: (fn: (id: number | null) => void) => listenReady<number | null>('capture:sync', fn),
-
-    // 尚未有人推的一个：首页布局（本地改动的推送方还没补）
-    onThemeConfig: () => noop,
+    ...syncApi,
+    ...projectApi,
+    ...domainsApi,
+    ...backgroundApi,
+    ...systemApi,
+    ...eventsApi,
   } as unknown as WorkbenchApi
 
   /**

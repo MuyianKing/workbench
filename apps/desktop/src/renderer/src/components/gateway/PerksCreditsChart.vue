@@ -8,6 +8,7 @@ import { init, use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import EmptyState from '@/components/EmptyState.vue'
+import { formatDecimal } from '@/format'
 import { useSettingsStore } from '@/stores/settings'
 
 /**
@@ -57,10 +58,6 @@ let resizeObserver: ResizeObserver | null = null
 const hasData = computed(() => props.days.some(day => day.credit > 0))
 const maxCredit = computed(() => Math.max(0, ...props.days.map(day => day.credit)))
 
-function fmt(value: number): string {
-  return value.toLocaleString('en-US', { maximumFractionDigits: 2 })
-}
-
 /** 设计令牌：画布上要的是具体颜色，CSS 变量得现读（明暗各一份） */
 function token(name: string, fallback: string): string {
   const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
@@ -75,7 +72,7 @@ function tipText(raw: unknown): string {
   if (!day)
     return ''
   return day.credit > 0
-    ? `${day.date} · +${fmt(day.credit)} 积分`
+    ? `${day.date} · +${formatDecimal(day.credit)} 积分`
     : `${day.date} · 没有获取积分`
 }
 
@@ -199,7 +196,7 @@ onBeforeUnmount(disposeChart)
       </h4>
       <span class="credits-chart__dim">
         {{ scope }}<template v-if="failed"> · {{ failed }} 个账号未读到</template>
-        <template v-if="hasData"> · 合计 +{{ fmt(total) }} 积分</template>
+        <template v-if="hasData"> · 合计 +{{ formatDecimal(total) }} 积分</template>
       </span>
     </header>
 

@@ -13,6 +13,7 @@
 //!
 //! 纯 I/O 适配：解析交给 [`crate::wb_credits`]。
 
+use crate::common::{civil_from_days, excerpt};
 use crate::http;
 use crate::wb_account::Account;
 use crate::wb_credits::{self, Credits};
@@ -144,7 +145,7 @@ fn post(account: &Account, path: &str, body: &serde_json::Value) -> Result<serde
         return Err(format!(
             "查询额度失败：HTTP {} {}",
             response.status,
-            excerpt(&text)
+            excerpt(&text, 160)
         ));
     }
 
@@ -241,33 +242,6 @@ pub fn format_wall_clock(unix: i64) -> String {
         (seconds % 3600) / 60,
         seconds % 60
     )
-}
-
-/// 距 1970-01-01 的天数 → 公历日期（Hinnant 算法，与 `days_from_civil` 互逆）。
-fn civil_from_days(days: i64) -> (i64, i64, i64) {
-    let z = days + 719_468;
-    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
-    let day_of_era = z - era * 146_097;
-    let year_of_era =
-        (day_of_era - day_of_era / 1460 + day_of_era / 36524 - day_of_era / 146_096) / 365;
-    let year = year_of_era + era * 400;
-    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
-    let month_prime = (5 * day_of_year + 2) / 153;
-    let day = day_of_year - (153 * month_prime + 2) / 5 + 1;
-    let month = if month_prime < 10 {
-        month_prime + 3
-    } else {
-        month_prime - 9
-    };
-    (if month <= 2 { year + 1 } else { year }, month, day)
-}
-
-fn excerpt(text: &str) -> String {
-    let trimmed = text.trim();
-    if trimmed.chars().count() <= 160 {
-        return trimmed.to_string();
-    }
-    trimmed.chars().take(160).collect::<String>() + "…"
 }
 
 #[cfg(test)]

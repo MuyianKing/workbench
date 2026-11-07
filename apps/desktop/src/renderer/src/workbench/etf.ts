@@ -1,4 +1,6 @@
 import type { EtfCache, EtfOverview } from '@workbench/etf'
+
+import type { EtfProgress, EtfRefreshOutcome, EtfSyncPullOutcome } from '@/types'
 /**
  * ETF 资金流（导航「ETF」页）的适配层实现：拉取编排与落盘。
  *
@@ -34,35 +36,13 @@ import {
   szseCoveredThrough,
 } from '@workbench/etf'
 import { errorText, invoke } from './bridge'
+// 载荷类型搬到 /types（契约侧）了；这里 re-export，老导入不动
+export type { EtfProgress, EtfRefreshOutcome, EtfSyncPullOutcome } from '@/types'
 
 /** Rust 回来的原始取数结果（与 etf.rs 的 EtfFetchResult 一致） */
 interface EtfFetchResult {
   status: number
   body: string
-}
-
-/** 刷新进度：页面那行「正在回填」的提示 */
-export interface EtfProgress {
-  phase: 'nav' | 'szse' | 'sse'
-  done: number
-  total: number
-}
-
-/** 一轮刷新的结论：新视图 + 有没有真的动过缓存 + 失败原因（如实给界面） */
-export interface EtfRefreshOutcome {
-  overview: EtfOverview
-  updated: boolean
-  notes: string[]
-}
-
-/** 从同步仓库拉回别的机器那几份缓存的结果 */
-export interface EtfSyncPullOutcome {
-  /** 有没有同步可用（没登录 / 没填仓库地址时为 false） */
-  enabled: boolean
-  /** 仓库里已经有本机那一份（第一次同步完之前是 false） */
-  own: boolean
-  /** 并进本机之后缓存有没有变 */
-  changed: boolean
 }
 
 /** 沪市逐日请求之间的间隔：交易所的接口，别连打 */

@@ -20,11 +20,12 @@
 
 use std::collections::HashSet;
 use std::io::Write;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+use crate::common::{civil_from_days, days_from_civil, now_millis, now_secs, redact};
 use crate::http;
 use crate::wb_account::Account;
 use crate::wb_api_billing;
@@ -347,19 +348,7 @@ pub struct ActivityRow {
 
 // ---------- 请求与解析 ----------
 
-fn now_secs() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|elapsed| elapsed.as_secs() as i64)
-        .unwrap_or(0)
-}
 
-fn now_millis() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|elapsed| elapsed.as_millis() as i64)
-        .unwrap_or(0)
-}
 
 fn sleep_secs(seconds: f64) {
     if seconds > 0.0 {
@@ -393,13 +382,6 @@ fn number_at(value: &Value) -> Option<i64> {
     value.as_f64().map(|number| number as i64)
 }
 
-fn excerpt(text: &str, max: usize) -> String {
-    let trimmed = text.trim();
-    if trimmed.chars().count() <= max {
-        return trimmed.to_string();
-    }
-    trimmed.chars().take(max).collect::<String>() + "…"
-}
 
 /// 聊天头：与网关对话同一条构造路径，会话 id 每请求新生成。
 fn chat_headers(account: &Account, model: Option<&str>) -> Vec<(String, String)> {
@@ -435,15 +417,7 @@ fn send_json(
     body: Option<&str>,
 ) -> Result<Value, String> {
     let refs = as_refs(headers);
-    let response = http::request_url(method, url, &refs, body)?;
-    if response.status != 200 {
-        return Err(format!(
-            "HTTP {} {}",
-            response.status,
-            excerpt(&response.text(), 200)
-        ));
-    }
-    serde_json::from_str(&response.text()).map_err(|err| format!("响应不是 JSON: {err}"))
+    http::request_json(method, url, &refs, body, http::JSON_MAX_BODY, 200)
 }
 
 fn chat_get(account: &Account, path: &str) -> Result<Value, String> {
@@ -1983,7 +1957,7 @@ pub fn record_activity(account: &Account, task: &str, ok: bool, message: &str) {
         nickname: account.label(),
         task: task.to_string(),
         ok,
-        message: safe_message(message),
+        message: redact(message),
     };
     let path = crate::paths::gateway_activity_file();
     if let Some(parent) = path.parent() {
@@ -2044,56 +2018,6 @@ fn compact_activity(path: &std::path::Path) {
     let _ = crate::fs_util::write_atomic(path, format!("{keep}\n").as_bytes());
 }
 
-/// 上游原文压成一行可读的短说明：换行折叠、已知的凭证形态打码、截断到 200 字。
-fn safe_message(text: &str) -> String {
-    let line = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    let line = redact_bearer(&line);
-    let line = redact_long_tokens(&line);
-    excerpt(&line, 200)
-}
-
-fn redact_bearer(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    let mut rest = text;
-    while let Some(index) = rest.find("Bearer ") {
-        out.push_str(&rest[..index]);
-        out.push_str("Bearer [redacted]");
-        let after = &rest[index + "Bearer ".len()..];
-        match after.find(char::is_whitespace) {
-            Some(end) => rest = &after[end..],
-            None => return out,
-        }
-    }
-    out.push_str(rest);
-    out
-}
-
-/// 32 位以上的连续十六进制 / `sk-` 形态：上游报错里回显密钥不算罕见。
-fn redact_long_tokens(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    let mut run = String::new();
-    let flush = |out: &mut String, run: &mut String| {
-        let is_secret = run.len() >= 32 && run.chars().all(|ch| ch.is_ascii_hexdigit())
-            || run.starts_with("sk-");
-        if is_secret {
-            out.push_str("[redacted]");
-        } else {
-            out.push_str(run);
-        }
-        run.clear();
-    };
-    for ch in text.chars() {
-        if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
-            run.push(ch);
-        } else {
-            flush(&mut out, &mut run);
-            out.push(ch);
-        }
-    }
-    flush(&mut out, &mut run);
-    out
-}
-
 /// 本地时间：`(year, month, day, hour)`。走系统自己的 `GetLocalTime`，不引日期 crate。
 fn local_parts() -> (i32, i32, i32, i32) {
     let mut now: windows_sys::Win32::Foundation::SYSTEMTIME = unsafe { std::mem::zeroed() };
@@ -2119,36 +2043,6 @@ fn local_date_offset(offset: i64) -> String {
     let days = days_from_civil(year as i64, month as i64, day as i64) + offset;
     let (year, month, day) = civil_from_days(days);
     format!("{year:04}-{month:02}-{day:02}")
-}
-
-/// 公历日期 → 距 1970-01-01 的天数（Hinnant 算法）。
-fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
-    let year = if month <= 2 { year - 1 } else { year };
-    let era = if year >= 0 { year } else { year - 399 } / 400;
-    let year_of_era = year - era * 400;
-    let month_prime = if month > 2 { month - 3 } else { month + 9 };
-    let day_of_year = (153 * month_prime + 2) / 5 + day - 1;
-    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
-    era * 146_097 + day_of_era - 719_468
-}
-
-/// 距 1970-01-01 的天数 → 公历日期（Hinnant 算法，与上面互逆）。
-fn civil_from_days(days: i64) -> (i64, i64, i64) {
-    let z = days + 719_468;
-    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
-    let day_of_era = z - era * 146_097;
-    let year_of_era =
-        (day_of_era - day_of_era / 1460 + day_of_era / 36524 - day_of_era / 146_096) / 365;
-    let year = year_of_era + era * 400;
-    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
-    let month_prime = (5 * day_of_year + 2) / 153;
-    let day = day_of_year - (153 * month_prime + 2) / 5 + 1;
-    let month = if month_prime < 10 {
-        month_prime + 3
-    } else {
-        month_prime - 9
-    };
-    (if month <= 2 { year + 1 } else { year }, month, day)
 }
 
 #[cfg(test)]
@@ -2375,7 +2269,7 @@ mod tests {
 
     #[test]
     fn 活动记录里的消息会被截断与打码() {
-        let message = safe_message(&format!("失败: Bearer abcdefghijklmnop {}", "a".repeat(48)));
+        let message = redact(&format!("失败: Bearer abcdefghijklmnop {}", "a".repeat(48)));
         assert!(message.contains("Bearer [redacted]"));
         assert!(!message.contains(&"a".repeat(48)));
         assert!(message.chars().count() <= 201);

@@ -12,6 +12,7 @@
 
 use serde::Serialize;
 use serde_json::Value;
+use crate::common::{days_from_civil, now_secs};
 
 /// 超过这个天数就算"永不过期"。上游用它表示无期限的包。
 pub const EXPIRY_SENTINEL_DAYS: f64 = 730.0;
@@ -374,12 +375,6 @@ fn round2(value: f64) -> f64 {
     (value * 100.0).round() / 100.0
 }
 
-fn now_secs() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|elapsed| elapsed.as_secs() as i64)
-        .unwrap_or(0)
-}
 
 /// 解析上游的墙钟时间 `YYYY-MM-DD HH:MM:SS`，按 **UTC+8** 折算成 Unix 秒。
 ///
@@ -412,17 +407,6 @@ pub fn parse_wall_clock(text: &str) -> Option<i64> {
     let days = days_from_civil(year, month, day);
     let local = days * 86400 + hour * 3600 + minute * 60 + second;
     Some(local - 8 * 3600)
-}
-
-/// 公历日期 → 距 1970-01-01 的天数（Howard Hinnant 的算法，对负数年份也成立）。
-fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
-    let year = if month <= 2 { year - 1 } else { year };
-    let era = if year >= 0 { year } else { year - 399 } / 400;
-    let year_of_era = year - era * 400;
-    let month_prime = (month + 9) % 12;
-    let day_of_year = (153 * month_prime + 2) / 5 + day - 1;
-    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
-    era * 146_097 + day_of_era - 719_468
 }
 
 #[cfg(test)]

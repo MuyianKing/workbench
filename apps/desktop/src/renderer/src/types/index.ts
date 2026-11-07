@@ -21,13 +21,22 @@ import type { VaultEntry, VaultRecord } from '@workbench/vault'
 import type { VideoNode, VideoSource } from '@workbench/video'
 import type { WorkLogEntry, WorkLogInput, WorkLogPatch, WorkRange, WorkSort } from '@workbench/work-log'
 import type { ZentaoBugList, ZentaoSession } from '@workbench/zentao'
+// 网关 / Qoder / ETF 的通道载荷类型：住在隔壁的 gateway.ts / qoder.ts / etf.ts（契约侧），
+// 这里导入并 re-export —— WorkbenchApi 直接引用，老代码从本文件或各自适配文件取都行。
+import type { EtfSyncPullOutcome } from './etf'
+import type { GatewayAccess, GatewayAccount, GatewayAccountImport, GatewayActionResult, GatewayActivityRow, GatewayCredits, GatewayGrantAccount, GatewayLoginPoll, GatewayLoginStart, GatewayModelInfo, GatewayPerksAutoConfig, GatewayPerksAutoRun, GatewayPullResult, GatewayStatus, GatewaySyncResult, GatewaySyncStatus, GatewayTaskRun, GatewayTasksSnapshot, GatewayUsageRow, GatewayUsageSummary, GatewayUsageWindow } from './gateway'
+import type { QoderAccess, QoderAccount, QoderAccountImport, QoderActivityRow, QoderClaimResult, QoderCredits, QoderEarningPoint, QoderHeatmapPoint, QoderLoginPoll, QoderLoginStart, QoderModelInfo, QoderPerksAutoConfig, QoderPerksAutoRun, QoderStatus, QoderTaskSnapshot, QoderUsageWindow } from './qoder'
 import { AI_PERMISSION_DEFAULT, AI_THINKING_DEFAULT } from '@workbench/ai'
 import { DEFAULT_APPEARANCE, TERMINAL_BUTTON_TOP_DEFAULT } from '@workbench/appearance'
 import { CAPTURE_ENABLED_DEFAULT, CAPTURE_HOTKEY_DEFAULT, CAPTURE_MAGNIFIER_DEFAULT, CAPTURE_PIN_OPACITY_DEFAULT, CAPTURE_SAVE_DIR_DEFAULT } from '@workbench/capture'
+
 import { PROJECT_SORT_DEFAULT } from '@workbench/core'
 import { WORK_RANGE_DEFAULT, WORK_SORT_DEFAULT } from '@workbench/work-log'
 import { ZENTAO_POLL_MINUTES_DEFAULT } from '@workbench/zentao'
 
+export * from './etf'
+export * from './gateway'
+export * from './qoder'
 export type {
   AiNewsArticle,
   AiNewsCache,
@@ -1104,29 +1113,29 @@ export interface WorkbenchApi {
    * 连上游；默认不启动、不监听。账号视图里不含 token，余额查询是显式动作
    * （原项目把它做成了一个带副作用的 GET）。
    */
-  gatewayStatus: () => Promise<Result<import('./workbench/gateway').GatewayStatus>>
+  gatewayStatus: () => Promise<Result<GatewayStatus>>
   gatewayStart: (port: number) => Promise<Result<number>>
   gatewayStop: () => Promise<Result<null>>
   /** 「随程序启动」：只改配置，下次应用启动时生效 */
   gatewayAutoStartSet: (enabled: boolean) => Promise<Result<null>>
-  gatewayAccounts: () => Promise<Result<import('./workbench/gateway').GatewayAccount[]>>
+  gatewayAccounts: () => Promise<Result<GatewayAccount[]>>
   gatewayReload: () => Promise<Result<null>>
-  gatewayLoginStart: () => Promise<Result<import('./workbench/gateway').GatewayLoginStart>>
-  gatewayLoginPoll: (loginState: string) => Promise<Result<import('./workbench/gateway').GatewayLoginPoll>>
-  gatewayCredits: (uid: string) => Promise<Result<import('./workbench/gateway').GatewayCredits>>
-  gatewayModels: () => Promise<Result<import('./workbench/gateway').GatewayModelInfo[]>>
+  gatewayLoginStart: () => Promise<Result<GatewayLoginStart>>
+  gatewayLoginPoll: (loginState: string) => Promise<Result<GatewayLoginPoll>>
+  gatewayCredits: (uid: string) => Promise<Result<GatewayCredits>>
+  gatewayModels: () => Promise<Result<GatewayModelInfo[]>>
   /** 从上游拉一次真实目录并落盘（手动触发，没有定时器） */
-  gatewayModelsRefresh: () => Promise<Result<import('./workbench/gateway').GatewayModelInfo[]>>
-  gatewayAccess: () => Promise<Result<import('./workbench/gateway').GatewayAccess>>
+  gatewayModelsRefresh: () => Promise<Result<GatewayModelInfo[]>>
+  gatewayAccess: () => Promise<Result<GatewayAccess>>
   gatewayRotateKey: () => Promise<Result<string>>
-  gatewayUsage: (days: number) => Promise<Result<import('./workbench/gateway').GatewayUsageSummary>>
-  gatewayUsageRows: (days: number) => Promise<Result<import('./workbench/gateway').GatewayUsageWindow>>
-  gatewayUsageRecent: (limit: number) => Promise<Result<import('./workbench/gateway').GatewayUsageRow[]>>
+  gatewayUsage: (days: number) => Promise<Result<GatewayUsageSummary>>
+  gatewayUsageRows: (days: number) => Promise<Result<GatewayUsageWindow>>
+  gatewayUsageRecent: (limit: number) => Promise<Result<GatewayUsageRow[]>>
   /** 手动同步网关流水；`force=false` 时一小时内的重复调用会被节流跳过 */
-  gatewayUsageSync: (force?: boolean) => Promise<Result<import('./workbench/gateway').GatewaySyncResult>>
+  gatewayUsageSync: (force?: boolean) => Promise<Result<GatewaySyncResult>>
   /** 只拉一次远端克隆（不推送）；读路径只读本地副本，靠它补上别的机器的新流水 */
-  gatewayUsagePull: () => Promise<Result<import('./workbench/gateway').GatewayPullResult>>
-  gatewaySyncStatus: () => Promise<import('./workbench/gateway').GatewaySyncStatus>
+  gatewayUsagePull: () => Promise<Result<GatewayPullResult>>
+  gatewaySyncStatus: () => Promise<GatewaySyncStatus>
   gatewayAccountSet: (uid: string, enabled: boolean) => Promise<Result<null>>
   /** 选号优先级：1..=100，数大的先用 */
   gatewayAccountPriority: (uid: string, priority: number) => Promise<Result<null>>
@@ -1134,59 +1143,59 @@ export interface WorkbenchApi {
   /** 导出账号：返回一段含明文 token 的 JSON，交给用户自己保管（不进同步仓库） */
   gatewayAccountsExport: () => Promise<Result<string>>
   /** 导入账号；`overwrite=false` 时同 uid 跳过 */
-  gatewayAccountsImport: (payload: string, overwrite: boolean) => Promise<Result<import('./workbench/gateway').GatewayAccountImport>>
+  gatewayAccountsImport: (payload: string, overwrite: boolean) => Promise<Result<GatewayAccountImport>>
   /** 福利页：当前号的成长任务 + 汇总（`uid` 为空取第一个已启用的国内号） */
-  gatewayTasks: (uid?: string) => Promise<Result<import('./workbench/gateway').GatewayTasksSnapshot>>
+  gatewayTasks: (uid?: string) => Promise<Result<GatewayTasksSnapshot>>
   /** 一键做任务领积分；`uid` 为空时跑全部已启用的国内账号 */
-  gatewayTasksRun: (uid?: string) => Promise<Result<import('./workbench/gateway').GatewayTaskRun>>
-  gatewayTasksTravel: (uid?: string) => Promise<Result<import('./workbench/gateway').GatewayActionResult[]>>
-  gatewayTasksStreak: (uid?: string) => Promise<Result<import('./workbench/gateway').GatewayActionResult[]>>
+  gatewayTasksRun: (uid?: string) => Promise<Result<GatewayTaskRun>>
+  gatewayTasksTravel: (uid?: string) => Promise<Result<GatewayActionResult[]>>
+  gatewayTasksStreak: (uid?: string) => Promise<Result<GatewayActionResult[]>>
   /** Buddy 加油站签到 */
-  gatewayCheckin: (uid?: string) => Promise<Result<import('./workbench/gateway').GatewayActionResult[]>>
-  gatewayActivityToday: () => Promise<Result<import('./workbench/gateway').GatewayActivityRow[]>>
+  gatewayCheckin: (uid?: string) => Promise<Result<GatewayActionResult[]>>
+  gatewayActivityToday: () => Promise<Result<GatewayActivityRow[]>>
   /** 福利页：积分发放流水（`uid` 为空时取全部已启用账号，界面按发放日汇总近 30 天） */
-  gatewayCreditGrants: (uid?: string) => Promise<Result<import('./workbench/gateway').GatewayGrantAccount[]>>
+  gatewayCreditGrants: (uid?: string) => Promise<Result<GatewayGrantAccount[]>>
   /** 福利自动跑：开关（默认关；日期标记由后端维护） */
-  gatewayPerksAutoConfig: () => Promise<Result<import('./workbench/gateway').GatewayPerksAutoConfig>>
-  gatewayPerksAutoSet: (enabled: boolean) => Promise<Result<import('./workbench/gateway').GatewayPerksAutoConfig>>
+  gatewayPerksAutoConfig: () => Promise<Result<GatewayPerksAutoConfig>>
+  gatewayPerksAutoSet: (enabled: boolean) => Promise<Result<GatewayPerksAutoConfig>>
   /** 按自然日与夜间窗口判断该不该跑；关着时不发请求 */
-  gatewayPerksAutoRun: () => Promise<Result<import('./workbench/gateway').GatewayPerksAutoRun>>
+  gatewayPerksAutoRun: () => Promise<Result<GatewayPerksAutoRun>>
   /** Qoder（国内版反代）。端口与密钥与 TBuddy 共用，两个代理同时只能跑一个。 */
-  qoderStatus: () => Promise<Result<import('./workbench/qoder').QoderStatus>>
+  qoderStatus: () => Promise<Result<QoderStatus>>
   qoderStart: (port: number) => Promise<Result<number>>
   qoderStop: () => Promise<Result<null>>
   qoderAutoStartSet: (enabled: boolean) => Promise<Result<null>>
-  qoderAccounts: () => Promise<Result<import('./workbench/qoder').QoderAccount[]>>
+  qoderAccounts: () => Promise<Result<QoderAccount[]>>
   qoderReload: () => Promise<Result<null>>
-  qoderLoginStart: () => Promise<Result<import('./workbench/qoder').QoderLoginStart>>
-  qoderLoginPoll: (loginState: string) => Promise<Result<import('./workbench/qoder').QoderLoginPoll>>
-  qoderCredits: (uid: string) => Promise<Result<import('./workbench/qoder').QoderCredits>>
+  qoderLoginStart: () => Promise<Result<QoderLoginStart>>
+  qoderLoginPoll: (loginState: string) => Promise<Result<QoderLoginPoll>>
+  qoderCredits: (uid: string) => Promise<Result<QoderCredits>>
   qoderAccountSet: (uid: string, enabled: boolean) => Promise<Result<null>>
   qoderAccountPriority: (uid: string, priority: number) => Promise<Result<null>>
   qoderAccountDelete: (uid: string) => Promise<Result<null>>
   /** 导出 Qoder 账号：返回一段含明文 token 的 JSON，交给用户自己保管 */
   qoderAccountsExport: () => Promise<Result<string>>
   /** 导入 Qoder 账号；`overwrite=false` 时同 uid 跳过 */
-  qoderAccountsImport: (payload: string, overwrite: boolean) => Promise<Result<import('./workbench/qoder').QoderAccountImport>>
+  qoderAccountsImport: (payload: string, overwrite: boolean) => Promise<Result<QoderAccountImport>>
   qoderAccountNames: () => Promise<Result<Record<string, string>>>
-  qoderModels: () => Promise<Result<import('./workbench/qoder').QoderModelInfo[]>>
-  qoderModelsRefresh: () => Promise<Result<import('./workbench/qoder').QoderModelInfo[]>>
-  qoderAccess: () => Promise<Result<import('./workbench/qoder').QoderAccess>>
+  qoderModels: () => Promise<Result<QoderModelInfo[]>>
+  qoderModelsRefresh: () => Promise<Result<QoderModelInfo[]>>
+  qoderAccess: () => Promise<Result<QoderAccess>>
   qoderRotateKey: () => Promise<Result<string>>
-  qoderUsage: (days: number) => Promise<Result<import('./workbench/gateway').GatewayUsageSummary>>
-  qoderUsageRows: (days: number) => Promise<Result<import('./workbench/qoder').QoderUsageWindow>>
-  qoderUsageRecent: (limit: number) => Promise<Result<import('./workbench/gateway').GatewayUsageRow[]>>
-  qoderPerksStatus: (uid?: string) => Promise<Result<import('./workbench/qoder').QoderTaskSnapshot[]>>
-  qoderCheckin: (uid: string) => Promise<Result<import('./workbench/qoder').QoderClaimResult>>
-  qoderClaimCampaigns: (uid: string) => Promise<Result<import('./workbench/qoder').QoderClaimResult>>
-  qoderCreditHeatmap: (uid: string) => Promise<Result<import('./workbench/qoder').QoderHeatmapPoint[]>>
-  qoderActivityToday: () => Promise<Result<import('./workbench/qoder').QoderActivityRow[]>>
-  qoderEarnings: (days: number) => Promise<Result<import('./workbench/qoder').QoderEarningPoint[]>>
+  qoderUsage: (days: number) => Promise<Result<GatewayUsageSummary>>
+  qoderUsageRows: (days: number) => Promise<Result<QoderUsageWindow>>
+  qoderUsageRecent: (limit: number) => Promise<Result<GatewayUsageRow[]>>
+  qoderPerksStatus: (uid?: string) => Promise<Result<QoderTaskSnapshot[]>>
+  qoderCheckin: (uid: string) => Promise<Result<QoderClaimResult>>
+  qoderClaimCampaigns: (uid: string) => Promise<Result<QoderClaimResult>>
+  qoderCreditHeatmap: (uid: string) => Promise<Result<QoderHeatmapPoint[]>>
+  qoderActivityToday: () => Promise<Result<QoderActivityRow[]>>
+  qoderEarnings: (days: number) => Promise<Result<QoderEarningPoint[]>>
   qoderEarningsPublish: () => Promise<Result<unknown>>
   qoderEarningsPull: () => Promise<Result<unknown>>
-  qoderPerksAutoConfig: () => Promise<Result<import('./workbench/qoder').QoderPerksAutoConfig>>
-  qoderPerksAutoSet: (enabled: boolean) => Promise<Result<import('./workbench/qoder').QoderPerksAutoConfig>>
-  qoderPerksAutoRun: () => Promise<Result<import('./workbench/qoder').QoderPerksAutoRun>>
+  qoderPerksAutoConfig: () => Promise<Result<QoderPerksAutoConfig>>
+  qoderPerksAutoSet: (enabled: boolean) => Promise<Result<QoderPerksAutoConfig>>
+  qoderPerksAutoRun: () => Promise<Result<QoderPerksAutoRun>>
   versions: { node: string, chrome: string }
   /**
    * 挑一个目录。
@@ -1266,7 +1275,7 @@ export interface WorkbenchApi {
    * 就不会再向交易所要同样的数据（见 workbench/etf.ts 的 pullEtfCache）。
    * 没登录 / 没填仓库地址时给 `enabled: false`，页面照旧只读本机。
    */
-  etfSyncPull: () => Promise<Result<import('./workbench/etf').EtfSyncPullOutcome>>
+  etfSyncPull: () => Promise<Result<EtfSyncPullOutcome>>
   /** 把本机 ETF 缓存写进 `etf/<设备id>.json` 并推送；内容没变时 git 那边不产生提交 */
   etfSyncPublish: () => Promise<Result<null>>
   createGroup: (name: string) => Promise<Result<ProjectGroup>>

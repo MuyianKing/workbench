@@ -12,8 +12,9 @@ import { CopyDocument, Delete, Download, Upload } from '@element-plus/icons-vue'
  * 它只走文件（导出一份，拿到另一台机器导入）。
  */
 import { computed } from 'vue'
+import { copyText } from '@/clipboard'
 import AppDialog from '@/components/AppDialog.vue'
-import { confirmAction, notifyError, notifySuccess } from '@/notify'
+import { confirmAction } from '@/notify'
 import { useAuthStore } from '@/stores/auth'
 import { useSettingsStore } from '@/stores/settings'
 import { useVaultStore } from '@/stores/vault'
@@ -39,14 +40,8 @@ const repoHint = computed(() => {
   return repo
 })
 
-async function copyFingerprint(): Promise<void> {
-  try {
-    await navigator.clipboard.writeText(store.fingerprint)
-    notifySuccess('公钥指纹已复制')
-  }
-  catch {
-    notifyError('复制失败，可以手动选中再复制')
-  }
+function copyFingerprint(): void {
+  void copyText(store.fingerprint, '公钥指纹')
 }
 
 /**

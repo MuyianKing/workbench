@@ -10,6 +10,7 @@
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+use crate::common::{now_secs, sanitize_uid};
 
 /// 到期前多久算「该续期了」：留十分钟够一次网络往返。
 pub const REFRESH_SKEW_SECS: i64 = 600;
@@ -124,12 +125,6 @@ fn default_user_type() -> String {
     crate::qd_upstream::DEFAULT_USER_TYPE.into()
 }
 
-pub fn now_secs() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0)
-}
 
 impl Account {
     /// 登录成功后的新账号。
@@ -285,21 +280,6 @@ impl Account {
             serde_json::to_string_pretty(self).map_err(|err| format!("序列化账号失败: {err}"))?;
         crate::fs_util::write_atomic(&path, text.as_bytes())
     }
-}
-
-/// uid 白名单：字母、数字、连字符、下划线。uid 来自上游响应，直接拼路径会被穿越利用。
-pub fn sanitize_uid(raw: &str) -> Option<String> {
-    let text = raw.trim();
-    if text.is_empty() || text.len() > 64 {
-        return None;
-    }
-    if !text
-        .chars()
-        .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
-    {
-        return None;
-    }
-    Some(text.to_string())
 }
 
 pub fn account_path(dir: &Path, uid: &str) -> Result<PathBuf, String> {

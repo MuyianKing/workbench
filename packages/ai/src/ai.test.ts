@@ -1,6 +1,6 @@
 import type { AiLogLine, AiProvider, AiSession } from './ai'
 import { describe, expect, it } from 'vitest'
-import { AI_IMAGE_TYPES, AI_MODEL_MAX, AI_PERMISSION_DEFAULT, AI_PERMISSION_MODES, AI_PROMPT_PREFIX, AI_PROVIDER_PRESETS, AI_SESSION_MAX, AI_SESSION_TITLE_MAX, AI_THINKING_DEFAULT, AI_THINKING_LEVELS, aiImageAccepted, aiImagePayload, aiModelChoices, aiModelFromId, aiPermissionLabel, aiProviderPayload, aiProviderReady, aiSessionGroups, aiSessionTitle, aiThinkingLabel, aiThinkingMap, aiTurns, builtinModelMeta, confirmFrame, formatDuration, formatTokensShort, formatUsageSummary, inferModelMeta, nodeSatisfiesPi, parsePiConfirm, parsePiDelta, parsePiEvent, parsePiUsage, pickAiActiveSession, pickAiChoice, pickAiThinking, piLaunch, piLaunchForDisplay, rememberAiSession, sanitizeAiApiFormat, sanitizeAiBaseUrl, sanitizeAiContext, sanitizeAiLabel, sanitizeAiMaxTokens, sanitizeAiModelId, sanitizeAiModels, sanitizeAiName, sanitizeAiPermission, sanitizeAiPreset, sanitizeAiProviders, sanitizeAiSessionId, sanitizeAiSessions, sanitizeAiSessionTitle, sanitizeAiThinking, sanitizeAiThinkingLevels, sessionMessagesToLines, skillCommandOf, stripSkillCommand, taskPrompt, uniqueAiName, visibleInstruction, writtenEntries } from './ai'
+import { AI_IMAGE_TYPES, AI_MODEL_MAX, AI_PERMISSION_DEFAULT, AI_PERMISSION_MODES, AI_PROMPT_PREFIX, AI_PROVIDER_PRESETS, AI_SESSION_MAX, AI_SESSION_TITLE_MAX, AI_THINKING_DEFAULT, AI_THINKING_LEVELS, aiImageAccepted, aiImagePayload, aiModelChoices, aiModelFromId, aiPermissionLabel, aiProviderPayload, aiProviderReady, aiSessionGroups, aiSessionTitle, aiThinkingLabel, aiThinkingMap, aiTurns, builtinModelMeta, confirmFrame, formatDuration, formatTokensShort, formatUsageSummary, inferModelMeta, nodeSatisfiesPi, parsePiConfirm, parsePiDelta, parsePiEvent, parsePiUsage, pickAiActiveSession, pickAiChoice, pickAiThinking, piLaunch, piLaunchForDisplay, rememberAiSession, resolveAiRunConfig, sanitizeAiApiFormat, sanitizeAiBaseUrl, sanitizeAiContext, sanitizeAiLabel, sanitizeAiMaxTokens, sanitizeAiModelId, sanitizeAiModels, sanitizeAiName, sanitizeAiPermission, sanitizeAiPreset, sanitizeAiProviders, sanitizeAiSessionId, sanitizeAiSessions, sanitizeAiSessionTitle, sanitizeAiThinking, sanitizeAiThinkingLevels, sessionMessagesToLines, skillCommandOf, stripSkillCommand, taskPrompt, uniqueAiName, visibleInstruction, writtenEntries } from './ai'
 
 describe('模型配置的收敛', () => {
   it('提供方名折成小写字母 / 数字 / 连字符，超长截断', () => {
@@ -1279,5 +1279,42 @@ describe('确认帧（扩展问「这条命令让不让跑」）', () => {
     })
     expect(JSON.parse(confirmFrame('c1', false)).confirmed).toBe(false)
     expect(confirmFrame('c1', true)).not.toContain('\n')
+  })
+})
+
+describe('会话运行配置的解析', () => {
+  const providers: AiProvider[] = [
+    {
+      id: 'p1',
+      label: '服务一',
+      baseUrl: 'https://x.example',
+      apiKey: '',
+      enabled: true,
+      models: [{ id: 'm1', label: '模型一', enabled: true, levels: ['off', 'high'] }],
+    },
+  ] as unknown as AiProvider[]
+  const defaults = { provider: 'p1', model: 'p1/m1', thinking: 'off', permission: AI_PERMISSION_DEFAULT }
+
+  it('会话记过就用会话自己的，没记过回落默认', () => {
+    const pinned = resolveAiRunConfig(providers, { provider: 'p1', model: 'p1/m1', thinking: 'high', permission: 'full' } as AiSession, defaults)
+    expect(pinned.providerName).toBe('p1')
+    expect(pinned.model).toBe('m1')
+    expect(pinned.thinking).toBe('high')
+    expect(pinned.permission).toBe('full')
+
+    const fresh = resolveAiRunConfig(providers, null, defaults)
+    expect(fresh.providerName).toBe('p1')
+    expect(fresh.model).toBe('m1')
+    expect(fresh.thinking).toBe('off')
+    expect(fresh.permission).toBe(AI_PERMISSION_DEFAULT)
+  })
+
+  it('会话指着的模型被删了就退回默认；一个能挑的都没有就全空', () => {
+    const gone = resolveAiRunConfig(providers, { provider: 'p1', model: 'p1/ghost' } as AiSession, defaults)
+    expect(gone.model).toBe('m1')
+    const empty = resolveAiRunConfig([], null, { provider: 'ghost', model: 'x', thinking: 'off', permission: 'confirm' })
+    expect(empty.choice).toBeNull()
+    expect(empty.providerName).toBe('')
+    expect(empty.model).toBe('')
   })
 })

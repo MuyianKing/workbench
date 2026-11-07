@@ -12,6 +12,7 @@ import { DESIGN_FILE_NAME, designMarkdown, designPrompt } from '@workbench/appea
  * 用户点的是「应用这份规范」，覆盖自己上一版是预期内的动作。
  */
 import { computed, ref, watch } from 'vue'
+import { tryCopy } from '@/clipboard'
 import AppDialog from '@/components/AppDialog.vue'
 import ProjectPickList from '@/components/ProjectPickList.vue'
 import { notifyError, notifySuccess, notifyWarning } from '@/notify'
@@ -74,13 +75,9 @@ async function submit(): Promise<void> {
     selectedIds.value = failures.value.map(project => project.id)
     let copied = false
     if (succeeded) {
-      try {
-        await navigator.clipboard.writeText(designPrompt(design))
-        copied = true
-      }
-      catch {
+      copied = await tryCopy(designPrompt(design))
+      if (!copied)
         notifyWarning('提示词没能写进剪贴板，可以在规格档里手动复制')
-      }
     }
 
     const summary = [`已写入 ${succeeded} 个项目`]

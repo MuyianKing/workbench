@@ -12,7 +12,8 @@
 //! 纯 I/O 适配：发请求、解响应、把结果写回 [`Account`]。
 
 use crate::http;
-use crate::qd_account::{now_secs, Account};
+use crate::common::{excerpt, now_secs};
+use crate::qd_account::Account;
 use crate::qd_upstream;
 
 /// 一次登录的起点：授权链接交给浏览器，`state` 留在内存里等轮询。
@@ -97,7 +98,7 @@ pub fn poll_login(ticket: &LoginTicket) -> PollOutcome {
         return PollOutcome::Failed(format!(
             "设备授权轮询返回 HTTP {}：{}",
             response.status,
-            excerpt(&text)
+            excerpt(&text, 200)
         ));
     }
     let value: serde_json::Value = match serde_json::from_str(&text) {
@@ -223,7 +224,7 @@ pub fn refresh(account: &mut Account) -> Result<(), String> {
         return Err(format!(
             "续期失败：HTTP {} {}",
             response.status,
-            excerpt(&text)
+            excerpt(&text, 200)
         ));
     }
     let value: serde_json::Value =
@@ -234,7 +235,7 @@ pub fn refresh(account: &mut Account) -> Result<(), String> {
         .and_then(serde_json::Value::as_str)
         .unwrap_or("");
     if token.trim().is_empty() {
-        return Err(format!("续期返回里没有 token：{}", excerpt(&text)));
+        return Err(format!("续期返回里没有 token：{}", excerpt(&text, 200)));
     }
     account.access_token = token.to_string();
     if let Some(next) = data.get("refresh_token").and_then(serde_json::Value::as_str) {
@@ -316,13 +317,6 @@ fn local_machine_id() -> String {
     uuid::Uuid::new_v4().to_string()
 }
 
-fn excerpt(text: &str) -> String {
-    let trimmed = text.trim();
-    if trimmed.chars().count() <= 200 {
-        return trimmed.to_string();
-    }
-    trimmed.chars().take(200).collect::<String>() + "…"
-}
 
 #[cfg(test)]
 mod tests {

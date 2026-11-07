@@ -60,6 +60,8 @@
 | | `qd_gateway` | 生命周期、状态、全部 `wb_qoder_*` 命令 |
 | 界面 | `components/qoder/QoderView.vue` | 账号 / 用量 / 请求 / 福利 / 模型五栏；用量栏复用 `components/gateway/UsagePane.vue` |
 
+与 TBuddy 共用的**协议无关设施**：Rust 侧 `common.rs`（时间 / 截断 / 打码 / 历法 / uid 白名单）与 `http::request_json(_with)`（信封解包），外加直接复用 `wb_server`（HTTP 服务）与 `wb_usage`（JSONL 记账）—— 这两块本来就不懂协议；界面侧账号卡的状态机在 `renderer/src/status.ts` 的 `pool*`（状态类名已从 `state-*` 统一成 `is-*`）、余额快照在 `composables/use-credit-pool.ts`（Qoder 删号现在也清快照，与 TBuddy 同口径）。业务定义、账号模型、落盘照旧独立。
+
 ### 请求链路
 
 ```
@@ -127,9 +129,9 @@
 
 ### 请求栏
 
-- 条件带与 TBuddy 的请求栏同一套：搜索框（模型 / 账号名 / uid / User-Agent / 推理强度 / 错误）、
-  结果下拉（全部 / 只看成功 / 只看失败）、条数下拉（最近 50 / 100 / 200 条），
-  右端「共 N 条 · 成功 M」+「重新读取」。
+- 条件带**就是 TBuddy 那个组件**（`components/gateway/RequestFilters.vue`：搜索框、结果下拉、
+  条数下拉、右端「共 N 条 · 成功 M」+「重新读取」，模板与样式只有一份）；表格两页各是各的 ——
+  这边精简七列（时间 / 账号 / 模型 / 状态 / token / 延迟 / 错误），TBuddy 全量十四列，别借共用合并。
 - **换条数才重新读后端**；换结果或关键字只在前端过滤（`requestRows` computed）。
 - 表格行键是「时间 + 模型 + 账号」：同一秒里两条同模型请求时，只用 `ts` 会撞键。
 

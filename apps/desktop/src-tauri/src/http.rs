@@ -1,9 +1,9 @@
 //! 极简 HTTPS 客户端，走系统自带的 WinHTTP。
 //!
-//! **为什么是 WinHTTP 而不是 reqwest**：本项目的联网出口只有账号登录和 git 同步两处，
-//! 为此引入 reqwest 会连带 hyper / tower / 一整套 TLS 栈进编译图（实测当前 797 个 rlib 里
-//! 一个都没有，全是新增），既有违 AGENTS.md 的依赖约束，也会拖慢打包。
-//! WinHTTP 的 TLS 与系统代理都由 Windows 提供，代价只是下面这一百多行 FFI。
+//! **为什么是 WinHTTP 而不是 reqwest**：为本项目新增 reqwest 会连带 hyper / tower /
+//! 一整套 TLS 栈进编译图（实测当前 797 个 rlib 里一个都没有，全是新增），既有违
+//! AGENTS.md 的依赖约束，也会拖慢打包。WinHTTP 的 TLS 与系统代理都由 Windows 提供，
+//! 代价只是下面这一百多行 FFI。
 //!
 //! **阻塞式**：与 `proc::run_direct` 起子进程同一风格 —— 调用方都是 `#[tauri::command(async)]`，
 //! 函数体落在工作线程上，不占主线程。
@@ -47,6 +47,9 @@ const DEFAULT_TIMEOUTS: [i32; 4] = [
 /// 响应体上限。OAuth 回包都是几百字节；AI 那边拉一次模型目录（几百个模型、每个一串元数据）
 /// 能到几 MB，所以这个阀门给到 8 MiB —— 再大说明对面不对劲，别一直收。
 const MAX_BODY: usize = 8 << 20;
+
+/// JSON 响应的默认阀门（[`request_url`] 与 [`request_json`] 共用）。
+pub const JSON_MAX_BODY: usize = MAX_BODY;
 
 pub struct Response {
     pub status: u16,
@@ -143,6 +146,48 @@ pub fn request_url_limited(
         },
         Sink::Buffer { max_body },
     )
+}
+
+/// 发一个请求并解析 JSON 响应：HTTP 非 200 报「HTTP <状态> <原文摘录>」，200 但不是
+/// JSON 报「响应不是 JSON」。信封里的业务码不在这儿判。
+///
+/// 原先这段「发请求 → 判 200 → 解 JSON」在 wb_tasks / qd_tasks / wb_models 各写一遍，
+/// 连「响应不是 JSON」的冒号是半角还是全角都不一样，收在这里统一。
+pub fn request_json(
+    method: &str,
+    url: &str,
+    headers: &[(&str, &str)],
+    body: Option<&str>,
+    max_body: usize,
+    excerpt_chars: usize,
+) -> Result<serde_json::Value, String> {
+    request_json_with(method, url, headers, body, max_body, excerpt_chars, |_, _| Ok(()))
+}
+
+/// 同 [`request_json`]，多一个信封校验回调：拿到 200 的 JSON 后先过 `check`
+/// （要报业务码错误就用它，`text` 是原文，报错时可以摘录），过了才返回。
+pub fn request_json_with(
+    method: &str,
+    url: &str,
+    headers: &[(&str, &str)],
+    body: Option<&str>,
+    max_body: usize,
+    excerpt_chars: usize,
+    check: impl Fn(&serde_json::Value, &str) -> Result<(), String>,
+) -> Result<serde_json::Value, String> {
+    let response = request_url_limited(method, url, headers, body, max_body)?;
+    let text = response.text();
+    if response.status != 200 {
+        return Err(format!(
+            "HTTP {} {}",
+            response.status,
+            crate::common::excerpt(&text, excerpt_chars)
+        ));
+    }
+    let value: serde_json::Value =
+        serde_json::from_str(&text).map_err(|err| format!("响应不是 JSON：{err}"))?;
+    check(&value, &text)?;
+    Ok(value)
 }
 
 /// 带机密请求头的单次请求：发送前关闭 WinHTTP 自动跳转，3xx 原样返回给调用方拒绝。

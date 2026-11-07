@@ -12,6 +12,7 @@ use std::time::Instant;
 
 use serde_json::{Map, Value};
 
+use crate::common::{key_tail, now_secs};
 use crate::wb_account::Account;
 use crate::wb_api_chat::{self, ChatCall, UpstreamEvent};
 use crate::wb_identity;
@@ -302,21 +303,6 @@ fn effort_of(body: &Value) -> String {
         .collect()
 }
 
-/// 密钥只留末四位：流水文件会被人翻着看，整把钥匙不该躺在里面。
-/// 长度不够四位就整把记（那要么是短密钥，要么是空的）。
-fn key_tail(key: &str) -> String {
-    let key = key.trim();
-    if key.is_empty() {
-        return String::new();
-    }
-    let tail: String = key.chars().rev().take(4).collect::<Vec<_>>().into_iter().rev().collect();
-    if key.chars().count() <= 4 {
-        tail
-    } else {
-        format!("…{tail}")
-    }
-}
-
 /// 从流里捡 token 数与首字时刻。
 struct Capture {
     started: Instant,
@@ -411,12 +397,6 @@ fn record(meta: &UsageMeta, capture: &Capture, ok: bool, error: &str) {
     let _ = wb_usage::append(&row);
 }
 
-fn now_secs() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|elapsed| elapsed.as_secs() as i64)
-        .unwrap_or(0)
-}
 
 /// 流式：上游已经回了 200，这里只管把帧翻出去。
 fn stream_response(mut handle: wb_api_chat::StreamHandle, meta: UsageMeta) -> Response {

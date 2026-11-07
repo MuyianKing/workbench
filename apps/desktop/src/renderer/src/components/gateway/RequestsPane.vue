@@ -3,8 +3,10 @@ import type { GatewayUsageRow } from '@/workbench/gateway'
 import { List } from '@element-plus/icons-vue'
 import { computed, onMounted, ref } from 'vue'
 import EmptyState from '@/components/EmptyState.vue'
+import { formatInt, formatTimestamp } from '@/format'
 import { gatewayAccountNames } from '@/workbench/gateway'
 import GatewayTable from './GatewayTable.vue'
+import RequestFilters from './RequestFilters.vue'
 
 /**
  * 请求记录：最近若干条流水的表格。
@@ -12,17 +14,6 @@ import GatewayTable from './GatewayTable.vue'
  * 列照参考面板那一套摆：一行就把「用了什么模型、以什么档位、走了多久、花在哪」看全。
  * 数据全部来自 `usage.jsonl`；上游没给的（积分、思考 token）记成空，界面显示 `—`，不猜。
  */
-const LIMITS = [
-  { label: '最近 50 条', value: 50 },
-  { label: '最近 100 条', value: 100 },
-  { label: '最近 200 条', value: 200 },
-]
-const RESULTS = [
-  { label: '全部结果', value: 'all' },
-  { label: '只看成功', value: 'ok' },
-  { label: '只看失败', value: 'fail' },
-]
-
 const limit = ref(100)
 const result = ref<'all' | 'ok' | 'fail'>('all')
 const keyword = ref('')
@@ -52,13 +43,6 @@ function nameOf(uid: string): string {
   return names.value[uid] ?? uid.slice(0, 8)
 }
 
-/** 时间带日期：跨天的流水只写时分秒分不清是哪天 */
-function timeOf(ts: number): string {
-  const date = new Date(ts * 1000)
-  const pad = (value: number) => String(value).padStart(2, '0')
-  return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
-}
-
 /** 毫秒 → 秒。两列（耗时 / 首字）同一套写法，竖着扫才对得齐 */
 function secs(ms: number): string {
   return `${(ms / 1000).toFixed(2)} s`
@@ -74,11 +58,6 @@ function speedOf(row: GatewayUsageRow): string {
   if (row.completionTokens <= 0 || generating <= 0)
     return '—'
   return (row.completionTokens / (generating / 1000)).toFixed(1)
-}
-
-/** token 数带千分位：6 位数字一眼读不出量级 */
-function int(value: number): string {
-  return value.toLocaleString('en-US')
 }
 
 /** 缓存命中率 = 命中 token / 输入 token */
@@ -117,31 +96,15 @@ onMounted(load)
 <template>
   <div class="req">
     <!-- 条件带：一行排完，不套卡片（毛玻璃留给表格，它才是这一栏的主体）、紧贴下面的表 -->
-    <div class="req__filters">
-      <div class="req__picks">
-        <el-input
-          v-model="keyword"
-          size="small"
-          placeholder="搜索模型 / 账号 / User-Agent"
-          clearable
-          class="req__search"
-        />
-        <!-- 两处筛选用下拉：选项各三条，分段选择器把这一行撑得太长 -->
-        <el-select v-model="result" size="small" class="req__pick">
-          <el-option v-for="item in RESULTS" :key="item.value" :label="item.label" :value="item.value" />
-        </el-select>
-        <el-select v-model="limit" size="small" class="req__pick" @change="load">
-          <el-option v-for="item in LIMITS" :key="item.value" :label="item.label" :value="item.value" />
-        </el-select>
-      </div>
-      <!-- 条数跟着条件带走：页签已经写着「请求」，再为它单起一条带子只多占一行 -->
-      <div class="req__actions">
-        <span class="req__count">共 {{ filtered.length }} 条 · 成功 {{ okCount }}</span>
-        <el-button size="small" :loading="loading" class="req__reload" @click="load">
-          重新读取
-        </el-button>
-      </div>
-    </div>
+    <RequestFilters
+      v-model:keyword="keyword"
+      v-model:result="result"
+      v-model:limit="limit"
+      :count="filtered.length"
+      :ok-count="okCount"
+      :loading="loading"
+      @reload="load"
+    />
 
     <div v-if="!filtered.length" class="panel">
       <EmptyState compact :icon="List" text="还没有请求" hint="TBuddy 启动后，客户端来的请求会出现在这里" />
@@ -157,7 +120,7 @@ onMounted(load)
     >
       <el-table-column label="时间" align="center">
         <template #default="{ row }">
-          <span class="req__mono">{{ timeOf(row.ts) }}</span>
+          <span class="req__mono">{{ formatTimestamp(row.ts * 1000, true) }}</span>
         </template>
       </el-table-column>
       <el-table-column label="模型" align="center">
@@ -206,17 +169,17 @@ onMounted(load)
       </el-table-column>
       <el-table-column label="输入" align="center">
         <template #default="{ row }">
-          <span class="req__mono">{{ int(row.promptTokens) }}</span>
+          <span class="req__mono">{{ formatInt(row.promptTokens) }}</span>
         </template>
       </el-table-column>
       <el-table-column label="输出" align="center">
         <template #default="{ row }">
-          <span class="req__mono">{{ int(row.completionTokens) }}</span>
+          <span class="req__mono">{{ formatInt(row.completionTokens) }}</span>
         </template>
       </el-table-column>
       <el-table-column label="思考" align="center">
         <template #default="{ row }">
-          <span class="req__mono">{{ int(row.reasoningTokens) }}</span>
+          <span class="req__mono">{{ formatInt(row.reasoningTokens) }}</span>
         </template>
       </el-table-column>
       <el-table-column label="缓存" align="center">
@@ -226,7 +189,7 @@ onMounted(load)
       </el-table-column>
       <el-table-column label="总 token" align="center">
         <template #default="{ row }">
-          <span class="req__mono req__total">{{ int(row.totalTokens) }}</span>
+          <span class="req__mono req__total">{{ formatInt(row.totalTokens) }}</span>
         </template>
       </el-table-column>
       <el-table-column label="扣除积分" align="center">
@@ -256,53 +219,6 @@ onMounted(load)
  * **左右不缩进**：不需要跟卡片内容对齐，两端就贴着卡片边缘走 —— 这一排控件自己带内边距，
  * 再缩一档反而像被推离了列表。下边距再收 4px，让它是「贴着列表」而不是另一张卡。
  */
-.req__filters {
-  display: flex;
-  flex-direction: row;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--sp-2);
-  flex: none;
-  margin-bottom: calc(-1 * var(--sp-1));
-}
-
-/* 左端那组筛选：窄窗口时自己换行，别把右边那颗按钮挤下去 */
-.req__picks {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--sp-2);
-  min-width: 0;
-}
-
-/* 两枚下拉等宽：选项就那么几条，宽度跟着最长的那个标签走 */
-.req__pick {
-  width: 120px;
-}
-
-/* 右端：条数 + 重新读取一起贴右沿；窄窗口时让位的该是左边的搜索框 */
-.req__actions {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-3);
-  margin-left: auto;
-}
-
-.req__count {
-  font-size: var(--gw-fs-micro);
-  color: var(--ink-3);
-  white-space: nowrap;
-}
-
-.req__reload {
-  flex: none;
-}
-
-.req__search {
-  width: 240px;
-}
-
 .req__table-wrap {
   flex: 1 1 auto;
   min-height: 0;

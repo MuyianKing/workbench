@@ -18,6 +18,7 @@ import { ElMessage } from 'element-plus'
  * 这一层只做取数与交互。
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import EmptyState from '@/components/EmptyState.vue'
 import PanelLoading from '@/components/PanelLoading.vue'
 import WorkLogCard from '@/components/WorkLogCard.vue'
 import WorkLogDialog from '@/components/WorkLogDialog.vue'
@@ -364,27 +365,17 @@ async function remove(entry: WorkLogEntry): Promise<void> {
 
     <div class="work-view__body">
       <!-- 读盘失败：把原因说出来并给一次重试，不能显示成「还没有记录」 -->
-      <div v-if="loadError" class="empty">
-        <el-icon class="empty__icon">
-          <Warning />
-        </el-icon>
-        <p>{{ loadError }}</p>
-        <el-button size="small" @click="load()">
-          重试
-        </el-button>
-      </div>
+      <EmptyState v-if="loadError" tone="error" :icon="Warning" :text="loadError">
+        <template #actions>
+          <el-button size="small" @click="load()">
+            重试
+          </el-button>
+        </template>
+      </EmptyState>
 
       <PanelLoading v-else-if="loading" text="正在读取工作日志…" />
 
-      <div v-else-if="!total" class="empty">
-        <el-icon class="empty__icon">
-          <Memo />
-        </el-icon>
-        <p>{{ emptyTitle }}</p>
-        <p class="empty__hint">
-          {{ emptyHint }}
-        </p>
-      </div>
+      <EmptyState v-else-if="!total" :icon="Memo" :text="emptyTitle" :hint="emptyHint" />
 
       <section v-for="group in groups" :key="group.key" class="day">
         <!-- 栏头按维度换：时间维度给日期 / 星期，项目维度给项目色点 + 项目名 -->
@@ -478,21 +469,6 @@ async function remove(entry: WorkLogEntry): Promise<void> {
   /* 四周留白与卡片间距同源（--card-gap 由 .app 统一给，设置里改「卡片间距」这里跟着变），
      与项目页的画布、首页的卡片是同一套 */
   padding: var(--card-gap, 10px);
-}
-
-/* 工作页的空态比别处「重」一档（整页居中，等日志的时间更长），
-   基础样式在 global.css，这里只留与别处不同的高度与字号 */
-.empty {
-  min-height: 200px;
-  font-size: var(--fs-body);
-}
-
-.empty__hint {
-  font-size: var(--fs-meta);
-}
-
-.empty p {
-  margin: 0;
 }
 
 .day {

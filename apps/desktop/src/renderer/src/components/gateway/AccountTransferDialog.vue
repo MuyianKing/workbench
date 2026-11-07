@@ -3,6 +3,7 @@ import type { GatewayAccountImport } from '@/workbench/gateway'
 import type { QoderAccountImport } from '@/workbench/qoder'
 import { ElMessage } from 'element-plus'
 import { computed, ref, watch } from 'vue'
+import { copyText } from '@/clipboard'
 import AppDialog from '@/components/AppDialog.vue'
 
 /**
@@ -57,16 +58,6 @@ async function prepare(): Promise<void> {
     return
   }
   payload.value = result.data
-}
-
-async function copy(): Promise<void> {
-  try {
-    await navigator.clipboard.writeText(payload.value)
-    ElMessage.success('已复制导出内容')
-  }
-  catch {
-    ElMessage.error('复制失败，手动选中即可')
-  }
 }
 
 async function submit(): Promise<void> {
@@ -126,7 +117,7 @@ function summary(result: GatewayAccountImport | QoderAccountImport): string {
         v-if="mode === 'export'"
         type="primary"
         :disabled="!payload"
-        @click="copy"
+        @click="copyText"
       >
         复制
       </el-button>

@@ -9,6 +9,10 @@ import type { Component } from 'vue'
  *
  * 文字只写事实，不写引导（见 AGENTS.md 第 4 节）：「还没有会话」是事实，
  * 「点这里开始」不是。去哪儿做、为什么空着放第二行（`hint`），动作按钮走 `#actions`。
+ *
+ * `tone="error"` 给「不是空的，是出了事」的场景（读盘失败、打开失败）：
+ * 图标染失败色 `--st-fail`（运行状态色，见 AGENTS.md 第 4 节），构图与动效照旧 ——
+ * 重试一类的按钮照走 `#actions`，不必再各页手写一套「图标 + 原因 + 重试」。
  */
 defineProps<{
   /** Element Plus 的那枚图标组件（`import { Message } from '@element-plus/icons-vue'` 那种） */
@@ -21,11 +25,13 @@ defineProps<{
   compact?: boolean
   /** 卡片右上角那枚小点（邮箱的未读点是它，别处不用） */
   dot?: boolean
+  /** 失败态：图标染 --st-fail，其余照旧 */
+  tone?: 'error'
 }>()
 </script>
 
 <template>
-  <div class="empty-state" :class="{ 'is-compact': compact }">
+  <div class="empty-state" :class="{ 'is-compact': compact, 'is-error': tone === 'error' }">
     <div class="empty-state__stage" aria-hidden="true">
       <span class="empty-state__card">
         <el-icon class="empty-state__icon">
@@ -88,6 +94,11 @@ defineProps<{
 .empty-state__icon {
   font-size: 34px;
   color: var(--ink-2);
+}
+
+/* 失败态只染图标：文字保持灰度读原因，彩色点到「这里出了事」为止 */
+.empty-state.is-error .empty-state__icon {
+  color: var(--st-fail);
 }
 
 .empty-state__dot {

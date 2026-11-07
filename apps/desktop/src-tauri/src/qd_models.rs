@@ -384,7 +384,7 @@ pub fn refresh(account: &Account, cosy: &mut CosyCache) -> Result<usize, String>
     }
     let count = models.len();
     save_cache(&ModelsCache {
-        fetched_at: crate::qd_account::now_secs(),
+        fetched_at: crate::common::now_secs(),
         models,
     })?;
     Ok(count)

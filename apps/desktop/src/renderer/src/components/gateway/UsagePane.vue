@@ -5,6 +5,7 @@ import { Bottom, CircleCheck, DataLine, Histogram, Timer, Top } from '@element-p
 import { gatewayBucketUnit, recentHourBuckets, summarizeGatewayRows } from '@workbench/usage'
 import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref } from 'vue'
 import EmptyState from '@/components/EmptyState.vue'
+import { formatCompactTokens } from '@/format'
 import { gatewayAccountNames, gatewayUsageRows } from '@/workbench/gateway'
 import GatewayTable from './GatewayTable.vue'
 
@@ -142,7 +143,7 @@ const yAxis = computed(() => {
 
 /** 悬停时看全：小时桶补上 `:00` */
 function barTitle(item: { bucket: string, totalTokens: number, requests: number }): string {
-  return `${item.bucket}:00 · ${compact(item.totalTokens)} token · ${item.requests} 次`
+  return `${item.bucket}:00 · ${formatCompactTokens(item.totalTokens)} token · ${item.requests} 次`
 }
 
 const detailRows = computed<DetailRow[]>(() => {
@@ -185,14 +186,6 @@ const detailRows = computed<DetailRow[]>(() => {
 const missingCreditCount = computed(() =>
   (summary.value?.byModel ?? []).filter(item => item.creditSamples === 0 && item.totalTokens > 0).length,
 )
-
-function compact(value: number): string {
-  if (value >= 1_000_000)
-    return `${(value / 1_000_000).toFixed(2)}M`
-  if (value >= 1_000)
-    return `${(value / 1_000).toFixed(1)}K`
-  return String(value)
-}
 
 function percent(value: number): string {
   return `${value.toFixed(1)}%`
@@ -339,7 +332,7 @@ onBeforeUnmount(() => {
         <span class="usage__card-icon"><el-icon><Histogram /></el-icon></span>
         <div class="usage__card-body">
           <span class="usage__label">总 token</span>
-          <span class="usage__value">{{ compact(summary?.totalTokens ?? 0) }}</span>
+          <span class="usage__value">{{ formatCompactTokens(summary?.totalTokens ?? 0) }}</span>
           <span class="usage__sub">入 {{ percent((summary?.promptTokens ?? 0) / Math.max(1, summary?.totalTokens ?? 1) * 100) }} · 出 {{ percent((summary?.completionTokens ?? 0) / Math.max(1, summary?.totalTokens ?? 1) * 100) }}</span>
         </div>
       </div>
@@ -347,14 +340,14 @@ onBeforeUnmount(() => {
         <span class="usage__card-icon"><el-icon><Bottom /></el-icon></span>
         <div class="usage__card-body">
           <span class="usage__label">输入</span>
-          <span class="usage__value">{{ compact(summary?.promptTokens ?? 0) }}</span>
+          <span class="usage__value">{{ formatCompactTokens(summary?.promptTokens ?? 0) }}</span>
         </div>
       </div>
       <div class="usage__card is-output">
         <span class="usage__card-icon"><el-icon><Top /></el-icon></span>
         <div class="usage__card-body">
           <span class="usage__label">输出</span>
-          <span class="usage__value">{{ compact(summary?.completionTokens ?? 0) }}</span>
+          <span class="usage__value">{{ formatCompactTokens(summary?.completionTokens ?? 0) }}</span>
         </div>
       </div>
       <div class="usage__card is-success">
@@ -392,7 +385,7 @@ onBeforeUnmount(() => {
       </div>
       <div class="usage__cost-item is-match">
         <span class="usage__cost-label">匹配 Token</span>
-        <span class="usage__cost-value">{{ (summary?.creditSamples ?? 0) > 0 ? compact(summary?.creditTokens ?? 0) : '—' }}</span>
+        <span class="usage__cost-value">{{ (summary?.creditSamples ?? 0) > 0 ? formatCompactTokens(summary?.creditTokens ?? 0) : '—' }}</span>
         <span class="usage__cost-sub">与积分同时观测到的总 token</span>
       </div>
       <div class="usage__cost-item is-samples">
@@ -441,17 +434,17 @@ onBeforeUnmount(() => {
         </el-table-column>
         <el-table-column label="输入" align="center" class-name="gw-num" label-class-name="gw-num">
           <template #default="{ row }">
-            {{ compact(row.promptTokens) }}
+            {{ formatCompactTokens(row.promptTokens) }}
           </template>
         </el-table-column>
         <el-table-column label="输出" align="center" class-name="gw-num" label-class-name="gw-num">
           <template #default="{ row }">
-            {{ compact(row.completionTokens) }}
+            {{ formatCompactTokens(row.completionTokens) }}
           </template>
         </el-table-column>
         <el-table-column label="合计" align="center" class-name="gw-num" label-class-name="gw-num">
           <template #default="{ row }">
-            {{ compact(row.promptTokens + row.completionTokens) }}
+            {{ formatCompactTokens(row.promptTokens + row.completionTokens) }}
           </template>
         </el-table-column>
         <el-table-column label="均延迟" align="center" class-name="gw-num" label-class-name="gw-num">
@@ -471,7 +464,7 @@ onBeforeUnmount(() => {
         </el-table-column>
         <el-table-column label="匹配 Token" align="center" class-name="gw-num" label-class-name="gw-num">
           <template #default="{ row }">
-            {{ row.creditSamples > 0 ? compact(row.creditTokens) : '—' }}
+            {{ row.creditSamples > 0 ? formatCompactTokens(row.creditTokens) : '—' }}
           </template>
         </el-table-column>
         <el-table-column label="积分 / 1M Token" align="center" class-name="gw-num" label-class-name="gw-num">

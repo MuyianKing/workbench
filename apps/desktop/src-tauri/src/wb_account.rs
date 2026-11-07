@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::common::{now_secs, sanitize_uid};
 use crate::wb_identity::Identity;
 use crate::wb_jwt;
 use crate::wb_upstream;
@@ -308,22 +309,6 @@ pub fn account_path(dir: &Path, uid: &str) -> Result<PathBuf, String> {
     Ok(dir.join(format!("{safe}.json")))
 }
 
-/// uid 白名单：字母、数字、连字符、下划线。腾讯侧的 uid 实测是 UUID 形态，
-/// 这条闸只是防着"上游被换掉"那种情况。
-pub fn sanitize_uid(raw: &str) -> Option<String> {
-    let text = raw.trim();
-    if text.is_empty() || text.len() > 64 {
-        return None;
-    }
-    if !text
-        .chars()
-        .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
-    {
-        return None;
-    }
-    Some(text.to_string())
-}
-
 /// 旧账号文件里记过 `realm`。现在只接国内版，见到非国内版的值就跳过 ——
 /// 把国际版账号当成国内版去发请求，只会拿到一串 401，用户还看不出是为什么。
 #[derive(Deserialize)]
@@ -523,12 +508,6 @@ pub fn parse_import(text: &str) -> Result<Vec<Account>, String> {
     Ok(accounts)
 }
 
-fn now_secs() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|elapsed| elapsed.as_secs() as i64)
-        .unwrap_or(0)
-}
 
 #[cfg(test)]
 mod tests {

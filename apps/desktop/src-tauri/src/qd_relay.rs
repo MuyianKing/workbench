@@ -17,6 +17,7 @@ use std::time::Instant;
 
 use serde_json::{json, Value};
 
+use crate::common::key_tail;
 use crate::qd_account::Account;
 use crate::qd_api_chat::{self, ChatCall, StreamHandle, UpstreamEvent};
 use crate::qd_body::{self, Conversation};
@@ -111,7 +112,7 @@ pub fn chat(
     // 上游用量面板会把同一次对话拆成两条
     let conversation_ref = conversation_for(conversations, &affinity, &messages);
 
-    let now = crate::qd_account::now_secs();
+    let now = crate::common::now_secs();
     let order = qd_pool_order(accounts, &model.id, now, &affinity, conversations);
     if order.is_empty() {
         return unavailable(accounts, &model.id, now);
@@ -283,7 +284,7 @@ pub fn chat(
 
     // 未识别的 429：再换一个号试（只多试一个）
     if saw_throttle {
-        let now = crate::qd_account::now_secs();
+        let now = crate::common::now_secs();
         let retry = qd_pool_order(accounts, &model.id, now, &affinity, conversations);
         for index in retry {
             if tried.contains(&accounts[index].uid) {
@@ -304,7 +305,7 @@ pub fn chat(
                 Err(_) => continue,
             };
             let meta = Meta {
-                ts: crate::qd_account::now_secs(),
+                ts: crate::common::now_secs(),
                 uid: account.uid.clone(),
                 model: model.id.clone(),
                 ua: ua.clone(),
@@ -375,7 +376,7 @@ fn conversation_for(
         .unwrap_or_default();
     let conversation = Conversation {
         id: uuid::Uuid::new_v4().to_string(),
-        begin_at: crate::qd_account::now_secs() * 1000,
+        begin_at: crate::common::now_secs() * 1000,
         name,
     };
     conversations.insert(affinity.to_string(), conversation.clone());
@@ -488,7 +489,7 @@ fn stream_response(mut handle: StreamHandle, meta: Meta, allowed: Vec<String>) -
             let chunk = json!({
                 "id": "chatcmpl-qoder",
                 "object": "chat.completion.chunk",
-                "created": crate::qd_account::now_secs(),
+                "created": crate::common::now_secs(),
                 "model": meta.model,
                 "choices": [{ "index": 0, "delta": { "content": tail }, "finish_reason": null }],
             });
@@ -498,7 +499,7 @@ fn stream_response(mut handle: StreamHandle, meta: Meta, allowed: Vec<String>) -
             let chunk = json!({
                 "id": "chatcmpl-qoder",
                 "object": "chat.completion.chunk",
-                "created": crate::qd_account::now_secs(),
+                "created": crate::common::now_secs(),
                 "model": meta.model,
                 "choices": [{ "index": 0, "delta": { "tool_calls": calls }, "finish_reason": "tool_calls" }],
             });
@@ -629,13 +630,6 @@ fn record_failure(meta: &Meta, error: &str, _status: u16) {
     let _ = qd_usage::append(&row);
 }
 
-fn key_tail(key: &str) -> String {
-    if key.is_empty() {
-        return String::new();
-    }
-    let tail: String = key.chars().rev().take(4).collect::<Vec<char>>().into_iter().rev().collect();
-    format!("…{tail}")
-}
 
 /// 写一行到 stdout 之外的调试口（保留给排障，不参与业务）。
 #[allow(dead_code)]

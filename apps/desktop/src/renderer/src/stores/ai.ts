@@ -1,6 +1,6 @@
-import type { AiConfirm, AiFetchedModel, AiImage, AiLogLine, AiModelChoice, AiProvider, AiSession, AiUsage, PiDelta } from '@workbench/ai'
+import type { AiConfirm, AiFetchedModel, AiImage, AiLogLine, AiProvider, AiRunConfig, AiSession, AiUsage, PiDelta } from '@workbench/ai'
 import type { Result } from '@/types'
-import { aiImagePayload, aiModelChoices, aiProviderPayload, aiSessionGroups, aiSessionTitle, confirmFrame, formatDuration, formatUsageSummary, nodeSatisfiesPi, pickAiActiveSession, pickAiChoice, pickAiThinking, piLaunch, piLaunchForDisplay, rememberAiSession, sanitizeAiApiFormat, sanitizeAiBaseUrl, sanitizeAiLabel, sanitizeAiModels, sanitizeAiName, sanitizeAiPermission, sanitizeAiPreset, sanitizeAiSessionId, sanitizeAiSessions, sanitizeAiThinking, sessionMessagesToLines, taskPrompt, writtenEntries } from '@workbench/ai'
+import { aiImagePayload, aiModelChoices, aiProviderPayload, aiSessionGroups, aiSessionTitle, confirmFrame, formatDuration, formatUsageSummary, nodeSatisfiesPi, pickAiActiveSession, piLaunch, piLaunchForDisplay, rememberAiSession, resolveAiRunConfig, sanitizeAiApiFormat, sanitizeAiBaseUrl, sanitizeAiLabel, sanitizeAiModels, sanitizeAiName, sanitizeAiPermission, sanitizeAiPreset, sanitizeAiSessionId, sanitizeAiSessions, sanitizeAiThinking, sessionMessagesToLines, taskPrompt, writtenEntries } from '@workbench/ai'
 import { noteRootName, sanitizeNoteRoot } from '@workbench/notes'
 import { defineStore } from 'pinia'
 /**
@@ -246,36 +246,18 @@ export const useAiStore = defineStore('ai', () => {
   /** 页面上那个「模型」下拉里能挑的：启用的服务下启用的那些模型 */
   const choices = computed(() => aiModelChoices(providers.value))
 
-  /** 一个会话（或「还没建的新对话」）当下生效的那份配置：composer 画的、起进程带的就是它 */
-  interface AiRunConfig {
-    choice: AiModelChoice | null
-    providerName: string
-    model: string
-    thinking: string
-    permission: string
-  }
-
   /**
-   * **每个会话的配置是独立的**（模型 / 思考档位 / 权限记在会话自己身上，见 AiSession 的
-   * 可选字段）：记过就用它，没记过的回落设置里的默认 —— 老会话不用迁移；模型管理里把
-   * 那个服务删了 / 停了也在这里回落（pickAiChoice 退回第一个能挑的）。
+   * 一个会话（或「还没建的新对话」）当下生效的那份配置。解析规则在
+   * `@workbench/ai` 的 `resolveAiRunConfig`（可单测，回落与档位钳制都在那边）；
+   * 这里只把两份响应式事实 —— 服务清单与设置里的默认 —— 递进去。
    */
   function configOf(session: AiSession | null): AiRunConfig {
-    const choice = pickAiChoice(
-      providers.value,
-      session?.provider ?? settings.settings.aiDefaultProvider,
-      session?.model ?? settings.settings.aiDefaultModel,
-    )
-    return {
-      choice,
-      providerName: choice?.provider ?? '',
-      model: choice?.model ?? '',
-      thinking: pickAiThinking(
-        choice?.levels ?? ['off'],
-        session?.thinking ?? settings.settings.aiThinking,
-      ),
-      permission: sanitizeAiPermission(session?.permission ?? settings.settings.aiPermission),
-    }
+    return resolveAiRunConfig(providers.value, session, {
+      provider: settings.settings.aiDefaultProvider,
+      model: settings.settings.aiDefaultModel,
+      thinking: settings.settings.aiThinking,
+      permission: settings.settings.aiPermission,
+    })
   }
 
   /** 当前正对着的那份：有会话用会话自己的，起始屏（还没建会话）用设置里的默认 */
@@ -1325,6 +1307,12 @@ export const useAiStore = defineStore('ai', () => {
     if (started && ready && activeId.value)
       void hydrate(activeId.value)
   })
+
+  // 把技能那两条根注册给技能栏（ai-skills 不反向 import 这里，见它 setRoots 的说明）：
+  // 探测运行时带回的 skillRoot 与当前盯着的目录一变，技能栏的两栏根就跟着换、并自动重扫
+  watch([skillRoot, watchedDir], ([root, dir]) => {
+    useAiSkillsStore().setRoots(root, dir)
+  }, { immediate: true })
 
   /**
    * 模型配置变过了（默认模型 / 思考档位 / 权限这三样，以及下面三个改服务的入口）：

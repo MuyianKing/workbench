@@ -22,6 +22,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tauri::{AppHandle, Emitter, Manager};
 
+use crate::common::now_secs;
 use crate::mail::{self, Folder, MailSummary};
 use crate::fs_util;
 use crate::{notify, paths};
@@ -169,10 +170,7 @@ pub fn mail_watch_register(
 /// 周期的收敛（与渲染层 sanitizeMailPollMinutes 同一条）：0 = 关闭原样放行，
 /// 其余夹进下限..上限。
 fn sanitize_poll_minutes(raw: u32) -> u32 {
-    if raw == 0 {
-        return 0;
-    }
-    raw.clamp(POLL_MIN_MINUTES, POLL_MAX_MINUTES)
+    crate::common::clamp_poll_minutes(raw, POLL_MIN_MINUTES, POLL_MAX_MINUTES)
 }
 
 /// 起监视线程（main.rs 的 setup 里调，全进程一个）。清单空着时它只睡不查 ——
@@ -199,7 +197,7 @@ fn tick(app: &AppHandle) {
         return;
     }
     let mut state = WatchState::load();
-    let now = now_secs();
+    let now = now_secs() as u64;
     if now.saturating_sub(state.last_check) < u64::from(config.poll_minutes) * 60 {
         return;
     }
@@ -327,12 +325,6 @@ pub(crate) fn display_name(app: &AppHandle) -> String {
         .unwrap_or_else(|| app.package_info().name.clone())
 }
 
-fn now_secs() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|duration| duration.as_secs())
-        .unwrap_or(0)
-}
 
 #[cfg(test)]
 mod tests {

@@ -1,11 +1,22 @@
 <script setup lang="ts">
 import type { GatewayAccess, GatewayAccount, GatewayCredits, GatewayStatus, GatewayUsageSummary } from '@/workbench/gateway'
 import { CircleCheck, CircleClose, Clock, Coin, Connection, Plus, User, Warning } from '@element-plus/icons-vue'
-import { creditExpiry, creditExpiryDate, gatewayBucketUnit, soonestExpiry, summarizeGatewayRows } from '@workbench/usage'
+import { gatewayBucketUnit, summarizeGatewayRows } from '@workbench/usage'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { computed, onActivated, onBeforeUnmount, onMounted, ref } from 'vue'
 import EmptyState from '@/components/EmptyState.vue'
-import { formatTimestamp } from '@/format'
+import { useCreditPool } from '@/composables/use-credit-pool'
+import { formatCompactTokens } from '@/format'
+import {
+  poolMeterTone as meterClass,
+  poolBalanceText as number,
+  poolExpiryHint,
+  poolStatusText,
+  poolQuotaActive as quotaActive,
+  poolQuotaHint as quotaHint,
+  poolRemainPercent as remainPercent,
+  poolStatusTone as statusClass,
+} from '@/status'
 import AccessDialog from './AccessDialog.vue'
 import AccountTransferDialog from './AccountTransferDialog.vue'
 import CreditsDialog from './CreditsDialog.vue'
@@ -45,7 +56,8 @@ const TABS = [
 const tab = ref<'accounts' | 'perks' | 'usage' | 'requests' | 'models'>('accounts')
 const status = ref<GatewayStatus | null>(null)
 const accounts = ref<GatewayAccount[]>([])
-const credits = ref<Record<string, GatewayCredits>>({})
+// 余额快照（credits）与单号在途（creditPending）在 useCreditPool：两套网关页同一套口径
+const { credits, pending: creditPending, pruneCredits, throttled: poolThrottled, markQueried: markPoolQueried, queryCredits: queryPoolCredits } = useCreditPool<GatewayCredits>()
 const usage = ref<GatewayUsageSummary | null>(null)
 const access = ref<GatewayAccess | null>(null)
 const accessOpen = ref(false)
@@ -61,10 +73,6 @@ const loginHint = ref('')
 const loggingIn = ref('')
 /** 全量查余额在途（整排一起转） */
 const creditBusy = ref(false)
-/** 按 uid 记的单号在途：行内那枚「查余额」自己转自己的 */
-const creditPending = ref<Record<string, boolean>>({})
-/** 上一次全量查余额的时刻（毫秒），配合 CREDIT_THROTTLE */
-let creditAt = 0
 /** 进页面那一套动作是否在途（见 `enter`） */
 let entering = false
 
@@ -134,46 +142,13 @@ async function refreshDetail(): Promise<void> {
     await queryOne(account)
 }
 
-function remainPercent(value: GatewayCredits): number {
-  if (value.size <= 0)
-    return 0
-  return Math.min(100, Math.max(0, (value.remain / value.size) * 100))
+/** 卡面状态机、余额条与临期提示在 status.ts（两套网关页同一份）；这里只绑各自的快照与文案。 */
+function expiryHint(account: GatewayAccount) {
+  return poolExpiryHint(credits.value[account.uid])
 }
 
-function number(value: number): string {
-  return Number.isInteger(value) ? String(value) : value.toFixed(2)
-}
-
-/**
- * 账号卡行尾那枚临期天数：取还花得出去、到期最近的那个包。
- *
- * 卡上只答一个问题 —— 这个号该先花哪一批；逐包的到期在弹层里。
- * 无期限 / 到期未知 / 已过期 / 已花光都不占位（与弹层那些灰档同一口径：不催动作）。
- * 天数按 UTC+8 自然日（`creditExpiry`），所以和弹层里同一个包的标签一致。
- * 每次都按当前时刻重算，不读快照里的 `earliestExpiring` —— 后者是查询那一刻算的。
- */
-function expiryHint(account: GatewayAccount): { text: string, title: string } | null {
-  const snapshot = credits.value[account.uid]
-  if (!snapshot)
-    return null
-  const now = Math.floor(Date.now() / 1000)
-  const pack = soonestExpiry(snapshot.packages, now)
-  if (!pack || pack.expiresAt === null)
-    return null
-  const verdict = creditExpiry(pack, now, { enterprise: snapshot.enterprise })
-  const days = verdict.days ?? 0
-  return {
-    text: verdict.tier === 'today' ? '今日到期' : `${days} 天后到期`,
-    title: `最早到期：${pack.name} 还剩 ${number(pack.remain)}，${creditExpiryDate(pack.expiresAt)} 作废`,
-  }
-}
-
-function compact(value: number): string {
-  if (value >= 1_000_000)
-    return `${(value / 1_000_000).toFixed(1)}M`
-  if (value >= 1_000)
-    return `${(value / 1_000).toFixed(1)}K`
-  return String(value)
+function statusText(account: GatewayAccount): string {
+  return poolStatusText(account, { readyLabel: '待续期' })
 }
 
 function stopLoginPolling(): void {
@@ -205,10 +180,7 @@ async function refresh(): Promise<void> {
     accounts.value = list.data.map(item => ({ ...item, modelQuotas: item.modelQuotas ?? [] }))
     // 账号删掉后它的余额快照要一起丢掉：统计卡里的积分是把 map 全部加起来，
     // 留着旧号会让「剩余 / 总额」凭空多出一个号的数
-    const alive = new Set(list.data.map(item => item.uid))
-    credits.value = Object.fromEntries(
-      Object.entries(credits.value).filter(([uid]) => alive.has(uid)),
-    )
+    pruneCredits(new Set(list.data.map(item => item.uid)))
   }
   if (rows.ok && rows.data) {
     // 30 天的自然日窗口本来就比 24 小时长，取数不会多带行，整批汇总即可
@@ -313,24 +285,9 @@ async function pollLogin(loginState: string): Promise<void> {
     await queryOne(added)
 }
 
-/**
- * 查一个号的余额。成功时返回 `null`，失败返回错误串 —— **这里不弹提示**：
- * 批量查余额时十个号会弹十条红条，由调用方汇总成一条。
- */
-async function queryCredits(account: GatewayAccount): Promise<string | null> {
-  creditPending.value = { ...creditPending.value, [account.uid]: true }
-  try {
-    const result = await window.workbench.gatewayCredits(account.uid)
-    if (!result.ok || !result.data)
-      return result.error ?? '查询余额失败'
-    credits.value = { ...credits.value, [account.uid]: result.data }
-    return null
-  }
-  finally {
-    const pending = { ...creditPending.value }
-    delete pending[account.uid]
-    creditPending.value = pending
-  }
+/** 查一个号的余额：快照与在途标记都在 useCreditPool，这里不弹提示（见那边的注释） */
+function queryCredits(account: GatewayAccount): Promise<string | null> {
+  return queryPoolCredits(account.uid, uid => window.workbench.gatewayCredits(uid))
 }
 
 /** 行内那枚「查余额」：单号，失败就地提示 */
@@ -353,13 +310,13 @@ async function queryAllCredits(force = false): Promise<void> {
   const list = accounts.value
   if (!list.length || creditBusy.value)
     return
-  if (!force && Date.now() - creditAt < CREDIT_THROTTLE)
+  if (!force && poolThrottled(CREDIT_THROTTLE))
     return
 
   creditBusy.value = true
   try {
     const results = await Promise.all(list.map(account => queryCredits(account)))
-    creditAt = Date.now()
+    markPoolQueried()
     const failed = results.filter(item => item !== null)
     if (!failed.length) {
       if (force)
@@ -404,64 +361,6 @@ async function setPriority(account: GatewayAccount, value: number | undefined): 
  * 整号的额度标记（余额 / 积分用完）：这个号暂时整个不可用。
  * 停用 / 待续期的号本来就进不了池子，额度标记等 token 修好再说。
  */
-function quotaActive(account: GatewayAccount): boolean {
-  return account.enabled && account.ready && account.quotaExhausted
-}
-
-/**
- * 按模型的额度标记（上游 code 6004）：只挡这几个模型，号本身还能用别的模型。
- * 与整号标记分开 —— 拿它去算「可用 / 额度用完」会让一个还能用的号被算成下线。
- */
-function modelQuotaActive(account: GatewayAccount): boolean {
-  return account.enabled && account.ready && account.modelQuotas.length > 0
-}
-
-/** 状态标签：停用 → 待续期 → 额度用完 → 部分模型用完 → 可用 */
-function statusText(account: GatewayAccount): string {
-  if (!account.enabled)
-    return '已停用'
-  if (!account.ready)
-    return '待续期'
-  if (quotaActive(account))
-    return '额度用完'
-  return modelQuotaActive(account) ? '部分模型用完' : '可用'
-}
-
-function statusClass(account: GatewayAccount): string {
-  if (!account.enabled)
-    return 'is-fail'
-  if (!account.ready)
-    return 'is-muted'
-  return quotaActive(account) || modelQuotaActive(account) ? 'is-warn' : 'is-ok'
-}
-
-/** 余额条的底色：≥50% 绿、20–50% 琥珀、<20% 红；总量未知时不上色 */
-function meterClass(value: GatewayCredits): string {
-  if (value.size <= 0)
-    return ''
-  const percent = value.remain / value.size * 100
-  if (percent < 20)
-    return 'is-fail'
-  if (percent < 50)
-    return 'is-warn'
-  return 'is-ok'
-}
-
-/**
- * 额度用完时状态下面那行小字：告诉用户什么时候回来（其余状态不写第二行）。
- * 整号用完只写时间；按模型的写「模型 + 时间」，还有别的模型就用个数收尾。
- */
-function quotaHint(account: GatewayAccount): string {
-  if (!account.enabled || !account.ready)
-    return ''
-  if (quotaActive(account))
-    return account.quotaResetsAt ? `${formatTimestamp(account.quotaResetsAt * 1000)} 恢复` : ''
-  if (!account.modelQuotas.length)
-    return ''
-  const [first, ...rest] = account.modelQuotas
-  const head = `${first.model} ${formatTimestamp(first.resetsAt * 1000)} 恢复`
-  return rest.length ? `${head}（另 ${rest.length} 个模型）` : head
-}
 
 async function removeAccount(account: GatewayAccount): Promise<void> {
   try {
@@ -769,7 +668,7 @@ onBeforeUnmount(() => {
               <div class="gw__fact">
                 <span class="gw__fact-label">用量</span>
                 <span class="gw__fact-value">
-                  {{ usageOf(account.uid) ? compact(usageOf(account.uid)!.promptTokens + usageOf(account.uid)!.completionTokens) : '—' }}
+                  {{ usageOf(account.uid) ? formatCompactTokens(usageOf(account.uid)!.promptTokens + usageOf(account.uid)!.completionTokens) : '—' }}
                 </span>
               </div>
               <div class="gw__fact">

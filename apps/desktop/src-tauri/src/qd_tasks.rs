@@ -17,7 +17,8 @@ use std::io::Write;
 use serde::{Deserialize, Serialize};
 
 use crate::http;
-use crate::qd_account::{now_secs, Account};
+use crate::common::{civil_from_days, now_secs, redact};
+use crate::qd_account::Account;
 use crate::qd_credits::account_headers;
 use crate::qd_upstream;
 
@@ -120,12 +121,7 @@ fn get_json(account: &Account, method: &str, path: &str, body: Option<&str>) -> 
         .iter()
         .map(|(name, value)| (*name, value.as_str()))
         .collect();
-    let response = http::request_url_limited(method, &url, &refs, body, 2 * 1024 * 1024)?;
-    let text = response.text();
-    if response.status != 200 {
-        return Err(format!("HTTP {} {}", response.status, text.chars().take(160).collect::<String>()));
-    }
-    serde_json::from_str(&text).map_err(|err| format!("响应不是 JSON：{err}"))
+    http::request_json(method, &url, &refs, body, 2 * 1024 * 1024, 160)
 }
 
 /// 今天（UTC+8）的 `YYYY-MM-DD`。
@@ -136,19 +132,6 @@ pub fn today() -> String {
     format!("{year:04}-{month:02}-{day:02}")
 }
 
-fn civil_from_days(days: i64) -> (i64, i64, i64) {
-    // Howard Hinnant 的 days → civil 算法
-    let z = days + 719_468;
-    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
-    let doe = z - era * 146_097;
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let y = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    (if m <= 2 { y + 1 } else { y }, m, d)
-}
 
 /// 查签到状态。
 pub fn checkin_status(account: &Account) -> CheckinStatus {
@@ -555,29 +538,6 @@ pub fn record_activity_with(account: &Account, task: &str, ok: bool, credits: i6
             let _ = writeln!(file, "{line}");
         }
     }
-}
-
-/// 打码：`Bearer …`、32 位以上连续十六进制、`sk-` / `pt-` / `dt-` / `drt-` 形态。
-pub fn redact(message: &str) -> String {
-    let mut text = message.replace(['\r', '\n'], " ");
-    for prefix in ["Bearer ", "sk-", "pt-", "dt-", "drt-", "jrt-"] {
-        let mut search_from = 0;
-        while let Some(relative) = text[search_from..].find(prefix) {
-            let at = search_from + relative;
-            let start = at + prefix.len();
-            let rest = &text[start..];
-            let end = rest
-                .find(|ch: char| !ch.is_ascii_alphanumeric() && ch != '.' && ch != '-' && ch != '_')
-                .unwrap_or(rest.len());
-            if end == 0 {
-                search_from = start;
-                continue;
-            }
-            text.replace_range(at..start + end, "[已脱敏]");
-            search_from = at + "[已脱敏]".len();
-        }
-    }
-    text.chars().take(200).collect()
 }
 
 /// 今天的尝试记录。

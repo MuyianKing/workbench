@@ -275,7 +275,7 @@ pub fn build(input: BuildInput<'_>) -> Result<(Value, Prepared), String> {
             business.insert("id".into(), Value::String(id));
             business.insert(
                 "begin_at".into(),
-                Value::Number((crate::qd_account::now_secs() * 1000).into()),
+                Value::Number((crate::common::now_secs() * 1000).into()),
             );
             business.insert("name".into(), Value::String(short_name(&prompt)));
         }

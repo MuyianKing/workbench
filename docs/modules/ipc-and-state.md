@@ -11,8 +11,10 @@
 
 ### 通道
 
-- 契约以 [types.ts](../../apps/desktop/src/renderer/src/types.ts) 的 `WorkbenchApi` 为准：Tauri 命令名用 snake_case，camelCase 方法名到命令名的
-  映射只出现在适配层。
+- 契约以 [types/index.ts](../../apps/desktop/src/renderer/src/types/index.ts) 的 `WorkbenchApi` 为准：Tauri 命令名用 snake_case，camelCase 方法名到命令名的
+  映射只出现在适配层。通道载荷类型（`Gateway*` / `Qoder*` / `Etf*`）住在 `types/gateway.ts` / `types/qoder.ts` / `types/etf.ts`
+  （契约侧），适配层从 `@/types` **import 并 re-export** —— 既有的 `from '@/workbench/gateway'` 导入照旧能用，
+  但**契约不再反向 import 适配层**（原先 47 处 `import('./workbench/…')`），新增载荷类型一律落 `types/`。
 - 通道一律返回 `Result<T>`（[result.ts](../../packages/core/src/result.ts) 的 `ok` / `fail` / `toResult`），不 reject；调用侧判 `result.ok`、
   失败取 `result.error` 提示。Rust 的 `Err(String)` 会被 Tauri 直接 reject，所以适配层用 `guard()` 收敛（它兼容字符串与 Error，
   不能直接套 `@workbench/core` 的 `toResult`）。
@@ -22,6 +24,12 @@
   的形态冒到调用方，而调用方按签名认为它不会失败。
 - 新增通道三步：`WorkbenchApi` 登记 → 适配层实现 → 需要后端时在 `commands.rs` 写命令并在 `main.rs` 的 `generate_handler!`
   注册。渲染层→主进程的单向事件走适配层的 `events.ts` 广播。
+- 适配层实现**按域分文件**：`workbench/index.ts` 只是装配根（spreads + 未移植兜底 + 安装时序），
+  通道实现按域住在 `api-sync.ts`（同步门禁那几组）、`api-project.ts`（项目 CRUD 与进程十件事）、
+  `api-system.ts`（系统 / 窗口 / 对话框 / 系统集成）、`api-background.ts`（背景图与图片授权）、
+  `api-events.ts`（事件订阅与截图 / 钉图 / 网速球这三窗共用组）；域模块的薄转发收在 index.ts 的
+  `domainsApi`，网关与 Qoder 各自整组在 `gateway.ts` / `qoder.ts`。新增通道加到对应域文件，
+  不要往 index.ts 里塞实现。
 - **数组 / 对象形状的取值接口必须真实现，绝不能落到「尚未移植」兜底**：兜底返回的是 `Result` 对象，store 会把它当数组遍历、
   直接抛错并把整条 `init()` 打断，表现成完全无关的功能失灵（`listQuickApps` / `listCommands` 就这么让「系统状态」一直没数据）。
 - 渲染层不直接访问 Node / 文件系统 / WebView 宿主能力，一切经 `window.workbench`。**唯一的例外

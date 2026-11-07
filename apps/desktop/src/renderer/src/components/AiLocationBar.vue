@@ -10,6 +10,7 @@ import { noteRootName } from '@workbench/notes'
  * git 分支那一格是父级（AiView）探好递下来的（它自己只显示，不探）。
  */
 import { computed } from 'vue'
+import { tryCopy } from '@/clipboard'
 import { useAiStore } from '@/stores/ai'
 
 const props = defineProps<{
@@ -29,7 +30,7 @@ function onCommand(command: string): void {
   if (command === 'reveal' && dir.value)
     void window.workbench.reveal(dir.value)
   else if (command === 'copy' && dir.value)
-    void navigator.clipboard.writeText(dir.value)
+    void tryCopy(dir.value)
 }
 </script>
 

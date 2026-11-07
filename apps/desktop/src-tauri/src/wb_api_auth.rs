@@ -7,6 +7,7 @@
 //! 纯 I/O 适配：只发请求、解响应、把结果写回 `Account`。要不要续、什么时候续，
 //! 由调用方按 [`Account::needs_refresh`] 决定。
 
+use crate::common::excerpt;
 use crate::http;
 use crate::wb_account::{Account, TokenGrant};
 use crate::wb_upstream;
@@ -39,13 +40,13 @@ pub fn refresh(account: &mut Account) -> Result<(), String> {
         return Err(format!(
             "续期失败：HTTP {} {}",
             response.status,
-            excerpt(&text)
+            excerpt(&text, 200)
         ));
     }
 
     let grant = parse_grant(&text)?;
     if grant.access_token.trim().is_empty() {
-        return Err(format!("续期返回里没有 accessToken：{}", excerpt(&text)));
+        return Err(format!("续期返回里没有 accessToken：{}", excerpt(&text, 200)));
     }
     account.absorb_grant(&grant);
     Ok(())
@@ -86,13 +87,6 @@ fn common_headers() -> Vec<(&'static str, &'static str)> {
     ]
 }
 
-fn excerpt(text: &str) -> String {
-    let trimmed = text.trim();
-    if trimmed.chars().count() <= 200 {
-        return trimmed.to_string();
-    }
-    trimmed.chars().take(200).collect::<String>() + "…"
-}
 
 // ---------- 登录（设备授权流） ----------
 //
@@ -140,7 +134,7 @@ pub fn start_login() -> Result<LoginStart, String> {
         return Err(format!(
             "发起登录失败：HTTP {} {}",
             response.status,
-            excerpt(&text)
+            excerpt(&text, 200)
         ));
     }
     let value: serde_json::Value =
@@ -186,7 +180,7 @@ pub fn poll_login(state: &str) -> Result<PollOutcome, String> {
         return Ok(PollOutcome::Pending(format!(
             "HTTP {} {}",
             response.status,
-            excerpt(&text)
+            excerpt(&text, 200)
         )));
     }
     let value: serde_json::Value =

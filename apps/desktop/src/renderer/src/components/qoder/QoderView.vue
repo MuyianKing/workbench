@@ -3,7 +3,7 @@ import type { GatewayUsageSummary } from '@workbench/usage'
 import type { GatewayCredits, GatewayUsageRow } from '@/workbench/gateway'
 import type { QoderAccount, QoderCredits, QoderEarningPoint, QoderHeatmapPoint, QoderModelInfo, QoderStatus, QoderTaskSnapshot } from '@/workbench/qoder'
 import { Calendar, Coin, Cpu, Histogram, MagicStick, Plus, Refresh, User } from '@element-plus/icons-vue'
-import { creditExpiry, creditExpiryDate, dailyCreditSeries, gatewayBucketUnit, GROWTH_CREDIT_DAYS, soonestExpiry, summarizeGatewayRows } from '@workbench/usage'
+import { dailyCreditSeries, gatewayBucketUnit, GROWTH_CREDIT_DAYS, summarizeGatewayRows } from '@workbench/usage'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { computed, onActivated, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import EmptyState from '@/components/EmptyState.vue'
@@ -13,8 +13,19 @@ import CreditsDialog from '@/components/gateway/CreditsDialog.vue'
 import GatewayTable from '@/components/gateway/GatewayTable.vue'
 import GatewayTabs from '@/components/gateway/GatewayTabs.vue'
 import PerksCreditsChart from '@/components/gateway/PerksCreditsChart.vue'
+import RequestFilters from '@/components/gateway/RequestFilters.vue'
 import UsagePane from '@/components/gateway/UsagePane.vue'
-import { formatTimestamp } from '@/format'
+import { useCreditPool } from '@/composables/use-credit-pool'
+import { formatCompactTokens, formatTimestamp } from '@/format'
+import {
+  poolMeterTone as meterClass,
+  poolBalanceText as number,
+  poolExpiryHint,
+  poolStatusText,
+  poolQuotaHint as quotaHint,
+  poolRemainPercent as remainPercent,
+  poolStatusTone as statusClass,
+} from '@/status'
 import { qoderUsageRows } from '@/workbench/qoder'
 
 /**
@@ -34,22 +45,11 @@ const TABS = [
   { label: '模型', value: 'models' },
 ] as const
 
-/** 请求栏的条件：条数 / 结果 / 关键字（与 TBuddy 的请求栏同一套选项） */
-const REQUEST_LIMITS = [
-  { label: '最近 50 条', value: 50 },
-  { label: '最近 100 条', value: 100 },
-  { label: '最近 200 条', value: 200 },
-] as const
-const REQUEST_RESULTS = [
-  { label: '全部结果', value: 'all' },
-  { label: '只看成功', value: 'ok' },
-  { label: '只看失败', value: 'fail' },
-] as const
-
 const tab = ref<'accounts' | 'perks' | 'usage' | 'requests' | 'models'>('accounts')
 const status = ref<QoderStatus | null>(null)
 const accounts = ref<QoderAccount[]>([])
-const credits = ref<Record<string, QoderCredits>>({})
+// 余额快照（credits）与单号在途（creditBusy）在 useCreditPool：与 TBuddy 账号页同一套口径
+const { credits, pending: creditBusy, pruneCredits, throttled: poolThrottled, markQueried, resetThrottle, queryCredits: queryPoolCredits } = useCreditPool<QoderCredits>()
 const models = ref<QoderModelInfo[]>([])
 const access = ref<{ baseUrl: string, apiKey: string, models: string[] } | null>(null)
 const accessOpen = ref(false)
@@ -60,7 +60,6 @@ const port = ref(17879)
 const busy = ref(false)
 const loggingIn = ref(false)
 const loginHint = ref('')
-const creditBusy = ref<Record<string, boolean>>({})
 const modelsBusy = ref(false)
 
 const recent = ref<GatewayUsageRow[]>([])
@@ -83,7 +82,6 @@ let earningsPushed = false
 
 let pollTimer: ReturnType<typeof setInterval> | null = null
 let loginTimer: ReturnType<typeof setInterval> | null = null
-let creditAt = 0
 
 const running = computed(() => status.value?.running === true)
 const baseUrl = computed(() => access.value?.baseUrl ?? status.value?.baseUrl ?? `http://127.0.0.1:${port.value}/v1`)
@@ -112,8 +110,12 @@ async function refresh(): Promise<void> {
     if (!accessOpen.value)
       port.value = statusResult.data.port
   }
-  if (accountResult.ok && accountResult.data)
+  if (accountResult.ok && accountResult.data) {
     accounts.value = accountResult.data
+    // 账号删掉后它的余额快照要一起丢掉（与 TBuddy 同一口径；统计卡把整个 map 求和，
+    // 留着旧号会让「剩余 / 总额」凭空多出一个号的数）
+    pruneCredits(new Set(accountResult.data.map(item => item.uid)))
+  }
   if (accessResult.ok && accessResult.data)
     access.value = accessResult.data
 }
@@ -150,9 +152,9 @@ async function refreshModels(): Promise<void> {
 }
 
 async function loadCredits(): Promise<void> {
-  if (Date.now() - creditAt < 60_000)
+  if (poolThrottled(60_000))
     return
-  creditAt = Date.now()
+  markQueried()
   for (const account of accounts.value) {
     if (!account.enabled)
       continue
@@ -162,22 +164,23 @@ async function loadCredits(): Promise<void> {
 
 /** 右下角「刷新积分」：跳过一分钟节流，把可用账号各查一遍 */
 function refreshCredits(): void {
-  creditAt = 0
+  resetThrottle()
   void loadCredits()
 }
 
+/**
+ * 查一个号的余额：快照与在途标记在 useCreditPool。失败就地提示（TBuddy 那边
+ * 是批量聚成一条，这里是单号各说各的 —— 节奏不同，快照口径相同）。
+ */
 async function queryCredits(uid: string): Promise<void> {
-  creditBusy.value = { ...creditBusy.value, [uid]: true }
-  const result = await window.workbench.qoderCredits(uid)
-  creditBusy.value = { ...creditBusy.value, [uid]: false }
-  if (result.ok && result.data) {
-    credits.value = { ...credits.value, [uid]: result.data }
-    if (result.data.error)
-      ElMessage.warning(`${uid.slice(0, 8)}：${result.data.error}`)
+  const error = await queryPoolCredits(uid, id => window.workbench.qoderCredits(id), '查询积分失败')
+  if (error) {
+    ElMessage.error(error)
+    return
   }
-  else {
-    ElMessage.error(result.error ?? '查询积分失败')
-  }
+  const snapshot = credits.value[uid]
+  if (snapshot?.error)
+    ElMessage.warning(`${uid.slice(0, 8)}：${snapshot.error}`)
 }
 
 async function toggleRun(): Promise<void> {
@@ -407,7 +410,7 @@ async function checkinAll(): Promise<void> {
     ElMessage.success(summary)
   publishEarnings(true)
   await Promise.all([loadPerks(), loadCredits()])
-  creditAt = Date.now()
+  markQueried()
 }
 
 /**
@@ -502,109 +505,13 @@ function asGatewayCredits(snapshot: QoderCredits): GatewayCredits {
   }
 }
 
-function remainPercent(value: QoderCredits): number {
-  if (value.size <= 0)
-    return 0
-  return Math.min(100, Math.max(0, (value.remain / value.size) * 100))
+/** 卡面状态机、余额条与临期提示在 status.ts（与 TBuddy 账号页同一份）；这里只绑各自的快照与文案 */
+function expiryHint(account: QoderAccount) {
+  return poolExpiryHint(credits.value[account.uid], { onlyAvailable: true })
 }
 
-function number(value: number): string {
-  return Number.isInteger(value) ? String(value) : value.toFixed(2)
-}
-
-/** 账号卡行尾那枚临期天数：取还花得出去、到期最近的包（与 TBuddy 同一口径） */
-function expiryHint(account: QoderAccount): { text: string, title: string } | null {
-  const snapshot = credits.value[account.uid]
-  if (!snapshot)
-    return null
-  const now = Math.floor(Date.now() / 1000)
-  const packs = snapshot.packages
-    .filter(item => item.available)
-    .map(item => ({ ...item, noExpiry: snapshot.team || item.expiresAt === null }))
-  const pack = soonestExpiry(packs, now)
-  if (!pack || pack.expiresAt === null)
-    return null
-  const verdict = creditExpiry(pack, now, { enterprise: snapshot.team })
-  const days = verdict.days ?? 0
-  return {
-    text: verdict.tier === 'today' ? '今日到期' : `${days} 天后到期`,
-    title: `最早到期：${pack.name} 还剩 ${number(pack.remain)}，${creditExpiryDate(pack.expiresAt)} 作废`,
-  }
-}
-
-/** 余额条：≥50% 绿、20–50% 琥珀、<20% 红；总量未知时不上色 */
-function meterClass(value: QoderCredits): string {
-  if (value.size <= 0)
-    return ''
-  const percent = value.remain / value.size * 100
-  if (percent < 20)
-    return 'is-fail'
-  if (percent < 50)
-    return 'is-warn'
-  return 'is-ok'
-}
-
-function quotaActive(account: QoderAccount): boolean {
-  return account.enabled && account.ready && account.quotaExhausted
-}
-
-function modelQuotaActive(account: QoderAccount): boolean {
-  return account.enabled && account.ready && account.modelQuotas.length > 0
-}
-
-/** 状态标签：停用 → 待登录 → 额度用完 → 部分模型用完 → 可用 */
 function statusText(account: QoderAccount): string {
-  if (!account.enabled)
-    return '已停用'
-  if (!account.ready)
-    return '待登录'
-  if (quotaActive(account))
-    return '额度用完'
-  return modelQuotaActive(account) ? '部分模型用完' : '可用'
-}
-
-/** 卡面状态色：只表达状态，不做装饰（与 TBuddy 账号卡同一套） */
-function statusClass(account: QoderAccount): string {
-  if (!account.enabled)
-    return 'state-fail'
-  if (!account.ready)
-    return 'state-muted'
-  return quotaActive(account) || modelQuotaActive(account) ? 'state-warn' : 'state-ok'
-}
-
-/** 额度用完时状态下面那行小字：整号写恢复时间，按模型写「模型 + 时间」 */
-function quotaHint(account: QoderAccount): string {
-  if (!account.enabled || !account.ready)
-    return ''
-  if (quotaActive(account))
-    return account.quotaResetsAt ? `${formatTimestamp(account.quotaResetsAt * 1000)} 恢复` : ''
-  if (!account.modelQuotas.length)
-    return ''
-  const [first, ...rest] = account.modelQuotas
-  const head = `${first.model} ${formatTimestamp(first.resetsAt * 1000)} 恢复`
-  return rest.length ? `${head}（另 ${rest.length} 个模型）` : head
-}
-
-function compact(value: number): string {
-  if (value >= 1_000_000)
-    return `${(value / 1_000_000).toFixed(1)}M`
-  if (value >= 1_000)
-    return `${(value / 1_000).toFixed(1)}K`
-  return String(value)
-}
-
-/**
- * token 数按千进制收短：≥100 万给 `M`（两位小数）、≥1000 给 `K`（一位小数），再小给整数，
- * 与 TBuddy 用量页的 `compact()` 同一套。**不写「兆」**：中文的兆是万亿，
- * 9.28M 写成「9.28兆」会读大六个数量级（M = 百万）。
- */
-function token(value: number): string {
-  const n = Math.max(0, Math.round(value))
-  if (n >= 1_000_000)
-    return `${(n / 1_000_000).toFixed(2)}M`
-  if (n >= 1_000)
-    return `${(n / 1_000).toFixed(1)}K`
-  return String(n)
+  return poolStatusText(account, { readyLabel: '待登录' })
 }
 
 /** 签到标签只看上游 status：请求成功不等于「可签」 */
@@ -813,7 +720,7 @@ onBeforeUnmount(() => {
               <div class="qd-account__fact">
                 <span class="qd-account__fact-label">用量</span>
                 <span class="qd-account__fact-value">
-                  {{ usageOf(account.uid) ? compact(usageOf(account.uid)!.promptTokens + usageOf(account.uid)!.completionTokens) : '—' }}
+                  {{ usageOf(account.uid) ? formatCompactTokens(usageOf(account.uid)!.promptTokens + usageOf(account.uid)!.completionTokens) : '—' }}
                 </span>
               </div>
               <div class="qd-account__fact">
@@ -937,29 +844,15 @@ onBeforeUnmount(() => {
 
     <!-- 请求：条件带与 TBuddy 的请求栏同一套（搜索 / 结果 / 条数 + 计数与重读） -->
     <section v-else-if="tab === 'requests'" class="qd__pane">
-      <div class="qd-req__filters">
-        <div class="qd-req__picks">
-          <el-input
-            v-model="requestKeyword"
-            size="small"
-            placeholder="搜索模型 / 账号 / User-Agent"
-            clearable
-            class="qd-req__search"
-          />
-          <el-select v-model="requestResult" size="small" class="qd-req__pick">
-            <el-option v-for="item in REQUEST_RESULTS" :key="item.value" :label="item.label" :value="item.value" />
-          </el-select>
-          <el-select v-model="requestLimit" size="small" class="qd-req__pick" @change="loadRecent">
-            <el-option v-for="item in REQUEST_LIMITS" :key="item.value" :label="item.label" :value="item.value" />
-          </el-select>
-        </div>
-        <div class="qd-req__actions">
-          <span class="qd-req__count">共 {{ requestRows.length }} 条 · 成功 {{ requestOkCount }}</span>
-          <el-button size="small" :loading="requestsLoading" @click="loadRecent">
-            重新读取
-          </el-button>
-        </div>
-      </div>
+      <RequestFilters
+        v-model:keyword="requestKeyword"
+        v-model:result="requestResult"
+        v-model:limit="requestLimit"
+        :count="requestRows.length"
+        :ok-count="requestOkCount"
+        :loading="requestsLoading"
+        @reload="loadRecent"
+      />
       <EmptyState
         v-if="!requestRows.length"
         :icon="Cpu"
@@ -985,7 +878,7 @@ onBeforeUnmount(() => {
         </el-table-column>
         <el-table-column label="token" align="center">
           <template #default="{ row }">
-            {{ token(row.totalTokens) }}
+            {{ formatCompactTokens(row.totalTokens) }}
           </template>
         </el-table-column>
         <el-table-column label="延迟" align="center">
@@ -1215,19 +1108,19 @@ onBeforeUnmount(() => {
   background: var(--card-color, transparent);
 }
 
-.qd-account.state-ok {
+.qd-account.is-ok {
   --card-color: var(--st-ok);
 }
 
-.qd-account.state-warn {
+.qd-account.is-warn {
   --card-color: var(--st-run);
 }
 
-.qd-account.state-fail {
+.qd-account.is-fail {
   --card-color: var(--st-fail);
 }
 
-.qd-account.state-muted {
+.qd-account.is-muted {
   --card-color: var(--ink-3);
 }
 
@@ -1284,19 +1177,19 @@ onBeforeUnmount(() => {
   font-size: var(--gw-fs-micro);
 }
 
-.qd-account__tag.state-ok {
+.qd-account__tag.is-ok {
   color: var(--st-ok);
 }
 
-.qd-account__tag.state-muted {
+.qd-account__tag.is-muted {
   color: var(--ink-3);
 }
 
-.qd-account__tag.state-warn {
+.qd-account__tag.is-warn {
   color: var(--st-run);
 }
 
-.qd-account__tag.state-fail {
+.qd-account__tag.is-fail {
   color: var(--st-fail);
 }
 
@@ -1472,46 +1365,6 @@ onBeforeUnmount(() => {
   min-height: 0;
   /* 表格再宽也不许把这一栏撑出横向滚动条（min-width: auto 会按表格最小内容宽度算） */
   min-width: 0;
-}
-
-/* 请求栏的条件带：一行排完、不套卡片，与 TBuddy 的请求栏同一套 */
-.qd-req__filters {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--sp-2);
-  flex: none;
-  margin-bottom: calc(-1 * var(--sp-1));
-}
-
-.qd-req__picks {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--sp-2);
-  min-width: 0;
-}
-
-.qd-req__pick {
-  width: 120px;
-}
-
-.qd-req__search {
-  width: 240px;
-}
-
-.qd-req__actions {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-3);
-  margin-left: auto;
-}
-
-.qd-req__count {
-  font-size: var(--fs-meta);
-  color: var(--ink-3);
-  white-space: nowrap;
 }
 
 .qd-card {

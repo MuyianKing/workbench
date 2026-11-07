@@ -10,7 +10,8 @@ use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 
-use crate::qd_account::{now_secs, Account};
+use crate::common::now_secs;
+use crate::qd_account::Account;
 use crate::qd_auth::{LoginStart, LoginTicket, PollOutcome};
 use crate::qd_body::Conversation;
 use crate::qd_credits::{self, Credits};

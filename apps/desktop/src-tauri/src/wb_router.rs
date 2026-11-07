@@ -4,6 +4,7 @@
 //! 纯调度：不解析协议、不碰网络、不认识数据库。它做的唯一判断是「这个方法 + 这个路径
 //! 归哪个处理函数」。
 
+use crate::common::key_tail;
 use crate::wb_account::Account;
 use crate::wb_relay;
 use crate::wb_server::{Request, Response};
@@ -26,13 +27,13 @@ pub fn route(request: &Request, accounts: &mut [Account], api_key: &str) -> Resp
         let supplied = if supplied.is_empty() {
             "未带".to_string()
         } else {
-            format!("…{}", key_tail(supplied))
+            key_tail(supplied)
         };
         return Response::error(
             401,
             "invalid_api_key",
             &format!(
-                "缺少或错误的 API Key：请在请求头带 Authorization: Bearer <网关密钥>（当前密钥末四位 …{expected}；请求带的密钥末四位 {supplied}）"
+                "缺少或错误的 API Key：请在请求头带 Authorization: Bearer <网关密钥>（当前密钥末四位 {expected}；请求带的密钥末四位 {supplied}）"
             ),
         );
     }
@@ -69,15 +70,6 @@ fn key_matches(request: &Request, expected: &str) -> bool {
     supplied.len() == expected.len() && supplied == expected
 }
 
-fn key_tail(key: &str) -> String {
-    key.chars()
-        .rev()
-        .take(4)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect()
-}
 
 /// 健康检查。**不要求鉴权** —— 它是给界面和 curl 探活用的，不含任何账号信息。
 fn health(accounts: &[Account]) -> Response {

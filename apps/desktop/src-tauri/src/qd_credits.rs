@@ -9,7 +9,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::http;
-use crate::qd_account::{now_secs, Account};
+use crate::common::{excerpt, now_secs};
+use crate::qd_account::Account;
 use crate::qd_upstream;
 
 /// 一个额度包（界面按它渲染余额条与到期明细）。
@@ -85,7 +86,7 @@ fn call(
     let _ = timeout_secs;
     let text = response.text();
     if response.status != 200 {
-        return Err(format!("HTTP {} {}", response.status, excerpt(&text)));
+        return Err(format!("HTTP {} {}", response.status, excerpt(&text, 160)));
     }
     serde_json::from_str(&text).map_err(|err| format!("响应不是 JSON：{err}"))
 }
@@ -293,10 +294,6 @@ fn epoch(value: &serde_json::Value) -> i64 {
     }
 }
 
-fn excerpt(text: &str) -> String {
-    let trimmed = text.trim();
-    trimmed.chars().take(160).collect()
-}
 
 /// 把「最近到期」写回账号（选号的第一关键字）。
 pub fn apply_expiry(account: &mut Account, credits: &Credits) {

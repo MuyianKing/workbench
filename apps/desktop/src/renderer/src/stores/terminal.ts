@@ -2,7 +2,7 @@ import type { LogLine, ProcessLogEvent, ProcessLogPayload, ProcessStatusEvent, R
 
 import { clampTerminalButtonTop, clampTerminalHeight } from '@workbench/appearance'
 
-import { RingLog, terminalKey } from '@workbench/terminal'
+import { describeHolder, RingLog, RUNNING_STATUS, terminalKey } from '@workbench/terminal'
 import { defineStore } from 'pinia'
 /**
  * 终端与运行态：底部面板的每个 Tab、每个项目的运行状态，以及它们的日志缓冲。
@@ -62,9 +62,6 @@ export interface TerminalState {
   logs: RingLog<LogLine>
 }
 
-/** 处于「正在干活」的几个状态；重启、关闭终端、批量检测都要判它 */
-export const RUNNING_STATUS: ReadonlyArray<string> = ['running', 'installing', 'building']
-
 /**
  * 一个「有运行状态、能按端口检测、能被停止」的目标。
  *
@@ -88,9 +85,6 @@ export interface ProcessTarget {
 }
 
 /** 端口被谁占着，拼成一句给人看的说明 */
-function describeHolder(check: { pid?: number, processName?: string }): string {
-  return check.processName ? `${check.processName}（PID ${check.pid}）` : `PID ${check.pid ?? '未知'}`
-}
 
 export const useTerminalStore = defineStore('terminal', () => {
   const settingsStore = useSettingsStore()

@@ -4,6 +4,7 @@ import { CopyDocument, Cpu } from '@element-plus/icons-vue'
 import { inferModelMeta } from '@workbench/ai'
 import { ElMessage } from 'element-plus'
 import { onMounted, ref } from 'vue'
+import { copyText } from '@/clipboard'
 import EmptyState from '@/components/EmptyState.vue'
 
 /**
@@ -108,16 +109,6 @@ function refresh(): void {
   })
 }
 
-async function copy(id: string): Promise<void> {
-  try {
-    await navigator.clipboard.writeText(id)
-    ElMessage.success('已复制模型 ID')
-  }
-  catch {
-    ElMessage.error('复制失败，手动选中即可')
-  }
-}
-
 onMounted(load)
 </script>
 
@@ -143,7 +134,7 @@ onMounted(load)
             <span class="models__name" :title="model.name">{{ model.name || '—' }}</span>
           </div>
           <el-tooltip content="复制模型 ID" placement="top">
-            <el-button size="small" text :icon="CopyDocument" aria-label="复制模型 ID" @click="copy(model.id)" />
+            <el-button size="small" text :icon="CopyDocument" aria-label="复制模型 ID" @click="copyText(model.id, '模型 ID')" />
           </el-tooltip>
         </div>
 

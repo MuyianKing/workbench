@@ -11,6 +11,7 @@ use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 
+use crate::common::now_secs;
 use crate::wb_account::{self, Account};
 use crate::wb_api_auth::{self, LoginStart, PollOutcome};
 use crate::wb_credits::Credits;
@@ -1407,12 +1408,6 @@ fn view_of(account: &Account) -> AccountView {
     }
 }
 
-fn now_secs() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|elapsed| elapsed.as_secs() as i64)
-        .unwrap_or(0)
-}
 
 // ---------- 配置 ----------
 

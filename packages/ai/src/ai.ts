@@ -1773,3 +1773,44 @@ export function formatDuration(ms: number): string {
   const rest = Math.round(seconds - minutes * 60)
   return `${minutes} 分 ${String(rest).padStart(2, '0')} 秒`
 }
+
+// ---------- 会话运行配置 ----------
+
+/** 一个会话（或「还没建的新对话」）当下生效的那份配置：composer 画的、起进程带的就是它 */
+export interface AiRunConfig {
+  choice: AiModelChoice | null
+  providerName: string
+  model: string
+  thinking: string
+  permission: string
+}
+
+/**
+ * 解一个会话当下生效的配置：**会话记过就用会话自己的，没记过回落默认** ——
+ * 老会话不用迁移；模型管理里把那个服务删了 / 停了也在这里回落
+ * （`pickAiChoice` 退回第一个能挑的）。
+ *
+ * 原先这段住在渲染层的 ai store 里，靠着两份响应式事实（服务清单 + 设置默认）现场算；
+ * 收进包里之后规则可单测，store 只负责把两份事实递进来。
+ */
+export function resolveAiRunConfig(
+  providers: AiProvider[],
+  session: AiSession | null,
+  defaults: { provider: string, model: string, thinking: string, permission: string },
+): AiRunConfig {
+  const choice = pickAiChoice(
+    providers,
+    session?.provider ?? defaults.provider,
+    session?.model ?? defaults.model,
+  )
+  return {
+    choice,
+    providerName: choice?.provider ?? '',
+    model: choice?.model ?? '',
+    thinking: pickAiThinking(
+      choice?.levels ?? ['off'],
+      session?.thinking ?? defaults.thinking,
+    ),
+    permission: sanitizeAiPermission(session?.permission ?? defaults.permission),
+  }
+}

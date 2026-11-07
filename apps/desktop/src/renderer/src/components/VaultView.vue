@@ -27,11 +27,12 @@ import { ArrowRight, CopyDocument, Document, Hide, Key, Lock, MoreFilled, Plus, 
  * 明文只活在内存里：磁盘上那份与仓库里那份都只有密文（见 workbench/vault.ts）。
  */
 import { computed, nextTick, onActivated, onMounted, ref, watch } from 'vue'
+import { copyText } from '@/clipboard'
 import PanelLoading from '@/components/PanelLoading.vue'
 import VaultEntryDialog from '@/components/VaultEntryDialog.vue'
 import VaultGroupDialog from '@/components/VaultGroupDialog.vue'
 import VaultKeyDialog from '@/components/VaultKeyDialog.vue'
-import { confirmAction, notifyError, notifySuccess } from '@/notify'
+import { confirmAction } from '@/notify'
 import { useVaultStore } from '@/stores/vault'
 
 const store = useVaultStore()
@@ -127,19 +128,6 @@ function toggleReveal(id: string): void {
   revealed.value = isRevealed(id)
     ? revealed.value.filter(item => item !== id)
     : [...revealed.value, id]
-}
-
-/** 复制。WebView 里 `navigator.clipboard` 在安全上下文下可用，失败时如实说一句 */
-async function copy(text: string, what: string): Promise<void> {
-  if (!text)
-    return
-  try {
-    await navigator.clipboard.writeText(text)
-    notifySuccess(`${what}已复制`)
-  }
-  catch {
-    notifyError('复制失败，可以手动选中再复制')
-  }
 }
 
 /**
@@ -455,7 +443,7 @@ async function lock(): Promise<void> {
                               :icon="CopyDocument"
                               :disabled="!record.password"
                               aria-label="复制密码"
-                              @click="copy(record.password, '密码')"
+                              @click="copyText(record.password, '密码')"
                             />
                           </span>
                         </el-tooltip>

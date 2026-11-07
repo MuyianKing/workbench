@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { CopyDocument, Hide, Refresh, View } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
 import { computed, ref } from 'vue'
+import { copyText } from '@/clipboard'
 import AppDialog from '@/components/AppDialog.vue'
 
 /**
@@ -48,16 +48,6 @@ const keyText = computed(() => {
     : `${props.apiKey.slice(0, 8)}${'•'.repeat(12)}${props.apiKey.slice(-4)}`
 })
 
-async function copy(text: string, label: string): Promise<void> {
-  try {
-    await navigator.clipboard.writeText(text)
-    ElMessage.success(`已复制${label}`)
-  }
-  catch {
-    ElMessage.error('复制失败，手动选中即可')
-  }
-}
-
 /** 换完密钥顺手亮出来：换的目的多半就是马上粘到别处 */
 function rotate(): void {
   reveal.value = true
@@ -86,7 +76,7 @@ function rotate(): void {
         <span class="access__label">API 地址</span>
         <code class="access__value">{{ baseUrl }}</code>
         <el-tooltip content="复制地址" placement="top">
-          <el-button size="small" text :icon="CopyDocument" aria-label="复制地址" @click="copy(baseUrl, '地址')" />
+          <el-button size="small" text :icon="CopyDocument" aria-label="复制地址" @click="copyText(baseUrl, '地址')" />
         </el-tooltip>
       </div>
 
@@ -104,7 +94,7 @@ function rotate(): void {
           />
         </el-tooltip>
         <el-tooltip content="复制密钥" placement="top">
-          <el-button size="small" text :icon="CopyDocument" aria-label="复制密钥" :disabled="!apiKey" @click="copy(apiKey, '密钥')" />
+          <el-button size="small" text :icon="CopyDocument" aria-label="复制密钥" :disabled="!apiKey" @click="copyText(apiKey, '密钥')" />
         </el-tooltip>
         <el-tooltip content="换一个密钥" placement="top">
           <el-button size="small" text :icon="Refresh" aria-label="换一个密钥" @click="rotate" />

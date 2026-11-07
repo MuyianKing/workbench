@@ -572,13 +572,13 @@ pub fn models_fetch(
 }
 
 /// 出错时把那一段响应截下来给用户看：各家报错的形状不一样，猜不如原文。
+/// 空响应给一句兜底（`common::excerpt` 只负责截断）。
 fn excerpt(body: &str) -> String {
-    let text = body.trim();
-    let cut: String = text.chars().take(200).collect();
-    if cut.is_empty() {
-        "（没有响应内容）".into()
+    let text = crate::common::excerpt(body, 200);
+    if text.is_empty() {
+        "（没有响应内容）".to_string()
     } else {
-        cut
+        text
     }
 }
 

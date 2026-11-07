@@ -13,7 +13,8 @@ AI 助手（ai）的文档：先读「约束」一节（不能破的规矩）；
 `apps/desktop/src-tauri/src/ai.rs`（提示词进 stdin、权限扩展、models.json、拉模型列表、密钥、环境变量、起会话、拼 `--skill`、删会话）、
 `workbench/ai.ts`（按会话 id 认领进程事件、确认帧应答、`aiRequest` / `aiAbort` 与会话删除）、
 `workbench/pi-skill.ts`（技能四条通道适配）、`stores/ai.ts`（编排、每会话运行态、确认队列、服务增删改与 models.json 对齐）、
-`stores/ai-skills.ts`（两栏扫描、开关、装 / 卸）；组件：`AiView.vue`（左树右对话，左栏底部一行是技能入口与收起开关）、
+`stores/ai-skills.ts`（两栏扫描、开关、装 / 卸；**两条技能根由 ai store 经 `setRoots` 注册进来**，
+不反向 import ai store —— 那会成环，根变了 ai 推过来、这边按 `keyOf()` 自动重扫）；组件：`AiView.vue`（左树右对话，左栏底部一行是技能入口与收起开关）、
 `AiSessionTree.vue`、`AiLocationBar.vue`（挑中会话那一屏）、`AiComposer.vue`（贴图缩略图与 `/skill:` 候选）、
 `AiModelMenu.vue`（composer 那颗「模型」chip 与它的浮层：服务卡、模型清单、思考强度滑杆）、
 `AiSkillDialog.vue`、`AiRunPanel.vue`（对话画法与确认条）、`AiPreviewPane.vue`（右侧预览栏）、

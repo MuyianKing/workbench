@@ -371,7 +371,7 @@ impl Aggregator {
         let mut out = serde_json::json!({
             "id": if self.id.is_empty() { "chatcmpl-qoder".to_string() } else { self.id },
             "object": "chat.completion",
-            "created": if self.created == 0 { crate::qd_account::now_secs() } else { self.created },
+            "created": if self.created == 0 { crate::common::now_secs() } else { self.created },
             "model": self.model,
             "choices": [{
                 "index": 0,

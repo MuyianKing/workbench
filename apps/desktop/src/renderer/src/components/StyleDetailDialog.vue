@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import type { ComponentGroup, DesignStyle, DesignTypeToken } from '@workbench/appearance'
 import { clampFontSize, clampPadding, COLOR_GROUPS, colorGroup, colorLabel, componentLabel, componentSamples, componentStyle, designStyleFamily, inkOn, isColorValue, lineHeightCss, numericScale, roundedLabel, safeCssValue, spacingLabel, THEME_LABELS, typeLabel, typographyScale } from '@workbench/appearance'
-
 /**
  * 样式详情弹窗：一套设计语言分两档看。
  *
@@ -24,10 +23,11 @@ import { clampFontSize, clampPadding, COLOR_GROUPS, colorGroup, colorLabel, comp
  *    一句、预览档的按钮按主色现画，都不留白板。
  */
 import { computed, ref, watch } from 'vue'
+
+import { copyText } from '@/clipboard'
 import AppDialog from '@/components/AppDialog.vue'
 import StyleApplyDialog from '@/components/StyleApplyDialog.vue'
 import StyleDemo from '@/components/StyleDemo.vue'
-import { notifyError, notifySuccess } from '@/notify'
 
 const props = defineProps<{ design: DesignStyle | null }>()
 
@@ -58,18 +58,6 @@ const title = computed(() => props.design?.title ?? '')
 const badge = computed(() =>
   props.design ? `${props.design.category} · ${THEME_LABELS[props.design.theme]} · ${designStyleFamily(props.design)}` : '',
 )
-
-async function copy(text: string, what: string): Promise<void> {
-  if (!text)
-    return
-  try {
-    await navigator.clipboard.writeText(text)
-    notifySuccess(`${what}已复制`)
-  }
-  catch {
-    notifyError('复制失败，可以手动选中再复制')
-  }
-}
 
 /** 把空值剔掉，避免往 :style 上一堆空串 */
 function compact(source: Record<string, string | undefined>): Record<string, string> {
@@ -261,10 +249,10 @@ const canvas = computed(() => props.design?.canvas ?? '')
       <div v-else class="spec">
         <p class="lede">
           <span class="lede__badge">{{ badge }}</span>
-          <button v-if="canvas" class="lede__color" type="button" @click="copy(canvas, '画布色')">
+          <button v-if="canvas" class="lede__color" type="button" @click="copyText(canvas, '画布色')">
             画布 <i :style="{ background: canvas }" /> <span class="mono">{{ canvas }}</span>
           </button>
-          <button v-if="accent" class="lede__color" type="button" @click="copy(accent, '主色')">
+          <button v-if="accent" class="lede__color" type="button" @click="copyText(accent, '主色')">
             主色 <i :style="{ background: accent }" /> <span class="mono">{{ accent }}</span>
           </button>
           <span v-if="design.font" class="lede__font">展示字体 {{ design.font }}</span>
@@ -291,7 +279,7 @@ const canvas = computed(() => props.design?.canvas ?? '')
                   type="button"
                   :style="{ background: swatch.value, color: swatch.ink }"
                   :title="`复制 ${swatch.value}`"
-                  @click="copy(swatch.value, '色值')"
+                  @click="copyText(swatch.value, '色值')"
                 >
                   {{ swatch.value }}
                 </button>
@@ -300,7 +288,7 @@ const canvas = computed(() => props.design?.canvas ?? '')
                   class="swatch__key mono"
                   type="button"
                   :title="`复制变量名 ${swatch.key}`"
-                  @click="copy(swatch.key, '变量名')"
+                  @click="copyText(swatch.key, '变量名')"
                 >
                   {{ swatch.key }}
                 </button>
@@ -325,7 +313,7 @@ const canvas = computed(() => props.design?.canvas ?? '')
                   class="type-row__key mono"
                   type="button"
                   :title="`复制变量名 ${row.key}`"
-                  @click="copy(row.key, '变量名')"
+                  @click="copyText(row.key, '变量名')"
                 >
                   {{ row.key }}
                 </button>
@@ -361,7 +349,7 @@ const canvas = computed(() => props.design?.canvas ?? '')
                   class="sample__label mono"
                   type="button"
                   :title="`复制变量名 ${sample.key}`"
-                  @click="copy(sample.key, '变量名')"
+                  @click="copyText(sample.key, '变量名')"
                 >
                   {{ sample.label }}
                 </button>

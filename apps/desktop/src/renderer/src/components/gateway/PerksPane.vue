@@ -24,6 +24,7 @@ import { dailyGrowthCredits, isGrowthPerkPackage } from '@workbench/usage'
 import { ElMessage } from 'element-plus'
 import { computed, onMounted, ref } from 'vue'
 import EmptyState from '@/components/EmptyState.vue'
+import { formatDecimal } from '@/format'
 import GatewayTable from './GatewayTable.vue'
 import PerksCreditsChart from './PerksCreditsChart.vue'
 
@@ -182,12 +183,8 @@ const scopeLabel = computed(() => {
   return accounts.value.find(item => item.uid === selected.value)?.label ?? '当前账号'
 })
 
-function fmt(value: number): string {
-  return value.toLocaleString('en-US', { maximumFractionDigits: 2 })
-}
-
 function grantedText(value: number | null): string {
-  return value === null ? '—' : `+${fmt(value)} 积分`
+  return value === null ? '—' : `+${formatDecimal(value)} 积分`
 }
 
 function statusOf(task: GatewayGrowthTask): { text: string, tone: string } {

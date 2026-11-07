@@ -4,6 +4,7 @@ import type { ProcessTarget } from './terminal'
 import type { ActivityBreakdown, ActivityCounts, ActivityView, AddProjectInput, PackageManager, ProcessStatusEvent, Project, ProjectGroup, ProjectPatch } from '@/types'
 import { backfillProjectColors as backfillColors, devServerUrl, reorderById, sanitizeProjectSort } from '@workbench/core'
 
+import { RUNNING_STATUS } from '@workbench/terminal'
 import { defineStore } from 'pinia'
 /**
  * 项目与分组：列表、筛选排序、抽屉与「添加项目」，以及项目的启停打包。
@@ -27,7 +28,7 @@ import { useAuthStore } from './auth'
 import { useCatalogStore } from './catalog'
 import { useEnvironmentStore } from './environment'
 import { useSettingsStore } from './settings'
-import { RUNNING_STATUS, useTerminalStore } from './terminal'
+import { useTerminalStore } from './terminal'
 
 /** 未分组项目在筛选栏里的伪分组 id */
 export const UNGROUPED = 'ungrouped'

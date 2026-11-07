@@ -12,6 +12,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::common::{excerpt, now_secs};
 use crate::wb_account::Account;
 
 /// 目录里的一条模型。
@@ -105,19 +106,15 @@ fn probe(account: &Account, path: &str) -> Result<Vec<ModelEntry>, String> {
         .map(|(name, value)| (name.as_str(), value.as_str()))
         .collect();
 
-    let response = crate::http::request_url("GET", &url, &refs, None)?;
-    let text = response.text();
-    if response.status != 200 {
-        return Err(format!("HTTP {} {}", response.status, excerpt(&text)));
-    }
-    let value: Value =
-        serde_json::from_str(&text).map_err(|err| format!("响应不是 JSON：{err}"))?;
-    // 上流的信封里 code 非 0 也是失败（200 里什么都可能装）
-    if let Some(code) = value.get("code").and_then(Value::as_i64) {
-        if code != 0 {
-            return Err(format!("code={code} {}", excerpt(&text)));
+    let value = crate::http::request_json_with("GET", &url, &refs, None, crate::http::JSON_MAX_BODY, 160, |value, text| {
+        // 上流的信封里 code 非 0 也是失败（200 里什么都可能装）
+        if let Some(code) = value.get("code").and_then(Value::as_i64) {
+            if code != 0 {
+                return Err(format!("code={code} {}", excerpt(text, 160)));
+            }
         }
-    }
+        Ok(())
+    })?;
     Ok(parse_catalog(&value))
 }
 
@@ -261,20 +258,7 @@ fn headers(account: &Account) -> Vec<(String, String)> {
     headers
 }
 
-fn excerpt(text: &str) -> String {
-    let trimmed = text.trim();
-    if trimmed.chars().count() <= 160 {
-        return trimmed.to_string();
-    }
-    trimmed.chars().take(160).collect::<String>() + "…"
-}
 
-fn now_secs() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|elapsed| elapsed.as_secs() as i64)
-        .unwrap_or(0)
-}
 
 #[cfg(test)]
 mod tests {

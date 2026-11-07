@@ -13,6 +13,7 @@ mod ball;
 mod capture;
 mod clipboard;
 mod commands;
+mod common;
 mod credentials;
 mod design;
 mod encoding;

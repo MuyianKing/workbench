@@ -13,6 +13,7 @@ use std::io::Write;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use crate::common::now_secs;
 
 /// 一条请求的用量。
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -686,12 +687,6 @@ pub fn round2(value: f64) -> f64 {
     (value * 100.0).round() / 100.0
 }
 
-fn now_secs() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|elapsed| elapsed.as_secs() as i64)
-        .unwrap_or(0)
-}
 
 #[cfg(test)]
 mod tests {

@@ -5,6 +5,7 @@
 
 use std::collections::HashMap;
 
+use crate::common::key_tail;
 use crate::qd_account::Account;
 use crate::qd_body::Conversation;
 use crate::qd_relay;
@@ -28,13 +29,13 @@ pub fn route(
         let supplied = if supplied.is_empty() {
             "未带".to_string()
         } else {
-            format!("…{}", key_tail(supplied))
+            key_tail(supplied)
         };
         return Response::error(
             401,
             "invalid_api_key",
             &format!(
-                "缺少或错误的 API Key：请在请求头带 Authorization: Bearer <网关密钥>（当前密钥末四位 …{expected}；请求带的密钥末四位 {supplied}）"
+                "缺少或错误的 API Key：请在请求头带 Authorization: Bearer <网关密钥>（当前密钥末四位 {expected}；请求带的密钥末四位 {supplied}）"
             ),
         );
     }
@@ -70,15 +71,6 @@ fn key_matches(request: &Request, expected: &str) -> bool {
     supplied.len() == expected.len() && supplied == expected
 }
 
-fn key_tail(key: &str) -> String {
-    key.chars()
-        .rev()
-        .take(4)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect()
-}
 
 fn health(accounts: &[Account]) -> Response {
     let ready = accounts.iter().filter(|account| account.is_ready()).count();
