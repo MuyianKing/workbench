@@ -31,7 +31,7 @@ import type { MailAttachmentKind, MailContact, MailFolder, ParsedAttachment } fr
 import type { Component } from 'vue'
 import type { MailListItem, MailReplyTarget } from '@/stores/mail'
 import { ArrowDown, Document, Download, EditPen, Link, Loading, Memo, Message, Monitor, Notebook, Plus, Reading, Refresh, Setting, User } from '@element-plus/icons-vue'
-import { attachmentBadge, attachmentDataUrl, attachmentKind, attachmentTint, formatMailSize, isImageAttachment, recipientAddress, senderAddress } from '@workbench/mail'
+import { attachmentBadge, attachmentDataUrl, attachmentHint, attachmentKind, attachmentOpenable, attachmentSizeText, attachmentTint, isImageAttachment, recipientAddress, senderAddress } from '@workbench/mail'
 import { computed, onActivated, onMounted, ref, watch } from 'vue'
 import EmptyState from '@/components/EmptyState.vue'
 import MailAccountDialog from '@/components/MailAccountDialog.vue'
@@ -397,11 +397,6 @@ async function downloadAttachment(name: string, base64: string): Promise<void> {
   else notifyError(result.error ?? '保存附件失败')
 }
 
-/** 附件字节数（base64 长 × 3/4，去 padding 的近似在展示层够用） */
-function attachmentSize(base64: string): string {
-  return formatMailSize(Math.floor((base64.length * 3) / 4))
-}
-
 /**
  * 附件片左首那枚图标：按类型给一枚（颜色见 @workbench/mail 的 attachmentTint —— 那是应用里
  * 唯一按文件类型着色的一处）。**图走缩略图**、**认不出的类型走扩展名角标**（`file` 那一档：
@@ -422,20 +417,6 @@ const FILE_ICONS: Partial<Record<MailAttachmentKind, Component>> = {
 function fileTintStyle(file: ParsedAttachment): Record<string, string> {
   const tint = attachmentTint(attachmentKind(file))
   return { color: tint, background: `${tint}1f` }
-}
-
-/**
- * 附件片的标题：**能在应用里打开的**说清点开去哪儿，其余照旧说另存。
- */
-function attachmentHint(file: ParsedAttachment): string {
-  const kind = attachmentKind(file)
-  const where = kind === 'file' ? '点开另存' : kind === 'image' ? '点开看大图' : '点开在应用里看'
-  return `${file.name}（${attachmentSize(file.base64)}），${where}`
-}
-
-/** 能在应用里打开的（图 / md / docx / pptx / pdf）：片子整片是一颗按钮，另存另给一颗图标按钮 */
-function openableAttachment(file: ParsedAttachment): boolean {
-  return attachmentKind(file) !== 'file'
 }
 
 /**
@@ -741,7 +722,7 @@ const bodyStyle = computed(() => ({
                    内层按钮（左首的类型图标 / 缩略图 + 名字 + 大小都在它里面），打开方式按类型分：
                    图进 EP 的查看器，md / html / docx / pptx / pdf 进预览弹层。右端那颗另存按钮留在片子
                    外层（按钮不能套按钮），点它是「存」、不触发打开 -->
-              <span v-if="openableAttachment(file)" class="mail-file mail-file--open">
+              <span v-if="attachmentOpenable(file)" class="mail-file mail-file--open">
                 <button
                   class="mail-file__open"
                   type="button"
@@ -761,7 +742,7 @@ const bodyStyle = computed(() => ({
                     <span v-else class="mail-file__ext">{{ attachmentBadge(file) }}</span>
                   </span>
                   <span class="mail-file__name">{{ file.name }}</span>
-                  <span class="mail-file__size">{{ attachmentSize(file.base64) }}</span>
+                  <span class="mail-file__size">{{ attachmentSizeText(file.base64) }}</span>
                 </button>
                 <el-tooltip content="另存为" placement="top">
                   <el-button
@@ -788,7 +769,7 @@ const bodyStyle = computed(() => ({
                   <span v-else class="mail-file__ext">{{ attachmentBadge(file) }}</span>
                 </span>
                 <span class="mail-file__name">{{ file.name }}</span>
-                <span class="mail-file__size">{{ attachmentSize(file.base64) }}</span>
+                <span class="mail-file__size">{{ attachmentSizeText(file.base64) }}</span>
               </button>
             </template>
           </div>

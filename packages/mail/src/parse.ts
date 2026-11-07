@@ -12,6 +12,7 @@
 
 import PostalMime from 'postal-mime'
 import { base64ToBytes, bytesToBase64 } from './base64'
+import { formatMailSize } from './mime'
 import { decodeEncodedWords } from './rfc2047'
 
 export interface ParsedAttachment {
@@ -278,6 +279,23 @@ export function attachmentTint(kind: MailAttachmentKind): string {
     default:
       return '#8a8a8a'
   }
+}
+
+/** 附件字节数（base64 长 × 3/4，去 padding 的近似在展示层够用）→ 附件片上的尺寸文案 */
+export function attachmentSizeText(base64: string): string {
+  return formatMailSize(Math.floor((base64.length * 3) / 4))
+}
+
+/** 能在应用里打开的（图 / md / docx / pptx / pdf）：片子整片是一颗按钮，另存另给一颗图标按钮 */
+export function attachmentOpenable(part: ParsedAttachment): boolean {
+  return attachmentKind(part) !== 'file'
+}
+
+/** 附件片的标题：能在应用里打开的说清点开去哪儿，其余照旧说另存 */
+export function attachmentHint(part: ParsedAttachment): string {
+  const kind = attachmentKind(part)
+  const where = kind === 'file' ? '点开另存' : kind === 'image' ? '点开看大图' : '点开在应用里看'
+  return `${part.name}（${attachmentSizeText(part.base64)}），${where}`
 }
 
 /** 附件内容当文本读（markdown 预览用）：base64 → 字节 → UTF-8 文本。解不开给空串。 */

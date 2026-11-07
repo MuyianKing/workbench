@@ -6,7 +6,7 @@ import { isBulkMail, sanitizeMailBulkSenders } from './bulk'
 import { contactLabel, contactOf, MAIL_CONTACT_NAME_MAX, MAIL_CONTACTS_MAX, sanitizeMailContact, sanitizeMailContacts, splitTypedAddresses } from './contacts'
 import { MAIL_ACCOUNTS_MAX, MAIL_POLL_DEFAULT, MAIL_POLL_MAX, MAIL_POLL_MIN, mailAccountReady, presetForAddress, sanitizeMailAccount, sanitizeMailAccounts, sanitizeMailAddress, sanitizeMailHost, sanitizeMailPollMinutes, sanitizeMailPort } from './mail'
 import { buildMime } from './mime'
-import { accountTag, attachmentBadge, attachmentDataUrl, attachmentHtml, attachmentKind, attachmentText, attachmentTint, displayDate, displayRecipients, displaySender, htmlBody, isImageAttachment, mailTime, parseMessage, preferExtendedFilenames, recipientAddress, recipientDisplay, senderAddress } from './parse'
+import { accountTag, attachmentBadge, attachmentDataUrl, attachmentHint, attachmentHtml, attachmentKind, attachmentOpenable, attachmentSizeText, attachmentText, attachmentTint, displayDate, displayRecipients, displaySender, htmlBody, isImageAttachment, mailTime, parseMessage, preferExtendedFilenames, recipientAddress, recipientDisplay, senderAddress } from './parse'
 import { decodeEncodedWords, encodeRfc2047Word } from './rfc2047'
 
 describe('账户配置收敛', () => {
@@ -676,5 +676,22 @@ describe('通讯录', () => {
   it('写信框收件人那一行的值拆成地址：逗号 / 分号（中英文）/ 空白都算分隔符', () => {
     expect(splitTypedAddresses(['a@b.com, c@d.com； e@f.com'])).toEqual(['a@b.com', 'c@d.com', 'e@f.com'])
     expect(splitTypedAddresses([])).toEqual([])
+  })
+})
+
+describe('附件片的展示辅助', () => {
+  const file: ParsedAttachment = { name: '报价.pdf', mimeType: 'application/pdf', contentType: 'application/pdf', base64: 'AA'.repeat(300), size: 450, inline: false } as unknown as ParsedAttachment
+
+  it('尺寸按 base64 长 × 3/4 估算，走与别处同一套 formatMailSize', () => {
+    expect(attachmentSizeText(file.base64)).toBe('450 B')
+  })
+
+  it('认得出的类型能在应用里打开，file 档只另存；标题把「点开去哪儿」说清', () => {
+    expect(attachmentOpenable(file)).toBe(true)
+    expect(attachmentHint(file)).toBe('报价.pdf（450 B），点开在应用里看')
+
+    const zip = { ...file, name: '资料.zip', mimeType: 'application/zip', contentType: 'application/zip' }
+    expect(attachmentOpenable(zip)).toBe(false)
+    expect(attachmentHint(zip)).toBe('资料.zip（450 B），点开另存')
   })
 })
