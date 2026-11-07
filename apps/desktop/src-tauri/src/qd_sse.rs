@@ -489,14 +489,6 @@ mod tests {
         )
     }
 
-    fn schema(name: &str, required: &[&str]) -> crate::qd_tools::ToolSchema {
-        crate::qd_tools::ToolSchema {
-            name: name.to_string(),
-            properties: required.iter().map(|key| key.to_string()).collect(),
-            required: required.iter().map(|key| key.to_string()).collect(),
-        }
-    }
-
     fn read_schema() -> crate::qd_tools::ToolSchema {
         crate::qd_tools::ToolSchema {
             name: "read".into(),

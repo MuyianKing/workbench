@@ -1097,8 +1097,8 @@ mod tests {
             properties: ["path".to_string()].into_iter().collect(),
             required: ["path".to_string()].into_iter().collect(),
         };
-        let (before, calls) =
-            restore_leak(&content, &[schema.clone()]).unwrap_or_else(|| panic!("应还原"));
+        let (before, calls) = restore_leak(&content, std::slice::from_ref(&schema))
+            .unwrap_or_else(|| panic!("应还原"));
         assert_eq!(before, "我先读文件");
         assert_eq!(calls[0]["function"]["name"], Value::String("read".into()));
         // 没声明的工具名不认
@@ -1107,9 +1107,9 @@ mod tests {
             properties: schema.properties.clone(),
             required: schema.required.clone(),
         };
-        assert!(restore_leak(&content, &[other]).is_none());
+        assert!(restore_leak(&content, std::slice::from_ref(&other)).is_none());
         // 普通正文不受影响
-        assert!(restore_leak("普通正文", &[schema]).is_none());
+        assert!(restore_leak("普通正文", std::slice::from_ref(&schema)).is_none());
     }
 
     #[test]
