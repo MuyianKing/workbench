@@ -93,11 +93,11 @@ function rotate(): void {
             @click="reveal = !reveal"
           />
         </el-tooltip>
-        <el-tooltip content="复制密钥" placement="top">
-          <el-button size="small" text :icon="CopyDocument" aria-label="复制密钥" :disabled="!apiKey" @click="copyText(apiKey, '密钥')" />
-        </el-tooltip>
         <el-tooltip content="换一个密钥" placement="top">
           <el-button size="small" text :icon="Refresh" aria-label="换一个密钥" @click="rotate" />
+        </el-tooltip>
+        <el-tooltip content="复制密钥" placement="top">
+          <el-button size="small" text :icon="CopyDocument" aria-label="复制密钥" :disabled="!apiKey" @click="copyText(apiKey, '密钥')" />
         </el-tooltip>
       </div>
     </div>
