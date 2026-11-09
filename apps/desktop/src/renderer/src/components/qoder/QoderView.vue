@@ -2,10 +2,11 @@
 import type { GatewayUsageSummary } from '@workbench/usage'
 import type { GatewayCredits, GatewayUsageRow } from '@/workbench/gateway'
 import type { QoderAccount, QoderCredits, QoderEarningPoint, QoderHeatmapPoint, QoderModelInfo, QoderStatus, QoderTaskSnapshot } from '@/workbench/qoder'
-import { Calendar, Coin, Cpu, Download, Histogram, MagicStick, Plus, Refresh, Upload, User } from '@element-plus/icons-vue'
+import { Calendar, Coin, CopyDocument, Cpu, Download, Histogram, MagicStick, Plus, Refresh, Search, Upload, User } from '@element-plus/icons-vue'
 import { dailyCreditSeries, gatewayBucketUnit, GROWTH_CREDIT_DAYS, summarizeGatewayRows } from '@workbench/usage'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { computed, onActivated, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { copyText } from '@/clipboard'
 import EmptyState from '@/components/EmptyState.vue'
 import AccessDialog from '@/components/gateway/AccessDialog.vue'
 import AccountTransferDialog from '@/components/gateway/AccountTransferDialog.vue'
@@ -51,6 +52,16 @@ const accounts = ref<QoderAccount[]>([])
 // 余额快照（credits）与单号在途（creditBusy）在 useCreditPool：与 TBuddy 账号页同一套口径
 const { credits, pending: creditBusy, pruneCredits, throttled: poolThrottled, markQueried, resetThrottle, queryCredits: queryPoolCredits } = useCreditPool<QoderCredits>()
 const models = ref<QoderModelInfo[]>([])
+/** 模型栏的本地查询：只在已拉下来的清单里按 id / key 过滤，不发请求、不触发重新获取 */
+const modelKeyword = ref('')
+const visibleModels = computed(() => {
+  const keyword = modelKeyword.value.trim().toLowerCase()
+  if (!keyword)
+    return models.value
+  return models.value.filter(model =>
+    model.id.toLowerCase().includes(keyword) || model.key.toLowerCase().includes(keyword),
+  )
+})
 const access = ref<{ baseUrl: string, apiKey: string, models: string[] } | null>(null)
 const accessOpen = ref(false)
 /** 账号导出 / 导入弹层：两个模式共用一个实例，`transferMode` 决定打开哪个 */
@@ -914,8 +925,14 @@ onBeforeUnmount(() => {
     <!-- 模型 -->
     <section v-else class="qd__pane">
       <div class="qd__toolbar">
-        <span class="qd__hint">目录来自上游官方清单；点「重新获取」用第一个可用账号拉一次</span>
-        <el-button size="small" :loading="modelsBusy" @click="refreshModels">
+        <el-input
+          v-model="modelKeyword"
+          placeholder="搜索模型"
+          clearable
+          :prefix-icon="Search"
+          class="qd__search"
+        />
+        <el-button :loading="modelsBusy" @click="refreshModels">
           <el-icon><Refresh /></el-icon>
           重新获取
         </el-button>
@@ -926,8 +943,14 @@ onBeforeUnmount(() => {
         text="还没有模型清单"
         hint="登录一个可用账号后会自动拉取；也可以点「重新获取」"
       />
+      <EmptyState
+        v-else-if="!visibleModels.length"
+        :icon="Search"
+        text="没有匹配的模型"
+        hint="换个关键字试试"
+      />
       <div v-else class="qd__cards">
-        <article v-for="model in models" :key="model.key" class="qd-model panel">
+        <article v-for="model in visibleModels" :key="model.key" class="qd-model panel">
           <header>
             <span class="qd-model__id">{{ model.id }}</span>
             <el-tag v-if="model.isNew" size="small" effect="dark">
@@ -936,13 +959,19 @@ onBeforeUnmount(() => {
             <el-tag v-if="!model.enabled" size="small" effect="dark">
               未开放
             </el-tag>
+            <el-tooltip content="复制模型名" placement="top">
+              <el-button
+                class="qd-model__copy"
+                size="small"
+                text
+                :icon="CopyDocument"
+                aria-label="复制模型名"
+                @click="copyText(model.id, '模型名')"
+              />
+            </el-tooltip>
           </header>
-          <p class="qd-model__desc">
-            {{ model.description || '官方未提供介绍' }}
-          </p>
           <div class="qd-card__facts">
             <div><span>上下文</span><strong>{{ model.contextLength || '—' }}</strong></div>
-            <div><span>思考档位</span><strong>{{ model.efforts.join(' / ') || '—' }}</strong></div>
             <div><span>倍率</span><strong>{{ model.priceFactor ?? '—' }}</strong></div>
           </div>
           <footer class="qd-model__foot">
@@ -1089,6 +1118,11 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   gap: var(--sp-3);
   flex: none;
+}
+
+/* 模型栏的搜索框与请求栏那个同宽；高度走默认尺寸（32px），别用 small —— 栏首只有这一行，24px 太矮 */
+.qd__search {
+  width: 240px;
 }
 
 /* 栏首那一对批量动作：与卡片里的工具键同一套间距 */
@@ -1473,6 +1507,11 @@ onBeforeUnmount(() => {
   gap: var(--sp-2);
 }
 
+/* 模型卡只列上下文与倍率两格（思考档位不进界面），两格平分栏宽；福利卡仍是三格 */
+.qd-model .qd-card__facts {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .qd-card__facts > div {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
@@ -1611,11 +1650,9 @@ onBeforeUnmount(() => {
   color: var(--ink-1);
 }
 
-.qd-model__desc {
-  margin: 0;
-  color: var(--ink-3);
-  font-size: var(--fs-sm);
-  min-height: 2.4em;
+/* 复制键推到行尾：无底色图标键，悬停才有底（与接入信息弹层那几枚同一形态） */
+.qd-model__copy {
+  margin-left: auto;
 }
 
 .qd-model__foot {
