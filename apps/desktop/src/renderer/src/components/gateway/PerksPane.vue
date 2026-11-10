@@ -592,6 +592,11 @@ onMounted(() => {
   align-items: center;
   gap: var(--sp-2);
   flex-wrap: wrap;
+  /*
+   * 账号下拉与同排的 small 按钮同高。global.css 把 small 按钮定成 28px，而 EP 的输入类控件
+   * 走自己的 --el-component-size-small（24px），不改这一排就一个高一个矮（与 SettingsDialog 同一套做法）。
+   */
+  --el-component-size-small: 28px;
 }
 
 .perks__select {
