@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { ProjectColor } from '@workbench/core'
 import type { WorkLogEntry, WorkLogStatus, WorkRange, WorkSort } from '@workbench/work-log'
-import { ArrowDown, Memo, Plus, Warning } from '@element-plus/icons-vue'
+import { ArrowDown, Download, Memo, Plus, Warning } from '@element-plus/icons-vue'
 import { addDays, dayKey, markdownToPlainText, projectColorVar, sanitizeProjectColor } from '@workbench/core'
 import { dayMeta, DELETED_PROJECT_ID, groupByProject, isWorkSort, paginate, sanitizeWorkRange, sanitizeWorkSort, timelineOf, toggleWorkLogStatus, WORK_PAGE_DAYS, WORK_RANGE_LABELS, WORK_RANGES, WORK_SORT_LABELS, WORK_SORTS, WORK_STATUS_DEFAULT } from '@workbench/work-log'
 import { ElMessage } from 'element-plus'
@@ -22,6 +22,7 @@ import EmptyState from '@/components/EmptyState.vue'
 import PanelLoading from '@/components/PanelLoading.vue'
 import WorkLogCard from '@/components/WorkLogCard.vue'
 import WorkLogDialog from '@/components/WorkLogDialog.vue'
+import WorkLogGitDialog from '@/components/WorkLogGitDialog.vue'
 import { confirmAction } from '@/notify'
 import { useProjectsStore } from '@/stores/projects'
 import { useSettingsStore } from '@/stores/settings'
@@ -59,6 +60,11 @@ const page = ref(1)
 const now = ref(Date.now())
 const dialogVisible = ref(false)
 const editing = ref<WorkLogEntry | null>(null)
+/** 「从提交生成」弹窗；「待办」不是时段，那一档按钮置灰 */
+const gitVisible = ref(false)
+const gitRange = computed<Exclude<WorkRange, 'todo'>>(() =>
+  range.value === 'todo' ? 'today' : range.value,
+)
 
 async function load(): Promise<void> {
   loading.value = true
@@ -275,6 +281,17 @@ function onSaved(entry: WorkLogEntry): void {
   now.value = Date.now()
 }
 
+/** 从提交生成之后同样并进内存列表：这次可能是新建，也可能是追加到已有记录 */
+function onGitImported(changed: WorkLogEntry[]): void {
+  for (const entry of changed) {
+    const index = entries.value.findIndex(item => item.id === entry.id)
+    if (index === -1)
+      entries.value.push(entry)
+    else entries.value.splice(index, 1, entry)
+  }
+  now.value = Date.now()
+}
+
 /**
  * 点记录 = 在「已完成 / 待办」之间切一下。
  *
@@ -355,6 +372,16 @@ async function remove(entry: WorkLogEntry): Promise<void> {
             </el-dropdown-menu>
           </template>
         </el-dropdown>
+
+        <!-- 从项目仓库的提交生成：先预览再写入。「待办」档没有日期范围，置灰并说明原因 -->
+        <el-tooltip content="先切到时间档" placement="bottom" :disabled="range !== 'todo'">
+          <span class="git-entry">
+            <el-button size="small" :disabled="range === 'todo'" @click="gitVisible = true">
+              <el-icon><Download /></el-icon>
+              从提交生成
+            </el-button>
+          </span>
+        </el-tooltip>
 
         <el-button type="primary" size="small" @click="openCreate">
           <el-icon><Plus /></el-icon>
@@ -440,6 +467,16 @@ async function remove(entry: WorkLogEntry): Promise<void> {
       :default-status="defaultStatus"
       @saved="onSaved"
     />
+
+    <!-- 提交生成：项目与日志都从这一页取，读写各归适配层 -->
+    <WorkLogGitDialog
+      v-model="gitVisible"
+      :projects="store.projects"
+      :entries="entries"
+      :range="gitRange"
+      :now="now"
+      @imported="onGitImported"
+    />
   </main>
 </template>
 
@@ -457,6 +494,11 @@ async function remove(entry: WorkLogEntry): Promise<void> {
 /* 范围切换用 el-segmented：外壳（底色 / 圆角 / 选中态）在 global.css，这里只补不显形的一行 */
 .ranges.el-segmented {
   flex-shrink: 0;
+}
+
+/* 置灰的按钮自己接不住鼠标事件，tooltip 的悬停目标得由外面这层给 */
+.git-entry {
+  display: inline-flex;
 }
 
 /* 时间轴区域自己滚，工具条与分页钉在上下两头 */

@@ -19,7 +19,7 @@ import type { SkillCommit, SkillCompareFile, SkillCreateInput, SkillEntry, Skill
 import type { SyncDeviceInfo, TokenUsageResult } from '@workbench/usage'
 import type { VaultEntry, VaultRecord } from '@workbench/vault'
 import type { VideoNode, VideoSource } from '@workbench/video'
-import type { WorkLogEntry, WorkLogInput, WorkLogPatch, WorkRange, WorkSort } from '@workbench/work-log'
+import type { GitCommitLog, GitWorkLogDraft, WorkLogEntry, WorkLogInput, WorkLogPatch, WorkRange, WorkSort } from '@workbench/work-log'
 import type { ZentaoBugList, ZentaoSession } from '@workbench/zentao'
 // 网关 / Qoder / ETF 的通道载荷类型：住在隔壁的 gateway.ts / qoder.ts / etf.ts（契约侧），
 // 这里导入并 re-export —— WorkbenchApi 直接引用，老代码从本文件或各自适配文件取都行。
@@ -137,7 +137,7 @@ export type {
 export type { SyncDeviceInfo } from '@workbench/usage'
 export type { TokenUsageResult } from '@workbench/usage'
 export type { VideoNode, VideoSource } from '@workbench/video'
-export type { WorkLogEntry, WorkLogInput, WorkLogPatch } from '@workbench/work-log'
+export type { GitCommit, GitCommitLog, GitWorkLogDraft, WorkLogEntry, WorkLogInput, WorkLogPatch, WorkLogSource } from '@workbench/work-log'
 export type { ZentaoBrowse, ZentaoBug, ZentaoBugList, ZentaoSession } from '@workbench/zentao'
 
 export type ProjectStatus = 'idle' | 'installing' | 'running' | 'building' | 'success' | 'failed'
@@ -1315,6 +1315,19 @@ export interface WorkbenchApi {
   addWorkLog: (input: WorkLogInput) => Promise<Result<WorkLogEntry>>
   updateWorkLog: (id: string, patch: WorkLogPatch) => Promise<Result<WorkLogEntry>>
   removeWorkLog: (id: string) => Promise<Result<null>>
+  /**
+   * 读一个项目仓库的提交记录。**只读、本地**：只跑 git log 与 git config，
+   * 不写仓库、不联网，也不是新的网络出口。
+   *
+   * `since` 是毫秒时间戳，宿主侧拿它做 git `--since` 的粗筛；精确到天的过滤
+   * 与按项目 / 按天分组在 `@workbench/work-log` 里。不是 git 仓库时 `isRepo: false`。
+   */
+  projectGitLog: (dir: string, since?: number) => Promise<Result<GitCommitLog>>
+  /**
+   * 把「从提交生成」预览里确认过的草稿写进工作日志。
+   * 新建的条目带来源哈希（下次生成不会重复写），`appendTo` 的条目追加到已有记录上。
+   */
+  importGitDrafts: (drafts: readonly GitWorkLogDraft[]) => Promise<Result<WorkLogEntry[]>>
   /**
    * AI 热点：读本地缓存（`ai-news.json`）的合并视图。**不联网** —— 只回上次拉回来的那份。
    * 卡片首屏先走它：有内容就直接摆出来，再交给 refreshAiNews 后台更新。

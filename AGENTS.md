@@ -40,11 +40,13 @@
   **别再往上加任何来源，也别给附件那个 iframe 加 `allow-same-origin`**。
 - Rust 依赖的判据是**不新增编译单元**，不是「不新增 crate 名」：先 `cargo tree -e normal -i <crate>` 确认它已经在图里；不要引
   `reqwest`、`git2`、`sysinfo` 这类会拉进整套栈的 native / 运行时依赖。唯一例外是邮箱的 TLS（`schannel`，理由见 `mail.rs`）。
-- 唯一需要用户预装的外部程序是 **git**：`sync.rs` 的几处同步与 `skills.rs` 的版本提交 / 同步，外加两条只读探测
-  （笔记 / 知识库 / AI 助手工作目录的 `repo_state`、技能库的 `skills::state`）。直启 `git.exe`（`proc::run_direct`），**不要**经 `cmd /C`；
+- 唯一需要用户预装的外部程序是 **git**：`sync.rs` 的几处同步与 `skills.rs` 的版本提交 / 同步，外加只读探测
+  （笔记 / 知识库 / AI 助手工作目录的 `repo_state`、技能库的 `skills::state`、工作日志生成用的项目仓库 `git log`）。直启 `git.exe`（`proc::run_direct`），**不要**经 `cmd /C`；
   子进程一律带 `GIT_TERMINAL_PROMPT=0` 与 `-c core.quotepath=false`（前者：没有终端可问，挂着只会等超时；后者：中文文件名在冲突提示里会变乱码）；
-  超时与失败收敛成给用户看的提示。**只在用户自己那两个文件夹（笔记本、技能库）所在的仓库里跑 git，且从不写它们的远端配置**
-  （不 `init`、不 `remote add` / `set-url`；只在仓库没配过身份时写一次本地 `user.email` / `user.name` 兜底）。别处不新增这类外部依赖。
+  超时与失败收敛成给用户看的提示。**只在用户自己那两个文件夹（笔记本、技能库）所在的仓库与项目目录里跑 git**：
+  前两处可写（同步提交），**项目仓库一律只读**（只跑 `git log` / `git config user.email`，不 add / commit / push），
+  且从不写它们的远端配置（不 `init`、不 `remote add` / `set-url`；只在仓库没配过身份时写一次本地 `user.email` / `user.name` 兜底）。
+  别处不新增这类外部依赖。
 - VS Code 与微信是仅有的两个**可选**外部程序，各只服务一个功能，没装只影响那一处：
   - VS Code 只服务项目卡的「在 VS Code 中打开」：走它自己注册的 `vscode://` 协议（`system.rs` 的
     `open_in_vscode`），不去找 `Code.exe` 的安装路径；不要照着再引别的编辑器。

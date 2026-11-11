@@ -51,6 +51,9 @@ const domainsApi = {
   updateWorkLog: (id: string, patch: Parameters<WorkbenchApi['updateWorkLog']>[1]) =>
     workLog.updateWorkLog(id, patch),
   removeWorkLog: (id: string) => workLog.removeWorkLog(id),
+  projectGitLog: (dir: string, since?: number) => workLog.projectGitLog(dir, since),
+  importGitDrafts: (drafts: Parameters<WorkbenchApi['importGitDrafts']>[0]) =>
+    workLog.importGitDrafts(drafts),
 
   // ---------- AI 热点（本地缓存 + 宿主侧的内置源白名单） ----------
   getAiNews: () => aiNews.getAiNews(),

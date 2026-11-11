@@ -17,6 +17,18 @@ import { addDays, dayKey, isDateKey, startOfDay } from '@workbench/core'
 /** 文件口径版本。只在本机流转，不参与跨设备合并，所以版本只用来标记格式 */
 export const WORK_LOG_VERSION = 1
 
+/**
+ * 一条记录的生成来源（目前只有 git 提交）。
+ *
+ * 存哈希的唯一用处是**去重**：再点一次「从提交生成」时，已经并进某条记录的提交
+ * 不再重复写入。手写的记录没有这个字段。
+ */
+export interface WorkLogSource {
+  kind: 'git'
+  /** 已并入这条记录的提交哈希（小写、去重） */
+  commits: string[]
+}
+
 export interface WorkLogEntry {
   id: string
   /** 所属日期（YYYY-MM-DD，本地时区）—— 时间轴按它分组 */
@@ -29,6 +41,8 @@ export interface WorkLogEntry {
   status: WorkLogStatus
   createdAt: number
   updatedAt: number
+  /** 来源；手写的记录没有 */
+  source?: WorkLogSource
 }
 
 /**
@@ -47,6 +61,9 @@ export const WORK_STATUS_LABELS: Record<WorkLogStatus, string> = {
 
 export const WORK_STATUS_DEFAULT: WorkLogStatus = 'done'
 
+/** git 提交哈希：7 位短哈希到 64 位（sha256 仓库）都认 */
+const COMMIT_HASH = /^[0-9a-f]{7,64}$/i
+
 export function isWorkLogStatus(value: unknown): value is WorkLogStatus {
   return typeof value === 'string' && (WORK_STATUSES as readonly string[]).includes(value)
 }
@@ -54,6 +71,43 @@ export function isWorkLogStatus(value: unknown): value is WorkLogStatus {
 /** 认不出来的取值按默认处理：手改坏的数据文件不该让一条记录既不是待办也不是已完成 */
 export function sanitizeWorkLogStatus(value: unknown): WorkLogStatus {
   return isWorkLogStatus(value) ? value : WORK_STATUS_DEFAULT
+}
+
+/**
+ * 一批提交哈希的收敛：去空、转小写、只留像哈希的、按原顺序去重。
+ *
+ * 7 位短哈希到 64 位（sha256 仓库）都认。手改坏的数据文件里混进来的任意字符串
+ * 不该被当成「已导入」而挡掉真正的提交。
+ */
+export function sanitizeCommitHashes(raw: unknown): string[] {
+  if (!Array.isArray(raw))
+    return []
+
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const value of raw) {
+    if (typeof value !== 'string')
+      continue
+    const hash = value.trim().toLowerCase()
+    if (!COMMIT_HASH.test(hash) || seen.has(hash))
+      continue
+    seen.add(hash)
+    out.push(hash)
+  }
+  return out
+}
+
+/** 生成来源的收敛：kind 认不出来、或一个合法哈希都没有时整块丢掉 */
+export function sanitizeWorkLogSource(raw: unknown): WorkLogSource | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw))
+    return undefined
+
+  const input = raw as Partial<WorkLogSource>
+  if (input.kind !== 'git')
+    return undefined
+
+  const commits = sanitizeCommitHashes(input.commits)
+  return commits.length ? { kind: 'git', commits } : undefined
 }
 
 /** 点一下就是这两档之间来回切（时间轴上点记录即用它） */
@@ -68,6 +122,8 @@ export interface WorkLogInput {
   content: string
   /** 不传就是「已完成」（见 WORK_STATUS_DEFAULT） */
   status?: WorkLogStatus
+  /** 生成来源；普通手记不传 */
+  source?: WorkLogSource
 }
 
 /** 可编辑的字段；未给的项保持原值 */
@@ -193,6 +249,7 @@ export function sanitizeWorkLogEntry(
 
   const id = text(input.id)
   const projectId = text(input.projectId)
+  const source = sanitizeWorkLogSource(input.source)
 
   return {
     id: id || uuid(),
@@ -204,6 +261,7 @@ export function sanitizeWorkLogEntry(
     status: sanitizeWorkLogStatus(input.status),
     createdAt,
     updatedAt: stamp(input.updatedAt, createdAt),
+    ...(source ? { source } : {}),
   }
 }
 
@@ -249,6 +307,7 @@ export function createWorkLogEntry(
     return null
 
   const projectId = text(input.projectId)
+  const source = sanitizeWorkLogSource(input.source)
   return {
     id: uuid(),
     date,
@@ -258,6 +317,7 @@ export function createWorkLogEntry(
     status: sanitizeWorkLogStatus(input.status),
     createdAt: now,
     updatedAt: now,
+    ...(source ? { source } : {}),
   }
 }
 
@@ -307,6 +367,8 @@ export function patchWorkLogEntry(
     status,
     createdAt: entry.createdAt,
     updatedAt: now,
+    // 手工编辑不动来源：改过正文的记录仍然知道自己是哪几笔提交生成的（去重靠它）
+    ...(entry.source ? { source: entry.source } : {}),
   }
 }
 

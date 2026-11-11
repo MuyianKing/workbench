@@ -1,4 +1,4 @@
-import type { WorkLogEntry, WorkLogFile, WorkLogInput, WorkLogPatch } from '@workbench/work-log'
+import type { GitCommitLog, GitWorkLogDraft, WorkLogEntry, WorkLogFile, WorkLogInput, WorkLogPatch } from '@workbench/work-log'
 import type { Result } from '@/types'
 import { fail, ok } from '@workbench/core'
 /**
@@ -11,7 +11,7 @@ import { fail, ok } from '@workbench/core'
  * 文件是懒加载的：首屏不读它，第一次进「工作」页时才把整份取回来，
  * 之后一直在内存里维护，每次改动整份落盘（防抖在 Rust 侧）。
  */
-import { createWorkLogEntry, emptyWorkLog, parseWorkLog, patchWorkLogEntry } from '@workbench/work-log'
+import { appendGitContent, createWorkLogEntry, emptyWorkLog, mergeGitCommits, parseGitCommitLog, parseWorkLog, patchWorkLogEntry, sanitizeCommitHashes } from '@workbench/work-log'
 import { recordActivity } from './activity'
 import { errorText, invoke } from './bridge'
 
@@ -115,5 +115,94 @@ export async function removeWorkLog(id: string): Promise<Result<null>> {
   }
   catch (error) {
     return fail(errorText(error, '删除工作日志失败'))
+  }
+}
+
+/**
+ * 读一个项目仓库的提交记录（宿主侧只读、本地）。
+ *
+ * `since` 是毫秒时间戳：宿主侧拿它做 git 的 `--since` 粗筛，精确到天的过滤在
+ * `@workbench/work-log` 的 `buildGitDrafts` 里做 —— git 的日期边界按提交时间算，
+ * 而分组按作者时间，两边不是同一套口径，不能拿它当边界。
+ *
+ * 不是 git 仓库时 `isRepo: false` 是正常结果，不是失败。
+ */
+export async function projectGitLog(dir: string, since?: number): Promise<Result<GitCommitLog>> {
+  try {
+    const raw = await invoke<unknown>('project_git_log', { dir, since })
+    return ok(parseGitCommitLog(raw))
+  }
+  catch (error) {
+    return fail(errorText(error, '读取项目提交记录失败'))
+  }
+}
+
+/**
+ * 把预览里确认过的草稿写进工作日志。
+ *
+ * `appendTo` 的草稿并进那条已有记录（正文追加、哈希并集），其余新建一条「已完成」。
+ * 一次调用只落一次盘；返回这次被新建 / 改动的记录，页面据此并进内存列表。
+ */
+export async function importGitDrafts(
+  drafts: readonly GitWorkLogDraft[],
+): Promise<Result<WorkLogEntry[]>> {
+  try {
+    await ensureLoaded()
+    const now = Date.now()
+    const changed: WorkLogEntry[] = []
+    let created = 0
+
+    for (const draft of drafts) {
+      const commits = sanitizeCommitHashes(draft.commits)
+      const content = draft.content.trim()
+      // 正文被用户清空、或一个合法哈希都不剩的草稿直接跳过（其余照常导入）
+      if (!commits.length || !content || !draft.projectId.trim())
+        continue
+
+      const appendTo = draft.appendTo
+      if (appendTo) {
+        const index = file.entries.findIndex(entry => entry.id === appendTo)
+        if (index !== -1) {
+          const entry = file.entries[index]
+          const next: WorkLogEntry = {
+            ...entry,
+            content: appendGitContent(entry.content, content),
+            source: { kind: 'git', commits: mergeGitCommits(entry.source?.commits, commits) },
+            updatedAt: now,
+          }
+          file.entries[index] = next
+          changed.push(copy(next))
+          continue
+        }
+        // 目标记录在预览之后被删掉了：退回「新建一条」，这次导入不丢
+      }
+
+      const entry = createWorkLogEntry({
+        date: draft.date,
+        projectId: draft.projectId,
+        content,
+        status: 'done',
+        source: { kind: 'git', commits },
+      }, () => crypto.randomUUID(), now)
+      if (!entry)
+        continue
+
+      file.entries.push(entry)
+      changed.push(copy(entry))
+      created += 1
+    }
+
+    if (!changed.length)
+      return fail('没有可导入的提交')
+
+    persist()
+    // 与 addWorkLog 同一条口径：新建一条算一笔；追加不是一条新记录，不记
+    for (let index = 0; index < created; index += 1)
+      recordActivity('log')
+
+    return ok(changed)
+  }
+  catch (error) {
+    return fail(errorText(error, '导入提交记录失败'))
   }
 }

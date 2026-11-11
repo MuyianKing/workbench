@@ -37,6 +37,7 @@ mod paths;
 mod pi_skills;
 mod pin;
 mod proc;
+mod project_git;
 mod qd_account;
 mod qd_api_chat;
 mod qd_auth;
@@ -557,6 +558,7 @@ fn main() {
             commands::token_save,
             commands::work_log_load,
             commands::work_log_save,
+            commands::project_git_log,
             ai_news::ai_news_load,
             ai_news::ai_news_save,
             ai_news::ai_news_fetch,

@@ -125,6 +125,13 @@ pub fn work_log_save(value: Value) {
     work_log_store().schedule();
 }
 
+/// 读一个项目仓库的提交记录（只读、本地；工作日志的「从提交生成」用）。
+/// 会起 git 子进程，异步执行 —— 阻塞在主线程上会把窗口消息循环一起堵住。
+#[tauri::command(async)]
+pub fn project_git_log(dir: String, since: Option<i64>) -> Result<Value, String> {
+    crate::project_git::log(&dir, since)
+}
+
 // ---------- 笔记（用户自己挑的一个文件夹，见 notes.rs） ----------
 //
 // 这一组只认「相对笔记根的路径」，越界与非法名字在 notes.rs 里挡住。
