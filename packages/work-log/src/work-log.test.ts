@@ -353,6 +353,42 @@ describe('patchWorkLogEntry', () => {
   })
 })
 
+describe('workLogSource', () => {
+  it('合法来源落盘保留：哈希转小写、去重、非哈希丢掉', () => {
+    const file = parseWorkLog({
+      entries: [{
+        date: '2026-09-15',
+        content: '从提交生成',
+        source: { kind: 'git', commits: ['AAA1111', 'aaa1111', 'nope', 7] },
+      }],
+    }, uuid, NOW)
+
+    expect(file.entries[0].source).toEqual({ kind: 'git', commits: ['aaa1111'] })
+  })
+
+  it('认不出的来源整块丢掉，不影响这条记录', () => {
+    const file = parseWorkLog({
+      entries: [
+        { date: '2026-09-15', content: '甲', source: { kind: 'svn', commits: ['aaa1111'] } },
+        { date: '2026-09-15', content: '乙', source: { kind: 'git', commits: [] } },
+      ],
+    }, uuid, NOW)
+
+    expect(file.entries[0].source).toBeUndefined()
+    expect(file.entries[1].source).toBeUndefined()
+  })
+
+  it('手工编辑（patch）保留来源，去重仍然认得这些提交', () => {
+    const base: WorkLogEntry = {
+      ...entry('2026-09-15', NOW - 1000, '- 上午'),
+      source: { kind: 'git', commits: ['aaa1111'] },
+    }
+
+    expect(patchWorkLogEntry(base, { content: '- 上午\n\n- 下午' }, NOW).source)
+      .toEqual({ kind: 'git', commits: ['aaa1111'] })
+  })
+})
+
 describe('dayMeta', () => {
   it('给出日期、星期与相对今天的说法', () => {
     expect(dayMeta('2026-09-15', NOW)).toEqual({ title: '9月15日', weekday: '周二', relative: '今天' })
