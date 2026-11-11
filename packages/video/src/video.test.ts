@@ -1,6 +1,6 @@
 import type { VideoEntry } from './video'
 import { describe, expect, it } from 'vitest'
-import { buildVideoTree, clampVideoFloatHeight, clampVideoFloatPercent, clampVideoFloatWidth, clampVideoRate, countVideos, findVideoNode, fitVideoFloatGeometry, formatVideoTime, isVideoFile, nextVideoNode, nextVideoRate, pushVideoHistory, removeFromVideoHistory, resizeVideoFloat, sanitizeVideoHistory, sanitizeVideoLastRel, sanitizeVideoRoot, sanitizeVideoTreeExpanded, VIDEO_FLOAT_SIZE_DEFAULT, VIDEO_FLOAT_SIZE_MAX, VIDEO_FLOAT_SIZE_MIN, VIDEO_HISTORY_MAX, VIDEO_NEXT_SECONDS, VIDEO_RATES, VIDEO_SEEK_SECONDS, VIDEO_TREE_EXPANDED_MAX, videoChain, videoDisplayName } from './video'
+import { buildVideoTree, clampVideoFloatHeight, clampVideoFloatPercent, clampVideoFloatWidth, clampVideoRate, countVideos, findVideoNode, fitVideoFloatGeometry, flattenVideoNodes, formatVideoTime, isVideoFile, nextVideoNode, nextVideoRate, pushVideoHistory, removeFromVideoHistory, resizeVideoFloat, sanitizeVideoHistory, sanitizeVideoLastRel, sanitizeVideoRoot, sanitizeVideoTreeExpanded, VIDEO_FLOAT_SIZE_DEFAULT, VIDEO_FLOAT_SIZE_MAX, VIDEO_FLOAT_SIZE_MIN, VIDEO_HISTORY_MAX, VIDEO_NEXT_SECONDS, VIDEO_RATES, VIDEO_SEEK_SECONDS, VIDEO_TREE_EXPANDED_MAX, videoAbsPath, videoChain, videoDisplayName } from './video'
 
 function dir(rel: string): VideoEntry {
   return { rel, name: relName(rel), isDir: true }
@@ -102,6 +102,13 @@ describe('目录收敛与历史', () => {
     expect(sanitizeVideoLastRel('../outside.mp4')).toBe('')
     expect(sanitizeVideoLastRel('')).toBe('')
     expect(sanitizeVideoLastRel(undefined)).toBe('')
+  })
+
+  it('绝对路径按根拼：相对路径换回反斜杠，空 rel 回来的是根本身', () => {
+    expect(videoAbsPath('D:\\视频', '第一季/第1集.mp4')).toBe('D:\\视频\\第一季\\第1集.mp4')
+    expect(videoAbsPath('D:/视频/', '')).toBe('D:\\视频')
+    expect(videoAbsPath('C:\\', 'a.mp4')).toBe('C:\\a.mp4')
+    expect(videoAbsPath('', 'a.mp4')).toBe('')
   })
 })
 
@@ -211,6 +218,25 @@ describe('浮窗贴合与缩放', () => {
 })
 
 describe('播放顺序', () => {
+  it('摊平只留视频，顺序与树从上往下读一致（文件夹在前、深度优先）', () => {
+    const tree = buildVideoTree([
+      video('b.mp4'),
+      dir('a'),
+      video('a/2.mp4'),
+      dir('a/子目录'),
+      video('a/子目录/3.mp4'),
+      video('a/1.mp4'),
+    ])
+
+    expect(flattenVideoNodes(tree).map(node => node.rel)).toEqual([
+      'a/子目录/3.mp4',
+      'a/1.mp4',
+      'a/2.mp4',
+      'b.mp4',
+    ])
+    expect(flattenVideoNodes([])).toEqual([])
+  })
+
   it('下一个按树的展示顺序摊平：文件夹在前、深度优先，最后一个没有下一个', () => {
     const tree = buildVideoTree([dir('a'), video('a/1.mp4'), video('a/2.mp4'), video('b.mp4')])
     expect(nextVideoNode(tree, 'a/1.mp4')?.rel).toBe('a/2.mp4')

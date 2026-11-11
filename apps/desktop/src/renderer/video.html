@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-CN" class="dark" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <!--
+      独立视频窗口的入口（第五个 HTML 入口，见 docs/modules/video.md）。
+
+      与截图 / 钉图 / 网速球同一条口径：独立窗口、各自的 JS 上下文，只装适配层，
+      **不装 store、不 initState** —— 它的播放状态由主窗口经 Rust 交过来
+      （video_window_context），再回报回去；装了 store 会与主窗口抢着读写同一批数据文件。
+
+      class="dark" 固定：播放画布始终深色（与终端面板同一口径），窗口自带深色手柄栏；
+      color-scheme 让原生媒体控件也走暗色。首帧在可见之前就换上这份底色（窗口先隐藏、
+      页面加载完才显示），所以这里写得跟 tokens.css 的 --term-bg 同一值不会闪白。
+    -->
+    <title>视频</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+
+      html,
+      body,
+      #video-window {
+        height: 100%;
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        overflow: hidden;
+        font-family: var(--font-ui);
+        font-size: var(--fs-body);
+        color: var(--term-ink);
+        background: var(--term-bg);
+        -webkit-font-smoothing: antialiased;
+        text-rendering: optimizeLegibility;
+      }
+
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
+
+      button {
+        font-family: inherit;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="video-window"></div>
+    <script type="module" src="/src/video-window/main.ts"></script>
+  </body>
+</html>

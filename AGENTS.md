@@ -26,7 +26,7 @@
 ## 1. 项目边界
 
 - 定位：Windows 桌面应用（Tauri 2 + WebView2），一个窗口里管项目、记工作、写笔记、看 AI 用量；pnpm workspace monorepo
-  （应用在 `apps/desktop/`，纯逻辑按域拆在 `packages/` 的 18 个 `@workbench/*` 包，见第 2 节），`Cargo.lock` 要提交；
+  （应用在 `apps/desktop/`，纯逻辑按域拆在 `packages/` 的 19 个 `@workbench/*` 包，见第 2 节），`Cargo.lock` 要提交；
   例外：`vendor-pi.mjs` 内部装 Pi 仍走 `npm install`（`resources/pi/` 要整树打进安装包，不能用符号链接布局）。
 - **联网边界：默认不联网、不上报任何数据；出口只有十五条，且都由用户显式开启** —— 清单与每条细则见
   [features-and-architecture.md](docs/features-and-architecture.md) 的「数据与隐私」一节，**动联网代码前先读那一节**。
@@ -38,13 +38,21 @@
   之前先确认它不被拦（`connect-src` / `worker-src` / `img-src` 这几项最容易踩）；**改动只能在生产态真应用里验**（dev 与浏览器预览都不生效）。
   `script-src` 上的 `'unsafe-inline'` **只为 HTML 附件那一档**（这份 meta 会被子框架继承，见 [mail.md](docs/modules/mail.md)）——
   **别再往上加任何来源，也别给附件那个 iframe 加 `allow-same-origin`**。
+- **Markdown 文件关联只在安装器里登记**（`bundle.fileAssociations`：`.md` / `.markdown`）：Tauri 的 NSIS 会把
+  这两个后缀的**默认打开程序**设成 Workbench（卸载时恢复备份值），这是明知的取舍；开发模式不登记，别再加第二套
+  运行时注册表写入。用「打开方式」打开时只显示一扇独立编辑窗口（`markdown.html`），主窗口留在后台；
+  **文件路径只由 Rust 会话持有**，编辑窗口的读写命令不接受渲染层传路径 —— 细则见 [notes.md](docs/modules/notes.md)。
 - Rust 依赖的判据是**不新增编译单元**，不是「不新增 crate 名」：先 `cargo tree -e normal -i <crate>` 确认它已经在图里；不要引
   `reqwest`、`git2`、`sysinfo` 这类会拉进整套栈的 native / 运行时依赖。唯一例外是邮箱的 TLS（`schannel`，理由见 `mail.rs`）。
 - 唯一需要用户预装的外部程序是 **git**：`sync.rs` 的几处同步与 `skills.rs` 的版本提交 / 同步，外加只读探测
-  （笔记 / 知识库 / AI 助手工作目录的 `repo_state`、技能库的 `skills::state`、工作日志生成用的项目仓库 `git log`）。直启 `git.exe`（`proc::run_direct`），**不要**经 `cmd /C`；
-  子进程一律带 `GIT_TERMINAL_PROMPT=0` 与 `-c core.quotepath=false`（前者：没有终端可问，挂着只会等超时；后者：中文文件名在冲突提示里会变乱码）；
-  超时与失败收敛成给用户看的提示。**只在用户自己那两个文件夹（笔记本、技能库）所在的仓库与项目目录里跑 git**：
-  前两处可写（同步提交），**项目仓库一律只读**（只跑 `git log` / `git config user.email`，不 add / commit / push），
+  （笔记 / 知识库 / AI 助手工作目录的 `repo_state`、技能库的 `skills::state`、工作日志生成用的项目仓库 `git log`）
+  与 Git 页的只读浏览器（`repo_git.rs`：`rev-parse` / `log` / `ls-tree` / `show` / `diff` / `cat-file -s`）。直启 `git.exe`（`proc::run_direct`），**不要**经 `cmd /C`；
+  子进程一律带 `GIT_TERMINAL_PROMPT=0`、`-c core.quotepath=false` 与 `--no-pager`（没有终端可问 / 中文文件名不被转义 / 别在管道里起分页器）；
+  Git 页的只读命令再按需带 `--literal-pathspecs`（文件名里的 `*` / `?` / `[` 不是通配符）与 `--no-ext-diff` / `--no-textconv`
+  （别让仓库自己的 `.gitattributes` 或 `diff.external` 执行外部程序）；
+  超时与失败收敛成给用户看的提示。**只在用户自己那两个文件夹（笔记本、技能库）所在的仓库、项目目录与 Git 页里用户打开的仓库跑 git**：
+  前两处可写（同步提交），**项目仓库与 Git 页的仓库一律只读**（项目仓库只跑 `git log` / `git config user.email`；
+  Git 页只跑上面那几条读命令），不 add / commit / push / fetch，
   且从不写它们的远端配置（不 `init`、不 `remote add` / `set-url`；只在仓库没配过身份时写一次本地 `user.email` / `user.name` 兜底）。
   别处不新增这类外部依赖。
 - VS Code 与微信是仅有的两个**可选**外部程序，各只服务一个功能，没装只影响那一处：
@@ -67,7 +75,7 @@
   （`src-tauri/src/qoder/`，MIT，来自 qoder2api-hub），改协议只换这两份与 `qd_upstream` 常量。
   请求流水只存本机 `data\wb-qoder\usage.jsonl`，不并入 `gateway-usage/` 同步。细则见 [qoder.md](docs/modules/qoder.md)。
 - 测试用 Vitest（各包子目录里的 `vitest.config.ts` 是配置来源；根目录 `pnpm test` 走根 `vitest.config.ts` 的
-  `test.projects`，把 19 个项目收进**一个** vitest 进程跑全量 —— 别退回 `pnpm -r test`，那是 19 次进程启动；
+  `test.projects`，把 20 个项目收进**一个** vitest 进程跑全量 —— 别退回 `pnpm -r test`，那是 20 次进程启动；
   渲染层用例在 `@workbench/desktop` 包里）
   + `cargo test`（写在同文件的 `#[cfg(test)] mod tests`）。**TypeScript 锁 6.0.x、vue-tsc 3.3.x**：vue-tsc 还跑不了 TS 7
     （原生编译器不再导出 `./lib/tsc`，`pnpm run typecheck` 会直接崩），别升 7。
@@ -77,12 +85,14 @@
 
 - 总览：monorepo。桌面应用自包含在 `apps/desktop/` —— Rust 在 `src-tauri/src/`、渲染层在 `src/renderer/src/`（组件 `components/`、
   store `stores/`、交互骨架 `composables/`、适配层 `workbench/`、设计令牌与全局样式 `styles/`）、随包资源 `resources/`、构建脚本 `scripts/`；
-  跨页面复用的类型 / 契约 / 纯逻辑按域拆在 `packages/` 的 18 个 `@workbench/*` 包里（`core` 是平台原语，其余按业务域；
+  跨页面复用的类型 / 契约 / 纯逻辑按域拆在 `packages/` 的 19 个 `@workbench/*` 包里（`core` 是平台原语，其余按业务域；
   逐包逐文件分工见 [features-and-architecture.md](docs/features-and-architecture.md) 的「目录结构」）。
-- 渲染层有**四个 HTML 入口**（`src/renderer/` 下，`vite.config.ts` 的 `rollupOptions.input`）：`index.html`（主界面）、
-  `capture.html`（截图遮罩）、`pin.html`（钉图）、`ball.html`（网速球）。后三个是独立窗口、各自的 JS 上下文，
-  **只装适配层，不装 store、不 initState**
-  —— 装了会与主窗口抢着读 / 写同一批数据文件（见 [screenshot.md](docs/modules/screenshot.md)、[float-ball.md](docs/modules/float-ball.md)）。
+- 渲染层有**六个 HTML 入口**（`src/renderer/` 下，`vite.config.ts` 的 `rollupOptions.input`）：`index.html`（主界面）、
+  `capture.html`（截图遮罩）、`pin.html`（钉图）、`ball.html`（网速球）、`video.html`（独立视频窗口）、
+  `markdown.html`（资源管理器「打开方式」的独立 Markdown 编辑窗口）。
+  后五个是独立窗口、各自的 JS 上下文，**只装适配层，不装 store、不 initState**
+  —— 装了会与主窗口抢着读 / 写同一批数据文件（见 [screenshot.md](docs/modules/screenshot.md)、
+  [float-ball.md](docs/modules/float-ball.md)、[video.md](docs/modules/video.md)、[notes.md](docs/modules/notes.md)）。
 - **禅道是一扇独立窗口**（顶栏那一排右侧、收起 / 展开菜单那颗右边的图标打开，通知点击也开它），里面直接加载禅道站点、用系统标题栏：
   它是唯一的**远程来源窗口**，**不登记任何 capability**（远程来源不给 IPC，见 [zentao.md](docs/modules/zentao.md)）。
   别把它做进页面里当 iframe（服务端 `X-Frame-Options: SAMEORIGIN` 会拒绝渲染），也别自绘窗口按钮
@@ -110,9 +120,13 @@
   `--bg-*` `--ink-*` `--st-*` `--sp-*` `--r-*` `--fs-*` `--ease-*`。暗色只在 `:root[data-theme='dark']` 覆盖令牌。
 - 界面主体灰度，彩色只表达运行状态（`--st-run` / `--st-ok` / `--st-fail`）与项目标识色；用户配的主题色只管
   交互态、首页活跃度图的色阶与网关用量页那张柱状图（口径在 [accent-color.ts](packages/appearance/src/accent-color.ts) 的文件头，别扩到别处）；
-  终端面板始终深色（`--term-*`）。**例外只有一处**：邮箱附件片左首那枚类型图标按文件类型着色（PDF 红 / Word 蓝 / 幻灯片橙 / Markdown 紫 / 网页青），
+  终端面板始终深色（`--term-*`）。**例外有两处**：
+  ① 邮箱附件片左首那枚类型图标按文件类型着色（PDF 红 / Word 蓝 / 幻灯片橙 / Markdown 紫 / 网页青），
   色阶口径只在 [parse.ts](packages/mail/src/parse.ts) 的 `attachmentTint`（见 [mail.md](docs/modules/mail.md)），
-  名字、大小与其余一切照旧灰度，不许扩到别处、也不许拿它给整片附件上色。
+  名字、大小与其余一切照旧灰度，不许扩到别处、也不许拿它给整片附件上色；
+  ② 邮箱清单行的发件人首字头像按展示名稳定散到 8 档柔和色（调色板只在
+  [MailListRow.vue](apps/desktop/src/renderer/src/components/MailListRow.vue)，同一发件人恒色），
+  只上这一枚圆片，不许扩到姓名 / 主题 / 整行。
 - **项目标识色**（[project-color.ts](packages/core/src/project-color.ts)）：预设色存名字不存色值，自定义色 `#rrggbb` 一律经
   `sanitizeProjectColor()` 收敛；颜色怎么分配只在那一个文件里定义，界面别自己另拍一个。
 - 项目标签统一走 [ProjectTag.vue](apps/desktop/src/renderer/src/components/ProjectTag.vue)（`el-tag` + `effect="dark"`），**别自绘浅底同色字标签**；
@@ -173,6 +187,7 @@ asset 协议、读取权限在 Rust 侧按单个文件授予）、**通道一律
 | 截图与钉图（抓屏 / 标注 / 剪贴板 / 置顶图窗口） | [screenshot](docs/modules/screenshot.md) |
 | 网速球（自由摆放 / 贴边收起 / 网卡计数取样） | [float-ball](docs/modules/float-ball.md) |
 | ETF 资金流（份额 / 净值 / 净申赎 / 五年回填） | [etf](docs/modules/etf.md) |
+| Git 页（只读浏览本地仓库 / 提交历史 / 文件历史 / 两个提交的差异） | [git-client](docs/modules/git-client.md) |
 
 没有列入表里的模块（首页、项目、技能、样式、视频、快捷启动）也在 [docs/modules/](docs/modules/) 下各有一份文档，
 动手前先看它的「约束」一节。

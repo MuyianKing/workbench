@@ -612,7 +612,7 @@ const bodyStyle = computed(() => ({
              不混进上面的清单（勾选 / 删除 / 右键与正常邮件同一套） -->
         <div v-if="mail.bulkCount > 0" class="mail-bulk">
           <button class="mail-bulk__head" type="button" @click="toggleShowBulk">
-            <span>推广邮件 {{ mail.bulkCount }} 封</span>
+            <span class="mail-bulk__label">推广邮件<span class="mail-bulk__count">{{ mail.bulkCount }}</span>封</span>
             <el-icon class="mail-bulk__chevron" :class="{ 'is-open': mail.showBulk }">
               <ArrowDown />
             </el-icon>
@@ -950,9 +950,12 @@ const bodyStyle = computed(() => ({
   background: var(--bg-subtle);
 }
 
-/** 清单自己滚；行高紧凑，一屏多看几封（行的样式在 MailListRow.vue 里） */
+/** 清单自己滚；一行一张小卡片，卡片之间留一档缝（行的样式在 MailListRow.vue 里） */
 .mail-list {
+  display: flex;
   flex: 1;
+  flex-direction: column;
+  gap: var(--sp-1);
   min-height: 0;
   margin-top: var(--sp-2);
   overflow-y: auto;
@@ -1017,9 +1020,33 @@ const bodyStyle = computed(() => ({
 
 /* 推广邮件段：与收件箱分开的一段 —— 头一行是折叠开关，展开的行不混进上面的清单 */
 .mail-bulk {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
   margin-top: var(--sp-2);
   padding-top: var(--sp-1);
   border-top: 1px solid var(--border);
+}
+
+/* 折叠开关上的「推广邮件 N 封」：数字收进一枚安静的小胶囊里 */
+.mail-bulk__label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+
+.mail-bulk__count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: var(--r-pill);
+  background: var(--bg-inset);
+  color: var(--ink-2);
+  font-size: var(--fs-micro);
+  font-variant-numeric: tabular-nums;
 }
 
 .mail-bulk__head {

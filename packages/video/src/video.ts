@@ -11,7 +11,7 @@
  * 全是纯函数，放这里是为了被单测直接覆盖。目录收敛（sanitizeVideoRoot）与
  * 笔记文件夹是同一件事（本机挑的一个目录），直接复用 note.ts 的那几个函数。
  */
-import { buildRelTree, countRelNodes, findRelNode, normalizeRel, noteRootName, pushNoteHistory, relChain, removeFromNoteHistory, sanitizeNoteHistory, sanitizeNoteRoot, sanitizeNoteTreeExpanded, sortRelNodes } from '@workbench/notes'
+import { buildRelTree, countRelNodes, findRelNode, normalizeRel, noteAbsPath, noteRootName, pushNoteHistory, relChain, removeFromNoteHistory, sanitizeNoteHistory, sanitizeNoteRoot, sanitizeNoteTreeExpanded, sortRelNodes } from '@workbench/notes'
 
 /** 只认这一种后缀。别的容器（mkv / avi / flv…）webview 里的解码器不一定有，先不收 */
 const VIDEO_EXTENSION = '.mp4'
@@ -125,6 +125,15 @@ export const VIDEO_HISTORY_MAX = 6
 export const sanitizeVideoRoot = sanitizeNoteRoot
 export const videoRootName = noteRootName
 
+/**
+ * 视频的绝对路径：交给系统的能力（用默认程序打开 / 在资源管理器中定位 / 复制路径）
+ * 只认这个。与笔记的 `noteAbsPath` 是同一件事（本机目录 + 相对路径），
+ * 盘根、反斜杠这些口径只在 note.ts 写一份。
+ *
+ * 只由扫描出来的树喂进来（菜单项的 rel），这里不做越界判断 —— 真边界在 Rust 侧。
+ */
+export const videoAbsPath = noteAbsPath
+
 /** 收敛一份「打开过的视频目录」清单：逐条收敛、去重（不分大小写）、超上限整段丢掉 */
 export function sanitizeVideoHistory(raw: unknown): string[] {
   return sanitizeNoteHistory(raw)
@@ -188,15 +197,12 @@ export const VIDEO_SEEK_SECONDS = 5
 export const VIDEO_NEXT_SECONDS = 3
 
 /**
- * 播放顺序里的下一个视频：把树按展示顺序（文件夹在前、同层按名字，深度优先）摊平，
- * 取当前那一个后面的第一个视频 —— 「播完自动接下去」的顺序与树上从上往下的阅读顺序一致。
- * 现在播的就是最后一个（或这个路径根本不在树里）时返回 null，此时不自动接。
+ * 把树按展示顺序（文件夹在前、同层按名字，深度优先）摊平成视频清单。
+ *
+ * 「播完自动接下去」与独立播放窗口的播放列表都按这一份顺序走 ——
+ * 与树上从上往下的阅读顺序一致。文件夹本身不进清单。
  */
-export function nextVideoNode(nodes: readonly VideoNode[], rel: string): VideoNode | null {
-  const target = normalizeVideoRel(rel)
-  if (!target)
-    return null
-
+export function flattenVideoNodes(nodes: readonly VideoNode[]): VideoNode[] {
   const videos: VideoNode[] = []
   const walk = (list: readonly VideoNode[]): void => {
     for (const node of list) {
@@ -207,7 +213,19 @@ export function nextVideoNode(nodes: readonly VideoNode[], rel: string): VideoNo
     }
   }
   walk(nodes)
+  return videos
+}
 
+/**
+ * 播放顺序里的下一个视频：把树按展示顺序摊平，取当前那一个后面的第一个视频。
+ * 现在播的就是最后一个（或这个路径根本不在树里）时返回 null，此时不自动接。
+ */
+export function nextVideoNode(nodes: readonly VideoNode[], rel: string): VideoNode | null {
+  const target = normalizeVideoRel(rel)
+  if (!target)
+    return null
+
+  const videos = flattenVideoNodes(nodes)
   const at = videos.findIndex(node => node.rel === target)
   // 当前那一个不在树里（被删了、路径是别的目录的）按「没有下一个」算，
   // 不能让 -1 + 1 恰好捞回第一个视频

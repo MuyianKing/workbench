@@ -25,6 +25,7 @@ mod imaging;
 mod kb;
 mod mail;
 mod mail_watch;
+mod md_window;
 mod net;
 mod nrm;
 mod notes;
@@ -55,6 +56,7 @@ mod qd_tasks;
 mod qd_tools;
 mod qd_upstream;
 mod qd_usage;
+mod repo_git;
 mod screen;
 mod session;
 mod skills;
@@ -64,6 +66,7 @@ mod system;
 mod token;
 mod vault;
 mod video;
+mod video_window;
 mod wb_account;
 mod wb_api_auth;
 mod wb_api_billing;
@@ -200,7 +203,7 @@ fn toggle_main_window(app: &AppHandle) {
 /// 它连一次跨进程往返都不需要，也不阻塞渲染线程。
 ///
 /// 只注入原始设置与布局，不做 sanitize —— 收敛逻辑在 TS 侧，与异步路径用的是同一份。
-fn bootstrap_script() -> String {
+pub(crate) fn bootstrap_script() -> String {
     let data = commands::data_store().get();
     let payload = json!({
         "settings": data.get("settings").cloned().unwrap_or(Value::Null),
@@ -220,7 +223,7 @@ fn bootstrap_script() -> String {
  * 放进初始化脚本而不是渲染层入口：它比其他任何页面脚本都早，连首帧之前那段空窗也盖住了。
  * 代价是原生菜单里的「检查」没了，调试改走 CDP 远程调试端口（见 AGENTS.md 第 6 节）。
  */
-fn no_context_menu_script() -> &'static str {
+pub(crate) fn no_context_menu_script() -> &'static str {
     "window.addEventListener('contextmenu', (event) => event.preventDefault(), { capture: true });"
 }
 
@@ -255,7 +258,32 @@ fn attach_window_events(window: &tauri::WebviewWindow) {
     });
 }
 
-fn create_main_window(app: &AppHandle) -> tauri::Result<()> {
+/// 主窗口与独立 Markdown 编辑窗口共用的导航边界。
+///
+/// 邮件正文（sandbox iframe）里的链接统一 target="_top" 往顶层窗口导航
+/// （见 @workbench/mail 的 htmlBody），在这里拦下：应用自己的页面照常放行，
+/// 其余 http(s) / mailto 交给系统浏览器开，别的 scheme 一律取消 ——
+/// 邮件的 HTML 不带宿主能力，这条边界不因放行链接而破。
+/// 禅道窗口是另一扇窗（zentao.rs），有它自己的导航边界。
+pub(crate) fn handle_navigation(url: &tauri::Url) -> bool {
+    let text = url.as_str();
+    let own = text.starts_with("http://tauri.localhost")
+        || text.starts_with("https://tauri.localhost")
+        || text.starts_with("tauri://localhost")
+        || text.starts_with("about:");
+    if own || (cfg!(dev) && text.starts_with("http://localhost:5274")) {
+        return true;
+    }
+    if text.starts_with("http://") || text.starts_with("https://") || text.starts_with("mailto:") {
+        let _ = crate::system::open_external(text);
+    }
+    false
+}
+
+/// `show_on_load` 为 false 时只创建、不显示：从资源管理器「打开方式」启动的那一次
+/// 用户要的是编辑窗口，不是主界面 —— 主窗口仍留在后台，托盘与后台服务照常，
+/// 之后从托盘「显示主界面」还能把它叫出来。
+fn create_main_window(app: &AppHandle, show_on_load: bool) -> tauri::Result<()> {
     let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
         // 只是启动那一瞬的占位：渲染层挂载后立刻用设置里的程序名覆盖它（见 commands::set_app_name）。
         // 取 package_info 而不是写死一个字面量，改 productName 时这里跟着走
@@ -269,30 +297,14 @@ fn create_main_window(app: &AppHandle) -> tauri::Result<()> {
         .visible(false)
         .initialization_script(bootstrap_script())
         .initialization_script(no_context_menu_script())
-        .on_page_load(|window, payload| {
+        .on_page_load(move |window, payload| {
             if let PageLoadEvent::Finished = payload.event() {
-                let _ = window.show();
+                if show_on_load {
+                    let _ = window.show();
+                }
             }
         })
-        // 邮件正文（sandbox iframe）里的链接统一 target="_top" 往顶层窗口导航
-        // （见 @workbench/mail 的 htmlBody），在这里拦下：应用自己的页面照常放行，
-        // 其余 http(s) / mailto 交给系统浏览器开，别的 scheme 一律取消 ——
-        // 邮件的 HTML 不带宿主能力，这条边界不因放行链接而破。
-        // 禅道窗口是另一扇窗（zentao.rs），有它自己的导航边界。
-        .on_navigation(|url| {
-            let url = url.as_str();
-            let own = url.starts_with("http://tauri.localhost")
-                || url.starts_with("https://tauri.localhost")
-                || url.starts_with("tauri://localhost")
-                || url.starts_with("about:");
-            if own || (cfg!(dev) && url.starts_with("http://localhost:5274")) {
-                return true;
-            }
-            if url.starts_with("http://") || url.starts_with("https://") || url.starts_with("mailto:") {
-                let _ = crate::system::open_external(url);
-            }
-            false
-        })
+        .on_navigation(handle_navigation)
         .build()?;
 
     attach_window_events(&window);
@@ -503,8 +515,21 @@ fn main() {
     // （`Workbench-dev` 与 `Workbench`，见 paths.rs），两边各写各的文件；后台轮询与通知仍会各跑一遍，
     // 见 docs/dev-notes/browser-preview-verification.md。
     #[cfg(not(dev))]
-    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
-        show_main_window(app);
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
+        let paths = md_window::markdown_paths(&argv, std::path::Path::new(&cwd));
+        if paths.is_empty() {
+            show_main_window(app);
+            return;
+        }
+        // 这是第二实例的「打开方式」：只开编辑窗口，不把主界面叫到前面。
+        // 建窗口会等主线程泵消息，不能在单实例回调（主线程）里直接建 —— 丢给独立线程。
+        let handle = app.clone();
+        std::thread::spawn(move || {
+            if md_window::open_paths(&handle, &paths) == 0 {
+                // 一个都没开起来（文件被删 / 窗口建不出来）：退回原来的行为，让用户至少看得到主界面
+                show_main_window(&handle);
+            }
+        });
     }));
 
     builder
@@ -546,6 +571,8 @@ fn main() {
         .manage(capture::CaptureState::default())
         .manage(pin::Pins::default())
         .manage(ball::BallState::default())
+        .manage(video_window::VideoWindowState::default())
+        .manage(md_window::MdWindows::default())
         .manage(zentao::ZentaoState::default())
         .manage(zentao::ZentaoWatch::default())
         .manage(zentao::ZentaoWindowState::default())
@@ -559,6 +586,13 @@ fn main() {
             commands::work_log_load,
             commands::work_log_save,
             commands::project_git_log,
+            repo_git::repo_git_open,
+            repo_git::repo_git_commits,
+            repo_git::repo_git_file_commits,
+            repo_git::repo_git_tree,
+            repo_git::repo_git_commit,
+            repo_git::repo_git_compare,
+            repo_git::repo_git_patch,
             ai_news::ai_news_load,
             ai_news::ai_news_save,
             ai_news::ai_news_fetch,
@@ -597,6 +631,15 @@ fn main() {
             commands::note_repo_state,
             commands::video_scan,
             commands::allow_video,
+            video_window::video_window_open,
+            video_window::video_window_command,
+            video_window::video_window_context,
+            video_window::video_window_report,
+            video_window::video_window_on_top,
+            md_window::markdown_window_context,
+            md_window::markdown_window_save,
+            md_window::markdown_window_close,
+            md_window::markdown_window_cancel_close,
             commands::skill_list,
             commands::skill_state,
             commands::skill_sync,
@@ -647,6 +690,8 @@ fn main() {
             commands::qoder_earnings_pull,
             commands::etf_sync_publish,
             commands::etf_sync_pull,
+            commands::activity_sync_publish,
+            commands::activity_sync_shards,
             commands::auth_status,
             commands::auth_refresh_account,
             commands::auth_login_start,
@@ -820,7 +865,19 @@ fn main() {
             // 悬浮球只读记账、不开窗：开不开由设置决定，值由渲染层在 initState 之后推
             // （ball_apply，见 workbench/index.ts 的 syncSystemIntegration）
             ball::load(&handle);
-            create_main_window(&handle)?;
+            // 从资源管理器「打开方式」启动：先把编辑窗口开出来，主窗口照建但**不显示** ——
+            // 用户要的是编辑那个文件，不是主界面；托盘与后台服务照旧，之后可从托盘叫出主界面。
+            // 一个都没开起来（文件已删 / 建窗口失败）就退回正常启动，别让用户看不到任何界面。
+            // args_os + lossy：路径里有非 Unicode 代理对时 std::env::args() 会 panic，
+            // 而这条路径只是拿来认「有没有 .md 文件」，认不出就照常显示主界面
+            let args: Vec<String> = std::env::args_os()
+                .map(|arg| arg.to_string_lossy().into_owned())
+                .collect();
+            let cwd = std::env::current_dir()
+                .unwrap_or_else(|_| std::path::PathBuf::from("."));
+            let requested = md_window::markdown_paths(&args, &cwd);
+            let opened = md_window::open_paths(&handle, &requested);
+            create_main_window(&handle, opened == 0)?;
             create_tray(&handle)?;
             pin::restore(&handle);
 

@@ -11,9 +11,9 @@
  *    `app.use(ElLoading)` 注册，样式在这里；
  *  - 上面几样的依赖（base / overlay / input / button…）由各自的 `style/css` 入口带进来。
  *
- * 四个入口里凡是会用到 EP 的都 import 这一份（`capture` / `pin` 也会 —— `installTauriWorkbench`
- * 在快捷键注册失败时会 `notifyWarning`）。位置要排在 `tokens.css` 与 `global.css` **之前**，
- * 与原先整包 `element-plus/dist/index.css` 的位置一致。
+ * 六个入口里凡是会用到 EP 的都 import 这一份（`capture` / `pin` / `video` / `markdown`
+ * 也会 —— `installTauriWorkbench` 在快捷键注册失败时会 `notifyWarning`）。位置要排在
+ * `tokens.css` 与 `global.css` **之前**，与原先整包 `element-plus/dist/index.css` 的位置一致。
  */
 import 'element-plus/es/components/loading/style/css'
 import 'element-plus/es/components/message/style/css'

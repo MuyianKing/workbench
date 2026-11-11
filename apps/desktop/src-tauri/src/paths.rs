@@ -68,6 +68,9 @@ pub(crate) const QODER_EARNINGS_DIR: &str = "qoder-earnings";
 /// 克隆里放 **ETF 缓存**的子目录名：一台机器一个文件（份额 / 净值都是公开行情，
 /// 别的机器读到就并进本机，不必各自再向交易所重拉，见 packages/etf/src/etf.ts 的 mergeEtfCacheInto）
 pub(crate) const ETF_SYNC_DIR: &str = "etf";
+/// 克隆里放 **活跃度账本**的子目录名：一台机器一个文件（日期 → 各来源次数，只有计数、没有明细）。
+/// 读的时候按天求和，见 packages/core/src/activity.ts 的 mergeActivityBreakdowns
+pub(crate) const ACTIVITY_SYNC_DIR: &str = "activity";
 /// 网关（WorkBuddy 反代）的目录名。它自带一层完整结构：账号、用量、日志都在里面，
 /// 不跟工作台自己的数据文件混在一起 —— 那是一整套独立的运行时状态
 const GATEWAY_DIR: &str = "wb-gateway";

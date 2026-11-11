@@ -1,0 +1,10 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "video-window",
+  "description": "独立视频窗口的能力：核心 API（事件订阅 / webview）加自绘手柄栏拖动（core:window:allow-start-dragging，被 ACL 拦下是静默失效，拖不动也不报错）。窗口的位置 / 尺寸 / 置顶全由 Rust 设（video_window_* 命令），前端不碰窗口 API，所以其余窗口权限一个都不给；它加载的是本地页面，不是远程来源窗口。",
+  "windows": ["video-window"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-start-dragging"
+  ]
+}

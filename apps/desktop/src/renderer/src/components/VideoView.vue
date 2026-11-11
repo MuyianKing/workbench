@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { Expand, Fold, FolderOpened, Refresh, TopRight, VideoPlay } from '@element-plus/icons-vue'
-import { findVideoNode, VIDEO_SEEK_SECONDS, videoRootName } from '@workbench/video'
+import { Expand, Fold, FolderOpened, FullScreen, Refresh, TopRight, VideoPlay } from '@element-plus/icons-vue'
+import { findVideoNode, VIDEO_SEEK_SECONDS, videoAbsPath, videoRootName } from '@workbench/video'
 import { ElMessage } from 'element-plus'
 /**
  * 视频页：左边目录树，右边播放器。
@@ -10,6 +10,8 @@ import { ElMessage } from 'element-plus'
  * 住在全局单例 VideoPlayer（挂在 App.vue 上）：在视频页时它经 Teleport 落进
  * `.video__stage` 那个宿主里；离开这一页**不**自动浮窗（接着当背景音播），
  * 想带走就点头部的「悬浮播放」（store 的显式意图），元素不重建，播放一秒不断。
+ * 头部另一颗「在独立窗口播放」走的是另一条路：交给 `video.html` 那扇真正的顶层窗口，
+ * 这一页的画布只说一句在哪并给「收回窗口」—— 与笔记左右分屏时用这一条。
  * 所以这一页管的是「这一页长什么样」：
  *   - **还没选文件夹**：整页只有一句引导与那颗「选择文件夹」按钮；
  *   - **选好了**：左树右播放器，点树上的视频立刻开播（走 store.select），
@@ -23,6 +25,7 @@ import { ElMessage } from 'element-plus'
  * 「最近打开」。左栏底部那一行与分隔条是 RecentRoots / PanelResizer（与笔记页共用）。
  */
 import { computed, onMounted, ref } from 'vue'
+import { copyText } from '@/clipboard'
 import PanelLoading from '@/components/PanelLoading.vue'
 import PanelResizer from '@/components/PanelResizer.vue'
 import RecentRoots from '@/components/RecentRoots.vue'
@@ -30,6 +33,7 @@ import SideLoadError from '@/components/SideLoadError.vue'
 import VideoRateMenu from '@/components/VideoRateMenu.vue'
 import VideoTree from '@/components/VideoTree.vue'
 import { setVideoStageHost } from '@/composables/use-video-stage'
+import { notifyError } from '@/notify'
 import { useSettingsStore } from '@/stores/settings'
 import { useVideoStore } from '@/stores/video'
 
@@ -118,10 +122,35 @@ function openRecentRoot(dir: string): void {
   void store.setRoot(dir)
 }
 
-/** 点树上的条目：在视频页里挑的就是要在画布里看 —— 先收回悬浮，再走 store.select */
+/** 点树上的条目：先收回悬浮，再走 store.select（独立窗口播着时 select 会切那扇窗口） */
 function pickFromTree(rel: string): void {
   store.dockFloat()
   store.select(rel)
+}
+
+// ---------- 视频行的右键菜单：只读的三件事 ----------
+
+/**
+ * 路径由 `videoAbsPath` 按视频根拼出来：树的相对路径在视频页里，系统的能力
+ * （reveal / openPath）只认绝对路径。这三件事都**不碰播放状态** ——
+ * 想接着在这里看就接着看，它们管的是「在别处打开 / 找到它」。
+ */
+
+/** 在资源管理器中选中这个视频（文件带选中） */
+function revealVideo(rel: string): void {
+  void window.workbench.reveal(videoAbsPath(store.root, rel))
+}
+
+/** 复制这个视频的绝对路径（粘到终端或别的播放器里用） */
+function copyVideoPath(rel: string): void {
+  void copyText(videoAbsPath(store.root, rel), '路径')
+}
+
+/** 用系统关联的默认程序打开（交给外部播放器）；失败时把原因说出来 */
+async function openVideoExternally(rel: string): Promise<void> {
+  const result = await window.workbench.openPath(videoAbsPath(store.root, rel))
+  if (!result.ok)
+    notifyError(result.error ?? '打开失败')
 }
 </script>
 
@@ -162,6 +191,9 @@ function pickFromTree(rel: string): void {
           :active-rel="store.activeRel"
           :loaded="store.loaded && !store.loading"
           @select="pickFromTree"
+          @open-default="openVideoExternally"
+          @reveal="revealVideo"
+          @copy-path="copyVideoPath"
         />
 
         <!--
@@ -224,17 +256,33 @@ function pickFromTree(rel: string): void {
 
           <span class="video__spacer" />
 
-          <!-- 速率：档位表住在 VideoRateMenu（与悬浮小窗共用一枚），值住在 store 里 -->
+          <!-- 速率：档位表住在 VideoRateMenu（与悬浮小窗共用一枚），值住在 store 里。
+               独立窗口播着时这一份不生效（速率归窗口那边），先收起来 -->
           <VideoRateMenu
-            v-if="store.active"
+            v-if="store.active && !store.detached"
             :rate="store.rate"
             title="播放速率（快捷键 ↑ / ↓）"
             @change="(value: number) => (store.rate = value)"
           />
 
           <!-- 悬浮播放：把视频浮成小窗带走。离开这一页不会自动浮 —— 这颗按钮是唯一的入口 -->
-          <el-tooltip v-if="store.active && !store.floatRequested" content="悬浮播放" placement="bottom">
+          <el-tooltip
+            v-if="store.active && !store.floatRequested && !store.detached"
+            content="悬浮播放"
+            placement="bottom"
+          >
             <el-button size="small" text :icon="TopRight" aria-label="悬浮播放" @click="store.requestFloat()" />
+          </el-tooltip>
+
+          <!-- 独立窗口：真正的顶层窗口，可与笔记左右分屏；播着时这颗按钮收起（画布上给收回入口） -->
+          <el-tooltip v-if="store.active && !store.detached" content="在独立窗口播放" placement="bottom">
+            <el-button
+              size="small"
+              text
+              :icon="FullScreen"
+              aria-label="在独立窗口播放"
+              @click="store.requestDetach()"
+            />
           </el-tooltip>
         </header>
 
@@ -298,6 +346,17 @@ function pickFromTree(rel: string): void {
             </template>
           </div>
 
+          <!-- 独立窗口播着：主窗口里没有播放器，画布说明在哪，给一条收回的路 -->
+          <div v-else-if="store.detached" class="empty video__hint">
+            <p>「{{ store.active?.name }}」正在独立窗口播放。</p>
+            <p v-if="store.openError" class="empty__hint">
+              {{ store.openError }}
+            </p>
+            <el-button size="small" @click="store.dockDetached()">
+              收回窗口
+            </el-button>
+          </div>
+
           <!-- 悬浮播放中：播放器浮在界面上、宿主空着 —— 说一句在哪，给一条收回的路 -->
           <div v-else-if="store.floatRequested" class="empty video__hint">
             <p>「{{ store.active?.name }}」正在悬浮播放。</p>
@@ -307,8 +366,8 @@ function pickFromTree(rel: string): void {
           </div>
         </div>
 
-        <!-- 快捷键提示：只挂在画布内嵌播放时 —— 悬浮小窗浮着的那几个键是另一套（只有空格） -->
-        <footer v-if="store.active && !store.floatRequested" class="video__keys">
+        <!-- 快捷键提示：只挂在画布内嵌播放时 —— 独立窗口与悬浮小窗的那几个键是另一套 -->
+        <footer v-if="store.active && !store.floatRequested && !store.detached" class="video__keys">
           <span class="video__key"><kbd>空格</kbd>播放 / 暂停</span>
           <span class="video__key"><kbd>←</kbd><kbd>→</kbd>快退 / 快进 {{ VIDEO_SEEK_SECONDS }} 秒</span>
           <span class="video__key"><kbd>↑</kbd><kbd>↓</kbd>播放速率</span>

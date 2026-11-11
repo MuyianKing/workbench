@@ -10,11 +10,12 @@
 `packages/usage/src/token-usage.ts`、`sync-config.ts`、`theme.ts`、`appearance.ts`（纯口径），
 `apps/desktop/src/renderer/src/workbench/` 下的 `index.ts` / `token.ts` / `auth.ts` / `state.ts`。
 
-调用 git 的方式（直启 `git.exe`、不经 `cmd /C`、带 `GIT_TERMINAL_PROMPT=0` 与 `-c core.quotepath=false`）是全局规则，
-见 [AGENTS.md](../../AGENTS.md) 第 1 节。两条都有非留不可的理由：`GIT_TERMINAL_PROMPT=0` 是因为子进程没有终端可问，
+调用 git 的方式（直启 `git.exe`、不经 `cmd /C`、带 `GIT_TERMINAL_PROMPT=0`、`-c core.quotepath=false` 与 `--no-pager`）是全局规则，
+见 [AGENTS.md](../../AGENTS.md) 第 1 节。它们都有非留不可的理由：`GIT_TERMINAL_PROMPT=0` 是因为子进程没有终端可问，
 挂着只会等到超时；`core.quotepath=false` 是因为**git 默认把非 ASCII 路径转义成八进制**
 （`周报.md` → `\345\221\250\346\212\245.md`），而冲突提示里报的就是文件名 —— 这个应用的笔记多半是中文名，
-转义之后那句话直接没法看。它还是个**每台机器都可能不同**的 git 全局项，不能指望用户自己设过，
+转义之后那句话直接没法看；`--no-pager` 是因为管道里真起了分页器，子进程会等一个永远没人按的键。
+它们还是**每台机器都可能不同**的 git 全局项，不能指望用户自己设过，
 所以每次调用显式带上（`sync.rs` 的 `run()` 里一处拼好，别让调用方各带各的）。
 
 ### 开关与边界
@@ -43,15 +44,23 @@
   的整份副本（见 [sync-config.ts](../../packages/usage/src/sync-config.ts)）、
   `gateway-usage/<设备id>/<YYYY-MM>.jsonl` 是网关请求流水（一台机器一个目录、每月一个文件）、
   `etf/<设备id>.json` 是这台机器抓到的 ETF 份额 / 净值缓存（公开行情，读侧逐日并集，见
-  [etf.md](etf.md)）。前两个目录一台机器一个文件；所有文件都必须保持**单写者**（只写自己那份、只读别人的）——
-  这是「不需要人工合并」的全部依据。
+  [etf.md](etf.md)）、`activity/<设备id>.json` 是这台机器的活跃度账本（日期 → 五类操作的次数，
+  只有计数、没有明细，读侧按天按来源求和，见 [home.md](home.md)）。所有文件都必须保持**单写者**
+  （只写自己那份、只读别人的）—— 这是「不需要人工合并」的全部依据。
+- **活跃度跟着用量这条出口走**（`activity_sync_publish` / `activity_sync_shards`）：推的是本机账本，
+  读侧跳过本机那份，由渲染层把别的机器那份合进来（`mergeActivityBreakdowns`）。它**不写回本机数据文件** ——
+  写回去下一次推送就会把别人的算成自己的，两台机器互相翻倍。首页每分钟重取一次（合并只在内存里），
+  同步一小时一轮、由取活跃度时顺带触发（见 `workbench/activity.ts`）；换仓库 / 重新登录后下一次取数
+  就不再等节流窗口；没登录、没配仓库时只剩本机。它不新增网络出口：同一个仓库、同一把锁、同一条 `enqueue` 队列。
+  **本机设备标识（`device.json`）别删 / 别换**：换了就等于多出一台机器，仓库里旧那份还会被当成别人的再算一遍 ——
+  用量分片同理（那边会互相覆盖，这边是重复计数）。
 - **ETF 是第三条独立的出口**：它只由 ETF 页自己推拉（进页面先拉、刷新完推，见 [etf.md](etf.md)），
   面板按钮、一小时一轮的用量同步、外观的「同步一次」都不碰它。内容是交易所 / 天天基金的公开数据，
   与用量、外观、网关流水都不相干，别把它折进任何一条现有流程。
 - **用量与外观是两条互不相干的出口，别把它们合回一条**：用量那条（`token_sync_publish` 推 `token-usage/<自己>.json`，
-  `gateway_sync_publish` 推 `gateway-usage/<自己>/`，面板按钮与一小时一轮的自动同步顺带跑）只 add / diff 自己设备的两条路径；
+  `gateway_sync_publish` 推 `gateway-usage/<自己>/`，面板按钮与一小时一轮的自动同步顺带跑）只 add / diff 自己设备的那几条路径；
   外观那条（`token_sync_config`，设置 → 外观 →「同步一次」）只 add / diff `config/<自己>.json`。`sync.rs` 的 `publish_at`
-  按传进来的两个 `Option` 决定这次碰哪几个文件，传 `None` 的那个**这次完全不碰** —— 两处都别再把 `config` 塞回
+  按传进来的几个 `Option` 决定这次碰哪几个文件，传 `None` 的那个**这次完全不碰** —— 两处都别再把 `config` 塞回
   `token_sync_publish`：那正是「用量同步顺手把外观也推了」的来路。
 - **网关流水先脱敏再进仓库**：`wb_usage::rows_for_sync` 把 `apiKey` 清空、`costCny` 置空；仓库里不出现密钥尾号。
   `gateway-usage` 只加不删（`git add --ignore-removal`），本机丢文件不会抹掉仓库里的旧月份。
@@ -64,7 +73,7 @@
 
 ### 同一个克隆上的并发
 
-- **几条同步共用同一个克隆，必须排队**：用量 / 外观 / 网关 / 保险库 / ETF 五条同步各走各的线程，落在同一个
+- **几条同步共用同一个克隆，必须排队**：用量 / 外观 / 网关 / 保险库 / ETF / 活跃度几条同步各走各的线程，落在同一个
   `token-sync` 上；两条同时跑时 git 自己的步骤会互相踩 —— 一条在 pull 的当口另一条提交了，pull 会以为
   工作区要从旧提交快进，die 出 `Cannot fast-forward your working tree`（`builtin/pull.c`）；两条同时
   `add` / `commit` 还会撞 `index.lock`。所以每个入口在动 git 之前先拿 `sync::lock_workflow(dir)`：
@@ -297,6 +306,8 @@ OAuth 应用构建期内置，所以使用者零配置；代价是**打包的人
   src/token.rs           ZCode sqlite 聚合 + DSH 多帧 zstd（会话文件用 walkdir 递归找）
   src/sync.rs            同步仓库的 git 操作（克隆 / 拉 / 提交 / 推、读回别人的用量与配置），
                         网关请求流水的按月写入与读取（publish_gateway_usage / read_gateway_rows），
+                        活跃度账本的推送与读取（publish_activity / read_activity_shards：
+                        一台机器一份 activity/<设备id>.json，读侧跳过本机那份），
                         以及笔记图片的上传与清理（同一个机制、另一个仓库：publish_image /
                         list_images / delete_images —— 删图也是一次提交 + 一次推送），
                         还有笔记本身的同步（sync_notes：没有克隆目录，就在用户那个笔记
@@ -313,5 +324,7 @@ OAuth 应用构建期内置，所以使用者零配置；代价是**打包的人
 
 ```
     auth.ts             账号登录的适配包装（workbench/）
+    activity.ts         活跃度的记一笔与多机合并（workbench/：本机账本推上去、别人的读回来
+                        只在内存里求和，不写回本机文件）
     auth.ts              账号状态与登录流程（stores/）
 ```

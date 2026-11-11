@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ACTIVITY_DAYS, ACTIVITY_WEEKS, addDays, buildActivityCalendar, bumpDay, dayKey, describeDay, isActivityKind, levelOf, monthLabels, pruneDays, sanitizeActivity, startOfWeek, streakOf, totalOf } from './activity'
+import { ACTIVITY_DAYS, ACTIVITY_SHARD_VERSION, ACTIVITY_WEEKS, addDays, buildActivityCalendar, bumpDay, dayKey, describeDay, isActivityKind, levelOf, mergeActivityBreakdowns, monthLabels, pruneDays, sanitizeActivity, sanitizeActivityShard, startOfWeek, streakOf, totalOf } from './activity'
 
 /** 固定的「今天」，避免测试跑到跨天/跨年就失效 */
 const TODAY = new Date(2026, 8, 10) // 2026-09-10
@@ -257,5 +257,71 @@ describe('streakOf', () => {
 
   it('中间断掉只数到断点', () => {
     expect(streakOf({ [TODAY_KEY]: 1, '2026-09-09': 1, '2026-09-07': 1 }, TODAY)).toBe(2)
+  })
+})
+
+/**
+ * 多机合并：同步仓库里一台机器一份（`activity/<设备id>.json`），
+ * 读回来要与本机那份**按天按来源求和**，不是取 max。
+ */
+describe('mergeActivityBreakdowns', () => {
+  it('同一天同一来源相加，不同日期各自保留', () => {
+    const merged = mergeActivityBreakdowns([
+      { '2026-09-10': { run: 2, note: 1 } },
+      { '2026-09-10': { run: 1, ai: 3 }, '2026-09-09': { kb: 1 } },
+    ])
+    expect(merged).toEqual({
+      '2026-09-10': { run: 3, note: 1, ai: 3 },
+      '2026-09-09': { kb: 1 },
+    })
+    expect(totalOf(merged)['2026-09-10']).toBe(7)
+  })
+
+  it('不改动传进来的账本', () => {
+    const a = { '2026-09-10': { run: 1 } }
+    const b = { '2026-09-10': { run: 2 } }
+    mergeActivityBreakdowns([a, b])
+    expect(a['2026-09-10']).toEqual({ run: 1 })
+    expect(b['2026-09-10']).toEqual({ run: 2 })
+  })
+
+  it('认不出的日期键与来源、非正数一律不收', () => {
+    const merged = mergeActivityBreakdowns([
+      { 'not-a-day': { run: 8 }, '2026-09-10': { run: 1, unknown: 9, note: 0 } } as never,
+    ])
+    expect(merged).toEqual({ '2026-09-10': { run: 1 } })
+  })
+
+  it('空表与缺参都不炸', () => {
+    expect(mergeActivityBreakdowns([])).toEqual({})
+    expect(mergeActivityBreakdowns(undefined as never)).toEqual({})
+  })
+})
+
+describe('sanitizeActivityShard', () => {
+  it('收下带设备 id 的分片并收敛分项', () => {
+    const shard = sanitizeActivityShard({
+      version: 1,
+      device: ' dev-a ',
+      activity: { '2026-09-10': { run: 2, unknown: 1 }, 'bad': { run: 1 } },
+    })
+    expect(shard).toEqual({
+      version: ACTIVITY_SHARD_VERSION,
+      device: 'dev-a',
+      activity: { '2026-09-10': { run: 2 } },
+    })
+  })
+
+  it('没有设备 id 的整份丢掉（分不出本机就会重复计数）', () => {
+    expect(sanitizeActivityShard({ activity: { '2026-09-10': { run: 1 } } })).toBeNull()
+    expect(sanitizeActivityShard({ device: '  ', activity: {} })).toBeNull()
+    expect(sanitizeActivityShard(null)).toBeNull()
+    expect(sanitizeActivityShard([])).toBeNull()
+  })
+
+  it('版本号缺失或不是数字时按当前版本收下', () => {
+    expect(sanitizeActivityShard({ device: 'dev-a', activity: {} })?.version).toBe(ACTIVITY_SHARD_VERSION)
+    expect(sanitizeActivityShard({ device: 'dev-a', version: 'x', activity: {} })?.version)
+      .toBe(ACTIVITY_SHARD_VERSION)
   })
 })

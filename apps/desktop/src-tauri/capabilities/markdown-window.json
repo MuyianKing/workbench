@@ -1,0 +1,9 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "markdown-window",
+  "description": "独立 Markdown 编辑窗口的能力：只需要核心 API（事件订阅 / webview）。它用系统标题栏，不拖动窗口、不弹文件对话框；读写文件走 markdown_window_* 自定义命令（命令本身不走 ACL，路径由 Rust 会话持有，渲染层传不了别的文件）。",
+  "windows": ["markdown-*"],
+  "permissions": [
+    "core:default"
+  ]
+}

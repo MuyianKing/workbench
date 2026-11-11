@@ -27,6 +27,7 @@
     "@workbench/capture": "workspace:*",
     "@workbench/core": "workspace:*",
     "@workbench/etf": "workspace:*",
+    "@workbench/git": "workspace:*",
     "@workbench/kb": "workspace:*",
     "@workbench/mail": "workspace:*",
     "@workbench/net-meter": "workspace:*",

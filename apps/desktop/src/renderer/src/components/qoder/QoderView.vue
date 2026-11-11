@@ -17,7 +17,7 @@ import PerksCreditsChart from '@/components/gateway/PerksCreditsChart.vue'
 import RequestFilters from '@/components/gateway/RequestFilters.vue'
 import UsagePane from '@/components/gateway/UsagePane.vue'
 import { useCreditPool } from '@/composables/use-credit-pool'
-import { formatCompactTokens, formatTimestamp } from '@/format'
+import { formatCompactTokens, formatDecimal, formatTimestamp } from '@/format'
 import {
   poolMeterTone as meterClass,
   poolBalanceText as number,
@@ -569,7 +569,16 @@ function requestRowKey(row: GatewayUsageRow): string {
   return `${row.ts}-${row.model}-${row.uid}`
 }
 
-const heatMax = computed(() => Math.max(1, ...heatmap.value.map(point => point.value)))
+/**
+ * 官方消耗热力：上游回的是**一整年**的点（`items`），这里按近 30 天铺成连续序列
+ * （缺的天补 0，与领取图同一窗口口径）；全是 0 时不渲染这张图。
+ */
+const heatDays = computed(() => dailyCreditSeries(
+  heatmap.value.map(item => ({ date: item.date, credit: item.value })),
+  GROWTH_CREDIT_DAYS,
+))
+const heatMax = computed(() => Math.max(1, ...heatDays.value.map(point => point.credit)))
+const heatHasData = computed(() => heatDays.value.some(point => point.credit > 0))
 
 watch(tab, async (value) => {
   if (value === 'accounts')
@@ -850,14 +859,14 @@ onBeforeUnmount(() => {
         :error="earningsError"
         hint="签到或领取活动后会记在这里"
       />
-      <div v-if="heatmap.length" class="qd-chart panel">
+      <div v-if="heatHasData" class="qd-chart panel">
         <div class="qd-chart__head">
           <span>近一个月官方积分消耗</span>
-          <span class="qd-card__muted">单日峰值 {{ heatMax }}</span>
+          <span class="qd-card__muted">单日峰值 {{ formatDecimal(heatMax) }}</span>
         </div>
         <div class="qd-chart__bars">
-          <div v-for="point in heatmap" :key="point.date" class="qd-chart__bar" :title="`${point.date}：${point.value}`">
-            <span :style="{ height: `${Math.round((point.value / heatMax) * 100)}%` }" />
+          <div v-for="point in heatDays" :key="point.date" class="qd-chart__bar" :title="`${point.date}：${formatDecimal(point.credit)}`">
+            <span :style="{ height: `${Math.round((point.credit / heatMax) * 100)}%` }" />
           </div>
         </div>
       </div>

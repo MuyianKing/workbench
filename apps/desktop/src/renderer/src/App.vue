@@ -11,6 +11,7 @@ import AppHeader from '@/components/AppHeader.vue'
 import CommandDialog from '@/components/CommandDialog.vue'
 import EtfView from '@/components/etf/EtfView.vue'
 import GatewayView from '@/components/gateway/GatewayView.vue'
+import GitView from '@/components/git/GitView.vue'
 import KbView from '@/components/KbView.vue'
 import MailView from '@/components/MailView.vue'
 import NavRail from '@/components/NavRail.vue'
@@ -70,6 +71,7 @@ const VIEWS: Record<ViewId, Component> = {
   styles: StylesView,
   video: VideoView,
   etf: EtfView,
+  git: GitView,
 }
 
 const currentView = computed(() => VIEWS[nav.activeView])

@@ -28,8 +28,8 @@
   通道实现按域住在 `api-sync.ts`（同步门禁那几组）、`api-project.ts`（项目 CRUD 与进程十件事）、
   `api-system.ts`（系统 / 窗口 / 对话框 / 系统集成）、`api-background.ts`（背景图与图片授权）、
   `api-events.ts`（事件订阅与截图 / 钉图 / 网速球这三窗共用组）；域模块的薄转发收在 index.ts 的
-  `domainsApi`，网关与 Qoder 各自整组在 `gateway.ts` / `qoder.ts`。新增通道加到对应域文件，
-  不要往 index.ts 里塞实现。
+  `domainsApi`，网关、Qoder 与独立视频窗口各自整组在 `gateway.ts` / `qoder.ts` / `video-window.ts`。
+  新增通道加到对应域文件，不要往 index.ts 里塞实现。
 - **数组 / 对象形状的取值接口必须真实现，绝不能落到「尚未移植」兜底**：兜底返回的是 `Result` 对象，store 会把它当数组遍历、
   直接抛错并把整条 `init()` 打断，表现成完全无关的功能失灵（`listQuickApps` / `listCommands` 就这么让「系统状态」一直没数据）。
 - 渲染层不直接访问 Node / 文件系统 / WebView 宿主能力，一切经 `window.workbench`。**唯一的例外
@@ -69,6 +69,8 @@
   [zentao.md](zentao.md)），周期住 `workbench-data.json` 的 `zentaoPollMinutes`。
   **技能没有数据文件**：技能库是用户挑的一个目录（设置里的 `skillDir`，与笔记文件夹互不相干），
   磁盘上的文件就是数据本身；它在哪个仓库里由 `skills.rs` 的 `state` 从那个目录往上找。
+  **独立视频窗口没有数据文件**：播放会话与置顶只在 Rust 内存里（窗口关掉即清），
+  位置 / 尺寸建窗时按主窗口现算、不记账（见 [video.md](video.md)）。
 - **开发版（`pnpm dev`）不注册单实例**，可以与装着的那份同时开（正式版之间仍按 identifier 互斥）。
   两边的数据目录按环境分开（`Workbench-dev` 与 `Workbench`，见下一条），各写各的文件；
   代价是邮件 / 禅道的后台轮询与通知仍会各跑一遍（见

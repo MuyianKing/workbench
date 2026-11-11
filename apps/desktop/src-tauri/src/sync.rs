@@ -8,17 +8,20 @@
 //! 没登录、或登出之后，就退回系统凭据 —— 两条路都要留着：token 过期又续不上时如果只剩它一条路，
 //! 原本能用的同步也会跟着坏掉（所以那种凭据干脆不注入，见 `set_git_auth`）。
 //!
-//! **仓库布局（四个路径，各管一件事）**：
+//! **仓库布局（五个路径，各管一件事）**：
 //!   `token-usage/<设备id>.json` —— 这台机器的用量快照（只增不减的计数）
 //!   `gateway-usage/<设备id>/<YYYY-MM>.jsonl` —— 这台机器的网关请求流水（每月一个文件）
 //!   `config/<设备id>.json`      —— 这台机器 theme.json 的整份副本（外观 + 首页布局）
 //!   `etf/<设备id>.json`         —— 这台机器抓到的 ETF 份额 / 净值缓存（公开行情，多机共用）
-//! 前三个是「用量」与「外观」两个出口，ETF 是第三个、独立的出口；每台机器只写自己那条路径，
-//! 单写者，所以不存在需要人工合并的冲突，流程一律是 pull → 写自己的那份 → commit → push。
+//!   `activity/<设备id>.json`    —— 这台机器的活跃度账本（日期 → 各来源次数，只有计数、没有明细）
+//! 前三个是「用量」与「外观」两个出口，ETF 是第三个、独立的出口，活跃度跟着「用量」这条出口走；
+//! 每台机器只写自己那条路径，单写者，所以不存在需要人工合并的冲突，
+//! 流程一律是 pull → 写自己的那份 → commit → push。
 //! 别人的文件我们从不修改，只在读取时汇总（token 用量求和，见 `packages/usage/src/token-usage.ts`；
 //! 网关流水由 `wb_usage::summarize` 合并；配置则整份采用 —— 什么时候采用由用户在设置里点，
 //! 见 `packages/usage/src/sync-config.ts`；ETF 缓存逐日求并集，见 `packages/etf/src/etf.ts` 的
-//! `mergeEtfCacheInto`）。
+//! `mergeEtfCacheInto`；活跃度按天按来源求和，见 `packages/core/src/activity.ts` 的
+//! `mergeActivityBreakdowns`）。
 //!
 //! 这一层只做「调系统能力 + 读写文件」：token 用量的内容与合并语义在 TS 侧，网关流水的聚合在
 //! `wb_usage::summarize`；它只负责按月落盘与读取。
@@ -60,7 +63,11 @@ const GIT_ENVS: [(&str, &str); 1] = [("GIT_TERMINAL_PROMPT", "0")];
 ///
 /// 不能指望本机的 git 配置：这是个**每台机器都可能不同**的全局项（用户自己在
 /// `~/.gitconfig` 里设过就不同），而我们每次都要拿到能直接上屏的名字。
-const GIT_GLOBAL_ARGS: [&str; 2] = ["-c", "core.quotepath=false"];
+///
+/// `--no-pager`：Git 页会把 `log` / `show` / `diff` 的输出直接收进管道。管道本来就不该
+/// 起分页器，但 `pager.log` / `GIT_PAGER` 是每台机器各自配的，显式关掉最稳 ——
+/// 真起了分页器，子进程会等一个永远没人按的键，最后只能等超时。
+const GIT_GLOBAL_ARGS: [&str; 3] = ["-c", "core.quotepath=false", "--no-pager"];
 
 /// 一轮 pull 因为「别的同步刚好在中间提交」失败时，最多再试几次。
 /// 每次之间退避一下，让先动手的那条把 commit / push 走完。
@@ -180,13 +187,13 @@ pub fn publish(
     usage: Option<&Value>,
     config: Option<&Value>,
 ) -> Result<Value, String> {
-    publish_at(&paths::token_sync_dir(), repo, device, usage, config, None)
+    publish_at(&paths::token_sync_dir(), repo, device, usage, config, None, None)
 }
 
 /// 只推外观配置（设置界面「同步一次」走它）：拉 → 写 config/ 那一份 → 提交 → 推送。
 /// 推完本地克隆就是最新的，渲染层随后用 `read_shards` 把设备列表刷新。
 pub fn publish_config(repo: &str, device: &str, config: &Value) -> Result<Value, String> {
-    publish_at(&paths::token_sync_dir(), repo, device, None, Some(config), None)
+    publish_at(&paths::token_sync_dir(), repo, device, None, Some(config), None, None)
 }
 
 /// 只推本机的 ETF 缓存（`etf/<设备id>.json`）：每个入口都先拉一次再写自己那份。
@@ -194,7 +201,23 @@ pub fn publish_config(repo: &str, device: &str, config: &Value) -> Result<Value,
 /// 与用量 / 外观同一个克隆、同一把锁；**只 stage 自己那一条路径**，所以别的机器
 /// 的同名文件永远不会被这次提交碰到。
 pub fn publish_etf(repo: &str, device: &str, cache: &Value) -> Result<Value, String> {
-    publish_at(&paths::token_sync_dir(), repo, device, None, None, Some(cache))
+    publish_at(&paths::token_sync_dir(), repo, device, None, None, Some(cache), None)
+}
+
+/// 只推本机的活跃度账本（`activity/<设备id>.json`）。
+///
+/// 与用量同一个出口、同一个克隆：每台机器只写自己那一份，读回来按天求和
+/// （见 `read_activity_shards` 与 `packages/core/src/activity.ts`）。
+pub fn publish_activity(repo: &str, device: &str, activity: &Value) -> Result<Value, String> {
+    publish_at(
+        &paths::token_sync_dir(),
+        repo,
+        device,
+        None,
+        None,
+        None,
+        Some(activity),
+    )
 }
 
 /// 同上，克隆目录由调用方给（单测用临时目录跑真实的 git 流程）。
@@ -205,8 +228,9 @@ fn publish_at(
     usage: Option<&Value>,
     config: Option<&Value>,
     etf: Option<&Value>,
+    activity: Option<&Value>,
 ) -> Result<Value, String> {
-    if usage.is_none() && config.is_none() && etf.is_none() {
+    if usage.is_none() && config.is_none() && etf.is_none() && activity.is_none() {
         return Err("没有要同步的内容".into());
     }
     // 与另外几条同步共用这一个克隆：同一时刻只跑一条（见 workflow_lock）
@@ -220,8 +244,9 @@ fn publish_at(
     let usage_relative = format!("{}/{safe}.json", paths::TOKEN_USAGE_DIR);
     let config_relative = format!("{}/{safe}.json", paths::CONFIG_DIR);
     let etf_relative = format!("{}/{safe}.json", paths::ETF_SYNC_DIR);
+    let activity_relative = format!("{}/{safe}.json", paths::ACTIVITY_SYNC_DIR);
 
-    // 这次推哪几个文件就 add / diff 哪几个：用量同步碰不到 config/ 与 etf/，外观同步碰不到另外两个
+    // 这次推哪几个文件就 add / diff 哪几个：用量同步碰不到 config/ 与 etf/，外观同步碰不到另外几个
     let mut staged: Vec<&str> = Vec::new();
     if let Some(usage) = usage {
         write_json(&dir.join(&usage_relative), usage)?;
@@ -234,6 +259,10 @@ fn publish_at(
     if let Some(etf) = etf {
         write_json(&dir.join(&etf_relative), etf)?;
         staged.push(etf_relative.as_str());
+    }
+    if let Some(activity) = activity {
+        write_json(&dir.join(&activity_relative), activity)?;
+        staged.push(activity_relative.as_str());
     }
     let mut add_args: Vec<&str> = vec!["add", "-A", "--"];
     add_args.extend(staged.iter().copied());
@@ -683,6 +712,51 @@ fn read_etf_shards_for(clone_dir: &Path, repo: &str, own_device: &str) -> Result
         }
     }
     Ok(json!({ "own": own_found, "files": files }))
+}
+
+/// 读仓库里**别的机器**推上来的活跃度账本（原始 JSON，收敛与合并由渲染层负责）。
+///
+/// 本机那份跳过：本机内存里的账本才是权威，再读仓库副本会把自己重复算一遍。
+/// 与 `read_shards` 同一条前提：只读属于当前配置那个仓库的克隆，换了地址还没重新克隆成功时
+/// 一律当空。这一路只碰本地，不注入凭据。
+pub fn read_activity_shards(repo: &str, own_device: &str) -> Result<Vec<Value>, String> {
+    read_activity_shards_for(&paths::token_sync_dir(), repo, own_device)
+}
+
+fn read_activity_shards_for(
+    clone_dir: &Path,
+    repo: &str,
+    own_device: &str,
+) -> Result<Vec<Value>, String> {
+    clear_git_auth();
+
+    if !clone_dir.join(".git").is_dir() || !clone_matches(clone_dir, repo) {
+        return Ok(Vec::new());
+    }
+    // 还没同步过（克隆里没有 activity/ 目录）就是空表，不是错误
+    let Ok(entries) = std::fs::read_dir(clone_dir.join(paths::ACTIVITY_SYNC_DIR)) else {
+        return Ok(Vec::new());
+    };
+    let own = safe_name(own_device);
+    let mut files: Vec<Value> = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("json") || !path.is_file() {
+            continue;
+        }
+        let stem = path.file_stem().and_then(|stem| stem.to_str()).unwrap_or("");
+        if stem == own {
+            continue;
+        }
+        // 单个文件坏了（手工改过 / 半截写入）就跳过它：一个坏文件不能把整张图拖垮
+        if let Some(value) = std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+        {
+            files.push(value);
+        }
+    }
+    Ok(files)
 }
 
 /// 仓库里两个目录的内容（原始 JSON，收敛与合并由渲染层负责）
@@ -1557,6 +1631,29 @@ pub(crate) fn run(args: &[&str], cwd: Option<&Path>, timeout: Duration) -> Resul
     })
 }
 
+/// 与 `run` 同一条 git 管道，但 stdout 按字节收。
+///
+/// 只有一个调用方：Git 客户端的补丁预览 —— 文件内容可能不是 UTF-8，
+/// `read_to_string` 会在非法字节处提前结束，看起来就像补丁被截断了。
+pub(crate) fn run_bytes(
+    args: &[&str],
+    cwd: Option<&Path>,
+    timeout: Duration,
+) -> Result<proc::OutcomeBytes, String> {
+    let mut all: Vec<&str> = GIT_GLOBAL_ARGS.to_vec();
+    all.extend_from_slice(args);
+
+    let owned: Vec<String> = all.iter().map(|arg| (*arg).to_string()).collect();
+    let auth = GIT_AUTH.with(|slot| slot.borrow().clone());
+
+    let mut envs: Vec<(&str, &str)> = GIT_ENVS.to_vec();
+    envs.extend(auth.iter().map(|(key, value)| (key.as_str(), value.as_str())));
+
+    proc::run_direct_bytes("git", &owned, timeout, cwd, &envs).map_err(|err| {
+        format!("启动 git 失败（请确认已安装 Git 并把它放在 PATH 里）: {err}")
+    })
+}
+
 /// 失败提示：git 的话主要落在 stderr（凭据、权限、非快进…），整段带回去太长，
 /// 只留最后几行 —— 真正的原因在靠后那几行，前面多是 "Cloning into..." 这类过程输出。
 /// 认证被拒时再补一句账号那边怎么办（见 `auth_note`）。
@@ -1763,7 +1860,7 @@ mod tests {
         let theme = json!({ "device": "dev-z", "name": "Z", "theme": { "version": 2, "updatedAt": 1 } });
 
         // 克隆里现在装的是 A 的那两份文件
-        publish_at(&clone, &repo_a, "dev-z", Some(&shard), Some(&theme), None).unwrap();
+        publish_at(&clone, &repo_a, "dev-z", Some(&shard), Some(&theme), None, None).unwrap();
 
         // 地址还是 A：读得到；换成 B：一个都不返回（老仓库的文件不能当成最新的展示出来）
         let files = read_shards_for(&clone, &repo_a).unwrap();
@@ -1821,13 +1918,13 @@ mod tests {
         let theme_a = json!({ "device": "dev-a", "name": "A", "theme": { "version": 2, "updatedAt": 1 } });
         let theme_b = json!({ "device": "dev-b", "name": "B", "theme": { "version": 2, "updatedAt": 2 } });
 
-        let first = publish_at(&clone_a, &repo, "dev-a", Some(&shard_a), Some(&theme_a), None).unwrap();
+        let first = publish_at(&clone_a, &repo, "dev-a", Some(&shard_a), Some(&theme_a), None, None).unwrap();
         assert_eq!(first["changed"], json!(true));
         assert_eq!(first["pushed"], json!(true));
 
         // 第二台机器在另一端：它的克隆会落在「远端 HEAD 不存在」的状态上。
         // 分支挑错了这里就会另起一个分支，下面那句读分片就会缺一台机器。
-        let second = publish_at(&clone_b, &repo, "dev-b", Some(&shard_b), Some(&theme_b), None).unwrap();
+        let second = publish_at(&clone_b, &repo, "dev-b", Some(&shard_b), Some(&theme_b), None, None).unwrap();
         assert_eq!(second["changed"], json!(true));
 
         let read = read_shards_for(&clone_b, &repo).unwrap();
@@ -1851,13 +1948,13 @@ mod tests {
         );
 
         // 内容没变就不该产生提交：自动同步一小时一轮，否则仓库里全是空提交
-        let again = publish_at(&clone_a, &repo, "dev-a", Some(&shard_a), Some(&theme_a), None).unwrap();
+        let again = publish_at(&clone_a, &repo, "dev-a", Some(&shard_a), Some(&theme_a), None, None).unwrap();
         assert_eq!(again["changed"], json!(false));
         let count = run_git(&["rev-list", "--count", "HEAD"], Some(&clone_a), GIT_TIMEOUT).unwrap();
         assert_eq!(count, "2", "不该为空提交再增一条");
 
         // 只推用量（config 给 None）：完全不碰 config/ —— 用量与外观是两个独立的出口
-        let usage_only = publish_at(&clone_a, &repo, "dev-a", Some(&shard_a), None, None).unwrap();
+        let usage_only = publish_at(&clone_a, &repo, "dev-a", Some(&shard_a), None, None, None).unwrap();
         assert_eq!(usage_only["changed"], json!(false));
         assert!(clone_a.join("config").join("dev-a.json").exists(), "配置不该被动到");
         let read = read_shards_for(&clone_a, &repo).unwrap();
@@ -1869,7 +1966,7 @@ mod tests {
 
         // 只推配置（publish_config 那条路）：用量分片也不该被动到
         let theme_a2 = json!({ "device": "dev-a", "name": "A", "theme": { "version": 2, "updatedAt": 9 } });
-        let config_only = publish_at(&clone_a, &repo, "dev-a", None, Some(&theme_a2), None).unwrap();
+        let config_only = publish_at(&clone_a, &repo, "dev-a", None, Some(&theme_a2), None, None).unwrap();
         assert_eq!(config_only["changed"], json!(true));
         let read = read_shards_for(&clone_a, &repo).unwrap();
         let usage_a = read
@@ -2183,11 +2280,11 @@ mod tests {
             "nav": { "510300": { "20261023": 3.9 } },
             "sseDone": "20261023",
         });
-        publish_at(&clone_a, &repo, "dev-a", None, None, Some(&cache_a)).unwrap();
+        publish_at(&clone_a, &repo, "dev-a", None, None, Some(&cache_a), None).unwrap();
         assert!(clone_a.join(paths::ETF_SYNC_DIR).join("dev-a.json").is_file());
 
         // 同一份内容再推一次：不该产生空提交
-        let again = publish_at(&clone_a, &repo, "dev-a", None, None, Some(&cache_a)).unwrap();
+        let again = publish_at(&clone_a, &repo, "dev-a", None, None, Some(&cache_a), None).unwrap();
         assert_eq!(again["changed"], json!(false));
 
         // B 第一次拉：仓库里有 A 的缓存、没有自己那份
@@ -2205,11 +2302,76 @@ mod tests {
             "nav": {},
             "sseDone": "20261024",
         });
-        publish_at(&clone_b, &repo, "dev-b", None, None, Some(&cache_b)).unwrap();
+        publish_at(&clone_b, &repo, "dev-b", None, None, Some(&cache_b), None).unwrap();
         let read = read_etf_shards_for(&clone_b, &repo, "dev-b").unwrap();
         assert_eq!(read["own"], json!(true));
         assert_eq!(read["files"].as_array().map(Vec::len), Some(1), "本机那份不参与合并");
         assert_eq!(read["files"][0]["sseDone"], json!("20261023"));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// 活跃度分片：一台机器一份文件；读侧跳过本机那份（本机内存里的账本才是权威），
+    /// 跨机器的求和由渲染层做（`packages/core/src/activity.ts` 的 mergeActivityBreakdowns）。
+    #[test]
+    fn publishes_and_reads_activity_shards() {
+        if proc::probe_version("git").is_none() {
+            eprintln!("跳过：本机没有 git");
+            return;
+        }
+
+        let root =
+            std::env::temp_dir().join(format!("wb-activity-sync-{}", uuid::Uuid::new_v4()));
+        let remote = root.join("remote.git");
+        let clone_a = root.join("clone-a");
+        let clone_b = root.join("clone-b");
+        std::fs::create_dir_all(&root).unwrap();
+        let init = proc::run_direct(
+            "git",
+            &[
+                "init".to_string(),
+                "--bare".to_string(),
+                remote.to_string_lossy().into_owned(),
+            ],
+            GIT_TIMEOUT,
+            None,
+            &GIT_ENVS,
+        )
+        .unwrap();
+        assert!(init.ok(), "git init --bare 失败: {}", init.stderr);
+        let repo = remote.to_string_lossy().into_owned();
+
+        let shard_a = json!({
+            "version": 1,
+            "device": "dev-a",
+            "activity": { "2026-10-30": { "run": 1 } },
+        });
+        publish_at(&clone_a, &repo, "dev-a", None, None, None, Some(&shard_a)).unwrap();
+        assert!(clone_a.join(paths::ACTIVITY_SYNC_DIR).join("dev-a.json").is_file());
+
+        // 同一份内容再推一次：不该产生空提交
+        let again =
+            publish_at(&clone_a, &repo, "dev-a", None, None, None, Some(&shard_a)).unwrap();
+        assert_eq!(again["changed"], json!(false));
+
+        // B 第一次拉：仓库里只有 A 的那份（本机还没推过）
+        let pulled = refresh_clone_at(&clone_b, &repo).unwrap();
+        assert_eq!(pulled["changed"], json!(true));
+        let read = read_activity_shards_for(&clone_b, &repo, "dev-b").unwrap();
+        assert_eq!(read.len(), 1);
+        assert_eq!(read[0]["device"], json!("dev-a"));
+        assert_eq!(read[0]["activity"]["2026-10-30"]["run"], json!(1));
+
+        // B 推了自己那份之后：读侧跳过本机，只剩 A 的
+        let shard_b = json!({
+            "version": 1,
+            "device": "dev-b",
+            "activity": { "2026-10-30": { "run": 2 }, "2026-10-31": { "note": 1 } },
+        });
+        publish_at(&clone_b, &repo, "dev-b", None, None, None, Some(&shard_b)).unwrap();
+        let read = read_activity_shards_for(&clone_b, &repo, "dev-b").unwrap();
+        assert_eq!(read.len(), 1, "本机那份不参与合并");
+        assert_eq!(read[0]["device"], json!("dev-a"));
 
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -2254,11 +2416,11 @@ mod tests {
         };
 
         // 先在 A 上同步，并让另一台机器（dev-z）的文件也进了这个克隆
-        publish_at(&clone, &repo_a, "dev-z", Some(&shard("dev-z")), None, None).unwrap();
+        publish_at(&clone, &repo_a, "dev-z", Some(&shard("dev-z")), None, None, None).unwrap();
         assert_eq!(read_shards_for(&clone, &repo_a).unwrap().usage.len(), 1);
 
         // 换到 B
-        publish_at(&clone, &repo_b, "dev-a", Some(&shard("dev-a")), None, None).unwrap();
+        publish_at(&clone, &repo_b, "dev-a", Some(&shard("dev-a")), None, None, None).unwrap();
 
         let read = read_shards_for(&clone, &repo_b).unwrap();
         let found: Vec<String> = read

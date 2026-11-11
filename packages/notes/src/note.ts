@@ -81,6 +81,17 @@ export interface NoteDocument {
   mtimeMs: number
 }
 
+/**
+ * 读盘回来的一份正文 + 它当时的 mtime。
+ *
+ * mtime 是**写盘时的基准**：下一次保存把它原样交回 Rust，磁盘上的那一篇要是在这期间
+ * 被别处改过（或被删掉），那一笔就拒绝写 —— 别处刚写下的内容不能被静默盖掉。
+ */
+export interface NoteRead {
+  text: string
+  mtimeMs: number
+}
+
 /** 新建一个节点的入参 */
 export interface NoteCreateInput {
   /** 放进哪个文件夹（相对路径）；空串 / 不传表示根目录 */
@@ -161,6 +172,29 @@ export function noteRootName(root: string): string {
   const clean = sanitizeNoteRoot(root)
   const parts = clean.split(/[\\/]/).filter(Boolean)
   return parts.length ? parts[parts.length - 1] : clean
+}
+
+/**
+ * 笔记的绝对路径：交给系统的那些能力（资源管理器里选中、默认程序打开、复制路径）只认这个。
+ *
+ * 反斜杠是为了给 Windows 用：相对路径进来时一律是 `/`（见 `normalizeRel`），这里换回去；
+ * 根部也统一成 `\`。盘根那个特例照旧（`C:\` 不能变成 `C:`，见 `sanitizeNoteRoot`）——
+ * 去掉末尾分隔符再拼，拼出来仍是 `C:\周报.md`。
+ *
+ * `rel` 为空串时回来的是笔记本自己。**这里不做越界判断**（`..` 原样留着）：
+ * 真正的边界在 Rust 侧，而这条路径只由扫描出来的树喂进来。
+ */
+export function noteAbsPath(root: unknown, rel: unknown): string {
+  const clean = sanitizeNoteRoot(root)
+  if (!clean)
+    return ''
+
+  const inner = normalizeRel(rel).replace(/\//g, '\\')
+  if (!inner)
+    return clean.replace(/\//g, '\\')
+
+  const base = clean.replace(/[\\/]+$/, '').replace(/\//g, '\\')
+  return `${base}\\${inner}`
 }
 
 /**

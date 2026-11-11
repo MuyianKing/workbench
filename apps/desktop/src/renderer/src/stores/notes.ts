@@ -52,6 +52,14 @@ export const useNotesStore = defineStore('notes', () => {
   const activeRel = ref('')
   /** 当前打开的那一篇的正文；选中的是文件夹（或什么都没选）时是 null */
   const active = ref<NoteDocument | null>(null)
+  /**
+   * 每一篇「上次读 / 写时磁盘上的 mtime」，写盘时交回 Rust 当基准。
+   *
+   * 编辑器切篇时会把上一篇没写完的那一段补交上来，那时 `active` 已经是新的那一篇了 ——
+   * 只按 `active` 取基准就会把上一篇漏成「没有基准、不检查」，所以这里按路径各记一份。
+   * 换笔记本时清空：相对路径在另一个笔记本里指的是别的东西。
+   */
+  const mtimeByRel = new Map<string, number>()
 
   const loading = ref(false)
   /** 至少成功读过一次盘：工具栏的按钮据此决定给不给点 */
@@ -110,12 +118,16 @@ export const useNotesStore = defineStore('notes', () => {
     nodes.value = []
     activeRel.value = ''
     active.value = null
+    mtimeByRel.clear()
     loaded.value = false
     loadError.value = ''
     openError.value = ''
     saveError.value = ''
     repoState.value = null
   }
+
+  // 换笔记本：相对路径指向的东西全变了，基准一份都不能留
+  watch(root, () => mtimeByRel.clear())
 
   /**
    * 重新探一次这个文件夹的 git 状态：有没有仓库、`origin` 是谁（本地两条 git，很便宜）。
@@ -288,7 +300,7 @@ export const useNotesStore = defineStore('notes', () => {
     if (job !== openJob)
       return
 
-    if (!result.ok || result.data === undefined) {
+    if (!result.ok || !result.data) {
       closeNote()
       openError.value = result.error ?? '读取笔记失败'
       return
@@ -296,11 +308,15 @@ export const useNotesStore = defineStore('notes', () => {
 
     openError.value = ''
     saveError.value = ''
+    // 「已保存 · 时间」属于这一篇：不清掉的话会继续挂着上一篇 / 上一次保存的时间
+    savedAt.value = 0
+    // 记下这一份是基于磁盘上哪个版本读出来的，写盘时原样交回去当基准
+    mtimeByRel.set(node.rel, result.data.mtimeMs)
     active.value = {
       rel: node.rel,
       name: node.name,
-      content: result.data,
-      mtimeMs: node.mtimeMs ?? 0,
+      content: result.data.text,
+      mtimeMs: result.data.mtimeMs,
     }
   }
 
@@ -326,16 +342,21 @@ export const useNotesStore = defineStore('notes', () => {
   }
 
   async function writeContent(rel: string, content: string): Promise<void> {
-    const result = await window.workbench.writeNote(root.value, rel, content)
+    // 带上「这份正文基于哪个版本」：别处刚改过的那一篇不能被这一笔盖掉（见 notes.rs 的 write）
+    const expected = mtimeByRel.get(rel)
+    const result = await window.workbench.writeNote(root.value, rel, content, expected)
     saveError.value = result.ok ? '' : (result.error ?? '保存笔记失败')
-    if (!result.ok)
+    if (!result.ok || typeof result.data !== 'number')
       return
 
-    savedAt.value = Date.now()
+    // 用文件自己的 mtime 当基准与「已保存」的时间；本地时间戳只代表「我们敲过这一下」
+    const mtimeMs = result.data
+    mtimeByRel.set(rel, mtimeMs)
+    savedAt.value = mtimeMs
     // 本地也记下这一份：右栏那句「最后修改」与下次打开时给的初值都用它
     if (active.value?.rel === rel) {
       active.value.content = content
-      active.value.mtimeMs = savedAt.value
+      active.value.mtimeMs = mtimeMs
     }
   }
 
@@ -402,18 +423,38 @@ export const useNotesStore = defineStore('notes', () => {
       return false
 
     const result = await window.workbench.readNote(root.value, current.rel)
-    if (!result.ok || result.data === undefined)
+    if (!result.ok || !result.data)
       return false
-    if (result.data === current.content)
+
+    // 基准先跟上：别处存了一份一模一样的内容时，下一次保存不该因为 mtime 变了被挡住
+    mtimeByRel.set(current.rel, result.data.mtimeMs)
+    if (result.data.text === current.content)
       return false
 
     active.value = {
       rel: current.rel,
       name: current.name,
-      content: result.data,
-      mtimeMs: findNoteNode(nodes.value, current.rel)?.mtimeMs ?? current.mtimeMs,
+      content: result.data.text,
+      mtimeMs: result.data.mtimeMs,
     }
+    // 换成了磁盘上那一份：上一次「别处改过、没保存」的红字到这儿就算解决了
+    saveError.value = ''
     return true
+  }
+
+  /**
+   * 只探一下磁盘上的这一篇有没有变过（不动任何状态，也不碰编辑器）。
+   *
+   * 编辑器里还有未保存的修改时，界面拿它决定要不要问那句「按磁盘重读」——
+   * 没变就别打扰；变了才有「这边要丢掉、那边刚写上」这件事要选。
+   */
+  async function activeChangedOnDisk(): Promise<boolean> {
+    const current = active.value
+    if (!current)
+      return false
+
+    const result = await window.workbench.readNote(root.value, current.rel)
+    return result.ok && !!result.data && result.data.text !== current.content
   }
 
   /**
@@ -431,6 +472,13 @@ export const useNotesStore = defineStore('notes', () => {
       return
 
     const next = to ? `${to}${current.slice(from.length)}` : ''
+    // 路径改了，写盘基准跟着搬：改名 / 移动不动文件内容，mtime 还是那一份
+    const base = mtimeByRel.get(current)
+    if (base !== undefined) {
+      mtimeByRel.delete(current)
+      if (next)
+        mtimeByRel.set(next, base)
+    }
     activeRel.value = next
     if (!active.value)
       return
@@ -545,6 +593,8 @@ export const useNotesStore = defineStore('notes', () => {
     move,
     saveContent,
     waitForWrites,
+    rereadActive,
+    activeChangedOnDisk,
     syncNotes,
     closeNote,
   }

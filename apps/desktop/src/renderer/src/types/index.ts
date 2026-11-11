@@ -11,10 +11,11 @@ import type { AccentInkMode, AppearanceSettingKey, EffectiveTheme, ThemeConfig, 
 import type { AccountProfile, AuthProvider } from '@workbench/auth'
 import type { CaptureContext, OcrLine, PinPatch, PinRecord } from '@workbench/capture'
 import type { ActiveSession, ActivityBreakdown, ActivityKind, ActivityView, CommandEntry, IconCacheEntry, PackageManager, ProjectColor, ProjectSort, QuickApp, Result, ScanResult } from '@workbench/core'
+import type { GitCommitDetail, GitCommitPage, GitCompare, GitPatch, GitRepoInfo, GitTreePage } from '@workbench/git'
 import type { KbRawSource, KbRepoState, KbScanResult, KbSyncInput, KbSyncSummary } from '@workbench/kb'
 import type { MailAccount, MailContact } from '@workbench/mail'
 import type { BallContext, NetCounters } from '@workbench/net-meter'
-import type { NoteChange, NoteCreateInput, NoteImageDeleted, NoteImageDeleteInput, NoteImageList, NoteImageListInput, NoteImageUploaded, NoteImageUploadInput, NoteNode, NoteRepoState, NoteSyncInput, NoteSyncSummary, NoteTextScan } from '@workbench/notes'
+import type { NoteChange, NoteCreateInput, NoteImageDeleted, NoteImageDeleteInput, NoteImageList, NoteImageListInput, NoteImageUploaded, NoteImageUploadInput, NoteNode, NoteRead, NoteRepoState, NoteSyncInput, NoteSyncSummary, NoteTextScan } from '@workbench/notes'
 import type { SkillCommit, SkillCompareFile, SkillCreateInput, SkillEntry, SkillFileInfo, SkillInstalledScan, SkillLibraryState, SkillSyncSummary } from '@workbench/skills'
 import type { SyncDeviceInfo, TokenUsageResult } from '@workbench/usage'
 import type { VaultEntry, VaultRecord } from '@workbench/vault'
@@ -87,6 +88,18 @@ export type {
   Result,
   ScanResult,
 } from '@workbench/core'
+export type {
+  GitChangedFile,
+  GitCommitDetail,
+  GitCommitPage,
+  GitCompare,
+  GitFileStatus,
+  GitPatch,
+  GitRepoInfo,
+  GitTreeEntry,
+  GitTreeEntryType,
+  GitTreePage,
+} from '@workbench/git'
 export type {
   KbEntryMeta,
   KbIndexInfo,
@@ -435,6 +448,14 @@ export interface AppSettings {
    * 同一类。每条带 root：来源名在不同知识库里可以重名，映射只对它那个库生效。
    */
   kbRawSources: KbRawSource[]
+  /**
+   * Git 页上次打开的仓库根目录（空串 = 还没打开过）。
+   *
+   * 与 `noteDir` / `skillDir` / `videoDir` 同一类：本机的一个目录，进数据文件、
+   * 不参与外观同步。空串时 Git 页显示「选一个仓库」的引导；打不开时照实提示，
+   * 不把它悄悄清掉（仓库可能是移动硬盘 / 网络盘，下次插上还能用）。
+   */
+  gitRepo: string
   /**
    * AI 助手配过的服务（模型管理弹窗里那一屏）：一个服务 = 名称 + Base URL + API 形态 +
    * 模型清单（每条带上下文与思考档位）。密钥不在这里 —— 它在 Windows 凭据管理器里
@@ -1105,6 +1126,73 @@ export interface AiRunInput {
   skills: AiSkillRef[]
 }
 
+/**
+ * 独立视频窗口的一集（播放列表里的一项）。
+ *
+ * 只带相对路径与显示名：窗口拿到 `root` 后自己调 `loadVideo` 换下一个，
+ * URL 与 asset 授权仍在进程内按文件走（见 @workbench/video 与 video.md）。
+ */
+export interface VideoWindowItem {
+  rel: string
+  name: string
+}
+
+/**
+ * 开独立视频窗口时主窗口交过去的那份上下文。
+ *
+ * `time` 是主窗口播放器暂停时的秒数 —— 窗口从同一秒接上；`playing` 决定它到了
+ * 元数据之后要不要直接开播（暂停态保持暂停）。`playlist` 是视频树按展示顺序摊平的一
+ * 整份，播完自动接续时窗口按它在里面找下一个。
+ */
+export interface VideoWindowOpen {
+  root: string
+  source: VideoSource
+  rate: number
+  time: number
+  playing: boolean
+  playlist: VideoWindowItem[]
+}
+
+/** 窗口向 Rust 问回的上下文：开窗时那份 + 本次运行的置顶状态（不落盘） */
+export interface VideoWindowContext extends VideoWindowOpen {
+  onTop: boolean
+}
+
+/**
+ * 独立 Markdown 编辑窗口启动时取到的上下文。
+ *
+ * 只有文件名、正文与 mtime：完整路径留在 Rust 会话里，渲染层不需要、也拿不到
+ * （下一笔写盘按这个 mtime 做冲突判断，见 notes.rs 的 write）。
+ */
+export interface MarkdownWindowContext {
+  /** 文件名（不带目录），窗口标题用的也是它 */
+  name: string
+  /** 读盘时的正文 */
+  text: string
+  /** 读盘那一刻文件的 mtime，保存时当基准 */
+  mtimeMs: number
+}
+
+/** 主窗口 → 独立视频窗口的命令（Rust 转成 `video-window:command` 事件） */
+export type VideoWindowCommand
+  = | { action: 'load', source: VideoSource, rate: number, time: number, playing: boolean, playlist: VideoWindowItem[] }
+    | { action: 'dock' }
+    | { action: 'close' }
+
+/** 独立视频窗口 → 主窗口的回报（`dock` / `close` 由 Rust 处理完窗口再转发） */
+export type VideoWindowReport
+  = | { kind: 'active', source: VideoSource, rate: number }
+    | { kind: 'rate', rate: number }
+    | { kind: 'dock', source: VideoSource, rate: number, time: number, playing: boolean }
+    | { kind: 'close' }
+
+/** 主窗口收到的独立视频窗口事件（Rust 发 `video-window:event`） */
+export type VideoWindowEvent
+  = | { kind: 'active', source: VideoSource, rate: number }
+    | { kind: 'rate', rate: number }
+    | { kind: 'dock', source: VideoSource, rate: number, time: number, playing: boolean }
+    | { kind: 'closed', docked: boolean }
+
 export interface WorkbenchApi {
   /**
    * 网关（CodeBuddy 反代）。
@@ -1234,7 +1322,11 @@ export interface WorkbenchApi {
   relocateProject: (id: string, newPath: string) => Promise<Result<Project>>
   /** 检查所有项目目录是否仍然存在，返回 项目 ID -> 是否有效 */
   checkProjectPaths: () => Promise<Record<string, boolean>>
-  /** 首页活跃度：按天聚合的各来源操作次数，总数（total）与分项（days）一起给，见 @workbench/core 的 ActivityView */
+  /**
+   * 首页活跃度：按天聚合的各来源操作次数，总数（total）与分项（days）一起给，
+   * 见 @workbench/core 的 ActivityView。开了同步时是**本机 + 别的机器**按天求和之后的账本
+   * （别的机器那份只在内存里合并，不写回本机文件，见 workbench/activity.ts）。
+   */
   getActivity: () => Promise<ActivityView>
   /**
    * 记一次活跃度（只给渲染层里那几个「适配层看不见动作成败」的来源用：AI 助手跑完一轮，
@@ -1328,6 +1420,26 @@ export interface WorkbenchApi {
    * 新建的条目带来源哈希（下次生成不会重复写），`appendTo` 的条目追加到已有记录上。
    */
   importGitDrafts: (drafts: readonly GitWorkLogDraft[]) => Promise<Result<WorkLogEntry[]>>
+
+  // ---------- Git 页（只读、本地：打开仓库 / 提交 / 文件历史 / 差异） ----------
+  //
+  // 与上面 projectGitLog 不是同一条：那一条按项目目录起算、只给「从提交生成」用；
+  // 这一组按仓库根解释路径，还会读目录树与补丁。全部只跑读命令，不写仓库、不联网。
+  /** 打开一个仓库（选中的可以是子目录，返回的 root 才是仓库根） */
+  openGitRepo: (path: string) => Promise<Result<GitRepoInfo>>
+  /** 当前分支（HEAD）的提交列表；分页取 */
+  listGitCommits: (root: string, skip: number, limit: number) => Promise<Result<GitCommitPage>>
+  /** 一个文件的提交历史（不做 rename 跟踪：改名前的历史不显示） */
+  listGitFileCommits: (root: string, path: string, skip: number, limit: number) => Promise<Result<GitCommitPage>>
+  /** 一个目录的内容（HEAD 那一版）；空串 = 根目录 */
+  listGitTree: (root: string, dir: string) => Promise<Result<GitTreePage>>
+  /** 一个提交的元信息 + 改动文件清单 */
+  loadGitCommit: (root: string, hash: string) => Promise<Result<GitCommitDetail>>
+  /** 任意两个提交之间的改动文件清单 */
+  compareGitCommits: (root: string, base: string, target: string) => Promise<Result<GitCompare>>
+  /** 一个文件的补丁（base 为空串 = 根提交） */
+  loadGitPatch: (root: string, base: string, target: string, path: string) => Promise<Result<GitPatch>>
+
   /**
    * AI 热点：读本地缓存（`ai-news.json`）的合并视图。**不联网** —— 只回上次拉回来的那份。
    * 卡片首屏先走它：有内容就直接摆出来，再交给 refreshAiNews 后台更新。
@@ -1365,10 +1477,15 @@ export interface WorkbenchApi {
    * 回来的是 `Result`：目录被移走、被拔掉的网络盘都要与「里面什么都没有」分得开。
    */
   listNotes: (root: string) => Promise<Result<NoteNode[]>>
-  /** 读一篇的正文；文件在应用外面被改成读不出来的内容时在这里报错 */
-  readNote: (root: string, rel: string) => Promise<Result<string>>
-  /** 保存正文（编辑器防抖后落盘）；结构没变，所以只回成功与否 */
-  writeNote: (root: string, rel: string, content: string) => Promise<Result<null>>
+  /** 读一篇的正文与它此刻的 mtime；文件在应用外面被改成读不出来的内容时在这里报错 */
+  readNote: (root: string, rel: string) => Promise<Result<NoteRead>>
+  /**
+   * 保存正文（编辑器防抖后落盘）。
+   *
+   * `expectedMtimeMs` 是这份正文基于磁盘上哪个版本改的（打开 / 上次落盘时记下的 mtime）：
+   * 传了就核一遍，文件被别处改过 / 被删掉时拒绝写；回来的是写完之后文件自己的 mtime。
+   */
+  writeNote: (root: string, rel: string, content: string, expectedMtimeMs?: number) => Promise<Result<number>>
   /** 新建一个文件夹或笔记；名字撞上同层的由调用方先往后编号 */
   createNote: (root: string, input: NoteCreateInput) => Promise<Result<NoteChange>>
   /** 改名（名字不带后缀）；回来的是新树 + 改完之后的路径 */
@@ -1445,6 +1562,40 @@ export interface WorkbenchApi {
    * 坏文件（读不出 MP4 文件头的）在这里如实报错，不交给界面静默黑屏。
    */
   loadVideo: (root: string, rel: string) => Promise<Result<VideoSource>>
+  /**
+   * 把当前视频搬到一扇真正的顶层窗口里播（第五个 HTML 入口 `video.html`）。
+   *
+   * 主窗口给的是「现在这一部 + 播到哪 + 播放列表」；窗口自己持有 `<video>`，
+   * 播完按 `playlist` 自动接下一个。已有窗口时只是更新它（换视频 / 重新开），
+   * 不重建 —— 播放状态由两条事件通道同步，见下面几个方法。
+   */
+  openVideoWindow: (input: VideoWindowOpen) => Promise<Result<null>>
+  /** 主窗口 → 独立视频窗口：换视频（`load`）/ 收回（`dock`）/ 关掉（`close`） */
+  sendVideoWindowCommand: (command: VideoWindowCommand) => Promise<Result<null>>
+  /** 独立视频窗口启动时问自己那份上下文（会话 + 置顶状态）；窗口已经过期时报错 */
+  videoWindowContext: () => Promise<Result<VideoWindowContext>>
+  /** 独立视频窗口 → 主窗口：当前视频 / 速率变化 / 收回（带时间与暂停态）/ 关闭 */
+  reportVideoWindow: (report: VideoWindowReport) => Promise<Result<null>>
+  /** 切独立视频窗口的置顶（本次运行内记住，不落盘） */
+  setVideoWindowOnTop: (onTop: boolean) => Promise<Result<null>>
+  // ---------- 独立 Markdown 编辑窗口（markdown.html，资源管理器「打开方式」） ----------
+  /**
+   * 独立编辑窗口启动时取自己那份上下文（文件名 / 正文 / mtime）。
+   *
+   * 路径不经过渲染层：Rust 按窗口 label 查会话，这扇窗只能读它被打开的那一个文件。
+   */
+  markdownWindowContext: () => Promise<Result<MarkdownWindowContext>>
+  /**
+   * 保存正文。`expectedMtimeMs` 是读盘 / 上次落盘拿到的基准：
+   * 文件在别处被改过或删掉时 Rust 拒绝写入并把原因交回来（与笔记页同一套规则）。
+   */
+  markdownWindowSave: (content: string, expectedMtimeMs?: number) => Promise<Result<number>>
+  /** 关闭握手：渲染层交完正文后调它真正销毁窗口 */
+  markdownWindowClose: () => Promise<Result<null>>
+  /** 回执：撤掉 Rust 那次关闭的兜底计时（保存 / 确认要花多久都行）；窗口不动 */
+  markdownWindowCancelClose: () => Promise<Result<null>>
+  /** 窗口被点了关闭：先回 `markdownWindowCancelClose`，再冲刷正文，完成后调 `markdownWindowClose` */
+  onMarkdownWindowFlushRequest: (fn: () => void) => () => void
   // ---------- 技能（住在笔记仓库的一个子目录里，见 @workbench/skills） ----------
   /**
    * 列出技能库里的技能：Rust 回 id / 文件数 / SKILL.md 原文，名字与描述由适配层解析。
@@ -1938,6 +2089,20 @@ export interface WorkbenchApi {
   /** 最大化 / 还原状态变化（拖窗口边缘、系统快捷键也会走到这里） */
   onWindowState: (fn: (state: WindowState) => void) => () => void
   /**
+   * 独立视频窗口里的命令（换视频 / 收回）。
+   *
+   * 只有 `video.html` 那个入口订阅：主窗口用不到的窗口侧通道照样登记在这里，
+   * 契约与别的 `on*` 一样是「订阅返回退订函数」。
+   */
+  onVideoWindowCommand: (fn: (command: VideoWindowCommand) => void) => () => void
+  /**
+   * 独立视频窗口发回来的状态（当前视频 / 速率 / 收回 / 已关闭）。
+   *
+   * 只有主窗口订阅：收回时 `dock` 带着播放时间与暂停态，关闭时 `closed` 告诉主窗口
+   * 要不要清掉 `active`（收回触发的关闭不清，它已经由 `dock` 交回播放权了）。
+   */
+  onVideoWindowEvent: (fn: (event: VideoWindowEvent) => void) => () => void
+  /**
    * 把设置里的程序名交给系统画的那两处：窗口标题（任务栏悬停提示）与托盘提示。
    *
    * 自绘的那条标题栏由渲染层自己画，不经过这里；而这两处归系统，只能在 Rust 侧设。
@@ -2009,6 +2174,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   skillDir: '',
   kbDir: '',
   kbRawSources: [],
+  gitRepo: '',
   aiProviders: [],
   aiDefaultProvider: '',
   aiDefaultModel: '',

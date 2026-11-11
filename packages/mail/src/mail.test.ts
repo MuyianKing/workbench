@@ -6,7 +6,7 @@ import { isBulkMail, sanitizeMailBulkSenders } from './bulk'
 import { contactLabel, contactOf, MAIL_CONTACT_NAME_MAX, MAIL_CONTACTS_MAX, sanitizeMailContact, sanitizeMailContacts, splitTypedAddresses } from './contacts'
 import { MAIL_ACCOUNTS_MAX, MAIL_POLL_DEFAULT, MAIL_POLL_MAX, MAIL_POLL_MIN, mailAccountReady, presetForAddress, sanitizeMailAccount, sanitizeMailAccounts, sanitizeMailAddress, sanitizeMailHost, sanitizeMailPollMinutes, sanitizeMailPort } from './mail'
 import { buildMime } from './mime'
-import { accountTag, attachmentBadge, attachmentDataUrl, attachmentHint, attachmentHtml, attachmentKind, attachmentOpenable, attachmentSizeText, attachmentText, attachmentTint, displayDate, displayRecipients, displaySender, htmlBody, isImageAttachment, mailTime, parseMessage, preferExtendedFilenames, recipientAddress, recipientDisplay, senderAddress } from './parse'
+import { accountTag, attachmentBadge, attachmentDataUrl, attachmentHint, attachmentHtml, attachmentKind, attachmentOpenable, attachmentSizeText, attachmentText, attachmentTint, displayDate, displayListDate, displayRecipients, displaySender, htmlBody, isImageAttachment, mailTime, parseMessage, preferExtendedFilenames, recipientAddress, recipientDisplay, senderAddress } from './parse'
 import { decodeEncodedWords, encodeRfc2047Word } from './rfc2047'
 
 describe('账户配置收敛', () => {
@@ -559,6 +559,18 @@ describe('展示层的拆解', () => {
     expect(displayDate('Mon, 5 Oct 2026 10:00:00 +0800')).toMatch(/^\d{2}\/\d{2} \d{2}:\d{2}$/)
     expect(displayDate('not a date')).toBe('not a date')
     expect(displayDate('')).toBe('')
+  })
+
+  it('清单日期：今天给时刻、昨天给昨天、同年给月日、跨年给年月日', () => {
+    const now = new Date(2026, 10, 11, 20, 0)
+    expect(displayListDate('2026-11-11T19:35:00', now)).toBe('19:35')
+    expect(displayListDate('2026-11-10T12:22:00', now)).toBe('昨天')
+    expect(displayListDate('2026-11-07T15:08:00', now)).toBe('11/07')
+    expect(displayListDate('2025-12-31T22:00:00', now)).toBe('2025/12/31')
+    // 跨年那一刻的「昨天」照旧按日历日算，不按年份拆开
+    expect(displayListDate('2025-12-31T22:00:00', new Date(2026, 0, 1, 1, 0))).toBe('昨天')
+    expect(displayListDate('not a date', now)).toBe('not a date')
+    expect(displayListDate('', now)).toBe('')
   })
 
   it('日期的时间戳给排序用：解析不动给 0', () => {

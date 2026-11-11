@@ -8,7 +8,7 @@
 
 关键落点：`packages/capture/src/`（选区几何 / 把手 / 标注模型 / 撤销栈 / 放大镜取样 / 坐标换算 /
 取字摆位（`ocr.ts`），全部带单测）、`apps/desktop/src-tauri/src/{capture,screen,clipboard,ocr,pin}.rs`、
-`workbench/index.ts` 里那一段通道、三个 HTML 入口（`index.html` / `capture.html` / `pin.html`）、
+`workbench/index.ts` 里那一段通道、三个相关 HTML 入口（`index.html` / `capture.html` / `pin.html`）、
 `components/settings/CapturePane.vue`。
 
 - **抓屏只能在 Rust 侧做**：WebView2 没有 `getDisplayMedia`，webview 里拿不到屏幕像素。
@@ -403,7 +403,7 @@ Ctrl+滚轮调透明度。**尺寸与位置一律取整**：`pin_update` 那边�
 记账里的图片路径 / 尺寸 / 透明度在下次启动时由 `restore` 照着钉回来；
 窗口被 Alt+F4 关掉时也要抹掉记账（否则下次启动会把已经关掉的图又钉回来）。
 
-**验证**：`pnpm run typecheck` → `pnpm run lint` → `pnpm run build:renderer`（**三个 HTML 入口的
+**验证**：`pnpm run typecheck` → `pnpm run lint` → `pnpm run build:renderer`（**相关 HTML 入口的
 模板都要真的编一遍**：`typecheck` 查不出标签不配平，也查不出模板里用了没 import 的组件）→
 `pnpm test` → `cargo test` + `cargo build`。
 

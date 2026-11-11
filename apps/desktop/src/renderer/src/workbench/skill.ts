@@ -1,3 +1,4 @@
+import type { NoteRead } from '@workbench/notes'
 import type { SkillCommit, SkillCompareFile, SkillCreateInput, SkillEntry, SkillFileCopy, SkillFileInfo, SkillInstalledScan, SkillLibraryState, SkillSyncSummary } from '@workbench/skills'
 import type { Result } from '@/types'
 import { fail, ok } from '@workbench/core'
@@ -145,7 +146,7 @@ export async function createSkill(
     return fail(created.error ?? '新建技能失败')
 
   const written = await guard(
-    invoke<null>('note_write', {
+    invoke<number>('note_write', {
       root: root.trim(),
       rel: skillFileRel(base, id.data),
       content: skillMdTemplate(sanitizeNoteName(input.name) || id.data, input.description ?? ''),
@@ -206,7 +207,7 @@ export async function saveSkillFile(
   await ensureFolders(root, target)
 
   const written = await guard(
-    invoke<null>('note_write', { root: root.trim(), rel: target, content }),
+    invoke<number>('note_write', { root: root.trim(), rel: target, content }),
     '保存技能失败',
   )
   if (!written.ok)
@@ -242,10 +243,14 @@ export async function readSkillFile(
   id: string,
   rel: string,
 ): Promise<Result<string>> {
-  return guard(
-    invoke<string>('note_read', { root: root.trim(), rel: fileRel(dir, id.trim(), rel) }),
+  // note_read 现在连 mtime 一起回（笔记页写盘要拿它当基准）；这里只要正文
+  const result = await guard(
+    invoke<NoteRead>('note_read', { root: root.trim(), rel: fileRel(dir, id.trim(), rel) }),
     '读取文件失败',
   )
+  if (!result.ok)
+    return fail(result.error ?? '读取文件失败')
+  return ok(result.data?.text ?? '')
 }
 
 /** 技能目录里的全部文件（相对路径 + 字节数），认不出的条目丢掉 */

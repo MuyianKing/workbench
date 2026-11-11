@@ -147,6 +147,10 @@ export const useProjectsStore = defineStore('projects', () => {
     // 与 onProjectChanged 分开挂 —— 改项目名 / 改分组也会推 projectChanged，那些不改活跃度，
     // 顺手重拉一次纯属白跑（原先就是这么绑的，拆开之后各走各的）
     window.workbench.onActivityChanged(() => void refreshActivity())
+    // 别人的机器推上来的账本要有人来问才读得到（一小时的同步也在取数时顺带触发，
+    // 见 workbench/activity.ts）。这张图不一定有人动它，所以每分钟问一次 ——
+    // 合并只在内存里，不到同步点不联网
+    window.setInterval(() => void refreshActivity(), 60_000)
   }
 
   /** 拉一次项目 / 分组 / 设置 / 数据目录 */

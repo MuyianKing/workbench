@@ -213,6 +213,10 @@ Workbench 的文档按「通用 / 模块」分层：
 - 右键不弹 WebView2 的原生菜单（返回 / 刷新 / 另存为 / 打印 / 更多工具 / 检查 那一套）：界面是自绘的，浏览器这套菜单在这里没有意义；
   菜单键与 Shift+F10 触发的是同一个事件，也一样不出。调试因此没有「检查」可点，改走远程调试端口（见 [AGENTS.md](../AGENTS.md) 第 6 节）
 - 开机自启（默认开启，仅打包后生效）
+- Markdown 文件关联（**打包安装时登记，开发模式不登记**）：`.md` / `.markdown` 会出现在资源管理器的
+  「打开方式」里，安装器同时把它们**默认打开程序**设为 Workbench（卸载时恢复备份值）。
+  用「打开方式」打开时只显示一扇独立编辑窗口，主窗口留在后台（托盘照常可用）；
+  窗口细节与路径边界见 [notes.md](modules/notes.md) 的「独立编辑窗口」一节
 - 网速球（默认关闭）：打开后桌面上出现一颗显示实时下载 / 上传速度的球，拖到哪就停在哪儿；
   拖到屏幕左 / 右边缘会收成贴边的一条竖流量条，鼠标移开收回去、移上来再摊开
   （见 [float-ball.md](modules/float-ball.md)）。
@@ -252,9 +256,10 @@ Workbench 的文档按「通用 / 模块」分层：
   **刻意不磨的**：终端面板（始终深色，日志要读字）、顶部栏的「正常 / 透明」两档（用户显式选的档位）、
   压在玻璃上的**控件**（按钮 / 输入框 / 标签 —— 小、要读字，白底就是为了从壁纸上立起来）、
   深色 tooltip（是标签不是面）、面板里那些「框里的框」（如 AI 助手那条等确认的卡片）；
-  三个辅助窗口（截图遮罩 / 钉图 / 网速球）也不磨 —— 它们的窗口是透明的（背后是桌面，
+  三个透明的辅助窗口（截图遮罩 / 钉图 / 网速球）也不磨 —— 它们的窗口是透明的（背后是桌面，
   不是网页磨得着的东西，模糊取不到画面、只会剩一层半透），截图遮罩里那条工具条还压在冻结的
-  截图上（深色实底，磨开反而看不清要标注的地方）。**遮罩照旧完全透明**：
+  截图上（深色实底，磨开反而看不清要标注的地方）。**独立视频窗口**同样不磨：它是一块
+  深色播放画布（与终端面板同一口径），不是压在壁纸上的面。**遮罩照旧完全透明**：
   玻璃浮起来靠它自己那层磨砂与投影，不靠压暗背景
 - 两处代价（改这些面时一并想着）：`backdrop-filter` 会给元素造一个层叠上下文，
   里面的浮动内容得 Teleport 到 `body` 才出得了头；它同时给 `position: fixed` 的子元素换定位参照
@@ -271,12 +276,12 @@ Workbench 的文档按「通用 / 模块」分层：
 | 工作日志渲染 | markdown-it（只服务工作日志正文：`html: false` 转义原文里的标签、`linkify` 认裸地址、`breaks` 让单个换行就是 `<br>`，链接统一新窗口 + 交系统浏览器打开） |
 | 笔记编辑器 | Vditor（只服务笔记正文；静态资源随包带一份、不走 CDN，见[「笔记」](modules/notes.md)那一节） |
 | 构建 | Vite 8（渲染层，打包器是 rolldown）+ cargo / Tauri CLI（后端）。根与 `apps/desktop` 的 `package.json` 都是 `"type": "module"`，所以各 vite / vitest 配置里用 `import.meta.dirname`（`__dirname` 只在旧的打包式加载器下被 shim 出来；仓库里也不要有 CJS 的 `.js` / `.cjs`，它们会被当成 ESM） |
-| 语言 | TypeScript（渲染层）+ Rust（后端）；契约与纯逻辑按域拆在 `packages/` 的 18 个 `@workbench/*` 包 |
+| 语言 | TypeScript（渲染层）+ Rust（后端）；契约与纯逻辑按域拆在 `packages/` 的 19 个 `@workbench/*` 包 |
 | 持久化 | 本地 JSON，由 Rust 侧 `store.rs` 负责（防抖 300ms、临时文件 + rename、退出前同步落盘） |
 | 子进程 | `std::process` 起 shell 命令（按批回传输出，Windows 下 `taskkill /T /F` 结束整棵进程树） |
 | 端口 → 进程 | `GetExtendedTcpTable`（iphlpapi，一次系统调用拿到监听表）+ `QueryFullProcessImageNameW`；不再起 `netstat` / `tasklist` 解析文本输出（全量检测会并发问十几个端口，原先每个端口两个子进程） |
 | Coding 用量数据源 | ZCode：`rusqlite` 只读打开本地 sqlite（WAL 并发读）；DeepSeek Harness：Rust 逐帧解压 `~/.dsh/sessions` 的多帧 zstd 会话；CodeBuddy：Rust 列扩展日志清单、渲染层读内容并解析；WorkBuddy：Rust 列会话正文清单、渲染层读内容并解析；Qoder：Rust 列 `~/.qoder-cn/projects` 的会话正文清单、渲染层读内容并解析（只取 `usage.credits`，它不报 token）。五者都只读，且只取用量数字 |
-| 多机同步 | 可选（默认关闭）：`std::process` 直启系统的 `git`（不经 `cmd`，参数行不会被二次解析），推 / 拉一个用户指定的仓库；`token-usage/<设备id>.json`、`config/<设备id>.json`、`gateway-usage/<设备id>/<YYYY-MM>.jsonl` 与 `etf/<设备id>.json`，都按一台机器一份写。用量、外观、ETF 是三条互不相干的出口：用量（token 快照 + 网关流水）自动 + 手动，外观只在设置里点「同步一次」（采用别人的配置也只能手动），ETF 只由那一页自己进页面时拉、刷新完推。凭据默认走系统 git，登录过账号则改用该账号的 token（按 host 限定注入请求头，过期前自动续期，见下） |
+| 多机同步 | 可选（默认关闭）：`std::process` 直启系统的 `git`（不经 `cmd`，参数行不会被二次解析），推 / 拉一个用户指定的仓库；`token-usage/<设备id>.json`、`config/<设备id>.json`、`gateway-usage/<设备id>/<YYYY-MM>.jsonl`、`etf/<设备id>.json` 与 `activity/<设备id>.json`，都按一台机器一份写。用量、外观、ETF 是三条互不相干的出口：用量（token 快照 + 网关流水）自动 + 手动，活跃度账本跟着自动那一轮走（首页取数时触发、一小时一轮），外观只在设置里点「同步一次」（采用别人的配置也只能手动），ETF 只由那一页自己进页面时拉、刷新完推。凭据默认走系统 git，登录过账号则改用该账号的 token（按 host 限定注入请求头，过期前自动续期，见下） |
 | 账号登录 | 可选：GitHub / Gitee 的授权码流程 + 本机回环回调（RFC 8252 那套，与 VS Code 同路）。HTTPS 走系统自带的 WinHTTP，access_token 与 refresh_token 存 Windows 凭据管理器（DPAPI）—— 两者都只给已有的 `windows-sys` 加 feature，**没有引入任何新的 crate**。两家都要求 clientId + clientSecret，凭据由 `build.rs` 编译期内置 |
 | 依赖取舍 | 新增 crate 的标准是**「不新增编译单元」**而不是「不新增名字」：`url` / `percent-encoding` / `form_urlencoded` / `walkdir` / `base64` / `sha2` 都已被 tauri / tao / wry / tauri-utils 拉进编译图（`cargo tree -e normal -i <crate>` 可查），所以直接用它们替掉手写的 URL 编解码、目录递归与摘要实现，代价为零。反过来，`reqwest`（hyper + tower + TLS 整套）、`git2`（libgit2 的 C 依赖）、`sysinfo` 会新增成片的编译单元，一律不引 |
 | 测试 | Vitest（渲染层与域包）+ `cargo test`（Rust） |
@@ -335,13 +340,17 @@ apps/desktop/            桌面应用（自包含：渲染层 + Rust + 随包资
   src/nrm.rs             nrm 探测与镜像源切换 —— 注解见 modules/projects.md
   src/token.rs           用量数据源聚合 —— 注解见 modules/sync-and-auth.md
   src/notes.rs           笔记文件夹的扫描 / 读写 / 增删改名 —— 注解见 modules/notes.md
+  src/md_window.rs       资源管理器「打开方式」的独立 Markdown 编辑窗口（会话 / 关闭握手）—— 注解见 modules/notes.md
   src/sync.rs            同步与 git 管道 —— 注解见 modules/sync-and-auth.md
+  src/repo_git.rs        Git 页的只读仓库读取（仓库 / 提交 / 目录树 / 文件历史 / 差异 / 补丁）
+                         —— 注解见 modules/git-client.md
   src/design.rs          设计规范落盘 —— 注解见 modules/styles.md
   src/skills.rs          技能库 —— 注解见 modules/skills.md
   src/kb.rs              知识库 —— 注解见 modules/kb.md
   src/ai.rs              AI 助手宿主侧 —— 注解见 modules/ai.md
   src/pi_skills.rs       Pi 的技能 —— 注解见 modules/ai.md
   src/video.rs           视频文件夹扫描与 allow —— 注解见 modules/video.md
+  src/video_window.rs    独立视频窗口与两条事件通道 —— 注解见 modules/video.md
   src/screen.rs          Win32 抓屏（BitBlt）与光标位置 —— 注解见 modules/screenshot.md
   src/capture.rs         截图会话与遮罩窗口 —— 注解见 modules/screenshot.md
   src/clipboard.rs       往系统剪贴板放图（CF_DIBV5 / CF_DIB / PNG）—— 注解见 modules/screenshot.md
@@ -368,9 +377,12 @@ apps/desktop/            桌面应用（自包含：渲染层 + Rust + 随包资
   tauri.conf.json        窗口、打包、资源映射
   capabilities/          能力白名单
 
-  src/renderer/           四个 HTML 入口：index.html（主界面）、capture.html（截图遮罩）、
-                         pin.html（钉图）、ball.html（网速球）。后三个是独立窗口、各自的 JS 上下文，
-                         只装适配层、不装 store（见 modules/screenshot.md、modules/float-ball.md）
+  src/renderer/           六个 HTML 入口：index.html（主界面）、capture.html（截图遮罩）、
+                         pin.html（钉图）、ball.html（网速球）、video.html（独立视频窗口）、
+                         markdown.html（资源管理器「打开方式」的独立 Markdown 编辑窗口）。
+                         后五个是独立窗口、各自的 JS 上下文，只装适配层、不装 store
+                         （见 modules/screenshot.md、modules/float-ball.md、modules/video.md、
+                         modules/notes.md）
   src/renderer/src/       Vue 应用（组件 / Pinia store / 设计令牌）
   workbench/             window.workbench 的适配层（原 preload + 主进程逻辑的替代品）：
                          底座五件（bridge / events / state / session / scanner）的注解见
@@ -391,13 +403,13 @@ apps/desktop/            桌面应用（自包含：渲染层 + Rust + 随包资
                          DEFAULT_SETTINGS），并从各域包 re-export 保持 `@/types` 一站式取类型
   persisted-data.ts      数据文件的收敛编排 + theme.json ↔ 数据文件的分流桥接
 
-packages/                按域拆出的 18 个 @workbench/* 包（TS 源码直出、各自带 vitest；
+packages/                按域拆出的 19 个 @workbench/* 包（TS 源码直出、各自带 vitest；
                          包之间与应用都只按包名走各自的 index.ts 桶导入）：
   core/                  平台原语：Result 与 ok/fail、端口与项目路径、dev-port、扫描
                          （scanner，fs 注入）、命令与快捷启动的收敛、图标缓存、残留进程判定、
                          项目标识色的分配、项目排序的取值、markdown 渲染、text-diff
   notes/                 笔记的文件名与目录树口径、图片的命名与访问地址拼接
-  video/                 MP4 过滤 / 目录树口径 / 倍速档位与时间、时长的显示
+  video/                 MP4 过滤 / 目录树口径 / 倍速档位与时间、时长显示、播放顺序（flattenVideoNodes）
   appearance/            外观口径与默认外观的唯一来源、主题、views、工作区背景与壁纸、
                          设计样式的 token 模型与键名中文标签规则、色系判定与筛选排序、
                          设计示例页面的颜色角色解析（design-demo）、设计规范与提示词的
@@ -414,6 +426,7 @@ packages/                按域拆出的 18 个 @workbench/* 包（TS 源码直�
   usage/                 Token 用量口径（token-usage.ts）、同步配置（sync-config.ts）、
                          四个 IDE 日志源（codebuddy / qoder / dsh / workbuddy-log）
   work-log/              工作日志的时间轴
+  git/                   Git 页的回包收敛、统一 diff 行模型与类型（见 modules/git-client.md）
   vault/                 密码保险库的条目模型 / 信封 / 合并 / 加解密
   auth/ 、 weather/       账号资料的收敛；实时天气的 WMO 码表与两条接口回包的解析
   mail/                   邮箱账户配置的收敛、通讯录的收敛（contacts.ts）、RFC 2047 编解码、
@@ -452,7 +465,7 @@ pnpm install
 
 pnpm run dev             # 启动开发态（Rust 后端 + 渲染层热更新）
 pnpm run typecheck       # 根目录单一 TS 工程覆盖渲染层与全部域包
-pnpm test                # Vitest 单元测试（根配置收 19 个项目，一条进程跑全量）
+pnpm test                # Vitest 单元测试（根配置收 20 个项目，一条进程跑全量）
 cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml   # Rust 侧测试
 pnpm run build:renderer  # 只编渲染层，产物落 apps/desktop/out/renderer
 pnpm run preview:renderer # 只把渲染层跑在浏览器里，方便看布局（产物落 apps/desktop/.preview/）
@@ -514,6 +527,8 @@ pnpm run dist         # 产出 NSIS 安装包
 - **用量同步**（可选、默认关闭）：登录账号且设置里填了仓库地址才会推 / 拉那个仓库，退出登录就停。
   推的内容是 Coding 用量快照、外观配置（只在设置里手动点）与**网关请求流水**（`gateway-usage/`：
   模型 / token / 积分 / 账号 uid / UA / 错误文本；不含 apiKey 与 costCny，也没有对话正文）。
+  **首页活跃度另推一份计数账本**（`activity/<设备id>.json`：日期 + 五类操作的次数，没有操作明细），
+  多台机器按天求和之后画在同一张图上 —— 同一个仓库、同一个出口。
   **ETF 页另推一份公开行情缓存**（`etf/<设备id>.json`：份额与净值，没有用户内容）——
   它进的是同一个仓库、同一个出口，只是给别的机器复用，省掉重复回填。
   **密码保险库推的是同一仓库的另一个目录**（`vault/vault.json`），推上去的只有密文

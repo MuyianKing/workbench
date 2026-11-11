@@ -37,6 +37,21 @@ export type ActivityBreakdown = Record<string, ActivityDayKinds>
 /** 日期（YYYY-MM-DD）→ 当天的总次数；图上深浅只看它（由分项求和而来，见 totalOf） */
 export type ActivityCounts = Record<string, number>
 
+/** 同步仓库里一台机器那份账本的版本 */
+export const ACTIVITY_SHARD_VERSION = 1
+
+/**
+ * 同步仓库里的一台机器（`activity/<设备id>.json`）：只有日期 → 各来源的次数。
+ *
+ * **推上去的永远只有本机账本**：别的机器那份只在内存里合并给界面看，
+ * 不写回本机文件 —— 写回去的话下一次推送就会把它当成自己的，两台机器互相翻倍。
+ */
+export interface ActivityShard {
+  version: number
+  device: string
+  activity: ActivityBreakdown
+}
+
 /** 交给界面的一份活跃度：总数画图、分项写悬停提示 */
 export interface ActivityView {
   total: ActivityCounts
@@ -218,6 +233,55 @@ export function sanitizeActivity(raw: unknown): ActivityBreakdown {
     const kinds = sanitizeDayKinds(value)
     if (Object.keys(kinds).length)
       next[key] = kinds
+  }
+  return next
+}
+
+/**
+ * 收敛同步仓库里的一份分片：认不出设备 id 的整份丢掉（排除不了本机就会重复计数），
+ * 分项照本机那份同一套收敛。
+ */
+export function sanitizeActivityShard(raw: unknown): ActivityShard | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw))
+    return null
+
+  const value = raw as Record<string, unknown>
+  const device = typeof value.device === 'string' ? value.device.trim() : ''
+  if (!device)
+    return null
+
+  return {
+    version: typeof value.version === 'number' && Number.isFinite(value.version)
+      ? Math.floor(value.version)
+      : ACTIVITY_SHARD_VERSION,
+    device,
+    activity: sanitizeActivity(value.activity),
+  }
+}
+
+/**
+ * 多台机器的账本合起来看：**按天、按来源求和**。
+ *
+ * 同一台机器的数据不会重复进来（本机用内存里那份，别人的按设备排除），所以直接相加；
+ * 不是取 max —— 两台机器同一天各启动一次就是两次。
+ */
+export function mergeActivityBreakdowns(list: ActivityBreakdown[]): ActivityBreakdown {
+  const next: ActivityBreakdown = {}
+  for (const breakdown of list ?? []) {
+    for (const [key, day] of Object.entries(breakdown ?? {})) {
+      if (!isDateKey(key))
+        continue
+      const kinds = sanitizeDayKinds(day)
+      if (!Object.keys(kinds).length)
+        continue
+      const target = next[key] ?? {}
+      for (const kind of ACTIVITY_KINDS) {
+        const value = kinds[kind] ?? 0
+        if (value > 0)
+          target[kind] = (target[kind] ?? 0) + value
+      }
+      next[key] = target
+    }
   }
   return next
 }

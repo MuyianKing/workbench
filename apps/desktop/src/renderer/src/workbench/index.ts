@@ -8,8 +8,9 @@ import type { AppSettings, AuthProvider, MailNotifyPayload, Result, ThemeConfig,
  * 通道实现按域分文件：`api-sync.ts`（同步门禁那几组）、`api-project.ts`（项目与进程）、
  * `api-domains.ts`（域模块的薄转发，就在本文件）、`api-background.ts`（背景图与图片授权）、
  * `api-system.ts`（系统 / 窗口 / 对话框 / 系统集成）、`api-events.ts`（事件订阅与跨窗口通道）；
- * 网关与 Qoder 各自的整组通道住在 `gateway.ts` / `qoder.ts`。本文件只做 spreads、
- * 未移植兜底与安装时序。
+ * 网关、Qoder、独立视频窗口与独立 Markdown 编辑窗口各自的整组通道住在
+ * `gateway.ts` / `qoder.ts` / `video-window.ts` / `markdown-window.ts`。
+ * 本文件只做 spreads、未移植兜底与安装时序。
  *
  * 尚未移植的通道由 `createApi` 的兜底接管：返回 `Result` 形状的失败值并打一次警告，
  * 界面降级成空态而不是崩掉 —— 迁移期间的缺口因此可见、可控。
@@ -30,7 +31,9 @@ import * as design from './design'
 import { emit } from './events'
 import * as events from './events'
 import { gatewayApi } from './gateway'
+import * as git from './git'
 import * as kb from './kb'
+import { markdownWindowApi } from './markdown-window'
 import * as note from './note'
 import * as orphan from './orphan'
 import * as piSkill from './pi-skill'
@@ -40,6 +43,7 @@ import * as skill from './skill'
 import * as state from './state'
 import * as vault from './vault'
 import * as video from './video'
+import { videoWindowApi } from './video-window'
 import * as workLog from './work-log'
 import * as zentao from './zentao'
 
@@ -55,6 +59,19 @@ const domainsApi = {
   importGitDrafts: (drafts: Parameters<WorkbenchApi['importGitDrafts']>[0]) =>
     workLog.importGitDrafts(drafts),
 
+  // ---------- Git 页（只读、本地；实现见 workbench/git.ts） ----------
+  openGitRepo: (path: string) => git.openRepo(path),
+  listGitCommits: (root: string, skip: number, limit: number) =>
+    git.listCommits(root, skip, limit),
+  listGitFileCommits: (root: string, path: string, skip: number, limit: number) =>
+    git.listFileCommits(root, path, skip, limit),
+  listGitTree: (root: string, dir: string) => git.listTree(root, dir),
+  loadGitCommit: (root: string, hash: string) => git.loadCommit(root, hash),
+  compareGitCommits: (root: string, base: string, target: string) =>
+    git.compareCommits(root, base, target),
+  loadGitPatch: (root: string, base: string, target: string, path: string) =>
+    git.loadPatch(root, base, target, path),
+
   // ---------- AI 热点（本地缓存 + 宿主侧的内置源白名单） ----------
   getAiNews: () => aiNews.getAiNews(),
   refreshAiNews: () => aiNews.refreshAiNews(),
@@ -63,7 +80,8 @@ const domainsApi = {
   // ---------- 笔记（用户自己挑的一个文件夹里的 markdown 文件） ----------
   listNotes: (root: string) => note.listNotes(root),
   readNote: (root: string, rel: string) => note.readNote(root, rel),
-  writeNote: (root: string, rel: string, content: string) => note.writeNote(root, rel, content),
+  writeNote: (root: string, rel: string, content: string, expectedMtimeMs?: number) =>
+    note.writeNote(root, rel, content, expectedMtimeMs),
   createNote: (root: string, input: Parameters<WorkbenchApi['createNote']>[1]) =>
     note.createNote(root, input),
   renameNote: (root: string, rel: string, name: string) => note.renameNote(root, rel, name),
@@ -182,7 +200,8 @@ const domainsApi = {
   piSkillRemove: (root: string, id: string) => piSkill.piSkillRemove(root, id),
 
   // ---------- 统计：活跃度（token 用量 / 外观 / ETF 那几条在 api-sync） ----------
-  getActivity: () => Promise.resolve(state.activityView()),
+  // 本机账本 + 同步仓库里别的机器那份（没登录 / 没配仓库时只有本机，见 activity.ts）
+  getActivity: () => activity.activityView(syncRepo()),
   /**
    * 记一次活跃度。适配层内部那几个来源直接调 `activity.recordActivity`，
    * 这条通道只给渲染层里那一处 —— AI 助手跑完一轮是在 store 里才知道的（见 stores/ai.ts 的 settle）。
@@ -246,6 +265,8 @@ function createApi(): WorkbenchApi {
     ...syncApi,
     ...projectApi,
     ...domainsApi,
+    ...videoWindowApi,
+    ...markdownWindowApi,
     ...backgroundApi,
     ...systemApi,
     ...eventsApi,

@@ -48,7 +48,6 @@ import Vditor from 'vditor'
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import NoteContextMenu from '@/components/NoteContextMenu.vue'
 import { notifyWarning } from '@/notify'
-import { useSettingsStore } from '@/stores/settings'
 import 'vditor/dist/index.css'
 
 const props = defineProps<{
@@ -70,6 +69,23 @@ const props = defineProps<{
    * 读盘、链接跳转、滚动、选中照旧，那些都是「读」。
    */
   readOnly: boolean
+  /**
+   * 图片仓库地址（设置里的 `noteImageRepo`）。
+   *
+   * **不再从 settings store 里读**：这枚组件要能在独立 Markdown 编辑窗口里挂起来，
+   * 而那扇窗口只装适配层、不装 Pinia（见 docs/modules/notes.md）。笔记页把值传进来，
+   * 独立窗口不传，粘贴图片时如实提示去设置里配。
+   */
+  imageRepo?: string
+  /**
+   * 允不允许粘贴 / 拖入图片（默认允许）。
+   *
+   * 独立编辑窗口传 false：那个窗口没有「笔记本」这个概念，一次上传会把图片推到
+   * 图片仓库的某个临时层级里，不是用户在那个窗口里期待的动作。挡下来并说清楚。
+   */
+  allowImageUpload?: boolean
+  /** 空文档时的提示语；不传用笔记页那一句（含 Ctrl+/ 说明），独立窗口用简短版 */
+  placeholder?: string
 }>()
 
 const emit = defineEmits<{
@@ -89,8 +105,8 @@ const emit = defineEmits<{
   open: [rel: string]
 }>()
 
-/** 图片仓库等配置住在设置里；这一页只为粘贴图片读它 */
-const settings = useSettingsStore()
+/** 笔记页那句提示：工具带藏起来之后，格式入口与两处隐形快捷键都在这里说清楚 */
+const DEFAULT_PLACEHOLDER = '写点什么…markdown 直接写；图片粘贴即上传，格式走右键菜单；Ctrl+点击链接可打开，Ctrl+/ 切只读'
 
 /**
  * Vditor 的静态资源目录。
@@ -250,13 +266,46 @@ function schedule(content: string): void {
   timer = window.setTimeout(flush, SAVE_DELAY)
 }
 
-/** 换一篇：先把上一篇没写完的改动交出去，再整份换成新的 */
-function load(node: NoteDocument): void {
-  flush(currentValue())
+/** 把编辑器整份换成 `node` 的正文（不交任何东西出去、也不动防抖计时器） */
+function applyDocument(node: NoteDocument): void {
   editingRel = node.rel
   saved = node.content
   pending = null
   editor?.setValue(saved, true)
+}
+
+/** 换一篇：先把上一篇没写完的改动交出去，再整份换成新的 */
+function load(node: NoteDocument): void {
+  flush(currentValue())
+  applyDocument(node)
+}
+
+/**
+ * 手上这一份算不算「有没保存的修改」。
+ *
+ * 不能只看组件里的 `saved`：写盘失败（被 Rust 以「别处改过」拒绝）之后，`flush` 已经把
+ * `saved` 推进到那段新正文了，可磁盘上并没有它。所以由上层把**最后一次真正落盘 / 读盘的
+ * 内容**传进来比对；两侧都是空白（`''` 与 Vditor 的 `'\n'`）不算改动，与 `sameText` 同一口径。
+ */
+function hasUnsaved(base: string): boolean {
+  const current = currentValue()
+  if (current === undefined)
+    return pending !== null
+  return !sameText(current, base)
+}
+
+/**
+ * 丢掉手上这一份、整份换成 `node` 的正文（防抖里攒着的也一起丢）。
+ *
+ * 只在**上层已经确认过「按磁盘重读」**时用：它不 flush，不会把编辑器里的旧正文写回去。
+ * 正文从参数进来而不是读 `props.note` —— 上层刚把 store 里那一份换掉，props 未必已经跟上。
+ */
+function discardAndReload(node: NoteDocument): void {
+  if (timer !== null) {
+    window.clearTimeout(timer)
+    timer = null
+  }
+  applyDocument(node)
 }
 
 /**
@@ -410,7 +459,12 @@ async function uploadImages(files: File[]): Promise<string | null> {
   if (props.readOnly)
     return '只读模式：图片没有上传（Ctrl+/ 切回可写再贴）'
 
-  if (!settings.settings.noteImageRepo) {
+  // 独立 Markdown 编辑窗口：没有「笔记本」这一层，一次上传会把图片推到图片仓库里
+  // 一个临时层级 —— 不是那个窗口里期待的动作，挡下来并说清楚（笔记页行为不变）
+  if (props.allowImageUpload === false)
+    return '这个编辑窗口不上传图片：粘贴图片只在笔记页里推到图片仓库'
+
+  if (!props.imageRepo) {
     return '还没有配置图片仓库：设置 → 笔记图片，填一个 git 仓库地址后，粘贴的图片会自动传上去'
   }
 
@@ -426,7 +480,7 @@ async function uploadImages(files: File[]): Promise<string | null> {
         return `读不出这张图片的内容：${file.name || '粘贴的图片'}`
 
       const result = await window.workbench.uploadNoteImage({
-        repo: settings.settings.noteImageRepo,
+        repo: props.imageRepo ?? '',
         root: props.root,
         name: imageFileName({ mime: file.type }),
         data,
@@ -493,7 +547,7 @@ onMounted(() => {
     lang: 'zh_CN',
     // 工具带藏起来之后，界面上没有别的入口提示「格式在哪」，所以在这里说一句；
     // 「Ctrl+点击」与「Ctrl+/」也一样 —— 那两下是隐形的，不写在这儿就没人知道
-    placeholder: '写点什么…markdown 直接写；图片粘贴即上传，格式走右键菜单；Ctrl+点击链接可打开，Ctrl+/ 切只读',
+    placeholder: props.placeholder ?? DEFAULT_PLACEHOLDER,
     // 缓存与落盘都归我们：Vditor 自带的那份存在 localStorage 里，会与磁盘上的 .md 打架
     cache: { enable: false },
     counter: { enable: false },
@@ -568,8 +622,19 @@ onBeforeUnmount(() => {
 defineExpose({
   /** 立刻把攒着的那一份交出去，不等 `SAVE_DELAY` */
   flushAll: () => flush(currentValue()),
+  /**
+   * 编辑器现在的正文（只读，不触发写盘）。
+   *
+   * 独立编辑窗口在「上一次保存被拒」之后要重试：那时 `flushAll` 不会重复交出
+   * 同一段正文（`saved` 已经推进过了），重试得自己拿这份内容再发一次。
+   */
+  currentContent: (): string | undefined => currentValue(),
   /** 用上层刚读回来的那一份（`props.note`）整份重置正文 */
   reloadFromProps: () => load(props.note),
+  /** 手上这一份与 `base`（最后一次真正落盘 / 读盘的内容）比，有没有未保存的修改 */
+  hasUnsaved,
+  /** 丢掉手上这一份、整份换成 `node`（上层确认「按磁盘重读」之后才用；不 flush） */
+  discardAndReload,
 })
 </script>
 
@@ -586,7 +651,7 @@ defineExpose({
     （踩过：现象是「只读之后滚不动了」，看着与滚动无关，其实坏在布局上）。这一层是我们自己的元素，
     Vditor 不碰，挂在它身上两边都安全。
   -->
-  <div class="editor-wrap" :class="{ 'is-readonly': readOnly }">
+  <div class="editor-wrap" :class="{ 'is-readonly': readOnly, 'is-dark': theme === 'dark' }">
     <div
       ref="host"
       class="editor"
@@ -681,6 +746,17 @@ defineExpose({
 .editor :deep(.vditor-wysiwyg pre.vditor-reset),
 .editor :deep(.vditor-sv .vditor-reset) {
   background-color: transparent;
+}
+
+/**
+ * 引用块左侧那条竖线：Vditor 的内容主题给的是 `#eaecef`（比这张半透明卡片还亮），
+ * 压上来像一道白边。亮色取 `--border-strong` —— 页面里别处的引用（MarkdownView）都是这一档；
+ * 暗色不动，Vditor 自带的那条 `#d1d5da` 本身就是清楚的亮灰。
+ *
+ * 明暗那个类挂在 `.editor-wrap` 上，理由与只读那一档相同（见模板里那段）。
+ */
+.editor-wrap:not(.is-dark) :deep(.vditor-reset blockquote) {
+  border-left-color: var(--border-strong);
 }
 
 /**

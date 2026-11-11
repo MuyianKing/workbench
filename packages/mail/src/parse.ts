@@ -515,6 +515,34 @@ export function displayDate(raw: string): string {
   return date.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
 }
 
+/**
+ * 头部日期 → 清单上的短串：今天只给时刻（19:35），昨天给「昨天」，
+ * 同年给「11/07」，跨年给「2025/11/07」。列表行里不再重复每天的日期，
+ * 一眼能认出「是不是今天 / 多久以前」就够。
+ *
+ * `now` 只为单测注入；生产侧用当前时间。解析不动原样给。
+ */
+export function displayListDate(raw: string, now: Date = new Date()): string {
+  const text = raw.trim()
+  if (!text)
+    return ''
+  const date = new Date(text)
+  if (Number.isNaN(date.getTime()))
+    return text
+
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const day = new Date(date.getFullYear(), date.getMonth(), date.getDate())
+  const dayDiff = Math.round((today.getTime() - day.getTime()) / 86_400_000)
+
+  if (dayDiff === 0)
+    return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
+  if (dayDiff === 1)
+    return '昨天'
+  if (date.getFullYear() === now.getFullYear())
+    return `${String(date.getMonth() + 1).padStart(2, '0')}/${String(date.getDate()).padStart(2, '0')}`
+  return `${date.getFullYear()}/${String(date.getMonth() + 1).padStart(2, '0')}/${String(date.getDate()).padStart(2, '0')}`
+}
+
 /** 头部日期 → 时间戳（多账户合并清单按它排序）。解析不动给 0 —— 没有日期的信排最后。 */
 export function mailTime(raw: string): number {
   const time = Date.parse(raw.trim())

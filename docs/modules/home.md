@@ -6,7 +6,9 @@
 
 ## 约束
 
-关键落点：`packages/core/src/activity.ts`（活跃度的分项与总数、连续天数 `streakOf`）、`packages/ai/src/ai-news.ts`（RSS 解析与逐源缓存策略）、
+关键落点：`packages/core/src/activity.ts`（活跃度的分项与总数、连续天数 `streakOf`、多机账本求和）、
+`apps/desktop/src/renderer/src/workbench/activity.ts`（记一笔与多机同步：本机推 / 别人的只合并不落盘）、
+`packages/ai/src/ai-news.ts`（RSS 解析与逐源缓存策略）、
 `packages/weather/src/weather.ts`（WMO 码表与两条接口回包的解析）、`stores/settings.ts`（布局与卡片开关的落盘）、
 Rust 侧 `ai_news.rs`（热点源白名单）与 `weather.rs`（天气主机白名单）。
 
@@ -76,6 +78,12 @@ Rust 侧 `ai_news.rs`（热点源白名单）与 `weather.rs`（天气主机白�
   **记一笔的出口只有一个**：`workbench/activity.ts` 的 `recordActivity`（写账 + 广播 `activityChanged` 成对），
   渲染层拿不到它、只订阅广播；唯一的例外是 AI 助手那一轮 —— 它在 store 里才知道跑完了
   （`stores/ai.ts` 的 `settle`），走的是暴露出去的同名通道，最终仍落到那一处。
+  **开了同步时这张图是「多台机器合起来」的**：每台机器的账本推 `activity/<设备id>.json`（只有日期与各来源次数，
+  没有操作明细），读回来按天按来源**求和**（同一天两台机器各做一次就是两次，见 `mergeActivityBreakdowns`）。
+  本机文件里**不掺**别人的数 —— 写回去的话下一次推送就会把别人的算成自己的，两台机器互相翻倍；
+  别的机器那份只在内存里合并。首页每分钟重取一次（合并只在内存里，不到同步点不联网），
+  同步一小时一轮（取活跃度时顺带节流触发，推完 / 拉完广播 `activityChanged`），
+  没登录 / 没配仓库时只剩本机。**两台机器都要升到带这条同步的版本**之后才互相看得见。
   **深浅那四档从主题色掺出来**（38 / 60 / 80 / 100% 掺进**空格子那一档** `--bg-inset`，最深一档就是
   主题色本身）。底色必须是空格子、不能是面底色：浅色主题色掺进白色会被白色吃掉 —— 亮绿 #6fb684 掺 20%
   出来与空格子只差几个色阶，「这天只做了一件事」和「什么都没做」看起来一样（2026-10-30 就是这么被当成图坏了）。

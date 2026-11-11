@@ -26,6 +26,15 @@
     "copyright": "Copyright (c) 2026 muyian",
     "targets": ["nsis"],
     "icon": ["icon.ico"],
+    "fileAssociations": [
+      {
+        "ext": ["md", "markdown"],
+        "name": "WorkbenchMarkdown",
+        "description": "Markdown 文档",
+        "mimeType": "text/markdown",
+        "role": "Editor"
+      }
+    ],
     "resources": {
       "../resources/backgrounds": "backgrounds",
       "../resources/pi": "pi"

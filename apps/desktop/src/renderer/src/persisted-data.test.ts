@@ -5,6 +5,13 @@ import { describe, expect, it } from 'vitest'
 import { DEFAULT_STORED_SETTINGS, mergeSettingsAppearance, migrateAppearanceIntoTheme, sanitizeSettings, splitSettingsPatch } from './persisted-data'
 import { DEFAULT_SETTINGS } from './types'
 
+describe('git 页上次打开的仓库', () => {
+  it('老数据文件里没有时是空串；路径去空白与末尾分隔符', () => {
+    expect(sanitizeSettings({}).gitRepo).toBe('')
+    expect(sanitizeSettings({ gitRepo: '  E:/repo/  ' }).gitRepo).toBe('E:/repo')
+  })
+})
+
 describe('设置里那颗悬浮按钮的位置', () => {
   it('老数据文件里没有这一项时回到「跟随终端面板」', () => {
     expect(sanitizeSettings({}).terminalButtonTop).toBeNull()
@@ -213,8 +220,9 @@ describe('按落点拆一份设置补丁', () => {
       'styles',
       'video',
       'etf',
+      'git',
     ])
-    expect(sanitizeAppearanceSettings({ viewOrder: 'notes' }).viewOrder.length).toBe(14)
+    expect(sanitizeAppearanceSettings({ viewOrder: 'notes' }).viewOrder.length).toBe(15)
   })
 
   it('合回来的设置与拆之前一致', () => {

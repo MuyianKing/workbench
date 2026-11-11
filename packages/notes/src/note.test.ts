@@ -1,6 +1,6 @@
 import type { NoteEntry, NoteNode } from './note'
 import { describe, expect, it } from 'vitest'
-import { buildNoteTree, countNodes, countNotes, findNoteNode, isNoteFile, isValidNoteName, joinRel, normalizeRel, NOTE_HISTORY_MAX, NOTE_TREE_EXPANDED_MAX, noteChain, noteDisplayName, noteDropAllowed, noteFileName, noteNameProblem, noteRootName, parentRel, pushNoteHistory, relName, removeFromNoteHistory, resolveNoteLink, sanitizeNoteHistory, sanitizeNoteName, sanitizeNoteRoot, sanitizeNoteTreeExpanded, sortNoteNodes, uniqueNoteName } from './note'
+import { buildNoteTree, countNodes, countNotes, findNoteNode, isNoteFile, isValidNoteName, joinRel, normalizeRel, NOTE_HISTORY_MAX, NOTE_TREE_EXPANDED_MAX, noteAbsPath, noteChain, noteDisplayName, noteDropAllowed, noteFileName, noteNameProblem, noteRootName, parentRel, pushNoteHistory, relName, removeFromNoteHistory, resolveNoteLink, sanitizeNoteHistory, sanitizeNoteName, sanitizeNoteRoot, sanitizeNoteTreeExpanded, sortNoteNodes, uniqueNoteName } from './note'
 
 function dir(rel: string): NoteEntry {
   return { rel, name: relName(rel), isDir: true }
@@ -43,6 +43,17 @@ describe('路径', () => {
   it('笔记名字取路径最后一段', () => {
     expect(noteRootName('D:\\notes\\我的笔记')).toBe('我的笔记')
     expect(noteRootName('D:/notes/')).toBe('notes')
+  })
+
+  it('拼绝对路径：相对路径换成反斜杠，盘根不丢分隔符', () => {
+    expect(noteAbsPath('D:\\notes', '工作/周报.md')).toBe('D:\\notes\\工作\\周报.md')
+    expect(noteAbsPath('D:/notes/', '周报.md')).toBe('D:\\notes\\周报.md')
+    // 根自己：末尾的分隔符留着；`C:` 与 `C:\` 在 Windows 上不是一个地方
+    expect(noteAbsPath('D:/notes/', '')).toBe('D:\\notes')
+    expect(noteAbsPath('C:\\', '周报.md')).toBe('C:\\周报.md')
+    expect(noteAbsPath('C:\\', '')).toBe('C:\\')
+    // 没选笔记本时什么都不拼（别回一个相对路径让人以为是绝对路径）
+    expect(noteAbsPath('', '周报.md')).toBe('')
   })
 })
 

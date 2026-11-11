@@ -299,10 +299,8 @@ pub fn claim_campaigns(account: &mut Account) -> ClaimResult {
                 if let Some(code) = code {
                     codes.insert(item.id.clone(), code);
                 }
-                let amount = data
-                    .get("amount")
-                    .and_then(serde_json::Value::as_i64)
-                    .unwrap_or(0);
+                // 领取响应不一定带面额（实测只回 success），取不到就退回活动列表里的 `benefit.amount`
+                let amount = claim_reward(&data, item.benefit_amount);
                 result.reward_credits += amount;
                 record_activity_with(
                     account,
@@ -330,6 +328,39 @@ pub fn claim_campaigns(account: &mut Account) -> ClaimResult {
         "已领取可用的活动".into()
     };
     result
+}
+
+/// 本次领到的积分：优先认响应里的面额，响应没给就用活动列表里的 `benefit.amount`。
+fn claim_reward(data: &serde_json::Value, benefit_amount: i64) -> i64 {
+    match claim_amount(data) {
+        Some(value) if value > 0 => value,
+        _ => benefit_amount,
+    }
+}
+
+/// 领取响应里的本次面额。上游不一定回 `amount`；数字可能是整数、浮点或字符串。
+fn claim_amount(data: &serde_json::Value) -> Option<i64> {
+    for key in ["amount", "rewardCredits", "credits"] {
+        if let Some(value) = data.get(key).and_then(json_i64) {
+            return Some(value);
+        }
+    }
+    data.get("benefit")
+        .and_then(|benefit| benefit.get("amount"))
+        .and_then(json_i64)
+}
+
+fn json_i64(value: &serde_json::Value) -> Option<i64> {
+    if let Some(number) = value.as_i64() {
+        return Some(number);
+    }
+    if let Some(number) = value.as_f64() {
+        return Some(number.round() as i64);
+    }
+    value
+        .as_str()
+        .and_then(|text| text.trim().parse::<f64>().ok())
+        .map(|number| number.round() as i64)
 }
 
 fn find_code(value: &serde_json::Value) -> Option<String> {
@@ -456,35 +487,42 @@ pub fn campaign_items(data: &serde_json::Value, account: &Account) -> Vec<Campai
     out
 }
 
-/// 读官方积分消耗热力（近 N 天）。
+/// 读官方积分消耗热力。上游回的是**一整年**的点（`items`），窗口由界面按近 30 天裁。
 pub fn credit_usage(account: &Account) -> Vec<HeatmapPoint> {
     let Ok(value) = get_json(account, "GET", qd_upstream::PATH_CREDIT_HEATMAP, None) else {
         return Vec::new();
     };
     let data = value.get("data").cloned().unwrap_or(value);
-    let mut points = Vec::new();
-    let Some(object) = data.as_object() else {
-        return points;
+    parse_heatmap(&data)
+}
+
+/// 热力响应归一：实测是 `{ items: [{ date, value }] }`（371 天，含全年零值），
+/// 旧形态另有 `daily`；`levels` / `total` / `unit` / `year` 不是日历数据，忽略。
+fn parse_heatmap(data: &serde_json::Value) -> Vec<HeatmapPoint> {
+    let Some(list) = data
+        .get("items")
+        .or_else(|| data.get("daily"))
+        .and_then(serde_json::Value::as_array)
+    else {
+        return Vec::new();
     };
-    // 常见形态：{ daily: [{date, value|credits}] } 或 { "2026-10-01": 12 }
-    if let Some(list) = object.get("daily").and_then(serde_json::Value::as_array) {
-        for item in list {
-            let date = item
-                .get("date")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("")
-                .to_string();
-            if date.is_empty() {
-                continue;
-            }
-            let value = item
-                .get("value")
-                .or_else(|| item.get("credits"))
-                .or_else(|| item.get("amount"))
-                .and_then(serde_json::Value::as_f64)
-                .unwrap_or(0.0);
-            points.push(HeatmapPoint { date, value });
+    let mut points = Vec::new();
+    for item in list {
+        let date = item
+            .get("date")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        if date.is_empty() {
+            continue;
         }
+        let value = item
+            .get("value")
+            .or_else(|| item.get("credits"))
+            .or_else(|| item.get("amount"))
+            .and_then(serde_json::Value::as_f64)
+            .unwrap_or(0.0);
+        points.push(HeatmapPoint { date, value });
     }
     points.sort_by(|a, b| a.date.cmp(&b.date));
     points
@@ -571,11 +609,7 @@ fn earning_rows_at(path: &std::path::Path, since: i64) -> Vec<EarningRow> {
         if !row.ok || row.ts < since {
             continue;
         }
-        let credits = if row.credits > 0 {
-            row.credits
-        } else {
-            legacy_checkin_credits(&row)
-        };
+        let credits = effective_credits(&row.task, &row.message, row.credits);
         if credits <= 0 {
             continue;
         }
@@ -600,7 +634,11 @@ pub fn aggregate_earnings(rows: &[EarningRow], since: i64) -> Vec<EarningPoint> 
     let mut seen = std::collections::HashSet::new();
     let mut totals: BTreeMap<String, i64> = BTreeMap::new();
     for row in rows {
-        if row.ts < since || row.credits <= 0 {
+        if row.ts < since {
+            continue;
+        }
+        let credits = effective_credits(&row.task, &row.message, row.credits);
+        if credits <= 0 {
             continue;
         }
         let key = (
@@ -612,7 +650,7 @@ pub fn aggregate_earnings(rows: &[EarningRow], since: i64) -> Vec<EarningPoint> 
         if !seen.insert(key) {
             continue;
         }
-        *totals.entry(row.date.clone()).or_default() += row.credits;
+        *totals.entry(row.date.clone()).or_default() += credits;
     }
     totals
         .into_iter()
@@ -620,17 +658,50 @@ pub fn aggregate_earnings(rows: &[EarningRow], since: i64) -> Vec<EarningPoint> 
         .collect()
 }
 
-/// 旧记录的签到金额写在说明里（`签到成功 +100 积分`）；不是签到就不猜。
-fn legacy_checkin_credits(row: &ActivityRow) -> i64 {
-    if row.task != "checkin" {
-        return 0;
+/// 新记录直接用 `credits`；旧记录没有金额，从说明里回读。
+fn effective_credits(task: &str, message: &str, credits: i64) -> i64 {
+    if credits > 0 {
+        credits
+    } else {
+        legacy_credits(task, message)
     }
-    row.message
-        .split('+')
-        .nth(1)
-        .and_then(|rest| rest.split_whitespace().next())
-        .and_then(|value| value.parse().ok())
-        .unwrap_or(0)
+}
+
+/// 旧记录的金额写在说明里：签到是「签到成功 +100 积分」，
+/// 活动是标题里的面额（「领取活动 每天领 100 Credits」）；看不出金额的不猜。
+fn legacy_credits(task: &str, message: &str) -> i64 {
+    match task {
+        "checkin" => message
+            .split('+')
+            .nth(1)
+            .and_then(|rest| rest.split_whitespace().next())
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(0),
+        "campaign" => title_credits(message.strip_prefix("领取活动 ").unwrap_or(message)),
+        _ => 0,
+    }
+}
+
+/// 活动标题里写在「Credits / 积分」前面的面额（支持千分位逗号）。
+fn title_credits(title: &str) -> i64 {
+    let lower = title.to_lowercase();
+    for marker in ["credits", "积分"] {
+        for (index, _) in lower.match_indices(marker) {
+            let head = lower[..index].trim_end();
+            let digits: String = head
+                .chars()
+                .rev()
+                .skip_while(|ch| !ch.is_ascii_digit())
+                .take_while(|ch| ch.is_ascii_digit() || *ch == ',')
+                .filter(|ch| ch.is_ascii_digit())
+                .collect();
+            let number: String = digits.chars().rev().collect();
+            if let Ok(value) = number.parse::<i64>() {
+                return value;
+            }
+        }
+    }
+    0
 }
 
 // ---------- 自动签到 ----------
@@ -753,6 +824,19 @@ mod tests {
         }
     }
 
+    fn campaign(date: &str, ts: i64, ok: bool, credits: i64, message: &str) -> ActivityRow {
+        ActivityRow {
+            ts,
+            date: date.into(),
+            uid: "u1".into(),
+            nickname: "n".into(),
+            task: "campaign".into(),
+            ok,
+            message: message.into(),
+            credits,
+        }
+    }
+
     #[test]
     fn 每日获取按自然日相加且只算成功() {
         let dir = std::env::temp_dir().join(format!("wb-qoder-earn-{}", uuid::Uuid::new_v4()));
@@ -761,6 +845,8 @@ mod tests {
         let rows = vec![
             activity("2026-11-07", 200, true, 100, "签到成功 +100 积分"),
             activity("2026-11-07", 300, true, 50, "领取活动 每日福利"),
+            // 旧活动记录没有 credits：从标题里的面额回读（真实现场的「每天领 100 Credits」）
+            campaign("2026-11-07", 320, true, 0, "领取活动 每天领 100 Credits"),
             // 旧记录没有 credits，回读说明里的金额
             activity("2026-11-06", 150, true, 0, "签到成功 +100 积分"),
             // 失败 / 窗口外 / 没有金额的旧记录都不进图
@@ -780,10 +866,48 @@ mod tests {
             points,
             vec![
                 EarningPoint { date: "2026-11-06".into(), credits: 100 },
-                EarningPoint { date: "2026-11-07".into(), credits: 150 },
+                EarningPoint { date: "2026-11-07".into(), credits: 250 },
             ]
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn 旧活动记录从标题回读面额() {
+        assert_eq!(title_credits("每天领 100 Credits"), 100);
+        assert_eq!(title_credits("领取 1,000 积分"), 1000);
+        assert_eq!(title_credits("首次订阅福利"), 0);
+        assert_eq!(legacy_credits("campaign", "领取活动 每天领 100 Credits"), 100);
+        assert_eq!(legacy_credits("campaign", "领取活动 首次订阅福利"), 0);
+        assert_eq!(legacy_credits("checkin", "签到成功 +100 积分"), 100);
+    }
+
+    #[test]
+    fn 领取响应没有面额时退回活动面额() {
+        assert_eq!(claim_reward(&serde_json::json!({ "success": true }), 100), 100);
+        assert_eq!(claim_reward(&serde_json::json!({ "amount": "50" }), 100), 50);
+        assert_eq!(claim_reward(&serde_json::json!({ "rewardCredits": 60.0 }), 100), 60);
+        assert_eq!(claim_reward(&serde_json::json!({ "benefit": { "amount": 70 } }), 100), 70);
+    }
+
+    #[test]
+    fn 官方消耗热力按_items_解析() {
+        let data = serde_json::json!({
+            "items": [
+                { "date": "2026-11-07", "value": 105.5102274776 },
+                { "date": "2026-10-15", "value": 262 },
+                { "date": "2026-11-08", "value": 0 }
+            ],
+            "levels": [0, 10, 100],
+            "total": 367.5,
+            "unit": "credits",
+            "year": 2026
+        });
+        let points = parse_heatmap(&data);
+        assert_eq!(points.len(), 3);
+        assert_eq!(points[0].date, "2026-10-15");
+        assert_eq!(points[1].value, 105.5102274776);
+        assert_eq!(points[2].date, "2026-11-08");
     }
 
     #[test]

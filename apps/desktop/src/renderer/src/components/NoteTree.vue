@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { NoteKind, NoteNode } from '@workbench/notes'
 import type { Component } from 'vue'
-import { Document, Folder, FolderAdd, Plus } from '@element-plus/icons-vue'
+import { CopyDocument, Document, Folder, FolderAdd, FolderOpened, Plus, Refresh, TopRight } from '@element-plus/icons-vue'
 import { noteChain, noteDropAllowed, parentRel } from '@workbench/notes'
 /**
  * 笔记目录树（左栏）。
@@ -14,9 +14,11 @@ import { noteChain, noteDropAllowed, parentRel } from '@workbench/notes'
  * 这里只补它没有的四件：
  *   1. **拖动**：文件拖进文件夹，或拖到树下面的**空白区**（= 移回最外层）。
  *      能不能落由 packages/notes/src/note.ts 的 `noteDropAllowed` 说了算，这里只把它接到 el-tree 的回调上；
- *   2. **右键菜单**：节点行上是新建笔记 / 新建文件夹 / 重命名 / 删除（触发区盖住整行，
- *      见样式里 el-dropdown 那两条，所以行尾的空白也算这一行）；
- *      落在空白区时只有前两项，且一律落在笔记本根目录 —— 顶部那条工具条去掉之后，
+ *   2. **右键菜单**：节点行上分两组 —— **写**（新建笔记 / 新建文件夹 / 重命名 / 删除）与
+ *      **读**（在资源管理器中显示 / 复制路径 / 用默认程序打开），触发区盖住整行，见样式里
+ *      el-dropdown 那两条，所以行尾的空白也算这一行；**同一时刻只开一个**（右击另一行先把
+ *      上一个关掉，见 use-exclusive-dropdown）；落在空白区时是「新建两项 + 刷新列表 +
+ *      在资源管理器中打开笔记本」，新建一律落在笔记本根目录 —— 顶部那条工具条去掉之后，
  *      新建就只剩右键与空态里那两颗按钮这两条路；
  *   3. **节点样式**：文件夹与笔记两副图标、选中态（自己画，不用 `highlight-current`：
  *      它那套「当前节点」是它自己的概念，与「编辑器里打开的是哪一篇」是两回事，
@@ -30,12 +32,14 @@ import { noteChain, noteDropAllowed, parentRel } from '@workbench/notes'
  * 自己不留一份副本 —— 上层要拿它落盘（见 NotesView 的 expandedKeys），
  * 组件里再存一份就变成「两份状态谁说了算」。
  *
- * 只读（`readOnly`，笔记页按 Ctrl+/ 切的那一档）下，这里只剩导航：节点行的菜单禁用、
- * 空白区的菜单不弹、拖动关掉、空态那两颗新建按钮不出现 —— 口径见那个 prop 的注释。
+ * 只读是**正文那一档**的事（见 NotesView），树不接它：这里的新建 / 重命名 / 删除 / 拖动
+ * 都是用户明确点下去、拖下去的（删除还有确认框），不属于「读的时候手一抖」那类误触 ——
+ * 把它们一起锁掉，只读就变成「连整理笔记都不许」了。
  */
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import EmptyState from '@/components/EmptyState.vue'
 import PanelLoading from '@/components/PanelLoading.vue'
+import { useExclusiveDropdown } from '@/composables/use-exclusive-dropdown'
 import { useFloatingDismiss } from '@/composables/use-floating-dismiss'
 import { useFloatingPosition } from '@/composables/use-floating-position'
 
@@ -54,14 +58,6 @@ const props = defineProps<{
    * `default-expanded-keys` 要的就是数组。
    */
   expanded: string[]
-  /**
-   * 只读（笔记页按 Ctrl+/ 切的那一档）：树上不给任何**写**的入口，只留导航。
-   *
-   * 于是三条路一起收起来：节点行与空白区的右键菜单、拖动、空态里那两颗新建按钮。
-   * **删除一篇笔记也是写** —— 只挡住正文的话，「只读」就是半句假话（用户按下去
-   * 以为动不了任何东西，其实能删掉一篇）。选中、展开、读盘照旧：那些是「看」。
-   */
-  readOnly: boolean
 }>()
 
 const emit = defineEmits<{
@@ -70,6 +66,16 @@ const emit = defineEmits<{
   'rename': [rel: string]
   'remove': [rel: string]
   'move': [payload: { rel: string, targetDir: string }]
+  /** 在资源管理器里选中它（文件带选中，文件夹直接进去） */
+  'reveal': [rel: string]
+  /** 在资源管理器里打开笔记本本身 */
+  'reveal-root': []
+  /** 复制它的绝对路径 */
+  'copy-path': [rel: string]
+  /** 用系统关联的默认程序打开（只对笔记；文件夹走 reveal） */
+  'open-default': [rel: string]
+  /** 重新读一遍文件夹 */
+  'refresh': []
   'update:expanded': [value: string[]]
 }>()
 
@@ -78,6 +84,9 @@ const treeRoot = ref<HTMLDivElement | null>(null)
 
 /** el-tree 认的字段名：数据里叫 name / children */
 const TREE_PROPS = { label: 'name', children: 'children' } as const
+
+/** 每行一个右键菜单，但同一时刻只许开一个（收口见 composables/use-exclusive-dropdown） */
+const { register: registerMenu, onChange: onMenuChange } = useExclusiveDropdown()
 
 /**
  * 展开 / 收起都只是把下一份清单报上去，状态本身在上层。
@@ -174,6 +183,19 @@ function folderOf(data: NoteNode): string {
 }
 
 function onCommand(command: string, data: NoteNode): void {
+  // 读的那几项：只把路径报上去，怎么落到系统上由上层（NotesView）负责
+  if (command === 'reveal') {
+    emit('reveal', data.rel)
+    return
+  }
+  if (command === 'copy-path') {
+    emit('copy-path', data.rel)
+    return
+  }
+  if (command === 'open-default') {
+    emit('open-default', data.rel)
+    return
+  }
   if (command === 'rename') {
     emit('rename', data.rel)
     return
@@ -190,10 +212,23 @@ function onCommand(command: string, data: NoteNode): void {
 
 // ---------- 空白区的右键菜单 ----------
 
-/** 空白区菜单的两项：都落在笔记本根目录 */
-const ROOT_ITEMS: { command: string, label: string, icon: Component }[] = [
+/**
+ * 空白区菜单：新建落在笔记本根目录；后两项是刷新与打开笔记本。
+ *
+ * `divided` 只是在那之前画一道分隔线，把新建与其余动作分开。
+ */
+interface RootItem {
+  command: string
+  label: string
+  icon: Component
+  divided?: boolean
+}
+
+const ROOT_ITEMS: RootItem[] = [
   { command: 'new-note', label: '新建笔记', icon: Plus },
   { command: 'new-folder', label: '新建文件夹', icon: FolderAdd },
+  { command: 'refresh', label: '刷新列表', icon: Refresh, divided: true },
+  { command: 'reveal', label: '在资源管理器中打开', icon: FolderOpened },
 ]
 
 const rootMenuOpen = ref(false)
@@ -209,15 +244,11 @@ const { pos: rootPos, place: placeRootMenu } = useFloatingPosition({
 })
 
 /**
- * 空白区（树下面那片没有节点的地方）右键：菜单里的新建落在根目录。
+ * 空白区（树下面那片没有节点的地方）右键：新建落在根目录，另两项是刷新与打开笔记本。
  *
  * 落在节点行上时让路 —— 那个事件是给节点自己的菜单的（它挂得更深，先收到）。
  */
 async function openRootMenu(event: MouseEvent): Promise<void> {
-  // 只读：空白区那两项都是「新建」，一个都不该出现 —— 连菜单本身也别弹（空的浮层更费解）
-  if (props.readOnly)
-    return
-
   const target = event.target as HTMLElement | null
   if (target?.closest('.el-tree-node__content'))
     return
@@ -233,6 +264,14 @@ async function openRootMenu(event: MouseEvent): Promise<void> {
 
 function runRootCommand(command: string): void {
   rootMenuOpen.value = false
+  if (command === 'refresh') {
+    emit('refresh')
+    return
+  }
+  if (command === 'reveal') {
+    emit('reveal-root')
+    return
+  }
   emit('create', { parentRel: '', kind: command === 'new-folder' ? 'folder' : 'note' })
 }
 
@@ -375,7 +414,7 @@ onBeforeUnmount(() => window.removeEventListener('dragend', onDragEnd))
       :auto-expand-parent="false"
       :expand-on-click-node="true"
       :highlight-current="false"
-      :draggable="!readOnly"
+      :draggable="true"
       :allow-drag="allowDrag"
       :allow-drop="allowDrop"
       @node-click="(data: NoteNode) => emit('select', data.rel)"
@@ -387,15 +426,15 @@ onBeforeUnmount(() => window.removeEventListener('dragend', onDragEnd))
       <template #default="{ data }">
         <!--
           右键菜单挂在标签上：位置由 el-dropdown 按指针算，不用自己摆一副浮动层。
-          **只读这一档不能把它整个拿掉**：它同时是「触发区盖住整行余宽」的那一层
-          （见样式里 `.el-tree-node__content > .el-dropdown` 那两条），拿掉行盒就塌了；
-          禁用它只是不再弹菜单，正好是这里要的（菜单里那四项没有一项是只读下能做的）。
+          它同时是「触发区盖住整行余宽」的那一层（见样式里
+          `.el-tree-node__content > .el-dropdown` 那两条），所以不能拿掉、也不能禁用。
         -->
         <el-dropdown
+          :ref="(el: unknown) => registerMenu(data.rel, el)"
           trigger="contextmenu"
           placement="bottom-start"
-          :disabled="readOnly"
           @command="(command: string) => onCommand(command, data)"
+          @visible-change="(visible: boolean) => onMenuChange(data.rel, visible)"
         >
           <span class="node" :class="{ 'is-active': data.rel === activeRel }" :title="data.name">
             <el-icon class="node__icon">
@@ -406,23 +445,28 @@ onBeforeUnmount(() => window.removeEventListener('dragend', onDragEnd))
           </span>
 
           <template #dropdown>
-            <!--
-              每一项也各自标一次 `disabled`：`el-dropdown` 那层的 `disabled` 是「别弹」，
-              这一层是「万一还是弹出来了，每一项也得是灰的」—— 四项没有一项在只读下做得成，
-              看上去点得动却什么都不发生更像坏了。
-            -->
             <el-dropdown-menu>
-              <el-dropdown-item command="new-note" :disabled="readOnly">
+              <el-dropdown-item command="new-note">
                 <el-icon><Plus /></el-icon>新建笔记
               </el-dropdown-item>
-              <el-dropdown-item command="new-folder" divided :disabled="readOnly">
+              <el-dropdown-item command="new-folder" divided>
                 <el-icon><FolderAdd /></el-icon>新建文件夹
               </el-dropdown-item>
-              <el-dropdown-item command="rename" divided :disabled="readOnly">
+              <el-dropdown-item command="rename" divided>
                 重命名
               </el-dropdown-item>
-              <el-dropdown-item command="remove" :disabled="readOnly">
+              <el-dropdown-item command="remove">
                 删除
+              </el-dropdown-item>
+              <el-dropdown-item command="reveal" divided>
+                <el-icon><FolderOpened /></el-icon>在资源管理器中显示
+              </el-dropdown-item>
+              <el-dropdown-item command="copy-path">
+                <el-icon><CopyDocument /></el-icon>复制路径
+              </el-dropdown-item>
+              <!-- 文件夹走 reveal 就是进到它里面；默认程序打开对文件夹没有意义 -->
+              <el-dropdown-item v-if="data.kind === 'note'" command="open-default">
+                <el-icon><TopRight /></el-icon>用默认程序打开
               </el-dropdown-item>
             </el-dropdown-menu>
           </template>
@@ -433,15 +477,15 @@ onBeforeUnmount(() => window.removeEventListener('dragend', onDragEnd))
     <!-- 首次扫盘还没回来：左栏先说一声，别让人对着半屏空白猜在干什么 -->
     <PanelLoading v-if="!loaded && !nodes.length" text="正在读取笔记…" />
 
-    <!-- 一篇都没有：一张小图 + 两颗按钮（只读下按钮与下面那句「右击新建」都不作数，一起收掉） -->
+    <!-- 一篇都没有：一张小图 + 两颗按钮 -->
     <EmptyState
       v-if="loaded && !nodes.length"
       compact
       :icon="Document"
       text="这个文件夹里还没有笔记"
-      :hint="readOnly ? '' : '也可以在这里右击新建。把现成的 markdown 文件放进这个文件夹，点一下底部那颗刷新也能看到。'"
+      hint="也可以在这里右击新建。把现成的 markdown 文件放进这个文件夹，点一下底部那颗刷新也能看到。"
     >
-      <template v-if="!readOnly" #actions>
+      <template #actions>
         <el-button
           type="primary"
           size="small"
@@ -469,17 +513,18 @@ onBeforeUnmount(() => window.removeEventListener('dragend', onDragEnd))
       @mousedown.prevent
       @contextmenu.prevent
     >
-      <button
-        v-for="item in ROOT_ITEMS"
-        :key="item.command"
-        class="root-menu__item"
-        type="button"
-        role="menuitem"
-        @click="runRootCommand(item.command)"
-      >
-        <el-icon><component :is="item.icon" /></el-icon>
-        {{ item.label }}
-      </button>
+      <template v-for="item in ROOT_ITEMS" :key="item.command">
+        <span v-if="item.divided" class="root-menu__sep" />
+        <button
+          class="root-menu__item"
+          type="button"
+          role="menuitem"
+          @click="runRootCommand(item.command)"
+        >
+          <el-icon><component :is="item.icon" /></el-icon>
+          {{ item.label }}
+        </button>
+      </template>
     </div>
   </Teleport>
 </template>
@@ -641,5 +686,12 @@ onBeforeUnmount(() => window.removeEventListener('dragend', onDragEnd))
 .root-menu__item:hover {
   color: var(--ink);
   background: var(--bg-subtle);
+}
+
+/* 分隔线：把「新建」与刷新 / 打开所在位置分开（与正文菜单那道同一档粗细） */
+.root-menu__sep {
+  height: 1px;
+  margin: 2px 0;
+  background: var(--border);
 }
 </style>

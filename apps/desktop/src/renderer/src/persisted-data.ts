@@ -110,6 +110,9 @@ export function sanitizeSettings(raw: unknown): StoredSettings {
   // 知识库文件夹（本机挑的一个目录，一个独立项目的根）：老数据文件里没有，默认空串 = 还没选过。
   // 与笔记 / 技能同一条收敛 —— 它同样要拿去拼文件路径
   value.kbDir = sanitizeNoteRoot(value.kbDir)
+  // Git 页上次打开的仓库根：老数据文件里没有，默认空串 = 还没打开过。
+  // 与上面几个目录同一条收敛 —— 它要拿去起 git 子进程
+  value.gitRepo = sanitizeNoteRoot(value.gitRepo)
   // 原始数据的来源映射（来源名 → 本机一个文件夹）：老数据文件里没有，默认空清单 =
   // 一律读库里的 data/raw。与 kbDir 同一类 —— 路径只对本机成立，逐项收敛
   // （缺 root / 缺名字的丢掉、同名与同一个文件夹去重、指到知识库文件夹里的按没配处理）

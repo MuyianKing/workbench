@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import type { VideoNode } from '@workbench/video'
-import { Close, Monitor } from '@element-plus/icons-vue'
 import { fitVideoFloatGeometry, nextVideoNode, nextVideoRate, resizeVideoFloat, VIDEO_NEXT_SECONDS, VIDEO_SEEK_SECONDS } from '@workbench/video'
 /**
  * 视频播放器本体：**全局单例**，挂在 App.vue 上（与终端面板同层），不随换页切换。
@@ -17,15 +16,26 @@ import { fitVideoFloatGeometry, nextVideoNode, nextVideoRate, resizeVideoFloat, 
  * 位置与尺寸落 theme.json（videoFloatX/Y/W/H，两段式跟手 / 落盘与视频树宽同一套）。
  * 「回到视频页」= 收回悬浮 + 把当前页切回去 —— 小窗内容原地传送进画布；「关闭」是停止播放。
  *
+ * **独立窗口是另一条路**（不在这个组件里播）：点视频页头部的「在独立窗口播放」后，
+ * 这里把当前秒数与播放态交给 `video.html` 那扇顶层窗口，然后把自己的 `<video>` 卸掉
+ * （`store.detached`）；两边的 active / 速率 / 收回 / 关闭经 Rust 的两条事件同步。
+ * 收回时按 `store.resume` 在 `loadedmetadata` 里 seek 回同一秒，**播放一秒不重复、不跳**。
+ *
  * 快捷键跟着播放器走而不是跟着页面走：视频页内仍是整套（空格 / 方向键 / 速率），
  * 悬浮时只拦空格 —— 笔记页的树还要用方向键导航，而 Vditor 里打字由 typingOn 挡住。
- * 拦截规则照旧：捕获阶段拦下并 stopPropagation（媒体控件自己也会拿这几个键），
- * 没有正播的视频时一个键都不拦。
+ * **独立播放时主窗口一个键都不拦**（窗口自己有整套）。拦截规则照旧：捕获阶段拦下并
+ * stopPropagation（媒体控件自己也会拿这几个键），没有正播的视频时一个键都不拦。
+ *
+ * **原生控件不许留住焦点**（见 releaseScreenFocus）：Chromium 的媒体控件在 `<video>`
+ * 自己的 UA shadow DOM 里，焦点落进去之后 keydown 连 window 捕获阶段都收不到 ——
+ * 按过原生播放键 / 拖过进度条，空格就会「失效」，直到点别处把焦点挪走。
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import VideoRateMenu from '@/components/VideoRateMenu.vue'
+import VideoPlayerBar from '@/components/VideoPlayerBar.vue'
+import VideoUpNext from '@/components/VideoUpNext.vue'
 import { startPointerDrag } from '@/composables/use-pointer-drag'
 import { useVideoStageHost } from '@/composables/use-video-stage'
+import { notifyError } from '@/notify'
 import { useNavStore } from '@/stores/nav'
 import { useSettingsStore } from '@/stores/settings'
 import { useVideoStore } from '@/stores/video'
@@ -36,13 +46,17 @@ const nav = useNavStore()
 
 const stageHost = useVideoStageHost()
 
+/** 独立窗口发回来的事件取消函数（挂载后才有） */
+let offWindowEvents: (() => void) | null = null
+
 /** 在视频页：内嵌（传送进画布）；不在：宿主随视频页一起脱离文档，接着出声 */
 const inline = computed(() => nav.activeView === 'video')
 /**
  * 小窗显示没有：手上还有视频、且用户点过「悬浮播放」（store 的显式意图 —— 离开
  * 视频页**不**自动浮）。播的、暂停的都算：小窗是遥控器也是画面。
+ * 独立窗口播着时不算：那时主窗口里没有可浮的元素。
  */
-const floating = computed(() => !!store.active && store.floatRequested)
+const floating = computed(() => !!store.active && store.floatRequested && !store.detached)
 
 // 进视频页就收回悬浮：画布才是视频在那一页的正位（与悬浮窗上「回到视频页」同一语义）
 watch(inline, (value) => {
@@ -71,6 +85,35 @@ watch(
   () => store.rate,
   () => applyRate(),
 )
+
+/** 从独立窗口收回时带来、还没落下去的那一秒（见下面的 detached watcher 与 onLoadedMetadata） */
+const resumeSeek = ref<{ time: number, play: boolean } | null>(null)
+
+/**
+ * 元数据到位：先贴速率，再把收回时要落的那一秒落下去。
+ *
+ * seek 必须等元数据 —— 刚挂上的 `<video>` duration 还是 NaN，直接写 currentTime
+ * 要么被忽略、要么报错。收回时主窗口的 `<video>` 是重新挂的（独立播放期间它被卸掉了），
+ * 所以这条是「从独立窗口接着播」的唯一入口；`play` 为 false 就停在那一秒。
+ */
+function onLoadedMetadata(): void {
+  applyRate()
+  const video = playerRef.value
+  const seek = resumeSeek.value
+  if (!video || !seek)
+    return
+  resumeSeek.value = null
+  if (Number.isFinite(seek.time) && seek.time > 0) {
+    try {
+      video.currentTime = seek.time
+    }
+    catch {
+      // 可 seek 区间还没出来：停在首帧，用户按空格即可
+    }
+  }
+  if (seek.play)
+    void video.play().catch(() => {})
+}
 
 /** 新视频挂上来（元素随 :key 整个换新）：把速率贴上去；播不播看 store 的意图 ——
  * 点树上的直接开播，恢复上次的那个只加载、停在首帧（空格或播放键在这儿等着） */
@@ -148,6 +191,95 @@ function cancelUpNext(): void {
   clearUpNext()
 }
 
+// ---------- 独立窗口：交出播放权 / 收回 ----------
+
+/**
+ * 点「在独立窗口播放」：store 只置了一个意图，真正读秒数得在这里（只有这个组件拿着
+ * `<video>`）。先暂停再开窗，窗口从同一秒接上；开不起来就按原来的播放态接着播。
+ */
+watch(
+  () => store.detachedRequest,
+  async (wanted) => {
+    if (!wanted)
+      return
+    const source = store.active
+    const video = playerRef.value
+    if (!source || !video) {
+      store.detachFailed()
+      notifyError('没有正在播放的视频')
+      return
+    }
+
+    const time = Number.isFinite(video.currentTime) ? video.currentTime : 0
+    const playing = !video.paused
+    video.pause()
+    clearUpNext()
+
+    const result = await window.workbench.openVideoWindow({
+      root: store.root,
+      source,
+      rate: store.rate,
+      time,
+      playing,
+      playlist: store.playlist,
+    })
+    if (!result.ok) {
+      store.detachFailed()
+      notifyError(result.error ?? '打开独立视频窗口失败')
+      if (playing)
+        void video.play().catch(() => {})
+      return
+    }
+    store.detachOpened()
+  },
+)
+
+/** 收回：等主窗口的 `<video>` 重新挂上、元数据到位后 seek 回同一秒 */
+watch(
+  () => store.detached,
+  async (value, previous) => {
+    if (!previous || value)
+      return
+    const seek = store.consumeResume()
+    if (!seek)
+      return
+    await nextTick()
+    if (!playerRef.value) {
+      resumeSeek.value = null
+      return
+    }
+    resumeSeek.value = { time: seek.time, play: seek.playing }
+    // 本地文件可能快得在 nextTick 之前就 loadedmetadata 了：补一次
+    if (playerRef.value.readyState >= 1)
+      onLoadedMetadata()
+  },
+)
+
+onMounted(() => {
+  // 浏览器预览里没有 window.workbench（见 workbench/index.ts 的 installTauriWorkbench）：
+  // 这条订阅只在 Tauri 里挂得上，别的功能照旧
+  offWindowEvents = window.workbench?.onVideoWindowEvent((event) => {
+    switch (event.kind) {
+      case 'active':
+        // 独立窗口自动接下一部：视频页的标题、选中项与「上次打开」都跟着它
+        store.detachedActive(event.source, event.rate)
+        break
+      case 'rate':
+        store.detachedRate(event.rate)
+        break
+      case 'dock':
+        store.detachedDocked(event)
+        void nav.setActiveView('video')
+        break
+      case 'closed':
+        // 收回触发的关闭已经由 dock 交回播放权了，别把刚恢复的画面又清掉
+        if (!event.docked)
+          store.detachedClosed()
+        break
+    }
+  }) ?? null
+})
+
 function togglePlay(): void {
   const video = playerRef.value
   if (!video)
@@ -163,6 +295,22 @@ function seekBy(delta: number): void {
   if (!video || !Number.isFinite(video.duration))
     return
   video.currentTime = Math.max(0, Math.min(video.duration, video.currentTime + delta))
+}
+
+/**
+ * **原生媒体控件一拿到焦点，整页就收不到键盘了** —— 这是 Chromium 的坑：
+ * 控件在 `<video>` 自己的 UA shadow DOM 里，焦点落在那些按钮 / 进度条上的这段时间，
+ * keydown 连 window 捕获阶段都到不了（不是被谁拦下，是压根不进页面），按空格要么被
+ * 控件自己吃掉、要么毫无反应；点一下画面把焦点挪走才恢复。点过原生播放键、拖过进度条
+ * 之后「空格暂停 / 播放失效」就是它 —— 焦点还留在控件里。
+ *
+ * 快捷键整套归我们管（原生控件的键盘操作本来也用不上），所以焦点一贴上来就 blur 掉。
+ * 鼠标操作照常：播放键 / 音量 / 全屏走 click，进度条拖动走 pointer capture，都不依赖焦点
+ * （试过 mousedown 上 preventDefault 想不让它聚焦 —— 控件是脚本里自己 focus 的，挡不住）。
+ * `focusin` 一起挂：焦点落进 shadow DOM 时 `focus` 不一定再发一次。
+ */
+function releaseScreenFocus(): void {
+  playerRef.value?.blur()
 }
 
 // ---------- 快捷键 ----------
@@ -234,7 +382,7 @@ function onKeyup(event: KeyboardEvent): void {
   event.stopPropagation()
 }
 
-/** 内嵌或悬浮着就挂键，两样都不是（不在视频页、也没悬浮 —— 背景音接着播也算）就摘掉 —— 捕获监听成对摘挂 */
+/** 内嵌 / 悬浮时挂键；独立播放、不在视频页也没悬浮（背景音接着播）都摘掉 —— 捕获监听成对摘挂 */
 function bindKeys(bind: boolean): void {
   if (bind) {
     window.addEventListener('keydown', onKeydown, true)
@@ -246,12 +394,16 @@ function bindKeys(bind: boolean): void {
   }
 }
 
-watch([inline, floating], ([nextInline, nextFloating]) => bindKeys(nextInline || nextFloating), {
-  immediate: true,
-})
+watch(
+  [inline, floating, () => store.detached],
+  ([nextInline, nextFloating, nextDetached]) =>
+    bindKeys(!nextDetached && (nextInline || nextFloating)),
+  { immediate: true },
+)
 
 onBeforeUnmount(() => {
   bindKeys(false)
+  offWindowEvents?.()
   clearUpNext()
 })
 
@@ -373,27 +525,20 @@ function closePlayer(): void {
     但 Teleport 的目标不能是 null，兜一层免得边界状态把整个组件摔了。
   -->
   <Teleport :to="stageHost ?? 'body'" :disabled="floating">
-    <div v-if="store.active" class="vplayer" :class="{ 'is-floating': floating }" :style="floating ? floatStyle : undefined">
-      <!-- 悬浮窗的手柄条：整条都能拖；标题截断给原生 title，速率与两颗图标按钮各自带 tooltip -->
-      <header v-if="floating" class="vplayer__bar" @pointerdown="onBarDown">
-        <span class="vplayer__name" :title="store.active.name">{{ store.active.name }}</span>
-
-        <!-- pointerdown 别冒泡到手柄条(那是拖窗口的入口),徽章自己要点得动 -->
-        <span @pointerdown.stop>
-          <VideoRateMenu :rate="store.rate" @change="(value: number) => (store.rate = value)" />
-        </span>
-
-        <el-tooltip content="回到视频页" placement="bottom">
-          <button class="vplayer__act" type="button" aria-label="回到视频页" @pointerdown.stop @click="backToVideoView">
-            <el-icon><Monitor /></el-icon>
-          </button>
-        </el-tooltip>
-        <el-tooltip content="停止播放" placement="bottom">
-          <button class="vplayer__act" type="button" aria-label="停止播放" @pointerdown.stop @click="closePlayer">
-            <el-icon><Close /></el-icon>
-          </button>
-        </el-tooltip>
-      </header>
+    <div v-if="store.active && !store.detached" class="vplayer" :class="{ 'is-floating': floating }" :style="floating ? floatStyle : undefined">
+      <!--
+        悬浮窗的手柄条：整条都能拖（父级挂的 pointerdown 落到组件根上），
+        标题截断给原生 title，速率与图标按钮各自带 tooltip。独立窗口里用的是同一枚。
+      -->
+      <VideoPlayerBar
+        v-if="floating"
+        :name="store.active.name"
+        :rate="store.rate"
+        @rate="(value: number) => (store.rate = value)"
+        @dock="backToVideoView"
+        @close="closePlayer"
+        @pointerdown="onBarDown"
+      />
 
       <!-- 播放画布：始终深色（--term-* 那一族，与终端面板同一口径），视频按比例缩进画布里 -->
       <div class="vplayer__canvas">
@@ -402,6 +547,8 @@ function closePlayer(): void {
           不放 autoplay 属性 —— 开播只由上面的 watch 按 store 的意图调 play()。
           play / seeking 是「用户接手了」的信号：倒计时摆着的时候用户重新播放或拖回
           进度条，说明他想重看这一部，自动接下去就得撤。
+          focus / focusin 一律 blur 掉（见 releaseScreenFocus）：焦点留在原生控件里时
+          整页收不到键盘，空格快捷键会静默失效。
           原生控件右下角 ⋮ 菜单整份关掉（controlslist + disablepictureinpicture）：
           下载对本地播放器没意义，原生速率会与 store 的 rate 脱钩，系统级画中画会把
           视频搬出应用自己的传送小窗 —— 三项各有应用内的一套，留原生那份只会两处打架
@@ -414,7 +561,9 @@ function closePlayer(): void {
           controlslist="nodownload noplaybackrate"
           disablepictureinpicture
           preload="metadata"
-          @loadedmetadata="applyRate"
+          @focus="releaseScreenFocus"
+          @focusin="releaseScreenFocus"
+          @loadedmetadata="onLoadedMetadata"
           @play="cancelUpNext"
           @seeking="cancelUpNext"
           @ended="onEnded"
@@ -423,28 +572,15 @@ function closePlayer(): void {
         <!--
           播完接下去的倒计时浮层（压暗层 + 卡片）：与视频同进退（传送时跟着元素一起搬），
           到点与卡片上的「立即播放」都走 goUpNext 切过去 —— 与点树上的视频是同一条路。
-          悬浮时它照常出现在小窗里
+          悬浮时它照常出现在小窗里；独立窗口里用的是同一枚组件。
         -->
-        <div v-if="upNext" class="vplayer__next" role="status">
-          <div class="vplayer__next-card">
-            <div class="vplayer__next-head">
-              <span class="vplayer__next-label">即将进入下一个视频</span>
-              <span class="vplayer__next-left">{{ upNextLeft }} 秒后自动播放</span>
-            </div>
-            <p class="vplayer__next-name" :title="upNext.name">
-              {{ upNext.name }}
-            </p>
-            <div class="vplayer__next-actions">
-              <el-button size="small" type="primary" @click="goUpNext">
-                立即播放
-              </el-button>
-              <el-button size="small" text @click="cancelUpNext">
-                取消
-              </el-button>
-            </div>
-            <span class="vplayer__next-bar" :style="{ animationDuration: `${VIDEO_NEXT_SECONDS}s` }" />
-          </div>
-        </div>
+        <VideoUpNext
+          v-if="upNext"
+          :name="upNext.name"
+          :seconds="upNextLeft"
+          @play="goUpNext"
+          @cancel="cancelUpNext"
+        />
       </div>
 
       <!--
@@ -500,59 +636,13 @@ function closePlayer(): void {
   overflow: hidden;
 }
 
-/* ---------- 悬浮窗手柄条 ---------- */
-
-.vplayer__bar {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  height: 32px;
-  padding: 0 var(--sp-2) 0 var(--sp-3);
-/* 手柄条是深色窗的一部分，底色比画布浮一档，看着是「窗的标题栏」而不是一块黑 */
-background: color-mix(in srgb, var(--term-ink) 8%, var(--term-bg));
-border-bottom: 1px solid var(--term-border);
-cursor: move;
-user-select: none;
-/* 速率徽章（VideoRateMenu）在这里换深色窗的这一族配色 */
---rate-badge-border: var(--term-border);
---rate-badge-ink: var(--term-ink);
---rate-badge-hover-ink: var(--term-ink);
---rate-badge-hover-bg: color-mix(in srgb, var(--term-ink) 12%, var(--term-bg));
-}
-
-.vplayer__name {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  font-size: var(--fs-meta);
-  color: var(--term-ink);
-}
-
-/* 手柄条上的图标按钮：tooltip 已给出名字，按钮本体保持安静 */
-.vplayer__act {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  background: transparent;
-  border: 0;
-  border-radius: var(--r-sm);
-  color: var(--term-ink);
-  cursor: pointer;
-}
-
-.vplayer__act:hover {
-  background: color-mix(in srgb, var(--term-ink) 12%, var(--term-bg));
-}
-
 /* ---------- 播放画布 ---------- */
 
+/**
+ * 画布同时是倒计时卡片的**尺寸容器**（见下面 @container）：卡片要按「内嵌页的大画布」
+ * 与「悬浮小窗」两种尺寸换疏密，能回答这个问题的只有画布自己 —— 窗口宽度不算数
+ * （同一只小窗可以拖得很宽，也可以压到 240×135）。
+ */
 .vplayer__canvas {
   flex: 1 1 auto;
   position: relative;
@@ -561,6 +651,7 @@ user-select: none;
   justify-content: center;
   min-height: 0;
   background: var(--term-bg);
+  container-type: size;
 }
 
 /**
@@ -574,179 +665,6 @@ user-select: none;
   height: 100%;
   object-fit: contain;
   outline: none;
-}
-
-/* ---------- 播完接下去的倒计时浮层 ---------- */
-
-/**
- * 两块：铺满画布的一层压暗 + 居中的卡片。
- *
- * 压暗这一层是「一眼看得见」的来源：视频停在最后一帧时画面往往还亮着，卡片直接贴上去
- * 会糊在画面里（原先就是这个样子）；先把画面压下去，卡片才立得起来 —— 一块实底 + 一级
- * 阴影在压暗的画面上是一层清清楚楚的浮层。
- *
- * **这一层不接事件**（pointer-events: none，卡片自己再把事件要回来）：下面的原生控件
- * 照常能点 —— 点重播 / 拖进度条是「用户接手了」的信号（见 <video> 上的 play / seeking），
- * 遮罩拦下来的话这两条出口就断了。
- *
- * 居中用「容器 margin: auto」而不是 align-items: center：悬浮小窗最小只有 240×135
- * （画布剩一百来像素高），卡片装不下时 align-items: center 会把上下两头一起切掉；
- * margin: auto 至少把标签与名字留在看得见的上沿。滚动条不画（指针压根进不来）。
- * 四周只留 --sp-1：这点余量是留给最小那个小窗的 —— 卡片本身比原先高了一档（见下），
- * 这里不收一收，画布最矮时底缘那条进度线就先被顶出去。
- */
-.vplayer__next {
-  position: absolute;
-  inset: 0;
-  z-index: 5;
-  display: flex;
-  padding: var(--sp-1);
-  background: color-mix(in srgb, var(--term-bg) 62%, transparent);
-  overflow: auto;
-  scrollbar-width: none;
-  pointer-events: none;
-  animation: vplayer-next-veil 0.15s ease-out;
-}
-
-.vplayer__next::-webkit-scrollbar {
-  display: none;
-}
-
-/**
- * 卡片本身：三行 + 底缘一条进度线。行距与内边距都卡着最小的小窗给（240×135 —— 画布只剩
- * 一百来像素高，卡片再松一点底缘那条进度线就先被切掉），所以用的是「行距拉开、四周收紧」：
- * 三行之间各留 --sp-2，比原先的 --sp-1 松出一倍；上下内边距不对称 —— 底下多留一档给进度线。
- * 内容一律左对齐 —— 居中的三行在窄卡片里会显得散（同一句话在宽窄两种窗口下都要收得住）。
- */
-.vplayer__next-card {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-2);
-  width: min(340px, 100%);
-  margin: auto;
-  padding: var(--sp-2) var(--sp-3) var(--sp-3);
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  box-shadow: var(--shadow-pop);
-  overflow: hidden;
-  pointer-events: auto;
-  animation: vplayer-next-in 0.18s ease-out;
-}
-
-/* 进度线的底槽：极淡的一条痕，让那条进行色的线读起来是「走了多久」而不是一条下划线 */
-.vplayer__next-card::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 3px;
-  background: var(--st-run-soft);
-}
-
-/* 头一行：左边说「接下来是什么事」，右边那枚小徽章是那个一直在动的数字 ——
-   秒数靠右单成一块（margin-left: auto），两句话不再挤在一起，窄卡片上先让左边截断 */
-.vplayer__next-head {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-}
-
-.vplayer__next-label {
-  min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  font-size: var(--fs-micro);
-  color: var(--ink-3);
-}
-
-/* 秒数：倒计时是这个浮层里唯一「在动」的东西，用进行色（--st-run）标出来 */
-.vplayer__next-left {
-  flex-shrink: 0;
-  margin-left: auto;
-  padding: 0 var(--sp-1);
-  font-size: var(--fs-micro);
-  font-weight: 600;
-  color: var(--st-run);
-  background: var(--st-run-soft);
-  border-radius: var(--r-pill);
-  font-variant-numeric: tabular-nums;
-}
-
-.vplayer__next-name {
-  margin: 0;
-  max-width: 100%;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  line-height: 1.35;
-  font-size: var(--fs-title);
-  font-weight: 600;
-  color: var(--ink);
-}
-
-/* 两颗按钮：主动作是实底那颗，「取消」退成纯文字（同 MailView 挑信那一排）——
-   两个同重的方框并排，在这张三行的小卡片上会显得吵 */
-.vplayer__next-actions {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-}
-
-/* EP 会在相邻按钮之间再垫 12px 的 margin-left，与上面那道 gap 叠起来把两颗推得太开；
-   间距统一交给 gap —— 「取消」自带内边距，加起来正好是看得惯的一段留白 */
-.vplayer__next-actions .el-button + .el-button {
-  margin-left: 0;
-}
-
-/**
- * 底缘那条进度线：照 VIDEO_NEXT_SECONDS 秒**从左往右拉满**（时长由模板按常量绑定）——
- * 进度就是「离自动播放还有多久」，走完就切下一个。底下压着卡片 ::before 那一条底槽。
- */
-.vplayer__next-bar {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 3px;
-  background: var(--st-run);
-  transform-origin: left;
-  animation-name: vplayer-next-fill;
-  animation-timing-function: linear;
-  animation-fill-mode: forwards;
-}
-
-@keyframes vplayer-next-fill {
-  from {
-    transform: scaleX(0);
-  }
-  to {
-    transform: scaleX(1);
-  }
-}
-
-/* 压暗层淡入、卡片轻轻上浮一下：这一下是用来把视线叫过来的 */
-@keyframes vplayer-next-veil {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
-}
-
-@keyframes vplayer-next-in {
-  from {
-    opacity: 0;
-    transform: translateY(6px) scale(0.98);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
 }
 
 /* ---------- 缩放手柄 ---------- */

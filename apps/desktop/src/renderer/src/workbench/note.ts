@@ -1,4 +1,4 @@
-import type { NoteChange, NoteCreateInput, NoteEntry, NoteImage, NoteImageDeleted, NoteImageDeleteInput, NoteImageList, NoteImageListInput, NoteImageUploaded, NoteImageUploadInput, NoteNode, NoteRepoState, NoteSyncInput, NoteSyncSummary, NoteTextScan } from '@workbench/notes'
+import type { NoteChange, NoteCreateInput, NoteEntry, NoteImage, NoteImageDeleted, NoteImageDeleteInput, NoteImageList, NoteImageListInput, NoteImageUploaded, NoteImageUploadInput, NoteNode, NoteRead, NoteRepoState, NoteSyncInput, NoteSyncSummary, NoteTextScan } from '@workbench/notes'
 
 import type { Result } from '@/types'
 import { fail, ok } from '@workbench/core'
@@ -40,23 +40,30 @@ export async function listNotes(root: string): Promise<Result<NoteNode[]>> {
   return ok(buildNoteTree(entries))
 }
 
-/** 读一篇的正文 */
-export async function readNote(root: string, rel: string): Promise<Result<string>> {
-  return guard(invoke<string>('note_read', { root: rootArg(root), rel }), '读取笔记失败')
+/** 读一篇的正文；连它此刻的 mtime 一起回（写盘时当基准） */
+export async function readNote(root: string, rel: string): Promise<Result<NoteRead>> {
+  return guard(invoke<NoteRead>('note_read', { root: rootArg(root), rel }), '读取笔记失败')
 }
 
 /**
  * 保存正文。
  *
- * 只回成功与否：结构没变、树也不该重建 —— 正文是边打字边落盘的东西，
+ * 回来的是写完之后文件自己的 mtime：结构没变、树也不该重建 —— 正文是边打字边落盘的东西，
  * 每敲一段就把整棵树重新扫一遍（还可能把展开态冲掉）纯属白费。
+ *
+ * `expectedMtimeMs` 是这份正文基于磁盘上哪个版本改的；带上它，别处在这期间改过的
+ * 那一篇就不会被这一笔盖掉（Rust 侧写前核一遍，不一致直接拒绝）。
  */
 export async function writeNote(
   root: string,
   rel: string,
   content: string,
-): Promise<Result<null>> {
-  return guard(invoke<null>('note_write', { root: rootArg(root), rel, content }), '保存笔记失败')
+  expectedMtimeMs?: number,
+): Promise<Result<number>> {
+  return guard(
+    invoke<number>('note_write', { root: rootArg(root), rel, content, expectedMtimeMs }),
+    '保存笔记失败',
+  )
 }
 
 /**

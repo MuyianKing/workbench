@@ -9,7 +9,7 @@
 //!  - **超时后要 kill 并回收**：否则弹出的 npm 会一直挂着，用户以为卡死了。
 
 use std::io::Read;
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 #[cfg(windows)]
@@ -27,6 +27,23 @@ pub struct Outcome {
     pub timed_out: bool,
     pub stdout: String,
     pub stderr: String,
+}
+
+/// 按**原始字节**收输出的一份结果。
+///
+/// 只给「内容本身可能不是 UTF-8」的调用方用（Git 客户端的补丁预览）：`read_to_string`
+/// 遇到非法 UTF-8 会提前中断，看起来就像补丁被截断；这里保留字节，由调用方决定怎么解。
+pub struct OutcomeBytes {
+    pub status: Option<i32>,
+    pub timed_out: bool,
+    pub stdout: Vec<u8>,
+    pub stderr: Vec<u8>,
+}
+
+impl OutcomeBytes {
+    pub fn ok(&self) -> bool {
+        self.status == Some(0)
+    }
 }
 
 impl Outcome {
@@ -94,13 +111,31 @@ pub fn run(program: &str, args: &[String], timeout: Duration) -> std::io::Result
     collect(shell_command(program, args), timeout)
 }
 
+/// 与 `run_direct` 同一条路，但输出按字节收（见 `OutcomeBytes`）。
+pub fn run_direct_bytes(
+    program: &str,
+    args: &[String],
+    timeout: Duration,
+    cwd: Option<&std::path::Path>,
+    envs: &[(&str, &str)],
+) -> std::io::Result<OutcomeBytes> {
+    let mut cmd = Command::new(program);
+    cmd.args(args);
+    if let Some(dir) = cwd {
+        cmd.current_dir(dir);
+    }
+    for (key, value) in envs {
+        cmd.env(key, value);
+    }
+    #[cfg(windows)]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+
+    collect_bytes(cmd, timeout)
+}
+
 /// 起进程 → 边跑边收输出 → 超时按进程树终止。`run` 与 `run_direct` 共用这一段。
-fn collect(mut cmd: Command, timeout: Duration) -> std::io::Result<Outcome> {
-    let mut child = cmd
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()?;
+fn collect(cmd: Command, timeout: Duration) -> std::io::Result<Outcome> {
+    let mut child = spawn(cmd)?;
 
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
@@ -108,7 +143,44 @@ fn collect(mut cmd: Command, timeout: Duration) -> std::io::Result<Outcome> {
     // 两个独立的读者线程：边产出边清空管道，避免子进程卡在写
     let out_handle = std::thread::spawn(move || read_pipe(stdout));
     let err_handle = std::thread::spawn(move || read_pipe(stderr));
+    let (status, timed_out) = wait_with_timeout(&mut child, timeout)?;
 
+    // 进程已结束（或被我们杀掉），管道随之关闭，读者线程会立刻读完返回
+    Ok(Outcome {
+        status,
+        timed_out,
+        stdout: out_handle.join().unwrap_or_default(),
+        stderr: err_handle.join().unwrap_or_default(),
+    })
+}
+
+fn collect_bytes(cmd: Command, timeout: Duration) -> std::io::Result<OutcomeBytes> {
+    let mut child = spawn(cmd)?;
+
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
+
+    let out_handle = std::thread::spawn(move || read_pipe_bytes(stdout));
+    let err_handle = std::thread::spawn(move || read_pipe_bytes(stderr));
+    let (status, timed_out) = wait_with_timeout(&mut child, timeout)?;
+
+    Ok(OutcomeBytes {
+        status,
+        timed_out,
+        stdout: out_handle.join().unwrap_or_default(),
+        stderr: err_handle.join().unwrap_or_default(),
+    })
+}
+
+fn spawn(mut cmd: Command) -> std::io::Result<Child> {
+    cmd.stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+}
+
+/// 等进程结束；到点就连同整棵进程树一起结束。
+fn wait_with_timeout(child: &mut Child, timeout: Duration) -> std::io::Result<(Option<i32>, bool)> {
     let deadline = Instant::now() + timeout;
     let mut timed_out = false;
     let status = loop {
@@ -127,14 +199,7 @@ fn collect(mut cmd: Command, timeout: Duration) -> std::io::Result<Outcome> {
         }
         std::thread::sleep(Duration::from_millis(40));
     };
-
-    // 进程已结束（或被我们杀掉），管道随之关闭，读者线程会立刻读完返回
-    Ok(Outcome {
-        status,
-        timed_out,
-        stdout: out_handle.join().unwrap_or_default(),
-        stderr: err_handle.join().unwrap_or_default(),
-    })
+    Ok((status, timed_out))
 }
 
 fn read_pipe(pipe: Option<impl Read>) -> String {
@@ -143,6 +208,14 @@ fn read_pipe(pipe: Option<impl Read>) -> String {
         let _ = pipe.read_to_string(&mut text);
     }
     text
+}
+
+fn read_pipe_bytes(pipe: Option<impl Read>) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    if let Some(mut pipe) = pipe {
+        let _ = pipe.read_to_end(&mut bytes);
+    }
+    bytes
 }
 
 /// 结束整棵进程树。

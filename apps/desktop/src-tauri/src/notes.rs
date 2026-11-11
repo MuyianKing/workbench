@@ -193,24 +193,49 @@ pub fn scan_texts(root: &str) -> Result<Value, String> {
     Ok(json!({ "files": files, "failed": failed }))
 }
 
-/// 读一篇的正文
-pub fn read(root: &str, rel: &str) -> Result<String, String> {
+/// 读一篇的正文；连它此刻的 mtime 一起回来（渲染层拿它当下一笔写盘的基准）。
+///
+/// **mtime 在正文之前取**：两次之间别处又写了一次的话，交出去的是新正文、基准却是旧时间，
+/// 下一次保存会被判成冲突 —— 宁可多问一次，也不能漏判之后把别处刚写的内容盖掉。
+pub fn read(root: &str, rel: &str) -> Result<Value, String> {
     let path = resolve(root, rel)?;
-    std::fs::read_to_string(&path).map_err(|err| format!("读取失败：{err}"))
+    let mtime_ms = fs_util::mtime_ms(&path);
+    let text = std::fs::read_to_string(&path).map_err(|err| format!("读取失败：{err}"))?;
+    Ok(json!({ "text": text, "mtimeMs": mtime_ms }))
 }
 
-/// 写一篇的正文。
+/// 写一篇的正文，返回写完之后文件自己的 mtime。
 ///
 /// 先写同目录下的临时文件再改名：这是编辑器每 600ms 就可能落一次盘的路径，
 /// 直接覆盖时断电 / 进程被杀会留下半篇。改名在 Windows 上会直接覆盖旧文件（与 store.rs 同一套做法）。
-pub fn write(root: &str, rel: &str, content: &str) -> Result<(), String> {
+///
+/// `expected_mtime_ms` 是「这份正文基于磁盘上哪个版本改的」（打开 / 上次落盘时记下的 mtime）：
+/// 传了就核一遍 —— 文件没了、或 mtime 变了，说明别处刚改过它，**这一笔一个字都不写**，
+/// 把原因交回渲染层（`saveError` 红字）；不传（没有基准，例如换篇时补交上一篇的那一段）照旧直接写。
+/// 这一道是「别处的修改不能被静默盖掉」的唯一保证，别为了少一次 stat 把它删掉。
+pub fn write(
+    root: &str,
+    rel: &str,
+    content: &str,
+    expected_mtime_ms: Option<u64>,
+) -> Result<u64, String> {
     let path = resolve(root, rel)?;
     let parent = path.parent().unwrap_or(Path::new(""));
     if !parent.is_dir() {
         return Err("这篇笔记所在的文件夹已经不在了".into());
     }
 
-    fs_util::write_atomic(&path, content.as_bytes())
+    if let Some(expected) = expected_mtime_ms {
+        if !path.is_file() {
+            return Err("这一篇已经被删掉或移走了，这次没有保存".into());
+        }
+        if fs_util::mtime_ms(&path) != expected {
+            return Err("这一篇在别处被改过了，这次没有保存".into());
+        }
+    }
+
+    fs_util::write_atomic(&path, content.as_bytes())?;
+    Ok(fs_util::mtime_ms(&path))
 }
 /// 新建一个文件夹或一篇空笔记；同名已存在时报错（名字撞车由渲染层按树去重）
 pub fn create(root: &str, rel: &str, is_dir: bool) -> Result<(), String> {
@@ -431,8 +456,11 @@ mod tests {
         let path = root.to_str().unwrap();
         create(path, "日记.md", false).unwrap();
 
-        write(path, "日记.md", "# 今天\n\n写了一篇。").unwrap();
-        assert_eq!(read(path, "日记.md").unwrap(), "# 今天\n\n写了一篇。");
+        let written = write(path, "日记.md", "# 今天\n\n写了一篇。", None).unwrap();
+        let read_back = read(path, "日记.md").unwrap();
+        assert_eq!(read_back["text"], "# 今天\n\n写了一篇。");
+        // 读与写报的是同一个 mtime：渲染层拿它当下一笔写盘的基准
+        assert_eq!(read_back["mtimeMs"].as_u64(), Some(written));
 
         let left: Vec<String> = std::fs::read_dir(&root)
             .unwrap()
@@ -440,6 +468,32 @@ mod tests {
             .map(|entry| entry.file_name().to_string_lossy().into_owned())
             .collect();
         assert_eq!(left, vec!["日记.md".to_string()], "写盘留下了临时文件: {left:?}");
+
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// 写盘带基准 mtime：对得上才写；别处改过 / 文件没了就一个字都不写
+    #[test]
+    fn write_refuses_to_clobber_external_change() {
+        let root = temp_root("conflict");
+        let path = root.to_str().unwrap();
+        create(path, "日记.md", false).unwrap();
+
+        let first = write(path, "日记.md", "一稿", None).unwrap();
+        // 基准对得上：照写不误，回来的就是文件此刻的 mtime
+        let second = write(path, "日记.md", "二稿", Some(first)).unwrap();
+        assert_eq!(second, fs_util::mtime_ms(&root.join("日记.md")));
+
+        // 别处改过（基准是个过期的时间）：拒绝写，盘上那份原样留着
+        let err = write(path, "日记.md", "我这边", Some(first.saturating_sub(1))).unwrap_err();
+        assert!(err.contains("别处被改过"), "实际是 {err}");
+        assert_eq!(read(path, "日记.md").unwrap()["text"], "二稿");
+
+        // 已经被删掉：同样拒绝，且不把文件重新建出来
+        delete(path, "日记.md").unwrap();
+        let err = write(path, "日记.md", "又写", Some(second)).unwrap_err();
+        assert!(err.contains("删掉"), "实际是 {err}");
+        assert!(!root.join("日记.md").exists(), "冲突时不该把文件重建出来");
 
         std::fs::remove_dir_all(&root).unwrap();
     }

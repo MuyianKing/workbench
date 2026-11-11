@@ -249,7 +249,7 @@ export const useSkillsStore = defineStore('skills', () => {
       notifyError(message)
       return false
     }
-    content.value = result.data
+    content.value = result.data.text
     return true
   }
 

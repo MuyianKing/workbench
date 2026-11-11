@@ -196,10 +196,19 @@ Qoder 与 TBuddy 是**两套完全独立的状态**：各自的 `Inner` 持有�
   数据来自本机 `activity.jsonl` 里签到 / 活动领取成功时记下的 `credits`，按 UTC+8 自然日相加、
   最近 30 天、缺的天补 0（`dailyCreditSeries`，与 TBuddy 的 `dailyGrowthCredits` 同一条口径）。
   **只统计本应用领到的积分**：别的设备用本应用领的会同步进来（见下一节）；
-  官方客户端领的仍不在图里。旧签到记录会从「签到成功 +N 积分」这句话回读 N，
-  活动旧记录没有金额、不猜。
-- **「近一个月官方积分消耗」仍在**：上游 `credits-heatmap` 的只读快照（第一个可用账号），
-  回答的是消耗而不是获取，所以和上面那张获取图并存，不混口径。
+  官方客户端领的仍不在图里。
+  **活动领取的响应实测不带面额（只有 success）**：金额先认响应里的 `amount` / `rewardCredits`，
+  没有就退回活动列表的 `benefit.amount`（`claim_reward`）。旧记录没有 `credits` 时，
+  签到从「签到成功 +N 积分」回读，活动从标题里的「N Credits / N 积分」回读（`legacy_credits`）；
+  看不出金额的（如「首次订阅福利」）不猜。
+- **旧每日签到接口上游已停用**（`status=DISABLED`，`currentStreakDays` / `totalClaimDays` 恒 0）；
+  每天的 100 Credits 改由活动平台发放，要按「领取活动」才真正到账。
+  卡片上的「连签 / 累计」仍是旧接口的字段，保留原样，不拿活动数据硬凑。
+- **「近一个月官方积分消耗」**：上游 `credits-heatmap` 的只读快照（第一个可用账号）。
+  实测返回 `{ items: [{ date, value }], levels, total, unit, year }`，是**一整年**的逐日点
+  （含大量 0）；`parse_heatmap` 只认 `items` / 旧形态 `daily`。界面用 `dailyCreditSeries`
+  铺成近 30 天的连续序列再画，全是 0 时整张图不渲染。回答的是消耗而不是获取，
+  所以和上面那张获取图并存，不混口径。
 - **「今日尝试」列表已撤掉**（过程流水没人看）；`activity.jsonl` 仍保留 —— 它是积分获取统计的唯一来源。
 
 ### 领取账本同步

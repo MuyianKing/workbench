@@ -7,7 +7,8 @@ import { CaretBottom, Close } from '@element-plus/icons-vue'
  *  - **钉在卡片底部**：树上边吃掉剩余高度，这一段多长都不会被挤走；
  *    上面那道分隔线把它与树分开 —— 两者说的是不同的事（这一页的内容 / 这是哪个目录）。
  *  - **目录名是一颗按钮**，点开「最近打开」那份**往上弹的浮层**（它就在面板最底下），
- *    旁边那颗小箭头是提示，展开时翻过来。没有历史记录时名字只是一行字，点了没东西可弹。
+ *    旁边那颗小箭头是提示，展开时翻过来；**再点一次就收起**（不必去点别处）。
+ *    没有历史记录时名字只是一行字，点了没东西可弹。
  *    浮层不做成常显的一行：左栏本来就窄，这几个目录几天也不换一次，常显要吃掉大半屏的高度。
  *  - **浮层与这一行等宽、左缘对齐**：现量这一行自己的 `clientWidth`，而不是按左栏宽度
  *    减内边距算 —— 内边距是设计令牌（`--sp-4`），在 JS 里再抄一遍就等于多了一处会过期的事实。
@@ -44,6 +45,27 @@ const emit = defineEmits<{
 /** 那份浮层开着没有（挂在目录名那颗按钮上） */
 const historyOpen = ref(false)
 
+/**
+ * 「点同一颗按钮收起」是自己接的，**不用 el-popover 的 click 触发**：
+ * EP 的「点外面关闭」监听挂在 window 的 click **捕获**阶段 —— 点参照物本身时它先把
+ * 浮层关掉，紧接着 click 冒到按钮上又走触发器的 onToggle 重新打开，两次一抵消，
+ * 第二下永远关不上（只能去点别处）。把 `trigger` 置空之后，收起（window 那一下）
+ * 与切换（下面这两下）各归各的：按下时记住那一刻的状态，click 到手时按它取反，
+ * 不依赖两个监听器谁先谁后（捕获那一步可能已经把状态改成关了）。
+ * 键盘回车 / 空格仍由 EP 的 triggerKeys 切换（合成 click 的 detail 是 0，这里不重复处理）。
+ */
+let openOnDown = false
+
+function onRootPointerdown(): void {
+  openOnDown = historyOpen.value
+}
+
+function onRootClick(event: MouseEvent): void {
+  if (event.detail === 0)
+    return
+  historyOpen.value = !openOnDown
+}
+
 /** 浮层的宽度：见文件头。量的是这一行自己的 clientWidth —— 它铺满菜单区，自己不带内边距 */
 const metaRef = ref<HTMLElement | null>(null)
 const historyWidth = ref(200)
@@ -79,16 +101,25 @@ function forgetRecent(dir: string): void {
   <footer class="recent-roots">
     <!-- ref 只为一件事：量出这一行有多宽，好让浮层与它等宽、左缘对齐 -->
     <div ref="metaRef" class="recent-roots__meta">
+      <!-- trigger 置空（切换由按钮自己管，理由见 onRootClick）；不带箭头：那一小片浮在
+           壁纸上、还带一圈描边，比浮层本身显眼，看着像块颜色更深的小疙瘩 -->
       <el-popover
         v-if="roots.length"
         v-model:visible="historyOpen"
-        trigger="click"
+        :trigger="[]"
         placement="top-start"
         :width="historyWidth"
         :offset="8"
+        :show-arrow="false"
       >
         <template #reference>
-          <button class="recent-roots__root-btn" type="button" :title="root">
+          <button
+            class="recent-roots__root-btn"
+            type="button"
+            :title="root"
+            @pointerdown="onRootPointerdown"
+            @click="onRootClick"
+          >
             <span class="recent-roots__root truncate">{{ rootName }}</span>
             <el-icon class="recent-roots__caret" :class="{ 'is-open': historyOpen }">
               <CaretBottom />

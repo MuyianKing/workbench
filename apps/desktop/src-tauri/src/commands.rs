@@ -143,15 +143,22 @@ pub fn note_scan(root: String) -> Result<Vec<Value>, String> {
     crate::notes::scan(&root)
 }
 
+/// 读正文；连此刻的 mtime 一起回来（写盘时当基准）
 #[tauri::command(async)]
-pub fn note_read(root: String, rel: String) -> Result<String, String> {
+pub fn note_read(root: String, rel: String) -> Result<Value, String> {
     crate::notes::read(&root, &rel)
 }
 
-/// 写正文（编辑器防抖后落盘）：临时文件 + 改名，不留半篇
+/// 写正文（编辑器防抖后落盘）：临时文件 + 改名，不留半篇。
+/// 传了 expected_mtime_ms 就先核一遍——别处改过 / 文件没了就拒绝写，回来的是新 mtime
 #[tauri::command(async)]
-pub fn note_write(root: String, rel: String, content: String) -> Result<(), String> {
-    crate::notes::write(&root, &rel, &content)
+pub fn note_write(
+    root: String,
+    rel: String,
+    content: String,
+    expected_mtime_ms: Option<u64>,
+) -> Result<u64, String> {
+    crate::notes::write(&root, &rel, &content, expected_mtime_ms)
 }
 
 /// 新建一个文件夹或一篇空笔记
@@ -709,6 +716,20 @@ pub fn etf_sync_publish(repo: String, device: String, cache: Value) -> Result<Va
         return Err("没有配置同步仓库".into());
     }
     crate::sync::publish_etf(&repo, &device, &cache)
+}
+
+/// 把本机的活跃度账本推进同步仓库：`activity/<设备id>.json`
+/// （只有日期 → 各来源次数，没有操作明细；只写自己那份，单写者）。
+#[tauri::command(async)]
+pub fn activity_sync_publish(repo: String, device: String, shard: Value) -> Result<Value, String> {
+    crate::sync::publish_activity(&repo, &device, &shard)
+}
+
+/// 读仓库里别的机器推上来的活跃度账本（不联网、不改克隆；本机那份跳过）。
+/// 原始 JSON 回来，收敛与按天求和由渲染层做。
+#[tauri::command(async)]
+pub fn activity_sync_shards(repo: String, device: String) -> Result<Vec<Value>, String> {
+    crate::sync::read_activity_shards(&repo, &device)
 }
 
 /// 把本机的外观配置（theme.json 整份副本）单独写进同步仓库并推送；

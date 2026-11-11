@@ -211,6 +211,9 @@ importers:
       '@workbench/etf':
         specifier: workspace:*
         version: link:../../packages/etf
+      '@workbench/git':
+        specifier: workspace:*
+        version: link:../../packages/git
       '@workbench/kb':
         specifier: workspace:*
         version: link:../../packages/kb
@@ -349,6 +352,12 @@ importers:
         version: 5.0.3(@types/node@26.6.4)(vite@8.3.2(@types/node@26.6.4)(yaml@2.9.1))
 
   packages/etf:
+    devDependencies:
+      vitest:
+        specifier: ^5.0.3
+        version: 5.0.3(@types/node@26.6.4)(vite@8.3.2(@types/node@26.6.4)(yaml@2.9.1))
+
+  packages/git:
     devDependencies:
       vitest:
         specifier: ^5.0.3

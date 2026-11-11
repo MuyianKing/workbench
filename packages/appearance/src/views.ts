@@ -13,7 +13,7 @@
  * 谁的数据文件，它就自然出现在导航栏上（排在末尾）。
  */
 
-export const VIEW_IDS = ['home', 'projects', 'work', 'notes', 'skills', 'kb', 'ai', 'gateway', 'qoder', 'vault', 'mail', 'styles', 'video', 'etf'] as const
+export const VIEW_IDS = ['home', 'projects', 'work', 'notes', 'skills', 'kb', 'ai', 'gateway', 'qoder', 'vault', 'mail', 'styles', 'video', 'etf', 'git'] as const
 
 export type ViewId = (typeof VIEW_IDS)[number]
 
@@ -37,6 +37,7 @@ export const VIEW_LABELS: Record<ViewId, string> = {
   styles: '样式',
   video: '视频',
   etf: 'ETF',
+  git: 'Git',
 }
 
 export function isViewId(value: unknown): value is ViewId {

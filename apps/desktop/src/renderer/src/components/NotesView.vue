@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { NoteKind, NoteSyncSummary } from '@workbench/notes'
 import { Document, EditPen, FolderOpened, Notebook, Picture, Refresh, RefreshRight } from '@element-plus/icons-vue'
-import { countNodes, findNoteNode, noteRootName } from '@workbench/notes'
+import { countNodes, findNoteNode, noteAbsPath, noteRootName } from '@workbench/notes'
 import { ElMessage } from 'element-plus'
 /**
  * 笔记页：左边目录树，右边正文。
@@ -17,7 +17,7 @@ import { ElMessage } from 'element-plus'
  * 与首页那两条栏宽把手同一套做法：拖动时只改本地让界面跟手，松手才落盘。
  *
  * 另外还有一档**只读**（**默认就是它**，Ctrl+/ 切到可写）：读一篇长笔记时不想手一抖改掉它，
- * 就把这一页的写入口统统收起来（正文、格式菜单、左栏树上的增删改拖），省得「看一眼」变成「改一处」。
+ * 就把**正文**的写入口收起来（正文、格式菜单），省得「看一眼」变成「改一处」。
  * 这一档不落盘，开着的时候标题行里挂着「只读」（带快捷键提示）—— 口径与三条守卫见 readOnly / onShortcut 那两段。
  *
  * 与其它页面一样，它是导航栏上的一项（见 packages/appearance/src/views.ts），换页由 App.vue 的
@@ -27,6 +27,7 @@ import { ElMessage } from 'element-plus'
  * 左栏底部那一行与分隔条是 RecentRoots / PanelResizer（与视频页共用）。
  */
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { copyText } from '@/clipboard'
 import NoteAssetsDialog from '@/components/NoteAssetsDialog.vue'
 import NoteEditor from '@/components/NoteEditor.vue'
 import NoteNameDialog from '@/components/NoteNameDialog.vue'
@@ -36,7 +37,7 @@ import PanelResizer from '@/components/PanelResizer.vue'
 import RecentRoots from '@/components/RecentRoots.vue'
 import SideLoadError from '@/components/SideLoadError.vue'
 import { formatTimestamp } from '@/format'
-import { confirmAction } from '@/notify'
+import { confirmAction, notifyError } from '@/notify'
 import { useNavStore } from '@/stores/nav'
 import { useNotesStore } from '@/stores/notes'
 import { useSettingsStore } from '@/stores/settings'
@@ -131,15 +132,14 @@ const assetsOpen = ref(false)
  * 落盘的话，某次读着读着关掉应用，下次打开笔记就是不能写的，而那时未必想得起来按什么切回来。
  * 标题行里那颗「只读」小片（带提示，写着 Ctrl+/）就是这一档的落点。
  *
- * 关掉的写入口有三处，各在自己的地方实现，改的时候不要漏掉任何一处：
+ * 关掉的写入口有两处，各在自己的地方实现，改的时候不要漏掉任何一处：
  *  1. 正文（NoteEditor 收 `readOnly`，落到 Vditor 的 `disabled()`）：不能打字，
  *     粘贴 / 拖进来的图片也不会上传（那一下是往图片仓库推一次 git）；
- *  2. 正文的格式右键菜单（同上）：只读下它一个动作都做不了，索性不弹；
- *  3. 左栏树上的增删改拖（NoteTree 收 `readOnly`）：**删一篇笔记也是写** ——
- *     只挡正文的话，「只读」就成了半句假话。
+ *  2. 正文的格式右键菜单（同上）：只读下它一个动作都做不了，索性不弹。
  *
- * **不管**左栏底部那两颗按钮（同步、素材管理）：它们动的是远端与图片仓库，
- * 不是这一页正在读的正文；同步本来就要先把编辑器手上的改动交出去，只读下那一份是空的。
+ * **不管左栏**：目录树上的新建 / 重命名 / 删除 / 拖动都是用户明确点下去的动作（删除还有确认框），
+ * 不属于「读的时候手一抖」那类误触，所以树不接这一档（NoteTree 没有 readOnly 这个 prop）；
+ * 左栏底部那两颗按钮（同步、素材管理）动的是远端与图片仓库，也不归它管。
  */
 const readOnly = ref(true)
 
@@ -174,9 +174,14 @@ onMounted(() => {
   void store.init()
   // 捕获阶段挂：编辑器 / 弹窗自己也会处理键盘，这一下要在它们之前拿到
   window.addEventListener('keydown', onShortcut, true)
+  // 别的编辑器改完、切回应用：打开着的那一篇要跟着变（见 onWindowFocus）
+  window.addEventListener('focus', onWindowFocus)
 })
 
-onBeforeUnmount(() => window.removeEventListener('keydown', onShortcut, true))
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onShortcut, true)
+  window.removeEventListener('focus', onWindowFocus)
+})
 
 /** 第一次进来（或想换一个目录）时挑文件夹；取消就什么都不做 */
 async function chooseFolder(): Promise<void> {
@@ -246,6 +251,40 @@ async function remove(rel: string): Promise<void> {
 
   if (await store.remove(rel))
     ElMessage.success('已删除')
+}
+
+/**
+ * 在资源管理器中定位。
+ *
+ * 路径由 `noteAbsPath` 按笔记本根拼出来：笔记命令只认相对路径，而系统的能力（reveal）只认
+ * 绝对路径。文件是选中它、文件夹是直接进去（口径见 src-tauri/src/system.rs 的 reveal）。
+ * 这两项都是「看」，只读模式下照样给。
+ */
+function revealNote(rel: string): void {
+  void window.workbench.reveal(noteAbsPath(store.root, rel))
+}
+
+/** 在资源管理器里打开笔记本本身（空白区菜单里那一项） */
+function revealNotebook(): void {
+  void window.workbench.reveal(store.root)
+}
+
+/** 复制这一项的绝对路径（粘到终端或别的编辑器里用） */
+function copyNotePath(rel: string): void {
+  void copyText(noteAbsPath(store.root, rel), '路径')
+}
+
+/**
+ * 用系统关联的默认程序打开这一篇。
+ *
+ * 只读模式不拦它：打开的是另一个程序，不是这里的编辑器 —— 只读管的是「别在这个页面里
+ * 手一抖改掉它」，不是「不许在别处读 / 改它」。失败时把原因说出来（没装关联程序、
+ * 文件刚被删掉都在这里）。
+ */
+async function openNoteExternally(rel: string): Promise<void> {
+  const result = await window.workbench.openPath(noteAbsPath(store.root, rel))
+  if (!result.ok)
+    notifyError(result.error ?? '打开失败')
 }
 
 /**
@@ -344,6 +383,73 @@ function syncDoneText(summary: NoteSyncSummary): string {
     parts.push('拉回了远端的改动')
   return parts.length ? `已同步（${parts.join('、')}）` : '已同步，两边都没有新改动'
 }
+
+/**
+ * 重新读一遍：重扫目录树，再把打开着的那一篇按磁盘上的样子对齐一次。
+ *
+ * 左栏底部那颗刷新与树上空白区的「刷新列表」都走这里。只重扫树是不够的 ——
+ * 别的编辑器改过的正文会一直停在旧的样子上（这个坑踩过）。
+ */
+async function refreshNotes(): Promise<void> {
+  await store.reload()
+  await pullActiveFromDisk()
+}
+
+/**
+ * 把打开着的那一篇对齐磁盘。
+ *
+ *  - 编辑器没有未保存的修改 → 直接重读、换正文；
+ *  - 有未保存的修改 → 只有磁盘确实变了才问一句「按磁盘重读 / 保留这里的」。
+ *    选保留之后继续输入会被 Rust 的写前检查拦下（标题栏红字），磁盘上那一份不会被盖掉。
+ *
+ * 判「有没有未保存」用的是**最后一次真正落盘 / 读盘的内容**（`store.active.content`），
+ * 不是编辑器自己那份基线：写盘被拒之后编辑器会以为已经保存了（见 NoteEditor 的 hasUnsaved）。
+ */
+async function pullActiveFromDisk(): Promise<void> {
+  if (!store.root || !store.active)
+    return
+
+  // 先把正在路上的那一笔等掉：它落地之后 `active.content` 才是「最后一次真正落盘的内容」，
+  // 否则拿着还没更新的旧基线去比，会把刚刚自己写下去的那一段误判成「别处改过」
+  await store.waitForWrites()
+
+  const active = store.active
+  if (!active)
+    return
+
+  const editor = editorRef.value
+  const dirty = editor?.hasUnsaved(active.content) ?? false
+  if (!dirty) {
+    if (await store.rereadActive())
+      editor?.discardAndReload(store.active ?? active)
+    return
+  }
+
+  if (!(await store.activeChangedOnDisk()))
+    return
+
+  const reload = await confirmAction(
+    '磁盘上的这一篇被别处改过。要放弃这里的修改、按磁盘重读吗？',
+    '这一篇被别处改过',
+    { confirmButtonText: '按磁盘重读', cancelButtonText: '保留这里的' },
+  )
+  if (!reload)
+    return
+  if (await store.rereadActive())
+    editor?.discardAndReload(store.active ?? active)
+}
+
+/**
+ * 窗口重新获得焦点：在别的编辑器里改完切回来，这一篇要跟着变。
+ *
+ * 只探打开着的那一篇（一次读盘），不重扫整棵树 —— 那边新增 / 删除文件还是交给刷新按钮。
+ * 页面被 KeepAlive 留着，切到别的页时也会收到焦点事件，所以先判当前页（与 onShortcut 同一道）。
+ */
+function onWindowFocus(): void {
+  if (nav.activeView !== 'notes' || !store.root || !store.active)
+    return
+  void pullActiveFromDisk()
+}
 </script>
 
 <template>
@@ -382,12 +488,16 @@ function syncDoneText(summary: NoteSyncSummary): string {
           :nodes="store.nodes"
           :active-rel="store.activeRel"
           :loaded="store.loaded && !store.loading"
-          :read-only="readOnly"
           @select="store.select"
           @create="({ parentRel, kind }) => openCreateIn(parentRel, kind)"
           @rename="openRename"
           @remove="remove"
           @move="onMove"
+          @reveal="revealNote"
+          @reveal-root="revealNotebook"
+          @copy-path="copyNotePath"
+          @open-default="openNoteExternally"
+          @refresh="refreshNotes"
         />
 
         <!--
@@ -413,8 +523,8 @@ function syncDoneText(summary: NoteSyncSummary): string {
                 </el-icon>
               </el-button>
             </el-tooltip>
-            <el-tooltip content="重新读取文件夹" placement="top">
-              <el-button size="small" text :disabled="store.loading" @click="store.reload()">
+            <el-tooltip content="重新读取文件夹与打开着的正文" placement="top">
+              <el-button size="small" text :disabled="store.loading" @click="refreshNotes">
                 <el-icon><Refresh /></el-icon>
               </el-button>
             </el-tooltip>
@@ -462,7 +572,7 @@ function syncDoneText(summary: NoteSyncSummary): string {
             只读那一档的落点。**这一档是默认的**，所以它几乎一直挂在这儿，也正因为如此
             它得同时说清两件事：现在打字没反应是因为它在开着，以及怎么切回去（提示里那句）。
           -->
-          <el-tooltip v-if="readOnly" content="只读模式：Ctrl+/ 切回可写" placement="bottom">
+          <el-tooltip v-if="readOnly" content="正文只读：Ctrl+/ 切回可写" placement="bottom">
             <span class="notes__mode">只读</span>
           </el-tooltip>
 
@@ -479,6 +589,7 @@ function syncDoneText(summary: NoteSyncSummary): string {
           :root="store.root"
           :theme="settings.effectiveTheme"
           :read-only="readOnly"
+          :image-repo="settings.settings.noteImageRepo"
           @change="onContentChange"
           @open="openNoteLink"
         />

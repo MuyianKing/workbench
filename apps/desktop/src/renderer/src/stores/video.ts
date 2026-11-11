@@ -1,5 +1,6 @@
 import type { VideoNode, VideoSource } from '@workbench/video'
-import { countVideos, findVideoNode, pushVideoHistory, removeFromVideoHistory, sanitizeVideoRoot, videoChain, videoRootName } from '@workbench/video'
+import type { VideoWindowCommand, VideoWindowItem } from '@/types'
+import { clampVideoRate, countVideos, findVideoNode, flattenVideoNodes, pushVideoHistory, removeFromVideoHistory, sanitizeVideoRoot, videoChain, videoRootName } from '@workbench/video'
 import { defineStore } from 'pinia'
 /**
  * 视频：一个**用户自己挑的文件夹**，以及它里面的目录树与正在播放的那一个。
@@ -16,9 +17,14 @@ import { defineStore } from 'pinia'
  *     立刻播它，点文件夹只是选中并切换展开态；恢复上次的那个是唯一的例外
  *     （只加载不播，见 `autoplayNext`）。
  *
- * 播放本身的状态里，只有**要跨组件共享的那部分**住在这里（速率、悬浮意图 ——
- * 播放器本体与视频页头部各要读一份）；进度与暂停的实际值活在 `<video>` 元素上，
+ * 播放本身的状态里，只有**要跨组件共享的那部分**住在这里（速率、悬浮与独立窗口的意图 ——
+ * 播放器本体、视频页头部与独立窗口各要读一份）；进度与暂停的实际值活在 `<video>` 元素上，
  * 不另立全局状态。
+ *
+ * **独立窗口**（第五个 HTML 入口 `video.html`）是第二份播放宿主：这里的 `detached` 只是
+ * 主窗口这边的镜像（真正的窗口在 Rust 手里），`detachedRequest` 是「点过在独立窗口播放」
+ * 的意图，`resume` 是收回时带来、还没落到主窗口 `<video>` 上的那一秒。两边的 active /
+ * 速率 / 收回 / 关闭走 VideoPlayer 里的两条事件（见 `video-window:event`），不在这里监听。
  */
 import { computed, ref, watch } from 'vue'
 import { useSettingsStore } from '@/stores/settings'
@@ -60,6 +66,21 @@ export const useVideoStore = defineStore('video', () => {
    */
   const autoplayNext = ref(true)
 
+  /**
+   * 独立窗口正在播（主窗口这边不再渲染 `<video>`）：它只是 Rust 那扇窗口的镜像，
+   * 窗口被关掉时由 `video-window:event` 的 closed 回来清掉。
+   */
+  const detached = ref(false)
+  /** 点过「在独立窗口播放」的意图：真正读秒数并开窗的是播放器（它拿着 `<video>`） */
+  const detachedRequest = ref(false)
+  /** 从独立窗口收回时带来、还没落到主窗口 `<video>` 上的那一秒 */
+  const resume = ref<{ time: number, playing: boolean } | null>(null)
+
+  /** 独立窗口的播放列表：视频树按展示顺序摊平（与 nextVideoNode 同一份顺序） */
+  const playlist = computed<VideoWindowItem[]>(() =>
+    flattenVideoNodes(nodes.value).map(node => ({ rel: node.rel, name: node.name })),
+  )
+
   const loading = ref(false)
   /** 至少成功读过一次盘：空态提示据此决定要不要说「这里还没有视频」 */
   const loaded = ref(false)
@@ -75,6 +96,8 @@ export const useVideoStore = defineStore('video', () => {
   /** 扫描与打开各自的令牌：慢一步回来的结果直接丢掉 */
   let scanJob = 0
   let openJob = 0
+  /** 独立窗口换视频的令牌：连点两个时只让最后那个发 load 命令 */
+  let detachJob = 0
 
   const videoCount = computed(() => countVideos(nodes.value))
   /** 选中项从最外层到自身的链；界面拿它写「它在哪一层」 */
@@ -89,6 +112,9 @@ export const useVideoStore = defineStore('video', () => {
     loaded.value = false
     loadError.value = ''
     openError.value = ''
+    detached.value = false
+    detachedRequest.value = false
+    resume.value = null
   }
 
   /**
@@ -241,6 +267,11 @@ export const useVideoStore = defineStore('video', () => {
 
     if (!node || node.kind === 'folder')
       return
+    // 独立窗口播着时，树上挑别的只切那扇窗口：主窗口这边不再起第二个播放器
+    if (detached.value) {
+      void openInDetached(node)
+      return
+    }
     void open(node)
   }
 
@@ -264,8 +295,132 @@ export const useVideoStore = defineStore('video', () => {
     void settings.updateSettings({ videoLastRel: node.rel })
   }
 
-  /** 换视频 / 清空时把播放器那份收起来（重试打开同一个文件走 open） */
+  /**
+   * 独立窗口播着时在树上挑别的：先授权并转出 URL，再让窗口换过去。
+   * 主窗口这边同步 active / 选中项 / 上次打开，但不渲染 `<video>` —— 播放权在窗口那边。
+   */
+  async function openInDetached(node: VideoNode): Promise<void> {
+    const job = (detachJob += 1)
+    const result = await window.workbench.loadVideo(root.value, node.rel)
+    if (job !== detachJob)
+      return
+    if (!result.ok || !result.data) {
+      openError.value = result.error ?? '打开视频失败'
+      // 树上的高亮退回还在播的那一个：换失败不该让选中项指向一个没在播的视频
+      activeRel.value = active.value?.rel ?? ''
+      return
+    }
+
+    active.value = result.data
+    void settings.updateSettings({ videoLastRel: node.rel })
+    const command: VideoWindowCommand = {
+      action: 'load',
+      source: result.data,
+      rate: rate.value,
+      time: 0,
+      playing: true,
+      playlist: playlist.value,
+    }
+    const sent = await window.workbench.sendVideoWindowCommand(command)
+    if (job !== detachJob)
+      return
+    if (!sent.ok) {
+      detachedClosed()
+      openError.value = sent.error ?? '独立视频窗口没有响应'
+    }
+  }
+
+  /** 点「在独立窗口播放」：只置意图 —— 真正读当前秒数并开窗的是播放器（它拿着 `<video>`） */
+  function requestDetach(): void {
+    if (!active.value || detached.value)
+      return
+    floatRequested.value = false
+    openError.value = ''
+    detachedRequest.value = true
+  }
+
+  /** 播放器开窗失败：撤掉意图（提示由它自己说，不进 openError —— 视频还在正常播） */
+  function detachFailed(): void {
+    detachedRequest.value = false
+  }
+
+  /** 窗口开起来了：主窗口卸掉自己的 `<video>`，播放权交给独立窗口 */
+  function detachOpened(): void {
+    detachedRequest.value = false
+    detached.value = true
+    floatRequested.value = false
+    resume.value = null
+  }
+
+  /** 独立窗口自动接下一部：跟着它更新当前视频 / 速率 / 「上次打开」 */
+  function detachedActive(source: VideoSource, rateValue: number): void {
+    active.value = source
+    activeRel.value = source.rel
+    rate.value = clampVideoRate(rateValue)
+    void settings.updateSettings({ videoLastRel: source.rel })
+  }
+
+  function detachedRate(value: number): void {
+    rate.value = clampVideoRate(value)
+  }
+
+  /** 窗口收回：播放权交回主窗口，等它按 resume 落回同一秒 */
+  function detachedDocked(payload: { source: VideoSource, rate: number, time: number, playing: boolean }): void {
+    detachJob += 1
+    rate.value = clampVideoRate(payload.rate)
+    active.value = payload.source
+    activeRel.value = payload.source.rel
+    detached.value = false
+    floatRequested.value = false
+    resume.value = { time: payload.time, playing: payload.playing }
+    void settings.updateSettings({ videoLastRel: payload.source.rel })
+  }
+
+  /** 窗口被关掉（不是收回）：停止播放，主窗口清空 */
+  function detachedClosed(): void {
+    if (!detached.value && !detachedRequest.value)
+      return
+    detachJob += 1
+    detached.value = false
+    detachedRequest.value = false
+    resume.value = null
+    active.value = null
+    openError.value = ''
+    floatRequested.value = false
+  }
+
+  /** 收回后播放器来取要落的那一秒（取完即清，避免下一次换视频误用） */
+  function consumeResume(): { time: number, playing: boolean } | null {
+    const value = resume.value
+    resume.value = null
+    return value
+  }
+
+  /** 主窗口主动收回：让窗口自己报告时间并关掉；窗口已经没了就按已关闭处理 */
+  async function dockDetached(): Promise<void> {
+    const result = await window.workbench.sendVideoWindowCommand({ action: 'dock' })
+    if (!result.ok)
+      detachedClosed()
+  }
+
+  /** 主窗口主动停掉独立窗口（换目录等）；窗口已经没了就按已关闭处理 */
+  async function closeDetached(): Promise<void> {
+    const result = await window.workbench.sendVideoWindowCommand({ action: 'close' })
+    if (!result.ok)
+      detachedClosed()
+  }
+
+  /**
+   * 换视频 / 清空时把播放器那份收起来（重试打开同一个文件走 open）。
+   * 独立窗口开着时连它一起关掉 —— 换了目录 / 停了播放，窗口继续播旧文件只会让人困惑。
+   */
   function closeVideo(): void {
+    detachJob += 1
+    if (detached.value)
+      void closeDetached()
+    detached.value = false
+    detachedRequest.value = false
+    resume.value = null
     active.value = null
     openError.value = ''
     floatRequested.value = false
@@ -273,6 +428,8 @@ export const useVideoStore = defineStore('video', () => {
 
   /** 点「悬浮播放」：把手上的视频浮成小窗带走（没有正播的视频时那颗按钮不在） */
   function requestFloat(): void {
+    // 两件事互相排斥：从别处点悬浮时，别再让播放器去开独立窗口
+    detachedRequest.value = false
     floatRequested.value = true
   }
 
@@ -291,6 +448,9 @@ export const useVideoStore = defineStore('video', () => {
     activeRel,
     active,
     autoplayNext,
+    detached,
+    detachedRequest,
+    playlist,
     activeChain,
     videoCount,
     loading,
@@ -305,5 +465,14 @@ export const useVideoStore = defineStore('video', () => {
     closeVideo,
     requestFloat,
     dockFloat,
+    requestDetach,
+    detachFailed,
+    detachOpened,
+    detachedActive,
+    detachedRate,
+    detachedDocked,
+    detachedClosed,
+    consumeResume,
+    dockDetached,
   }
 })

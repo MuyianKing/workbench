@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <!--
+      独立 Markdown 编辑窗口的入口（第六个 HTML 入口，见 docs/modules/notes.md）。
+
+      与截图 / 钉图 / 网速球 / 独立视频窗口同一条口径：独立窗口、各自的 JS 上下文，
+      只装适配层，**不装 store、不 initState** —— 它打开的是资源管理器里被右击的那一个
+      .md 文件，路径与正文由 Rust 会话交过来（markdown_window_context），装 store 会与
+      主窗口抢着读写同一批数据文件。
+
+      明暗不写死：入口里 applyBootstrapTheme() 按首屏快照把 data-theme / .dark 落到
+      <html> 上，tokens.css 随之切换；窗口在页面加载完成前一直藏着，不会闪白。
+    -->
+    <title>Markdown</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <style>
+      html,
+      body,
+      #markdown-window {
+        height: 100%;
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        overflow: hidden;
+        font-family: var(--font-ui);
+        font-size: var(--fs-body);
+        color: var(--ink-1);
+        background: var(--bg-canvas);
+        -webkit-font-smoothing: antialiased;
+        text-rendering: optimizeLegibility;
+      }
+
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
+
+      button {
+        font-family: inherit;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="markdown-window"></div>
+    <script type="module" src="/src/markdown-window/main.ts"></script>
+  </body>
+</html>

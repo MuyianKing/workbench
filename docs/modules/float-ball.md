@@ -131,7 +131,7 @@
   （判左键还按着没有，见「松手了没有认左键」那条；只是加 feature，不新增编译单元）
 - `apps/desktop/src-tauri/src/paths.rs` 的 `ball_file()` —— `data\ball.json`
 - `apps/desktop/src/renderer/ball.html` + `src/renderer/src/ball/` —— 第四个入口与那颗球
-- `apps/desktop/vite.config.ts` 的 `rollupOptions.input`（四个入口）
+- `apps/desktop/vite.config.ts` 的 `rollupOptions.input`（六个入口）
 - `apps/desktop/src/renderer/src/workbench/index.ts` 里那一段通道、`types.ts` 的 `ballEnabled`
 - `components/settings/GeneralPane.vue` 的「网速球」开关
 - `apps/desktop/src-tauri/capabilities/capture.json`（`windows` 里含 `ball`）

@@ -1,9 +1,9 @@
 import { defineConfig } from 'vitest/config'
 
 /**
- * 全量测试的入口：一条 `vitest run` 把 18 个项目收进同一个进程（根 package.json 的 `test`）。
+ * 全量测试的入口：一条 `vitest run` 把 19 个域包 + 应用收进同一个进程（根 package.json 的 `test`）。
  *
- * 为什么不用 `pnpm -r test`：那会给**每个包各起一个 vitest 进程**，18 次进程与配置启动实测约 16s，
+ * 为什么不用 `pnpm -r test`：那会给**每个包各起一个 vitest 进程**，二十次进程与配置启动实测约 16s，
  * 而单包真正跑用例只要 0.77s（`core` 实测 1.7s）—— 这条链上最后一块大头就是它。
  *
  * 各包自己的 `vitest.config.ts` 仍是唯一的配置来源（`include` / `environment` / `@` 别名都在那儿），

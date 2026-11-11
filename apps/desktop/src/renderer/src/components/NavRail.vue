@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { ViewId } from '@workbench/appearance'
 import type { Component, CSSProperties } from 'vue'
-import { Brush, ChatDotRound, Collection, Connection, Cpu, Document, FolderOpened, Grid, Key, MagicStick, Message, Notebook, TrendCharts, VideoPlay } from '@element-plus/icons-vue'
+import { Brush, ChatDotRound, Collection, Connection, Cpu, Document, FolderOpened, Grid, Key, MagicStick, Message, Notebook, Share, TrendCharts, VideoPlay } from '@element-plus/icons-vue'
 import { orderedViews } from '@workbench/appearance'
 /**
  * 左侧导航栏：应用的一级页面都挂在这里。
@@ -36,6 +36,7 @@ const ICONS: Record<ViewId, Component> = {
   styles: Brush,
   video: VideoPlay,
   etf: TrendCharts,
+  git: Share,
 }
 
 const active = computed(() => store.activeView)
