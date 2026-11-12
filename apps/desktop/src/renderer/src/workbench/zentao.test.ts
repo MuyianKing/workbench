@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { bugs, login, logout, openWindow, session } from './zentao'
+import { bugs, login, logout, openSite, session } from './zentao'
 
 const invoke = vi.fn<(command: string, args?: Record<string, unknown>) => Promise<unknown>>()
 
@@ -51,13 +51,13 @@ describe('禅道适配层', () => {
     ])
   })
 
-  it('打开禅道窗口不带参数，失败收敛成 Result', async () => {
+  it('在浏览器里打开禅道不带参数，失败收敛成 Result', async () => {
     invoke.mockResolvedValue(null)
-    expect(await openWindow()).toEqual({ ok: true, data: null })
-    expect(invoke).toHaveBeenLastCalledWith('zentao_open_window', undefined)
+    expect(await openSite()).toEqual({ ok: true, data: null })
+    expect(invoke).toHaveBeenLastCalledWith('zentao_open_site', undefined)
 
     invoke.mockRejectedValue('请填写 oauth.local.json 的 zentao 并重新构建')
-    expect(await openWindow()).toEqual({ ok: false, error: '请填写 oauth.local.json 的 zentao 并重新构建' })
+    expect(await openSite()).toEqual({ ok: false, error: '请填写 oauth.local.json 的 zentao 并重新构建' })
   })
 
   it('分页失败不返回部分列表，并保留认证过期标记', async () => {

@@ -1,11 +1,11 @@
 import type { Result } from '@workbench/core'
 
 import type { GatewayUsageRow, GatewayUsageSummary } from './gateway'
-import type { QoderAccess, QoderAccount, QoderAccountImport, QoderActivityRow, QoderClaimResult, QoderCredits, QoderEarningPoint, QoderHeatmapPoint, QoderLoginPoll, QoderLoginStart, QoderModelInfo, QoderPerksAutoConfig, QoderPerksAutoRun, QoderStatus, QoderTaskSnapshot, QoderUsageWindow } from '@/types'
+import type { QoderAccess, QoderAccount, QoderAccountImport, QoderActivityRow, QoderClaimResult, QoderCredits, QoderEarningPoint, QoderLoginPoll, QoderLoginStart, QoderModelInfo, QoderPerksAutoConfig, QoderPerksAutoRun, QoderStatus, QoderTaskSnapshot, QoderUsageWindow } from '@/types'
 import { fail, ok } from '@workbench/core'
 import { errorText, invoke } from './bridge'
 // 载荷类型搬到 /types（契约侧）了；这里 re-export，老导入不动
-export type { QoderAccess, QoderAccount, QoderAccountImport, QoderActivityRow, QoderCampaign, QoderCheckinStatus, QoderClaimResult, QoderCredits, QoderEarningPoint, QoderHeatmapPoint, QoderLoginPoll, QoderLoginStart, QoderModelInfo, QoderModelQuota, QoderPackage, QoderPerksAutoConfig, QoderPerksAutoRun, QoderStatus, QoderTaskSnapshot, QoderUsageWindow } from '@/types'
+export type { QoderAccess, QoderAccount, QoderAccountImport, QoderActivityRow, QoderCampaign, QoderCheckinStatus, QoderClaimResult, QoderCredits, QoderEarningPoint, QoderLoginPoll, QoderLoginStart, QoderModelInfo, QoderModelQuota, QoderPackage, QoderPerksAutoConfig, QoderPerksAutoRun, QoderStatus, QoderTaskSnapshot, QoderUsageWindow } from '@/types'
 
 /**
  * Qoder 网关的适配层。
@@ -129,10 +129,6 @@ export function qoderClaimCampaigns(uid: string): Promise<Result<QoderClaimResul
   return call('wb_qoder_claim_campaigns', { uid }, '领取活动失败')
 }
 
-export function qoderCreditHeatmap(uid: string): Promise<Result<QoderHeatmapPoint[]>> {
-  return call('wb_qoder_credit_heatmap', { uid }, '读取积分消耗失败')
-}
-
 export function qoderActivityToday(): Promise<Result<QoderActivityRow[]>> {
   return call('wb_qoder_activity_today', {}, '读取今日签到记录失败')
 }
@@ -191,7 +187,6 @@ export const qoderApi = {
   qoderPerksStatus,
   qoderCheckin,
   qoderClaimCampaigns,
-  qoderCreditHeatmap,
   qoderActivityToday,
   qoderEarnings,
   publishQoderEarnings,

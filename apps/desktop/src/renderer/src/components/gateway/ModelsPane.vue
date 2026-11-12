@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import type { GatewayModelInfo } from '@/workbench/gateway'
-import { CopyDocument, Cpu } from '@element-plus/icons-vue'
+import { CopyDocument, Cpu, Search } from '@element-plus/icons-vue'
 import { inferModelMeta } from '@workbench/ai'
 import { ElMessage } from 'element-plus'
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { copyText } from '@/clipboard'
 import EmptyState from '@/components/EmptyState.vue'
 
@@ -19,10 +19,23 @@ import EmptyState from '@/components/EmptyState.vue'
  *
  * 单价由 Rust 算好：价表是**前缀匹配**（`glm-5.2-0930` 也要落到 `glm-5.2` 那个价上），
  * 这条规则只该有 `wb_pricing` 一份，界面照着显示就行。
+ *
+ * 栏首的搜索只在本地的模型清单里过滤（id / 名称），**不发请求**、也不触发重新拉取。
  */
 const models = ref<GatewayModelInfo[]>([])
 const loading = ref(false)
 const fetching = ref(false)
+
+/** 模型栏的本地查询：只在已拉下来的清单里按 id / 名称过滤，不发请求、不触发重新获取 */
+const modelKeyword = ref('')
+const visibleModels = computed(() => {
+  const keyword = modelKeyword.value.trim().toLowerCase()
+  if (!keyword)
+    return models.value
+  return models.value.filter(model =>
+    model.id.toLowerCase().includes(keyword) || model.name.toLowerCase().includes(keyword),
+  )
+})
 
 /**
  * 128_000 → 「128K」，1_048_576 → 「1M」，0 就是不知道。
@@ -114,6 +127,16 @@ onMounted(load)
 
 <template>
   <div class="models">
+    <div v-if="models.length" class="models__toolbar">
+      <el-input
+        v-model="modelKeyword"
+        placeholder="搜索模型"
+        clearable
+        :prefix-icon="Search"
+        class="models__search"
+      />
+    </div>
+
     <div v-if="!models.length && !loading && !fetching" class="panel">
       <EmptyState
         compact
@@ -123,8 +146,17 @@ onMounted(load)
       />
     </div>
 
+    <div v-else-if="models.length && !visibleModels.length" class="panel">
+      <EmptyState
+        compact
+        :icon="Search"
+        text="没有匹配的模型"
+        hint="换个关键字试试"
+      />
+    </div>
+
     <div v-else v-loading="fetching && !models.length" class="models__grid">
-      <article v-for="model in models" :key="model.id" class="panel models__card">
+      <article v-for="model in visibleModels" :key="model.id" class="panel models__card">
         <div class="models__card-head">
           <span class="models__avatar">
             <el-icon><Cpu /></el-icon>
@@ -175,6 +207,17 @@ onMounted(load)
   flex-direction: column;
   gap: var(--sp-2);
   min-height: 0;
+}
+
+/* 栏首只留一个本地搜索框：与 Qoder 模型栏同宽，高度走默认尺寸（32px） */
+.models__toolbar {
+  display: flex;
+  align-items: center;
+  flex: none;
+}
+
+.models__search {
+  width: 240px;
 }
 
 /* 卡片网格：一行放不下五张时自动往下排 */

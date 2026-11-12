@@ -17,7 +17,7 @@
  *     **右键不关自己**：在正文里换个地方右击时，编辑器的 contextmenu 会紧接着在新位置重开，
  *     两件事在同一个事件里闭环，不会先消失再出现。
  */
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useFloatingDismiss } from '@/composables/use-floating-dismiss'
 import { useFloatingPosition } from '@/composables/use-floating-position'
 
@@ -38,6 +38,13 @@ const props = defineProps<{
   /** 打开的位置，视口坐标（取自 contextmenu 的 clientX / clientY） */
   x: number
   y: number
+  /**
+   * 不出现在菜单里的动作名。
+   *
+   * 独立 Markdown 窗口把大纲钉死在右侧（`outlinePinned`），菜单里再放一项「大纲」
+   * 就能把它关成一条空栏 —— 那一档传 `['outline']` 进来；笔记页不传，照旧按需开关。
+   */
+  hidden?: string[]
 }>()
 
 const emit = defineEmits<{
@@ -77,6 +84,16 @@ const GROUPS: MenuAction[][] = [
     { name: 'line', label: '分隔线', icon: 'line' },
   ],
 ]
+
+/** 按 `hidden` 滤掉不许出现的项；整排都空了就不摆那一排（连分隔线一起） */
+const groups = computed(() => {
+  const hidden = props.hidden ?? []
+  if (!hidden.length)
+    return GROUPS
+  return GROUPS
+    .map(group => group.filter(action => !hidden.includes(action.name)))
+    .filter(group => group.length > 0)
+})
 
 /** 两行带子菜单的：标题（Vditor 工具带上是一个下拉）与插入整块的东西 */
 const SUBMENUS: { label: string, items: MenuRow[] }[] = [
@@ -142,7 +159,7 @@ onMounted(place)
       @mousedown.prevent
       @contextmenu.prevent
     >
-      <template v-for="(group, index) in GROUPS" :key="index">
+      <template v-for="(group, index) in groups" :key="index">
         <div class="menu__grid">
           <el-tooltip
             v-for="action in group"

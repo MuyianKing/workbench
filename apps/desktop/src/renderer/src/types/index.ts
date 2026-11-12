@@ -11,7 +11,7 @@ import type { AccentInkMode, AppearanceSettingKey, EffectiveTheme, ThemeConfig, 
 import type { AccountProfile, AuthProvider } from '@workbench/auth'
 import type { CaptureContext, OcrLine, PinPatch, PinRecord } from '@workbench/capture'
 import type { ActiveSession, ActivityBreakdown, ActivityKind, ActivityView, CommandEntry, IconCacheEntry, PackageManager, ProjectColor, ProjectSort, QuickApp, Result, ScanResult } from '@workbench/core'
-import type { GitCommitDetail, GitCommitPage, GitCompare, GitPatch, GitRepoInfo, GitTreePage } from '@workbench/git'
+import type { GitBranchList, GitCommitDetail, GitCommitPage, GitCompare, GitPatch, GitRepoInfo, GitTreePage } from '@workbench/git'
 import type { KbRawSource, KbRepoState, KbScanResult, KbSyncInput, KbSyncSummary } from '@workbench/kb'
 import type { MailAccount, MailContact } from '@workbench/mail'
 import type { BallContext, NetCounters } from '@workbench/net-meter'
@@ -20,13 +20,13 @@ import type { SkillCommit, SkillCompareFile, SkillCreateInput, SkillEntry, Skill
 import type { SyncDeviceInfo, TokenUsageResult } from '@workbench/usage'
 import type { VaultEntry, VaultRecord } from '@workbench/vault'
 import type { VideoNode, VideoSource } from '@workbench/video'
-import type { GitCommitLog, GitWorkLogDraft, WorkLogEntry, WorkLogInput, WorkLogPatch, WorkRange, WorkSort } from '@workbench/work-log'
+import type { GitCommitLog, GitWorkLogDraft, WorkLogEntry, WorkLogInput, WorkLogPatch, WorkLogSyncOutcome, WorkRange, WorkRangeBounds, WorkSort } from '@workbench/work-log'
 import type { ZentaoBugList, ZentaoSession } from '@workbench/zentao'
 // 网关 / Qoder / ETF 的通道载荷类型：住在隔壁的 gateway.ts / qoder.ts / etf.ts（契约侧），
 // 这里导入并 re-export —— WorkbenchApi 直接引用，老代码从本文件或各自适配文件取都行。
 import type { EtfSyncPullOutcome } from './etf'
 import type { GatewayAccess, GatewayAccount, GatewayAccountImport, GatewayActionResult, GatewayActivityRow, GatewayCredits, GatewayGrantAccount, GatewayLoginPoll, GatewayLoginStart, GatewayModelInfo, GatewayPerksAutoConfig, GatewayPerksAutoRun, GatewayPullResult, GatewayStatus, GatewaySyncResult, GatewaySyncStatus, GatewayTaskRun, GatewayTasksSnapshot, GatewayUsageRow, GatewayUsageSummary, GatewayUsageWindow } from './gateway'
-import type { QoderAccess, QoderAccount, QoderAccountImport, QoderActivityRow, QoderClaimResult, QoderCredits, QoderEarningPoint, QoderHeatmapPoint, QoderLoginPoll, QoderLoginStart, QoderModelInfo, QoderPerksAutoConfig, QoderPerksAutoRun, QoderStatus, QoderTaskSnapshot, QoderUsageWindow } from './qoder'
+import type { QoderAccess, QoderAccount, QoderAccountImport, QoderActivityRow, QoderClaimResult, QoderCredits, QoderEarningPoint, QoderLoginPoll, QoderLoginStart, QoderModelInfo, QoderPerksAutoConfig, QoderPerksAutoRun, QoderStatus, QoderTaskSnapshot, QoderUsageWindow } from './qoder'
 import { AI_PERMISSION_DEFAULT, AI_THINKING_DEFAULT } from '@workbench/ai'
 import { DEFAULT_APPEARANCE, TERMINAL_BUTTON_TOP_DEFAULT } from '@workbench/appearance'
 import { CAPTURE_ENABLED_DEFAULT, CAPTURE_HOTKEY_DEFAULT, CAPTURE_MAGNIFIER_DEFAULT, CAPTURE_PIN_OPACITY_DEFAULT, CAPTURE_SAVE_DIR_DEFAULT } from '@workbench/capture'
@@ -89,6 +89,7 @@ export type {
   ScanResult,
 } from '@workbench/core'
 export type {
+  GitBranchList,
   GitChangedFile,
   GitCommitDetail,
   GitCommitPage,
@@ -449,13 +450,23 @@ export interface AppSettings {
    */
   kbRawSources: KbRawSource[]
   /**
-   * Git 页上次打开的仓库根目录（空串 = 还没打开过）。
+   * Git 页上次打开的那个文件夹（空串 = 还没打开过）。
    *
+   * 它可能是仓库里的一个子目录（`.git` 在外层）：页面按它恢复，左栏目录树也只展开这个子树。
    * 与 `noteDir` / `skillDir` / `videoDir` 同一类：本机的一个目录，进数据文件、
    * 不参与外观同步。空串时 Git 页显示「选一个仓库」的引导；打不开时照实提示，
    * 不把它悄悄清掉（仓库可能是移动硬盘 / 网络盘，下次插上还能用）。
    */
   gitRepo: string
+  /**
+   * Git 页「最近打开的文件夹」清单（最近打开的在前，最多 `GIT_REPO_HISTORY_MAX` 个）。
+   *
+   * 存的是用户选中的那个文件夹（可能是仓库里的子目录），不是解析出来的仓库根 ——
+   * 从下拉里换回来时目录树还停在同一个子树。与 `gitRepo` 同一类：本机路径，进数据文件、
+   * 不参与外观同步。打不开的条目照旧保留（仓库可能在移动硬盘 / 网络盘上，下次插上还能用）。
+   * 收敛口径见 packages/git/src/repos.ts。
+   */
+  gitRepos: string[]
   /**
    * AI 助手配过的服务（模型管理弹窗里那一屏）：一个服务 = 名称 + Base URL + API 形态 +
    * 模型清单（每条带上下文与思考档位）。密钥不在这里 —— 它在 Windows 凭据管理器里
@@ -613,8 +624,16 @@ export interface AppSettings {
    * 会整份同步到别的机器；而「我上一眼在看什么」换台机器不成立（与 `activeView` 同一条口径）。
    */
   projectSort: ProjectSort
-  /** 工作页顶栏那一排的范围（待办 / 今天 / 昨天 / 本周 / 本月），同上 */
+  /** 工作页顶栏那一排的范围（待办 / 今天 / 昨天 / 本周 / 本月 / 自定义），同上 */
   workRange: WorkRange
+  /**
+   * 工作页「自定义」范围的两端（YYYY-MM-DD，含两端）；null = 还没选过。
+   *
+   * 与 `workRange` 同属行为记忆：选中「自定义」时用它筛时间轴，换台机器不成立，
+   * 所以进数据文件、不进 theme.json。收敛见 packages/work-log/src/work-log.ts 的
+   * `sanitizeWorkRangeBounds`。
+   */
+  workRangeCustom: WorkRangeBounds | null
   /** 工作页的排序维度（按时间 / 按项目） */
   workSort: WorkSort
   /**
@@ -1276,7 +1295,6 @@ export interface WorkbenchApi {
   qoderPerksStatus: (uid?: string) => Promise<Result<QoderTaskSnapshot[]>>
   qoderCheckin: (uid: string) => Promise<Result<QoderClaimResult>>
   qoderClaimCampaigns: (uid: string) => Promise<Result<QoderClaimResult>>
-  qoderCreditHeatmap: (uid: string) => Promise<Result<QoderHeatmapPoint[]>>
   qoderActivityToday: () => Promise<Result<QoderActivityRow[]>>
   qoderEarnings: (days: number) => Promise<Result<QoderEarningPoint[]>>
   qoderEarningsPublish: () => Promise<Result<unknown>>
@@ -1396,8 +1414,8 @@ export interface WorkbenchApi {
   /**
    * 工作日志：整份列表（时间轴自己按范围分组、分页）。
    *
-   * 数据住在本机的 `work-log.json` 里，**不进同步仓库** —— 它是个人记录，
-   * 多机合并的语义也不成立（见 @workbench/work-log 的文件头）。
+   * 数据住在本机的 `work-log.json`；配了同步仓库时会按设备分片推 / 拉
+   * （`work-log/<设备id>.json`，合并规则见 @workbench/work-log 的 work-log-sync.ts）。
    *
    * 这里是 `Result` 而不是裸数组：读盘失败与「确实还没写过」必须分得开，
    * 把前者显示成空列表会让人以为自己的记录丢了。
@@ -1408,13 +1426,20 @@ export interface WorkbenchApi {
   updateWorkLog: (id: string, patch: WorkLogPatch) => Promise<Result<WorkLogEntry>>
   removeWorkLog: (id: string) => Promise<Result<null>>
   /**
+   * 工作日志的多机同步：拉别的设备分片 → 合并写回本机 → 推本机分片。
+   *
+   * 没登录 / 没配同步仓库时返回 `enabled: false`（本机数据照常）；
+   * 失败时 `Result` 带原因，页面只在工具带留一行字，不弹消息。
+   */
+  syncWorkLogs: () => Promise<Result<WorkLogSyncOutcome>>
+  /**
    * 读一个项目仓库的提交记录。**只读、本地**：只跑 git log 与 git config，
    * 不写仓库、不联网，也不是新的网络出口。
    *
-   * `since` 是毫秒时间戳，宿主侧拿它做 git `--since` 的粗筛；精确到天的过滤
-   * 与按项目 / 按天分组在 `@workbench/work-log` 里。不是 git 仓库时 `isRepo: false`。
+   * `since` / `until` 是毫秒时间戳，宿主侧拿它们做 git `--since` / `--until` 的粗筛；
+   * 精确到天的过滤与按项目 / 按天分组在 `@workbench/work-log` 里。不是 git 仓库时 `isRepo: false`。
    */
-  projectGitLog: (dir: string, since?: number) => Promise<Result<GitCommitLog>>
+  projectGitLog: (dir: string, since?: number, until?: number) => Promise<Result<GitCommitLog>>
   /**
    * 把「从提交生成」预览里确认过的草稿写进工作日志。
    * 新建的条目带来源哈希（下次生成不会重复写），`appendTo` 的条目追加到已有记录上。
@@ -1425,14 +1450,16 @@ export interface WorkbenchApi {
   //
   // 与上面 projectGitLog 不是同一条：那一条按项目目录起算、只给「从提交生成」用；
   // 这一组按仓库根解释路径，还会读目录树与补丁。全部只跑读命令，不写仓库、不联网。
-  /** 打开一个仓库（选中的可以是子目录，返回的 root 才是仓库根） */
+  /** 打开一个文件夹（返回仓库根；选中的是子目录时 scope 是它相对根的位置） */
   openGitRepo: (path: string) => Promise<Result<GitRepoInfo>>
-  /** 当前分支（HEAD）的提交列表；分页取 */
-  listGitCommits: (root: string, skip: number, limit: number) => Promise<Result<GitCommitPage>>
-  /** 一个文件的提交历史（不做 rename 跟踪：改名前的历史不显示） */
-  listGitFileCommits: (root: string, path: string, skip: number, limit: number) => Promise<Result<GitCommitPage>>
-  /** 一个目录的内容（HEAD 那一版）；空串 = 根目录 */
-  listGitTree: (root: string, dir: string) => Promise<Result<GitTreePage>>
+  /** 本地分支清单（只用于看哪条分支的历史，不切工作区） */
+  listGitBranches: (root: string) => Promise<Result<GitBranchList>>
+  /** 一条分支（空串 = 当前分支）的提交列表；`since` / `until` 是 YYYY-MM-DD（空串 = 不限），分页取 */
+  listGitCommits: (root: string, rev: string, since: string, until: string, skip: number, limit: number) => Promise<Result<GitCommitPage>>
+  /** 一条分支上一个文件的提交历史（不做 rename 跟踪：改名前的历史不显示；时间范围同上） */
+  listGitFileCommits: (root: string, path: string, rev: string, since: string, until: string, skip: number, limit: number) => Promise<Result<GitCommitPage>>
+  /** 一条分支上一个目录的内容（空串 = 根目录） */
+  listGitTree: (root: string, dir: string, rev: string) => Promise<Result<GitTreePage>>
   /** 一个提交的元信息 + 改动文件清单 */
   loadGitCommit: (root: string, hash: string) => Promise<Result<GitCommitDetail>>
   /** 任意两个提交之间的改动文件清单 */
@@ -1837,12 +1864,12 @@ export interface WorkbenchApi {
   zentaoBugs: (sessionId: string) => Promise<Result<ZentaoBugList>>
   /** 登记禅道后台检查周期（分钟，0 = 关闭）；间隔没变时后端不动计时 */
   zentaoWatch: (pollMinutes: number) => Promise<Result<null>>
-  /** 比出新增之后弹系统通知（点通知打开禅道窗口，那一跳在 Rust 侧接） */
+  /** 比出新增之后弹系统通知（点通知用浏览器打开禅道，那一跳在 Rust 侧接） */
   zentaoNotify: (sessionId: string, count: number, title: string) => Promise<Result<null>>
   /** 后台线程到点该查了（取数、比新增与通知都在渲染层接手） */
   onZentaoCheck: (handler: () => void) => Promise<() => void>
-  /** 打开（或聚焦）禅道窗口（免登录在 Rust 侧完成；通知点击也走它） */
-  zentaoOpenWindow: () => Promise<Result<null>>
+  /** 用系统浏览器打开禅道（地址由 Rust 读内嵌配置；通知点击也走它） */
+  zentaoOpenSite: () => Promise<Result<null>>
   /** 用系统默认浏览器打开 http(s) 链接 */
   openExternal: (url: string) => Promise<Result<null>>
   /**
@@ -2175,6 +2202,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   kbDir: '',
   kbRawSources: [],
   gitRepo: '',
+  gitRepos: [],
   aiProviders: [],
   aiDefaultProvider: '',
   aiDefaultModel: '',
@@ -2194,6 +2222,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   // 行为记忆：第一次打开时就是这几个默认档，之后记住用户自己选的那一档
   projectSort: PROJECT_SORT_DEFAULT,
   workRange: WORK_RANGE_DEFAULT,
+  workRangeCustom: null,
   workSort: WORK_SORT_DEFAULT,
   noteTreeExpanded: [],
   videoDir: '',

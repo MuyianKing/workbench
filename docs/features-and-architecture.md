@@ -28,7 +28,7 @@ Workbench 的文档按「通用 / 模块」分层：
 | Qoder（网关：Qoder 国内版反代，独立端口 / 密钥） | [qoder.md](modules/qoder.md) |
 | 密码保险库 | [vault.md](modules/vault.md) |
 | 邮箱（IMAP 收发） | [mail.md](modules/mail.md) |
-| 禅道（独立窗口 + 后台检查与通知） | [zentao.md](modules/zentao.md) |
+| 禅道（浏览器打开站点 + 后台检查与通知） | [zentao.md](modules/zentao.md) |
 | 样式（设计参考库） | [styles.md](modules/styles.md) |
 | 视频（本地 MP4 播放器） | [video.md](modules/video.md) |
 | 截图与钉图（capture） | [screenshot.md](modules/screenshot.md) |
@@ -83,7 +83,7 @@ Workbench 的文档按「通用 / 模块」分层：
   见[「知识库（kb）」](modules/kb.md)一节）、**AI 助手**（请本机的 Pi 干活的通用控制台，
   见[「AI 助手（ai）」](modules/ai.md)一节）、**密码**（密码保险库，见[「密码保险库」](modules/vault.md)一节）、
   **样式**（74 套设计语言的参考库，见[「样式」](modules/styles.md)一节）、**视频**（本地 MP4 播放器，见[「视频」](modules/video.md)一节）、
-  **邮箱**（IMAP 收发，见[「邮箱」](modules/mail.md)）、**禅道**（顶栏右侧那颗图标打开的独立窗口 + 后台检查与通知，见[「禅道」](modules/zentao.md)）
+  **邮箱**（IMAP 收发，见[「邮箱」](modules/mail.md)）、**禅道**（顶栏右侧那颗图标用系统浏览器打开的站点 + 后台检查与通知，见[「禅道」](modules/zentao.md)）
   与**ETF**（国家队重仓宽基 ETF 的每日净申赎，见[「ETF 资金流」](modules/etf.md)）。
   布局编辑态由顶栏那颗「编辑布局」进入，欢迎语那一行原地换成操作条，行高不变、画布不跳。
   那行提示**不换行**，窄窗口下让位给右侧按钮而不把顶栏顶宽：`.app` 与 `.topbar` 的列定义带 `minmax(0, 1fr)`、
@@ -342,7 +342,7 @@ apps/desktop/            桌面应用（自包含：渲染层 + Rust + 随包资
   src/notes.rs           笔记文件夹的扫描 / 读写 / 增删改名 —— 注解见 modules/notes.md
   src/md_window.rs       资源管理器「打开方式」的独立 Markdown 编辑窗口（会话 / 关闭握手）—— 注解见 modules/notes.md
   src/sync.rs            同步与 git 管道 —— 注解见 modules/sync-and-auth.md
-  src/repo_git.rs        Git 页的只读仓库读取（仓库 / 提交 / 目录树 / 文件历史 / 差异 / 补丁）
+  src/repo_git.rs        Git 页的只读仓库读取（仓库 / 分支清单 / 提交 / 目录树 / 文件历史 / 差异 / 补丁）
                          —— 注解见 modules/git-client.md
   src/design.rs          设计规范落盘 —— 注解见 modules/styles.md
   src/skills.rs          技能库 —— 注解见 modules/skills.md
@@ -364,7 +364,7 @@ apps/desktop/            桌面应用（自包含：渲染层 + Rust + 随包资
   src/mail.rs            邮箱（IMAP/SMTP 传输）—— 注解见 modules/mail.md
   src/mail_watch.rs      邮件后台监视（按设置周期的新邮件检查 + 系统通知）—— 注解见 modules/mail.md
   src/zentao.rs          禅道：后台检查用的 API 认证与会话、只读单页请求、可见产品清单，
-                         以及那扇禅道窗口（建窗 / 导航边界 / 登录页自动填表）
+                         以及用系统浏览器打开站点
                          —— 注解见 modules/zentao.md
   src/notify.rs          Windows toast 的手写 WinRT FFI —— 注解见 modules/mail.md
   src/credentials.rs     Windows 凭据管理器读写 —— 注解见 modules/ipc-and-state.md
@@ -426,7 +426,7 @@ packages/                按域拆出的 19 个 @workbench/* 包（TS 源码直�
   usage/                 Token 用量口径（token-usage.ts）、同步配置（sync-config.ts）、
                          四个 IDE 日志源（codebuddy / qoder / dsh / workbuddy-log）
   work-log/              工作日志的时间轴
-  git/                   Git 页的回包收敛、统一 diff 行模型与类型（见 modules/git-client.md）
+  git/                   Git 页的回包收敛、统一 diff 行模型、最近打开清单与类型（见 modules/git-client.md）
   vault/                 密码保险库的条目模型 / 信封 / 合并 / 加解密
   auth/ 、 weather/       账号资料的收敛；实时天气的 WMO 码表与两条接口回包的解析
   mail/                   邮箱账户配置的收敛、通讯录的收敛（contacts.ts）、RFC 2047 编解码、
@@ -520,7 +520,7 @@ pnpm run dist         # 产出 NSIS 安装包
 
 ## 数据与隐私
 
-应用**默认不联网**。对外发请求的只有十五处，且都是你自己开出来的。
+应用**默认不联网**。对外发请求的只有十四处，且都是你自己开出来的。
 **截图与钉图一处都不占**：抓屏走 Win32（BitBlt）、剪贴板与落盘都在本机、钉图只是一扇置顶窗口，
 整个过程没有一次网络请求（也正因如此，取字 / OCR 这一版不做：云端那条会多出一处出口）。
 
@@ -529,6 +529,8 @@ pnpm run dist         # 产出 NSIS 安装包
   模型 / token / 积分 / 账号 uid / UA / 错误文本；不含 apiKey 与 costCny，也没有对话正文）。
   **首页活跃度另推一份计数账本**（`activity/<设备id>.json`：日期 + 五类操作的次数，没有操作明细），
   多台机器按天求和之后画在同一张图上 —— 同一个仓库、同一个出口。
+  **工作日志也走这条出口**（`work-log/<设备id>.json`：日期 / 状态 / markdown 正文 / 项目名，外加删除墓碑），
+  登录且填了地址才推，进工作页与每次增删改后自动同步 —— 同一个仓库、同一个出口。
   **ETF 页另推一份公开行情缓存**（`etf/<设备id>.json`：份额与净值，没有用户内容）——
   它进的是同一个仓库、同一个出口，只是给别的机器复用，省掉重复回填。
   **密码保险库推的是同一仓库的另一个目录**（`vault/vault.json`），推上去的只有密文
@@ -624,20 +626,12 @@ pnpm run dist         # 产出 NSIS 安装包
   Rust 先 POST `/api.php/v1/tokens` 登录，随后 GET 可见产品与各产品「指派给我的」Bug 分页；
   间隔由 Rust 计时线程计时并到点发事件，取数、比编号全集与弹通知在渲染层 —— 计时放 Rust 是因为窗口收进托盘后
   WebView 定时器会被节流。只有配置完整、周期非 0 才发检查事件；第一轮成功只建立基线，之后有新增才弹系统通知
-  （复用邮件那条 toast 路径，点击打开禅道窗口）。请求只发往配置的部署根与固定端点，不跟重定向；
+  （复用邮件那条 toast 路径，点击用系统浏览器打开禅道）。请求只发往配置的部署根与固定端点，不跟重定向；
   账号密码仅由 Rust 读取，token 仅留 Rust 内存，不回渲染层、不写数据文件或凭据管理器。配置缺失不出网；重启清 token。
   HTTP 的凭据传输不加密，个人密码随配置内嵌到二进制，不能分发带密码的构建。
   实现与边界见 [zentao.md](modules/zentao.md)。
 
-- **禅道窗口本身**（第十二条出口，与上一条同一个部署地址，但机制不同）：顶栏右侧那颗图标（收起 / 展开菜单那颗的右边）打开的
-  是一扇**独立窗口**，由 webview 直接加载禅道的网页（HTML/CSS/JS 与图片附件都由它去取），
-  打开时用内嵌账号密码在登录页自动登录一次。所以这一条出口跑的是**禅道自己的前端脚本**，
-  而不是我们那些「固定端点 + 字段白名单」的 JSON 请求；页面里的写操作（改状态、指派、评论）也发生在这一侧。
-  窗口用系统标题栏，**`zentao` 这个 label 不登记任何 capability**：远程来源拿不到 IPC，站点脚本够不到宿主命令。
-  站外链接与 `target=_blank` 交给系统浏览器，不在应用里开新窗口。
-  实现与代价见 [zentao.md](modules/zentao.md)。
-
-- **ETF 资金流**（可选；第十四条出口，**三个公开行情主机、全部只读 GET、不发用户内容**）：
+- **ETF 资金流**（可选；第十三条出口，**三个公开行情主机、全部只读 GET、不发用户内容**）：
   打开「ETF」页（或点那一页的刷新）才会拉：沪深交易所的份额披露（`query.sse.com.cn` 单日一份、
   `www.szse.cn` 区间批量）与天天基金的单位净值脚本（`fund.eastmoney.com`）。
   主机白名单钉死在 `etf.rs`，渲染层只给得出日期 / 基金代码 / 页码；
@@ -649,7 +643,7 @@ pnpm run dist         # 产出 NSIS 安装包
   一台机器跑完回填，其他机器进页面把它并进本机就够，不再向交易所重发同一批请求）。
   实现与边界见 [etf.md](modules/etf.md)。
 
-十五处都没有自建服务端：四处 git 同步发往你自己的仓库（知识库的同步与笔记共用同一条路、不另算），
+十四处都没有自建服务端：四处 git 同步发往你自己的仓库（知识库的同步与笔记共用同一条路、不另算），
 登录走两家平台官方 OAuth，AI 热点与天气只 GET 白名单里的公开源，AI 助手发给你自己配的端点，
 装技能只 GET 你粘的地址，邮箱连的是你自己配的收发服务器，禅道只访问凭据配置中的部署地址，
 ETF 资金流只 GET 交易所与行情的四个公开主机，Qoder 只连它国内版的三个主机 ——
@@ -687,8 +681,9 @@ ETF 资金流只 GET 交易所与行情的四个公开主机，Qoder 只连它�
   也就是同步推到 `token-usage/` 的那份（旧名 `token-data.json` 启动时自动改名）。
   明细不复制 —— 各工具的本地数据是明细账本，快照用于对抗上游清理。带一个 `credits` 字段
   （额度口径，只有 Qoder 填），同一套合并规则但**不参与 token 总量**
-- `work-log.json`：工作日志。**只在本机**：不在 `workbench-data.json` 里、**不同步** ——
-  工作内容最贴近个人记录，多机合并没有成立的口径（不像用量数字可相加）
+- `work-log.json`：工作日志（v2：条目 + 删除墓碑）。**本机这份是权威**；登录且配了同步仓库时
+  按设备推一份 `work-log/<设备id>.json`，读别人的分片按 id 后写胜出、墓碑不复活，合并结果**写回本机**
+  （见 [work-log.md](modules/work-log.md)）。它仍然不在 `workbench-data.json` 里
 - `ai-news.json`：AI 热点的上次拉取结果，**按源分开**存（每源一份 `etag / nextFetchAt /
   failCount / lastError / items`），合并视图读时现算 —— 撤掉一个源，它的内容立刻从卡片消失。
   **只在本机、不进同步仓库**。单源时代（v1）的老结构不再迁移，读到当空缓存重拉
@@ -761,6 +756,6 @@ WorkBuddy 是 `~/.workbuddy/projects/<项目>/`（`WORKBUDDY_HOME` 可指别处�
 
 多项目批量串行构建、远程部署与 Docker、代码编辑器与 Git 图形化、macOS / Linux 适配、
 截图的云 OCR 取字（会多出一条联网出口）与录屏 / GIF（与截图几乎是两套东西），
-交互式命令输入（伪终端）、多人协作与项目数据云同步（多机同步只做 Token 用量快照、那份主题文件与
-网关请求流水，项目列表、快捷启动、独立命令、工作日志与笔记这些本机数据不跟着走；工作日志是**刻意**不同步的，
-笔记则本来就是用户自己目录里的文件，见「数据与隐私」）。
+交互式命令输入（伪终端）、多人协作与项目数据云同步（多机同步只做 Token 用量快照、那份主题文件、
+网关请求流水、工作日志与笔记；项目列表、快捷启动、独立命令这些本机数据不跟着走，
+笔记本来就是用户自己目录里的文件，见「数据与隐私」）。

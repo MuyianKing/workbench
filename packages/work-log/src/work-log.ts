@@ -1,9 +1,9 @@
 /**
  * 工作日志（本地 `work-log.json`）：类型、默认值、收敛，以及时间轴要用的纯逻辑。
  *
- * **这份数据只在本机**：它不进同步仓库，也不在 `workbench-data.json` 里（见 AGENTS.md 第 5 节
- * 的出口约定）—— 工作内容是最贴近「个人记录」的东西，默认不往外发；
- * 文件与数据目录同进同出（迁移数据目录时会一起搬），但不会跟着 Token 同步被推上去。
+ * **数据在本机落盘；配了同步仓库时按设备分片共享**（`work-log/<设备id>.json`，见
+ * `work-log-sync.ts`）：同步走 Token 同步那个仓库（登录 + 设置里的地址），不新增网络出口；
+ * 条目按 id 做「后写胜出」，删除留墓碑，合并结果写回本机。
  *
  * 落点分工与其它数据一致：Rust 只把 JSON 安全读写到磁盘，收敛、分组、分页都在这里，
  * 于是这些规则能被单测直接覆盖，也不需要为了改一版显示口径去重编 Rust。
@@ -14,8 +14,8 @@
 
 import { addDays, dayKey, isDateKey, startOfDay } from '@workbench/core'
 
-/** 文件口径版本。只在本机流转，不参与跨设备合并，所以版本只用来标记格式 */
-export const WORK_LOG_VERSION = 1
+/** 文件口径版本。v2 起带删除墓碑与设备 id；v1 旧文件照常读（缺的字段按空补齐） */
+export const WORK_LOG_VERSION = 2
 
 /**
  * 一条记录的生成来源（目前只有 git 提交）。
@@ -35,6 +35,13 @@ export interface WorkLogEntry {
   date: string
   /** 所属项目 id；非必填，项目被删掉后这里就成了悬空引用（界面按「已删除的项目」显示） */
   projectId?: string
+  /**
+   * 所属项目名的冗余副本：项目列表本身不跨设备同步，别的机器按 id 找不到项目时
+   * 用这个名字显示，而不是一律显示「项目已删除」。本地项目还在时以本地名字为准。
+   */
+  projectName?: string
+  /** 创建它的设备 id（多机合并时同毫秒破平；也用来判断条目是不是别的设备来的）。编辑不改它 */
+  by?: string
   /** 工作内容，markdown 原文 */
   content: string
   /** 待办 / 已完成；老数据文件里没有这个字段，一律按「已完成」算（见 WORK_STATUS_DEFAULT） */
@@ -43,6 +50,34 @@ export interface WorkLogEntry {
   updatedAt: number
   /** 来源；手写的记录没有 */
   source?: WorkLogSource
+}
+
+/**
+ * 删除墓碑：一条记录被删掉时留下的空壳，随分片同步到别的设备。
+ *
+ * **不清理**（与保险库同一条口径）：清掉之后，离线很久的设备回来会把旧条目
+ * 当「只有我这边有」再推回来，用户会看到删掉的记录自己复活。
+ */
+export interface WorkLogTombstone {
+  /** 与被删条目同一个 id */
+  id: string
+  /** 删除发生的本地时间（毫秒） */
+  updatedAt: number
+  /** 执行删除的设备 id（同毫秒破平用） */
+  by: string
+}
+
+/** 比较条目 / 墓碑新旧只看这两项 */
+export interface WorkLogStamp {
+  updatedAt: number
+  by?: string
+}
+
+/** 同 id 的两份谁更新：先比 updatedAt，再比 by（设备 id 大的赢） */
+export function newerWorkLogStamp(a: WorkLogStamp, b: WorkLogStamp): boolean {
+  if (a.updatedAt !== b.updatedAt)
+    return a.updatedAt > b.updatedAt
+  return (a.by ?? '') > (b.by ?? '')
 }
 
 /**
@@ -119,11 +154,14 @@ export function toggleWorkLogStatus(status: WorkLogStatus): WorkLogStatus {
 export interface WorkLogInput {
   date: string
   projectId?: string
+  projectName?: string
   content: string
   /** 不传就是「已完成」（见 WORK_STATUS_DEFAULT） */
   status?: WorkLogStatus
   /** 生成来源；普通手记不传 */
   source?: WorkLogSource
+  /** 写入这条记录的设备 id（多机合并用；适配层统一打上） */
+  by?: string
 }
 
 /** 可编辑的字段；未给的项保持原值 */
@@ -131,6 +169,8 @@ export interface WorkLogPatch {
   date?: string
   /** 显式传 null 表示清掉所属项目 */
   projectId?: string | null
+  /** 项目名冗余副本；显式 null / 空串表示清掉。项目没变时不要传，免得用占位名覆盖旧值 */
+  projectName?: string | null
   content?: string
   status?: WorkLogStatus
 }
@@ -138,15 +178,17 @@ export interface WorkLogPatch {
 export interface WorkLogFile {
   version: number
   entries: WorkLogEntry[]
+  /** 本机删掉的 id：随文件落盘、随分片同步（见 work-log-sync.ts） */
+  tombstones: WorkLogTombstone[]
 }
 
 /**
  * 顶栏那排档位（数组顺序就是控件里的顺序）。
  *
- * 最左的「待办」不是一个时间段，而是**所有还没做完的事**（不分日期铺开），其余四档才是日期范围。
- * 刻意不做「自定义区间」：日常最多的就是这几问，多一个日期选择器只是多一步操作。
+ * 最左的「待办」不是一个时间段，而是**所有还没做完的事**（不分日期铺开），其余几档才是日期范围；
+ * 最右的「自定义」用页面上那枚日期范围选择器的两端。
  */
-export const WORK_RANGES = ['todo', 'today', 'yesterday', 'week', 'month'] as const
+export const WORK_RANGES = ['todo', 'today', 'yesterday', 'week', 'month', 'custom'] as const
 export type WorkRange = (typeof WORK_RANGES)[number]
 
 export const WORK_RANGE_LABELS: Record<WorkRange, string> = {
@@ -155,6 +197,7 @@ export const WORK_RANGE_LABELS: Record<WorkRange, string> = {
   yesterday: '昨天',
   week: '本周',
   month: '本月',
+  custom: '自定义',
 }
 
 /** 每页显示几天（不是几条）：一天的多条记录不该被分页切开 */
@@ -209,8 +252,33 @@ export function sanitizeWorkSort(value: unknown): WorkSort {
   return isWorkSort(value) ? value : WORK_SORT_DEFAULT
 }
 
+/** 自定义区间：两端都是本地日期键（YYYY-MM-DD，含两端） */
+export interface WorkRangeBounds {
+  from: string
+  to: string
+}
+
+/**
+ * 自定义区间收敛：两端都必须是合法日期键；反着填的换回来，缺一端 / 认不出就是 null。
+ *
+ * 手改过的数据文件、以及选中「自定义」但还没挑过日期的第一次打开都会走到这里。
+ */
+export function sanitizeWorkRangeBounds(from: unknown, to: unknown): WorkRangeBounds | null {
+  const left = typeof from === 'string' && isDateKey(from) ? from : ''
+  const right = typeof to === 'string' && isDateKey(to) ? to : ''
+  if (!left || !right)
+    return null
+  return left <= right ? { from: left, to: right } : { from: right, to: left }
+}
+
+/** 还没挑过自定义区间时的默认值：今天一天 */
+export function defaultWorkRangeBounds(now: number): WorkRangeBounds {
+  const today = dayKey(now)
+  return { from: today, to: today }
+}
+
 export function emptyWorkLog(): WorkLogFile {
-  return { version: WORK_LOG_VERSION, entries: [] }
+  return { version: WORK_LOG_VERSION, entries: [], tombstones: [] }
 }
 
 // ---------- 收敛 ----------
@@ -221,6 +289,20 @@ function text(value: unknown): string {
 
 function stamp(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback
+}
+
+/** 墓碑收敛：id 为空或时间不合法就丢掉（缺一条墓碑最多让一条删除传不出去，不会把整份文件弄坏） */
+export function sanitizeWorkLogTombstone(raw: unknown): WorkLogTombstone | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw))
+    return null
+
+  const input = raw as Partial<WorkLogTombstone>
+  const id = text(input.id)
+  const updatedAt = stamp(input.updatedAt, 0)
+  if (!id || !updatedAt)
+    return null
+
+  return { id, updatedAt, by: text(input.by) }
 }
 
 /**
@@ -249,6 +331,8 @@ export function sanitizeWorkLogEntry(
 
   const id = text(input.id)
   const projectId = text(input.projectId)
+  const projectName = text(input.projectName)
+  const by = text(input.by)
   const source = sanitizeWorkLogSource(input.source)
 
   return {
@@ -256,6 +340,8 @@ export function sanitizeWorkLogEntry(
     date,
     // 空串按「没有所属项目」落盘，不留一个指向空的字段
     ...(projectId ? { projectId } : {}),
+    ...(projectId && projectName ? { projectName } : {}),
+    ...(by ? { by } : {}),
     content,
     // 老数据文件里没有这个字段 —— 缺了就是「已完成」，界面因此不会把它标成待办
     status: sanitizeWorkLogStatus(input.status),
@@ -268,6 +354,9 @@ export function sanitizeWorkLogEntry(
 /**
  * 磁盘 → 内存。文件缺失（首次使用）、损坏、被手工改坏都退化成一份空日志，不影响启动。
  * id 重复的条目只留第一条：列表 key 靠它，重复会让界面上两条记录一起动。
+ *
+ * v1 老文件没有墓碑与设备 id：照常读，缺的按空补齐。同一 id 的条目与墓碑同时存在时
+ * 只留新的那份（墓碑更新 = 这条已被删；条目更新 = 删除之后又被改过，以条目为准）。
  */
 export function parseWorkLog(
   raw: unknown,
@@ -287,7 +376,34 @@ export function parseWorkLog(
     entries.push(entry)
   }
 
-  return { version: WORK_LOG_VERSION, entries }
+  const tombById = new Map<string, WorkLogTombstone>()
+  for (const item of Array.isArray(parsed.tombstones) ? parsed.tombstones : []) {
+    const tombstone = sanitizeWorkLogTombstone(item)
+    if (!tombstone)
+      continue
+    const current = tombById.get(tombstone.id)
+    if (!current || newerWorkLogStamp(tombstone, current))
+      tombById.set(tombstone.id, tombstone)
+  }
+
+  const live: WorkLogEntry[] = []
+  for (const entry of entries) {
+    const tombstone = tombById.get(entry.id)
+    if (!tombstone) {
+      live.push(entry)
+      continue
+    }
+    if (newerWorkLogStamp(tombstone, entry))
+      continue
+    tombById.delete(entry.id)
+    live.push(entry)
+  }
+
+  return {
+    version: WORK_LOG_VERSION,
+    entries: live,
+    tombstones: [...tombById.values()].sort((left, right) => left.id.localeCompare(right.id)),
+  }
 }
 
 // ---------- 增删改 ----------
@@ -307,11 +423,15 @@ export function createWorkLogEntry(
     return null
 
   const projectId = text(input.projectId)
+  const projectName = text(input.projectName)
+  const by = text(input.by)
   const source = sanitizeWorkLogSource(input.source)
   return {
     id: uuid(),
     date,
     ...(projectId ? { projectId } : {}),
+    ...(projectId && projectName ? { projectName } : {}),
+    ...(by ? { by } : {}),
     content,
     // 不传就是「已完成」：写下这条时事情多半已经做完了
     status: sanitizeWorkLogStatus(input.status),
@@ -350,10 +470,21 @@ export function patchWorkLogEntry(
         ? undefined
         : text(patch.projectId)
 
+  // 项目名只在「跟着项目一起改」时动：没选项目就清掉；换了项目但没给名字（认不出的 id）也清掉，
+  // 不拿旧项目的名字张冠李戴
+  let projectName = entry.projectName
+  if (!projectId)
+    projectName = undefined
+  else if (patch.projectName !== undefined)
+    projectName = text(patch.projectName) || undefined
+  else if (patch.projectId !== undefined && projectId !== entry.projectId)
+    projectName = undefined
+
   if (
     nextContent === entry.content
     && date === entry.date
     && projectId === entry.projectId
+    && projectName === entry.projectName
     && status === entry.status
   ) {
     return entry
@@ -363,10 +494,13 @@ export function patchWorkLogEntry(
     id: entry.id,
     date,
     ...(projectId ? { projectId } : {}),
+    ...(projectName ? { projectName } : {}),
+    ...(entry.by ? { by: entry.by } : {}),
     content: nextContent,
     status,
     createdAt: entry.createdAt,
-    updatedAt: now,
+    // 同一条记录在同一毫秒里连改两次时也保证时间戳严格递增：合并靠它分先后
+    updatedAt: Math.max(Math.floor(now), entry.updatedAt + 1),
     // 手工编辑不动来源：改过正文的记录仍然知道自己是哪几笔提交生成的（去重靠它）
     ...(entry.source ? { source: entry.source } : {}),
   }
@@ -392,15 +526,16 @@ export function dateOfDayKey(day: string): Date {
 /**
  * 某一档**日期**范围覆盖的起止日期（含两端，本地日期键）。
  *
- * 只收四档日期范围：「待办」筛的是状态、不看日期（见 `entriesInRange`），拿它算边界没有意义。
+ * 只收四档预置范围：「待办」筛的是状态、不看日期（见 `entriesInRange`）；
+ * 「自定义」的两端由用户在界面上选（见 `resolveWorkRangeBounds`），拿它们算边界没有意义。
  *
  * 「本周」从**周一**起算：项目里另一处 startOfWeek 是按周日切的（贡献图那一列的起点），
  * 那是网格的排版约定，跟用户嘴里的「本周」不是一回事，别把两者合并。
  */
 export function rangeBounds(
-  range: Exclude<WorkRange, 'todo'>,
+  range: Exclude<WorkRange, 'todo' | 'custom'>,
   now: number,
-): { from: string, to: string } {
+): WorkRangeBounds {
   const today = startOfDay(now)
 
   switch (range) {
@@ -426,6 +561,24 @@ export function rangeBounds(
 }
 
 /**
+ * 某一档实际覆盖的日期区间（含两端）。
+ *
+ * 「待办」筛的是状态、不看日期，返回 null；「自定义」用界面上选的那一段，
+ * 没选过或值坏了就退回今天 —— 这一段永远有边界可用。
+ */
+export function resolveWorkRangeBounds(
+  range: WorkRange,
+  now: number,
+  custom?: WorkRangeBounds | null,
+): WorkRangeBounds | null {
+  if (range === 'todo')
+    return null
+  if (range === 'custom')
+    return sanitizeWorkRangeBounds(custom?.from, custom?.to) ?? defaultWorkRangeBounds(now)
+  return rangeBounds(range, now)
+}
+
+/**
  * 铺出时间轴：只留这一档里的记录，按天分组（「待办」档是所有待办，不分日期）。
  *
  * 没有记录的日子不占一栏 —— 本月按自然日铺会有大半是空行，滚起来像翻日历而不是看日志。
@@ -434,10 +587,11 @@ export function timelineOf(
   entries: readonly WorkLogEntry[],
   range: WorkRange,
   now: number,
+  custom?: WorkRangeBounds | null,
 ): WorkLogDay[] {
   const byDay = new Map<string, WorkLogEntry[]>()
 
-  for (const entry of entriesInRange(entries, range, now)) {
+  for (const entry of entriesInRange(entries, range, now, custom)) {
     const group = byDay.get(entry.date)
     if (group)
       group.push(entry)
@@ -478,11 +632,12 @@ export function groupByProject(
   range: WorkRange,
   now: number,
   projects: readonly WorkLogProjectRef[],
+  custom?: WorkRangeBounds | null,
 ): WorkLogProjectGroup[] {
   const known = new Map(projects.map(project => [project.id, project.name]))
   const groups = new Map<string, WorkLogEntry[]>()
 
-  for (const entry of entriesInRange(entries, range, now)) {
+  for (const entry of entriesInRange(entries, range, now, custom)) {
     const key = !entry.projectId
       ? ''
       : known.has(entry.projectId)
@@ -512,17 +667,20 @@ export function groupByProject(
     }))
 }
 
-/** 这一档里的记录：「待办」不看日期、只要还欠着的，其余四档按日期闭区间收 */
+/** 这一档里的记录：「待办」不看日期、只要还欠着的，其余档按日期闭区间收 */
 function entriesInRange(
   entries: readonly WorkLogEntry[],
   range: WorkRange,
   now: number,
+  custom?: WorkRangeBounds | null,
 ): WorkLogEntry[] {
   if (range === 'todo')
     return entries.filter(entry => entry.status !== 'done')
 
-  const { from, to } = rangeBounds(range, now)
-  return entries.filter(entry => entry.date >= from && entry.date <= to)
+  const bounds = resolveWorkRangeBounds(range, now, custom)
+  if (!bounds)
+    return []
+  return entries.filter(entry => entry.date >= bounds.from && entry.date <= bounds.to)
 }
 
 /** 从新到旧：先比日期，同一天再比写入时间 */

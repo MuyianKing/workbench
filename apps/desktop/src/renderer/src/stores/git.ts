@@ -1,17 +1,19 @@
-import type { GitCommit } from '@workbench/git'
+import type { GitChangedFile, GitCommit } from '@workbench/git'
 import type { GitCommitDetail, GitCompare, GitPatch, GitRepoInfo, GitTreePage, Result } from '@/types'
+import { pushRepoHistory, sanitizeGitRepoRoot } from '@workbench/git'
 import { defineStore } from 'pinia'
 /**
  * Git 页：一个用户自己打开的仓库、它的提交历史、目录树与差异。
  *
  * 与视频 / 笔记 store 同一条骨架：这里没有仓库内容的内存副本 —— 提交、文件、补丁
- * 都是**按需现问 git**（打开仓库时读第一页提交，选文件时读文件历史，选提交时读
- * 改动清单，选文件时读补丁）。落盘的只有一项「上次打开的仓库根」（设置里的 `gitRepo`），
- * 它是本机路径、不参与外观同步。
+ * 都是**按需现问 git**（打开仓库时读第一页提交与分支清单，选文件时读文件历史，选提交时读
+ * 改动清单，选文件时读补丁）。落盘的只有「上次打开的那个文件夹」与「最近打开的文件夹清单」
+ * （设置里的 `gitRepo` / `gitRepos`，可能只是仓库里的子目录），都是本机路径、不参与外观同步。
  *
  * 三条不能破：
  *  - **只读**：这里调用的通道全部是读命令（见 workbench/git.ts 与 repo_git.rs），
- *    没有任何暂存 / 提交 / 切分支的入口；
+ *    没有任何暂存 / 提交 / 切工作区的入口；「切换分支」只是换 `log` / `ls-tree` 的 ref，
+ *    `viewBranch` 为空串时仍跟着 HEAD；
  *  - **一次只认一个来源**：右侧差异要么是「某个提交」，要么是「两个提交的对比」，
  *    两者不会同时显示；选中新的提交 / 开始新的对比时旧的那份立刻清掉；
  *  - **慢一步回来的结果丢掉**：每个异步动作带自己的令牌，连点两个文件 / 提交时
@@ -28,15 +30,30 @@ export const useGitStore = defineStore('git', () => {
 
   /** 当前打开的仓库；null = 还没打开 */
   const repo = ref<GitRepoInfo | null>(null)
+  /** 用户打开的那个文件夹：可能是仓库里的子目录，最近打开清单存它，进页面也按它恢复 */
+  const openPath = ref('')
   const opening = ref(false)
   /** 打开失败的原因：仓库被移动 / 不是一个 git 仓库 / 没装 git */
   const openError = ref('')
+
+  /** 本地分支清单（只用于换「看哪条分支」，不切工作区） */
+  const branches = ref<string[]>([])
+  const branchesLoading = ref(false)
+
+  /** 正在看的分支短名：空串 = 跟着 HEAD（仓库当前分支） */
+  const viewBranch = ref('')
 
   /**
    * 当前提交列表属于谁：空串 = 整个仓库（HEAD），否则是某个文件的路径。
    * 它同时决定中间那栏的标题与「返回仓库历史」那颗按钮出不出来。
    */
   const historyPath = ref('')
+
+  /**
+   * 提交列表的时间范围（`YYYY-MM-DD`，本地日历上的两天，任一端可以是空串 = 那一侧不限）：
+   * null = 完全没筛。只给 `git log --since/--until` 用；换仓库时清空，换文件 / 换分支 / 刷新都保留。
+   */
+  const historyRange = ref<{ since: string, until: string } | null>(null)
 
   const commits = ref<GitCommit[]>([])
   const commitsLoading = ref(false)
@@ -63,15 +80,33 @@ export const useGitStore = defineStore('git', () => {
   const patchLoading = ref(false)
   const patchError = ref('')
 
+  /**
+   * 补丁视图：统一（默认）/ 并排。它住在页面状态里而不是补丁组件内部 ——
+   * 切提交时右栏文件清单会短暂清空、补丁组件被卸载重建，状态放在组件里就会弹回默认。
+   * 换仓库 / 换页也保持用户刚选的那一档；重启应用回到默认。
+   */
+  const patchView = ref<'unified' | 'split'>('unified')
+
   let openJob = 0
+  let branchJob = 0
   let historyJob = 0
   let detailJob = 0
   let compareJob = 0
   let patchJob = 0
 
   const root = computed(() => repo.value?.root ?? '')
+  /** 用户选中的目录相对仓库根的位置（空串 = 仓库根）；左栏目录树只展开这个子树 */
+  const scope = computed(() => repo.value?.scope ?? '')
   const hasRepo = computed(() => repo.value !== null)
   const isFileHistory = computed(() => historyPath.value !== '')
+  /** 头部那颗分支 chip 显示的名字：正在看的分支，没单独选过就是仓库当前分支 */
+  const shownBranch = computed(() => viewBranch.value || repo.value?.branch || '')
+  /** 正在看的分支不是仓库当前分支（只读浏览，工作区没被切换） */
+  const viewingOtherBranch = computed(() =>
+    Boolean(viewBranch.value) && viewBranch.value !== repo.value?.branch,
+  )
+  /** 头部下拉里的「最近打开的仓库」：最近打开的在前 */
+  const recentRepos = computed(() => settings.settings.gitRepos)
 
   /** 右侧当前的改动清单：对比优先（两者不会同时有值） */
   const activeFiles = computed(() => compare.value?.files ?? detail.value?.files ?? [])
@@ -132,15 +167,30 @@ export const useGitStore = defineStore('git', () => {
   }
 
   /**
-   * 打开一个仓库（选中的可以是仓库里的子目录，宿主会回仓库根）。
-   * 成功之后把仓库根写回设置，下次进页面直接接上。
+   * 右侧默认打开哪个改动文件：优先「当前正在看的历史来源」（左栏点开的那个文件），
+   * 它不在这笔改动里时才退回第一个。左栏选的是 bump-version.mjs、右侧却打开
+   * CHANGELOG.md，会让人以为点错了。
    */
-  async function open(path: string): Promise<void> {
+  function preferredFile(files: GitChangedFile[]): string {
+    if (!files.length)
+      return ''
+    if (historyPath.value && files.some(file => file.path === historyPath.value))
+      return historyPath.value
+    return files[0].path
+  }
+
+  /**
+   * 打开一个仓库（选中的可以是仓库里的子目录，宿主会回仓库根）。
+   * 成功之后把仓库根写回设置并排进「最近打开」，下次进页面直接接上。
+   * `rev` 只给刷新用：刷新时尽量保住原来正在看的那条分支。
+   */
+  async function open(path: string, rev = ''): Promise<void> {
     const value = path.trim()
     if (!value)
       return
 
     const job = (openJob += 1)
+    const previousPath = openPath.value
     opening.value = true
     openError.value = ''
 
@@ -155,11 +205,60 @@ export const useGitStore = defineStore('git', () => {
     }
 
     repo.value = result.data
-    // 仓库根可能和用户选中的子目录不同，落盘的是根
-    void settings.updateSettings({ gitRepo: result.data.root })
+    openPath.value = sanitizeGitRepoRoot(value)
+    // 换了一个文件夹才清掉时间范围；刷新同一个仓库时保留筛选
+    if (openPath.value.toLowerCase() !== previousPath.toLowerCase())
+      historyRange.value = null
+    branchJob += 1
+    branches.value = []
+    viewBranch.value = ''
+    // 落盘的是**用户选中的那个文件夹**（可能只是仓库里的一个子目录），不是仓库根：
+    // 下次从这里恢复时目录树还按同一个子树展开；顺手排到最近打开的最前面
+    void settings.updateSettings({
+      gitRepo: openPath.value,
+      gitRepos: pushRepoHistory(settings.settings.gitRepos, openPath.value),
+    })
     resetAll()
+    await loadBranches()
+    // 刷新时原来那支还在就继续看它；已经被删掉就退回 HEAD
+    if (rev && branches.value.includes(rev))
+      viewBranch.value = rev
     // 空仓库也走一次：loadHistory 会把它当成「已加载、零条」，中间那栏因此显示空态，
     // 而不是停在「还没开始加载」的空白上。
+    await loadHistory(true)
+  }
+
+  /** 读一遍本地分支清单；失败只让下拉空着，不影响看历史 */
+  async function loadBranches(): Promise<void> {
+    if (!repo.value) {
+      branches.value = []
+      return
+    }
+    const job = (branchJob += 1)
+    branchesLoading.value = true
+    const result = await window.workbench.listGitBranches(root.value)
+    if (job !== branchJob)
+      return
+    branchesLoading.value = false
+    branches.value = result.ok && result.data ? result.data.branches : []
+  }
+
+  /**
+   * 换「看哪条分支」：只换中间与右侧的数据来源，**不切工作区**。
+   * `historyPath` 保留 —— 从文件历史切过去时继续看同一个文件（新分支上没有它，
+   * 历史列表照实回空）。
+   */
+  async function switchBranch(name: string): Promise<void> {
+    if (!repo.value)
+      return
+    if (name && !branches.value.includes(name))
+      return
+    if (name === viewBranch.value)
+      return
+    viewBranch.value = name
+    resetHistory()
+    resetDetail()
+    resetCompare()
     await loadHistory(true)
   }
 
@@ -174,17 +273,17 @@ export const useGitStore = defineStore('git', () => {
   async function restore(): Promise<void> {
     if (repo.value || opening.value)
       return
-    const saved = settings.settings.gitRepo
+    const saved = settings.settings.gitRepo || settings.settings.gitRepos[0] || ''
     if (saved)
       await open(saved)
   }
 
-  /** 重新读一遍当前仓库（新提交、别的窗口改了仓库之后用） */
+  /** 重新读一遍当前仓库（新提交、别的窗口改了仓库之后用）；保住正在看的分支与子树 */
   async function refresh(): Promise<void> {
     const current = repo.value
     if (!current)
       return
-    await open(current.root)
+    await open(openPath.value || current.root, viewBranch.value)
   }
 
   /**
@@ -203,9 +302,11 @@ export const useGitStore = defineStore('git', () => {
     commitsLoading.value = true
     commitsError.value = ''
 
+    const since = historyRange.value?.since ?? ''
+    const until = historyRange.value?.until ?? ''
     const result = historyPath.value
-      ? await window.workbench.listGitFileCommits(root.value, historyPath.value, skip, PAGE_SIZE)
-      : await window.workbench.listGitCommits(root.value, skip, PAGE_SIZE)
+      ? await window.workbench.listGitFileCommits(root.value, historyPath.value, viewBranch.value, since, until, skip, PAGE_SIZE)
+      : await window.workbench.listGitCommits(root.value, viewBranch.value, since, until, skip, PAGE_SIZE)
 
     if (job !== historyJob)
       return
@@ -229,6 +330,23 @@ export const useGitStore = defineStore('git', () => {
 
   /** 重新拉当前这一页（出错后的「重试」用） */
   async function reloadHistory(): Promise<void> {
+    await loadHistory(true)
+  }
+
+  /**
+   * 设 / 清提交列表的时间范围（`YYYY-MM-DD`，两端都可为空串；两端都空 = 不限）。
+   * 换了范围就从头取一页，右侧详情与对比一起收掉（它们不一定落在新范围里）。
+   */
+  async function setHistoryRange(range: { since: string, until: string } | null): Promise<void> {
+    if (!repo.value)
+      return
+    const next = range && (range.since || range.until) ? range : null
+    if (next?.since === historyRange.value?.since && next?.until === historyRange.value?.until)
+      return
+    historyRange.value = next
+    resetHistory()
+    resetDetail()
+    resetCompare()
     await loadHistory(true)
   }
 
@@ -279,9 +397,9 @@ export const useGitStore = defineStore('git', () => {
     }
 
     detail.value = result.data
-    const first = result.data.files[0]
-    if (first)
-      await selectFile(first.path)
+    const path = preferredFile(result.data.files)
+    if (path)
+      await selectFile(path)
   }
 
   /**
@@ -336,9 +454,9 @@ export const useGitStore = defineStore('git', () => {
     }
 
     compare.value = result.data
-    const first = result.data.files[0]
-    if (first)
-      await selectFile(first.path)
+    const path = preferredFile(result.data.files)
+    if (path)
+      await selectFile(path)
   }
 
   function clearCompare(): void {
@@ -381,16 +499,25 @@ export const useGitStore = defineStore('git', () => {
   async function loadTree(dir: string): Promise<Result<GitTreePage>> {
     if (!repo.value)
       return { ok: false, error: '还没有打开仓库' }
-    return window.workbench.listGitTree(root.value, dir)
+    return window.workbench.listGitTree(root.value, dir, viewBranch.value)
   }
 
   return {
     repo,
     root,
+    openPath,
+    scope,
     hasRepo,
     opening,
     openError,
+    branches,
+    branchesLoading,
+    viewBranch,
+    shownBranch,
+    viewingOtherBranch,
+    recentRepos,
     historyPath,
+    historyRange,
     isFileHistory,
     commits,
     commitsLoading,
@@ -409,6 +536,7 @@ export const useGitStore = defineStore('git', () => {
     patch,
     patchLoading,
     patchError,
+    patchView,
     activeFiles,
     activeBase,
     activeTarget,
@@ -420,10 +548,13 @@ export const useGitStore = defineStore('git', () => {
     choose,
     restore,
     refresh,
+    loadBranches,
+    switchBranch,
     loadMore,
     reloadHistory,
     showRepoHistory,
     showFileHistory,
+    setHistoryRange,
     selectCommit,
     pickCompare,
     clearCompare,

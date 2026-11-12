@@ -8,6 +8,7 @@
  */
 
 import type {
+  GitBranchList,
   GitChangedFile,
   GitCommit,
   GitCommitDetail,
@@ -90,9 +91,12 @@ function parseRepoInfo(raw: unknown): GitRepoInfo | null {
   if (!root)
     return null
   const name = asText(value.name) || root.replace(/[/\\]+$/, '').split(/[/\\]/).pop() || root
+  // 宿主回的是 `/` 分隔、不带结尾斜杠；这里再收一次，防手改过的数据把树指到别处
+  const scope = asText(value.scope).replace(/^\/+|\/+$/g, '')
   return {
     root,
     name,
+    scope,
     head: asText(value.head).toLowerCase(),
     shortHead: asText(value.shortHead).toLowerCase(),
     branch: asText(value.branch),
@@ -184,6 +188,17 @@ export function parseCommitPage(raw: unknown): GitCommitPage {
     commits,
     hasMore: asBool(value.hasMore),
   }
+}
+
+export function parseBranchList(raw: unknown): GitBranchList {
+  const value = asRecord(raw)
+  const branches: string[] = []
+  for (const item of asArray(value.branches)) {
+    const name = asText(item)
+    if (name && !branches.includes(name))
+      branches.push(name)
+  }
+  return { branches }
 }
 
 export function parseTreePage(raw: unknown): GitTreePage {

@@ -22,13 +22,39 @@ const store = useGitStore()
 
 const scrollRef = ref<HTMLElement | null>(null)
 
-const emptyText = computed(() =>
-  store.isFileHistory ? '这个文件还没有提交历史' : '这个仓库还没有提交',
-)
+/**
+ * 时间范围的两个端点（`YYYY-MM-DD`，空串 = 那一侧不限）。
+ * 分成两个日期框而不是一个 daterange：中栏拉窄时 daterange 的两个日期会被裁掉半边，
+ * 两个框可以用 flex-wrap 在窄处自动换行，日期永远显示完整。
+ */
+const rangeSince = computed({
+  get: () => store.historyRange?.since ?? '',
+  set: value =>
+    void store.setHistoryRange({
+      since: value ?? '',
+      until: store.historyRange?.until ?? '',
+    }),
+})
 
-/** 换文件历史 / 换仓库时把列表滚回顶部：上一个位置对下一批提交没有意义 */
+const rangeUntil = computed({
+  get: () => store.historyRange?.until ?? '',
+  set: value =>
+    void store.setHistoryRange({
+      since: store.historyRange?.since ?? '',
+      until: value ?? '',
+    }),
+})
+
+const emptyText = computed(() => {
+  if (store.historyRange)
+    return '这个时间范围里没有提交'
+  return store.isFileHistory ? '这个文件还没有提交历史' : '这个仓库还没有提交'
+})
+
+/** 换文件历史 / 换仓库 / 换时间范围时把列表滚回顶部：上一个位置对下一批提交没有意义 */
 watch(
-  () => `${store.repo?.root ?? ''}|${store.repo?.head ?? ''}|${store.historyPath}`,
+  () =>
+    `${store.repo?.root ?? ''}|${store.repo?.head ?? ''}|${store.historyPath}|${store.historyRange?.since ?? ''}|${store.historyRange?.until ?? ''}`,
   async () => {
     await nextTick()
     if (scrollRef.value)
@@ -97,13 +123,36 @@ function pick(commit: GitCommit): void {
       <span class="commit-head__count">{{ store.commits.length }} 条</span>
     </header>
 
+    <!-- 时间范围：两个日期框（可只填一侧），中间「至」，窄了自动换行；清空 = 不限 -->
+    <div class="commit-filter">
+      <el-date-picker
+        v-model="rangeSince"
+        type="date"
+        size="small"
+        value-format="YYYY-MM-DD"
+        placeholder="开始日期"
+        class="commit-filter__picker"
+        aria-label="提交范围的开始日期"
+      />
+      <span class="commit-filter__sep" aria-hidden="true">至</span>
+      <el-date-picker
+        v-model="rangeUntil"
+        type="date"
+        size="small"
+        value-format="YYYY-MM-DD"
+        placeholder="结束日期"
+        class="commit-filter__picker"
+        aria-label="提交范围的结束日期"
+      />
+    </div>
+
     <!-- 对比条：选基准之后一直摆在这里，直到取消或比完再选下一个 -->
     <div v-if="store.compareBase" class="compare-bar">
       <span class="compare-bar__lead">对比</span>
       <span class="mono">{{ shortHash(store.compareBase.hash) }}</span>
       <span class="compare-bar__arrow">→</span>
       <span v-if="store.compareTarget" class="mono">{{ shortHash(store.compareTarget.hash) }}</span>
-      <span v-else class="compare-bar__hint">再点一个提交</span>
+      <span v-else class="compare-bar__hint">悬停另一行，点右下角的「对比」</span>
       <el-button class="compare-bar__clear" text size="small" @click="store.clearCompare()">
         取消
       </el-button>
@@ -147,7 +196,6 @@ function pick(commit: GitCommit): void {
               {{ commit.subject || '（无提交说明）' }}
             </span>
             <span class="commit__meta">
-              <span class="commit__hash mono">{{ shortHash(commit.hash) }}</span>
               <span class="commit__author">{{ commit.author || commit.authorEmail || '未知作者' }}</span>
               <span>{{ formatTimestamp(commit.time) }}</span>
               <span v-if="commit.parents.length > 1" class="commit__badge">合并</span>
@@ -232,6 +280,45 @@ function pick(commit: GitCommit): void {
   font-size: var(--fs-micro);
 }
 
+/* 时间范围筛选：两个日期框固定窄宽、并排，中间「至」（与 daterange 的读法一致） */
+.commit-filter {
+  display: flex;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-top: var(--sp-2);
+}
+
+/* 不管日期控件的根元素是哪个节点，直接锁死两个直接子元素为窄宽 */
+.commit-filter > * {
+  flex: 0 0 128px;
+  width: 128px;
+  min-width: 0;
+}
+
+/* 连接符不占那 128px：跟着前一个日期框走，换行时留在上一行末尾 */
+.commit-filter > .commit-filter__sep {
+  flex: 0 0 auto;
+  width: auto;
+  color: var(--ink-3);
+  font-size: var(--fs-micro);
+  line-height: 1;
+}
+
+.commit-filter .commit-filter__picker {
+  flex: 0 0 128px;
+  width: 128px;
+  min-width: 0;
+}
+
+/* EP 给日期控件写死了 220px（`.el-date-editor.el-input`），只靠根类名压不住；这里直接命中它 */
+.commit-filter :deep(.el-date-editor.el-input) {
+  flex: 0 0 128px;
+  width: 128px;
+  min-width: 0;
+}
+
 .compare-bar {
   display: flex;
   flex-shrink: 0;
@@ -269,6 +356,7 @@ function pick(commit: GitCommit): void {
 }
 
 .commit {
+  position: relative;
   display: flex;
   align-items: center;
   gap: var(--sp-2);
@@ -324,10 +412,6 @@ function pick(commit: GitCommit): void {
   font-size: var(--fs-micro);
 }
 
-.commit__hash {
-  color: var(--ink-2);
-}
-
 .commit__author {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -350,15 +434,37 @@ function pick(commit: GitCommit): void {
   color: var(--ink-3);
 }
 
+/**
+ * 对比入口平时不占位：绝对定位在行的右下角，悬停 / 键盘聚焦 / 已经选成基准或目标时才浮出来。
+ * 底色跟着行底色走（普通悬停是 `--bg-inset`，当前提交是 `--bg-selected`），
+ * 浮出来时把底下被压住的说明文字盖干净。
+ */
 .commit__compare {
-  flex-shrink: 0;
+  position: absolute;
+  right: var(--sp-2);
+  bottom: 2px;
   padding: 2px 10px;
   border: 1px solid transparent;
   border-radius: var(--r-sm);
-  background: transparent;
+  background: var(--bg-inset);
   color: var(--ink-3);
   font-size: var(--fs-micro);
   cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+}
+
+.commit:hover .commit__compare,
+.commit:focus-within .commit__compare,
+.commit__compare.is-picked {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* 当前提交的行底色是「选中」，那颗浮出来的按钮也跟着换，不然会露出一块色差 */
+.commit.is-active .commit__compare:not(.is-picked) {
+  background: var(--bg-selected);
 }
 
 .commit__compare:hover {

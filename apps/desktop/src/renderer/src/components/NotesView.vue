@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { NoteKind, NoteSyncSummary } from '@workbench/notes'
-import { Document, EditPen, FolderOpened, Notebook, Picture, Refresh, RefreshRight } from '@element-plus/icons-vue'
+import { Document, EditPen, FolderOpened, List, Notebook, Picture, Refresh, RefreshRight } from '@element-plus/icons-vue'
 import { countNodes, findNoteNode, noteAbsPath, noteRootName } from '@workbench/notes'
 import { ElMessage } from 'element-plus'
 /**
@@ -26,7 +26,7 @@ import { ElMessage } from 'element-plus'
  * 增删改的确认与提示。树在 NoteTree，正文编辑在 NoteEditor，
  * 左栏底部那一行与分隔条是 RecentRoots / PanelResizer（与视频页共用）。
  */
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { copyText } from '@/clipboard'
 import NoteAssetsDialog from '@/components/NoteAssetsDialog.vue'
 import NoteEditor from '@/components/NoteEditor.vue'
@@ -334,6 +334,43 @@ async function openNoteLink(rel: string): Promise<void> {
 const editorRef = ref<InstanceType<typeof NoteEditor> | null>(null)
 
 /**
+ * 右侧大纲栏。
+ *
+ * 那枚大纲元素是 Vditor 建的，初始化完成后由 NoteEditor 搬进这条栏（见它的 `outlineHost`）——
+ * 长在正文区里的时候，它的顶边只能与正文对齐，跟页头差着一整行，对不齐。
+ */
+const outlineRail = ref<HTMLElement | null>(null)
+/** 大纲开没开：开合归 Vditor，每次真正变化经 NoteEditor 的 `outline-change` 报到这儿 */
+const outlineOpen = ref(false)
+
+/**
+ * 大纲收放会改变正文那块的可读宽度，而 Vditor 只在 window resize / 切模式时重算
+ * 正文的左右留白（`preview.maxWidth` 居中的那一份），不跟容器宽度走。
+ * 所以栏位收放完之后补一次 resize，让它按新的宽度把留白算回去。
+ */
+watch(outlineOpen, async () => {
+  await nextTick()
+  window.dispatchEvent(new Event('resize'))
+})
+
+// 选中项离开「一篇笔记」（换文件夹 / 换笔记本）时编辑器会卸载，那条栏跟着收起。
+// NoteEditor 卸载时也会报一次，这里再兜一道 —— 栏留在屏幕上会是一块空白的竖条
+watch(() => store.active, (active) => {
+  if (!active)
+    outlineOpen.value = false
+})
+
+/**
+ * 右侧大纲（目录结构）的开关。
+ *
+ * 只读那一档照样给：它只改看法，不动正文。开合状态不在这里存 —— Vditor 自己维护，
+ * 面板开没开看右栏那块本身。
+ */
+function toggleOutline(): void {
+  editorRef.value?.toggleOutline()
+}
+
+/**
  * 同步按钮的提示：**同步到哪儿先说清楚**。
  *
  * 地址不是用户在这里填的，而是这个文件夹自己连着的远端 —— 文件夹里任何一个 origin 都会被
@@ -551,91 +588,116 @@ function onWindowFocus(): void {
       />
 
       <section class="notes__editor panel">
-        <header class="notes__head">
-          <template v-if="store.active">
-            <span class="notes__title" :title="store.active.name">{{ store.active.name }}</span>
-            <!-- 在最外层时它是空的：没有「哪一层」可说，就不摆一个空盒子占位 -->
-            <span v-if="locationText" class="notes__location truncate">{{ locationText }}</span>
-          </template>
-          <template v-else-if="store.activeRel">
-            <span class="notes__title">
-              {{ findNoteNode(store.nodes, store.activeRel)?.name ?? '' }}
-            </span>
-            <!-- 在最外层时它是空的：没有「哪一层」可说，就不摆一个空盒子占位 -->
-            <span v-if="locationText" class="notes__location truncate">{{ locationText }}</span>
-          </template>
-          <span v-else class="notes__location">未选中</span>
+        <!-- 左列：页头 + 正文；大纲开着时它让出右栏那份宽度 -->
+        <div class="notes__main">
+          <header class="notes__head">
+            <template v-if="store.active">
+              <span class="notes__title" :title="store.active.name">{{ store.active.name }}</span>
+              <!-- 在最外层时它是空的：没有「哪一层」可说，就不摆一个空盒子占位 -->
+              <span v-if="locationText" class="notes__location truncate">{{ locationText }}</span>
+            </template>
+            <template v-else-if="store.activeRel">
+              <span class="notes__title">
+                {{ findNoteNode(store.nodes, store.activeRel)?.name ?? '' }}
+              </span>
+              <!-- 在最外层时它是空的：没有「哪一层」可说，就不摆一个空盒子占位 -->
+              <span v-if="locationText" class="notes__location truncate">{{ locationText }}</span>
+            </template>
+            <span v-else class="notes__location">未选中</span>
 
-          <span class="notes__spacer" />
+            <span class="notes__spacer" />
 
-          <!--
-            只读那一档的落点。**这一档是默认的**，所以它几乎一直挂在这儿，也正因为如此
-            它得同时说清两件事：现在打字没反应是因为它在开着，以及怎么切回去（提示里那句）。
-          -->
-          <el-tooltip v-if="readOnly" content="正文只读：Ctrl+/ 切回可写" placement="bottom">
-            <span class="notes__mode">只读</span>
-          </el-tooltip>
+            <!--
+              只读那一档的落点，**它自己就是切回去的按钮**：点一下切到可写（Ctrl+/ 同样有效）。
+              **这一档是默认的**，所以它几乎一直挂在这儿，也正因为如此它得同时说清两件事：
+              现在打字没反应是因为它在开着，以及怎么切回去（提示里那句）。
+            -->
+            <el-tooltip v-if="readOnly" content="正文只读：点击或 Ctrl+/ 切到可写" placement="bottom">
+              <button type="button" class="notes__mode" @click="readOnly = false">
+                只读
+              </button>
+            </el-tooltip>
 
-          <!-- 保存状态就写在标题这一行：写东西的人需要知道「刚才那段到底存下去了没有」 -->
-          <span v-if="store.saveError" class="notes__saved is-error">{{ store.saveError }}</span>
-          <span v-else-if="store.active" class="notes__saved">{{ savedText }}</span>
-        </header>
+            <!-- 保存状态就写在标题这一行：写东西的人需要知道「刚才那段到底存下去了没有」 -->
+            <span v-if="store.saveError" class="notes__saved is-error">{{ store.saveError }}</span>
+            <span v-else-if="store.active" class="notes__saved">{{ savedText }}</span>
 
-        <!-- 编辑器只在「打开的是一篇笔记」时出现；其余情况各说一句 -->
-        <NoteEditor
-          v-if="store.active"
-          ref="editorRef"
-          :note="store.active"
-          :root="store.root"
-          :theme="settings.effectiveTheme"
-          :read-only="readOnly"
-          :image-repo="settings.settings.noteImageRepo"
-          @change="onContentChange"
-          @open="openNoteLink"
-        />
+            <!--
+              右侧大纲的开关：按需打开（右键菜单里那一项是同一个动作）。
+              **只读那一档也留着它** —— 大纲只改「怎么看」，不改正文。
+            -->
+            <el-tooltip v-if="store.active" content="显示 / 收起大纲" placement="bottom">
+              <el-button class="notes__outline" size="small" text @click="toggleOutline">
+                <el-icon><List /></el-icon>
+              </el-button>
+            </el-tooltip>
+          </header>
 
-        <div v-else class="empty notes__hint">
-          <template v-if="store.loadError">
-            <p>读不出这个文件夹。</p>
-            <p class="empty__hint">
-              {{ store.loadError }}
-            </p>
-          </template>
-          <PanelLoading v-else-if="scanning" text="正在读取笔记…" />
-          <template v-else-if="store.openError">
-            <p>这一篇打不开。</p>
-            <p class="empty__hint">
-              {{ store.openError }}
-            </p>
-            <el-button size="small" @click="store.select(store.activeRel)">
-              重试
-            </el-button>
-          </template>
-          <template v-else-if="store.activeRel">
-            <p>「{{ findNoteNode(store.nodes, store.activeRel)?.name }}」是文件夹。</p>
-            <p class="empty__hint">
-              在左栏里选中一篇笔记打开，或者右击它往里面新建。
-            </p>
-          </template>
-          <template v-else-if="!store.noteCount">
-            <el-icon class="empty__icon">
-              <EditPen />
-            </el-icon>
-            <p>这个文件夹里还没有笔记。</p>
-            <p class="empty__hint">
-              在左栏里右击新建一篇，写下第一行。
-            </p>
-          </template>
-          <template v-else>
-            <el-icon class="empty__icon">
-              <Document />
-            </el-icon>
-            <p>从左边选一篇笔记打开。</p>
-            <p class="empty__hint">
-              标题栏右侧那句会显示它最后一次改动的时间。
-            </p>
-          </template>
+          <!-- 编辑器只在「打开的是一篇笔记」时出现；其余情况各说一句 -->
+          <NoteEditor
+            v-if="store.active"
+            ref="editorRef"
+            :note="store.active"
+            :root="store.root"
+            :theme="settings.effectiveTheme"
+            :read-only="readOnly"
+            :image-repo="settings.settings.noteImageRepo"
+            :outline-host="outlineRail"
+            @change="onContentChange"
+            @open="openNoteLink"
+            @outline-change="outlineOpen = $event"
+          />
+
+          <div v-else class="empty notes__hint">
+            <template v-if="store.loadError">
+              <p>读不出这个文件夹。</p>
+              <p class="empty__hint">
+                {{ store.loadError }}
+              </p>
+            </template>
+            <PanelLoading v-else-if="scanning" text="正在读取笔记…" />
+            <template v-else-if="store.openError">
+              <p>这一篇打不开。</p>
+              <p class="empty__hint">
+                {{ store.openError }}
+              </p>
+              <el-button size="small" @click="store.select(store.activeRel)">
+                重试
+              </el-button>
+            </template>
+            <template v-else-if="store.activeRel">
+              <p>「{{ findNoteNode(store.nodes, store.activeRel)?.name }}」是文件夹。</p>
+              <p class="empty__hint">
+                在左栏里选中一篇笔记打开，或者右击它往里面新建。
+              </p>
+            </template>
+            <template v-else-if="!store.noteCount">
+              <el-icon class="empty__icon">
+                <EditPen />
+              </el-icon>
+              <p>这个文件夹里还没有笔记。</p>
+              <p class="empty__hint">
+                在左栏里右击新建一篇，写下第一行。
+              </p>
+            </template>
+            <template v-else>
+              <el-icon class="empty__icon">
+                <Document />
+              </el-icon>
+              <p>从左边选一篇笔记打开。</p>
+              <p class="empty__hint">
+                标题栏右侧那句会显示它最后一次改动的时间。
+              </p>
+            </template>
+          </div>
         </div>
+
+        <!--
+          大纲栏：Vditor 自己那枚大纲元素在初始化后搬进这里（见 NoteEditor 的 outlineHost）。
+          它在正文区里的时候，顶边只能贴着正文，比页头低一整行；搬到这条栏里之后
+          与页头同高起步，栏位多宽、显不显示由这一层说了算。
+        -->
+        <aside v-show="outlineOpen" ref="outlineRail" class="notes__rail" />
       </section>
     </div>
 
@@ -692,15 +754,144 @@ function onWindowFocus(): void {
   min-height: 0;
 }
 
+/**
+ * 右栏：左边一列是页头 + 正文，右边一条是大纲栏（按需显示）。
+ *
+ * `.panel` 原本是竖排的 flex（页头压着正文），这里拆成两列：大纲栏要与页头同高起步，
+ * 它就得是这一层的直接子元素，不能跟着正文一起往下让。行间距归 `.notes__main` 自己，
+ * 所以这一层的 gap 归零 —— 栏收起来时不能留下一道空缝。
+ */
 .notes__editor {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0;
   min-width: 0;
   min-height: 0;
 }
 
-/* 标题行：名字 + 位置 + 保存状态，右栏的「页头」 */
+/* 左列：页头与正文，间距沿用 .panel 那一档（12） */
+.notes__main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  min-width: 0;
+  min-height: 0;
+}
+
+/**
+ * 大纲栏：与左列同高、与页头同顶。
+ *
+ * 它自己不带底色与卡片外壳 —— 这一页的底归 .panel，栏只留一道左侧发丝线与一点内边距，
+ * 像书页边上的目录，而不是第二张卡片。宽度定死：大纲是导航，不该跟正文抢宽度。
+ */
+.notes__rail {
+  width: 224px;
+  min-height: 0;
+  margin-left: var(--sp-4);
+  padding-left: var(--sp-4);
+  border-left: 1px solid var(--border);
+  overflow: hidden;
+}
+
+/**
+ * 大纲本体（Vditor 自带的那枚元素，被搬到了这条栏里）。
+ *
+ * 它原本长在编辑器里：不透明底、粗边线、固定蓝悬停、Vditor 的字体。搬出来之后
+ * 这些变量不再继承自 `.vditor`，所以关键的几枚（边线 / 字色 / 悬停色）在这里补一份，
+ * 否则字会掉回浏览器默认色。
+ */
+.notes__rail :deep(.vditor-outline) {
+  --border-color: var(--border);
+  --panel-background-color: transparent;
+  --textarea-text-color: var(--ink-2);
+  --toolbar-icon-color: var(--ink-3);
+  --toolbar-icon-hover-color: var(--ink);
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-family: var(--font-ui);
+  font-size: var(--fs-meta);
+}
+
+/**
+ * 栏首「大纲」：与页头同一条水平线（行高取页头那颗按钮的 28，文字中心落在 14），
+ * 左缘与条目文字对齐（8 内边距 + 10 箭头 + 4 间距），下缘一条细分隔。
+ */
+.notes__rail :deep(.vditor-outline__title) {
+  padding: 0 0 var(--sp-2) 22px;
+  border-bottom: 1px solid var(--border);
+  color: var(--ink-3);
+  font-size: var(--fs-meta);
+  line-height: 28px;
+}
+
+/* 条目区：从分隔线下面一点开始，别贴着 */
+.notes__rail :deep(.vditor-outline__content) {
+  padding-top: var(--sp-2);
+}
+
+/* 缩进：顶层不缩，子级按 12px 退一格（Vditor 默认的 1em 在这条窄栏里略宽） */
+.notes__rail :deep(.vditor-outline__content > ul) {
+  padding-left: 0;
+}
+
+.notes__rail :deep(.vditor-outline ul ul) {
+  padding-left: var(--sp-3);
+}
+
+/**
+ * 每一条：行高与内边距按「能点的一片」给（4px + 19px 行高 = 27px 高），
+ * 悬停铺一层浅底、四角收圆 —— 它是这一栏里的导航，不是正文里的链接。
+ */
+.notes__rail :deep(.vditor-outline li > span) {
+  padding: 4px var(--sp-2);
+  border-radius: var(--r-sm);
+  color: var(--ink-2);
+  line-height: 19px;
+  transition: background-color 0.15s var(--ease-out), color 0.15s var(--ease-out);
+}
+
+.notes__rail :deep(.vditor-outline li > span:hover) {
+  background-color: var(--bg-subtle);
+  color: var(--ink);
+}
+
+/* 层级：顶层用正墨色，子级弱一档 —— 缩进之外再给一层层次 */
+.notes__rail :deep(.vditor-outline__content > ul > li > span) {
+  color: var(--ink-2);
+}
+
+.notes__rail :deep(.vditor-outline ul ul li > span) {
+  color: var(--ink-3);
+}
+
+/* 折叠箭头：小一号、弱一档；收起时 Vditor 自己加 `--close` 转半圈 */
+.notes__rail :deep(.vditor-outline li > span > svg) {
+  width: 10px;
+  height: 10px;
+  margin-right: var(--sp-1);
+  color: var(--ink-3);
+  opacity: 0.75;
+  transition: transform 0.15s var(--ease-out);
+}
+
+.notes__rail :deep(.vditor-outline li > span > span) {
+  line-height: 19px;
+}
+
+/**
+ * 标题行：名字 + 位置 + 保存状态 + 大纲开关，右栏的「页头」。
+ *
+ * **垂直居中，不是基线对齐**：这一行里有一颗 28px 高的图标按钮，按基线对齐时
+ * 文字会被自己的基线摆在上半截、按钮却居中，两者差 3px（看着就是图标往下挂）。
+ * 字号不同的那几段（标题 15 / 位置与保存 10.5）居中摆也不会打架。
+ */
 .notes__head {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: var(--sp-3);
   flex-shrink: 0;
   min-width: 0;
@@ -733,6 +924,19 @@ function onWindowFocus(): void {
 }
 
 /**
+ * 标题行右端的大纲开关：无底色的图标键（与左栏底部那几颗同款）。
+ * 垂直位置由这一行的 `align-items: center` 定，这里只留颜色与不收缩。
+ */
+.notes__outline {
+  flex-shrink: 0;
+  color: var(--ink-3);
+}
+
+.notes__outline:hover {
+  color: var(--ink);
+}
+
+/**
  * 只读那一档的标记：**实心深片**（墨底反白字；暗色下两个令牌互换，反成亮片深字）。
  * 它是一档模式徽章、不是普通的信息小片：默认档几乎一直挂在标题行里，浅底那副
  * （知识库信息面板小片的同款）压不出存在感 —— 得一眼能找到它、也一眼能看出
@@ -748,17 +952,28 @@ function onWindowFocus(): void {
  *
  * 为什么非有它不可：这是一档「按下去之后界面几乎不变」的模式（能变的只有打字打不出来），
  * 一个隐形的快捷键总得有个看得见的落脚点。
+ *
+ * **它是一颗按钮**（不是纯标签）：点一下就切到可写 —— 点下去它自己消失，那正是这一档
+ * 结束时该有的样子；切回可写之后要回只读，仍是 Ctrl+/（提示里写着）。
  */
 .notes__mode {
   display: inline-flex;
   align-items: baseline;
   flex-shrink: 0;
   padding: 0 var(--sp-2);
+  border: 0;
   border-radius: var(--r-sm);
   background: var(--ink);
+  font-family: inherit;
   font-size: var(--fs-meta);
   line-height: 18px;
   color: var(--ink-inverse);
+  cursor: pointer;
+  transition: opacity 0.15s var(--ease-out);
+}
+
+.notes__mode:hover {
+  opacity: 0.85;
 }
 
 .notes__saved.is-error {

@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import type { ProjectColor } from '@workbench/core'
-import type { WorkLogEntry, WorkLogStatus, WorkRange, WorkSort } from '@workbench/work-log'
+import type { WorkLogEntry, WorkLogStatus, WorkRange, WorkRangeBounds, WorkSort } from '@workbench/work-log'
 import { ArrowDown, Download, Memo, Plus, Warning } from '@element-plus/icons-vue'
 import { addDays, dayKey, markdownToPlainText, projectColorVar, sanitizeProjectColor } from '@workbench/core'
-import { dayMeta, DELETED_PROJECT_ID, groupByProject, isWorkSort, paginate, sanitizeWorkRange, sanitizeWorkSort, timelineOf, toggleWorkLogStatus, WORK_PAGE_DAYS, WORK_RANGE_LABELS, WORK_RANGES, WORK_SORT_LABELS, WORK_SORTS, WORK_STATUS_DEFAULT } from '@workbench/work-log'
+import { dayMeta, defaultWorkRangeBounds, DELETED_PROJECT_ID, groupByProject, isWorkSort, paginate, sanitizeWorkRange, sanitizeWorkRangeBounds, sanitizeWorkSort, timelineOf, toggleWorkLogStatus, WORK_PAGE_DAYS, WORK_RANGE_LABELS, WORK_RANGES, WORK_SORT_LABELS, WORK_SORTS, WORK_STATUS_DEFAULT } from '@workbench/work-log'
 import { ElMessage } from 'element-plus'
 /**
  * 工作页：按天分组的工作日志时间轴。
@@ -12,29 +12,46 @@ import { ElMessage } from 'element-plus'
  * `<KeepAlive><component :is>` 负责 —— 所以这一页在离开时会留在内存里，滚动位置与
  * 展开状态都不会丢；数据也不会因为切走再回来而重读。
  *
- * 数据住在本机的 `work-log.json`（**不进同步仓库**，见 packages/work-log/src/work-log.ts）。
+ * 数据住在本机的 `work-log.json`（配了同步仓库时按设备分片共享，见
+ * packages/work-log/src/work-log.ts 与 work-log-sync.ts）。
  * 时间的最小刻度是「天」：一天可以有多条记录，所以分页按**天**走 ——
  * 一天里的几条不该被翻页切成两半。范围、分组、分页都是 shared 里的纯函数，
  * 这一层只做取数与交互。
  */
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onActivated, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import EmptyState from '@/components/EmptyState.vue'
 import PanelLoading from '@/components/PanelLoading.vue'
 import WorkLogCard from '@/components/WorkLogCard.vue'
 import WorkLogDialog from '@/components/WorkLogDialog.vue'
 import WorkLogGitDialog from '@/components/WorkLogGitDialog.vue'
 import { confirmAction } from '@/notify'
+import { useAuthStore } from '@/stores/auth'
 import { useProjectsStore } from '@/stores/projects'
 import { useSettingsStore } from '@/stores/settings'
 
 const store = useProjectsStore()
 const settings = useSettingsStore()
+const auth = useAuthStore()
 
 const entries = ref<WorkLogEntry[]>([])
 const loading = ref(true)
 /** 读盘失败与「一条都还没写过」是两回事，不能都显示成空列表 */
 const loadError = ref('')
 const range = ref<WorkRange>(sanitizeWorkRange(settings.settings.workRange))
+/** 自定义范围（只在「自定义」那一档用）：设置里没存过就按今天一天 */
+const customRange = ref<WorkRangeBounds>(
+  sanitizeWorkRangeBounds(settings.settings.workRangeCustom?.from, settings.settings.workRangeCustom?.to)
+  ?? defaultWorkRangeBounds(Date.now()),
+)
+/** 日期范围控件的 model：Element Plus 要 [开始, 结束]，内部统一收成 { from, to } */
+const customRangeInput = computed<[string, string]>({
+  get: (): [string, string] => [customRange.value.from, customRange.value.to],
+  set: (value: [string, string] | null) => {
+    const next = sanitizeWorkRangeBounds(value?.[0], value?.[1])
+    if (next)
+      customRange.value = next
+  },
+})
 /** 时间范围的选项：Element Plus 的分段控件要 { label, value }，标签表在 shared 里（最左是「待办」） */
 const rangeOptions = WORK_RANGES.map(value => ({ label: WORK_RANGE_LABELS[value], value }))
 /** 排序维度：按时间（天为轴）或按项目（项目为轴） */
@@ -45,6 +62,16 @@ watch(
   () => settings.settings.workRange,
   (value) => {
     range.value = sanitizeWorkRange(value)
+  },
+)
+
+/** 数据目录整个换掉时，自定义区间也跟着设置重新取一次（认不出就回今天） */
+watch(
+  () => settings.settings.workRangeCustom,
+  (value) => {
+    const next = sanitizeWorkRangeBounds(value?.from, value?.to) ?? defaultWorkRangeBounds(Date.now())
+    if (next.from !== customRange.value.from || next.to !== customRange.value.to)
+      customRange.value = next
   },
 )
 
@@ -60,11 +87,28 @@ const page = ref(1)
 const now = ref(Date.now())
 const dialogVisible = ref(false)
 const editing = ref<WorkLogEntry | null>(null)
-/** 「从提交生成」弹窗；「待办」不是时段，那一档按钮置灰 */
+/** 「从提交生成」弹窗；日期与项目都在弹窗里选，不跟这一排的档位联动 */
 const gitVisible = ref(false)
-const gitRange = computed<Exclude<WorkRange, 'todo'>>(() =>
-  range.value === 'todo' ? 'today' : range.value,
+
+/**
+ * 多机同步：只在这两样都齐了才跑 —— 没登录 / 没填同步仓库时安静跳过，
+ * 这一页不摆一颗按下去只会报错的按钮（与保险库同一条口径）。
+ */
+const syncReady = computed(() =>
+  Boolean(auth.status?.account) && Boolean(settings.settings.tokenSyncRepo.trim()),
 )
+const syncing = ref(false)
+const syncFailed = ref(false)
+const syncNote = ref('')
+/** 同步拿回来的本机设备 id：远端条目的项目名兜底要看它 */
+const localDeviceId = ref('')
+let queuedSync = false
+
+/** 登录状态 / 同步仓库是异步载入的：第一次真正就绪时补跑一轮（首次挂载那条已经跑过也无妨，会合并成一趟） */
+watch(syncReady, (ready, wasReady) => {
+  if (ready && !wasReady)
+    void syncNow()
+})
 
 async function load(): Promise<void> {
   loading.value = true
@@ -85,13 +129,60 @@ async function load(): Promise<void> {
 }
 
 /**
+ * 同步一轮：拉别的设备的分片 → 合并写回本机 → 推本机分片。
+ *
+ * 节奏与保险库同一套：进页面（含从别的页切回来）与每次增删改成功后各跑一轮；
+ * 跑着的时候又改了，等这轮完了补一趟。失败只在工具带留一行字 —— 成功一个字都不写，
+ * 不把工具带变成常驻状态栏。
+ */
+async function syncNow(): Promise<void> {
+  if (!syncReady.value)
+    return
+  if (syncing.value) {
+    queuedSync = true
+    return
+  }
+
+  syncing.value = true
+  try {
+    do {
+      queuedSync = false
+      const result = await window.workbench.syncWorkLogs()
+      if (!result.ok) {
+        syncFailed.value = true
+        syncNote.value = result.error ?? '同步失败'
+        break
+      }
+      if (!result.data || !result.data.enabled)
+        break
+      localDeviceId.value = result.data.device
+      // 远端条目并进来了：直接换成本机文件合并后的那份，不再多读一次盘
+      if (result.data.changed) {
+        entries.value = result.data.entries
+        now.value = Date.now()
+      }
+      syncFailed.value = false
+      syncNote.value = ''
+    } while (queuedSync)
+  }
+  catch (error) {
+    syncFailed.value = true
+    syncNote.value = error instanceof Error ? error.message : '同步失败'
+  }
+  finally {
+    syncing.value = false
+  }
+}
+
+/**
  * 跨过午夜时把「现在」往后推一格：停在应用里过夜之后，
  * 「今天」那一档与分组上的相对说法都得跟着走到新的一天。
  */
 let timer: number | null = null
 
 onMounted(() => {
-  void load()
+  // 先读本机再同步：反过来会让合并后的列表被先到的旧快照盖回去
+  void load().then(() => syncNow())
   timer = window.setInterval(() => {
     const next = Date.now()
     if (dayKey(next) !== dayKey(now.value))
@@ -99,10 +190,26 @@ onMounted(() => {
   }, 60_000)
 })
 
+/** 第一次激活跟在首次挂载后面，不重复跑；之后每次切回这一页再同步一轮 */
+let activatedOnce = false
+
+onActivated(() => {
+  if (!activatedOnce) {
+    activatedOnce = true
+    return
+  }
+  void syncNow()
+})
+
 onBeforeUnmount(() => {
   if (timer)
     window.clearInterval(timer)
 })
+
+/**
+ * 领域函数只认「这一段」：不在自定义档时传 null，其余档自己按 now 算边界。
+ */
+const customBounds = computed(() => (range.value === 'custom' ? customRange.value : null))
 
 /**
  * 当前维度下的分组（时间 = 一天一栏，项目 = 一个项目一栏），再按页大小切开。
@@ -115,7 +222,7 @@ onBeforeUnmount(() => {
  */
 const sections = computed(() => {
   if (sort.value === 'time') {
-    return timelineOf(entries.value, range.value, now.value).map(group => ({
+    return timelineOf(entries.value, range.value, now.value, customBounds.value).map(group => ({
       key: group.day,
       day: group.day,
       projectId: null as string | null,
@@ -128,6 +235,7 @@ const sections = computed(() => {
     range.value,
     now.value,
     store.projects.map(project => ({ id: project.id, name: project.name })),
+    customBounds.value,
   ).map(group => ({
     key: group.projectId ?? 'none',
     day: '',
@@ -171,12 +279,27 @@ const lastLoggedText = computed(() => {
   return meta.relative || meta.title
 })
 
+/** 自定义档在空态里的名字：单日说「今天 / 昨天」，跨天报「M月D日 – M月D日」 */
+const customRangeTitle = computed(() => {
+  const { from, to } = customRange.value
+  if (from === to) {
+    const meta = dayMeta(from, now.value)
+    return meta.relative || meta.title || from
+  }
+  return `${dayMeta(from, now.value).title || from} – ${dayMeta(to, now.value).title || to}`
+})
+
 /**
- * 空态的第一句。「待办」那一档不是时段，说「待办还没有记录」读着别扭，直接说「没有待办」。
+ * 空态的第一句。「待办」那一档不是时段，说「待办还没有记录」读着别扭，直接说「没有待办」；
+ * 「自定义」报具体区间，否则「自定义还没有记录」读不出是哪段时间。
  */
-const emptyTitle = computed(() =>
-  range.value === 'todo' ? '没有待办' : `${WORK_RANGE_LABELS[range.value]}还没有记录`,
-)
+const emptyTitle = computed(() => {
+  if (range.value === 'todo')
+    return '没有待办'
+  if (range.value === 'custom')
+    return `${customRangeTitle.value}还没有记录`
+  return `${WORK_RANGE_LABELS[range.value]}还没有记录`
+})
 
 /**
  * 空态的第二句。
@@ -199,7 +322,7 @@ const emptyHint = computed(() => {
 })
 
 /** 换范围或维度后回到第一页，否则会停在一个新视图里并不存在的页码上 */
-watch([range, sort], () => {
+watch([range, sort, customRange], () => {
   page.value = 1
 })
 
@@ -210,8 +333,12 @@ watch([range, sort], () => {
  * 「待办」是这一排里的一档，跟其余四档一样会记住：它现在是一个视图（所有还欠着的事），
  * 不是临时戴上的镜片。
  */
-watch([range, sort], () => {
-  void settings.updateSettings({ workRange: range.value, workSort: sort.value })
+watch([range, sort, customRange], () => {
+  void settings.updateSettings({
+    workRange: range.value,
+    workSort: sort.value,
+    workRangeCustom: { ...customRange.value },
+  })
 })
 
 function pickSort(value: string): void {
@@ -222,10 +349,19 @@ function pickSort(value: string): void {
 
 const projectNames = computed(() => new Map(store.projects.map(item => [item.id, item])))
 
-/** 记录上的项目名；项目已被删除时返回 null，由卡片显示「项目已删除」 */
+/**
+ * 记录上的项目名；项目已被删除时返回 null，由卡片显示「项目已删除」。
+ *
+ * 别的设备来的条目（`by` 不是本机）在本地项目列表里找不到时，用条目里冗余的项目名 ——
+ * 项目列表本身不跨设备同步，不兜底的话远端条目的标签会一律显示成「项目已删除」。
+ */
 function projectNameOf(entry: WorkLogEntry): string | null {
   const project = entry.projectId ? projectNames.value.get(entry.projectId) : undefined
-  return project?.name ?? null
+  if (project)
+    return project.name
+  if (entry.projectId && localDeviceId.value && entry.by && entry.by !== localDeviceId.value)
+    return entry.projectName ?? null
+  return null
 }
 
 /** 记录上那个项目标签的颜色：与项目卡上的圆点同一个来源（项目标识色） */
@@ -234,13 +370,22 @@ function projectColorOf(projectId?: string | null): ProjectColor | undefined {
   return sanitizeProjectColor(project?.color)
 }
 
-/** 项目维度下栏头上的名字：未关联 / 已删除各说各的 */
+/** 项目维度下栏头上的名字：未关联 / 已删除各说各的；远端项目用条目里带的名字兜底 */
 function projectTitleOf(projectId?: string | null): string {
   if (!projectId)
     return '未关联项目'
   if (projectId === DELETED_PROJECT_ID)
     return '项目已删除'
-  return projectNames.value.get(projectId)?.name ?? '项目已删除'
+  const known = projectNames.value.get(projectId)?.name
+  if (known)
+    return known
+  const remote = entries.value.find(entry =>
+    entry.projectId === projectId
+    && localDeviceId.value
+    && entry.by
+    && entry.by !== localDeviceId.value,
+  )
+  return remote?.projectName ?? '项目已删除'
 }
 
 /** 卡片上的项目标签颜色（时间维度下每条记录各自算） */
@@ -279,6 +424,7 @@ function onSaved(entry: WorkLogEntry): void {
   else entries.value.splice(index, 1, entry)
   // 新记的那条未必落在当前范围里（例如停在「昨天」却记到了今天），把时刻推一下让范围重新算
   now.value = Date.now()
+  void syncNow()
 }
 
 /** 从提交生成之后同样并进内存列表：这次可能是新建，也可能是追加到已有记录 */
@@ -290,6 +436,7 @@ function onGitImported(changed: WorkLogEntry[]): void {
     else entries.value.splice(index, 1, entry)
   }
   now.value = Date.now()
+  void syncNow()
 }
 
 /**
@@ -313,6 +460,7 @@ async function toggleStatus(entry: WorkLogEntry): Promise<void> {
     return
   }
   entries.value.splice(index, 1, result.data)
+  void syncNow()
 }
 
 async function remove(entry: WorkLogEntry): Promise<void> {
@@ -332,6 +480,7 @@ async function remove(entry: WorkLogEntry): Promise<void> {
   }
   entries.value = entries.value.filter(item => item.id !== entry.id)
   ElMessage.success('已删除')
+  void syncNow()
 }
 </script>
 
@@ -340,16 +489,32 @@ async function remove(entry: WorkLogEntry): Promise<void> {
     <!-- 工具条与项目页那条同款（底色由 global.css 按顶部样式给），顶栏以下的第一条 -->
     <div class="filter">
       <div class="filter__head">
-        <!-- 五档：最左是「待办」（所有还没做完的事），其余四档是时间范围 -->
+        <!-- 六档：最左是「待办」（所有还没做完的事），中间四档是预置时间范围，最右「自定义」配一枚日期范围选择器 -->
         <el-segmented
           v-model="range"
           class="ranges"
           :options="rangeOptions"
           aria-label="范围"
         />
+
+        <el-date-picker
+          v-if="range === 'custom'"
+          v-model="customRangeInput"
+          class="custom-range"
+          type="daterange"
+          value-format="YYYY-MM-DD"
+          format="YYYY-MM-DD"
+          range-separator="至"
+          start-placeholder="开始日期"
+          end-placeholder="结束日期"
+          :clearable="false"
+        />
       </div>
 
       <div class="filter__tools">
+        <!-- 同步失败只在这一行留个字：成功不写（不把工具带变成常驻状态栏） -->
+        <span v-if="syncFailed && syncNote" class="sync-note" :title="syncNote">{{ syncNote }}</span>
+
         <!-- 排序维度：时间（一天一栏）或项目（一个项目一栏），与项目页的「排序」同一副控件 -->
         <el-dropdown trigger="click" placement="bottom-end" @command="pickSort">
           <button class="sort" type="button">
@@ -373,15 +538,11 @@ async function remove(entry: WorkLogEntry): Promise<void> {
           </template>
         </el-dropdown>
 
-        <!-- 从项目仓库的提交生成：先预览再写入。「待办」档没有日期范围，置灰并说明原因 -->
-        <el-tooltip content="先切到时间档" placement="bottom" :disabled="range !== 'todo'">
-          <span class="git-entry">
-            <el-button size="small" :disabled="range === 'todo'" @click="gitVisible = true">
-              <el-icon><Download /></el-icon>
-              从提交生成
-            </el-button>
-          </span>
-        </el-tooltip>
+        <!-- 从项目仓库的提交生成：先预览再写入。日期在弹窗里选，五档都能用 -->
+        <el-button size="small" @click="gitVisible = true">
+          <el-icon><Download /></el-icon>
+          从提交生成
+        </el-button>
 
         <el-button type="primary" size="small" @click="openCreate">
           <el-icon><Plus /></el-icon>
@@ -468,12 +629,11 @@ async function remove(entry: WorkLogEntry): Promise<void> {
       @saved="onSaved"
     />
 
-    <!-- 提交生成：项目与日志都从这一页取，读写各归适配层 -->
+    <!-- 提交生成：项目与日志都从这一页取，读写各归适配层；日期与项目在弹窗里选 -->
     <WorkLogGitDialog
       v-model="gitVisible"
       :projects="store.projects"
       :entries="entries"
-      :range="gitRange"
       :now="now"
       @imported="onGitImported"
     />
@@ -496,9 +656,20 @@ async function remove(entry: WorkLogEntry): Promise<void> {
   flex-shrink: 0;
 }
 
-/* 置灰的按钮自己接不住鼠标事件，tooltip 的悬停目标得由外面这层给 */
-.git-entry {
-  display: inline-flex;
+/* 「自定义」后面那枚日期范围：宽度给到刚好装下两端日期，不与右边的工具抢地方 */
+.custom-range.el-date-editor {
+  flex: 0 0 260px;
+  width: 260px;
+}
+
+/* 同步失败：工具带上一行红字，悬停看全文（与保险库同一套，成功时不占地方） */
+.sync-note {
+  max-width: 200px;
+  overflow: hidden;
+  font-size: var(--fs-micro);
+  color: var(--st-fail);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* 时间轴区域自己滚，工具条与分页钉在上下两头 */

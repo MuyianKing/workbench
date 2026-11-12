@@ -49,9 +49,9 @@ export function onCheck(handler: () => void): Promise<() => void> {
 }
 
 /**
- * 打开（或聚焦）禅道窗口：一扇独立窗口加载禅道站点，免登录由 Rust 侧的登录页脚本完成
- * （见 zentao.rs 的 auto_login_script）。已经开着就只是唤到前面。
+ * 用系统浏览器打开禅道（顶栏那颗图标与通知点击都走它）。
+ * 地址由 Rust 从内嵌配置读取；浏览器里没有应用的登录态，登录由用户自己在那里做。
  */
-export function openWindow(): Promise<Result<null>> {
-  return guard(invoke<null>('zentao_open_window'), '打开禅道窗口失败')
+export function openSite(): Promise<Result<null>> {
+  return guard(invoke<null>('zentao_open_site'), '在浏览器中打开禅道失败')
 }

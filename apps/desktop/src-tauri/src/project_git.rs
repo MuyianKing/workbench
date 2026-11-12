@@ -22,13 +22,14 @@ const MAX_COMMITS: usize = 1000;
 
 /// 读一个项目目录的提交。
 ///
-/// `since` 是毫秒时间戳（调用方按范围起点算好）：拿它做 git 的 `--since` **粗筛**，
-/// 精确到天的过滤留给调用方 —— git 这个参数按提交时间算，而分组按作者时间，
-/// 两者在 rebase / cherry-pick 之后会差很远，不能拿它当边界。
+/// `since` / `until` 是毫秒时间戳（调用方按选中那天的前后各放一天算好）：
+/// 拿它们做 git 的 `--since` / `--until` **粗筛**，精确到天的过滤留给调用方 ——
+/// git 这两个参数按提交时间算，而分组按作者时间，两者在 rebase / cherry-pick 之后
+/// 会差很远，不能拿它们当边界。
 ///
 /// 不是 git 仓库时返回 `isRepo: false`（这是正常情况，不是错误）；
 /// 目录不存在、git 起不来、git 自己报错才是 `Err`。
-pub fn log(dir: &str, since: Option<i64>) -> Result<Value, String> {
+pub fn log(dir: &str, since: Option<i64>, until: Option<i64>) -> Result<Value, String> {
     let dir = dir.trim();
     if dir.is_empty() {
         return Err("还没有选择项目文件夹".into());
@@ -40,6 +41,7 @@ pub fn log(dir: &str, since: Option<i64>) -> Result<Value, String> {
     }
 
     let since_arg = since.map(|ms| format!("--since=@{}", (ms.max(0) / 1000)));
+    let until_arg = until.map(|ms| format!("--until=@{}", (ms.max(0) / 1000)));
     let max_arg = format!("--max-count={MAX_COMMITS}");
     let mut args: Vec<&str> = vec![
         "log",
@@ -49,13 +51,16 @@ pub fn log(dir: &str, since: Option<i64>) -> Result<Value, String> {
         // 合并提交不产生「做了什么」，只会把两个分支的标题重复一遍
         "--no-merges",
         "--format=%H%x1f%at%x1f%ae%x1f%s",
-        "--",
-        ".",
     ];
-    args.insert(3, max_arg.as_str());
     if let Some(arg) = &since_arg {
-        args.insert(3, arg.as_str());
+        args.push(arg.as_str());
     }
+    if let Some(arg) = &until_arg {
+        args.push(arg.as_str());
+    }
+    args.push(max_arg.as_str());
+    args.push("--");
+    args.push(".");
 
     let outcome = run(&args, Some(root), GIT_TIMEOUT)?;
     if outcome.timed_out {

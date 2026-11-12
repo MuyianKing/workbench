@@ -1,15 +1,17 @@
-//! Git 页的只读仓库读取：仓库信息、提交列表、目录树、文件历史、提交差异与补丁。
+//! Git 页的只读仓库读取：仓库信息、分支清单、提交列表、目录树、文件历史、提交差异与补丁。
 //!
-//! **一个字节都不写仓库**：只跑 `rev-parse` / `log` / `ls-tree` / `show` / `diff` /
-//! `cat-file -s`，不 add、不 commit、不 checkout、不 push、不 fetch。也不联网。
+//! **一个字节都不写仓库**：只跑 `rev-parse` / `for-each-ref` / `log` / `ls-tree` / `show` /
+//! `diff` / `cat-file -s`，不 add、不 commit、不 checkout、不 switch、不 push、不 fetch。也不联网。
+//! 「切换分支」只是把看历史 / 目录树的来源换成另一条 `refs/heads/*`，工作区不动。
 //!
 //! 范围是**用户在这一页自己打开的那个仓库**（见 docs/modules/git-client.md）。
 //! 与 `project_git.rs`（工作日志的「从提交生成」）分开放：那一份按项目目录起算、
 //! 只给一个功能用；这一份要按仓库根解释路径、分页、看树与补丁，口径不一样。
 //!
-//! 路径与提交号都从界面回来，是命令行参数的一部分：
+//! 路径、分支名与提交号都从界面回来，是命令行参数的一部分：
 //!  - 提交号只认十六进制（7 ~ 64 位，长短都收），别的字符必然不是提交号；
 //!  - 文件路径只认仓库内的相对路径（不接受盘符、开头的 `/`、`..` 与空段）；
+//!  - 分支名会拼成 `refs/heads/<name>`，不接受 `-` 开头的形状与控制字符；
 //!  - 所有带 pathspec 的命令都先挂 `--literal-pathspecs`：文件名里的 `*` / `?` / `[`
 //!    不该被当成通配符；
 //!  - `--no-ext-diff` / `--no-textconv`：仓库自己的 `.gitattributes` 或 `diff.external`
@@ -46,23 +48,53 @@ pub fn repo_git_open(path: String) -> Result<Value, String> {
 }
 
 #[tauri::command(async)]
-pub fn repo_git_commits(root: String, skip: Option<u32>, limit: Option<u32>) -> Result<Value, String> {
-    commits(&root, skip, limit)
+pub fn repo_git_branches(root: String) -> Result<Value, String> {
+    branches(&root)
+}
+
+#[tauri::command(async)]
+pub fn repo_git_commits(
+    root: String,
+    rev: Option<String>,
+    since: Option<String>,
+    until: Option<String>,
+    skip: Option<u32>,
+    limit: Option<u32>,
+) -> Result<Value, String> {
+    commits(
+        &root,
+        rev.as_deref(),
+        since.as_deref(),
+        until.as_deref(),
+        skip,
+        limit,
+    )
 }
 
 #[tauri::command(async)]
 pub fn repo_git_file_commits(
     root: String,
     path: String,
+    rev: Option<String>,
+    since: Option<String>,
+    until: Option<String>,
     skip: Option<u32>,
     limit: Option<u32>,
 ) -> Result<Value, String> {
-    file_commits(&root, &path, skip, limit)
+    file_commits(
+        &root,
+        &path,
+        rev.as_deref(),
+        since.as_deref(),
+        until.as_deref(),
+        skip,
+        limit,
+    )
 }
 
 #[tauri::command(async)]
-pub fn repo_git_tree(root: String, dir: Option<String>) -> Result<Value, String> {
-    tree(&root, dir.as_deref())
+pub fn repo_git_tree(root: String, dir: Option<String>, rev: Option<String>) -> Result<Value, String> {
+    tree(&root, dir.as_deref(), rev.as_deref())
 }
 
 #[tauri::command(async)]
@@ -82,12 +114,19 @@ pub fn repo_git_patch(root: String, base: String, target: String, path: String) 
 
 // ---------- 实现 ----------
 
-/// 打开一个仓库：返回根目录、当前分支与 HEAD。
+/// 打开一个仓库：返回仓库根、选中目录相对仓库根的位置、当前分支与 HEAD。
 ///
-/// 选中的可以是仓库里的任意子目录；返回的 `root` 才是仓库根，之后的命令都用它。
+/// 选中的可以是仓库里的任意子目录；`root` 才是仓库根，之后的命令都用它。
+/// `scope` 是选中目录相对仓库根的位置（`--show-prefix`，空串 = 仓库根本身）：
+/// 左上角那棵目录树只展开这个子树，历史 / 补丁仍按整个仓库解释路径。
 /// 空仓库（还没有第一次提交）也照常打开，`empty: true`、`head` 为空。
 pub fn open(path: &str) -> Result<Value, String> {
+    let dir = check_dir(path)?;
     let root = repo_root(path)?;
+    // 在用户选中的那个目录里问「我相对仓库根在哪」：git 会带上结尾的 `/`，仓库根是空串
+    let scope = run_ok(&["rev-parse", "--show-prefix"], &dir, "rev-parse")
+        .map(|text| text.trim().trim_end_matches('/').to_string())
+        .unwrap_or_default();
 
     let head = run(&["rev-parse", "--verify", "HEAD"], Some(&root), GIT_TIMEOUT)?;
     let empty = !head.ok();
@@ -116,6 +155,7 @@ pub fn open(path: &str) -> Result<Value, String> {
     Ok(json!({
         "root": root_text,
         "name": name,
+        "scope": scope,
         "head": hash,
         "shortHead": short,
         "branch": branch,
@@ -124,18 +164,61 @@ pub fn open(path: &str) -> Result<Value, String> {
     }))
 }
 
-/// 当前分支的提交列表（`HEAD`，不跟别的分支混在一起）。
-pub fn commits(root: &str, skip: Option<u32>, limit: Option<u32>) -> Result<Value, String> {
+/// 本地分支清单（`refs/heads` 里的短名），最近提交的排在前面。
+///
+/// 这是「只读浏览分支」的入口：选中的分支只决定 `log` / `ls-tree` 从哪条 ref 取，
+/// 不切工作区。`for-each-ref` 在空仓库上也照常回空清单。
+pub fn branches(root: &str) -> Result<Value, String> {
     let root = repo_root(root)?;
+    let text = run_ok(
+        &[
+            "for-each-ref",
+            "--sort=-committerdate",
+            "--format=%(refname)",
+            "refs/heads",
+        ],
+        &root,
+        "for-each-ref",
+    )?;
+
+    let mut branches: Vec<Value> = Vec::new();
+    for line in text.lines() {
+        let name = line.trim();
+        let Some(short) = name.strip_prefix("refs/heads/") else {
+            continue;
+        };
+        if !short.is_empty() {
+            branches.push(json!(short));
+        }
+    }
+    Ok(json!({ "branches": branches }))
+}
+
+/// 一条分支的提交列表（`rev` 为空时是 `HEAD`，不跟别的分支混在一起）。
+/// `since` / `until` 是界面选的那两天（`YYYY-MM-DD`，本地时区）：补成当天 00:00:00 ~ 23:59:59。
+pub fn commits(
+    root: &str,
+    rev: Option<&str>,
+    since: Option<&str>,
+    until: Option<&str>,
+    skip: Option<u32>,
+    limit: Option<u32>,
+) -> Result<Value, String> {
+    let root = repo_root(root)?;
+    let rev = rev_spec(rev)?;
+    let since = check_date("开始日期", since)?;
+    let until = check_date("结束日期", until)?;
+    let since_arg = since.map(|date| format!("--since={date} 00:00:00"));
+    let until_arg = until.map(|date| format!("--until={date} 23:59:59"));
     let skip = skip.unwrap_or(0).min(SKIP_MAX);
     let limit = clamp_limit(limit);
     // 多取一条只用来判断「后面还有没有」；--skip 由 git 先跳，--max-count 限制的是跳完之后的条数
     let max = format!("--max-count={}", limit + 1);
     let skip_arg = format!("--skip={skip}");
-    let args = [
+    let mut args = vec![
         "--literal-pathspecs",
         "log",
-        "HEAD",
+        rev.as_str(),
         "--date-order",
         "--no-color",
         "--no-show-signature",
@@ -143,12 +226,18 @@ pub fn commits(root: &str, skip: Option<u32>, limit: Option<u32>) -> Result<Valu
         skip_arg.as_str(),
         "--format=%H%x1f%at%x1f%an%x1f%ae%x1f%P%x1f%D%x1f%s",
     ];
+    if let Some(arg) = since_arg.as_deref() {
+        args.push(arg);
+    }
+    if let Some(arg) = until_arg.as_deref() {
+        args.push(arg);
+    }
     let outcome = run(&args, Some(&root), GIT_TIMEOUT)?;
     if outcome.timed_out {
         return Err("读取提交记录超时".into());
     }
     if !outcome.ok() {
-        if is_empty_repo(&outcome.stdout, &outcome.stderr) {
+        if rev == "HEAD" && is_empty_repo(&outcome.stdout, &outcome.stderr) {
             return Ok(json!({ "commits": [], "hasMore": false }));
         }
         return Err(describe("log", &outcome));
@@ -164,34 +253,48 @@ pub fn commits(root: &str, skip: Option<u32>, limit: Option<u32>) -> Result<Valu
 pub fn file_commits(
     root: &str,
     path: &str,
+    rev: Option<&str>,
+    since: Option<&str>,
+    until: Option<&str>,
     skip: Option<u32>,
     limit: Option<u32>,
 ) -> Result<Value, String> {
     let root = repo_root(root)?;
     let path = check_rel_path(path, false)?;
+    let rev = rev_spec(rev)?;
+    let since = check_date("开始日期", since)?;
+    let until = check_date("结束日期", until)?;
+    let since_arg = since.map(|date| format!("--since={date} 00:00:00"));
+    let until_arg = until.map(|date| format!("--until={date} 23:59:59"));
     let skip = skip.unwrap_or(0).min(SKIP_MAX);
     let limit = clamp_limit(limit);
     let max = format!("--max-count={}", limit + 1);
     let skip_arg = format!("--skip={skip}");
-    let args = [
+    let mut args = vec![
         "--literal-pathspecs",
         "log",
-        "HEAD",
+        rev.as_str(),
         "--date-order",
         "--no-color",
         "--no-show-signature",
         max.as_str(),
         skip_arg.as_str(),
         "--format=%H%x1f%at%x1f%an%x1f%ae%x1f%P%x1f%D%x1f%s",
-        "--",
-        path.as_str(),
     ];
+    if let Some(arg) = since_arg.as_deref() {
+        args.push(arg);
+    }
+    if let Some(arg) = until_arg.as_deref() {
+        args.push(arg);
+    }
+    args.push("--");
+    args.push(path.as_str());
     let outcome = run(&args, Some(&root), GIT_TIMEOUT)?;
     if outcome.timed_out {
         return Err("读取文件历史超时".into());
     }
     if !outcome.ok() {
-        if is_empty_repo(&outcome.stdout, &outcome.stderr) {
+        if rev == "HEAD" && is_empty_repo(&outcome.stdout, &outcome.stderr) {
             return Ok(json!({ "commits": [], "hasMore": false }));
         }
         return Err(describe("log", &outcome));
@@ -203,19 +306,34 @@ pub fn file_commits(
     Ok(json!({ "commits": commits, "hasMore": has_more }))
 }
 
-/// 一个目录的内容（`HEAD` 那一版）。根目录传空串。
-pub fn tree(root: &str, dir: Option<&str>) -> Result<Value, String> {
+/// 一条分支上某个目录的内容（`rev` 为空时是 `HEAD`）。根目录传空串。
+pub fn tree(root: &str, dir: Option<&str>, rev: Option<&str>) -> Result<Value, String> {
     let root = repo_root(root)?;
     let dir = check_rel_path(dir.unwrap_or_default(), true)?;
+    let rev = rev_spec(rev)?;
     // 空仓库没有 HEAD：照常回空清单，别把「还没有第一次提交」显示成读取失败
-    let head = run(&["rev-parse", "--verify", "HEAD"], Some(&root), GIT_TIMEOUT)?;
-    if !head.ok() {
-        return Ok(json!({ "entries": [], "truncated": false }));
+    if rev == "HEAD" {
+        let head = run(&["rev-parse", "--verify", "HEAD"], Some(&root), GIT_TIMEOUT)?;
+        if !head.ok() {
+            return Ok(json!({ "entries": [], "truncated": false }));
+        }
+    }
+    // 这个目录在当前看的这条分支上可能不存在（换分支后子目录没了）：
+    // 回空清单，别把「这一支没有这个目录」报成读取失败
+    if !dir.is_empty() {
+        let kind = run(
+            &["cat-file", "-t", &format!("{rev}:{dir}")],
+            Some(&root),
+            GIT_TIMEOUT,
+        )?;
+        if !kind.ok() || kind.stdout.trim() != "tree" {
+            return Ok(json!({ "entries": [], "truncated": false }));
+        }
     }
     let spec = if dir.is_empty() {
-        "HEAD".to_string()
+        rev
     } else {
-        format!("HEAD:{dir}")
+        format!("{rev}:{dir}")
     };
     let text = run_ok(&["ls-tree", "-z", "-l", spec.as_str()], &root, "ls-tree")?;
 
@@ -705,6 +823,50 @@ fn check_hash(value: &str) -> Result<String, String> {
     Ok(value)
 }
 
+/// 分支名 → 可以交给 git 的 ref。
+///
+/// 空串 = `HEAD`（当前分支）；其余一律拼成 `refs/heads/<name>`，所以即使名字长得像
+/// 命令行选项，也不会被当成选项。名字本身的合法性（`..`、`@{` 之类）交给 git 判断。
+fn rev_spec(rev: Option<&str>) -> Result<String, String> {
+    let name = rev.map(str::trim).filter(|value| !value.is_empty());
+    let Some(name) = name else {
+        return Ok("HEAD".to_string());
+    };
+    if name.starts_with('-')
+        || name.contains('\0')
+        || name.contains('\n')
+        || name.contains('\r')
+    {
+        return Err(format!("不是有效的分支名：{name}"));
+    }
+    Ok(format!("refs/heads/{name}"))
+}
+
+/// 界面选的那一天（`YYYY-MM-DD`）：只认日期形状，补成 00:00:00 / 23:59:59 的动作在调用方做。
+/// 日期本身合不合法由日历控件保证；这里只挡「把任意字符串拼进 git 参数」。
+fn check_date(label: &str, value: Option<&str>) -> Result<Option<String>, String> {
+    let Some(value) = value.map(str::trim).filter(|item| !item.is_empty()) else {
+        return Ok(None);
+    };
+    let bytes = value.as_bytes();
+    let digit = |index: usize| bytes.get(index).is_some_and(u8::is_ascii_digit);
+    let valid = bytes.len() == 10
+        && digit(0)
+        && digit(1)
+        && digit(2)
+        && digit(3)
+        && bytes[4] == b'-'
+        && digit(5)
+        && digit(6)
+        && bytes[7] == b'-'
+        && digit(8)
+        && digit(9);
+    if !valid {
+        return Err(format!("{label}只认 YYYY-MM-DD：{value}"));
+    }
+    Ok(Some(value.to_string()))
+}
+
 fn is_empty_repo(stdout: &str, stderr: &str) -> bool {
     let detail = format!("{stdout}\n{stderr}");
     detail.contains("does not have any commits") || detail.contains("unknown revision")
@@ -790,13 +952,14 @@ mod tests {
         }
         let root = repo.to_string_lossy().into_owned();
 
-        // 空仓库也能打开，只是没有 HEAD
+        // 空仓库也能打开，只是没有 HEAD；选中的就是仓库根，scope 为空
         let info = open(&root).unwrap();
         assert_eq!(info["empty"], json!(true));
         assert_eq!(info["head"], json!(""));
-        assert_eq!(commits(&root, None, None).unwrap()["commits"], json!([]));
+        assert_eq!(info["scope"], json!(""));
+        assert_eq!(commits(&root, None, None, None, None, None).unwrap()["commits"], json!([]));
         // 空仓库没有 HEAD：目录树回空清单，不是读取失败
-        assert_eq!(tree(&root, None).unwrap()["entries"], json!([]));
+        assert_eq!(tree(&root, None, None).unwrap()["entries"], json!([]));
 
         write(&repo, "a.txt", "one\n");
         let first = commit_all(&repo, "first");
@@ -808,15 +971,33 @@ mod tests {
         assert_eq!(info["empty"], json!(false));
         assert_eq!(info["head"], json!(second));
 
-        let page = commits(&root, Some(0), Some(1)).unwrap();
+        let page = commits(&root, None, None, None, Some(0), Some(1)).unwrap();
         assert_eq!(page["commits"].as_array().unwrap().len(), 1);
         assert_eq!(page["hasMore"], json!(true));
         assert_eq!(page["commits"][0]["hash"], json!(second));
         assert_eq!(page["commits"][0]["subject"], json!("second"));
 
-        let page = commits(&root, Some(1), Some(10)).unwrap();
+        let page = commits(&root, None, None, None, Some(1), Some(10)).unwrap();
         assert_eq!(page["commits"][0]["hash"], json!(first));
         assert_eq!(page["hasMore"], json!(false));
+
+        // 时间范围：未来 → 0 条；很早到现在 → 全量；不是 YYYY-MM-DD 直接报错
+        // （年份别写 2999：git 的 approxidate 认不出那么远的日期，会当成没给）
+        assert_eq!(
+            commits(&root, None, Some("2099-01-01"), None, None, None).unwrap()["commits"],
+            json!([])
+        );
+        let page = commits(
+            &root,
+            None,
+            Some("2000-01-01"),
+            Some("2099-12-31"),
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(page["commits"].as_array().unwrap().len(), 2);
+        assert!(commits(&root, None, Some("2026/01/01"), None, None, None).is_err());
 
         cleanup(&repo);
     }
@@ -832,18 +1013,24 @@ mod tests {
         commit_all(&repo, "init");
         let root = repo.to_string_lossy().into_owned();
 
-        let page = tree(&root, Some("")).unwrap();
+        let page = tree(&root, Some(""), None).unwrap();
         let entries = page["entries"].as_array().unwrap();
         assert_eq!(entries[0]["type"], json!("dir"));
         assert_eq!(entries[0]["name"], json!("src"));
         assert!(entries.iter().any(|entry| entry["name"] == json!("说明.md")));
 
-        let page = tree(&root, Some("src")).unwrap();
+        let page = tree(&root, Some("src"), None).unwrap();
         assert_eq!(page["entries"][0]["path"], json!("src/main.rs"));
         assert_eq!(page["entries"][0]["type"], json!("file"));
 
-        assert!(tree(&root, Some("../")).is_err());
-        assert!(tree(&root, Some("C:/Windows")).is_err());
+        // 选中子目录打开：scope 是它相对仓库根的位置（目录树只展开这个子树）
+        let sub = repo.join("src");
+        let info = open(&sub.to_string_lossy()).unwrap();
+        assert_eq!(info["scope"], json!("src"));
+        assert_eq!(info["empty"], json!(false));
+
+        assert!(tree(&root, Some("../"), None).is_err());
+        assert!(tree(&root, Some("C:/Windows"), None).is_err());
 
         cleanup(&repo);
     }
@@ -862,27 +1049,27 @@ mod tests {
         let third = commit_all(&repo, "third");
         let root = repo.to_string_lossy().into_owned();
 
-        let page = file_commits(&root, "a.txt", None, None).unwrap();
+        let page = file_commits(&root, "a.txt", None, None, None, None, None).unwrap();
         let commits = page["commits"].as_array().unwrap();
         assert_eq!(commits.len(), 2);
         assert_eq!(commits[0]["hash"], json!(third));
         assert_eq!(commits[1]["hash"], json!(first));
         assert_eq!(page["hasMore"], json!(false));
 
-        let page = file_commits(&root, "a.txt", Some(1), Some(1)).unwrap();
+        let page = file_commits(&root, "a.txt", None, None, None, Some(1), Some(1)).unwrap();
         assert_eq!(page["commits"].as_array().unwrap().len(), 1);
         assert_eq!(page["commits"][0]["hash"], json!(first));
 
         // 文件名里的 [ ] 是字面字符，不是 pathspec 通配符（--literal-pathspecs）
         write(&repo, "odd[1].txt", "x\n");
         let odd = commit_all(&repo, "odd name");
-        let page = file_commits(&root, "odd[1].txt", None, None).unwrap();
+        let page = file_commits(&root, "odd[1].txt", None, None, None, None, None).unwrap();
         assert_eq!(page["commits"][0]["hash"], json!(odd));
         let p = patch(&root, "", &odd, "odd[1].txt").unwrap();
         assert!(p["patch"].as_str().unwrap().contains("+x"));
 
-        assert!(file_commits(&root, "../a.txt", None, None).is_err());
-        assert!(file_commits(&root, "C:/a.txt", None, None).is_err());
+        assert!(file_commits(&root, "../a.txt", None, None, None, None, None).is_err());
+        assert!(file_commits(&root, "C:/a.txt", None, None, None, None, None).is_err());
 
         cleanup(&repo);
     }
@@ -954,6 +1141,70 @@ mod tests {
         assert!(files.iter().any(|file| file["path"] == json!("b.txt")
             && file["status"] == json!("A")));
         assert_eq!(result["filesTruncated"], json!(false));
+
+        cleanup(&repo);
+    }
+
+    #[test]
+    fn branches_browse_history_and_tree_without_switching() {
+        let repo = temp_repo("branches");
+        if !repo.exists() {
+            return;
+        }
+        write(&repo, "a.txt", "one\n");
+        let first = commit_all(&repo, "first");
+        let root = repo.to_string_lossy().into_owned();
+        let current = open(&root).unwrap()["branch"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        // 在当前这一点上拉一条 dev，再让当前分支往前走
+        crate::sync::run_git(&["branch", "dev"], Some(&repo), GIT_TIMEOUT).unwrap();
+        write(&repo, "b.txt", "b\n");
+        let second = commit_all(&repo, "second");
+
+        let list = branches(&root).unwrap();
+        let names: Vec<&str> = list["branches"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|value| value.as_str())
+            .collect();
+        assert!(names.contains(&current.as_str()));
+        assert!(names.contains(&"dev"));
+
+        // dev 停在 first：历史与目录树都看不到 second 的提交 / b.txt
+        let dev_commits = commits(&root, Some("dev"), None, None, None, None).unwrap();
+        assert_eq!(dev_commits["commits"].as_array().unwrap().len(), 1);
+        assert_eq!(dev_commits["commits"][0]["hash"], json!(first));
+        let dev_tree = tree(&root, Some(""), Some("dev")).unwrap();
+        assert!(!dev_tree["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|entry| entry["name"] == json!("b.txt")));
+        // 这条分支上没有的目录（换分支后子目录可能就没了）回空清单，不是读取失败
+        assert_eq!(
+            tree(&root, Some("no-such-dir"), Some("dev")).unwrap()["entries"],
+            json!([])
+        );
+
+        // 当前分支照旧看到 second
+        let head_commits = commits(&root, None, None, None, None, None).unwrap();
+        assert_eq!(head_commits["commits"][0]["hash"], json!(second));
+
+        // 文件历史也认分支：dev 上的 a.txt 只有 first 这一笔
+        let dev_a = file_commits(&root, "a.txt", Some("dev"), None, None, None, None).unwrap();
+        assert_eq!(dev_a["commits"].as_array().unwrap().len(), 1);
+        assert_eq!(dev_a["commits"][0]["hash"], json!(first));
+
+        // 分支名拼进 refs/heads/，不接受选项形状；不存在的分支照实报错
+        assert!(commits(&root, Some("--all"), None, None, None, None).is_err());
+        assert!(commits(&root, Some("no-such-branch"), None, None, None, None).is_err());
+
+        // 浏览分支不切工作区：HEAD 仍在原来那条分支
+        assert_eq!(open(&root).unwrap()["branch"], json!(current));
 
         cleanup(&repo);
     }

@@ -44,7 +44,7 @@ pub fn token_store() -> &'static JsonStore {
     TOKEN.get_or_init(|| JsonStore::new(paths::token_file, "保存 token 用量数据"))
 }
 
-/// 工作日志单独一份文件：它**不进同步仓库**，只在本机读写（见 paths.rs 的说明）
+/// 工作日志单独一份文件：本机读写是权威；多机共享走 `work_log_sync_*` 的分片同步（见 paths.rs 与 sync.rs）
 pub fn work_log_store() -> &'static JsonStore {
     WORK_LOG.get_or_init(|| JsonStore::new(paths::work_log_file, "保存工作日志"))
 }
@@ -112,7 +112,7 @@ pub fn token_save(value: Value) {
     token_store().schedule();
 }
 
-// ---------- 工作日志（本地，不进同步仓库） ----------
+// ---------- 工作日志（本机文件；多机共享走分片同步） ----------
 
 #[tauri::command]
 pub fn work_log_load() -> Value {
@@ -128,8 +128,8 @@ pub fn work_log_save(value: Value) {
 /// 读一个项目仓库的提交记录（只读、本地；工作日志的「从提交生成」用）。
 /// 会起 git 子进程，异步执行 —— 阻塞在主线程上会把窗口消息循环一起堵住。
 #[tauri::command(async)]
-pub fn project_git_log(dir: String, since: Option<i64>) -> Result<Value, String> {
-    crate::project_git::log(&dir, since)
+pub fn project_git_log(dir: String, since: Option<i64>, until: Option<i64>) -> Result<Value, String> {
+    crate::project_git::log(&dir, since, until)
 }
 
 // ---------- 笔记（用户自己挑的一个文件夹，见 notes.rs） ----------
@@ -732,6 +732,27 @@ pub fn activity_sync_shards(repo: String, device: String) -> Result<Vec<Value>, 
     crate::sync::read_activity_shards(&repo, &device)
 }
 
+/// 把本机的工作日志分片推进同步仓库：`work-log/<设备id>.json`
+/// （条目 + 删除墓碑；只写自己那份，单写者）。
+#[tauri::command(async)]
+pub fn work_log_sync_publish(repo: String, device: String, shard: Value) -> Result<Value, String> {
+    if repo.trim().is_empty() {
+        return Err("没有配置同步仓库".into());
+    }
+    crate::sync::publish_work_log(&repo, &device, &shard)
+}
+
+/// 拉最新克隆后读别的机器推上来的工作日志分片（本机那份跳过）。
+/// 原始 JSON 回来，收敛与按 id 合并由渲染层做。
+#[tauri::command(async)]
+pub fn work_log_sync_pull(repo: String, device: String) -> Result<Vec<Value>, String> {
+    if repo.trim().is_empty() {
+        return Err("没有配置同步仓库".into());
+    }
+    crate::sync::refresh_clone(&repo)?;
+    crate::sync::read_work_log_shards(&repo, &device)
+}
+
 /// 把本机的外观配置（theme.json 整份副本）单独写进同步仓库并推送；
 /// 设置界面「从别的机器取外观」旁的「同步一次」走它（且只有它 —— 没有自动同步）。
 /// 返回 `{ changed, pushed, log }`。
@@ -856,11 +877,11 @@ pub fn zentao_products(
     crate::zentao::products(&state, &session_id)
 }
 
-// 禅道窗口（右上角那颗图标与通知点击都走它）。创建窗口不能在同步命令里跑。
+// 禅道（右上角那颗图标与通知点击都走它）：交给系统浏览器打开部署根。
 
 #[tauri::command(async)]
-pub fn zentao_open_window(app: tauri::AppHandle) -> Result<(), String> {
-    crate::zentao::open_window(&app)
+pub fn zentao_open_site() -> Result<(), String> {
+    crate::zentao::open_site()
 }
 
 // ---------- 系统能力 ----------

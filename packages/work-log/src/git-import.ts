@@ -4,17 +4,17 @@
  * 口径（与工作日志本身一致）：
  *  - **一个项目一天一条**：一天里的多个提交合成一条 markdown 列表，时间轴的最小刻度仍然是天；
  *  - **只收自己的提交**：仓库配了 `user.email` 时按它过滤（读不到身份就不过滤，宁可多收）；
- *  - **按作者时间落在本地时区的哪一天**分组，而不是 git 的提交时间（rebase / cherry-pick 之后
+ *  - **只收选中的日期范围**：日期范围由用户在弹窗里选（默认今天，可快捷选今天 / 昨天 / 本周），
+ *    按作者时间落在本地时区的哪一天判断（不是 git 的提交时间 —— rebase / cherry-pick 之后
  *    两者会差很远，而用户记的是「我那天写了什么」）；
- *  - **已导入过的提交不再写**：来源哈希记在 `WorkLogEntry.source.commits` 里，哪怕中间换了范围
+ *  - **已导入过的提交不再写**：来源哈希记在 `WorkLogEntry.source.commits` 里，哪怕中间换了日期
  *    再点一次「从提交生成」，同一笔提交也只出现一次。
  *
  * 这里只产出草稿（预览里可以改、可以取消勾选），真正落盘在适配层的 `importGitDrafts`。
  */
 
-import type { WorkLogEntry, WorkRange } from './work-log'
+import type { WorkLogEntry } from './work-log'
 import { dayKey } from '@workbench/core'
-import { rangeBounds } from './work-log'
 
 /** 宿主侧读回来的一条提交；`time` 已是毫秒（作者时间） */
 export interface GitCommit {
@@ -105,17 +105,17 @@ export function parseGitCommitLog(raw: unknown): GitCommitLog {
 /**
  * 按提交铺出草稿。
  *
- * 范围用的是工作页顶部那几档（`todo` 不是时段，调用方不该把这一档传进来）。
+ * `from` / `to` 是弹窗里选的日期范围（本地日期键，含两端）：只有作者时间落在这个范围里的
+ * 提交才会进草稿，别的日期一律丢掉。宿主侧的 `--since` / `--until` 只是粗筛
+ * （按提交时间算，两端还会各放一天），真正的日期边界在这里按本地时区认。
  * 分组键是「项目 + 本地日期」；组内按提交时间从早到晚排，读起来是一条流水。
  */
 export function buildGitDrafts(
   inputs: readonly GitWorkLogInput[],
-  range: Exclude<WorkRange, 'todo'>,
-  now: number,
+  from: string,
+  to: string,
   entries: readonly WorkLogEntry[],
 ): GitWorkLogDraft[] {
-  const { from, to } = rangeBounds(range, now)
-
   // 已经导入过的哈希（按项目分：同一个仓库被两个项目指向时，各自该有自己的记录）
   const imported = new Map<string, Set<string>>()
   // 同项目同日已有生成记录时，新提交接到它后面（有多条时认最近改过的那条）

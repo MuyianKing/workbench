@@ -18,9 +18,10 @@ pub const DATA_FILE: &str = "workbench-data.json";
 pub const TOKEN_USAGE_FILE: &str = "token-usage.json";
 /// 主题文件：外观设置 + 首页布局（见 packages/appearance/src/theme.ts）
 pub const THEME_FILE: &str = "theme.json";
-/// 工作日志（见 packages/work-log/src/work-log.ts）。**只在本机**：不进同步仓库、也不进任何云端
+/// 工作日志（见 packages/work-log/src/work-log.ts）。本机这份是权威；配了同步仓库时
+/// 另按设备推一份 `work-log/<设备id>.json`（单写者分片，合并规则在 packages/work-log/src/work-log-sync.ts）
 pub const WORK_LOG_FILE: &str = "work-log.json";
-/// AI 热点缓存（见 packages/ai/src/ai-news.ts）。与工作日志同一待遇：只在本机、不进同步仓库
+/// AI 热点缓存（见 packages/ai/src/ai-news.ts）。只在本机、不进同步仓库
 pub const AI_NEWS_FILE: &str = "ai-news.json";
 /// ETF 资金流缓存（见 packages/etf/src/etf.ts）：份额 / 净值 / 指数的本地回填。
 /// 本机这份是权威；开同步时另推一份 `etf/<设备id>.json` 进仓库给别的机器复用
@@ -32,7 +33,7 @@ pub const VAULT_FILE: &str = "vault.json";
 /// 最大 UID，外加上一轮检查的时间。只是通知用的记账，**不进同步仓库**
 pub const MAIL_WATCH_FILE: &str = "mail-watch.json";
 /// 钉图的记账文件（见 pin.rs）：哪些图还钉在屏幕上、各自在哪儿、多大、多透明。
-/// 与工作日志同一待遇：只对本机成立（位置是这块屏的坐标），不进同步仓库
+/// 与钉图同一待遇：只对本机成立（位置是这块屏的坐标），不进同步仓库
 pub const PINS_FILE: &str = "pins.json";
 /// 悬浮球的记账文件（见 ball.rs）：贴在哪一侧、纵向在哪儿。
 /// 与钉图同一待遇：只对本机成立，不进同步仓库
@@ -71,6 +72,9 @@ pub(crate) const ETF_SYNC_DIR: &str = "etf";
 /// 克隆里放 **活跃度账本**的子目录名：一台机器一个文件（日期 → 各来源次数，只有计数、没有明细）。
 /// 读的时候按天求和，见 packages/core/src/activity.ts 的 mergeActivityBreakdowns
 pub(crate) const ACTIVITY_SYNC_DIR: &str = "activity";
+/// 克隆里放 **工作日志** 的子目录名：一台机器一个文件（条目 + 删除墓碑）。
+/// 读回来按 id 做后写胜出并写回本机，见 packages/work-log/src/work-log-sync.ts
+pub(crate) const WORK_LOG_SYNC_DIR: &str = "work-log";
 /// 网关（WorkBuddy 反代）的目录名。它自带一层完整结构：账号、用量、日志都在里面，
 /// 不跟工作台自己的数据文件混在一起 —— 那是一整套独立的运行时状态
 const GATEWAY_DIR: &str = "wb-gateway";

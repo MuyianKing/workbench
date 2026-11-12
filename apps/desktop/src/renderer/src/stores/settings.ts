@@ -1,7 +1,7 @@
 import type { AccentInkMode, CardPlacement, ColumnId, HomeCardId, RowId, RowTarget, ThemeConfig, ViewId } from '@workbench/appearance'
 import type { ThemeOrigin } from '@/theme-transition'
 import type { AppSettings, BuiltinWallpaper, EffectiveTheme, Result, SyncDeviceInfo, ThemeSource, TokenUsageResult, TopBarStyle } from '@/types'
-import { addColumn as addColumnTo, clampAiTreeWidth, clampBackgroundOpacity, clampCardGap, clampCardOpacity, clampColumnWidth, clampKbTreeWidth, clampMailListWidth, clampNoteTreeWidth, clampRowHeight, clampVideoTreeWidth, COLUMN_WIDTH_DEFAULT, DEFAULT_THEME, moveCard as placeCard, setColumnWidths as placeColumnWidths, removeColumn as removeColumnFrom, rowHeightMin, rowOf, sanitizeAccentColor, sanitizeAccentInkMode, sanitizeTheme, VIEW_LABELS } from '@workbench/appearance'
+import { addColumn as addColumnTo, clampAiTreeWidth, clampBackgroundOpacity, clampCardGap, clampCardOpacity, clampColumnWidth, clampGitFilesWidth, clampGitHistoryWidth, clampGitTreeWidth, clampKbTreeWidth, clampMailListWidth, clampNoteTreeWidth, clampRowHeight, clampVideoTreeWidth, COLUMN_WIDTH_DEFAULT, DEFAULT_THEME, moveCard as placeCard, setColumnWidths as placeColumnWidths, removeColumn as removeColumnFrom, rowHeightMin, rowOf, sanitizeAccentColor, sanitizeAccentInkMode, sanitizeTheme, VIEW_LABELS } from '@workbench/appearance'
 
 import { clampVideoFloatHeight, clampVideoFloatPercent, clampVideoFloatWidth } from '@workbench/video'
 import { defineStore } from 'pinia'
@@ -560,6 +560,34 @@ export const useSettingsStore = defineStore('settings', () => {
   }
 
   /**
+   * Git 页三处栏宽（文件树 / 提交列表 / 改动文件清单）：与笔记 / 视频树同一套做法 ——
+   * 拖动时只改本地让界面跟手，松手才整份落盘（它们也在 theme.json 里）。
+   */
+  function setGitTreeWidth(width: number): void {
+    themeConfig.value.gitTreeWidth = clampGitTreeWidth(width)
+  }
+
+  async function commitGitTreeWidth(): Promise<void> {
+    await saveThemeConfig({ gitTreeWidth: themeConfig.value.gitTreeWidth })
+  }
+
+  function setGitHistoryWidth(width: number): void {
+    themeConfig.value.gitHistoryWidth = clampGitHistoryWidth(width)
+  }
+
+  async function commitGitHistoryWidth(): Promise<void> {
+    await saveThemeConfig({ gitHistoryWidth: themeConfig.value.gitHistoryWidth })
+  }
+
+  function setGitFilesWidth(width: number): void {
+    themeConfig.value.gitFilesWidth = clampGitFilesWidth(width)
+  }
+
+  async function commitGitFilesWidth(): Promise<void> {
+    await saveThemeConfig({ gitFilesWidth: themeConfig.value.gitFilesWidth })
+  }
+
+  /**
    * AI 助手页左栏（项目 → 会话那棵树）收起 / 展开：收起后对话占满整行，
    * 入口在对话区左上角那颗按钮上。落 theme.json（与视频树收起同一套做法）。
    */
@@ -854,6 +882,12 @@ export const useSettingsStore = defineStore('settings', () => {
     commitAiTreeWidth,
     setMailListWidth,
     commitMailListWidth,
+    setGitTreeWidth,
+    commitGitTreeWidth,
+    setGitHistoryWidth,
+    commitGitHistoryWidth,
+    setGitFilesWidth,
+    commitGitFilesWidth,
     setAiTreeCollapsed,
     setKbTreeWidth,
     commitKbTreeWidth,

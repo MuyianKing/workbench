@@ -18,6 +18,7 @@ import { clampTerminalButtonTop, pickAppearance, sanitizeAppearanceSettings, san
 import { sanitizeAccount } from '@workbench/auth'
 import { CAPTURE_HOTKEY_DEFAULT, sanitizeCaptureHotkey, sanitizeCaptureMagnifier, sanitizeCapturePinOpacity, sanitizeCaptureSaveDir } from '@workbench/capture'
 import { pruneDays, sanitizeActivity, sanitizeCommands, sanitizeIconCache, sanitizeProjectSort, sanitizeQuickApps } from '@workbench/core'
+import { sanitizeGitRepoRoot, sanitizeRepoHistory } from '@workbench/git'
 import { sanitizeKbRawSources } from '@workbench/kb'
 import { sanitizeMailAccounts, sanitizeMailBulkSenders, sanitizeMailContacts, sanitizeMailPollMinutes } from '@workbench/mail'
 import { sanitizeImageRepo, sanitizeNoteHistory, sanitizeNoteRoot, sanitizeNoteTreeExpanded } from '@workbench/notes'
@@ -25,7 +26,7 @@ import { sanitizeSyncRepo } from '@workbench/usage'
 import { sanitizeVaultGroupNames } from '@workbench/vault'
 import { sanitizeVideoHistory, sanitizeVideoLastRel, sanitizeVideoRoot, sanitizeVideoTreeExpanded } from '@workbench/video'
 import { sanitizeWeatherCity } from '@workbench/weather'
-import { sanitizeWorkRange, sanitizeWorkSort } from '@workbench/work-log'
+import { sanitizeWorkRange, sanitizeWorkRangeBounds, sanitizeWorkSort } from '@workbench/work-log'
 import { sanitizeZentaoPollMinutes } from '@workbench/zentao'
 import { DEFAULT_SETTINGS } from './types'
 
@@ -92,6 +93,9 @@ export function sanitizeSettings(raw: unknown): StoredSettings {
   // 留一个控件认不出的值在那儿，界面会是「一个都没选中」的样子
   value.projectSort = sanitizeProjectSort(value.projectSort)
   value.workRange = sanitizeWorkRange(value.workRange)
+  // 自定义区间的两端：都得是合法日期键，反着的换回来；缺一端 / 认不出就当没选过
+  const customRange = value.workRangeCustom as { from?: unknown, to?: unknown } | null | undefined
+  value.workRangeCustom = sanitizeWorkRangeBounds(customRange?.from, customRange?.to)
   value.workSort = sanitizeWorkSort(value.workSort)
   // 摊开的文件夹：路径要拿去和树里的节点比对，得先统一分隔符、去掉越界的项
   value.noteTreeExpanded = sanitizeNoteTreeExpanded(value.noteTreeExpanded)
@@ -110,9 +114,12 @@ export function sanitizeSettings(raw: unknown): StoredSettings {
   // 知识库文件夹（本机挑的一个目录，一个独立项目的根）：老数据文件里没有，默认空串 = 还没选过。
   // 与笔记 / 技能同一条收敛 —— 它同样要拿去拼文件路径
   value.kbDir = sanitizeNoteRoot(value.kbDir)
-  // Git 页上次打开的仓库根：老数据文件里没有，默认空串 = 还没打开过。
+  // Git 页上次打开的那个文件夹（可能是仓库里的子目录）：老数据文件里没有，默认空串 = 还没打开过。
   // 与上面几个目录同一条收敛 —— 它要拿去起 git 子进程
-  value.gitRepo = sanitizeNoteRoot(value.gitRepo)
+  value.gitRepo = sanitizeGitRepoRoot(value.gitRepo)
+  // Git 页「最近打开的文件夹」（头部下拉）：老数据文件里没有，默认空清单；
+  // 手工改坏过、重复、超上限的都在这里收敛
+  value.gitRepos = sanitizeRepoHistory(value.gitRepos)
   // 原始数据的来源映射（来源名 → 本机一个文件夹）：老数据文件里没有，默认空清单 =
   // 一律读库里的 data/raw。与 kbDir 同一类 —— 路径只对本机成立，逐项收敛
   // （缺 root / 缺名字的丢掉、同名与同一个文件夹去重、指到知识库文件夹里的按没配处理）

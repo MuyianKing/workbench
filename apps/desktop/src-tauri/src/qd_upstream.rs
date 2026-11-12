@@ -58,7 +58,6 @@ pub const PATH_PLAN: &str = "/api/v2/user/plan";
 pub const PATH_CHECKIN_STATUS: &str = "/sash/api/v1/me/daily-check-in/status";
 pub const PATH_CHECKIN_CLAIM: &str = "/sash/api/v1/me/daily-check-in/claim";
 pub const PATH_CAMPAIGNS: &str = "/sash/api/v1/me/campaigns";
-pub const PATH_CREDIT_HEATMAP: &str = "/sash/api/v1/ai-conversations/credits-heatmap";
 
 /// 设备授权页。参数（challenge / nonce / client_id / machine_id / redirect_uri）
 /// 由 [`crate::qd_auth`] 拼上去。

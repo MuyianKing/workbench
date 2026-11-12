@@ -104,6 +104,13 @@ body.is-resizing-ai-preview * {
   user-select: none !important;
 }
 
+/* 拖 Git 页的三条栏宽把手：与笔记 / 视频 / AI 页同一副兜法（指针会扫过提交列表与补丁正文） */
+body.is-resizing-git-pane,
+body.is-resizing-git-pane * {
+  cursor: ew-resize !important;
+  user-select: none !important;
+}
+
 /* 沙箱 iframe 是另一个文档，指针一进它里面父窗口就收不到 pointermove、拖拽就断 ——
    拖动期间让它对指针透明（HTML 预览整栏都是它，必须放行），事件才到得了拖拽监听 */
 body.is-resizing-ai-preview iframe {
@@ -1479,6 +1486,76 @@ body.is-resizing-video-float * {
   display: block;
   color: var(--ink-3);
   font-size: var(--fs-micro);
+}
+
+/**
+ * Git 页头部的两个下拉（`popper-class` 见 GitView.vue）：仓库要放下「名字 + 路径」，
+ * 分支要放下「名字 + 当前 / 选中标记」。下拉挂在 body 上，组件的 scoped 样式够不着。
+ */
+.git-repo-menu {
+  max-width: 480px;
+}
+
+/* 项目可能很多：菜单自己滚，别顶出屏幕 */
+.git-repo-menu .el-dropdown-menu {
+  max-height: min(60vh, 420px);
+  overflow-y: auto;
+}
+
+/* 「项目 / 最近打开」两行分组名：只当分隔，不参与选择 */
+.git-repo-menu .el-dropdown-menu__item.repo-menu__label {
+  padding-top: var(--sp-1);
+  padding-bottom: 2px;
+  color: var(--ink-3);
+  font-size: var(--fs-meta);
+  cursor: default;
+  pointer-events: none;
+}
+
+.git-repo-menu .el-dropdown-menu__item,
+.git-branch-menu .el-dropdown-menu__item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.git-repo-menu .repo-item__name {
+  flex-shrink: 0;
+  color: var(--ink);
+}
+
+.git-repo-menu .repo-item__path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink-3);
+  font-size: var(--fs-meta);
+}
+
+.git-branch-menu .branch-item__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink);
+}
+
+.git-branch-menu .branch-item__tag {
+  flex-shrink: 0;
+  padding: 0 6px;
+  border-radius: var(--r-pill);
+  background: var(--bg-subtle);
+  color: var(--ink-3);
+  font-size: var(--fs-meta);
+}
+
+.git-repo-menu .repo-item__mark,
+.git-branch-menu .branch-item__mark {
+  flex-shrink: 0;
+  color: var(--el-color-primary);
 }
 
 @media (prefers-reduced-motion: reduce) {

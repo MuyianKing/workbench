@@ -1,6 +1,6 @@
 import type { WorkLogEntry, WorkLogStatus } from './work-log'
 import { describe, expect, it } from 'vitest'
-import { completedEntriesOn, createWorkLogEntry, dayMeta, DELETED_PROJECT_ID, emptyWorkLog, groupByProject, paginate, parseWorkLog, patchWorkLogEntry, rangeBounds, sanitizeWorkLogStatus, sanitizeWorkRange, sanitizeWorkSort, timelineOf, toggleWorkLogStatus, WORK_PAGE_DAYS, WORK_RANGE_DEFAULT, WORK_RANGES, WORK_SORT_DEFAULT, WORK_SORTS } from './work-log'
+import { completedEntriesOn, createWorkLogEntry, dayMeta, DELETED_PROJECT_ID, emptyWorkLog, groupByProject, paginate, parseWorkLog, patchWorkLogEntry, rangeBounds, sanitizeWorkLogStatus, sanitizeWorkRange, sanitizeWorkRangeBounds, sanitizeWorkSort, timelineOf, toggleWorkLogStatus, WORK_PAGE_DAYS, WORK_RANGE_DEFAULT, WORK_RANGES, WORK_SORT_DEFAULT, WORK_SORTS } from './work-log'
 
 /** 2026-09-15 是周二，本周 = 09-14（周一）~ 09-20（周日） */
 const NOW = new Date(2026, 8, 15, 10, 30).getTime()
@@ -79,6 +79,29 @@ describe('parseWorkLog', () => {
     )
     expect('projectId' in file.entries[0]).toBe(false)
   })
+
+  it('v1 老文件照常读：补上空墓碑，版本升到 2', () => {
+    const file = parseWorkLog({ version: 1, entries: [{ id: 'a', date: '2026-09-15', content: '甲' }] }, uuid, NOW)
+    expect(file.version).toBe(2)
+    expect(file.tombstones).toEqual([])
+    expect(file.entries.map(item => item.id)).toEqual(['a'])
+  })
+
+  it('同 id 的条目与墓碑只留新的那份', () => {
+    const deleted = parseWorkLog({
+      entries: [{ id: 'x', date: '2026-09-15', content: '甲', createdAt: NOW - 100, updatedAt: NOW - 100 }],
+      tombstones: [{ id: 'x', updatedAt: NOW, by: 'dev-a' }],
+    }, uuid, NOW)
+    expect(deleted.entries).toEqual([])
+    expect(deleted.tombstones.map(item => item.id)).toEqual(['x'])
+
+    const editedAfter = parseWorkLog({
+      entries: [{ id: 'x', date: '2026-09-15', content: '甲', createdAt: NOW - 100, updatedAt: NOW }],
+      tombstones: [{ id: 'x', updatedAt: NOW - 50, by: 'dev-a' }],
+    }, uuid, NOW)
+    expect(editedAfter.entries.map(item => item.id)).toEqual(['x'])
+    expect(editedAfter.tombstones).toEqual([])
+  })
 })
 
 describe('rangeBounds', () => {
@@ -100,6 +123,24 @@ describe('rangeBounds', () => {
     expect(rangeBounds('month', NOW)).toEqual({ from: '2026-09-01', to: '2026-09-30' })
     const leap = new Date(2024, 1, 10, 12, 0).getTime()
     expect(rangeBounds('month', leap)).toEqual({ from: '2024-02-01', to: '2024-02-29' })
+  })
+})
+
+describe('sanitizeWorkRangeBounds', () => {
+  it('合法两端原样留下；反着的换回来', () => {
+    expect(sanitizeWorkRangeBounds('2026-09-01', '2026-09-15'))
+      .toEqual({ from: '2026-09-01', to: '2026-09-15' })
+    expect(sanitizeWorkRangeBounds('2026-09-15', '2026-09-01'))
+      .toEqual({ from: '2026-09-01', to: '2026-09-15' })
+    expect(sanitizeWorkRangeBounds('2026-09-15', '2026-09-15'))
+      .toEqual({ from: '2026-09-15', to: '2026-09-15' })
+  })
+
+  it('缺一端 / 格式不对就当没选过', () => {
+    expect(sanitizeWorkRangeBounds('', '2026-09-15')).toBeNull()
+    expect(sanitizeWorkRangeBounds('2026-09-15', undefined)).toBeNull()
+    expect(sanitizeWorkRangeBounds('2026-9-1', '2026-09-15')).toBeNull()
+    expect(sanitizeWorkRangeBounds(7, null)).toBeNull()
   })
 })
 
@@ -127,6 +168,21 @@ describe('timelineOf', () => {
 
   it('没有记录时是空时间轴', () => {
     expect(timelineOf([], 'month', NOW)).toEqual([])
+  })
+
+  it('「自定义」档按给的两端收；没给区间时退回今天', () => {
+    expect(
+      timelineOf(entries, 'custom', NOW, { from: '2026-09-14', to: '2026-09-14' })
+        .map(group => group.day),
+    ).toEqual(['2026-09-14'])
+
+    expect(
+      timelineOf(entries, 'custom', NOW, { from: '2026-02-01', to: '2026-09-15' })
+        .map(group => group.day),
+    ).toEqual(['2026-09-15', '2026-09-14', '2026-08-31'])
+
+    // 认不出 / 没给区间时退回今天：界面上不会出现「一段没有边界的时间」
+    expect(timelineOf(entries, 'custom', NOW).map(group => group.day)).toEqual(['2026-09-15'])
   })
 
   it('「待办」档不分日期，只留还没做完的', () => {
@@ -210,6 +266,15 @@ describe('groupByProject', () => {
       'p1',
       'p2',
     ])
+  })
+
+  it('「自定义」档同样按日期收', () => {
+    const groups = groupByProject(entries, 'custom', NOW, projects, {
+      from: '2026-09-14',
+      to: '2026-09-15',
+    })
+    expect(groups.map(group => group.projectId)).toEqual(['p1', 'p2'])
+    expect(groups.flatMap(group => group.entries)).toHaveLength(3)
   })
 
   it('已删除的项目合并成一栏，未关联单独一栏，都排在已知项目之后', () => {
@@ -297,6 +362,22 @@ describe('createWorkLogEntry', () => {
     )
     expect(created?.status).toBe('done')
   })
+
+  it('写入设备 id 与项目名（有项目时才带名字）', () => {
+    const created = createWorkLogEntry(
+      { date: '2026-09-15', content: '甲', projectId: 'p1', projectName: ' 项目甲 ', by: 'dev-a' },
+      uuid,
+      NOW,
+    )
+    expect(created).toMatchObject({ projectId: 'p1', projectName: '项目甲', by: 'dev-a' })
+
+    const withoutProject = createWorkLogEntry(
+      { date: '2026-09-15', content: '甲', projectName: '项目甲', by: 'dev-a' },
+      uuid,
+      NOW,
+    )
+    expect(withoutProject && 'projectName' in withoutProject).toBe(false)
+  })
 })
 
 describe('状态', () => {
@@ -350,6 +431,30 @@ describe('patchWorkLogEntry', () => {
 
   it('日期非法时保持原日期', () => {
     expect(patchWorkLogEntry(base, { date: '后天' }, NOW).date).toBe('2026-09-15')
+  })
+
+  it('同一毫秒连改也保证 updatedAt 严格递增', () => {
+    const next = patchWorkLogEntry({ ...base, updatedAt: NOW }, { content: '新内容' }, NOW)
+    expect(next.updatedAt).toBe(NOW + 1)
+  })
+
+  it('项目名跟着项目一起改：换项目给名字、清项目连名字一起清', () => {
+    const withProject = { ...base, projectId: 'p1', projectName: '项目甲', by: 'dev-a' }
+
+    expect(patchWorkLogEntry(withProject, { projectId: 'p2', projectName: '项目乙' }, NOW))
+      .toMatchObject({ projectId: 'p2', projectName: '项目乙', by: 'dev-a' })
+
+    // 换了项目却没给名字（认不出的 id）：不拿旧项目的名字张冠李戴
+    expect(patchWorkLogEntry(withProject, { projectId: 'p2' }, NOW).projectName).toBeUndefined()
+
+    const cleared = patchWorkLogEntry(withProject, { projectId: null }, NOW)
+    expect('projectId' in cleared).toBe(false)
+    expect('projectName' in cleared).toBe(false)
+  })
+
+  it('没动项目时保留原来的项目名（编辑内容不会把它洗掉）', () => {
+    const withProject = { ...base, projectId: 'p1', projectName: '项目甲' }
+    expect(patchWorkLogEntry(withProject, { content: '新内容' }, NOW).projectName).toBe('项目甲')
   })
 })
 

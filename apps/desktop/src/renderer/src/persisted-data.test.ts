@@ -10,6 +10,13 @@ describe('git 页上次打开的仓库', () => {
     expect(sanitizeSettings({}).gitRepo).toBe('')
     expect(sanitizeSettings({ gitRepo: '  E:/repo/  ' }).gitRepo).toBe('E:/repo')
   })
+
+  it('最近打开清单为空数组，逐项收敛并去重', () => {
+    expect(sanitizeSettings({}).gitRepos).toEqual([])
+    expect(sanitizeSettings({ gitRepos: [' E:/repo/', 'e:\\repo\\', 'E:/other', '', 3] }).gitRepos)
+      .toEqual(['E:/repo', 'E:/other'])
+    expect(sanitizeSettings({ gitRepos: 'E:/repo' }).gitRepos).toEqual([])
+  })
 })
 
 describe('设置里那颗悬浮按钮的位置', () => {
@@ -43,6 +50,7 @@ describe('行为记忆那几项设置', () => {
     const value = sanitizeSettings({})
     expect(value.projectSort).toBe('recent')
     expect(value.workRange).toBe('today')
+    expect(value.workRangeCustom).toBeNull()
     expect(value.workSort).toBe('project')
     expect(value.noteTreeExpanded).toEqual([])
   })
@@ -51,11 +59,13 @@ describe('行为记忆那几项设置', () => {
     const value = sanitizeSettings({
       projectSort: 'name',
       workRange: 'month',
+      workRangeCustom: { from: '2026-09-01', to: '2026-09-15' },
       workSort: 'project',
       noteTreeExpanded: ['工作', '工作/周报'],
     })
     expect(value.projectSort).toBe('name')
     expect(value.workRange).toBe('month')
+    expect(value.workRangeCustom).toEqual({ from: '2026-09-01', to: '2026-09-15' })
     expect(value.workSort).toBe('project')
     expect(value.noteTreeExpanded).toEqual(['工作', '工作/周报'])
   })
@@ -64,11 +74,13 @@ describe('行为记忆那几项设置', () => {
     const value = sanitizeSettings({
       projectSort: 'size',
       workRange: 3,
+      workRangeCustom: { from: '2026-9-1', to: 3 },
       workSort: null,
       noteTreeExpanded: ['工作\\周报', '../越界', '', '工作/周报'],
     })
     expect(value.projectSort).toBe('recent')
     expect(value.workRange).toBe('today')
+    expect(value.workRangeCustom).toBeNull()
     expect(value.workSort).toBe('project')
     expect(value.noteTreeExpanded).toEqual(['工作/周报'])
   })

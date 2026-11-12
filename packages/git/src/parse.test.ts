@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   isCommitHash,
+  parseBranchList,
   parseCommitDetail,
   parseCommitPage,
   parseCompare,
@@ -41,12 +42,32 @@ describe('parseRepoInfo', () => {
     expect(info).toEqual({
       root: 'E:/work/demo',
       name: 'demo',
+      scope: '',
       head: HASH,
       shortHead: '',
       branch: '',
       detached: false,
       empty: false,
     })
+  })
+
+  it('选中子目录时的 scope 去掉首尾斜杠', () => {
+    expect(parseRepoInfo({ root: 'E:/work/demo', scope: ' code/anes/ ' })?.scope).toBe('code/anes')
+    expect(parseRepoInfo({ root: 'E:/work/demo', scope: '/code/' })?.scope).toBe('code')
+    expect(parseRepoInfo({ root: 'E:/work/demo' })?.scope).toBe('')
+  })
+})
+
+describe('parseBranchList', () => {
+  it('只留非空名字并去重', () => {
+    expect(parseBranchList({ branches: ['main', ' dev ', '', null, 'main'] })).toEqual({
+      branches: ['main', 'dev'],
+    })
+  })
+
+  it('缺字段时回空清单', () => {
+    expect(parseBranchList(null)).toEqual({ branches: [] })
+    expect(parseBranchList({ branches: 'main' })).toEqual({ branches: [] })
   })
 })
 

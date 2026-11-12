@@ -837,6 +837,7 @@ export const useProjectsStore = defineStore('projects', () => {
     setGroupFilter,
     setSortBy,
     filteredProjects,
+    orderedProjects,
     homeProjects,
     runningCount,
     drawerProjectId,

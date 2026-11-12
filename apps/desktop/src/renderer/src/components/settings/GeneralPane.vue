@@ -403,7 +403,7 @@ function saveHotkey(accelerator: string): void {
       </div>
 
       <!--
-        后台检查 / 通知失败时的原因。禅道窗口是远程页面，应用自己的话没地方贴在它上面，
+        后台检查 / 通知失败时的原因。禅道页面在系统浏览器里，应用自己的话没地方贴在它上面，
         所以这句话落在配置检查间隔的同一块里 —— 通知突然不响了，来这里看。
       -->
       <p v-if="zentao.error" class="row__error" role="alert">

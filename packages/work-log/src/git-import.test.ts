@@ -3,9 +3,6 @@ import type { WorkLogEntry } from './work-log'
 import { describe, expect, it } from 'vitest'
 import { appendGitContent, buildGitDrafts, mergeGitCommits, parseGitCommitLog } from './git-import'
 
-/** 2026-09-15 是周二，本周 = 09-14（周一）~ 09-20（周日） */
-const NOW = new Date(2026, 8, 15, 10, 30).getTime()
-
 function commit(
   hash: string,
   time: number,
@@ -52,8 +49,8 @@ describe('buildGitDrafts', () => {
           commit('aaa1111', new Date(2026, 8, 15, 9, 0).getTime(), '上午的改动'),
         ]),
       }],
-      'today',
-      NOW,
+      '2026-09-15',
+      '2026-09-15',
       [],
     )
 
@@ -68,7 +65,7 @@ describe('buildGitDrafts', () => {
     expect(drafts[0].appendTo).toBeUndefined()
   })
 
-  it('范围外的提交不收；不同天分条', () => {
+  it('只收选中范围内的提交：不同天各生成一条，范围外的不进草稿', () => {
     const drafts = buildGitDrafts(
       [{
         project: project('p1'),
@@ -78,8 +75,8 @@ describe('buildGitDrafts', () => {
           commit('ccc3333', new Date(2026, 8, 10, 9, 0).getTime(), '上周'),
         ]),
       }],
-      'week',
-      NOW,
+      '2026-09-14',
+      '2026-09-15',
       [],
     )
 
@@ -97,16 +94,16 @@ describe('buildGitDrafts', () => {
 
     const mine = buildGitDrafts(
       [{ project: project('p1'), log: log(commits, 'ME@test') }],
-      'today',
-      NOW,
+      '2026-09-15',
+      '2026-09-15',
       [],
     )
     expect(mine[0].content).toBe('- 我的')
 
     const all = buildGitDrafts(
       [{ project: project('p1'), log: log(commits, '') }],
-      'today',
-      NOW,
+      '2026-09-15',
+      '2026-09-15',
       [],
     )
     expect(all[0].content).toBe('- 我的\n- 别人的')
@@ -127,8 +124,8 @@ describe('buildGitDrafts', () => {
           commit('bbb2222', new Date(2026, 8, 15, 14, 0).getTime(), '下午的改动'),
         ]),
       }],
-      'today',
-      NOW,
+      '2026-09-15',
+      '2026-09-15',
       [existing],
     )
 
@@ -156,8 +153,8 @@ describe('buildGitDrafts', () => {
         project: project('p1'),
         log: log([commit('bbb2222', new Date(2026, 8, 15, 9, 0).getTime(), '新提交')]),
       }],
-      'today',
-      NOW,
+      '2026-09-15',
+      '2026-09-15',
       [handwritten, older, newer],
     )
 
@@ -171,8 +168,8 @@ describe('buildGitDrafts', () => {
         { project: project('p1'), log: log([shared]) },
         { project: project('p2'), log: log([shared]) },
       ],
-      'today',
-      NOW,
+      '2026-09-15',
+      '2026-09-15',
       [],
     )
 
@@ -185,8 +182,8 @@ describe('buildGitDrafts', () => {
         { project: project('p1'), log: { isRepo: false, userEmail: '', commits: [] } },
         { project: project('p2'), log: log([]) },
       ],
-      'today',
-      NOW,
+      '2026-09-15',
+      '2026-09-15',
       [],
     )
     expect(drafts).toEqual([])

@@ -16,7 +16,7 @@ use crate::qd_auth::{LoginStart, LoginTicket, PollOutcome};
 use crate::qd_body::Conversation;
 use crate::qd_credits::{self, Credits};
 use crate::qd_models::{self, ModelInfo};
-use crate::qd_tasks::{self, ActivityRow, CampaignView, CheckinStatus, ClaimResult, EarningPoint, HeatmapPoint};
+use crate::qd_tasks::{self, ActivityRow, CampaignView, CheckinStatus, ClaimResult, EarningPoint};
 use crate::qd_usage;
 use crate::wb_server::{self, Server};
 use crate::wb_usage::{self, BucketUnit};
@@ -837,27 +837,6 @@ pub fn wb_qoder_claim_campaigns(
         slot.save(&crate::paths::qoder_accounts_dir())?;
     }
     Ok(result)
-}
-
-#[tauri::command(async)]
-pub fn wb_qoder_credit_heatmap(
-    state: tauri::State<'_, Qoder>,
-    uid: String,
-) -> Result<Vec<HeatmapPoint>, String> {
-    let mut account = {
-        let mut inner = state.lock()?;
-        inner.ensure_loaded();
-        inner
-            .accounts
-            .iter()
-            .find(|item| item.uid == uid)
-            .cloned()
-            .ok_or_else(|| format!("没有这个账号：{uid}"))?
-    };
-    if account.needs_refresh() {
-        let _ = crate::qd_auth::refresh(&mut account);
-    }
-    Ok(qd_tasks::credit_usage(&account))
 }
 
 #[tauri::command(async)]

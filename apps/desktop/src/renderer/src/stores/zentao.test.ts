@@ -2,11 +2,10 @@
  * 禅道 store：后台检查这条链上「改坏了不报错」的几条。
  *
  * 挑的都是静默失效类的问题：首轮把存量 Bug 全报成新增、取数失败却推进基线、
- * 通知发失败被吞掉不再重试、订阅晚于登记而漏掉启用时那一轮、
- * 会话被禅道窗口的自动登录换掉之后一直报「会话已变更」。
+ * 通知发失败被吞掉不再重试、订阅晚于登记而漏掉启用时那一轮。
  *
- * 列表页与禅道页签都已经删掉（页面是顶栏那颗图标打开的独立窗口），所以这里不再断言 bugList：
- * 可见的结果只剩「弹不弹通知」「登记了什么周期」「错误文案」，以及开窗那一条命令的入参。
+ * 列表页与禅道页签都已经删掉（页面交给系统浏览器打开），所以这里不再断言 bugList：
+ * 可见的结果只剩「弹不弹通知」「登记了什么周期」「错误文案」，以及开浏览器那一条命令的入参。
  *
  * 跑在 node 环境里：`window.__TAURI__` 用假桩（`invoke` 按命令名分发、
  * `event.listen` 收住事件处理器）。
@@ -29,14 +28,12 @@ let watchRegistrations: number[]
 let logins: number
 /** zentao_session 的返回值：本机会话（null = 没有，逼 store 登录） */
 let sessionOverride: unknown
-/** 让下一次分页请求报「会话已变更」（窗口里的自动登录换了会话），只报一次 */
-let pageChangedOnce = false
 /** zentao_page 收到的参数（按顺序） */
 let pageArgs: Array<Record<string, unknown>>
-/** zentao_open_window 被调了几次 */
-let openWindowCalls: number
-/** 打开窗口是否失败（模拟配置缺失） */
-let openWindowFails = false
+/** zentao_open_site 被调了几次 */
+let openSiteCalls: number
+/** 在浏览器里打开是否失败（模拟配置缺失） */
+let openSiteFails = false
 /** zentao_login 的返回值：模拟「重登后换了账号」 */
 let loginOverride: unknown
 /** 让下一次取数报「认证过期」，逼 store 重登 */
@@ -67,15 +64,11 @@ function invoke(command: string, args?: Record<string, unknown>): Promise<unknow
     // 禅道的 /v1/products 在本部署下是空的：产品清单由后端从账号资料取，且只给 id
     case 'zentao_products':
       return Promise.resolve({ page: 1, total: 1, limit: 1, products: [{ id: 7 }] })
-    case 'zentao_open_window':
-      openWindowCalls += 1
-      return openWindowFails ? Promise.reject('禅道账号密码没配置') : Promise.resolve(null)
+    case 'zentao_open_site':
+      openSiteCalls += 1
+      return openSiteFails ? Promise.reject('禅道账号密码没配置') : Promise.resolve(null)
     case 'zentao_page': {
       pageArgs.push({ ...args })
-      if (pageChangedOnce) {
-        pageChangedOnce = false
-        return Promise.reject('禅道会话已变更，请重试')
-      }
       const round = rounds[Math.min(roundIndex, rounds.length - 1)]
       roundIndex += 1
       if (authExpiresOnce) {
@@ -100,10 +93,9 @@ beforeEach(() => {
   watchRegistrations = []
   logins = 0
   sessionOverride = null
-  pageChangedOnce = false
   pageArgs = []
-  openWindowCalls = 0
-  openWindowFails = false
+  openSiteCalls = 0
+  openSiteFails = false
   loginOverride = null
   authExpiresOnce = false
   stubSettings = { ...DEFAULT_SETTINGS }
@@ -264,35 +256,16 @@ describe('禅道后台检查', () => {
     expect(roundIndex).toBe(1)
     expect(notifyCalls).toEqual([])
   })
-
-  it('会话被禅道窗口的自动登录换掉：重读本机会话再试一次，不重登', async () => {
-    await bootStore()
-    rounds = [{ ok: true, bugs: [bug(1)] }]
-    checkHandlers[0]({ payload: null })
-    await settle()
-    expect(logins).toBe(1)
-
-    // 窗口那边（浏览器登录）换了一枚会话：这一轮先失败，重读会话后成功
-    pageChangedOnce = true
-    sessionOverride = { id: 'session-2', baseUrl: SESSION.baseUrl, account: 'alice' }
-    rounds = [{ ok: true, bugs: [bug(1), bug(2)] }]
-    checkHandlers[0]({ payload: null })
-    await settle()
-    expect(logins).toBe(1)
-    expect(notifyCalls).toHaveLength(1)
-    expect(notifyCalls[0][0]).toBe('session-2')
-    expect(notifyCalls[0][1]).toBe(1)
-  })
 })
 
-describe('禅道窗口', () => {
+describe('禅道入口', () => {
   it('打开成功不报错，失败把原因带回给调用方', async () => {
     const store = await bootStore()
     expect(await store.open()).toBe('')
-    expect(openWindowCalls).toBe(1)
+    expect(openSiteCalls).toBe(1)
     expect(store.error).toBe('')
 
-    openWindowFails = true
+    openSiteFails = true
     expect(await store.open()).toBe('禅道账号密码没配置')
     expect(store.error).toBe('禅道账号密码没配置')
   })

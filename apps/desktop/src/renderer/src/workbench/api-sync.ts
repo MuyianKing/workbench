@@ -6,6 +6,7 @@ import { gatewayUsage, gatewayUsageRecent, gatewayUsageRows, pullGatewayUsage, s
 import { publishQoderEarnings, pullQoderEarnings, qoderEarnings } from './qoder'
 import * as state from './state'
 import { getTokenUsage, getTokenUsageSnapshot, listSyncDevices, localDevice, syncThemeConfig, syncTokenUsage } from './token'
+import * as workLog from './work-log'
 
 /**
  * 同步门禁这一侧的通道：网关流水 / 领取账本 / token 用量 / 外观 / ETF。
@@ -133,5 +134,19 @@ export const syncApi = {
     if (!id)
       return ok(null)
     return guard(etf.publishEtfCache(repo, id), '同步 ETF 缓存失败')
+  },
+
+  /**
+   * 工作日志：与上面几条同一道门禁（没登录一律空仓库）。拉 + 合并 + 推一轮都在
+   * `workbench/work-log.ts` 里；页面只在同步成功且真的合出新内容时重画。
+   */
+  syncWorkLogs: async () => {
+    const repo = syncRepo()
+    if (!repo)
+      return ok({ enabled: false, changed: false, device: '', entries: [] })
+    const { id, name } = await localDevice()
+    if (!id)
+      return ok({ enabled: false, changed: false, device: '', entries: [] })
+    return workLog.syncWorkLog(repo, { id, name })
   },
 } as Partial<WorkbenchApi>

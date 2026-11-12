@@ -43,6 +43,26 @@
       button {
         font-family: inherit;
       }
+
+      /**
+       * Vditor 的图标 sprite：它由 `public/vditor/dist/js/icons/ant.js` 用
+       * `document.body.insertAdjacentHTML('afterbegin', '<svg style="position: absolute; width: 0;
+       * height: 0; overflow: hidden">…')` 插到 body 最前面，靠的是**行内 style**。
+       *
+       * 这扇窗的 HTML 里有这段内联 <style>，生产态 Tauri 会给它加 nonce，并在 CSP 的
+       * `style-src` 里追加 `'nonce-…'` —— 按 CSP 规则，nonce 一在场 `'unsafe-inline'` 就失效，
+       * **行内 style 属性整个被丢弃**，那个 sprite 于是按 SVG 的默认尺寸占成 300×150 的
+       * inline 元素，把整扇窗往下顶 153px（现象就是正文上方一块白）。
+       *
+       * 所以这里用页面自己的样式把尺寸补回来（这段 <style> 带 nonce，是生效的）。
+       * 只认 body 的直接子元素：正文里的 svg 与 Vditor 图片查看器里那些都不受影响。
+       */
+      body > svg {
+        position: absolute;
+        width: 0;
+        height: 0;
+        overflow: hidden;
+      }
     </style>
   </head>
   <body>

@@ -176,6 +176,12 @@ export interface ThemeConfig {
   kbTreeWidth: number
   /** 邮箱页左栏（收件箱清单）的宽度（px）：与笔记 / 视频树同一套做法 */
   mailListWidth: number
+  /** Git 页左栏（文件树）的宽度（px）：与笔记 / 视频树同一套做法 */
+  gitTreeWidth: number
+  /** Git 页中栏（提交列表）的宽度（px）：同上 */
+  gitHistoryWidth: number
+  /** Git 页右栏里「改动文件清单」那一列的宽度（px）：同上 */
+  gitFilesWidth: number
   cards: Record<HomeCardId, CardPlacement>
   /**
    * 外观设置（见 appearance.ts）：这一批也住在主题文件里，和布局一起构成
@@ -321,6 +327,24 @@ export const MAIL_LIST_WIDTH_MAX = 520
 export const MAIL_LIST_WIDTH_DEFAULT = 331
 
 /**
+ * Git 页三处栏宽：左栏文件树 / 中栏提交列表 / 右栏里的改动文件清单。
+ *
+ * 三者都住 theme.json（与笔记 / 视频 / 邮箱页同一套做法），拖动时只改本地跟手、松手落盘。
+ * 下限保证路径与操作还能读，上限只防手改数据把补丁区挤没。
+ * 默认值是原来那套 `minmax(220px,300px) / minmax(300px,380px) / minmax(180px,240px)` 的上限，
+ * 也就是在宽窗口下原本实际显示的宽度。
+ */
+export const GIT_TREE_WIDTH_MIN = 180
+export const GIT_TREE_WIDTH_MAX = 520
+export const GIT_TREE_WIDTH_DEFAULT = 300
+export const GIT_HISTORY_WIDTH_MIN = 260
+export const GIT_HISTORY_WIDTH_MAX = 520
+export const GIT_HISTORY_WIDTH_DEFAULT = 380
+export const GIT_FILES_WIDTH_MIN = 160
+export const GIT_FILES_WIDTH_MAX = 400
+export const GIT_FILES_WIDTH_DEFAULT = 240
+
+/**
  * 默认布局（按用户日常调好的那份首页布局固化：2026-10 从安装版的 theme.json 逐字段抄过来的，
  * 数值本身没有别的讲究 —— 以后调出更喜欢的样子，照样抄一遍换掉就是）。
  *
@@ -382,6 +406,9 @@ export const DEFAULT_THEME: ThemeConfig = {
   aiTreeCollapsed: false,
   kbTreeWidth: KB_TREE_WIDTH_DEFAULT,
   mailListWidth: MAIL_LIST_WIDTH_DEFAULT,
+  gitTreeWidth: GIT_TREE_WIDTH_DEFAULT,
+  gitHistoryWidth: GIT_HISTORY_WIDTH_DEFAULT,
+  gitFilesWidth: GIT_FILES_WIDTH_DEFAULT,
   cards: {
     activity: { row: 'row-1', order: 0, hidden: false },
     quick: { row: 'row-2', order: 0, hidden: false },
@@ -724,6 +751,27 @@ export function clampMailListWidth(value: unknown): number {
   return Math.min(MAIL_LIST_WIDTH_MAX, Math.max(MAIL_LIST_WIDTH_MIN, base))
 }
 
+/** 收敛 Git 页左栏（文件树）宽度；非法值回到默认宽度 */
+export function clampGitTreeWidth(value: unknown): number {
+  const fallback = GIT_TREE_WIDTH_DEFAULT
+  const base = typeof value === 'number' && Number.isFinite(value) ? Math.round(value) : fallback
+  return Math.min(GIT_TREE_WIDTH_MAX, Math.max(GIT_TREE_WIDTH_MIN, base))
+}
+
+/** 收敛 Git 页中栏（提交列表）宽度；非法值回到默认宽度 */
+export function clampGitHistoryWidth(value: unknown): number {
+  const fallback = GIT_HISTORY_WIDTH_DEFAULT
+  const base = typeof value === 'number' && Number.isFinite(value) ? Math.round(value) : fallback
+  return Math.min(GIT_HISTORY_WIDTH_MAX, Math.max(GIT_HISTORY_WIDTH_MIN, base))
+}
+
+/** 收敛 Git 页改动文件清单宽度；非法值回到默认宽度 */
+export function clampGitFilesWidth(value: unknown): number {
+  const fallback = GIT_FILES_WIDTH_DEFAULT
+  const base = typeof value === 'number' && Number.isFinite(value) ? Math.round(value) : fallback
+  return Math.min(GIT_FILES_WIDTH_MAX, Math.max(GIT_FILES_WIDTH_MIN, base))
+}
+
 function finiteOr(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback
 }
@@ -972,6 +1020,10 @@ export function sanitizeTheme(raw: unknown): ThemeConfig {
     kbTreeWidth: clampKbTreeWidth(base.kbTreeWidth),
     // 同上：老主题文件里没有，补默认宽度
     mailListWidth: clampMailListWidth(base.mailListWidth),
+    // Git 页三处栏宽：老主题文件里没有，补默认宽度
+    gitTreeWidth: clampGitTreeWidth(base.gitTreeWidth),
+    gitHistoryWidth: clampGitHistoryWidth(base.gitHistoryWidth),
+    gitFilesWidth: clampGitFilesWidth(base.gitFilesWidth),
     cards: normalizeOrder(keepOneVisible(cards)),
     // 外观是后加的字段：老主题文件里没有，缺了就补默认（**不能**因为它去动上面的版本判定，
     // 否则升级一次就会把用户的布局整份清掉）
@@ -1037,6 +1089,9 @@ function layoutSignature(layout: ThemeConfig): string {
     layout.aiTreeWidth,
     layout.kbTreeWidth,
     layout.mailListWidth,
+    layout.gitTreeWidth,
+    layout.gitHistoryWidth,
+    layout.gitFilesWidth,
     layout.columns
       .map(
         column =>

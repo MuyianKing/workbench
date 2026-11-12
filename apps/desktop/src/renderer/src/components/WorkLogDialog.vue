@@ -106,21 +106,31 @@ async function submit(): Promise<void> {
   if (!canSubmit.value)
     return
 
+  const current = props.entry
+  // 项目名的冗余副本：只在真正选了本地项目时带（「已删除的项目」占位不写进去）；
+  // 编辑时项目没变就不传，免得用占位名把条目里原来的名字洗掉
+  const selectedProject = form.projectId
+    ? store.projects.find(project => project.id === form.projectId)
+    : undefined
+  const projectChanged = form.projectId !== (current?.projectId ?? '')
+  const projectName = projectChanged ? (selectedProject?.name ?? null) : undefined
+
   const payload = {
     date: form.date || dayKey(Date.now()),
     projectId: form.projectId || undefined,
     content: form.content.trim(),
     status: form.status,
+    ...(selectedProject ? { projectName: selectedProject.name } : {}),
   }
 
   saving.value = true
   try {
-    const current = props.entry
     const result = current
       ? await window.workbench.updateWorkLog(current.id, {
           date: payload.date,
           // 清空下拉 = 解除关联：显式传 null，主进程才知道要把这个字段摘掉
           projectId: form.projectId || null,
+          ...(projectChanged ? { projectName } : {}),
           content: payload.content,
           status: payload.status,
         })

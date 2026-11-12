@@ -137,7 +137,13 @@
   `data/panic.log`（写失败就放弃；默认钩子照旧调用，dev 的 stderr 上还有一份）。单份超 256KB 先清空。
 - **webview 有全局 CSP**（`tauri.conf.json` 的 `csp`；dev 用 `devCsp`，多放行 HMR 的 ws）。底线是
   `default-src 'self'`、`script-src 'self'`、`object-src 'none'`；必须放行的几处都有理由：
-  `style-src 'unsafe-inline'`（Element Plus / Vditor 的动态样式与邮件正文）、
+  `style-src 'unsafe-inline'`（Element Plus / Vditor 的动态样式与邮件正文 —— **但它只管 CSSOM**：
+  入口 HTML 里只要有一段内联 `<style>`，Tauri 就会给那一段加 nonce、并往 `style-src` 里追加
+  `'nonce-…'`，按 CSP 规则 nonce 一在场 `'unsafe-inline'` 即失效，**源码里的行内 `style` 属性整个被丢弃**；
+  `el.style.x = …` 这类 CSSOM 写入不受影响。`markdown` / `video` / `capture` / `pin` / `ball` 这五个带
+  内联 `<style>` 的入口因此不能依赖行内 style 属性，独立 Markdown 窗口踩过这个坑：Vditor 的图标 sprite
+  靠行内样式缩成 0×0，被丢弃后占成 300×150，把整扇窗往下顶 153px，补法见
+  [notes.md](notes.md) 的「独立编辑窗口」）、
   `script-src` 上的 **`'unsafe-inline'`**（**只为 HTML 附件那一档**：这份 CSP 由 Tauri 按 meta
   注入到页面里、**子框架会继承**，附件里的脚本要跑只能在这儿放行；代价与三条不能动的边界写在
   [mail.md](mail.md) 的「HTML 附件：给脚本、不给宿主能力」一节 —— 别再往 `script-src` 上加

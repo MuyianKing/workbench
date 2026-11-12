@@ -52,14 +52,6 @@ pub struct ClaimResult {
     pub error: String,
 }
 
-/// 一张热力图上的点。
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct HeatmapPoint {
-    pub date: String,
-    pub value: f64,
-}
-
 /// 一个活动的展示信息。
 #[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -487,47 +479,6 @@ pub fn campaign_items(data: &serde_json::Value, account: &Account) -> Vec<Campai
     out
 }
 
-/// 读官方积分消耗热力。上游回的是**一整年**的点（`items`），窗口由界面按近 30 天裁。
-pub fn credit_usage(account: &Account) -> Vec<HeatmapPoint> {
-    let Ok(value) = get_json(account, "GET", qd_upstream::PATH_CREDIT_HEATMAP, None) else {
-        return Vec::new();
-    };
-    let data = value.get("data").cloned().unwrap_or(value);
-    parse_heatmap(&data)
-}
-
-/// 热力响应归一：实测是 `{ items: [{ date, value }] }`（371 天，含全年零值），
-/// 旧形态另有 `daily`；`levels` / `total` / `unit` / `year` 不是日历数据，忽略。
-fn parse_heatmap(data: &serde_json::Value) -> Vec<HeatmapPoint> {
-    let Some(list) = data
-        .get("items")
-        .or_else(|| data.get("daily"))
-        .and_then(serde_json::Value::as_array)
-    else {
-        return Vec::new();
-    };
-    let mut points = Vec::new();
-    for item in list {
-        let date = item
-            .get("date")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("")
-            .to_string();
-        if date.is_empty() {
-            continue;
-        }
-        let value = item
-            .get("value")
-            .or_else(|| item.get("credits"))
-            .or_else(|| item.get("amount"))
-            .and_then(serde_json::Value::as_f64)
-            .unwrap_or(0.0);
-        points.push(HeatmapPoint { date, value });
-    }
-    points.sort_by(|a, b| a.date.cmp(&b.date));
-    points
-}
-
 /// 把一个号的「今天已签」写回账号文件。
 pub fn stamp_checkin(account: &mut Account) {
     account.last_checkin = today();
@@ -888,26 +839,6 @@ mod tests {
         assert_eq!(claim_reward(&serde_json::json!({ "amount": "50" }), 100), 50);
         assert_eq!(claim_reward(&serde_json::json!({ "rewardCredits": 60.0 }), 100), 60);
         assert_eq!(claim_reward(&serde_json::json!({ "benefit": { "amount": 70 } }), 100), 70);
-    }
-
-    #[test]
-    fn 官方消耗热力按_items_解析() {
-        let data = serde_json::json!({
-            "items": [
-                { "date": "2026-11-07", "value": 105.5102274776 },
-                { "date": "2026-10-15", "value": 262 },
-                { "date": "2026-11-08", "value": 0 }
-            ],
-            "levels": [0, 10, 100],
-            "total": 367.5,
-            "unit": "credits",
-            "year": 2026
-        });
-        let points = parse_heatmap(&data);
-        assert_eq!(points.len(), 3);
-        assert_eq!(points[0].date, "2026-10-15");
-        assert_eq!(points[1].value, 105.5102274776);
-        assert_eq!(points[2].date, "2026-11-08");
     }
 
     #[test]

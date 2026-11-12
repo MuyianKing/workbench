@@ -49,23 +49,24 @@ import * as zentao from './zentao'
 
 /** 域模块的薄转发：一个域一组通道，实现都在各自的适配文件里（注释也留在那边） */
 const domainsApi = {
-  // ---------- 工作日志（本地文件，不进同步仓库） ----------
+  // ---------- 工作日志（本地文件；配了同步仓库时按设备分片共享） ----------
   listWorkLogs: () => workLog.listWorkLogs(),
   addWorkLog: (input: Parameters<WorkbenchApi['addWorkLog']>[0]) => workLog.addWorkLog(input),
   updateWorkLog: (id: string, patch: Parameters<WorkbenchApi['updateWorkLog']>[1]) =>
     workLog.updateWorkLog(id, patch),
   removeWorkLog: (id: string) => workLog.removeWorkLog(id),
-  projectGitLog: (dir: string, since?: number) => workLog.projectGitLog(dir, since),
+  projectGitLog: (dir: string, since?: number, until?: number) => workLog.projectGitLog(dir, since, until),
   importGitDrafts: (drafts: Parameters<WorkbenchApi['importGitDrafts']>[0]) =>
     workLog.importGitDrafts(drafts),
 
   // ---------- Git 页（只读、本地；实现见 workbench/git.ts） ----------
   openGitRepo: (path: string) => git.openRepo(path),
-  listGitCommits: (root: string, skip: number, limit: number) =>
-    git.listCommits(root, skip, limit),
-  listGitFileCommits: (root: string, path: string, skip: number, limit: number) =>
-    git.listFileCommits(root, path, skip, limit),
-  listGitTree: (root: string, dir: string) => git.listTree(root, dir),
+  listGitBranches: (root: string) => git.listBranches(root),
+  listGitCommits: (root: string, rev: string, since: string, until: string, skip: number, limit: number) =>
+    git.listCommits(root, rev, since, until, skip, limit),
+  listGitFileCommits: (root: string, path: string, rev: string, since: string, until: string, skip: number, limit: number) =>
+    git.listFileCommits(root, path, rev, since, until, skip, limit),
+  listGitTree: (root: string, dir: string, rev: string) => git.listTree(root, dir, rev),
   loadGitCommit: (root: string, hash: string) => git.loadCommit(root, hash),
   compareGitCommits: (root: string, base: string, target: string) =>
     git.compareCommits(root, base, target),
@@ -244,7 +245,7 @@ const domainsApi = {
   zentaoWatch: zentao.watch,
   zentaoNotify: zentao.notify,
   onZentaoCheck: zentao.onCheck,
-  zentaoOpenWindow: zentao.openWindow,
+  zentaoOpenSite: zentao.openSite,
 
   // ---------- 账号 ----------
   // 换 token、回环监听、凭据落盘都在 Rust 侧；这里只驱动轮询并落显示资料，

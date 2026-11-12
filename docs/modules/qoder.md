@@ -57,7 +57,7 @@
 | | `qd_body` | 以 `baseprompt.json` 为骨架构造上游请求体 |
 | | `qd_models` | 随包 CN 目录 + 上游目录缓存 + 显示名 ↔ key 解析 |
 | | `qd_credits` | 额度多桶归一、套餐、最近到期 |
-| | `qd_tasks` | 每日签到、活动领取、积分热力、自动签到 / 活动记录 |
+| | `qd_tasks` | 每日签到、活动领取、自动签到 / 活动记录 |
 | I/O | `qd_auth` | 设备授权、续期、userinfo |
 | | `qd_api_chat` | 上游对话调用（线程 + 通道，先送状态码再送字节） |
 | | `qd_usage` | `usage.jsonl` 追加与读取 |
@@ -204,11 +204,8 @@ Qoder 与 TBuddy 是**两套完全独立的状态**：各自的 `Inner` 持有�
 - **旧每日签到接口上游已停用**（`status=DISABLED`，`currentStreakDays` / `totalClaimDays` 恒 0）；
   每天的 100 Credits 改由活动平台发放，要按「领取活动」才真正到账。
   卡片上的「连签 / 累计」仍是旧接口的字段，保留原样，不拿活动数据硬凑。
-- **「近一个月官方积分消耗」**：上游 `credits-heatmap` 的只读快照（第一个可用账号）。
-  实测返回 `{ items: [{ date, value }], levels, total, unit, year }`，是**一整年**的逐日点
-  （含大量 0）；`parse_heatmap` 只认 `items` / 旧形态 `daily`。界面用 `dailyCreditSeries`
-  铺成近 30 天的连续序列再画，全是 0 时整张图不渲染。回答的是消耗而不是获取，
-  所以和上面那张获取图并存，不混口径。
+- **「近一个月官方积分消耗」图已撤掉**：福利栏只剩「近一个月积分获取」一张图。
+  `wb_qoder_credit_heatmap` 命令、`parse_heatmap` 解析与 `PATH_CREDIT_HEATMAP` 端点常量一并删除。
 - **「今日尝试」列表已撤掉**（过程流水没人看）；`activity.jsonl` 仍保留 —— 它是积分获取统计的唯一来源。
 
 ### 领取账本同步
@@ -276,7 +273,7 @@ Qoder 与 TBuddy 是**两套完全独立的状态**：各自的 `Inner` 持有�
 | 模型 | `wb_qoder_models` / `wb_qoder_models_refresh` |
 | 积分 | `wb_qoder_credits` |
 | 用量 / 请求 | `wb_qoder_usage` / `wb_qoder_usage_rows` / `wb_qoder_usage_recent` |
-| 福利 | `wb_qoder_perks_status` / `wb_qoder_checkin` / `wb_qoder_claim_campaigns` / `wb_qoder_credit_heatmap` / `wb_qoder_earnings` / `wb_qoder_activity_today` |
+| 福利 | `wb_qoder_perks_status` / `wb_qoder_checkin` / `wb_qoder_claim_campaigns` / `wb_qoder_earnings` / `wb_qoder_activity_today` |
 | 领取同步 | `qoder_earnings_publish` / `qoder_earnings_pull` |
 | 自动签到 | `wb_qoder_perks_auto_config` / `wb_qoder_perks_auto_set` / `wb_qoder_perks_auto_run` |
 

@@ -3,16 +3,16 @@ import { fail } from '@workbench/core'
 import { diffZentaoBugs, sanitizeZentaoPollMinutes } from '@workbench/zentao'
 import { defineStore } from 'pinia'
 import { ref, watch } from 'vue'
-import { bugs as fetchBugs, session as fetchSession, onCheck, openWindow, watch as registerWatch, notify as sendNotify, login as zentaoLogin } from '@/workbench/zentao'
+import { bugs as fetchBugs, session as fetchSession, onCheck, openSite, watch as registerWatch, notify as sendNotify, login as zentaoLogin } from '@/workbench/zentao'
 import { useSettingsStore } from './settings'
 
 /**
- * 禅道：**只有后台检查与系统通知**。禅道页面本身在独立窗口里（顶栏右上角那颗图标打开，
- * 见 components/TitleBar.vue 与 Rust 侧 zentao.rs 的 open_window），这一层不维护任何列表。
+ * 禅道：**只有后台检查与系统通知**。页面本身不在应用里打开 —— 顶栏那颗图标（与通知点击）
+ * 直接交给系统浏览器（见 Rust 侧 zentao.rs 的 open_site），这一层不维护任何列表。
  *
  * **数据流**：设置里的检查间隔（`zentaoPollMinutes`，默认 30、0 = 关闭）→ 适配层登记给
  * Rust 的计时线程 → 到点发 `zentao:check` → 这一层取完整列表（分页聚合在 @workbench/zentao）、
- * 与上一轮**编号全集**比出新增 → 有新增才调 `zentaoNotify` 弹系统通知（点通知打开禅道窗口，
+ * 与上一轮**编号全集**比出新增 → 有新增才调 `zentaoNotify` 弹系统通知（点通知用浏览器打开禅道，
  * 那一下在 Rust 侧接）。取数间隔与新增判定放在这一侧，是因为窗口收进托盘后
  * WebView 的定时器会被节流 —— 计时必须由 Rust 醒，而分页与判定已经有带单测的域包。
  *
@@ -22,7 +22,7 @@ import { useSettingsStore } from './settings'
  *
  * **通知失败不吞**：待通知的那批留在 `pendingNotify` 里，下一轮后台检查时重发（成功才清），
  * 因此「弹一次没弹出去」不会变成「永远不知道」，也不会因为重试把同一批报两遍。
- * 失败原因留在 `error` 里（打开窗口失败、或后台检查失败都往这里写，界面自己决定怎么说）。
+ * 失败原因留在 `error` 里（打开站点失败、或后台检查失败都往这里写，界面自己决定怎么说）。
  */
 const AUTH_PREFIX = 'ZENTAO_AUTH_EXPIRED:'
 
@@ -65,10 +65,6 @@ export const useZentaoStore = defineStore('zentao', () => {
 
   /**
    * 认证并取一轮完整列表：本机已有会话就复用；过期（401）只重登一次再取，不循环。
-   *
-   * 另有一条：Rust 侧的会话可能被**窗口里的自动登录**换掉（那边走的是浏览器登录，
-   * 与这里的 API 会话是两份）。取数失败时重读一次本机会话，id 变了就用新的再试一次 ——
-   * 否则后台检查会一直拿着过期 id 报「会话已变更」。
    */
   async function fetchList(): Promise<Result<ZentaoBugList>> {
     if (!session) {
@@ -91,13 +87,6 @@ export const useZentaoStore = defineStore('zentao', () => {
         return fail(loginResult.error || '禅道重新登录失败')
       session = loginResult.data
       result = await fetchBugs(loginResult.data.id, BROWSE)
-    }
-    if (!result.ok) {
-      const fresh = await fetchSession()
-      if (fresh.ok && fresh.data && fresh.data.id !== current.id) {
-        session = fresh.data
-        result = await fetchBugs(fresh.data.id, BROWSE)
-      }
     }
     return result
   }
@@ -171,16 +160,16 @@ export const useZentaoStore = defineStore('zentao', () => {
   }
 
   /**
-   * 打开（或聚焦）禅道窗口；返回错误文案（空串 = 成功）。
+   * 用系统浏览器打开禅道；返回错误文案（空串 = 成功）。
    * 顶栏那颗图标调它，失败时给一句提示。
    */
   async function open(): Promise<string> {
-    const result = await openWindow()
+    const result = await openSite()
     if (result.ok) {
       error.value = ''
       return ''
     }
-    error.value = result.error || '打开禅道窗口失败'
+    error.value = result.error || '在浏览器中打开禅道失败'
     return error.value
   }
 

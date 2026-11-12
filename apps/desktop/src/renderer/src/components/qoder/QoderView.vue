@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { GatewayUsageSummary } from '@workbench/usage'
 import type { GatewayCredits, GatewayUsageRow } from '@/workbench/gateway'
-import type { QoderAccount, QoderCredits, QoderEarningPoint, QoderHeatmapPoint, QoderModelInfo, QoderStatus, QoderTaskSnapshot } from '@/workbench/qoder'
+import type { QoderAccount, QoderCredits, QoderEarningPoint, QoderModelInfo, QoderStatus, QoderTaskSnapshot } from '@/workbench/qoder'
 import { Calendar, Coin, CopyDocument, Cpu, Download, Histogram, MagicStick, Plus, Refresh, Search, Upload, User } from '@element-plus/icons-vue'
 import { dailyCreditSeries, gatewayBucketUnit, GROWTH_CREDIT_DAYS, summarizeGatewayRows } from '@workbench/usage'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -17,7 +17,7 @@ import PerksCreditsChart from '@/components/gateway/PerksCreditsChart.vue'
 import RequestFilters from '@/components/gateway/RequestFilters.vue'
 import UsagePane from '@/components/gateway/UsagePane.vue'
 import { useCreditPool } from '@/composables/use-credit-pool'
-import { formatCompactTokens, formatDecimal, formatTimestamp } from '@/format'
+import { formatCompactTokens, formatTimestamp } from '@/format'
 import {
   poolMeterTone as meterClass,
   poolBalanceText as number,
@@ -79,7 +79,6 @@ const requestResult = ref<'all' | 'ok' | 'fail'>('all')
 const requestKeyword = ref('')
 const requestsLoading = ref(false)
 const taskSnapshots = ref<QoderTaskSnapshot[]>([])
-const heatmap = ref<QoderHeatmapPoint[]>([])
 const earnings = ref<QoderEarningPoint[]>([])
 const earningsLoading = ref(false)
 const earningsError = ref('')
@@ -318,7 +317,7 @@ async function loadQoderNames(): Promise<Record<string, string>> {
 
 async function loadPerks(): Promise<void> {
   pullEarnings()
-  // 领取记录在本机，先跟签到状态并行读；热力图要联网，放到后面
+  // 领取记录在本机，跟签到状态并行读
   const [snapshots] = await Promise.all([
     window.workbench.qoderPerksStatus(),
     loadEarnings(),
@@ -327,12 +326,6 @@ async function loadPerks(): Promise<void> {
   publishEarnings()
   if (snapshots.ok && snapshots.data)
     taskSnapshots.value = snapshots.data
-  const first = taskSnapshots.value.find(item => item.checkin?.ok)
-  if (first) {
-    const points = await window.workbench.qoderCreditHeatmap(first.uid)
-    if (points.ok && points.data)
-      heatmap.value = points.data
-  }
 }
 
 /**
@@ -568,17 +561,6 @@ const earningTotal = computed(() => earningDays.value.reduce((sum, day) => sum +
 function requestRowKey(row: GatewayUsageRow): string {
   return `${row.ts}-${row.model}-${row.uid}`
 }
-
-/**
- * 官方消耗热力：上游回的是**一整年**的点（`items`），这里按近 30 天铺成连续序列
- * （缺的天补 0，与领取图同一窗口口径）；全是 0 时不渲染这张图。
- */
-const heatDays = computed(() => dailyCreditSeries(
-  heatmap.value.map(item => ({ date: item.date, credit: item.value })),
-  GROWTH_CREDIT_DAYS,
-))
-const heatMax = computed(() => Math.max(1, ...heatDays.value.map(point => point.credit)))
-const heatHasData = computed(() => heatDays.value.some(point => point.credit > 0))
 
 watch(tab, async (value) => {
   if (value === 'accounts')
@@ -859,17 +841,6 @@ onBeforeUnmount(() => {
         :error="earningsError"
         hint="签到或领取活动后会记在这里"
       />
-      <div v-if="heatHasData" class="qd-chart panel">
-        <div class="qd-chart__head">
-          <span>近一个月官方积分消耗</span>
-          <span class="qd-card__muted">单日峰值 {{ formatDecimal(heatMax) }}</span>
-        </div>
-        <div class="qd-chart__bars">
-          <div v-for="point in heatDays" :key="point.date" class="qd-chart__bar" :title="`${point.date}：${formatDecimal(point.credit)}`">
-            <span :style="{ height: `${Math.round((point.credit / heatMax) * 100)}%` }" />
-          </div>
-        </div>
-      </div>
     </section>
 
     <!-- 用量：与 TBuddy 共用同一个组件，只把取数与账号名换成 Qoder 的 -->
@@ -1594,44 +1565,6 @@ onBeforeUnmount(() => {
 
 .is-off {
   color: var(--st-fail);
-}
-
-.qd-chart {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-2);
-  padding: var(--sp-3);
-  flex: none;
-}
-
-.qd-chart__head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  color: var(--ink-2);
-  font-size: var(--fs-sm);
-}
-
-.qd-chart__bars {
-  display: flex;
-  align-items: flex-end;
-  gap: 3px;
-  height: 96px;
-}
-
-.qd-chart__bar {
-  display: flex;
-  /* 宽度定死：桶少时（比如 24 小时里只有一个小时有请求）不能把一根柱子拉满整行 */
-  flex: 0 0 12px;
-  align-items: flex-end;
-  height: 100%;
-}
-
-.qd-chart__bar span {
-  width: 100%;
-  border-radius: 3px 3px 0 0;
-  background: var(--el-color-primary);
-  opacity: 0.75;
 }
 
 .qd-log__msg {

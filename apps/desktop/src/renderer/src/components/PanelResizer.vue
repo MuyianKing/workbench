@@ -22,6 +22,8 @@ const props = defineProps<{
   width: number
   /** 拖动期间挂到 body 上的类（global.css 靠它兜光标与文本选择） */
   bodyClass: string
+  /** 悬停提示：不同页面拖的是不同的栏，默认按目录树说 */
+  title?: string
 }>()
 
 const emit = defineEmits<{
@@ -57,7 +59,7 @@ function onPointerDown(event: PointerEvent): void {
   <span
     class="panel-resizer"
     :class="{ 'is-dragging': dragging }"
-    title="拖动调整目录树宽度"
+    :title="props.title ?? '拖动调整目录树宽度'"
     @pointerdown="onPointerDown"
   />
 </template>

@@ -166,11 +166,6 @@ export interface QoderTaskSnapshot {
   error: string
 }
 
-export interface QoderHeatmapPoint {
-  date: string
-  value: number
-}
-
 export interface QoderActivityRow {
   ts: number
   date: string

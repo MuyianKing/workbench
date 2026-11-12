@@ -230,7 +230,57 @@ fn publish_at(
     etf: Option<&Value>,
     activity: Option<&Value>,
 ) -> Result<Value, String> {
-    if usage.is_none() && config.is_none() && etf.is_none() && activity.is_none() {
+    let safe = safe_name(device);
+    let usage_relative = format!("{}/{safe}.json", paths::TOKEN_USAGE_DIR);
+    let config_relative = format!("{}/{safe}.json", paths::CONFIG_DIR);
+    let etf_relative = format!("{}/{safe}.json", paths::ETF_SYNC_DIR);
+    let activity_relative = format!("{}/{safe}.json", paths::ACTIVITY_SYNC_DIR);
+
+    // 这次推哪几个文件就 add / diff 哪几个：用量同步碰不到 config/ 与 etf/，外观同步碰不到另外几个
+    let mut files: Vec<(&str, &Value)> = Vec::new();
+    if let Some(usage) = usage {
+        files.push((&usage_relative, usage));
+    }
+    if let Some(config) = config {
+        files.push((&config_relative, config));
+    }
+    if let Some(etf) = etf {
+        files.push((&etf_relative, etf));
+    }
+    if let Some(activity) = activity {
+        files.push((&activity_relative, activity));
+    }
+
+    publish_files_at(clone_dir, repo, device, &files, "sync")
+}
+
+/// 只推本机的工作日志分片（`work-log/<设备id>.json`）。
+///
+/// 与用量 / 活跃度同一个克隆、同一把锁；每台机器只写自己那份，合并由渲染层做
+/// （见 packages/work-log/src/work-log-sync.ts）。
+pub fn publish_work_log(repo: &str, device: &str, shard: &Value) -> Result<Value, String> {
+    publish_work_log_at(&paths::token_sync_dir(), repo, device, shard)
+}
+
+fn publish_work_log_at(
+    clone_dir: &Path,
+    repo: &str,
+    device: &str,
+    shard: &Value,
+) -> Result<Value, String> {
+    let relative = format!("{}/{}.json", paths::WORK_LOG_SYNC_DIR, safe_name(device));
+    publish_files_at(clone_dir, repo, device, &[(&relative, shard)], "work-log")
+}
+
+/// 所有「一台机器一份」的通道共用的那一段：写文件 → 只 stage 自己的路径 → 内容变了才提交 → 推送。
+fn publish_files_at(
+    clone_dir: &Path,
+    repo: &str,
+    device: &str,
+    files: &[(&str, &Value)],
+    prefix: &str,
+) -> Result<Value, String> {
+    if files.is_empty() {
         return Err("没有要同步的内容".into());
     }
     // 与另外几条同步共用这一个克隆：同一时刻只跑一条（见 workflow_lock）
@@ -239,30 +289,12 @@ fn publish_at(
     set_git_auth();
     let (dir, branch) = ensure_clone(clone_dir, repo)?;
     let mut log: Vec<String> = Vec::new();
-
     let safe = safe_name(device);
-    let usage_relative = format!("{}/{safe}.json", paths::TOKEN_USAGE_DIR);
-    let config_relative = format!("{}/{safe}.json", paths::CONFIG_DIR);
-    let etf_relative = format!("{}/{safe}.json", paths::ETF_SYNC_DIR);
-    let activity_relative = format!("{}/{safe}.json", paths::ACTIVITY_SYNC_DIR);
 
-    // 这次推哪几个文件就 add / diff 哪几个：用量同步碰不到 config/ 与 etf/，外观同步碰不到另外几个
     let mut staged: Vec<&str> = Vec::new();
-    if let Some(usage) = usage {
-        write_json(&dir.join(&usage_relative), usage)?;
-        staged.push(usage_relative.as_str());
-    }
-    if let Some(config) = config {
-        write_json(&dir.join(&config_relative), config)?;
-        staged.push(config_relative.as_str());
-    }
-    if let Some(etf) = etf {
-        write_json(&dir.join(&etf_relative), etf)?;
-        staged.push(etf_relative.as_str());
-    }
-    if let Some(activity) = activity {
-        write_json(&dir.join(&activity_relative), activity)?;
-        staged.push(activity_relative.as_str());
+    for (relative, value) in files {
+        write_json(&dir.join(relative), value)?;
+        staged.push(relative);
     }
     let mut add_args: Vec<&str> = vec!["add", "-A", "--"];
     add_args.extend(staged.iter().copied());
@@ -274,7 +306,7 @@ fn publish_at(
     diff_args.extend(staged.iter().copied());
     let changed = !run_git_quiet(&diff_args, &dir);
     if changed {
-        let message = format!("sync:{safe}");
+        let message = format!("{prefix}:{safe}");
         log.push(run_git(&["commit", "-m", &message], Some(&dir), GIT_TIMEOUT)?);
     }
 
@@ -728,13 +760,38 @@ fn read_activity_shards_for(
     repo: &str,
     own_device: &str,
 ) -> Result<Vec<Value>, String> {
+    read_device_shards_for(clone_dir, repo, own_device, paths::ACTIVITY_SYNC_DIR)
+}
+
+/// 读仓库里**别的机器**推上来的工作日志分片（原始 JSON，合并由渲染层负责）。
+///
+/// 本机那份跳过：本机内存里的文件才是权威，读仓库副本会把自己的条目再合一遍。
+pub fn read_work_log_shards(repo: &str, own_device: &str) -> Result<Vec<Value>, String> {
+    read_work_log_shards_for(&paths::token_sync_dir(), repo, own_device)
+}
+
+fn read_work_log_shards_for(
+    clone_dir: &Path,
+    repo: &str,
+    own_device: &str,
+) -> Result<Vec<Value>, String> {
+    read_device_shards_for(clone_dir, repo, own_device, paths::WORK_LOG_SYNC_DIR)
+}
+
+/// 「一台机器一份」目录的通用读法：只收 `.json`、跳过本机那份、坏文件跳过。
+fn read_device_shards_for(
+    clone_dir: &Path,
+    repo: &str,
+    own_device: &str,
+    dir_name: &str,
+) -> Result<Vec<Value>, String> {
     clear_git_auth();
 
     if !clone_dir.join(".git").is_dir() || !clone_matches(clone_dir, repo) {
         return Ok(Vec::new());
     }
-    // 还没同步过（克隆里没有 activity/ 目录）就是空表，不是错误
-    let Ok(entries) = std::fs::read_dir(clone_dir.join(paths::ACTIVITY_SYNC_DIR)) else {
+    // 还没同步过（克隆里没有这个目录）就是空表，不是错误
+    let Ok(entries) = std::fs::read_dir(clone_dir.join(dir_name)) else {
         return Ok(Vec::new());
     };
     let own = safe_name(own_device);
@@ -2370,6 +2427,86 @@ mod tests {
         });
         publish_at(&clone_b, &repo, "dev-b", None, None, None, Some(&shard_b)).unwrap();
         let read = read_activity_shards_for(&clone_b, &repo, "dev-b").unwrap();
+        assert_eq!(read.len(), 1, "本机那份不参与合并");
+        assert_eq!(read[0]["device"], json!("dev-a"));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// 工作日志分片：一台机器一份，读侧跳过本机；内容没变不产生空提交。
+    #[test]
+    fn publishes_and_reads_work_log_shards() {
+        if proc::probe_version("git").is_none() {
+            eprintln!("跳过：本机没有 git");
+            return;
+        }
+
+        let root =
+            std::env::temp_dir().join(format!("wb-work-log-sync-{}", uuid::Uuid::new_v4()));
+        let remote = root.join("remote.git");
+        let clone_a = root.join("clone-a");
+        let clone_b = root.join("clone-b");
+        std::fs::create_dir_all(&root).unwrap();
+        let init = proc::run_direct(
+            "git",
+            &[
+                "init".to_string(),
+                "--bare".to_string(),
+                remote.to_string_lossy().into_owned(),
+            ],
+            GIT_TIMEOUT,
+            None,
+            &GIT_ENVS,
+        )
+        .unwrap();
+        assert!(init.ok(), "git init --bare 失败: {}", init.stderr);
+        let repo = remote.to_string_lossy().into_owned();
+
+        let shard_a = json!({
+            "version": 1,
+            "device": "dev-a",
+            "name": "A 机",
+            "updatedAt": 100,
+            "entries": [{
+                "id": "e1",
+                "date": "2026-10-30",
+                "content": "甲",
+                "status": "done",
+                "createdAt": 100,
+                "updatedAt": 100,
+                "by": "dev-a"
+            }],
+            "tombstones": [],
+        });
+        publish_work_log_at(&clone_a, &repo, "dev-a", &shard_a).unwrap();
+        assert!(clone_a
+            .join(paths::WORK_LOG_SYNC_DIR)
+            .join("dev-a.json")
+            .is_file());
+
+        // 同一份内容再推一次：不该产生空提交
+        let again = publish_work_log_at(&clone_a, &repo, "dev-a", &shard_a).unwrap();
+        assert_eq!(again["changed"], json!(false));
+
+        // B 第一次拉：仓库里只有 A 的那份（本机还没推过）
+        let pulled = refresh_clone_at(&clone_b, &repo).unwrap();
+        assert_eq!(pulled["changed"], json!(true));
+        let read = read_work_log_shards_for(&clone_b, &repo, "dev-b").unwrap();
+        assert_eq!(read.len(), 1);
+        assert_eq!(read[0]["device"], json!("dev-a"));
+        assert_eq!(read[0]["entries"][0]["id"], json!("e1"));
+
+        // B 推了自己那份之后：读侧跳过本机，只剩 A 的
+        let shard_b = json!({
+            "version": 1,
+            "device": "dev-b",
+            "name": "B 机",
+            "updatedAt": 200,
+            "entries": [],
+            "tombstones": [{ "id": "e2", "updatedAt": 200, "by": "dev-b" }],
+        });
+        publish_work_log_at(&clone_b, &repo, "dev-b", &shard_b).unwrap();
+        let read = read_work_log_shards_for(&clone_b, &repo, "dev-b").unwrap();
         assert_eq!(read.len(), 1, "本机那份不参与合并");
         assert_eq!(read[0]["device"], json!("dev-a"));
 

@@ -30,7 +30,9 @@ const keyword = ref('')
 
 const loadNode: LoadFunction = async (node, resolve) => {
   const parent = node.level > 0 ? node.data as GitTreeNode | undefined : undefined
-  const dir = parent?.path ?? ''
+  // 第一层从用户选中的那个文件夹开始（scope）：`.git` 可能在外层，树不该把整个仓库都摊开；
+  // 展开子目录时节点里带的已经是仓库相对路径，直接用
+  const dir = parent?.path ?? store.scope
   const result = await store.loadTree(dir)
   if (!result.ok || !result.data) {
     ElMessage.error(result.error ?? '读取目录失败')

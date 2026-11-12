@@ -1,6 +1,6 @@
 import type { CardPlacement, HomeCardId, HomeColumn } from './theme'
 import { describe, expect, it } from 'vitest'
-import { addColumn, CARD_GAP_DEFAULT, CARD_GAP_MAX, CARD_GAP_MIN, CARD_HEIGHT_MIN, cardIdsInRow, clampCardGap, clampColumnWidth, clampKbTreeWidth, clampNoteTreeWidth, clampRowHeight, clampVideoTreeWidth, COLUMN_COUNT_MAX, COLUMN_WIDTH_DEFAULT, COLUMN_WIDTH_MAX, COLUMN_WIDTH_MIN, columnHasVisibleCards, columnIds, columnOfRow, DEFAULT_THEME, HOME_CARD_IDS, KB_TREE_WIDTH_DEFAULT, KB_TREE_WIDTH_MAX, KB_TREE_WIDTH_MIN, moveCard, normalizeOrder, NOTE_TREE_WIDTH_DEFAULT, NOTE_TREE_WIDTH_MAX, NOTE_TREE_WIDTH_MIN, pruneEmptyRows, removeColumn, resizeColumnPair, resizeRowHeight, ROW_HEIGHT_MAX, ROW_HEIGHT_MIN_DEFAULT, rowBoxHeight, rowHeightMin, rowIds, rowOf, rowShapeFor, sameThemeContent, sanitizeCardMode, sanitizeTheme, setColumnWidths, THEME_VERSION, VIDEO_TREE_WIDTH_DEFAULT, VIDEO_TREE_WIDTH_MAX, VIDEO_TREE_WIDTH_MIN, visibleCardIdsInRow } from './theme'
+import { addColumn, CARD_GAP_DEFAULT, CARD_GAP_MAX, CARD_GAP_MIN, CARD_HEIGHT_MIN, cardIdsInRow, clampCardGap, clampColumnWidth, clampGitFilesWidth, clampGitHistoryWidth, clampGitTreeWidth, clampKbTreeWidth, clampNoteTreeWidth, clampRowHeight, clampVideoTreeWidth, COLUMN_COUNT_MAX, COLUMN_WIDTH_DEFAULT, COLUMN_WIDTH_MAX, COLUMN_WIDTH_MIN, columnHasVisibleCards, columnIds, columnOfRow, DEFAULT_THEME, GIT_FILES_WIDTH_DEFAULT, GIT_FILES_WIDTH_MIN, GIT_HISTORY_WIDTH_DEFAULT, GIT_HISTORY_WIDTH_MIN, GIT_TREE_WIDTH_DEFAULT, GIT_TREE_WIDTH_MAX, HOME_CARD_IDS, KB_TREE_WIDTH_DEFAULT, KB_TREE_WIDTH_MAX, KB_TREE_WIDTH_MIN, moveCard, normalizeOrder, NOTE_TREE_WIDTH_DEFAULT, NOTE_TREE_WIDTH_MAX, NOTE_TREE_WIDTH_MIN, pruneEmptyRows, removeColumn, resizeColumnPair, resizeRowHeight, ROW_HEIGHT_MAX, ROW_HEIGHT_MIN_DEFAULT, rowBoxHeight, rowHeightMin, rowIds, rowOf, rowShapeFor, sameThemeContent, sanitizeCardMode, sanitizeTheme, setColumnWidths, THEME_VERSION, VIDEO_TREE_WIDTH_DEFAULT, VIDEO_TREE_WIDTH_MAX, VIDEO_TREE_WIDTH_MIN, visibleCardIdsInRow } from './theme'
 
 /**
  * 算法用例（移动 / 拆栏 / 收栏）的固定夹具：三栏五行，一行里可能并着好几张卡片。
@@ -206,6 +206,23 @@ describe('sanitizeTheme', () => {
       KB_TREE_WIDTH_MIN,
     )
     expect(sanitizeTheme({ version: THEME_VERSION, kbTreeWidth: 300 }).kbTreeWidth).toBe(300)
+  })
+
+  /** Git 页三处栏宽同是后加的字段：缺省补默认值，越界收敛 */
+  it('git 页文件树 / 提交列表 / 改动文件清单的宽度缺省用默认值，越界收敛', () => {
+    expect(sanitizeTheme({}).gitTreeWidth).toBe(GIT_TREE_WIDTH_DEFAULT)
+    expect(sanitizeTheme({}).gitHistoryWidth).toBe(GIT_HISTORY_WIDTH_DEFAULT)
+    expect(sanitizeTheme({}).gitFilesWidth).toBe(GIT_FILES_WIDTH_DEFAULT)
+    expect(clampGitTreeWidth(undefined)).toBe(GIT_TREE_WIDTH_DEFAULT)
+    expect(clampGitHistoryWidth('宽一点')).toBe(GIT_HISTORY_WIDTH_DEFAULT)
+    expect(clampGitFilesWidth(1)).toBe(GIT_FILES_WIDTH_MIN)
+    expect(sanitizeTheme({ version: THEME_VERSION, gitTreeWidth: 9999 }).gitTreeWidth).toBe(
+      GIT_TREE_WIDTH_MAX,
+    )
+    expect(sanitizeTheme({ version: THEME_VERSION, gitHistoryWidth: 1 }).gitHistoryWidth).toBe(
+      GIT_HISTORY_WIDTH_MIN,
+    )
+    expect(sanitizeTheme({ version: THEME_VERSION, gitFilesWidth: 240 }).gitFilesWidth).toBe(240)
   })
 
   it('卡片间距缺省用默认值，越界收敛', () => {

@@ -28,7 +28,7 @@
 - 定位：Windows 桌面应用（Tauri 2 + WebView2），一个窗口里管项目、记工作、写笔记、看 AI 用量；pnpm workspace monorepo
   （应用在 `apps/desktop/`，纯逻辑按域拆在 `packages/` 的 19 个 `@workbench/*` 包，见第 2 节），`Cargo.lock` 要提交；
   例外：`vendor-pi.mjs` 内部装 Pi 仍走 `npm install`（`resources/pi/` 要整树打进安装包，不能用符号链接布局）。
-- **联网边界：默认不联网、不上报任何数据；出口只有十五条，且都由用户显式开启** —— 清单与每条细则见
+- **联网边界：默认不联网、不上报任何数据；出口只有十四条，且都由用户显式开启** —— 清单与每条细则见
   [features-and-architecture.md](docs/features-and-architecture.md) 的「数据与隐私」一节，**动联网代码前先读那一节**。
   **不要新增网络出口、不往任何第三方服务发数据**；笔记里的外链图片、密码保险库（推的是用量同步那个仓库的 `vault/vault.json`，
   推上去的只有密文）都**不算**新出口；构建期内嵌 OAuth client_id/secret 与用户指定的禅道个人凭据是明确例外，后者不得随包分发。
@@ -46,13 +46,13 @@
   `reqwest`、`git2`、`sysinfo` 这类会拉进整套栈的 native / 运行时依赖。唯一例外是邮箱的 TLS（`schannel`，理由见 `mail.rs`）。
 - 唯一需要用户预装的外部程序是 **git**：`sync.rs` 的几处同步与 `skills.rs` 的版本提交 / 同步，外加只读探测
   （笔记 / 知识库 / AI 助手工作目录的 `repo_state`、技能库的 `skills::state`、工作日志生成用的项目仓库 `git log`）
-  与 Git 页的只读浏览器（`repo_git.rs`：`rev-parse` / `log` / `ls-tree` / `show` / `diff` / `cat-file -s`）。直启 `git.exe`（`proc::run_direct`），**不要**经 `cmd /C`；
+  与 Git 页的只读浏览器（`repo_git.rs`：`rev-parse` / `for-each-ref` / `log` / `ls-tree` / `show` / `diff` / `cat-file -s`）。直启 `git.exe`（`proc::run_direct`），**不要**经 `cmd /C`；
   子进程一律带 `GIT_TERMINAL_PROMPT=0`、`-c core.quotepath=false` 与 `--no-pager`（没有终端可问 / 中文文件名不被转义 / 别在管道里起分页器）；
   Git 页的只读命令再按需带 `--literal-pathspecs`（文件名里的 `*` / `?` / `[` 不是通配符）与 `--no-ext-diff` / `--no-textconv`
   （别让仓库自己的 `.gitattributes` 或 `diff.external` 执行外部程序）；
   超时与失败收敛成给用户看的提示。**只在用户自己那两个文件夹（笔记本、技能库）所在的仓库、项目目录与 Git 页里用户打开的仓库跑 git**：
   前两处可写（同步提交），**项目仓库与 Git 页的仓库一律只读**（项目仓库只跑 `git log` / `git config user.email`；
-  Git 页只跑上面那几条读命令），不 add / commit / push / fetch，
+  Git 页只跑上面那几条读命令；「切换分支」只把 `log` / `ls-tree` 的 ref 换成 `refs/heads/<name>`，**不 checkout / switch**），不 add / commit / push / fetch，
   且从不写它们的远端配置（不 `init`、不 `remote add` / `set-url`；只在仓库没配过身份时写一次本地 `user.email` / `user.name` 兜底）。
   别处不新增这类外部依赖。
 - VS Code 与微信是仅有的两个**可选**外部程序，各只服务一个功能，没装只影响那一处：
@@ -93,10 +93,10 @@
   后五个是独立窗口、各自的 JS 上下文，**只装适配层，不装 store、不 initState**
   —— 装了会与主窗口抢着读 / 写同一批数据文件（见 [screenshot.md](docs/modules/screenshot.md)、
   [float-ball.md](docs/modules/float-ball.md)、[video.md](docs/modules/video.md)、[notes.md](docs/modules/notes.md)）。
-- **禅道是一扇独立窗口**（顶栏那一排右侧、收起 / 展开菜单那颗右边的图标打开，通知点击也开它），里面直接加载禅道站点、用系统标题栏：
-  它是唯一的**远程来源窗口**，**不登记任何 capability**（远程来源不给 IPC，见 [zentao.md](docs/modules/zentao.md)）。
-  别把它做进页面里当 iframe（服务端 `X-Frame-Options: SAMEORIGIN` 会拒绝渲染），也别自绘窗口按钮
-  （自绘的按钮盖不住远程页面 —— 原生画面与 HTML 是两层）。
+- **禅道不在应用里打开**：顶栏那一排右侧、收起 / 展开菜单那颗右边的图标（通知点击也走它）把配置里的部署根
+  交给系统默认浏览器；应用里不做禅道页签、不嵌 iframe（服务端 `X-Frame-Options: SAMEORIGIN` 会拒绝渲染），
+  也不再建独立窗口。浏览器里没有应用的登录态：**不做自动登录、不把账号密码拼进地址**，网页登录由用户自己登一次；
+  应用发出的请求仍只读，细则见 [zentao.md](docs/modules/zentao.md)。
 - 域包之间与应用对域包一律**按包名导入**（`@workbench/<包>`，只走各包 `index.ts` 桶）；解析走 pnpm 的 workspace 软链 + 各包
   `exports`（TS 源码直出），TS 检查由根目录唯一的 `tsconfig.json` / `tsconfig.test.json` 的 paths 兜底。渲染层内部别名
   `@` → `apps/desktop/src/renderer/src`（`@shared` 已随拆包删除）。单测与被测模块同目录，命名 `*.test.ts`。
@@ -183,7 +183,7 @@ asset 协议、读取权限在 Rust 侧按单个文件授予）、**通道一律
 | 用量与外观同步、账号登录 | [sync-and-auth](docs/modules/sync-and-auth.md) |
 | 密码保险库（密钥 / 加解密 / 多机共写一份文件） | [vault](docs/modules/vault.md) |
 | 邮箱（IMAP 收信 / SMTP 发信 / 授权码 / 联网出口） | [mail](docs/modules/mail.md) |
-| 禅道（API 登录 / 内存会话 / 独立窗口与免登录 / 后台检查与通知） | [zentao](docs/modules/zentao.md) |
+| 禅道（API 登录 / 后台检查与通知 / 浏览器打开站点） | [zentao](docs/modules/zentao.md) |
 | 截图与钉图（抓屏 / 标注 / 剪贴板 / 置顶图窗口） | [screenshot](docs/modules/screenshot.md) |
 | 网速球（自由摆放 / 贴边收起 / 网卡计数取样） | [float-ball](docs/modules/float-ball.md) |
 | ETF 资金流（份额 / 净值 / 净申赎 / 五年回填） | [etf](docs/modules/etf.md) |

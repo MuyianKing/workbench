@@ -9,7 +9,7 @@ import { accountLabel } from '@workbench/auth'
  * 进出编辑态画布不会上下跳，而那颗「编辑布局」按钮本来就在这一行的右端。
  *
  * 最左边那颗是「隐藏 / 显示菜单」（折叠左侧导航栏），禅道那颗紧跟在它右边：
- * 禅道在应用里没有页签，只有一扇独立窗口，入口就放在这一排里（见 docs/modules/zentao.md）。
+ * 禅道在应用里没有页签，那颗图标用系统浏览器打开禅道站点，入口就放在这一排里（见 docs/modules/zentao.md）。
  */
 import { computed, ref } from 'vue'
 import AccountDialog from '@/components/AccountDialog.vue'
@@ -57,7 +57,7 @@ function toggleNav(): void {
 }
 
 /**
- * 打开（或聚焦）禅道：那扇独立窗口在 Rust 侧建、免登录也在那边做，这里只管叫一声，
+ * 用系统浏览器打开禅道：地址由 Rust 从内嵌配置读取，这里只管叫一声，
  * 失败了给一句提示。这条路是禅道唯一的入口 —— 应用里没有禅道页签。
  */
 const zentaoOpening = ref(false)
@@ -71,7 +71,7 @@ async function openZentao(): Promise<void> {
       notifyError(message)
   }
   finally {
-    // 开窗失败不该把按钮永远留在禁用态（open() 走的是 Result，不会 reject，这是兜底）
+    // 打开失败不该把按钮永远留在禁用态（open() 走的是 Result，不会 reject，这是兜底）
     zentaoOpening.value = false
   }
 }
@@ -92,7 +92,7 @@ async function openZentao(): Promise<void> {
         @click="toggleNav"
       />
 
-      <!-- 禅道：独立窗口，见 docs/modules/zentao.md —— 与上面那颗折叠按钮同一排 -->
+      <!-- 禅道：交给系统浏览器打开，见 docs/modules/zentao.md —— 与上面那颗折叠按钮同一排 -->
       <el-button
         class="icon-btn"
         :icon="List"

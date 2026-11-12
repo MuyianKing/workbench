@@ -86,6 +86,23 @@ const props = defineProps<{
   allowImageUpload?: boolean
   /** 空文档时的提示语；不传用笔记页那一句（含 Ctrl+/ 说明），独立窗口用简短版 */
   placeholder?: string
+  /**
+   * 大纲栏的落点（笔记页与独立 Markdown 窗口布局里的那条右栏）。
+   *
+   * Vditor 把大纲建在编辑器自己的正文区里，于是它只能从正文顶部开始 ——
+   * 比页头（标题 / 保存状态）低一整行，跟页头对不齐。上层传一个右栏容器进来，
+   * 初始化完成后把大纲那枚元素搬过去：开合、内容与跳转都还是 Vditor 的，
+   * 只是换了个待着的地方。不传就留在原处（默认关着，从右键菜单才开）。
+   */
+  outlineHost?: HTMLElement | null
+  /**
+   * 大纲钉在右侧、始终开着（独立 Markdown 窗口用）。
+   *
+   * 那边没有标题行、也没有开关：右侧那条目录栏是固定的，初始化完成后直接打开；
+   * 右键菜单里的「大纲」项在这一档不出现（否则能从菜单把它关掉，栏里剩一条空白）。
+   * 笔记页不传：那边按需打开，开合由标题行那颗图标键说了算。
+   */
+  outlinePinned?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -95,14 +112,21 @@ const emit = defineEmits<{
    * 带上路径而不是让上层去看「当前打开的是哪一篇」：换篇时这里会先把上一篇没写完的改动冲出去，
    * 而那一刻上层的选中项已经是新的一篇了（按选中项取就会把上一篇的正文写进刚点开的那一篇）。
    */
-  change: [payload: { rel: string, content: string }]
+  'change': [payload: { rel: string, content: string }]
   /**
    * 正文里点了一个指向**本笔记本里另一篇笔记**的链接（`[标题](./别的.md)`）：请上层打开它。
    *
    * 这里只做到「链接指向哪一篇」（相对路径的解析是纯函数，见 packages/notes/src/note.ts 的 resolveNoteLink）；
    * 那一篇在不在、要不要重扫一遍树、跳过去之后选中谁，都是上层的事。
    */
-  open: [rel: string]
+  'open': [rel: string]
+  /**
+   * 大纲开了 / 关了（每次真正变化时报一次）。
+   *
+   * 笔记页拿它决定右边那条大纲栏显不显示：栏的位置在页面布局里，开合状态却在
+   * Vditor 手里（它把 display 写在大纲元素上），所以这里替它转达一声。
+   */
+  'outline-change': [open: boolean]
 }>()
 
 /** 笔记页那句提示：工具带藏起来之后，格式入口与两处隐形快捷键都在这里说清楚 */
@@ -329,7 +353,21 @@ function discardAndReload(node: NoteDocument): void {
  * 都算数，行为与从前一样。
  */
 async function onClick(event: MouseEvent): Promise<void> {
-  const node = (event.target as HTMLElement | null)?.closest('[data-type="a"]')
+  const target = event.target as HTMLElement | null
+
+  /**
+   * 大纲（右侧那一栏目录）与工具带都是编辑器自己的东西，点击要交给 Vditor。
+   *
+   * **只读那一档必须在这里让路**：
+   *  - 工具带：开合大纲靠「点工具带上那颗按钮」（右键菜单与标题行那颗按钮都走这条路），
+   *    而工具带就在 `.editor` 里 —— 一条 `stopPropagation` 会把这一下吞掉，表现成
+   *    「只读下大纲打不开」（踩过）；
+   *  - 大纲：点标题要交给 Vditor 去滚正文。
+   */
+  if (target?.closest('.vditor-toolbar, .vditor-outline'))
+    return
+
+  const node = target?.closest('[data-type="a"]')
   if (!(node instanceof HTMLElement)) {
     /**
      * 只读：不是链接的那一下也不放它过去。
@@ -413,7 +451,7 @@ function openMenu(event: MouseEvent): void {
  * 代价是动作名必须与 TOOLBAR 对得上，点不到时只在这里留一句告警（工具带是藏着的，界面上看不出来）。
  */
 function runAction(name: string): void {
-  const elements = editor?.vditor.toolbar?.elements
+  const elements = editor?.vditor?.toolbar?.elements
   if (!elements)
     return
 
@@ -427,6 +465,76 @@ function runAction(name: string): void {
   }
 
   target.click()
+
+  // 大纲的开合不经过我们（Vditor 自己写 display），这里顺手把状态同步出去。
+  // 右键菜单与标题行那颗按钮都走这条，所以这一处就够
+  if (name === 'outline')
+    syncOutlineOpen()
+}
+
+/** 大纲此刻开没开（Vditor 不对外暴露状态，开合落在元素的行内 display 上） */
+const outlineOpen = ref(false)
+
+/** 把「实际开没开」同步成事件；真正变了才报 */
+function syncOutlineOpen(): void {
+  // `editor` 有值不代表 `vditor` 已经建好：Vditor 的初始化是异步的，
+  // 宿主那一侧的 watcher 可能比它先跑（见 attachOutline）
+  const vditor = editor?.vditor
+  if (!vditor)
+    return
+
+  const open = vditor.outline.element.style.display === 'block'
+  if (open === outlineOpen.value)
+    return
+  outlineOpen.value = open
+  emit('outline-change', open)
+}
+
+/**
+ * 把大纲元素搬进上层给的右栏。
+ *
+ * **只有初始化完成之后 `vditor` 才存在**（Vditor 初始化是异步的，元素那会儿才挂进它
+ * 自己的正文区），所以这里必须连 `vditor` 一起判空 —— 宿主是上层模板里的一个 ref，
+ * 它的 watcher 可能比初始化先跑（不判会抛 `Cannot read properties of undefined`）。
+ * 搬过去之后 Vditor 照旧拿着这个元素的引用 —— `toggle` 设 display、`render` 写 innerHTML
+ * 都不看它在谁名下，所以行为不变。
+ */
+function attachOutline(): void {
+  const vditor = editor?.vditor
+  const host = props.outlineHost
+  if (!vditor || !host)
+    return
+
+  const element = vditor.outline.element
+  if (element.parentElement === host)
+    return
+  host.appendChild(element)
+}
+
+/**
+ * 开关右侧的大纲（目录结构）。
+ *
+ * 与右键菜单里那一项走同一条路：**点工具带上那颗按钮**。`options.outline.enable`
+ * 与按钮的选中态都由 Vditor 自己维护，所以这里不留第二份状态 —— 开没开看右栏那块
+ * 面板本身。工具带虽然藏着（见样式），按钮照旧在 DOM 里、照旧点得动；
+ * 只读那一档也没把它禁掉（`disabled()` 只禁带编辑动作的那批）。
+ */
+function toggleOutline(): void {
+  runAction('outline')
+}
+
+/**
+ * 大纲还没开就打开它（`outlinePinned` 那一档在初始化完成时调一次）。
+ *
+ * 不走 `toggleOutline` 直接调用是因为它是「开关」：已经开着时再点一下就关了。
+ * 初始化那一刻正常是关着的，但 `setValue` / 切主题之类重渲染后未必 —— 这里按
+ * 元素自己的 `display` 判断实际状态（与 `syncOutlineOpen` 同一个口径）。
+ */
+function ensureOutlineOpen(): void {
+  const element = editor?.vditor?.outline?.element
+  if (!element || element.style.display === 'block')
+    return
+  toggleOutline()
 }
 
 /**
@@ -580,12 +688,32 @@ onMounted(() => {
      * 关掉之后点击全归下面那个 onClick，Vditor 那一段只剩一次 `return`。
      */
     link: { isOpen: false },
+    /**
+     * 大纲（目录结构）在**右侧、按需打开**。
+     *
+     * `enable` 保持 false：进这一页不先占掉正文 250px，要目录时从标题行那颗按钮
+     * （或右键菜单的「大纲」）开一下 —— 两个入口点的都是工具带上那颗按钮。
+     * 位置只能是 left / right，这里定死 right。
+     */
+    outline: { enable: false, position: 'right' },
     toolbar: TOOLBAR,
     input: value => schedule(value),
-    // 初始化完成那一刻核一遍只读（编辑器可能是「已经切到只读之后」才建起来的）
-    after: applyReadOnly,
+    // 初始化完成那一刻：核一遍只读（编辑器可能是「已经切到只读之后」才建起来的）、
+    // 把大纲搬进右栏、再把它的开合状态同步一次；钉死那一档顺手打开它
+    after: () => {
+      applyReadOnly()
+      attachOutline()
+      syncOutlineOpen()
+      if (props.outlinePinned)
+        ensureOutlineOpen()
+    },
   })
 })
+
+watch(
+  () => props.outlineHost,
+  () => attachOutline(),
+)
 
 watch(
   () => props.note.rel,
@@ -608,6 +736,15 @@ watch(() => props.readOnly, applyReadOnly)
 onBeforeUnmount(() => {
   // 卸载前把没写完的那一段交出去：防抖窗口里切走不该丢字（同样是现取，道理见 flush）
   flush(currentValue())
+  // 大纲元素是我们搬到右栏里的，`destroy()` 只管它自己那棵树 —— 不摘掉的话，
+  // 它会留在那条栏里没人清理，下一位编辑器进来再挂一个，两块并排
+  const outline = editor?.vditor?.outline?.element
+  if (outline?.parentElement && outline.parentElement === props.outlineHost)
+    outline.remove()
+  if (outlineOpen.value) {
+    outlineOpen.value = false
+    emit('outline-change', false)
+  }
   editor?.destroy()
   editor = null
 })
@@ -635,6 +772,8 @@ defineExpose({
   hasUnsaved,
   /** 丢掉手上这一份、整份换成 `node`（上层确认「按磁盘重读」之后才用；不 flush） */
   discardAndReload,
+  /** 开关右侧大纲（标题行那颗按钮用；与右键菜单「大纲」同一个动作） */
+  toggleOutline,
 })
 </script>
 
@@ -670,7 +809,15 @@ defineExpose({
   </div>
 
   <!-- 菜单挂在 body 上（见组件里的 Teleport）：它是浮层，定位与层叠都不必看这张卡片与别处的脸色 -->
-  <NoteContextMenu v-if="menu" :x="menu.x" :y="menu.y" @act="runAction" @close="menu = null" />
+  <!-- 菜单挂在 body 上（见组件里的 Teleport）；大纲钉死那一档不摆「大纲」项，免得把固定栏关成空条 -->
+  <NoteContextMenu
+    v-if="menu"
+    :x="menu.x"
+    :y="menu.y"
+    :hidden="outlinePinned ? ['outline'] : []"
+    @act="runAction"
+    @close="menu = null"
+  />
 </template>
 
 <style scoped>
@@ -732,6 +879,36 @@ defineExpose({
 
 .editor :deep(.vditor-content) {
   background: transparent;
+}
+
+/**
+ * 右侧大纲（目录结构）：Vditor 自带的 `outline`，开到 `position: 'right'`。
+ *
+ * 它默认是编辑器自己的样子，直接嵌进这张半透明卡片会有三处不对，所以整片换成应用这一套：
+ *  1. **底色**：它铺的是 `--panel-background-color`（亮色纯白、暗色 #24292e），
+ *     而这一页的底色归卡片 —— 铺上去就是右栏嵌了一块实心（与正文透明那条同一个理由）；
+ *  2. **边线与字色**：那条 `#d1d5da` 比卡片还亮（与引用块那条竖线同一个坑），
+ *     悬停色默认是它写死的蓝，而这一页的交互色跟主题走；
+ *  3. **字体**：Vditor 根节点挂的是 Helvetica Neue 那一套，大纲是界面文字、不是正文。
+ *
+ * 宽度留它自己的 250px：那是它内部布局（标题栏、缩进、折叠箭头）算好的那一档。
+ */
+.editor :deep(.vditor-outline) {
+  --border-color: var(--border);
+  --panel-background-color: transparent;
+  --toolbar-icon-color: var(--ink-3);
+  --toolbar-icon-hover-color: var(--ink);
+  background-color: transparent;
+  border-left-color: var(--border);
+  font-family: var(--font-ui);
+  font-size: var(--fs-body);
+}
+
+/* 栏首那行「大纲」：虚线换成实线，字色与字号跟界面小标题同一档 */
+.editor :deep(.vditor-outline__title) {
+  border-bottom-style: solid;
+  color: var(--ink-3);
+  font-size: var(--fs-meta);
 }
 
 /**

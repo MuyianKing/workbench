@@ -264,7 +264,6 @@ fn attach_window_events(window: &tauri::WebviewWindow) {
 /// （见 @workbench/mail 的 htmlBody），在这里拦下：应用自己的页面照常放行，
 /// 其余 http(s) / mailto 交给系统浏览器开，别的 scheme 一律取消 ——
 /// 邮件的 HTML 不带宿主能力，这条边界不因放行链接而破。
-/// 禅道窗口是另一扇窗（zentao.rs），有它自己的导航边界。
 pub(crate) fn handle_navigation(url: &tauri::Url) -> bool {
     let text = url.as_str();
     let own = text.starts_with("http://tauri.localhost")
@@ -575,7 +574,6 @@ fn main() {
         .manage(md_window::MdWindows::default())
         .manage(zentao::ZentaoState::default())
         .manage(zentao::ZentaoWatch::default())
-        .manage(zentao::ZentaoWindowState::default())
         .invoke_handler(tauri::generate_handler![
             commands::data_load,
             commands::data_save,
@@ -587,6 +585,7 @@ fn main() {
             commands::work_log_save,
             commands::project_git_log,
             repo_git::repo_git_open,
+            repo_git::repo_git_branches,
             repo_git::repo_git_commits,
             repo_git::repo_git_file_commits,
             repo_git::repo_git_tree,
@@ -692,6 +691,8 @@ fn main() {
             commands::etf_sync_pull,
             commands::activity_sync_publish,
             commands::activity_sync_shards,
+            commands::work_log_sync_publish,
+            commands::work_log_sync_pull,
             commands::auth_status,
             commands::auth_refresh_account,
             commands::auth_login_start,
@@ -706,7 +707,7 @@ fn main() {
             commands::zentao_watch,
             commands::zentao_notify,
             commands::zentao_products,
-            commands::zentao_open_window,
+            commands::zentao_open_site,
             commands::check_port,
             commands::kill_port_process,
             commands::reveal,
@@ -826,7 +827,6 @@ fn main() {
             qd_gateway::wb_qoder_perks_status,
             qd_gateway::wb_qoder_checkin,
             qd_gateway::wb_qoder_claim_campaigns,
-            qd_gateway::wb_qoder_credit_heatmap,
             qd_gateway::wb_qoder_activity_today,
             qd_gateway::wb_qoder_earnings,
             qd_gateway::wb_qoder_perks_auto_config,

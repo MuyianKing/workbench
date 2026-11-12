@@ -1,8 +1,9 @@
 /**
  * Git 页的数据形状：宿主（`repo_git.rs`）返回什么、渲染层吃什么。
  *
- * 这里只有「读」：仓库信息、提交、目录树、文件历史、两个提交之间的改动与单文件补丁。
- * 没有暂存 / 提交 / 分支这些写操作的类型 —— Git 页是只读浏览器（见 docs/modules/git-client.md）。
+ * 这里只有「读」：仓库信息、分支清单、提交、目录树、文件历史、两个提交之间的改动与单文件补丁。
+ * 没有暂存 / 提交 / 切分支这些写操作的类型 —— Git 页是只读浏览器，分支只决定看哪条 ref
+ * （见 docs/modules/git-client.md）。
  *
  * 时间一律是**毫秒**（宿主把 git 的 `%at` 秒换成毫秒再回来），与全应用其余时间字段一致。
  */
@@ -12,6 +13,13 @@ export interface GitRepoInfo {
   root: string
   /** 根目录的末段，界面上显示的名字 */
   name: string
+  /**
+   * 用户选中的目录相对仓库根的位置（`/` 分隔，空串 = 仓库根本身）。
+   *
+   * 左栏目录树只展开这个子树；提交 / 文件历史 / 补丁仍按仓库根解释路径 ——
+   * 用户可能只打开仓库里的一个子项目，而 `.git` 在外层。
+   */
+  scope: string
   /** 当前 HEAD 的完整提交号；空仓库时为空串 */
   head: string
   /** 短提交号（7 位左右）；空仓库时为空串 */
@@ -22,6 +30,12 @@ export interface GitRepoInfo {
   detached: boolean
   /** 还没有第一次提交（仍可打开，只是没有历史与目录树） */
   empty: boolean
+}
+
+/** 本地分支清单：只用于「看哪条分支的历史」，不切工作区 */
+export interface GitBranchList {
+  /** `refs/heads` 里的短名，最近提交的排在前面 */
+  branches: string[]
 }
 
 export interface GitCommit {

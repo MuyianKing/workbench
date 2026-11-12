@@ -1,19 +1,20 @@
-import type { GitCommitLog, GitWorkLogDraft, WorkLogEntry, WorkLogFile, WorkLogInput, WorkLogPatch } from '@workbench/work-log'
+import type { GitCommitLog, GitWorkLogDraft, WorkLogEntry, WorkLogFile, WorkLogInput, WorkLogPatch, WorkLogShard, WorkLogSyncOutcome } from '@workbench/work-log'
 import type { Result } from '@/types'
 import { fail, ok } from '@workbench/core'
 /**
  * 工作日志（本地 `work-log.json`）的适配层实现。
  *
- * 与 Token 用量那套的区别在于**没有同步**：这份数据只在本机，读写路径就是
- * 「读一次文件 → 内存里增删改 → 整份写回」，没有分片、没有合并、没有跨设备语义
- * （见 packages/work-log/src/work-log.ts 的文件头）。
+ * 本机读写是「读一次文件 → 内存里增删改 → 整份写回」；配了同步仓库时再按设备分片
+ * 推 / 拉（`work-log/<设备id>.json`，合并规则在 @workbench/work-log 的 `work-log-sync.ts`）。
+ * 同步走 Token 同步那个仓库，没登录 / 没配地址时安静跳过 —— 本机数据照常完整。
  *
  * 文件是懒加载的：首屏不读它，第一次进「工作」页时才把整份取回来，
  * 之后一直在内存里维护，每次改动整份落盘（防抖在 Rust 侧）。
  */
-import { appendGitContent, createWorkLogEntry, emptyWorkLog, mergeGitCommits, parseGitCommitLog, parseWorkLog, patchWorkLogEntry, sanitizeCommitHashes } from '@workbench/work-log'
+import { appendGitContent, createWorkLogEntry, emptyWorkLog, mergeGitCommits, mergeWorkLogShards, parseGitCommitLog, parseWorkLog, patchWorkLogEntry, sameWorkLogFile, sanitizeCommitHashes, sanitizeWorkLogShard, workLogShardOf } from '@workbench/work-log'
 import { recordActivity } from './activity'
 import { errorText, invoke } from './bridge'
+import { localDevice } from './token'
 
 let file: WorkLogFile = emptyWorkLog()
 let loaded = false
@@ -67,7 +68,8 @@ export async function addWorkLog(input: WorkLogInput): Promise<Result<WorkLogEnt
   try {
     await ensureLoaded()
     // 工作内容必填：界面已经拦过一次，这里是兜底（与状态机同口径的校验留在 shared）
-    const entry = createWorkLogEntry(input, () => crypto.randomUUID())
+    const device = await localDevice()
+    const entry = createWorkLogEntry({ ...input, by: device.id }, () => crypto.randomUUID())
     if (!entry)
       return fail('工作内容不能为空')
 
@@ -106,9 +108,16 @@ export async function updateWorkLog(
 export async function removeWorkLog(id: string): Promise<Result<null>> {
   try {
     await ensureLoaded()
-    const next = file.entries.filter(entry => entry.id !== id)
-    if (next.length !== file.entries.length) {
-      file.entries = next
+    const index = file.entries.findIndex(entry => entry.id === id)
+    if (index !== -1) {
+      const [removed] = file.entries.splice(index, 1)
+      // 删除留墓碑：别的设备靠它知道这条被删了，而不是下一轮又把它读回来
+      const device = await localDevice()
+      const deletedAt = Math.max(Date.now(), removed.updatedAt + 1)
+      file.tombstones = [
+        ...file.tombstones.filter(item => item.id !== id),
+        { id, updatedAt: deletedAt, by: device.id },
+      ]
       persist()
     }
     return ok(null)
@@ -121,15 +130,19 @@ export async function removeWorkLog(id: string): Promise<Result<null>> {
 /**
  * 读一个项目仓库的提交记录（宿主侧只读、本地）。
  *
- * `since` 是毫秒时间戳：宿主侧拿它做 git 的 `--since` 粗筛，精确到天的过滤在
- * `@workbench/work-log` 的 `buildGitDrafts` 里做 —— git 的日期边界按提交时间算，
+ * `since` / `until` 是毫秒时间戳：宿主侧拿它们做 git 的 `--since` / `--until` 粗筛，
+ * 精确到天的过滤在 `@workbench/work-log` 的 `buildGitDrafts` 里做 —— git 的日期边界按提交时间算，
  * 而分组按作者时间，两边不是同一套口径，不能拿它当边界。
  *
  * 不是 git 仓库时 `isRepo: false` 是正常结果，不是失败。
  */
-export async function projectGitLog(dir: string, since?: number): Promise<Result<GitCommitLog>> {
+export async function projectGitLog(
+  dir: string,
+  since?: number,
+  until?: number,
+): Promise<Result<GitCommitLog>> {
   try {
-    const raw = await invoke<unknown>('project_git_log', { dir, since })
+    const raw = await invoke<unknown>('project_git_log', { dir, since, until })
     return ok(parseGitCommitLog(raw))
   }
   catch (error) {
@@ -149,6 +162,7 @@ export async function importGitDrafts(
   try {
     await ensureLoaded()
     const now = Date.now()
+    const device = await localDevice()
     const changed: WorkLogEntry[] = []
     let created = 0
 
@@ -164,11 +178,13 @@ export async function importGitDrafts(
         const index = file.entries.findIndex(entry => entry.id === appendTo)
         if (index !== -1) {
           const entry = file.entries[index]
+          const projectName = entry.projectName ?? draft.projectName
           const next: WorkLogEntry = {
             ...entry,
             content: appendGitContent(entry.content, content),
             source: { kind: 'git', commits: mergeGitCommits(entry.source?.commits, commits) },
             updatedAt: now,
+            ...(projectName ? { projectName } : {}),
           }
           file.entries[index] = next
           changed.push(copy(next))
@@ -180,9 +196,11 @@ export async function importGitDrafts(
       const entry = createWorkLogEntry({
         date: draft.date,
         projectId: draft.projectId,
+        projectName: draft.projectName,
         content,
         status: 'done',
         source: { kind: 'git', commits },
+        by: device.id,
       }, () => crypto.randomUUID(), now)
       if (!entry)
         continue
@@ -204,5 +222,52 @@ export async function importGitDrafts(
   }
   catch (error) {
     return fail(errorText(error, '导入提交记录失败'))
+  }
+}
+
+/**
+ * 同步一轮：拉别的设备的分片 → 合并进本机 → 推本机分片。
+ *
+ * 与活跃度不同：合并结果**写回本机**（条目可编辑 / 可删除，只在内存里看一眼的话，
+ * 这边改了删了没有落点，下一轮又从别处读回来）。分片是本机合并后的快照，单写者。
+ */
+export async function syncWorkLog(
+  repo: string,
+  device: { id: string, name: string },
+): Promise<Result<WorkLogSyncOutcome>> {
+  try {
+    await ensureLoaded()
+    if (!repo.trim())
+      return ok({ enabled: false, changed: false, device: device.id, entries: copy(file.entries) })
+
+    // 先拉最新：命令里先刷新克隆再读（本机那份由 Rust 跳过，避免把自己再合一遍）
+    const raw = await invoke<unknown>('work_log_sync_pull', { repo, device: device.id })
+    const shards: WorkLogShard[] = []
+    for (const item of Array.isArray(raw) ? raw : []) {
+      const shard = sanitizeWorkLogShard(item)
+      if (shard)
+        shards.push(shard)
+    }
+
+    const merged = mergeWorkLogShards(file, shards)
+    const changed = !sameWorkLogFile(file, merged)
+    if (changed) {
+      file = merged
+      persist()
+    }
+
+    // 有内容才建分片：一台从没记过工作日志的机器不必在仓库里留下一个空文件
+    if (file.entries.length || file.tombstones.length) {
+      await invoke('work_log_sync_publish', {
+        repo,
+        device: device.id,
+        shard: workLogShardOf(device.id, device.name, file),
+      })
+    }
+
+    return ok({ enabled: true, changed, device: device.id, entries: copy(file.entries) })
+  }
+  catch (error) {
+    return fail(errorText(error, '同步工作日志失败'))
   }
 }

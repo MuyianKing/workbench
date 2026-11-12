@@ -31,6 +31,25 @@ export interface ParsedPatch {
   truncated: boolean
 }
 
+/** 并排视图里的一侧：行号 + 行内容 */
+export interface SplitCell {
+  no: number
+  text: string
+}
+
+export type SplitRowType = 'hunk' | 'note' | 'equal' | 'change' | 'del' | 'add'
+
+/** 并排（split）视图的一行：左右各一侧；hunk 头与说明行是跨两栏的整行 */
+export interface SplitRow {
+  type: SplitRowType
+  /** hunk 头 / 「文件末尾没有换行」这类说明行的整行文本 */
+  text?: string
+  /** 旧文本那一行；add 行没有 */
+  left: SplitCell | null
+  /** 新文本那一行；del 行没有 */
+  right: SplitCell | null
+}
+
 /** 默认最多解析多少行：几万行的补丁一次性铺进 DOM，滚动与选中都会变卡 */
 export const PATCH_ROW_MAX = 20_000
 
@@ -115,4 +134,86 @@ export function parsePatch(patch: string, maxRows = PATCH_ROW_MAX): ParsedPatch 
   }
 
   return { rows, truncated }
+}
+
+/**
+ * 统一 diff 的行模型 → 并排视图的行清单（GitHub split 那种左右对照）。
+ *
+ * 配对口径与 `@workbench/core` 的 `buildDiffRows` 一致：连续的删除块与新增块按顺序
+ * 一一配成 `change` 行（左旧右新），配剩的就是单边 `del` / `add` 行。
+ * 上下文行左右同文，hunk 头与说明行保留成整行；`meta` 行不进并排视图
+ * （组件本来就不显示它们）。
+ */
+export function buildSplitRows(rows: readonly PatchRow[]): SplitRow[] {
+  const split: SplitRow[] = []
+  /** 攒下的连续删除块与新增块：遇到上下文 / 下一个 hunk（或结尾）时配对清空 */
+  let removed: PatchRow[] = []
+  let added: PatchRow[] = []
+  /** 夹在删除与新增之间的说明行（「文件末尾没有换行」）：不打断配对，结块时补在最后 */
+  let notes: string[] = []
+
+  const flush = (): void => {
+    const paired = Math.min(removed.length, added.length)
+    for (let index = 0; index < paired; index += 1) {
+      const del = removed[index]
+      const add = added[index]
+      split.push({
+        type: 'change',
+        left: { no: del.oldNo ?? 0, text: del.text },
+        right: { no: add.newNo ?? 0, text: add.text },
+      })
+    }
+    for (let index = paired; index < removed.length; index += 1) {
+      const row = removed[index]
+      split.push({ type: 'del', left: { no: row.oldNo ?? 0, text: row.text }, right: null })
+    }
+    for (let index = paired; index < added.length; index += 1) {
+      const row = added[index]
+      split.push({ type: 'add', left: null, right: { no: row.newNo ?? 0, text: row.text } })
+    }
+    for (const text of notes)
+      split.push({ type: 'note', text, left: null, right: null })
+    removed = []
+    added = []
+    notes = []
+  }
+
+  for (const row of rows) {
+    if (row.type === 'del') {
+      // 新增块之后又出现删除行：先结掉上一组（正常补丁不会这样，防御一下）
+      if (added.length)
+        flush()
+      removed.push(row)
+      continue
+    }
+    if (row.type === 'add') {
+      added.push(row)
+      continue
+    }
+    if (row.type === 'note') {
+      if (removed.length || added.length) {
+        notes.push(row.text)
+        continue
+      }
+      split.push({ type: 'note', text: row.text, left: null, right: null })
+      continue
+    }
+
+    flush()
+    if (row.type === 'hunk') {
+      split.push({ type: 'hunk', text: row.text, left: null, right: null })
+      continue
+    }
+    if (row.type === 'context') {
+      split.push({
+        type: 'equal',
+        left: { no: row.oldNo ?? 0, text: row.text },
+        right: { no: row.newNo ?? 0, text: row.text },
+      })
+    }
+    // meta 行不显示
+  }
+  flush()
+
+  return split
 }

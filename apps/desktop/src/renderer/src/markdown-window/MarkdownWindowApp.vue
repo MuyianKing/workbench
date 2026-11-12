@@ -39,6 +39,14 @@ const note = ref<NoteDocument | null>(null)
 const theme = computed<'light' | 'dark'>(() => bootstrapSnapshot()?.theme ?? 'light')
 
 const editorRef = ref<InstanceType<typeof NoteEditor> | null>(null)
+/**
+ * 右侧大纲栏的落点。
+ *
+ * 大纲那枚元素是 Vditor 建的，NoteEditor 在初始化完成后把它搬进这里（`outlineHost`）；
+ * 这扇窗传了 `outlinePinned`，所以搬完之后直接打开、菜单里也不再有「大纲」一项 ——
+ * 它是一条固定的目录栏，不是可开关的面板。
+ */
+const outlineRail = ref<HTMLElement | null>(null)
 /** 磁盘上那一版的 mtime（读盘 / 每次落盘后更新），下一笔写盘拿它当基准 */
 let mtimeMs = 0
 /** 串行保存队列：只保证顺序，失败由 saveError 展示，不在这里 reject */
@@ -198,18 +206,27 @@ onBeforeUnmount(() => {
       </template>
     </EmptyState>
 
-    <NoteEditor
-      v-else-if="note"
-      ref="editorRef"
-      :note="note"
-      root=""
-      :theme="theme"
-      :read-only="false"
-      :allow-image-upload="false"
-      placeholder="写点什么…"
-      @change="onChange"
-      @open="onOpen"
-    />
+    <div v-else-if="note" class="md-body">
+      <NoteEditor
+        ref="editorRef"
+        :note="note"
+        root=""
+        :theme="theme"
+        :read-only="false"
+        :allow-image-upload="false"
+        placeholder="写点什么…"
+        :outline-host="outlineRail"
+        outline-pinned
+        @change="onChange"
+        @open="onOpen"
+      />
+
+      <!--
+        右侧大纲：与笔记页那条栏同一副样子（`.notes__rail`），差别只在这扇窗里**始终显示** ——
+        没有标题行的开关，`outlinePinned` 让 NoteEditor 初始化完成后直接把大纲打开。
+      -->
+      <aside ref="outlineRail" class="md-rail" />
+    </div>
 
     <!-- 保存失败只挂一条浮层：成功时窗口里什么都不多出来（这一页只有正文） -->
     <div v-if="saveError" class="save-error" role="alert">
@@ -232,6 +249,112 @@ onBeforeUnmount(() => {
   padding: var(--sp-4) var(--sp-5);
   /* 底色归窗口：编辑器自己透明（与笔记页同一条，见 NoteEditor 样式） */
   background: var(--bg-canvas);
+}
+
+/*
+ * 正文 + 右侧大纲栏：两列。大纲是固定的目录栏（这扇窗没有标题行、没有开关），
+ * 宽度不跟正文抢；栏收不起来，所以 gap 归零、只留左边那条发丝线。
+ */
+.md-body {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+
+/**
+ * 大纲栏：与笔记页的 `.notes__rail` 同一副样子（宽度 / 留白 / 发丝线都在那一份口径里，
+ * 改一处要同步另一处）。那边的栏按需显示、这边始终显示，样式本身没有分叉。
+ */
+.md-rail {
+  flex: 0 0 224px;
+  width: 224px;
+  min-height: 0;
+  margin-left: var(--sp-4);
+  padding-left: var(--sp-4);
+  border-left: 1px solid var(--border);
+  overflow: hidden;
+}
+
+/*
+ * 大纲本体（Vditor 自带的那枚元素，被 NoteEditor 搬到了这条栏里）。
+ * 搬出来之后这些变量不再继承自 `.vditor`，关键的几枚（边线 / 字色 / 悬停色）
+ * 要在栏这一层补一份，否则字会掉回浏览器默认色（与 NotesView 同一条）。
+ */
+.md-rail :deep(.vditor-outline) {
+  --border-color: var(--border);
+  --panel-background-color: transparent;
+  --textarea-text-color: var(--ink-2);
+  --toolbar-icon-color: var(--ink-3);
+  --toolbar-icon-hover-color: var(--ink);
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-family: var(--font-ui);
+  font-size: var(--fs-meta);
+}
+
+/* 栏首「大纲」：与笔记页同一个行高（28）与左缘（8 内边距 + 10 箭头 + 4 间距） */
+.md-rail :deep(.vditor-outline__title) {
+  padding: 0 0 var(--sp-2) 22px;
+  border-bottom: 1px solid var(--border);
+  color: var(--ink-3);
+  font-size: var(--fs-meta);
+  line-height: 28px;
+}
+
+/* 条目区：从分隔线下面一点开始，别贴着 */
+.md-rail :deep(.vditor-outline__content) {
+  padding-top: var(--sp-2);
+}
+
+/* 缩进：顶层不缩，子级按 12px 退一格 */
+.md-rail :deep(.vditor-outline__content > ul) {
+  padding-left: 0;
+}
+
+.md-rail :deep(.vditor-outline ul ul) {
+  padding-left: var(--sp-3);
+}
+
+/* 每一条：4px + 19px 行高 = 27px 的点击片，悬停铺一层浅底、四角收圆 */
+.md-rail :deep(.vditor-outline li > span) {
+  padding: 4px var(--sp-2);
+  border-radius: var(--r-sm);
+  color: var(--ink-2);
+  line-height: 19px;
+  transition: background-color 0.15s var(--ease-out), color 0.15s var(--ease-out);
+}
+
+.md-rail :deep(.vditor-outline li > span:hover) {
+  background-color: var(--bg-subtle);
+  color: var(--ink);
+}
+
+/* 层级：顶层用正墨色，子级弱一档 */
+.md-rail :deep(.vditor-outline__content > ul > li > span) {
+  color: var(--ink-2);
+}
+
+.md-rail :deep(.vditor-outline ul ul li > span) {
+  color: var(--ink-3);
+}
+
+/* 折叠箭头：小一号、弱一档；收起时 Vditor 自己加 `--close` 转半圈 */
+.md-rail :deep(.vditor-outline li > span > svg) {
+  width: 10px;
+  height: 10px;
+  margin-right: var(--sp-1);
+  color: var(--ink-3);
+  opacity: 0.75;
+  transition: transform 0.15s var(--ease-out);
+}
+
+.md-rail :deep(.vditor-outline li > span > span) {
+  line-height: 19px;
 }
 
 /*

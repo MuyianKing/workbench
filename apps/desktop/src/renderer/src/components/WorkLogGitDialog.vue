@@ -1,24 +1,26 @@
 <script setup lang="ts">
 import type { ProjectColor } from '@workbench/core'
-import type { GitWorkLogDraft, GitWorkLogInput, WorkLogEntry, WorkRange } from '@workbench/work-log'
+import type { GitWorkLogDraft, GitWorkLogInput, WorkLogEntry } from '@workbench/work-log'
 import { DocumentAdd } from '@element-plus/icons-vue'
-import { sanitizeProjectColor } from '@workbench/core'
-import { buildGitDrafts, dateOfDayKey, dayMeta, rangeBounds, WORK_RANGE_LABELS } from '@workbench/work-log'
+import { addDays, dayKey, projectColorVar, sanitizeProjectColor } from '@workbench/core'
+import { buildGitDrafts, dateOfDayKey, dayMeta } from '@workbench/work-log'
 import { ElMessage } from 'element-plus'
 /**
  * 从项目仓库的提交生成工作记录（预览后写入）。
  *
  * 读提交、分组、去重都在 `@workbench/work-log` 的 `git-import.ts` 里（纯逻辑，有单测）；
- * 这个弹窗只做三件事：按当前范围逐个项目读、把草稿摆出来让人改、确认后交给适配层写入。
+ * 这个弹窗负责三件事：选哪一天 / 哪些项目、把草稿摆出来让人改、确认后交给适配层写入。
+ * 日期范围必选（默认今天，可快捷选今天 / 昨天 / 本周），项目多选（默认空 = 全部项目；没选项目就生成前先确认一次）。
  *
  * 一个项目一天一条：同项目同一天已经有生成记录时标「追加」，新提交接在它后面；
  * 否则新建一条「已完成」。勾掉的行不写，正文被清空的行也跳过。
  */
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import AppDialog from '@/components/AppDialog.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import PanelLoading from '@/components/PanelLoading.vue'
 import ProjectTag from '@/components/ProjectTag.vue'
+import { confirmAction } from '@/notify'
 
 /** 预览里的一行：草稿 + 勾选状态（只有界面用，不落盘） */
 interface DraftRow extends GitWorkLogDraft {
@@ -30,9 +32,7 @@ const props = defineProps<{
   projects: { id: string, name: string, path: string, color?: ProjectColor }[]
   /** 当前工作日志（去重与「追加到哪条」都靠它） */
   entries: readonly WorkLogEntry[]
-  /** 当前范围；「待办」不是时段，页面不会在这一档打开这个弹窗 */
-  range: Exclude<WorkRange, 'todo'>
-  /** 页面的「现在」：范围边界与日期标题都按它算 */
+  /** 页面的「现在」：预览里的相对日期（今天 / 昨天 / 前天）按它算 */
   now: number
 }>()
 
@@ -43,6 +43,37 @@ const emit = defineEmits<{
 
 const open = defineModel<boolean>({ required: true })
 
+/** 生成哪一段（必选、默认今天）：两端都是本地日期键，不跟工作页顶部的档位联动 */
+const dateRange = ref<[string, string]>([dayKey(Date.now()), dayKey(Date.now())])
+/** 选中的项目 id：空 = 全部项目（默认空，可以不选） */
+const selectedIds = ref<string[]>([])
+
+/**
+ * 日期快捷项：与工作页顶栏那几档同一口径 —— 本周从周一起算。
+ * 返回 Date，选择器按 value-format 落成本地日期键。
+ */
+const dateShortcuts = [
+  {
+    text: '今天',
+    value: () => [new Date(), new Date()],
+  },
+  {
+    text: '昨天',
+    value: () => {
+      const day = addDays(new Date(), -1)
+      return [day, day]
+    },
+  },
+  {
+    text: '本周',
+    value: () => {
+      const today = new Date()
+      const monday = addDays(today, -((today.getDay() + 6) % 7))
+      return [monday, addDays(monday, 6)]
+    },
+  },
+]
+
 const rows = ref<DraftRow[]>([])
 const loading = ref(false)
 const saving = ref(false)
@@ -50,8 +81,23 @@ const saving = ref(false)
 const warnings = ref<string[]>([])
 
 const checkedCount = computed(() => rows.value.filter(row => row.checked).length)
+const commitCount = computed(() => rows.value.reduce((sum, row) => sum + row.commits.length, 0))
 const submitLabel = computed(() => (checkedCount.value ? `生成 ${checkedCount.value} 条` : '生成'))
-const emptyText = computed(() => `${WORK_RANGE_LABELS[props.range]}没有可导入的提交`)
+
+/** 空态标题里的日期范围：同一天说「今天 / 昨天 / 前天」，跨天报日期区间 */
+const rangeTitle = computed(() => {
+  const range = dateRange.value
+  if (!range || !range[0] || !range[1])
+    return ''
+
+  const [from, to] = range
+  if (from === to) {
+    const meta = dayMeta(from, props.now)
+    return meta.relative || meta.title || from
+  }
+  return `${dayMeta(from, props.now).title || from} – ${dayMeta(to, props.now).title || to}`
+})
+const emptyText = computed(() => `${rangeTitle.value}没有可导入的提交`)
 /** 空态第二行：先说是哪个项目出了问题，再退回「为什么没有」的常规解释 */
 const emptyHint = computed(() => {
   if (warnings.value.length)
@@ -61,35 +107,63 @@ const emptyHint = computed(() => {
   return '已导入过的提交不会重复出现。'
 })
 
+/** 下拉里的项目（带上标识色，选的时候就能对上号） */
+const projectOptions = computed(() => props.projects.map(project => ({
+  id: project.id,
+  name: project.name,
+  color: sanitizeProjectColor(project.color),
+})))
+
 /** 项目色：预览里的标签与时间轴上那枚同一个来源 */
 function colorOf(projectId: string): ProjectColor | undefined {
   return sanitizeProjectColor(props.projects.find(project => project.id === projectId)?.color)
 }
 
 /**
- * git `--since` 的粗筛点（毫秒）。
+ * 选中日期范围对应的粗筛区间（毫秒）。
  *
- * 从范围起始日的本地零点再往前放一天：`--since` 按提交时间算，而分组按作者时间，
+ * 两端各放一天：`--since` / `--until` 按提交时间算，而分组按作者时间，
  * 两者在 rebase / cherry-pick 之后会差开；多放一天只是让 git 多回几条，
- * 精确的日期过滤在 `buildGitDrafts` 里按作者时间做。
+ * 精确到天的过滤在 `buildGitDrafts` 里按作者时间做。
  */
-function sinceOf(range: Exclude<WorkRange, 'todo'>, now: number): number | undefined {
-  const start = dateOfDayKey(rangeBounds(range, now).from).getTime()
-  return Number.isFinite(start) ? start - 86_400_000 : undefined
+function boundsOf(from: string, to: string): { since: number, until: number } | null {
+  const start = dateOfDayKey(from).getTime()
+  const end = dateOfDayKey(to).getTime()
+  if (!Number.isFinite(start) || !Number.isFinite(end))
+    return null
+  return { since: start - 86_400_000, until: end + 2 * 86_400_000 }
 }
 
+/** 在途读取的代号：改日期 / 改项目后，早先那次读回来的结果直接丢掉 */
+let loadToken = 0
+let reloadTimer: number | null = null
+
 async function load(): Promise<void> {
+  const token = ++loadToken
   loading.value = true
   rows.value = []
   warnings.value = []
 
   try {
-    const since = sinceOf(props.range, props.now)
-    const reads = await Promise.all(props.projects.map(async (project) => {
+    const range = dateRange.value
+    if (!range || !range[0] || !range[1])
+      return
+    const [from, to] = range
+    const bounds = boundsOf(from, to)
+    if (!bounds)
+      return
+
+    // 选了项目就只读这几个仓库；不选 = 全部项目
+    const picked = selectedIds.value.length
+      ? props.projects.filter(project => selectedIds.value.includes(project.id))
+      : props.projects
+    const reads = await Promise.all(picked.map(async (project) => {
       if (!project.path.trim())
         return { project, result: null }
-      return { project, result: await window.workbench.projectGitLog(project.path, since) }
+      return { project, result: await window.workbench.projectGitLog(project.path, bounds.since, bounds.until) }
     }))
+    if (token !== loadToken)
+      return
 
     const inputs: GitWorkLogInput[] = []
     for (const { project, result } of reads) {
@@ -106,34 +180,89 @@ async function load(): Promise<void> {
       }
     }
 
-    rows.value = buildGitDrafts(inputs, props.range, props.now, props.entries)
+    rows.value = buildGitDrafts(inputs, from, to, props.entries)
       .map(draft => ({ ...draft, checked: true }))
   }
   finally {
-    loading.value = false
+    if (token === loadToken)
+      loading.value = false
   }
 }
 
-watch(open, (value) => {
-  if (value)
+/**
+ * 合并同一轮里的连续变化再读：打开弹窗会同时复位日期与项目，
+ * 多选时也可能连点几个项目 —— 每次点击都起一轮 git 没必要。
+ */
+function requestLoad(): void {
+  if (reloadTimer)
+    window.clearTimeout(reloadTimer)
+  reloadTimer = window.setTimeout(() => {
+    reloadTimer = null
     void load()
+  }, 120)
+}
+
+watch(open, (value) => {
+  if (!value)
+    return
+  // 每次打开都回到默认：今天 + 全部项目
+  const today = dayKey(Date.now())
+  dateRange.value = [today, today]
+  selectedIds.value = []
+  requestLoad()
+})
+
+watch([dateRange, selectedIds], () => {
+  if (open.value)
+    requestLoad()
+}, { deep: true })
+
+onBeforeUnmount(() => {
+  if (reloadTimer)
+    window.clearTimeout(reloadTimer)
 })
 
 function reset(): void {
+  if (reloadTimer) {
+    window.clearTimeout(reloadTimer)
+    reloadTimer = null
+  }
+  // 丢掉在途结果：关掉弹窗之后回来的那批不该再摆回界面上
+  loadToken += 1
+  loading.value = false
   rows.value = []
   warnings.value = []
 }
 
-async function submit(): Promise<void> {
-  if (saving.value)
+/**
+ * 写入勾选的草稿。
+ *
+ * `closeAfter` 为 false 时（「添加并继续」）不关弹窗：已经写进去的行从预览里摘掉，
+ * 剩下没勾选的行（连同正文的改动）留在原地，换个日期或项目可以接着加。
+ */
+async function commit(closeAfter: boolean): Promise<void> {
+  if (saving.value || loading.value)
     return
+  if (!dateRange.value?.[0] || !dateRange.value?.[1]) {
+    ElMessage.warning('请先选择日期范围')
+    return
+  }
 
-  const picked = rows.value
-    .filter(row => row.checked && row.content.trim())
-    .map(({ checked: _checked, ...draft }) => draft)
+  const selectedRows = rows.value.filter(row => row.checked && row.content.trim())
+  const picked = selectedRows.map(({ checked: _checked, ...draft }) => draft)
   if (!picked.length) {
     ElMessage.warning('没有勾选可生成的内容')
     return
+  }
+
+  // 项目不选 = 全部项目：写入前问一句，免得把没打算生成的项目一起写进去
+  if (!selectedIds.value.length) {
+    const agreed = await confirmAction(
+      `没有选择项目，将从全部项目生成 ${picked.length} 条记录，是否继续？`,
+      '从提交生成',
+    )
+    if (!agreed)
+      return
   }
 
   saving.value = true
@@ -145,8 +274,16 @@ async function submit(): Promise<void> {
     }
 
     emit('imported', result.data)
-    ElMessage.success(`已生成 ${result.data.length} 条工作记录`)
-    open.value = false
+    if (closeAfter) {
+      ElMessage.success(`已生成 ${result.data.length} 条工作记录`)
+      open.value = false
+    }
+    else {
+      // 写进去的行已经成了正式记录，从预览里摘掉；剩下的行继续留着
+      const done = new Set(selectedRows)
+      rows.value = rows.value.filter(row => !done.has(row))
+      ElMessage.success(`已添加 ${result.data.length} 条工作记录`)
+    }
   }
   finally {
     saving.value = false
@@ -163,6 +300,54 @@ async function submit(): Promise<void> {
     @closed="reset"
   >
     <div class="git">
+      <!-- 生成范围：日期范围必选（默认今天，可快捷选今天 / 昨天 / 本周），项目多选（默认空 = 全部项目） -->
+      <el-form class="form" label-position="top" @submit.prevent>
+        <div class="filters">
+          <el-form-item label="日期范围" class="filters__date">
+            <el-date-picker
+              v-model="dateRange"
+              type="daterange"
+              value-format="YYYY-MM-DD"
+              format="YYYY-MM-DD"
+              range-separator="至"
+              start-placeholder="开始日期"
+              end-placeholder="结束日期"
+              :clearable="false"
+              :shortcuts="dateShortcuts"
+            />
+          </el-form-item>
+
+          <el-form-item label="项目" class="filters__project">
+            <el-select
+              v-model="selectedIds"
+              class="select"
+              multiple
+              collapse-tags
+              collapse-tags-tooltip
+              clearable
+              filterable
+              placeholder="全部项目"
+            >
+              <el-option
+                v-for="project in projectOptions"
+                :key="project.id"
+                :label="project.name"
+                :value="project.id"
+              >
+                <span class="project-option">
+                  <i
+                    v-if="project.color"
+                    class="project-option__dot"
+                    :style="{ background: projectColorVar(project.color) }"
+                  />
+                  {{ project.name }}
+                </span>
+              </el-option>
+            </el-select>
+          </el-form-item>
+        </div>
+      </el-form>
+
       <PanelLoading v-if="loading" text="正在读取项目提交记录…" />
 
       <EmptyState
@@ -175,8 +360,7 @@ async function submit(): Promise<void> {
 
       <template v-else>
         <p class="git__summary">
-          {{ WORK_RANGE_LABELS[range] }} · {{ rows.length }} 条记录 ·
-          {{ rows.reduce((sum, row) => sum + row.commits.length, 0) }} 条提交
+          {{ rows.length }} 条记录 · {{ commitCount }} 条提交
         </p>
 
         <p v-if="warnings.length" class="git__warn">
@@ -212,7 +396,10 @@ async function submit(): Promise<void> {
       <el-button @click="open = false">
         取消
       </el-button>
-      <el-button type="primary" :disabled="!checkedCount || saving" @click="submit">
+      <el-button :disabled="!checkedCount || saving || loading" @click="commit(false)">
+        添加并继续
+      </el-button>
+      <el-button type="primary" :disabled="!checkedCount || saving || loading" @click="commit(true)">
         {{ submitLabel }}
       </el-button>
     </template>
@@ -227,6 +414,44 @@ async function submit(): Promise<void> {
   min-height: 220px;
 }
 
+/* 日期 + 项目：日期给固定宽度，项目吃掉剩下的地方 */
+.filters {
+  display: flex;
+  gap: var(--sp-4);
+}
+
+.filters__date {
+  flex: 0 0 300px;
+}
+
+.filters__project {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.filters__date :deep(.el-date-editor) {
+  width: 100%;
+}
+
+/* el-select 的默认宽度是固定值，这一行里要它跟着格子走 */
+.select {
+  width: 100%;
+}
+
+/* 下拉选项里的项目：色点 + 名字，与项目卡上的圆点同色 */
+.project-option {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.project-option__dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
 .git__summary {
   margin: 0;
   font-size: var(--fs-meta);
@@ -239,7 +464,7 @@ async function submit(): Promise<void> {
   color: var(--st-fail);
 }
 
-/* 草稿列表自己滚：范围一拉大（本月 × 多项目）也不让弹窗长到屏幕外面 */
+/* 草稿列表自己滚：多个项目一起生成时也不让弹窗长到屏幕外面 */
 .git__list {
   display: flex;
   flex-direction: column;
