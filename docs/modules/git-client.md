@@ -55,6 +55,9 @@ Git 页的文档：先读「约束」一节（不能破的规矩）；「实现�
     **最近打开的文件夹**（设置里的 `gitRepos`，最近打开在前、最多 10 个、由
     `packages/git/src/repos.ts` 去重收敛）与「打开其他文件夹…」。最近打开里会去掉与项目重复的文件夹；
     存的是用户选中的那个文件夹（不一定是仓库根），成功打开时把它排到最前面，换回来时目录树还停在同一个子树。
+    **还没打开仓库（或上次那个打不开）的空态里也有同一份菜单**：空态动作区在「打开仓库」左边多一颗下拉按钮
+    （有项目时叫「选择项目」，只剩最近打开时叫「最近打开」），不用先去系统文件选择器里翻目录；
+    两处共用 `components/git/GitRepoMenu.vue`，别各写一份。
   - **分支名** → `refs/heads` 的本地分支清单（`for-each-ref --sort=-committerdate`，最近提交的在前）。
     选中一条只是换 `viewBranch`：中间的历史、左栏的目录树与文件历史都带上它，`resetDetail` / `resetCompare`
     清掉右侧；工作区与 HEAD 不动。`viewBranch` 为空串 = 跟着 HEAD；正在看别的分支时 chip 挂「未切换」。
@@ -81,11 +84,11 @@ Git 页的文档：先读「约束」一节（不能破的规矩）；「实现�
 - 提交 / 对比加载完默认打开哪个改动文件：优先**当前正在看的历史来源**（左栏点开的那个文件，
   从文件历史点进来的提交一定包含它），它不在改动清单里时才是第一个；选中行会自动滚进清单可视区，
   文件多时不至于「高亮了但看不见」。
-- 补丁两种视图：**统一（默认）** 是 Git 原生的一列排布，顺着看大段上下文更省横向空间；
-  **并排** 把 `git diff -U3` 的连续删除块与新增块按顺序一一配成「修改行」（左旧右新，配剩的单边显示），
-  配对口径在 `packages/git/src/patch.ts` 的 `buildSplitRows`（有单测）。两者共用同一份 `parsePatch` 行模型。
+- 补丁两种视图：**并排（默认）** 把 `git diff -U3` 的连续删除块与新增块按顺序一一配成「修改行」
+  （左旧右新，配剩的单边显示），配对口径在 `packages/git/src/patch.ts` 的 `buildSplitRows`（有单测）；
+  **统一** 是 Git 原生的一列排布，顺着看大段上下文更省横向空间。两者共用同一份 `parsePatch` 行模型。
   所选的视图住在 store 的 `patchView` 里（不是补丁组件内部）：切提交时右栏会短暂清空、补丁组件被卸载重建，
-  状态放组件里会弹回默认；换文件 / 换仓库 / 换页也保持，重启应用才回到统一。
+  状态放组件里会弹回默认；换文件 / 换仓库 / 换页也保持，重启应用才回到并排。
 - 提交列表可按日期范围筛：标题下是**两个日期框**（开始 / 结束，`el-date-picker type=date`；
   固定窄宽 128px 并排、中间一个「至」（与 daterange 的读法一致，不占窄宽、换行时留在上一行末尾），
   中栏放不下才换行，日期不会像 daterange 那样被裁掉半边，也不占满一整行；
@@ -124,5 +127,5 @@ Git 页的文档：先读「约束」一节（不能破的规矩）；「实现�
   packages/git           回包收敛（parse.ts）、diff 行模型与并排配对（patch.ts）、最近打开清单（repos.ts）、类型（types.ts）
   workbench/git.ts       通道适配（invoke + parse，失败收敛成 Result）
   stores/git.ts          页面状态：仓库 / 历史来源 / 选中提交 / 对比 / 补丁
-  components/git/        GitView / GitFileTree / GitCommitList / GitDiffPane / GitChangedFiles / GitPatchView
+  components/git/        GitView / GitFileTree / GitCommitList / GitDiffPane / GitChangedFiles / GitPatchView / GitRepoMenu（头部与空态共用的换仓库菜单）
 ```

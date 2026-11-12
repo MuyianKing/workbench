@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { NoteDocument } from '@workbench/notes'
 import { Loading } from '@element-plus/icons-vue'
-import { imageFileName, imageMarkdown, NOTE_IMAGE_MAX_BYTES, resolveNoteLink } from '@workbench/notes'
+import { imageFileName, imageMarkdown, mergeEditorHotkeys, NOTE_IMAGE_MAX_BYTES, resolveNoteLink } from '@workbench/notes'
 
 import Vditor from 'vditor'
 /**
@@ -45,8 +45,10 @@ import Vditor from 'vditor'
  *     滚动的容器，于是点了不给焦点、键盘再也滚不动。要补一个 `tabindex` 补回来
  *     （见 applyReadOnly 第 2 条）。
  */
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import NoteContextMenu from '@/components/NoteContextMenu.vue'
+import OverlayScrollbar from '@/components/OverlayScrollbar.vue'
+import { acceleratorOfEvent } from '@/composables/use-hotkey-recorder'
 import { notifyWarning } from '@/notify'
 import 'vditor/dist/index.css'
 
@@ -78,6 +80,15 @@ const props = defineProps<{
    */
   imageRepo?: string
   /**
+   * 编辑器的自定义快捷键表（动作名 → 组合键串，见 `@workbench/notes` 的 editor-hotkeys.ts）。
+   *
+   * 与 imageRepo 同一条规矩：**不从 settings store 里读**（独立 Markdown 窗口不装 Pinia），
+   * 值由上层传。**拦截按「默认 + 用户覆盖」的合成表来**（`mergeEditorHotkeys`）：
+   * 用户没碰过的动作按默认键位（标题 Ctrl+1~6、粗体 Ctrl+B…）也能拦下来走工具带；
+   * 用户存空串的动作被禁用（不拦，只剩 Vditor 原厂键位）。
+   */
+  editorHotkeys?: Record<string, string>
+  /**
    * 允不允许粘贴 / 拖入图片（默认允许）。
    *
    * 独立编辑窗口传 false：那个窗口没有「笔记本」这个概念，一次上传会把图片推到
@@ -96,11 +107,10 @@ const props = defineProps<{
    */
   outlineHost?: HTMLElement | null
   /**
-   * 大纲钉在右侧、始终开着（独立 Markdown 窗口用）。
+   * 大纲钉在右侧、始终开着（笔记页与独立 Markdown 窗口都用）。
    *
-   * 那边没有标题行、也没有开关：右侧那条目录栏是固定的，初始化完成后直接打开；
+   * 两边都没有开关：右侧那条目录栏是固定的，初始化完成后直接打开；
    * 右键菜单里的「大纲」项在这一档不出现（否则能从菜单把它关掉，栏里剩一条空白）。
-   * 笔记页不传：那边按需打开，开合由标题行那颗图标键说了算。
    */
   outlinePinned?: boolean
 }>()
@@ -112,21 +122,14 @@ const emit = defineEmits<{
    * 带上路径而不是让上层去看「当前打开的是哪一篇」：换篇时这里会先把上一篇没写完的改动冲出去，
    * 而那一刻上层的选中项已经是新的一篇了（按选中项取就会把上一篇的正文写进刚点开的那一篇）。
    */
-  'change': [payload: { rel: string, content: string }]
+  change: [payload: { rel: string, content: string }]
   /**
    * 正文里点了一个指向**本笔记本里另一篇笔记**的链接（`[标题](./别的.md)`）：请上层打开它。
    *
    * 这里只做到「链接指向哪一篇」（相对路径的解析是纯函数，见 packages/notes/src/note.ts 的 resolveNoteLink）；
    * 那一篇在不在、要不要重扫一遍树、跳过去之后选中谁，都是上层的事。
    */
-  'open': [rel: string]
-  /**
-   * 大纲开了 / 关了（每次真正变化时报一次）。
-   *
-   * 笔记页拿它决定右边那条大纲栏显不显示：栏的位置在页面布局里，开合状态却在
-   * Vditor 手里（它把 display 写在大纲元素上），所以这里替它转达一声。
-   */
-  'outline-change': [open: boolean]
+  open: [rel: string]
 }>()
 
 /** 笔记页那句提示：工具带藏起来之后，格式入口与两处隐形快捷键都在这里说清楚 */
@@ -178,6 +181,13 @@ const TOOLBAR = [
 const SAVE_DELAY = 600
 
 const host = ref<HTMLDivElement | null>(null)
+/**
+ * 正文真正的滚动容器（Vditor 的 `pre.vditor-reset`）。
+ *
+ * 原生滚动条在样式里藏掉了，改由 `OverlayScrollbar` 画一条不占宽度的悬浮滑块。
+ * Vditor 是异步初始化的，这个 ref 要到 `after` 里才拿得到；在那之前滚动条自己隐藏。
+ */
+const scrollTarget = ref<HTMLElement | null>(null)
 /**
  * 正在上传的图片张数（0 = 没在传）：粘贴的图片要推一次 git 仓库，几秒钟很正常，
  * 编辑器上挂一颗角标告诉用户「在传」，不能让这几秒看起来像什么都没发生。
@@ -356,13 +366,11 @@ async function onClick(event: MouseEvent): Promise<void> {
   const target = event.target as HTMLElement | null
 
   /**
-   * 大纲（右侧那一栏目录）与工具带都是编辑器自己的东西，点击要交给 Vditor。
+   * 工具带与大纲都是编辑器自己的东西，点击要交给 Vditor。
    *
-   * **只读那一档必须在这里让路**：
-   *  - 工具带：开合大纲靠「点工具带上那颗按钮」（右键菜单与标题行那颗按钮都走这条路），
-   *    而工具带就在 `.editor` 里 —— 一条 `stopPropagation` 会把这一下吞掉，表现成
-   *    「只读下大纲打不开」（踩过）；
-   *  - 大纲：点标题要交给 Vditor 去滚正文。
+   * **只读那一档必须在这里让路**：下面那条 `stopPropagation` 挂在捕获阶段，会把
+   * 这两处的点击一起吞掉 —— 工具带虽然藏着，里面的按钮照旧点得动；大纲条目的
+   * 跳转也归 Vditor 的监听器接。
    */
   if (target?.closest('.vditor-toolbar, .vditor-outline'))
     return
@@ -429,19 +437,114 @@ async function onClick(event: MouseEvent): Promise<void> {
  * PageUp / PageDown / 空格 / 方向键正是靠浏览器自己的默认行为滚它（见 applyReadOnly 第 2 条）。
  */
 function onKeyCapture(event: KeyboardEvent): void {
-  if (props.readOnly)
+  if (props.readOnly) {
     event.stopPropagation()
+    return
+  }
+  if (
+    event.type === 'keydown' && event.key === 'Enter' && !event.isComposing
+    && !event.ctrlKey && !event.altKey && !event.metaKey
+  ) {
+    markBottomStick()
+  }
+  // 自定义快捷键命中时事件已被拦住（preventDefault + stopPropagation），这里不用再做什么
+  dispatchEditorHotkey(event)
 }
 
-/** 右键菜单的落点（视口坐标）；null 表示没开 */
-const menu = ref<{ x: number, y: number } | null>(null)
+/**
+ * 自定义快捷键命中了吗？命中就拦下来去点工具带按钮，返回 true。
+ *
+ * 拦截按**「默认 + 用户覆盖」的合成表**（`mergeEditorHotkeys`，computed 缓存一份）：
+ * 默认键位（标题 Ctrl+1~6、粗体 Ctrl+B…）真的生效 —— 不只是设置里的显示；
+ * 用户覆盖的动作换用户的键；用户存空串的动作被禁用（不拦，只剩 Vditor 原厂键位）。
+ * 与原厂键位是**并行**关系：拦的是合成表里的键，原厂那套（Ctrl+Alt+3 等）它自己
+ * 还在监听，两边同时有效。
+ *
+ * 组合键串的拼法与设置里录制的共用一份口径（`acceleratorOfEvent`）—— 否则
+ * 「录进去的键按不出来」没处查。命中判断挂在 keydown 一档（keyup 再拦一次会
+ * 把同一个动作跑两遍）；输入法组合中（isComposing）让路。**表里没有的组合一概
+ * 不拦**：Ctrl+S / Ctrl+/ 这些都是外层监听器的，各走各的。
+ */
+function dispatchEditorHotkey(event: KeyboardEvent): boolean {
+  if (event.type !== 'keydown' || event.isComposing)
+    return false
+
+  // 只认带修饰键的组合：单按一个字符是打字本身，与快捷键无关
+  if (!event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey)
+    return false
+
+  const accelerator = acceleratorOfEvent(event)
+  if (!accelerator)
+    return false
+
+  const lowered = accelerator.toLowerCase()
+  const target = Object.entries(effectiveHotkeys.value).find(([, bound]) => String(bound).trim().toLowerCase() === lowered)
+  if (!target)
+    return false
+
+  event.preventDefault()
+  event.stopPropagation()
+  runAction(target[0])
+  return true
+}
+
+/** 生效的键位表 = 默认 + 用户覆盖（设置里传上来的 `editorHotkeys`）；空串项被剔除 */
+const effectiveHotkeys = computed(() => mergeEditorHotkeys(props.editorHotkeys))
+
+/**
+ * 按回车前是不是已经贴着底（含底部那段留白）。
+ *
+ * 浏览器只把光标滚到「刚好可见」为止，底部留白会留在视野外 —— 一路回车时看起来
+ * 时灵时不灵：有时滚到留白，有时停在最后一行。所以输入前先记一笔，输入后再把
+ * 滚动位置补到底（见 onContentInput）；读着上面时这一条不成立，不会抢滚动。
+ */
+let stickToBottom = false
+
+function markBottomStick(): void {
+  const element = editor?.vditor?.ir?.element
+  if (!element)
+    return
+  // 留白是样式里的 `--editor-bottom`（见下面那一段），这里按实际值算，别另抄一份数字
+  const gap = parseFloat(getComputedStyle(element).getPropertyValue('--editor-bottom')) || 0
+  stickToBottom = element.scrollTop + element.clientHeight >= element.scrollHeight - gap - 2
+}
+
+/**
+ * 回车落定后补一次滚动：让底部留白稳定留在光标下方（Typora 那种手感）。
+ *
+ * 放在 rAF 里：Vditor 的 input 处理会同步重绘当前块，等这一帧的布局量完再设 scrollTop。
+ */
+function onContentInput(): void {
+  if (!stickToBottom)
+    return
+  stickToBottom = false
+  requestAnimationFrame(() => {
+    const element = editor?.vditor?.ir?.element
+    if (element)
+      element.scrollTop = element.scrollHeight
+  })
+}
+
+/** 右键菜单的落点（视口坐标）；null 表示没开。`inTable` 是右键那一刻光标的状态，菜单据此摆不摆表格那排 */
+const menu = ref<{ x: number, y: number, inTable: boolean } | null>(null)
 
 function openMenu(event: MouseEvent): void {
   // 编辑器还没建好时菜单没有可点的东西（动作全在那份工具带上）；
   // 只读下同样没有：工具带被 `disabled()` 禁掉了，弹出来会是一份每一项都没反应的菜单
   if (!editor || props.readOnly)
     return
-  menu.value = { x: event.clientX, y: event.clientY }
+  menu.value = { x: event.clientX, y: event.clientY, inTable: focusInTable() }
+}
+
+/**
+ * 右键菜单点了一项：`table:` 前缀的走快捷键通道，其余照旧点工具带上那颗按钮。
+ */
+function onMenuAction(name: string): void {
+  if (name.startsWith('table:')) {
+    runTableAction(name.slice('table:'.length) as Parameters<typeof runTableAction>[0])
+    return
+  }
+  runAction(name)
 }
 
 /**
@@ -456,38 +559,110 @@ function runAction(name: string): void {
     return
 
   // 标题在工具带上是一个下拉面板，动作挂在面板里的按钮上（data-tag="h1"…见 Vditor 的 Headings）
-  const target = name.startsWith('heading')
-    ? elements.headings?.querySelector(`[data-tag="h${name.slice('heading'.length)}"]`)
-    : elements[name]?.firstElementChild
+  if (name.startsWith('heading')) {
+    const level = name.slice('heading'.length)
+
+    /**
+     * 光标已经在**同级**标题里时改点主按钮：它带开关语义 —— 光标在标题里时挂着
+     * `vditor-menu--current`（Vditor 的 highlightToolbarIR 点的），此时点它是
+     * 「去掉标题」（IR 走 `processHeading(vditor, "")`）。照旧去点面板里那颗的话，
+     * 同一级只会「再设置一遍」，Ctrl+1 就取消不掉 H1。不同级照旧是切换。
+     */
+    const current = getSelection()?.anchorNode
+    const anchor = current instanceof Element ? current : current?.parentElement ?? null
+    const heading = anchor?.closest('h1, h2, h3, h4, h5, h6')
+    if (heading && heading.tagName === `H${level}`) {
+      const toggle = elements.headings?.firstElementChild
+      if (toggle instanceof HTMLElement) {
+        toggle.click()
+        return
+      }
+    }
+
+    const target = elements.headings?.querySelector(`[data-tag="h${level}"]`)
+    if (!(target instanceof HTMLElement)) {
+      console.warn('[workbench] 工具带上找不到这一项，右键菜单的动作没有执行', name)
+      return
+    }
+    target.click()
+    return
+  }
+
+  const target = elements[name]?.firstElementChild
   if (!(target instanceof HTMLElement)) {
     console.warn('[workbench] 工具带上找不到这一项，右键菜单的动作没有执行', name)
     return
   }
 
   target.click()
-
-  // 大纲的开合不经过我们（Vditor 自己写 display），这里顺手把状态同步出去。
-  // 右键菜单与标题行那颗按钮都走这条，所以这一处就够
-  if (name === 'outline')
-    syncOutlineOpen()
 }
 
-/** 大纲此刻开没开（Vditor 不对外暴露状态，开合落在元素的行内 display 上） */
-const outlineOpen = ref(false)
+/**
+ * 光标（或选区）此刻是否落在表格的单元格里。
+ *
+ * 右键菜单据此决定要不要摆出「表格」那一组 —— IR 模式下 Vditor 对表格没有
+ * 所见即所得那种悬停工具条（它只挂在 wysiwyg 元素上），行列的增删只能走
+ * 它自己那组快捷键（见 runTableAction）。
+ */
+function focusInTable(): boolean {
+  const node = getSelection()?.anchorNode
+  if (!node)
+    return false
+  const element = node instanceof Element ? node : node.parentElement
+  return !!element?.closest('.vditor-ir pre.vditor-reset td, .vditor-ir pre.vditor-reset th')
+}
 
-/** 把「实际开没开」同步成事件；真正变了才报 */
-function syncOutlineOpen(): void {
-  // `editor` 有值不代表 `vditor` 已经建好：Vditor 的初始化是异步的，
-  // 宿主那一侧的 watcher 可能比它先跑（见 attachOutline）
-  const vditor = editor?.vditor
-  if (!vditor)
+/**
+ * 表格的行列操作：往 IR 元素上**派发一次 Vditor 自己认的快捷键**。
+ *
+ * Vditor 对表格的增删改全挂在它 IR / wysiwyg 共用的那个按键处理器上（光标必须在
+ * `td` / `th` 里才生效）；与其把插行删列的 DOM 手术照抄一遍 —— 渲染、光标、撤销栈
+ * 都会与它分叉 —— 不如把事件合成出来交给它。它不看 `isTrusted`，合成事件照走原路。
+ *
+ * 键名的坑：Vditor 的匹配器在非 Mac 上会把带 Shift 的 `=` / `-` 先改写成 `+` / `_`
+ * **再与 `event.key` 比**，所以这里给的是改写后的键，不是按键字面上的 `=` / `-`。
+ * `bubbles: true` 不能省 —— 监听器挂在 IR 元素上，事件得从 `td` 冒泡上去。
+ */
+function runTableAction(
+  action: 'row-after' | 'row-before' | 'col-after' | 'col-before' | 'row-delete' | 'col-delete',
+): void {
+  const element = editor?.vditor?.ir?.element
+  if (!element || !focusInTable()) {
+    console.warn('[workbench] 表格动作被跳过：光标不在单元格里', action)
     return
+  }
 
-  const open = vditor.outline.element.style.display === 'block'
-  if (open === outlineOpen.value)
-    return
-  outlineOpen.value = open
-  emit('outline-change', open)
+  // 六个动作与 Vditor 按键处理器里的六条一一对应：⌘= ⇧⌘F ⇧⌘= ⇧⌘G ⌘- ⇧⌘-
+  const keys = {
+    'row-after': { ctrlKey: true, shiftKey: false, key: '=' },
+    'row-before': { ctrlKey: true, shiftKey: true, key: 'F' },
+    'col-after': { ctrlKey: true, shiftKey: true, key: '+' },
+    'col-before': { ctrlKey: true, shiftKey: true, key: 'G' },
+    'row-delete': { ctrlKey: true, shiftKey: false, key: '-' },
+    'col-delete': { ctrlKey: true, shiftKey: true, key: '_' },
+  } as const
+
+  const init = keys[action]
+  element.dispatchEvent(new KeyboardEvent('keydown', {
+    key: init.key,
+    code: `Key${init.key.toUpperCase()}`,
+    ctrlKey: init.ctrlKey,
+    shiftKey: init.shiftKey,
+    altKey: false,
+    metaKey: false,
+    bubbles: true,
+    cancelable: true,
+  }))
+}
+
+/**
+ * 抓住正文的滚动容器（`pre.vditor-reset`）。
+ *
+ * Vditor 自己在这个元素上开 `overflow: auto`，原生滚动条被样式藏掉，滑块要跟着它走。
+ * 初始化完成时调一次；切主题会让 Vditor 重渲染正文，顺手再抓一次（元素没换也无害）。
+ */
+function bindScrollTarget(): void {
+  scrollTarget.value = host.value?.querySelector<HTMLElement>('pre.vditor-reset') ?? null
 }
 
 /**
@@ -512,12 +687,12 @@ function attachOutline(): void {
 }
 
 /**
- * 开关右侧的大纲（目录结构）。
+ * 打开 / 关掉右侧的大纲（目录结构）。
  *
  * 与右键菜单里那一项走同一条路：**点工具带上那颗按钮**。`options.outline.enable`
- * 与按钮的选中态都由 Vditor 自己维护，所以这里不留第二份状态 —— 开没开看右栏那块
- * 面板本身。工具带虽然藏着（见样式），按钮照旧在 DOM 里、照旧点得动；
- * 只读那一档也没把它禁掉（`disabled()` 只禁带编辑动作的那批）。
+ * 与按钮的选中态都由 Vditor 自己维护。现在两处调用方（笔记页 / 独立窗口）都钉着大纲，
+ * 它只由 `ensureOutlineOpen` 在初始化后调一次；工具带虽然藏着（见样式），按钮照旧在 DOM 里、
+ * 照旧点得动，只读那一档也没把它禁掉（`disabled()` 只禁带编辑动作的那批）。
  */
 function toggleOutline(): void {
   runAction('outline')
@@ -528,7 +703,7 @@ function toggleOutline(): void {
  *
  * 不走 `toggleOutline` 直接调用是因为它是「开关」：已经开着时再点一下就关了。
  * 初始化那一刻正常是关着的，但 `setValue` / 切主题之类重渲染后未必 —— 这里按
- * 元素自己的 `display` 判断实际状态（与 `syncOutlineOpen` 同一个口径）。
+ * 元素自己的 `display` 判断实际状态。
  */
 function ensureOutlineOpen(): void {
   const element = editor?.vditor?.outline?.element
@@ -674,6 +849,12 @@ onMounted(() => {
     theme: isDark() ? 'dark' : 'classic',
     preview: {
       delay: 300,
+      /**
+       * 正文不再按 800px 居中：Vditor 默认把可读宽度钉在 800，宽窗口下左右各留几百像素，
+       * 内容没多长就换行。给一个大数让它的自动内边距退回最小值，真正的左右留白交给样式
+       * （固定 50px、剩下的全给正文，见 `.vditor-ir pre.vditor-reset` 那一段）。
+       */
+      maxWidth: 100000,
       // 正文区（内容主题）与代码块高亮各有一套配色，明暗切换时一起换
       theme: { current: isDark() ? 'dark' : 'light' },
       hljs: { enable: true, lineNumber: false, style: isDark() ? 'github-dark' : 'github' },
@@ -689,21 +870,21 @@ onMounted(() => {
      */
     link: { isOpen: false },
     /**
-     * 大纲（目录结构）在**右侧、按需打开**。
+     * 大纲（目录结构）在**右侧**。
      *
-     * `enable` 保持 false：进这一页不先占掉正文 250px，要目录时从标题行那颗按钮
-     * （或右键菜单的「大纲」）开一下 —— 两个入口点的都是工具带上那颗按钮。
+     * `enable` 保持 false：打开这个动作放在初始化完成之后（`after` 里的 `ensureOutlineOpen`），
+     * 与「把元素搬进右栏」是同一步 —— 两处调用方都钉着大纲，界面上不再有开关。
      * 位置只能是 left / right，这里定死 right。
      */
     outline: { enable: false, position: 'right' },
     toolbar: TOOLBAR,
     input: value => schedule(value),
     // 初始化完成那一刻：核一遍只读（编辑器可能是「已经切到只读之后」才建起来的）、
-    // 把大纲搬进右栏、再把它的开合状态同步一次；钉死那一档顺手打开它
+    // 把大纲搬进右栏、钉死那一档顺手打开它
     after: () => {
       applyReadOnly()
       attachOutline()
-      syncOutlineOpen()
+      bindScrollTarget()
       if (props.outlinePinned)
         ensureOutlineOpen()
     },
@@ -726,6 +907,8 @@ watch(
     // 编辑器配色 / 内容主题 / 代码高亮是三处，setTheme 一次换掉
     const dark = theme === 'dark'
     editor?.setTheme(dark ? 'dark' : 'classic', dark ? 'dark' : 'light', dark ? 'github-dark' : 'github')
+    // 重渲染之后正文元素若换了，滚动条要跟到新那一个上
+    void nextTick(bindScrollTarget)
   },
 )
 
@@ -741,10 +924,6 @@ onBeforeUnmount(() => {
   const outline = editor?.vditor?.outline?.element
   if (outline?.parentElement && outline.parentElement === props.outlineHost)
     outline.remove()
-  if (outlineOpen.value) {
-    outlineOpen.value = false
-    emit('outline-change', false)
-  }
   editor?.destroy()
   editor = null
 })
@@ -772,8 +951,17 @@ defineExpose({
   hasUnsaved,
   /** 丢掉手上这一份、整份换成 `node`（上层确认「按磁盘重读」之后才用；不 flush） */
   discardAndReload,
-  /** 开关右侧大纲（标题行那颗按钮用；与右键菜单「大纲」同一个动作） */
-  toggleOutline,
+  /** 光标此刻在表格单元格里吗（右键菜单据此决定要不要摆「表格」那一组） */
+  focusInTable: () => focusInTable(),
+  /**
+   * 表格的行列操作（动作名见 `runTableAction`）。
+   *
+   * 右键菜单的「表格」一组用它 —— IR 模式没有表格工具条，这组动作走的是
+   * Vditor 自己的快捷键通道，与工具带上的按钮是两回事，所以单独开一个口。
+   */
+  execTable: (
+    action: 'row-after' | 'row-before' | 'col-after' | 'col-before' | 'row-delete' | 'col-delete',
+  ) => runTableAction(action),
 })
 </script>
 
@@ -797,8 +985,12 @@ defineExpose({
       @click.capture="onClick"
       @keydown.capture="onKeyCapture"
       @keyup.capture="onKeyCapture"
+      @input="onContentInput"
       @contextmenu.prevent="openMenu"
     />
+
+    <!-- 原生滚动条在样式里藏掉了；这一条不占正文宽度，只在正文右边浮一枚胶囊 -->
+    <OverlayScrollbar :target="scrollTarget" />
 
     <div v-if="uploading" class="upload" role="status">
       <el-icon class="is-loading">
@@ -810,12 +1002,14 @@ defineExpose({
 
   <!-- 菜单挂在 body 上（见组件里的 Teleport）：它是浮层，定位与层叠都不必看这张卡片与别处的脸色 -->
   <!-- 菜单挂在 body 上（见组件里的 Teleport）；大纲钉死那一档不摆「大纲」项，免得把固定栏关成空条 -->
+  <!-- 光标在单元格里时右键，菜单多摆一排表格的行列操作（openMenu 记下那一刻的状态） -->
   <NoteContextMenu
     v-if="menu"
     :x="menu.x"
     :y="menu.y"
     :hidden="outlinePinned ? ['outline'] : []"
-    @act="runAction"
+    :in-table="menu.inTable"
+    @act="onMenuAction"
     @close="menu = null"
   />
 </template>
@@ -882,6 +1076,20 @@ defineExpose({
 }
 
 /**
+ * 正文的原生滚动条收掉 —— 滚动位置由 `OverlayScrollbar` 那条 5px 胶囊表示。
+ *
+ * 两条都写：标准属性在 Chromium / Edge 152 里比 `::-webkit-scrollbar` 优先（见 global.css
+ * 同一段注释），所以只写伪元素的话 WebView2 里原生条仍会露出来。
+ */
+.editor :deep(pre.vditor-reset) {
+  scrollbar-width: none;
+}
+
+.editor :deep(pre.vditor-reset)::-webkit-scrollbar {
+  display: none;
+}
+
+/**
  * 右侧大纲（目录结构）：Vditor 自带的 `outline`，开到 `position: 'right'`。
  *
  * 它默认是编辑器自己的样子，直接嵌进这张半透明卡片会有三处不对，所以整片换成应用这一套：
@@ -923,6 +1131,23 @@ defineExpose({
 .editor :deep(.vditor-wysiwyg pre.vditor-reset),
 .editor :deep(.vditor-sv .vditor-reset) {
   background-color: transparent;
+}
+
+/**
+ * 正文宽度：左右各留 50px，剩下的全给正文（宽窗口下跟着变宽，不再按 800px 居中）。
+ *
+ * Vditor 的 `setPadding` 会在 window resize / 切模式时把 `padding` 写成**行内样式**，
+ * 所以这里得 `!important` 才压得住（上下仍是它的 10px）；`preview.maxWidth` 给大数
+ * 只是让它的自动内边距算出来是默认的最小值，不跟这条打架。
+ *
+ * 底部那段留白借它自己的 `pre.vditor-reset::after`（高度取 `--editor-bottom`）——
+ * 空白长在滚动内容里，滚动条位置与长度都不受影响，滚到底时最后一行下面就是这一段。
+ */
+.editor :deep(.vditor-ir pre.vditor-reset),
+.editor :deep(.vditor-wysiwyg pre.vditor-reset) {
+  --editor-bottom: 120px;
+  padding-right: 50px !important;
+  padding-left: 50px !important;
 }
 
 /**

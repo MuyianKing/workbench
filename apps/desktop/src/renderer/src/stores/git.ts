@@ -81,11 +81,11 @@ export const useGitStore = defineStore('git', () => {
   const patchError = ref('')
 
   /**
-   * 补丁视图：统一（默认）/ 并排。它住在页面状态里而不是补丁组件内部 ——
+   * 补丁视图：并排（默认）/ 统一。它住在页面状态里而不是补丁组件内部 ——
    * 切提交时右栏文件清单会短暂清空、补丁组件被卸载重建，状态放在组件里就会弹回默认。
    * 换仓库 / 换页也保持用户刚选的那一档；重启应用回到默认。
    */
-  const patchView = ref<'unified' | 'split'>('unified')
+  const patchView = ref<'unified' | 'split'>('split')
 
   let openJob = 0
   let branchJob = 0

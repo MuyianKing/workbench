@@ -7,7 +7,7 @@ import EmptyState from '@/components/EmptyState.vue'
 /**
  * 单文件补丁：把 `git diff -U3` 的原文拆成可读的差异表。
  *
- * 两种视图（右上角分段切换，默认统一）：
+ * 两种视图（右上角分段切换，默认并排）：
  *  - **并排**（split）：左旧右新，连续的删除块与新增块按顺序一一配对成「修改行」，
  *    多余的单边显示；口径在 `@workbench/git` 的 `buildSplitRows`（有单测）。
  *  - **统一**（unified）：Git 原生的一列排布，顺着看大段上下文更省横向空间。

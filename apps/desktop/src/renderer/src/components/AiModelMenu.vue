@@ -9,8 +9,8 @@ import { aiThinkingLabel } from '@workbench/ai'
  *    卡里列启用的服务（当前那个打勾），点一个就落到这个服务的第一个模型；卡底「管理模型」
  *    报给页面开模型管理弹层；
  *  - 中间「模型」清单只列**这个服务**的模型：模型名 +「视觉」小签，选中的那行末尾打勾；
- *  - 底下「思考强度」：左标签右档名，一条绿→蓝渐变滑杆（这条彩色是用户点名要的参考样式，
- *    不进全局令牌）；点跑道上某一档时钮横向滑过去（不是瞬移）。
+ *  - 底下「思考强度」：标签与档名挨着写在左，下面一条细滑杆 —— 已过的那段取主题色
+ *    （`--el-color-primary`，没配主题色就是中性色），余下是跑道灰；点某一档时钮横向滑过去（不是瞬移）。
  *
  * 收放走 use-floating-dismiss（点别处 / Esc / 面板外滚轮都收）；「面板」报的是**组件根** ——
  * 点 chip 那一下不算「点别处」，开与关由 click 自己翻。与 store 的分工沿 composer 的老规矩：
@@ -119,7 +119,7 @@ function commitSlider(): void {
 }
 
 /** 跑道两端各给钮让出的半个钮（px）—— 与 .el-slider__runway 左右那两条透明边框同值 */
-const TRACK_INSET = 14
+const TRACK_INSET = 9
 
 /**
  * 点跑道上某一档：自己算好档位写进去，**不让 EP 把这一下当成一次拖动** ——
@@ -149,6 +149,9 @@ const stopLefts = computed(() =>
     `${(index / Math.max(1, ai.thinkingLevels.length - 1)) * 100}%`,
   ),
 )
+
+/** 「已过段」填到哪：与钮中心同一条比例（跑道背景的色止点） */
+const fillRatio = computed(() => slider.value / Math.max(1, ai.thinkingLevels.length - 1))
 </script>
 
 <template>
@@ -221,13 +224,19 @@ const stopLefts = computed(() =>
           <span class="menu__think-value">{{ aiThinkingLabel(ai.thinking) }}</span>
         </div>
         <!-- 只列这个模型支持的档位（与从前的档位下拉同一份口径）；不支持思考的没有滑杆 -->
-        <div v-if="ai.thinkingLevels.length > 1" class="menu__slider-wrap" @mousedown.capture="pickLevel">
-          <!-- 档位点：一档一颗，水平刻度与钮同源（选中那档正好压在钮下面） -->
+        <div
+          v-if="ai.thinkingLevels.length > 1"
+          class="menu__slider-wrap"
+          :style="{ '--fill': `${fillRatio * 100}%` }"
+          @mousedown.capture="pickLevel"
+        >
+          <!-- 档位点：一档一颗，水平刻度与钮同源（已过段上的点用反色，余下的用浅灰） -->
           <div class="menu__stops" aria-hidden="true">
             <span
               v-for="(level, index) in ai.thinkingLevels"
               :key="level"
               class="menu__stop"
+              :class="{ 'is-filled': index < slider }"
               :style="{ left: stopLefts[index] }"
             />
           </div>
@@ -382,8 +391,9 @@ const stopLefts = computed(() =>
   font-size: var(--fs-meta);
 }
 
+/* 服务名不占满整行：API 小签紧跟在名字后面（参考设计），靠右的只有那颗箭头 */
 .menu__service-name {
-  flex: 1;
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   color: var(--ink);
@@ -395,6 +405,7 @@ const stopLefts = computed(() =>
 
 .menu__service-arrow {
   flex-shrink: 0;
+  margin-left: auto;
   color: var(--ink-3);
   font-size: 12px;
 }
@@ -450,8 +461,9 @@ const stopLefts = computed(() =>
   background: var(--bg-selected);
 }
 
+/* 模型名同样不占满整行：「视觉」小签跟在名字后面，靠右的只有末尾那个勾 */
 .menu__model-name {
-  flex: 1;
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   color: var(--ink);
@@ -463,6 +475,7 @@ const stopLefts = computed(() =>
 /* 选中那一行末尾打勾（参考设计里是细黑勾，不抢主题色） */
 .menu__model-check {
   flex-shrink: 0;
+  margin-left: auto;
   color: var(--ink);
   font-size: 14px;
 }
@@ -520,7 +533,7 @@ const stopLefts = computed(() =>
 }
 
 .menu__provider-name {
-  flex: 1;
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   color: var(--ink);
@@ -559,7 +572,7 @@ const stopLefts = computed(() =>
 .menu__think-head {
   display: flex;
   align-items: baseline;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: var(--sp-2);
 }
 
@@ -575,35 +588,43 @@ const stopLefts = computed(() =>
 }
 
 /**
- * 滑杆：一条敦实的药丸跑道（24px）+ 比跑道略大的白圆钮（28px）—— 照参考设计放粗，
- * 钮停在两端时整颗仍在跑道里。做法：跑道左右各留 14px（= 钮半径）透明边框，
- * EP 的钮按 padding box 的百分比定位，正好被这两个边框往里收半个钮；渐变再用
- * background-origin: border-box 铺回整条（透明边框下面就是渐变，不是空档）。
- * EP 默认的「已过段」实色条会把渐变盖住，改成透的。跑道里只放档位点
- * （.menu__stops，一档一颗，位置与钮同源），没有别的纹理。钮的尺寸走 EP 自己的
- * 变量（wrapper 高 36，居中偏移按跑道高度算）。
+ * 滑杆：一条细药丸跑道（12px）+ 一枚白圆钮（18px），钮停在两端时整颗仍在跑道里。
+ * **已过的那段取主题色**（`--el-slider-main-bg-color`，EP 的滑块主色，见 accent-color.ts），
+ * 余下取跑道灰 —— 整条一个颜色读不出「到哪一档」，而整条铺彩又会把这条控件从
+ * 「主题色只管交互态」里摘出去。做法：跑道左右各留 9px（= 钮半径）透明边框，
+ * EP 的钮按 padding box 的百分比定位，正好被这两个边框往里收半个钮；背景用
+ * background-origin: border-box 铺回整条，色止点取与钮中心同一条比例 —— 差的那几像素
+ * 永远压在钮底下，看不出来。EP 默认那条实色「已过段」会把背景盖住，改成透的。
+ * 跑道里只放档位点（.menu__stops，一档一颗，位置与钮同源），没有别的纹理。
  */
 .menu__slider-wrap {
   position: relative;
 }
 
-/* 档位点：一档一颗小白点，横向刻度与钮同源 —— 两端各让 14px（= 钮半径），
+/* 档位点：一档一颗小点，横向刻度与钮同源 —— 两端各让 9px（= 钮半径），
    与跑道透明边那段行程一致；只作标记，不吃指针 */
 .menu__stops {
   position: absolute;
-  inset: 0 14px;
+  inset: 0 9px;
   z-index: 1;
   pointer-events: none;
 }
 
+/* 已过段上的点取反色（与钮同色，落在色块上才看得见），余下的取浅灰 */
 .menu__stop {
   position: absolute;
   top: 50%;
-  width: 4px;
-  height: 4px;
+  width: 3px;
+  height: 3px;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.6);
+  background: var(--ink-3);
+  opacity: 0.4;
   transform: translate(-50%, -50%);
+}
+
+.menu__stop.is-filled {
+  background: var(--ink-inverse);
+  opacity: 0.85;
 }
 
 /* 钮压在档位点上面：选中那档的点正好落在钮中心，被钮盖住。
@@ -619,17 +640,21 @@ const stopLefts = computed(() =>
 }
 
 .menu__slider {
-  --el-slider-height: 24px;
+  --el-slider-height: 12px;
   --el-slider-border-radius: var(--r-pill);
-  --el-slider-button-size: 28px;
-  --el-slider-button-wrapper-offset: -6px;
+  --el-slider-button-size: 18px;
+  --el-slider-button-wrapper-offset: -12px;
 }
 
 .menu__slider :deep(.el-slider__runway) {
   box-sizing: border-box;
-  border-right: 14px solid transparent;
-  border-left: 14px solid transparent;
-  background: linear-gradient(90deg, #34d399, #3b82f6);
+  border-right: 9px solid transparent;
+  border-left: 9px solid transparent;
+  background: linear-gradient(
+    90deg,
+    var(--el-slider-main-bg-color) var(--fill, 0%),
+    var(--el-slider-runway-bg-color) 0
+  );
   background-clip: border-box;
   background-origin: border-box;
 }
@@ -644,8 +669,8 @@ const stopLefts = computed(() =>
  */
 .menu__slider :deep(.el-slider__button) {
   border: none;
-  background-color: #fff;
-  box-shadow: 0 2px 6px rgba(17, 21, 27, 0.28);
+  background-color: var(--ink-inverse);
+  box-shadow: 0 1px 4px rgba(17, 21, 27, 0.24);
   transition: none;
 }
 

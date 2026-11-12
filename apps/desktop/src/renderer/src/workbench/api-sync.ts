@@ -143,10 +143,10 @@ export const syncApi = {
   syncWorkLogs: async () => {
     const repo = syncRepo()
     if (!repo)
-      return ok({ enabled: false, changed: false, device: '', entries: [] })
+      return ok({ enabled: false, changed: false, device: '', entries: [], devices: [] })
     const { id, name } = await localDevice()
     if (!id)
-      return ok({ enabled: false, changed: false, device: '', entries: [] })
+      return ok({ enabled: false, changed: false, device: '', entries: [], devices: [] })
     return workLog.syncWorkLog(repo, { id, name })
   },
 } as Partial<WorkbenchApi>

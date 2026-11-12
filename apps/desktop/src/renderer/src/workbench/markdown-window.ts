@@ -46,6 +46,25 @@ export function onMarkdownWindowFlushRequest(handler: () => void): () => void {
   return listen<null>('markdown-window:flush', () => handler())
 }
 
+/** 这扇窗当前是不是最大化（窗口控制按钮画「最大化」还是「还原」） */
+export async function markdownWindowIsMaximized(): Promise<boolean> {
+  return invoke<boolean>('markdown_window_is_maximized').catch(() => false)
+}
+
+/** 最小化 / 最大化-还原。走主窗口同款命令（它们按调用方窗口生效），失败无处可报也不影响功能 */
+export function markdownWindowMinimize(): void {
+  void invoke('window_minimize')
+}
+
+export function markdownWindowToggleMaximize(): void {
+  void invoke('window_toggle_maximize')
+}
+
+/** 最大化状态从窗口事件推：拖边缘、双击拖动带、系统快捷键都算，按钮只管画 */
+export function onMarkdownWindowState(handler: (state: { maximized: boolean }) => void): () => void {
+  return listen<{ maximized: boolean }>('markdown-window:state-changed', handler)
+}
+
 /** 装配根按域 spread 用的一份（方法名与 WorkbenchApi 一一对应） */
 export const markdownWindowApi = {
   markdownWindowContext,
@@ -53,4 +72,8 @@ export const markdownWindowApi = {
   markdownWindowClose,
   markdownWindowCancelClose,
   onMarkdownWindowFlushRequest,
+  markdownWindowIsMaximized,
+  markdownWindowMinimize,
+  markdownWindowToggleMaximize,
+  onMarkdownWindowState,
 }

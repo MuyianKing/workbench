@@ -186,7 +186,9 @@ fn open_path(app: &AppHandle, path: &Path) -> Result<(), String> {
         .title(name)
         .inner_size(960.0, 760.0)
         .min_inner_size(520.0, 400.0)
-        // 系统标题栏：这一扇窗里除了正文没有别的界面，最小化 / 最大化 / 关闭交给系统画
+        // 无边框：系统标题栏不画，最小化 / 最大化 / 关闭由渲染层自绘（MarkdownWindowApp.vue），
+        // 标题栏与底栏兼做拖动带。关闭仍走下面的握手（CloseRequested 照拦）。
+        .decorations(false)
         .visible(false)
         .initialization_script(crate::bootstrap_script())
         .initialization_script(crate::no_context_menu_script())
@@ -224,6 +226,9 @@ fn open_path(app: &AppHandle, path: &Path) -> Result<(), String> {
 /// 关闭握手与收尾。
 fn attach_window_events(window: &WebviewWindow) {
     let handle = window.clone();
+    // 最大化状态的上一次观测值（这扇窗自己的）：Resized 推「变化」，不是每次 resize 都发。
+    // 与主窗口的 MaximizedFlag 分开 —— 那一份是全局的，两边会互相顶掉。
+    let maximized = Mutex::new(false);
     window.on_window_event(move |event| match event {
         tauri::WindowEvent::CloseRequested { api, .. } => {
             // 先拦下来，让渲染层把防抖里那一份写出去；回执到了再由 markdown_window_close 销毁
@@ -262,6 +267,21 @@ fn attach_window_events(window: &WebviewWindow) {
                     let _ = fallback.destroy();
                 }
             });
+        }
+        // 最大化状态从窗口事件推，不由按钮自己记：拖边缘、双击拖动带、系统快捷键
+        // 都能最大化，第三个按钮只管画（与主窗口 main.rs 的那条同款）。
+        tauri::WindowEvent::Resized(_) => {
+            let now_maximized = handle.is_maximized().unwrap_or(false);
+            let Ok(mut last) = maximized.lock() else {
+                return;
+            };
+            if *last != now_maximized {
+                *last = now_maximized;
+                let _ = handle.emit(
+                    "markdown-window:state-changed",
+                    serde_json::json!({ "maximized": now_maximized }),
+                );
+            }
         }
         tauri::WindowEvent::Destroyed => {
             if let Some(state) = handle.try_state::<MdWindows>() {
@@ -330,6 +350,12 @@ pub fn markdown_window_cancel_close(
         closing.remove(window.label());
     }
     Ok(())
+}
+
+/// 这扇窗当前是不是最大化（第三个按钮画「最大化」还是「还原」用）。
+#[tauri::command]
+pub fn markdown_window_is_maximized(window: WebviewWindow) -> bool {
+    window.is_maximized().unwrap_or(false)
 }
 
 #[cfg(test)]

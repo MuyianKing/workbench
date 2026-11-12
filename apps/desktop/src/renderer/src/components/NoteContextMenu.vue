@@ -41,14 +41,22 @@ const props = defineProps<{
   /**
    * 不出现在菜单里的动作名。
    *
-   * 独立 Markdown 窗口把大纲钉死在右侧（`outlinePinned`），菜单里再放一项「大纲」
-   * 就能把它关成一条空栏 —— 那一档传 `['outline']` 进来；笔记页不传，照旧按需开关。
+   * 笔记页与独立 Markdown 窗口都把大纲钉死在右侧（`outlinePinned`），菜单里再放一项「大纲」
+   * 就能把它关成一条空栏 —— 两处都传 `['outline']` 进来。
    */
   hidden?: string[]
+  /**
+   * 右键时光标是否在表格的单元格里（NoteEditor 用 `focusInTable` 算好递过来）。
+   *
+   * 在表格里才摆出「表格」那一组：IR 模式没有表格工具条，行列的增删平时只能按
+   * Vditor 自己那组快捷键，菜单把它们显式摆出来（动作名带 `table:` 前缀，归
+   * NoteEditor 的 `execTable` 认领，与工具带动作不是一条路）。
+   */
+  inTable?: boolean
 }>()
 
 const emit = defineEmits<{
-  /** 选中了一项；名字是工具带项名（标题是 heading1…heading6） */
+  /** 选中了一项；名字是工具带项名（标题是 heading1…heading6；`table:` 前缀的归 execTable） */
   act: [name: string]
   close: []
 }>()
@@ -85,12 +93,29 @@ const GROUPS: MenuAction[][] = [
   ],
 ]
 
-/** 按 `hidden` 滤掉不许出现的项；整排都空了就不摆那一排（连分隔线一起） */
+/**
+ * 光标在表格里才出现的那一排：行列的增删（顺序照 Vditor 自己工具条的摆法）。
+ *
+ * 动作名带 `table:` 前缀 —— 它们不是工具带上的项，NoteEditor 按 `execTable` 分流；
+ * 快捷键一并列在 label 里（菜单的 tooltip 用它）：这是这组动作唯一的键盘入口，
+ * 常用的人不用每次都钻菜单。
+ */
+const TABLE_ACTIONS: MenuAction[] = [
+  { name: 'table:row-after', label: '在下方插入行（Ctrl+=）', icon: 'insert-row' },
+  { name: 'table:row-before', label: '在上方插入行（Ctrl+Shift+F）', icon: 'insert-rowb' },
+  { name: 'table:col-after', label: '在右侧插入列（Ctrl+Shift+=）', icon: 'insert-column' },
+  { name: 'table:col-before', label: '在左侧插入列（Ctrl+Shift+G）', icon: 'insert-columnb' },
+  { name: 'table:row-delete', label: '删除行（Ctrl+-）', icon: 'delete-row' },
+  { name: 'table:col-delete', label: '删除列（Ctrl+Shift+-）', icon: 'delete-column' },
+]
+
+/** 按 `hidden` 滤掉不许出现的项；整排都空了就不摆那一排（连分隔线一起）；表格排只在单元格里右键时摆 */
 const groups = computed(() => {
   const hidden = props.hidden ?? []
+  const base = props.inTable ? [...GROUPS, TABLE_ACTIONS] : GROUPS
   if (!hidden.length)
-    return GROUPS
-  return GROUPS
+    return base
+  return base
     .map(group => group.filter(action => !hidden.includes(action.name)))
     .filter(group => group.length > 0)
 })
@@ -160,7 +185,7 @@ onMounted(place)
       @contextmenu.prevent
     >
       <template v-for="(group, index) in groups" :key="index">
-        <div class="menu__grid">
+        <div class="menu__grid" :style="{ '--cols': group.length }">
           <el-tooltip
             v-for="action in group"
             :key="action.name"
@@ -243,7 +268,8 @@ onMounted(place)
 
 .menu__grid {
   display: grid;
-  grid-template-columns: repeat(5, 30px);
+  /* 列数跟着那一排的项数走（表格那排是 6 项，其余三排 5 项） */
+  grid-template-columns: repeat(var(--cols, 5), 30px);
   gap: var(--sp-1);
 }
 

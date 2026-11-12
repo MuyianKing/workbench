@@ -1,19 +1,22 @@
 <script setup lang="ts">
 import type { ProjectColor } from '@workbench/core'
-import type { WorkLogEntry, WorkLogStatus, WorkRange, WorkRangeBounds, WorkSort } from '@workbench/work-log'
+import type { WorkLogDevice, WorkLogDeviceRef, WorkLogEntry, WorkLogStatus, WorkRange, WorkRangeBounds, WorkSort } from '@workbench/work-log'
 import { ArrowDown, Download, Memo, Plus, Warning } from '@element-plus/icons-vue'
 import { addDays, dayKey, markdownToPlainText, projectColorVar, sanitizeProjectColor } from '@workbench/core'
-import { dayMeta, defaultWorkRangeBounds, DELETED_PROJECT_ID, groupByProject, isWorkSort, paginate, sanitizeWorkRange, sanitizeWorkRangeBounds, sanitizeWorkSort, timelineOf, toggleWorkLogStatus, WORK_PAGE_DAYS, WORK_RANGE_LABELS, WORK_RANGES, WORK_SORT_LABELS, WORK_SORTS, WORK_STATUS_DEFAULT } from '@workbench/work-log'
+import { dayMeta, defaultWorkRangeBounds, DELETED_PROJECT_ID, entriesOfDevice, groupByProject, isWorkSort, paginate, sanitizeWorkRange, sanitizeWorkRangeBounds, sanitizeWorkSort, timelineOf, toggleWorkLogStatus, WORK_PAGE_DAYS, WORK_RANGE_LABELS, WORK_RANGES, WORK_SORT_LABELS, WORK_SORTS, WORK_STATUS_DEFAULT, workLogDevices } from '@workbench/work-log'
 import { ElMessage } from 'element-plus'
 /**
  * 工作页：按天分组的工作日志时间轴。
  *
  * 与其它页面一样，它是导航栏上的一项（见 packages/appearance/src/views.ts），换页由 App.vue 的
- * `<KeepAlive><component :is>` 负责 —— 所以这一页在离开时会留在内存里，滚动位置与
- * 展开状态都不会丢；数据也不会因为切走再回来而重读。
+ * `<KeepAlive><component :is>` 负责 —— 所以这一页在离开时会留在内存里，滚动位置
+ * 也不会丢；数据也不会因为切走再回来而重读。
  *
  * 数据住在本机的 `work-log.json`（配了同步仓库时按设备分片共享，见
  * packages/work-log/src/work-log.ts 与 work-log-sync.ts）。
+ * **一次只看一台设备**（默认本机，工具带上的下拉可切换）：别的设备的分片照样合并进本机文件，
+ * 但界面上不混在一条时间轴里 —— 哪条属于哪台设备只看条目上的 `by`（没有 `by` 的老数据算本机），
+ * 筛选规则在 packages/work-log/src/work-log-devices.ts。
  * 时间的最小刻度是「天」：一天可以有多条记录，所以分页按**天**走 ——
  * 一天里的几条不该被翻页切成两半。范围、分组、分页都是 shared 里的纯函数，
  * 这一层只做取数与交互。
@@ -28,6 +31,7 @@ import { confirmAction } from '@/notify'
 import { useAuthStore } from '@/stores/auth'
 import { useProjectsStore } from '@/stores/projects'
 import { useSettingsStore } from '@/stores/settings'
+import { workLogLocalDevice } from '@/workbench/work-log'
 
 const store = useProjectsStore()
 const settings = useSettingsStore()
@@ -100,8 +104,12 @@ const syncReady = computed(() =>
 const syncing = ref(false)
 const syncFailed = ref(false)
 const syncNote = ref('')
-/** 同步拿回来的本机设备 id：远端条目的项目名兜底要看它 */
-const localDeviceId = ref('')
+/** 本机设备标识：默认看它，远端条目的项目名兜底也要它（拿不到时 id 为空，页面就不按设备筛） */
+const localDevice = ref<{ id: string, name: string }>({ id: '', name: '' })
+/** 同步拉回来的设备身份（含名字）：切换器里别的机器靠它显示 */
+const remoteDevices = ref<WorkLogDeviceRef[]>([])
+/** 正在看哪台设备：空串 = 本机（默认）；只活在本次会话里，重启回到本机 */
+const pickedDeviceId = ref('')
 let queuedSync = false
 
 /** 登录状态 / 同步仓库是异步载入的：第一次真正就绪时补跑一轮（首次挂载那条已经跑过也无妨，会合并成一趟） */
@@ -129,6 +137,14 @@ async function load(): Promise<void> {
 }
 
 /**
+ * 本机设备标识只取一次（适配层与 Token 面板共用同一份缓存）。
+ * 拿不到时 id 为空 —— 页面退化成「不按设备筛」，不把整份日志藏起来。
+ */
+async function loadLocalDevice(): Promise<void> {
+  localDevice.value = await workLogLocalDevice()
+}
+
+/**
  * 同步一轮：拉别的设备的分片 → 合并写回本机 → 推本机分片。
  *
  * 节奏与保险库同一套：进页面（含从别的页切回来）与每次增删改成功后各跑一轮；
@@ -153,12 +169,17 @@ async function syncNow(): Promise<void> {
         syncNote.value = result.error ?? '同步失败'
         break
       }
-      if (!result.data || !result.data.enabled)
+      const data = result.data
+      if (!data || !data.enabled)
         break
-      localDeviceId.value = result.data.device
+      // 设备名跟着分片走：别的机器在设置里改了名，下一轮这里就显示新的
+      remoteDevices.value = data.devices ?? []
+      const self = remoteDevices.value.find(item => item.id === data.device)
+      if (self && !localDevice.value.name)
+        localDevice.value = { id: self.id, name: self.name }
       // 远端条目并进来了：直接换成本机文件合并后的那份，不再多读一次盘
-      if (result.data.changed) {
-        entries.value = result.data.entries
+      if (data.changed) {
+        entries.value = data.entries
         now.value = Date.now()
       }
       syncFailed.value = false
@@ -181,8 +202,9 @@ async function syncNow(): Promise<void> {
 let timer: number | null = null
 
 onMounted(() => {
-  // 先读本机再同步：反过来会让合并后的列表被先到的旧快照盖回去
-  void load().then(() => syncNow())
+  // 先拿本机标识再读日志：否则第一帧会把别的设备的记录先混进来闪一下。
+  // 读完本机再同步：反过来会让合并后的列表被先到的旧快照盖回去
+  void loadLocalDevice().then(() => load()).then(() => syncNow())
   timer = window.setInterval(() => {
     const next = Date.now()
     if (dayKey(next) !== dayKey(now.value))
@@ -212,6 +234,54 @@ onBeforeUnmount(() => {
 const customBounds = computed(() => (range.value === 'custom' ? customRange.value : null))
 
 /**
+ * 切换器里的设备：本机恒在第一位（哪怕一条记录都没有），其余只列还有条目的。
+ * 只有一份设备时工具带上不摆这颗下拉（见模板里的 v-if）。
+ */
+const deviceOptions = computed(() =>
+  workLogDevices(entries.value, localDevice.value, remoteDevices.value),
+)
+
+/** 现在看的是哪台设备：选中的那台条目被删光了就回到本机 */
+const activeDeviceId = computed(() => {
+  const picked = pickedDeviceId.value
+  if (picked && deviceOptions.value.some(item => item.id === picked))
+    return picked
+  return localDevice.value.id
+})
+
+/** 切到别的设备看时，新建 / 导入的条目属于本机，写完要把选择切回本机 */
+const viewingOtherDevice = computed(
+  () => !!activeDeviceId.value && activeDeviceId.value !== localDevice.value.id,
+)
+
+/** 设备在按钮 / 菜单里的名字：本机带上「（本机）」，本机名字还没取到时就是「本机」 */
+function deviceLabelOf(item: WorkLogDevice): string {
+  if (!item.self)
+    return item.name
+  return item.name ? `${item.name}（本机）` : '本机'
+}
+
+/** 当前设备在按钮上显示的名字 */
+const activeDeviceLabel = computed(() => {
+  const current = deviceOptions.value.find(item => item.id === activeDeviceId.value)
+  return current ? deviceLabelOf(current) : ''
+})
+
+/** 这一页真正展示的条目：只留当前设备（本机标识拿不到时 entriesOfDevice 不筛） */
+const visibleEntries = computed(() =>
+  entriesOfDevice(entries.value, activeDeviceId.value, localDevice.value.id),
+)
+
+/** 本机条目：「从提交生成」的追加目标只该是本机的记录 */
+const localEntries = computed(() =>
+  entriesOfDevice(entries.value, localDevice.value.id, localDevice.value.id),
+)
+
+function pickDevice(id: string): void {
+  pickedDeviceId.value = id
+}
+
+/**
  * 当前维度下的分组（时间 = 一天一栏，项目 = 一个项目一栏），再按页大小切开。
  *
  * 两种维度共用同一套分页：页大小还是「7」，只是单位从天变成项目 ——
@@ -222,7 +292,7 @@ const customBounds = computed(() => (range.value === 'custom' ? customRange.valu
  */
 const sections = computed(() => {
   if (sort.value === 'time') {
-    return timelineOf(entries.value, range.value, now.value, customBounds.value).map(group => ({
+    return timelineOf(visibleEntries.value, range.value, now.value, customBounds.value).map(group => ({
       key: group.day,
       day: group.day,
       projectId: null as string | null,
@@ -231,7 +301,7 @@ const sections = computed(() => {
   }
 
   return groupByProject(
-    entries.value,
+    visibleEntries.value,
     range.value,
     now.value,
     store.projects.map(project => ({ id: project.id, name: project.name })),
@@ -262,12 +332,12 @@ const total = computed(() => sections.value.reduce((sum, group) => sum + group.e
 /**
  * 空态里那句「最近一次是……」。空串表示**整份日志一条都没有**，与「这段时间没有」不是一回事。
  *
- * 数的是整份 `entries`（不受范围与筛选影响），所以空态里拿到的必定是范围之外的那一天 ——
+ * 数的是当前设备整份条目（不受范围与筛选影响），所以空态里拿到的必定是范围之外的那一天 ——
  * 这正是它的用处：只说「本月还没有记录」，用户分不清是自己没记、还是记录丢了。
  * 日期键是 YYYY-MM-DD，直接比字符串就是比先后。
  */
 const lastLoggedText = computed(() => {
-  const latest = entries.value.reduce(
+  const latest = visibleEntries.value.reduce(
     (max, entry) => (entry.date > max ? entry.date : max),
     '',
   )
@@ -294,6 +364,10 @@ const customRangeTitle = computed(() => {
  * 「自定义」报具体区间，否则「自定义还没有记录」读不出是哪段时间。
  */
 const emptyTitle = computed(() => {
+  // 切到另一台设备、那台又一条记录都没有时，先说清是设备本身空着 ——
+  // 不然「今天还没有记录」会被读成「这台机器今天没记」（它可能是从来没记过）
+  if (viewingOtherDevice.value && !visibleEntries.value.length)
+    return '这台设备还没有记录'
   if (range.value === 'todo')
     return '没有待办'
   if (range.value === 'custom')
@@ -309,8 +383,12 @@ const emptyTitle = computed(() => {
  * 「一条记录都没有」与「都做完了」：前者才是原来那句引导。
  */
 const emptyHint = computed(() => {
+  // 别的设备空着时不要再指「记一条」：新记的条目属于本机，写进去也不会出现在这台设备下
+  if (viewingOtherDevice.value && !visibleEntries.value.length)
+    return ''
+
   if (range.value === 'todo') {
-    return entries.value.length
+    return visibleEntries.value.length
       ? '所有记录都已完成。'
       : '点右上角「记一条」写下待办；一天可以记多条，记录只保存在本机。'
   }
@@ -321,8 +399,8 @@ const emptyHint = computed(() => {
   return '点右上角「记一条」写下做了什么；一天可以记多条，记录只保存在本机。'
 })
 
-/** 换范围或维度后回到第一页，否则会停在一个新视图里并不存在的页码上 */
-watch([range, sort, customRange], () => {
+/** 换范围、维度或设备后回到第一页，否则会停在一个新视图里并不存在的页码上 */
+watch([range, sort, customRange, activeDeviceId], () => {
   page.value = 1
 })
 
@@ -359,7 +437,7 @@ function projectNameOf(entry: WorkLogEntry): string | null {
   const project = entry.projectId ? projectNames.value.get(entry.projectId) : undefined
   if (project)
     return project.name
-  if (entry.projectId && localDeviceId.value && entry.by && entry.by !== localDeviceId.value)
+  if (entry.projectId && localDevice.value.id && entry.by && entry.by !== localDevice.value.id)
     return entry.projectName ?? null
   return null
 }
@@ -379,11 +457,11 @@ function projectTitleOf(projectId?: string | null): string {
   const known = projectNames.value.get(projectId)?.name
   if (known)
     return known
-  const remote = entries.value.find(entry =>
+  const remote = visibleEntries.value.find(entry =>
     entry.projectId === projectId
-    && localDeviceId.value
+    && localDevice.value.id
     && entry.by
-    && entry.by !== localDeviceId.value,
+    && entry.by !== localDevice.value.id,
   )
   return remote?.projectName ?? '项目已删除'
 }
@@ -418,16 +496,20 @@ function openEdit(entry: WorkLogEntry): void {
 
 /** 保存成功后把结果并进内存里那份列表：不重读文件，也不等下一次进页面 */
 function onSaved(entry: WorkLogEntry): void {
+  // 新建的那条永远属于本机：正在看别的设备时切回本机，否则它一保存就从眼前消失
+  const created = editing.value === null
   const index = entries.value.findIndex(item => item.id === entry.id)
   if (index === -1)
     entries.value = [...entries.value, entry]
   else entries.value.splice(index, 1, entry)
+  if (created && viewingOtherDevice.value)
+    pickedDeviceId.value = ''
   // 新记的那条未必落在当前范围里（例如停在「昨天」却记到了今天），把时刻推一下让范围重新算
   now.value = Date.now()
   void syncNow()
 }
 
-/** 从提交生成之后同样并进内存列表：这次可能是新建，也可能是追加到已有记录 */
+/** 从提交生成之后同样并进内存列表：这次可能是新建，也可能是追加到已有记录（都写在本机这份里） */
 function onGitImported(changed: WorkLogEntry[]): void {
   for (const entry of changed) {
     const index = entries.value.findIndex(item => item.id === entry.id)
@@ -435,6 +517,9 @@ function onGitImported(changed: WorkLogEntry[]): void {
       entries.value.push(entry)
     else entries.value.splice(index, 1, entry)
   }
+  // 导入的条目属于本机：正在看别的设备时切回来，不然刚生成的东西看不见
+  if (viewingOtherDevice.value)
+    pickedDeviceId.value = ''
   now.value = Date.now()
   void syncNow()
 }
@@ -514,6 +599,37 @@ async function remove(entry: WorkLogEntry): Promise<void> {
       <div class="filter__tools">
         <!-- 同步失败只在这一行留个字：成功不写（不把工具带变成常驻状态栏） -->
         <span v-if="syncFailed && syncNote" class="sync-note" :title="syncNote">{{ syncNote }}</span>
+
+        <!--
+          设备切换：别的设备的分片虽然合并进了本机文件，这一页一次只看一台。
+          本机恒在清单第一位（默认看它），别的机器只列还有记录的；只有一台设备时不摆这颗下拉。
+        -->
+        <el-dropdown
+          v-if="deviceOptions.length > 1"
+          trigger="click"
+          placement="bottom-end"
+          @command="pickDevice"
+        >
+          <button class="sort device" type="button" :title="activeDeviceLabel">
+            <span class="sort__label">设备</span>
+            <span class="sort__value">{{ activeDeviceLabel }}</span>
+            <el-icon class="sort__caret">
+              <ArrowDown />
+            </el-icon>
+          </button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item
+                v-for="item in deviceOptions"
+                :key="item.id || 'self'"
+                :command="item.id"
+                :class="{ 'is-current': item.id === activeDeviceId }"
+              >
+                {{ deviceLabelOf(item) }}
+              </el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
 
         <!-- 排序维度：时间（一天一栏）或项目（一个项目一栏），与项目页的「排序」同一副控件 -->
         <el-dropdown trigger="click" placement="bottom-end" @command="pickSort">
@@ -629,11 +745,12 @@ async function remove(entry: WorkLogEntry): Promise<void> {
       @saved="onSaved"
     />
 
-    <!-- 提交生成：项目与日志都从这一页取，读写各归适配层；日期与项目在弹窗里选 -->
+    <!-- 提交生成：项目与日志都从这一页取，读写各归适配层；日期与项目在弹窗里选。
+         去重与「追加到哪条」只认本机条目 —— 别把提交接进别的设备的记录里 -->
     <WorkLogGitDialog
       v-model="gitVisible"
       :projects="store.projects"
-      :entries="entries"
+      :entries="localEntries"
       :now="now"
       @imported="onGitImported"
     />
@@ -668,6 +785,14 @@ async function remove(entry: WorkLogEntry): Promise<void> {
   overflow: hidden;
   font-size: var(--fs-micro);
   color: var(--st-fail);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 设备切换沿用「排序」那副按钮；机器名可能长，按钮上截断（全名走 title） */
+.device .sort__value {
+  max-width: 140px;
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }

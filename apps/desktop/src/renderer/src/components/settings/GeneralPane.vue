@@ -2,6 +2,7 @@
 import type { AppSettings } from '@/types'
 import { APP_NAME_DEFAULT, APP_NAME_MAX_LENGTH } from '@workbench/appearance'
 import { accountLabel } from '@workbench/auth'
+import { EDITOR_HOTKEY_ACTIONS, EDITOR_HOTKEY_DEFAULTS, EDITOR_HOTKEY_LABELS, resolveEditorHotkeyConflict } from '@workbench/notes'
 import { WEATHER_CITY_MAX } from '@workbench/weather'
 import { sanitizeZentaoPollMinutes } from '@workbench/zentao'
 import { ElMessage } from 'element-plus'
@@ -210,6 +211,43 @@ function commitWeatherCity(): void {
 function saveHotkey(accelerator: string): void {
   // 换了组合键要重新注册，所以一定带上启用开关
   save({ hotkey: accelerator, hotkeyEnabled: true })
+}
+
+// ---------- 编辑器快捷键 ----------
+//
+// 笔记正文（NoteEditor）里那套自定义键位：动作清单、撞键腾位、收敛都在
+// @workbench/notes 的 editor-hotkeys.ts，这里只管把录到的表存进设置。
+// 表只存改过的项：没出现的动作走 Vditor 内置键位；空串 = 禁用。
+
+const editorHotkeys = computed(() => settings.settings.editorHotkeys ?? {})
+
+/** 一个动作当前的键串；不在表里 = 没配过 —— 按钮里垫的显示值就是编辑器的内置键位 */
+function editorHotkeyOf(name: string): string {
+  return editorHotkeys.value[name] ?? EDITOR_HOTKEY_DEFAULTS[name] ?? ''
+}
+
+/** 这个动作有没有被用户改过（决定「恢复默认」那颗出不出） */
+function isEditorHotkeyCustomized(action: string): boolean {
+  return action in editorHotkeys.value
+}
+
+/** 录完一个组合键：撞了别的动作的键先腾位（提示一声），再整表存进设置 */
+function saveEditorHotkey(action: string, accelerator: string): void {
+  const { next, cleared } = resolveEditorHotkeyConflict(editorHotkeys.value, action, accelerator)
+  if (cleared.length) {
+    const labels = cleared.map(name => EDITOR_HOTKEY_LABELS[name] ?? name)
+    ElMessage.warning(`该组合键已从「${labels.join('、')}」上腾出（原来那个动作改回内置键位）`)
+  }
+  save({ editorHotkeys: next })
+}
+
+/** 恢复默认 = 把这一项从表里删掉（回到编辑器内置键位） */
+function resetEditorHotkey(action: string): void {
+  if (!isEditorHotkeyCustomized(action))
+    return
+  const next = { ...editorHotkeys.value }
+  delete next[action]
+  save({ editorHotkeys: next })
 }
 </script>
 
@@ -447,6 +485,44 @@ function saveHotkey(accelerator: string): void {
       </div>
 
       <!--
+        编辑器快捷键：给右键菜单里那组常用动作各配一个组合键（Ctrl+3 → 三级标题这种）。
+        录制件与全局快捷键共用 HotkeyField（同一种按法录出的串一致）；
+        表只存改过的项 —— 没配的动作按编辑器内置键位走（按钮里垫显示的就是内置键），
+        「恢复默认」就是把这一项删掉。
+      -->
+      <div class="row row--stack">
+        <div class="row__text">
+          <span class="row__label">编辑器快捷键</span>
+          <span class="row__hint">只对笔记正文生效；两个动作撞了同一个键时，先配的那个自动腾出。</span>
+        </div>
+        <div class="hotkey-grid">
+          <div v-for="action in EDITOR_HOTKEY_ACTIONS" :key="action.name" class="hotkey-grid__row">
+            <span class="hotkey-grid__name">{{ action.label }}</span>
+            <HotkeyField
+              :model-value="editorHotkeyOf(action.name)"
+              :hint="false"
+              @update:model-value="(value: string) => saveEditorHotkey(action.name, value)"
+            />
+            <!--
+              恢复默认只在改过的行出现，但它的**位置恒定占着**（没改的行渲染等宽占位）：
+              不然配过的行比没配的行宽出一截，同一列的键位按钮左右各挪，竖向对不齐。
+            -->
+            <button
+              v-if="isEditorHotkeyCustomized(action.name)"
+              class="hotkey-grid__reset"
+              type="button"
+              title="恢复默认（回到编辑器内置键位）"
+              aria-label="恢复默认"
+              @click="resetEditorHotkey(action.name)"
+            >
+              恢复默认
+            </button>
+            <span v-else class="hotkey-grid__reset" aria-hidden="true" />
+          </div>
+        </div>
+      </div>
+
+      <!--
         技能（skill）没有设置项：技能库是**它自己的一个目录**（技能页那颗「选择技能文件夹」挑的），
         与上面那个笔记文件夹互不相干 —— 可以正好是同一处，也可以各有各的仓库。
         所以这里既没有「技能目录」也没有「它在仓库哪一层」：那一层由磁盘决定
@@ -508,5 +584,67 @@ function saveHotkey(accelerator: string): void {
 
 .row--hotkey {
   align-items: center;
+}
+
+/*
+ * 编辑器快捷键：两列小网格（动作名 + 录制件），不用把 18 行铺成 18 个大条。
+ * 三列网格用**固定的列模板**而不是自由 flex：动作名列 + 键位列 + 恢复默认列都各有定宽，
+ * 同一列的按钮才落在同一条竖线上（恢复默认那格恒定占位，见模板里的说明）。
+ */
+.hotkey-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: var(--sp-2) var(--sp-4);
+  width: 100%;
+}
+
+.hotkey-grid__row {
+  display: grid;
+  grid-template-columns: 1fr auto 44px;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.hotkey-grid__name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink-2);
+  font-size: var(--fs-meta);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 键位按钮定宽：取装得下最长那串（Control + Shift + H ≈ 168px）的值，全列落在同一条竖线 */
+.hotkey-grid__row :deep(.hotkey) {
+  width: 168px;
+  min-width: 0;
+  justify-content: center;
+}
+
+/* 键位定宽后按钮占 168，恢复默认那列相应放宽，保持同一列的按钮都在一条竖线上 */
+.hotkey-grid__row {
+  grid-template-columns: 1fr auto 48px;
+}
+
+.hotkey-grid__reset {
+  flex: 0 0 auto;
+  justify-self: start;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink-3);
+  font-size: var(--fs-micro);
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+
+/* 空占位（没改过的行）：不响应任何指针动作，只把「恢复默认」那格的位置占住 */
+span.hotkey-grid__reset {
+  cursor: default;
+}
+
+.hotkey-grid__reset:hover {
+  color: var(--st-fail);
 }
 </style>

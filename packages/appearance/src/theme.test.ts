@@ -1,6 +1,6 @@
 import type { CardPlacement, HomeCardId, HomeColumn } from './theme'
 import { describe, expect, it } from 'vitest'
-import { addColumn, CARD_GAP_DEFAULT, CARD_GAP_MAX, CARD_GAP_MIN, CARD_HEIGHT_MIN, cardIdsInRow, clampCardGap, clampColumnWidth, clampGitFilesWidth, clampGitHistoryWidth, clampGitTreeWidth, clampKbTreeWidth, clampNoteTreeWidth, clampRowHeight, clampVideoTreeWidth, COLUMN_COUNT_MAX, COLUMN_WIDTH_DEFAULT, COLUMN_WIDTH_MAX, COLUMN_WIDTH_MIN, columnHasVisibleCards, columnIds, columnOfRow, DEFAULT_THEME, GIT_FILES_WIDTH_DEFAULT, GIT_FILES_WIDTH_MIN, GIT_HISTORY_WIDTH_DEFAULT, GIT_HISTORY_WIDTH_MIN, GIT_TREE_WIDTH_DEFAULT, GIT_TREE_WIDTH_MAX, HOME_CARD_IDS, KB_TREE_WIDTH_DEFAULT, KB_TREE_WIDTH_MAX, KB_TREE_WIDTH_MIN, moveCard, normalizeOrder, NOTE_TREE_WIDTH_DEFAULT, NOTE_TREE_WIDTH_MAX, NOTE_TREE_WIDTH_MIN, pruneEmptyRows, removeColumn, resizeColumnPair, resizeRowHeight, ROW_HEIGHT_MAX, ROW_HEIGHT_MIN_DEFAULT, rowBoxHeight, rowHeightMin, rowIds, rowOf, rowShapeFor, sameThemeContent, sanitizeCardMode, sanitizeTheme, setColumnWidths, THEME_VERSION, VIDEO_TREE_WIDTH_DEFAULT, VIDEO_TREE_WIDTH_MAX, VIDEO_TREE_WIDTH_MIN, visibleCardIdsInRow } from './theme'
+import { addColumn, CARD_GAP_DEFAULT, CARD_GAP_MAX, CARD_GAP_MIN, CARD_HEIGHT_MIN, cardIdsInRow, clampCardGap, clampColumnWidth, clampGitFilesWidth, clampGitHistoryWidth, clampGitTreeWidth, clampKbTreeWidth, clampNoteRailWidth, clampNoteTreeWidth, clampRowHeight, clampVideoTreeWidth, COLUMN_COUNT_MAX, COLUMN_WIDTH_DEFAULT, COLUMN_WIDTH_MAX, COLUMN_WIDTH_MIN, columnHasVisibleCards, columnIds, columnOfRow, DEFAULT_THEME, GIT_FILES_WIDTH_DEFAULT, GIT_FILES_WIDTH_MIN, GIT_HISTORY_WIDTH_DEFAULT, GIT_HISTORY_WIDTH_MIN, GIT_TREE_WIDTH_DEFAULT, GIT_TREE_WIDTH_MAX, HOME_CARD_IDS, KB_TREE_WIDTH_DEFAULT, KB_TREE_WIDTH_MAX, KB_TREE_WIDTH_MIN, moveCard, normalizeOrder, NOTE_RAIL_WIDTH_DEFAULT, NOTE_RAIL_WIDTH_MAX, NOTE_RAIL_WIDTH_MIN, NOTE_TREE_WIDTH_DEFAULT, NOTE_TREE_WIDTH_MAX, NOTE_TREE_WIDTH_MIN, pruneEmptyRows, removeColumn, resizeColumnPair, resizeRowHeight, ROW_HEIGHT_MAX, ROW_HEIGHT_MIN_DEFAULT, rowBoxHeight, rowHeightMin, rowIds, rowOf, rowShapeFor, sameThemeContent, sanitizeCardMode, sanitizeTheme, setColumnWidths, THEME_VERSION, VIDEO_TREE_WIDTH_DEFAULT, VIDEO_TREE_WIDTH_MAX, VIDEO_TREE_WIDTH_MIN, visibleCardIdsInRow } from './theme'
 
 /**
  * 算法用例（移动 / 拆栏 / 收栏）的固定夹具：三栏五行，一行里可能并着好几张卡片。
@@ -178,6 +178,20 @@ describe('sanitizeTheme', () => {
       NOTE_TREE_WIDTH_MIN,
     )
     expect(sanitizeTheme({ version: THEME_VERSION, noteTreeWidth: 300 }).noteTreeWidth).toBe(300)
+  })
+
+  /** 笔记页大纲栏宽度是后加的字段：老主题文件里没有它，补默认值（可拖之前那条定宽） */
+  it('笔记页大纲栏宽度缺省用默认值，越界收敛', () => {
+    expect(sanitizeTheme({}).noteRailWidth).toBe(NOTE_RAIL_WIDTH_DEFAULT)
+    expect(clampNoteRailWidth(undefined)).toBe(NOTE_RAIL_WIDTH_DEFAULT)
+    expect(clampNoteRailWidth('宽一点')).toBe(NOTE_RAIL_WIDTH_DEFAULT)
+    expect(sanitizeTheme({ version: THEME_VERSION, noteRailWidth: 9999 }).noteRailWidth).toBe(
+      NOTE_RAIL_WIDTH_MAX,
+    )
+    expect(sanitizeTheme({ version: THEME_VERSION, noteRailWidth: 1 }).noteRailWidth).toBe(
+      NOTE_RAIL_WIDTH_MIN,
+    )
+    expect(sanitizeTheme({ version: THEME_VERSION, noteRailWidth: 300 }).noteRailWidth).toBe(300)
   })
 
   /** 视频页左栏宽度同是后加的字段：缺省补默认值（也是拖动前那个 264 的定宽），越界收敛 */

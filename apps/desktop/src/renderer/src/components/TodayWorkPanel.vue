@@ -3,7 +3,7 @@ import type { WorkLogEntry } from '@workbench/work-log'
 import { Finished, Warning } from '@element-plus/icons-vue'
 
 import { dayKey, markdownToPlainText, sanitizeProjectColor } from '@workbench/core'
-import { completedEntriesOn } from '@workbench/work-log'
+import { completedEntriesOn, entriesOfDevice } from '@workbench/work-log'
 /**
  * 首页「今日完成」卡片：今天**标记为已完成**的工作记录，一条一行（项目标签 + 内容）。
  *
@@ -12,6 +12,8 @@ import { completedEntriesOn } from '@workbench/work-log'
  * packages/work-log/src/work-log.ts / work-log-sync.ts）——
  * 与工作页是两次独立读取，但适配层把整份文件缓存在内存里，第二次只是取一份快照，
  * 所以两边看到的是同一份内容，不会各自去读一遍磁盘。
+ * **只数本机的**（按条目的 `by` 筛，与工作页默认看的那台一致）：卡片上没有设备切换，
+ * 别把几台机器的事混成一行行看起来像自己做的；要看别的设备去「工作」页切。
  *
  * 正文按 markdown 原文存着，这里**不渲染它**（一行装不下，一张卡片里堆十几段富文本也读不出重点）：
  * 去掉标记后一行显示，悬停给全文，要读全貌就点进去。
@@ -22,6 +24,7 @@ import ProjectTag from '@/components/ProjectTag.vue'
 import { useWallClock } from '@/composables/use-wall-clock'
 import { useNavStore } from '@/stores/nav'
 import { useProjectsStore } from '@/stores/projects'
+import { workLogLocalDevice } from '@/workbench/work-log'
 
 const store = useProjectsStore()
 const nav = useNavStore()
@@ -31,6 +34,8 @@ const entries = ref<WorkLogEntry[]>([])
 const loading = ref(true)
 /** 读盘失败与「今天还没做完什么」是两回事，不能都显示成空列表 */
 const error = ref('')
+/** 本机设备 id：只留本机条目（拿不到时 entriesOfDevice 不筛，退化成原来的样子） */
+const localDeviceId = ref('')
 
 async function load(): Promise<void> {
   error.value = ''
@@ -48,7 +53,11 @@ async function load(): Promise<void> {
   }
 }
 
-onMounted(() => void load())
+async function loadLocalDevice(): Promise<void> {
+  localDeviceId.value = (await workLogLocalDevice()).id
+}
+
+onMounted(() => void Promise.all([loadLocalDevice(), load()]))
 
 /**
  * 切回首页时重读一次：首页整页留在内存里（KeepAlive），卡片不会重新挂载，
@@ -90,7 +99,10 @@ interface PanelRow {
 
 /** 项目名 / 标识色 / 纯文本都在这里算一次，模板里不再逐帧转换 */
 const rows = computed<PanelRow[]>(() =>
-  completedEntriesOn(entries.value, today.value).map((entry) => {
+  completedEntriesOn(
+    entriesOfDevice(entries.value, localDeviceId.value, localDeviceId.value),
+    today.value,
+  ).map((entry) => {
     const project = entry.projectId ? projects.value.get(entry.projectId) : undefined
     return {
       id: entry.id,

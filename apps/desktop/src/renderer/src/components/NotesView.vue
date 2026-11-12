@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { NoteKind, NoteSyncSummary } from '@workbench/notes'
-import { Document, EditPen, FolderOpened, List, Notebook, Picture, Refresh, RefreshRight } from '@element-plus/icons-vue'
+import { Document, EditPen, FolderOpened, Notebook, Picture, Refresh, RefreshRight } from '@element-plus/icons-vue'
 import { countNodes, findNoteNode, noteAbsPath, noteRootName } from '@workbench/notes'
 import { ElMessage } from 'element-plus'
 /**
@@ -14,7 +14,8 @@ import { ElMessage } from 'element-plus'
  *     左栏底部是笔记本本身与「最近打开」那一份历史记录。
  *
  * 两栏的分隔线可以左右拖（宽度住在 theme.json 里，见 packages/appearance/src/theme.ts 的 `noteTreeWidth`），
- * 与首页那两条栏宽把手同一套做法：拖动时只改本地让界面跟手，松手才落盘。
+ * 右栏大纲常显、拖它左缘那条缝也能改宽（`noteRailWidth`），与首页那两条栏宽把手同一套做法：
+ * 拖动时只改本地让界面跟手，松手才落盘。
  *
  * 另外还有一档**只读**（**默认就是它**，Ctrl+/ 切到可写）：读一篇长笔记时不想手一抖改掉它，
  * 就把**正文**的写入口收起来（正文、格式菜单），省得「看一眼」变成「改一处」。
@@ -26,7 +27,7 @@ import { ElMessage } from 'element-plus'
  * 增删改的确认与提示。树在 NoteTree，正文编辑在 NoteEditor，
  * 左栏底部那一行与分隔条是 RecentRoots / PanelResizer（与视频页共用）。
  */
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { copyText } from '@/clipboard'
 import NoteAssetsDialog from '@/components/NoteAssetsDialog.vue'
 import NoteEditor from '@/components/NoteEditor.vue'
@@ -36,6 +37,8 @@ import PanelLoading from '@/components/PanelLoading.vue'
 import PanelResizer from '@/components/PanelResizer.vue'
 import RecentRoots from '@/components/RecentRoots.vue'
 import SideLoadError from '@/components/SideLoadError.vue'
+import { toggleOutlineRow } from '@/composables/use-outline-row-toggle'
+import { startPointerDrag } from '@/composables/use-pointer-drag'
 import { formatTimestamp } from '@/format'
 import { confirmAction, notifyError } from '@/notify'
 import { useNavStore } from '@/stores/nav'
@@ -338,36 +341,57 @@ const editorRef = ref<InstanceType<typeof NoteEditor> | null>(null)
  *
  * 那枚大纲元素是 Vditor 建的，初始化完成后由 NoteEditor 搬进这条栏（见它的 `outlineHost`）——
  * 长在正文区里的时候，它的顶边只能与正文对齐，跟页头差着一整行，对不齐。
+ *
+ * 这一栏**常显**（打开着一篇笔记时它就在那儿），不再有开关：`outlinePinned` 让编辑器
+ * 初始化完成后直接打开大纲，右键菜单里也不再给「大纲」那一项。
  */
 const outlineRail = ref<HTMLElement | null>(null)
-/** 大纲开没开：开合归 Vditor，每次真正变化经 NoteEditor 的 `outline-change` 报到这儿 */
-const outlineOpen = ref(false)
 
 /**
- * 大纲收放会改变正文那块的可读宽度，而 Vditor 只在 window resize / 切模式时重算
- * 正文的左右留白（`preview.maxWidth` 居中的那一份），不跟容器宽度走。
- * 所以栏位收放完之后补一次 resize，让它按新的宽度把留白算回去。
+ * 大纲条目整行收展：capture 阶段先于 Vditor 绑在根 `ul` 上的冒泡监听跑到，
+ * 点在有子级的条目行任意位置就由这里收展（见 use-outline-row-toggle）。
+ * 只有箭头上的点击需要拦下 —— 不拦的话 Vditor 自己那份也跑，同一下收展两次。
  */
-watch(outlineOpen, async () => {
-  await nextTick()
-  window.dispatchEvent(new Event('resize'))
-})
+function onOutlineRowClick(event: MouseEvent): void {
+  if (toggleOutlineRow(event.target))
+    event.stopPropagation()
+}
 
-// 选中项离开「一篇笔记」（换文件夹 / 换笔记本）时编辑器会卸载，那条栏跟着收起。
-// NoteEditor 卸载时也会报一次，这里再兜一道 —— 栏留在屏幕上会是一块空白的竖条
-watch(() => store.active, (active) => {
-  if (!active)
-    outlineOpen.value = false
-})
+/** 栏宽住在 theme.json 里（`noteRailWidth`）：拖动只改本地跟手，松手才落盘 */
+const editorStyle = computed(() => ({
+  '--rail-w': `${settings.themeConfig.noteRailWidth}px`,
+}))
+
+/** 拖动大纲栏左缘的把手（拖动态只用来让把手一直亮着） */
+const railResizing = ref(false)
 
 /**
- * 右侧大纲（目录结构）的开关。
+ * 拖大纲栏左缘调宽：与目录树那条缝同一套做法（宽度以按下那一刻为基准，逐帧只算差值）。
  *
- * 只读那一档照样给：它只改看法，不动正文。开合状态不在这里存 —— Vditor 自己维护，
- * 面板开没开看右栏那块本身。
+ * 栏在右边，所以指针往左拖才是把栏拉宽（差一个负号）。
+ * 正文的左右留白是固定的 50px（见 NoteEditor 的样式），容器变窄变宽由 CSS 自己重排，
+ * 不必再补 window resize。
  */
-function toggleOutline(): void {
-  editorRef.value?.toggleOutline()
+function onRailResize(event: PointerEvent): void {
+  if (event.button !== 0)
+    return
+  event.preventDefault()
+
+  const startWidth = settings.themeConfig.noteRailWidth
+  railResizing.value = true
+  startPointerDrag({
+    start: { x: event.clientX, y: event.clientY },
+    bodyClass: 'is-resizing-notes-rail',
+    onMove: (moveEvent, start) =>
+      settings.setNoteRailWidth(startWidth - (moveEvent.clientX - start.x)),
+    onEnd: (_last, cancelled) => {
+      railResizing.value = false
+      if (cancelled)
+        settings.setNoteRailWidth(startWidth)
+      else
+        void settings.commitNoteRailWidth()
+    },
+  })
 }
 
 /**
@@ -587,8 +611,8 @@ function onWindowFocus(): void {
         @end="() => void settings.commitNoteTreeWidth()"
       />
 
-      <section class="notes__editor panel">
-        <!-- 左列：页头 + 正文；大纲开着时它让出右栏那份宽度 -->
+      <section class="notes__editor panel" :style="editorStyle">
+        <!-- 左列：页头 + 正文；大纲栏常显，它拿的是剩下的宽度 -->
         <div class="notes__main">
           <header class="notes__head">
             <template v-if="store.active">
@@ -621,16 +645,6 @@ function onWindowFocus(): void {
             <!-- 保存状态就写在标题这一行：写东西的人需要知道「刚才那段到底存下去了没有」 -->
             <span v-if="store.saveError" class="notes__saved is-error">{{ store.saveError }}</span>
             <span v-else-if="store.active" class="notes__saved">{{ savedText }}</span>
-
-            <!--
-              右侧大纲的开关：按需打开（右键菜单里那一项是同一个动作）。
-              **只读那一档也留着它** —— 大纲只改「怎么看」，不改正文。
-            -->
-            <el-tooltip v-if="store.active" content="显示 / 收起大纲" placement="bottom">
-              <el-button class="notes__outline" size="small" text @click="toggleOutline">
-                <el-icon><List /></el-icon>
-              </el-button>
-            </el-tooltip>
           </header>
 
           <!-- 编辑器只在「打开的是一篇笔记」时出现；其余情况各说一句 -->
@@ -642,10 +656,11 @@ function onWindowFocus(): void {
             :theme="settings.effectiveTheme"
             :read-only="readOnly"
             :image-repo="settings.settings.noteImageRepo"
+            :editor-hotkeys="settings.settings.editorHotkeys"
             :outline-host="outlineRail"
+            outline-pinned
             @change="onContentChange"
             @open="openNoteLink"
-            @outline-change="outlineOpen = $event"
           />
 
           <div v-else class="empty notes__hint">
@@ -695,9 +710,23 @@ function onWindowFocus(): void {
         <!--
           大纲栏：Vditor 自己那枚大纲元素在初始化后搬进这里（见 NoteEditor 的 outlineHost）。
           它在正文区里的时候，顶边只能贴着正文，比页头低一整行；搬到这条栏里之后
-          与页头同高起步，栏位多宽、显不显示由这一层说了算。
+          与页头同高起步，栏位多宽由左缘那条缝说了算。
+          **常显**：打开着一篇笔记时它就在那儿（`outlinePinned` 让编辑器把大纲直接打开），
+          不再有开关；拖左缘那条缝改宽度，宽度记在 theme.json 里。
         -->
-        <aside v-show="outlineOpen" ref="outlineRail" class="notes__rail" />
+        <span
+          v-if="store.active"
+          class="notes__rail-resizer"
+          :class="{ 'is-dragging': railResizing }"
+          title="拖动调整大纲宽度"
+          @pointerdown="onRailResize"
+        />
+        <aside
+          v-if="store.active"
+          ref="outlineRail"
+          class="notes__rail"
+          @click.capture="onOutlineRowClick"
+        />
       </section>
     </div>
 
@@ -755,15 +784,16 @@ function onWindowFocus(): void {
 }
 
 /**
- * 右栏：左边一列是页头 + 正文，右边一条是大纲栏（按需显示）。
+ * 右栏：左边一列是页头 + 正文，右边一条是大纲栏（常显）。
  *
- * `.panel` 原本是竖排的 flex（页头压着正文），这里拆成两列：大纲栏要与页头同高起步，
- * 它就得是这一层的直接子元素，不能跟着正文一起往下让。行间距归 `.notes__main` 自己，
- * 所以这一层的 gap 归零 —— 栏收起来时不能留下一道空缝。
+ * `.panel` 原本是竖排的 flex（页头压着正文），这里拆成三列：正文、栏左缘那条拖动缝、大纲栏。
+ * 大纲栏要与页头同高起步，它就得是这一层的直接子元素，不能跟着正文一起往下让。
+ * 行间距归 `.notes__main` 自己，所以这一层的 gap 归零 —— 没有打开着的笔记时
+ * 后两列整个不画，右边不会留一道空缝。
  */
 .notes__editor {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   gap: 0;
   min-width: 0;
   min-height: 0;
@@ -782,15 +812,48 @@ function onWindowFocus(): void {
  * 大纲栏：与左列同高、与页头同顶。
  *
  * 它自己不带底色与卡片外壳 —— 这一页的底归 .panel，栏只留一道左侧发丝线与一点内边距，
- * 像书页边上的目录，而不是第二张卡片。宽度定死：大纲是导航，不该跟正文抢宽度。
+ * 像书页边上的目录，而不是第二张卡片。宽度是主题里的 `noteRailWidth`：拖左缘那条缝改，
+ * 大纲是导航、不抢正文宽度，所以下限只到放得下一行标题。
  */
 .notes__rail {
-  width: 224px;
+  width: var(--rail-w, 224px);
   min-height: 0;
-  margin-left: var(--sp-4);
   padding-left: var(--sp-4);
   border-left: 1px solid var(--border);
   overflow: hidden;
+}
+
+/**
+ * 大纲栏左缘的拖动把手：一条通高的热区（宽度就是原先栏的左边距），
+ * 看得见的只有正中间那个小竖条 —— 与目录树那条缝（PanelResizer）同一副样子，
+ * 只是它住在编辑器这一层的网格里、改的是右栏。指针落到缝上才露出来，
+ * 拖动态由组件自己驱动（指针可能已经离开缝线，不亮就像拖动断了）。
+ */
+.notes__rail-resizer {
+  position: relative;
+  width: var(--sp-4);
+  cursor: ew-resize;
+}
+
+.notes__rail-resizer::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 8px;
+  height: 34px;
+  transform: translate(-50%, -50%);
+  border: 1px solid var(--ink);
+  border-radius: var(--r-pill);
+  background: var(--bg-surface);
+  opacity: 0;
+  transition: opacity 0.15s ease, background 0.15s ease;
+}
+
+.notes__rail-resizer:hover::after,
+.notes__rail-resizer.is-dragging::after {
+  background: var(--ink);
+  opacity: 1;
 }
 
 /**
@@ -883,11 +946,10 @@ function onWindowFocus(): void {
 }
 
 /**
- * 标题行：名字 + 位置 + 保存状态 + 大纲开关，右栏的「页头」。
+ * 标题行：名字 + 位置 + 保存状态，右栏的「页头」。
  *
- * **垂直居中，不是基线对齐**：这一行里有一颗 28px 高的图标按钮，按基线对齐时
- * 文字会被自己的基线摆在上半截、按钮却居中，两者差 3px（看着就是图标往下挂）。
- * 字号不同的那几段（标题 15 / 位置与保存 10.5）居中摆也不会打架。
+ * **垂直居中，不是基线对齐**：这一行混着 15px 的标题与 10.5px 的辅助文字（位置 / 保存状态），
+ * 按基线对齐小字会浮在上半截；居中摆各自居中对齐。
  */
 .notes__head {
   display: flex;
@@ -921,19 +983,6 @@ function onWindowFocus(): void {
   flex-shrink: 0;
   font-size: var(--fs-micro);
   color: var(--ink-3);
-}
-
-/**
- * 标题行右端的大纲开关：无底色的图标键（与左栏底部那几颗同款）。
- * 垂直位置由这一行的 `align-items: center` 定，这里只留颜色与不收缩。
- */
-.notes__outline {
-  flex-shrink: 0;
-  color: var(--ink-3);
-}
-
-.notes__outline:hover {
-  color: var(--ink);
 }
 
 /**

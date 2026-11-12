@@ -1,12 +1,13 @@
 <script setup lang="ts">
+import type { Result } from '@workbench/core'
 import type { GatewayUsageSummary } from '@workbench/usage'
-import type { GatewayUsageRow } from '@/workbench/gateway'
+import type { GatewayUsageRow, GatewayUsageWindow } from '@/workbench/gateway'
 import { Bottom, CircleCheck, DataLine, Histogram, Timer, Top } from '@element-plus/icons-vue'
 import { gatewayBucketUnit, recentHourBuckets, summarizeGatewayRows } from '@workbench/usage'
 import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref } from 'vue'
 import EmptyState from '@/components/EmptyState.vue'
 import { formatCompactTokens } from '@/format'
-import { gatewayAccountNames, gatewayUsageRows } from '@/workbench/gateway'
+import { gatewayAccountNames } from '@/workbench/gateway'
 import GatewayTable from './GatewayTable.vue'
 
 /**
@@ -25,13 +26,14 @@ import GatewayTable from './GatewayTable.vue'
  * 时间范围按**自然日**算（UTC+8 零点起）：`今日` = 今天 0 点到现在，`昨日` = 昨天一整天，
  * `近 3 天` = 今天加前两天。取回的行会盖住最近 24 小时（图要用），统计前按 `since` 再裁一次。
  *
- * 所有数字来自 `usage_rows`（默认 `wb_gateway_usage_rows`，Qoder 页注入自己的命令），这一页只做格式化。
+ * 所有数字来自 `usage_rows`（默认走 `window.workbench.gatewayUsageRows` —— 适配层会带上同步仓库与
+ * 本机设备 id，别的机器的流水才合得进来；Qoder 页注入自己的命令），这一页只做格式化。
  * 两边流水形状相同、汇总都走 `summarizeGatewayRows`，所以 TBuddy 与 Qoder 共用这一份：
  * 改布局或口径时两个页面一起生效，别再给 Qoder 另抄一份。
  */
 
 /** 取数窗口：TBuddy 与 Qoder 的 `usage_rows` 同形（`since` + 行） */
-type UsageWindow = Awaited<ReturnType<typeof gatewayUsageRows>>
+type UsageWindow = Result<GatewayUsageWindow>
 
 const props = defineProps<{
   /** 取数入口：默认走 TBuddy 网关；Qoder 页注入自己的命令 */
@@ -235,7 +237,9 @@ function nameOf(uid: string): string {
 
 function load(): void {
   const range = RANGES.find(item => item.value === rangeKey.value) ?? RANGES[0]
-  const fetchRows = props.loadRows ?? gatewayUsageRows
+  // 默认必须走 `window.workbench` 这一份：适配层（api-sync）会给它带上同步仓库与本机设备 id，
+  // 直接调 `@/workbench/gateway` 的同名函数是空仓库 —— 只读本机，别的机器的流水永远进不来。
+  const fetchRows = props.loadRows ?? window.workbench.gatewayUsageRows
   const fetchNames = props.loadNames ?? gatewayAccountNames
   loading.value = true
   void fetchRows(range.days).then((result) => {

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { NoteKind, NoteNode } from '@workbench/notes'
 import type { Component } from 'vue'
-import { CopyDocument, Document, Folder, FolderAdd, FolderOpened, Plus, Refresh, TopRight } from '@element-plus/icons-vue'
+import { Document, Folder, FolderAdd, FolderOpened, Plus, Refresh } from '@element-plus/icons-vue'
 import { noteChain, noteDropAllowed, parentRel } from '@workbench/notes'
 /**
  * 笔记目录树（左栏）。
@@ -15,9 +15,10 @@ import { noteChain, noteDropAllowed, parentRel } from '@workbench/notes'
  *   1. **拖动**：文件拖进文件夹，或拖到树下面的**空白区**（= 移回最外层）。
  *      能不能落由 packages/notes/src/note.ts 的 `noteDropAllowed` 说了算，这里只把它接到 el-tree 的回调上；
  *   2. **右键菜单**：节点行上分两组 —— **写**（新建笔记 / 新建文件夹 / 重命名 / 删除）与
- *      **读**（在资源管理器中显示 / 复制路径 / 用默认程序打开），触发区盖住整行，见样式里
- *      el-dropdown 那两条，所以行尾的空白也算这一行；**同一时刻只开一个**（右击另一行先把
- *      上一个关掉，见 use-exclusive-dropdown）；落在空白区时是「新建两项 + 刷新列表 +
+ *      **读**（在资源管理器中显示 / 复制路径 / 用默认程序打开），**贴右键落点**出现
+ *      （[NoteTreeMenu](NoteTreeMenu.vue)：el-dropdown 的 contextmenu 触发器锚在整行上，
+ *      右击行尾会弹回行首；整行（含行尾空白）都由树上的 node-contextmenu 接住）；
+ *      **同一时刻只有一份**，右击另一行直接换落点；落在空白区时是「新建两项 + 刷新列表 +
  *      在资源管理器中打开笔记本」，新建一律落在笔记本根目录 —— 顶部那条工具条去掉之后，
  *      新建就只剩右键与空态里那两颗按钮这两条路；
  *   3. **节点样式**：文件夹与笔记两副图标、选中态（自己画，不用 `highlight-current`：
@@ -38,8 +39,8 @@ import { noteChain, noteDropAllowed, parentRel } from '@workbench/notes'
  */
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import EmptyState from '@/components/EmptyState.vue'
+import NoteTreeMenu from '@/components/NoteTreeMenu.vue'
 import PanelLoading from '@/components/PanelLoading.vue'
-import { useExclusiveDropdown } from '@/composables/use-exclusive-dropdown'
 import { useFloatingDismiss } from '@/composables/use-floating-dismiss'
 import { useFloatingPosition } from '@/composables/use-floating-position'
 
@@ -85,8 +86,13 @@ const treeRoot = ref<HTMLDivElement | null>(null)
 /** el-tree 认的字段名：数据里叫 name / children */
 const TREE_PROPS = { label: 'name', children: 'children' } as const
 
-/** 每行一个右键菜单，但同一时刻只许开一个（收口见 composables/use-exclusive-dropdown） */
-const { register: registerMenu, onChange: onMenuChange } = useExclusiveDropdown()
+/** 节点行上的右键菜单：开着时记下对哪一行、落在哪（视口坐标）；null 表示没开 */
+const menu = ref<{ x: number, y: number, node: NoteNode } | null>(null)
+
+/** 节点行右击：菜单贴指针落点出现（node-contextmenu 已经 preventDefault 并挡掉树的根处理器） */
+function openRowMenu(event: MouseEvent, data: NoteNode): void {
+  menu.value = { x: event.clientX, y: event.clientY, node: data }
+}
 
 /**
  * 展开 / 收起都只是把下一份清单报上去，状态本身在上层。
@@ -127,7 +133,7 @@ function collapse(id: string): void {
  *
  * 横向则一律不许动（下面那段回零）：`inline` 也是 `nearest`，选中的那行只要稍微越出容器右缘，
  * 浏览器就会把中间那些 `overflow: hidden` 的折叠容器横着滚一截 —— 它们没有滚动条、用户也不会去滚，
- * 于是那一支永久左移、底色块与文字错位（踩过；溢出的来源见样式里 `el-dropdown` 那条 min-width）。
+ * 于是那一支永久左移、底色块与文字错位（踩过；溢出的来源见样式里 `.node` 那条 min-width）。
  * 只认 `.tree__body` 这一层：它是给人滚的视口，它的横向位置不归这里管。
  */
 async function revealActive(): Promise<void> {
@@ -182,30 +188,34 @@ function folderOf(data: NoteNode): string {
   return data.kind === 'folder' ? data.rel : parentRel(data.rel)
 }
 
-function onCommand(command: string, data: NoteNode): void {
+/** 节点行右键菜单的一项：读的动作只报路径，写的动作交回上层执行 */
+function onMenuAct(command: 'new-note' | 'new-folder' | 'rename' | 'remove' | 'reveal' | 'copy-path' | 'open-default'): void {
+  const node = menu.value?.node
+  if (!node)
+    return
   // 读的那几项：只把路径报上去，怎么落到系统上由上层（NotesView）负责
   if (command === 'reveal') {
-    emit('reveal', data.rel)
+    emit('reveal', node.rel)
     return
   }
   if (command === 'copy-path') {
-    emit('copy-path', data.rel)
+    emit('copy-path', node.rel)
     return
   }
   if (command === 'open-default') {
-    emit('open-default', data.rel)
+    emit('open-default', node.rel)
     return
   }
   if (command === 'rename') {
-    emit('rename', data.rel)
+    emit('rename', node.rel)
     return
   }
   if (command === 'remove') {
-    emit('remove', data.rel)
+    emit('remove', node.rel)
     return
   }
   emit('create', {
-    parentRel: folderOf(data),
+    parentRel: folderOf(node),
     kind: command === 'new-folder' ? 'folder' : 'note',
   })
 }
@@ -422,55 +432,21 @@ onBeforeUnmount(() => window.removeEventListener('dragend', onDragEnd))
       @node-collapse="(data: NoteNode) => collapse(data.id)"
       @node-drag-start="onDragStart"
       @node-drop="(dragging: TreeNodeLike, drop: TreeNodeLike) => onDrop(dragging, drop)"
+      @node-contextmenu="openRowMenu"
     >
       <template #default="{ data }">
         <!--
-          右键菜单挂在标签上：位置由 el-dropdown 按指针算，不用自己摆一副浮动层。
-          它同时是「触发区盖住整行余宽」的那一层（见样式里
-          `.el-tree-node__content > .el-dropdown` 那两条），所以不能拿掉、也不能禁用。
+          右键菜单不挂在行上：el-dropdown 的 contextmenu 触发器锚在触发元素上（整行），
+          菜单会一路弹到行首。整棵树只留一份菜单（见模板末尾的 NoteTreeMenu），
+          由 openRowMenu 按指针落点摆；整行（含行尾空白）都归 tree 的 node-contextmenu 管。
         -->
-        <el-dropdown
-          :ref="(el: unknown) => registerMenu(data.rel, el)"
-          trigger="contextmenu"
-          placement="bottom-start"
-          @command="(command: string) => onCommand(command, data)"
-          @visible-change="(visible: boolean) => onMenuChange(data.rel, visible)"
-        >
-          <span class="node" :class="{ 'is-active': data.rel === activeRel }" :title="data.name">
-            <el-icon class="node__icon">
-              <Folder v-if="data.kind === 'folder'" />
-              <Document v-else />
-            </el-icon>
-            <span class="node__name">{{ data.name }}</span>
-          </span>
-
-          <template #dropdown>
-            <el-dropdown-menu>
-              <el-dropdown-item command="new-note">
-                <el-icon><Plus /></el-icon>新建笔记
-              </el-dropdown-item>
-              <el-dropdown-item command="new-folder" divided>
-                <el-icon><FolderAdd /></el-icon>新建文件夹
-              </el-dropdown-item>
-              <el-dropdown-item command="rename" divided>
-                重命名
-              </el-dropdown-item>
-              <el-dropdown-item command="remove">
-                删除
-              </el-dropdown-item>
-              <el-dropdown-item command="reveal" divided>
-                <el-icon><FolderOpened /></el-icon>在资源管理器中显示
-              </el-dropdown-item>
-              <el-dropdown-item command="copy-path">
-                <el-icon><CopyDocument /></el-icon>复制路径
-              </el-dropdown-item>
-              <!-- 文件夹走 reveal 就是进到它里面；默认程序打开对文件夹没有意义 -->
-              <el-dropdown-item v-if="data.kind === 'note'" command="open-default">
-                <el-icon><TopRight /></el-icon>用默认程序打开
-              </el-dropdown-item>
-            </el-dropdown-menu>
-          </template>
-        </el-dropdown>
+        <span class="node" :class="{ 'is-active': data.rel === activeRel }" :title="data.name">
+          <el-icon class="node__icon">
+            <Folder v-if="data.kind === 'folder'" />
+            <Document v-else />
+          </el-icon>
+          <span class="node__name">{{ data.name }}</span>
+        </span>
       </template>
     </el-tree>
 
@@ -527,6 +503,16 @@ onBeforeUnmount(() => window.removeEventListener('dragend', onDragEnd))
       </template>
     </div>
   </Teleport>
+
+  <!-- 节点行的右键菜单：贴指针出现；「对哪一行」由这一层记着（见 openRowMenu / onMenuAct） -->
+  <NoteTreeMenu
+    v-if="menu"
+    :x="menu.x"
+    :y="menu.y"
+    :kind="menu.node.kind"
+    @act="onMenuAct"
+    @close="menu = null"
+  />
 </template>
 
 <style scoped>
@@ -569,14 +555,11 @@ onBeforeUnmount(() => window.removeEventListener('dragend', onDragEnd))
 }
 
 /**
- * 右键菜单那一层要盖住**整行余下的宽度**，不能只盖住名字那几个字。
+ * 节点行要盖住**整行余下的宽度**，不能只盖住名字那几个字。
  *
  * 行盒吃满整宽，右半边光秃秃的那一截也算「这一行」（资源管理器、VS Code 里右击那里
- * 弹的都是这一项的菜单）。而 `el-dropdown` 的触发元素是它唯一的子元素 `.node`，
- * 原先只有内容那么宽：右击行尾的空白既进不了触发区（菜单不弹），冒泡到树的根处理器
- * 时又被「落在节点行上就让路」挡掉（见 openRootMenu），两边都不管，什么都不出现。
- * 行盒与 `el-dropdown` 都是 flex 容器，两处 `flex: 1` 把触发区一路撑到行尾
- * （展开箭头那一小条仍归 el-tree，右键落在上面什么都不弹，与从前一致）。
+ * 弹的都是这一项的菜单）。`.node` 是行盒里唯一的内容层，`flex: 1` 让它一路铺到行尾，
+ * 右击行尾的空白才落得进 `node-contextmenu`（见 openRowMenu）。
  *
  * `min-width: 0` 是另一半：撑开之后这一层成了有宽度的盒子，名字要能在里面被压缩，
  * 否则 `.node__name` 上的 ellipsis 是摆设。默认的 `min-width: auto` 在 flex 子项上
@@ -588,11 +571,6 @@ onBeforeUnmount(() => window.removeEventListener('dragend', onDragEnd))
  * 的滚动容器）都变得可横向滚动，而「把选中项滚进视野」会顺手把它们滚一截 ——
  * 那一支从此整体左移，底色块与文字错位，且再也回不去（见 revealActive）。
  */
-.tree__body :deep(.el-tree-node__content > .el-dropdown) {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
 .tree__body :deep(.el-tree-node__content:hover) {
   background: var(--bg-inset);
 }
@@ -608,8 +586,7 @@ onBeforeUnmount(() => window.removeEventListener('dragend', onDragEnd))
 }
 
 /* 图标不参与收缩：名字很长时该被挤掉的是字，不是图标。
-   自己也要撑满（触发区就是它，见上面 el-dropdown 那条）—— 它只是 el-dropdown 的
-   子项，不铺开的话右击行尾那一段仍然落在触发区外面。 */
+   自己也要撑满整行（行盒里只有它这一层）—— 不铺开的话右击行尾那一段就不算这一行。 */
 .node {
   display: flex;
   align-items: center;

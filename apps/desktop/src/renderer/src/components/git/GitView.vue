@@ -5,6 +5,7 @@ import EmptyState from '@/components/EmptyState.vue'
 import GitCommitList from '@/components/git/GitCommitList.vue'
 import GitDiffPane from '@/components/git/GitDiffPane.vue'
 import GitFileTree from '@/components/git/GitFileTree.vue'
+import GitRepoMenu from '@/components/git/GitRepoMenu.vue'
 import PanelResizer from '@/components/PanelResizer.vue'
 import { basenameOf } from '@/format'
 import { useGitStore } from '@/stores/git'
@@ -19,7 +20,8 @@ import { useSettingsStore } from '@/stores/settings'
  *  - 分支名 → 本地分支清单，只换看哪条分支的历史 / 目录树，**不切工作区**。
  *
  * 打开过的文件夹写在设置里，下次进页面直接接上；仓库不在了就照实提示，不悄悄清掉路径
- * （可能是移动硬盘 / 网络盘，下次插上还能用）。
+ * （可能是移动硬盘 / 网络盘，下次插上还能用）。还没打开时空态里也有一颗下拉按钮，
+ * 和头部共用 GitRepoMenu 那份菜单（项目 / 最近打开 / 打开其他文件夹…）。
  *
  * 这一页不写仓库：没有暂存、提交、切分支、推拉。所有 git 命令都是读命令
  * （见 repo_git.rs），因此它也不是一处新的网络出口。
@@ -45,18 +47,24 @@ function normalizePath(path: string): string {
   return path.replace(/\\/g, '/').toLowerCase()
 }
 
-/** 「项目」那一组：顺序跟项目页一致（用户在项目页怎么排，这里就怎么排） */
-const projectOptions = computed(() => projects.orderedProjects)
+/** 「项目」那一组：顺序跟项目页一致（用户在项目页怎么排，这里就怎么排）；目录不存在的置灰 */
+const projectOptions = computed(() =>
+  projects.orderedProjects.map(project => ({
+    id: project.id,
+    name: project.name,
+    path: project.path,
+    disabled: !projects.isPathValid(project.id),
+  })),
+)
 
 /** 最近打开里去掉已经在项目里出现过的：同一个文件夹不列两遍 */
 const recentOnly = computed(() => {
   const known = new Set(projectOptions.value.map(project => normalizePath(project.path)))
-  return store.recentRepos.filter(item => !known.has(normalizePath(item)))
+  return store.recentRepos.filter(path => !known.has(normalizePath(path)))
 })
 
-function isCurrentPath(path: string): boolean {
-  return Boolean(path) && normalizePath(path) === normalizePath(store.openPath)
-}
+/** 空态那颗下拉的名字：没有项目可挑时，菜单里只剩最近打开与文件选择器 */
+const repoMenuLabel = computed(() => (projectOptions.value.length ? '选择项目' : '最近打开'))
 
 /** 切到另一条分支 / 另一个子树时树也要重建：key 里带着它们，换了就整棵重来 */
 const treeCacheKey = computed(() => `${store.openPath}-${store.viewBranch}-${treeKey.value}`)
@@ -102,7 +110,7 @@ function onRepoCommand(command: string): void {
     void chooseRepo()
     return
   }
-  if (command && !isCurrentPath(command))
+  if (command && normalizePath(command) !== normalizePath(store.openPath))
     void store.open(command)
 }
 
@@ -122,6 +130,29 @@ function onBranchCommand(name: string): void {
         :tone="store.openError && !store.opening ? 'error' : undefined"
       >
         <template #actions>
+          <!-- 和头部同一份菜单：不用先去系统文件选择器里翻目录，点项目就能进 -->
+          <el-dropdown
+            v-if="projectOptions.length || recentOnly.length"
+            trigger="click"
+            placement="bottom"
+            popper-class="git-repo-menu"
+            :disabled="store.opening"
+            @command="onRepoCommand"
+          >
+            <el-button>
+              {{ repoMenuLabel }}
+              <el-icon class="el-icon--right">
+                <ArrowDown />
+              </el-icon>
+            </el-button>
+            <template #dropdown>
+              <GitRepoMenu
+                :projects="projectOptions"
+                :recent="recentOnly"
+                :current-path="store.openPath"
+              />
+            </template>
+          </el-dropdown>
           <el-button
             type="primary"
             :icon="FolderOpened"
@@ -156,55 +187,11 @@ function onBranchCommand(name: string): void {
                 </el-icon>
               </button>
               <template #dropdown>
-                <el-dropdown-menu>
-                  <template v-if="projectOptions.length">
-                    <el-dropdown-item disabled class="repo-menu__label">
-                      项目
-                    </el-dropdown-item>
-                    <el-dropdown-item
-                      v-for="project in projectOptions"
-                      :key="project.id"
-                      :command="project.path"
-                      :disabled="!projects.isPathValid(project.id)"
-                      :title="projects.isPathValid(project.id) ? project.path : `${project.path}（目录不存在）`"
-                    >
-                      <span class="repo-item__name">{{ project.name }}</span>
-                      <span class="repo-item__path mono">{{ project.path }}</span>
-                      <el-icon v-if="isCurrentPath(project.path)" class="repo-item__mark">
-                        <Check />
-                      </el-icon>
-                    </el-dropdown-item>
-                  </template>
-
-                  <template v-if="recentOnly.length">
-                    <el-dropdown-item
-                      disabled
-                      class="repo-menu__label"
-                      :divided="projectOptions.length > 0"
-                    >
-                      最近打开
-                    </el-dropdown-item>
-                    <el-dropdown-item
-                      v-for="item in recentOnly"
-                      :key="item"
-                      :command="item"
-                      :title="item"
-                    >
-                      <span class="repo-item__name">{{ basenameOf(item) }}</span>
-                      <span class="repo-item__path mono">{{ item }}</span>
-                      <el-icon v-if="isCurrentPath(item)" class="repo-item__mark">
-                        <Check />
-                      </el-icon>
-                    </el-dropdown-item>
-                  </template>
-
-                  <el-dropdown-item
-                    :divided="projectOptions.length > 0 || recentOnly.length > 0"
-                    command="pick"
-                  >
-                    打开其他文件夹…
-                  </el-dropdown-item>
-                </el-dropdown-menu>
+                <GitRepoMenu
+                  :projects="projectOptions"
+                  :recent="recentOnly"
+                  :current-path="store.openPath"
+                />
               </template>
             </el-dropdown>
 

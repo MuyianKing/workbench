@@ -45,6 +45,16 @@
       }
 
       /**
+       * 拖大纲栏左缘：指针会扫过正文（Vditor 里是可选中文字），光标与文本选择
+       * 只能在 body 上兜住 —— 这扇窗没引 global.css，笔记页那条 body 规则不在。
+       */
+      body.is-resizing-md-rail,
+      body.is-resizing-md-rail * {
+        cursor: ew-resize !important;
+        user-select: none !important;
+      }
+
+      /**
        * Vditor 的图标 sprite：它由 `public/vditor/dist/js/icons/ant.js` 用
        * `document.body.insertAdjacentHTML('afterbegin', '<svg style="position: absolute; width: 0;
        * height: 0; overflow: hidden">…')` 插到 body 最前面，靠的是**行内 style**。

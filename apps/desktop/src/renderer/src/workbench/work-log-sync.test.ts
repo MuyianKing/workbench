@@ -94,6 +94,11 @@ describe('工作日志的多机同步', () => {
     expect(result.ok).toBe(true)
     expect(result.data).toMatchObject({ enabled: true, changed: true, device: 'dev-local' })
     expect(result.data?.entries.map(item => item.id)).toEqual(['a', 'b'])
+    // 设备清单：本机在第一位，分片带回来的名字原样交出去（切换器显示用）
+    expect(result.data?.devices).toEqual([
+      { id: 'dev-local', name: '本机' },
+      { id: 'dev-remote', name: 'dev-remote' },
+    ])
 
     // 合并结果要落回本机文件（与活跃度「只在内存」不同：条目可编辑）
     expect(saved).toHaveLength(1)
@@ -126,7 +131,11 @@ describe('工作日志的多机同步', () => {
     const workLog = await import('./work-log')
 
     const result = await workLog.syncWorkLog('', DEVICE)
-    expect(result.data).toMatchObject({ enabled: false, changed: false })
+    expect(result.data).toMatchObject({
+      enabled: false,
+      changed: false,
+      devices: [{ id: 'dev-local', name: '本机' }],
+    })
     expect(result.data?.entries.map(item => item.id)).toEqual(['a'])
     expect(pulls).toBe(0)
     expect(published).toEqual([])

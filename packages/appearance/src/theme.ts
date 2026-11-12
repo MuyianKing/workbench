@@ -147,6 +147,11 @@ export interface ThemeConfig {
   /** 笔记页左栏（目录树）的宽度（px）：在那一页里左右拖动分隔条调整，与首页栏宽同一套做法 */
   noteTreeWidth: number
   /**
+   * 笔记页右栏（大纲）的宽度（px）：大纲常显，拖它左缘那条缝调宽。
+   * 与左栏树宽同一套做法（拖动只改本地跟手、松手落盘），也一起被同步带走。
+   */
+  noteRailWidth: number
+  /**
    * 视频页左栏（目录树）收起没有：收起后播放器占满整行，入口在播放器头部那颗按钮上。
    * 与笔记树宽度同属「这一页长什么样」，住主题文件；收起**不是卸载** —— 摊开的那几层
    * 与「上次打开的视频」都在数据文件里，不跟着丢。
@@ -287,6 +292,16 @@ export const NOTE_TREE_WIDTH_MAX = 520
 export const NOTE_TREE_WIDTH_DEFAULT = 398
 
 /**
+ * 笔记页右栏（大纲）的宽度区间。
+ *
+ * 它是正文旁边的一条目录，不是第二块正文：下限要放得下一行标题（再多靠省略号），
+ * 上限只防手改数据把正文挤没。默认 224 就是改成可拖之前那条定宽。
+ */
+export const NOTE_RAIL_WIDTH_MIN = 160
+export const NOTE_RAIL_WIDTH_MAX = 420
+export const NOTE_RAIL_WIDTH_DEFAULT = 224
+
+/**
  * 视频页左栏（目录树）的宽度区间。
  *
  * 下限要放得下树行与底部「目录名 + 计数 + 按钮」那行，上限只防手改数据把播放器挤没。
@@ -395,6 +410,7 @@ export const DEFAULT_THEME: ThemeConfig = {
     },
   ],
   noteTreeWidth: NOTE_TREE_WIDTH_DEFAULT,
+  noteRailWidth: NOTE_RAIL_WIDTH_DEFAULT,
   videoTreeCollapsed: false,
   videoTreeWidth: VIDEO_TREE_WIDTH_DEFAULT,
   // 画中画小窗：还没拖过就落在右上角（渲染时按视口与小窗尺寸 clamp）、默认尺寸
@@ -723,6 +739,13 @@ export function clampNoteTreeWidth(value: unknown): number {
   return Math.min(NOTE_TREE_WIDTH_MAX, Math.max(NOTE_TREE_WIDTH_MIN, base))
 }
 
+/** 收敛笔记页右栏（大纲）宽度（与左栏树同一条规矩）；非法值回到默认宽度 */
+export function clampNoteRailWidth(value: unknown): number {
+  const fallback = NOTE_RAIL_WIDTH_DEFAULT
+  const base = typeof value === 'number' && Number.isFinite(value) ? Math.round(value) : fallback
+  return Math.min(NOTE_RAIL_WIDTH_MAX, Math.max(NOTE_RAIL_WIDTH_MIN, base))
+}
+
 /** 收敛视频页左栏宽度（与笔记树同一条规矩）；非法值回到默认宽度 */
 export function clampVideoTreeWidth(value: unknown): number {
   const fallback = VIDEO_TREE_WIDTH_DEFAULT
@@ -1003,6 +1026,8 @@ export function sanitizeTheme(raw: unknown): ThemeConfig {
     columns: kept,
     // 后加的字段：老主题文件里没有，补默认宽度（与 appearance 同理，不能因此去动上面的版本判定）
     noteTreeWidth: clampNoteTreeWidth(base.noteTreeWidth),
+    // 同上：老主题文件里没有，补默认宽度（改成可拖之前的那条定宽）
+    noteRailWidth: clampNoteRailWidth(base.noteRailWidth),
     // 同上：老主题文件里没有，默认不收起
     videoTreeCollapsed: base.videoTreeCollapsed === true,
     // 同上：老主题文件里没有，补默认宽度
@@ -1081,6 +1106,7 @@ function layoutSignature(layout: ThemeConfig): string {
     layout.version,
     layout.cardGap,
     layout.noteTreeWidth,
+    layout.noteRailWidth,
     layout.videoTreeWidth,
     layout.videoFloatX,
     layout.videoFloatY,

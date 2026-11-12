@@ -70,6 +70,13 @@ body.is-resizing-notes-tree * {
   user-select: none !important;
 }
 
+/* 拖笔记页大纲栏左缘那条缝：同一副兜法（指针会扫过正文与大纲条目） */
+body.is-resizing-notes-rail,
+body.is-resizing-notes-rail * {
+  cursor: ew-resize !important;
+  user-select: none !important;
+}
+
 /* 拖 ETF 总规模那条范围选择条：改窗口宽度（两侧把手）是 ew-resize，平移窗口是 grabbing */
 body.is-resizing-etf-range,
 body.is-resizing-etf-range * {

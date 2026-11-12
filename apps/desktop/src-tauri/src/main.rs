@@ -639,6 +639,7 @@ fn main() {
             md_window::markdown_window_save,
             md_window::markdown_window_close,
             md_window::markdown_window_cancel_close,
+            md_window::markdown_window_is_maximized,
             commands::skill_list,
             commands::skill_state,
             commands::skill_sync,

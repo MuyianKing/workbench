@@ -9,10 +9,10 @@ import { WORK_STATUS_LABELS } from '@workbench/work-log'
  *
  * 只负责展示，以及把「编辑 / 删除 / 状态开关」三个动作抛上去 —— 数据从哪来、改完列表怎么变由页面决定。
  * **整条卡片不可点**：改变状态只认右上角那颗开关（点卡片只是看，不顺手动数据）。
- * 内容很长时默认收起，留一个「展开」——一条日志写成一篇长文时，时间轴不该被它整段占满。
- * 左沿那条灰竖条是卡片的「脊」（见样式里那段：为什么不按项目色上色），认项目看那枚标签。
+ * **正文不折叠**：来了就整篇摊开，没有「展开 / 收起」——一条日志不该为省几行多一道手。
+ * 认项目只看那枚标签（左沿不挂竖条，见 docs/modules/work-log.md）。
  */
-import { computed, ref, watch } from 'vue'
+import { computed } from 'vue'
 import MarkdownView from '@/components/MarkdownView.vue'
 import ProjectTag from '@/components/ProjectTag.vue'
 import { formatTimeOfDay, formatTimestamp } from '@/format'
@@ -45,23 +45,6 @@ const projectMissing = computed(() => !!props.entry.projectId && !props.projectN
 
 /** 收敛后的标识色；没设或写坏时为 undefined */
 const color = computed(() => sanitizeProjectColor(props.projectColor))
-
-/** 超过这个体量就默认收起：大概相当于屏幕上四五行 */
-const COLLAPSE_AT = 220
-
-const collapsible = computed(
-  () => props.entry.content.length > COLLAPSE_AT || props.entry.content.split('\n').length > 6,
-)
-
-const expanded = ref(false)
-
-/** 换了一条记录（列表被替换）就把展开状态收回去，免得新条目一进来就是展开的样子 */
-watch(
-  () => props.entry.id,
-  () => {
-    expanded.value = false
-  },
-)
 </script>
 
 <template>
@@ -137,18 +120,9 @@ watch(
       </span>
     </header>
 
-    <div class="log__body" :class="{ 'is-collapsed': collapsible && !expanded }">
+    <div class="log__body">
       <MarkdownView :source="entry.content" />
     </div>
-
-    <button
-      v-if="collapsible"
-      class="log__more"
-      type="button"
-      @click="expanded = !expanded"
-    >
-      {{ expanded ? '收起' : '展开' }}
-    </button>
   </article>
 </template>
 
@@ -250,28 +224,5 @@ watch(
 
 .log__action--danger:hover {
   color: var(--st-fail);
-}
-
-/* 收起时从底部渐隐，而不是硬切一刀 —— 让人看得出「下面还有」 */
-.log__body.is-collapsed {
-  max-height: 120px;
-  overflow: hidden;
-  mask-image: linear-gradient(180deg, #000 62%, transparent);
-}
-
-.log__more {
-  align-self: flex-start;
-  padding: 1px 6px;
-  border: 0;
-  border-radius: var(--r-sm);
-  background: transparent;
-  color: var(--ink-2);
-  font-size: var(--fs-micro);
-  cursor: pointer;
-}
-
-.log__more:hover {
-  background: var(--bg-inset);
-  color: var(--ink);
 }
 </style>

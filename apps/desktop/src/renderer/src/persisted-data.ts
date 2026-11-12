@@ -21,7 +21,7 @@ import { pruneDays, sanitizeActivity, sanitizeCommands, sanitizeIconCache, sanit
 import { sanitizeGitRepoRoot, sanitizeRepoHistory } from '@workbench/git'
 import { sanitizeKbRawSources } from '@workbench/kb'
 import { sanitizeMailAccounts, sanitizeMailBulkSenders, sanitizeMailContacts, sanitizeMailPollMinutes } from '@workbench/mail'
-import { sanitizeImageRepo, sanitizeNoteHistory, sanitizeNoteRoot, sanitizeNoteTreeExpanded } from '@workbench/notes'
+import { sanitizeEditorHotkeys, sanitizeImageRepo, sanitizeNoteHistory, sanitizeNoteRoot, sanitizeNoteTreeExpanded } from '@workbench/notes'
 import { sanitizeSyncRepo } from '@workbench/usage'
 import { sanitizeVaultGroupNames } from '@workbench/vault'
 import { sanitizeVideoHistory, sanitizeVideoLastRel, sanitizeVideoRoot, sanitizeVideoTreeExpanded } from '@workbench/video'
@@ -76,6 +76,9 @@ export function sanitizeSettings(raw: unknown): StoredSettings {
   // 保存目录与透明度这些在这里收敛（它们要拿去拼路径 / 当数值用）
   value.captureEnabled = value.captureEnabled !== false
   value.captureHotkey = sanitizeCaptureHotkey(value.captureHotkey, CAPTURE_HOTKEY_DEFAULT)
+  // 笔记编辑器的自定义快捷键：动作清单 / 空串禁用 / 输出排序的收敛都在 @workbench/notes；
+  // 键串认不认得不在这一层（匹配层查不到就当作没配，走 Vditor 内置键位）
+  value.editorHotkeys = sanitizeEditorHotkeys(value.editorHotkeys)
   value.captureSaveDir = sanitizeCaptureSaveDir(value.captureSaveDir)
   value.capturePinOpacity = sanitizeCapturePinOpacity(value.capturePinOpacity)
   value.captureMagnifier = sanitizeCaptureMagnifier(value.captureMagnifier)

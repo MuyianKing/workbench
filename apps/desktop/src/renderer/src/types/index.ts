@@ -329,6 +329,14 @@ export interface AppSettings {
    */
   captureHotkey: string
   /**
+   * 笔记编辑器的自定义快捷键表（动作名 → 组合键串）。
+   *
+   * **只存用户改过的项**：表里没有的动作走 Vditor 内置键位；显式存空串 = 禁用该动作的
+   * 自定义键。动作清单、收敛与撞键腾位都在 `@workbench/notes` 的 editor-hotkeys.ts。
+   * 只在本机的编辑器里生效（不注册系统级热键），进数据文件、不参与外观同步。
+   */
+  editorHotkeys: Record<string, string>
+  /**
    * 截图的自动保存目录，空串 = 还没设置（那时「保存」会弹一次「另存为」）。
    * 只对本机成立（是本机的一个盘位），进数据文件、不参与外观同步。
    */
@@ -1623,6 +1631,14 @@ export interface WorkbenchApi {
   markdownWindowCancelClose: () => Promise<Result<null>>
   /** 窗口被点了关闭：先回 `markdownWindowCancelClose`，再冲刷正文，完成后调 `markdownWindowClose` */
   onMarkdownWindowFlushRequest: (fn: () => void) => () => void
+  /** 这扇窗当前是不是最大化（窗口控制按钮画「最大化」还是「还原」） */
+  markdownWindowIsMaximized: () => Promise<boolean>
+  /** 最小化这扇编辑窗口（无边框改版后窗口键自绘） */
+  markdownWindowMinimize: () => void
+  /** 最大化 / 向下还原这扇编辑窗口 */
+  markdownWindowToggleMaximize: () => void
+  /** 最大化状态从窗口事件推：拖边缘、双击拖动带、系统快捷键都算 */
+  onMarkdownWindowState: (fn: (state: { maximized: boolean }) => void) => () => void
   // ---------- 技能（住在笔记仓库的一个子目录里，见 @workbench/skills） ----------
   /**
    * 列出技能库里的技能：Rust 回 id / 文件数 / SKILL.md 原文，名字与描述由适配层解析。
@@ -2186,6 +2202,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   launchAtLogin: true,
   hotkeyEnabled: true,
   hotkey: 'Control+M',
+  // 笔记编辑器的自定义快捷键：默认空表 = 全部走 Vditor 内置键位
+  editorHotkeys: {},
   // 截图（见 docs/modules/screenshot.md）：默认 F1 起截图
   captureEnabled: CAPTURE_ENABLED_DEFAULT,
   captureHotkey: CAPTURE_HOTKEY_DEFAULT,

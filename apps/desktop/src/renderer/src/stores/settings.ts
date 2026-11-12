@@ -1,7 +1,7 @@
 import type { AccentInkMode, CardPlacement, ColumnId, HomeCardId, RowId, RowTarget, ThemeConfig, ViewId } from '@workbench/appearance'
 import type { ThemeOrigin } from '@/theme-transition'
 import type { AppSettings, BuiltinWallpaper, EffectiveTheme, Result, SyncDeviceInfo, ThemeSource, TokenUsageResult, TopBarStyle } from '@/types'
-import { addColumn as addColumnTo, clampAiTreeWidth, clampBackgroundOpacity, clampCardGap, clampCardOpacity, clampColumnWidth, clampGitFilesWidth, clampGitHistoryWidth, clampGitTreeWidth, clampKbTreeWidth, clampMailListWidth, clampNoteTreeWidth, clampRowHeight, clampVideoTreeWidth, COLUMN_WIDTH_DEFAULT, DEFAULT_THEME, moveCard as placeCard, setColumnWidths as placeColumnWidths, removeColumn as removeColumnFrom, rowHeightMin, rowOf, sanitizeAccentColor, sanitizeAccentInkMode, sanitizeTheme, VIEW_LABELS } from '@workbench/appearance'
+import { addColumn as addColumnTo, clampAiTreeWidth, clampBackgroundOpacity, clampCardGap, clampCardOpacity, clampColumnWidth, clampGitFilesWidth, clampGitHistoryWidth, clampGitTreeWidth, clampKbTreeWidth, clampMailListWidth, clampNoteRailWidth, clampNoteTreeWidth, clampRowHeight, clampVideoTreeWidth, COLUMN_WIDTH_DEFAULT, DEFAULT_THEME, moveCard as placeCard, setColumnWidths as placeColumnWidths, removeColumn as removeColumnFrom, rowHeightMin, rowOf, sanitizeAccentColor, sanitizeAccentInkMode, sanitizeTheme, VIEW_LABELS } from '@workbench/appearance'
 
 import { clampVideoFloatHeight, clampVideoFloatPercent, clampVideoFloatWidth } from '@workbench/video'
 import { defineStore } from 'pinia'
@@ -506,6 +506,18 @@ export const useSettingsStore = defineStore('settings', () => {
   }
 
   /**
+   * 笔记页右栏（大纲）宽度：与左栏树同一套做法 —— 拖动时只改本地让界面跟手，
+   * 松手才整份落盘（它也在 theme.json 里）。
+   */
+  function setNoteRailWidth(width: number): void {
+    themeConfig.value.noteRailWidth = clampNoteRailWidth(width)
+  }
+
+  async function commitNoteRailWidth(): Promise<void> {
+    await saveThemeConfig({ noteRailWidth: themeConfig.value.noteRailWidth })
+  }
+
+  /**
    * 视频页左栏（目录树）收起 / 展开：收起只是不画那一列，播放器占满整行，
    * 入口在播放器头部那颗按钮上。落 theme.json（与笔记树宽度同属「这一页长什么样」）。
    */
@@ -876,6 +888,8 @@ export const useSettingsStore = defineStore('settings', () => {
     removeColumn,
     setNoteTreeWidth,
     commitNoteTreeWidth,
+    setNoteRailWidth,
+    commitNoteRailWidth,
     setVideoTreeWidth,
     commitVideoTreeWidth,
     setAiTreeWidth,

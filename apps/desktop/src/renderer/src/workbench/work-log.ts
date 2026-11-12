@@ -53,6 +53,16 @@ function copy<T>(value: T): T {
   return structuredClone(value)
 }
 
+/**
+ * 本机设备标识（工作页按设备分开显示要用）。
+ *
+ * 与同步分片同一个来源（数据目录的 `device.json`）；拿不到时 id / name 都是空串 ——
+ * 页面据此不按设备筛，宁可多显示，也不要把整份日志藏起来。
+ */
+export function workLogLocalDevice(): Promise<{ id: string, name: string }> {
+  return localDevice()
+}
+
 /** 整份列表（新的在前由界面侧的 timelineOf 决定，这里不排序） */
 export async function listWorkLogs(): Promise<Result<WorkLogEntry[]>> {
   try {
@@ -238,7 +248,7 @@ export async function syncWorkLog(
   try {
     await ensureLoaded()
     if (!repo.trim())
-      return ok({ enabled: false, changed: false, device: device.id, entries: copy(file.entries) })
+      return ok({ enabled: false, changed: false, device: device.id, entries: copy(file.entries), devices: [{ id: device.id, name: device.name }] })
 
     // 先拉最新：命令里先刷新克隆再读（本机那份由 Rust 跳过，避免把自己再合一遍）
     const raw = await invoke<unknown>('work_log_sync_pull', { repo, device: device.id })
@@ -256,6 +266,12 @@ export async function syncWorkLog(
       persist()
     }
 
+    // 设备清单：本机在第一位，其余是分片里的（分片名就是设备名，页面拿它显示切换器）
+    const devices = [
+      { id: device.id, name: device.name },
+      ...shards.map(shard => ({ id: shard.device, name: shard.name })),
+    ]
+
     // 有内容才建分片：一台从没记过工作日志的机器不必在仓库里留下一个空文件
     if (file.entries.length || file.tombstones.length) {
       await invoke('work_log_sync_publish', {
@@ -265,7 +281,7 @@ export async function syncWorkLog(
       })
     }
 
-    return ok({ enabled: true, changed, device: device.id, entries: copy(file.entries) })
+    return ok({ enabled: true, changed, device: device.id, entries: copy(file.entries), devices })
   }
   catch (error) {
     return fail(errorText(error, '同步工作日志失败'))

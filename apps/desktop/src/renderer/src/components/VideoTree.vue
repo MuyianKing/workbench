@@ -5,8 +5,9 @@ import type { VideoNode } from '@workbench/video'
  *
  * 与笔记树同一副骨架（el-tree），但**没有**那两套写操作：这一页只看不改 ——
  * 没有拖动、没有「新建 / 重命名 / 删除」。右键菜单只挂在**视频行**上，而且只有「读」的三件：
- * 用默认程序打开 / 在资源管理器中显示 / 复制路径（文件夹行把触发器禁用掉，不给菜单）。
- * **同一时刻只开一个**（`use-exclusive-dropdown` 收口：右击另一行先把上一个关掉）。
+ * 用默认程序打开 / 在资源管理器中显示 / 复制路径（文件夹行不给菜单）。
+ * 菜单**贴右键落点**出现（[VideoContextMenu](VideoContextMenu.vue)：el-dropdown 的 contextmenu
+ * 触发器锚在整行上，右击行尾会把菜单弹回行首去）；**同一时刻只有一份**，右击另一行直接换落点。
  * 动作本身由上层（VideoView）落到系统上：这一层只把「对哪个 rel 做什么」报上去。
  * 点文件夹是撑开 / 收起那一层（`expand-on-click-node`），点视频是选中并立刻播放。
  *
@@ -15,10 +16,11 @@ import type { VideoNode } from '@workbench/video'
  * `:auto-expand-parent="false"` 的原因见 NoteTree 的同名注释 —— 不关它，
  * 「展开一个子孙」会顺手把祖先顶开，选中项那一支怎么点都收不起来。
  */
-import { CopyDocument, Folder, FolderOpened, TopRight, VideoPlay } from '@element-plus/icons-vue'
+import { Folder, VideoPlay } from '@element-plus/icons-vue'
 import { formatVideoTime } from '@workbench/video'
+import { ref } from 'vue'
 import PanelLoading from '@/components/PanelLoading.vue'
-import { useExclusiveDropdown } from '@/composables/use-exclusive-dropdown'
+import VideoContextMenu from '@/components/VideoContextMenu.vue'
 
 const props = defineProps<{
   /** 视频文件夹里的顶层条目（文件夹在前、同层按名字，顺序由后端 + shared 定下） */
@@ -45,8 +47,8 @@ const emit = defineEmits<{
 /** el-tree 认的字段名：数据里叫 name / children */
 const TREE_PROPS = { label: 'name', children: 'children' } as const
 
-/** 每行一个右键菜单，但同一时刻只许开一个（收口见 composables/use-exclusive-dropdown） */
-const { register: registerMenu, onChange: onMenuChange } = useExclusiveDropdown()
+/** 右键菜单：开着时记下对哪一行、落在哪（视口坐标）；null 表示没开 */
+const menu = ref<{ x: number, y: number, node: VideoNode } | null>(null)
 
 function expand(ids: string[]): void {
   emit('update:expanded', [...new Set([...props.expanded, ...ids])])
@@ -72,17 +74,30 @@ function durationOf(node: VideoNode): string {
 }
 
 /**
+ * 视频行右击：把菜单开在指针落点上（el-tree 的 node-contextmenu 已经 preventDefault）。
+ * 文件夹行没有可做的事 —— 右键与从前一样什么都不弹。
+ */
+function openMenu(event: MouseEvent, data: VideoNode): void {
+  if (data.kind !== 'video')
+    return
+  menu.value = { x: event.clientX, y: event.clientY, node: data }
+}
+
+/**
  * 视频行的右键菜单：只有「读」的三件事，**不碰播放状态**
  * （打开的是另一个程序、定位的是资源管理器、复制的是路径）。
  * 路径怎么落到系统上由上层（VideoView）负责 —— 这一层不拼绝对路径。
  */
-function onCommand(command: string, data: VideoNode): void {
+function onMenuAct(command: 'open-default' | 'reveal' | 'copy-path'): void {
+  const node = menu.value?.node
+  if (!node)
+    return
   if (command === 'open-default')
-    emit('open-default', data.rel)
+    emit('open-default', node.rel)
   else if (command === 'reveal')
-    emit('reveal', data.rel)
+    emit('reveal', node.rel)
   else if (command === 'copy-path')
-    emit('copy-path', data.rel)
+    emit('copy-path', node.rel)
 }
 </script>
 
@@ -102,44 +117,22 @@ function onCommand(command: string, data: VideoNode): void {
       @node-click="(data: VideoNode) => emit('select', data.rel)"
       @node-expand="(data: VideoNode) => expand([data.id])"
       @node-collapse="(data: VideoNode) => collapse(data.id)"
+      @node-contextmenu="openMenu"
     >
       <template #default="{ data }">
         <!--
-          右键菜单挂在标签上（与笔记树同一条做法）：位置由 el-dropdown 按指针算，
-          触发器同时负责盖住整行余宽（见样式里 `.el-tree-node__content > .el-dropdown`）。
-          文件夹行没有可做的事，把触发器禁用掉 —— 那一行的右键与从前一样什么都不弹。
+          右键菜单不挂在行上：el-dropdown 的 contextmenu 触发器锚在触发元素上（整行），
+          菜单会一路弹到行首。整棵树只留一份菜单（见模板末尾的 VideoContextMenu），
+          由 openMenu 按指针落点摆；文件夹行由那一层直接忽略。
         -->
-        <el-dropdown
-          :ref="(el: unknown) => registerMenu(data.rel, el)"
-          trigger="contextmenu"
-          placement="bottom-start"
-          :disabled="data.kind !== 'video'"
-          @command="(command: string) => onCommand(command, data)"
-          @visible-change="(visible: boolean) => onMenuChange(data.rel, visible)"
-        >
-          <span class="node" :class="{ 'is-active': data.rel === activeRel }" :title="data.name">
-            <el-icon class="node__icon">
-              <Folder v-if="data.kind === 'folder'" />
-              <VideoPlay v-else />
-            </el-icon>
-            <span class="node__name">{{ data.name }}</span>
-            <span v-if="data.kind === 'video'" class="node__duration">{{ durationOf(data) }}</span>
-          </span>
-
-          <template #dropdown>
-            <el-dropdown-menu>
-              <el-dropdown-item command="open-default">
-                <el-icon><TopRight /></el-icon>用默认程序打开
-              </el-dropdown-item>
-              <el-dropdown-item command="reveal" divided>
-                <el-icon><FolderOpened /></el-icon>在资源管理器中显示
-              </el-dropdown-item>
-              <el-dropdown-item command="copy-path">
-                <el-icon><CopyDocument /></el-icon>复制路径
-              </el-dropdown-item>
-            </el-dropdown-menu>
-          </template>
-        </el-dropdown>
+        <span class="node" :class="{ 'is-active': data.rel === activeRel }" :title="data.name">
+          <el-icon class="node__icon">
+            <Folder v-if="data.kind === 'folder'" />
+            <VideoPlay v-else />
+          </el-icon>
+          <span class="node__name">{{ data.name }}</span>
+          <span v-if="data.kind === 'video'" class="node__duration">{{ durationOf(data) }}</span>
+        </span>
       </template>
     </el-tree>
 
@@ -155,6 +148,15 @@ function onCommand(command: string, data: VideoNode): void {
         把视频放进来（或在别处放好），点左栏底部那颗刷新就能看到。字幕、封面这些别的文件不会出现在树里。
       </p>
     </div>
+
+    <!-- 视频行的右键菜单：贴指针出现；「对哪一个视频」由这一层记着（见 openMenu / onMenuAct） -->
+    <VideoContextMenu
+      v-if="menu"
+      :x="menu.x"
+      :y="menu.y"
+      @act="onMenuAct"
+      @close="menu = null"
+    />
   </div>
 </template>
 
@@ -186,26 +188,13 @@ function onCommand(command: string, data: VideoNode): void {
   border-radius: var(--r-sm);
 }
 
-/**
- * 右键菜单那一层要盖住**整行余下的宽度**（与 NoteTree 同一条口径）：
- * el-dropdown 的触发元素是它唯一的子元素 `.node`，这一层不铺开的话，
- * 右击行尾那段空白进不了触发区，菜单不弹。行盒与这一层都是 flex 容器，
- * 两处 `flex: 1` 把触发区一路撑到行尾。
- * `min-width: 0` 是另一半：撑开之后名字要能在里面被压缩，否则 `.node__name`
- * 上的 ellipsis 是摆设（长名字直接溢出行盒）。
- */
-.tree__body :deep(.el-tree-node__content > .el-dropdown) {
-  flex: 1 1 auto;
-  min-width: 0;
+/* 选中态自己画：它比悬停明确高一档，且与「右边正在播的是哪一个」严格对应 */
+.tree__body :deep(.el-tree-node__content:has(.node.is-active)) {
+  background: var(--bg-selected);
 }
 
 .tree__body :deep(.el-tree-node__content:hover) {
   background: var(--bg-inset);
-}
-
-/* 选中的那一行整行铺底色（自己画，不开 el-tree 的 highlight-current，理由见 NoteTree） */
-.tree__body :deep(.el-tree-node__content:has(.node.is-active)) {
-  background: var(--bg-selected);
 }
 
 /**
@@ -213,6 +202,9 @@ function onCommand(command: string, data: VideoNode): void {
  * 名字用 flex: 1 吃掉剩余宽度把它顶到最右 —— 名字不吃的话，短名字的徽章缩在中间、
  * 跟着名字的长短横七竖八（用户看到的「没对齐」就是这个）。定宽 + 右对齐 + 等宽数字，
  * 视频行的右缘掐齐；文件夹行没有徽章，名字一直铺到右缘。
+ *
+ * `min-width: 0` 是名字能压缩的前提：行盒撑满后名字要能在里面被压缩，
+ * 否则 `.node__name` 上的 ellipsis 是摆设（长名字直接溢出行盒）。
  */
 .node {
   flex: 1 1 auto;

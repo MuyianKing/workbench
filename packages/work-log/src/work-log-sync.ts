@@ -14,6 +14,7 @@
  */
 
 import type { WorkLogEntry, WorkLogFile, WorkLogTombstone } from './work-log'
+import type { WorkLogDeviceRef } from './work-log-devices'
 import { newerWorkLogStamp, sanitizeWorkLogEntry, sanitizeWorkLogTombstone, WORK_LOG_VERSION } from './work-log'
 
 export const WORK_LOG_SHARD_VERSION = 1
@@ -37,6 +38,8 @@ export interface WorkLogSyncOutcome {
   changed: boolean
   device: string
   entries: WorkLogEntry[]
+  /** 这一轮知道的所有设备（本机 + 各分片，带名字）：工作页的设备切换器用它显示别的机器 */
+  devices: WorkLogDeviceRef[]
 }
 
 type WorkLogNode = WorkLogEntry | WorkLogTombstone

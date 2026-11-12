@@ -57,6 +57,32 @@ export function hotkeyLabel(accelerator: string): string {
     .join(' + ')
 }
 
+/**
+ * 把一次按键转成组合键串（`Control+Shift+W` 这种写法）—— **录制的口径**。
+ *
+ * 纯函数，两处共用：上面的 `capture`（录制全局快捷键）与 NoteEditor 的按键拦截
+ * （编辑器自定义快捷键要拿按键来查表）—— 两个场景必须认同一种按法，否则
+ * 「录进去的键按不出来」会很难解释。修饰键的顺序固定 Control → Shift → Alt → Super。
+ * 主键认不出（按的就是修饰键本身、或不在 normalizeHotkeyKey 的表里）时返回 null。
+ */
+export function acceleratorOfEvent(event: KeyboardEvent): string | null {
+  const key = normalizeHotkeyKey(event.key)
+  if (MODIFIER_KEYS.has(event.key) || !key)
+    return null
+
+  const parts: string[] = []
+  if (event.ctrlKey)
+    parts.push('Control')
+  if (event.shiftKey)
+    parts.push('Shift')
+  if (event.altKey)
+    parts.push('Alt')
+  if (event.metaKey)
+    parts.push('Super')
+
+  return [...parts, key].join('+')
+}
+
 export interface HotkeyRecorderOptions {
   /**
    * 是否必须有修饰键。唤起窗口那条要求（单按一个字母会把整个键盘吃掉）；
@@ -89,8 +115,11 @@ export function useHotkeyRecorder(options: HotkeyRecorderOptions) {
       return
     }
 
+    if (MODIFIER_KEYS.has(event.key))
+      return
+
     const key = normalizeHotkeyKey(event.key)
-    if (MODIFIER_KEYS.has(event.key) || !key)
+    if (!key)
       return
 
     const parts: string[] = []

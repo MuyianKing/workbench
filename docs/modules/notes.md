@@ -10,8 +10,10 @@
 `apps/desktop/src-tauri/src/md_window.rs`（资源管理器「打开方式」的独立编辑窗口）、
 `apps/desktop/src-tauri/src/sync.rs`（图片上传与笔记同步）、
 `apps/desktop/src/renderer/src/stores/notes.ts`、`apps/desktop/src/renderer/src/components/` 下的
-`NoteTree.vue`（左栏树）、`NoteEditor.vue`（Vditor 正文）、`NoteContextMenu.vue`（右键菜单）、
-`NotesView.vue`（页面编排），以及 `apps/desktop/src/renderer/src/markdown-window/`（独立窗口宿主）、
+`NoteTree.vue`（左栏树）、`NoteTreeMenu.vue`（树的右键菜单）、`NoteEditor.vue`（Vditor 正文）、
+`OverlayScrollbar.vue`（正文悬浮滚动条）、
+`NoteContextMenu.vue`（正文右键菜单）、`NotesView.vue`（页面编排），以及
+`apps/desktop/src/renderer/src/markdown-window/`（独立窗口宿主）、
 纯口径在 `packages/notes/src/note.ts` 与 `note-image.ts`。
 
 **动手前先读 NoteTree.vue 顶部的注释**：空白区的 `blankHover` 标记、以及展开态清单那两条 `el-tree` 坑（`auto-expand-parent` 默认是
@@ -20,8 +22,8 @@ true、清单里不能放选中项自己）只在那里写清楚了，下面不�
 ### 数据模型
 
 - **笔记没有数据文件**：它就是那个文件夹里的 `.md` 文件，应用只记下「当前打开的是哪个目录」（设置里的 `noteDir`）与「打开过的那几个」
-  （`noteDirs`，左栏底部的「最近打开」）。两者都只对本机成立，所以不进 theme.json、也不参与同步（左栏**宽度** `noteTreeWidth` 是
-  「界面长什么样」，住 theme.json）。**别为了「顺手统一」把笔记塞进同步或主数据文件** —— 旧版那棵笔记 JSON 树（`note-data.json`）就是
+  （`noteDirs`，左栏底部的「最近打开」）。两者都只对本机成立，所以不进 theme.json、也不参与同步（左栏**宽度** `noteTreeWidth`
+  与右栏大纲宽度 `noteRailWidth` 是「界面长什么样」，住 theme.json）。**别为了「顺手统一」把笔记塞进同步或主数据文件** —— 旧版那棵笔记 JSON 树（`note-data.json`）就是
   反例，它早就不再读写。首次进笔记页必须先选这个文件夹，没选之前不显示任何操作入口。
 - 三条不能破：**所有笔记命令都要带 root**（别把路径缓存在适配层里，用户换了文件夹来源就换了）；**路径只认相对笔记根的写法**，
   `..` / 绝对路径在 `notes.rs` 里被挡住；**结构改动一律用后端重新扫出来的树**，别在本地推算改动结果（外面用别的编辑器改过那些文件时，
@@ -67,6 +69,10 @@ true、清单里不能放选中项自己）只在那里写清楚了，下面不�
   store 的 `saveContent`：路径已经不在树里就整次写盘不发出去。
 - **动作一律交回 Vditor**：右键菜单只记动作名、按名字去点工具带上的按钮，别在菜单里另写一套格式化（选区、markdown 往返、撤销栈都会与
   工具带分叉）。工具带只是不显示、仍在 DOM 里，所以 `TOOLBAR` 里删项前先看菜单有没有用它。
+- **正文滚动条是自绘的**（`OverlayScrollbar.vue` + `use-overlay-scrollbar.ts`）：Vditor 的 `pre.vditor-reset` 才是滚动容器，
+  原生条在 `NoteEditor` 样式里用 `scrollbar-width: none` 收掉，换成一枚 5px 胶囊滑块 —— 不占正文宽度、没有轨道与箭头、可拖可点轨跳转。
+  笔记页与独立窗口共用这一枚；后者只引了 tokens、没引 global.css，原生条本是 WebView2 那副带箭头的，这一下也一并盖掉。
+  几何在 `thumbMetrics()`（纯函数、有单测），监听 scroll / ResizeObserver / MutationObserver / 图片 load 四类变化。
 - **正文里的链接一律在组件里接管，而且只有按住 Ctrl 的那一下才算**（普通点击什么都不做：这一页是拿来写东西的，
   点正文里的一处本来是「把光标挪过去」，顺手换掉打开着的那一篇或弹出浏览器都很打扰）。Ctrl 那一下里：外部地址走
   `openExternal`；相对链接里**只认指向笔记的那一种**，用 [note.ts](../../packages/notes/src/note.ts) 的 `resolveNoteLink`
@@ -78,26 +84,53 @@ true、清单里不能放选中项自己）只在那里写清楚了，下面不�
   路径上**（右栏会显示成「『』是文件夹」）。只有 `.md` / `.markdown` 能跳，图片、附件、锚点那些跳不过去 —— 说一句，别静默。
 - **`options.link.isOpen` 必须关着**：Vditor 默认在点击链接时自己 `window.open(地址)`，那一下 `preventDefault` 拦不住
   （它拦的是浏览器的默认动作）—— 外链会多弹一个窗口，相对链接在 WebView 里只会打开一个错误页，而且**它不看按没按 Ctrl**。
-- **大纲（目录结构）在右侧、按需打开**：Vditor 自带的 `outline` 定成 `position: 'right'`、`enable: false`
-  （不先占掉正文宽度），入口是右栏标题行右端那颗图标键；右键菜单里的「大纲」是同一个动作
-  （两个入口都去点工具带上那颗按钮，开合状态只归 Vditor）。它只收 `#` 标题，没有标题的笔记打开也只剩栏首那行字。
-  四件配套不能少：
+- **大纲（目录结构）在右侧、始终显示**：正文与目录分成两列，右栏常显（打开着一篇笔记时就有它），
+  **不再有开关** —— `NoteEditor` 传 `outlinePinned`，初始化完成后直接把大纲打开，右键菜单里也不给「大纲」。
+  它只收 `#` 标题，没有标题的笔记打开也只剩栏首那行字。栏宽是主题里的 `noteRailWidth`
+  （默认 224，见 [theme.ts](../../packages/appearance/src/theme.ts)），拖栏左缘那条缝改：
+  拖动只改本地跟手、松手落盘，与左栏目录树同一套做法。三件配套不能少：
   ① **大纲元素要搬出正文区**（`NoteEditor` 的 `outlineHost`）：Vditor 把它建在 `.vditor-content` 里，
      顶边只能贴着正文，比页头（标题 / 保存状态）低一整行 —— 笔记页把一条与页头同高的右栏 `<aside>` 交给它，
      初始化完成后 `appendChild` 进去。开合 / 内容 / 跳转都还是 Vditor 的（它只拿着元素引用，不看它在谁名下）；
      **卸载时要把这枚元素从栏里摘掉**，否则下一位编辑器进来会并排挂两个。
-     宿主是模板 ref，它的 watcher 可能比 Vditor 的异步初始化先跑 —— **`attachOutline` / `syncOutlineOpen`
+     宿主是模板 ref，它的 watcher 可能比 Vditor 的异步初始化先跑 —— **`attachOutline` / `ensureOutlineOpen`
      要连 `editor.vditor` 一起判空**（只判 `editor` 会抛 `Cannot read properties of undefined`）。
   ② **只读模式的捕获拦截要让路**（`NoteEditor.onClick` 里 `.vditor-toolbar, .vditor-outline` 提前 return）：
-     只读是默认档，而那条 `stopPropagation` 会把**工具带上那颗大纲按钮**的点击一起吞掉 —— 开合靠点它，
-     不让路就是「只读下大纲打不开」（踩过）；大纲本身那一条只管「点标题跳转」（搬出去之后它在独立编辑窗口里才用得上）。
-  ③ **样式归 NotesView 的右栏**（元素搬出去之后 `.editor :deep()` 够不着它）：透明底、`--border` 发丝线、
-     `--ink` 悬停、`--font-ui` 字体，条目是 19px 行高 + 4px 内边距的圆角悬停片；栏宽 224px，不与正文抢宽度。
+     只读是默认档，而那条 `stopPropagation` 挂在捕获阶段，会把编辑器里这两处的点击一起吞掉 ——
+     工具带虽然藏着，里面的按钮照旧点得动；大纲条目的跳转也归 Vditor 的监听器接。
+  ③ **条目整行收展**（`use-outline-row-toggle.ts`，笔记页右栏与独立窗口目录栏共用）：
+     Vditor 只让条目里那枚箭头 svg 认收展点击，整行接管在宿主栏上挂一条 **capture 阶段**
+     的 `@click.capture` 委托：点到「有子级 `ul`」的条目行任意位置就复刻 Vditor 的收展
+     （svg 加/去 `--close`、子列表切 `display`），并 `stopPropagation` 拦下 —— 不拦的话点在
+     箭头上时 Vditor 自己那份监听也跑，同一下收展两次、互相抵消；叶子条目与空白处放行
+     （叶子还要跳标题）。大纲 DOM 会被 Vditor 重建，委托按点击目标现场查找、绑在宿主栏上，不受影响。
+     **子列表显隐必须走 CSSOM（`el.style.display = …`），不许 `setAttribute('style', …)`**：
+     独立窗口的 markdown.html 里有内联 `<style>`，生产态 Tauri 给它加 nonce 后 CSP 的
+     `style-src 'unsafe-inline'` 整体失效，行内 style 属性会被静默丢弃 —— 现象是箭头转了、
+     列表收不起来（与 sprite 占位是同一个坑，见 markdown.html 里的注释）。CSSOM 赋值
+     不经属性解析，CSP 不管这一路。
+  ④ **样式归 NotesView 的右栏**（元素搬出去之后 `.editor :deep()` 够不着它）：透明底、`--border` 发丝线、
+     `--ink` 悬停、`--font-ui` 字体，条目是 19px 行高 + 4px 内边距的圆角悬停片；栏宽由 `--rail-w`
+     给（主题里的 `noteRailWidth`），不与正文抢宽度。**拖动把手是栏左缘一条 `--sp-4` 宽的热区**
+     （`notes__rail-resizer`，悬停才露出小竖条），拖动期间挂 `body.is-resizing-notes-rail`
+     兜住光标与文本选择；**别把它改成 `PanelResizer`** —— 那只按左栏宽度定位、改的是左栏。
      搬出去后 `--textarea-text-color` 这些变量不再从 `.vditor` 继承，要在栏里补一份，否则字掉回浏览器默认色。
-     页头是 `align-items: center`（**不是 baseline**：里面那颗 28px 的图标键会让文字与按钮差 3px），
+     页头是 `align-items: center`（**不是 baseline**：这一行混着 15px 标题与 10.5px 辅助文字，
+     按基线对齐小字会浮上去），
      栏首「大纲」的 `line-height: 28px` 就是为了让它与页头文字垂直居中对齐。
-  ④ **栏收放之后补一次 `resize`**：Vditor 只在 window resize / 切模式时重算正文的左右留白
-     （`preview.maxWidth` 居中那一份），容器宽度变了它不自己跟 —— 不补，开栏后正文会偏右、关栏后偏左。
+- **正文左右留白固定 50px，剩下的宽度全给正文**：Vditor 默认把可读宽度钉在 `preview.maxWidth`（800）并居中，
+  宽窗口下左右各留几百像素，内容没多长就换行。现在 `preview.maxWidth` 给一个大数（让它的自动内边距退回最小值），
+  真正的左右留白由 `NoteEditor` 样式里的 `padding-left / padding-right: 50px !important` 定 ——
+  Vditor 的 `setPadding` 会在 resize 时写**行内** padding，普通样式压不住，必须是 `!important`。
+  内容宽度跟着窗口与大纲栏自适应，拖大纲栏也不必再补 window resize。
+  **独立窗口例外**：它在 `MarkdownWindowApp` 里用一条更具体的 `!important` 覆写成居中约 1200px 的行宽
+  （见下文「独立编辑窗口」一节），笔记页仍是 50px。
+- **正文底部始终留一段空白**（120px）：最后一行不贴着卡片下沿、能往下多滚一点（Typora 那种手感）。
+  空白借 Vditor 自己的 `pre.vditor-reset::after`（高度取 `--editor-bottom`，`NoteEditor` 里给的值）——
+  **必须长在滚动内容里**，别改成外层容器的 `padding-bottom`：那样滚动条到不了它下面，最后一行还是贴底，
+  也白占了卡片高度。光标自动滚动只把光标带到「刚好可见」，留白会留在视野外；所以**输入前已经贴着底**时，
+  回车落定后由 `NoteEditor` 的 `markBottomStick` / `onContentInput` 把滚动位置补到底，留白稳定留在光标下方；
+  读着上面时这一条不成立，不抢滚动。
 
 ### 外部修改与写盘冲突
 
@@ -115,6 +148,50 @@ true、清单里不能放选中项自己）只在那里写清楚了，下面不�
   打开一篇时重置 `savedAt`，否则会挂着上一篇 / 上一次保存的时间（看着像保存了）。
 - 编辑器里的「有没有未保存的修改」不能只看它自己的基线（`saved`）：写盘被拒之后它也会以为
   保存了。要对的是 store 里**最后一次真正落盘 / 读盘的内容**（`NoteEditor.hasUnsaved(base)`）。
+
+### 编辑器自定义快捷键
+
+- **表只存用户改过的项**（设置里的 `editorHotkeys`，`@workbench/notes` 的
+  [editor-hotkeys.ts](../../packages/notes/src/editor-hotkeys.ts)）：键是动作名
+  （与右键菜单 / `TOOLBAR` 一致），值是组合键串（`Control+3` 这种写法，与全局快捷键同口径）。
+  显式存**空串 = 禁用**这个动作的自定义键（「恢复默认」就是把这一项从表里删掉）。
+- **有一份「生效的默认键位表」**（`EDITOR_HOTKEY_DEFAULTS`，同一文件）：标题六档
+  `Control+1` ~ `Control+6`（离手近；与 Vditor 原厂的 `Ctrl+Alt+N` 并行，两边同时有效），
+  其余 12 项照原厂（粗体 Ctrl+B、斜体 Ctrl+I、删除线 Ctrl+D、行内代码 Ctrl+G、
+  代码块 Ctrl+U、链接 Ctrl+K、引用 Ctrl+;、无序 Ctrl+L、有序 Ctrl+O、任务 Ctrl+J、
+  分隔线 Ctrl+Shift+H、表格 Ctrl+M）。**拦截按「默认 + 用户覆盖」的合成表**
+  （`mergeEditorHotkeys`，computed 缓存）：没碰过的动作按默认键触发（默认是真的生效，
+  不只是显示）；用户覆盖的动作换用户的键；空串禁用的动作不拦（只剩原厂键位）。
+- **可配的只有 18 项常用动作**（标题六档 / 粗斜删 / 行内代码 / 代码块 / 链接 / 引用 /
+  三种列表 / 分隔线 / 表格）；**undo / redo / outline / fullscreen 不开放** —— 它们被
+  Vditor 内部键绑定与视图状态管着，拦下来自己 `runAction` 一遍会跟内部状态分叉。
+- **配置住在数据文件**（本机性质，不参与外观同步，与 `hotkey` / `captureHotkey` 同类），
+  收敛在 [persisted-data.ts](../../apps/desktop/src/renderer/src/persisted-data.ts) 调
+  `sanitizeEditorHotkeys`：动作名不在清单的丢掉、值去空白（键串认不认得不在这一层 ——
+  匹配层查不到就当作没配）、输出按清单顺序排稳。配置界面在设置 · 通用 → 笔记，
+  录制件与全局快捷键共用 `HotkeyField`（**同一种按法录出的串必须一致**，为此
+  `acceleratorOfEvent` 纯函数从 use-hotkey-recorder 导出，录制与匹配共用一份口径）。
+- **撞键自动腾位**：后配的保留，先配的那个被腾成空串并提示一声
+  （`resolveEditorHotkeyConflict`，纯函数有单测）；禁用项（空串）不占键位、不参与撞键。
+- **设置里的显示**：没有自定义的那一行，按钮里垫显示的就是**生效的默认键位**
+  （`EDITOR_HOTKEY_DEFAULTS`）—— 显示与触发同一张表，不会「显示一个键按下去没反应」。
+  用户配了同一个动作后显示与触发都换用户的。
+  `HotkeyField` 那句「点击后直接按组合键即可替换」在网格里关掉（`:hint="false"`，改由
+  title 兜着）—— 18 行各带一句会把版面挤碎。键位按钮定宽（168px + nowrap），
+  「恢复默认」那格恒定占位（没配的行渲染等宽空占位），18 行两列各自落在一条竖线上。
+- **拦截挂在 NoteEditor 的 `onKeyCapture`**（capture 阶段、keydown 一档 —— keyup 再拦
+  会把同一动作跑两遍）：命中表里的组合才 `preventDefault` + `stopPropagation` + `runAction`，
+  **表里没有的组合一概不拦**（内置键位、Ctrl+S / Ctrl+/ 各走各的）。只认带修饰键的组合；
+  输入法组合中（`isComposing`）让路。值由上层传 prop（`editorHotkeys`）——
+  与 `imageRepo` 同一条「不读 store」的规矩；独立 Markdown 窗口在 `load()` 里从
+  **首屏快照**取一份（`bootstrapSnapshot().settings.editorHotkeys`）—— 那扇窗不
+  `initState`，`getSettings()` 返回的是适配层内存里的默认数据，设置里配的自定义键
+  只有 Rust 注入的快照里才有。不跟主窗口实时联动；快照拿不到退回内置键位。
+- **标题六档带开关**（`runAction`）：光标已在**同级**标题里时改点工具带上标题那颗
+  **主按钮** —— 它带 `vditor-menu--current` 态（Vditor 的 `highlightToolbarIR` 在点击 /
+  输入 / 聚焦时维护，判断与这里同用 `closest('h1…h6')`），点它是「去掉标题」；
+  不同级照旧是切换（点面板里 `data-tag="hN"` 那颗）。Ctrl+1 再按一下取消 H1、
+  Ctrl+2 直接把 H1 换成 H2，右键菜单与两个窗口的快捷键共用这一份。
 
 ### 只读模式
 
@@ -242,10 +319,10 @@ true、清单里不能放选中项自己）只在那里写清楚了，下面不�
 
 ### 独立编辑窗口（资源管理器「打开方式」）
 
-笔记页之外还有一扇**只装正文编辑器**的窗口（第六个 HTML 入口 `markdown.html`，Rust 在
+笔记页之外还有一扇**只装一块工作台面板**的窗口（第六个 HTML 入口 `markdown.html`，Rust 在
 `md_window.rs`）：安装后在资源管理器右击 `.md` / `.markdown` →「打开方式」→ Workbench，
 就直接编辑那一个文件。它与笔记页共用 `notes.rs` 的读 / 写与 mtime 冲突保护，但没有笔记本、
-没有目录树、没有导航栏。
+没有目录树、没有导航栏；面板里有标题栏、正文、大纲栏与底栏。
 
 - **文件关联由安装器登记**：`tauri.conf.json` 的 `bundle.fileAssociations`（`.md` / `.markdown`）。
   Tauri 的 NSIS 模板会把这两个后缀的**默认打开程序**改成 Workbench（卸载时恢复备份值）——
@@ -253,6 +330,18 @@ true、清单里不能放选中项自己）只在那里写清楚了，下面不�
 - **一个文件一扇窗**（label `markdown-<uuid>`）：同一路径再次打开只聚焦已有窗口，不同文件各开一扇。
   启动参数里有 md 文件时主窗口照建但**不显示**（托盘与后台服务照旧）；关掉编辑窗口后应用留在托盘，
   从托盘「显示主界面」仍能叫出主窗口。
+- **无边框**：`md_window.rs` 建窗时 `decorations(false)`，系统标题栏不画 —— 最小化 / 最大化 / 关闭
+  三颗窗口键由渲染层自绘在标题栏右端（规格照 `TitleBar.vue` 的手画 SVG，但那份引着 store，
+  这扇窗不装 store，图标照抄不引）；标题栏与底栏都标了 `data-tauri-drag-region` 兼做拖动带
+  （双击最大化 / 还原由 Tauri 的注入脚本接管，组件里**不要**再写 `@dblclick` 自己 toggle）。
+  拖动要 capabilities 放行：`markdown-window.json` 里的 `core:window:allow-start-dragging`
+  （`core:default` 不含它，被 ACL 拦下是静默失效）。最大化状态从 Rust 推
+  （`md_window.rs` 在 `Resized` 事件里比对后发 `markdown-window:state-changed`，与主窗口
+  main.rs 那条同款但用**这扇窗自己的**上一次观测值 —— 全局那份 `MaximizedFlag` 是主窗口的，
+  两边共用会互相顶掉），渲染层经 `onMarkdownWindowState` 订阅、`markdownWindowIsMaximized` 问初值，
+  第三颗按钮据此画「最大化」还是「还原」；最小化 / 最大化复用主窗口同款的
+  `window_minimize` / `window_toggle_maximize`（两条都按调用方窗口生效），关闭按钮直接走
+  `markdown_window_close`（防抖里那一份由输入路径交出去，见下面的「关闭是握手」）。
 - **路径只从 Rust 会话取**：`markdown_window_context` / `markdown_window_save` 都按窗口 label 查会话，
   不接受渲染层传路径 —— 这扇窗没法读写它被打开的那个文件以外的任何东西；读写走 `notes::read` /
   `notes::write`，冲突规则与笔记页完全一致（写盘带 mtime，别处改过就拒绝）。
@@ -261,11 +350,36 @@ true、清单里不能放选中项自己）只在那里写清楚了，下面不�
   `NoteEditor` 为此把图片仓库与「允不允许上传图片」改成 props（笔记页传仓库地址，独立窗口
   传 `allowImageUpload=false`）—— 独立窗口没有「笔记本」这一层，粘贴图片会把图推到图片仓库里
   一个临时层级，不是那个窗口里期待的动作。
-- **右侧大纲始终显示**：正文与目录分成两列（`.md-body`），右栏 `.md-rail` 固定 224px，样式与笔记页的
-  `.notes__rail` 是同一副样子（各自 scoped，没法共用，**改栏宽 / 条目样式要两边一起改**）。这扇窗没有
-  标题行、也没有开关，所以 `NoteEditor` 传 `outlineHost` + `outlinePinned`：初始化完成后把 Vditor 那枚
-  大纲元素搬进右栏并直接打开；钉死这一档右键菜单里不再给「大纲」（`NoteContextMenu` 的 `hidden`），
-  否则能从菜单把它关成一条空栏。**栏宽不跟正文抢**：编辑器自己只拿剩下的宽度，Vditor 按它重算居中留白。
+- **工作台面板**：窗口内边距 `--sp-4`，里面一块 `.md-panel`（`--bg-surface` + `--border` + `--r-lg` +
+  `--shadow-card`）；标题栏 52px、底栏 34px，加载与打开失败也落在这块面板里（不再是一整页白）。
+  标题栏左边是文件图标与文件名（`Markdown` 副行已删），右端是三颗自绘窗口键（见上面「无边框」）。
+- **底栏的保存状态**：`保存中…`（队列里还有笔数）→ `已保存 · MM-DD HH:mm`（`savedAt`，读盘与每次落盘后更新）；
+  失败时切到 `保存失败`（`--st-fail`）。状态只用于展示，写盘仍走原来的串行队列。
+- **底栏**：左边「N 字」（**非空白字符数，含 markdown 记号** —— 它是正文本身，不是渲染后的结果）+ `Markdown`；
+  右端是保存状态与大纲开关（无边框改版后从标题栏挪下来），保存失败时改显原因与「重试」——
+  原来的右下角浮动提示搬到了这里。整条标了拖动区（按钮自己不拖）。
+- **左侧大纲**：目录与正文分成两列（`.md-body`），左栏 `.md-rail` **默认 320px、可拖**
+  （这扇窗不接主题、也不写 theme.json；宽度只活在本次窗口里，关窗回到 320。区间沿用
+  `noteRailWidth` 的 160–420，见 `clampNoteRailWidth`）。拖右缘那条通高热区改宽（指针往右拉），
+  拖动期间挂 `body.is-resizing-md-rail`（这扇窗没引 global.css，光标与文本选择由
+  `markdown.html` 的内联样式兜住）；热区落在栏的右内边距里（不压正文的悬浮滚动条），
+  是栏的子元素（收起时随栏一起裁掉），静止时只露正中间一枚小竖条。
+  笔记页那条的宽度是 theme.json 的 `noteRailWidth`，两边互不影响。条目底子与笔记页的
+  `.notes__rail` 是同一套
+  （各自 scoped，没法共用，**改条目样式要两边一起改**：27px 行片、缩进、悬停底、箭头规格一致）。
+  条目的**整行收展**与笔记页共用
+  `use-outline-row-toggle`（见上文「约束」③，这扇窗挂在 `.md-rail` 上；**显隐走 CSSOM**，
+  这扇窗的 CSP nonce 会丢行内 style 属性）。`NoteEditor` 传 `outlineHost` + `outlinePinned`：
+  初始化完成后把 Vditor 那枚大纲元素搬进左栏并直接打开；钉死这一档右键菜单里不再给「大纲」
+  （`NoteContextMenu` 的 `hidden`），否则能从菜单把它关成一条空栏。
+  **底栏那颗开关做的是宽度过渡**（`.md-body.is-rail-closed` 把宽度 / 左右内边距 / 不透明度
+  一起归零，0.2s `--ease-out`；栏始终留在 DOM 里，不碰 Vditor 的大纲），**箭头同时转 180°**
+  （底图是左向箭头，收起后朝右）；系统开了「减少动态效果」时两者都直接跳。
+  窄窗口（< 820px）打开时默认收起。**栏宽不跟正文抢**：编辑器自己只拿剩下的宽度。
+- **正文滚动条**：原生条收掉，由共享的 `OverlayScrollbar` 画（见上文「正文编辑器」那一节）；
+  这扇窗没引 global.css，原生条本是 WebView2 带箭头那副，这一下也一并盖掉。
+  正文排版在这扇窗里单独松一档（15.5px / 1.8、单行约 1200px、左右内边距居中），只在
+  `MarkdownWindowApp` 的 scoped 样式里，笔记页不受影响。
 - **关闭是握手**：Rust 先 `prevent_close` 并向窗口发 `markdown-window:flush`，渲染层收到后先回一条
   `markdown_window_cancel_close` 撤掉兜底计时（保存与确认可能要等用户慢慢决定），再把防抖里那一份交出去、
   等保存落地，最后调 `markdown_window_close` 销毁；保存失败会问「仍然关闭 / 留在窗口」。
@@ -289,7 +403,7 @@ true、清单里不能放选中项自己）只在那里写清楚了，下面不�
   不进同步）的口径见上文「约束」一节
 - 一页两栏：左边目录树、右边 **Vditor**（即时渲染，正文存 markdown 原文，数据不依赖编辑器）。
   两栏之间的缝可拖（`noteTreeWidth`，拖动只改本地、松手落盘；把手平时不显示，指针落上才露出）。
-  右栏内部还能按需再开一条大纲（卡片右侧一条与页头同高的栏，见上文「约束」一节）。
+  右栏内部常显一条大纲（宽度可拖，见上文「约束」一节）。
   左栏底部一行是「这个笔记本是谁」：目录名、篇数、刷新 / 换文件夹 / 素材管理。
   **最近打开**（`noteDirs`，最多 6 条）是**点开才弹的浮层**（与左栏菜单区等宽、左缘对齐）——
   不做成常显：左栏本来就窄，这几个目录几天也不换一次。点一条换过去（换过的排最前、当前的加粗点不动），
@@ -304,11 +418,12 @@ true、清单里不能放选中项自己）只在那里写清楚了，下面不�
 - **拖动只认「文件拖进文件夹」与「拖到树下面的空白区」（移回最外层）**：文件夹不可拖，
   落在文件上、落在原处都不放行。松手后真的挪磁盘文件，**失败时重新扫一遍** —— `el-tree` 在松手那一刻
   已把自己那份数据挪过了，不重扫左栏显示的就是一个磁盘上不存在的位置
-- 树的增删改都在**右键菜单**：节点行是新建笔记 / 新建文件夹 / 重命名 / 删除（触发区盖住整行），
+- 树的增删改都在**右键菜单**：节点行是新建笔记 / 新建文件夹 / 重命名 / 删除（整行都算这一行），
   另加三项**读**的动作 —— 在资源管理器中显示、复制路径（绝对路径，`noteAbsPath` 按笔记本根拼）、
-  用默认程序打开（只对笔记）。**同一时刻只开一个**：右击另一行先把上一个关掉
-  （`use-exclusive-dropdown` 在 `visible-change` 上收口 —— EP 的「点外面关闭」只听 click，
-  右键另一行不算，两个菜单会并排挂着）。空白区是新建两项 + 刷新列表 + 在资源管理器中打开笔记本，
+  用默认程序打开（只对笔记）。菜单**贴指针落点**出现（`NoteTreeMenu`，落点与收起跟笔记正文 /
+  邮件清单行 / 视频行共用 `use-floating-position` / `use-floating-dismiss`）—— `el-dropdown`
+  的 contextmenu 触发器锚在整行上、右击行尾会弹回行首，**不要再用它**；**同一时刻只有一份**，
+  右击另一行直接换落点。空白区是新建两项 + 刷新列表 + 在资源管理器中打开笔记本，
   新建一律落在笔记本根。名字最终是文件名：上限 60 字，非法字符与系统保留名在名字弹窗里
   当场说清楚（`noteNameProblem`）；**新建撞名自动退格**（`新建笔记 2`），重命名不退让。
   弹窗新建与重命名共用，聚焦与全选挂在 `@opened` 之后（正文打开时才挂，写在 `watch` 里等完 `nextTick`
@@ -326,8 +441,8 @@ true、清单里不能放选中项自己）只在那里写清楚了，下面不�
   选中项所在的那几层自动展开（`default-expanded-keys` 每次重建按清单恢复，清单**只放祖先不放选中项**）。
   展开态清单由笔记页持有并落盘（`noteTreeExpanded`，见[设置那一节](../features-and-architecture.md)的
   「上次看的那一档会被记住」），`NoteTree` 是 `expanded` 进、`update:expanded` 出、**自己不留副本**；
-  换笔记本清空。`el-tree` 的两处脾气（`auto-expand-parent` 顶回展开态、名字栏外层 `el-dropdown`
-  必须 `min-width: 0` 且 `flex: 1` 盖住整行余宽 —— 否则长名字溢出、树横向错位，右键触发区也断）
+  换笔记本清空。`el-tree` 的两处脾气（`auto-expand-parent` 顶回展开态、名字栏那一层 `.node`
+  必须 `min-width: 0` 且 `flex: 1` 盖住整行余宽 —— 否则长名字溢出、树横向错位，右键也接不住行尾）
   见 [`NoteTree.vue`](../../apps/desktop/src/renderer/src/components/NoteTree.vue) 顶部注释与样式
 - 右栏标题行：左边名字 + 所在的那几层文件夹（面包屑，最外层没有上一级就不显示），右边保存状态
   （「已保存 · 最后修改时间」，写盘失败换成原因）。正文按 **600ms 防抖**落盘（先写同目录临时文件再改名，
@@ -351,10 +466,18 @@ true、清单里不能放选中项自己）只在那里写清楚了，下面不�
   四条坑与各自的解法见上文「约束」一节。**Vditor 的初始化是异步的**，所以只读那一档不只挂在 watch 上：
   初始化完成那一刻由 options 的 `after` 回调再核一遍（编辑器可能是「已经切到只读之后」才建起来的）
 - **编辑器的动作全部挪到正文的右键菜单**，工具带 CSS 藏起来（元素还在）：菜单三排图标 + 两行带子菜单
-  （段落 / 插入），共 17 项 —— 正好是工具带的全部动作。位置贴指针、不越出窗口，右边放不下子菜单整份翻左；
+  （段落 / 插入），共 17 项 —— 正好是工具带的全部动作；光标在表格单元格里时再多一排表格操作（见下条）。位置贴指针、不越出窗口，右边放不下子菜单整份翻左；
   点别处 / Esc / 滚轮 / 窗口变化收起。**菜单自己不实现任何编辑动作**：每一项按名字去点工具带上对应的按钮
   （动作名必须与 `TOOLBAR` 对得上，点不到只在控制台告警）。菜单 Teleport 到 body，且按下时
   `preventDefault` 掉 mousedown —— 否则焦点挪走、**选区没了**
+- **表格的行列增删在右键菜单的第四排**（光标落在单元格里右键才出现）：下方 / 上方插行、右侧 / 左侧插列、
+  删行、删列六项。Vditor 4 的表格工具条**只挂在 wysiwyg 模式**上，IR 模式没有，行列操作平时只能按它
+  自己那组快捷键（Ctrl+= / Ctrl+Shift+F / Ctrl+Shift+= / Ctrl+Shift+G / Ctrl+- / Ctrl+Shift+-，
+  菜单项的提示里带着）。菜单的这排**不点工具带** —— 工具带上没有对应按钮 —— 而是 NoteEditor 合成一次
+  按键派发到 IR 元素上（`runTableAction`），让 Vditor 自己的表格处理器去干活（渲染 / 光标 / 撤销栈都归它）；
+  两个坑：匹配器在非 Mac 上把带 Shift 的 `=` / `-` 改写成 `+` / `_` 之后才比 `event.key`（合成事件得给
+  改写后的键），事件必须 `bubbles: true`（监听器在 IR 元素上）。动作名带 `table:` 前缀经 `execTable`
+  分流，与工具带动作用同一条 `act` 事件
 - **粘贴的图片推到用户自己的 git 仓库**（不放进笔记本目录）：正文里留下一条
   `![图片](https://…/images/<设备>/<笔记本>/20260916-104512-ab12cd34.png)` 外链，笔记文件始终很小。
   一次上传就是一次 `pull → 写文件 → commit → push`（与 Token 同步同一套机制、另一套地址与克隆目录）；
