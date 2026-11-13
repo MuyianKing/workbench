@@ -573,8 +573,8 @@ async function remove(entry: WorkLogEntry): Promise<void> {
         <el-date-picker
           v-if="range === 'custom'"
           v-model="customRangeInput"
-          class="custom-range"
           type="daterange"
+          size="small"
           value-format="YYYY-MM-DD"
           format="YYYY-MM-DD"
           range-separator="至"
@@ -764,10 +764,30 @@ async function remove(entry: WorkLogEntry): Promise<void> {
   flex-shrink: 0;
 }
 
-/* 「自定义」后面那枚日期范围：宽度给到刚好装下两端日期，不与右边的工具抢地方 */
-.custom-range.el-date-editor {
+/**
+ * 「自定义」后面那枚日期范围：宽度给到刚好装下两端日期（260px），高度与右边那排按钮齐平
+ * （`.sort` / `.el-button--small` 都是 28px），字号落到 12px —— 由 `size="small"` 给。
+ *
+ * 必须 `:deep()` 命中内层那枚 `.el-date-editor`：`el-date-picker` 的根节点是 `ElTooltip`，
+ * scoped 的 `[data-v]` 落在它身上而不是日期框元素上，直接写 `.xxx.el-date-editor` 会静默失效
+ * （实测仍按 EP 默认的 350×32 渲染）。GitCommitList 的日期框同一个坑，同一种解法。
+ */
+.filter__head :deep(.el-date-editor) {
   flex: 0 0 260px;
   width: 260px;
+  height: 28px;
+}
+
+/* 两端日期与「至」按工具带那档字号（12px）：EP 的 small 档是 12px，但内层高度写死了 22px，
+   跟着 28px 的外壳改成 26px，上下各留 1px 不顶边 */
+.filter__head :deep(.el-range-input),
+.filter__head :deep(.el-range-separator) {
+  font-size: var(--fs-meta);
+}
+
+.filter__head :deep(.el-range-input) {
+  height: 26px;
+  line-height: 26px;
 }
 
 /* 同步失败：工具带上一行红字，悬停看全文（与保险库同一套，成功时不占地方） */
