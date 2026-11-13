@@ -1450,9 +1450,13 @@ export interface WorkbenchApi {
   projectGitLog: (dir: string, since?: number, until?: number) => Promise<Result<GitCommitLog>>
   /**
    * 把「从提交生成」预览里确认过的草稿写进工作日志。
-   * 新建的条目带来源哈希（下次生成不会重复写），`appendTo` 的条目追加到已有记录上。
+   * 新建的条目带来源哈希（下次生成不会重复写），`appendTo` 的条目追加到已有记录上；
+   * `deviceId` 指定新建条目属于哪台设备，留空 / 不传落本机。
    */
-  importGitDrafts: (drafts: readonly GitWorkLogDraft[]) => Promise<Result<WorkLogEntry[]>>
+  importGitDrafts: (
+    drafts: readonly GitWorkLogDraft[],
+    deviceId?: string,
+  ) => Promise<Result<WorkLogEntry[]>>
 
   // ---------- Git 页（只读、本地：打开仓库 / 提交 / 文件历史 / 差异） ----------
   //

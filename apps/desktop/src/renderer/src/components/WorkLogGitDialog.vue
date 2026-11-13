@@ -1,16 +1,17 @@
 <script setup lang="ts">
 import type { ProjectColor } from '@workbench/core'
-import type { GitWorkLogDraft, GitWorkLogInput, WorkLogEntry } from '@workbench/work-log'
+import type { GitWorkLogDraft, GitWorkLogInput, WorkLogDevice, WorkLogEntry } from '@workbench/work-log'
 import { DocumentAdd } from '@element-plus/icons-vue'
 import { addDays, dayKey, projectColorVar, sanitizeProjectColor } from '@workbench/core'
-import { buildGitDrafts, dateOfDayKey, dayMeta } from '@workbench/work-log'
+import { buildGitDrafts, dateOfDayKey, dayMeta, entriesOfDevice, workLogDeviceLabel } from '@workbench/work-log'
 import { ElMessage } from 'element-plus'
 /**
  * 从项目仓库的提交生成工作记录（预览后写入）。
  *
  * 读提交、分组、去重都在 `@workbench/work-log` 的 `git-import.ts` 里（纯逻辑，有单测）；
- * 这个弹窗负责三件事：选哪一天 / 哪些项目、把草稿摆出来让人改、确认后交给适配层写入。
- * 日期范围必选（默认今天，可快捷选今天 / 昨天 / 本周），项目多选（默认空 = 全部项目；没选项目就生成前先确认一次）。
+ * 这个弹窗负责三件事：选写到哪台设备 / 哪一天 / 哪些项目、把草稿摆出来让人改、确认后交给适配层写入。
+ * 日期范围必选（默认今天，可快捷选今天 / 昨天 / 本周），项目多选（默认空 = 全部项目；没选项目就生成前先确认一次），
+ * 设备默认取工作页当前正在看的那台 —— 去重与「追加到哪条」也只认这台设备的记录。
  *
  * 一个项目一天一条：同项目同一天已经有生成记录时标「追加」，新提交接在它后面；
  * 否则新建一条「已完成」。勾掉的行不写，正文被清空的行也跳过。
@@ -30,23 +31,45 @@ interface DraftRow extends GitWorkLogDraft {
 const props = defineProps<{
   /** 项目列表（取数用；颜色只用于预览里的标签） */
   projects: { id: string, name: string, path: string, color?: ProjectColor }[]
-  /** 当前工作日志（去重与「追加到哪条」都靠它） */
+  /** 整份工作日志：去重与「追加到哪条」都靠它，弹窗内部按选中的设备先筛一遍再用 */
   entries: readonly WorkLogEntry[]
+  /** 设备清单（与工作页工具带同一份：本机恒在第一位） */
+  devices: readonly WorkLogDevice[]
+  /** 本机设备 id：认领没有 by 的老数据 */
+  localDeviceId: string
+  /** 打开弹窗时默认写到哪台设备（工作页当前正在看的那台） */
+  defaultDeviceId: string
   /** 页面的「现在」：预览里的相对日期（今天 / 昨天 / 前天）按它算 */
   now: number
 }>()
 
 const emit = defineEmits<{
-  /** 写入成功后把新建 / 改动过的记录交给页面并进内存列表 */
-  imported: [entries: WorkLogEntry[]]
+  /** 写入成功后把新建 / 改动过的记录，连同它们所属的设备交给页面并进内存列表 */
+  imported: [entries: WorkLogEntry[], deviceId: string]
 }>()
 
 const open = defineModel<boolean>({ required: true })
 
+/** 写到哪台设备：值是设备 id（本机那项也是真实 id）；打开弹窗时默认跟工作页当前看的那台一致 */
+const deviceId = ref('')
 /** 生成哪一段（必选、默认今天）：两端都是本地日期键，不跟工作页顶部的档位联动 */
 const dateRange = ref<[string, string]>([dayKey(Date.now()), dayKey(Date.now())])
 /** 选中的项目 id：空 = 全部项目（默认空，可以不选） */
 const selectedIds = ref<string[]>([])
+
+/** 设备下拉的选项：本机恒在第一位，名字与工具带同一个口径 */
+const deviceOptions = computed(() => props.devices.map(item => ({
+  id: item.id,
+  label: workLogDeviceLabel(item),
+})))
+
+/** 新建条目实际落到哪台设备：还没选时认默认那台 */
+const targetDeviceId = computed(() => deviceId.value || props.defaultDeviceId)
+
+/** 只认这台设备的记录：别把提交接进别的设备的记录里，也别拿别处的哈希来去重 */
+const deviceEntries = computed(() =>
+  entriesOfDevice(props.entries, targetDeviceId.value, props.localDeviceId),
+)
 
 /**
  * 日期快捷项：与工作页顶栏那几档同一口径 —— 本周从周一起算。
@@ -180,7 +203,7 @@ async function load(): Promise<void> {
       }
     }
 
-    rows.value = buildGitDrafts(inputs, from, to, props.entries)
+    rows.value = buildGitDrafts(inputs, from, to, deviceEntries.value)
       .map(draft => ({ ...draft, checked: true }))
   }
   finally {
@@ -205,14 +228,16 @@ function requestLoad(): void {
 watch(open, (value) => {
   if (!value)
     return
-  // 每次打开都回到默认：今天 + 全部项目
+  // 每次打开都回到默认：当前看的那台设备 + 今天 + 全部项目
   const today = dayKey(Date.now())
+  deviceId.value = props.defaultDeviceId
   dateRange.value = [today, today]
   selectedIds.value = []
   requestLoad()
 })
 
-watch([dateRange, selectedIds], () => {
+/** 换设备等于换了去重与追加的依据，预览要重读 */
+watch([dateRange, selectedIds, deviceId], () => {
   if (open.value)
     requestLoad()
 }, { deep: true })
@@ -267,13 +292,13 @@ async function commit(closeAfter: boolean): Promise<void> {
 
   saving.value = true
   try {
-    const result = await window.workbench.importGitDrafts(picked)
+    const result = await window.workbench.importGitDrafts(picked, targetDeviceId.value)
     if (!result.ok || !result.data) {
       ElMessage.error(result.error ?? '生成工作记录失败')
       return
     }
 
-    emit('imported', result.data)
+    emit('imported', result.data, targetDeviceId.value)
     if (closeAfter) {
       ElMessage.success(`已生成 ${result.data.length} 条工作记录`)
       open.value = false
@@ -300,9 +325,20 @@ async function commit(closeAfter: boolean): Promise<void> {
     @closed="reset"
   >
     <div class="git">
-      <!-- 生成范围：日期范围必选（默认今天，可快捷选今天 / 昨天 / 本周），项目多选（默认空 = 全部项目） -->
+      <!-- 生成范围：写到哪台设备（默认当前看的那台）、日期范围必选、项目多选（默认空 = 全部项目） -->
       <el-form class="form" label-position="top" @submit.prevent>
         <div class="filters">
+          <el-form-item v-if="deviceOptions.length > 1" label="设备" class="filters__device">
+            <el-select v-model="deviceId" class="select" placeholder="选择设备">
+              <el-option
+                v-for="item in deviceOptions"
+                :key="item.id"
+                :label="item.label"
+                :value="item.id"
+              />
+            </el-select>
+          </el-form-item>
+
           <el-form-item label="日期范围" class="filters__date">
             <el-date-picker
               v-model="dateRange"
@@ -414,10 +450,14 @@ async function commit(closeAfter: boolean): Promise<void> {
   min-height: 220px;
 }
 
-/* 日期 + 项目：日期给固定宽度，项目吃掉剩下的地方 */
+/* 设备 + 日期 + 项目：设备与日期给固定宽度，项目吃掉剩下的地方 */
 .filters {
   display: flex;
   gap: var(--sp-4);
+}
+
+.filters__device {
+  flex: 0 0 160px;
 }
 
 .filters__date {

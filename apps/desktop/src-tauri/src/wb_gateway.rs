@@ -961,15 +961,22 @@ pub fn wb_gateway_tasks(
         persist_tokens(&state, &target);
     }
 
-    let tasks = crate::wb_tasks::fetch_growth_tasks(&target)?;
-    // 汇总要打四五次上游、签到状态也要一次 POST，都和任务清单并行：这一栏等的是
-    // 「几块都到齐」，串着来就是白白多等一倍。
+    // 三块并行：任务清单 1 次、汇总 4 次（内部也并行）、签到状态 1 次。
+    // 这一栏等的是「几块都到齐」，串着来就是白白多等一倍。
+    // 任务清单失败仍然整个命令失败 —— 那是这一栏的主体内容，不是可吞的一块。
+    let tasks_account = target.clone();
     let summary_account = target.clone();
     let checkin_account = target.clone();
+    let tasks_handle =
+        std::thread::spawn(move || crate::wb_tasks::fetch_growth_tasks(&tasks_account));
     let summary_handle =
         std::thread::spawn(move || crate::wb_tasks::fetch_growth_summary(&summary_account));
     let checkin_handle =
         std::thread::spawn(move || crate::wb_tasks::checkin_status(&checkin_account));
+    // 外层是线程 join（panic 会变成 Err），内层是上游请求本身的失败
+    let tasks = tasks_handle
+        .join()
+        .map_err(|_| "读取成长任务失败".to_string())??;
     let summary = summary_handle.join().unwrap_or_default();
     let checkin = checkin_handle.join().ok().flatten().unwrap_or_default();
     Ok(TasksSnapshot {
@@ -987,6 +994,10 @@ pub fn wb_gateway_tasks(
 /// `uid` 为空 / `all` 时取全部已启用的号，界面按发放日相加；每个号一次只读 POST。
 /// 某个号失败只把 `error` 填上，其余账号照常返回 —— 一个号的 token 过期不该把整张图清空。
 /// 整段包历史原样回去，裁最近 30 天是界面那一层的事（与用量流水的分工一致）。
+///
+/// **各号并行**：这一发打的是 `get-user-resource` 的宽时间窗（16 年 + 每页 500 条），
+/// 单发就要好几秒；几个号排着来就是好几倍。续期与取数都在线程里做，
+/// 写回 token 回到主线程（状态锁不跨线程用）。
 #[tauri::command(async)]
 pub fn wb_gateway_credit_grants(
     state: tauri::State<'_, Gateway>,
@@ -997,34 +1008,60 @@ pub fn wb_gateway_credit_grants(
         return Err("未找到已启用的账号".into());
     }
 
-    let mut rows = Vec::new();
-    for mut account in targets {
-        let mut error = String::new();
-        match refresh_if_needed(&mut account) {
-            Ok(refreshed) => {
+    // 续期与取数都在线程里做（各号并行），写回 token 回到主线程（状态锁不跨线程用）
+    type Job = crate::common::ParallelJob<
+        Account,
+        (Account, Vec<crate::wb_credits::Grant>, String, bool),
+    >;
+    let jobs: Vec<(Account, Job)> = targets
+        .into_iter()
+        .map(|account| {
+            let work: Job = Box::new(move |mut account: Account| {
+                let mut error = String::new();
+                let mut refreshed = false;
+                match refresh_if_needed(&mut account) {
+                    Ok(did) => refreshed = did,
+                    Err(message) => error = format!("续期失败：{message}"),
+                }
+                let grants = if error.is_empty() {
+                    match crate::wb_api_billing::fetch_credit_grants(&account) {
+                        Ok(grants) => grants,
+                        Err(message) => {
+                            error = message;
+                            Vec::new()
+                        }
+                    }
+                } else {
+                    Vec::new()
+                };
+                Ok((account, grants, error, refreshed))
+            });
+            (account, work)
+        })
+        .collect();
+
+    let results = crate::common::run_parallel(jobs);
+    let mut rows = Vec::with_capacity(results.len());
+    for (account, outcome) in results {
+        match outcome {
+            Ok((account, grants, error, refreshed)) => {
                 if refreshed {
                     persist_tokens(&state, &account);
                 }
+                rows.push(GrantAccount {
+                    uid: account.uid.clone(),
+                    nickname: account.label(),
+                    grants,
+                    error,
+                });
             }
-            Err(message) => error = format!("续期失败：{message}"),
+            Err(message) => rows.push(GrantAccount {
+                uid: account.uid.clone(),
+                nickname: account.label(),
+                grants: Vec::new(),
+                error: message,
+            }),
         }
-        let grants = if error.is_empty() {
-            match crate::wb_api_billing::fetch_credit_grants(&account) {
-                Ok(grants) => grants,
-                Err(message) => {
-                    error = message;
-                    Vec::new()
-                }
-            }
-        } else {
-            Vec::new()
-        };
-        rows.push(GrantAccount {
-            uid: account.uid.clone(),
-            nickname: account.label(),
-            grants,
-            error,
-        });
     }
     Ok(rows)
 }

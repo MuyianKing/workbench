@@ -165,14 +165,18 @@ export async function projectGitLog(
  *
  * `appendTo` 的草稿并进那条已有记录（正文追加、哈希并集），其余新建一条「已完成」。
  * 一次调用只落一次盘；返回这次被新建 / 改动的记录，页面据此并进内存列表。
+ * `deviceId` 指定新建条目属于哪台设备（「从提交生成」弹窗里可以选），留空落本机；
+ * 追加的那条本来就属于某台设备，不改它的 `by`。
  */
 export async function importGitDrafts(
   drafts: readonly GitWorkLogDraft[],
+  deviceId?: string,
 ): Promise<Result<WorkLogEntry[]>> {
   try {
     await ensureLoaded()
     const now = Date.now()
-    const device = await localDevice()
+    const local = await localDevice()
+    const by = deviceId?.trim() || local.id
     const changed: WorkLogEntry[] = []
     let created = 0
 
@@ -210,7 +214,7 @@ export async function importGitDrafts(
         content,
         status: 'done',
         source: { kind: 'git', commits },
-        by: device.id,
+        by,
       }, () => crypto.randomUUID(), now)
       if (!entry)
         continue

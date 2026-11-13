@@ -1,6 +1,6 @@
 import type { WorkLogEntry } from './work-log'
 import { describe, expect, it } from 'vitest'
-import { deviceOfEntry, entriesOfDevice, workLogDevices } from './work-log-devices'
+import { deviceOfEntry, entriesOfDevice, workLogDeviceLabel, workLogDevices } from './work-log-devices'
 
 function entry(id: string, by?: string): WorkLogEntry {
   return {
@@ -42,6 +42,17 @@ describe('entriesOfDevice', () => {
     const source = [entry('a', 'dev-remote')]
     entriesOfDevice(source, 'dev-local', LOCAL.id)
     expect(source.map(item => item.id)).toEqual(['a'])
+  })
+})
+
+describe('workLogDeviceLabel', () => {
+  it('本机带「（本机）」，名字没取到时就是「本机」', () => {
+    expect(workLogDeviceLabel({ id: 'dev-local', name: '我的电脑', self: true })).toBe('我的电脑（本机）')
+    expect(workLogDeviceLabel({ id: 'dev-local', name: '', self: true })).toBe('本机')
+  })
+
+  it('别的设备直接用它的名字', () => {
+    expect(workLogDeviceLabel({ id: 'dev-remote', name: '另一台' })).toBe('另一台')
   })
 })
 

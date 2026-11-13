@@ -1,7 +1,9 @@
 <script setup lang="ts">
+import type { ModelSortKey } from '@workbench/usage'
 import type { GatewayModelInfo } from '@/workbench/gateway'
 import { CopyDocument, Cpu, Search } from '@element-plus/icons-vue'
 import { inferModelMeta } from '@workbench/ai'
+import { MODEL_SORTS, sortModels } from '@workbench/usage'
 import { ElMessage } from 'element-plus'
 import { computed, onMounted, ref } from 'vue'
 import { copyText } from '@/clipboard'
@@ -28,13 +30,19 @@ const fetching = ref(false)
 
 /** 模型栏的本地查询：只在已拉下来的清单里按 id / 名称过滤，不发请求、不触发重新获取 */
 const modelKeyword = ref('')
+/**
+ * 排序只在本地清单里排，不发请求。默认按倍率从低到高 —— 挑模型时最关心的是贵不贵；
+ * 口径（倍率原文解析 / 未知沉底 / 同值按 id 兜底）在 `packages/usage` 的 `model-catalog.ts`。
+ */
+const sortKey = ref<ModelSortKey>('rate')
 const visibleModels = computed(() => {
   const keyword = modelKeyword.value.trim().toLowerCase()
-  if (!keyword)
-    return models.value
-  return models.value.filter(model =>
-    model.id.toLowerCase().includes(keyword) || model.name.toLowerCase().includes(keyword),
-  )
+  const filtered = keyword
+    ? models.value.filter(model =>
+        model.id.toLowerCase().includes(keyword) || model.name.toLowerCase().includes(keyword),
+      )
+    : models.value
+  return sortModels(filtered, sortKey.value)
 })
 
 /**
@@ -132,70 +140,77 @@ onMounted(load)
         v-model="modelKeyword"
         placeholder="搜索模型"
         clearable
+        size="small"
         :prefix-icon="Search"
         class="models__search"
       />
+      <!-- 与搜索框同档（small）：这一行只有它和排序下拉，两件都走同一档才齐平 -->
+      <el-select v-model="sortKey" size="small" class="models__sort" aria-label="模型排序">
+        <el-option v-for="item in MODEL_SORTS" :key="item.value" :label="item.label" :value="item.value" />
+      </el-select>
     </div>
 
-    <div v-if="!models.length && !loading && !fetching" class="panel">
-      <EmptyState
-        compact
-        :icon="Cpu"
-        text="还没拿到模型目录"
-        hint="登录一个可用账号后会自动拉取"
-      />
-    </div>
+    <div class="models__body">
+      <div v-if="!models.length && !loading && !fetching" class="panel">
+        <EmptyState
+          compact
+          :icon="Cpu"
+          text="还没拿到模型目录"
+          hint="登录一个可用账号后会自动拉取"
+        />
+      </div>
 
-    <div v-else-if="models.length && !visibleModels.length" class="panel">
-      <EmptyState
-        compact
-        :icon="Search"
-        text="没有匹配的模型"
-        hint="换个关键字试试"
-      />
-    </div>
+      <div v-else-if="models.length && !visibleModels.length" class="panel">
+        <EmptyState
+          compact
+          :icon="Search"
+          text="没有匹配的模型"
+          hint="换个关键字试试"
+        />
+      </div>
 
-    <div v-else v-loading="fetching && !models.length" class="models__grid">
-      <article v-for="model in visibleModels" :key="model.id" class="panel models__card">
-        <div class="models__card-head">
-          <span class="models__avatar">
-            <el-icon><Cpu /></el-icon>
-          </span>
-          <div class="models__titles">
-            <span class="models__id" :title="model.id">{{ model.id }}</span>
-            <span class="models__name" :title="model.name">{{ model.name || '—' }}</span>
+      <div v-else v-loading="fetching && !models.length" class="models__grid">
+        <article v-for="model in visibleModels" :key="model.id" class="panel models__card">
+          <div class="models__card-head">
+            <span class="models__avatar">
+              <el-icon><Cpu /></el-icon>
+            </span>
+            <div class="models__titles">
+              <span class="models__id" :title="model.id">{{ model.id }}</span>
+              <span class="models__name" :title="model.name">{{ model.name || '—' }}</span>
+            </div>
+            <el-tooltip content="复制模型 ID" placement="top">
+              <el-button size="small" text :icon="CopyDocument" aria-label="复制模型 ID" @click="copyText(model.id, '模型 ID')" />
+            </el-tooltip>
           </div>
-          <el-tooltip content="复制模型 ID" placement="top">
-            <el-button size="small" text :icon="CopyDocument" aria-label="复制模型 ID" @click="copyText(model.id, '模型 ID')" />
-          </el-tooltip>
-        </div>
 
-        <div class="models__facts">
-          <div class="models__fact">
-            <span class="models__fact-label">上下文窗口</span>
-            <span class="models__fact-value">{{ contextOf(model) }}</span>
+          <div class="models__facts">
+            <div class="models__fact">
+              <span class="models__fact-label">上下文窗口</span>
+              <span class="models__fact-value">{{ contextOf(model) }}</span>
+            </div>
+            <div class="models__fact">
+              <span class="models__fact-label">最大输出</span>
+              <span class="models__fact-value">{{ maxOutputOf(model) }}</span>
+            </div>
+            <div class="models__fact">
+              <span class="models__fact-label">倍率</span>
+              <span class="models__fact-value">{{ model.rate || '—' }}</span>
+            </div>
           </div>
-          <div class="models__fact">
-            <span class="models__fact-label">最大输出</span>
-            <span class="models__fact-value">{{ maxOutputOf(model) }}</span>
-          </div>
-          <div class="models__fact">
-            <span class="models__fact-label">倍率</span>
-            <span class="models__fact-value">{{ model.rate || '—' }}</span>
-          </div>
-        </div>
 
-        <div class="models__rows">
-          <div class="models__row">
-            <span class="models__row-label">思考档位</span>
-            <span class="models__row-value" :title="effortsOf(model)">{{ effortsOf(model) }}</span>
+          <div class="models__rows">
+            <div class="models__row">
+              <span class="models__row-label">思考档位</span>
+              <span class="models__row-value" :title="effortsOf(model)">{{ effortsOf(model) }}</span>
+            </div>
+            <div class="models__row">
+              <span class="models__row-label">单价</span>
+              <span class="models__row-value models__price" :class="{ 'is-unpriced': model.inputCny === null && model.outputCny === null }">{{ priceOf(model) }}</span>
+            </div>
           </div>
-          <div class="models__row">
-            <span class="models__row-label">单价</span>
-            <span class="models__row-value models__price" :class="{ 'is-unpriced': model.inputCny === null && model.outputCny === null }">{{ priceOf(model) }}</span>
-          </div>
-        </div>
-      </article>
+        </article>
+      </div>
     </div>
   </div>
 </template>
@@ -206,18 +221,39 @@ onMounted(load)
   display: flex;
   flex-direction: column;
   gap: var(--sp-2);
+  flex: 1 1 auto;
   min-height: 0;
 }
 
-/* 栏首只留一个本地搜索框：与 Qoder 模型栏同宽，高度走默认尺寸（32px） */
+/* 栏首只留本地搜索 + 排序：进栏自动拉取，没有手动按钮；这一行不参与滚动 */
 .models__toolbar {
   display: flex;
   align-items: center;
+  gap: var(--sp-2);
   flex: none;
 }
 
 .models__search {
   width: 240px;
+}
+
+/* 排序是本地的重排，与搜索同一行、同一档高度 */
+.models__sort {
+  width: 176px;
+}
+
+/**
+ * 只有内容区滚：模型常有六十来张卡，整页滚会把页首的页签一起带走。
+ * 工具条与页签留在原地，卡片网格在这里面滚 —— 与「请求」栏表格内滚同一套做法。
+ *
+ * 顶部留一格内边距：滚动区上沿紧贴工具条时，被腰斩的卡片边框会悬在工具条底下，
+ * 像错版；留一格后裁切线与工具条之间有呼吸，滚动态也认得出来。
+ */
+.models__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding-top: var(--sp-2);
 }
 
 /* 卡片网格：一行放不下五张时自动往下排 */

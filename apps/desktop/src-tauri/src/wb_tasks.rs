@@ -538,7 +538,68 @@ fn tier_status(redemption: &Value, tier: &str) -> String {
 
 /// 查连续打卡、补签卡、抽奖次数、能量与猫猫旅行。每一段各自吞错误：
 /// 一个端点挂了不该让整块汇总消失（界面上显示 0 比空白更像事实）。
+///
+/// **四发并行**：能量 / 连登 / 抽奖次数 / 猫猫旅行是四个互不相干的端点，
+/// 串着来就是四倍等待（一发最多卡 15 秒接收超时，串起来能等一分钟）。
+/// 这里四发同时发，等的是最慢的那一发。
 pub fn fetch_growth_summary(account: &Account) -> GrowthSummary {
+    // 四发的返回类型各不相同，统一的形状是「每一段一个 Option」
+    // —— Option 是「这一段读到了没有」，读到了就照填（值本身就是 0 也照填，
+    // 别把上游明确给的 0 当成没读到）；没读到才留空。
+    type SummaryParts = (Option<i64>, Option<(i64, i64, i64)>, Option<i64>, Option<TravelState>);
+
+    // 键是「这一段叫什么 + 各自的账号副本」：闭包按值拿键（不借用），
+    // 标签只为出错时说得清是哪一段
+    type Job = crate::common::ParallelJob<(&'static str, Account), SummaryParts>;
+    let jobs: Vec<((&'static str, Account), Job)> = vec![
+        (
+            ("成长能量", account.clone()),
+            Box::new(move |(_label, account): (&'static str, Account)| -> Result<SummaryParts, String> {
+                let value = chat_get(&account, ENERGY_PATH)
+                    .map(|value| int_at(data(&value), "balance"))
+                    .map_err(|_| "查询成长能量失败".to_string())?;
+                Ok((Some(value), None, None, None))
+            }),
+        ),
+        (
+            ("连续打卡", account.clone()),
+            Box::new(move |(_label, account): (&'static str, Account)| -> Result<SummaryParts, String> {
+                let value = chat_get(&account, STREAK_PATH)
+                    .map_err(|_| "查询连续打卡失败".to_string())?;
+                let data = data(&value);
+                let streak = data.get("streak").unwrap_or(&Value::Null);
+                Ok((
+                    None,
+                    Some((
+                        int_at(streak, "days"),
+                        int_at(streak, "next_tier_remaining"),
+                        int_at(data.get("makeup_cards").unwrap_or(&Value::Null), "balance"),
+                    )),
+                    None,
+                    None,
+                ))
+            }),
+        ),
+        (
+            ("抽奖次数", account.clone()),
+            Box::new(move |(_label, account): (&'static str, Account)| -> Result<SummaryParts, String> {
+                let value = chat_get(&account, LOTTERY_CHANCES_PATH)
+                    .map(|value| int_at(data(&value), "balance"))
+                    .map_err(|_| "查询抽奖次数失败".to_string())?;
+                Ok((None, None, Some(value), None))
+            }),
+        ),
+        (
+            ("猫猫旅行", account.clone()),
+            Box::new(move |(_label, account): (&'static str, Account)| -> Result<SummaryParts, String> {
+                let value = chat_get(&account, TRAVEL_STATUS_PATH)
+                    .map(|value| travel_from(&value))
+                    .map_err(|_| "查询猫猫旅行状态失败".to_string())?;
+                Ok((None, None, None, Some(value)))
+            }),
+        ),
+    ];
+
     let mut summary = GrowthSummary {
         travel: TravelState {
             state: "unknown".to_string(),
@@ -547,32 +608,26 @@ pub fn fetch_growth_summary(account: &Account) -> GrowthSummary {
         ..GrowthSummary::default()
     };
 
-    if let Ok(value) = chat_get(account, ENERGY_PATH) {
-        summary.energy = int_at(data(&value), "balance");
-    } else {
-        eprintln!("[workbench] 查询成长能量失败");
-    }
-
-    if let Ok(value) = chat_get(account, STREAK_PATH) {
-        let data = data(&value);
-        let streak = data.get("streak").unwrap_or(&Value::Null);
-        summary.streak_days = int_at(streak, "days");
-        summary.next_tier_remaining = int_at(streak, "next_tier_remaining");
-        summary.makeup_cards = int_at(data.get("makeup_cards").unwrap_or(&Value::Null), "balance");
-    } else {
-        eprintln!("[workbench] 查询连续打卡失败");
-    }
-
-    if let Ok(value) = chat_get(account, LOTTERY_CHANCES_PATH) {
-        summary.lottery_chances = int_at(data(&value), "balance");
-    } else {
-        eprintln!("[workbench] 查询抽奖次数失败");
-    }
-
-    if let Ok(value) = chat_get(account, TRAVEL_STATUS_PATH) {
-        summary.travel = travel_from(&value);
-    } else {
-        eprintln!("[workbench] 查询猫猫旅行状态失败");
+    for ((label, _), outcome) in crate::common::run_parallel(jobs) {
+        match outcome {
+            Ok((energy, streak, lottery, travel)) => {
+                if let Some(value) = energy {
+                    summary.energy = value;
+                }
+                if let Some((days, remaining, cards)) = streak {
+                    summary.streak_days = days;
+                    summary.next_tier_remaining = remaining;
+                    summary.makeup_cards = cards;
+                }
+                if let Some(value) = lottery {
+                    summary.lottery_chances = value;
+                }
+                if let Some(value) = travel {
+                    summary.travel = value;
+                }
+            }
+            Err(message) => eprintln!("[workbench] {message}（{label}）"),
+        }
     }
     summary
 }

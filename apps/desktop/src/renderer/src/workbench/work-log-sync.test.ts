@@ -1,4 +1,4 @@
-import type { WorkLogEntry, WorkLogFile, WorkLogShard, WorkLogTombstone } from '@workbench/work-log'
+import type { GitWorkLogDraft, WorkLogEntry, WorkLogFile, WorkLogShard, WorkLogTombstone } from '@workbench/work-log'
 import { beforeAll, describe, expect, it, vi } from 'vitest'
 
 // 每条用例都要 resetModules 重新导入适配层（与 activity.test.ts 同一套桩）：
@@ -174,5 +174,57 @@ describe('工作日志的多机同步', () => {
       projectName: '项目甲',
       by: 'dev-local',
     })
+  })
+})
+
+/** 一条「从提交生成」的草稿：commit 哈希要合法，否则适配层会把它跳过 */
+function draft(overrides: Partial<GitWorkLogDraft> = {}): GitWorkLogDraft {
+  return {
+    projectId: 'p1',
+    projectName: '项目甲',
+    date: '2026-10-30',
+    content: '- 一笔提交',
+    commits: ['aaa1111'],
+    ...overrides,
+  }
+}
+
+describe('从提交生成的设备归属', () => {
+  it('不传设备时新建的条目落本机', async () => {
+    await boot(file())
+    const workLog = await import('./work-log')
+
+    const result = await workLog.importGitDrafts([draft()])
+    expect(result.ok).toBe(true)
+    expect(result.data?.[0]).toMatchObject({ by: 'dev-local', source: { kind: 'git', commits: ['aaa1111'] } })
+  })
+
+  it('传了设备就写进那台设备（弹窗里选的机器）', async () => {
+    await boot(file())
+    const workLog = await import('./work-log')
+
+    const result = await workLog.importGitDrafts([draft()], 'dev-remote')
+    expect(result.ok).toBe(true)
+    expect(result.data?.[0].by).toBe('dev-remote')
+    expect(saved).toHaveLength(1)
+    expect(saved[0].entries[0].by).toBe('dev-remote')
+  })
+
+  it('追加到已有记录时不改它的 by', async () => {
+    const existing = entry('a', 100, 'dev-other', {
+      projectId: 'p1',
+      source: { kind: 'git', commits: ['bbb2222'] },
+    })
+    await boot(file([existing]))
+    const workLog = await import('./work-log')
+
+    const result = await workLog.importGitDrafts([draft({ appendTo: 'a' })], 'dev-remote')
+    expect(result.ok).toBe(true)
+    expect(result.data?.[0]).toMatchObject({
+      id: 'a',
+      by: 'dev-other',
+      source: { kind: 'git', commits: ['bbb2222', 'aaa1111'] },
+    })
+    expect(result.data?.[0].content).toContain('- 一笔提交')
   })
 })

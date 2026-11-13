@@ -166,6 +166,55 @@ pub fn clamp_poll_minutes(raw: u32, min: u32, max: u32) -> u32 {
     raw.clamp(min, max)
 }
 
+/// 一件要并行做的事：拿自己的键去干，干完给一个结果（失败是给一句话）。
+pub type ParallelJob<T, R> = Box<dyn FnOnce(T) -> Result<R, String> + Send>;
+
+/// 一批键各做一件事，**并行**做，结果按输入顺序收回。
+///
+/// 键按值交给闭包（闭包独占自己的键，不用借用）；主线程另留一份用于 panic 兜底 ——
+/// 某个线程 panic 了也认得出是哪一个键，那一项单独标成失败，
+/// 其余照常给结果，不让一项把整批带走。
+///
+/// 闭包类型擦成 `Box<dyn FnOnce…>`：一批里各项要干的事不一样（返回类型也不同），
+/// 擦掉之后才能放进同一个 `Vec`。
+///
+/// 为什么要它：网关里「一个号一次上游往返」的地方有好几处（查余额之外的积分流水、
+/// 福利汇总…）。上游一发的接收超时是 15 秒，几个号排着来就够等上一分钟；
+/// 并行之后等的是最慢的那一发。
+pub fn run_parallel<T, R>(items: Vec<(T, ParallelJob<T, R>)>) -> Vec<(T, Result<R, String>)>
+where
+    T: Clone + Send + 'static,
+    R: Send + 'static,
+{
+    // 主线程留一份键：线程 panic 时键已经跟着进了线程，只能按索引找回
+    let fallback_keys: Vec<T> = items.iter().map(|(key, _)| key.clone()).collect();
+    let handles: Vec<_> = items
+        .into_iter()
+        .map(|(key, work)| {
+            std::thread::spawn(move || {
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| work(key)))
+            })
+        })
+        .collect();
+
+    handles
+        .into_iter()
+        .enumerate()
+        .map(|(index, handle)| {
+            let key = fallback_keys[index].clone();
+            match handle.join() {
+                // join 成功 → catch_unwind 的结果：闭包自己的 Ok / Err
+                Ok(Ok(Ok(value))) => (key, Ok(value)),
+                Ok(Ok(Err(message))) => (key, Err(message)),
+                // 闭包 panic 了
+                Ok(Err(_)) => (key, Err("这一项没能完成".to_string())),
+                // 线程本身 panic 了
+                Err(_) => (key, Err("这一项没能完成".to_string())),
+            }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -227,5 +276,67 @@ mod tests {
         assert_eq!(clamp_poll_minutes(3, 5, 60), 5);
         assert_eq!(clamp_poll_minutes(30, 5, 60), 30);
         assert_eq!(clamp_poll_minutes(90, 5, 60), 60);
+    }
+
+    #[test]
+    fn 并行按输入顺序收回结果() {
+        let jobs: Vec<(String, ParallelJob<String, i64>)> = vec![
+            (
+                "a".into(),
+                Box::new(|key: String| Ok(key.len() as i64)),
+            ),
+            (
+                "bb".into(),
+                Box::new(|key: String| Ok(key.len() as i64)),
+            ),
+            (
+                "ccc".into(),
+                Box::new(|key: String| Ok(key.len() as i64)),
+            ),
+        ];
+        let results = run_parallel(jobs);
+        let keys: Vec<&str> = results.iter().map(|(key, _)| key.as_str()).collect();
+        assert_eq!(keys, vec!["a", "bb", "ccc"]);
+        let values: Vec<i64> = results
+            .iter()
+            .map(|(_, outcome)| outcome.as_ref().ok().copied().unwrap_or(-1))
+            .collect();
+        assert_eq!(values, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn 并行里一项失败只影响它自己() {
+        let jobs: Vec<(&str, ParallelJob<&str, i64>)> = vec![
+            ("ok", Box::new(|_key: &str| Ok(7))),
+            ("bad", Box::new(|_key: &str| Err("读不到".to_string()))),
+        ];
+        let results = run_parallel(jobs);
+        assert_eq!(results[0].1.as_ref().ok().copied(), Some(7));
+        assert_eq!(results[1].1.as_ref().ok().copied(), None);
+        assert_eq!(results[1].1.as_ref().err().map(String::as_str), Some("读不到"));
+    }
+
+    #[test]
+    fn 并行里一项炸了不带走其余() {
+        let jobs: Vec<(&str, ParallelJob<&str, i64>)> = vec![
+            ("before", Box::new(|_key: &str| Ok(1))),
+            (
+                "boom",
+                Box::new(|_key: &str| -> Result<i64, String> { panic!("炸了") }),
+            ),
+            ("after", Box::new(|_key: &str| Ok(3))),
+        ];
+        let results = run_parallel(jobs);
+        assert_eq!(results.len(), 3);
+        assert_eq!(results[0].1.as_ref().ok().copied(), Some(1));
+        assert_eq!(results[1].1.as_ref().ok().copied(), None);
+        assert!(results[1].1.as_ref().is_err());
+        assert_eq!(results[2].1.as_ref().ok().copied(), Some(3));
+    }
+
+    #[test]
+    fn 并行空输入不报错() {
+        let jobs: Vec<(u8, ParallelJob<u8, u8>)> = Vec::new();
+        assert!(run_parallel(jobs).is_empty());
     }
 }

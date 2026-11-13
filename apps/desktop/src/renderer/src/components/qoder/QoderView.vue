@@ -909,10 +909,12 @@ onBeforeUnmount(() => {
           v-model="modelKeyword"
           placeholder="搜索模型"
           clearable
+          size="small"
           :prefix-icon="Search"
           class="qd__search"
         />
-        <el-button :loading="modelsBusy" @click="refreshModels">
+        <!-- 按钮跟着搜索框一起 small：同一行两件控件，不是一个 24px 一个 32px -->
+        <el-button size="small" :loading="modelsBusy" @click="refreshModels">
           <el-icon><Refresh /></el-icon>
           重新获取
         </el-button>

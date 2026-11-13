@@ -97,6 +97,7 @@ function summary(result: GatewayAccountImport | QoderAccountImport): string {
         v-model="payload"
         type="textarea"
         :rows="12"
+        size="small"
         resize="none"
         spellcheck="false"
         :readonly="mode === 'export'"

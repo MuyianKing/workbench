@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import type { ProjectColor } from '@workbench/core'
-import type { WorkLogDevice, WorkLogDeviceRef, WorkLogEntry, WorkLogStatus, WorkRange, WorkRangeBounds, WorkSort } from '@workbench/work-log'
+import type { WorkLogDeviceRef, WorkLogEntry, WorkLogStatus, WorkRange, WorkRangeBounds, WorkSort } from '@workbench/work-log'
 import { ArrowDown, Download, Memo, Plus, Warning } from '@element-plus/icons-vue'
 import { addDays, dayKey, markdownToPlainText, projectColorVar, sanitizeProjectColor } from '@workbench/core'
-import { dayMeta, defaultWorkRangeBounds, DELETED_PROJECT_ID, entriesOfDevice, groupByProject, isWorkSort, paginate, sanitizeWorkRange, sanitizeWorkRangeBounds, sanitizeWorkSort, timelineOf, toggleWorkLogStatus, WORK_PAGE_DAYS, WORK_RANGE_LABELS, WORK_RANGES, WORK_SORT_LABELS, WORK_SORTS, WORK_STATUS_DEFAULT, workLogDevices } from '@workbench/work-log'
+import { dayMeta, defaultWorkRangeBounds, DELETED_PROJECT_ID, entriesOfDevice, groupByProject, isWorkSort, paginate, sanitizeWorkRange, sanitizeWorkRangeBounds, sanitizeWorkSort, timelineOf, toggleWorkLogStatus, WORK_PAGE_DAYS, WORK_RANGE_LABELS, WORK_RANGES, WORK_SORT_LABELS, WORK_SORTS, WORK_STATUS_DEFAULT, workLogDeviceLabel, workLogDevices } from '@workbench/work-log'
 import { ElMessage } from 'element-plus'
 /**
  * 工作页：按天分组的工作日志时间轴。
@@ -254,27 +254,15 @@ const viewingOtherDevice = computed(
   () => !!activeDeviceId.value && activeDeviceId.value !== localDevice.value.id,
 )
 
-/** 设备在按钮 / 菜单里的名字：本机带上「（本机）」，本机名字还没取到时就是「本机」 */
-function deviceLabelOf(item: WorkLogDevice): string {
-  if (!item.self)
-    return item.name
-  return item.name ? `${item.name}（本机）` : '本机'
-}
-
-/** 当前设备在按钮上显示的名字 */
+/** 当前设备在按钮上显示的名字（与「从提交生成」弹窗同一个口径） */
 const activeDeviceLabel = computed(() => {
   const current = deviceOptions.value.find(item => item.id === activeDeviceId.value)
-  return current ? deviceLabelOf(current) : ''
+  return current ? workLogDeviceLabel(current) : ''
 })
 
 /** 这一页真正展示的条目：只留当前设备（本机标识拿不到时 entriesOfDevice 不筛） */
 const visibleEntries = computed(() =>
   entriesOfDevice(entries.value, activeDeviceId.value, localDevice.value.id),
-)
-
-/** 本机条目：「从提交生成」的追加目标只该是本机的记录 */
-const localEntries = computed(() =>
-  entriesOfDevice(entries.value, localDevice.value.id, localDevice.value.id),
 )
 
 function pickDevice(id: string): void {
@@ -509,17 +497,17 @@ function onSaved(entry: WorkLogEntry): void {
   void syncNow()
 }
 
-/** 从提交生成之后同样并进内存列表：这次可能是新建，也可能是追加到已有记录（都写在本机这份里） */
-function onGitImported(changed: WorkLogEntry[]): void {
+/** 从提交生成之后同样并进内存列表：这次可能是新建，也可能是追加到已有记录 */
+function onGitImported(changed: WorkLogEntry[], importedDeviceId: string): void {
   for (const entry of changed) {
     const index = entries.value.findIndex(item => item.id === entry.id)
     if (index === -1)
       entries.value.push(entry)
     else entries.value.splice(index, 1, entry)
   }
-  // 导入的条目属于本机：正在看别的设备时切回来，不然刚生成的东西看不见
-  if (viewingOtherDevice.value)
-    pickedDeviceId.value = ''
+  // 写到别的设备时把选择切过去，不然刚生成的记录看不见
+  if (importedDeviceId && importedDeviceId !== localDevice.value.id)
+    pickedDeviceId.value = importedDeviceId
   now.value = Date.now()
   void syncNow()
 }
@@ -625,7 +613,7 @@ async function remove(entry: WorkLogEntry): Promise<void> {
                 :command="item.id"
                 :class="{ 'is-current': item.id === activeDeviceId }"
               >
-                {{ deviceLabelOf(item) }}
+                {{ workLogDeviceLabel(item) }}
               </el-dropdown-item>
             </el-dropdown-menu>
           </template>
@@ -745,12 +733,15 @@ async function remove(entry: WorkLogEntry): Promise<void> {
       @saved="onSaved"
     />
 
-    <!-- 提交生成：项目与日志都从这一页取，读写各归适配层；日期与项目在弹窗里选。
-         去重与「追加到哪条」只认本机条目 —— 别把提交接进别的设备的记录里 -->
+    <!-- 提交生成：项目与整份日志都从这一页取，读写各归适配层；日期、项目与设备在弹窗里选。
+         默认写进当前正在看的那台设备，弹窗内部按选中的设备筛去重与追加的依据 -->
     <WorkLogGitDialog
       v-model="gitVisible"
       :projects="store.projects"
-      :entries="localEntries"
+      :entries="entries"
+      :devices="deviceOptions"
+      :local-device-id="localDevice.id"
+      :default-device-id="activeDeviceId"
       :now="now"
       @imported="onGitImported"
     />

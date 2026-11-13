@@ -25,6 +25,17 @@ export interface WorkLogDeviceRef {
   name: string
 }
 
+/**
+ * 切换器 / 下拉里一项的显示名：本机带「（本机）」，名字还没取到时就是「本机」。
+ *
+ * 工作页工具带与「从提交生成」弹窗用同一套叫法，免得两台设备对不上号。
+ */
+export function workLogDeviceLabel(item: WorkLogDevice): string {
+  if (!item.self)
+    return item.name
+  return item.name ? `${item.name}（本机）` : '本机'
+}
+
 /** 条目属于哪台设备：没有 by 的老数据算本机 */
 export function deviceOfEntry(entry: WorkLogEntry, localDeviceId: string): string {
   return entry.by || localDeviceId

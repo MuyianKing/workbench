@@ -474,7 +474,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="gw">
+  <section class="gw" :class="{ 'is-models': tab === 'models' }">
     <!-- 页首：左页签、右全局状态。启停不跟着「账号」页签走 —— 在哪一栏都能看到网关开没开 -->
     <div class="gw__head">
       <GatewayTabs v-model="tab" :items="TABS" />
@@ -775,6 +775,15 @@ onBeforeUnmount(() => {
   min-height: 0;
   overflow: auto;
   padding: var(--sp-3);
+}
+
+/**
+ * 模型栏整页不滚：页签（.gw__head）与模型栏自己的搜索 / 排序工具条钉在原地，
+ * 只有卡片网格在 ModelsPane 的 .models__body 里滚。其余栏照旧整页滚 —— 它们内容不满一屏时
+ * 不该被塞进一个多余的滚动容器。
+ */
+.gw.is-models {
+  overflow: hidden;
 }
 
 /**

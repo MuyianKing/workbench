@@ -56,8 +56,10 @@ const domainsApi = {
     workLog.updateWorkLog(id, patch),
   removeWorkLog: (id: string) => workLog.removeWorkLog(id),
   projectGitLog: (dir: string, since?: number, until?: number) => workLog.projectGitLog(dir, since, until),
-  importGitDrafts: (drafts: Parameters<WorkbenchApi['importGitDrafts']>[0]) =>
-    workLog.importGitDrafts(drafts),
+  importGitDrafts: (
+    drafts: Parameters<WorkbenchApi['importGitDrafts']>[0],
+    deviceId?: string,
+  ) => workLog.importGitDrafts(drafts, deviceId),
 
   // ---------- Git 页（只读、本地；实现见 workbench/git.ts） ----------
   openGitRepo: (path: string) => git.openRepo(path),
