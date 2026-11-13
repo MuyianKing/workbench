@@ -26,6 +26,22 @@ pub const QUEUE_MAX_ROUNDS: u8 = 3;
 pub const QUEUE_WAIT_MAX_SECS: i64 = 180;
 pub const QUEUE_WAIT_BUDGET_SECS: i64 = 600;
 
+/// 排队等待的随机抖动：0..=2 秒。多个客户端同时被排队时别在同一毫秒齐刷刷重试。
+pub fn queue_jitter_secs() -> u64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|elapsed| u64::from(elapsed.subsec_nanos() % 3))
+        .unwrap_or(0)
+}
+
+/// 排队超出网关等待预算时给客户端的话（回 503 + `Retry-After`，不是 403）。
+pub fn queued_message(waited: i64, retry_after: i64) -> String {
+    format!(
+        "上游模型排队中（10605 / RESOURCE_LIMIT）：已等待 {waited} 秒仍在队列，上游建议 {retry_after} 秒后再试。这不是密钥或账号问题，稍后重试或换一个模型。"
+    )
+}
+
 /// 同账号瞬时故障的重试次数（1s / 2s 退避）。
 pub const TRANSIENT_MAX_RETRIES: u8 = 2;
 

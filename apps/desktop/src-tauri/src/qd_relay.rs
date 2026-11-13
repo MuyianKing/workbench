@@ -172,6 +172,8 @@ pub fn chat(
         let mut queue_rounds = 0u8;
         let queue_start = Instant::now();
         loop {
+            // 从发起上游调用算起（prelude 会先吃掉第一帧，不能到了流式闭包里才开始计时）
+            let started = Instant::now();
             let mut handle = qd_api_chat::spawn(ChatCall {
                 account: account.clone(),
                 model_key: prepared.model_key.clone(),
@@ -192,27 +194,47 @@ pub fn chat(
                 }
             };
 
-            if status == 200 {
-                return if wants_stream {
-                    stream_response(handle, meta, schemas.clone())
-                } else {
-                    aggregate_response(handle, meta, schemas.clone())
-                };
-            }
-
-            let text = qd_api_chat::drain_text(&mut handle);
+            // 上游把错误（排队 / 额度 / 会话失效）藏在 **HTTP 200 + 信封
+            // statusCodeValue** 里，只有读到第一帧才知道是不是真的开始出正文。
+            // 先把这一帧判掉，错误按与 HTTP 状态码同一套口径分类。
+            let (status, text) = if status == 200 {
+                match prelude(&mut handle) {
+                    Prelude::Ready { events, decoder } => {
+                        return if wants_stream {
+                            stream_response(handle, events, decoder, started, meta, schemas.clone())
+                        } else {
+                            aggregate_response(handle, events, decoder, started, meta, schemas.clone())
+                        };
+                    }
+                    Prelude::Failed(status, detail) => (status, detail),
+                }
+            } else {
+                (status, qd_api_chat::drain_text(&mut handle))
+            };
 
             // 排队：等，不冷却账号
             let wait = qd_quota::queue_wait(&text);
-            if wait > 0
-                && queue_rounds < qd_quota::QUEUE_MAX_ROUNDS
-                && wait <= qd_quota::QUEUE_WAIT_MAX_SECS
-                && queue_start.elapsed().as_secs() as i64 + wait
-                    <= qd_quota::QUEUE_WAIT_BUDGET_SECS
-            {
-                queue_rounds += 1;
-                std::thread::sleep(std::time::Duration::from_secs(wait as u64 + 1));
-                continue;
+            if wait > 0 {
+                if queue_rounds < qd_quota::QUEUE_MAX_ROUNDS
+                    && wait <= qd_quota::QUEUE_WAIT_MAX_SECS
+                    && queue_start.elapsed().as_secs() as i64 + wait
+                        <= qd_quota::QUEUE_WAIT_BUDGET_SECS
+                {
+                    queue_rounds += 1;
+                    std::thread::sleep(std::time::Duration::from_secs(
+                        wait as u64 + 1 + qd_quota::queue_jitter_secs(),
+                    ));
+                    continue;
+                }
+                // 预算用完：排队是**模型级**的（同一模型的所有账号排同一个池），
+                // 换号不会变快，所以直接回客户端，不再往下试别的号。
+                // 回 503 而不是 403：403 会被客户端当成「请求被拒」直接结束本轮，
+                // 503 + Retry-After 才会让它按上游建议的间隔重试。
+                let waited = queue_start.elapsed().as_secs() as i64;
+                record_failure(&meta, "上游排队未放行", status);
+                let message = qd_quota::queued_message(waited, wait);
+                return Response::error(503, "upstream_queued", &message)
+                    .with_header("Retry-After", &wait.to_string());
             }
 
             if qd_quota::session_dead(&text) {
@@ -313,19 +335,24 @@ pub fn chat(
                 stream: wants_stream,
                 api_key_tail: api_key_tail.clone(),
             };
+            let started = Instant::now();
             let mut handle = qd_api_chat::spawn(ChatCall {
                 account: account.clone(),
                 model_key: prepared.model_key.clone(),
                 body: encoded,
             });
             match handle.head() {
-                Ok(200) => {
-                    return if wants_stream {
-                        stream_response(handle, meta, qd_body::tool_schemas(&value))
-                    } else {
-                        aggregate_response(handle, meta, qd_body::tool_schemas(&value))
-                    };
-                }
+                Ok(200) => match prelude(&mut handle) {
+                    Prelude::Ready { events, decoder } => {
+                        let schemas = qd_body::tool_schemas(&value);
+                        return if wants_stream {
+                            stream_response(handle, events, decoder, started, meta, schemas)
+                        } else {
+                            aggregate_response(handle, events, decoder, started, meta, schemas)
+                        };
+                    }
+                    Prelude::Failed(status, detail) => record_failure(&meta, &detail, status),
+                },
                 Ok(status) => {
                     let text = qd_api_chat::drain_text(&mut handle);
                     record_failure(&meta, &text, status);
@@ -412,17 +439,66 @@ fn unavailable(accounts: &[Account], model: &str, now: i64) -> Response {
     )
 }
 
+/// 交出句柄之前先判一帧的结果。
+enum Prelude {
+    /// 上游已经开始吐正文：把首批帧与解码器一起交回去，一帧都不丢。
+    Ready {
+        events: Vec<Envelope>,
+        decoder: Decoder,
+    },
+    /// 首帧就是错误：`status` / `detail` 与 HTTP 状态码那条路同一套分类。
+    Failed(u16, String),
+}
+
+/// 读到第一帧正文之前的那一帧判定。
+///
+/// 上游常把错误塞在 **HTTP 200 + 信封 `statusCodeValue`** 里（排队 10605、
+/// 额度 112 / 110、会话失效都在这一档），只有读到第一帧才知道是不是真的开始
+/// 出正文。不先判掉的话，这些错误会直接从流式 / 非流式两条出口漏给客户端，
+/// 排队等待、额度打标、换号全都不会生效。
+fn prelude(handle: &mut StreamHandle) -> Prelude {
+    let mut decoder = Decoder::default();
+    loop {
+        let Some(event) = handle.next() else {
+            return Prelude::Failed(502, "上游连接提前断开".into());
+        };
+        let events = match event {
+            UpstreamEvent::Chunk(bytes) => decoder.push(&bytes),
+            UpstreamEvent::End => return Prelude::Failed(502, "上游没有返回任何内容".into()),
+            UpstreamEvent::Failed(message) => return Prelude::Failed(502, message),
+            UpstreamEvent::Head(_) => continue,
+        };
+        if events.is_empty() {
+            continue;
+        }
+        // 同一批里既有正文又有错误时以错误为准
+        if let Some((status, detail)) = events.iter().find_map(|envelope| match envelope {
+            Envelope::Failed(status, detail) => Some((*status, detail.clone())),
+            _ => None,
+        }) {
+            return Prelude::Failed(status, detail);
+        }
+        return Prelude::Ready { events, decoder };
+    }
+}
+
 /// 流式返回。
-fn stream_response(mut handle: StreamHandle, meta: Meta, schemas: Vec<crate::qd_tools::ToolSchema>) -> Response {
+fn stream_response(
+    mut handle: StreamHandle,
+    initial: Vec<Envelope>,
+    mut decoder: Decoder,
+    started: Instant,
+    meta: Meta,
+    schemas: Vec<crate::qd_tools::ToolSchema>,
+) -> Response {
     Response::sse(move |writer| {
-        let started = Instant::now();
-        let mut decoder = Decoder::default();
         let mut aggregator = Aggregator::default();
         let mut guard = LeakGuard::default();
         let mut ids: HashMap<i64, String> = HashMap::new();
         let mut first_at: Option<Instant> = None;
         let mut error: Option<String> = None;
         let mut done = false;
+        let mut pending = initial;
 
         let write_chunk = |writer: &mut crate::wb_server::ChunkedWriter<'_>, value: &Value| {
             let text = format!("data: {}\n\n", value);
@@ -430,21 +506,25 @@ fn stream_response(mut handle: StreamHandle, meta: Meta, schemas: Vec<crate::qd_
         };
 
         while !done {
-            let Some(event) = handle.next() else {
-                break;
-            };
-            let events = match event {
-                UpstreamEvent::Chunk(bytes) => decoder.push(&bytes),
-                UpstreamEvent::End => {
-                    done = true;
-                    decoder.finish()
+            let events = if pending.is_empty() {
+                let Some(event) = handle.next() else {
+                    break;
+                };
+                match event {
+                    UpstreamEvent::Chunk(bytes) => decoder.push(&bytes),
+                    UpstreamEvent::End => {
+                        done = true;
+                        decoder.finish()
+                    }
+                    UpstreamEvent::Failed(message) => {
+                        error = Some(message);
+                        done = true;
+                        Vec::new()
+                    }
+                    UpstreamEvent::Head(_) => Vec::new(),
                 }
-                UpstreamEvent::Failed(message) => {
-                    error = Some(message);
-                    done = true;
-                    Vec::new()
-                }
-                UpstreamEvent::Head(_) => Vec::new(),
+            } else {
+                std::mem::take(&mut pending)
             };
             for envelope in events {
                 match envelope {
@@ -522,30 +602,40 @@ fn stream_response(mut handle: StreamHandle, meta: Meta, schemas: Vec<crate::qd_
 }
 
 /// 非流式：把流折成一个完整响应。
-fn aggregate_response(mut handle: StreamHandle, meta: Meta, schemas: Vec<crate::qd_tools::ToolSchema>) -> Response {
-    let started = Instant::now();
-    let mut decoder = Decoder::default();
+fn aggregate_response(
+    mut handle: StreamHandle,
+    initial: Vec<Envelope>,
+    mut decoder: Decoder,
+    started: Instant,
+    meta: Meta,
+    schemas: Vec<crate::qd_tools::ToolSchema>,
+) -> Response {
     let mut aggregator = Aggregator::default();
     let mut ids: HashMap<i64, String> = HashMap::new();
     let mut first_at: Option<Instant> = None;
     let mut error: Option<(u16, String)> = None;
     let mut done = false;
+    let mut pending = initial;
     while !done {
-        let Some(event) = handle.next() else {
-            break;
-        };
-        let events = match event {
-            UpstreamEvent::Chunk(bytes) => decoder.push(&bytes),
-            UpstreamEvent::End => {
-                done = true;
-                decoder.finish()
+        let events = if pending.is_empty() {
+            let Some(event) = handle.next() else {
+                break;
+            };
+            match event {
+                UpstreamEvent::Chunk(bytes) => decoder.push(&bytes),
+                UpstreamEvent::End => {
+                    done = true;
+                    decoder.finish()
+                }
+                UpstreamEvent::Failed(message) => {
+                    error = Some((502, message));
+                    done = true;
+                    Vec::new()
+                }
+                UpstreamEvent::Head(_) => Vec::new(),
             }
-            UpstreamEvent::Failed(message) => {
-                error = Some((502, message));
-                done = true;
-                Vec::new()
-            }
-            UpstreamEvent::Head(_) => Vec::new(),
+        } else {
+            std::mem::take(&mut pending)
         };
         for envelope in events {
             match envelope {
@@ -635,4 +725,91 @@ fn record_failure(meta: &Meta, error: &str, _status: u16) {
 #[allow(dead_code)]
 fn trace(message: &str) {
     let _ = writeln!(std::io::stderr(), "[qoder] {message}");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 一帧正常信封（内层是 OpenAI chunk 字符串）。
+    fn chunk_line(body: &str) -> Vec<u8> {
+        format!(
+            "data: {}\n\n",
+            json!({ "headers": {}, "body": body, "statusCodeValue": 200 })
+        )
+        .into_bytes()
+    }
+
+    /// 一帧错误信封（HTTP 200 里带 statusCodeValue != 200）。
+    fn error_line(status: u16, body: &str) -> Vec<u8> {
+        format!(
+            "data: {}\n\n",
+            json!({ "body": body, "statusCodeValue": status })
+        )
+        .into_bytes()
+    }
+
+    #[test]
+    fn 信封里的排队错误在交出句柄前被判掉() {
+        let queue = r#"{"code":"10605","isQueued":true,"retryAfterSeconds":60}"#;
+        let mut handle = StreamHandle::from_events(vec![
+            UpstreamEvent::Head(200),
+            UpstreamEvent::Chunk(error_line(403, queue)),
+            UpstreamEvent::End,
+        ]);
+        match prelude(&mut handle) {
+            Prelude::Failed(status, detail) => {
+                assert_eq!(status, 403);
+                assert!(detail.contains("10605"), "{detail}");
+                assert_eq!(qd_quota::queue_wait(&detail), 60);
+            }
+            Prelude::Ready { .. } => panic!("排队错误不该被当成正文"),
+        }
+    }
+
+    #[test]
+    fn 首帧是正文时原样交回() {
+        let body = r#"{"id":"c","choices":[{"index":0,"delta":{"content":"hi"}}]}"#;
+        let mut handle = StreamHandle::from_events(vec![
+            UpstreamEvent::Head(200),
+            UpstreamEvent::Chunk(chunk_line(body)),
+            UpstreamEvent::End,
+        ]);
+        match prelude(&mut handle) {
+            Prelude::Ready { events, .. } => {
+                assert_eq!(events.len(), 1);
+                match &events[0] {
+                    Envelope::Chunk(chunk) => assert_eq!(
+                        chunk
+                            .pointer("/choices/0/delta/content")
+                            .and_then(Value::as_str),
+                        Some("hi")
+                    ),
+                    _ => panic!("首帧应是正文"),
+                }
+            }
+            Prelude::Failed(status, detail) => panic!("不该判成错误：{status} {detail}"),
+        }
+    }
+
+    #[test]
+    fn 空流与断线都按瞬时故障处置() {
+        let mut empty = StreamHandle::from_events(vec![UpstreamEvent::Head(200), UpstreamEvent::End]);
+        match prelude(&mut empty) {
+            Prelude::Failed(status, _) => assert_eq!(status, 502),
+            Prelude::Ready { .. } => panic!("空流不该当成正文"),
+        }
+
+        let mut broken = StreamHandle::from_events(vec![
+            UpstreamEvent::Head(200),
+            UpstreamEvent::Failed("connection reset".into()),
+        ]);
+        match prelude(&mut broken) {
+            Prelude::Failed(status, detail) => {
+                assert_eq!(status, 502);
+                assert!(detail.contains("connection reset"), "{detail}");
+            }
+            Prelude::Ready { .. } => panic!("断线不该当成正文"),
+        }
+    }
 }

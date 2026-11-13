@@ -134,3 +134,15 @@ pub fn drain_text(handle: &mut StreamHandle) -> String {
     }
     String::from_utf8_lossy(&buffer).to_string()
 }
+
+#[cfg(test)]
+impl StreamHandle {
+    /// 测试用：把一串事件装进通道，模拟上游读句柄。
+    pub fn from_events(events: Vec<UpstreamEvent>) -> Self {
+        let (sender, receiver) = channel();
+        for event in events {
+            let _ = sender.send(event);
+        }
+        Self { receiver }
+    }
+}

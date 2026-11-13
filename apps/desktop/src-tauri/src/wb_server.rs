@@ -164,6 +164,8 @@ pub struct Response {
     pub status: u16,
     pub content_type: String,
     pub body: Body,
+    /// 额外响应头。目前只有排队时的 `Retry-After` 用。
+    pub extra_headers: Vec<(String, String)>,
 }
 
 impl Response {
@@ -172,6 +174,7 @@ impl Response {
             status: 200,
             content_type: "application/json; charset=utf-8".to_string(),
             body: Body::Bytes(value.to_string().into_bytes()),
+            extra_headers: Vec::new(),
         }
     }
 
@@ -180,6 +183,7 @@ impl Response {
             status,
             content_type: "text/plain; charset=utf-8".to_string(),
             body: Body::Bytes(message.as_bytes().to_vec()),
+            extra_headers: Vec::new(),
         }
     }
 
@@ -196,6 +200,12 @@ impl Response {
         self
     }
 
+    /// 追加一个响应头（目前只有排队时的 `Retry-After` 用）。
+    pub fn with_header(mut self, name: &str, value: &str) -> Self {
+        self.extra_headers.push((name.to_string(), value.to_string()));
+        self
+    }
+
     /// 服务端事件流。
     pub fn sse<F>(emit: F) -> Self
     where
@@ -205,6 +215,7 @@ impl Response {
             status: 200,
             content_type: "text/event-stream; charset=utf-8".to_string(),
             body: Body::Stream(Box::new(emit)),
+            extra_headers: Vec::new(),
         }
     }
 }
@@ -243,7 +254,13 @@ impl ChunkedWriter<'_> {
 }
 
 /// 拼响应头。抽成纯函数是为了能直接断言（`\r\n` 与大小写这类事只能靠字符串验）。
-pub fn response_head(status: u16, content_type: &str, length: Option<usize>, keep_alive: bool) -> String {
+pub fn response_head(
+    status: u16,
+    content_type: &str,
+    length: Option<usize>,
+    keep_alive: bool,
+    extra: &[(String, String)],
+) -> String {
     let mut head = String::with_capacity(160);
     head.push_str(&format!("HTTP/1.1 {status} {}\r\n", reason(status)));
     head.push_str(&format!("Content-Type: {content_type}\r\n"));
@@ -252,6 +269,9 @@ pub fn response_head(status: u16, content_type: &str, length: Option<usize>, kee
         None => head.push_str("Transfer-Encoding: chunked\r\n"),
     }
     head.push_str("Cache-Control: no-store\r\n");
+    for (name, value) in extra {
+        head.push_str(&format!("{name}: {value}\r\n"));
+    }
     if keep_alive {
         head.push_str("Connection: keep-alive\r\n");
     } else {
@@ -285,14 +305,26 @@ pub fn write_response<W: Write>(
 ) -> Result<(), String> {
     match response.body {
         Body::Bytes(bytes) => {
-            let head = response_head(response.status, &response.content_type, Some(bytes.len()), keep_alive);
+            let head = response_head(
+                response.status,
+                &response.content_type,
+                Some(bytes.len()),
+                keep_alive,
+                &response.extra_headers,
+            );
             out.write_all(head.as_bytes())
                 .and_then(|_| out.write_all(&bytes))
                 .and_then(|_| out.flush())
                 .map_err(|err| format!("写出响应失败: {err}"))
         }
         Body::Stream(emit) => {
-            let head = response_head(response.status, &response.content_type, None, keep_alive);
+            let head = response_head(
+                response.status,
+                &response.content_type,
+                None,
+                keep_alive,
+                &response.extra_headers,
+            );
             out.write_all(head.as_bytes())
                 .and_then(|_| out.flush())
                 .map_err(|err| format!("写出响应失败: {err}"))?;
@@ -518,16 +550,26 @@ mod tests {
 
     #[test]
     fn 响应头带_content_length_或_chunked() {
-        let buffered = response_head(200, "application/json", Some(12), true);
+        let buffered = response_head(200, "application/json", Some(12), true, &[]);
         assert!(buffered.starts_with("HTTP/1.1 200 OK\r\n"));
         assert!(buffered.contains("Content-Length: 12\r\n"));
         assert!(buffered.contains("Connection: keep-alive\r\n"));
         assert!(buffered.ends_with("\r\n\r\n"));
 
-        let streamed = response_head(200, "text/event-stream", None, false);
+        let streamed = response_head(200, "text/event-stream", None, false, &[]);
         assert!(streamed.contains("Transfer-Encoding: chunked\r\n"));
         assert!(streamed.contains("Connection: close\r\n"));
         assert_eq!(reason(429), "Too Many Requests");
+    }
+
+    #[test]
+    fn 额外响应头写在连接头之前() {
+        let extra = [("Retry-After".to_string(), "60".to_string())];
+        let head = response_head(503, "application/json", Some(2), false, &extra);
+        assert!(head.contains("Retry-After: 60\r\n"), "{head}");
+        let retry = head.find("Retry-After").unwrap();
+        let connection = head.find("Connection:").unwrap();
+        assert!(retry < connection);
     }
 
     #[test]

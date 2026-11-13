@@ -28,6 +28,14 @@
 - **错误分类不许把排队当账号故障**：403 + `10605` / `isQueued` / `RESOURCE_LIMIT` 是模型排队，按 `retryAfterSeconds` 等；
   429 是模型粒度频控，只挡那一个模型；402 / `112` 是额度耗尽；`110` 是当日次数上限（本地 0 点恢复，封顶 6 小时）；
   `TOKEN_EXPIRE` / `12153` 才是会话失效。
+- **错误判定必须两条路都认**：上游把排队 / 额度错误塞在 **HTTP 200 + 信封 `statusCodeValue`** 里，不是 HTTP 状态码。
+  所以交出句柄之前先读第一帧（`qd_relay::prelude`），信封错误与 HTTP 状态码走同一套分类 —— 只判 HTTP 状态码时，
+  排队等待、额度打标、换号三件事对真实错误全部失效（2026-11-13 实测：chat 请求 1 秒内回 403「上游排队中」，
+  两个账号文件里 `quotaExhaustedAt` 一直是 0）。排队预算用完回 **503 + `Retry-After`**，不回 403（403 会被客户端
+  当成「请求被拒」直接结束本轮、不重试）。
+- **排队是模型级的，不换号也不罚号**：`10605` 是同一个模型所有账号共享的池（参考项目
+  `qoder2api-hub` 的 `docs/risk-control-and-queueing.md`），换号不会变快，所以预算用完直接回客户端、不再往下试别的号；
+  也不写 `quotaModels` / `cooldownUntil`。等待带 0–2 秒抖动。
 - **工具历史单点决策**：白名单模型（Qwen / GLM / DeepSeek 两档 —— `dmodel` / `dfmodel`，2026-11-07 真机补测单轮与多轮结构化
   历史都正常）且 `tool_call_id` 齐备才走结构化 `tool_calls`，否则整轮退回文本标记（`[assistant 请求调用工具]`）。只要有一个 id
   不完整就退回 —— 不发畸形请求。**DeepSeek 必须结构化的原因**：上游对它走原生 DSML 工具模板，历史再压成文本标记会教模型把两种
@@ -80,6 +88,7 @@
   → COSY 头               RSA 包裹临时密钥 + md5 签名
   → POST gateway.qoder.com.cn/algo/api/v2/service/pro/sse/agent_chat_generation?Encode=1
   → 解 SSE 信封 {"headers","body","statusCodeValue"} → 内层 OpenAI chunk
+  → prelude()            读第一帧：信封里的错误（排队 / 额度 / 会话失效）按 HTTP 错误同一套分类处置
   → 清洗 / 补 tool_call id / 泄漏缓冲 → 以 SSE 或 JSON 返回客户端
 ```
 
@@ -259,6 +268,10 @@ Qoder 与 TBuddy 是**两套完全独立的状态**：各自的 `Inner` 持有�
 ## 与上游 / TBuddy 的已知差异
 
 - 用量栏是**同一份界面代码**（`UsagePane.vue`），差异只在取数命令与本机流水文件；两边的账仍然分开算。
+- **排队是同步等待，不是官方那套轮询协议**：官方客户端收到 `10605` 后另开 `GET /api/v2/service/ask/queue/status`
+  轮询、最长等 60 分钟，并把排队进度当事件流回给界面；本网关在一个请求里静默等（`qd_quota` 的 3 轮 / 单轮 180 秒 /
+  总 600 秒，不做环境变量覆盖），客户端看到的是首字变慢，超预算后拿到 503 + `Retry-After`。要改成「先发响应头、
+  流里报排队进度」得把账号线程与响应写出拆开，属于另一层改造。
 - 不实现国际版、PAT、本地凭证扫描、Responses / Anthropic 协议。
 - 活动平台（`/sash/api/v1/me/campaigns`）对机器身份敏感：没有官方 `runtime-info.exe` 的真实身份时，上游可能把活动列表隐藏
   （HTTP 200 但空）。这里只如实显示「今天没有可领的活动」，不伪造。
