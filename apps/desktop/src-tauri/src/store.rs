@@ -22,6 +22,9 @@ struct Inner {
     /// 这一条是对 Electron 版的收紧：那边退出时无条件写一遍解析结果，
     /// 数据文件要是被手工改坏（解析失败 → 回落默认值），退出就会把损坏但还有救的原文件覆盖掉。
     dirty: bool,
+    /// 启动时那次载入失败的原因。文件缺失不是错误（第一次运行），读不出来 / 解析不了才是 ——
+    /// 留着给 `*_load` 通道如实回一个 `Err`，而不是让渲染层把「读失败」当成「空数据」。
+    load_error: Option<String>,
 }
 
 pub struct JsonStore {
@@ -38,6 +41,7 @@ impl JsonStore {
             value: Value::Null,
             loaded: false,
             dirty: false,
+            load_error: None,
         }));
 
         let (tx, rx) = channel::<()>();
@@ -64,30 +68,57 @@ impl JsonStore {
         }
     }
 
-    /// 读磁盘原始 JSON。文件缺失或损坏时返回 Null —— 由调用方（TS 侧）收敛成默认值，
-    /// 不影响启动。
-    pub fn load(&self) -> Value {
-        let value = std::fs::read_to_string((self.file)())
-            .ok()
-            .and_then(|text| serde_json::from_str::<Value>(&text).ok())
-            .unwrap_or(Value::Null);
+    /// 读磁盘原始 JSON。**文件不存在 = 第一次运行**（`Ok(Null)`）；
+    /// 文件存在但读不出来 / 解析不了 = `Err`，由通道如实带回渲染层。
+    /// 内存里那份仍然只放 `Null`：启动不能因为一份坏文件停住，但也别把它说成「空数据」。
+    pub fn load(&self) -> Result<Value, String> {
+        let path = (self.file)();
+        let (value, error) = match std::fs::read_to_string(&path) {
+            Ok(text) => match serde_json::from_str::<Value>(&text) {
+                Ok(value) => (value, None),
+                Err(err) => (
+                    Value::Null,
+                    Some(format!("{} 解析失败（{}）：{err}", self.label, path.display())),
+                ),
+            },
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => (Value::Null, None),
+            Err(err) => (
+                Value::Null,
+                Some(format!("{} 读取失败（{}）：{err}", self.label, path.display())),
+            ),
+        };
 
         let mut inner = self.inner.lock().expect("锁中毒");
         inner.value = value.clone();
         inner.loaded = true;
         inner.dirty = false;
-        value
+        inner.load_error = error.clone();
+        match error {
+            Some(err) => Err(err),
+            None => Ok(value),
+        }
     }
 
     pub fn get(&self) -> Value {
         self.inner.lock().expect("锁中毒").value.clone()
     }
 
-    /// 直接替换内存值（调用方应已 sanitize 过）
+    /// 读一次内存里的值给通道用：启动那次载入出过错就回 `Err`。
+    pub fn read(&self) -> Result<Value, String> {
+        let inner = self.inner.lock().expect("锁中毒");
+        match &inner.load_error {
+            Some(err) => Err(err.clone()),
+            None => Ok(inner.value.clone()),
+        }
+    }
+
+    /// 直接替换内存值（调用方应已 sanitize 过）。写入了新值就说明用户已经覆盖了
+    /// 上一份坏文件，载入错误随之作废。
     pub fn set(&self, value: Value) {
         let mut inner = self.inner.lock().expect("锁中毒");
         inner.value = value;
         inner.dirty = true;
+        inner.load_error = None;
     }
 
     /// 变更即写，防抖 300ms

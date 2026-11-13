@@ -30,13 +30,9 @@ export const useAuthStore = defineStore('auth', () => {
    * 头像那张图不在这一步拉（那是网络请求），留给账号弹窗打开时按需刷新。
    */
   async function refreshAuth(): Promise<void> {
-    try {
-      status.value = await window.workbench.authStatus()
-    }
-    catch {
-      // 拿不到就当没登录：账号是可选功能，不该把首屏拖下水
-      status.value = null
-    }
+    const result = await window.workbench.authStatus()
+    // 拿不到就当没登录：账号是可选功能，不该把首屏拖下水
+    status.value = result.ok && result.data ? result.data : null
   }
 
   /** 走一次登录。成功后账号资料由适配层落盘，这里只负责界面状态与提示 */

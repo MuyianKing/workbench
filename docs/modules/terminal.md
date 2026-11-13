@@ -38,5 +38,9 @@
 ## 涉及文件
 
 ```
-    terminal.ts          终端、运行态、日志缓冲；检测与停止的统一实现在这里
+    terminal.ts          终端、运行态、日志缓冲；检测与停止的统一实现在这里（stores/）
+    TerminalPanel.vue    面板壳：高度拖拽、收起状态、Tab 与工具栏（components/）
+    TerminalLogView.vue  日志正文：分块渲染、贴底跟随、Ctrl + 单击开链接、行高测量（components/）
+    TerminalDockButton.vue
+                         收起后窗口右缘那颗悬浮按钮：落点、拖动与点击展开（components/）
 ```

@@ -68,7 +68,14 @@ export async function icon(target: string): Promise<Result<string>> {
   if (!source)
     return fail('没有可用的程序路径')
 
-  const mtime = await invoke<number | null>('fs_stat_mtime', { path: source })
+  // 问不到修改时间只影响缓存键（等于每次都当新图标取），不该让「取图标」整条失败
+  let mtime: number | null = null
+  try {
+    mtime = await invoke<number | null>('fs_stat_mtime', { path: source })
+  }
+  catch (error) {
+    console.warn('[workbench] 读取程序修改时间失败，按 0 处理', error)
+  }
   const key = `${source}::${mtime ?? 0}`
 
   const cached = iconCache.get(key)

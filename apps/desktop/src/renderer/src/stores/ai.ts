@@ -1,6 +1,6 @@
-import type { AiConfirm, AiFetchedModel, AiImage, AiLogLine, AiProvider, AiRunConfig, AiSession, AiUsage, PiDelta } from '@workbench/ai'
-import type { Result } from '@/types'
-import { aiImagePayload, aiModelChoices, aiProviderPayload, aiSessionGroups, aiSessionTitle, confirmFrame, formatDuration, formatUsageSummary, nodeSatisfiesPi, pickAiActiveSession, piLaunch, piLaunchForDisplay, rememberAiSession, resolveAiRunConfig, sanitizeAiApiFormat, sanitizeAiBaseUrl, sanitizeAiLabel, sanitizeAiModels, sanitizeAiName, sanitizeAiPermission, sanitizeAiPreset, sanitizeAiSessionId, sanitizeAiSessions, sanitizeAiThinking, sessionMessagesToLines, taskPrompt, writtenEntries } from '@workbench/ai'
+import type { AiConfirm, AiImage, AiLogLine, AiSession, AiUsage, PiDelta } from '@workbench/ai'
+import type { AiRun } from '@/stores/ai-run-state'
+import { aiImagePayload, aiSessionGroups, aiSessionTitle, confirmFrame, pickAiActiveSession, piLaunch, piLaunchForDisplay, rememberAiSession, sanitizeAiSessionId, sessionMessagesToLines, taskPrompt, writtenEntries } from '@workbench/ai'
 import { noteRootName, sanitizeNoteRoot } from '@workbench/notes'
 import { defineStore } from 'pinia'
 /**
@@ -25,96 +25,20 @@ import { defineStore } from 'pinia'
  * 会话文件的落点 —— 都在 Rust 侧（见 src-tauri/src/ai.rs），因为密钥与提示词都不该经过渲染层。
  * 输入框里那句指令与贴上的图也归页面（AiView）持有 —— 这里只在发的那一刻收到它们
  * （见 run），「能不能发、还差什么」的判断也长在 composer 上（canRun / blocking）。
+ *
+ * 叶子模块各管一块（工厂 + 装配，对外形状不变）：`ai-run-state.ts`（每会话运行态与流式收尾）、
+ * `ai-config.ts`（服务 / 模型 / 三颗选择）、`ai-runtime.ts`（Pi 与 Node 探测、密钥状态、装 Pi）、
+ * `ai-providers.ts`（服务的增删改与 models.json）。这一层只留会话树、一轮的运行与进程收放。
  */
-import { computed, reactive, ref, watch } from 'vue'
-import { confirmAction, notifyError, notifySuccess, notifyWarning } from '@/notify'
+import { computed, ref, watch } from 'vue'
+import { confirmAction, notifyError } from '@/notify'
+import { useAiConfig } from '@/stores/ai-config'
+import { useAiProviders } from '@/stores/ai-providers'
+import { configChangeAction, IDLE_RUN, STREAM_TICK, useAiRunState } from '@/stores/ai-run-state'
+import { useAiRuntime } from '@/stores/ai-runtime'
 import { useAiSkillsStore } from '@/stores/ai-skills'
 import { useSettingsStore } from '@/stores/settings'
-import { AI_INSTALL_SESSION_ID, aiAbort, aiKeyClear, aiKeySave, aiKeyState, aiMessages, aiModelsFetch, aiModelsWrite, aiRun, aiRuntime, aiSend, aiSessionDelete, aiSessionProcessId, aiStop } from '@/workbench/ai'
-import { runDetached } from '@/workbench/session'
-
-/** Pi 的 npm 包名（它官方给的安装方式就是全局装一个包） */
-const PI_PACKAGE = '@earendil-works/pi-coding-agent'
-
-/**
- * 一个会话的运行态（内存，不落盘）：一段对话从这里长出来。
- * 落盘的那份只是调度用的记录（id / 目录 / 标题 / 时间，见 AiSession），对话本身在 Pi 那边。
- */
-interface AiRun {
-  /** 这个会话的对话（历史 + 之后一轮轮接上来的） */
-  lines: AiLogLine[]
-  /** 这一轮在跑（Pi 在干活） */
-  running: boolean
-  /** 进程起过、还活着：连续对话靠它（跑完不收，见文件头） */
-  live: boolean
-  /** 历史读回来过没有（打开会话时读一次） */
-  hydrated: boolean
-  /** 正在读历史（界面上给一个「正在接上这段对话」的样子） */
-  hydrating: boolean
-  /** 用户点了停止（`abort` 已经发出去） */
-  stopping: boolean
-  /** 模型 / 档位 / 权限改过了：这一轮跑完把进程收掉，下一句按新参数重开 */
-  stale: boolean
-  exitCode: number | null
-  runError: string
-  /** 等用户答话的命令（扩展的确认）：一次只画队首那条 */
-  confirms: AiConfirm[]
-  /** 这一轮是哪一刻发出去的（跑完拿它算用时）；0 = 这一轮还没开始 */
-  startedAt: number
-  /**
-   * 助手正在流式吐出来的那段文字（`message_end` 一到就换成整段的权威版本，见 onLine）。
-   * 面板把它画在对话末尾 —— 「一个字一个字长出来」就是这一段在变。
-   */
-  streamText: string
-  /** 攒着还没发布出去的增量：发布按 STREAM_TICK 节流，见 onDelta */
-  streamBuffer: string
-  streamTimer: ReturnType<typeof setTimeout> | null
-  /**
-   * 模型正在想的那一段（`thinking_delta`）：与正文同一套节流，画在跑着那轮的
-   * 「过程」块末尾（它就是那一刻最新的内容，长在所有已落地行的下面）。
-   * **一段想完了（`thinking_end`）就落成一行 `kind: 'thinking'`**（收进同一块），这里随之清空。
-   */
-  thinkText: string
-  thinkBuffer: string
-  thinkTimer: ReturnType<typeof setTimeout> | null
-  /** 这一刻正在思考（`thinking_start` / 第一个增量到、到 `thinking_end` 为止） */
-  thinking: boolean
-  /**
-   * 这一轮攒下的 token 消耗（每条助手消息的 `usage` 累加，见 onUsage）：收尾时跟在
-   * 「用时 …」旁边落一行（见 noteDuration）。发下一句时清零 —— 那一行是每一轮自己的账。
-   */
-  usage: AiUsage
-}
-
-/** 还没建过运行态时读到的那一份（只读，永远不写进去） */
-const IDLE_RUN: AiRun = Object.freeze({
-  lines: [] as AiLogLine[],
-  running: false,
-  live: false,
-  hydrated: false,
-  hydrating: false,
-  stopping: false,
-  stale: false,
-  exitCode: null,
-  runError: '',
-  confirms: [] as AiConfirm[],
-  startedAt: 0,
-  streamText: '',
-  streamBuffer: '',
-  streamTimer: null,
-  thinkText: '',
-  thinkBuffer: '',
-  thinkTimer: null,
-  thinking: false,
-  usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-})
-
-/**
- * 流式增量发布的最小间隔（ms）：模型一个字一个字往外吐，每个字都重画一遍对话区
- * （还要重跑一遍 markdown）是白烧钱 —— 攒够这么一小会儿再画，看着仍是连续长出来的
- * （与 session.rs 那边按窗口攒批同一个思路）。
- */
-const STREAM_TICK = 80
+import { aiAbort, aiMessages, aiRun, aiSend, aiSessionDelete, aiSessionProcessId, aiStop } from '@/workbench/ai'
 
 /** run 收下的那一句：文本与随发的图。输入框那两样归 AiView 持有，发的那一刻才交进来 */
 interface AiRunInput {
@@ -149,45 +73,11 @@ export const useAiStore = defineStore('ai', () => {
     () => sessions.value.find(session => session.id === activeId.value) ?? null,
   )
 
-  /** 每个会话的运行态：key 是会话 id（界面只画当前那个，但每个都在跑自己的） */
-  const runs = reactive(new Map<string, AiRun>())
-  /** 取一条会话的运行态（没有就建一个空的） */
-  function runOf(sessionId: string): AiRun {
-    const existing = runs.get(sessionId)
-    if (existing)
-      return existing
-    const created: AiRun = {
-      lines: [],
-      running: false,
-      live: false,
-      hydrated: false,
-      hydrating: false,
-      stopping: false,
-      stale: false,
-      exitCode: null,
-      runError: '',
-      confirms: [],
-      startedAt: 0,
-      streamText: '',
-      streamBuffer: '',
-      streamTimer: null,
-      thinkText: '',
-      thinkBuffer: '',
-      thinkTimer: null,
-      thinking: false,
-      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    }
-    runs.set(sessionId, created)
-    // 回**代理**而不是 created 本体：reactive Map 的 get 才会把对象包成响应式代理，
-    // 拿本体写的字段（hydrate 里的 hydrating / hydrated / lines）不触发任何依赖 ——
-    // 界面就会永远停在旧值上（首次打开旧会话挂在「正在接上这段对话…」、对话迟迟不画，
-    // 就是这批写入丢了响应式）
-    return runs.get(sessionId) ?? created
-  }
+  // 每会话运行态（与流式 / 思考两段的收尾）
+  const { runs, runOf, endStream, endThink, isTurnMarker, noteDuration } = useAiRunState()
 
-  const activeRun = computed<AiRun>(
-    () => runs.get(activeId.value) ?? IDLE_RUN,
-  )
+  /** 当前那一屏要画的那份运行态 */
+  const activeRun = computed<AiRun>(() => runs.get(activeId.value) ?? IDLE_RUN)
 
   /**
    * 正在按起始那一屏挑的目录建会话（见 run → startSession）：那一下要等一个来回
@@ -240,85 +130,73 @@ export const useAiStore = defineStore('ai', () => {
    */
   const watchedDir = computed(() => activeSession.value?.dir ?? newDir.value)
 
-  // ---------- 配置（都在设置里；形状是「服务 + 模型清单」，见 packages/ai/src/ai.ts） ----------
-  /** 配过的 AI 服务（模型管理弹窗里那一屏）：密钥不在里面，它在凭据管理器里 */
-  const providers = computed(() => settings.settings.aiProviders)
-  /** 页面上那个「模型」下拉里能挑的：启用的服务下启用的那些模型 */
-  const choices = computed(() => aiModelChoices(providers.value))
+  // ---------- 配置与服务（两个叶子模块） ----------
 
-  /**
-   * 一个会话（或「还没建的新对话」）当下生效的那份配置。解析规则在
-   * `@workbench/ai` 的 `resolveAiRunConfig`（可单测，回落与档位钳制都在那边）；
-   * 这里只把两份响应式事实 —— 服务清单与设置里的默认 —— 递进去。
-   */
-  function configOf(session: AiSession | null): AiRunConfig {
-    return resolveAiRunConfig(providers.value, session, {
-      provider: settings.settings.aiDefaultProvider,
-      model: settings.settings.aiDefaultModel,
-      thinking: settings.settings.aiThinking,
-      permission: settings.settings.aiPermission,
-    })
-  }
-
-  /** 当前正对着的那份：有会话用会话自己的，起始屏（还没建会话）用设置里的默认 */
-  const activeConfig = computed(() => configOf(activeSession.value))
-  /**
-   * 默认模型（模型管理弹窗顶上那一栏写的、起始屏下拉显示的都是它）：挑的没了
-   * （服务停用 / 模型关掉 / 删掉）退回第一个能挑的，一个都没有是 null。
-   */
-  const activeChoice = computed(() => activeConfig.value.choice)
-  /** 这个模型挂在哪个服务上（Pi 的 `--provider`，也是取密钥用的那个名字） */
-  const providerName = computed(() => activeConfig.value.providerName)
-  const providerLabel = computed(() => activeChoice.value?.providerLabel ?? '还没配置')
-  /** 这一轮跑哪个模型（`--model`） */
-  const runModel = computed(() => activeConfig.value.model)
-  /** 这个模型支持哪几档思考（界面上的下拉只列这些，Pi 那边也会按它收敛） */
-  const thinkingLevels = computed(() => activeChoice.value?.levels ?? ['off'])
-  /** 思考档位：Pi 的 `--thinking` 那一档；挑的不被这个模型支持就退默认档（见 pickAiThinking） */
-  const thinking = computed(() => activeConfig.value.thinking)
-  /**
-   * 工具权限（composer 左边那一栏）：两档，见 packages/ai/src/ai.ts 的 AI_PERMISSION_MODES。
-   * **它决定 Pi 那边加不加载那份确认扩展** —— 自动编辑：每次要跑命令都先问一句；
-   * 完全访问：不加载扩展，结构上就没有询问。改它要重开进程（见下面那个 watch）。
-   */
-  const permission = computed(() => activeConfig.value.permission)
-  /** 能跑一轮的最低配置：挑中的那个服务四样齐了（密钥另算，见 keyReady） */
-  const configured = computed(() => !!activeChoice.value && !!providerName.value)
-
-  // ---------- 这台机器上的环境 ----------
-  /** 运行时来源：bundled = 随包内置的那份（resources/pi），path = 全局安装的，none = 都没有 */
-  const runtimeSource = ref<'bundled' | 'path' | 'none'>('none')
-  /** 内置 cli.js 的绝对路径（仅 bundled 模式有值；拼命令时交给 node） */
-  const cliPath = ref('')
-  /** 都没有时的原因（ai_runtime 的 detail）：排障用，界面不展示 */
-  const runtimeDetail = ref('')
-  const piVersion = ref('')
-  const nodeVersion = ref('')
-  /**
-   * 全局技能根（`%USERPROFILE%\.agents\skills`，由 ai_runtime 报回来）：技能弹窗那两栏里
-   * 靠上那一栏就是它。拿不到用户目录时是空串，那一栏显示「用不了」。
-   */
-  const skillRoot = ref('')
-  const probed = ref(false)
-  const probing = ref(false)
-  /**
-   * 每个服务配没配 API Key（key 是服务 id）。**只回有没有** —— 密钥本身不进渲染层，
-   * 界面显示的是「已配置 / 未配置」。
-   */
-  const keyStates = reactive<Record<string, boolean>>({})
-  /** 挑中的那个服务配过 Key 没有（跑一轮的硬条件之一） */
-  const keyReady = computed(() => {
-    const current = providerName.value
-    return !!current && keyStates[current] === true
+  const config = useAiConfig({
+    settings: computed(() => settings.settings),
+    updateSettings: patch => settings.updateSettings(patch),
+    sessions,
+    activeSession,
+  })
+  const runtime = useAiRuntime({
+    providers: config.providers,
+    providerName: config.providerName,
   })
 
-  const piReady = computed(() => runtimeSource.value !== 'none')
-  /** 内置 cli.js 要 node ≥ 22.19；不内置 Node，这条是硬门槛 */
-  const nodeOk = computed(() => nodeSatisfiesPi(nodeVersion.value))
+  const {
+    providers,
+    choices,
+    configOf,
+    activeChoice,
+    activeChoiceKey,
+    providerName,
+    providerLabel,
+    runModel,
+    thinkingLevels,
+    thinking,
+    permission,
+    configured,
+    imageReady,
+    setChoice,
+    setThinking,
+    setPermission,
+  } = config
+
+  const {
+    runtimeSource,
+    cliPath,
+    runtimeDetail,
+    piVersion,
+    nodeVersion,
+    skillRoot,
+    probed,
+    probing,
+    keyStates,
+    keyReady,
+    piReady,
+    nodeOk,
+    installing,
+    installLog,
+    probe,
+    refreshKey,
+    installPi,
+  } = runtime
+
+  const providersApi = useAiProviders({
+    updateSettings: patch => settings.updateSettings(patch),
+    providers,
+    activeChoice,
+    keyStates,
+    refreshKey,
+    retireProcesses: () => retireProcesses(),
+  })
+  const { syncModels, saveProvider, removeProvider, toggleProvider, fetchModels, clearProviderKey } = providersApi
+
   /** 起进程要的东西齐了没有（与 composer 那边的 canRun 比少了「指令」那一条）：打开会话要拿它挡一下 */
   const startable = computed(() => piReady.value && nodeOk.value && configured.value)
 
   // ---------- 当前画的这一屏 ----------
+
   const lines = computed(() => activeRun.value.lines)
   /** 助手正在流式吐出来的那段文字（画在对话末尾，接在已落地的那几行后面） */
   const streaming = computed(() => activeRun.value.streamText)
@@ -339,50 +217,6 @@ export const useAiStore = defineStore('ai', () => {
   const runError = computed(() => activeRun.value.runError)
   /** 这个会话写下的文件（从对话里收的，去重排序） */
   const written = computed(() => writtenEntries(activeRun.value.lines))
-
-  const installing = ref(false)
-  const installLog = ref<string[]>([])
-
-  /**
-   * 挑中的这个模型能不能看图（贴图只在它上面成立，见 packages/ai/src/ai.ts 的 AiModelChoice.imageInput）；
-   *composer 那边判断「这条能不能发 / 还差什么」时要用它（canRun / blocking 归输入框自己）
-   */
-  const imageReady = computed(() => activeChoice.value?.imageInput === true)
-
-  // ---------- 环境探测 ----------
-
-  /** 探一次运行时（内置 → 全局 pi → 都没有）与 node 版本；顺带查一下密钥配没配 */
-  async function probe(): Promise<void> {
-    probing.value = true
-    try {
-      const runtime = await aiRuntime()
-      runtimeSource.value = runtime.source
-      cliPath.value = runtime.cli
-      runtimeDetail.value = runtime.detail
-      piVersion.value = runtime.pi
-      nodeVersion.value = runtime.node
-      skillRoot.value = runtime.skillRoot
-    }
-    finally {
-      probed.value = true
-      probing.value = false
-    }
-    await refreshKey()
-  }
-
-  /** 每个服务有没有配过 Key（一次问一遍：凭据管理器里一条一次，很便宜） */
-  async function refreshKey(): Promise<void> {
-    for (const provider of providers.value) {
-      const result = await aiKeyState(provider.id)
-      keyStates[provider.id] = result.ok && result.data === true
-    }
-    // 删掉的服务不留残影（它已经不在这张表里了，界面不该还记着「已配置」）
-    const alive = new Set(providers.value.map(provider => provider.id))
-    for (const id of Object.keys(keyStates)) {
-      if (!alive.has(id))
-        delete keyStates[id]
-    }
-  }
 
   // ---------- 会话的增删选 ----------
 
@@ -501,7 +335,7 @@ export const useAiStore = defineStore('ai', () => {
     try {
       const processId = aiSessionProcessId(sessionId)
       const launch = launchFor(session)
-      const config = configOf(session)
+      const cfg = configOf(session)
       // 技能：起进程这一趟才给（`--skill`，见 ai.rs 的 run）—— 先保证那张表是**当下**的
       // （换过目录、别处刚装过技能都算），再取开着的那些
       await useAiSkillsStore().ensure()
@@ -514,8 +348,8 @@ export const useAiStore = defineStore('ai', () => {
           images: [],
           program: launch.program,
           args: launch.args,
-          provider: config.providerName,
-          permission: config.permission,
+          provider: cfg.providerName,
+          permission: cfg.permission,
           skills: useAiSkillsStore().enabledRefs,
         },
         handlers(sessionId),
@@ -572,11 +406,11 @@ export const useAiStore = defineStore('ai', () => {
    *参数按**这个会话自己**的生效配置取（configOf），不是当前正对着的那份
    */
   function launchFor(session: AiSession) {
-    const config = configOf(session)
+    const cfg = configOf(session)
     return piLaunch(runtimeSource.value === 'bundled' ? cliPath.value : null, {
-      provider: config.providerName,
-      model: config.model,
-      thinking: config.thinking,
+      provider: cfg.providerName,
+      model: cfg.model,
+      thinking: cfg.thinking,
     }, session.id)
   }
 
@@ -661,51 +495,6 @@ export const useAiStore = defineStore('ai', () => {
   }
 
   /**
-   * 流式那段收尾：把攒着的增量冲出来、清掉待发布的那口气。
-   * `keep` 为真时（被停掉 / 进程没了时还没等到整段）把已经吐出来的部分**留在对话里** ——
-   * 已经看到过的字不该凭空消失。
-   */
-  function endStream(run: AiRun, keep = false): void {
-    if (run.streamTimer) {
-      clearTimeout(run.streamTimer)
-      run.streamTimer = null
-    }
-    const text = run.streamBuffer
-    run.streamBuffer = ''
-    run.streamText = ''
-    if (keep && text.trim())
-      run.lines = [...run.lines, { kind: 'text', text }]
-  }
-
-  /**
-   * 思考那一段收尾（与 endStream 同一条路子）：`authoritative` 是 `thinking_end` 给的
-   * 整块内容（有就以它为准），`keep` 为真时把这一段落成对话里的一行 `kind: 'thinking'`
-   * —— 面板上它是那块**收着的**「思考过程」（跑完自动收起，点开还能看，见 AiProcess.vue）。
-   */
-  function endThink(run: AiRun, authoritative = '', keep = false): void {
-    if (run.thinkTimer) {
-      clearTimeout(run.thinkTimer)
-      run.thinkTimer = null
-    }
-    const text = (authoritative || run.thinkBuffer).trim()
-    run.thinkBuffer = ''
-    run.thinkText = ''
-    run.thinking = false
-    if (keep && text)
-      run.lines = [...run.lines, { kind: 'thinking', text }]
-  }
-
-  /**
-   * 轮与轮之间那两条要不要画：**不画**。
-   * 它们（`agent_start` 的「开始执行」与 `agent_settled` 的「执行结束」）是单次运行的步骤流里
-   * 该有的分节，放到一段连续的对话里就成了每轮插一句的噪音 —— 用户那句与助手的正文本来就
-   * 把两轮分得很清楚，跑没跑完由顶部那行状态说（`AiRunPanel` 的 notice）。
-   */
-  function isTurnMarker(line: AiLogLine): boolean {
-    return line.kind === 'done' || (line.kind === 'info' && line.text === '开始执行')
-  }
-
-  /**
    * 环境这一环还缺哪一样，按用户要动手的顺序：Node → Pi → 模型 → 密钥。
    * 「还差什么」级联的**唯一顺序口径** —— composer 的 blocking、run 的校验、知识库清洗
    * 的拦路都从这里取（原先三处各排一遍，顺序已经漂移出两种）。文案各归各：悬停里
@@ -783,7 +572,7 @@ export const useAiStore = defineStore('ai', () => {
 
     // 起进程的参数按**这个会话自己**的生效配置取（configOf），不是当前正对着的那份
     const launch = launchFor(session)
-    const config = configOf(session)
+    const cfg = configOf(session)
     // 第一次说话时把标题定下来（左栏上那一行）；之后不再改。**只有图没有字的那句**标题
     // 记成「（N 张图）」—— 标题空着等于「还没说过话」，下次打开这段会话就不去读历史了
     // （见 hydrate）
@@ -834,8 +623,8 @@ export const useAiStore = defineStore('ai', () => {
           images: aiImagePayload(attached),
           program: launch.program,
           args: launch.args,
-          provider: config.providerName,
-          permission: config.permission,
+          provider: cfg.providerName,
+          permission: cfg.permission,
           // 已经在跑的进程不会因为这张表变了而变（`--skill` 只认起进程那一趟）；
           // 没在跑时这一句就是起进程那一趟，带的必须是当下这份
           skills: useAiSkillsStore().enabledRefs,
@@ -893,24 +682,6 @@ export const useAiStore = defineStore('ai', () => {
     // 也正因为挂在 store 这一层，它才只认这个页面里的会话 —— 知识库一键清洗走的是自己那条
     // Pi 路子，那一笔在知识库那边记（见 workbench/kb.ts 的 kbIndexBuild），不会重复
     void window.workbench.recordActivity('ai')
-  }
-
-  /**
-   * 在这一轮末尾补一行「用时 …」：回复长的时候用户就想知道它到底跑了多久
-   * （也是「这一轮到这儿完了」的一个安静的句号 —— 那两条进度行不画，见 isTurnMarker）。
-   * 端点报了消耗的话把 token 也带上（`输入 … · 输出 …`，这一轮各段消息累加的账）；
-   * 没报就只有用时 —— 自定义端点不保证都有。
-   */
-  function noteDuration(run: AiRun): void {
-    if (!run.startedAt)
-      return
-    const text = formatDuration(Date.now() - run.startedAt)
-    run.startedAt = 0
-    const usage = formatUsageSummary(run.usage)
-    run.lines = [
-      ...run.lines,
-      { kind: 'duration', text: usage ? `用时 ${text} · ${usage}` : `用时 ${text}` },
-    ]
   }
 
   /** 进程退出了（我们收的，或者它自己崩了）：把这一轮的状态收尾 */
@@ -996,284 +767,6 @@ export const useAiStore = defineStore('ai', () => {
       notifyError(sent.error ?? '答复没能送到 Pi 那边')
   }
 
-  /**
-   * 页面上那个「模型」下拉的选中项：`<服务 id>/<模型 id>`（与选项的值同一个，
-   * 不过这里空串表示「一个能挑的都没有」—— 下拉的 placeholder 就是给那一刻的）。
-   */
-  const activeChoiceKey = computed(() => activeChoice.value?.key ?? '')
-
-  /**
-   * 页面上那个下拉挑了什么：**有会话就记到会话自己身上**（那一刻生效的四样一起快照，
-   * 见 AiSession 的可选字段），起始屏（还没建会话）记到设置里的默认 —— 之后新建的
-   * 对话用它起步。挑的是 `packages/ai/src/ai.ts` 的 AiModelChoice.key（`<服务 id>/<模型 id>`），
-   * 认不出就当没挑过。
-   */
-  async function setChoice(key: string): Promise<boolean> {
-    const choice = choices.value.find(item => item.key === key)
-    if (!choice)
-      return false
-    const session = activeSession.value
-    if (!session) {
-      return settings.updateSettings({
-        aiDefaultProvider: choice.provider,
-        aiDefaultModel: choice.model,
-      })
-    }
-    return persistSessionConfig(session, {
-      provider: choice.provider,
-      model: choice.model,
-      thinking: thinking.value,
-      permission: permission.value,
-    })
-  }
-
-  async function setThinking(level: string): Promise<boolean> {
-    const session = activeSession.value
-    if (!session)
-      return settings.updateSettings({ aiThinking: sanitizeAiThinking(level) })
-    return persistSessionConfig(session, {
-      provider: providerName.value,
-      model: runModel.value,
-      thinking: sanitizeAiThinking(level),
-      permission: permission.value,
-    })
-  }
-
-  /** 页面上那一栏挑了什么：与模型 / 档位同一条口径（有会话记会话，起始屏记设置默认） */
-  async function setPermission(id: string): Promise<boolean> {
-    const session = activeSession.value
-    if (!session)
-      return settings.updateSettings({ aiPermission: sanitizeAiPermission(id) })
-    return persistSessionConfig(session, {
-      provider: providerName.value,
-      model: runModel.value,
-      thinking: thinking.value,
-      permission: sanitizeAiPermission(id),
-    })
-  }
-
-  /**
-   * 把一份配置记到会话自己身上（数据文件的 aiSessions）：只改这一条、顺序不动，收敛后再落
-   * —— 认不出的值在收敛那层就被丢掉，读的时候回落设置里的默认。
-   */
-  async function persistSessionConfig(
-    session: AiSession,
-    patch: Partial<Pick<AiSession, 'provider' | 'model' | 'thinking' | 'permission'>>,
-  ): Promise<boolean> {
-    const next = sessions.value.map(item =>
-      item.id === session.id ? { ...item, ...patch } : item,
-    )
-    return settings.updateSettings({ aiSessions: sanitizeAiSessions(next) })
-  }
-
-  // ---------- AI 服务（模型管理弹窗里那一屏） ----------
-
-  /**
-   * 把当前设置里的服务清单写成 Pi 的 models.json（agent 目录下那份）。
-   *
-   * Pi 是照这份文件认端点的：设置存下了而文件没写等于没配，所以每次改完服务都要走一遍，
-   * 进页面时也补一次（老设置搬到新形状之后那句「还没写」是看不出来的）。停用的服务与模型
-   * 不进这份文件 —— 见 packages/ai/src/ai.ts 的 aiProviderPayload。
-   */
-  async function syncModels(): Promise<boolean> {
-    const payload = aiProviderPayload(providers.value)
-    // 一个能跑的服务都没有（还没配过，或者都停用了）：models.json 留着上一次那份也无妨 ——
-    // 起进程时 --provider 是显式给的，没挑中就没有那一轮，残留的端点不会被用上
-    if (!payload.length)
-      return true
-    const written = await aiModelsWrite(payload)
-    if (!written.ok) {
-      notifyError(written.error ?? '写入模型配置失败')
-      return false
-    }
-    return true
-  }
-
-  /**
-   * 保存一个服务（新增或改一个现有的）：收敛校验 → 落设置 → 重写 models.json →
-   * （给了密钥就）存密钥。**四步都过了才算成功** —— 只落后半截会让界面显示「配好了」而
-   * Pi 那边跑不起来。
-   *
-   * `secret` 空串 = 不动已有的密钥（编辑一个已经保存过的服务时不必重填）；
-   * `previousId` 是编辑前那个名字 —— 改过名字时旧名字下那条凭据要清掉（它已经没人认领）。
-   */
-  async function saveProvider(input: AiProvider, secret = '', previousId = ''): Promise<boolean> {
-    const id = sanitizeAiName(input.id)
-    const baseUrl = sanitizeAiBaseUrl(input.baseUrl)
-    const apiFormat = sanitizeAiApiFormat(input.apiFormat)
-    const models = sanitizeAiModels(input.models)
-    if (!id) {
-      notifyError('服务名称要填：小写字母、数字与连字符（它进凭据名，不能有别的字符）')
-      return false
-    }
-    if (!/^https?:\/\//.test(baseUrl)) {
-      notifyError('Base URL 要以 http:// 或 https:// 开头')
-      return false
-    }
-    if (!apiFormat) {
-      notifyError('先选一个 API 形态')
-      return false
-    }
-    if (!models.some(entry => entry.enabled)) {
-      notifyError('至少要启用一个模型')
-      return false
-    }
-
-    const provider: AiProvider = {
-      id,
-      label: sanitizeAiLabel(input.label) || id,
-      baseUrl,
-      apiFormat,
-      preset: sanitizeAiPreset(input.preset),
-      enabled: input.enabled !== false,
-      models,
-    }
-    // 编辑的是哪一条：**按原名找**（改名之后那一条还在清单里，只是换了键）
-    const target = previousId || id
-    const taken = providers.value
-      .filter(item => item.id !== target && item.id !== id)
-      .map(item => item.id)
-    if (taken.includes(id)) {
-      notifyError(`已经有一个叫 ${id} 的服务了：换一个名字`)
-      return false
-    }
-
-    const next = providers.value.some(item => item.id === target)
-      ? providers.value.map(item => (item.id === target ? provider : item))
-      : [...providers.value, provider]
-    const saved = await settings.updateSettings({
-      aiProviders: next,
-      // 一个都没挑过（或者挑的那个刚被这次编辑弄没了）：默认模型就落到它身上
-      ...(activeChoice.value
-        ? {}
-        : { aiDefaultProvider: provider.id, aiDefaultModel: provider.models[0]?.id ?? '' }),
-    })
-    if (!saved) {
-      notifyError('保存设置失败')
-      return false
-    }
-
-    // 密钥与模型配置是两个独立的落点：**密钥没存进去不该把配置卡在半路** ——
-    // models.json 照写（它本来就不含密钥，密钥只在起进程时进环境变量），
-    // 密钥那条失败在结尾当警告说出来。之前这里写失败就整体返回，设置落了而
-    // models.json 没写，弹窗里只飘一条 toast —— 用户以为保存成功了，改的东西没生效
-    let keyWarning = ''
-    if (secret.trim()) {
-      const stored = await aiKeySave(id, secret.trim())
-      if (!stored.ok)
-        keyWarning = stored.error ?? '保存 Key 失败'
-    }
-
-    // 设置已经落下去了：models.json 照**它**重写一遍（两边永远对得上）。
-    // 能力位（能看图 / 上下文 / 档位）都长在这份文件里，写完就把进程退掉 ——
-    // 否则改完的配置对已经在聊的会话不生效（Pi 起进程时读一次，不重读）
-    if (!(await syncModels()))
-      return false
-    retireProcesses()
-
-    // 改过名字：旧名字下那条凭据（API Key）已经没人认领了，清掉 —— 留着的只是一条密文
-    if (previousId && previousId !== id)
-      await aiKeyClear(previousId)
-
-    await refreshKey()
-    if (keyWarning)
-      notifyWarning(`已保存 ${provider.label}，但 API Key 没存进去：${keyWarning}`)
-    else notifySuccess(`已保存 ${provider.label}`)
-    return true
-  }
-
-  /** 删掉一个服务：设置里去掉、models.json 重写；**密钥一起清掉**（留着它就是一条没人认领的密文） */
-  async function removeProvider(id: string): Promise<void> {
-    const provider = providers.value.find(item => item.id === id)
-    if (!provider)
-      return
-
-    const agreed = await confirmAction(
-      `「${provider.label}」这个服务会从模型管理里删掉，里面的 ${provider.models.length} 个模型与它的 API Key 一起清掉。`,
-      '删除服务',
-      { confirmButtonText: '删除', type: 'warning' },
-    )
-    if (!agreed)
-      return
-
-    const next = providers.value.filter(item => item.id !== id)
-    const saved = await settings.updateSettings({ aiProviders: next })
-    if (!saved) {
-      notifyError('保存设置失败')
-      return
-    }
-    await aiKeyClear(id)
-    await syncModels()
-    retireProcesses()
-    await refreshKey()
-    notifySuccess(`已删除 ${provider.label}`)
-  }
-
-  /** 打开 / 停用一个服务（停用的不进 models.json，也当不了默认模型） */
-  async function toggleProvider(id: string, enabled: boolean): Promise<void> {
-    const next = providers.value.map(item => (item.id === id ? { ...item, enabled } : item))
-    const saved = await settings.updateSettings({ aiProviders: next })
-    if (!saved)
-      return
-    await syncModels()
-    retireProcesses()
-  }
-
-  /**
-   * 从端点拉一份模型列表（「添加服务」里粘完 Key / 点「获取列表」那一下）。
-   * 打的是用户自己那个端点（`{baseUrl}/models`），密钥优先用草稿里刚粘的那把。
-   */
-  async function fetchModels(input: {
-    provider: string
-    baseUrl: string
-    api: string
-    secret?: string
-  }): Promise<Result<AiFetchedModel[]>> {
-    return aiModelsFetch(input.provider, input.baseUrl, input.api, input.secret ?? '')
-  }
-
-  /** 清掉某个服务的密钥 */
-  async function clearProviderKey(id: string): Promise<void> {
-    const result = await aiKeyClear(id)
-    if (!result.ok) {
-      notifyError(result.error ?? '清除 Key 失败')
-      return
-    }
-    keyStates[id] = false
-    notifySuccess('已清除 API Key')
-  }
-
-  /** 装 Pi（全局装那一个包）。输出进安装日志，装完自动重探一次 */
-  async function installPi(): Promise<void> {
-    if (installing.value)
-      return
-
-    installing.value = true
-    installLog.value = []
-    try {
-      const code = await runDetached(
-        AI_INSTALL_SESSION_ID,
-        `npm install -g ${PI_PACKAGE}`,
-        (text) => {
-          installLog.value = [...installLog.value, text]
-        },
-      )
-      if (code === 0) {
-        notifySuccess('Pi 装好了')
-        await probe()
-      }
-      else {
-        notifyError(`安装没有成功（退出码 ${code ?? '未知'}）`)
-      }
-    }
-    catch (error) {
-      notifyError(error instanceof Error ? error.message : '安装失败')
-    }
-    finally {
-      installing.value = false
-    }
-  }
-
   let started = false
 
   /** 进页面时探一次环境（KeepAlive 下重复进入不再探）；顺带把上次那个会话接上 */
@@ -1338,8 +831,8 @@ export const useAiStore = defineStore('ai', () => {
    * （retireProcesses，上面的旧口径）。
    */
   function effectiveKey(session: AiSession): string {
-    const config = configOf(session)
-    return `${config.providerName}|${config.model}|${config.thinking}|${config.permission}`
+    const cfg = configOf(session)
+    return `${cfg.providerName}|${cfg.model}|${cfg.thinking}|${cfg.permission}`
   }
 
   const lastConfigKeys = new Map<string, string>()
@@ -1351,14 +844,14 @@ export const useAiStore = defineStore('ai', () => {
         const previous = lastConfigKeys.get(session.id)
         lastConfigKeys.set(session.id, key)
         // 第一趟（immediate）只是记账；会话刚出现（没有旧键）也不算换配置
-        if (!started || previous === undefined || previous === key)
+        if (!started)
           continue
         const run = runs.get(session.id)
-        if (!run?.live)
-          continue
-        if (run.running)
+        const action = configChangeAction(previous, key, run)
+        if (action === 'stale' && run)
           run.stale = true
-        else void recycle(session.id)
+        else if (action === 'recycle')
+          void recycle(session.id)
       }
     },
     { immediate: true },

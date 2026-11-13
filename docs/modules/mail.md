@@ -247,8 +247,15 @@ apps/desktop/src/renderer/src/stores/mail.ts
   发送 / 后台监视的登记与通知点击
   （startWatch）；拉取时机在这层
 apps/desktop/src/renderer/src/components/MailView.vue
-  邮箱页：左清单右阅读（头部一颗分段选择器切收件箱 / 已发送 / 联系人）；HTML 正文走 sandbox iframe（外链图片照常显示，脚本全禁，链接经顶层导航转交系统浏览器）；
-  附件片按 attachmentKind 分打开方式：图进 EP 查看器、md / html / docx / pptx / pdf 进 MailAttachmentDialog，其余点开另存为；
+  邮箱页外壳：两栏布局（左栏宽度住 theme.json 的 mailListWidth）、拉列表时机与那几个弹层
+  （账户 / 写邮件 / 回复）；左栏与右栏的内容分别在同目录的 MailSidebar / MailReaderPane
+apps/desktop/src/renderer/src/components/MailSidebar.vue
+  左栏：三签切换（收件箱 / 已发送 / 联系人）、邮件清单与推广段、多选删除、通讯录与它的右键菜单；
+  「账户」「写邮件」用 emit 交给父组件
+apps/desktop/src/renderer/src/components/MailReaderPane.vue
+  右栏阅读区：未配置 / 拉正文骨架 / 未选中三态；HTML 正文走 sandbox iframe（外链图片照常显示，脚本全禁，
+  链接经顶层导航转交系统浏览器）；附件片按 attachmentKind 分打开方式：图进 EP 查看器、
+  md / html / docx / pptx / pdf 进 MailAttachmentDialog，其余点开另存为；
   左首那块小方块按 attachmentTint 着色（唯一按文件类型着色的地方）
 apps/desktop/src/renderer/src/components/MailAttachmentDialog.vue
   附件预览弹层：md（MarkdownView）/ html（sandbox iframe，文档由 attachmentHtml 准备）/

@@ -29,7 +29,7 @@ import process from 'node:process'
  * 注意别顺手给 tsconfig.test.json 加 `incremental`：`noEmit` 下它还要读写 tsbuildinfo，
  * 实测反而更慢（串行 11.2s、并行 8.6s）。见 docs/dev-notes/build-performance.md。
  */
-const PARALLEL = ['lint', 'typecheck:code', 'typecheck:test', 'build:renderer']
+const PARALLEL = ['contract:check', 'lint', 'typecheck:code', 'typecheck:test', 'build:renderer']
 
 /**
  * 跑一个 pnpm 脚本，回传耗时与退出码。

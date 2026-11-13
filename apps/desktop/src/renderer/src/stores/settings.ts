@@ -1,7 +1,7 @@
-import type { AccentInkMode, CardPlacement, ColumnId, HomeCardId, RowId, RowTarget, ThemeConfig, ViewId, WidthField } from '@workbench/appearance'
+import type { ViewId } from '@workbench/appearance'
 import type { ThemeOrigin } from '@/theme-transition'
-import type { AppSettings, EffectiveTheme, Result, SyncDeviceInfo, ThemeSource, TokenUsageResult, TopBarStyle } from '@/types'
-import { addColumn as addColumnTo, clampCardGap, clampCardOpacity, clampColumnWidth, clampRowHeight, clampVideoFloatHeight, clampVideoFloatPercent, clampVideoFloatWidth, clampWidth, COLUMN_WIDTH_DEFAULT, DEFAULT_THEME, moveCard as placeCard, setColumnWidths as placeColumnWidths, removeColumn as removeColumnFrom, rowHeightMin, rowOf, sanitizeAccentColor, sanitizeAccentInkMode, sanitizeTheme, VIEW_LABELS } from '@workbench/appearance'
+import type { AppSettings, TopBarStyle } from '@/types'
+import { clampCardOpacity } from '@workbench/appearance'
 import { defineStore } from 'pinia'
 /**
  * 设置与外观：明暗、主题色、工作区背景、卡片浓度，以及首页的分栏布局。
@@ -12,24 +12,19 @@ import { defineStore } from 'pinia'
  *
  * 与「业务」无关的持久化状态都归这里，于是别的 store（项目、终端）要用设置时，
  * 只需 `useSettingsStore()`，不必把项目数据一起拖进来。
+ *
+ * 四块内容各自住在同目录的工厂里，这里只做装配（对外名字与行为不变）：
+ * `settings-theme.ts`（明暗与主题色）、`settings-layout.ts`（首页布局）、
+ * `settings-sync.ts`（别台机器的外观）、`settings-background.ts`（工作区背景）。
  */
-import { computed, ref, watch } from 'vue'
-import { bootstrapSnapshot, writeAccentColor, writeGlassBorder, writeTheme } from '@/bootstrap'
-import { notifyError, notifySuccess, notifyWarning } from '@/notify'
+import { ref, watch } from 'vue'
+import { bootstrapSnapshot, writeGlassBorder } from '@/bootstrap'
+import { notifyError, notifyWarning } from '@/notify'
 import { useSettingsBackground } from '@/stores/settings-background'
-import { applyThemeWithTransition } from '@/theme-transition'
+import { useSettingsLayout } from '@/stores/settings-layout'
+import { useSettingsSync } from '@/stores/settings-sync'
+import { resolveTheme, useSettingsTheme } from '@/stores/settings-theme'
 import { DEFAULT_SETTINGS, TOP_BAR_STYLES } from '@/types'
-
-function prefersDark(): boolean {
-  return window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false
-}
-
-/** 主进程推主题之前，先按设置自算一次，避免首帧闪一下白底 */
-function resolveTheme(value: AppSettings): EffectiveTheme {
-  if (value.theme === 'system')
-    return prefersDark() ? 'dark' : 'light'
-  return value.theme
-}
 
 export const useSettingsStore = defineStore('settings', () => {
   /**
@@ -43,79 +38,42 @@ export const useSettingsStore = defineStore('settings', () => {
   const bootstrap = bootstrapSnapshot()
   const settings = ref<AppSettings>(bootstrap ? bootstrap.settings : { ...DEFAULT_SETTINGS })
 
-  /**
-   * 当前实际生效的明暗（`system` 已被解析成 light / dark）。
-   * 界面里要按它画图标（顶栏的主题开关），所以不能只落在 DOM 属性上，得是个响应式的值。
-   */
-  const effectiveTheme = ref<EffectiveTheme>(bootstrap?.theme ?? 'light')
-
-  /**
-   * 已经生效的主题。
-   *
-   * 必须用这个变量做守卫，不能读 root.dataset.theme：View Transitions 的 DOM 改动要等旧快照
-   * 拍完才执行，是异步的。一次用户切换会从三条路各推一次主题进来（IPC 回包、主进程显式的
-   * 主题广播、nativeTheme 的 updated 广播），读 DOM 的话后两次会误判成「还没应用」，
-   * 于是连开好几个转场、互相把对方挤成 skipped，界面上就是动效错乱甚至没有。
-   *
-   * 起点取首屏快照里的主题：入口 main.ts 已经把那一份落到 <html> 上了，这里登记成
-   * 「已生效」，loadAppearance 拿回同一个值时才会直接返回，不会把首帧再改一遍。
-   */
-  let appliedTheme: EffectiveTheme | null = bootstrap?.theme ?? null
-
-  /**
-   * 用户刚点下的切换起点，等「真正生效的那一次应用」来认领。
-   * IPC 回包与主进程广播谁先到不确定，把起点挂在这里，谁先到都能从点击处扩散。
-   */
-  let pendingThemeOrigin: ThemeOrigin | null = null
-
-  /**
-   * 主题落在 <html> 上；同时切换 Element Plus 需要的 .dark 类。
-   *
-   * origin 是这次切换的起点（用户点主题按钮的位置），过渡会从那个点扩散开；没有起点
-   * （跟随系统、主进程推送）就从视口中心扩散。启动时传 animate: false，首帧不该播动画。
-   */
-  function applyTheme(
-    theme: EffectiveTheme,
-    options: { origin?: ThemeOrigin | null, animate?: boolean } = {},
-  ): void {
-    // 同一轮切换里的其余推送到这里直接返回，保证一次切换只开一个转场
-    if (appliedTheme === theme)
-      return
-
-    appliedTheme = theme
-    effectiveTheme.value = theme
-
-    const origin = options.origin ?? pendingThemeOrigin
-    pendingThemeOrigin = null
-
-    const commit = (): void => {
-      writeTheme(theme)
-      // 主题色的浅色 / 深色档是照着明暗派生的，换主题必须一起重算（同一帧落进去，快照才是完整的）
-      applyAccentColor()
-    }
-
-    if (options.animate === false) {
-      commit()
-      return
-    }
-    applyThemeWithTransition(commit, origin)
-  }
-
-  /**
-   * 主题色：把派生出来的整族变量写到 <html> 的内联样式上（写法见 bootstrap.ts，
-   * 与 mount 之前那次首屏落地共用同一份）。
-   */
-  function applyAccentColor(): void {
-    writeAccentColor(settings.value.accentColor, effectiveTheme.value, settings.value.accentInk)
-  }
-
-  /**
-   * 设置里一改就跟着落地：主题没变时 applyTheme 会直接返回，所以挑色后的落点是这条 watch。
-   * 首次加载、别的窗口改设置推回来的整份设置也都经它。
-   */
-  watch([() => settings.value.accentColor, () => settings.value.accentInk], applyAccentColor, {
-    immediate: true,
+  // 主题内核：先把落盘入口以闭包递进去（updateSettings 是下面的函数声明，已提升）
+  const theme = useSettingsTheme({
+    settings,
+    updateSettings: (patch, origin) => updateSettings(patch, origin),
   })
+
+  // ---------- 设置本体 ----------
+
+  async function updateSettings(
+    patch: Partial<AppSettings>,
+    origin?: ThemeOrigin | null,
+  ): Promise<boolean> {
+    const wantedHotkey = patch.hotkeyEnabled === true
+
+    // 主题的起点先挂上：主进程既会回包又会广播，哪条路先触发应用都要用同一个起点。
+    // 传了主题却没传起点（键盘切换）就是 null，从中心扩散。
+    if (patch.theme !== undefined)
+      theme.setPendingOrigin(origin)
+
+    const result = await window.workbench.updateSettings(patch)
+    if (!result.ok || !result.data) {
+      // 没保存成功就不会有主题应用来认领，别把起点留给下一次系统切换
+      theme.clearPendingOrigin()
+      notifyError(result.error ?? '保存设置失败')
+      return false
+    }
+
+    settings.value = result.data
+    theme.applyTheme(resolveTheme(result.data), { origin })
+
+    // 主进程注册失败时会自动把开关关掉，这里替它把原因说清楚
+    if (wantedHotkey && !result.data.hotkeyEnabled) {
+      notifyWarning(`快捷键 ${patch.hotkey ?? result.data.hotkey} 被系统或其他应用占用，已自动停用`)
+    }
+    return true
+  }
 
   /**
    * 程序名：自绘的那条标题栏由组件自己读设置，而**窗口标题与托盘提示归系统**，只能在
@@ -130,48 +88,6 @@ export const useSettingsStore = defineStore('settings', () => {
     name => window.workbench?.setAppName(name),
     { immediate: true },
   )
-
-  // ---------- 设置本体 ----------
-
-  async function updateSettings(
-    patch: Partial<AppSettings>,
-    origin?: ThemeOrigin | null,
-  ): Promise<boolean> {
-    const wantedHotkey = patch.hotkeyEnabled === true
-
-    // 主题的起点先挂上：主进程既会回包又会广播，哪条路先触发应用都要用同一个起点。
-    // 传了主题却没传起点（键盘切换）就是 null，从中心扩散。
-    if (patch.theme !== undefined)
-      pendingThemeOrigin = origin ?? null
-
-    const result = await window.workbench.updateSettings(patch)
-    if (!result.ok || !result.data) {
-      // 没保存成功就不会有主题应用来认领，别把起点留给下一次系统切换
-      pendingThemeOrigin = null
-      notifyError(result.error ?? '保存设置失败')
-      return false
-    }
-
-    settings.value = result.data
-    applyTheme(resolveTheme(result.data), { origin })
-
-    // 主进程注册失败时会自动把开关关掉，这里替它把原因说清楚
-    if (wantedHotkey && !result.data.hotkeyEnabled) {
-      notifyWarning(`快捷键 ${patch.hotkey ?? result.data.hotkey} 被系统或其他应用占用，已自动停用`)
-    }
-    return true
-  }
-
-  /**
-   * 快速切换明暗（顶栏那颗图标）。
-   *
-   * 按「当前生效主题」取反后显式写进设置：原本是「跟随系统」的话，点一下就等于手动
-   * 指定了相反的明或暗。origin 传点击位置，过渡动画从图标那一点扩散开。
-   */
-  function toggleTheme(origin?: ThemeOrigin | null): Promise<boolean> {
-    const next: ThemeSource = effectiveTheme.value === 'dark' ? 'light' : 'dark'
-    return updateSettings({ theme: next }, origin)
-  }
 
   /** 顶部三条栏的样式（标题栏 / 欢迎语 / 筛选栏怎么跟壁纸叠） */
   async function setTopBarStyle(style: TopBarStyle): Promise<boolean> {
@@ -221,27 +137,6 @@ export const useSettingsStore = defineStore('settings', () => {
     return updateSettings({ navHidden: !visible })
   }
 
-  /**
-   * 主题色：交互态与主按钮用的颜色，空串表示回到默认的中性色。
-   * 只影响 Element Plus 的主色一族与全局焦点环，状态色和终端不动。
-   */
-  async function setAccentColor(color: string): Promise<boolean> {
-    const next = sanitizeAccentColor(color)
-    if (next === settings.value.accentColor)
-      return true
-
-    return updateSettings({ accentColor: next })
-  }
-
-  /** 铺在主题色上的文字色：自动 / 白字 / 黑字 */
-  async function setAccentInk(mode: AccentInkMode): Promise<boolean> {
-    const next = sanitizeAccentInkMode(mode)
-    if (next === settings.value.accentInk)
-      return true
-
-    return updateSettings({ accentInk: next })
-  }
-
   // 工作区背景（状态与动作）在 settings-background.ts：这里只装配并转出去
   const background = useSettingsBackground({ settings, updateSettings })
 
@@ -287,322 +182,10 @@ export const useSettingsStore = defineStore('settings', () => {
     await updateSettings({ glassBorder: enabled })
   }
 
-  // ---------- 首页布局 ----------
+  // ---------- 首页布局 / 别台机器的外观 ----------
 
-  /**
-   * 首页的分栏布局（theme.json：外观 + 布局都在这个文件里）。
-   *
-   * 与终端高度同一套做法：拖动栏宽 / 行高时只改这个 ref 让布局跟手，
-   * 松手才整份落盘，免得每动一格就写一次文件。
-   *
-   * 只读它的布局字段（cards / 栏与行 / 间距）。改成外观那几项走的是 `settings`：
-   * 适配层在那边把两份合起来，这里的 `appearance` 可能比适配层旧一拍 ——
-   * 无妨，因为每次落盘都是把补丁交给适配层、由它并到自己那份权威值上（见 workbench/state.ts）。
-   */
-  const themeConfig = ref<ThemeConfig>(sanitizeTheme(bootstrap?.themeConfig ?? DEFAULT_THEME))
-
-  const cardGap = computed(() => themeConfig.value.cardGap)
-
-  function applyThemeConfig(value: ThemeConfig): void {
-    themeConfig.value = sanitizeTheme(value)
-  }
-
-  async function saveThemeConfig(patch: Partial<ThemeConfig>): Promise<boolean> {
-    const result = await window.workbench.updateThemeConfig(patch)
-    if (!result.ok || !result.data) {
-      notifyError(result.error ?? '保存首页布局失败')
-      return false
-    }
-    applyThemeConfig(result.data)
-    return true
-  }
-
-  /**
-   * 把一块卡片挪到落点上（拖放收手时走它）：本地先跟手，随即落盘。
-   *
-   * 行清单也一起换 —— 「另起一行」会多出一行、卡片被搬空的那一行会跟着没了
-   * （见 packages/appearance/src/theme.ts 的 moveCard），所以这两份必须同一次写下去。
-   */
-  async function moveCard(id: HomeCardId, target: RowTarget): Promise<void> {
-    const moved = placeCard(themeConfig.value.cards, themeConfig.value.columns, id, target)
-    themeConfig.value.cards = moved.cards
-    themeConfig.value.columns = moved.columns
-    await saveThemeConfig({ cards: moved.cards, columns: moved.columns })
-  }
-
-  /** 拖动行下边缘改高度：过程中只改本地，松手时由 commitColumns 落盘 */
-  function setRowHeight(id: RowId, height: number): void {
-    const row = rowOf(themeConfig.value.columns, id)
-    if (!row)
-      return
-    row.height = clampRowHeight(height, rowHeightMin(themeConfig.value.cards, id))
-  }
-
-  /** 切换一行的高度模式（固定 / 自适应）；一次性动作，切完直接落盘 */
-  async function toggleRowMode(id: RowId): Promise<void> {
-    const row = rowOf(themeConfig.value.columns, id)
-    if (!row)
-      return
-    row.mode = row.mode === 'flex' ? 'fixed' : 'flex'
-    await commitColumns()
-  }
-
-  /**
-   * 关掉 / 打开首页的某一块卡片。
-   *
-   * 关掉只是不画它：它那一行与行内的位置都留着，再打开时回到原来那一格（见 packages/appearance/src/theme.ts）。
-   * 与拖动落盘走同一条路（commitCards）：整份送出去，免得别的卡片停在旧快照。
-   */
-  async function setCardVisible(id: HomeCardId, visible: boolean): Promise<void> {
-    themeConfig.value.cards[id].hidden = !visible
-    await commitCards()
-  }
-
-  /** 松手落盘：所有卡片一起送，避免只有被拖的那块更新、其余停留在旧快照 */
-  async function commitCards(): Promise<void> {
-    const cards = {} as Record<HomeCardId, CardPlacement>
-    for (const id of Object.keys(themeConfig.value.cards) as HomeCardId[]) {
-      cards[id] = { ...themeConfig.value.cards[id] }
-    }
-    await saveThemeConfig({ cards })
-  }
-
-  /**
-   * 拖动某一栏的宽度：只改本地让界面跟手，**松手用 `commitThemeWidth` 整份落盘**
-   * （它也在 theme.json 里）。档位（min / max / 默认）由 `@workbench/appearance` 的
-   * `WIDTH_FIELDS` 一处定，这里不重复。
-   */
-  function setThemeWidth(field: WidthField, width: number): void {
-    themeConfig.value[field] = clampWidth(field, width)
-  }
-
-  /** 松手落盘某一栏的宽度（整份 saveThemeConfig，与别处一致） */
-  async function commitThemeWidth(field: WidthField): Promise<void> {
-    const patch: Partial<ThemeConfig> = {}
-    patch[field] = themeConfig.value[field]
-    await saveThemeConfig(patch)
-  }
-
-  /**
-   * 视频页左栏（目录树）收起 / 展开：收起只是不画那一列，播放器占满整行，
-   * 入口在播放器头部那颗按钮上。落 theme.json（与笔记树宽度同属「这一页长什么样」）。
-   */
-  async function setVideoTreeCollapsed(collapsed: boolean): Promise<boolean> {
-    if (themeConfig.value.videoTreeCollapsed === collapsed)
-      return true
-    return saveThemeConfig({ videoTreeCollapsed: collapsed })
-  }
-
-  /**
-   * 导航上各页的名字：**AI 页跟程序名走** —— 用户在设置里把程序叫什么，这个智能体就叫什么
-   * （导航栏与设置菜单两处都从这儿取）；其余页照 @workbench/appearance 的默认名。
-   */
-  function viewLabelOf(id: ViewId): string {
-    return id === 'ai' ? settings.value.appName : VIEW_LABELS[id]
-  }
-
-  /**
-   * AI 助手页左栏（项目 → 会话那棵树）收起 / 展开：收起后对话占满整行，
-   * 入口在对话区左上角那颗按钮上。落 theme.json（与视频树收起同一套做法）。
-   */
-  async function setAiTreeCollapsed(collapsed: boolean): Promise<boolean> {
-    if (themeConfig.value.aiTreeCollapsed === collapsed)
-      return true
-    return saveThemeConfig({ aiTreeCollapsed: collapsed })
-  }
-
-  /**
-   * 画中画悬浮小窗的位置与尺寸：与视频树宽同一套做法 —— 拖动 / 缩放时只改本地让界面跟手，
-   * 松手才整份落盘（四个字段一起送，theme.json 一份快照一次写完）。
-   */
-  function setVideoFloatGeometry(geometry: { x: number, y: number, w: number, h: number }): void {
-    themeConfig.value.videoFloatX = clampVideoFloatPercent(geometry.x)
-    themeConfig.value.videoFloatY = clampVideoFloatPercent(geometry.y)
-    themeConfig.value.videoFloatW = clampVideoFloatWidth(geometry.w)
-    themeConfig.value.videoFloatH = clampVideoFloatHeight(geometry.h)
-  }
-
-  async function commitVideoFloatGeometry(): Promise<void> {
-    await saveThemeConfig({
-      videoFloatX: themeConfig.value.videoFloatX,
-      videoFloatY: themeConfig.value.videoFloatY,
-      videoFloatW: themeConfig.value.videoFloatW,
-      videoFloatH: themeConfig.value.videoFloatH,
-    })
-  }
-
-  /** 拖动分栏边界：一次给出那一条缝上要改的栏与新宽度（两栏一起改），过程中只改本地 */
-  function setColumnWidths(widths: Record<ColumnId, number>): void {
-    themeConfig.value.columns = placeColumnWidths(themeConfig.value.columns, widths)
-  }
-
-  /**
-   * 松手落盘栏（连行一起）：整份送出去 —— 拆栏 / 收栏 / 改栏宽 / 改行高都走它，
-   * 免得只更新一栏。行是栏的一部分，所以行高与行的高度模式也落在这一份里。
-   */
-  async function commitColumns(): Promise<void> {
-    await saveThemeConfig({
-      columns: themeConfig.value.columns.map(column => ({
-        ...column,
-        rows: column.rows.map(row => ({ ...row })),
-      })),
-    })
-  }
-
-  /**
-   * 切换某一栏的宽度模式：自适应 ↔ 固定。
-   *
-   * 固定时取它此刻的显示宽度（由画布量了传进来）：切换前后那一栏的宽度看起来不动，
-   * 用户只是把「当前这个宽度」钉住了 —— 与行上那颗「固定 / 自适应」同一个做法。
-   */
-  async function toggleColumnMode(id: ColumnId, currentWidth: number): Promise<void> {
-    const column = themeConfig.value.columns.find(item => item.id === id)
-    if (!column)
-      return
-
-    column.width
-      = column.width === null ? clampColumnWidth(currentWidth, COLUMN_WIDTH_DEFAULT) : null
-    await commitColumns()
-  }
-
-  /** 在某一栏右边拆出一栏（宽度跟着它）；到栏数上限时不动 */
-  async function addColumn(afterId: ColumnId): Promise<void> {
-    const next = addColumnTo(themeConfig.value.columns, afterId)
-    if (next === themeConfig.value.columns)
-      return
-
-    themeConfig.value.columns = next
-    await commitColumns()
-  }
-
-  /** 收掉一栏：栏里的行整条并到相邻那一栏；只剩一栏时不动 */
-  async function removeColumn(id: ColumnId): Promise<void> {
-    const removed = removeColumnFrom(themeConfig.value.cards, themeConfig.value.columns, id)
-    if (!removed)
-      return
-
-    themeConfig.value.columns = removed.columns
-    themeConfig.value.cards = removed.cards
-    await saveThemeConfig({ columns: removed.columns, cards: removed.cards })
-  }
-
-  /** 卡片间距是设置项，改完立即落盘（栏间、行间、行内卡片、项目卡网格同时生效） */
-  async function setCardGap(value: number): Promise<void> {
-    const next = clampCardGap(value)
-    themeConfig.value.cardGap = next
-    await saveThemeConfig({ cardGap: next })
-  }
-
-  /** 恢复默认布局；栏数 / 栏宽 / 行数与行高 / 卡片位置 / 间距 / 关掉的卡片全部回到默认 */
-  async function resetLayout(): Promise<void> {
-    const fallback = sanitizeTheme(DEFAULT_THEME)
-    themeConfig.value = fallback
-    await saveThemeConfig({
-      cardGap: fallback.cardGap,
-      columns: fallback.columns,
-      cards: fallback.cards,
-    })
-  }
-
-  // ---------- 别台机器的外观 ----------
-
-  /**
-   * 同步仓库里其它机器（含各自的外观配置快照）。
-   *
-   * 只读本地那份克隆、不联网，所以设置界面打开时问一次是安全的；内容是上一次同步取回来的样子。
-   */
-  const syncDevices = ref<SyncDeviceInfo[]>([])
-
-  async function loadSyncDevices(): Promise<void> {
-    const result = await window.workbench.listSyncDevices()
-    if (result.ok && result.data) {
-      syncDevices.value = result.data
-      return
-    }
-    // 取不到就当没有：没填仓库地址、还没同步过都是常态，界面上是一句空态提示
-    syncDevices.value = []
-    if (!result.ok)
-      console.warn('[workbench] 读取同步设备失败', result.error)
-  }
-
-  /**
-   * 采用另一台机器的配置（设置界面里那一行的「应用」）。
-   *
-   * **只能由用户点**：配置是「以谁的为准」而不是能合并的数据，两台机器互相自动采用对方的
-   * 会来回覆盖、永远收敛不了（详见 packages/appearance/src/sync-config.ts 的文件头）。
-   * 走的是既有的 updateThemeConfig 通道 —— 外观与布局在同一个文件里，所以一次写入就够，
-   * 主题过渡、终端高度、卡片摆放这些联动不必另写一套。
-   */
-  async function applySyncAppearance(deviceId: string): Promise<boolean> {
-    const device = syncDevices.value.find(item => item.id === deviceId)
-    if (!device?.theme) {
-      notifyWarning('那台机器没有可用的配置')
-      return false
-    }
-
-    if (!(await saveThemeConfig(device.theme)))
-      return false
-
-    notifySuccess(`已应用「${device.name}」的外观与布局`)
-    return true
-  }
-
-  /**
-   * 手动同步一次 Token 用量（面板上的同步按钮）：绕过自动同步的节流，
-   * **只推拉用量分片、不碰外观配置** —— 外观走下面的 syncAppearanceNow。
-   *
-   * 自动同步在后台跑、失败只体现在状态点上，手动点的这一次必须把原因说清楚。
-   * 返回后端结果，让调用方按需再取数字（Token 卡片拿到后会立刻重算展示）。
-   */
-  async function syncUsageNow(): Promise<Result<TokenUsageResult> | null> {
-    try {
-      const result = await window.workbench.syncTokenUsage()
-      if (!result.ok) {
-        notifyError(result.error ?? '同步失败')
-        return result
-      }
-
-      const error = result.data?.sync.error
-      if (error)
-        notifyError(error)
-      else notifySuccess(`已同步${deviceTextOf(result.data)}`)
-      return result
-    }
-    catch (err) {
-      // 版本不一致、后端没起来都可能走到这里：说一声比按钮转完圈什么都不发生强
-      notifyError(err instanceof Error ? err.message : '同步失败')
-      return null
-    }
-  }
-
-  /**
-   * 手动同步一次外观配置（设置 → 外观 →「同步一次」）：推本机 theme.json、拉回别的机器的。
-   * 与用量同步互不相干 —— 不实读用量、不推分片。
-   */
-  async function syncAppearanceNow(): Promise<boolean> {
-    try {
-      const result = await window.workbench.syncThemeConfig()
-      if (!result.ok) {
-        notifyError(result.error ?? '同步外观配置失败')
-        return false
-      }
-      notifySuccess('外观配置已同步')
-      return true
-    }
-    catch (err) {
-      notifyError(err instanceof Error ? err.message : '同步外观配置失败')
-      return false
-    }
-  }
-
-  /** 「已同步 · 本机、另一台」里那一段设备名；没开同步就是空串 */
-  function deviceTextOf(data: TokenUsageResult | undefined): string {
-    const sync = data?.sync
-    if (!sync?.enabled)
-      return ''
-    const others = sync.devices.map(item => item.name).join('、')
-    return others ? ` · ${sync.deviceName}、${others}` : ` · ${sync.deviceName}`
-  }
+  const layout = useSettingsLayout({ settings })
+  const sync = useSettingsSync({ saveThemeConfig: layout.saveThemeConfig })
 
   // ---------- 载入与订阅 ----------
 
@@ -614,36 +197,47 @@ export const useSettingsStore = defineStore('settings', () => {
    * 首屏快照是启动那一瞬的值（数据目录可能在启动后被换过），所以这里仍照当前值核一遍。
    */
   async function loadAppearance(): Promise<void> {
-    settings.value = await window.workbench.getSettings()
-    applyTheme(resolveTheme(settings.value), { animate: false })
-    applyThemeConfig(await window.workbench.getThemeConfig())
+    const settingsResult = await window.workbench.getSettings()
+    if (settingsResult.ok && settingsResult.data) {
+      settings.value = settingsResult.data
+      theme.applyTheme(resolveTheme(settings.value), { animate: false })
+    }
+    else {
+      console.warn('读取设置失败', settingsResult.error)
+    }
+
+    const themeResult = await window.workbench.getThemeConfig()
+    if (themeResult.ok && themeResult.data)
+      layout.applyThemeConfig(themeResult.data)
+    else
+      console.warn('读取首页布局失败', themeResult.error)
   }
 
   /** 主进程 / 别的窗口推设置与主题过来时同步本地（由 store 的 init 统一调用） */
   function installListeners(): void {
     window.workbench.onSettingsChanged((value) => {
       settings.value = value
-      applyTheme(resolveTheme(value))
+      theme.applyTheme(resolveTheme(value))
     })
-    window.workbench.onTheme(applyTheme)
+    window.workbench.onTheme(theme.applyTheme)
     // 首页布局被改（本地保存或另一个窗口），整份同步
-    window.workbench.onThemeConfig(applyThemeConfig)
+    window.workbench.onThemeConfig(layout.applyThemeConfig)
     // 跟随系统时，系统切换主题要即时响应（主进程那条事件是另一重保险）
     window.matchMedia?.('(prefers-color-scheme: dark)').addEventListener('change', () => {
       if (settings.value.theme === 'system')
-        applyTheme(resolveTheme(settings.value))
+        theme.applyTheme(resolveTheme(settings.value))
     })
   }
 
   return {
     settings,
-    effectiveTheme,
+    effectiveTheme: theme.effectiveTheme,
     updateSettings,
-    toggleTheme,
-    applyTheme,
+    toggleTheme: theme.toggleTheme,
+    applyTheme: theme.applyTheme,
     setTopBarStyle,
-    setAccentColor,
-    setAccentInk,
+    setAccentColor: theme.setAccentColor,
+    setAccentInk: theme.setAccentInk,
     setViewVisible,
     setViewOrder,
     setNavVisible,
@@ -652,35 +246,10 @@ export const useSettingsStore = defineStore('settings', () => {
     cardOpacity,
     setCardOpacity,
     setGlassBorder,
-    // 布局
-    themeConfig,
-    cardGap,
-    applyThemeConfig,
-    moveCard,
-    setRowHeight,
-    toggleRowMode,
-    setCardVisible,
-    commitCards,
-    viewLabelOf,
-    setColumnWidths,
-    commitColumns,
-    toggleColumnMode,
-    addColumn,
-    removeColumn,
-    setThemeWidth,
-    commitThemeWidth,
-    setAiTreeCollapsed,
-    setVideoTreeCollapsed,
-    setVideoFloatGeometry,
-    commitVideoFloatGeometry,
-    setCardGap,
-    resetLayout,
-    // 别台机器的外观
-    syncDevices,
-    loadSyncDevices,
-    applySyncAppearance,
-    syncUsageNow,
-    syncAppearanceNow,
+    // 布局（整组来自 settings-layout.ts）
+    ...layout,
+    // 别台机器的外观（整组来自 settings-sync.ts）
+    ...sync,
     // 生命周期
     loadAppearance,
     installListeners,

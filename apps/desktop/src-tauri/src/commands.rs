@@ -56,13 +56,20 @@ pub fn work_log_store() -> &'static JsonStore {
 pub fn load_all() {
     // 先做一次性的文件改名：必须早于 token_store().load()，否则会先按新名字读到空文件
     paths::migrate_legacy_files();
-    data_store().load();
-    theme_store().load();
-    token_store().load();
-    work_log_store().load();
-    crate::ai_news::ai_news_store().load();
-    crate::etf::etf_store().load();
-    crate::vault::vault_store().load();
+    // 载入失败不挡启动（渲染层拿 `*_load` 的 Err 决定怎么降级），但要在控制台留痕
+    for (label, result) in [
+        ("workbench-data", data_store().load()),
+        ("theme", theme_store().load()),
+        ("token-usage", token_store().load()),
+        ("work-log", work_log_store().load()),
+        ("ai-news", crate::ai_news::ai_news_store().load()),
+        ("etf", crate::etf::etf_store().load()),
+        ("vault", crate::vault::vault_store().load()),
+    ] {
+        if let Err(err) = result {
+            eprintln!("[workbench] {label} 载入失败：{err}");
+        }
+    }
 }
 
 /// 退出前同步落盘，防止防抖窗口内的改动丢失
@@ -80,8 +87,8 @@ pub fn flush_all() {
 // ---------- 数据文件 ----------
 
 #[tauri::command]
-pub fn data_load() -> Value {
-    data_store().get()
+pub fn data_load() -> Result<Value, String> {
+    data_store().read()
 }
 
 #[tauri::command]
@@ -91,8 +98,8 @@ pub fn data_save(value: Value) {
 }
 
 #[tauri::command]
-pub fn theme_load() -> Value {
-    theme_store().get()
+pub fn theme_load() -> Result<Value, String> {
+    theme_store().read()
 }
 
 #[tauri::command]
@@ -102,8 +109,8 @@ pub fn theme_save(value: Value) {
 }
 
 #[tauri::command]
-pub fn token_load() -> Value {
-    token_store().get()
+pub fn token_load() -> Result<Value, String> {
+    token_store().read()
 }
 
 #[tauri::command]
@@ -115,8 +122,8 @@ pub fn token_save(value: Value) {
 // ---------- 工作日志（本机文件；多机共享走分片同步） ----------
 
 #[tauri::command]
-pub fn work_log_load() -> Value {
-    work_log_store().get()
+pub fn work_log_load() -> Result<Value, String> {
+    work_log_store().read()
 }
 
 #[tauri::command]
@@ -237,7 +244,7 @@ pub fn note_sync(dir: String) -> Result<Value, String> {
 
 /// 探测笔记文件夹的 git 状态（有没有仓库、origin 是什么）：只读，界面拿它决定给不给同步入口
 #[tauri::command(async)]
-pub fn note_repo_state(dir: String) -> Result<Value, String> {
+pub fn note_repo_state(dir: String) -> Result<crate::sync::NoteRepoStateWire, String> {
     crate::sync::repo_state(&dir)
 }
 
@@ -400,7 +407,7 @@ pub fn kb_index_build(root: String, generated_at: String) -> Result<Value, Strin
 /// 探测 AI 运行时：内置的 Pi（resources/pi）优先，退回 PATH 上的全局 pi。
 /// 渲染层拿它决定 AI 助手页给哪种提示、命令怎么拼（内置时用 node 直跑 cli.js）。
 #[tauri::command(async)]
-pub fn ai_runtime(app: AppHandle) -> Value {
+pub fn ai_runtime(app: AppHandle) -> Result<crate::ai::AiRuntimeStatus, String> {
     crate::ai::runtime(&app)
 }
 
@@ -613,7 +620,7 @@ pub fn token_zstd_decode(path: String) -> Result<String, String> {
 
 /// 本机设备标识（Token 同步用）；首次调用生成并落盘
 #[tauri::command(async)]
-pub fn token_device() -> Result<Value, String> {
+pub fn token_device() -> Result<crate::sync::TokenDevice, String> {
     crate::sync::device_info()
 }
 
@@ -773,8 +780,8 @@ pub fn token_sync_shards(repo: String) -> Result<crate::sync::SyncFiles, String>
 /// 登录状态：能不能登录（是否内置了凭据）、回环地址、已登录哪些 provider。
 /// **不含任何 token** —— token 只在 Rust 侧流转（见 oauth.rs）。
 #[tauri::command]
-pub fn auth_status() -> Value {
-    crate::oauth::status()
+pub fn auth_status() -> Result<crate::oauth::AuthStatusWire, String> {
+    Ok(crate::oauth::status())
 }
 
 /// 重新拉一次账号信息（启动时刷新头像与昵称）
@@ -887,7 +894,7 @@ pub fn zentao_open_site() -> Result<(), String> {
 // ---------- 系统能力 ----------
 
 #[tauri::command(async)]
-pub fn check_port(port: u16) -> Value {
+pub fn check_port(port: u16) -> Result<crate::system::PortCheckResult, String> {
     system::check_port(port)
 }
 
@@ -921,8 +928,8 @@ pub fn open_in_vscode(path: String) -> Result<(), String> {
 /// 一次调用要起 `cmd /C <bin> --version`，Windows 上 npm 是 .cmd、还会再拉一个 node，
 /// 冷启动能到秒级 —— 必须异步，否则启动时界面就是冻住的（这条是踩过的坑）。
 #[tauri::command(async)]
-pub fn probe_version(bin: String) -> Option<String> {
-    crate::proc::probe_version(&bin)
+pub fn probe_version(bin: String) -> Result<Option<String>, String> {
+    crate::proc::probe_version_checked(&bin)
 }
 
 // ---------- 进程会话 ----------
@@ -956,16 +963,17 @@ pub fn session_write(app: AppHandle, session_id: String, line: String) -> Result
 
 // ---------- nvm ----------
 
-/// nvm 探测结果；形状与 shared 里的 NvmStatus 一致
+/// nvm 探测结果；形状由 Rust 生成（`NvmStatus`，见 contract.generated.ts）
 #[tauri::command(async)]
-pub fn nvm_status() -> Value {
-    crate::nvm::status()
+pub fn nvm_status() -> Result<crate::nvm::NvmStatus, String> {
+    Ok(crate::nvm::status())
 }
 
 /// 某个 nvm 版本对应的安装目录，用于给子进程前置 PATH
 #[tauri::command(async)]
-pub fn nvm_node_dir(version: String) -> Option<String> {
-    crate::nvm::find_node_dir(&version).map(|dir| dir.to_string_lossy().into_owned())
+pub fn nvm_node_dir(version: String) -> Result<Option<String>, String> {
+    Ok(crate::nvm::find_node_dir(&version)?
+        .map(|dir| dir.to_string_lossy().into_owned()))
 }
 
 // ---------- nrm ----------
@@ -973,7 +981,7 @@ pub fn nvm_node_dir(version: String) -> Option<String> {
 /// nrm（npm 镜像源管理器）状态：装没装、当前镜像、可切换的清单。
 /// 一次调用要起 nrm（node 冷启动一秒上下），必须异步。
 #[tauri::command(async)]
-pub fn nrm_status() -> Value {
+pub fn nrm_status() -> Result<crate::nrm::NrmStatus, String> {
     crate::nrm::status()
 }
 
@@ -1094,11 +1102,11 @@ pub fn resolve_quit_choice(app: AppHandle, choice: String) {
 
 // ---------- 残留进程清理 ----------
 
-/// 进程创建时间（毫秒，Unix 纪元）；打不开返回 null。
-/// 残留清理用它判断「这个 PID 还是不是当初那个进程」。
+/// 进程创建时间（毫秒，Unix 纪元）。`Ok(None)` = 进程已退出 / 没有这个 PID；
+/// `Err` = 查询本身失败（权限等）。残留清理用它判断「这个 PID 还是不是当初那个进程」。
 #[tauri::command(async)]
-pub fn process_created_at(pid: u32) -> Option<u64> {
-    crate::proc::process_created_at(pid)
+pub fn process_created_at(pid: u32) -> Result<Option<u64>, String> {
+    crate::proc::process_created_at_checked(pid)
 }
 
 /// 按进程树结束指定 PID（清理残留进程用；清理前必须先核对命令行）
@@ -1133,20 +1141,33 @@ pub fn fs_read_base64(path: String) -> Result<String, String> {
 }
 
 #[tauri::command(async)]
-pub fn fs_exists(path: String) -> bool {
-    PathBuf::from(&path).exists()
+pub fn fs_exists(path: String) -> Result<bool, String> {
+    match std::fs::metadata(&path) {
+        Ok(_) => Ok(true),
+        // 「不存在」是正常答案；其余（权限 / 路径不可达）说明这次没问到
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(err) => Err(format!("检查路径失败（{path}）：{err}")),
+    }
 }
 
 /// 路径存在且是目录（扫描项目、判断产物目录都要用）
 #[tauri::command(async)]
-pub fn fs_is_dir(path: String) -> bool {
-    PathBuf::from(&path).is_dir()
+pub fn fs_is_dir(path: String) -> Result<bool, String> {
+    match std::fs::metadata(&path) {
+        Ok(meta) => Ok(meta.is_dir()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(err) => Err(format!("检查目录失败（{path}）：{err}")),
+    }
 }
 
 /// 文件的最后修改时间（毫秒）。图标缓存靠它判断「程序升级换了图标」而失效。
 #[tauri::command(async)]
-pub fn fs_stat_mtime(path: String) -> Option<u64> {
-    std::fs::metadata(&path).ok().map(|meta| fs_util::modified_ms(&meta))
+pub fn fs_stat_mtime(path: String) -> Result<Option<u64>, String> {
+    match std::fs::metadata(&path) {
+        Ok(meta) => Ok(Some(fs_util::modified_ms(&meta))),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(err) => Err(format!("读取修改时间失败（{path}）：{err}")),
+    }
 }
 
 /// 列目录：只回元数据，怎么用由渲染层决定
@@ -1183,7 +1204,7 @@ pub fn design_write(project_dir: String, content: String) -> Result<design::Writ
 /// 内置壁纸目录：打包后走 resource_dir，开发态直接读仓库里的目录
 /// （开发态资源不经过打包流程，不会出现在 target 下面）。
 #[tauri::command(async)]
-pub fn list_wallpapers(app: AppHandle) -> Vec<String> {
+pub fn list_wallpapers(app: AppHandle) -> Result<Vec<String>, String> {
     fn candidates(app: &AppHandle) -> Vec<PathBuf> {
         let mut list = Vec::new();
         if let Ok(dir) = app.path().resource_dir() {
@@ -1198,13 +1219,13 @@ pub fn list_wallpapers(app: AppHandle) -> Vec<String> {
         list
     }
 
+    // 一个壁纸目录都没有是正常状态（便携 / 裁剪过的包），不是错误
     let Some(dir) = candidates(&app).into_iter().find(|path| path.is_dir()) else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
 
-    let Ok(entries) = std::fs::read_dir(&dir) else {
-        return Vec::new();
-    };
+    let entries = std::fs::read_dir(&dir)
+        .map_err(|err| format!("读取壁纸目录失败（{}）：{err}", dir.display()))?;
 
     let mut files: Vec<String> = entries
         .flatten()
@@ -1213,7 +1234,7 @@ pub fn list_wallpapers(app: AppHandle) -> Vec<String> {
         .map(|path| path.to_string_lossy().into_owned())
         .collect();
     files.sort();
-    files
+    Ok(files)
 }
 
 #[cfg(test)]
@@ -1262,13 +1283,13 @@ mod tests {
         let file = dir.join("a.txt");
         std::fs::write(&file, "x").unwrap();
 
-        assert!(fs_exists(dir.to_string_lossy().into_owned()));
-        assert!(!fs_is_dir(file.to_string_lossy().into_owned()));
-        assert!(fs_is_dir(dir.to_string_lossy().into_owned()));
+        assert!(fs_exists(dir.to_string_lossy().into_owned()).expect("检查路径失败"));
+        assert!(!fs_is_dir(file.to_string_lossy().into_owned()).expect("检查目录失败"));
+        assert!(fs_is_dir(dir.to_string_lossy().into_owned()).expect("检查目录失败"));
 
         let ghost = dir.join("ghost");
-        assert!(!fs_exists(ghost.to_string_lossy().into_owned()));
-        assert!(!fs_is_dir(ghost.to_string_lossy().into_owned()));
+        assert!(!fs_exists(ghost.to_string_lossy().into_owned()).expect("检查路径失败"));
+        assert!(!fs_is_dir(ghost.to_string_lossy().into_owned()).expect("检查目录失败"));
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -1279,8 +1300,12 @@ mod tests {
         let file = dir.join("a.txt");
         std::fs::write(&file, "x").unwrap();
 
-        assert!(fs_stat_mtime(file.to_string_lossy().into_owned()).is_some());
-        assert!(fs_stat_mtime(dir.join("ghost").to_string_lossy().into_owned()).is_none());
+        assert!(fs_stat_mtime(file.to_string_lossy().into_owned())
+            .expect("读取修改时间失败")
+            .is_some());
+        assert!(fs_stat_mtime(dir.join("ghost").to_string_lossy().into_owned())
+            .expect("缺失文件不该算读取失败")
+            .is_none());
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -1330,14 +1355,23 @@ mod tests {
 
     #[test]
     fn probe_version_is_none_for_a_program_that_is_not_there() {
-        // 走 `cmd /C <bin> --version`：命令根本起不来时安静地回 None，不报错
-        assert_eq!(probe_version("workbench-no-such-binary-xyz".to_string()), None);
+        // 走 `cmd /C <bin> --version`：命令起来了但没用（退出码非 0）时回 Ok(None)；
+        // 只有连 shell 都起不来才是 Err
+        assert_eq!(
+            probe_version("workbench-no-such-binary-xyz".to_string()),
+            Ok(None)
+        );
     }
 
     #[test]
     fn process_created_at_knows_the_current_process() {
-        assert!(process_created_at(std::process::id()).is_some());
-        assert_eq!(process_created_at(u32::MAX), None);
+        assert!(process_created_at(std::process::id())
+            .expect("查询当前进程失败")
+            .is_some());
+        assert_eq!(
+            process_created_at(u32::MAX).expect("不存在的 PID 不该算查询失败"),
+            None
+        );
     }
 
     #[test]

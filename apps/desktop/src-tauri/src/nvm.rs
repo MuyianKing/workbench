@@ -6,7 +6,7 @@
 //!
 //! 这套规则与判据是从 Electron 版 `main/nvm.ts` 整段搬过来的，连同它的用例。
 
-use serde_json::{json, Value};
+use serde::Serialize;
 use std::path::{Path, PathBuf};
 
 /// 版本目录名：vX.Y.Z
@@ -210,46 +210,71 @@ fn version_of_symlink(symlink: &Option<String>) -> Option<String> {
     }
 }
 
-/// 某个版本对应的安装目录，找不到返回 None
-pub fn find_node_dir(version: &str) -> Option<PathBuf> {
-    let root = resolve_root()?;
+/// 某个版本对应的安装目录：`Ok(None)` = 没装 nvm 或这个版本没装。
+///
+/// 这条路上没有「查询失败」的分支（纯读目录），签名统一成 `Result` 是为了通道上
+/// 「没装」与「失败」能分开，不再是同一个 `None`。
+pub fn find_node_dir(version: &str) -> Result<Option<PathBuf>, String> {
+    let Some(root) = resolve_root() else {
+        return Ok(None);
+    };
     let installed = list_installed_versions(&root);
-    let matched = match_installed_version(version, &installed)?;
+    let Some(matched) = match_installed_version(version, &installed) else {
+        return Ok(None);
+    };
 
     let dir = root.join(format!("v{matched}"));
-    if is_node_install(&dir) {
-        Some(dir)
-    } else {
-        None
-    }
+    Ok(if is_node_install(&dir) { Some(dir) } else { None })
 }
 
-/// nvm 探测结果（只读），形状与 shared 里的 NvmStatus 一致
-pub fn status() -> Value {
+/// nvm 探测结果（只读）。**「没装 nvm」是一种状态，不是错误**：`available: false` 与
+/// `error` 说明原因，命令本身照常返回。
+// @contract
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NvmStatus {
+    pub available: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub root: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub symlink: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub current: Option<String>,
+    pub versions: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+pub fn status() -> NvmStatus {
     let Some(root) = resolve_root() else {
-        return json!({
-            "available": false,
-            "versions": [],
-            "error": "未找到 nvm：NVM_HOME、%APPDATA%\\nvm 与 PATH 里都没有它的安装目录",
-        });
+        return NvmStatus {
+            available: false,
+            root: None,
+            symlink: None,
+            current: None,
+            versions: Vec::new(),
+            error: Some(
+                "未找到 nvm：NVM_HOME、%APPDATA%\\nvm 与 PATH 里都没有它的安装目录".into(),
+            ),
+        };
     };
 
     let versions = list_installed_versions(&root);
     let symlink = resolve_symlink(&root);
     let current = version_of_symlink(&symlink);
 
-    json!({
-        "available": true,
-        "root": root.to_string_lossy(),
-        "symlink": symlink,
-        "current": current,
-        "versions": versions,
-        "error": if versions.is_empty() {
-            Some("这个 nvm 目录下还没有已安装的 Node 版本")
+    NvmStatus {
+        available: true,
+        root: Some(root.to_string_lossy().into_owned()),
+        symlink,
+        current,
+        error: if versions.is_empty() {
+            Some("这个 nvm 目录下还没有已安装的 Node 版本".into())
         } else {
             None
         },
-    })
+        versions,
+    }
 }
 
 #[cfg(test)]

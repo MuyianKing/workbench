@@ -118,7 +118,6 @@ pub(crate) fn local_date() -> String {
 
 /// 本地自然日偏移（`offset` 为天数）。用公历天数换算，跨月 / 跨年都对。
 /// 目前只有日期形状的测试在用（补签已改成按服务端日历选日期）。
-
 #[cfg(test)]
 fn local_date_offset(offset: i64) -> String {
     let (year, month, day, _) = local_parts();

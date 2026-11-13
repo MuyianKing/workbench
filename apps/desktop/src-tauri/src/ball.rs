@@ -286,7 +286,8 @@ fn record_of(app: &AppHandle) -> BallRecord {
 
 /// 启动时把记账读回来（读不出、格式不对都当「没记过」，不影响启动）
 pub fn load(app: &AppHandle) {
-    let raw = ball_store().load();
+    // 读不出来 / 文件坏掉都当「没记过」：这是网速球的本地记账，不影响启动
+    let raw = ball_store().load().unwrap_or(Value::Null);
     let record: Option<BallRecord> = serde_json::from_value(raw).unwrap_or(None);
     *app.state::<BallState>().record.lock().expect("锁中毒") = record;
 }

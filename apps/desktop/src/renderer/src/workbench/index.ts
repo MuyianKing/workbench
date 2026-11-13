@@ -26,7 +26,7 @@ import { projectApi } from './api-project'
 import { syncApi, syncRepo } from './api-sync'
 import { openDialog, saveDialog, syncSystemIntegration, systemApi } from './api-system'
 import * as auth from './auth'
-import { hasTauri, listen } from './bridge'
+import { guard, hasTauri, listen } from './bridge'
 import * as design from './design'
 import { emit } from './events'
 import * as events from './events'
@@ -204,7 +204,7 @@ const domainsApi = {
 
   // ---------- 统计：活跃度（token 用量 / 外观 / ETF 那几条在 api-sync） ----------
   // 本机账本 + 同步仓库里别的机器那份（没登录 / 没配仓库时只有本机，见 activity.ts）
-  getActivity: () => activity.activityView(syncRepo()),
+  getActivity: () => guard(activity.activityView(syncRepo()), '读取活跃度失败'),
   /**
    * 记一次活跃度。适配层内部那几个来源直接调 `activity.recordActivity`，
    * 这条通道只给渲染层里那一处 —— AI 助手跑完一轮是在 store 里才知道的（见 stores/ai.ts 的 settle）。
@@ -215,14 +215,14 @@ const domainsApi = {
   },
 
   // ---------- 设置与布局 ----------
-  getSettings: () => Promise.resolve(state.settings()),
+  getSettings: () => Promise.resolve(ok(state.settings())),
   updateSettings: (patch: Partial<AppSettings>) => {
     const next = state.updateSettings(patch)
     // 开机自启与全局快捷键是「设置即系统状态」：改完要立刻落到系统上
     void syncSystemIntegration(next)
     return Promise.resolve(ok(next))
   },
-  getThemeConfig: () => Promise.resolve(state.themeConfig()),
+  getThemeConfig: () => Promise.resolve(ok(state.themeConfig())),
   /**
    * 首页布局与外观同一个文件（theme.json），所以改主题也可能改了设置 ——
    * 把合并后的那份推一遍，渲染层的 settings 才会跟着刷新（应用别的机器的配置就走这条路）。
@@ -234,7 +234,7 @@ const domainsApi = {
   },
 
   // ---------- 数据目录 ----------
-  getDataDir: () => state.dataDir(),
+  getDataDir: () => guard(state.dataDir(), '读取数据目录失败'),
 
   // ---------- 样式参考库（token 是随包静态资源，导出到项目时只往后端递内容） ----------
   writeDesign: (projectDir: string, content: string) => design.writeDesign(projectDir, content),
@@ -252,7 +252,7 @@ const domainsApi = {
   // ---------- 账号 ----------
   // 换 token、回环监听、凭据落盘都在 Rust 侧；这里只驱动轮询并落显示资料，
   // 全程不会有 token 回到渲染层（见 workbench/auth.ts）
-  authStatus: () => auth.authStatus(),
+  authStatus: () => guard(auth.authStatus(), '读取登录状态失败'),
   authRefreshAccount: (provider: AuthProvider) => auth.refreshAccount(provider),
   authLogin: (provider: AuthProvider, onAuthUrl?: (authUrl: string, opened: boolean) => void) =>
     auth.login(provider, onAuthUrl),

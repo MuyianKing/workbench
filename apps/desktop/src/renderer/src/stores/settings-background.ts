@@ -100,12 +100,13 @@ export function useSettingsBackground(options: {
   async function ensureWallpapers(): Promise<void> {
     if (wallpapersLoaded)
       return
-    try {
-      wallpapers.value = await window.workbench.listWallpapers()
+    const result = await window.workbench.listWallpapers()
+    if (result.ok && result.data) {
+      wallpapers.value = result.data
       wallpapersLoaded = true
     }
-    catch (error) {
-      console.warn('[workbench] 读取内置壁纸失败', error)
+    else {
+      console.warn('[workbench] 读取内置壁纸失败', result.error)
     }
   }
 

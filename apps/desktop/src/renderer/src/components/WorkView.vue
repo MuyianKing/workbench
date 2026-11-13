@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import type { ProjectColor } from '@workbench/core'
-import type { WorkLogDeviceRef, WorkLogEntry, WorkLogStatus, WorkRange, WorkRangeBounds, WorkSort } from '@workbench/work-log'
+import type { WorkLogEntry, WorkLogStatus, WorkRange, WorkRangeBounds, WorkSort } from '@workbench/work-log'
 import { ArrowDown, Download, Memo, Plus, Warning } from '@element-plus/icons-vue'
 import { addDays, dayKey, markdownToPlainText, projectColorVar, sanitizeProjectColor } from '@workbench/core'
-import { dayMeta, defaultWorkRangeBounds, DELETED_PROJECT_ID, entriesOfDevice, groupByProject, isWorkSort, paginate, sanitizeWorkRange, sanitizeWorkRangeBounds, sanitizeWorkSort, timelineOf, toggleWorkLogStatus, WORK_PAGE_DAYS, WORK_RANGE_LABELS, WORK_RANGES, WORK_SORT_LABELS, WORK_SORTS, WORK_STATUS_DEFAULT, workLogDeviceLabel, workLogDevices } from '@workbench/work-log'
+import { dayMeta, defaultWorkRangeBounds, DELETED_PROJECT_ID, entriesOfDevice, groupByProject, isWorkSort, paginate, sanitizeWorkRange, sanitizeWorkRangeBounds, sanitizeWorkSort, timelineOf, WORK_PAGE_DAYS, WORK_RANGE_LABELS, WORK_RANGES, WORK_SORT_LABELS, WORK_SORTS, WORK_STATUS_DEFAULT, workLogDeviceLabel, workLogDevices } from '@workbench/work-log'
 import { ElMessage } from 'element-plus'
+import { storeToRefs } from 'pinia'
 /**
  * 工作页：按天分组的工作日志时间轴。
  *
@@ -31,16 +32,20 @@ import { confirmAction } from '@/notify'
 import { useAuthStore } from '@/stores/auth'
 import { useProjectsStore } from '@/stores/projects'
 import { useSettingsStore } from '@/stores/settings'
-import { workLogLocalDevice } from '@/workbench/work-log'
+import { useWorkLogStore } from '@/stores/work-log'
 
 const store = useProjectsStore()
 const settings = useSettingsStore()
 const auth = useAuthStore()
+const workLog = useWorkLogStore()
+const {
+  entries,
+  loading,
+  error: loadError,
+  localDevice,
+  remoteDevices,
+} = storeToRefs(workLog)
 
-const entries = ref<WorkLogEntry[]>([])
-const loading = ref(true)
-/** 读盘失败与「一条都还没写过」是两回事，不能都显示成空列表 */
-const loadError = ref('')
 const range = ref<WorkRange>(sanitizeWorkRange(settings.settings.workRange))
 /** 自定义范围（只在「自定义」那一档用）：设置里没存过就按今天一天 */
 const customRange = ref<WorkRangeBounds>(
@@ -104,10 +109,6 @@ const syncReady = computed(() =>
 const syncing = ref(false)
 const syncFailed = ref(false)
 const syncNote = ref('')
-/** 本机设备标识：默认看它，远端条目的项目名兜底也要它（拿不到时 id 为空，页面就不按设备筛） */
-const localDevice = ref<{ id: string, name: string }>({ id: '', name: '' })
-/** 同步拉回来的设备身份（含名字）：切换器里别的机器靠它显示 */
-const remoteDevices = ref<WorkLogDeviceRef[]>([])
 /** 正在看哪台设备：空串 = 本机（默认）；只活在本次会话里，重启回到本机 */
 const pickedDeviceId = ref('')
 let queuedSync = false
@@ -119,29 +120,8 @@ watch(syncReady, (ready, wasReady) => {
 })
 
 async function load(): Promise<void> {
-  loading.value = true
-  loadError.value = ''
-  try {
-    const result = await window.workbench.listWorkLogs()
-    if (result.ok && result.data)
-      entries.value = result.data
-    else loadError.value = result.error ?? '读取工作日志失败'
-  }
-  catch (error) {
-    loadError.value = error instanceof Error ? error.message : '读取工作日志失败'
-  }
-  finally {
-    loading.value = false
-    now.value = Date.now()
-  }
-}
-
-/**
- * 本机设备标识只取一次（适配层与 Token 面板共用同一份缓存）。
- * 拿不到时 id 为空 —— 页面退化成「不按设备筛」，不把整份日志藏起来。
- */
-async function loadLocalDevice(): Promise<void> {
-  localDevice.value = await workLogLocalDevice()
+  await workLog.load()
+  now.value = Date.now()
 }
 
 /**
@@ -163,7 +143,7 @@ async function syncNow(): Promise<void> {
   try {
     do {
       queuedSync = false
-      const result = await window.workbench.syncWorkLogs()
+      const result = await workLog.sync()
       if (!result.ok) {
         syncFailed.value = true
         syncNote.value = result.error ?? '同步失败'
@@ -172,16 +152,9 @@ async function syncNow(): Promise<void> {
       const data = result.data
       if (!data || !data.enabled)
         break
-      // 设备名跟着分片走：别的机器在设置里改了名，下一轮这里就显示新的
-      remoteDevices.value = data.devices ?? []
-      const self = remoteDevices.value.find(item => item.id === data.device)
-      if (self && !localDevice.value.name)
-        localDevice.value = { id: self.id, name: self.name }
-      // 远端条目并进来了：直接换成本机文件合并后的那份，不再多读一次盘
-      if (data.changed) {
-        entries.value = data.entries
+      // 远端条目并进来了：store 已换成合并后的那份，这里只把时刻推一下让范围重算
+      if (data.changed)
         now.value = Date.now()
-      }
       syncFailed.value = false
       syncNote.value = ''
     } while (queuedSync)
@@ -204,7 +177,7 @@ let timer: number | null = null
 onMounted(() => {
   // 先拿本机标识再读日志：否则第一帧会把别的设备的记录先混进来闪一下。
   // 读完本机再同步：反过来会让合并后的列表被先到的旧快照盖回去
-  void loadLocalDevice().then(() => load()).then(() => syncNow())
+  void workLog.loadDevice().then(() => load()).then(() => syncNow())
   timer = window.setInterval(() => {
     const next = Date.now()
     if (dayKey(next) !== dayKey(now.value))
@@ -486,10 +459,7 @@ function openEdit(entry: WorkLogEntry): void {
 function onSaved(entry: WorkLogEntry): void {
   // 新建的那条永远属于本机：正在看别的设备时切回本机，否则它一保存就从眼前消失
   const created = editing.value === null
-  const index = entries.value.findIndex(item => item.id === entry.id)
-  if (index === -1)
-    entries.value = [...entries.value, entry]
-  else entries.value.splice(index, 1, entry)
+  workLog.applyEntry(entry)
   if (created && viewingOtherDevice.value)
     pickedDeviceId.value = ''
   // 新记的那条未必落在当前范围里（例如停在「昨天」却记到了今天），把时刻推一下让范围重新算
@@ -499,12 +469,7 @@ function onSaved(entry: WorkLogEntry): void {
 
 /** 从提交生成之后同样并进内存列表：这次可能是新建，也可能是追加到已有记录 */
 function onGitImported(changed: WorkLogEntry[], importedDeviceId: string): void {
-  for (const entry of changed) {
-    const index = entries.value.findIndex(item => item.id === entry.id)
-    if (index === -1)
-      entries.value.push(entry)
-    else entries.value.splice(index, 1, entry)
-  }
+  workLog.applyEntries(changed)
   // 写到别的设备时把选择切过去，不然刚生成的记录看不见
   if (importedDeviceId && importedDeviceId !== localDevice.value.id)
     pickedDeviceId.value = importedDeviceId
@@ -519,20 +484,11 @@ function onGitImported(changed: WorkLogEntry[], importedDeviceId: string): void 
  * 点一下还要等一次 IPC 往返才动，手感会明显发钝。
  */
 async function toggleStatus(entry: WorkLogEntry): Promise<void> {
-  const before = entry.status
-  const next = toggleWorkLogStatus(before)
-  const index = entries.value.findIndex(item => item.id === entry.id)
-  if (index === -1)
-    return
-  entries.value.splice(index, 1, { ...entry, status: next })
-
-  const result = await window.workbench.updateWorkLog(entry.id, { status: next })
-  if (!result.ok || !result.data) {
-    entries.value.splice(index, 1, entry)
+  const result = await workLog.toggleStatus(entry)
+  if (!result.ok) {
     ElMessage.error(result.error ?? '修改状态失败')
     return
   }
-  entries.value.splice(index, 1, result.data)
   void syncNow()
 }
 
@@ -546,12 +502,11 @@ async function remove(entry: WorkLogEntry): Promise<void> {
   if (!agreed)
     return
 
-  const result = await window.workbench.removeWorkLog(entry.id)
+  const result = await workLog.remove(entry.id)
   if (!result.ok) {
     ElMessage.error(result.error ?? '删除工作记录失败')
     return
   }
-  entries.value = entries.value.filter(item => item.id !== entry.id)
   ElMessage.success('已删除')
   void syncNow()
 }

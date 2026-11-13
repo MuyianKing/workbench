@@ -80,7 +80,8 @@ fn pin_id(label: &str) -> Option<&str> {
 
 /// 启动时把记账读回来（读不出、格式不对都当「没有钉图」，不影响启动）
 pub fn load(app: &AppHandle) {
-    let raw = pin_store().load();
+    // 读不出来 / 文件坏掉都当「没有钉图」：这是本机记账，不影响启动
+    let raw = pin_store().load().unwrap_or(Value::Null);
     let records: Vec<PinRecord> = serde_json::from_value(raw).unwrap_or_default();
     *app.state::<Pins>().0.lock().expect("锁中毒") = records;
 }

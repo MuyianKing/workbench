@@ -1,6 +1,6 @@
 import type { SyncDeviceInfo, ThemeFile } from '@workbench/appearance'
 import type { TokenCounters, TokenDataFile, TokenDays, TokenShard, TokenSyncStatus, TokenUsageResult } from '@workbench/usage'
-import type { Result } from '@/types'
+import type { Result, TokenDevice } from '@/types'
 /**
  * Token 用量的读取、快照合并与多机同步。
  *
@@ -319,17 +319,22 @@ export async function localDevice(): Promise<{ id: string, name: string }> {
     return device
 
   try {
-    const info = await invoke<{ id?: unknown, name?: unknown }>('token_device')
-    device = {
+    const info = await invoke<Partial<TokenDevice>>('token_device')
+    const next = {
       id: typeof info?.id === 'string' ? info.id.trim() : '',
       name: typeof info?.name === 'string' ? info.name.trim() : '',
     }
+    // 只缓存成功的那一份：设备文件坏掉时不能把空标识记一辈子（修好后下一次就该用上）
+    if (next.id)
+      device = next
+    return next
   }
-  catch {
-    // 拿不到标识只影响同步与图片上传（分片名 / 目录名要用它），本机数据照常展示
-    device = { id: '', name: '' }
+  catch (error) {
+    // 拿不到标识只影响同步与图片上传（分片名 / 目录名要用它），本机数据照常展示；
+    // 但要把原因留下来 —— 设备文件损坏会让这台机器在同步仓库里换一条分片
+    console.error('[workbench] 读取设备标识失败（同步与图片上传会停用）', error)
+    return { id: '', name: '' }
   }
-  return device
 }
 
 // ---------- 同步 ----------

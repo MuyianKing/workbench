@@ -41,17 +41,29 @@ export const useEnvironmentStore = defineStore('environment', () => {
 
   /** 重新探测包管理器。装上东西之后界面上那一列状态就靠它刷新 */
   async function refreshPackageManagers(): Promise<void> {
-    packageManagers.value = await window.workbench.checkPackageManagers()
+    const result = await window.workbench.checkPackageManagers()
+    if (result.ok && result.data)
+      packageManagers.value = result.data
+    else
+      console.warn('探测包管理器失败', result.error)
   }
 
   /** 重新探测 nrm：装完 / 换完镜像后那一行状态靠它刷新 */
   async function refreshNrm(): Promise<void> {
-    nrm.value = await window.workbench.getNrmStatus()
+    const result = await window.workbench.getNrmStatus()
+    if (result.ok && result.data)
+      nrm.value = result.data
+    else
+      console.warn('读取 nrm 状态失败', result.error)
   }
 
   /** 重新探测 nvm（装上 / 卸载了 Node 版本后手动刷新用） */
   async function refreshNvm(): Promise<void> {
-    nvm.value = await window.workbench.getNvmStatus()
+    const result = await window.workbench.getNvmStatus()
+    if (result.ok && result.data)
+      nvm.value = result.data
+    else
+      console.warn('读取 nvm 状态失败', result.error)
   }
 
   /** 首屏三项探测一起跑（各自要起子进程 / 扫目录，不挡首屏） */
@@ -63,7 +75,11 @@ export const useEnvironmentStore = defineStore('environment', () => {
   }
 
   async function loadDataDir(): Promise<void> {
-    dataDir.value = await window.workbench.getDataDir()
+    const result = await window.workbench.getDataDir()
+    if (result.ok && result.data)
+      dataDir.value = result.data
+    else
+      console.warn('读取数据目录失败', result.error)
   }
 
   /**

@@ -13,12 +13,19 @@ import type { AccountProfile, AuthProvider } from '@workbench/auth'
 import type { ActiveSession, ActivityBreakdown, CommandEntry, IconCacheEntry, PackageManager, ProjectColor, QuickApp } from '@workbench/core'
 import type { VaultRecord } from '@workbench/vault'
 import type { VideoSource } from '@workbench/video'
+import type { AuthStatusWire } from './contract.generated'
 // 网关 / Qoder / ETF 的通道载荷类型：住在隔壁的 gateway.ts / qoder.ts / etf.ts（契约侧），
 // 这里导入并 re-export —— WorkbenchApi 直接引用，老代码从本文件或各自适配文件取都行。
 
 import type { AppSettings, StoredSettings } from './settings'
 
 export * from './api'
+
+/**
+ * Rust 侧的线上契约（`// @contract` 结构生成，勿手改）。
+ * 生成与门禁：`pnpm run contract:gen` / `pnpm run contract:check`。
+ */
+export type { AiRuntimeStatus, NoteRepoStateWire, NrmRegistry, NrmStatus, NvmStatus, PortCheckResult, TokenDevice } from './contract.generated'
 export * from './etf'
 export * from './gateway'
 export * from './qoder'
@@ -343,22 +350,11 @@ export interface VaultSyncOutcome extends VaultLoaded {
   keyMismatch: boolean
 }
 
-/** 登录状态 */
-export interface AuthStatus {
-  /** 当前这个构建有没有内置 OAuth 凭据（没内置时登录按钮不可点） */
-  configured: boolean
-  /**
-   * 一家都用不了时的原因，由 Rust 侧给出；能用时是空串。
-   *
-   * 比「未内置凭据」具体得多 —— 凭据填了但少一项时，缺的到底是哪一项只有那边知道，
-   * 界面上照搬它就能直接告诉用户该补什么。
-   */
-  configError: string
-  /**
-   * 要在两家平台上注册的回调地址。
-   * 由 Rust 侧给出而不是这里写死：它必须和回环监听实际用的地址逐字一致。
-   */
-  redirectUri: string
+/**
+ * 登录状态。线上形状（configured / configError / redirectUri / providers）由 Rust 生成
+ * （`contract.generated.ts` 的 `AuthStatusWire`），适配层另补已登录账号的显示资料。
+ */
+export interface AuthStatus extends Omit<AuthStatusWire, 'providers'> {
   /** 凭据管理器里确实有 token 的那些平台。**这才是「已登录」的判据。 */
   providers: AuthProvider[]
   /**
@@ -542,13 +538,6 @@ export interface ProcessStatusEvent {
   port?: number
 }
 
-export interface PortCheckResult {
-  port: number
-  inUse: boolean
-  pid?: number
-  processName?: string
-}
-
 export interface PackageManagerStatus {
   npm: boolean
   yarn: boolean
@@ -574,57 +563,10 @@ export interface NodeCheckResult {
 }
 
 /**
- * nvm 探测结果（只读）。
- *
- * 这里刻意不调用 nvm.exe：nvm-windows 会先用 GetConsoleMode 检查 stdout 是不是真终端，
- * 从 GUI 进程里 spawn 只会拿到「should be run from a terminal」然后静默退出；
- * 而 nvm use 又要管理员权限去改软链。所以只读 nvm 的目录和软链，切换靠给子进程注入 PATH。
+ * nvm / nrm / 端口检测的线上形状由 Rust 生成（`contract.generated.ts`）：
+ * `NvmStatus` / `NrmStatus` / `NrmRegistry` / `PortCheckResult` 都在那边，
+ * 这里只管其余应用级类型。
  */
-export interface NvmStatus {
-  /** 是否找到了 nvm 及其安装目录 */
-  available: boolean
-  /** nvm 根目录，各版本以 vX.Y.Z 子目录存放 */
-  root?: string
-  /** NVM_SYMLINK，即系统 node 所在的软链目录 */
-  symlink?: string
-  /** 软链当前指向的版本，即系统在用的 node */
-  current?: string
-  /** 已安装版本，按版本号从高到低 */
-  versions: string[]
-  /** 探测失败的原因，用于界面提示 */
-  error?: string
-}
-
-/**
- * nrm 管理下的一个 npm 镜像源。
- * 清单本身不在这里维护：名字与地址由 `nrm ls` 给出（taobao 改名 npmmirror 就是一次），
- * 在代码里再抄一份必然过期。
- */
-export interface NrmRegistry {
-  name: string
-  url: string
-  /** 是不是 npm 当前正在用的那个 */
-  current: boolean
-}
-
-/**
- * nrm（npm 镜像源管理器）探测结果。
- *
- * nrm 是个全局 npm 包，自己带一份镜像清单，当前用的是哪个写在 npm 的配置里，
- * 所以「装没装」「有哪些镜像」「当前是哪个」三件事都要问它。
- */
-export interface NrmStatus {
-  /** 是否检测到 nrm */
-  available: boolean
-  /** nrm 版本（探不到版本串但命令可用时为空） */
-  version?: string
-  /** 当前镜像名；认不出来（例如 registry 被手工改成了清单之外的值）时为空 */
-  current?: string
-  /** 可切换的镜像清单；nrm 不可用或者读不出时为[] */
-  registries: NrmRegistry[]
-  /** 探测失败的原因，用于界面提示 */
-  error?: string
-}
 
 /**
  * 主进程读好、可以直接贴进 CSS 的背景图。

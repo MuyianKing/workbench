@@ -22,8 +22,15 @@ async function loadSources(): Promise<AiNewsSourceInfo[]> {
 }
 
 async function loadCache(): Promise<AiNewsCache> {
-  const raw = await invoke<unknown>('ai_news_load')
-  return sanitizeAiNewsCache(raw)
+  try {
+    const raw = await invoke<unknown>('ai_news_load')
+    return sanitizeAiNewsCache(raw)
+  }
+  catch (error) {
+    // 缓存坏了不该让整页打不开：留一条带原因的日志，按空缓存继续（下一次保存会覆盖坏文件）
+    console.error('[workbench] 读取 AI 热点缓存失败，按空缓存继续', error)
+    return sanitizeAiNewsCache(null)
+  }
 }
 
 async function saveCache(cache: AiNewsCache): Promise<void> {

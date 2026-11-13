@@ -15,6 +15,8 @@
     "typecheck": "pnpm run typecheck:code && pnpm run typecheck:test",
     "typecheck:code": "vue-tsc --noEmit -p tsconfig.json",
     "typecheck:test": "tsc --noEmit -p tsconfig.test.json",
+    "contract:gen": "node apps/desktop/scripts/gen-rust-contract.mjs",
+    "contract:check": "node apps/desktop/scripts/gen-rust-contract.mjs --check",
     "lint": "eslint . --cache",
     "lint:fix": "eslint . --fix --cache",
     "test": "vitest run",

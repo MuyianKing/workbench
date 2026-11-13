@@ -4,7 +4,7 @@
 //! `netstat` / `tasklist` 的文本输出 —— 见 `find_pid_by_port` 上方的说明。
 
 use percent_encoding::{utf8_percent_encode, AsciiSet, CONTROLS};
-use serde_json::{json, Value};
+use serde::Serialize;
 use std::net::{SocketAddr, TcpStream};
 use std::path::Path;
 use std::process::Command;
@@ -27,16 +27,32 @@ fn hidden(command: &str) -> Command {
 }
 
 /// 端口是否有人在监听。判据与渲染层一致：127.0.0.1 上连得上就算在监听。
-pub fn is_port_in_use(port: u16) -> bool {
+///
+/// **连不上分两种**：拒绝连接 / 超时 = 没人监听（正常状态）；其余错误（权限、地址不可用）
+/// 说明这次探测本身没做成，交给调用方报出来，不能当成「端口空着」。
+pub fn port_in_use(port: u16) -> Result<bool, String> {
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
-    TcpStream::connect_timeout(&addr, Duration::from_millis(400)).is_ok()
+    match TcpStream::connect_timeout(&addr, Duration::from_millis(400)) {
+        Ok(_) => Ok(true),
+        Err(err)
+            if matches!(
+                err.kind(),
+                std::io::ErrorKind::ConnectionRefused
+                    | std::io::ErrorKind::TimedOut
+                    | std::io::ErrorKind::AddrNotAvailable
+            ) =>
+        {
+            Ok(false)
+        }
+        Err(err) => Err(format!("检测端口 {port} 失败：{err}")),
+    }
 }
 
 /// 按端口找占用进程 PID（只认监听中的 IPv4 套接字，与原来的 `netstat -p tcp` 同口径）。
 ///
 /// **一次系统调用换一次文本解析**：这条路不起子进程，也不依赖 netstat 的列格式与系统语言。
 /// 启动时的全量检测会并发问十几个端口，原先每个端口要起 netstat + tasklist 两个进程。
-fn find_pid_by_port(port: u16) -> Option<u32> {
+fn find_pid_by_port(port: u16) -> Result<Option<u32>, String> {
     use windows_sys::Win32::NetworkManagement::IpHelper::{
         GetExtendedTcpTable, MIB_TCPTABLE_OWNER_PID, TCP_TABLE_OWNER_PID_LISTENER,
     };
@@ -55,7 +71,7 @@ fn find_pid_by_port(port: u16) -> Option<u32> {
         );
     }
     if size == 0 {
-        return None;
+        return Err("读取 TCP 监听表失败：缓冲区大小为 0".into());
     }
 
     // u32 而不是 u8：下面那张表是 4 字节对齐的结构体，拿 Vec<u8> 的指针去转是未定义行为
@@ -72,17 +88,18 @@ fn find_pid_by_port(port: u16) -> Option<u32> {
         )
     };
     if status != 0 {
-        return None;
+        return Err(format!("读取 TCP 监听表失败（Win32 错误码 {status}）"));
     }
 
     unsafe {
         let table = buffer.as_ptr() as *const MIB_TCPTABLE_OWNER_PID;
         let count = (*table).dwNumEntries as usize;
         let rows = std::slice::from_raw_parts((*table).table.as_ptr(), count);
-        rows.iter()
+        Ok(rows
+            .iter()
             // dwLocalPort 的低 16 位是网络字节序的端口号，要换回来才比得上
             .find(|row| u16::from_be(row.dwLocalPort as u16) == port)
-            .map(|row| row.dwOwningPid)
+            .map(|row| row.dwOwningPid))
     }
 }
 
@@ -111,14 +128,36 @@ fn process_name_of(pid: u32) -> Option<String> {
     path.rsplit(['\\', '/']).next().map(str::to_string)
 }
 
-/// 端口检测，返回结构与 Electron 版一致：port / inUse / pid? / processName?
-pub fn check_port(port: u16) -> Value {
-    if !is_port_in_use(port) {
-        return json!({ "port": port, "inUse": false });
+/// 端口检测：port / inUse / pid? / processName?
+// @contract
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PortCheckResult {
+    pub port: u16,
+    pub in_use: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pid: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub process_name: Option<String>,
+}
+
+pub fn check_port(port: u16) -> Result<PortCheckResult, String> {
+    if !port_in_use(port)? {
+        return Ok(PortCheckResult {
+            port,
+            in_use: false,
+            pid: None,
+            process_name: None,
+        });
     }
-    let pid = find_pid_by_port(port);
+    let pid = find_pid_by_port(port)?;
     let name = pid.and_then(process_name_of);
-    json!({ "port": port, "inUse": true, "pid": pid, "processName": name })
+    Ok(PortCheckResult {
+        port,
+        in_use: true,
+        pid,
+        process_name: name,
+    })
 }
 
 /// 结束整棵进程树。实现已下沉到 proc 原语（超时清理也要用它），这里只做端口到 pid 的翻译。
@@ -127,7 +166,7 @@ pub fn kill_process_tree(pid: u32) -> Result<(), String> {
 }
 
 pub fn kill_port_process(port: u16) -> Result<(), String> {
-    let pid = find_pid_by_port(port).ok_or_else(|| format!("端口 {port} 上没找到监听进程"))?;
+    let pid = find_pid_by_port(port)?.ok_or_else(|| format!("端口 {port} 上没找到监听进程"))?;
     kill_process_tree(pid)
 }
 
@@ -251,9 +290,9 @@ mod tests {
         let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("绑定端口失败");
         let port = listener.local_addr().expect("取本地地址失败").port();
 
-        assert!(is_port_in_use(port), "刚监听的端口应当算占用");
+        assert!(port_in_use(port).expect("探测端口失败"), "刚监听的端口应当算占用");
         assert_eq!(
-            find_pid_by_port(port),
+            find_pid_by_port(port).expect("读 TCP 表失败"),
             Some(std::process::id()),
             "按端口找回的 PID 不是当前进程"
         );
@@ -271,9 +310,13 @@ mod tests {
             listener.local_addr().expect("取本地地址失败").port()
         };
 
-        assert_eq!(find_pid_by_port(port), None, "空闲端口不该有占用进程");
-        let checked = check_port(port);
-        assert_eq!(checked["inUse"], json!(false), "空闲端口被报成占用了");
+        assert_eq!(
+            find_pid_by_port(port).expect("读 TCP 表失败"),
+            None,
+            "空闲端口不该有占用进程"
+        );
+        let checked = check_port(port).expect("探测端口失败");
+        assert!(!checked.in_use, "空闲端口被报成占用了");
     }
 
     /// 查不到进程的 PID 一律返回 None，而不是编一个名字出来

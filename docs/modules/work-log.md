@@ -4,6 +4,7 @@
 
 关键落点：`packages/work-log/src/work-log.ts`（时间轴口径）、
 `apps/desktop/src/renderer/src/workbench/work-log.ts`（懒加载整份文件）、
+`apps/desktop/src/renderer/src/stores/work-log.ts`（跨页共享的那一份：条目 / 本机与别的设备 / 读写与同步）、
 `packages/core/src/markdown.ts`（渲染）、`apps/desktop/src/renderer/src/components/MarkdownView.vue`（点击接管）。
 跨模块通用事实见 [features-and-architecture.md](../features-and-architecture.md)，红线见 [AGENTS.md](../../AGENTS.md)。
 

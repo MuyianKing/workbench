@@ -156,8 +156,12 @@ asset 协议、读取权限在 Rust 侧按单个文件授予）、**通道一律
 ## 6. Agent 操作与验证
 
 - 脚本：`pnpm run typecheck`、`pnpm test`、`cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`、`pnpm run dev`、`pnpm run build`、
-  `pnpm run build:renderer`、`pnpm run dev:renderer`、`pnpm run preview:renderer`（渲染层单独构建到 `.preview/`）、`pnpm run icons`；
+  `pnpm run build:renderer`、`pnpm run dev:renderer`、`pnpm run preview:renderer`（渲染层单独构建到 `.preview/`）、`pnpm run icons`、
+  `pnpm run contract:gen` / `pnpm run contract:check`（Rust `// @contract` → TS 契约）；
   其余以 `package.json` 为准（根与 `apps/desktop` 各一份）。
+- **改了带 `// @contract` 的 Rust 结构要跑 `pnpm run contract:gen`**：生成
+  `apps/desktop/src/renderer/src/types/contract.generated.ts`；`pnpm run verify` 与 CI 里的 `contract:check`
+  会拦住没同步的生成文件。
 - **前端代码格式化走 ESLint**：`pnpm run lint:fix`（检查用 `pnpm run lint`），配置在根目录 `eslint.config.mjs`
   （`@antfu/eslint-config`，范围是渲染层 + 域包，`src-tauri/`、`resources/`、`apps/desktop/scripts/` 不在圈里）；
   **每次改完前端代码都要跑一遍**，只允许这一套，不要再引 Prettier 之类的第二套格式化工具。

@@ -241,13 +241,24 @@ pub fn kill_process_tree(pid: u32) -> Result<(), String> {
 
 /// 探测 `<bin> --version`：可用返回版本串，不可用或超时返回 None。
 /// 与 Electron 版的 probeVersion 行为一致（超时 8 秒）。
+///
+/// **只在测试里用**（用例要先判「本机有没有装 git」再决定跳不跳）；生产侧一律走
+/// [`probe_version_checked`]，因为通道上要把「没装」与「探测失败」分开。
+#[cfg(test)]
 pub fn probe_version(bin: &str) -> Option<String> {
-    let outcome = run(bin, &["--version".to_string()], Duration::from_secs(8)).ok()?;
-    if outcome.ok() {
+    probe_version_checked(bin).ok().flatten()
+}
+
+/// 探测 `<bin> --version`：`Ok(Some(版本))` = 可用，`Ok(None)` = 起来了但没用，
+/// `Err` = 起不来 / 超时（通道上要如实告诉用户，而不是当成「没装」）。
+pub fn probe_version_checked(bin: &str) -> Result<Option<String>, String> {
+    let outcome = run(bin, &["--version".to_string()], Duration::from_secs(8))
+        .map_err(|err| format!("探测 {bin} 失败：{err}"))?;
+    Ok(if outcome.ok() {
         Some(outcome.first_line())
     } else {
         None
-    }
+    })
 }
 
 /// 进程的创建时间（毫秒，Unix 纪元）；**进程已经退出则返回 None**。
@@ -262,14 +273,27 @@ pub fn probe_version(bin: &str) -> Option<String> {
 ///
 /// 打不开进程（已退出、权限不足）同样返回 None —— 调用方据此跳过，绝不对拿不准的进程下手。
 pub fn process_created_at(pid: u32) -> Option<u64> {
-    use windows_sys::Win32::Foundation::{CloseHandle, FILETIME, STILL_ACTIVE};
+    process_created_at_checked(pid).ok().flatten()
+}
+
+/// 同 [`process_created_at`]，但把「问不到」与「没这个进程」分开：
+/// `Ok(Some(时间))` = 还活着，`Ok(None)` = 进程已退出 / 没有这个 PID，`Err` = 查询本身失败
+/// （权限不足、系统调用失败）—— 后者不能再被当成「进程没了」，否则残留清理会跳过它。
+pub fn process_created_at_checked(pid: u32) -> Result<Option<u64>, String> {
+    use windows_sys::Win32::Foundation::{CloseHandle, FILETIME, GetLastError, STILL_ACTIVE};
     use windows_sys::Win32::System::Threading::{
         GetExitCodeProcess, GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
     };
 
     let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
     if handle.is_null() {
-        return None;
+        let code = unsafe { GetLastError() };
+        // ERROR_INVALID_PARAMETER = 87：这个 PID 不存在（已退出 / 被复用前的空档）
+        return if code == 87 {
+            Ok(None)
+        } else {
+            Err(format!("查询进程 {pid} 失败（Win32 错误码 {code}）"))
+        };
     }
 
     let empty = FILETIME {
@@ -285,17 +309,20 @@ pub fn process_created_at(pid: u32) -> Option<u64> {
     unsafe { CloseHandle(handle) };
 
     if times_ok == 0 || exit_ok == 0 {
-        return None;
+        // 拿到句柄之后进程刚好退出：不是查询失败
+        return Ok(None);
     }
     // 已退出（含"死了但进程对象还没被回收"）一律当认不出来
     if exit_code != STILL_ACTIVE as u32 {
-        return None;
+        return Ok(None);
     }
 
     // FILETIME 是「1601-01-01 起的 100 纳秒数」，换算成 Unix 毫秒
     const FILETIME_EPOCH_OFFSET_MS: u64 = 11_644_473_600_000;
     let ticks = ((created.dwHighDateTime as u64) << 32) | created.dwLowDateTime as u64;
-    Some((ticks / 10_000).saturating_sub(FILETIME_EPOCH_OFFSET_MS))
+    Ok(Some(
+        (ticks / 10_000).saturating_sub(FILETIME_EPOCH_OFFSET_MS),
+    ))
 }
 
 #[cfg(test)]

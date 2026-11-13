@@ -51,11 +51,26 @@ export function initialTheme(): ThemeConfig {
   return sanitizeTheme(migrateAppearanceIntoTheme(raw?.themeConfig, raw?.settings))
 }
 
+/**
+ * 读一份数据文件。**读失败不再被当成空数据**：通道已经会把「文件坏掉 / 读不出来」回成 Err，
+ * 这里留下一条带原因的日志再按空数据启动 —— 启动不能停，但也不能静默；
+ * 之后用户任何一次保存都会用新内容覆盖那份坏文件（Rust 侧 `set` 会清掉载入错误）。
+ */
+async function loadFile(channel: 'data_load' | 'theme_load'): Promise<unknown> {
+  try {
+    return await invoke<unknown>(channel)
+  }
+  catch (error) {
+    console.error(`[workbench] ${channel} 失败，按空数据启动（下一次保存会覆盖坏文件）`, error)
+    return null
+  }
+}
+
 /** 载入磁盘数据。收敛逻辑与首屏快照完全同源，两条路径不会给出不一样的结果。 */
 export async function initState(): Promise<void> {
   const [rawData, rawTheme] = await Promise.all([
-    invoke<unknown>('data_load'),
-    invoke<unknown>('theme_load'),
+    loadFile('data_load'),
+    loadFile('theme_load'),
   ])
 
   data = parseData(rawData, () => crypto.randomUUID())

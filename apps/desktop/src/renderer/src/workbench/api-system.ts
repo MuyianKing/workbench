@@ -1,4 +1,4 @@
-import type { AppSettings, EffectiveTheme, InstallablePackageManager, WindowState, WorkbenchApi } from '@/types'
+import type { AppSettings, EffectiveTheme, InstallablePackageManager, PortCheckResult, WindowState, WorkbenchApi } from '@/types'
 import { ok } from '@workbench/core'
 import { notifyWarning } from '@/notify'
 import { errorText, guard, invoke } from './bridge'
@@ -148,16 +148,16 @@ export const systemApi = {
   }),
 
   // ---------- 系统 ----------
-  checkPackageManagers: () => system.checkPackageManagers(),
+  checkPackageManagers: () => guard(system.checkPackageManagers(), '探测包管理器失败'),
   installPackageManager: (pm: InstallablePackageManager) => system.installPackageManager(pm),
 
-  checkNodeVersion: (id: string) => nvm.checkNodeVersion(id),
+  checkNodeVersion: (id: string) => guard(nvm.checkNodeVersion(id), '检查 Node 版本失败'),
 
   /** nvm 只读探测：目录、settings.txt、软链都由 Rust 扫，形状与 NvmStatus 一致 */
-  getNvmStatus: () => nvm.status(),
+  getNvmStatus: () => guard(nvm.status(), '读取 nvm 状态失败'),
 
   /** nrm：镜像清单与「当前是哪个」都问 nrm 自己（见 src-tauri/src/nrm.rs） */
-  getNrmStatus: () => nrm.status(),
+  getNrmStatus: () => guard(nrm.status(), '读取 nrm 状态失败'),
   installNrm: () => nrm.install(),
   useNrmRegistry: (name: string) => nrm.useRegistry(name),
 
@@ -191,7 +191,7 @@ export const systemApi = {
       ...(options.defaultPath ? { defaultPath: options.defaultPath } : {}),
       ...(options.filters && options.filters.length ? { filters: options.filters } : {}),
     }),
-  checkPort: (port: number) => invoke('check_port', { port }),
+  checkPort: (port: number) => guard(invoke<PortCheckResult>('check_port', { port }), '检测端口失败'),
   killPortProcess: (port: number) =>
     guard(invoke<null>('kill_port_process', { port }), '结束进程失败'),
   reveal: (targetPath: string) => {

@@ -132,15 +132,32 @@ fn clear_git_auth() {
 
 /// 本机设备标识：没有就生成一份落盘。id 一旦生成不再变，分片文件名就是它。
 ///
-/// 落盘失败不报错：设备 id 只在同步里当分片名用，连它都写不进去的话同步本来也跑不成，
+/// 读不出来时**分两种**：文件不存在 = 第一次运行，生成一个新的；文件存在但坏掉 = `Err` ——
+/// 这时悄悄换一个新 id 会让这台机器在同步仓库里换一条分片、旧流水再也合不进来。
+/// 落盘失败仍然不报错：设备 id 只在同步里当分片名用，连它都写不进去的话同步本来也跑不成，
 /// 但那时**本机数据仍然要能看**，不能因为一个标识把整块 Token 面板打断。
-pub fn device_info() -> Result<Value, String> {
-    let existing = std::fs::read_to_string(paths::device_file())
-        .ok()
-        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
-        .and_then(|value| value.get("id").and_then(Value::as_str).map(str::to_string))
-        .map(|id| id.trim().to_string())
-        .filter(|id| !id.is_empty());
+// @contract
+#[derive(Debug, Clone, Serialize)]
+pub struct TokenDevice {
+    pub id: String,
+    pub name: String,
+}
+
+pub fn device_info() -> Result<TokenDevice, String> {
+    let path = paths::device_file();
+    let existing = match std::fs::read_to_string(&path) {
+        Ok(text) => match serde_json::from_str::<Value>(&text) {
+            Ok(value) => value
+                .get("id")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .map(|id| id.trim().to_string())
+                .filter(|id| !id.is_empty()),
+            Err(err) => return Err(format!("设备标识损坏（{}）：{err}", path.display())),
+        },
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => None,
+        Err(err) => return Err(format!("读取设备标识失败（{}）：{err}", path.display())),
+    };
 
     let id = match existing {
         Some(id) => id,
@@ -153,7 +170,10 @@ pub fn device_info() -> Result<Value, String> {
         }
     };
 
-    Ok(json!({ "id": id, "name": host_name() }))
+    Ok(TokenDevice {
+        id,
+        name: host_name(),
+    })
 }
 
 fn write_device(id: &str) -> Result<(), String> {
@@ -930,7 +950,17 @@ pub fn sync_notes(dir: &str) -> Result<Value, String> {
 ///
 /// 不是仓库**不是错误**：没仓库的笔记就是本机的笔记，回 `isRepo: false` 照常返回
 /// （调用方也是按「探不到就按本机笔记处理」用的，别把它变成一页错误）。
-pub fn repo_state(dir: &str) -> Result<Value, String> {
+/// 一个目录的 git 身份：是不是仓库、远端、当前分支。三条都是空串 / false 的合法状态。
+// @contract
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NoteRepoStateWire {
+    pub is_repo: bool,
+    pub origin: String,
+    pub branch: String,
+}
+
+pub fn repo_state(dir: &str) -> Result<NoteRepoStateWire, String> {
     let dir = dir.trim();
     if dir.is_empty() {
         return Err("还没有选择笔记文件夹".into());
@@ -941,7 +971,11 @@ pub fn repo_state(dir: &str) -> Result<Value, String> {
     }
 
     if !root.join(".git").exists() {
-        return Ok(json!({ "isRepo": false, "origin": "", "branch": "" }));
+        return Ok(NoteRepoStateWire {
+            is_repo: false,
+            origin: String::new(),
+            branch: String::new(),
+        });
     }
 
     // 纯本地只读，不注入凭据（`set_git_auth` 只给要出网的那几步用）
@@ -957,7 +991,11 @@ pub fn repo_state(dir: &str) -> Result<Value, String> {
         .map(|text| text.trim().to_string())
         .unwrap_or_default();
 
-    Ok(json!({ "isRepo": true, "origin": origin, "branch": branch }))
+    Ok(NoteRepoStateWire {
+        is_repo: true,
+        origin,
+        branch,
+    })
 }
 
 /// 提交是应用替用户产生的：他没配过 git 身份时给一个兜底，否则 commit 会直接失败。
@@ -2430,16 +2468,16 @@ mod tests {
         let plain = root.join("plain");
         std::fs::create_dir_all(&plain).unwrap();
         let state = repo_state(plain.to_str().unwrap()).unwrap();
-        assert_eq!(state["isRepo"], json!(false));
-        assert_eq!(state["origin"], json!(""));
-        assert_eq!(state["branch"], json!(""));
+        assert!(!state.is_repo);
+        assert_eq!(state.origin, "");
+        assert_eq!(state.branch, "");
 
         // 有 .git 但没连远端：是仓库（提交照旧），只是不能同步
         let bare = root.join("bare");
         std::fs::create_dir_all(bare.join(".git")).unwrap();
         let state = repo_state(bare.to_str().unwrap()).unwrap();
-        assert_eq!(state["isRepo"], json!(true));
-        assert_eq!(state["origin"], json!(""));
+        assert!(state.is_repo);
+        assert_eq!(state.origin, "");
 
         if proc::probe_version("git").is_none() {
             eprintln!("跳过：本机没有 git");
@@ -2455,24 +2493,24 @@ mod tests {
         let target_text = target.to_string_lossy().into_owned();
         run_git(&["remote", "add", "origin", &target_text], Some(&real), GIT_TIMEOUT).unwrap();
         let state = repo_state(real.to_str().unwrap()).unwrap();
-        assert_eq!(state["isRepo"], json!(true));
-        assert_eq!(state["origin"], json!(target_text), "{state:?}");
+        assert!(state.is_repo);
+        assert_eq!(state.origin, target_text, "{state:?}");
         // 还没有提交也要说得出分支（symbolic-ref 认得起，`rev-parse --abbrev-ref HEAD` 在这儿会回 "HEAD"）
-        let branch = state["branch"].as_str().unwrap_or_default();
+        let branch = state.branch.clone();
         assert!(!branch.is_empty() && branch != "HEAD", "{state:?}");
         // 切到别的分支：跟的是当前站着的那个（AI 助手页面上显示的就是它）
         run_git(&["checkout", "--quiet", "-b", "干活的分支"], Some(&real), GIT_TIMEOUT).unwrap();
         let state = repo_state(real.to_str().unwrap()).unwrap();
-        assert_eq!(state["branch"], json!("干活的分支"), "{state:?}");
+        assert_eq!(state.branch, "干活的分支", "{state:?}");
 
         // 仓库里的一个子目录：它自己没有 `.git`，所以是「本机的笔记」——
         // 绝不能因为处在仓库里就被当成那个仓库的一部分（`add -A` 会把整棵工作树带走）
         let nested = real.join("子目录");
         std::fs::create_dir_all(&nested).unwrap();
         let state = repo_state(nested.to_str().unwrap()).unwrap();
-        assert_eq!(state["isRepo"], json!(false), "子目录不算仓库: {state:?}");
-        assert_eq!(state["origin"], json!(""), "{state:?}");
-        assert_eq!(state["branch"], json!(""), "{state:?}");
+        assert!(!state.is_repo, "子目录不算仓库: {state:?}");
+        assert_eq!(state.origin, "", "{state:?}");
+        assert_eq!(state.branch, "", "{state:?}");
 
         let _ = std::fs::remove_dir_all(&root);
     }

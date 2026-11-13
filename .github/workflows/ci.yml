@@ -55,6 +55,10 @@ jobs:
       - name: ESLint
         run: pnpm run lint
 
+      # Rust 的 `// @contract` 结构与生成文件是否一致（改 Rust 结构忘了跑 contract:gen 会红）
+      - name: 契约（Rust → TS）
+        run: pnpm run contract:check
+
       - name: 类型检查
         run: pnpm run typecheck
 

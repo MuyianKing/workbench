@@ -142,6 +142,20 @@ export const useKbStore = defineStore('kb', () => {
     activeRawError.value = ''
   }
 
+  /** 重扫序号：旧的一轮回来时不覆盖新结果（见 reload） */
+  let reloadSeq = 0
+  /** 来源映射连着改时合并成一轮，别连着全库扫两遍 */
+  let reloadTimer: number | null = null
+
+  function scheduleReload(): void {
+    if (reloadTimer !== null)
+      window.clearTimeout(reloadTimer)
+    reloadTimer = window.setTimeout(() => {
+      reloadTimer = null
+      void reload()
+    }, 200)
+  }
+
   /**
    * 重新扫一遍：扫描 → 拆三部分 → 读条目 frontmatter → 配状态 → 读索引 → 探仓库。
    *
@@ -159,9 +173,20 @@ export const useKbStore = defineStore('kb', () => {
       return
     }
 
+    // 有排队中的重扫就先撤掉：这一次已经是最新的意图
+    if (reloadTimer !== null) {
+      window.clearTimeout(reloadTimer)
+      reloadTimer = null
+    }
+
+    // 每一次重扫都有一个序号：来源连着改（先加一个再设路径）会连着触发两轮，
+    // 旧的那轮回来时不能把新结果盖掉 —— 这就是「旧结果覆盖新结果」的那个竞态。
+    const seq = ++reloadSeq
     loading.value = true
     loadError.value = ''
     const result = await window.workbench.kbScan(root.value, sources.value)
+    if (seq !== reloadSeq)
+      return
     loading.value = false
 
     if (!result.ok || !result.data) {
@@ -197,6 +222,9 @@ export const useKbStore = defineStore('kb', () => {
         }
       }),
     )
+    // 读完条目的这段时间里又发起了一轮：这份结果作废（否则旧清单会盖掉新的）
+    if (seq !== reloadSeq)
+      return
     entries.value = metas.filter((meta): meta is KbEntryMeta => meta !== null)
     rawItems.value = matchKbRawStatus(kbRawFiles(visible), entries.value)
     rawSources.value = kbRawSourceRows(
@@ -370,11 +398,13 @@ export const useKbStore = defineStore('kb', () => {
    * 比的是**映射的形状**（名字 + 路径），不是数组引用 —— 设置里任何一项改动都会换掉
    * settings 对象，盯着引用就会因为「改了个卡片宽度」去重扫一遍知识库。
    */
-  const sourceShape = computed(() => JSON.stringify(sources.value.map(item => [item.name, item.dir])))
+  const sourceShape = computed(() =>
+    sources.value.map(item => `${item.name}\u0000${item.dir}`).join('\u0001'),
+  )
   watch(sourceShape, () => {
     if (!started)
       return
-    void reload()
+    scheduleReload()
   })
 
   /** 记下用户挑的知识库文件夹（页面那颗「选择知识库文件夹」用它）。不搬动任何文件 */

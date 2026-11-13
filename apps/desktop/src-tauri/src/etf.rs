@@ -45,8 +45,8 @@ pub fn etf_store() -> &'static JsonStore {
 // ---------- 数据文件 ----------
 
 #[tauri::command]
-pub fn etf_load() -> Value {
-    etf_store().get()
+pub fn etf_load() -> Result<Value, String> {
+    etf_store().read()
 }
 
 #[tauri::command]

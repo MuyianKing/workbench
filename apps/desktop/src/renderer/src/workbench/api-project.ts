@@ -1,7 +1,7 @@
 import type { AddProjectInput, CommandEntry, Project, Result, TerminalKind, WorkbenchApi } from '@/types'
 import { fail, nextProjectColor, ok, samePath } from '@workbench/core'
 import { openDialog } from './api-system'
-import { guard, invoke } from './bridge'
+import { errorText, guard, invoke } from './bridge'
 import { emit } from './events'
 import * as quick from './quick-launch'
 import * as scanner from './scanner'
@@ -46,7 +46,15 @@ export const projectApi = {
       return fail('参数不合法')
 
     const dirPath = input.path.trim()
-    if (!(await invoke<boolean>('fs_is_dir', { path: dirPath }))) {
+    let isDir: boolean
+    try {
+      isDir = await invoke<boolean>('fs_is_dir', { path: dirPath })
+    }
+    catch (error) {
+      // 「问不到」与「不是目录」是两回事：前者要把原因说出来，别当成用户选错了路径
+      return fail(errorText(error, '检查目录失败'))
+    }
+    if (!isDir) {
       return fail('目录不存在或不是文件夹')
     }
 
@@ -99,7 +107,7 @@ export const projectApi = {
     return ok(project)
   },
 
-  listProjects: () => Promise.resolve(state.listProjects()),
+  listProjects: () => Promise.resolve(ok(state.listProjects())),
   updateProject: (id: string, patch: Parameters<WorkbenchApi['updateProject']>[1]) =>
     guard(Promise.resolve(state.updateProject(id, patch)), '更新项目失败'),
   removeProject: (id: string) => {
@@ -108,7 +116,7 @@ export const projectApi = {
   },
   relocateProject: (id: string, newPath: string) =>
     guard(Promise.resolve(state.relocateProject(id, newPath)), '重新绑定路径失败'),
-  checkProjectPaths: () => state.checkProjectPaths(),
+  checkProjectPaths: () => guard(state.checkProjectPaths(), '检查项目目录失败'),
 
   // ---------- 分组 ----------
   createGroup: (name: string) =>
@@ -125,7 +133,7 @@ export const projectApi = {
   // ---------- 快捷启动 ----------
   // 这几个是数组 / 对象形状的取值接口，必须真实现：落到「未移植」兜底会返回 Result 对象，
   // 而 store 会当数组遍历，直接抛错并把整条 init() 打断（系统状态探测就因此一直没跑起来）。
-  listQuickApps: () => state.quickAppList(),
+  listQuickApps: () => guard(state.quickAppList(), '读取快捷启动失败'),
   pickQuickTarget: () =>
     openDialog({
       directory: false,
@@ -154,7 +162,7 @@ export const projectApi = {
   quickAppIcon: (target: string) => quick.icon(target),
 
   // ---------- 独立命令 ----------
-  listCommands: () => Promise.resolve(state.commandList()),
+  listCommands: () => Promise.resolve(ok(state.commandList())),
   addCommand: (input: Parameters<WorkbenchApi['addCommand']>[0]) =>
     guard(Promise.resolve(state.addCommand(input)), '添加命令失败'),
   updateCommand: (id: string, patch: Parameters<WorkbenchApi['updateCommand']>[1]) =>

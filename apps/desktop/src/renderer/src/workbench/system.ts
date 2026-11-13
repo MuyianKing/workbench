@@ -13,17 +13,13 @@ import { abortDetached, PM_SESSION_PREFIX, runDetached } from './session'
 /** 安装包管理器最多等 5 分钟：registry 慢的时候一分钟上下是常态，但也不能无限挂着 */
 const PM_INSTALL_TIMEOUT_MS = 5 * 60 * 1000
 
-/** 探测 `<bin> --version`；不可用或超时返回 null */
+/**
+ * 探测 `<bin> --version`：`null` = 起来了但没用（没装 / 版本命令失败）。
+ * **探测本身没做成（通道失败 / 超时）直接抛** —— 由 `checkPackageManagers` 变成一个失败，
+ * 别再把「问不到」伪装成「这四样都没装」。
+ */
 async function probeVersion(bin: string): Promise<string | null> {
-  try {
-    return await invoke<string | null>('probe_version', { bin })
-  }
-  catch (error) {
-    // 不能静默吞掉：这个 catch 曾经把「通道根本到不了 Rust」伪装成「这四个都没装」，
-    // 排查时多花了好几轮才看出区别
-    console.warn(`[workbench] 探测 ${bin} 失败`, error)
-    return null
-  }
+  return await invoke<string | null>('probe_version', { bin })
 }
 
 export async function checkPackageManagers(): Promise<PackageManagerStatus> {
@@ -87,7 +83,14 @@ export async function installPackageManager(
   if (!install.ok)
     return fail(install.error ?? '安装失败')
 
-  const status = await checkPackageManagers()
+  let status: PackageManagerStatus
+  try {
+    status = await checkPackageManagers()
+  }
+  catch (error) {
+    // 装完了却探测不了：如实说「探测失败」，别当成「还是没装上」
+    return fail(error instanceof Error ? error.message : '安装后探测失败')
+  }
   if (status[pm])
     return ok(status)
 

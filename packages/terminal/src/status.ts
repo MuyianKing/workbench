@@ -9,7 +9,7 @@
 /** 处于「正在干活」的几个状态；重启、关闭终端、批量检测都要判它 */
 export const RUNNING_STATUS: ReadonlyArray<string> = ['running', 'installing', 'building']
 
-/** 端口被谁占着，拼成一句给人看的说明 */
-export function describeHolder(check: { pid?: number, processName?: string }): string {
-  return check.processName ? `${check.processName}（PID ${check.pid}）` : `PID ${check.pid ?? '未知'}`
+/** 端口被谁占着，拼成一句给人看的说明。线上契约里 pid / 进程名可能是 null（没问到） */
+export function describeHolder(check: { pid?: number | null, processName?: string | null }): string {
+  return check.processName ? `${check.processName}（PID ${check.pid ?? '未知'}）` : `PID ${check.pid ?? '未知'}`
 }

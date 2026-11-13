@@ -78,13 +78,14 @@ export const syncApi = {
       return ok(null)
     return pullQoderEarnings(repo)
   },
-  gatewaySyncStatus: async () => {
-    const repo = syncRepo()
-    if (!repo)
-      return { enabled: false, deviceName: '' }
-    const { id, name } = await localDevice()
-    return { enabled: Boolean(id), deviceName: name }
-  },
+  gatewaySyncStatus: () =>
+    guard((async () => {
+      const repo = syncRepo()
+      if (!repo)
+        return { enabled: false, deviceName: '' }
+      const { id, name } = await localDevice()
+      return { enabled: Boolean(id), deviceName: name }
+    })(), '读取同步状态失败'),
 
   // ---------- 统计 ----------
   /**

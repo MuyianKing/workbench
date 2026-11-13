@@ -18,9 +18,12 @@
 历史消息 → 日志行，带单测）、`packages/ai/src/ai-preview.ts`（回答里的站内链接 → 预览目标的解析与画法判定，带单测）、
 `packages/ai/src/pi-skills.ts`（技能的根与开关键、交给 Pi 的清单，带单测）、
 `apps/desktop/src-tauri/src/pi_skills.rs`（技能的列 / 装 / 卸、手写 zip 与 `Location` 跳转，带单测）、
-`apps/desktop/src-tauri/src/ai.rs`（提示词进 stdin、权限扩展、models.json、拉模型列表、密钥、环境变量、起会话、拼 `--skill`、删会话）、
+`apps/desktop/src-tauri/src/ai.rs`（提示词进 stdin、权限扩展、models.json、拉模型列表、密钥、环境变量、起会话、拼 `--skill`、删会话；
+`AiRuntimeStatus` 带 `// @contract`，TS 类型由 `pnpm run contract:gen` 生成），
 `workbench/ai.ts`（按会话 id 认领进程事件、确认帧应答、`aiRequest` / `aiAbort` 与会话删除）、
-`workbench/pi-skill.ts`（技能四条通道适配）、`stores/ai.ts`（编排、每会话运行态、确认队列、服务增删改与 models.json 对齐）、
+`workbench/pi-skill.ts`（技能四条通道适配）、`stores/ai.ts`（编排：会话树、一轮的运行、进程收放与确认队列）、
+`stores/ai-run-state.ts`（每会话运行态与流式 / 思考收尾）、`stores/ai-config.ts`（服务 / 模型清单与三颗选择）、
+`stores/ai-runtime.ts`（Pi 与 Node 探测、密钥状态、装 Pi）、`stores/ai-providers.ts`（服务增删改与 models.json 对齐）、
 `stores/ai-skills.ts`（两栏扫描、开关、装 / 卸；**两条技能根由 ai store 经 `setRoots` 注册进来**，
 不反向 import ai store —— 那会成环，根变了 ai 推过来、这边按 `keyOf()` 自动重扫）；组件：`AiView.vue`（左树右对话，左栏底部一行是技能入口与收起开关）、
 `AiSessionTree.vue`、`AiLocationBar.vue`（挑中会话那一屏）、`AiComposer.vue`（贴图缩略图与 `/skill:` 候选）、
@@ -95,7 +98,8 @@
 - **进程直启、不经 `cmd /C`**（`session::spawn_args`，带一根可写 stdin）：整行交给 cmd 会被它的引号剥离规则拆坏。
   提示词与确认答复都走那根 stdin，不落临时文件、不走 shell。
 - **内置 cli.js 路径两处候选**（`resolve_cli`，与内置壁纸同一条路子）：打包走 `resource_dir()/pi/...`，开发态读仓库 `resources/pi/`，
-  都没有才退回全局 `pi`。**`resource_dir` 给的 `\\?\` 前缀必须剥掉再用**。
+  都没有才退回全局 `pi`。**`resource_dir` 给的 `\\?\` 前缀必须剥掉再用**。两个都没有是正常状态（`source: none`）；
+  探测本身失败（命令起不来 / 超时）回 `Err`，界面提示「探测失败」而不是「没装」。
 - **模型管理是「服务 + 模型」两层**：一个服务 = 名称 + Base URL + API 形态 + 密钥 + 模型清单，每条模型带 上下文窗口、最大输出、思考档位、能看图（形状见 [ai.ts](../../packages/ai/src/ai.ts) 的`AiProvider` / `sanitizeAiProviders`）。
   落点：名称 / 地址 / 形态 / 清单进设置（`aiProviders`）；密钥进凭据管理器（`Workbench/ai/<服务名>/token`，只写不回显）；
   端点由 `models_write` **一次写整份**成`models.json`（数据目录下的 `pi\`：安装版 `%APPDATA%\Workbench\data\pi\`，

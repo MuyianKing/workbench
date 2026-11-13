@@ -66,7 +66,12 @@ export const useCatalogStore = defineStore('catalog', () => {
   }
 
   async function refreshQuickApps(): Promise<void> {
-    const list: QuickAppList = await window.workbench.listQuickApps()
+    const result = await window.workbench.listQuickApps()
+    if (!result.ok || !result.data) {
+      notifyError(result.error ?? '读取快捷启动失败')
+      return
+    }
+    const list = result.data
     dropFailedIcons()
     quickApps.value = list.apps
     quickMissing.value = list.missing
@@ -222,7 +227,12 @@ export const useCatalogStore = defineStore('catalog', () => {
   }
 
   async function refreshCommands(): Promise<void> {
-    commands.value = await window.workbench.listCommands()
+    const result = await window.workbench.listCommands()
+    if (!result.ok || !result.data) {
+      notifyError(result.error ?? '读取命令失败')
+      return
+    }
+    commands.value = result.data
   }
 
   /** 同 addProject：会经 IPC 传输，必须转成普通对象 */

@@ -155,7 +155,12 @@ export const useProjectsStore = defineStore('projects', () => {
 
   /** 拉一次项目 / 分组 / 设置 / 数据目录 */
   async function loadData(): Promise<void> {
-    const data = await window.workbench.listProjects()
+    const listed = await window.workbench.listProjects()
+    if (!listed.ok || !listed.data) {
+      notifyError(listed.error ?? '读取项目列表失败')
+      return
+    }
+    const data = listed.data
     projects.value = data.projects
     groups.value = data.groups
     for (const project of data.projects) terminal.runtimeOf(project.id)
@@ -172,7 +177,8 @@ export const useProjectsStore = defineStore('projects', () => {
       catalog.refreshQuickApps(),
       catalog.refreshCommands(),
     ])
-    applyActivity(view)
+    if (view.ok && view.data)
+      applyActivity(view.data)
     for (const item of catalog.commands) terminal.runtimeOf(item.id)
   }
 
@@ -184,7 +190,9 @@ export const useProjectsStore = defineStore('projects', () => {
 
   /** 重新拉一次活跃度（任何一种来源记了一笔之后调用，见 installListeners） */
   async function refreshActivity(): Promise<void> {
-    applyActivity(await window.workbench.getActivity())
+    const result = await window.workbench.getActivity()
+    if (result.ok && result.data)
+      applyActivity(result.data)
   }
 
   /** 主进程更新了项目（执行记录、最近使用时间），同步回本地列表 */
@@ -422,37 +430,43 @@ export const useProjectsStore = defineStore('projects', () => {
     }
   }
 
+  /**
+   * 参与落盘的字段投影。
+   *
+   * 原先这里是 `watch(projects, ..., { deep: true })`：主进程推回来的 `history` / `lastUsedAt`
+   * 这类运行期字段也会触发，然后对**全部项目**各跑一次 `editableOf + JSON.stringify`。
+   * 改成盯这份投影之后，只有真正会落盘的字段变了才进重算，深遍历那一步也省了。
+   */
+  const editableProjects = computed(() =>
+    projects.value.map(project => ({ id: project.id, patch: editableOf(project) })),
+  )
+
   const pushedSnapshot = new Map<string, string>()
 
   function snapshotProjects(): void {
     pushedSnapshot.clear()
-    for (const project of projects.value) {
-      pushedSnapshot.set(project.id, JSON.stringify(editableOf(project)))
-    }
+    for (const item of editableProjects.value)
+      pushedSnapshot.set(item.id, JSON.stringify(item.patch))
   }
 
   let pushTimer: number | null = null
 
-  watch(
-    projects,
-    () => {
-      if (!ready.value)
-        return
-      if (pushTimer)
-        window.clearTimeout(pushTimer)
-      pushTimer = window.setTimeout(() => {
-        pushTimer = null
-        for (const project of projects.value) {
-          const next = JSON.stringify(editableOf(project))
-          if (pushedSnapshot.get(project.id) === next)
-            continue
-          pushedSnapshot.set(project.id, next)
-          void window.workbench.updateProject(project.id, editableOf(project))
-        }
-      }, 400)
-    },
-    { deep: true },
-  )
+  watch(editableProjects, () => {
+    if (!ready.value)
+      return
+    if (pushTimer)
+      window.clearTimeout(pushTimer)
+    pushTimer = window.setTimeout(() => {
+      pushTimer = null
+      for (const item of editableProjects.value) {
+        const next = JSON.stringify(item.patch)
+        if (pushedSnapshot.get(item.id) === next)
+          continue
+        pushedSnapshot.set(item.id, next)
+        void window.workbench.updateProject(item.id, item.patch)
+      }
+    }, 400)
+  })
 
   // ---------- 操作 ----------
 
@@ -549,8 +563,8 @@ export const useProjectsStore = defineStore('projects', () => {
 
     // Node 版本不满足只提示不阻断（F-9.3）
     const node = await window.workbench.checkNodeVersion(id)
-    if (!node.ok) {
-      notifyWarning(`项目要求 Node ${node.required}，当前为 ${node.actual}，启动可能失败`)
+    if (node.ok && node.data && !node.data.ok) {
+      notifyWarning(`项目要求 Node ${node.data.required}，当前为 ${node.data.actual}，启动可能失败`)
     }
 
     // 先看项目上一次记下的端口，其次用本次会话里从启动日志识别到的那个。
@@ -697,10 +711,14 @@ export const useProjectsStore = defineStore('projects', () => {
       return
     }
     try {
-      pathValidity.value = await window.workbench.checkProjectPaths()
+      const result = await window.workbench.checkProjectPaths()
+      if (result.ok && result.data)
+        pathValidity.value = result.data
+      else
+        console.warn('检查项目路径失败', result.error)
     }
     catch (error) {
-      // 这条通道失败会 reject,而它总被 void 调用(init / 窗口聚焦),吞下异常保持旧的有效性
+      // 兜底：通道已收敛成 Result，正常不会 reject；保持旧的有效性
       console.warn('检查项目路径失败', error)
     }
   }

@@ -14,12 +14,26 @@
   `types/qoder.ts` / `types/etf.ts`（契约侧），适配层从 `@/types` **import 并 re-export** —— `from '@/workbench/gateway'` 照旧
   能用，但**契约不再反向 import 适配层**（原先 47 处 `import('./workbench/…')`），新增载荷类型一律落 `types/`。
 - 通道一律返回 `Result<T>`（[result.ts](../../packages/core/src/result.ts) 的 `ok` / `fail` / `toResult`），不 reject；调用侧判
-  `result.ok`、失败取 `result.error` 提示。Rust 的 `Err(String)` 会被 Tauri 直接 reject，所以适配层用 `guard()` 收敛（兼容
-  字符串与 Error，不能直接套 `@workbench/core` 的 `toResult`）。
-- **「会 Err 的就必须是 `Result`」**：裸返回具体结构只留给「取不到也只是一句空态」的本地读（`checkPort`、`listProjects`、
-  `getNvmStatus`、`listWallpapers`、`checkPackageManagers`）。一旦跨到 Rust、那条命令本身会 `Err` —— 典型是 `listSyncDevices`
-  （底下是 `token_sync_shards`）—— 适配层必须用 `guard()` 收敛成 `Result`：否则失败以「未处理异常」冒到调用方，而调用方按
-  签名认为它不会失败。
+  `result.ok`、失败取 `result.error` 提示（`data` 在类型上仍是可选，取用前判一下）。Rust 的 `Err(String)` 会被 Tauri
+  直接 reject，所以适配层用 `guard()` 收敛（兼容字符串与 Error，不能直接套 `@workbench/core` 的 `toResult`）。
+- **会跨到 Rust 的数据读一律走 `Result`，不再留「取不到也是一句空态」的豁免**：`getActivity` / `gatewaySyncStatus` 这类
+  底下真会 `Err` 的用 `guard()`；`listProjects` / `listCommands` / `getSettings` / `getThemeConfig` 这些纯内存 / 常量的用
+  `ok()` 包一层 —— 现在不会失败，但签名与失败分支保持统一，以后 Rust 真开始 `Err` 时不会以「未处理异常」冒到调用方。
+  **三类例外不属于数据通道**：① 文件 / 目录选择器返回 `T | null`（`null` 是「用户取消」，不是失败）；② 窗口控制与版本
+  读取这类本地能力（`getWindowState` / `getAppVersion` / `markdownWindowIsMaximized` / `minimizeWindow` 等）按原样返回；
+  ③ 事件订阅（`on*`）与 void 命令。
+- **Rust → TS 的线上契约由 Rust 生成，不再手抄键名**：可序列化的 payload 结构在 Rust 侧标 `// @contract`，
+  `pnpm run contract:gen` 生成 [types/contract.generated.ts](../../apps/desktop/src/renderer/src/types/contract.generated.ts)；
+  `pnpm run contract:check`（`verify` 与 CI 里跑）在生成结果与仓库不一致时失败。新增 / 改动这类结构只改 Rust 一处，
+  别再手写同名 interface（`AuthStatus` 这种「线上形状 + 适配层补充」的可以在生成类型上再组合一次）。
+  **还返回 `Value` 的命令登记在** [contract-value-allow.txt](../../apps/desktop/src-tauri/contract-value-allow.txt)：
+  新增一条会让 `contract:check` 失败，逼着新命令用 typed payload；确需保留 `Value` 的跑
+  `node apps/desktop/scripts/gen-rust-contract.mjs --accept` 显式改写清单（人工动作，看 diff 只该多一条）。
+- **「失败」与「空」要分开**：读数据文件（`data_load` / `theme_load` / `token_load` / `work_log_load` /
+  `ai_news_load` / `etf_load`）、`probe_version`、`fs_exists` / `fs_is_dir` / `fs_stat_mtime`、`process_created_at`、
+  `nvm_node_dir`、`check_port`、`nvm_status` / `nrm_status` 把「读不出来 / 探测失败」回成 `Err`；
+  「文件不存在 / 没装 / 进程已退出」仍是正常值（`Ok(None)` / `Ok(false)` / 带 `error` 字段的 payload）。
+  调用侧要么提示，要么显式降级并留日志 —— 启动时那几份数据文件属于后者（见 `workbench/state.ts` 的 `loadFile`）。
 - 新增通道三步：`WorkbenchApi` 登记 → 适配层实现 → 需要后端时在 `commands.rs` 写命令并在 `main.rs` 的 `generate_handler!`
   注册。渲染层→主进程的单向事件走适配层的 `events.ts` 广播。
 - 适配层实现**按域分文件**：`workbench/index.ts` 只是装配根（spreads + 通道覆盖检查 + 安装时序），通道按域住在 `api-sync.ts`
@@ -36,8 +50,7 @@
   在 Rust 侧按**单个文件**授予（`commands.rs` 的 `allow_background` / `allow_video`，后者先核后缀与 MP4 文件头再放行），
   `tauri.conf.json` 的 `assetProtocol.scope` 必须保持为空 —— 写 `**` 等于把整块磁盘敞开给渲染层读。
 - 后端只做「取原始数据 / 落盘 / 调系统能力」；合并、排序、修剪、状态机、命令构造这些业务语义留在 TS 适配层（改动走 Vite
-  秒级热更新，不必重编 Rust）。少数通道按约定直接返回具体结构而非 `Result`：`checkPort`、`listProjects`、`getNvmStatus`、
-  `listWallpapers`、`checkPackageManagers`。
+  秒级热更新，不必重编 Rust）。
 - **交给 Shell 的路径先换成反斜杠**：`reveal` 与文件对话框的 `defaultPath` 都归 Windows 解析，而 Shell 路径解析只认 `\` ——
   `E:/a/b`（设置里的路径可能就是它）会让 `SHParseDisplayName` 直接失败，资源管理器开到别处、对话框也不从你要的地方打开。
   适配层的 `windowsPath()` 是唯一收口（Rust 侧的文件操作两种分隔符都认；别在各调用方各写一遍 `replace`）。
@@ -48,8 +61,10 @@
 
 - 跨组件状态按领域分在 [stores/](../../apps/desktop/src/renderer/src/stores/) 下（分工见架构文档「目录结构」）；不另建全局状态，
   也不要用事件总线传业务数据（组件设计那一层的约束见 [AGENTS.md](../../AGENTS.md) 第 0 节）。
-- **谁该进 store 的判据是「跨页共享」**：多处读写的状态必须进 store 且只经 action 变更；只在单页生命周期内用完即弃的数据与
-  动作（工作日志的读写入参、Token 卡片的取数节流）直接调 `window.workbench`，不为它造 store 切片。
+- **谁该进 store 的判据是「跨页共享」**：多处读写的状态必须进 store 且只经 action 变更 —— 工作日志就是这一条
+  （[stores/work-log.ts](../../apps/desktop/src/renderer/src/stores/work-log.ts)：「工作」页写、首页「今日完成」读，两边必须是
+  同一份）；只在单页生命周期内用完即弃的数据与动作直接调 `window.workbench` 或收进 composable（首页用量卡片的取数与轮询在
+  [use-token-usage.ts](../../apps/desktop/src/renderer/src/composables/use-token-usage.ts)），不为它造 store 切片。
 - **store 里不要直接 import element-plus**：提示与确认框一律经 [notify.ts](../../apps/desktop/src/renderer/src/notify.ts) 的
   `notifySuccess` / `notifyError` / `confirmAction` —— 这样这些 action 才可能被单测覆盖，也让状态层与「怎么提示」分开演进。
 

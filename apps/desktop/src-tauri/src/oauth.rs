@@ -975,14 +975,26 @@ fn logged_in() -> Vec<&'static str> {
         .collect()
 }
 
-pub fn status() -> Value {
-    json!({
-        "configured": configured(),
-        "redirectUri": redirect_uri(),
-        "providers": logged_in(),
+/// 登录状态（线上形状）。**不含任何 token**；已登录账号的显示资料由适配层另加
+/// （`account` 字段），这里只回「能不能登录、已登录哪几家」。
+// @contract
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthStatusWire {
+    pub configured: bool,
+    pub redirect_uri: String,
+    pub providers: Vec<String>,
+    pub config_error: String,
+}
+
+pub fn status() -> AuthStatusWire {
+    AuthStatusWire {
+        configured: configured(),
+        redirect_uri: redirect_uri(),
+        providers: logged_in().into_iter().map(str::to_string).collect(),
         // 只在完全用不了时才有值，界面直接显示它
-        "configError": config_error(),
-    })
+        config_error: config_error(),
+    }
 }
 
 /// 重新拉一次账号信息（启动时刷新头像用）。

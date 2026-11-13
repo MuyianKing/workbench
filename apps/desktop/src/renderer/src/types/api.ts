@@ -181,7 +181,7 @@ export interface WorkbenchApi {
   gatewayUsageSync: (force?: boolean) => Promise<Result<GatewaySyncResult>>
   /** 只拉一次远端克隆（不推送）；读路径只读本地副本，靠它补上别的机器的新流水 */
   gatewayUsagePull: () => Promise<Result<GatewayPullResult>>
-  gatewaySyncStatus: () => Promise<GatewaySyncStatus>
+  gatewaySyncStatus: () => Promise<Result<GatewaySyncStatus>>
   gatewayAccountSet: (uid: string, enabled: boolean) => Promise<Result<null>>
   /** 选号优先级：1..=100，数大的先用 */
   gatewayAccountPriority: (uid: string, priority: number) => Promise<Result<null>>
@@ -270,20 +270,20 @@ export interface WorkbenchApi {
     filters?: Array<{ name: string, extensions: string[] }>
   }) => Promise<string | null>
   scanProject: (dirPath: string) => Promise<Result<ScanResult>>
-  listProjects: () => Promise<{ projects: Project[], groups: ProjectGroup[] }>
+  listProjects: () => Promise<Result<{ projects: Project[], groups: ProjectGroup[] }>>
   addProject: (input: AddProjectInput) => Promise<Result<Project>>
   updateProject: (id: string, patch: ProjectPatch) => Promise<Result<Project>>
   removeProject: (id: string) => Promise<Result<null>>
   /** 目录被移动或删除后重新绑定路径 */
   relocateProject: (id: string, newPath: string) => Promise<Result<Project>>
   /** 检查所有项目目录是否仍然存在，返回 项目 ID -> 是否有效 */
-  checkProjectPaths: () => Promise<Record<string, boolean>>
+  checkProjectPaths: () => Promise<Result<Record<string, boolean>>>
   /**
    * 首页活跃度：按天聚合的各来源操作次数，总数（total）与分项（days）一起给，
    * 见 @workbench/core 的 ActivityView。开了同步时是**本机 + 别的机器**按天求和之后的账本
    * （别的机器那份只在内存里合并，不写回本机文件，见 workbench/activity.ts）。
    */
-  getActivity: () => Promise<ActivityView>
+  getActivity: () => Promise<Result<ActivityView>>
   /**
    * 记一次活跃度（只给渲染层里那几个「适配层看不见动作成败」的来源用：AI 助手跑完一轮，
    * 见 stores/ai.ts 的 settle）。其余来源都在适配层内部直接记（见 workbench/activity.ts）。
@@ -332,7 +332,7 @@ export interface WorkbenchApi {
   /** 按给定顺序重排分组（拖动排序） */
   reorderGroups: (ids: string[]) => Promise<Result<ProjectGroup[]>>
   /** 快捷启动：列表 + 哪些程序已经不在原路径上了 */
-  listQuickApps: () => Promise<QuickAppList>
+  listQuickApps: () => Promise<Result<QuickAppList>>
   /** 挑一个要启动的程序（.exe / 快捷方式…），取消返回 null */
   pickQuickTarget: () => Promise<string | null>
   addQuickApp: (input: QuickAppInput) => Promise<Result<QuickApp>>
@@ -345,7 +345,7 @@ export interface WorkbenchApi {
   /** 取程序的系统图标（主进程转成 data URL，取不到时用首字母兜底） */
   quickAppIcon: (target: string) => Promise<Result<string>>
   /** 首页「命令」卡片：独立于项目的一批命令 */
-  listCommands: () => Promise<CommandEntry[]>
+  listCommands: () => Promise<Result<CommandEntry[]>>
   addCommand: (input: CommandInput) => Promise<Result<CommandEntry>>
   updateCommand: (id: string, patch: CommandPatch) => Promise<Result<CommandEntry>>
   removeCommand: (id: string) => Promise<Result<null>>
@@ -836,18 +836,18 @@ export interface WorkbenchApi {
    * （AI 预览栏显示回答里提到的图片用，与工作区背景图同一条边界）。
    */
   allowPreviewImage: (path: string) => Promise<Result<{ url: string }>>
-  checkPackageManagers: () => Promise<PackageManagerStatus>
+  checkPackageManagers: () => Promise<Result<PackageManagerStatus>>
   /** 用 npm 全局安装 yarn / pnpm；返回的 status 是装完（或装失败）后重新探测的结果 */
   installPackageManager: (
     pm: InstallablePackageManager,
   ) => Promise<Result<PackageManagerStatus>>
-  checkPort: (port: number) => Promise<PortCheckResult>
+  checkPort: (port: number) => Promise<Result<PortCheckResult>>
   killPortProcess: (port: number) => Promise<Result<null>>
-  checkNodeVersion: (id: string) => Promise<NodeCheckResult>
+  checkNodeVersion: (id: string) => Promise<Result<NodeCheckResult>>
   /** 读取 nvm 已安装的 Node 版本，用于项目级选择 */
-  getNvmStatus: () => Promise<NvmStatus>
+  getNvmStatus: () => Promise<Result<NvmStatus>>
   /** nrm 状态：装没装、当前镜像、可切换的镜像清单 */
-  getNrmStatus: () => Promise<NrmStatus>
+  getNrmStatus: () => Promise<Result<NrmStatus>>
   /** 用 npm 全局安装 nrm；返回装完（或装失败）后重新探测的结果 */
   installNrm: () => Promise<Result<NrmStatus>>
   /** 换一个 npm 镜像源（nrm use <name>）；返回切换后重新探测的结果 */
@@ -869,20 +869,20 @@ export interface WorkbenchApi {
    * 渲染层在 mount 之前调用，让第一帧就是用户设置的样子，而不是先默认再切换。
    */
   getBootstrap: () => BootstrapSnapshot
-  getSettings: () => Promise<AppSettings>
+  getSettings: () => Promise<Result<AppSettings>>
   updateSettings: (patch: Partial<AppSettings>) => Promise<Result<AppSettings>>
   /** 挑一张图片当工作区背景；只返回路径，落盘交给 updateSettings */
   pickBackground: () => Promise<string | null>
   /** 读取背景图（主进程压好尺寸后回传 data URL），文件不在或读不出来时返回失败 */
   loadBackground: (path: string) => Promise<Result<BackgroundImage>>
   /** 内置壁纸清单（含缩略图）；目录里没有图时返回空数组 */
-  listWallpapers: () => Promise<BuiltinWallpaper[]>
+  listWallpapers: () => Promise<Result<BuiltinWallpaper[]>>
   /** 首页布局配置（theme.json）：八块卡片的位置 / 尺寸与栏宽 */
-  getThemeConfig: () => Promise<ThemeConfig>
+  getThemeConfig: () => Promise<Result<ThemeConfig>>
   /** 合并保存首页布局；返回收敛后的最终值 */
   updateThemeConfig: (patch: Partial<ThemeConfig>) => Promise<Result<ThemeConfig>>
   /** 数据目录：安装版 `%APPDATA%\Workbench\data`、开发版 `%APPDATA%\Workbench-dev\data`，界面只用来如实显示数据放在哪儿 */
-  getDataDir: () => Promise<string>
+  getDataDir: () => Promise<Result<string>>
   // ---------- 截图与钉图（见 docs/modules/screenshot.md） ----------
   /**
    * 预先把遮罩窗口建好（每块屏一块）。**按热键到看见遮罩能不能压到两百毫秒级全靠这一条**：
@@ -1002,7 +1002,7 @@ export interface WorkbenchApi {
    * 账号登录状态：能不能登录、回调地址、已登录哪些平台。
    * **不返回任何 token** —— 它在 Rust 侧，渲染层碰不到（见 AccountProfile）。
    */
-  authStatus: () => Promise<AuthStatus>
+  authStatus: () => Promise<Result<AuthStatus>>
   /** 重新拉一次账号资料（启动时刷新头像与昵称） */
   authRefreshAccount: (provider: AuthProvider) => Promise<Result<AccountProfile>>
   /**

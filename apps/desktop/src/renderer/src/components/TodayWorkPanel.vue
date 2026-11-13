@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import type { WorkLogEntry } from '@workbench/work-log'
 import { Finished, Warning } from '@element-plus/icons-vue'
 
 import { dayKey, markdownToPlainText, sanitizeProjectColor } from '@workbench/core'
@@ -8,61 +7,38 @@ import { completedEntriesOn, entriesOfDevice } from '@workbench/work-log'
  * 首页「今日完成」卡片：今天**标记为已完成**的工作记录，一条一行（项目标签 + 内容）。
  *
  * 只读不写：记一条、改内容都在「工作」页，这张卡片回答的是「今天做完了几件事」。
- * 数据住在本机的 `work-log.json`（配了同步仓库时别的设备的条目会合进来，见
- * packages/work-log/src/work-log.ts / work-log-sync.ts）——
- * 与工作页是两次独立读取，但适配层把整份文件缓存在内存里，第二次只是取一份快照，
- * 所以两边看到的是同一份内容，不会各自去读一遍磁盘。
+ * 数据与工作页是**同一份 store**（[stores/work-log.ts](../stores/work-log.ts)）——
+ * 两边看到的是同一份内容，「工作」页记完一条，切回首页就是新的，不必等下一次读盘。
  * **只数本机的**（按条目的 `by` 筛，与工作页默认看的那台一致）：卡片上没有设备切换，
  * 别把几台机器的事混成一行行看起来像自己做的；要看别的设备去「工作」页切。
  *
  * 正文按 markdown 原文存着，这里**不渲染它**（一行装不下，一张卡片里堆十几段富文本也读不出重点）：
  * 去掉标记后一行显示，悬停给全文，要读全貌就点进去。
  */
-import { computed, onActivated, onMounted, ref } from 'vue'
+import { storeToRefs } from 'pinia'
+import { computed, onActivated, onMounted } from 'vue'
 import PanelLoading from '@/components/PanelLoading.vue'
 import ProjectTag from '@/components/ProjectTag.vue'
 import { useWallClock } from '@/composables/use-wall-clock'
 import { useNavStore } from '@/stores/nav'
 import { useProjectsStore } from '@/stores/projects'
-import { workLogLocalDevice } from '@/workbench/work-log'
+import { useWorkLogStore } from '@/stores/work-log'
 
 const store = useProjectsStore()
 const nav = useNavStore()
+const workLog = useWorkLogStore()
+const { entries, loading, error, localDevice } = storeToRefs(workLog)
 const { dayStart } = useWallClock()
 
-const entries = ref<WorkLogEntry[]>([])
-const loading = ref(true)
-/** 读盘失败与「今天还没做完什么」是两回事，不能都显示成空列表 */
-const error = ref('')
 /** 本机设备 id：只留本机条目（拿不到时 entriesOfDevice 不筛，退化成原来的样子） */
-const localDeviceId = ref('')
+const localDeviceId = computed(() => localDevice.value.id)
 
-async function load(): Promise<void> {
-  error.value = ''
-  try {
-    const result = await window.workbench.listWorkLogs()
-    if (result.ok && result.data)
-      entries.value = result.data
-    else error.value = result.error ?? '读取工作日志失败'
-  }
-  catch (err) {
-    error.value = err instanceof Error ? err.message : '读取工作日志失败'
-  }
-  finally {
-    loading.value = false
-  }
-}
-
-async function loadLocalDevice(): Promise<void> {
-  localDeviceId.value = (await workLogLocalDevice()).id
-}
-
-onMounted(() => void Promise.all([loadLocalDevice(), load()]))
+onMounted(() => void Promise.all([workLog.loadDevice(), workLog.load()]))
 
 /**
- * 切回首页时重读一次：首页整页留在内存里（KeepAlive），卡片不会重新挂载，
- * 而这段时间里刚在「工作」页记过一条是常态。
- * 首次挂载时 activated 也会触发，用这个标志把那次免掉，免得启动时连着读两遍。
+ * 切回首页时确认一次：首页整页留在内存里（KeepAlive），卡片不会重新挂载。
+ * 数据已经在共享 store 里（工作页的增删改与同步都直接改它），这里只是兜住
+ * 「首挂时卡片先于工作页读、而工作页还没挂过」的那一拍。
  */
 let activatedOnce = false
 
@@ -71,7 +47,7 @@ onActivated(() => {
     activatedOnce = true
     return
   }
-  void load()
+  void workLog.load()
 })
 
 /**
@@ -134,7 +110,7 @@ function openWorkView(): void {
         <Warning />
       </el-icon>
       <p>{{ error }}</p>
-      <button class="panel__link" type="button" @click="load">
+      <button class="panel__link" type="button" @click="workLog.refresh">
         重试
       </button>
     </div>

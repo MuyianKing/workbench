@@ -127,3 +127,15 @@
     projects.ts          项目、分组、筛选排序、抽屉；也是启动编排的落点（init）（stores/）
     environment.ts       包管理器、nvm、nrm、数据目录（stores/）
 ```
+
+项目详情抽屉按区块拆开（`components/`）：`ProjectDrawer.vue` 只是壳（开关动画 + 共用表单样式 +
+危险操作），内容在 `ProjectDrawerHeader.vue`（头部与主操作）与五个 `Project*Section.vue`
+（基本信息 / 命令配置 / 环境 / 打包输出 / 运行记录）。各块自己读 `store.drawerProject`，
+不为每一块在父组件里转一遍 props。
+
+**配置变更自动落盘盯的是「可落盘字段的投影」**（`stores/projects.ts` 的 `editableProjects`），
+不是 `projects` 的深遍历：主进程推回来的 `history` / `lastUsedAt` 不再触发一次全项目重算与 IPC。
+
+nvm / nrm 的探测结果不再手写 `json!`：`nvm.rs` / `nrm.rs` 的 `NvmStatus` / `NrmStatus` 带 `// @contract`，
+TS 类型由 `pnpm run contract:gen` 生成。「没装 nvm / nrm」是正常状态（`available: false` + `error`），
+只有探测本身失败（命令起不来）才是 `Err`。

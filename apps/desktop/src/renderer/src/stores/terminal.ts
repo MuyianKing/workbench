@@ -555,7 +555,13 @@ export const useTerminalStore = defineStore('terminal', () => {
       return true
 
     const check = await window.workbench.checkPort(port)
-    if (!check.inUse) {
+    if (!check.ok || !check.data) {
+      // 问不到占用情况就放行：拦着不让启动比「可能撞端口」更糟
+      console.warn('检测端口失败', check.error)
+      return true
+    }
+    const info = check.data
+    if (!info.inUse) {
       if (rt.external) {
         // 端口已经空出来，之前探测到的「外部运行中」不再成立
         rt.status = 'idle'
@@ -567,7 +573,7 @@ export const useTerminalStore = defineStore('terminal', () => {
     }
 
     const agreed = await confirmAction(
-      `端口 ${port} 已被 ${describeHolder(check)} 占用，是否结束该进程后重新启动？`,
+      `端口 ${port} 已被 ${describeHolder(info)} 占用，是否结束该进程后重新启动？`,
       '端口被占用',
       { confirmButtonText: '结束进程并启动' },
     )
@@ -612,14 +618,20 @@ export const useTerminalStore = defineStore('terminal', () => {
     }
 
     const check = await window.workbench.checkPort(port)
-    if (check.inUse) {
+    if (!check.ok || !check.data) {
+      // 问不到占用情况：按「没在跑」处理，让启动照常继续
+      console.warn('检测端口失败', check.error)
+      return false
+    }
+    const info = check.data
+    if (info.inUse) {
       rt.status = 'running'
       rt.external = true
       rt.port = port
-      rt.pid = check.pid
+      rt.pid = info.pid ?? undefined
       if (!options.silent) {
         notifySuccess(
-          `端口 ${port} 已被 ${describeHolder(check)} 占用，${target.subject}已在运行`,
+          `端口 ${port} 已被 ${describeHolder(info)} 占用，${target.subject}已在运行`,
         )
       }
       return true

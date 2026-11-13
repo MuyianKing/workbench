@@ -28,7 +28,12 @@ export async function useRegistry(name: string): Promise<Result<NrmStatus>> {
     // Rust 的 Err(String) 是被 Tauri 直接 reject 的，所以失败值不一定是 Error
     return fail(error instanceof Error ? error.message : '切换镜像源失败')
   }
-  return ok(await status())
+  try {
+    return ok(await status())
+  }
+  catch (error) {
+    return fail(error instanceof Error ? error.message : '切换后重新探测失败')
+  }
 }
 
 /**
@@ -40,7 +45,13 @@ export async function install(): Promise<Result<NrmStatus>> {
   if (!install.ok)
     return fail(install.error ?? '安装失败')
 
-  const next = await status()
+  let next: NrmStatus
+  try {
+    next = await status()
+  }
+  catch (error) {
+    return fail(error instanceof Error ? error.message : '安装后探测失败')
+  }
   if (next.available)
     return ok(next)
 

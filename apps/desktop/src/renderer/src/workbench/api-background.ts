@@ -72,27 +72,32 @@ export const backgroundApi = {
   },
 
   /** 内置壁纸清单（含缩略图）：缩略图压到 320 就够面板里看了 */
-  listWallpapers: async (): Promise<BuiltinWallpaper[]> => {
-    const files = await invoke<string[]>('list_wallpapers')
-    const items = await Promise.all(
-      files.map(async (file) => {
-        const item = wallpaperFrom(file)
-        try {
-          return {
-            ...item,
-            thumbnail: await invoke<string>('image_data_url', {
-              path: file,
-              maxEdge: THUMBNAIL_MAX_EDGE,
-              quality: THUMBNAIL_QUALITY,
-            }),
+  listWallpapers: async (): Promise<Result<BuiltinWallpaper[]>> => {
+    try {
+      const files = await invoke<string[]>('list_wallpapers')
+      const items = await Promise.all(
+        files.map(async (file) => {
+          const item = wallpaperFrom(file)
+          try {
+            return {
+              ...item,
+              thumbnail: await invoke<string>('image_data_url', {
+                path: file,
+                maxEdge: THUMBNAIL_MAX_EDGE,
+                quality: THUMBNAIL_QUALITY,
+              }),
+            }
           }
-        }
-        catch {
-          return item
-        }
-      }),
-    )
-    return items
+          catch {
+            return item
+          }
+        }),
+      )
+      return ok(items)
+    }
+    catch (error) {
+      return fail(errorText(error, '读取内置壁纸失败'))
+    }
   },
 
   /**

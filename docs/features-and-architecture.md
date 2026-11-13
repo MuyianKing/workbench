@@ -367,14 +367,21 @@ apps/desktop/            桌面应用（自包含：渲染层 + Rust + 随包资
   composables/           跨组件复用的交互骨架（use-pointer-drag：拖拽的起手 / 收手 / Esc 取消 /
                          解绑；use-floating-dismiss：浮层的收起；use-video-stage：画中画
                          传送宿主的注册；use-wall-clock：每秒时钟与「今天 00:00」的模块级单例；
-                         use-draft-field：设置 / 抽屉的草稿字段。拖拽与浮层那几个带单测）
+                         use-draft-field：设置 / 抽屉的草稿字段；use-token-usage：首页用量卡片的
+                         快照 → 实读顺序、60 秒轮询与手动同步。拖拽与浮层那几个带单测）
   notify.ts              非组件代码「说一句话 / 问一句」的唯一出口（可被测试顶替）
   stores/                跨组件状态，按领域分文件：nav.ts（当前页与首页布局编辑态）与
-                         settings.ts（设置、外观、首页布局、别台机器的外观）是壳层，
-                         见上面的「导航与页面」「系统集成」；其余各 store 的注解见
-                         modules/<模块>.md 的「涉及文件」
-  types.ts               应用级契约（Project / AppSettings / WorkbenchApi / IPC 通道表 /
-                         DEFAULT_SETTINGS），并从各域包 re-export 保持 `@/types` 一站式取类型
+                         settings.ts（设置本体与装配；主题内核 / 首页布局 / 别台机器的外观分别由
+                         settings-theme.ts / settings-layout.ts / settings-sync.ts 提供，背景在
+                         settings-background.ts）是壳层，见上面的「导航与页面」「系统集成」；
+                         ai.ts 是 AI 助手的编排层，运行态 / 配置 / 运行时 / 服务四个叶子分别住在
+                         ai-run-state.ts / ai-config.ts / ai-runtime.ts / ai-providers.ts；
+                         work-log.ts 是「工作页写、首页今日完成读」的同一份日志。
+                         其余各 store 的注解见 modules/<模块>.md 的「涉及文件」
+  types/                 应用级契约：api.ts（WorkbenchApi 通道表）、settings.ts（AppSettings 与
+                         DEFAULT_SETTINGS）、index.ts（其余形状 + 各域包的 re-export 桶）、
+                         contract.generated.ts（Rust `// @contract` 结构 → TS，`pnpm run contract:gen`
+                         生成、`contract:check` 拦漂移），`@/types` 照旧一站式取类型
   persisted-data.ts      数据文件的收敛编排 + theme.json ↔ 数据文件的分流桥接
 
 packages/                按域拆出的 19 个 @workbench/* 包（TS 源码直出、各自带 vitest；

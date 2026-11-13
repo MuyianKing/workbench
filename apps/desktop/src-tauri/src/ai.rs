@@ -44,6 +44,7 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use serde::Serialize;
 use serde_json::{json, Value};
 use tauri::{AppHandle, Manager};
 
@@ -114,8 +115,23 @@ pub fn resolve_cli(app: &AppHandle) -> Option<PathBuf> {
 /// 内置的 cli.js 一样要 node ≥ 22.19 才能跑（门槛的判定在渲染层 packages/ai/src/ai.ts）。
 /// `detail` 带内置那份探测失败时的原始输出：这个字段就是为「为什么明明装了却说没有」
 /// 这类排查准备的，界面上不展示。
-pub fn runtime(app: &AppHandle) -> Value {
-    let node = crate::proc::probe_version("node").unwrap_or_default();
+///
+/// **探测没做成（起不来 / 超时）才回 `Err`**；「两个都没有」与「没装 nvm 版本」一样，
+/// 是一种状态（`source: "none"`），不是错误。
+// @contract
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiRuntimeStatus {
+    pub source: String,
+    pub cli: String,
+    pub pi: String,
+    pub node: String,
+    pub detail: String,
+    pub skill_root: String,
+}
+
+pub fn runtime(app: &AppHandle) -> Result<AiRuntimeStatus, String> {
+    let node = crate::proc::probe_version_checked("node")?.unwrap_or_default();
 
     let mut source = "none";
     let mut cli = String::new();
@@ -154,7 +170,7 @@ pub fn runtime(app: &AppHandle) -> Value {
     }
 
     if source == "none" {
-        if let Some(version) = crate::proc::probe_version("pi") {
+        if let Some(version) = crate::proc::probe_version_checked("pi")? {
             source = "path";
             pi = version;
         }
@@ -162,13 +178,13 @@ pub fn runtime(app: &AppHandle) -> Value {
 
     // 全局技能根（`%USERPROFILE%\.agents\skills`）：渲染层拿它扫列表、拼开关状态。
     // 拿不到用户目录时是空串，界面据此把全局那一栏说明白（不显示一个拼错的路径）
-    json!({
-        "source": source,
-        "cli": cli,
-        "pi": pi,
-        "node": node,
-        "detail": detail,
-        "skillRoot": crate::pi_skills::global_root().unwrap_or_default(),
+    Ok(AiRuntimeStatus {
+        source: source.to_string(),
+        cli,
+        pi,
+        node,
+        detail,
+        skill_root: crate::pi_skills::global_root().unwrap_or_default(),
     })
 }
 

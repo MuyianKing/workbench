@@ -1,6 +1,6 @@
 import type { AiConfirm, AiFetchedModel, AiLogLine, AiProviderPayload, AiUsage, PiDelta } from '@workbench/ai'
 import type { NoteRepoState } from '@workbench/notes'
-import type { AiRunInput, Result } from '@/types'
+import type { AiRunInput, AiRuntimeStatus, Result } from '@/types'
 /**
  * AI 助手的适配层：把「在一条会话里跑一轮」接到 Rust（`ai_run`）与进程会话的事件流上，
  * 外加密钥三条、探测、RPC 的命令应答与会话删除。
@@ -82,42 +82,31 @@ const pending = new Map<string, PendingRequest>()
 const REQUEST_TIMEOUT = 15000
 
 /** AI 运行时的探测结果：内置那份优先，没有再看全局 */
-export interface AiRuntime {
+export interface AiRuntime extends Omit<AiRuntimeStatus, 'source'> {
   source: 'bundled' | 'path' | 'none'
-  /** 内置 cli.js 的绝对路径（仅 bundled 模式有值；拼命令时直接交给 node） */
-  cli: string
-  /** Pi 版本串；两边都没有时是空串 */
-  pi: string
-  /** 本机 Node 版本串（内置 cli.js 一样要 node ≥ 22.19） */
-  node: string
-  /** 都没有时的原因（内置那份探测失败的原始输出），排障用，界面不展示 */
-  detail: string
-  /** 全局技能根（`%USERPROFILE%\.agents\skills`）：技能弹窗拿它扫列表、拼开关状态。拿不到用户目录时是空串 */
-  skillRoot: string
 }
 
 /**
  * 探测 AI 运行时：内置（resources/pi）→ 全局 pi → 都没有。
- * 探测失败不该被吞掉（见 workbench/system.ts 的教训），warn 一条再按「都没有」处理。
+ * **探测没做成回 `fail`**（不是「都没有」）：调用方据此说清是「没装」还是「问不到」。
+ * 「两个都没有」是正常状态（`source: 'none'`）。
  */
-export async function aiRuntime(): Promise<AiRuntime> {
+export async function aiRuntime(): Promise<Result<AiRuntime>> {
   try {
-    const raw = await invoke<Partial<AiRuntime>>('ai_runtime')
+    const raw = await invoke<Partial<AiRuntimeStatus>>('ai_runtime')
     const source
       = raw.source === 'bundled' || raw.source === 'path' ? raw.source : ('none' as const)
-    return {
+    return ok({
       source,
       cli: typeof raw.cli === 'string' ? raw.cli : '',
       pi: typeof raw.pi === 'string' ? raw.pi : '',
       node: typeof raw.node === 'string' ? raw.node : '',
       detail: typeof raw.detail === 'string' ? raw.detail : '',
       skillRoot: typeof raw.skillRoot === 'string' ? raw.skillRoot : '',
-    }
+    })
   }
   catch (error) {
-    const message = errorText(error, '探测 AI 运行时失败')
-    console.warn('[workbench] 探测 AI 运行时失败', error)
-    return { source: 'none', cli: '', pi: '', node: '', detail: message, skillRoot: '' }
+    return fail(errorText(error, '探测 AI 运行时失败'))
   }
 }
 

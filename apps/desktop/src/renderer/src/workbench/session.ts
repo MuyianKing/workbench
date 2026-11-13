@@ -94,7 +94,14 @@ async function appPid(): Promise<number> {
 async function appCreatedAt(): Promise<number | null> {
   if (cachedAppCreatedAt === null) {
     const pid = await appPid()
-    cachedAppCreatedAt = (await invoke<number | null>('process_created_at', { pid })) ?? -1
+    try {
+      cachedAppCreatedAt = (await invoke<number | null>('process_created_at', { pid })) ?? -1
+    }
+    catch (error) {
+      // 问不到本应用的创建时间：记录里不带这个字段，残留清理会保守地跳过
+      console.warn('[workbench] 读取应用创建时间失败', error)
+      cachedAppCreatedAt = -1
+    }
   }
   // -1 表示问不到（极少见），返回 null 让记录里不带这个字段
   return cachedAppCreatedAt < 0 ? null : cachedAppCreatedAt
@@ -215,7 +222,14 @@ async function run(input: RunInput): Promise<Result<null>> {
     // 落一条记录：应用要是被强杀，下次启动就靠它认出该收哪些进程。
     // 创建时间要趁进程刚起就取 —— 它是「这个 PID 还是不是当初那个进程」的判据，
     // 等下才取的话进程可能已经退出、PID 也可能已经被复用。
-    const createdAt = await invoke<number | null>('process_created_at', { pid })
+    let createdAt: number | null = null
+    try {
+      createdAt = await invoke<number | null>('process_created_at', { pid })
+    }
+    catch (error) {
+      // 记录里少这个字段只让下次的残留清理更保守，不该把「起进程」整条弄失败
+      console.warn('[workbench] 读取进程创建时间失败', error)
+    }
     const ownerCreated = await appCreatedAt()
     state.recordSession({
       projectId: meta.projectId,

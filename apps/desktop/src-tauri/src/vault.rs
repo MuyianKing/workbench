@@ -455,10 +455,8 @@ fn checked_repo(repo: &str) -> Result<String, String> {
 
 /// 提交信息带上本机设备名，一眼看得出这次改动是哪台机器做的
 fn commit_message() -> String {
-    let name = sync::device_info()
-        .ok()
-        .and_then(|value| value.get("name").and_then(|name| name.as_str()).map(str::to_string))
-        .unwrap_or_default();
+    // 设备标识读不出来时只影响提交信息里的名字，同步照走
+    let name = sync::device_info().map(|device| device.name).unwrap_or_default();
 
     if name.is_empty() {
         "vault: 同步".to_string()

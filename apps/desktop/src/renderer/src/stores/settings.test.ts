@@ -13,6 +13,7 @@
 import { clampWidth, DEFAULT_THEME } from '@workbench/appearance'
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { DEFAULT_SETTINGS } from '@/types'
 
 vi.mock('@/notify', () => ({
   notifyError: vi.fn(),
@@ -22,13 +23,33 @@ vi.mock('@/notify', () => ({
 
 /** updateThemeConfig 收到的补丁：用来钉「只送了该送的字段」 */
 let themePatches: Array<Record<string, unknown>>
+/** 载入时两条通道的先后顺序 */
+let loadOrder: string[]
+/** 主题落地时对 <html> 的 class 切换：用来钉「同一个主题只落一次」 */
+let classToggle: ReturnType<typeof vi.fn>
 
 beforeEach(() => {
   themePatches = []
+  loadOrder = []
+  classToggle = vi.fn()
   const workbench = new Proxy({} as Record<string, unknown>, {
     get: (_target, key) => {
       if (key === 'getBootstrap')
         return () => null
+      if (key === 'getSettings') {
+        return async () => {
+          loadOrder.push('settings')
+          return { ok: true, data: structuredClone(DEFAULT_SETTINGS) }
+        }
+      }
+      if (key === 'getThemeConfig') {
+        return async () => {
+          loadOrder.push('theme')
+          return { ok: true, data: structuredClone(DEFAULT_THEME) }
+        }
+      }
+      if (key === 'updateSettings')
+        return async (patch: Record<string, unknown>) => ({ ok: true, data: { ...DEFAULT_SETTINGS, ...patch } })
       if (key === 'updateThemeConfig') {
         return (patch: Record<string, unknown>) => {
           themePatches.push(patch)
@@ -41,13 +62,13 @@ beforeEach(() => {
   })
 
   ;(globalThis as { window?: unknown }).window = {
-    matchMedia: () => ({ matches: false }),
+    matchMedia: () => ({ matches: false, addEventListener: () => {} }),
     workbench,
   }
   ;(globalThis as { document?: unknown }).document = {
     documentElement: {
       dataset: {},
-      classList: { toggle: () => {} },
+      classList: { toggle: classToggle },
       style: { setProperty: () => {}, removeProperty: () => {} },
     },
   }
@@ -85,5 +106,24 @@ describe('布局落盘只送该送的字段', () => {
 
     store.settings.appName = '小助手'
     expect(store.viewLabelOf('ai')).toBe('小助手')
+  })
+})
+
+describe('主题与载入顺序', () => {
+  it('同一个主题再推一次不重复落地（一次切换只开一个转场）', () => {
+    const store = useSettingsStore()
+    classToggle.mockClear()
+
+    store.applyTheme('dark', { animate: false })
+    store.applyTheme('dark', { animate: false })
+
+    expect(classToggle).toHaveBeenCalledTimes(1)
+  })
+
+  it('先拉设置、再拉首页布局：外观决定首帧', async () => {
+    const store = useSettingsStore()
+
+    await store.loadAppearance()
+    expect(loadOrder).toEqual(['settings', 'theme'])
   })
 })

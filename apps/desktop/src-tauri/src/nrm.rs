@@ -8,7 +8,7 @@
 //! nrm 是个 .cmd，所以要经 shell 起（见 proc::run）；超时给得比探测宽 ——
 //! 冷启动一次 node 要一两秒，慢机器上更多。
 
-use serde_json::{json, Value};
+use serde::Serialize;
 use std::time::Duration;
 
 /// `nrm ls` / `nrm use` 的单次超时
@@ -163,13 +163,39 @@ fn list_registries() -> Result<Vec<(String, String, bool)>, String> {
     Ok(list)
 }
 
-/// nrm 探测结果，形状与 shared 里的 NrmStatus 一致
-pub fn status() -> Value {
-    let Some(version) = crate::proc::probe_version("nrm") else {
-        return json!({
-            "available": false,
-            "registries": [],
-            "error": "未检测到 nrm，可用右侧的安装按钮装一个",
+/// nrm 管理下的一个镜像源。
+// @contract
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NrmRegistry {
+    pub name: String,
+    pub url: String,
+    pub current: bool,
+}
+
+/// nrm 探测结果。**「没装 nrm」是状态不是错误**；`probe_version` 真的起不来时才是 `Err`。
+// @contract
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NrmStatus {
+    pub available: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub current: Option<String>,
+    pub registries: Vec<NrmRegistry>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+pub fn status() -> Result<NrmStatus, String> {
+    let Some(version) = crate::proc::probe_version_checked("nrm")? else {
+        return Ok(NrmStatus {
+            available: false,
+            version: None,
+            current: None,
+            registries: Vec::new(),
+            error: Some("未检测到 nrm，可用右侧的安装按钮装一个".into()),
         });
     };
 
@@ -179,24 +205,30 @@ pub fn status() -> Value {
                 .iter()
                 .find(|item| item.2)
                 .map(|item| item.0.clone());
-            let registries: Vec<Value> = list
+            let registries = list
                 .iter()
-                .map(|(name, url, current)| json!({ "name": name, "url": url, "current": current }))
+                .map(|(name, url, current)| NrmRegistry {
+                    name: name.clone(),
+                    url: url.clone(),
+                    current: *current,
+                })
                 .collect();
 
-            json!({
-                "available": true,
-                "version": version,
-                "current": current,
-                "registries": registries,
+            Ok(NrmStatus {
+                available: true,
+                version: Some(version),
+                current,
+                registries,
+                error: None,
             })
         }
         // 装是装了，但清单读不出来：照样按「可用」回，把原因带上让界面提示
-        Err(err) => json!({
-            "available": true,
-            "version": version,
-            "registries": [],
-            "error": err,
+        Err(err) => Ok(NrmStatus {
+            available: true,
+            version: Some(version),
+            current: None,
+            registries: Vec::new(),
+            error: Some(err),
         }),
     }
 }

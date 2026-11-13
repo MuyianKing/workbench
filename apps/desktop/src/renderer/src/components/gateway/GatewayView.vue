@@ -464,13 +464,10 @@ async function rotateKey(): Promise<void> {
 
 /** 同步开关跟着登录态 / 仓库地址走：进页面与每次切回来都重新对一下 */
 async function loadSyncStatus(): Promise<void> {
-  try {
-    const status = await window.workbench.gatewaySyncStatus()
-    syncEnabled.value = status.enabled
-  }
-  catch {
-    // 读不到就按关闭处理：只读本机
-  }
+  const result = await window.workbench.gatewaySyncStatus()
+  // 读不到就按关闭处理：只读本机
+  if (result.ok && result.data)
+    syncEnabled.value = result.data.enabled
 }
 
 /**

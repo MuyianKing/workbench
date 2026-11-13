@@ -63,8 +63,8 @@ pub fn ai_news_store() -> &'static JsonStore {
 // ---------- 数据文件 ----------
 
 #[tauri::command]
-pub fn ai_news_load() -> Value {
-    ai_news_store().get()
+pub fn ai_news_load() -> Result<Value, String> {
+    ai_news_store().read()
 }
 
 #[tauri::command]

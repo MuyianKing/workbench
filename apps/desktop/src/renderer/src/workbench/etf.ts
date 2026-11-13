@@ -60,8 +60,15 @@ function sleep(ms: number): Promise<void> {
 }
 
 async function loadCache(): Promise<EtfCache> {
-  const raw = await invoke<unknown>('etf_load')
-  return sanitizeEtfCache(raw)
+  try {
+    const raw = await invoke<unknown>('etf_load')
+    return sanitizeEtfCache(raw)
+  }
+  catch (error) {
+    // 缓存坏了不该让资金流页打不开：留一条带原因的日志，按空缓存继续
+    console.error('[workbench] 读取 ETF 缓存失败，按空缓存继续', error)
+    return sanitizeEtfCache(null)
+  }
 }
 
 async function saveCache(cache: EtfCache): Promise<void> {
