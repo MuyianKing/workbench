@@ -24,7 +24,8 @@
   ③ 事件订阅（`on*`）与 void 命令。
 - **Rust → TS 的线上契约由 Rust 生成，不再手抄键名**：可序列化的 payload 结构在 Rust 侧标 `// @contract`，
   `pnpm run contract:gen` 生成 [types/contract.generated.ts](../../apps/desktop/src/renderer/src/types/contract.generated.ts)；
-  `pnpm run contract:check`（`verify` 与 CI 里跑）在生成结果与仓库不一致时失败。新增 / 改动这类结构只改 Rust 一处，
+  `pnpm run contract:check`（`verify` 与 CI 里跑）在生成结果与仓库不一致时失败。`--check` **只比内容、不比行尾**
+  （生成器写 LF，而 Windows 的 `core.autocrlf=true` 会把工作区那份转成 CRLF，按字节比会在第 1 行假红）。新增 / 改动这类结构只改 Rust 一处，
   别再手写同名 interface（`AuthStatus` 这种「线上形状 + 适配层补充」的可以在生成类型上再组合一次）。
   **还返回 `Value` 的命令登记在** [contract-value-allow.txt](../../apps/desktop/src-tauri/contract-value-allow.txt)：
   新增一条会让 `contract:check` 失败，逼着新命令用 typed payload；确需保留 `Value` 的跑

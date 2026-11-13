@@ -336,6 +336,9 @@ function main() {
       process.exitCode = 1
       return
     }
+    // 只比内容、不比行尾：Windows 上 `core.autocrlf=true`（CI 的 windows-latest 同样如此）
+    // 会把工作区这份转成 CRLF，按字节比会让完全一致的契约在第 1 行报「不一致」
+    current = current.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n')
     if (current !== next) {
       const a = current.split('\n')
       const b = next.split('\n')
