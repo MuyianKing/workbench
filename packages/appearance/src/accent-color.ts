@@ -40,6 +40,7 @@
  * 所以整个模块是纯函数、不碰 DOM；写变量由渲染层负责。
  */
 import { sanitizeHexColor } from '@workbench/core'
+import { contrastRatio, mixHex } from './color'
 
 /** 设置里空串表示「用默认的中性色」，也就是界面原本的灰度样子 */
 export const ACCENT_COLOR_DEFAULT = ''
@@ -142,45 +143,6 @@ const WHITE_INK_FLOOR = 3
  */
 export function sanitizeAccentColor(value: unknown): string {
   return sanitizeHexColor(typeof value === 'string' ? value.trim() : '') ?? ACCENT_COLOR_DEFAULT
-}
-
-/** #rrggbb → 三个 0~255 的分量 */
-function channels(hex: string): [number, number, number] {
-  const value = Number.parseInt(hex.slice(1), 16)
-  return [(value >> 16) & 255, (value >> 8) & 255, value & 255]
-}
-
-function toHex(value: number): string {
-  return Math.round(Math.min(255, Math.max(0, value)))
-    .toString(16)
-    .padStart(2, '0')
-}
-
-/**
- * 把 blend 按 ratio 的比例混进 base（ratio 是 blend 的占比）。
- * Element Plus 的 light-N 就是 10 分之 N 的白混进主色。
- */
-export function mixHex(base: string, blend: string, ratio: number): string {
-  const [r1, g1, b1] = channels(base)
-  const [r2, g2, b2] = channels(blend)
-  const t = Math.min(1, Math.max(0, ratio))
-
-  return `#${toHex(r1 + (r2 - r1) * t)}${toHex(g1 + (g2 - g1) * t)}${toHex(b1 + (b2 - b1) * t)}`
-}
-
-/** WCAG 相对亮度（0 全黑 ~ 1 全白） */
-export function relativeLuminance(hex: string): number {
-  const [r, g, b] = channels(hex).map((channel) => {
-    const value = channel / 255
-    return value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4
-  })
-  return 0.2126 * r + 0.7152 * g + 0.0722 * b
-}
-
-/** WCAG 对比度（1 ~ 21） */
-export function contrastRatio(a: string, b: string): number {
-  const [high, low] = [relativeLuminance(a), relativeLuminance(b)].sort((x, y) => y - x)
-  return (high + 0.05) / (low + 0.05)
 }
 
 /**

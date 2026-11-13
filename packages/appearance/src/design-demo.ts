@@ -20,7 +20,8 @@ import type { ComponentStyle, DesignStyle, DesignTypeToken } from './design-styl
  *
  * 这里只产出「该画成什么样」（颜色、字阶、尺寸、文案），DOM 结构在 StyleDemo.vue / StyleCard.vue。
  */
-import { componentStyle, inkOn, isColorValue, lineHeightCss, mixHex, numericScale, relativeLuminance, safeCssValue, typographyScale } from './design-styles'
+import { inkOn, isColorValue, mixHex, relativeLuminance } from './color'
+import { componentStyle, lineHeightCss, numericScale, safeCssValue, typographyScale } from './design-styles'
 
 /** 示例页面用到的一组颜色角色；兜底之后每一项都必定有值 */
 export interface DemoPalette {

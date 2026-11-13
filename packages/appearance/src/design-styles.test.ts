@@ -2,7 +2,8 @@ import type { ColorFamily, DesignStyle } from './design-styles'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { categoryCounts, COLOR_FAMILIES, COLOR_GROUPS, colorFamily, colorGroup, colorLabel, componentGroup, componentLabel, componentSamples, componentStyle, designStyleHaystack, expandTokenRefs, familyCounts, filterDesignStyles, groupComponents, hueOf, inkOn, isColorValue, lineHeightCss, mixHex, numericScale, parseHex, resolveTokenRef, roundedLabel, safeCssValue, sanitizeDesignStyles, sortDesignStyles, spacingLabel, tokenLabel, typeLabel, typographyRef, typographyScale } from './design-styles'
+import { isColorValue, parseHex } from './color'
+import { categoryCounts, COLOR_FAMILIES, COLOR_GROUPS, colorFamily, colorGroup, colorLabel, componentGroup, componentLabel, componentSamples, componentStyle, designStyleHaystack, expandTokenRefs, familyCounts, filterDesignStyles, groupComponents, hueOf, lineHeightCss, numericScale, resolveTokenRef, roundedLabel, safeCssValue, sanitizeDesignStyles, sortDesignStyles, spacingLabel, tokenLabel, typeLabel, typographyRef, typographyScale } from './design-styles'
 
 // ---------------------------------------------------------------- 夹具
 
@@ -40,31 +41,7 @@ function makeStyle(patch: Partial<DesignStyle> = {}): DesignStyle {
 
 // ---------------------------------------------------------------- 颜色
 
-describe('颜色解析与计算', () => {
-  it('认六位与三位 hex，带不带 # 都行；认不出来回 null 而不是抛错', () => {
-    expect(parseHex('#cc785c')).toEqual({ r: 204, g: 120, b: 92 })
-    expect(parseHex('cc785c')).toEqual({ r: 204, g: 120, b: 92 })
-    expect(parseHex('#abc')).toEqual({ r: 170, g: 187, b: 204 })
-    expect(parseHex('rgb(1,2,3)')).toBeNull()
-    expect(parseHex(undefined)).toBeNull()
-    expect(parseHex(123)).toBeNull()
-  })
-
-  it('只放行能写进样式表的颜色写法', () => {
-    expect(isColorValue('#fff')).toBe(true)
-    expect(isColorValue('rgba(0,0,0,0.5)')).toBe(true)
-    expect(isColorValue('transparent')).toBe(true)
-    expect(isColorValue('红色')).toBe(false)
-    expect(isColorValue('url(x)')).toBe(false)
-  })
-
-  it('深底配白字、浅底配黑字', () => {
-    expect(inkOn('#000000')).toBe('#ffffff')
-    expect(inkOn('#181715')).toBe('#ffffff')
-    expect(inkOn('#ffffff')).toBe('#11151b')
-    expect(inkOn('#faf9f5')).toBe('#11151b')
-  })
-
+describe('色相与色系', () => {
   it('色相：灰阶无解，回 -1', () => {
     expect(hueOf('#ff0000')).toBeCloseTo(0, 0)
     expect(hueOf('#00ff00')).toBeCloseTo(120, 0)
@@ -175,19 +152,6 @@ describe('内嵌引用展开', () => {
     expect(expandTokenRefs('{colors.nope}', style)).toBeUndefined()
     expect(expandTokenRefs(undefined, style)).toBeUndefined()
     expect(expandTokenRefs('  ', style)).toBeUndefined()
-  })
-})
-
-describe('混色', () => {
-  it('两个 hex 之间线性插值，比例夹在 0–1', () => {
-    expect(mixHex('#000000', '#ffffff', 0)).toBe('#000000')
-    expect(mixHex('#000000', '#ffffff', 1)).toBe('#ffffff')
-    expect(mixHex('#000000', '#ffffff', 0.5)).toBe('#808080')
-    expect(mixHex('#000000', '#ffffff', 2)).toBe('#ffffff')
-  })
-
-  it('认不出 hex 时原样回第一个值', () => {
-    expect(mixHex('rgba(0,0,0,0.5)', '#ffffff', 0.5)).toBe('rgba(0,0,0,0.5)')
   })
 })
 

@@ -2,8 +2,9 @@ import type { DesignStyle } from './design-styles'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { isColorValue, relativeLuminance } from './color'
 import { buildDesignDemo, CARD_TYPE, clampFontSize, clampPadding, demoCopy, demoPalette, typeCss } from './design-demo'
-import { isColorValue, relativeLuminance, sanitizeDesignStyles } from './design-styles'
+import { sanitizeDesignStyles } from './design-styles'
 
 // ---------------------------------------------------------------- 夹具
 

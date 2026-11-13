@@ -1,5 +1,4 @@
 import type { DesignComponentToken, DesignStyle } from './design-styles'
-import { demoPalette } from './design-demo'
 /**
  * 设计规范导出：把一套设计语言写成一份 DESIGN.md，外加一段给 AI 编码助手的提示词。
  *
@@ -11,7 +10,9 @@ import { demoPalette } from './design-demo'
  * 拿到手就是能直接用的数字。表格的标签与详情弹窗「规格」档同源（同一批 `*Label` 函数），
  * 所以界面上看到的中文与文档里的一致。
  */
-import { COLOR_GROUPS, colorGroup, colorLabel, componentLabel, componentSamples, componentStyle, designStyleFamily, isColorValue, lineHeightCss, numericScale, roundedLabel, spacingLabel, THEME_LABELS, typeLabel, typographyScale } from './design-styles'
+import { isColorValue } from './color'
+import { demoPalette } from './design-demo'
+import { COLOR_GROUPS, colorGroup, colorLabel, componentLabel, componentSamples, componentStyle, designStyleFamily, lineHeightCss, numericScale, roundedLabel, spacingLabel, THEME_LABELS, typeLabel, typographyScale } from './design-styles'
 
 /** 落到项目根目录的文件名 */
 export const DESIGN_FILE_NAME = 'DESIGN.md'

@@ -1,7 +1,5 @@
-// accent-color 与 design-styles 各有一套色值工具（mixHex / relativeLuminance）：数学一致但坏输入
-// 契约不同（后者防御式返回原值、有测试锁定），不合并 —— TS 会把星号导出的重名报成错误（TS2308），
-// 所以 accent-color 走显式清单、收下除那两个函数外的全部导出；它们的用点都在包内，
-// 外界要色值工具就走 design-styles 的防御式版本。
+// 色值工具全包只有一份（./color.ts）：主题色派生与设计参考库共用，契约是「只认带 # 的 hex、
+// 坏输入不抛错」（mixHex 原样回第一个值、亮度按 0）。
 export {
   ACCENT_COLOR_DEFAULT,
   ACCENT_INK_DEFAULT,
@@ -12,7 +10,6 @@ export {
   type AccentVariableName,
   type AccentVariables,
   accentVariables,
-  contrastRatio,
   inkOnAccent,
   sanitizeAccentColor,
   sanitizeAccentInkMode,
@@ -20,6 +17,7 @@ export {
 export * from './app-name'
 export * from './appearance'
 export * from './card-opacity'
+export * from './color'
 export * from './design-demo'
 export * from './design-export'
 export * from './design-styles'

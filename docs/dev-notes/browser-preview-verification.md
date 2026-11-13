@@ -338,7 +338,8 @@ await send('Runtime.evaluate', { expression: `(async () => {
   判据用数字：亮色修完是 17.4 / 10.0 / 5.7，暗色是 15 / 9.4 / 5.1。
 
 **关键**：探针里复算主题色的算法（`mix` 混色、`inkOf` 取字色）必须和
-[`packages/appearance/src/accent-color.ts`](../../packages/appearance/src/accent-color.ts) 里真实实现**同源照抄**，
+[`packages/appearance/src/color.ts`](../../packages/appearance/src/color.ts) 的 `mixHex`、
+[`accent-color.ts`](../../packages/appearance/src/accent-color.ts) 的 `inkOnAccent` 真实实现**同源照抄**，
 并且切场景的方式要和 `bootstrap.ts` 的 `writeAccentColor` 一致（空值就是逐个摘掉内联属性）。
 算法不一致的话，量出来的是一份假象。
 

@@ -2,7 +2,8 @@
 
 ## 约束
 
-关键落点：`packages/appearance/src/design-styles.ts`（token 模型、键名中文标签规则、行高归一化、色系判定）、
+关键落点：`packages/appearance/src/color.ts`（全包唯一的色值解析 / 混色 / 亮度判定）、
+`packages/appearance/src/design-styles.ts`（token 模型、键名中文标签规则、行高归一化、色系判定）、
 `packages/appearance/src/design-demo.ts`（示例页面文案）、`packages/appearance/src/design-export.ts`（DESIGN.md 与提示词的
 生成，带单测）、`stores/styles.ts`、`apps/desktop/src-tauri/src/design.rs`（落盘）、
 `apps/desktop/src/renderer/public/design-styles.json`（数据）。
@@ -12,6 +13,9 @@
   `import.meta.env.BASE_URL` 读一次并缓存进 store —— 读自己包里的文件，**不出网**，也不新增 IPC 通道。
 - **颜色角色是三层匹配选出来的**（键名正则 → 中文标签正则 → 画布色与文字色现调），主文字与主色上的文字必须过**可读性
   检查**（`inkOn`）—— 深色设计里的 `ink` 键可能指深色表面，直接当文字色会在近黑画布上糊成一片。
+- **色值工具只有一份**（`packages/appearance/src/color.ts`，与主题色派生共用）：只认带 `#` 的三位 / 六位 hex，
+  坏输入不抛错 —— `mixHex` 原样回第一个值、`relativeLuminance` 按 0；`rgb()` 这类函数式写法只在 `isColorValue`
+  里放行（那是「能不能写进样式表」，不参与颜色计算）。别再在别处另写一套解析或混色。
 - **token 引用展开不出来时宁可不画**（`expandTokenRefs` 回 `undefined`），不把 `{colors.x}` 原样写进样式表；所有取到的值
   再过 `safeCssValue`（挡 `url(...)`、分号、花括号）。
 - **行高必须先归一化再绑到样式上**（`lineHeightCss`）：上游有倍数、不带单位的像素、带单位的像素三种写法，直接绑会把

@@ -495,19 +495,19 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+/* 铺满整扇窗：外圈不留画布底色，面板自己就是窗口 */
 .md-window {
   display: flex;
   height: 100%;
   min-width: 0;
   min-height: 0;
-  padding: var(--sp-4);
-  /* 底色归窗口：面板是浮在画布上的一张纸 */
-  background: var(--bg-canvas);
+  background: var(--bg-surface);
 }
 
 /**
- * 工作台面板：标题栏 + 正文 + 底栏。圆角与发丝线取应用令牌，
- * 阴影只借最轻那一档 —— 独立窗口里没有壁纸，太重会像一张贴纸。
+ * 工作台面板：标题栏 + 正文 + 底栏，**直接贴到窗口四边**。
+ * 不画外边框、圆角与卡片阴影 —— 这扇窗只有这一块内容，留一圈画布会像浮着的一张纸；
+ * 层次全靠标题栏与底栏那两条发丝线。
  */
 .md-panel {
   display: flex;
@@ -516,10 +516,7 @@ onBeforeUnmount(() => {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: var(--r-lg);
   background: var(--bg-surface);
-  box-shadow: var(--shadow-card);
 }
 
 /* 加载 / 打不开：面板里居中，与打开成功时同一块底 */

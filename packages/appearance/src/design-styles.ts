@@ -2,7 +2,8 @@
  * 设计样式（74 套 DESIGN.md 的解析结果）的类型与纯逻辑。
  *
  * 数据本体是 `src/renderer/public/design-styles.json`（随包静态资源，页面首次打开时读一次），
- * 这里只放两端都不依赖宿主的部分：颜色计算、token 引用展开、键名的中文标签规则、筛选排序。
+ * 这里只放两端都不依赖宿主的部分：色系判定、token 引用展开、键名的中文标签规则、筛选排序
+ * （色值解析 / 混色 / 亮度判定在 ./color.ts，主题色派生也共用那一份）。
  *
  * **键名的中文标签是规则生成而不是手写词典**：74 套一共 677 个颜色键、221 个字阶键、829 个组件键，
  * 手写不可能维护。绝大多数键是 `surface-dark-elevated` 这种 kebab-case 组合，按下面的词段表逐段翻译即可；
@@ -12,7 +13,7 @@
  * 没有任何键名能覆盖到底的词段会原样保留 —— 像 `rausch`（Airbnb 的品牌红）、`safu`（Kraken 的术语）
  * 本来就是专有名词，硬翻反而失真。
  */
-import { sanitizeHexColor } from '@workbench/core'
+import { inkOn, isColorValue, parseHex } from './color'
 
 /** 明暗基调：用页面底色判定，不是「最亮/最暗色」 */
 export type DesignTheme = 'light' | 'dark'
@@ -96,70 +97,7 @@ export interface DesignStyle {
 }
 
 // ---------------------------------------------------------------- 颜色计算
-
-/** 解析 hex，认不出来回 null（不抛错：外部数据手改坏过也不能白屏） */
-export function parseHex(value: unknown): { r: number, g: number, b: number } | null {
-  if (typeof value !== 'string')
-    return null
-  const text = value.trim()
-  // 这套数据里的色值有不带 # 的写法；core 那把尺子要求带 #，补上再量
-  const hex = sanitizeHexColor(text.startsWith('#') ? text : `#${text}`)
-  if (!hex)
-    return null
-  return {
-    r: Number.parseInt(hex.slice(1, 3), 16),
-    g: Number.parseInt(hex.slice(3, 5), 16),
-    b: Number.parseInt(hex.slice(5, 7), 16),
-  }
-}
-
-/** 是不是一个能写进样式的颜色值（hex / 常见函数式写法 / 关键字） */
-export function isColorValue(value: unknown): value is string {
-  if (typeof value !== 'string')
-    return false
-  const text = value.trim()
-  if (parseHex(text))
-    return true
-  return /^(rgb|rgba|hsl|hsla|oklch|lab|color-mix)\(/i.test(text) || text === 'transparent'
-}
-
-/** 相对亮度（WCAG），用于决定叠在某个底色上的字用黑还是白 */
-export function relativeLuminance(hex: string): number {
-  const rgb = parseHex(hex)
-  if (!rgb)
-    return 0
-  const channel = (value: number): number => {
-    const v = value / 255
-    return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4
-  }
-  return 0.2126 * channel(rgb.r) + 0.7152 * channel(rgb.g) + 0.0722 * channel(rgb.b)
-}
-
-/**
- * 叠在这个底色上的字该用黑还是白。阈值取 0.45 而不是 0.5：
- * 深色系品牌里大量 `#181715` 这类近黑底，0.5 会让中灰底判成白字而糊掉。
- */
-export function inkOn(background: string): string {
-  return relativeLuminance(background) > 0.45 ? '#11151b' : '#ffffff'
-}
-
-/**
- * 两个 hex 之间线性插值：`t=0` 取 a，`t=1` 取 b。
- *
- * 样例页面的兜底色（卡片底 / 次文字 / 分隔线）靠它从画布色与文字色之间现调 ——
- * 缺这些 token 的设计不必另拍一套写死的颜色，导出的深浅也是跟着这套设计走的。
- * 认不出 hex 时原样回 a（与 `parseHex` 一样，坏数据不抛错）。
- */
-export function mixHex(a: string, b: string, t: number): string {
-  const from = parseHex(a)
-  const to = parseHex(b)
-  if (!from || !to)
-    return a
-  const ratio = Math.min(1, Math.max(0, t))
-  const channel = (x: number, y: number): number => Math.round(x + (y - x) * ratio)
-  const hex = (value: number): string => value.toString(16).padStart(2, '0')
-  return `#${hex(channel(from.r, to.r))}${hex(channel(from.g, to.g))}${hex(channel(from.b, to.b))}`
-}
+// 色值解析与混色 / 亮度判定在 ./color.ts（全包唯一一份，主题色派生也用那套）。
 
 /** 色相（0–360），灰阶回 -1 */
 export function hueOf(hex: string): number {

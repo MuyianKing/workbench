@@ -1,6 +1,7 @@
 import type { AccentVariableName, AccentVariables } from './accent-color'
 import { describe, expect, it } from 'vitest'
-import { ACCENT_COLOR_DEFAULT, ACCENT_INK_DEFAULT, ACCENT_PRESETS, ACCENT_VARIABLE_NAMES, accentVariables, contrastRatio, inkOnAccent, mixHex, relativeLuminance, sanitizeAccentColor, sanitizeAccentInkMode } from './accent-color'
+import { ACCENT_COLOR_DEFAULT, ACCENT_INK_DEFAULT, ACCENT_PRESETS, ACCENT_VARIABLE_NAMES, accentVariables, inkOnAccent, sanitizeAccentColor, sanitizeAccentInkMode } from './accent-color'
+import { contrastRatio, relativeLuminance } from './color'
 
 /** 取一个派生变量；缺失就是用例失败，省得每处都写非空断言 */
 function varOf(vars: AccentVariables, name: AccentVariableName): string {
@@ -27,32 +28,6 @@ describe('sanitizeAccentColor', () => {
     expect(sanitizeAccentColor(undefined)).toBe(ACCENT_COLOR_DEFAULT)
     expect(sanitizeAccentColor(null)).toBe(ACCENT_COLOR_DEFAULT)
     expect(sanitizeAccentColor(0x2F6BD8)).toBe(ACCENT_COLOR_DEFAULT)
-  })
-})
-
-describe('mixHex', () => {
-  it('按比例混色，ratio 是被混入那一边的占比', () => {
-    expect(mixHex('#000000', '#ffffff', 0.5)).toBe('#808080')
-    expect(mixHex('#000000', '#ffffff', 0)).toBe('#000000')
-    expect(mixHex('#000000', '#ffffff', 1)).toBe('#ffffff')
-  })
-
-  it('比例越界会被夹到 0~1', () => {
-    expect(mixHex('#000000', '#ffffff', -1)).toBe('#000000')
-    expect(mixHex('#000000', '#ffffff', 5)).toBe('#ffffff')
-  })
-})
-
-describe('对比度', () => {
-  it('黑白对比度是 21，同色是 1', () => {
-    expect(contrastRatio('#000000', '#ffffff')).toBeCloseTo(21, 5)
-    expect(contrastRatio('#2f6bd8', '#2f6bd8')).toBeCloseTo(1, 5)
-  })
-
-  it('亮度随颜色变浅单调上升', () => {
-    expect(relativeLuminance('#000000')).toBe(0)
-    expect(relativeLuminance('#ffffff')).toBeCloseTo(1, 5)
-    expect(relativeLuminance('#2f6bd8')).toBeGreaterThan(relativeLuminance('#1b212a'))
   })
 })
 
