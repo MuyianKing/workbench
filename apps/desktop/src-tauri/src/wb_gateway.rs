@@ -113,12 +113,19 @@ impl Gateway {
         // 处理函数要一个 'static 的东西，所以把共享状态克隆进去，而不是借用 self
         let shared = Arc::clone(&self.inner);
         let handler: wb_server::Handler = relay_core::handler(move |request: &wb_server::Request| {
-            // 锁在单次请求内持有：对话请求可能续期账号，必须拿可变借用。
-            // 锁冲突的代价只是并发请求排队 —— 本机客户端不会把这里压满。
-            let mut inner = relay_core::lock_or_recover(&shared);
-            // 先把 key 拷出来：`&mut inner.accounts` 与 `&inner.api_key` 同时借不行
-            let key = inner.api_key.clone();
-            crate::wb_router::route(request, &mut inner.accounts, &key)
+            // **网络在锁外**：上游首帧最长要等到读超时（300s），锁着它的话界面所有
+            // async 命令都堵在同一个锁上，工作线程耗尽时整个应用一起「卡死」。
+            // 锁内只取快照、只合回续期与额度标记（与查余额同一条规矩）。
+            let (mut accounts, key) = {
+                let inner = relay_core::lock_or_recover(&shared);
+                (inner.accounts.clone(), inner.api_key.clone())
+            };
+            let response = crate::wb_router::route(request, &mut accounts, &key);
+            {
+                let mut inner = relay_core::lock_or_recover(&shared);
+                merge_request_state(&mut inner, &accounts);
+            }
+            response
         });
 
         relay_core::start(&mut inner.server, port, handler)
@@ -252,6 +259,25 @@ impl Inner {
         }
         self.accounts = wb_account::load_all(&crate::paths::gateway_accounts_dir());
         self.loaded = true;
+    }
+}
+
+/// 把请求在锁外跑完之后的改动合回共享状态。
+///
+/// **只合请求真会改的字段**（续期三件套、额度标记）：整份覆盖会把用户同时做的
+/// 优先级 / 备注 / 删除冲掉。请求期间被删掉的号不再复活。
+fn merge_request_state(inner: &mut Inner, accounts: &[Account]) {
+    for account in accounts {
+        let Some(slot) = inner.accounts.iter_mut().find(|item| item.uid == account.uid) else {
+            continue;
+        };
+        slot.access_token = account.access_token.clone();
+        slot.refresh_token = account.refresh_token.clone();
+        slot.expires_at = account.expires_at;
+        slot.token_expired = account.token_expired;
+        slot.quota_exhausted_at = account.quota_exhausted_at;
+        slot.quota_resets_at = account.quota_resets_at;
+        slot.quota_models = account.quota_models.clone();
     }
 }
 
@@ -1663,5 +1689,31 @@ mod tests {
                 skipped: 0,
             }
         );
+    }
+
+    #[test]
+    fn 请求改过的账号字段合回而界面字段不动() {
+        let mut inner = Inner::default();
+        let mut stored = ready_account("u1");
+        stored.weight = 9;
+        inner.accounts = vec![stored];
+
+        // 请求拿的是快照：续期、额度标记会改，界面同时改的优先级它看不到
+        let mut snapshot = inner.accounts.clone();
+        snapshot[0].access_token = "new-token".into();
+        snapshot[0].quota_exhausted_at = 42;
+        snapshot[0].weight = 1;
+        merge_request_state(&mut inner, &snapshot);
+
+        assert_eq!(inner.accounts[0].access_token, "new-token");
+        assert_eq!(inner.accounts[0].quota_exhausted_at, 42);
+        assert_eq!(inner.accounts[0].weight, 9, "界面改的优先级不该被请求冲掉");
+    }
+
+    #[test]
+    fn 请求期间被删掉的账号不复活() {
+        let mut inner = Inner::default();
+        merge_request_state(&mut inner, &[ready_account("u1")]);
+        assert!(inner.accounts.is_empty());
     }
 }

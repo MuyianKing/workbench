@@ -126,7 +126,9 @@
 - **适配层顶替的是 Electron 时代的进程边界**：递给渲染层的列表一律是快照（`structuredClone`），渲染层的乐观追加写不进要落盘
   的数据。
 - **IPC 命令默认跑主线程**：会起子进程、读写文件、解码图片、跑 SQL 的命令都标 `(async)`（落到 `async_runtime::spawn` 工作
-  线程），漏标的后果不是慢而是界面卡死。
+  线程），漏标的后果不是慢而是界面卡死。**标了 `async` 也不等于安全**：在工作线程上等一个被长网络请求占住的 `Mutex`
+  同样会耗尽线程、拖死整个应用的 IPC —— 长网络一律在锁外跑（网关那次全体卡死的教训见 [gateway](gateway.md) 与
+  [qoder](qoder.md)）。
 - **工作区背景图与视频播放走 asset 协议，后端不碰它们的字节**：渲染层只调一次 `allow_background` / `allow_video`，后端核文件头
   后把**这一个文件**的读取权限授给 asset 协议，URL 由 `convertFileSrc` 转出；`assetProtocol.scope` 刻意留空。
 - **崩溃落痕**：release 档把 panic 设成直接中止进程（`Cargo.toml` 的 `panic = "abort"`），进程凭空消失、什么都不留 ——

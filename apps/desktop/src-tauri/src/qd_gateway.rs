@@ -83,15 +83,25 @@ impl Qoder {
 
         let shared = Arc::clone(&self.inner);
         let handler: wb_server::Handler = relay_core::handler(move |request: &wb_server::Request| {
-            let mut inner = relay_core::lock_or_recover(&shared);
-            // 先把 key 拷出来：`&mut inner.accounts` 与 `&inner.api_key` 同时借不行
-            let key = inner.api_key.clone();
-            let Inner {
-                accounts,
-                conversations,
-                ..
-            } = &mut *inner;
-            crate::qd_router::route(request, accounts, &key, conversations)
+            // **网络与排队一律在锁外**：一次对话要等上游首帧，排队时每轮还睡到三分钟
+            // （预算十分钟）—— 锁着它的话，界面每 15 秒一次的状态 / 用量取数会全堵在
+            // async 工作线程上，线程耗尽时整个应用的 IPC 一起停摆（不止这一页）。
+            // 锁内只取快照、只合回请求真改过的字段，与 `wb_qoder_credits` 同一条规矩。
+            let (mut accounts, mut conversations, key) = {
+                let inner = relay_core::lock_or_recover(&shared);
+                (
+                    inner.accounts.clone(),
+                    inner.conversations.clone(),
+                    inner.api_key.clone(),
+                )
+            };
+            let conversations_before = conversations.clone();
+            let response = crate::qd_router::route(request, &mut accounts, &key, &mut conversations);
+            {
+                let mut inner = relay_core::lock_or_recover(&shared);
+                merge_request_state(&mut inner, &accounts, &conversations_before, &conversations);
+            }
+            response
         });
         relay_core::start(&mut inner.server, port, handler)
     }
@@ -212,6 +222,48 @@ impl Inner {
         let now = now_secs();
         self.logins
             .retain(|_, session| now - session.ticket.created <= relay_core::LOGIN_TTL_SECS);
+    }
+}
+
+/// 把请求在锁外跑完之后的改动合回共享状态。
+///
+/// **只合请求真会改的字段**（续期三件套、失败原因、会话失效、额度 / 冷却标记）：
+/// 整份覆盖会把用户同时做的优先级 / 备注 / 删除冲掉。请求期间被删掉的号不再复活。
+fn merge_request_state(
+    inner: &mut Inner,
+    accounts: &[Account],
+    before: &HashMap<String, Conversation>,
+    after: &HashMap<String, Conversation>,
+) {
+    // 会话身份只在首轮请求前新建，之后不改；只把新增 / 变化的合回去
+    for (key, conversation) in after {
+        let changed = match before.get(key) {
+            Some(previous) => {
+                previous.id != conversation.id
+                    || previous.begin_at != conversation.begin_at
+                    || previous.name != conversation.name
+            }
+            None => true,
+        };
+        if changed {
+            inner.conversations.insert(key.clone(), conversation.clone());
+        }
+    }
+
+    for account in accounts {
+        let Some(slot) = inner.accounts.iter_mut().find(|item| item.uid == account.uid) else {
+            continue;
+        };
+        slot.access_token = account.access_token.clone();
+        slot.refresh_token = account.refresh_token.clone();
+        slot.expires_at = account.expires_at;
+        slot.token_expired = account.token_expired;
+        slot.enabled = account.enabled;
+        slot.last_error = account.last_error.clone();
+        slot.cooldown_until = account.cooldown_until;
+        slot.quota_exhausted_at = account.quota_exhausted_at;
+        slot.quota_resets_at = account.quota_resets_at;
+        slot.quota_models = account.quota_models.clone();
     }
 }
 
@@ -883,6 +935,53 @@ mod tests {
                 updated: 1,
                 skipped: 0,
             }
+        );
+    }
+
+    #[test]
+    fn 请求改过的账号字段合回而界面字段不动() {
+        let mut inner = Inner::default();
+        let mut stored = Account::from_login("u1", "n", "old-token", "old-refresh", 0, "", "", "");
+        stored.weight = 9;
+        inner.accounts = vec![stored];
+
+        // 请求拿的是快照：续期、额度标记会改，界面同时改的优先级它看不到
+        let mut snapshot = inner.accounts.clone();
+        snapshot[0].access_token = "new-token".into();
+        snapshot[0].quota_exhausted_at = 42;
+        snapshot[0].weight = 1;
+        merge_request_state(&mut inner, &snapshot, &HashMap::new(), &HashMap::new());
+
+        assert_eq!(inner.accounts[0].access_token, "new-token");
+        assert_eq!(inner.accounts[0].quota_exhausted_at, 42);
+        assert_eq!(inner.accounts[0].weight, 9, "界面改的优先级不该被请求冲掉");
+    }
+
+    #[test]
+    fn 请求期间被删掉的账号不复活() {
+        let mut inner = Inner::default();
+        let snapshot = vec![Account::from_login("u1", "n", "t", "r", 0, "", "", "")];
+        merge_request_state(&mut inner, &snapshot, &HashMap::new(), &HashMap::new());
+        assert!(inner.accounts.is_empty());
+    }
+
+    #[test]
+    fn 新建的会话身份合回共享状态() {
+        let mut inner = Inner::default();
+        let before = HashMap::new();
+        let mut after = HashMap::new();
+        after.insert(
+            "affinity".to_string(),
+            Conversation {
+                id: "c1".into(),
+                begin_at: 1,
+                name: "你好".into(),
+            },
+        );
+        merge_request_state(&mut inner, &[], &before, &after);
+        assert_eq!(
+            inner.conversations.get("affinity").map(|item| item.id.as_str()),
+            Some("c1")
         );
     }
 }

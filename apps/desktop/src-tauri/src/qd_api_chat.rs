@@ -112,10 +112,13 @@ impl StreamHandle {
         }
     }
 
-    /// 取下一个事件。结束或断线都返回 `None`。
+    /// 取下一个事件。正常结束 / 通道断开返回 `None`。
+    ///
+    /// **`Failed` 要原样交出去**：`prelude` 靠它把上游断线的真实原因写给客户端，
+    /// 吞掉就只剩一句「上游连接提前断开」，分不出排队、断流还是真的空响应。
     pub fn next(&mut self) -> Option<UpstreamEvent> {
         match self.receiver.recv() {
-            Ok(UpstreamEvent::End) | Ok(UpstreamEvent::Failed(_)) | Err(_) => None,
+            Ok(UpstreamEvent::End) | Err(_) => None,
             Ok(event) => Some(event),
         }
     }
