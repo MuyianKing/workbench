@@ -47,6 +47,40 @@
 
 ### 调整
 
+- **`features-and-architecture.md` 瘦身**：819 → 676 行（-17.5%）。只压表达 —— 「功能」节里逐条括号补述与「踩过一次」类
+  叙事、架构段落的重复解释、设置面板里同一件事讲两遍的地方；**数据与隐私十四处出口、目录结构那棵 400 行目录树、技术栈表、
+  模块索引表、全部反引号标识符 / 端口 / 路径 / 阈值、链接与标题逐字节不动**。核对：标题 / 链接零丢、表格 39 行不变、
+  3 个代码块完全一致、全 docs 链接体检零断链。
+- **模块文档统一瘦身，只压表达、不丢事实**：`docs/modules/` 下 16 份文档（terminal / ai / screenshot / vault / notes /
+  mail / float-ball / video / sync-and-auth / ipc-and-state / zentao / etf / git-client / styles / quick-launch / projects）
+  合计 3804 → 3104 行（-18.4%）。压的全是表达冗余：开头 4 行导航套话压成 1 行、括号套括号的补述、「这一版 / 当时 / 实测」
+  的事故复盘、逐帧操作白描、「这些条目从主文档迁来」的自述句；约束条、反引号里的标识符 / 路径 / 命令、链接、标题、
+  表格、代码块、数字与阈值一律不动。逐份用脚本比对「标题 / 链接 / 非跨行反引号 token」确认零丢失，全 docs 链接体检零断链。
+  `gateway` / `work-log` / `home` / `kb` / `skills` / `qoder` 当时正被别的会话改写，未碰。
+- **AGENTS.md 第 4 节只留跨模块红线，UI 口径下沉**：文件头声明「只写跨模块硬约束、不写解释、不抄清单」，
+  但第 4 节把 tokens.css 七个前缀、邮箱两处彩色例外的完整色阶、项目标识色 / ProjectTag、EP 已定用法、
+  EmptyState 分档、明暗切换与拖动窗口的实现细节全铺开了 —— 这些是单模块口径、docs 里本就有。
+  现压成「红线一段 + 去哪读一段」：手写 CSS / 令牌 / 灰度 / 按需引入 / 空态配图 / AppDialog /
+  换页不关弹层 / 明暗切换 / 拖动窗口这些**跨模块红线**留下，其余去
+  `docs/features-and-architecture.md` 新增的「UI 与样式通用口径」小节（收两处彩色例外、项目标识色、
+  EP 按需引入与已定用法、EmptyState、AppDialog、theme-transition、拖动窗口、不写教学式说明）。
+  顺带把第 1 节 CSP 边界、第 2 节六个 HTML 入口逐一列举、第 6 节 `verify.mjs` 四条并行编排与
+  cargo 查进程的完整命令换成「红线 + 指针」（细节在 ipc-and-state / features 目录结构 /
+  build-performance / browser-preview-verification）。`browser-preview-verification.md` 里指向
+  「el-form 见 AGENTS 第 4 节」的引用改指向 features 那一节。复核：跨模块祈使句一条不丢、
+  四节反向引用所指规矩都在、链接全可达；AGENTS 255 行 → 208 行（减 27.2%）。
+- **AGENTS.md 只留跨模块闸门，模块细则下沉**：删掉第 1 节里 VS Code / 微信 OCR / Pi / Qoder 四段整块实现
+  细节（协议名、DLL 路径、瘦身与 RPC 环境变量、COSY 签名与端口），压成一条「外部依赖与内置组件边界」
+  的闸门 + 五份模块文档指针；只剩真正跨模块的红线（唯一预装 git、两个可选程序、唯一 Agent、别引第二个、
+  两套网关独立可同时跑）。细则本就在各模块文档里，补两处：`ai.md` 约束节新增「Pi 是唯一编码 Agent」并
+  收进 RPC / 会话 / 环境变量那些规矩，`projects.md` 补「别引别的编辑器」；`ai.md` 里指向「装技能出口
+  见 AGENTS 第 1 节」的引用改指向 `features-and-architecture.md`（那条从来不在 AGENTS）。复核：跨模块
+  祈使句一条不丢、链接全可达、反向引用「第 1 节」所指的 git 与 Rust 依赖规矩都还在。
+- **README 瘦身为项目简介，细节归位到 docs**：README 只留定位、截图、一句话能力概览、上手命令与
+  文档导航；原先铺开的「能做什么 / 技术栈 / 数据与隐私」是 docs 里那份的过时副本（域包个数、
+  联网出口条数、Pi 体积都已漂移），一律删掉，权威口径仍看 `docs/features-and-architecture.md`
+  与各模块文档。唯一独有的发版操作流程（bump → 提交 → 打 tag → 流水线校验、`OAUTH_LOCAL_JSON`、
+  CHANGELOG 与 Release 正文）迁到新增的 `docs/dev-notes/releasing.md`，不再堆在首页。
 - **视频原生控件右下角的 ⋮ 菜单去掉**：下载 / 播放速度 / 画中画三样都会与应用自己的那一套
   打架 —— 原生速率与播放器的速率菜单脱钩、系统级画中画会把视频搬出应用自己的悬浮小窗，
   下载对本地播放器也没意义，整份关掉。

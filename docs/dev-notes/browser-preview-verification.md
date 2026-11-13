@@ -430,7 +430,8 @@ await send('Runtime.evaluate', { expression: `(async () => {
   横排时标签正好贴住控件左缘。2026-09 量「添加常用软件」：标签与预览卡左缘 436、两个输入框被标签推到 460，
   其中带「浏览」按钮那行的输入框只有 379 宽、另一行 464 —— 右缘差 85px，看着就是「这个弹窗没排过版」。
   判据是 `document.querySelector('.el-form--label-top')` 是不是 null（漏了属性时 form 的类是
-  `el-form--label-right`），别照着截图猜字号或间距。**弹窗字段一律带这个属性**，见 AGENTS.md 第 4 节。
+  `el-form--label-right`），别照着截图猜字号或间距。**弹窗字段一律带这个属性**，见
+  [features-and-architecture.md](../../docs/features-and-architecture.md) 的「UI 与样式通用口径」。
 - **v-html 里的列表看不见圆点**：global.css 的 reset 把 `ul / ol` 的 `list-style` 清成了 none
   （那是给界面自己的布局列表定的），markdown 正文渲染出来后同样吃这条规则 ——
   在展示组件的 `:deep()` 里把 `list-style` 写回来（disc / decimal），否则有序列表看着像没有序号。

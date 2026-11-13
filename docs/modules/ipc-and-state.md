@@ -1,164 +1,136 @@
 # 通道、状态与落盘（底座）
 
-通道、状态与落盘（底座）的文档：先读「约束」一节（不能破的规矩）；「实现」一节装为什么这么做、踩过哪些坑。
-跨模块的通用事实（导航壳层、数据与隐私、目录结构）见
-[features-and-architecture.md](../features-and-architecture.md)，跨模块红线见 [AGENTS.md](../../AGENTS.md)。
-
 ## 约束
 
-关键落点：`apps/desktop/src/renderer/src/workbench/`（适配层）、`apps/desktop/src/renderer/src/stores/`、`apps/desktop/src-tauri/src/commands.rs`、
-`apps/desktop/src-tauri/src/store.rs`、`apps/desktop/src-tauri/src/paths.rs`。
+关键落点：`apps/desktop/src/renderer/src/workbench/`（适配层）、`apps/desktop/src/renderer/src/stores/`、
+`apps/desktop/src-tauri/src/commands.rs`、`apps/desktop/src-tauri/src/store.rs`、`apps/desktop/src-tauri/src/paths.rs`。
+跨模块通用事实见 [features-and-architecture.md](../features-and-architecture.md)，红线见 [AGENTS.md](../../AGENTS.md)。
 
 ### 通道
 
-- 契约以 [types/index.ts](../../apps/desktop/src/renderer/src/types/index.ts) 的 `WorkbenchApi` 为准：Tauri 命令名用 snake_case，camelCase 方法名到命令名的
-  映射只出现在适配层。通道载荷类型（`Gateway*` / `Qoder*` / `Etf*`）住在 `types/gateway.ts` / `types/qoder.ts` / `types/etf.ts`
-  （契约侧），适配层从 `@/types` **import 并 re-export** —— 既有的 `from '@/workbench/gateway'` 导入照旧能用，
-  但**契约不再反向 import 适配层**（原先 47 处 `import('./workbench/…')`），新增载荷类型一律落 `types/`。
-- 通道一律返回 `Result<T>`（[result.ts](../../packages/core/src/result.ts) 的 `ok` / `fail` / `toResult`），不 reject；调用侧判 `result.ok`、
-  失败取 `result.error` 提示。Rust 的 `Err(String)` 会被 Tauri 直接 reject，所以适配层用 `guard()` 收敛（它兼容字符串与 Error，
-  不能直接套 `@workbench/core` 的 `toResult`）。
+- 契约以 [types/index.ts](../../apps/desktop/src/renderer/src/types/index.ts) 的 `WorkbenchApi` 为准：Tauri 命令名用 snake_case，
+  camelCase 方法名到命令名的映射只出现在适配层。通道载荷类型（`Gateway*` / `Qoder*` / `Etf*`）住在 `types/gateway.ts` /
+  `types/qoder.ts` / `types/etf.ts`（契约侧），适配层从 `@/types` **import 并 re-export** —— `from '@/workbench/gateway'` 照旧
+  能用，但**契约不再反向 import 适配层**（原先 47 处 `import('./workbench/…')`），新增载荷类型一律落 `types/`。
+- 通道一律返回 `Result<T>`（[result.ts](../../packages/core/src/result.ts) 的 `ok` / `fail` / `toResult`），不 reject；调用侧判
+  `result.ok`、失败取 `result.error` 提示。Rust 的 `Err(String)` 会被 Tauri 直接 reject，所以适配层用 `guard()` 收敛（兼容
+  字符串与 Error，不能直接套 `@workbench/core` 的 `toResult`）。
 - **「会 Err 的就必须是 `Result`」**：裸返回具体结构只留给「取不到也只是一句空态」的本地读（`checkPort`、`listProjects`、
-  `getNvmStatus`、`listWallpapers`、`checkPackageManagers`）。一旦跨到 Rust、而那条命令本身会 `Err` —— 典型是
-  `listSyncDevices`（底下是 `token_sync_shards`）—— 适配层必须用 `guard()` 收敛成 `Result`：否则失败会以「未处理异常」
-  的形态冒到调用方，而调用方按签名认为它不会失败。
+  `getNvmStatus`、`listWallpapers`、`checkPackageManagers`）。一旦跨到 Rust、那条命令本身会 `Err` —— 典型是 `listSyncDevices`
+  （底下是 `token_sync_shards`）—— 适配层必须用 `guard()` 收敛成 `Result`：否则失败以「未处理异常」冒到调用方，而调用方按
+  签名认为它不会失败。
 - 新增通道三步：`WorkbenchApi` 登记 → 适配层实现 → 需要后端时在 `commands.rs` 写命令并在 `main.rs` 的 `generate_handler!`
   注册。渲染层→主进程的单向事件走适配层的 `events.ts` 广播。
-- 适配层实现**按域分文件**：`workbench/index.ts` 只是装配根（spreads + 未移植兜底 + 安装时序），
-  通道实现按域住在 `api-sync.ts`（同步门禁那几组）、`api-project.ts`（项目 CRUD 与进程十件事）、
-  `api-system.ts`（系统 / 窗口 / 对话框 / 系统集成）、`api-background.ts`（背景图与图片授权）、
-  `api-events.ts`（事件订阅与截图 / 钉图 / 网速球这三窗共用组）；域模块的薄转发收在 index.ts 的
-  `domainsApi`，网关、Qoder 与独立视频窗口各自整组在 `gateway.ts` / `qoder.ts` / `video-window.ts`。
-  新增通道加到对应域文件，不要往 index.ts 里塞实现。
+- 适配层实现**按域分文件**：`workbench/index.ts` 只是装配根（spreads + 未移植兜底 + 安装时序），通道按域住在 `api-sync.ts`
+  （同步门禁几组）、`api-project.ts`（项目 CRUD 与进程十件事）、`api-system.ts`（系统 / 窗口 / 对话框 / 系统集成）、
+  `api-background.ts`（背景图与图片授权）、`api-events.ts`（事件订阅与截图 / 钉图 / 网速球三窗共用组）；域模块薄转发收在
+  index.ts 的 `domainsApi`，网关、Qoder 与独立视频窗口各自整组在 `gateway.ts` / `qoder.ts` / `video-window.ts`。新增通道加到
+  对应域文件，不要往 index.ts 里塞实现。
 - **数组 / 对象形状的取值接口必须真实现，绝不能落到「尚未移植」兜底**：兜底返回的是 `Result` 对象，store 会把它当数组遍历、
-  直接抛错并把整条 `init()` 打断，表现成完全无关的功能失灵（`listQuickApps` / `listCommands` 就这么让「系统状态」一直没数据）。
-- 渲染层不直接访问 Node / 文件系统 / WebView 宿主能力，一切经 `window.workbench`。**唯一的例外
-  是「大文件交给 webview 按文件读」的两处**：工作区背景图与视频播放 —— 让 webview 按 asset 协议
-  自己加载（URL 由适配层的 `assetUrl()` 转出），读取权限一律在 Rust 侧按**单个文件**授予
-  （`commands.rs` 的 `allow_background` / `allow_video`，后者先核后缀与 MP4 文件头再放行），
-  `tauri.conf.json` 的 `assetProtocol.scope` 必须保持为空 —— 往里写 `**` 等于把整块磁盘敞开给渲染层读。
-- 后端只做「取原始数据 / 落盘 / 调系统能力」；合并、排序、修剪、状态机、命令构造这些业务语义留在 TS 适配层（改动因此走 Vite
-  的秒级热更新，不必重编 Rust）。少数通道按约定直接返回具体结构而非 `Result`：`checkPort`、`listProjects`、`getNvmStatus`、
+  直接抛错并打断整条 `init()`，表现成完全无关的功能失灵（`listQuickApps` / `listCommands` 就这么让「系统状态」一直没数据）。
+- 渲染层不直接访问 Node / 文件系统 / WebView 宿主能力，一切经 `window.workbench`。**唯一例外是「大文件交给 webview 按文件
+  读」的两处**：工作区背景图与视频播放 —— 让 webview 按 asset 协议自己加载（URL 由适配层 `assetUrl()` 转出），读取权限一律
+  在 Rust 侧按**单个文件**授予（`commands.rs` 的 `allow_background` / `allow_video`，后者先核后缀与 MP4 文件头再放行），
+  `tauri.conf.json` 的 `assetProtocol.scope` 必须保持为空 —— 写 `**` 等于把整块磁盘敞开给渲染层读。
+- 后端只做「取原始数据 / 落盘 / 调系统能力」；合并、排序、修剪、状态机、命令构造这些业务语义留在 TS 适配层（改动走 Vite
+  秒级热更新，不必重编 Rust）。少数通道按约定直接返回具体结构而非 `Result`：`checkPort`、`listProjects`、`getNvmStatus`、
   `listWallpapers`、`checkPackageManagers`。
-- **交给 Shell 的路径先换成反斜杠**：`reveal` 与文件对话框的 `defaultPath` 都归 Windows 解析，而 Shell 的路径解析只认 `\` ——
-  `E:/a/b` 这种写法（设置里的路径可能就是它）会让 `SHParseDisplayName` 直接失败，资源管理器于是开到别处、对话框也不从你要的
-  地方打开。适配层的 `windowsPath()` 是唯一收口（Rust 侧的文件操作两种分隔符都认，不受影响；别在各调用方各写一遍 `replace`）。
+- **交给 Shell 的路径先换成反斜杠**：`reveal` 与文件对话框的 `defaultPath` 都归 Windows 解析，而 Shell 路径解析只认 `\` ——
+  `E:/a/b`（设置里的路径可能就是它）会让 `SHParseDisplayName` 直接失败，资源管理器开到别处、对话框也不从你要的地方打开。
+  适配层的 `windowsPath()` 是唯一收口（Rust 侧的文件操作两种分隔符都认；别在各调用方各写一遍 `replace`）。
 - 首屏快照：Tauri 没有同步 IPC，建窗口时用 `initialization_script` 注入 `window.__WB_BOOTSTRAP__`（`main.rs` 的
   `bootstrap_script`），渲染层同步读它，第一帧就是用户设置的样子。
 
 ### 状态
 
-- 跨组件状态按领域分在 [stores/](../../apps/desktop/src/renderer/src/stores/) 下（分工见架构文档的「目录结构」一节）；不另建全局状态，也不
-  用事件总线传业务数据（组件设计那一层的约束见 [AGENTS.md](../../AGENTS.md) 第 0 节）。
-- **谁该进 store 的判据是「跨页共享」**：多处读写的状态必须进 store 且只经 action 变更；只在单页生命周期内用完即弃的数据与动作
-  （工作日志的读写入参、Token 卡片的取数节流）直接调 `window.workbench`，不为它造 store 切片。
-- **store 里不要直接 import element-plus**：提示与确认框一律经 [notify.ts](../../apps/desktop/src/renderer/src/notify.ts) 的 `notifySuccess` /
-  `notifyError` / `confirmAction` —— 这样这些 action 才可能被单测覆盖，也让状态层与「怎么提示」分开演进。
+- 跨组件状态按领域分在 [stores/](../../apps/desktop/src/renderer/src/stores/) 下（分工见架构文档「目录结构」）；不另建全局状态，
+  也不要用事件总线传业务数据（组件设计那一层的约束见 [AGENTS.md](../../AGENTS.md) 第 0 节）。
+- **谁该进 store 的判据是「跨页共享」**：多处读写的状态必须进 store 且只经 action 变更；只在单页生命周期内用完即弃的数据与
+  动作（工作日志的读写入参、Token 卡片的取数节流）直接调 `window.workbench`，不为它造 store 切片。
+- **store 里不要直接 import element-plus**：提示与确认框一律经 [notify.ts](../../apps/desktop/src/renderer/src/notify.ts) 的
+  `notifySuccess` / `notifyError` / `confirmAction` —— 这样这些 action 才可能被单测覆盖，也让状态层与「怎么提示」分开演进。
 
 ### 落盘
 
 - 落盘全在 Rust 侧（`store.rs`：300ms 防抖 + 临时文件 rename + 退出前同步落盘）。数据文件分工：`workbench-data.json`（项目 /
   快捷启动 / 命令 + 与本机绑定的设置，含笔记文件夹 `noteDir`）、`theme.json`（外观 + 首页布局）、`token-usage.json`、
-  `work-log.json` 与 `ai-news.json`（都只在本机）、`vault.json`（密码保险库，**里面只有密文**，
-  密钥在 Windows 凭据管理器里，见 [vault.md](vault.md)）、`mail-watch.json`（邮件后台监视的
-  UID 基准与上轮检查时间，见 [mail.md](mail.md)，只是通知的记账，不进同步仓库），
-  加上设备标识 `device.json`，以及 `panic.log`（崩溃落痕，见「实现」一节）—— 全都在数据目录下
-  （安装版 `%APPDATA%/Workbench/data/`，开发版 `%APPDATA%/Workbench-dev/data/`；
-  根目录 `%APPDATA%/Workbench` 是 Electron 版留下的 Chromium 配置目录；老版本也把数据文件写在那儿，启动时由 `migrate_legacy_files` 搬进 `data/`）。
-  **禅道没有数据文件**：后台检查的编号基线只在本机内存里（应用重启后第一轮重新建立，见
-  [zentao.md](zentao.md)），周期住 `workbench-data.json` 的 `zentaoPollMinutes`。
-  **技能没有数据文件**：技能库是用户挑的一个目录（设置里的 `skillDir`，与笔记文件夹互不相干），
-  磁盘上的文件就是数据本身；它在哪个仓库里由 `skills.rs` 的 `state` 从那个目录往上找。
-  **独立视频窗口没有数据文件**：播放会话与置顶只在 Rust 内存里（窗口关掉即清），
-  位置 / 尺寸建窗时按主窗口现算、不记账（见 [video.md](video.md)）。
-- **开发版（`pnpm dev`）不注册单实例**，可以与装着的那份同时开（正式版之间仍按 identifier 互斥）。
-  两边的数据目录按环境分开（`Workbench-dev` 与 `Workbench`，见下一条），各写各的文件；
-  代价是邮件 / 禅道的后台轮询与通知仍会各跑一遍（见
+  `work-log.json` 与 `ai-news.json`（都只在本机）、`vault.json`（密码保险库，**里面只有密文**，密钥在 Windows 凭据管理器，
+  见 [vault.md](vault.md)）、`mail-watch.json`（邮件后台监视的 UID 基准与上轮检查时间，见 [mail.md](mail.md)，只是通知记账，
+  不进同步仓库），加上设备标识 `device.json`，以及 `panic.log`（崩溃落痕）—— 全在数据目录下（安装版
+  `%APPDATA%/Workbench/data/`，开发版 `%APPDATA%/Workbench-dev/data/`；根目录 `%APPDATA%/Workbench` 是 Electron 版留下的
+  Chromium 配置目录；老版本也把数据文件写在那儿，启动时由 `migrate_legacy_files` 搬进 `data/`）。
+  **禅道没有数据文件**：后台检查的编号基线只在本机内存（重启后第一轮重新建立，见 [zentao.md](zentao.md)），周期住
+  `workbench-data.json` 的 `zentaoPollMinutes`。**技能没有数据文件**：技能库是用户挑的目录（`skillDir`，与笔记文件夹互不
+  相干），磁盘文件就是数据；它在哪个仓库由 `skills.rs` 的 `state` 往上找。**独立视频窗口没有数据文件**：播放会话与置顶只在
+  Rust 内存（窗口关掉即清），位置 / 尺寸建窗时按主窗口现算、不记账（见 [video.md](video.md)）。
+- **开发版（`pnpm dev`）不注册单实例**，可与装着的那份同时开（正式版之间仍按 identifier 互斥）。两边数据目录按环境分开
+  （`Workbench-dev` 与 `Workbench`），各写各的；代价是邮件 / 禅道的后台轮询与通知仍各跑一遍（见
   [dev-notes/browser-preview-verification.md](../dev-notes/browser-preview-verification.md)）。
-- **数据目录按环境固定**：安装版 `%APPDATA%\Workbench\data`，开发版 `%APPDATA%\Workbench-dev\data`
-  （根目录 `%APPDATA%\Workbench` 是 Electron 版留下的 Chromium 配置目录，
-  数据文件收进 `data` 子目录，两边不混），**没有「换目录」这回事**：不要图省事改用 Tauri 的
-  `app_config_dir()`（它按 identifier 生成 `%APPDATA%\com.muyian.workbench`，换了位置用户就等于丢了项目列表）；
-  路径一律经 `paths.rs` 的 `data_dir()` / `data_file()` 现取，不要缓存写死，也不要在别处另拍一个数据目录。
-  开发版与安装版共用同一份设置会让两边互相盖掉（截图开关、全局快捷键、项目列表都是），所以判据用编译期
-  `dev` cfg（`tauri dev` / `cargo build` 为真，`tauri build` 为假），与单实例、开机自启同一条口径。
-- 数据结构变更要同步落盘的 sanitize（[persisted-data.ts](../../apps/desktop/src/renderer/src/persisted-data.ts) 的 `sanitizeSettings` / `parseData`），
-  老数据文件缺字段须有默认值，不留未收敛的 `undefined`。
+- **数据目录按环境固定**：安装版 `%APPDATA%\Workbench\data`，开发版 `%APPDATA%\Workbench-dev\data`（根目录
+  `%APPDATA%\Workbench` 是 Electron 版留下的 Chromium 配置目录，数据文件收进 `data` 子目录，两边不混），**没有「换目录」
+  这回事**：不要图省事改用 Tauri 的 `app_config_dir()`（它按 identifier 生成 `%APPDATA%\com.muyian.workbench`，换位置用户就
+  等于丢了项目列表）；路径一律经 `paths.rs` 的 `data_dir()` / `data_file()` 现取，不要缓存写死，也别在别处另拍一个数据目录。
+  开发版与安装版共用同一份设置会让两边互相盖掉（截图开关、全局快捷键、项目列表都是），所以判据用编译期 `dev` cfg
+  （`tauri dev` / `cargo build` 为真，`tauri build` 为假），与单实例、开机自启同一条口径。
+- 数据结构变更要同步落盘的 sanitize（[persisted-data.ts](../../apps/desktop/src/renderer/src/persisted-data.ts) 的
+  `sanitizeSettings` / `parseData`），老数据文件缺字段须有默认值，不留未收敛的 `undefined`。
 - **设置项先分清是「外观」还是「行为习惯」，落点完全不同**：
   - **外观**（明暗、主题色、顶部样式、卡片不透明度、毛玻璃描边、终端高度、程序名、背景、导航菜单、首页布局、笔记树宽度）住
-    `theme.json`，判据是它在 [appearance.ts](../../packages/appearance/src/appearance.ts) 的 `APPEARANCE_SETTING_KEYS` 里
-    —— **进这张白名单就等于「会被整份同步到另一台机器」**，所以只放「这台机器该长成什么样」的项；
-    **没有例外**：技能库在哪儿不是「界面长什么样」，它是**本机的一个目录**
-    （设置里的 `skillDir`，住 `workbench-data.json`，与 `noteDir` 同一类），
-    也不再有「技能放在仓库哪一层」这种配置；
-  - **行为习惯**（`activeView`、`projectSort`、`workRange` / `workSort`、`noteTreeExpanded`、
-    密码页那两样 `vaultGroupOrder` / `vaultHiddenGroups`）与
-    本机路径 / 凭据（快捷键、开机自启、两个同步仓库地址 —— 用量与图片；**笔记与技能那两个仓库的地址
-    都不在设置里**：它们跟着各自那个文件夹的 `origin` 走、`noteDir`、`skillDir`）住 `workbench-data.json`。
-    天气城市 `weatherCity` 也在这一边：它是「这台机器上的人住哪儿」，不是「界面长什么样」，
-    而且它管着一条联网出口的开关（留空即关闭），不该被同步顶掉。
-    判据是「换台机器还成不成立」：「我上一眼在看什么」「我的笔记在哪个盘」换台机器就没了，
-    同步过去只会把那边正看的东西顶掉。
+    `theme.json`，判据是它在 [appearance.ts](../../packages/appearance/src/appearance.ts) 的 `APPEARANCE_SETTING_KEYS` 里 ——
+    **进这张白名单就等于「会被整份同步到另一台机器」**，所以只放「这台机器该长成什么样」的项；**没有例外**：技能库在哪儿不是
+    「界面长什么样」，它是**本机的一个目录**（`skillDir`，住 `workbench-data.json`，与 `noteDir` 同一类），也不再有「技能放在
+    仓库哪一层」这种配置；
+  - **行为习惯**（`activeView`、`projectSort`、`workRange` / `workSort`、`noteTreeExpanded`、密码页那两样 `vaultGroupOrder` /
+    `vaultHiddenGroups`）与本机路径 / 凭据（快捷键、开机自启、两个同步仓库地址 —— 用量与图片；**笔记与技能那两个仓库的地址
+    都不在设置里**：跟着各自那个文件夹的 `origin` 走、`noteDir`、`skillDir`）住 `workbench-data.json`。天气城市 `weatherCity`
+    也在这边：它是「这台机器上的人住哪儿」，不是「界面长什么样」，而且它管着一条联网出口的开关（留空即关闭），不该被同步
+    顶掉。判据是「换台机器还成不成立」：「我上一眼在看什么」「我的笔记在哪个盘」换台机器就没了，同步过去只会把那边正看的
+    东西顶掉。
   不确定时的口径：**它是「界面长什么样」还是「我上次用到哪儿」** —— 后者一律留数据文件。
-- 给项目加可编辑字段时，除了 `Project` / `ProjectPatch`，还要把它加进 store 里的 `editableOf`
-  （[stores/projects.ts](../../apps/desktop/src/renderer/src/stores/projects.ts)）：项目是就地改 `projects.value` 的，落盘靠那条「与快照比对后推
-  差异」的 watch，`editableOf` 就是它认得的那份字段清单 —— 漏加的表现是界面上改完看着生效、重启后回到旧值。
+- 给项目加可编辑字段时，除了 `Project` / `ProjectPatch`，还要加进 store 里的 `editableOf`
+  （[stores/projects.ts](../../apps/desktop/src/renderer/src/stores/projects.ts)）：项目是就地改 `projects.value` 的，落盘靠
+  那条「与快照比对后推差异」的 watch，`editableOf` 就是它认得的字段清单 —— 漏加的表现是改完看着生效、重启回到旧值。
 - **读取时补齐老数据的字段**（例如项目标识色）要走「先 `snapshotProjects()`、再补」的顺序：补齐要经上面那条 watch 推给后端，
-  而它只推与快照不同的项 —— 顺序反了的话快照里已经是补好的值，那批数据永远写不进磁盘。
+  而它只推与快照不同的项 —— 顺序反了的话快照里已是补好的值，那批数据永远写不进磁盘。
 
 ## 实现
 
 ### 底座的形状
 
-- **后端刻意做薄**：`commands.rs` 只做「取原始数据 / 落盘 / 调系统能力」；合并、排序、修剪、
-  状态机、命令构造这些业务语义在渲染层适配层（`apps/desktop/src/renderer/src/workbench/`）——
-  改动因此大多走 Vite 的秒级热更新，只有动到系统能力时才重编 Rust。
-  **例外是 store 的「形状」**：加了字段 / 加了动作之后，正在跑的那个应用**要整页刷新一次**才认得 ——
-  组件会热替换，而 Pinia 的 store 实例不会（项目里没有一处 `acceptHMRUpdate`，实例是上次整页加载时
-  建好的）。新组件去读 store 上还不存在的字段，渲染时就抛错、被 Vue 吞掉（控制台才有）。
-  store 里加东西之后**把应用重开一次**（或刷新 webview 的页面）。
-- **「按钮在、点下去什么都没发生」有两种来路，别只认一种**（2026-10 密码页那次就认错了）：
-  一是上面那条 store 实例过期；二是**模板里用了组件、脚本里漏了 import** —— 少了 import 时
-  `vue-tsc` 与 `vite build` **都不报错**（那个标签被当成认不出的元素渲染成空），只有
-  `pnpm run lint` 的 `vue/no-undef-components` 拦得住（见 eslint.config.mjs 里那条说明）。
-  诊断时先看这两处，别一上来就猜 HMR。
-- **适配层顶替的是 Electron 时代的进程边界**：它递给渲染层的列表一律是快照
-  （`structuredClone`），渲染层的乐观追加写不进要落盘的数据。
-- **IPC 命令默认跑在主线程上**：会起子进程、读写文件、解码图片、跑 SQL 的命令都标 `(async)`
-  （落到 `async_runtime::spawn` 的工作线程），漏标的后果不是慢而是界面卡死。
-- **首屏快照**：Tauri 没有同步 IPC，建窗口时用 `initialization_script` 注入
-  `window.__WB_BOOTSTRAP__`（`main.rs` 的 `bootstrap_script`），渲染层同步读它，
-  第一帧就是用户设置的样子。
-- **工作区背景图与视频播放走 asset 协议，后端不碰它们的字节**：渲染层只调一次
-  `allow_background` / `allow_video`，后端核文件头后把**这一个文件**的读取权限授给 asset 协议，
-  URL 由 `convertFileSrc` 转出；`assetProtocol.scope` 刻意留空。
-- **崩溃落痕**：release 档把 panic 设成直接中止进程（`Cargo.toml` 的 `panic = "abort"`），进程凭空消失、
-  什么都不留 —— `main()` 第一行装 `panic_log::install()`，把「时间 / 线程 / 位置 / 消息 / 回溯」追加到
-  `data/panic.log`（写失败就放弃；默认钩子照旧调用，dev 的 stderr 上还有一份）。单份超 256KB 先清空。
-- **webview 有全局 CSP**（`tauri.conf.json` 的 `csp`；dev 用 `devCsp`，多放行 HMR 的 ws）。底线是
-  `default-src 'self'`、`script-src 'self'`、`object-src 'none'`；必须放行的几处都有理由：
-  `style-src 'unsafe-inline'`（Element Plus / Vditor 的动态样式与邮件正文 —— **但它只管 CSSOM**：
-  入口 HTML 里只要有一段内联 `<style>`，Tauri 就会给那一段加 nonce、并往 `style-src` 里追加
-  `'nonce-…'`，按 CSP 规则 nonce 一在场 `'unsafe-inline'` 即失效，**源码里的行内 `style` 属性整个被丢弃**；
-  `el.style.x = …` 这类 CSSOM 写入不受影响。`markdown` / `video` / `capture` / `pin` / `ball` 这五个带
-  内联 `<style>` 的入口因此不能依赖行内 style 属性，独立 Markdown 窗口踩过这个坑：Vditor 的图标 sprite
-  靠行内样式缩成 0×0，被丢弃后占成 300×150，把整扇窗往下顶 153px，补法见
-  [notes.md](notes.md) 的「独立编辑窗口」）、
-  `script-src` 上的 **`'unsafe-inline'`**（**只为 HTML 附件那一档**：这份 CSP 由 Tauri 按 meta
-  注入到页面里、**子框架会继承**，附件里的脚本要跑只能在这儿放行；代价与三条不能动的边界写在
-  [mail.md](mail.md) 的「HTML 附件：给脚本、不给宿主能力」一节 —— 别再往 `script-src` 上加
-  别的来源，**也别给附件那个 iframe 加 `allow-same-origin`**）、
-  `connect-src ipc: http://ipc.localhost`（IPC 本身）与它的 `data:`
-  （截图遮罩把那一帧的 base64 交给浏览器原生解，见 [screenshot.md](screenshot.md)；`data:` 不出进程、
-  放行它不等于开了新出口）、`worker-src blob:`
-  （pptx 预览与笔记里的 graphviz 都用 blob 建 Worker）、`img-src` 的 asset 协议与 `https:`/`http:`
-  （背景图、笔记与邮件的外链图）、`frame-src` 的 `about:`（邮件与 AI 预览的 srcdoc 内嵌框）。
-  **改这条、或引新的前端依赖 / 资源之前先想它会不会被拦**，而且**要在生产态的真应用里过一遍**：
-  dev 下页面来自 Vite、CSP 根本不生效，浏览器预览也验不了。
+- **后端刻意做薄**（`commands.rs` 只取数据 / 落盘 / 调系统能力，业务语义在适配层）。**例外是 store 的「形状」**：加了字段 /
+  动作之后，正在跑的那个应用**要整页刷新一次**才认得 —— 组件会热替换，而 Pinia 的 store 实例不会（项目里没有一处
+  `acceptHMRUpdate`，实例是上次整页加载时建好的）。新组件读 store 上还不存在的字段，渲染时就抛错、被 Vue 吞掉（控制台才有）。
+  store 里加东西之后**把应用重开一次**（或刷新 webview 页面）。
+- **「按钮在、点下去什么都没发生」有两种来路，别只认一种**（2026-10 密码页那次就认错了）：一是上面那条 store 实例过期；
+  二是**模板里用了组件、脚本里漏了 import** —— 少了 import 时 `vue-tsc` 与 `vite build` **都不报错**（标签被当成认不出的元素
+  渲染成空），只有 `pnpm run lint` 的 `vue/no-undef-components` 拦得住（见 eslint.config.mjs 里那条说明）。诊断先看这两处，
+  别一上来就猜 HMR。
+- **适配层顶替的是 Electron 时代的进程边界**：递给渲染层的列表一律是快照（`structuredClone`），渲染层的乐观追加写不进要落盘
+  的数据。
+- **IPC 命令默认跑主线程**：会起子进程、读写文件、解码图片、跑 SQL 的命令都标 `(async)`（落到 `async_runtime::spawn` 工作
+  线程），漏标的后果不是慢而是界面卡死。
+- **工作区背景图与视频播放走 asset 协议，后端不碰它们的字节**：渲染层只调一次 `allow_background` / `allow_video`，后端核文件头
+  后把**这一个文件**的读取权限授给 asset 协议，URL 由 `convertFileSrc` 转出；`assetProtocol.scope` 刻意留空。
+- **崩溃落痕**：release 档把 panic 设成直接中止进程（`Cargo.toml` 的 `panic = "abort"`），进程凭空消失、什么都不留 ——
+  `main()` 第一行装 `panic_log::install()`，把「时间 / 线程 / 位置 / 消息 / 回溯」追加到 `data/panic.log`（写失败就放弃；默认
+  钩子照旧调用，dev 的 stderr 上还有一份）。单份超 256KB 先清空。
+- **webview 有全局 CSP**（`tauri.conf.json` 的 `csp`；dev 用 `devCsp`，多放行 HMR 的 ws）。底线是 `default-src 'self'`、
+  `script-src 'self'`、`object-src 'none'`；必须放行的几处都有理由：
+  `style-src 'unsafe-inline'`（Element Plus / Vditor 的动态样式与邮件正文 —— **但它只管 CSSOM**：入口 HTML 里只要有一段内联
+  `<style>`，Tauri 就给那一段加 nonce、并往 `style-src` 追加 `'nonce-…'`，按 CSP 规则 nonce 在场 `'unsafe-inline'` 即失效，
+  **源码里的行内 `style` 属性整个被丢弃**；`el.style.x = …` 这类 CSSOM 写入不受影响。`markdown` / `video` / `capture` / `pin` /
+  `ball` 这五个带内联 `<style>` 的入口因此不能依赖行内 style 属性，独立 Markdown 窗口踩过：Vditor 的图标 sprite 靠行内样式缩成
+  0×0，被丢弃后占成 300×150，把整扇窗往下顶 153px，补法见 [notes.md](notes.md) 的「独立编辑窗口」）、
+  `script-src` 上的 **`'unsafe-inline'`**（**只为 HTML 附件那一档**：这份 CSP 由 Tauri 按 meta 注入、**子框架会继承**，附件
+  脚本要跑只能在这儿放行；代价与三条不能动的边界见 [mail.md](mail.md) 的「HTML 附件：给脚本、不给宿主能力」—— 别再往
+  `script-src` 加别的来源，**也别给附件那个 iframe 加 `allow-same-origin`**）、`connect-src ipc: http://ipc.localhost`（IPC
+  本身）与它的 `data:`（截图遮罩把那一帧的 base64 交给浏览器原生解，见 [screenshot.md](screenshot.md)；`data:` 不出进程、放行
+  它不等于开了新出口）、`worker-src blob:`（pptx 预览与笔记里的 graphviz 都用 blob 建 Worker）、`img-src` 的 asset 协议与
+  `https:`/`http:`（背景图、笔记与邮件的外链图）、`frame-src` 的 `about:`（邮件与 AI 预览的 srcdoc 内嵌框）。
+  **改这条、或引新的前端依赖 / 资源之前先想它会不会被拦**，而且**要在生产态的真应用里过一遍**：dev 下页面来自 Vite、CSP 根本
+  不生效，浏览器预览也验不了。
 
 ## 涉及文件
-
-这些条目的原文注解从主文档「目录结构」迁来（主文档的树里各留一行，指回这里）。
 
 ```
   src/main.rs            入口、窗口、托盘、单实例、生命周期
@@ -184,6 +156,6 @@
 ```
 
 前七行在 `apps/desktop/src-tauri/src/`，中间三行也在 `apps/desktop/src-tauri/src/`（http / credentials / encoding）；
-末尾五件在 `apps/desktop/src/renderer/src/workbench/`（适配层的底座部分）。
-两个壳层 store（`stores/nav.ts` 当前页、`stores/settings.ts` 设置与外观）与导航壳层的注解
-仍留在主文档「目录结构」里，因为它们与「导航与页面」「系统集成」两节长在一起。
+末尾五件在 `apps/desktop/src/renderer/src/workbench/`（适配层的底座部分）。两个壳层 store（`stores/nav.ts` 当前页、
+`stores/settings.ts` 设置与外观）与导航壳层的注解仍留在主文档「目录结构」里，因为它们与「导航与页面」「系统集成」两节长在
+一起。
