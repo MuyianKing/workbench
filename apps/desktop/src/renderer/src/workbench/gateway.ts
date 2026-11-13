@@ -1,9 +1,9 @@
 import type { Result } from '@workbench/core'
 
-import type { GatewayAccess, GatewayAccount, GatewayAccountImport, GatewayActionResult, GatewayActivityRow, GatewayCredits, GatewayGrantAccount, GatewayLoginPoll, GatewayLoginStart, GatewayModelInfo, GatewayPerksAutoConfig, GatewayPerksAutoRun, GatewayPullResult, GatewayStatus, GatewaySyncResult, GatewayTaskRun, GatewayTasksSnapshot, GatewayUsageRow, GatewayUsageSummary, GatewayUsageWindow } from '@/types'
+import type { GatewayAccess, GatewayAccount, GatewayAccountImport, GatewayActionResult, GatewayActivityRow, GatewayCredits, GatewayGrantAccount, GatewayLoginPoll, GatewayLoginStart, GatewayModelInfo, GatewayPerksAutoConfig, GatewayPerksAutoRun, GatewayPullResult, GatewayStatus, GatewaySyncResult, GatewayTaskRun, GatewayTasksSnapshot, GatewayUsageRow, GatewayUsageWindow } from '@/types'
 import { fail, ok } from '@workbench/core'
+import { createAutoSync } from './auto-sync'
 import { errorText, invoke } from './bridge'
-import { enqueue } from './sync-queue'
 // 载荷类型搬到 @\/types（契约侧）了；这里 re-export，老导入不动
 export type { GatewayAccess, GatewayAccount, GatewayAccountImport, GatewayAccountUsage, GatewayActionResult, GatewayActivityRow, GatewayBucketUsage, GatewayCheckinStatus, GatewayCredits, GatewayGrantAccount, GatewayGrowthSummary, GatewayGrowthTask, GatewayLoginPoll, GatewayLoginStart, GatewayModelInfo, GatewayModelQuota, GatewayModelUsage, GatewayPackage, GatewayPerksAutoConfig, GatewayPerksAutoRun, GatewayPullResult, GatewayStatus, GatewaySyncResult, GatewaySyncStatus, GatewayTaskAccount, GatewayTaskRun, GatewayTasksSnapshot, GatewayTravelState, GatewayUsageRow, GatewayUsageSummary, GatewayUsageWindow } from '@/types'
 
@@ -107,16 +107,8 @@ export function gatewayRotateKey(): Promise<Result<string>> {
 }
 
 /**
- * 用量汇总。`repo` / `device` 由 `index.ts` 用登录态与 `localDevice()` 注入：
- * 空仓库 = 只读本机；非空时 Rust 侧会把同步克隆里别的机器的流水一起合进来。
- */
-export function gatewayUsage(days: number, repo = '', device = ''): Promise<Result<GatewayUsageSummary>> {
-  return call('wb_gateway_usage', { days, repo, device }, '读取用量失败')
-}
-
-/**
  * 窗口内的流水（旧→新），连统计窗口的起点一起回。**只取数**：分组 / 分桶 / 比率的语义在
- * `@workbench/usage` 的 `summarizeGatewayRows`，与 Rust 的 `summarize` 同口径。
+ * `@workbench/usage` 的 `summarizeGatewayRows`（Rust 只按窗口把行取齐）。
  *
  * 窗口是**自然日**（UTC+8 零点起算）：`days = 1` 是今天，`days = 3` 是今天加前两天。
  */
@@ -163,10 +155,14 @@ export function pullGatewayUsage(repo: string): Promise<Result<GatewayPullResult
 }
 
 /** 自动同步的节流窗口：与 token 用量同一个节奏（一小时） */
-const GATEWAY_SYNC_INTERVAL_MS = 60 * 60_000
-let lastGatewaySyncAt = 0
-let lastGatewaySyncRepo = ''
-let gatewaySyncing: Promise<Result<GatewaySyncResult>> | null = null
+/**
+ * 自动同步的节流窗口：与 token 用量同一个节奏（一小时）。
+ * 失败不进节流窗口（`shouldMark`）：下一次进页面会立刻重试。
+ */
+const gatewaySyncGate = createAutoSync({
+  intervalMs: 60 * 60_000,
+  shouldMark: result => (result as Result<GatewaySyncResult>).ok,
+})
 
 /**
  * 直接推一次（不排队、不节流）。
@@ -190,8 +186,7 @@ export async function gatewaySyncNow(repo: string, device: string): Promise<Resu
 
 /** 记下这次同步的时刻：手动按钮与 token 的每小时同步共用这个节流窗口 */
 export function markGatewaySynced(repo: string): void {
-  lastGatewaySyncAt = Date.now()
-  lastGatewaySyncRepo = repo
+  gatewaySyncGate.mark(repo)
 }
 
 /**
@@ -206,20 +201,10 @@ export function syncGatewayUsage(
   if (!repo)
     return Promise.resolve(ok({ enabled: false, changed: false, pushed: false }))
 
-  if (!force && repo === lastGatewaySyncRepo && Date.now() - lastGatewaySyncAt < GATEWAY_SYNC_INTERVAL_MS)
+  if (!force && !gatewaySyncGate.due(repo))
     return Promise.resolve(ok({ enabled: true, changed: false, pushed: false, skipped: true }))
 
-  if (gatewaySyncing)
-    return gatewaySyncing
-
-  gatewaySyncing = enqueue(() => gatewaySyncNow(repo, device)).finally(() => {
-    gatewaySyncing = null
-  })
-  return gatewaySyncing.then((result) => {
-    if (result.ok)
-      markGatewaySynced(repo)
-    return result
-  })
+  return gatewaySyncGate.now(repo, () => gatewaySyncNow(repo, device))
 }
 
 /**

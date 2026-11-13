@@ -313,7 +313,9 @@ apps/desktop/            桌面应用（自包含：渲染层 + Rust + 随包资
   src/token.rs           用量数据源聚合 —— 注解见 modules/sync-and-auth.md
   src/notes.rs           笔记文件夹的扫描 / 读写 / 增删改名 —— 注解见 modules/notes.md
   src/md_window.rs       资源管理器「打开方式」的独立 Markdown 编辑窗口（会话 / 关闭握手）—— 注解见 modules/notes.md
-  src/sync.rs            同步与 git 管道 —— 注解见 modules/sync-and-auth.md
+  src/sync.rs            同步与 git 管道（各域分片的推 / 读）—— 注解见 modules/sync-and-auth.md
+  src/sync_images.rs     笔记图片仓库的上传 / 列清单 / 删图 —— 注解见 modules/notes.md
+  src/relay_core.rs      两套网关（TBuddy / Qoder）共用的配置 / 密钥 / 启停 / 状态形状
   src/repo_git.rs        Git 页的只读仓库读取（仓库 / 分支清单 / 提交 / 目录树 / 文件历史 / 差异 / 补丁）
                          —— 注解见 modules/git-client.md
   src/design.rs          设计规范落盘 —— 注解见 modules/styles.md
@@ -383,6 +385,8 @@ packages/                按域拆出的 19 个 @workbench/* 包（TS 源码直�
   notes/                 笔记的文件名与目录树口径、图片的命名与访问地址拼接
   video/                 MP4 过滤 / 目录树口径 / 倍速档位与时间、时长显示、播放顺序（flattenVideoNodes）
   appearance/            外观口径与默认外观的唯一来源、主题、views、工作区背景与壁纸、
+                         同步仓库里的外观配置（sync-config）、悬浮小窗的位置 / 尺寸档位
+                         （video-float）、
                          设计样式的 token 模型与键名中文标签规则、色系判定与筛选排序、
                          设计示例页面的颜色角色解析（design-demo）、设计规范与提示词的
                          生成（design-export）
@@ -395,7 +399,7 @@ packages/                按域拆出的 19 个 @workbench/* 包（TS 源码直�
                          内置模型目录（ai-builtin-models.generated.ts，由 vendor-pi 生成）、
                          AI 热点的 RSS 解析与缓存策略（ai-news.ts）、Pi 技能的根与开关口径
                          （pi-skills.ts）
-  usage/                 Token 用量口径（token-usage.ts）、同步配置（sync-config.ts）、
+  usage/                 Token 用量口径（token-usage.ts）、
                          四个 IDE 日志源（codebuddy / qoder / dsh / workbuddy-log）
   work-log/              工作日志的时间轴
   git/                   Git 页的回包收敛、统一 diff 行模型、最近打开清单与类型（见 modules/git-client.md）

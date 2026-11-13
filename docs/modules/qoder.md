@@ -60,10 +60,11 @@
 | | `qd_relay` | 一次请求的编排与写回 |
 | | `qd_router` | 路由表与密钥校验 |
 | | `qd_gateway` | 生命周期、状态、全部 `wb_qoder_*` 命令 |
-| 界面 | `components/qoder/QoderView.vue` | 账号 / 用量 / 请求 / 福利 / 模型五栏；用量栏复用 `components/gateway/UsagePane.vue` |
+| 界面 | `components/qoder/QoderView.vue` | 账号 / 用量 / 请求 / 福利 / 模型五栏；账号栏复用 `components/gateway/AccountCards.vue`、用量栏 `UsagePane.vue`、请求栏 `RequestsPane.vue` |
 
-与 TBuddy 共用的**协议无关设施**：Rust 侧 `common.rs`（时间 / 截断 / 打码 / 历法 / uid 白名单）与 `http::request_json(_with)`
-（信封解包），外加直接复用 `wb_server`（HTTP 服务）与 `wb_usage`（JSONL 记账）—— 这两块本来就不懂协议；界面侧账号卡的状态机在
+与 TBuddy 共用的**协议无关设施**：Rust 侧 `common.rs`（时间 / 截断 / 打码 / 历法 / uid 白名单）、`relay_core.rs`（配置 / 密钥 /
+启停 / 状态形状）与 `http::request_json(_with)`（信封解包），外加直接复用 `wb_server`（HTTP 服务）与 `wb_usage`（JSONL 记账）
+—— 这几块本来就不懂协议；界面侧账号卡就是 `AccountCards.vue`（经 `AccountCardView` 视图模型注入，动作走 emit）、状态机在
 `renderer/src/status.ts` 的 `pool*`（状态类名已从 `state-*` 统一成 `is-*`）、余额快照在 `composables/use-credit-pool.ts`
 （Qoder 删号现在也清快照，与 TBuddy 同口径）。业务定义、账号模型、落盘照旧独立。
 
@@ -98,11 +99,13 @@
   刷新 `Coin` 三枚工具键、登录一颗主色加号，悬停才有文字提示；口径（sticky + `margin-top: auto`、`calc(sp-5 - sp-3)`、
   不许改回 `position: fixed`）只在 [gateway.md](gateway.md) 一处，这边照抄。
 - 栏首不再放选号规则之类的说明文字，只留一行登录中的提示（`loginHint`：「等待浏览器完成 Qoder 授权…」）。
-- **账号卡与 TBuddy 的账号卡同一套布局**：首字头像（紫）、左侧状态色标与 7% 状态色柔光、名称下的状态标签（可用 / 待登录 /
-  额度用完 / 部分模型用完 / 已停用）、右上「查余额 / 停用 / 删除」、额度恢复小字与优先级同一排（提示在左、空着时隐藏占位）、
-  积分「剩余 / 总额 + 已用 + 最近到期」与余额条，点积分区打开积分明细弹层（复用 `CreditsDialog`，Qoder 快照在适配层转成同一
-  形状）；底部三格「成功 / 失败、用量、均速」取最近 30 天流水。字号取 `--gw-fs-*`（与 TBuddy 账号卡一致），这一页其余栏仍用
-  `--fs-*`。彩色例外与 TBuddy 账号卡一致：头像紫、余额条与状态色标的状态色；别扩到别处（福利栏那三格图标的彩色另算）。
+- **账号栏就是 TBuddy 那份 `AccountCards.vue`**（两页同一个组件，卡片只写一次）：首字头像（紫）、左侧状态色标与 7% 状态色柔光、
+  名称下的状态标签（可用 / 待登录 / 额度用完 / 部分模型用完 / 已停用）、右上「查余额 / 停用 / 删除」、额度恢复小字与优先级同一排
+  （提示在左、空着时隐藏占位）、积分「剩余 / 总额 + 已用 + 最近到期」与余额条，点积分区打开积分明细弹层（复用 `CreditsDialog`，
+  Qoder 快照在适配层转成同一形状）；底部三格「成功 / 失败、用量、均速」取最近 30 天流水。Qoder 这一侧只负责把 `QoderAccount`
+  映射成卡片视图（`accountCards`，临期提示传 `onlyAvailable`）并把 emit 接回自己的动作。字号取 `--gw-fs-*`（与 TBuddy 账号卡
+  一致），这一页其余栏仍用 `--fs-*`。彩色例外与 TBuddy 账号卡一致：头像紫、余额条与状态色标的状态色；别扩到别处（福利栏那三格
+  图标的彩色另算）。
 - **账号栏的 `.qd__pane` 不参与收缩**（`flex: none`）：卡片按内容自然长高，浮动键才拿得到整段滚动范围；空态时再撑满一栏
   （`is-empty`）让空态居中。
 - 空态只写事实 + 「点右下角加号登录一个」，不在空态里再放一颗登录按钮。
@@ -124,14 +127,14 @@
   重读一次**，页面被 KeepAlive 缓存时暂停、切回来立即补读。
 - token 按千进制收短（K / M，**不写「兆」**）：`compact()` 与 TBuddy 用量页同一套。
 - **取数与统计分开**：Rust 的 `wb_qoder_usage_rows` 只回窗口内的流水与 `since`，分组 / 分桶 / 积分比率在 `packages/usage` 的
-  `summarizeGatewayRows`（与 TBuddy 同一份、同一口径）。`wb_qoder_usage`（Rust 侧的汇总）仍然保留，但界面走的是 TS 那一份 ——
-  两边改口径时一起看。
+  `summarizeGatewayRows`（与 TBuddy 同一份、同一口径）。原来那条 Rust 汇总 `wb_qoder_usage` 没有调用方，已随
+  `wb_usage::summarize` 一起删掉 —— 口径只有 TS 一份。
 
 ### 请求栏
 
-- 条件带**就是 TBuddy 那个组件**（`components/gateway/RequestFilters.vue`：搜索框、结果下拉、条数下拉、右端「共 N 条 · 成功
-  M」+「重新读取」，模板与样式只有一份）；表格两页各是各的 —— 这边精简七列（时间 / 账号 / 模型 / 状态 / token / 延迟 / 错误），
-  TBuddy 全量十四列，别借共用合并。
+- **就是 TBuddy 那个请求栏组件**（`components/gateway/RequestsPane.vue`：条件带 + 十四列表格 + 空态），Qoder 只经
+  `:load-rows` / `:load-names` 注入 `qoderUsageRecent` / `qoderAccountNames`，再换一句空态提示。列、筛选与计数口径因此两页
+  完全一致（原来这边精简七列的版本已删：少的那几列是首字、速度、缓存与积分，恰是比较两个网关时最该对齐的部分）。
 - **换条数才重新读后端**；换结果或关键字只在前端过滤（`requestRows` computed）。
 - 表格行键是「时间 + 模型 + 账号」：同一秒里两条同模型请求时，只用 `ts` 会撞键。
 

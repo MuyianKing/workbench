@@ -12,62 +12,26 @@ use std::sync::{Arc, Mutex};
 use serde::{Deserialize, Serialize};
 
 use crate::common::now_secs;
+use crate::relay_core;
 use crate::wb_account::{self, Account};
 use crate::wb_api_auth::{self, LoginStart, PollOutcome};
 use crate::wb_credits::Credits;
 use crate::wb_server::{self, Server};
 
-/// 持久化配置。字段少，所以直接读写文件（不必上 `JsonStore` 的防抖那一套 ——
-/// 这里没有高频写入）。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Config {
-    /// 应用启动时自动把网关拉起来。默认开（设置·通用里可关）；
-    /// 显式写成 false 才不监听，缺字段按开处理。
-    #[serde(default = "default_auto_start")]
-    pub auto_start: bool,
-    pub port: u16,
-    /// 访问密钥。第三方客户端大多要填一个非空的 key 才肯保存配置；
-    /// 同时它也是"别的本机程序别乱调"的一道闸。首次启动时自动生成。
-    #[serde(default)]
-    pub api_key: String,
+/// 配置、密钥与状态 / 接入信息的形状在 `relay_core`（两套网关同一份）；这里只绑路径与端口。
+pub use crate::relay_core::{Access, Status};
+
+pub fn load_config() -> relay_core::Config {
+    relay_core::load_config(crate::paths::gateway_settings_file(), DEFAULT_PORT)
 }
 
-fn default_auto_start() -> bool {
-    true
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            auto_start: true,
-            port: DEFAULT_PORT,
-            api_key: String::new(),
-        }
-    }
-}
-
-pub fn load_config() -> Config {
-    let path = crate::paths::gateway_settings_file();
-    let Ok(text) = std::fs::read_to_string(path) else {
-        return Config::default();
-    };
-    serde_json::from_str(&text).unwrap_or_default()
-}
-
-pub fn save_config(config: &Config) -> Result<(), String> {
-    let path = crate::paths::gateway_settings_file();
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|err| format!("建网关目录失败: {err}"))?;
-    }
-    let text =
-        serde_json::to_string_pretty(config).map_err(|err| format!("序列化网关配置失败: {err}"))?;
-    crate::fs_util::write_atomic(&path, text.as_bytes())
+pub fn save_config(config: &relay_core::Config) -> Result<(), String> {
+    relay_core::save_config(crate::paths::gateway_settings_file(), config)
 }
 
 /// 一段随机密钥。`wbg-` 前缀只是让它在配置里认得出来。
 pub fn new_key() -> String {
-    format!("wbg-{}", uuid::Uuid::new_v4().simple())
+    relay_core::new_key()
 }
 
 
@@ -130,10 +94,6 @@ struct LoginSession {
     created: i64,
 }
 
-/// 登录窗口的有效期。用户"开了浏览器就走开"是常事，过期就让他重来，
-/// 别把一个 state 无限留在内存里。
-const LOGIN_TTL_SECS: i64 = 600;
-
 /// Tauri managed state。Clone 只是为了把它交给监听线程，成本是一次 `Arc` 克隆。
 #[derive(Default, Clone)]
 pub struct Gateway {
@@ -152,29 +112,22 @@ impl Gateway {
 
         // 处理函数要一个 'static 的东西，所以把共享状态克隆进去，而不是借用 self
         let shared = Arc::clone(&self.inner);
-        let handler: wb_server::Handler = Arc::new(move |request: &wb_server::Request| {
+        let handler: wb_server::Handler = relay_core::handler(move |request: &wb_server::Request| {
             // 锁在单次请求内持有：对话请求可能续期账号，必须拿可变借用。
             // 锁冲突的代价只是并发请求排队 —— 本机客户端不会把这里压满。
-            let mut inner = match shared.lock() {
-                Ok(inner) => inner,
-                Err(poisoned) => poisoned.into_inner(),
-            };
+            let mut inner = relay_core::lock_or_recover(&shared);
             // 先把 key 拷出来：`&mut inner.accounts` 与 `&inner.api_key` 同时借不行
             let key = inner.api_key.clone();
             crate::wb_router::route(request, &mut inner.accounts, &key)
         });
 
-        let server = Server::start(port, handler)?;
-        inner.server = Some(server);
-        Ok(port)
+        relay_core::start(&mut inner.server, port, handler)
     }
 
     /// 停止监听。没在跑就什么都不做。
     pub fn stop(&self) -> Result<(), String> {
         let mut inner = self.lock()?;
-        if let Some(mut server) = inner.server.take() {
-            server.stop();
-        }
+        relay_core::stop(&mut inner.server);
         Ok(())
     }
 
@@ -186,15 +139,8 @@ impl Gateway {
         let config = load_config();
         Ok(Status {
             running: inner.server.is_some(),
-            port: inner
-                .server
-                .as_ref()
-                .map(Server::port)
-                .unwrap_or(config.port),
-            base_url: inner
-                .server
-                .as_ref()
-                .map(|server| wb_server::api_base(server.port())),
+            port: relay_core::running_port(&inner.server, config.port),
+            base_url: relay_core::base_url(&inner.server),
             accounts: inner.accounts.len(),
             ready,
             auto_start: config.auto_start,
@@ -265,13 +211,7 @@ impl Gateway {
             inner.api_key = ensure_key()?;
         }
         Ok(Access {
-            base_url: wb_server::api_base(
-                inner
-                    .server
-                    .as_ref()
-                    .map(Server::port)
-                    .unwrap_or(config.port),
-            ),
+            base_url: wb_server::api_base(relay_core::running_port(&inner.server, config.port)),
             api_key: inner.api_key.clone(),
             models: model_views().into_iter().map(|item| item.id).collect(),
         })
@@ -286,12 +226,7 @@ impl Gateway {
 
 /// 读 TBuddy 自己的密钥；没有就生成并落盘。
 fn ensure_key() -> Result<String, String> {
-    let mut config = load_config();
-    if config.api_key.trim().is_empty() {
-        config.api_key = new_key();
-        save_config(&config)?;
-    }
-    Ok(config.api_key)
+    relay_core::ensure_key(crate::paths::gateway_settings_file(), DEFAULT_PORT)
 }
 
 impl Inner {
@@ -308,7 +243,7 @@ impl Inner {
     fn prune_logins(&mut self) {
         let now = now_secs();
         self.logins
-            .retain(|_, session| now - session.created <= LOGIN_TTL_SECS);
+            .retain(|_, session| now - session.created <= relay_core::LOGIN_TTL_SECS);
     }
 
     fn ensure_loaded(&mut self) {
@@ -320,18 +255,6 @@ impl Inner {
     }
 }
 
-/// 给界面的状态。字段都是"能直接渲染"的东西。
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Status {
-    pub running: bool,
-    pub port: u16,
-    pub base_url: Option<String>,
-    pub accounts: usize,
-    pub ready: usize,
-    /// 下次应用启动时是否自动监听（页首「随程序启动」开关）
-    pub auto_start: bool,
-}
 
 /// 清单里的一行模型：id 加上价表查出来的单价（每百万 token，人民币）。
 ///
@@ -385,15 +308,6 @@ pub fn model_views() -> Vec<ModelView> {
     crate::wb_models::cached().iter().map(ModelView::of).collect()
 }
 
-/// 接入信息：第三方客户端要填的那三样。
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Access {
-    pub base_url: String,
-    /// 明文密钥。本机自用，界面需要能复制出来
-    pub api_key: String,
-    pub models: Vec<String>,
-}
 
 /// 给界面的账号行。**不含 token**。
 #[derive(Debug, Serialize)]
@@ -599,15 +513,6 @@ fn remote_rows(repo: &str, device: &str, since: i64) -> Vec<crate::wb_usage::Usa
             Vec::new()
         }
     }
-}
-
-/// 一段时间（自然日）内的用量汇总。`repo` 非空时把同步仓库里别的机器的流水也合进来。
-#[tauri::command(async)]
-pub fn wb_gateway_usage(days: i64, repo: String, device: String) -> crate::wb_usage::Summary {
-    let days = days.max(1);
-    let rows = usage_rows_since(crate::wb_usage::window_start(days), &repo, &device);
-    // 粒度跟着窗口走：一周以内按小时，再长退回按天（见 `bucket_unit` 的说明）
-    crate::wb_usage::summarize(&rows, crate::wb_usage::bucket_unit(days))
 }
 
 /// 一段流水：统计窗口的起点 + 覆盖到它的行（旧→新）。
@@ -1582,7 +1487,8 @@ mod tests {
 
     #[test]
     fn 默认配置随程序启动() {
-        let config = Config::default();
+        // 文件不存在时回到默认：随程序启动 + 默认端口（Config 的 Default 由 relay_core 的 fallback 表达）
+        let config = relay_core::load_config(std::path::PathBuf::from("no-such-settings.json"), DEFAULT_PORT);
         assert!(config.auto_start, "默认随程序启动（设置·通用里可关）");
         assert_eq!(config.port, DEFAULT_PORT);
     }
@@ -1628,7 +1534,7 @@ mod tests {
 
     #[test]
     fn 配置能往返序列化() {
-        let config = Config {
+        let config = relay_core::Config {
             auto_start: true,
             port: 18000,
             api_key: "wbg-test".into(),
@@ -1636,19 +1542,19 @@ mod tests {
         let text = serde_json::to_string(&config).unwrap();
         assert!(text.contains("\"autoStart\":true"));
         assert!(text.contains("\"port\":18000"));
-        let back: Config = serde_json::from_str(&text).unwrap();
+        let back: relay_core::Config = serde_json::from_str(&text).unwrap();
         assert!(back.auto_start);
         assert_eq!(back.port, 18000);
     }
 
     #[test]
     fn 缺字段时用默认值补齐() {
-        let back: Config = serde_json::from_str(r#"{"port":9999}"#).unwrap();
+        let back: relay_core::Config = serde_json::from_str(r#"{"port":9999}"#).unwrap();
         assert!(back.auto_start, "缺字段按默认开处理");
         assert_eq!(back.port, 9999);
 
         // 显式关掉要尊重：设置里关过一次之后，缺别的字段不能把它又打开
-        let off: Config = serde_json::from_str(r#"{"autoStart":false,"port":9999}"#).unwrap();
+        let off: relay_core::Config = serde_json::from_str(r#"{"autoStart":false,"port":9999}"#).unwrap();
         assert!(!off.auto_start);
     }
 

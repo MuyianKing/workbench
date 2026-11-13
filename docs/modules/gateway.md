@@ -5,7 +5,9 @@
 - **只监听 `127.0.0.1`**。这不是可改的配置项 —— 网关进程里带着账号 token，任何监听 `0.0.0.0` 的版本都不该存在。端口可改，
   回环地址不可改。
 - **Qoder 网关是另一套独立实现**（自己的端口 17879、密钥与 `wb-qoder/settings.json`），与这一页互不相干、可以同时跑；换这一页
-  的密钥不影响 Qoder。细则见 [qoder.md](qoder.md)。
+  的密钥不影响 Qoder。细则见 [qoder.md](qoder.md)。**独立的是协议与账号池，不是这套壳**：配置 / 密钥 / 启停 / 状态形状在
+  [relay_core.rs](../../apps/desktop/src-tauri/src/relay_core.rs) 一处定义、两边共用；页面上账号卡（`AccountCards.vue`）、
+  请求栏（`RequestsPane.vue`，取数经 `:load-rows` 注入）与用量栏（`UsagePane.vue`）也是两页同一份 —— 改口径只改一处。
 - **监听默认随程序启动，可在设置·通用里关掉**。打开时应用启动即绑 `127.0.0.1`（不连上游；点「登录」才连）。手动「停止」只在
   本次会话有效，下次启动照旧监听；关掉开关后仍需手动点「启动」。开关只改配置，不立刻启停；监听地址不可改。
 - **接入信息单独一层弹层，但不进设置**：地址与密钥是第三方客户端缺一不可的两样，一件都不能藏；但它们只是「配客户端时抄一次」
@@ -106,10 +108,9 @@
 - **积分比率的口径固定**：分母是**积分大于 0 的请求的总 token**（`creditTokens`）；缺积分与 `credit = 0` 的免费请求都既不进
   样本数（`creditSamples`）也不进分母（零消耗的 token 不参与折算）；跨账号 / 跨模型汇总时，先把积分与 token 两个总量分别累加，
   再**直接相除**，不平均各组比率。总 token 含缓存命中的 token，而缓存 token 的积分单价远低于输出 token —— 比较两个账号 / 模型时
-  先把缓存命中率一起看，别把这个数当模型单价。**序列化名是大写的 `creditsPer1MTokens`**：serde 的 `camelCase` 会把
-  `credits_per_1m_tokens` 中间的 `1m` 原样留下（`creditsPer1mTokens`），与前端契约对不上；三个汇总结构上都要显式
-  `#[serde(rename = "creditsPer1MTokens")]`，`wb_usage` 的「积分比率字段按前端契约序列化」用例守着这一条。名字对不上时 KPI 会
-  静默显示 0、明细表在 `undefined.toFixed` 上抛错。
+  先把缓存命中率一起看，别把这个数当模型单价。字段名在 TS 契约里是 `creditsPer1MTokens`（大写 1M，见
+  [types/gateway.ts](../../apps/desktop/src/renderer/src/types/gateway.ts)）；写成小写会让 KPI 静默显示 0、明细表在
+  `undefined.toFixed` 上抛错。
 - **明细只有一张表、积分总账单独一张面板**：「用量明细」的每一行同时给用量（请求 / 失败 / token / 延迟 / 速度）与积分（扣除积分 /
   匹配 Token / 比率 / 缓存命中率），由同一个「按账号 / 按模型」切换控制；积分汇总（扣除积分 / 匹配 Token / 平均积分每百万 / 有效
   样本 / 命中率）放在表格**上面**，**单独一张 `.panel` 毛玻璃面板**（不再套在明细面板里）：左侧主数字（扣除积分）占满两行、
@@ -215,11 +216,12 @@
 | | `wb_pricing` | 静态价表与花费估算 |
 | | `wb_quota` | 额度用完的判定（整号 / 按模型）与恢复时刻 |
 | 领域 | `wb_account` | 账号模型与 `<uid>.json` 读写 |
-| | `wb_tasks` | 成长任务 / 签到 / 成长连登 / 猫猫旅行 / Buddy 盲盒，以及 `activity.jsonl` |
+| | `wb_tasks` | 成长任务 / 签到 / 成长连登 / 猫猫旅行 / Buddy 盲盒 |
+| | `wb_activity` | `activity.jsonl` 的一行形状、写入与「读今天」 |
 | I/O | `wb_api_auth` | 设备授权登录、续期 |
 | | `wb_api_billing` | 个人 / 企业两条计费路径（计费头与信封供 `wb_tasks` 复用） |
 | | `wb_api_chat` | 上游对话调用（线程 + 通道两阶段） |
-| | `wb_usage` | `usage.jsonl` 追加与聚合 |
+| | `wb_usage` | `usage.jsonl` 追加与读取（聚合在 TS） |
 | | `wb_models` | 上游模型目录的探测、解析与 `models.json` 缓存 |
 | 编排 | `wb_relay` | 一次对话请求的编排 + 出站形状归一（tools / stop / tool_choice / 显式思考档） |
 | | `wb_pool` | 选号顺序（积分到期时刻 / 优先级 / 加入时间 / 跳过额度标记） |
@@ -372,8 +374,9 @@ JSON 让用户抄进密码管理器，另一台设备把它贴回来，**不必�
 - 用量页**自己每 15 秒重读一次**本机流水（与 TBuddy 页顶栏同一个节奏），页面被 `KeepAlive` 缓存时暂停、切回来立即补读。只挂
   `onMounted` 的话，打开那一刻读到什么就一直是它 —— 清空流水后正好读到空文件，就会一直显示 0。
 - **取数与统计分开**：Rust 的 `wb_gateway_usage_rows` 只回窗口内的流水（本机 + 同步仓库里别的机器）与窗口起点 `since`，用量页
-  与「账号」栏都读它；分组 / 分桶 / 积分比率的语义在 `packages/usage` 的 `summarizeGatewayRows`（单测同目录），与 Rust 的
-  `wb_usage::summarize` 同口径 —— 改口径时两边一起看（界面走的是 TS 那份）。
+  与「账号」栏都读它；分组 / 分桶 / 积分比率的语义只在 `packages/usage` 的 `summarizeGatewayRows`（单测同目录）。
+  **Rust 侧不再算汇总**：原来那条 `wb_gateway_usage`（回整份 Summary）没有调用方，已随 `wb_usage::summarize` 一并删掉 ——
+  口径只有一份，不存在「两边一起改」。
 
 ### 积分明细弹层
 
@@ -467,11 +470,12 @@ JSON 让用户抄进密码管理器，另一台设备把它贴回来，**不必�
 - `apps/desktop/src-tauri/src/common.rs`（协议无关设施；`run_parallel` 是并行取数的通用工具）
 - `apps/desktop/src-tauri/src/http.rs`（流式接口；`TIMEOUT_RECEIVE` 15 秒是上游一发的接收超时）
 - `apps/desktop/src-tauri/src/paths.rs`（`gateway_dir` / `gateway-usage` / `gateway_activity_file` / `gateway_perks_file` 系列）
-- `apps/desktop/src-tauri/src/sync.rs`（网关流水的 git 写入 / 读取、按月分文件）
+- `apps/desktop/src-tauri/src/sync.rs`（git 基础设施 + 各域分片的写入 / 读取、按月分文件）
+- `apps/desktop/src-tauri/src/relay_core.rs`（两套网关共用的配置 / 密钥 / 启停 / 状态形状）
 - `apps/desktop/src-tauri/src/commands.rs`（`gateway_sync_publish` / `gateway_sync_pull`）
 - `apps/desktop/src-tauri/src/main.rs`（模块、managed state、命令注册）
-- `apps/desktop/src/renderer/src/components/gateway/{GatewayView,CreditsDialog,AccessDialog,AccountTransferDialog,PerksPane,PerksCreditsChart,UsagePane,RequestsPane,ModelsPane}.vue`
-- `apps/desktop/src/renderer/src/workbench/{gateway,sync-queue}.ts`
+- `apps/desktop/src/renderer/src/components/gateway/{GatewayView,AccountCards,CreditsDialog,AccessDialog,AccountTransferDialog,PerksPane,PerksCreditsChart,UsagePane,RequestsPane,ModelsPane}.vue`
+- `apps/desktop/src/renderer/src/workbench/{gateway,auto-sync,sync-queue}.ts`
 - `apps/desktop/src/renderer/src/stores/perks-auto.ts`（福利自动跑的后台节拍）
 - `packages/usage/src/{credit-expiry,growth-credits,gateway-usage,model-catalog}.ts`（到期档位 / 福利流水 / 用量汇总 / 模型目录排序的纯逻辑）
 - `packages/appearance/src/views.ts`（`gateway` 页签）

@@ -1,6 +1,6 @@
 import type { Result } from '@workbench/core'
 
-import type { GatewayUsageRow, GatewayUsageSummary } from './gateway'
+import type { GatewayUsageRow } from './gateway'
 import type { QoderAccess, QoderAccount, QoderAccountImport, QoderActivityRow, QoderClaimResult, QoderCredits, QoderEarningPoint, QoderLoginPoll, QoderLoginStart, QoderModelInfo, QoderPerksAutoConfig, QoderPerksAutoRun, QoderStatus, QoderTaskSnapshot, QoderUsageWindow } from '@/types'
 import { fail, ok } from '@workbench/core'
 import { errorText, invoke } from './bridge'
@@ -105,10 +105,6 @@ export function qoderRotateKey(): Promise<Result<string>> {
   return call('wb_qoder_rotate_key', {}, '重新生成密钥失败')
 }
 
-export function qoderUsage(days: number): Promise<Result<GatewayUsageSummary>> {
-  return call('wb_qoder_usage', { days }, '读取用量失败')
-}
-
 export function qoderUsageRows(days: number): Promise<Result<QoderUsageWindow>> {
   return call('wb_qoder_usage_rows', { days }, '读取用量失败')
 }
@@ -181,7 +177,6 @@ export const qoderApi = {
   qoderModelsRefresh,
   qoderAccess,
   qoderRotateKey,
-  qoderUsage,
   qoderUsageRows,
   qoderUsageRecent,
   qoderPerksStatus,

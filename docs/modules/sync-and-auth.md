@@ -2,9 +2,10 @@
 
 ## 约束
 
-关键落点：`apps/desktop/src-tauri/src/sync.rs`（git 操作）、`oauth.rs` / `http.rs` / `credentials.rs`（登录与凭据）、
-`packages/usage/src/token-usage.ts`、`sync-config.ts`、`theme.ts`、`appearance.ts`（纯口径）、
-`apps/desktop/src/renderer/src/workbench/` 下的 `index.ts` / `token.ts` / `auth.ts` / `state.ts`。
+关键落点：`apps/desktop/src-tauri/src/sync.rs`（git 操作与各域分片）、`sync_images.rs`（笔记图片）、`relay_core.rs`（两套网关的
+配置 / 密钥 / 启停）、`oauth.rs` / `http.rs` / `credentials.rs`（登录与凭据）、
+`packages/usage/src/token-usage.ts`、`packages/appearance/src/sync-config.ts`、`theme.ts`、`appearance.ts`（纯口径）、
+`apps/desktop/src/renderer/src/workbench/` 下的 `index.ts` / `token.ts` / `auto-sync.ts` / `auth.ts` / `state.ts`。
 
 调用 git 的方式（直启 `git.exe`、不经 `cmd /C`、带 `GIT_TERMINAL_PROMPT=0`、`-c core.quotepath=false` 与 `--no-pager`）
 是全局规则，见 [AGENTS.md](../../AGENTS.md) 第 1 节。三条各有理由：`GIT_TERMINAL_PROMPT=0`（子进程没终端可问，挂着只会等
@@ -35,7 +36,7 @@
 ### 同步仓库布局
 
 - 「一个功能一个目录、一台机器一份」：`token-usage/<设备id>.json` 是用量快照、`config/<设备id>.json` 是 `theme.json` 的整份
-  副本（见 [sync-config.ts](../../packages/usage/src/sync-config.ts)）、`gateway-usage/<设备id>/<YYYY-MM>.jsonl` 是网关请求
+  副本（见 [sync-config.ts](../../packages/appearance/src/sync-config.ts)）、`gateway-usage/<设备id>/<YYYY-MM>.jsonl` 是网关请求
   流水（一台机器一个目录、每月一个文件）、`etf/<设备id>.json` 是 ETF 份额 / 净值缓存（公开行情，读侧逐日并集，见
   [etf.md](etf.md)）、`activity/<设备id>.json` 是活跃度账本（日期 → 五类操作次数，只有计数、没有明细，读侧按天按来源求和，
   见 [home.md](home.md)）、`work-log/<设备id>.json` 是本机合并后的工作日志快照（条目 + 删除墓碑，读侧按 id 后写胜出，见
@@ -209,6 +210,9 @@
 
 - 一小时一轮的 token 用量同步在同一个 `enqueue` 里顺带调 `gateway_sync_publish`；网关用量页页首另有「同步」按钮
   （`gatewayUsageSync`）强制推一次。内容没变不产生提交。
+- **节流状态机只有一份**：用量 / 活跃度 / 网关流水三处都是「换仓库立刻跑、到点才跑、同一时刻只跑一条」，收在
+  `workbench/auto-sync.ts` 的 `createAutoSync`（`intervalMs` 一小时；网关那一路传 `shouldMark: r => r.ok`，失败不进窗口）。
+  手点的那一次（`now`）会等结果、**不**广播「同步完成」；后台那轮（`schedule`）跑完广播一次。新增同类同步别再抄一遍计时器。
 - 请求记录页有「机器」列（`UsageRow.machine`）；新流水记账时写主机名，旧流水在同步 / 读取时补（远端行缺这一项时用设备目录名）。
 - 清理历史只能先删本机 `usage.jsonl` 里那个月的行，再手工删仓库文件；只删仓库会被下一次同步写回。
 - 克隆、凭据、登录门禁与单写者布局全部沿用 Token 用量那一套；`gateway-usage/` 只由 `gateway_sync_publish` 写。
@@ -278,8 +282,8 @@ OAuth 应用构建期内置，所以使用者零配置；代价是**打包的人
                         网关请求流水的按月写入与读取（publish_gateway_usage / read_gateway_rows），
                         活跃度账本的推送与读取（publish_activity / read_activity_shards：
                         一台机器一份 activity/<设备id>.json，读侧跳过本机那份），
-                        以及笔记图片的上传与清理（同一个机制、另一个仓库：publish_image /
-                        list_images / delete_images —— 删图也是一次提交 + 一次推送），
+                        以及笔记图片的上传与清理（sync_images.rs；同一个机制、另一个仓库：
+                        publish_image / list_images / delete_images —— 删图也是一次提交 + 一次推送），
                         还有笔记本身的同步（sync_notes：没有克隆目录，就在用户那个笔记
                         文件夹里就地跑 git，冲突时中止 rebase 而不替用户挑边）与那条只读探测
                         repo_state（那个文件夹有没有仓库、origin 是谁 —— 同步到哪儿由它决定，

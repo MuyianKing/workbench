@@ -129,8 +129,8 @@ const bodyRest = computed(() => {
             '--resizer-inset': 'calc((var(--sp-2) - var(--card-gap, 10px)) / 2)',
             '--tree-w': `${settings.themeConfig.gitFilesWidth}px`,
           }"
-          @move="settings.setGitFilesWidth"
-          @end="() => void settings.commitGitFilesWidth()"
+          @move="width => settings.setThemeWidth('gitFilesWidth', width)"
+          @end="() => void settings.commitThemeWidth('gitFilesWidth')"
         />
       </div>
       <p v-else-if="!store.activeLoading" class="diff-empty">

@@ -312,9 +312,6 @@ importers:
       '@workbench/core':
         specifier: workspace:*
         version: link:../core
-      '@workbench/video':
-        specifier: workspace:*
-        version: link:../video
     devDependencies:
       vitest:
         specifier: ^5.0.3
@@ -416,9 +413,6 @@ importers:
 
   packages/usage:
     dependencies:
-      '@workbench/appearance':
-        specifier: workspace:*
-        version: link:../appearance
       '@workbench/core':
         specifier: workspace:*
         version: link:../core
@@ -441,6 +435,9 @@ importers:
 
   packages/video:
     dependencies:
+      '@workbench/appearance':
+        specifier: workspace:*
+        version: link:../appearance
       '@workbench/notes':
         specifier: workspace:*
         version: link:../notes

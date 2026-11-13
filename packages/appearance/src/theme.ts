@@ -1,5 +1,4 @@
 import type { AppearanceSettings } from './appearance'
-import { clampVideoFloatHeight, clampVideoFloatPercent, clampVideoFloatWidth, VIDEO_FLOAT_SIZE_DEFAULT, VIDEO_FLOAT_X_DEFAULT, VIDEO_FLOAT_Y_DEFAULT } from '@workbench/video'
 /**
  * 主题文件（theme.json）的数据结构、收敛规则与纯计算：**外观设置 + 首页布局**。
  *
@@ -24,6 +23,7 @@ import { clampVideoFloatHeight, clampVideoFloatPercent, clampVideoFloatWidth, VI
  * 边界与吸附规则，否则一个手改过的 theme.json 就能把栏宽撑爆、或者拖出一个负高度。
  */
 import { DEFAULT_APPEARANCE, sanitizeAppearanceSettings } from './appearance'
+import { clampVideoFloatHeight, clampVideoFloatPercent, clampVideoFloatWidth, VIDEO_FLOAT_SIZE_DEFAULT, VIDEO_FLOAT_X_DEFAULT, VIDEO_FLOAT_Y_DEFAULT } from './video-float'
 
 /** 首页九块卡片的稳定 id；数组顺序也是同栏同行时的兜底排序 */
 export const HOME_CARD_IDS = [
@@ -281,83 +281,42 @@ export const CARD_HEIGHT_MIN: Record<HomeCardId, number> = {
 export const ROW_HEIGHT_MIN_DEFAULT = Math.min(...Object.values(CARD_HEIGHT_MIN))
 
 /**
- * 笔记页左栏（目录树）的宽度区间。
+ * 各页可拖栏位的宽度档位（逻辑像素）。**一处定义**：`sanitizeTheme`、`clampWidth` 与界面的
+ * 拖动上下限都从这里取 —— 加一个可拖的栏位只要在这张表里补一行，不再改五处。
  *
- * 下限要放得下「笔记本名字 + 右键菜单的入口」，上限只防手改数据把正文挤没。
- * 它与首页那两栏同一个存放处（theme.json）：都是「界面长什么样」，也一起被同步带走。
- * 默认 398 为按当前布局固化。
+ * 下限要放得下那一栏的内容（树行、路径、标题），上限只防手改数据把正文 / 播放器 / 补丁区
+ * 挤没。默认值按当前布局固化：改成可拖之前那条定宽，或者宽窗口下原本实际显示的宽度。
  */
-export const NOTE_TREE_WIDTH_MIN = 180
-export const NOTE_TREE_WIDTH_MAX = 520
-export const NOTE_TREE_WIDTH_DEFAULT = 398
+export const WIDTH_FIELDS = {
+  /** 笔记页左栏（目录树）：放得下「笔记本名字 + 右键菜单的入口」。默认 398 */
+  noteTreeWidth: { min: 180, max: 520, def: 398 },
+  /** 笔记页右栏（大纲）：一行标题（再多靠省略号）。默认 224 */
+  noteRailWidth: { min: 160, max: 420, def: 224 },
+  /** 视频页左栏（目录树）：树行与底部那行。默认 291（原定宽 264） */
+  videoTreeWidth: { min: 180, max: 520, def: 291 },
+  /** AI 助手页左栏（项目 → 会话）：目录名 + 悬停按钮。默认 321 */
+  aiTreeWidth: { min: 180, max: 520, def: 321 },
+  /** 知识库页左栏（条目 / 原始数据）：树行 + 切换。默认 353 */
+  kbTreeWidth: { min: 180, max: 520, def: 353 },
+  /** 邮箱页左栏（收件箱清单）：「发件人 + 主题 + 日期」一行的开头。默认 331 */
+  mailListWidth: { min: 220, max: 520, def: 331 },
+  /** Git 页左栏（文件树） */
+  gitTreeWidth: { min: 180, max: 520, def: 300 },
+  /** Git 页中栏（提交列表） */
+  gitHistoryWidth: { min: 260, max: 520, def: 380 },
+  /** Git 页右栏里的改动文件清单 */
+  gitFilesWidth: { min: 160, max: 400, def: 240 },
+} as const
 
-/**
- * 笔记页右栏（大纲）的宽度区间。
- *
- * 它是正文旁边的一条目录，不是第二块正文：下限要放得下一行标题（再多靠省略号），
- * 上限只防手改数据把正文挤没。默认 224 就是改成可拖之前那条定宽。
- */
-export const NOTE_RAIL_WIDTH_MIN = 160
-export const NOTE_RAIL_WIDTH_MAX = 420
-export const NOTE_RAIL_WIDTH_DEFAULT = 224
+/** 可拖栏位的名字（theme.json 里同名字段） */
+export type WidthField = keyof typeof WIDTH_FIELDS
 
-/**
- * 视频页左栏（目录树）的宽度区间。
- *
- * 下限要放得下树行与底部「目录名 + 计数 + 按钮」那行，上限只防手改数据把播放器挤没。
- * 默认 291 为按当前布局固化（原来是「可以拖」之前的定宽 264）。
- */
-export const VIDEO_TREE_WIDTH_MIN = 180
-export const VIDEO_TREE_WIDTH_MAX = 520
-export const VIDEO_TREE_WIDTH_DEFAULT = 291
-
-/**
- * AI 助手页左栏（项目 → 会话那棵树）的宽度区间。
- *
- * 下限要放得下「目录名 + 悬停才出来的那颗按钮」，上限只防手改数据把对话挤没。
- * 默认 321 为按当前布局固化。
- */
-export const AI_TREE_WIDTH_MIN = 180
-export const AI_TREE_WIDTH_MAX = 520
-export const AI_TREE_WIDTH_DEFAULT = 321
-
-/**
- * 知识库页左栏（条目 / 原始数据清单）的宽度区间。
- *
- * 下限要放得下树行与「条目 / 原始数据」那个切换，上限只防手改数据把阅读区挤没。
- * 与笔记 / AI 树同一个存放处（theme.json）、同一套做法。默认 353 为按当前布局固化。
- */
-export const KB_TREE_WIDTH_MIN = 180
-export const KB_TREE_WIDTH_MAX = 520
-export const KB_TREE_WIDTH_DEFAULT = 353
-
-/**
- * 邮箱页左栏（收件箱清单）的宽度区间。
- *
- * 下限要放得下「发件人 + 主题 + 日期」一行的开头，上限只防手改数据把阅读区挤没。
- * 与笔记 / AI / 知识库树同一个存放处（theme.json）、同一套做法。默认 331 为按当前布局固化。
- */
-export const MAIL_LIST_WIDTH_MIN = 220
-export const MAIL_LIST_WIDTH_MAX = 520
-export const MAIL_LIST_WIDTH_DEFAULT = 331
-
-/**
- * Git 页三处栏宽：左栏文件树 / 中栏提交列表 / 右栏里的改动文件清单。
- *
- * 三者都住 theme.json（与笔记 / 视频 / 邮箱页同一套做法），拖动时只改本地跟手、松手落盘。
- * 下限保证路径与操作还能读，上限只防手改数据把补丁区挤没。
- * 默认值是原来那套 `minmax(220px,300px) / minmax(300px,380px) / minmax(180px,240px)` 的上限，
- * 也就是在宽窗口下原本实际显示的宽度。
- */
-export const GIT_TREE_WIDTH_MIN = 180
-export const GIT_TREE_WIDTH_MAX = 520
-export const GIT_TREE_WIDTH_DEFAULT = 300
-export const GIT_HISTORY_WIDTH_MIN = 260
-export const GIT_HISTORY_WIDTH_MAX = 520
-export const GIT_HISTORY_WIDTH_DEFAULT = 380
-export const GIT_FILES_WIDTH_MIN = 160
-export const GIT_FILES_WIDTH_MAX = 400
-export const GIT_FILES_WIDTH_DEFAULT = 240
+/** 收敛某个栏位的宽度；非法值回到这一档的默认宽度 */
+export function clampWidth(field: WidthField, value: unknown): number {
+  const { min, max, def } = WIDTH_FIELDS[field]
+  const base = typeof value === 'number' && Number.isFinite(value) ? Math.round(value) : def
+  return Math.min(max, Math.max(min, base))
+}
 
 /**
  * 默认布局（按用户日常调好的那份首页布局固化：2026-10 从安装版的 theme.json 逐字段抄过来的，
@@ -409,22 +368,22 @@ export const DEFAULT_THEME: ThemeConfig = {
       ],
     },
   ],
-  noteTreeWidth: NOTE_TREE_WIDTH_DEFAULT,
-  noteRailWidth: NOTE_RAIL_WIDTH_DEFAULT,
+  noteTreeWidth: WIDTH_FIELDS.noteTreeWidth.def,
+  noteRailWidth: WIDTH_FIELDS.noteRailWidth.def,
   videoTreeCollapsed: false,
-  videoTreeWidth: VIDEO_TREE_WIDTH_DEFAULT,
+  videoTreeWidth: WIDTH_FIELDS.videoTreeWidth.def,
   // 画中画小窗：还没拖过就落在右上角（渲染时按视口与小窗尺寸 clamp）、默认尺寸
   videoFloatX: VIDEO_FLOAT_X_DEFAULT,
   videoFloatY: VIDEO_FLOAT_Y_DEFAULT,
   videoFloatW: VIDEO_FLOAT_SIZE_DEFAULT.width,
   videoFloatH: VIDEO_FLOAT_SIZE_DEFAULT.height,
-  aiTreeWidth: AI_TREE_WIDTH_DEFAULT,
+  aiTreeWidth: WIDTH_FIELDS.aiTreeWidth.def,
   aiTreeCollapsed: false,
-  kbTreeWidth: KB_TREE_WIDTH_DEFAULT,
-  mailListWidth: MAIL_LIST_WIDTH_DEFAULT,
-  gitTreeWidth: GIT_TREE_WIDTH_DEFAULT,
-  gitHistoryWidth: GIT_HISTORY_WIDTH_DEFAULT,
-  gitFilesWidth: GIT_FILES_WIDTH_DEFAULT,
+  kbTreeWidth: WIDTH_FIELDS.kbTreeWidth.def,
+  mailListWidth: WIDTH_FIELDS.mailListWidth.def,
+  gitTreeWidth: WIDTH_FIELDS.gitTreeWidth.def,
+  gitHistoryWidth: WIDTH_FIELDS.gitHistoryWidth.def,
+  gitFilesWidth: WIDTH_FIELDS.gitFilesWidth.def,
   cards: {
     activity: { row: 'row-1', order: 0, hidden: false },
     quick: { row: 'row-2', order: 0, hidden: false },
@@ -732,69 +691,6 @@ export function removeColumn(
   return { columns: pruneEmptyRows(next, cards), cards }
 }
 
-/** 收敛笔记页左栏宽度；非法值回到默认宽度 */
-export function clampNoteTreeWidth(value: unknown): number {
-  const fallback = NOTE_TREE_WIDTH_DEFAULT
-  const base = typeof value === 'number' && Number.isFinite(value) ? Math.round(value) : fallback
-  return Math.min(NOTE_TREE_WIDTH_MAX, Math.max(NOTE_TREE_WIDTH_MIN, base))
-}
-
-/** 收敛笔记页右栏（大纲）宽度（与左栏树同一条规矩）；非法值回到默认宽度 */
-export function clampNoteRailWidth(value: unknown): number {
-  const fallback = NOTE_RAIL_WIDTH_DEFAULT
-  const base = typeof value === 'number' && Number.isFinite(value) ? Math.round(value) : fallback
-  return Math.min(NOTE_RAIL_WIDTH_MAX, Math.max(NOTE_RAIL_WIDTH_MIN, base))
-}
-
-/** 收敛视频页左栏宽度（与笔记树同一条规矩）；非法值回到默认宽度 */
-export function clampVideoTreeWidth(value: unknown): number {
-  const fallback = VIDEO_TREE_WIDTH_DEFAULT
-  const base = typeof value === 'number' && Number.isFinite(value) ? Math.round(value) : fallback
-  return Math.min(VIDEO_TREE_WIDTH_MAX, Math.max(VIDEO_TREE_WIDTH_MIN, base))
-}
-
-/** 收敛 AI 助手页左栏宽度（与笔记 / 视频树同一条规矩）；非法值回到默认宽度 */
-export function clampAiTreeWidth(value: unknown): number {
-  const fallback = AI_TREE_WIDTH_DEFAULT
-  const base = typeof value === 'number' && Number.isFinite(value) ? Math.round(value) : fallback
-  return Math.min(AI_TREE_WIDTH_MAX, Math.max(AI_TREE_WIDTH_MIN, base))
-}
-
-/** 收敛知识库页左栏宽度（与笔记 / 视频树同一条规矩）；非法值回到默认宽度 */
-export function clampKbTreeWidth(value: unknown): number {
-  const fallback = KB_TREE_WIDTH_DEFAULT
-  const base = typeof value === 'number' && Number.isFinite(value) ? Math.round(value) : fallback
-  return Math.min(KB_TREE_WIDTH_MAX, Math.max(KB_TREE_WIDTH_MIN, base))
-}
-
-/** 收敛邮箱页左栏宽度（与笔记 / 视频树同一条规矩）；非法值回到默认宽度 */
-export function clampMailListWidth(value: unknown): number {
-  const fallback = MAIL_LIST_WIDTH_DEFAULT
-  const base = typeof value === 'number' && Number.isFinite(value) ? Math.round(value) : fallback
-  return Math.min(MAIL_LIST_WIDTH_MAX, Math.max(MAIL_LIST_WIDTH_MIN, base))
-}
-
-/** 收敛 Git 页左栏（文件树）宽度；非法值回到默认宽度 */
-export function clampGitTreeWidth(value: unknown): number {
-  const fallback = GIT_TREE_WIDTH_DEFAULT
-  const base = typeof value === 'number' && Number.isFinite(value) ? Math.round(value) : fallback
-  return Math.min(GIT_TREE_WIDTH_MAX, Math.max(GIT_TREE_WIDTH_MIN, base))
-}
-
-/** 收敛 Git 页中栏（提交列表）宽度；非法值回到默认宽度 */
-export function clampGitHistoryWidth(value: unknown): number {
-  const fallback = GIT_HISTORY_WIDTH_DEFAULT
-  const base = typeof value === 'number' && Number.isFinite(value) ? Math.round(value) : fallback
-  return Math.min(GIT_HISTORY_WIDTH_MAX, Math.max(GIT_HISTORY_WIDTH_MIN, base))
-}
-
-/** 收敛 Git 页改动文件清单宽度；非法值回到默认宽度 */
-export function clampGitFilesWidth(value: unknown): number {
-  const fallback = GIT_FILES_WIDTH_DEFAULT
-  const base = typeof value === 'number' && Number.isFinite(value) ? Math.round(value) : fallback
-  return Math.min(GIT_FILES_WIDTH_MAX, Math.max(GIT_FILES_WIDTH_MIN, base))
-}
-
 function finiteOr(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback
 }
@@ -1025,30 +921,30 @@ export function sanitizeTheme(raw: unknown): ThemeConfig {
     cardGap: clampCardGap(base.cardGap),
     columns: kept,
     // 后加的字段：老主题文件里没有，补默认宽度（与 appearance 同理，不能因此去动上面的版本判定）
-    noteTreeWidth: clampNoteTreeWidth(base.noteTreeWidth),
+    noteTreeWidth: clampWidth('noteTreeWidth', base.noteTreeWidth),
     // 同上：老主题文件里没有，补默认宽度（改成可拖之前的那条定宽）
-    noteRailWidth: clampNoteRailWidth(base.noteRailWidth),
+    noteRailWidth: clampWidth('noteRailWidth', base.noteRailWidth),
     // 同上：老主题文件里没有，默认不收起
     videoTreeCollapsed: base.videoTreeCollapsed === true,
     // 同上：老主题文件里没有，补默认宽度
-    videoTreeWidth: clampVideoTreeWidth(base.videoTreeWidth),
+    videoTreeWidth: clampWidth('videoTreeWidth', base.videoTreeWidth),
     // 同上：老主题文件里没有，小窗回到默认位置（右上角）与默认尺寸
     videoFloatX: clampVideoFloatPercent(base.videoFloatX, VIDEO_FLOAT_X_DEFAULT),
     videoFloatY: clampVideoFloatPercent(base.videoFloatY, VIDEO_FLOAT_Y_DEFAULT),
     videoFloatW: clampVideoFloatWidth(base.videoFloatW),
     videoFloatH: clampVideoFloatHeight(base.videoFloatH),
     // 同上：老主题文件里没有，补默认宽度
-    aiTreeWidth: clampAiTreeWidth(base.aiTreeWidth),
+    aiTreeWidth: clampWidth('aiTreeWidth', base.aiTreeWidth),
     // 同上：老主题文件里没有，默认不收起
     aiTreeCollapsed: base.aiTreeCollapsed === true,
     // 同上：老主题文件里没有，补默认宽度
-    kbTreeWidth: clampKbTreeWidth(base.kbTreeWidth),
+    kbTreeWidth: clampWidth('kbTreeWidth', base.kbTreeWidth),
     // 同上：老主题文件里没有，补默认宽度
-    mailListWidth: clampMailListWidth(base.mailListWidth),
+    mailListWidth: clampWidth('mailListWidth', base.mailListWidth),
     // Git 页三处栏宽：老主题文件里没有，补默认宽度
-    gitTreeWidth: clampGitTreeWidth(base.gitTreeWidth),
-    gitHistoryWidth: clampGitHistoryWidth(base.gitHistoryWidth),
-    gitFilesWidth: clampGitFilesWidth(base.gitFilesWidth),
+    gitTreeWidth: clampWidth('gitTreeWidth', base.gitTreeWidth),
+    gitHistoryWidth: clampWidth('gitHistoryWidth', base.gitHistoryWidth),
+    gitFilesWidth: clampWidth('gitFilesWidth', base.gitFilesWidth),
     cards: normalizeOrder(keepOneVisible(cards)),
     // 外观是后加的字段：老主题文件里没有，缺了就补默认（**不能**因为它去动上面的版本判定，
     // 否则升级一次就会把用户的布局整份清掉）

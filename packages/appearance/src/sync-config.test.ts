@@ -1,4 +1,3 @@
-import { COLUMN_WIDTH_MAX, DEFAULT_THEME, sanitizeTheme, THEME_VERSION } from '@workbench/appearance'
 /**
  * 仓库里 `config/<设备id>.json` 的读写口径。
  *
@@ -8,6 +7,7 @@ import { COLUMN_WIDTH_MAX, DEFAULT_THEME, sanitizeTheme, THEME_VERSION } from '@
  */
 import { describe, expect, it } from 'vitest'
 import { captureThemeFile, sanitizeThemeFile } from './sync-config'
+import { COLUMN_WIDTH_MAX, DEFAULT_THEME, sanitizeTheme, THEME_VERSION } from './theme'
 
 describe('打包一份要推上去的配置', () => {
   it('就是本机 theme.json 的整份内容加一层设备信封', () => {

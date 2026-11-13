@@ -4,7 +4,8 @@
 
 关键落点：`apps/desktop/src-tauri/src/notes.rs`（列目录 / 读 / 写 / 新建 / 改名 / 移动 / 删除）、
 `apps/desktop/src-tauri/src/md_window.rs`（资源管理器「打开方式」的独立编辑窗口）、
-`apps/desktop/src-tauri/src/sync.rs`（图片上传与笔记同步）、`apps/desktop/src/renderer/src/stores/notes.ts`
+`apps/desktop/src-tauri/src/sync.rs`（git 基础设施 + 笔记同步）、`apps/desktop/src-tauri/src/sync_images.rs`（图片上传 /
+列清单 / 删图）、`apps/desktop/src/renderer/src/stores/notes.ts`
 （`stores/notes.ts`）、
 `apps/desktop/src/renderer/src/components/` 下的 `NoteTree.vue`（左栏树）、`NoteTreeMenu.vue`（树右键菜单）、
 `NoteEditor.vue`（Vditor 正文）、`OverlayScrollbar.vue`（正文悬浮滚动条）、`NoteContextMenu.vue`（正文右键菜单）、
@@ -195,7 +196,7 @@
   `<images>/<本机设备>/<笔记本>/<文件名>`（第一层是 [note-image.ts](../../packages/notes/src/note-image.ts) 的
   `NOTE_IMAGE_DIR`，不给用户配），后两层由 `imageScopeDir` 现算 —— 上传 / 列清单 / 删图三条通道用同一个算法，
   **别在某处另写路径拼法**（这三层也是素材管理成立的前提）。链路：`uploadImages` → `workbench/note.ts` 的
-  `uploadNoteImage` → `sync.rs` 的 `publish_image`。
+  `uploadNoteImage` → `sync_images.rs` 的 `publish_image`。
 - 七条不能破：
   1. **`upload.handler` 必须配着**：不配 Vditor 会把图片读成 base64 内联进正文，几篇带图就把 `.md` 撑到几兆；
   2. **handler 返回字符串等于报错**，成功必须返回 `null` 并自己 `insertValue`；
@@ -302,7 +303,7 @@ notes store 里只在「重读这个文件夹」几处与每次同步后探一�
 - **底栏**：左边「N 字」（**非空白字符数，含 markdown 记号** —— 正文本身，不是渲染结果）+ `Markdown`；右端是保存
   状态与大纲开关（无边框改版后从标题栏挪下来），失败改显原因与「重试」。整条标拖动区（按钮自己不拖）。
 - **左侧大纲**：目录与正文两列（`.md-body`），左栏 `.md-rail` **默认 320px、可拖**（这扇窗不接主题、不写
-  theme.json；宽度只活在本次窗口，关窗回 320。区间沿用 `noteRailWidth` 的 160–420，见 `clampNoteRailWidth`）。
+  theme.json；宽度只活在本次窗口，关窗回 320。区间沿用 `noteRailWidth` 的 160–420，见 `clampWidth('noteRailWidth', …)`）。
   拖右缘高热区改宽，拖动挂 `body.is-resizing-md-rail`（这扇窗没引 global.css，光标与选择由 markdown.html 的内联
   样式兜住）；热区落在栏右内边距里、是栏的子元素，静止只露正中小竖条。笔记页那条宽度是 theme.json 的
   `noteRailWidth`，两边互不影响。条目底子与笔记页 `.notes__rail` 同一套（各自 scoped，**改条目样式要两边一起改**：

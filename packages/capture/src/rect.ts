@@ -115,8 +115,3 @@ export function rectsEqual(a: Rect, b: Rect): boolean {
 export function rectSizeText(rect: Rect): string {
   return `${Math.round(rect.width)} × ${Math.round(rect.height)}`
 }
-
-/** 坐标标签，如 `(1024, 768)` */
-export function rectOriginText(rect: Rect): string {
-  return `(${Math.round(rect.x)}, ${Math.round(rect.y)})`
-}

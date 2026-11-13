@@ -1,9 +1,9 @@
 import type { ActivityBreakdown, ActivityKind, ActivityShard, ActivityView } from '@workbench/core'
 import { ACTIVITY_SHARD_VERSION, mergeActivityBreakdowns, pruneDays, sanitizeActivityShard, totalOf } from '@workbench/core'
+import { createAutoSync } from './auto-sync'
 import { invoke } from './bridge'
 import { emit } from './events'
 import * as state from './state'
-import { enqueue } from './sync-queue'
 import { localDevice } from './token'
 
 /**
@@ -29,21 +29,21 @@ export function recordActivity(kind: ActivityKind): void {
 }
 
 /**
- * 自动同步的间隔：与用量那一路同一档（一小时）。
+ * 自动同步的节流：与用量那一路同一档（一小时）。
  *
  * 每记一笔就推一次会让仓库里堆满提交（写笔记一个下午就有几十笔）；
  * 一小时一轮足够「两台机器合起来看」，临时想立刻看到就重开首页（启动那一次不受节流限制）。
+ * 间隔 / 换仓库即失效 / 同一时刻只跑一条这三条口径与用量、网关流水共用 `createAutoSync`。
  */
-const SYNC_INTERVAL_MS = 60 * 60_000
+const syncGate = createAutoSync({
+  intervalMs: 60 * 60_000,
+  settled: () => emit('activityChanged', null),
+})
 
 /** 别的机器那份（已收敛、已修剪）；本机文件里不掺它，只在交给界面时合并 */
 let remoteDays: ActivityBreakdown = {}
 /** 上面那份读自哪个仓库：换仓库要重读，没配仓库时清空 */
 let remoteRepo = ''
-let lastSyncAt = 0
-let lastSyncRepo = ''
-/** 正在排 / 正在跑的那一轮；同一时刻只排一条，免得一次操作刷出几次推送 */
-let pending: Promise<void> | null = null
 
 /**
  * 交给界面的一份活跃度：本机账本 + 同步仓库里别的机器那份（按天按来源求和）。
@@ -103,8 +103,7 @@ async function readRemote(repo: string): Promise<void> {
 function resetRemote(): void {
   remoteDays = {}
   remoteRepo = ''
-  lastSyncAt = 0
-  lastSyncRepo = ''
+  syncGate.reset()
 }
 
 /**
@@ -114,19 +113,11 @@ function resetRemote(): void {
  * 读到就还能看到别的机器的最新数据。跑完无论成败都广播一次：新读回的分片立刻上屏。
  */
 function scheduleSync(repo: string): void {
-  if (pending)
-    return
-  if (lastSyncRepo === repo && Date.now() - lastSyncAt < SYNC_INTERVAL_MS)
-    return
-
-  pending = enqueue(async () => {
+  syncGate.schedule(repo, async () => {
     try {
       const { id } = await localDevice()
-      if (!id) {
-        lastSyncAt = Date.now()
-        lastSyncRepo = repo
+      if (!id)
         return
-      }
       await invoke('activity_sync_publish', {
         repo,
         device: id,
@@ -138,14 +129,7 @@ function scheduleSync(repo: string): void {
     }
 
     await readRemote(repo)
-    lastSyncAt = Date.now()
-    lastSyncRepo = repo
   })
-    .catch(() => undefined)
-    .finally(() => {
-      pending = null
-      emit('activityChanged', null)
-    })
 }
 
 /** 推上去的永远只有本机账本 —— 别的机器那份只在内存里合并，写回去就会互相翻倍 */

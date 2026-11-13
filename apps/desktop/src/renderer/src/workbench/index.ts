@@ -26,7 +26,7 @@ import { projectApi } from './api-project'
 import { syncApi, syncRepo } from './api-sync'
 import { openDialog, saveDialog, syncSystemIntegration, systemApi } from './api-system'
 import * as auth from './auth'
-import { hasTauri, listen, notPorted } from './bridge'
+import { hasTauri, listen } from './bridge'
 import * as design from './design'
 import { emit } from './events'
 import * as events from './events'
@@ -261,32 +261,33 @@ const domainsApi = {
   authLogout: (provider: AuthProvider) => auth.logout(provider),
 } as Partial<WorkbenchApi>
 
-function createApi(): WorkbenchApi {
-  const implemented = {
-    ...gatewayApi,
-    ...qoderApi,
-    ...syncApi,
-    ...projectApi,
-    ...domainsApi,
-    ...videoWindowApi,
-    ...markdownWindowApi,
-    ...backgroundApi,
-    ...systemApi,
-    ...eventsApi,
-  } as unknown as WorkbenchApi
+const implementedApi = {
+  ...gatewayApi,
+  ...qoderApi,
+  ...syncApi,
+  ...projectApi,
+  ...domainsApi,
+  ...videoWindowApi,
+  ...markdownWindowApi,
+  ...backgroundApi,
+  ...systemApi,
+  ...eventsApi,
+}
 
-  /**
-   * 未实现的通道统一兜底。`versions` 这类属性值已在上面给出，所以这里只会接住「方法」；
-   * `on*` 订阅也已显式列出，不会被当成 Promise 返回。
-   */
-  return new Proxy(implemented, {
-    get(target, prop, receiver) {
-      const value = Reflect.get(target, prop, receiver)
-      if (value !== undefined || typeof prop !== 'string')
-        return value
-      return () => notPorted(prop)
-    },
-  })
+/**
+ * 通道覆盖的**编译期**闸：`WorkbenchApi` 里有哪个通道没被上面装配进来，这里就报错并把名字列出来。
+ *
+ * 以前靠一层 Proxy 在运行时兜底（缺的通道返回「尚未移植」）—— 那层兜底有两个毛病：
+ * 漏实现要到运行时才发现；而且它给 `then` 也编了一个函数，`await window.workbench`
+ * 会被当成 thenable 永远不落地。现在缺通道是编译错误，运行期只剩真实实现。
+ */
+type MissingChannels = Exclude<keyof WorkbenchApi, keyof typeof implementedApi>
+const channelsCovered: [MissingChannels] extends [never] ? true : ['未实现的通道', MissingChannels] = true
+
+function createApi(): WorkbenchApi {
+  // 断言只在上面那道编译期检查通过之后才成立（缺通道会先在 typescript 里报错）
+  void channelsCovered
+  return implementedApi as unknown as WorkbenchApi
 }
 
 /** 只在 Tauri 里接管；浏览器预览（vite.preview）下没有后端，保持 undefined 让调用方走退化路径 */

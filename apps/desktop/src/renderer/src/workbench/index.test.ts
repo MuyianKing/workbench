@@ -68,8 +68,8 @@ async function flush(): Promise<void> {
 /**
  * 起一遍适配层，装好 `window.workbench`。
  *
- * 返回值只给类型看：**绝不能 `await` 这个 API 对象** —— 它是个 Proxy，未移植的通道
- * 一律回 `notPorted`，连 `.then` 都能取到一个函数，于是 `await` 会把它当 thenable 永远等下去。
+ * 返回值只给类型看：接口对象本身不是 Promise（缺通道在装配时就是编译错误，
+ * 运行期不再有「尚未移植」的兜底），要等的是某条通道的返回值。
  */
 async function boot(account: AccountProfile | null): Promise<void> {
   vi.resetModules()

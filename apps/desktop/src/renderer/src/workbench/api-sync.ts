@@ -2,7 +2,7 @@ import type { WorkbenchApi } from '@/types'
 import { fail, ok } from '@workbench/core'
 import { guard } from './bridge'
 import * as etf from './etf'
-import { gatewayUsage, gatewayUsageRecent, gatewayUsageRows, pullGatewayUsage, syncGatewayUsage } from './gateway'
+import { gatewayUsageRecent, gatewayUsageRows, pullGatewayUsage, syncGatewayUsage } from './gateway'
 import { publishQoderEarnings, pullQoderEarnings, qoderEarnings } from './qoder'
 import * as state from './state'
 import { getTokenUsage, getTokenUsageSnapshot, listSyncDevices, localDevice, syncThemeConfig, syncTokenUsage } from './token'
@@ -41,10 +41,6 @@ async function gatewayContext(): Promise<{ repo: string, device: string }> {
 /** 网关流水 / 领取账本 / 用量统计 / ETF 缓存这几组「跟着同步仓库走」的通道 */
 export const syncApi = {
   // 网关流水：仓库与设备 id 与 token 同步同一个门禁；空仓库时只读本机
-  gatewayUsage: async (days: number) => {
-    const { repo, device } = await gatewayContext()
-    return gatewayUsage(days, repo, device)
-  },
   gatewayUsageRows: async (days: number) => {
     const { repo, device } = await gatewayContext()
     return gatewayUsageRows(days, repo, device)

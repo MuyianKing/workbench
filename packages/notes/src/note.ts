@@ -106,10 +106,6 @@ export const NOTE_DEFAULT_NAMES: Record<NoteKind, string> = {
   note: '新建笔记',
 }
 
-export function isNoteKind(value: unknown): value is NoteKind {
-  return typeof value === 'string' && (NOTE_KINDS as readonly string[]).includes(value)
-}
-
 // ---------- 路径 ----------
 
 /**

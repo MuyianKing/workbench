@@ -322,8 +322,8 @@ function openWritten(rel: string): void {
         <PanelResizer
           :width="settings.themeConfig.kbTreeWidth"
           body-class="is-resizing-kb-tree"
-          @move="settings.setKbTreeWidth"
-          @end="() => void settings.commitKbTreeWidth()"
+          @move="width => settings.setThemeWidth('kbTreeWidth', width)"
+          @end="() => void settings.commitThemeWidth('kbTreeWidth')"
         />
 
         <section class="kb-view__right panel">

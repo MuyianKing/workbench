@@ -38,9 +38,6 @@ export const PROJECT_COLOR_LABELS: Record<ProjectColorPreset, string> = {
   info: '信息',
 }
 
-/** 自定义色在界面上的名字 */
-export const PROJECT_COLOR_CUSTOM_LABEL = '自定义'
-
 const PRESET_NAMES: readonly string[] = PROJECT_COLOR_PRESETS
 
 export function isProjectColorPreset(value: unknown): value is ProjectColorPreset {

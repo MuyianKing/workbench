@@ -160,9 +160,6 @@ export interface TokenUsageResult {
   sync: TokenSyncStatus
 }
 
-/** token-usage.json 与 workbench-data.json 同目录,文件名在这里当唯一口径 */
-export const TOKEN_USAGE_FILE_NAME = 'token-usage.json'
-
 /** 同步仓库地址的长度上限:git 远程地址远短于此,超长多半是贴错了东西 */
 export const TOKEN_SYNC_REPO_MAX_LENGTH = 300
 

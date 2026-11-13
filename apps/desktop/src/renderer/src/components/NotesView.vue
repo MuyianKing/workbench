@@ -383,13 +383,13 @@ function onRailResize(event: PointerEvent): void {
     start: { x: event.clientX, y: event.clientY },
     bodyClass: 'is-resizing-notes-rail',
     onMove: (moveEvent, start) =>
-      settings.setNoteRailWidth(startWidth - (moveEvent.clientX - start.x)),
+      settings.setThemeWidth('noteRailWidth', startWidth - (moveEvent.clientX - start.x)),
     onEnd: (_last, cancelled) => {
       railResizing.value = false
       if (cancelled)
-        settings.setNoteRailWidth(startWidth)
+        settings.setThemeWidth('noteRailWidth', startWidth)
       else
-        void settings.commitNoteRailWidth()
+        void settings.commitThemeWidth('noteRailWidth')
     },
   })
 }
@@ -607,8 +607,8 @@ function onWindowFocus(): void {
       <PanelResizer
         :width="settings.themeConfig.noteTreeWidth"
         body-class="is-resizing-notes-tree"
-        @move="settings.setNoteTreeWidth"
-        @end="() => void settings.commitNoteTreeWidth()"
+        @move="width => settings.setThemeWidth('noteTreeWidth', width)"
+        @end="() => void settings.commitThemeWidth('noteTreeWidth')"
       />
 
       <section class="notes__editor panel" :style="editorStyle">

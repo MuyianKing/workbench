@@ -205,8 +205,3 @@ export async function logout(provider: AuthProvider): Promise<Result<null>> {
     state.setAccount(null)
   return ok(null)
 }
-
-/** 当前保存的账号资料（不做任何网络或凭据访问） */
-export function currentAccount(): AccountProfile | null {
-  return state.account()
-}

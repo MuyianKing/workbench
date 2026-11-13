@@ -284,8 +284,8 @@ function onBranchCommand(name: string): void {
           body-class="is-resizing-git-pane"
           title="拖动调整文件树宽度"
           :style="{ '--resizer-inset': '0px', '--tree-w': `${settings.themeConfig.gitTreeWidth}px` }"
-          @move="settings.setGitTreeWidth"
-          @end="() => void settings.commitGitTreeWidth()"
+          @move="width => settings.setThemeWidth('gitTreeWidth', width)"
+          @end="() => void settings.commitThemeWidth('gitTreeWidth')"
         />
         <PanelResizer
           :width="settings.themeConfig.gitHistoryWidth"
@@ -295,8 +295,8 @@ function onBranchCommand(name: string): void {
             '--resizer-inset': '0px',
             '--tree-w': `calc(${settings.themeConfig.gitTreeWidth}px + var(--card-gap, 10px) + ${settings.themeConfig.gitHistoryWidth}px)`,
           }"
-          @move="settings.setGitHistoryWidth"
-          @end="() => void settings.commitGitHistoryWidth()"
+          @move="width => settings.setThemeWidth('gitHistoryWidth', width)"
+          @end="() => void settings.commitThemeWidth('gitHistoryWidth')"
         />
       </div>
     </template>

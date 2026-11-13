@@ -650,8 +650,8 @@ const bodyStyle = computed(() => ({
     <PanelResizer
       :width="settings.themeConfig.mailListWidth"
       body-class="is-resizing-mail-list"
-      @move="settings.setMailListWidth"
-      @end="() => void settings.commitMailListWidth()"
+      @move="width => settings.setThemeWidth('mailListWidth', width)"
+      @end="() => void settings.commitThemeWidth('mailListWidth')"
     />
 
     <!-- 右栏：阅读区 -->

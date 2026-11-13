@@ -2,7 +2,8 @@
 
 ## 约束
 
-关键落点：`packages/video/src/video.ts`（MP4 过滤 / 目录树口径 / 倍速档位 / 播放顺序 / 浮窗几何，带单测）、
+关键落点：`packages/video/src/video.ts`（MP4 过滤 / 目录树口径 / 倍速档位 / 播放顺序 / 视口内的贴合与缩放，带单测）、
+`packages/appearance/src/video-float.ts`（悬浮小窗的位置 / 尺寸档位与收敛 —— 这几个字段住在 theme.json，归 ThemeConfig 管）、
 `apps/desktop/src-tauri/src/video.rs`（扫描与时长解析、`allow_video`）、
 `apps/desktop/src-tauri/src/video_window.rs`（独立窗口与两条事件通道）、`workbench/video.ts`、
 `workbench/video-window.ts`、`stores/video.ts`、`components/VideoPlayer.vue`（全局单例播放器）、
@@ -17,7 +18,8 @@
   名单整棵跳过。
 - **左栏右键只有「读」**（笔记树那套写操作一件都不搬）：**视频行**右击给三件 —— 用默认程序打开 / 在资源管理器中显示 /
   复制路径，**文件夹行不给菜单**；三项都不动播放状态、选中与落盘，绝对路径由 `videoAbsPath` 按视频根拼。**菜单贴指针
-  落点**出现（`VideoContextMenu`，与笔记正文 / 邮件清单行共用 `use-floating-position` / `use-floating-dismiss`）——
+  落点**出现（`VideoContextMenu` 只提供 items，外壳 / 落点 / 收起是 `components/FloatingMenu.vue`——与笔记、邮件、联系人、
+  钉图五处共用同一份）——
   `el-dropdown` 的 contextmenu 触发器锚在整行上、右击行尾会弹回行首，**不要再用它**；**同一时刻只有一份**。
 - **播放器本体是全局单例，挂在 App.vue 上**（与终端面板同层，不随换页切换）；视频页只留目录树、头部与空态，画布上是
   一个传送宿主 —— 画中画靠 Teleport 搬元素，**元素不重建，播放一秒不断**。**悬浮是显式意图**：离开视频页**不**自动浮窗

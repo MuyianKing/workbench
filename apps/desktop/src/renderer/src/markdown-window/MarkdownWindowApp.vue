@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { NoteDocument } from '@workbench/notes'
 import { DArrowLeft, Document } from '@element-plus/icons-vue'
-import { clampNoteRailWidth } from '@workbench/appearance'
+import { clampWidth } from '@workbench/appearance'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { bootstrapSnapshot } from '@/bootstrap'
 import EmptyState from '@/components/EmptyState.vue'
@@ -67,7 +67,7 @@ let offWindowState: (() => void) | null = null
  *
  * 拖动只改这一份本地值 —— 这扇窗不装 store、也不写 theme.json（笔记页那条
  * `noteRailWidth` 归主窗口），所以关窗后回到 320。区间沿用 noteRailWidth 的
- * 160–420（`clampNoteRailWidth`），不另定一套。
+ * 160–420（`clampWidth('noteRailWidth', …)` 取的同一档），不另定一套。
  */
 const RAIL_WIDTH_DEFAULT = 320
 const railWidth = ref(RAIL_WIDTH_DEFAULT)
@@ -77,7 +77,7 @@ const railResizing = ref(false)
 /**
  * 拖大纲栏右缘调宽：与笔记页那条缝同一套骨架（`startPointerDrag`）。
  *
- * 栏在左边，指针往右拖才是拉宽，所以差值是正号；松手前一直被 `clampNoteRailWidth`
+ * 栏在左边，指针往右拖才是拉宽，所以差值是正号；松手前一直被 `clampWidth('noteRailWidth', …)`
  * 夹在 160–420 之间。拖动态挂 `body.is-resizing-md-rail`（markdown.html 里兜住光标
  * 与文本选择 —— 独立窗口没引 global.css）。
  */
@@ -92,7 +92,7 @@ function onRailResize(event: PointerEvent): void {
     start: { x: event.clientX, y: event.clientY },
     bodyClass: 'is-resizing-md-rail',
     onMove: (moveEvent, start) => {
-      railWidth.value = clampNoteRailWidth(startWidth + (moveEvent.clientX - start.x))
+      railWidth.value = clampWidth('noteRailWidth', startWidth + (moveEvent.clientX - start.x))
     },
     onEnd: (_last, cancelled) => {
       railResizing.value = false

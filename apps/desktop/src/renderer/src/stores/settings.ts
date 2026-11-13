@@ -1,9 +1,7 @@
-import type { AccentInkMode, CardPlacement, ColumnId, HomeCardId, RowId, RowTarget, ThemeConfig, ViewId } from '@workbench/appearance'
+import type { AccentInkMode, CardPlacement, ColumnId, HomeCardId, RowId, RowTarget, ThemeConfig, ViewId, WidthField } from '@workbench/appearance'
 import type { ThemeOrigin } from '@/theme-transition'
-import type { AppSettings, BuiltinWallpaper, EffectiveTheme, Result, SyncDeviceInfo, ThemeSource, TokenUsageResult, TopBarStyle } from '@/types'
-import { addColumn as addColumnTo, clampAiTreeWidth, clampBackgroundOpacity, clampCardGap, clampCardOpacity, clampColumnWidth, clampGitFilesWidth, clampGitHistoryWidth, clampGitTreeWidth, clampKbTreeWidth, clampMailListWidth, clampNoteRailWidth, clampNoteTreeWidth, clampRowHeight, clampVideoTreeWidth, COLUMN_WIDTH_DEFAULT, DEFAULT_THEME, moveCard as placeCard, setColumnWidths as placeColumnWidths, removeColumn as removeColumnFrom, rowHeightMin, rowOf, sanitizeAccentColor, sanitizeAccentInkMode, sanitizeTheme, VIEW_LABELS } from '@workbench/appearance'
-
-import { clampVideoFloatHeight, clampVideoFloatPercent, clampVideoFloatWidth } from '@workbench/video'
+import type { AppSettings, EffectiveTheme, Result, SyncDeviceInfo, ThemeSource, TokenUsageResult, TopBarStyle } from '@/types'
+import { addColumn as addColumnTo, clampCardGap, clampCardOpacity, clampColumnWidth, clampRowHeight, clampVideoFloatHeight, clampVideoFloatPercent, clampVideoFloatWidth, clampWidth, COLUMN_WIDTH_DEFAULT, DEFAULT_THEME, moveCard as placeCard, setColumnWidths as placeColumnWidths, removeColumn as removeColumnFrom, rowHeightMin, rowOf, sanitizeAccentColor, sanitizeAccentInkMode, sanitizeTheme, VIEW_LABELS } from '@workbench/appearance'
 import { defineStore } from 'pinia'
 /**
  * 设置与外观：明暗、主题色、工作区背景、卡片浓度，以及首页的分栏布局。
@@ -18,6 +16,7 @@ import { defineStore } from 'pinia'
 import { computed, ref, watch } from 'vue'
 import { bootstrapSnapshot, writeAccentColor, writeGlassBorder, writeTheme } from '@/bootstrap'
 import { notifyError, notifySuccess, notifyWarning } from '@/notify'
+import { useSettingsBackground } from '@/stores/settings-background'
 import { applyThemeWithTransition } from '@/theme-transition'
 import { DEFAULT_SETTINGS, TOP_BAR_STYLES } from '@/types'
 
@@ -243,133 +242,8 @@ export const useSettingsStore = defineStore('settings', () => {
     return updateSettings({ accentInk: next })
   }
 
-  // ---------- 工作区背景 ----------
-
-  /**
-   * 工作区背景。
-   *
-   * 设置里存的是磁盘路径，这里拿到的是后端授权、由 webview 按 asset 协议读的 URL（见适配层的
-   * assetUrl）：图片不进数据文件，换图只是换一个字符串。
-   * 图片被删、被换成读不出来的格式时留空并把原因记在 backgroundError 里，设置界面据此提示。
-   */
-  const backgroundImage = ref('')
-  const backgroundName = ref('')
-  const backgroundError = ref('')
-  /** 已经读进 backgroundImage 的那条路径，用来免掉「刚选完又被设置变化推着读一遍」 */
-  const backgroundPath = ref('')
-
-  const backgroundOpacity = ref(DEFAULT_SETTINGS.workspaceBackgroundOpacity)
-
-  watch(
-    () => settings.value.workspaceBackgroundOpacity,
-    (value) => {
-      backgroundOpacity.value = clampBackgroundOpacity(value)
-    },
-    { immediate: true },
-  )
-
-  async function setBackgroundOpacity(percent: number): Promise<void> {
-    const next = clampBackgroundOpacity(percent)
-    backgroundOpacity.value = next
-    if (next === settings.value.workspaceBackgroundOpacity)
-      return
-
-    await updateSettings({ workspaceBackgroundOpacity: next })
-  }
-
-  /** 读一张图贴上工作区；读不出来时清空并把原因留在 backgroundError */
-  async function applyBackground(path: string): Promise<boolean> {
-    if (!path) {
-      backgroundImage.value = ''
-      backgroundName.value = ''
-      backgroundPath.value = ''
-      backgroundError.value = ''
-      return true
-    }
-
-    // 同一张图已经在手上：选完图落盘会再触发一次，没必要把同一个 asset URL 再解析一遍
-    if (path === backgroundPath.value && backgroundImage.value)
-      return true
-
-    const result = await window.workbench.loadBackground(path)
-    if (!result.ok || !result.data) {
-      backgroundImage.value = ''
-      backgroundName.value = ''
-      backgroundPath.value = ''
-      backgroundError.value = result.error ?? '背景图读取失败'
-      return false
-    }
-
-    backgroundImage.value = result.data.url
-    backgroundName.value = result.data.name
-    backgroundPath.value = result.data.path
-    backgroundError.value = ''
-    return true
-  }
-
-  // 设置是异步载入的，也可能被设置窗口改写，跟着它同步
-  watch(() => settings.value.workspaceBackground, value => void applyBackground(value), {
-    immediate: true,
-  })
-
-  /**
-   * 随应用发布的内置壁纸（resources/backgrounds 下的那几张）。
-   *
-   * 每张的缩略图都要现解码 + 现压（7 张实测 270ms，全在 Rust 那边），而只有设置面板会读它，
-   * 所以不跟着启动一起拉：面板第一次打开时按需取一次，之后一直用这份缓存。
-   * 目录里没有图时是空数组，设置里那一栏自己会收起来。
-   */
-  const wallpapers = ref<BuiltinWallpaper[]>([])
-  let wallpapersLoaded = false
-
-  /** 打开设置面板时调一次；取不到就下次再试，不因为一组缩略图让面板打不开 */
-  async function ensureWallpapers(): Promise<void> {
-    if (wallpapersLoaded)
-      return
-    try {
-      wallpapers.value = await window.workbench.listWallpapers()
-      wallpapersLoaded = true
-    }
-    catch (error) {
-      console.warn('[workbench] 读取内置壁纸失败', error)
-    }
-  }
-
-  /**
-   * 换一张工作区背景。
-   *
-   * target 可以是磁盘路径、`builtin:<id>` 内置引用，或空串（恢复默认画布）。
-   * 一律先读通再落盘：免得把一个读不出来的值写进设置，下次启动才发现是一片空白。
-   */
-  async function chooseBackground(target: string): Promise<boolean> {
-    if (!(await applyBackground(target))) {
-      notifyError(backgroundError.value || '这张图片读不出来，请换一张')
-      return false
-    }
-    if (target === settings.value.workspaceBackground)
-      return true
-
-    return updateSettings({ workspaceBackground: target })
-  }
-
-  /** 从磁盘上挑一张图当背景 */
-  async function pickBackground(): Promise<boolean> {
-    const picked = await window.workbench.pickBackground()
-    if (!picked)
-      return false
-
-    return chooseBackground(picked)
-  }
-
-  /** 点选一张内置壁纸 */
-  async function useWallpaper(reference: string): Promise<boolean> {
-    return chooseBackground(reference)
-  }
-
-  /** 恢复默认画布 */
-  async function clearBackground(): Promise<boolean> {
-    return chooseBackground('')
-  }
+  // 工作区背景（状态与动作）在 settings-background.ts：这里只装配并转出去
+  const background = useSettingsBackground({ settings, updateSettings })
 
   /**
    * 卡片不透明度：首页工作台面板与项目卡共用的底色浓度。
@@ -494,27 +368,19 @@ export const useSettingsStore = defineStore('settings', () => {
   }
 
   /**
-   * 笔记页左栏（目录树）宽度：与首页栏宽同一套做法 —— 拖动时只改本地让界面跟手，
-   * 松手才整份落盘（它也在 theme.json 里）。
+   * 拖动某一栏的宽度：只改本地让界面跟手，**松手用 `commitThemeWidth` 整份落盘**
+   * （它也在 theme.json 里）。档位（min / max / 默认）由 `@workbench/appearance` 的
+   * `WIDTH_FIELDS` 一处定，这里不重复。
    */
-  function setNoteTreeWidth(width: number): void {
-    themeConfig.value.noteTreeWidth = clampNoteTreeWidth(width)
+  function setThemeWidth(field: WidthField, width: number): void {
+    themeConfig.value[field] = clampWidth(field, width)
   }
 
-  async function commitNoteTreeWidth(): Promise<void> {
-    await saveThemeConfig({ noteTreeWidth: themeConfig.value.noteTreeWidth })
-  }
-
-  /**
-   * 笔记页右栏（大纲）宽度：与左栏树同一套做法 —— 拖动时只改本地让界面跟手，
-   * 松手才整份落盘（它也在 theme.json 里）。
-   */
-  function setNoteRailWidth(width: number): void {
-    themeConfig.value.noteRailWidth = clampNoteRailWidth(width)
-  }
-
-  async function commitNoteRailWidth(): Promise<void> {
-    await saveThemeConfig({ noteRailWidth: themeConfig.value.noteRailWidth })
+  /** 松手落盘某一栏的宽度（整份 saveThemeConfig，与别处一致） */
+  async function commitThemeWidth(field: WidthField): Promise<void> {
+    const patch: Partial<ThemeConfig> = {}
+    patch[field] = themeConfig.value[field]
+    await saveThemeConfig(patch)
   }
 
   /**
@@ -528,75 +394,11 @@ export const useSettingsStore = defineStore('settings', () => {
   }
 
   /**
-   * 视频页左栏（目录树）宽度：与笔记树同一套做法 —— 拖动时只改本地让界面跟手，
-   * 松手才整份落盘（它也在 theme.json 里）。
-   */
-  function setVideoTreeWidth(width: number): void {
-    themeConfig.value.videoTreeWidth = clampVideoTreeWidth(width)
-  }
-
-  async function commitVideoTreeWidth(): Promise<void> {
-    await saveThemeConfig({ videoTreeWidth: themeConfig.value.videoTreeWidth })
-  }
-
-  /**
    * 导航上各页的名字：**AI 页跟程序名走** —— 用户在设置里把程序叫什么，这个智能体就叫什么
    * （导航栏与设置菜单两处都从这儿取）；其余页照 @workbench/appearance 的默认名。
    */
   function viewLabelOf(id: ViewId): string {
     return id === 'ai' ? settings.value.appName : VIEW_LABELS[id]
-  }
-
-  /**
-   * AI 助手页左栏（项目 → 会话那棵树）宽度：与笔记 / 视频树同一套做法 ——
-   * 拖动时只改本地让界面跟手，松手才整份落盘（它也在 theme.json 里）。
-   */
-  function setAiTreeWidth(width: number): void {
-    themeConfig.value.aiTreeWidth = clampAiTreeWidth(width)
-  }
-
-  async function commitAiTreeWidth(): Promise<void> {
-    await saveThemeConfig({ aiTreeWidth: themeConfig.value.aiTreeWidth })
-  }
-
-  /**
-   * 邮箱页左栏（收件箱清单）宽度：与笔记 / 视频树同一套做法 ——
-   * 拖动时只改本地让界面跟手，松手才整份落盘（它也在 theme.json 里）。
-   */
-  function setMailListWidth(width: number): void {
-    themeConfig.value.mailListWidth = clampMailListWidth(width)
-  }
-
-  async function commitMailListWidth(): Promise<void> {
-    await saveThemeConfig({ mailListWidth: themeConfig.value.mailListWidth })
-  }
-
-  /**
-   * Git 页三处栏宽（文件树 / 提交列表 / 改动文件清单）：与笔记 / 视频树同一套做法 ——
-   * 拖动时只改本地让界面跟手，松手才整份落盘（它们也在 theme.json 里）。
-   */
-  function setGitTreeWidth(width: number): void {
-    themeConfig.value.gitTreeWidth = clampGitTreeWidth(width)
-  }
-
-  async function commitGitTreeWidth(): Promise<void> {
-    await saveThemeConfig({ gitTreeWidth: themeConfig.value.gitTreeWidth })
-  }
-
-  function setGitHistoryWidth(width: number): void {
-    themeConfig.value.gitHistoryWidth = clampGitHistoryWidth(width)
-  }
-
-  async function commitGitHistoryWidth(): Promise<void> {
-    await saveThemeConfig({ gitHistoryWidth: themeConfig.value.gitHistoryWidth })
-  }
-
-  function setGitFilesWidth(width: number): void {
-    themeConfig.value.gitFilesWidth = clampGitFilesWidth(width)
-  }
-
-  async function commitGitFilesWidth(): Promise<void> {
-    await saveThemeConfig({ gitFilesWidth: themeConfig.value.gitFilesWidth })
   }
 
   /**
@@ -607,18 +409,6 @@ export const useSettingsStore = defineStore('settings', () => {
     if (themeConfig.value.aiTreeCollapsed === collapsed)
       return true
     return saveThemeConfig({ aiTreeCollapsed: collapsed })
-  }
-
-  /**
-   * 知识库页左栏（条目 / 原始数据清单）宽度：与笔记 / 视频树同一套做法 ——
-   * 拖动时只改本地让界面跟手，松手才整份落盘（它也在 theme.json 里）。
-   */
-  function setKbTreeWidth(width: number): void {
-    themeConfig.value.kbTreeWidth = clampKbTreeWidth(width)
-  }
-
-  async function commitKbTreeWidth(): Promise<void> {
-    await saveThemeConfig({ kbTreeWidth: themeConfig.value.kbTreeWidth })
   }
 
   /**
@@ -739,7 +529,7 @@ export const useSettingsStore = defineStore('settings', () => {
    * 采用另一台机器的配置（设置界面里那一行的「应用」）。
    *
    * **只能由用户点**：配置是「以谁的为准」而不是能合并的数据，两台机器互相自动采用对方的
-   * 会来回覆盖、永远收敛不了（详见 packages/usage/src/sync-config.ts 的文件头）。
+   * 会来回覆盖、永远收敛不了（详见 packages/appearance/src/sync-config.ts 的文件头）。
    * 走的是既有的 updateThemeConfig 通道 —— 外观与布局在同一个文件里，所以一次写入就够，
    * 主题过渡、终端高度、卡片摆放这些联动不必另写一套。
    */
@@ -857,17 +647,8 @@ export const useSettingsStore = defineStore('settings', () => {
     setViewVisible,
     setViewOrder,
     setNavVisible,
-    // 背景
-    backgroundImage,
-    backgroundName,
-    backgroundError,
-    backgroundOpacity,
-    setBackgroundOpacity,
-    wallpapers,
-    ensureWallpapers,
-    pickBackground,
-    useWallpaper,
-    clearBackground,
+    // 背景（状态与动作整组来自 settings-background.ts）
+    ...background,
     cardOpacity,
     setCardOpacity,
     setGlassBorder,
@@ -886,25 +667,9 @@ export const useSettingsStore = defineStore('settings', () => {
     toggleColumnMode,
     addColumn,
     removeColumn,
-    setNoteTreeWidth,
-    commitNoteTreeWidth,
-    setNoteRailWidth,
-    commitNoteRailWidth,
-    setVideoTreeWidth,
-    commitVideoTreeWidth,
-    setAiTreeWidth,
-    commitAiTreeWidth,
-    setMailListWidth,
-    commitMailListWidth,
-    setGitTreeWidth,
-    commitGitTreeWidth,
-    setGitHistoryWidth,
-    commitGitHistoryWidth,
-    setGitFilesWidth,
-    commitGitFilesWidth,
+    setThemeWidth,
+    commitThemeWidth,
     setAiTreeCollapsed,
-    setKbTreeWidth,
-    commitKbTreeWidth,
     setVideoTreeCollapsed,
     setVideoFloatGeometry,
     commitVideoFloatGeometry,

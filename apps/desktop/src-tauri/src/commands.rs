@@ -924,25 +924,8 @@ pub fn open_in_vscode(path: String) -> Result<(), String> {
 pub fn probe_version(bin: String) -> Option<String> {
     crate::proc::probe_version(&bin)
 }
-/// 跑一条命令并把输出整份收回（带超时），用于 `npm install -g <pm>` 这类会长时间输出的操作。
-/// 超时返回 `timedOut: true`，由调用方给出提示。
-#[tauri::command(async)]
-pub fn run_command(program: String, args: Vec<String>, timeout_ms: u64) -> Value {
-    match crate::proc::run(&program, &args, std::time::Duration::from_millis(timeout_ms)) {
-        Ok(outcome) => json!({
-            "ok": outcome.ok(),
-            "timedOut": outcome.timed_out,
-            "stdout": outcome.stdout,
-            "stderr": outcome.stderr,
-        }),
-        Err(err) => json!({
-            "ok": false,
-            "timedOut": false,
-            "stdout": "",
-            "stderr": err.to_string(),
-        }),
-    }
-}
+
+// ---------- 进程会话 ----------
 
 // ---------- 进程会话 ----------
 
@@ -1129,17 +1112,6 @@ pub fn kill_process_tree(pid: u32) -> Result<(), String> {
 #[tauri::command(async)]
 pub fn stop_session(app: AppHandle, session_id: String) -> Result<(), String> {
     crate::session::stop(&app, &session_id)
-}
-
-#[tauri::command]
-pub fn active_sessions(app: AppHandle) -> Vec<String> {
-    crate::session::active_ids(&app)
-}
-
-/// 会话记录已在别处收尾（退出时已按树终止）后，把它从表里摘掉
-#[tauri::command]
-pub fn forget_session(app: AppHandle, session_id: String) {
-    crate::session::forget(&app, &session_id)
 }
 
 // ---------- 文件读写（给渲染层的解析逻辑当数据源） ----------

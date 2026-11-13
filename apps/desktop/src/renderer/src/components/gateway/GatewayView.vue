@@ -1,23 +1,21 @@
 <script setup lang="ts">
+import type { AccountCardView } from './AccountCards.vue'
 import type { GatewayAccess, GatewayAccount, GatewayCredits, GatewayStatus, GatewayUsageSummary } from '@/workbench/gateway'
-import { CircleCheck, CircleClose, Clock, Coin, Connection, Download, Plus, Upload, User, Warning } from '@element-plus/icons-vue'
+import { CircleCheck, CircleClose, Clock, Coin, Download, Plus, Upload, User, Warning } from '@element-plus/icons-vue'
 import { gatewayBucketUnit, summarizeGatewayRows } from '@workbench/usage'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { computed, onActivated, onBeforeUnmount, onMounted, ref } from 'vue'
-import EmptyState from '@/components/EmptyState.vue'
 import { useCreditPool } from '@/composables/use-credit-pool'
-import { formatCompactTokens } from '@/format'
 import {
-  poolMeterTone as meterClass,
   poolBalanceText as number,
   poolExpiryHint,
   poolStatusText,
   poolQuotaActive as quotaActive,
   poolQuotaHint as quotaHint,
-  poolRemainPercent as remainPercent,
   poolStatusTone as statusClass,
 } from '@/status'
 import AccessDialog from './AccessDialog.vue'
+import AccountCards from './AccountCards.vue'
 import AccountTransferDialog from './AccountTransferDialog.vue'
 import CreditsDialog from './CreditsDialog.vue'
 import GatewayTabs from './GatewayTabs.vue'
@@ -149,6 +147,65 @@ function expiryHint(account: GatewayAccount) {
 
 function statusText(account: GatewayAccount): string {
   return poolStatusText(account, { readyLabel: '待续期' })
+}
+
+/** 账号卡的数据：两页共用 AccountCards，这里只把 TBuddy 的账号映射成卡片视图 */
+const accountCards = computed<AccountCardView[]>(() => accounts.value.map((account) => {
+  const item = usageOf(account.uid)
+  return {
+    uid: account.uid,
+    label: account.label,
+    enabled: account.enabled,
+    priority: account.priority,
+    tone: statusClass(account),
+    status: statusText(account),
+    quota: quotaHint(account),
+    credits: credits.value[account.uid] ?? null,
+    expiry: expiryHint(account),
+    usage: item
+      ? {
+          requests: item.requests,
+          failed: item.failed,
+          tokens: item.promptTokens + item.completionTokens,
+          tokensPerSec: item.tokensPerSec,
+        }
+      : null,
+  }
+}))
+
+function accountOf(uid: string): GatewayAccount | undefined {
+  return accounts.value.find(item => item.uid === uid)
+}
+
+/** 卡片只回传 uid，动作仍按原样收账号对象（就地改 `priority` 那类语义不变） */
+function queryByUid(uid: string): void {
+  const account = accountOf(uid)
+  if (account)
+    void queryOne(account)
+}
+
+function toggleByUid(uid: string): void {
+  const account = accountOf(uid)
+  if (account)
+    void toggleAccount(account)
+}
+
+function removeByUid(uid: string): void {
+  const account = accountOf(uid)
+  if (account)
+    void removeAccount(account)
+}
+
+function priorityByUid(uid: string, value: number | undefined): void {
+  const account = accountOf(uid)
+  if (account)
+    void setPriority(account, value)
+}
+
+function openCreditsByUid(uid: string): void {
+  const account = accountOf(uid)
+  if (account)
+    openCredits(account)
 }
 
 function stopLoginPolling(): void {
@@ -554,122 +611,17 @@ onBeforeUnmount(() => {
           {{ loginHint }}
         </p>
 
-        <div v-if="!accounts.length" class="panel">
-          <EmptyState compact :icon="Connection" text="还没有账号" hint="点右下角加号登录一个" />
-        </div>
-
-        <div v-else class="gw__accounts">
-          <article
-            v-for="account in accounts"
-            :key="account.uid"
-            class="panel gw__account-card"
-            :class="statusClass(account)"
-          >
-            <div class="gw__account-head">
-              <span class="gw__avatar">{{ account.label.slice(0, 1) }}</span>
-              <div class="gw__account-id">
-                <span class="gw__name">{{ account.label }}</span>
-                <span class="gw__tag" :class="statusClass(account)">{{ statusText(account) }}</span>
-              </div>
-              <div class="gw__account-actions">
-                <el-button size="small" text :loading="creditPending[account.uid]" @click="queryOne(account)">
-                  查余额
-                </el-button>
-                <el-button size="small" text @click="toggleAccount(account)">
-                  {{ account.enabled ? '停用' : '启用' }}
-                </el-button>
-                <el-button size="small" text @click="removeAccount(account)">
-                  删除
-                </el-button>
-              </div>
-            </div>
-
-            <!-- 额度恢复提示（多数账号平时没有）与优先级并作一排：提示在左、优先级在右，
-                 省下单独一行；行高由优先级输入框兜着，提示空着（隐藏但占位）也不影响同排卡片对齐 -->
-            <div class="gw__account-meta">
-              <span
-                class="gw__sub"
-                :class="{ 'is-empty': !quotaHint(account) }"
-                :title="quotaHint(account) || undefined"
-              >{{ quotaHint(account) || '—' }}</span>
-              <span class="gw__priority">
-                <span class="gw__dim">优先级</span>
-                <el-input-number
-                  :model-value="account.priority"
-                  :min="1"
-                  :max="100"
-                  :step="1"
-                  size="small"
-                  controls-position="right"
-                  @change="(value: number | undefined) => setPriority(account, value)"
-                />
-              </span>
-            </div>
-
-            <!-- 点这一块看逐包到期：账号卡只放得下「剩余 / 总额」，说不出哪天作废 -->
-            <div
-              class="gw__account-credits"
-              role="button"
-              tabindex="0"
-              :aria-label="`查看 ${account.label} 的积分明细`"
-              @click="openCredits(account)"
-              @keydown.enter.prevent="openCredits(account)"
-              @keydown.space.prevent="openCredits(account)"
-            >
-              <div class="gw__credits-line">
-                <span class="gw__dim">积分</span>
-                <template v-if="credits[account.uid]">
-                  <span class="gw__num">{{ number(credits[account.uid]!.remain) }}</span>
-                  <span class="gw__dim">/ {{ number(credits[account.uid]!.size) }}</span>
-                  <span v-if="credits[account.uid]!.size > 0 || expiryHint(account)" class="gw__aside">
-                    <span v-if="credits[account.uid]!.size > 0" class="gw__used">
-                      已用 <span class="gw__used-num">{{ number(Math.max(0, credits[account.uid]!.size - credits[account.uid]!.remain)) }}</span>
-                    </span>
-                    <span
-                      v-if="expiryHint(account)"
-                      class="gw__expiry"
-                      :title="expiryHint(account)!.title"
-                    >{{ expiryHint(account)!.text }}</span>
-                  </span>
-                </template>
-                <span v-else class="gw__dim">未查询</span>
-              </div>
-              <!-- 余额条同样始终占位：没查过余额的卡不能比查过的卡少一截，否则三格又错开 -->
-              <span class="gw__meter" :class="{ 'is-empty': !credits[account.uid] }">
-                <span
-                  v-if="credits[account.uid]"
-                  class="gw__meter-fill"
-                  :class="meterClass(credits[account.uid]!)"
-                  :style="{ width: `${remainPercent(credits[account.uid]!)}%` }"
-                />
-              </span>
-            </div>
-
-            <div class="gw__account-facts">
-              <div class="gw__fact">
-                <span class="gw__fact-label">成功 / 失败</span>
-                <span class="gw__fact-value">
-                  <template v-if="usageOf(account.uid)">
-                    {{ usageOf(account.uid)!.requests - usageOf(account.uid)!.failed }} / {{ usageOf(account.uid)!.failed }}
-                  </template>
-                  <span v-else class="gw__dim">—</span>
-                </span>
-              </div>
-              <div class="gw__fact">
-                <span class="gw__fact-label">用量</span>
-                <span class="gw__fact-value">
-                  {{ usageOf(account.uid) ? formatCompactTokens(usageOf(account.uid)!.promptTokens + usageOf(account.uid)!.completionTokens) : '—' }}
-                </span>
-              </div>
-              <div class="gw__fact">
-                <span class="gw__fact-label">均速</span>
-                <span class="gw__fact-value">
-                  {{ usageOf(account.uid) ? `${usageOf(account.uid)!.tokensPerSec.toFixed(0)} tok/s` : '—' }}
-                </span>
-              </div>
-            </div>
-          </article>
-        </div>
+        <AccountCards
+          :accounts="accountCards"
+          :credits-busy="creditPending"
+          empty-text="还没有账号"
+          empty-hint="点右下角加号登录一个"
+          @query="queryByUid"
+          @toggle="toggleByUid"
+          @remove="removeByUid"
+          @priority="priorityByUid"
+          @open-credits="openCreditsByUid"
+        />
       </section>
 
       <!-- 页面右下角：导出 / 导入 + 刷新积分 + 登录（用 sticky 钉在页面可视区里，终端展开时跟着上移）。
@@ -996,308 +948,6 @@ onBeforeUnmount(() => {
   margin: 0;
   font-size: var(--gw-fs-meta);
   color: var(--ink-3);
-}
-
-/* 账号卡：一行放不下四张时自动往下排 */
-.gw__accounts {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
-  gap: var(--sp-3);
-}
-
-.panel.gw__account-card {
-  position: relative;
-  gap: var(--sp-2);
-  padding: var(--sp-3);
-  overflow: hidden;
-  /* 卡面也铺一层极淡的状态色：整页才不至于一片灰 */
-  background-image: radial-gradient(
-    120% 120% at 100% 0%,
-    color-mix(in srgb, var(--card-color) 7%, transparent),
-    transparent 55%
-  );
-}
-
-/**
- * 左侧一截状态色标：与用量页的积分总账同一套做法 ——
- * 颜色只表达状态（可用绿 / 待续期灰 / 额度用完琥珀 / 已停用红），不做装饰。
- */
-.gw__account-card::before {
-  content: '';
-  position: absolute;
-  top: var(--sp-3);
-  bottom: var(--sp-3);
-  left: 0;
-  width: 3px;
-  border-radius: 0 3px 3px 0;
-  background: var(--card-color, transparent);
-}
-
-.gw__account-card.is-ok {
-  --card-color: var(--st-ok);
-}
-
-.gw__account-card.is-warn {
-  --card-color: var(--st-run);
-}
-
-.gw__account-card.is-fail {
-  --card-color: var(--st-fail);
-}
-
-.gw__account-card.is-muted {
-  --card-color: var(--ink-3);
-}
-
-.gw__account-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--sp-2);
-}
-
-/* 账号头像：首字 + 账号色（紫，与统计卡的紫同一套），给每张卡一个颜色锚点 */
-.gw__avatar {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex: none;
-  width: 36px;
-  height: 36px;
-  border-radius: var(--r-pill);
-  background: color-mix(in srgb, var(--type-color) 15%, transparent);
-  color: var(--type-color);
-  font-size: var(--gw-fs-title);
-  font-weight: 600;
-  --type-color: #7c3aed;
-}
-
-.gw__account-id {
-  flex: 1 1 auto;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-}
-
-/* 状态标签跟在名称下面：列方向下不拉伸，保持小标签的形状 */
-.gw__account-id .gw__tag {
-  align-self: flex-start;
-}
-
-.gw__name {
-  font-size: var(--gw-fs-title);
-  font-weight: 600;
-  color: var(--ink);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.gw__tag {
-  display: inline-block;
-  flex: none;
-  padding: 0 var(--sp-1);
-  border-radius: var(--r-sm);
-  background: var(--bg-subtle);
-  color: var(--ink-3);
-  font-size: var(--gw-fs-micro);
-}
-
-.gw__tag.is-ok {
-  color: var(--st-ok);
-}
-
-/* 待续期是「等一下」：中性灰；额度用完用琥珀，停用才是红 */
-.gw__tag.is-muted {
-  color: var(--ink-3);
-}
-
-.gw__tag.is-warn {
-  color: var(--st-run);
-}
-
-.gw__tag.is-fail {
-  color: var(--st-fail);
-}
-
-.gw__account-meta {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--sp-2);
-  font-size: var(--gw-fs-micro);
-  color: var(--ink-3);
-}
-
-.gw__priority {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-1);
-}
-
-.gw__priority :deep(.el-input-number) {
-  width: 76px;
-}
-
-/* 与优先级同一排的那行小字（目前只有额度恢复时间）。
-   空着时也**隐藏而不是删掉**：这一排的高度由优先级输入框兜着，
-   它占住左边的位子，同排卡片的积分条与三格才对得齐；太长时截断，完整内容在 title 里。 */
-.gw__sub {
-  overflow: hidden;
-  font-size: var(--gw-fs-micro);
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  color: var(--ink-3);
-}
-
-.gw__sub.is-empty {
-  visibility: hidden;
-}
-
-.gw__account-credits {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-1);
-  /* 整块可点开积分明细：手型 + 悬停浅底给反馈。
-     热区用「内边距 + 等量负外边距」撑开，内容位置不动 */
-  padding: var(--sp-1) var(--sp-2);
-  margin: calc(var(--sp-1) * -1) calc(var(--sp-2) * -1);
-  border-radius: var(--r-sm);
-  cursor: pointer;
-  transition: background 120ms var(--ease-out);
-}
-
-.gw__account-credits:hover {
-  background: color-mix(in srgb, var(--ink-3) 8%, transparent);
-}
-
-.gw__account-credits:focus-visible {
-  outline: 2px solid var(--el-color-primary);
-  outline-offset: -2px;
-}
-
-.gw__credits-line {
-  display: flex;
-  align-items: baseline;
-  gap: var(--sp-1);
-  font-variant-numeric: tabular-nums;
-}
-
-/* 已用量与临期天数一起贴着行尾：剩多少、用了多少、哪天作废在同一行读完 */
-.gw__aside {
-  display: flex;
-  align-items: baseline;
-  gap: var(--sp-2);
-  margin-left: auto;
-}
-
-.gw__used {
-  font-size: var(--gw-fs-micro);
-  color: var(--ink-3);
-  white-space: nowrap;
-}
-
-.gw__used-num {
-  font-family: var(--font-mono);
-  font-weight: 600;
-  color: var(--ink-2);
-}
-
-/* 临期天数：与「已用」用一条细竖线隔开 —— 一个是已经发生的，一个是接下来要来的 */
-.gw__expiry {
-  padding-left: var(--sp-2);
-  border-left: 1px solid var(--border);
-  font-size: var(--gw-fs-micro);
-  color: var(--ink-3);
-  white-space: nowrap;
-}
-
-.gw__num {
-  font-family: var(--font-mono);
-  font-size: 18px;
-  font-weight: 600;
-  color: var(--ink);
-}
-
-.gw__dim {
-  font-size: var(--gw-fs-micro);
-  color: var(--ink-3);
-}
-
-/**
- * 余额条：彩色那段是**剩余**（≥50% 绿 / 20–50% 琥珀 / <20% 红），
- * 空出来的灰底是**已用** —— 所以底色取 `--bg-inset` 而不是几乎看不见的 `--bg-subtle`。
- * 这是这一页的第二处彩色例外：余额见底是可行动的状态，不是装饰。
- */
-.gw__meter {
-  display: block;
-  height: 6px;
-  border-radius: var(--r-pill);
-  background: var(--bg-inset);
-  overflow: hidden;
-}
-
-/* 没查过余额时留出同一条的高度，别让这张卡的三格比旁边高 */
-.gw__meter.is-empty {
-  visibility: hidden;
-}
-
-.gw__meter-fill {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-  background: var(--ink-3);
-}
-
-.gw__meter-fill.is-ok {
-  background: var(--st-ok);
-}
-
-.gw__meter-fill.is-warn {
-  background: var(--st-run);
-}
-
-.gw__meter-fill.is-fail {
-  background: var(--st-fail);
-}
-
-.gw__account-facts {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: var(--sp-2);
-  padding-top: var(--sp-2);
-  border-top: 1px solid var(--border);
-}
-
-.gw__fact {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.gw__fact-label {
-  font-size: var(--gw-fs-micro);
-  color: var(--ink-3);
-}
-
-.gw__fact-value {
-  font-family: var(--font-mono);
-  font-size: var(--gw-fs-meta);
-  color: var(--ink-2);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* 操作按钮在卡片的右上角 */
-.gw__account-actions {
-  display: flex;
-  align-items: center;
-  flex: none;
-  gap: var(--sp-1);
 }
 
 /* ---------- 右下角悬浮动作 ---------- */

@@ -56,15 +56,18 @@ mod qd_tasks;
 mod qd_tools;
 mod qd_upstream;
 mod qd_usage;
+mod relay_core;
 mod repo_git;
 mod screen;
 mod session;
 mod skills;
 mod store;
 mod sync;
+mod sync_images;
 mod system;
 mod token;
 mod vault;
+mod wb_activity;
 mod video;
 mod video_window;
 mod wb_account;
@@ -715,12 +718,9 @@ fn main() {
             commands::open_external,
             commands::open_in_vscode,
             commands::probe_version,
-            commands::run_command,
             commands::spawn_session,
             commands::session_write,
             commands::stop_session,
-            commands::active_sessions,
-            commands::forget_session,
             commands::nvm_status,
             commands::nvm_node_dir,
             commands::nrm_status,
@@ -790,7 +790,6 @@ fn main() {
             wb_gateway::wb_gateway_models_refresh,
             wb_gateway::wb_gateway_access,
             wb_gateway::wb_gateway_rotate_key,
-            wb_gateway::wb_gateway_usage,
             wb_gateway::wb_gateway_usage_rows,
             wb_gateway::wb_gateway_usage_recent,
             wb_gateway::wb_gateway_tasks,
@@ -821,7 +820,6 @@ fn main() {
             qd_gateway::wb_qoder_models_refresh,
             qd_gateway::wb_qoder_access,
             qd_gateway::wb_qoder_rotate_key,
-            qd_gateway::wb_qoder_usage,
             qd_gateway::wb_qoder_usage_rows,
             qd_gateway::wb_qoder_usage_recent,
             qd_gateway::wb_qoder_credits,

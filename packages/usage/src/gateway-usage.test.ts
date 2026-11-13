@@ -36,6 +36,24 @@ describe('summarizeGatewayRows', () => {
     expect(summary.creditsPer1MTokens).toBeCloseTo(0.5 / 1100 * 1_000_000)
   })
 
+  it('未定价的请求不进折算分母', () => {
+    // 折算率的分母只算价表里有价的行：`costCny` 为 null 表示「不知道」，不是 0。
+    // 未定价模型的 token 掺进分母会把「每百万花多少」压低。
+    const summary = summarizeGatewayRows([
+      row({ model: 'glm-5.2', totalTokens: 1100, costCny: 0.01 }),
+      row({ model: 'unknown-model', totalTokens: 900_000, costCny: null }),
+    ], 'hour')
+
+    expect(summary.pricedRequests).toBe(1)
+    expect(summary.pricedTokens).toBe(1100)
+    expect(summary.totalTokens).toBe(901_100)
+
+    const unknown = summary.byModel.find(item => item.model === 'unknown-model')
+    expect(unknown?.pricedTokens).toBe(0)
+    expect(unknown?.pricedRequests).toBe(0)
+    expect(unknown?.costCny).toBe(0)
+  })
+
   it('命中率与分数各算各的', () => {
     const summary = summarizeGatewayRows([
       row({ uid: 'a', promptTokens: 1000, cachedTokens: 900 }),

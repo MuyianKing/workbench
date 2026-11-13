@@ -1,6 +1,6 @@
 import type { CardPlacement, HomeCardId, HomeColumn } from './theme'
 import { describe, expect, it } from 'vitest'
-import { addColumn, CARD_GAP_DEFAULT, CARD_GAP_MAX, CARD_GAP_MIN, CARD_HEIGHT_MIN, cardIdsInRow, clampCardGap, clampColumnWidth, clampGitFilesWidth, clampGitHistoryWidth, clampGitTreeWidth, clampKbTreeWidth, clampNoteRailWidth, clampNoteTreeWidth, clampRowHeight, clampVideoTreeWidth, COLUMN_COUNT_MAX, COLUMN_WIDTH_DEFAULT, COLUMN_WIDTH_MAX, COLUMN_WIDTH_MIN, columnHasVisibleCards, columnIds, columnOfRow, DEFAULT_THEME, GIT_FILES_WIDTH_DEFAULT, GIT_FILES_WIDTH_MIN, GIT_HISTORY_WIDTH_DEFAULT, GIT_HISTORY_WIDTH_MIN, GIT_TREE_WIDTH_DEFAULT, GIT_TREE_WIDTH_MAX, HOME_CARD_IDS, KB_TREE_WIDTH_DEFAULT, KB_TREE_WIDTH_MAX, KB_TREE_WIDTH_MIN, moveCard, normalizeOrder, NOTE_RAIL_WIDTH_DEFAULT, NOTE_RAIL_WIDTH_MAX, NOTE_RAIL_WIDTH_MIN, NOTE_TREE_WIDTH_DEFAULT, NOTE_TREE_WIDTH_MAX, NOTE_TREE_WIDTH_MIN, pruneEmptyRows, removeColumn, resizeColumnPair, resizeRowHeight, ROW_HEIGHT_MAX, ROW_HEIGHT_MIN_DEFAULT, rowBoxHeight, rowHeightMin, rowIds, rowOf, rowShapeFor, sameThemeContent, sanitizeCardMode, sanitizeTheme, setColumnWidths, THEME_VERSION, VIDEO_TREE_WIDTH_DEFAULT, VIDEO_TREE_WIDTH_MAX, VIDEO_TREE_WIDTH_MIN, visibleCardIdsInRow } from './theme'
+import { addColumn, CARD_GAP_DEFAULT, CARD_GAP_MAX, CARD_GAP_MIN, CARD_HEIGHT_MIN, cardIdsInRow, clampCardGap, clampColumnWidth, clampRowHeight, clampWidth, COLUMN_COUNT_MAX, COLUMN_WIDTH_DEFAULT, COLUMN_WIDTH_MAX, COLUMN_WIDTH_MIN, columnHasVisibleCards, columnIds, columnOfRow, DEFAULT_THEME, HOME_CARD_IDS, moveCard, normalizeOrder, pruneEmptyRows, removeColumn, resizeColumnPair, resizeRowHeight, ROW_HEIGHT_MAX, ROW_HEIGHT_MIN_DEFAULT, rowBoxHeight, rowHeightMin, rowIds, rowOf, rowShapeFor, sameThemeContent, sanitizeCardMode, sanitizeTheme, setColumnWidths, THEME_VERSION, visibleCardIdsInRow, WIDTH_FIELDS } from './theme'
 
 /**
  * 算法用例（移动 / 拆栏 / 收栏）的固定夹具：三栏五行，一行里可能并着好几张卡片。
@@ -166,77 +166,17 @@ describe('sanitizeTheme', () => {
     expect(rowOf(result.columns, result.cards.recent.row)).toMatchObject({ mode: 'fixed', height: 200 })
   })
 
-  /** 笔记页左栏宽度是后加的字段：老主题文件里没有它，得补默认值而不是当成 0 */
-  it('笔记页左栏宽度缺省用默认值，越界收敛', () => {
-    expect(sanitizeTheme({}).noteTreeWidth).toBe(NOTE_TREE_WIDTH_DEFAULT)
-    expect(clampNoteTreeWidth(undefined)).toBe(NOTE_TREE_WIDTH_DEFAULT)
-    expect(clampNoteTreeWidth('宽一点')).toBe(NOTE_TREE_WIDTH_DEFAULT)
-    expect(sanitizeTheme({ version: THEME_VERSION, noteTreeWidth: 9999 }).noteTreeWidth).toBe(
-      NOTE_TREE_WIDTH_MAX,
-    )
-    expect(sanitizeTheme({ version: THEME_VERSION, noteTreeWidth: 1 }).noteTreeWidth).toBe(
-      NOTE_TREE_WIDTH_MIN,
-    )
-    expect(sanitizeTheme({ version: THEME_VERSION, noteTreeWidth: 300 }).noteTreeWidth).toBe(300)
-  })
-
-  /** 笔记页大纲栏宽度是后加的字段：老主题文件里没有它，补默认值（可拖之前那条定宽） */
-  it('笔记页大纲栏宽度缺省用默认值，越界收敛', () => {
-    expect(sanitizeTheme({}).noteRailWidth).toBe(NOTE_RAIL_WIDTH_DEFAULT)
-    expect(clampNoteRailWidth(undefined)).toBe(NOTE_RAIL_WIDTH_DEFAULT)
-    expect(clampNoteRailWidth('宽一点')).toBe(NOTE_RAIL_WIDTH_DEFAULT)
-    expect(sanitizeTheme({ version: THEME_VERSION, noteRailWidth: 9999 }).noteRailWidth).toBe(
-      NOTE_RAIL_WIDTH_MAX,
-    )
-    expect(sanitizeTheme({ version: THEME_VERSION, noteRailWidth: 1 }).noteRailWidth).toBe(
-      NOTE_RAIL_WIDTH_MIN,
-    )
-    expect(sanitizeTheme({ version: THEME_VERSION, noteRailWidth: 300 }).noteRailWidth).toBe(300)
-  })
-
-  /** 视频页左栏宽度同是后加的字段：缺省补默认值（也是拖动前那个 264 的定宽），越界收敛 */
-  it('视频页左栏宽度缺省用默认值，越界收敛', () => {
-    expect(sanitizeTheme({}).videoTreeWidth).toBe(VIDEO_TREE_WIDTH_DEFAULT)
-    expect(clampVideoTreeWidth(undefined)).toBe(VIDEO_TREE_WIDTH_DEFAULT)
-    expect(clampVideoTreeWidth('宽一点')).toBe(VIDEO_TREE_WIDTH_DEFAULT)
-    expect(sanitizeTheme({ version: THEME_VERSION, videoTreeWidth: 9999 }).videoTreeWidth).toBe(
-      VIDEO_TREE_WIDTH_MAX,
-    )
-    expect(sanitizeTheme({ version: THEME_VERSION, videoTreeWidth: 1 }).videoTreeWidth).toBe(
-      VIDEO_TREE_WIDTH_MIN,
-    )
-    expect(sanitizeTheme({ version: THEME_VERSION, videoTreeWidth: 300 }).videoTreeWidth).toBe(300)
-  })
-
-  /** 知识库页左栏宽度同是后加的字段：缺省补默认值，越界收敛 */
-  it('知识库页左栏宽度缺省用默认值，越界收敛', () => {
-    expect(sanitizeTheme({}).kbTreeWidth).toBe(KB_TREE_WIDTH_DEFAULT)
-    expect(clampKbTreeWidth(undefined)).toBe(KB_TREE_WIDTH_DEFAULT)
-    expect(clampKbTreeWidth('宽一点')).toBe(KB_TREE_WIDTH_DEFAULT)
-    expect(sanitizeTheme({ version: THEME_VERSION, kbTreeWidth: 9999 }).kbTreeWidth).toBe(
-      KB_TREE_WIDTH_MAX,
-    )
-    expect(sanitizeTheme({ version: THEME_VERSION, kbTreeWidth: 1 }).kbTreeWidth).toBe(
-      KB_TREE_WIDTH_MIN,
-    )
-    expect(sanitizeTheme({ version: THEME_VERSION, kbTreeWidth: 300 }).kbTreeWidth).toBe(300)
-  })
-
-  /** Git 页三处栏宽同是后加的字段：缺省补默认值，越界收敛 */
-  it('git 页文件树 / 提交列表 / 改动文件清单的宽度缺省用默认值，越界收敛', () => {
-    expect(sanitizeTheme({}).gitTreeWidth).toBe(GIT_TREE_WIDTH_DEFAULT)
-    expect(sanitizeTheme({}).gitHistoryWidth).toBe(GIT_HISTORY_WIDTH_DEFAULT)
-    expect(sanitizeTheme({}).gitFilesWidth).toBe(GIT_FILES_WIDTH_DEFAULT)
-    expect(clampGitTreeWidth(undefined)).toBe(GIT_TREE_WIDTH_DEFAULT)
-    expect(clampGitHistoryWidth('宽一点')).toBe(GIT_HISTORY_WIDTH_DEFAULT)
-    expect(clampGitFilesWidth(1)).toBe(GIT_FILES_WIDTH_MIN)
-    expect(sanitizeTheme({ version: THEME_VERSION, gitTreeWidth: 9999 }).gitTreeWidth).toBe(
-      GIT_TREE_WIDTH_MAX,
-    )
-    expect(sanitizeTheme({ version: THEME_VERSION, gitHistoryWidth: 1 }).gitHistoryWidth).toBe(
-      GIT_HISTORY_WIDTH_MIN,
-    )
-    expect(sanitizeTheme({ version: THEME_VERSION, gitFilesWidth: 240 }).gitFilesWidth).toBe(240)
+  /** 各页可拖栏位：缺省补默认值、越界收敛到档位上下限（档位表见 WIDTH_FIELDS） */
+  it('各页栏宽缺省用默认值，越界收敛', () => {
+    for (const field of Object.keys(WIDTH_FIELDS) as (keyof typeof WIDTH_FIELDS)[]) {
+      const { def, min, max } = WIDTH_FIELDS[field]
+      expect(sanitizeTheme({})[field], field).toBe(def)
+      expect(clampWidth(field, undefined), field).toBe(def)
+      expect(clampWidth(field, '宽一点'), field).toBe(def)
+      expect(sanitizeTheme({ version: THEME_VERSION, [field]: 9999 })[field], field).toBe(max)
+      expect(sanitizeTheme({ version: THEME_VERSION, [field]: 1 })[field], field).toBe(min)
+      expect(sanitizeTheme({ version: THEME_VERSION, [field]: 300 })[field], field).toBe(300)
+    }
   })
 
   it('卡片间距缺省用默认值，越界收敛', () => {

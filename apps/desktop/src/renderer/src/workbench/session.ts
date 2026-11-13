@@ -463,8 +463,3 @@ export function stopOwner(projectId: string, kind?: TerminalKind): Promise<Resul
 export function stopCommand(entryId: string): Promise<Result<null>> {
   return stopTerminal(terminalKey(entryId, 'command'))
 }
-
-/** 清空某个终端的显示（后端无事可做，纯界面动作） */
-export function clearTerminal(terminal: string): void {
-  emit<{ terminal: string }>('clear', { terminal })
-}

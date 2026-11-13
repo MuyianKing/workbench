@@ -30,8 +30,6 @@ export const MAX_INTERVAL_MS = 5000
 /** 球每秒问一次宿主 */
 export const SAMPLE_INTERVAL_MS = 1000
 
-const IDLE: NetRate = { down: 0, up: 0 }
-
 /**
  * 两次采样之间这一段的速率。
  *
@@ -177,11 +175,6 @@ export function directionShare(rate: NetRate): { down: number, up: number } {
   if (total <= 0)
     return { down: 0.5, up: 0.5 }
   return { down: rate.down / total, up: rate.up / total }
-}
-
-/** 一帧都没测到时的空读数（静止态） */
-export function idleRate(): NetRate {
-  return { ...IDLE }
 }
 
 /** 这个读数算不算「有流量」：收起态的点亮与呼吸按它判 */

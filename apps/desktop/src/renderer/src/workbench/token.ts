@@ -1,6 +1,6 @@
-import type { SyncDeviceInfo, ThemeFile, TokenCounters, TokenDataFile, TokenDays, TokenShard, TokenSyncStatus, TokenUsageResult } from '@workbench/usage'
+import type { SyncDeviceInfo, ThemeFile } from '@workbench/appearance'
+import type { TokenCounters, TokenDataFile, TokenDays, TokenShard, TokenSyncStatus, TokenUsageResult } from '@workbench/usage'
 import type { Result } from '@/types'
-import { fail, ok } from '@workbench/core'
 /**
  * Token 用量的读取、快照合并与多机同步。
  *
@@ -24,13 +24,15 @@ import { fail, ok } from '@workbench/core'
  * 首屏还有一条更早的路：`getTokenUsageSnapshot` 只读本地那份快照（几毫秒），
  * 让面板先把上次的数据摆出来，再被实读结果覆盖。它不实读、不落盘，只是一个先手。
  */
-import { captureThemeFile, CODEBUDDY_SOURCE_ID, collectCodeBuddyLogText, collectDshSessionText, collectQoderSessionText, collectWorkBuddySessionText, combineShards, createCodeBuddyParseState, DSH_SOURCE_ID, isDateKey, mergeDays, pruneTokenDays, QODER_SOURCE_ID, sameDays, sameShardContent, sanitizeShard, sanitizeSyncRepo, sanitizeThemeFile, sumDays, TOKEN_DATA_VERSION, TOKEN_KEEP_DAYS, WORKBUDDY_SOURCE_ID, ZCODE_SOURCE_ID } from '@workbench/usage'
+import { captureThemeFile, sanitizeThemeFile } from '@workbench/appearance'
+import { fail, ok } from '@workbench/core'
+import { CODEBUDDY_SOURCE_ID, collectCodeBuddyLogText, collectDshSessionText, collectQoderSessionText, collectWorkBuddySessionText, combineShards, createCodeBuddyParseState, DSH_SOURCE_ID, isDateKey, mergeDays, pruneTokenDays, QODER_SOURCE_ID, sameDays, sameShardContent, sanitizeShard, sanitizeSyncRepo, sumDays, TOKEN_DATA_VERSION, TOKEN_KEEP_DAYS, WORKBUDDY_SOURCE_ID, ZCODE_SOURCE_ID } from '@workbench/usage'
 
+import { createAutoSync } from './auto-sync'
 import { errorText, guard, invoke } from './bridge'
 import { emit } from './events'
 import { gatewaySyncNow, markGatewaySynced } from './gateway'
 import * as state from './state'
-import { enqueue } from './sync-queue'
 
 /** Rust 侧 `token_zcode_rows` 回来的行：SUM 在无数据时是 NULL，所以全部可空 */
 interface UsageRow {
@@ -333,17 +335,21 @@ export async function localDevice(): Promise<{ id: string, name: string }> {
 // ---------- 同步 ----------
 
 /**
- * 自动同步的间隔：面板每分钟刷新一次，一小时里只有到点的那一次真的走网络。
+ * 自动同步的节流：面板每分钟刷新一次，一小时里只有到点的那一次真的走网络。
  *
  * 一小时是「推送」的节奏：分片内容只要变了就会推一次（没变不产生提交），
  * 干活的时候十分钟一推会让仓库里堆出一串没有信息量的提交。
  * 想让数据立刻出去就用手动同步按钮，它不受这个间隔限制。
+ * 间隔 / 换仓库即失效 / 同一时刻只跑一条这三条口径与活跃度、网关流水共用
+ * `createAutoSync`（见 auto-sync.ts）。
  */
-const SYNC_INTERVAL_MS = 60 * 60_000
+const syncGate = createAutoSync({
+  intervalMs: 60 * 60_000,
+  // 跑完（成功失败都算）广播一次，订阅方据此重取 —— 新读回的分片立刻显示出来，
+  // 同步失败的原因也能及时反映到标题行，都不必干等到下一个轮询周期
+  settled: () => emit('tokenSynced', null),
+})
 
-let lastSyncAt = 0
-/** 上次尝试同步用的仓库；设置里换了地址就立刻同步一次，不必等节流窗口过去 */
-let lastSyncRepo = ''
 let lastSyncError = ''
 /** 别人的分片（已收敛）；两次同步之间照旧参与合计，面板不会因为没到同步点就少一块数据 */
 let remoteShards: TokenShard[] = []
@@ -428,7 +434,7 @@ async function syncLocalShards(repo: string, ownDevice: string): Promise<void> {
     remoteShards = []
     remoteConfigs = []
     shardsRepo = ''
-    lastSyncRepo = ''
+    syncGate.reset()
     lastSyncError = ''
     return
   }
@@ -495,8 +501,6 @@ async function runSync(repo: string, shard: TokenShard): Promise<void> {
   }
 
   lastSyncError = errors.join('；')
-  lastSyncAt = Date.now()
-  lastSyncRepo = repo
 }
 
 function syncStatus(enabled: boolean, deviceName: string, repo: string): TokenSyncStatus {
@@ -507,7 +511,7 @@ function syncStatus(enabled: boolean, deviceName: string, repo: string): TokenSy
     enabled: true,
     deviceName,
     repo,
-    lastSyncAt,
+    lastSyncAt: syncGate.lastAt(),
     error: lastSyncError,
     // 时间取用量与配置里较新的那个（见 pairDevices）：配置改晚了也该反映出来
     devices: pairDevices(remoteShards, remoteConfigs).map(device => ({
@@ -583,7 +587,7 @@ export async function getTokenUsage(options: {
   }
 
   // 外观配置**不在这份分片里**：它是 theme.json 的整份内容，由 runSync 单独作为 config 推上去
-  // （见 packages/usage/src/sync-config.ts）。两个目录各管一件事，用量这边的版本演进不必再带上外观
+  // （见 packages/appearance/src/sync-config.ts）。两个目录各管一件事，用量这边的版本演进不必再带上外观
   const shard: TokenShard = {
     version: TOKEN_DATA_VERSION,
     device: id,
@@ -603,23 +607,18 @@ export async function getTokenUsage(options: {
 
   // 换仓库（或首次）之后的这一轮立刻走，不必等节流窗口过去；Rust 那边发现克隆指向的不是
   // 这个仓库会重新克隆，读分片时也会核对仓库归属 —— 详见 sync.rs 的 ensure_clone / read_shards
-  if (repo && (options.force || repo !== lastSyncRepo || now - lastSyncAt >= SYNC_INTERVAL_MS)) {
+  if (repo && (options.force || syncGate.due(repo))) {
     if (!id) {
-      lastSyncAt = now
-      lastSyncRepo = repo
+      syncGate.mark(repo)
       lastSyncError = '拿不到本机设备标识，无法同步'
     }
     else if (options.force) {
       // 手点的那一次必须等回来：按钮上的成功 / 失败提示要用这一轮的真实结果
-      await enqueue(() => runSync(repo, shard))
+      await syncGate.now(repo, () => runSync(repo, shard))
     }
     else {
-      // 自动同步放后台：数据上面已经全部算完了，没有理由让卡片再等两趟网络。
-      // 跑完（成功失败都算）广播一次，订阅方据此重取 —— 新读回的分片立刻显示出来，
-      // 同步失败的原因也能及时反映到标题行，都不必干等到下一个轮询周期
-      void enqueue(() => runSync(repo, shard))
-        .finally(() => emit('tokenSynced', null))
-        .catch(() => undefined)
+      // 自动同步放后台：数据上面已经全部算完了，没有理由让卡片再等两趟网络
+      syncGate.schedule(repo, () => runSync(repo, shard))
     }
   }
 

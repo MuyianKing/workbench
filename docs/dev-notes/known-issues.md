@@ -120,6 +120,9 @@ on:
 
 ### 5. `types.ts` 一个人干三件事，还漏了两个包
 
+> **已处理（2026-11-13）**：拆成 `types/api.ts`（`WorkbenchApi`）、`types/settings.ts`（`AppSettings` + 默认值）与
+> `types/index.ts`（其余形状 + re-export 桶）；`@/types` 的导入路径不变。下面这段保留为当时的证据。
+
 **证据**：`apps/desktop/src/renderer/src/types.ts`（1759 行）
 
 - 既是 IPC 通道表：`WorkbenchApi` 从第 1082 行起，170 个成员、约 148 条 invoke；
@@ -138,6 +141,11 @@ on:
 ---
 
 ### 6. `settings.ts` 是 God Store，并且催生了重复的样板
+
+> **已部分处理（2026-11-13）**：`setX/commitX` 的 8 组样板已收成 `setThemeWidth` / `commitThemeWidth` 一对
+> （档位表在 `packages/appearance/src/theme.ts` 的 `WIDTH_FIELDS`）；背景图管理拆到
+> `stores/settings-background.ts`（`useSettingsBackground`）。剩下的 God Store 本体与 `ai.ts` 的拆分仍未做 ——
+> 下面这段保留为当时的证据与后续依据。
 
 **证据**：`apps/desktop/src/renderer/src/stores/settings.ts`
 
@@ -220,6 +228,9 @@ on:
 ---
 
 ### 11. 任意命令执行面：`run_command` 与 `spawn_session` 的边界
+
+> **已收窄（2026-11-13）**：`run_command` 从来没有渲染层调用点，已整条删除（命令实现 + 注册），执行面只剩
+> `spawn_session`（终端与 AI 助手在用）。下面的记录保留为「为什么当初留着它」的背景。
 
 这一条**不是缺陷，是设计取舍**，但要留个记认：`proc.rs:52-53` 的
 `Command::new("cmd").arg("/C").arg(program).args(args)` 是有意为之（npm / nvm 都是 `.cmd`，直启找不到），
@@ -320,3 +331,51 @@ on:
 - 组件块头（现在 28 个文件 > 600 行）：长期维护成本，不在这轮。
 - `run_command` / `spawn_session` 的任意命令执行面：那是设计取舍（见本文件 P2-11），要收紧得先设计。
 
+
+---
+
+## 处理记录（2026-11-13，结构整理轮）
+
+这轮按「高耦合 / 低内聚 / 复用 / 冗余」通读后集中改的一批，按文件落位：
+
+**删掉的死代码与死链路**
+
+- 用量聚合整条 Rust 链路：`wb_gateway_usage` / `wb_qoder_usage` 两个命令、`wb_usage` 的 `Summary` 一族与
+  `summarize`（约 350 行）都没有调用方，渲染层早就在 TS 里算（`packages/usage/src/gateway-usage.ts`）。
+  删的同时给 TS 补了一条「未定价请求不进折算分母」的用例，口径覆盖不缩水。
+- 从未被渲染层调用的三个 IPC：`run_command`、`active_sessions`、`forget_session`（及 `session::forget`）。
+- 13 个零引用导出（`VERSIONS_FALLBACK`、`clearTerminal`、`rectOriginText`、`formatShareYi`、网速环的
+  `TUCKED_*` / `OPEN_D` / `TICK_STROKE`、`idleRate`、`isNoteKind`、`TOKEN_USAGE_FILE_NAME`、`sortVideoNodes`、
+  `PROJECT_COLOR_CUSTOM_LABEL`、`currentAccount`）。
+- `wb_fingerprint.rs` 顶部那条「S1 还没有调用方」的 `#![allow(dead_code)]`：调用方早就有，豁免只是在掩盖。
+
+**拆掉的重复实现**
+
+- 右键菜单：5 份几乎一样的外壳（Teleport + 项列表 + 分隔线 + 危险档 + 约 100 行 CSS）收成
+  `components/FloatingMenu.vue`；五个调用点只留 items 与动作。选项差异用 `variant` / `minWidth` 表达。
+- 两套网关的壳：配置 / 密钥 / 启停 / 状态与接入信息的形状收进 `src-tauri/src/relay_core.rs`；
+  页面上账号卡收成 `components/gateway/AccountCards.vue`（`AccountCardView` 视图模型 + emit），
+  请求栏 `RequestsPane.vue` 改成 `:load-rows` / `:load-names` 注入、Qoder 复用（不再自绘七列）。
+- 栏宽样板：`appearance/theme.ts` 的 9 组 `MIN/MAX/DEFAULT` + 9 个 clamp 收成 `WIDTH_FIELDS` + `clampWidth`；
+  settings store 的 9 对 `setX/commitX` 收成 `setThemeWidth` / `commitThemeWidth`。
+- 同步节流：token / 活跃度 / 网关流水三份「间隔 + 换仓库即失效 + 单飞」收成 `workbench/auto-sync.ts`。
+- 包依赖倒挂：`sync-config` 从 `usage` 搬回 `appearance`（它本来就是外观同步）；悬浮小窗的档位与收敛搬进
+  `appearance/src/video-float.ts`（theme.json 的字段归 ThemeConfig 管）。
+
+**接缝与内聚**
+
+- 适配层去掉了 Proxy 兜底（它会给 `then` 编函数，`await window.workbench` 永远不落地）：改成装配时对
+  `WorkbenchApi` 做编译期覆盖检查（`MissingChannels`），漏通道直接 tsc 报错。
+- `types/index.ts`（2257 行）拆成 `types/api.ts` + `types/settings.ts` + 桶文件；
+  `settings.ts` 的背景图管理拆成 `stores/settings-background.ts`；
+  Rust 的 `sync.rs` 把图片仓库拆成 `sync_images.rs`（3146 → 约 2050 行），`wb_tasks.rs` 把活动记录与本地日期拆成
+  `wb_activity.rs`（2423 → 约 1970 行）。
+
+**这轮明确没做**
+
+- `stores/ai.ts`（约 1440 行）拆三份、`settings.ts` 的 God Store 本体：动面大且要按会话 / 运行 / 配置重构
+  store 的形状，不适合和「删死代码」混在一轮。
+- QoderView 的福利 / 模型两栏抽组件：两栏共用卡片网格的 scoped 样式，抽出来要么把外壳提到 global.css、
+  要么复制一份，收益小于回归风险（这页已经复用掉账号 / 用量 / 请求三栏）。
+- `appearance` 包里两套色值工具（`accent-color.ts` 与 `design-styles.ts`）：坏输入契约不同（前者夹回、后者防御
+  式返回原值），`index.ts` 文件头已写明「不合并」—— 这是既定取舍，不是漏项。

@@ -8,9 +8,10 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 use crate::common::now_secs;
+use crate::relay_core;
 use crate::qd_account::Account;
 use crate::qd_auth::{LoginStart, LoginTicket, PollOutcome};
 use crate::qd_body::Conversation;
@@ -19,63 +20,26 @@ use crate::qd_models::{self, ModelInfo};
 use crate::qd_tasks::{self, ActivityRow, CampaignView, CheckinStatus, ClaimResult, EarningPoint};
 use crate::qd_usage;
 use crate::wb_server::{self, Server};
-use crate::wb_usage::{self, BucketUnit};
-
-/// 登录窗口有效期。
-const LOGIN_TTL_SECS: i64 = 600;
-
-/// Qoder 自己的持久化配置（`data/wb-qoder/settings.json`）。
-///
-/// 与 TBuddy 的 `wb-gateway/settings.json` **各存各的**：端口、密钥、随程序启动都独立，
-/// 两个代理可以同时跑（端口不同）。字段少，直接读写文件。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Config {
-    #[serde(default = "default_auto_start")]
-    pub auto_start: bool,
-    pub port: u16,
-    #[serde(default)]
-    pub api_key: String,
-}
-
-fn default_auto_start() -> bool {
-    true
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            auto_start: true,
-            port: DEFAULT_PORT,
-            api_key: String::new(),
-        }
-    }
-}
+use crate::wb_usage;
 
 /// 默认端口。TBuddy 用 17878，这里错开一个。
 pub const DEFAULT_PORT: u16 = 17879;
 
-pub fn load_config() -> Config {
-    let path = crate::paths::qoder_settings_file();
-    let Ok(text) = std::fs::read_to_string(path) else {
-        return Config::default();
-    };
-    serde_json::from_str(&text).unwrap_or_default()
+/// 配置、密钥与状态 / 接入信息的形状在 `relay_core`（两套网关同一份）；这里只绑路径与端口。
+/// 与 TBuddy 的 `settings.json` **各存各的**：端口、密钥、随程序启动都独立。
+pub use crate::relay_core::{Access, Status};
+
+pub fn load_config() -> relay_core::Config {
+    relay_core::load_config(crate::paths::qoder_settings_file(), DEFAULT_PORT)
 }
 
-pub fn save_config(config: &Config) -> Result<(), String> {
-    let path = crate::paths::qoder_settings_file();
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|err| format!("建 Qoder 目录失败: {err}"))?;
-    }
-    let text = serde_json::to_string_pretty(config)
-        .map_err(|err| format!("序列化 Qoder 配置失败: {err}"))?;
-    crate::fs_util::write_atomic(&path, text.as_bytes())
+pub fn save_config(config: &relay_core::Config) -> Result<(), String> {
+    relay_core::save_config(crate::paths::qoder_settings_file(), config)
 }
 
-/// 一段随机密钥。`wbg-` 前缀与 TBuddy 同一族，认得出来这是网关密钥。
+/// 一段随机密钥（与 TBuddy 同一族前缀，认得出来这是网关密钥）。
 pub fn new_key() -> String {
-    format!("wbg-{}", uuid::Uuid::new_v4().simple())
+    relay_core::new_key()
 }
 
 struct LoginSession {
@@ -118,11 +82,8 @@ impl Qoder {
         inner.api_key = ensure_key()?;
 
         let shared = Arc::clone(&self.inner);
-        let handler: wb_server::Handler = Arc::new(move |request: &wb_server::Request| {
-            let mut inner = match shared.lock() {
-                Ok(inner) => inner,
-                Err(poisoned) => poisoned.into_inner(),
-            };
+        let handler: wb_server::Handler = relay_core::handler(move |request: &wb_server::Request| {
+            let mut inner = relay_core::lock_or_recover(&shared);
             // 先把 key 拷出来：`&mut inner.accounts` 与 `&inner.api_key` 同时借不行
             let key = inner.api_key.clone();
             let Inner {
@@ -132,16 +93,12 @@ impl Qoder {
             } = &mut *inner;
             crate::qd_router::route(request, accounts, &key, conversations)
         });
-        let server = Server::start(port, handler)?;
-        inner.server = Some(server);
-        Ok(port)
+        relay_core::start(&mut inner.server, port, handler)
     }
 
     pub fn stop(&self) -> Result<(), String> {
         let mut inner = self.lock()?;
-        if let Some(mut server) = inner.server.take() {
-            server.stop();
-        }
+        relay_core::stop(&mut inner.server);
         Ok(())
     }
 
@@ -152,15 +109,8 @@ impl Qoder {
         let config = load_config();
         Ok(Status {
             running: inner.server.is_some(),
-            port: inner
-                .server
-                .as_ref()
-                .map(Server::port)
-                .unwrap_or(config.port),
-            base_url: inner
-                .server
-                .as_ref()
-                .map(|server| wb_server::api_base(server.port())),
+            port: relay_core::running_port(&inner.server, config.port),
+            base_url: relay_core::base_url(&inner.server),
             accounts: inner.accounts.len(),
             ready,
             auto_start: config.auto_start,
@@ -225,13 +175,7 @@ impl Qoder {
             inner.api_key = ensure_key()?;
         }
         Ok(Access {
-            base_url: wb_server::api_base(
-                inner
-                    .server
-                    .as_ref()
-                    .map(Server::port)
-                    .unwrap_or(config.port),
-            ),
+            base_url: wb_server::api_base(relay_core::running_port(&inner.server, config.port)),
             api_key: inner.api_key.clone(),
             models: qd_models::merged()
                 .into_iter()
@@ -244,12 +188,7 @@ impl Qoder {
 
 /// 读 Qoder 自己的密钥；没有就生成并落盘。
 fn ensure_key() -> Result<String, String> {
-    let mut config = load_config();
-    if config.api_key.trim().is_empty() {
-        config.api_key = new_key();
-        save_config(&config)?;
-    }
-    Ok(config.api_key)
+    relay_core::ensure_key(crate::paths::qoder_settings_file(), DEFAULT_PORT)
 }
 
 impl Inner {
@@ -272,27 +211,8 @@ impl Inner {
     fn prune_logins(&mut self) {
         let now = now_secs();
         self.logins
-            .retain(|_, session| now - session.ticket.created <= LOGIN_TTL_SECS);
+            .retain(|_, session| now - session.ticket.created <= relay_core::LOGIN_TTL_SECS);
     }
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Status {
-    pub running: bool,
-    pub port: u16,
-    pub base_url: Option<String>,
-    pub accounts: usize,
-    pub ready: usize,
-    pub auto_start: bool,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Access {
-    pub base_url: String,
-    pub api_key: String,
-    pub models: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -709,13 +629,6 @@ pub fn wb_qoder_credits(
 // ---------- 用量 / 请求 ----------
 
 #[tauri::command(async)]
-pub fn wb_qoder_usage(days: i64) -> wb_usage::Summary {
-    let since = wb_usage::window_start(days);
-    let rows = qd_usage::read_since(since);
-    wb_usage::summarize(&rows, BucketUnit::Hour)
-}
-
-#[tauri::command(async)]
 pub fn wb_qoder_usage_rows(days: i64) -> UsageWindow {
     let since = wb_usage::fetch_start(days);
     UsageWindow {
@@ -937,8 +850,8 @@ mod tests {
 
     #[test]
     fn 配置缺字段时按默认值补齐() {
-        let config: Config =
-            serde_json::from_str(r#"{"port": 17879}"#).unwrap_or_default();
+        let config: relay_core::Config =
+            serde_json::from_str(r#"{"port": 17879}"#).unwrap_or_else(|err| panic!("{err}"));
         assert!(config.auto_start);
         assert_eq!(config.port, 17879);
     }

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { Result } from '@workbench/core'
 import type { GatewayUsageRow } from '@/workbench/gateway'
 import { List } from '@element-plus/icons-vue'
 import { computed, onMounted, ref } from 'vue'
@@ -13,7 +14,19 @@ import RequestFilters from './RequestFilters.vue'
  *
  * 列照参考面板那一套摆：一行就把「用了什么模型、以什么档位、走了多久、花在哪」看全。
  * 数据全部来自 `usage.jsonl`；上游没给的（积分、思考 token）记成空，界面显示 `—`，不猜。
+ *
+ * TBuddy 与 Qoder 两页共用这一份：取数与账号名由页面注入（`:load-rows` / `:load-names`），
+ * 两边的流水形状相同（`GatewayUsageRow`），列与筛选口径也就该完全一致。
  */
+const props = defineProps<{
+  /** 取最近若干条流水；默认 TBuddy 的 */
+  loadRows?: (limit: number) => Promise<Result<GatewayUsageRow[]>>
+  /** uid → 账号名；默认 TBuddy 的账号表 */
+  loadNames?: () => Promise<Record<string, string>>
+  /** 空态提示（默认 TBuddy 的文案） */
+  emptyHint?: string
+}>()
+
 const limit = ref(100)
 const result = ref<'all' | 'ok' | 'fail'>('all')
 const keyword = ref('')
@@ -79,13 +92,15 @@ function rowKey(row: GatewayUsageRow): string {
 
 function load(): void {
   loading.value = true
-  void window.workbench.gatewayUsageRecent(limit.value).then((reply) => {
+  const fetchRows = props.loadRows ?? window.workbench.gatewayUsageRecent
+  void fetchRows(limit.value).then((reply) => {
     if (reply.ok && reply.data)
       rows.value = reply.data
     loading.value = false
   })
   // 名字跟着重新读取一起取：新登录的号冒出来的第一条流水，就该是名字
-  void gatewayAccountNames().then((map) => {
+  const fetchNames = props.loadNames ?? gatewayAccountNames
+  void fetchNames().then((map) => {
     names.value = map
   })
 }
@@ -107,7 +122,7 @@ onMounted(load)
     />
 
     <div v-if="!filtered.length" class="panel">
-      <EmptyState compact :icon="List" text="还没有请求" hint="TBuddy 启动后，客户端来的请求会出现在这里" />
+      <EmptyState compact :icon="List" text="还没有请求" :hint="props.emptyHint ?? 'TBuddy 启动后，客户端来的请求会出现在这里'" />
     </div>
 
     <GatewayTable

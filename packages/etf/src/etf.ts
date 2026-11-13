@@ -658,11 +658,6 @@ export function formatYi(yuan: number, signed = false): string {
   return yi > 0 ? `+${text}` : text
 }
 
-/** 份 → 亿份 */
-export function formatShareYi(shares: number): string {
-  return Number.isFinite(shares) ? (shares / 1e8).toFixed(2) : '—'
-}
-
 /** 已经折成亿元的数值 → 展示串（口径与 `formatYi` 一致：过百取整、带符号时正数补加号） */
 export function formatYiNumber(yi: number, signed = false): string {
   if (!Number.isFinite(yi))

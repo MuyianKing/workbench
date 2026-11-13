@@ -466,12 +466,6 @@ pub fn active_ids(app: &AppHandle) -> Vec<String> {
     map.keys().cloned().collect()
 }
 
-/// 会话是否还在（等待线程结束后才会从表里移除，所以这里只用来判断「起没起过」）
-pub fn forget(app: &AppHandle, session_id: &str) {
-    let state = app.state::<Sessions>();
-    state.0.lock().expect("锁中毒").remove(session_id);
-}
-
 
 #[cfg(test)]
 mod tests {

@@ -7,6 +7,7 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
+    "@workbench/appearance": "workspace:*",
     "@workbench/notes": "workspace:*"
   },
   "devDependencies": {

@@ -10,7 +10,7 @@
  *  - `document` 给最小桩（主题落在 `documentElement` 上）；
  *  - `@/notify` 换成假的：它底下是 Element Plus，node 里没必要真加载。
  */
-import { clampNoteTreeWidth, DEFAULT_THEME } from '@workbench/appearance'
+import { clampWidth, DEFAULT_THEME } from '@workbench/appearance'
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -62,11 +62,11 @@ describe('布局落盘只送该送的字段', () => {
   it('笔记树宽度先在本地夹到区间内，落盘只带这一个字段', async () => {
     const store = useSettingsStore()
 
-    store.setNoteTreeWidth(-100)
-    expect(store.themeConfig.noteTreeWidth).toBe(clampNoteTreeWidth(-100))
+    store.setThemeWidth('noteTreeWidth', -100)
+    expect(store.themeConfig.noteTreeWidth).toBe(clampWidth('noteTreeWidth', -100))
 
-    await store.commitNoteTreeWidth()
-    expect(themePatches).toEqual([{ noteTreeWidth: clampNoteTreeWidth(-100) }])
+    await store.commitThemeWidth('noteTreeWidth')
+    expect(themePatches).toEqual([{ noteTreeWidth: clampWidth('noteTreeWidth', -100) }])
   })
 
   it('视频树收起状态没变时直接回 true，不写盘', async () => {

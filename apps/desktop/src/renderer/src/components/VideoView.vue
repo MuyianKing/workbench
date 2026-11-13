@@ -230,8 +230,8 @@ async function openVideoExternally(rel: string): Promise<void> {
         v-show="!treeCollapsed"
         :width="settings.themeConfig.videoTreeWidth"
         body-class="is-resizing-video-tree"
-        @move="settings.setVideoTreeWidth"
-        @end="() => void settings.commitVideoTreeWidth()"
+        @move="width => settings.setThemeWidth('videoTreeWidth', width)"
+        @end="() => void settings.commitThemeWidth('videoTreeWidth')"
       />
 
       <section class="video__player panel">

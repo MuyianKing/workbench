@@ -2,12 +2,12 @@ import type { Result } from '@/types'
 /**
  * 渲染层与 Tauri 后端之间的桥。
  *
- * 四条约定：
+ * 三条约定：
  *  1. 前端只认 `window.workbench` 这个契约，不认识 Tauri 命令名 —— 名字映射收敛在这里；
- *  2. 尚未移植的通道统一走 `notPorted`，返回与 `Result` 同形的失败值而不是抛错，
- *     界面因此降级成空态而不是白屏（迁移期间的可观测性靠它）；
- *  3. 全部经 `__TAURI__` / `__TAURI_INTERNALS__`，不引 npm 依赖（tauri.conf.json 里开了 withGlobalTauri）；
- *  4. 可能失败的调用经 `guard` 收敛成 `Result`，形状与主进程版一致。
+ *  2. 全部经 `__TAURI__` / `__TAURI_INTERNALS__`，不引 npm 依赖（tauri.conf.json 里开了 withGlobalTauri）；
+ *  3. 可能失败的调用经 `guard` 收敛成 `Result`，形状与主进程版一致。
+ *
+ * 「通道有没有实现」不在这里兜底：缺通道是装配时的编译错误（见 index.ts 的 MissingChannels）。
  */
 import { fail, ok } from '@workbench/core'
 
@@ -138,20 +138,4 @@ export function errorText(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message)
     return error.message
   return fallback
-}
-
-/** 已经报过「尚未移植」的通道，避免同一个警告刷满控制台 */
-const warned = new Set<string>()
-/**
- * 尚未移植的通道。
- *
- * 返回 `{ ok: false }` 而不是抛错：绝大多数通道本来就是 `Result` 形状，
- * 界面会照常走「失败提示」那条路；数组型的取值接口会退化成空态。
- */
-export function notPorted(channel: string): Promise<never> {
-  if (!warned.has(channel)) {
-    warned.add(channel)
-    console.warn(`[workbench] 通道尚未移植到 Tauri 后端: ${channel}`)
-  }
-  return Promise.resolve({ ok: false, error: `「${channel}」尚未移植到 Tauri 后端` } as never)
 }

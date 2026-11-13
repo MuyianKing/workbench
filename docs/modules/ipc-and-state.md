@@ -8,7 +8,8 @@
 
 ### 通道
 
-- 契约以 [types/index.ts](../../apps/desktop/src/renderer/src/types/index.ts) 的 `WorkbenchApi` 为准：Tauri 命令名用 snake_case，
+- 契约以 [types/api.ts](../../apps/desktop/src/renderer/src/types/api.ts) 的 `WorkbenchApi` 为准（`@/types` 从那里 re-export；
+  设置与默认值在 `types/settings.ts`）：Tauri 命令名用 snake_case，
   camelCase 方法名到命令名的映射只出现在适配层。通道载荷类型（`Gateway*` / `Qoder*` / `Etf*`）住在 `types/gateway.ts` /
   `types/qoder.ts` / `types/etf.ts`（契约侧），适配层从 `@/types` **import 并 re-export** —— `from '@/workbench/gateway'` 照旧
   能用，但**契约不再反向 import 适配层**（原先 47 处 `import('./workbench/…')`），新增载荷类型一律落 `types/`。
@@ -21,13 +22,15 @@
   签名认为它不会失败。
 - 新增通道三步：`WorkbenchApi` 登记 → 适配层实现 → 需要后端时在 `commands.rs` 写命令并在 `main.rs` 的 `generate_handler!`
   注册。渲染层→主进程的单向事件走适配层的 `events.ts` 广播。
-- 适配层实现**按域分文件**：`workbench/index.ts` 只是装配根（spreads + 未移植兜底 + 安装时序），通道按域住在 `api-sync.ts`
+- 适配层实现**按域分文件**：`workbench/index.ts` 只是装配根（spreads + 通道覆盖检查 + 安装时序），通道按域住在 `api-sync.ts`
   （同步门禁几组）、`api-project.ts`（项目 CRUD 与进程十件事）、`api-system.ts`（系统 / 窗口 / 对话框 / 系统集成）、
   `api-background.ts`（背景图与图片授权）、`api-events.ts`（事件订阅与截图 / 钉图 / 网速球三窗共用组）；域模块薄转发收在
   index.ts 的 `domainsApi`，网关、Qoder 与独立视频窗口各自整组在 `gateway.ts` / `qoder.ts` / `video-window.ts`。新增通道加到
   对应域文件，不要往 index.ts 里塞实现。
-- **数组 / 对象形状的取值接口必须真实现，绝不能落到「尚未移植」兜底**：兜底返回的是 `Result` 对象，store 会把它当数组遍历、
-  直接抛错并打断整条 `init()`，表现成完全无关的功能失灵（`listQuickApps` / `listCommands` 就这么让「系统状态」一直没数据）。
+- **「通道有没有实现」是编译期的事，运行期没有兜底**：装配根把合并出来的对象与 `WorkbenchApi` 对一遍（`MissingChannels`），
+  漏一条就是 tsc 报错并把名字列出来。原来那层 Proxy（缺通道返回「尚未移植」）已经删掉 —— 它有两个毛病：漏实现要到运行时才
+  发现；而且它给 `then` 也编了个函数，`await window.workbench` 会被当成 thenable 永远不落地。**不要把它加回来**：新增通道时
+  实现与 `types/api.ts` 的登记必须同一次改完。
 - 渲染层不直接访问 Node / 文件系统 / WebView 宿主能力，一切经 `window.workbench`。**唯一例外是「大文件交给 webview 按文件
   读」的两处**：工作区背景图与视频播放 —— 让 webview 按 asset 协议自己加载（URL 由适配层 `assetUrl()` 转出），读取权限一律
   在 Rust 侧按**单个文件**授予（`commands.rs` 的 `allow_background` / `allow_video`，后者先核后缀与 MP4 文件头再放行），
@@ -148,8 +151,9 @@
   src/credentials.rs     Windows 凭据管理器读写（access_token 与**保险库密钥**落在这里，不落 JSON）
   src/encoding.rs        base64 / SHA-256 / UTF-16 宽字符串（前两者用 base64 / sha2）
 
-    bridge.ts            invoke / 事件 / 未移植通道兜底
+    bridge.ts            invoke / 事件 / 错误收敛
     events.ts            适配层内部广播
+    auto-sync.ts         「一台机器一份分片」那类同步的公共节流
     state.ts             持久化状态与增删改
     session.ts           进程会话与事件翻译
     scanner.ts           扫描的生产侧（fs 经 IPC 落到 Rust）

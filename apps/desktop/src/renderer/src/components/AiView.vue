@@ -368,8 +368,8 @@ const runningIds = computed(() =>
       v-show="!treeCollapsed"
       :width="settings.themeConfig.aiTreeWidth"
       body-class="is-resizing-ai-tree"
-      @move="settings.setAiTreeWidth"
-      @end="() => void settings.commitAiTreeWidth()"
+      @move="width => settings.setThemeWidth('aiTreeWidth', width)"
+      @end="() => void settings.commitThemeWidth('aiTreeWidth')"
     />
 
     <section class="ai-view__main">

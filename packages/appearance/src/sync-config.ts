@@ -1,4 +1,4 @@
-import type { ThemeConfig } from '@workbench/appearance'
+import type { ThemeConfig } from './theme'
 /**
  * 同步仓库里 `config/<设备id>.json` 的结构：**本机 theme.json 的整份副本 + 一层设备信封**。
  *
@@ -10,7 +10,7 @@ import type { ThemeConfig } from '@workbench/appearance'
  * （两台机器互相自动采用对方的配置会来回覆盖、永远收敛不了）。时间戳取自 theme.updatedAt ——
  * 那是这台机器上外观最后一次真的变化的时间，不是「推送到仓库」的时间。
  */
-import { sanitizeTheme } from '@workbench/appearance'
+import { sanitizeTheme } from './theme'
 
 /** 仓库里一台机器的那份配置 */
 export interface ThemeFile {

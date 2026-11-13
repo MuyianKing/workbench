@@ -7,7 +7,6 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@workbench/appearance": "workspace:*",
     "@workbench/core": "workspace:*",
     "lodash-es": "^4.17.12"
   },

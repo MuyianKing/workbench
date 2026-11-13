@@ -11,7 +11,8 @@
  * 全是纯函数，放这里是为了被单测直接覆盖。目录收敛（sanitizeVideoRoot）与
  * 笔记文件夹是同一件事（本机挑的一个目录），直接复用 note.ts 的那几个函数。
  */
-import { buildRelTree, countRelNodes, findRelNode, normalizeRel, noteAbsPath, noteRootName, pushNoteHistory, relChain, removeFromNoteHistory, sanitizeNoteHistory, sanitizeNoteRoot, sanitizeNoteTreeExpanded, sortRelNodes } from '@workbench/notes'
+import { clampVideoFloatHeight, clampVideoFloatWidth, VIDEO_FLOAT_SIZE_MIN } from '@workbench/appearance'
+import { buildRelTree, countRelNodes, findRelNode, normalizeRel, noteAbsPath, noteRootName, pushNoteHistory, relChain, removeFromNoteHistory, sanitizeNoteHistory, sanitizeNoteRoot, sanitizeNoteTreeExpanded } from '@workbench/notes'
 
 /** 只认这一种后缀。别的容器（mkv / avi / flv…）webview 里的解码器不一定有，先不收 */
 const VIDEO_EXTENSION = '.mp4'
@@ -63,14 +64,6 @@ export function videoDisplayName(fileName: string): string {
 
 /** 收敛一个相对路径：分隔符统一成 `/`、去掉空段与 `.` 段（与 note.ts 同一条口径） */
 export const normalizeVideoRel = normalizeRel
-
-/**
- * 同层排序：**文件夹在前、视频在后**，各自按名字排（与笔记树同一条规则，
- * 连 `笔记 10` 排在 `笔记 9` 后面的 numeric 口径也一样）。
- */
-export function sortVideoNodes(nodes: readonly VideoNode[]): VideoNode[] {
-  return sortRelNodes(nodes)
-}
 
 /**
  * 平铺清单 → 树。
@@ -259,51 +252,9 @@ export function nextVideoRate(current: number, direction: 1 | -1): number {
 /**
  * 切到别的页时正播的视频缩成的那只悬浮小窗。
  *
- * 位置与尺寸会落盘（theme.json，与视频树宽同属「这一页长什么样」），读它的一方
- * （sanitizeTheme）与拖动它的一方（VideoPlayer）必须用同一套边界 —— 共用规则与
- * 终端悬浮按钮（shared/terminal-dock.ts）同一个道理：手改过的数据文件不能把小窗
- * 放到够不着的地方去。
- *
- * **位置存视口百分比而不是像素**（同 terminal-dock.ts 的口径）：换台机器、把窗口
- * 拉大拉小，小窗都还停在差不多的地方。窗口内的最终落点渲染时按当前视口再 clamp
- * 一次（那里才知道小窗自己的宽高），这里的边界只是数据文件的第一道防线。
+ * 尺寸档位与位置收敛在 `@workbench/appearance` 的 `video-float.ts`（它们落在 theme.json，
+ * 归 ThemeConfig 管）；这里只剩按当前视口把落盘值折成渲染盒子的几何。
  */
-
-/** 小窗默认尺寸（px）：16:9 出来的 320×180，不压内容也不挡太多笔记 */
-export const VIDEO_FLOAT_SIZE_DEFAULT = { width: 320, height: 180 }
-
-/** 小窗最小 / 最大尺寸（px）：再小看不清字幕，再大就是回去看视频页了 */
-export const VIDEO_FLOAT_SIZE_MIN = { width: 240, height: 135 }
-export const VIDEO_FLOAT_SIZE_MAX = { width: 1280, height: 720 }
-
-/** 位置（视口百分比）的默认落点：右上角 —— 那儿离笔记正文最远，也最少挡东西 */
-export const VIDEO_FLOAT_X_DEFAULT = 100
-export const VIDEO_FLOAT_Y_DEFAULT = 0
-
-/**
- * 收敛位置（视口百分比）：0–100，超界一律拉回；缺失 / 认不出的取值回到 `fallback`
- * —— X 的默认是右上角、Y 的默认是顶边（与 DEFAULT_THEME 同一口径）。
- */
-export function clampVideoFloatPercent(value: unknown, fallback = 0): number {
-  if (typeof value !== 'number' || !Number.isFinite(value))
-    return clampVideoFloatPercent(fallback)
-  return Math.min(100, Math.max(0, value))
-}
-
-function clampVideoFloatSide(value: unknown, min: number, max: number, fallback: number): number {
-  const size = typeof value === 'number' && Number.isFinite(value) ? value : fallback
-  return Math.min(max, Math.max(min, Math.round(size)))
-}
-
-/** 收敛小窗宽度（px）；缺失 / 认不出的取值回到默认尺寸 */
-export function clampVideoFloatWidth(value: unknown): number {
-  return clampVideoFloatSide(value, VIDEO_FLOAT_SIZE_MIN.width, VIDEO_FLOAT_SIZE_MAX.width, VIDEO_FLOAT_SIZE_DEFAULT.width)
-}
-
-/** 收敛小窗高度（px）；缺失 / 认不出的取值回到默认尺寸 */
-export function clampVideoFloatHeight(value: unknown): number {
-  return clampVideoFloatSide(value, VIDEO_FLOAT_SIZE_MIN.height, VIDEO_FLOAT_SIZE_MAX.height, VIDEO_FLOAT_SIZE_DEFAULT.height)
-}
 
 /**
  * 落盘值 → 当前视口里的渲染盒子：宽高先压进视口（渲染不可能比视口大），
