@@ -177,15 +177,26 @@ const domainsApi = {
   vaultSync: () => vault.sync(syncRepo()),
   vaultRemoteKeyStatus: () => vault.remoteKeyStatus(syncRepo()),
 
-  // ---------- 知识库（用户在别处维护的独立项目，见 workbench/kb.ts） ----------
-  // 后两个参数是原始数据的来源清单（来源名 → 本机一个文件夹）：扫与读都要带上它
-  kbScan: (root: string, sources: Parameters<WorkbenchApi['kbScan']>[1]) => kb.kbScan(root, sources),
-  kbRead: (root: string, rel: string, sources: Parameters<WorkbenchApi['kbRead']>[2]) =>
-    kb.kbRead(root, rel, sources),
-  // 目录与索引的重建由应用自己做（对齐仓库脚本的输出）；内容由 AI 助手那一轮写入
+  // ---------- 知识库（仓库里 raw/ + data/ 两层的独立项目，见 workbench/kb.ts） ----------
+  kbScan: (root: string, links: Parameters<WorkbenchApi['kbScan']>[1]) => kb.kbScan(root, links),
+  kbRead: (root: string, rel: string, links?: Parameters<WorkbenchApi['kbRead']>[2]) =>
+    kb.kbRead(root, rel, links),
+  // 目录与索引的重建由应用自己做；条目的内容由 AI 那一轮清洗写入
   kbIndexBuild: (root: string, generatedAt: string) => kb.kbIndexBuild(root, generatedAt),
-  // 同步与仓库探测复用笔记那两条通用通道（对任意文件夹、认它自己的 origin），技能页同款
-  kbSync: (input: Parameters<WorkbenchApi['kbSync']>[0]) => kb.kbSync(input),
+  // 内容指纹（跨设备判「已入库 / 有更新」）与那几件受控的写动作（见 workbench/kb.ts）
+  kbFingerprints: (root: string, rels: string[]) => kb.kbFingerprints(root, rels),
+  kbEntryDelete: (root: string, rels: string[]) => kb.kbEntryDelete(root, rels),
+  kbSourceSync: (root: string, name: string, dir: string) => kb.kbSourceSync(root, name, dir),
+  kbDeleteTree: (root: string, name: string) => kb.kbDeleteTree(root, name),
+  kbFileDelete: (root: string, name: string, dir: string, rels: string[]) =>
+    kb.kbFileDelete(root, name, dir, rels),
+  kbAgentsDoc: (root: string) => kb.kbAgentsDoc(root),
+  kbConfigWrite: (root: string, content: string) => kb.kbConfigWrite(root, content),
+  kbMigrate: (root: string, sources: Parameters<WorkbenchApi['kbMigrate']>[1], manifest: string) =>
+    kb.kbMigrate(root, sources, manifest),
+  // 知识库仓库自己的 git 通道（提交拉推 / 只拉不推）；仓库探测复用笔记那条通用通道
+  kbSync: (dir: string) => kb.kbSync(dir),
+  kbPull: (dir: string) => kb.kbPull(dir),
   kbRepoState: (dir: string) => kb.kbRepoState(dir),
   // AI 助手那几条不在这里：它们要回传进程输出、按会话 id 认领事件，
   // 与 spawn_session 同一条路子住在适配层（见 workbench/ai.ts）

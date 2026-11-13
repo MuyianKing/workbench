@@ -1,28 +1,28 @@
 import type { AiLogLine } from '@workbench/ai'
-import type { KbCleanPhase, KbEntryMeta, KbIndexInfo, KbIssue, KbRawItem, KbRawSource, KbRawSourceRow, KbRawViewKind, KbRepoState, KbScanEntry, KbStats } from '@workbench/kb'
+import type { KbCleanPhase, KbDanglingGroup, KbEntryMeta, KbLibraryRow, KbManifestEntry, KbRawItem, KbRawViewKind, KbRepoState, KbScanEntry, KbSourceLink, KbStats } from '@workbench/kb'
 
 import { confirmFrame, piLaunch, writtenEntries } from '@workbench/ai'
-import { KB_DIR, KB_INDEX_REL, KB_RAW_DIR, kbCleanPrompt, kbEntryFiles, kbEntryLinks, kbLint, kbRawFiles, kbRawSourceRows, kbRawSourcesFor, kbRawViewKind, kbStats, kbTagCounts, kbVisibleRawEntries, matchKbRawStatus, normalizeKbSource, parseKbFrontmatter, parseKbIndex, resolveKbLink, sameKbRoot, sanitizeKbRawSources, sanitizeKbSourceName, splitCleanWrites, todayIsoDate } from '@workbench/kb'
+import { KB_RAW_DIR, kbCleanPrompt, kbDanglingGroups, kbEntryFiles, kbLibraryRows, kbRawDisplayPath, kbRawFiles, kbRawReferencedRels, kbRawSourceNameOf, kbRawViewKind, kbSourceLinkKey, kbSourceRef, kbStats, matchKbRawStatus, normalizeKbSource, parseKbFrontmatter, parseKbManifest, sameKbRoot, sanitizeKbName, sanitizeKbSourceLinks, serializeKbManifest, todayIsoDate } from '@workbench/kb'
 
 import { noteRootName, sanitizeNoteRoot } from '@workbench/notes'
 import { defineStore } from 'pinia'
 /**
- * 知识库：清单、条目、原始数据与入库状态的编排，外加**清洗**这件事的全程驱动。
+ * 知识库：**仓库里 raw/ + data/ 两层**的编排，外加「添加 / 删除 / 清洗 / 迁移」这些动作的
+ * 全程驱动。
  *
- * 与笔记 / 技能 store 同一个思路：知识库就是用户挑的那个文件夹（一个独立项目的根），
- * 这里没有内存副本 ——「条目」是扫出来再逐个读 frontmatter 的、「原始数据」是扫出来的，
- * 应用对条目内容**只读**。清洗由应用编排：扫描出的待处理清单 + kb-clean.ts 里的提示词
- * 交给内置的 Pi（走 ai.rs 那条通用驱动链路），盯完一轮自动重建索引、刷新状态 ——
- * 用户不写指令、不碰提示词。
+ * 知识库就是用户挑的那个文件夹（一个 git 仓库的根）：列表数据来自仓库里的清单文件
+ * （`raw/kb.json`，别的设备推上来什么这边就有什么），原始数据物理在 `raw/` 下、清洗写
+ * `data/`。本机哪台设备给哪个知识库关联了源头文件夹只落本机设置（`kbRawSources`）——
+ * 没有关联的知识库直接用仓库里的 raw 副本（只读）。
  *
- * 状态判定的口径（source 配对 + mtime 比较）在 packages/kb/src/kb.ts 的纯函数里，这边只编排：
- * 扫描 → 拆三部分（条目 / 原始数据 / 索引）→ 配状态 → 界面取用。另有两件「库内一致性」
- * 的事也在这里收口：**巡检**（packages/kb/src/kb-lint.ts 的 kbLint，只读报告，算着但界面不展示）与
- * **站内链接**（条目正文里点一条 → followLink 解析成条目或原始数据，再走上面那两条开口）。
+ * **清洗的硬前置是把原始文件上传远程仓库**：清洗前先做源头同步（本机改过的文件复制进
+ * raw）→ 提交推送（kb_sync）→ 算清单交给内置的 Pi（提示词在 kb-clean.ts，走 ai.rs 那条
+ * 通用驱动链路）→ 跑完重建索引、再推一次（把新条目送上去）。任何一步失败都就地拦下，
+ * 不让「本地洗了、远端没有」的状态发生。
  *
- * **原始数据的来源**（来源名 → 本机一个文件夹）也归这里编：映射住在设置里、只对本机成立，
- * 应用不搬运任何文件。检测是**手动**的（工具条那颗「检测更新」= reload + 报一句结果），
- * 不设后台轮询、也没有自动清洗 —— 这一页的动作都由用户点出来。
+ * 打开页面会**后台拉取一次远端**（kb_pull，只拉不推）：列表数据来自远程仓库，
+ * 自动 pull 让它即开即新；冲突不挑边，只把原因摆到同步那行。检测是**手动**的
+ * （工具条那颗「检测更新」= reload + 报一句结果），没有后台轮询、也没有自动清洗。
  */
 import { computed, ref, watch } from 'vue'
 import { notifyError, notifyInfo, notifySuccess } from '@/notify'
@@ -31,48 +31,63 @@ import { useAiSkillsStore } from '@/stores/ai-skills'
 import { useSettingsStore } from '@/stores/settings'
 import { aiAbort, aiRun, aiSend, aiSessionProcessId, aiStop } from '@/workbench/ai'
 
+/** 清洗的范围：全库 / 某个知识库 / 某个文件（右键菜单那两条按它过滤清单） */
+export type KbCleanScope = { kind: 'all' } | { kind: 'kb', name: string } | { kind: 'file', rel: string }
+
+/** 旧结构的条目目录（迁移前）：「像不像知识库」与「要不要迁移」都认它 */
+const KB_LEGACY_DIR = 'kb'
+
 export const useKbStore = defineStore('kb', () => {
   const settings = useSettingsStore()
 
   /**
-   * 知识库文件夹：**用户自己挑的一个目录**（一个独立项目的根）。
+   * 知识库文件夹：**用户自己挑的一个目录**（一个 git 仓库的根）。
    * 空串 = 还没选过，整页只给引导。与笔记 / 技能文件夹互不相干。
    */
   const root = computed(() => settings.settings.kbDir)
-  /** 当前知识库配的原始数据来源（别的知识库配的不串过来） */
-  const sources = computed<KbRawSource[]>(() =>
-    kbRawSourcesFor(settings.settings.kbRawSources, root.value),
+  /** 本机给这个知识库根关联的源头文件夹（知识库名 → 文件夹；没有关联的就是只读） */
+  const sourceLinks = computed<KbSourceLink[]>(() => {
+    const key = root.value.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
+    if (!key)
+      return []
+    return settings.settings.kbRawSources.filter(
+      link => link.root.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase() === key,
+    )
+  })
+  /** 带得出去的关联清单（有源头文件夹的那些）：扫描与读取共用 —— 有关联就认本机那份 */
+  const activeLinks = computed(() =>
+    sourceLinks.value.filter(link => link.dir).map(link => ({ name: link.name, dir: link.dir })),
   )
-  /** 文件夹的 git 状态（探出来的、不落盘）：有没有仓库与远端决定给不给同步按钮 */
+  /** 文件夹的 git 状态（探出来的、不落盘）：有没有仓库与远端决定给不给同步入口 */
   const repoState = ref<KbRepoState | null>(null)
   const remoteUrl = computed(() => repoState.value?.origin ?? '')
   const canSync = computed(() => repoState.value?.isRepo === true && remoteUrl.value !== '')
 
-  /** 扫描的原始平铺清单（**全量**：来源行要看库里那份副本还在不在，所以不在这里摘） */
+  /** 扫描的原始平铺清单（仓库里读到的：raw、data、生成物） */
   const scanEntries = ref<KbScanEntry[]>([])
+  /** 清单文件解析出来的知识库列表（列表数据源；认不出按空清单处理） */
+  const manifest = ref<KbManifestEntry[]>([])
   const entries = ref<KbEntryMeta[]>([])
   const rawItems = ref<KbRawItem[]>([])
-  /** 来源行（最外层那一格）：配置与库里 data/raw 的顶层目录合起来，带每个来源的几个数 */
-  const rawSources = ref<KbRawSourceRow[]>([])
+  /** 列表行（最外层）：清单一条一行，带本机关联与这一库的几个数 */
+  const libraries = ref<KbLibraryRow[]>([])
   /**
-   * 上一次检测报出去的几个数（「检测更新」那颗按钮）：只说**变化**用（「发现了 2 处更新」
-   * 比把总数再说一遍有用）。它记的是「上一次报给你的话」，不是数据事实，所以只在内存里、
-   * 不落盘、也不进设置 —— 进设置就成了第二份真源。
+   * 失联组（次次重扫现算，不落盘）：一个 raw 文件一组，列出指向它的条目。
+   * 只在「这一轮扫描成功、且文件不在清单里」时出现（多半是别的设备删了、pull 下来后
+   * 条目还在），点开确认后整组删。
+   */
+  const dangling = ref<KbDanglingGroup[]>([])
+  /**
+   * 上一次检测报出去的几个数（「检测更新」那颗按钮）：只说**变化**用。它记的是
+   * 「上一次报给你的话」，不是数据事实，所以只在内存里、不落盘、也不进设置。
    */
   const lastDetect = ref<KbStats | null>(null)
-  const indexInfo = ref<KbIndexInfo | null>(null)
 
   const loading = ref(false)
   const loaded = ref(false)
   const loadError = ref('')
 
-  /** 当前打开的条目（kb 相对路径）与它的正文；没有打开的就是概览 */
-  const activeRel = ref('')
-  const activeContent = ref('')
-  const activeLoading = ref(false)
-  const activeError = ref('')
-
-  /** 当前查看的原始数据（data/raw 相对路径）与正文；没有查看的就是概览。与条目查看互斥 */
+  /** 当前查看的原始数据（raw 相对路径）与正文；没有查看的就是概览 */
   const activeRawRel = ref('')
   const activeRawContent = ref('')
   const activeRawLoading = ref(false)
@@ -80,59 +95,60 @@ export const useKbStore = defineStore('kb', () => {
 
   const syncing = ref(false)
   const syncError = ref('')
-  /** 重建索引正在进行（那颗按钮转圈用） */
-  const rebuilding = ref(false)
+  /** 后台拉取远端正在进行（不挡界面，只是防重入） */
+  const pulling = ref(false)
+  /** 一次性迁移正在进行 */
+  const migrating = ref(false)
 
-  const activeEntry = computed(() => entries.value.find(item => item.rel === activeRel.value) ?? null)
   /** 正在查看的原始数据（清单里那一条）与它该怎么看（按后缀分：渲染 / 纯文本 / 交出去） */
   const activeRaw = computed(() => rawItems.value.find(item => item.rel === activeRawRel.value) ?? null)
   const activeRawKind = computed<KbRawViewKind>(() =>
     activeRaw.value ? kbRawViewKind(activeRaw.value.name) : 'external',
   )
   const stats = computed(() => kbStats(entries.value, rawItems.value))
-  const tagCounts = computed(() => kbTagCounts(entries.value))
-  /** 巡检：库内一致性的**只读**检查（孤儿 / 断链 / 元数据 / 出处 / 主题目录） */
-  const lintIssues = computed<KbIssue[]>(() =>
-    kbLint(
-      entries.value,
-      // 被映射顶掉的库里那份不进巡检的「库里有什么」：以映射为准，与清单、与状态同一口径
-      kbVisibleRawEntries(scanEntries.value, sources.value),
-      rawSources.value,
-    ),
-  )
   const locationText = computed(() => noteRootName(root.value))
   /**
-   * 选的文件夹像不像一个知识库：有 `kb/`、有库里的 `data/raw/`、或者配过来源都算
-   * （原始资料现在多半在库外，「只有 kb/」也是一种正常的摆法）。
+   * 选的文件夹像不像一个知识库：清单在、两层目录（raw / data）任一在、旧结构的 `kb/`
+   * 在，或者**文件夹是空的**（第一次用，添加知识库就从这儿开始）—— 都算。
+   * 一个塞满别的项目文件的文件夹不算（那多半是选错了目录）。
    */
-  const looksLikeKb = computed(
-    () =>
-      scanEntries.value.some(item => item.rel === KB_DIR || item.rel.startsWith(`${KB_DIR}/`))
-      || scanEntries.value.some(
-        item => item.rel === KB_RAW_DIR || item.rel.startsWith(`${KB_RAW_DIR}/`),
-      )
-      || sources.value.length > 0,
+  const looksLikeKb = computed(() => {
+    if (manifest.value.length > 0)
+      return true
+    if (scanEntries.value.length === 0)
+      return true
+    return scanEntries.value.some(
+      item =>
+        item.rel === KB_RAW_DIR
+        || item.rel.startsWith(`${KB_RAW_DIR}/`)
+        || item.rel === 'data'
+        || item.rel.startsWith('data/')
+        || item.rel === KB_LEGACY_DIR
+        || item.rel.startsWith(`${KB_LEGACY_DIR}/`),
+    )
+  })
+  /**
+   * 要不要迁移：旧结构的 `kb/` 还在、清单还没有 —— 一次性迁移动作只在这种状态下出现。
+   * 迁移由用户确认后做（搬文件、改写条目，见 Rust 侧的 kb_migrate）。
+   */
+  const migrateNeeded = computed(() =>
+    scanEntries.value.some(item => item.rel === KB_LEGACY_DIR || item.rel.startsWith(`${KB_LEGACY_DIR}/`))
+    && manifest.value.length === 0,
   )
 
   function reset(): void {
     scanEntries.value = []
+    manifest.value = []
     entries.value = []
     rawItems.value = []
-    rawSources.value = []
-    indexInfo.value = null
+    libraries.value = []
+    dangling.value = []
     repoState.value = null
     lastDetect.value = null
-    closeActive()
     closeRaw()
     loaded.value = false
     loadError.value = ''
     syncError.value = ''
-  }
-
-  function closeActive(): void {
-    activeRel.value = ''
-    activeContent.value = ''
-    activeError.value = ''
   }
 
   /** 收起原始数据查看（回到概览） */
@@ -144,28 +160,13 @@ export const useKbStore = defineStore('kb', () => {
 
   /** 重扫序号：旧的一轮回来时不覆盖新结果（见 reload） */
   let reloadSeq = 0
-  /** 来源映射连着改时合并成一轮，别连着全库扫两遍 */
-  let reloadTimer: number | null = null
-
-  function scheduleReload(): void {
-    if (reloadTimer !== null)
-      window.clearTimeout(reloadTimer)
-    reloadTimer = window.setTimeout(() => {
-      reloadTimer = null
-      void reload()
-    }, 200)
-  }
 
   /**
-   * 重新扫一遍：扫描 → 拆三部分 → 读条目 frontmatter → 配状态 → 读索引 → 探仓库。
+   * 重新扫一遍：扫描 → 解析清单 → 读条目 frontmatter → 算指纹 → 配状态 → 探仓库。
    *
    * 条目是逐个读出来解析的（source 在 frontmatter 里，状态判定绕不开），几十上百个
-   * 本地小文件并发读，量级与笔记首扫相当；读不出的（权限 / 刚被删）如实丢掉 ——
-   * 少一条只是清单上少一行，不该让整页读不出来。
-   *
-   * 来源清单一起带过去（Rust 不缓存它）：回来的 rel 一律是**逻辑路径**，来源里的文件
-   * 落在 `data/raw/<来源名>/…` 下，真实位置在每条的 abs 里。配了路径却读不到的来源
-   * 只在自己的结果里报原因，界面把它摆到那一行上。
+   * 本地小文件并发读；读不出的（权限 / 刚被删）如实丢掉 —— 少一条只是清单上少一行，
+   * 不该让整页读不出来。
    */
   async function reload(): Promise<void> {
     if (!root.value) {
@@ -173,18 +174,13 @@ export const useKbStore = defineStore('kb', () => {
       return
     }
 
-    // 有排队中的重扫就先撤掉：这一次已经是最新的意图
-    if (reloadTimer !== null) {
-      window.clearTimeout(reloadTimer)
-      reloadTimer = null
-    }
-
-    // 每一次重扫都有一个序号：来源连着改（先加一个再设路径）会连着触发两轮，
-    // 旧的那轮回来时不能把新结果盖掉 —— 这就是「旧结果覆盖新结果」的那个竞态。
+    // 每一次重扫都有一个序号：连着的两轮（自动 pull 完 + 用户点检测）旧的那轮回来时
+    // 不能把新结果盖掉 —— 这就是「旧结果覆盖新结果」的那个竞态。
     const seq = ++reloadSeq
     loading.value = true
     loadError.value = ''
-    const result = await window.workbench.kbScan(root.value, sources.value)
+    // 本机关联随扫描带走：源头文件夹的指纹在 Rust 侧顺路算（状态判定「本地为准」用）
+    const result = await window.workbench.kbScan(root.value, activeLinks.value)
     if (seq !== reloadSeq)
       return
     loading.value = false
@@ -195,14 +191,13 @@ export const useKbStore = defineStore('kb', () => {
       return
     }
 
-    // 全量清单留着（来源行要看库里那份副本还在不在）；被映射顶掉的那部分在取用处分流
     scanEntries.value = result.data.entries
-    const visible = kbVisibleRawEntries(result.data.entries, sources.value)
+    manifest.value = parseKbManifest(result.data.manifest) ?? []
     const current = root.value
 
     const metas = await Promise.all(
-      kbEntryFiles(visible).map(async (file): Promise<KbEntryMeta | null> => {
-        const read = await window.workbench.kbRead(current, file.rel, sources.value)
+      kbEntryFiles(result.data.entries).map(async (file): Promise<KbEntryMeta | null> => {
+        const read = await window.workbench.kbRead(current, file.rel)
         if (!read.ok || typeof read.data !== 'string')
           return null
         const fm = parseKbFrontmatter(read.data)
@@ -216,8 +211,7 @@ export const useKbStore = defineStore('kb', () => {
           updated: fm.updated,
           summary: fm.summary,
           source: normalizeKbSource(fm.source),
-          // 正文里的站内链接在这里一次读出来带着走：巡检与站内跳转都不必再读一遍文件
-          links: kbEntryLinks(read.data),
+          sourceHash: fm.sourceHash,
           mtimeMs: file.mtimeMs,
         }
       }),
@@ -226,24 +220,22 @@ export const useKbStore = defineStore('kb', () => {
     if (seq !== reloadSeq)
       return
     entries.value = metas.filter((meta): meta is KbEntryMeta => meta !== null)
-    rawItems.value = matchKbRawStatus(kbRawFiles(visible), entries.value)
-    rawSources.value = kbRawSourceRows(
-      sources.value,
-      result.data.sources,
-      result.data.entries,
-      rawItems.value,
-    )
 
-    // 索引：读不到 / 认不出都按「还没生成」处理，不是错误（清单不依赖它）
-    const indexRead = await window.workbench.kbRead(current, KB_INDEX_REL, sources.value)
-    indexInfo.value
-      = indexRead.ok && typeof indexRead.data === 'string' ? parseKbIndex(indexRead.data) : null
+    // 内容指纹只算「有条目指向」的文件（未入库的不参与）；读不到的那几个回落 mtime
+    const rawFiles = kbRawFiles(result.data.entries)
+    const hashRels = kbRawReferencedRels(rawFiles, entries.value)
+    const hashResult = hashRels.length
+      ? await window.workbench.kbFingerprints(current, hashRels)
+      : null
+    if (seq !== reloadSeq)
+      return
+    const hashes = hashResult?.ok && hashResult.data ? hashResult.data : {}
 
-    // 打开着的条目没了（整理重排 / 换了文件夹）：收起来，别挂着一个空壳。
-    // 正在查看的原始数据同理 —— 它清走 / 重洗后文件可能就没了
-    if (activeRel.value && !entries.value.some(item => item.rel === activeRel.value)) {
-      closeActive()
-    }
+    rawItems.value = matchKbRawStatus(rawFiles, entries.value, hashes, result.data.local)
+    dangling.value = kbDanglingGroups(entries.value, rawItems.value, manifest.value.map(item => item.name))
+    libraries.value = kbLibraryRows(manifest.value, sourceLinks.value, rawItems.value, dangling.value)
+
+    // 正在查看的原始数据没了（被删 / 重洗后挪了）：收起来，别挂着一个空壳
     if (activeRawRel.value && !rawItems.value.some(item => item.rel === activeRawRel.value)) {
       closeRaw()
     }
@@ -257,7 +249,7 @@ export const useKbStore = defineStore('kb', () => {
   /**
    * 检测更新：全扫一遍（与刷新是同一条路），再挑**变化**说一句。
    *
-   * 只读、不写任何文件，也不清洗 —— 清洗是另一颗按钮、由用户明明白白点出来。
+   * 只读、不写任何文件，也不清洗 —— 清洗是另一个动作、由用户明明白白点出来。
    * 没有变化就说「没有变化」：静默什么都不说，用户没法确认这一下到底跑没跑。
    */
   async function detect(): Promise<void> {
@@ -289,69 +281,267 @@ export const useKbStore = defineStore('kb', () => {
     notifyInfo(parts.length ? `检测到 ${parts.join(' · ')}` : '没有变化')
   }
 
-  // ---------- 来源（原始数据最外层对到本机一个文件夹） ----------
-  //
-  // 映射只落设置、只对本机成立；**应用不搬运 / 不复制 / 不删除任何文件** —— 换路径、
-  // 移除来源动的都只是这条配置（库里那份副本还在原处，移除后会照旧读它）。
+  // ---------- 清单（raw/kb.json：列表数据源，应用维护） ----------
 
-  /** 来源名与路径都收敛过再落盘（收敛函数在 @workbench/kb，与设置读侧同一份口径） */
-  async function updateSources(next: KbRawSource[]): Promise<boolean> {
-    return settings.updateSettings({ kbRawSources: sanitizeKbRawSources(next) })
-  }
-
-  /**
-   * 加一个来源（名称 + 文件夹）。同名已经在清单里时不重复加：名字是条目 source 的契约，
-   * 悄悄换一个名字下挂的文件夹会让状态判定说不清。
-   */
-  async function addSource(name: string, dir: string): Promise<boolean> {
-    const clean = sanitizeKbSourceName(name)
-    const target = sanitizeNoteRoot(dir)
-    if (!root.value || !clean || !target)
+  /** 清单落盘（serializeKbManifest 收敛过再写）；成功后本地那一份跟着换 */
+  async function writeManifest(next: KbManifestEntry[]): Promise<boolean> {
+    const dir = root.value
+    if (!dir)
       return false
-    if (sources.value.some(source => source.name.toLowerCase() === clean.toLowerCase())) {
-      notifyError(`已经有叫「${clean}」的来源了`)
+    const result = await window.workbench.kbConfigWrite(dir, serializeKbManifest(next))
+    if (!result.ok || !result.data) {
+      notifyError(result.error ?? '保存知识库清单失败')
       return false
     }
-    return updateSources([...settings.settings.kbRawSources, { root: root.value, name: clean, dir: target }])
+    manifest.value = next
+    return true
   }
 
-  /** 给一个来源指定 / 更换文件夹（「还没有配置路径」的那一行就是它再指定一次） */
-  async function setSourceDir(name: string, dir: string): Promise<boolean> {
-    const current = root.value
-    const target = sanitizeNoteRoot(dir)
-    if (!current || !target)
-      return false
+  /** 关联清单落盘（只写设置、不碰文件；收敛函数在 @workbench/kb，与设置读侧同一份口径） */
+  async function updateSourceLinks(next: KbSourceLink[]): Promise<boolean> {
+    return settings.updateSettings({ kbRawSources: sanitizeKbSourceLinks(next) })
+  }
 
-    const next = settings.settings.kbRawSources.filter(
-      item => !(sameKbRoot(item.root, current) && item.name.toLowerCase() === name.toLowerCase()),
-    )
-    next.push({ root: current, name, dir: target })
-    return updateSources(next)
+  /** 两个文件夹是不是同一个（Windows 口径：分隔符与大小写不敏感） */
+  function sameDir(a: string, b: string): boolean {
+    const key = (value: string): string =>
+      value.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
+    return !!key(a) && key(a) === key(b)
+  }
+
+  // ---------- 添加 / 删除知识库 ----------
+
+  /**
+   * 添加一个知识库（名称 + 本机源头文件夹）：**二次确认在弹层里** —— 确认后
+   * 复制进 raw/ → 写清单 → 写本机关联，随即进入首洗（上传是清洗的硬前置，在
+   * startClean 的准备阶段做，面板逐步可见）。用户在弹层里取消清洗时整个添加作废
+   * （一个字都不会落盘）；所以这里的拦路（重名 / 环境缺 / 没连远端）都在复制之前。
+   */
+  async function addLibrary(name: string, dir: string): Promise<boolean> {
+    const clean = sanitizeKbName(name)
+    const target = sanitizeNoteRoot(dir)
+    const current = root.value
+    if (!current || !clean || !target)
+      return false
+    if (manifest.value.some(item => item.name === clean)) {
+      notifyError(`已经有叫「${clean}」的知识库了`)
+      return false
+    }
+    // 同一个文件夹不能当两个知识库的源头（内容会被复制两份）—— 但只认**清单里还活着**
+    // 的知识库：旧配置的残留（名字不在清单里，失败添加 / 旧模型留下的）不拦，写关联时顶掉
+    const conflict = sourceLinks.value.find(link => link.dir && sameDir(link.dir, target))
+    if (conflict && manifest.value.some(item => item.name === conflict.name)) {
+      notifyError(`这个文件夹已经关联给「${conflict.name}」了`)
+      return false
+    }
+    // 「不清洗就当做不添加」—— 所以清洗缺什么、上传缺什么，都要在复制之前拦住
+    const ai = useAiStore()
+    if (!ai.probed)
+      await ai.probe()
+    const blocker = cleanBlocker()
+    if (blocker) {
+      notifyError(blocker)
+      return false
+    }
+    if (!canSync.value) {
+      notifyError('知识库文件夹还没连 git 远端：原始文件必须先上传到远程仓库，现在添加不了')
+      return false
+    }
+
+    const synced = await window.workbench.kbSourceSync(current, clean, target)
+    if (!synced.ok || !synced.data) {
+      notifyError(synced.error ?? '复制源头文件夹失败')
+      return false
+    }
+    if (!await writeManifest([...manifest.value, { name: clean, created: todayIsoDate() }]))
+      return false
+    // 仓库根的 AGENTS.md（给进仓库的 AI 描述结构与用法）：没有就生成，已存在不覆盖
+    await window.workbench.kbAgentsDoc(current)
+    // 写关联时把残留顶掉：同名的（sanitize 去重保留先出现的，必须先摘掉）、
+    // 以及同目录但名字已不在清单里的
+    if (!await updateSourceLinks([
+      ...settings.settings.kbRawSources.filter(
+        link => !(sameKbRoot(link.root, current)
+          && (link.name === clean
+            || (link.dir && sameDir(link.dir, target) && !manifest.value.some(item => item.name === link.name)))),
+      ),
+      { root: current, name: clean, dir: target },
+    ])) {
+      notifyError('保存本机关联失败')
+      return false
+    }
+
+    // 上传不在这里做：它是清洗的硬前置，交给 startClean 的准备阶段（面板逐步可见，
+    // 失败就地拦下）。**不 await**：本地几步一完成就返回（弹窗立刻关），首洗在后台接管
+    await reload()
+    notifySuccess(`知识库「${clean}」已添加（复制 ${synced.data.copied} 个文件）`)
+    void startClean({ kind: 'kb', name: clean })
+    return true
+  }
+
+  /** 一个知识库名下指向它的全部条目（data 相对路径）：**不管 raw 文件在不在**，删除知识库用 */
+  function entryRelsOfLibrary(name: string): string[] {
+    return entries.value
+      .filter(entry => kbSourceRef(entry.source)?.name === name)
+      .map(entry => entry.rel)
+  }
+
+  /** 指向某个 raw 文件的全部条目（data 相对路径）：删除文件时一并删 */
+  function entryRelsOfRawRel(rel: string): string[] {
+    const key = kbSourceLinkKey(rel)
+    if (!key)
+      return []
+    return entries.value.filter(entry => kbSourceLinkKey(entry.source) === key).map(entry => entry.rel)
   }
 
   /**
-   * 移除一个来源：**只删这条配置**（库里那份副本、来源文件夹里的东西都不动）。
-   * 库里没有副本时这一行就从树上消失；有副本时它会退回「读库里那份」的样子。
+   * 删除一个知识库：条目（全部，不管 raw 文件在不在）→ 两层目录（raw/<名>/ 与
+   * data/<名>/）→ 清单移除 → 本机关联移除 → 索引重建 → 上传删除。**源头文件夹里的
+   * 文件一个都不动**（那是用户自己的目录）。
    */
-  async function removeSource(name: string): Promise<boolean> {
-    const current = root.value
-    if (!current)
+  async function deleteLibrary(name: string): Promise<boolean> {
+    const dir = root.value
+    if (!dir || !manifest.value.some(item => item.name === name))
       return false
-    return updateSources(
+    if (cleanBusy.value) {
+      notifyError('清洗进行中，先停下再删除知识库')
+      return false
+    }
+
+    const rels = entryRelsOfLibrary(name)
+    let deletedEntries = 0
+    if (rels.length) {
+      const result = await window.workbench.kbEntryDelete(dir, rels)
+      if (!result.ok || !result.data) {
+        notifyError(result.error ?? '删除条目失败')
+        return false
+      }
+      deletedEntries = result.data.deleted
+    }
+    const tree = await window.workbench.kbDeleteTree(dir, name)
+    if (!tree.ok || !tree.data) {
+      notifyError(tree.error ?? '删除知识库失败')
+      return false
+    }
+    if (!await writeManifest(manifest.value.filter(item => item.name !== name)))
+      return false
+    if (!await updateSourceLinks(
       settings.settings.kbRawSources.filter(
-        item => !(sameKbRoot(item.root, current) && item.name.toLowerCase() === name.toLowerCase()),
+        link => !(sameKbRoot(link.root, dir) && link.name === name),
       ),
+    )) {
+      notifyError('移除本机关联失败')
+      return false
+    }
+
+    await window.workbench.kbIndexBuild(dir, todayIsoDate())
+    if (canSync.value) {
+      const up = await window.workbench.kbSync(dir)
+      if (!up.ok || !up.data)
+        syncError.value = up.error ?? '同步失败'
+    }
+    await reload()
+    notifySuccess(
+      deletedEntries
+        ? `已删除知识库「${name}」与它的 ${deletedEntries} 个条目（源头文件夹未动）`
+        : `已删除知识库「${name}」（源头文件夹未动）`,
     )
+    return true
   }
 
-  /** 在资源管理器里打开一个来源的文件夹（未配置路径的行没有落点，界面不给这个入口） */
-  function revealSource(row: KbRawSourceRow): void {
-    if (!row.dir)
-      return
-    void window.workbench.reveal(row.dir)
+  /**
+   * 删除一个原始文件：仓库里那份与关联的源头文件夹里那份一起删（源头持续关联着，
+   * 只删仓库里那份会在下一次源头同步时回来），指向它的条目一并删。确认框在组件里
+   * （写明「同时删除本机文件夹中的该文件」）。
+   */
+  async function deleteFile(rel: string): Promise<boolean> {
+    const dir = root.value
+    if (!dir)
+      return false
+    if (cleanBusy.value) {
+      notifyError('清洗进行中，先停下再删除文件')
+      return false
+    }
+    const name = kbRawSourceNameOf(rel)
+    if (!name)
+      return false
+    const link = sourceLinks.value.find(item => item.name === name)
+
+    const result = await window.workbench.kbFileDelete(dir, name, link?.dir ?? '', [rel])
+    if (!result.ok || !result.data) {
+      notifyError(result.error ?? '删除文件失败')
+      return false
+    }
+    const rels = entryRelsOfRawRel(rel)
+    if (rels.length) {
+      const removed = await window.workbench.kbEntryDelete(dir, rels)
+      if (!removed.ok || !removed.data) {
+        notifyError(`文件已删除，但条目清理失败：${removed.error ?? '原因不明'}`)
+        await reload()
+        return false
+      }
+    }
+    await window.workbench.kbIndexBuild(dir, todayIsoDate())
+    if (canSync.value) {
+      const up = await window.workbench.kbSync(dir)
+      if (!up.ok || !up.data)
+        syncError.value = up.error ?? '同步失败'
+    }
+    await reload()
+    notifySuccess(link?.dir ? '文件已删除（仓库与源头文件夹）' : '文件已删除')
+    return true
   }
 
-  /** 探一次 git 状态：探不到就当本机文件夹处理（同步按钮不出现），不打扰界面 */
+  // ---------- 一次性迁移（旧结构 → raw/ + data/） ----------
+
+  /**
+   * 迁移旧结构：本机关联的源头文件夹复制进 raw/、`kb/` 搬进 `data/`、条目里的
+   * `data/raw/` 前缀改写成 `raw/`、写清单、删旧 index/。确认框在组件里（列出将做的事）。
+   * 搬完重建索引并上传（没连远端时只提示，迁移本身已完成）。
+   */
+  async function migrate(): Promise<boolean> {
+    const dir = root.value
+    if (!dir || cleanBusy.value)
+      return false
+    if (!migrateNeeded.value) {
+      notifyInfo('这个仓库不需要迁移')
+      return false
+    }
+    if (migrating.value)
+      return false
+    migrating.value = true
+    try {
+      // 清单从本机关联造（旧模型里「来源名」就是知识库名的原型）
+      const nextManifest: KbManifestEntry[] = manifest.value.length
+        ? manifest.value
+        : [...new Set(sourceLinks.value.map(link => link.name))].map(name => ({ name, created: '' }))
+      const sources = sourceLinks.value
+        .filter(link => link.dir)
+        .map(link => ({ name: link.name, dir: link.dir }))
+      const result = await window.workbench.kbMigrate(dir, sources, serializeKbManifest(nextManifest))
+      if (!result.ok || !result.data) {
+        notifyError(result.error ?? '迁移失败')
+        return false
+      }
+      await window.workbench.kbAgentsDoc(dir)
+      await window.workbench.kbIndexBuild(dir, todayIsoDate())
+      if (canSync.value) {
+        const up = await window.workbench.kbSync(dir)
+        if (!up.ok || !up.data)
+          syncError.value = up.error ?? '同步失败'
+      }
+      await reload()
+      notifySuccess(`迁移完成：复制 ${result.data.copied} 个原始文件、改写 ${result.data.rewritten} 个条目`)
+      return true
+    }
+    finally {
+      migrating.value = false
+    }
+  }
+
+  // ---------- git（同步 / 后台拉取 / 仓库探测） ----------
+
+  /** 探一次 git 状态：探不到就当本机文件夹处理（同步入口不出现），不打扰界面 */
   async function probeState(): Promise<void> {
     const current = root.value
     if (!current) {
@@ -363,140 +553,38 @@ export const useKbStore = defineStore('kb', () => {
     repoState.value = result.ok && result.data ? result.data : null
   }
 
-  let started = false
-  let ready = false
-
-  /** 首次进页面扫一次（KeepAlive 下来回切页不重挂载，这里挡住重复扫描） */
-  async function init(): Promise<void> {
-    if (started && ready)
-      return
-    started = true
-    await reload()
-  }
-
-  // 知识库文件夹变了（选了新目录）：全部重新认一遍。正在清洗的话先把它按停 ——
-  // 那条 Pi 会话的工作目录还是旧文件夹，让它跑完只会把旧目录的条目写进来
-  watch(root, () => {
-    if (!started)
-      return
-    ready = false
-    closeActive()
-    closeRaw()
-    if (cleanBusy.value) {
-      cleanCancelled = true
-      void aiStop(aiSessionProcessId(cleanSessionId))
-      cleanPhase.value = 'idle'
-      cleanLines.value = []
-      cleanError.value = ''
-    }
-    void reload()
-  })
-
   /**
-   * 来源映射变了（加了一个 / 换了路径 / 移除了）：重新扫一遍。
-   *
-   * 比的是**映射的形状**（名字 + 路径），不是数组引用 —— 设置里任何一项改动都会换掉
-   * settings 对象，盯着引用就会因为「改了个卡片宽度」去重扫一遍知识库。
+   * 后台拉一次远端（打开页面 / 换文件夹之后）：列表数据来自远程仓库，pull 下来才有
+   * 别的设备推的东西。拉到了新东西就重扫；失败只把原因摆到同步那行 ——
+   * 打开页面这件事不该因为网络失败变成一页错误。
    */
-  const sourceShape = computed(() =>
-    sources.value.map(item => `${item.name}\u0000${item.dir}`).join('\u0001'),
-  )
-  watch(sourceShape, () => {
-    if (!started)
+  async function pullRemote(): Promise<void> {
+    const current = root.value
+    if (!current || pulling.value || cleanBusy.value)
       return
-    scheduleReload()
-  })
-
-  /** 记下用户挑的知识库文件夹（页面那颗「选择知识库文件夹」用它）。不搬动任何文件 */
-  async function setRoot(dir: string): Promise<boolean> {
-    const target = sanitizeNoteRoot(dir)
-    if (!target)
-      return false
-    return settings.updateSettings({ kbDir: target })
-  }
-
-  /**
-   * 打开一个条目：读正文进阅读区。慢一步回来的旧结果直接丢掉（连点两行时各回各的）。
-   * 读失败留在概览并提示，不挂一个空壳阅读区。与原始数据查看互斥：打开条目就收起它。
-   */
-  async function openEntry(rel: string): Promise<void> {
-    closeRaw()
-    activeRel.value = rel
-    activeError.value = ''
-    activeContent.value = ''
-
-    activeLoading.value = true
-    const result = await window.workbench.kbRead(root.value, rel, sources.value)
-    activeLoading.value = false
-    if (activeRel.value !== rel)
+    // 现探一次再用：换文件夹 / 别的动作刚跑完时，缓存的仓库状态可能是上一个目录的
+    await probeState()
+    if (!canSync.value)
       return
 
-    if (!result.ok || typeof result.data !== 'string') {
-      activeError.value = result.error ?? '读取条目失败'
-      notifyError(activeError.value)
-      closeActive()
-      return
+    pulling.value = true
+    try {
+      const result = await window.workbench.kbPull(current)
+      if (result.ok && result.data?.received) {
+        await reload()
+      }
+      else if (!result.ok) {
+        syncError.value = result.error ?? '拉取远端失败'
+      }
     }
-    activeContent.value = result.data
-  }
-
-  function backToOverview(): void {
-    closeActive()
-  }
-
-  /**
-   * 条目正文里点了一个站内链接：把地址解析成仓库里的一条路径（口径在 packages/kb/src/kb-lint.ts），
-   * 再按它是什么开条目或原始数据 —— 链接指到原始资料上也照样跳（`../../data/raw/x.md`）。
-   * 库里没有这一份就一句话说清，不静默什么都不做（点了没反应最让人犯嘀咕）。
-   */
-  async function followLink(fromRel: string, href: string): Promise<void> {
-    const rel = resolveKbLink(fromRel, href)
-    if (!rel) {
-      notifyInfo('这个链接跳不到知识库里')
-      return
+    finally {
+      pulling.value = false
     }
-    if (entries.value.some(item => item.rel === rel)) {
-      await openEntry(rel)
-      return
-    }
-    if (rawItems.value.some(item => item.rel === rel)) {
-      await openRaw(rel)
-      return
-    }
-    notifyInfo(`库里没有这一份：${rel}`)
-  }
-
-  /**
-   * 查看一个原始数据：文本类（md / 认得出的文本后缀）就地读进来预览，其余只摆出
-   * 「用系统默认程序打开」的入口（看法的分类在 packages/kb/src/kb.ts 的 kbRawViewKind）。
-   * 读失败不关查看区、把原因摆进去 —— 外部打开那条路还在。与条目查看互斥。
-   */
-  async function openRaw(rel: string): Promise<void> {
-    closeActive()
-    const item = rawItems.value.find(raw => raw.rel === rel)
-    activeRawRel.value = rel
-    activeRawError.value = ''
-    activeRawContent.value = ''
-
-    if (!item || kbRawViewKind(item.name) === 'external')
-      return
-
-    activeRawLoading.value = true
-    const result = await window.workbench.kbRead(root.value, rel, sources.value)
-    activeRawLoading.value = false
-    if (activeRawRel.value !== rel)
-      return
-
-    if (!result.ok || typeof result.data !== 'string') {
-      activeRawError.value = result.error ?? '读取文件失败'
-      return
-    }
-    activeRawContent.value = result.data
   }
 
   /**
    * 与远端同步一次：知识库文件夹自己的那个仓库（提交 → 拉 → 推）。
-   * 远端可能刚整理过条目：回来后重扫，打开着的那篇也重读。
+   * 远端可能刚整理过条目：回来后重扫，正在查看的原始文件也重读。
    */
   async function syncNow(): Promise<void> {
     const current = root.value
@@ -508,7 +596,7 @@ export const useKbStore = defineStore('kb', () => {
     syncing.value = true
     syncError.value = ''
     try {
-      const result = await window.workbench.kbSync({ dir: current })
+      const result = await window.workbench.kbSync(current)
       if (!result.ok || !result.data) {
         syncError.value = result.error ?? '同步失败'
         // 常见的一种失败是「用户刚在终端里补上 origin / init 了仓库」：再探一次，让按钮跟上
@@ -517,10 +605,7 @@ export const useKbStore = defineStore('kb', () => {
       }
 
       await reload()
-      // 打开着的东西重读一遍：远端 / 清洗可能刚改过它们
-      if (activeRel.value)
-        await openEntry(activeRel.value)
-      else if (activeRawRel.value)
+      if (activeRawRel.value)
         await openRaw(activeRawRel.value)
     }
     finally {
@@ -528,34 +613,85 @@ export const useKbStore = defineStore('kb', () => {
     }
   }
 
-  /**
-   * 重建目录与索引（`kb/_catalog.md` 与 `index/index.json`）。
-   *
-   * 这是应用**唯一直接写知识库的地方**，写的是生成物、不是内容。两处会用到它：
-   * 用户自己点这颗按钮（手改过条目、或从别处拉回了新的条目），以及清洗跑完的收尾
-   * （见 finishClean）。索引只由应用生成（见 kb.rs 的 index_build）。
-   */
-  async function rebuildIndex(): Promise<void> {
-    const current = root.value
-    if (!current)
-      return
+  let started = false
 
-    rebuilding.value = true
-    try {
-      const result = await window.workbench.kbIndexBuild(current, todayIsoDate())
-      if (!result.ok || !result.data) {
-        notifyError(result.error ?? '重建索引失败')
-        return
-      }
-      notifySuccess(`目录与索引已重建（${result.data.count} 条）`)
-      await reload()
-    }
-    finally {
-      rebuilding.value = false
-    }
+  /** 首次进页面扫一次（KeepAlive 下来回切页不重挂载，这里挡住重复扫描），扫完后台拉远端 */
+  async function init(): Promise<void> {
+    if (started)
+      return
+    started = true
+    await reload()
+    void pullRemote()
   }
 
-  // ---------- 清洗（应用编排：清单 → Pi → 重建索引 → 刷新） ----------
+  // 知识库文件夹变了（选了新目录）：全部重新认一遍。正在清洗的话先把它按停 ——
+  // 那条 Pi 会话的工作目录还是旧文件夹，让它跑完只会把旧目录的条目写进来
+  watch(root, () => {
+    if (!started)
+      return
+    closeRaw()
+    if (cleanBusy.value) {
+      cleanCancelled = true
+      void aiStop(aiSessionProcessId(cleanSessionId))
+      cleanPhase.value = 'idle'
+      cleanLines.value = []
+      cleanError.value = ''
+    }
+    void reload()
+    void pullRemote()
+  })
+
+  /**
+   * 本机关联变了（加了一个 / 移除了）：列表行的「关联」与清洗范围跟着变，重扫一遍。
+   * 比的是**关联的形状**（名字 + 路径），不是数组引用 —— 设置里任何一项改动都会换掉
+   * settings 对象，盯着引用就会因为「改了个卡片宽度」去重扫一遍知识库。
+   */
+  const linkShape = computed(() =>
+    sourceLinks.value.map(item => `${item.name}\u0000${item.dir}`).join('\u0001'),
+  )
+  watch(linkShape, () => {
+    if (!started)
+      return
+    libraries.value = kbLibraryRows(manifest.value, sourceLinks.value, rawItems.value, dangling.value)
+  })
+
+  /** 记下用户挑的知识库文件夹（页面那颗「选择知识库文件夹」用它）。不搬动任何文件 */
+  async function setRoot(dir: string): Promise<boolean> {
+    const target = sanitizeNoteRoot(dir)
+    if (!target)
+      return false
+    return settings.updateSettings({ kbDir: target })
+  }
+
+  /**
+   * 查看一个原始数据：文本类（md / 认得出的文本后缀）就地读进来预览，其余只摆出
+   * 「用系统默认程序打开」的入口（看法的分类在 packages/kb/src/kb.ts 的 kbRawViewKind）。
+   * 读失败不关查看区、把原因摆进去 —— 外部打开那条路还在。
+   */
+  async function openRaw(rel: string): Promise<void> {
+    const item = rawItems.value.find(raw => raw.rel === rel)
+    activeRawRel.value = rel
+    activeRawError.value = ''
+    activeRawContent.value = ''
+
+    if (!item || kbRawViewKind(item.name) === 'external')
+      return
+
+    activeRawLoading.value = true
+    // 带上关联：raw 层的文件本机里有就读本机那份（本机是事实源，副本可能还没同步）
+    const result = await window.workbench.kbRead(root.value, rel, activeLinks.value)
+    activeRawLoading.value = false
+    if (activeRawRel.value !== rel)
+      return
+
+    if (!result.ok || typeof result.data !== 'string') {
+      activeRawError.value = result.error ?? '读取文件失败'
+      return
+    }
+    activeRawContent.value = result.data
+  }
+
+  // ---------- 清洗（应用编排：源头同步 → 上传 → 清单 → Pi → 索引 → 上传） ----------
 
   /** 清洗流程的阶段（形状见 packages/kb/src/kb-clean.ts） */
   const cleanPhase = ref<KbCleanPhase>('idle')
@@ -567,18 +703,39 @@ export const useKbStore = defineStore('kb', () => {
   let cleanSessionId = ''
   /** 起跑前那份条目清单（相对路径）：收据按它分「新建 / 覆盖」 */
   const cleanBefore = ref<string[]>([])
+  /** 这一轮洗的范围（面板上说明用） */
+  const cleanScope = ref<KbCleanScope>({ kind: 'all' })
   /** 用户点了取消：之后的收尾事件（settle / exit）不再走「完成」那一路 */
   let cleanCancelled = false
 
-  const cleanBusy = computed(() => cleanPhase.value === 'cleaning' || cleanPhase.value === 'indexing')
+  const cleanBusy = computed(() =>
+    cleanPhase.value === 'preparing' || cleanPhase.value === 'cleaning' || cleanPhase.value === 'indexing',
+  )
 
   /**
-   * 这一轮动过的条目：Pi 报出的写入路径（工具行里带着的）分成新建与覆盖两组。
-   * 与旧清单比对的是**起跑前**那份（cleanBefore）—— 跑完清单已经刷新过，拿它比会说全是新建。
+   * 这一轮整理过的**原始文件**（raw 相对路径）：Pi 报出的写入是条目（data/ 下的路径，
+   * 用户不关心），拿写入条目 frontmatter 的 source 映射回 raw 层再说 —— 清洗产物的
+   * 路径不进界面。「新入库 / 重新入库」拿**起跑前**那份条目清单（cleanBefore）分：
+   * 在里面就是覆盖（重新入库）—— 跑完清单已刷新，拿刷新后的比会说全是新建。
+   * 条目还没读出来（进行中）或 source 解析不到 raw 文件的，先不进收据。
    */
-  const cleanWrites = computed(() =>
-    splitCleanWrites(root.value, writtenEntries(cleanLines.value), cleanBefore.value),
-  )
+  const cleanWrites = computed(() => {
+    const known = new Set(cleanBefore.value.map(rel => rel.toLowerCase()))
+    const created = new Set<string>()
+    const updated = new Set<string>()
+    for (const rel of writtenEntries(cleanLines.value)) {
+      const meta = entries.value.find(item => item.rel.toLowerCase() === rel.toLowerCase())
+      const ref = meta ? kbSourceRef(meta.source) : null
+      if (!ref)
+        continue
+      const raw = kbRawDisplayPath(`${KB_RAW_DIR}/${ref.name}/${ref.inner}`)
+      ;(known.has(rel.toLowerCase()) ? updated : created).add(raw)
+    }
+    return {
+      created: [...created].sort((a, b) => a.localeCompare(b)),
+      updated: [...updated].sort((a, b) => a.localeCompare(b)),
+    }
+  })
 
   /**
    * 起跑前还缺什么：顺序归 AI store 的 envGap（与 AI 助手页的 blocking、run 的校验
@@ -602,17 +759,55 @@ export const useKbStore = defineStore('kb', () => {
     return ''
   }
 
+  /** 清洗面板的拦截态：原因摆进面板，就地说明 */
+  function blocked(message: string): void {
+    cleanLines.value = []
+    cleanError.value = message
+    cleanPhase.value = 'blocked'
+  }
+
+  /** 清洗范围里要动的 raw 文件清单（清洗清单以它算） */
+  function itemsInScope(scope: KbCleanScope): KbRawItem[] {
+    if (scope.kind === 'file')
+      return rawItems.value.filter(item => item.rel === scope.rel)
+    if (scope.kind === 'kb')
+      return rawItems.value.filter(item => kbRawSourceNameOf(item.rel) === scope.name)
+    return rawItems.value
+  }
+
   /**
-   * 开始清洗：把扫描出的待处理清单拼进提示词，起一条**专用的 Pi 会话**（不在 AI 助手页的
-   * 会话树里 —— 那棵树认的是设置里的 aiSessions 清单，这里不写入；留档照旧落在
-   * `data\pi\sessions\`，可审计）。跑完自动重建索引并刷新状态。
+   * 开始清洗（范围由调用方给：全库 / 某个知识库 / 某个文件）。
+   *
+   * **面板先开（preparing）、每步打日志**：下面这几步是实打实的耗时（上传是三次出网），
+   * 不给反馈就是「点了没反应」——
+   *
+   * 1. **源头同步** —— 本机关联的源头文件夹里改过的文件先复制进 raw（不删）；
+   * 2. 有复制就重扫一遍，清单以同步后的 raw 为准；
+   * 3. **上传远程（硬前置）** —— 没连远端、提交推送失败都在这里拦下，不让
+   *    「本地洗了、远端没有」的状态发生；
+   * 4. 算清单（未入库 + 有更新，按范围过滤），没有待洗的就收场明说；
+   * 5. 起一条**专用的 Pi 会话**（不在 AI 助手页的会话树里 —— 那棵树认的是设置里的
+   *    aiSessions 清单，这里不写入；留档照旧落在 `data\pi\sessions\`，可审计）。
+   *
+   * 准备阶段可取消（还没有 Pi 进程，直接收）；每步之间都有取消检查，在途的那一步
+   * （如上传）做完就停。
    */
-  async function startClean(): Promise<void> {
+  async function startClean(scope: KbCleanScope = { kind: 'all' }): Promise<void> {
     if (cleanBusy.value)
       return
     const dir = root.value
     if (!dir || !loaded.value || !looksLikeKb.value)
       return
+
+    // 面板先开、每步打日志：源头同步与上传远程都是实打实的耗时（上传是三次出网），
+    // 不给反馈的话这几秒就是「点了没反应」
+    cleanScope.value = scope
+    cleanCancelled = false
+    cleanError.value = ''
+    cleanLines.value = [
+      { kind: 'info', text: '准备清洗：同步源头文件夹 → 上传远程仓库 → 算清洗清单…' },
+    ]
+    cleanPhase.value = 'preparing'
 
     // 环境没探过先探一次（AI 页开没开过都可能）：缺什么就地明说，面板给得出拦路屏
     const ai = useAiStore()
@@ -620,31 +815,106 @@ export const useKbStore = defineStore('kb', () => {
       await ai.probe()
     const blocker = cleanBlocker()
     if (blocker) {
-      cleanLines.value = []
-      cleanError.value = blocker
-      cleanPhase.value = 'blocked'
+      blocked(blocker)
       return
     }
 
-    // 清单里两个地址都给：rel 是逻辑路径（条目 source 写它），abs 是资料实际在哪儿
-    // （来源多半在知识库文件夹外面，只有逻辑路径 Pi 读不到）
-    const pending = rawItems.value
-      .filter(item => item.status === 'pending')
-      .map(item => ({ rel: item.rel, abs: item.abs }))
-    const stale = rawItems.value
-      .filter(item => item.status === 'stale')
-      .map(item => ({ rel: item.rel, abs: item.abs }))
-    if (!pending.length && !stale.length) {
-      notifyInfo('当前没有待处理的原始数据')
+    // ① 源头同步：清洗范围里有关联的知识库，把本机改过的文件带进 raw
+    const inScope = (name: string): boolean => {
+      if (scope.kind === 'kb')
+        return name === scope.name
+      if (scope.kind === 'file')
+        return kbRawSourceNameOf(scope.rel) === name
+      return true
+    }
+    const linked = sourceLinks.value.filter(link => link.dir && inScope(link.name))
+    let copied = 0
+    if (linked.length) {
+      cleanLines.value = [
+        ...cleanLines.value,
+        { kind: 'info', text: '正在同步源头文件夹（本机改过的文件先复制进仓库）…' },
+      ]
+      for (const link of linked) {
+        const synced = await window.workbench.kbSourceSync(dir, link.name, link.dir)
+        if (!synced.ok || !synced.data) {
+          blocked(synced.error ?? '同步源头文件夹失败')
+          return
+        }
+        copied += synced.data.copied
+      }
+      if (cleanCancelled) {
+        cleanPhase.value = 'cancelled'
+        return
+      }
+    }
+
+    // ② 源头有变化就重扫：状态清单以同步后的 raw 为准（本地改过的文件这才「看得见」）
+    if (copied > 0) {
+      cleanLines.value = [
+        ...cleanLines.value,
+        { kind: 'info', text: `源头同步了 ${copied} 个文件，重新扫描…` },
+      ]
+      await reload()
+      if (cleanCancelled) {
+        cleanPhase.value = 'cancelled'
+        return
+      }
+    }
+
+    // ③ 上传远程（硬前置）：提交 → 拉取 → 推送三次出网，是这段等待的大头
+    if (!canSync.value) {
+      blocked('知识库文件夹还没连 git 远端：清洗前必须把原始文件上传到远程仓库。先把它做成仓库并接上远端，再回来清洗。')
       return
     }
+    cleanLines.value = [
+      ...cleanLines.value,
+      { kind: 'info', text: '正在上传远程仓库（提交 → 拉取 → 推送）——清洗前必须把原始文件送上去…' },
+    ]
+    syncing.value = true
+    syncError.value = ''
+    try {
+      const up = await window.workbench.kbSync(dir)
+      if (!up.ok || !up.data) {
+        blocked(`原始文件还没上传成功（${up.error ?? '原因不明'}），清洗先停在这里；处理好远端再洗。`)
+        void probeState()
+        return
+      }
+      if (cleanCancelled) {
+        cleanPhase.value = 'cancelled'
+        return
+      }
+    }
+    finally {
+      syncing.value = false
+    }
+
+    // ④ 算清单：没有待洗的就收场（面板退回，提示一句话）
+    const pendingItems = itemsInScope(scope).filter(item => item.status === 'pending')
+    const staleItems = itemsInScope(scope).filter(item => item.status === 'stale')
+    if (!pendingItems.length && !staleItems.length) {
+      cleanPhase.value = 'idle'
+      cleanLines.value = []
+      notifyInfo('没有要清洗的原始数据')
+      return
+    }
+    const targetItems = [...pendingItems, ...staleItems]
+    const hashResult = await window.workbench.kbFingerprints(dir, targetItems.map(item => item.rel))
+    const hashes = hashResult.ok && hashResult.data ? hashResult.data : {}
+    const targetOf = (item: KbRawItem) => ({
+      rel: item.rel,
+      abs: item.abs,
+      hash: hashes[item.rel] ?? '',
+    })
+    const pending = pendingItems.map(targetOf)
+    const stale = staleItems.map(targetOf)
 
     const sessionId = crypto.randomUUID()
     cleanSessionId = sessionId
-    cleanCancelled = false
     // 收据的底：这一轮跑完要说清哪些是新建、哪些是覆盖，得先记下跑之前的清单
     cleanBefore.value = entries.value.map(item => item.rel)
+    // 准备阶段的日志留着（源头同步 / 上传各花了几步可见），接着进入正式清洗
     cleanLines.value = [
+      ...cleanLines.value,
       {
         kind: 'info',
         text: `开始清洗：未入库 ${pending.length} 个、有更新 ${stale.length} 个（模型 ${ai.providerLabel} · ${ai.runModel}）`,
@@ -683,7 +953,7 @@ export const useKbStore = defineStore('kb', () => {
           if (cleanSessionId !== sessionId)
             return
           cleanLines.value = [...cleanLines.value, line]
-          // agent_settled：这一轮收工。接下来是应用自己的收尾（收进程 → 重建索引）
+          // agent_settled：这一轮收工。接下来是应用自己的收尾（收进程 → 重建索引 → 上传）
           if (line.kind === 'done' && !cleanCancelled)
             void finishClean(sessionId)
         },
@@ -726,7 +996,7 @@ export const useKbStore = defineStore('kb', () => {
     }
   }
 
-  /** 清洗的收尾：收掉进程 → 重建目录与索引 → 刷新清单（打开着的条目一并重读） */
+  /** 清洗的收尾：收掉进程 → 重建索引 → 把新条目推上去 → 刷新清单 */
   async function finishClean(sessionId: string): Promise<void> {
     if (cleanPhase.value !== 'cleaning' || cleanSessionId !== sessionId)
       return
@@ -737,33 +1007,51 @@ export const useKbStore = defineStore('kb', () => {
     const current = root.value
     if (!current) {
       cleanPhase.value = 'failed'
-      cleanError.value = '条目已整理，但知识库文件夹读不到了：没法重建索引'
+      cleanError.value = '清洗已完成，但知识库文件夹读不到了：没法收尾'
       return
     }
     const built = await window.workbench.kbIndexBuild(current, todayIsoDate())
     if (!built.ok || !built.data) {
       cleanPhase.value = 'failed'
-      cleanError.value = `条目已整理，但重建索引失败：${built.error ?? '原因不明'}`
+      cleanError.value = `清洗完成，但收尾（重建索引）失败：${built.error ?? '原因不明'}`
       notifyError(cleanError.value)
       return
     }
+    // 条目推上去（清洗的前半程上传的是 raw，这一步把 data 的新条目也送上去）
+    let pushed = true
+    if (canSync.value) {
+      const up = await window.workbench.kbSync(current)
+      if (!up.ok || !up.data) {
+        pushed = false
+        syncError.value = up.error ?? '同步失败'
+      }
+    }
     await reload()
-    if (activeRel.value)
-      await openEntry(activeRel.value)
-    else if (activeRawRel.value)
+    if (activeRawRel.value)
       await openRaw(activeRawRel.value)
     cleanPhase.value = 'done'
-    notifySuccess(`清洗完成，目录与索引已重建（${built.data.count} 条）`)
+    if (pushed) {
+      notifySuccess('清洗完成，已上传远程')
+    }
+    else {
+      cleanLines.value = [
+        ...cleanLines.value,
+        { kind: 'info', text: '清洗完成，但上传远程失败：点工具条上的「同步」补一次。' },
+      ]
+      notifySuccess('清洗完成；上传失败，点「同步」补一次')
+    }
   }
 
-  /** 停下清洗：先走 Pi 自己的 abort（留档收得完整），不管成没成都按进程树收掉 */
+  /** 停下清洗：准备阶段直接收（还没有 Pi 进程）；清洗中先走 Pi 自己的 abort，再按进程树收掉 */
   async function stopClean(): Promise<void> {
-    if (cleanPhase.value !== 'cleaning')
+    if (cleanPhase.value !== 'cleaning' && cleanPhase.value !== 'preparing')
       return
     cleanCancelled = true
-    const procId = aiSessionProcessId(cleanSessionId)
-    await aiAbort(procId)
-    await aiStop(procId)
+    if (cleanPhase.value === 'cleaning') {
+      const procId = aiSessionProcessId(cleanSessionId)
+      await aiAbort(procId)
+      await aiStop(procId)
+    }
     cleanPhase.value = 'cancelled'
     await reload()
   }
@@ -777,25 +1065,54 @@ export const useKbStore = defineStore('kb', () => {
     cleanError.value = ''
   }
 
+  /** 删除失联条目（一个 raw 文件对应的那一组）：确认框在组件里，这里删 → 重建索引 → 刷新 */
+  async function purgeEntries(groups: KbDanglingGroup[]): Promise<boolean> {
+    const current = root.value
+    const rels = [...new Set(groups.flatMap(group => group.entryRels))]
+    if (!current || !rels.length)
+      return false
+    if (cleanBusy.value) {
+      notifyError('清洗进行中，先停下再清理失联条目')
+      return false
+    }
+
+    const result = await window.workbench.kbEntryDelete(current, rels)
+    if (!result.ok || !result.data) {
+      notifyError(result.error ?? '删除条目失败')
+      return false
+    }
+
+    // 与清洗收尾同一条路：删完立刻重建索引，再刷新清单（「已删除 N」随重扫消失）
+    const built = await window.workbench.kbIndexBuild(current, todayIsoDate())
+    if (canSync.value) {
+      const up = await window.workbench.kbSync(current)
+      if (!up.ok || !up.data)
+        syncError.value = up.error ?? '同步失败'
+    }
+    await reload()
+    if (!built.ok) {
+      notifyError(`条目已删除（${result.data.deleted} 个），但重建索引失败：${built.error ?? '原因不明'}`)
+      return false
+    }
+    notifySuccess(`已清理 ${result.data.deleted} 个失联条目`)
+    return true
+  }
+
   return {
     root,
-    sources,
+    sourceLinks,
     repoState,
     remoteUrl,
     canSync,
     scanEntries,
+    manifest,
     entries,
     rawItems,
-    rawSources,
-    indexInfo,
+    libraries,
+    dangling,
     loading,
     loaded,
     loadError,
-    activeRel,
-    activeEntry,
-    activeContent,
-    activeLoading,
-    activeError,
     activeRawRel,
     activeRaw,
     activeRawKind,
@@ -803,33 +1120,34 @@ export const useKbStore = defineStore('kb', () => {
     activeRawLoading,
     activeRawError,
     syncing,
+    pulling,
     syncError,
-    rebuilding,
+    migrating,
     stats,
-    tagCounts,
-    lintIssues,
     locationText,
     looksLikeKb,
+    migrateNeeded,
     cleanPhase,
     cleanLines,
     cleanError,
     cleanBusy,
     cleanWrites,
+    cleanScope,
     init,
     reload,
     detect,
     setRoot,
-    addSource,
-    setSourceDir,
-    removeSource,
-    revealSource,
-    openEntry,
+    addLibrary,
+    deleteLibrary,
+    deleteFile,
+    entryRelsOfLibrary,
+    entryRelsOfRawRel,
+    purgeEntries,
+    migrate,
     openRaw,
     closeRaw,
-    backToOverview,
-    followLink,
     syncNow,
-    rebuildIndex,
+    pullRemote,
     startClean,
     stopClean,
     closeClean,

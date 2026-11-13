@@ -95,12 +95,12 @@ export type {
   GitTreePage,
 } from '@workbench/git'
 export type {
+  KbDanglingGroup,
   KbEntryMeta,
   KbIndexInfo,
+  KbLibraryRow,
+  KbManifestEntry,
   KbRawItem,
-  KbRawSource,
-  KbRawSourceRow,
-  KbRawSourceScan,
   KbRawStatus,
   KbRepoState,
   KbScanEntry,

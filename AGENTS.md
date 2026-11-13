@@ -137,7 +137,7 @@ asset 协议、读取权限在 Rust 侧按单个文件授予）、**通道一律
 | 终端、子进程会话与日志 | [terminal](docs/modules/terminal.md) |
 | 工作日志 | [work-log](docs/modules/work-log.md) |
 | 笔记（正文 / 图片 / 素材 / 笔记同步） | [notes](docs/modules/notes.md) |
-| 知识库（原始数据 / 条目 / 一键清洗 / 索引重建 / 同步） | [kb](docs/modules/kb.md) |
+| 知识库（raw + data 两层仓库 / 清单列表 / 添加即首洗 / 清洗前置上传 / 删除 / 迁移 / 同步与自动拉取） | [kb](docs/modules/kb.md) |
 | AI 助手（会话 / 项目 / 驱动本机 Pi / 模型与密钥 / 提示词与出口） | [ai](docs/modules/ai.md) |
 | TBuddy（网关：CodeBuddy 反代；账号 / 流式对话 / 用量） | [gateway](docs/modules/gateway.md) |
 | Qoder（网关：Qoder 国内版反代；独立端口 / 密钥，可同时跑） | [qoder](docs/modules/qoder.md) |

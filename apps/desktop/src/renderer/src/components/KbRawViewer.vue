@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { KbRawItem, KbRawViewKind } from '@workbench/kb'
 import { ArrowLeft, FolderOpened } from '@element-plus/icons-vue'
-import { kbRawStatusText } from '@workbench/kb'
+import { kbRawDisplayPath, kbRawStatusText } from '@workbench/kb'
 /**
  * 原始数据查看（右栏点开一个原始文件之后）：文本类就地预览，其余说明去向。
  *
@@ -27,8 +27,8 @@ const props = defineProps<{
 const emit = defineEmits<{ back: [], open: [] }>()
 
 /**
- * 资料的真实位置：库里那份就是「知识库文件夹 + 逻辑路径」，不必多摆一行；
- * 在来源文件夹里时它是用户自己的目录，摆出来才找得到。
+ * 资料的真实位置：有关联的知识库 abs 指向**本机源头那份**（用户自己的目录，找得到才
+ * 放心改，内容也读本机的）；没关联时 abs 就是仓库里那份（与 rel 同尾），摆 rel。
  */
 const realPath = computed(() => {
   const trimmed = props.item.abs.replace(/\\/g, '/').replace(/\/+$/, '')
@@ -43,26 +43,17 @@ const realPath = computed(() => {
         <el-button size="small" :icon="ArrowLeft" @click="emit('back')">
           概览
         </el-button>
-        <el-tooltip content="用系统默认程序打开" placement="bottom">
-          <el-button size="small" :icon="FolderOpened" @click="emit('open')" />
-        </el-tooltip>
       </div>
       <h2 class="kb-raw-viewer__title">
         {{ item.name }}
       </h2>
+      <!-- 有关联时摆本机源头那份的路径（本机是事实源），没关联摆仓库里的位置 -->
       <p class="kb-raw-viewer__meta">
-        <span class="mono" :title="item.rel">{{ item.rel }}</span>
-      </p>
-      <!-- 资料在来源文件夹里时把真实位置也摆出来：它是用户自己的目录，找得到才放心改 -->
-      <p v-if="realPath" class="kb-raw-viewer__meta">
-        <span class="mono" :title="realPath">{{ realPath }}</span>
+        <span class="mono" :title="realPath || item.rel">{{ realPath || kbRawDisplayPath(item.rel) }}</span>
       </p>
       <p class="kb-raw-viewer__meta">
         <span>{{ kbRawStatusText(item.status) }}</span>
         <span>更新于 {{ formatTimestamp(item.mtimeMs) }}</span>
-        <span v-if="item.entryRels.length" :title="item.entryRels.join('\n')">
-          {{ item.entryRels.length }} 个条目整理自它
-        </span>
       </p>
     </header>
 

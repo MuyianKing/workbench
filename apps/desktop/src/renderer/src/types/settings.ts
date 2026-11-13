@@ -11,7 +11,7 @@
 import type { AiProvider, AiSession } from '@workbench/ai'
 import type { AccentInkMode, AppearanceSettingKey, ThemeSource, TopBarStyle, ViewId } from '@workbench/appearance'
 import type { ProjectSort } from '@workbench/core'
-import type { KbRawSource } from '@workbench/kb'
+import type { KbSourceLink } from '@workbench/kb'
 import type { MailAccount, MailContact } from '@workbench/mail'
 import type { WorkRange, WorkRangeBounds, WorkSort } from '@workbench/work-log'
 import { AI_PERMISSION_DEFAULT, AI_THINKING_DEFAULT } from '@workbench/ai'
@@ -181,7 +181,7 @@ export interface AppSettings {
    * 换台机器就不成立（路径是本机的），所以进数据文件、不参与外观同步 —— 与 `kbDir`
    * 同一类。每条带 root：来源名在不同知识库里可以重名，映射只对它那个库生效。
    */
-  kbRawSources: KbRawSource[]
+  kbRawSources: KbSourceLink[]
   /**
    * Git 页上次打开的那个文件夹（空串 = 还没打开过）。
    *

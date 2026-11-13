@@ -852,46 +852,74 @@ pub use crate::fs_util::is_plain_segment;
 
 // ---------- 笔记同步 ----------
 
-/// 笔记同步：把**用户挑的那个笔记文件夹本身**当成一个 git 工作区（提交 → pull --rebase → 推送）。
+/// 笔记 / 知识库同步共用一条路（把**用户挑的那个文件夹本身**当成一个 git 工作区：
+/// 提交 → pull --rebase → 推送），两边的差别只有报错里的称呼、提交信息前缀与两条
+/// 「怎么自己解决」的提示 —— 流程一条也不能有第二份（并发、冲突、busy 的口径都要一致）。
 ///
 /// 与另外两处同步最大的不同是**没有克隆目录**：用量 / 图片那边同步的是应用自己在 `%APPDATA%`
 /// 里管的缓存，这边同步的就是用户那个文件夹 —— 于是「笔记就是磁盘上那些 `.md`」这条不变：
 /// 换台机器 `git clone` 下来、拿别的编辑器接着写，还是同一份东西，应用只是替它跑几条 git 命令。
 ///
 /// **同步到哪儿不由应用决定**：就是这个文件夹自己 `remote origin` 指的地址。应用既不 `git init`
-/// 也不替用户 `remote add` —— 没有仓库的文件夹就是本机的笔记，不同步；想同步就自己先 clone
-/// 或 `git init` + `remote add origin`（这也顺带保住了「悄悄把笔记推到用户没选的地方」这条禁令：
+/// 也不替用户 `remote add` —— 没有仓库的文件夹就是本机的资料，不同步；想同步就自己先 clone
+/// 或 `git init` + `remote add origin`（这也顺带保住了「悄悄把资料推到用户没选的地方」这条禁令：
 /// 应用手里根本没有可以改 origin 的代码路径）。
 ///
 /// 三件必须说清楚的事：
 ///   1. **先提交本机的改动**，再拉、再推。顺序反了的话工作区里的改动会挡住 rebase，
 ///      而「还没提的那一份」在冲突里没有落脚点，撤回来就没了；
 ///   2. **冲突不替用户挑边**：中止这次 rebase（本地那笔提交留着）、把冲突的文件名如实报回去。
-///      笔记是文字，自动挑一边就是悄悄改掉人家的内容；
+///      文字是用户写的，自动挑一边就是悄悄改掉人家的内容；
 ///   3. 文件夹里留着**别人没做完的 rebase / merge** 时拒绝动手：那是用户的现场，
 ///      我们既不该在 detach 的 HEAD 上提交，也不该替他 abort。
-pub fn sync_notes(dir: &str) -> Result<Value, String> {
+struct SyncSubject {
+    /// 界面叫法：「笔记文件夹」／「知识库文件夹」
+    label: &'static str,
+    /// 提交信息前缀：`notes: <设备名>` / `kb: <设备名>`
+    commit_prefix: &'static str,
+    /// 还不是仓库时的提示（各说各的解决办法）
+    not_repo_hint: &'static str,
+    /// 没连远端时的提示
+    no_remote_hint: &'static str,
+}
+
+const NOTES_SUBJECT: SyncSubject = SyncSubject {
+    label: "笔记文件夹",
+    commit_prefix: "notes",
+    not_repo_hint: "笔记只在本机。想同步就先把它做成仓库（`git init` 后接上远端，或直接 clone 一个下来）",
+    no_remote_hint: "在它里面跑 `git remote add origin <地址>` 就能同步",
+};
+
+const KB_SUBJECT: SyncSubject = SyncSubject {
+    label: "知识库文件夹",
+    commit_prefix: "kb",
+    not_repo_hint: "知识库同步到哪儿只认它自己连着的远端。想同步就先把它做成仓库（clone 下来，或 `git init` 后接上远端）",
+    no_remote_hint: "在它里面跑 `git remote add origin <地址>` 就能同步",
+};
+
+fn sync_folder(dir: &str, subject: &SyncSubject) -> Result<Value, String> {
+    let label = subject.label;
     let dir = dir.trim();
     if dir.is_empty() {
-        return Err("还没有选择笔记文件夹".into());
+        return Err(format!("还没有选择{label}"));
     }
     let root = PathBuf::from(dir);
     if !root.is_dir() {
-        return Err(format!("找不到笔记文件夹：{dir}"));
+        return Err(format!("找不到{label}：{dir}"));
     }
     // `.git` 是个目录（普通仓库）也可能是个文件（worktree / 子模块），两种都算「已经是仓库」。
     // 判据只看这个文件夹自己：`rev-parse --show-toplevel` 指到别处也不采用 —— 见 commit_notes 里
     // `add -A` 不带 pathspec 的后果，在别人的仓库子目录里跑一次就会把整个仓库提交走
     if !root.join(".git").exists() {
-        return Err("这个笔记文件夹还不是 git 仓库：笔记只在本机。想同步就先把它做成仓库（`git init` 后接上远端，或直接 clone 一个下来）".into());
+        return Err(format!("这个{label}还不是 git 仓库：{}", subject.not_repo_hint));
     }
     if !run_git_quiet(&["remote", "get-url", "origin"], &root) {
-        return Err("这个笔记文件夹还没连远端仓库：在它里面跑 `git remote add origin <地址>` 就能同步".into());
+        return Err(format!("这个{label}还没连远端仓库：{}", subject.no_remote_hint));
     }
 
     // 同一个文件夹被两个窗口同时同步时，走同一条队（见 workflow_lock）
     let _workflow = lock_workflow(&root);
-    if let Some(message) = busy_message(&root, "这个笔记文件夹") {
+    if let Some(message) = busy_message(&root, &format!("这个{label}")) {
         return Err(message);
     }
 
@@ -914,12 +942,12 @@ pub fn sync_notes(dir: &str) -> Result<Value, String> {
     // 刚接上远端的分支（本地本来还没有提交，这一步之后站上去了）：远端那一批就是这次取下来的
     let adopted_remote = was_empty && !head_of(&root).is_empty();
 
-    let files = commit_notes(&root, &mut log)?;
+    let files = commit_notes(&root, &mut log, subject.commit_prefix)?;
 
     /*
      * 「这次同步有没有把远端的东西取下来」。
      *
-     * 两种情况都算：**刚接上远端的分支**（上面那一下把远端的笔记落到了盘上）与
+     * 两种情况都算：**刚接上远端的分支**（上面那一下把远端的资料落到了盘上）与
      * **pull 真的动了 HEAD**。只看 pull 会漏掉前者 —— 那正是新机器第一次同步
      * 最需要被说一句「拉回来了」的时候。
      */
@@ -927,7 +955,7 @@ pub fn sync_notes(dir: &str) -> Result<Value, String> {
     pull_with_rebase(&root, &branch, &mut log)?;
     let received = adopted_remote || before_pull != head_of(&root);
 
-    // 一份提交都没有（笔记本是空的、远端也空）：没有可推的，如实回一个「什么都没做」的结果，
+    // 一份提交都没有（文件夹是空的、远端也空）：没有可推的，如实回一个「什么都没做」的结果，
     // 不然 `git push` 会报一句「refspec 匹配不上任何东西」，看着像出错
     if !head_of(&root).is_empty() {
         push_with_retry(&root, &branch, &mut log)?;
@@ -937,8 +965,61 @@ pub fn sync_notes(dir: &str) -> Result<Value, String> {
         "branch": branch,
         "files": files,
         "received": received,
-        "log": log.join("\n"),
+        "log": log.join("
+"),
     }))
+}
+
+/// 笔记同步：把用户挑的笔记文件夹当成一个 git 工作区同步一次（提交信息 `notes: <设备名>`）。
+pub fn sync_notes(dir: &str) -> Result<Value, String> {
+    sync_folder(dir, &NOTES_SUBJECT)
+}
+
+/// 知识库同步：把知识库文件夹当成一个 git 工作区同步一次（提交信息 `kb: <设备名>`）。
+/// 清洗前上传原始文件、清洗后推条目、用户手点同步，走的都是这一条。
+pub fn sync_kb(dir: &str) -> Result<Value, String> {
+    sync_folder(dir, &KB_SUBJECT)
+}
+
+/// 知识库仓库**只拉不推**：打开知识库页时后台对齐远端用（远端有新东西就落到本地工作树，
+/// 让列表跟上别的设备）。不提交本机的改动 —— 工作区里压着未提交的东西时 `--autostash`
+/// 会先挪开再放回来；冲突不替用户挑边（本地现场保持原样，报错让用户自己合）。
+pub fn pull_kb(dir: &str) -> Result<Value, String> {
+    let dir = dir.trim();
+    if dir.is_empty() {
+        return Err("还没有选择知识库文件夹".into());
+    }
+    let root = PathBuf::from(dir);
+    if !root.is_dir() {
+        return Err(format!("找不到知识库文件夹：{dir}"));
+    }
+    if !root.join(".git").exists() {
+        return Err("这个知识库文件夹还不是 git 仓库".into());
+    }
+    if !run_git_quiet(&["remote", "get-url", "origin"], &root) {
+        return Err("这个知识库文件夹还没连远端仓库".into());
+    }
+
+    let _workflow = lock_workflow(&root);
+    if let Some(message) = busy_message(&root, "这个知识库文件夹") {
+        return Err(message);
+    }
+
+    // 要出网，先注入凭据（与 sync_folder 同一条规矩）
+    set_git_auth();
+
+    let mut log: Vec<String> = Vec::new();
+    if let Ok(text) = run_git(&["fetch", "--quiet", "--prune", "origin"], Some(&root), GIT_TIMEOUT) {
+        if !text.trim().is_empty() {
+            log.push(text);
+        }
+    }
+    let branch = current_branch(&root)?;
+    let before = head_of(&root);
+    pull_with_rebase(&root, &branch, &mut log)?;
+    let received = before != head_of(&root);
+    Ok(json!({ "branch": branch, "received": received, "log": log.join("
+") }))
 }
 
 /// 文件夹的 git 状态：有没有仓库、origin 是什么、当前站在哪个分支。
@@ -1032,9 +1113,10 @@ pub(crate) fn current_branch(root: &Path) -> Result<String, String> {
 
 /// 把本机的改动提交掉（没有改动就什么都不做），返回这次提交了几个文件。
 ///
-/// `add -A` 是整个文件夹：笔记、附件、用户自己放进来的 `.gitignore` 都算这个仓库的内容 ——
+/// `add -A` 是整个文件夹：资料、附件、用户自己放进来的 `.gitignore` 都算这个仓库的内容 ——
 /// 要排除什么都写在 `.gitignore` 里，那是 git 自己的规矩。
-fn commit_notes(root: &Path, log: &mut Vec<String>) -> Result<usize, String> {
+/// 提交信息按调用方带前缀（`notes:` / `kb:`），后面的设备名让人分得清是哪台机器推的。
+fn commit_notes(root: &Path, log: &mut Vec<String>, prefix: &str) -> Result<usize, String> {
     run_git(&["add", "-A"], Some(root), GIT_TIMEOUT)?;
     // 退出码 1 = 有暂存改动（与 publish_at 那边同一个用法）
     if run_git_quiet(&["diff", "--cached", "--quiet"], root) {
@@ -1044,7 +1126,7 @@ fn commit_notes(root: &Path, log: &mut Vec<String>) -> Result<usize, String> {
     let names = run_git(&["diff", "--cached", "--name-only"], Some(root), GIT_TIMEOUT)?;
     let files = names.lines().filter(|line| !line.trim().is_empty()).count();
     log.push(run_git(
-        &["commit", "-m", &format!("notes: {}", host_name())],
+        &["commit", "-m", &format!("{prefix}: {}", host_name())],
         Some(root),
         GIT_TIMEOUT,
     )?);

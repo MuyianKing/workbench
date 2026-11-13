@@ -330,7 +330,7 @@ describe('老数据搬家', () => {
     expect(sanitizeSettings({}).mailAccounts).toEqual([])
   })
 
-  it('原始数据的来源：老数据文件里没有就是空清单（一律读库里的 data/raw）', () => {
+  it('原始数据的来源：老数据文件里没有就是空清单（来源只来自外部映射）', () => {
     expect(sanitizeSettings({}).kbRawSources).toEqual([])
   })
 

@@ -1,32 +1,21 @@
 <script setup lang="ts">
-import type { KbIndexInfo, KbStats } from '@workbench/kb'
+import type { KbStats } from '@workbench/kb'
 /**
- * 知识库概览（右栏的默认内容）：统计、标签分布、索引状态与仓库归属。
+ * 知识库概览（右栏的默认内容）：原始数据的几个数与仓库归属。
  *
- * 全是父层算好的数字（props 只读），这里负责把它们说成人话 —— 特别是两件要提醒的
- * 事：索引与实际条目数对不上（该重建索引了）、仓库没连远端（同步按钮不会出现的原因）。
+ * **界面只说原始文件的事**：清洗出来的条目、索引这些产物用户不关心也不展示 ——
+ * 这里只有「多少原始文件、多少等着洗」与「仓库连没连远端」两块。
+ * 全是父层算好的数字（props 只读）。
  */
 import { computed } from 'vue'
 
 const props = defineProps<{
   stats: KbStats
-  tagCounts: Array<{ tag: string, count: number }>
-  /** index.json 解出来的两样；null = 索引还没生成（或认不出） */
-  indexInfo: KbIndexInfo | null
   /** 知识库文件夹在不在 git 仓库里 */
   isRepo: boolean
   /** origin 地址；空串 = 没连远端 */
   repoOrigin: string
 }>()
-
-/** 概览只放前几个标签，再多就是另一页的事了 */
-const TAG_LIMIT = 8
-const topTags = computed(() => props.tagCounts.slice(0, TAG_LIMIT))
-
-/** 索引与实际条目数对不上：该重建了（null 不算对不上，那是「还没生成」的另一句话） */
-const indexMismatch = computed(
-  () => props.indexInfo !== null && props.indexInfo.count !== props.stats.entries,
-)
 
 const repoText = computed(() => {
   if (!props.isRepo)
@@ -46,14 +35,6 @@ const repoText = computed(() => {
         </h3>
         <dl class="kb-info__facts">
           <div class="kb-info__fact">
-            <dt>条目</dt>
-            <dd>
-              {{ stats.entries }}<template v-if="stats.drafts > 0">
-                （草稿 {{ stats.drafts }}）
-              </template>
-            </dd>
-          </div>
-          <div class="kb-info__fact">
             <dt>原始数据</dt>
             <dd>
               {{ stats.raws }}<template v-if="stats.pending + stats.stale > 0">
@@ -62,34 +43,6 @@ const repoText = computed(() => {
             </dd>
           </div>
         </dl>
-      </section>
-
-      <section v-if="topTags.length" class="kb-info__block">
-        <h3 class="kb-info__title">
-          标签
-        </h3>
-        <div class="kb-info__tags">
-          <span v-for="item in topTags" :key="item.tag" class="kb-info__tag">
-            {{ item.tag }}<span class="kb-info__tag-count">{{ item.count }}</span>
-          </span>
-        </div>
-      </section>
-
-      <section class="kb-info__block">
-        <h3 class="kb-info__title">
-          索引
-        </h3>
-        <p v-if="!indexInfo" class="kb-info__note">
-          还没有生成索引：点工具条上的「重建索引」，由应用按 kb/ 下的条目算出目录与机器索引。
-        </p>
-        <template v-else>
-          <p class="kb-info__note">
-            生成于 {{ indexInfo.generatedAt }}，收录 {{ indexInfo.count }} 条。
-          </p>
-          <p v-if="indexMismatch" class="kb-info__warn">
-            实际扫到 {{ stats.entries }} 条，与索引对不上 —— 点工具条上的「重建索引」。
-          </p>
-        </template>
       </section>
 
       <section class="kb-info__block">
@@ -152,29 +105,6 @@ const repoText = computed(() => {
   margin: 0;
   color: var(--ink);
   font-size: var(--fs-body);
-}
-
-.kb-info__tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--sp-2);
-}
-
-.kb-info__tag {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 4px;
-  padding: 1px 8px;
-  border-radius: var(--r-sm);
-  background: var(--bg-inset);
-  color: var(--ink-2);
-  font-size: var(--fs-meta);
-  line-height: 22px;
-}
-
-.kb-info__tag-count {
-  color: var(--ink-3);
-  font-size: var(--fs-micro);
 }
 
 .kb-info__note {

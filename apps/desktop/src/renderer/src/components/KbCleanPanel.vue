@@ -11,8 +11,8 @@ import { ArrowLeft, Document, Loading, MagicStick } from '@element-plus/icons-vu
  *
  * 面板只画状态：起跑 / 取消 / 重试 / 关 / 开模型管理都交回 store 与页面（见 stores/kb.ts）。
  *
- * 底部的**收据**说清这一轮动了哪几条（新建的与覆盖的分开，口径在 packages/kb/src/kb-clean.ts 的
- * splitCleanWrites）：条目名是一颗能点的按钮，点一下收面板、直接去读那一条。
+ * 底部的**收据**说清这一轮整理了哪些**原始文件**（store 把清洗写下的东西映射回 raw 层
+ * 再给过来 —— 清洗产物的路径不进界面，用户只关心源文件）：新入库的与重新入库的分开。
  */
 import { computed, nextTick, ref, watch } from 'vue'
 import MarkdownView from '@/components/MarkdownView.vue'
@@ -24,29 +24,31 @@ const props = defineProps<{
   lines: AiLogLine[]
   /** 拦路原因（blocked）或失败原因（failed） */
   error: string
-  /** 这一轮新建的条目（相对仓库根） */
+  /** 这一轮新入库的原始文件（raw 相对路径） */
   created: string[]
-  /** 这一轮覆盖的条目（相对仓库根） */
+  /** 这一轮重新入库的原始文件（raw 相对路径） */
   updated: string[]
 }>()
 
-const emit = defineEmits<{ 'start': [], 'stop': [], 'close': [], 'open-models': [], 'open-entry': [rel: string] }>()
+const emit = defineEmits<{ 'start': [], 'stop': [], 'close': [], 'open-models': [] }>()
 
 const settings = useSettingsStore()
 
-/** 顶部那行状态说什么：跑着的每一步、收场与拦截各有一句 */
+/** 顶部那行状态说什么：跑着的每一步、收场与拦截各有一句（只说原始文件的事，不提产物） */
 const status = computed<{ text: string, kind: 'run' | 'ok' | 'fail' } | null>(() => {
   switch (props.phase) {
+    case 'preparing':
+      return { text: '正在准备：同步源头 → 上传远程 → 算清洗清单…', kind: 'run' }
     case 'cleaning':
-      return { text: `正在清洗：${settings.settings.appName} 在按清单整理条目…`, kind: 'run' }
+      return { text: `正在清洗：${settings.settings.appName} 正在按清单整理原始资料…`, kind: 'run' }
     case 'indexing':
-      return { text: '条目已整理，正在重建目录与索引…', kind: 'run' }
+      return { text: '清洗完成，正在收尾并上传远程…', kind: 'run' }
     case 'done':
-      return { text: '清洗完成，条目状态已刷新', kind: 'ok' }
+      return { text: '清洗完成，状态已刷新', kind: 'ok' }
     case 'failed':
       return { text: '清洗没有走完', kind: 'fail' }
     case 'cancelled':
-      return { text: '已停止清洗（已写下的条目保留）', kind: 'fail' }
+      return { text: '已停止清洗（已写下的内容保留）', kind: 'fail' }
     default:
       return null
   }
@@ -89,7 +91,7 @@ watch(
           {{ status.text }}
         </span>
         <span class="clean__tools">
-          <el-button v-if="phase === 'cleaning'" size="small" @click="emit('stop')">
+          <el-button v-if="phase === 'cleaning' || phase === 'preparing'" size="small" @click="emit('stop')">
             停止清洗
           </el-button>
           <template v-else-if="phase !== 'indexing'">
@@ -142,13 +144,11 @@ watch(
     <footer v-if="created.length || updated.length" class="clean__foot">
       <div v-if="created.length" class="clean__write">
         <p class="clean__written">
-          新建 {{ created.length }} 条
+          新入库 {{ created.length }} 个
         </p>
         <ul class="clean__rels">
-          <li v-for="rel in createdShown" :key="rel">
-            <button type="button" class="clean__rel" @click="emit('open-entry', rel)">
-              {{ rel }}
-            </button>
+          <li v-for="rel in createdShown" :key="rel" class="clean__rel">
+            {{ rel }}
           </li>
         </ul>
         <p v-if="restText(created)" class="clean__written">
@@ -157,13 +157,11 @@ watch(
       </div>
       <div v-if="updated.length" class="clean__write">
         <p class="clean__written">
-          覆盖 {{ updated.length }} 条
+          重新入库 {{ updated.length }} 个
         </p>
         <ul class="clean__rels">
-          <li v-for="rel in updatedShown" :key="rel">
-            <button type="button" class="clean__rel" @click="emit('open-entry', rel)">
-              {{ rel }}
-            </button>
+          <li v-for="rel in updatedShown" :key="rel" class="clean__rel">
+            {{ rel }}
           </li>
         </ul>
         <p v-if="restText(updated)" class="clean__written">
@@ -346,7 +344,7 @@ watch(
   word-break: break-word;
 }
 
-/* 条目名排成一行小片：点一下就去看那一条（收起面板，见父层的 openWritten） */
+/* 条目路径排成一行小片：只是展示（应用里没有条目阅读视图，不跳转） */
 .clean__rels {
   display: flex;
   flex-wrap: wrap;
@@ -359,7 +357,6 @@ watch(
 .clean__rel {
   max-width: 100%;
   padding: 0 6px;
-  border: 0;
   border-radius: var(--r-sm);
   background: var(--bg-inset);
   color: var(--ink-2);
@@ -369,11 +366,5 @@ watch(
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  cursor: pointer;
-}
-
-.clean__rel:hover {
-  background: var(--border);
-  color: var(--ink);
 }
 </style>

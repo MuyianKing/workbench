@@ -19,7 +19,7 @@ import { sanitizeAccount } from '@workbench/auth'
 import { CAPTURE_HOTKEY_DEFAULT, sanitizeCaptureHotkey, sanitizeCaptureMagnifier, sanitizeCapturePinOpacity, sanitizeCaptureSaveDir } from '@workbench/capture'
 import { pruneDays, sanitizeActivity, sanitizeCommands, sanitizeIconCache, sanitizeProjectSort, sanitizeQuickApps } from '@workbench/core'
 import { sanitizeGitRepoRoot, sanitizeRepoHistory } from '@workbench/git'
-import { sanitizeKbRawSources } from '@workbench/kb'
+import { sanitizeKbSourceLinks } from '@workbench/kb'
 import { sanitizeMailAccounts, sanitizeMailBulkSenders, sanitizeMailContacts, sanitizeMailPollMinutes } from '@workbench/mail'
 import { sanitizeEditorHotkeys, sanitizeImageRepo, sanitizeNoteHistory, sanitizeNoteRoot, sanitizeNoteTreeExpanded } from '@workbench/notes'
 import { sanitizeSyncRepo } from '@workbench/usage'
@@ -123,10 +123,10 @@ export function sanitizeSettings(raw: unknown): StoredSettings {
   // Git 页「最近打开的文件夹」（头部下拉）：老数据文件里没有，默认空清单；
   // 手工改坏过、重复、超上限的都在这里收敛
   value.gitRepos = sanitizeRepoHistory(value.gitRepos)
-  // 原始数据的来源映射（来源名 → 本机一个文件夹）：老数据文件里没有，默认空清单 =
-  // 一律读库里的 data/raw。与 kbDir 同一类 —— 路径只对本机成立，逐项收敛
-  // （缺 root / 缺名字的丢掉、同名与同一个文件夹去重、指到知识库文件夹里的按没配处理）
-  value.kbRawSources = sanitizeKbRawSources(value.kbRawSources)
+  // 知识库的本机源头文件夹关联（知识库名 → 本机一个文件夹）：老数据文件里没有，默认空清单 =
+  // 全都没有关联（仓库里的 raw 副本直接用，只读）。与 kbDir 同一类 —— 路径只对本机成立，
+  // 逐项收敛（缺 root / 缺名字的丢掉、同名与同一个文件夹去重、指到知识库文件夹里的按没配处理）
+  value.kbRawSources = sanitizeKbSourceLinks(value.kbRawSources)
   // AI 助手的模型配置（AI 服务清单）：老数据文件里没有，默认空 = 还没配过。
   // 更早的版本只有「一个自定义端点」（aiProviderName / aiBaseUrl / aiApiFormat / aiModels
   // 四样平铺在设置里），这里顺手搬成一条服务 —— 只搬一次，之后那四个字段就清掉了

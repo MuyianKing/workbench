@@ -364,38 +364,109 @@ pub fn skill_files(root: String, dir: String, id: String) -> Result<Vec<Value>, 
     crate::skills::files(&root, &dir, &id)
 }
 
-// ---------- 知识库（用户在别处维护的独立项目，见 kb.rs） ----------
+// ---------- 知识库（仓库里 raw/ + data/ 两层的独立项目，见 kb.rs） ----------
 //
-// 清单与正文读取是只读的；写只有一处 —— 重建目录与索引（生成物，脚本的活）。
-// 条目的内容**不由应用直接写**：那是 AI 助手驱动 Pi 在那个目录里干的（见 ai.rs）。
-// 同步与仓库探测不走新命令 —— note_sync / note_repo_state 本来就是「对任意文件夹、
-// 认它自己的 origin」的通用实现，渲染层带着知识库目录直接调。
+// 清单与正文读取是只读的；写全是受控动作（源头同步 / 删知识库 / 删文件 / 写清单 /
+// 迁移 / 重建索引 / 删条目），各有明确的前缀边界。git 的提交与推送在 sync.rs
+// （kb_sync / kb_pull），仓库探测复用 note_repo_state（它本来就是「对任意文件夹、
+// 认它自己的 origin」的通用实现）。
 
-/// 列目录（平铺清单，**任意后缀** —— 原始资料可能是 pdf / docx 任何东西）；
-/// 前缀拆分由渲染层做。`sources` 是原始数据的来源映射（来源名 → 本机一个文件夹）：
-/// 那些文件夹里的文件按**逻辑路径** `data/raw/<来源名>/…` 进来；读不到的那条只在自己
-/// 的结果里报原因（见 kb.rs 的 scan），不让整页读不出来
+/// 扫知识库文件夹：平铺清单（**任意后缀** —— 原始资料可能是 pdf / docx 任何东西）
+/// + 清单文件 `raw/kb.json` 的原文（没有就是空串，不是错误）+ 本机关联的源头文件夹
+/// 指纹（`links` 是「知识库名 → 本机文件夹」，状态判定「本地为准」用）
 #[tauri::command(async)]
-pub fn kb_scan(root: String, sources: Vec<crate::kb::RawSource>) -> Result<Value, String> {
-    crate::kb::scan(&root, &sources)
+pub fn kb_scan(root: String, links: Vec<crate::kb::SourceLink>) -> Result<Value, String> {
+    crate::kb::scan(&root, &links)
 }
 
-/// 读一个文件的文本（条目正文 / index.json / 来源里的原始资料）：
-/// `data/raw/<来源名>/…` 这条形状经来源根解析，其余在知识库文件夹里找；越界一律挡
+/// 读一个文件的文本：只认 raw/ 与 data/ 两层；越界一律挡。 是本机关联
+/// （知识库名 → 源头文件夹）：raw 层的文件本机里有就读本机的（最新内容）
 #[tauri::command(async)]
-pub fn kb_read(
-    root: String,
-    rel: String,
-    sources: Vec<crate::kb::RawSource>,
-) -> Result<String, String> {
-    crate::kb::read(&root, &rel, &sources)
+pub fn kb_read(root: String, rel: String, links: Vec<crate::kb::SourceLink>) -> Result<String, String> {
+    crate::kb::read(&root, &rel, &links)
 }
 
-/// 重建 `kb/_catalog.md` 与 `index/index.json`（输出与仓库自己的脚本逐字节一致）。
-/// `generated_at` 由渲染层给：脚本用的是本机时区的今天，只有渲染层知道本机的今天。
+/// 重建 `data/_catalog.md` 与 `data/index.json`（索引只由应用生成）。
+/// `generated_at` 由渲染层给：本机时区的今天，只有渲染层知道本机的今天。
 #[tauri::command(async)]
 pub fn kb_index_build(root: String, generated_at: String) -> Result<Value, String> {
     crate::kb::index_build(&root, &generated_at)
+}
+
+/// 一批原始文件的内容指纹（逻辑路径 → SHA-256）：跨设备判定「已入库 / 有更新」用，
+/// 只算渲染层挑出来的那些（有条目指向的）。单个文件读不到就不放进结果，渲染层回落 mtime
+#[tauri::command(async)]
+pub fn kb_fingerprints(root: String, rels: Vec<String>) -> Result<Value, String> {
+    crate::kb::fingerprints(&root, &rels)
+}
+
+/// 删除条目（受控例外）：只认 `data/` 下的 `.md`，生成物 `_catalog.md`、遗留的
+/// `data/raw/` 与越界路径一律拒（见 kb.rs 的 delete_entries）
+#[tauri::command(async)]
+pub fn kb_entry_delete(root: String, rels: Vec<String>) -> Result<Value, String> {
+    crate::kb::delete_entries(&root, &rels)
+}
+
+/// 源头同步：把本机关联的源头文件夹复制进 `raw/<名字>/`（新增 / 有变化才复制，
+/// 不删除）。添加知识库（全量）与清洗前的源头同步（增量）共用
+#[tauri::command(async)]
+pub fn kb_source_sync(root: String, name: String, dir: String) -> Result<Value, String> {
+    crate::kb::source_sync(&root, &name, &dir)
+}
+
+/// 删一个知识库的两层：`raw/<名字>/` 与 `data/<名字>/`（存在才删）；源头文件夹不动
+#[tauri::command(async)]
+pub fn kb_delete_tree(root: String, name: String) -> Result<Value, String> {
+    crate::kb::delete_tree(&root, &name)
+}
+
+/// 删一个原始文件：仓库里那份与关联的源头文件夹里那份一起删（dir 为空串 = 没有关联）
+#[tauri::command(async)]
+pub fn kb_file_delete(
+    root: String,
+    name: String,
+    dir: String,
+    rels: Vec<String>,
+) -> Result<Value, String> {
+    crate::kb::file_delete(&root, &name, &dir, &rels)
+}
+
+/// 生成仓库根的 AGENTS.md（给进仓库的 AI 描述结构与用法）：已存在时不覆盖。
+/// 添加知识库与迁移之后由渲染层调一次
+#[tauri::command(async)]
+pub fn kb_agents_doc(root: String) -> Result<Value, String> {
+    crate::kb::agents_doc_write(&root)
+}
+
+/// 写清单文件 `raw/kb.json`（内容由渲染层拼好，这里挡一层「必须是合法 JSON」）
+#[tauri::command(async)]
+pub fn kb_config_write(root: String, content: String) -> Result<Value, String> {
+    crate::kb::config_write(&root, &content)
+}
+
+/// 旧结构一次性迁移：来源复制进 raw/、kb/ 搬进 data/、source 前缀改写、旧 index/ 删除、
+/// 清单落盘（见 kb.rs 的 migrate）。只能迁移一次
+#[tauri::command(async)]
+pub fn kb_migrate(
+    root: String,
+    sources: Vec<crate::kb::SourceLink>,
+    manifest: String,
+) -> Result<Value, String> {
+    crate::kb::migrate(&root, &sources, &manifest)
+}
+
+/// 与知识库仓库自己的 origin 同步一次（提交 → 拉 → 推，提交信息 `kb: <设备名>`）。
+/// 清洗前上传原始文件、清洗后推条目、用户手点同步，走的都是它
+#[tauri::command(async)]
+pub fn kb_sync(dir: String) -> Result<Value, String> {
+    crate::sync::sync_kb(&dir)
+}
+
+/// 只拉不推（打开页面时后台对齐远端用的那一下）：远端有新东西就落到本地工作树。
+/// 不提交本机的改动 —— 那是同步（kb_sync）的事
+#[tauri::command(async)]
+pub fn kb_pull(dir: String) -> Result<Value, String> {
+    crate::sync::pull_kb(&dir)
 }
 
 // ---------- AI 助手（驱动本机的 Pi 整理知识库，见 ai.rs） ----------
