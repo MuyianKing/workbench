@@ -163,13 +163,15 @@ const skeletonParas = [
 </script>
 
 <template>
-  <section class="mail-view__main panel">
-    <!-- 通讯录那一签：左边那份名单才是这一签的内容，右栏空着 -->
-    <div v-if="mail.tab === 'contacts'" class="mail-view__blank" />
-
+  <!--
+    玻璃壳只在配置了账户之后画：没配置是功能的缺省态，右栏裸压画布 + 居中空态，
+    与技能 / Git 的整页空态同一待遇（2026-11 用户定：缺省态不要毛玻璃）。
+    未配置的分支排在最前：左栏此刻不存在，联系人签残留（账户被移除时）也不能盖住配置入口。
+  -->
+  <section class="mail-view__main" :class="{ panel: mail.configured }">
     <!-- 没配置账户：空态配图 + 一句事实 + 那颗入口（地址、授权码都在那个弹层里填） -->
     <EmptyState
-      v-else-if="!mail.configured"
+      v-if="!mail.configured"
       :icon="Message"
       text="还没有配置邮箱账户"
     >
@@ -179,6 +181,9 @@ const skeletonParas = [
         </el-button>
       </template>
     </EmptyState>
+
+    <!-- 通讯录那一签：左边那份名单才是这一签的内容，右栏空着 -->
+    <div v-else-if="mail.tab === 'contacts'" class="mail-view__blank" />
 
     <!-- 拉正文期间整个阅读区让位给骨架屏：铺满整栏（头像 / 落款 / 主题 / 撑满高度的正文段落），
          段落不足时均匀铺开、超出时裁掉 —— 任何窗口高度下都不留空白，内容看着正在成形 -->

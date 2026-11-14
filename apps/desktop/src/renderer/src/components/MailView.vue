@@ -50,24 +50,27 @@ onActivated(() => {
 /**
  * 两栏的宽度：左栏是主题里存的那个值（与笔记 / 视频 / AI 页同一套做法）。
  * 列宽用 auto —— 宽度长在左栏自己身上，grid 这一行跟着缩。
+ * 未配置账户时不分栏：整页只有右栏那枚缺省空态（2026-11 用户定，清单连着分隔条一起不出现）。
  */
 const bodyStyle = computed(() => ({
-  'gridTemplateColumns': 'auto minmax(0, 1fr)',
+  'gridTemplateColumns': mail.configured ? 'auto minmax(0, 1fr)' : 'minmax(0, 1fr)',
   '--tree-w': `${settings.themeConfig.mailListWidth}px`,
 }))
 </script>
 
 <template>
   <main class="mail-view" :style="bodyStyle">
-    <MailSidebar @accounts="accountVisible = true" @compose="openComposer" />
+    <template v-if="mail.configured">
+      <MailSidebar @accounts="accountVisible = true" @compose="openComposer" />
 
-    <!-- 两栏之间的分隔条：与 AI / 知识库页同一条缝 -->
-    <PanelResizer
-      :width="settings.themeConfig.mailListWidth"
-      body-class="is-resizing-mail-list"
-      @move="width => settings.setThemeWidth('mailListWidth', width)"
-      @end="() => void settings.commitThemeWidth('mailListWidth')"
-    />
+      <!-- 两栏之间的分隔条：与 AI / 知识库页同一条缝 -->
+      <PanelResizer
+        :width="settings.themeConfig.mailListWidth"
+        body-class="is-resizing-mail-list"
+        @move="width => settings.setThemeWidth('mailListWidth', width)"
+        @end="() => void settings.commitThemeWidth('mailListWidth')"
+      />
+    </template>
 
     <MailReaderPane @accounts="accountVisible = true" @reply="reply" />
 

@@ -938,7 +938,12 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: var(--sp-3);
-  flex: none;
+  /**
+   * 账号栏要能撑满剩下的高度：空态时（AccountCards 的 .acct__empty）EmptyState 才有
+   * 垂直居中的空间（与 Qoder 页 .qd__pane.is-empty 同一套）。有卡时多出来的是透明区，
+   * 卡片照旧顶排、悬浮键仍在页面下沿 —— 视觉没有差别。
+   */
+  flex: 1 1 auto;
 }
 
 .gw__hint {

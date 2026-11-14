@@ -91,9 +91,10 @@ defineProps<{
   animation: empty-state-hop 2.4s ease-in-out infinite;
 }
 
+/* 空态文字与图标一律白色（ink，2026-11 用户定：不描边不垫底，压壁纸靠字色本身） */
 .empty-state__icon {
   font-size: 34px;
-  color: var(--ink-2);
+  color: var(--ink);
 }
 
 /* 失败态只染图标：文字保持灰度读原因，彩色点到「这里出了事」为止 */
@@ -125,19 +126,19 @@ defineProps<{
   animation: empty-state-shadow 2.4s ease-in-out infinite;
 }
 
+/* 正文与提示行都取白色（ink）：空态族统一口径，不描边不垫底，压壁纸靠字色本身 */
 .empty-state__text {
   margin: 0;
-  color: var(--ink-3);
+  color: var(--ink);
   font-size: var(--fs-title);
 }
 
 .empty-state__hint {
   max-width: 34ch;
   margin: 0;
-  color: var(--ink-3);
+  color: var(--ink);
   font-size: var(--fs-meta);
   line-height: 1.7;
-  opacity: 0.85;
 }
 
 .empty-state__actions {

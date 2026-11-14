@@ -94,7 +94,8 @@ function clearFilter(): void {
   border: 1px dashed var(--border-strong);
   border-radius: var(--r-lg);
   background: transparent;
-  color: var(--ink-3);
+  /* 幽灵卡上的字裸压壁纸：空态族统一白色（ink），不描边不垫底（2026-11 用户定） */
+  color: var(--ink);
   cursor: pointer;
   transition: border-color 0.18s ease, color 0.18s ease, background 0.18s ease;
 }
@@ -135,6 +136,8 @@ function clearFilter(): void {
   border: 1px dashed var(--border-strong);
   border-radius: var(--r-lg);
   text-align: center;
+  /* 裸压壁纸的说明字：空态族统一白色（ink），不描边不垫底 */
+  color: var(--ink);
 }
 
 .nomatch__title {
@@ -146,6 +149,6 @@ function clearFilter(): void {
 .nomatch__desc {
   margin-bottom: var(--sp-1);
   font-size: var(--fs-body);
-  color: var(--ink-3);
+  color: var(--ink);
 }
 </style>

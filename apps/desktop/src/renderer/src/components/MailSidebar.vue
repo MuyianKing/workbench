@@ -400,12 +400,8 @@ function onMenuAct(name: 'contact' | 'bulk' | 'toggle-seen' | 'multi-pick' | 'mu
         @menu="openMenu($event, item)"
       />
 
-      <!-- 没配置账户：清单无从拉起 —— 也摆空态配图 + 一句事实
-           （配置入口在右栏那颗与左栏底部「账户」） -->
-      <EmptyState v-if="!mail.configured" :icon="Message" text="还没有配置邮箱账户" />
-
-      <!-- 空态只说事实：没配置 / 拉完是空的（推广段不算空，有账户拉挂了也不算空）。
-           教学式引导一律不加 -->
+      <!-- 空态只说事实：拉完是空的（推广段不算空，有账户拉挂了也不算空）。
+           教学式引导一律不加。未配置时整个侧栏都不渲染（MailView 只出右栏缺省态） -->
       <EmptyState
         v-if="
           mail.configured

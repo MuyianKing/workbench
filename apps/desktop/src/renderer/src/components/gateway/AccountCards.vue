@@ -60,8 +60,13 @@ const emit = defineEmits<{
 </script>
 
 <template>
-  <div v-if="!props.accounts.length" class="panel">
-    <EmptyState compact :icon="Connection" :text="props.emptyText" :hint="props.emptyHint" />
+  <!--
+    空态不套卡片外壳（2026-11 用户指出与首页不统一）：与技能 / Git 的整页空态同一待遇 ——
+    字直接压在壁纸上、取白色（ink，不描边不垫底，2026-11 用户定）；flex 吃掉账号栏剩下的高度，
+    EmptyState 自己垂直居中。compact 也一并摘掉：整页空态用全尺寸那一档。
+  -->
+  <div v-if="!props.accounts.length" class="acct__empty">
+    <EmptyState :icon="Connection" :text="props.emptyText" :hint="props.emptyHint" />
   </div>
 
   <div v-else class="acct__list">
@@ -179,6 +184,16 @@ const emit = defineEmits<{
 </template>
 
 <style scoped>
+/**
+ * 空态容器：裸压画布（去毛玻璃），flex 吃满父栏剩下的高度让 EmptyState 垂直居中。
+ * TBuddy 的 `.gw__pool` 与 Qoder 的 `.qd__pane.is-empty` 各自把这个容器撑到整栏。
+ */
+.acct__empty {
+  flex: 1 1 auto;
+  display: flex;
+  min-height: 0;
+}
+
 .acct__list {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
