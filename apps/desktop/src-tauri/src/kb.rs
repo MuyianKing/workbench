@@ -1034,13 +1034,6 @@ mod tests {
         dir
     }
 
-    fn rels(entries: &[Value]) -> Vec<String> {
-        entries
-            .iter()
-            .map(|item| item["rel"].as_str().unwrap_or_default().to_string())
-            .collect()
-    }
-
     fn scan_rels(root: &str) -> Vec<String> {
         let result = scan(root, &[]).unwrap();
         result["entries"].as_array().cloned().unwrap_or_default()

@@ -447,14 +447,24 @@ onBeforeUnmount(() => {
         </div>
 
         <!--
-          底栏：左边字数照旧；右端是原标题栏那组 —— 保存状态 + 大纲开关。
+          底栏：最左是大纲开关，接着保存状态，右端是字数。
           整条也标了拖动区：拖动标记只在直接按住的元素上生效，按钮自己不拖。
         -->
         <footer class="md-foot" data-tauri-drag-region>
-          <span class="md-foot__count" data-tauri-drag-region>{{ countText }}</span>
-          <span class="md-foot__sep" aria-hidden="true" data-tauri-drag-region />
-          <span class="md-foot__kind" data-tauri-drag-region>Markdown</span>
-          <span class="md-foot__spacer" />
+          <el-tooltip :content="railOpen ? '收起大纲' : '展开大纲'" placement="top">
+            <el-button
+              text
+              size="small"
+              class="md-foot__btn"
+              :class="{ 'is-collapsed': !railOpen }"
+              :aria-label="railOpen ? '收起大纲' : '展开大纲'"
+              :aria-pressed="railOpen"
+              @click="railOpen = !railOpen"
+            >
+              <!-- 只留一枚左向箭头：收起时整枚转 180°（动画在样式里），不换图标 -->
+              <el-icon><DArrowLeft /></el-icon>
+            </el-button>
+          </el-tooltip>
           <template v-if="saveError">
             <span class="md-foot__error" role="alert" :title="saveError">
               保存失败：{{ saveError }}
@@ -474,20 +484,10 @@ onBeforeUnmount(() => {
             <span class="md-foot__dot" aria-hidden="true" data-tauri-drag-region />
             {{ status.text }}
           </span>
-          <el-tooltip :content="railOpen ? '收起大纲' : '展开大纲'" placement="top">
-            <el-button
-              text
-              size="small"
-              class="md-foot__btn"
-              :class="{ 'is-collapsed': !railOpen }"
-              :aria-label="railOpen ? '收起大纲' : '展开大纲'"
-              :aria-pressed="railOpen"
-              @click="railOpen = !railOpen"
-            >
-              <!-- 只留一枚左向箭头：收起时整枚转 180°（动画在样式里），不换图标 -->
-              <el-icon><DArrowLeft /></el-icon>
-            </el-button>
-          </el-tooltip>
+          <span class="md-foot__spacer" />
+          <span class="md-foot__count" data-tauri-drag-region>{{ countText }}</span>
+          <span class="md-foot__sep" aria-hidden="true" data-tauri-drag-region />
+          <span class="md-foot__kind" data-tauri-drag-region>Markdown</span>
         </footer>
       </template>
     </section>
@@ -802,7 +802,7 @@ onBeforeUnmount(() => {
 }
 
 /**
- * 底栏：左边字数，右端是保存状态（或失败原因 + 重试）与大纲开关。
+ * 底栏：最左是大纲开关，接着保存状态（或失败原因 + 重试），右端是字数。
  * 失败提示从原来的右下角浮层挪到这里 —— 面板已经有底栏，不必再压一块浮层。
  * 整条兼做窗口拖动带（拖动标记在模板上；按钮自己不拖）。
  */
@@ -811,14 +811,14 @@ onBeforeUnmount(() => {
   flex: 0 0 34px;
   align-items: center;
   gap: var(--sp-2);
-  padding: 0 var(--sp-2) 0 var(--sp-4);
+  padding: 0 var(--sp-4);
   border-top: 1px solid var(--border);
   color: var(--ink-3);
   font-size: var(--fs-micro);
   user-select: none;
 }
 
-/* 保存状态：一枚状态色小点 + 一句事实；文字不换行，窄窗口里让字数先截断 */
+/* 保存状态：一枚状态色小点 + 一句事实；文字不换行，窄窗口里失败原因先截断 */
 .md-foot__status {
   display: flex;
   flex: 0 0 auto;

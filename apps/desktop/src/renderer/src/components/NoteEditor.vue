@@ -1210,4 +1210,19 @@ defineExpose({
 .editor :deep(.vditor-ir__node[data-type='code-block']:not(.vditor-ir__node--expand) > .vditor-ir__marker) {
   display: none;
 }
+
+/**
+ * 展开态只留源码，预览那层收掉。
+ *
+ * IR 的代码块在 DOM 里是两层：可编辑源码（`pre.vditor-ir__marker--pre`）与高亮预览
+ * （`pre.vditor-ir__preview`，带复制按钮），折叠 / 展开靠 marker 的宽高切换 —— 上面那条
+ * 管折叠态（只留预览）。但 Vditor 自己的样式从不隐藏预览：点进代码块（节点挂上
+ * `--expand`）后两层一起出现，围栏 + 灰底源码下面还叠着一份高亮块，同一段代码看两遍。
+ *
+ * 这里补对称的另一边 —— 展开态（正在编辑）只留源码，blur 收起后回到高亮预览。
+ * 预览层在输入时仍被 Vditor 同步着（源码一变它就跟着重算高亮），收起那一刻就是新的。
+ */
+.editor :deep(.vditor-ir__node--expand[data-type='code-block'] > .vditor-ir__preview) {
+  display: none;
+}
 </style>
