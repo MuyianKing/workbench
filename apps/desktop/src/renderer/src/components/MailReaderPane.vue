@@ -3,7 +3,7 @@ import type { MailAttachmentKind, ParsedAttachment } from '@workbench/mail'
 import type { Component } from 'vue'
 import type { MailReplyTarget } from '@/stores/mail'
 import { Document, Download, EditPen, Link, Memo, Message, Monitor, Notebook, Reading } from '@element-plus/icons-vue'
-import { attachmentBadge, attachmentDataUrl, attachmentHint, attachmentKind, attachmentOpenable, attachmentSizeText, attachmentTint, isImageAttachment } from '@workbench/mail'
+import { attachmentBadge, attachmentDataUrl, attachmentHint, attachmentKind, attachmentOpenable, attachmentSizeText, attachmentTint, htmlBody, isImageAttachment } from '@workbench/mail'
 /**
  * 邮箱页右栏：阅读区（主题 / 收发人 / 附件 / 正文）与它的三种过渡态（未配置 / 拉正文骨架 / 未选中）。
  *
@@ -15,6 +15,7 @@ import EmptyState from '@/components/EmptyState.vue'
 import MailAttachmentDialog from '@/components/MailAttachmentDialog.vue'
 import { notifyError, notifySuccess } from '@/notify'
 import { useMailStore } from '@/stores/mail'
+import { useSettingsStore } from '@/stores/settings'
 
 const emit = defineEmits<{
   accounts: []
@@ -22,6 +23,7 @@ const emit = defineEmits<{
 }>()
 
 const mail = useMailStore()
+const settings = useSettingsStore()
 
 /** 清单里当前这封信的已读态（阅读栏「标记未读」按钮的依据） */
 const activeSeen = computed(() => mail.list.find(item => item.key === mail.active?.key)?.seen ?? true)
@@ -160,6 +162,18 @@ const skeletonParas = [
   [100, 78],
   [90, 52],
 ]
+
+/**
+ * 沙箱文档：store 只存解析件，文档按当前主题现场生成 —— 暗色下 htmlBody 注入整页
+ * 反色样式（信是照浅色纸设计的别人家的文档），切主题重算 srcdoc，正文跟着明暗走。
+ * null = 这封没有 HTML 正文，走下面的纯文本。
+ */
+const bodyDoc = computed(() => {
+  const message = mail.active
+  if (!message)
+    return null
+  return htmlBody(message.parsed, { dark: settings.effectiveTheme === 'dark' })
+})
 </script>
 
 <template>
@@ -296,8 +310,9 @@ const skeletonParas = [
         <!-- HTML 正文：sandbox 禁脚本 / 同源 / 表单 / 弹窗 —— 硬边界，与 AI 预览栏同一套；
              只放行用户点出来的顶层导航：htmlBody 把链接统一 target="_top"，
              这次导航被 main.rs 的 on_navigation 拦下转交系统浏览器。
-             正文外链图片照常加载（CSP img-src *），请求不带 Referer -->
-        <iframe v-if="mail.active.html" class="mail-body__frame" sandbox="allow-top-navigation-by-user-activation" referrerpolicy="no-referrer" :srcdoc="mail.active.html" title="邮件正文" />
+             正文外链图片照常加载（CSP img-src *），请求不带 Referer；
+             文档按当前主题生成（暗色注入整页反色，见 bodyDoc） -->
+        <iframe v-if="bodyDoc" class="mail-body__frame" sandbox="allow-top-navigation-by-user-activation" referrerpolicy="no-referrer" :srcdoc="bodyDoc" title="邮件正文" />
         <pre v-else class="mail-body__text">{{ mail.active.text || '（这封邮件没有可显示的正文）' }}</pre>
       </div>
     </template>

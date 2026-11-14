@@ -67,7 +67,14 @@ WinRT FFI）、`apps/desktop/src/renderer/src/workbench/mail.ts`（适配）、
   代码不同（同为系统 toast），是它的 `s:toast` 没被关过。
 - **HTML 正文渲染是 sandbox iframe**：脚本、同源、表单、弹窗全禁（只放行 `allow-top-navigation-by-user-activation`）
   —— 与 AI 预览栏（AiPreviewHtml.vue）同一条硬边界：邮件 HTML 绝不能在带宿主能力的 webview 里执行。没有 HTML 正文
-  时按纯文本排版，两者不混。**边界上两个刻意的口子**：① **外链图片** —— CSP `img-src * data:`（htmlBody 注入）放行，
+  时按纯文本排版，两者不混（纯文本那档走 `--ink`，明暗跟着主题走，不用另做）。
+  **暗色主题下正文整页反色**（`htmlBody` 的 `dark` 选项，MailReaderPane 按 `effectiveTheme` 传入）：信是照浅色纸
+  设计的别人家的文档，注入的只有一段 `<style>` —— `html` 整页 `invert(1) + hue-rotate(180deg)`（明暗翻转、色相不偏）
+  带 `!important`；`img / video / canvas` 二重反色连元素底色一起抵消（照片按原样画，透明像素底下仍是白纸、透明的黑色
+  logo 不会消失在暗底上），行内 svg 刻意不反 —— 黑图标跟着页面翻白；信里自己给图片垫的底色仍以它为准（图片那条
+  `background-color` 不带 `!important`），CSS `background-image` 与深色配色的信不单独识别、跟着一起翻。
+  **HTML 附件那一档不注入**（`attachmentHtml`）：显式打开的文档按原样看。这段样式不碰 CSP，「正文一行脚本都不跑」
+  不变。**边界上两个刻意的口子**：① **外链图片** —— CSP `img-src * data:`（htmlBody 注入）放行，
   请求不带 Referer；其余外链资源照样掐死。② **链接** —— 三处配套：`htmlBody`（parse.ts）把每个 `<a>` 改写成
   `target="_top"`（iframe 里点链接走不通，只能往顶层导航）→ MailView.vue 的 iframe 只放行「用户点出来的顶层导航」
   （脚本自动跳转照样被沙箱掐死）→ main.rs 的 `on_navigation` 拦下这次导航：应用自己的页面照常放行，http(s) /
@@ -132,8 +139,9 @@ WinRT FFI）、`apps/desktop/src/renderer/src/workbench/mail.ts`（适配）、
   **未配置时整个左栏不存在**（MailView 只渲染阅读栏，清单与分隔条都不出、grid 收成一列）—— 缺省态就是页面上唯一的
   内容；「未配置」分支排在阅读栏各态最前，联系人签残留（账户被移除时）也盖不住配置入口。
 - **读信**：点清单行 → `mail.openMail(item)` → 高亮（`activeKey`）在点击那一刻切，正文缓存查一次，有就开；没有才
-  `mail_fetch_body`（base64 回来；收件箱顺带标已读，发件箱不标）→ `parseMessage` 拆成文本 / HTML / 附件 / 内联图 →
-  `htmlBody` 生成沙箱文档（注入 CSP、cid 换 data URL、链接统一 `target="_top"`）。下载期间又点别的不被吞：排队等当前
+  `mail_fetch_body`（base64 回来；收件箱顺带标已读，发件箱不标）→ `parseMessage` 拆成文本 / HTML / 附件 / 内联图
+  （**缓存里存的是解析件**）；沙箱文档（注入 CSP、cid 换 data URL、链接统一 `target="_top"`、暗色整页反色）由
+  MailReaderPane 按当前主题现场生成（`htmlBody` 的 `dark` 选项），切主题重算 srcdoc、正文跟着明暗走。下载期间又点别的不被吞：排队等当前
   这封完事接着开（只记最后一封）；下载完时若最新点的已不是它，只进缓存不换内容 —— 高亮与阅读栏永远指同一封。列表
   未读点就地更新。阅读栏头部是「回复」（发件箱第一行摆收件人，前面挂「收件人」小字；回复也发给当初收到这封的人 ——
   `recipientAddress`）、「标记已读（未读）」（只在收件箱画），多账户时还标收自哪个邮箱 —— 回信默认从它发；附件一颗
@@ -257,9 +265,9 @@ apps/desktop/src/renderer/src/components/MailSidebar.vue
   左栏：三签切换（收件箱 / 已发送 / 联系人）、邮件清单与推广段、多选删除、通讯录与它的右键菜单；
   「账户」「写邮件」用 emit 交给父组件
 apps/desktop/src/renderer/src/components/MailReaderPane.vue
-  右栏阅读区：未配置 / 拉正文骨架 / 未选中三态；HTML 正文走 sandbox iframe（外链图片照常显示，脚本全禁，
-  链接经顶层导航转交系统浏览器）；附件片按 attachmentKind 分打开方式：图进 EP 查看器、
-  md / html / docx / pptx / pdf 进 MailAttachmentDialog，其余点开另存为；
+  右栏阅读区：未配置 / 拉正文骨架 / 未选中三态；HTML 正文走 sandbox iframe（文档按当前主题现场生成 ——
+  暗色注入整页反色；外链图片照常显示，脚本全禁，链接经顶层导航转交系统浏览器）；附件片按 attachmentKind
+  分打开方式：图进 EP 查看器、md / html / docx / pptx / pdf 进 MailAttachmentDialog，其余点开另存为；
   左首那块小方块按 attachmentTint 着色（唯一按文件类型着色的地方）
 apps/desktop/src/renderer/src/components/MailAttachmentDialog.vue
   附件预览弹层：md（MarkdownView）/ html（sandbox iframe，文档由 attachmentHtml 准备）/
@@ -292,8 +300,8 @@ packages/mail/src/mime.ts
   Content-Type 猜测
 packages/mail/src/parse.ts
   postal-mime 包装（parseMessage，含附件名的归一 preferExtendedFilenames）、
-  沙箱文档生成（正文 htmlBody：CSP + cid → data URL；HTML 附件 attachmentHtml：
-  同一副沙箱头与链接改写，另按文档声明的字符集解码）、
+  沙箱文档生成（正文 htmlBody：CSP + cid → data URL + 暗色整页反色的 dark 选项；
+  HTML 附件 attachmentHtml：同一副沙箱头与链接改写，另按文档声明的字符集解码）、
   发件人 / 收件人（displayRecipients、recipientAddress）与日期的展示拆解
   （阅读栏 displayDate / 清单短串 displayListDate）、
   附件的打开方式与片子上的左首（attachmentKind、attachmentBadge、attachmentTint、isImageAttachment、

@@ -260,6 +260,17 @@ describe('收信侧解析', () => {
     expect(htmlBody({ subject: '', from: null, text: 'x', html: '', attachments: [], inline: [] })).toBeNull()
   })
 
+  it('dark 选项注入整页反色（默认不给），注入的只是样式 —— CSP 一字不动、依旧没有 script-src', async () => {
+    const parsed = await parseMessage(sampleMessageBase64())
+    expect(htmlBody(parsed)).not.toContain('invert(')
+    const dark = htmlBody(parsed, { dark: true })
+    // html 的结构样式带 !important；图片那档连底色一起二重反色（透明像素底下还是白纸）
+    expect(dark).toContain('html{background:#fff!important;filter:invert(1) hue-rotate(180deg)!important}')
+    expect(dark).toContain('img,video,canvas{filter:invert(1) hue-rotate(180deg)!important;background-color:#fff}')
+    expect(dark).toContain('img-src * data:')
+    expect(dark).not.toContain('script-src')
+  })
+
   it('外链图片放行加载（CSP img-src *），标记不动', async () => {
     const raw = [
       'From: a@b.com',

@@ -5,6 +5,8 @@
 // ! 表单 / 弹窗，与 AI 预览栏同一套，见 AiPreviewHtml.vue），注入 CSP 放行外链图片
 // ! （营销信的主视觉跟着信里写的地址加载）但掐死其余一切外链资源 —— 脚本、字体、
 // ! 音视频、iframe 都没有。内联图（cid:）是邮件自带的内容，转成 data URL。
+// ! 暗色主题下再注入一段整页反色样式（DARK_STYLE）—— 信是照浅色纸设计的别人家的
+// ! 文档，注入的只有 <style>，CSP 与「一行脚本都不跑」的边界不变。
 // !
 // ! **HTML 附件是这条边上唯一开了内联脚本的**（`attachmentHtml`）：那是一整页别人做的东西，
 // ! 脚本不跑就只剩死版面。外链脚本照旧一个不放行，承载它的 iframe 也不给同源（不给
@@ -390,9 +392,27 @@ function sandboxHead(csp: string): string {
   return `<meta http-equiv="Content-Security-Policy" content="${csp}">${NO_REFERRER}`
 }
 
+/**
+ * 暗色主题下注入正文沙箱文档的整页反色样式（`htmlBody` 的 `dark` 选项）。
+ *
+ * 邮件是照浅色纸设计的别人家的文档，暗色下整页 `invert(1) + hue-rotate(180deg)`：
+ * 明暗翻转、色相不偏（蓝链接还是蓝的）。`img / video / canvas` 再反一次 —— 两道反色
+ * 连元素自己的底色一起抵消，照片按原样画、透明像素底下仍是白纸（与原信一致，透明的
+ * 黑色 logo 不会消失在暗底上）。行内 `svg` 刻意不反 —— 黑色图标跟着页面翻成白色，
+ * 正是暗色下想要的样子（svg 若装在 img 里走的是上一条，按原样还原）。
+ *
+ * `html` 的两条与图片的 filter 带 `!important`：这些是结构性样式，不能被信里的样式
+ * 盖掉；图片的 `background-color` 刻意不带 —— 信自己给图片垫了底色就以它为准。
+ * CSS `background-image`（营销信的主视觉贴图）与深色配色的信不单独识别，跟着一起翻。
+ * HTML 附件那一档不注入（attachmentHtml）：显式打开的文档，按原样看。
+ */
+const DARK_STYLE
+  = '<style>html{background:#fff!important;filter:invert(1) hue-rotate(180deg)!important}'
+    + 'img,video,canvas{filter:invert(1) hue-rotate(180deg)!important;background-color:#fff}</style>'
+
 /** 把沙箱头塞进文档：有 head 进 head，有 html 补一层，两样都没有就顶在最前。 */
-function withSandboxHead(html: string, csp = SANDBOX_CSP): string {
-  const head = sandboxHead(csp)
+function withSandboxHead(html: string, csp = SANDBOX_CSP, extraHead = ''): string {
+  const head = sandboxHead(csp) + extraHead
   if (/<head[^>]*>/i.test(html))
     return html.replace(/<head[^>]*>/i, tag => `${tag}${head}`)
   if (/<html[^>]*>/i.test(html))
@@ -413,18 +433,25 @@ function linksToTop(html: string): string {
   })
 }
 
+/** `htmlBody` 的选项：主题由渲染层决定（域包不认主题，只认传进来的布尔） */
+export interface HtmlBodyOptions {
+  /** 应用当前是暗色主题：给文档注入整页反色样式（见 DARK_STYLE） */
+  dark?: boolean
+}
+
 /**
  * 把 HTML 正文准备成能进沙箱 iframe 的文档：注入 CSP 与 no-referrer、cid: 换成 data URL、
- *  链接统一 target="_top"。返回 null 表示这封信没有 HTML 正文，展示层改走纯文本。
+ *  链接统一 target="_top"；暗色主题下再注入整页反色样式（dark 选项）。
+ * 返回 null 表示这封信没有 HTML 正文，展示层改走纯文本。
  */
-export function htmlBody(parsed: ParsedMail): string | null {
+export function htmlBody(parsed: ParsedMail, options: HtmlBodyOptions = {}): string | null {
   if (!parsed.html.trim())
     return null
   const map = cidMap(parsed.inline)
   const html = parsed.html.replace(/cid:\s*([^"'>\s]+)/gi, (whole, id: string) => {
     return map.get(id.toLowerCase().trim()) ?? whole
   })
-  return withSandboxHead(linksToTop(html))
+  return withSandboxHead(linksToTop(html), SANDBOX_CSP, options.dark ? DARK_STYLE : '')
 }
 
 /** 发件人头部 → 展示名：优先名字，退回地址。编码词在这里解码。 */

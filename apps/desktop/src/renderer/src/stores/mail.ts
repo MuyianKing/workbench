@@ -1,8 +1,8 @@
-import type { MailAccount, MailAttachmentInput, MailContact, MailFolder, ParsedAttachment } from '@workbench/mail'
+import type { MailAccount, MailAttachmentInput, MailContact, MailFolder, ParsedAttachment, ParsedMail } from '@workbench/mail'
 import type { Result } from '@/types'
 import type { MailSummary } from '@/workbench/mail'
 import { fail, ok } from '@workbench/core'
-import { buildMime, contactOf, displayDate, displayRecipients, displaySender, htmlBody, isBulkMail, mailAccountReady, mailTime, parseMessage, recipientAddress, recipientDisplay, sanitizeMailContact, senderAddress } from '@workbench/mail'
+import { buildMime, contactOf, displayDate, displayRecipients, displaySender, isBulkMail, mailAccountReady, mailTime, parseMessage, recipientAddress, recipientDisplay, sanitizeMailContact, senderAddress } from '@workbench/mail'
 import { defineStore } from 'pinia'
 /**
  * 邮箱页的状态。
@@ -11,7 +11,8 @@ import { defineStore } from 'pinia'
  * 适配层（`workbench/mail.ts`，invoke mail_* 命令，一个账户一条）→ Rust 现连现断跑
  * IMAP/SMTP → 这一层做策略：多账户的清单合并成一份（每封打上来源账户、按头部日期
  * 新在前 —— 不按来源分组）、正文按 (文件夹, 账户, uid) 缓存（页面会话内存，不落盘）、
- * MIME 解析与沙箱用 HTML 的生成（@workbench/mail 的 parseMessage / htmlBody）。
+ * MIME 解析（@workbench/mail 的 parseMessage）；沙箱文档由阅读栏按当前主题现场生成
+ * （htmlBody 的 dark 选项，缓存里只存解析件）。
  *
  * **左栏头部那颗分段选择器有三签**（`tab`）：收件箱 / 已发送 / 通讯录。前两签是文件夹
  * （`folder`，清单一次只装当前那个，切过去就重拉，见 `setFolder`）；通讯录签把邮件
@@ -66,8 +67,12 @@ export interface MailMessage {
   toText: string
   toAddress: string
   dateText: string
-  /** sandbox iframe 用的文档（CSP 已注入、cid 已换成 data URL）；null = 这封没有 HTML 正文 */
-  html: string | null
+  /**
+   * 原始解析件：sandbox iframe 用的文档不在这里 —— 阅读栏按当前主题现场生成
+   * （htmlBody 的 dark 选项，暗色下注入整页反色），切主题跟着换。没有 HTML
+   * 正文时 parsed.html 是空串，展示层走纯文本。
+   */
+  parsed: ParsedMail
   text: string
   attachments: ParsedAttachment[]
 }
@@ -290,7 +295,7 @@ export const useMailStore = defineStore('mail', () => {
         toText: displayRecipients(item.to),
         toAddress: recipientAddress(item.to),
         dateText: displayDate(item.date),
-        html: htmlBody(parsed),
+        parsed,
         text: parsed.text,
         attachments: parsed.attachments,
       }
