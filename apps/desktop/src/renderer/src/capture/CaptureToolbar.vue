@@ -9,7 +9,7 @@ import type { AnnotationTool } from '@/types'
 import { Close, CopyDocument, Download } from '@element-plus/icons-vue'
 import { ANNOTATION_COLORS, ANNOTATION_TOOLS, MOSAIC_BLOCKS, STROKE_WIDTHS, TEXT_SIZES } from '@workbench/capture'
 import { computed } from 'vue'
-import { OCR_COPY_ICON, OCR_ICON, PIN_ICON, REDO_ICON, TOOL_ICONS, UNDO_ICON } from './tool-icons'
+import { OCR_COPY_ICON, OCR_ICON, PIN_ICON, REDO_ICON, SCROLL_ICON, TOOL_ICONS, UNDO_ICON } from './tool-icons'
 
 const props = defineProps<{
   canUndo: boolean
@@ -31,6 +31,7 @@ const emit = defineEmits<{
   'pin': []
   'ocr': []
   'ocr-copy': []
+  'scroll': []
 }>()
 const tool = defineModel<AnnotationTool | null>('tool', { required: true })
 const color = defineModel<string>('color', { required: true })
@@ -118,6 +119,15 @@ function pick(next: AnnotationTool): void {
         <button type="button" class="overlay-tool" :disabled="props.busy" @click="emit('ocr-copy')">
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6">
             <path :d="OCR_COPY_ICON" />
+          </svg>
+        </button>
+      </el-tooltip>
+
+      <!-- 滚动截图：自动向下滚动选区下的内容拼成长图（遮罩不收，运行中再按截图键停止） -->
+      <el-tooltip content="滚动截图（自动滚动拼接长图）" placement="top">
+        <button type="button" class="overlay-tool" :disabled="props.busy" @click="emit('scroll')">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6">
+            <path :d="SCROLL_ICON" />
           </svg>
         </button>
       </el-tooltip>

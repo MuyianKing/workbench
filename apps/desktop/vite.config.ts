@@ -48,6 +48,11 @@ export default defineConfig({
   ],
   // Tauri 用自定义协议从根路径提供静态资源；相对路径在 http:// 与 tauri:// 下都不会出错
   base: './',
+  // 滚动截图的匹配 worker（capture/scroll-match.worker.ts）按 `{ type: 'module' }` 起，
+  // build 产物也得是 ES 格式才不错配（默认 iife 配 module 构造器在运行时会挂）
+  worker: {
+    format: 'es',
+  },
   build: {
     outDir: resolve(import.meta.dirname, 'out/renderer'),
     emptyOutDir: true,

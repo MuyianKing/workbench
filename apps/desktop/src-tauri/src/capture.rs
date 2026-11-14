@@ -98,6 +98,15 @@ pub struct CaptureContext {
     pub options: CaptureOptions,
 }
 
+/// 滚动截图运行中的一场：哪块遮罩在滚。
+///
+/// 目标窗口在 `Session::target`（`start` 亮遮罩**之前**记下的前台窗口）—— 那时前台还是
+/// 用户正在用的那个程序；等真要滚的时候前台已经是遮罩自己，再问就问错了。
+struct ScrollRun {
+    /// 滚动中的那块遮罩标签（`capture_scroll_stop` 与热键停止都靠它找到窗口）
+    overlay: String,
+}
+
 struct Session {
     /// 这一场的编号：`capture:sync` 带出去、`capture_show` 带回来 —— 上一场那半截
     /// 「画好了」不该把这一场提前亮出来
@@ -107,6 +116,10 @@ struct Session {
     pending: Vec<usize>,
     /// 已经亮出来了。看门狗与 capture_show 只认第一次
     shown: bool,
+    /// 滚动截图的目标窗口：开场时的前台窗口（`start` 里、亮遮罩之前抓的）
+    target: isize,
+    /// 滚动截图运行中的那块遮罩；None = 不在滚动
+    scroll: Option<ScrollRun>,
 }
 
 /// 一块屏：几何 + 那一帧的 PNG 字节。
@@ -179,13 +192,32 @@ pub fn request(app: &AppHandle) {
     });
 }
 
-/// 已经在截 → 收掉（热键再按一次就是取消）；否则开始
+/// 已经在截 → 收掉（热键再按一次就是取消）；滚动运行中 → 只停滚动（结果留给结果条）；
+/// 否则开始
 fn toggle(app: &AppHandle) -> Result<usize, String> {
     if active(app) {
+        // 滚动运行中遮罩对鼠标穿透、按钮点不到、Esc 会漏进目标窗口 —— 热键是唯一
+        // 可靠的停止手段。停的是循环不是整场：拼到一半的长图别丢
+        if scrolling(app) {
+            stop_scroll(app, true)?;
+            return Ok(0);
+        }
         abort(app);
         return Ok(0);
     }
     start(app)
+}
+
+/// 有没有一场滚动正在跑
+fn scrolling(app: &AppHandle) -> bool {
+    app.state::<CaptureState>()
+        .0
+        .lock()
+        .expect("锁中毒")
+        .session
+        .as_ref()
+        .and_then(|session| session.scroll.as_ref())
+        .is_some()
 }
 
 pub fn active(app: &AppHandle) -> bool {
@@ -200,6 +232,10 @@ pub fn active(app: &AppHandle) -> bool {
 fn start(app: &AppHandle) -> Result<usize, String> {
     // 上一场没收干净（崩过、或连按了两次）先收掉：只丢帧、把遮罩藏起来，窗口留着复用
     abort(app);
+
+    // 滚动截图的目标窗口：**现在**记下前台 —— 亮遮罩、给焦点之后前台就是遮罩自己了。
+    // 托盘 / 设置按钮起的那场拿到的可能是本应用的主窗口，滚它无害（滚不动就停）
+    let target = screen::foreground_window();
 
     let specs = monitors(app)?;
     // 池子对不上这几块屏（第一次、或插拔过显示器）就整批重建，否则一块窗口都不用建
@@ -250,6 +286,8 @@ fn start(app: &AppHandle) -> Result<usize, String> {
             frames,
             pending: (0..count).collect(),
             shown: false,
+            target,
+            scroll: None,
         });
         id
     };
@@ -379,7 +417,22 @@ pub fn abort(app: &AppHandle) {
 
     // 取锁放在藏窗之后：窗口事件会派发，持着锁等它不划算。
     // 会话里只有内存中的几份 PNG，丢掉引用就算收工了 —— 没有临时文件要删
-    let _ = app.state::<CaptureState>().0.lock().expect("锁中毒").session.take();
+    let scrolling = app
+        .state::<CaptureState>()
+        .0
+        .lock()
+        .expect("锁中毒")
+        .session
+        .take()
+        .and_then(|session| session.scroll.map(|run| run.overlay));
+
+    // 滚动中的那块遮罩要把鼠标穿透解掉：窗口是跨场复用的，留着穿透，
+    // 下一场（复用同一块窗口）点什么都是空的
+    if let Some(label) = scrolling {
+        if let Some(window) = app.get_webview_window(&label) {
+            let _ = window.set_ignore_cursor_events(false);
+        }
+    }
 
     // 收工也通知一声（**不带编号** = 这一场结束了）：遮罩里那张上一场的帧（ImageBitmap +
     // 取样画布，4K 下是几十兆）、选区与标注都该丢掉 —— 窗口留着复用，但不必留着上一张图。
@@ -932,6 +985,145 @@ fn unique_in(dir: &Path, name: &str) -> PathBuf {
     }
     // 一千个都占了：照原名覆盖，总比存不下去强
     dir.join(name)
+}
+
+// ---------- 滚动截图 ----------
+
+/// 这个遮罩窗口自己那块屏的几何。与 `take_frame_png` 同一条认路：按窗口标签认屏。
+/// 滚动截图靠它把「画布坐标的选区矩形」换算回虚拟桌面物理坐标。
+fn overlay_frame(window: &WebviewWindow, app: &AppHandle) -> Result<MonitorFrame, String> {
+    let index = overlay_index(window.label()).ok_or("这个窗口不是截图遮罩")?;
+    let state = app.state::<CaptureState>();
+    let guard = state.0.lock().expect("锁中毒");
+    let session = guard.session.as_ref().ok_or("截图会话已经结束了")?;
+    let frame = session
+        .frames
+        .iter()
+        .find(|frame| frame.info.index == index)
+        .ok_or("找不到这块屏的截图")?;
+    Ok(frame.info.clone())
+}
+
+/// 滚动截图开场：把输入交还给目标窗口，遮罩对鼠标穿透。
+///
+/// - **焦点还给开场时的前台窗口**（`start` 亮遮罩前记在 `Session::target` 的那个）：
+///   滚轮默认去前台窗口，不管用户「悬停滚动非活动窗口」的开关怎么设都滚得到；
+/// - **光标钉进选区中心**：那道开关开着的机器按光标落点派发滚轮，这是第二道保险；
+/// - **遮罩设成鼠标穿透**：光标落点压着的是遮罩，不穿透的话滚轮全被遮罩吃掉。
+///
+/// `x` / `y` / `width` / `height` 是这块屏的画布坐标（物理像素），口径与
+/// `capture_copy_frame` 一致，这里用 `clamp_region` 再夹一次。
+#[tauri::command]
+pub fn capture_scroll_begin(
+    window: WebviewWindow,
+    app: AppHandle,
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+) -> Result<(), String> {
+    let frame = overlay_frame(&window, &app)?;
+    let (left, top, crop_width, crop_height) =
+        clamp_region(frame.width, frame.height, x, y, width, height)?;
+
+    let target = {
+        let state = app.state::<CaptureState>();
+        let mut guard = state.0.lock().expect("锁中毒");
+        let session = guard.session.as_mut().ok_or("截图会话已经结束了")?;
+        if session.scroll.is_some() {
+            return Err("滚动截图已经在跑了".into());
+        }
+        session.scroll = Some(ScrollRun { overlay: window.label().to_owned() });
+        session.target
+    };
+
+    // 穿透要在真正动手滚之前设好；设失败就回滚标记 ——
+    // 别留下「标记说在滚、遮罩却不穿透」的中间态（滚轮会被遮罩吃掉，JS 那边看着像卡死）
+    if let Err(err) = window.set_ignore_cursor_events(true) {
+        let state = app.state::<CaptureState>();
+        if let Some(session) = state.0.lock().expect("锁中毒").session.as_mut() {
+            session.scroll.take();
+        }
+        return Err(format!("遮罩设成鼠标穿透失败：{err}"));
+    }
+
+    screen::set_foreground(target);
+    let center_x = frame.x + left as i32 + crop_width as i32 / 2;
+    let center_y = frame.y + top as i32 + crop_height as i32 / 2;
+    screen::set_cursor_pos(center_x, center_y);
+    Ok(())
+}
+
+/// 滚动中抓一次选区（**实时的屏幕像素，走二进制 IPC**）。
+///
+/// 不走会话缓存：滚动截图读的是「现在」的屏幕 —— 目标窗口正在动，开场冻结的那一帧
+/// 早过时了。抓哪块屏由调用窗口的标签认（`overlay_frame`），矩形再夹回这块屏里。
+/// 回的是**原始 RGBA 字节**（`capture_region` 的直出，BGRA→RGBA 已换好、alpha 补满）：
+/// 拼接循环每步要抓好几帧，PNG 编解码那一来一回（约 50ms）全省掉 —— JS 拿到字节就是
+/// `ImageData`，`putImageData` 直接上长图画布，一步一个像素都不差。
+#[tauri::command(async)]
+pub fn capture_scroll_grab(
+    window: WebviewWindow,
+    app: AppHandle,
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+) -> Result<tauri::ipc::Response, String> {
+    let frame = overlay_frame(&window, &app)?;
+    {
+        let state = app.state::<CaptureState>();
+        let guard = state.0.lock().expect("锁中毒");
+        let session = guard.session.as_ref().ok_or("截图会话已经结束了")?;
+        if session.scroll.is_none() {
+            return Err("没有在滚动截图".into());
+        }
+    }
+
+    let (left, top, crop_width, crop_height) =
+        clamp_region(frame.width, frame.height, x, y, width, height)?;
+    let image =
+        screen::capture_region(frame.x + left as i32, frame.y + top as i32, crop_width, crop_height)?;
+    Ok(tauri::ipc::Response::new(image.into_raw()))
+}
+
+/// 滚动中发一轮滚轮（向下 `notches` 齿，齿数由渲染层按上一步的实际位移自适应）。
+#[tauri::command]
+pub fn capture_scroll_wheel(app: AppHandle, notches: u32) -> Result<(), String> {
+    if !scrolling(&app) {
+        return Err("没有在滚动截图".into());
+    }
+    screen::send_wheel(notches.clamp(1, 16));
+    Ok(())
+}
+
+/// 滚动收尾：遮罩恢复交互并拿回焦点（结果条要可点、Esc 要收得到）。
+/// JS 自己停（到底 / 匹配不上 / 点了开始后的循环结束）走这条。
+#[tauri::command]
+pub fn capture_scroll_stop(app: AppHandle) -> Result<(), String> {
+    stop_scroll(&app, false)
+}
+
+/// `capture_scroll_stop` 命令与热键停止（`toggle`）共用的收尾。
+///
+/// `notify` 为真再推一条 `capture:scroll-stop` 给那块遮罩 —— 热键那条路 Rust 已经收完尾，
+/// 推事件叫 JS 把循环停下来、进结果相；JS 自己停的那条路不需要（它自己知道）。
+fn stop_scroll(app: &AppHandle, notify: bool) -> Result<(), String> {
+    let label = {
+        let state = app.state::<CaptureState>();
+        let mut guard = state.0.lock().expect("锁中毒");
+        let session = guard.session.as_mut().ok_or("截图会话已经结束了")?;
+        session.scroll.take().ok_or("没有在滚动截图")?.overlay
+    };
+
+    if let Some(window) = app.get_webview_window(&label) {
+        let _ = window.set_ignore_cursor_events(false);
+        let _ = window.set_focus();
+    }
+    if notify {
+        let _ = app.emit_to(&label, "capture:scroll-stop", ());
+    }
+    Ok(())
 }
 
 #[cfg(test)]

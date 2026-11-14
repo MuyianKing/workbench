@@ -1,17 +1,21 @@
-//! Win32 抓屏与光标位置。
+//! Win32 抓屏、光标位置与输入注入（滚轮 / 前台窗口）。
 //!
 //! **为什么自己写 BitBlt 而不引截图库**（`xcap` / `screenshots` 那一类）：那类库会带进
 //! 一串新编译单元（有的还要拉 D3D / 图像编解码的额外依赖），而这里要的只是「把屏幕一块
 //! 矩形抠成像素」——`BitBlt` + `GetDIBits` 都在**已经开着**的 `Win32_Graphics_Gdi` 里，
 //! `GetSystemMetrics` / `GetCursorPos` 在 `Win32_UI_WindowsAndMessaging` 里，
 //! 一个 feature 都不用加（见 Cargo.toml 与 AGENTS.md 第 1 节的依赖口径）。
+//! 滚动截图要的 `SendInput` / `SetForegroundWindow` 同理，分别在
+//! `Win32_UI_Input_KeyboardAndMouse`（悬浮球的 `GetAsyncKeyState` 已开）与
+//! `Win32_UI_WindowsAndMessaging` 里，也是零 feature 变更。
 //!
 //! **已知边界**（写清楚，免得当成 bug 查）：
 //!  - 独占全屏的 D3D 游戏抓出来是**黑的**（DWM 不合成它，屏幕 DC 上就是没有）；
 //!  - HDR 屏按 SDR 色调映射抓，颜色会比肉眼看到的淡；
-//!  - UAC 安全桌面、DRM 保护内容抓不到（Windows 就不给，Snipaste 也一样，除非进程提权）。
+//!  - UAC 安全桌面、DRM 保护内容抓不到（Windows 就不给，Snipaste 也一样，除非进程提权）；
+//!  - 发滚轮到**管理员权限 / UWP** 窗口会被 UIPI 挡住（跟抓不到安全桌面同一族边界）。
 //!
-//! 要越过这三条得改走 Windows.Graphics.Capture（D3D11 帧池那套），是另一摊活。
+//! 要越过前三条得改走 Windows.Graphics.Capture（D3D11 帧池那套），是另一摊活。
 
 use std::ffi::c_void;
 
@@ -21,9 +25,12 @@ use windows_sys::Win32::Graphics::Gdi::{
     ReleaseDC, SelectObject, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, CAPTUREBLT, DIB_RGB_COLORS, HDC,
     HGDIOBJ, SRCCOPY,
 };
+use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+    SendInput, INPUT, INPUT_0, INPUT_MOUSE, MOUSEEVENTF_WHEEL, MOUSEINPUT,
+};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    GetCursorPos, GetSystemMetrics, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN,
-    SM_YVIRTUALSCREEN,
+    GetCursorPos, GetForegroundWindow, GetSystemMetrics, SetCursorPos, SetForegroundWindow,
+    SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN,
 };
 
 /// 抓屏幕上一块矩形（**虚拟桌面物理坐标**）。
@@ -171,4 +178,53 @@ pub fn virtual_desktop() -> Option<(i32, i32, u32, u32)> {
         width as u32,
         height as u32,
     ))
+}
+
+// ---------- 滚动截图的输入侧：前台窗口、光标、滚轮 ----------
+//
+// 三件事合起来才把滚轮喂进目标窗口：**焦点路径**（滚轮默认去前台窗口）与**光标路径**
+// （「悬停滚动非活动窗口」开着的机器按光标落点派发）双保险，遮罩那侧再把自己设成
+// 鼠标穿透（见 capture.rs 的 `capture_scroll_begin`）。用 `SendInput` 而不是
+// `PostMessage(WM_MOUSEWHEEL)`：注入的是系统输入栈里的「真输入」，Chromium / Qt /
+// Win32 各路窗口都认，PostMessage 对 UWP 与不少现代窗口是静默无效的。
+
+/// 一格滚轮的量（Windows 的 `WHEEL_DELTA`；自己定一份，省一个跨模块 import 的悬念）
+const WHEEL_DELTA: i32 = 120;
+
+/// 现在的前台窗口。**开场时记下**（见 capture.rs 的 `ScrollRun`）—— 等真要滚的时候
+/// 前台已经是遮罩自己了，再问就问错了。
+pub fn foreground_window() -> isize {
+    unsafe { GetForegroundWindow() as isize }
+}
+
+/// 把某个窗口扶回前台。返回值不管：被系统的前台锁拒绝时还有光标那道保险
+/// （`capture_scroll_begin` 会把光标钉进选区中心）。
+pub fn set_foreground(hwnd: isize) {
+    unsafe { SetForegroundWindow(hwnd as _) };
+}
+
+/// 把光标摆到虚拟桌面物理坐标（滚动截图把它钉进选区中心，滚轮跟着光标走）。
+pub fn set_cursor_pos(x: i32, y: i32) {
+    unsafe { SetCursorPos(x, y) };
+}
+
+/// 向下滚 `notches` 齿（每齿一格 `WHEEL_DELTA`）。
+pub fn send_wheel(notches: u32) {
+    // 向下滚 = 负的 delta；`mouseData` 按 u32 存，负值经补码转过去
+    let input = INPUT {
+        r#type: INPUT_MOUSE,
+        Anonymous: INPUT_0 {
+            mi: MOUSEINPUT {
+                dx: 0,
+                dy: 0,
+                mouseData: -(WHEEL_DELTA * notches as i32) as u32,
+                dwFlags: MOUSEEVENTF_WHEEL,
+                time: 0,
+                dwExtraInfo: 0,
+            },
+        },
+    };
+    unsafe {
+        SendInput(1, &input, std::mem::size_of::<INPUT>() as i32);
+    }
 }

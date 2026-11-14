@@ -28,6 +28,9 @@ export const OCR_ICON = 'M12 4v16M8.5 4h7M8.5 20h7'
 /** 复制文字：文字光标 + 一枚复制块 —— 与「取字」（进文字层挑）区分：整段直接进剪贴板 */
 export const OCR_COPY_ICON = 'M9 3v18M6 3h6M6 21h6M15 13h6v8h-6z'
 
+/** 滚动截图：几行内容 + 一支向下箭头 —— 「自动往下滚、拼成长图」 */
+export const SCROLL_ICON = 'M4 6h10M4 10.5h10M4 15h7M18 9v10M14.5 15.5 18 19l3.5-3.5'
+
 /**
  * 撤销 / 重做。**别用 EP 的 `RefreshLeft` / `RefreshRight`**：那两个是「绕一圈的箭头」，
  * 摆在工具条上更像「刷新 / 重新加载」，有歧义；拐个弯回头的返回箭头才是撤销 / 重做。

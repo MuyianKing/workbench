@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { ScrollMatchResult, StitchFrame } from '@workbench/capture'
 /**
  * 截图遮罩：一块铺满屏幕的「冻结画面」，在上面选一块、画几笔、然后复制 / 保存 / 钉图。
  *
@@ -38,12 +39,16 @@
  */
 import type { Annotation, AnnotationStylePatch, AnnotationTool, CaptureContext, OcrLine, Point, Rect } from '@/types'
 import {
+  analyzeScrollOffset,
   ANNOTATION_COLOR_DEFAULT,
   ANNOTATION_TOLERANCE,
   annotationBounds,
   annotationHandles,
+  autoToolbarPosition,
+  bytesEqual,
   canvasToViewport,
   clampRect,
+  clampToolbarPosition,
   defaultCaptureName,
   defaultToolStyles,
   fromDrag,
@@ -65,9 +70,14 @@ import {
   layoutOcrSpans,
   MAGNIFIER_SIDE,
   MAGNIFIER_ZOOM,
+  MAX_STITCH_HEIGHT,
+  MIN_SCROLL_REGION_HEIGHT,
   MIN_SELECTION,
   MOSAIC_BLOCK_DEFAULT,
   moveAnnotation,
+  planBand,
+  planNotches,
+  planTickDelay,
   readableInkOn,
   rectContains,
   rectIsEmpty,
@@ -82,9 +92,11 @@ import {
   viewportToCanvas,
 } from '@workbench/capture'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
+import { startPointerDrag } from '@/composables/use-pointer-drag'
 import { drawAnnotation, drawAnnotations, measureTextSize, TEXT_LINE_HEIGHT } from './annotation-render'
 import CaptureMagnifier from './CaptureMagnifier.vue'
 import CaptureOcrBar from './CaptureOcrBar.vue'
+import CaptureScrollBar from './CaptureScrollBar.vue'
 import CaptureToolbar from './CaptureToolbar.vue'
 
 const context = ref<CaptureContext | null>(null)
@@ -149,6 +161,31 @@ const ocrRect = ref<Rect | null>(null)
 const ocrLayer = ref<HTMLElement | null>(null)
 /** 短暂失败提示的收尾（取字那几条都是「换一块再试」的事，不该一直挂着） */
 let failureTimer: number | undefined
+
+// ---------- 滚动截图（见 docs/modules/screenshot.md 的「滚动截图」） ----------
+//
+// 与取字一样是一个「模式」：遮罩不收，Esc / 右键退出回到标注那套。两个阶段：
+// 点「滚动」直接开滚 —— run（遮罩对鼠标穿透，「发滚轮 → 等稳 → 抓帧 → 拼接」的循环
+// 在这边跑，停止靠再按一次截图热键）→ result（控制条上复制 / 保存，选区里挂着长图预览）。
+type ScrollPhase = 'run' | 'result'
+interface ScrollState {
+  phase: ScrollPhase
+  /** 选区（取整后的画布像素）：循环里每次抓的就是这一块 */
+  rect: { x: number, y: number, width: number, height: number }
+  /** 已拼到的高度（画布像素）：进度读数与上限判定用 */
+  stitched: number
+  /** 跑了多少步：进度读数 */
+  steps: number
+  /** 拼不上的原因（result 相挂在尺寸前面），空 = 没有话要说 */
+  note: string
+}
+const scrollState = ref<ScrollState | null>(null)
+/** 拼好的长图（非响应式，进了 result 相才有）：复制 / 保存从它出 */
+let scrollCanvas: HTMLCanvasElement | null = null
+/** 热键停止（Rust 推 `capture:scroll-stop`）置上，循环每一轮检查 */
+let scrollStopRequested = false
+/** `capture:scroll-stop` 的订阅收尾（窗口真被关掉时才用得上） */
+let stopScrollEvent: (() => void) | null = null
 
 type DragMode = 'none' | 'create' | 'move-selection' | 'resize-selection' | 'draw' | 'move-annotation' | 'resize-annotation'
 let mode: DragMode = 'none'
@@ -246,6 +283,9 @@ function reset(): void {
   failure.value = ''
   ocrLines.value = null
   ocrRect.value = null
+  scrollState.value = null
+  scrollCanvas = null
+  scrollStopRequested = false
   window.clearTimeout(failureTimer)
   mode = 'none'
   creating.value = false
@@ -257,6 +297,9 @@ function reset(): void {
   pixelHex.value = '#000000'
   pixelInk.value = '#ffffff'
   pointerCursor.value = 'crosshair'
+  // 手动位置只记这一场：下一场回「贴选区右下角」的默认摆位（拖到一半换场就先收手）
+  endToolbarDrag?.()
+  toolbarManual.value = null
   redraw()
 }
 
@@ -306,6 +349,11 @@ async function beginSession(opening: boolean): Promise<void> {
 onMounted(async () => {
   // 订阅**先**挂上，而且等它真的挂上：挂上之前可能已经开了一场，而那一场只推这一次
   stopSync = await window.workbench.onCaptureSync(id => void beginSession(id !== null))
+  // 滚动运行中按了截图热键：Rust 已把遮罩恢复成交互态，这里只标记「该停了」，
+  // 循环每一轮自己查（不能就地动 scrollState —— 那是循环线程的活）
+  stopScrollEvent = window.workbench.onScrollStop(() => {
+    scrollStopRequested = true
+  })
 
   window.addEventListener('keydown', onKeyDown)
   window.addEventListener('pointermove', onPointerMove)
@@ -321,7 +369,10 @@ onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeyDown)
   window.removeEventListener('pointermove', onPointerMove)
   window.removeEventListener('pointerup', onPointerUp)
+  // 拖到一半窗口被收走：window 上的拖动监听要收干净（composable 返回的就是收尾函数）
+  endToolbarDrag?.()
   stopSync?.()
+  stopScrollEvent?.()
   window.clearTimeout(copyNoteTimer)
   window.clearTimeout(failureTimer)
   bitmap.value?.close()
@@ -390,6 +441,48 @@ function redraw(): void {
 
   ctx.setTransform(1, 0, 0, 1, 0, 0)
   ctx.clearRect(0, 0, element.width, element.height)
+
+  // 滚动模式换一副画法：不画冻结帧（要透出**实时**的内容，滚轮滚的是底下的真窗口）。
+  // 选区**外**压一层暗（与标注模式同一口径的 evenodd 暗层）：一眼看出要滚的是哪块，
+  // 选区内保持原亮度。洞的边缘落在整数像素上 —— 像素中心要么在洞里要么在洞外，
+  // 抓帧抓不到半透明的过渡行。描边画在暗层**之后**（不被压灰），仍然画在矩形**外面**
+  // （外扩 3.5px、线宽 3，离矩形边至少 2px）：抓帧抓的是矩形内部，画进里面就会把线
+  // 拼进长图。
+  if (scrollState.value) {
+    const scroll = scrollState.value
+    const rect = scroll.rect
+    // 结果相把拼好的长图按比例画进选区 —— 「复制前先看一眼」是这类功能的基本预期
+    // （run 相不画：那块要透出实时内容）。等比缩到选区以内、居中，长图整幅一眼可见
+    if (scroll.phase === 'result' && scrollCanvas) {
+      const image = scrollCanvas
+      const scale = Math.min(rect.width / image.width, rect.height / image.height, 1)
+      const width = image.width * scale
+      const height = image.height * scale
+      const x = rect.x + (rect.width - width) / 2
+      const y = rect.y + (rect.height - height) / 2
+      ctx.imageSmoothingEnabled = true
+      ctx.imageSmoothingQuality = 'high'
+      ctx.drawImage(image, x, y, width, height)
+      ctx.imageSmoothingEnabled = false
+      // 一圈细边让长图从实时内容里浮出来，边界一眼可见
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.4)'
+      ctx.lineWidth = 1
+      ctx.strokeRect(x + 0.5, y + 0.5, width - 1, height - 1)
+    }
+
+    // 选区外置灰：整块屏减去选区那块（evenodd），暗层压在实时内容上、选区内不碰
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.45)'
+    ctx.beginPath()
+    ctx.rect(0, 0, element.width, element.height)
+    ctx.rect(rect.x, rect.y, rect.width, rect.height)
+    ctx.fill('evenodd')
+
+    ctx.strokeStyle = '#409eff'
+    ctx.lineWidth = 3
+    ctx.strokeRect(rect.x - 3.5, rect.y - 3.5, rect.width + 7, rect.height + 7)
+    return
+  }
+
   if (!frame)
     return
 
@@ -543,6 +636,9 @@ function fullRect(): Rect {
 // ---------- 鼠标 ----------
 
 function onPointerDown(event: PointerEvent): void {
+  // 滚动模式整个画面只听控制条的：选区 / 标注那一套指针交互全部让开
+  if (scrollState.value)
+    return
   if (event.button !== 0 || busy.value)
     return
   event.preventDefault()
@@ -648,7 +744,7 @@ function onPointerDown(event: PointerEvent): void {
 }
 
 function onPointerMove(event: PointerEvent): void {
-  if (!context.value)
+  if (!context.value || scrollState.value)
     return
 
   const point = toCanvas(event)
@@ -741,6 +837,11 @@ function onPointerUp(): void {
  * 取字模式里右键先退那层（文字层自己接住了 contextmenu，这里兜的是没盖到的缝）。
  */
 function onContextMenu(): void {
+  // 滚动模式右键先退那层（与取字同一套逐层退），不是取消整场
+  if (scrollState.value) {
+    exitScroll()
+    return
+  }
   if (ocrLines.value) {
     exitOcr()
     return
@@ -984,11 +1085,44 @@ watch(textSize, (next) => {
 // ---------- 键盘 ----------
 
 function onKeyDown(event: KeyboardEvent): void {
+  // 拖工具条把手期间键盘不参与：window 上的 keydown 监听有两个，本函数先注册先触发，
+  // 不挡的话 Esc 会同时走下面的「逐层退」把选区清掉 —— 放弃拖动是 startPointerDrag 自己的 Esc
+  if (toolbarDragging.value)
+    return
   if (textEditing.value)
     return
 
   const ctrl = event.ctrlKey || event.metaKey
   const key = event.key.toLowerCase()
+
+  // 滚动模式先于选区 / 标注那套：result 相遮罩拿着焦点（Esc / Enter 收得到），
+  // run 相焦点在目标窗口、这边什么都收不到（Esc 会进目标窗口 —— 已知边界）。
+  // 只接少数几个键，其余一概不落到下面去（Ctrl+Z 会动底下的标注、Enter 会把图复制走）。
+  if (scrollState.value) {
+    const phase = scrollState.value.phase
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      exitScroll()
+      return
+    }
+    if (event.key === 'Enter') {
+      event.preventDefault()
+      if (phase === 'result')
+        void finishWith(finishScrollCopy)
+      return
+    }
+    if (ctrl && key === 'c' && phase === 'result') {
+      event.preventDefault()
+      void finishWith(finishScrollCopy)
+      return
+    }
+    if (ctrl && key === 's' && phase === 'result') {
+      event.preventDefault()
+      void finishWith(finishScrollSave)
+      return
+    }
+    return
+  }
 
   // 取字模式先于选区 / 标注那套：这层里拖选、挪光标都交给浏览器原生行为，
   // 我们只接四个键，其余一概不落到下面去（Ctrl+Z 会动底下的标注、Enter 会把图复制走）。
@@ -1258,9 +1392,8 @@ function failTransient(message: string): void {
   }, 2000)
 }
 
-/** 工具条上「取字」：把选区那一块交给 Windows OCR（Rust 从缓帧里裁，图不过渲染层），遮罩不收 */
-/** 选区取整夹好（取字与「复制文字」同一个口径：画布像素，Rust 那边再夹一次到帧内） */
-function ocrRegionOfSelection(): { x: number, y: number, width: number, height: number } | null {
+/** 选区取整夹好（取字 / 复制文字 / 滚动截图同一个口径：画布像素，Rust 那边再夹一次到帧内） */
+function roundedSelection(): { x: number, y: number, width: number, height: number } | null {
   const rect = selection.value
   if (!rect || !hasSelection.value)
     return null
@@ -1274,7 +1407,7 @@ function ocrRegionOfSelection(): { x: number, y: number, width: number, height: 
 }
 
 async function startOcr(): Promise<void> {
-  const region = ocrRegionOfSelection()
+  const region = roundedSelection()
   if (!region)
     return
 
@@ -1298,7 +1431,7 @@ async function startOcr(): Promise<void> {
  * （空格只补在字母数字词身边、行与行之间换行）。
  */
 async function ocrCopy(): Promise<void> {
-  const region = ocrRegionOfSelection()
+  const region = roundedSelection()
   if (!region)
     return
 
@@ -1363,6 +1496,412 @@ function selectAllOcr(): void {
     domSelection.selectAllChildren(element)
 }
 
+// ---------- 滚动截图（见 docs/modules/screenshot.md 的「滚动截图」） ----------
+
+/** 首步等稳的 tick（毫秒）：一格滚轮的滚动动画约 150~300ms，等它跑完大半。
+ *  之后按上一步实测的轮询数自适应（planTickDelay，40~150ms）—— 瞬时跳滚的应用
+ *  会一路降到 40，平滑滚动的应用升回这个上限 */
+const SCROLL_TICK_DELAY = 150
+
+/** 等稳轮询的间隔（毫秒）：两次抓帧字节一致才算停稳 */
+const SCROLL_SETTLE_POLL = 80
+
+/** 等稳最多轮询几次（画面一直在动 —— 视频 / 加载占位 —— 就抓最后一帧硬拼，交给匹配判） */
+const SCROLL_SETTLE_POLLS = 8
+
+/** 连续这么多次 Δ=0 才认定到底：防「这一齿还没生效就抓了一帧」的假到底 */
+const SCROLL_ZERO_CONFIRM = 2
+
+/** 连续这么多次匹配对不上才收场：第一次可能是动画没停稳 / 布局正在动，放慢再试一次 */
+const SCROLL_NULL_LIMIT = 2
+
+function delay(ms: number): Promise<void> {
+  return new Promise(resolve => window.setTimeout(resolve, ms))
+}
+
+/** 工具条上「滚动截图」：直接开滚（没有「开始」确认步 —— 停止靠再按一次截图热键）。
+ *  选区太矮匹配不出重叠，先说清楚 */
+function startScroll(): void {
+  if (scrollState.value)
+    return
+  const rect = roundedSelection()
+  if (!rect)
+    return
+  if (rect.height < MIN_SCROLL_REGION_HEIGHT) {
+    failTransient(`选区太矮（至少 ${MIN_SCROLL_REGION_HEIGHT}px）才拼得出长图`)
+    return
+  }
+  settleFresh()
+  scrollState.value = { phase: 'run', rect, stitched: rect.height, steps: 0, note: '' }
+  redraw()
+  void finishWith(runScroll)
+}
+
+/** 退出滚动模式：回到标注那套（选区原样留着）。接的是 result 相的取消 / Esc，以及
+ *  开场那一瞬的 Esc —— 循环靠「活着」守卫自己收尾（穿透由 finally 里的 scrollStop 解掉） */
+function exitScroll(): void {
+  scrollState.value = null
+  scrollCanvas = null
+  scrollStopRequested = false
+  redraw()
+}
+
+/** 抓一次选区的实时像素（滚动中）：字节是等稳判定的凭据 */
+async function grabScrollBytes(rect: ScrollState['rect']): Promise<ArrayBuffer | null> {
+  const result = await window.workbench.scrollGrab(rect)
+  if (!result.ok || !result.data)
+    return null
+  return result.data
+}
+
+/** 抓回来的原始 RGBA 字节 → 匹配与拼接共用的像素帧（长度不对就当抓失败） */
+function frameFromBytes(bytes: ArrayBuffer, rect: ScrollState['rect']): StitchFrame | null {
+  const data = new Uint8ClampedArray(bytes)
+  if (data.length !== rect.width * rect.height * 4)
+    return null
+  return { width: rect.width, height: rect.height, data }
+}
+
+/**
+ * 滚动拼接的主循环。编排在这边（业务语义归渲染层，Rust 只出「发滚轮」「抓矩形」两件
+ * 原生件）：发一轮滚轮 → 等画面停稳（连续两帧字节一致）→ 抓帧 → 算重叠 → 接到长图末尾。
+ * 到底（Δ=0）、拼不上（匹配 null，放慢重试一次后仍不行）、热键停止、到高度上限，都是出口。
+ *
+ * **为什么必须等停稳再抓**：拼进长图的就是抓到的像素，滚动动画中途抓到的帧是合成器
+ * 过滤出来的过渡态（内容差着不到一个像素），拼进去就是一条条模糊带 —— 所以
+ * 「滚 → 停稳 → 抓」的节奏是这类工具的固有形态（Snipaste / PixPin 同款），能做的是把
+ * 一步的量压小（planNotches 贴着选区高度 25% 走）、把等稳的轮询收紧。
+ *
+ * **卡顿与接缝这两件事的解法**：匹配挪进 worker（`scroll-match.worker.ts`，预测位移
+ * 一起带过去，稳态只在预测窗口里找几个候选），主线程不背几十万次像素比较；贴画布只贴
+ * `planBand` 算出的**新露出条带**（起点向上越过粘底栏多要一段）—— Δ 估错时污染只在
+ * 条带里，粘底栏的旧副本被后续条带盖掉、最终只在最后一帧的位置出现一次。
+ */
+async function runScroll(): Promise<void> {
+  const state = scrollState.value
+  if (!state || state.phase !== 'run')
+    return
+  const rect = state.rect
+  const token = sessionSeq
+  scrollStopRequested = false
+
+  const begin = await window.workbench.scrollBegin(rect)
+  if (token !== sessionSeq)
+    return
+  if (!begin.ok) {
+    // 开场失败（穿透设不上之类）：没有确认步可回，退出滚动模式回到标注，把原因说清楚
+    exitScroll()
+    failTransient(begin.error ?? '开始滚动截图失败')
+    return
+  }
+
+  // 这一轮里「还活着」= 会话没换、模式没被退。每个 await 之后都查一遍 ——
+  // 循环跑着的时候 abort / 新一场随时可能来（与 beginSession 的 token 守卫同一条口径）
+  const alive = () => token === sessionSeq && scrollState.value === state
+  let note = ''
+  let top = 0
+  let steps = 0
+  let notches = 1
+  let canvas: HTMLCanvasElement | null = null
+
+  // 匹配挪进 worker（无状态，每场一个，收尾时 terminate）：像素比较是几十万到上千万次
+  // 的同步运算，主线程上跑每步要冻结遮罩几十到几百毫秒（首步与回退全量扫最重）。
+  // 建不起来 / 中途出错就回退同步直调 —— 结果一致，只是那一步会卡
+  let matchWorker: Worker | null = null
+  let matchWorkerBroken = false
+  try {
+    matchWorker = new Worker(new URL('./scroll-match.worker.ts', import.meta.url), { type: 'module' })
+  }
+  catch {
+    matchWorker = null
+  }
+  const matchScroll = async (
+    prevFrame: StitchFrame,
+    nextFrame: StitchFrame,
+    hintDelta: number | undefined,
+  ): Promise<ScrollMatchResult> => {
+    const worker = matchWorkerBroken ? null : matchWorker
+    if (worker) {
+      try {
+        return await new Promise<ScrollMatchResult>((resolve, reject) => {
+          worker.onmessage = (event: MessageEvent<ScrollMatchResult>) => resolve(event.data)
+          worker.onerror = () => {
+            matchWorkerBroken = true
+            reject(new Error('匹配 worker 出错'))
+          }
+          worker.postMessage({
+            prev: prevFrame.data.buffer,
+            next: nextFrame.data.buffer,
+            width: prevFrame.width,
+            height: prevFrame.height,
+            hintDelta,
+          })
+        })
+      }
+      catch {
+        // worker 这条路断了，落到下面的同步调用
+      }
+    }
+    return analyzeScrollOffset(prevFrame, nextFrame, { hintDelta })
+  }
+
+  try {
+    // 长图画布：高度从两屏起步，不够就翻倍着扩（夹在 MAX_STITCH_HEIGHT 上），
+    // 每次扩容把已拼内容搬过去 —— 搬家次数是对数级的，几兆的搬运摊不到每一步上。
+    // 返回画布自己的 ctx（可能刚扩容换过）——ctx 每次都从这里拿，不存旧的
+    const ensureCanvas = (heightNeeded: number): CanvasRenderingContext2D | null => {
+      if (canvas === null) {
+        canvas = document.createElement('canvas')
+        canvas.width = rect.width
+        canvas.height = Math.min(MAX_STITCH_HEIGHT, Math.max(rect.height * 2, heightNeeded))
+      }
+      else if (canvas.height < heightNeeded) {
+        const grown = document.createElement('canvas')
+        grown.width = rect.width
+        grown.height = Math.min(MAX_STITCH_HEIGHT, Math.max(canvas.height * 2, heightNeeded))
+        const next = grown.getContext('2d', { willReadFrequently: true })
+        if (!next)
+          return null
+        next.drawImage(canvas, 0, 0)
+        canvas = grown
+      }
+      return canvas.getContext('2d', { willReadFrequently: true })
+    }
+
+    // 第 0 帧：滚之前的样子，就是长图的第一屏
+    const first = await grabScrollBytes(rect)
+    if (!alive())
+      return
+    const firstFrame = first ? frameFromBytes(first, rect) : null
+    const ctx = firstFrame ? ensureCanvas(rect.height) : null
+
+    if (!first) {
+      note = '抓不到选区的画面'
+    }
+    else if (!firstFrame) {
+      note = '抓回来的帧尺寸不对'
+    }
+    else if (!ctx) {
+      note = '长图画布建不出来'
+    }
+    else {
+      ctx.putImageData(new ImageData(firstFrame.data, rect.width, rect.height), 0, 0)
+      let prev: StitchFrame = firstFrame
+      steps = 1
+      state.stitched = rect.height
+      // 连续 Δ=0 的计数：到底要连着两次没动才算（第一下可能是这一齿还没生效）
+      let zeroRun = 0
+      // 连续对不上的计数：第一次可能是动画没停稳 / 布局正在动，放慢（1 齿 + 等稳翻倍）
+      // 再试，连着两次才认输
+      let nullRun = 0
+      // 上一步实测位移：滚轮是自己发的，本步的位移 ≈ 它 × 本步实发齿数，
+      // 匹配先在预测窗口里找（见 stitch.ts 的「预测窗口」）
+      let lastDelta = 0
+      // 等稳轮询数：对不上的那一步翻倍（滚动动画更慢就多等一会）
+      let settlePolls = SCROLL_SETTLE_POLLS
+      // 首等 tick：发完滚轮先等多久再开始抓帧（按上一步的实测轮询数自适应，
+      // 见 stitch.ts 的 planTickDelay）
+      let tick = SCROLL_TICK_DELAY
+
+      // 循环：滚 → 等稳 → 抓 → 算重叠 → 只贴新露出的条带
+      for (;;) {
+        if (scrollStopRequested)
+          break
+        if (top + rect.height >= MAX_STITCH_HEIGHT) {
+          note = `已拼到上限 ${MAX_STITCH_HEIGHT}px`
+          break
+        }
+        const rolled = await window.workbench.scrollWheel(notches)
+        if (!alive())
+          return
+        if (!rolled.ok) {
+          note = rolled.error ?? '发滚轮失败'
+          break
+        }
+
+        // 等稳：先等 tick（滚动动画跑完大半；瞬时跳滚的应用 tick 会降到 40），再轮询
+        // 到「连续两帧字节一致」（抓屏是确定的，静止内容必同字节）。一直在动就抓
+        // 最后一帧硬拼 —— 交给匹配判
+        await delay(tick)
+        if (!alive())
+          return
+        let current = await grabScrollBytes(rect)
+        if (!alive())
+          return
+        let settled: ArrayBuffer | null = null
+        let attempts = 0
+        for (; attempts < settlePolls && !settled && current; attempts += 1) {
+          await delay(SCROLL_SETTLE_POLL)
+          if (!alive())
+            return
+          // 停止请求：不再等停稳，拿当前帧尽力拼完这一步再收（重复的帧自然 Δ=0）
+          if (scrollStopRequested)
+            break
+          const grabbed = await grabScrollBytes(rect)
+          if (!alive())
+            return
+          if (grabbed && bytesEqual(current, grabbed))
+            settled = grabbed
+          else if (grabbed)
+            current = grabbed
+        }
+        if (!current) {
+          note = '抓不到选区的画面'
+          break
+        }
+        const candidate = settled ?? current
+
+        const frame = frameFromBytes(candidate, rect)
+        if (!alive())
+          return
+        if (!frame) {
+          note = '抓回来的帧尺寸不对'
+          break
+        }
+        const hintDelta = lastDelta > 0 ? lastDelta * notches : undefined
+        const result = await matchScroll(prev, frame, hintDelta)
+        if (!alive())
+          return
+        const delta = result.delta
+        if (delta === null) {
+          // 已经按了停止：这一帧多半是动画中间态，不值得再放慢重试，直接收
+          if (scrollStopRequested)
+            break
+          // 放慢再试：一步只滚一齿、等稳轮询翻倍；连着两次对不上才收
+          nullRun += 1
+          if (nullRun >= SCROLL_NULL_LIMIT) {
+            note = '画面变化太快，这里拼不上'
+            break
+          }
+          notches = 1
+          settlePolls = SCROLL_SETTLE_POLLS * 2
+          continue
+        }
+        if (delta === 0) {
+          // 到底了、或这一齿没起作用 —— 再滚一齿确认一次，连着两次没动才收
+          zeroRun += 1
+          if (zeroRun >= SCROLL_ZERO_CONFIRM)
+            break
+          continue
+        }
+        zeroRun = 0
+        nullRun = 0
+
+        // 只贴新露出的条带（起点从新内容线向上越过粘底栏再多要一段，见 planBand）：
+        // Δ 估错时污染只在条带里，粘底栏的旧副本被后续条带盖掉，不会每步留一份
+        const bandTop = planBand(delta, rect.height, result.stickyTop, result.stickyBottom)
+        top += delta
+        const target = ensureCanvas(top + rect.height)
+        if (!target) {
+          note = '长图画布扩不动了'
+          break
+        }
+        target.putImageData(
+          new ImageData(frame.data.subarray(bandTop * rect.width * 4), rect.width, rect.height - bandTop),
+          0,
+          top + bandTop,
+        )
+        prev = frame
+        steps += 1
+        state.stitched = top + rect.height
+        state.steps = steps
+        lastDelta = delta
+        // 这一步的等稳表现 → 下一步的首等（瞬时跳滚的应用 tick 降到 40，少白等）
+        if (settled)
+          tick = planTickDelay(tick, attempts)
+        // 下一步发几个齿按这一步的实际位移自适应（步长贴着选区高度 25% 走）
+        notches = planNotches(delta, rect.height)
+        settlePolls = SCROLL_SETTLE_POLLS
+        // 停止请求：这一步已经拼进去（滚出去的内容不丢），下一轮开头收工
+        if (scrollStopRequested)
+          break
+      }
+    }
+  }
+  finally {
+    // 不管从哪条路出来：穿透都要解掉。热键停止那条路 Rust 已经收过尾，
+    // 这条命令会报「没有在滚动」—— 当幂等失败忽略
+    await window.workbench.scrollStop()
+    matchWorker?.terminate()
+    matchWorker = null
+    if (alive()) {
+      // 正常收尾：进结果相（note 为空 = 到底了，干干净净）
+      state.note = note
+      state.steps = steps
+      state.phase = 'result'
+      scrollCanvas = canvas
+      redraw()
+    }
+    else {
+      // 模式被退 / 换场了：长图跟模式一起丢
+      scrollCanvas = null
+    }
+  }
+}
+
+/** 滚动结果整图编成 base64（照 pngBase64 的分块：几兆整串会爆调用栈） */
+async function scrollPngBase64(): Promise<string | null> {
+  const canvas = scrollCanvas
+  if (!canvas)
+    return null
+  const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'))
+  return blob ? blobToBase64(blob) : null
+}
+
+/** 结果相的复制：长图进剪贴板。capture_copy 一进来就收场（遮罩不会停在屏幕上等） */
+async function finishScrollCopy(): Promise<void> {
+  const state = scrollState.value
+  if (!state || state.phase !== 'result')
+    return
+  const png = await scrollPngBase64()
+  if (!png) {
+    failTransient('长图编不出来')
+    return
+  }
+  const result = await window.workbench.copyImage(png)
+  if (!result.ok)
+    failure.value = result.error ?? '复制到剪贴板失败'
+}
+
+/** 结果相的保存：设过自动保存目录直接落进去，没设过弹一次「另存为」——与 save() 同一条路 */
+async function finishScrollSave(): Promise<void> {
+  const state = scrollState.value
+  if (!state || state.phase !== 'result')
+    return
+  const png = await scrollPngBase64()
+  if (!png) {
+    failTransient('长图编不出来')
+    return
+  }
+
+  const name = defaultCaptureName(new Date())
+  const dir = options.value?.saveDir ?? ''
+  if (dir) {
+    const result = await window.workbench.saveImage(png, dir, name, true)
+    if (!result.ok) {
+      failTransient(result.error ?? '保存失败')
+      return
+    }
+    await abort()
+    return
+  }
+
+  const picked = await window.workbench.pickSavePath({
+    title: '滚动截图另存为',
+    defaultPath: name,
+    filters: [{ name: 'PNG 图片', extensions: ['png'] }],
+  })
+  if (!picked)
+    return
+  const parts = splitPath(picked)
+  const result = await window.workbench.saveImage(png, parts.dir, parts.name, false)
+  if (!result.ok) {
+    failTransient(result.error ?? '保存失败')
+    return
+  }
+  await abort()
+}
+
 // ---------- 导出与动作 ----------
 
 /** 选区那一块 + 标注，编成 PNG。画法与显示侧完全一致（见文件头） */
@@ -1411,18 +1950,19 @@ async function compose(): Promise<Blob | null> {
   }
 }
 
-async function pngBase64(): Promise<string | null> {
-  const blob = await compose()
-  if (!blob)
-    return null
-
+/** Blob → base64。一次转换的字节数有上限：几兆的图整串塞进 fromCharCode 会爆调用栈，分块来 */
+async function blobToBase64(blob: Blob): Promise<string> {
   const bytes = new Uint8Array(await blob.arrayBuffer())
-  // 一次转换的字节数有上限：几兆的图整串塞进 fromCharCode 会爆调用栈，分块来
   let binary = ''
   const chunk = 0x8000
   for (let index = 0; index < bytes.length; index += chunk)
     binary += String.fromCharCode(...bytes.subarray(index, index + chunk))
   return btoa(binary)
+}
+
+async function pngBase64(): Promise<string | null> {
+  const blob = await compose()
+  return blob ? blobToBase64(blob) : null
 }
 
 async function copy(): Promise<void> {
@@ -1553,7 +2093,18 @@ function cancel(): void {
 const toolbarRef = ref<HTMLElement | null>(null)
 const toolbarSize = ref({ width: 420, height: 78 })
 
+/**
+ * 拖把手拖出来的手动位置（视口 CSS 像素）。非空时它说了算、不再跟着选区跳 ——
+ * 工具条挡住要标注的部分时把它拖走。只记当前这一场：`reset` 里清掉，下一场回自动摆位。
+ */
+const toolbarManual = ref<Point | null>(null)
+const toolbarDragging = ref(false)
+
 const toolbarStyle = computed(() => {
+  const manual = toolbarManual.value
+  if (manual)
+    return { left: `${manual.x}px`, top: `${manual.y}px` }
+
   const rect = selection.value
   if (!rect)
     return {}
@@ -1565,33 +2116,77 @@ const toolbarStyle = computed(() => {
     width: toolbarSize.value.width * scale.value,
     height: toolbarSize.value.height * scale.value,
   }
-  const gap = 10 * scale.value
-
-  // 优先贴选区下方；下面放不下翻到上面；上下都放不下就压进选区底部
-  let top = rect.y + rect.height + gap
-  if (top + size.height > canvas.height)
-    top = rect.y - size.height - gap
-  if (top < 0)
-    top = Math.min(rect.y + rect.height - size.height - gap, canvas.height - size.height - gap)
-  top = Math.max(gap, top)
-
-  // 横向贴选区的**右边缘**（工具条摆在右下角，与 Snipaste 一致），再夹回画布内
-  const right = rect.x + rect.width - size.width
-  const left = Math.min(Math.max(right, gap), Math.max(gap, canvas.width - size.width - gap))
-  const at = canvasToViewport({ x: left, y: top }, viewportBox(), canvas)
+  const at = canvasToViewport(
+    autoToolbarPosition(rect, size, canvas, 10 * scale.value),
+    viewportBox(),
+    canvas,
+  )
   return { left: `${at.x}px`, top: `${at.y}px` }
 })
+
+/** 拖动落点离视口每条边的最小距离 */
+const TOOLBAR_DRAG_MARGIN = 2
+
+/** 这一手拖动开始前的手动位置：Esc / 系统接管指针放弃时回这里（null = 自动贴选区） */
+let toolbarManualBeforeDrag: Point | null = null
+let endToolbarDrag: (() => void) | null = null
+
+/**
+ * 按住左侧把手拖工具条：跟手摆、夹回视口内，松手定格在本场内。
+ * 指针监听由 startPointerDrag 挂到 window 上（把手外松手也收得到），Esc 放弃这一手。
+ */
+function onToolbarGripDown(event: PointerEvent): void {
+  if (event.button !== 0)
+    return
+  const element = toolbarRef.value
+  if (!element)
+    return
+
+  // 按住点相对工具条左上角的偏移：拖动中保持它，工具条不会在指针底下跳一下
+  const grabOffset = { x: event.clientX - element.offsetLeft, y: event.clientY - element.offsetTop }
+  toolbarManualBeforeDrag = toolbarManual.value
+  toolbarDragging.value = true
+
+  endToolbarDrag = startPointerDrag({
+    start: { x: event.clientX, y: event.clientY },
+    onMove: (moveEvent) => {
+      toolbarManual.value = clampToolbarPosition(
+        { x: moveEvent.clientX - grabOffset.x, y: moveEvent.clientY - grabOffset.y },
+        toolbarSize.value,
+        viewportBox(),
+        TOOLBAR_DRAG_MARGIN,
+      )
+    },
+    onEnd: (_last, cancelled) => {
+      // 放弃这一手（Esc / 系统接管）就当没拖过：回拖动前的位置
+      if (cancelled)
+        toolbarManual.value = toolbarManualBeforeDrag
+      toolbarDragging.value = false
+      endToolbarDrag = null
+    },
+  })
+}
 
 /** 工具条一渲染出来就量真实尺寸，摆位与翻面才判得准（第二排参数会改高度） */
 function measureToolbar(): void {
   const element = toolbarRef.value
-  if (element)
-    toolbarSize.value = { width: element.offsetWidth, height: element.offsetHeight }
+  if (!element)
+    return
+  toolbarSize.value = { width: element.offsetWidth, height: element.offsetHeight }
+  // 参数排出现 / 消失会改高度：手动位置重夹一次，别把下半截戳出视口
+  if (toolbarManual.value) {
+    toolbarManual.value = clampToolbarPosition(
+      toolbarManual.value,
+      toolbarSize.value,
+      viewportBox(),
+      TOOLBAR_DRAG_MARGIN,
+    )
+  }
 }
 
 // freshId 也在名单里：它一翻，参数那一排跟着换（见 optionTool），高度可能跟着变；
-// 取字那一层进出时工具条整个换了一副，也要重量一次
-watch([toolbarVisible, activeTool, freshId, ocrLines, () => annotations.value.length], () => {
+// 取字 / 滚动那一层进出时工具条整个换了一副，也要重量一次
+watch([toolbarVisible, activeTool, freshId, ocrLines, scrollState, () => annotations.value.length], () => {
   void nextTick(measureToolbar)
 })
 
@@ -1644,7 +2239,7 @@ const redoAble = computed(() => historyCanRedo(history.value))
 </script>
 
 <template>
-  <div class="capture" :style="{ cursor: pointerCursor }">
+  <div class="capture" :style="{ cursor: toolbarDragging ? 'grabbing' : pointerCursor }">
     <canvas
       ref="stage"
       class="capture__stage"
@@ -1705,10 +2300,28 @@ const redoAble = computed(() => historyCanRedo(history.value))
       >{{ span.text }}</span>
     </div>
 
-    <div v-if="toolbarVisible" ref="toolbarRef" class="capture__toolbar" :style="toolbarStyle">
+    <div
+      v-if="toolbarVisible"
+      ref="toolbarRef"
+      class="capture__toolbar"
+      :class="{ 'is-dragging': toolbarDragging }"
+      :style="toolbarStyle"
+    >
+      <!-- 左侧把手：挡住要标注的部分时按住它把整条拖走（取字 / 滚动那一副同样吃这套摆位） -->
+      <div class="capture__toolbar-grip" @pointerdown="onToolbarGripDown" />
+      <!-- 滚动模式下工具条换成滚动控制条：run / result 两相各一副脸（动作都在这边，bar 只摆样子） -->
+      <CaptureScrollBar
+        v-if="scrollState"
+        :phase="scrollState.phase"
+        :size="`${scrollState.rect.width} × ${scrollState.stitched}`"
+        :note="scrollState.note"
+        @cancel="exitScroll"
+        @copy="finishWith(finishScrollCopy)"
+        @save="finishWith(finishScrollSave)"
+      />
       <!-- 取字模式下工具条换成那一副：全选 / 复制 / 退出（动作都在这边，bar 只摆样子） -->
       <CaptureOcrBar
-        v-if="ocrLines"
+        v-else-if="ocrLines"
         @select-all="selectAllOcr"
         @copy="copyOcr"
         @exit="exitOcr"
@@ -1732,6 +2345,7 @@ const redoAble = computed(() => historyCanRedo(history.value))
         @pin="finishWith(pin)"
         @ocr="finishWith(startOcr)"
         @ocr-copy="finishWith(ocrCopy)"
+        @scroll="startScroll"
       />
     </div>
 
@@ -1748,8 +2362,15 @@ const redoAble = computed(() => historyCanRedo(history.value))
       />
     </div>
 
-    <!-- 这一屏没有别的说明渠道，还没选区时留一条，选上之后自动让开 -->
-    <div v-if="!hasSelection && !failure" class="capture__hint">
+    <!--
+      这一屏没有别的说明渠道，还没选区时留一条，选上之后自动让开。
+      **必须跟着会话走（context 非空才算开了场）**：遮罩窗口预建复用，开场之前与收工之后
+      页面都停在「无会话」状态，而藏着的窗口不往合成器交新帧 —— 显示出来的头一帧还是
+      上一份旧表面。提示条不按会话显隐的话，这份表面就带着一块深色底：启动后第一场截图，
+      遮罩亮起的一瞬它先闪出来（用户报过「第一次截图闪一个色块」）。
+      会话外整页全透明，旧表面露出的才是桌面本身。
+    -->
+    <div v-if="context && !hasSelection && !failure" class="capture__hint">
       拖动选一块 · 双击整屏 · 右键取消 · Shift 取色
     </div>
 
@@ -1805,7 +2426,38 @@ const redoAble = computed(() => historyCanRedo(history.value))
   /* 取字的文字层（inset: 0）盖满全屏，工具条必须压在它上面 —— 排序之外再给一道 z-index
      双保险：排在它后面的话三颗按钮看着在、点不到 */
   z-index: 2;
+  /* 把手在左、内容在右：一行 flex 让两者并排（absolute 容器本来就 shrink-to-fit） */
+  display: flex;
+  align-items: center;
+  gap: 4px;
   cursor: default;
+}
+
+/*
+ * 左侧拖动把手：工具条挡住要标注的部分时按住它拖走。底子与 .overlay-bar 同一套
+ * 深色半透明卡片（压在任意像素上都看得清），握把纹是一列小点。
+ */
+.capture__toolbar-grip {
+  flex: none;
+  align-self: stretch;
+  width: 12px;
+  border: 1px solid rgb(255 255 255 / 12%);
+  border-radius: 8px;
+  background-color: rgb(28 30 34 / 96%);
+  background-image: radial-gradient(rgb(255 255 255 / 45%) 1px, transparent 1.6px);
+  background-size: 5px 5px;
+  background-position: center;
+  box-shadow: 0 6px 24px rgb(0 0 0 / 45%);
+  cursor: grab;
+  touch-action: none;
+}
+
+.capture__toolbar-grip:hover {
+  background-image: radial-gradient(rgb(255 255 255 / 75%) 1px, transparent 1.6px);
+}
+
+.capture__toolbar.is-dragging .capture__toolbar-grip {
+  cursor: grabbing;
 }
 
 /*

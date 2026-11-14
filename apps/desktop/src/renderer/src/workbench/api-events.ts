@@ -84,6 +84,20 @@ export const eventsApi = {
     guard(invoke<OcrLine[]>('capture_ocr', rect), '取字失败'),
   saveImage: (png: string, dir: string, name: string, unique: boolean) =>
     guard(invoke<string>('capture_save', { png, dir, name, unique }), '保存截图失败'),
+  // 滚动截图（见 docs/modules/screenshot.md 的「滚动截图」）：开场那条把焦点 / 光标交还
+  // 目标窗口、遮罩设成鼠标穿透；此后「发滚轮 → 抓帧 → 拼接」的循环在 JS 这边跑，
+  // Rust 只出原生件。矩形口径与 copyFrame 一致：这块屏的画布坐标（物理像素）
+  scrollBegin: (rect: { x: number, y: number, width: number, height: number }) =>
+    guard(invoke<null>('capture_scroll_begin', rect), '开始滚动截图失败'),
+  // 滚动中抓一次选区的**实时**像素（同 captureFrame：命令回 ipc::Response，JS 是 ArrayBuffer；
+  // 不走会话缓存 —— 目标窗口正在动，开场冻结的那一帧早过时了）
+  scrollGrab: (rect: { x: number, y: number, width: number, height: number }) =>
+    guard(invoke<ArrayBuffer>('capture_scroll_grab', rect), '抓不到滚动截图的这一帧'),
+  // 向下滚 notches 齿（齿数由 JS 按上一步的实际位移自适应，见 @workbench/capture 的 planNotches）
+  scrollWheel: (notches: number) =>
+    guard(invoke<null>('capture_scroll_wheel', { notches }), '发滚轮失败'),
+  // JS 自己停（到底 / 拼不上）走这条：Rust 把遮罩恢复成交互态并拿回焦点
+  scrollStop: () => guard(invoke<null>('capture_scroll_stop'), '停滚动截图失败'),
   pinImage: (png: string, x: number, y: number, width: number, height: number, opacity: number) =>
     guard(invoke<PinRecord>('pin_create', { png, x, y, width, height, opacity }), '钉图失败'),
   pinContext: () => guard(invoke<PinRecord>('pin_context'), '取钉图信息失败'),
@@ -126,6 +140,10 @@ export const eventsApi = {
   // 两边都靠这一条（见 docs/modules/screenshot.md）。用 listenReady：遮罩要先挂上订阅、
   // 再补问一次当前有没有会话，顺序反了会漏掉中间那一条
   onCaptureSync: (fn: (id: number | null) => void) => listenReady<number | null>('capture:sync', fn),
+  // 运行中按了截图热键 = 停止滚动（不是收场）：Rust 已把遮罩恢复成交互态并拿回焦点，
+  // 这条只负责叫 JS 停下循环、进结果相。只在滚动运行中发 —— 订阅在遮罩开场就挂上了，
+  // 远早于任何一场滚动，普通 listen 就够
+  onScrollStop: (fn: () => void) => listen<null>('capture:scroll-stop', fn),
 
   // 尚未有人推的一个：首页布局（本地改动的推送方还没补）
   onThemeConfig: () => noop,
