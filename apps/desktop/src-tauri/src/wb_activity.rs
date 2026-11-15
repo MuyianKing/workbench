@@ -43,14 +43,14 @@ pub fn record_activity(account: &Account, task: &str, ok: bool, message: &str) {
     let path = crate::paths::gateway_activity_file();
     if let Some(parent) = path.parent() {
         if let Err(err) = std::fs::create_dir_all(parent) {
-            eprintln!("[workbench] 建活动记录目录失败：{err}");
+            crate::error_log::error("活动记录", format!("建目录失败：{err}"));
             return;
         }
     }
     let line = match serde_json::to_string(&row) {
         Ok(line) => line,
         Err(err) => {
-            eprintln!("[workbench] 序列化活动记录失败：{err}");
+            crate::error_log::error("活动记录", format!("序列化失败：{err}"));
             return;
         }
     };
@@ -60,7 +60,7 @@ pub fn record_activity(account: &Account, task: &str, ok: bool, message: &str) {
         .open(&path)
         .and_then(|mut file| writeln!(file, "{line}"));
     if let Err(err) = written {
-        eprintln!("[workbench] 写活动记录失败：{err}");
+        crate::error_log::error("活动记录", format!("写入失败：{err}"));
         return;
     }
     compact_activity(&path);

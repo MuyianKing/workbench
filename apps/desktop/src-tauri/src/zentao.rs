@@ -58,6 +58,23 @@ pub struct ZentaoWatch {
     config: Mutex<WatchConfig>,
 }
 
+/// 供挂起看门狗探测（见 hang_watch.rs）：会话锁与登记锁都只在毫秒级临界区里被握
+/// （网络前放锁的约定见「约束」），被占只作线索。
+pub(crate) fn hang_probe(app: &AppHandle) -> Vec<String> {
+    let mut held = Vec::new();
+    if let Some(state) = app.try_state::<ZentaoState>() {
+        if state.0.try_lock().is_err() {
+            held.push("zentao.会话".to_string());
+        }
+    }
+    if let Some(watch) = app.try_state::<ZentaoWatch>() {
+        if watch.config.try_lock().is_err() {
+            held.push("zentao.登记".to_string());
+        }
+    }
+    held
+}
+
 #[derive(Default, Clone, Copy, PartialEq, Eq, Debug)]
 struct WatchConfig {
     poll_minutes: u32,
@@ -503,7 +520,7 @@ pub fn spawn(app: &AppHandle) {
             tick(&handle);
         });
     if let Err(err) = spawned {
-        eprintln!("[workbench] 禅道检查线程起不来：{err}");
+        crate::error_log::error("禅道检查", format!("线程起不来：{err}"));
     }
 }
 

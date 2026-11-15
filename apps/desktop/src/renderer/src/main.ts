@@ -5,6 +5,7 @@ import { createApp } from 'vue'
 
 import App from './App.vue'
 import { applyBootstrapTheme } from './bootstrap'
+import { installErrorReport } from './error-report'
 import { initState, installTauriWorkbench, reapOrphansOnStart } from './workbench'
 // Element Plus 按需引入：模板里的 <el-*> 由 vite.config.ts 的 Components 插件在编译期逐个换成
 // 单组件 import（连同该组件的 css），整包的 dist/index.css 不再引。剩下插件管不到的那几样
@@ -22,6 +23,8 @@ installTauriWorkbench()
 applyBootstrapTheme()
 
 const app = createApp(App).use(createPinia())
+// 渲染层未捕获异常收进 Rust 的 error.log：渲染层没有 stderr，正式版控制台之外一片空白
+installErrorReport(app)
 // 与原先 `app.use(ElementPlus, { locale: zhCn })` 等价的那一半：第三个参数是「全局」，
 // 少了它 ElMessage / ElMessageBox 这类在组件树外创建的实例读不到 locale（按钮会变英文）。
 provideGlobalConfig({ locale: zhCn }, app, true)

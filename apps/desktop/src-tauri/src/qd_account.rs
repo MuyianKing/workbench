@@ -304,19 +304,18 @@ pub fn load_all(dir: &Path) -> Vec<Account> {
         match serde_json::from_str::<Account>(&text) {
             Ok(account) => {
                 if account.realm != "cn" {
-                    eprintln!(
-                        "[workbench] 跳过非国内版 Qoder 账号文件 {}（realm={}）",
-                        path.display(),
-                        account.realm
+                    crate::error_log::warn(
+                        "Qoder 账号",
+                        format!("跳过非国内版账号文件 {}（realm={}）", path.display(), account.realm),
                     );
                     continue;
                 }
                 accounts.push(account);
             }
             Err(err) => {
-                eprintln!(
-                    "[workbench] 跳过读不懂的 Qoder 账号文件 {}：{err}",
-                    path.display()
+                crate::error_log::warn(
+                    "Qoder 账号",
+                    format!("跳过读不懂的账号文件 {}：{err}", path.display()),
                 );
             }
         }

@@ -610,7 +610,7 @@ pub fn fetch_growth_summary(account: &Account) -> GrowthSummary {
                     summary.travel = value;
                 }
             }
-            Err(message) => eprintln!("[workbench] {message}（{label}）"),
+            Err(message) => crate::error_log::error(label, &message),
         }
     }
     summary
@@ -725,7 +725,7 @@ fn accept_tasks(account: &Account, codes: &[String]) -> AcceptOutcome {
             Err(message) => {
                 outcome.msg = message.clone();
                 outcome.failed.extend(part.iter().cloned());
-                eprintln!("[workbench] 接取任务失败：{message}");
+                crate::error_log::error("福利任务", format!("接取任务失败：{message}"));
                 continue;
             }
         };
@@ -733,7 +733,7 @@ fn accept_tasks(account: &Account, codes: &[String]) -> AcceptOutcome {
         if code != 0 {
             outcome.msg = text_at(&value, "msg");
             outcome.failed.extend(part.iter().cloned());
-            eprintln!("[workbench] 接取被拒：{}", outcome.msg);
+            crate::error_log::warn("福利任务", format!("接取被拒：{}", outcome.msg));
             continue;
         }
         let mut seen: Vec<String> = Vec::new();

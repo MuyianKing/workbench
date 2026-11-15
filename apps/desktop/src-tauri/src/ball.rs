@@ -143,6 +143,22 @@ fn place_guard() -> std::sync::MutexGuard<'static, ()> {
     PLACE_LOCK.lock().unwrap_or_else(|err| err.into_inner())
 }
 
+/// 供挂起看门狗探测（见 hang_watch.rs）：此刻被占的锁。占着 = 有人卡在里面 ——
+/// 摆位锁的三个写者都在工作线程上、主线程不碰它，所以它被占而主线程又停泵，
+/// 多半是哪个写者正卡在「等主线程回包」的窗口调用上（见 PLACE_LOCK 的说明）。
+pub(crate) fn hang_probe(app: &AppHandle) -> Vec<String> {
+    let mut held = Vec::new();
+    if PLACE_LOCK.try_lock().is_err() {
+        held.push("ball.摆位锁".to_string());
+    }
+    if let Some(state) = app.try_state::<BallState>() {
+        if state.record.try_lock().is_err() {
+            held.push("ball.记账".to_string());
+        }
+    }
+    held
+}
+
 /// 记账 + 当前展开状态。记账是内存里这份为真源，每次改完同步进 JsonStore。
 #[derive(Default)]
 pub struct BallState {

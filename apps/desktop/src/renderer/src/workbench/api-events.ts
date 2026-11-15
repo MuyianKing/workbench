@@ -16,6 +16,12 @@ import * as state from './state'
 function noop(): void {}
 
 export const eventsApi = {
+  // ---------- 诊断 ----------
+  // 渲染层未捕获异常转进 Rust 的 error.log：渲染层没有 stderr，正式版控制台之外一片空白。
+  // guard 收敛成 Result、永不 reject —— 报异常的通道自己出异常就是死循环，调用方 void 掉即可。
+  logError: (message: string, stack?: string) =>
+    guard(invoke<null>('frontend_error', { message, stack }), '记渲染层异常失败'),
+
   // ---------- 事件订阅 ----------
   // 窗口状态来自 Tauri 事件；其余来自适配层内部的广播（见 events.ts），
   // 契约与 preload 版完全一致，组件不需要知道底下换了实现。

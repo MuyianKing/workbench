@@ -124,7 +124,7 @@ pub(crate) fn open_paths(app: &AppHandle, paths: &[PathBuf]) -> usize {
     for path in paths {
         match open_path(app, path) {
             Ok(()) => opened += 1,
-            Err(message) => eprintln!("[workbench] 打开 Markdown 窗口失败：{message}"),
+            Err(message) => crate::error_log::error("打开 Markdown 窗口", &message),
         }
     }
     opened

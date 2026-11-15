@@ -40,6 +40,10 @@ pub const PINS_FILE: &str = "pins.json";
 pub const BALL_FILE: &str = "ball.json";
 /// 崩溃日志（见 panic_log.rs）：release 档 panic 直接中止进程，那一下的证据只留在这里
 const PANIC_LOG_FILE: &str = "panic.log";
+/// 挂起日志（见 hang_watch.rs）：主线程停泵消息时的现场证据
+const HANG_LOG_FILE: &str = "hang.log";
+/// 错误日志（见 error_log.rs）：后台链路那些「写失败就放弃」的 errors，release 的 stderr 没人看
+const ERROR_LOG_FILE: &str = "error.log";
 /// 钉图的图片目录名：一张钉图一个 PNG，钉图关掉时连文件一起删
 const PINS_DIR: &str = "pins";
 /// 克隆里放**保险库**的子目录名。与用量 / 配置那两个目录最大的不同：那份文件是所有机器**共写**的
@@ -188,6 +192,16 @@ pub fn panic_log_file() -> PathBuf {
     data_dir().join(PANIC_LOG_FILE)
 }
 
+/// 挂起日志（见 hang_watch.rs）。与 panic.log 同一目录，同一条「只找一处」的思路。
+pub fn hang_log_file() -> PathBuf {
+    data_dir().join(HANG_LOG_FILE)
+}
+
+/// 错误日志（见 error_log.rs）。与 panic.log / hang.log 同一目录。
+pub fn error_log_file() -> PathBuf {
+    data_dir().join(ERROR_LOG_FILE)
+}
+
 /// 网关的根目录（`data/wb-gateway`）。
 pub fn gateway_dir() -> PathBuf {
     data_dir().join(GATEWAY_DIR)
@@ -265,7 +279,7 @@ pub fn qoder_perks_file() -> PathBuf {
 pub fn migrate_legacy_files() {
     let dir = data_dir();
     if let Err(err) = std::fs::create_dir_all(&dir) {
-        eprintln!("[workbench] 数据目录创建失败（{err}）");
+        crate::error_log::error("路径", format!("数据目录创建失败（{err}）"));
         return;
     }
     relocate_root_files_in(&user_data_dir(), &dir);
@@ -290,7 +304,7 @@ fn relocate_root_files_in(root: &Path, dir: &Path) {
             continue;
         }
         if let Err(err) = std::fs::rename(&from, &to) {
-            eprintln!("[workbench] 数据文件搬家失败（{name}: {err}），下次启动再试");
+            crate::error_log::error("路径", format!("数据文件搬家失败（{name}: {err}），下次启动再试"));
         }
     }
 }
@@ -306,7 +320,7 @@ fn rename_legacy_token_file_in(dir: &Path) {
         return;
     }
     if let Err(err) = std::fs::rename(&legacy, &target) {
-        eprintln!("[workbench] 用量快照改名失败（{err}），下次启动再试");
+        crate::error_log::error("路径", format!("用量快照改名失败（{err}），下次启动再试"));
     }
 }
 

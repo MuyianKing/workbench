@@ -75,7 +75,8 @@
   快捷启动 / 命令 + 与本机绑定的设置，含笔记文件夹 `noteDir`）、`theme.json`（外观 + 首页布局）、`token-usage.json`、
   `work-log.json` 与 `ai-news.json`（都只在本机）、`vault.json`（密码保险库，**里面只有密文**，密钥在 Windows 凭据管理器，
   见 [vault.md](vault.md)）、`mail-watch.json`（邮件后台监视的 UID 基准与上轮检查时间，见 [mail.md](mail.md)，只是通知记账，
-  不进同步仓库），加上设备标识 `device.json`，以及 `panic.log`（崩溃落痕）—— 全在数据目录下（安装版
+  不进同步仓库），加上设备标识 `device.json`，以及三份诊断落痕：`panic.log`（崩溃）、`hang.log`（挂起）、
+  `error.log`（错误日志）—— 全在数据目录下（安装版
   `%APPDATA%/Workbench/data/`，开发版 `%APPDATA%/Workbench-dev/data/`；根目录 `%APPDATA%/Workbench` 是 Electron 版留下的
   Chromium 配置目录；老版本也把数据文件写在那儿，启动时由 `migrate_legacy_files` 搬进 `data/`）。
   **禅道没有数据文件**：后台检查的编号基线只在本机内存（重启后第一轮重新建立，见 [zentao.md](zentao.md)），周期住
@@ -135,6 +136,22 @@
 - **崩溃落痕**：release 档把 panic 设成直接中止进程（`Cargo.toml` 的 `panic = "abort"`），进程凭空消失、什么都不留 ——
   `main()` 第一行装 `panic_log::install()`，把「时间 / 线程 / 位置 / 消息 / 回溯」追加到 `data/panic.log`（写失败就放弃；默认
   钩子照旧调用，dev 的 stderr 上还有一份）。单份超 256KB 先清空。
+- **挂起看门狗**（`hang_watch.rs`）：「无响应」连 panic 都没有 —— 主线程卡死在某个同步调用里，Windows 报 AppHang，
+  用户从幽灵壳关掉进程，事后零证据。看门狗线程每 5 秒经 `run_on_main_thread` 往事件循环投一个「回个时间戳」的探针
+  （投递即返回、回调在主线程执行；事件循环空闲时探针会把它唤醒，所以「没执行」只能是停泵），探针 5 秒内没执行 =
+  主线程 5 秒没泵消息，与 Windows 报 AppHang 同一条判据。判定挂起当场往 `data/hang.log` 追加一行
+  「挂起 ≥5 秒 + 此刻被占的锁」（session / ball / pin / capture / mail_watch / zentao 六个模块各有一个 `hang_probe`，
+  用 try_lock 报告自己那几把锁 —— **占着只作线索**，可能只是撞上微秒级临界区），每 30 秒补一行，恢复后补总时长。
+  写盘直接 append + flush、不经 JsonStore，进程被杀拦不住已写下的行；安装在 setup 末尾（各状态已 manage 完）。
+  单份超 256KB 先清空。事件循环退出（应用正在退）时探针失败不算挂起，看门狗自己收摊。
+- **错误日志**（`error_log.rs`）：后台链路那些「写失败就放弃」的错误，release 里 stderr 没人看，等于黑洞 ——
+  原来散在各处的 `eprintln!`（数据文件落盘失败、邮件检查 / 通知失败、网关流水与活动记录读写失败、OAuth 登录与续期
+  失败……）统一改走 `error_log::error(label, message)` / `warn(label, message)`，收进 `data/error.log`：
+  `[时间] [级别] [子系统] 内容`。一行一条当场 append + flush（不经 JsonStore，被杀拦不住已写的行），多线程靠一把锁
+  串行；单份超 512KB 轮转成 `error.log.old`（比清空多留一代）。dev 下 stderr 照打一份。**新代码的判据**：后台线程与
+  「失败只说一句就放过去」的路径要留痕的都走它；正常流程的进度不打进来，别写成流水账。渲染层的未捕获异常
+  （`window.onerror` / `unhandledrejection` / Vue `errorHandler`，见 `error-report.ts`，按分钟限流 20 条防刷屏）经
+  `frontend_error` 命令进同一份文件 —— 只装主窗口入口，独立窗口不装。
 - **webview 有全局 CSP**（`tauri.conf.json` 的 `csp`；dev 用 `devCsp`，多放行 HMR 的 ws）。底线是 `default-src 'self'`、
   `script-src 'self'`、`object-src 'none'`；必须放行的几处都有理由：
   `style-src 'unsafe-inline'`（Element Plus / Vditor 的动态样式与邮件正文 —— **但它只管 CSSOM**：入口 HTML 里只要有一段内联

@@ -70,6 +70,18 @@ pub struct PinPatch {
 #[derive(Default)]
 pub struct Pins(pub Mutex<Vec<PinRecord>>);
 
+/// 供挂起看门狗探测（见 hang_watch.rs）：这把锁的临界区都是微秒级，被占只作线索。
+pub(crate) fn hang_probe(app: &AppHandle) -> Vec<String> {
+    let Some(pins) = app.try_state::<Pins>() else {
+        return Vec::new();
+    };
+    if pins.0.try_lock().is_err() {
+        vec!["pin.钉图".to_string()]
+    } else {
+        Vec::new()
+    }
+}
+
 pub fn pin_label(id: &str) -> String {
     format!("{PIN_PREFIX}{id}")
 }

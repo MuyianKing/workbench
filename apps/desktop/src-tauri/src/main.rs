@@ -17,8 +17,10 @@ mod common;
 mod credentials;
 mod design;
 mod encoding;
+mod error_log;
 mod etf;
 mod fs_util;
+mod hang_watch;
 mod http;
 mod icon;
 mod imaging;
@@ -518,15 +520,21 @@ fn main() {
     // 见 docs/dev-notes/browser-preview-verification.md。
     #[cfg(not(dev))]
     let builder = builder.plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
-        let paths = md_window::markdown_paths(&argv, std::path::Path::new(&cwd));
-        if paths.is_empty() {
-            show_main_window(app);
-            return;
-        }
-        // 这是第二实例的「打开方式」：只开编辑窗口，不把主界面叫到前面。
-        // 建窗口会等主线程泵消息，不能在单实例回调（主线程）里直接建 —— 丢给独立线程。
+        // 探测与建窗整个丢给独立线程：markdown_paths 会对每个参数做 is_file() / canonicalize，
+        // 路径落在断开的网络盘上时一次就要等 SMB 超时（几十秒起，与 commands.rs 文件读写那一节
+        // 同一条判据），而这个回调在主线程上 —— 留在这儿冻住的是整个窗口消息循环
+        // （表现为整个应用「无响应」，与用没用 AI 无关）。
         let handle = app.clone();
+        let args = argv;
+        let cwd = std::path::PathBuf::from(cwd);
         std::thread::spawn(move || {
+            let paths = md_window::markdown_paths(&args, &cwd);
+            if paths.is_empty() {
+                show_main_window(&handle);
+                return;
+            }
+            // 这是第二实例的「打开方式」：只开编辑窗口，不把主界面叫到前面。
+            // 建窗口会等主线程泵消息，所以这条链路一步都不进主线程。
             if md_window::open_paths(&handle, &paths) == 0 {
                 // 一个都没开起来（文件被删 / 窗口建不出来）：退回原来的行为，让用户至少看得到主界面
                 show_main_window(&handle);
@@ -730,6 +738,7 @@ fn main() {
             commands::probe_version,
             commands::spawn_session,
             commands::session_write,
+            commands::frontend_error,
             commands::stop_session,
             commands::nvm_status,
             commands::nvm_node_dir,
@@ -864,13 +873,13 @@ fn main() {
                     .state::<wb_gateway::Gateway>()
                     .start(gateway_config.port)
                 {
-                    eprintln!("[workbench] 网关随程序启动失败：{message}");
+                    crate::error_log::error("网关", format!("随程序启动失败：{message}"));
                 }
             }
             let qoder_config = qd_gateway::load_config();
             if qoder_config.auto_start {
                 if let Err(message) = app.state::<qd_gateway::Qoder>().start(qoder_config.port) {
-                    eprintln!("[workbench] Qoder 网关随程序启动失败：{message}");
+                    crate::error_log::error("Qoder 网关", format!("随程序启动失败：{message}"));
                 }
             }
             // 钉图的记账要早于窗口：restore 照着它把上次钉着的图开回来
@@ -906,6 +915,10 @@ fn main() {
             // （取数、比新增与通知都在渲染层，线程只计时）。周期由渲染层载入设置后
             // 经 zentao_watch 登记进来，登记之前只睡。
             zentao::spawn(&handle);
+
+            // 挂起看门狗：主线程停泵消息时抢在用户杀进程之前把证据写进数据目录。
+            // 放在 setup 末尾：各状态都已在 builder 上 manage 完，探针取得到。
+            hang_watch::install(&handle);
 
             Ok(())
         })

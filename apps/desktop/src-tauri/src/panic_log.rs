@@ -75,8 +75,8 @@ fn open(path: &std::path::Path) -> Option<std::fs::File> {
         .ok()
 }
 
-/// 本地时间，形如 `2026-10-12 15:04:05.123`。
-fn local_time_text() -> String {
+/// 本地时间，形如 `2026-10-12 15:04:05.123`。hang_watch.rs 的时间戳同用这一份。
+pub(crate) fn local_time_text() -> String {
     let mut now: windows_sys::Win32::Foundation::SYSTEMTIME = unsafe { std::mem::zeroed() };
     unsafe { windows_sys::Win32::System::SystemInformation::GetLocalTime(&mut now) };
     format!(

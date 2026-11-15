@@ -97,6 +97,11 @@
   会话 / 续聊 / 权限扩展 / 确认帧那条链照[dev-notes/pi-session-probe.md](../dev-notes/pi-session-probe.md) 的假端点探针重跑。
 - **进程直启、不经 `cmd /C`**（`session::spawn_args`，带一根可写 stdin）：整行交给 cmd 会被它的引号剥离规则拆坏。
   提示词与确认答复都走那根 stdin，不落临时文件、不走 shell。
+- **写 stdin 一律落在工作线程**（`ai_run` 与 `session_write` 都标 `(async)`）：管道写要阻塞到对端来消费 ——
+  Pi 忙着跑长工具调用或卡住时不去读 stdin，缓冲一满 `write_all` 就停在那里；写大提示词（含图的帧可达数 MB，
+  远超管道缓冲）的 `ai_run` 工作线程还会一直握着 `session.stdin` 锁，让后来的写入先卡锁、再卡管道。
+  同步命令在主线程上内联执行，冻住的是整个窗口消息循环 —— 正式版 v0.3 / v0.4 的多次「无响应被关掉」
+  （Windows 事件日志 AppHang，ID 1002）即此，`session_write` 是唯一漏标的一处。
 - **内置 cli.js 路径两处候选**（`resolve_cli`，与内置壁纸同一条路子）：打包走 `resource_dir()/pi/...`，开发态读仓库 `resources/pi/`，
   都没有才退回全局 `pi`。**`resource_dir` 给的 `\\?\` 前缀必须剥掉再用**。两个都没有是正常状态（`source: none`）；
   探测本身失败（命令起不来 / 超时）回 `Err`，界面提示「探测失败」而不是「没装」。

@@ -311,6 +311,8 @@ apps/desktop/            桌面应用（自包含：渲染层 + Rust + 随包资
   src-tauri/               Rust 后端
   src/main.rs            入口、窗口、托盘、单实例、生命周期
   src/panic_log.rs       panic 落痕（release 是 panic=abort，崩溃证据只留这一份）—— 注解见 modules/ipc-and-state.md
+  src/hang_watch.rs      挂起看门狗（主线程停泵消息时把现场写进 hang.log）—— 注解见 modules/ipc-and-state.md
+  src/error_log.rs       错误日志（后台链路的失败收进 error.log）—— 注解见 modules/ipc-and-state.md
   src/commands.rs        IPC 命令层（薄：取数据 / 落盘 / 调系统能力）
   src/session.rs         子进程会话：起命令、按批回传输出、按进程树终止
   src/proc.rs            带超时的子进程原语 + 进程树终止

@@ -435,10 +435,10 @@ fn receive_callback(pending: &Pending) -> Callback {
         let empty = text.trim().is_empty();
         if empty {
             // 读不到内容属于异常，落一行日志：这类问题只看界面是查不出来的
-            eprintln!("[workbench] 回调连接上没读到请求内容（可能不是浏览器的请求）");
+            crate::error_log::warn("OAuth 回调", "连接上没读到请求内容（可能不是浏览器的请求）");
         } else if path != "/favicon.ico" {
             // favicon 是浏览器顺手要的，正常现象不必记
-            eprintln!("[workbench] 回调端口收到无关请求：{path}");
+            crate::error_log::warn("OAuth 回调", format!("收到无关请求：{path}"));
         }
         let detail = if empty {
             "没能读到这次请求的内容，请回到 Workbench 重新发起登录。"
@@ -596,7 +596,7 @@ fn token_payload(provider: &Provider, response: &http::Response) -> Result<Token
             ""
         };
         let message = format!("{} 拒绝了授权：{detail}{hint}", provider.label);
-        eprintln!("[workbench] {message}");
+        crate::error_log::error("OAuth 登录", &message);
         return Err(message);
     }
 
@@ -892,7 +892,7 @@ fn usable_tokens(provider: &'static Provider) -> Result<TokenSet, String> {
         .map_err(|err| format!("{} 的登录凭据已过期，续期也没成：{err}", provider.label))?;
     if let Err(err) = save(provider, &fresh) {
         // 存不进去时这一份本次仍然能用（同步照跑），所以只记一行日志，不把同步打断
-        eprintln!("[workbench] 续期拿到的凭据没能落盘（{err}），下次同步会再试一次");
+        crate::error_log::error("OAuth 续期", format!("拿到的凭据没能落盘（{err}），下次同步会再试一次"));
     }
     Ok(fresh)
 }
@@ -1037,12 +1037,15 @@ pub fn git_credentials() -> (Vec<(String, String)>, Option<String>) {
         match renew(provider, &tokens) {
             Ok(fresh) => {
                 if let Err(err) = save(provider, &fresh) {
-                    eprintln!("[workbench] 续期拿到的凭据没能落盘（{err}），下次同步会再试一次");
+                    crate::error_log::error("OAuth 续期", format!("拿到的凭据没能落盘（{err}），下次同步会再试一次"));
                 }
                 usable.push((provider, fresh));
             }
             Err(err) => {
-                eprintln!("[workbench] {} 的登录凭据续期失败：{err}", provider.label);
+                crate::error_log::error(
+                    "OAuth 续期",
+                    format!("{} 的登录凭据续期失败：{err}", provider.label),
+                );
                 skipped.push(format!("{}（{err}）", provider.label));
             }
         }

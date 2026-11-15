@@ -152,6 +152,12 @@ import type {
 
 export interface WorkbenchApi {
   /**
+   * 渲染层未捕获异常 → Rust 的 error.log。入口上的 `onerror` / `unhandledrejection` /
+   * Vue 的 `errorHandler` 经它转发；实现侧经 guard 收敛、永不 reject ——
+   * 报异常的通道自己出异常就是死循环。
+   */
+  logError: (message: string, stack?: string) => Promise<Result<null>>
+  /**
    * 网关（CodeBuddy 反代）。
    *
    * 这一段整体是新增的一处**网络出口**：只有用户自己点「登录」或「启动」之后才会

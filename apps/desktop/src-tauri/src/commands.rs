@@ -67,7 +67,7 @@ pub fn load_all() {
         ("vault", crate::vault::vault_store().load()),
     ] {
         if let Err(err) = result {
-            eprintln!("[workbench] {label} 载入失败：{err}");
+            crate::error_log::error(label, format!("载入失败：{err}"));
         }
     }
 }
@@ -617,6 +617,18 @@ pub fn data_dir() -> String {
     paths::data_dir().to_string_lossy().into_owned()
 }
 
+/// 渲染层的未捕获异常（入口上的 `window.onerror` / `unhandledrejection` / Vue 的
+/// `errorHandler` 转发过来）。渲染层连 stderr 都没有，dev 控制台之外正式版一片空白 ——
+/// 与 Rust 侧的失败进同一份 error.log，排查「白了一下 / 弹一下就没了」时有据可查。
+#[tauri::command(async)]
+pub fn frontend_error(message: String, stack: Option<String>) -> Result<(), String> {
+    crate::error_log::error("渲染层", &match stack {
+        Some(stack) if !stack.trim().is_empty() => format!("{message}\n{stack}"),
+        _ => message,
+    });
+    Ok(())
+}
+
 // ---------- 窗口控制 ----------
 
 #[tauri::command]
@@ -1027,7 +1039,11 @@ pub fn spawn_session(
 /// 提示词由 Rust 侧写（见 ai.rs），扩展问「这条命令让不让跑」时的答复由渲染层写回来
 /// （形状见 packages/ai/src/ai.ts 的 confirmFrame）。别的会话起进程时给的是 null stdin，
 /// 这里会回一句「这条会话不接受输入」，不会静默丢掉。
-#[tauri::command]
+///
+/// **必须是 `(async)`**：管道写会阻塞到对端来消费 —— Pi 忙着跑长工具调用或卡住时
+/// 不读 stdin，缓冲一满 `write_all` 就停在那里；同步命令在主线程上内联执行，
+/// 冻住的是整个窗口消息循环（正式版两次「无响应」即此，见 docs/modules/ai.md）。
+#[tauri::command(async)]
 pub fn session_write(app: AppHandle, session_id: String, line: String) -> Result<(), String> {
     crate::session::write_stdin(&app, &session_id, &line)
 }

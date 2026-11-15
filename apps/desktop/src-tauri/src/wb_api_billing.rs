@@ -36,7 +36,7 @@ pub fn fetch(account: &Account) -> Result<Credits, String> {
             Ok(_) => {}
             Err(message) => {
                 // 企业接口挂了不等于个人接口也挂了，继续往下试
-                eprintln!("[workbench] 企业额度查询失败：{message}");
+                crate::error_log::error("企业额度查询", message);
             }
         }
     }

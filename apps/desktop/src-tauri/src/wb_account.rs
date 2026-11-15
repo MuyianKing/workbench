@@ -336,16 +336,19 @@ pub fn load_all(dir: &Path) -> Vec<Account> {
             .map(|probe| probe.realm)
             .unwrap_or_default();
         if !legacy.is_empty() && legacy != "codebuddy" {
-            eprintln!(
-                "[workbench] 跳过非国内版账号文件 {}（realm={legacy}）",
-                path.display()
+            crate::error_log::warn(
+                "网关账号",
+                format!("跳过非国内版账号文件 {}（realm={legacy}）", path.display()),
             );
             continue;
         }
         match serde_json::from_str::<Account>(&text) {
             Ok(account) => accounts.push(account),
             Err(err) => {
-                eprintln!("[workbench] 跳过坏账号文件 {}：{err}", path.display());
+                crate::error_log::warn(
+                    "网关账号",
+                    format!("跳过坏账号文件 {}：{err}", path.display()),
+                );
             }
         }
     }

@@ -5,7 +5,7 @@
 //! 1. `request`（热键 / 托盘 / 设置里的按钮）丢一个工作线程进来，走 `start`；
 //! 2. `start` 确认遮罩窗口的池子对得上当前这几块屏（见下面那条）；
 //! 3. 再逐屏抓图、编成 PNG 字节留在内存里；**顺序不能反**（窗口一显示就会被拍进去）；
-//! 4. 帧进状态之后把遮罩**摆好、显示出来**，并推一条 `capture:sync` 给每一块遮罩
+//! 4. 帧进状态之后把遮罩**摆好、显示出来**，并广播一条 `capture:sync`（遮罩页各自醒来取上下文）
 //!    （窗口是复用的，光显示它不会让里面的 JS 知道又开了一场）；焦点给光标所在的那块屏；
 //! 5. 渲染层在窗口里画「冻结的那一帧 + 选区 + 标注」，做完复制 / 保存 / 钉图之后调
 //!    `capture_abort` 收工：**把遮罩藏起来**（窗口留着下次接着用）、丢掉这场会话的帧字节。
@@ -155,6 +155,22 @@ struct Pool {
 #[derive(Default)]
 pub struct CaptureState(Mutex<Pool>, Mutex<()>);
 
+/// 供挂起看门狗探测（见 hang_watch.rs）：Pool 是热路径锁、build 串行化建收池子，
+/// 被占 = 有截图链路正在里面（或只是撞上微秒级临界区，只作线索）。
+pub(crate) fn hang_probe(app: &AppHandle) -> Vec<String> {
+    let Some(state) = app.try_state::<CaptureState>() else {
+        return Vec::new();
+    };
+    let mut held = Vec::new();
+    if state.0.try_lock().is_err() {
+        held.push("capture.池".to_string());
+    }
+    if state.1.try_lock().is_err() {
+        held.push("capture.建收".to_string());
+    }
+    held
+}
+
 /// Tauri 报回来的显示器几何（与 `screen::capture_region` 要的坐标系一致）
 struct MonitorSpec {
     name: String,
@@ -183,7 +199,7 @@ pub fn request(app: &AppHandle) {
     let handle = app.clone();
     std::thread::spawn(move || {
         if let Err(err) = toggle(&handle) {
-            eprintln!("[workbench] 截图失败：{err}");
+            crate::error_log::error("截图", &err);
             // 界面这时多半压根看不见（截图是从热键 / 托盘起的），先把窗口唤出来再推事件 ——
             // 应用内的提示条压在隐藏的窗口里等于没提（与退出确认那条同一条口径）
             crate::show_main_window(&handle);
@@ -239,7 +255,7 @@ fn start(app: &AppHandle) -> Result<usize, String> {
 
     let specs = monitors(app)?;
     // 池子对不上这几块屏（第一次、或插拔过显示器）就整批重建，否则一块窗口都不用建
-    let overlays = ensure_overlays(app, &specs)?;
+    ensure_overlays(app, &specs)?;
 
     let mut frames = Vec::with_capacity(specs.len());
     for (index, spec) in specs.iter().enumerate() {
@@ -293,10 +309,12 @@ fn start(app: &AppHandle) -> Result<usize, String> {
     };
 
     // 窗口是复用的：光显示它们不会让里面的 JS 知道又开了一场，得推一条让它重新取上下文与帧。
-    // 带上这一场的编号，JS 画完再把编号送回来（`capture_show`）
-    for window in &overlays {
-        let _ = window.emit("capture:sync", Some(id));
-    }
+    // 带上这一场的编号，JS 画完再把编号送回来（`capture_show`）。
+    // **广播一次就够，不逐窗口推**：遮罩页是全局订阅（`__TAURI__.event.listen` = Any 目标），
+    // 逐窗口 emit 在双屏下会让每页收到两份（自己那块和另一块屏的都进来了），两份各跑一遍
+    // beginSession —— 后到的那条先 reset 再取上下文，遮罩亮起后提示条会闪一下
+    // （实测 ON→OFF→ON，~50ms；前一条的 IPC 回得比第二条事件早才看得见，是竞态）。
+    let _ = app.emit("capture:sync", Some(id));
 
     // **到这里还不显示**：那一帧要走 `capture_frame` 从 IPC 过来（几兆、几十毫秒），
     // 抢在它前面显示就是先闪一块黑再出画面。等每一块屏都报「画好了」再亮（见 `capture_show`）。
@@ -305,7 +323,7 @@ fn start(app: &AppHandle) -> Result<usize, String> {
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_millis(SHOW_WATCHDOG_MS));
         if let Err(err) = maybe_show(&watchdog, id) {
-            eprintln!("[workbench] 显示截图遮罩失败：{err}");
+            crate::error_log::error("显示截图遮罩", &err);
         }
     });
 
@@ -437,9 +455,8 @@ pub fn abort(app: &AppHandle) {
     // 收工也通知一声（**不带编号** = 这一场结束了）：遮罩里那张上一场的帧（ImageBitmap +
     // 取样画布，4K 下是几十兆）、选区与标注都该丢掉 —— 窗口留着复用，但不必留着上一张图。
     // 这一条过去之后那边的 `capture_context` 会问到「会话已经结束了」，它就自己清干净了
-    for window in &overlays {
-        let _ = window.emit("capture:sync", None::<u64>);
-    }
+    // （**广播一次**：理由同 start 里那条，逐窗口推会被每页收成两份）
+    let _ = app.emit("capture:sync", None::<u64>);
 }
 
 /// 池子里/还在销毁路上的所有 `capture-*` 窗口
@@ -789,7 +806,96 @@ pub fn capture_prewarm(app: AppHandle, enabled: bool) -> Result<(), String> {
     }
 
     let specs = monitors(&app)?;
-    ensure_overlays(&app, &specs).map(|_| ())
+    let generation = app.state::<CaptureState>().0.lock().expect("锁中毒").generation;
+    let overlays = ensure_overlays(&app, &specs)?;
+    // 池子是这一回**新建**的才做预热呈现：新建的那批窗口还没被合成器收进过画面
+    let rebuilt = generation != app.state::<CaptureState>().0.lock().expect("锁中毒").generation;
+    if rebuilt {
+        warm_up_overlays(&app, &overlays, &specs);
+    }
+    Ok(())
+}
+
+/// 预热呈现：把新建成的那批遮罩在**本屏几何**上无激活地亮一瞬（~100ms）再藏回去。
+///
+/// 为什么要有这一下：遮罩页面在会话之外是**全透明**的（见 screenshot.md「会话之外不许渲染
+/// 任何可见元素」），这样一个空透明图层第一次被合成器收进画面、压到任务栏的半透明材质上时，
+/// 材质会重新采样背景 —— 外部抓屏逐帧量到整条任务栏提亮约 8%、持续一两帧（桌面 217 → 237
+/// 再回 217），就是用户报的「启动后第一场截图闪现一个色块」。这次重采样只在进程里第一次把
+/// 遮罩亮出来时发生（重建池子后的新窗口、之后的每一场都不再触发），所以趁预热把它付掉：
+/// 启动那一瞬用户本来就在等界面，比工作中按热键闪一下便宜得多。亮出去的东西是全透明的，
+/// 什么都没有。
+///
+/// - **无激活**：走 `ShowWindow(SW_SHOWNOACTIVATE)`，不抢启动时的焦点（tao 的 `show()` 会
+///   激活窗口）。
+/// - 先摆到**本屏几何**再亮：不压在任务栏上的空图层触发不了那次重采样，等于白亮。
+/// - 与 `start` 的竞态：亮之前、藏之前各查一次 `active()` —— 启动一秒内就按热键的概率极低，
+///   查完即做，最坏也只是那一场的遮罩早亮了 100ms。
+fn warm_up_overlays(app: &AppHandle, overlays: &[WebviewWindow], specs: &[MonitorSpec]) {
+    let handle = app.clone();
+    let jobs: Vec<(String, MonitorFrame)> = overlays
+        .iter()
+        .enumerate()
+        .filter_map(|(index, window)| {
+            specs.get(index).map(|spec| {
+                (
+                    window.label().to_string(),
+                    MonitorFrame {
+                        index,
+                        name: spec.name.clone(),
+                        x: spec.x,
+                        y: spec.y,
+                        width: spec.width,
+                        height: spec.height,
+                        scale: spec.scale,
+                    },
+                )
+            })
+        })
+        .collect();
+    if jobs.is_empty() {
+        return;
+    }
+
+    std::thread::spawn(move || {
+        // 等页面挂起来；早了也一样是全透明，稳一点没坏处
+        std::thread::sleep(std::time::Duration::from_millis(600));
+        for (label, frame) in jobs {
+            let Some(window) = handle.get_webview_window(&label) else {
+                continue;
+            };
+            if active(&handle) {
+                return;
+            }
+            if window
+                .set_position(PhysicalPosition::new(frame.x, frame.y))
+                .and_then(|_| window.set_size(PhysicalSize::new(frame.width, frame.height)))
+                .is_err()
+            {
+                continue;
+            }
+            // 显示前压一次过渡（见 disable_transitions：样式变更可能把它带掉）
+            disable_transitions(&window);
+            show_no_activate(&window);
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            if active(&handle) {
+                // 会话抢在这 100ms 里开始了：它的遮罩正在亮，别藏掉
+                return;
+            }
+            let _ = window.hide();
+        }
+    });
+}
+
+/// 无激活地显示窗口。tao 的 `show()` 走 `ShowWindow(SW_SHOW)`，会把窗口激活 ——
+/// 预热呈现发生在应用启动那一瞬，不该把用户正在用的窗口挤下去。
+fn show_no_activate(window: &WebviewWindow) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_SHOWNOACTIVATE};
+    if let Ok(handle) = window.hwnd() {
+        unsafe {
+            ShowWindow(handle.0, SW_SHOWNOACTIVATE);
+        }
+    }
 }
 
 /// 收工：把遮罩藏起来（窗口留着复用，见 `abort`）

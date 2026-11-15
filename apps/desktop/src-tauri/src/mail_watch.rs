@@ -56,6 +56,18 @@ pub struct WatchAccount {
 #[derive(Default)]
 pub struct MailWatch(Mutex<WatchConfig>);
 
+/// 供挂起看门狗探测（见 hang_watch.rs）：配置锁只在开头 clone 一份，被占只作线索。
+pub(crate) fn hang_probe(app: &AppHandle) -> Vec<String> {
+    let Some(watch) = app.try_state::<MailWatch>() else {
+        return Vec::new();
+    };
+    if watch.0.try_lock().is_err() {
+        vec!["mail.配置".to_string()]
+    } else {
+        Vec::new()
+    }
+}
+
 /// 渲染层登记的监视清单 + 通知要避开的广告发件人 + 轮询周期。
 #[derive(Default, Clone)]
 struct WatchConfig {
@@ -108,7 +120,7 @@ impl WatchState {
         }
         // 与 store.rs 同一个写法：临时文件 + rename，不会留下半个 JSON（实现归 fs_util）
         if let Err(err) = fs_util::write_atomic(&path, text.as_bytes()) {
-            eprintln!("[workbench] 邮件监视进度落盘失败: {err}");
+            crate::error_log::error("邮件监视", format!("进度落盘失败：{err}"));
         }
     }
 }
@@ -184,7 +196,7 @@ pub fn spawn(app: &AppHandle) {
             tick(&handle);
         });
     if let Err(err) = spawned {
-        eprintln!("[workbench] 邮件监视线程起不来：{err}");
+        crate::error_log::error("邮件监视", format!("线程起不来：{err}"));
     }
 }
 
@@ -215,7 +227,7 @@ fn tick(app: &AppHandle) {
                 }
             }
             Err(err) => {
-                eprintln!("[workbench] 邮件监视「{}」：{err}", account.address);
+                crate::error_log::error(&format!("邮件监视「{}」", account.address), &err);
             }
         }
     }
@@ -307,7 +319,7 @@ fn toast(app: &AppHandle, address: &str, batch: NewBatch) {
         },
     );
     if let Err(err) = outcome {
-        eprintln!("[workbench] 邮件通知：{err}");
+        crate::error_log::error("邮件通知", &err);
     }
 }
 

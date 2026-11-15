@@ -535,7 +535,7 @@ fn remote_rows(repo: &str, device: &str, since: i64) -> Vec<crate::wb_usage::Usa
     match crate::sync::read_gateway_rows(repo, device, since) {
         Ok(rows) => rows,
         Err(err) => {
-            eprintln!("[workbench] 读取网关同步流水失败：{err}");
+            crate::error_log::error("读取网关同步流水", &err);
             Vec::new()
         }
     }

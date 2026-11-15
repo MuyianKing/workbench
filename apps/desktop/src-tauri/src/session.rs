@@ -74,6 +74,31 @@ fn wait_for_exit(session: &Session) -> Option<i32> {
         .and_then(|status| status.code())
 }
 
+/// 供挂起看门狗探测（见 hang_watch.rs）。表锁只该在 clone `Arc` 的瞬间被握住；
+/// stdin / child 被占 = 有写入或「等退出」卡在里面 —— 现在都发生在工作线程上，
+/// 占着说明子进程没消费 / 没退出，正好是 AI 那条链路卡住的现场。
+pub(crate) fn hang_probe(app: &AppHandle) -> Vec<String> {
+    let mut held = Vec::new();
+    let Some(sessions) = app.try_state::<Sessions>() else {
+        return held;
+    };
+    // 握着表锁探测各把内锁是安全的：内锁的临界区都不取表锁，而且 try_lock 本就不阻塞
+    match sessions.0.try_lock() {
+        Ok(guard) => {
+            for (id, session) in guard.iter() {
+                if session.stdin.try_lock().is_err() {
+                    held.push(format!("session<{id}>.stdin"));
+                }
+                if session.child.try_lock().is_err() {
+                    held.push(format!("session<{id}>.child"));
+                }
+            }
+        }
+        Err(_) => held.push("session.表锁".to_string()),
+    }
+    held
+}
+
 fn shell_command(line: &str) -> Command {
     #[cfg(windows)]
     {

@@ -164,7 +164,7 @@ pub fn device_info() -> Result<TokenDevice, String> {
         None => {
             let generated = uuid::Uuid::new_v4().to_string();
             if let Err(err) = write_device(&generated) {
-                eprintln!("[workbench] {err}");
+                crate::error_log::error("设备标识", &err);
             }
             generated
         }
