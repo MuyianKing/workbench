@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { GitChangedFile, GitPatch, ParsedPatch, PatchRow, SplitRow } from '@workbench/git'
-import { Document, Warning } from '@element-plus/icons-vue'
+import { ArrowDown, Close, Document, FullScreen, Warning } from '@element-plus/icons-vue'
 import { buildSplitRows, parsePatch } from '@workbench/git'
 import { computed } from 'vue'
 import EmptyState from '@/components/EmptyState.vue'
@@ -11,6 +11,9 @@ import EmptyState from '@/components/EmptyState.vue'
  *  - **并排**（split）：左旧右新，连续的删除块与新增块按顺序一一配对成「修改行」，
  *    多余的单边显示；口径在 `@workbench/git` 的 `buildSplitRows`（有单测）。
  *  - **统一**（unified）：Git 原生的一列排布，顺着看大段上下文更省横向空间。
+ *
+ * 全屏（补丁栏最右那颗开关）只是把意图报给宿主：状态与落点归 GitDiffPane（它负责把
+ * 这块代码区 Teleport 出去铺满内容区），组件自己不知道 fixed 与坐标。
  *
  * 这里只管渲染与几种取不到的情况：
  *  - 二进制 → 明说「二进制文件」，不假装能逐行看；
@@ -30,9 +33,18 @@ const props = defineProps<{
   error: string
   /** 当前文件：补丁栏首行显示路径与增删数；没有选中文件时为 null */
   file?: GitChangedFile | null
+  /** 这次提交（或对比）的全部改动文件：全屏时左上角的路径是颗下拉，切文件用 */
+  files?: GitChangedFile[]
+  /** 代码区是否处于全屏（开关的图标跟它变，状态在宿主） */
+  full?: boolean
 }>()
 
-const emit = defineEmits<{ 'update:view': [value: ViewMode] }>()
+const emit = defineEmits<{
+  'update:view': [value: ViewMode]
+  'toggle-full': []
+  /** 全屏下拉里选中了另一个文件，路径回宿主走 store.selectFile */
+  'select': [path: string]
+}>()
 
 const VIEW_OPTIONS: { label: string, value: ViewMode }[] = [
   { label: '并排', value: 'split' },
@@ -87,10 +99,38 @@ function markOf(row: PatchRow): string {
 </script>
 
 <template>
-  <div class="patch">
-    <!-- 文件名与视图切换常驻：切文件、读取中都不整条闪掉，只换下面的内容 -->
+  <div class="patch" :class="{ 'patch--full': full }">
+    <!-- 文件名与视图切换常驻：切文件、读取中都不整条闪掉，只换下面的内容。
+         全屏时左侧文件清单被盖住，路径就是颗下拉 —— 列出全部改动文件，选中即切 -->
     <div v-if="props.file" class="patch__bar">
-      <span class="patch__file mono" :title="props.file.path">
+      <el-dropdown
+        v-if="props.full && props.files?.length"
+        class="patch__file-switch"
+        trigger="click"
+        placement="bottom-start"
+        popper-class="git-file-menu"
+        @command="(path: string) => emit('select', path)"
+      >
+        <button type="button" class="patch__file patch__file--switch" :title="props.file.path">
+          <span class="patch__file-name mono">{{ props.file.path }}</span>
+          <el-icon class="patch__file-caret">
+            <ArrowDown />
+          </el-icon>
+        </button>
+        <template #dropdown>
+          <el-dropdown-menu>
+            <el-dropdown-item
+              v-for="item in props.files"
+              :key="item.path"
+              :command="item.path"
+              :class="{ 'is-current': item.path === props.file?.path }"
+            >
+              <span class="mono">{{ item.path }}</span>
+            </el-dropdown-item>
+          </el-dropdown-menu>
+        </template>
+      </el-dropdown>
+      <span v-else class="patch__file mono" :title="props.file.path">
         {{ props.file.path }}
       </span>
       <span v-if="props.file.binary" class="patch__stat">二进制</span>
@@ -106,6 +146,19 @@ function markOf(row: PatchRow): string {
         size="small"
         aria-label="差异视图"
       />
+      <el-tooltip :content="props.full ? '退出全屏' : '全屏'" placement="bottom">
+        <button
+          type="button"
+          class="patch__full"
+          :aria-label="props.full ? '退出全屏' : '全屏'"
+          @click="emit('toggle-full')"
+        >
+          <el-icon>
+            <Close v-if="props.full" />
+            <FullScreen v-else />
+          </el-icon>
+        </button>
+      </el-tooltip>
     </div>
 
     <div v-if="props.loading" class="state">
@@ -233,6 +286,26 @@ function markOf(row: PatchRow): string {
   height: 100%;
 }
 
+/* 全屏：一块同底色的圆角卡片 —— 补丁栏与代码共用 --bg-inset，顶部没有那条更深的色带。
+   圆角必须靠 overflow 裁：里面的代码盒是透明的方角，不裁的话行底色会把卡片的圆角盖掉
+   （看起来就像没加）。补丁栏自己留出与窗口边的呼吸，右上角的开关在条内垂直居中；
+   卡片与窗口边之间的留白归槽层（见 GitDiffPane 的 slot padding），这层不管 */
+.patch--full {
+  overflow: hidden;
+  background: var(--bg-inset);
+  border-radius: var(--r-lg);
+}
+
+.patch--full .patch__bar {
+  padding: var(--sp-2) var(--sp-3);
+}
+
+.patch--full .patch__scroll {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
 .state {
   padding: var(--sp-5) var(--sp-3);
   color: var(--ink-3);
@@ -262,6 +335,41 @@ function markOf(row: PatchRow): string {
   font-size: var(--fs-micro);
 }
 
+/* 全屏时的文件切换：长得与纯文本路径同款（悬停亮一档 + 尾巴一个下箭头），
+   长路径照样省略 —— 槽是 flex 项，要给 min-width: 0 才缩得下去 */
+.patch__file-switch {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.patch__file--switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.patch__file--switch:hover {
+  color: var(--ink);
+}
+
+.patch__file-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.patch__file-caret {
+  flex-shrink: 0;
+  font-size: var(--fs-micro);
+}
+
 .patch__stat {
   display: inline-flex;
   flex-shrink: 0;
@@ -274,6 +382,27 @@ function markOf(row: PatchRow): string {
 .patch__toggle {
   flex-shrink: 0;
   margin-left: auto;
+}
+
+/* 全屏开关：与视图切换同排最右，ghost 面孔（悬停才上底色） */
+.patch__full {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--ink-3);
+  cursor: pointer;
+}
+
+.patch__full:hover {
+  color: var(--ink);
+  background: var(--bg-subtle);
 }
 
 .is-add {

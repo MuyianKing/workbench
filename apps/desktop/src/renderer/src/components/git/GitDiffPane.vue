@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { Document } from '@element-plus/icons-vue'
 import { shortHash } from '@workbench/git'
-import { computed } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue'
 import EmptyState from '@/components/EmptyState.vue'
 import GitChangedFiles from '@/components/git/GitChangedFiles.vue'
 import GitPatchView from '@/components/git/GitPatchView.vue'
@@ -11,6 +11,9 @@ import PanelResizer from '@/components/PanelResizer.vue'
 import { formatTimestamp } from '@/format'
 import { useGitStore } from '@/stores/git'
 import { useSettingsStore } from '@/stores/settings'
+/** 全屏期间把态报给宿主（GitView）：分隔条（PanelResizer，z 10）比全屏卡片（z 9）高，
+ * 不藏的话会从卡片上戳出来 —— 它的 tooltip 更是 2000 起。 */
+const emit = defineEmits<{ fullscreen: [value: boolean] }>()
 /**
  * 右侧：一次提交（相对第一父提交）或两个提交之间的差异。
  *
@@ -40,6 +43,129 @@ const bodyRest = computed(() => {
   if (!detail)
     return ''
   return detail.body.split('\n').slice(1).join('\n').trim()
+})
+
+// ---------- 代码区（补丁）全屏 ----------
+
+/** 全屏的是补丁区本身：提交说明与文件清单留在原地（被盖住），代码铺满内容区。
+ * 页面内的布局态，不进 store；换页即收（onDeactivated）。 */
+const patchFull = ref(false)
+const patchWrap = ref<HTMLElement | null>(null)
+
+/**
+ * 全屏落点 = `.git-view` 的盒子（顶栏以下、导航栏右侧的内容区）。导航栏是 int32 上限
+ * 的层级（弹层开着它也在最上），压不过 —— 铺到它右侧为止。量出来钉 inline inset，
+ * 不照 `--w-nav` 摆：导航收起时那个变量不跟着变（收起动画动的是导航自己的 width）。
+ */
+function pinPatchRect(): void {
+  const el = patchWrap.value
+  const view = el?.closest('.git-view')
+  if (!el || !view)
+    return
+  const rect = view.getBoundingClientRect()
+  el.style.top = `${rect.top}px`
+  el.style.right = `${window.innerWidth - rect.right}px`
+  el.style.bottom = `${window.innerHeight - rect.bottom}px`
+  el.style.left = `${rect.left}px`
+}
+
+function clearPatchRect(): void {
+  const el = patchWrap.value
+  if (!el)
+    return
+  el.style.top = ''
+  el.style.right = ''
+  el.style.bottom = ''
+  el.style.left = ''
+}
+
+/**
+ * FLIP：先量起点（栏内那格），换完布局（Teleport 挪到 body + fixed）再量终点，
+ * 用 `transform-origin: top left` 把代码区平移 + 缩放回起点再放它归位 —— 看上去就是
+ * 代码区朝着左上角长满过去，收起时对称缩回右栏。文本在 0.22s 里会被带着缩放，
+ * FLIP 固有形态；缓动取 --ease-out（起步快收尾缓）。
+ */
+function flipPatch(apply: () => void): void {
+  const el = patchWrap.value
+  if (!el) {
+    apply()
+    return
+  }
+  const first = el.getBoundingClientRect()
+  apply()
+  void nextTick(() => {
+    const last = el.getBoundingClientRect()
+    if (!last.width || !last.height)
+      return
+    const dx = first.left - last.left
+    const dy = first.top - last.top
+    const sx = first.width / last.width
+    const sy = first.height / last.height
+    el.style.transition = 'none'
+    el.style.transform = `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})`
+    // 强制回流：让「起点那一帧」先落住，清掉 transform 时才有东西可过渡
+    void el.getBoundingClientRect()
+    el.style.transition = ''
+    el.style.transform = ''
+  })
+}
+
+/** 全屏态的惟一写入口：状态与「告诉宿主」绑在一起 */
+function setPatchFull(value: boolean): void {
+  patchFull.value = value
+  emit('fullscreen', value)
+}
+
+function togglePatchFull(): void {
+  // 没选文件时补丁栏（连同它的全屏开关）根本不渲染，这里兜一道
+  if (!activeFile.value)
+    return
+  flipPatch(() => {
+    setPatchFull(!patchFull.value)
+    if (patchFull.value)
+      pinPatchRect()
+    else
+      clearPatchRect()
+  })
+}
+
+/** 全屏期间按 Esc 收 */
+function onEscKey(event: KeyboardEvent): void {
+  if (event.key === 'Escape' && patchFull.value)
+    togglePatchFull()
+}
+
+function onWindowResize(): void {
+  if (patchFull.value)
+    pinPatchRect()
+}
+
+/** 导航栏收起 / 展开是 0.2s 的过渡：结束时再钉一次，全屏的代码区跟着让位 / 收回来 */
+function onNavToggle(): void {
+  if (!patchFull.value)
+    return
+  pinPatchRect()
+  window.setTimeout(pinPatchRect, 240)
+}
+
+watch(() => settings.settings.navHidden, onNavToggle)
+
+onMounted(() => {
+  window.addEventListener('keydown', onEscKey)
+  window.addEventListener('resize', onWindowResize)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onEscKey)
+  window.removeEventListener('resize', onWindowResize)
+})
+
+/** 换页（KeepAlive 挂起）必须收掉全屏：fixed 面板会盖在别的页上面 */
+onDeactivated(() => {
+  if (!patchFull.value)
+    return
+  setPatchFull(false)
+  clearPatchRect()
 })
 </script>
 
@@ -111,17 +237,31 @@ const bodyRest = computed(() => {
           />
         </aside>
 
-        <GitPatchView
-          v-model:view="store.patchView"
-          class="diff-pane__patch"
-          :file="activeFile"
-          :patch="store.patch"
-          :loading="store.patchLoading"
-          :error="store.patchError"
-        />
+        <!--
+          代码区（补丁）全屏：Teleport 到 body 才逃得开 .panel 那层毛玻璃 —— backdrop-filter 会把
+          后代的 fixed 劫持成自己的 containing block。平时 disabled 原地渲染，全屏时挪到 body、钉到
+          `.git-view` 的盒子上（提交说明与文件清单留在原地，被盖住）；Esc 收、换页自动收（见 script）。
+        -->
+        <Teleport to="body" :disabled="!patchFull">
+          <div ref="patchWrap" class="diff-patch-slot" :class="{ 'diff-patch-slot--full': patchFull }">
+            <GitPatchView
+              v-model:view="store.patchView"
+              :file="activeFile"
+              :files="store.activeFiles"
+              :patch="store.patch"
+              :loading="store.patchLoading"
+              :error="store.patchError"
+              :full="patchFull"
+              @toggle-full="togglePatchFull"
+              @select="store.selectFile"
+            />
+          </div>
+        </Teleport>
 
-        <!-- 文件清单与补丁之间那条缝：宽度住 theme.json 的 gitFilesWidth -->
+        <!-- 文件清单与补丁之间那条缝：宽度住 theme.json 的 gitFilesWidth。全屏期间要藏
+             （PanelResizer 比全屏卡片高，会戳出来） -->
         <PanelResizer
+          v-show="!patchFull"
           :width="settings.themeConfig.gitFilesWidth"
           body-class="is-resizing-git-pane"
           title="拖动调整改动文件清单宽度"
@@ -271,5 +411,29 @@ const bodyRest = computed(() => {
 .diff-pane__patch {
   min-width: 0;
   min-height: 0;
+}
+
+/* 补丁区的槽：平时是 .diff-body 网格里普通的一格，全屏时被 Teleport 挪到 body */
+.diff-patch-slot {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  /* 全屏 FLIP 只动 transform（落点钉在 inline inset 上）；双向都得有过渡可放 */
+  transition: transform 0.22s var(--ease-out);
+}
+
+/**
+ * 全屏态：fixed 钉到 `.git-view` 的盒子（inline inset，见 pinPatchRect）。层级取 9 ——
+ * 顶栏是 10（毛玻璃要压住内容），导航栏是 int32 上限（弹层开着它也在最上），全屏铺不到
+ * 它，铺到它右侧为止。**这层自己不上底色**：外层再垫一块画布就是多余的又一层，左卡片
+ * 顶到窗口边、**上 / 右 / 底各留一道 --card-gap**（上下对称），露出来的是底下的页面与
+ * 壁纸；FLIP 过渡中缩放露出的同样是页面，不会闪白（.app 整块在底下垫着）。
+ */
+.diff-patch-slot--full {
+  position: fixed;
+  z-index: 9;
+  padding: var(--card-gap, 10px) var(--card-gap, 10px) var(--card-gap, 10px) 0;
+  transform-origin: top left;
 }
 </style>

@@ -38,6 +38,9 @@ const layoutStyle = computed(() => ({
 /** 刷新时换 key，让左栏的懒加载树整棵重建（目录 / 文件可能已经变了） */
 const treeKey = ref(0)
 
+/** 右栏代码区全屏期间，两条栏缝的分隔条要藏（PanelResizer z 10 比全屏卡片 z 9 高，会戳出来） */
+const detailFull = ref(false)
+
 onMounted(() => {
   void store.restore()
 })
@@ -275,11 +278,13 @@ function onBranchCommand(name: string): void {
           <GitCommitList />
         </section>
         <section class="git-pane panel">
-          <GitDiffPane />
+          <GitDiffPane @fullscreen="detailFull = $event" />
         </section>
 
-        <!-- 两条分隔条：文件树 | 提交列表、提交列表 | 差异。落点按列宽与缝线算 -->
+        <!-- 两条分隔条：文件树 | 提交列表、提交列表 | 差异。落点按列宽与缝线算。
+             代码区全屏期间藏掉：PanelResizer（z 10）比全屏卡片（z 9）高，会戳到卡片上 -->
         <PanelResizer
+          v-show="!detailFull"
           :width="settings.themeConfig.gitTreeWidth"
           body-class="is-resizing-git-pane"
           title="拖动调整文件树宽度"
@@ -288,6 +293,7 @@ function onBranchCommand(name: string): void {
           @end="() => void settings.commitThemeWidth('gitTreeWidth')"
         />
         <PanelResizer
+          v-show="!detailFull"
           :width="settings.themeConfig.gitHistoryWidth"
           body-class="is-resizing-git-pane"
           title="拖动调整提交列表宽度"

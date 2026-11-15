@@ -1531,6 +1531,30 @@ body.is-resizing-video-float * {
   gap: var(--sp-2);
 }
 
+/**
+ * Git 页代码区全屏的文件切换菜单（补丁栏左上角的路径下拉）：改动文件可能上百，
+ * 菜单自己滚；路径全是等宽字；当前选中那项高亮一档。
+ */
+.git-file-menu {
+  max-width: min(60vw, 720px);
+}
+
+.git-file-menu .el-dropdown-menu {
+  max-height: min(60vh, 480px);
+  overflow-y: auto;
+}
+
+.git-file-menu .el-dropdown-menu__item .mono {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.git-file-menu .el-dropdown-menu__item.is-current {
+  color: var(--ink);
+  background: var(--bg-subtle);
+}
+
 .git-repo-menu .repo-item__name {
   flex-shrink: 0;
   color: var(--ink);
