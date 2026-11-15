@@ -263,7 +263,7 @@ fn work_area(window: &WebviewWindow) -> Option<WorkArea> {
     })
 }
 
-/// 首次出现的落点：右侧、纵向约 40% 处（跟 360 那颗球一个习惯）
+/// 首次出现的落点：右侧、纵向居中（用户定的）
 fn default_record(app: &AppHandle) -> BallRecord {
     let work = app
         .primary_monitor()
@@ -289,7 +289,7 @@ fn default_record(app: &AppHandle) -> BallRecord {
     BallRecord {
         // 默认贴着右边（x 由那条边算，见 place，这儿给什么都不算数）
         x: work.right,
-        y: work.top + span * 2 / 5,
+        y: work.top + span / 2,
         side: Some(BallSide::Right),
     }
 }
@@ -315,7 +315,11 @@ fn persist(app: &AppHandle) {
 }
 
 /// 把窗口摆到记账里那个位置该在的地方
-fn apply_placement(window: &WebviewWindow, record: BallRecord, open: bool) -> Result<(), String> {
+fn apply_placement(
+    window: &WebviewWindow,
+    record: BallRecord,
+    open: bool,
+) -> Result<Placement, String> {
     // 摆的这几步会派发出 Moved / Resized，先举旗：这一小段里的事件不参与落定（见 BallState::moving）
     let state = window.app_handle().state::<BallState>();
     state.moving.store(true, Ordering::Relaxed);
@@ -325,7 +329,8 @@ fn apply_placement(window: &WebviewWindow, record: BallRecord, open: bool) -> Re
 }
 
 /// 摆位落地。**调用方必须已持 `PLACE_LOCK`**（见那把锁的说明）：算尺寸、算位置、下发。
-fn place_locked(window: &WebviewWindow, record: BallRecord, open: bool) -> Result<(), String> {
+/// 回带算出来的那一档落点 —— `create_window` 拿它给首次出现的球落第一笔账。
+fn place_locked(window: &WebviewWindow, record: BallRecord, open: bool) -> Result<Placement, String> {
     let Some(work) = work_area(window) else {
         return Err("找不到这块屏幕".to_string());
     };
@@ -341,11 +346,11 @@ fn place_locked(window: &WebviewWindow, record: BallRecord, open: bool) -> Resul
     window
         .set_position(PhysicalPosition::new(at.x, at.y))
         .map_err(|err| format!("摆悬浮球失败：{err}"))?;
-    Ok(())
+    Ok(at)
 }
 
 /// 摆位落地（自己拿锁）。展开 / 收起走这条：它要摆的形状由调用方给定，不含「读当前状态」这一步。
-fn place_now(window: &WebviewWindow, record: BallRecord, open: bool) -> Result<(), String> {
+fn place_now(window: &WebviewWindow, record: BallRecord, open: bool) -> Result<Placement, String> {
     let _guard = place_guard();
     place_locked(window, record, open)
 }
@@ -394,6 +399,21 @@ fn sync_from_window(app: &AppHandle) {
         let _ = window.set_position(PhysicalPosition::new(x, y));
     }
 
+    // **往下的每一笔（记账、落盘、安排落定）都只认「手按着拖出来的」位移**。判据就是左键
+    // （`dragging`，与「松手了没有」同一条）：拖动中手一直按着，程序化摆位那几下指针没按键。
+    //
+    // 为什么记账必须过这道闸 —— Moved / Resized 在程序化摆位（创建、收起、展开、落定自己）时
+    // 也会到，而那些 set_size / set_position 是**排队下发**的，事件到达时窗口可能还停在半路：
+    // 拿瞬态几何写账会把坏位置存下来（实证：账里出现过 `(0,0)`，即窗口出生的 OS 默认位）；
+    // 工作区短暂退化（开机 / 显示器重配的瞬间）时上面的夹取还会把 y 钳到顶 —— 写进账球就从此
+    // 赖在右侧顶部，工作区恢复也不回去（用户报「球经常出现在右侧顶部」）。夹取矫正照做 ——
+    // 那是视觉修正；账只认拖动与落定（`settle_drop`），夹取不改写用户选的位置，工作区恢复后
+    // 球还能回到原地。悬停展开 / 收起也走这闸：它们不该进账，更不该进落定 —— 否则刚摊开的球
+    // 会在 250ms 后按「贴边就收起」被收回去，指针还压着球就又摊开，收放没完（用户报过）。
+    if !dragging() {
+        return;
+    }
+
     let changed = {
         let state = app.state::<BallState>();
         let mut guard = state.record.lock().expect("锁中毒");
@@ -414,14 +434,6 @@ fn sync_from_window(app: &AppHandle) {
     }
 
     let state = app.state::<BallState>();
-    // **只有「手按着搬出来的」位移才安排落定**。悬停展开 / 收起也是程序化摆位，同样会派发
-    // `Moved` / `Resized`，可那不是拖动 —— 它们要是也走进落定，刚摊开的球会在 250ms 后
-    // 按「贴边就收起」被收回去，指针还压在球上就又摊开，收放收放没完（用户报的）。
-    // 判据就是左键按着（`dragging`，与「松手了没有」同一条）：拖动中手一直按着，
-    // 而程序化摆位那几下指针没按键。
-    if !dragging() {
-        return;
-    }
     state.last_move.store(now_ms(), Ordering::Relaxed);
     if !state.settle_pending.swap(true, Ordering::Relaxed) {
         schedule_settle(app);
@@ -581,7 +593,26 @@ fn create_window(app: &AppHandle, record: BallRecord) -> Result<(), String> {
     // 开出来是什么形状看记账落在哪儿：贴边的（含首次出现）是那条竖条，浮着的是整颗球
     let open = record.side.is_none();
     app.state::<BallState>().open.store(open, Ordering::Relaxed);
-    apply_placement(&window, record, open)?;
+    let at = apply_placement(&window, record, open)?;
+    // 还没有账（首次开启、文件被改坏）就把这次摆位落成第一笔：球出现的那一刻 ball.json 就该有。
+    // 记账不再由 Moved / Resized 事件代笔（见 sync_from_window 那道闸），这里是唯一的「没账变有账」
+    let seeded = {
+        let state = app.state::<BallState>();
+        let mut guard = state.record.lock().expect("锁中毒");
+        if guard.is_none() {
+            *guard = Some(BallRecord {
+                x: at.x,
+                y: at.y,
+                side: record.side,
+            });
+            true
+        } else {
+            false
+        }
+    };
+    if seeded {
+        persist(app);
+    }
     window
         .show()
         .map_err(|err| format!("显示悬浮球失败：{err}"))?;

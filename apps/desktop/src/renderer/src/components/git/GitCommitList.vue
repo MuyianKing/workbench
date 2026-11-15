@@ -290,14 +290,14 @@ function pick(commit: GitCommit): void {
   margin-top: var(--sp-2);
 }
 
-/* 不管日期控件的根元素是哪个节点，直接锁死两个直接子元素为窄宽 */
+/* 不管日期控件的根元素是哪个节点，直接锁死两个直接子元素为窄宽（104px 装下「2026-11-04」+ 日历图标不再更宽） */
 .commit-filter > * {
-  flex: 0 0 128px;
-  width: 128px;
+  flex: 0 0 104px;
+  width: 104px;
   min-width: 0;
 }
 
-/* 连接符不占那 128px：跟着前一个日期框走，换行时留在上一行末尾 */
+/* 连接符不占那 104px：跟着前一个日期框走，换行时留在上一行末尾 */
 .commit-filter > .commit-filter__sep {
   flex: 0 0 auto;
   width: auto;
@@ -307,15 +307,15 @@ function pick(commit: GitCommit): void {
 }
 
 .commit-filter .commit-filter__picker {
-  flex: 0 0 128px;
-  width: 128px;
+  flex: 0 0 104px;
+  width: 104px;
   min-width: 0;
 }
 
 /* EP 给日期控件写死了 220px（`.el-date-editor.el-input`），只靠根类名压不住；这里直接命中它 */
 .commit-filter :deep(.el-date-editor.el-input) {
-  flex: 0 0 128px;
-  width: 128px;
+  flex: 0 0 104px;
+  width: 104px;
   min-width: 0;
 }
 

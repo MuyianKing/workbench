@@ -82,6 +82,7 @@ pub fn flush_all() {
     crate::etf::etf_store().flush_sync();
     crate::vault::vault_store().flush_sync();
     crate::pin::pin_store().flush_sync();
+    crate::ball::ball_store().flush_sync();
 }
 
 // ---------- 数据文件 ----------

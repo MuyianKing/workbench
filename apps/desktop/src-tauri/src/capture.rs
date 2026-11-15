@@ -880,20 +880,43 @@ fn warm_up_overlays(app: &AppHandle, overlays: &[WebviewWindow], specs: &[Monito
             std::thread::sleep(std::time::Duration::from_millis(100));
             if active(&handle) {
                 // 会话抢在这 100ms 里开始了：它的遮罩正在亮，别藏掉
+                // （show_session 走 tao 的 show()，顺带把 tao 的状态写回一致）
                 return;
             }
-            let _ = window.hide();
+            hide_raw(&window);
         }
     });
 }
 
 /// 无激活地显示窗口。tao 的 `show()` 走 `ShowWindow(SW_SHOW)`，会把窗口激活 ——
 /// 预热呈现发生在应用启动那一瞬，不该把用户正在用的窗口挤下去。
+///
+/// **与 `hide_raw` 成对使用**：这里绕过了 tao，收起也必须绕过 —— 理由见那边。
 fn show_no_activate(window: &WebviewWindow) {
     use windows_sys::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_SHOWNOACTIVATE};
     if let Ok(handle) = window.hwnd() {
         unsafe {
             ShowWindow(handle.0, SW_SHOWNOACTIVATE);
+        }
+    }
+}
+
+/// 与 `show_no_activate` 对称：也走裸 `ShowWindow(SW_HIDE)` 藏起。
+///
+/// **不能用 tao 的 `hide()`**：tao 的显隐跟着它内部缓存的窗口状态走（`apply_diff`
+/// 在「新旧状态相同」时先早退，排在后面的 `ShowWindow(SW_HIDE)` 根本不执行）。
+/// 这批遮罩建窗时 `visible(false)`，缓存里一直是「隐藏」；亮它们的又是绕开 tao 的
+/// 裸 `ShowWindow`，不写这个缓存 —— 于是 `hide()` 看「本来就是隐藏的」直接早退，
+/// 藏成了空操作。结果：预热亮出去的全屏置顶透明层永远悬在屏幕上（页面全透明，
+/// 肉眼看不见），但鼠标点击全被它吃掉 —— 用户报的「启动打开一个全局遮罩、鼠标
+/// 无法操作」。真会话的 show / hide 走 tao 自己，状态自洽，不受影响；且真会话
+/// 一旦 show 过，缓存被写回一致，`hide()` 从此恢复工作 —— 所以这层只挂在「启动
+/// 到第一场截图之间」，恰好人人都撞上。
+fn hide_raw(window: &WebviewWindow) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE};
+    if let Ok(handle) = window.hwnd() {
+        unsafe {
+            ShowWindow(handle.0, SW_HIDE);
         }
     }
 }

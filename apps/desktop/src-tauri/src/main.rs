@@ -101,7 +101,7 @@ use serde_json::{json, Value};
 use std::sync::mpsc::{channel, Sender};
 use std::sync::Mutex;
 use std::time::Duration;
-use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
+use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::webview::PageLoadEvent;
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
@@ -316,22 +316,10 @@ fn create_main_window(app: &AppHandle, show_on_load: bool) -> tauri::Result<()> 
 }
 
 /// 托盘：常驻。左键把窗口调到前面（没被别的程序压住时才收起，见 toggle_main_window），右键出菜单。
+/// 菜单只留「退出」：唤主界面走左键单击，截图 / 关钉图各有热键与界面入口，托盘不再重复。
 fn create_tray(app: &AppHandle) -> tauri::Result<()> {
-    let show = MenuItem::with_id(app, "show", "显示主界面", true, None::<&str>)?;
-    let shot = MenuItem::with_id(app, "capture", "截图", true, None::<&str>)?;
-    let close_pins = MenuItem::with_id(app, "close-pins", "关闭所有钉图", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
-    let menu = Menu::with_items(
-        app,
-        &[
-            &show,
-            &PredefinedMenuItem::separator(app)?,
-            &shot,
-            &close_pins,
-            &PredefinedMenuItem::separator(app)?,
-            &quit,
-        ],
-    )?;
+    let menu = Menu::with_items(app, &[&quit])?;
 
     let mut builder = TrayIconBuilder::with_id("main")
         // 同窗口标题：占位用构建时的产品名，渲染层随后按设置里的程序名覆盖
@@ -339,13 +327,10 @@ fn create_tray(app: &AppHandle) -> tauri::Result<()> {
         .menu(&menu)
         // 左键单击留给「唤起窗口」，菜单只在右键出
         .show_menu_on_left_click(false)
-        .on_menu_event(|app, event| match event.id.as_ref() {
-            "show" => show_main_window(app),
-            // 截图与钉图都是「本体在别的窗口里」的动作：界面收在托盘时也点得到
-            "capture" => capture::request(app),
-            "close-pins" => pin::pin_close_all(app.clone()),
-            "quit" => request_quit(app),
-            _ => {}
+        .on_menu_event(|app, event| {
+            if event.id.as_ref() == "quit" {
+                request_quit(app);
+            }
         })
         .on_tray_icon_event(|tray, event| {
             if let TrayIconEvent::Click {
