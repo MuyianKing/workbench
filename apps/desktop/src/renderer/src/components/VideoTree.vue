@@ -130,7 +130,7 @@ function onMenuAct(command: 'open-default' | 'reveal' | 'copy-path'): void {
             <Folder v-if="data.kind === 'folder'" />
             <VideoPlay v-else />
           </el-icon>
-          <span class="node__name">{{ data.name }}</span>
+          <span class="node__name truncate">{{ data.name }}</span>
           <span v-if="data.kind === 'video'" class="node__duration">{{ durationOf(data) }}</span>
         </span>
       </template>
@@ -227,9 +227,6 @@ function onMenuAct(command: 'open-default' | 'reveal' | 'copy-path'): void {
 .node__name {
   flex: 1 1 auto;
   min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
 }
 
 .node__duration {

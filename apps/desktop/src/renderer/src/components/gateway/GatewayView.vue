@@ -528,7 +528,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="gw" :class="{ 'is-models': tab === 'models' }">
+  <section class="gw page" :class="{ 'is-models': tab === 'models' }">
     <!-- 页首：左页签、右全局状态。启停不跟着「账号」页签走 —— 在哪一栏都能看到网关开没开 -->
     <div class="gw__head">
       <GatewayTabs v-model="tab" :items="TABS" />
@@ -553,7 +553,7 @@ onBeforeUnmount(() => {
           </span>
           <div class="gw__stat-body">
             <span class="gw__stat-label">账号总数</span>
-            <span class="gw__stat-value">{{ stats.total }}</span>
+            <span class="gw__stat-value truncate">{{ stats.total }}</span>
           </div>
         </div>
         <div class="panel gw__stat-card is-ok">
@@ -562,7 +562,7 @@ onBeforeUnmount(() => {
           </span>
           <div class="gw__stat-body">
             <span class="gw__stat-label">可用</span>
-            <span class="gw__stat-value">{{ stats.usable }}</span>
+            <span class="gw__stat-value truncate">{{ stats.usable }}</span>
           </div>
         </div>
         <div class="panel gw__stat-card is-fail">
@@ -571,7 +571,7 @@ onBeforeUnmount(() => {
           </span>
           <div class="gw__stat-body">
             <span class="gw__stat-label">已停用</span>
-            <span class="gw__stat-value">{{ stats.disabled }}</span>
+            <span class="gw__stat-value truncate">{{ stats.disabled }}</span>
           </div>
         </div>
         <div class="panel gw__stat-card is-muted">
@@ -580,7 +580,7 @@ onBeforeUnmount(() => {
           </span>
           <div class="gw__stat-body">
             <span class="gw__stat-label">待续期</span>
-            <span class="gw__stat-value">{{ stats.pending }}</span>
+            <span class="gw__stat-value truncate">{{ stats.pending }}</span>
           </div>
         </div>
         <div class="panel gw__stat-card is-warn">
@@ -589,7 +589,7 @@ onBeforeUnmount(() => {
           </span>
           <div class="gw__stat-body">
             <span class="gw__stat-label">额度用完</span>
-            <span class="gw__stat-value">{{ stats.quota }}</span>
+            <span class="gw__stat-value truncate">{{ stats.quota }}</span>
           </div>
         </div>
         <div class="panel gw__stat-card is-credit">
@@ -598,7 +598,7 @@ onBeforeUnmount(() => {
           </span>
           <div class="gw__stat-body">
             <span class="gw__stat-label">积分剩余 / 总额</span>
-            <span class="gw__stat-value is-credit">{{ number(stats.remain) }} <span class="gw__stat-dim">/ {{ number(stats.size) }}</span></span>
+            <span class="gw__stat-value is-credit truncate">{{ number(stats.remain) }} <span class="gw__stat-dim">/ {{ number(stats.size) }}</span></span>
           </div>
         </div>
       </section>
@@ -717,11 +717,7 @@ onBeforeUnmount(() => {
  * 这里只管行列关系 —— 别在局部再画一遍边框与底色。
  */
 .gw {
-  display: flex;
-  flex-direction: column;
   gap: var(--sp-3);
-  height: 100%;
-  min-height: 0;
   overflow: auto;
   padding: var(--sp-3);
 }
@@ -916,9 +912,6 @@ onBeforeUnmount(() => {
   line-height: 1.1;
   color: var(--ink);
   font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 /* 积分数值最长（`9557.49 / 10349`），降一档字号才放得下 */

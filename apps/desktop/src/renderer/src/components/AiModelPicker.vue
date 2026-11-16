@@ -260,11 +260,11 @@ function contextText(size: number): string {
               @click="toggle(row.model)"
             >
               <span class="pick__offer-text">
-                <span class="pick__offer-name">{{ row.model.name }}</span>
+                <span class="pick__offer-name truncate">{{ row.model.name }}</span>
                 <!-- 端点没给显示名时 name 就是 id：两行写同一个字符串只是占地方 -->
                 <span
                   v-if="row.model.id !== row.model.name"
-                  class="pick__offer-id mono"
+                  class="pick__offer-id mono truncate"
                   :title="row.model.id"
                 >
                   {{ row.model.id }}
@@ -306,8 +306,8 @@ function contextText(size: number): string {
           <li v-for="entry in chosen" :key="entry.id" class="pick__row is-chosen">
             <div class="pick__line">
               <span class="pick__offer-text">
-                <span class="pick__offer-name">{{ entry.name }}</span>
-                <span v-if="entry.id !== entry.name" class="pick__offer-id mono" :title="entry.id">
+                <span class="pick__offer-name truncate">{{ entry.name }}</span>
+                <span v-if="entry.id !== entry.name" class="pick__offer-id mono truncate" :title="entry.id">
                   {{ entry.id }}
                 </span>
               </span>
@@ -557,19 +557,13 @@ function contextText(size: number): string {
 }
 
 .pick__offer-name {
-  overflow: hidden;
   color: var(--ink);
   font-size: var(--fs-meta);
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .pick__offer-id {
-  overflow: hidden;
   color: var(--ink-3);
   font-size: var(--fs-micro);
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .pick__offer-meta {

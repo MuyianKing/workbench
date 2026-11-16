@@ -230,7 +230,7 @@ async function openRawExternally(): Promise<void> {
 </script>
 
 <template>
-  <main class="kb-view">
+  <main class="kb-view page">
     <!-- 还没选知识库文件夹：整页只有一块自绘线稿、「知识库」那行标题与那颗按钮，居中浮在画布上、
          不套卡片；仓库该怎么摆与清洗收在按钮的悬停里，不摆在页面上 -->
     <div v-if="!store.root" class="guide">
@@ -289,7 +289,7 @@ async function openRawExternally(): Promise<void> {
             <h2 class="head__title">
               知识库
             </h2>
-            <span class="head__loc mono" :title="store.root">{{ store.locationText }}</span>
+            <span class="head__loc mono truncate" :title="store.root">{{ store.locationText }}</span>
           </div>
         </div>
         <div class="filter__tools">
@@ -597,8 +597,6 @@ async function openRawExternally(): Promise<void> {
 
 <style scoped>
 .kb-view {
-  display: flex;
-  flex-direction: column;
   /**
    * 行距就是设置里那一档「卡片间距」（--card-gap）：工具带与两栏之间、两栏之间、报错那行上下，
    * 全都是同一个数 —— 与项目页 / 工作页 / 密码页工具带下沿那条缝同源（那几页是滚动体自己带
@@ -609,8 +607,6 @@ async function openRawExternally(): Promise<void> {
    * 看着就是「这一页空得莫名其妙」）。换纵向 flex 之后不渲染的节点不占位，也就没有多出来那条。
    */
   gap: var(--card-gap, 10px);
-  height: 100%;
-  min-height: 0;
   /**
    * 左右下三边与卡片间距同源；**上边一份不给自己加** —— 顶栏下面那条缝归 .shell 管
    * （见 global.css「顶栏与内容之间那条缝」），这里再补一份，正常 / 毛玻璃两档就成了两倍，
@@ -672,9 +668,6 @@ async function openRawExternally(): Promise<void> {
 
 .head__loc {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   color: var(--ink-3);
   font-size: var(--fs-micro);
 }

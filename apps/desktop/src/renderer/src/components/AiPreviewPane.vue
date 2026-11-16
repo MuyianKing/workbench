@@ -73,7 +73,7 @@ function onResizeDown(event: PointerEvent): void {
           :title="state.name"
           @click="emit('activate', state.key)"
         >
-          <span class="pane__tab-name">{{ state.name }}</span>
+          <span class="pane__tab-name truncate">{{ state.name }}</span>
           <span
             class="pane__tab-close"
             aria-label="关闭这个预览"
@@ -207,12 +207,6 @@ function onResizeDown(event: PointerEvent): void {
 .pane__tab.is-active {
   color: var(--ink);
   background: var(--bg-inset);
-}
-
-.pane__tab-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /* 行内那颗 ×：平时淡着，悬停抬头 */

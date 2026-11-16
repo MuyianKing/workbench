@@ -270,7 +270,7 @@ function onMenuAct(name: string): void {
              关联到哪儿这些说明收在悬停里（两行块在这一层只是噪音） -->
         <span v-if="data.library" class="library" :title="data.library.dir || '这台机器没有关联源头文件夹（只读仓库里的副本）'">
           <el-icon class="node__icon"><Folder /></el-icon>
-          <span class="library__name">{{ data.name }}</span>
+          <span class="library__name truncate">{{ data.name }}</span>
           <!-- 失联：原始文件被删（多半是别的设备删的），但还有条目指着它。点开按 raw 文件分组清理 -->
           <button
             v-if="data.library.deleted"
@@ -298,13 +298,13 @@ function onMenuAct(name: string): void {
         <!-- 目录行（知识库下面那一层起）：图标 + 名字，一行 -->
         <span v-else-if="data.kind === 'folder'" class="node" :title="data.name">
           <el-icon class="node__icon"><Folder /></el-icon>
-          <span class="node__name">{{ data.name }}</span>
+          <span class="node__name truncate">{{ data.name }}</span>
         </span>
 
         <!-- 文件行：与目录行同一副（图标 + 名字，一行），只有「有更新」才在行尾挂一个 tag -->
         <span v-else class="raw-item">
           <el-icon class="raw-item__icon"><Document /></el-icon>
-          <span class="raw-item__name">{{ data.name }}</span>
+          <span class="raw-item__name truncate">{{ data.name }}</span>
           <span v-if="data.item?.status === 'stale'" class="raw-item__tag">有更新</span>
         </span>
       </template>
@@ -383,9 +383,6 @@ function onMenuAct(name: string): void {
 .library__name {
   flex: 1;
   min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
   color: var(--ink);
   font-size: var(--fs-body);
 }
@@ -435,9 +432,6 @@ function onMenuAct(name: string): void {
 .node__name {
   flex: 1;
   min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
 }
 
 /* ---------- 文件行 ---------- */
@@ -462,9 +456,6 @@ function onMenuAct(name: string): void {
 .raw-item__name {
   flex: 1;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   color: var(--ink);
   font-size: var(--fs-body);
 }

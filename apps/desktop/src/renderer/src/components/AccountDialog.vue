@@ -192,8 +192,8 @@ async function signOut(): Promise<void> {
             <el-icon><User /></el-icon>
           </el-avatar>
           <span class="row__text">
-            <span class="row__name">{{ accountLabel(account) }}</span>
-            <span class="row__meta">{{ account.login }} · {{ AUTH_PROVIDER_LABELS[account.provider] }}</span>
+            <span class="row__name truncate">{{ accountLabel(account) }}</span>
+            <span class="row__meta truncate">{{ account.login }} · {{ AUTH_PROVIDER_LABELS[account.provider] }}</span>
           </span>
         </div>
         <el-button size="small" @click="signOut">
@@ -303,17 +303,11 @@ code.mono {
   font-size: var(--fs-body);
   font-weight: 600;
   color: var(--ink);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .row__meta {
   font-size: var(--fs-micro);
   color: var(--ink-3);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /* ---------- 等待授权 ---------- */

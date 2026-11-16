@@ -58,6 +58,10 @@ export const eventsApi = {
   onMailNotifyClick: (handler: Parameters<WorkbenchApi['onMailNotifyClick']>[0]) =>
     events.subscribe('mailNotifyClick', handler),
 
+  /** 后台监视每轮的收件箱未读摘要：导航栏邮箱角标据此计数（过滤在 store 里做） */
+  onMailUnread: (handler: Parameters<WorkbenchApi['onMailUnread']>[0]) =>
+    events.subscribe('mailUnread', handler),
+
   /** 把用户的选择回传后端：后端在另一个线程里等着它决定「停进程还是留着」 */
   respondQuitConfirm: (choice: Parameters<WorkbenchApi['respondQuitConfirm']>[0]) => {
     void invoke('resolve_quit_choice', { choice })

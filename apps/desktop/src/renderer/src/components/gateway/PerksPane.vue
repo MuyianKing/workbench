@@ -417,7 +417,7 @@ onMounted(() => {
           </span>
           <div class="perks__cell-body">
             <span class="perks__label">Buddy 加油站</span>
-            <span class="perks__value" :class="cnCheckinTone">{{ cnCheckinText }}</span>
+            <span class="perks__value truncate" :class="cnCheckinTone">{{ cnCheckinText }}</span>
           </div>
         </div>
         <div class="perks__cell is-streak" title="当前汇总账号的 Buddy 加油站签到；成长连登另计">
@@ -426,7 +426,7 @@ onMounted(() => {
           </span>
           <div class="perks__cell-body">
             <span class="perks__label">Buddy 签到连签</span>
-            <span class="perks__value">{{ checkin.currentStreak }} 天</span>
+            <span class="perks__value truncate">{{ checkin.currentStreak }} 天</span>
           </div>
         </div>
         <div class="perks__cell is-muted">
@@ -435,7 +435,7 @@ onMounted(() => {
           </span>
           <div class="perks__cell-body">
             <span class="perks__label">成长补签卡</span>
-            <span class="perks__value">{{ summary.makeupCards }} 张</span>
+            <span class="perks__value truncate">{{ summary.makeupCards }} 张</span>
           </div>
         </div>
         <div class="perks__cell is-warn">
@@ -444,7 +444,7 @@ onMounted(() => {
           </span>
           <div class="perks__cell-body">
             <span class="perks__label">成长抽奖次数</span>
-            <span class="perks__value">{{ summary.lotteryChances }} 次</span>
+            <span class="perks__value truncate">{{ summary.lotteryChances }} 次</span>
           </div>
         </div>
         <div class="perks__cell is-cat">
@@ -453,7 +453,7 @@ onMounted(() => {
           </span>
           <div class="perks__cell-body">
             <span class="perks__label">猫猫旅行状态</span>
-            <span class="perks__value" :class="catState.tone">{{ catState.text }}</span>
+            <span class="perks__value truncate" :class="catState.tone">{{ catState.text }}</span>
           </div>
         </div>
         <div class="perks__cell is-energy">
@@ -462,7 +462,7 @@ onMounted(() => {
           </span>
           <div class="perks__cell-body">
             <span class="perks__label">成长能量余额</span>
-            <span class="perks__value">{{ summary.energy }}</span>
+            <span class="perks__value truncate">{{ summary.energy }}</span>
           </div>
         </div>
         <div class="perks__cell is-grant">
@@ -471,7 +471,7 @@ onMounted(() => {
           </span>
           <div class="perks__cell-body">
             <span class="perks__label">已获取福利总积分</span>
-            <span class="perks__value">{{ grantedText(granted) }}</span>
+            <span class="perks__value truncate">{{ grantedText(granted) }}</span>
           </div>
         </div>
       </div>
@@ -687,9 +687,6 @@ onMounted(() => {
   font-weight: 600;
   color: var(--ink);
   font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .perks__value.is-ok {

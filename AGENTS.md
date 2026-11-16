@@ -1,9 +1,10 @@
 # AGENTS.md
 
 本文件是 Workbench 的 AI Coding Agent 约束：只写跨模块的硬约束，一行一条，不写解释、不抄清单。
-每个模块一份文档在 [docs/modules/](docs/modules/) 下（开头「约束」一节是不能破的规矩、动手前先读，索引见第 5 节）；
-跨模块的通用事实在 [features-and-architecture.md](docs/features-and-architecture.md)（**联网、弹层、目录结构这三块的细则只在
-它的「数据与隐私」与「功能」两节，动到再读它**，本文件只留闸门）；动手方法与踩坑见 [docs/dev-notes/](docs/dev-notes/)，
+每个模块一份文档在 [docs/modules/](docs/modules/) 下（「约束」开口那段**红线**动手前先读，下面按主题分了小节、
+改到哪块读哪块，索引见第 5 节）；
+跨模块的通用事实从 [features-and-architecture.md](docs/features-and-architecture.md) 进门（**联网 → [privacy.md](docs/privacy.md)、
+弹层与页面口径 → [features.md](docs/features.md)、目录 → [directory.md](docs/directory.md)，动到再读**，本文件只留闸门）；动手方法与踩坑见 [docs/dev-notes/](docs/dev-notes/)，
 通用知识库的位置见 [AGENT-DOC.md](AGENT-DOC.md)。
 第 0 节为跨项目通用约束，第 1 节起为本项目专属，冲突时以后者为准。
 
@@ -27,9 +28,10 @@
 
 - 定位：Windows 桌面应用（Tauri 2 + WebView2），一个窗口里管项目、记工作、写笔记、看 AI 用量；pnpm workspace monorepo
   （应用在 `apps/desktop/`，纯逻辑按域拆在 `packages/` 的 19 个 `@workbench/*` 包，见第 2 节），`Cargo.lock` 要提交；
-  例外：`vendor-pi.mjs` 内部装 Pi 仍走 `npm install`（`resources/pi/` 要整树打进安装包，不能用符号链接布局）。
+  例外：`apps/desktop/scripts/vendor-pi.mjs` 内部装 Pi 仍走 `npm install`（`apps/desktop/resources/pi/` 要整树打进安装包，
+  不能用符号链接布局）。
 - **联网边界：默认不联网、不上报任何数据；出口只有十四条，且都由用户显式开启** —— 清单与每条细则见
-  [features-and-architecture.md](docs/features-and-architecture.md) 的「数据与隐私」一节，**动联网代码前先读那一节**。
+  [privacy.md](docs/privacy.md)，**动联网代码前先读它**。
   **不要新增网络出口、不往任何第三方服务发数据**；笔记里的外链图片、密码保险库（推的是用量同步那个仓库的 `vault/vault.json`，
   推上去的只有密文）都**不算**新出口；构建期内嵌 OAuth client_id/secret 与用户指定的禅道个人凭据是明确例外，后者不得随包分发。
 - 引新前端依赖先看它会不会在**运行时**去取外面的资源（Vditor 就是这类：资源按 `options.cdn` 取，默认指 unpkg）—— 这类要么把资源
@@ -62,7 +64,8 @@
 - 测试用 Vitest（各包子目录里的 `vitest.config.ts` 是配置来源；根目录 `pnpm test` 走根 `vitest.config.ts` 的
   `test.projects`，把 20 个项目收进**一个** vitest 进程跑全量 —— 别退回 `pnpm -r test`；渲染层用例在
   `@workbench/desktop` 包里）+ `cargo test`（写在同文件的 `#[cfg(test)] mod tests`）。
-  **TypeScript 锁 6.0.x、vue-tsc 3.3.x**：vue-tsc 还跑不了 TS 7，别升 7。
+  **TypeScript 锁 6.0.x、vue-tsc 锁 3.3.13**：vue-tsc 还跑不了 TS 7，别升 7；3.3.14 的模板 dot-value 断言会把
+  以 `Record<…>` 常量做下标的表达式误判成缺 `.value`（`AccountDialog.vue` 三处 TS2339），先停在 3.3.13。
 - 仅 Windows，不做 macOS / Linux 适配。
 
 ## 2. 文件落位
@@ -70,13 +73,13 @@
 - 总览：monorepo。桌面应用自包含在 `apps/desktop/` —— Rust 在 `src-tauri/src/`、渲染层在 `src/renderer/src/`（组件 `components/`、
   store `stores/`、交互骨架 `composables/`、适配层 `workbench/`、设计令牌与全局样式 `styles/`）、随包资源 `resources/`、构建脚本 `scripts/`；
   跨页面复用的类型 / 契约 / 纯逻辑按域拆在 `packages/` 的 19 个 `@workbench/*` 包里（`core` 是平台原语，其余按业务域；
-  逐包逐文件分工见 [features-and-architecture.md](docs/features-and-architecture.md) 的「目录结构」）。
+  逐包逐文件分工见 [directory.md](docs/directory.md)）。
 - **渲染层有六个 HTML 入口**（`src/renderer/` 下 `vite.config.ts` 的 `rollupOptions.input`；
-  清单见 [features-and-architecture.md](docs/features-and-architecture.md) 的「目录结构」）：
+  清单见 [directory.md](docs/directory.md)）：
   除主界面 `index.html` 外，**后五个是独立窗口、各自的 JS 上下文，只装适配层，不装 store、不 initState**
   —— 装了会与主窗口抢着读 / 写同一批数据文件（各窗口细则见 [screenshot.md](docs/modules/screenshot.md)、
   [float-ball.md](docs/modules/float-ball.md)、[video.md](docs/modules/video.md)、[notes.md](docs/modules/notes.md)）。
-- **禅道不在应用里打开**：顶栏右侧那颗图标（通知点击也走它）把配置里的部署根交给系统默认浏览器；
+- **禅道不在应用里打开**：顶栏右侧那颗图标（通知点击也走它）把配置部署根下的「我的地盘」（my.html）交给系统默认浏览器；
   应用里不做禅道页签、不嵌 iframe，也不再建独立窗口。浏览器里没有应用的登录态：
   **不做自动登录、不把账号密码拼进地址**，网页登录由用户自己登一次；应用发出的请求仍只读，
   细则见 [zentao.md](docs/modules/zentao.md)。

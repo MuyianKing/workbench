@@ -298,7 +298,7 @@ async function removeActive(): Promise<void> {
     <div v-if="store.activeSkill" class="detail">
       <header class="detail__head">
         <div class="detail__identity">
-          <h2 class="detail__name">
+          <h2 class="detail__name truncate">
             {{ store.activeSkill.name }}
           </h2>
           <span class="detail__id mono" :title="store.activeSkill.id">
@@ -331,11 +331,11 @@ async function removeActive(): Promise<void> {
             有 {{ updates.length }} 个项目里的副本和库不一样：
           </span>
           <div v-for="update in updates" :key="update.project" class="detail__update">
-            <span class="detail__update-name" :title="update.project">
+            <span class="detail__update-name truncate" :title="update.project">
               {{ projectNameOf(update.project) }}
             </span>
             <!-- 摘要是「版本 + 差异」拼出来的一句，窄窗下会被截断：全名挂在原生 title 上 -->
-            <span class="detail__update-hint" :title="updateHint(update)">{{ updateHint(update) }}</span>
+            <span class="detail__update-hint truncate" :title="updateHint(update)">{{ updateHint(update) }}</span>
             <el-button size="small" text @click="openCompare(update)">
               查看差异
             </el-button>
@@ -374,7 +374,7 @@ async function removeActive(): Promise<void> {
             ? '保存 = 记一个版本（frontmatter 需带语义化 version，如 1.0.0）'
             : '保存附属文件 = 记一个版本' }}{{ versionHint }}
         </span>
-        <span v-if="store.saveError" class="detail__error">{{ store.saveError }}</span>
+        <span v-if="store.saveError" class="detail__error truncate">{{ store.saveError }}</span>
         <span v-else class="detail__saved">{{ savedText }}</span>
         <el-button
           type="primary"
@@ -429,9 +429,6 @@ async function removeActive(): Promise<void> {
 
 .detail__name {
   margin: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   color: var(--ink);
   font-size: var(--fs-title);
 }
@@ -471,9 +468,6 @@ async function removeActive(): Promise<void> {
 }
 
 .detail__update-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   color: var(--ink);
   font-size: var(--fs-micro);
   font-weight: 600;
@@ -482,9 +476,6 @@ async function removeActive(): Promise<void> {
 .detail__update-hint {
   flex: 1;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   color: var(--ink-3);
   font-size: var(--fs-micro);
 }
@@ -543,9 +534,6 @@ async function removeActive(): Promise<void> {
 
 .detail__error {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   color: var(--st-fail);
   font-size: var(--fs-micro);
 }

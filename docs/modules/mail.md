@@ -10,6 +10,21 @@ WinRT FFI）、`apps/desktop/src/renderer/src/workbench/mail.ts`（适配）、
 `apps/desktop/src/renderer/src/stores/mail.ts`（缓存与策略）。
 跨模块通用事实见 [features-and-architecture.md](../features-and-architecture.md)，红线见 [AGENTS.md](../../AGENTS.md)。
 
+**先读这一段就够了**——下面十条红线，破一条就是 bug；每条的依据与边界在下面按主题分的七节里，改到哪块读哪块。
+
+- 地址留空 = 整条出口关闭；填了才连用户自己配的那两台，主机名不设白名单。
+- 授权码只进凭据管理器，绝不落 JSON、绝不回渲染层。
+- Rust 只做传输，MIME / 编码 / 展示拆解全在 TS。
+- 两个逻辑文件夹（收件箱 / 已发送），服务器名靠 `\Sent` 认；发件箱只读、不发 APPEND。
+- 连接现连现断，后台只有邮件监视这一条。
+- HTML 正文走 sandbox iframe：脚本全禁；附件那档给脚本但**绝不能给 `allow-same-origin`**。
+- 外链图片放行（CSP `img-src *` + no-referrer），其余外链资源一律掐死。
+- 广告识别：误伤一封真信比放过一封广告难看得多，用户标记远在前。
+- 大小上限两侧同源（发信 30 MB、拉正文 24 MB），改就两边一起改。
+- PDF 自己用 pdf.js 画，不改 iframe / embed，也不为它开 `wasm-unsafe-eval`。
+
+### 出口与凭据
+
 - **第十条出口，「地址由用户给」**：地址留空 = 整条出口关闭；填了地址（且授权码进凭据管理器）才连**用户配置的那两台**
   收发服务器，主机名不设白名单 —— 与 AI 助手的 Base URL 同类。**外链图片跟着信里的地址加载**（营销信主视觉可见，
   请求不带 Referer —— htmlBody 注入 CSP `img-src *` + no-referrer，iframe 再补 `referrerpolicy`），脚本 / 字体 /
@@ -22,6 +37,9 @@ WinRT FFI）、`apps/desktop/src/renderer/src/workbench/mail.ts`（适配）、
 - **通讯录只住本机、不进任何出口**：联系人（名字 + 地址）住 `settings.mailContacts` 明文 JSON（不进凭据管理器、
   不参与外观同步、不发往任何服务器），形状与收敛在 packages/mail/src/contacts.ts（地址是身份，按地址去重）。
   **别把它接进同步仓库、也别为它加接口** —— 只服务写信时的收件人下拉。
+
+### 账户与文件夹
+
 - **多账户**：账户是一份清单（`settings.mailAccounts`，上限 5 —— 逐项收敛、按地址去重，没地址的半截丢掉），
   当前文件夹里各账户合并成**一条按时间排的时间线**（按头部日期新在前，不按来源分组），每封摘要带来源账户：多账户时
   清单行标 `accountTag`（本地部分 + 域名第一段）、阅读栏标全地址，只有一个账户时什么都不标。清单操作都认
@@ -35,25 +53,40 @@ WinRT FFI）、`apps/desktop/src/renderer/src/workbench/mail.ts`（适配）、
   存一份，客户端再塞一次会出两封，所以发件箱只读。
 - **已读标记只对收件箱发**：发件箱的信本来就读过，别白写一趟服务器；界面也不画未读点、不摆「标记未读」，右键菜单
   里广告与已读两项都不出现（那儿的发件人是自己）。
+
+### 职责切分与 MIME
+
 - **职责切分：Rust 只做传输，邮件语义全在 TS**：Rust 按「现连现断」跑 IMAP/SMTP 命令子集，回结构化摘要与原始报文
-  （base64）；MIME 解析（postal-mime 包装）、发信报文构建（buildMime）、RFC 2047、展示拆解全在 @workbench/mail。
-  不要往 Rust 侧加 MIME / 编码逻辑。
+  （base64）；MIME 解析（postal-mime 包装）、发信报文构建（buildMime）、RFC 2047、展示拆解全在 @workbench/mail
+  （字节级的 base64 工具在 `@workbench/core` 的 `base64.ts`，mail 的桶照旧 re-export）。不要往 Rust 侧加 MIME / 编码逻辑。
 - **附件名：两份参数都在时认 RFC 2231 的扩展那份**（`filename*=` / `name*=`）。postal-mime 口径正相反 —— 同名纯参数
   优先（它 decodeParameterValueContinuations 里那条守卫，changelog 4.0.3 明说的），于是自己发的
   `filename="__ DOCX __.docx"; filename*=utf-8''…` 读回来只剩那串下划线，中文名全成 `__`。所以 `parseMessage` 在把
   字节递给它前先跑 `preferExtendedFilenames`（摘掉同名纯参数、只摘这两行头，报文体一个字节不碰）。**别摘这一层**，
   也别把纯参数写回去 —— 只有扩展参数的来信（大多数客户端）本来就解得对。
+
+### 连接策略
+
 - **网易 IMAP 必须先报身份**：不发 `ID` 命令，SELECT 直接 `Unsafe Login` 闭门羹（rust-imap 不支持这条，这就是手写
   协议子集的原因）。流程是 LOGIN 后发 ID、SELECT 被拒且错误带 Unsafe 时补发 ID 重试一次。改这段别把 ID 弄丢。
 - **连接现连现断，后台只有一件事**：进页面 / 手动刷新 / 发信 / 切文件夹各是一次独立连接，不缓存到磁盘（正文按
   (文件夹, 账户, uid) 缓存在页面会话内存）；后台**只**有邮件监视这一条。明确不做任意文件夹、邮件搜索、STARTTLS
   （只用隐式 TLS 端口 993 / 465）。
+
+### 后台监视与通知
+
 - **后台监视（mail_watch.rs）**：配了账户（渲染层 `startWatch` 登记）就按登记周期对每个账户现连现断查一轮**收件箱**
   最近 50 封摘要（只查收件箱 —— 新邮件提醒跟自己发的信没关系）—— 周期是 `mailPollMinutes`（默认 30，下限 5 / 上限
   24 小时，0 = 关闭；账户弹层末尾「新邮件检查」下拉改，改了立即重登）。判「基准之后到达且**未读**」的新信，判定
   刻意保守：手机读过的不再吵；广告黑名单（`mailBulkSenders`，用户亲手标的）里的不弹；`isBulkMail` 的完整启发式不在
   这里重复。UID 基准连同 UIDVALIDITY 落 `data/mail-watch.json`（只是通知记账，不进同步仓库；丢了无非多弹或少弹一条）。
   轮询放 Rust：窗口收进托盘后 WebView 定时器会被节流。清单为空 = 监视空转。
+- **导航栏角标只算正常邮件**：后台监视每轮把各账户收件箱的**未读摘要**推给渲染层
+  （`mail:unread`，只带 uid / 主题 / 发件人，另带本轮**开始取数**的 `checkedAt`），渲染层按与清单同一套
+  `isBulkMail` 过滤后计数 —— **推广段与黑名单发件人不计入**（广告识别启发式不搬进 Rust）。登记时账户清单变了或监控
+  从关到开**立刻补查一轮**（`refresh_now`），否则角标要等满一个周期才出现；`checkedAt` 比本地读信 / 删信 / 清单同步
+  更早的结果整批丢弃，防止慢半拍的轮询把刚读完的信刷回未读。角标只覆盖最近 50 封窗口；监控周期设成 0 时没有后台来源
+  （进过邮箱页 / 手动刷新之后才更新）。
 - **系统通知（notify.rs）是手写 WinRT toast**：不给 tauri-plugin-notification 那串新编译单元开口子 —— 与 Schannel /
   Hello 同一条口径，只给已有的 `windows` crate 加 feature。非打包应用弹 toast 的前提是开始菜单有挂 AUMID 的快捷方式：
   安装器建的那条自带 identifier（tauri-bundler 模板的 `${BUNDLEID}`），dev / 便携由 `ensure_aumid_shortcut` 补。
@@ -65,6 +98,9 @@ WinRT FFI）、`apps/desktop/src/renderer/src/workbench/mail.ts`（适配）、
   0 = 禁），注册表 `HKCU\...\Notifications\Settings\<AUMID>` 的 `Enabled` 只是镜像 —— 只改镜像平台不认。notify.rs
   弹前用 `ToastNotifier.Setting` 自查，被禁给出指路「设置 > 系统 > 通知」的报错而不是静默。ZCode 的通知能用不是因为
   代码不同（同为系统 toast），是它的 `s:toast` 没被关过。
+
+### HTML 正文与附件（沙箱）
+
 - **HTML 正文渲染是 sandbox iframe**：脚本、同源、表单、弹窗全禁（只放行 `allow-top-navigation-by-user-activation`）
   —— 与 AI 预览栏（AiPreviewHtml.vue）同一条硬边界：邮件 HTML 绝不能在带宿主能力的 webview 里执行。没有 HTML 正文
   时按纯文本排版，两者不混（纯文本那档走 `--ink`，明暗跟着主题走，不用另做）。
@@ -99,6 +135,9 @@ WinRT FFI）、`apps/desktop/src/renderer/src/workbench/mail.ts`（适配）、
   `margin: var(--el-dialog-margin-top, 15vh) auto 50px`，15vh + 整屏高 + 50px 一定撑破视口，对话框就成了「比窗口还高」
   那个 —— 页脚「关闭 / 另存为」要滚遮罩才看得见（2026-10-16 用户截图里就是这样）。上边距小于标题栏高度会被浮在遮罩
   之上的标题栏压住，所以取 `var(--h-titlebar)`。md / docx / pptx / pdf 四档照旧按文稿一页定宽 920px、EP 原边距。
+
+### 上限与 PDF 画法
+
 - **大小上限两侧同源**：发信 30 MB（`mime.ts` 的 `MAX_MESSAGE_BYTES` = Rust `mail.rs` 的 `MAX_MESSAGE_BYTES`，构建
   这一步就拦）、拉正文 24 MB（与 AI 预览栏二进制同一口径）。改就两边一起改。
 - **PDF 在页面里自己画**（`PdfPreview.vue`，pdf.js / `pdfjs-dist`）：**不要改成 iframe 或 embed 内嵌系统查看器** ——
@@ -110,6 +149,8 @@ WinRT FFI）、`apps/desktop/src/renderer/src/workbench/mail.ts`（适配）、
   `WebAssembly.instantiate` 抛错由 pdf.js 自己吞掉、退回 JS 解码（实测通）。密码保护的 PDF 打不开（就地说一句）。
 
 ## 实现
+
+### 页面、清单与空态
 
 - **页面**（MailView.vue）：左清单右阅读（与 AI / 笔记 / 视频页同一副外壳），左栏宽度住 theme.json 的 `mailListWidth`
   （拖两栏之间的缝改，PanelResizer 三段式：只改本地、松手落盘）。**左栏头部是一颗分段选择器**（`el-segmented`，
@@ -138,6 +179,9 @@ WinRT FFI）、`apps/desktop/src/renderer/src/workbench/mail.ts`（适配）、
   缺省态，右栏裸压画布 + 居中空态、白色文字（ink），与技能 / Git 的整页空态同一待遇（2026-11 用户定）。
   **未配置时整个左栏不存在**（MailView 只渲染阅读栏，清单与分隔条都不出、grid 收成一列）—— 缺省态就是页面上唯一的
   内容；「未配置」分支排在阅读栏各态最前，联系人签残留（账户被移除时）也盖不住配置入口。
+
+### 读信与附件
+
 - **读信**：点清单行 → `mail.openMail(item)` → 高亮（`activeKey`）在点击那一刻切，正文缓存查一次，有就开；没有才
   `mail_fetch_body`（base64 回来；收件箱顺带标已读，发件箱不标）→ `parseMessage` 拆成文本 / HTML / 附件 / 内联图
   （**缓存里存的是解析件**）；沙箱文档（注入 CSP、cid 换 data URL、链接统一 `target="_top"`、暗色整页反色）由
@@ -149,8 +193,8 @@ WinRT FFI）、`apps/desktop/src/renderer/src/workbench/mail.ts`（适配）、
   + 右端一颗另存图标」拼的 —— 按钮不能套按钮，另存留外层）—— 图进 EP 的 `el-image-viewer`（页面持一个实例：该封里
   所有图左右切、滚轮缩放、Esc 或点外面关，`teleported` 才不会被子栏 overflow 裁掉）；**md / html / docx / pptx / pdf
   进预览弹层**（MailAttachmentDialog：md 借 MarkdownView、html 借 sandbox iframe、docx 借 AiPreviewDoc、pptx 借
-  AiPreviewSlides、pdf 借 PdfPreview —— 五件都只吃 base64、都在浏览器里画、都不出网，pptx 的 pdfjs 兜底在那边显式
-  关着）；应用里画不了的（压缩包 / 老式 .doc .ppt）整片点开就是「另存为」（pickSavePath 挑路径 + `mail_attachment_save`
+  AiPreviewSlides、pdf 借 PdfPreview —— 五件都只吃 base64、都在浏览器里画、都不出网，pptx 的 pdf.js 兜底与外部媒体在那边显式
+  关着（`pdfjs: false` / `externalMedia: 'block'`））；应用里画不了的（压缩包 / 老式 .doc .ppt）整片点开就是「另存为」（pickSavePath 挑路径 + `mail_attachment_save`
   落盘，与 vault_key_export 同一个信任模型）。**html 那一档在弹层里是会跑的页面**（脚本放行，边界见「约束」），弹层
   **按类型定尺寸**：html 近满屏、整页铺满（`--wide`），其余四档按文稿一页定宽 920px。片子的样子：左首一块**定宽小方块**
   —— 图给缩略图、认得出的五种给一枚**按类型着色的图标**（PDF 红 / Word 蓝 / 幻灯片橙 / Markdown 紫 / 网页青，色阶只
@@ -159,6 +203,9 @@ WinRT FFI）、`apps/desktop/src/renderer/src/workbench/mail.ts`（适配）、
   **md 是唯一一处把邮件内容画进宿主 webview 的地方**（html 进的是沙箱 iframe）：走 markdown-it（`html: false`，原文
   标签早被转义，v-html 拿到的是安全片段），正文外链图片跟着信里写的地址加载 —— 与 HTML 正文那条口子同一个口径，
   别在这条路上放脚本。
+
+### 删除与多选
+
 - **删除（右键入口，多选态勾选）**：右键「多选删除」是入口 —— 把右击的这封勾进批次的同时进入**多选态**（Ctrl+点选 /
   Shift+点范围 / Ctrl+A 也进）：每封左侧亮出复选框（**不常驻**），点行从「开信」变成「勾 / 撤」（Shift 从锚点整段勾），
   清单上方出一条「已选 N 封」——删除（确认框过一道，只删此刻看得见的勾选）与取消。**多选态是显式开关，不跟勾选数走**：
@@ -169,6 +216,9 @@ WinRT FFI）、`apps/desktop/src/renderer/src/workbench/mail.ts`（适配）、
   是**所有**带 \Deleted 的信 —— 本命令每次独立连接、只标这一批，所以只收它们；单封也走它）；勾选跨账户时 store 按
   (文件夹, 账户) 分组，一个账户一条连接，某个账户失败只记一句话、其余照删。删成后清单就地摘掉、正文缓存扔掉、正在
   读的关掉，不等下次刷新；删中那几行变淡转圈接不住点。推广段收着时看不见的行不参与勾选与删除。
+
+### 账户、写信与通讯录
+
 - **账户弹层**（MailAccountDialog.vue，penetrable）：上半是已配账户清单（逐个「编辑 / 删除」，可同时配多个，上限 5），
   下半是表单 —— 新增一个或编辑选中的。末尾隔一条细线是全局项「新邮件检查」（`mailPollMinutes`，下拉：关闭 / 每 1..60
   分钟）—— 后台监视周期，改了立即落盘并重登，不进「验证并保存」链路。平常只有地址与授权码两样 —— 163 / 126 / QQ
@@ -190,15 +240,20 @@ WinRT FFI）、`apps/desktop/src/renderer/src/workbench/mail.ts`（适配）、
 - **通讯录**（左栏「联系人」签 + MailContactEditDialog.vue / MailContactMenu.vue；数据住 `mailContacts`）：一份
   **只住本机的小名单**，形状与收敛在 contacts.ts（`MailContact` = 名字 + 地址，**地址就是身份**：按地址去重、
   `sanitizeMailContacts` 丢没有地址的、上限 500；**不参与外观同步、不进任何出口、不碰服务器** —— 与 `mailBulkSenders`
-  同待遇）。**名单就是左栏那一签**：一行一个人 —— 名字（没名字就摆地址，两者相同时不重复画）＋ 地址，**行上不带按钮**：
+  同待遇）。**名单就是左栏那一签**：一个人一张小卡片 —— 左侧首字头像（与 MailListRow 共用 MailAvatar.vue：
+  按名字散到八档柔和色、暗色换深底浅字），右侧两行「名字 / 地址」（没名字时主行摆地址、两者相同时不重复画；
+  地址用等宽小字），名单顶上只报一句「N 位联系人」。**行上不带按钮**：
   编辑与删除收在右击弹出的 MailContactMenu（与邮件清单行右键菜单同一副外壳：位置贴指针、夹回窗口、左键点别处 / Esc
-  收起），空名单一句「还没有联系人」，删除中那行变淡转圈。右栏在那一签空着（`mail.tab === 'contacts'` 分支），头部
+  收起），空名单一句「还没有联系人」，删除中整行变淡转圈。右栏在那一签空着（`mail.tab === 'contacts'` 分支），头部
   右端那颗面板级动作从「刷新」换成「**新增联系人**」（只在自己那一签出现）。**新增与编辑都开小弹窗**
   （MailContactEditDialog，penetrable）：名字（可留空）＋ 邮箱地址两栏，编辑时地址锁死 —— 换地址走「删除 + 新增」
   （与邮箱账户同口径），新增撞上已有地址就地说一句；保存后关掉。**删除不做确认框**（名单少一条随时能加回来），失败
   才飘错误。另一个入口是清单行右击「**存为联系人**」（MailContextMenu 首项）—— 存的是这行的**对方**（收件箱看发件人
   `senderAddress` / 显示名 `displaySender`，发件箱看收件人 `recipientAddress` / `recipientDisplay`，群发只认头一个），
   已在名单里时变「移出联系人」（与「标记为广告」同一种两态写法）；信里没写名字（展示出来就是地址）时只存地址。
+
+### 取数与筛选
+
 - **列表摘要的来路**：Rust 按序号区间拉最近 N 封的 `UID FLAGS BODY[HEADER.FIELDS
   (FROM TO SUBJECT DATE)] BODYSTRUCTURE`，
   ENVELOPE 不用 —— 头部四件套是原始文本，拆解（编码词 / 名字与地址 / 日期）全在 TS。收件人（TO）收件箱用不上，
@@ -214,18 +269,30 @@ WinRT FFI）、`apps/desktop/src/renderer/src/workbench/mail.ts`（适配）、
   **不进收件箱清单** —— 收进清单底部分开的一段（「推广邮件 N 封」，数字收在小胶囊里；默认折叠，展开也是自己一段、
   不与正常邮件混排），勾选 / 删除 / 右键与正常邮件同一套。**发件箱不筛广告**（发件人是自己，按发件人判没道理，右键
   也没有那项）。改词表要连着 mail.test.ts 的口径一起过。
+
+### 后台监视与角标
+
 - **后台监视的链路**：App.vue 挂载时 `mail.startWatch()` → `mail_watch_register`（账户 + 黑名单 + 周期，内容签名比对，
   变了才重登）→ Rust 的 `mail-watch` 线程每分钟醒一次、距上轮满登记的周期才查（失败也记账，等下一个周期，不把服务器
   摁着打）。第一轮只立基准不弹（UID 序列还没对上号）；通知正文是「账户有 N 封新邮件」，不解读主题 —— RFC 2047 解码
   在 TS，Rust 不复做一份；提示音显式挂系统的 `ms-winsoundevent:Notification.Mail`。`refreshList` 的并发调用共享在途的
   同一个 Promise（页面挂载与通知点击可能前后脚各调一次）。
-- **测试**：@workbench/mail 的 67 个用例（收敛 / 编码词 / 报文构建 / 解析与沙箱正文 / **清单日期** / 附件的打开方式
+- **导航栏角标**（`NavRail.vue` 的邮箱项 + `components/UnreadBadge.vue`；状态在 `stores/mail.ts` 的 `unread`）：
+  账本是各账户收件箱**未读摘要**的集合（`{uid, subject, from}`），计数时逐条过 `isBulkMail`（`countUnreadMails`）——
+  所以「标记为广告」一改，角标立刻掉、不必等下一轮。来源两路：后台推送的 `mail:unread`（`startWatch` 里
+  `onMailUnread` 订阅）与进页面 / 刷新的清单（按 `!seen` 重建；取数失败的账户保留上一轮）。打开未读信、标已读、
+  删信就地摘掉，标回未读补回；触到本地的动作都记时刻，比它更早开始取数的后台结果不再采用。
+
+### 测试
+
+- **测试**：@workbench/mail 的 71 个用例（收敛 / 编码词 / 报文构建（含 HTML 的 alternative 档）/ 解析与沙箱正文 / **清单日期** / 附件的打开方式
   （含 pdf / html 两档）、类型图标 / 角标与图片判定、每类的着色（`attachmentTint`）/ HTML 附件的预览文档（沙箱头 /
   没有 head 的片段 / 链接改写 / 声明字符集解码 / **放行内联脚本而不放行任何外链脚本**）/ **正文那一档照旧一行脚本
   都不跑** / **附件名归一（含「自己发的信读回来是原名」整条路）** / 广告识别 / 收件人列表拆解）；mail.rs 的
   `#[cfg(test)]`（字面量标记 / 括号项解析 / 头部折叠展开 / EXISTS / UIDVALIDITY / **文件夹：LIST 解析（引号串与字面量
   两种名字）、`\Sent` 属性与候选名取舍、逻辑名收敛** / 点填充 / SMTP 多行应答 / 参数收敛）；mail_watch.rs 的
-  `#[cfg(test)]`（新邮件判定：基准 / 未读 / UIDVALIDITY 换茬 / 黑名单 / 高水位不倒退 / 发件人地址拆解）；notify.rs 的
+  `#[cfg(test)]`（新邮件判定：基准 / 未读 / UIDVALIDITY 换茬 / 黑名单 / 高水位不倒退 / 发件人地址拆解 /
+  角标未读摘要 / 登记补查的时机）；notify.rs 的
   `#[cfg(test)]`（XML 转义 / PKEY 常量）。协议层没有真连接测试 —— 改收发流程要拿真邮箱跑一遍（见 AGENTS.md 第 6 节
   的验证脚本），**认已发送文件夹这件事尤其要在网易与腾讯两边的真账户上各跑一次**（`\Sent` 报不报、名字是哪种写法
   只有真连才知道）。
@@ -242,7 +309,8 @@ apps/desktop/src-tauri/src/mail.rs
   管理器）；网易 IMAP 要先发 ID 命令（否则 SELECT 报 Unsafe Login），见模块文档「约束」
 apps/desktop/src-tauri/src/mail_watch.rs
   邮件后台监视：按设置周期（mailPollMinutes）的**收件箱**新邮件检查（UID 基准 + 未读 + 黑名单，进度落
-  mail-watch.json）+ 弹系统通知；账户清单由渲染层 mail_watch_register 登记
+  mail-watch.json）+ 弹系统通知 + 每轮推 `mail:unread`（各账户未读摘要，导航栏角标用）；
+  账户清单由渲染层 mail_watch_register 登记，清单变化 / 从关到开时立刻补查一轮
 apps/desktop/src-tauri/src/notify.rs
   Windows toast 的手写 WinRT FFI：ToastNotificationManager + AUMID 快捷方式
   （安装器建的那条自带 identifier，dev/便携由 ensure_aumid_shortcut 补），
@@ -256,8 +324,10 @@ apps/desktop/src/renderer/src/workbench/mail.ts
   邮箱适配层：mail_* 命令的 invoke → Result 收敛（都带 folder 逻辑名）；MIME 解析与报文构建在 @workbench/mail
 apps/desktop/src/renderer/src/stores/mail.ts
   邮箱页状态：当前文件夹（收件箱 / 已发送）/ 列表 / 正文（按 (文件夹, 账户, uid) 的会话内存缓存）/
-  发送 / 后台监视的登记与通知点击
+  发送 / 后台监视的登记与通知点击 / 角标账本（unread）
   （startWatch）；拉取时机在这层
+apps/desktop/src/renderer/src/components/UnreadBadge.vue
+  未读角标（导航栏邮箱 / 顶栏禅道共用）：灰度小胶囊，0 不画、>99 收成 99+
 apps/desktop/src/renderer/src/components/MailView.vue
   邮箱页外壳：两栏布局（左栏宽度住 theme.json 的 mailListWidth）、拉列表时机与那几个弹层
   （账户 / 写邮件 / 回复）；左栏与右栏的内容分别在同目录的 MailSidebar / MailReaderPane
@@ -277,7 +347,7 @@ apps/desktop/src/renderer/src/components/MailAttachmentDialog.vue
   其余四档页外不再堆一大片白，中间那块自己滚（global.css 的 .mail-preview-dialog 一组），
   脚上一个「另存为」
 apps/desktop/src/renderer/src/components/MailListRow.vue
-  邮件清单行：一行一张小卡片（首字头像 / 发件人旁的来源账户 / 短日期 / 附件回形针）；
+  邮件清单行：一行一张小卡片（首字头像走 MailAvatar.vue / 发件人旁的来源账户 / 短日期 / 附件回形针）；
   收件箱清单、推广邮件段与发件箱共用一副；发件箱里第一行摆收件人，多选态才亮复选框
 apps/desktop/src/renderer/src/components/MailAccountDialog.vue
   账户弹层：连接参数 + 授权码（凭据管理器），163/126 预设自动带出
@@ -285,7 +355,7 @@ apps/desktop/src/renderer/src/components/MailComposer.vue
   写信弹层：收件人 / 主题 / 正文 / 附件，回复预填
 apps/desktop/src/renderer/src/components/PdfPreview.vue
   PDF 画法：pdf.js 一页一页画到画布上（上下一颗按钮翻页）；cmaps / 标准字体 / wasm 随包带
-  （scripts/sync-pdfjs-assets.mjs → public/pdfjs/），别改成 iframe / embed
+  （`apps/desktop/scripts/sync-pdfjs-assets.mjs` → `public/pdfjs/`），别改成 iframe / embed
 ```
 
 域包：
@@ -296,7 +366,8 @@ packages/mail/src/mail.ts
 packages/mail/src/rfc2047.ts
   RFC 2047 编码词的解（B/Q、各字符集经 TextDecoder）与中文主题的 B 编码
 packages/mail/src/mime.ts
-  发信报文构建（multipart/mixed、RFC 2231 文件名、30 MB 上限）与附件的
+  发信报文构建（有 html 时正文是 multipart/alternative：纯文本 + HTML 两档；
+  附件另包 multipart/mixed、RFC 2231 文件名、30 MB 上限）与附件的
   Content-Type 猜测
 packages/mail/src/parse.ts
   postal-mime 包装（parseMessage，含附件名的归一 preferExtendedFilenames）、

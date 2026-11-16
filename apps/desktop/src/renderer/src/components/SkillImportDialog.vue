@@ -67,7 +67,7 @@ async function submit(): Promise<void> {
           <el-button @click="pick">
             选择文件夹…
           </el-button>
-          <span v-if="sourcePath" class="pick__path mono" :title="sourcePath">{{ sourcePath }}</span>
+          <span v-if="sourcePath" class="pick__path mono truncate" :title="sourcePath">{{ sourcePath }}</span>
           <span v-else class="pick__hint">整棵复制（含子目录），.git 等隐藏目录不带</span>
         </div>
       </el-form-item>
@@ -107,9 +107,6 @@ async function submit(): Promise<void> {
 
 .pick__path {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   color: var(--ink-2);
   font-size: var(--fs-micro);
 }

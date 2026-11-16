@@ -445,7 +445,7 @@ onBeforeUnmount(() => window.removeEventListener('dragend', onDragEnd))
             <Folder v-if="data.kind === 'folder'" />
             <Document v-else />
           </el-icon>
-          <span class="node__name">{{ data.name }}</span>
+          <span class="node__name truncate">{{ data.name }}</span>
         </span>
       </template>
     </el-tree>
@@ -603,12 +603,6 @@ onBeforeUnmount(() => window.removeEventListener('dragend', onDragEnd))
   flex-shrink: 0;
   font-size: 14px;
   color: var(--ink-3);
-}
-
-.node__name {
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
 }
 
 /* 选中态自己画（不用 el-tree 的 highlight-current）：它比悬停明确高一档，

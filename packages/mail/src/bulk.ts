@@ -67,6 +67,24 @@ export function sanitizeMailBulkSenders(value: unknown): string[] {
   return [...seen]
 }
 
+/**
+ * 收件箱角标数：**只数正常邮件** —— 未读且不是广告 / 营销（与清单同一套 isBulkMail 判法）。
+ * 推广段与黑名单发件人本来就被收在折叠的一段里，让它们把角标顶在那里、用户又清不掉，
+ * 比不显示更糟。传进来的是清单窗口里的摘要（收件箱最近 N 封），不是整个服务器的未读总数；
+ * `seen` 缺省按未读算（账本里只存未读，不必逐条带这个字段）。
+ */
+export function countUnreadMails(
+  mails: ReadonlyArray<BulkSignals & { seen?: boolean }>,
+  bulkSenders: readonly string[] = [],
+): number {
+  let count = 0
+  for (const mail of mails) {
+    if (mail.seen !== true && !isBulkMail(mail, bulkSenders))
+      count += 1
+  }
+  return count
+}
+
 /** 一条摘要是不是广告 / 营销邮件：黑名单说了算，其次才是启发式。 */
 export function isBulkMail(summary: BulkSignals, bulkSenders: readonly string[] = []): boolean {
   const address = senderAddress(summary.from).toLowerCase()

@@ -63,7 +63,7 @@ function onNodeClick(data: GitTreeNode): void {
 </script>
 
 <template>
-  <div class="tree-pane">
+  <div class="tree-pane page">
     <header class="tree-head">
       <span class="tree-head__title">文件</span>
       <el-input
@@ -108,7 +108,7 @@ function onNodeClick(data: GitTreeNode): void {
               <Folder v-if="data.type === 'dir'" />
               <Document v-else />
             </el-icon>
-            <span class="node__name">{{ data.name }}</span>
+            <span class="node__name truncate">{{ data.name }}</span>
             <span v-if="data.type === 'submodule'" class="node__badge">子模块</span>
           </span>
         </template>
@@ -119,11 +119,7 @@ function onNodeClick(data: GitTreeNode): void {
 
 <style scoped>
 .tree-pane {
-  display: flex;
-  flex-direction: column;
   min-width: 0;
-  min-height: 0;
-  height: 100%;
   padding: var(--sp-3);
 }
 
@@ -195,9 +191,6 @@ function onNodeClick(data: GitTreeNode): void {
 
 .node__name {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .node__badge {

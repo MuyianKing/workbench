@@ -75,10 +75,6 @@ function onCardPointerDown(event: PointerEvent): void {
   cursor: default;
 }
 
-.board-card.is-editing {
-  cursor: grab;
-}
-
 /* 内容撑满卡片（内部各面板自己决定怎么分配） */
 .board-card__body {
   display: flex;
@@ -94,7 +90,9 @@ function onCardPointerDown(event: PointerEvent): void {
   pointer-events: none;
 }
 
+/* 编辑态：整块都是拖动热区，并描一圈虚线提示当前能拖哪一张 */
 .board-card.is-editing {
+  cursor: grab;
   outline: 1px dashed var(--border-strong);
   outline-offset: -1px;
   border-radius: var(--r-lg);

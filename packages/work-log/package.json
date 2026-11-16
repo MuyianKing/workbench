@@ -10,7 +10,7 @@
     "@workbench/core": "workspace:*"
   },
   "devDependencies": {
-    "vitest": "^5.0.3"
+    "vitest": "^5.1.0"
   },
   "scripts": {
     "test": "vitest run",

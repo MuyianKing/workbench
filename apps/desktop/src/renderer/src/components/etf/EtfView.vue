@@ -145,7 +145,7 @@ onActivated(() => {
 </script>
 
 <template>
-  <section class="etf">
+  <section class="etf page">
     <div class="head panel">
       <div class="head__meta">
         <span class="head__date"><el-icon><Calendar /></el-icon>数据日 <b>{{ dataAsOfText }}</b></span>
@@ -185,11 +185,7 @@ onActivated(() => {
 /* 与网关页同一副页壳：整页滚动、每块 flex none 不被压；区块间距收紧一档（sp-2），
  * 这页块数多、每块都矮，sp-3 的缝会显出一截截空白 */
 .etf {
-  display: flex;
-  flex-direction: column;
   gap: var(--sp-2);
-  height: 100%;
-  min-height: 0;
   overflow: auto;
   padding: var(--sp-3);
 }

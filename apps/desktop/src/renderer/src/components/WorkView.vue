@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import type { ProjectColor } from '@workbench/core'
 import type { WorkLogEntry, WorkLogStatus, WorkRange, WorkRangeBounds, WorkSort } from '@workbench/work-log'
-import { ArrowDown, Download, Memo, Plus, Warning } from '@element-plus/icons-vue'
+import { ArrowDown, Download, Memo, Plus, Promotion, Warning } from '@element-plus/icons-vue'
 import { addDays, dayKey, markdownToPlainText, projectColorVar, sanitizeProjectColor } from '@workbench/core'
-import { dayMeta, defaultWorkRangeBounds, DELETED_PROJECT_ID, entriesOfDevice, groupByProject, isWorkSort, paginate, sanitizeWorkRange, sanitizeWorkRangeBounds, sanitizeWorkSort, timelineOf, WORK_PAGE_DAYS, WORK_RANGE_LABELS, WORK_RANGES, WORK_SORT_LABELS, WORK_SORTS, WORK_STATUS_DEFAULT, workLogDeviceLabel, workLogDevices } from '@workbench/work-log'
+import { dayMeta, defaultWorkRangeBounds, DELETED_PROJECT_ID, entriesOfDevice, groupByProject, isWorkSort, paginate, sanitizeWorkRange, sanitizeWorkRangeBounds, sanitizeWorkSort, timelineOf, WORK_PAGE_DAYS, WORK_RANGE_LABELS, WORK_RANGES, WORK_SORT_LABELS, WORK_SORTS, WORK_STATUS_DEFAULT, workLogDeviceLabel, workLogDevices, workLogToMarkdown } from '@workbench/work-log'
 import { ElMessage } from 'element-plus'
 import { storeToRefs } from 'pinia'
 /**
@@ -28,8 +28,10 @@ import PanelLoading from '@/components/PanelLoading.vue'
 import WorkLogCard from '@/components/WorkLogCard.vue'
 import WorkLogDialog from '@/components/WorkLogDialog.vue'
 import WorkLogGitDialog from '@/components/WorkLogGitDialog.vue'
+import WorkLogMailDialog from '@/components/WorkLogMailDialog.vue'
 import { confirmAction } from '@/notify'
 import { useAuthStore } from '@/stores/auth'
+import { useMailStore } from '@/stores/mail'
 import { useProjectsStore } from '@/stores/projects'
 import { useSettingsStore } from '@/stores/settings'
 import { useWorkLogStore } from '@/stores/work-log'
@@ -92,7 +94,7 @@ watch(
 )
 
 const page = ref(1)
-/** 当前时刻：决定「今天 / 本周 / 本月」的边界，也决定时间轴上的「今天」标记 */
+/** 当前时刻：决定「今天 / 本周 / 上周 / 本月」的边界，也决定时间轴上的「今天」标记 */
 const now = ref(Date.now())
 const dialogVisible = ref(false)
 const editing = ref<WorkLogEntry | null>(null)
@@ -290,6 +292,43 @@ const groups = computed(() =>
 /** 当前范围里的记录条数（不是栏数）：头部那个计数与分页都从它来 */
 const total = computed(() => sections.value.reduce((sum, group) => sum + group.entries.length, 0))
 
+// ---------- 发送到邮箱 ----------
+
+const mail = useMailStore()
+
+/**
+ * 「发送到邮箱」的快照：点按钮那一刻按屏幕上这份（当前设备、当前档位、当前维度）定稿，
+ * 弹窗开着期间再改数据也不影响这一封 —— 要发新的重新点一次就是。
+ * **只装已完成的记录**（待办不往外发，见 workLogToMarkdown）。
+ */
+const mailVisible = ref(false)
+const mailDraft = ref<{ from: string, subject: string, text: string, count: number } | null>(null)
+
+function openMail(): void {
+  // 发件账户取第一个就绪的：工作页不管账户怎么配，没配好就去邮箱页配
+  const account = mail.accounts[0]
+  if (!account) {
+    ElMessage.warning('还没有能发信的邮箱 —— 先到邮箱页把账户配好')
+    return
+  }
+  // 邮件只发已完成的记录（workLogToMarkdown 内部也滤一遍）；「待办」档整档都是待办
+  const doneEntries = visibleEntries.value.filter(entry => entry.status === 'done')
+  if (!doneEntries.length) {
+    ElMessage.info(range.value === 'todo' ? '待办都还没完成，邮件里只发已完成的记录' : '这一档还没有已完成的记录')
+    return
+  }
+  const md = workLogToMarkdown({
+    range: range.value,
+    now: now.value,
+    custom: customBounds.value,
+    sort: sort.value,
+    entries: doneEntries,
+    projects: store.projects.map(project => ({ id: project.id, name: project.name })),
+  })
+  mailDraft.value = { from: account.address, subject: md.title, text: md.body, count: doneEntries.length }
+  mailVisible.value = true
+}
+
 /**
  * 空态里那句「最近一次是……」。空串表示**整份日志一条都没有**，与「这段时间没有」不是一回事。
  *
@@ -369,7 +408,7 @@ watch([range, sort, customRange, activeDeviceId], () => {
  * 范围与维度是**行为记忆**（见 apps/desktop/src/renderer/src/types.ts 的那一段）：初值来自设置，改了写回去，
  * 下次打开还停在上一眼看的那一档，不必每次重新拉一遍。
  *
- * 「待办」是这一排里的一档，跟其余四档一样会记住：它现在是一个视图（所有还欠着的事），
+ * 「待办」是这一排里的一档，跟其它几档一样会记住：它现在是一个视图（所有还欠着的事），
  * 不是临时戴上的镜片。
  */
 watch([range, sort, customRange], () => {
@@ -517,7 +556,7 @@ async function remove(entry: WorkLogEntry): Promise<void> {
     <!-- 工具条与项目页那条同款（底色由 global.css 按顶部样式给），顶栏以下的第一条 -->
     <div class="filter">
       <div class="filter__head">
-        <!-- 六档：最左是「待办」（所有还没做完的事），中间四档是预置时间范围，最右「自定义」配一枚日期范围选择器 -->
+        <!-- 七档：最左是「待办」（所有还没做完的事），中间五档是预置时间范围，最右「自定义」配一枚日期范围选择器 -->
         <el-segmented
           v-model="range"
           class="ranges"
@@ -541,7 +580,7 @@ async function remove(entry: WorkLogEntry): Promise<void> {
 
       <div class="filter__tools">
         <!-- 同步失败只在这一行留个字：成功不写（不把工具带变成常驻状态栏） -->
-        <span v-if="syncFailed && syncNote" class="sync-note" :title="syncNote">{{ syncNote }}</span>
+        <span v-if="syncFailed && syncNote" class="sync-note truncate" :title="syncNote">{{ syncNote }}</span>
 
         <!--
           设备切换：别的设备的分片虽然合并进了本机文件，这一页一次只看一台。
@@ -596,6 +635,12 @@ async function remove(entry: WorkLogEntry): Promise<void> {
             </el-dropdown-menu>
           </template>
         </el-dropdown>
+
+        <!-- 当前档整理成 Markdown 发到邮箱：内容按屏幕上这份定稿，收件人默认发给自己 -->
+        <el-button size="small" @click="openMail">
+          <el-icon><Promotion /></el-icon>
+          发送到邮箱
+        </el-button>
 
         <!-- 从项目仓库的提交生成：先预览再写入。日期在弹窗里选，五档都能用 -->
         <el-button size="small" @click="gitVisible = true">
@@ -700,6 +745,16 @@ async function remove(entry: WorkLogEntry): Promise<void> {
       :now="now"
       @imported="onGitImported"
     />
+
+    <!-- 发送到邮箱：快照在 openMail 里定稿；没有快照不挂载 -->
+    <WorkLogMailDialog
+      v-if="mailDraft"
+      v-model="mailVisible"
+      :subject="mailDraft.subject"
+      :text="mailDraft.text"
+      :entry-count="mailDraft.count"
+      :from="mailDraft.from"
+    />
   </main>
 </template>
 
@@ -748,11 +803,8 @@ async function remove(entry: WorkLogEntry): Promise<void> {
 /* 同步失败：工具带上一行红字，悬停看全文（与保险库同一套，成功时不占地方） */
 .sync-note {
   max-width: 200px;
-  overflow: hidden;
   font-size: var(--fs-micro);
   color: var(--st-fail);
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /* 设备切换沿用「排序」那副按钮；机器名可能长，按钮上截断（全名走 title） */

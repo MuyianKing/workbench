@@ -1,6 +1,6 @@
 # 禅道
 
-禅道**不在应用里打开**：点顶栏那一行里的禅道图标（或点系统通知），交给系统默认浏览器打开配置里的部署根。浏览器里是禅道
+禅道**不在应用里打开**：点顶栏那一行里的禅道图标（或点系统通知），交给系统默认浏览器打开配置部署根下的「我的地盘」（`my.html`）。浏览器里是禅道
 自己的完整站点，登录由用户自己在那里做一次。应用里**没有**禅道页签、没有列表、也不建独立窗口：详情、指派与解决都在浏览器里
 的禅道界面上做。**后台检查与系统通知照旧** —— 到点取一轮「指派给我的」编号全集，比出新增就弹 Windows toast，点通知用浏览器
 打开站点。跨模块的导航、主题与联网边界见 [功能与架构](../features-and-architecture.md)，通道规则见 [ipc-and-state.md](ipc-and-state.md)。
@@ -23,6 +23,10 @@
   周期非 0 才发检查事件，线程自己不做网络、不持锁 emit。
 - **只有后台检查发现新增才弹通知**：第一轮成功只建立基线；失败不推进基线；按**编号全集**比对（旧 Bug 重新指派给我也算新增；
   类比「指派给我的」这个口径固定）。点通知用浏览器打开站点，不唤主窗口。
+- **未读角标 = 后台发现、还没点开禅道的新 Bug 数**：编号记在设置的 `zentaoUnreadBugs`（本机数据文件、不参与外观同步，
+  上限 200），**跨重启保留**；当前列表里已经不存在的编号（解决了 / 改派了）自动掉出去。应用看不到浏览器里读没读，
+  **点开禅道**（顶栏图标或点系统通知）就算这批看过了 —— 角标清零、待发通知一并作废；打开失败时不清。角标本体是
+  `components/UnreadBadge.vue`（灰度小胶囊，与邮件清单的未读点同一档）。
 - 外部字符串（Bug 标题等）只作纯文本用，绝不 `v-html`。
 
 ## 实现
@@ -31,7 +35,8 @@
 
 `AppHeader.vue` 那一排里的禅道图标（收起 / 展开菜单那颗的右边）是它唯一的入口：`stores/zentao.ts` 的 `open()` → 适配层
 `workbench/zentao.ts` 的 `openSite()` → 命令 `zentao_open_site` → `zentao.rs` 的 `open_site()` → `system::open_external`。
-地址取内嵌配置的部署根（`normalize_base_url` 也接受 `my-work*.html` 并收敛到根），**不带任何凭据**。每次点击都交给系统默认
+地址取内嵌配置的部署根下的固定页面 `my.html`（`normalize_base_url` 把配置收敛到根，也接受 `my.html` /
+`my-work*.html` 页面地址并收敛到根），**不带任何凭据**。每次点击都交给系统默认
 浏览器（浏览器自己决定新开还是复用标签页），应用不跟踪那扇浏览器窗口。系统通知的点击回调在 Rust 侧走同一个 `open_site()`，
 所以通知与顶栏图标的行为一致。
 
@@ -59,6 +64,15 @@ HTTP 复用系统 WinHTTP，不增加 Rust 编译单元，也不放宽 WebView C
 
 一次取数的顺序：**产品清单**（账号资料里的可见范围）→ 逐产品读该口径的 Bug 分页 → 汇总去重按编号降序。产品名不再补取
 （界面上不显示它了）。
+
+### 未读角标
+
+后台比出的新增在 store 里另记一份账（`unreadIds`，落盘到设置的 `zentaoUnreadBugs`）：`mergeZentaoUnread` 保留仍在
+当前列表里的旧编号、并入本轮新增（降序去重、上限 200），`AppHeader.vue` 那颗禅道图标上的数字就是它的长度。
+清零走两条路：`open()` 成功（顶栏图标），以及 Rust 通知点击时 `open_site()` 成功后发出的 `zentao:opened`
+（`workbench/zentao.ts` 的 `onOpened` 订阅）—— 两条都一并清空 `pendingNotify`。`clearedAt` 挡住「点开之前就开始取数
+的那一轮」，避免慢半拍的检查把已清零的编号加回来；会话身份（账号 / 部署）真的变了也清零，首次建立基线不清
+（跨重启保留）。
 
 ### 22.2 API 契约
 
@@ -90,7 +104,8 @@ HTTP 复用系统 WinHTTP，不增加 Rust 编译单元，也不放宽 WebView C
 
 - [入口图标](../../apps/desktop/src/renderer/src/components/AppHeader.vue)（收起 / 展开菜单那颗的右边）。
 - [状态](../../apps/desktop/src/renderer/src/stores/zentao.ts)、[适配层](../../apps/desktop/src/renderer/src/workbench/zentao.ts)。
-- [域包](../../packages/zentao/src/zentao.ts)：类型、分页聚合、新增判定、周期收敛。
+- [角标](../../apps/desktop/src/renderer/src/components/UnreadBadge.vue)（顶栏那颗图标右上角，与邮箱共用）。
+- [域包](../../packages/zentao/src/zentao.ts)：类型、分页聚合、新增判定、周期收敛、未读编号账本。
 - [Rust](../../apps/desktop/src-tauri/src/zentao.rs)、[命令层](../../apps/desktop/src-tauri/src/commands.rs)、
   [主窗口](../../apps/desktop/src-tauri/src/main.rs)。
 - [凭据读取](../../apps/desktop/src-tauri/src/oauth.rs)、[空值模板](../../apps/desktop/src-tauri/oauth.example.json)。
@@ -110,7 +125,8 @@ HTTP 复用系统 WinHTTP，不增加 Rust 编译单元，也不放宽 WebView C
 
 填写真实账号密码后重新构建。沿用 `build.rs` 整份复制、Rust `include_str!` 的流程，运行中的程序不读取磁盘上该文件的新内容；
 配置及二进制都含明文个人凭据，不是加密保存。该文件已忽略，不能提交；模板 `oauth.example.json` 保持空值。密码保留原值，不做
-trim。地址由现有后端校验，也接受该部署的 `my-work*.html` 页面地址并收敛到根目录。
+trim。地址由现有后端校验，也接受该部署的 `my.html` / `my-work*.html` 页面地址并收敛到根目录（打开站点固定去根下的
+`my.html`，即「我的地盘」）。
 
 ## 已知代价与边界
 

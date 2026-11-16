@@ -84,18 +84,18 @@ const secondaryStyle = computed(() =>
     <!-- 一行的导航：主色标志、品牌名、一个次级链接 -->
     <div class="card__nav">
       <i class="card__dot" aria-hidden="true" />
-      <span class="card__brand" :style="brandStyle" :title="design.title">{{ design.title }}</span>
+      <span class="card__brand truncate" :style="brandStyle" :title="design.title">{{ design.title }}</span>
       <span class="card__link" :style="linkStyle">{{ demo.copy.nav[1] }}</span>
     </div>
 
     <!-- 首屏那一小段：眉题、标题、副文案、按钮 -->
-    <p class="card__eyebrow" :style="eyebrowStyle">
+    <p class="card__eyebrow truncate" :style="eyebrowStyle">
       {{ demo.copy.eyebrow }}
     </p>
     <h3 class="card__title" :style="titleStyle">
       {{ demo.copy.title }}
     </h3>
-    <p class="card__subtitle" :style="subtitleStyle">
+    <p class="card__subtitle truncate" :style="subtitleStyle">
       {{ demo.copy.subtitle }}
     </p>
     <div class="card__actions">
@@ -106,7 +106,7 @@ const secondaryStyle = computed(() =>
     <!-- 元信息：给检索用，不是样张的一部分 -->
     <footer class="card__meta">
       <span>{{ badge }}</span>
-      <span class="card__category">{{ design.category }}</span>
+      <span class="card__category truncate">{{ design.category }}</span>
       <span class="card__count">{{ componentCount }} 组件</span>
     </footer>
   </article>
@@ -155,9 +155,6 @@ const secondaryStyle = computed(() =>
 
 .card__brand {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .card__link {
@@ -167,9 +164,6 @@ const secondaryStyle = computed(() =>
 
 .card__eyebrow {
   margin: 10px 0 2px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .card__title {
@@ -182,9 +176,6 @@ const secondaryStyle = computed(() =>
 
 .card__subtitle {
   margin: 4px 0 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .card__actions {
@@ -221,9 +212,6 @@ const secondaryStyle = computed(() =>
 
 .card__category {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .card__count {

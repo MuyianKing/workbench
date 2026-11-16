@@ -80,7 +80,7 @@ function toggle(provider: AiProvider, value: unknown): void {
         <div class="model__default">
           <span class="model__default-text">
             <span class="model__default-title">默认模型</span>
-            <span class="model__default-value">
+            <span class="model__default-value truncate">
               {{ defaultText }}
               <span v-if="defaultId" class="model__default-id mono">{{ defaultId }}</span>
             </span>
@@ -144,7 +144,7 @@ function toggle(provider: AiProvider, value: unknown): void {
                 <span class="model__badge">{{ provider.models.length }} 个模型</span>
                 <span v-if="store.keyStates[provider.id] !== true" class="model__warn">未配密钥</span>
               </span>
-              <span class="model__host" :title="provider.baseUrl">{{ host(provider.baseUrl) }}</span>
+              <span class="model__host truncate" :title="provider.baseUrl">{{ host(provider.baseUrl) }}</span>
             </span>
             <el-switch
               :model-value="provider.enabled"
@@ -234,11 +234,8 @@ function toggle(provider: AiProvider, value: unknown): void {
   display: flex;
   align-items: baseline;
   gap: var(--sp-2);
-  overflow: hidden;
   color: var(--ink);
   font-size: var(--fs-meta);
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .model__default-id {
@@ -331,10 +328,7 @@ function toggle(provider: AiProvider, value: unknown): void {
 }
 
 .model__host {
-  overflow: hidden;
   color: var(--ink-3);
   font-size: var(--fs-micro);
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 </style>

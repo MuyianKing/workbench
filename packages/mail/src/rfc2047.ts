@@ -4,7 +4,7 @@
 // !
 // ! 罕见字符集解不动就原样保留，不假装成功 —— 看得到原文比看到乱码强。
 
-import { base64ToBytes } from './base64'
+import { base64ToBytes } from '@workbench/core'
 
 /** Q 编码：下划线当空格，=XX 是十六进制字节（与百分号编码同形不同义）。 */
 function qEncodedBytes(text: string): Uint8Array {

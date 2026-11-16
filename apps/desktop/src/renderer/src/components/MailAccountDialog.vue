@@ -257,7 +257,7 @@ async function remove(account: MailAccount): Promise<void> {
           class="acct__row"
           :class="{ 'is-editing': account.address === editing }"
         >
-          <span class="acct__addr" :title="account.address">{{ account.address }}</span>
+          <span class="acct__addr truncate" :title="account.address">{{ account.address }}</span>
           <el-button text size="small" @click="startEdit(account)">
             编辑
           </el-button>
@@ -406,9 +406,6 @@ async function remove(account: MailAccount): Promise<void> {
 .acct__addr {
   flex: 1;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   color: var(--ink-2);
   font-size: var(--fs-meta);
 }

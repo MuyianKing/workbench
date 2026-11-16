@@ -22,6 +22,7 @@ import type { MailListItem } from '@/stores/mail'
 import { Loading, Paperclip } from '@element-plus/icons-vue'
 import { accountTag, decodeEncodedWords, displayListDate, displayRecipients, displaySender } from '@workbench/mail'
 import { computed } from 'vue'
+import MailAvatar from '@/components/MailAvatar.vue'
 
 const props = defineProps<{
   /** 这一行画哪封 */
@@ -56,22 +57,6 @@ const party = computed(() => {
   return displayRecipients(props.item.to) || '(无收件人)'
 })
 
-/** 头像上的那个字：展示名的首字（中文原字 / 英文大写）；拆不出名字时给 ? */
-const avatarInitial = computed(() => {
-  const text = party.value.trim()
-  if (!text || text.startsWith('('))
-    return '?'
-  return (Array.from(text)[0] ?? '?').toUpperCase()
-})
-
-/** 头像底色按展示名散到八档柔和色里：同一个发件人恒定，不表达状态 */
-const avatarTone = computed(() => {
-  let hash = 0
-  for (const char of party.value)
-    hash = (hash * 31 + (char.codePointAt(0) ?? 0)) >>> 0
-  return hash % 8
-})
-
 /** 主题是原始头部文本（RFC 2047 编码词），解码在这里做 */
 function subjectText(raw: string): string {
   const decoded = decodeEncodedWords(raw).trim()
@@ -104,17 +89,17 @@ function subjectText(raw: string): string {
       @change="emit('toggle-pick')"
     />
     <button class="mail-item__main" type="button">
-      <span class="mail-item__avatar" :class="`is-tone-${avatarTone}`" aria-hidden="true">{{ avatarInitial }}</span>
+      <MailAvatar :name="party" />
       <span class="mail-item__content">
         <span class="mail-item__row">
           <span class="mail-item__dot" aria-hidden="true" />
-          <span class="mail-item__from" :title="party">{{ party }}</span>
+          <span class="mail-item__from truncate" :title="party">{{ party }}</span>
           <el-icon v-if="deleting" class="mail-item__deleting is-loading"><Loading /></el-icon>
-          <span v-if="showSource" class="mail-item__src" :title="item.account">{{ accountTag(item.account) }}</span>
+          <span v-if="showSource" class="mail-item__src truncate" :title="item.account">{{ accountTag(item.account) }}</span>
           <span class="mail-item__date">{{ displayListDate(item.date) }}</span>
         </span>
         <span class="mail-item__sub">
-          <span class="mail-item__subject" :title="subjectText(item.subject)">{{ subjectText(item.subject) }}</span>
+          <span class="mail-item__subject truncate" :title="subjectText(item.subject)">{{ subjectText(item.subject) }}</span>
           <el-icon v-if="item.hasAttachment" class="mail-item__clip"><Paperclip /></el-icon>
         </span>
       </span>
@@ -207,67 +192,6 @@ function subjectText(raw: string): string {
   cursor: inherit;
 }
 
-/*
- * 首字头像：28px 圆片，按展示名稳定散到八档柔和色（红 / 橙 / 黄 / 绿 / 青 / 蓝 / 靛 / 紫）。
- * 选中时不再换成主题色实心 —— 身份色留在头像上，选中由卡片淡底与左侧窄轨表达。
- * 亮色浅底深字、暗色深底浅字；色相只有这八档，别在别处再调一套。
- */
-.mail-item__avatar {
-  --avatar-h: 212;
-  display: inline-flex;
-  flex-shrink: 0;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: var(--r-pill);
-  background: hsl(var(--avatar-h), 75%, 84%);
-  color: hsl(var(--avatar-h), 60%, 30%);
-  font-size: var(--fs-meta);
-  font-weight: 600;
-  line-height: 1;
-  transition: background-color 0.16s ease, color 0.16s ease;
-}
-
-.mail-item__avatar.is-tone-0 {
-  --avatar-h: 4;
-}
-
-.mail-item__avatar.is-tone-1 {
-  --avatar-h: 28;
-}
-
-.mail-item__avatar.is-tone-2 {
-  --avatar-h: 48;
-}
-
-.mail-item__avatar.is-tone-3 {
-  --avatar-h: 150;
-}
-
-.mail-item__avatar.is-tone-4 {
-  --avatar-h: 182;
-}
-
-.mail-item__avatar.is-tone-5 {
-  --avatar-h: 212;
-}
-
-.mail-item__avatar.is-tone-6 {
-  --avatar-h: 252;
-}
-
-.mail-item__avatar.is-tone-7 {
-  --avatar-h: 292;
-}
-
-/* 暗色下同色相换深底浅字。整条选择器一起放进 :global()：只包 `:root[...]`
-   那一截的话，scoped 编译会把后面的 `.mail-item__avatar` 丢掉，规则落到根元素上 */
-:global(:root[data-theme='dark'] .mail-item__avatar) {
-  background: hsl(var(--avatar-h), 40%, 30%);
-  color: hsl(var(--avatar-h), 65%, 82%);
-}
-
 /* 右侧两行：第一行发件人 + 来源 + 日期，第二行主题 + 附件 */
 .mail-item__content {
   display: flex;
@@ -304,9 +228,6 @@ function subjectText(raw: string): string {
 .mail-item__from {
   flex: 1;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   font-size: var(--fs-meta);
   font-weight: 500;
   line-height: 16px;
@@ -329,9 +250,6 @@ function subjectText(raw: string): string {
 .mail-item__src {
   flex-shrink: 0;
   max-width: 82px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   color: var(--ink-3);
   font-family: var(--font-mono);
   font-size: var(--fs-micro);
@@ -367,9 +285,6 @@ function subjectText(raw: string): string {
 .mail-item__subject {
   flex: 1;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   font-size: var(--fs-body);
   line-height: 18px;
   color: var(--ink);

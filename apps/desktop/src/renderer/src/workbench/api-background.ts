@@ -8,7 +8,7 @@ import { assetUrl, errorText, invoke } from './bridge'
  *
  * 图片本身交给 webview 按文件加载（asset 协议），这一侧只做「解析内置引用 +
  * 让后端把读取权限授给 asset 协议」，不解码、不缩放、不编码（原理见
- * docs/features-and-architecture.md 的 asset 协议那一段）。
+ * docs/privacy.md 的 asset 协议那一段）。
  */
 
 const IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'webp', 'bmp', 'gif']

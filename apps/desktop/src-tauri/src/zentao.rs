@@ -14,6 +14,8 @@ use crate::notify;
 
 const WATCH_TICK: Duration = Duration::from_secs(60);
 const CHECK_EVENT: &str = "zentao:check";
+/// 通知点击、站点真的在浏览器里打开之后推给渲染层（未读角标据此清零）
+const OPENED_EVENT: &str = "zentao:opened";
 
 /// 后台检查周期的上下限（分钟）：与 @workbench/zentao 的 sanitizeZentaoPollMinutes 同口径。
 const POLL_MIN_MINUTES: u32 = 1;
@@ -170,7 +172,8 @@ impl Inner {
     }
 }
 
-/// 支持部署根目录或浏览器中的完整 my-work*.html 地址；统一回不带尾斜杠的根。
+/// 支持部署根目录或浏览器中的完整页面地址（my.html / my-work*.html，即「我的地盘」）；
+/// 统一回不带尾斜杠的根。
 fn normalize_base_url(raw: &str) -> Result<String, String> {
     let invalid = || "禅道地址无效，请填写 http:// 或 https:// 部署根地址".to_string();
     // URL 解析器会自动丢控制字符、修正反斜杠，必须在它修正之前拒绝。
@@ -203,7 +206,7 @@ fn normalize_base_url(raw: &str) -> Result<String, String> {
     }
     let path = url.path().trim_end_matches('/');
     let last = path.rsplit('/').next().unwrap_or("");
-    let root = if last.starts_with("my-work") && last.ends_with(".html") {
+    let root = if last.ends_with(".html") && (last == "my.html" || last.starts_with("my-work")) {
         path.rsplit_once('/')
             .map(|(parent, _)| parent)
             .unwrap_or("")
@@ -571,16 +574,20 @@ pub fn notify_new_bugs(
     let aumid = app.config().identifier.clone();
     let name = crate::mail_watch::display_name(app);
     notify::ensure_aumid_shortcut(&aumid, app.package_info().name.as_str())?;
+    let handle = app.clone();
     // 提示音用系统默认那个：禅道跟新邮件混成一种声音就没法凭耳朵分了
     notify::show_toast_with_sound(&aumid, &name, &body, notify::SOUND_DEFAULT, move || {
         // 点击：用系统浏览器打开禅道 —— 用户要看的就是那一页，不绕回主窗口。
-        let _ = open_site();
+        // 只有真的打开成功才清角标（渲染层收 zentao:opened）：没打开等于用户没看到。
+        if open_site().is_ok() {
+            let _ = handle.emit(OPENED_EVENT, ());
+        }
     })
 }
 
 // ---------- 浏览器（顶栏那颗图标与通知点击都走它） ----------
 
-/// 用系统浏览器打开禅道的部署根。
+/// 用系统浏览器打开禅道部署根下的「我的地盘」（`my.html`）。
 ///
 /// 只读内嵌配置里的地址，**不把账号密码带出去**：页面登录由用户自己在浏览器里做
 /// （勾「保持登录」后禅道会种 30 天 cookie）。浏览器那份登录态与应用后台检查用的
@@ -588,7 +595,7 @@ pub fn notify_new_bugs(
 pub fn open_site() -> Result<(), String> {
     let config = crate::oauth::zentao_config()?;
     let base = normalize_base_url(&config.base_url)?;
-    crate::system::open_external(&base)
+    crate::system::open_external(&format!("{base}/my.html"))
 }
 
 /// 通知正文里的 Bug 标题：控制字符压成空格、连续空白合成一个、超长截断 ——
@@ -771,6 +778,10 @@ mod tests {
             (
                 "https://zentao.example/zentao/my-work.html",
                 "https://zentao.example/zentao",
+            ),
+            (
+                "http://115.159.41.157:81/zentao/my.html",
+                "http://115.159.41.157:81/zentao",
             ),
             (
                 "http://localhost:8080/team/zentao/my-work-bug.html",

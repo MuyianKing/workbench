@@ -190,6 +190,10 @@ fn open_path(app: &AppHandle, path: &Path) -> Result<(), String> {
         // 标题栏与底栏兼做拖动带。关闭仍走下面的握手（CloseRequested 照拦）。
         .decorations(false)
         .visible(false)
+        // 打开即最大化。窗口此刻还隐藏着，tao 只记标志不调 ShowWindow（防闪现），
+        // page load 后 show() 那一刻才真正 SW_MAXIMIZE —— 用户看到的第一帧就是满屏。
+        // 上面 inner_size 没删：它是用户「还原」时回来的尺寸。
+        .maximized(true)
         .initialization_script(crate::bootstrap_script())
         .initialization_script(crate::no_context_menu_script())
         .on_page_load(|window, payload| {

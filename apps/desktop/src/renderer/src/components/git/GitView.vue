@@ -123,7 +123,7 @@ function onBranchCommand(name: string): void {
 </script>
 
 <template>
-  <main class="git-view">
+  <main class="git-view page">
     <!-- 还没打开（或上次那个打不开）：空态配图 + 一句事实 + 打开按钮，整块垂直居中 -->
     <div v-if="!store.hasRepo" class="guide">
       <EmptyState
@@ -184,7 +184,7 @@ function onBranchCommand(name: string): void {
               @command="onRepoCommand"
             >
               <button type="button" class="head__repo" :title="repoTitle">
-                <span class="head__repo-name">{{ repoName }}</span>
+                <span class="head__repo-name truncate">{{ repoName }}</span>
                 <el-icon class="head__caret">
                   <ArrowDown />
                 </el-icon>
@@ -208,7 +208,7 @@ function onBranchCommand(name: string): void {
             >
               <button type="button" class="head__branch" :title="branchText">
                 <el-icon><Share /></el-icon>
-                <span class="head__branch-name mono">{{ branchText }}</span>
+                <span class="head__branch-name mono truncate">{{ branchText }}</span>
                 <span v-if="store.viewingOtherBranch" class="head__branch-tag">未切换</span>
                 <el-icon class="head__caret">
                   <ArrowDown />
@@ -244,7 +244,7 @@ function onBranchCommand(name: string): void {
               {{ branchText }}
             </span>
 
-            <span class="head__path mono" :title="repoTitle">{{ store.openPath || store.repo?.root }}</span>
+            <span class="head__path mono truncate" :title="repoTitle">{{ store.openPath || store.repo?.root }}</span>
           </div>
         </div>
         <div class="filter__tools">
@@ -318,11 +318,7 @@ function onBranchCommand(name: string): void {
   --fs-micro: 12px;
   --fs-meta: 13px;
   --fs-body: 14px;
-  display: flex;
-  flex-direction: column;
   gap: var(--sp-3);
-  height: 100%;
-  min-height: 0;
   padding: var(--card-gap, 10px);
 }
 
@@ -367,12 +363,6 @@ function onBranchCommand(name: string): void {
   color: var(--ink);
 }
 
-.head__repo-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .head__branch {
   display: inline-flex;
   flex-shrink: 0;
@@ -396,9 +386,6 @@ button.head__branch:hover {
 }
 
 .head__branch-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   max-width: 18em;
 }
 
@@ -420,9 +407,6 @@ button.head__branch:hover {
 
 .head__path {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   color: var(--ink-3);
   font-size: var(--fs-micro);
 }

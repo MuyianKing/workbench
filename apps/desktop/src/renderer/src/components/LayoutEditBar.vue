@@ -31,7 +31,7 @@ async function resetLayout(): Promise<void> {
   <div class="layoutbar">
     <span class="layoutbar__tag">布局编辑</span>
     <!-- 整句就是一行（nowrap）：源码里别在句子中间换行，中文之间会多出一个空格 -->
-    <span class="layoutbar__hint">
+    <span class="layoutbar__hint truncate">
       拖卡片换栏换行换序（落在卡片中间＝并进这一行、左右换位，落在上 / 下缘＝另起一行）；行右上角切高度固定 / 自适应、下缘那颗拉行高；栏头 ＋ 拆栏、✕ 收栏、那颗切栏宽的自适应与固定；拖两栏之间的竖线改栏宽（两栏都固定就一起变）· 间距
       <b class="mono">{{ settings.cardGap }}px</b>
     </span>
@@ -77,9 +77,6 @@ async function resetLayout(): Promise<void> {
   font-size: var(--fs-meta);
   color: var(--ink-2);
   /* 一行放不下就省略，绝不换行把这一行撑高、把下面的画布顶下去 */
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .layoutbar__hint b {

@@ -42,14 +42,33 @@ const ACCOUNTS_MAX: usize = 5;
 const BULK_SENDERS_MAX: usize = 500;
 /// 通知被点后发给渲染层的事件（渲染层换到邮箱页并打开这一封）
 const NOTIFY_CLICK_EVENT: &str = "mail:notify-click";
+/// 每轮推给渲染层的收件箱未读摘要（导航栏邮箱角标据此计数）
+const UNREAD_EVENT: &str = "mail:unread";
 
 /// 登记进来的一个账户。字段与渲染层的 MailAccount 对齐（camelCase 经 serde 收敛）。
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WatchAccount {
     pub address: String,
     pub imap_host: String,
     pub imap_port: u16,
+}
+
+/// 角标用的最小摘要：只带计数与广告识别要用的三样（推广段过滤在 TS 侧做）。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UnreadMail {
+    uid: u64,
+    subject: String,
+    from: String,
+}
+
+/// 一个账户这一轮的未读清单。取数失败的账户不进载荷 —— 渲染层沿用上一轮的值。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UnreadAccount {
+    address: String,
+    mails: Vec<UnreadMail>,
 }
 
 /// 渲染层登记的监视清单 + 通知要避开的广告发件人。
@@ -75,6 +94,9 @@ struct WatchConfig {
     bulk_senders: Vec<String>,
     /// 周期（分钟）：0 = 后台检查关闭（只保留进页面 / 手动刷新的那几次）。
     poll_minutes: u32,
+    /// 登记时账户清单变了 / 监控从关到开：下一眼跳过「没到周期」直接查一轮 ——
+    /// 否则应用启动后角标要等满一个周期（默认 30 分钟）才有数。
+    refresh_now: bool,
 }
 
 /// 一个账户的监视进度：UIDVALIDITY + 上次见过的最大 UID（高水位）。
@@ -171,12 +193,23 @@ pub fn mail_watch_register(
         }
     }
 
-    *state.0.lock().expect("锁中毒") = WatchConfig {
+    let minutes = sanitize_poll_minutes(poll_minutes);
+    let mut config = state.0.lock().expect("锁中毒");
+    // 账户清单变了、或监控从关到开：登记完立刻补一轮（角标不必等满一个周期）。
+    // 只改广告黑名单不触发 —— 那是通知与清单的判法，不值得多连一次服务器。
+    let refresh_now = should_refresh_now(&config, &cleaned, minutes);
+    *config = WatchConfig {
         accounts: cleaned,
         bulk_senders: bulk,
-        poll_minutes: sanitize_poll_minutes(poll_minutes),
+        poll_minutes: minutes,
+        refresh_now,
     };
     Ok(())
+}
+
+/// 登记之后要不要立刻补查一轮：监控开着，并且账户清单变了或刚从「关」打开。
+fn should_refresh_now(previous: &WatchConfig, accounts: &[WatchAccount], minutes: u32) -> bool {
+    minutes > 0 && (previous.poll_minutes == 0 || previous.accounts != accounts)
 }
 
 /// 周期的收敛（与渲染层 sanitizeMailPollMinutes 同一条）：0 = 关闭原样放行，
@@ -200,28 +233,43 @@ pub fn spawn(app: &AppHandle) {
     }
 }
 
-/// 一轮：到点没（距上次检查满登记的周期）→ 逐个账户查 → 有新信就弹通知。
+/// 一轮：到点没（距上次检查满登记的周期）→ 逐个账户查 → 有新信就弹通知，
+/// 同时把各账户的收件箱未读摘要推给渲染层（导航栏角标）。
 /// 每个账户的失败只记一行日志，不挡别人 —— 后台的事不该吵到界面。
 fn tick(app: &AppHandle) {
-    let config = app.state::<MailWatch>().0.lock().expect("锁中毒").clone();
-    // 清单空着或周期设成关闭（0）：只睡不查
-    if config.accounts.is_empty() || config.poll_minutes == 0 {
-        return;
-    }
+    let (config, forced) = {
+        let state = app.state::<MailWatch>();
+        let mut guard = state.0.lock().expect("锁中毒");
+        // 清单空着或周期设成关闭（0）：只睡不查
+        if guard.accounts.is_empty() || guard.poll_minutes == 0 {
+            return;
+        }
+        let forced = guard.refresh_now;
+        guard.refresh_now = false;
+        (guard.clone(), forced)
+    };
     let mut state = WatchState::load();
     let now = now_secs() as u64;
-    if now.saturating_sub(state.last_check) < u64::from(config.poll_minutes) * 60 {
+    if !forced && now.saturating_sub(state.last_check) < u64::from(config.poll_minutes) * 60 {
         return;
     }
-    // 先记账再查：这轮失败了也等下一个 30 分钟，别把服务器摁着打
+    // 这一轮**开始取数**的时刻：渲染层拿它判断「这批结果是不是比本地读信还旧」
+    // （见 stores/mail.ts 的 checkedAt 守卫），所以要在连服务器之前取
+    let checked_at = now;
+    // 先记账再查：这轮失败了也等下一个周期，别把服务器摁着打
     state.last_check = now;
     state.save();
+    let mut unread_accounts = Vec::new();
     for account in &config.accounts {
         let known = state.accounts.get(&account.address).copied();
         match check_account(account, known, &config.bulk_senders) {
-            Ok((mark, batch)) => {
+            Ok((mark, batch, unread)) => {
                 state.accounts.insert(account.address.clone(), mark);
                 state.save();
+                unread_accounts.push(UnreadAccount {
+                    address: account.address.clone(),
+                    mails: unread,
+                });
                 if let Some(batch) = batch {
                     toast(app, &account.address, batch);
                 }
@@ -231,15 +279,22 @@ fn tick(app: &AppHandle) {
             }
         }
     }
+    // 一个账户都没查成就不推：渲染层保留上一轮的值，别把角标清成 0
+    if !unread_accounts.is_empty() {
+        let _ = app.emit(
+            UNREAD_EVENT,
+            json!({ "checkedAt": checked_at, "accounts": unread_accounts }),
+        );
+    }
 }
 
-/// 查一个账户：现连现断拉一次最近摘要，比出「基准之后到达且未读」的那部分。
-/// 只看收件箱 —— 新邮件提醒跟「我发出去的信」没关系。
+/// 查一个账户：现连现断拉一次最近摘要，比出「基准之后到达且未读」的那部分，
+/// 顺带把这一轮的未读清单（角标用）一起带回。只看收件箱 —— 新邮件提醒跟「我发出去的信」没关系。
 fn check_account(
     account: &WatchAccount,
     known: Option<AccountMark>,
     bulk: &[String],
-) -> Result<(AccountMark, Option<NewBatch>), String> {
+) -> Result<(AccountMark, Option<NewBatch>, Vec<UnreadMail>), String> {
     let (info, summaries) = mail::fetch_recent_summaries(
         &account.address,
         &account.imap_host,
@@ -247,7 +302,21 @@ fn check_account(
         Folder::Inbox,
         WINDOW,
     )?;
-    Ok(pick_new(&summaries, known, info.uidvalidity, bulk))
+    let (mark, batch) = pick_new(&summaries, known, info.uidvalidity, bulk);
+    Ok((mark, batch, unread_mails(&summaries)))
+}
+
+/// 这一轮收件箱里的未读摘要（角标口径是「未读」；推广段过滤交给 TS 的 isBulkMail）。
+fn unread_mails(summaries: &[MailSummary]) -> Vec<UnreadMail> {
+    summaries
+        .iter()
+        .filter(|summary| !summary.seen)
+        .map(|summary| UnreadMail {
+            uid: summary.uid,
+            subject: summary.subject.clone(),
+            from: summary.from.clone(),
+        })
+        .collect()
 }
 
 /// 新邮件判定（纯函数，可单测）。规则：
@@ -437,6 +506,53 @@ mod tests {
         // 1 就是下限本身，5000 夹回上限
         assert_eq!(sanitize_poll_minutes(1), POLL_MIN_MINUTES);
         assert_eq!(sanitize_poll_minutes(5000), POLL_MAX_MINUTES);
+    }
+
+    // ----- 角标：未读摘要与登记补查 -----
+
+    #[test]
+    fn unread_digest_only_keeps_unseen_mail() {
+        let summaries = vec![
+            summary(9, true, "a@b.com"),
+            summary(11, false, "促销 <promo@shop.com>"),
+            summary(12, false, "c@d.com"),
+        ];
+        let unread = unread_mails(&summaries);
+        assert_eq!(unread.len(), 2);
+        assert_eq!(unread[0].uid, 11);
+        assert_eq!(unread[0].from, "促销 <promo@shop.com>");
+        // 推广段过滤不在这里做（TS 侧的 isBulkMail）：Rust 只挑未读
+        assert_eq!(unread[1].uid, 12);
+        assert!(unread_mails(&[]).is_empty());
+    }
+
+    #[test]
+    fn registers_refresh_immediately_on_account_change_or_reenable() {
+        let account = |address: &str| WatchAccount {
+            address: address.into(),
+            imap_host: "imap.example.com".into(),
+            imap_port: 993,
+        };
+        // 首次登记（之前清单空着）：补一轮，角标不必等满一个周期
+        assert!(should_refresh_now(&WatchConfig::default(), &[account("a@b.com")], 30));
+        // 周期 0 = 关闭：不补查
+        assert!(!should_refresh_now(&WatchConfig::default(), &[account("a@b.com")], 0));
+        let running = WatchConfig {
+            accounts: vec![account("a@b.com")],
+            bulk_senders: vec![],
+            poll_minutes: 30,
+            refresh_now: false,
+        };
+        // 只改广告黑名单（账户与周期都没变）：不额外连一次服务器
+        assert!(!should_refresh_now(&running, &[account("a@b.com")], 30));
+        // 账户清单变了：补一轮
+        assert!(should_refresh_now(&running, &[account("c@d.com")], 30));
+        // 从关到开：补一轮
+        let disabled = WatchConfig {
+            poll_minutes: 0,
+            ..running.clone()
+        };
+        assert!(should_refresh_now(&disabled, &[account("a@b.com")], 30));
     }
 
     // ----- 发件人地址 -----

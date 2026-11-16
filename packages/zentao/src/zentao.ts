@@ -73,6 +73,47 @@ export function diffZentaoBugs(previous: readonly number[] | null, bugs: readonl
   return { ids: [...currentIds], added }
 }
 
+/** 未读 Bug 编号的上限：角标只显示数，个人待办攒不到这个数，只防手改数据文件塞进一大坨 */
+export const ZENTAO_UNREAD_MAX = 200
+
+/** 收敛落盘的未读编号（设置的 `zentaoUnreadBugs`）：正整数、去重、降序、截断。 */
+export function sanitizeZentaoUnreadBugs(value: unknown): number[] {
+  if (!Array.isArray(value))
+    return []
+  const seen = new Set<number>()
+  for (const item of value) {
+    if (typeof item !== 'number' || !Number.isSafeInteger(item) || item <= 0)
+      continue
+    seen.add(item)
+    if (seen.size >= ZENTAO_UNREAD_MAX)
+      break
+  }
+  return [...seen].sort((a, b) => b - a)
+}
+
+/**
+ * 角标账本：上一轮的未读里**仍在当前列表**的那些留着，再并入本轮新增（降序去重）。
+ * 被解决 / 改派 / 关掉的编号自动掉出去 —— 「未读」只在它还需要看的时候成立。
+ * `added` 不额外校验（它本来就取自当前列表），但仍按 `currentIds` 过一道。
+ */
+export function mergeZentaoUnread(
+  previous: readonly number[],
+  added: readonly number[],
+  currentIds: readonly number[],
+): number[] {
+  const current = new Set(currentIds)
+  const next = new Set<number>()
+  for (const id of previous) {
+    if (current.has(id))
+      next.add(id)
+  }
+  for (const id of added) {
+    if (current.has(id))
+      next.add(id)
+  }
+  return [...next].sort((a, b) => b - a).slice(0, ZENTAO_UNREAD_MAX)
+}
+
 function recordOf(value: unknown): Record<string, unknown> {
   if (typeof value !== 'object' || value === null || Array.isArray(value))
     throw new Error('禅道响应必须是 JSON 对象')

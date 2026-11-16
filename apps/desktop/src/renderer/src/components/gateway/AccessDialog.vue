@@ -74,7 +74,7 @@ function rotate(): void {
 
       <div class="access__row">
         <span class="access__label">API 地址</span>
-        <code class="access__value">{{ baseUrl }}</code>
+        <code class="access__value truncate">{{ baseUrl }}</code>
         <el-tooltip content="复制地址" placement="top">
           <el-button size="small" text :icon="CopyDocument" aria-label="复制地址" @click="copyText(baseUrl, '地址')" />
         </el-tooltip>
@@ -82,7 +82,7 @@ function rotate(): void {
 
       <div class="access__row">
         <span class="access__label">API Key</span>
-        <code class="access__value">{{ keyText }}</code>
+        <code class="access__value truncate">{{ keyText }}</code>
         <el-tooltip :content="reveal ? '隐藏密钥' : '显示密钥'" placement="top">
           <el-button
             size="small"
@@ -147,8 +147,5 @@ function rotate(): void {
   font-family: var(--font-mono);
   font-size: var(--gw-fs-meta);
   color: var(--ink-2);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 </style>

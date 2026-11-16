@@ -53,16 +53,24 @@ const patchFull = ref(false)
 const patchWrap = ref<HTMLElement | null>(null)
 
 /**
+ * `.git-view` 的盒子：全屏后槽被 Teleport 到 body，`closest` 就找不到了 ——
+ * 进全屏时（此刻还在原地）先取一次存下来，之后缩放窗口 / 收展导航才钉得动。
+ */
+let viewEl: HTMLElement | null = null
+
+/**
  * 全屏落点 = `.git-view` 的盒子（顶栏以下、导航栏右侧的内容区）。导航栏是 int32 上限
  * 的层级（弹层开着它也在最上），压不过 —— 铺到它右侧为止。量出来钉 inline inset，
  * 不照 `--w-nav` 摆：导航收起时那个变量不跟着变（收起动画动的是导航自己的 width）。
  */
 function pinPatchRect(): void {
   const el = patchWrap.value
-  const view = el?.closest('.git-view')
-  if (!el || !view)
+  if (!el)
     return
-  const rect = view.getBoundingClientRect()
+  viewEl = el.closest('.git-view') ?? viewEl
+  if (!viewEl)
+    return
+  const rect = viewEl.getBoundingClientRect()
   el.style.top = `${rect.top}px`
   el.style.right = `${window.innerWidth - rect.right}px`
   el.style.bottom = `${window.innerHeight - rect.bottom}px`
@@ -156,6 +164,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  viewEl = null
   window.removeEventListener('keydown', onEscKey)
   window.removeEventListener('resize', onWindowResize)
 })
@@ -170,7 +179,7 @@ onDeactivated(() => {
 </script>
 
 <template>
-  <section class="diff-pane">
+  <section class="diff-pane page">
     <PanelLoading v-if="store.activeLoading && !hasSelection" text="正在读取提交…" />
 
     <EmptyState
@@ -191,10 +200,10 @@ onDeactivated(() => {
             <span class="mono">{{ shortHash(store.compare.target) }}</span>
           </div>
           <div class="diff-head__subjects">
-            <span v-if="store.compareBase" class="diff-head__subject" :title="store.compareBase.subject">
+            <span v-if="store.compareBase" class="diff-head__subject truncate" :title="store.compareBase.subject">
               {{ store.compareBase.subject || '（无提交说明）' }}
             </span>
-            <span v-if="store.compareTarget" class="diff-head__subject" :title="store.compareTarget.subject">
+            <span v-if="store.compareTarget" class="diff-head__subject truncate" :title="store.compareTarget.subject">
               {{ store.compareTarget.subject || '（无提交说明）' }}
             </span>
           </div>
@@ -204,7 +213,7 @@ onDeactivated(() => {
           <!-- 提交说明按 Markdown 渲染（作者常写列表 / 行内代码 / 链接）：
                标题仍是第一行，正文在下面那个定高滚动的盒子里，安全口径见 MarkdownView -->
           <MarkdownView
-            class="diff-head__subject diff-head__subject--title"
+            class="diff-head__subject diff-head__subject--title truncate"
             :source="store.detail.subject || '（无提交说明）'"
             style="font-size: var(--fs-title); line-height: 1.45"
           />
@@ -243,7 +252,13 @@ onDeactivated(() => {
           `.git-view` 的盒子上（提交说明与文件清单留在原地，被盖住）；Esc 收、换页自动收（见 script）。
         -->
         <Teleport to="body" :disabled="!patchFull">
-          <div ref="patchWrap" class="diff-patch-slot" :class="{ 'diff-patch-slot--full': patchFull }">
+          <!-- 卡片间距在这里显式带一份：全屏后槽挪到了 body 上，`.app` 上那个 --card-gap 继承不过来 -->
+          <div
+            ref="patchWrap"
+            class="diff-patch-slot"
+            :class="{ 'diff-patch-slot--full': patchFull }"
+            :style="{ '--card-gap': `${settings.cardGap}px` }"
+          >
             <GitPatchView
               v-model:view="store.patchView"
               :file="activeFile"
@@ -282,12 +297,8 @@ onDeactivated(() => {
 
 <style scoped>
 .diff-pane {
-  display: flex;
-  flex-direction: column;
   gap: var(--sp-2);
-  height: 100%;
   min-width: 0;
-  min-height: 0;
   padding: var(--sp-3);
   overflow: hidden;
 }
@@ -327,9 +338,6 @@ onDeactivated(() => {
 }
 
 .diff-head__subject {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   color: var(--ink-2);
   font-size: var(--fs-meta);
 }
@@ -426,14 +434,17 @@ onDeactivated(() => {
 /**
  * 全屏态：fixed 钉到 `.git-view` 的盒子（inline inset，见 pinPatchRect）。层级取 9 ——
  * 顶栏是 10（毛玻璃要压住内容），导航栏是 int32 上限（弹层开着它也在最上），全屏铺不到
- * 它，铺到它右侧为止。**这层自己不上底色**：外层再垫一块画布就是多余的又一层，左卡片
- * 顶到窗口边、**上 / 右 / 底各留一道 --card-gap**（上下对称），露出来的是底下的页面与
- * 壁纸；FLIP 过渡中缩放露出的同样是页面，不会闪白（.app 整块在底下垫着）。
+ * 它，铺到它右侧为止。**这层自己不上底色**：外层再垫一块画布就是多余的又一层。
+ *
+ * 落点是「导航栏那张卡片的外壳」：**顶边与它齐平（不留缝）**，**左 / 右 / 底各留一道
+ * --card-gap**（左那条就是与导航栏卡片之间的间距，右 / 底与页面四周同一档，取设置里
+ * 的「卡片间距」）；露出来的是底下的页面与壁纸；FLIP 过渡中缩放露出的同样是页面，
+ * 不会闪白（.app 整块在底下垫着）。
  */
 .diff-patch-slot--full {
   position: fixed;
   z-index: 9;
-  padding: var(--card-gap, 10px) var(--card-gap, 10px) var(--card-gap, 10px) 0;
+  padding: 0 var(--card-gap, 10px) var(--card-gap, 10px);
   transform-origin: top left;
 }
 </style>

@@ -18,6 +18,7 @@ import type { EtfProgress, EtfRefreshOutcome, EtfSyncPullOutcome } from '@/types
  * `pullEtfCache` 把别的机器推在用户仓库里的那份并进来，再规划缺口 —— 已经有人跑过回填的
  * 机器不会再把同一批日期向交易所要一遍；这一轮真拉到了东西，结束时 `publishEtfCache` 推回去。
  */
+import { delay } from '@workbench/core'
 import {
   backfillFrom,
   buildOverview,
@@ -55,10 +56,6 @@ const RETRY_GAP_MS = 1200
 /** 净值超过这个天数没更新才重拉（全历史一份，日常增量走份额那条路） */
 const REFRESH_STALE_DAYS = 5
 
-function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms))
-}
-
 async function loadCache(): Promise<EtfCache> {
   try {
     const raw = await invoke<unknown>('etf_load')
@@ -89,7 +86,7 @@ async function fetchBody(command: string, args: Record<string, unknown>): Promis
       lastError = error
     }
     if (attempt < RETRIES)
-      await sleep(RETRY_GAP_MS)
+      await delay(RETRY_GAP_MS)
   }
   throw new Error(errorText(lastError, '取数失败'))
 }
@@ -172,11 +169,11 @@ async function refreshSzse(cache: EtfCache, today: string, onProgress: (p: EtfPr
           const pages = parsed.pages > 0 ? parsed.pages : page + 1
           if (page >= pages || parsed.rows === 0)
             break
-          await sleep(SZSE_GAP_MS)
+          await delay(SZSE_GAP_MS)
         }
         done++
         onProgress({ phase: 'szse', done, total })
-        await sleep(SZSE_GAP_MS)
+        await delay(SZSE_GAP_MS)
       }
       for (const [date, values] of Object.entries(merged))
         mergeSharesInto(cache, date, values)
@@ -225,7 +222,7 @@ async function refreshSse(cache: EtfCache, onProgress: (p: EtfProgress) => void,
     }
     done++
     onProgress({ phase: 'sse', done, total: dates.length })
-    await sleep(SSE_GAP_MS)
+    await delay(SSE_GAP_MS)
   }
   return changed
 }

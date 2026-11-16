@@ -1,8 +1,8 @@
 import type { ParsedAttachment } from './parse'
 
+import { base64ToBytes, bytesToBase64 } from '@workbench/core'
 import { describe, expect, it } from 'vitest'
-import { bytesToBase64 } from './base64'
-import { isBulkMail, sanitizeMailBulkSenders } from './bulk'
+import { countUnreadMails, isBulkMail, sanitizeMailBulkSenders } from './bulk'
 import { contactLabel, contactOf, MAIL_CONTACT_NAME_MAX, MAIL_CONTACTS_MAX, sanitizeMailContact, sanitizeMailContacts, splitTypedAddresses } from './contacts'
 import { MAIL_ACCOUNTS_MAX, MAIL_POLL_DEFAULT, MAIL_POLL_MAX, MAIL_POLL_MIN, mailAccountReady, presetForAddress, sanitizeMailAccount, sanitizeMailAccounts, sanitizeMailAddress, sanitizeMailHost, sanitizeMailPollMinutes, sanitizeMailPort } from './mail'
 import { buildMime } from './mime'
@@ -175,6 +175,53 @@ describe('发信报文构建', () => {
     // ASCII 兜底名把非 ASCII 换成下划线（两个中文字符两个下划线），RFC 2231 的是完整百分号编码
     expect(mime).toMatch(/Content-Disposition: attachment; filename="__\.pdf"; filename\*=utf-8''%E6%8A%A5%E5%91%8A\.pdf/)
     expect(mime).toContain(`--${mime.match(/boundary="([^"]+)"/)![1]}--`)
+  })
+
+  it('带 HTML：multipart/alternative，纯文本在前、HTML 在后', () => {
+    const htmlBody = '<h1>标题</h1><ul><li>☑ 一条</li></ul>'
+    const mime = buildMime({
+      from: 'me@163.com',
+      to: ['me@163.com'],
+      subject: '工作日志',
+      text: '# 标题\n- [x] 一条',
+      html: htmlBody,
+    })
+    expect(mime).toContain('Content-Type: multipart/alternative; boundary=')
+    expect(mime).not.toContain('multipart/mixed')
+    const alt = mime.match(/multipart\/alternative; boundary="([^"]+)"/)![1]
+    expect(mime).toContain(`--${alt}--`)
+    // 收件端挑认得的那一档：纯文本在前、HTML 在后
+    const plainAt = mime.indexOf('Content-Type: text/plain; charset=utf-8')
+    const htmlAt = mime.indexOf('Content-Type: text/html; charset=utf-8')
+    expect(plainAt).toBeGreaterThan(-1)
+    expect(htmlAt).toBeGreaterThan(plainAt)
+    // HTML 也是 base64：解回来就是传进去的那份
+    const start = mime.indexOf('\r\n\r\n', htmlAt) + 4
+    const end = mime.indexOf('\r\n--', start)
+    const htmlBytes = base64ToBytes(mime.slice(start, end).replace(/\r\n/g, ''))
+    expect(htmlBytes).not.toBeNull()
+    const decoded = new TextDecoder().decode(htmlBytes ?? new Uint8Array())
+    expect(decoded).toBe(htmlBody)
+  })
+
+  it('html 正文 + 附件：multipart/mixed 里先正文的 alternative、再文件', () => {
+    const mime = buildMime({
+      from: 'me@163.com',
+      to: ['me@163.com'],
+      subject: '带附件',
+      text: '文本',
+      html: '<p>文本</p>',
+      attachments: [{ name: 'a.txt', contentType: 'text/plain', bytesBase64: bytesToBase64(new TextEncoder().encode('x')) }],
+    })
+    expect(mime).toContain('multipart/mixed; boundary=')
+    expect(mime).toContain('multipart/alternative; boundary=')
+    expect(mime.indexOf('multipart/alternative')).toBeLessThan(mime.indexOf('Content-Disposition: attachment'))
+    // 两层边界各是各的
+    const mixed = mime.match(/multipart\/mixed; boundary="([^"]+)"/)![1]
+    const alt = mime.match(/multipart\/alternative; boundary="([^"]+)"/)![1]
+    expect(mixed).not.toBe(alt)
+    expect(mime).toContain(`--${mixed}--`)
+    expect(mime).toContain(`--${alt}--`)
   })
 
   it('超 30 MB 直接拒', () => {
@@ -652,6 +699,20 @@ describe('广告邮件的识别', () => {
     expect(sanitizeMailBulkSenders([' A@B.com ', 'a@b.com', 'not-an-address', '', 42, null])).toEqual(['a@b.com'])
     expect(sanitizeMailBulkSenders(undefined)).toEqual([])
     expect(sanitizeMailBulkSenders('a@b.com')).toEqual([])
+  })
+
+  it('角标只数正常未读：已读不算，推广段与黑名单发件人都不算', () => {
+    const mails = [
+      { seen: false, subject: '项目排期', from: '张三 <zhang@corp.com>' },
+      { seen: true, subject: '已读的信', from: 'li@corp.com' },
+      { seen: false, subject: '【京东】限时秒杀 全场 5 折', from: 'ad@mail.jd.com' },
+      { seen: false, subject: '推广通知', from: 'promo@shop.example.com' },
+      { seen: false, subject: '周报', from: 'spam@corp.com' },
+    ]
+    expect(countUnreadMails(mails)).toBe(2)
+    // 用户亲手标过的发件人也不进角标（与清单的推广段同一口径）
+    expect(countUnreadMails(mails, ['spam@corp.com'])).toBe(1)
+    expect(countUnreadMails([])).toBe(0)
   })
 })
 

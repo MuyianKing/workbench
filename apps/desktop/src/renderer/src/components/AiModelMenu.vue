@@ -166,7 +166,7 @@ const fillRatio = computed(() => slider.value / Math.max(1, ai.thinkingLevels.le
       <el-icon class="menu__chip-icon">
         <Cpu />
       </el-icon>
-      <span class="menu__chip-text">{{ triggerLabel }}</span>
+      <span class="menu__chip-text truncate">{{ triggerLabel }}</span>
       <el-icon class="menu__caret" :class="{ 'is-open': open }">
         <ArrowDown />
       </el-icon>
@@ -182,7 +182,7 @@ const fillRatio = computed(() => slider.value / Math.max(1, ai.thinkingLevels.le
         @click="providersOpen = !providersOpen"
       >
         <span class="menu__avatar">{{ serviceInitial }}</span>
-        <span class="menu__service-name">{{ serviceLabel }}</span>
+        <span class="menu__service-name truncate">{{ serviceLabel }}</span>
         <span v-if="ai.providerName" class="menu__pill">API</span>
         <el-icon class="menu__service-arrow">
           <ArrowRight />
@@ -207,7 +207,7 @@ const fillRatio = computed(() => slider.value / Math.max(1, ai.thinkingLevels.le
             :title="model.name"
             @click="pick(model.key)"
           >
-            <span class="menu__model-name">{{ model.name }}</span>
+            <span class="menu__model-name truncate">{{ model.name }}</span>
             <span v-if="model.imageInput" class="menu__pill">视觉</span>
             <el-icon v-if="model.key === ai.activeChoiceKey" class="menu__model-check">
               <Check />
@@ -264,7 +264,7 @@ const fillRatio = computed(() => slider.value / Math.max(1, ai.thinkingLevels.le
             @click="switchService(service.id)"
           >
             <span class="menu__avatar">{{ service.label.slice(0, 1).toUpperCase() }}</span>
-            <span class="menu__provider-name">{{ service.label }}</span>
+            <span class="menu__provider-name truncate">{{ service.label }}</span>
             <span class="menu__pill">API</span>
             <el-icon v-if="service.id === ai.providerName" class="menu__model-check">
               <Check />
@@ -323,9 +323,6 @@ const fillRatio = computed(() => slider.value / Math.max(1, ai.thinkingLevels.le
 
 .menu__chip-text {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /* 收展那颗小箭头：开合翻个面 */
@@ -395,12 +392,9 @@ const fillRatio = computed(() => slider.value / Math.max(1, ai.thinkingLevels.le
 .menu__service-name {
   flex: 0 1 auto;
   min-width: 0;
-  overflow: hidden;
   color: var(--ink);
   font-size: var(--fs-body);
   font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .menu__service-arrow {
@@ -465,11 +459,8 @@ const fillRatio = computed(() => slider.value / Math.max(1, ai.thinkingLevels.le
 .menu__model-name {
   flex: 0 1 auto;
   min-width: 0;
-  overflow: hidden;
   color: var(--ink);
   font-size: var(--fs-body);
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /* 选中那一行末尾打勾（参考设计里是细黑勾，不抢主题色） */
@@ -535,11 +526,8 @@ const fillRatio = computed(() => slider.value / Math.max(1, ai.thinkingLevels.le
 .menu__provider-name {
   flex: 0 1 auto;
   min-width: 0;
-  overflow: hidden;
   color: var(--ink);
   font-size: var(--fs-body);
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /* 卡底那一行：开模型管理弹层 */

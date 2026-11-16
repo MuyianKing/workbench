@@ -131,7 +131,7 @@ function detailWidth(value: number, max: number): string {
         @click="toggleModel(m.key)"
       >
         <div class="source__line">
-          <span class="source__name mono" :title="m.key">{{ m.key }}</span>
+          <span class="source__name mono truncate" :title="m.key">{{ m.key }}</span>
           <span class="source__num mono">
             {{ formatTokensWan(totalTokens(m.counters)) }}
             <el-icon class="share__chevron" :class="{ 'is-open': expandedModel === m.key }">
@@ -145,7 +145,7 @@ function detailWidth(value: number, max: number): string {
       </button>
       <div v-if="expandedModel === m.key" class="share__detail">
         <div v-for="row in detailRows(m.counters)" :key="row.label" class="detail__row">
-          <span class="detail__label">{{ row.label }}</span>
+          <span class="detail__label truncate">{{ row.label }}</span>
           <span class="detail__track">
             <i :style="{ width: detailWidth(row.value, totalTokens(m.counters)) }" />
           </span>
@@ -172,7 +172,7 @@ function detailWidth(value: number, max: number): string {
         :aria-expanded="expandedTool === s.key"
         @click="toggleTool(s.key)"
       >
-        <span class="tool__name" :title="s.key">{{ SOURCE_LABELS[s.key] ?? s.key }}</span>
+        <span class="tool__name truncate" :title="s.key">{{ SOURCE_LABELS[s.key] ?? s.key }}</span>
         <span class="tool__track"><i :style="{ width: sourceWidth(s.counters) }" /></span>
         <span class="tool__num mono">{{ formatCounters(s.counters) }}</span>
         <el-icon
@@ -185,7 +185,7 @@ function detailWidth(value: number, max: number): string {
       </button>
       <div v-if="expandedTool === s.key" class="share__detail">
         <div v-for="tm in expandedToolModels" :key="tm.key" class="detail__row">
-          <span class="detail__label mono" :title="tm.key">{{ tm.key }}</span>
+          <span class="detail__label mono truncate" :title="tm.key">{{ tm.key }}</span>
           <span class="detail__track">
             <i :style="{ width: detailWidth(totalTokens(tm.counters), totalTokens(expandedToolModels[0]?.counters ?? emptyCounters())) }" />
           </span>
@@ -271,9 +271,6 @@ function detailWidth(value: number, max: number): string {
   /* 列宽从 40% 收到 34%：短标签（输出/思考）后面不再是大片留白，条形相应变长 */
   flex: 0 0 34%;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   font-size: var(--fs-micro);
   color: var(--ink-2);
 }
@@ -333,9 +330,6 @@ function detailWidth(value: number, max: number): string {
 
 .source__name {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   font-size: var(--fs-meta);
   font-weight: 600;
 }
@@ -397,9 +391,6 @@ function detailWidth(value: number, max: number): string {
 .tool__name {
   flex: 0 0 40%;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   font-size: var(--fs-micro);
 }
 

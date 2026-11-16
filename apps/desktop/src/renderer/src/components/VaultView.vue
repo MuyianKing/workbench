@@ -312,7 +312,7 @@ async function lock(): Promise<void> {
         <div class="filter__tools">
           <!-- 同步是自动的（进这一页一次、增删改各一次），所以这一带没有同步按钮：
                只在**没成功**的时候留一行字（失败原因 / 两边密钥对不上），成功不留字 -->
-          <span v-if="store.syncNote" class="vault__note" :class="{ 'is-fail': store.syncFailed }">
+          <span v-if="store.syncNote" class="vault__note truncate" :class="{ 'is-fail': store.syncFailed }">
             {{ store.syncNote }}
           </span>
           <el-tooltip content="密钥与同步" placement="bottom">
@@ -387,7 +387,7 @@ async function lock(): Promise<void> {
             <div v-if="!isCollapsed(section.key)" class="grid">
               <article v-for="record in section.records" :key="record.id" class="card">
                 <header class="card__head">
-                  <h3 class="card__name" :title="record.name">
+                  <h3 class="card__name truncate" :title="record.name">
                     {{ record.name }}
                   </h3>
 
@@ -644,11 +644,8 @@ async function lock(): Promise<void> {
 /* 同步结果那句话：成功用灰字（它是常态），失败才用状态色 —— 彩色只表达运行状态 */
 .vault__note {
   max-width: 320px;
-  overflow: hidden;
   color: var(--ink-3);
   font-size: var(--fs-meta);
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .vault__note.is-fail {
@@ -803,12 +800,9 @@ async function lock(): Promise<void> {
 .card__name {
   margin: 0;
   min-width: 0;
-  overflow: hidden;
   color: var(--ink);
   font-size: var(--fs-body);
   font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /* 右上角那颗「⋯」：悬停 / 键盘聚焦时显形，菜单开着时也显形（见 openMenu 的说明） */

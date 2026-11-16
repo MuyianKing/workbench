@@ -125,7 +125,7 @@ const used = computed(() => {
             :class="`is-${row.tier}`"
           >
             <div class="credits__pack">
-              <span class="credits__name" :title="row.name">{{ row.name }}</span>
+              <span class="credits__name truncate" :title="row.name">{{ row.name }}</span>
               <span class="credits__amount">
                 {{ number(row.remain) }}<span v-if="row.size > 0" class="credits__dim"> / {{ number(row.size) }}</span>
               </span>
@@ -244,11 +244,8 @@ const used = computed(() => {
 }
 
 .credits__name {
-  overflow: hidden;
   font-size: var(--gw-fs-meta);
   color: var(--ink);
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .credits__amount {

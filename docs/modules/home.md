@@ -20,7 +20,7 @@ Rust 侧 `ai_news.rs`（热点源白名单）与 `weather.rs`（天气主机白�
   主机名白名单是 Rust 侧 `weather.rs` 里那两个、各管一段；**城市名会作为查询串发出去**，
   这是这条出口唯一的用户内容。
 - **布局与卡片开关住 `theme.json`**（栏 / 行 / 卡片两层结构、`hidden`），跟着外观同步整份走；
-  「上次停在哪一页」那类机器状态不进它（口径见 [../ipc-and-state/constraints.md](ipc-and-state.md)）。
+  「上次停在哪一页」那类机器状态不进它（口径见 [ipc-and-state.md](ipc-and-state.md)）。
 - **卡片与导航的下限同一条**：至少留一块卡片、至少留一页（收敛函数里拦下，
   界面上最后一颗开关禁用）。
 
@@ -36,7 +36,7 @@ Rust 侧 `ai_news.rs`（热点源白名单）与 `weather.rs`（天气主机白�
   「还没有项目。加一个之后，这里会记下每天的动静。」
 - **天气排在实话最前**（说「此刻」，后面说「今天」）：数据来自 weather store 后台按间隔取
   （这一行自己不发 IPC，天气却是后台取的；`weatherCity` 没填、没取到、取失败都是空串，那段就不画 ——
-  出网边界见[「数据与隐私」](../features-and-architecture.md)）。显示口径只有「现象 + 气温」，
+  出网边界见[「数据与隐私」](../privacy.md)）。显示口径只有「现象 + 气温」，
   码表与解析在 [weather.ts](../../packages/weather/src/weather.ts)；实况半小时一取，失败不清上一次的值、
   原因只留控制台。连续天数走 `packages/core/src/activity.ts` 的 `streakOf`（只取这一个数，不必铺整张日历）
 - 首页是**一层画布 + 九块卡片**（活跃度、Coding 用量、系统状态、我的项目、快捷操作、快捷启动、

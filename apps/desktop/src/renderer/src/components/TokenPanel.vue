@@ -299,7 +299,7 @@ function selectBucket(index: number): void {
       <!-- 底部的更新时间与状态点合并到标题行右侧,与刷新按钮同一条 flex 中线对齐 -->
       <span class="head__meta" :title="statusTitle">
         <i class="head__dot" :class="statusFail ? 'is-fail' : 'is-ok'" aria-hidden="true" />
-        <span class="head__time">{{ statusText }}</span>
+        <span class="head__time truncate">{{ statusText }}</span>
       </span>
       <!-- 同步按钮只在设置里填了仓库地址时出现:没开同步就没得同步,按钮放着只会让人点 -->
       <button
@@ -497,9 +497,6 @@ function selectBucket(index: number): void {
 }
 
 .head__time {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   font-size: var(--fs-micro);
   color: var(--ink-3);
 }

@@ -39,7 +39,7 @@
   `input` 里没有的模型收到的是 `(image omitted: model does not support images)` ——
   所以界面上贴图那道门槛（`AiModelChoice.imageInput`）不是装饰。`get_messages` 读回来的
   用户消息里那段图还在（`{type:'image',data,mimeType}`，那段 base64 就是能直接画的数据 URL）。
-- **瘦身后的树上（2026-09-29）**：删掉那 7 个包、`resources/pi` 只剩 59MB 之后，两条 API 形态
+- **瘦身后的树上（2026-09-29）**：删掉那 7 个包、`apps/desktop/resources/pi` 只剩 59MB 之后，两条 API 形态
   （`openai-completions` 打 `/v1/chat/completions` 带 `Authorization: Bearer`、`anthropic-messages`
   打 `/v1/messages` 带 `x-api-key`）都照常把请求发到假端点，`-e permission.js` 照常加载、
   confirm 一问一答之后 `bash` 真的跑出结果；models.json 的 `apiKey` 照应用那样写
@@ -54,7 +54,7 @@
   ai.test.ts 的夹具换成了新表里真实存在的 id。
 
 - **按保留清单裁剪之后（2026-10-22）**：`vendor-pi.mjs` 从「删几个包」改成「保留清单」、
-  又收窄到运行时真正会加载的三个包（`PRUNE_REVISION=4`）之后重跑了一遍，`resources/pi`
+  又收窄到运行时真正会加载的三个包（`PRUNE_REVISION=4`）之后重跑了一遍，`apps/desktop/resources/pi`
   从 55.6MB 降到 **12.8MB（147 个文件）**，下面这些仍然成立：
   - `node cli.js --version` → `1.0.4`；
   - 假端点一轮：`extension_ui_request` 一问一答 → `bash` 真跑出 `probe-ok` → `agent_settled`；
@@ -71,7 +71,7 @@
 
 - **Pi 1.5.0（2026-11-06 重验）**：`PI_VERSION` / `CATALOG_VERSION` 都到 1.5.0 之后，按上面同一套假端点
   探针（放 `%TEMP%`，不进版本库）重跑，**17 项全过**：
-  - `node cli.js --version` → `1.5.0`；裁完 `resources/pi` 是 **13.5MB / 160 个文件**（1.0.4 是 12.8MB / 147，
+  - `node cli.js --version` → `1.5.0`；裁完 `apps/desktop/resources/pi` 是 **13.5MB / 160 个文件**（1.0.4 是 12.8MB / 147，
     整棵树 tar.gz 3.3MB）；
   - openai-completions：`extension_ui_request`（confirm）一问一答 → `bash` 真跑出 `probe-ok` →
     `agent_settled`（`aborted:false`）；read / write / edit 各成功一次，write 真的落盘、edit 真的改了内容；

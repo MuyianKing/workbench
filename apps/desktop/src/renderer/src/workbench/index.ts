@@ -1,4 +1,4 @@
-import type { AppSettings, AuthProvider, MailNotifyPayload, Result, ThemeConfig, WorkbenchApi } from '@/types'
+import type { AppSettings, AuthProvider, MailNotifyPayload, MailUnreadPayload, Result, ThemeConfig, WorkbenchApi } from '@/types'
 /**
  * `window.workbench` 的 Tauri 实现 —— **装配根**。
  *
@@ -312,6 +312,8 @@ export function installTauriWorkbench(): void {
   listen<{ count: number }>('app:quit-confirm', payload => events.emit('quitConfirm', payload))
   // 邮件通知点击：Rust 弹的系统 toast 被点了，载荷是（账户, uid）
   listen<MailNotifyPayload>('mail:notify-click', payload => events.emit('mailNotifyClick', payload))
+  // 邮件后台监视每轮的收件箱未读摘要（导航栏角标）
+  listen<MailUnreadPayload>('mail:unread', payload => events.emit('mailUnread', payload))
   window.workbench = createApi()
 }
 

@@ -47,5 +47,5 @@ tag 可以带预发布后缀（如 `v0.2.1-rc.1`），那样 Release 标成 prer
 - **Node 22.19 或更新**：AI 助手那页的 Pi 已随应用内置（开源编码 Agent，不给安装包多背一个 Node），
   不用另装；只需要系统里有这个版本的 Node 来跑内置的那份。
 
-这些功能的边界见[功能与架构·数据与隐私](../features-and-architecture.md#数据与隐私) 与
+这些功能的边界见[数据与隐私](../privacy.md) 与
 [AI 助手](../modules/ai.md)。

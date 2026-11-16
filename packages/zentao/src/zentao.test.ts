@@ -3,9 +3,12 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   diffZentaoBugs,
   fetchZentaoBugs,
+  mergeZentaoUnread,
   sanitizeZentaoPollMinutes,
+  sanitizeZentaoUnreadBugs,
   ZENTAO_DEFAULT_URL,
   ZENTAO_POLL_MINUTES_DEFAULT,
+  ZENTAO_UNREAD_MAX,
 } from './index'
 
 function product(id: unknown, name = `产品 ${id}`) {
@@ -330,5 +333,30 @@ describe('产品清单来自账号资料（/v1/products 为空时的正路）', 
     })
     const result = await fetchZentaoBugs(read)
     expect(result.bugs[0].assignedTo).toBe('杨峰')
+  })
+})
+
+describe('未读角标的账本', () => {
+  it('收敛落盘值：正整数、去重、降序、截断', () => {
+    expect(sanitizeZentaoUnreadBugs([3, 1, 3, 0, -2, 2.5, '7', null])).toEqual([3, 1])
+    expect(sanitizeZentaoUnreadBugs(undefined)).toEqual([])
+    expect(sanitizeZentaoUnreadBugs(`[1]`)).toEqual([])
+    const many = Array.from({ length: ZENTAO_UNREAD_MAX + 20 }, (_, i) => i + 1)
+    expect(sanitizeZentaoUnreadBugs(many)).toHaveLength(ZENTAO_UNREAD_MAX)
+  })
+
+  it('合并：上一轮未读里仍在当前列表的留着，并进本轮新增、降序去重', () => {
+    // 2 还在、9 被解决掉了；本轮新增 5（6 是当前列表里本来就有的旧 Bug，不该进账本）
+    expect(mergeZentaoUnread([9, 2], [5], [2, 5, 6])).toEqual([5, 2])
+    // 首轮基线（没有新增）不该清掉还没看的旧账，只按当前列表裁剪
+    expect(mergeZentaoUnread([9, 2], [], [2])).toEqual([2])
+    expect(mergeZentaoUnread([], [], [])).toEqual([])
+  })
+
+  it('合并结果也受上限约束：只留最大的那些编号', () => {
+    const current = Array.from({ length: ZENTAO_UNREAD_MAX + 5 }, (_, i) => i + 1)
+    const merged = mergeZentaoUnread([], current, current)
+    expect(merged).toHaveLength(ZENTAO_UNREAD_MAX)
+    expect(merged[0]).toBe(ZENTAO_UNREAD_MAX + 5)
   })
 })

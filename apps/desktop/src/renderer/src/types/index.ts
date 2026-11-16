@@ -3,7 +3,7 @@
  *
  * 域类型（笔记 / 知识库 / AI / 用量 / 外观…）住在各自的包（packages/*）里，这里聚合
  * re-export，渲染层照旧从 `@/types` 一站式取类型。应用级形状按用途分了两份：
- * 设置与默认值在 [settings.ts](./settings.ts)，`window.workbench` 的通道在 [api.ts](./api.ts)；
+ * 设置与默认值在 [settings.ts](./settings.ts)，`window.workbench` 的通道在 [api/](./api/)（按域一份）；
  * 本文件只剩项目 / 终端 / 窗口 / 事件这些零散形状。
  */
 
@@ -759,4 +759,22 @@ export interface QuitConfirmPayload {
 export interface MailNotifyPayload {
   account: string
   uid: number
+}
+
+/**
+ * 后台监视每轮推上来的收件箱**未读**摘要（导航栏邮箱角标据此计数）。
+ * 只带计数与广告识别要用的三样，完整摘要仍由 mail_list 在进页面时取。
+ * `checkedAt` 是这一轮**开始取数**的 Unix 秒：渲染层比它更晚的本地改动（读信 / 删信 /
+ * 清单同步）说明这批已经过时，整批丢掉。
+ */
+export interface MailUnreadPayload {
+  checkedAt: number
+  accounts: Array<{
+    address: string
+    mails: Array<{
+      uid: number
+      subject: string
+      from: string
+    }>
+  }>
 }

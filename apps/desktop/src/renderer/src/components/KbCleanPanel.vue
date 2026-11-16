@@ -80,7 +80,7 @@ watch(
 </script>
 
 <template>
-  <div class="clean">
+  <div class="clean page">
     <header class="clean__head">
       <div class="clean__bar">
         <h3 class="clean__title">
@@ -147,7 +147,7 @@ watch(
           新入库 {{ created.length }} 个
         </p>
         <ul class="clean__rels">
-          <li v-for="rel in createdShown" :key="rel" class="clean__rel">
+          <li v-for="rel in createdShown" :key="rel" class="clean__rel truncate">
             {{ rel }}
           </li>
         </ul>
@@ -160,7 +160,7 @@ watch(
           重新入库 {{ updated.length }} 个
         </p>
         <ul class="clean__rels">
-          <li v-for="rel in updatedShown" :key="rel" class="clean__rel">
+          <li v-for="rel in updatedShown" :key="rel" class="clean__rel truncate">
             {{ rel }}
           </li>
         </ul>
@@ -174,11 +174,7 @@ watch(
 
 <style scoped>
 .clean {
-  display: flex;
-  flex-direction: column;
   gap: var(--sp-2);
-  height: 100%;
-  min-height: 0;
 }
 
 .clean__head {
@@ -363,8 +359,5 @@ watch(
   font-family: var(--font-mono);
   font-size: var(--fs-micro);
   line-height: 20px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 </style>

@@ -38,7 +38,7 @@
 ### 要同步改的文档
 
 - [kb.md](../modules/kb.md) 的「约束」与「实现」：删除库内 raw 兼容层、来源三种状态变两种、同步范围。
-- [features-and-architecture.md](../features-and-architecture.md) 的目录结构与数据隐私相关段落。
+- [directory.md](../directory.md) 与 [privacy.md](../privacy.md)。
 - 知识库仓库自己的 README（仓库在应用外，需要你那边同步改）：`data/raw` 不再是物理投放区，只是逻辑命名空间。
 - [kb-clean.ts](../../packages/kb/src/kb-clean.ts) 的提示词与单测。
 

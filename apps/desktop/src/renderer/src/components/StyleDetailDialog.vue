@@ -231,7 +231,7 @@ const canvas = computed(() => props.design?.canvas ?? '')
   <AppDialog v-model="visible" class="style-dialog" width="min(1120px, 94vw)">
     <template #header>
       <div class="dialog-head">
-        <h3 class="dialog-head__title">
+        <h3 class="dialog-head__title truncate">
           {{ title }}
         </h3>
         <el-segmented v-model="view" :options="viewOptions" size="small" aria-label="查看方式" />
@@ -285,7 +285,7 @@ const canvas = computed(() => props.design?.canvas ?? '')
                 </button>
                 <span class="swatch__label">{{ swatch.label }}</span>
                 <button
-                  class="swatch__key mono"
+                  class="swatch__key mono truncate"
                   type="button"
                   :title="`复制变量名 ${swatch.key}`"
                   @click="copyText(swatch.key, '变量名')"
@@ -319,7 +319,7 @@ const canvas = computed(() => props.design?.canvas ?? '')
                 </button>
                 <span class="type-row__spec mono">{{ row.spec }}</span>
               </div>
-              <p class="type-row__sample" :style="row.style">
+              <p class="type-row__sample truncate" :style="row.style">
                 {{ row.sample }}
               </p>
             </div>
@@ -339,7 +339,7 @@ const canvas = computed(() => props.design?.canvas ?? '')
             <div class="samples__row" :class="`samples__row--${entry.group}`">
               <div v-for="sample in entry.samples" :key="sample.key" class="sample">
                 <div
-                  class="sample__box"
+                  class="sample__box truncate"
                   :class="`sample__box--${entry.group}`"
                   :style="sample.style"
                 >
@@ -381,7 +381,7 @@ const canvas = computed(() => props.design?.canvas ?? '')
           </p>
           <div class="steps">
             <div v-for="step in spacingSteps" :key="step.key" class="step">
-              <span class="step__label">{{ step.label }}</span>
+              <span class="step__label truncate">{{ step.label }}</span>
               <span class="step__bar"><i :style="{ width: step.width }" /></span>
               <span class="step__raw mono">{{ step.raw }}</span>
             </div>
@@ -430,9 +430,6 @@ const canvas = computed(() => props.design?.canvas ?? '')
   margin: 0;
   flex: 1;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   color: var(--ink);
   font-size: var(--fs-body);
 }
@@ -547,9 +544,6 @@ const canvas = computed(() => props.design?.canvas ?? '')
   color: var(--ink-3);
   font-size: var(--fs-micro);
   text-align: left;
-  text-overflow: ellipsis;
-  overflow: hidden;
-  white-space: nowrap;
   cursor: pointer;
 }
 
@@ -607,8 +601,6 @@ button.sample__label:hover {
   margin: 0;
   min-width: 0;
   color: var(--ink);
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 /* ---- 组件样张 ---- */
@@ -653,9 +645,6 @@ button.sample__label:hover {
   border: 1px solid transparent;
   border-radius: var(--r-sm);
   padding: 6px 12px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .sample__box--卡片 {
@@ -694,9 +683,6 @@ button.sample__label:hover {
 .step__label {
   color: var(--ink-2);
   font-size: var(--fs-micro);
-  text-overflow: ellipsis;
-  overflow: hidden;
-  white-space: nowrap;
 }
 
 .step__bar {

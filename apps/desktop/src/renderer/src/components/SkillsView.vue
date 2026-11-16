@@ -141,7 +141,7 @@ function installActive(): void {
             <h2 class="head__title">
               技能
             </h2>
-            <span class="head__loc mono" :title="locTitle">
+            <span class="head__loc mono truncate" :title="locTitle">
               {{ store.locationText }}
             </span>
           </div>
@@ -269,9 +269,6 @@ function installActive(): void {
 
 .head__loc {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   color: var(--ink-3);
   font-size: var(--fs-micro);
 }

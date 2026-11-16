@@ -13,6 +13,19 @@
 纯口径在 `packages/notes/src/note.ts` 与 `note-image.ts`。
 跨模块通用事实见 [features-and-architecture.md](../features-and-architecture.md)，红线见 [AGENTS.md](../../AGENTS.md)。
 
+**先读这一段就够了**——下面十条红线，破一条就是 bug；每条的依据与边界在下面按主题分的十节里，改到哪块读哪块。
+
+- 笔记没有数据文件：正文就是那个文件夹里的 `.md`；别塞进同步或主数据文件。
+- 笔记命令一律带 root，路径只认相对笔记根（`..` / 绝对路径在 `notes.rs` 被挡）。
+- 结构改动一律用后端重扫出来的树，别本地推算。
+- 写盘带上次读盘 / 落盘的 mtime，别处改过就一个字都不写。
+- 只读默认开着、状态不落盘；只挡正文，左栏与同步 / 素材管理照常。
+- Vditor 的 `cdn` 必须指随包那份（`public/vditor/`），默认指 unpkg。
+- 上传图片七条不能破（`upload.handler` 必须配、成功返 `null`、仓库地址空时只提示、访问地址只由 TS 拼、`no-referrer` 不能删）。
+- 素材管理只放行「未引用」，清单与引用都只限「这台机器 + 当前笔记本」那一层。
+- 同步只认「这个文件夹自己有 `.git`」；不 `init`、不接远端，冲突不替用户挑边。
+- 独立编辑窗口只装适配层、不装 store；文件路径只从 Rust 会话取。
+
 **动手前先读 NoteTree.vue 顶部的注释**：空白区的 `blankHover` 标记、展开态清单那两条 `el-tree` 坑
 （`auto-expand-parent` 默认 true、清单里不能放选中项自己）只在那里写清楚。
 
@@ -294,9 +307,11 @@ notes store 里只在「重读这个文件夹」几处与每次同步后探一�
   `TitleBar.vue` 的手画 SVG，但那份引着 store；这扇窗不装 store，图标照抄不引）；标题栏与底栏都标
   `data-tauri-drag-region`（双击最大化 / 还原由 Tauri 注入脚本接管，组件里**不要**再写 `@dblclick` 自己 toggle）。
   拖动要 capabilities 放行：`markdown-window.json` 的 `core:window:allow-start-dragging`（`core:default` 不含它，
-  被 ACL 拦下静默失效）。最大化状态由 Rust 推（`Resized` 里比对后发 `markdown-window:state-changed`，用**这扇窗
-  自己的**上次观测值 —— 全局 `MaximizedFlag` 是主窗口的，共用会互相顶掉），渲染层经 `onMarkdownWindowState` 订阅、
-  `markdownWindowIsMaximized` 问初值；最小化 / 最大化复用 `window_minimize` / `window_toggle_maximize`，关闭走
+  被 ACL 拦下静默失效）。**打开即最大化**（builder `maximized(true)`）：窗口隐藏阶段 tao 只记标志、不调
+  `ShowWindow`（防闪现），page load 后 `show()` 那一刻才真正 `SW_MAXIMIZE` —— 第一帧就是满屏，不会先弹小块再跳大；
+  builder 上的 `inner_size(960, 760)` 仍要留 —— 它是用户「还原」时回来的尺寸。最大化状态由 Rust 推（`Resized` 里比对后发
+  `markdown-window:state-changed`，用**这扇窗自己的**上次观测值 —— 全局 `MaximizedFlag` 是主窗口的，共用会互相顶掉），渲染层经
+  `onMarkdownWindowState` 订阅、`markdownWindowIsMaximized` 问初值；最小化 / 最大化复用 `window_minimize` / `window_toggle_maximize`，关闭走
   `markdown_window_close`（防抖那份由输入路径交出去，见下「关闭是握手」）。
 - **路径只从 Rust 会话取**：`markdown_window_context` / `markdown_window_save` 按窗口 label 查会话，不接受渲染层传
   路径 —— 这扇窗没法读写它被打开的文件以外的任何东西；读写走 `notes::read` / `notes::write`，冲突规则与笔记页一致。
@@ -340,6 +355,8 @@ notes store 里只在「重读这个文件夹」几处与每次同步后探一�
 
 ## 实现
 
+### 页面与左栏树
+
 - **笔记本就是本机的一个文件夹**（第一次进这页必须先选它）：目录树就是文件夹本来的结构，正文就是里面的 `.md` ——
   拿 VSCode / Typora 直接改那些文件也成立，切回应用（窗口重新获得焦点）或点刷新就是最新的。没选文件夹前整页只有
   一句引导与「选择文件夹」。数据模型见「数据模型」。
@@ -374,6 +391,9 @@ notes store 里只在「重读这个文件夹」几处与每次同步后探一�
   `el-tree` 两处脾气（`auto-expand-parent` 顶回展开态、名字栏那层 `.node` 必须 `min-width: 0` 且 `flex: 1` 盖住
   整行余宽 —— 否则长名字溢出、树横向错位，右键也接不住行尾）见
   [`NoteTree.vue`](../../apps/desktop/src/renderer/src/components/NoteTree.vue) 顶部注释与样式。
+
+### 右栏、写盘与链接
+
 - 右栏标题行：左边名字 + 所在几层文件夹（面包屑，最外层无上一级就不显示），右边保存状态（「已保存 · 最后修改
   时间」，写盘失败换原因）。正文按 **600ms 防抖**落盘（先写同目录临时文件再改名，断电不留半篇），切笔记 / 离开
   先冲刷；换篇交出去的正文带它属于哪一篇的路径，上层把树交给后端重扫结果 —— 改名 / 拖动后靠后端回来的新路径接着
@@ -384,11 +404,17 @@ notes store 里只在「重读这个文件夹」几处与每次同步后探一�
   `/别的.md`、百分号编码都认，`#小节` / `?x` 切掉）；树上没有时**先重扫再看**，还没有就说「找不到这篇笔记」。能跳的
   只有 `.md` / `.markdown`，图片 / 附件 / 锚点说一句「跳不过去」，不静默。三处 Vditor 脾气（IR 链接不是 `<a>`、
   `link.isOpen` 必须关、Ctrl 隐形所以 placeholder 写了一句）见「正文编辑器」。
+
+### 只读模式
+
 - **只读模式**（**默认开着**，点标题行「只读」按钮或 Ctrl+/ 切可写）只收**正文**写入口：正文不可编辑、格式菜单
   不弹。不落盘，也不管左栏（增删改拖照常、同步与素材管理照常）—— 那些是明确操作。**要点不是「关掉编辑」，而是
   别让它看着还能编辑**：点击与按键在**捕获阶段**拦在 Vditor 之外，正文另补 `tabindex` 让键盘照常滚。四条坑与
   解法见「只读模式」。**Vditor 初始化是异步的**，所以只读那档不只挂 watch：初始化完成那一刻由 options 的 `after`
   回调再核一遍（编辑器可能是「已切到只读之后」才建起来的）。
+
+### 编辑器动作（右键菜单 / 表格）
+
 - **编辑器动作全部挪到正文右键菜单**，工具带 CSS 藏起来（元素还在）：菜单三排图标 + 两行带子菜单（段落 / 插入），
   共 17 项 —— 正好是工具带全部动作；光标在表格单元格时再多一排（见下条）。位置贴指针、不越出窗口，右边放不下子
   菜单整份翻左；点别处 / Esc / 滚轮 / 窗口变化收起。**菜单自己不实现编辑动作**：每项按名字点工具带对应按钮
@@ -401,12 +427,15 @@ notes store 里只在「重读这个文件夹」几处与每次同步后探一�
   光标 / 撤销栈都归它）；两个坑：匹配器在非 Mac 上把带 Shift 的 `=` / `-` 改写成 `+` / `_` 后才比 `event.key`
   （合成事件得给改写后的键），事件必须 `bubbles: true`（监听器在 IR 元素上）。动作名带 `table:` 前缀经 `execTable`
   分流，与工具带动作用同一条 `act` 事件。
+
+### 图片与素材管理
+
 - **粘贴的图片推到用户自己的 git 仓库**（不放进笔记本目录）：正文留一条
   `![图片](https://…/images/<设备>/<笔记本>/20260916-104512-ab12cd34.png)` 外链，笔记文件始终很小。一次上传一次
   `pull → 写文件 → commit → push`（与 Token 同步同一套机制、另一套地址与克隆目录）；文件名 = 时间戳 + 随机段（按名
   排即按时间排，同秒多贴不覆盖）。三层落点里，笔记本那段是「目录名小写 + 整个路径的摘要」（如 `笔记-3f2a91c4`）——
   `D:\a\笔记` 与 `E:\b\笔记` 不会落进同一层，这是素材管理「只看得见自己那份」的前提；其余（七条不能破、
-  `no-referrer`、访问地址只认 GitHub / Gitee / GitLab）见「图片」与[「数据与隐私」](../features-and-architecture.md)。
+  `no-referrer`、访问地址只认 GitHub / Gitee / GitLab）见「图片」与[「数据与隐私」](../privacy.md)。
   上传期间编辑器右下角挂 loading 角标（贴多张带张数）—— 一次上传一次 `git push`，几秒里正文什么都不出现，没提示
   就像按下去没反应。
 - **素材管理**（左栏底部图片按钮）回答「我能安全删掉哪些图」：列表来自仓库那一层、引用次数来自当前笔记本正文，两边
@@ -414,19 +443,25 @@ notes store 里只在「重读这个文件夹」几处与每次同步后探一�
   带红字，有人用的行**勾不动**；底部「全选未引用 / 清空选择 / 删除 N 张」，删除前确认，按下去**一次提交 + 一次
   推送**（删图也要进历史，不然别处克隆出去那份还会把图带回来）。缩略图按行懒加载；拼不出访问地址的仓库显示占位
   图标，不是裂图。历史包袱：改版前平铺在 `<images>/` 的图不在任何一层里，不进素材管理，只能去仓库手工删。
+
+### 笔记同步
+
 - **笔记可以整体同步到你自己的 git 仓库**（**地址不在设置里**：就是笔记本文件夹自己连着的 `origin`，没仓库连按钮
   都不出现）。左栏底部那颗按钮把当前笔记本与远端对齐一次；与另外两处同步最大的区别是**没有克隆目录** —— 跑 git 的
   地方就是笔记本文件夹本身，换台机器 clone 下来还是同一份。应用不 `git init`、不接远端；判定、次序、冲突、身份
   兜底八条见「笔记同步」。按钮提示写着**这次会同步到哪个地址**（任何 `origin` 都会被当成笔记仓库，推之前你得知道
   是哪儿）；每条 git 命令都带 `-c core.quotepath=false`（中文冲突文件名才报得成人话，见 [sync-and-auth.md](sync-and-auth.md)）。
+
+### Vditor 静态资源
+
 - **Vditor 静态资源随包带一份**：图标 / 语言包 / lute / 内容主题 / 表情 / 代码高亮**运行时**按 `options.cdn` 取（默认
-  unpkg），所以 `cdn` 指向本地 `public/vditor/`，内容由 `scripts/sync-vditor-assets.mjs` 在 dev / build 前从
+  unpkg），所以 `cdn` 指向本地 `public/vditor/`，内容由 `apps/desktop/scripts/sync-vditor-assets.mjs` 在 dev / build 前从
   `node_modules/vditor/dist` 复制（只带用得着的子集约 4.8MB；整包 20MB 其余是 katex / mermaid / echarts 等用不到的）。
   复制挂在 vite 的 `configResolved` 上，dev 与 build 都绕不过；版本没变就跳过。
 
 ## 涉及文件
 
-这些条目的原文注解从主文档「目录结构」迁来（主文档的树里各留一行，指回这里）。
+这些条目的原文注解从 [directory.md](../directory.md) 迁来（那份的树里各留一行，指回这里）。
 
 ```
   src/notes.rs           笔记文件夹：列目录 / 读写 / 新建 / 改名 / 移动 / 删除（只认相对笔记根的路径，
@@ -447,5 +482,5 @@ notes store 里只在「重读这个文件夹」几处与每次同步后探一�
     markdown-window/     独立 Markdown 编辑窗口的宿主（markdown.html 入口）：只装适配层，
                          正文 / 保存队列 / 关闭握手都在这；不装 store
     markdown-window.ts   独立编辑窗口的适配层（workbench/：上下文 / 保存 / 关闭 / 冲刷事件）
-scripts/sync-vditor-assets.mjs  dev / build 前把 Vditor 用得着的静态资源复制进渲染层 public/
+apps/desktop/scripts/sync-vditor-assets.mjs  dev / build 前把 Vditor 用得着的静态资源复制进渲染层 public/
 ```

@@ -85,7 +85,7 @@ async function pickSaveDir(): Promise<void> {
           </span>
         </div>
         <div class="row__pick">
-          <span class="pick__value mono" :class="{ 'is-empty': !saveDir }">
+          <span class="pick__value mono truncate" :class="{ 'is-empty': !saveDir }">
             {{ saveDir || '未设置' }}
           </span>
           <el-button size="small" @click="pickSaveDir">
@@ -146,14 +146,11 @@ async function pickSaveDir(): Promise<void> {
 .pick__value {
   flex: 1;
   min-width: 0;
-  overflow: hidden;
   padding: 5px 8px;
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
   background: var(--bg-subtle);
   font-size: var(--fs-meta);
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .pick__value.is-empty {

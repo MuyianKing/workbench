@@ -303,6 +303,14 @@ export interface AppSettings {
    */
   zentaoPollMinutes: number
   /**
+   * 禅道角标上还没点开过的 Bug 编号（顶栏那颗图标上的未读数就是它的长度）：
+   * 「后台检查发现了新 Bug、还没点开禅道」的那批，**点开禅道（顶栏图标或系统通知）
+   * 才清零**。只在当前列表里还存在的编号留着（被解决 / 改派就自动掉出去）。
+   * 只落本机数据文件，不参与外观同步；取值由 @workbench/zentao 的
+   * sanitizeZentaoUnreadBugs 收敛（正整数、去重、降序、上限 200）。
+   */
+  zentaoUnreadBugs: number[]
+  /**
    * Token 用量同步仓库地址（git 远程地址），空串表示不同步。
    *
    * 多台机器各自把「本机分片」推到这一个仓库里，读的时候全量合并 ——
@@ -357,7 +365,7 @@ export interface AppSettings {
    * 会整份同步到别的机器；而「我上一眼在看什么」换台机器不成立（与 `activeView` 同一条口径）。
    */
   projectSort: ProjectSort
-  /** 工作页顶栏那一排的范围（待办 / 今天 / 昨天 / 本周 / 本月 / 自定义），同上 */
+  /** 工作页顶栏那一排的范围（待办 / 今天 / 昨天 / 本周 / 上周 / 本月 / 自定义），同上 */
   workRange: WorkRange
   /**
    * 工作页「自定义」范围的两端（YYYY-MM-DD，含两端）；null = 还没选过。
@@ -477,6 +485,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   mailContacts: [],
   mailPollMinutes: 30,
   zentaoPollMinutes: ZENTAO_POLL_MINUTES_DEFAULT,
+  zentaoUnreadBugs: [],
   tokenSyncRepo: '',
   activeView: 'home',
   // 行为记忆：第一次打开时就是这几个默认档，之后记住用户自己选的那一档

@@ -319,9 +319,9 @@ const sendTitle = computed(() => {
         :aria-selected="index === skillIndex"
         @mousedown.prevent="insertSkill(row)"
       >
-        <span class="skills__name">{{ row.name || row.id }}</span>
+        <span class="skills__name truncate">{{ row.name || row.id }}</span>
         <span class="skills__tag">{{ row.level === 'global' ? '全局' : '项目' }}</span>
-        <span class="skills__desc" :title="row.description">{{ row.description }}</span>
+        <span class="skills__desc truncate" :title="row.description">{{ row.description }}</span>
       </button>
     </div>
 
@@ -572,9 +572,6 @@ const sendTitle = computed(() => {
 .skills__name {
   flex: none;
   max-width: 240px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   color: var(--ink);
   font-size: var(--fs-body);
   font-weight: 600;
@@ -592,9 +589,6 @@ const sendTitle = computed(() => {
 .skills__desc {
   min-width: 0;
   flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   color: var(--ink-3);
   font-size: var(--fs-meta);
 }

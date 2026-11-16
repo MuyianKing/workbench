@@ -79,7 +79,7 @@ const emit = defineEmits<{
       <div class="acct__head">
         <span class="acct__avatar">{{ account.label.slice(0, 1) }}</span>
         <div class="acct__id">
-          <span class="acct__name">{{ account.label }}</span>
+          <span class="acct__name truncate">{{ account.label }}</span>
           <span class="acct__tag" :class="account.tone" :title="account.statusTitle">{{ account.status }}</span>
         </div>
         <div class="acct__actions">
@@ -99,7 +99,7 @@ const emit = defineEmits<{
            省下单独一行；行高由优先级输入框兜着，提示空着（隐藏但占位）也不影响同排卡片对齐 -->
       <div class="acct__meta">
         <span
-          class="acct__sub"
+          class="acct__sub truncate"
           :class="{ 'is-empty': !account.quota }"
           :title="account.quota || undefined"
         >{{ account.quota || '—' }}</span>
@@ -159,7 +159,7 @@ const emit = defineEmits<{
       <div class="acct__facts">
         <div class="acct__fact">
           <span class="acct__fact-label">成功 / 失败</span>
-          <span class="acct__fact-value">
+          <span class="acct__fact-value truncate">
             <template v-if="account.usage">
               {{ account.usage.requests - account.usage.failed }} / {{ account.usage.failed }}
             </template>
@@ -168,13 +168,13 @@ const emit = defineEmits<{
         </div>
         <div class="acct__fact">
           <span class="acct__fact-label">用量</span>
-          <span class="acct__fact-value">
+          <span class="acct__fact-value truncate">
             {{ account.usage ? formatCompactTokens(account.usage.tokens) : '—' }}
           </span>
         </div>
         <div class="acct__fact">
           <span class="acct__fact-label">均速</span>
-          <span class="acct__fact-value">
+          <span class="acct__fact-value truncate">
             {{ account.usage ? `${account.usage.tokensPerSec.toFixed(0)} tok/s` : '—' }}
           </span>
         </div>
@@ -284,9 +284,6 @@ const emit = defineEmits<{
   font-size: var(--gw-fs-title);
   font-weight: 600;
   color: var(--ink);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .acct__tag {
@@ -339,10 +336,7 @@ const emit = defineEmits<{
    空着时也**隐藏而不是删掉**：这一排的高度由优先级输入框兜着，
    它占住左边的位子，同排卡片的积分条与三格才对得齐；太长时截断，完整内容在 title 里。 */
 .acct__sub {
-  overflow: hidden;
   font-size: var(--gw-fs-micro);
-  white-space: nowrap;
-  text-overflow: ellipsis;
   color: var(--ink-3);
 }
 
@@ -481,9 +475,6 @@ const emit = defineEmits<{
   font-size: var(--gw-fs-meta);
   color: var(--ink-2);
   font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 /* 操作按钮在卡片的右上角 */

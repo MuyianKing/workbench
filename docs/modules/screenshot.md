@@ -8,9 +8,27 @@
 `components/settings/CapturePane.vue`。
 跨模块通用事实见 [features-and-architecture.md](../features-and-architecture.md)，红线见 [AGENTS.md](../../AGENTS.md)。
 
+**先读这一段就够了**——下面十条红线，破一条就是 bug；每条的依据、边界与踩坑都在后面按主题分的十节里，改到哪块读哪块。
+
+- 抓屏只在 Rust 侧（`screen.rs` 的 `BitBlt` + `GetDIBits`），WebView2 没有 `getDisplayMedia`。
+- 一块屏一块遮罩窗口、不跨屏；窗口位置与尺寸一律给物理像素。
+- 遮罩窗口预建池化、收工只藏不关；别改回「一场一建一关」或「先显示再等画面」。
+- 遮罩与钉图是独立 HTML 入口，只装适配层，不装 store、不 initState。
+- 整帧 Rust → 渲染层走二进制 IPC；渲染层 → Rust 的最终图仍走 base64；帧不走 asset 协议（钉图可以）。
+- 系统剪贴板自己写 Win32（CF_DIBV5 + CF_DIB + `PNG`），不走 `navigator.clipboard`。
+- 两条热键由渲染层推值、`apply_hotkeys` 一次装齐；注册失败必须在界面上说出来。
+- 标注按这块屏的物理像素绝对坐标存与画，显示与导出共用 `drawAnnotations`。
+- 取字双引擎（微信优先、Windows OCR 回退）、只认横排、不许上云；滚动截图全程在同一块遮罩里换装。
+- 本功能没有联网出口；长图只在内存里，唯一临时文件是微信取字的裁剪图（认完即删）。
+
+### 抓屏
+
 - **抓屏只能在 Rust 侧做**：WebView2 没有 `getDisplayMedia`，像素只能由 `screen.rs` 的 `BitBlt` + `GetDIBits`
   拿（`Win32_Graphics_Gdi` 已在编译图里，不引 `xcap` 之类）。**已知边界（不是 bug）**：独占全屏 D3D 抓出来是黑的、
   HDR 按 SDR 映射、UAC 安全桌面与 DRM 抓不到；要越过得改走 Windows.Graphics.Capture（D3D11 帧池）。
+
+### 遮罩窗口与池子
+
 - **一块屏一个遮罩窗口**（`capture-<代号>-<序号>`），不做横跨虚拟桌面的窗口：缩放因子按所在显示器定，
   横跨两块不同 DPI 只能有一个缩放，另一半就错。代价是**选区不跨屏**，有意接受。
 - **遮罩窗口预建、跨场复用（池子），收工只藏不关**：按热键到看见遮罩要压到两百毫秒级，而建一块 WebView2
@@ -37,6 +55,9 @@
   否则 Windows 会给隐藏补一段 150~200ms 的淡出。
 - **位置与尺寸一律按物理像素给**（`set_position(PhysicalPosition)` / `set_size(PhysicalSize)`）：builder 的
   `position` / `inner_size` 是逻辑坐标，混合 DPI 下会错位。
+
+### 独立入口与帧传输
+
 - **遮罩与钉图是独立入口，只装适配层，不装 store、不 initState**：各自的 JS 上下文，装 store 会与主窗口
   抢读写同一批 JSON（`workbench-data.json` 等）。设置由 Rust 随 `capture_context` 给（`CaptureOptions`）。
 - **方向决定走不走 base64**（`capture_frame` / `capture_copy` / `capture_save` / `pin_create`）：
@@ -49,15 +70,24 @@
   把整个拖拽打断，症状是「选区怎么拖都出不来」）。字节包成 Blob 与页面同源，没这问题；钉图只摆图不读像素，
   照旧走 asset。旧的 base64 帧路径是 `fetch(data:)`，改后渲染层已无此调用点；生产态 `csp` 的 `connect-src` 暂时留着 `data:`（删它属于改 CSP，得在生产态复验，见
   [ipc-and-state](ipc-and-state.md)）。
+
+### 剪贴板
+
 - **系统剪贴板自己写 Win32**（`clipboard.rs`）：一次给 CF_DIBV5 + CF_DIB + 注册格式 `PNG`。不走
   `navigator.clipboard`（WebView2 要 `CoreWebView2` 权限回调，wry 没暴露、失败静默；且只写 PNG，认 CF_DIB 的
   老程序粘出来是空的）。新增 feature 只有 `Win32_System_DataExchange` 与 `Win32_System_Memory`。
+
+### 全局热键
+
 - **两条全局快捷键一次性装齐，值由渲染层推**（`apply_hotkeys(main, capture)`，Rust 不读设置）：插件是
   「先全清再逐条注册」，分几次调会互相注销，只有 `main.rs` 的 `register_hotkeys` 动手。值也必须由渲染层给
   —— 默认值只活在 `@workbench/capture`，Rust 读盘会漏掉「刚加的字段还没写回」那段（首启按截图键没反应、
   之后也不再补注册，踩过）。旧的 `set_hotkey` / 无参 `apply_hotkeys()` 已删。
 - **注册失败必须说出来**：`RegisterHotKey` 全局独占，被占（F1 常被输入法 / 录屏 / 游戏助手占）就挂不上。
   启动时失败走 `notifyWarning`，设置·截图那屏如实报 Rust 原文（「这些快捷键被别的程序占用了：截图（F1）」）。
+
+### 文字输入（基线 / 量尺寸）
+
 - **文字标注的基线问浏览器自己排的那一行，别算**（`annotation-render.ts` 的 `textBaselineOffset` →
   `domBaseline`）：挂同字体同行高的
   隐藏块，里面一个零尺寸、`vertical-align: baseline` 的探针，其顶边正压基线，两位置相减；按字号缓存，
@@ -71,6 +101,9 @@
   v-model 量，框停在上一字宽、拼音比它宽，浏览器给合成区让路时就滚（用户报「输完『你好，』再打『世界』时
   『你好』看不见了」）。所以尺寸跟**原生 input**（合成期间照发），滚动用 `pinTextInputScroll` 按 `scroll`
   事件钉回 0。真输入法那一下复现不了，按「盒子永远装得下 + 滚动钉回原点」两道做。
+
+### 标注：坐标、编辑与选中
+
 - **选中一条标注之后能改位置、大小、粗细**（`annotationHandles` / `resizeAnnotation` / `restyleAnnotation`）：
   矩形 / 椭圆 / 马赛克摆八个把手（拖它就是改那一块，与选区同一套几何与容差），箭头两端各一个（只动被拖那端），
   文字与笔迹不摆把手（没有「框」这层几何：位置直接拖整条，字号 / 线宽在工具条上改）。**工具条上的参数改的是
@@ -100,10 +133,14 @@
   **拖动中键盘不参与**：window 上的 keydown 监听有两个，`onKeyDown` 先注册先触发，不挡一道的话
   Esc 会同时走「逐层退」把选区清掉 —— 放弃拖动（回拖动前位置）是 `startPointerDrag` 自己的 Esc。
 - **标注一律按「这块屏的物理像素绝对坐标」存与画，两侧都在整帧尺寸的画布上画、共用 `drawAnnotations`**：
-  显示侧是那块 stage（**只 clip 住选区，不平移**），导出侧先在同样大的画布上画完、最后才抠选区。三条坑：
+  显示侧是那块 stage（**只 clip 住选区，不平移**），导出侧先在同样大的画布上画完、最后才抠选区
+  （导出侧那一段在 `capture/export.ts` 的 `composePng`，CaptureApp 只留取数与守卫）。三条坑：
   显示侧多平移一次就多减一个选区原点，笔迹整体偏左上、被裁掉大半；导出侧只在「选区那么大」的画布上画，
   画布尺寸与原点的少数部分一变，马赛克块色差几个点、抗锯齿也差一点；马赛克格子必须落在**绝对坐标**的网格上，
   两侧各按自己原点对齐会错半格。
+
+### 取字（双引擎与联网边界）
+
 - **本功能没有任何新的联网出口**：抓屏、标注、剪贴板、落盘、钉图、取字全在本机。**取字双引擎，微信优先**
   （`capture_ocr` 进 `wechat_ocr.rs`，起不来回退 `ocr.rs` 的 Windows OCR）：
   - **微信引擎**（`wechat_ocr.rs`）：微信截图「提取文字」那颗引擎（4.x 的 `wxocr.dll`），对 12px 界面小字
@@ -148,6 +185,9 @@
   （中文不用空格分词，见缝就补会把「直接把」拆成「直 接 把」）、非末行行尾补换行位 —— 摆位纯逻辑在
   `packages/capture/src/ocr.ts`（带单测），换算到视口在 CaptureApp 的 `ocrSpans`（与 `canvasToViewport`
   同一套比例）。
+
+### 滚动截图
+
 - **滚动截图也是一个「模式」**（工具条那颗「滚动」进入，遮罩不收）：**点「滚动」直接开滚，没有
   「开始」确认步** —— run（自动「发滚轮 → 等稳 → 抓帧 → 拼接」循环）→ result（复制 / 保存）两相
   全在**同一块遮罩窗口**里换装，不新开 HTML 入口、不新开窗口；控制条是 `CaptureScrollBar.vue`
@@ -163,10 +203,10 @@
   「悬停滚动非活动窗口」开着的机器按光标落点派发，两条路互为保险；③ 遮罩穿透（不穿透的话光标落点
   压着的是遮罩自己，滚轮全被吃掉）。**用 `SendInput` 不用 `PostMessage(WM_MOUSEWHEEL)`**：注入的是系统
   输入栈里的「真输入」，Chromium / Qt / Win32 各路窗口都认，PostMessage 对 UWP 与不少现代窗口静默无效。
-  齿数由渲染层按上一步实际位移自适应（`stitch.ts` 的 `planNotches`），步长贴着选区高度 25% 走、
-  夹在「选区高 − 最小重叠」以内 —— 跨过整个视口就没有重叠可比了。feature 全在已开的两个里
-  （`Win32_UI_Input_KeyboardAndMouse` 的 `SendInput`、`Win32_UI_WindowsAndMessaging` 的前台 / 光标），
-  零 feature 变更。
+  齿数由渲染层按**上一齿**的实际位移自适应（`stitch.ts` 的 `planNotches`：上一步总位移 ÷ 实发齿数），
+  步长贴着选区高度 25% 走、夹在「选区高 − 最小重叠」以内 —— 跨过整个视口就没有重叠可比了。feature
+  全在已开的两个里（`Win32_UI_Input_KeyboardAndMouse` 的 `SendInput`、`Win32_UI_WindowsAndMessaging`
+  的前台 / 光标），零 feature 变更。
 - **滚动抓的是「现在」的屏幕**：`capture_scroll_grab` 走 `screen::capture_region` 现抓（选区矩形 =
   遮罩那块屏原点 + 画布坐标，`clamp_region` 对这块屏再夹一次），不走会话缓存 —— 目标窗口正在动，
   开场冻结帧早过时了。**回的是原始 RGBA 字节**（`capture_region` 的直出）：拼接循环每步要抓好几帧，
@@ -182,21 +222,28 @@
   - **中位数聚合**：每个候选 Δ 逐行算绝对差、取**中位数**当分数。会动的行（彩虹渐变带、视频、
     加载占位）与粘头 / 粘底的行都是个别离群值，平均值会被拖高、中位数不受 —— 只要「有内容且静止」
     的行超过一半，真解稳稳胜出。静止内容的真解中位差是 0，门槛可以收到 3；
-  - **Δ=0 快速通道**：全体有内容行的中位差 ≤ 门槛 = 页面没滚（到底、滚轮没生效、大面积静止），
-    直接报 0 —— 与全量扫里 Δ=0 胜出的旧口径完全一致，只是不用把其余候选也扫一遍；
+  - **Δ=0 快速通道**：**剔过粘行之后**剩下的有内容行中位差 ≤ 门槛 = 页面没滚（到底、滚轮没生效、
+    大面积静止），直接报 0。拿全体有内容行判会让「一屏几乎全是粘底栏」的选区（160px 高的聊天输入
+    区踩过）把真滚动误判成没动，调用方据此收场、只拼一屏；
   - **静态行剔除**：两帧在**同一屏幕位置**一模一样的行是「粘住画面」的行（粘头 / 粘底 / 悬浮件，
     内容滚它们不滚），从匹配行集里剔掉 —— 它们在任何 Δ 下都对得上，留在集里只会制造并列、把
-    粘底页面拉去错的档。剔完行数不足复核最少行数、或剔行集对不上时退回整集再扫一次（剔除只该
-    帮忙，不该把行数削到凑不齐复核的量）；
-  - **预测窗口**：滚轮是渲染层自己发的，本步位移 ≈ 上一步实测 × 本步实发齿数，先在预测值 ±48px
+    粘底页面拉去错的档。**实色栏也算数**：判定看全部行，不只「有内容」的行 —— 标题栏 / 输入栏
+    的上下边缘是纯色平的行，只看有内容行会把整条粘栏漏掉（真机踩过：粘底栏没认出来，条带每步
+    都跳过一栏内容、还把它的副本贴进长图）。剔完行数不足复核最少行数、或剔行集对不上时退回整集
+    再扫一次（剔除只该帮忙，不该把行数削到凑不齐复核的量）；
+  - **预测窗口**：滚轮是渲染层自己发的，本步位移 ≈ 上一齿实测 × 本步实发齿数（**按齿记**：上一步
+    发了几齿，总位移先除以几；直接拿总位移算，齿数一变预测就差一倍），先在预测值 ±48px
     （`WINDOW_TOLERANCE`）的小窗口里找，命中直接用 —— 稳态候选从「选区高」个掉到百来个，
     **每步不再卡顿靠的就是这个**；不中（布局位移、预测失灵）回退全量扫；
-  - **并列破平局**：与最优分差 ≤1 的候选视为并列，取离预测最近的 Δ —— 重复纹理（列表行 /
-    代码行）天然给出多个「完美」档，锁到过小的 Δ 会把内容拼重（拼接处杂糅的来源之一）；
+  - **并列破平局**：与最优分**严格相等**的候选才算并列，取离预测最近的 Δ —— 重复纹理（列表行 /
+    代码行）天然给出多个「完美」档，锁到过小的 Δ 会把内容拼重（拼接处杂糅的来源之一）；反过来，
+    差 1 分的近邻不能因为「离预测近」顶掉真解（会把 Δ 拉偏几个像素）；
     没预测（首步）保持初筛序取最小；
   - **两段式**：初筛按粗采样的行 / 列（≤48 行 × 步距 8）算平均差、留下最像的 8 个候选，复核才用
-    匹配行集算中位数 —— 全量行的中位数每个候选都算一遍太贵。搜索上限给重叠留 48px
-    （`MIN_OVERLAP`），Δ 最大到「选区高 − 它」。
+    匹配行集算中位数 —— 全量行的中位数每个候选都算一遍太贵。搜索范围要让开粘底栏：`maxDelta`
+    取「帧高 − 48」与「内容区下缘（帧高 − stickyBottom）− 48」的较小者，打分时超出内容区的行
+    一律不算 —— Δ 大时新帧顶部的行对上的其实是上一帧的粘底栏（那里永远不变），算进重叠会让
+    大 Δ 直接判成拼不上。
 - **只贴新露出的条带（`planBand`）**：向下滚 Δ 时条带**不从 h−Δ 起**，起点 = h − Δ − stickyBottom − 8
   —— 向上越过粘底栏多要一段（eSearch makePatch 同款）。条带起点的**绝对位置**只跟粘底栏厚度有关
   （`top + h − Δ − stickyBottom − 8 = 上一步的 top + h − stickyBottom − 8`，与 Δ 无关），每一步都恰好
@@ -212,8 +259,9 @@
 - **滚动节奏是「滚 → 停稳 → 抓」，一步步的顿挫是固有形态**（Snipaste / PixPin 同款；但每步的
   **冻结卡顿**不是 —— 那是匹配在主线程上跑出来的，解法见上面 worker 与预测窗口两条）：**拼进
   长图的就是抓到的像素**，滚动动画中途抓到的帧是合成器过滤出来的过渡态（内容差着不到一个像素），
-  拼进去就是一条条模糊带 —— 所以不能边滚边抓。能做的是把一步的量压小：首步 1 齿，之后按实际位移
-  自适应（`planNotches` 贴着选区高度 25% 走、上限 3 齿）；等稳先等 tick —— 首步 150ms（动画跑完
+  拼进去就是一条条模糊带 —— 所以不能边滚边抓。能做的是把一步的量压小：首步 1 齿，之后按**每齿**
+  实际位移自适应（`planNotches` 贴着选区高度 25% 走、上限 3 齿；按总位移算会让齿数在 1 与上限之间
+  抖，每步的预测窗口跟着错位）；等稳先等 tick —— 首步 150ms（动画跑完
   大半），之后按上一步实测的轮询数自适应（`planTickDelay`，40~150ms：瞬时跳滚的应用一路降到 40，
   平滑滚动的应用升回 150），再以 80ms 轮询到「连续两帧字节一致」。**到底要连着两次 Δ=0 才收**
   （`SCROLL_ZERO_CONFIRM`）—— 防的是「这一齿还没生效就抓了一帧」的假到底，代价只是到底时多滚
@@ -224,12 +272,19 @@
 - **长图上限 `MAX_STITCH_HEIGHT = 16000`**（Chromium 画布超过 16384 一档在 GPU 纹理上不可靠）；
   选区高度下限 `MIN_SCROLL_REGION_HEIGHT = 192`（匹配要有内容行，更要留得出最小重叠 —— 一齿滚轮
   普遍 ~100px，选区比「两倍最小重叠」高不了多少时一步就把重叠吃光了）。长图画布**翻倍扩容**，
-  每次扩容把已拼内容搬过去 —— 搬家次数是对数级的。拼好的长图**只在内存里**（随模式退出丢掉），
+  每次扩容把已拼内容搬过去 —— 搬家次数是对数级的。**进结果相前必须裁到 `stitched`（`top + h`）**：
+  画布初始就给两屏、之后翻倍，末尾永远留着一截从没写过的透明行 —— 预览、复制、保存都按画布
+  全高走，不裁就是长图下面挂一块空白区（真机踩过）。拼好的长图**只在内存里**（随模式退出丢掉），
   复制 / 保存走 `capture_copy` / `capture_save` 那条 base64 路，不新增落盘与联网出口。
 - **已知边界（写清楚，免得当成 bug 查）**：管理员权限 / UWP 窗口滚不动（UIPI，与抓不到安全桌面
   同族）；滚动中 Esc / 点击会漏进目标窗口（焦点在那边）；无暂停（停即出结果）；动画内容接缝可能有
-  残影；选区中心若不是可滚区域就滚不动（Δ=0 如实收场）；首步 Δ=0 的「滚轮没起作用」与「已在底部」
+  残影；选区中心若不是可滚区域就滚不动（Δ=0 如实收场）；**一格滚轮就跨过整个选区**的窗口（整页翻
+  的阅读器 / 看图）没有重叠可比，会以「画面变化太快，这里拼不上」收场 —— 算法救不了，只能把选区
+  选高、或别用它截；首步 Δ=0 的「滚轮没起作用」与「已在底部」
   不区分 —— 都按「拼完了」收，第一屏也是完整的长图。
+
+### 落点、设置与 capability
+
 - **数据落点**：截图的每一帧**只在内存里**（不落盘、没有临时目录要收拾）；**唯一例外是取字走微信引擎时**：
   裁剪图落临时 PNG（`%TEMP%\workbench-wxocr-<task>.png`），认完立刻删（错误路径也有 Drop 兜底）；钉图的图在
   数据目录的 `pins\<id>.png`（安装版 `%APPDATA%\Workbench\data\`，开发版 `%APPDATA%\Workbench-dev\data\`）、
@@ -242,6 +297,8 @@
   拖不动也不报错）+ `dialog:default`（「另存为」）。窗口位置 / 尺寸 / 置顶都由 Rust 设，前端一条都不碰。
 
 ## 实现
+
+### 一次截图怎么走
 
 **一次截图的完整走法**（`capture.rs`）：
 
@@ -260,6 +317,8 @@
    **不带编号**的 `capture:sync` 清掉上一场的帧 / 选区 / 标注。**复制这条是反过来的**：`capture_copy` /
    `capture_copy_frame` 一进来先 `abort`，再解码 / 裁图 / 构 DIB / 写剪贴板 —— 遮罩不该停在屏幕上等；
    失败经 `capture:failed` 推给主窗口（与「起截图失败」同一条路）。
+
+### 池子、透明与两处闪
 
 **为什么要养一池遮罩窗口（预建 + 复用）**：按热键到看见遮罩要压到两百毫秒级，靠的就这一条：**建一块
 WebView2 窗口比整个预算还贵**（起 webview、加载 JS 包、跑起 Vue）。所以窗口在 `capture_prewarm`（渲染层
@@ -310,6 +369,8 @@ WebView2 窗口比整个预算还贵**（起 webview、加载 JS 包、跑起 Vu
 立刻按热键）没有预热，仍可能闪一次，接受。量法：外部抓屏窄带 57fps + SendKeys 触发 F1，见
 [dev-notes/browser-preview-verification.md](../dev-notes/browser-preview-verification.md)。
 
+### 耗时账
+
 **这条路上每一笔开销**（1080p 单屏、release 构建、CDP 驱动，见「验证」。这场屏幕上是 4.28MB 的帧）：
 
 | 阶段 | 耗时 | 说明 |
@@ -328,6 +389,8 @@ WebView2 窗口比整个预算还贵**（起 webview、加载 JS 包、跑起 Vu
 几百毫秒**，在 Cargo.toml 里给 `image` / `png` / `flate2` / `fdeflate` / `miniz_oxide` 开了 `opt-level = 3`
 （同屏 295ms → 158ms）。
 
+### 剪贴板这条路
+
 **复制到剪贴板这条路**（用户报过「复制有点慢」）：
 
 - **没画标注走 `capture_copy_frame`**：渲染层只给选区矩形（画布坐标），Rust 从这场缓存的原始 PNG 裁。
@@ -340,6 +403,8 @@ WebView2 窗口比整个预算还贵**（起 webview、加载 JS 包、跑起 Vu
   在 Rust 重编一次 —— 快路径唯一多出来的一笔。
 - 依赖档位见 `Cargo.toml`：`base64` 在 dev、`image` / `png` / `flate2` / `fdeflate` / `miniz_oxide` 在
   release 都按 `opt-level = 3`（release 全局是 `s`，按体积编的解码会慢一截）。**这些数要在 release 里量**。
+
+### 取字这条路
 
 **取字这条路**（`ocr.rs` + CaptureApp 取字那一节 + `@workbench/capture` 的 `layoutOcrSpans`）：
 
@@ -362,6 +427,8 @@ WebView2 窗口比整个预算还贵**（起 webview、加载 JS 包、跑起 Vu
   渲染层照实显示。真机验只能真按一遍热键；单测只钉换算与摆位。`ocr_probe` 是 `#[ignore]` 手动探针：
   `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml ocr_probe -- --ignored`。
 
+### 滚动截图这条路
+
 **滚动截图这条路**（`capture.rs` 的滚动四命令 + CaptureApp 的滚动模式 + `@workbench/capture` 的
 `stitch.ts`；矩形口径与 `capture_copy_frame` 一致 —— 这块屏的画布像素，Rust 再夹一次）：
 
@@ -382,18 +449,19 @@ WebView2 窗口比整个预算还贵**（起 webview、加载 JS 包、跑起 Vu
   的轮询数自适应（`planTickDelay`，40~150ms）；再以 `SCROLL_SETTLE_POLL=80ms` 轮询到连续两帧
   原始字节一致，最多 8 次；一直在动就抓最后一帧硬拼）→
   `scrollGrab`（原始 RGBA）→ `frameFromBytes` 长度校验 → `matchScroll`（worker 里的
-  `analyzeScrollOffset`，预测位移 = 上一步实测 × 本步实发齿数）→
+  `analyzeScrollOffset`，预测位移 = **上一齿**实测 × 本步实发齿数）→
   `null` **放慢重试**（改发 1 齿 + 等稳轮询翻倍，连着 `SCROLL_NULL_LIMIT=2` 次才收，note 说清楚）、
   `Δ=0` 连着 `SCROLL_ZERO_CONFIRM=2` 次才收（防假到底）→ `planBand` 算条带起点、**只贴新露出条带**
-  进长图画布（`frame.data.subarray(bandTop·w·4)` 构 ImageData）→ `planNotches(Δ, h)`。
+  进长图画布（`frame.data.subarray(bandTop·w·4)` 构 ImageData）→ `planNotches(Δ ÷ 齿数, h)`。
   第 0 帧也走实时抓取（不用冻结帧），整帧贴。步骤间守卫与收尾见「约束」里那两条。
   **停止响应**：请求在每一轮开头、轮询间隙、匹配失败分支、贴完这一步后都查 —— 按下去最多再等
   一个轮询（~80ms）或把在途的一步拼完（滚出去的内容不丢），不会卡着把整步走完。
 - **热键停止**：`toggle` → `scrolling()`（`Session::scroll` 非空）→ `stop_scroll(app, true)`：
   清标记、解穿透、`set_focus` 回遮罩、`emit_to` 推 `capture:scroll-stop`。JS 那边 `onScrollStop`
   **只置 `scrollStopRequested` 标记**，循环每一轮自己查 —— 不能就地动 `scrollState`（那是循环线程的活）。
-- **结果相**：拼好的长图**先画回选区做预览**（等比缩到选区以内、居中，细边一圈 —— run 相不画，
-  那块要透出实时内容；「复制前先看一眼」是这类功能的基本预期），再走
+- **结果相**：收尾时先把画布裁到 `stitched`（`cropStitched`，见上一条）；拼好的长图**先画回选区做
+  预览**（等比缩到选区以内、居中，细边一圈 —— run 相不画，那块要透出实时内容；「复制前先看一眼」
+  是这类功能的基本预期），再走
   长图画布 → `toBlob` → `blobToBase64`（照 pngBase64 的分块，长图几 MB）→
   `capture_copy` / `capture_save`（复用既定的 base64 口径；命令一进来就 abort 收场，失败走
   `capture:failed`）。取消 / Esc / 右键退回标注那套（冻结帧还在、选区原样），再一层 Esc 才是收场 ——
@@ -407,6 +475,8 @@ WebView2 窗口比整个预算还贵**（起 webview、加载 JS 包、跑起 Vu
   的速度差异应感觉得到）；选区 < 192px 高要提示；
   **abort / 换场后遮罩不能再是穿透态**（收工后点一下选区试试就知道）；运行中按 Esc 应该进的是目标
   窗口而不是收遮罩（焦点在那边，不是 bug）。
+
+### 坐标与画布
 
 **坐标有三层**（口径在 `packages/capture/src/coords.ts` 文件头）：虚拟桌面物理坐标（Rust 摆窗口、钉图定位）
 → 画布像素（某块屏的物理像素，与那帧 PNG 一一对应）→ 视口 CSS 像素（鼠标事件）。**鼠标事件一律经
@@ -425,6 +495,8 @@ WebView2 窗口比整个预算还贵**（起 webview、加载 JS 包、跑起 Vu
 做法是「整格对齐那块」**缩到一格一像素再放大铺回**，`imageSmoothingQuality` **必须 high**（默认 low 大比例
 缩小时只采几个像素，白底字变零星色块），放大关插值；scratch 画布复用。**格子对齐原图绝对网格**
 （`origin` 就是 0），画的范围**只用 clip 收在拖的矩形里**（不然网格外扩几格会让边一格一格跳）。
+
+### 标注几何
 
 **箭头是一块填出来的多边形**（`ARROW_SPREAD` / `arrowHeadLength` / `arrowOutline` 在 annotation.ts，渲染层
 只负责填一次色）：**杆是收尖的锥形、头是实心三角**，粗细与头都按线宽算，细 / 中 / 粗整体等比放大。三个比例
@@ -450,6 +522,8 @@ WebView2 窗口比整个预算还贵**（起 webview、加载 JS 包、跑起 Vu
 正要失焦，`blur` 里再提交时 ref 可能已被「文字工具点一下开新框」换成空的一段，踩过：打完字点别处那几个字
 直接没了）；`blur` 兜「点到工具栏 / 窗口外」，Esc 用 `.stop` 拦在输入框自己这儿。
 
+### 钉图窗口
+
 **钉图窗口**就是一块和图片一样大的窗口（`pin.rs`）：`always_on_top` + `decorations(false)` + `skip_taskbar`
 + **`transparent(true)`**（透明度只能靠 CSS `opacity`，而 WebView2 窗口底色默认不透明 —— 不开 transparent，
 透出来的是窗口底色而不是桌面；`html` / `body` 也必须真透明）。**拖动交给系统**（整张标
@@ -458,6 +532,8 @@ JsonStore 防抖把拖动连发合并成一次写）。滚轮缩放**以光标�
 （`clampPinSize`），Ctrl+滚轮调透明度。**尺寸与位置一律取整**：`pin_update` 收 u32/i32，`* 1.1` 的小数会被
 serde 拒掉（`invalid type: floating point …, expected u32`，踩过）。记账里的路径 / 尺寸 / 透明度下次启动由
 `restore` 照原样钉回；Alt+F4 关掉时也要抹掉记账（否则下次又把已关的图钉回）。
+
+### 验证
 
 **验证**：`pnpm run typecheck` → `pnpm run lint` → `pnpm run build:renderer`（**相关 HTML 入口的模板都要真编
 一遍**：`typecheck` 查不出标签不配平、也查不出模板里用了没 import 的组件）→ `pnpm test` → `cargo test` +
@@ -470,7 +546,7 @@ serde 拒掉（`invalid type: floating point …, expected u32`，踩过）。�
 浏览器里就能验** —— 把 `ocrRegion` 桩成回一份现造的行业与词即可，仓库一个文件都不用加。
 
 上面这些管不到「抓屏真的抓到没有、窗口真的起来没有」—— 只能在真应用里验。跑法（配方见
-[dev-notes/browser-preview-verification.md](../dev-notes/browser-preview-verification.md) 的「在真应用里验证」）：
+[dev-notes/tauri-app-verification.md](../dev-notes/tauri-app-verification.md)）：
 把 `APPDATA` 指到临时目录再起
 `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="--remote-debugging-port=9222" pnpm run dev`，连 CDP 求值驱动一遍：
 **应用起来后 `/json/list` 里已经有 `capture.html` target**（窗口预建 —— 预热生效的判据）→ `beginCapture` 的

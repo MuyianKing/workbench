@@ -59,7 +59,7 @@ const PUSH_PIN_FILL_PATH = 'M235.33,104l-53.47,53.65c4.56,12.67,6.45,33.89-13.19
   <header class="vplayer__bar" :data-tauri-drag-region="nativeDrag ? '' : undefined">
     <!-- 名字截断给原生 title；独立窗口里它也是拖动区（子元素不继承裸属性） -->
     <span
-      class="vplayer__name"
+      class="vplayer__name truncate"
       :title="name"
       :data-tauri-drag-region="nativeDrag ? '' : undefined"
     >{{ name }}</span>
@@ -129,9 +129,6 @@ const PUSH_PIN_FILL_PATH = 'M235.33,104l-53.47,53.65c4.56,12.67,6.45,33.89-13.19
 .vplayer__name {
   flex: 1 1 auto;
   min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
   font-size: var(--fs-meta);
   color: var(--term-ink);
 }

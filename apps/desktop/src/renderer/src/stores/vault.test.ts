@@ -94,12 +94,12 @@ const { useSettingsStore } = await import('./settings')
 const { useAuthStore } = await import('./auth')
 
 /**
- * 让在途的 async 链跑完。轮次刻意压得低：这些 `setTimeout(0)` 在 Windows 上有十几毫秒的地板，
- * 攒起来会把同批跑的用例（`workbench/index.test.ts` 那几条真起 git 的重用例只有 5 秒）挤到超时。
+ * 让在途的 async 链跑完。用 `setImmediate` 而不是 `setTimeout(0)`：Windows 上定时器有约 15.6ms 的地板，
+ * 轮次再少也会攒成几十毫秒，把同批跑的用例挤向 5 秒超时。
  */
 async function settle() {
   for (let i = 0; i < 6; i++)
-    await new Promise(resolve => setTimeout(resolve, 0))
+    await new Promise(resolve => setImmediate(resolve))
 }
 
 /** 登录 + 填了仓库地址 + 已解锁：同步的三个前提都齐了 */

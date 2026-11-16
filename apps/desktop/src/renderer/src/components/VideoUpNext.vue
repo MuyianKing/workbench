@@ -26,10 +26,10 @@ const emit = defineEmits<{
   <div class="vplayer__next" role="status">
     <div class="vplayer__next-card">
       <div class="vplayer__next-head">
-        <span class="vplayer__next-label">即将进入下一个视频</span>
+        <span class="vplayer__next-label truncate">即将进入下一个视频</span>
         <span class="vplayer__next-left">{{ seconds }} 秒后自动播放</span>
       </div>
-      <p class="vplayer__next-name" :title="name">
+      <p class="vplayer__next-name truncate" :title="name">
         {{ name }}
       </p>
       <div class="vplayer__next-actions">
@@ -124,9 +124,6 @@ const emit = defineEmits<{
 
 .vplayer__next-label {
   min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
   font-size: var(--fs-meta);
   color: var(--ink-3);
 }
@@ -211,8 +208,6 @@ const emit = defineEmits<{
 
   .vplayer__next-name {
     display: block;
-    white-space: nowrap;
-    text-overflow: ellipsis;
     font-size: var(--fs-title);
     line-height: 1.35;
   }

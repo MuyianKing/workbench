@@ -616,12 +616,12 @@ function onWindowFocus(): void {
         <div class="notes__main">
           <header class="notes__head">
             <template v-if="store.active">
-              <span class="notes__title" :title="store.active.name">{{ store.active.name }}</span>
+              <span class="notes__title truncate" :title="store.active.name">{{ store.active.name }}</span>
               <!-- 在最外层时它是空的：没有「哪一层」可说，就不摆一个空盒子占位 -->
               <span v-if="locationText" class="notes__location truncate">{{ locationText }}</span>
             </template>
             <template v-else-if="store.activeRel">
-              <span class="notes__title">
+              <span class="notes__title truncate">
                 {{ findNoteNode(store.nodes, store.activeRel)?.name ?? '' }}
               </span>
               <!-- 在最外层时它是空的：没有「哪一层」可说，就不摆一个空盒子占位 -->
@@ -964,9 +964,6 @@ function onWindowFocus(): void {
   font-weight: 600;
   color: var(--ink);
   min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
 }
 
 .notes__location {

@@ -176,8 +176,8 @@ onMounted(load)
               <el-icon><Cpu /></el-icon>
             </span>
             <div class="models__titles">
-              <span class="models__id" :title="model.id">{{ model.id }}</span>
-              <span class="models__name" :title="model.name">{{ model.name || '—' }}</span>
+              <span class="models__id truncate" :title="model.id">{{ model.id }}</span>
+              <span class="models__name truncate" :title="model.name">{{ model.name || '—' }}</span>
             </div>
             <el-tooltip content="复制模型 ID" placement="top">
               <el-button size="small" text :icon="CopyDocument" aria-label="复制模型 ID" @click="copyText(model.id, '模型 ID')" />
@@ -187,26 +187,26 @@ onMounted(load)
           <div class="models__facts">
             <div class="models__fact">
               <span class="models__fact-label">上下文窗口</span>
-              <span class="models__fact-value">{{ contextOf(model) }}</span>
+              <span class="models__fact-value truncate">{{ contextOf(model) }}</span>
             </div>
             <div class="models__fact">
               <span class="models__fact-label">最大输出</span>
-              <span class="models__fact-value">{{ maxOutputOf(model) }}</span>
+              <span class="models__fact-value truncate">{{ maxOutputOf(model) }}</span>
             </div>
             <div class="models__fact">
               <span class="models__fact-label">倍率</span>
-              <span class="models__fact-value">{{ model.rate || '—' }}</span>
+              <span class="models__fact-value truncate">{{ model.rate || '—' }}</span>
             </div>
           </div>
 
           <div class="models__rows">
             <div class="models__row">
               <span class="models__row-label">思考档位</span>
-              <span class="models__row-value" :title="effortsOf(model)">{{ effortsOf(model) }}</span>
+              <span class="models__row-value truncate" :title="effortsOf(model)">{{ effortsOf(model) }}</span>
             </div>
             <div class="models__row">
               <span class="models__row-label">单价</span>
-              <span class="models__row-value models__price" :class="{ 'is-unpriced': model.inputCny === null && model.outputCny === null }">{{ priceOf(model) }}</span>
+              <span class="models__row-value models__price truncate" :class="{ 'is-unpriced': model.inputCny === null && model.outputCny === null }">{{ priceOf(model) }}</span>
             </div>
           </div>
         </article>
@@ -307,17 +307,11 @@ onMounted(load)
   font-size: var(--gw-fs-body);
   font-weight: 600;
   color: var(--ink);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .models__name {
   font-size: var(--gw-fs-micro);
   color: var(--ink-3);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .models__facts {
@@ -346,9 +340,6 @@ onMounted(load)
   font-size: var(--gw-fs-meta);
   color: var(--ink-2);
   font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .models__rows {
@@ -376,9 +367,6 @@ onMounted(load)
   min-width: 0;
   font-size: var(--gw-fs-meta);
   color: var(--ink-2);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /* 单价是数字串，用等宽体；思考档位仍用正文字体 */

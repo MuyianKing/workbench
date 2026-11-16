@@ -206,7 +206,7 @@ async function send(): Promise<void> {
           添加附件
         </el-button>
         <span v-for="(file, index) in attachments" :key="`${index}-${file.name}`" class="comp__file">
-          <span class="comp__file-name" :title="file.name">{{ file.name }}</span>
+          <span class="comp__file-name truncate" :title="file.name">{{ file.name }}</span>
           <span class="comp__file-size">{{ attachmentSize(file.bytesBase64) }}</span>
           <el-button
             class="comp__file-remove"
@@ -264,9 +264,6 @@ async function send(): Promise<void> {
 
 .comp__file-name {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   color: var(--ink-2);
 }
 

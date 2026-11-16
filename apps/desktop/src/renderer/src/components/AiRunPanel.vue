@@ -180,7 +180,7 @@ const hasHead = computed(() => notice.value !== null || !props.piVersion)
 </script>
 
 <template>
-  <div class="run">
+  <div class="run page">
     <div v-if="hasHead" class="run__head">
       <span v-if="notice" class="run__status" :class="`is-${notice.kind}`">
         <el-icon v-if="notice.kind === 'run'" class="run__spin"><Loading /></el-icon>
@@ -336,11 +336,7 @@ const hasHead = computed(() => notice.value !== null || !props.piVersion)
 
 <style scoped>
 .run {
-  display: flex;
-  flex-direction: column;
   gap: var(--sp-2);
-  min-height: 0;
-  height: 100%;
 }
 
 .run__head {

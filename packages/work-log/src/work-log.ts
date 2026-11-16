@@ -188,7 +188,7 @@ export interface WorkLogFile {
  * 最左的「待办」不是一个时间段，而是**所有还没做完的事**（不分日期铺开），其余几档才是日期范围；
  * 最右的「自定义」用页面上那枚日期范围选择器的两端。
  */
-export const WORK_RANGES = ['todo', 'today', 'yesterday', 'week', 'month', 'custom'] as const
+export const WORK_RANGES = ['todo', 'today', 'yesterday', 'week', 'lastWeek', 'month', 'custom'] as const
 export type WorkRange = (typeof WORK_RANGES)[number]
 
 export const WORK_RANGE_LABELS: Record<WorkRange, string> = {
@@ -196,6 +196,7 @@ export const WORK_RANGE_LABELS: Record<WorkRange, string> = {
   today: '今天',
   yesterday: '昨天',
   week: '本周',
+  lastWeek: '上周',
   month: '本月',
   custom: '自定义',
 }
@@ -526,17 +527,20 @@ export function dateOfDayKey(day: string): Date {
 /**
  * 某一档**日期**范围覆盖的起止日期（含两端，本地日期键）。
  *
- * 只收四档预置范围：「待办」筛的是状态、不看日期（见 `entriesInRange`）；
+ * 只收五档预置范围：「待办」筛的是状态、不看日期（见 `entriesInRange`）；
  * 「自定义」的两端由用户在界面上选（见 `resolveWorkRangeBounds`），拿它们算边界没有意义。
  *
  * 「本周」从**周一**起算：项目里另一处 startOfWeek 是按周日切的（贡献图那一列的起点），
- * 那是网格的排版约定，跟用户嘴里的「本周」不是一回事，别把两者合并。
+ * 那是网格的排版约定，跟用户嘴里的「本周」不是一回事，别把两者合并。「上周」就是照这条口径
+ * 往回退一整周：上一个周一到上一个周日。
  */
 export function rangeBounds(
   range: Exclude<WorkRange, 'todo' | 'custom'>,
   now: number,
 ): WorkRangeBounds {
   const today = startOfDay(now)
+  /** 本周周一（周日那天算在它所在那一周的尾巴上） */
+  const monday = addDays(today, -((today.getDay() + 6) % 7))
 
   switch (range) {
     case 'yesterday': {
@@ -544,8 +548,11 @@ export function rangeBounds(
       return { from: day, to: day }
     }
     case 'week': {
-      const monday = addDays(today, -((today.getDay() + 6) % 7))
       return { from: dayKey(monday), to: dayKey(addDays(monday, 6)) }
+    }
+    case 'lastWeek': {
+      const lastMonday = addDays(monday, -7)
+      return { from: dayKey(lastMonday), to: dayKey(addDays(lastMonday, 6)) }
     }
     case 'month': {
       const first = startOfDay(today)

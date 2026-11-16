@@ -39,6 +39,21 @@ function makeFrame(
 }
 
 /**
+ * 真实界面的粘栏：底边 / 顶边几行是**纯色**的留白，中间才有按钮、输入框这类
+ * 有花纹的块（标题栏 / 输入栏都长这样）。按「有内容行」判粘住会把整条栏漏掉。
+ */
+function solidBar(x: number, y: number, height: number, barHeight: number, dark = false): [number, number, number] {
+  const rel = y - (height - barHeight) // 从栏顶往下第几行
+  const bg: [number, number, number] = dark ? [36, 38, 44] : [232, 234, 238]
+  if (rel > 14 && rel < barHeight - 14) {
+    if (x > 240 && x < 300)
+      return [60, 120, 230] // 按钮
+    return [252, 252, 252] // 输入框
+  }
+  return bg
+}
+
+/**
  * 把 painter 表示的页面向下滚 delta 像素后的那一帧：顶部 h−Δ 行是原内容平移，
  * 底部 Δ 行是「新露出的内容」。stickyTop 给了的话，顶部 stickyTop 行保持原样
  * （粘性头部每一帧都停在同一个屏幕位置）。
@@ -171,6 +186,46 @@ describe('analyzeScrollOffset', () => {
     expect(analyzeScrollOffset(prev, next, { hintDelta: 137 }).delta).toBe(137)
   })
 
+  it('实色粘底栏（底边是纯色留白）也认得出来 —— 漏了它每步都会跳过一栏、底栏还会重复', () => {
+    const H = 600
+    const FOOTER = 60
+    const frame = (scroll: number) => makeFrame(W, H, (x, y) =>
+      y >= H - FOOTER ? solidBar(x, y, H, FOOTER) : pagePixel(x, y + scroll))
+    const result = analyzeScrollOffset(frame(0), frame(137))
+    expect(result.delta).toBe(137)
+    expect(result.stickyBottom).toBe(FOOTER)
+    expect(result.stickyTop).toBe(0)
+  })
+
+  it('实色粘头（纯色标题栏）也认得出来', () => {
+    const H = 600
+    const HEADER = 36
+    const frame = (scroll: number) => makeFrame(W, H, (x, y) =>
+      y < HEADER ? solidBar(x, y - HEADER + H, H, HEADER, true) : pagePixel(x, y - HEADER + scroll))
+    const result = analyzeScrollOffset(frame(0), frame(137))
+    expect(result.delta).toBe(137)
+    expect(result.stickyTop).toBe(HEADER)
+  })
+
+  it('高的实色粘底栏：不把真滚动误判成「没动」，也不拿底栏当重叠', () => {
+    const H = 400
+    const FOOTER = 160 // 聊天输入区那种高栏
+    const frame = (scroll: number) => makeFrame(W, H, (x, y) =>
+      y >= H - FOOTER ? solidBar(x, y, H, FOOTER) : pagePixel(x, y + scroll))
+    const prev = frame(0)
+    for (const scroll of [80, 160]) {
+      const result = analyzeScrollOffset(prev, frame(scroll))
+      expect(result.delta).toBe(scroll)
+      expect(result.stickyBottom).toBe(FOOTER)
+    }
+  })
+
+  it('预测差一倍（齿数变了）只回退全量扫，不把 Δ 拉偏', () => {
+    const prev = makeFrame(W, H, pagePixel)
+    const next = makeShifted(W, H, pagePixel, 137)
+    expect(analyzeScrollOffset(prev, next, { hintDelta: 274 }).delta).toBe(137)
+  })
+
   it('剔完好内容行不足最少行数时退回整集打分，不误报 null', () => {
     // 192 高的帧：花纹行每 20px 一条（随滚动挪行），另有两行粘住的悬浮条。剔掉
     // 2 行粘行后行集在复核阶段会被重叠截断削短（Δ 大时底部行不参与打分），凑不齐
@@ -246,6 +301,13 @@ describe('planNotches', () => {
     expect(planNotches(30, 600)).toBe(3)
   })
 
+  it('传的是每齿位移：连着两步的齿数一样（传总位移会 1↔2 抖）', () => {
+    const H = 600
+    // 每齿 100px → 2 齿；发了 2 齿走 200px，除以 2 还是 100px → 仍是 2 齿
+    expect(planNotches(100, H)).toBe(2)
+    expect(planNotches(200 / 2, H)).toBe(2)
+  })
+
   it('没量过位移（首步）或参数不合法时发 1 齿', () => {
     expect(planNotches(0, 600)).toBe(1)
     expect(planNotches(100, 0)).toBe(1)
@@ -271,6 +333,7 @@ describe('滚动拼接端到端', () => {
     let top = 0 // 当前帧对准的页面行
     let stitchedHeight = H
     let notches = 1
+    let perNotch = 0
     let prev = makeFrame(W, H, (x, y) => pagePixel(x, top + y))
 
     for (let step = 0; step < 40; step += 1) {
@@ -288,7 +351,8 @@ describe('滚动拼接端到端', () => {
       top += delta!
       stitchedHeight = top + H
       prev = next
-      notches = planNotches(delta!, H)
+      perNotch = delta! / notches
+      notches = planNotches(perNotch, H)
     }
 
     expect(stitchedHeight).toBe(PAGE_HEIGHT)
@@ -319,7 +383,7 @@ describe('hint + 条带贴端到端', () => {
     }
 
     let top = 0
-    let lastDelta = 0
+    let perNotch = 0
     let notches = 1
     let prev = frame(0)
     paste(prev, 0, 0)
@@ -329,16 +393,16 @@ describe('hint + 条带贴端到端', () => {
       if (actual <= 0)
         break
       const next = frame(top + actual)
-      const hintDelta = lastDelta > 0 ? lastDelta * notches : undefined
+      const hintDelta = perNotch > 0 ? Math.round(perNotch * notches) : undefined
       const result = analyzeScrollOffset(prev, next, { hintDelta })
       expect(result.delta).toBe(actual)
       expect(result.stickyBottom).toBe(FOOTER)
       const delta = result.delta!
       top += delta
       paste(next, planBand(delta, H, result.stickyTop, result.stickyBottom), top)
-      lastDelta = delta
+      perNotch = delta / notches
       prev = next
-      notches = planNotches(delta, H)
+      notches = planNotches(perNotch, H)
     }
 
     expect(top).toBe(BOTTOM)
@@ -348,6 +412,65 @@ describe('hint + 条带贴端到端', () => {
     for (let a = 0; a < longH; a += 1) {
       for (let x = 0; x < W; x += 1) {
         const [r, g, b] = a < CONTENT_H ? pagePixel(x, a) : footerP(x, a - BOTTOM)
+        const at = (a * W + x) * 4
+        expected[at] = r
+        expected[at + 1] = g
+        expected[at + 2] = b
+        expected[at + 3] = 255
+      }
+    }
+    expect(bytesEqual(image.buffer, expected.buffer)).toBe(true)
+  })
+})
+
+describe('实色粘底栏的拼接端到端', () => {
+  it('纯色输入栏：长图内容逐行连续，底栏只在最后出现一次', () => {
+    const W = 160
+    const H = 400
+    const FOOTER = 120 // 高的实色输入栏（底边全是纯色）
+    const CONTENT_H = 1200
+    const NOTCH_PX = 100
+    const BOTTOM = CONTENT_H - (H - FOOTER)
+
+    const frame = (top: number) => makeFrame(W, H, (x, y) =>
+      y >= H - FOOTER ? solidBar(x, y, H, FOOTER) : pagePixel(x, top + y))
+
+    const longH = CONTENT_H + FOOTER
+    const image = new Uint8ClampedArray(W * longH * 4)
+    const paste = (frameData: StitchFrame, bandTop: number, at: number) => {
+      const w4 = W * 4
+      for (let y = bandTop; y < H; y += 1)
+        image.set(frameData.data.subarray(y * w4, (y + 1) * w4), (at + y) * w4)
+    }
+
+    let top = 0
+    let perNotch = 0
+    let notches = 1
+    let prev = frame(0)
+    paste(prev, 0, 0)
+
+    for (let step = 0; step < 40; step += 1) {
+      const actual = Math.min(notches * NOTCH_PX, BOTTOM - top)
+      if (actual <= 0)
+        break
+      const next = frame(top + actual)
+      const hintDelta = perNotch > 0 ? Math.round(perNotch * notches) : undefined
+      const result = analyzeScrollOffset(prev, next, { hintDelta })
+      expect(result.delta).toBe(actual)
+      expect(result.stickyBottom).toBe(FOOTER)
+      const delta = result.delta!
+      top += delta
+      paste(next, planBand(delta, H, result.stickyTop, result.stickyBottom), top)
+      perNotch = delta / notches
+      prev = next
+      notches = planNotches(perNotch, H)
+    }
+
+    expect(top).toBe(BOTTOM)
+    const expected = new Uint8ClampedArray(W * longH * 4)
+    for (let a = 0; a < longH; a += 1) {
+      for (let x = 0; x < W; x += 1) {
+        const [r, g, b] = a < CONTENT_H ? pagePixel(x, a) : solidBar(x, a - BOTTOM, H, FOOTER)
         const at = (a * W + x) * 4
         expected[at] = r
         expected[at + 1] = g

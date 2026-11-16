@@ -479,7 +479,7 @@ function onToggleRowMode(id: RowId): void {
       >
         <!-- 栏头只在编辑态出现：拆一栏 / 收一栏 / 切固定与自适应都在这儿 -->
         <div v-if="editing" class="colhead">
-          <span class="colhead__name">第 {{ index + 1 }} 栏</span>
+          <span class="colhead__name truncate">第 {{ index + 1 }} 栏</span>
           <button
             class="colhead__btn"
             type="button"
@@ -667,9 +667,6 @@ function onToggleRowMode(id: RowId): void {
   flex: 1 1 auto;
   min-width: 0;
   color: var(--ink-2);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 /* 与行右上角那颗「固定高度 / 自适应」同一种小药丸 */

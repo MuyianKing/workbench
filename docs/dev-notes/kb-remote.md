@@ -25,7 +25,7 @@
    frontmatter），但不上界面 —— 条目树、条目阅读、标签分布、巡检（kb-lint.ts）一起退役。
 2. **打开页面自动 pull**：列表数据来自远程仓库，进页面后台 `kb_pull` 一次（只拉不推，
    `--autostash` 保护未提交现场）；冲突不挑边、失败只把原因摆到同步那行，不变成一页错误。
-   这是同一条 kb 仓库出口、触发时机多了一处（features-and-architecture.md「数据与隐私」
+   这是同一条 kb 仓库出口、触发时机多了一处（[privacy.md](../privacy.md)「数据与隐私」
    已同步改写）。
 3. **应用做一次性迁移**：`kb/` → `data/`、来源复制进 `raw/<名>/`、`data/raw/` 前缀改写、
    写清单、删旧 index/，确认弹层列明四步后一次做完；只能迁移一次（清单已存在时 Rust 拒绝）。
@@ -57,7 +57,7 @@
 - `sync.rs` 抽出 `sync_folder` 共用实现（笔记 / 知识库同一套流程：锁、busy、凭据、fetch、
   commit、pull --rebase --autostash、push，冲突不挑边），两个薄壳：
   `kb_sync`（提交信息 `kb: <设备名>`）与 `kb_pull`（只拉不推）。`commit_notes` 加了前缀参数。
-- 出网点清单（「数据与隐私」一节已改写）：同步按钮（用户点）、**打开页面后台 pull**、
+- 出网点清单（[privacy.md](../privacy.md) 已改写）：同步按钮（用户点）、**打开页面后台 pull**、
   **清洗前后各一次 kb_sync**（前置上传 + 推条目）。地址与内容不变：都是知识库仓库自己的 origin。
 - 应用仍不 init、不 clone、不改 origin；没仓库 / 没远端时同步与清洗都如实拦。
 

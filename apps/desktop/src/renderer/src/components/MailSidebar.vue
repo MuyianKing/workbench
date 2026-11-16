@@ -14,6 +14,7 @@ import { recipientAddress, senderAddress } from '@workbench/mail'
  */
 import { computed, ref, watch } from 'vue'
 import EmptyState from '@/components/EmptyState.vue'
+import MailAvatar from '@/components/MailAvatar.vue'
 import MailContactEditDialog from '@/components/MailContactEditDialog.vue'
 import MailContactMenu from '@/components/MailContactMenu.vue'
 import MailContextMenu from '@/components/MailContextMenu.vue'
@@ -352,9 +353,13 @@ function onMenuAct(name: 'contact' | 'bulk' | 'toggle-seen' | 'multi-pick' | 'mu
       </span>
     </div>
 
-    <!-- 通讯录那一签：一行一个人（名字 / 地址）。**行上不带按钮** —— 编辑与删除都收在
-         右击弹出的 MailContactMenu 里（与邮件清单行同一种做法），新增走头部那颗动作 -->
+    <!-- 通讯录那一签：一个人一张小卡片（首字头像 + 名字 / 地址两行），与邮件清单同一副分量。
+         **行上不带按钮** —— 编辑与删除都收在右击弹出的 MailContactMenu 里（与邮件清单行同一种做法），
+         新增走头部那颗动作；顶上一行只报个数 -->
     <div v-if="mail.tab === 'contacts'" class="contact-list" role="list">
+      <p v-if="mail.contacts.length" class="contact-list__count">
+        {{ mail.contacts.length }} 位联系人
+      </p>
       <div
         v-for="contact in mail.contacts"
         :key="contact.address"
@@ -363,11 +368,14 @@ function onMenuAct(name: 'contact' | 'bulk' | 'toggle-seen' | 'multi-pick' | 'mu
         role="listitem"
         @contextmenu.prevent="openContactMenu($event, contact)"
       >
-        <span class="contact-row__name" :title="contact.name || contact.address">
-          {{ contact.name || contact.address }}
-        </span>
-        <span v-if="contact.name" class="contact-row__addr" :title="contact.address">
-          {{ contact.address }}
+        <MailAvatar :name="contact.name || contact.address" />
+        <span class="contact-row__text">
+          <span class="contact-row__name truncate" :title="contact.name || contact.address">
+            {{ contact.name || contact.address }}
+          </span>
+          <span v-if="contact.name" class="contact-row__addr truncate" :title="contact.address">
+            {{ contact.address }}
+          </span>
         </span>
         <el-icon v-if="removingContact === contact.address" class="contact-row__removing is-loading">
           <Loading />
@@ -578,25 +586,44 @@ function onMenuAct(name: 'contact' | 'bulk' | 'toggle-seen' | 'multi-pick' | 'mu
   overflow-y: auto;
 }
 
-/* 通讯录那一签的名单：一行一个人，与邮件清单同一副行的分量（名字主色、地址退一档）。
+/* 通讯录那一签的名单：一个人一张小卡片（首字头像 + 名字 / 地址两行），与邮件清单同一副分量。
    行上不带按钮，动作用右击（MailContactMenu）—— user-select: none 与邮件清单行同理 */
 .contact-list {
+  display: flex;
   flex: 1;
+  flex-direction: column;
+  gap: var(--sp-1);
   min-height: 0;
   margin-top: var(--sp-2);
   overflow-y: auto;
 }
 
+/* 名单顶上的计数：只报个数，安静一档，不占卡片位置 */
+.contact-list__count {
+  flex-shrink: 0;
+  margin: 0;
+  padding: 0 var(--sp-1) var(--sp-1);
+  color: var(--ink-3);
+  font-size: var(--fs-meta);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 一张小卡片：与邮件清单行同一副壳（透明边 + 悬停实起来 + 底色抬一档） */
 .contact-row {
   display: flex;
+  flex-shrink: 0;
   align-items: center;
   gap: var(--sp-2);
   padding: var(--sp-2);
+  border: 1px solid transparent;
   border-radius: var(--r-md);
+  background: var(--bg-subtle);
   user-select: none;
+  transition: background-color 0.16s ease, border-color 0.16s ease;
 }
 
 .contact-row:hover {
+  border-color: var(--border);
   background: var(--bg-inset);
 }
 
@@ -606,26 +633,29 @@ function onMenuAct(name: 'contact' | 'bulk' | 'toggle-seen' | 'multi-pick' | 'mu
   pointer-events: none;
 }
 
-.contact-row__name {
+/* 两行字：名字主行、地址退一档 */
+.contact-row__text {
+  display: flex;
   flex: 1;
+  flex-direction: column;
+  gap: 1px;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--ink);
-  font-size: var(--fs-body);
 }
 
-/* 地址：有名字时才跟着摆（没名字时它已经在名字那一格了） */
+.contact-row__name {
+  color: var(--ink);
+  font-size: var(--fs-body);
+  line-height: 16px;
+}
+
+/* 地址：等宽字（与邮件清单里来源账户同一种「数据」感）；有名字时才跟着摆
+   （没名字时它已经在主行里了） */
 .contact-row__addr {
-  flex-shrink: 1;
-  min-width: 0;
-  max-width: 55%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   color: var(--ink-3);
-  font-size: var(--fs-meta);
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  line-height: 15px;
+  letter-spacing: 0.02em;
 }
 
 /* 正在删的那一行：行尾转个圈（与邮件清单里删信那几行同一副信号） */

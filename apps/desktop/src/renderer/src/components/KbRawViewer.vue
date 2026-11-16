@@ -37,7 +37,7 @@ const realPath = computed(() => {
 </script>
 
 <template>
-  <div class="kb-raw-viewer">
+  <div class="kb-raw-viewer page">
     <header class="kb-raw-viewer__head">
       <div class="kb-raw-viewer__bar">
         <el-button size="small" :icon="ArrowLeft" @click="emit('back')">
@@ -83,10 +83,6 @@ const realPath = computed(() => {
 
 <style scoped>
 .kb-raw-viewer {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  min-height: 0;
 }
 
 .kb-raw-viewer__head {

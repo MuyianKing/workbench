@@ -329,7 +329,7 @@ onBeforeUnmount(() => {
         <div class="usage__card-body">
           <span class="usage__label">请求数</span>
           <span class="usage__value">{{ summary?.requests ?? 0 }}</span>
-          <span class="usage__sub">其中失败 {{ summary?.failed ?? 0 }} 次</span>
+          <span class="usage__sub truncate">其中失败 {{ summary?.failed ?? 0 }} 次</span>
         </div>
       </div>
       <div class="usage__card is-tokens">
@@ -337,7 +337,7 @@ onBeforeUnmount(() => {
         <div class="usage__card-body">
           <span class="usage__label">总 token</span>
           <span class="usage__value">{{ formatCompactTokens(summary?.totalTokens ?? 0) }}</span>
-          <span class="usage__sub">入 {{ percent((summary?.promptTokens ?? 0) / Math.max(1, summary?.totalTokens ?? 1) * 100) }} · 出 {{ percent((summary?.completionTokens ?? 0) / Math.max(1, summary?.totalTokens ?? 1) * 100) }}</span>
+          <span class="usage__sub truncate">入 {{ percent((summary?.promptTokens ?? 0) / Math.max(1, summary?.totalTokens ?? 1) * 100) }} · 出 {{ percent((summary?.completionTokens ?? 0) / Math.max(1, summary?.totalTokens ?? 1) * 100) }}</span>
         </div>
       </div>
       <div class="usage__card is-input">
@@ -359,7 +359,7 @@ onBeforeUnmount(() => {
         <div class="usage__card-body">
           <span class="usage__label">成功率</span>
           <span class="usage__value">{{ percent(summary?.successPct ?? 0) }}</span>
-          <span class="usage__sub">失败 {{ summary?.failed ?? 0 }} 次</span>
+          <span class="usage__sub truncate">失败 {{ summary?.failed ?? 0 }} 次</span>
         </div>
       </div>
       <div class="usage__card is-latency">
@@ -367,7 +367,7 @@ onBeforeUnmount(() => {
         <div class="usage__card-body">
           <span class="usage__label">平均延迟</span>
           <span class="usage__value">{{ ((summary?.avgTtftMs ?? 0) / 1000).toFixed(2) }}s</span>
-          <span class="usage__sub">吐字 {{ (summary?.tokensPerSec ?? 0).toFixed(1) }} tok/s</span>
+          <span class="usage__sub truncate">吐字 {{ (summary?.tokensPerSec ?? 0).toFixed(1) }} tok/s</span>
         </div>
       </div>
     </div>
@@ -378,29 +378,29 @@ onBeforeUnmount(() => {
     -->
     <section class="panel usage__cost">
       <div class="usage__cost-hero">
-        <span class="usage__cost-label">扣除积分</span>
+        <span class="usage__cost-label truncate">扣除积分</span>
         <span class="usage__cost-value">{{ (summary?.creditSamples ?? 0) > 0 ? credit(summary?.credits ?? 0) : '—' }}</span>
-        <span class="usage__cost-sub">按上游 usage.credit 累计</span>
+        <span class="usage__cost-sub truncate">按上游 usage.credit 累计</span>
       </div>
       <div class="usage__cost-item is-avg">
-        <span class="usage__cost-label">平均积分 / 1M Token</span>
+        <span class="usage__cost-label truncate">平均积分 / 1M Token</span>
         <span class="usage__cost-value is-ok">{{ ratioValue(summary?.creditsPer1MTokens ?? 0, summary?.creditSamples ?? 0) }}</span>
-        <span class="usage__cost-sub">分母为总 token · 越低越省</span>
+        <span class="usage__cost-sub truncate">分母为总 token · 越低越省</span>
       </div>
       <div class="usage__cost-item is-match">
-        <span class="usage__cost-label">匹配 Token</span>
+        <span class="usage__cost-label truncate">匹配 Token</span>
         <span class="usage__cost-value">{{ (summary?.creditSamples ?? 0) > 0 ? formatCompactTokens(summary?.creditTokens ?? 0) : '—' }}</span>
-        <span class="usage__cost-sub">与积分同时观测到的总 token</span>
+        <span class="usage__cost-sub truncate">与积分同时观测到的总 token</span>
       </div>
       <div class="usage__cost-item is-samples">
-        <span class="usage__cost-label">有效积分样本</span>
+        <span class="usage__cost-label truncate">有效积分样本</span>
         <span class="usage__cost-value">{{ summary?.creditSamples ?? 0 }}</span>
-        <span class="usage__cost-sub">{{ missingCreditCount }} 个模型不参与折算</span>
+        <span class="usage__cost-sub truncate">{{ missingCreditCount }} 个模型不参与折算</span>
       </div>
       <div class="usage__cost-item is-hit">
-        <span class="usage__cost-label">缓存命中率</span>
+        <span class="usage__cost-label truncate">缓存命中率</span>
         <span class="usage__cost-value">{{ percent(summary?.cacheHitPct ?? 0) }}</span>
-        <span class="usage__cost-sub">命中 / 输入 token · 低命中更贵</span>
+        <span class="usage__cost-sub truncate">命中 / 输入 token · 低命中更贵</span>
       </div>
     </section>
 
@@ -646,9 +646,6 @@ onBeforeUnmount(() => {
 .usage__sub {
   font-size: var(--gw-fs-micro);
   color: var(--ink-3);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .usage__section {
@@ -787,9 +784,6 @@ onBeforeUnmount(() => {
 .usage__cost-label {
   font-size: var(--gw-fs-micro);
   color: var(--ink-3);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 /* 数字用等宽体：位数对齐后，主数字与四个佐证一眼分得出主次 */
@@ -821,9 +815,6 @@ onBeforeUnmount(() => {
   margin-top: 6px;
   font-size: var(--gw-fs-micro);
   color: var(--ink-3);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 /* 账号格两行：名字在上、域与 uid 前缀在下（流水里只有 uid，名字查不到就退回它） */

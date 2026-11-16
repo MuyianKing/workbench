@@ -16,6 +16,7 @@ import AccountDialog from '@/components/AccountDialog.vue'
 import HomeGreeting from '@/components/HomeGreeting.vue'
 import LayoutEditBar from '@/components/LayoutEditBar.vue'
 import SettingsDialog from '@/components/SettingsDialog.vue'
+import UnreadBadge from '@/components/UnreadBadge.vue'
 import { notifyError } from '@/notify'
 import { useAuthStore } from '@/stores/auth'
 import { useNavStore } from '@/stores/nav'
@@ -75,6 +76,11 @@ async function openZentao(): Promise<void> {
     zentaoOpening.value = false
   }
 }
+
+/** 角标很小，悬停提示里说清它是什么（未读数是「后台发现、还没点开禅道」的那批） */
+const zentaoTitle = computed(() =>
+  zentao.unread > 0 ? `打开禅道 · ${zentao.unread} 个未读` : '打开禅道',
+)
 </script>
 
 <template>
@@ -92,15 +98,19 @@ async function openZentao(): Promise<void> {
         @click="toggleNav"
       />
 
-      <!-- 禅道：交给系统浏览器打开，见 docs/modules/zentao.md —— 与上面那颗折叠按钮同一排 -->
-      <el-button
-        class="icon-btn"
-        :icon="List"
-        title="打开禅道"
-        aria-label="打开禅道"
-        :disabled="zentaoOpening"
-        @click="openZentao"
-      />
+      <!-- 禅道：交给系统浏览器打开，见 docs/modules/zentao.md —— 与上面那颗折叠按钮同一排。
+           角标是「后台发现、还没点开禅道」的 Bug 数（点开即清零） -->
+      <span class="badge-host">
+        <el-button
+          class="icon-btn"
+          :icon="List"
+          :title="zentaoTitle"
+          :aria-label="zentaoTitle"
+          :disabled="zentaoOpening"
+          @click="openZentao"
+        />
+        <UnreadBadge :count="zentao.unread" />
+      </span>
 
       <el-button
         v-if="showLayoutButton"
@@ -181,6 +191,12 @@ async function openZentao(): Promise<void> {
 .icon-btn {
   width: 32px;
   padding: 0;
+}
+
+/* 顶栏那些带角标的按钮：角标以这一层为定位基准 */
+.badge-host {
+  position: relative;
+  display: inline-flex;
 }
 
 /* 头像按钮：高度与 .icon-btn 对齐，宽度由头像自己撑开 */

@@ -249,7 +249,7 @@ async function openVideoExternally(rel: string): Promise<void> {
           </el-tooltip>
 
           <template v-if="store.active">
-            <span class="video__title" :title="store.active.rel">{{ store.active.name }}</span>
+            <span class="video__title truncate" :title="store.active.rel">{{ store.active.name }}</span>
             <span v-if="locationText" class="video__location truncate">{{ locationText }}</span>
           </template>
           <span v-else class="video__location">未选中</span>
@@ -499,9 +499,6 @@ body.is-resizing-video-tree .video__side {
   font-weight: 600;
   color: var(--ink);
   min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
 }
 
 .video__location {

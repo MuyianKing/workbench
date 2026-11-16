@@ -3,9 +3,10 @@ import type { PptxViewer } from '@aiden0z/pptx-renderer'
 import { decodeBase64ToBuffer } from '@workbench/ai'
 /**
  * 预览栏的 PPTX 画法：@aiden0z/pptx-renderer 在浏览器里解析并渲染，列表模式
- * （幻灯片从上到下排、带页码标）。**pdfjs 兜底必须显式关** —— EMF 媒体的降级渲染
- * 默认会去拿 pdf.js，那是不在任何已登记出口里的出网（见 AGENTS.md 第 1 节的联网边界）。
- * 库（连带它依赖的 echarts）是动态引的：不用这个画法就不进包。
+ * （幻灯片从上到下排、带页码标）。**两条出网路都要显式关**：pdfjs 兜底 —— EMF 媒体的
+ * 降级渲染默认会去拿 pdf.js；externalMedia —— 外部图片 / 填充 / 音视频与封面关系默认
+ * allow，包里带的媒体不受影响。两者都是不在任何已登记出口里的出网（见 AGENTS.md 第 1 节
+ * 的联网边界）。库（连带它依赖的 echarts）是动态引的：不用这个画法就不进包。
  */
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
@@ -41,6 +42,7 @@ async function load(): Promise<void> {
     viewer = new PptxViewer(box, {
       fitMode: 'contain',
       pdfjs: false,
+      externalMedia: 'block',
     })
     await viewer.open(buffer, { renderMode: 'list', listOptions: { showSlideLabels: true } })
   }

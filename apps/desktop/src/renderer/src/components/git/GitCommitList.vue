@@ -106,12 +106,12 @@ function pick(commit: GitCommit): void {
 </script>
 
 <template>
-  <section class="commit-pane">
+  <section class="commit-pane page">
     <header class="commit-head">
       <div class="commit-head__title">
         <template v-if="store.isFileHistory">
           <span class="commit-head__label">文件历史</span>
-          <span class="commit-head__file mono" :title="store.historyPath">
+          <span class="commit-head__file mono truncate" :title="store.historyPath">
             {{ basenameOf(store.historyPath) }}
           </span>
           <el-button text size="small" @click="store.showRepoHistory()">
@@ -192,14 +192,14 @@ function pick(commit: GitCommit): void {
           @keydown.space.prevent="select(commit)"
         >
           <div class="commit__main">
-            <span class="commit__subject" :title="commit.subject">
+            <span class="commit__subject truncate" :title="commit.subject">
               {{ commit.subject || '（无提交说明）' }}
             </span>
             <span class="commit__meta">
-              <span class="commit__author">{{ commit.author || commit.authorEmail || '未知作者' }}</span>
+              <span class="commit__author truncate">{{ commit.author || commit.authorEmail || '未知作者' }}</span>
               <span>{{ formatTimestamp(commit.time) }}</span>
               <span v-if="commit.parents.length > 1" class="commit__badge">合并</span>
-              <span v-if="refLabel(commit)" class="commit__ref" :title="commit.refs">
+              <span v-if="refLabel(commit)" class="commit__ref truncate" :title="commit.refs">
                 {{ refLabel(commit) }}
               </span>
             </span>
@@ -233,11 +233,7 @@ function pick(commit: GitCommit): void {
 
 <style scoped>
 .commit-pane {
-  display: flex;
-  flex-direction: column;
   min-width: 0;
-  min-height: 0;
-  height: 100%;
   padding: var(--sp-3);
 }
 
@@ -267,9 +263,6 @@ function pick(commit: GitCommit): void {
 
 .commit-head__file {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   color: var(--ink-3);
   font-size: var(--fs-micro);
 }
@@ -396,9 +389,6 @@ function pick(commit: GitCommit): void {
 }
 
 .commit__subject {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   color: var(--ink);
   font-size: var(--fs-meta);
 }
@@ -413,9 +403,6 @@ function pick(commit: GitCommit): void {
 }
 
 .commit__author {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   max-width: 8em;
 }
 
@@ -427,9 +414,6 @@ function pick(commit: GitCommit): void {
 
 /* 引用（分支 / 标签）只留第一条：完整清单在 title 里 */
 .commit__ref {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   max-width: 10em;
   color: var(--ink-3);
 }

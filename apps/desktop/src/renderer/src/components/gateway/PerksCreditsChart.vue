@@ -194,7 +194,7 @@ onBeforeUnmount(disposeChart)
       <h4 class="credits-chart__title">
         近一个月积分获取
       </h4>
-      <span class="credits-chart__dim">
+      <span class="credits-chart__dim truncate">
         {{ scope }}<template v-if="failed"> · {{ failed }} 个账号未读到</template>
         <template v-if="hasData"> · 合计 +{{ formatDecimal(total) }} 积分</template>
       </span>
@@ -245,9 +245,6 @@ onBeforeUnmount(disposeChart)
   font-size: var(--gw-fs-micro);
   color: var(--ink-3);
   font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 /* 画布容器：ECharts 要一个定高的宿主（宽度由 flex 给）；高度与原来的手绘图同量级 */

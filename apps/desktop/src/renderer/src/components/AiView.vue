@@ -448,7 +448,7 @@ const runningIds = computed(() =>
               <el-dropdown trigger="click" @command="onLandingDir">
                 <button type="button" class="dir" :title="ai.newDir">
                   <el-icon><FolderOpened v-if="ai.newDir" /><Folder v-else /></el-icon>
-                  <span class="dir__name">{{ ai.newDir ? noteRootName(ai.newDir) : '选择工作目录' }}</span>
+                  <span class="dir__name truncate">{{ ai.newDir ? noteRootName(ai.newDir) : '选择工作目录' }}</span>
                   <el-icon class="dir__caret">
                     <ArrowDown />
                   </el-icon>
@@ -464,7 +464,7 @@ const runningIds = computed(() =>
                   </el-dropdown-menu>
                 </template>
               </el-dropdown>
-              <span v-if="repoBranch" class="dir__branch" title="这个目录当前的 git 分支">
+              <span v-if="repoBranch" class="dir__branch truncate" title="这个目录当前的 git 分支">
                 <el-icon><Share /></el-icon>
                 {{ repoBranch }}
               </span>
@@ -715,9 +715,6 @@ body.is-resizing-ai-tree .ai-view__side {
 
 .dir__name {
   max-width: 320px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .dir__caret {
@@ -732,11 +729,8 @@ body.is-resizing-ai-tree .ai-view__side {
   align-items: center;
   gap: 6px;
   min-width: 0;
-  overflow: hidden;
   color: var(--ink-3);
   font-size: var(--fs-meta);
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /* 输入框底下那一行：只在没探到 Pi 时才出现（那颗「安装 Pi」，居中） */

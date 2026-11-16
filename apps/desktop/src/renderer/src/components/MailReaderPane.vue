@@ -225,13 +225,13 @@ const bodyDoc = computed(() => {
         <div class="mail-head__meta">
           <!-- 发件箱里第一行摆的是收件人：挂一个安静的小字，免得跟发件人混淆 -->
           <span v-if="mail.active.folder === 'sent'" class="mail-head__to">收件人</span>
-          <span class="mail-head__from">{{ partyText }}</span>
-          <span v-if="partyAddress && partyText !== partyAddress" class="mail-head__addr">
+          <span class="mail-head__from truncate">{{ partyText }}</span>
+          <span v-if="partyAddress && partyText !== partyAddress" class="mail-head__addr truncate">
             &lt;{{ partyAddress }}&gt;
           </span>
           <span class="mail-head__date">{{ mail.active.dateText }}</span>
           <!-- 收自哪个邮箱（配了多个账户才画）：回信默认就从它发 -->
-          <span v-if="mail.accounts.length > 1" class="mail-head__src" :title="mail.active.account">
+          <span v-if="mail.accounts.length > 1" class="mail-head__src truncate" :title="mail.active.account">
             {{ mail.active.account }}
           </span>
           <span class="mail-head__spacer" />
@@ -268,7 +268,7 @@ const bodyDoc = computed(() => {
                   </el-icon>
                   <span v-else class="mail-file__ext">{{ attachmentBadge(file) }}</span>
                 </span>
-                <span class="mail-file__name">{{ file.name }}</span>
+                <span class="mail-file__name truncate">{{ file.name }}</span>
                 <span class="mail-file__size">{{ attachmentSizeText(file.base64) }}</span>
               </button>
               <el-tooltip content="另存为" placement="top">
@@ -295,7 +295,7 @@ const bodyDoc = computed(() => {
                 </el-icon>
                 <span v-else class="mail-file__ext">{{ attachmentBadge(file) }}</span>
               </span>
-              <span class="mail-file__name">{{ file.name }}</span>
+              <span class="mail-file__name truncate">{{ file.name }}</span>
               <span class="mail-file__size">{{ attachmentSizeText(file.base64) }}</span>
             </button>
           </template>
@@ -392,17 +392,11 @@ const bodyDoc = computed(() => {
 .mail-head__from {
   color: var(--ink);
   font-size: var(--fs-meta);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .mail-head__addr {
   color: var(--ink-3);
   font-size: var(--fs-meta);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .mail-head__date {
@@ -415,9 +409,6 @@ const bodyDoc = computed(() => {
 .mail-head__src {
   color: var(--ink-3);
   font-size: var(--fs-meta);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /* 发件箱里第一行摆的是收件人：前面挂一个安静的小字，免得跟发件人混淆 */
@@ -540,9 +531,6 @@ button.mail-file__save:hover {
 
 .mail-file__name {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .mail-file__size {

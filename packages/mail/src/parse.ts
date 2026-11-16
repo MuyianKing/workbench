@@ -12,8 +12,8 @@
 // ! 脚本不跑就只剩死版面。外链脚本照旧一个不放行，承载它的 iframe 也不给同源（不给
 // ! 宿主能力），细则与代价见 docs/modules/mail.md。
 
+import { base64ToBytes, bytesToBase64 } from '@workbench/core'
 import PostalMime from 'postal-mime'
-import { base64ToBytes, bytesToBase64 } from './base64'
 import { formatMailSize } from './mime'
 import { decodeEncodedWords } from './rfc2047'
 

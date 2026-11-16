@@ -99,7 +99,7 @@ function markOf(row: PatchRow): string {
 </script>
 
 <template>
-  <div class="patch" :class="{ 'patch--full': full }">
+  <div class="patch page" :class="{ 'patch--full': full }">
     <!-- 文件名与视图切换常驻：切文件、读取中都不整条闪掉，只换下面的内容。
          全屏时左侧文件清单被盖住，路径就是颗下拉 —— 列出全部改动文件，选中即切 -->
     <div v-if="props.file" class="patch__bar">
@@ -111,8 +111,8 @@ function markOf(row: PatchRow): string {
         popper-class="git-file-menu"
         @command="(path: string) => emit('select', path)"
       >
-        <button type="button" class="patch__file patch__file--switch" :title="props.file.path">
-          <span class="patch__file-name mono">{{ props.file.path }}</span>
+        <button type="button" class="patch__file patch__file--switch truncate" :title="props.file.path">
+          <span class="patch__file-name mono truncate">{{ props.file.path }}</span>
           <el-icon class="patch__file-caret">
             <ArrowDown />
           </el-icon>
@@ -130,7 +130,7 @@ function markOf(row: PatchRow): string {
           </el-dropdown-menu>
         </template>
       </el-dropdown>
-      <span v-else class="patch__file mono" :title="props.file.path">
+      <span v-else class="patch__file mono truncate" :title="props.file.path">
         {{ props.file.path }}
       </span>
       <span v-if="props.file.binary" class="patch__stat">二进制</span>
@@ -279,11 +279,7 @@ function markOf(row: PatchRow): string {
 
 <style scoped>
 .patch {
-  display: flex;
-  flex-direction: column;
   gap: var(--sp-2);
-  min-height: 0;
-  height: 100%;
 }
 
 /* 全屏：一块同底色的圆角卡片 —— 补丁栏与代码共用 --bg-inset，顶部没有那条更深的色带。
@@ -328,9 +324,6 @@ function markOf(row: PatchRow): string {
 
 .patch__file {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   color: var(--ink-2);
   font-size: var(--fs-micro);
 }
@@ -360,9 +353,6 @@ function markOf(row: PatchRow): string {
 
 .patch__file-name {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .patch__file-caret {

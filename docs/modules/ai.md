@@ -4,16 +4,6 @@
 
 跨模块通用事实见 [features-and-architecture.md](../features-and-architecture.md)，红线见 [AGENTS.md](../../AGENTS.md)。
 
-- **Pi 是应用里唯一的编码 Agent**：只服务 AI 助手页，**别照着再引第二个 Agent**（另一个网关 /
-  另一个 CLI / 另一套云端助手都不算「接个模型」那么简单，会各自带来新的出网与权限面）。
-  它**随包内置**（`scripts/vendor-pi.mjs` 在构建 / 开发前生成瘦身的 `resources/pi/`，钉死版本、
-  删掉运行时用不到的云厂商 SDK），Node 用系统里的（≥ 22.19，门槛判定在 `nodeSatisfiesPi`）。
-  跑 **RPC 模式**、**一个会话一个进程**（一轮跑完不收：连续对话靠它），会话留档由 Pi 自己写在
-  `data\pi\sessions\`（起进程传 `--session-id` 与 `--session-dir`，**不要传 `--no-session`**；
-  两档工具权限见下）。子进程必须带 `PI_TELEMETRY=0`、`PI_SKIP_VERSION_CHECK=1` 与 `PI_OFFLINE=1`
-  （那三条默认行为不在任何已登记的出口里），密钥只经环境变量给、界面读不回来，
-  **进程直启不经 `cmd /C`**（`session::spawn_args`，行内层引号会被 cmd 拆坏）。
-
 关键落点：`packages/ai/src/ai.ts`（服务 / 模型 / 会话的形状与收敛、`thinkingLevelMap`、提示词、启动参数、RPC 帧解析、
 历史消息 → 日志行，带单测）、`packages/ai/src/ai-preview.ts`（回答里的站内链接 → 预览目标的解析与画法判定，带单测）、
 `packages/ai/src/pi-skills.ts`（技能的根与开关键、交给 Pi 的清单，带单测）、
@@ -30,6 +20,33 @@
 `AiModelMenu.vue`（composer 那颗「模型」chip 与它的浮层：服务卡、模型清单、思考强度滑杆）、
 `AiSkillDialog.vue`、`AiRunPanel.vue`（对话画法与确认条）、`AiPreviewPane.vue`（右侧预览栏）、
 `AiModelDialog.vue` / `AiProviderDialog.vue` / `AiPresetGrid.vue` / `AiModelPicker.vue`（模型管理三层）。
+
+**先读这一段就够了**——下面十条红线，破一条就是 bug；每条的依据、边界与踩坑都在后面按主题分的九节里，改到哪块读哪块。
+
+- Pi 是唯一的编码 Agent，只服务这一页；别引第二个 Agent。
+- 起进程直启、不经 `cmd /C`；提示词走 stdin 一行 JSON，密钥只经环境变量。
+- 一个会话一个进程、跑完不收；一轮的结束判据是 `agent_settled`，不是退出码。
+- 会话留档由 Pi 写、落点钉在数据目录；应用不自己攒上下文。
+- `PI_TELEMETRY=0` / `PI_SKIP_VERSION_CHECK=1` / `PI_OFFLINE=1` 三条不许删。
+- 技能只认 `-ns` + 逐条 `--skill`（两头合起来才成立）；开关存「关掉的那些」。
+- 工具面全开，问不问由 `aiPermission` 定（`full` = 不加载扩展，不是扩展里判一下）。
+- 模型请求由 Pi 自己发；models.json 一次写整份，密钥只写环境变量引用。
+- 渲染层与 Rust 的字段名必须一字不差（serde 静默丢弃认不出的键）。
+- 这一页与知识库无关、不摆提示行；AI 写的 HTML 只走沙箱 iframe。
+
+### 唯一的内置 Agent
+
+- **Pi 是应用里唯一的编码 Agent**：只服务 AI 助手页，**别照着再引第二个 Agent**（另一个网关 /
+  另一个 CLI / 另一套云端助手都不算「接个模型」那么简单，会各自带来新的出网与权限面）。
+  它**随包内置**（`apps/desktop/scripts/vendor-pi.mjs` 在构建 / 开发前生成瘦身的 `apps/desktop/resources/pi/`，钉死版本、
+  删掉运行时用不到的云厂商 SDK），Node 用系统里的（≥ 22.19，门槛判定在 `nodeSatisfiesPi`）。
+  跑 **RPC 模式**、**一个会话一个进程**（一轮跑完不收：连续对话靠它），会话留档由 Pi 自己写在
+  `data\pi\sessions\`（起进程传 `--session-id` 与 `--session-dir`，**不要传 `--no-session`**；
+  两档工具权限见下）。子进程必须带 `PI_TELEMETRY=0`、`PI_SKIP_VERSION_CHECK=1` 与 `PI_OFFLINE=1`
+  （那三条默认行为不在任何已登记的出口里），密钥只经环境变量给、界面读不回来，
+  **进程直启不经 `cmd /C`**（`session::spawn_args`，行内层引号会被 cmd 拆坏）。
+
+### 页面形态（两屏、左树右对话）
 
 - **会话是头等对象**：一个会话 = 一个工作目录里的一段连续对话，与 Pi 的会话文件一一对应。
   `aiSessions` 存调度字段（id / dir / title / createdAt / updatedAt，收敛见 `sanitizeAiSessions`）
@@ -75,15 +92,19 @@
   280 起、给对话留一截，不落盘重启回默认）。只有非 http(s) / mailto 的地址会进预览（外部地址照旧交系统浏览器，见 MarkdownView 的 `internalLinks`），
   相对地址一律对到**会话工作目录**解析（口径唯一出处 `resolveAiPreview`，`../` 出目录是本意）；画法按扩展名：markdown / html 按正文渲染（html 走**沙箱 iframe**，
   `sandbox` 全禁 —— AI 写的HTML 里若有脚本，绝不能在带宿主能力的 webview 里执行，这是硬边界）、图片显示原图、docx / pptx 交给渲染库（`docx-preview` / `@aiden0z/pptx-renderer`，
-  二者**不出网**：资源都出自文件 本身，pptx 的 pdf.js 兜底必须显式 `pdfjs: false` 关掉 —— 那是潜在的新出口；库都是动态引的，
+  二者**不出网**：资源都出自文件 本身，pptx 两个缺省就开着的出口必须显式关掉 —— pdf.js 兜底 `pdfjs: false`（EMF 媒体的降级
+  渲染会去拿 pdf.js）、外部媒体 `externalMedia: 'block'`（外部图片 / 填充 / 音视频与封面关系默认 allow，包内带的媒体不受影响）；库都是动态引的，
   不用就不进包）、其余文本等宽原文；docx / pptx 的二进制经 `fs_read_base64`（commands.rs，base64 已在依赖图里）回传，
   解码用 `decodeBase64ToBuffer`；读不到 / 超限（文本 2 MB、二进制约 24 MB，`AI_PREVIEW_MAX_*`）就地给一行错因；
   **Excel（.xlsx/.xls）与老二进制格式（.doc/.ppt）明确不支持**，解析那层就给出理由、不掉进文本通道读乱码。换会话（换工作目录）预览整栏收起。
 - **这一页不摆提示行，弹窗里也不写说明段**：缺什么由 `blocking` 说（长在 composer 上，与 `canRun` 一处 ——「能不能发、还差什么」是那条输入框自己的事），
   只出现在**发送按钮的悬停**里（`sendTitle`）；页面上只留控件自己的字（栏名、placeholder、composer 里那句工具边界），与首页「不打招呼不问好」同一条语气。
   弹窗里说明句、空态提示、生效时机说明全不写，只有控件与数据；例外是**技能弹窗组头的根路径与计数徽标**（那是数据不是说明句）。别加「点这里开始」类引导。
+
+### 进程：直启、stdin、内置 cli.js
+
 - **干活的不是应用，是本机 Pi**：**随包内置**，Node 用系统里的（≥ 22.19，判定在 `nodeSatisfiesPi`，跑不起来整页明说原因）。
-  内置形态由 [scripts/vendor-pi.mjs](../../apps/desktop/scripts/vendor-pi.mjs)在构建 / 开发前生成到 `resources/pi/`（不进版本库）：
+  内置形态由 [vendor-pi.mjs](../../apps/desktop/scripts/vendor-pi.mjs) 在构建 / 开发前生成到 `apps/desktop/resources/pi/`（不进版本库）：
   **不整棵 `npm install`** —— `npm pack` 只取 Pi 本体的 tarball，预填表的数据源（`pi-ai`）单下一份、读完就删（版本钉在 `CATALOG_VERSION`），
   再装 `jiti` / `photon-node` 两个运行期小包；然后按**保留清单**（`KEEP`）裁到运行时加载的那**三个**包：`pi-coding-agent` 的 `dist/bundle/`（实际执行的就是它的 `cli.js`，
   提供方实现已内联在 chunks 里）、`jiti`（扩展加载器，删了 `-e` 那份扩展会静默不加载、权限确认整条消失）、`@silvia-odwyer/photon-node`（贴图缩放）。
@@ -102,9 +123,12 @@
   远超管道缓冲）的 `ai_run` 工作线程还会一直握着 `session.stdin` 锁，让后来的写入先卡锁、再卡管道。
   同步命令在主线程上内联执行，冻住的是整个窗口消息循环 —— 正式版 v0.3 / v0.4 的多次「无响应被关掉」
   （Windows 事件日志 AppHang，ID 1002）即此，`session_write` 是唯一漏标的一处。
-- **内置 cli.js 路径两处候选**（`resolve_cli`，与内置壁纸同一条路子）：打包走 `resource_dir()/pi/...`，开发态读仓库 `resources/pi/`，
+- **内置 cli.js 路径两处候选**（`resolve_cli`，与内置壁纸同一条路子）：打包走 `resource_dir()/pi/...`，开发态读仓库 `apps/desktop/resources/pi/`，
   都没有才退回全局 `pi`。**`resource_dir` 给的 `\\?\` 前缀必须剥掉再用**。两个都没有是正常状态（`source: none`）；
   探测本身失败（命令起不来 / 超时）回 `Err`，界面提示「探测失败」而不是「没装」。
+
+### 模型与配置
+
 - **模型管理是「服务 + 模型」两层**：一个服务 = 名称 + Base URL + API 形态 + 密钥 + 模型清单，每条模型带 上下文窗口、最大输出、思考档位、能看图（形状见 [ai.ts](../../packages/ai/src/ai.ts) 的`AiProvider` / `sanitizeAiProviders`）。
   落点：名称 / 地址 / 形态 / 清单进设置（`aiProviders`）；密钥进凭据管理器（`Workbench/ai/<服务名>/token`，只写不回显）；
   端点由 `models_write` **一次写整份**成`models.json`（数据目录下的 `pi\`：安装版 `%APPDATA%\Workbench\data\pi\`，
@@ -135,6 +159,9 @@
 - **思考档位总是显式给**（`--thinking <level>`）：七档 id 是 Pi 认的（off / minimal / low / medium / high /xhigh / max），
   **一个字符都不能改**（不认的值它直接报错退出）；界面名由 `AI_THINKING_LEVELS` 定（默认 `medium`，与 Pi 一致）。给的是该模型支持的档位里挑的那档（不支持思考的只有 `off`，
   Pi 自己也会夹档）。
+
+### 提示词、贴图与脚手架
+
 - **别把「读懂并改写内容」搬进应用**：怎么拆怎么组织由用户与目录里的规范说了算；应用只交目录与指令、备好模型与密钥、把过程与结果画出来。
 - **提示词与密钥都不经过渲染层**：RPC 模式（`--mode rpc`），提示词是 **stdin 的一行 JSON**（`prompt_frame`）——含中文与换行，
   走命令行必炸。**一句一轮、同一根 stdin**（第一句由 `ai_run` 写，之后每句都是同一条命令）。密钥只在起进程时注入环境变量（命令行参数在进程列表是明文）。
@@ -150,6 +177,9 @@
 - **提示词开头那行脚手架不进界面**：`taskPrompt` 造的是「`你在下面这个目录里工作：<目录>` + 空行 + 用户原文」（`AI_PROMPT_PREFIX`），
   模型看见与落盘的都是整份；**界面只显示用户那段** —— 读历史用 `visibleInstruction` 剥掉（否则气泡里有一句用户没写过的话）。
   改字面量连 `AI_PROMPT_PREFIX` 一起改。
+
+### 会话留档与进程数
+
 - **会话留档由 Pi 写，落点由我们钉住**：起进程传 `--session-id` 与 `--session-dir <数据目录>/pi/sessions`（`sessions_dir`），
   **不传 `--no-session`**；默认落点是全局 `~/.pi/agent/sessions/`，必须拨到应用数据目录下（与 `PI_CODING_AGENT_DIR` 同一条理由）。
   **续聊与重启后还在 = 同一 id 再起进程**（`get_messages` 读得回 全部历史，杀在半路不留坏数据），应用不自己攒上下文。**删会话认的是会话文件首行 header 的 id**（不认文件名 ——时间戳与目录分组是 Pi 的实现细节），
@@ -164,6 +194,9 @@
   **别把「跑完就杀」写回来**。
 - **替 Pi 关掉三条出网旁路**：`PI_TELEMETRY=0`、`PI_SKIP_VERSION_CHECK=1`、`PI_OFFLINE=1` —— 它默认报遥测、向 pi.dev 查版本，
   RPC 启动还会刷模型目录（关掉后真正请求照常）。这三条不在任何已登记出口里，**不许删**。
+
+### 权限、一轮与收尾
+
 - **工具面全开，问不问由权限模式定**（`aiPermission`，默认 `auto-edit`）：`auto-edit` 时 `ai.rs` 写 Pi 扩展（`permission.js`：
   `tool_call` 钩子对 bash / powershell 调 `ctx.ui.confirm`，答否 `{ block: true, reason }` 挡回）以 `-e` 加载；
   `full` 不加载任何扩展 —— **「不问」是「没有扩展」，不是扩展里判了一下**。两档的差别只有「执行命令问不问」，读写文件两档都不问。**扩展只在内容变了时重写**（多会话同时起进程，
@@ -186,6 +219,9 @@
   换参数重开时对话里写一行「在哪个目录里工作」，那串命令行（cli.js 绝对路径 + 开关）收进这行的悬停（`AiLogLine.detail`），同进程续聊不重复。
   **失败落错误行，来源两处**：模型侧在 message 的 `errorMessage`，工具侧在事件 `result.content[].text`（`tool_execution_end` **没有 `error` 字段** —— 只认 error 会把「找不到 bash」「EISDIR」全显示成同一句兜底文案），
   多行只留第一句、全文进悬停。**有报错不能装顺利；顺利跑完不留状态行**。
+
+### 技能
+
 - **技能 = `--no-skills` + 逐条 `--skill`，两头合起来才成立**：Pi（1.5.0）有显式 `--skill <路径>`（可重复）与**自动发现**（`~/.agents/skills`、信任项目的 `.agents/skills`（还往上找）、`<agentDir>/skills`、`<cwd>/.pi/skills`、package 与扩展）。
   **自动发现必须关**（`-ns`），否则「关掉」是假的（只给 `--skill` 时 `~/.agents/skills` 仍在清单里，加 `-ns` 才只剩给出去的；
   `get_commands` 里另会列 `llama` / `mcp` 两条内置命令，它们不随技能表变，应用也不读这份清单）。于是**应用那份表是唯一真源**：
@@ -205,11 +241,14 @@
 - **`/skill:名字` 必须摆在提示词最前面**：Pi 只在文本**开头**认它（`startsWith('/skill:')`，一次一条，名字取到第一个空白）。
   `taskPrompt` 在指令以命令开头时把脚手架**挪进命令参数位**，`visibleInstruction` 对称还原（**技能名留着**、脚手架去掉），
   `aiSessionTitle` 把命令剥掉当标题。**别把命令插到中间** ——Pi 不认，整条会原样发给模型当普通文本。
-- **装技能这条出口**（第 9 条，清单见 [features-and-architecture.md](../features-and-architecture.md) 的「数据与隐私」）：
+- **装技能这条出口**（第 9 条，清单见 [privacy.md](../privacy.md)）：
   只有「粘地址」出网 —— 地址用户粘、点「装上」才 GET 一次，**主机不设白名单**（与「用户自己填的 git 仓库」同类），跟 `Location` 最多 5 跳，
   只收 zip、超 64 MB 停（`http::request_url_limited` —— 那个 8 MiB 阀门是所有出口共用的，**别调大**）。
   导入本地 zip / 目录、装卸开关、`--skill` 注入全在本机；这趟除地址本身不带任何用户数据。http.rs 因此多了 `location`（**不自动跟重定向**，
   跟不跟由调用方定）与 `request_url_limited`。
+
+### 索引与明确不做
+
 - **索引重建归应用**：`kb.rs` 的 `index_build` 是 `kb/_catalog.md` 与 `index/index.json` 的唯一生成者，
   格式与既有生成物一致（CRLF、文件头、JSON 键序），`generated_at` 由渲染层按本机时区算（`todayIsoDate`）；改输出格式只改 kb.rs 一处，
   断言在其测试里。**别把索引交回 Agent**：清洗的提示词同样明令 Pi 不碰生成物。
@@ -219,6 +258,7 @@
 
 ## 实现
 
+### 两屏与 composer
 
 - 导航栏第七项（名字跟设置里的程序名走 —— 用户把程序叫什么，这个智能体就叫什么，见 stores/settings.ts 的 viewLabelOf）：**通用 agent 控制台** —— 在一个目录里跟一段对话，请内置的 Pi 干活。
   版式**左树右对话**（与笔记 / 视频页同一副分栏，宽度住 `aiTreeWidth`，缝可拖）；**左栏能整栏收起**
@@ -235,7 +275,7 @@
   `AiLocationBar.vue` 只在挑中会话那一屏：目录定死（没有「换一个工作目录」—— 目录跟着会话走，
   Pi 按目录分组，换目录 = 新建会话；下拉只有「打开 / 复制路径」）—— 起始屏的目录键在 composer
   上面那一行（最近目录 + 「选择其他目录…」，只记在 `newDir`）；不是仓库或分离头指针时分支格
-  不出现（分支来自 `note_repo_state` 那条通用探测，见 [../notes/constraints.md](notes.md)；
+  不出现（分支来自 `note_repo_state` 那条通用探测，见 [notes.md](notes.md)；
   探测是 AiView 的 `refreshRepo`，分支值作 prop 递进位置栏）。
   `AiComposer.vue`：输入框 + 一行控件（左权限，右「模型」chip 与发送-停止），Enter 发送
   （Shift+Enter 换行，输入法选字的 Enter 不算）。**挑模型与换思考档合成一颗 chip**：点开
@@ -253,46 +293,61 @@
   实例，放页面这层才换屏不丢；composer 经 `update:instruction` / `add-images` / `remove-image` 回报，
   `send` 事件把那句交给页面、页面转 `run`，store 说收下了才清空输入框），`canRun` / `blocking` 也长在
   composer 上。贴图（Ctrl+V）一行缩略图、上限 `AI_IMAGE_MAX` 张、点开 `el-image` 看大图、只收 png / jpeg / webp / gif ——
-  形状与边界见 [../ai/constraints.md](ai.md)。**这一页不摆提示行**：缺什么（目录 / Node / Pi / 模型 / 密钥）由
+  形状与边界见上面「约束」。**这一页不摆提示行**：缺什么（目录 / Node / Pi / 模型 / 密钥）由
   `blocking` 一次说一件、只出现在发送按钮悬停里；页面上剩的字都是控件自己的。
   **这一页与知识库无关**：不内置任务提示词（`taskPrompt` 那行「你在下面这个目录里工作：」脚手架只给模型看，
-  读历史由 `visibleInstruction` 剥掉）、跑完不做任务绑定的事（见 [../ai/constraints.md](ai.md)）。干活的不是应用，
-  是内置的 Pi（[scripts/vendor-pi.mjs](../../apps/desktop/scripts/vendor-pi.mjs) 生成到 `resources/pi/`，Node 用系统里的）。
+  读历史由 `visibleInstruction` 剥掉）、跑完不做任务绑定的事（见上面「约束」）。干活的不是应用，
+  是内置的 Pi（[vendor-pi.mjs](../../apps/desktop/scripts/vendor-pi.mjs) 生成到 `apps/desktop/resources/pi/`，Node 用系统里的）。
+
+### 模型管理一屏
+
 - **模型管理是一屏「服务 + 模型」**（`AiModelDialog.vue`，从「模型」下拉底部进）：顶栏写默认模型
-  （`服务 · 模型`，点一下换），下面列服务，能加改停删；服务的形状与落点、`models.json` 的写法见
-  [../ai/constraints.md](ai.md)。加服务三步（`AiProviderDialog.vue`）：挑厂商（预设网格 `AI_PROVIDER_PRESETS`，
+  （`服务 · 模型`，点一下换），下面列服务，能加改停删；服务的形状与落点、`models.json` 的写法见上面「约束」。加服务三步（`AiProviderDialog.vue`）：挑厂商（预设网格 `AI_PROVIDER_PRESETS`，
   「自定义端点」在最前）→ 粘 Key（粘上即自动拉一次端点的模型列表）→ 挑模型（左栏点进右栏，行上预显「加进来会填成什么」，
   端点没报而靠认出的带 ≈）；行上「高级」摊开 `AiModelPicker.vue` 编辑面板：别名（清空回 id）、
   上下文与最大输出（快捷档位 + 认 `128k` 写法）、
-  思考 chips、能力（图片）。默认值的「四层」认法与 `thinkingLevelMap` 的写法见
-  [../ai/constraints.md](ai.md)。跑哪个模型在 composer 挑（`aiDefaultProvider` /
+  思考 chips、能力（图片）。默认值的「四层」认法与 `thinkingLevelMap` 的写法见上面「约束」。跑哪个模型在 composer 挑（`aiDefaultProvider` /
   `aiDefaultModel`，行为记忆，挑的没了退回第一个能挑的）；服务名撞上 Pi 内置的几个（`opencode-go` / `deepseek` /
   `zai`）时它的内置模型目录也进候选，只影响可选范围。历史包袱：更早的单端点设置
   （`aiProviderName` / `aiBaseUrl` / `aiApiFormat` / `aiModels`）在收敛时搬成一条服务（`legacyAiProvider`）
   后清掉；`aiWorkDir` 已废弃（目录跟着会话走）。
+
+### 会话与留档
+
 - **会话：一段对话一份留档，接着聊就是接着那个进程**。`aiSessions` 只存调度字段；留档由 Pi 写
   （`--session-id` + `--session-dir`）、续聊与重启后还在靠同一 id 再起进程、打开先读历史（`get_messages`，
-  只有活进程答得出来）、删除先收进程再按 header id 删 —— 规矩见 [../ai/constraints.md](ai.md)。
+  只有活进程答得出来）、删除先收进程再按 header id 删 —— 规矩见上面「约束」。
+
+### 权限与一轮的流程
+
 - **工具权限是 composer 左边那一栏**（`aiPermission`，默认「自动编辑」，两档差别只有「执行命令问不问」，
-  机制见 [../ai/constraints.md](ai.md)）：确认条画在**对话的末尾**（命令原文 + 允许 / 拒绝 + 后面还压几条），
+  机制见上面「约束」）：确认条画在**对话的末尾**（命令原文 + 允许 / 拒绝 + 后面还压几条），
   顶部状态这时说「等你确认这条命令…」；确认可能同时压几条（一轮的工具调用是并发的），
   `stores/ai.ts` 用队列按 id 应答，答与不答都在对话里留一行（「允许执行：…」/「拒绝执行：…」）；
   **确认排在会话上** —— 切到别的会话干别的，它还在原来那段里等着。
 - **一轮的流程**：写一句 → 交给那条会话的进程（没在跑先起，同一会话一句一轮、同一根 stdin）→
   事件流翻成对话行（失败也落错误行）→ `agent_settled` 收尾但进程留着；停止走 `abort`、应答没回来再按进程树杀。
-  画法（气泡、过程块、收据、流式）见 [AiProcess.vue](../../apps/desktop/src/renderer/src/components/AiProcess.vue) 与
-  [../ai/constraints.md](ai.md)；正文里的站内链接与「写下 N 个文件」点开在右侧预览栏（`AiView` 编排取数与图片授权、
+  画法（气泡、过程块、收据、流式）见 [AiProcess.vue](../../apps/desktop/src/renderer/src/components/AiProcess.vue)；规矩见上面「约束」；正文里的站内链接与「写下 N 个文件」点开在右侧预览栏（`AiView` 编排取数与图片授权、
   `AiPreviewPane.vue` 画，DOCX / PPTX / HTML 三个画法在 `AiPreviewDoc` / `AiPreviewSlides` / `AiPreviewHtml`，
   解析口径见 `packages/ai/src/ai-preview.ts`）。
+
+### Pi 与 Node
+
 - **Pi 已随包内置，Node 用系统里的**：资源解析与内置壁纸同一条路子（打包走 `resource_dir`、开发态读仓库目录，
   `\\?\` 前缀要剥）；两处都没有才退回 PATH 上的全局 `pi`，再没有才显示「安装 Pi」（`npm install -g`，
   与包管理器安装同一条会话通道）—— 打包出的安装包里内置那份永远在，这颗按钮只在开发态可能见到。
+
+### 技能弹窗
+
 - **技能**：「技能」按钮弹出的弹窗，两条技能根各一栏（**全局** `%USERPROFILE%\.agents\skills` 与别的 agent
   共用、**项目** `<工作目录>\.agents\skills` 就是技能页「安装到项目」写的那份 —— 两处共用有意为之），
   每栏导入文件 / 导入目录 / 粘地址三颗按钮，行内开关、看 `SKILL.md` 原文、文件管理器、卸载（要确认，
   删的是用户自己的目录，应用不替他提交 git）；**应用不内置任何技能**。装卸边界、`-ns` + 逐条 `--skill`、
-  `/skill:` 注入与开关表见 [../ai/constraints.md](ai.md)；出网只有「粘地址」
-  （第九条出口，见[「数据与隐私」](../features-and-architecture.md)）。
+  `/skill:` 注入与开关表见上面「约束」；出网只有「粘地址」
+  （第九条出口，见[「数据与隐私」](../privacy.md)）。
+
+### 页面结构
+
 - 页面结构：左栏两层树归
   [AiSessionTree.vue](../../apps/desktop/src/renderer/src/components/AiSessionTree.vue)（手写两层列表：固定两层、
   行上悬停按钮、展开态自己说了算 —— 笔记树用 `el-tree` 为的是拖拽与任意深度，这儿用不上）；两屏排版与 composer 归

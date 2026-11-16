@@ -37,8 +37,9 @@ pnpm run dist       # 打包出 NSIS 安装包
 
 ## 文档
 
-- [功能与架构](docs/features-and-architecture.md)：跨模块的通用事实（技术栈、目录结构、数据与隐私）与模块索引
-- [模块文档](docs/modules/)：每个模块一份，开头「约束」一节是不能破的规矩，后面是实现细节
+- [功能与架构](docs/features-and-architecture.md)：入口（模块索引、技术栈、开发与打包），正文三份 ——
+  [功能](docs/features.md)、[数据与隐私](docs/privacy.md)、[目录结构](docs/directory.md)
+- [模块文档](docs/modules/)：每个模块一份，「约束」开头的红线是不能破的规矩，下面按主题分节、后面是实现细节
 - [开发笔记](docs/dev-notes/)：构建性能、浏览器验证、发版等动手方法
 - [AGENTS.md](AGENTS.md)：给 AI 编码 Agent 看的工程约束（跨模块红线 + 模块索引）
 - [CHANGELOG.md](CHANGELOG.md)：每个版本的变更记录

@@ -604,7 +604,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="qd">
+  <div class="qd page">
     <div class="qd__head">
       <GatewayTabs v-model="tab" :items="TABS" />
       <div class="qd__status">
@@ -712,7 +712,7 @@ onBeforeUnmount(() => {
           <header class="qd-card__head">
             <div class="qd-card__title">
               <span class="qd-card__avatar" aria-hidden="true">{{ item.account.slice(0, 1).toUpperCase() }}</span>
-              <span class="qd-card__name">{{ item.account }}</span>
+              <span class="qd-card__name truncate">{{ item.account }}</span>
               <el-tag v-if="checkinLabel(item.checkin)" size="small" effect="dark">
                 {{ checkinLabel(item.checkin) }}
               </el-tag>
@@ -735,7 +735,7 @@ onBeforeUnmount(() => {
               <strong>{{ item.checkin.rewardCredits }}</strong>
             </div>
           </div>
-          <p v-if="item.checkin.error" class="qd-card__error">
+          <p v-if="item.checkin.error" class="qd-card__error truncate">
             {{ item.checkin.error }}
           </p>
         </article>
@@ -860,11 +860,7 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .qd {
-  display: flex;
-  flex-direction: column;
   gap: var(--sp-3);
-  height: 100%;
-  min-height: 0;
   overflow: auto;
   padding: var(--sp-3);
 }
@@ -1034,9 +1030,6 @@ onBeforeUnmount(() => {
 .qd-card__name {
   font-weight: 600;
   color: var(--ink-1);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .qd-card__muted {
@@ -1047,9 +1040,6 @@ onBeforeUnmount(() => {
 .qd-card__error {
   color: var(--st-fail);
   font-size: var(--fs-xs);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .qd-card__facts {

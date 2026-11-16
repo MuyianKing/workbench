@@ -1,9 +1,9 @@
 import type { Result, ZentaoBug, ZentaoBugList, ZentaoSession } from '@/types'
 import { fail } from '@workbench/core'
-import { diffZentaoBugs, sanitizeZentaoPollMinutes } from '@workbench/zentao'
+import { diffZentaoBugs, mergeZentaoUnread, sanitizeZentaoPollMinutes } from '@workbench/zentao'
 import { defineStore } from 'pinia'
-import { ref, watch } from 'vue'
-import { bugs as fetchBugs, session as fetchSession, onCheck, openSite, watch as registerWatch, notify as sendNotify, login as zentaoLogin } from '@/workbench/zentao'
+import { computed, ref, watch } from 'vue'
+import { bugs as fetchBugs, session as fetchSession, onCheck, onOpened, openSite, watch as registerWatch, notify as sendNotify, login as zentaoLogin } from '@/workbench/zentao'
 import { useSettingsStore } from './settings'
 
 /**
@@ -23,6 +23,11 @@ import { useSettingsStore } from './settings'
  * **通知失败不吞**：待通知的那批留在 `pendingNotify` 里，下一轮后台检查时重发（成功才清），
  * 因此「弹一次没弹出去」不会变成「永远不知道」，也不会因为重试把同一批报两遍。
  * 失败原因留在 `error` 里（打开站点失败、或后台检查失败都往这里写，界面自己决定怎么说）。
+ *
+ * **未读角标**：后台比出的新增同时记进 `unreadIds`（落盘在设置的 `zentaoUnreadBugs`），
+ * 顶栏那颗图标上的数字就是它的长度。应用看不到浏览器里读没读，所以**点开禅道**
+ * （顶栏图标、或点系统通知让 Rust 打开站点）就算这批看过了 —— 清零并作废待发通知；
+ * 当前列表里已经不存在的编号（解决了 / 改派了）自动掉出去。跨重启保留。
  */
 const AUTH_PREFIX = 'ZENTAO_AUTH_EXPIRED:'
 
@@ -49,6 +54,51 @@ export const useZentaoStore = defineStore('zentao', () => {
 
   /** 最近一次后台检查 / 通知失败的原因（页面头部落一行字；成功即清） */
   const error = ref('')
+
+  /**
+   * 未读角标：后台发现、还没点开禅道的那批 Bug 编号（顶栏那颗图标上的数字）。
+   * 落盘在设置的 `zentaoUnreadBugs`（只本机、不参与外观同步）—— 重启后还在，
+   * 直到用户点开禅道（顶栏图标或点系统通知）才清零；列表里消失的编号自动掉出去。
+   */
+  const unreadIds = ref<number[]>(settings.settings.zentaoUnreadBugs ?? [])
+  const unread = computed(() => unreadIds.value.length)
+
+  /** 点开禅道的时刻（毫秒）：比它更早开始取数的那一轮不再把已清零的编号加回来 */
+  let clearedAt = 0
+
+  /** 写回设置的队列（合并与清零谁后调用谁后落盘：回包乱序也不会互相覆盖） */
+  let unreadWrite: Promise<unknown> = Promise.resolve()
+
+  /** 落盘失败不打断后台链路：本地账本已经更新过，下一轮还会重写 */
+  function commitUnread(next: number[]): void {
+    unreadIds.value = next
+    unreadWrite = unreadWrite
+      .then(() => settings.updateSettings({ zentaoUnreadBugs: next }))
+      .catch(() => {})
+  }
+
+  /**
+   * 点开禅道 = 这批看过了：角标清零、待发的系统通知也作废（用户已经在看了，
+   * 下一轮再弹一次只会吵）。取数途中那一轮由 clearedAt 拦住。
+   */
+  function clearUnread(): void {
+    clearedAt = Date.now()
+    pendingNotify = []
+    if (unreadIds.value.length)
+      commitUnread([])
+  }
+
+  /** 设置被回推（另一处改了、或重新载入）时跟上 */
+  watch(
+    () => settings.settings.zentaoUnreadBugs,
+    (ids) => { unreadIds.value = [...ids] },
+    { deep: true },
+  )
+
+  /** 两份编号清单一样吗（merge 的输出本来就降序去重，逐位比就够） */
+  function sameIds(a: readonly number[], b: readonly number[]): boolean {
+    return a.length === b.length && a.every((id, index) => id === b[index])
+  }
 
   /** 上一轮成功取回的编号全集；null = 还没建立基线 */
   let baselineIds: number[] | null = null
@@ -92,10 +142,13 @@ export const useZentaoStore = defineStore('zentao', () => {
   }
 
   /** 把这一轮结果并进状态：推进基线，有新增加进待发队列并立刻发一次 */
-  async function applyResult(list: ZentaoBugList): Promise<void> {
+  async function applyResult(list: ZentaoBugList, startedAt: number): Promise<void> {
     const identity = session ? identityOf(session) : ''
     if (identity !== baselineIdentity) {
       baselineIds = null
+      // 真的换了账号 / 部署才作废旧账：首次建立基线（baselineIdentity 还是空）要保留落盘的未读
+      if (baselineIdentity)
+        clearUnread()
       baselineIdentity = identity
       pendingNotify = []
     }
@@ -108,6 +161,11 @@ export const useZentaoStore = defineStore('zentao', () => {
           pendingNotify.push(bug)
       }
     }
+    // 角标账本：点开禅道之前就开始取数的那一轮，不把已清零的编号加回来
+    const addedIds = startedAt < clearedAt ? [] : diff.added.map(bug => bug.id)
+    const next = mergeZentaoUnread(unreadIds.value, addedIds, diff.ids)
+    if (!sameIds(next, unreadIds.value))
+      commitUnread(next)
     await flushNotify()
   }
 
@@ -133,6 +191,8 @@ export const useZentaoStore = defineStore('zentao', () => {
     if (inFlight)
       return inFlight
     const seq = ++runSeq
+    // 取数开始的那一刻：途中用户点开了禅道，这一轮的结果就不再补进未读账本
+    const startedAt = Date.now()
     const task = (async () => {
       try {
         const result = await fetchList()
@@ -141,7 +201,7 @@ export const useZentaoStore = defineStore('zentao', () => {
           return
         }
         error.value = ''
-        await applyResult(result.data)
+        await applyResult(result.data, startedAt)
       }
       finally {
         if (seq === runSeq)
@@ -167,6 +227,8 @@ export const useZentaoStore = defineStore('zentao', () => {
     const result = await openSite()
     if (result.ok) {
       error.value = ''
+      // 站点已经交给浏览器：这批未读算「点开过」，角标清零
+      clearUnread()
       return ''
     }
     error.value = result.error || '在浏览器中打开禅道失败'
@@ -183,6 +245,8 @@ export const useZentaoStore = defineStore('zentao', () => {
       return
     watchStarted = true
     void onCheck(checkInBackground)
+    // 系统通知被点、站点在浏览器里打开：同样算「看过了」，角标清零
+    void onOpened(clearUnread)
     watch(
       () => pollMinutes(),
       (minutes) => {
@@ -194,6 +258,7 @@ export const useZentaoStore = defineStore('zentao', () => {
 
   return {
     error,
+    unread,
     open,
     startWatch,
   }

@@ -213,7 +213,7 @@ function onRowCommand(command: unknown, row: AiSkillRow): void {
       <section v-for="level in visibleLevels" :key="level" class="group">
         <header class="group__head">
           <span class="group__label">{{ level === 'global' ? '全局级' : '项目级' }}</span>
-          <span class="group__path" :title="rootOf(level)">{{ displayRoot(level) }}</span>
+          <span class="group__path truncate" :title="rootOf(level)">{{ displayRoot(level) }}</span>
           <span class="group__count">{{ matching(rowsOf(level)).length }}</span>
           <div class="group__tools">
             <el-button
@@ -250,13 +250,13 @@ function onRowCommand(command: unknown, row: AiSkillRow): void {
             </el-icon>
             <div class="row__main">
               <div class="row__title">
-                <button class="row__name" type="button" :title="row.name || row.id" @click="detail = row">
+                <button class="row__name truncate" type="button" :title="row.name || row.id" @click="detail = row">
                   {{ row.name || row.id }}
                 </button>
                 <span class="row__tag">{{ row.level === 'global' ? '全局' : '项目' }}</span>
                 <span v-if="row.version" class="row__version">v{{ row.version }}</span>
               </div>
-              <p class="row__desc" :title="row.description">
+              <p class="row__desc truncate" :title="row.description">
                 {{ row.description || '（没有写描述）' }}
               </p>
             </div>
@@ -400,9 +400,6 @@ function onRowCommand(command: unknown, row: AiSkillRow): void {
 .group__path {
   flex: 1;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   color: var(--ink-3);
   font-size: var(--fs-meta);
 }
@@ -466,9 +463,6 @@ function onRowCommand(command: unknown, row: AiSkillRow): void {
 
 .row__name {
   max-width: 380px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   padding: 0;
   border: none;
   background: none;
@@ -502,9 +496,6 @@ function onRowCommand(command: unknown, row: AiSkillRow): void {
 
 .row__desc {
   margin: 2px 0 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   color: var(--ink-3);
   font-size: var(--fs-meta);
 }

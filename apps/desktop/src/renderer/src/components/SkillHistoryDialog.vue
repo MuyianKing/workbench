@@ -112,7 +112,7 @@ async function restoreTo(hash: string): Promise<void> {
     <ul v-else class="commits">
       <li v-for="commit in commits" :key="commit.hash" class="commits__item">
         <div class="commits__main">
-          <span class="commits__subject">{{ commit.subject }}</span>
+          <span class="commits__subject truncate">{{ commit.subject }}</span>
           <span class="commits__time">{{ formatTimestamp(commit.time) }}</span>
         </div>
         <div class="commits__side">
@@ -198,9 +198,6 @@ async function restoreTo(hash: string): Promise<void> {
 }
 
 .commits__subject {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   color: var(--ink);
   font-size: var(--fs-meta);
 }

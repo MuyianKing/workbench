@@ -19,18 +19,24 @@
  *   中位差是 0，门槛可以收得很紧；
  * - **静态行剔除**：两帧在**同一屏幕位置**一模一样的行是「粘住画面」的行（粘头 /
  *   粘底 / 悬浮件 —— 内容滚它们不滚，轻则制造并列、重则把中位数拉去错的档），
- *   从匹配行集里剔掉。页面没滚时全体行都「粘」，那由 Δ=0 快速通道先接住，走不到
- *   这里；剔完好内容行不足最少行数时宁可不剔（判定本身可疑）；
- * - **Δ=0 快速通道**：全体有内容行的中位差 ≤ 门槛 = 页面没滚（到底、滚轮没生效、
- *   大面积静止），直接报 0 —— 与全量扫里 Δ=0 胜出的旧口径完全一致，只是不用把
- *   其余候选也扫一遍；
- * - **预测窗口**：滚轮是调用方自己发的，这一步的 Δ ≈ 上一步实测 × 本步齿数，
+ *   从匹配行集里剔掉。**实色栏也算数**：判定要看全部行，不只「有内容」的行 ——
+ *   标题栏 / 输入栏的上下边缘是纯色平的行，只看有内容行会把整条粘栏漏掉（真机
+ *   踩过：粘底栏没认出来，每步都跳过一栏内容、还把它的副本贴进长图）。页面没滚
+ *   时全体行都「粘」，那由 Δ=0 快速通道先接住，走不到这里；剔完好内容行不足
+ *   最少行数时宁可不剔（判定本身可疑）；
+ * - **Δ=0 快速通道**：**剔过粘行之后**剩下的有内容行中位差 ≤ 门槛 = 页面没滚（到底、
+ *   滚轮没生效、大面积静止），直接报 0 —— 拿全体有内容行判会让「一屏几乎全是
+ *   粘底栏」的选区（高的聊天输入区）把真滚动误判成没动；
+ * - **搜索范围让开粘底栏**：`maxDelta` 取「帧高 − 48」与「内容区下缘 − 48」的较小
+ *   者，打分时超出内容区的行一律不算 —— Δ 大时新帧顶部的行对上的其实是上一帧的
+ *   粘底栏（那里永远不变、永远对不上），算进重叠会让大 Δ 直接判成拼不上；
+ * - **预测窗口**：滚轮是调用方自己发的，这一步的 Δ ≈ 上一齿实测 × 本步齿数，
  *   先在预测值 ±48px 的小窗口里找，命中直接用 —— 稳态候选从「选区高」个掉到
  *   百来个，滚动截图每步不再卡顿靠的就是这个；不中（布局位移、预测失灵）才
  *   回退全量扫；
- * - **并列破平局**：与最优分差 ≤1 的候选视为并列，取离预测值最近的那个 ——
+ * - **并列破平局**：与最优分**严格相等**的候选才算并列，取离预测值最近的那个 ——
  *   重复纹理（列表行 / 代码行）天然给出多个「完美」Δ，不破平局就会锁到过小的
- *   Δ 把内容拼重。
+ *   Δ 把内容拼重；反过来，差 1 分的近邻不能因为「离预测近」就顶掉真解。
  *
  * 贴条带的计划在 `planBand`：只贴新露出的那条带，且起点向上越过粘底栏多贴一段
  * （照 eSearch 的 makePatch）—— 条带起点的**绝对位置**只跟粘底栏厚度有关，
@@ -88,8 +94,12 @@ const FLAT_EPS = 2
 /** 预测窗口的半径：先在预测位移 ± 这个值里找，命中就不用全量扫 */
 const WINDOW_TOLERANCE = 48
 
-/** 与最优分差 ≤ 它的候选视为并列：重复纹理天然给出多个「完美」Δ，取离预测最近的 */
-const SCORE_TIE_EPS = 1
+/**
+ * 与最优分差 ≤ 它的候选视为并列：重复纹理天然给出多个「完美」Δ，取离预测最近的。
+ *  静止内容的真解中位差是 0，并列要按「严格相等」判 —— 差 1 分的近邻被 hint
+ *  拉走就会把 Δ 拉偏几个像素（真机踩过，靠条带的 8px 上溢兜）
+ */
+const SCORE_TIE_EPS = 0.001
 
 /** 同一屏幕位置两帧行差 ≤ 它算「粘住画面」的行（静止内容行差是 0，留一档余量） */
 const STICKY_EPS = 1
@@ -109,7 +119,7 @@ const TICK_STEP = 40
 
 /** `analyzeScrollOffset` 的选项 */
 export interface ScrollMatchOptions {
-  /** 预测位移（上一步实测 × 本步实发齿数）：先在这个值附近的小窗口里找，命中就不全量扫 */
+  /** 预测位移（上一齿实测 × 本步实发齿数）：先在这个值附近的小窗口里找，命中就不全量扫 */
   hintDelta?: number
 }
 
@@ -144,40 +154,48 @@ export function analyzeScrollOffset(
   if (usable.length < MIN_USABLE_ROWS)
     return empty(null)
 
-  const maxDelta = height - MIN_OVERLAP
-  const hint = options.hintDelta !== undefined && options.hintDelta > 0
-    ? Math.min(Math.round(options.hintDelta), maxDelta)
-    : undefined
-
-  // 粘住画面的行：内容滚了它们不滚，同一屏幕位置两帧一模一样。Δ=0 处判定没有
-  // 越界问题，帧底的粘底栏也探得到
-  const sticky = stickyRowSet(prev, next, usable)
+  // 粘住画面的行：内容滚了它们不滚，同一屏幕位置两帧一模一样。**所有行都算**，
+  // 不只「有内容」的行 —— 实色标题栏 / 输入栏的上下边缘是平的行，按有内容行判
+  // 会把整条粘栏漏掉（真机踩过：粘底栏没认出来，每步都跳过一栏的内容、还把
+  // 它的副本贴进长图）
+  const sticky = stickyRowSet(prev, next, height)
   const stickyTop = contiguousSticky(sticky, 0, 1, height)
   const stickyBottom = contiguousSticky(sticky, height - 1, -1, height)
 
-  // Δ=0 快速通道：绝大多数有内容的行在两帧同一位置一样 = 页面没滚（到底、滚轮
-  // 没生效、大面积静止）。与全量扫里 Δ=0 按初筛序胜出的旧口径一致，只是省掉
-  // 其余候选
-  if (medianScore(prev, next, usable, 0, COLUMN_STRIDE) <= MATCH_SCORE_MAX)
-    return { delta: 0, stickyTop, stickyBottom }
-
-  // 静态行剔除：它们在任何 Δ 下都对得上，留在行集里只会制造并列。剔完好内容行
+  // 静态行剔除：粘栏的行在任何 Δ 下都对得上，留在行集里只会制造并列。剔完好内容行
   // 不足最少行数时宁可不剔（页面大面积静止、判定可疑，退回旧口径全量打分）
   const filtered = usable.filter(y => !sticky.has(y))
   const useFiltered = filtered.length >= MIN_USABLE_ROWS && filtered.length < usable.length
   const matched = useFiltered ? filtered : usable
 
+  // Δ=0 快速通道：只在剔过粘行的行集上判 —— 粘栏两帧一样，算进去会让「选区几乎
+  // 全是底栏」的那种把真滚动误判成没动（160px 高的输入栏踩过），调用方据此收场
+  if (matched.length >= MIN_USABLE_ROWS
+    && medianScore(prev, next, matched, 0, COLUMN_STRIDE, height) <= MATCH_SCORE_MAX) {
+    return { delta: 0, stickyTop, stickyBottom }
+  }
+
+  // 匹配只许用「上一帧里也落在内容区」的行：Δ 大时新帧顶部的行对上的其实是上一帧
+  // 的粘底栏（那里永远不变、永远对不上），把它算进重叠会让大 Δ 直接被判成拼不上
+  const contentBottom = height - stickyBottom
+  const maxDelta = Math.min(height - MIN_OVERLAP, contentBottom - MIN_OVERLAP)
+  if (maxDelta <= 0)
+    return { delta: null, stickyTop, stickyBottom }
+  const hint = options.hintDelta !== undefined && options.hintDelta > 0
+    ? Math.min(Math.round(options.hintDelta), maxDelta)
+    : undefined
+
   // 预测窗口先行：命中门槛直接用，不中再全量扫（稳态永远走不到这一步）
   if (hint !== undefined) {
-    const windowBest = findBestDelta(prev, next, matched, windowDeltas(hint, maxDelta), hint)
+    const windowBest = findBestDelta(prev, next, matched, windowDeltas(hint, maxDelta), hint, contentBottom)
     if (windowBest !== null && windowBest.score <= MATCH_SCORE_MAX)
       return { delta: windowBest.delta, stickyTop, stickyBottom }
   }
-  let best = findBestDelta(prev, next, matched, fullDeltas(maxDelta), hint)
+  let best = findBestDelta(prev, next, matched, fullDeltas(maxDelta), hint, contentBottom)
   // 剔行集对不上就退回整集再扫一次：剔除只该帮忙（去掉制造并列的粘行），不该把
   // 行数削到连复核的最少行数都凑不齐（底部行在 Δ 大时本就超出重叠范围不参与打分）
   if ((best === null || best.score > MATCH_SCORE_MAX) && useFiltered)
-    best = findBestDelta(prev, next, usable, fullDeltas(maxDelta), hint)
+    best = findBestDelta(prev, next, usable, fullDeltas(maxDelta), hint, contentBottom)
   return { delta: best !== null && best.score <= MATCH_SCORE_MAX ? best.delta : null, stickyTop, stickyBottom }
 }
 
@@ -227,6 +245,7 @@ function findBestDelta(
   rows: number[],
   deltas: number[],
   hint: number | undefined,
+  contentBottom: number,
 ): DeltaScore | null {
   if (deltas.length === 0)
     return null
@@ -234,14 +253,14 @@ function findBestDelta(
   const stageRows = strideRows(rows, SHORTLIST_ROWS)
   const shortlist: DeltaScore[] = []
   for (const delta of deltas)
-    shortlist.push({ delta, score: meanScore(prev, next, stageRows, delta, SHORTLIST_COLUMN_STRIDE) })
+    shortlist.push({ delta, score: meanScore(prev, next, stageRows, delta, SHORTLIST_COLUMN_STRIDE, contentBottom) })
   shortlist.sort((a, b) => a.score - b.score)
 
   // 复核：全部有内容的行逐个算中位差 —— 会动的行 / 粘头行是离群值，
   // 中位数不受它们拖动
   const refined: DeltaScore[] = []
   for (const { delta } of shortlist.slice(0, SHORTLIST_KEEP))
-    refined.push({ delta, score: medianScore(prev, next, rows, delta, COLUMN_STRIDE) })
+    refined.push({ delta, score: medianScore(prev, next, rows, delta, COLUMN_STRIDE, contentBottom) })
   const best = Math.min(...refined.map(r => r.score))
   let chosen: DeltaScore | null = null
   for (const r of refined) {
@@ -261,17 +280,24 @@ function findBestDelta(
   return chosen
 }
 
-/** 同一屏幕位置两帧一模一样的行号集合：粘住画面的行（粘栏 / 悬浮件），内容滚它们不滚 */
-function stickyRowSet(prev: StitchFrame, next: StitchFrame, rows: number[]): Set<number> {
+/**
+ * 同一屏幕位置两帧一模一样的行号集合：粘住画面的行（粘栏 / 悬浮件），内容滚它们不滚。
+ *  **所有行都算，不只「有内容」的行**：实色标题栏 / 输入栏的边是平的行，按有内容行
+ *  判会把整条粘栏漏掉（真机踩过）。
+ */
+function stickyRowSet(prev: StitchFrame, next: StitchFrame, height: number): Set<number> {
   const sticky = new Set<number>()
-  for (const y of rows) {
+  for (let y = 0; y < height; y += 1) {
     if (rowScore(prev, next, y, 0, COLUMN_STRIDE) <= STICKY_EPS)
       sticky.add(y)
   }
   return sticky
 }
 
-/** 从帧缘起连续粘住行的行数（贴条带要知道粘栏有多厚，中间断开的悬浮件不算数） */
+/**
+ * 从帧缘起连续粘住行的行数（贴条带要知道粘栏有多厚，中间断开的悬浮件不算数）。
+ *  **严格连续**：内容里空白行与有墨行交替出现，放宽容错会把整段内容也当成粘的。
+ */
 function contiguousSticky(sticky: Set<number>, from: number, step: 1 | -1, height: number): number {
   let count = 0
   for (let y = from; y >= 0 && y < height; y += step) {
@@ -283,15 +309,18 @@ function contiguousSticky(sticky: Set<number>, from: number, step: 1 | -1, heigh
 }
 
 /**
- * 下一步发几个滚轮齿：按上一步的实际位移自适应，步长贴着选区高度的 25% 走 ——
+ * 下一步发几个滚轮齿：按**上一齿的实际位移**自适应，步长贴着选区高度的 25% 走 ——
  * 一步太大滚得「一卡一卡」，太小又白抓好几帧。一步的量还不许超过
  * 「选区高 − 最小重叠」：跨过整个视口就没有重叠可比了。首步（没量过位移）发 1 齿。
+ *
+ * 传的是**每齿**位移，不是上一步的总位移：上一步发了几齿就把总位移除以几。
+ * 直接拿总位移算会让齿数在 1 与上限之间来回跳（每步的预测窗口跟着错位）。
  */
-export function planNotches(lastDelta: number, regionHeight: number): number {
-  if (!(lastDelta > 0) || !(regionHeight > 0))
+export function planNotches(perNotch: number, regionHeight: number): number {
+  if (!(perNotch > 0) || !(regionHeight > 0))
     return 1
-  const wanted = Math.min(MAX_NOTCHES, Math.round((regionHeight * 0.25) / lastDelta))
-  const capped = Math.floor((regionHeight - MIN_OVERLAP) / lastDelta)
+  const wanted = Math.min(MAX_NOTCHES, Math.round((regionHeight * 0.25) / perNotch))
+  const capped = Math.floor((regionHeight - MIN_OVERLAP) / perNotch)
   return Math.max(1, Math.min(wanted, capped))
 }
 
@@ -428,15 +457,20 @@ function rowScore(prev: StitchFrame, next: StitchFrame, y: number, delta: number
   return count === 0 ? Number.POSITIVE_INFINITY : sum / count
 }
 
-/** 候选 Δ 的初筛分数：给定行（截掉超出重叠范围的）的平均差 */
+/**
+ * 候选 Δ 的初筛分数：给定行（截掉超出重叠范围的）的平均差。
+ *  `contentBottom` 是上一帧的内容区下缘（帧高 − 粘底栏）：再往下比就是在和粘底栏
+ *  比，那里永远不变、也永远对不上
+ */
 function meanScore(
   prev: StitchFrame,
   next: StitchFrame,
   rows: number[],
   delta: number,
   colStride: number,
+  contentBottom: number,
 ): number {
-  const limit = next.height - delta
+  const limit = contentBottom - delta
   let sum = 0
   let count = 0
   for (const y of rows) {
@@ -455,8 +489,9 @@ function medianScore(
   rows: number[],
   delta: number,
   colStride: number,
+  contentBottom: number,
 ): number {
-  const limit = next.height - delta
+  const limit = contentBottom - delta
   const scores: number[] = []
   for (const y of rows) {
     if (y >= limit)

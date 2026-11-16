@@ -13,7 +13,7 @@
 
 - **视频按文件交给 webview 自己读，走 asset 协议**：与工作区背景图同一条边界 —— 播放前 `allow_video` 核两道（后缀
   `.mp4`、文件头第 4..8 字节 `ftyp`）后把**这一个文件**的读取权限授给 asset 协议；`tauri.conf.json` 的
-  `assetProtocol.scope` 保持为空，**别往里写 `**`**（见 [../ipc-and-state/constraints.md](ipc-and-state.md)）。
+  `assetProtocol.scope` 保持为空，**别往里写 `**`**（见 [ipc-and-state.md](ipc-and-state.md)）。
 - **树只收文件夹与 `.mp4`**（别的容器 webview 解码器不一定有）；点开头的目录与依赖 / 构建产物按 `notes.rs` 同一份
   名单整棵跳过。
 - **左栏右键只有「读」**（笔记树那套写操作一件都不搬）：**视频行**右击给三件 —— 用默认程序打开 / 在资源管理器中显示 /

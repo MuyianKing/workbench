@@ -127,10 +127,10 @@ const firstRun = computed(() => store.ready && store.projects.length === 0)
   <div class="greet">
     <p class="greet__line">
       <span class="greet__hello">{{ greeting }}，{{ name }}</span>
-      <span v-if="firstRun" class="greet__facts">
+      <span v-if="firstRun" class="greet__facts truncate">
         还没有项目。加一个之后，这里会记下每天的动静。
       </span>
-      <span v-else-if="facts.length" class="greet__facts">
+      <span v-else-if="facts.length" class="greet__facts truncate">
         <template v-for="(fact, index) in facts" :key="fact">
           <span v-if="index" class="greet__dot" aria-hidden="true">·</span>{{ fact }}
         </template>
@@ -167,9 +167,6 @@ const firstRun = computed(() => store.ready && store.projects.length === 0)
   font-size: var(--fs-meta);
   color: var(--ink-3);
   /* 窗口窄时先省略这一段 —— 称呼比统计重要 */
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .greet__dot {

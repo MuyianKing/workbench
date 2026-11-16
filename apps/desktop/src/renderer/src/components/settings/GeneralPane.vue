@@ -497,7 +497,7 @@ function resetEditorHotkey(action: string): void {
         </div>
         <div class="hotkey-grid">
           <div v-for="action in EDITOR_HOTKEY_ACTIONS" :key="action.name" class="hotkey-grid__row">
-            <span class="hotkey-grid__name">{{ action.label }}</span>
+            <span class="hotkey-grid__name truncate">{{ action.label }}</span>
             <HotkeyField
               :model-value="editorHotkeyOf(action.name)"
               :hint="false"
@@ -598,21 +598,10 @@ function resetEditorHotkey(action: string): void {
   width: 100%;
 }
 
-.hotkey-grid__row {
-  display: grid;
-  grid-template-columns: 1fr auto 44px;
-  align-items: center;
-  gap: var(--sp-2);
-  min-width: 0;
-}
-
 .hotkey-grid__name {
   min-width: 0;
-  overflow: hidden;
   color: var(--ink-2);
   font-size: var(--fs-meta);
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /* 键位按钮定宽：取装得下最长那串（Control + Shift + H ≈ 168px）的值，全列落在同一条竖线 */
@@ -622,9 +611,13 @@ function resetEditorHotkey(action: string): void {
   justify-content: center;
 }
 
-/* 键位定宽后按钮占 168，恢复默认那列相应放宽，保持同一列的按钮都在一条竖线上 */
+/* 键位定宽后按钮占 168，恢复默认那列相应放宽到 48，保持同一列的按钮都在一条竖线上 */
 .hotkey-grid__row {
+  display: grid;
   grid-template-columns: 1fr auto 48px;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
 }
 
 .hotkey-grid__reset {

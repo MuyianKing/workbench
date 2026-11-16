@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { NoteDocument } from '@workbench/notes'
 import { Loading } from '@element-plus/icons-vue'
+import { blobToBase64 } from '@workbench/core'
 import { imageFileName, imageMarkdown, mergeEditorHotkeys, NOTE_IMAGE_MAX_BYTES, resolveNoteLink } from '@workbench/notes'
 
 import Vditor from 'vditor'
@@ -797,16 +798,10 @@ function uploadHandler(files: File[]): Promise<string> | Promise<null> {
   return uploadImages(files) as Promise<string> | Promise<null>
 }
 
-/** 整张图 → base64。分块拼字符串：一次性 `String.fromCharCode(...bytes)` 在几兆的图上会爆栈 */
+/** 整张图 → base64（分块拼字符串的实现在 `@workbench/core` 的 `bytesToBase64`） */
 async function toBase64(file: File): Promise<string> {
   try {
-    const bytes = new Uint8Array(await file.arrayBuffer())
-    let binary = ''
-    const CHUNK = 0x8000
-    for (let index = 0; index < bytes.length; index += CHUNK) {
-      binary += String.fromCharCode(...bytes.subarray(index, index + CHUNK))
-    }
-    return btoa(binary)
+    return await blobToBase64(file)
   }
   catch (error) {
     console.warn('[workbench] 读取粘贴的图片失败', error)

@@ -186,11 +186,11 @@ async function restoreVersion(): Promise<void> {
       <div class="cmp__heads">
         <div class="cmp__head">
           <span class="cmp__badge cmp__badge--base">{{ baseBadge }}</span>
-          <span class="cmp__head-hint">库里现在保存的内容</span>
+          <span class="cmp__head-hint truncate">库里现在保存的内容</span>
         </div>
         <div class="cmp__head">
           <span class="cmp__badge cmp__badge--in">{{ incomingBadge }}</span>
-          <span class="cmp__head-hint">{{ incomingHint }}</span>
+          <span class="cmp__head-hint truncate">{{ incomingHint }}</span>
         </div>
       </div>
 
@@ -220,7 +220,7 @@ async function restoreVersion(): Promise<void> {
       </div>
 
       <footer class="cmp__foot">
-        <span v-if="error" class="cmp__error">{{ error }}</span>
+        <span v-if="error" class="cmp__error truncate">{{ error }}</span>
         <el-button @click="visible = false">
           取消
         </el-button>
@@ -290,9 +290,6 @@ async function restoreVersion(): Promise<void> {
 
 .cmp__head-hint {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   color: var(--ink-3);
   font-size: var(--fs-micro);
 }
@@ -387,9 +384,6 @@ tr.is-change td.cmp__code--r .is-chg {
 
 .cmp__error {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   color: var(--st-fail);
   font-size: var(--fs-micro);
   margin-right: auto;

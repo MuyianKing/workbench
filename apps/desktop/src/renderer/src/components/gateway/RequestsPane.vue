@@ -140,7 +140,7 @@ onMounted(load)
       </el-table-column>
       <el-table-column label="模型" align="center">
         <template #default="{ row }">
-          <span class="req__mono req__model" :title="`${row.model} · ${row.ua}`">{{ row.model }}</span>
+          <span class="req__mono req__model truncate" :title="`${row.model} · ${row.ua}`">{{ row.model }}</span>
         </template>
       </el-table-column>
       <el-table-column label="推理强度" align="center">
@@ -247,8 +247,6 @@ onMounted(load)
 .req__model {
   display: inline-block;
   max-width: 200px;
-  overflow: hidden;
-  text-overflow: ellipsis;
   vertical-align: bottom;
 }
 

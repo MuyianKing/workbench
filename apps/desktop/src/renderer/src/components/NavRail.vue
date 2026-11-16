@@ -14,11 +14,15 @@ import { orderedViews } from '@workbench/appearance'
  * 拖窗口是标题栏的事（在面板上按空白处也不会拖窗口，两边保持一致）。
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import UnreadBadge from '@/components/UnreadBadge.vue'
+import { useMailStore } from '@/stores/mail'
 import { useNavStore } from '@/stores/nav'
 import { useSettingsStore } from '@/stores/settings'
 
 const store = useNavStore()
 const settings = useSettingsStore()
+// 邮箱角标：后台监视推进来的收件箱未读数（见 stores/mail.ts 的 unread）
+const mail = useMailStore()
 
 /** 每个页面一个图标；新增页面时这里会因缺 key 而报类型错，不会漏配 */
 const ICONS: Record<ViewId, Component> = {
@@ -173,6 +177,14 @@ function select(id: ViewId): void {
   // 用户只能先关掉弹框才能换页。
   void store.setActiveView(id)
 }
+
+/** 悬停提示：邮箱那一项带上未读数（角标很小，说清楚它是什么） */
+function itemTitle(id: ViewId): string {
+  const label = settings.viewLabelOf(id)
+  if (id === 'mail' && mail.unread > 0)
+    return `${label} · ${mail.unread} 封未读`
+  return label
+}
 </script>
 
 <template>
@@ -189,13 +201,17 @@ function select(id: ViewId): void {
         class="nav__item"
         :class="{ 'is-active': active === id }"
         type="button"
-        :title="settings.viewLabelOf(id)"
+        :title="itemTitle(id)"
         :aria-current="active === id ? 'page' : undefined"
         @click="select(id)"
       >
-        <el-icon class="nav__icon">
-          <component :is="ICONS[id]" />
-        </el-icon>
+        <span class="nav__icon-wrap">
+          <el-icon class="nav__icon">
+            <component :is="ICONS[id]" />
+          </el-icon>
+          <!-- 未读角标：只有邮箱有（禅道那颗在顶栏） -->
+          <UnreadBadge v-if="id === 'mail'" :count="mail.unread" />
+        </span>
         <span class="nav__label">{{ settings.viewLabelOf(id) }}</span>
       </button>
     </div>
@@ -426,6 +442,12 @@ function select(id: ViewId): void {
 
 .nav__icon {
   font-size: 17px;
+}
+
+/* 图标区：未读角标以它为定位基准（角标本体在 UnreadBadge 里） */
+.nav__icon-wrap {
+  position: relative;
+  display: inline-flex;
 }
 
 .nav__label {

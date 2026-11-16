@@ -23,6 +23,8 @@ let notifyCalls: Array<[string, number, string]>
 let notifyFails = false
 /** 已登记的检查事件处理器（适配层的 listen 会把 Tauri 的 { payload } 转一手） */
 let checkHandlers: Array<(event: { payload: null }) => void>
+/** 已登记的「通知被点、站点已打开」处理器 */
+let openedHandlers: Array<(event: { payload: null }) => void>
 /** zentao_watch 收到的周期（按顺序） */
 let watchRegistrations: number[]
 let logins: number
@@ -90,6 +92,7 @@ beforeEach(() => {
   notifyCalls = []
   notifyFails = false
   checkHandlers = []
+  openedHandlers = []
   watchRegistrations = []
   logins = 0
   sessionOverride = null
@@ -104,6 +107,8 @@ beforeEach(() => {
     listen: (name: string, handler: (event: { payload: null }) => void) => {
       if (name === 'zentao:check')
         checkHandlers.push(handler)
+      if (name === 'zentao:opened')
+        openedHandlers.push(handler)
       return Promise.resolve(() => {})
     },
   }
@@ -141,10 +146,14 @@ beforeEach(() => {
 const { useZentaoStore } = await import('./zentao')
 const { useSettingsStore } = await import('./settings')
 
-/** 让在途的 async 链跑完：一串 await 与回调要几个宏任务才落地 */
+/**
+ * 让在途的 async 链跑完：一串 await 与回调要几个宏任务才落地。
+ * 让出的是 `setImmediate` 而不是 `setTimeout(0)` —— Windows 上定时器有约 15.6ms 的地板，
+ * 十二轮乘以每条用例的调用次数就是七秒的空等（实测 60 次 `setTimeout(0)` 932ms，`setImmediate` 1ms）。
+ */
 async function settle() {
   for (let i = 0; i < 12; i++)
-    await new Promise(resolve => setTimeout(resolve, 0))
+    await new Promise(resolve => setImmediate(resolve))
 }
 
 async function bootStore() {
@@ -284,5 +293,86 @@ describe('禅道入口', () => {
     await settle()
     expect(logins).toBe(2)
     expect(notifyCalls).toEqual([])
+  })
+})
+
+describe('禅道未读角标', () => {
+  it('后台发现的新增累加到角标，列表里消失的编号自动剔除并落盘', async () => {
+    const store = await bootStore()
+    rounds = [{ ok: true, bugs: [bug(1)] }]
+    checkHandlers[0]({ payload: null })
+    await settle()
+    // 首轮只立基线，不把存量报成未读
+    expect(store.unread).toBe(0)
+
+    rounds = [{ ok: true, bugs: [bug(1), bug(2), bug(5)] }]
+    checkHandlers[0]({ payload: null })
+    await settle()
+    expect(store.unread).toBe(2)
+    expect(stubSettings.zentaoUnreadBugs).toEqual([5, 2])
+
+    // 5 被解决 / 改派：它不再需要看，角标掉回 1，落盘同步
+    rounds = [{ ok: true, bugs: [bug(1), bug(2)] }]
+    checkHandlers[0]({ payload: null })
+    await settle()
+    expect(store.unread).toBe(1)
+    expect(stubSettings.zentaoUnreadBugs).toEqual([2])
+  })
+
+  it('首轮建立基线不清掉上次没看完的未读（跨重启保留），编号不在列表里才掉出去', async () => {
+    const settings = useSettingsStore()
+    settings.settings.zentaoUnreadBugs = [7]
+    const store = await bootStore()
+    expect(store.unread).toBe(1)
+
+    rounds = [{ ok: true, bugs: [bug(1), bug(7)] }]
+    checkHandlers[0]({ payload: null })
+    await settle()
+    expect(store.unread).toBe(1)
+
+    rounds = [{ ok: true, bugs: [bug(1)] }]
+    checkHandlers[0]({ payload: null })
+    await settle()
+    expect(store.unread).toBe(0)
+  })
+
+  it('点开禅道（顶栏图标）清零角标，并把待发通知一起作废', async () => {
+    const store = await bootStore()
+    rounds = [{ ok: true, bugs: [bug(1)] }]
+    checkHandlers[0]({ payload: null })
+    await settle()
+
+    notifyFails = true
+    rounds = [{ ok: true, bugs: [bug(1), bug(2)] }]
+    checkHandlers[0]({ payload: null })
+    await settle()
+    expect(store.unread).toBe(1)
+
+    // 通知还发不出去的时候点开禅道：角标清零，那批也不再重试
+    expect(await store.open()).toBe('')
+    expect(store.unread).toBe(0)
+    notifyFails = false
+    checkHandlers[0]({ payload: null })
+    await settle()
+    expect(notifyCalls).toHaveLength(1)
+    await settle()
+    expect(stubSettings.zentaoUnreadBugs).toEqual([])
+  })
+
+  it('系统通知被点（Rust 已在浏览器打开站点）同样算看过：角标清零', async () => {
+    const store = await bootStore()
+    rounds = [{ ok: true, bugs: [bug(1)] }]
+    checkHandlers[0]({ payload: null })
+    await settle()
+
+    rounds = [{ ok: true, bugs: [bug(1), bug(2), bug(3)] }]
+    checkHandlers[0]({ payload: null })
+    await settle()
+    expect(store.unread).toBe(2)
+
+    expect(openedHandlers).toHaveLength(1)
+    openedHandlers[0]({ payload: null })
+    await settle()
+    expect(store.unread).toBe(0)
   })
 })

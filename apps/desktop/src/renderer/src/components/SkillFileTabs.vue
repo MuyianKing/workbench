@@ -31,7 +31,7 @@ const isMarked = (rel: string): boolean => props.markedRels?.includes(rel) ?? fa
     <button
       v-for="file in files"
       :key="file.rel"
-      class="skill-file-tabs__file mono"
+      class="skill-file-tabs__file mono truncate"
       :class="{ 'is-active': activeRel === file.rel }"
       type="button"
       role="tab"
@@ -60,9 +60,6 @@ const isMarked = (rel: string): boolean => props.markedRels?.includes(rel) ?? fa
   position: relative;
   flex-shrink: 0;
   max-width: 240px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   padding: 4px 10px;
   border: 1px solid transparent;
   border-radius: var(--r-md);

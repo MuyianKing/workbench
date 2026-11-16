@@ -1,5 +1,4 @@
-export { base64ToBytes, bytesToBase64 } from './base64'
-export { isBulkMail, MAIL_BULK_SENDERS_MAX, sanitizeMailBulkSenders } from './bulk'
+export { countUnreadMails, isBulkMail, MAIL_BULK_SENDERS_MAX, sanitizeMailBulkSenders } from './bulk'
 export type { BulkSignals } from './bulk'
 export {
   contactLabel,
@@ -34,3 +33,4 @@ export type { BuildMimeInput, MailAttachmentInput } from './mime'
 export { accountTag, attachmentBadge, attachmentDataUrl, attachmentHint, attachmentHtml, attachmentKind, attachmentOpenable, attachmentSizeText, attachmentText, attachmentTint, displayDate, displayListDate, displayRecipients, displaySender, htmlBody, isImageAttachment, mailTime, parseMessage, preferExtendedFilenames, recipientAddress, recipientDisplay, senderAddress } from './parse'
 export type { HtmlBodyOptions, MailAttachmentKind, ParsedAttachment, ParsedMail } from './parse'
 export { decodeEncodedWords, encodeRfc2047Word } from './rfc2047'
+export { base64ToBytes, bytesToBase64 } from '@workbench/core'

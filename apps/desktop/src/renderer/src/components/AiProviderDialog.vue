@@ -228,7 +228,7 @@ const title = computed(() => (props.provider ? '编辑 AI 服务' : '添加 AI �
           <span class="svc__avatar">{{ (label || '?').slice(0, 1).toUpperCase() }}</span>
           <span class="svc__text">
             <span class="svc__name">{{ label || '还没起名字' }}</span>
-            <span class="svc__host">{{ baseUrl || '还没填地址' }}</span>
+            <span class="svc__host truncate">{{ baseUrl || '还没填地址' }}</span>
           </span>
           <el-button link size="small" @click="back">
             更换
@@ -375,11 +375,8 @@ const title = computed(() => (props.provider ? '编辑 AI 服务' : '添加 AI �
 }
 
 .svc__host {
-  overflow: hidden;
   color: var(--ink-3);
   font-size: var(--fs-micro);
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .svc__fields {

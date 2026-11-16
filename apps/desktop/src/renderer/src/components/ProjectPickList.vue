@@ -42,8 +42,8 @@ function colorVarOf(project: Project): string {
       @click="toggle(project.id)"
     >
       <i class="pick__dot" :style="{ background: colorVarOf(project) }" aria-hidden="true" />
-      <span class="pick__name" :title="project.name">{{ project.name }}</span>
-      <span class="pick__path mono" :title="project.path">{{ project.path }}</span>
+      <span class="pick__name truncate" :title="project.name">{{ project.name }}</span>
+      <span class="pick__path mono truncate" :title="project.path">{{ project.path }}</span>
       <el-icon class="pick__check">
         <Check />
       </el-icon>
@@ -114,9 +114,6 @@ function colorVarOf(project: Project): string {
 .pick__name {
   flex: 0 1 auto;
   max-width: 50%;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
   color: var(--ink);
   font-size: var(--fs-meta);
   font-weight: 600;
@@ -125,10 +122,7 @@ function colorVarOf(project: Project): string {
 .pick__path {
   flex: 1 1 auto;
   min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
   text-align: right;
-  text-overflow: ellipsis;
   color: var(--ink-3);
   font-size: var(--fs-micro);
 }

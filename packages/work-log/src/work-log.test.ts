@@ -114,6 +114,13 @@ describe('rangeBounds', () => {
     expect(rangeBounds('week', NOW)).toEqual({ from: '2026-09-14', to: '2026-09-20' })
   })
 
+  it('上周是往回退一整周：上一个周一到上一个周日', () => {
+    expect(rangeBounds('lastWeek', NOW)).toEqual({ from: '2026-09-07', to: '2026-09-13' })
+    // 跨月、跨年都不该被自然月截断
+    const newYear = new Date(2027, 0, 1, 12, 0).getTime()
+    expect(rangeBounds('lastWeek', newYear)).toEqual({ from: '2026-12-21', to: '2026-12-27' })
+  })
+
   it('周日属于本周的第一天之后 —— 上一周的周一才是本周起点', () => {
     const sunday = new Date(2026, 2, 1, 12, 0).getTime()
     expect(rangeBounds('week', sunday)).toEqual({ from: '2026-02-23', to: '2026-03-01' })

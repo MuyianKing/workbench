@@ -1,5 +1,7 @@
 export * from './activity'
+export * from './base64'
 export * from './command'
+export * from './delay'
 export * from './dev-port'
 export * from './icon-cache'
 export * from './linkify'

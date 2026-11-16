@@ -91,6 +91,7 @@ import {
   TEXT_SIZE_DEFAULT,
   viewportToCanvas,
 } from '@workbench/capture'
+import { blobToBase64, delay } from '@workbench/core'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { startPointerDrag } from '@/composables/use-pointer-drag'
 import { drawAnnotation, drawAnnotations, measureTextSize, TEXT_LINE_HEIGHT } from './annotation-render'
@@ -98,6 +99,7 @@ import CaptureMagnifier from './CaptureMagnifier.vue'
 import CaptureOcrBar from './CaptureOcrBar.vue'
 import CaptureScrollBar from './CaptureScrollBar.vue'
 import CaptureToolbar from './CaptureToolbar.vue'
+import { composePng } from './export'
 
 const context = ref<CaptureContext | null>(null)
 const monitor = computed(() => context.value?.monitor ?? null)
@@ -1515,10 +1517,6 @@ const SCROLL_ZERO_CONFIRM = 2
 /** 连续这么多次匹配对不上才收场：第一次可能是动画没停稳 / 布局正在动，放慢再试一次 */
 const SCROLL_NULL_LIMIT = 2
 
-function delay(ms: number): Promise<void> {
-  return new Promise(resolve => window.setTimeout(resolve, ms))
-}
-
 /** 工具条上「滚动截图」：直接开滚（没有「开始」确认步 —— 停止靠再按一次截图热键）。
  *  选区太矮匹配不出重叠，先说清楚 */
 function startScroll(): void {
@@ -1560,6 +1558,25 @@ function frameFromBytes(bytes: ArrayBuffer, rect: ScrollState['rect']): StitchFr
   if (data.length !== rect.width * rect.height * 4)
     return null
   return { width: rect.width, height: rect.height, data }
+}
+
+/**
+ * 长图画布裁到真正拼到的高度（`top + 选区高`）。画布是**翻倍扩容**的：初始就给
+ * 两屏、之后不够再翻倍，末尾永远留着一截从没写过的透明行 —— 预览、复制、保存
+ * 都按画布全高走，不裁就是图下面挂一块空白区。
+ */
+function cropStitched(canvas: HTMLCanvasElement, height: number): HTMLCanvasElement | null {
+  const cropped = Math.max(1, Math.min(Math.round(height), canvas.height))
+  if (cropped === canvas.height)
+    return canvas
+  const out = document.createElement('canvas')
+  out.width = canvas.width
+  out.height = cropped
+  const ctx = out.getContext('2d')
+  if (!ctx)
+    return null
+  ctx.drawImage(canvas, 0, 0)
+  return out
 }
 
 /**
@@ -1694,9 +1711,10 @@ async function runScroll(): Promise<void> {
       // 连续对不上的计数：第一次可能是动画没停稳 / 布局正在动，放慢（1 齿 + 等稳翻倍）
       // 再试，连着两次才认输
       let nullRun = 0
-      // 上一步实测位移：滚轮是自己发的，本步的位移 ≈ 它 × 本步实发齿数，
-      // 匹配先在预测窗口里找（见 stitch.ts 的「预测窗口」）
-      let lastDelta = 0
+      // 上一齿的实测位移（上一步总位移 ÷ 实发齿数）：滚轮是自己发的，本步的位移
+      // ≈ 它 × 本步实发齿数，匹配先在预测窗口里找（见 stitch.ts 的「预测窗口」）。
+      // 必须按「齿」记：上一步发了两齿就把总位移除以二，否则齿数一变预测就错一倍
+      let perNotch = 0
       // 等稳轮询数：对不上的那一步翻倍（滚动动画更慢就多等一会）
       let settlePolls = SCROLL_SETTLE_POLLS
       // 首等 tick：发完滚轮先等多久再开始抓帧（按上一步的实测轮询数自适应，
@@ -1758,7 +1776,7 @@ async function runScroll(): Promise<void> {
           note = '抓回来的帧尺寸不对'
           break
         }
-        const hintDelta = lastDelta > 0 ? lastDelta * notches : undefined
+        const hintDelta = perNotch > 0 ? Math.round(perNotch * notches) : undefined
         const result = await matchScroll(prev, frame, hintDelta)
         if (!alive())
           return
@@ -1805,12 +1823,12 @@ async function runScroll(): Promise<void> {
         steps += 1
         state.stitched = top + rect.height
         state.steps = steps
-        lastDelta = delta
+        perNotch = delta / notches
         // 这一步的等稳表现 → 下一步的首等（瞬时跳滚的应用 tick 降到 40，少白等）
         if (settled)
           tick = planTickDelay(tick, attempts)
-        // 下一步发几个齿按这一步的实际位移自适应（步长贴着选区高度 25% 走）
-        notches = planNotches(delta, rect.height)
+        // 下一步发几个齿按这一步的**每齿**位移自适应（步长贴着选区高度 25% 走）
+        notches = planNotches(perNotch, rect.height)
         settlePolls = SCROLL_SETTLE_POLLS
         // 停止请求：这一步已经拼进去（滚出去的内容不丢），下一轮开头收工
         if (scrollStopRequested)
@@ -1825,11 +1843,13 @@ async function runScroll(): Promise<void> {
     matchWorker?.terminate()
     matchWorker = null
     if (alive()) {
-      // 正常收尾：进结果相（note 为空 = 到底了，干干净净）
+      // 正常收尾：进结果相（note 为空 = 到底了，干干净净）。长图**裁到真正拼到的
+      // 高度**：画布是翻倍扩容的，末尾那段从没写过的透明行不能进图 —— 进图就是
+      // 一片空白区（预览、复制、保存都按画布全高走）
       state.note = note
       state.steps = steps
       state.phase = 'result'
-      scrollCanvas = canvas
+      scrollCanvas = canvas ? cropStitched(canvas, state.stitched) : null
       redraw()
     }
     else {
@@ -1904,60 +1924,21 @@ async function finishScrollSave(): Promise<void> {
 
 // ---------- 导出与动作 ----------
 
-/** 选区那一块 + 标注，编成 PNG。画法与显示侧完全一致（见文件头） */
+/** 选区那一块 + 标注，编成 PNG。画法与显示侧完全一致（见文件头；实现在 export.ts） */
 async function compose(): Promise<Blob | null> {
   const frame = bitmap.value
   const rect = selection.value
   if (!frame || !rect || !hasSelection.value)
     return null
 
-  const crop = clampRect({ ...rect, x: Math.round(rect.x), y: Math.round(rect.y) }, fullRect())
-  const width = Math.max(1, Math.round(crop.width))
-  const height = Math.max(1, Math.round(crop.height))
-
-  // **先在整帧尺寸的画布上画**（与 stage 同一套：绝对坐标、不平移），最后才把选区那块抠出来。
-  // 不能图省事只在「选区那么大」的画布上平移到选区坐标系再画：那样两边 canvas 尺寸与原点的
-  // 小数部分都不一样，抗锯齿、马赛克那类要读像素 / 要缩放的画法会与屏幕上差一点点
-  // （马赛克更明显：浏览器的缩放实现跟源画布尺寸有关，块色会差几个点）。
-  const stage = document.createElement('canvas')
-  stage.width = frame.width
-  stage.height = frame.height
-  const painter = stage.getContext('2d')
-  if (!painter)
-    return null
-  painter.imageSmoothingEnabled = false
-  painter.drawImage(frame, 0, 0)
-  // 与显示侧同一个规矩：正被拖的那条摘掉、补上 draft 那一份（拖到一半按 Enter / Ctrl+C
-  // 导出的就是屏幕上此刻的样子，而不是它的旧几何，见 settledAnnotations）
-  drawAnnotations(painter, settledAnnotations(), { x: 0, y: 0 })
-  if (draft.value)
-    drawAnnotation(painter, draft.value, { x: 0, y: 0 })
-
-  const canvas = document.createElement('canvas')
-  canvas.width = width
-  canvas.height = height
-  const ctx = canvas.getContext('2d')
-  if (!ctx)
-    return null
-  ctx.drawImage(stage, crop.x, crop.y, width, height, 0, 0, width, height)
-
-  try {
-    return await new Promise<Blob | null>(resolve => canvas.toBlob(blob => resolve(blob), 'image/png'))
-  }
-  catch {
-    // 污染的画布上 toBlob 会同步抛 SecurityError（帧走 Blob 之后不该发生，兜住免得白屏）
-    return null
-  }
-}
-
-/** Blob → base64。一次转换的字节数有上限：几兆的图整串塞进 fromCharCode 会爆调用栈，分块来 */
-async function blobToBase64(blob: Blob): Promise<string> {
-  const bytes = new Uint8Array(await blob.arrayBuffer())
-  let binary = ''
-  const chunk = 0x8000
-  for (let index = 0; index < bytes.length; index += chunk)
-    binary += String.fromCharCode(...bytes.subarray(index, index + chunk))
-  return btoa(binary)
+  // 正被拖的那条摘掉、补上 draft 那一份（拖到一半按 Enter / Ctrl+C 导出的就是屏幕上此刻的样子）
+  return composePng({
+    frame,
+    rect,
+    bounds: fullRect(),
+    annotations: settledAnnotations(),
+    draft: draft.value,
+  })
 }
 
 async function pngBase64(): Promise<string | null> {

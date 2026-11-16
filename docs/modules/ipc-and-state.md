@@ -8,8 +8,9 @@
 
 ### 通道
 
-- 契约以 [types/api.ts](../../apps/desktop/src/renderer/src/types/api.ts) 的 `WorkbenchApi` 为准（`@/types` 从那里 re-export；
-  设置与默认值在 `types/settings.ts`）：Tauri 命令名用 snake_case，
+- 契约以 [types/api/](../../apps/desktop/src/renderer/src/types/api/) 的 `WorkbenchApi` 为准（`@/types` 从那里 re-export；
+  设置与默认值在 `types/settings.ts`）：它只是各域 `*Channel` 的并集，一个域一个文件（`gateway.ts` / `qoder.ts` / `notes.ts` /
+  `kb.ts` / `system.ts` …），与适配层的分文件一一对应 —— 单测可以只实现自己那个域。Tauri 命令名用 snake_case，
   camelCase 方法名到命令名的映射只出现在适配层。通道载荷类型（`Gateway*` / `Qoder*` / `Etf*`）住在 `types/gateway.ts` /
   `types/qoder.ts` / `types/etf.ts`（契约侧），适配层从 `@/types` **import 并 re-export** —— `from '@/workbench/gateway'` 照旧
   能用，但**契约不再反向 import 适配层**（原先 47 处 `import('./workbench/…')`），新增载荷类型一律落 `types/`。
@@ -35,8 +36,9 @@
   `nvm_node_dir`、`check_port`、`nvm_status` / `nrm_status` 把「读不出来 / 探测失败」回成 `Err`；
   「文件不存在 / 没装 / 进程已退出」仍是正常值（`Ok(None)` / `Ok(false)` / 带 `error` 字段的 payload）。
   调用侧要么提示，要么显式降级并留日志 —— 启动时那几份数据文件属于后者（见 `workbench/state.ts` 的 `loadFile`）。
-- 新增通道三步：`WorkbenchApi` 登记 → 适配层实现 → 需要后端时在 `commands.rs` 写命令并在 `main.rs` 的 `generate_handler!`
-  注册。渲染层→主进程的单向事件走适配层的 `events.ts` 广播。
+- 新增通道三步：在 `types/api/` 对应域的 `*Channel` 里登记 → 适配层实现 → 需要后端时在 `commands.rs` 写命令并在
+  `main.rs` 的 `generate_handler!` 注册。没有对应域就先加一个 `*Channel` 文件并在 `types/api/index.ts` 的并集里加上。
+  渲染层→主进程的单向事件走适配层的 `events.ts` 广播。
 - 适配层实现**按域分文件**：`workbench/index.ts` 只是装配根（spreads + 通道覆盖检查 + 安装时序），通道按域住在 `api-sync.ts`
   （同步门禁几组）、`api-project.ts`（项目 CRUD 与进程十件事）、`api-system.ts`（系统 / 窗口 / 对话框 / 系统集成）、
   `api-background.ts`（背景图与图片授权）、`api-events.ts`（事件订阅与截图 / 钉图 / 网速球三窗共用组）；域模块薄转发收在
@@ -45,7 +47,7 @@
 - **「通道有没有实现」是编译期的事，运行期没有兜底**：装配根把合并出来的对象与 `WorkbenchApi` 对一遍（`MissingChannels`），
   漏一条就是 tsc 报错并把名字列出来。原来那层 Proxy（缺通道返回「尚未移植」）已经删掉 —— 它有两个毛病：漏实现要到运行时才
   发现；而且它给 `then` 也编了个函数，`await window.workbench` 会被当成 thenable 永远不落地。**不要把它加回来**：新增通道时
-  实现与 `types/api.ts` 的登记必须同一次改完。
+  实现与 `types/api/` 里的登记必须同一次改完。
 - 渲染层不直接访问 Node / 文件系统 / WebView 宿主能力，一切经 `window.workbench`。**唯一例外是「大文件交给 webview 按文件
   读」的两处**：工作区背景图与视频播放 —— 让 webview 按 asset 协议自己加载（URL 由适配层 `assetUrl()` 转出），读取权限一律
   在 Rust 侧按**单个文件**授予（`commands.rs` 的 `allow_background` / `allow_video`，后者先核后缀与 MP4 文件头再放行），
@@ -60,7 +62,7 @@
 
 ### 状态
 
-- 跨组件状态按领域分在 [stores/](../../apps/desktop/src/renderer/src/stores/) 下（分工见架构文档「目录结构」）；不另建全局状态，
+- 跨组件状态按领域分在 [stores/](../../apps/desktop/src/renderer/src/stores/) 下（分工见 [directory.md](../directory.md)）；不另建全局状态，
   也不要用事件总线传业务数据（组件设计那一层的约束见 [AGENTS.md](../../AGENTS.md) 第 0 节）。
 - **谁该进 store 的判据是「跨页共享」**：多处读写的状态必须进 store 且只经 action 变更 —— 工作日志就是这一条
   （[stores/work-log.ts](../../apps/desktop/src/renderer/src/stores/work-log.ts)：「工作」页写、首页「今日完成」读，两边必须是
@@ -196,5 +198,5 @@
 
 前七行在 `apps/desktop/src-tauri/src/`，中间三行也在 `apps/desktop/src-tauri/src/`（http / credentials / encoding）；
 末尾五件在 `apps/desktop/src/renderer/src/workbench/`（适配层的底座部分）。两个壳层 store（`stores/nav.ts` 当前页、
-`stores/settings.ts` 设置与外观）与导航壳层的注解仍留在主文档「目录结构」里，因为它们与「导航与页面」「系统集成」两节长在
+`stores/settings.ts` 设置与外观）与导航壳层的注解仍留在 [directory.md](../directory.md) 里，因为它们与「导航与页面」「系统集成」两节长在
 一起。

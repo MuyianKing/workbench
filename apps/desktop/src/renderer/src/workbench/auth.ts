@@ -9,7 +9,7 @@ import type { AccountProfile, AuthProvider, AuthStatus, LoginOutcome, LoginPoll,
  * 只有昵称头像这类显示用的东西会回到渲染层。
  */
 import { AUTH_PROVIDERS, sanitizeAccount } from '@workbench/auth'
-import { fail, ok } from '@workbench/core'
+import { delay, fail, ok } from '@workbench/core'
 import { guard, invoke } from './bridge'
 import * as state from './state'
 
@@ -34,10 +34,6 @@ let session = 0
  * 光看编号分不出来，所以成功时在这里留一份。取消会把它清掉。
  */
 let finished: AccountProfile | null = null
-
-function delay(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms))
-}
 
 /**
  * 凭据管理器是「是否已登录」的权威来源，数据文件里那份资料只是显示用的缓存。

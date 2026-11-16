@@ -90,8 +90,8 @@ beforeEach(() => {
 const { useNotesStore } = await import('./notes')
 const { useSettingsStore } = await import('./settings')
 
-/** 打开 / 探测都是 async 的，等一轮宏任务让假通道落地 */
-const settle = (): Promise<void> => new Promise(resolve => setTimeout(resolve, 0))
+/** 打开 / 探测都是 async 的，等一轮宏任务让假通道落地（`setImmediate` 没有 Windows 那 15.6ms 的定时器地板） */
+const settle = (): Promise<void> => new Promise(resolve => setImmediate(resolve))
 
 async function openNote(text: string, mtimeMs: number) {
   files.set('周报.md', { text, mtimeMs })

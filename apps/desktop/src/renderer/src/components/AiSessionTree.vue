@@ -77,7 +77,7 @@ const running = computed(() => new Set(props.runningIds))
         <el-icon class="row__icon">
           <FolderOpened />
         </el-icon>
-        <span class="row__name">{{ group.name }}</span>
+        <span class="row__name truncate">{{ group.name }}</span>
         <el-tooltip content="在这个目录里起一段新的" placement="top">
           <button type="button" class="row__action" @click.stop="emit('start', group.dir)">
             <el-icon><Plus /></el-icon>
@@ -97,7 +97,7 @@ const running = computed(() => new Set(props.runningIds))
           <el-icon class="row__icon">
             <ChatLineSquare />
           </el-icon>
-          <span class="row__name">{{ sessionLabel(session.title) }}</span>
+          <span class="row__name truncate">{{ sessionLabel(session.title) }}</span>
           <span v-if="running.has(session.id)" class="row__run" aria-hidden="true" />
           <el-tooltip content="删除这个会话（对话记录一起删掉）" placement="top">
             <button type="button" class="row__action" @click.stop="emit('remove', session.id)">
@@ -183,9 +183,6 @@ const running = computed(() => new Set(props.runningIds))
 .row__name {
   flex: 1 1 auto;
   min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
 }
 
 /* 正在跑的那一颗：彩色只表达运行状态（与首页那些运行态同一套） */

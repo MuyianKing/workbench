@@ -356,7 +356,7 @@ onBeforeUnmount(() => {
             <el-icon><Document /></el-icon>
           </span>
           <span class="md-head__title" data-tauri-drag-region>
-            <span class="md-head__name" :title="note.name">{{ note.name }}</span>
+            <span class="md-head__name truncate" :title="note.name">{{ note.name }}</span>
           </span>
           <span class="md-head__spacer" />
           <div class="wctl" role="group" aria-label="窗口控制">
@@ -466,7 +466,7 @@ onBeforeUnmount(() => {
             </el-button>
           </el-tooltip>
           <template v-if="saveError">
-            <span class="md-foot__error" role="alert" :title="saveError">
+            <span class="md-foot__error truncate" role="alert" :title="saveError">
               保存失败：{{ saveError }}
             </span>
             <el-button link size="small" @click="retry">
@@ -569,12 +569,9 @@ onBeforeUnmount(() => {
 }
 
 .md-head__name {
-  overflow: hidden;
   color: var(--ink);
   font-size: var(--fs-title);
   font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .md-head__spacer {
@@ -894,10 +891,7 @@ onBeforeUnmount(() => {
 
 .md-foot__error {
   min-width: 0;
-  overflow: hidden;
   color: var(--st-fail);
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /**

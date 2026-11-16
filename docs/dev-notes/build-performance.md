@@ -80,7 +80,7 @@ Rust 两行与前端用什么打包器无关；**合计两行仍是 vite 7 那�
 | 旧：整棵 `npm install` | 139MB | 15,165 | 12.1s |
 | 新：tarball + 两个包 | ~26MB | ~1,250 | **5.7s** |
 
-冷缓存时差距更大（下载量约 9.4MB，旧的要几十兆）。stamp（`resources/pi/.pi-version`）命中时
+冷缓存时差距更大（下载量约 9.4MB，旧的要几十兆）。stamp（`apps/desktop/resources/pi/.pi-version`）命中时
 整步 <0.3s，所以热构建里它基本不占时间。
 
 ## 验证链的耗时
@@ -149,6 +149,41 @@ vitest 进程（各包自己的 `vitest.config.ts` 仍是配置来源，`pnpm -F
 - **`fsModuleCache: true`**（vitest 在输出末尾自己提示的「把 transform 落盘复用」）：连量三遍都是 12.1s，
   时长构成里 transform 仍占 40%，没有收益，撤掉了 —— 它只多出一个缓存目录。
 
+### 用例里的真定时器（2026-11-16）
+
+那 12.1s 到 2026-11 涨到了 13.9～14.8s（用例从 85 个文件 / 1526 条涨到 113 个 / 1805 条），其中一半是空等：
+`stores/zentao.test.ts`、`stores/vault.test.ts`、`stores/mail.test.ts`、`stores/notes.test.ts` 的 `settle()`
+用 `setTimeout(resolve, 0)` 让出宏任务。**Windows 上事件循环空闲时定时器地板约 15.6ms** ——
+实测 60 次 `setTimeout(0)` 要 932ms，同样 60 次 `setImmediate` 只要 1ms。
+
+- 单这一条就压住关键路径：`stores/zentao.test.ts` 12 条用例 6.78s，而且是最后一个跑完的
+  （整条跑到 13.5s 才收尾）；把它排除掉整条从 13.9s 掉到 8.9s。
+- 四处 `settle()` 改成 `setImmediate(resolve)`（语义不变，都是让出一次宏任务，只是不等定时器队列）：
+  **14.8s → 9.1s**，连量两遍一致，1805 条全绿。这条文件本身 9.3s → 2.5s（剩下的是 import/transform）。
+- 结论：用例里要「让几轮宏任务落地」时用 `setImmediate`，不要用 `setTimeout(…, 0)`；也别用真实
+  `setTimeout(ms)` 等状态，要等就用假定时器（`vi.useFakeTimers` + `advanceTimersByTimeAsync`，
+  见 `stores/projects.test.ts`）。
+
+降到 9.1s 之后剩下的构成是 transform 39% / import 32% / tests 28%：`workbench/index.test.ts`、
+`workbench/work-log-sync.test.ts`、`workbench/activity.test.ts`、`workbench/token.test.ts` 的每条用例
+都 `vi.resetModules()` 后重新 import 整层适配层 + `initState()`，首条用例要 2～3s。要再往下压得改测试结构
+（一次 boot 多处复用），收益约 2～3s、风险明显更高，暂不动。
+
+worker 池也扫过两轮（定时器账修完之后重量）。默认 `maxWorkers` 是 `CPU-1`（16 线程 → 15），
+19 个 project 共用这个池：
+
+| 配置 | 时长 |
+|---|---|
+| 默认（`forks` / 15） | 8.4～9.3s |
+| `--maxWorkers=8` | 11.8～13.2s |
+| `--pool=threads` | 7.1～9.9s |
+| `--pool=threads --maxWorkers=8`（或 12） | 25～27s |
+
+- **池保持默认 `forks`、worker 数不写**。`--pool=threads` 单开是快一截，但 12 次全量里挂了 2 次：
+  `workbench/activity.test.ts` 的「没配仓库 / 退出登录时只剩本机」拿到 `{ run: 3 }`（应为 1）——
+  前一条用例记的两笔漏进了后一条，`vi.resetModules()` 在 threads 池下没兜住。为 1s 换一个 15% 的假失败率不划算。
+- 显式给 `maxWorkers` 只会更慢；`threads` + 显式 `maxWorkers` 这一档在 vitest 5.0.3 上是坏的（25s+），别这么配。
+
 ### 量这条链的坑
 
 - **别在别的进程抢 CPU 的时候量**。同一条 `eslint .` 今天先量到 31.5s、十分钟后单独量到 19.0s；
@@ -203,6 +238,19 @@ powershell -NoProfile -Command "@(Get-CimInstance Win32_Process -Filter \"Name='
 
 `AGENTS.md` 里「改 Rust 前先关掉正在运行的应用」原本只讲了 exe 被占用（os error 5），
 并行编译本身也是打包变慢的一大来源。
+
+### `cargo update` 后锁文件里多出的 html5ever / selectors 不进 Windows 编译图
+
+`wry 0.57.2` 的 `dom_query ^0.29` 挂在 `cfg(target_os = "android")` 下，但 `cargo update` 仍会把
+html5ever / cssparser / selectors / servo_arc / string_cache / phf / web_atoms 一整套写进 `Cargo.lock`。
+它们在本机**不编译**，别按「新增编译单元」把它们退回：
+
+```bash
+cargo tree -e normal -i html5ever@0.40.1 --target x86_64-pc-windows-msvc   # nothing to print
+```
+
+核实要带 `--target`，包名同版本共存时还得带 `@版本`（`tauri-utils` 自己那条 `html5ever 0.39 / dom_query 0.28`
+在 Windows 图里，和 wry 那条 `0.40 / 0.29` 重名，只写包名会报 ambiguous）。
 
 ### `.cargo/config.toml` 的位置：`apps/desktop/.cargo/`，别放 `apps/desktop/src-tauri/` 里
 

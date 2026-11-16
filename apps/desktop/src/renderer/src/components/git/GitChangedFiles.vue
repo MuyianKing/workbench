@@ -49,7 +49,7 @@ function toneOf(file: GitChangedFile): string {
 </script>
 
 <template>
-  <div class="changed-files">
+  <div class="changed-files page">
     <header class="changed-files__head">
       <span class="changed-files__title">改动文件</span>
       <span class="changed-files__count">{{ props.files.length }} 个</span>
@@ -68,7 +68,7 @@ function toneOf(file: GitChangedFile): string {
         @click="emit('select', file.path)"
       >
         <span class="changed-file__status" :class="toneOf(file)">{{ file.status }}</span>
-        <span class="changed-file__path mono">{{ file.path }}</span>
+        <span class="changed-file__path mono truncate">{{ file.path }}</span>
         <span v-if="file.binary" class="changed-file__stat">二进制</span>
         <span v-else class="changed-file__stat">
           <span class="is-add">+{{ file.added }}</span>
@@ -85,10 +85,6 @@ function toneOf(file: GitChangedFile): string {
 
 <style scoped>
 .changed-files {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  min-height: 0;
 }
 
 .changed-files__head {
@@ -155,9 +151,6 @@ function toneOf(file: GitChangedFile): string {
 .changed-file__path {
   flex: 1;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .changed-file__stat {

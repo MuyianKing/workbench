@@ -2,7 +2,7 @@ import type { MailAccount, MailAttachmentInput, MailContact, MailFolder, ParsedA
 import type { Result } from '@/types'
 import type { MailSummary } from '@/workbench/mail'
 import { fail, ok } from '@workbench/core'
-import { buildMime, contactOf, displayDate, displayRecipients, displaySender, isBulkMail, mailAccountReady, mailTime, parseMessage, recipientAddress, recipientDisplay, sanitizeMailContact, senderAddress } from '@workbench/mail'
+import { buildMime, contactOf, countUnreadMails, displayDate, displayRecipients, displaySender, isBulkMail, mailAccountReady, mailTime, parseMessage, recipientAddress, recipientDisplay, sanitizeMailContact, senderAddress } from '@workbench/mail'
 import { defineStore } from 'pinia'
 /**
  * 邮箱页的状态。
@@ -52,6 +52,16 @@ export type MailListItem = MailSummary & {
   folder: MailFolder
   /** (文件夹, 账户, uid) 拼成的身份：uid 只在单个文件夹里唯一，跨账户、跨文件夹都会撞 */
   key: string
+}
+
+/**
+ * 角标账本里的一条未读：只留计数与广告识别要用的三样（isBulkMail 认 subject / from）。
+ * 推广段过滤在计数的计算属性里现场做 —— 用户「标记为广告」时角标立刻跟着掉，不必等下一轮。
+ */
+interface UnreadMail {
+  uid: number
+  subject: string
+  from: string
 }
 
 /** 打开的一封信：都是展示层直接能用的形态（解码过、日期格式化过） */
@@ -177,6 +187,61 @@ export const useMailStore = defineStore('mail', () => {
   )
   const bulkCount = computed(() => bulkList.value.length)
 
+  // ---------- 导航栏角标（收件箱未读数） ----------
+
+  /**
+   * 各账户收件箱里**未读**的摘要（最近 50 封窗口内，与清单同一个窗口）。只当账本用：
+   * 计数在 unread 里逐条过 isBulkMail —— 推广段与黑名单发件人不计入（与清单的可见口径一致）。
+   * 来源两路：后台监视每轮的 `mail:unread`（Rust 取完就推）与进页面 / 刷新拉回来的清单。
+   */
+  const unreadMails = ref<Record<string, UnreadMail[]>>({})
+
+  /**
+   * 最近一次本地读信 / 删信 / 清单同步的时刻（毫秒）。后台那一路推的是「本轮**开始取数**时」
+   * 的快照：比它更早的整批丢掉，否则刚读完的三封会被一个慢半拍的轮询又刷回未读。
+   */
+  let unreadLocalAt = 0
+
+  /** 导航栏上的未读数：只数看得见的那部分（推广段 / 黑名单发件人不算） */
+  const unread = computed(() => {
+    let total = 0
+    for (const account of accounts.value) {
+      const mails = unreadMails.value[account.address] ?? []
+      total += countUnreadMails(mails, bulkSenders.value)
+    }
+    return total
+  })
+
+  /** 换掉一个账户的未读清单（整份替换才触发响应；就地推数组不会） */
+  function setAccountUnread(address: string, mails: UnreadMail[]): void {
+    unreadMails.value = { ...unreadMails.value, [address]: mails }
+  }
+
+  /** 记一次本地改动：此后推来的、比它更早开始取数的后台结果一律不采用 */
+  function touchUnread(): void {
+    unreadLocalAt = Date.now()
+  }
+
+  /** 这封已经读掉了（打开即已读 / 手动标已读 / 删除）：从账本里摘掉 */
+  function forgetUnread(account: string, uid: number): void {
+    touchUnread()
+    const mails = unreadMails.value[account]
+    if (!mails?.some(mail => mail.uid === uid))
+      return
+    setAccountUnread(account, mails.filter(mail => mail.uid !== uid))
+  }
+
+  /** 标回未读：把那封补回账本（只在收件箱；发件箱本来就不计） */
+  function restoreUnread(item: MailListItem): void {
+    if (item.folder !== 'inbox')
+      return
+    touchUnread()
+    const mails = unreadMails.value[item.account] ?? []
+    if (mails.some(mail => mail.uid === item.uid))
+      return
+    setAccountUnread(item.account, [...mails, { uid: item.uid, subject: item.subject, from: item.from }])
+  }
+
   /** 一封在某个文件夹里的身份键 —— uid 只在单个文件夹里唯一，三个字段缺一不可 */
   function mailKey(folder: MailFolder, account: string, uid: number): string {
     return `${folder}/${account}/${uid}`
@@ -210,6 +275,7 @@ export const useMailStore = defineStore('mail', () => {
         return
       const merged: MailListItem[] = []
       const errors: string[] = []
+      let syncedInbox = false
       for (const { account, result } of results) {
         if (result.ok && result.data) {
           for (const summary of result.data) {
@@ -220,6 +286,16 @@ export const useMailStore = defineStore('mail', () => {
               key: mailKey(requested, account.address, summary.uid),
             })
           }
+          // 收件箱这一批同时就是角标的账本（取数失败的账户保留上一轮的值）
+          if (requested === 'inbox') {
+            syncedInbox = true
+            setAccountUnread(
+              account.address,
+              result.data
+                .filter(summary => !summary.seen)
+                .map(summary => ({ uid: summary.uid, subject: summary.subject, from: summary.from })),
+            )
+          }
         }
         else {
           errors.push(`「${account.address}」${result.error ?? `拉取${folderLabel.value}失败`}`)
@@ -228,6 +304,8 @@ export const useMailStore = defineStore('mail', () => {
       merged.sort((a, b) => mailTime(b.date) - mailTime(a.date))
       all.value = merged
       listErrors.value = errors
+      if (syncedInbox)
+        touchUnread()
     })().finally(() => {
       listInFlight = null
       listLoading.value = false
@@ -281,6 +359,9 @@ export const useMailStore = defineStore('mail', () => {
       bodyError.value = raw.error ?? '读取邮件失败'
       return
     }
+    // 收件箱那边 Rust 已经顺手标了 \Seen：角标从这一刻起就该掉（解析失败也一样）
+    if (item.folder === 'inbox')
+      forgetUnread(item.account, item.uid)
     try {
       const parsed = await parseMessage(raw.data)
       const fromAddress = parsed.from?.address || senderAddress(item.from)
@@ -332,8 +413,16 @@ export const useMailStore = defineStore('mail', () => {
     const result = await setMailSeen(config, target.folder, target.uid, seen)
     if (result.ok) {
       const item = all.value.find(entry => entry.key === mailKey(target.folder, target.account, target.uid))
-      if (item)
+      if (item) {
         item.seen = seen
+        // 角标账本跟着走：标已读就摘掉，标回未读就补回来（只有收件箱参与）
+        if (target.folder === 'inbox') {
+          if (seen)
+            forgetUnread(target.account, target.uid)
+          else
+            restoreUnread(item)
+        }
+      }
     }
     return result
   }
@@ -385,6 +474,11 @@ export const useMailStore = defineStore('mail', () => {
     )
     deletingKeys.value = deletingKeys.value.filter(key => !keys.includes(key))
     if (done.size) {
+      // 删掉的信连同角标账本一起摘（删成的那几封，读没读过都摘掉）
+      for (const item of pending) {
+        if (item.folder === 'inbox' && done.has(keyOf(item)))
+          forgetUnread(item.account, item.uid)
+      }
       all.value = all.value.filter(entry => !done.has(entry.key))
       for (const key of done) bodies.delete(key)
       if (active.value && done.has(active.value.key)) {
@@ -500,6 +594,8 @@ export const useMailStore = defineStore('mail', () => {
     to: string[]
     subject: string
     text: string
+    /** HTML 版正文（可选）：给了就按 multipart/alternative 发，纯文本那份作兜底 */
+    html?: string
     attachments?: MailAttachmentInput[]
   }): Promise<Result<null>> {
     const account = accountOf(input.from)
@@ -514,6 +610,7 @@ export const useMailStore = defineStore('mail', () => {
         to: input.to,
         subject: input.subject,
         text: input.text,
+        html: input.html,
         attachments: input.attachments,
       })
       const result = await sendMail(account, input.to, mime)
@@ -592,6 +689,21 @@ export const useMailStore = defineStore('mail', () => {
           void openMail(item)
       })
     })
+
+    // 后台监视每轮推来的收件箱未读快照（导航栏角标）：比本地改动更早开始取数的整批丢掉
+    window.workbench?.onMailUnread(({ checkedAt, accounts: snapshots }) => {
+      if (checkedAt * 1000 < unreadLocalAt)
+        return
+      const next = { ...unreadMails.value }
+      for (const snapshot of snapshots) {
+        next[snapshot.address] = snapshot.mails.map(mail => ({
+          uid: mail.uid,
+          subject: mail.subject,
+          from: mail.from,
+        }))
+      }
+      unreadMails.value = next
+    })
   }
 
   /** 发件人展示名：列表与阅读栏共用同一套解码（@workbench/mail 的 displaySender） */
@@ -611,6 +723,7 @@ export const useMailStore = defineStore('mail', () => {
     bulkList,
     bulkSenders,
     bulkCount,
+    unread,
     showBulk,
     deletingKeys,
     listLoading,

@@ -142,7 +142,7 @@ function beginGroupDrag(event: PointerEvent, name: string): void {
           :class="{ 'is-dragging': draggingGroup === name }"
           @pointerdown="beginGroupDrag($event, name)"
         >
-          <span class="group-row__name">{{ name }}</span>
+          <span class="group-row__name truncate">{{ name }}</span>
           <el-switch
             :model-value="!store.hiddenGroups.includes(name)"
             size="small"
@@ -185,11 +185,8 @@ function beginGroupDrag(event: PointerEvent, name: string): void {
 
 .group-row__name {
   min-width: 0;
-  overflow: hidden;
   color: var(--ink);
   font-size: var(--fs-meta);
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /* 拖动中的那一行浮起来（描边加重 + 卡片投影），跟手重排时好认出它落在哪 */

@@ -49,6 +49,15 @@ export function onCheck(handler: () => void): Promise<() => void> {
 }
 
 /**
+ * 系统通知被点了（Rust 已经用浏览器把站点打开）：角标该清零。
+ * 只有打开成功才推 —— 打开失败时用户其实没看到禅道，未读还得留着。
+ */
+export function onOpened(handler: () => void): Promise<() => void> {
+  const registered = window.__TAURI__?.event?.listen('zentao:opened', () => handler())
+  return registered ?? Promise.resolve(() => {})
+}
+
+/**
  * 用系统浏览器打开禅道（顶栏那颗图标与通知点击都走它）。
  * 地址由 Rust 从内嵌配置读取；浏览器里没有应用的登录态，登录由用户自己在那里做。
  */

@@ -68,8 +68,8 @@ const showCustom = computed(() => {
       <button v-if="showCustom" type="button" class="preset__cell" @click="emit('custom')">
         <span class="preset__avatar is-custom"><el-icon><Plus /></el-icon></span>
         <span class="preset__text">
-          <span class="preset__name">自定义端点</span>
-          <span class="preset__host">任意 OpenAI 或 Anthropic 兼容地址</span>
+          <span class="preset__name truncate">自定义端点</span>
+          <span class="preset__host truncate">任意 OpenAI 或 Anthropic 兼容地址</span>
         </span>
       </button>
 
@@ -82,8 +82,8 @@ const showCustom = computed(() => {
       >
         <span class="preset__avatar">{{ initial(preset.label) }}</span>
         <span class="preset__text">
-          <span class="preset__name">{{ preset.label }}</span>
-          <span class="preset__host" :title="preset.baseUrl">{{ host(preset.baseUrl) }}</span>
+          <span class="preset__name truncate">{{ preset.label }}</span>
+          <span class="preset__host truncate" :title="preset.baseUrl">{{ host(preset.baseUrl) }}</span>
         </span>
       </button>
     </div>
@@ -164,18 +164,12 @@ const showCustom = computed(() => {
 }
 
 .preset__name {
-  overflow: hidden;
   color: var(--ink);
   font-size: var(--fs-meta);
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .preset__host {
-  overflow: hidden;
   color: var(--ink-3);
   font-size: var(--fs-micro);
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 </style>

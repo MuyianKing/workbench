@@ -167,7 +167,7 @@ function forgetRecent(dir: string): void {
         {{ rootName }}
       </span>
 
-      <span class="recent-roots__count" :title="countText">{{ countText }}</span>
+      <span class="recent-roots__count truncate" :title="countText">{{ countText }}</span>
 
       <!-- 右侧的工具按钮归调用方（两个页面各有一组），尺寸按这一行的小按钮画 -->
       <span class="recent-roots__tools">
@@ -254,9 +254,6 @@ function forgetRecent(dir: string): void {
 .recent-roots__count {
   flex: 0 100 auto;
   min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
   font-size: var(--fs-micro);
   color: var(--ink-3);
 }

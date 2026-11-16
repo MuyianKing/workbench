@@ -32,7 +32,7 @@ const metaWarn = !props.skill.hasSkillMd
   >
     <div class="card__head">
       <div class="card__title">
-        <h3 class="card__name" :title="skill.name">
+        <h3 class="card__name truncate" :title="skill.name">
           {{ skill.name }}
         </h3>
         <!-- 版本号：从 frontmatter 的 version 里解析的（保存时必填）；历史数据 / 导入的没有就不显示 -->
@@ -118,9 +118,6 @@ const metaWarn = !props.skill.hasSkillMd
 .card__name {
   margin: 0;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   color: var(--ink);
   font-size: var(--fs-title);
 }

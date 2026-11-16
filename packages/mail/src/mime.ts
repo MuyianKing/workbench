@@ -4,7 +4,7 @@
 // !
 // ! 所有行一律 CRLF（SMTP 的硬要求），信体文本里的换行也归一成 CRLF。
 
-import { bytesToBase64 } from './base64'
+import { bytesToBase64 } from '@workbench/core'
 import { encodeRfc2047Word } from './rfc2047'
 
 /** 与 Rust 侧 mail.rs 的 MAX_MESSAGE_BYTES 同一个数：超限在构建这一步就拦下。 */
@@ -25,6 +25,12 @@ export interface BuildMimeInput {
   subject: string
   /** 纯文本正文 */
   text: string
+  /**
+   * HTML 版正文（可选）：给了就按 multipart/alternative 发 —— 收件端认 HTML 就看排版好的
+   * 那份，不认（或用户关了 HTML）就落回上面的纯文本。没有附件时顶层就是 alternative，
+   * 有附件时由 multipart/mixed 包住「alternative + 文件」。
+   */
+  html?: string
   attachments?: MailAttachmentInput[]
 }
 
@@ -121,14 +127,21 @@ export function formatMailSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
+/** 生成一个 multipart 边界：每次取新随机串，alternative 与 mixed 两层不会撞。 */
+function boundaryOf(tag: string): string {
+  return `=_workbench_${tag}_${messageId().replace(/[<>.@]/g, '')}`
+}
+
 /**
- * 拼一份完整的发信报文。附件可省；有附件时 multipart/mixed 包住文本与文件。
- * 超过 30 MB 直接抛 —— 服务器收不下，发出去也是白费一趟。
+ * 拼一份完整的发信报文。附件可省；有 html 时正文包成 multipart/alternative
+ * （纯文本那份永远在，作兜底）。超过 30 MB 直接抛 —— 服务器收不下，发出去也是白费一趟。
  */
 export function buildMime(input: BuildMimeInput): string {
   const textBase64 = wrappedBase64(bytesToBase64(new TextEncoder().encode(normalizeText(input.text))))
+  const htmlText = (input.html ?? '').trim()
+  const htmlBase64 = htmlText ? wrappedBase64(bytesToBase64(new TextEncoder().encode(normalizeText(htmlText)))) : ''
   const attachments = input.attachments ?? []
-  const totalBytes = textBase64.length + attachments.reduce((sum, part) => sum + part.bytesBase64.length, 0)
+  const totalBytes = textBase64.length + htmlBase64.length + attachments.reduce((sum, part) => sum + part.bytesBase64.length, 0)
   if (totalBytes > MAX_MESSAGE_BYTES) {
     throw new Error('邮件（含附件）超过 30 MB，发件服务器收不下，拆小一点再试')
   }
@@ -142,31 +155,51 @@ export function buildMime(input: BuildMimeInput): string {
     `Message-ID: ${messageId()}`,
   ]
 
-  if (attachments.length === 0) {
-    return [
-      ...headers,
-      'Content-Type: text/plain; charset=utf-8',
-      'Content-Transfer-Encoding: base64',
-      '',
-      textBase64,
-      '',
-    ].join('\r\n')
-  }
-
-  const boundary = `=_workbench_${messageId().replace(/[<>.@]/g, '')}`
-  const parts = [
-    ...headers,
-    `Content-Type: multipart/mixed; boundary="${boundary}"`,
-    '',
-    `--${boundary}`,
+  const plainPart = [
     'Content-Type: text/plain; charset=utf-8',
     'Content-Transfer-Encoding: base64',
     '',
     textBase64,
   ]
+
+  // 只有纯文本、没有附件：老形状，别动
+  if (!htmlBase64 && attachments.length === 0) {
+    return [...headers, ...plainPart, ''].join('\r\n')
+  }
+
+  // 正文实体：有 HTML 就是 multipart/alternative（纯文本在前、HTML 在后，收件端挑认得的）
+  let body: string[] = plainPart
+  if (htmlBase64) {
+    const altBoundary = boundaryOf('alt')
+    body = [
+      `Content-Type: multipart/alternative; boundary="${altBoundary}"`,
+      '',
+      `--${altBoundary}`,
+      ...plainPart,
+      `--${altBoundary}`,
+      'Content-Type: text/html; charset=utf-8',
+      'Content-Transfer-Encoding: base64',
+      '',
+      htmlBase64,
+      `--${altBoundary}--`,
+    ]
+  }
+
+  if (attachments.length === 0) {
+    return [...headers, ...body, ''].join('\r\n')
+  }
+
+  const mixedBoundary = boundaryOf('mixed')
+  const parts = [
+    ...headers,
+    `Content-Type: multipart/mixed; boundary="${mixedBoundary}"`,
+    '',
+    `--${mixedBoundary}`,
+    ...body,
+  ]
   for (const part of attachments) {
     parts.push(
-      `--${boundary}`,
+      `--${mixedBoundary}`,
       `Content-Type: ${part.contentType || 'application/octet-stream'}`,
       'Content-Transfer-Encoding: base64',
       `Content-Disposition: ${contentDisposition(part.name)}`,
@@ -174,6 +207,6 @@ export function buildMime(input: BuildMimeInput): string {
       wrappedBase64(part.bytesBase64),
     )
   }
-  parts.push(`--${boundary}--`, '')
+  parts.push(`--${mixedBoundary}--`, '')
   return parts.join('\r\n')
 }
