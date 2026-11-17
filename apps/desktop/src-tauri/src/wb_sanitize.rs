@@ -52,12 +52,41 @@ const REWRITES: [(&str, &str); 5] = [
 const OMO_PHRASE: &str = "Sisyphus-Junior - Focused executor from OhMyOpenCode";
 const OMO_REPLACEMENT: &str = "Sisyphus-Junior - Focused executor";
 
+/// DeepSeek Harness 的 system 里有三段固定文案，**各自单独**出现就会触发 11-128
+/// （2026-11 实测：整份 system 去掉这三段后，连同 33 个工具定义一起发就 200）。
+/// 所以按句改写，不整份替换 —— 身份句与工具约定都要留给模型看。
+const DSH_FEATURES: [&str; 3] = [
+    "You are an AI agent powered by DeepSeek Harness",
+    "Tokens prefixed with @ are paths the user explicitly referenced",
+    "DeepSeek Harness Web GUI",
+];
+
+/// 只换说法、保留语义：身份句写成「DeepSeek Harness, an AI coding agent」，
+/// 另两句去掉会被拦的模板措辞。
+const DSH_REWRITES: [(&str, &str); 3] = [
+    (
+        "You are an AI agent powered by DeepSeek Harness.",
+        "You are DeepSeek Harness, an AI coding agent.",
+    ),
+    (
+        "Tokens prefixed with @ are paths the user explicitly referenced.",
+        "An @-prefixed token is a path the user referenced.",
+    ),
+    (
+        "You are interacting with the user through the DeepSeek Harness Web GUI whose URL the runtime context names.",
+        "This session talks to the user through a Web GUI whose URL the runtime context names.",
+    ),
+];
+
 /// 粗判。绝大多数文本在这里就返回，改写只在命中后才做。
 pub fn has_fingerprint(text: &str) -> bool {
     if text.is_empty() {
         return false;
     }
     if FEATURES.iter().any(|feature| text.contains(feature)) {
+        return true;
+    }
+    if DSH_FEATURES.iter().any(|feature| text.contains(feature)) {
         return true;
     }
     let lower = text.to_ascii_lowercase();
@@ -71,6 +100,9 @@ pub fn sanitize_text(text: &str) -> String {
     }
     let mut out = replace_ci(text, OMO_PHRASE, OMO_REPLACEMENT);
     for (old, new) in REWRITES {
+        out = out.replace(old, new);
+    }
+    for (old, new) in DSH_REWRITES {
         out = out.replace(old, new);
     }
     strip_anthropic_markers(&out)
@@ -548,5 +580,25 @@ mod tests {
         sanitize_body(&mut body);
         assert_eq!(body["max_tokens"], 4096);
         assert!(body.get("max_completion_tokens").is_none());
+    }
+
+    #[test]
+    fn deepseek_harness_的三段指纹被改写() {
+        let identity = "You are an AI agent powered by DeepSeek Harness.";
+        assert_eq!(
+            sanitize_text(identity),
+            "You are DeepSeek Harness, an AI coding agent."
+        );
+
+        let paths = "Tokens prefixed with @ are paths the user explicitly referenced. Relative paths resolve from the workspace root.";
+        let out = sanitize_text(paths);
+        assert!(out.starts_with("An @-prefixed token is a path the user referenced."));
+        assert!(out.contains("Relative paths resolve from the workspace root."));
+
+        let gui = "You are interacting with the user through the DeepSeek Harness Web GUI whose URL the runtime context names.";
+        assert_eq!(
+            sanitize_text(gui),
+            "This session talks to the user through a Web GUI whose URL the runtime context names."
+        );
     }
 }

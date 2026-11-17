@@ -185,7 +185,11 @@
 - **出站请求体要先过指纹清洗**（`wb_sanitize`）：上游会对 system 里的 Claude Code / Codex CLI 固定模板句做逐字匹配，命中回 400
   `11-128`「Illegal API invocation from an unapproved channel」。只改确认会被拦的那几整句（`Main branch (...)` →
   `Default branch (...)` 等），**不要扩成通用内容过滤**，也不许拿它删用户内容；这张字面量表随上游更新（口径来自
-  workbuddy2api-hub）。同一趟还要把 `developer` 归一到 `system`、`{type:"reasoning"}` 片段折进 `reasoning_content`、给 DeepSeek
+  workbuddy2api-hub）。**DeepSeek Harness（`deepseek-harness`，用 `tbuddy` provider 直连本网关）另有单独三条**：
+  身份句 `You are an AI agent powered by DeepSeek Harness.`、`Tokens prefixed with @ are paths the user explicitly
+  referenced.` 与 `You are interacting with the user through the DeepSeek Harness Web GUI ...` —— 三条**各自单独**
+  出现就 400，整份 system 去掉它们之后连同 33 个工具定义一起发是 200（2026-11 实测），所以按句改写（`DSH_FEATURES` /
+  `DSH_REWRITES`），不整份替换。同一趟还要把 `developer` 归一到 `system`、`{type:"reasoning"}` 片段折进 `reasoning_content`、给 DeepSeek
   的 assistant 按 thinking 状态回填 `reasoning_content` —— 否则长会话分别撞 11101 / 11155。
 - **客户端形状在出站前收敛，不改用户内容**（`wb_relay::normalize_body`）：`tool_choice` 对象降级成字符串（`none` 时保留
   `tools`）、`tools` 丢掉空 function / 裸服务端工具 / 非法 function.name / 重名并补空 `parameters`、`stop` 字符串包成数组、
@@ -499,7 +503,9 @@ JSON 让用户抄进密码管理器，另一台设备把它贴回来，**不必�
   score = 40）计了 1 天。`wb_gateway_checkin` 走计费域 `daily-checkin`，不会推进成长连登；`run_streak_bonus` 只做补签 / 兑换 /
   抽奖，本身不产生每日成长活跃。福利栏的「Buddy 签到连签」另取 `checkin-activity-status` 的 `checkin_dates` 计算，不拿成长连登
   冒充签到连签。
-- 渠道指纹清洗是**字面量黑名单**（`wb_sanitize` 的 `FEATURES` / `REWRITES`）：上游新增一种客户端模板句时要手工补表；它只保证
+- 渠道指纹清洗是**字面量黑名单**（`wb_sanitize` 的 `FEATURES` / `REWRITES` 与 DeepSeek Harness 那组
+  `DSH_FEATURES` / `DSH_REWRITES`）：上游新增一种客户端模板句时要手工补表，客户端自己升级改了 system 文案时旧整句也
+  会匹配不上（DSH 的 system 是随版本编进安装包的，换 rc 版本可能要按同法重新核一遍）；它只保证
   「请求能发出去」，不代表上游认可这种用法，账号风险仍由用户承担。
 - 同步仓库会随月份文件长期增长，**不做自动清理**；清理办法见「多机流水同步」。
 - 两台机器共用同一个 `device.json` 会写同一个设备目录并互相覆盖；本机 `usage.jsonl` 丢了但设备 id 还在时，自己的远端目录会被
