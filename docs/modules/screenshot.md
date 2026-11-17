@@ -15,7 +15,8 @@
 - 遮罩窗口预建池化、收工只藏不关；别改回「一场一建一关」或「先显示再等画面」。
 - 遮罩与钉图是独立 HTML 入口，只装适配层，不装 store、不 initState。
 - 整帧 Rust → 渲染层走二进制 IPC；渲染层 → Rust 的最终图仍走 base64；帧不走 asset 协议（钉图可以）。
-- 系统剪贴板自己写 Win32（CF_DIBV5 + CF_DIB + `PNG`），不走 `navigator.clipboard`。
+- 系统剪贴板自己写 Win32（CF_DIBV5 + CF_DIB + `PNG`），不走 `navigator.clipboard`；DPI 按截到那块屏写
+  `96 × scale`（注意不是 72 DPI），PNG 另补 `pHYs`。
 - 两条热键由渲染层推值、`apply_hotkeys` 一次装齐；注册失败必须在界面上说出来。
 - 标注按这块屏的物理像素绝对坐标存与画，显示与导出共用 `drawAnnotations`。
 - 取字双引擎（微信优先、Windows OCR 回退）、只认横排、不许上云；滚动截图全程在同一块遮罩里换装。
@@ -76,6 +77,13 @@
 - **系统剪贴板自己写 Win32**（`clipboard.rs`）：一次给 CF_DIBV5 + CF_DIB + 注册格式 `PNG`。不走
   `navigator.clipboard`（WebView2 要 `CoreWebView2` 权限回调，wry 没暴露、失败静默；且只写 PNG，认 CF_DIB 的
   老程序粘出来是空的）。新增 feature 只有 `Win32_System_DataExchange` 与 `Win32_System_Memory`。
+- **DPI 必须按截到的那块屏写 `96 × scale`**（`dpi_for_scale`），100% 是 3780 像素/米、150% 是 5670。截出来的
+  是**物理像素**，而 DPI-aware 的程序（WPS / Word 这类）照 `biXPelsPerMeter` 决定「一个像素占多大」——从前一律写
+  2835（72 DPI），它们就按 96/72 = **4/3 倍**铺开再画，字发虚（用户报过「复制的图不如钉图清楚」）。钉图窗口是
+  1:1 物理像素，所以同一张图钉着清楚、粘出去糊。
+- **PNG 那份另补一个 `pHYs`**（单位米，同一个像素/米值）：`image` 的编码器不写这个块，而剪贴板里的 PNG 要交给
+  不看 DIB 头的消费方；只插 21 个字节，不重编整张图。**别指望它救所有程序**：Chromium 系（含 Electron）粘图时
+  先取注册格式 `PNG`、整条读图路径不看 DPI，它们按自己的布局放大缩小，剪贴板管不着。
 
 ### 全局热键
 
@@ -401,6 +409,9 @@ WebView2 窗口比整个预算还贵**（起 webview、加载 JS 包、跑起 Vu
 - **遮罩在命令一开始就收**，剪贴板后台写完；失败时遮罩已没了，经 `capture:failed` 唤出主窗口并弹提示。
 - **剪贴板里的 `PNG` 仍是裁剪后的图**：整屏时复用缓存 PNG 字节，非整屏时用同一编码档（`Fast` + `Sub`）
   在 Rust 重编一次 —— 快路径唯一多出来的一笔。
+- **DPI 的一条线**：两条复制命令都从 `window.scale_factor()` 取（遮罩一块屏一个窗口，它就是那块屏的缩放），
+  在 `abort` 之前算好；`pin_copy` 取钉图窗口当前所在那块屏的缩放 —— 记账里没有「当初截自哪块屏」，而它已经
+  摆在这块屏上了。三个入口都只往 `write_png` / `write_rgba` 传一个 `dpi`，构 DIB 与插 `pHYs` 都在 `clipboard.rs` 里。
 - 依赖档位见 `Cargo.toml`：`base64` 在 dev、`image` / `png` / `flate2` / `fdeflate` / `miniz_oxide` 在
   release 都按 `opt-level = 3`（release 全局是 `s`，按体积编的解码会慢一截）。**这些数要在 release 里量**。
 
@@ -579,7 +590,9 @@ serde 拒掉（`invalid type: floating point …, expected u32`，踩过）。�
 `EnumWindows` + `IsWindowVisible` 核对（藏着 `visible=False`，进行中 `True`）。剪贴板**读回来核对**：
 `copyImage`（有标注）/ `copyFrame`（没标注）后用 PowerShell 的
 `[System.Windows.Forms.Clipboard]::GetImage()` 看有没有图、`GetFormats()` 里该有 `Format17`(CF_DIBV5)、
-`DeviceIndependentBitmap`(CF_DIB) 与 `PNG` 三种。**这两条命令都是先收遮罩再写剪贴板**，「遮罩已没、剪贴板
+`DeviceIndependentBitmap`(CF_DIB) 与 `PNG` 三种，**再读一次 DIB 头里的 `biXPelsPerMeter`（偏移 24 / 28）**：
+100% 屏应是 3780，写成 2835 就是退回 72 DPI 的旧 bug（粘进 WPS / Word 会放大 4/3 发虚）；`PNG` 那份里应多出
+一个 `pHYs` 块（夹在 IHDR 与 IDAT 之间）。**这两条命令都是先收遮罩再写剪贴板**，「遮罩已没、剪贴板
 暂时还没有」是正常的，读之前等一会儿（或把 `GetFormats()` 放进短轮询）。收工别忘了
 `taskkill /F /T /IM workbench.exe` 与那串 vite / cargo 子进程（见 AGENTS.md 第 6 节）。
 

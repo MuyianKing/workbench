@@ -932,10 +932,14 @@ pub fn capture_abort(app: AppHandle) {
 /// **一进来先把遮罩收掉**：解码 PNG、构两份 DIB、写剪贴板在 4K 上是几百毫秒的活，
 /// 用户按下 Enter 之后不该还盯着遮罩等它。失败经 `report_copy_failure` 推给主窗口
 /// （遮罩已经收了，没有别的地方能说话）。
+///
+/// DPI 取遮罩所在那块屏的缩放（见 clipboard.rs 文件头）：截出来的是物理像素，
+/// 写 72 DPI 会让按 DPI 摆图的程序放大 4/3 倍再画。
 #[tauri::command(async)]
-pub fn capture_copy(app: AppHandle, png: String) -> Result<(), String> {
+pub fn capture_copy(window: WebviewWindow, app: AppHandle, png: String) -> Result<(), String> {
+    let dpi = crate::clipboard::dpi_for_scale(window.scale_factor().unwrap_or(1.0));
     abort(&app);
-    let outcome = decode_png(&png).and_then(|bytes| crate::clipboard::write_png(&bytes));
+    let outcome = decode_png(&png).and_then(|bytes| crate::clipboard::write_png(&bytes, dpi));
     report_copy_failure(&app, outcome)
 }
 
@@ -954,9 +958,10 @@ pub fn capture_copy_frame(
     height: u32,
 ) -> Result<(), String> {
     // 帧只在会话里，而收工会把会话丢掉：**先把 PNG 克隆出来再 abort**
+    let dpi = crate::clipboard::dpi_for_scale(window.scale_factor().unwrap_or(1.0));
     let frame = take_frame_png(&window, &app);
     abort(&app);
-    let outcome = frame.and_then(|png| copy_region(&png, x, y, width, height));
+    let outcome = frame.and_then(|png| copy_region(&png, x, y, width, height, dpi));
     report_copy_failure(&app, outcome)
 }
 
@@ -977,7 +982,7 @@ pub(crate) fn take_frame_png(window: &WebviewWindow, app: &AppHandle) -> Result<
 ///
 /// 剪贴板里的 `PNG` 格式要的是**裁剪后**的图，所以非整屏时得重编一次（`Fast` + `Sub`，
 /// 与抓屏那条路同一个编码档）；整屏就直接复用缓存的那份 PNG 字节。
-fn copy_region(png: &[u8], x: i32, y: i32, width: u32, height: u32) -> Result<(), String> {
+fn copy_region(png: &[u8], x: i32, y: i32, width: u32, height: u32, dpi: u32) -> Result<(), String> {
     let image = image::load_from_memory(png)
         .map_err(|err| format!("这张图解不开（{err}）"))?
         .to_rgba8();
@@ -985,14 +990,14 @@ fn copy_region(png: &[u8], x: i32, y: i32, width: u32, height: u32) -> Result<()
         clamp_region(image.width(), image.height(), x, y, width, height)?;
 
     if left == 0 && top == 0 && crop_width == image.width() && crop_height == image.height() {
-        return crate::clipboard::write_rgba(&image, png);
+        return crate::clipboard::write_rgba(&image, png, dpi);
     }
 
     let cropped =
         image::imageops::crop_imm(&image, left, top, crop_width, crop_height).to_image();
     let mut encoded = Vec::new();
     encode_png(&cropped, &mut encoded)?;
-    crate::clipboard::write_rgba(&cropped, &encoded)
+    crate::clipboard::write_rgba(&cropped, &encoded, dpi)
 }
 
 /// 把选区收敛到这一帧里面（渲染层已经取整并夹过一次，命令参数仍是外部输入，这里再夹一次）。

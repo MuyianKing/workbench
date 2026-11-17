@@ -13,6 +13,17 @@
 //! DIB 头是**按字节手写**的，不用 windows-sys 的 `BITMAPV5HEADER` 结构体：那份结构体
 //! 的字段名与版本绑定得紧，而这里要的只是「124 个字节、小端、字段顺序固定」，
 //! 手写反而更稳、也能直接单测。像素一律**自底向上**（DIB 的经典朝向，兼容性最好）。
+//!
+//! ## DPI 要按截到的那块屏写
+//!
+//! 截出来的像素是**物理像素**，而 DPI-aware 的程序（WPS / Word 这类）是照
+//! `biXPelsPerMeter` 决定「一个像素该占多大」的。从前这里一律写 2835（72 DPI），
+//! 于是 96/72 = 1.33 倍铺开、字就发虚 —— 值必须跟着屏走：`96 × scale`，100% 是
+//! 3780，150% 是 5670。PNG 那份同理，补一个 `pHYs` 块（单位米），让不带 DIB 头的
+//! 消费方也读得到。
+//!
+//! Chromium 系（含 Electron）粘图时先取注册格式 `PNG`、整条读图路径**不看 DPI**，
+//! 所以这一项对它们没有效果；有影响的正是按 DPI 摆图的那批程序。
 
 use std::time::Duration;
 
@@ -33,22 +44,33 @@ const CF_DIBV5: u32 = 17;
 const DIBV5_HEADER: u32 = 124;
 /// `BITMAPINFOHEADER` 的长度
 const DIB_HEADER: u32 = 40;
-/// 72 DPI（像素/米），写个常见的值，很多程序读它只是为了显示尺寸
-const PELS_PER_METER: i32 = 2835;
+/// 96 DPI 对应的「像素/米」（96 / 0.0254 = 3779.5，Windows 那几家都取 3780）。
+/// 其余档位按 96 这一档等比算：120 DPI → 4725，144 DPI → 5670
+const PELS_PER_METER_96: i32 = 3780;
 
-/// 把 PNG 字节写进剪贴板
-pub fn write_png(png: &[u8]) -> Result<(), String> {
+/// 某块屏的缩放 → 这份截图该声明的 DPI（96 × scale）
+pub fn dpi_for_scale(scale: f64) -> u32 {
+    let scale = if scale.is_finite() && scale > 0.0 {
+        scale
+    } else {
+        1.0
+    };
+    (96.0 * scale).round() as u32
+}
+
+/// 把 PNG 字节写进剪贴板。`dpi` 见文件头「DPI 要按截到的那块屏写」
+pub fn write_png(png: &[u8], dpi: u32) -> Result<(), String> {
     let image = image::load_from_memory(png)
         .map_err(|err| format!("剪贴板：这张图解不开（{err}）"))?
         .to_rgba8();
-    write_rgba(&image, png)
+    write_rgba(&image, png, dpi)
 }
 
 /// 把已经解好的像素写进剪贴板。`png` 是这块图对应的 PNG 字节 —— 剪贴板里的 `PNG` 格式
-/// 直接用它，不重编一遍（DIB 那两个格式才需要像素）。
-pub fn write_rgba(image: &image::RgbaImage, png: &[u8]) -> Result<(), String> {
+/// 直接用它（补一个 `pHYs` 之后），不重编一遍；DIB 那两个格式才需要像素。
+pub fn write_rgba(image: &image::RgbaImage, png: &[u8], dpi: u32) -> Result<(), String> {
     // **像素只转一遍**：两份 DIB 的像素段完全一样，共用这一份自底向上的 BGRA 缓冲
-    let (dib_v5, dib) = build_dibs(image);
+    let (dib_v5, dib) = build_dibs(image, dpi);
 
     with_clipboard(|| {
         // 顺序有意义：先放最精确的，后面的格式不会覆盖前面的（格式号不同）
@@ -56,7 +78,7 @@ pub fn write_rgba(image: &image::RgbaImage, png: &[u8]) -> Result<(), String> {
         set_data(CF_DIB, &dib)?;
         let png_format = register_format("PNG");
         if png_format != 0 {
-            set_data(png_format, png)?;
+            set_data(png_format, &with_phys(png, dpi))?;
         }
         Ok(())
     })
@@ -159,7 +181,7 @@ fn bgra_bottom_up(image: &image::RgbaImage) -> Vec<u8> {
 }
 
 /// `BITMAPV5HEADER` + 32 位 BGRA（带 alpha、`BI_BITFIELDS`、sRGB）
-fn build_dib_v5(pixels: &[u8], width: u32, height: u32) -> Vec<u8> {
+fn build_dib_v5(pixels: &[u8], width: u32, height: u32, dpi: u32) -> Vec<u8> {
     let mut out = Vec::with_capacity(DIBV5_HEADER as usize + pixels.len());
 
     push_u32(&mut out, DIBV5_HEADER);
@@ -169,8 +191,8 @@ fn build_dib_v5(pixels: &[u8], width: u32, height: u32) -> Vec<u8> {
     push_u16(&mut out, 32); // 位深
     push_u32(&mut out, 3); // BI_BITFIELDS：下面四个掩码才有效
     push_u32(&mut out, width * height * 4); // 图像数据长度
-    push_i32(&mut out, PELS_PER_METER);
-    push_i32(&mut out, PELS_PER_METER);
+    push_i32(&mut out, pels_per_meter(dpi));
+    push_i32(&mut out, pels_per_meter(dpi));
     push_u32(&mut out, 0); // 调色板条目数
     push_u32(&mut out, 0); // 重要颜色数
     push_u32(&mut out, 0x00ff_0000); // 红掩码
@@ -192,7 +214,7 @@ fn build_dib_v5(pixels: &[u8], width: u32, height: u32) -> Vec<u8> {
 }
 
 /// `BITMAPINFOHEADER` + 32 位 BGRA（`BI_RGB`，alpha 被忽略）—— 最保守的那一档
-fn build_dib(pixels: &[u8], width: u32, height: u32) -> Vec<u8> {
+fn build_dib(pixels: &[u8], width: u32, height: u32, dpi: u32) -> Vec<u8> {
     let mut out = Vec::with_capacity(DIB_HEADER as usize + pixels.len());
 
     push_u32(&mut out, DIB_HEADER);
@@ -202,8 +224,8 @@ fn build_dib(pixels: &[u8], width: u32, height: u32) -> Vec<u8> {
     push_u16(&mut out, 32);
     push_u32(&mut out, 0); // BI_RGB
     push_u32(&mut out, width * height * 4);
-    push_i32(&mut out, PELS_PER_METER);
-    push_i32(&mut out, PELS_PER_METER);
+    push_i32(&mut out, pels_per_meter(dpi));
+    push_i32(&mut out, pels_per_meter(dpi));
     push_u32(&mut out, 0);
     push_u32(&mut out, 0);
 
@@ -211,13 +233,70 @@ fn build_dib(pixels: &[u8], width: u32, height: u32) -> Vec<u8> {
     out
 }
 
-fn build_dibs(image: &image::RgbaImage) -> (Vec<u8>, Vec<u8>) {
+fn build_dibs(image: &image::RgbaImage, dpi: u32) -> (Vec<u8>, Vec<u8>) {
     let (width, height) = image.dimensions();
     let pixels = bgra_bottom_up(image);
     (
-        build_dib_v5(&pixels, width, height),
-        build_dib(&pixels, width, height),
+        build_dib_v5(&pixels, width, height, dpi),
+        build_dib(&pixels, width, height, dpi),
     )
+}
+
+fn pels_per_meter(dpi: u32) -> i32 {
+    (PELS_PER_METER_96 as f64 * dpi as f64 / 96.0).round() as i32
+}
+
+// ---------- PNG 的 pHYs（纯函数，可单测） ----------
+
+/// PNG 的 CRC-32（IEEE 802.3，多项式 0xEDB88320，反射写法）
+fn crc32(bytes: &[u8]) -> u32 {
+    let mut crc = 0xffff_ffffu32;
+    for &byte in bytes {
+        crc ^= byte as u32;
+        for _ in 0..8 {
+            let mask = (crc & 1).wrapping_neg();
+            crc = (crc >> 1) ^ (0xedb8_8320 & mask);
+        }
+    }
+    !crc
+}
+
+/// 往 PNG 里补一个 `pHYs` 块（紧跟 IHDR），声明 DPI。已有 pHYs 的（不该有）原样返回。
+///
+/// **为什么自己插**：`image` 的 PNG 编码器不写这个块，而剪贴板里 PNG 那份要交给
+/// 不看 DIB 头的消费方；重编一遍整张图只为一个 21 字节的块不划算。
+fn with_phys(png: &[u8], dpi: u32) -> Vec<u8> {
+    const SIGNATURE: usize = 8;
+    const CHUNK_HEADER: usize = 8;
+    const CHUNK_TAIL: usize = 4;
+
+    // 签名 + IHDR（长度 4 + 类型 4 + 数据 13 + CRC 4）
+    if png.len() < SIGNATURE + CHUNK_HEADER + 13 + CHUNK_TAIL || &png[SIGNATURE + 4..SIGNATURE + 8] != b"IHDR" {
+        return png.to_vec();
+    }
+    let insert_at = SIGNATURE + CHUNK_HEADER + 13 + CHUNK_TAIL;
+    // 已经有就不要再来一个：同名块重复的 PNG 不合规
+    if png.len() >= insert_at + 8 && &png[insert_at + 4..insert_at + 8] == b"pHYs" {
+        return png.to_vec();
+    }
+
+    let per_meter = pels_per_meter(dpi) as u32;
+    let mut body = Vec::with_capacity(9);
+    body.extend_from_slice(&per_meter.to_be_bytes());
+    body.extend_from_slice(&per_meter.to_be_bytes());
+    body.push(1); // 单位：米
+
+    let mut chunk = Vec::with_capacity(4 + 4 + body.len() + 4);
+    chunk.extend_from_slice(&(body.len() as u32).to_be_bytes());
+    chunk.extend_from_slice(b"pHYs");
+    chunk.extend_from_slice(&body);
+    chunk.extend_from_slice(&crc32(&chunk[4..]).to_be_bytes());
+
+    let mut out = Vec::with_capacity(png.len() + chunk.len());
+    out.extend_from_slice(&png[..insert_at]);
+    out.extend_from_slice(&chunk);
+    out.extend_from_slice(&png[insert_at..]);
+    out
 }
 
 #[cfg(test)]
@@ -244,7 +323,7 @@ mod tests {
 
     #[test]
     fn dibv5_头长与关键字段() {
-        let (bytes, _) = build_dibs(&fixture());
+        let (bytes, _) = build_dibs(&fixture(), 96);
         assert_eq!(bytes.len(), (DIBV5_HEADER + 16) as usize);
         assert_eq!(read_u32(&bytes, 0), 124);
         assert_eq!(read_i32(&bytes, 4), 2);
@@ -259,18 +338,18 @@ mod tests {
 
     #[test]
     fn dib_头长与关键字段() {
-        let (_, bytes) = build_dibs(&fixture());
+        let (_, bytes) = build_dibs(&fixture(), 96);
         assert_eq!(bytes.len(), (DIB_HEADER + 16) as usize);
         assert_eq!(read_u32(&bytes, 0), 40);
         assert_eq!(read_u32(&bytes, 16), 0); // BI_RGB
         assert_eq!(read_u32(&bytes, 20), 16);
-        assert_eq!(read_i32(&bytes, 28), PELS_PER_METER);
+        assert_eq!(read_i32(&bytes, 28), PELS_PER_METER_96);
     }
 
     #[test]
     fn 像素是自底向上的_bgra() {
         // 先写的是最后一行（左下角那个像素）：7,8,9 → B=9 G=8 R=7 A=255
-        let (v5, _) = build_dibs(&fixture());
+        let (v5, _) = build_dibs(&fixture(), 96);
         assert_eq!(&v5[124..128], &[9, 8, 7, 255]);
         // 再是右下角：10,11,12
         assert_eq!(&v5[128..132], &[12, 11, 10, 255]);
@@ -281,7 +360,82 @@ mod tests {
 
     #[test]
     fn 两种dib的像素段完全一致() {
-        let (v5, dib) = build_dibs(&fixture());
+        let (v5, dib) = build_dibs(&fixture(), 96);
         assert_eq!(&v5[124..], &dib[40..]);
+    }
+
+    #[test]
+    fn dpi_按屏缩放换算() {
+        assert_eq!(dpi_for_scale(1.0), 96);
+        assert_eq!(dpi_for_scale(1.25), 120);
+        assert_eq!(dpi_for_scale(1.5), 144);
+        assert_eq!(dpi_for_scale(2.0), 192);
+        // 拿不到缩放（0 / NaN / 负数）按 100% 算
+        assert_eq!(dpi_for_scale(0.0), 96);
+        assert_eq!(dpi_for_scale(f64::NAN), 96);
+        assert_eq!(dpi_for_scale(-2.0), 96);
+    }
+
+    #[test]
+    fn 像素每米按_96_这一档等比() {
+        assert_eq!(pels_per_meter(96), 3780);
+        assert_eq!(pels_per_meter(120), 4725);
+        assert_eq!(pels_per_meter(144), 5670);
+        // 两份 DIB 的头里写的是同一个值
+        let (v5, dib) = build_dibs(&fixture(), 144);
+        assert_eq!(read_i32(&v5, 24), 5670);
+        assert_eq!(read_i32(&v5, 28), 5670);
+        assert_eq!(read_i32(&dib, 24), 5670);
+        assert_eq!(read_i32(&dib, 28), 5670);
+    }
+
+    #[test]
+    fn crc32_与_png_规范一致() {
+        // IEND 块（类型 "IEND"、无数据）的 CRC 是 0xAE426082
+        assert_eq!(crc32(b""), 0);
+        assert_eq!(crc32(b"IEND"), 0xae42_6082);
+    }
+
+    #[test]
+    fn phys_块插在_ihdr_后面且自洽() {
+        let png = tiny_png();
+        let with = with_phys(&png, 144);
+        assert_eq!(with.len(), png.len() + 21);
+
+        let at = 33; // 签名 8 + IHDR（长度 4 + 类型 4 + 数据 13 + CRC 4）
+        assert_eq!(be_u32(&with, at), 9); // 数据长度
+        assert_eq!(&with[at + 4..at + 8], b"pHYs");
+        assert_eq!(be_u32(&with, at + 8), 5670); // X
+        assert_eq!(be_u32(&with, at + 12), 5670); // Y
+        assert_eq!(with[at + 16], 1); // 单位：米
+        assert_eq!(be_u32(&with, at + 17), crc32(&with[at + 4..at + 17]));
+        // 原有的块原样接回去
+        assert_eq!(&with[at + 21..], &png[at..]);
+    }
+
+    #[test]
+    fn phys_不会被插两次() {
+        let once = with_phys(&tiny_png(), 96);
+        assert_eq!(with_phys(&once, 192), once);
+    }
+
+    #[test]
+    fn 不是_png_就原样返回() {
+        let junk = b"not a png at all";
+        assert_eq!(with_phys(junk, 96), junk);
+    }
+
+    fn tiny_png() -> Vec<u8> {
+        use image::ImageEncoder;
+        let image = image::RgbaImage::from_pixel(2, 2, image::Rgba([1, 2, 3, 255]));
+        let mut out = Vec::new();
+        image::codecs::png::PngEncoder::new(&mut out)
+            .write_image(image.as_raw(), 2, 2, image::ExtendedColorType::Rgba8)
+            .expect("测试图编码失败");
+        out
+    }
+
+    fn be_u32(bytes: &[u8], offset: usize) -> u32 {
+        u32::from_be_bytes(bytes[offset..offset + 4].try_into().unwrap())
     }
 }

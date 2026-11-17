@@ -407,13 +407,17 @@ pub fn pin_close(window: WebviewWindow, app: AppHandle) {
     }
 }
 
-/// 把这张钉图的图放进剪贴板（读盘上的那份，不用渲染层再编一遍）
+/// 把这张钉图的图放进剪贴板（读盘上的那份，不用渲染层再编一遍）。
+///
+/// DPI 取这张钉图当前所在那块屏的缩放：记账里没有「当初截自哪块屏」这一项，
+/// 而它现在已经摆在这块屏上了 —— 按这块屏写，粘到同样 DPI-aware 的程序里才是 1:1。
 #[tauri::command(async)]
 pub fn pin_copy(window: WebviewWindow, app: AppHandle) -> Result<(), String> {
     let id = pin_id(window.label()).ok_or("这个窗口不是钉图")?;
     let record = find(&app, id).ok_or("这张钉图已经不在了")?;
     let bytes = std::fs::read(&record.file).map_err(|err| format!("读钉图失败：{err}"))?;
-    crate::clipboard::write_png(&bytes)
+    let dpi = crate::clipboard::dpi_for_scale(window.scale_factor().unwrap_or(1.0));
+    crate::clipboard::write_png(&bytes, dpi)
 }
 
 /// 把这张钉图另存一份
