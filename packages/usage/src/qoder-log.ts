@@ -18,9 +18,9 @@
  * 每一行都自足（模型与用量都在同一行），所以适配层可以**按文件**缓存解析结果。
  */
 
-import type { TokenCounters, TokenDays } from './token-usage'
+import type { TokenCounters, TokenDays, TokenProjectDays } from './token-usage'
 import { dayKey } from '@workbench/core'
-import { addCounters, emptyCounters, isDateKey } from './token-usage'
+import { addCounters, emptyCounters, isDateKey, normalizeProjectPath } from './token-usage'
 
 /** 事件里没带模型名时的兜底名（正常每条都带，只防残缺事件） */
 export const QODER_DEFAULT_MODEL = 'qoder'
@@ -29,6 +29,10 @@ export const QODER_DEFAULT_MODEL = 'qoder'
 interface QoderEvent {
   type?: unknown
   timestamp?: unknown
+  /** assistant 事件里的工作目录（项目归属就看它） */
+  cwd?: unknown
+  /** workspace-directories 事件里的目录清单，会话开头给出 */
+  directories?: unknown
   message?: {
     model?: unknown
     usage?: { credits?: unknown }
@@ -41,10 +45,19 @@ function creditsOf(value: unknown): number {
 }
 
 /**
- * 把一个会话文件（正文）的额度累计进 days：按事件时间戳的本地日期、按行内自带的模型分桶。
- * 单个事件解析失败只丢那一条。
+ * 把一个会话文件（正文）的额度累计进 days 与 projects：
+ * 按事件时间戳的本地日期、按行内自带的模型分桶。单个事件解析失败只丢那一条。
+ *
+ * 项目优先取 assistant 事件自己的 `cwd`；没有就退回会话开头 workspace-directories 事件的
+ * 第一个目录；都没有就只进额度口径，项目层不落账。
  */
-export function collectQoderSessionText(text: string, days: TokenDays): void {
+export function collectQoderSessionText(
+  text: string,
+  days: TokenDays,
+  projects: TokenProjectDays,
+): void {
+  let project = ''
+
   for (const line of text.split('\n')) {
     if (!line)
       continue
@@ -56,6 +69,21 @@ export function collectQoderSessionText(text: string, days: TokenDays): void {
     catch {
       // 会话文件是追加写的：最后一行可能只写了一半，下次刷新就会带上完整的那条
       continue
+    }
+
+    if (event.type === 'workspace-directories') {
+      const first = Array.isArray(event.directories) ? event.directories[0] : undefined
+      if (typeof first === 'string') {
+        const declared = normalizeProjectPath(first)
+        if (declared)
+          project = declared
+      }
+      continue
+    }
+    if (typeof event.cwd === 'string') {
+      const declared = normalizeProjectPath(event.cwd)
+      if (declared)
+        project = declared
     }
 
     if (event.type !== 'assistant')
@@ -95,5 +123,11 @@ export function collectQoderSessionText(text: string, days: TokenDays): void {
 
     const modelDays = (days[date] ??= {})
     modelDays[model] = addCounters(modelDays[model] ?? emptyCounters(), step)
+
+    // 没有工作目录就不算项目:只进额度口径,项目占比里不出现
+    if (project) {
+      const projectDays = (projects[date] ??= {})
+      projectDays[project] = addCounters(projectDays[project] ?? emptyCounters(), step)
+    }
   }
 }

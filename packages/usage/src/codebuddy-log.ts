@@ -63,8 +63,15 @@ function finite(value: unknown): number {
 /**
  * 把一段日志文本的用量累计进 days(按行首时间戳的本地日期、请求的模型分桶)。
  * state 跨文件复用;单行解析失败直接跳过,只少一条记录,不影响整体。
+ *
+ * 扩展日志里**没有工作目录**(只有 traceId / requestId / usage),所以这个来源
+ * 不产生项目归属:它的计数只进模型 / 工具口径,项目占比里不出现。
  */
-export function collectCodeBuddyLogText(text: string, state: CodeBuddyParseState, days: TokenDays): void {
+export function collectCodeBuddyLogText(
+  text: string,
+  state: CodeBuddyParseState,
+  days: TokenDays,
+): void {
   for (const line of text.split('\n')) {
     const modelMatch = line.match(MODEL_RE)
     if (modelMatch) {

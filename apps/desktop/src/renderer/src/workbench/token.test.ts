@@ -21,6 +21,8 @@ const REPO = 'git@example.com:me/sync.git'
 interface UsageRow {
   day: string
   model: string
+  /** ZCode 的会话工作目录（项目归属）；没带就不落项目层 */
+  project?: string
   input: number
   cacheRead: number
   requests: number
@@ -360,6 +362,28 @@ function inputOn(result: Awaited<ReturnType<typeof import('./token').getTokenUsa
   return result.data.sources.zcode?.days[day]?.['glm-5']?.inputTokens ?? -1
 }
 
+describe('zCode 按项目实读', () => {
+  it('同一天同一个模型按项目各一行时,模型合计相加而不是后一行盖掉前一行', async () => {
+    const day = today()
+    rows = [
+      { day, model: 'glm-5', project: 'E:\\muyian\\Workbench', input: 30, cacheRead: 10, requests: 1 },
+      { day, model: 'glm-5', project: 'e:/muyian/workbench', input: 12, cacheRead: 2, requests: 1 },
+      { day, model: 'glm-5', input: 5, cacheRead: 0, requests: 1 },
+    ]
+
+    const token = await freshToken()
+    const result = await token.getTokenUsage({ repo: '' })
+
+    // 输入都是含缓存的总输入,拆开后 20 + 10 + 5
+    expect(inputOn(result)).toBe(35)
+    const projects = result.data.sources.zcode.projects[day]
+    // 同一目录的大小写 / 分隔符写法在快照里各存一行,占比那边再归并(见 usage 包的 shareByProject)
+    expect(projects['E:\\muyian\\Workbench'].inputTokens + projects['e:\\muyian\\workbench'].inputTokens).toBe(30)
+    // 没有工作目录的用量只进模型口径,项目层不落账
+    expect(projects['未归属']).toBeUndefined()
+  })
+})
+
 describe('多机合并', () => {
   it('仓库里自己的那份分片不算别人的，本机用量不会计两遍', async () => {
     const day = today()
@@ -398,7 +422,7 @@ describe('多机合并', () => {
     await token.getTokenUsage({ repo: '' })
 
     const saved = localFile as { version: number, device: string, name: string }
-    expect(saved.version).toBe(7)
+    expect(saved.version).toBe(8)
     expect(saved.device).toBe('dev-local')
     expect(saved.name).toBe('本机')
   })
@@ -456,7 +480,7 @@ describe('多机合并', () => {
     await token.getTokenUsage({ repo: '' })
 
     const saved = localFile as { version: number, device: string }
-    expect(saved.version).toBe(7)
+    expect(saved.version).toBe(8)
     expect(saved.device).toBe('dev-local')
   })
 })
@@ -1096,8 +1120,20 @@ describe('用量与外观是两个独立的出口', () => {
 
   it('列设备时两个目录按设备 id 配对，本机标出来但别的机器排前，最近动过的在前', async () => {
     const day = today()
-    localFile = shard('dev-local', 10, day)
-    rows = [{ day, model: 'glm-5', input: 10, cacheRead: 0, requests: 1 }]
+    // 本机那份已经带项目层:这一轮实读不产生变化,更新时间才停在 1(否则升级写回会把它顶到最前)
+    localFile = {
+      version: 8,
+      device: 'dev-local',
+      name: 'dev-local',
+      updatedAt: 1,
+      sources: {
+        zcode: {
+          days: { [day]: { 'glm-5': { inputTokens: 10, requests: 1 } } },
+          projects: { [day]: { 'E:\\muyian\\Workbench': { inputTokens: 10, requests: 1 } } },
+        },
+      },
+    }
+    rows = [{ day, model: 'glm-5', project: 'E:\\muyian\\Workbench', input: 10, cacheRead: 0, requests: 1 }]
     remotes[REPO] = [
       shard('dev-local', 10, day),
       { ...shard('dev-older', 20, day), name: '办公室', updatedAt: 100 },

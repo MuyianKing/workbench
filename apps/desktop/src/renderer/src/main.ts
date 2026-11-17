@@ -6,7 +6,7 @@ import { createApp } from 'vue'
 import App from './App.vue'
 import { applyBootstrapTheme } from './bootstrap'
 import { installErrorReport } from './error-report'
-import { initState, installTauriWorkbench, reapOrphansOnStart } from './workbench'
+import { initState, installTauriWorkbench } from './workbench'
 // Element Plus 按需引入：模板里的 <el-*> 由 vite.config.ts 的 Components 插件在编译期逐个换成
 // 单组件 import（连同该组件的 css），整包的 dist/index.css 不再引。剩下插件管不到的那几样
 // （命令式 API 与 v-loading 的样式）集中在 element-plus-styles.ts。
@@ -37,6 +37,6 @@ app.use(ElLoading)
 // Electron 版是主进程先 loadData 再建窗口，这里等价地等一次。
 void initState().finally(() => {
   app.mount('#app')
-  // 挂载之后再清理残留进程：它要挨个问进程的创建时间，别挡首屏
-  void reapOrphansOnStart()
+  // 残留进程清理不在主进程这边做：它要排在启动时的端口探测之前，
+  // 编排跟着项目 store 的 init 走（见 stores/projects.ts），别在这里再起一份。
 })

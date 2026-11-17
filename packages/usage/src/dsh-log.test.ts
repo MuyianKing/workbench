@@ -1,4 +1,4 @@
-import type { TokenDays } from './token-usage'
+import type { TokenDays, TokenProjectDays } from './token-usage'
 import { dayKey } from '@workbench/core'
 /**
  * DSH 会话事件 → 按天计数的解析规则。
@@ -33,10 +33,25 @@ function messageLine(time: number, usage: Record<string, number>): string {
   })
 }
 
-function collect(...lines: string[]): TokenDays {
+function sessionLine(cwd: string): string {
+  return JSON.stringify({
+    type: 'session',
+    version: 4,
+    id: 'session-x',
+    createdAt: TIME,
+    cwd,
+  })
+}
+
+function collectAll(...lines: string[]): { days: TokenDays, projects: TokenProjectDays } {
   const days: TokenDays = {}
-  collectDshSessionText(lines.join('\n'), days)
-  return days
+  const projects: TokenProjectDays = {}
+  collectDshSessionText(lines.join('\n'), days, projects)
+  return { days, projects }
+}
+
+function collect(...lines: string[]): TokenDays {
+  return collectAll(...lines).days
 }
 
 describe('dSH 会话解析', () => {
@@ -55,6 +70,29 @@ describe('dSH 会话解析', () => {
     // v3 会话的 usage 里没有缓存写入这一项，按 0 计
     expect(counters.cacheWriteTokens).toBe(0)
     expect(counters.requests).toBe(1)
+  })
+
+  it('用量归到会话事件里的工作目录，路径写法先归一', () => {
+    const { projects } = collectAll(
+      sessionLine('E:/muyian/Workbench/'),
+      headerLine(TIME, 'deepseek-flash'),
+      messageLine(TIME, { inputTokens: 100, outputTokens: 10 }),
+    )
+
+    const counters = projects[dayKey(TIME)]['E:\\muyian\\Workbench']
+    expect(counters.inputTokens).toBe(100)
+    expect(counters.outputTokens).toBe(10)
+  })
+
+  it('没有 session 事件时不落项目层,计数只进模型口径', () => {
+    const { days, projects } = collectAll(
+      headerLine(TIME, 'deepseek-flash'),
+      messageLine(TIME, { inputTokens: 5 }),
+    )
+
+    expect(days[dayKey(TIME)]['deepseek-flash'].inputTokens).toBe(5)
+    // 没有工作目录就不算项目
+    expect(projects).toEqual({})
   })
 
   it('v4 会话的 usage 多带 cacheWriteTokens，照实落账', () => {

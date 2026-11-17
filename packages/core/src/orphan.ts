@@ -1,5 +1,9 @@
 /**
- * 残留进程清理：应用被强杀后，上次留下的 dev server 会在下次启动时收掉。
+ * 残留进程清理：应用被强杀（或更新安装时被杀）后，下次启动靠落盘记录找出上次留下的子进程。
+ *
+ * 开发服务（`start` 类；没有类别字段的老记录也算）不一律收掉：进程还活着、项目记着的端口还在听，
+ * 就说明它仍在服务，保留进程并丢掉记录，交给界面的端口探测认成「外部运行中」—— 更新重启后项目不至于被停掉。
+ * 其余类别（打包 / 安装 / 自定义命令 / 命令卡片）以及端口已经空了的开发服务照旧清掉。
  *
  * 这里的逻辑是纯的 + IO 注入（`ReapDeps`），与 [scanner.ts](scanner.ts) 同一套路：
  * 生产注入走 Rust 命令的实现，测试注入假实现，于是判断规则能被直接测到
@@ -7,7 +11,7 @@
  */
 /**
  * 正在运行的子进程记录（落盘）。
- * 应用被强杀后，下次启动靠它找出残留的 dev server 并清理（设计文档 §7）。
+ * 应用被强杀后，下次启动靠它找出残留的子进程，按 [reapOrphanSessions] 的规则清理或接管。
  */
 export interface ActiveSession {
   projectId: string
@@ -15,6 +19,11 @@ export interface ActiveSession {
   command: string
   cwd: string
   startedAt: number
+  /**
+   * 会话类别（与渲染层的 `TerminalKind` 同源）。只有 `start`（开发服务）交给端口探测接管；
+   * 老数据文件里没有这个字段，按「可能是开发服务」处理（见 `adoptable`）。
+   */
+  kind?: string
   /** 派生它的应用进程 PID；这个进程还活着就说明会话有主，不能当残留处理 */
   ownerPid: number
   /**
@@ -60,13 +69,28 @@ export interface ReapDeps {
   createdAt: (pid: number) => Promise<number | null>
   /** 按进程树结束 */
   killTree: (pid: number) => Promise<void>
+  /** 会话所属项目当前记着的监听端口（没有记录时返回 undefined） */
+  projectPort: (projectId: string) => number | undefined
+  /** 端口上还有没有人在听 */
+  portInUse: (port: number) => Promise<boolean>
 }
 
 export interface ReapResult {
   killed: number
   /** 判定为「有主」而被保留的会话，调用方要写回去，别把它们丢了 */
   kept: ActiveSession[]
+  /** 保留下来、交给端口探测接管的开发服务数（记录已丢弃，进程仍在跑） */
+  adopted: number
   notes: string[]
+}
+
+/**
+ * 能交给端口探测接管的类别：开发服务。
+ * 老记录没有类别字段时也按可接管处理 —— 接管只是「不动进程」，弄错也只是留下一个残留
+ * （下次启动按端口仍然可见、可停止），比升级后的第一次启动把它误杀更符合预期。
+ */
+function adoptable(kind: string | undefined): boolean {
+  return kind === undefined || kind === 'start'
 }
 
 /**
@@ -106,17 +130,18 @@ export function isSameOwner(
   return session.ownerCreatedAt === actualCreatedAt
 }
 
-/** 启动时调用：清理上次残留的子进程，返回仍有效的会话记录与处理说明 */
+/** 启动时调用：处理上次残留的子进程，返回仍有效的会话记录与处理说明 */
 export async function reapOrphanSessions(
   sessions: ActiveSession[] | undefined,
   deps: ReapDeps,
 ): Promise<ReapResult> {
   const notes: string[] = []
   const kept: ActiveSession[] = []
+  let adopted = 0
 
   const list = Array.isArray(sessions) ? sessions.filter(Boolean) : []
   if (list.length === 0)
-    return { killed: 0, kept: [], notes }
+    return { killed: 0, kept: [], adopted: 0, notes }
 
   let killed = 0
   for (const session of list) {
@@ -140,6 +165,20 @@ export async function reapOrphanSessions(
       continue
     }
 
+    // 开发服务的进程活过了这次退出（更新安装只杀应用本身，子进程会留下来）：
+    // 项目记着的端口还在听，说明它仍在服务。保留进程、丢掉记录，界面按端口探测
+    // 把它认成「外部运行中」——停止仍可按端口结束。端口已经空了就照常清掉。
+    if (adoptable(session.kind)) {
+      const port = deps.projectPort(session.projectId)
+      if (port !== undefined && await deps.portInUse(port)) {
+        adopted += 1
+        notes.push(
+          `上次的进程 PID ${session.pid} 仍在监听端口 ${port}，已保留并交给端口探测接管（${session.command}）`,
+        )
+        continue
+      }
+    }
+
     try {
       await deps.killTree(session.pid)
       killed += 1
@@ -152,5 +191,5 @@ export async function reapOrphanSessions(
     }
   }
 
-  return { killed, kept, notes }
+  return { killed, kept, adopted, notes }
 }

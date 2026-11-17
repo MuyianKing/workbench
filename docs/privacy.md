@@ -122,7 +122,8 @@ AI 热点与天气只 GET 白名单里的公开源，AI 助手发给你自己配
   写出，`apiKey` 只是环境变量引用）、权限扩展 `permission.js`、Pi 自己的 trust.json / auth.json，以及 `pi/sessions/` 下
   **一段对话一份的会话文件**（`<时间戳>_<会话 id>.jsonl`，Pi 自己写；删会话就是删这里那份）。不是应用的数据格式，别当第二份
   真源：读对话走 RPC 的 `get_messages`，删会话走 `ai_session_delete`。
-- `token-usage.json`：**本机** Coding 用量快照，按「工具 → 天 → 模型」聚合（只留最近一年），也就是同步推到 `token-usage/`
+- `token-usage.json`：**本机** Coding 用量快照，按「工具 → 天 → 模型」聚合，并多一层同形状的「工具 → 天 → 项目」
+  （项目 = 会话的工作目录路径；只留最近一年），也就是同步推到 `token-usage/`
   的那份（旧名 `token-data.json` 启动时自动改名）。明细不复制 —— 各工具的本地数据是明细账本，快照用于对抗上游清理。带一个
   `credits` 字段（额度口径，只有 Qoder 填），同一套合并规则但**不参与 token 总量**。
 - `work-log.json`：工作日志（v2：条目 + 删除墓碑）。**本机这份是权威**；登录且配了同步仓库时按设备推一份
@@ -158,15 +159,17 @@ Harness 是 `~/.dsh/sessions/<项目>/<会话>/`（`DSH_HOME` 可指别处；v3 
 CodeBuddy 是 `%APPDATA%/CodeBuddy CN/logs`（国际版没有 `CN`，`CODEBUDDY_DATA_DIR` 可指别处）里扩展目录
 `Tencent-Cloud.coding-copilot` 下的 `.log`；WorkBuddy 是 `~/.workbuddy/projects/<项目>/`（`WORKBUDDY_HOME` 可指别处；与
 Electron 那个 `%APPDATA%/WorkBuddy` 不是一个目录，后者只有窗口状态）；Qoder 是 `~/.qoder-cn/projects/<项目>/`（国际版
-`~/.qoder`，`QODER_DATA_DIR` 可指别处）。五处正文都带对话内容，只解析用量字段、**正文不进快照** —— 同步推的只有模型名与计数。
+`~/.qoder`，`QODER_DATA_DIR` 可指别处）。五处正文都带对话内容，只解析用量字段与会话的工作目录、**正文不进快照** ——
+同步推的只有模型名、计数与工作目录路径（CodeBuddy 的扩展日志没有工作目录，那部分只推计数）。
 Qoder 不产生 token 计数，解析出的只有每次请求扣掉的额度，落在 `credits` 一个字段上、只喂 credits 口径。
 
 同步的克隆目录在用户数据根目录下（安装版 `%APPDATA%/Workbench/token-sync/`，开发版
 `%APPDATA%/Workbench-dev/token-sync/`；本地缓存，删了下次同步重新克隆）。仓库里四个路径：
-`token-usage/<设备id>.json`（模型名与 token 计数，**没有对话内容**）、`config/<设备id>.json`（那份 `theme.json` 的副本：
+`token-usage/<设备id>.json`（模型名、token 计数与**会话的工作目录路径**，没有对话内容）、`config/<设备id>.json`（那份 `theme.json` 的副本：
 明暗 / 主题色 / 顶部样式 / 卡片不透明度 / 毛玻璃描边 / 终端高度 / 程序名称 / 工作区背景 / 导航菜单 / 首页布局）、
 `gateway-usage/<设备id>/<YYYY-MM>.jsonl`（网关请求流水：模型、token、积分、账号 uid、UA、错误文本；**没有密钥尾号、没有对话
-正文**）与 `etf/<设备id>.json`（沪深份额与天天基金净值，全是公开行情、没有用户内容）。四者都没有图片本体与项目信息，别的
+正文**）与 `etf/<设备id>.json`（沪深份额与天天基金净值，全是公开行情、没有用户内容）。四者都没有图片本体，项目页的项目
+记录也不在仓库里（用量分片里只有会话的工作目录），别的
 机器的文件从不改动、只读自己那份。仍建议私有仓库。
 
 网关流水的同步节奏与 token 用量一致：30 天总 token 每新增 10M 推一次、一小时一轮的用量同步也顺带推一次；进 TBuddy 页时另会

@@ -1,6 +1,6 @@
 import type { TokenCounters, TokenDays, TokenShard } from './token-usage'
 import { describe, expect, it } from 'vitest'
-import { addCounters, axisTotal, bucketRangeOf, buildSeriesRange, cacheHitRate, combineShards, emptyCounters, flattenSources, formatCredits, formatPercent, formatTokensWan, isDateKey, maxCounters, mergeDays, monthKeyOf, presetLabel, pruneTokenDays, resolvePresetRange, sameShardContent, sanitizeShard, shareByModel, shareBySource, shortDayLabel, sumDays, sumRange, TOKEN_RANGE_PRESETS, totalTokens, weekKeyOf } from './token-usage'
+import { addCounters, axisTotal, bucketRangeOf, buildSeriesRange, cacheHitRate, combineShards, emptyCounters, flattenSources, formatCredits, formatPercent, formatTokensWan, isDateKey, maxCounters, mergeDays, monthKeyOf, normalizeProjectPath, presetLabel, projectKeyOf, projectLabelOf, pruneTokenDays, resolvePresetRange, sameShardContent, sanitizeShard, shareByModel, shareByProject, shareBySource, shareToolsOfProject, shortDayLabel, sumDays, sumRange, TOKEN_RANGE_PRESETS, totalTokens, UNKNOWN_PROJECT, weekKeyOf } from './token-usage'
 
 function counters(overrides: Partial<TokenCounters> = {}): TokenCounters {
   return { ...emptyCounters(), ...overrides }
@@ -148,6 +148,40 @@ describe('落盘收敛', () => {
     expect(counters.requests).toBe(2)
   })
 
+  it('v7 老分片照常读进来,项目层是空的,模型口径照旧', () => {
+    const shard = sanitizeShard({
+      version: 7,
+      device: 'dev-1',
+      sources: { zcode: { days: { '2026-09-13': { 'glm-5': { inputTokens: 10 } } } } },
+    })
+
+    expect(shard.sources.zcode.days['2026-09-13']['glm-5'].inputTokens).toBe(10)
+    // 老分片没有按项目的计数:只当空的,下一次实读按本机日志补上
+    expect(shard.sources.zcode.projects).toEqual({})
+  })
+
+  it('项目层同样逐层收敛:坏日期与空路径丢掉', () => {
+    const shard = sanitizeShard({
+      version: 8,
+      sources: {
+        zcode: {
+          days: {},
+          projects: {
+            '2026-09-13': {
+              'E:\\muyian\\Workbench': { inputTokens: 10 },
+              '': { inputTokens: 30 },
+            },
+            'not-a-date': { 'E:\\muyian\\Workbench': { inputTokens: 5 } },
+          },
+        },
+      },
+    })
+
+    expect(shard.sources.zcode.projects['2026-09-13']['E:\\muyian\\Workbench'].inputTokens).toBe(10)
+    expect(shard.sources.zcode.projects['2026-09-13']['']).toBeUndefined()
+    expect(shard.sources.zcode.projects['not-a-date']).toBeUndefined()
+  })
+
   it('v6 老分片照常读进来,那时候还没有额度,credits 落 0', () => {
     const shard = sanitizeShard({
       version: 6,
@@ -171,7 +205,7 @@ describe('落盘收敛', () => {
     )
 
     // 口径没变,历史必须留住 —— 这里要是整份弃用,用户攒下的一年快照就没了
-    expect(shard.version).toBe(7)
+    expect(shard.version).toBe(8)
     expect(shard.device).toBe('dev-1')
     expect(shard.name).toBe('办公室')
     expect(shard.sources.zcode.days['2026-09-13']['glm-5'].inputTokens).toBe(10)
@@ -189,7 +223,7 @@ describe('落盘收敛', () => {
       appearance: { settings: { theme: 'light' } },
     })
 
-    expect(shard.version).toBe(7)
+    expect(shard.version).toBe(8)
     expect(shard).not.toHaveProperty('appearance')
   })
 
@@ -209,7 +243,7 @@ describe('落盘收敛', () => {
       sources: { zcode: { days: { '2026-09-13': { zhipu: { 'glm-5': { inputTokens: 10 } } } } } },
     }
     expect(sanitizeShard(v1)).toEqual({
-      version: 7,
+      version: 8,
       device: '',
       name: '',
       updatedAt: 0,
@@ -218,7 +252,7 @@ describe('落盘收敛', () => {
   })
 
   it('sanitizeShard 对 null / 数组 / 数字等整份坏数据回空分片', () => {
-    const empty = { version: 7, device: '', name: '', updatedAt: 0, sources: {} }
+    const empty = { version: 8, device: '', name: '', updatedAt: 0, sources: {} }
     expect(sanitizeShard(null)).toEqual(empty)
     expect(sanitizeShard([1, 2])).toEqual(empty)
     expect(sanitizeShard(42)).toEqual(empty)
@@ -286,10 +320,76 @@ describe('跨工具合并', () => {
   })
 })
 
+describe('项目维度', () => {
+  /** 项目页里的两条记录:一个是父目录,一个嵌在它下面(嵌套时取最具体的那个) */
+  const PROJECTS = [
+    { path: 'E:\\muyian', name: '怀安' },
+    { path: 'E:\\muyian\\Workbench', name: 'workbench' },
+  ]
+
+  it('projectLabelOf 取路径最后一段,认不出的统一显示未归属', () => {
+    expect(projectLabelOf('E:\\muyian\\Workbench')).toBe('Workbench')
+    expect(projectLabelOf('E:/git-projects/ICU2.0/code/ICUClient/')).toBe('ICUClient')
+    expect(projectLabelOf('')).toBe(UNKNOWN_PROJECT)
+    expect(projectLabelOf(UNKNOWN_PROJECT)).toBe(UNKNOWN_PROJECT)
+  })
+
+  it('路径先归一再比:分隔符统一、末尾分隔符去掉,比对时忽略大小写', () => {
+    expect(normalizeProjectPath('E:/muyian/Workbench/')).toBe('E:\\muyian\\Workbench')
+    expect(projectKeyOf('e:\\MUYIAN\\Workbench')).toBe(projectKeyOf('E:\\muyian\\workbench'))
+  })
+
+  it('shareByProject 只列项目列表里的项目:子目录算进来、嵌套取最具体的一个', () => {
+    const data = sanitizeShard({
+      version: 8,
+      sources: {
+        zcode: { days: {}, projects: makeDays([['2026-09-13', 'E:\\muyian\\Workbench', 100]]) },
+        workbuddy: { days: {}, projects: makeDays([['2026-09-13', 'e:\\muyian\\workbench\\apps\\desktop', 50]]) },
+        qoder: {
+          days: {},
+          projects: makeDays([
+            ['2026-09-13', 'E:\\muyian\\ui', 20],
+            // 前缀像但不是同一条路径(少了分隔符),不能算进 Workbench
+            ['2026-09-13', 'E:\\muyian\\Workbench2', 7],
+            // 不在任何项目目录下:不占一行
+            ['2026-09-13', 'E:\\other\\thing', 999],
+          ]),
+        },
+      },
+    })
+
+    const shares = shareByProject(data, '2026-09-01', '2026-09-30', 'tokens', PROJECTS)
+    expect(shares.map(s => [s.name, s.key, s.counters.inputTokens])).toEqual([
+      ['workbench', 'E:\\muyian\\Workbench', 150],
+      // Workbench2 不是 Workbench 的子目录(少了分隔符),归到父项目;E:\other 不在列表里
+      ['怀安', 'E:\\muyian', 27],
+    ])
+    // 当前口径下没数的项目不露一行
+    expect(shareByProject(data, '2026-09-01', '2026-09-30', 'credits', PROJECTS)).toEqual([])
+  })
+
+  it('shareToolsOfProject 只统计这个项目,按工具分开', () => {
+    const data = sanitizeShard({
+      version: 8,
+      sources: {
+        zcode: { days: {}, projects: makeDays([['2026-09-13', 'E:\\muyian\\Workbench', 100]]) },
+        workbuddy: { days: {}, projects: makeDays([['2026-09-13', 'e:\\muyian\\Workbench\\apps', 50]]) },
+        qoder: { days: {}, projects: makeDays([['2026-09-13', 'E:\\muyian\\ui', 7]]) },
+      },
+    })
+
+    const shares = shareToolsOfProject(data, 'e:\\muyian\\workbench', '2026-09-01', '2026-09-30', 'tokens', PROJECTS)
+    expect(shares.map(s => [s.key, s.counters.inputTokens])).toEqual([
+      ['zcode', 100],
+      ['workbuddy', 50],
+    ])
+  })
+})
+
 describe('跨设备合并', () => {
   /** 造一份设备分片;days 直接给「天 → 模型 → 输入量」 */
   function shard(device: string, updatedAt: number, days: TokenDays): TokenShard {
-    return { version: 4, device, name: device, updatedAt, sources: { zcode: { days } } }
+    return { version: 4, device, name: device, updatedAt, sources: { zcode: { days, projects: {} } } }
   }
 
   it('sumDays 同天同模型相加,各自独有的日期与模型都留着', () => {
@@ -319,6 +419,32 @@ describe('跨设备合并', () => {
     expect(data.sources.zcode.days['2026-09-13']['glm-5'].inputTokens).toBe(1400)
     // updatedAt 取最新那台机器的时间,用于界面上的「更新于」
     expect(data.updatedAt).toBe(200)
+  })
+
+  it('combineShards 的项目层同样跨设备求和,老的 v7 分片只当没有项目', () => {
+    const now = new Date(2026, 8, 14)
+    const withProjects = (device: string, updatedAt: number, projects: TokenDays): TokenShard => ({
+      version: 8,
+      device,
+      name: device,
+      updatedAt,
+      sources: { zcode: { days: {}, projects } },
+    })
+    const data = combineShards(
+      [
+        withProjects('dev-a', 100, makeDays([['2026-09-13', 'E:\\muyian\\Workbench', 1000]])),
+        withProjects('dev-b', 200, makeDays([['2026-09-13', 'e:\\muyian\\Workbench', 400]])),
+        shard('dev-c', 300, makeDays([['2026-09-13', 'glm-5', 7]])),
+      ],
+      now,
+    )
+
+    expect(data.sources.zcode.days['2026-09-13']['glm-5'].inputTokens).toBe(7)
+    // 两台机器的同一目录相加;只有模型口径的旧分片不凭空造出项目
+    expect(shareByProject(data, '2026-09-01', '2026-09-30', 'tokens', [
+      { path: 'E:\\muyian\\Workbench', name: 'workbench' },
+    ]).map(s => [s.key, s.counters.inputTokens]))
+      .toEqual([['E:\\muyian\\Workbench', 1400]])
   })
 
   it('combineShards 丢掉窗口外的旧天:长期关机的那台机器不往图里塞陈年数据', () => {

@@ -237,6 +237,8 @@ async function run(input: RunInput): Promise<Result<null>> {
       command: input.line,
       cwd: input.cwd ?? '',
       startedAt: meta.startedAt,
+      // 类别决定「下次启动要不要接管」：开发服务还在监听端口时保留，其余残留一律清掉
+      kind: input.kind,
       ownerPid: await appPid(),
       ...(createdAt === null ? {} : { processCreatedAt: createdAt }),
       ...(ownerCreated === null ? {} : { ownerCreatedAt: ownerCreated }),

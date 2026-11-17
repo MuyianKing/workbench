@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { TokenBucket, TokenCounters, TokenGranularity, TokenRangePreset, UsageAxis } from '@workbench/usage'
+import type { TokenBucket, TokenCounters, TokenGranularity, TokenProjectRef, TokenRangePreset, UsageAxis } from '@workbench/usage'
 import { Connection, Histogram, Refresh } from '@element-plus/icons-vue'
 import { dayKey } from '@workbench/core'
 import { axisTotal, bucketRangeOf, buildSeriesRange, flattenSources, presetLabel, resolvePresetRange, shortDayLabel, SOURCE_LABELS, sumRange } from '@workbench/usage'
@@ -35,6 +35,7 @@ import TokenShares from '@/components/TokenShares.vue'
 import TokenTrendChart from '@/components/TokenTrendChart.vue'
 import { useTokenUsage } from '@/composables/use-token-usage'
 import { formatRelative } from '@/format'
+import { useProjectsStore } from '@/stores/projects'
 
 /**
  * 两个口径:token 计数,与按额度记账的工具(Qoder)报的 credits。
@@ -51,6 +52,14 @@ const AXES: Array<{ key: UsageAxis, label: string }> = [
 const { result, loading, syncing, nowTick, readOnce, refresh, syncNow } = useTokenUsage({
   onData: () => clampRange(),
 })
+/**
+ * 项目占比只列**项目页里的项目**:路径与显示名都取那一份。
+ * 归属按工作目录判(子目录算进所属项目),不在项目列表里的用量仍计入总览 / 趋势 / 工具占比。
+ */
+const projectsStore = useProjectsStore()
+const projectRefs = computed<TokenProjectRef[]>(() =>
+  projectsStore.projects.map(item => ({ path: item.path, name: item.name })),
+)
 const granularity = ref<TokenGranularity>('day')
 /** 当前口径;切换即换一整套数字(总览、趋势、占比都跟着走) */
 const axis = ref<UsageAxis>('tokens')
@@ -359,6 +368,7 @@ function selectBucket(index: number): void {
           :axis="axis"
           :range-label="shareRangeLabel"
           :show-models="showModels"
+          :projects="projectRefs"
         />
       </template>
 

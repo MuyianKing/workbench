@@ -12,9 +12,9 @@
  * 因此适配层可以按文件单独解析、只重解变化的那些（见 workbench/token.ts 的按文件缓存）。
  */
 
-import type { TokenCounters, TokenDays } from './token-usage'
+import type { TokenCounters, TokenDays, TokenProjectDays } from './token-usage'
 import { dayKey } from '@workbench/core'
-import { addCounters, emptyCounters, isDateKey } from './token-usage'
+import { addCounters, emptyCounters, isDateKey, normalizeProjectPath } from './token-usage'
 
 /** 会话里没声明模型时的兜底名 */
 export const DSH_DEFAULT_MODEL = 'deepseek'
@@ -32,6 +32,8 @@ interface DshUsage {
 interface DshEvent {
   type?: unknown
   time?: unknown
+  /** 会话事件里的工作目录（项目归属就看它） */
+  cwd?: unknown
   data?: {
     header?: { config?: { model?: unknown } }
     usage?: DshUsage
@@ -43,11 +45,19 @@ function finite(value: unknown): number {
 }
 
 /**
- * 把一个会话文件（已解压的文本）的用量累计进 days：
+ * 把一个会话文件（已解压的文本）的用量累计进 days 与 projects：
  * 按事件时间的本地日期、按当时声明的模型分桶。单个事件解析失败只丢那一条。
+ *
+ * 项目取会话事件（`{"type":"session",…,"cwd":"E:\\…"}`）里的工作目录 ——
+ * 实测每个会话文件都有这一条；缺了（半行 / 老格式）就只进模型口径，项目层不落账。
  */
-export function collectDshSessionText(text: string, days: TokenDays): void {
+export function collectDshSessionText(
+  text: string,
+  days: TokenDays,
+  projects: TokenProjectDays,
+): void {
   let model = DSH_DEFAULT_MODEL
+  let project = ''
 
   for (const line of text.split('\n')) {
     if (!line)
@@ -61,6 +71,11 @@ export function collectDshSessionText(text: string, days: TokenDays): void {
       continue
     }
 
+    if (event.type === 'session') {
+      if (typeof event.cwd === 'string')
+        project = normalizeProjectPath(event.cwd)
+      continue
+    }
     if (event.type === 'request/header') {
       const declared = event.data?.header?.config?.model
       if (typeof declared === 'string' && declared.trim())
@@ -92,5 +107,11 @@ export function collectDshSessionText(text: string, days: TokenDays): void {
 
     const modelDays = (days[date] ??= {})
     modelDays[model] = addCounters(modelDays[model] ?? emptyCounters(), step)
+
+    // 没有工作目录就不算项目:只进模型口径,项目占比里不出现
+    if (project) {
+      const projectDays = (projects[date] ??= {})
+      projectDays[project] = addCounters(projectDays[project] ?? emptyCounters(), step)
+    }
   }
 }

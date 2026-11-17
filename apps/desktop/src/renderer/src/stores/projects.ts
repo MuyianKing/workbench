@@ -24,6 +24,7 @@ import { defineStore } from 'pinia'
  */
 import { computed, ref, watch } from 'vue'
 import { confirmAction, notifyError, notifySuccess, notifyWarning } from '@/notify'
+import { reapOrphansOnStart } from '@/workbench'
 import { useAuthStore } from './auth'
 import { useCatalogStore } from './catalog'
 import { useEnvironmentStore } from './environment'
@@ -119,16 +120,27 @@ export const useProjectsStore = defineStore('projects', () => {
     backfillProjectColors()
 
     void refreshPaths()
-    // 项目可能在上次关闭后、或在 Workbench 之外已经跑起来了，进应用先按端口认一遍
-    void detectAll()
-    // 命令卡片同理：它连日志都可能没有（在外面启动的），只能靠端口认
-    void catalog.detectAllCommands()
+    // 先处理残留、再按端口认运行状态：这两件事并行时，探测可能先看到残留进程还在监听，
+    // 随后清理把它杀掉，状态就再也没人收回来 —— 更新重启后卡片一直挂着「运行中」。
+    // 开发服务的残留不杀，由后面的端口探测接管（规则见 @workbench/core 的 orphan）。
+    void (async () => {
+      await reapOrphansOnStart()
+      // 项目可能在上次关闭后、或在 Workbench 之外已经跑起来了，进应用先按端口认一遍
+      void detectAll()
+      // 命令卡片同理：它连日志都可能没有（在外面启动的），只能靠端口认
+      void catalog.detectAllCommands()
+    })()
     // 账号状态只读凭据管理器，很快；顶栏的头像要靠它才会在首帧之后补上
     void useAuthStore().refreshAuth()
     // 目录与程序都可能在应用之外被移动/删除，窗口重新获得焦点时复查一次
     window.addEventListener('focus', () => {
       void refreshPaths()
       void catalog.refreshQuickApps()
+      // 「外部运行中」是探测出来的快照：用户可能在应用之外把服务停了。回来时复认一遍，
+      // 免得卡片一直挂着「运行中」（更新后接管的那类也靠它保持准确）。Workbench 自己的
+      // 会话不重探 —— 它们有退出事件，状态本来就准。
+      void detectAll()
+      void catalog.detectAllCommands()
     })
   }
 

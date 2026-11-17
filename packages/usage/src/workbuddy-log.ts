@@ -17,9 +17,9 @@
  * 所以适配层可以**按文件**缓存解析结果，只重解变化的那些（见 workbench/token.ts）。
  */
 
-import type { TokenCounters, TokenDays } from './token-usage'
+import type { TokenCounters, TokenDays, TokenProjectDays } from './token-usage'
 import { dayKey } from '@workbench/core'
-import { addCounters, emptyCounters, isDateKey } from './token-usage'
+import { addCounters, emptyCounters, isDateKey, normalizeProjectPath } from './token-usage'
 
 /** 事件里没带模型名时的兜底名（正常每条用量都自带模型，只防残缺事件） */
 export const WORKBUDDY_DEFAULT_MODEL = 'workbuddy'
@@ -27,6 +27,8 @@ export const WORKBUDDY_DEFAULT_MODEL = 'workbuddy'
 /** 事件里用得上的那几层；其余字段不解析 */
 interface WorkBuddyEvent {
   timestamp?: unknown
+  /** 会话事件里记的工作目录（项目归属就看它） */
+  cwd?: unknown
   providerData?: {
     model?: unknown
     usage?: WorkBuddyUsage
@@ -64,11 +66,19 @@ function sumDetail(details: unknown, field: string): number {
 }
 
 /**
- * 把一个会话文件（正文）的用量累计进 days：
+ * 把一个会话文件（正文）的用量累计进 days 与 projects：
  * 按事件时间戳的本地日期、按事件自己声明的模型分桶。单个事件解析失败只丢那一条。
+ *
+ * 项目取事件里的 `cwd`（实测带用量的事件自己就带）；事件偶尔缺 `cwd` 时沿用上一条看过的，
+ * 一条都没见过就只进模型口径，项目层不落账。
  */
-export function collectWorkBuddySessionText(text: string, days: TokenDays): void {
+export function collectWorkBuddySessionText(
+  text: string,
+  days: TokenDays,
+  projects: TokenProjectDays,
+): void {
   let model = WORKBUDDY_DEFAULT_MODEL
+  let project = ''
 
   for (const line of text.split('\n')) {
     if (!line)
@@ -81,6 +91,13 @@ export function collectWorkBuddySessionText(text: string, days: TokenDays): void
     catch {
       // 会话正文是追加写的：最后一行可能只写了一半，下次刷新就会带上完整的那条
       continue
+    }
+
+    // 项目归属在事件进门时就更新：带用量的事件自己带 cwd，其余事件也顺手记下
+    if (typeof event.cwd === 'string') {
+      const declared = normalizeProjectPath(event.cwd)
+      if (declared)
+        project = declared
     }
 
     const providerData = event.providerData
@@ -116,5 +133,11 @@ export function collectWorkBuddySessionText(text: string, days: TokenDays): void
 
     const modelDays = (days[date] ??= {})
     modelDays[model] = addCounters(modelDays[model] ?? emptyCounters(), step)
+
+    // 没有工作目录就不算项目:只进模型口径,项目占比里不出现
+    if (project) {
+      const projectDays = (projects[date] ??= {})
+      projectDays[project] = addCounters(projectDays[project] ?? emptyCounters(), step)
+    }
   }
 }

@@ -9,13 +9,16 @@ use serde_json::{json, Value};
 use std::path::PathBuf;
 use walkdir::WalkDir;
 
-/// 聚合 SQL：按 天 × 模型 汇总，与 Electron 版逐字一致。
+/// 聚合 SQL：按 天 × 项目 × 模型 汇总，与 Electron 版逐字一致（项目那一维是后加的）。
 ///  - ROW_NUMBER 去重重试：同一个 logical_request_id 只留最后一次尝试，重试不双算；
 ///  - error_type IS NULL 排除失败请求：没产生计数的失败不算用量；
-///  - date(..., 'localtime') 按本地日期归天，与活跃度图同一约定。
+///  - date(..., 'localtime') 按本地日期归天，与活跃度图同一约定；
+///  - 项目取会话的工作目录（session.directory），界面上按它分组；会话记的是绝对路径原文，
+///    大小写与分隔符的归一留给 TS 侧（packages/usage/src/token-usage.ts 的 normalizeProjectPath）。
 const USAGE_SQL: &str = "
   SELECT
     date(mu.started_at / 1000, 'unixepoch', 'localtime') AS day,
+    s.directory AS project,
     mu.model_id AS model,
     SUM(mu.input_tokens) AS input,
     SUM(mu.output_tokens) AS output,
@@ -24,6 +27,7 @@ const USAGE_SQL: &str = "
     SUM(mu.cache_creation_input_tokens) AS cacheWrite,
     COUNT(*) AS requests
   FROM model_usage mu
+  JOIN session s ON s.id = mu.session_id
   WHERE mu.id IN (
     SELECT id FROM (
       SELECT id, ROW_NUMBER() OVER (PARTITION BY logical_request_id ORDER BY attempt_index DESC) AS rn
@@ -31,7 +35,7 @@ const USAGE_SQL: &str = "
     ) latest WHERE latest.rn = 1
   )
     AND mu.error_type IS NULL
-  GROUP BY day, model
+  GROUP BY day, project, model
 ";
 
 fn home_dir() -> PathBuf {
@@ -72,13 +76,14 @@ pub fn zcode_rows() -> Result<Vec<Value>, String> {
         .query_map([], |row| {
             Ok(json!({
                 "day": row.get::<_, Option<String>>(0)?,
-                "model": row.get::<_, Option<String>>(1)?,
-                "input": row.get::<_, Option<i64>>(2)?,
-                "output": row.get::<_, Option<i64>>(3)?,
-                "reasoning": row.get::<_, Option<i64>>(4)?,
-                "cacheRead": row.get::<_, Option<i64>>(5)?,
-                "cacheWrite": row.get::<_, Option<i64>>(6)?,
-                "requests": row.get::<_, Option<i64>>(7)?,
+                "project": row.get::<_, Option<String>>(1)?,
+                "model": row.get::<_, Option<String>>(2)?,
+                "input": row.get::<_, Option<i64>>(3)?,
+                "output": row.get::<_, Option<i64>>(4)?,
+                "reasoning": row.get::<_, Option<i64>>(5)?,
+                "cacheRead": row.get::<_, Option<i64>>(6)?,
+                "cacheWrite": row.get::<_, Option<i64>>(7)?,
+                "requests": row.get::<_, Option<i64>>(8)?,
             }))
         })
         .map_err(|_| "ZCode 数据库读取失败,可能它的版本已更新了表结构".to_string())?;
@@ -436,7 +441,15 @@ mod tests {
         }
 
         match zcode_rows() {
-            Ok(rows) => eprintln!("只读打开成功，读到 {} 行聚合结果", rows.len()),
+            Ok(rows) => {
+                eprintln!("只读打开成功，读到 {} 行聚合结果", rows.len());
+                // 项目那一维靠 JOIN session 的 directory；这一列取不到时面板会整片归「未归属」，
+                // 表结构一变就在这儿露出来（sqlite 的列别名按位置取，别只看有没有报错）
+                assert!(
+                    rows.iter().any(|row| row["project"].as_str().is_some_and(|p| !p.is_empty())),
+                    "ZCode 用量行里没有工作目录"
+                );
+            }
             Err(err) => panic!("只读打开运行中的 WAL 库失败: {err}"),
         }
     }

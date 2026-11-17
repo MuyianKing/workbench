@@ -41,10 +41,16 @@ describe('isSameProcess', () => {
   })
 })
 
-function depsOf(created: Record<number, number>, killTree = vi.fn()): ReapDeps {
+function depsOf(
+  created: Record<number, number>,
+  killTree = vi.fn(),
+  options: { ports?: Record<string, number>, listening?: number[] } = {},
+): ReapDeps {
   return {
     createdAt: async pid => created[pid] ?? null,
     killTree,
+    projectPort: projectId => options.ports?.[projectId],
+    portInUse: async port => (options.listening ?? []).includes(port),
   }
 }
 
@@ -65,7 +71,7 @@ function session(patch: Partial<ActiveSession> = {}): ActiveSession {
 describe('reapOrphanSessions', () => {
   it('没有记录时什么都不做', async () => {
     const result = await reapOrphanSessions([], depsOf({}))
-    expect(result).toEqual({ killed: 0, kept: [], notes: [] })
+    expect(result).toEqual({ killed: 0, kept: [], adopted: 0, notes: [] })
   })
 
   it('记录为脏数据时不抛错', async () => {
@@ -129,6 +135,57 @@ describe('reapOrphanSessions', () => {
     const result = await reapOrphanSessions([session()], depsOf({}))
     expect(result.killed).toBe(0)
     expect(result.notes).toEqual([])
+  })
+
+  it('开发服务还在监听端口时保留进程、丢掉记录（交给端口探测接管）', async () => {
+    const killTree = vi.fn()
+    const deps = depsOf({ 200: CREATED }, killTree, { ports: { p1: 5173 }, listening: [5173] })
+
+    const result = await reapOrphanSessions([session({ kind: 'start' })], deps)
+    expect(result.adopted).toBe(1)
+    expect(result.killed).toBe(0)
+    expect(result.kept).toHaveLength(0)
+    expect(killTree).not.toHaveBeenCalled()
+    expect(result.notes.join()).toContain('5173')
+  })
+
+  it('开发服务端口已经空了，照常清掉', async () => {
+    const killTree = vi.fn().mockResolvedValue(undefined)
+    const deps = depsOf({ 200: CREATED }, killTree, { ports: { p1: 5173 }, listening: [] })
+
+    const result = await reapOrphanSessions([session({ kind: 'start' })], deps)
+    expect(result.adopted).toBe(0)
+    expect(result.killed).toBe(1)
+    expect(killTree).toHaveBeenCalledWith(200)
+  })
+
+  it('项目没记端口时不能接管，照常清掉', async () => {
+    const killTree = vi.fn().mockResolvedValue(undefined)
+    // 端口是「这个进程还在服务」的唯一判据：没有它就没法保证界面能认出这条进程
+    const result = await reapOrphanSessions([session({ kind: 'start' })], depsOf({ 200: CREATED }, killTree))
+    expect(result.adopted).toBe(0)
+    expect(killTree).toHaveBeenCalledWith(200)
+  })
+
+  it('打包 / 安装 / 命令类即使端口还在听也照旧清掉', async () => {
+    for (const kind of ['build', 'install', 'custom', 'command']) {
+      const killTree = vi.fn().mockResolvedValue(undefined)
+      const deps = depsOf({ 200: CREATED }, killTree, { ports: { p1: 5173 }, listening: [5173] })
+
+      const result = await reapOrphanSessions([session({ kind })], deps)
+      expect(result.adopted).toBe(0)
+      expect(result.killed).toBe(1)
+    }
+  })
+
+  it('老记录没有类别字段时也按可接管处理（接管只是不动进程）', async () => {
+    const killTree = vi.fn()
+    const deps = depsOf({ 200: CREATED }, killTree, { ports: { p1: 5173 }, listening: [5173] })
+
+    const result = await reapOrphanSessions([session()], deps)
+    expect(result.adopted).toBe(1)
+    expect(result.killed).toBe(0)
+    expect(killTree).not.toHaveBeenCalled()
   })
 
   it('确认是残留就按进程树结束', async () => {

@@ -1,14 +1,19 @@
 <script setup lang="ts">
-import type { TokenCounters, TokenUsageResult, UsageAxis } from '@workbench/usage'
+import type { TokenCounters, TokenProjectRef, TokenUsageResult, UsageAxis } from '@workbench/usage'
 import { CaretRight } from '@element-plus/icons-vue'
-import { axisTotal, emptyCounters, flattenSources, formatCredits, formatPercent, formatTokensWan, shareByModel, shareBySource, SOURCE_LABELS, totalTokens } from '@workbench/usage'
+import { axisTotal, emptyCounters, flattenSources, formatCredits, formatPercent, formatTokensWan, shareByModel, shareByProject, shareBySource, shareToolsOfProject, SOURCE_LABELS, totalTokens } from '@workbench/usage'
 import { computed, ref, watch } from 'vue'
 
 /**
- * 用量卡片下方两块占比：模型占比与工具占比（各自可以点开看构成）。
+ * 用量卡片下方两块占比：模型占比，以及可以切换维度的「项目 / 工具」占比（各自可以点开看构成）。
  *
  * 从 `TokenPanel.vue` 拆出来的整块。统计区间由父组件按「选中的桶 / 整个窗口」算好送进来，
- * 展开状态只活在这一次渲染里 —— 换口径时父组件用 `:key="axis"` 重挂，展开自然收掉。
+ * 展开状态只活在这一次渲染里 —— 换口径时父组件用 `:key="axis"` 重挂，展开与维度选择自然收掉。
+ *
+ * 项目维度来自各工具会话里记的工作目录（见 packages/usage/src/token-usage.ts 的
+ * `shareByProject`）：同一个目录在几个工具里各算过，这里跨工具并成一行；**只列项目页
+ * 项目列表里的项目**（子目录算进所属项目），展开一行看的是这个项目由哪些工具产生。
+ * 不在项目列表里的用量不占一行，但照常计入总览、趋势与工具 / 模型占比。
  */
 const props = defineProps<{
   result: TokenUsageResult | null
@@ -19,7 +24,18 @@ const props = defineProps<{
   rangeLabel: string
   /** 模型占比只在 tokens 口径下画（credits 按模型拆没有意义） */
   showModels: boolean
+  /** 项目页的项目列表：项目占比只列这里的项目，按工作目录归属 */
+  projects: TokenProjectRef[]
 }>()
+
+/** 占比区的两个维度:默认项目(用户最关心的是哪个目录在烧 token),次之才是工具 */
+const DIMENSIONS: Array<{ key: ShareDimension, label: string }> = [
+  { key: 'project', label: '项目' },
+  { key: 'tool', label: '工具' },
+]
+type ShareDimension = 'project' | 'tool'
+
+const dimension = ref<ShareDimension>('project')
 
 const days = computed(() => (props.result ? flattenSources(props.result.data) : {}))
 
@@ -31,6 +47,16 @@ const models = computed(() =>
 const sources = computed(() =>
   props.result
     ? shareBySource(props.result.data, props.fromKey, props.toKey, props.axis)
+    : [],
+)
+
+/**
+ * 项目占比：跨工具按工作目录合计，只列项目页项目列表里的项目。
+ * 不在任何项目目录下的用量不占一行（子目录算进所属项目，嵌套取最具体的那个）。
+ */
+const projectShares = computed(() =>
+  props.result
+    ? shareByProject(props.result.data, props.fromKey, props.toKey, props.axis, props.projects)
     : [],
 )
 
@@ -63,10 +89,23 @@ function toggleTool(key: string): void {
   expandedTool.value = expandedTool.value === key ? null : key
 }
 
-// 换口径时两块的展开都作废（数字整套都变了）
+/** 展开工具构成的项目；只有一个维度的展开状态在用,另一维的随切换清掉 */
+const expandedProject = ref<string | null>(null)
+
+function toggleProject(key: string): void {
+  expandedProject.value = expandedProject.value === key ? null : key
+}
+
+// 换口径或换维度时展开都作废（数字与名单整套都变了）
 watch(() => props.axis, () => {
   expandedModel.value = null
   expandedTool.value = null
+  expandedProject.value = null
+})
+
+watch(dimension, () => {
+  expandedTool.value = null
+  expandedProject.value = null
 })
 
 /** 展开的工具里各模型的占比（按该工具自己的天级数据统计） */
@@ -77,6 +116,27 @@ const expandedToolModels = computed(() => {
   if (!source)
     return []
   return shareByModel(source.days, props.fromKey, props.toKey)
+})
+
+/** 展开的项目里各工具的占比（跨工具的项目层已经合在一起，这里再按工具拆回去） */
+const expandedProjectTools = computed(() => {
+  if (!expandedProject.value || !props.result)
+    return []
+  return shareToolsOfProject(
+    props.result.data,
+    expandedProject.value,
+    props.fromKey,
+    props.toKey,
+    props.axis,
+    props.projects,
+  )
+})
+
+/** 占比标题右侧的提示:当前维度点开能看到什么 */
+const hintText = computed(() => {
+  if (dimension.value === 'project')
+    return '点击行看工具'
+  return props.showModels ? '点击行看模型' : ''
 })
 
 /** 一行明细：标签 + 占比 + 数值 */
@@ -108,6 +168,11 @@ function shareWidth(counters: TokenCounters): string {
 
 function sourceWidth(counters: TokenCounters): string {
   const max = Math.max(1, amount(sources.value[0]?.counters ?? emptyCounters()))
+  return `${(amount(counters) / max) * 100}%`
+}
+
+function projectWidth(counters: TokenCounters): string {
+  const max = Math.max(1, amount(projectShares.value[0]?.counters ?? emptyCounters()))
   return `${(amount(counters) / max) * 100}%`
 }
 
@@ -160,42 +225,89 @@ function detailWidth(value: number, max: number): string {
   </div>
 
   <div class="share">
-    <div class="share__head">
-      工具占比
-      <span>{{ rangeLabel }}{{ showModels ? ' · 点击行看模型' : '' }}</span>
+    <!-- 维度切换:项目是默认那一档(哪个目录在烧 token 比哪个工具更有用) -->
+    <div class="share__head share__head--tabs">
+      <el-segmented
+        v-model="dimension"
+        class="share__tabs"
+        :options="DIMENSIONS"
+        :props="{ label: 'label', value: 'key' }"
+        aria-label="占比维度"
+      />
+      <span class="share__range truncate">{{ rangeLabel }}{{ hintText ? ` · ${hintText}` : '' }}</span>
     </div>
-    <template v-for="s in sources" :key="s.key">
-      <button
-        type="button"
-        class="tool"
-        :class="{ 'tool--toggle': showModels }"
-        :aria-expanded="expandedTool === s.key"
-        @click="toggleTool(s.key)"
-      >
-        <span class="tool__name truncate" :title="s.key">{{ SOURCE_LABELS[s.key] ?? s.key }}</span>
-        <span class="tool__track"><i :style="{ width: sourceWidth(s.counters) }" /></span>
-        <span class="tool__num mono">{{ formatCounters(s.counters) }}</span>
-        <el-icon
-          v-if="showModels"
-          class="share__chevron"
-          :class="{ 'is-open': expandedTool === s.key }"
-        >
-          <CaretRight />
-        </el-icon>
-      </button>
-      <div v-if="expandedTool === s.key" class="share__detail">
-        <div v-for="tm in expandedToolModels" :key="tm.key" class="detail__row">
-          <span class="detail__label mono truncate" :title="tm.key">{{ tm.key }}</span>
-          <span class="detail__track">
-            <i :style="{ width: detailWidth(totalTokens(tm.counters), totalTokens(expandedToolModels[0]?.counters ?? emptyCounters())) }" />
-          </span>
-          <span class="detail__pct mono">{{ formatPercent(totalTokens(tm.counters), totalTokens(s.counters)) }}</span>
-          <b class="detail__val mono">{{ formatTokensWan(totalTokens(tm.counters)) }}</b>
-        </div>
-        <div class="detail__foot">
-          请求 {{ s.counters.requests }} 次 · 缓存命中率 {{ hitRateLabel(s.counters) }}
-        </div>
+
+    <template v-if="dimension === 'project'">
+      <div v-if="!projectShares.length" class="share__empty">
+        {{ projects.length ? '这段时间的用量都不在项目列表里' : '项目页里还没有项目' }}
       </div>
+      <template v-for="p in projectShares" :key="p.key">
+        <button
+          type="button"
+          class="tool tool--toggle"
+          :aria-expanded="expandedProject === p.key"
+          :title="p.key"
+          @click="toggleProject(p.key)"
+        >
+          <span class="tool__name truncate">{{ p.name }}</span>
+          <span class="tool__track"><i :style="{ width: projectWidth(p.counters) }" /></span>
+          <span class="tool__num mono">{{ formatCounters(p.counters) }}</span>
+          <el-icon class="share__chevron" :class="{ 'is-open': expandedProject === p.key }">
+            <CaretRight />
+          </el-icon>
+        </button>
+        <div v-if="expandedProject === p.key" class="share__detail">
+          <div v-for="tool in expandedProjectTools" :key="tool.key" class="detail__row">
+            <span class="detail__label truncate">{{ SOURCE_LABELS[tool.key] ?? tool.key }}</span>
+            <span class="detail__track">
+              <i :style="{ width: detailWidth(amount(tool.counters), amount(p.counters)) }" />
+            </span>
+            <span class="detail__pct mono">{{ formatPercent(amount(tool.counters), amount(p.counters)) }}</span>
+            <b class="detail__val mono">{{ formatCounters(tool.counters) }}</b>
+          </div>
+          <div class="detail__foot">
+            请求 {{ p.counters.requests }} 次<template v-if="axis === 'tokens'">
+              · 缓存命中率 {{ hitRateLabel(p.counters) }}
+            </template>
+          </div>
+        </div>
+      </template>
+    </template>
+
+    <template v-else>
+      <template v-for="s in sources" :key="s.key">
+        <button
+          type="button"
+          class="tool"
+          :class="{ 'tool--toggle': showModels }"
+          :aria-expanded="expandedTool === s.key"
+          @click="toggleTool(s.key)"
+        >
+          <span class="tool__name truncate" :title="s.key">{{ SOURCE_LABELS[s.key] ?? s.key }}</span>
+          <span class="tool__track"><i :style="{ width: sourceWidth(s.counters) }" /></span>
+          <span class="tool__num mono">{{ formatCounters(s.counters) }}</span>
+          <el-icon
+            v-if="showModels"
+            class="share__chevron"
+            :class="{ 'is-open': expandedTool === s.key }"
+          >
+            <CaretRight />
+          </el-icon>
+        </button>
+        <div v-if="expandedTool === s.key" class="share__detail">
+          <div v-for="tm in expandedToolModels" :key="tm.key" class="detail__row">
+            <span class="detail__label mono truncate" :title="tm.key">{{ tm.key }}</span>
+            <span class="detail__track">
+              <i :style="{ width: detailWidth(totalTokens(tm.counters), totalTokens(expandedToolModels[0]?.counters ?? emptyCounters())) }" />
+            </span>
+            <span class="detail__pct mono">{{ formatPercent(totalTokens(tm.counters), totalTokens(s.counters)) }}</span>
+            <b class="detail__val mono">{{ formatTokensWan(totalTokens(tm.counters)) }}</b>
+          </div>
+          <div class="detail__foot">
+            请求 {{ s.counters.requests }} 次 · 缓存命中率 {{ hitRateLabel(s.counters) }}
+          </div>
+        </div>
+      </template>
     </template>
   </div>
 </template>
@@ -213,6 +325,34 @@ function detailWidth(value: number, max: number): string {
 .share__head {
   display: flex;
   justify-content: space-between;
+  font-size: var(--fs-micro);
+  color: var(--ink-3);
+}
+
+/* 带页签的头部：控件在左、区间说明在右；窄了先收说明 */
+.share__head--tabs {
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+/* 分段控件的外壳（底色、圆角、内边距）在 global.css；这里只留这一处的排版 */
+.share__tabs.el-segmented {
+  flex-shrink: 0;
+  font-size: var(--fs-micro);
+}
+
+.share__tabs :deep(.el-segmented__item) {
+  padding: 1px 8px;
+}
+
+.share__range {
+  min-width: 0;
+  text-align: right;
+}
+
+.share__empty {
+  padding: var(--sp-1) 0;
   font-size: var(--fs-micro);
   color: var(--ink-3);
 }
@@ -312,7 +452,7 @@ function detailWidth(value: number, max: number): string {
   color: var(--ink-3);
 }
 
-/* ---------- 工具占比：名称左、总量右，下面一条全宽细条表示份额 ---------- */
+/* ---------- 模型占比：名称左、总量右，下面一条全宽细条表示份额 ---------- */
 
 .source {
   display: flex;
@@ -354,10 +494,10 @@ function detailWidth(value: number, max: number): string {
   background: var(--ink);
 }
 
-/* ---------- 工具占比：单行紧凑样式（名称左、行内细条、数值右），tokens 口径下点击展开该工具的模型 ---------- */
+/* ---------- 项目 / 工具占比：单行紧凑样式（名称左、行内细条、数值右），可点击展开 ---------- */
 
 /*
- * 这一行始终是按钮（tokens 口径下可点开，credits 口径下不可点），所以按钮的默认外观
+ * 这一行始终是按钮（可点开的那一档与 credits 口径下不可点的工具行共用），所以按钮的默认外观
  * **统一在这里抹掉**，别放进 `.tool--toggle` —— 放进去了，credits 那一档不加那个类，
  * 就会露出浏览器默认的灰底方块（踩过一次：额度那一屏只有 Qoder 一行，一眼就能看见）。
  */

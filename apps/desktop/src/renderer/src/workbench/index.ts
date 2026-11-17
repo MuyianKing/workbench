@@ -320,9 +320,11 @@ export function installTauriWorkbench(): void {
 export { initState } from './state'
 
 /**
- * 启动收尾：收掉上次被强杀后留下的 dev server。
+ * 启动收尾：处理上次被强杀 / 更新安装时留下的子进程（开发服务还在监听端口的会保留，
+ * 交给端口探测接管，规则见 `@workbench/core` 的 orphan）。
  *
- * 放在界面挂载之后调用 —— 它要挨个问进程的创建时间，不该挡首屏。
+ * 由项目 store 的 init 调用，且要排在启动时的端口探测**之前** —— 反过来的话，
+ * 探测可能先看到残留进程还在监听，随后清理又把它杀掉，状态就再也没人收回来。
  * 只在 Tauri 里做：浏览器预览下没有后端。
  */
 export async function reapOrphansOnStart(): Promise<void> {

@@ -87,9 +87,34 @@ export interface TokenCounters {
 /** 日期(YYYY-MM-DD)→ 模型 → 计数 */
 export type TokenDays = Record<string, Record<string, TokenCounters>>
 
+/**
+ * 日期(YYYY-MM-DD)→ 项目(工作目录)→ 计数。
+ *
+ * 结构与 TokenDays 完全相同,所以合并 / 求和 / 修剪 / 区间合计那几个函数直接复用 ——
+ * 只是第二层的键从模型换成了项目路径。项目是**发起这次请求的工作目录**(各工具会话里
+ * 自己记的 cwd),不是 Workbench 项目页里那条记录:对不上的目录也照实单列。
+ */
+export type TokenProjectDays = TokenDays
+
+/**
+ * 没有项目归属的用量。
+ *
+ * **不进项目占比**:没有工作目录就不算项目(CodeBuddy 的扩展日志没有 cwd,
+ * 个别会话也缺 cwd),这部分只算进模型 / 工具口径。快照的 projects 层里不再写它;
+ * shareByProject 读到这个键(早期结构留下的)也一律滤掉。
+ */
+export const UNKNOWN_PROJECT = '未归属'
+
 /** 单个接入工具的快照 */
 export interface TokenSourceSnapshot {
   days: TokenDays
+  /**
+   * 按项目的同一份计数(项目 = 工作目录)。
+   *
+   * v7 及更早的快照没有这一层:读进来时是空的,下一次实读按本机日志补上 ——
+   * 上游库 / 会话还在的历史都能重新归到项目上,已经读不到的旧天数则只剩在 days 里。
+   */
+  projects: TokenProjectDays
 }
 
 /**
@@ -193,15 +218,17 @@ export const TOKEN_KEEP_DAYS = 53 * 7
  * v6:外观搬去 config/ 目录,这个文件只剩用量 —— 逐日计数与 v5 完全一致。
  * v7:计数里多一个 credits 字段(额度型工具),token 口径与 v6 完全一致 ——
  *     v6 的文件读进来时 credits 一律是 0,历史照常留住,下一次实读就把额度补上。
+ * v8:每个来源多一份按项目的同形状计数(projects),逐日计数与模型口径与 v7 完全一致 ——
+ *     v7 的文件读进来时 projects 是空的,下一次实读按本机日志把项目补上(读不回来的旧天只剩在 days 里)。
  *
  * 读取时**不能**按「版本不等就整份弃用」处理:v1→v2→v3 是口径修正,弃掉之后能从上游实读自愈;
  * 而 v4 起文件里装着**别的机器**的历史,弃掉就再也读不回来(那台机器不开机就不会重写分片)。
  * 所以兼容版本显式列进下面这张表,新增口径版本要手工往里加,别写成 `version >= 3`。
  */
-export const TOKEN_DATA_VERSION = 7
+export const TOKEN_DATA_VERSION = 8
 
 /** 能安全读进来的版本:这几版之间的逐日计数口径相同,多带一份外观、或是把外观搬走都不改变计数 */
-export const TOKEN_DATA_COMPATIBLE_VERSIONS: readonly number[] = [3, 4, 5, 6, 7]
+export const TOKEN_DATA_COMPATIBLE_VERSIONS: readonly number[] = [3, 4, 5, 6, 7, 8]
 
 export function emptyCounters(): TokenCounters {
   return {
@@ -326,7 +353,10 @@ export function sanitizeShard(
     for (const [id, source] of Object.entries(input.sources as Record<string, unknown>)) {
       if (!id)
         continue
-      sources[id] = { days: sanitizeDays((source as TokenSourceSnapshot | undefined)?.days) }
+      sources[id] = {
+        days: sanitizeDays((source as TokenSourceSnapshot | undefined)?.days),
+        projects: sanitizeDays((source as TokenSourceSnapshot | undefined)?.projects),
+      }
     }
   }
   return {
@@ -467,12 +497,15 @@ export function combineShards(
     if (shard.updatedAt > updatedAt)
       updatedAt = shard.updatedAt
     for (const [tool, source] of Object.entries(shard.sources)) {
-      const target = (sources[tool] ??= { days: {} })
+      const target = (sources[tool] ??= { days: {}, projects: {} })
       target.days = sumDays(target.days, source.days)
+      // 老版本分片没有 projects:只当空的,那一台的用量没有项目归属,不影响合计与工具占比
+      target.projects = sumDays(target.projects, source.projects ?? {})
     }
   }
   for (const source of Object.values(sources)) {
     source.days = pruneTokenDays(source.days, now, keepDays)
+    source.projects = pruneTokenDays(source.projects, now, keepDays)
   }
 
   return { version: TOKEN_DATA_VERSION, updatedAt, sources }
@@ -671,10 +704,169 @@ export function sumRange(days: TokenDays, fromKey: string, toKey: string): Token
   return total
 }
 
-/** 区间内的一项占比(模型或工具) */
+/** 区间内的一项占比(模型 / 工具 / 项目) */
 export interface TokenShare {
   key: string
   counters: TokenCounters
+}
+
+/**
+ * 项目路径归一到同一种写法:分隔符统一成 `\`、去掉末尾分隔符。
+ *
+ * 各工具记 cwd 的写法并不一样(WorkBuddy 写成小写盘符 + 反斜杠、Qoder 写成大写盘符),
+ * 不归一的话同一个目录会在项目占比里裂成两行,合计还各算一半。
+ * 大小写留给 projectKeyOf 处理:展示要保留原样,比对才忽略大小写(Windows 路径)。
+ */
+export function normalizeProjectPath(path: string): string {
+  const value = path.trim()
+  if (!value || value === UNKNOWN_PROJECT)
+    return value === UNKNOWN_PROJECT ? UNKNOWN_PROJECT : ''
+  return value.replace(/[\\/]+/g, '\\').replace(/\\+$/, '')
+}
+
+/** 项目在占比里的归并键:归一化后忽略大小写(Win32 路径不区分大小写) */
+export function projectKeyOf(path: string): string {
+  return normalizeProjectPath(path).toLowerCase()
+}
+
+/** 项目在界面上的名字:路径最后一段;认不出来的统一显示「未归属」 */
+export function projectLabelOf(path: string): string {
+  const normalized = normalizeProjectPath(path)
+  if (!normalized || normalized === UNKNOWN_PROJECT)
+    return UNKNOWN_PROJECT
+  const parts = normalized.split('\\')
+  return parts[parts.length - 1] || normalized
+}
+
+/** 项目页里的一条记录(只取归属与显示要用的两样) */
+export interface TokenProjectRef {
+  /** 项目页里那个目录(绝对路径) */
+  path: string
+  /** 项目页里显示的名字 */
+  name: string
+}
+
+/** 占比里的一行项目:key 是项目页记录的路径,name 是它的显示名 */
+export interface ProjectShare extends TokenShare {
+  name: string
+}
+
+interface ProjectMatcher extends TokenProjectRef {
+  key: string
+}
+
+/**
+ * 项目列表 → 归属判定用的匹配表:路径归一化、去重,并按长度从长到短排 ——
+ * 嵌套项目(项目 A 在项目 B 目录下)里更具体的那个先命中。
+ */
+function prepareProjects(projects: readonly TokenProjectRef[]): ProjectMatcher[] {
+  const matchers: ProjectMatcher[] = []
+  const seen = new Set<string>()
+  for (const item of projects) {
+    const key = projectKeyOf(item.path)
+    if (!key || seen.has(key))
+      continue
+    seen.add(key)
+    matchers.push({
+      key,
+      path: normalizeProjectPath(item.path),
+      name: item.name.trim() || projectLabelOf(item.path),
+    })
+  }
+  return matchers.sort((a, b) => b.key.length - a.key.length)
+}
+
+/**
+ * 一个工作目录属于哪个项目:路径相等,或落在它下面(在项目子目录里起的会话也算这个项目)。
+ * 不在任何项目目录下的用量返回 null —— 它不进项目占比,但照常计入总览 / 趋势 / 工具占比。
+ */
+function matchProject(cwd: string, matchers: readonly ProjectMatcher[]): ProjectMatcher | null {
+  const key = projectKeyOf(cwd)
+  if (!key)
+    return null
+  for (const matcher of matchers) {
+    if (key === matcher.key || key.startsWith(`${matcher.key}\\`))
+      return matcher
+  }
+  return null
+}
+
+/**
+ * 区间内按项目合计(跨工具),按当前口径从大到小。**只列项目页项目列表里的项目**。
+ *
+ * 归属按工作目录判:路径相等或在项目目录之下(子目录算进所属项目,嵌套项目取最具体的那个);
+ * 不在任何项目目录下的用量不占一行 —— 但它仍计入总览、趋势与工具 / 模型占比(见
+ * TokenPanel 的总计),只是没有项目归属。
+ *
+ * 同一个项目在不同工具里的大小写写法不同,按 projectKeyOf 归并;显示名取项目页的名字。
+ */
+export function shareByProject(
+  data: TokenDataFile,
+  fromKey: string,
+  toKey: string,
+  axis: UsageAxis,
+  projects: readonly TokenProjectRef[],
+): ProjectShare[] {
+  const matchers = prepareProjects(projects)
+  const totals = new Map<string, ProjectShare>()
+  for (const source of Object.values(data.sources)) {
+    for (const [date, entries] of Object.entries(source.projects)) {
+      if (date < fromKey || date > toKey)
+        continue
+      for (const [path, counters] of Object.entries(entries)) {
+        const match = matchProject(path, matchers)
+        if (!match)
+          continue
+        const existing = totals.get(match.key)
+        if (existing) {
+          existing.counters = addCounters(existing.counters, counters)
+        }
+        else {
+          totals.set(match.key, {
+            key: match.path,
+            name: match.name,
+            counters: addCounters(emptyCounters(), counters),
+          })
+        }
+      }
+    }
+  }
+  return [...totals.values()]
+    .filter(share => axisTotal(share.counters, axis) > 0)
+    .sort((a, b) => axisTotal(b.counters, axis) - axisTotal(a.counters, axis))
+}
+
+/**
+ * 一个项目在区间内由哪些工具产生(项目行展开后的明细),按当前口径从大到小。
+ * 归属规则与 shareByProject 同一套:子目录算进来,嵌套项目取最具体的那个。
+ */
+export function shareToolsOfProject(
+  data: TokenDataFile,
+  project: string,
+  fromKey: string,
+  toKey: string,
+  axis: UsageAxis,
+  projects: readonly TokenProjectRef[],
+): TokenShare[] {
+  const matchers = prepareProjects(projects)
+  const target = matchers.find(item => item.key === projectKeyOf(project))
+  if (!target)
+    return []
+  const shares: TokenShare[] = []
+  for (const [tool, source] of Object.entries(data.sources)) {
+    let counters = emptyCounters()
+    for (const [date, entries] of Object.entries(source.projects)) {
+      if (date < fromKey || date > toKey)
+        continue
+      for (const [path, item] of Object.entries(entries)) {
+        if (matchProject(path, matchers)?.key === target.key)
+          counters = addCounters(counters, item)
+      }
+    }
+    if (axisTotal(counters, axis) > 0)
+      shares.push({ key: tool, counters })
+  }
+  return shares.sort((a, b) => axisTotal(b.counters, axis) - axisTotal(a.counters, axis))
 }
 
 /** 区间内按模型合计(跨工具),按总量从大到小 */

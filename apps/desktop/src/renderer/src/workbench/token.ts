@@ -1,5 +1,5 @@
 import type { SyncDeviceInfo, ThemeFile } from '@workbench/appearance'
-import type { TokenCounters, TokenDataFile, TokenDays, TokenShard, TokenSyncStatus, TokenUsageResult } from '@workbench/usage'
+import type { TokenCounters, TokenDataFile, TokenDays, TokenProjectDays, TokenShard, TokenSyncStatus, TokenUsageResult } from '@workbench/usage'
 import type { Result, TokenDevice } from '@/types'
 /**
  * Token 用量的读取、快照合并与多机同步。
@@ -26,7 +26,7 @@ import type { Result, TokenDevice } from '@/types'
  */
 import { captureThemeFile, sanitizeThemeFile } from '@workbench/appearance'
 import { fail, ok } from '@workbench/core'
-import { CODEBUDDY_SOURCE_ID, collectCodeBuddyLogText, collectDshSessionText, collectQoderSessionText, collectWorkBuddySessionText, combineShards, createCodeBuddyParseState, DSH_SOURCE_ID, isDateKey, mergeDays, pruneTokenDays, QODER_SOURCE_ID, sameDays, sameShardContent, sanitizeShard, sanitizeSyncRepo, sumDays, TOKEN_DATA_VERSION, TOKEN_KEEP_DAYS, WORKBUDDY_SOURCE_ID, ZCODE_SOURCE_ID } from '@workbench/usage'
+import { addCounters, CODEBUDDY_SOURCE_ID, collectCodeBuddyLogText, collectDshSessionText, collectQoderSessionText, collectWorkBuddySessionText, combineShards, createCodeBuddyParseState, DSH_SOURCE_ID, emptyCounters, isDateKey, mergeDays, normalizeProjectPath, pruneTokenDays, QODER_SOURCE_ID, sameDays, sameShardContent, sanitizeShard, sanitizeSyncRepo, sumDays, TOKEN_DATA_VERSION, TOKEN_KEEP_DAYS, WORKBUDDY_SOURCE_ID, ZCODE_SOURCE_ID } from '@workbench/usage'
 
 import { createAutoSync } from './auto-sync'
 import { errorText, guard, invoke } from './bridge'
@@ -37,6 +37,8 @@ import * as state from './state'
 /** Rust 侧 `token_zcode_rows` 回来的行：SUM 在无数据时是 NULL，所以全部可空 */
 interface UsageRow {
   day: string | null
+  /** 会话的工作目录（项目归属） */
+  project: string | null
   model: string | null
   input: number | null
   output: number | null
@@ -68,21 +70,37 @@ function toCounters(row: UsageRow): TokenCounters {
   }
 }
 
-type LiveRead = { ok: true, days: TokenDays } | { ok: false, error: string, missing?: boolean }
+type LiveRead
+  = | { ok: true, days: TokenDays, projects: TokenProjectDays }
+    | { ok: false, error: string, missing?: boolean }
 
-/** 实读 ZCode：按天 × 模型聚合后交给共享逻辑去合并 */
+/**
+ * 实读 ZCode：SQL 已经按「天 × 项目 × 模型」聚合，这里同时铺出两层 ——
+ * 按模型的 days（趋势 / 模型占比）与按项目的工作目录（项目占比）。
+ *
+ * 注意**必须相加而不是赋值**：同一个「天 × 模型」现在会有每个项目各一行。
+ */
 async function readZcodeLive(): Promise<LiveRead> {
   try {
     const rows = await invoke<UsageRow[]>('token_zcode_rows')
     const days: TokenDays = {}
+    const projects: TokenProjectDays = {}
 
     for (const row of rows) {
       if (!isDateKey(row.day) || !row.model)
         continue
+      const counters = toCounters(row)
       const modelDays = (days[row.day] ??= {})
-      modelDays[row.model] = toCounters(row)
+      modelDays[row.model] = addCounters(modelDays[row.model] ?? emptyCounters(), counters)
+
+      // 没有工作目录的行只进模型口径(项目层不落账 —— 不在项目里的不算项目)
+      const project = normalizeProjectPath(row.project ?? '')
+      if (project) {
+        const projectDays = (projects[row.day] ??= {})
+        projectDays[project] = addCounters(projectDays[project] ?? emptyCounters(), counters)
+      }
     }
-    return { ok: true, days }
+    return { ok: true, days, projects }
   }
   catch (error) {
     return { ok: false, error: errorText(error, '读取 ZCode 用量失败') }
@@ -138,13 +156,17 @@ async function readCodeBuddyLive(): Promise<LiveRead> {
 
   const signature = files.map(item => `${item.path}:${item.mtimeMs}:${item.size}`).join('|')
   if (codebuddyCache?.signature === signature)
-    return { ok: true, days: codebuddyCache.days }
+    return { ok: true, days: codebuddyCache.days, projects: {} }
 
   const state = createCodeBuddyParseState()
   const days: TokenDays = {}
   for (const file of files) {
     try {
-      collectCodeBuddyLogText(await invoke<string>('fs_read_text', { path: file.path }), state, days)
+      collectCodeBuddyLogText(
+        await invoke<string>('fs_read_text', { path: file.path }),
+        state,
+        days,
+      )
     }
     catch {
       // 单个文件读不了（被占用 / 编码异常）只少几条记录，不影响其余
@@ -152,7 +174,8 @@ async function readCodeBuddyLive(): Promise<LiveRead> {
   }
 
   codebuddyCache = { signature, days }
-  return { ok: true, days }
+  // 扩展日志没有工作目录:这个来源不产生项目归属(见 codebuddy-log.ts 的文件头)
+  return { ok: true, days, projects: {} }
 }
 
 // ---------- DSH / WorkBuddy / Qoder(会话目录,同一副骨架) ----------
@@ -164,9 +187,15 @@ interface SessionFile {
   size: number
 }
 
+/** 单个会话文件解析出来的两层:按天×模型,以及按天×项目 */
+interface SessionParse {
+  days: TokenDays
+  projects: TokenProjectDays
+}
+
 /**
  * 会话文件读取器的公共骨架:清单(很便宜)→ 没装安静跳过 → 截止过滤 →
- * **按文件**缓存(mtime + size 没变的直接复用上次解析)→ sumDays 求和 → 摘除失效键。
+ * **按文件**缓存(mtime + size 没变的直接复用上次解析)→ 两层各自求和 → 摘除失效键。
  *
  * 与 CodeBuddy 的整批缓存不同,这里按文件缓存:会话文件之间互不依赖
  * (每行自带模型 / 用量,没有跨文件的链路),只重解变化的那些就够 ——
@@ -177,8 +206,8 @@ interface SessionFile {
 async function readSessionFiles(options: {
   command: string
   errorText: string
-  cache: Map<string, { mtimeMs: number, size: number, days: TokenDays }>
-  parse: (file: SessionFile) => Promise<TokenDays>
+  cache: Map<string, { mtimeMs: number, size: number, days: TokenDays, projects: TokenProjectDays }>
+  parse: (file: SessionFile) => Promise<SessionParse>
 }): Promise<LiveRead> {
   let listing: { found?: unknown, sessions?: unknown }
   try {
@@ -206,6 +235,7 @@ async function readSessionFiles(options: {
     .filter(item => item.mtimeMs >= cutoff)
 
   let days: TokenDays = {}
+  let projects: TokenProjectDays = {}
   const alive = new Set<string>()
 
   for (const session of sessions) {
@@ -215,7 +245,7 @@ async function readSessionFiles(options: {
     if (!cached || cached.mtimeMs !== session.mtimeMs || cached.size !== session.size) {
       try {
         const parsed = await options.parse(session)
-        cached = { mtimeMs: session.mtimeMs, size: session.size, days: parsed }
+        cached = { mtimeMs: session.mtimeMs, size: session.size, days: parsed.days, projects: parsed.projects }
         options.cache.set(session.path, cached)
       }
       catch {
@@ -226,6 +256,7 @@ async function readSessionFiles(options: {
     }
 
     days = sumDays(days, cached.days)
+    projects = sumDays(projects, cached.projects)
   }
 
   // 会话被清理掉的就从缓存里摘掉,不然内存里会一直留着它们
@@ -234,12 +265,12 @@ async function readSessionFiles(options: {
       options.cache.delete(path)
   }
 
-  return { ok: true, days }
+  return { ok: true, days, projects }
 }
 
 // ---------- DeepSeek Harness(~/.dsh/sessions) ----------
 
-const dshCache = new Map<string, { mtimeMs: number, size: number, days: TokenDays }>()
+const dshCache = new Map<string, { mtimeMs: number, size: number, days: TokenDays, projects: TokenProjectDays }>()
 
 /**
  * 实读 DSH。会话文件逐帧 zstd 压缩 —— 浏览器没有解码 API,
@@ -251,16 +282,17 @@ async function readDshLive(): Promise<LiveRead> {
     errorText: '读取 DSH 会话目录失败',
     cache: dshCache,
     parse: async (file) => {
-      const parsed: TokenDays = {}
-      collectDshSessionText(await invoke<string>('token_zstd_decode', { path: file.path }), parsed)
-      return parsed
+      const days: TokenDays = {}
+      const projects: TokenProjectDays = {}
+      collectDshSessionText(await invoke<string>('token_zstd_decode', { path: file.path }), days, projects)
+      return { days, projects }
     },
   })
 }
 
 // ---------- WorkBuddy(~/.workbuddy/projects) ----------
 
-const workbuddyCache = new Map<string, { mtimeMs: number, size: number, days: TokenDays }>()
+const workbuddyCache = new Map<string, { mtimeMs: number, size: number, days: TokenDays, projects: TokenProjectDays }>()
 
 /**
  * 实读 WorkBuddy。正文按路径读回来自己解析 ——
@@ -272,16 +304,17 @@ async function readWorkBuddyLive(): Promise<LiveRead> {
     errorText: '读取 WorkBuddy 会话目录失败',
     cache: workbuddyCache,
     parse: async (file) => {
-      const parsed: TokenDays = {}
-      collectWorkBuddySessionText(await invoke<string>('fs_read_text', { path: file.path }), parsed)
-      return parsed
+      const days: TokenDays = {}
+      const projects: TokenProjectDays = {}
+      collectWorkBuddySessionText(await invoke<string>('fs_read_text', { path: file.path }), days, projects)
+      return { days, projects }
     },
   })
 }
 
 // ---------- Qoder(~/.qoder-cn/projects) ----------
 
-const qoderCache = new Map<string, { mtimeMs: number, size: number, days: TokenDays }>()
+const qoderCache = new Map<string, { mtimeMs: number, size: number, days: TokenDays, projects: TokenProjectDays }>()
 
 /**
  * 实读 Qoder。正文按路径读回来自己解析,同样不用回 Rust 解码。
@@ -295,9 +328,10 @@ async function readQoderLive(): Promise<LiveRead> {
     errorText: '读取 Qoder 会话目录失败',
     cache: qoderCache,
     parse: async (file) => {
-      const parsed: TokenDays = {}
-      collectQoderSessionText(await invoke<string>('fs_read_text', { path: file.path }), parsed)
-      return parsed
+      const days: TokenDays = {}
+      const projects: TokenProjectDays = {}
+      collectQoderSessionText(await invoke<string>('fs_read_text', { path: file.path }), days, projects)
+      return { days, projects }
     },
   })
 }
@@ -584,11 +618,12 @@ export async function getTokenUsage(options: {
       continue
     }
 
-    const before = local.sources[sourceId]?.days ?? {}
-    const merged = pruneTokenDays(mergeDays(before, read.days), now)
-    if (!sameDays(merged, before))
+    const before = local.sources[sourceId] ?? { days: {}, projects: {} }
+    const mergedDays = pruneTokenDays(mergeDays(before.days, read.days), now)
+    const mergedProjects = pruneTokenDays(mergeDays(before.projects, read.projects), now)
+    if (!sameDays(mergedDays, before.days) || !sameDays(mergedProjects, before.projects))
       changed = true
-    sources[sourceId] = { days: merged }
+    sources[sourceId] = { days: mergedDays, projects: mergedProjects }
   }
 
   // 外观配置**不在这份分片里**：它是 theme.json 的整份内容，由 runSync 单独作为 config 推上去
