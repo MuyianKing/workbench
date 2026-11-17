@@ -65,6 +65,8 @@ pub fn load_all() {
         ("ai-news", crate::ai_news::ai_news_store().load()),
         ("etf", crate::etf::etf_store().load()),
         ("vault", crate::vault::vault_store().load()),
+        // 独立 Markdown 编辑窗口自己的明暗：首屏脚本要用到它（见 md_window.rs）
+        ("markdown-window", crate::md_window::load_prefs()),
     ] {
         if let Err(err) = result {
             crate::error_log::error(label, format!("载入失败：{err}"));
@@ -83,6 +85,7 @@ pub fn flush_all() {
     crate::vault::vault_store().flush_sync();
     crate::pin::pin_store().flush_sync();
     crate::ball::ball_store().flush_sync();
+    crate::md_window::flush_prefs();
 }
 
 // ---------- 数据文件 ----------

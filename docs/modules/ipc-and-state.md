@@ -58,7 +58,8 @@
   `E:/a/b`（设置里的路径可能就是它）会让 `SHParseDisplayName` 直接失败，资源管理器开到别处、对话框也不从你要的地方打开。
   适配层的 `windowsPath()` 是唯一收口（Rust 侧的文件操作两种分隔符都认；别在各调用方各写一遍 `replace`）。
 - 首屏快照：Tauri 没有同步 IPC，建窗口时用 `initialization_script` 注入 `window.__WB_BOOTSTRAP__`（`main.rs` 的
-  `bootstrap_script`），渲染层同步读它，第一帧就是用户设置的样子。
+  `bootstrap_script`），渲染层同步读它，第一帧就是用户设置的样子。快照只放**首帧就要用、且运行期不变**的值
+  （设置 / 主题 / 独立窗口明暗 / 构建期能力位，如禅道的 `zentaoConfigured`）：异步探测会晚一帧，把首屏布局挤动一下。
 
 ### 状态
 
@@ -77,7 +78,8 @@
   快捷启动 / 命令 + 与本机绑定的设置，含笔记文件夹 `noteDir`）、`theme.json`（外观 + 首页布局）、`token-usage.json`、
   `work-log.json` 与 `ai-news.json`（都只在本机）、`vault.json`（密码保险库，**里面只有密文**，密钥在 Windows 凭据管理器，
   见 [vault.md](vault.md)）、`mail-watch.json`（邮件后台监视的 UID 基准与上轮检查时间，见 [mail.md](mail.md)，只是通知记账，
-  不进同步仓库），加上设备标识 `device.json`，以及三份诊断落痕：`panic.log`（崩溃）、`hang.log`（挂起）、
+  不进同步仓库）、`markdown-window.json`（独立 Markdown 编辑窗口自己的明暗，见 [notes.md](notes.md)），加上设备标识
+  `device.json`，以及三份诊断落痕：`panic.log`（崩溃）、`hang.log`（挂起）、
   `error.log`（错误日志）—— 全在数据目录下（安装版
   `%APPDATA%/Workbench/data/`，开发版 `%APPDATA%/Workbench-dev/data/`；根目录 `%APPDATA%/Workbench` 是 Electron 版留下的
   Chromium 配置目录；老版本也把数据文件写在那儿，启动时由 `migrate_legacy_files` 搬进 `data/`）。

@@ -618,6 +618,16 @@ export interface BootstrapSnapshot {
   theme: EffectiveTheme
   settings: AppSettings
   themeConfig: ThemeConfig
+  /**
+   * 独立 Markdown 编辑窗口自己存过的明暗（`data\markdown-window.json`）；
+   * null = 没设过，窗口回落到 `theme`。主窗口不读它。
+   */
+  markdownWindowTheme: EffectiveTheme | null
+  /**
+   * 内嵌禅道凭据（`oauth.local.json` 的 `zentao` 节）是否配齐。
+   * 构建期常量：没配齐时顶栏不出现那颗禅道入口图标。
+   */
+  zentaoConfigured: boolean
 }
 
 /** 写 DESIGN.md 的回执：落在哪、原本是否已有这个文件（据此换提示文案） */

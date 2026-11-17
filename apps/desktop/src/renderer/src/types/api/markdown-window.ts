@@ -5,6 +5,7 @@
 
 import type { Result } from '@workbench/core'
 import type {
+  EffectiveTheme,
   MarkdownWindowContext,
 } from '../index'
 
@@ -43,4 +44,16 @@ export interface MarkdownWindowChannel {
 
   /** 最大化状态从窗口事件推：拖边缘、双击拖动带、系统快捷键都算 */
   onMarkdownWindowState: (fn: (state: { maximized: boolean }) => void) => () => void
+
+  /**
+   * 这扇窗打开的那个文件此刻的 mtime（只 stat，不读正文）。
+   * 窗口重新获得焦点时拿它和手上的基准比：不同就是别处改过，提示重新加载。
+   */
+  markdownWindowMtime: () => Promise<Result<number>>
+
+  /**
+   * 换这扇窗自己的明暗并落盘（`data\markdown-window.json`），回来的是存住的值。
+   * 只认 light / dark，不跟随系统；不影响主应用的主题。
+   */
+  setMarkdownWindowTheme: (theme: EffectiveTheme) => Promise<Result<EffectiveTheme>>
 }

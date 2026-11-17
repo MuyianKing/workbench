@@ -3,6 +3,7 @@ import { fail } from '@workbench/core'
 import { diffZentaoBugs, mergeZentaoUnread, sanitizeZentaoPollMinutes } from '@workbench/zentao'
 import { defineStore } from 'pinia'
 import { computed, ref, watch } from 'vue'
+import { initialZentaoConfigured } from '@/workbench/state'
 import { bugs as fetchBugs, session as fetchSession, onCheck, onOpened, openSite, watch as registerWatch, notify as sendNotify, login as zentaoLogin } from '@/workbench/zentao'
 import { useSettingsStore } from './settings'
 
@@ -48,6 +49,12 @@ function readableError(message: string): string {
 
 export const useZentaoStore = defineStore('zentao', () => {
   const settings = useSettingsStore()
+
+  /**
+   * 内嵌凭据配齐了没有：没配齐时顶栏不出现那颗入口（打开站点必然失败）。
+   * 构建期常量，随首屏快照同步拿到，不是运行期探测。
+   */
+  const configured = initialZentaoConfigured()
 
   /** 只在后台链里用；界面不需要它（窗口里显示的是禅道自己的登录态） */
   let session: ZentaoSession | null = null
@@ -257,6 +264,7 @@ export const useZentaoStore = defineStore('zentao', () => {
   }
 
   return {
+    configured,
     error,
     unread,
     open,

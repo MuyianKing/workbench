@@ -10,8 +10,9 @@
       .md 文件，路径与正文由 Rust 会话交过来（markdown_window_context），装 store 会与
       主窗口抢着读写同一批数据文件。
 
-      明暗不写死：入口里 applyBootstrapTheme() 按首屏快照把 data-theme / .dark 落到
-      <html> 上，tokens.css 随之切换；窗口在页面加载完成前一直藏着，不会闪白。
+      明暗不写死：入口里 applyBootstrapTheme(initialMarkdownWindowTheme()) 把这扇窗自己
+      存过的那份（没设过才回落到主应用当前明暗）落到 data-theme / .dark 上，tokens.css
+      随之切换；窗口在页面加载完成前一直藏着，不会闪白。它不跟随系统。
     -->
     <title>Markdown</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -51,6 +52,15 @@
       body.is-resizing-md-rail,
       body.is-resizing-md-rail * {
         cursor: ew-resize !important;
+        user-select: none !important;
+      }
+
+      /**
+       * 拖笔记图片的右 / 下边缘调宽高：与笔记页 global.css 里那条同一套，这扇窗没引
+       * global.css，在这里另放一份。光标的方向由 NoteEditor 写在 body 的行内样式上。
+       */
+      body.is-resizing-note-image * {
+        cursor: inherit !important;
         user-select: none !important;
       }
 

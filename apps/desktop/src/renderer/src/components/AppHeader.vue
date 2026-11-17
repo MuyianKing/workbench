@@ -99,8 +99,8 @@ const zentaoTitle = computed(() =>
       />
 
       <!-- 禅道：交给系统浏览器打开，见 docs/modules/zentao.md —— 与上面那颗折叠按钮同一排。
-           角标是「后台发现、还没点开禅道」的 Bug 数（点开即清零） -->
-      <span class="badge-host">
+           内嵌凭据没配齐时整颗都不出现（打开必然失败）；角标是「后台发现、还没点开禅道」的 Bug 数（点开即清零） -->
+      <span v-if="zentao.configured" class="badge-host">
         <el-button
           class="icon-btn"
           :icon="List"

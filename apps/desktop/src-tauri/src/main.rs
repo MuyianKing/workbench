@@ -208,11 +208,18 @@ fn toggle_main_window(app: &AppHandle) {
 /// 它连一次跨进程往返都不需要，也不阻塞渲染线程。
 ///
 /// 只注入原始设置与布局，不做 sanitize —— 收敛逻辑在 TS 侧，与异步路径用的是同一份。
+///
+/// `markdownWindowTheme` 只有独立编辑窗口用（它自己的明暗，不跟随系统与主窗口）；
+/// 主窗口拿到这个字段也不读，多一点体积而已 —— 少一条只对某扇窗成立的注入路径更省事。
 pub(crate) fn bootstrap_script() -> String {
     let data = commands::data_store().get();
     let payload = json!({
         "settings": data.get("settings").cloned().unwrap_or(Value::Null),
         "themeConfig": commands::theme_store().get(),
+        "markdownWindowTheme": crate::md_window::saved_theme(),
+        // 内嵌禅道凭据配齐了没有：顶栏那颗入口图标按它决定显不显示。放进快照是因为
+        // 配置是构建期常量，异步探测会让图标晚一帧冒出来、把旁边几颗按钮挤动一下。
+        "zentaoConfigured": crate::oauth::zentao_config().is_ok(),
     });
     format!("window.__WB_BOOTSTRAP__ = {payload};")
 }
@@ -636,6 +643,8 @@ fn main() {
             md_window::markdown_window_close,
             md_window::markdown_window_cancel_close,
             md_window::markdown_window_is_maximized,
+            md_window::markdown_window_mtime,
+            md_window::markdown_window_set_theme,
             commands::skill_list,
             commands::skill_state,
             commands::skill_sync,

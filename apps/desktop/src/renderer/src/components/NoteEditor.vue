@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import type { NoteDocument } from '@workbench/notes'
+import type { FloatingMenuItem } from '@/components/FloatingMenu.vue'
 import { Loading } from '@element-plus/icons-vue'
 import { blobToBase64 } from '@workbench/core'
-import { imageFileName, imageMarkdown, mergeEditorHotkeys, NOTE_IMAGE_MAX_BYTES, resolveNoteLink } from '@workbench/notes'
 
+import { imageFileName, imageMarkdown, mergeEditorHotkeys, NOTE_IMAGE_MAX_BYTES, resolveNoteLink } from '@workbench/notes'
 import Vditor from 'vditor'
 /**
  * 笔记正文编辑器（Vditor，即时渲染模式）。
@@ -47,13 +48,14 @@ import Vditor from 'vditor'
  *     （见 applyReadOnly 第 2 条）。
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import FloatingMenu from '@/components/FloatingMenu.vue'
 import NoteContextMenu from '@/components/NoteContextMenu.vue'
 import OverlayScrollbar from '@/components/OverlayScrollbar.vue'
 import { acceleratorOfEvent } from '@/composables/use-hotkey-recorder'
 import { notifyWarning } from '@/notify'
 import 'vditor/dist/index.css'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   note: NoteDocument
   /**
    * 当前笔记本（笔记文件夹的绝对路径）。
@@ -114,7 +116,13 @@ const props = defineProps<{
    * 右键菜单里的「大纲」项在这一档不出现（否则能从菜单把它关掉，栏里剩一条空白）。
    */
   outlinePinned?: boolean
-}>()
+}>(), {
+  /**
+   * **必须显式给 true**：布尔 prop 在父组件不传时 Vue 会转成 `false`，不是 `undefined` ——
+   * 笔记页不传这个 prop，靠默认值放行；独立窗口显式传 `false` 才挡。
+   */
+  allowImageUpload: true,
+})
 
 const emit = defineEmits<{
   /**
@@ -376,6 +384,16 @@ async function onClick(event: MouseEvent): Promise<void> {
   if (target?.closest('.vditor-toolbar, .vditor-outline'))
     return
 
+  /**
+   * 图片：源码标记（![]() 与地址）已整体藏起来（地址走 img 的 hover tooltip）。
+   * Vditor 那个「点击图片选中地址」的处理器不能放它接 —— 不然用户对着藏起来的文本
+   * 按 Backspace，会把地址一个字一个字删掉（正文看着没变，下一次保存就把图改坏了）。
+   */
+  if (target instanceof HTMLImageElement && target.closest('span[data-type="img"]')) {
+    event.stopPropagation()
+    return
+  }
+
   const node = target?.closest('[data-type="a"]')
   if (!(node instanceof HTMLElement)) {
     /**
@@ -428,6 +446,54 @@ async function onClick(event: MouseEvent): Promise<void> {
 }
 
 /**
+ * 段落行首的那一下空格。
+ *
+ * Markdown 把段落开头的 ASCII 空格当缩进丢掉（1–3 个是段落缩进，4 个起才是代码块），
+ * 而 Vditor 每次输入还会把当前块交给 Lute 重新解析（`SpinVditorIRDOM`）—— 行首第一个
+ * 普通空格连 DOM 里都留不住，所以看起来「打不进去」。
+ *
+ * 只处理**顶层普通段落、光标在整段最前面**这一档（空段落也算 —— 新起一行先打空格再写，
+ * 同样是这个动作）：把这一次空格换成 EN SPACE（U+2002）。它是正文字符，Lute 不修剪，
+ * 落进 `.md` 也是一个真正的空白字符，别的编辑器照样显示成缩进。列表项 / 引用 / 表格 /
+ * 代码块不碰（各有自己的 Markdown 语义）；第一颗 EN SPACE 打头之后，后面再按空格就是
+ * 普通空格，Lute 会照常保留。
+ */
+function insertLeadingSpace(event: KeyboardEvent): boolean {
+  if (event.type !== 'keydown' || event.isComposing || event.key !== ' ')
+    return false
+  if (event.ctrlKey || event.altKey || event.metaKey || event.shiftKey)
+    return false
+
+  const selection = window.getSelection()
+  if (!selection || selection.rangeCount === 0 || !selection.isCollapsed)
+    return false
+  const range = selection.getRangeAt(0)
+
+  const element: Element | null = range.startContainer.nodeType === Node.TEXT_NODE
+    ? range.startContainer.parentElement
+    : range.startContainer as Element | null
+  const block = element?.closest<HTMLElement>('p[data-block="0"]')
+  if (!block)
+    return false
+  // 只认顶层普通段落：列表里的段落、引用、表格、代码块各有自己的缩进语义
+  if (block.closest('li, blockquote, table, [data-type="code-block"]'))
+    return false
+
+  // 光标前必须真的什么都没有：行内空格不归这里管
+  const before = range.cloneRange()
+  before.selectNodeContents(block)
+  before.setEnd(range.startContainer, range.startOffset)
+  if (before.toString().replace(/[\u200b\ufeff]/g, '') !== '')
+    return false
+
+  event.preventDefault()
+  event.stopPropagation()
+  // 交给浏览器的输入通道：Vditor 的 input 监听会照常重排，我们的防抖保存也照常收到
+  document.execCommand('insertText', false, '\u2002')
+  return true
+}
+
+/**
  * 只读：按键也不交给 Vditor。
  *
  * 上面那条 tabindex 让这块正文重新能被聚焦，于是挂在 `pre` 上的那对 keydown / keyup
@@ -448,6 +514,8 @@ function onKeyCapture(event: KeyboardEvent): void {
   ) {
     markBottomStick()
   }
+  if (insertLeadingSpace(event))
+    return
   // 自定义快捷键命中时事件已被拦住（preventDefault + stopPropagation），这里不用再做什么
   dispatchEditorHotkey(event)
 }
@@ -529,11 +597,23 @@ function onContentInput(): void {
 /** 右键菜单的落点（视口坐标）；null 表示没开。`inTable` 是右键那一刻光标的状态，菜单据此摆不摆表格那排 */
 const menu = ref<{ x: number, y: number, inTable: boolean } | null>(null)
 
+/** 右击图片弹出的宽高预设菜单（条目见 IMAGE_MENU_ITEMS）；null 表示没开 */
+const imageMenu = ref<ImageMenuState | null>(null)
+
 function openMenu(event: MouseEvent): void {
   // 编辑器还没建好时菜单没有可点的东西（动作全在那份工具带上）；
   // 只读下同样没有：工具带被 `disabled()` 禁掉了，弹出来会是一份每一项都没反应的菜单
   if (!editor || props.readOnly)
     return
+  // 右击的是正文里的图片：出宽高预设（25 / 50 / 75 / 100% 与原始大小），不出格式菜单
+  const target = event.target
+  const imageNode = target instanceof HTMLImageElement
+    ? target.closest<HTMLElement>('span[data-type="img"]')
+    : null
+  if (target instanceof HTMLImageElement && imageNode) {
+    imageMenu.value = { x: event.clientX, y: event.clientY, img: target, node: imageNode }
+    return
+  }
   menu.value = { x: event.clientX, y: event.clientY, inTable: focusInTable() }
 }
 
@@ -657,13 +737,16 @@ function runTableAction(
 }
 
 /**
- * 抓住正文的滚动容器（`pre.vditor-reset`）。
+ * 抓住正文的滚动容器（`.vditor-ir pre.vditor-reset`）。
  *
  * Vditor 自己在这个元素上开 `overflow: auto`，原生滚动条被样式藏掉，滑块要跟着它走。
  * 初始化完成时调一次；切主题会让 Vditor 重渲染正文，顺手再抓一次（元素没换也无害）。
+ *
+ * **必须圈定在 `.vditor-ir` 里**：`pre.vditor-reset` 在文档顺序上先出现的是隐藏的
+ * wysiwyg 那份（Vditor 把三套模式的容器都建出来），抓到它滚动条就永远量不出尺寸。
  */
 function bindScrollTarget(): void {
-  scrollTarget.value = host.value?.querySelector<HTMLElement>('pre.vditor-reset') ?? null
+  scrollTarget.value = host.value?.querySelector<HTMLElement>('.vditor-ir pre.vditor-reset') ?? null
 }
 
 /**
@@ -685,6 +768,103 @@ function attachOutline(): void {
   if (element.parentElement === host)
     return
   host.appendChild(element)
+}
+
+/** Vditor 大纲里收起分支的箭头类名（见 outlineRender 的 click 处理） */
+const OUTLINE_CLOSE_CLASS = 'vditor-outline__action--close'
+
+/** 大纲分支的路径键：从顶层逐级写下的标题文本；重建后 id 会换，这条路径不会 */
+function outlineBranchKey(path: string[]): string {
+  return JSON.stringify(path)
+}
+
+/**
+ * 走一遍大纲的分支（`li > span[data-target-id] + ul`），把每一级都交给 visit。
+ *
+ * 路径按标题文本记而不是 target id：`outlineRender` 用「正文子元素序号」拼 id，
+ * 在中间插入一个标题就会让后面所有条目的 id 整体错位。
+ */
+function eachOutlineBranch(
+  root: HTMLElement,
+  visit: (row: HTMLElement, sub: HTMLElement, key: string) => void,
+): void {
+  const walk = (list: Element, path: string[]): void => {
+    for (const item of Array.from(list.children)) {
+      if (!(item instanceof HTMLElement) || item.tagName !== 'LI')
+        continue
+      const row = item.querySelector(':scope > span[data-target-id]')
+      const sub = item.querySelector(':scope > ul')
+      if (!(row instanceof HTMLElement) || !(sub instanceof HTMLElement))
+        continue
+      const label = (row.querySelector(':scope > span')?.textContent ?? '').trim()
+      const nextPath = [...path, label]
+      visit(row, sub, outlineBranchKey(nextPath))
+      walk(sub, nextPath)
+    }
+  }
+  const list = root.querySelector('.vditor-outline__content ul')
+  if (list)
+    walk(list, [])
+}
+
+/** 记下大纲里已经收起的分支（箭头转开、子列表 display:none） */
+function collapsedOutlineBranches(): Set<string> {
+  const collapsed = new Set<string>()
+  const root = editor?.vditor?.outline?.element
+  if (!(root instanceof HTMLElement))
+    return collapsed
+
+  eachOutlineBranch(root, (row, sub, key) => {
+    const action = row.querySelector(':scope > svg.vditor-outline__action')
+    if (sub.style.display === 'none' || action?.classList.contains(OUTLINE_CLOSE_CLASS))
+      collapsed.add(key)
+  })
+  return collapsed
+}
+
+/** 把上次收起的分支按同一路径补回（CSSOM 赋值，窗口的 CSP 不拦这一路） */
+function restoreOutlineBranches(collapsed: Set<string>): void {
+  if (!collapsed.size)
+    return
+  const root = editor?.vditor?.outline?.element
+  if (!(root instanceof HTMLElement))
+    return
+
+  eachOutlineBranch(root, (row, sub, key) => {
+    if (!collapsed.has(key))
+      return
+    row.querySelector(':scope > svg.vditor-outline__action')?.classList.add(OUTLINE_CLOSE_CLASS)
+    sub.style.display = 'none'
+  })
+}
+
+/** 大纲重建的补丁每个编辑器实例只打一次 */
+let outlineRenderPatched = false
+
+/**
+ * 保住大纲分支的展开 / 收起状态。
+ *
+ * Vditor 每次输入都会 `renderToc`，它无条件调 `outline.render` 把整棵目录重建一遍
+ * （`outlineRender` 直接覆写 innerHTML）—— 收起的分支（箭头 `--close` + 子列表
+ * `display:none`）就会全部重新展开。现象是「标题一加 / 字一敲，左侧目录自己弹开」。
+ *
+ * 这里包一层 render：重建前记下收起的分支，重建后按同一路径补回。只影响大纲的外观，
+ * Vditor 的渲染结果与它自己的点击监听都照旧。
+ */
+function patchOutlineRender(): void {
+  const outline = editor?.vditor?.outline
+  if (!outline || outlineRenderPatched)
+    return
+  outlineRenderPatched = true
+
+  const target = outline as unknown as { render: (vditor: unknown) => string }
+  const original = target.render.bind(outline)
+  target.render = (vditor: unknown) => {
+    const collapsed = collapsedOutlineBranches()
+    const html = original(vditor)
+    restoreOutlineBranches(collapsed)
+    return html
+  }
 }
 
 /**
@@ -711,6 +891,291 @@ function ensureOutlineOpen(): void {
   if (!element || element.style.display === 'block')
     return
   toggleOutline()
+}
+
+// ---------- 图片宽高 ----------
+
+/**
+ * 图片尺寸存进 **alt 文本**的约定：`![说明|宽x高](地址)`。
+ *
+ * Markdown / Lute 都不认 `=宽x高`、`{width=…}` 这类扩展语法（试过，原样留在正文里），
+ * 而 IR 重排会把 `<img>` 上的 width / height 属性剥掉 —— 尺寸只有写进 alt 才能活下来
+ * （alt 是普通文本，落盘、round-trip 都不丢；别的编辑器不认识就当普通说明文字）。
+ * 渲染时在这里把 alt 尾巴解析出来，落到 img 的 style 上。
+ *
+ * 三种尾巴都认：`|800x450`（宽高都定）、`|800x`（只定宽，高不设）、`|x450`（只定高）。
+ */
+const IMAGE_SIZE_PATTERN = /\|(\d*)x(\d*)$/
+
+/** 拖动热区：距图片右 / 下边缘多少像素内算「抓到把手」（右缘与右下角都是等比缩放） */
+const IMAGE_RESIZE_HOT = 10
+
+/** 最小宽度（px）：拖没了图就看不见了 */
+const IMAGE_SIZE_MIN = 40
+
+interface ImageResizeState {
+  img: HTMLImageElement
+  /** 图片所在的 IR 节点（alt 标记在里面） */
+  node: HTMLElement
+  startX: number
+  startWidth: number
+  /** 原始宽高比：拖动只等比缩放，宽定了高就跟着 */
+  ratio: number
+  maxWidth: number
+  moved: boolean
+}
+
+/** 右击图片弹出的预设菜单：`img:` 前缀的百分比按正文内容宽度算 */
+const IMAGE_MENU_ITEMS: FloatingMenuItem[] = [
+  { name: 'img:25', label: '宽度 25%' },
+  { name: 'img:50', label: '宽度 50%' },
+  { name: 'img:75', label: '宽度 75%' },
+  { name: 'img:100', label: '宽度 100%' },
+  { name: 'img:original', label: '原始大小', sep: true },
+  // 源码标记藏起来之后（见下方 CSS），键盘选中整段图片不再直观，删除给个确定的入口
+  { name: 'img:remove', label: '删除图片', danger: true },
+]
+
+interface ImageMenuState {
+  x: number
+  y: number
+  img: HTMLImageElement
+  node: HTMLElement
+}
+
+let imageResize: ImageResizeState | null = null
+let imageStyleFrame = 0
+let imageObserver: MutationObserver | null = null
+
+/** alt 标记：`[` 那枚 marker 的下一个兄弟（IR 节点里 alt 是普通文本 marker） */
+function imageAltMarker(node: HTMLElement): HTMLElement | null {
+  const open = node.querySelector(':scope > .vditor-ir__marker--bracket')
+  return open?.nextElementSibling instanceof HTMLElement ? open.nextElementSibling : null
+}
+
+/** 把 alt 尾巴里的尺寸落到 img 的 style 上；没有尾巴就清掉（Vditor 重排会剥掉行内样式） */
+function applyImageSizes(): void {
+  const element = editor?.vditor?.ir?.element
+  if (!element)
+    return
+
+  element.querySelectorAll<HTMLImageElement>('span[data-type="img"] > img').forEach((img) => {
+    // 地址以原生 tooltip 显示（悬停可见）：正文里的源码标记整段藏了，这是看地址的唯一入口
+    img.title = /^https?:/i.test(img.src) ? img.src : ''
+    const match = IMAGE_SIZE_PATTERN.exec(img.alt ?? '')
+    if (!match || (!match[1] && !match[2])) {
+      img.style.removeProperty('width')
+      img.style.removeProperty('height')
+      return
+    }
+    if (match[1])
+      img.style.width = `${match[1]}px`
+    else img.style.removeProperty('width')
+    if (match[2])
+      img.style.height = `${match[2]}px`
+    else img.style.removeProperty('height')
+  })
+}
+
+/** Vditor 每次输入都重建 DOM（行内样式同时被剥掉），用 MutationObserver 跟着重放尺寸 */
+function observeImageSizes(): void {
+  const element = editor?.vditor?.ir?.element
+  if (!element || imageObserver)
+    return
+  imageObserver = new MutationObserver(() => {
+    if (imageStyleFrame)
+      return
+    imageStyleFrame = window.requestAnimationFrame(() => {
+      imageStyleFrame = 0
+      applyImageSizes()
+    })
+  })
+  imageObserver.observe(element, { childList: true, subtree: true })
+}
+
+/** 正文内容的宽度（px）：拖动与百分比预设都以它为上限 / 基准。
+ *
+ * **必须圈定在 `.vditor-ir` 里**：Vditor 把三套模式的容器都建在宿主里，最先出现的
+ * `pre.vditor-reset` 是隐藏的 wysiwyg 那份（clientWidth 恒为 0）—— 直接查会把 0 当内容宽，
+ * 拖动与「宽度 100%」全部被压到 40px（实测踩过，现象是「一拖就变小一丢丢」）。
+ */
+function imageContentWidth(): number {
+  const content = host.value?.querySelector<HTMLElement>('.vditor-ir pre.vditor-reset')
+  const style = content ? getComputedStyle(content) : null
+  const width = content && style
+    ? content.clientWidth - Number.parseFloat(style.paddingLeft) - Number.parseFloat(style.paddingRight)
+    : 0
+  return Math.max(IMAGE_SIZE_MIN, Math.round(width))
+}
+
+/** 图片的原始宽高比；natural 尺寸还没到（图在加载）时退回当前显示比例 */
+function imageRatioOf(img: HTMLImageElement): number {
+  if (img.naturalWidth > 0 && img.naturalHeight > 0)
+    return img.naturalHeight / img.naturalWidth
+  const rect = img.getBoundingClientRect()
+  return rect.height / Math.max(1, rect.width)
+}
+
+/** 光标落点在不在拖动热区（右缘 / 右下角；一律等比缩放） */
+function imageResizeHotAt(x: number, y: number, rect: DOMRect): boolean {
+  return rect.right - x <= IMAGE_RESIZE_HOT || rect.bottom - y <= IMAGE_RESIZE_HOT
+}
+
+/** 宽度可拖的上限是正文内容宽度：style 写超了也会被 max-width 压回来，存个用不上的数没意义 */
+function imageWidthOf(state: ImageResizeState, dx: number): number {
+  return Math.min(Math.max(IMAGE_SIZE_MIN, state.startWidth + dx), state.maxWidth)
+}
+
+/**
+ * 把一份宽度落到图片上并立即保存：宽按比例带出高，尺寸写进 alt 尾巴。
+ * `width` 为 null 表示回原始大小（摘掉尾巴）。
+ */
+function applyImageWidth(img: HTMLImageElement, node: HTMLElement, width: number | null): void {
+  const altMarker = imageAltMarker(node)
+  if (!altMarker)
+    return
+  const base = (altMarker.textContent ?? '').replace(IMAGE_SIZE_PATTERN, '')
+
+  if (width === null) {
+    altMarker.textContent = base
+    img.alt = base
+    img.style.removeProperty('width')
+    img.style.removeProperty('height')
+  }
+  else {
+    const finalWidth = Math.round(Math.min(Math.max(IMAGE_SIZE_MIN, width), imageContentWidth()))
+    const height = Math.round(finalWidth * imageRatioOf(img))
+    altMarker.textContent = `${base}|${finalWidth}x${height}`
+    img.alt = altMarker.textContent
+    img.style.width = `${finalWidth}px`
+    img.style.height = `${height}px`
+  }
+  flush(currentValue())
+}
+
+function onImagePointerDown(event: PointerEvent): void {
+  if (props.readOnly || event.button !== 0)
+    return
+  const target = event.target
+  if (!(target instanceof HTMLImageElement))
+    return
+  const node = target.closest<HTMLElement>('span[data-type="img"]')
+  if (!node)
+    return
+
+  const rect = target.getBoundingClientRect()
+  if (!imageResizeHotAt(event.clientX, event.clientY, rect))
+    return
+
+  // 拦下这一下：既不让 Vditor 选中图片地址，也不让浏览器起原生拖图
+  event.preventDefault()
+  event.stopPropagation()
+
+  imageResize = {
+    img: target,
+    node,
+    startX: event.clientX,
+    startWidth: rect.width,
+    ratio: imageRatioOf(target),
+    maxWidth: imageContentWidth(),
+    moved: false,
+  }
+  document.body.classList.add('is-resizing-note-image')
+  document.body.style.cursor = 'ew-resize'
+  window.addEventListener('pointermove', onImageResizeMove)
+  window.addEventListener('pointerup', onImageResizeEnd)
+}
+
+function onImageResizeMove(event: PointerEvent): void {
+  const state = imageResize
+  if (!state)
+    return
+  const dx = event.clientX - state.startX
+  if (!state.moved && Math.abs(dx) < 3)
+    return
+  state.moved = true
+
+  // **始终等比**：宽由指针带，高按原始比例跟
+  const width = imageWidthOf(state, dx)
+  state.img.style.width = `${Math.round(width)}px`
+  state.img.style.height = `${Math.round(width * state.ratio)}px`
+}
+
+function onImageResizeEnd(): void {
+  const state = imageResize
+  imageResize = null
+  window.removeEventListener('pointermove', onImageResizeMove)
+  document.body.classList.remove('is-resizing-note-image')
+  document.body.style.cursor = ''
+  if (state)
+    delete state.img.dataset.resizeMode
+  if (!state || !state.moved)
+    return
+
+  // 尺寸写回 alt 标记（markdown 里唯一留得住的位置），随后立刻交一次保存
+  const img = state.img
+  const width = img.style.width ? Math.round(Number.parseFloat(img.style.width)) : 0
+  if (!width)
+    return
+  applyImageWidth(img, state.node, width)
+}
+
+/** 悬停在热区上给个光标提示（拖动中的光标归 body 那条管） */
+function onImagePointerHover(event: PointerEvent): void {
+  if (imageResize || props.readOnly)
+    return
+  const target = event.target
+  if (!(target instanceof HTMLImageElement) || !target.closest('span[data-type="img"]'))
+    return
+  if (imageResizeHotAt(event.clientX, event.clientY, target.getBoundingClientRect()))
+    target.dataset.resizeMode = 'scale'
+  else if (target.dataset.resizeMode)
+    delete target.dataset.resizeMode
+}
+
+/** 从热区起手时不许浏览器把图片拖走（其余位置的拖放仍归 Vditor 的粘贴 / 拖入逻辑） */
+function onImageDragStart(event: DragEvent): void {
+  const target = event.target
+  if (target instanceof HTMLImageElement && target.dataset.resizeMode)
+    event.preventDefault()
+}
+
+/** 右击图片：出宽高预设菜单，不出格式菜单 */
+function onImageMenuAction(name: string): void {
+  const state = imageMenu.value
+  if (!state)
+    return
+  imageMenu.value = null
+  if (name === 'img:original') {
+    applyImageWidth(state.img, state.node, null)
+    return
+  }
+  if (name === 'img:remove') {
+    removeImageFrom(state.node)
+    return
+  }
+  const percent = Number(name.slice('img:'.length))
+  if (!Number.isFinite(percent))
+    return
+  applyImageWidth(state.img, state.node, Math.round(imageContentWidth() * percent / 100))
+}
+
+/**
+ * 删掉一张图片（右键菜单的「删除图片」）：整枚 IR 节点摘掉，所在段落空了就一起删；
+ * 正文删空时补一个空段（Vditor 的空文档就是一份没有内容的块）。
+ *
+ * 走 DOM 手术而不是键盘删除：源码标记藏起来之后（见样式），用键盘选整段图片不再直观，
+ * 这里给一个确定的一次到位。注意 Vditor 的撤销栈不记这一次 —— 删错了靠再贴一张。
+ */
+function removeImageFrom(node: HTMLElement): void {
+  const block = node.closest<HTMLElement>('[data-block="0"]') ?? node.parentElement
+  node.remove()
+  if (block && !(block.textContent ?? '').replace(/[\u200b\ufeff]/g, '').trim() && !block.querySelector('img'))
+    block.remove()
+  const element = editor?.vditor?.ir?.element
+  if (element && !element.firstElementChild)
+    element.innerHTML = '<p data-block="0"><wbr></p>'
+  flush(currentValue())
 }
 
 /**
@@ -875,11 +1340,14 @@ onMounted(() => {
     toolbar: TOOLBAR,
     input: value => schedule(value),
     // 初始化完成那一刻：核一遍只读（编辑器可能是「已经切到只读之后」才建起来的）、
-    // 把大纲搬进右栏、钉死那一档顺手打开它
+    // 把大纲搬进右栏、钉死那一档顺手打开它；图片尺寸跟着 alt 尾巴落一遍并盯住重排
     after: () => {
       applyReadOnly()
       attachOutline()
+      patchOutlineRender()
       bindScrollTarget()
+      applyImageSizes()
+      observeImageSizes()
       if (props.outlinePinned)
         ensureOutlineOpen()
     },
@@ -921,6 +1389,17 @@ onBeforeUnmount(() => {
     outline.remove()
   editor?.destroy()
   editor = null
+  // 图片尺寸的观察器与可能还挂着的那次拖动一并收掉
+  imageObserver?.disconnect()
+  imageObserver = null
+  if (imageStyleFrame) {
+    window.cancelAnimationFrame(imageStyleFrame)
+    imageStyleFrame = 0
+  }
+  imageResize = null
+  window.removeEventListener('pointermove', onImageResizeMove)
+  document.body.classList.remove('is-resizing-note-image')
+  document.body.style.cursor = ''
 })
 
 /**
@@ -981,6 +1460,9 @@ defineExpose({
       @keydown.capture="onKeyCapture"
       @keyup.capture="onKeyCapture"
       @input="onContentInput"
+      @pointerdown.capture="onImagePointerDown"
+      @pointermove.capture="onImagePointerHover"
+      @dragstart.capture="onImageDragStart"
       @contextmenu.prevent="openMenu"
     />
 
@@ -1006,6 +1488,16 @@ defineExpose({
     :in-table="menu.inTable"
     @act="onMenuAction"
     @close="menu = null"
+  />
+
+  <!-- 右击图片的宽高预设（贴指针，与其他右键菜单同一副外壳） -->
+  <FloatingMenu
+    v-if="imageMenu"
+    :x="imageMenu.x"
+    :y="imageMenu.y"
+    :items="IMAGE_MENU_ITEMS"
+    @act="onImageMenuAction"
+    @close="imageMenu = null"
   />
 </template>
 
@@ -1218,6 +1710,27 @@ defineExpose({
  * 预览层在输入时仍被 Vditor 同步着（源码一变它就跟着重算高亮），收起那一刻就是新的。
  */
 .editor :deep(.vditor-ir__node--expand[data-type='code-block'] > .vditor-ir__preview) {
+  display: none;
+}
+
+/**
+ * 图片右 / 下边缘的拖动热区光标（热区由 `onImagePointerHover` 写在 data 属性上）；
+ * 拖动一律等比缩放。拖动中的光标与文本选择归 body 那条全局规则兜（global.css /
+ * markdown.html 各一份）。
+ */
+.editor :deep(img[data-resize-mode='scale']) {
+  cursor: ew-resize;
+}
+
+/**
+ * 图片节点的源码标记（`![alt|尺寸](地址)` 那一串）整段藏起来：IR 默认把它排在图片
+ * 旁边，上传图的长地址会一直占一大行。地址在悬停图片时以原生 tooltip 显示
+ * （`applyImageSizes` 写 `img.title`），正文里不再排出这一串。
+ *
+ * **必须连「点击图片选中地址」一起拦掉**（见 onClick）：标记藏了但 DOM 还在，
+ * Vditor 的选中是隐形的，对着它按 Backspace 会把地址一个个字删掉。
+ */
+.editor :deep(.vditor-ir__node[data-type='img'] .vditor-ir__marker) {
   display: none;
 }
 </style>

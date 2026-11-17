@@ -64,6 +64,17 @@ body.is-dragging-terminal-dock * {
 }
 
 /**
+ * 拖笔记图片的右 / 下边缘调宽高（NoteEditor 的拖动热区）：指针可能扫过正文文字，
+ * 光标与文本选择都是全局状态，只能在这里兜住。光标的方向（ew / ns / nwse）由
+ * NoteEditor 按拖动档位写在 body 的行内样式上，这里让整页跟着 body 的光标走。
+ * markdown.html 没引这份 global.css，同一套规则在那扇窗的内联样式里另有一份。
+ */
+body.is-resizing-note-image * {
+  cursor: inherit !important;
+  user-select: none !important;
+}
+
+/**
  * 拖各页那条左右分隔条：指针会扫过正文（可能是 Vditor 的可选文字、视频画布或沙箱 iframe），
  * 光标与文本选择都是全局状态，只能在这里兜住。新增一处拖动时只往下面这个列表里加一个类名。
  */

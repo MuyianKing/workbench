@@ -13,10 +13,11 @@
 //!     （见 main.rs 的 setup 与单实例回调）。
 
 use crate::notes;
+use crate::store::JsonStore;
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 use tauri::webview::{NewWindowResponse, PageLoadEvent};
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
@@ -27,10 +28,45 @@ pub const LABEL_PREFIX: &str = "markdown-";
 /// 关闭前给渲染层冲刷正文的时间上限。本地文件写盘远用不了这么久，留足冗余。
 const CLOSE_FLUSH_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// 编辑窗口自己的本机偏好（目前只有明暗）。
+///
+/// 单独一份 `data\markdown-window.json`：这扇窗不装 store，写 `theme.json` 会与主窗口那份
+/// 内存副本互相覆盖，写数据文件同理。偏好只对本机成立，不进同步仓库。
+static PREFS: OnceLock<JsonStore> = OnceLock::new();
+
+fn prefs_store() -> &'static JsonStore {
+    PREFS.get_or_init(|| JsonStore::new(crate::paths::markdown_window_file, "保存 Markdown 编辑窗口偏好"))
+}
+
+/// 启动时载入（由 commands::load_all 统一调，早于任何窗口创建）
+pub fn load_prefs() -> Result<Value, String> {
+    prefs_store().load()
+}
+
+/// 退出前同步落盘
+pub fn flush_prefs() {
+    prefs_store().flush_sync();
+}
+
+/// 偏好里存的明暗。**只认显式的 light / dark**：这扇窗不跟随系统，`system` 不是一个取值；
+/// 没存过 / 手工改坏了都回 None，渲染层据此回落到打开时主应用的明暗。
+pub fn saved_theme() -> Option<String> {
+    theme_of(&prefs_store().get())
+}
+
+fn theme_of(value: &Value) -> Option<String> {
+    match value.get("theme").and_then(Value::as_str) {
+        Some("light") => Some("light".to_string()),
+        Some("dark") => Some("dark".to_string()),
+        _ => None,
+    }
+}
+
 /// 一扇编辑窗口打开着的那个文件。
 ///
 /// `dir` / `name` 是交给 `notes::read / write` 的两个值（它们只认「根 + 相对路径」）；
-/// `path` 是规范化的绝对路径，只用来做「同一文件不重复开窗」与日志。
+/// `path` 是规范化的绝对路径，只用来做「同一文件不重复开窗」、查 mtime 与日志。
+#[derive(Clone)]
 struct Session {
     dir: String,
     name: String,
@@ -45,8 +81,8 @@ pub struct MdWindows {
 }
 
 impl MdWindows {
-    /// 按 label 取「这个窗口打开的是哪个文件」；不是编辑窗口 / 会话已清掉时返回原因。
-    fn lookup(&self, label: &str) -> Result<(String, String), String> {
+    /// 按 label 取这个窗口的会话（克隆一份）；不是编辑窗口 / 会话已清掉时返回原因。
+    fn session(&self, label: &str) -> Result<Session, String> {
         if !label.starts_with(LABEL_PREFIX) {
             return Err("这个窗口不是 Markdown 编辑窗口".into());
         }
@@ -54,10 +90,16 @@ impl MdWindows {
             .sessions
             .lock()
             .map_err(|_| "编辑窗口状态锁中毒".to_string())?;
-        let session = sessions
+        sessions
             .get(label)
-            .ok_or_else(|| "这个编辑窗口已经关闭了".to_string())?;
-        Ok((session.dir.clone(), session.name.clone()))
+            .cloned()
+            .ok_or_else(|| "这个编辑窗口已经关闭了".to_string())
+    }
+
+    /// 按 label 取「这个窗口打开的是哪个文件」；不是编辑窗口 / 会话已清掉时返回原因。
+    fn lookup(&self, label: &str) -> Result<(String, String), String> {
+        let session = self.session(label)?;
+        Ok((session.dir, session.name))
     }
 
     fn has_path(&self, path: &Path) -> Option<String> {
@@ -362,6 +404,37 @@ pub fn markdown_window_is_maximized(window: WebviewWindow) -> bool {
     window.is_maximized().unwrap_or(false)
 }
 
+/// 这扇窗打开的那个文件此刻的 mtime（只 stat，不读正文）。
+///
+/// 窗口重新获得焦点时用它判断「别处改过没有」：正文可能很大，也可能在断开的网络盘上，
+/// 每次 focus 都整篇读回来不划算。读不到 / 已经不在都回 Err，渲染层照实提示。
+#[tauri::command(async)]
+pub fn markdown_window_mtime(window: WebviewWindow, state: State<'_, MdWindows>) -> Result<u64, String> {
+    let path = state.session(window.label())?.path;
+    if !path.is_file() {
+        return Err("这一篇已经被删掉或移走了".into());
+    }
+    Ok(crate::fs_util::mtime_ms(&path))
+}
+
+/// 换这扇窗自己的明暗并落盘，回来的是存住的那个值。
+///
+/// 只认 light / dark（不跟随系统）；只允许编辑窗口调 —— 这不是主窗口的外观设置，
+/// 主窗口改全局主题仍走 `updateSettings` / theme.json。
+#[tauri::command]
+pub fn markdown_window_set_theme(window: WebviewWindow, theme: String) -> Result<String, String> {
+    if !window.label().starts_with(LABEL_PREFIX) {
+        return Err("这个窗口不是 Markdown 编辑窗口".into());
+    }
+    let next = match theme.as_str() {
+        "light" | "dark" => theme,
+        _ => return Err("编辑窗口的主题只能是 light 或 dark".into()),
+    };
+    prefs_store().set(json!({ "theme": next }));
+    prefs_store().schedule();
+    Ok(next)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -370,6 +443,16 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("wb-md-window-{tag}-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn reads_only_explicit_light_or_dark() {
+        assert_eq!(theme_of(&json!({ "theme": "light" })).as_deref(), Some("light"));
+        assert_eq!(theme_of(&json!({ "theme": "dark" })).as_deref(), Some("dark"));
+        // 跟随系统不是这扇窗的取值；坏值 / 没存过一律当作没设
+        assert_eq!(theme_of(&json!({ "theme": "system" })), None);
+        assert_eq!(theme_of(&json!({ "theme": true })), None);
+        assert_eq!(theme_of(&Value::Null), None);
     }
 
     #[test]

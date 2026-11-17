@@ -38,6 +38,9 @@ pub const PINS_FILE: &str = "pins.json";
 /// 悬浮球的记账文件（见 ball.rs）：贴在哪一侧、纵向在哪儿。
 /// 与钉图同一待遇：只对本机成立，不进同步仓库
 pub const BALL_FILE: &str = "ball.json";
+/// 独立 Markdown 编辑窗口的本机偏好（见 md_window.rs）：目前只有明暗。
+/// 与悬浮球同一待遇 —— 那扇窗不装 store、也不写 theme.json，偏好单独存一份
+pub const MARKDOWN_WINDOW_FILE: &str = "markdown-window.json";
 /// 崩溃日志（见 panic_log.rs）：release 档 panic 直接中止进程，那一下的证据只留在这里
 const PANIC_LOG_FILE: &str = "panic.log";
 /// 挂起日志（见 hang_watch.rs）：主线程停泵消息时的现场证据
@@ -184,6 +187,11 @@ pub fn pins_file() -> PathBuf {
 /// 悬浮球的记账文件
 pub fn ball_file() -> PathBuf {
     data_dir().join(BALL_FILE)
+}
+
+/// 独立 Markdown 编辑窗口的偏好文件
+pub fn markdown_window_file() -> PathBuf {
+    data_dir().join(MARKDOWN_WINDOW_FILE)
 }
 
 /// 崩溃日志（见 panic_log.rs）。与数据文件同一目录：出了「窗口凭空没了」这种怪事时，

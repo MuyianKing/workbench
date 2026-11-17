@@ -1,4 +1,4 @@
-import type { MarkdownWindowContext, Result } from '@/types'
+import type { EffectiveTheme, MarkdownWindowContext, Result } from '@/types'
 import { guard, invoke, listen } from './bridge'
 /**
  * 独立 Markdown 编辑窗口的适配层（`markdown.html`）。
@@ -51,6 +51,28 @@ export async function markdownWindowIsMaximized(): Promise<boolean> {
   return invoke<boolean>('markdown_window_is_maximized').catch(() => false)
 }
 
+/**
+ * 这扇窗打开的那个文件此刻的 mtime（只 stat，不读正文）。
+ *
+ * 窗口重新获得焦点时用它判断「别处改过没有」；与手上那个 `mtimeMs` 不同就提示重新加载。
+ * 文件被删 / 读不到时回失败（渲染层照实提示），不当成「没变」。
+ */
+export async function markdownWindowMtime(): Promise<Result<number>> {
+  return guard(invoke<number>('markdown_window_mtime'), '检查文件是否被外部修改失败')
+}
+
+/**
+ * 换这扇窗自己的明暗并落盘（`data\markdown-window.json`），回来的是存住的值。
+ *
+ * 只认 light / dark：这扇窗不跟随系统，也不改主应用的主题（主应用仍走 updateSettings）。
+ */
+export async function setMarkdownWindowTheme(theme: EffectiveTheme): Promise<Result<EffectiveTheme>> {
+  return guard(
+    invoke<EffectiveTheme>('markdown_window_set_theme', { theme }),
+    '保存编辑窗口主题失败',
+  )
+}
+
 /** 最小化 / 最大化-还原。走主窗口同款命令（它们按调用方窗口生效），失败无处可报也不影响功能 */
 export function markdownWindowMinimize(): void {
   void invoke('window_minimize')
@@ -73,7 +95,9 @@ export const markdownWindowApi = {
   markdownWindowCancelClose,
   onMarkdownWindowFlushRequest,
   markdownWindowIsMaximized,
+  markdownWindowMtime,
   markdownWindowMinimize,
   markdownWindowToggleMaximize,
   onMarkdownWindowState,
+  setMarkdownWindowTheme,
 }

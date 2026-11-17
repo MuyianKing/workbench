@@ -95,14 +95,39 @@ export function writeGlassBorder(enabled: boolean): void {
  *
  * 必须在 Element Plus 的样式表之后执行（本模块由 main.ts 在创建应用前调用，
  * 那几个样式 import 早已完成），否则会看见亮色的一瞥。
+ *
+ * `theme` 只给独立 Markdown 窗口传：它有自己的明暗（见 initialMarkdownWindowTheme），
+ * 不传时就是主应用那一份。
  */
-export function applyBootstrapTheme(): void {
+export function applyBootstrapTheme(theme?: EffectiveTheme | null): void {
   const snapshot = bootstrapSnapshot()
   if (!snapshot)
     return
 
-  writeTheme(snapshot.theme)
-  writeAccentColor(snapshot.settings.accentColor, snapshot.theme, snapshot.settings.accentInk)
+  const effective = theme ?? snapshot.theme
+  writeTheme(effective)
+  writeAccentColor(snapshot.settings.accentColor, effective, snapshot.settings.accentInk)
   // 老主题文件里没有这一项：缺省就是不画描边（与 sanitizeAppearanceSettings 同一个口径）
   writeGlassBorder(snapshot.settings.glassBorder === true)
+}
+
+/**
+ * 独立 Markdown 编辑窗口首帧用的明暗：存过就用存过的那一份，没设过时取应用当前明暗。
+ * 设过之后这扇窗就不再跟随主应用（也不跟随系统）。
+ */
+export function initialMarkdownWindowTheme(): EffectiveTheme {
+  const snapshot = bootstrapSnapshot()
+  return snapshot?.markdownWindowTheme ?? snapshot?.theme ?? 'light'
+}
+
+/**
+ * 独立 Markdown 窗口在窗口里换明暗：只改这扇窗的 `<html>`（明暗 + 按新明暗重算主题色）。
+ *
+ * 不经过 store —— 那扇窗不装 store。落盘另走 `setMarkdownWindowTheme`（Rust 那份小文件）。
+ */
+export function applyMarkdownWindowTheme(theme: EffectiveTheme): void {
+  const snapshot = bootstrapSnapshot()
+  writeTheme(theme)
+  if (snapshot)
+    writeAccentColor(snapshot.settings.accentColor, theme, snapshot.settings.accentInk)
 }

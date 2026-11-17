@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import type { NoteDocument } from '@workbench/notes'
-import { DArrowLeft, Document } from '@element-plus/icons-vue'
+import type { EffectiveTheme } from '@/types'
+import { DArrowLeft, Document, Moon, Sunny } from '@element-plus/icons-vue'
 import { clampWidth } from '@workbench/appearance'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { bootstrapSnapshot } from '@/bootstrap'
+import { applyMarkdownWindowTheme, bootstrapSnapshot, initialMarkdownWindowTheme } from '@/bootstrap'
 import EmptyState from '@/components/EmptyState.vue'
 import NoteEditor from '@/components/NoteEditor.vue'
 import PanelLoading from '@/components/PanelLoading.vue'
@@ -11,6 +12,7 @@ import { toggleOutlineRow } from '@/composables/use-outline-row-toggle'
 import { startPointerDrag } from '@/composables/use-pointer-drag'
 import { formatTimestamp } from '@/format'
 import { confirmAction, notifyError, notifyInfo } from '@/notify'
+import { applyThemeWithTransition } from '@/theme-transition'
 
 /**
  * 独立 Markdown 编辑窗口（`markdown.html`）。
@@ -24,21 +26,24 @@ import { confirmAction, notifyError, notifyInfo } from '@/notify'
  * 三颗窗口键自绘在标题栏右端（规格照 TitleBar.vue，但那份引着 store，这里照抄不引）；
  * 标题栏与底栏都标了 `data-tauri-drag-region` 兼做拖动带（双击最大化由 Tauri 接管）。
  *
- * 三件自己管的事：
+ * 四件自己管的事：
  *   1. **写盘串行**：一次输入防抖后的保存进入队列，下一笔等上一笔回来才发 ——
  *      否则两笔并发写盘会拿同一个 mtime 当基准，后一笔被 Rust 当成「别处改过」拒掉；
  *   2. **关闭握手**：Rust 先拦住窗口关闭并发 `markdown-window:flush`，这里把防抖里
  *      那一份交出去、等保存落地，再调 `markdownWindowClose` 真正销毁窗口；
  *      保存失败时问一句「仍然关闭 / 留在窗口」；
  *   3. **失败不静默**：保存失败的原因挂在底栏右侧，带一颗「重试」（重试取编辑器当前正文，
- *      因为失败那一次已经把 `saved` 推进过了，`flushAll` 不会重复交同一段）。
+ *      因为失败那一次已经把 `saved` 推进过了，`flushAll` 不会重复交同一段）；
+ *   4. **外部改动要提示重新加载**：窗口重新获得焦点时只 stat 一次磁盘 mtime，与手上的基准
+ *      不同就问「重新加载 / 保留当前内容」；保存被 Rust 以「别处改过」拒掉时也走同一条提示，
+ *      底栏把「重试」换成「重新加载」。重读会丢掉编辑器与队列里那一份（见 reloadFromDisk）。
  *
  * 这扇窗**不上传图片**（NoteEditor 的 allowImageUpload=false）：它没有「笔记本」这一层，
  * 粘贴图片会把图推到图片仓库里一个临时层级，不是这个窗口里期待的动作。
  *
  * 面板本身是按「工作台」那一版设计做的：大纲在左、正文在右，中间一条发丝线；
- * 标题栏与底栏各 52 / 34px。**主题跟随主应用快照**，窗口里没有明暗开关 ——
- * 一次编辑通常不会中途去改主题。
+ * 标题栏与底栏各 52 / 34px。**明暗是这扇窗自己的**（标题栏那枚日 / 月按钮，见下方
+ * `theme` 与 `onToggleTheme`）：不跟随系统，也不跟主应用实时联动。
  */
 const loading = ref(true)
 const loadError = ref('')
@@ -103,10 +108,30 @@ function onRailResize(event: PointerEvent): void {
 }
 
 /**
- * 打开时取一次明暗。独立窗口不跟主窗口实时联动（应用没有跨窗口的主题广播）：
- * 一次编辑通常不会中途去改主题；取的是首屏快照，与窗口创建时的设置一致。
+ * 这扇窗自己的明暗（标题栏右侧那颗日 / 月按钮切换）。
+ *
+ * **不跟随系统，也不跟主应用实时联动**：存过的那份在 `data\markdown-window.json`
+ * （不是 theme.json，见 md_window.rs），没设过时以打开那一刻主应用的明暗为初值；
+ * 入口 main.ts 已经按同一个值把 `<html>` 落到首帧，这里只是把它接成响应式的。
  */
-const theme = computed<'light' | 'dark'>(() => bootstrapSnapshot()?.theme ?? 'light')
+const theme = ref<EffectiveTheme>(initialMarkdownWindowTheme())
+
+/**
+ * 切换明暗：先落到 DOM（从按钮位置扩散），再把选择交给 Rust 落盘。
+ * 落盘失败只提示一句 —— 这一窗里已经切过去了，下次打开回到上次存住的那份。
+ */
+function onToggleTheme(event: MouseEvent): void {
+  const next: EffectiveTheme = theme.value === 'dark' ? 'light' : 'dark'
+  theme.value = next
+  applyThemeWithTransition(() => applyMarkdownWindowTheme(next), {
+    x: event.clientX,
+    y: event.clientY,
+  })
+  void api.setMarkdownWindowTheme(next).then((result) => {
+    if (!result.ok)
+      notifyError(result.error ?? '保存编辑窗口主题失败')
+  })
+}
 
 const editorRef = ref<InstanceType<typeof NoteEditor> | null>(null)
 /**
@@ -133,6 +158,14 @@ let mtimeMs = 0
 let queue: Promise<void> = Promise.resolve()
 /** 正在处理一次关闭请求：第二次点关闭只把兜底计时撤掉，别开第二份确认框 */
 let handlingClose = false
+/** 磁盘上有个和手上基准不同的版本（外部改动）：底栏据此把「重试」换成「重新加载」 */
+const externalChange = ref(false)
+/** 正在弹「重新加载」确认框：焦点回来时不叠第二个 */
+let promptingReload = false
+/** 用户选了「保留当前内容」的那个磁盘版本：同一个版本别再追问 */
+let dismissedMtime: number | null = null
+/** 保存队列的代号：按磁盘重读时加一，把重读之前排着的旧正文作废 */
+let saveEpoch = 0
 
 /** 字数：不计空白；markdown 记号照算（这是正文本身，不是渲染后的字数） */
 const countText = computed(() => {
@@ -194,19 +227,32 @@ async function load(): Promise<void> {
 }
 
 function enqueueSave(text: string): Promise<void> {
+  const epoch = saveEpoch
   pendingSaves.value += 1
   queue = queue.then(async () => {
+    // 这一轮之前按磁盘重读过：这一笔属于被换掉的那份正文，不能再写回去
+    if (epoch !== saveEpoch)
+      return
     try {
       const result = await window.workbench.markdownWindowSave(text, mtimeMs || undefined)
+      // 等回包期间按磁盘重读过了：这一笔的结果不能再改状态（否则会用旧基准清掉新状态）
+      if (epoch !== saveEpoch)
+        return
       if (result.ok && typeof result.data === 'number') {
         mtimeMs = result.data
         savedAt.value = result.data
         saveError.value = ''
+        externalChange.value = false
+        dismissedMtime = null
         return
       }
       saveError.value = result.error ?? '保存失败'
+      // 写不进去时查一次磁盘：别处改过就把「重试」换成「重新加载」（重试同一个基准必然再失败）
+      void checkExternalChange()
     }
     catch (error) {
+      if (epoch !== saveEpoch)
+        return
       saveError.value = messageOf(error)
     }
   }).finally(() => {
@@ -227,6 +273,107 @@ function retry(): void {
   if (text === undefined)
     return
   void enqueueSave(text)
+}
+
+/**
+ * 查一次磁盘上的版本和手上基准是否一致。
+ *
+ * 两个入口：**窗口重新获得焦点**（正常情况下的提示）与**一次保存被拒**（写不进去了才查）。
+ * 只 stat、不读正文，放在 focus 上是安全的。用户对同一个磁盘版本已经选过「保留当前内容」
+ * 就不再弹框（底栏那颗「重新加载」还在），避免每敲一下都撞一次确认框。
+ */
+async function checkExternalChange(): Promise<void> {
+  if (loading.value || !note.value || handlingClose || promptingReload)
+    return
+
+  const result = await window.workbench.markdownWindowMtime()
+  if (!result.ok || typeof result.data !== 'number') {
+    // 文件被删 / 读不到同样算外部变化；底栏只会留一颗「重新加载」，点了会如实报读不到
+    externalChange.value = true
+    return
+  }
+
+  const diskMtime = result.data
+  if (diskMtime === mtimeMs) {
+    externalChange.value = false
+    return
+  }
+
+  externalChange.value = true
+  if (dismissedMtime === diskMtime)
+    return
+  await promptReload(diskMtime)
+}
+
+/**
+ * 问一句「按磁盘重读」。
+ *
+ * 丢掉的是编辑器里这一份（含防抖里还没交出去的那一版），所以用确认框而不是提示条。
+ * 用户点「保留当前内容」后，同一个磁盘版本不再追问；底栏留一颗「重新加载」随时可以回来。
+ */
+async function promptReload(diskMtime?: number): Promise<void> {
+  if (promptingReload)
+    return
+  promptingReload = true
+  try {
+    // 底栏那颗按钮没有现成的 mtime：现查一次，别把已经过期的版本记成「用户已拒绝」
+    let version = diskMtime
+    if (version === undefined) {
+      const current = await window.workbench.markdownWindowMtime()
+      if (!current.ok || typeof current.data !== 'number') {
+        notifyError(current.error ?? '文件已经读不到了，无法重新加载')
+        return
+      }
+      version = current.data
+    }
+
+    const reload = await confirmAction(
+      '这个文件已在别处被修改过。重新加载会按磁盘上的版本替换编辑器里的内容，当前未保存的修改会丢掉。',
+      '文件已在别处修改',
+      { confirmButtonText: '重新加载', cancelButtonText: '保留当前内容', type: 'warning' },
+    )
+    if (!reload) {
+      dismissedMtime = version
+      return
+    }
+    await reloadFromDisk()
+  }
+  finally {
+    promptingReload = false
+  }
+}
+
+/** 按磁盘重读整份正文：丢掉编辑器与队列里那一份，基准也跟着换到磁盘版本 */
+async function reloadFromDisk(): Promise<void> {
+  // 重读之前排着的旧正文作废：它们带着旧内容，会在重读之后把磁盘那份盖回去。
+  // 已经在途的那一笔等它落地再读，免得读到一盘「写了一半」的中间态
+  saveEpoch += 1
+  await queue
+
+  const result = await window.workbench.markdownWindowContext()
+  if (!result.ok || !result.data) {
+    notifyError(result.error ?? '重新加载失败')
+    return
+  }
+
+  const context = result.data
+
+  const document: NoteDocument = {
+    rel: context.name,
+    name: context.name,
+    content: context.text,
+    mtimeMs: context.mtimeMs,
+  }
+  mtimeMs = context.mtimeMs
+  savedAt.value = context.mtimeMs
+  content.value = context.text
+  note.value = document
+  saveError.value = ''
+  externalChange.value = false
+  dismissedMtime = null
+  // NoteEditor 的 watch 只认换篇（rel 变了）；这里始终是同一篇，得主动让它整份换掉。
+  // discardAndReload 不 flush —— 否则会把编辑器里的旧正文又交出去一遍
+  editorRef.value?.discardAndReload(document)
 }
 
 /**
@@ -296,6 +443,16 @@ function onOpen(): void {
   notifyInfo('这个窗口只编辑一个文件；链接指向的笔记请回笔记页打开')
 }
 
+/**
+ * 窗口重新拿到焦点：查一次磁盘有没有被别处改过（只 stat）。
+ *
+ * 这是「在别处编辑过、切回来就能看到提示」的那条路；用户正在窗口里打字时不会触发，
+ * 那种情况下一次保存被拒会把它兜住（见 enqueueSave）。
+ */
+function onWindowFocus(): void {
+  void checkExternalChange()
+}
+
 let offFlush: (() => void) | null = null
 
 onMounted(() => {
@@ -310,6 +467,7 @@ onMounted(() => {
     maximized.value = value
   })
   window.addEventListener('keydown', onKeydown)
+  window.addEventListener('focus', onWindowFocus)
   void load()
 })
 
@@ -319,6 +477,7 @@ onBeforeUnmount(() => {
   offWindowState?.()
   offWindowState = null
   window.removeEventListener('keydown', onKeydown)
+  window.removeEventListener('focus', onWindowFocus)
 })
 </script>
 
@@ -359,6 +518,20 @@ onBeforeUnmount(() => {
             <span class="md-head__name truncate" :title="note.name">{{ note.name }}</span>
           </span>
           <span class="md-head__spacer" />
+          <!-- 这扇窗自己的明暗（不跟随系统 / 主应用），存住下次打开还是这个 -->
+          <el-tooltip :content="theme === 'dark' ? '切换到亮色' : '切换到暗色'" placement="bottom">
+            <button
+              class="md-head__theme"
+              type="button"
+              :aria-label="theme === 'dark' ? '切换到亮色' : '切换到暗色'"
+              @click="onToggleTheme"
+            >
+              <el-icon>
+                <Sunny v-if="theme === 'dark'" />
+                <Moon v-else />
+              </el-icon>
+            </button>
+          </el-tooltip>
           <div class="wctl" role="group" aria-label="窗口控制">
             <button
               class="wctl__btn"
@@ -469,8 +642,26 @@ onBeforeUnmount(() => {
             <span class="md-foot__error truncate" role="alert" :title="saveError">
               保存失败：{{ saveError }}
             </span>
-            <el-button link size="small" @click="retry">
+            <!-- 外部改过：重试还是拿旧基准，必然再失败，换成「重新加载」这条唯一能走通的路 -->
+            <el-button v-if="externalChange" link size="small" @click="promptReload()">
+              重新加载
+            </el-button>
+            <el-button v-else link size="small" @click="retry">
               重试
+            </el-button>
+          </template>
+          <template v-else-if="externalChange">
+            <span
+              class="md-foot__status is-run"
+              role="status"
+              aria-live="polite"
+              data-tauri-drag-region
+            >
+              <span class="md-foot__dot" aria-hidden="true" data-tauri-drag-region />
+              文件已在别处修改
+            </span>
+            <el-button link size="small" @click="promptReload()">
+              重新加载
             </el-button>
           </template>
           <span
@@ -576,6 +767,38 @@ onBeforeUnmount(() => {
 
 .md-head__spacer {
   flex: 1 1 auto;
+}
+
+/**
+ * 标题栏里的明暗切换：应用按钮，不是窗口键 —— 所以是手型光标、方一点的热区，
+ * 与右端那三颗 46px 的窗口键明显分开。拖动标记只认直接按中的元素，按它不会拖窗。
+ */
+.md-head__theme {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 32px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--ink-3);
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.md-head__theme:hover {
+  background: var(--bg-inset);
+  color: var(--ink);
+}
+
+.md-head__theme:active {
+  background: var(--bg-subtle);
+}
+
+.md-head__theme .el-icon {
+  font-size: 15px;
 }
 
 /* ---------- 窗口键（与 TitleBar.vue 同一套规格） ---------- */
@@ -920,6 +1143,8 @@ onBeforeUnmount(() => {
 }
 
 /* 标题的节奏：比 Vditor 自带的那套更松一点，贴近工作台设计稿 */
+/* 字号必须逐级递减：h4 原来写 1em，而 h5 / h6 落在 Vditor 默认的 1.13em / 1em 上，H4 反而比 H5 小。
+   h5 / h6 一并在这里定死，别让默认值漏进来。 */
 .md-doc :deep(.vditor-reset h1) {
   margin: 0 0 var(--sp-4);
   font-size: 1.9em;
@@ -941,7 +1166,17 @@ onBeforeUnmount(() => {
 
 .md-doc :deep(.vditor-reset h4) {
   margin: var(--sp-4) 0 var(--sp-1);
-  font-size: 1em;
+  font-size: 1.06em;
+}
+
+.md-doc :deep(.vditor-reset h5) {
+  margin: var(--sp-3) 0 var(--sp-1);
+  font-size: 0.98em;
+}
+
+.md-doc :deep(.vditor-reset h6) {
+  margin: var(--sp-3) 0 var(--sp-1);
+  font-size: 0.92em;
 }
 
 /* 系统开了「减少动态效果」：栏宽直接跳、箭头直接转向，不做过渡 */

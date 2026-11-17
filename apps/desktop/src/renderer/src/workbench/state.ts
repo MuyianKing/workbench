@@ -1,5 +1,5 @@
 import type { AppearanceSettings, ThemeConfig } from '@workbench/appearance'
-import type { AccountProfile, ActiveSession, ActivityKind, ActivityView, AppSettings, CommandEntry, CommandInput, CommandPatch, IconCacheEntry, PersistedData, Project, ProjectGroup, ProjectPatch, QuickApp, QuickAppInput, QuickAppList, QuickAppPatch } from '@/types'
+import type { AccountProfile, ActiveSession, ActivityKind, ActivityView, AppSettings, CommandEntry, CommandInput, CommandPatch, EffectiveTheme, IconCacheEntry, PersistedData, Project, ProjectGroup, ProjectPatch, QuickApp, QuickAppInput, QuickAppList, QuickAppPatch } from '@/types'
 import { DEFAULT_THEME, sameThemeContent, sanitizeTheme } from '@workbench/appearance'
 /**
  * 渲染层持有的持久化状态：项目 / 分组 / 快捷启动 / 命令 / 设置 / 首页布局 / 活跃度。
@@ -24,6 +24,8 @@ let loaded = false
 interface RawBootstrap {
   settings?: unknown
   themeConfig?: unknown
+  markdownWindowTheme?: unknown
+  zentaoConfigured?: unknown
 }
 
 function rawBootstrap(): RawBootstrap | null {
@@ -49,6 +51,25 @@ export function initialSettings(): AppSettings {
 export function initialTheme(): ThemeConfig {
   const raw = rawBootstrap()
   return sanitizeTheme(migrateAppearanceIntoTheme(raw?.themeConfig, raw?.settings))
+}
+
+/**
+ * 独立 Markdown 编辑窗口自己存过的明暗（`data\markdown-window.json`）。
+ *
+ * 只认显式的 light / dark —— 这扇窗不跟随系统，`system` 不是合法值；没存过 /
+ * 认不出来都回 null，由窗口回落到打开时主应用的明暗。
+ */
+export function initialMarkdownWindowTheme(): EffectiveTheme | null {
+  const value = rawBootstrap()?.markdownWindowTheme
+  return value === 'light' || value === 'dark' ? value : null
+}
+
+/**
+ * 内嵌禅道凭据是否配齐（构建期常量，随首屏快照同步带下来）。
+ * 没配齐时顶栏不出现那颗入口图标；拿不到快照（预览 / 测试）一律按没配处理。
+ */
+export function initialZentaoConfigured(): boolean {
+  return rawBootstrap()?.zentaoConfigured === true
 }
 
 /**

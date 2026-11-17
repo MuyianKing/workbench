@@ -145,6 +145,8 @@ export const systemApi = {
     theme: resolveTheme(state.initialSettings().theme),
     settings: state.initialSettings(),
     themeConfig: state.initialTheme(),
+    markdownWindowTheme: state.initialMarkdownWindowTheme(),
+    zentaoConfigured: state.initialZentaoConfigured(),
   }),
 
   // ---------- 系统 ----------

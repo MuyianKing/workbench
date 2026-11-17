@@ -7,8 +7,9 @@
 
 ## 约束
 
-- 凭据由 `oauth.local.json` 的 `zentao` 节构建期注入（部署根 + 账号 + 密码）；配置缺失时打开浏览器会失败，界面弹一句提示
-  （`ElMessage`）。账号密码仅由 Rust 读取，不进渲染层，**也不带进浏览器**（只用于后台检查的 API 会话）。
+- 凭据由 `oauth.local.json` 的 `zentao` 节构建期注入（部署根 + 账号 + 密码）；**没配齐时顶栏那颗入口图标整颗不渲染**
+  （`configured` 是构建期常量，随首屏快照的 `zentaoConfigured` 同步下发，不做运行期探测 —— 异步探测会让图标晚一帧冒出来、
+  挤动旁边几颗按钮）。手动调 `zentao_open_site` 仍会失败，界面弹一句提示（`ElMessage`）。账号密码仅由 Rust 读取，不进渲染层，**也不带进浏览器**（只用于后台检查的 API 会话）。
 - **不在应用里内嵌禅道页面**：服务端对每个响应都发 `X-Frame-Options: SAMEORIGIN`，跨源 iframe 会被直接拒绝渲染；独立窗口
   那套（远程 webview + 免登录脚本）已按需求拿掉，不要再加回来。站点交给系统浏览器，是顶层文档、也是用户自己的登录态。
 - **不做自动登录**：外部浏览器没有可注入脚本的地方。浏览器里第一次打开要手登一次，勾「保持登录」后由禅道自己种 30 天
@@ -33,7 +34,8 @@
 
 ### 打开站点
 
-`AppHeader.vue` 那一排里的禅道图标（收起 / 展开菜单那颗的右边）是它唯一的入口：`stores/zentao.ts` 的 `open()` → 适配层
+`AppHeader.vue` 那一排里的禅道图标（收起 / 展开菜单那颗的右边；`v-if="zentao.configured"`，配置没配齐时整颗不存在）是它唯一的入口：
+`stores/zentao.ts` 的 `open()` → 适配层
 `workbench/zentao.ts` 的 `openSite()` → 命令 `zentao_open_site` → `zentao.rs` 的 `open_site()` → `system::open_external`。
 地址取内嵌配置的部署根下的固定页面 `my.html`（`normalize_base_url` 把配置收敛到根，也接受 `my.html` /
 `my-work*.html` 页面地址并收敛到根），**不带任何凭据**。每次点击都交给系统默认

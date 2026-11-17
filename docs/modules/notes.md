@@ -75,6 +75,30 @@
 - **`input` 回调不是同步到的**（内部有处理延迟），换篇 / 卸载不能只看防抖那份，要 `getValue()` 现取；交出去的
   正文**必须带它属于哪一篇**（`{ rel, content }`）—— 换上来的正是「当前选中项」，只按选中项取路径会把上一篇
   写进刚点开的那篇。
+- **段落行首的空格**：Markdown 把段落开头的 ASCII 空格当缩进丢掉（1–3 个是段落缩进、4 个起才是代码块），
+  Vditor 每次输入还会把当前块交给 Lute 重解析（`SpinVditorIRDOM`），所以行首第一个普通空格连 DOM 里都留不住
+  （`ir/input.ts` 在 `startOffset === 0` 时直接 `startSpace = false` 进入重排）。`NoteEditor` 的
+  `insertLeadingSpace` 在 keydown 捕获里只对「顶层普通段落 + 光标在整段最前面」这一档（空段落也算），
+  把空格换成 **EN SPACE（U+2002）**：它是正文字符，Lute 不修剪，落进 `.md` 也是真正的空白字符，
+  其它编辑器照样显示成缩进。列表项 / 引用 / 表格 / 代码块不碰（各有自己的缩进语义）；第一颗 EN SPACE
+  打头之后，后续普通空格 Lute 会照常保留。
+- **图片宽高**：Markdown / Lute 都不认 `=宽x高`、`{width=…}` 这类扩展语法（原样留在正文里），IR 重排还会把
+  `<img>` 上的 width / height 属性剥掉 —— 尺寸只有写进 **alt 文本**才留得住：`![说明|宽x高](地址)`，
+  **宽高一起写**（高按图片原始比例算），别的编辑器不认识就当普通 alt 文字。调整的两条路：
+  **右击图片**出预设菜单（宽度 25 / 50 / 75 / 100% 按正文内容宽度算 + 原始大小，FloatingMenu 外壳），
+  或者拖图片**右缘 / 右下角**的热区等比缩放（宽由指针带、高按原始比例跟；上限正文内容宽，下限 40px），
+  拖完 / 点完立即 `flush`。渲染侧 `applyImageSizes` 把尾巴解析到 img 的 style 上，Vditor 的输入路径会剥
+  行内样式，重排后由 MutationObserver 重放（`observeImageSizes`）。拖动中的光标与文本选择走 body 级兜底
+  （global.css 与 markdown.html 的内联样式各一份，光标方向由 JS 写在 body 行内样式上）。
+  **量内容宽必须查 `.vditor-ir pre.vditor-reset`**：Vditor 把三套模式的容器都建在宿主里，文档顺序上先出现的
+  `pre.vditor-reset` 是隐藏的 wysiwyg 那份（clientWidth 恒为 0）—— 裸查 `pre.vditor-reset` 会把 0 当内容宽，
+  拖动与「宽度 100%」全被压到 40px（实测踩过，现象是「一拖就变小一丢丢」）。
+- **图片节点的源码标记整段藏起来**（`![]() ` 与地址那一串，`NoteEditor` 样式 `display: none`）：IR 默认把
+  这串排在图片旁边，上传图的长地址会一直占一大行。地址在**悬停图片时以原生 tooltip 显示**
+  （`applyImageSizes` 写 `img.title`，只认 http/https）。**点击图片必须拦掉 Vditor 的「选中地址」**
+  （`onClick` 捕获里 `stopPropagation`）：标记藏了但 DOM 还在，那个选中是隐形的，对着它按 Backspace 会把
+  地址一个个字删掉。删除图片走右键菜单「**删除图片**」（`removeImageFrom`：整枚 IR 节点摘掉、空段落一起删、
+  正文删空补一个空段）—— 源码藏了之后键盘选整段不再直观，这里给确定入口；Vditor 的撤销栈不记这一次。
 - **上传期间挂 loading 角标**（`uploading`）：一次上传一次 `git push`，几秒很正常，这几秒正文什么都不出现。
   收尾只放 `finally`；别用 `v-loading` 遮罩 —— 上传时用户还在写，遮罩会锁住正文。
 - **空文档在 Vditor 是 `'\n'` 不是 `''`**：两者不算改动（`sameText`）—— 照实写会让每打开一次空笔记就给空文件
@@ -82,7 +106,9 @@
   `saveContent`：路径不在树里就整次不写。
 - **动作一律交回 Vditor**：右键菜单只记动作名、按名字点工具带按钮，别另写一套格式化（选区、markdown 往返、
   撤销栈都会分叉）。工具带只是不显示、仍在 DOM，所以 `TOOLBAR` 删项前先看菜单有没有用。
-- **正文滚动条自绘**（`OverlayScrollbar.vue` + `use-overlay-scrollbar.ts`）：`pre.vditor-reset` 才是滚动容器，
+- **正文滚动条自绘**（`OverlayScrollbar.vue` + `use-overlay-scrollbar.ts`）：`.vditor-ir pre.vditor-reset`
+  才是滚动容器（**必须圈定 `.vditor-ir`** —— Vditor 把三套模式的容器都建出来，文档顺序上先出现的
+  `pre.vditor-reset` 是隐藏的 wysiwyg 那份，clientWidth 恒为 0，抓到它滑块永远量不出来），
   原生条在 `NoteEditor` 用 `scrollbar-width: none` 收掉，换成 5px 胶囊滑块 —— 不占宽度、无轨道箭头、可拖可点轨。
   笔记页与独立窗口共用；后者没引 global.css，原生条本是 WebView2 带箭头那副，一并盖掉。几何在 `thumbMetrics()`
   （纯函数、有单测），监听 scroll / ResizeObserver / MutationObserver / 图片 load 四类变化。
@@ -120,6 +146,10 @@
      与选择；**别改成 `PanelResizer`** —— 那只按左栏宽度定位、改的是左栏。搬出后 `--textarea-text-color` 不再从
      `.vditor` 继承，要在栏里补一份。页头是 `align-items: center`（**不是 baseline**：混着 15px 标题与 10.5px
      辅助文字，按基线小字会浮上去），栏首「大纲」的 `line-height: 28px` 与页头垂直居中。
+  ⑤ **重建要保住分支收展**（`patchOutlineRender`）：Vditor 每次输入都会 `renderToc` → `outline.render` 把整棵
+     目录的 innerHTML 覆写一遍，收起的分支（箭头 `--close` + 子列表 `display:none`）会全部弹开 —— 现象是
+     「加个标题，左侧目录自己展开」。初始化后包一层 `outline.render`：重建前按**逐级标题文本**记下收起的分支、
+     重建后按同一路径补回。**不能按 `data-target-id` 记** —— 那是正文子元素序号，中间插入标题会让后面整体错位。
 - **正文左右留白固定 50px，剩下全给正文**：Vditor 默认把可读宽度钉在 `preview.maxWidth`（800）并居中，宽窗口
   下左右各留几百像素。现在 `preview.maxWidth` 给大数（让自动内边距退回最小），真正留白由 `NoteEditor` 的
   `padding-left / padding-right: 50px !important` 定 —— Vditor 的 `setPadding` 在 resize 时写**行内** padding，
@@ -215,7 +245,7 @@
   `NOTE_IMAGE_DIR`，不给用户配），后两层由 `imageScopeDir` 现算 —— 上传 / 列清单 / 删图三条通道用同一个算法，
   **别在某处另写路径拼法**（这三层也是素材管理成立的前提）。链路：`uploadImages` → `workbench/note.ts` 的
   `uploadNoteImage` → `sync_images.rs` 的 `publish_image`。
-- 七条不能破：
+- 八条不能破：
   1. **`upload.handler` 必须配着**：不配 Vditor 会把图片读成 base64 内联进正文，几篇带图就把 `.md` 撑到几兆；
   2. **handler 返回字符串等于报错**，成功必须返回 `null` 并自己 `insertValue`；
   3. **图片仓库地址留空时只是提示**，不退回内联、不发任何请求 —— 这是联网出口之一，必须用户显式开；
@@ -228,6 +258,9 @@
   7. **`apps/desktop/src/renderer/index.html` 里 `<meta name="referrer" content="no-referrer">` 不能删**：Gitee 的
      `/raw/` 防盗链，请求带 `Referer`（且不是 gitee.com）直接 403，而 WebView 里 `<img>` **一定会带** —— 少了它所有
      Gitee 图都裂：上传成功、地址对、curl 也 200，就是显示不出来。顺手也是隐私改进。
+  8. **`allowImageUpload` 的默认值必须用 `withDefaults` 显式写 `true`**：Vue 对没传的布尔 prop 会转成 `false`
+     （不是 `undefined`），只声明 `allowImageUpload?: boolean` 的话，笔记页不传也会被当成独立编辑窗口 ——
+     粘贴图片直接报「这个编辑窗口不上传图片」。独立窗口要挡的那一档再显式传 `false`。
 - 克隆目录是数据根目录下的 `image-sync`（安装版 `%APPDATA%/Workbench/image-sync`，开发版
   `%APPDATA%/Workbench-dev/image-sync`），**与用量同步分开两份**。
 
@@ -322,12 +355,28 @@ notes store 里只在「重读这个文件夹」几处与每次同步后探一�
 - **铺满整窗**：窗口里只有一块 `.md-panel`（`--bg-surface`），**贴到窗口四边** —— 不留那圈画布底色，
   也不画外边框 / 圆角 / 卡片阴影（那会让它像浮着的一张纸）；层次只靠标题栏与底栏那两条发丝线。标题栏 52px、
   底栏 34px，加载与打开失败也落在这块面板里。标题栏左边是文件图标与文件名（`Markdown` 副行已删），
-  右端三颗自绘窗口键。
+  右端是明暗切换与三颗自绘窗口键。
+- **明暗单独存**：标题栏那枚日 / 月按钮切这扇窗自己的明暗，落 `data\markdown-window.json` 的
+  `{ "theme": "light" | "dark" }`（`md_window.rs`，JsonStore 防抖落盘、退出前 `flush_all` 一起写）。
+  **不跟随系统、也不写 `theme.json`**（这扇窗不装 store，写主窗口那份会互相覆盖）；取值只有 light / dark，
+  `system` / 改坏的值一律当没设过。没设过时以打开那一刻主应用的明暗为初值（首屏快照经
+  `initialMarkdownWindowTheme()` 在 mount 前落到 `<html>`，见入口 `main.ts`），设过之后固定用它。
+  切换从按钮位置扩散（`applyThemeWithTransition`），主题色按新明暗重算；落盘失败只提示一句，本次窗口里
+  已经切过去了。它只对本机成立，不进同步仓库。同时开着多扇编辑窗口时各窗各切各的，盘上留下最后切换的那一份
+  （窗口之间没有主题广播）。
 - **底栏保存状态**：`保存中…`（队列里还有笔数）→ `已保存 · MM-DD HH:mm`（`savedAt`，读盘与每次落盘后更新）；失败
   切 `保存失败`（`--st-fail`）。状态只展示，写盘仍走串行队列。
-- **底栏**：最左是大纲开关（无边框改版后从标题栏挪下来），接着保存状态（失败改显原因与「重试」）；右端是「N 字」
-  （**非空白字符数，含 markdown 记号** —— 正文本身，不是渲染结果）+ `Markdown`。整条标拖动区（按钮自己不拖）。
-- **左侧大纲**：目录与正文两列（`.md-body`），左栏 `.md-rail` **默认 320px、可拖**（这扇窗不接主题、不写
+- **底栏**：最左是大纲开关（无边框改版后从标题栏挪下来），接着保存状态（失败改显原因与「重试」；外部改过时
+  那颗换成「重新加载」）；右端是「N 字」（**非空白字符数，含 markdown 记号** —— 正文本身，不是渲染结果）+ `Markdown`。
+  整条标拖动区（按钮自己不拖）。
+- **外部改动的提示与重读**：窗口重新获得焦点时调 `markdown_window_mtime` **只 stat** 一次磁盘（不整篇读回来，
+  笔记可能在网络盘上），mtime 与手上的基准不同就问「重新加载 / 保留当前内容」；一次保存被 Rust 以「别处被改过 /
+  已被删掉」拒掉时也走同一条检查（同一个磁盘版本选过「保留当前内容」就不再弹第二次，避免每敲一下都撞确认框）。
+  选「重新加载」走 `markdown_window_context` 重读，并调 `NoteEditor` 的 `discardAndReload`（**不 flush**，
+  否则会把编辑器里的旧正文再交一遍）；选「保留当前内容」后底栏留一颗「重新加载」，随时可以回来。重读时队列代号
+  `saveEpoch` 加一：重读前排着的旧正文作废，在途那一笔等它落地再读，避免旧内容把磁盘那份盖回去。文件被删 /
+  读不到时照样标成外部变化，点重读会如实报原因。
+- **左侧大纲**：目录与正文两列（`.md-body`），左栏 `.md-rail` **默认 320px、可拖**（这扇窗不写
   theme.json；宽度只活在本次窗口，关窗回 320。区间沿用 `noteRailWidth` 的 160–420，见 `clampWidth('noteRailWidth', …)`）。
   拖右缘高热区改宽，拖动挂 `body.is-resizing-md-rail`（这扇窗没引 global.css，光标与选择由 markdown.html 的内联
   样式兜住）；热区落在栏右内边距里、是栏的子元素，静止只露正中小竖条。笔记页那条宽度是 theme.json 的
@@ -340,7 +389,8 @@ notes store 里只在「重读这个文件夹」几处与每次同步后探一�
   窄窗口（< 820px）打开时默认收起。**栏宽不跟正文抢**。
 - **正文滚动条**：原生条收掉，由共享 `OverlayScrollbar` 画。这扇窗没引 global.css，原生条本是 WebView2 带箭头
   那副，一并盖掉。正文排版单独松一档（15.5px / 1.8、单行约 1200px、左右内边距居中），只在 `MarkdownWindowApp`
-  的 scoped 样式里，笔记页不受影响。
+  的 scoped 样式里，笔记页不受影响。标题字号也在这扇窗里自成一套：1.9 / 1.32 / 1.14 / 1.06 / 0.98 / 0.92em
+  **逐级递减**；h5 / h6 必须一起覆盖 —— 只改到 h4 的话，h5 / h6 会落回 Vditor 默认的 1.13 / 1em，H4 反而比 H5 小。
 - **关闭是握手**：Rust 先 `prevent_close` 并推 `markdown-window:flush`，渲染层先回 `markdown_window_cancel_close`
   撤掉兜底计时，再把防抖那份交出去、等保存落地，最后 `markdown_window_close` 销毁；保存失败问「仍然关闭 / 留在窗口」。
   收不到回执时 10 秒兜底销毁，防止永远关不掉。
@@ -350,8 +400,8 @@ notes store 里只在「重读这个文件夹」几处与每次同步后探一�
   顶 153px。所以那段 `<style>` 里有 `body > svg { position: absolute;
   width: 0; height: 0; overflow: hidden }` 补回尺寸；**别删它**，也别在五个有内联 `<style>` 的入口
   （markdown / video / capture / pin / ball）里改用行内 style 属性（见 [ipc-and-state.md](ipc-and-state.md) 的 CSP 一条）。
-- 已知取舍：独立窗口不上传图片、打开后不跟随主窗口实时换主题、正文里的相对链接不支持跳转（只编辑当前文件，点了
-  如实提示）。
+- 已知取舍：独立窗口不上传图片、明暗只在打开时取一次初值（之后不跟主窗口实时联动，但窗口里可以自己切）、
+  正文里的相对链接不支持跳转（只编辑当前文件，点了如实提示）。
 
 ## 实现
 

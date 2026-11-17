@@ -1,6 +1,6 @@
 import { createApp } from 'vue'
 
-import { applyBootstrapTheme } from '@/bootstrap'
+import { applyBootstrapTheme, initialMarkdownWindowTheme } from '@/bootstrap'
 import { installTauriWorkbench } from '@/workbench'
 import MarkdownWindowApp from './MarkdownWindowApp.vue'
 
@@ -18,7 +18,10 @@ import '@/styles/tokens.css'
  * 与遮罩 / 钉图 / 悬浮球 / 视频窗口同一条口径：只装后端适配层，不装 Pinia store、
  * 不 initState（两个 JS 上下文都去落盘同一份数据文件会互相覆盖，见 docs/modules/notes.md）。
  * 打开的是哪个文件由 Rust 会话持有，这扇窗只拿到文件名、正文与 mtime。
+ *
+ * 明暗用**这扇窗自己存的那一份**（没设过才回落到主应用当前明暗）：它不跟随系统，
+ * 所以首帧那次落地不能直接照搬主应用的快照。
  */
 installTauriWorkbench()
-applyBootstrapTheme()
+applyBootstrapTheme(initialMarkdownWindowTheme())
 createApp(MarkdownWindowApp).mount('#markdown-window')
