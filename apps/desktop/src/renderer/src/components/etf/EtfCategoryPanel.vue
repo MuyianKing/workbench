@@ -1,24 +1,33 @@
 <script setup lang="ts">
 import type { EtfCategorySummary } from '@workbench/etf'
+import type { CategoryRow, CategorySortKey, CategorySortOrder } from './etf-category-rows'
 import { DataAnalysis } from '@element-plus/icons-vue'
 import { formatYiNumber } from '@workbench/etf'
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import GatewayTable from '@/components/gateway/GatewayTable.vue'
+import { sortCategoryRows } from './etf-category-rows'
 
 /**
- * 指数类别归集表：跟踪同一指数的多只 ETF 合并观察（按近一月降序），
+ * 指数类别归集表：跟踪同一指数的多只 ETF 合并观察（默认按近一月降序，
+ * 表头各列可点排序，与分品种表一致）。外观走 TBuddy 那套透明表格（GatewayTable）。
  * 末行「全部」是合计（自带在数据里，不用 el-table 的合计行——那个自带实底色，
- * 放在透明外壳里会突兀）。外观走 TBuddy 那套透明表格（GatewayTable）。
+ * 放在透明外壳里会突兀），排序时永远钉在末行。
  */
 const props = defineProps<{
   categories: EtfCategorySummary[]
 }>()
 
-/** 行:类别各一行 + 末行合计（口径与各列一致：份额一位、市值取整、金额两位） */
-interface CategoryRow extends EtfCategorySummary {
-  isTotal: boolean
+/** 当前排序列与方向，null 表示保持数据默认序（近一月降序） */
+const sortKey = ref<CategorySortKey>('monthYi')
+const sortOrder = ref<CategorySortOrder>('descending')
+
+function onSortChange({ prop, order }: { prop: string | null, order: 'ascending' | 'descending' | null }): void {
+  if (prop && order)
+    sortKey.value = prop as CategorySortKey
+  sortOrder.value = order
 }
 
+/** 行:类别各一行 + 末行合计（口径与各列一致：份额一位、市值取整、金额两位） */
 const rows = computed<CategoryRow[]>(() => {
   const total: CategoryRow = {
     category: '全部',
@@ -38,7 +47,8 @@ const rows = computed<CategoryRow[]>(() => {
     total.lastShareYi += row.lastShareYi
     total.lastScaleYi += row.lastScaleYi
   }
-  return [...props.categories.map(row => ({ ...row, isTotal: false })), total]
+  const detail = props.categories.map(row => ({ ...row, isTotal: false }))
+  return sortCategoryRows([...detail, total], sortKey.value, sortOrder.value)
 })
 
 function flowClass(value: number): string {
@@ -55,35 +65,44 @@ function rowClass({ row }: { row: CategoryRow }): string {
   <section class="panel">
     <div class="panel__head">
       <h3><el-icon><DataAnalysis /></el-icon>按指数归集</h3>
-      <span class="dim">亿元 · 按近一月降序</span>
+      <span class="dim">亿元 · 表头可排序</span>
     </div>
-    <GatewayTable v-if="rows.length > 1" :data="rows" row-key="category" max-height="500" flat :row-class-name="rowClass">
-      <el-table-column label="类别" align="center" min-width="110">
+    <GatewayTable
+      v-if="rows.length > 1"
+      :data="rows"
+      row-key="category"
+      max-height="500"
+      flat
+      :row-class-name="rowClass"
+      :default-sort="{ prop: 'monthYi', order: 'descending' }"
+      @sort-change="onSortChange"
+    >
+      <el-table-column label="类别" prop="category" sortable="custom" :sort-orders="['descending', 'ascending', null]" align="center" min-width="110">
         <template #default="{ row }">
           <b>{{ row.category }}</b><span class="count">{{ row.count }} 只</span>
         </template>
       </el-table-column>
-      <el-table-column label="今日" align="center" class-name="gw-num" label-class-name="gw-num">
+      <el-table-column label="今日" prop="todayYi" sortable="custom" :sort-orders="['descending', 'ascending', null]" align="center" class-name="gw-num" label-class-name="gw-num">
         <template #default="{ row }">
           <span :class="flowClass(row.todayYi)">{{ formatYiNumber(row.todayYi, true) }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="近一周" align="center" class-name="gw-num" label-class-name="gw-num">
+      <el-table-column label="近一周" prop="weekYi" sortable="custom" :sort-orders="['descending', 'ascending', null]" align="center" class-name="gw-num" label-class-name="gw-num">
         <template #default="{ row }">
           <span :class="flowClass(row.weekYi)">{{ formatYiNumber(row.weekYi, true) }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="近一月" align="center" class-name="gw-num" label-class-name="gw-num">
+      <el-table-column label="近一月" prop="monthYi" sortable="custom" :sort-orders="['descending', 'ascending', null]" align="center" class-name="gw-num" label-class-name="gw-num">
         <template #default="{ row }">
           <span :class="flowClass(row.monthYi)">{{ formatYiNumber(row.monthYi, true) }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="份额(亿)" align="center" class-name="gw-num" label-class-name="gw-num">
+      <el-table-column label="份额(亿)" prop="lastShareYi" sortable="custom" :sort-orders="['descending', 'ascending', null]" align="center" class-name="gw-num" label-class-name="gw-num">
         <template #default="{ row }">
           {{ row.lastShareYi.toFixed(1) }}
         </template>
       </el-table-column>
-      <el-table-column label="市值(亿)" align="center" class-name="gw-num" label-class-name="gw-num">
+      <el-table-column label="市值(亿)" prop="lastScaleYi" sortable="custom" :sort-orders="['descending', 'ascending', null]" align="center" class-name="gw-num" label-class-name="gw-num">
         <template #default="{ row }">
           {{ row.lastScaleYi.toFixed(0) }}
         </template>

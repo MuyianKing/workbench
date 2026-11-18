@@ -173,9 +173,10 @@ onActivated(() => {
       <EtfSummaryCards :totals="overview.totals" />
       <EtfFlowPanel :days="flowDays" />
       <EtfScalePanel :days="overview.days" :scale-series="overview.scaleSeries" />
+      <!-- 按指数归集放在分品种前面：先看汇总再看明细 -->
+      <EtfCategoryPanel :categories="overview.categories" />
       <!-- 分品种表行数最多，让它弹性长满剩余高度：内容不满一屏时页面不剩大片空白 -->
       <EtfHoldingsPanel class="etf-grow" :etfs="overview.etfs" />
-      <EtfCategoryPanel :categories="overview.categories" />
       <EtfMatrixPanel :days="overview.days" :categories="overview.categories" />
     </template>
   </section>

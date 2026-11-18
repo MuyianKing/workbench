@@ -35,6 +35,11 @@ withDefaults(defineProps<{
   nowrap: false,
   defaultSort: undefined,
 })
+
+const emit = defineEmits<{
+  /** 表头点击排序（仅 `sortable="custom"` 的列需要，自定义行序由调用方处理） */
+  'sort-change': [data: { prop: string | null, order: 'ascending' | 'descending' | null }]
+}>()
 </script>
 
 <template>
@@ -48,6 +53,7 @@ withDefaults(defineProps<{
       table-layout="auto"
       class="gw-table__el"
       :class="{ 'is-nowrap': nowrap }"
+      @sort-change="emit('sort-change', $event)"
     >
       <slot />
     </el-table>
