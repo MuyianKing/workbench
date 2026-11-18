@@ -1,6 +1,6 @@
 import type { NoteEntry, NoteNode } from './note'
 import { describe, expect, it } from 'vitest'
-import { buildNoteTree, countNodes, countNotes, findNoteNode, isNoteFile, isValidNoteName, joinRel, normalizeRel, NOTE_HISTORY_MAX, NOTE_TREE_EXPANDED_MAX, noteAbsPath, noteChain, noteDisplayName, noteDropAllowed, noteFileName, noteNameProblem, noteRootName, parentRel, pushNoteHistory, relName, removeFromNoteHistory, resolveNoteLink, sanitizeNoteHistory, sanitizeNoteName, sanitizeNoteRoot, sanitizeNoteTreeExpanded, sortNoteNodes, uniqueNoteName } from './note'
+import { buildNoteTree, countNodes, countNotes, findNoteNode, isNoteFile, isValidNoteName, joinRel, normalizeRel, NOTE_HISTORY_MAX, NOTE_TREE_EXPANDED_MAX, noteAbsPath, noteChain, noteDisplayName, noteDropAllowed, noteFileName, noteNameProblem, noteRootName, parentRel, pushNoteHistory, relName, removeFromNoteHistory, resolveNoteLink, sameNoteText, sanitizeNoteHistory, sanitizeNoteName, sanitizeNoteRoot, sanitizeNoteTreeExpanded, shouldAskBeforeDiskReload, sortNoteNodes, uniqueNoteName } from './note'
 
 function dir(rel: string): NoteEntry {
   return { rel, name: relName(rel), isDir: true }
@@ -313,5 +313,27 @@ describe('目录树的展开清单', () => {
   it('超过上限的部分整段丢掉', () => {
     const many = Array.from({ length: NOTE_TREE_EXPANDED_MAX + 10 }, (_, i) => `目录${i}`)
     expect(sanitizeNoteTreeExpanded(many)).toHaveLength(NOTE_TREE_EXPANDED_MAX)
+  })
+})
+
+describe('自动对齐磁盘前的分歧判定', () => {
+  it('空白文档按同一份算（Vditor 的换行与磁盘空文件不算改动）', () => {
+    expect(sameNoteText('', '\n')).toBe(true)
+    expect(sameNoteText('  \n  ', '')).toBe(true)
+    expect(sameNoteText('# 一稿', '# 二稿')).toBe(false)
+  })
+
+  it('编辑器还没初始化时不问：没内容可丢', () => {
+    expect(shouldAskBeforeDiskReload(undefined, '磁盘内容')).toBe(false)
+  })
+
+  it('编辑器与磁盘一致就不问', () => {
+    expect(shouldAskBeforeDiskReload('# 同一稿', '# 同一稿')).toBe(false)
+    expect(shouldAskBeforeDiskReload('', '\n')).toBe(false)
+  })
+
+  it('编辑器与磁盘不同就问——这正是两扇窗开同一篇时不能静默丢字的那道闸', () => {
+    expect(shouldAskBeforeDiskReload('# 我这边还没落盘', '# 别处改过的')).toBe(true)
+    expect(shouldAskBeforeDiskReload('# 我这边还没落盘', '')).toBe(true)
   })
 })

@@ -164,4 +164,25 @@ describe('笔记正文的写盘基准', () => {
     files.set('周报.md', { text: '# 一稿', mtimeMs: 333 })
     expect(await store.activeChangedOnDisk()).toBe(false)
   })
+
+  it('readActiveFromDisk 只读磁盘，不动正文与基准', async () => {
+    const store = await openNote('# 一稿', 111)
+    files.set('周报.md', { text: '# 别处改的', mtimeMs: 222 })
+
+    expect(await store.readActiveFromDisk()).toEqual({ text: '# 别处改的', mtimeMs: 222 })
+    // 什么都不改——界面拿它和编辑器直接比，别让这里先把状态推进了
+    expect(store.active?.content).toBe('# 一稿')
+    expect(store.active?.mtimeMs).toBe(111)
+    expect(writeCalls).toHaveLength(0)
+  })
+
+  it('syncActiveBaseline 只更新写盘基准，不换正文', async () => {
+    const store = await openNote('# 一稿', 111)
+
+    // 内容与磁盘一致、只是 mtime 变了：把基准跟上，下一次写盘带新基准
+    store.syncActiveBaseline({ text: '# 一稿', mtimeMs: 999 })
+    expect(store.active?.content).toBe('# 一稿')
+    await store.saveContent('周报.md', '# 二稿')
+    expect(writeCalls[0]?.expected).toBe(999)
+  })
 })

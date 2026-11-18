@@ -429,8 +429,12 @@ export const useNotesStore = defineStore('notes', () => {
    * 本地未提交的改动由 Rust 的 `--autostash` 保住，拉取后原样放回来。**不清 needPush** ——
    * 那批本地改动还在，仍要等停笔 / 切页那次 syncNotes 推上去。
    *
-   * 回来同样要重扫树 + 重读打开着的那篇（远端可能改过它），与 syncNotes 同一套收尾。
-   * 返回「打开着的那篇是否变了」，由界面转达给编辑器；失败原因写 `syncError`（不弹窗，调用方决定）。
+   * 回来重扫一遍树（远端可能带来新文件 / 删文件），但**不在这里 rereadActive**：
+   * 拉取后打开篇要不要换正文，由界面那条带闸门的对齐（`pullActiveFromDisk`）决定——
+   * 编辑器手上还有没落盘的内容时必须先问，不能因为拉取就把基线/正文推进到磁盘版，
+   * 否则用户选"保留这里的"后下一次保存会越过冲突检查、盖掉别处的改动。
+   *
+   * 返回「远端是否带来了改动」（只表示 git 拉到了东西），由界面决定接下来怎么对齐。
    */
   async function pullNotes(): Promise<boolean> {
     const current = root.value
@@ -447,11 +451,11 @@ export const useNotesStore = defineStore('notes', () => {
         return false
       }
 
-      // 没有新东西就不重扫、不重读：省一次整棵树的磁盘遍历
+      // 没有新东西就不重扫：省一次整棵树的磁盘遍历
       if (!result.data.received)
         return false
       await reload()
-      return await rereadActive()
+      return true
     }
     finally {
       syncing.value = false
@@ -502,6 +506,35 @@ export const useNotesStore = defineStore('notes', () => {
 
     const result = await window.workbench.readNote(root.value, current.rel)
     return result.ok && !!result.data && result.data.text !== current.content
+  }
+
+  /**
+   * 读一次磁盘上打开着的那一篇，只读、不动任何状态（不碰 active / 基准 / 编辑器）。
+   *
+   * 给界面拿它和编辑器里的正文直接比——这是"要不要问按磁盘重读"的唯一真源，
+   * 不能拿 store.active.content 当判据：那条基线可能被拉取推进过，是过期的。
+   * 读不到（文件被删 / 磁盘出错）返回 null，界面据此跳过对齐。
+   */
+  async function readActiveFromDisk(): Promise<{ text: string, mtimeMs: number } | null> {
+    const current = active.value
+    if (!current)
+      return null
+    const result = await window.workbench.readNote(root.value, current.rel)
+    return result.ok && result.data ? result.data : null
+  }
+
+  /**
+   * 把打开篇的写盘基准跟上磁盘版本，**不动正文**。
+   *
+   * 用于"编辑器内容和磁盘一致、只是 mtime 变了"那一档：下一次保存该以磁盘这份为准，
+   * 但没必要换正文（换了会白用掉编辑器撤销栈）。选"保留这里的"时**不调它**——
+   * 基准必须留在用户手上那版对应的磁盘版本，否则下一次保存会越过冲突检查盖掉别处的改动。
+   */
+  function syncActiveBaseline(disk: { text: string, mtimeMs: number }): void {
+    const current = active.value
+    if (!current)
+      return
+    mtimeByRel.set(current.rel, disk.mtimeMs)
   }
 
   /**
@@ -647,6 +680,8 @@ export const useNotesStore = defineStore('notes', () => {
     waitForWrites,
     rereadActive,
     activeChangedOnDisk,
+    readActiveFromDisk,
+    syncActiveBaseline,
     syncNotes,
     pullNotes,
     closeNote,

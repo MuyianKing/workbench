@@ -688,3 +688,27 @@ export function resolveNoteLink(href: unknown, fromRel: string): string {
   const rel = parts.join('/')
   return isNoteFile(rel) ? rel : ''
 }
+
+/**
+ * 两段正文算不算同一份。
+ *
+ * 空文档在 Vditor 里是 `'\n'`、磁盘上的空文件是 `''`：两者都不是「用户改了什么」，
+ * 照实区分只会让每次打开空笔记都冒出一次改动。编辑器与 store 判定"有没有变"统一走这条口径。
+ */
+export function sameNoteText(left: string, right: string): boolean {
+  return left === right || (left.trim() === '' && right.trim() === '')
+}
+
+/**
+ * 自动对齐磁盘（窗口聚焦 / 进页面 / 拉取之后）时，要不要先问一句"按磁盘重读"。
+ *
+ * 判据只有一条：**编辑器里的内容和磁盘上的内容是否相同**。相同就没事，不同就必须问——
+ * 绝不能因为"编辑器 == store 基线"就当没改动、静默把编辑器换成磁盘那版：
+ * 基线本身可能是过期的（刚被别处改过、或从远端拉过又没落盘），照它判断会把用户手上的内容丢掉。
+ * `undefined` 表示编辑器还没初始化（Vditor 异步建 DOM），这时没内容可丢，交由调用方只同步基准。
+ */
+export function shouldAskBeforeDiskReload(editorText: string | undefined, diskText: string): boolean {
+  if (editorText === undefined)
+    return false
+  return !sameNoteText(editorText, diskText)
+}

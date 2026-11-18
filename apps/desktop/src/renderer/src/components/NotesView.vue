@@ -2,7 +2,7 @@
 import type { ImageMigrationPlan, NoteKind, NoteSyncSummary } from '@workbench/notes'
 import type { NoteSyncOutcome } from '@/stores/notes'
 import { Document, EditPen, FolderOpened, Notebook, Picture, Refresh, RefreshRight } from '@element-plus/icons-vue'
-import { countNodes, findNoteNode, noteAbsPath, noteRootName } from '@workbench/notes'
+import { countNodes, findNoteNode, noteAbsPath, noteRootName, shouldAskBeforeDiskReload } from '@workbench/notes'
 import { ElMessage } from 'element-plus'
 /**
  * 笔记页：左边目录树，右边正文。
@@ -191,8 +191,14 @@ onBeforeUnmount(() => {
  * 进 / 出这一页各对齐一次（KeepAlive 下切走再回来不会重挂载，只有这对钩子会触发）。
  * onActivated 首次挂载也触发，正好覆盖「打开应用就进笔记页」那一档。
  * 进来**只拉**（收下别处推的），切走才推 —— 而且只有本地有未推改动才真推。
+ * 拉完再按磁盘对齐打开篇（带闸门，见 pullActiveFromDisk），确保离开这段时间别的编辑器改过
+ * 这一篇时能发现；两条串行，都动编辑器与 store.active，不能并发。
  */
-onActivated(() => void runPull())
+onActivated(() => void (async () => {
+  await runPull()
+  if (store.active)
+    await pullActiveFromDisk()
+})())
 onDeactivated(() => {
   cancelAutoSync()
   void runPush()
@@ -456,9 +462,10 @@ async function runPull(): Promise<void> {
     await store.probeRepo()
     if (!store.canSync)
       return
-    const changed = await store.pullNotes()
-    if (changed)
-      editorRef.value?.reloadFromProps()
+    await store.pullNotes()
+    // 拉取之后**不在这里静默 reloadFromProps**：远端改过的正文由 pullActiveFromDisk
+    // 统一按「编辑器 vs 磁盘」判定——编辑器手上还有没落盘的内容时，那条路会先问一句，
+    // 不会像以前那样把正在写的内容直接换成磁盘版（见 pullActiveFromDisk）。
   }
   finally {
     autoSyncing = false
@@ -601,21 +608,34 @@ async function refreshNotes(): Promise<void> {
 }
 
 /**
+ * 把编辑器内容整份换成磁盘那一版：确认过（或判定无分歧）之后才走。
+ *
+ * 同步回来 / 手动重读都走它，免得两处各写一份、漏掉某一条路径。
+ */
+function reloadActiveFromDisk(): void {
+  if (store.active && editorRef.value)
+    editorRef.value.discardAndReload(store.active)
+}
+
+/**
  * 把打开着的那一篇对齐磁盘。
  *
- *  - 编辑器没有未保存的修改 → 直接重读、换正文；
- *  - 有未保存的修改 → 只有磁盘确实变了才问一句「按磁盘重读 / 保留这里的」。
- *    选保留之后继续输入会被 Rust 的写前检查拦下（标题栏红字），磁盘上那一份不会被盖掉。
+ * 判据只有一条：**编辑器里的内容和磁盘上的内容是否一致**（`shouldAskBeforeDiskReload`）。
+ * 一致就什么都不做；不一致就问「按磁盘重读 / 保留这里的」，绝不静默把编辑器换成磁盘版。
  *
- * 判「有没有未保存」用的是**最后一次真正落盘 / 读盘的内容**（`store.active.content`），
- * 不是编辑器自己那份基线：写盘被拒之后编辑器会以为已经保存了（见 NoteEditor 的 hasUnsaved）。
+ * 以前用「编辑器 == store 基线」判有没有未保存改动，这条基线可能被拉取 / 外部写入悄悄推进，
+ * 于是编辑器里明明还有没落盘的内容、却被当成"没改动"直接冲掉（两扇窗开同一篇时会遇到）。
+ * 直接跟磁盘比就没有这个中间态：磁盘是唯一真源，编辑器跟它不同就是有分歧，必须让人拍板。
+ *
+ * 选「保留这里的」后不写盘，下一次保存会被 Rust 的写前检查挡住（标题栏红字），磁盘不会被盖掉；
+ * 想换回磁盘版，用左栏「刷新列表」或再触发一次对齐、这次选重读。
  */
 async function pullActiveFromDisk(): Promise<void> {
   if (!store.root || !store.active)
     return
 
-  // 先把正在路上的那一笔等掉：它落地之后 `active.content` 才是「最后一次真正落盘的内容」，
-  // 否则拿着还没更新的旧基线去比，会把刚刚自己写下去的那一段误判成「别处改过」
+  // 先把正在路上的那一笔等掉：它落地之后磁盘才是"用户刚敲的那份"，
+  // 否则拿还在防抖里的内容去比，会把刚写下的这段误判成"和磁盘不同"
   await store.waitForWrites()
 
   const active = store.active
@@ -623,25 +643,32 @@ async function pullActiveFromDisk(): Promise<void> {
     return
 
   const editor = editorRef.value
-  const dirty = editor?.hasUnsaved(active.content) ?? false
-  if (!dirty) {
-    if (await store.rereadActive())
-      editor?.discardAndReload(store.active ?? active)
+  const editorText = editor?.currentContent()
+  // 编辑器还没初始化：没内容可丢，只把基准对齐到磁盘（rereadActive 内部做）
+  if (editorText === undefined) {
+    await store.rereadActive()
     return
   }
 
-  if (!(await store.activeChangedOnDisk()))
+  // 读一次磁盘正文，直接和编辑器比。store 的 active.content 不作为判据——它可能刚被拉取推进过
+  const disk = await store.readActiveFromDisk()
+  if (!disk)
     return
+  if (!shouldAskBeforeDiskReload(editorText, disk.text)) {
+    // 内容一致：把基准（mtime）跟上，免得下一次保存因为别人的写入被误判冲突
+    store.syncActiveBaseline(disk)
+    return
+  }
 
   const reload = await confirmAction(
-    '磁盘上的这一篇被别处改过。要放弃这里的修改、按磁盘重读吗？',
-    '这一篇被别处改过',
+    '磁盘上的这一篇和这里的内容不一样。要放弃这里的修改、按磁盘重读吗？',
+    '这一篇在别处被改过',
     { confirmButtonText: '按磁盘重读', cancelButtonText: '保留这里的' },
   )
   if (!reload)
     return
-  if (await store.rereadActive())
-    editor?.discardAndReload(store.active ?? active)
+  await store.rereadActive()
+  reloadActiveFromDisk()
 }
 
 /**
