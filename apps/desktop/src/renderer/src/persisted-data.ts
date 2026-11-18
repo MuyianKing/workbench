@@ -89,6 +89,8 @@ export function sanitizeSettings(raw: unknown): StoredSettings {
   // Token 同步仓库：老数据文件里没有这个字段（默认空串 = 不同步）。
   // 认不出的一律按没填处理，别留一个每次同步都失败的地址在那儿反复重试
   value.tokenSyncRepo = sanitizeSyncRepo(value.tokenSyncRepo)
+  // 设备认领向导：老数据文件里没有这个字段，默认 false（还没处理过）
+  value.deviceClaimGuideDone = value.deviceClaimGuideDone === true
   // 上次停留的页面：老数据文件里没有，认不出来的值回首页
   value.activeView = sanitizeViewId(value.activeView)
   // 行为记忆那几项（上次看的是哪一档 / 怎么排的 / 目录树摊开了哪几层）：

@@ -261,6 +261,65 @@ pub fn round2(value: f64) -> f64 {
     (value * 100.0).round() / 100.0
 }
 
+/// 认领向导：把别的设备的流水副本写回本机 `usage.jsonl`。
+///
+/// 同步副本是脱敏的（`apiKey` 清空、`costCny` 清掉），这里按价表把估算花费补回来
+/// （与 `read_recent` 对老流水的补价同一口径）；密钥尾号补不回来，如实留空。
+/// 去重键用 `(ts, uid, prompt_tokens, completion_tokens, model)`：认领前本机可能已经实读过
+/// 一部分行，重复推回来的不能在本机账本里再记一遍。只追加本机还没有的行，按 ts 排好再写。
+pub fn import_rows(rows: &[UsageRow]) -> Result<usize, String> {
+    import_rows_at(&crate::paths::gateway_usage_file(), rows)
+}
+
+/// 同上，路径由调用方给（单测用临时文件跑）。
+fn import_rows_at(path: &std::path::Path, rows: &[UsageRow]) -> Result<usize, String> {
+    let mut existing: Vec<UsageRow> = std::fs::read_to_string(path)
+        .unwrap_or_default()
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .filter_map(|line| serde_json::from_str::<UsageRow>(line).ok())
+        .collect();
+
+    let mut seen: std::collections::HashSet<(i64, String, i64, i64, String)> =
+        existing.iter().map(dedup_key).collect();
+    let mut added = 0usize;
+    for row in rows {
+        if seen.insert(dedup_key(row)) {
+            let mut row = row.clone();
+            if row.cost_cny.is_none() {
+                row.cost_cny = cost_for(&row.model, row.prompt_tokens, row.completion_tokens).map(round2);
+            }
+            existing.push(row);
+            added += 1;
+        }
+    }
+    if added == 0 {
+        return Ok(0);
+    }
+    existing.sort_by_key(|row| row.ts);
+
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|err| format!("建用量目录失败: {err}"))?;
+    }
+    let mut text = String::new();
+    for row in &existing {
+        text.push_str(&serde_json::to_string(row).map_err(|err| format!("序列化用量失败: {err}"))?);
+        text.push('\n');
+    }
+    std::fs::write(path, text).map_err(|err| format!("写用量失败: {err}"))?;
+    Ok(added)
+}
+
+fn dedup_key(row: &UsageRow) -> (i64, String, i64, i64, String) {
+    (
+        row.ts,
+        row.uid.clone(),
+        row.prompt_tokens,
+        row.completion_tokens,
+        row.model.clone(),
+    )
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -318,6 +377,37 @@ mod tests {
         assert!(rows[0].cost_cny.is_none());
         assert_eq!(rows[0].machine, "本机");
         assert_eq!(rows[1].machine, "另一台");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// 认领回灌：去重（本机已有的行不重复写）、按 ts 排序、cost 按价表补算。
+    #[test]
+    fn 回灌流水去重并补算花费() {
+        let dir = std::env::temp_dir().join(format!("wb-usage-import-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("usage.jsonl");
+
+        // 本机已有一行（ts=1）
+        let mut existing = row("a", "m", 10, 2, 0);
+        existing.ts = 1;
+        std::fs::write(&file, format!("{}\n", serde_json::to_string(&existing).unwrap())).unwrap();
+
+        // 回灌三行：一行与本机重复（ts=1），两行新的（ts=2 乱序在前）
+        let dup = existing.clone();
+        let mut later = row("a", "m", 20, 4, 0);
+        later.ts = 3;
+        let mut earlier = row("a", "m", 5, 1, 0);
+        earlier.ts = 2;
+
+        let added = import_rows_at(&file, &[dup, later, earlier]).unwrap();
+        assert_eq!(added, 2, "重复的那行不算新增");
+
+        let text = std::fs::read_to_string(&file).unwrap();
+        let rows: Vec<UsageRow> = text.lines().filter_map(|l| serde_json::from_str(l).ok()).collect();
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows.iter().map(|r| r.ts).collect::<Vec<_>>(), vec![1, 2, 3], "按 ts 排序");
+        assert!(rows[1].cost_cny.is_some() || crate::wb_pricing::price_of("m").is_none(), "补价要么有值、要么价表里本就没有");
 
         std::fs::remove_dir_all(&dir).ok();
     }

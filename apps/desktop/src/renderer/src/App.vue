@@ -9,6 +9,7 @@ import AddProjectDialog from '@/components/AddProjectDialog.vue'
 import AiView from '@/components/AiView.vue'
 import AppHeader from '@/components/AppHeader.vue'
 import CommandDialog from '@/components/CommandDialog.vue'
+import DeviceClaimDialog from '@/components/DeviceClaimDialog.vue'
 import EtfView from '@/components/etf/EtfView.vue'
 import GatewayView from '@/components/gateway/GatewayView.vue'
 import GitView from '@/components/git/GitView.vue'
@@ -30,6 +31,7 @@ import VaultView from '@/components/VaultView.vue'
 import VideoPlayer from '@/components/VideoPlayer.vue'
 import VideoView from '@/components/VideoView.vue'
 import WorkView from '@/components/WorkView.vue'
+import { useDeviceClaim } from '@/composables/use-device-claim'
 import { useMailStore } from '@/stores/mail'
 import { useNavStore } from '@/stores/nav'
 import { usePerksAutoStore } from '@/stores/perks-auto'
@@ -49,6 +51,8 @@ const mail = useMailStore()
 const zentao = useZentaoStore()
 // 福利自动跑：启动后问一次、之后每十分钟问一次；该不该跑由 Rust 按自然日与夜间窗口判断
 const perksAuto = usePerksAutoStore()
+// 设备认领向导：重装后检测到新 id + 仓库里有旧设备时弹一次（只安装版，内部判 DEV）
+const deviceClaim = useDeviceClaim()
 
 /**
  * 页面清单：id 在 packages/appearance/src/views.ts 里登记，这里给出对应的组件。
@@ -106,6 +110,8 @@ const appStyle = computed(() => {
 
 onMounted(() => {
   void store.init()
+  // 设备认领检测挂在项目数据 init 之后：它要读设置里的仓库地址与设备列表，不能挡住启动
+  void deviceClaim.check()
   weather.start()
   mail.startWatch()
   zentao.startWatch()
@@ -147,6 +153,7 @@ onMounted(() => {
     <QuickAppDialog />
     <CommandDialog />
     <QuitConfirmDialog />
+    <DeviceClaimDialog />
 
     <!--
       视频播放器本体是全局单例（与终端面板同一层、不随换页切换）：在视频页时它传送进

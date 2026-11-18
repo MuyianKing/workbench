@@ -25,7 +25,7 @@ export * from './api'
  * Rust 侧的线上契约（`// @contract` 结构生成，勿手改）。
  * 生成与门禁：`pnpm run contract:gen` / `pnpm run contract:check`。
  */
-export type { AiRuntimeStatus, NoteRepoStateWire, NrmRegistry, NrmStatus, NvmStatus, PortCheckResult, TokenDevice } from './contract.generated'
+export type { AiRuntimeStatus, DeviceClaimState, DeviceShardsDeleted, NoteRepoStateWire, NrmRegistry, NrmStatus, NvmStatus, PortCheckResult, TokenDevice } from './contract.generated'
 export * from './etf'
 export * from './gateway'
 export * from './qoder'

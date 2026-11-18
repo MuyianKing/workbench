@@ -321,6 +321,11 @@ export interface AppSettings {
    */
   tokenSyncRepo: string
   /**
+   * 设备认领向导是否已处理过（认领或「暂不处理」都置 true，不再打扰）。
+   * 重装 / 清数据目录后随数据文件一起丢失，会再提示一次——那时确实需要恢复，符合预期。
+   */
+  deviceClaimGuideDone: boolean
+  /**
    * 上次停留的页面（左侧导航栏的当前项，见 packages/appearance/src/views.ts）。
    *
    * 放在设置里，只是因为设置本来就是「随数据文件落盘的界面状态」的容身处
@@ -487,6 +492,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   zentaoPollMinutes: ZENTAO_POLL_MINUTES_DEFAULT,
   zentaoUnreadBugs: [],
   tokenSyncRepo: '',
+  deviceClaimGuideDone: false,
   activeView: 'home',
   // 行为记忆：第一次打开时就是这几个默认档，之后记住用户自己选的那一档
   projectSort: PROJECT_SORT_DEFAULT,

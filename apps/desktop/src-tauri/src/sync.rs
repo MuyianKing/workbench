@@ -136,11 +136,54 @@ fn clear_git_auth() {
 /// 这时悄悄换一个新 id 会让这台机器在同步仓库里换一条分片、旧流水再也合不进来。
 /// 落盘失败仍然不报错：设备 id 只在同步里当分片名用，连它都写不进去的话同步本来也跑不成，
 /// 但那时**本机数据仍然要能看**，不能因为一个标识把整块 Token 面板打断。
+///
+/// 文件里多写一个 `fresh`：本次运行是不是「刚生成、还没认领过」。重装 / 清数据目录后新生成的
+/// id 带 `fresh=true`，认领向导据此提示用户把旧设备认回来；用户认领或忽略后由
+/// `clear_device_fresh` 抹掉这个标记，以后不再打扰。它是持久化的，不受首屏谁先调
+/// `token_device` 的影响（改 `TokenDevice` 契约做不到这一点，所以单独放文件里）。
 // @contract
 #[derive(Debug, Clone, Serialize)]
 pub struct TokenDevice {
     pub id: String,
     pub name: String,
+}
+
+/// 设备身份的完整状态，仅认领向导用（`token_device_claim_state`）。
+/// `fresh`：这次是不是新生成的 id（还没认领 / 忽略过）。
+// @contract
+#[derive(Debug, Clone, Serialize)]
+pub struct DeviceClaimState {
+    pub id: String,
+    pub fresh: bool,
+}
+
+/// 读本机设备身份 + 是否「刚生成还没认领」。
+///
+/// 与 `device_info()` 共用同一份 `device.json`，但额外把 `fresh` 带出来给认领向导。
+pub fn device_claim_state() -> Result<DeviceClaimState, String> {
+    let fresh = device_fresh()?;
+    let device = device_info()?;
+    Ok(DeviceClaimState {
+        id: device.id,
+        fresh,
+    })
+}
+
+/// 单独读 `fresh` 标记：文件不存在或没有这个字段都按 `false`（认领 / 忽略过，或老版本文件）。
+fn device_fresh() -> Result<bool, String> {
+    fresh_of_path(&paths::device_file())
+}
+
+/// 从指定文件读 `fresh`（单测用临时路径跑，生产走 `device_fresh`）。
+fn fresh_of_path(path: &Path) -> Result<bool, String> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(err) => return Err(format!("读取设备标识失败（{}）：{err}", path.display())),
+    };
+    let value: Value = serde_json::from_str(&text)
+        .map_err(|err| format!("设备标识损坏（{}）：{err}", path.display()))?;
+    Ok(value.get("fresh").and_then(Value::as_bool).unwrap_or(false))
 }
 
 pub fn device_info() -> Result<TokenDevice, String> {
@@ -163,7 +206,7 @@ pub fn device_info() -> Result<TokenDevice, String> {
         Some(id) => id,
         None => {
             let generated = uuid::Uuid::new_v4().to_string();
-            if let Err(err) = write_device(&generated) {
+            if let Err(err) = write_device_fresh(&generated, true) {
                 crate::error_log::error("设备标识", &err);
             }
             generated
@@ -176,14 +219,34 @@ pub fn device_info() -> Result<TokenDevice, String> {
     })
 }
 
-fn write_device(id: &str) -> Result<(), String> {
+/// 写 `device.json`：保留 `fresh` 状态；不传时按「已认领」写。
+fn write_device_impl(id: &str, fresh: bool) -> Result<(), String> {
     let file = paths::device_file();
     if let Some(parent) = file.parent() {
         std::fs::create_dir_all(parent).map_err(|err| format!("创建设备标识目录失败: {err}"))?;
     }
-    let text = serde_json::to_string_pretty(&json!({ "id": id }))
+    let text = serde_json::to_string_pretty(&json!({ "id": id, "fresh": fresh }))
         .map_err(|err| format!("序列化设备标识失败: {err}"))?;
     std::fs::write(&file, text).map_err(|err| format!("写入设备标识失败: {err}"))
+}
+
+fn write_device_fresh(id: &str, fresh: bool) -> Result<(), String> {
+    write_device_impl(id, fresh)
+}
+
+/// 认领 / 忽略向导后改写本机 id（`fresh=false`，不再提示认领）。
+pub fn set_device(id: &str) -> Result<(), String> {
+    let id = id.trim();
+    if id.is_empty() {
+        return Err("设备 id 不能为空".into());
+    }
+    write_device_impl(id, false)
+}
+
+/// 只抹掉 `fresh` 标记（用户选择「暂不处理」）：保留当前 id，不再提示认领。
+pub fn clear_device_fresh() -> Result<(), String> {
+    let state = device_info()?;
+    write_device_impl(&state.id, false)
 }
 
 /// 设备名：默认就是主机名（Windows 的计算机名不带空格、不带中文，正好能直接当标签和提交信息）
@@ -344,6 +407,96 @@ fn write_json(file: &Path, value: &Value) -> Result<(), String> {
     }
     let text = serde_json::to_string_pretty(value).map_err(|err| format!("序列化失败: {err}"))?;
     fs_util::write_atomic(file, text.as_bytes())
+}
+
+/// 认领清理分片的返回值（typed，见 gen-rust-contract，不返回 `Value`）。
+// @contract
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceShardsDeleted {
+    pub deleted: usize,
+    pub changed: bool,
+    pub log: String,
+    pub paths: Vec<String>,
+}
+
+/// 认领向导清理「误生成的新 id」在同步仓库里留下的全部分片。
+///
+/// 与图片删除（`sync_images::delete_images_at`）同构：同一个 token-sync 克隆、同一把工作流锁，
+/// 逐条 `git rm` 连工作区一起删并暂存，有删除才提交，再 `push_with_retry`。
+/// 一台机器一份的五个目录删单文件；网关流水与 Qoder 账本是按设备分的子目录，整目录删。
+/// 不存在的文件跳过 —— 新 id 可能只推了部分分片（还没到同步点就认领了）。
+pub fn delete_device_shards(repo: &str, device: &str) -> Result<DeviceShardsDeleted, String> {
+    delete_device_shards_at(&paths::token_sync_dir(), repo, device)
+}
+
+/// 同上，克隆目录由调用方给（单测用临时目录跑真实的 git 删除流程）。
+fn delete_device_shards_at(
+    clone_dir: &Path,
+    repo: &str,
+    device: &str,
+) -> Result<DeviceShardsDeleted, String> {
+    let clean = repo.trim();
+    if clean.is_empty() {
+        return Err("没有配置同步仓库".into());
+    }
+    let safe = safe_name(device);
+    if safe == "unknown-device" {
+        return Err("设备标识不合法，拒绝删除分片".into());
+    }
+
+    let _workflow = lock_workflow(clone_dir);
+    set_git_auth();
+    let (root, branch) = ensure_clone(clone_dir, clean)?;
+
+    // 单文件分片：一台机器一份
+    let file_shards = [
+        format!("{}/{safe}.json", paths::TOKEN_USAGE_DIR),
+        format!("{}/{safe}.json", paths::CONFIG_DIR),
+        format!("{}/{safe}.json", paths::ETF_SYNC_DIR),
+        format!("{}/{safe}.json", paths::ACTIVITY_SYNC_DIR),
+        format!("{}/{safe}.json", paths::WORK_LOG_SYNC_DIR),
+    ];
+    // 按设备分的子目录：网关流水、Qoder 账本
+    let dir_shards = [
+        format!("{}/{safe}", paths::GATEWAY_USAGE_DIR),
+        format!("{}/{safe}", paths::QODER_EARNINGS_DIR),
+    ];
+
+    let mut removed: Vec<String> = Vec::new();
+    for rel in &file_shards {
+        if root.join(rel).is_file() {
+            run_git(&["rm", "--quiet", "--", rel], Some(&root), GIT_TIMEOUT)?;
+            removed.push(rel.clone());
+        }
+    }
+    for rel in &dir_shards {
+        if root.join(rel).is_dir() {
+            run_git(&["rm", "-r", "--quiet", "--", rel], Some(&root), GIT_TIMEOUT)?;
+            removed.push(rel.clone());
+        }
+    }
+
+    if removed.is_empty() {
+        return Ok(DeviceShardsDeleted {
+            deleted: 0,
+            changed: false,
+            log: String::new(),
+            paths: removed,
+        });
+    }
+
+    let message = format!("sync: 清理设备 {safe} 的分片");
+    let mut log: Vec<String> = Vec::new();
+    log.push(run_git(&["commit", "-m", &message], Some(&root), GIT_TIMEOUT)?);
+    push_with_retry(&root, &branch, &mut log)?;
+
+    Ok(DeviceShardsDeleted {
+        deleted: removed.len(),
+        changed: true,
+        log: log.join("\n"),
+        paths: removed,
+    })
 }
 
 // ---------- 网关请求流水 ----------
@@ -551,6 +704,44 @@ fn read_gateway_rows_for(
     Ok(rows)
 }
 
+/// 认领向导：读指定设备 `device` 的网关流水分片（不跳过、不按 own 过滤），
+/// 直接回灌本机 `usage.jsonl`，返回新增行数。
+///
+/// 只读那一个设备的目录，不能读全部 —— 否则别的设备的流水会被写成本机的，
+/// 下次推送就双计。分片是脱敏副本，`wb_usage::import_rows` 会按价表补回估算花费。
+pub fn claim_import_gateway_rows(repo: &str, device: &str) -> Result<usize, String> {
+    clear_git_auth();
+    let clone_dir = paths::token_sync_dir();
+    if !clone_dir.join(".git").is_dir() || !clone_matches(&clone_dir, repo) {
+        return Err("同步仓库还没拉取，无法恢复网关流水".into());
+    }
+    let safe = safe_name(device);
+    let dir = clone_dir.join(paths::GATEWAY_USAGE_DIR).join(&safe);
+    let Ok(files) = std::fs::read_dir(&dir) else {
+        return Ok(0);
+    };
+    let mut rows: Vec<crate::wb_usage::UsageRow> = Vec::new();
+    for file in files.flatten() {
+        let path = file.path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("jsonl") {
+            continue;
+        }
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        for line in text.lines().filter(|line| !line.trim().is_empty()) {
+            let Ok(mut row) = serde_json::from_str::<crate::wb_usage::UsageRow>(line) else {
+                continue;
+            };
+            if row.machine.trim().is_empty() {
+                row.machine = safe.clone();
+            }
+            rows.push(row);
+        }
+    }
+    crate::wb_usage::import_rows(&rows)
+}
+
 // ---------- Qoder 领取账本 ----------
 
 /// 本机 Qoder 领取记录 → `qoder-earnings/<设备id>/<YYYY>.jsonl`。
@@ -717,6 +908,38 @@ fn read_qoder_earnings_for(
     }
     rows.sort_by_key(|row| row.ts);
     Ok(rows)
+}
+
+/// 认领向导：读指定设备 `device` 的 Qoder 领取账本分片，直接回灌本机 `activity.jsonl`。
+/// 只那一个设备，理由同 `claim_import_gateway_rows`。
+pub fn claim_import_qoder_earnings(repo: &str, device: &str) -> Result<usize, String> {
+    clear_git_auth();
+    let clone_dir = paths::token_sync_dir();
+    if !clone_dir.join(".git").is_dir() || !clone_matches(&clone_dir, repo) {
+        return Err("同步仓库还没拉取，无法恢复 Qoder 领取记录".into());
+    }
+    let safe = safe_name(device);
+    let dir = clone_dir.join(paths::QODER_EARNINGS_DIR).join(&safe);
+    let Ok(files) = std::fs::read_dir(&dir) else {
+        return Ok(0);
+    };
+    let mut rows: Vec<crate::qd_tasks::EarningRow> = Vec::new();
+    for file in files.flatten() {
+        let path = file.path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("jsonl") {
+            continue;
+        }
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        for line in text.lines().filter(|line| !line.trim().is_empty()) {
+            let Ok(row) = serde_json::from_str::<crate::qd_tasks::EarningRow>(line) else {
+                continue;
+            };
+            rows.push(row);
+        }
+    }
+    crate::qd_tasks::import_earnings(&rows)
 }
 
 /// 读仓库里**别的机器**推上来的 ETF 缓存（原始 JSON，收敛与合并由渲染层负责）。
@@ -1742,6 +1965,75 @@ mod tests {
     #[test]
     fn host_name_is_never_empty() {
         assert!(!host_name().trim().is_empty());
+    }
+
+    /// `fresh` 标记：新生成的 id 带 true；认领 / 忽略后写 false，再读就是 false。
+    /// 文件不存在按 false（不是这台机器刚生成），坏文件报 Err（不悄悄换 id）。
+    #[test]
+    fn device_fresh_flag_persists_and_bad_file_errors() {
+        let dir = std::env::temp_dir().join(format!("wb-device-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("device.json");
+
+        assert!(!fresh_of_path(&file).unwrap(), "文件不存在按 false");
+
+        std::fs::write(&file, r#"{"id":"dev-new","fresh":true}"#).unwrap();
+        assert!(fresh_of_path(&file).unwrap(), "刚生成的 id 带 fresh=true");
+
+        std::fs::write(&file, r#"{"id":"dev-new","fresh":false}"#).unwrap();
+        assert!(!fresh_of_path(&file).unwrap(), "认领后抹掉 fresh");
+
+        std::fs::write(&file, r#"{"id":"old-shape"}"#).unwrap();
+        assert!(!fresh_of_path(&file).unwrap(), "老版本文件没有 fresh 按 false");
+
+        std::fs::write(&file, "not json").unwrap();
+        assert!(fresh_of_path(&file).is_err(), "坏文件要报错，不能当成新设备");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 认领清理：删掉指定设备的全部分片，别的设备分片原样保留。
+    #[test]
+    fn device_shards_delete_removes_only_target_device() {
+        if proc::probe_version("git").is_none() {
+            eprintln!("跳过：本机没有 git");
+            return;
+        }
+
+        let root = std::env::temp_dir().join(format!("wb-claim-del-{}", uuid::Uuid::new_v4()));
+        let remote = root.join("remote.git");
+        let clone = root.join("clone");
+        std::fs::create_dir_all(&root).unwrap();
+        let init = proc::run_direct(
+            "git",
+            &["init".to_string(), "--bare".to_string(), remote.to_string_lossy().into_owned()],
+            GIT_TIMEOUT,
+            None,
+            &GIT_ENVS,
+        )
+        .unwrap();
+        assert!(init.ok(), "git init --bare 失败: {}", init.stderr);
+        let repo = remote.to_string_lossy().into_owned();
+
+        let shard_a = json!({"version":6,"device":"dev-a","name":"A","updatedAt":1,"sources":{}});
+        let shard_b = json!({"version":6,"device":"dev-b","name":"B","updatedAt":2,"sources":{}});
+        publish_at(&clone, &repo, "dev-a", Some(&shard_a), None, None, None).unwrap();
+        publish_at(&clone, &repo, "dev-b", Some(&shard_b), None, None, None).unwrap();
+
+        let removed = delete_device_shards_at(&clone, &repo, "dev-a").unwrap();
+        assert_eq!(removed.deleted, 1);
+        assert!(removed.changed);
+
+        // 从已经存在的克隆读：只剩 dev-b 的分片，dev-a 的没了
+        let read = read_shards_for(&clone, &repo).unwrap();
+        let devices: Vec<String> = read
+            .usage
+            .iter()
+            .filter_map(|item| item.get("device").and_then(Value::as_str).map(str::to_string))
+            .collect();
+        assert_eq!(devices, vec!["dev-b".to_string()], "只删目标设备，别的设备保留");
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     /// 比地址时忽略「结尾的斜杠 / .git」这类写法差异，但不同仓库必须区分得开

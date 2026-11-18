@@ -342,6 +342,15 @@ async function readQoderLive(): Promise<LiveRead> {
 let device: { id: string, name: string } | null = null
 
 /**
+ * 认领旧设备改写 `device.json` 后让上面的缓存失效：否则后续 publish 仍用旧的新 id。
+ * 正常路径不会调它；只有认领向导改写 id 成功后调一次（随后建议重启，store 里的其它缓存
+ * 也随之刷新）。
+ */
+export function resetLocalDevice(): void {
+  device = null
+}
+
+/**
  * 本机设备标识（数据目录的 `device.json`：安装版 `%APPDATA%/Workbench/data/`，
  * 开发版 `%APPDATA%/Workbench-dev/data/`，没有就现生成一份）。
  *

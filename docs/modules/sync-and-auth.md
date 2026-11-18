@@ -48,6 +48,16 @@
   队列。**本机设备标识（`device.json`）别删 / 别换**：换了等于多出一台机器，仓库里旧那份还会被当成别人的再算一遍 ——
   用量分片同理（那边会互相覆盖，这边是重复计数）。**文件坏了现在是 `Err`，不再悄悄换一个新 id**
   （那会让这台机器在仓库里换一条分片、旧流水再也合不进来）：`token_device` 回错，界面按「同步不可用」提示。
+  **`device.json` 多写一个 `fresh` 标记**：文件不存在而新生成的 id 带 `fresh=true`，认领向导据此提示把旧设备认回来；
+  用户认领 / 忽略后抹掉（`device_claim_set` / `device_claim_dismiss`）。这是持久化的，不受首屏谁先调 `token_device` 影响。
+- **设备认领向导（重装 / 清数据目录后恢复历史）**：只安装版（`import.meta.env.DEV` 时整条不跑）。启动后检测
+  `fresh=true` + 设置里 `deviceClaimGuideDone=false` + 填了同步仓库 + 仓库里除本机外有别的设备 → 弹一次，列出旧设备。
+  认领顺序固定：**先把旧 id 的分片回灌本机各权威文件，再改 `device.json` 的 id 回旧值，最后删新 id 已推的空分片**
+  （改 id 后旧分片会被读侧当成 own 跳过，顺序反了历史就看不到）。回灌范围：用量 / 工作日志 / 外观 / ETF / 活跃度
+  用各域包的 sanitize + 合并写回（biz 语义在 `workbench/device-claim.ts`），网关流水 / Qoder 领取走 Rust 的
+  `device_claim_import_gateway` / `device_claim_import_qoder`（读指定设备分片、去重、按价表补回估算花费）。
+  网关 / Qoder 分片是脱敏副本：**条数、token、模型、时间、估算花费可恢复，`apiKey` 尾号找不回来**。
+  单个域失败只记一条、继续其余域；改 id 失败则整体失败让用户重试（fresh 还在，下次启动仍提示）。完成提示重启应用。
 - **工作日志跟着用量这条出口走**（`work_log_sync_publish` / `work_log_sync_pull`）：推本机合并后的分片，读侧跳过本机那份，
   按条目 id 后写胜出、墓碑不复活（见 [work-log.md](work-log.md) 约束）。与活跃度相反：合并结果**要写回本机** —— 工作日志
   可编辑、可删除，只在内存合并就没有落点。进工作页与每次增删改后自动一轮，失败只在工具带留一行字；同一个仓库、同一把锁、
@@ -302,7 +312,13 @@ OAuth 应用构建期内置，所以使用者零配置；代价是**打包的人
                         repo_state（那个文件夹有没有仓库、origin 是谁 —— 同步到哪儿由它决定，
                         应用不 init、不改 origin）。
                         所有 git 调用都经一个 `run()`，那里固定拼上 `GIT_GLOBAL_ARGS`
-                        （`-c core.quotepath=false`：不然中文文件名在提示里是八进制转义）
+                        （`-c core.quotepath=false`：不然中文文件名在提示里是八进制转义）。
+                        另有设备认领：device_info 的 `fresh` 标记、set_device / clear_device_fresh、
+                        delete_device_shards（git rm 指定设备全部分片）、
+                        claim_import_gateway_rows / claim_import_qoder_earnings（读指定设备分片 + 回灌本机）
+  src/wb_usage.rs        网关流水的 append / 读窗口 / 脱敏副本；import_rows 是认领回灌
+                        （按 5 元组去重、按价表补回估算花费）
+  src/qd_tasks.rs        Qoder 领取账本；import_earnings 是认领回灌（脱敏行转本机行、按 4 元组去重）
   src/oauth.rs           账号登录：两家的授权流程、回环回调、换 token 与账号信息
                          （百分号编解码与 URL 拆分走 url / form_urlencoded，见 http.rs 同一条取舍）
 ```
@@ -313,5 +329,9 @@ OAuth 应用构建期内置，所以使用者零配置；代价是**打包的人
     auth.ts             账号登录的适配包装（workbench/）
     activity.ts         活跃度的记一笔与多机合并（workbench/：本机账本推上去、别人的读回来
                         只在内存里求和，不写回本机文件）
+    device-claim.ts     设备认领编排（workbench/：按旧 id 过滤各域分片、用域包 sanitize + merge
+                        回灌本机、改 id、删新分片，单域失败隔离）
+    device-claim.ts     认领向导状态机（composables/：启动检测门槛、候选设备、认领 / 忽略收口）
+    DeviceClaimDialog.vue 认领弹窗（components/，App.vue 全局挂载）
     auth.ts              账号状态与登录流程（stores/）
 ```

@@ -17,6 +17,19 @@ export interface AuthStatusWire {
   configError: string
 }
 
+export interface DeviceClaimState {
+  id: string
+  fresh: boolean
+}
+
+export interface DeviceShardsDeleted {
+  deleted: number
+  changed: boolean
+  log: string
+  paths: string[]
+}
+
+
 export interface NoteRepoStateWire {
   isRepo: boolean
   origin: string

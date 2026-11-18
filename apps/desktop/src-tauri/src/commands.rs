@@ -725,6 +725,45 @@ pub fn token_device() -> Result<crate::sync::TokenDevice, String> {
     crate::sync::device_info()
 }
 
+/// 认领向导：本机设备身份 + 是否「刚生成还没认领」。
+#[tauri::command(async)]
+pub fn device_claim_state() -> Result<crate::sync::DeviceClaimState, String> {
+    crate::sync::device_claim_state()
+}
+
+/// 认领向导：把本机设备 id 改回认领的那台旧设备（`fresh` 一并抹掉）。
+#[tauri::command(async)]
+pub fn device_claim_set(id: String) -> Result<(), String> {
+    crate::sync::set_device(&id)
+}
+
+/// 认领向导：用户「暂不处理」——保留当前 id，只抹掉 `fresh`，不再提示。
+#[tauri::command(async)]
+pub fn device_claim_dismiss() -> Result<(), String> {
+    crate::sync::clear_device_fresh()
+}
+
+/// 认领向导：删除「误生成的新 id」在同步仓库里的全部分片。
+#[tauri::command(async)]
+pub fn device_claim_delete_shards(
+    repo: String,
+    device: String,
+) -> Result<crate::sync::DeviceShardsDeleted, String> {
+    crate::sync::delete_device_shards(&repo, &device)
+}
+
+/// 认领向导：把指定旧设备的网关流水副本回灌本机 `usage.jsonl`，返回新增行数。
+#[tauri::command(async)]
+pub fn device_claim_import_gateway(repo: String, device: String) -> Result<usize, String> {
+    crate::sync::claim_import_gateway_rows(&repo, &device)
+}
+
+/// 认领向导：把指定旧设备的 Qoder 领取副本回灌本机 `activity.jsonl`，返回新增行数。
+#[tauri::command(async)]
+pub fn device_claim_import_qoder(repo: String, device: String) -> Result<usize, String> {
+    crate::sync::claim_import_qoder_earnings(&repo, &device)
+}
+
 /// CodeBuddy 扩展日志的文件清单（路径 / 修改时间 / 大小），不含文件内容。
 /// 内容由渲染层按需再读（`fs_read_text`）——日志加起来有近十兆，
 /// 闲着的时候没必要每分钟搬一遍（见适配层里的签名缓存）。

@@ -577,12 +577,68 @@ fn earning_rows_at(path: &std::path::Path, since: i64) -> Vec<EarningRow> {
     rows
 }
 
+/// 认领向导：把别的设备的领取账本副本写回本机 `activity.jsonl`。
+///
+/// 同步副本是 `EarningRow`（脱敏，不含昵称 / ok），这里转成本机的 `ActivityRow`：
+/// 昵称补空串、`ok=true`（只推过成功领取的行）、credits 原样带过去。
+/// 去重键与 `aggregate_earnings` 一致，认领前本机已有的行不重复追加。
+pub fn import_earnings(rows: &[EarningRow]) -> Result<usize, String> {
+    import_earnings_at(&crate::paths::qoder_activity_file(), rows)
+}
+
+/// 同上，路径由调用方给（单测用临时文件跑）。
+fn import_earnings_at(path: &std::path::Path, rows: &[EarningRow]) -> Result<usize, String> {
+    let mut existing: Vec<ActivityRow> = std::fs::read_to_string(path)
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|line| serde_json::from_str::<ActivityRow>(line).ok())
+        .collect();
+    let mut seen: std::collections::HashSet<(String, String, String, String)> =
+        existing.iter().map(dedup_key).collect();
+
+    let mut added = 0usize;
+    for row in rows {
+        let key = (row.uid.clone(), row.date.clone(), row.task.clone(), row.message.clone());
+        if seen.insert(key) {
+            existing.push(ActivityRow {
+                ts: row.ts,
+                date: row.date.clone(),
+                uid: row.uid.clone(),
+                nickname: String::new(),
+                task: row.task.clone(),
+                ok: true,
+                message: row.message.clone(),
+                credits: row.credits.max(0),
+            });
+            added += 1;
+        }
+    }
+    if added == 0 {
+        return Ok(0);
+    }
+    existing.sort_by_key(|row| row.ts);
+
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|err| format!("建领取目录失败: {err}"))?;
+    }
+    let mut text = String::new();
+    for row in &existing {
+        text.push_str(&serde_json::to_string(row).map_err(|err| format!("序列化领取失败: {err}"))?);
+        text.push('\n');
+    }
+    std::fs::write(path, text).map_err(|err| format!("写领取失败: {err}"))?;
+    Ok(added)
+}
+
+fn dedup_key(row: &ActivityRow) -> (String, String, String, String) {
+    (row.uid.clone(), row.date.clone(), row.task.clone(), row.message.clone())
+}
+
 /// 合并本机与别的设备的领取记录，按日相加。
 ///
 /// 去重键是 `(uid, date, task, message)`：同一条领取最多由一台设备真正拿到响应，
 /// 正常不会重复；万一被重复推送，也只算一次。
-pub fn aggregate_earnings(rows: &[EarningRow], since: i64) -> Vec<EarningPoint> {
-    let mut seen = std::collections::HashSet::new();
+pub fn aggregate_earnings(rows: &[EarningRow], since: i64) -> Vec<EarningPoint> {    let mut seen = std::collections::HashSet::new();
     let mut totals: BTreeMap<String, i64> = BTreeMap::new();
     for row in rows {
         if row.ts < since {
@@ -786,6 +842,33 @@ mod tests {
             message: message.into(),
             credits,
         }
+    }
+
+    #[test]
+    fn 认领回灌领取记录去重并转换() {
+        let dir = std::env::temp_dir().join(format!("wb-qoder-import-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("activity.jsonl");
+
+        // 本机已有的一条
+        let existing = activity("2026-10-20", 1, true, 5, "签到");
+        std::fs::write(&file, format!("{}\n", serde_json::to_string(&existing).unwrap())).unwrap();
+
+        let dup = EarningRow { ts: 1, date: "2026-10-20".into(), uid: "u1".into(), task: "checkin".into(), credits: 5, message: "签到".into() };
+        let fresh = EarningRow { ts: 2, date: "2026-10-21".into(), uid: "u1".into(), task: "checkin".into(), credits: 6, message: "签到".into() };
+
+        let added = import_earnings_at(&file, &[dup, fresh]).unwrap();
+        assert_eq!(added, 1, "重复的那条不算新增");
+
+        let text = std::fs::read_to_string(&file).unwrap();
+        let rows: Vec<ActivityRow> = text.lines().filter_map(|l| serde_json::from_str(l).ok()).collect();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[1].date, "2026-10-21");
+        assert_eq!(rows[1].credits, 6);
+        assert!(rows[1].nickname.is_empty(), "同步副本没有昵称，回灌补空串");
+        assert!(rows[1].ok, "回灌的行按成功领取记");
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
