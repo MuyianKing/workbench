@@ -60,6 +60,9 @@ pub fn chat(request: &Request, accounts: &mut [Account], api_key: &str) -> Respo
             return Response::error(500, "internal_error", &format!("重新序列化请求失败：{err}"))
         }
     };
+    // 客户端不带会话头时的兜底投名：首条用户消息。会话 id 一稳，上游的前缀缓存才认得
+    // 这是同一段对话（见 wb_identity::new_ids 的说明）。
+    let content_seed = wb_identity::content_seed(&prepared);
 
     // 选号：优先级高的先用，整号额度标记与本模型额度标记没过期的都跳过
     // （顺序见 wb_pool）。每次请求都重新取一次 now —— 额度标记的到期判定跟着墙钟走。
@@ -104,6 +107,7 @@ pub fn chat(request: &Request, accounts: &mut [Account], api_key: &str) -> Respo
                 .header("x-session-id")
                 .or_else(|| prepared.get("conversation_id").and_then(Value::as_str)),
             None,
+            content_seed.as_deref(),
         );
 
         let meta = UsageMeta {

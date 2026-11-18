@@ -367,9 +367,9 @@ fn number_at(value: &Value) -> Option<i64> {
 }
 
 
-/// 聊天头：与网关对话同一条构造路径，会话 id 每请求新生成。
+/// 聊天头：与网关对话同一条构造路径，会话 id 每请求新生成（福利这类调用没有多轮前缀，不必稳定）。
 fn chat_headers(account: &Account, model: Option<&str>) -> Vec<(String, String)> {
-    let ids = wb_identity::new_ids(account.product, &account.uid, None, None, None);
+    let ids = wb_identity::new_ids(account.product, &account.uid, None, None, None, None);
     let input = wb_identity::ChatHeaders {
         identity: account.product,
         uid: &account.uid,

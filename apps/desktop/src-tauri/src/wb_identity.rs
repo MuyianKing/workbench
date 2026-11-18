@@ -14,6 +14,8 @@
 //! **本文件只造头，不做网络、不读文件。** 需要随机数的地方直接从 `uuid::Uuid::new_v4()`
 //! 取熵（`uuid` 本来就在依赖里，不为四个随机 bit 再引 `rand`）。
 
+use serde_json::Value;
+
 use crate::common::now_millis;
 use crate::encoding::sha256;
 use crate::wb_upstream;
@@ -89,9 +91,12 @@ pub struct Ids {
 
 /// 按身分生成一轮的标识。
 ///
-/// - 桌面端 / VSCode：三项都现生成（桌面端 UUIDv7，VSCode 是 32 位无连字符 hex）。
-/// - CLI：`X-Conversation-ID` 按 `(uid, session_key)` **稳定派生**，`conversation_request`
-///   取调用方给的一轮 id（整轮所有请求与重试复用），`message` 仍每请求新生成。
+/// - CLI：`conversation_request` 取调用方给的一轮 id（整轮所有请求与重试复用），
+///   `message` 仍每请求新生成。
+/// - 所有身分：`conversation` 尽量**稳定** —— 上游 Hy4 那几档的前缀缓存按会话 id 分片，
+///   每条请求换一个 id 就等于每轮都从冷缓存开始（实测命中率 15–20%，固定 id 是 80–99%，
+///   见 gateway.md「会话 id 与前缀缓存」）。来源按优先级取：客户端显式给的 → `(uid, session_key)`
+///   派生 → `(uid, 首条用户消息)` 派生 → 都没有才现生成（桌面端 UUIDv7，VSCode 32 位 hex）。
 ///
 /// `explicit_conversation` 非空时优先 —— 客户端自己带了 `X-Conversation-Id` / `session_id`
 /// 就沿用它，别覆盖。
@@ -101,25 +106,25 @@ pub fn new_ids(
     explicit_conversation: Option<&str>,
     session_key: Option<&str>,
     turn_request_id: Option<&str>,
+    content_seed: Option<&str>,
 ) -> Ids {
     let explicit = explicit_conversation.map(str::trim).unwrap_or_default();
-    let mut conversation = if explicit.is_empty() {
+    let conversation = if !explicit.is_empty() {
+        explicit.to_string()
+    } else if let Some(derived) = stable_conversation(identity, uid, session_key)
+        .or_else(|| stable_conversation(identity, uid, content_seed))
+    {
+        derived
+    } else {
         match identity {
             Identity::Vscode => request_id_hex(),
             _ => uuid7().to_string(),
         }
-    } else {
-        explicit.to_string()
     };
     let message = request_id_hex();
     let mut conversation_request = request_id_hex();
 
     if identity == Identity::Cli {
-        if explicit.is_empty() {
-            if let Some(derived) = conversation_id_for(uid, session_key.unwrap_or_default()) {
-                conversation = derived;
-            }
-        }
         if let Some(turn) = turn_request_id.map(str::trim).filter(|v| !v.is_empty()) {
             conversation_request = turn.to_string();
         }
@@ -130,6 +135,69 @@ pub fn new_ids(
         conversation_request,
         message,
     }
+}
+
+/// 首条 user 消息的正文，作为「同一段对话」的稳定投名。
+///
+/// 通用客户端（ZCode 这类）不带会话头，只有它能把同一段对话的每轮请求算成同一个
+/// 会话 id。只取首条消息：后面的历史每轮都在长，system 里也可能带时间戳。
+pub fn content_seed(body: &Value) -> Option<String> {
+    let messages = body.get("messages")?.as_array()?;
+    for message in messages {
+        if message.get("role").and_then(Value::as_str) != Some("user") {
+            continue;
+        }
+        let Some(content) = message.get("content") else {
+            continue;
+        };
+        let text = match content {
+            Value::String(text) => text.clone(),
+            // 多模态：正文散在 {"type":"text","text":…} 片段里，图片片段跳过
+            Value::Array(parts) => parts
+                .iter()
+                .filter_map(|part| part.get("text").and_then(Value::as_str))
+                .collect::<Vec<_>>()
+                .join("\n"),
+            _ => continue,
+        };
+        if !text.trim().is_empty() {
+            return Some(text);
+        }
+    }
+    None
+}
+
+/// 按 `(uid, key)` 派生稳定会话 id，形状跟随身分：桌面端 / CLI 是带连字符的 UUIDv4，
+/// VSCode 是 32 位无连字符 hex。`key` 为空时返回 `None`，调用方接着试下一种来源。
+///
+/// 语义就是官方 CLI 的那套：同一个会话里始终复用同一个 id，换会话才换。
+fn stable_conversation(identity: Identity, uid: &str, key: Option<&str>) -> Option<String> {
+    let key = key.map(str::trim).filter(|key| !key.is_empty())?;
+    let digest = sha256(format!("{uid}|{key}").as_bytes());
+    let mut hex = String::with_capacity(32);
+    for byte in digest.iter().take(16) {
+        hex.push_str(&format!("{byte:02x}"));
+    }
+    Some(match identity {
+        Identity::Vscode => hex,
+        _ => uuid4_shape(&hex),
+    })
+}
+
+/// 把 32 位 hex 改成 UUIDv4 的形状（版本位 4、变体位 a），其余信息不动。
+fn uuid4_shape(hex: &str) -> String {
+    let mut chars: Vec<char> = hex.chars().collect();
+    chars[12] = '4';
+    chars[16] = 'a';
+    let shaped: String = chars.into_iter().collect();
+    format!(
+        "{}-{}-{}-{}-{}",
+        &shaped[0..8],
+        &shaped[8..12],
+        &shaped[12..16],
+        &shaped[16..20],
+        &shaped[20..32]
+    )
 }
 
 /// UUIDv7（RFC 9562）：48 位毫秒时间戳打头，后面是随机位，时间有序。
@@ -169,35 +237,6 @@ pub fn request_id_hex() -> String {
 /// 带连字符的随机 UUID 字符串（VSCode 的 `X-Request-Trace-Id` 用）。
 pub fn request_trace_id() -> String {
     uuid::Uuid::new_v4().to_string()
-}
-
-/// 按 `(uid, session_key)` 稳定派生的会话 id，形状是带连字符的 UUIDv4。
-///
-/// 官方 CLI 在同一个会话里始终复用同一个 id；换会话才换。`session_key` 为空时返回
-/// `None`（调用方回落到随机 id）。
-pub fn conversation_id_for(uid: &str, session_key: &str) -> Option<String> {
-    let key = session_key.trim();
-    if key.is_empty() {
-        return None;
-    }
-    let digest = sha256(format!("{uid}|{key}").as_bytes());
-    let mut hex = String::with_capacity(32);
-    for byte in digest.iter().take(16) {
-        hex.push_str(&format!("{byte:02x}"));
-    }
-    // 版本位 4、变体位 a：只改形状，不动其余信息
-    let mut chars: Vec<char> = hex.chars().collect();
-    chars[12] = '4';
-    chars[16] = 'a';
-    let shaped: String = chars.into_iter().collect();
-    Some(format!(
-        "{}-{}-{}-{}-{}",
-        &shaped[0..8],
-        &shaped[8..12],
-        &shaped[12..16],
-        &shaped[16..20],
-        &shaped[20..32]
-    ))
 }
 
 // ---------- 头构造 ----------
@@ -522,28 +561,95 @@ mod tests {
 
     #[test]
     fn 稳定派生要求_session_key() {
-        assert_eq!(conversation_id_for("u", ""), None);
-        assert_eq!(conversation_id_for("u", "   "), None);
-        let derived = conversation_id_for("u", "s").unwrap();
+        assert_eq!(stable_conversation(Identity::Cli, "u", Some("")), None);
+        assert_eq!(stable_conversation(Identity::Cli, "u", Some("   ")), None);
+        let derived = stable_conversation(Identity::Cli, "u", Some("s")).unwrap();
         assert_eq!(derived.len(), 36);
-        assert_eq!(conversation_id_for("u", "s").unwrap(), derived);
-        assert_ne!(conversation_id_for("u", "t").unwrap(), derived);
-        assert_ne!(conversation_id_for("v", "s").unwrap(), derived);
+        assert_eq!(stable_conversation(Identity::Cli, "u", Some("s")).unwrap(), derived);
+        assert_ne!(stable_conversation(Identity::Cli, "u", Some("t")).unwrap(), derived);
+        assert_ne!(stable_conversation(Identity::Cli, "v", Some("s")).unwrap(), derived);
+        // 身分只改形状，不改「谁和谁是同一个会话」
+        assert_eq!(stable_conversation(Identity::Vscode, "u", Some("s")).unwrap().len(), 32);
     }
 
     #[test]
-    fn 桌面端三项_id_都现生成() {
-        let ids = new_ids(Identity::Workbuddy, "u", None, Some("sess"), Some("turn"));
-        // 桌面端不吃 session_key / turn_request_id
-        assert_ne!(ids.conversation_request, "turn");
-        assert_eq!(ids.conversation.len(), 36); // UUIDv7 带连字符
-        assert_eq!(ids.message.len(), 32);
+    fn 桌面端的会话_id_也按_session_key_稳定_请求_id_仍现生成() {
+        let a = new_ids(Identity::Workbuddy, "u", None, Some("sess"), Some("turn"), None);
+        let b = new_ids(Identity::Workbuddy, "u", None, Some("sess"), Some("turn"), None);
+        // 会话 id 稳（上游缓存按它分片），一轮请求 id 与消息 id 仍每请求新生成
+        assert_eq!(a.conversation, b.conversation);
+        assert_eq!(a.conversation.len(), 36); // UUIDv4 带连字符
+        assert_ne!(a.conversation_request, "turn");
+        assert_ne!(a.conversation_request, b.conversation_request);
+        assert_ne!(a.message, b.message);
+    }
+
+    #[test]
+    fn 没有会话头时按首条用户消息稳定派生() {
+        let a = new_ids(Identity::Workbuddy, "u", None, None, None, Some("帮我看看缓存"));
+        let b = new_ids(Identity::Workbuddy, "u", None, None, None, Some("帮我看看缓存"));
+        let other = new_ids(Identity::Workbuddy, "u", None, None, None, Some("另一个话题"));
+        assert_eq!(a.conversation, b.conversation);
+        assert_ne!(a.conversation, other.conversation);
+        assert_eq!(a.conversation.len(), 36);
+        // 换号（uid 变）算另一段会话
+        let same_user = new_ids(Identity::Workbuddy, "v", None, None, None, Some("帮我看看缓存"));
+        assert_ne!(a.conversation, same_user.conversation);
+    }
+
+    #[test]
+    fn session_key_优先于内容种子_显式_id_又优先于两者() {
+        let by_key = new_ids(Identity::Workbuddy, "u", None, Some("sess"), None, Some("seed"));
+        let derived = new_ids(Identity::Workbuddy, "u", None, Some("sess"), None, None);
+        assert_eq!(by_key.conversation, derived.conversation);
+        let explicit = new_ids(Identity::Workbuddy, "u", Some("given"), Some("sess"), None, Some("seed"));
+        assert_eq!(explicit.conversation, "given");
+    }
+
+    #[test]
+    fn 内容种子取首条用户消息() {
+        let text = serde_json::json!({
+            "messages": [
+                { "role": "system", "content": "你是助手" },
+                { "role": "user", "content": "第一条" },
+                { "role": "user", "content": "第二条" }
+            ]
+        });
+        assert_eq!(content_seed(&text).as_deref(), Some("第一条"));
+
+        let parts = serde_json::json!({
+            "messages": [{
+                "role": "user",
+                "content": [
+                    { "type": "text", "text": "看图" },
+                    { "type": "image_url", "image_url": { "url": "data:image/png;base64,AA" } }
+                ]
+            }]
+        });
+        assert_eq!(content_seed(&parts).as_deref(), Some("看图"));
+
+        // 空正文 / 只有 system / 没有 messages 都不给种子
+        assert_eq!(content_seed(&serde_json::json!({ "messages": [] })), None);
+        assert_eq!(content_seed(&serde_json::json!({
+            "messages": [{ "role": "system", "content": "x" }]
+        })), None);
+        assert_eq!(content_seed(&serde_json::json!({
+            "messages": [{ "role": "user", "content": "   " }]
+        })), None);
+        assert_eq!(content_seed(&serde_json::json!({})), None);
+    }
+
+    #[test]
+    fn vscode_的派生会话_id_也是_32_位_hex() {
+        let ids = new_ids(Identity::Vscode, "u", None, None, None, Some("seed"));
+        assert_eq!(ids.conversation.len(), 32);
+        assert!(!ids.conversation.contains('-'));
     }
 
     #[test]
     fn cli_的会话_id_稳定_请求_id_整轮复用() {
-        let a = new_ids(Identity::Cli, "u", None, Some("sess"), Some("turn"));
-        let b = new_ids(Identity::Cli, "u", None, Some("sess"), Some("turn"));
+        let a = new_ids(Identity::Cli, "u", None, Some("sess"), Some("turn"), None);
+        let b = new_ids(Identity::Cli, "u", None, Some("sess"), Some("turn"), None);
         assert_eq!(a.conversation, b.conversation);
         assert_eq!(a.conversation_request, "turn");
         // 消息 id 每请求新生成
@@ -552,20 +658,20 @@ mod tests {
 
     #[test]
     fn 显式会话_id_优先() {
-        let ids = new_ids(Identity::Cli, "u", Some("given"), Some("sess"), None);
+        let ids = new_ids(Identity::Cli, "u", Some("given"), Some("sess"), None, None);
         assert_eq!(ids.conversation, "given");
     }
 
     #[test]
     fn vscode_的会话_id_是无连字符_hex() {
-        let ids = new_ids(Identity::Vscode, "u", None, None, None);
+        let ids = new_ids(Identity::Vscode, "u", None, None, None, None);
         assert_eq!(ids.conversation.len(), 32);
         assert!(!ids.conversation.contains('-'));
     }
 
     #[test]
     fn 桌面端的头是完整的一套() {
-        let ids = new_ids(Identity::Workbuddy, "u", None, None, None);
+        let ids = new_ids(Identity::Workbuddy, "u", None, None, None, None);
         let headers = chat_headers(&input(Identity::Workbuddy, &ids));
 
         // wrapper：Origin 是 codebuddy.cn，X-Domain 仍是 copilot
@@ -597,7 +703,7 @@ mod tests {
 
     #[test]
     fn 国内版的_origin_与_domain_不是一回事() {
-        let ids = new_ids(Identity::Workbuddy, "u", None, None, None);
+        let ids = new_ids(Identity::Workbuddy, "u", None, None, None, None);
         let headers = chat_headers(&input(Identity::Workbuddy, &ids));
         assert_eq!(header_value(&headers, "Origin"), Some("https://www.codebuddy.cn"));
         assert_eq!(header_value(&headers, "Referer"), Some("https://www.codebuddy.cn/"));
@@ -606,7 +712,7 @@ mod tests {
 
     #[test]
     fn vscode_不发_root_request_id_也不发_x_trace_id() {
-        let ids = new_ids(Identity::Vscode, "u", None, None, None);
+        let ids = new_ids(Identity::Vscode, "u", None, None, None, None);
         let headers = chat_headers(&input(Identity::Vscode, &ids));
         assert!(header_value(&headers, "X-Root-Request-ID").is_none());
         assert!(header_value(&headers, "X-Trace-ID").is_none());
@@ -619,7 +725,7 @@ mod tests {
 
     #[test]
     fn vscode_带_model_时才有_model_id() {
-        let ids = new_ids(Identity::Vscode, "u", None, None, None);
+        let ids = new_ids(Identity::Vscode, "u", None, None, None, None);
         let plain = chat_headers(&input(Identity::Vscode, &ids));
         assert!(header_value(&plain, "X-Model-ID").is_none());
 
@@ -632,7 +738,7 @@ mod tests {
 
     #[test]
     fn vscode_不发_private_data_而是补设备占位() {
-        let ids = new_ids(Identity::Vscode, "u", None, None, None);
+        let ids = new_ids(Identity::Vscode, "u", None, None, None, None);
         let headers = chat_headers(&input(Identity::Vscode, &ids));
         assert!(header_value(&headers, "X-Private-Data").is_none());
         // 非企业号补失败态占位
@@ -644,7 +750,7 @@ mod tests {
 
     #[test]
     fn cli_没有浏览器头_但带_stainless() {
-        let ids = new_ids(Identity::Cli, "u", None, Some("s"), None);
+        let ids = new_ids(Identity::Cli, "u", None, Some("s"), None, None);
         let headers = chat_headers(&input(Identity::Cli, &ids));
         assert!(header_value(&headers, "Origin").is_none());
         assert!(header_value(&headers, "Referer").is_none());
@@ -663,7 +769,7 @@ mod tests {
 
     #[test]
     fn cli_的_private_data_按企业号分流() {
-        let ids = new_ids(Identity::Cli, "u", None, Some("s"), None);
+        let ids = new_ids(Identity::Cli, "u", None, Some("s"), None, None);
         let personal = chat_headers(&input(Identity::Cli, &ids));
         assert_eq!(header_value(&personal, "X-Private-Data"), Some("false"));
 
@@ -678,7 +784,7 @@ mod tests {
 
     #[test]
     fn 设备_token_只在桌面端出现() {
-        let ids = new_ids(Identity::Workbuddy, "u", None, None, None);
+        let ids = new_ids(Identity::Workbuddy, "u", None, None, None, None);
 
         let mut desktop = input(Identity::Workbuddy, &ids);
         desktop.device_token = Some("dev-token");
@@ -688,7 +794,7 @@ mod tests {
         );
 
         // CLI 身份无论如何不发
-        let cli_ids = new_ids(Identity::Cli, "u", None, Some("s"), None);
+        let cli_ids = new_ids(Identity::Cli, "u", None, Some("s"), None, None);
         let mut cli = input(Identity::Cli, &cli_ids);
         cli.device_token = Some("dev-token");
         let headers = chat_headers(&cli);
@@ -698,7 +804,7 @@ mod tests {
 
     #[test]
     fn 空_uid_回落成_anonymous() {
-        let ids = new_ids(Identity::Workbuddy, "", None, None, None);
+        let ids = new_ids(Identity::Workbuddy, "", None, None, None, None);
         let mut request = input(Identity::Workbuddy, &ids);
         request.uid = "";
         assert_eq!(
