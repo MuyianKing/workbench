@@ -1,7 +1,7 @@
-import type { GitBranchList, GitCommitDetail, GitCommitPage, GitCompare, GitPatch, GitRepoInfo, GitTreePage } from '@workbench/git'
+import type { GitAuthorList, GitBranchList, GitCommitDetail, GitCommitPage, GitCompare, GitPatch, GitRepoInfo, GitTreePage } from '@workbench/git'
 import type { Result } from '@/types'
 import { fail, ok } from '@workbench/core'
-import { parseBranchList, parseCommitDetail, parseCommitPage, parseCompare, parseGitPatch, parseRepoInfo, parseTreePage } from '@workbench/git'
+import { parseAuthorList, parseBranchList, parseCommitDetail, parseCommitPage, parseCompare, parseGitPatch, parseRepoInfo, parseTreePage } from '@workbench/git'
 import { errorText, invoke } from './bridge'
 
 /**
@@ -35,17 +35,27 @@ export async function listBranches(root: string): Promise<Result<GitBranchList>>
   }
 }
 
+export async function listAuthors(root: string, rev: string): Promise<Result<GitAuthorList>> {
+  try {
+    return ok(parseAuthorList(await invoke<unknown>('repo_git_authors', { root, rev })))
+  }
+  catch (error) {
+    return fail(errorText(error, '读取提交作者失败'))
+  }
+}
+
 export async function listCommits(
   root: string,
   rev: string,
   since: string,
   until: string,
+  author: string,
   skip: number,
   limit: number,
 ): Promise<Result<GitCommitPage>> {
   try {
     return ok(parseCommitPage(
-      await invoke<unknown>('repo_git_commits', { root, rev, since, until, skip, limit }),
+      await invoke<unknown>('repo_git_commits', { root, rev, since, until, author, skip, limit }),
     ))
   }
   catch (error) {
@@ -59,12 +69,13 @@ export async function listFileCommits(
   rev: string,
   since: string,
   until: string,
+  author: string,
   skip: number,
   limit: number,
 ): Promise<Result<GitCommitPage>> {
   try {
     return ok(parseCommitPage(
-      await invoke<unknown>('repo_git_file_commits', { root, path, rev, since, until, skip, limit }),
+      await invoke<unknown>('repo_git_file_commits', { root, path, rev, since, until, author, skip, limit }),
     ))
   }
   catch (error) {
