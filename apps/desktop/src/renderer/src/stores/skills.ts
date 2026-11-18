@@ -1,7 +1,7 @@
 import type { SkillCommit, SkillCompareFile, SkillCreateInput, SkillEntry, SkillFileInfo, SkillLibraryState } from '@workbench/skills'
 import type { Result } from '@/types'
 import { noteNameProblem, noteRootName, sanitizeNoteName, sanitizeNoteRoot } from '@workbench/notes'
-import { SKILL_FILE, skillFileRel, skillRel } from '@workbench/skills'
+import { compareSkillCopy, SKILL_FILE, skillFileRel, skillRel } from '@workbench/skills'
 import { defineStore } from 'pinia'
 /**
  * 技能：列表、当前打开的那一篇、增删改、版本历史与安装的编排。
@@ -20,10 +20,12 @@ import { defineStore } from 'pinia'
  */
 import { computed, ref, watch } from 'vue'
 import { confirmAction, notifyError, notifySuccess } from '@/notify'
+import { useProjectsStore } from '@/stores/projects'
 import { useSettingsStore } from '@/stores/settings'
 
 export const useSkillsStore = defineStore('skills', () => {
   const settings = useSettingsStore()
+  const projects = useProjectsStore()
 
   /**
    * 技能库目录：**用户自己挑的一个目录**（技能就是它下面的一个个子目录，每个带一份 SKILL.md）。
@@ -80,6 +82,14 @@ export const useSkillsStore = defineStore('skills', () => {
   const syncNotice = ref('')
   /** 本地有已提交、还没推出去的改动：保存 / 删改 / 导入 / 恢复成功之后置位 */
   const needPush = ref(false)
+  /**
+   * 卡片上「项目里有这份技能的新副本」的标记：技能 id → 有几个项目副本比库新 / 不一样。
+   * 由后台扫描填（见 scanCopies），只影响卡片徽标，不影响详情弹窗自己那次检测 —— 两边口径
+   * 都是域包的 `compareSkillCopy`，这里只读结果、不另拍一套。
+   */
+  const updatedCopies = ref<Record<string, number>>({})
+  /** 副本扫描在途：进页面 / 保存 / 安装 / 同步可能连着触发，串成一条免得互相盖结果 */
+  let copyScanJob = 0
 
   const activeSkill = computed(() => skills.value.find(item => item.id === activeId.value) ?? null)
 
@@ -100,6 +110,8 @@ export const useSkillsStore = defineStore('skills', () => {
     syncError.value = ''
     syncNotice.value = ''
     needPush.value = false
+    copyScanJob += 1
+    updatedCopies.value = {}
     cancelAutoPush()
   }
 
@@ -238,6 +250,51 @@ export const useSkillsStore = defineStore('skills', () => {
     // 打开着的技能还在：文件清单跟着刷一遍（附属文件可能增删）
     if (activeId.value)
       await loadFiles()
+    // 卡片上的「项目有更新」徽标后台补扫：N 个技能 × 项目数 次读盘，不挡列表出屏
+    void scanCopies()
+  }
+
+  /**
+   * 后台扫一遍各项目里的技能副本，给卡片填「项目有更新」徽标。
+   *
+   * 口径与详情弹窗完全同一处（`compareSkillCopy`）：版本更高 / 项目里多出文件 / 同版本内容不同，
+   * 版本更低的旧快照不算。文件与判定都由域包负责，这里只数「这份技能有几份副本需要看」。
+   * 连着触发（进页面 / 保存 / 安装 / 同步）只认最后一轮的结果（job 号防过期）。
+   * 读盘失败的项目按「没更新」处理 —— 徽标是提示，不该因为一次 IO 失败就挡住页面。
+   */
+  async function scanCopies(): Promise<void> {
+    const job = ++copyScanJob
+    const rootPath = gitRoot.value
+    const dirs = projects.projects.map(project => project.path).filter(Boolean)
+    if (!rootPath || !dirs.length || !skills.value.length) {
+      if (job === copyScanJob)
+        updatedCopies.value = {}
+      return
+    }
+
+    const ids = skills.value.map(skill => skill.id)
+    const counts = await Promise.all(ids.map(async (id) => {
+      const result = await window.workbench.scanSkillCopies(rootPath, dir.value, id, dirs)
+      if (!result.ok || !result.data)
+        return 0
+      const scan = result.data
+      return scan.projects.filter(copy => compareSkillCopy(scan.library, copy.files).needsAttention).length
+    }))
+
+    // 期间又扫了一轮 / 换了库 / 技能列表变了：这份结果已经过期
+    if (job !== copyScanJob || rootPath !== gitRoot.value)
+      return
+    const next: Record<string, number> = {}
+    ids.forEach((id, index) => {
+      if (counts[index] > 0)
+        next[id] = counts[index]
+    })
+    updatedCopies.value = next
+  }
+
+  /** 安装成功后重扫徽标：刚装进去的那份与库一致，对应卡片的标记要跟着消失 */
+  function refreshCopyBadges(): void {
+    void scanCopies()
   }
 
   let started = false
@@ -251,6 +308,16 @@ export const useSkillsStore = defineStore('skills', () => {
     await reload()
   }
 
+  // 项目列表是 App 挂载时异步载入的：进技能页可能比它先完成。那会儿扫出来是空、
+  // 徽标全无；等它就绪（或后来新增 / 删掉项目）再补扫一次，别让徽标一直空着。
+  watch(
+    () => projects.ready,
+    (ready) => {
+      if (ready && started && skills.value.length)
+        void scanCopies()
+    },
+  )
+
   // 技能库目录变了（选了新目录、别的窗口迁移）：仓库与库都重新认一遍
   watch(root, () => {
     if (!started)
@@ -261,6 +328,8 @@ export const useSkillsStore = defineStore('skills', () => {
     cancelAutoPush()
     needPush.value = false
     syncNotice.value = ''
+    copyScanJob += 1
+    updatedCopies.value = {}
     void reload()
   })
 
@@ -643,6 +712,9 @@ export const useSkillsStore = defineStore('skills', () => {
     syncError,
     syncNotice,
     needPush,
+    updatedCopies,
+    scanCopies,
+    refreshCopyBadges,
     init,
     reload,
     setRoot,

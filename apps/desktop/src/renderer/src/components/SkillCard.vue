@@ -7,10 +7,14 @@ import type { SkillEntry } from '@workbench/skills'
  * （与工作记录卡的动作同一交互 —— 平时常显就是每张卡片都顶着两个按钮，太吵），
  * 键盘聚焦到按钮上时同样显形（focus-within）；点击要 stopPropagation，
  * 不该顺带把详情弹窗也拉开。没有 SKILL.md 的卡片挂着常显的警示徽标，安装按钮置灰。
+ *
+ * 版本号旁还有一颗「N 个项目有更新」徽标（`updatedCopies`，后台扫描填的）：卡片上的
+ * `v0.0.2` 是**库里那份**的版本，项目副本更新到 `v0.0.3` 时库不会自己动 —— 没有这颗徽标，
+ * 那件事只有点开详情才看得见。数字是「有几份副本比库新 / 不一样」，只提示、不替用户挑边。
  */
 import { FolderOpened, Position } from '@element-plus/icons-vue'
 
-const props = defineProps<{ skill: SkillEntry }>()
+const props = defineProps<{ skill: SkillEntry, updatedCopies: number }>()
 const emit = defineEmits<{
   (event: 'open'): void
   (event: 'install'): void
@@ -39,6 +43,16 @@ const metaWarn = !props.skill.hasSkillMd
         <el-tag v-if="skill.version" size="small" type="info" effect="plain" class="card__version mono">
           v{{ skill.version }}
         </el-tag>
+        <!-- 项目里的副本比库新 / 不一样：只提示有几份，点开详情看逐项差异，不在这里替用户挑边 -->
+        <el-tooltip
+          v-if="updatedCopies > 0"
+          content="有项目里的副本与库中这份不一样，点开看详情"
+          placement="top"
+        >
+          <span class="card__outdated">
+            {{ updatedCopies }} 个项目有更新
+          </span>
+        </el-tooltip>
       </div>
       <div class="card__side">
         <span v-if="metaWarn" class="card__warn">没有 SKILL.md</span>
@@ -124,6 +138,14 @@ const metaWarn = !props.skill.hasSkillMd
 
 .card__version {
   flex-shrink: 0;
+}
+
+/* 「项目有更新」徽标：状态色表达「这里要处理」，不新增颜色；不换行、不挤掉标题 */
+.card__outdated {
+  flex-shrink: 0;
+  color: var(--st-run);
+  font-size: var(--fs-micro);
+  white-space: nowrap;
 }
 
 .card__side {

@@ -89,6 +89,8 @@ async function submit(): Promise<void> {
   }
   finally {
     installing.value = false
+    // 装进去的副本与库一致：重扫一遍卡片上的「项目有更新」徽标，刚装的那张要跟着消掉
+    store.refreshCopyBadges()
   }
   if (!selectedIds.value.length)
     visible.value = false
