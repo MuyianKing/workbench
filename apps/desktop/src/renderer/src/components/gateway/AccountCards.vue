@@ -203,8 +203,16 @@ const emit = defineEmits<{
 .panel.acct {
   position: relative;
   gap: var(--sp-2);
-  padding: var(--sp-3);
+  padding: var(--sp-3) var(--sp-3) var(--sp-3) calc(var(--sp-3) + 1px);
   overflow: hidden;
+  /**
+   * 左沿让给状态色标（.acct::before）：宽度直接去掉，而不只是把描边颜色调透明。
+   * 卡片走 .panel 那一圈 --glass-border-color，设置里描边默认关（变量写成透明）；
+   * 背景默认铺到边框下（background-clip: border-box），那 1px 透明边框就把卡面浅底
+   * 露成色标左边一道浅线（同 ProjectCard 的毛病，2026-11 用户指出）。
+   * padding-left 多留 1px 补回边框占的位置，box-sizing: border-box 下外框与文字都不横移。
+   */
+  border-left-width: 0;
   /* 卡面也铺一层极淡的状态色：整页才不至于一片灰 */
   background-image: radial-gradient(
     120% 120% at 100% 0%,

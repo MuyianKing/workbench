@@ -120,7 +120,7 @@
   Qoder 快照在适配层转成同一形状）；底部三格「成功 / 失败、用量、均速」取最近 30 天流水。Qoder 这一侧只负责把 `QoderAccount`
   映射成卡片视图（`accountCards`，临期提示传 `onlyAvailable`）并把 emit 接回自己的动作。字号取 `--gw-fs-*`（与 TBuddy 账号卡
   一致），这一页其余栏仍用 `--fs-*`。彩色例外与 TBuddy 账号卡一致：头像紫、余额条与状态色标的状态色；别扩到别处（福利栏那三格
-  图标的彩色另算）。
+  图标的彩色另算）。色标与左沿边框的口径（左边框宽度去掉、padding 补 1px）同 [gateway.md](gateway.md) 的账号卡一条。
 - **账号栏的 `.qd__pane` 不参与收缩**（`flex: none`）：卡片按内容自然长高，浮动键才拿得到整段滚动范围；空态时再撑满一栏
   （`is-empty`）让空态居中。
 - **空态不套卡片外壳**（2026-11 与首页统一的口径）：`AccountCards` 的 `.acct__empty` 裸压画布，EmptyState 全尺寸、
