@@ -53,11 +53,17 @@ pub fn repo_git_branches(root: String) -> Result<Value, String> {
 }
 
 #[tauri::command(async)]
+pub fn repo_git_authors(root: String, rev: Option<String>) -> Result<Value, String> {
+    authors(&root, rev.as_deref())
+}
+
+#[tauri::command(async)]
 pub fn repo_git_commits(
     root: String,
     rev: Option<String>,
     since: Option<String>,
     until: Option<String>,
+    author: Option<String>,
     skip: Option<u32>,
     limit: Option<u32>,
 ) -> Result<Value, String> {
@@ -66,11 +72,15 @@ pub fn repo_git_commits(
         rev.as_deref(),
         since.as_deref(),
         until.as_deref(),
+        author.as_deref(),
         skip,
         limit,
     )
 }
 
+// 文件历史比整仓库历史多一个路径参数（root / path / rev / since / until / author / skip / limit），
+// 它是 repo_git_commits 的「限定到某个文件」版本，保持同一串筛选参数不做结构体包装。
+#[allow(clippy::too_many_arguments)]
 #[tauri::command(async)]
 pub fn repo_git_file_commits(
     root: String,
@@ -78,6 +88,7 @@ pub fn repo_git_file_commits(
     rev: Option<String>,
     since: Option<String>,
     until: Option<String>,
+    author: Option<String>,
     skip: Option<u32>,
     limit: Option<u32>,
 ) -> Result<Value, String> {
@@ -87,6 +98,7 @@ pub fn repo_git_file_commits(
         rev.as_deref(),
         since.as_deref(),
         until.as_deref(),
+        author.as_deref(),
         skip,
         limit,
     )
@@ -194,13 +206,47 @@ pub fn branches(root: &str) -> Result<Value, String> {
     Ok(json!({ "branches": branches }))
 }
 
+/// 一条分支上出现过的提交作者（`%an`，按名字排、去重）。
+///
+/// 用于提交列表上方的「按作者筛选」下拉。只listing 当前分支（空串 = HEAD）的提交作者，
+/// 不分页也不另起进程扫描全仓库以外的内容 —— 与历史列表同源，选了作者 filter 之后仍在
+/// 这一份作者里挑。作者名是从历史提交里读出来的数据，拼 git 参数时用 `--fixed-strings`
+/// 按字面量匹配（git 的 `--author` 默认吃正则，`a.b` 会连 `axb` 一起匹配）。
+pub fn authors(root: &str, rev: Option<&str>) -> Result<Value, String> {
+    let root = repo_root(root)?;
+    let rev = rev_spec(rev)?;
+    let text = run_ok(
+        &[
+            "--literal-pathspecs",
+            "log",
+            rev.as_str(),
+            "--no-color",
+            "--no-show-signature",
+            "--format=%an",
+        ],
+        &root,
+        "log",
+    )?;
+    let mut names: Vec<String> = Vec::new();
+    for line in text.lines() {
+        let name = line.trim();
+        if !name.is_empty() && !names.iter().any(|item| item == name) {
+            names.push(name.to_string());
+        }
+    }
+    names.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()).then(a.cmp(b)));
+    Ok(json!({ "authors": names }))
+}
+
 /// 一条分支的提交列表（`rev` 为空时是 `HEAD`，不跟别的分支混在一起）。
 /// `since` / `until` 是界面选的那两天（`YYYY-MM-DD`，本地时区）：补成当天 00:00:00 ~ 23:59:59。
+/// `author` 是界面选的作者名（`%an`），空串 / None = 不限；用 `--fixed-strings` 按字面量匹配。
 pub fn commits(
     root: &str,
     rev: Option<&str>,
     since: Option<&str>,
     until: Option<&str>,
+    author: Option<&str>,
     skip: Option<u32>,
     limit: Option<u32>,
 ) -> Result<Value, String> {
@@ -208,8 +254,10 @@ pub fn commits(
     let rev = rev_spec(rev)?;
     let since = check_date("开始日期", since)?;
     let until = check_date("结束日期", until)?;
+    let author = check_author(author)?;
     let since_arg = since.map(|date| format!("--since={date} 00:00:00"));
     let until_arg = until.map(|date| format!("--until={date} 23:59:59"));
+    let author_arg = author.as_deref().map(|name| format!("--author={name}"));
     let skip = skip.unwrap_or(0).min(SKIP_MAX);
     let limit = clamp_limit(limit);
     // 多取一条只用来判断「后面还有没有」；--skip 由 git 先跳，--max-count 限制的是跳完之后的条数
@@ -232,6 +280,10 @@ pub fn commits(
     if let Some(arg) = until_arg.as_deref() {
         args.push(arg);
     }
+    if let Some(arg) = author_arg.as_deref() {
+        args.push("--fixed-strings");
+        args.push(arg);
+    }
     let outcome = run(&args, Some(&root), GIT_TIMEOUT)?;
     if outcome.timed_out {
         return Err("读取提交记录超时".into());
@@ -250,12 +302,15 @@ pub fn commits(
 }
 
 /// 一个文件的提交历史（只按这个路径，不做 rename 跟踪 —— 改名前的历史不显示）。
+/// 作者筛选与整仓库历史同一套口径（`--fixed-strings --author`，见 `commits`）。
+#[allow(clippy::too_many_arguments)]
 pub fn file_commits(
     root: &str,
     path: &str,
     rev: Option<&str>,
     since: Option<&str>,
     until: Option<&str>,
+    author: Option<&str>,
     skip: Option<u32>,
     limit: Option<u32>,
 ) -> Result<Value, String> {
@@ -264,8 +319,10 @@ pub fn file_commits(
     let rev = rev_spec(rev)?;
     let since = check_date("开始日期", since)?;
     let until = check_date("结束日期", until)?;
+    let author = check_author(author)?;
     let since_arg = since.map(|date| format!("--since={date} 00:00:00"));
     let until_arg = until.map(|date| format!("--until={date} 23:59:59"));
+    let author_arg = author.as_deref().map(|name| format!("--author={name}"));
     let skip = skip.unwrap_or(0).min(SKIP_MAX);
     let limit = clamp_limit(limit);
     let max = format!("--max-count={}", limit + 1);
@@ -285,6 +342,10 @@ pub fn file_commits(
         args.push(arg);
     }
     if let Some(arg) = until_arg.as_deref() {
+        args.push(arg);
+    }
+    if let Some(arg) = author_arg.as_deref() {
+        args.push("--fixed-strings");
         args.push(arg);
     }
     args.push("--");
@@ -867,6 +928,19 @@ fn check_date(label: &str, value: Option<&str>) -> Result<Option<String>, String
     Ok(Some(value.to_string()))
 }
 
+/// 界面选的作者名（`%an`）：空 = 不限。这里只挡控制字符与 NUL —— 作者名本身来自提交历史，
+/// 拼进 git 参数时用 `--fixed-strings` 按字面量匹配，不做正则解释；开头的 `-` 不会变成选项
+/// （它跟在 `--author=` 后面）。
+fn check_author(value: Option<&str>) -> Result<Option<String>, String> {
+    let Some(value) = value.map(str::trim).filter(|item| !item.is_empty()) else {
+        return Ok(None);
+    };
+    if value.contains('\0') || value.contains('\n') || value.contains('\r') {
+        return Err(format!("不是有效的作者名：{value}"));
+    }
+    Ok(Some(value.to_string()))
+}
+
 fn is_empty_repo(stdout: &str, stderr: &str) -> bool {
     let detail = format!("{stdout}\n{stderr}");
     detail.contains("does not have any commits") || detail.contains("unknown revision")
@@ -938,6 +1012,21 @@ mod tests {
             .to_string()
     }
 
+    /// 用指定作者名提交（`git -c user.name=…`，改的是这一次提交，不是仓库配置）。
+    fn commit_as(root: &Path, name: &str, message: &str) -> String {
+        crate::sync::run_git(&["add", "-A"], Some(root), GIT_TIMEOUT).unwrap();
+        crate::sync::run_git(
+            &["-c", &format!("user.name={name}"), "commit", "--quiet", "-m", message],
+            Some(root),
+            GIT_TIMEOUT,
+        )
+        .unwrap();
+        crate::sync::run_git(&["rev-parse", "HEAD"], Some(root), GIT_TIMEOUT)
+            .unwrap()
+            .trim()
+            .to_string()
+    }
+
     fn cleanup(dir: &Path) {
         if dir.starts_with(std::env::temp_dir()) {
             let _ = std::fs::remove_dir_all(dir);
@@ -957,7 +1046,7 @@ mod tests {
         assert_eq!(info["empty"], json!(true));
         assert_eq!(info["head"], json!(""));
         assert_eq!(info["scope"], json!(""));
-        assert_eq!(commits(&root, None, None, None, None, None).unwrap()["commits"], json!([]));
+        assert_eq!(commits(&root, None, None, None, None, None, None).unwrap()["commits"], json!([]));
         // 空仓库没有 HEAD：目录树回空清单，不是读取失败
         assert_eq!(tree(&root, None, None).unwrap()["entries"], json!([]));
 
@@ -971,20 +1060,20 @@ mod tests {
         assert_eq!(info["empty"], json!(false));
         assert_eq!(info["head"], json!(second));
 
-        let page = commits(&root, None, None, None, Some(0), Some(1)).unwrap();
+        let page = commits(&root, None, None, None, None, Some(0), Some(1)).unwrap();
         assert_eq!(page["commits"].as_array().unwrap().len(), 1);
         assert_eq!(page["hasMore"], json!(true));
         assert_eq!(page["commits"][0]["hash"], json!(second));
         assert_eq!(page["commits"][0]["subject"], json!("second"));
 
-        let page = commits(&root, None, None, None, Some(1), Some(10)).unwrap();
+        let page = commits(&root, None, None, None, None, Some(1), Some(10)).unwrap();
         assert_eq!(page["commits"][0]["hash"], json!(first));
         assert_eq!(page["hasMore"], json!(false));
 
         // 时间范围：未来 → 0 条；很早到现在 → 全量；不是 YYYY-MM-DD 直接报错
         // （年份别写 2999：git 的 approxidate 认不出那么远的日期，会当成没给）
         assert_eq!(
-            commits(&root, None, Some("2099-01-01"), None, None, None).unwrap()["commits"],
+            commits(&root, None, Some("2099-01-01"), None, None, None, None).unwrap()["commits"],
             json!([])
         );
         let page = commits(
@@ -994,10 +1083,11 @@ mod tests {
             Some("2099-12-31"),
             None,
             None,
+            None,
         )
         .unwrap();
         assert_eq!(page["commits"].as_array().unwrap().len(), 2);
-        assert!(commits(&root, None, Some("2026/01/01"), None, None, None).is_err());
+        assert!(commits(&root, None, Some("2026/01/01"), None, None, None, None).is_err());
 
         cleanup(&repo);
     }
@@ -1049,27 +1139,75 @@ mod tests {
         let third = commit_all(&repo, "third");
         let root = repo.to_string_lossy().into_owned();
 
-        let page = file_commits(&root, "a.txt", None, None, None, None, None).unwrap();
+        let page = file_commits(&root, "a.txt", None, None, None, None, None, None).unwrap();
         let commits = page["commits"].as_array().unwrap();
         assert_eq!(commits.len(), 2);
         assert_eq!(commits[0]["hash"], json!(third));
         assert_eq!(commits[1]["hash"], json!(first));
         assert_eq!(page["hasMore"], json!(false));
 
-        let page = file_commits(&root, "a.txt", None, None, None, Some(1), Some(1)).unwrap();
+        let page = file_commits(&root, "a.txt", None, None, None, None, Some(1), Some(1)).unwrap();
         assert_eq!(page["commits"].as_array().unwrap().len(), 1);
         assert_eq!(page["commits"][0]["hash"], json!(first));
 
         // 文件名里的 [ ] 是字面字符，不是 pathspec 通配符（--literal-pathspecs）
         write(&repo, "odd[1].txt", "x\n");
         let odd = commit_all(&repo, "odd name");
-        let page = file_commits(&root, "odd[1].txt", None, None, None, None, None).unwrap();
+        let page = file_commits(&root, "odd[1].txt", None, None, None, None, None, None).unwrap();
         assert_eq!(page["commits"][0]["hash"], json!(odd));
         let p = patch(&root, "", &odd, "odd[1].txt").unwrap();
         assert!(p["patch"].as_str().unwrap().contains("+x"));
 
-        assert!(file_commits(&root, "../a.txt", None, None, None, None, None).is_err());
-        assert!(file_commits(&root, "C:/a.txt", None, None, None, None, None).is_err());
+        assert!(file_commits(&root, "../a.txt", None, None, None, None, None, None).is_err());
+        assert!(file_commits(&root, "C:/a.txt", None, None, None, None, None, None).is_err());
+
+        cleanup(&repo);
+    }
+
+    #[test]
+    fn authors_lists_distinct_names_and_filters_literally() {
+        let repo = temp_repo("authors");
+        if !repo.exists() {
+            return;
+        }
+        write(&repo, "a.txt", "one\n");
+        commit_as(&repo, "a.b", "by a dot");
+        write(&repo, "a.txt", "two\n");
+        let second = commit_as(&repo, "axb", "by no dot");
+        write(&repo, "a.txt", "three\n");
+        commit_as(&repo, "axb", "by no dot again");
+        let root = repo.to_string_lossy().into_owned();
+
+        // 按名字去重、大小写不敏感排序；两次 axb 只回一条
+        let list = authors(&root, None).unwrap();
+        let names: Vec<&str> = list["authors"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|value| value.as_str())
+            .collect();
+        assert_eq!(names, vec!["a.b", "axb"]);
+
+        // `--fixed-strings`：a.b 只匹配字面名字，不把 axb 当正则也匹配进来
+        let page = commits(&root, None, None, None, Some("a.b"), None, None).unwrap();
+        let hashes: Vec<&str> = page["commits"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|value| value["hash"].as_str())
+            .collect();
+        assert_eq!(hashes.len(), 1);
+        assert_ne!(hashes[0], second);
+
+        let page = commits(&root, None, None, None, Some("axb"), None, None).unwrap();
+        assert_eq!(page["commits"].as_array().unwrap().len(), 2);
+
+        // 文件历史用同一套作者口径
+        let page = file_commits(&root, "a.txt", None, None, None, Some("axb"), None, None).unwrap();
+        assert_eq!(page["commits"].as_array().unwrap().len(), 2);
+
+        // 控制字符进不来（拼 git 参数是字面量，仍要挡住注入形状）
+        assert!(commits(&root, None, None, None, Some("a\nb"), None, None).is_err());
 
         cleanup(&repo);
     }
@@ -1175,7 +1313,7 @@ mod tests {
         assert!(names.contains(&"dev"));
 
         // dev 停在 first：历史与目录树都看不到 second 的提交 / b.txt
-        let dev_commits = commits(&root, Some("dev"), None, None, None, None).unwrap();
+        let dev_commits = commits(&root, Some("dev"), None, None, None, None, None).unwrap();
         assert_eq!(dev_commits["commits"].as_array().unwrap().len(), 1);
         assert_eq!(dev_commits["commits"][0]["hash"], json!(first));
         let dev_tree = tree(&root, Some(""), Some("dev")).unwrap();
@@ -1191,17 +1329,17 @@ mod tests {
         );
 
         // 当前分支照旧看到 second
-        let head_commits = commits(&root, None, None, None, None, None).unwrap();
+        let head_commits = commits(&root, None, None, None, None, None, None).unwrap();
         assert_eq!(head_commits["commits"][0]["hash"], json!(second));
 
         // 文件历史也认分支：dev 上的 a.txt 只有 first 这一笔
-        let dev_a = file_commits(&root, "a.txt", Some("dev"), None, None, None, None).unwrap();
+        let dev_a = file_commits(&root, "a.txt", Some("dev"), None, None, None, None, None).unwrap();
         assert_eq!(dev_a["commits"].as_array().unwrap().len(), 1);
         assert_eq!(dev_a["commits"][0]["hash"], json!(first));
 
         // 分支名拼进 refs/heads/，不接受选项形状；不存在的分支照实报错
-        assert!(commits(&root, Some("--all"), None, None, None, None).is_err());
-        assert!(commits(&root, Some("no-such-branch"), None, None, None, None).is_err());
+        assert!(commits(&root, Some("--all"), None, None, None, None, None).is_err());
+        assert!(commits(&root, Some("no-such-branch"), None, None, None, None, None).is_err());
 
         // 浏览分支不切工作区：HEAD 仍在原来那条分支
         assert_eq!(open(&root).unwrap()["branch"], json!(current));

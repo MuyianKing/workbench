@@ -45,16 +45,22 @@ const rangeUntil = computed({
     }),
 })
 
+/** 作者筛选：空串 = 全部作者；下拉里的人选来自当前分支的提交历史 */
+const authorValue = computed({
+  get: () => store.historyAuthor,
+  set: value => void store.setHistoryAuthor(value ?? ''),
+})
+
 const emptyText = computed(() => {
-  if (store.historyRange)
-    return '这个时间范围里没有提交'
+  if (store.historyRange || store.historyAuthor)
+    return '这个筛选条件里没有提交'
   return store.isFileHistory ? '这个文件还没有提交历史' : '这个仓库还没有提交'
 })
 
-/** 换文件历史 / 换仓库 / 换时间范围时把列表滚回顶部：上一个位置对下一批提交没有意义 */
+/** 换文件历史 / 换仓库 / 换时间范围 / 换作者时把列表滚回顶部：上一个位置对下一批提交没有意义 */
 watch(
   () =>
-    `${store.repo?.root ?? ''}|${store.repo?.head ?? ''}|${store.historyPath}|${store.historyRange?.since ?? ''}|${store.historyRange?.until ?? ''}`,
+    `${store.repo?.root ?? ''}|${store.repo?.head ?? ''}|${store.historyPath}|${store.historyRange?.since ?? ''}|${store.historyRange?.until ?? ''}|${store.historyAuthor}`,
   async () => {
     await nextTick()
     if (scrollRef.value)
@@ -144,6 +150,18 @@ function pick(commit: GitCommit): void {
         class="commit-filter__picker"
         aria-label="提交范围的结束日期"
       />
+      <!-- 提交人员：按作者名筛，选项取自当前分支历史；清空 = 全部 -->
+      <el-select
+        v-model="authorValue"
+        size="small"
+        clearable
+        filterable
+        placeholder="全部作者"
+        class="commit-filter__author"
+        aria-label="按提交人员筛选"
+      >
+        <el-option v-for="name in store.authors" :key="name" :label="name" :value="name" />
+      </el-select>
     </div>
 
     <!-- 对比条：选基准之后一直摆在这里，直到取消或比完再选下一个 -->
@@ -300,6 +318,13 @@ function pick(commit: GitCommit): void {
 }
 
 .commit-filter .commit-filter__picker {
+  flex: 0 0 104px;
+  width: 104px;
+  min-width: 0;
+}
+
+/* 作者下拉与两个日期框同宽（104px），一行更整齐；选中态有清除 + 箭头两个图标，文字过长由 select 省略号截断 */
+.commit-filter > .commit-filter__author {
   flex: 0 0 104px;
   width: 104px;
   min-width: 0;

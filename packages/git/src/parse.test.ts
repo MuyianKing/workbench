@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   isCommitHash,
+  parseAuthorList,
   parseBranchList,
   parseCommitDetail,
   parseCommitPage,
@@ -68,6 +69,19 @@ describe('parseBranchList', () => {
   it('缺字段时回空清单', () => {
     expect(parseBranchList(null)).toEqual({ branches: [] })
     expect(parseBranchList({ branches: 'main' })).toEqual({ branches: [] })
+  })
+})
+
+describe('parseAuthorList', () => {
+  it('只留非空名字、去重并按原顺序回传（排序在 Rust 侧已做）', () => {
+    expect(parseAuthorList({ authors: ['杨峰', ' yaojian ', '', null, '杨峰'] })).toEqual({
+      authors: ['杨峰', 'yaojian'],
+    })
+  })
+
+  it('缺字段时回空清单', () => {
+    expect(parseAuthorList(null)).toEqual({ authors: [] })
+    expect(parseAuthorList({ authors: '杨峰' })).toEqual({ authors: [] })
   })
 })
 

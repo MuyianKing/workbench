@@ -589,6 +589,7 @@ fn main() {
             commands::project_git_log,
             repo_git::repo_git_open,
             repo_git::repo_git_branches,
+            repo_git::repo_git_authors,
             repo_git::repo_git_commits,
             repo_git::repo_git_file_commits,
             repo_git::repo_git_tree,

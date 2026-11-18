@@ -8,6 +8,7 @@
  */
 
 import type {
+  GitAuthorList,
   GitBranchList,
   GitChangedFile,
   GitCommit,
@@ -199,6 +200,17 @@ export function parseBranchList(raw: unknown): GitBranchList {
       branches.push(name)
   }
   return { branches }
+}
+
+export function parseAuthorList(raw: unknown): GitAuthorList {
+  const value = asRecord(raw)
+  const authors: string[] = []
+  for (const item of asArray(value.authors)) {
+    const name = asText(item)
+    if (name && !authors.includes(name))
+      authors.push(name)
+  }
+  return { authors }
 }
 
 export function parseTreePage(raw: unknown): GitTreePage {

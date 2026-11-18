@@ -2,7 +2,7 @@
 import { Check } from '@element-plus/icons-vue'
 import { basenameOf } from '@/format'
 /**
- * Git 页「换仓库」的那份菜单：项目 → 最近打开 → 打开其他文件夹…
+ * Git 页「换仓库」的那份菜单：最近打开 → 项目 → 打开其他文件夹…
  *
  * 头部仓库名与空态里的「选择项目」共用这一份，菜单只在 [GitView](GitView.vue) 里出现，
  * 别在两处各写一遍。根是 `el-dropdown-menu`：每一项的 `command` 原样交给外层
@@ -27,8 +27,30 @@ function isCurrentPath(path: string, currentPath: string): boolean {
 
 <template>
   <el-dropdown-menu>
-    <template v-if="projects.length">
+    <template v-if="recent.length">
       <el-dropdown-item disabled class="repo-menu__label">
+        最近打开
+      </el-dropdown-item>
+      <el-dropdown-item
+        v-for="item in recent"
+        :key="item"
+        :command="item"
+        :title="item"
+      >
+        <span class="repo-item__name">{{ basenameOf(item) }}</span>
+        <span class="repo-item__path mono">{{ item }}</span>
+        <el-icon v-if="isCurrentPath(item, currentPath)" class="repo-item__mark">
+          <Check />
+        </el-icon>
+      </el-dropdown-item>
+    </template>
+
+    <template v-if="projects.length">
+      <el-dropdown-item
+        disabled
+        class="repo-menu__label"
+        :divided="recent.length > 0"
+      >
         项目
       </el-dropdown-item>
       <el-dropdown-item
@@ -41,28 +63,6 @@ function isCurrentPath(path: string, currentPath: string): boolean {
         <span class="repo-item__name">{{ project.name }}</span>
         <span class="repo-item__path mono">{{ project.path }}</span>
         <el-icon v-if="isCurrentPath(project.path, currentPath)" class="repo-item__mark">
-          <Check />
-        </el-icon>
-      </el-dropdown-item>
-    </template>
-
-    <template v-if="recent.length">
-      <el-dropdown-item
-        disabled
-        class="repo-menu__label"
-        :divided="projects.length > 0"
-      >
-        最近打开
-      </el-dropdown-item>
-      <el-dropdown-item
-        v-for="item in recent"
-        :key="item"
-        :command="item"
-        :title="item"
-      >
-        <span class="repo-item__name">{{ basenameOf(item) }}</span>
-        <span class="repo-item__path mono">{{ item }}</span>
-        <el-icon v-if="isCurrentPath(item, currentPath)" class="repo-item__mark">
           <Check />
         </el-icon>
       </el-dropdown-item>

@@ -64,10 +64,11 @@ const domainsApi = {
   // ---------- Git 页（只读、本地；实现见 workbench/git.ts） ----------
   openGitRepo: (path: string) => git.openRepo(path),
   listGitBranches: (root: string) => git.listBranches(root),
-  listGitCommits: (root: string, rev: string, since: string, until: string, skip: number, limit: number) =>
-    git.listCommits(root, rev, since, until, skip, limit),
-  listGitFileCommits: (root: string, path: string, rev: string, since: string, until: string, skip: number, limit: number) =>
-    git.listFileCommits(root, path, rev, since, until, skip, limit),
+  listGitAuthors: (root: string, rev: string) => git.listAuthors(root, rev),
+  listGitCommits: (root: string, rev: string, since: string, until: string, author: string, skip: number, limit: number) =>
+    git.listCommits(root, rev, since, until, author, skip, limit),
+  listGitFileCommits: (root: string, path: string, rev: string, since: string, until: string, author: string, skip: number, limit: number) =>
+    git.listFileCommits(root, path, rev, since, until, author, skip, limit),
   listGitTree: (root: string, dir: string, rev: string) => git.listTree(root, dir, rev),
   loadGitCommit: (root: string, hash: string) => git.loadCommit(root, hash),
   compareGitCommits: (root: string, base: string, target: string) =>

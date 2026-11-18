@@ -38,6 +38,12 @@ export interface GitBranchList {
   branches: string[]
 }
 
+/** 当前分支上出现过的提交作者名（`%an`），用于「按作者筛选」下拉 */
+export interface GitAuthorList {
+  /** 去重并按名字（不区分大小写）排序；空串 = 没有提交 */
+  authors: string[]
+}
+
 export interface GitCommit {
   hash: string
   /** 作者时间（毫秒） */

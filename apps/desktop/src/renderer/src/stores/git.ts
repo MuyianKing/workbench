@@ -55,6 +55,17 @@ export const useGitStore = defineStore('git', () => {
    */
   const historyRange = ref<{ since: string, until: string } | null>(null)
 
+  /**
+   * 当前分支上出现过的提交作者（`%an`，按名字排序去重），喂给提交列表上方的作者下拉。
+   * 与分支同源：换仓库 / 换分支重取，列表失败只让下拉空着。
+   */
+  const authors = ref<string[]>([])
+  /**
+   * 提交列表的作者筛选：空串 = 不限。给 `git log --fixed-strings --author` 用（按字面量匹配）。
+   * 与时间范围同一套生命周期：换仓库清空，换文件 / 换分支 / 刷新都保留。
+   */
+  const historyAuthor = ref('')
+
   const commits = ref<GitCommit[]>([])
   const commitsLoading = ref(false)
   const commitsError = ref('')
@@ -89,6 +100,7 @@ export const useGitStore = defineStore('git', () => {
 
   let openJob = 0
   let branchJob = 0
+  let authorJob = 0
   let historyJob = 0
   let detailJob = 0
   let compareJob = 0
@@ -206,9 +218,11 @@ export const useGitStore = defineStore('git', () => {
 
     repo.value = result.data
     openPath.value = sanitizeGitRepoRoot(value)
-    // 换了一个文件夹才清掉时间范围；刷新同一个仓库时保留筛选
-    if (openPath.value.toLowerCase() !== previousPath.toLowerCase())
+    // 换了一个文件夹才清掉时间范围与作者；刷新同一个仓库时保留筛选
+    if (openPath.value.toLowerCase() !== previousPath.toLowerCase()) {
       historyRange.value = null
+      historyAuthor.value = ''
+    }
     branchJob += 1
     branches.value = []
     viewBranch.value = ''
@@ -223,6 +237,8 @@ export const useGitStore = defineStore('git', () => {
     // 刷新时原来那支还在就继续看它；已经被删掉就退回 HEAD
     if (rev && branches.value.includes(rev))
       viewBranch.value = rev
+    // 作者清单跟着当前看的分支
+    await loadAuthors()
     // 空仓库也走一次：loadHistory 会把它当成「已加载、零条」，中间那栏因此显示空态，
     // 而不是停在「还没开始加载」的空白上。
     await loadHistory(true)
@@ -243,6 +259,19 @@ export const useGitStore = defineStore('git', () => {
     branches.value = result.ok && result.data ? result.data.branches : []
   }
 
+  /** 读当前分支的提交作者清单；失败只让下拉空着，历史列表照常可用 */
+  async function loadAuthors(): Promise<void> {
+    if (!repo.value || repo.value.empty) {
+      authors.value = []
+      return
+    }
+    const job = (authorJob += 1)
+    const result = await window.workbench.listGitAuthors(root.value, viewBranch.value)
+    if (job !== authorJob)
+      return
+    authors.value = result.ok && result.data ? result.data.authors : []
+  }
+
   /**
    * 换「看哪条分支」：只换中间与右侧的数据来源，**不切工作区**。
    * `historyPath` 保留 —— 从文件历史切过去时继续看同一个文件（新分支上没有它，
@@ -259,6 +288,7 @@ export const useGitStore = defineStore('git', () => {
     resetHistory()
     resetDetail()
     resetCompare()
+    await loadAuthors()
     await loadHistory(true)
   }
 
@@ -304,9 +334,10 @@ export const useGitStore = defineStore('git', () => {
 
     const since = historyRange.value?.since ?? ''
     const until = historyRange.value?.until ?? ''
+    const author = historyAuthor.value
     const result = historyPath.value
-      ? await window.workbench.listGitFileCommits(root.value, historyPath.value, viewBranch.value, since, until, skip, PAGE_SIZE)
-      : await window.workbench.listGitCommits(root.value, viewBranch.value, since, until, skip, PAGE_SIZE)
+      ? await window.workbench.listGitFileCommits(root.value, historyPath.value, viewBranch.value, since, until, author, skip, PAGE_SIZE)
+      : await window.workbench.listGitCommits(root.value, viewBranch.value, since, until, author, skip, PAGE_SIZE)
 
     if (job !== historyJob)
       return
@@ -344,6 +375,23 @@ export const useGitStore = defineStore('git', () => {
     if (next?.since === historyRange.value?.since && next?.until === historyRange.value?.until)
       return
     historyRange.value = next
+    resetHistory()
+    resetDetail()
+    resetCompare()
+    await loadHistory(true)
+  }
+
+  /**
+   * 设 / 清提交列表的作者筛选（空串 = 不限）。换了作者就从头取一页，
+   * 右侧详情与对比一起收掉（它们不一定是这个作者写的）。
+   */
+  async function setHistoryAuthor(author: string): Promise<void> {
+    if (!repo.value)
+      return
+    const next = author.trim()
+    if (next === historyAuthor.value)
+      return
+    historyAuthor.value = next
     resetHistory()
     resetDetail()
     resetCompare()
@@ -518,6 +566,8 @@ export const useGitStore = defineStore('git', () => {
     recentRepos,
     historyPath,
     historyRange,
+    historyAuthor,
+    authors,
     isFileHistory,
     commits,
     commitsLoading,
@@ -555,6 +605,7 @@ export const useGitStore = defineStore('git', () => {
     showRepoHistory,
     showFileHistory,
     setHistoryRange,
+    setHistoryAuthor,
     selectCommit,
     pickCompare,
     clearCompare,

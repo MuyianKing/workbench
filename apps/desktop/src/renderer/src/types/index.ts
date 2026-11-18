@@ -82,6 +82,7 @@ export type {
   ScanResult,
 } from '@workbench/core'
 export type {
+  GitAuthorList,
   GitBranchList,
   GitChangedFile,
   GitCommitDetail,

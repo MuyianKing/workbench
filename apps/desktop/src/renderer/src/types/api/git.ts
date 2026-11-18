@@ -5,6 +5,7 @@
 
 import type { Result } from '@workbench/core'
 import type {
+  GitAuthorList,
   GitBranchList,
   GitCommitDetail,
   GitCommitPage,
@@ -25,11 +26,14 @@ export interface GitChannel {
   /** 本地分支清单（只用于看哪条分支的历史，不切工作区） */
   listGitBranches: (root: string) => Promise<Result<GitBranchList>>
 
-  /** 一条分支（空串 = 当前分支）的提交列表；`since` / `until` 是 YYYY-MM-DD（空串 = 不限），分页取 */
-  listGitCommits: (root: string, rev: string, since: string, until: string, skip: number, limit: number) => Promise<Result<GitCommitPage>>
+  /** 当前分支上出现过的提交作者（按作者筛选下拉用；当前分支跟随 rev，空串 = HEAD） */
+  listGitAuthors: (root: string, rev: string) => Promise<Result<GitAuthorList>>
 
-  /** 一条分支上一个文件的提交历史（不做 rename 跟踪：改名前的历史不显示；时间范围同上） */
-  listGitFileCommits: (root: string, path: string, rev: string, since: string, until: string, skip: number, limit: number) => Promise<Result<GitCommitPage>>
+  /** 一条分支（空串 = 当前分支）的提交列表；`since` / `until` 是 YYYY-MM-DD（空串 = 不限），`author` 是提交作者名（空串 = 不限），分页取 */
+  listGitCommits: (root: string, rev: string, since: string, until: string, author: string, skip: number, limit: number) => Promise<Result<GitCommitPage>>
+
+  /** 一条分支上一个文件的提交历史（不做 rename 跟踪：改名前的历史不显示；时间范围与作者筛选同上） */
+  listGitFileCommits: (root: string, path: string, rev: string, since: string, until: string, author: string, skip: number, limit: number) => Promise<Result<GitCommitPage>>
 
   /** 一条分支上一个目录的内容（空串 = 根目录） */
   listGitTree: (root: string, dir: string, rev: string) => Promise<Result<GitTreePage>>

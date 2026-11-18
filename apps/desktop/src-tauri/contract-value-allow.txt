@@ -46,6 +46,7 @@ project_git_log
 qoder_earnings_publish
 qoder_earnings_pull
 repo_git_branches
+repo_git_authors
 repo_git_commit
 repo_git_commits
 repo_git_compare
