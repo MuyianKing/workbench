@@ -94,8 +94,11 @@ export interface CaptureChannel {
    */
   scrollGrab: (rect: { x: number, y: number, width: number, height: number }) => Promise<Result<ArrayBuffer>>
 
-  /** 向下滚 notches 齿：齿数由渲染层按上一步的实际位移自适应（@workbench/capture 的 planNotches） */
-  scrollWheel: (notches: number) => Promise<Result<null>>
+  /**
+   * 向下滚 `units` 个滚轮单位（120 = 一整格）。渲染层按上一步实际位移自适应：稳态发整格
+   * （120 × 齿数），遇到「一格跨过整个选区」的窗口减半细分（60 / 30）找能拼的步长。
+   */
+  scrollWheel: (units: number) => Promise<Result<null>>
 
   /** JS 自己停（到底 / 拼不上）：遮罩恢复交互并拿回焦点，进结果相 */
   scrollStop: () => Promise<Result<null>>

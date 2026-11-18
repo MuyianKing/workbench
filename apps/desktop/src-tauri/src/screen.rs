@@ -188,8 +188,14 @@ pub fn virtual_desktop() -> Option<(i32, i32, u32, u32)> {
 // `PostMessage(WM_MOUSEWHEEL)`：注入的是系统输入栈里的「真输入」，Chromium / Qt /
 // Win32 各路窗口都认，PostMessage 对 UWP 与不少现代窗口是静默无效的。
 
-/// 一格滚轮的量（Windows 的 `WHEEL_DELTA`；自己定一份，省一个跨模块 import 的悬念）
+/// 一格滚轮的量（Windows 的 `WHEEL_DELTA`；自己定一份，省一个跨模块 import 的悬念）。
+/// 调用方发滚轮时以它为一个整格，细分时给它的分数（60 / 30）。
 const WHEEL_DELTA: i32 = 120;
+
+/// 一个整格滚轮的量（单位数）；滚动命令用它算发滚轮的上限（16 格）。
+pub fn wheel_delta() -> i32 {
+    WHEEL_DELTA
+}
 
 /// 现在的前台窗口。**开场时记下**（见 capture.rs 的 `ScrollRun`）—— 等真要滚的时候
 /// 前台已经是遮罩自己了，再问就问错了。
@@ -208,8 +214,13 @@ pub fn set_cursor_pos(x: i32, y: i32) {
     unsafe { SetCursorPos(x, y) };
 }
 
-/// 向下滚 `notches` 齿（每齿一格 `WHEEL_DELTA`）。
-pub fn send_wheel(notches: u32) {
+/// 向下滚 `units` 个滚轮单位（`mouseData` 的原始量，120 = 一整格；细分时给 60 / 30）。
+///
+/// 滚动截图遇到「一整格就跨过整个选区」的窗口（翻页式阅读器 / 看图）时，调用方会把
+/// 单位减半再试，找出一帧仍能压住上一帧的步长 —— 所以这里收的是原始单位数，不再
+/// 写死「一齿 120」。小于一格的量在 Chromium 系按像素比例滚，老 Win32 程序可能
+/// 整格忽略（那种情况调用方读到 Δ=0 后会升回整齿）。
+pub fn send_wheel(units: u32) {
     // 向下滚 = 负的 delta；`mouseData` 按 u32 存，负值经补码转过去
     let input = INPUT {
         r#type: INPUT_MOUSE,
@@ -217,7 +228,7 @@ pub fn send_wheel(notches: u32) {
             mi: MOUSEINPUT {
                 dx: 0,
                 dy: 0,
-                mouseData: -(WHEEL_DELTA * notches as i32) as u32,
+                mouseData: -(units as i32) as u32,
                 dwFlags: MOUSEEVENTF_WHEEL,
                 time: 0,
                 dwExtraInfo: 0,

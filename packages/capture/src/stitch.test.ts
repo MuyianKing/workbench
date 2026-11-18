@@ -312,6 +312,14 @@ describe('planNotches', () => {
     expect(planNotches(0, 600)).toBe(1)
     expect(planNotches(100, 0)).toBe(1)
   })
+
+  it('粘底栏厚的页面步长减掉粘底栏，不超匹配搜索范围', () => {
+    // 每齿 100px、选区 600 高：没粘底栏时目标 150px → 2 齿；粘底栏 200px 时
+    // 可滚内容只剩 400，上限 floor((400-48)/100)=3 齿仍够 2；粘底栏 360px 时
+    // 可滚内容 240，上限 floor((240-48)/100)=1 —— 真解不会被挤出搜索范围
+    expect(planNotches(100, 600, 0)).toBe(2)
+    expect(planNotches(100, 600, 360)).toBe(1)
+  })
 })
 
 describe('bytesEqual', () => {

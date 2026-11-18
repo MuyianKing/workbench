@@ -1513,6 +1513,12 @@ const SCROLL_ZERO_CONFIRM = 2
 /** 连续这么多次匹配对不上才收场：第一次可能是动画没停稳 / 布局正在动，放慢再试一次 */
 const SCROLL_NULL_LIMIT = 2
 
+/** 一个整格滚轮的 mouseData 单位数（Windows WHEEL_DELTA，与 screen.rs 同口径） */
+const WHEEL_DELTA_UNIT = 120
+
+/** 细分步长下限：一格跨整屏的窗口靠减半单位找重叠，再小多数应用就不认了 */
+const WHEEL_MIN_UNIT = 30
+
 /** 工具条上「滚动截图」：直接开滚（没有「开始」确认步 —— 停止靠再按一次截图热键）。
  *  选区太矮匹配不出重叠，先说清楚 */
 function startScroll(): void {
@@ -1615,6 +1621,9 @@ async function runScroll(): Promise<void> {
   let top = 0
   let steps = 0
   let notches = 1
+  // 每次发的滚轮单位数（一格 120；一格跨整屏的窗口减半细分到 60 / 30）。
+  // 与 notches 相乘就是实际发给 Rust 的总单位数
+  let unit = WHEEL_DELTA_UNIT
   let canvas: HTMLCanvasElement | null = null
 
   // 匹配挪进 worker（无状态，每场一个，收尾时 terminate）：像素比较是几十万到上千万次
@@ -1704,13 +1713,15 @@ async function runScroll(): Promise<void> {
       state.stitched = rect.height
       // 连续 Δ=0 的计数：到底要连着两次没动才算（第一下可能是这一齿还没生效）
       let zeroRun = 0
-      // 连续对不上的计数：第一次可能是动画没停稳 / 布局正在动，放慢（1 齿 + 等稳翻倍）
-      // 再试，连着两次才认输
+      // 连续对不上的计数：放慢（1 齿 + 等稳翻倍）/ 降单位再试，连着两次才认输
       let nullRun = 0
-      // 上一齿的实测位移（上一步总位移 ÷ 实发齿数）：滚轮是自己发的，本步的位移
-      // ≈ 它 × 本步实发齿数，匹配先在预测窗口里找（见 stitch.ts 的「预测窗口」）。
-      // 必须按「齿」记：上一步发了两齿就把总位移除以二，否则齿数一变预测就错一倍
-      let perNotch = 0
+      // 细分单位被忽略（Δ=0）时允许升回整格验证一次；只做一次，防「细分不动→升整格→
+      // 整格跨屏 null→降细分→又不动」的死循环。成功拼上后重置，新内容重新允许验证
+      let canEscalate = true
+      // 每个滚轮单位的实测位移（上一步总位移 ÷ 实发单位数）：滚轮是自己发的，
+      // 本步位移 ≈ 它 × 本步实发单位数，匹配先在预测窗口里找（见 stitch.ts 的「预测窗口」）。
+      // 按「单位」记而不是按「齿」：齿数或单位数（细分时）一变，预测就错一倍
+      let perUnitPx = 0
       // 等稳轮询数：对不上的那一步翻倍（滚动动画更慢就多等一会）
       let settlePolls = SCROLL_SETTLE_POLLS
       // 首等 tick：发完滚轮先等多久再开始抓帧（按上一步的实测轮询数自适应，
@@ -1725,7 +1736,7 @@ async function runScroll(): Promise<void> {
           note = `已拼到上限 ${MAX_STITCH_HEIGHT}px`
           break
         }
-        const rolled = await window.workbench.scrollWheel(notches)
+        const rolled = await window.workbench.scrollWheel(unit * notches)
         if (!alive())
           return
         if (!rolled.ok) {
@@ -1772,7 +1783,8 @@ async function runScroll(): Promise<void> {
           note = '抓回来的帧尺寸不对'
           break
         }
-        const hintDelta = perNotch > 0 ? Math.round(perNotch * notches) : undefined
+        const issuedUnits = unit * notches
+        const hintDelta = perUnitPx > 0 ? Math.round(perUnitPx * issuedUnits) : undefined
         const result = await matchScroll(prev, frame, hintDelta)
         if (!alive())
           return
@@ -1781,7 +1793,16 @@ async function runScroll(): Promise<void> {
           // 已经按了停止：这一帧多半是动画中间态，不值得再放慢重试，直接收
           if (scrollStopRequested)
             break
-          // 放慢再试：一步只滚一齿、等稳轮询翻倍；连着两次对不上才收
+          // 对不上：先把步长降下来再试 —— 一格就跨过整个选区时两帧没有重叠可比，
+          // 减半滚轮单位（120→60→30）就有重叠了。每次换档算一次新鲜尝试（nullRun
+          // 清零），齿数收到 1 取该档最小步长；档位到底后仍对不上才按 nullRun 认输
+          if (unit > WHEEL_MIN_UNIT) {
+            unit = Math.max(WHEEL_MIN_UNIT, Math.floor(unit / 2))
+            notches = 1
+            nullRun = 0
+            settlePolls = SCROLL_SETTLE_POLLS * 2
+            continue
+          }
           nullRun += 1
           if (nullRun >= SCROLL_NULL_LIMIT) {
             note = '画面变化太快，这里拼不上'
@@ -1792,6 +1813,15 @@ async function runScroll(): Promise<void> {
           continue
         }
         if (delta === 0) {
+          // 细分单位被应用整格忽略时，细分帧和上一帧一样 → Δ=0。升回整格确认一次：
+          // 整格能滚出位移说明前面是「细分没生效」，不是到底；整格也没动才是真到底。
+          // canEscalate 保证只升一次，避免与「整格跨屏 null→降细分」来回震荡
+          if (unit < WHEEL_DELTA_UNIT && canEscalate) {
+            unit = WHEEL_DELTA_UNIT
+            notches = 1
+            canEscalate = false
+            continue
+          }
           // 到底了、或这一齿没起作用 —— 再滚一齿确认一次，连着两次没动才收
           zeroRun += 1
           if (zeroRun >= SCROLL_ZERO_CONFIRM)
@@ -1800,6 +1830,7 @@ async function runScroll(): Promise<void> {
         }
         zeroRun = 0
         nullRun = 0
+        canEscalate = true
 
         // 只贴新露出的条带（起点从新内容线向上越过粘底栏再多要一段，见 planBand）：
         // Δ 估错时污染只在条带里，粘底栏的旧副本被后续条带盖掉，不会每步留一份
@@ -1819,12 +1850,14 @@ async function runScroll(): Promise<void> {
         steps += 1
         state.stitched = top + rect.height
         state.steps = steps
-        perNotch = delta / notches
+        perUnitPx = delta / issuedUnits
         // 这一步的等稳表现 → 下一步的首等（瞬时跳滚的应用 tick 降到 40，少白等）
         if (settled)
           tick = planTickDelay(tick, attempts)
-        // 下一步发几个齿按这一步的**每齿**位移自适应（步长贴着选区高度 25% 走）
-        notches = planNotches(perNotch, rect.height)
+        // 下一步发几个「滚轮单位包」按这一步的实测自适应：每个包 = unit 个单位，
+        // 步长贴着选区高度 25% 走，上限减掉粘底栏（与匹配搜索范围同一口径）。
+        // 细分时 unit < 120，包更小、包数照算，实际位移不变只是更细
+        notches = planNotches(perUnitPx * unit, rect.height, result.stickyBottom)
         settlePolls = SCROLL_SETTLE_POLLS
         // 停止请求：这一步已经拼进去（滚出去的内容不丢），下一轮开头收工
         if (scrollStopRequested)

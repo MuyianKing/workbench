@@ -1231,13 +1231,18 @@ pub fn capture_scroll_grab(
     Ok(tauri::ipc::Response::new(image.into_raw()))
 }
 
-/// 滚动中发一轮滚轮（向下 `notches` 齿，齿数由渲染层按上一步的实际位移自适应）。
+/// 滚动中发一轮滚轮（向下 `units` 个滚轮单位，120 = 一整格）。
+///
+/// `units` 由渲染层给：稳态发整格（120 × 齿数），遇到「一格跨过整个选区」的窗口
+/// 会减半细分（60 / 30）找能拼的步长；老程序忽略细分单位时渲染层读到 Δ=0 会升回
+/// 整格。上限 16 格，按原始单位夹（`clamp` 用 `WHEEL_DELTA` 作一格）。
 #[tauri::command]
-pub fn capture_scroll_wheel(app: AppHandle, notches: u32) -> Result<(), String> {
+pub fn capture_scroll_wheel(app: AppHandle, units: u32) -> Result<(), String> {
     if !scrolling(&app) {
         return Err("没有在滚动截图".into());
     }
-    screen::send_wheel(notches.clamp(1, 16));
+    let max_units = (screen::wheel_delta() * 16) as u32;
+    screen::send_wheel(units.clamp(1, max_units));
     Ok(())
 }
 

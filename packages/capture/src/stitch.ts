@@ -311,16 +311,21 @@ function contiguousSticky(sticky: Set<number>, from: number, step: 1 | -1, heigh
 /**
  * 下一步发几个滚轮齿：按**上一齿的实际位移**自适应，步长贴着选区高度的 25% 走 ——
  * 一步太大滚得「一卡一卡」，太小又白抓好几帧。一步的量还不许超过
- * 「选区高 − 最小重叠」：跨过整个视口就没有重叠可比了。首步（没量过位移）发 1 齿。
+ * 「可滚内容高 − 最小重叠」：跨过整个视口就没有重叠可比了。首步（没量过位移）发 1 齿。
+ * **可滚内容高要把粘底栏减掉**（`contentBottom = 帧高 − stickyBottom`，与
+ * `analyzeScrollOffset` 的 `maxDelta` 同一口径）—— 搜索范围让开了粘底栏，步长却按
+ * 整帧高算的话，粘底栏一厚，步子就超过搜索上限，真解落在范围外直接判成拼不上
+ * （真机踩过）。粘底栏厚度由匹配报回（`ScrollMatchResult.stickyBottom`），调用方传进来。
  *
  * 传的是**每齿**位移，不是上一步的总位移：上一步发了几齿就把总位移除以几。
  * 直接拿总位移算会让齿数在 1 与上限之间来回跳（每步的预测窗口跟着错位）。
  */
-export function planNotches(perNotch: number, regionHeight: number): number {
+export function planNotches(perNotch: number, regionHeight: number, stickyBottom = 0): number {
   if (!(perNotch > 0) || !(regionHeight > 0))
     return 1
+  const contentBottom = regionHeight - Math.max(0, stickyBottom)
   const wanted = Math.min(MAX_NOTCHES, Math.round((regionHeight * 0.25) / perNotch))
-  const capped = Math.floor((regionHeight - MIN_OVERLAP) / perNotch)
+  const capped = Math.floor((contentBottom - MIN_OVERLAP) / perNotch)
   return Math.max(1, Math.min(wanted, capped))
 }
 

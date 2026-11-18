@@ -105,9 +105,10 @@ export const eventsApi = {
   // 不走会话缓存 —— 目标窗口正在动，开场冻结的那一帧早过时了）
   scrollGrab: (rect: { x: number, y: number, width: number, height: number }) =>
     guard(invoke<ArrayBuffer>('capture_scroll_grab', rect), '抓不到滚动截图的这一帧'),
-  // 向下滚 notches 齿（齿数由 JS 按上一步的实际位移自适应，见 @workbench/capture 的 planNotches）
-  scrollWheel: (notches: number) =>
-    guard(invoke<null>('capture_scroll_wheel', { notches }), '发滚轮失败'),
+  // 向下滚 units 个滚轮单位（120 = 一整格；细分 60/30 给一齿跨整屏的窗口找能拼的步长，
+  // 见 CaptureApp 的 wheelUnit / @workbench/capture 的 planNotches）
+  scrollWheel: (units: number) =>
+    guard(invoke<null>('capture_scroll_wheel', { units }), '发滚轮失败'),
   // JS 自己停（到底 / 拼不上）走这条：Rust 把遮罩恢复成交互态并拿回焦点
   scrollStop: () => guard(invoke<null>('capture_scroll_stop'), '停滚动截图失败'),
   pinImage: (png: string, x: number, y: number, width: number, height: number, opacity: number) =>
