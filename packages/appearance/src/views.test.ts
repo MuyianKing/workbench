@@ -34,45 +34,45 @@ describe('导航栏显示哪几页', () => {
   it('剩下哪几页永远按 VIEW_IDS 的顺序（关掉哪几项不影响其余项的先后）', () => {
     expect(visibleViews([])).toEqual([...VIEW_IDS])
     expect(visibleViews(['home', 'work'])).toEqual([
-      'projects',
-      'notes',
-      'skills',
-      'kb',
-      'ai',
+      'git',
       'gateway',
       'qoder',
-      'vault',
       'mail',
-      'styles',
+      'projects',
+      'ai',
+      'notes',
+      'kb',
+      'skills',
+      'vault',
       'video',
+      'styles',
       'etf',
-      'git',
     ])
   })
 
   it('至少留一页：全关掉时把首页留下，界面上不会一个入口都不剩', () => {
     expect(sanitizeHiddenViews([...VIEW_IDS])).toEqual([
-      'projects',
       'work',
-      'notes',
-      'skills',
-      'kb',
-      'ai',
+      'git',
       'gateway',
       'qoder',
-      'vault',
       'mail',
-      'styles',
+      'projects',
+      'ai',
+      'notes',
+      'kb',
+      'skills',
+      'vault',
       'video',
+      'styles',
       'etf',
-      'git',
     ])
     expect(visibleViews(sanitizeHiddenViews([...VIEW_IDS]))).toEqual(['home'])
   })
 
   it('当前页被关掉之后退到第一页可见的', () => {
-    expect(fallbackView(['home'])).toBe('projects')
-    expect(fallbackView(['home', 'projects', 'work'])).toBe('notes')
+    expect(fallbackView(['home'])).toBe('work')
+    expect(fallbackView(['home', 'projects', 'work'])).toBe('git')
     expect(fallbackView([])).toBe('home')
     // 防御：真的把每一页都关掉时也不能返回 undefined（正常到不了这里）
     expect(fallbackView([...VIEW_IDS])).toBe('home')
@@ -87,19 +87,19 @@ describe('导航栏的顺序', () => {
     expect(sanitizeViewOrder(['notes', 'nope', 'notes', 'home'])).toEqual([
       'notes',
       'home',
-      'projects',
       'work',
-      'skills',
-      'kb',
-      'ai',
+      'git',
       'gateway',
       'qoder',
-      'vault',
       'mail',
-      'styles',
+      'projects',
+      'ai',
+      'kb',
+      'skills',
+      'vault',
       'video',
+      'styles',
       'etf',
-      'git',
     ])
   })
 
@@ -109,46 +109,46 @@ describe('导航栏的顺序', () => {
       'work',
       'home',
       'notes',
-      'projects',
-      'skills',
-      'kb',
-      'ai',
+      'git',
       'gateway',
       'qoder',
-      'vault',
       'mail',
-      'styles',
+      'projects',
+      'ai',
+      'kb',
+      'skills',
+      'vault',
       'video',
+      'styles',
       'etf',
-      'git',
     ])
     expect(orderedViews(['work', 'skills', 'vault', 'styles', 'projects'], order)).toEqual([
       'home',
       'notes',
-      'kb',
-      'ai',
+      'git',
       'gateway',
       'qoder',
       'mail',
+      'ai',
+      'kb',
       'video',
       'etf',
-      'git',
     ])
     // 不带顺序参数时就是老行为：按 VIEW_IDS 的默认顺序
     expect(orderedViews(['home', 'work'])).toEqual([
-      'projects',
-      'notes',
-      'skills',
-      'kb',
-      'ai',
+      'git',
       'gateway',
       'qoder',
-      'vault',
       'mail',
-      'styles',
+      'projects',
+      'ai',
+      'notes',
+      'kb',
+      'skills',
+      'vault',
       'video',
+      'styles',
       'etf',
-      'git',
     ])
   })
 

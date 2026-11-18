@@ -11,9 +11,13 @@
  * 「导航栏上显示哪几页、按什么顺序」由用户自己配（AppSettings.hiddenViews / viewOrder，
  * 都住在 theme.json 里）：这里只记**被关掉的那些**与**显示的先后**，新加一页时不必去改
  * 谁的数据文件，它就自然出现在导航栏上（排在末尾）。
+ *
+ * 这里的排列就是装新应用（数据文件没有 viewOrder）时的默认顺序，与正式版一致：
+ * 首页 / 工作 / Git / TBuddy / Qoder / 邮箱 / 项目 / AI 助手 / 笔记 / 知识库 / 技能 /
+ * 密码 / 视频 / 样式 / ETF。新页仍追加到末尾；VIEW_LABELS 的键序跟着这里走。
  */
 
-export const VIEW_IDS = ['home', 'projects', 'work', 'notes', 'skills', 'kb', 'ai', 'gateway', 'qoder', 'vault', 'mail', 'styles', 'video', 'etf', 'git'] as const
+export const VIEW_IDS = ['home', 'work', 'git', 'gateway', 'qoder', 'mail', 'projects', 'ai', 'notes', 'kb', 'skills', 'vault', 'video', 'styles', 'etf'] as const
 
 export type ViewId = (typeof VIEW_IDS)[number]
 
@@ -24,20 +28,20 @@ export type ViewId = (typeof VIEW_IDS)[number]
  */
 export const VIEW_LABELS: Record<ViewId, string> = {
   home: '首页',
-  projects: '项目',
   work: '工作',
-  notes: '笔记',
-  skills: '技能',
-  kb: '知识库',
-  ai: 'AI 助手',
+  git: 'Git',
   gateway: 'TBuddy',
   qoder: 'Qoder',
-  vault: '密码',
   mail: '邮箱',
-  styles: '样式',
+  projects: '项目',
+  ai: 'AI 助手',
+  notes: '笔记',
+  kb: '知识库',
+  skills: '技能',
+  vault: '密码',
   video: '视频',
+  styles: '样式',
   etf: 'ETF',
-  git: 'Git',
 }
 
 export function isViewId(value: unknown): value is ViewId {

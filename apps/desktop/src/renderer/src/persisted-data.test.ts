@@ -220,19 +220,19 @@ describe('按落点拆一份设置补丁', () => {
     expect(sanitizeAppearanceSettings({ viewOrder: ['notes', 'nope', 'home'] }).viewOrder).toEqual([
       'notes',
       'home',
-      'projects',
       'work',
-      'skills',
-      'kb',
-      'ai',
+      'git',
       'gateway',
       'qoder',
-      'vault',
       'mail',
-      'styles',
+      'projects',
+      'ai',
+      'kb',
+      'skills',
+      'vault',
       'video',
+      'styles',
       'etf',
-      'git',
     ])
     expect(sanitizeAppearanceSettings({ viewOrder: 'notes' }).viewOrder.length).toBe(15)
   })
