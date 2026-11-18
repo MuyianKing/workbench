@@ -8,8 +8,9 @@
 历史消息 → 日志行，带单测）、`packages/ai/src/ai-preview.ts`（回答里的站内链接 → 预览目标的解析与画法判定，带单测）、
 `packages/ai/src/pi-skills.ts`（技能的根与开关键、交给 Pi 的清单，带单测）、
 `apps/desktop/src-tauri/src/pi_skills.rs`（技能的列 / 装 / 卸、手写 zip 与 `Location` 跳转，带单测）、
-`apps/desktop/src-tauri/src/ai.rs`（提示词进 stdin、权限扩展、models.json、拉模型列表、密钥、环境变量、起会话、拼 `--skill`、删会话；
+`apps/desktop/src-tauri/src/ai.rs`（提示词进 stdin、权限扩展、**网页扩展 `-e`**、models.json、拉模型列表、密钥、环境变量、起会话、拼 `--skill`、删会话；
 `AiRuntimeStatus` 带 `// @contract`，TS 类型由 `pnpm run contract:gen` 生成），
+`apps/desktop/scripts/vendor-pi.mjs`（内置 Pi **与 pi-web-access 网页扩展**，钉版本、裁剪；改动要 bump `PRUNE_REVISION` 并重跑 `pnpm run vendor:pi`），
 `workbench/ai.ts`（按会话 id 认领进程事件、确认帧应答、`aiRequest` / `aiAbort` 与会话删除）、
 `workbench/pi-skill.ts`（技能四条通道适配）、`stores/ai.ts`（编排：会话树、一轮的运行、进程收放与确认队列）、
 `stores/ai-run-state.ts`（每会话运行态与流式 / 思考收尾）、`stores/ai-config.ts`（服务 / 模型清单与三颗选择）、
@@ -21,7 +22,7 @@
 `AiSkillDialog.vue`、`AiRunPanel.vue`（对话画法与确认条）、`AiPreviewPane.vue`（右侧预览栏）、
 `AiModelDialog.vue` / `AiProviderDialog.vue` / `AiPresetGrid.vue` / `AiModelPicker.vue`（模型管理三层）。
 
-**先读这一段就够了**——下面十条红线，破一条就是 bug；每条的依据、边界与踩坑都在后面按主题分的九节里，改到哪块读哪块。
+**先读这一段就够了**——下面十一条红线，破一条就是 bug；每条的依据、边界与踩坑都在后面按主题分的九节里，改到哪块读哪块。
 
 - Pi 是唯一的编码 Agent，只服务这一页；别引第二个 Agent。
 - 起进程直启、不经 `cmd /C`；提示词走 stdin 一行 JSON，密钥只经环境变量。
@@ -30,6 +31,7 @@
 - `PI_TELEMETRY=0` / `PI_SKIP_VERSION_CHECK=1` / `PI_OFFLINE=1` 三条不许删。
 - 技能只认 `-ns` + 逐条 `--skill`（两头合起来才成立）；开关存「关掉的那些」。
 - 工具面全开，问不问由 `aiPermission` 定（`full` = 不加载扩展，不是扩展里判一下）。
+- 网页搜索 / 抓取走随包内置的 pi-web-access 扩展，以第二个 `-e` 无条件加载；缺了只是少工具，不阻断会话。
 - 模型请求由 Pi 自己发；models.json 一次写整份，密钥只写环境变量引用。
 - 渲染层与 Rust 的字段名必须一字不差（serde 静默丢弃认不出的键）。
 - 这一页与知识库无关、不摆提示行；AI 写的 HTML 只走沙箱 iframe。
@@ -219,6 +221,23 @@
   换参数重开时对话里写一行「在哪个目录里工作」，那串命令行（cli.js 绝对路径 + 开关）收进这行的悬停（`AiLogLine.detail`），同进程续聊不重复。
   **失败落错误行，来源两处**：模型侧在 message 的 `errorMessage`，工具侧在事件 `result.content[].text`（`tool_execution_end` **没有 `error` 字段** —— 只认 error 会把「找不到 bash」「EISDIR」全显示成同一句兜底文案），
   多行只留第一句、全文进悬停。**有报错不能装顺利；顺利跑完不留状态行**。
+
+### 网页搜索 / 抓取
+
+- **随包内置 pi-web-access 扩展**（MIT，<https://github.com/nicobailon/pi-web-access>，版本钉死在 `vendor-pi.mjs` 的 `PI_WEB_VERSION`）：
+  给 Pi 注册 `web_search` / `fetch_content` / `source_check` / `get_search_content` 等工具（还有 4 个斜杠命令、2 个全局快捷键）。
+  它是**扩展**，不是第二个 Agent —— 跑在同一条 Pi 进程里、用全局 `fetch` 联网，**不受 `PI_OFFLINE=1` 影响**（那条只管遥测 / 版本检查 / 模型目录刷新）。
+- **落位与加载**：`vendor-pi.mjs` 把整棵扩展（源码 `index.ts` + 自带 `node_modules`）解到 `resources/pi/pi-web-access/`，
+  **自包含、不进 `prune()`** —— 它的十来个运行时依赖（p-limit / undici / unpdf / readability / linkedom …）不能塞进 Pi 本体那棵 KEEP 树。
+  用 npm `--legacy-peer-deps` 装：它把 `@earendil-works/pi-*` / `typebox` 列为 peer，npm 7+ 会自动装回整棵 Pi（约 108MB），
+  而这些 peer 由 Pi 捆绑版的 jiti **虚拟模块**在运行时提供，不必落盘。`ai.rs` 以**第二个 `-e`** 加载 `pi-web-access/index.ts`
+  （与 `resolve_cli` 同源推导 dev / 打包两处路径），**与权限档无关** —— 它不执行本地命令，问不问是 `permission.js` 那一条的事。
+  缺了这棵树（没跑 vendor / 退到 PATH 上的全局 pi）就跳过，只是少这些工具，不阻断会话。
+- **改它要验证**：`vendor-pi.mjs` 改了 KEEP / 文件规则 / `PI_WEB_VERSION` 必须 bump `PRUNE_REVISION` 并重跑 `pnpm run vendor:pi`；
+  验证扩展真加载了用 RPC 的 `get_commands`（应出现 `websearch` / `curator` / `search` 三条、来源是 `extension`，路径指到 `pi-web-access/index.ts`），
+  光看 `cli.js --version` 不够（扩展是另一条 `-e`）。
+- **配置**（可选）：免 key 起手走 Exa 匿名 MCP；要指定后端 / 填 key 时读 `PI_CODING_AGENT_DIR` 下的 `web-search.json`（在应用里就是 `<data_dir>/pi/web-search.json`），
+  或 `*_API_KEY` 环境变量。48 个后端、18 个默认（`auto`/`all`），其中 Exa 匿名 / DuckDuckGo / Codex 订阅 / SearXNG / degoog 免 key，其余要 key。
 
 ### 技能
 

@@ -30,7 +30,7 @@
   （应用在 `apps/desktop/`，纯逻辑按域拆在 `packages/` 的 19 个 `@workbench/*` 包，见第 2 节），`Cargo.lock` 要提交；
   例外：`apps/desktop/scripts/vendor-pi.mjs` 内部装 Pi 仍走 `npm install`（`apps/desktop/resources/pi/` 要整树打进安装包，
   不能用符号链接布局）。
-- **联网边界：默认不联网、不上报任何数据；出口只有十四条，且都由用户显式开启** —— 清单与每条细则见
+- **联网边界：默认不联网、不上报任何数据；出口只有十五条，且都由用户显式开启** —— 清单与每条细则见
   [privacy.md](docs/privacy.md)，**动联网代码前先读它**。
   **不要新增网络出口、不往任何第三方服务发数据**；笔记里的外链图片、密码保险库（推的是用量同步那个仓库的 `vault/vault.json`，
   推上去的只有密文）都**不算**新出口；构建期内嵌 OAuth client_id/secret 与用户指定的禅道个人凭据是明确例外，后者不得随包分发。

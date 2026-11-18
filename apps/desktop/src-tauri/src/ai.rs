@@ -35,6 +35,10 @@
 //! 7. **技能**：这一轮启用的技能**逐个目录**用 `--skill` 交给 Pi（`pi_skills.rs`）——
 //!    Pi 的 RPC 这条路不扫默认技能目录，只有 `--skill` / settings.json / 扩展三种来源，
 //!    应用用第一种。装/卸/开关都发生在用户自己那两个 `.agents/skills` 里，下次起进程才生效。
+//! 8. **网页搜索 / 抓取**：随包内置的 pi-web-access 扩展（`resources/pi/pi-web-access/index.ts`，
+//!    由 scripts/vendor-pi.mjs 生成）以第二个 `-e` 加载，给 Pi 加上 `web_search` / `fetch_content`
+//!    等工具。它走全局 `fetch` 直接联网（不受 PI_OFFLINE 影响），与权限档无关 —— 命令问不问是
+//!    permission.js 那一条的事。没内置（没跑 vendor 脚本 / 退到 PATH 上的全局 pi）就跳过。
 //!
 //! 程序与参数的形状在渲染层（`packages/ai/src/ai.ts`，那边有单测）：TS 给 `program` 与
 //! `args`（内置模式 `node <cli.js>`、退路 `pi`，含 `--session-id`），这里只管写扩展文件、
@@ -80,25 +84,24 @@ fn sessions_dir() -> PathBuf {
     agent_dir().join("sessions")
 }
 
-/// 内置 Pi 的 CLI 入口：打包后走 resource_dir（resources 映射成 `pi/`），开发态直接读仓库里的
-/// `resources/pi/` —— 开发态资源不经过打包流程，不会出现在 target 下面，与内置壁纸同一条路子
-/// （见 commands.rs 的 list_wallpapers）。两处都没有（没跑过 vendor 脚本）就回 None，
-/// 调用方退回 PATH 上的全局 pi。
+/// 内置 Pi 的资源在 `resources/pi/<rel>`：打包后走 resource_dir（`resources` 映射成 `pi/`），
+/// 开发态直接读仓库里的 `resources/pi/` —— 开发态资源不经过打包流程，不会出现在 target 下面，
+/// 与内置壁纸同一条路子（见 commands.rs 的 list_wallpapers）。两处都没有（没跑过 vendor 脚本）
+/// 就回 None，调用方据此退回 PATH 上的全局 pi / 跳过扩展。
 ///
-/// 返回前做一次**规整**：canonicalize 会给出 `\\?\E:\...` 的原样路径，而这个 cli.js 之后要
-/// 交给 `cmd /C node` 去跑 —— cmd 对 `\\?\` 前缀的参数会拆坏（实测 node 收到的主路径只剩
-/// `E:`，报 EISDIR）。剥掉前缀对盘符路径是安全的；顺带把候选里的 `..` 一起消掉。
-pub fn resolve_cli(app: &AppHandle) -> Option<PathBuf> {
+/// 返回前做一次**规整**：canonicalize 会给出 `\\?\E:\...` 的原样路径，而这个路径之后要
+/// 交给 node 加载（cli.js 或扩展文件）；剥掉前缀对盘符路径是安全的，顺带把 `..` 一起消掉。
+fn resource_pi_path(app: &AppHandle, rel: &str) -> Option<PathBuf> {
     let mut candidates = Vec::new();
     if let Ok(dir) = app.path().resource_dir() {
-        candidates.push(dir.join("pi").join(BUNDLED_CLI_REL));
+        candidates.push(dir.join("pi").join(rel));
     }
     candidates.push(
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("..")
             .join("resources")
             .join("pi")
-            .join(BUNDLED_CLI_REL),
+            .join(rel),
     );
 
     let path = candidates.into_iter().find(|path| path.is_file())?;
@@ -108,6 +111,20 @@ pub fn resolve_cli(app: &AppHandle) -> Option<PathBuf> {
         Some(rest) => PathBuf::from(rest),
         None => canon,
     })
+}
+
+/// 内置的网页搜索 / 抓取扩展入口（`pi-web-access/index.ts`，由 scripts/vendor-pi.mjs 生成）。
+/// 与 CLI 同源推导路径；找不到就回 None —— 扩展是能力增强，缺了只是没有那些工具，不阻断会话。
+fn resolve_web_extension(app: &AppHandle) -> Option<PathBuf> {
+    resource_pi_path(app, "pi-web-access/index.ts")
+}
+
+/// 内置 Pi 的 CLI 入口：打包后走 resource_dir（resources 映射成 `pi/`），开发态直接读仓库里的
+/// `resources/pi/` —— 开发态资源不经过打包流程，不会出现在 target 下面，与内置壁纸同一条路子
+/// （见 commands.rs 的 list_wallpapers）。两处都没有（没跑过 vendor 脚本）就回 None，
+/// 调用方退回 PATH 上的全局 pi。
+pub fn resolve_cli(app: &AppHandle) -> Option<PathBuf> {
+    resource_pi_path(app, BUNDLED_CLI_REL)
 }
 
 /// 探测 AI 运行时：**内置的那份优先**（resources/pi，vendor 脚本生成、随包分发），
@@ -825,6 +842,13 @@ pub fn run(
         let extension = write_permission_extension(&agent_dir())?;
         argv.push("-e".to_string());
         argv.push(extension.to_string_lossy().into_owned());
+    }
+    // 网页搜索 / 抓取扩展（pi-web-access）：随包内置时给 Pi 加上 web_search / fetch_content
+    // 等工具。与权限档无关 —— 它不执行本地命令，问不问是 permission.js 那一条的事。
+    // 没内置（没跑 vendor 脚本 / 退到 PATH 上的全局 pi）就跳过，只是少这些工具，不阻断会话。
+    if let Some(web) = resolve_web_extension(app) {
+        argv.push("-e".to_string());
+        argv.push(web.to_string_lossy().into_owned());
     }
     // 技能：**先把 Pi 自己的技能发现关掉**（`--no-skills`：它默认会扫 `~/.agents/skills`
     // 与（信任过的）项目里的 `.agents/skills`，还会加载 package / 扩展带来的技能），
