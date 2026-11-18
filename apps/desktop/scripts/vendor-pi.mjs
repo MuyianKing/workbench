@@ -58,7 +58,7 @@ const WEB_SOURCE = join(root, 'scripts', 'pi-web-search')
  * 裁剪方案的版本号。**动了 KEEP、下面那几条文件级规则或网页扩展的 vendoring 就必须 +1**：
  * 跳过判据比的是 stamp 文件内容，对不上才会重装重裁。
  */
-const PRUNE_REVISION = '7'
+const PRUNE_REVISION = '8'
 /**
  * 预填表的数据源版本：`@earendil-works/pi-ai` 里那份 models.dev 快照（`dist/providers/data`）。
  * 它只被 `npm pack` 下来读一次、生成完就删 —— **不进树**。pi-coding-agent 从 1.3.0 起把
@@ -321,8 +321,28 @@ function vendorWebSearch() {
     ['install', '--omit=dev', '--no-save', '--ignore-scripts', '--no-audit', '--no-fund', '--legacy-peer-deps'],
     { cwd: WEB_TARGET, stdio: 'inherit', shell: true },
   )
-  // 只留运行时要读的：源码映射 / 类型声明不加载；package-lock 是本地装出来的，不进随包树
   let removed = 0
+  // @mixmark-io/domino 是 turndown 的传递依赖（8.9MB，其中 7.2MB 是 test/）。turndown 加载时会
+  // require 它，但我们的扩展只把 linkedom 解析出的 DOM node 传给 turndown（不是 HTML 字符串），
+  // createDocument 那条分支永远走不到。用实体 stub 替换（不放 symlink —— resources/pi 要整树打包）：
+  // 一个能被 require 的 main、createDocument 直接抛错（真被走到就是 bug，别静默出错）。
+  const dominoDir = join(WEB_TARGET, 'node_modules', '@mixmark-io', 'domino')
+  if (existsSync(dominoDir)) {
+    removed += dirSize(dominoDir)
+    rmSync(dominoDir, { recursive: true, force: true })
+    mkdirSync(dominoDir, { recursive: true })
+    writeFileSync(
+      join(dominoDir, 'package.json'),
+      JSON.stringify({ name: '@mixmark-io/domino', version: '0.0.0-stub', main: 'index.js' }),
+    )
+    writeFileSync(
+      join(dominoDir, 'index.js'),
+      '// Workbench 用 linkedom 给 turndown 传 DOM node，domino 的 createDocument 走不到；\n'
+        + '// 真被调到说明传了 HTML 字符串进来（会破坏瘦身），直接报错。\n'
+        + 'exports.createDocument = function () { throw new Error("domino stub: 请给 turndown 传 DOM node，不要传 HTML 字符串") }\n',
+    )
+  }
+  // 只留运行时要读的：源码映射 / 类型声明不加载；package-lock 是本地装出来的，不进随包树
   walk(join(WEB_TARGET, 'node_modules'), (path, entry) => {
     if (!entry.isFile() || !DROP_EXTENSIONS.includes(extname(entry.name)))
       return

@@ -233,6 +233,10 @@
   - `fetch_content`：只收一个 URL，校验 http/https（限 5 跳重定向）→ 全局 `fetch` → `linkedom.parseHTML` → `@mozilla/readability` 抽正文 → `turndown` 转 Markdown 交给模型。抽不到正文（动态渲染页）就如实报错，不做动态渲染兜底。
 - **落位与加载**：扩展自己带三个运行时依赖（`linkedom` / `@mozilla/readability` / `turndown`，版本钉在 `scripts/pi-web-search/package.json`），
   由 `vendor-pi.mjs` 装进 `resources/pi/web-search/node_modules`，**自包含、不进 Pi 本体的 `prune()`**；`typebox` 不装（由 Pi 捆绑版 jiti 虚拟模块提供）。
+  **`turndown` 的传递依赖 `@mixmark-io/domino`（8.9MB，含 7.2MB test/）在 vendor 时被实体 stub 替换**：扩展把 Readability 出的正文字符串
+  用 linkedom 再解析成 DOM node 传给 `turndown.turndown()`（走它的 node 分支），不触发 domino 的 `createDocument`（那条只在传 HTML 字符串时用）；
+  stub 是一个能被 require 的 `main` + 抛错的 `createDocument`（真被调到说明传了字符串、会破坏瘦身，立刻暴露）。不放 symlink（resources/pi 整树打包）。
+  这样 web-search 依赖树从 13MB 压到约 3.7MB，整棵 `resources/pi` 27MB→18MB。
   `ai.rs` 以**第二个 `-e`** 加载 `web-search/index.ts`（与 `resolve_cli` 同源推导 dev / 打包两处路径），**与权限档无关** —— 它不执行本地命令，问不问是 `permission.js` 那一条的事。
   缺了这棵树（没跑 vendor / 退到 PATH 上的全局 pi）就跳过，只是少这两个工具，不阻断会话。旧的整棵 pi-web-access（61MB / 211 包）已弃用，vendor 时清场。
 - **改它要验证**：改扩展源码 / package.json 后重跑 `pnpm run vendor:pi`（改 KEEP / 文件规则仍要 bump `PRUNE_REVISION`）。

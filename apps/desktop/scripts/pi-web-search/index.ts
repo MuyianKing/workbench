@@ -123,7 +123,12 @@ async function extractReadable(url, signal) {
 	if (!article || typeof article.content !== "string")
 		throw new Error("没能从页面里抽到正文（可能是动态渲染页面）");
 	const { default: TurndownService } = await import("turndown");
-	const markdown = new TurndownService().turndown(article.content);
+	// turndown 收到字符串时会用自带解析器（@mixmark-io/domino，8.9MB），而它自带的那套 DOM 我们根本用不到：
+	// 这里把 Readability 出的正文字符串用 linkedom 再解析成 DOM node 传进去，走 turndown 的 node 分支，
+	// 就能在 vendor 时把 domino 换成最小 stub（见 vendor-pi.mjs），省 8.9MB。
+	const { document: contentDoc } = parseHTML(`<x-tc-root>${article.content}</x-tc-root>`);
+	const root = contentDoc.querySelector("x-tc-root");
+	const markdown = new TurndownService().turndown(root);
 	return { title: article.title?.trim() || document.title?.trim() || "", markdown };
 }
 
