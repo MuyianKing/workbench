@@ -69,6 +69,13 @@ export interface NotesChannel {
   syncNotes: (input: NoteSyncInput) => Promise<Result<NoteSyncSummary>>
 
   /**
+   * 笔记仓库**只拉不推**：进笔记页 / 窗口聚焦时后台对齐远端用（远端有新东西落到本地工作树）。
+   * 不提交、不推送本机的改动（`--autostash` 保护未提交现场）—— 那是 syncNotes 的事，
+   * 只放在停笔 / 切页那几处，避免每次进页面就推一次。
+   */
+  pullNotes: (dir: string) => Promise<Result<{ branch: string, received: boolean }>>
+
+  /**
    * 探测一个笔记文件夹的 git 状态：有没有仓库、origin 是什么。
    *
    * 只读、不落盘：它在界面上决定「给不给同步入口」与「同步到哪儿」两句提示，

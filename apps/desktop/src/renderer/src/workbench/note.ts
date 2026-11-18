@@ -399,6 +399,29 @@ export async function syncNotes(input: NoteSyncInput): Promise<Result<NoteSyncSu
 }
 
 /**
+ * 笔记仓库**只拉不推**：进笔记页 / 窗口聚焦时后台对齐远端用（远端有新东西落到本地工作树）。
+ * 不提交、不推送本机的改动（`--autostash` 保护未提交现场）—— 推送留给 syncNotes 在停笔 / 切页时做。
+ * 探不到仓库 / 远端按失败如实报回去，由调用方决定说不说。
+ */
+export async function pullNotes(dir: string): Promise<Result<{ branch: string, received: boolean }>> {
+  const target = rootArg(dir)
+  if (!target)
+    return fail('还没有选择笔记文件夹')
+
+  const result = await guard(
+    invoke<{ branch?: unknown, received?: unknown }>('note_pull', { dir: target }),
+    '拉取笔记失败',
+  )
+  if (!result.ok || !result.data)
+    return fail(result.error ?? '拉取笔记失败')
+
+  return ok({
+    branch: typeof result.data.branch === 'string' ? result.data.branch : '',
+    received: result.data.received === true,
+  })
+}
+
+/**
  * 探一个文件夹的 git 状态：有没有仓库、origin 是什么、当前站在哪个分支。
  *
  * 只影响界面（给不给同步入口、同步到哪儿），所以**探不到就算探不到**：

@@ -33,6 +33,7 @@ markdown_window_context
 note_image_upload
 note_images_delete
 note_images_list
+note_pull
 note_read
 note_scan
 note_scan_texts

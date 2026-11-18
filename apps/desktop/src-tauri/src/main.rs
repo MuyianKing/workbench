@@ -630,6 +630,7 @@ fn main() {
             commands::note_images_delete,
             commands::note_scan_texts,
             commands::note_sync,
+            commands::note_pull,
             commands::note_repo_state,
             commands::video_scan,
             commands::allow_video,

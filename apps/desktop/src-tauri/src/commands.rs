@@ -246,6 +246,13 @@ pub fn note_sync(dir: String) -> Result<Value, String> {
     crate::sync::sync_notes(&dir)
 }
 
+/// 只拉不推（进笔记页 / 窗口聚焦时后台对齐远端用的那一下）：远端有新东西就落到本地工作树。
+/// 不提交本机的改动 —— 推送是 note_sync 的事，只放在停笔 / 切页那几处
+#[tauri::command(async)]
+pub fn note_pull(dir: String) -> Result<Value, String> {
+    crate::sync::pull_notes(&dir)
+}
+
 /// 探测笔记文件夹的 git 状态（有没有仓库、origin 是什么）：只读，界面拿它决定给不给同步入口
 #[tauri::command(async)]
 pub fn note_repo_state(dir: String) -> Result<crate::sync::NoteRepoStateWire, String> {

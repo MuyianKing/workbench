@@ -94,6 +94,14 @@ export const useNotesStore = defineStore('notes', () => {
   let repoJob = 0
   /** 最近一次正文落盘；同步前要等它落地（见 waitForWrites） */
   let writing: Promise<void> = Promise.resolve()
+  /**
+   * 本地有没有还没推上去的改动。
+   *
+   * 拉推分离后这条决定「要不要推」：进页面 / 聚焦只拉（note_pull），只有停笔 / 切页、且这里为 true
+   * 时才跑完整的 sync_notes（commit → 拉 → 推）。写盘落地与结构改动置位；sync_notes 成功后清零；
+   * 只拉不清（那批改动还在本地）。没它的话每次停笔都会空推一次。
+   */
+  const needPush = ref(false)
 
   const noteCount = computed(() => countNotes(nodes.value))
   /** 同步入口的显示条件：**是仓库才给**。没仓库的文件夹就是本机的笔记，一点痕迹都不留 */
@@ -353,6 +361,7 @@ export const useNotesStore = defineStore('notes', () => {
     const mtimeMs = result.data
     mtimeByRel.set(rel, mtimeMs)
     savedAt.value = mtimeMs
+    needPush.value = true
     // 本地也记下这一份：右栏那句「最后修改」与下次打开时给的初值都用它
     if (active.value?.rel === rel) {
       active.value.content = content
@@ -404,7 +413,45 @@ export const useNotesStore = defineStore('notes', () => {
 
       await reload()
       const activeChanged = await rereadActive()
+      // 本地那批改动已经提交并推出去了；这次之后的写盘会重新置位
+      needPush.value = false
       return { summary: result.data, activeChanged }
+    }
+    finally {
+      syncing.value = false
+    }
+  }
+
+  /**
+   * 只拉不推：进笔记页 / 窗口聚焦时对齐远端用（走 `note_pull`，不提交、不推本机改动）。
+   *
+   * 与 `syncNotes` 的区别：不 commit、不 push，所以不会把「刚打开页面」这件事变成一次推送；
+   * 本地未提交的改动由 Rust 的 `--autostash` 保住，拉取后原样放回来。**不清 needPush** ——
+   * 那批本地改动还在，仍要等停笔 / 切页那次 syncNotes 推上去。
+   *
+   * 回来同样要重扫树 + 重读打开着的那篇（远端可能改过它），与 syncNotes 同一套收尾。
+   * 返回「打开着的那篇是否变了」，由界面转达给编辑器；失败原因写 `syncError`（不弹窗，调用方决定）。
+   */
+  async function pullNotes(): Promise<boolean> {
+    const current = root.value
+    if (!current)
+      return false
+
+    syncing.value = true
+    syncError.value = ''
+    try {
+      const result = await window.workbench.pullNotes(current)
+      if (!result.ok || !result.data) {
+        syncError.value = result.error ?? '拉取笔记失败'
+        void probeRepo()
+        return false
+      }
+
+      // 没有新东西就不重扫、不重读：省一次整棵树的磁盘遍历
+      if (!result.data.received)
+        return false
+      await reload()
+      return await rereadActive()
     }
     finally {
       syncing.value = false
@@ -514,6 +561,7 @@ export const useNotesStore = defineStore('notes', () => {
     }
 
     nodes.value = result.data.nodes
+    needPush.value = true
     // 建完就选中它：新笔记正是要来写的那一篇，新文件夹则是接下来要往里放东西的那个
     select(result.data.rel)
     return findNoteNode(nodes.value, result.data.rel)
@@ -527,6 +575,7 @@ export const useNotesStore = defineStore('notes', () => {
     }
 
     nodes.value = result.data.nodes
+    needPush.value = true
     remapActive(rel, result.data.rel)
     return true
   }
@@ -543,6 +592,7 @@ export const useNotesStore = defineStore('notes', () => {
     }
 
     nodes.value = result.data.nodes
+    needPush.value = true
     remapActive(rel, '')
     return true
   }
@@ -556,6 +606,7 @@ export const useNotesStore = defineStore('notes', () => {
     }
 
     nodes.value = result.data.nodes
+    needPush.value = true
     remapActive(rel, result.data.rel)
     return true
   }
@@ -577,6 +628,7 @@ export const useNotesStore = defineStore('notes', () => {
     savedAt,
     syncing,
     syncError,
+    needPush,
     repoState,
     canSync,
     remoteUrl,
@@ -596,6 +648,7 @@ export const useNotesStore = defineStore('notes', () => {
     rereadActive,
     activeChangedOnDisk,
     syncNotes,
+    pullNotes,
     closeNote,
   }
 })

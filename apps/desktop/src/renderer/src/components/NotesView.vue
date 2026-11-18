@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { NoteKind, NoteSyncSummary } from '@workbench/notes'
+import type { NoteSyncOutcome } from '@/stores/notes'
 import { Document, EditPen, FolderOpened, Notebook, Picture, Refresh, RefreshRight } from '@element-plus/icons-vue'
 import { countNodes, findNoteNode, noteAbsPath, noteRootName } from '@workbench/notes'
 import { ElMessage } from 'element-plus'
@@ -17,9 +18,9 @@ import { ElMessage } from 'element-plus'
  * 右栏大纲常显、拖它左缘那条缝也能改宽（`noteRailWidth`），与首页那两条栏宽把手同一套做法：
  * 拖动时只改本地让界面跟手，松手才落盘。
  *
- * 另外还有一档**只读**（**默认就是它**，Ctrl+/ 切到可写）：读一篇长笔记时不想手一抖改掉它，
- * 就把**正文**的写入口收起来（正文、格式菜单），省得「看一眼」变成「改一处」。
- * 这一档不落盘，开着的时候标题行里挂着「只读」（带快捷键提示）—— 口径与三条守卫见 readOnly / onShortcut 那两段。
+ * 另外还有一档**只读**（默认可写，点标题行的「可写」小片或 Ctrl+/ 切到只读）：读一篇长笔记时不想手一抖改掉它，
+ * 就用它把**正文**的写入口收起来（正文、格式菜单），省得「看一眼」变成「改一处」。
+ * 这一档不落盘，标题行那颗小片始终挂着、写着当前是哪一档（带快捷键提示）—— 口径与三条守卫见 readOnly / onShortcut 那两段。
  *
  * 与其它页面一样，它是导航栏上的一项（见 packages/appearance/src/views.ts），换页由 App.vue 的
  * `<KeepAlive><component :is>` 负责 —— 切走再回来时编辑器还是刚才那一篇、光标位置也还在。
@@ -27,7 +28,7 @@ import { ElMessage } from 'element-plus'
  * 增删改的确认与提示。树在 NoteTree，正文编辑在 NoteEditor，
  * 左栏底部那一行与分隔条是 RecentRoots / PanelResizer（与视频页共用）。
  */
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, reactive, ref } from 'vue'
 import { copyText } from '@/clipboard'
 import NoteAssetsDialog from '@/components/NoteAssetsDialog.vue'
 import NoteEditor from '@/components/NoteEditor.vue'
@@ -125,15 +126,14 @@ const bodyStyle = computed(() => ({
 const assetsOpen = ref(false)
 
 /**
- * 只读模式：这一页不接任何写入口，只让人把东西看清楚。**Ctrl+/ 切换**（见 onShortcut）。
+ * 只读模式：这一页不接任何写入口，只让人把东西看清楚。**点标题行那颗模式小片或 Ctrl+/ 切换**（见 onShortcut）。
  *
- * **默认就是这一档**（初值 `true`）：进笔记页先按「读」来，想写才按那一下切过去 ——
- * 「看一眼」变成「改一处」是这个页面上最容易犯的事（点进代码块、顺手勾一个框、
- * 甚至贴一张图就推一次 git），把默认值放在安全那一侧，代价只是想写的时候多按一次。
+ * **默认可写**（初值 `false`）：进笔记页就能直接写；读一篇长笔记时怕手一抖改掉它，
+ * 点标题行那颗「可写」小片（或 Ctrl+/）切到只读 —— 「看一眼」变成「改一处」时有个明确的一键落点。
  *
  * **不落盘**（不写设置）：它记的是「这一趟用它来干什么」，不是「我偏好什么」——
- * 落盘的话，某次读着读着关掉应用，下次打开笔记就是不能写的，而那时未必想得起来按什么切回来。
- * 标题行里那颗「只读」小片（带提示，写着 Ctrl+/）就是这一档的落点。
+ * 落盘的话，某次停在只读关掉应用，下次打开笔记还是不能写的，而那时未必想得起来按什么切回来。
+ * 标题行那颗小片始终挂着、写着当前是哪一档（带提示，写着 Ctrl+/），两颗入口改同一个 `readOnly`。
  *
  * 关掉的写入口有两处，各在自己的地方实现，改的时候不要漏掉任何一处：
  *  1. 正文（NoteEditor 收 `readOnly`，落到 Vditor 的 `disabled()`）：不能打字，
@@ -144,10 +144,10 @@ const assetsOpen = ref(false)
  * 不属于「读的时候手一抖」那类误触，所以树不接这一档（NoteTree 没有 readOnly 这个 prop）；
  * 左栏底部那两颗按钮（同步、素材管理）动的是远端与图片仓库，也不归它管。
  */
-const readOnly = ref(true)
+const readOnly = ref(false)
 
 /**
- * Ctrl+/ 切只读。
+ * Ctrl+/ 切只读 / 可写。
  *
  * 三条守卫都是必须的：
  *  - **只有在笔记页显示着的时候接手**：KeepAlive 把这一页留在内存里，切走之后监听器还在，
@@ -184,6 +184,18 @@ onMounted(() => {
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onShortcut, true)
   window.removeEventListener('focus', onWindowFocus)
+  cancelAutoSync()
+})
+
+/**
+ * 进 / 出这一页各对齐一次（KeepAlive 下切走再回来不会重挂载，只有这对钩子会触发）。
+ * onActivated 首次挂载也触发，正好覆盖「打开应用就进笔记页」那一档。
+ * 进来**只拉**（收下别处推的），切走才推 —— 而且只有本地有未推改动才真推。
+ */
+onActivated(() => void runPull())
+onDeactivated(() => {
+  cancelAutoSync()
+  void runPush()
 })
 
 /** 第一次进来（或想换一个目录）时挑文件夹；取消就什么都不做 */
@@ -223,14 +235,18 @@ function openRename(rel: string): void {
 
 async function submitName(name: string): Promise<void> {
   if (dialog.mode === 'rename') {
-    if (await store.rename(dialog.targetRel, name))
+    if (await store.rename(dialog.targetRel, name)) {
       ElMessage.success('已重命名')
+      scheduleAutoSync()
+    }
     return
   }
 
   const created = await store.create({ parentRel: dialog.parentRel, kind: dialog.kind, name })
-  if (created)
+  if (created) {
     ElMessage.success(dialog.kind === 'folder' ? '已新建文件夹' : '已新建笔记')
+    scheduleAutoSync()
+  }
 }
 
 /**
@@ -252,8 +268,10 @@ async function remove(rel: string): Promise<void> {
     return
   }
 
-  if (await store.remove(rel))
+  if (await store.remove(rel)) {
     ElMessage.success('已删除')
+    scheduleAutoSync()
+  }
 }
 
 /**
@@ -297,8 +315,10 @@ async function openNoteExternally(rel: string): Promise<void> {
  * 不重新读一次，左栏显示的会是一个磁盘上并不存在的位置。
  */
 async function onMove(payload: { rel: string, targetDir: string }): Promise<void> {
-  if (await store.move(payload.rel, payload.targetDir))
+  if (await store.move(payload.rel, payload.targetDir)) {
+    scheduleAutoSync()
     return
+  }
   await store.reload()
 }
 
@@ -309,7 +329,7 @@ async function onMove(payload: { rel: string, targetDir: string }): Promise<void
  * 那一下发生在选中项已经切走之后，按当前选中项去取就会写错篇（见 NoteEditor 里的说明）。
  */
 function onContentChange(payload: { rel: string, content: string }): void {
-  void store.saveContent(payload.rel, payload.content)
+  void store.saveContent(payload.rel, payload.content).then(scheduleAutoSync)
 }
 
 /**
@@ -409,29 +429,105 @@ const syncTitle = computed(() =>
 )
 
 /**
- * 同步一次。
+ * 自动同步 = **拉推分离**，为的是少推送又不丢远端的改动：
+ *  - 进笔记页 / 窗口聚焦：只拉（`note_pull`），把别处推的收下来，不推本机、不产生提交；
+ *  - 停笔 30 秒 / 切走页面：本地有改动才推（完整 commit → 拉 → 推），没有就什么都不做。
  *
- * 次序是有讲究的，三步都不能换：
- *  1. **先让编辑器把防抖里那一份交出去、并等它落盘**：不然这次提交的是按下按钮
- *     之前的那一版（`flushAll` 是现取，`waitForWrites` 等的是 store 那一侧的写盘）；
- *  2. 再走同步（提交 → 拉 → 推，git 全在 Rust 那边跑）；
- *  3. 回来若远端改过打开着的那一篇，**把新正文塞回编辑器** —— 否则编辑器手上是旧的，
- *     下一次输入就会以旧内容为准把远端那份盖回去。
+ * 这样进页面 / 聚焦不再各推一次，推送只发生在真正写过东西之后。两条都**不弹窗**：
+ * 后台失败时原因写进 `store.syncError`，由左栏底部那行状态显示，不打断正在做的事。
+ * 真正同时改到同一行时 git 仍会冲突，Rust 那边照旧中止 rebase、不挑边、本地那笔留着。
+ */
+/** 停笔多久推一次：比正文写盘的 600ms 防抖长得多，也比拉取的时机疏，避免写长文时频繁推 */
+const AUTO_PUSH_IDLE_MS = 30_000
+/** 挂着的停笔计时器 */
+let idleTimer: number | null = null
+/** 同步在途：自动触发（进页面 / 切页 / 聚焦 / 停笔）之间防重入 */
+let autoSyncing = false
+
+/**
+ * 只拉一次（进页面 / 聚焦）：`store.pullNotes` 走 note_pull，不提交、不推本机改动。
+ * 拉到东西时 store 已重扫并重读过打开篇，这里把新正文塞回编辑器。
+ */
+async function runPull(): Promise<void> {
+  if (autoSyncing || store.syncing || !store.root)
+    return
+  autoSyncing = true
+  try {
+    await store.probeRepo()
+    if (!store.canSync)
+      return
+    const changed = await store.pullNotes()
+    if (changed)
+      editorRef.value?.reloadFromProps()
+  }
+  finally {
+    autoSyncing = false
+  }
+}
+
+/**
+ * 推一次（停笔 / 切页）：只有本地有未推改动时才跑完整闭环；没有就什么都不做。
  *
- * 失败一律是「说清楚」而不是静默：不是仓库、没连远端、git 报的错、冲突的那几个文件名都在里面。
+ * 三步次序都不能换：
+ *  1. `flushAll()` 现取防抖里那份交出去、`waitForWrites()` 等它落盘 —— 否则提交的是上一版；
+ *     needPush 的判断必须**在等落盘之后**：打字没满 600ms 时那份还在防抖里，提前判会漏推；
+ *  2. `syncNotes()` 走同步（提交 → 拉 → 推，git 全在 Rust 那边跑）；
+ *  3. 回来若远端改过打开着的那一篇，`reloadFromProps()` 把新正文塞回编辑器。
+ *
+ * `force` 给手动按钮用：用户明确点了「同步」，即使没改动也要走一遍（确认与远端的对齐状态），
+ * 不受 needPush 拦。自动触发传 false。失败时原因在 store.syncError，原样往上回 null。
+ */
+async function runPush(force = false): Promise<NoteSyncOutcome | null> {
+  if (autoSyncing || store.syncing || !store.root)
+    return null
+  autoSyncing = true
+  try {
+    await store.probeRepo()
+    if (!store.canSync)
+      return null
+    editorRef.value?.flushAll()
+    await store.waitForWrites()
+    // 等落盘之后再判：flushAll 交出去的那份（若有）此时已把 needPush 置位
+    if (!force && !store.needPush)
+      return null
+    const outcome = await store.syncNotes()
+    if (outcome?.activeChanged)
+      editorRef.value?.reloadFromProps()
+    return outcome
+  }
+  finally {
+    autoSyncing = false
+  }
+}
+
+/** 重置停笔计时器：写盘落地 / 结构改动后调，最后一次之后再过 30 秒推一次 */
+function scheduleAutoSync(): void {
+  if (idleTimer !== null)
+    window.clearTimeout(idleTimer)
+  idleTimer = window.setTimeout(() => {
+    idleTimer = null
+    void runPush()
+  }, AUTO_PUSH_IDLE_MS)
+}
+
+/** 取消挂着的停笔计时器（切页 / 卸载）：那一次同步由调用方立即补上 */
+function cancelAutoSync(): void {
+  if (idleTimer !== null) {
+    window.clearTimeout(idleTimer)
+    idleTimer = null
+  }
+}
+
+/**
+ * 手动同步（左栏那颗按钮）：走 `runSync` 同一条闭环，区别只在**弹 toast 给反馈**。
+ * 不是仓库 / 没连远端 / git 报的错 / 冲突文件名都在 `store.syncError` 里，原样弹出来。
  */
 async function syncNow(): Promise<void> {
-  editorRef.value?.flushAll()
-  await store.waitForWrites()
-
-  const outcome = await store.syncNotes()
+  const outcome = await runPush(true)
   if (!outcome) {
     ElMessage.error(store.syncError || '同步笔记失败')
     return
   }
-  if (outcome.activeChanged)
-    editorRef.value?.reloadFromProps()
-
   ElMessage.success(syncDoneText(outcome.summary))
 }
 
@@ -501,15 +597,21 @@ async function pullActiveFromDisk(): Promise<void> {
 }
 
 /**
- * 窗口重新获得焦点：在别的编辑器里改完切回来，这一篇要跟着变。
+ * 窗口重新获得焦点：两件事 —— 只拉一次远端，再把打开着的那一篇按磁盘重读。
  *
- * 只探打开着的那一篇（一次读盘），不重扫整棵树 —— 那边新增 / 删除文件还是交给刷新按钮。
+ * 前者走 note_pull（不推、不提交），把离开这段时间别处推的东西收下来；后者管的是
+ * 「在别的编辑器里改过这一篇」那档（一次读盘，不重扫整棵树，那边新增 / 删除交给刷新按钮）。
  * 页面被 KeepAlive 留着，切到别的页时也会收到焦点事件，所以先判当前页（与 onShortcut 同一道）。
  */
 function onWindowFocus(): void {
-  if (nav.activeView !== 'notes' || !store.root || !store.active)
+  if (nav.activeView !== 'notes' || !store.root)
     return
-  void pullActiveFromDisk()
+  // 串行：runPull 内部也会重读 / 换正文，两条并发会同时动 editor 与 store.active
+  void (async () => {
+    await runPull()
+    if (store.active)
+      await pullActiveFromDisk()
+  })()
 }
 </script>
 
@@ -560,6 +662,14 @@ function onWindowFocus(): void {
           @open-default="openNoteExternally"
           @refresh="refreshNotes"
         />
+
+        <!--
+          自动同步失败（含冲突）只把原因摆在这一行，不弹窗 —— 后台同步不该打断正在做的事。
+          冲突文件名、git 报错都从 store.syncError 原样带过来；下次同步开始时它会被清空。
+        -->
+        <div v-if="store.syncError" class="notes__sync-error" :title="store.syncError">
+          {{ store.syncError }}
+        </div>
 
         <!--
           底部：笔记本是哪个目录 + 最近打开的那几个（原顶部工具条右侧那一组搬到这里）。
@@ -632,13 +742,15 @@ function onWindowFocus(): void {
             <span class="notes__spacer" />
 
             <!--
-              只读那一档的落点，**它自己就是切回去的按钮**：点一下切到可写（Ctrl+/ 同样有效）。
-              **这一档是默认的**，所以它几乎一直挂在这儿，也正因为如此它得同时说清两件事：
-              现在打字没反应是因为它在开着，以及怎么切回去（提示里那句）。
+              模式档的落点：那颗小片始终挂着、写着当前是哪一档，点一下切到另一档（Ctrl+/ 同样有效）。
+              默认可写，所以「可写」是常态；切到只读时换成「只读」，提示里那句说清怎么切回来。
             -->
-            <el-tooltip v-if="readOnly" content="正文只读：点击或 Ctrl+/ 切到可写" placement="bottom">
-              <button type="button" class="notes__mode" @click="readOnly = false">
-                只读
+            <el-tooltip
+              :content="readOnly ? '正文只读：点击或 Ctrl+/ 切到可写' : '正文可写：点击或 Ctrl+/ 切到只读'"
+              placement="bottom"
+            >
+              <button type="button" class="notes__mode" @click="readOnly = !readOnly">
+                {{ readOnly ? '只读' : '可写' }}
               </button>
             </el-tooltip>
 
@@ -983,24 +1095,23 @@ function onWindowFocus(): void {
 }
 
 /**
- * 只读那一档的标记：**实心深片**（墨底反白字；暗色下两个令牌互换，反成亮片深字）。
- * 它是一档模式徽章、不是普通的信息小片：默认档几乎一直挂在标题行里，浅底那副
+ * 模式档的标记：**实心深片**（墨底反白字；暗色下两个令牌互换，反成亮片深字）。
+ * 它是一档模式徽章、不是普通的信息小片：始终挂在标题行里，浅底那副
  * （知识库信息面板小片的同款）压不出存在感 —— 得一眼能找到它、也一眼能看出
- * 「现在打不了字是因为它」。首页看板行那颗模式片需要打眼时也是切实心
+ * 现在是「可写」还是「只读」。首页看板行那颗模式片需要打眼时也是切实心
  * （`.board-row__mode`），同一副处理。
  *
  * 仍是**一行纯字** —— 标题这一行是 `align-items: baseline` 的，里面放图标就得去猜
  * 那颗 svg 的基线落在哪儿（多半会把整片顶高、看着比旁边那行字浮起来）。
  *
  * 高度按标题那一档字号的自然行盒算（18px 行高，比标题的 22px 矮）：
- * 这一片出现 / 消失时，标题行一整行的高度不变 —— 另加竖向内边距就会顶高，
- * 模式一切标题行就往下跳一格。
+ * 另加竖向内边距就会顶高，两档切换时文字长短不同也不该让标题行跳格。
  *
  * 为什么非有它不可：这是一档「按下去之后界面几乎不变」的模式（能变的只有打字打不出来），
  * 一个隐形的快捷键总得有个看得见的落脚点。
  *
- * **它是一颗按钮**（不是纯标签）：点一下就切到可写 —— 点下去它自己消失，那正是这一档
- * 结束时该有的样子；切回可写之后要回只读，仍是 Ctrl+/（提示里写着）。
+ * **它是一颗按钮**（不是纯标签）：点一下切到另一档 —— 当前是哪档直接写在片上，
+ * 不用去猜；Ctrl+/ 是另一颗入口（提示里写着）。
  */
 .notes__mode {
   display: inline-flex;
@@ -1024,6 +1135,24 @@ function onWindowFocus(): void {
 
 .notes__saved.is-error {
   color: var(--st-fail);
+}
+
+/**
+ * 自动同步失败（含冲突）的那行状态：钉在左栏底部、RecentRoots 上方，单独占一行。
+ * 文案可能很长（带文件名与解决办法），所以单行省略、完整内容挂 title 上；
+ * 用失败色但不铺底色 —— 它说的是「上次没同步成」，不是一直在报错。
+ */
+.notes__sync-error {
+  flex-shrink: 0;
+  padding: var(--sp-1) var(--sp-2);
+  font-size: var(--fs-micro);
+  line-height: 1.4;
+  color: var(--st-fail);
+  border-radius: var(--r-sm);
+  background: var(--st-fail-soft);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* 空态与文件夹提示：居中占满右栏，与别处的 .empty 同一副样子 */

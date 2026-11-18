@@ -1022,6 +1022,48 @@ pub fn pull_kb(dir: &str) -> Result<Value, String> {
 ") }))
 }
 
+/// 笔记仓库**只拉不推**：进笔记页 / 窗口聚焦时后台对齐远端用（远端有新东西就落到本地工作树，
+/// 让笔记跟上别的设备）。与 `pull_kb` 同一条路：不提交本机的改动 —— 推送是 `sync_notes` 的事，
+/// 只放在停笔 / 切页那几处（避免每次进页面就推一次）；`--autostash` 会先挪开未提交的改动再放回来，
+/// 冲突不替用户挑边（本地现场保持原样，报错让用户自己合）。
+pub fn pull_notes(dir: &str) -> Result<Value, String> {
+    let dir = dir.trim();
+    if dir.is_empty() {
+        return Err("还没有选择笔记文件夹".into());
+    }
+    let root = PathBuf::from(dir);
+    if !root.is_dir() {
+        return Err(format!("找不到笔记文件夹：{dir}"));
+    }
+    if !root.join(".git").exists() {
+        return Err("这个笔记文件夹还不是 git 仓库".into());
+    }
+    if !run_git_quiet(&["remote", "get-url", "origin"], &root) {
+        return Err("这个笔记文件夹还没连远端仓库".into());
+    }
+
+    let _workflow = lock_workflow(&root);
+    if let Some(message) = busy_message(&root, "这个笔记文件夹") {
+        return Err(message);
+    }
+
+    // 要出网，先注入凭据（与 sync_folder 同一条规矩）
+    set_git_auth();
+
+    let mut log: Vec<String> = Vec::new();
+    if let Ok(text) = run_git(&["fetch", "--quiet", "--prune", "origin"], Some(&root), GIT_TIMEOUT) {
+        if !text.trim().is_empty() {
+            log.push(text);
+        }
+    }
+    let branch = current_branch(&root)?;
+    let before = head_of(&root);
+    pull_with_rebase(&root, &branch, &mut log)?;
+    let received = before != head_of(&root);
+    Ok(json!({ "branch": branch, "received": received, "log": log.join("
+") }))
+}
+
 /// 文件夹的 git 状态：有没有仓库、origin 是什么、当前站在哪个分支。
 /// 界面拿它决定给不给同步入口、同步到哪儿（AI 助手那一页另外拿分支说清「在哪儿干活」）。
 ///
@@ -2529,6 +2571,84 @@ mod tests {
         // 空的目录参数 / 文件夹不在：各给一句能看懂的话
         assert!(sync_notes("  ").is_err());
         assert!(sync_notes(root.join("没有这个目录").to_str().unwrap()).is_err());
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// 只拉不推：进笔记页 / 聚焦那几处用它对齐远端，不产生提交、也不把本地的东西推出去。
+    /// 未提交的改动靠 `--autostash` 保住；真冲突仍中止 rebase、不挑边。
+    #[test]
+    fn pull_notes_only_fetches_without_committing_or_pushing() {
+        if proc::probe_version("git").is_none() {
+            eprintln!("跳过：本机没有 git");
+            return;
+        }
+
+        let root = std::env::temp_dir().join(format!("wb-notes-pull-{}", uuid::Uuid::new_v4()));
+        let remote = root.join("notes.git");
+        let (a, b) = (root.join("machine-a"), root.join("machine-b"));
+        std::fs::create_dir_all(&a).unwrap();
+
+        let init = proc::run_direct(
+            "git",
+            &[
+                "init".to_string(),
+                "--bare".to_string(),
+                remote.to_string_lossy().into_owned(),
+            ],
+            GIT_TIMEOUT,
+            None,
+            &GIT_ENVS,
+        )
+        .unwrap();
+        assert!(init.ok(), "git init --bare 失败: {}", init.stderr);
+
+        let repo = remote.to_string_lossy().into_owned();
+        let a_path = a.to_str().unwrap();
+        let b_path = b.to_str().unwrap();
+
+        // A：写一篇推上去
+        std::fs::write(a.join("周报.md"), "本周：写同步\n").unwrap();
+        run_git(&["init", "--quiet"], Some(&a), GIT_TIMEOUT).unwrap();
+        run_git(&["remote", "add", "origin", &repo], Some(&a), GIT_TIMEOUT).unwrap();
+        sync_notes(a_path).unwrap();
+
+        // B：init + 接远端，先同步一次把 A 那篇落下来（clone 会跟随 bare remote 默认的 master，
+        // 而远端那条是 main —— 用现成同步流程初始化才站得对分支）
+        std::fs::create_dir_all(&b).unwrap();
+        run_git(&["init", "--quiet"], Some(&b), GIT_TIMEOUT).unwrap();
+        run_git(&["remote", "add", "origin", &repo], Some(&b), GIT_TIMEOUT).unwrap();
+        sync_notes(b_path).unwrap();
+        assert_eq!(read_note(&b.join("周报.md")), "本周：写同步\n");
+        let remote_head = head_of(&b);
+
+        // 没有新东西再 pull：received=false，不产生提交，HEAD 也不动
+        let pulled = pull_notes(b_path).unwrap();
+        assert_eq!(pulled["received"], json!(false), "没有新东西时不算收到: {pulled:?}");
+        assert_eq!(
+            run_git(&["rev-list", "--count", "HEAD"], Some(&b), GIT_TIMEOUT).unwrap(),
+            "1",
+            "只拉不该产生新提交"
+        );
+        assert_eq!(head_of(&b), remote_head, "远端没动时 HEAD 不该变");
+
+        // A 再写一篇推上去；B 的 pull 该把它落到工作树，且照样不产生提交
+        std::fs::write(a.join("随手记.md"), "B 该收到这一篇\n").unwrap();
+        sync_notes(a_path).unwrap();
+        let pulled = pull_notes(b_path).unwrap();
+        assert_eq!(pulled["received"], json!(true), "A 推了新东西，B 该收到: {pulled:?}");
+        assert_eq!(read_note(&b.join("随手记.md")), "B 该收到这一篇\n");
+        assert_eq!(
+            run_git(&["rev-list", "--count", "HEAD"], Some(&b), GIT_TIMEOUT).unwrap(),
+            "2",
+            "pull 只快进、不提交"
+        );
+
+        // B 有一笔未提交改动时 pull：改动要靠 autostash 保住
+        std::fs::write(b.join("本地草稿.md"), "还没提交\n").unwrap();
+        let pulled = pull_notes(b_path).unwrap();
+        assert!(pulled["received"] == json!(false), "{pulled:?}");
+        assert_eq!(read_note(&b.join("本地草稿.md")), "还没提交\n", "未提交的改动不能被 pull 吃掉");
 
         let _ = std::fs::remove_dir_all(&root);
     }

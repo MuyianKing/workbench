@@ -92,6 +92,7 @@ const domainsApi = {
   moveNote: (root: string, rel: string, targetDir: string) =>
     note.moveNote(root, rel, targetDir),
   syncNotes: (input: Parameters<WorkbenchApi['syncNotes']>[0]) => note.syncNotes(input),
+  pullNotes: (dir: string) => note.pullNotes(dir),
   noteRepoState: (dir: string) => note.noteRepoState(dir),
   uploadNoteImage: (input: Parameters<WorkbenchApi['uploadNoteImage']>[0]) =>
     note.uploadNoteImage(input),
