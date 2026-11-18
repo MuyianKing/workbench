@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import type { NoteImageAsset, NoteTextScan } from '@workbench/notes'
+import type { ImageMigrationPlan, NoteImageAsset, NoteTextScan } from '@workbench/notes'
 import type { Result } from '@/types'
 import { Picture, Refresh } from '@element-plus/icons-vue'
-import { buildImageAssets, sortImageAssets, totalImageBytes, unusedImages } from '@workbench/notes'
+import { buildImageAssets, imageOriginScopeDir, migrationReplacements, planImageMigration, sortImageAssets, totalImageBytes, unusedImages } from '@workbench/notes'
 /**
  * 素材管理：当前这个笔记本传过哪些图、谁还在用、把没人用的清掉。
  *
@@ -10,20 +10,23 @@ import { buildImageAssets, sortImageAssets, totalImageBytes, unusedImages } from
  * 图片仓库里（见 packages/notes/src/note-image.ts 的文件头），所以列表来自仓库、引用次数来自笔记本 ——
  * 两边凑起来才知道哪张图已经没人用了。
  *
- * 三件值得说清楚的事：
+ * 四件值得说清楚的事：
  *  1. **引用次数是「数出来的」，不是记下来的**。正文就是磁盘上的 `.md` 文件，别处编辑器
  *     随时能改，仓库那边也可能被别人的机器推过 —— 没有一个地方能维护一份「引用表」，
  *     所以口径是「打开面板就重新数一遍」（面板一开就扫，不靠用户记得点刷新），
  *     缓存只用于先把上次的结果显示出来、**不用于决定删不删**；
- *  2. **清单与引用都只限当前这个笔记本**。图片进仓库时按「本机设备 / 笔记本」分成两层
- *     （`imageScopeDir`），这里列的正好是当前笔记本那一层，引用次数也数它自己的正文 ——
- *     「未引用」于是真的等于「没人用」。别的笔记本、别的机器传上来的图不在这份清单里，
- *     也**删不到**：这次传下去的目录就是那一层，Rust 按它逐条挡住越界路径；
+ *  2. **清单与引用都只限当前这个笔记本**。有 origin 的笔记本按 origin 共享层列（所有设备同一份），
+ *     没有的按「本机设备 / 本机路径」那一层列。有 origin 时额外并一列旧层（早年按设备/路径存的图），
+ *     让迁移前的老图也看得见；引用次数也只数这个笔记本自己的正文 —— 「未引用」于是真的等于「没人用」。
+ *     别的笔记本的图不在这份清单里，也**删不到**：Rust 按允许的目录逐条挡住越界路径；
  *  3. **只放行「未引用」的那些**。引用次数大于 0 的行不给勾（删它一定会裂图），
- *     删除本身是「一次提交 + 一次推送」，与粘贴上传走的是同一套 git 机制。
+ *     删除本身是「一次提交 + 一次推送」，与粘贴上传走的是同一套 git 机制；
+ *  4. **旧图可显式搬到共享层**。有 origin 且正文还引用着旧层的图时给「迁移」按钮：计划（哪些图、
+ *     怎么换 URL）由纯函数算好，上抛给 NotesView 编排（先 flush 编辑器、迁移后重读正文并同步
+ *     笔记本仓库）。图片仓库与笔记本仓库各提交一次，做不到原子，确认框里说清楚。
  *
  * 组件自己取数与删除（数据只在面板打开期间存在，用完即弃，不必为它造 store 切片），
- * 配置从设置里现取，笔记本路径由上层传进来（它就是当前打开的那个）——
+ * 配置从设置里现取，笔记本路径与 origin 由上层传进来（origin 是 store 探出来的，现探现传）——
  * **没打开笔记本时这一页什么都不列**：退回上一层目录去列图，等于把别的笔记本的图当成可删的。
  */
 import { computed, ref, watch } from 'vue'
@@ -35,6 +38,13 @@ import { useSettingsStore } from '@/stores/settings'
 const props = defineProps<{
   /** 当前笔记本：清单与引用次数都只限它（还没选文件夹时是空串，那时这一页什么都不列） */
   root: string
+  /** 当前笔记本连着的 origin（有仓库时）：有它就把图片按 origin 共享层管，并提供旧图迁移 */
+  origin: string
+}>()
+
+const emit = defineEmits<{
+  /** 把迁移计划上抛给 NotesView 编排（它才能先 flush 编辑器、迁移后重读与同步） */
+  migrate: [plan: ImageMigrationPlan]
 }>()
 
 /** 弹层开关:v-model 一条口径(与 AppDialog / el-dialog 相同,全应用的弹层都这么开) */
@@ -48,6 +58,12 @@ interface ScanResult {
   assets: NoteImageAsset[]
   /** 读不出来的笔记篇数 */
   failed: number
+  /** 并集里属于旧层的图（迁移按钮的对象） */
+  legacy: { path: string, name: string, size: number }[]
+  /** 这次扫描用的旧层目录（仓库相对），生成迁移计划要用 */
+  oldDir: string
+  /** 当前笔记本所有正文（生成迁移计划时按文件名挑被引用的旧图） */
+  texts: string[]
 }
 
 /**
@@ -90,6 +106,20 @@ const scannedText = computed(() =>
   result.value ? formatRelative(result.value.at, Date.now()) : '',
 )
 
+/** 有 origin 才谈得上「迁移旧图到共享层」；本机笔记本来就没有共享层，不显示这个按钮 */
+const canMigrate = computed(() => Boolean(props.origin.trim()))
+
+/** 待迁移的旧图（当前笔记本正文还引用着的那些）：生成计划用同一套纯函数，与筛选「未引用」分开 */
+const migrationCandidates = computed(() => {
+  const scan = result.value
+  if (!canMigrate.value || !scan?.oldDir || !scan.legacy.length)
+    return []
+  const newDir = imageOriginScopeDir('images', props.origin)
+  if (!newDir)
+    return []
+  return planImageMigration({ images: scan.legacy, texts: scan.texts, oldDir: scan.oldDir, newDir })
+})
+
 const repoMissing = computed(() => !settings.settings.noteImageRepo)
 /** 还没打开笔记本：清单是按笔记本来分的，这一页这时没有什么可管的 */
 const rootMissing = computed(() => !props.root.trim())
@@ -101,7 +131,7 @@ const rootMissing = computed(() => !props.root.trim())
  * 说成「没人用的图」（虽然真删会被 Rust 的路径边界挡回来，但那种「删不动」本身就是个错）。
  */
 watch(
-  () => [settings.settings.noteImageRepo, props.root],
+  () => [settings.settings.noteImageRepo, props.root, props.origin],
   () => {
     cached = null
     result.value = null
@@ -144,19 +174,26 @@ async function scan(): Promise<void> {
   error.value = ''
 
   try {
-    // 两件事并行：它们互不依赖，串起来等只会让面板多转一会儿
     const root = props.root
+    const origin = props.origin
     const textsTask: Promise<Result<NoteTextScan>> = window.workbench.scanNoteTexts(root)
 
-    const [images, texts] = await Promise.all([
-      window.workbench.listNoteImages({ repo, root }),
-      textsTask,
-    ])
+    // 有 origin 时并列列两层：当前共享层 + 旧的设备/本机路径层，合并成并集（迁移前的老图在旧层）。
+    // 两批列表 + 正文三者互不依赖，串起来等只会让面板多转一会儿。
+    const currentTask = window.workbench.listNoteImages({ repo, root, origin })
+    const legacyTask = origin.trim()
+      ? window.workbench.listNoteImages({ repo, root, origin, scope: 'legacy' })
+      : Promise.resolve(null)
+    const [current, legacy, texts] = await Promise.all([currentTask, legacyTask, textsTask])
 
-    if (!images.ok || !images.data) {
-      error.value = images.error ?? '读取图片仓库失败'
+    if (!current.ok || !current.data) {
+      error.value = current.error ?? '读取图片仓库失败'
       return
     }
+    // 旧层拉不下来不算整体失败：共享层的图照常能管，只是这一轮迁不了老图（提示一句即可）
+    const legacyFiles = legacy?.ok && legacy.data ? legacy.data.files : []
+    const legacyDir = legacy?.ok && legacy.data ? legacy.data.dir : ''
+    const legacyError = legacy && !legacy.ok ? (legacy.error ?? '') : ''
     // 正文读不出来不算失败：那样一张图都数不出来，界面上会显示成「全都未引用」——
     // 这正是最危险的错法，所以这里当作整体失败，宁可什么都不列
     if (!texts.ok || !texts.data) {
@@ -164,16 +201,37 @@ async function scan(): Promise<void> {
       return
     }
 
+    // 并集去重（按仓库相对路径）：旧层与共享层不会重叠，但同一层被 repeated 扫到时只留一张
+    const seen = new Set<string>()
+    const merged: typeof current.data.files = []
+    for (const file of [...current.data.files, ...legacyFiles]) {
+      if (seen.has(file.path))
+        continue
+      seen.add(file.path)
+      merged.push(file)
+    }
+    const legacyPaths = new Set(legacyFiles.map(file => file.path))
+
     const list: NoteImageAsset[] = sortImageAssets(
       buildImageAssets({
-        images: images.data.files,
+        images: merged,
         texts: texts.data.files.map(file => file.text),
         repo,
-        branch: images.data.branch,
+        branch: current.data.branch,
       }),
     )
 
-    cached = { at: Date.now(), assets: list, failed: texts.data.failed }
+    const textsOnly = texts.data.files.map(file => file.text)
+    cached = {
+      at: Date.now(),
+      assets: list,
+      failed: texts.data.failed,
+      legacy: merged.filter(file => legacyPaths.has(file.path)),
+      oldDir: legacyDir,
+      texts: textsOnly,
+    }
+    if (legacyError)
+      error.value = `旧层图片没读到，这一轮迁不了老图：${legacyError}`
     result.value = cached
     // 勾选跟着新结果走：已经不在清单里、或已经变成「有人引用」的，一律取消勾选
     selected.value = selected.value.filter(path =>
@@ -237,6 +295,7 @@ async function remove(): Promise<void> {
     const deleted = await window.workbench.deleteNoteImages({
       repo,
       root: props.root,
+      origin: props.origin,
       paths: targets.map(asset => asset.path),
     })
     if (!deleted.ok || !deleted.data) {
@@ -256,6 +315,40 @@ async function remove(): Promise<void> {
   finally {
     deleting.value = false
   }
+}
+
+/**
+ * 迁移旧图到共享层：确认后把计划上抛给 NotesView 编排（它先 flush 编辑器、迁移后重读并同步）。
+ *
+ * 风险在确认框里说全：动**两个仓库**（图片仓库搬图、笔记本仓库改正文 URL），各提交推送一次，
+ * 做不到原子；改过的正文会推到笔记本 origin，别的设备 pull 到之前旧链接会临时裂图。
+ */
+async function migrate(): Promise<void> {
+  const scan = result.value
+  const repo = settings.settings.noteImageRepo
+  const renames = migrationCandidates.value
+  if (!repo || !scan?.oldDir || !renames.length)
+    return
+
+  const newDir = imageOriginScopeDir('images', props.origin)
+  if (!newDir)
+    return
+
+  const detail = `把 ${renames.length} 张旧图搬到共享层，并改写笔记本正文里的图片地址？`
+  const hint = '这会同时改两个仓库：图片仓库搬文件、笔记本仓库改正文，各提交推送一次（做不到原子）。迁移前请先同步笔记本，期间别在别处编辑；别处 pull 到新正文前旧链接可能临时打不开。'
+  if (!(await confirmAction(`${detail}${hint}`, '迁移', { confirmButtonText: '开始迁移' })))
+    return
+
+  emit('migrate', {
+    repo,
+    root: props.root,
+    oldDir: scan.oldDir,
+    newDir,
+    renames,
+    replacements: migrationReplacements(scan.oldDir, newDir),
+  })
+  // 迁移由上层异步执行；面板关掉，等上层完成后用户再打开看最新清单
+  open.value = false
 }
 </script>
 
@@ -304,6 +397,18 @@ async function remove(): Promise<void> {
         <span class="assets__spacer" />
 
         <span v-if="scannedText" class="assets__time">上次扫描：{{ scannedText }}</span>
+
+        <!-- 有 origin 且有正文还在用的旧图时，才给迁移入口：本机笔记没有共享层，不显示 -->
+        <el-tooltip
+          v-if="canMigrate && migrationCandidates.length"
+          content="把这台机器早年按设备/路径存的图搬到 origin 共享层，跨设备共用；会改正文并推送两个仓库"
+          placement="top"
+        >
+          <el-button size="small" type="primary" plain :disabled="scanning" @click="migrate">
+            迁移 {{ migrationCandidates.length }} 张旧图
+          </el-button>
+        </el-tooltip>
+
         <el-tooltip content="重新读取仓库并重数引用次数" placement="top">
           <el-button size="small" text :disabled="scanning" @click="scan">
             <el-icon :class="{ 'is-loading': scanning }">
@@ -324,8 +429,8 @@ async function remove(): Promise<void> {
       </p>
 
       <p v-else class="assets__hint">
-        只列当前笔记本在这台机器上存的图片，引用次数也只数它自己的笔记
-        （按图片文件名数，正文里写成什么地址都认）。
+        列的是这个笔记本的图：连了仓库的按仓库共享（所有设备同一份），没连的按这台机器这一份；
+        引用次数按图片文件名数它自己的笔记（正文里写成什么地址都认）。
       </p>
 
       <div v-loading="scanning" class="assets">

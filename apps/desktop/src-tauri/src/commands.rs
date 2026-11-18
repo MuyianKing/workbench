@@ -225,9 +225,24 @@ pub fn note_images_list(repo: String, dir: String) -> Result<Value, String> {
 /// 素材管理：批量删掉仓库里的图片（一次提交、一次推送）。
 ///
 /// `paths` 是列表回来的那种「仓库内相对路径」，越界与非法路径在 sync.rs 里逐条挡住。
+/// `dirs` 是允许的目录（并集：共享层 + 旧层），删图只要落在其中之一即可。
 #[tauri::command(async)]
-pub fn note_images_delete(repo: String, dir: String, paths: Vec<String>) -> Result<Value, String> {
-    crate::sync::delete_images(&repo, &dir, &paths)
+pub fn note_images_delete(repo: String, dirs: Vec<String>, paths: Vec<String>) -> Result<Value, String> {
+    crate::sync::delete_images(&repo, &dirs, &paths)
+}
+
+/// 把旧层的图搬到 origin 共享层，并改写笔记本正文里的图片 URL（两个仓库各提交一次）。
+/// renames / replacements 由渲染层的纯函数算好，这里只做参数转发。
+#[tauri::command(async)]
+pub fn note_images_migrate(
+    repo: String,
+    root: String,
+    old_dir: String,
+    new_dir: String,
+    renames: Vec<crate::sync_images::ImageMigrationRename>,
+    replacements: Vec<crate::sync_images::ImageUrlReplacement>,
+) -> Result<crate::sync_images::ImageMigrationResult, String> {
+    crate::sync::migrate_images(&repo, &root, &old_dir, &new_dir, &renames, &replacements)
 }
 
 /// 笔记本里所有笔记的正文（引用计数用）：只读盘、不做任何过滤与统计

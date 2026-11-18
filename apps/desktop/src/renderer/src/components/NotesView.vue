@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { NoteKind, NoteSyncSummary } from '@workbench/notes'
+import type { ImageMigrationPlan, NoteKind, NoteSyncSummary } from '@workbench/notes'
 import type { NoteSyncOutcome } from '@/stores/notes'
 import { Document, EditPen, FolderOpened, Notebook, Picture, Refresh, RefreshRight } from '@element-plus/icons-vue'
 import { countNodes, findNoteNode, noteAbsPath, noteRootName } from '@workbench/notes'
@@ -531,6 +531,54 @@ async function syncNow(): Promise<void> {
   ElMessage.success(syncDoneText(outcome.summary))
 }
 
+/**
+ * 素材面板把「迁移旧图到共享层」的计划上抛到这里执行（面板不持有编辑器实例）。
+ *
+ * 顺序不能乱：先让编辑器交出手上未落盘的那份并等落盘（否则改的是旧正文、随后编辑器又把
+ * 旧 URL 写回来），再调迁移（图片仓库搬图 + 笔记本正文改写，两个仓库各提交一次），
+ * 迁移成功后把打开着的那篇按磁盘重读（正文 URL 变了），最后把改过的 .md 同步到笔记本 origin。
+ * 任何一步失败都不弹断，错误写进左栏底部状态行 —— 与后台同步同一档。
+ */
+async function migrateAssets(plan: ImageMigrationPlan): Promise<void> {
+  if (autoSyncing || store.syncing)
+    return
+  autoSyncing = true
+  try {
+    editorRef.value?.flushAll()
+    await store.waitForWrites()
+
+    const result = await window.workbench.migrateNoteImages({
+      repo: plan.repo,
+      root: plan.root,
+      oldDir: plan.oldDir,
+      newDir: plan.newDir,
+      renames: plan.renames,
+      replacements: plan.replacements,
+    })
+    if (!result.ok || !result.data) {
+      store.syncError = result.error ?? '迁移图片失败'
+      return
+    }
+
+    // 正文里的图片 URL 变了：把打开着的那篇按磁盘重读，免得编辑器还停在旧链接上
+    await store.rereadActive()
+    editorRef.value?.reloadFromProps()
+
+    // 改过的 .md 推到笔记本 origin（迁移只推了图片仓库；这一步推笔记本仓库）。
+    // 同步会清空 syncError，所以「有几篇没写回」的提示放在它之后设，别被冲掉。
+    const outcome = await store.syncNotes()
+    if (outcome?.activeChanged)
+      editorRef.value?.reloadFromProps()
+    // 同步失败本身已在 syncError 里，别用「有几篇没写回」把它冲掉；只在同步成功时补这条提醒
+    if (outcome && result.data.failed > 0)
+      store.syncError = `有 ${result.data.failed} 篇笔记没写回（被别处改过或读不出来），请检查后重试`
+    ElMessage.success(`已迁移 ${result.data.moved} 张图片到共享层`)
+  }
+  finally {
+    autoSyncing = false
+  }
+}
+
 /** 同步成功那句提示：把「提交了什么、拉回了什么」说清楚，两边都没动就直说 */
 function syncDoneText(summary: NoteSyncSummary): string {
   const parts: string[] = []
@@ -768,6 +816,7 @@ function onWindowFocus(): void {
             :theme="settings.effectiveTheme"
             :read-only="readOnly"
             :image-repo="settings.settings.noteImageRepo"
+            :image-origin="store.remoteUrl"
             :editor-hotkeys="settings.settings.editorHotkeys"
             :outline-host="outlineRail"
             outline-pinned
@@ -851,7 +900,12 @@ function onWindowFocus(): void {
     />
 
     <!-- 素材管理：当前笔记本（这台机器）传过哪些图、谁还在用 -->
-    <NoteAssetsDialog v-model="assetsOpen" :root="store.root" />
+    <NoteAssetsDialog
+      v-model="assetsOpen"
+      :root="store.root"
+      :origin="store.remoteUrl"
+      @migrate="migrateAssets"
+    />
   </main>
 </template>
 

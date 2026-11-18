@@ -129,6 +129,7 @@ export type {
   NoteImageDeleteInput,
   NoteImageList,
   NoteImageListInput,
+  NoteImageMigrated,
   NoteImageUploaded,
   NoteImageUploadInput,
   NoteTextScan,

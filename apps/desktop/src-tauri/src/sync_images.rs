@@ -1,8 +1,12 @@
-//! 笔记图片的同步仓库读写：上传 / 列清单 / 删除。
+//! 笔记图片的同步仓库读写：上传 / 列清单 / 删除 / 旧图迁移。
 //!
 //! 从 `sync.rs` 拆出来的独立一块：它碰的是**用户自己的图片仓库**（笔记里粘贴的图），
 //! 与用量分片那几份「一台机器一份」的文件不是一类东西；git 基础设施仍复用
 //! `sync.rs` 的那几个 pub(crate) 助手（clone / 锁 / 凭证 / 推送）。
+//!
+//! 图片按 origin 共享层或本机层存放（算法在 packages/notes/src/note-image.ts）；
+//! `migrate_images` 把旧的本机层图搬进共享层，并在笔记本文件夹里改写正文 URL ——
+//! 两个仓库各提交一次，顺序是先搬图再改正文（见 docs/modules/notes.md）。
 
 use std::path::Path;
 
@@ -13,6 +17,38 @@ use crate::fs_util;
 use crate::fs_util::is_plain_segment;
 use crate::paths;
 use crate::sync::{ensure_clone, lock_workflow, push_with_retry, run_git, run_git_quiet, set_git_auth, GIT_TIMEOUT, MAX_IMAGE_DEPTH};
+use serde::Serialize;
+
+/// 迁移结果（图片仓库这一侧）。带 `@contract` → 生成 TS 类型，前端据此收敛形状。
+// @contract
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImageMigrationResult {
+    /// 真的搬走的图数（已经不在的跳过）
+    pub moved: u32,
+    /// 写回了正文的篇数
+    pub rewritten: u32,
+    /// 读不出来 / 被并发改过而跳过的篇数
+    pub failed: u32,
+    /// 推上去的分支（保留给界面显示 / 排查）
+    pub branch: String,
+    /// git 输出（失败时界面拿它说明原因）
+    pub log: String,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct ImageMigrationRename {
+    pub from: String,
+    pub to: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct ImageUrlReplacement {
+    pub from: String,
+    pub to: String,
+}
+
 // ---------- 笔记里的图片 ----------
 
 /// 把一张图片写进**图片仓库**并推上去，返回它在仓库里的相对路径与推上去的分支。
@@ -145,16 +181,16 @@ fn list_images_at(
 /// 都不该让这一批白做。一张都没删到时不提交空提交。
 pub fn delete_images(
     repo: &str,
-    dir: &str,
+    dirs: &[String],
     paths: &[String],
 ) -> Result<Value, String> {
-    delete_images_at(&paths::image_sync_dir(), repo, dir, paths)
+    delete_images_at(&paths::image_sync_dir(), repo, dirs, paths)
 }
 
 fn delete_images_at(
     clone_dir: &Path,
     repo: &str,
-    dir: &str,
+    dirs: &[String],
     paths: &[String],
 ) -> Result<Value, String> {
     let clean = require_image_repo(repo)?;
@@ -168,7 +204,7 @@ fn delete_images_at(
 
     let mut removed: Vec<String> = Vec::new();
     for raw in paths {
-        let rel = image_repo_path(dir, raw)?;
+        let rel = image_repo_path_in(dirs, raw)?;
         if !root.join(&rel).is_file() {
             continue;
         }
@@ -197,6 +233,157 @@ fn delete_images_at(
         "log": log.join("\n"),
         "paths": removed,
     }))
+}
+
+/**
+ * 把旧层的图搬到 origin 共享层，并改写笔记本正文里的图片 URL。
+ *
+ * 两个仓库各提交一次，做不到原子（见 docs/modules/notes.md）：
+ *  1. **图片仓库**：`lock_workflow` + `set_git_auth` + `ensure_clone`，逐条 `git mv` 旧路径 → 新层
+ *     （边界复用 `image_repo_path_in`，只允许从 oldDir 搬到 newDir），一次 commit + push；
+ *  2. **笔记本文件夹**：递归扫 `.md`（复用 notes 的跳过名单），逐篇套渲染层算好的字面替换，
+ *     带 mtime 校验写回（复用 notes::write 的语义），改过的篇数 / 跳过的篇数如实返回。
+ *
+ * 笔记本仓库的 commit + push 不在这里 —— 由上层紧接着触发一次笔记同步负责。
+ * 顺序：先搬图（此时旧 URL 还能打开，因为 git mv 在 images 仓库同一提交里完成），再改正文，
+ * 这样任何时刻正文里的 URL 要么指向旧路径（图还在）、要么指向新路径（图已搬好）。
+ */
+pub fn migrate_images(
+    repo: &str,
+    root: &str,
+    old_dir: &str,
+    new_dir: &str,
+    renames: &[ImageMigrationRename],
+    replacements: &[ImageUrlReplacement],
+) -> Result<ImageMigrationResult, String> {
+    migrate_images_at(&paths::image_sync_dir(), repo, root, old_dir, new_dir, renames, replacements)
+}
+
+fn migrate_images_at(
+    clone_dir: &Path,
+    repo: &str,
+    root: &str,
+    old_dir: &str,
+    new_dir: &str,
+    renames: &[ImageMigrationRename],
+    replacements: &[ImageUrlReplacement],
+) -> Result<ImageMigrationResult, String> {
+    let clean = require_image_repo(repo)?;
+    if renames.is_empty() {
+        return Err("没有需要迁移的图片".into());
+    }
+    let old_clean = normalize_image_dir(old_dir)?;
+    let new_clean = normalize_image_dir(new_dir)?;
+    if old_clean.is_empty() || new_clean.is_empty() || old_clean == new_clean {
+        return Err("迁移的源目录与目标目录不合法或相同".into());
+    }
+
+    // ---- 1. 图片仓库：搬图 + 一次提交推送 ----
+    let _workflow = lock_workflow(clone_dir);
+    set_git_auth();
+    let (img_root, branch) = ensure_clone(clone_dir, &clean)?;
+
+    let allowed = vec![old_clean.clone()];
+    let mut moved = 0u32;
+    let mut log: Vec<String> = Vec::new();
+    for rename in renames {
+        let from = image_repo_path_in(&allowed, &rename.from)?;
+        let to = {
+            // 目标必须落在 new_dir 一层：文件名由渲染层给，只认普通名字
+            if !is_plain_segment(rename.name.trim()) {
+                return Err(format!("迁移目标文件名不合法：{}", rename.name));
+            }
+            let t = validate_image_path(&rename.to)?;
+            if !t.starts_with(&format!("{new_clean}/")) {
+                return Err(format!("迁移目标不在共享层里：{}", rename.to));
+            }
+            t
+        };
+        if !img_root.join(&from).is_file() {
+            continue; // 已经不在（别处删过 / 迁移到一半），跳过
+        }
+        // git mv：移动工作区文件并暂存；目标父目录不存在时先建（git mv 不会建中间目录）
+        if let Some(parent) = img_root.join(&to).parent() {
+            std::fs::create_dir_all(parent).map_err(|err| format!("建共享层目录失败：{err}"))?;
+        }
+        run_git(&["mv", "--", &from, &to], Some(&img_root), GIT_TIMEOUT)?;
+        moved += 1;
+    }
+
+    if moved == 0 {
+        return Ok(ImageMigrationResult { moved: 0, rewritten: 0, failed: 0, branch, log: String::new() });
+    }
+    log.push(run_git(&["commit", "-m", &format!("image: 迁移 {moved} 张旧图到共享层")], Some(&img_root), GIT_TIMEOUT)?);
+    push_with_retry(&img_root, &branch, &mut log)?;
+
+    // ---- 2. 笔记本文件夹：逐篇替换正文（带 mtime 校验） ----
+    let notes_root = crate::fs_util::root_dir(root, "笔记文件夹")?;
+    let mut rewritten = 0u32;
+    let mut failed = 0u32;
+    for entry in WalkDir::new(&notes_root)
+        .max_depth(crate::notes::MAX_DEPTH)
+        .follow_links(false)
+        .sort_by_file_name()
+        .into_iter()
+    {
+        let Ok(entry) = entry else { failed += 1; continue };
+        if entry.depth() == 0 || !entry.file_type().is_file() {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy();
+        if crate::notes::is_skipped_entry(&name, false) || !crate::notes::is_note_file(&name) {
+            continue;
+        }
+        let path = entry.path();
+        let before = match std::fs::read_to_string(path) {
+            Ok(text) => text,
+            Err(_) => { failed += 1; continue },
+        };
+        let expected = crate::fs_util::mtime_ms(path);
+        let mut after = before.clone();
+        // 大小写不敏感地套每条字面替换（别处编辑器可能把路径写成大写）
+        for pair in replacements {
+            after = replace_all_ci(&after, &pair.from, &pair.to);
+        }
+        if after == before {
+            continue;
+        }
+        // mtime 校验：读完之后、写回之前若别处改过，跳过这篇（记 failed），不静默覆盖
+        if crate::fs_util::mtime_ms(path) != expected {
+            failed += 1;
+            continue;
+        }
+        if crate::fs_util::write_atomic(path, after.as_bytes()).is_err() {
+            failed += 1;
+            continue;
+        }
+        rewritten += 1;
+    }
+
+    Ok(ImageMigrationResult { moved, rewritten, failed, branch, log: log.join("\n") })
+}
+
+/// 大小写不敏感地把正文里所有 `from` 换成 `to`（Rust 侧只做机械替换，编码口径在 TS 侧算好）
+fn replace_all_ci(text: &str, from: &str, to: &str) -> String {
+    if from.is_empty() {
+        return text.to_string();
+    }
+    let lower = text.to_ascii_lowercase();
+    let needle = from.to_ascii_lowercase();
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    let mut low_rest = lower.as_str();
+    loop {
+        let Some(at) = low_rest.find(&needle) else {
+            out.push_str(rest);
+            break;
+        };
+        out.push_str(&rest[..at]);
+        out.push_str(to);
+        rest = &rest[at + from.len()..];
+        low_rest = &low_rest[at + needle.len()..];
+    }
+    out
 }
 
 /// 图片仓库地址：与上传同一条口径（空 = 还没配，报错而不是当成空仓库）
@@ -292,6 +479,31 @@ fn image_repo_path(dir: &str, rel: &str) -> Result<String, String> {
         }
     } else if !clean.starts_with(&format!("{dir}/")) {
         return Err(format!("这张图不在图片目录「{dir}」里：{rel}"));
+    }
+    Ok(clean)
+}
+
+/// 与 `image_repo_path` 同一条边界，但允许落在 `dirs` 里任意一个目录（并集：共享层 + 旧层）。
+/// 逐条复用 `image_repo_path` 的校验，一条都不匹配就拒 —— 仍保证删不到清单之外的图。
+fn image_repo_path_in(dirs: &[String], rel: &str) -> Result<String, String> {
+    for dir in dirs {
+        if let Ok(clean) = image_repo_path(dir, rel) {
+            return Ok(clean);
+        }
+    }
+    Err(format!("这张图不在允许的图片目录里：{rel}"))
+}
+
+/// `image_repo_path` 的前半段：逐段普通名字 + 必须是图片，不判目录前缀
+fn validate_image_path(rel: &str) -> Result<String, String> {
+    let rel = rel.trim().replace('\\', "/");
+    let segments: Vec<&str> = rel.split('/').filter(|part| !part.trim().is_empty()).collect();
+    if segments.is_empty() || !segments.iter().all(|part| is_plain_segment(part.trim())) {
+        return Err(format!("图片路径不合法：{rel}"));
+    }
+    let clean = segments.join("/");
+    if !is_image_file(&clean) {
+        return Err(format!("不是图片文件：{rel}"));
     }
     Ok(clean)
 }
@@ -527,6 +739,7 @@ mod tests {
         );
         // 传下来的目录是「图片目录 / 设备 / 笔记本」三层（见 packages/notes/src/note-image.ts 的 imageScopeDir）
         let scope = "images/6f1e2d3c-4b5a/notes-2f3a9c02";
+        let dirs = vec![scope.to_string()];
         // 同一个仓库、同一个设备下的**另一个笔记本**：它的图不该出现在这一次的清单里，
         // 也不该被这一次的删除够到 —— 这正是那两层目录存在的意义
         let elsewhere = "images/6f1e2d3c-4b5a/别的-0b1c2d3e";
@@ -556,7 +769,7 @@ mod tests {
             // 图片目录底下那张（改版前的老位置）：不属于任何一层
             format!("images/{keep}"),
         ] {
-            let rejected = delete_images_at(&clone, &repo, scope, std::slice::from_ref(&bad));
+            let rejected = delete_images_at(&clone, &repo, &dirs, std::slice::from_ref(&bad));
             assert!(rejected.is_err(), "这条路径本该被拒掉: {bad}");
         }
 
@@ -565,7 +778,7 @@ mod tests {
         let removed = delete_images_at(
             &clone,
             &repo,
-            scope,
+            &dirs,
             &[format!("{scope}/{drop}"), missing.clone()],
         )
         .unwrap();
@@ -602,15 +815,109 @@ mod tests {
         );
 
         // 再删一次同一张（已经不在）：不该产生空提交
-        let gone = delete_images_at(&clone, &repo, scope, &[format!("{scope}/{drop}")]).unwrap();
+        let gone = delete_images_at(&clone, &repo, &dirs, &[format!("{scope}/{drop}")]).unwrap();
         assert_eq!(gone["deleted"], json!(0));
         assert_eq!(gone["changed"], json!(false));
         let count = run_git(&["rev-list", "--count", "--all"], Some(&remote), GIT_TIMEOUT).unwrap();
         assert_eq!(count, "4", "三张图各一条提交 + 删图一条，不该多出空提交");
 
         // 一张都没选 / 没配仓库：各给一句能看懂的话
-        assert!(delete_images_at(&clone, &repo, scope, &[]).is_err());
+        assert!(delete_images_at(&clone, &repo, &dirs, &[]).is_err());
         assert!(list_images_at(&clone, "  ", scope).is_err());
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// 迁移：把旧层的图 git mv 到共享层、改写正文 URL，别的笔记本的图不动
+    #[test]
+    fn migrates_old_images_into_shared_layer_and_rewrites_notes() {
+        if proc::probe_version("git").is_none() {
+            return;
+        }
+        let root = std::env::temp_dir().join(format!("wb-migrate-{}", uuid::Uuid::new_v4()));
+        let remote = root.join("remote.git");
+        let clone = root.join("clone");
+        let notes = root.join("notes");
+        std::fs::create_dir_all(&notes).unwrap();
+        proc::run_direct(
+            "git",
+            &["init".to_string(), "--bare".to_string(), remote.to_string_lossy().into_owned()],
+            GIT_TIMEOUT,
+            None,
+            &GIT_ENVS,
+        )
+        .unwrap();
+
+        let old_dir = "images/device-a/notebook-old";
+        let new_dir = "images/origin-3f2a91c4";
+        let moved_name = "20260916-104512-ab12cd34.png";
+        let kept_name = "20260916-104513-keepme00.png";
+        let bytes = b"fake png bytes";
+        publish_image_at(&clone, &remote.to_string_lossy(), old_dir, moved_name, bytes).unwrap();
+        publish_image_at(&clone, &remote.to_string_lossy(), old_dir, kept_name, bytes).unwrap();
+
+        // 当前笔记本正文：引用 moved（要改前缀），kept 不引用（不该被迁），还有一个别的笔记本的图
+        let note_rel = "一篇.md";
+        let note_body = format!(
+            "看图 ![](https://gitee.com/me/pics/raw/main/{old_dir}/{moved_name}) 完。"
+        );
+        std::fs::write(notes.join(note_rel), &note_body).unwrap();
+
+        let renames = vec![ImageMigrationRename {
+            from: format!("{old_dir}/{moved_name}"),
+            to: format!("{new_dir}/{moved_name}"),
+            name: moved_name.to_string(),
+        }];
+        let replacements = vec![ImageUrlReplacement {
+            from: format!("{old_dir}/"),
+            to: format!("{new_dir}/"),
+        }];
+        let result = migrate_images_at(
+            &clone,
+            &remote.to_string_lossy(),
+            &notes.to_string_lossy(),
+            old_dir,
+            new_dir,
+            &renames,
+            &replacements,
+        )
+        .unwrap();
+        assert_eq!(result.moved, 1, "只搬了正文引用的那张");
+        assert_eq!(result.rewritten, 1, "改了一篇正文");
+        assert_eq!(result.failed, 0);
+
+        // 图片仓库远端：新层有 moved、旧层没有 moved，但 kept 还在旧层
+        let again = root.join("again");
+        run_git(
+            &["clone", "--branch", &result.branch, &remote.to_string_lossy(), &again.to_string_lossy()],
+            None,
+            CLONE_TIMEOUT,
+        )
+        .unwrap();
+        assert!(again.join(new_dir).join(moved_name).exists(), "新层该有这张图");
+        assert!(!again.join(old_dir).join(moved_name).exists(), "旧层不该再有这张图");
+        assert!(again.join(old_dir).join(kept_name).exists(), "没被引用的图留在旧层");
+
+        // 正文：前缀换成新层，其余字不动
+        let after = std::fs::read_to_string(notes.join(note_rel)).unwrap();
+        assert!(after.contains(&format!("{new_dir}/{moved_name}")), "正文 URL 该指向新层: {after}");
+        assert!(after.contains("看图") && after.contains("完。"), "正文其余内容不该动");
+
+        // 目标越界的迁移请求被拒（不能搬到共享层之外）
+        let bad = migrate_images_at(
+            &clone,
+            &remote.to_string_lossy(),
+            &notes.to_string_lossy(),
+            old_dir,
+            new_dir,
+            &[ImageMigrationRename {
+                from: format!("{old_dir}/{kept_name}"),
+                to: "images/别处/x.png".into(),
+                name: "x.png".into(),
+            }],
+            &replacements,
+        );
+        assert!(bad.is_err(), "搬到共享层之外的请求该被拒");
 
         let _ = std::fs::remove_dir_all(&root);
     }

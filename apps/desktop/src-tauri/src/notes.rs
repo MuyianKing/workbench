@@ -21,7 +21,7 @@ use walkdir::WalkDir;
 const NOTE_EXTENSIONS: [&str; 2] = [".md", ".markdown"];
 
 /// 递归的深度上限。正常笔记本用不到，拦住的是「有人把盘根选成了笔记本」
-const MAX_DEPTH: usize = 12;
+pub(crate) const MAX_DEPTH: usize = 12;
 
 /// 扫的时候整棵跳过的目录名（比大小写，Windows 上 `Node_Modules` 也是同一个目录）。
 ///
@@ -44,7 +44,7 @@ const IGNORED_DIRS: [&str; 10] = [
     "vendor",
 ];
 
-fn is_note_file(name: &str) -> bool {
+pub(crate) fn is_note_file(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
     NOTE_EXTENSIONS.iter().any(|ext| lower.ends_with(ext))
 }

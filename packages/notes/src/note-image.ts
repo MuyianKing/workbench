@@ -10,11 +10,18 @@
  * 地址是**外链**：图片存在用户自己的仓库里，笔记文件里只有一个链接，
  * 于是笔记本搬到别的机器上、用别的编辑器打开，图照样在。
  *
- * 图片进仓库的落点是**三层**：`<images>/<设备>/<笔记本>/<文件名>`。
- * 后两层是「素材管理只看自己这一份」的前提：图片仓库是全机器共用的一份，
- * 而「这张图有没有人用」只有**某一个笔记本**说得清（见 buildImageAssets）——
- * 不分层的话面板里那列「未引用」混着别的笔记本与别的机器传上来的图，
- * 看着能删、删了却会裂图。两层的算法都在这里（`imageScopeDir`），有单测护着。
+ * 图片进仓库的落点分两种：
+ *  - **有 origin 的笔记本**（`imageOriginScopeDir`）：`<images>/<origin-key>/<文件名>`，
+ *    同一个仓库在多台机器、多个盘符是同一本笔记本，图全进同一层、跨设备共享。素材管理列这一层、
+ *    数同一份同步的正文，「这张图有没有人用」才说得清；
+ *  - **没有 origin 的本机笔记**（`imageScopeDir`）：`<images>/<设备>/<笔记本>/<文件名>`，
+ *    按本机设备 + 本机路径分，只服务这一台机器。
+ *
+ * 不分层（或两种范围混用）的话，面板里那列「未引用」会混着别的笔记本、别的机器传上来的图，
+ * 看着能删、删了却会裂图。各层的算法都在这里，有单测护着。
+ *
+ * 老笔记本从「无 origin」转成「有 origin」时，旧层的图可用 `planImageMigration` 规划搬迁、
+ * `rewriteImageUrlsForMigration` 改写正文里的图片 URL（执行在 Rust 侧），归拢到共享层。
  */
 
 /** 图片在仓库里的那层目录：定死的一层，用户不用配（它下面才是设备与笔记本两层） */
@@ -50,6 +57,11 @@ export interface NoteImageUploadInput {
    * 所以「哪台机器、哪个笔记本」必须由调用方如实带进来，适配层不缓存它。
    */
   root: string
+  /**
+   * 当前笔记本连着的 origin（有仓库时）：有它就按 origin 分层、跨设备共享（见 imageOriginScopeDir），
+   * 没有才退回上面的设备 + 本机路径层。由调用方现探现带（store 的 remoteUrl），适配层不缓存。
+   */
+  origin?: string
   /** 文件名（含后缀），由调用方用 `imageFileName` 算好 */
   name: string
   /** 整张图的 base64 */
@@ -237,6 +249,138 @@ export function imageScopeDir(dir: string, deviceId: string, root: string): stri
   return [sanitizeImageDir(dir), device, notebook].filter(Boolean).join('/')
 }
 
+/**
+ * 有 origin 的笔记本那层目录：`<dir>/<origin-key>`（**只有一层**，不再按设备 / 路径分）。
+ *
+ * 同一个仓库（笔记同步认的 origin）在多台机器、多个盘符上是同一本笔记本，正文也同步共享 ——
+ * 图片若还按设备 + 本机路径分，就会被撕进互不看见的几层，跨设备既共享不了、换盘符又失联。
+ * 按 origin 分层后所有设备传的图进同一层，素材管理列这一层、数同一份同步的正文，
+ * 「同一本笔记本」在笔记同步与素材管理两侧终于是一个意思。
+ *
+ * 解析不出 origin（本地路径、自建服务器等认不出的写法）时给空串：调用方据此报错或回退到
+ * 本机那层，**不要**退回仓库根，否则所有笔记本的图又混到一起。
+ */
+export function imageOriginScopeDir(dir: string, origin: string): string {
+  const key = imageOriginKey(origin)
+  if (!key)
+    return ''
+  return [sanitizeImageDir(dir), key].filter(Boolean).join('/')
+}
+
+/**
+ * origin 那段目录名：`origin-<8 位摘要>`。
+ *
+ * 摘要取的是归一化后的仓库身份（host + owner + name），于是 https 与 ssh 两种写法连同一个
+ * 仓库算出同一个 key —— 否则同一本笔记本在 A 机用 https、B 机用 ssh 又会分成两层。
+ * 复用 `parseImageRemote`（它已经收好了 host 大小写与 scp 写法）与 `shortHash`，口径只有一处。
+ */
+export function imageOriginKey(origin: string): string {
+  const remote = parseImageRemote(origin)
+  if (!remote)
+    return ''
+  // scp 写法会把 `C:/path` 拆成 host=`c`：那是本机路径，不是能跨设备共享的仓库身份
+  if (/^[a-z]$/i.test(remote.host))
+    return ''
+  const identity = `${remote.host}/${remote.owner}/${remote.name}`.toLowerCase()
+  return `origin-${shortHash(identity)}`
+}
+
+/** 一条待迁移的图：旧层路径 → 新层路径（文件名不变，只换目录） */
+export interface ImageMigrationRename {
+  /** 旧路径（仓库相对，/ 分隔） */
+  from: string
+  /** 新路径（仓库相对，/ 分隔） */
+  to: string
+  /** 文件名 */
+  name: string
+}
+
+/**
+ * 算出「这台机器这个笔记本」旧层里、正文还在用的那些图该搬到哪。
+ *
+ * 只挑当前笔记本正文引用到的（按文件名，与 countImageReferences 同一口径）：别的笔记本
+ * 正文引用的旧图不在这里，搬了会裂它们的图。文件名搬前搬后不变，只换目录前缀。
+ */
+export function planImageMigration(input: {
+  /** 旧层扫出来的图 */
+  images: readonly NoteImage[]
+  /** 当前笔记本所有正文（转成小写可省去逐张转换） */
+  texts: readonly string[]
+  /** 旧层目录（仓库相对，如 `images/<设备>/<笔记本>`） */
+  oldDir: string
+  /** 新层目录（仓库相对，如 `images/<origin-key>`） */
+  newDir: string
+}): ImageMigrationRename[] {
+  if (!input.oldDir || !input.newDir)
+    return []
+  const lowered = input.texts.map(text => text.toLowerCase())
+  const oldPrefix = `${input.oldDir.replace(/\/+$/, '')}/`
+  const newPrefix = `${input.newDir.replace(/\/+$/, '')}/`
+
+  const renames: ImageMigrationRename[] = []
+  for (const image of input.images) {
+    const from = image.path.replace(/^\/+/, '')
+    // 只认旧层自己的图（list 是按 oldDir 扫的，正常不会越界；这里是第二道闸）
+    if (!from.startsWith(oldPrefix))
+      continue
+    if (countInLowered(lowered, image.name) === 0)
+      continue
+    renames.push({ from, to: `${newPrefix}${image.name}`, name: image.name })
+  }
+  return renames
+}
+
+/** 正则元字符转义，给动态拼出来的字面量做精确匹配 */
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/** 大小写不敏感地替换所有命中（别处编辑器可能把路径写成大写） */
+function replaceAllCI(text: string, needle: string, replacement: string): string {
+  if (!needle)
+    return text
+  return text.replace(new RegExp(escapeRegExp(needle), 'gi'), replacement)
+}
+
+/** 正文里的一条字面替换：把 `from` 换成 `to`（由 Rust 逐篇机械套用，含原始与百分号编码两种形式） */
+export interface ImageUrlReplacement {
+  from: string
+  to: string
+}
+
+/**
+ * 迁移时正文要做的字面替换清单。
+ *
+ * 迁移只换目录、文件名不变，所以正文里带旧目录的图片 URL（raw 地址或相对路径）换掉前缀即可；
+ * 只写了裸文件名的引用本来就不含目录，无需改。中文目录名在 URL 里是百分号编码的
+ * （见 imageRawUrl 的逐段 encodeURIComponent），所以原始与编码两种前缀都要各出一条。
+ * 编码这种纯计算放这里才有单测 —— Rust 拿到的是现成的字面串，只做机械替换。
+ */
+export function migrationReplacements(oldDir: string, newDir: string): ImageUrlReplacement[] {
+  const oldPrefix = oldDir.replace(/\/+$/, '')
+  const newPrefix = newDir.replace(/\/+$/, '')
+  if (!oldPrefix || !newPrefix || oldPrefix === newPrefix)
+    return []
+
+  const pairs: ImageUrlReplacement[] = [{ from: `${oldPrefix}/`, to: `${newPrefix}/` }]
+  const encodedOld = oldPrefix.split('/').map(part => encodeURIComponent(part)).join('/')
+  const encodedNew = newPrefix.split('/').map(part => encodeURIComponent(part)).join('/')
+  if (encodedOld !== oldPrefix)
+    pairs.push({ from: `${encodedOld}/`, to: `${encodedNew}/` })
+  return pairs
+}
+
+/**
+ * 改写一段正文里的旧图目录前缀（与迁移时 Rust 套用 `migrationReplacements` 的结果一致，
+ * 放在这里给纯逻辑测试与别处复用）：只换目录前缀，文件名与其余文字都不动。
+ */
+export function rewriteImageUrlsForMigration(text: string, oldDir: string, newDir: string): string {
+  let out = text
+  for (const { from, to } of migrationReplacements(oldDir, newDir))
+    out = replaceAllCI(out, from, to)
+  return out
+}
+
 /** 仓库地址拆出来的三样东西 */
 export interface ImageRemote {
   host: string
@@ -355,24 +499,62 @@ export interface NoteImageAsset extends NoteImage {
 
 /**
  * 列出图片仓库的入参：仓库地址由调用方从设置里带过来（适配层不缓存设置），
- * 当前笔记本由调用方逐次带进来 —— **列的是「这台机器上这个笔记本」那一层**（见 imageScopeDir）。
+ * 当前笔记本由调用方逐次带进来 —— **列的是「这个笔记本那一层」**（有 origin 按 origin 共享层，
+ * 没有才退回这台机器这一层，见 imageOriginScopeDir / imageScopeDir）。
  */
 export interface NoteImageListInput {
   repo: string
   /** 当前笔记本（空串 = 还没打开笔记本，调用方要挡住，不要退回上一层） */
   root: string
+  /** 当前笔记本连着的 origin（有仓库时）：决定列共享层还是本机层 */
+  origin?: string
+  /**
+   * 列哪一层：`current`（默认，按 origin 的共享层或本机层）或 `legacy`（旧的设备 + 本机路径层）。
+   * 素材面板两批都列、合并成并集：老图在 legacy 层，迁移前的共享图在 current 层。
+   */
+  scope?: 'current' | 'legacy'
 }
 
-/** 列表的结果：分支（拼访问地址要用）+ 图片清单 */
+/** 列表的结果：分支（拼访问地址要用）+ 这次实际列的目录 + 图片清单 */
 export interface NoteImageList {
   branch: string
+  /** Rust 这次实际扫的目录（仓库相对，/ 分隔），生成迁移计划时当 oldDir 用 */
+  dir: string
   files: NoteImage[]
 }
 
 /** 批量删除的入参 */
 export interface NoteImageDeleteInput extends NoteImageListInput {
-  /** 仓库内相对路径（列表回来的那些）；越界、非法路径、不在这台机器这个笔记本那一层的一律被 Rust 挡住 */
+  /** 仓库内相对路径（列表回来的那些）；越界、非法路径、不在允许层的一律被 Rust 挡住 */
   paths: string[]
+}
+
+/** 一次迁移的完整计划（渲染层算好后交给 Rust 执行） */
+export interface ImageMigrationPlan {
+  /** 图片仓库地址 */
+  repo: string
+  /** 笔记本文件夹（要改它的 .md 正文） */
+  root: string
+  /** 旧层目录（仓库相对） */
+  oldDir: string
+  /** 新层目录（仓库相对，origin 共享层） */
+  newDir: string
+  /** 待搬的图：旧路径 → 新路径 */
+  renames: ImageMigrationRename[]
+  /** 正文里要做的字面替换 */
+  replacements: ImageUrlReplacement[]
+}
+
+/** 迁移结果（图片仓库这一侧）：搬了几张、正文改了几篇、读不出来几篇 */
+export interface NoteImageMigrated {
+  /** 真的搬走的图数（已经不在的跳过） */
+  moved: number
+  /** 写回了正文的篇数 */
+  rewritten: number
+  /** 读不出来 / 被并发改过而跳过的篇数（大于 0 界面要如实提示） */
+  failed: number
+  branch: string
+  log: string
 }
 
 /** 删除的结果 */

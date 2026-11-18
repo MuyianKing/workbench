@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildImageAssets, countImageReferences, imageDeviceKey, imageExtension, imageFileName, imageMarkdown, imageNotebookKey, imageRawUrl, imageRepoPath, imageScopeDir, parseImageRemote, sanitizeImageDir, sanitizeImageRepo, sortImageAssets, totalImageBytes, unusedImages } from './note-image'
+import { buildImageAssets, countImageReferences, imageDeviceKey, imageExtension, imageFileName, imageMarkdown, imageNotebookKey, imageOriginKey, imageOriginScopeDir, imageRawUrl, imageRepoPath, imageScopeDir, parseImageRemote, planImageMigration, rewriteImageUrlsForMigration, sanitizeImageDir, sanitizeImageRepo, sortImageAssets, totalImageBytes, unusedImages } from './note-image'
 
 /** 2026-09-16 10:45:12 本地时间 */
 const NOW = new Date(2026, 8, 16, 10, 45, 12).getTime()
@@ -268,5 +268,95 @@ describe('素材管理：谁还在用', () => {
       branch: 'main',
     })
     expect(asset.url).toBe('')
+  })
+})
+
+describe('按 origin 共享的那一层', () => {
+  it('https 与 ssh 连同一个仓库算同一个 key，不同仓库不同 key', () => {
+    const https = imageOriginKey('https://github.com/muyian/note.git')
+    const ssh = imageOriginKey('git@github.com:muyian/note.git')
+    expect(https).toMatch(/^origin-[0-9a-f]{8}$/)
+    expect(ssh).toBe(https)
+    expect(imageOriginKey('https://gitee.com/muyian/note.git')).not.toBe(https)
+    expect(imageOriginKey('git@github.com:muyian/other.git')).not.toBe(https)
+  })
+
+  it('认不出的 origin 给空串，不退回仓库根', () => {
+    expect(imageOriginKey('')).toBe('')
+    expect(imageOriginKey('不是地址')).toBe('')
+    expect(imageOriginKey('C:/some/local/path')).toBe('')
+    expect(imageOriginScopeDir('images', '')).toBe('')
+  })
+
+  it('共享层只有一层（origin），不再带设备与本机路径', () => {
+    const key = imageOriginKey('https://github.com/muyian/note.git')
+    expect(imageOriginScopeDir('images', 'https://github.com/muyian/note.git')).toBe(`images/${key}`)
+    expect(imageOriginScopeDir('', 'https://github.com/muyian/note.git')).toBe(key)
+    // 两种写法 / 两台机器算出同一层 —— 这正是跨设备共享的前提
+    expect(imageOriginScopeDir('images', 'git@github.com:muyian/note.git')).toBe(`images/${key}`)
+  })
+})
+
+describe('迁移旧图到共享层', () => {
+  const oldDir = 'images/6f1e2d3c-4b5a/notes-1f3a9c02'
+  const newDir = 'images/origin-3f2a91c4'
+  const oldImages = [
+    { path: `${oldDir}/20260916-104512-ab12cd34.png`, name: '20260916-104512-ab12cd34.png', size: 2048 },
+    { path: `${oldDir}/20260915-090000-ffffffff.png`, name: '20260915-090000-ffffffff.png', size: 1024 },
+  ]
+
+  it('只挑正文引用到的旧图，文件名不变、只换目录前缀', () => {
+    const renames = planImageMigration({
+      images: oldImages,
+      texts: [`![](https://raw.githubusercontent.com/me/pics/main/${oldImages[0].path})`],
+      oldDir,
+      newDir,
+    })
+    expect(renames).toEqual([
+      { from: oldImages[0].path, to: `${newDir}/${oldImages[0].name}`, name: oldImages[0].name },
+    ])
+    // 没被引用的那张不迁（迁了也无人用，果园留着让用户自己删）
+    expect(renames.some(r => r.name === oldImages[1].name)).toBe(false)
+  })
+
+  it('别的笔记本的旧图（不在 oldDir 里）不迁', () => {
+    const foreign = { path: 'images/其他设备/其他笔记本/a.png', name: 'a.png', size: 1 }
+    const renames = planImageMigration({
+      images: [...oldImages, foreign],
+      texts: ['[](a.png)'],
+      oldDir,
+      newDir,
+    })
+    expect(renames.some(r => r.name === 'a.png')).toBe(false)
+  })
+
+  it('缺任一层时什么都不迁', () => {
+    expect(planImageMigration({ images: oldImages, texts: [oldImages[0].name], oldDir: '', newDir })).toEqual([])
+    expect(planImageMigration({ images: oldImages, texts: [oldImages[0].name], oldDir, newDir: '' })).toEqual([])
+  })
+
+  it('改写正文只换目录前缀，裸文件名与其它文字都不动', () => {
+    const text = [
+      `![图片](https://raw.githubusercontent.com/me/pics/main/${oldDir}/${oldImages[0].name})`,
+      `相对路径：![](${oldDir}/${oldImages[1].name})`,
+      `裸文件名不换：![](${oldImages[0].name})`,
+      '其它句子：images 这个词别动',
+    ].join('\n')
+    const out = rewriteImageUrlsForMigration(text, oldDir, newDir)
+    expect(out).toContain(`${newDir}/${oldImages[0].name}`)
+    expect(out).toContain(`${newDir}/${oldImages[1].name}`)
+    expect(out).toContain(`裸文件名不换：![](${oldImages[0].name})`)
+    expect(out).toContain('其它句子：images 这个词别动')
+    expect(out).not.toContain(oldDir)
+  })
+
+  it('中文目录名的编码前缀也换；同目录或空目录不动', () => {
+    const cjkOld = 'images/设备/笔记'
+    const cjkNew = 'images/origin-abcdef12'
+    const encoded = `images/${encodeURIComponent('设备')}/${encodeURIComponent('笔记')}`
+    const text = `![图](https://gitee.com/me/pics/raw/main/${encoded}/a.png)`
+    expect(rewriteImageUrlsForMigration(text, cjkOld, cjkNew)).toContain(`${cjkNew}/a.png`)
+    expect(rewriteImageUrlsForMigration(text, cjkOld, cjkOld)).toBe(text)
+    expect(rewriteImageUrlsForMigration(text, '', cjkNew)).toBe(text)
   })
 })

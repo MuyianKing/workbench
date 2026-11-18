@@ -1,4 +1,4 @@
-import type { NoteChange, NoteCreateInput, NoteEntry, NoteImage, NoteImageDeleted, NoteImageDeleteInput, NoteImageList, NoteImageListInput, NoteImageUploaded, NoteImageUploadInput, NoteNode, NoteRead, NoteRepoState, NoteSyncInput, NoteSyncSummary, NoteTextScan } from '@workbench/notes'
+import type { NoteChange, NoteCreateInput, NoteEntry, NoteImage, NoteImageDeleted, NoteImageDeleteInput, NoteImageList, NoteImageListInput, NoteImageMigrated, NoteImageUploaded, NoteImageUploadInput, NoteNode, NoteRead, NoteRepoState, NoteSyncInput, NoteSyncSummary, NoteTextScan } from '@workbench/notes'
 
 import type { Result } from '@/types'
 import { fail, ok } from '@workbench/core'
@@ -17,7 +17,7 @@ import { fail, ok } from '@workbench/core'
  *
  * 路径一律是相对笔记根的相对路径，越界与非法名字由 Rust 侧挡住（见 src-tauri/src/notes.rs）。
  */
-import { buildNoteTree, imageRawUrl, imageScopeDir, joinRel, normalizeRel, NOTE_IMAGE_DIR, noteFileName, noteNameProblem, sanitizeImageRepo, sanitizeNoteName } from '@workbench/notes'
+import { buildNoteTree, imageOriginScopeDir, imageRawUrl, imageScopeDir, joinRel, normalizeRel, NOTE_IMAGE_DIR, noteFileName, noteNameProblem, sanitizeImageRepo, sanitizeNoteName } from '@workbench/notes'
 import { recordActivity } from './activity'
 import { guard, invoke } from './bridge'
 import { localDevice } from './token'
@@ -167,18 +167,27 @@ export async function moveNote(
 // ---------- 粘贴的图片 ----------
 
 /**
- * 这次调用落在仓库的哪一层：`<images>/<设备>/<笔记本>`（口径与算法都在 packages/notes/src/note-image.ts）。
+ * 这次调用落在仓库的哪一层（口径与算法都在 packages/notes/src/note-image.ts）：
  *
- * 设备标识问一次就缓存（`localDevice`，与 Token 分片用的是同一个 id），笔记本每次都由调用方带进来 ——
- * 这两样都不在适配层缓存：用户换了笔记本、换了机器，来源就换了。
+ * - 有 origin → `<images>/<origin-key>`：同一个仓库跨设备、跨盘符是同一本笔记本，图进同一层共享；
+ * - 没有 origin → `<images>/<设备>/<笔记本>`：本机笔记按设备 + 本机路径分。
  *
- * 缺哪一样都**不退回上一层**：退回等于让所有笔记本、所有机器的图混进同一个目录，
- * 素材管理里那列「未引用」立刻变成一份会删错东西的假数字。
+ * origin 与设备都不缓存（origin 现探现带、设备问一次即可；换笔记本 / 换机器来源就变了）。
+ * 缺该有的那一层时**不退回仓库根**：那会让所有笔记本的图混进一个目录，素材管理的「未引用」变假数字。
  */
-async function imageScope(input: { root: string }): Promise<Result<string>> {
+async function imageScope(input: { root: string, origin?: string }): Promise<Result<string>> {
   const root = rootArg(input.root)
   if (!root)
     return fail('还没有打开笔记文件夹')
+
+  const origin = (input.origin ?? '').trim()
+  if (origin) {
+    const shared = imageOriginScopeDir(NOTE_IMAGE_DIR, origin)
+    if (shared)
+      return ok(shared)
+    // origin 填了却解析不出来（本地路径等）：按失败如实报，不悄悄退回本机层
+    return fail('笔记本连着的 origin 认不出来，暂时按共享素材管理不了图片')
+  }
 
   const device = await localDevice()
   if (!device.id)
@@ -188,6 +197,20 @@ async function imageScope(input: { root: string }): Promise<Result<string>> {
   if (!dir)
     return fail('拼不出这个笔记本在图片仓库里的目录')
 
+  return ok(dir)
+}
+
+/** 旧层（设备 + 本机路径）目录：并集清单与迁移用，无论当前有没有 origin 都能算出来 */
+async function legacyImageScope(root: string): Promise<Result<string>> {
+  const clean = rootArg(root)
+  if (!clean)
+    return fail('还没有打开笔记文件夹')
+  const device = await localDevice()
+  if (!device.id)
+    return fail('拿不到本机设备标识，暂时管理不了图片')
+  const dir = imageScopeDir(NOTE_IMAGE_DIR, device.id, clean)
+  if (!dir)
+    return fail('拼不出这个笔记本旧的图片目录')
   return ok(dir)
 }
 
@@ -249,12 +272,14 @@ export async function listNoteImages(input: NoteImageListInput): Promise<Result<
   if (!repo)
     return fail('还没有配置图片仓库（设置 → 笔记图片）')
 
-  const scope = await imageScope(input)
+  const scope = input.scope === 'legacy'
+    ? await legacyImageScope(input.root)
+    : await imageScope(input)
   if (!scope.ok || !scope.data)
     return fail(scope.error ?? '拼不出这个笔记本在图片仓库里的目录')
 
   const result = await guard(
-    invoke<{ branch?: unknown, files?: unknown }>('note_images_list', {
+    invoke<{ branch?: unknown, dir?: unknown, files?: unknown }>('note_images_list', {
       repo,
       dir: scope.data,
     }),
@@ -265,6 +290,7 @@ export async function listNoteImages(input: NoteImageListInput): Promise<Result<
 
   return ok({
     branch: typeof result.data.branch === 'string' ? result.data.branch : '',
+    dir: typeof result.data.dir === 'string' ? result.data.dir : scope.data,
     files: normalizeImages(result.data.files),
   })
 }
@@ -312,14 +338,21 @@ export async function deleteNoteImages(
   if (!paths.length)
     return fail('没有选中要删除的图片')
 
-  const scope = await imageScope(input)
-  if (!scope.ok || !scope.data)
-    return fail(scope.error ?? '拼不出这个笔记本在图片仓库里的目录')
+  const current = await imageScope(input)
+  if (!current.ok || !current.data)
+    return fail(current.error ?? '拼不出这个笔记本在图片仓库里的目录')
+  // 并集清单里的图可能在共享层，也可能是迁移前的旧层：两层都作为允许的删除范围
+  const dirs = [current.data]
+  if (input.origin) {
+    const legacy = await legacyImageScope(input.root)
+    if (legacy.ok && legacy.data && legacy.data !== current.data)
+      dirs.push(legacy.data)
+  }
 
   const result = await guard(
     invoke<Partial<NoteImageDeleted>>('note_images_delete', {
       repo,
-      dir: scope.data,
+      dirs,
       paths,
     }),
     '删除图片失败',
@@ -330,6 +363,67 @@ export async function deleteNoteImages(
   return ok({
     deleted: typeof result.data.deleted === 'number' ? result.data.deleted : 0,
     changed: result.data.changed === true,
+    branch: typeof result.data.branch === 'string' ? result.data.branch : '',
+    log: typeof result.data.log === 'string' ? result.data.log : '',
+  })
+}
+
+/**
+ * 把旧层（设备 + 本机路径）的图片搬到 origin 共享层，并改写笔记本正文里的图片 URL。
+ *
+ * renames / replacements 由渲染层的纯函数算好（哪些图正文还在用、怎么换前缀，见 @workbench/notes），
+ * 这里只收紧形状再交给 Rust 执行：Rust 负责在**图片仓库**里 git mv + 一次提交推送，
+ * 并在**笔记本文件夹**里逐篇机械替换 + 带 mtime 校验写回（笔记本仓库的提交推送由上层同步负责）。
+ * 两个仓库各提交一次，做不到原子 —— 这一点在迁移确认框里如实告诉用户。
+ */
+export async function migrateNoteImages(input: {
+  repo: string
+  /** 笔记本文件夹（要改它的 .md 正文） */
+  root: string
+  /** 旧层目录（仓库相对） */
+  oldDir: string
+  /** 新层目录（仓库相对，origin 共享层） */
+  newDir: string
+  /** 待搬的图：旧路径 → 新路径 */
+  renames: { from: string, to: string, name: string }[]
+  /** 正文里要做的字面替换（含原始与百分号编码两种前缀） */
+  replacements: { from: string, to: string }[]
+}): Promise<Result<NoteImageMigrated>> {
+  const repo = sanitizeImageRepo(input.repo)
+  if (!repo)
+    return fail('还没有配置图片仓库（设置 → 笔记图片）')
+  const root = rootArg(input.root)
+  if (!root)
+    return fail('还没有打开笔记文件夹')
+
+  const renames = (Array.isArray(input.renames) ? input.renames : [])
+    .filter(item => item && typeof item.from === 'string' && typeof item.to === 'string' && typeof item.name === 'string')
+    .map(item => ({ from: item.from, to: item.to, name: item.name }))
+  if (!renames.length)
+    return fail('没有需要迁移的图片')
+
+  const replacements = (Array.isArray(input.replacements) ? input.replacements : [])
+    .filter(item => item && typeof item.from === 'string' && typeof item.to === 'string')
+    .map(item => ({ from: item.from, to: item.to }))
+
+  const result = await guard(
+    invoke<Partial<NoteImageMigrated>>('note_images_migrate', {
+      repo,
+      root,
+      oldDir: input.oldDir,
+      newDir: input.newDir,
+      renames,
+      replacements,
+    }),
+    '迁移图片失败',
+  )
+  if (!result.ok || !result.data)
+    return fail(result.error ?? '迁移图片失败')
+
+  return ok({
+    moved: typeof result.data.moved === 'number' ? result.data.moved : 0,
+    rewritten: typeof result.data.rewritten === 'number' ? result.data.rewritten : 0,
+    failed: typeof result.data.failed === 'number' ? result.data.failed : 0,
     branch: typeof result.data.branch === 'string' ? result.data.branch : '',
     log: typeof result.data.log === 'string' ? result.data.log : '',
   })

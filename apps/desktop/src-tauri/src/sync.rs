@@ -1067,7 +1067,7 @@ pub struct SyncFiles {
 }
 
 /// 图片仓库的三个入口（实现见 `sync_images.rs`）。
-pub use crate::sync_images::{delete_images, list_images, publish_image};
+pub use crate::sync_images::{delete_images, list_images, migrate_images, publish_image};
 
 /// 一个「正常的路径段」：非空、不是 `.` / `..`、不带分隔符与 Windows 上的非法字符。
 /// 实现归 [fs_util](fs_util.rs)，从这里转发（pi_skills / skills 还按老路子 import 它）。

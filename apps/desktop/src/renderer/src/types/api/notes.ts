@@ -12,6 +12,7 @@ import type {
   NoteImageDeleteInput,
   NoteImageList,
   NoteImageListInput,
+  NoteImageMigrated,
   NoteImageUploaded,
   NoteImageUploadInput,
   NoteNode,
@@ -88,30 +89,47 @@ export interface NotesChannel {
    * 上传一张图片（笔记里粘贴的图片走这条路）：推到设置的图片仓库，回来的是**可直接用的访问地址**。
    *
    * 与其它笔记通道一样，配置由调用方带进来（仓库地址与目录都在设置里），
-   * 另外还要带上**当前笔记本**（`root`）：落点是 `<目录>/<本机设备>/<笔记本>/<文件名>`，
-   * 后两层由适配层现算（见 @workbench/notes 的 imageScopeDir），拿不到设备标识就如实失败。
-   * 推不出访问地址时（仓库不在 GitHub / Gitee / GitLab 上）不是失败：`url` 是空串，
-   * 由界面如实说明 —— 图片此时已经进了仓库，只是应用拼不出访问它的地址。
+   * 另外还要带上**当前笔记本**（`root`）与它连着的 `origin`：有 origin 就按 origin 分层、
+   * 跨设备共享（落点 `<目录>/<origin-key>/<文件名>`），没有才退回 `<目录>/<本机设备>/<笔记本>/<文件名>`。
+   * 两层都由适配层现算（见 @workbench/notes 的 imageOriginScopeDir / imageScopeDir），
+   * 缺该有的那一层就如实失败。推不出访问地址时（仓库不在 GitHub / Gitee / GitLab 上）不是失败：
+   * `url` 是空串，由界面如实说明 —— 图片此时已经进了仓库，只是应用拼不出访问它的地址。
    */
   uploadNoteImage: (input: NoteImageUploadInput) => Promise<Result<NoteImageUploaded>>
 
   /**
-   * 素材管理：**当前这个笔记本（在这台机器上）**传过哪些图（顺手把本地克隆拉到最新，会走一次网络）。
+   * 素材管理：**当前这个笔记本**传过哪些图（顺手把本地克隆拉到最新，会走一次网络）。
    *
-   * 只回那一层里的图片文件：别的笔记本、别的机器传上来的图不在里面，因为拿当前笔记本的正文
-   * 数不出它们的引用次数。清单里「谁被引用了多少次」不在这里算 —— 那要把笔记正文读出来
-   * （见 `scanNoteTexts`）再按文件名数，是纯计算，留在渲染层。
+   * 有 origin 的笔记本列共享层（所有设备同一层）、没有的列本机层；`scope: 'legacy'` 额外列
+   * 旧的设备 + 本机路径层给面板做并集（迁移前的老图在那里）。清单只回图片文件 ——
+   * 「谁被引用了多少次」是把笔记正文读出来（见 `scanNoteTexts`）后按文件名数，留在渲染层。
    */
   listNoteImages: (input: NoteImageListInput) => Promise<Result<NoteImageList>>
 
   /**
-   * 素材管理：批量删掉**当前这个笔记本那一层**的图片，**一次提交、一次推送**（删除也是一次仓库改动）。
+   * 素材管理：批量删掉**这个笔记本（并集里）**的图片，**一次提交、一次推送**。
    *
-   * `paths` 是列表回来的那种仓库内相对路径；越界、非法名字、不在这台机器这个笔记本的目录里的
-   * 一律被 Rust 拒掉 —— 删不到别处的图，正是「清单只列自己这一层」的另一半。
-   * 已经不在的文件会被跳过（上一次删到一半、别处已经删过），一张都没删到时不会留下空提交。
+   * `paths` 是列表回来的仓库内相对路径；Rust 逐条校验它落在允许层（共享层 + 旧层）里、
+   * 必须是图片、逐段是普通名字 —— 删不到别处的图。已经不在的文件跳过，空删不留空提交。
    */
   deleteNoteImages: (input: NoteImageDeleteInput) => Promise<Result<NoteImageDeleted>>
+
+  /**
+   * 把旧层的图片搬到 origin 共享层，并改写笔记本正文里的图片 URL。
+   *
+   * `renames`（哪些图、旧路径→新路径）与 `replacements`（正文里的前缀替换）由渲染层的纯函数
+   * 算好，这里交给 Rust 执行：它在**图片仓库** git mv + 一次提交推送，并在**笔记本文件夹**逐篇
+   * 替换正文（带 mtime 校验，读不出来 / 被并发改过的篇跳过并计数）。改过的 `.md` 由上层紧接着
+   * 触发一次笔记同步推到笔记本 origin —— 两个仓库各提交一次，做不到原子。
+   */
+  migrateNoteImages: (input: {
+    repo: string
+    root: string
+    oldDir: string
+    newDir: string
+    renames: { from: string, to: string, name: string }[]
+    replacements: { from: string, to: string }[]
+  }) => Promise<Result<NoteImageMigrated>>
 
   /**
    * 笔记本里所有笔记的正文（素材管理算引用次数用）。

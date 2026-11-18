@@ -629,6 +629,7 @@ fn main() {
             commands::note_image_upload,
             commands::note_images_list,
             commands::note_images_delete,
+            commands::note_images_migrate,
             commands::note_scan_texts,
             commands::note_sync,
             commands::note_pull,

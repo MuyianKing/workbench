@@ -60,10 +60,15 @@ const props = withDefaults(defineProps<{
   /**
    * 当前笔记本（笔记文件夹的绝对路径）。
    *
-   * 粘贴的图片要按「哪台机器、哪个笔记本」分目录进仓库（见 packages/notes/src/note-image.ts 的 imageScopeDir），
+   * 粘贴的图片要按「哪台机器、哪个笔记本」分目录进仓库（见 packages/notes/src/note-image.ts），
    * 而这两个来源里只有笔记本在这里说了算：路径由上层带进来，省得编辑器自己去问一遍。
    */
   root: string
+  /**
+   * 当前笔记本连着的 origin（有仓库时）：粘贴的图片按 origin 分层、跨设备共享。
+   * 与 imageRepo 同一条规矩——不从 store 读，由上层（笔记页）传，独立窗口不传。
+   */
+  imageOrigin?: string
   /** 应用当前的明暗（编辑器的配色要跟着走，它与应用的主题是两套） */
   theme: 'light' | 'dark'
   /**
@@ -1231,6 +1236,7 @@ async function uploadImages(files: File[]): Promise<string | null> {
       const result = await window.workbench.uploadNoteImage({
         repo: props.imageRepo ?? '',
         root: props.root,
+        origin: props.imageOrigin ?? '',
         name: imageFileName({ mime: file.type }),
         data,
       })

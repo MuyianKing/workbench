@@ -29,6 +29,13 @@ export interface DeviceShardsDeleted {
   paths: string[]
 }
 
+export interface ImageMigrationResult {
+  moved: number
+  rewritten: number
+  failed: number
+  branch: string
+  log: string
+}
 
 export interface NoteRepoStateWire {
   isRepo: boolean

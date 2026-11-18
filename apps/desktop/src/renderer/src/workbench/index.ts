@@ -101,6 +101,8 @@ const domainsApi = {
     note.listNoteImages(input),
   deleteNoteImages: (input: Parameters<WorkbenchApi['deleteNoteImages']>[0]) =>
     note.deleteNoteImages(input),
+  migrateNoteImages: (input: Parameters<WorkbenchApi['migrateNoteImages']>[0]) =>
+    note.migrateNoteImages(input),
   scanNoteTexts: (root: string) => note.scanNoteTexts(root),
 
   // ---------- 视频（用户自己挑的一个文件夹里的 MP4） ----------
