@@ -69,13 +69,13 @@
   Base URL GET 一次 `{Base URL}/models`（Anthropic 那套是 `/v1/models`）—— 同一主机同一把 Key，不点不走。**Pi 自己的遥测与
   版本检查由应用在起进程时关掉**（`PI_TELEMETRY=0` / `PI_SKIP_VERSION_CHECK=1` / `PI_OFFLINE=1`），不关它会替用户往 pi.dev
   发请求。「安装 Pi」跑 `npm install -g`，属于「命令执行」那一类。
-- **AI 助手的网页搜索 / 抓取**（随包内置 pi-web-access 扩展；第十五条出口，用户显式开启）：AI 助手页起 Pi 会话时以第二个 `-e` 加载随包的
-  `pi-web-access` 扩展，给模型加上 `web_search` / `fetch_content` 等工具；它用全局 `fetch` 直接出网，**不受 `PI_OFFLINE=1` 影响**（那条只管遥测 / 版本检查 / 模型目录刷新）。
-  **只有模型在会话里真发起搜索 / 抓取工具调用时才出网** —— 搜索词 / 目标 URL 来自这段会话（也就是用户的内容），后端由 `<data_dir>/pi/web-search.json` 或 `*_API_KEY` 环境变量决定：
-  默认零配置走 Exa 匿名 MCP（`https://mcp.exa.ai/mcp`），也可填 key 走 Tavily / Brave / Firecrawl / Kagi 等 48 个后端，或走 Codex / ChatGPT 订阅身份、自建 SearXNG / degoog。
-  抓取按 URL 取网页正文（可读模式走 Readability / turndown，PDF / YouTube 等按需，视频帧要本机 ffmpeg / yt-dlp）。
-  配置缺失时扩展仍加载、只是没有可用后端；不带 key 也能用匿名档。它没有自己的 UI 开关 —— **入口就是用户主动让模型去搜 / 去抓**（与第 8 条模型端点同类：发不发由用户的提示词决定）。
-  安装扩展是随包内置、构建期的事（见 `vendor-pi.mjs` 与 [ai.md](modules/ai.md) 的「网页搜索 / 抓取」），运行期不额外下载。
+- **AI 助手的网页搜索 / 抓取**（随包内置最小扩展；第十五条出口，用户显式开启）：AI 助手页起 Pi 会话时以第二个 `-e` 加载随包的
+  `web-search` 扩展（源码 `scripts/pi-web-search/`，只注册 `web_search` / `fetch_content` 两个工具）；它用全局 `fetch` 直接出网，**不受 `PI_OFFLINE=1` 影响**（那条只管遥测 / 版本检查 / 模型目录刷新）。
+  **只有模型在会话里真发起搜索 / 抓取工具调用时才出网** —— 搜索词 / 目标 URL 来自这段会话（也就是用户的内容），没有可配置的后端 / key：
+  `web_search` **固定**走 Exa 匿名 MCP（`https://mcp.exa.ai/mcp` 的 `web_search_exa`，速率受限时如实报错，不换后端）；
+  `fetch_content` **固定**抓用户给的 URL 本身（`linkedom` 解析 + `@mozilla/readability` 抽正文 + `turndown` 转 Markdown），只做 http/https 协议校验、限 5 跳重定向，不做动态渲染、不请求页面里的任何外链资源。
+  **默认零配置、无密钥**（既没有 `web-search.json` 也没有 `*_API_KEY`），没有自己的 UI 开关 —— **入口就是用户主动让模型去搜 / 去抓**（与第 8 条模型端点同类：发不发由用户的提示词决定）。
+  扩展随包内置、构建期的事（见 `vendor-pi.mjs` 与 [ai.md](modules/ai.md) 的「网页搜索 / 抓取」），运行期不额外下载。
 - **装技能**（可选；AI 助手页「技能」按钮里的「粘地址」，第九条出口）：**你粘上地址、再点「装上」**应用才 GET 一次 ——
   **主机不设白名单**（与「你自己填的 git 仓库」同类：地址由你给），跟着 `Location` 最多跳 5 跳，只收 zip、超过 64 MB 就停。
   **除那个地址本身，这一趟不带任何用户数据**；下载的包**只解压落盘，脚本一概不执行**（要不要跑是 Pi 的事，受权限档管）。

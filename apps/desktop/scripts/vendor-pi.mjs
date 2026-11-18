@@ -49,16 +49,16 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 /** 钉死的 Pi 版本；升级要连着 docs/dev-notes/pi-session-probe.md 的验证一起重做 */
 const PI_VERSION = '1.5.0'
 /**
- * 随包内置的网页搜索 / 抓取扩展（`pi-web-access`，MIT，<https://github.com/nicobailon/pi-web-access>）。
- * 版本同样钉死：它给 Pi 注册 `web_search` / `fetch_content` 等工具，是 AI 助手页联网能力的落点。
- * 升级 = 改这里 + 重跑 `pnpm run vendor:pi` + 复验扩展能加载（见 docs/modules/ai.md）。
+ * 随包内置的最小网页扩展源码（`scripts/pi-web-search/`，进版本库）：只给 Pi 注册 `web_search`
+ * （Exa 匿名 MCP，零 key）与 `fetch_content`（Readability + turndown 抽正文）两个工具。
+ * 改扩展源码后重跑 `pnpm run vendor:pi` 即可复制进去；依赖版本在它自己的 package.json 里钉死。
  */
-const PI_WEB_VERSION = '0.48.0'
+const WEB_SOURCE = join(root, 'scripts', 'pi-web-search')
 /**
- * 裁剪方案的版本号。**动了 KEEP、下面那几条文件级规则或 pi-web-access 的 vendoring 就必须 +1**：
+ * 裁剪方案的版本号。**动了 KEEP、下面那几条文件级规则或网页扩展的 vendoring 就必须 +1**：
  * 跳过判据比的是 stamp 文件内容，对不上才会重装重裁。
  */
-const PRUNE_REVISION = '6'
+const PRUNE_REVISION = '7'
 /**
  * 预填表的数据源版本：`@earendil-works/pi-ai` 里那份 models.dev 快照（`dist/providers/data`）。
  * 它只被 `npm pack` 下来读一次、生成完就删 —— **不进树**。pi-coding-agent 从 1.3.0 起把
@@ -79,9 +79,9 @@ const EXTRA_DEPS = {
 const TARGET = join(root, 'resources', 'pi')
 const STAMP = join(TARGET, '.pi-version')
 const STAMP_VALUE = `${PI_VERSION}+prune${PRUNE_REVISION}`
-/** pi-web-access 的落点：与 Pi 本体同一棵 resources/pi，但自包含、不进 prune() */
-const WEB_TARGET = join(TARGET, 'pi-web-access')
-/** pi-web-access 扩展入口（package.json 的 `pi.extensions` 指向它就在这里） */
+/** 网页扩展的落点：与 Pi 本体同一棵 resources/pi，但自包含、不进 prune() */
+const WEB_TARGET = join(TARGET, 'web-search')
+/** 网页扩展入口（ai.rs 以 `-e` 指向它） */
 const WEB_ENTRY = join(WEB_TARGET, 'index.ts')
 /** Pi 的 CLI 入口（与模型目录一起，当作「这份树是好的」的判据） */
 const CLI = join(
@@ -296,75 +296,45 @@ function prune() {
 }
 
 /**
- * 内置网页搜索扩展 pi-web-access。
+ * 内置最小网页扩展（scripts/pi-web-search/：index.ts + package.json），并把它的三个运行时依赖
+ * （linkedom / @mozilla/readability / turndown）装进扩展自己的 node_modules。
  *
- * **自包含、不进 prune()**：它给 Pi 注册 `web_search` / `fetch_content`，靠 npm 解析自己的
- * 运行时依赖（p-limit、undici、unpdf、readability…）。这些包不能塞进 Pi 本体那棵 `node_modules`
- * —— 那边 prune() 会把 KEEP 清单外的全删掉。这里单独解一棵树、连 `npm install` 的依赖一起留着
- * （扩展文件多、但打包后 tar.gz 增量不大；且裁错会「看起来能起、真搜时静默失败」，不值得省）。
- *
- * 入口用源码 `index.ts`（package.json `pi.extensions` 就指向它）：Pi 捆绑版的 jiti 加载器带
- * 内联虚拟模块，`@earendil-works/pi-*` / typebox 这些 peer 依赖会从 bundle 里 resolve，不必落盘。
+ * **自包含、不进 prune()**：这三个包不能塞进 Pi 本体那棵 KEEP 树（会被 prune 删掉）；
+ * 放扩展同级目录，Pi 的 jiti 加载器解析 import 时自然能找到。typebox 不装 —— 它由 Pi 捆绑版的
+ * jiti 虚拟模块提供。旧的 `pi-web-access/` 整棵在这里删掉（升级到最小扩展时清场）。
  */
-function vendorWebAccess() {
-  const work = mkdtempSync(join(tmpdir(), 'workbench-pi-web-'))
-  try {
-    execFileSync(
-      'npm',
-      // `--legacy-peer-deps`：pi-web-access 把 @earendil-works/pi-* / typebox 列为 peer，
-      // npm 7+ 会自动装它们（等于把 108MB 的 Pi 整棵树再拉一遍）。这些 peer 由 Pi 捆绑版的
-      // jiti 虚拟模块在运行时提供，不必落盘 —— 这里明确不装。
-      ['install', `pi-web-access@${PI_WEB_VERSION}`, '--no-save', '--ignore-scripts', '--no-audit', '--no-fund', '--legacy-peer-deps'],
-      { cwd: work, stdio: 'inherit', shell: true },
-    )
-    const installed = join(work, 'node_modules', 'pi-web-access')
-    if (!existsSync(join(installed, 'index.ts'))) {
-      console.error('[vendor-pi] pi-web-access 解包后找不到 index.ts，内置失败')
-      process.exit(1)
-    }
-    rmSync(WEB_TARGET, { recursive: true, force: true })
-    mkdirSync(WEB_TARGET, { recursive: true })
-    // 整棵拷过去：pi-web-access/* 源文件 + 它自己的 node_modules（所有运行时依赖都在）
-    const src = join(work, 'node_modules')
-    for (const entry of readdirSync(src)) {
-      const from = join(src, entry)
-      // pi-web-access 自己解到 WEB_TARGET 根，其余依赖解到 WEB_TARGET/node_modules
-      const to = entry === 'pi-web-access' ? WEB_TARGET : join(WEB_TARGET, 'node_modules', entry)
-      mkdirSync(dirname(to), { recursive: true })
-      cpSync(from, to, { recursive: true })
-    }
-    // 只留运行时要读的：源码映射 / 类型声明 / 测试 / 文档配图 / demo 视频都不加载
-    let removed = 0
-    walk(WEB_TARGET, (path, entry) => {
-      if (!entry.isFile())
-        return
-      const lower = entry.name.toLowerCase()
-      if (
-        DROP_EXTENSIONS.includes(extname(entry.name))
-        || lower.endsWith('.map')
-        || lower === 'changelog.md'
-        || lower === 'security.md'
-        || lower === 'readme.md'
-        || lower === 'banner.png'
-        || lower.endsWith('.mp4')
-      ) {
-        removed += dirSize(path)
-        rmSync(path, { force: true })
-      }
-    })
-    // 整棵删的目录：运行时不加载（测试、预打包的 dist —— 我们加载的是源码 index.ts）
-    for (const entry of ['test', 'tests', 'dist']) {
-      const path = join(WEB_TARGET, entry)
-      if (existsSync(path))
-        removed += drop(path)
-    }
-    console.log(
-      `[vendor-pi] pi-web-access ${PI_WEB_VERSION} 已内置到 resources/pi/pi-web-access/（删掉 ${mb(removed)} MB 非运行时文件）`,
-    )
+function vendorWebSearch() {
+  if (!existsSync(join(WEB_SOURCE, 'index.ts'))) {
+    console.error('[vendor-pi] 找不到网页扩展源码 scripts/pi-web-search/index.ts，内置失败')
+    process.exit(1)
   }
-  finally {
-    rmSync(work, { recursive: true, force: true })
-  }
+  // 清掉上一版整棵 pi-web-access；并重建 web-search 目录
+  rmSync(join(TARGET, 'pi-web-access'), { recursive: true, force: true })
+  rmSync(WEB_TARGET, { recursive: true, force: true })
+  mkdirSync(WEB_TARGET, { recursive: true })
+  cpSync(join(WEB_SOURCE, 'index.ts'), join(WEB_TARGET, 'index.ts'))
+  cpSync(join(WEB_SOURCE, 'package.json'), join(WEB_TARGET, 'package.json'))
+
+  // 装运行时依赖（连传递依赖一起）。--legacy-peer-deps 防止 npm 解析任何 peer 树。
+  execFileSync(
+    'npm',
+    ['install', '--omit=dev', '--no-save', '--ignore-scripts', '--no-audit', '--no-fund', '--legacy-peer-deps'],
+    { cwd: WEB_TARGET, stdio: 'inherit', shell: true },
+  )
+  // 只留运行时要读的：源码映射 / 类型声明不加载；package-lock 是本地装出来的，不进随包树
+  let removed = 0
+  walk(join(WEB_TARGET, 'node_modules'), (path, entry) => {
+    if (!entry.isFile() || !DROP_EXTENSIONS.includes(extname(entry.name)))
+      return
+    removed += dirSize(path)
+    rmSync(path, { force: true })
+  })
+  const lock = join(WEB_TARGET, 'package-lock.json')
+  if (existsSync(lock))
+    removed += drop(lock)
+  console.log(
+    `[vendor-pi] 网页扩展（web_search + fetch_content）已内置到 resources/pi/web-search/（删掉 ${mb(removed)} MB 非运行时文件）`,
+  )
 }
 
 /**
@@ -527,7 +497,7 @@ finally {
 
 const freed = prune()
 console.log(`[vendor-pi] 瘦身省下 ${mb(freed)} MB，resources/pi 现有 ${mb(dirSize(TARGET))} MB`)
-vendorWebAccess()
+vendorWebSearch()
 selfCheck()
 writeFileSync(STAMP, `${STAMP_VALUE}\n`)
 console.log(`[vendor-pi] 完成：Pi ${PI_VERSION}（裁剪版 ${PRUNE_REVISION}）已内置到 resources/pi/`)

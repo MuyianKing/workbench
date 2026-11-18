@@ -35,10 +35,11 @@
 //! 7. **技能**：这一轮启用的技能**逐个目录**用 `--skill` 交给 Pi（`pi_skills.rs`）——
 //!    Pi 的 RPC 这条路不扫默认技能目录，只有 `--skill` / settings.json / 扩展三种来源，
 //!    应用用第一种。装/卸/开关都发生在用户自己那两个 `.agents/skills` 里，下次起进程才生效。
-//! 8. **网页搜索 / 抓取**：随包内置的 pi-web-access 扩展（`resources/pi/pi-web-access/index.ts`，
-//!    由 scripts/vendor-pi.mjs 生成）以第二个 `-e` 加载，给 Pi 加上 `web_search` / `fetch_content`
-//!    等工具。它走全局 `fetch` 直接联网（不受 PI_OFFLINE 影响），与权限档无关 —— 命令问不问是
-//!    permission.js 那一条的事。没内置（没跑 vendor 脚本 / 退到 PATH 上的全局 pi）就跳过。
+//! 8. **网页搜索 / 抓取**：随包内置的最小扩展（`resources/pi/web-search/index.ts`，
+//!    源码在 `scripts/pi-web-search/`，由 scripts/vendor-pi.mjs 生成）以第二个 `-e` 加载，
+//!    给 Pi 加上 `web_search`（Exa 匿名 MCP，零 key）与 `fetch_content`（Readability + turndown
+//!    抽正文）两个工具。它走全局 `fetch` 直接联网（不受 PI_OFFLINE 影响），与权限档无关 ——
+//!    命令问不问是 permission.js 那一条的事。没内置（没跑 vendor 脚本 / 退到 PATH 上的全局 pi）就跳过。
 //!
 //! 程序与参数的形状在渲染层（`packages/ai/src/ai.ts`，那边有单测）：TS 给 `program` 与
 //! `args`（内置模式 `node <cli.js>`、退路 `pi`，含 `--session-id`），这里只管写扩展文件、
@@ -113,10 +114,11 @@ fn resource_pi_path(app: &AppHandle, rel: &str) -> Option<PathBuf> {
     })
 }
 
-/// 内置的网页搜索 / 抓取扩展入口（`pi-web-access/index.ts`，由 scripts/vendor-pi.mjs 生成）。
-/// 与 CLI 同源推导路径；找不到就回 None —— 扩展是能力增强，缺了只是没有那些工具，不阻断会话。
+/// 内置的网页搜索 / 抓取扩展入口（`web-search/index.ts`，源码在 scripts/pi-web-search/，
+/// 由 scripts/vendor-pi.mjs 生成）。与 CLI 同源推导路径；找不到就回 None —— 扩展是能力增强，
+/// 缺了只是没有那两个工具，不阻断会话。
 fn resolve_web_extension(app: &AppHandle) -> Option<PathBuf> {
-    resource_pi_path(app, "pi-web-access/index.ts")
+    resource_pi_path(app, "web-search/index.ts")
 }
 
 /// 内置 Pi 的 CLI 入口：打包后走 resource_dir（resources 映射成 `pi/`），开发态直接读仓库里的
@@ -843,9 +845,9 @@ pub fn run(
         argv.push("-e".to_string());
         argv.push(extension.to_string_lossy().into_owned());
     }
-    // 网页搜索 / 抓取扩展（pi-web-access）：随包内置时给 Pi 加上 web_search / fetch_content
-    // 等工具。与权限档无关 —— 它不执行本地命令，问不问是 permission.js 那一条的事。
-    // 没内置（没跑 vendor 脚本 / 退到 PATH 上的全局 pi）就跳过，只是少这些工具，不阻断会话。
+    // 网页搜索 / 抓取扩展：随包内置时给 Pi 加上 web_search / fetch_content 两个工具。
+    // 与权限档无关 —— 它不执行本地命令，问不问是 permission.js 那一条的事。
+    // 没内置（没跑 vendor 脚本 / 退到 PATH 上的全局 pi）就跳过，只是少这两个工具，不阻断会话。
     if let Some(web) = resolve_web_extension(app) {
         argv.push("-e".to_string());
         argv.push(web.to_string_lossy().into_owned());

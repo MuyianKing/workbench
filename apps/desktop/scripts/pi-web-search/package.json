@@ -1,0 +1,8 @@
+{
+  "private": true,
+  "dependencies": {
+    "@mozilla/readability": "0.6.0",
+    "linkedom": "0.16.11",
+    "turndown": "7.2.5"
+  }
+}

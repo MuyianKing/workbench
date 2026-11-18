@@ -10,7 +10,8 @@
 `apps/desktop/src-tauri/src/pi_skills.rs`（技能的列 / 装 / 卸、手写 zip 与 `Location` 跳转，带单测）、
 `apps/desktop/src-tauri/src/ai.rs`（提示词进 stdin、权限扩展、**网页扩展 `-e`**、models.json、拉模型列表、密钥、环境变量、起会话、拼 `--skill`、删会话；
 `AiRuntimeStatus` 带 `// @contract`，TS 类型由 `pnpm run contract:gen` 生成），
-`apps/desktop/scripts/vendor-pi.mjs`（内置 Pi **与 pi-web-access 网页扩展**，钉版本、裁剪；改动要 bump `PRUNE_REVISION` 并重跑 `pnpm run vendor:pi`），
+`apps/desktop/scripts/vendor-pi.mjs`（内置 Pi **与最小网页扩展**，钉版本、裁剪；改动要 bump `PRUNE_REVISION` 并重跑 `pnpm run vendor:pi`），
+`apps/desktop/scripts/pi-web-search/index.ts` + `package.json`（**随包内置的最小网页扩展源码**：只注册 `web_search` / `fetch_content`，依赖三个小包，进版本库），
 `workbench/ai.ts`（按会话 id 认领进程事件、确认帧应答、`aiRequest` / `aiAbort` 与会话删除）、
 `workbench/pi-skill.ts`（技能四条通道适配）、`stores/ai.ts`（编排：会话树、一轮的运行、进程收放与确认队列）、
 `stores/ai-run-state.ts`（每会话运行态与流式 / 思考收尾）、`stores/ai-config.ts`（服务 / 模型清单与三颗选择）、
@@ -31,7 +32,7 @@
 - `PI_TELEMETRY=0` / `PI_SKIP_VERSION_CHECK=1` / `PI_OFFLINE=1` 三条不许删。
 - 技能只认 `-ns` + 逐条 `--skill`（两头合起来才成立）；开关存「关掉的那些」。
 - 工具面全开，问不问由 `aiPermission` 定（`full` = 不加载扩展，不是扩展里判一下）。
-- 网页搜索 / 抓取走随包内置的 pi-web-access 扩展，以第二个 `-e` 无条件加载；缺了只是少工具，不阻断会话。
+- 网页搜索 / 抓取走随包内置的最小扩展（`scripts/pi-web-search/`，两个工具），以第二个 `-e` 无条件加载；缺了只是少工具，不阻断会话。
 - 模型请求由 Pi 自己发；models.json 一次写整份，密钥只写环境变量引用。
 - 渲染层与 Rust 的字段名必须一字不差（serde 静默丢弃认不出的键）。
 - 这一页与知识库无关、不摆提示行；AI 写的 HTML 只走沙箱 iframe。
@@ -224,20 +225,19 @@
 
 ### 网页搜索 / 抓取
 
-- **随包内置 pi-web-access 扩展**（MIT，<https://github.com/nicobailon/pi-web-access>，版本钉死在 `vendor-pi.mjs` 的 `PI_WEB_VERSION`）：
-  给 Pi 注册 `web_search` / `fetch_content` / `source_check` / `get_search_content` 等工具（还有 4 个斜杠命令、2 个全局快捷键）。
+- **随包内置一个最小扩展**（源码 `apps/desktop/scripts/pi-web-search/index.ts`，进版本库；由 `vendor-pi.mjs` 复制到 `resources/pi/web-search/`）：
+  只给 Pi 注册 **`web_search`** 与 **`fetch_content`** 两个工具 —— 没有 48 后端 / key 配置 / `source_check` / `get_search_content` / 斜杠命令 / 全局快捷键。
   它是**扩展**，不是第二个 Agent —— 跑在同一条 Pi 进程里、用全局 `fetch` 联网，**不受 `PI_OFFLINE=1` 影响**（那条只管遥测 / 版本检查 / 模型目录刷新）。
-- **落位与加载**：`vendor-pi.mjs` 把整棵扩展（源码 `index.ts` + 自带 `node_modules`）解到 `resources/pi/pi-web-access/`，
-  **自包含、不进 `prune()`** —— 它的十来个运行时依赖（p-limit / undici / unpdf / readability / linkedom …）不能塞进 Pi 本体那棵 KEEP 树。
-  用 npm `--legacy-peer-deps` 装：它把 `@earendil-works/pi-*` / `typebox` 列为 peer，npm 7+ 会自动装回整棵 Pi（约 108MB），
-  而这些 peer 由 Pi 捆绑版的 jiti **虚拟模块**在运行时提供，不必落盘。`ai.rs` 以**第二个 `-e`** 加载 `pi-web-access/index.ts`
-  （与 `resolve_cli` 同源推导 dev / 打包两处路径），**与权限档无关** —— 它不执行本地命令，问不问是 `permission.js` 那一条的事。
-  缺了这棵树（没跑 vendor / 退到 PATH 上的全局 pi）就跳过，只是少这些工具，不阻断会话。
-- **改它要验证**：`vendor-pi.mjs` 改了 KEEP / 文件规则 / `PI_WEB_VERSION` 必须 bump `PRUNE_REVISION` 并重跑 `pnpm run vendor:pi`；
-  验证扩展真加载了用 RPC 的 `get_commands`（应出现 `websearch` / `curator` / `search` 三条、来源是 `extension`，路径指到 `pi-web-access/index.ts`），
-  光看 `cli.js --version` 不够（扩展是另一条 `-e`）。
-- **配置**（可选）：免 key 起手走 Exa 匿名 MCP；要指定后端 / 填 key 时读 `PI_CODING_AGENT_DIR` 下的 `web-search.json`（在应用里就是 `<data_dir>/pi/web-search.json`），
-  或 `*_API_KEY` 环境变量。48 个后端、18 个默认（`auto`/`all`），其中 Exa 匿名 / DuckDuckGo / Codex 订阅 / SearXNG / degoog 免 key，其余要 key。
+- **两个工具怎么干**：
+  - `web_search`：直接对 Exa 匿名 MCP（`https://mcp.exa.ai/mcp` 的 `web_search_exa`）发 JSON-RPC，**零 key、零配置**，解析 SSE / JSON 后把标题 / URL / 摘要交给模型；带速率限制提示。
+  - `fetch_content`：只收一个 URL，校验 http/https（限 5 跳重定向）→ 全局 `fetch` → `linkedom.parseHTML` → `@mozilla/readability` 抽正文 → `turndown` 转 Markdown 交给模型。抽不到正文（动态渲染页）就如实报错，不做动态渲染兜底。
+- **落位与加载**：扩展自己带三个运行时依赖（`linkedom` / `@mozilla/readability` / `turndown`，版本钉在 `scripts/pi-web-search/package.json`），
+  由 `vendor-pi.mjs` 装进 `resources/pi/web-search/node_modules`，**自包含、不进 Pi 本体的 `prune()`**；`typebox` 不装（由 Pi 捆绑版 jiti 虚拟模块提供）。
+  `ai.rs` 以**第二个 `-e`** 加载 `web-search/index.ts`（与 `resolve_cli` 同源推导 dev / 打包两处路径），**与权限档无关** —— 它不执行本地命令，问不问是 `permission.js` 那一条的事。
+  缺了这棵树（没跑 vendor / 退到 PATH 上的全局 pi）就跳过，只是少这两个工具，不阻断会话。旧的整棵 pi-web-access（61MB / 211 包）已弃用，vendor 时清场。
+- **改它要验证**：改扩展源码 / package.json 后重跑 `pnpm run vendor:pi`（改 KEEP / 文件规则仍要 bump `PRUNE_REVISION`）。
+  工具注册用 `docs/dev-notes/pi-session-probe.md` 的假端点探针：发一句话、抓发给模型的请求体，断言 `tools` 数组含 `web_search` / `fetch_content` 且不含 `source_check`；
+  `get_tools` 这个 RPC 命令不存在，`cli.js --version` 也只看得到 CLI、看不到扩展，两者都不够。真机联网可直连 Exa 匿名 MCP 发一次 `web_search_exa` 验检索与解析。
 
 ### 技能
 
