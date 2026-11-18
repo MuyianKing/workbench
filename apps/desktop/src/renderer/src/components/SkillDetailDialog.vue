@@ -15,7 +15,7 @@ import { compareSkillCopy, SKILL_FILE } from '@workbench/skills'
  * 改它们就是改正文本身 —— 保存之后列表会重扫一遍，卡片上的字跟着变。
  *
  * 关闭前有一道「放弃修改」的确认：编辑是手动的（没有防抖自动保存），没点保存就关，
- * 刚敲的字会真的丢 —— 问一句比静默丢掉强。保存成功之后 baseline 跟着走，不会误报。
+ * 刚敲的字会真的丢 —— 问一句比静默丢掉强。保存成功之后基线跟着走，不会误报。
  */
 import { computed, nextTick, ref, watch } from 'vue'
 import AppDialog from '@/components/AppDialog.vue'
@@ -45,9 +45,6 @@ const visible = computed({
   },
 })
 
-/** 打开那一刻的正文快照：与当前内容一致才算「没有未保存的修改」 */
-const baseline = ref('')
-
 /**
  * 项目里的副本与库的差异（打开详情时检测一次，**每次更新成功后重跑**）。
  *
@@ -69,24 +66,20 @@ watch(open, (value) => {
     return
   checkJob += 1
   updates.value = []
-  // 已选中且内容在手上（连点同一张卡片关了再开）时立刻记快照
-  if (!store.contentLoading) {
-    baseline.value = store.content
+  // 已选中且内容在手上（连点同一张卡片关了再开）时立刻扫一遍副本差异
+  if (!store.contentLoading)
     void checkUpdates()
-  }
 })
 
 /**
- * 每一次**载入完成**都重新取一次基线。正文除了编辑器里敲的，只会由「打开某个文件」
- * 「恢复到某个版本」「同步后重读」这几条路换掉，而它们全都是「以盘上那份为准」——
- * 基线不跟着走的话，恢复完立刻会显示成有未保存的修改，关弹窗还要问一句「放弃修改？」。
+ * 每一次**载入完成**都重跑一次副本差异：正文除了编辑器里敲的，只会由「打开某个文件」
+ * 「恢复到某个版本」「同步后重读」这几条路换掉，库盘上那份变了，差异检测就该跟着刷新。
  */
 watch(
   () => store.contentLoading,
   (loading, was) => {
     if (loading || was === loading)
       return
-    baseline.value = store.content
     void checkUpdates()
   },
 )
@@ -181,18 +174,18 @@ function openCompare(update: ProjectUpdate): void {
 
 /** 对比弹窗里更新成功：编辑器对齐到新内容、重跑检测（提示条随之消失），并把成功说出来 */
 async function onApplied(rel: string, content: string): Promise<void> {
-  if (store.activeFile === rel) {
-    store.content = content
-    baseline.value = content
-  }
+  if (store.activeFile === rel)
+    store.adoptContent(content)
   await checkUpdates()
   notifySuccess('已更新到库，保存成功')
 }
 
-/** 正文还在读时不算 dirty：那时 content 里是上一篇的旧文本，比了只会误报 */
-const dirty = computed(
-  () => !store.contentLoading && Boolean(store.activeId) && store.content !== baseline.value,
-)
+/**
+ * 有没有未保存的修改：基线在 store 里（`diskContent`，读盘 / 保存 / 采纳之后各刷一次）。
+ * **自动拉取也看它** —— 远端带来的更新不能把编辑器里没保存的草稿冲掉，所以两边认同一个基线，
+ * 这里不再自己记一份快照。
+ */
+const dirty = computed(() => store.contentDirty)
 
 const historyOpen = ref(false)
 
@@ -216,8 +209,8 @@ async function requestClose(): Promise<void> {
 }
 
 async function save(): Promise<void> {
-  if (await store.saveActive())
-    baseline.value = store.content
+  // 基线由 store 在保存成功后跟着走（同一份 content 既是正文也是新基线）
+  await store.saveActive()
 }
 
 /** 当前编辑的是不是清单文件（version 门槛只对它） */
@@ -265,7 +258,6 @@ async function switchFile(rel: string): Promise<void> {
       return
   }
   await store.openFile(rel)
-  baseline.value = store.content
 }
 
 async function removeActive(): Promise<void> {

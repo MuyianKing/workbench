@@ -305,6 +305,13 @@ pub fn skill_sync(root: String, dir: String) -> Result<Value, String> {
     crate::skills::sync(&root, &dir)
 }
 
+/// 只拉不推（进技能页 / 窗口聚焦时后台对齐远端用，见 skills::pull）：
+/// 远端有新东西就落到本地工作树；不提交、不推本机改动
+#[tauri::command(async)]
+pub fn skill_pull(root: String, dir: String) -> Result<Value, String> {
+    crate::skills::pull(&root, &dir)
+}
+
 /// 把技能库下的当前改动提交一次（内容没变、还不是仓库都不报错，见 skills::commit）
 #[tauri::command(async)]
 pub fn skill_commit(root: String, dir: String, message: String) -> Result<Value, String> {

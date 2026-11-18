@@ -8,8 +8,9 @@ import { FolderOpened, MagicStick, Plus, Refresh, RefreshRight, Upload, Warning 
  * 同一个仓库，也可以不是）；它会落在哪个仓库里由磁盘决定 —— 从那个目录开始看有没有 `.git`，
  * 没有就往上找最近的（见 packages/skills/src/skills.ts 的 `SkillLibraryState`）。
  * 版本管理就是那个仓库的提交历史 —— 每次保存、新建、删除、导入都会记一笔，
- * 「同步」按钮推的也是那个仓库（只提交技能库那一层，再拉、再推），
- * 而它只在这个仓库有远端时出现。
+ * **同步是自动的**：保存 / 删改 / 导入 / 恢复之后自动推（只提交技能库那一层，再拉、再推），
+ * 进技能页 / 窗口聚焦只拉；工具条那颗「同步」按钮留给「现在就对一遍」，
+ * 它只在这个仓库有远端时出现。
  * 所以这一页有两种空态：
  *   - **还没选技能库目录**（或那个目录已经不在了）：空态配图 + 一句事实 + 那颗
  *     「选择技能文件夹」（EmptyState，整块垂直居中）；这块**整个不要卡片外壳**
@@ -21,7 +22,7 @@ import { FolderOpened, MagicStick, Plus, Refresh, RefreshRight, Upload, Warning 
  * 动作都收在详情弹窗里（SkillDetailDialog）。与其它页面一样是导航栏上的一项
  * （见 packages/appearance/src/views.ts），换页由 App.vue 的 KeepAlive 负责，数据与动作都在 store 里。
  */
-import { computed, onMounted, ref } from 'vue'
+import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref } from 'vue'
 import EmptyState from '@/components/EmptyState.vue'
 import PanelLoading from '@/components/PanelLoading.vue'
 import SkillCard from '@/components/SkillCard.vue'
@@ -29,13 +30,70 @@ import SkillCreateDialog from '@/components/SkillCreateDialog.vue'
 import SkillDetailDialog from '@/components/SkillDetailDialog.vue'
 import SkillImportDialog from '@/components/SkillImportDialog.vue'
 import SkillInstallDialog from '@/components/SkillInstallDialog.vue'
+import { useNavStore } from '@/stores/nav'
 import { useSkillsStore } from '@/stores/skills'
 
 const store = useSkillsStore()
+const nav = useNavStore()
 
 onMounted(() => {
   void store.init()
+  // 别的机器推完、切回应用：打开着的技能要跟着变（见 onWindowFocus）
+  window.addEventListener('focus', onWindowFocus)
 })
+
+onBeforeUnmount(() => {
+  window.removeEventListener('focus', onWindowFocus)
+  store.cancelAutoPush()
+})
+
+/**
+ * 进 / 出这一页各对齐一次（KeepAlive 下切走再回来不会重挂载，只有这对钩子会触发）。
+ * 进来**只拉**（收下别处推的，不提交不推），切走时把还没推的改动补推掉。
+ * 保存之后的自动推送在 store 里挂着计时器（`markLocalChange`），这里不重复管。
+ */
+onActivated(() => void runPull())
+onDeactivated(() => {
+  store.cancelAutoPush()
+  void store.pushPending()
+})
+
+/** 自动同步之间防重入：进页面、聚焦、切页可能几乎同时触发 */
+let autoSyncing = false
+
+/**
+ * 只拉一次（进页面 / 聚焦）：先重新认一遍仓库（用户可能刚在终端里补上 origin），
+ * 能同步才走 `store.pullSkills`。失败原因写进 `store.syncError`，由工具条下面那行显示。
+ */
+async function runPull(): Promise<void> {
+  if (autoSyncing || store.syncing || !store.root)
+    return
+  autoSyncing = true
+  try {
+    await store.probeState()
+    if (!store.canSync)
+      return
+    await store.pullSkills()
+  }
+  finally {
+    autoSyncing = false
+  }
+}
+
+/**
+ * 窗口重新获得焦点：只拉一次远端（页面被 KeepAlive 留着，切到别的页时也会收到焦点事件，
+ * 所以先判当前页 —— 与笔记页同一个做法）。
+ */
+function onWindowFocus(): void {
+  if (nav.activeView !== 'skills' || !store.root)
+    return
+  void runPull()
+}
+
+/** 手动同步：用户明确点了按钮，即使本地没有待推改动也走一遍，确认与远端是对齐的 */
+async function syncNow(): Promise<void> {
+  await store.syncNow(true)
+}
 
 /**
  * 挑一个技能库目录：**技能库就是它**（里面的每个子目录带一份 SKILL.md 就是一个技能）。
@@ -155,7 +213,7 @@ function installActive(): void {
               size="small"
               :icon="RefreshRight"
               :loading="store.syncing"
-              @click="store.syncNow()"
+              @click="syncNow"
             >
               同步
             </el-button>
@@ -175,6 +233,10 @@ function installActive(): void {
 
       <p v-if="store.syncError" class="sync-error">
         {{ store.syncError }}
+      </p>
+      <!-- 后台拉取没换正文的那句事实（编辑区有未保存的修改）：不是错误，不配红色 -->
+      <p v-else-if="store.syncNotice" class="sync-notice">
+        {{ store.syncNotice }}
       </p>
 
       <div class="skills-view__scroll">
@@ -277,6 +339,13 @@ function installActive(): void {
 .sync-error {
   margin: 0;
   color: var(--st-fail);
+  font-size: var(--fs-micro);
+}
+
+/* 后台拉取的一句事实（没有换正文）：与失败那行同一位置，但取次要文字色 —— 它不是错误 */
+.sync-notice {
+  margin: 0;
+  color: var(--ink-3);
   font-size: var(--fs-micro);
 }
 

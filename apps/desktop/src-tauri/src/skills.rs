@@ -4,7 +4,8 @@
 //! 这里只认渲染层带下来的「仓库根 + 库在里面的相对路径」（见 `state`），
 //! 从不假设它与某个笔记本有关系。每个技能就是技能库下 `<技能名>/` 里的一个目录。
 //! 增删改都在那个仓库里提交一次，git 的历史因此就是技能的版本历史；
-//! 推上去走 `sync`（技能页那颗同步按钮），它**只提交技能库那一层**再拉推那个仓库。
+//! 推上去走 `sync`（保存后自动跑，技能页那颗同步按钮也走它），它**只提交技能库那一层**再拉推那个仓库；
+//! 进技能页 / 窗口聚焦只走 `pull`，不提交也不推。
 //!
 //! 与 sync.rs 的分工一致：这里只做「跑 git / 复制文件」，技能叫什么名字、frontmatter 里
 //! 写了什么、安装到哪个项目，都由渲染层决定（见 packages/skills/src/skills.ts）。因此对入参只有两道把关：
@@ -20,7 +21,8 @@ use walkdir::WalkDir;
 
 use crate::sync::{
     busy_message, current_branch, describe, ensure_commit_identity, head_of, host_name,
-    is_plain_segment, pull_with_rebase, push_with_retry, run_git, run_git_quiet, set_git_auth,
+    is_plain_segment, lock_workflow, pull_with_rebase, push_with_retry, run_git, run_git_quiet,
+    set_git_auth, GIT_TIMEOUT as NETWORK_TIMEOUT,
 };
 
 /// 技能清单文件：没有它的目录不算技能，装不进项目（渲染层负责提示，这里挡最后一道）
@@ -252,6 +254,8 @@ pub fn sync(root: &str, dir: &str) -> Result<Value, String> {
             "技能库所在的仓库还没连远端：在它里面跑 `git remote add origin <地址>` 就能同步".into(),
         );
     }
+    // 与笔记同步共用同一把按目录分的锁：技能库可能就住在笔记仓库里，两条同步会撞 index.lock
+    let _workflow = lock_workflow(&workspace);
     if let Some(message) = busy_message(&workspace, "技能库所在的仓库") {
         return Err(message);
     }
@@ -273,6 +277,54 @@ pub fn sync(root: &str, dir: &str) -> Result<Value, String> {
     Ok(json!({
         "branch": branch,
         "files": committed["files"],
+        "received": received,
+        "log": log.join("
+"),
+    }))
+}
+
+/// 技能库所在的仓库**只拉不推**：进技能页 / 窗口聚焦时后台对齐远端用。
+///
+/// 与 `sync` 的区别：不提交、也不推 —— 保存时已经各自提交过，推送只在保存之后那次自动同步里做
+/// （进页面就推会把「打开看一眼」变成一次网络写）。未提交的改动由 `--autostash` 挪开再放回来；
+/// 冲突不替用户挑边（中止这次 rebase，把冲突的文件名报回去）。
+/// 拉的是整条分支（git 没有「半个分支」），与 `sync` 同一条规矩。
+pub fn pull(root: &str, dir: &str) -> Result<Value, String> {
+    let workspace = workspace_of(root)?;
+    // 入参先验一遍（拼路径与 git 参数前的那道闸）：错误要在动网络之前出来
+    rel_of(dir)?;
+    if !workspace.join(".git").exists() {
+        return Err(
+            "技能库不在 git 仓库里：没有版本，也没法同步（把它放进一个仓库里就有版本了）".into(),
+        );
+    }
+    if !run_git_quiet(&["remote", "get-url", "origin"], &workspace) {
+        return Err(
+            "技能库所在的仓库还没连远端：在它里面跑 `git remote add origin <地址>` 就能同步".into(),
+        );
+    }
+    // 与 `sync` 同一把按目录分的锁（两种同步会撞 index.lock）
+    let _workflow = lock_workflow(&workspace);
+    if let Some(message) = busy_message(&workspace, "技能库所在的仓库") {
+        return Err(message);
+    }
+
+    // 要出网，先注入凭据（与 `sync` 同一条规矩）
+    set_git_auth();
+
+    let mut log: Vec<String> = Vec::new();
+    if let Ok(text) = run_git(&["fetch", "--quiet", "--prune", "origin"], Some(&workspace), NETWORK_TIMEOUT) {
+        if !text.trim().is_empty() {
+            log.push(text);
+        }
+    }
+    let branch = current_branch(&workspace)?;
+    let before = head_of(&workspace);
+    pull_with_rebase(&workspace, &branch, &mut log)?;
+    let received = before != head_of(&workspace);
+
+    Ok(json!({
+        "branch": branch,
         "received": received,
         "log": log.join("
 "),
@@ -1126,5 +1178,99 @@ name: A
         assert_eq!(rel_under(&base, &base), "");
         assert_eq!(rel_under(&base, &PathBuf::from(r"E:\a\x")), "");
         assert_eq!(rel_under(&base, &PathBuf::from(r"E:\a")), "");
+    }
+
+    /// 只拉不推：进技能页 / 聚焦那几处用它对齐远端 —— 不产生提交、也不把本地的东西推出去。
+    /// 未提交的改动靠 `--autostash` 保住（拉完原样放回来）。
+    #[test]
+    fn pull_only_fetches_without_committing_or_pushing() {
+        if crate::proc::probe_version("git").is_none() {
+            eprintln!("跳过：本机没有 git");
+            return;
+        }
+
+        let root = std::env::temp_dir().join(format!("wb-skills-pull-{}", uuid::Uuid::new_v4()));
+        let bare = root.join("skills.git");
+        let a = root.join("machine-a");
+        std::fs::create_dir_all(&a).unwrap();
+
+        // 远端是裸仓库：它的 HEAD 要对上 A 用的那条分支，B 才 clone 得好
+        assert!(run_git(
+            &["init", "--bare", "--quiet", bare.to_str().unwrap()],
+            None,
+            GIT_TIMEOUT
+        )
+        .is_ok());
+        assert!(run_git(&["init", "--quiet"], Some(&a), GIT_TIMEOUT).is_ok());
+        let _ = run_git(&["config", "user.email", "wb@test"], Some(&a), GIT_TIMEOUT);
+        let _ = run_git(&["config", "user.name", "wb"], Some(&a), GIT_TIMEOUT);
+        let branch = current_branch(&a).unwrap();
+        let _ = run_git(
+            &["symbolic-ref", "HEAD", &format!("refs/heads/{branch}")],
+            Some(&bare),
+            GIT_TIMEOUT,
+        );
+
+        // A：技能库里放一个技能，推上去
+        write(&a, "skills/demo/SKILL.md", "---\nname: demo\nversion: 0.1.0\n---\n第一版\n");
+        write(&a, "skills/demo/extra.md", "初始\n");
+        run_git(&["remote", "add", "origin", bare.to_str().unwrap()], Some(&a), GIT_TIMEOUT).unwrap();
+        sync(a.to_str().unwrap(), "skills").unwrap();
+
+        // B：clone 下来（origin 与分支都跟着远端）
+        let b = root.join("machine-b");
+        run_git(
+            &["clone", "--quiet", bare.to_str().unwrap(), b.to_str().unwrap()],
+            None,
+            GIT_TIMEOUT,
+        )
+        .unwrap();
+        let _ = run_git(&["config", "user.email", "wb@test"], Some(&b), GIT_TIMEOUT);
+        let _ = run_git(&["config", "user.name", "wb"], Some(&b), GIT_TIMEOUT);
+
+        // A 改清单并推上去；B 在工作区里改的是**另一个**文件（没提交）
+        write(&a, "skills/demo/SKILL.md", "---\nname: demo\nversion: 0.2.0\n---\n第二版\n");
+        sync(a.to_str().unwrap(), "skills").unwrap();
+        write(&b, "skills/demo/extra.md", "B 本地改的\n");
+
+        let before = head_of(&b);
+        let pulled = pull(b.to_str().unwrap(), "skills").unwrap();
+        assert_eq!(pulled["received"], json!(true), "A 那一版该被拉下来: {pulled:?}");
+        assert_ne!(head_of(&b), before, "HEAD 该跟着远端走");
+        assert!(
+            read_file(&b.join("skills/demo/SKILL.md")).contains("第二版"),
+            "清单该是远端那一版"
+        );
+        assert_eq!(
+            read_file(&b.join("skills/demo/extra.md")),
+            "B 本地改的\n",
+            "本地未提交的改动要原样放回来（--autostash）"
+        );
+
+        // 没有产生提交：B 的历史与 A 推上去的一致
+        let count = run_git(&["rev-list", "--count", "HEAD"], Some(&b), GIT_TIMEOUT).unwrap();
+        assert_eq!(count, "2", "只拉不推不该多出提交: {count}");
+        // 也没有推：远端 HEAD 就是 B 拉下来的那个
+        let remote_head = run_git(&["rev-parse", &branch], Some(&bare), GIT_TIMEOUT).unwrap();
+        assert_eq!(remote_head, head_of(&b), "只拉不该把本机的东西推出去");
+
+        // 再来一次：没有新东西就如实回 received=false
+        let quiet = pull(b.to_str().unwrap(), "skills").unwrap();
+        assert_eq!(quiet["received"], json!(false), "{quiet:?}");
+
+        // 不是仓库 / 没连远端：各给一句能看懂的话
+        let plain = root.join("plain");
+        std::fs::create_dir_all(&plain).unwrap();
+        let not_repo = pull(plain.to_str().unwrap(), "skills").unwrap_err();
+        assert!(not_repo.contains("不在 git 仓库里"), "{not_repo}");
+        assert!(!plain.join(".git").exists(), "只报错，不该顺手 init");
+
+        let orphan = root.join("orphan");
+        std::fs::create_dir_all(&orphan).unwrap();
+        assert!(run_git(&["init", "--quiet"], Some(&orphan), GIT_TIMEOUT).is_ok());
+        let no_remote = pull(orphan.to_str().unwrap(), "skills").unwrap_err();
+        assert!(no_remote.contains("还没连远端"), "{no_remote}");
+
+        cleanup(&root);
     }
 }

@@ -110,6 +110,7 @@ const domainsApi = {
   listSkills: (root: string, dir: string) => skill.listSkills(root, dir),
   skillState: (dir: string) => skill.skillState(dir),
   skillSync: (root: string, dir: string) => skill.skillSync(root, dir),
+  pullSkills: (root: string, dir: string) => skill.pullSkills(root, dir),
   createSkill: (root: string, dir: string, input: Parameters<WorkbenchApi['createSkill']>[2]) =>
     skill.createSkill(root, dir, input),
   saveSkillFile: (root: string, dir: string, id: string, rel: string, content: string) =>

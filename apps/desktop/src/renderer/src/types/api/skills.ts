@@ -42,6 +42,14 @@ export interface SkillsChannel {
    */
   skillSync: (root: string, dir: string) => Promise<Result<SkillSyncSummary>>
 
+  /**
+   * 技能库所在的仓库**只拉不推**：进技能页 / 窗口聚焦时后台对齐远端用（见 Rust 侧 `skills::pull`）。
+   *
+   * 不提交、也不推本机改动 —— 保存时已经各自提交过，推送只在保存之后那次自动同步里做；
+   * 未提交的改动由 `--autostash` 挪开再放回来，冲突不替用户挑边。
+   */
+  pullSkills: (root: string, dir: string) => Promise<Result<{ branch: string, received: boolean }>>
+
   /** 新建技能：建目录 + 写 SKILL.md 骨架 + 在笔记仓库里提交一次 */
   createSkill: (root: string, dir: string, input: SkillCreateInput) => Promise<Result<null>>
 

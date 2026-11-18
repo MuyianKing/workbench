@@ -13,6 +13,10 @@ import { defineStore } from 'pinia'
  *
  * 「版本」不是这里的状态：每次增删改都在适配层提交一次（见 workbench/skill.ts），
  * 历史与恢复直接问 git（skillHistory / restoreSkill），没有需要缓存的中间态。
+ *
+ * **同步是自动的**（与笔记页同一套拉推分离）：进技能页 / 窗口聚焦只拉（`pullSkills`，不提交不推），
+ * 保存 / 删改 / 导入 / 恢复之后自动推（`skillSync`：只提交技能库那一层，再拉、再推）。
+ * 后台失败只写 `syncError` 那一行，不弹窗；编辑器里有未保存的修改时，拉回来也不换正文。
  */
 import { computed, ref, watch } from 'vue'
 import { confirmAction, notifyError, notifySuccess } from '@/notify'
@@ -58,6 +62,12 @@ export const useSkillsStore = defineStore('skills', () => {
   /** 技能目录里的文件清单（切详情 / 保存 / 刷新时重拉） */
   const files = ref<SkillFileInfo[]>([])
   const content = ref('')
+  /**
+   * 编辑器内容最后一次与磁盘一致时的那一份（读盘成功 / 保存成功 / 采纳别处版本各刷一次）。
+   * 「有没有未保存的修改」就是 `content !== diskContent` —— 详情弹窗与自动拉取都认这一个基线，
+   * 拉回来的远端改动不会把编辑器里没保存的草稿冲掉。
+   */
+  const diskContent = ref('')
   const contentLoading = ref(false)
   const saving = ref(false)
   const saveError = ref('')
@@ -66,11 +76,20 @@ export const useSkillsStore = defineStore('skills', () => {
 
   const syncing = ref(false)
   const syncError = ref('')
+  /** 后台拉取遇到「编辑区有未保存修改」时的一句事实（不是错误，与 syncError 分开放） */
+  const syncNotice = ref('')
+  /** 本地有已提交、还没推出去的改动：保存 / 删改 / 导入 / 恢复成功之后置位 */
+  const needPush = ref(false)
 
   const activeSkill = computed(() => skills.value.find(item => item.id === activeId.value) ?? null)
 
   /** 库位置给人看的一句话：技能库目录那一层的名字（完整路径在悬停提示里） */
   const locationText = computed(() => noteRootName(root.value))
+
+  /** 编辑区里的正文与磁盘上那份不一致（正文还在读时不算：那时 content 里是上一篇的旧文本） */
+  const contentDirty = computed(
+    () => !contentLoading.value && Boolean(activeId.value) && content.value !== diskContent.value,
+  )
 
   function reset(): void {
     skills.value = []
@@ -79,6 +98,9 @@ export const useSkillsStore = defineStore('skills', () => {
     loadError.value = ''
     stateError.value = ''
     syncError.value = ''
+    syncNotice.value = ''
+    needPush.value = false
+    cancelAutoPush()
   }
 
   function closeActive(): void {
@@ -86,6 +108,7 @@ export const useSkillsStore = defineStore('skills', () => {
     activeFile.value = SKILL_FILE
     files.value = []
     content.value = ''
+    diskContent.value = ''
     contentLoading.value = false
     saveError.value = ''
     savedAt.value = 0
@@ -123,8 +146,35 @@ export const useSkillsStore = defineStore('skills', () => {
 
     activeFile.value = rel
     content.value = result.data
+    diskContent.value = result.data
     saveError.value = ''
     savedAt.value = 0
+  }
+
+  /**
+   * 采纳一份已经落盘的内容（「用项目版本更新到库」那条路）：正文与基线一起换成它，
+   * 这样界面上不会立刻显示成「有未保存的修改」。
+   */
+  function adoptContent(value: string): void {
+    content.value = value
+    diskContent.value = value
+  }
+
+  /**
+   * 把打开着的文件按磁盘重读一份（拉取 / 同步之后远端可能改过它）。
+   *
+   * **编辑区有未保存的修改就不换**：那是用户刚敲、还没提交的东西，宁可留着等他自己保存，
+   * 也不替他挑边。返回是否换了正文。
+   */
+  async function rereadActive(): Promise<boolean> {
+    if (!activeId.value)
+      return false
+    await loadFiles()
+    if (contentDirty.value)
+      return false
+    const rel = files.value.some(file => file.rel === activeFile.value) ? activeFile.value : SKILL_FILE
+    await openFile(rel)
+    return true
   }
 
   /**
@@ -207,6 +257,10 @@ export const useSkillsStore = defineStore('skills', () => {
       return
     ready = false
     closeActive()
+    // 换了一个库：旧库那些「待推」与挂着的自动推送都不再适用
+    cancelAutoPush()
+    needPush.value = false
+    syncNotice.value = ''
     void reload()
   })
 
@@ -250,6 +304,7 @@ export const useSkillsStore = defineStore('skills', () => {
       return false
     }
     content.value = result.data.text
+    diskContent.value = result.data.text
     return true
   }
 
@@ -273,6 +328,10 @@ export const useSkillsStore = defineStore('skills', () => {
       return false
     }
     savedAt.value = Date.now()
+    // 存的就是编辑器里那一份：基线跟着走，界面上不会立刻显示成「有未保存的修改」
+    if (rel === activeFile.value)
+      diskContent.value = content
+    markLocalChange()
     // 名字与描述是从 frontmatter 里解析的，正文改了列表就可能跟着变
     await reload()
     return true
@@ -304,6 +363,7 @@ export const useSkillsStore = defineStore('skills', () => {
       return false
     }
 
+    markLocalChange()
     await reload()
     void select(id)
     return true
@@ -318,6 +378,7 @@ export const useSkillsStore = defineStore('skills', () => {
 
     if (activeId.value === id)
       closeActive()
+    markLocalChange()
     await reload()
     return true
   }
@@ -339,6 +400,7 @@ export const useSkillsStore = defineStore('skills', () => {
       return false
     }
 
+    markLocalChange()
     await reload()
     void select(cleaned)
     return true
@@ -374,6 +436,7 @@ export const useSkillsStore = defineStore('skills', () => {
     }
 
     notifySuccess('已恢复到所选版本')
+    markLocalChange()
     await reload()
     if (activeId.value === id)
       await select(id)
@@ -411,19 +474,63 @@ export const useSkillsStore = defineStore('skills', () => {
   }
 
   /**
+   * 一次自动推送的等待时间：连着保存几处（对比弹窗一个文件一次）只推一趟。
+   * 比笔记那 30 秒短得多 —— 那边的写盘是防抖自动保存，这里「保存」是用户按下的动作。
+   */
+  const AUTO_PUSH_DELAY_MS = 2_000
+  /** 挂着的自动推送计时器 */
+  let autoPushTimer: number | null = null
+
+  /** 本地刚改过（适配层已经提交）：记下待推，等一小会儿自动推上去 */
+  function markLocalChange(): void {
+    needPush.value = true
+    scheduleAutoPush()
+  }
+
+  /** 重置自动推送计时器：连着改几次只在最后一次之后推一趟 */
+  function scheduleAutoPush(): void {
+    if (!canSync.value)
+      return
+    if (autoPushTimer !== null)
+      window.clearTimeout(autoPushTimer)
+    autoPushTimer = window.setTimeout(() => {
+      autoPushTimer = null
+      void syncNow()
+    }, AUTO_PUSH_DELAY_MS)
+  }
+
+  /** 取消挂着的自动推送（切走页面 / 换库 / 卸载前）：那一次由调用方立即补上 */
+  function cancelAutoPush(): void {
+    if (autoPushTimer !== null) {
+      window.clearTimeout(autoPushTimer)
+      autoPushTimer = null
+    }
+  }
+
+  /**
    * 与远端同步一次：**技能库所在的那个仓库**（提交技能库那一层 → 拉 → 推）。
    *
    * 与笔记页那颗不是同一个入口，也不要求同一个仓库：技能库可能住在一个专门的技能仓库里，
    * 也可能正好落在笔记仓库里（那样两颗按钮推的是同一个仓库，各自的提交范围不同 ——
    * 这边只动技能库，那边提交整个笔记本）。
-   * 回来后重扫列表、重读打开着的那一篇：远端可能刚改过它。
+   * 回来后重扫列表、重读打开着的那一篇：远端可能刚改过它；编辑区有未保存的修改时不换正文。
+   *
+   * `force` 给手动按钮用：用户明确点了「同步」，即使本地没有待推改动也走一遍（确认对齐状态）。
+   * 自动推送传 false：没有待推的就什么都不做，进页面 / 聚焦不会因此变成一次网络写。
    */
-  async function syncNow(): Promise<void> {
+  async function syncNow(force = false): Promise<boolean> {
+    cancelAutoPush()
     const current = gitRoot.value
     if (!current) {
       syncError.value = '技能库还不在 git 仓库里：改动的版本不会被记录，也没法同步'
-      return
+      return false
     }
+    if (syncing.value)
+      return false
+    if (!force && !canSync.value)
+      return false
+    if (!force && !needPush.value)
+      return false
 
     syncing.value = true
     syncError.value = ''
@@ -433,17 +540,69 @@ export const useSkillsStore = defineStore('skills', () => {
         syncError.value = result.error ?? '同步失败'
         // 常见的一种失败是「用户刚在终端里补上 origin / init 了仓库」：再探一次，让按钮跟上
         void probeState()
-        return
+        return false
       }
 
+      needPush.value = false
+      syncNotice.value = ''
+      const received = result.data.received === true
       await reload()
-      if (activeId.value)
-        await select(activeId.value)
-      syncError.value = ''
+      // 远端没带回新东西就不重读正文：那会白白刷掉「已保存 · 时间」这一行
+      if (received && !(await rereadActive()) && contentDirty.value)
+        syncNotice.value = '远端有更新；当前文件还有没保存的修改，编辑区没有被替换'
+      return true
     }
     finally {
       syncing.value = false
     }
+  }
+
+  /**
+   * 只拉不推（进技能页 / 窗口聚焦）：远端有新东西就重扫列表、重读打开着的正文。
+   *
+   * 不提交、不推送 —— 保存那次已经各自提交过，推送交给 `syncNow`。
+   * 编辑区有未保存的修改时不换正文（只留一句 `syncNotice`）；**不清 needPush**：
+   * 本地那批改动还要等自动推送那一次。
+   */
+  async function pullSkills(): Promise<boolean> {
+    const current = gitRoot.value
+    if (!current || syncing.value)
+      return false
+
+    syncing.value = true
+    syncError.value = ''
+    try {
+      const result = await window.workbench.pullSkills(current, dir.value)
+      if (!result.ok || !result.data) {
+        syncError.value = result.error ?? '拉取技能失败'
+        void probeState()
+        return false
+      }
+      // 没有新东西就不重扫、不重读：省一次整棵目录的磁盘遍历
+      if (!result.data.received)
+        return false
+
+      await reload()
+      if (!activeId.value)
+        return true
+      if (contentDirty.value) {
+        syncNotice.value = '远端有更新；当前文件还有没保存的修改，编辑区没有被替换'
+        return true
+      }
+      await rereadActive()
+      syncNotice.value = ''
+      return true
+    }
+    finally {
+      syncing.value = false
+    }
+  }
+
+  /** 切走技能页之前把还没推的改动补推掉（后台跑，失败只写 syncError，不弹窗） */
+  async function pushPending(): Promise<boolean> {
+    if (!needPush.value || !canSync.value)
+      return false
+    return syncNow()
   }
 
   /**
@@ -476,11 +635,14 @@ export const useSkillsStore = defineStore('skills', () => {
     files,
     content,
     contentLoading,
+    contentDirty,
     saving,
     saveError,
     savedAt,
     syncing,
     syncError,
+    syncNotice,
+    needPush,
     init,
     reload,
     setRoot,
@@ -488,6 +650,7 @@ export const useSkillsStore = defineStore('skills', () => {
     select,
     closeActive,
     openFile,
+    adoptContent,
     saveActive,
     saveContent,
     create,
@@ -499,6 +662,9 @@ export const useSkillsStore = defineStore('skills', () => {
     restoreWithConfirm,
     install,
     syncNow,
+    pullSkills,
+    pushPending,
+    cancelAutoPush,
     reveal,
   }
 })

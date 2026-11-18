@@ -60,6 +60,7 @@ skill_import
 skill_install
 skill_installed_versions
 skill_list
+skill_pull
 skill_restore
 skill_state
 skill_sync

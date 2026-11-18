@@ -123,6 +123,36 @@ export async function skillSync(root: string, dir: string): Promise<Result<Skill
   })
 }
 
+/**
+ * 技能库所在的仓库**只拉不推**：进技能页 / 窗口聚焦时后台对齐远端用。
+ *
+ * 与 `skillSync` 的区别：不提交、也不推 —— 保存时已经各自提交过，推送只在保存之后那次
+ * 自动同步里做。未提交的改动由 Rust 的 `--autostash` 保住，冲突按同一条规矩报回来。
+ */
+export async function pullSkills(
+  root: string,
+  dir: string,
+): Promise<Result<{ branch: string, received: boolean }>> {
+  const current = root.trim()
+  if (!current)
+    return fail('技能库还不在 git 仓库里')
+
+  const result = await guard(
+    invoke<{ branch?: unknown, received?: unknown }>('skill_pull', {
+      root: current,
+      dir: dirArg(dir),
+    }),
+    '拉取技能失败',
+  )
+  if (!result.ok || !result.data)
+    return fail(result.error ?? '拉取技能失败')
+
+  return ok({
+    branch: typeof result.data.branch === 'string' ? result.data.branch : '',
+    received: result.data.received === true,
+  })
+}
+
 /** 新建技能：建目录 → 写 SKILL.md 骨架 → 提交第一版 */
 export async function createSkill(
   root: string,

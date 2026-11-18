@@ -649,6 +649,7 @@ fn main() {
             commands::skill_list,
             commands::skill_state,
             commands::skill_sync,
+            commands::skill_pull,
             commands::skill_commit,
             commands::skill_history,
             commands::skill_restore,
