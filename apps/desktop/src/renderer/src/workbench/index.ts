@@ -341,10 +341,17 @@ export async function reapOrphansOnStart(): Promise<void> {
 
   try {
     const result = await orphan.reap()
-    for (const note of result.notes) console.warn(`[workbench] ${note}`)
+    // 每条处理结论都进 error.log：残留清理会按进程树结束进程，一旦下次出现「在跑的项目
+    // 被关掉」，这份记录能还原当时是保留、接管还是杀了哪个 PID、依据是什么。
+    // 只在真有会话要处理时写（notes 为空说明没有残留），免得每次启动都留一条流水账。
+    for (const note of result.notes) {
+      console.warn(`[workbench] ${note}`)
+      void window.workbench.logError(`[残留清理] ${note}`)
+    }
   }
   catch (error) {
     // 清理是尽力而为：失败不能让应用起不来
     console.warn('[workbench] 清理残留进程失败', error)
+    void window.workbench.logError(`[残留清理] 失败：${error instanceof Error ? error.message : String(error)}`)
   }
 }

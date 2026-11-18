@@ -321,12 +321,13 @@ export const useCatalogStore = defineStore('catalog', () => {
   }
 
   /** 检测一条命令是否已经在运行（判据是端口占用，实现见 terminal store） */
-  function detectCommand(id: string, options: { silent?: boolean } = {}): Promise<boolean> {
+  async function detectCommand(id: string, options: { silent?: boolean } = {}): Promise<boolean> {
     const entry = findCommand(id)
     if (!entry)
-      return Promise.resolve(false)
+      return false
 
-    return terminal.detectTarget({ ...targetOf(entry), port: entry.port }, options)
+    const result = await terminal.detectTarget({ ...targetOf(entry), port: entry.port }, options)
+    return result.running
   }
 
   /** 启动应用后做一次全量检测：命令可能是在 Workbench 之外启动、至今还跑着的 */

@@ -3,9 +3,9 @@ import type { ProcessTarget } from './terminal'
 
 import type { ActivityBreakdown, ActivityCounts, ActivityView, AddProjectInput, PackageManager, ProcessStatusEvent, Project, ProjectGroup, ProjectPatch } from '@/types'
 import { backfillProjectColors as backfillColors, devServerUrl, reorderById, sanitizeProjectSort } from '@workbench/core'
-import { sanitizeDeviceIds } from '@workbench/work-log'
-
 import { RUNNING_STATUS } from '@workbench/terminal'
+
+import { sanitizeDeviceIds } from '@workbench/work-log'
 import { defineStore } from 'pinia'
 /**
  * 项目与分组：列表、筛选排序、抽屉与「添加项目」，以及项目的启停打包。
@@ -634,11 +634,18 @@ export const useProjectsStore = defineStore('projects', () => {
     if (!project)
       return false
 
-    const running = await terminal.detectTarget({ ...targetOf(project), port: project.port }, options)
-    // 端口空着：上次留下的那个已经失效，清掉（下次启动才不会拿它去查占用）
-    if (!running)
+    const result = await terminal.detectTarget({ ...targetOf(project), port: project.port }, options)
+    // 只有确认端口空闲才清掉记着的端口 —— 探测失败（超时 / 通道出错）时端口状态是未知的，
+    // 清了下次启动的残留清理会把还在跑的 dev server 当残留杀掉（见 terminal.detectTarget / orphan）。
+    if (result.known && !result.running) {
+      // 记下「哪次把哪个端口判成空闲并清掉」：Rust 侧把 connect 超时映射成 inUse=false，
+      // 这种假空闲在日志里和真空闲长得一样，只有在这里留痕才能在下次「项目被关」时倒查。
+      void window.workbench.logError(
+        `[端口探测] 项目「${project.name}」端口 ${project.port} 判为空闲，已清空端口记录（下次启动将不再按此端口保留残留进程）`,
+      )
       setProjectPort(id, undefined)
-    return running
+    }
+    return result.running
   }
 
   /** 启动应用后做一次全量检测：项目可能是在 Workbench 之外启动、至今还跑着的 */

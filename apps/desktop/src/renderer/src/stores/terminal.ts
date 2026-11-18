@@ -84,6 +84,30 @@ export interface ProcessTarget {
   busyHint: string
 }
 
+/**
+ * 端口探测结果。`running` 之外还要带 `known`：探测本身失败（超时 / 通道出错）时
+ * 端口状态是未知的，调用方不能当成「空闲」去清掉记着的端口 —— 清了以后下次启动的
+ * 残留清理会把还在跑的 dev server 当残留杀掉（见 projects.detect 与 orphan 的规则）。
+ */
+export interface DetectResult {
+  running: boolean
+  /** 这次是否真的问到了端口占用；false = 探测失败，端口状态未知 */
+  known: boolean
+}
+
+/** 端口探测失败的记录：同一端口 60 秒内只写一条，避免窗口反复聚焦刷爆 error.log */
+const lastPortProbeLog = new Map<number, number>()
+
+function logPortProbeFailure(port: number, target: ProcessTarget, error: string): void {
+  const now = Date.now()
+  if (now - (lastPortProbeLog.get(port) ?? 0) < 60_000)
+    return
+  lastPortProbeLog.set(port, now)
+  void window.workbench.logError(
+    `[端口探测] ${target.subject}「${target.name}」端口 ${port} 探测失败：${error}；保留原端口记录不清空`,
+  )
+}
+
 /** 端口被谁占着，拼成一句给人看的说明 */
 
 export const useTerminalStore = defineStore('terminal', () => {
@@ -600,28 +624,31 @@ export const useTerminalStore = defineStore('terminal', () => {
   async function detectTarget(
     target: ProcessTarget,
     options: { silent?: boolean } = {},
-  ): Promise<boolean> {
+  ): Promise<DetectResult> {
     const rt = runtimeOf(target.id)
     // Workbench 自己启动的进程，状态本来就准，不必再探；
     // 而探测出来的「外部运行中」只是个快照，要重新确认（服务可能已经被人停了）
     if (!rt.external && RUNNING_STATUS.includes(rt.status)) {
       if (!options.silent)
         notifyInfo(target.busyHint)
-      return true
+      return { running: true, known: true }
     }
 
     const port = target.port ?? rt.port
     if (!port) {
       if (!options.silent)
         notifyWarning(target.noPortHint)
-      return false
+      return { running: false, known: false }
     }
 
     const check = await window.workbench.checkPort(port)
     if (!check.ok || !check.data) {
-      // 问不到占用情况：按「没在跑」处理，让启动照常继续
-      console.warn('检测端口失败', check.error)
-      return false
+      // 探测本身失败（超时 / 通道出错）：端口状态未知，绝不能当成空闲去清记录。
+      // 写 error.log 留证，调用方据此保留端口不清（见 projects.detect）。
+      const error = check.error ?? '未知错误'
+      console.warn('检测端口失败', error)
+      logPortProbeFailure(port, target, error)
+      return { running: false, known: false }
     }
     const info = check.data
     if (info.inUse) {
@@ -634,10 +661,10 @@ export const useTerminalStore = defineStore('terminal', () => {
           `端口 ${port} 已被 ${describeHolder(info)} 占用，${target.subject}已在运行`,
         )
       }
-      return true
+      return { running: true, known: true }
     }
 
-    // 端口空着：之前探测到的外部运行已经结束，把状态收回来
+    // 端口确认空闲：之前探测到的外部运行已经结束，把状态收回来
     if (rt.external) {
       rt.status = 'idle'
       rt.external = false
@@ -646,7 +673,7 @@ export const useTerminalStore = defineStore('terminal', () => {
     }
     if (!options.silent)
       notifyInfo(`端口 ${port} 空闲，${target.subject}未在运行`)
-    return false
+    return { running: false, known: true }
   }
 
   /**

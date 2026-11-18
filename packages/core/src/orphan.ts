@@ -168,21 +168,24 @@ export async function reapOrphanSessions(
     // 开发服务的进程活过了这次退出（更新安装只杀应用本身，子进程会留下来）：
     // 项目记着的端口还在听，说明它仍在服务。保留进程、丢掉记录，界面按端口探测
     // 把它认成「外部运行中」——停止仍可按端口结束。端口已经空了就照常清掉。
-    if (adoptable(session.kind)) {
-      const port = deps.projectPort(session.projectId)
-      if (port !== undefined && await deps.portInUse(port)) {
-        adopted += 1
-        notes.push(
-          `上次的进程 PID ${session.pid} 仍在监听端口 ${port}，已保留并交给端口探测接管（${session.command}）`,
-        )
-        continue
-      }
+    // 记着的端口 / 类别 / 当时的监听结果一起写进 note：真出现「在跑的项目被关」时，
+    // 能看出当时是没端口、端口探测没听，还是类别不可接管，才好接着查端口记录为什么丢了。
+    const port = adoptable(session.kind) ? deps.projectPort(session.projectId) : undefined
+    const listening = port === undefined ? false : await deps.portInUse(port)
+    if (listening) {
+      adopted += 1
+      notes.push(
+        `上次的进程 PID ${session.pid} 仍在监听端口 ${port}，已保留并交给端口探测接管（${session.command}）`,
+      )
+      continue
     }
 
     try {
       await deps.killTree(session.pid)
       killed += 1
-      notes.push(`已结束上次残留的进程 PID ${session.pid}（${session.command}）`)
+      notes.push(
+        `已结束上次残留的进程 PID ${session.pid}（${session.command}；类别 ${session.kind ?? '老记录无'}，端口 ${port ?? '未记录'}${port === undefined ? '' : ' 未在听'}）`,
+      )
     }
     catch (error) {
       notes.push(
