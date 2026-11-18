@@ -364,7 +364,7 @@ function onMore(command: string): void {
      min-height 与「添加项目」幽灵卡共用同一个令牌，两边不会各自漂移 */
   gap: 9px;
   min-height: var(--h-project-card);
-  padding: var(--sp-3) var(--sp-4) var(--sp-3) calc(var(--sp-4) + 3px);
+  padding: var(--sp-3) var(--sp-4) var(--sp-3) calc(var(--sp-4) + 4px);
   /* 与 .panel（global.css）同一条规则：底色浓度跟着设置里的「卡片不透明度」走 */
   background: rgba(var(--bg-surface-rgb), var(--card-alpha, 1));
   /**
@@ -378,15 +378,14 @@ function onMore(command: string): void {
   /* 四周那条线归设置里的「毛玻璃描边」（默认不画，见 tokens.css 的 --glass-border-color） */
   border: 1px solid var(--glass-border-color);
   /**
-   * 左沿这条描边让给灯带。描边取的是 --border 一族的灰（#e1e4e9），灯带取的是状态色
-   * （--st-idle / --st-run / --st-ok / --st-fail），两者本来就不是同一个来源；这 1px 又
-   * 紧贴在灯带左边，看上去就是灯带旁边多出一道颜色对不上的线。卡片这条左沿本来就是
-   * 灯带的地盘（padding-left 也多留了 3px 给灯带），所以只把左边让开。
-   *
-   * 用「颜色透明」而不是 border-left-width: 0 —— 外框尺寸不变，描边整体开 / 关时卡片
-   * 不会横着挪 1px、里面那几行字也不会跟着动（同 tokens.css 那条口径）。
+   * 左沿这条描边让给灯带：宽度直接去掉，而不只是把颜色调成 transparent。
+   * 背景默认铺到边框下（background-clip: border-box），一条 1px 的透明左边框
+   * 会把卡片白底露出来 —— 看着就是灯带左边还贴着一道浅色的线（用户 2026-11 指出）。
+   * 把宽度去掉后灯带（left: 0，落在 padding 盒左沿）才是卡片真正的左边界。
+   * box-sizing: border-box 下外框尺寸不变；padding-left 多留 1px（+4 而非 +3）
+   * 补回这条边框占的位置，里面几行字不横着挪，描边整体开 / 关也不受影响。
    */
-  border-left-color: transparent;
+  border-left-width: 0;
   border-radius: var(--r-lg);
   /* 没有了上沿那条高光（用户不要）：一块玻璃的边界只剩底色与投影 */
   box-shadow: var(--shadow-card);

@@ -62,7 +62,9 @@
   [features-and-architecture.md](../features-and-architecture.md) 的「浮在壁纸上的面一律是毛玻璃」一条，卡片自己只写
   `background: rgba(…--card-alpha)` + `backdrop-filter: var(--glass-filter)` 两行。不透明度调到 100% 时磨砂自然失效
   （用户要的实底）。卡片因此是**层叠上下文** —— 卡里要放浮动面板（popover 那类）得 Teleport 到 body 画，不然会被后画的
-  卡片盖住（同 global.css 里顶栏那条坑）。
+  卡片盖住（同 global.css 里顶栏那条坑）。**左沿以状态灯带为界**：左边框 `border-left-width: 0`（不是仅把颜色调成
+  transparent —— 背景默认铺到边框下，透明边框会把卡片白底露成灯带左边一道浅线，2026-11 用户指出后去掉）；
+  `padding-left` 比常规多留 1px（`+4` 而非 `+3`）补回边框占的位置，box-sizing: border-box 下卡片外框与文字都不横移。
 - 一个项目都没有时，**项目页**换成欢迎页：一枚 [EmptyState](../../apps/desktop/src/renderer/src/components/EmptyState.vue)
   （「还没有项目」+ 添加项目按钮），别的什么都不放 —— 2026-11 用户定「不关心上手三步那些内容」，眉题 / 三步 / 水印已去掉。
   裸压画布、水平垂直都居中、白色（ink，不描边不垫底），与技能 / Git 的整页空态同一待遇。

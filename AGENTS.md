@@ -181,6 +181,8 @@ asset 协议、读取权限在 Rust 侧按单个文件授予）、**通道一律
   少了它上面两条都不报错，那个标签被渲染成空，`pnpm run lint` 的 `vue/no-undef-components` 才拦得住。
 - **永远不要替用户起应用**（`pnpm run dev` / `tauri dev` / `tauri build` 一律不跑）：验证只到静态检查、单测与构建为止；
   改完说一句「dev 已停、代码已就绪」，起不起、什么时候起由用户自己决定。
+- **`pnpm run build`（= `tauri build`）只在大改动后才跑**（动 Rust、跨模块、依赖 / 构建配置 / CSP / 打包链路）：
+  小改动不必每次改完都跑一遍，收尾一次 `pnpm run verify` 就够；这是上一条「不跑 `tauri build`」的唯一例外，且只跑构建、不起应用。
 - **别在 cargo 与 dev 之间来回**：`tauri dev` 是 `--no-default-features`，`cargo test` / `cargo build` / `clippy` 是默认 feature 集，
   两套 feature 会把彼此的产物作废，每来回一次就是整棵重编（分钟级）。所以一次改完、cargo 只跑一轮。
 - **一次改完再一次跑齐验证，别拆成多轮**：前端一条 `pnpm run verify`（`scripts/verify.mjs`，
