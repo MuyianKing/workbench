@@ -3,7 +3,7 @@ import type { ProjectColor } from '@workbench/core'
 import type { GitWorkLogDraft, GitWorkLogInput, WorkLogDevice, WorkLogEntry } from '@workbench/work-log'
 import { DocumentAdd } from '@element-plus/icons-vue'
 import { addDays, dayKey, projectColorVar, sanitizeProjectColor } from '@workbench/core'
-import { buildGitDrafts, dateOfDayKey, dayMeta, entriesOfDevice, workLogDeviceLabel } from '@workbench/work-log'
+import { buildGitDrafts, dateOfDayKey, dayMeta, entriesOfDevice, projectsOfDevice, visibleProjectsOfDevice, workLogDeviceLabel } from '@workbench/work-log'
 import { ElMessage } from 'element-plus'
 /**
  * 从项目仓库的提交生成工作记录（预览后写入）。
@@ -12,6 +12,10 @@ import { ElMessage } from 'element-plus'
  * 这个弹窗负责三件事：选写到哪台设备 / 哪一天 / 哪些项目、把草稿摆出来让人改、确认后交给适配层写入。
  * 日期范围必选（默认今天，可快捷选今天 / 昨天 / 本周），项目多选（默认空 = 全部项目；没选项目就生成前先确认一次），
  * 设备默认取工作页当前正在看的那台 —— 去重与「追加到哪条」也只认这台设备的记录。
+ *
+ * 项目下拉只列「绑定到当前设备」+「没绑定任何设备」的（通用）项目 —— 绑定给别处的项目从下拉里隐藏，
+ * 不去别人仓库读提交。当前设备绑定的项目自动预选，通用项目列着但不预选（想生成就手勾）；
+ * 当前设备一个绑定项目都没有、又没手勾时，退回「全部可见项目 + 生成前确认」。
  *
  * 一个项目一天一条：同项目同一天已经有生成记录时标「追加」，新提交接在它后面；
  * 否则新建一条「已完成」。勾掉的行不写，正文被清空的行也跳过。
@@ -29,8 +33,8 @@ interface DraftRow extends GitWorkLogDraft {
 }
 
 const props = defineProps<{
-  /** 项目列表（取数用；颜色只用于预览里的标签） */
-  projects: { id: string, name: string, path: string, color?: ProjectColor }[]
+  /** 项目列表（取数用；颜色只用于预览里的标签，deviceIds 用于按设备预选） */
+  projects: { id: string, name: string, path: string, color?: ProjectColor, deviceIds?: string[] }[]
   /** 整份工作日志：去重与「追加到哪条」都靠它，弹窗内部按选中的设备先筛一遍再用 */
   entries: readonly WorkLogEntry[]
   /** 设备清单（与工作页工具带同一份：本机恒在第一位） */
@@ -54,7 +58,7 @@ const open = defineModel<boolean>({ required: true })
 const deviceId = ref('')
 /** 生成哪一段（必选、默认今天）：两端都是本地日期键，不跟工作页顶部的档位联动 */
 const dateRange = ref<[string, string]>([dayKey(Date.now()), dayKey(Date.now())])
-/** 选中的项目 id：空 = 全部项目（默认空，可以不选） */
+/** 选中的项目 id：空 = 全部可见项目（默认空，可以不选） */
 const selectedIds = ref<string[]>([])
 
 /** 设备下拉的选项：本机恒在第一位，名字与工具带同一个口径 */
@@ -125,13 +129,23 @@ const emptyText = computed(() => `${rangeTitle.value}没有可导入的提交`)
 const emptyHint = computed(() => {
   if (warnings.value.length)
     return warnings.value[0]
+  if (!visibleProjects.value.length)
+    return '当前设备没有可生成的项目。'
   if (!props.projects.length)
     return '项目列表是空的。'
   return '已导入过的提交不会重复出现。'
 })
 
+/**
+ * 当前设备可见的项目：绑定到它的 + 没绑定任何设备的（通用）。
+ * 绑定给别处的项目从下拉里隐藏，也不参与读取 —— 不去别人的仓库读提交。
+ */
+const visibleProjects = computed(() =>
+  visibleProjectsOfDevice(props.projects, targetDeviceId.value),
+)
+
 /** 下拉里的项目（带上标识色，选的时候就能对上号） */
-const projectOptions = computed(() => props.projects.map(project => ({
+const projectOptions = computed(() => visibleProjects.value.map(project => ({
   id: project.id,
   name: project.name,
   color: sanitizeProjectColor(project.color),
@@ -176,10 +190,10 @@ async function load(): Promise<void> {
     if (!bounds)
       return
 
-    // 选了项目就只读这几个仓库；不选 = 全部项目
+    // 选了项目就只读这几个仓库；不选 = 全部可见项目（绑定给别处的不读）
     const picked = selectedIds.value.length
-      ? props.projects.filter(project => selectedIds.value.includes(project.id))
-      : props.projects
+      ? visibleProjects.value.filter(project => selectedIds.value.includes(project.id))
+      : visibleProjects.value
     const reads = await Promise.all(picked.map(async (project) => {
       if (!project.path.trim())
         return { project, result: null }
@@ -225,22 +239,37 @@ function requestLoad(): void {
   }, 120)
 }
 
+/**
+ * 按设备预选项目：所选设备绑定的项目自动勾上（它必在可见集合内）。
+ * 通用项目与绑定给别处的项目都不预选；当前设备没绑定任何项目时返回空 ——
+ * 退回「全部可见项目 + 生成前确认」的既有口径。
+ */
+function preselectProjects(): void {
+  selectedIds.value = projectsOfDevice(visibleProjects.value, targetDeviceId.value).map(project => project.id)
+}
+
 watch(open, (value) => {
   if (!value)
     return
-  // 每次打开都回到默认：当前看的那台设备 + 今天 + 全部项目
+  // 每次打开都回到默认：当前看的那台设备 + 今天 + 该设备绑定的项目
   const today = dayKey(Date.now())
   deviceId.value = props.defaultDeviceId
   dateRange.value = [today, today]
-  selectedIds.value = []
+  preselectProjects()
   requestLoad()
 })
 
-/** 换设备等于换了去重与追加的依据，预览要重读 */
+/** 换设备等于换了去重与追加的依据，也换了预选的项目，预览要重读 */
 watch([dateRange, selectedIds, deviceId], () => {
   if (open.value)
     requestLoad()
 }, { deep: true })
+
+/** 设备一变就重算预选；与上面的重读 watch 合并到同一轮 debounce */
+watch(deviceId, () => {
+  if (open.value)
+    preselectProjects()
+})
 
 onBeforeUnmount(() => {
   if (reloadTimer)
@@ -280,10 +309,10 @@ async function commit(closeAfter: boolean): Promise<void> {
     return
   }
 
-  // 项目不选 = 全部项目：写入前问一句，免得把没打算生成的项目一起写进去
+  // 项目不选 = 全部可见项目：写入前问一句，免得把没打算生成的项目一起写进去
   if (!selectedIds.value.length) {
     const agreed = await confirmAction(
-      `没有选择项目，将从全部项目生成 ${picked.length} 条记录，是否继续？`,
+      `没有选择项目，将从全部可见项目生成 ${picked.length} 条记录，是否继续？`,
       '从提交生成',
     )
     if (!agreed)
@@ -325,7 +354,7 @@ async function commit(closeAfter: boolean): Promise<void> {
     @closed="reset"
   >
     <div class="git">
-      <!-- 生成范围：写到哪台设备（默认当前看的那台）、日期范围必选、项目多选（默认空 = 全部项目） -->
+      <!-- 生成范围：写到哪台设备（默认当前看的那台）、日期范围必选、项目多选（默认空 = 全部可见项目） -->
       <el-form class="form" label-position="top" @submit.prevent>
         <div class="filters">
           <el-form-item v-if="deviceOptions.length > 1" label="设备" class="filters__device">
@@ -362,7 +391,7 @@ async function commit(closeAfter: boolean): Promise<void> {
               collapse-tags-tooltip
               clearable
               filterable
-              placeholder="全部项目"
+              placeholder="全部可见项目"
             >
               <el-option
                 v-for="project in projectOptions"

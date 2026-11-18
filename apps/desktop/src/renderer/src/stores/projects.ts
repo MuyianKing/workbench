@@ -3,6 +3,7 @@ import type { ProcessTarget } from './terminal'
 
 import type { ActivityBreakdown, ActivityCounts, ActivityView, AddProjectInput, PackageManager, ProcessStatusEvent, Project, ProjectGroup, ProjectPatch } from '@/types'
 import { backfillProjectColors as backfillColors, devServerUrl, reorderById, sanitizeProjectSort } from '@workbench/core'
+import { sanitizeDeviceIds } from '@workbench/work-log'
 
 import { RUNNING_STATUS } from '@workbench/terminal'
 import { defineStore } from 'pinia'
@@ -418,6 +419,8 @@ export const useProjectsStore = defineStore('projects', () => {
       nodeVersion: project.nodeVersion ?? '',
       port: project.port ?? null,
       groupId: project.groupId,
+      // 归属设备：收敛成去重后的非空 id 列表；空数组也带上，主进程才能识别「清空」
+      deviceIds: sanitizeDeviceIds(project.deviceIds),
       color: project.color,
       // 同上，落盘口径统一成「不展示 = 没有这个字段」，界面写成 false 也在这里收掉
       home: project.home === true || undefined,

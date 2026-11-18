@@ -1,6 +1,6 @@
 import type { WorkLogEntry } from './work-log'
 import { describe, expect, it } from 'vitest'
-import { deviceOfEntry, entriesOfDevice, workLogDeviceLabel, workLogDevices } from './work-log-devices'
+import { deviceOfEntry, entriesOfDevice, projectsOfDevice, sanitizeDeviceIds, visibleProjectsOfDevice, workLogDeviceLabel, workLogDevices } from './work-log-devices'
 
 function entry(id: string, by?: string): WorkLogEntry {
   return {
@@ -42,6 +42,58 @@ describe('entriesOfDevice', () => {
     const source = [entry('a', 'dev-remote')]
     entriesOfDevice(source, 'dev-local', LOCAL.id)
     expect(source.map(item => item.id)).toEqual(['a'])
+  })
+})
+
+describe('sanitizeDeviceIds', () => {
+  it('只留非空字符串、去重、去空白，保持顺序', () => {
+    expect(sanitizeDeviceIds([' dev-a ', '', 'dev-b', 'dev-a', '   ', 42 as unknown as string, null as unknown as string]))
+      .toEqual(['dev-a', 'dev-b'])
+  })
+
+  it('非数组（含缺失）收敛成空列表', () => {
+    expect(sanitizeDeviceIds(undefined)).toEqual([])
+    expect(sanitizeDeviceIds('dev-a')).toEqual([])
+    expect(sanitizeDeviceIds(null)).toEqual([])
+  })
+})
+
+describe('projectsOfDevice', () => {
+  const projects = [
+    { id: 'wb', deviceIds: ['dev-a', 'dev-b'] },
+    { id: 'notes', deviceIds: ['dev-b'] },
+    { id: 'shared' },
+  ]
+
+  it('筛出 deviceIds 含该 id 的项目', () => {
+    expect(projectsOfDevice(projects, 'dev-a').map(item => item.id)).toEqual(['wb'])
+    expect(projectsOfDevice(projects, 'dev-b').map(item => item.id)).toEqual(['wb', 'notes'])
+  })
+
+  it('没有归属该设备（或设备 id 为空）时返回空列表', () => {
+    expect(projectsOfDevice(projects, 'dev-c')).toEqual([])
+    expect(projectsOfDevice(projects, '')).toEqual([])
+  })
+})
+
+describe('visibleProjectsOfDevice', () => {
+  const projects = [
+    { id: 'wb', deviceIds: ['dev-a', 'dev-b'] },
+    { id: 'icu', deviceIds: ['dev-b'] },
+    { id: 'anes', deviceIds: ['dev-a'] },
+    { id: 'shared' },
+    { id: 'empty', deviceIds: [] },
+  ]
+
+  it('显示通用项目 + 绑定当前设备的项目，隐藏绑定给别处的', () => {
+    expect(visibleProjectsOfDevice(projects, 'dev-a').map(item => item.id))
+      .toEqual(['wb', 'anes', 'shared', 'empty'])
+    expect(visibleProjectsOfDevice(projects, 'dev-b').map(item => item.id))
+      .toEqual(['wb', 'icu', 'shared', 'empty'])
+  })
+
+  it('设备 id 为空时不隐藏任何项目（本机标识拿不到）', () => {
+    expect(visibleProjectsOfDevice(projects, '')).toHaveLength(projects.length)
   })
 })
 

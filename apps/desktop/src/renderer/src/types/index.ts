@@ -230,6 +230,11 @@ export interface Project {
   nodeVersion?: string
   groupId?: string
   /**
+   * 归属设备（设备 id 列表）：供「从提交生成」按设备预选项目，多机各存本机一份（项目列表不跨设备同步）。
+   * 空 / 缺失 = 未绑定、通用项目；设备 id 取自工作日志的设备口径（device.json / 同步分片）。
+   */
+  deviceIds?: string[]
+  /**
    * 在首页展示：首页那张项目卡（我的项目）**只画勾了这一项的项目**。
    *
    * 缺省与老数据（没有这个字段）都是「不展示」—— 首页是挑出来的一份，
@@ -484,6 +489,8 @@ export interface ProjectPatch {
   /** 监听端口由应用自己维护（启动时写回、停止时清空）；null 表示清空 */
   port?: number | null
   groupId?: string
+  /** 归属设备 id 列表（见 Project.deviceIds） */
+  deviceIds?: string[]
   /** 标识色（见 Project.color） */
   color?: ProjectColor
   /** 是否在首页展示（见 Project.home） */

@@ -2,22 +2,45 @@
 import type { ProjectColorPreset } from '@workbench/core'
 import { FolderOpened } from '@element-plus/icons-vue'
 import { isProjectColorPreset, PROJECT_COLOR_LABELS, PROJECT_COLOR_PRESETS, projectColorVar, sanitizeProjectColor } from '@workbench/core'
-import { computed } from 'vue'
+import { sanitizeDeviceIds, workLogDeviceLabel, workLogDevices } from '@workbench/work-log'
+import { computed, onMounted } from 'vue'
 import { useDraftField } from '@/composables/use-draft-field'
 import { useProjectsStore } from '@/stores/projects'
 import { useSettingsStore } from '@/stores/settings'
+import { useWorkLogStore } from '@/stores/work-log'
 
 /**
- * 项目详情抽屉的「基本信息」：显示名、分组、标识色、首页开关、路径失效后的重新定位。
+ * 项目详情抽屉的「基本信息」：显示名、分组、归属设备、标识色、首页开关、路径失效后的重新定位。
  *
  * 从 `ProjectDrawer.vue` 拆出来的整块。项目对象就是 store 里那一个（就地改），
  * 与抽屉其它区块同一份，不需要 props 传递。
  */
 const store = useProjectsStore()
 const settings = useSettingsStore()
+const workLog = useWorkLogStore()
 
 const project = computed(() => store.drawerProject)
 const pathValid = computed(() => (project.value ? store.isPathValid(project.value.id) : true))
+
+// 归属设备的选项与工作页切换器、生成弹窗同一份口径（本机 + 同步拉到的设备）。
+// 设备清单是会话内共享单例，这里只补一次本机标识（便宜；拿不到就只剩本机这项）。
+onMounted(() => {
+  void workLog.loadDevice()
+})
+const deviceOptions = computed(() =>
+  workLogDevices(workLog.entries, workLog.localDevice, workLog.remoteDevices)
+    .map(item => ({ id: item.id, label: workLogDeviceLabel(item) })),
+)
+
+/** 归属设备多选：就地改项目对象，与显示名 / 分组 / 标识色同一条落盘路径 */
+const boundDevices = computed({
+  get: () => sanitizeDeviceIds(project.value?.deviceIds),
+  set: (value: string[]) => {
+    const current = project.value
+    if (current)
+      current.deviceIds = sanitizeDeviceIds(value)
+  },
+})
 
 /** 显示名先落在本地草稿，回车或失焦才提交，避免半截名字被写进磁盘 */
 const nameDraft = useDraftField(
@@ -156,6 +179,34 @@ async function relocate(): Promise<void> {
           :value="g.id"
         />
       </el-select>
+    </div>
+
+    <!--
+      归属设备：从提交生成工作记录时按设备预选项目，省去逐个人工取消。
+      设备清单与工作页切换器、生成弹窗共用一份；留空 = 不绑定（生成时按全部项目走）。
+    -->
+    <div class="field">
+      <label class="field__label">归属设备</label>
+      <el-select
+        v-model="boundDevices"
+        multiple
+        collapse-tags
+        collapse-tags-tooltip
+        clearable
+        size="small"
+        placeholder="全部设备（不绑定）"
+        style="width: 100%"
+      >
+        <el-option
+          v-for="item in deviceOptions"
+          :key="item.id"
+          :label="item.label"
+          :value="item.id"
+        />
+      </el-select>
+      <p class="field__hint">
+        「从提交生成」时默认只勾选这些设备的项目；留空表示不绑定。设备清单随项目一样只存本机。
+      </p>
     </div>
 
     <!--

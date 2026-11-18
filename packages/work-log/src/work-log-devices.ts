@@ -58,6 +58,66 @@ export function entriesOfDevice(
 }
 
 /**
+ * 带归属设备 id 的「项目」的最小形状 —— 域包不 import 渲染层的 Project，
+ * 渲染层项目结构上满足它即可（id + 可选的 deviceIds）。
+ */
+export interface DeviceBoundProject {
+  id: string
+  deviceIds?: string[]
+}
+
+/**
+ * 收敛「归属设备」id 列表：只留非空字符串、去重，保持原顺序。
+ * 落盘前与读取时都过一遍 —— 设备 id 来自外部数据文件，可能有空串 / 重复 / 非字符串。
+ */
+export function sanitizeDeviceIds(value: unknown): string[] {
+  if (!Array.isArray(value))
+    return []
+  const seen = new Set<string>()
+  const result: string[] = []
+  for (const item of value) {
+    if (typeof item !== 'string')
+      continue
+    const id = item.trim()
+    if (!id || seen.has(id))
+      continue
+    seen.add(id)
+    result.push(id)
+  }
+  return result
+}
+
+/**
+ * 按归属设备筛项目：`deviceIds` 含该 id 的才算这台设备的项目。
+ * 设备 id 为空（本机标识还没拿到）时返回空列表 —— 调用方据此退回「全部项目」。
+ */
+export function projectsOfDevice<T extends DeviceBoundProject>(
+  projects: readonly T[],
+  deviceId: string,
+): T[] {
+  if (!deviceId)
+    return []
+  return projects.filter(project => project.deviceIds?.includes(deviceId) === true)
+}
+
+/**
+ * 当前设备可见的项目：未绑定任何设备的（通用项目）+ 绑定了当前设备的。
+ *
+ * 绑定给别的设备的项目不在此列 —— 生成工作日志不去别人的仓库里读提交。
+ * 设备 id 为空（本机标识还没拿到）时不隐藏任何项目，与 `entriesOfDevice` 同一套降级口径。
+ */
+export function visibleProjectsOfDevice<T extends DeviceBoundProject>(
+  projects: readonly T[],
+  deviceId: string,
+): T[] {
+  if (!deviceId)
+    return [...projects]
+  return projects.filter(project =>
+    !project.deviceIds?.length || project.deviceIds.includes(deviceId),
+  )
+}
+
+/**
  * 切换器里的设备清单：**本机恒在第一位**（哪怕一条记录都没有，用户总得能切回来），
  * 其余取「同步拉到的设备清单」+「条目里实际出现过的设备」的并集 ——
  * 分片已经在盘上、只是还没有带 `by` 的条目时也要列出来（老数据没有来源信息，
