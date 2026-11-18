@@ -1,8 +1,11 @@
-//! 把一张 PNG 写进 Windows 剪贴板。
+//! 把一张 PNG 或一段文本写进 Windows 剪贴板。
 //!
 //! **为什么不走 WebView 的 `navigator.clipboard`**：WebView2 的异步剪贴板要
 //! `CoreWebView2` 的权限回调放行（wry 没暴露出来），失败还是静默的；而且它只写 PNG
-//! 一种格式，认 CF_DIB 的老程序（画图、部分 Office 版本）粘出来是空的。
+//! 一种格式，认 CF_DIB 的老程序（画图、部分 Office 版本）粘出来是空的。文本同理：
+//! `navigator.clipboard.writeText` 同样卡在那个权限回调上，所以取色 / 取字的文本出口
+//! 也一并走这里。Win32 这条路图片一次能给齐三种格式，文本给 `CF_UNICODETEXT`，
+//! 也与我们「宿主能力走 Rust」的口径一致。
 //! Win32 这条路一次能给齐三种格式，也与我们「宿主能力走 Rust」的口径一致。
 //!
 //! 写的三种格式：
@@ -39,6 +42,9 @@ use windows_sys::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, 
 /// 值来自 winuser.h，稳定不变。上一个是 8（CF_DIB），带 alpha 的那个是 17（CF_DIBV5）。
 const CF_DIB: u32 = 8;
 const CF_DIBV5: u32 = 17;
+/// CF_UNICODETEXT：Unicode 文本（UTF-16LE + 结尾 NUL），值同样来自 winuser.h。
+/// 取色 / 取字复制的字符都是 BMP 内的十六进制 / OCR 文本，UTF-16 编码一一对应。
+const CF_UNICODETEXT: u32 = 13;
 
 /// `BITMAPV5HEADER` 的长度
 const DIBV5_HEADER: u32 = 124;
@@ -82,6 +88,24 @@ pub fn write_rgba(image: &image::RgbaImage, png: &[u8], dpi: u32) -> Result<(), 
         }
         Ok(())
     })
+}
+
+/// 把一段文本写进剪贴板（`CF_UNICODETEXT`，UTF-16LE + 结尾 NUL）。
+/// 取色的十六进制串、取字的 OCR 文本都走这条，不再经 WebView 的异步剪贴板。
+pub fn write_text(text: &str) -> Result<(), String> {
+    let bytes = utf16le_with_nul(text);
+    with_clipboard(|| set_data(CF_UNICODETEXT, &bytes))
+}
+
+/// 文本 → `CF_UNICODETEXT` 的字节：UTF-16LE，末尾补一个 NUL 收尾（Windows 要求）。
+/// 抽成纯函数好单测 —— 真正写剪贴板要在用户会话里打开它，单测里做不到。
+fn utf16le_with_nul(text: &str) -> Vec<u8> {
+    let mut out = Vec::with_capacity((text.chars().count() + 1) * 2);
+    for unit in text.encode_utf16() {
+        out.extend_from_slice(&unit.to_le_bytes());
+    }
+    out.extend_from_slice(&[0, 0]);
+    out
 }
 
 /// 打开 → 清空 → 做事 → 关闭。打开会被别的进程挡住，所以要重试。
@@ -319,6 +343,18 @@ mod tests {
 
     fn read_i32(bytes: &[u8], offset: usize) -> i32 {
         i32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap())
+    }
+
+    #[test]
+    fn utf16le_带结尾_nul() {
+        // 取色的十六进制串：每字符一个小端 u16，末尾补 0,0
+        assert_eq!(utf16le_with_nul("#A1"), vec![0x23, 0, 0x41, 0, 0x31, 0, 0, 0]);
+        // 空串也有那个收尾 NUL
+        assert_eq!(utf16le_with_nul(""), vec![0, 0]);
+        // BMP 外字符按代理对编码，长度是 2 个 u16
+        let emoji = utf16le_with_nul("😀");
+        assert_eq!(emoji.len(), 6); // 代理对 4 字节 + 结尾 2 字节
+        assert_eq!(&emoji[..4], &[0x3d, 0xd8, 0x00, 0xde]); // U+1F600 的 UTF-16LE
     }
 
     #[test]

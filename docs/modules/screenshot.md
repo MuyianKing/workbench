@@ -74,9 +74,14 @@
 
 ### 剪贴板
 
-- **系统剪贴板自己写 Win32**（`clipboard.rs`）：一次给 CF_DIBV5 + CF_DIB + 注册格式 `PNG`。不走
-  `navigator.clipboard`（WebView2 要 `CoreWebView2` 权限回调，wry 没暴露、失败静默；且只写 PNG，认 CF_DIB 的
-  老程序粘出来是空的）。新增 feature 只有 `Win32_System_DataExchange` 与 `Win32_System_Memory`。
+- **系统剪贴板自己写 Win32**（`clipboard.rs`）：图片一次给 CF_DIBV5 + CF_DIB + 注册格式 `PNG`，
+  文本给 `CF_UNICODETEXT`（UTF-16LE + 结尾 NUL）。都不走 `navigator.clipboard`（WebView2 要
+  `CoreWebView2` 权限回调，wry 没暴露、失败静默；图片还只写 PNG，认 CF_DIB 的老程序粘出来是空的）。
+  新增 feature 只有 `Win32_System_DataExchange` 与 `Win32_System_Memory`。
+- **文本复制出口统一在 `capture_copy_text` / `window.workbench.copyText`**：取色（Shift 读数）、取字
+  （OCR 文字），以及全应用其它文本复制（`@/clipboard` 的 `tryCopy`，覆盖密码 / 密钥 / 色值 / 地址等）——
+  原先各处直连 `navigator.clipboard.writeText` 会静默失败，现在一处收敛到宿主。命令只收一个 `text: String`，
+  不动遮罩、不推失败事件（取色 / 取字的读数卡自己反馈）。
 - **DPI 必须按截到的那块屏写 `96 × scale`**（`dpi_for_scale`），100% 是 3780 像素/米、150% 是 5670。截出来的
   是**物理像素**，而 DPI-aware 的程序（WPS / Word 这类）照 `biXPelsPerMeter` 决定「一个像素占多大」——从前一律写
   2835（72 DPI），它们就按 96/72 = **4/3 倍**铺开再画，字发虚（用户报过「复制的图不如钉图清楚」）。钉图窗口是
@@ -432,7 +437,8 @@ WebView2 窗口比整个预算还贵**（起 webview、加载 JS 包、跑起 Vu
 - **词框 → 文字层**：`layoutOcrSpans`（纯逻辑、带单测）摊成逐字位：词内字符均分框宽、词间空隙过门槛补空格位、
   非末行行尾补换行位（那层全是绝对定位 span，浏览器串选区文本**不会自己**补 `\n`）。渲染层 `ocrSpans` 再按
   `canvasToViewport` 同一套比例换成 CSS 像素；`user-select` 要在层上显式开回 `text`（遮罩整页是 `none`）。
-- **复制**：`navigator.clipboard.writeText`（遮罩窗口里实测通）。Ctrl+C / Enter / 工具条「复制」都走 `copyOcr`：
+- **复制**：走宿主的 `copyText`（`CF_UNICODETEXT`，见「剪贴板」一节），不再直连 `navigator.clipboard.writeText`
+  —— 后者在 WebView2 里要权限回调、会静默失败。Ctrl+C / Enter / 工具条「复制」都走 `copyOcr`：
   有所选复制所选、没选复制全部，**复制完收工**。失败走「两秒自己收」的短提示（`failTransient`）。
 - **这套管不到「语言包在不在」**：`TryCreateFromUserProfileLanguages` 建不出引擎时 Rust 回一句人话，
   渲染层照实显示。真机验只能真按一遍热键；单测只钉换算与摆位。`ocr_probe` 是 `#[ignore]` 手动探针：
@@ -500,8 +506,8 @@ WebView2 窗口比整个预算还贵**（起 webview、加载 JS 包、跑起 Vu
 （`settledAnnotations` 按 `draft.id` 过滤）：拖动期间数组里还是旧几何，两份都画旧边就一直留在屏幕上
 （挪位置更明显，踩过）；显示与导出都按这份画再补 `draft`（选中框与把手那一路本来就取 `draft`，见
 `drawPickedChrome`）。**「取色」的出口是 Shift**：读数卡是画在遮罩上的
-文本（整页 `user-select: none`），按 Shift 把当前十六进制写剪贴板、读数卡回一句并**直接收工**（失败才留在
-遮罩里说「复制失败」）；只在放大镜露着时认（有选区时 Shift+方向键是「步进十格」）。sampler 现用现做（第一次
+文本（整页 `user-select: none`），按 Shift 把当前十六进制经 `copyText`（`CF_UNICODETEXT`，见「剪贴板」一节）
+写进剪贴板、读数卡回一句并**直接收工**（失败才留在遮罩里说「复制失败」）；只在放大镜露着时认（有选区时 Shift+方向键是「步进十格」）。sampler 现用现做（第一次
 取色才画整帧）。马赛克：**别用 `getImageData` + 逐像素循环**（要 GPU 读回，750×500 每帧 5~7ms，区域大就卡）；
 做法是「整格对齐那块」**缩到一格一像素再放大铺回**，`imageSmoothingQuality` **必须 high**（默认 low 大比例
 缩小时只采几个像素，白底字变零星色块），放大关插值；scratch 画布复用。**格子对齐原图绝对网格**

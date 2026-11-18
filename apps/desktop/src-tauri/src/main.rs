@@ -775,6 +775,7 @@ fn main() {
             capture::capture_frame,
             capture::capture_show,
             capture::capture_copy,
+            capture::capture_copy_text,
             capture::capture_copy_frame,
             capture::capture_save,
             capture::capture_scroll_begin,

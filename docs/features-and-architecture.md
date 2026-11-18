@@ -82,7 +82,8 @@ Workbench 的文档按「通用 / 模块」分层：
 
 **重复的实现先收成一份再谈复用**：Rust 侧跨模块小工具（时间、截断、打码、历法换算、uid 白名单、密钥尾号）在
 `src-tauri/src/common.rs`，「发请求 → 判 200 → 解 JSON」的信封解包在 `http::request_json(_with)`；渲染层的状态文案与 tone
-映射在 `status.ts`（项目状态与两套网关的账号池各一组）、剪贴板在 `clipboard.ts`、界面数字与时间的格式化在 `format.ts`
+映射在 `status.ts`（项目状态与两套网关的账号池各一组）、剪贴板在 `clipboard.ts`（文本统一经
+`window.workbench.copyText` 写 Win32 的 `CF_UNICODETEXT`，不走 `navigator.clipboard`）、界面数字与时间的格式化在 `format.ts`
 （token 千进制收短 / 千分位 / 带秒时间戳）、空态与失败态在 `EmptyState.vue`（`tone="error"`）。TBuddy 与 Qoder 两个网关页
 的账号池逻辑层共用这些（余额快照另收在 `composables/use-credit-pool.ts`），业务定义照旧独立 —— 新写类似逻辑先看这里有没有，
 别再各抄一份。

@@ -86,6 +86,8 @@ export const eventsApi = {
   // 抢在帧前面显示就是先闪一块黑（见 docs/modules/screenshot.md 与 capture.rs 的 capture_show）
   showCapture: (id: number) => guard(invoke<null>('capture_show', { id }), '显示截图遮罩失败'),
   copyImage: (png: string) => guard(invoke<null>('capture_copy', { png }), '复制到剪贴板失败'),
+  // 取色 / 取字的文本：走 Win32 的 CF_UNICODETEXT，不经 WebView 的异步剪贴板
+  copyText: (text: string) => guard(invoke<null>('capture_copy_text', { text }), '复制到剪贴板失败'),
   // 没画标注时走这条：只给选区，由 Rust 从这一场缓存的原始帧里裁（省掉整圈 base64 往返）
   copyFrame: (rect: { x: number, y: number, width: number, height: number }) =>
     guard(invoke<null>('capture_copy_frame', rect), '复制到剪贴板失败'),

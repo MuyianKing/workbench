@@ -927,6 +927,16 @@ pub fn capture_abort(app: AppHandle) {
     abort(&app)
 }
 
+/// 把一段文本（取色的十六进制 / 取字的 OCR 结果）放进系统剪贴板。
+///
+/// 走 Win32 的 `CF_UNICODETEXT`，不经 WebView 的异步剪贴板 —— 后者要 `CoreWebView2`
+/// 的权限回调放行（wry 没暴露），失败还是静默的（见 clipboard.rs 文件头）。
+/// 与 `capture_copy` 不同：这里不动遮罩、也不推失败事件，取色 / 取字的读数卡自己会说话。
+#[tauri::command]
+pub fn capture_copy_text(text: String) -> Result<(), String> {
+    crate::clipboard::write_text(&text)
+}
+
 /// 把最终的 PNG 放进系统剪贴板。
 ///
 /// **一进来先把遮罩收掉**：解码 PNG、构两份 DIB、写剪贴板在 4K 上是几百毫秒的活，

@@ -55,6 +55,13 @@ export interface CaptureChannel {
   copyImage: (png: string) => Promise<Result<null>>
 
   /**
+   * 把一段文本放进系统剪贴板（取色的十六进制 / 取字的 OCR 结果）。
+   * 走 Win32 的 `CF_UNICODETEXT`，不经 WebView 的异步剪贴板 —— 后者要权限回调放行、
+   * 失败还是静默的（见 clipboard.rs 文件头）。
+   */
+  copyText: (text: string) => Promise<Result<null>>
+
+  /**
    * 没画标注时的复制快路径：只把这**块屏画布坐标**上的选区交给 Rust，由它从这一场缓存的
    * 原始帧里裁出来写剪贴板 —— 不走「JS 合成 → PNG → base64 → IPC → Rust 再解码」那一圈。
    */

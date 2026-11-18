@@ -1451,11 +1451,9 @@ async function ocrCopy(): Promise<void> {
     .join('\n')
   if (!text.trim())
     return
-  try {
-    await navigator.clipboard.writeText(text)
-  }
-  catch {
-    failTransient('复制失败')
+  const copyResult = await window.workbench.copyText(text)
+  if (!copyResult.ok) {
+    failTransient(copyResult.error ?? '复制失败')
     return
   }
   await abort()
@@ -1480,11 +1478,9 @@ async function copyOcr(): Promise<void> {
   const text = picked.trim() ? picked : all
   if (!text.trim())
     return
-  try {
-    await navigator.clipboard.writeText(text)
-  }
-  catch {
-    failTransient('复制失败')
+  const result = await window.workbench.copyText(text)
+  if (!result.ok) {
+    failTransient(result.error ?? '复制失败')
     return
   }
   await abort()
@@ -2180,14 +2176,12 @@ let copyNoteTimer: number | undefined
 /**
  * 把放大镜当前的读数（十六进制）写进剪贴板 —— 这就是「取色」的出口：
  * 读数卡是画在遮罩上的文本，遮罩整页 `user-select: none`（防误选），选不中也拿不走。
- * WebView 里的 clipboard 可能被拦（失败还是静默的），所以成不成都在读数卡上说一句。
+ * 走宿主的 copyText（Win32 的 CF_UNICODETEXT），不经 WebView 的异步剪贴板 —— 后者要
+ * 权限回调放行、失败还是静默的；成不成都在读数卡上说一句。
  */
 async function copyPixel(): Promise<void> {
-  const hex = pixelHex.value
-  try {
-    await navigator.clipboard.writeText(hex)
-  }
-  catch {
+  const result = await window.workbench.copyText(pixelHex.value)
+  if (!result.ok) {
     // 失败就留在遮罩里：让人看清这一句、挪一下再按一次
     copyNote.value = '复制失败'
     window.clearTimeout(copyNoteTimer)
