@@ -1480,6 +1480,66 @@ fn trim_number(value: f64) -> String {
 }
 
 /// 猫猫旅行：领奖 / 派出 / 报告正在路上。企业号没有成长体系。
+/// 领一次已归来的猫猫旅行奖。抽出来给「一键做任务」与自动领奖轮共用。
+fn claim_travel(account: &Account) -> TravelOutcome {
+    match chat_post(account, TRAVEL_CLAIM_PATH, &json!({})) {
+        Ok(value) => {
+            let credit = int_at(data(&value), "reward_credit");
+            let _ = wb_api_billing::fetch(account);
+            // 领奖后顺手看一次成长能量：够开盲盒就开，不够就什么都不做。
+            let opened = open_buddy(account);
+            let suffix = opened
+                .map(|line| format!("；{line}"))
+                .unwrap_or_default();
+            TravelOutcome {
+                ok: true,
+                action: "claim".into(),
+                msg: format!("旅行归来领奖成功！获得 {credit} 积分{suffix}"),
+                credit,
+            }
+        }
+        Err(message) => TravelOutcome {
+            ok: false,
+            msg: format!("领奖失败：{message}"),
+            ..TravelOutcome::default()
+        },
+    }
+}
+
+/// 只领已归来的猫猫旅行奖，不派出新旅行。
+///
+/// 猫猫要数小时才归来，而「福利每天自动」每天只跑一轮，那一轮里多半还在 traveling，
+/// 所以另开一条独立领奖轮按节拍回来查、见 arrived 就领。其余状态什么都不做；
+/// 查询失败与没有奖都返回 ok 的 skip，免得污染自动跑的失败计数。
+pub fn claim_arrived_travel(account: &Account) -> TravelOutcome {
+    if is_enterprise(account) {
+        return TravelOutcome {
+            ok: true,
+            action: "skip".into(),
+            ..TravelOutcome::default()
+        };
+    }
+    let state = match chat_get(account, TRAVEL_STATUS_PATH) {
+        Ok(value) => travel_from(&value),
+        Err(_) => {
+            return TravelOutcome {
+                ok: true,
+                action: "skip".into(),
+                ..TravelOutcome::default()
+            }
+        }
+    };
+    if state.state == "arrived" {
+        claim_travel(account)
+    } else {
+        TravelOutcome {
+            ok: true,
+            action: "skip".into(),
+            ..TravelOutcome::default()
+        }
+    }
+}
+
 pub fn do_cat_travel(account: &Account) -> TravelOutcome {
     if is_enterprise(account) {
         return TravelOutcome {
@@ -1501,28 +1561,7 @@ pub fn do_cat_travel(account: &Account) -> TravelOutcome {
     };
 
     match state.state.as_str() {
-        "arrived" => match chat_post(account, TRAVEL_CLAIM_PATH, &json!({})) {
-            Ok(value) => {
-                let credit = int_at(data(&value), "reward_credit");
-                let _ = wb_api_billing::fetch(account);
-                // 领奖后顺手看一次成长能量：够开盲盒就开，不够就什么都不做。
-                let opened = open_buddy(account);
-                let suffix = opened
-                    .map(|line| format!("；{line}"))
-                    .unwrap_or_default();
-                TravelOutcome {
-                    ok: true,
-                    action: "claim".into(),
-                    msg: format!("旅行归来领奖成功！获得 {credit} 积分{suffix}"),
-                    credit,
-                }
-            }
-            Err(message) => TravelOutcome {
-                ok: false,
-                msg: format!("领奖失败：{message}"),
-                ..TravelOutcome::default()
-            },
-        },
+        "arrived" => claim_travel(account),
         "idle" => {
             if state.daily_limit_reached {
                 return TravelOutcome {

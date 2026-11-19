@@ -395,6 +395,8 @@ export interface GatewayPerksAutoRun {
   creditAdded: number
   /** 夜间轮推进的账号数 */
   night: number
+  /** 独立领奖轮领到猫猫旅行奖的账号数 */
+  travelClaimed: number
   /** 这一轮里没成功的动作数（签到 / 任务 / 夜猫子 / 续期） */
   failed: number
   /** 给用户的一句话；空串表示无事发生 */

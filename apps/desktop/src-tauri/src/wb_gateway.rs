@@ -48,6 +48,18 @@ pub struct PerksAuto {
     pub daily: HashMap<String, String>,
     /// uid → `YYYY-MM-DD`：夜间轮（只跑夜猫子）
     pub night: HashMap<String, String>,
+    /// uid → Unix 秒：上次检查猫猫是否归来可领。独立于每日闸门，按 30 分钟节流
+    pub travel_checked_at: HashMap<String, i64>,
+}
+
+/// 猫猫领奖轮的节流间隔：30 分钟。猫猫要数小时才归来，太密只是白打上游。
+const TRAVEL_CHECK_GAP_SECS: i64 = 30 * 60;
+
+/// 这个号的猫猫是否到了该检查领奖的时候。没查过 / 距上次超过间隔才查。
+fn travel_due(marks: &HashMap<String, i64>, uid: &str, now: i64) -> bool {
+    marks
+        .get(uid)
+        .map_or(true, |last| now - last >= TRAVEL_CHECK_GAP_SECS)
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -68,6 +80,8 @@ pub struct PerksAutoRun {
     pub credit_added: i64,
     /// 夜间轮推进的账号数
     pub night: usize,
+    /// 独立领奖轮领到猫猫旅行奖的账号数
+    pub travel_claimed: usize,
     /// 这一轮里没成功的动作数（签到 / 任务 / 夜猫子 / 续期）
     pub failed: usize,
     /// 给用户的一句话；空串表示无事发生
@@ -1194,6 +1208,7 @@ pub fn wb_gateway_perks_auto_run(
     }
 
     let today = crate::wb_tasks::local_date();
+    let now = now_secs();
     let night_now = crate::wb_tasks::in_night_window();
     let accounts: Vec<Account> = targets_of(snapshot_accounts(&state)?, None)
         .into_iter()
@@ -1220,6 +1235,27 @@ pub fn wb_gateway_perks_auto_run(
     for mut account in accounts {
         let uid = account.uid.clone();
         let nickname = account.label();
+
+        // 猫猫领奖独立于每日闸门：猫猫要数小时才归来，白天那一轮多半还在 traveling，
+        // 之后 10 分钟一次的 tick 又被 daily 标记挡掉，奖就一直挂着。这里按 30 分钟
+        // 节流单独回来查，见 arrived 就领。先续期，避免拿过期 token 打上游。
+        if travel_due(&auto.travel_checked_at, &uid, now) {
+            mark_travel_checked(&mut auto, &uid, now)?;
+            if let Err(message) = refresh_if_needed(&mut account) {
+                route_failed += 1;
+                notes.push(format!("{nickname} 续期失败：{message}"));
+                continue;
+            }
+            persist_tokens(&state, &account);
+            let outcome = crate::wb_tasks::claim_arrived_travel(&account);
+            if outcome.action == "claim" && outcome.ok {
+                report.ran = true;
+                report.travel_claimed += 1;
+                report.credit_added += outcome.credit;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(500));
+        }
+
         let daily_due = day_due(&auto.daily, &uid, &today);
 
         if daily_due {
@@ -1319,6 +1355,9 @@ pub fn wb_gateway_perks_auto_run(
         if report.night > 0 {
             parts.push(format!("夜猫子推进 {} 个号", report.night));
         }
+        if report.travel_claimed > 0 {
+            parts.push(format!("猫猫领奖 {} 个号", report.travel_claimed));
+        }
         let mut message = if parts.is_empty() {
             "自动福利已跑完".to_string()
         } else {
@@ -1412,6 +1451,15 @@ fn mark_perks(
     if night {
         latest.night.insert(uid.to_string(), today.to_string());
     }
+    save_perks_auto(&latest)?;
+    *auto = latest;
+    Ok(())
+}
+
+/// 记一个号刚检查过猫猫领奖。同样落盘前重读，别把并行写入的每日标记冲掉。
+fn mark_travel_checked(auto: &mut PerksAuto, uid: &str, now: i64) -> Result<(), String> {
+    let mut latest = load_perks_auto();
+    latest.travel_checked_at.insert(uid.to_string(), now);
     save_perks_auto(&latest)?;
     *auto = latest;
     Ok(())
@@ -1590,6 +1638,17 @@ mod tests {
         assert!(!back.enabled, "默认不自动跑");
         assert!(back.daily.is_empty());
         assert!(back.night.is_empty());
+        assert!(back.travel_checked_at.is_empty(), "老配置没有猫猫检查标记");
+    }
+
+    #[test]
+    fn 猫猫领奖按间隔节流() {
+        let mut marks = HashMap::new();
+        assert!(travel_due(&marks, "u-1", 1000), "没查过就该查");
+        marks.insert("u-1".into(), 1000);
+        assert!(!travel_due(&marks, "u-1", 1000 + TRAVEL_CHECK_GAP_SECS - 1), "间隔内不重复查");
+        assert!(travel_due(&marks, "u-1", 1000 + TRAVEL_CHECK_GAP_SECS), "到间隔再查");
+        assert!(travel_due(&marks, "u-2", 1000), "新加的号立刻查");
     }
 
     #[test]

@@ -223,7 +223,11 @@
   取数同时发。并行由 `common::run_parallel` 统一做：**结果按输入顺序收回**，某一项 panic 或失败只标它自己、不带走其余。**别再把
   这两处改回串行的 `for` 循环**。**唯一例外是设置·通用里的「福利每天自动」开关（TBuddy 与 Qoder 共用，默认关）**：打开后应用
   启动时补跑一次，之后每十分钟由渲染层问一次该不该跑（判断全在 Rust 侧，不该跑时不联网）。白天轮 = 签到 + 一键做任务（成长任务 /
-  猫猫旅行 / 盲盒），夜间轮 = 夜猫子（只在 23:00–08:00，每号每自然日一次）。**成长连登与抽奖不自动跑**（会消耗补签卡）；应用
+  猫猫旅行 / 盲盒），夜间轮 = 夜猫子（只在 23:00–08:00，每号每自然日一次），两条都按 `perks-auto.json` 的 `daily` / `night`
+  自然日标记每号每天只跑一次。**猫猫领奖是独立的第三条轮**：猫猫要数小时才归来，白天那一轮多半还在 `traveling`，之后十分钟一次的
+  tick 又被 `daily` 标记挡掉，奖会一直挂着；所以按 `travel_checked_at`（每号上次检查的 Unix 秒）**30 分钟节流**单独回来查，
+  见 `arrived` 就调 `claim_arrived_travel` 领奖（只领奖、不派出新旅行，派出仍归白天轮），查询失败 / 没有奖都静默跳过、不计失败。
+  领到奖在提示里单独记一句「猫猫领奖 N 个号」，积分并入 `creditAdded`。**成长连登与抽奖不自动跑**（会消耗补签卡）；应用
   关着的那天不跑，下次启动补。这与参考项目的自动巡检仍不同 —— 不替用户决定什么时候花额度。
 - **每一次签到尝试都落一行**（`activity.jsonl`）：时间、uid、昵称、任务、结果、一句截断并脱敏过的说明。**不落 token / cookie /
   请求体**；上游错误原文先折叠换行、把 `Bearer …` 与 32 位以上的连续十六进制 / `sk-` 形态打码，再截到 200 字。这是「今日已
@@ -364,7 +368,7 @@ JSON 让用户抄进密码管理器，另一台设备把它贴回来，**不必�
 | 积分流水 | `wb_gateway_credit_grants` | 计费域 `get-user-resource`（宽时间窗，每个号一次只读 POST） |
 | 今日尝试 | `wb_gateway_activity_today` | 只读 `activity.jsonl` |
 | 自动跑开关 | `wb_gateway_perks_auto_config` / `wb_gateway_perks_auto_set` | 无（只读写 `perks-auto.json`） |
-| 自动跑一轮 | `wb_gateway_perks_auto_run` | 白天到点：签到 + 一键做任务；夜间窗口：只跑夜猫子 |
+| 自动跑一轮 | `wb_gateway_perks_auto_run` | 白天到点：签到 + 一键做任务；夜间窗口：只跑夜猫子；另有独立的 30 分钟节流猫猫领奖轮（见上） |
 
 **签到连签与成长连登是两套账**：`wb_gateway_tasks` 并行读计费域的 `checkin-activity-status`（只读 POST）——`today_checked_in`
 判断今天签没签、`checkin_dates` 算当前连签（上游 `streak_days` 是本赛季累计，不是连签）、`week_checkin_days` 是本周天数。
