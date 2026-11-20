@@ -40,6 +40,8 @@ export interface AccountCardView {
   expiry: { text: string, title: string } | null
   /** 这一栏的用量：成功 / 失败、总 token、均速；没有流水是 null */
   usage: { requests: number, failed: number, tokens: number, tokensPerSec: number } | null
+  /** 近 30 天已用积分；`null` = 这个页面不按 30 天口径（Qoder） */
+  creditsUsed30: number | null
 }
 
 const props = defineProps<{
@@ -57,6 +59,34 @@ const emit = defineEmits<{
   'priority': [uid: string, value: number | undefined]
   'open-credits': [uid: string]
 }>()
+
+/**
+ * 积分行的分母：**近 30 天已用积分 + 剩余可用积分**。
+ *
+ * 只有页面把 30 天流水交进来时才这么算（TBuddy）。Qoder 的额度按周期重置、30 天流水又只记
+ * 网关这一路，拿它当分母会把「几乎没用过」显示成满格；那边传 `null`，仍按快照的包容量之和
+ * （`size`）算。
+ */
+function creditUsed(account: AccountCardView): number {
+  if (!account.credits)
+    return 0
+  if (account.creditsUsed30 !== null)
+    return Math.max(0, account.creditsUsed30)
+  return Math.max(0, account.credits.size - account.credits.remain)
+}
+
+function creditsTotal(account: AccountCardView): number {
+  if (!account.credits)
+    return 0
+  if (account.creditsUsed30 !== null)
+    return Math.max(0, account.credits.remain) + creditUsed(account)
+  return Math.max(0, account.credits.size)
+}
+
+/** 余额条只认「剩余」与这个分母：彩色段是剩余、灰底是已用（TBuddy 是近 30 天，Qoder 是包总量减剩余） */
+function meterOf(account: AccountCardView): PoolCreditsShape {
+  return { remain: Math.max(0, account.credits?.remain ?? 0), size: creditsTotal(account) }
+}
 </script>
 
 <template>
@@ -117,7 +147,7 @@ const emit = defineEmits<{
         </span>
       </div>
 
-      <!-- 点这一块看逐包到期：卡片只放得下「剩余 / 总额」，说不出哪天作废 -->
+      <!-- 点这一块看逐包到期：卡片只放得下「剩余 / 近 30 天已用 + 剩余」，说不出哪天作废 -->
       <div
         class="acct__credits"
         role="button"
@@ -131,10 +161,14 @@ const emit = defineEmits<{
           <span class="acct__dim">积分</span>
           <template v-if="account.credits">
             <span class="acct__num">{{ number(account.credits.remain) }}</span>
-            <span class="acct__dim">/ {{ number(account.credits.size) }}</span>
-            <span v-if="account.credits.size > 0 || account.expiry" class="acct__aside">
-              <span v-if="account.credits.size > 0" class="acct__used">
-                已用 <span class="acct__used-num">{{ number(Math.max(0, account.credits.size - account.credits.remain)) }}</span>
+            <span class="acct__dim">/ {{ number(creditsTotal(account)) }}</span>
+            <span v-if="creditsTotal(account) > 0 || account.expiry" class="acct__aside">
+              <span
+                v-if="creditsTotal(account) > 0"
+                class="acct__used"
+                :title="account.creditsUsed30 !== null ? '近 30 天已用积分' : '已用积分'"
+              >
+                已用 <span class="acct__used-num">{{ number(creditUsed(account)) }}</span>
               </span>
               <span
                 v-if="account.expiry"
@@ -150,8 +184,8 @@ const emit = defineEmits<{
           <span
             v-if="account.credits"
             class="acct__meter-fill"
-            :class="meterClass(account.credits)"
-            :style="{ width: `${remainPercent(account.credits)}%` }"
+            :class="meterClass(meterOf(account))"
+            :style="{ width: `${remainPercent(meterOf(account))}%` }"
           />
         </span>
       </div>

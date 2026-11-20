@@ -161,6 +161,8 @@ const accountCards = computed<AccountCardView[]>(() => accounts.value.map((accou
     status: statusText(account),
     quota: quotaHint(account),
     credits: credits.value[account.uid] ?? null,
+    // 积分行的分母取「近 30 天已用 + 剩余」：没有流水的号就是 0，不退回包总量
+    creditsUsed30: item?.credits ?? 0,
     expiry: expiryHint(account),
     usage: item
       ? {
