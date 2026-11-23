@@ -34,9 +34,11 @@ WinRT FFI）、`apps/desktop/src/renderer/src/workbench/mail.ts`（适配）、
   （credentials.rs，DPAPI 按用户加密，按地址一条 —— 天然多账户），之后 Rust 命令自己读（`auth_code`）；渲染层只在
   「验证并保存」那一次经参数递它。界面只显示「已配置 / 未配置」。连接参数（地址 / 主机 / 端口）走
   `settings.mailAccounts` 落 workbench-data.json，由 `sanitizeMailAccounts` 收敛 —— 两条不同的落盘，别混。
-- **通讯录只住本机、不进任何出口**：联系人（名字 + 地址）住 `settings.mailContacts` 明文 JSON（不进凭据管理器、
-  不参与外观同步、不发往任何服务器），形状与收敛在 packages/mail/src/contacts.ts（地址是身份，按地址去重）。
-  **别把它接进同步仓库、也别为它加接口** —— 只服务写信时的收件人下拉。
+- **通讯录随同步仓库跨设备共享（明文）**：联系人（名字 + 地址）住 `settings.mailContacts` 明文 JSON
+  （不进凭据管理器、不参与外观同步），形状与收敛在 packages/mail/src/contacts.ts（地址是身份，按地址去重）。
+  它**走工作日志那条出口**：登录且填了同步仓库时按设备分片推到 `mail-contacts/<设备id>.json`，
+  别的设备按地址做后写胜出（删除留墓碑）并写回本机（见「通讯录」实现节与 privacy.md）。**不新增网络出口**，
+  但名字与地址以明文进仓库，建议私有仓库；只服务写信时的收件人下拉，不往任何第三方服务发。
 
 ### 账户与文件夹
 
@@ -238,9 +240,9 @@ WinRT FFI）、`apps/desktop/src/renderer/src/workbench/mail.ts`（适配）、
   不需要圈范围）；回信预填 `Re:` 与 `> ` 引用体。发送失败表单原样留着，改一改能再发。**发送成功不主动重拉收件箱**
   （新信未必排得进最近 50 封），但发件箱正开着就顺手重拉一次（服务器把刚发的存进了已发送，`setFolder` 会重拉）。
 - **通讯录**（左栏「联系人」签 + MailContactEditDialog.vue / MailContactMenu.vue；数据住 `mailContacts`）：一份
-  **只住本机的小名单**，形状与收敛在 contacts.ts（`MailContact` = 名字 + 地址，**地址就是身份**：按地址去重、
-  `sanitizeMailContacts` 丢没有地址的、上限 500；**不参与外观同步、不进任何出口、不碰服务器** —— 与 `mailBulkSenders`
-  同待遇）。**名单就是左栏那一签**：一个人一张小卡片 —— 左侧首字头像（与 MailListRow 共用 MailAvatar.vue：
+  本机权威、跨设备共享的小名单，形状与收敛在 contacts.ts（`MailContact` = 名字 + 地址 + 同步字段 `updatedAt` / `by` /
+  `deleted`，**地址就是身份**：按地址去重、`sanitizeMailContacts` 丢没有地址的、上限 500；**不参与外观同步** —— 与
+  `mailBulkSenders` 同待遇）。**名单就是左栏那一签**：一个人一张小卡片 —— 左侧首字头像（与 MailListRow 共用 MailAvatar.vue：
   按名字散到八档柔和色、暗色换深底浅字），右侧两行「名字 / 地址」（没名字时主行摆地址、两者相同时不重复画；
   地址用等宽小字），名单顶上只报一句「N 位联系人」。**行上不带按钮**：
   编辑与删除收在右击弹出的 MailContactMenu（与邮件清单行右键菜单同一副外壳：位置贴指针、夹回窗口、左键点别处 / Esc
@@ -251,6 +253,17 @@ WinRT FFI）、`apps/desktop/src/renderer/src/workbench/mail.ts`（适配）、
   才飘错误。另一个入口是清单行右击「**存为联系人**」（MailContextMenu 首项）—— 存的是这行的**对方**（收件箱看发件人
   `senderAddress` / 显示名 `displaySender`，发件箱看收件人 `recipientAddress` / `recipientDisplay`，群发只认头一个），
   已在名单里时变「移出联系人」（与「标记为广告」同一种两态写法）；信里没写名字（展示出来就是地址）时只存地址。
+- **通讯录的跨设备同步**（与工作日志同一条出口）：登录且填了同步仓库时，每台机器把合并后的通讯录快照（记录 + 墓碑）
+  推到 `mail-contacts/<设备id>.json`（单写者，一台机器只写自己那份），读别的机器分片后合并**写回本机**
+  （联系人可改名、可删除，只在内存里合并没有落点）。合并规则在 packages/mail/src/contacts-sync.ts：按地址（小写身份）
+  取并集，同一个地址用 `(updatedAt, by)` 取大者（后写胜出，同值按设备 id 破平），**删除留墓碑参与比较**（离线设备带回的
+  旧记录输给较新的墓碑，不会复活；更晚重新添加同一地址则是新的一次添加）。输出按地址排序，两台机器算出的结果逐字节一致。
+  墓碑一并落在本机 `mailContacts`，展示时由 `projectContacts` 滤掉；旧数据没有时间戳的第一次同步时补 `Date.now()` +
+  本机设备 id 并落盘。**自动触发**：进「联系人」签（含页面挂载 / KeepAlive 切回在那一签）拉一轮，每次新增 / 编辑 / 删除
+  联系人写盘成功后各跑一轮；同一时刻只跑一轮，跑着时又改了等本轮收场补一趟（`stores/mail.ts` 的门禁），失败只在联系人签
+  留一行字、不弹消息，成功静默。没登录 / 没配仓库时安静跳过（本机名单照常完整）。同步命令 `mail_contacts_sync_*`
+  与其余几条共用同一个 `token-sync` 克隆、同一把 `sync::lock_workflow` 锁、同一条 `enqueue` 队列，**不是新出口**；
+  代价是名字与地址以明文进仓库，建议私有仓库。
 
 ### 取数与筛选
 
@@ -302,6 +315,9 @@ WinRT FFI）、`apps/desktop/src/renderer/src/workbench/mail.ts`（适配）、
 Rust 侧：
 
 ```text
+（通讯录同步不是新出口：复用 sync.rs 的 publish_files_at / read_device_shards_for 与 token-sync
+ 克隆那把锁，命令 mail_contacts_sync_publish / mail_contacts_sync_pull 在 commands.rs，
+ 目录常量 MAIL_CONTACTS_SYNC_DIR 在 paths.rs —— 与工作日志那组分片同一套、见 sync-and-auth.md）
 apps/desktop/src-tauri/src/mail.rs
   邮箱宿主侧（163 / 126 / QQ 等用户配置的账户，可同时配多个）：Schannel TLS +
   手写的 IMAP/SMTP 命令子集（含 LIST 认「已发送」文件夹）+ mail_* 十个命令 ——
@@ -322,10 +338,13 @@ apps/desktop/src-tauri/src/notify.rs
 ```text
 apps/desktop/src/renderer/src/workbench/mail.ts
   邮箱适配层：mail_* 命令的 invoke → Result 收敛（都带 folder 逻辑名）；MIME 解析与报文构建在 @workbench/mail
+apps/desktop/src/renderer/src/workbench/mail-contacts.ts
+  通讯录同步适配：stampContact（写记录打 updatedAt / by，删除写墓碑）/ syncMailContacts
+  （拉分片 → 合并写回 settings.mailContacts 并 emit settingsChanged → 推本机分片，与工作日志同一出口）
 apps/desktop/src/renderer/src/stores/mail.ts
   邮箱页状态：当前文件夹（收件箱 / 已发送）/ 列表 / 正文（按 (文件夹, 账户, uid) 的会话内存缓存）/
-  发送 / 后台监视的登记与通知点击 / 角标账本（unread）
-  （startWatch）；拉取时机在这层
+  发送 / 后台监视的登记与通知点击 / 角标账本（unread）/ 通讯录（含墓碑的完整记录与展示名单）
+  （startWatch）；拉列表与通讯录同步的触发时机在这层
 apps/desktop/src/renderer/src/components/UnreadBadge.vue
   未读角标（导航栏邮箱 / 顶栏禅道共用）：灰度小胶囊，0 不画、>99 收成 99+
 apps/desktop/src/renderer/src/components/MailView.vue
@@ -361,6 +380,13 @@ apps/desktop/src/renderer/src/components/PdfPreview.vue
 域包：
 
 ```text
+packages/mail/src/contacts.ts
+  通讯录的形状与收敛（MailContact = 名字 + 地址 + 同步字段 updatedAt / by / deleted，
+  sanitizeMailContacts：按地址去重、没地址的丢、上限 500；contactLabel / contactOf / splitTypedAddresses）
+packages/mail/src/contacts-sync.ts
+  通讯录跨设备合并（纯函数 + 单测）：单写者分片 MailContactShard、sanitizeMailContactShard、
+  mergeMailContactShards（按地址 LWW + 墓碑、按地址排序两端逐字节一致）、mailContactShardOf、
+  sameMailContacts、projectContacts（滤墓碑）、stampMissingContacts（旧数据补戳）
 packages/mail/src/mail.ts
   账户配置的形状与收敛（sanitizeMailAccount）、163/126 服务器预设、文件夹的逻辑名（MailFolder）
 packages/mail/src/rfc2047.ts

@@ -355,6 +355,21 @@ fn publish_work_log_at(
     publish_files_at(clone_dir, repo, device, &[(&relative, shard)], "work-log")
 }
 
+/// 只推本机的邮箱联系人分片（`mail-contacts/<设备id>.json`）。
+///
+/// 与用量 / 工作日志同一个克隆、同一把锁；每台机器只写自己那份，合并由渲染层做
+/// （见 packages/mail/src/contacts-sync.ts）。
+pub fn publish_mail_contacts(repo: &str, device: &str, shard: &Value) -> Result<Value, String> {
+    let relative = format!("{}/{}.json", paths::MAIL_CONTACTS_SYNC_DIR, safe_name(device));
+    publish_files_at(
+        &paths::token_sync_dir(),
+        repo,
+        device,
+        &[(&relative, shard)],
+        "mail-contacts",
+    )
+}
+
 /// 所有「一台机器一份」的通道共用的那一段：写文件 → 只 stage 自己的路径 → 内容变了才提交 → 推送。
 fn publish_files_at(
     clone_dir: &Path,
@@ -1019,6 +1034,17 @@ fn read_work_log_shards_for(
     own_device: &str,
 ) -> Result<Vec<Value>, String> {
     read_device_shards_for(clone_dir, repo, own_device, paths::WORK_LOG_SYNC_DIR)
+}
+
+/// 读仓库里**别的机器**推上来的邮箱联系人分片（原始 JSON，合并由渲染层负责）。
+/// 本机那份跳过：本机设置里的通讯录才是权威，读仓库副本会把自己的记录再合一遍。
+pub fn read_mail_contacts_shards(repo: &str, own_device: &str) -> Result<Vec<Value>, String> {
+    read_device_shards_for(
+        &paths::token_sync_dir(),
+        repo,
+        own_device,
+        paths::MAIL_CONTACTS_SYNC_DIR,
+    )
 }
 
 /// 「一台机器一份」目录的通用读法：只收 `.json`、跳过本机那份、坏文件跳过。

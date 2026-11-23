@@ -11,6 +11,16 @@ export {
 } from './contacts'
 export type { MailContact } from './contacts'
 export {
+  MAIL_CONTACTS_SHARD_VERSION,
+  mailContactShardOf,
+  mergeMailContactShards,
+  projectContacts,
+  sameMailContacts,
+  sanitizeMailContactShard,
+  stampMissingContacts,
+} from './contacts-sync'
+export type { MailContactShard, MailContactSyncOutcome } from './contacts-sync'
+export {
   MAIL_ACCOUNTS_MAX,
   MAIL_ADDRESS_MAX,
   MAIL_HOST_MAX,

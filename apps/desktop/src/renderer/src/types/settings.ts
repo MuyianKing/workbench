@@ -286,8 +286,10 @@ export interface AppSettings {
   /**
    * 通讯录（邮箱页右键「存为联系人」攒的、在联系人弹层里手动加的）：写邮件时收件人
    * 从它里面挑（也允许当场打一个新地址）。**地址就是身份**，按地址去重、名字只是叫法。
-   * 只对本机成立，进数据文件、不参与外观同步；取值由 @workbench/mail 的
-   * sanitizeMailContacts 收敛（没地址的丢 / 按地址去重 / 上限 500）。
+   * 本机那份是权威、进数据文件、不参与外观同步；跨设备共享走同步仓库的
+   * `mail-contacts/<设备id>.json`（名字与地址以明文进仓库，建议私有仓库），
+   * 记录带 updatedAt / by，删除留墓碑，合并规则见 @workbench/mail 的 contacts-sync.ts。
+   * 取值由 sanitizeMailContacts 收敛（没地址的丢 / 按地址去重 / 上限 500）。
    */
   mailContacts: MailContact[]
   /**

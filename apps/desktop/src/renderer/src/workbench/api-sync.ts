@@ -3,6 +3,7 @@ import { fail, ok } from '@workbench/core'
 import { guard } from './bridge'
 import * as etf from './etf'
 import { gatewayUsageRecent, gatewayUsageRows, pullGatewayUsage, syncGatewayUsage } from './gateway'
+import * as mailContacts from './mail-contacts'
 import { publishQoderEarnings, pullQoderEarnings, qoderEarnings } from './qoder'
 import * as state from './state'
 import { getTokenUsage, getTokenUsageSnapshot, listSyncDevices, localDevice, syncThemeConfig, syncTokenUsage } from './token'
@@ -145,5 +146,19 @@ export const syncApi = {
     if (!id)
       return ok({ enabled: false, changed: false, device: '', entries: [], devices: [] })
     return workLog.syncWorkLog(repo, { id, name })
+  },
+
+  /**
+   * 邮箱联系人：与工作日志同一道门禁（没登录一律空仓库）。拉 + 合并写回 + 推一轮都在
+   * `workbench/mail-contacts.ts` 里；名称 / 地址以明文进同一个同步仓库，建议私有仓库。
+   */
+  syncMailContacts: async () => {
+    const repo = syncRepo()
+    if (!repo)
+      return ok({ changed: false })
+    const { id, name } = await localDevice()
+    if (!id)
+      return fail('没有设备标识，无法同步联系人')
+    return mailContacts.syncMailContacts(repo, { id, name })
   },
 } as Partial<WorkbenchApi>

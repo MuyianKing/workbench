@@ -924,6 +924,27 @@ pub fn work_log_sync_pull(repo: String, device: String) -> Result<Vec<Value>, St
     crate::sync::read_work_log_shards(&repo, &device)
 }
 
+/// 把本机的邮箱联系人分片推进同步仓库：`mail-contacts/<设备id>.json`
+/// （记录 + 删除墓碑；只写自己那份，单写者）。
+#[tauri::command(async)]
+pub fn mail_contacts_sync_publish(repo: String, device: String, shard: Value) -> Result<Value, String> {
+    if repo.trim().is_empty() {
+        return Err("没有配置同步仓库".into());
+    }
+    crate::sync::publish_mail_contacts(&repo, &device, &shard)
+}
+
+/// 拉最新克隆后读别的机器推上来的邮箱联系人分片（本机那份跳过）。
+/// 原始 JSON 回来，收敛与按地址合并由渲染层做。
+#[tauri::command(async)]
+pub fn mail_contacts_sync_pull(repo: String, device: String) -> Result<Vec<Value>, String> {
+    if repo.trim().is_empty() {
+        return Err("没有配置同步仓库".into());
+    }
+    crate::sync::refresh_clone(&repo)?;
+    crate::sync::read_mail_contacts_shards(&repo, &device)
+}
+
 /// 把本机的外观配置（theme.json 整份副本）单独写进同步仓库并推送；
 /// 设置界面「从别的机器取外观」旁的「同步一次」走它（且只有它 —— 没有自动同步）。
 /// 返回 `{ changed, pushed, log }`。

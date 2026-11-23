@@ -2,7 +2,7 @@ import type { MailAccount, MailAttachmentInput, MailContact, MailFolder, ParsedA
 import type { Result } from '@/types'
 import type { MailSummary } from '@/workbench/mail'
 import { fail, ok } from '@workbench/core'
-import { buildMime, contactOf, countUnreadMails, displayDate, displayRecipients, displaySender, isBulkMail, mailAccountReady, mailTime, parseMessage, recipientAddress, recipientDisplay, sanitizeMailContact, senderAddress } from '@workbench/mail'
+import { buildMime, contactOf, countUnreadMails, displayDate, displayRecipients, displaySender, isBulkMail, mailAccountReady, mailTime, parseMessage, projectContacts, recipientAddress, recipientDisplay, sanitizeMailContact, senderAddress } from '@workbench/mail'
 import { defineStore } from 'pinia'
 /**
  * 邮箱页的状态。
@@ -38,6 +38,7 @@ import { defineStore } from 'pinia'
 import { computed, ref, watch } from 'vue'
 import { notifyError } from '@/notify'
 import { deleteMails as deleteMailsOnServer, fetchMailBody, fetchMailList, registerMailWatch, saveMailAttachment, sendMail, setMailSeen } from '@/workbench/mail'
+import { stampContact } from '@/workbench/mail-contacts'
 import { useNavStore } from './nav'
 import { useSettingsStore } from './settings'
 
@@ -133,6 +134,8 @@ export const useMailStore = defineStore('mail', () => {
     if (next === 'contacts') {
       tab.value = next
       closeMail()
+      // 进通讯录签拉一轮：把别的设备推上来的联系人并进来（失败只留一行字）
+      void syncContacts()
       return
     }
     setFolder(next)
@@ -522,8 +525,16 @@ export const useMailStore = defineStore('mail', () => {
 
   // ---------- 通讯录 ----------
 
-  /** 联系人名单（设置里的 mailContacts）：写信的收件人下拉与右键「存为联系人」共用一份 */
-  const contacts = computed<MailContact[]>(() => settings.settings.mailContacts)
+  /**
+   * 通讯录的完整记录（含删除墓碑）：同步与写入都基于它，墓碑要留着才能同步到别的机器。
+   * 直接读设置（settings.settings 是响应式对象，computed 会跟着刷新）。
+   */
+  const contactRecords = computed<MailContact[]>(() => settings.settings.mailContacts)
+
+  /**
+   * 展示用的联系人名单：滤掉墓碑。写信下拉与右键「存为联系人」共用这一份。
+   */
+  const contacts = computed<MailContact[]>(() => projectContacts(contactRecords.value))
 
   /** 这个地址在不在通讯录里（右键菜单据此在「存为联系人 / 移出联系人」之间切） */
   function isContact(address: string): boolean {
@@ -542,28 +553,77 @@ export const useMailStore = defineStore('mail', () => {
   }
 
   /**
-   * 存一个联系人：通讯录以地址为身份 —— 这个地址已有就改名字，没有才追一条。
-   * 落盘走设置（这里没有秘密，不进凭据管理器），失败把原因交回调用方。
+   * 存一个联系人：通讯录以地址为身份 —— 这个地址已有就改名字（新时间戳盖过旧记录），
+   * 没有才追一条。落盘走设置（这里没有秘密，不进凭据管理器），失败把原因交回调用方。
+   * 写成功后再触发一轮同步（带 updatedAt / by，别的机器按后写胜出合入）。
    */
   async function saveContact(draft: MailContact): Promise<Result<null>> {
-    const contact = sanitizeMailContact(draft)
-    if (!contact.address)
+    const clean = sanitizeMailContact(draft)
+    if (!clean.address)
       return fail('先填一个像样的邮箱地址')
-    const next = contacts.value.some(entry => entry.address === contact.address)
-      ? contacts.value.map(entry => (entry.address === contact.address ? contact : entry))
-      : [...contacts.value, contact]
+    const contact = await stampContact(clean)
+    const next = contactRecords.value.some(entry => entry.address === contact.address)
+      ? contactRecords.value.map(entry => (entry.address === contact.address ? contact : entry))
+      : [...contactRecords.value, contact]
     const updated = await settings.updateSettings({ mailContacts: next })
-    return updated ? ok(null) : fail('保存联系人失败')
+    if (!updated)
+      return fail('保存联系人失败')
+    void syncContacts()
+    return ok(null)
   }
 
-  /** 从通讯录里摘掉一个地址；本来就不在里面算成（结果一样） */
+  /**
+   * 从通讯录里摘掉一个地址：写删除墓碑而不是直接摘掉数组项 —— 墓碑要同步到别的机器，
+   * 否则那条旧记录下一轮又会被拉回来。本来就不在通讯录里算成（结果一样）。
+   */
   async function removeContact(address: string): Promise<Result<null>> {
     const wanted = address.trim().toLowerCase()
-    const next = contacts.value.filter(entry => entry.address !== wanted)
-    if (next.length === contacts.value.length)
+    const existing = contactRecords.value.find(entry => entry.address === wanted && !entry.deleted)
+    if (!existing)
       return ok(null)
+    const tombstone = await stampContact(existing, true)
+    const next = contactRecords.value.some(entry => entry.address === wanted)
+      ? contactRecords.value.map(entry => (entry.address === wanted ? tombstone : entry))
+      : [...contactRecords.value, tombstone]
     const updated = await settings.updateSettings({ mailContacts: next })
-    return updated ? ok(null) : fail('移出联系人失败')
+    if (!updated)
+      return fail('移出联系人失败')
+    void syncContacts()
+    return ok(null)
+  }
+
+  // ---------- 通讯录同步 ----------
+
+  /** 同步状态行：失败才在联系人签显示一行字，成功静默（不弹 toast） */
+  const contactSyncFailed = ref(false)
+  /** 同一时刻只跑一轮；跑着时又改了，等这轮收场补一趟 */
+  let contactSyncInFlight: Promise<void> | null = null
+  let contactSyncQueued = false
+
+  async function runContactSync(): Promise<void> {
+    const result = await window.workbench.syncMailContacts()
+    contactSyncFailed.value = !result.ok
+  }
+
+  /** 跑一轮同步；重复调用共享同一个在途 Promise */
+  async function syncContacts(): Promise<void> {
+    if (contactSyncInFlight) {
+      contactSyncQueued = true
+      return
+    }
+    contactSyncInFlight = (async () => {
+      try {
+        await runContactSync()
+      }
+      finally {
+        contactSyncInFlight = null
+      }
+      if (contactSyncQueued) {
+        contactSyncQueued = false
+        await syncContacts()
+      }
+    })()
+    await contactSyncInFlight
   }
 
   /**
@@ -741,6 +801,8 @@ export const useMailStore = defineStore('mail', () => {
     markBulk,
     unbulk,
     contacts,
+    contactSyncFailed,
+    syncContacts,
     isContact,
     saveContact,
     removeContact,

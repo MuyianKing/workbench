@@ -82,6 +82,9 @@ pub(crate) const ACTIVITY_SYNC_DIR: &str = "activity";
 /// 克隆里放 **工作日志** 的子目录名：一台机器一个文件（条目 + 删除墓碑）。
 /// 读回来按 id 做后写胜出并写回本机，见 packages/work-log/src/work-log-sync.ts
 pub(crate) const WORK_LOG_SYNC_DIR: &str = "work-log";
+/// 克隆里放 **邮箱联系人** 的子目录名：一台机器一个文件（记录 + 删除墓碑）。
+/// 读回来按地址做后写胜出并写回本机，见 packages/mail/src/contacts-sync.ts
+pub(crate) const MAIL_CONTACTS_SYNC_DIR: &str = "mail-contacts";
 /// 网关（WorkBuddy 反代）的目录名。它自带一层完整结构：账号、用量、日志都在里面，
 /// 不跟工作台自己的数据文件混在一起 —— 那是一整套独立的运行时状态
 const GATEWAY_DIR: &str = "wb-gateway";

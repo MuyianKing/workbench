@@ -360,6 +360,10 @@ function onMenuAct(name: 'contact' | 'bulk' | 'toggle-seen' | 'multi-pick' | 'mu
       <p v-if="mail.contacts.length" class="contact-list__count">
         {{ mail.contacts.length }} 位联系人
       </p>
+      <!-- 同步失败只在联系人签留一行字，成功静默（与保险库 / 工作日志同一待遇） -->
+      <p v-if="mail.contactSyncFailed" class="contact-list__sync-error">
+        联系人同步失败，稍后再进这一页重试
+      </p>
       <div
         v-for="contact in mail.contacts"
         :key="contact.address"
@@ -606,6 +610,15 @@ function onMenuAct(name: 'contact' | 'bulk' | 'toggle-seen' | 'multi-pick' | 'mu
   color: var(--ink-3);
   font-size: var(--fs-meta);
   font-variant-numeric: tabular-nums;
+}
+
+/* 同步失败那一行：只在联系人签出现，安静一档、不弹消息 */
+.contact-list__sync-error {
+  flex-shrink: 0;
+  margin: 0;
+  padding: 0 var(--sp-1) var(--sp-1);
+  color: var(--ink-3);
+  font-size: var(--fs-meta);
 }
 
 /* 一张小卡片：与邮件清单行同一副壳（透明边 + 悬停实起来 + 底色抬一档） */

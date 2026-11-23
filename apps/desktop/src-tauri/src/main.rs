@@ -720,6 +720,8 @@ fn main() {
             commands::activity_sync_shards,
             commands::work_log_sync_publish,
             commands::work_log_sync_pull,
+            commands::mail_contacts_sync_publish,
+            commands::mail_contacts_sync_pull,
             commands::auth_status,
             commands::auth_refresh_account,
             commands::auth_login_start,

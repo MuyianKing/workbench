@@ -40,11 +40,15 @@ function reply(target: MailReplyTarget): void {
 
 onMounted(() => {
   void mail.refreshList()
+  if (mail.tab === 'contacts')
+    void mail.syncContacts()
 })
 
 /** KeepAlive 换页回来再拉一次（inFlight 挡住与首次挂载的重复） */
 onActivated(() => {
   void mail.refreshList()
+  if (mail.tab === 'contacts')
+    void mail.syncContacts()
 })
 
 /**

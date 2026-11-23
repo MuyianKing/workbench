@@ -29,6 +29,9 @@ kb_pull
 kb_scan
 kb_source_sync
 kb_sync
+# 通讯录同步（Value 分片：记录 + 墓碑由渲染层合并，沿用 work_log_sync_* 的历史形态）
+mail_contacts_sync_publish
+mail_contacts_sync_pull
 markdown_window_context
 note_image_upload
 note_images_delete
