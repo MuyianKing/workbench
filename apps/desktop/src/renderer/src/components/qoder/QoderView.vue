@@ -514,8 +514,6 @@ const accountCards = computed<AccountCardView[]>(() => accounts.value.map((accou
     statusTitle: account.lastError || undefined,
     quota: quotaHint(account),
     credits: creditOf(account.uid),
-    // Qoder 的额度按周期重置，积分分母仍用快照的包总量（与 TBuddy 的 30 天口径不同）
-    creditsUsed30: null,
     expiry: expiryHint(account),
     usage: item
       ? {
