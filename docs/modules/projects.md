@@ -45,6 +45,10 @@
   与中间那张卡片里，独立成页后不再受栏宽限制。工具带的左右留白由外壳给（`--card-gap`，见 global.css 的 `.filter` 一节）——
   与下面第一张卡片的左缘、最后一张卡片的右缘同一条竖线，工具带贴死窗口边就是漏了这一段。
 - 选目录即自动读取 `package.json`：识别框架、版本、全部 scripts、锁文件与产物目录。
+- **没有 `package.json` 的目录（如 Rust / Tauri 项目，只有 `Cargo.toml`）也能加入**：扫描器用
+  `missingPackageJson` 标记（与「package.json 解析失败」的 `parseError` 一样只是「没有可自动识别的 Node 脚本」，
+  不影响能否加入）。这类项目在详情抽屉里挂自定义命令即可启动 / 打包。客观记一个 `hasPackageJson` 供「安装依赖」
+  按钮判断（没有就没有可装的东西）；不作为项目分类展示。目录不存在仍是普通失败。
 - 按命名约定预分类启动命令（`serve` > `dev` > `start` > 变体）与打包命令（`build` 及变体），可在界面上改。
 - 包管理器按锁文件判定（`pnpm` > `yarn` > `npm`），可手动覆盖；未安装时执行前拦截并说明原因。
 - 分组：新建 / 双击改名 / 删除；在**项目页的筛选栏**或「分组管理」弹窗里**拖动分组标签调整顺序**；把卡片拖到分组标签即完成
@@ -101,6 +105,14 @@
   （`devServerUrl()`，`packages/core/src/dev-port.ts`），它解释了两件事：为什么写 `localhost` 而不是 `127.0.0.1`、为什么
   结尾那个 `/` 不能省。
 - 自定义命令（名称 + 命令行）挂在项目上，卡片「⋯」菜单里一键运行。
+- **启动 / 打包的下拉框也列自定义命令**：候选既有 package.json 的 scripts 名，也有 `scripts.custom` 里的条目，
+  编码成 `@custom:<i>` 与脚本名存在同一个字段里（`packages/core/src/project-command.ts` 的 `customRef` /
+  `customRefIndex` / `commandLabel`，`@` 不在脚本名正则里，不会撞名）。界面显示成「自定义：名称」，不暴露内部编码。
+- **自定义命令按原始命令行执行，不以 node / npm / nvm / 包管理器为前提**：`session.ts` 解析到自定义引用就把
+  那条 `command` 原样交给 `spawn_session`（cwd 仍是项目目录），不拼 `<pm> run`、不前置 nvm 的 PATH，状态仍算
+  start / build（状态灯、端口识别、活跃度、最近使用的语义不变）。普通脚本名分支照旧拼 `<pm> run <name>` 并过
+  `isValidScriptName`。`guardProject(id, { commandOnly: true })` 对自定义命令跳过 nvm / 包管理器检查（那些是 Node 生态
+  的前提，不该拦 cargo 这类命令）；「安装依赖」走严格守卫，按钮按 `hasPackageJson` 判断有无可装的东西。
 - 状态机与指示灯：灰=空闲、黄=运行/安装/打包中、绿=命令正常退出（只有打包才显示成「打包成功」，其余按「已结束」）、
   红=失败。
 - 用户点一次「启动」或「打包」记一次活跃度（按下的当天），首页贡献图里那一格就有这一笔；安装依赖、自定义命令、停止与启动
@@ -162,6 +174,8 @@
 
 **配置变更自动落盘盯的是「可落盘字段的投影」**（`stores/projects.ts` 的 `editableProjects`），
 不是 `projects` 的深遍历：主进程推回来的 `history` / `lastUsedAt` 不再触发一次全项目重算与 IPC。
+写入按 400ms 防抖；**关抽屉时立即 `flushPendingWrites()` 冲一次**，不排队等防抖 —— 否则在抽屉里配好
+自定义命令后马上点卡片按钮，卡片 / 执行层读的还是没落盘的旧 `scripts`（按钮灰、点不动）。
 
 nvm / nrm 的探测结果不再手写 `json!`：`nvm.rs` / `nrm.rs` 的 `NvmStatus` / `NrmStatus` 带 `// @contract`，
 TS 类型由 `pnpm run contract:gen` 生成。「没装 nvm / nrm」是正常状态（`available: false` + `error`），

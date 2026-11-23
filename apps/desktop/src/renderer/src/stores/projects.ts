@@ -2,7 +2,7 @@ import type { ProjectSort } from '@workbench/core'
 import type { ProcessTarget } from './terminal'
 
 import type { ActivityBreakdown, ActivityCounts, ActivityView, AddProjectInput, PackageManager, ProcessStatusEvent, Project, ProjectGroup, ProjectPatch } from '@/types'
-import { backfillProjectColors as backfillColors, devServerUrl, reorderById, sanitizeProjectSort } from '@workbench/core'
+import { backfillProjectColors as backfillColors, customRefIndex, devServerUrl, reorderById, sanitizeProjectSort } from '@workbench/core'
 import { RUNNING_STATUS } from '@workbench/terminal'
 
 import { sanitizeDeviceIds } from '@workbench/work-log'
@@ -287,9 +287,7 @@ export const useProjectsStore = defineStore('projects', () => {
       serve: input.serve,
       build: [...input.build],
       defaultBuild: input.defaultBuild,
-      // 「仅管理目录」的放行标志，漏掉它会让勾选项静默失效
-      allowInvalid: input.allowInvalid,
-      // 同上：漏掉它勾了「在首页展示」也会静默失效
+      // 漏掉它勾了「在首页展示」也会静默失效
       home: input.home === true,
     }
 
@@ -466,6 +464,21 @@ export const useProjectsStore = defineStore('projects', () => {
 
   let pushTimer: number | null = null
 
+  /** 把当前待写的配置立刻推出去（抽屉关闭时调用，不等 400ms 防抖） */
+  function flushPendingWrites(): void {
+    if (pushTimer) {
+      window.clearTimeout(pushTimer)
+      pushTimer = null
+    }
+    for (const item of editableProjects.value) {
+      const next = JSON.stringify(item.patch)
+      if (pushedSnapshot.get(item.id) === next)
+        continue
+      pushedSnapshot.set(item.id, next)
+      void window.workbench.updateProject(item.id, item.patch)
+    }
+  }
+
   watch(editableProjects, () => {
     if (!ready.value)
       return
@@ -473,19 +486,23 @@ export const useProjectsStore = defineStore('projects', () => {
       window.clearTimeout(pushTimer)
     pushTimer = window.setTimeout(() => {
       pushTimer = null
-      for (const item of editableProjects.value) {
-        const next = JSON.stringify(item.patch)
-        if (pushedSnapshot.get(item.id) === next)
-          continue
-        pushedSnapshot.set(item.id, next)
-        void window.workbench.updateProject(item.id, item.patch)
-      }
+      flushPendingWrites()
     }, 400)
   })
 
   // ---------- 操作 ----------
 
-  async function guardProject(id: string): Promise<Project | null> {
+  /**
+   * 命令执行前的守卫。
+   *
+   * commandOnly 表示这条命令是用户配的原文（自定义命令 / 选作启动打包的自定义引用），
+   * 不依赖 Node 生态，因此不查 nvm 版本与包管理器是否安装；查了反而会误拦 cargo 这类命令。
+   * 走 npm 脚本与「安装依赖」的用默认守卫，照旧检查 Node 环境。
+   */
+  async function guardProject(
+    id: string,
+    options: { commandOnly?: boolean } = {},
+  ): Promise<Project | null> {
     const project = findProject(id)
     if (!project)
       return null
@@ -495,10 +512,8 @@ export const useProjectsStore = defineStore('projects', () => {
       return null
     }
 
-    if (project.manageOnly) {
-      notifyError('该项目是「仅管理目录」，package.json 不可用，无法执行命令')
-      return null
-    }
+    if (options.commandOnly)
+      return project
 
     // 选了 nvm 版本就必须真的装了，否则命令会悄悄跑在系统 node 上
     const wantedNode = project.nodeVersion?.trim()
@@ -535,6 +550,11 @@ export const useProjectsStore = defineStore('projects', () => {
     const project = await guardProject(id)
     if (!project)
       return
+    // 安装依赖是针对 Node 项目的动作：目录里没有 package.json 时没有可装的东西
+    if (project.hasPackageJson === false) {
+      notifyWarning('这个目录没有 package.json，无需安装依赖')
+      return
+    }
     terminal.focusTerminal(id, 'install')
     const result = await window.workbench.install(id)
     if (!result.ok)
@@ -572,14 +592,19 @@ export const useProjectsStore = defineStore('projects', () => {
   }
 
   async function start(id: string): Promise<void> {
-    const project = await guardProject(id)
+    // 启动命令若是自定义引用（原始命令行），走不依赖 Node 生态的守卫
+    const configured = findProject(id)
+    const isCustom = configured ? customRefIndex(configured.scripts.serve) !== null : false
+    const project = await guardProject(id, { commandOnly: isCustom })
     if (!project)
       return
 
-    // Node 版本不满足只提示不阻断（F-9.3）
-    const node = await window.workbench.checkNodeVersion(id)
-    if (node.ok && node.data && !node.data.ok) {
-      notifyWarning(`项目要求 Node ${node.data.required}，当前为 ${node.data.actual}，启动可能失败`)
+    // Node 版本不满足只提示不阻断（F-9.3）；自定义命令没有 nodeRequirement，这条会直接 ok
+    if (!isCustom) {
+      const node = await window.workbench.checkNodeVersion(id)
+      if (node.ok && node.data && !node.data.ok) {
+        notifyWarning(`项目要求 Node ${node.data.required}，当前为 ${node.data.actual}，启动可能失败`)
+      }
     }
 
     // 先看项目上一次记下的端口，其次用本次会话里从启动日志识别到的那个。
@@ -595,11 +620,14 @@ export const useProjectsStore = defineStore('projects', () => {
   }
 
   async function build(id: string, script?: string): Promise<void> {
-    const project = await guardProject(id)
+    const configured = findProject(id)
+    const target = script ?? configured?.scripts.defaultBuild ?? configured?.scripts.build[0]
+    // 打包命令若是自定义引用，走不依赖 Node 生态的守卫
+    const isCustom = customRefIndex(target) !== null
+    const project = await guardProject(id, { commandOnly: isCustom })
     if (!project)
       return
 
-    const target = script ?? project.scripts.defaultBuild ?? project.scripts.build[0]
     if (!target) {
       notifyWarning('未配置打包命令，请在项目详情中选择')
       return
@@ -656,7 +684,8 @@ export const useProjectsStore = defineStore('projects', () => {
 
   /** 执行项目配置里的第 index 条自定义命令（F-2.6） */
   async function runCustom(id: string, index: number): Promise<void> {
-    const project = await guardProject(id)
+    // 自定义命令是用户配的整行原文，不依赖 Node 生态
+    const project = await guardProject(id, { commandOnly: true })
     if (!project)
       return
 
@@ -776,6 +805,9 @@ export const useProjectsStore = defineStore('projects', () => {
   }
 
   function closeDrawer(): void {
+    // 抽屉里的命令 / 配置改动走 400ms 防抖落盘；关抽屉时立刻冲一次，
+    // 免得用户配完马上点卡片按钮，卡片读到的还是没落盘的旧 scripts。
+    flushPendingWrites()
     drawerProjectId.value = null
   }
 

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { Close, Operation, Plus, VideoPlay } from '@element-plus/icons-vue'
+import { commandLabel, customRef } from '@workbench/core'
 import { ElMessage } from 'element-plus'
 import { computed, ref, watch } from 'vue'
 import { isBusyStatus } from '@/status'
@@ -9,8 +10,9 @@ import { useTerminalStore } from '@/stores/terminal'
 /**
  * 项目详情抽屉的「命令配置」：启动 / 打包命令、监听端口（只读）、自定义命令。
  *
- * 从 `ProjectDrawer.vue` 拆出来的整块。候选命令来自磁盘上 package.json 的 scripts
- * （进抽屉时扫一次），自定义命令直接改 store 里那个项目对象。
+ * 从 `ProjectDrawer.vue` 拆出来的整块。启动 / 打包下拉的候选既有 package.json 的 scripts，
+ * 也有项目里配的自定义命令（编码成 `@custom:<i>`，原始命令行执行，不以 node 为前提）；
+ * 前者进抽屉时扫一次盘，后者直接读 store 里那个项目对象。
  */
 const store = useProjectsStore()
 const terminal = useTerminalStore()
@@ -39,18 +41,39 @@ watch(
   { immediate: true },
 )
 
-const serveOptions = computed(() => {
-  const set = new Set(allScripts.value)
+/** 下拉候选：scripts 名用原名，自定义命令显示成「自定义：名称」，值是 @custom:<i> 引用 */
+interface CommandOption { value: string, label: string }
+
+const customs = computed(() => project.value?.scripts.custom ?? [])
+
+function customOptions(): CommandOption[] {
+  return customs.value.map((entry, index) => ({ value: customRef(index), label: `自定义：${entry.name}` }))
+}
+
+const serveOptions = computed<CommandOption[]>(() => {
+  const set = new Map<string, string>()
+  for (const s of allScripts.value) set.set(s, s)
   if (project.value?.scripts.serve)
-    set.add(project.value.scripts.serve)
-  return [...set]
+    set.set(project.value.scripts.serve, commandLabel(project.value.scripts.serve, customs.value))
+  for (const opt of customOptions()) set.set(opt.value, opt.label)
+  return [...set].map(([value, label]) => ({ value, label }))
 })
 
-const buildOptions = computed(() => {
-  const set = new Set(allScripts.value)
-  for (const name of project.value?.scripts.build ?? []) set.add(name)
-  return [...set]
+const buildOptions = computed<CommandOption[]>(() => {
+  const set = new Map<string, string>()
+  for (const name of allScripts.value) set.set(name, name)
+  for (const name of project.value?.scripts.build ?? [])
+    set.set(name, commandLabel(name, customs.value))
+  for (const opt of customOptions()) set.set(opt.value, opt.label)
+  return [...set].map(([value, label]) => ({ value, label }))
 })
+
+const defaultBuildOptions = computed<CommandOption[]>(() =>
+  (project.value?.scripts.build ?? []).map(name => ({
+    value: name,
+    label: commandLabel(name, customs.value),
+  })),
+)
 
 // ---------- 监听端口 ----------
 
@@ -68,8 +91,6 @@ const portText = computed(() => {
 // ---------- 自定义命令（F-2.6） ----------
 
 const customDraft = ref({ name: '', command: '' })
-
-const customs = computed(() => project.value?.scripts.custom ?? [])
 
 function addCustom(): void {
   const current = project.value
@@ -121,10 +142,10 @@ function runCustom(index: number): void {
         clearable
         style="width: 100%"
       >
-        <el-option v-for="s in serveOptions" :key="s" :label="s" :value="s" />
+        <el-option v-for="opt in serveOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
       </el-select>
       <p class="field__hint">
-        来自 package.json 的 scripts，可手动指定。
+        来自 package.json 的 scripts，或下方添加的自定义命令（原始命令行，不依赖 node）。
       </p>
     </div>
 
@@ -145,10 +166,10 @@ function runCustom(index: number): void {
         placeholder="未配置"
         style="width: 100%"
       >
-        <el-option v-for="s in buildOptions" :key="s" :label="s" :value="s" />
+        <el-option v-for="opt in buildOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
       </el-select>
       <p class="field__hint">
-        勾选多条后，卡片上的「打包」可通过下拉切换。
+        勾选多条后，卡片上的「打包」可通过下拉切换；自定义命令按原始命令行执行。
       </p>
     </div>
 
@@ -161,7 +182,7 @@ function runCustom(index: number): void {
         clearable
         style="width: 100%"
       >
-        <el-option v-for="s in project.scripts.build" :key="s" :label="s" :value="s" />
+        <el-option v-for="opt in defaultBuildOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
       </el-select>
     </div>
 
@@ -185,7 +206,7 @@ function runCustom(index: number): void {
             size="small"
             :icon="VideoPlay"
             text
-            :disabled="isBusy || isRunning || !pathValid || !!project.manageOnly"
+            :disabled="isBusy || isRunning || !pathValid"
             aria-label="运行该命令"
             @click="runCustom(index)"
           />

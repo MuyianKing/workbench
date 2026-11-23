@@ -213,8 +213,8 @@ export interface Project {
   scripts: ProjectScripts
   outputDir?: string
   autoOpenExplorer: boolean
-  /** 仅管理目录（package.json 解析失败时加入），不执行任何命令 */
-  manageOnly?: boolean
+  /** 扫描时目录里有没有 package.json（客观事实，安装依赖据此判断；不作为界面分类展示） */
+  hasPackageJson?: boolean
   /** 项目声明的 Node 版本要求（engines.node 或 .nvmrc），仅用于提示 */
   nodeRequirement?: string
   /**
@@ -474,8 +474,6 @@ export interface AddProjectInput {
   serve?: string
   build: string[]
   defaultBuild?: string
-  /** package.json 解析失败时，是否以「仅管理目录」的方式加入 */
-  allowInvalid?: boolean
   /** 加入后是否放到首页展示（见 Project.home）；缺省不展示 */
   home?: boolean
 }

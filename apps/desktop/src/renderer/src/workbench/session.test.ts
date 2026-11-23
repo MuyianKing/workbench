@@ -1,4 +1,5 @@
 import type { Project } from '@/types'
+import { customRef } from '@workbench/core'
 import { terminalKey } from '@workbench/terminal'
 /**
  * 会话这一侧「停止到底停了哪一条」的判定。
@@ -96,5 +97,46 @@ describe('停止命中哪一条会话', () => {
     expect(result.ok).toBe(false)
     expect(result.error).toBe('该项目当前没有在运行的命令')
     expect(calls.some(item => item.command === 'stop_session')).toBe(false)
+  })
+})
+
+describe('自定义引用按原始命令行执行', () => {
+  function customCommandProject(): Project {
+    return {
+      ...makeProject('p-raw'),
+      nodeVersion: '20.0.0',
+      scripts: {
+        serve: customRef(0),
+        build: [customRef(1)],
+        defaultBuild: customRef(1),
+        custom: [
+          { name: 'dev', command: 'cargo tauri dev' },
+          { name: 'release', command: 'cargo build --release' },
+        ],
+      },
+    }
+  }
+
+  it('启动：传原始命令行，不带 <pm> run，也不前置 nvm PATH', async () => {
+    calls.length = 0
+    expect((await session.startProject(customCommandProject())).ok).toBe(true)
+
+    const spawn = calls.find(item => item.command === 'spawn_session')
+    expect(spawn?.args?.line).toBe('cargo tauri dev')
+    expect(spawn?.args?.pathPrepend).toBeNull()
+  })
+
+  it('打包：同样 raw line，脚本名分支仍拼 <pm> run', async () => {
+    calls.length = 0
+    expect((await session.buildProject(customCommandProject(), customRef(1))).ok).toBe(true)
+
+    const spawn = calls.find(item => item.command === 'spawn_session')
+    expect(spawn?.args?.line).toBe('cargo build --release')
+    expect(spawn?.args?.pathPrepend).toBeNull()
+
+    // 普通脚本名仍走原来的拼接，不被新逻辑影响
+    calls.length = 0
+    expect((await session.buildProject(makeProject('p-script'), 'build')).ok).toBe(true)
+    expect(calls.find(item => item.command === 'spawn_session')?.args?.line).toBe('pnpm run build')
   })
 })

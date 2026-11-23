@@ -250,7 +250,7 @@ export function removeProject(id: string): void {
 
 /**
  * 追加一个项目并落盘。
- * 项目对象的组装留在适配层——只有那里才知道这次扫描的结果与「仅管理目录」的判定。
+ * 项目对象的组装留在适配层——只有那里才知道这次扫描的结果（识别出的命令、有没有 package.json）。
  */
 export function addProject(project: Project): void {
   data.projects.push(project)
