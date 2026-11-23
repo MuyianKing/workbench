@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { Project, ProjectStatus } from '@/types'
 import { Box, Download, MoreFilled, Refresh, Search, Share, VideoPause, VideoPlay } from '@element-plus/icons-vue'
-import { devServerUrl, projectColorVar, sanitizeProjectColor } from '@workbench/core'
+import { commandLabel, devServerUrl, projectColorVar, sanitizeProjectColor } from '@workbench/core'
 import { computed, ref } from 'vue'
 import { useWallClock } from '@/composables/use-wall-clock'
 import { DRAG_MIME } from '@/drag-mime'
@@ -27,6 +27,13 @@ const meta = computed(() =>
     : { label: '路径无效', tone: 'fail' },
 )
 const pm = computed(() => store.resolvedPm(props.project))
+/** 打包下拉：自定义引用显示成「自定义：名称」，而不是 @custom:0 这种内部编码 */
+const buildOptions = computed(() =>
+  props.project.scripts.build.map(name => ({
+    value: name,
+    label: commandLabel(name, props.project.scripts.custom ?? []),
+  })),
+)
 const isBusy = computed(() => isBusyStatus(status.value))
 const isRunning = computed(() => status.value === 'running')
 
@@ -193,9 +200,6 @@ function onMore(command: string): void {
       <li v-if="runtime?.port">
         :{{ runtime.port }}
       </li>
-      <li v-if="project.manageOnly" class="card__flag">
-        仅管理目录
-      </li>
     </ul>
 
     <footer class="card__actions" @click.stop>
@@ -264,12 +268,12 @@ function onMore(command: string): void {
         <template #dropdown>
           <el-dropdown-menu>
             <el-dropdown-item
-              v-for="s in project.scripts.build"
-              :key="s"
-              :command="s"
-              :class="{ 'is-current': s === project.scripts.defaultBuild }"
+              v-for="opt in buildOptions"
+              :key="opt.value"
+              :command="opt.value"
+              :class="{ 'is-current': opt.value === project.scripts.defaultBuild }"
             >
-              {{ s }}
+              {{ opt.label }}
             </el-dropdown-item>
           </el-dropdown-menu>
         </template>
@@ -296,7 +300,7 @@ function onMore(command: string): void {
           size="small"
           :icon="Download"
           :loading="status === 'installing'"
-          :disabled="isBusy || isRunning || !pathValid || !!project.manageOnly"
+          :disabled="isBusy || isRunning || !pathValid || project.hasPackageJson === false"
           aria-label="安装依赖"
           @click="store.install(project.id)"
         />
@@ -338,7 +342,7 @@ function onMore(command: string): void {
                 v-for="(item, index) in project.scripts.custom"
                 :key="`${item.name}-${index}`"
                 :command="`custom:${index}`"
-                :disabled="isBusy || isRunning || !pathValid || !!project.manageOnly"
+                :disabled="isBusy || isRunning || !pathValid"
                 divided
               >
                 运行 {{ item.name }}
@@ -598,12 +602,6 @@ function onMore(command: string): void {
   content: '·';
   margin-right: var(--sp-2);
   color: var(--border-strong);
-}
-
-/* 「仅管理目录」在元信息里点一下色，说明这张卡为什么按钮全是灰的 */
-.card__flag {
-  color: var(--st-run);
-  font-weight: 600;
 }
 
 /* 项目级 Node 版本：非默认行为，值得比其它元信息重一点 */

@@ -39,7 +39,7 @@ export const projectApi = {
 
   /**
    * 新增项目：校验目录 → 扫描 package.json → 组装并落盘。
-   * 组装规则照着 Electron 版 ipc.ts 的 addProject 搬过来（含「仅管理目录」那条分支）。
+   * 组装规则照着 Electron 版 ipc.ts 的 addProject 搬过来。
    */
   addProject: async (input: AddProjectInput): Promise<Result<Project>> => {
     if (!input || typeof input.path !== 'string')
@@ -65,14 +65,11 @@ export const projectApi = {
 
     const scan = await scanner.scan(dirPath)
 
-    // 解析失败的 package.json 允许以「仅管理目录」的方式加入（设计文档 §7）
-    if (!scan.ok && !scan.parseError)
+    // 没有 package.json / 解析失败都不是拒绝理由：启动打包靠用户配的命令，
+    // 有没有 Node 脚本只是「自动识别到了没有」的差别。只有目录本身有问题才拒。
+    if (!scan.ok && !scan.parseError && !scan.missingPackageJson)
       return fail(scan.error ?? '项目扫描失败')
-    if (scan.parseError && input.allowInvalid !== true) {
-      return fail(scan.error ?? 'package.json 解析失败')
-    }
 
-    const manageOnly = !scan.ok
     const buildList = Array.isArray(input.build) ? input.build : scan.build
 
     const project: Project = {
@@ -87,13 +84,14 @@ export const projectApi = {
       version: scan.version || '0.0.0',
       scripts: {
         serve: input.serve || scan.serve,
-        build: manageOnly ? [] : buildList,
-        defaultBuild: manageOnly ? undefined : input.defaultBuild || buildList[0],
+        build: buildList,
+        defaultBuild: input.defaultBuild || buildList[0],
       },
       outputDir: scan.outputDir ?? '',
       nodeRequirement: scan.enginesNode,
       autoOpenExplorer: true,
-      manageOnly: manageOnly || undefined,
+      // 客观记下有没有 package.json，仅供「安装依赖」按钮判断；不作为项目分类展示
+      hasPackageJson: scan.ok || scan.parseError === true,
       // 首页展示：只有界面明确勾了才写 true —— 缺省与老项目都是不展示（见 Project.home）
       home: input.home === true || undefined,
       groupId: input.groupId,

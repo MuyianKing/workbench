@@ -291,13 +291,16 @@ describe('scanProject', () => {
     expect(scan.error).toContain('目录不存在')
   })
 
-  it('没有 package.json 时拒绝', async () => {
+  it('没有 package.json 时标记 missingPackageJson 而不是普通失败', async () => {
     const dir = makeProject(undefined)
     const scan = await scanProject(nodeFs, dir)
 
     expect(scan.ok).toBe(false)
+    expect(scan.missingPackageJson).toBe(true)
     expect(scan.parseError).toBeUndefined()
     expect(scan.error).toContain('package.json')
+    // 名字保底为目录名，加入后才有显示名
+    expect(scan.name.length).toBeGreaterThan(0)
   })
 
   it('package.json 损坏时标记 parseError 而不是普通失败', async () => {
@@ -307,7 +310,7 @@ describe('scanProject', () => {
     expect(scan.ok).toBe(false)
     expect(scan.parseError).toBe(true)
     expect(scan.error).toContain('解析失败')
-    // 名字保底为目录名，方便「仅管理目录」方式加入
+    // 名字保底为目录名，加入后才有显示名
     expect(scan.name.length).toBeGreaterThan(0)
   })
 })

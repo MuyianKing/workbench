@@ -1,5 +1,6 @@
 import type { Project } from '@/types'
 import { DEFAULT_THEME } from '@workbench/appearance'
+import { customRef } from '@workbench/core'
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_SETTINGS } from '@/types'
@@ -135,6 +136,38 @@ describe('配置变更自动落盘', () => {
     expect(patch.name).toBe('项目乙')
     expect('history' in patch).toBe(false)
     expect('lastUsedAt' in patch).toBe(false)
+  })
+
+  it('抽屉里给项目挂自定义命令并选为打包命令：改动会落盘', async () => {
+    const store = await initStore()
+    const project = store.projects[0]
+    project.scripts = { build: [], custom: [{ name: 'build', command: 'cargo build --release' }] }
+    await vi.advanceTimersByTimeAsync(500)
+    updateProjectSpy.mockClear()
+
+    // 模拟 ProjectCommandsSection / ProjectDrawerHeader 的 v-model 写入
+    project.scripts.build = [customRef(0)]
+    project.scripts.defaultBuild = customRef(0)
+    await vi.advanceTimersByTimeAsync(500)
+
+    expect(updateProjectSpy).toHaveBeenCalled()
+    const patch = updateProjectSpy.mock.calls.at(-1)![1] as Record<string, any>
+    expect(patch.scripts.build).toEqual([customRef(0)])
+    expect(patch.scripts.custom).toEqual([{ name: 'build', command: 'cargo build --release' }])
+  })
+
+  it('抽屉里改完不到 400ms 就关抽屉：关的那一下立刻落盘', async () => {
+    const store = await initStore()
+    updateProjectSpy.mockClear()
+
+    store.openDrawer('p1')
+    store.projects[0].scripts.build = ['build:prod']
+    // 不推进定时器：正常还要等 400ms，这里直接关抽屉
+    store.closeDrawer()
+
+    expect(updateProjectSpy).toHaveBeenCalledTimes(1)
+    const patch = updateProjectSpy.mock.calls[0][1] as Record<string, any>
+    expect(patch.scripts.build).toEqual(['build:prod'])
   })
 
   it('只改 lastUsedAt / history 这类运行期字段：一次 IPC 都不发', async () => {

@@ -24,8 +24,6 @@ const scanError = ref('')
 const scanning = ref(false)
 /** 用户手动改过显示名后，不再被扫描结果覆盖 */
 const nameTouched = ref(false)
-/** package.json 解析失败时，是否以「仅管理目录」的方式加入（设计文档 §7） */
-const allowInvalid = ref(false)
 
 const visible = computed({
   get: () => store.addDialogVisible,
@@ -33,9 +31,6 @@ const visible = computed({
 })
 
 const allScripts = computed(() => scan.value?.allScripts ?? [])
-
-/** 解析失败的项目只能管目录，不能执行命令，所以要用户显式勾选 */
-const parseFailed = computed(() => !!scan.value?.parseError)
 
 /** 选中的目录已经在列表里了；重复添加没有意义，在选路径这一步就拦掉 */
 const duplicate = computed(() => {
@@ -48,9 +43,8 @@ const duplicate = computed(() => {
 const canSubmit = computed(() => {
   if (scanning.value || !form.name.trim() || duplicate.value)
     return false
-  if (scan.value?.ok)
-    return true
-  return allowInvalid.value && parseFailed.value
+  // 扫描给出了名字就能加：有没有 package.json 只决定自动识别出多少命令，不决定能不能加
+  return !!scan.value
 })
 
 /** 输入路径后延迟扫描：手动选目录与逐字输入共用一个入口，避免选一次目录扫两遍 */
@@ -82,7 +76,6 @@ async function runScan(dirPath: string): Promise<void> {
   const target = dirPath.trim()
   scan.value = null
   scanError.value = ''
-  allowInvalid.value = false
 
   if (!target)
     return
@@ -99,12 +92,15 @@ async function runScan(dirPath: string): Promise<void> {
   }
 
   if (!result.data.ok) {
-    scanError.value = result.data.error ?? '该目录不是有效的 Node 项目'
-    if (result.data.parseError) {
-      // 解析失败仍允许加入，保留扫描结果供「仅管理目录」分支使用
+    // 没有 / 无法解析 package.json 是正常情况：没有可自动识别的 Node 命令，
+    // 但仍可加入、在详情里配命令。不把它标红成错误。
+    if (result.data.parseError || result.data.missingPackageJson) {
       scan.value = result.data
       if (!nameTouched.value)
         form.name = result.data.name
+    }
+    else {
+      scanError.value = result.data.error ?? '该目录不是有效的项目目录'
     }
     return
   }
@@ -172,7 +168,6 @@ function reset(): void {
   scanError.value = ''
   scanning.value = false
   nameTouched.value = false
-  allowInvalid.value = false
 }
 
 async function submit(): Promise<void> {
@@ -186,7 +181,6 @@ async function submit(): Promise<void> {
     serve: form.serve,
     build: form.build,
     defaultBuild: form.build[0],
-    allowInvalid: allowInvalid.value,
     home: form.home,
   })
 
@@ -210,7 +204,7 @@ async function submit(): Promise<void> {
         <div class="field__row">
           <el-input
             v-model="form.path"
-            placeholder="选择包含 package.json 的项目根目录"
+            placeholder="选择项目根目录（没有 package.json 也可加入）"
             spellcheck="false"
             @keydown.enter="runScan(form.path)"
           />
@@ -224,23 +218,13 @@ async function submit(): Promise<void> {
         该目录已经在项目列表里了（「{{ duplicate.name }}」），不能重复添加。
       </p>
       <p v-else-if="scanning" class="hint">
-        正在读取 package.json…
+        正在读取项目目录…
       </p>
       <p v-else-if="scanError" class="hint hint--error">
         {{ scanError }}
       </p>
 
-      <el-alert
-        v-if="parseFailed"
-        class="alert"
-        type="warning"
-        :closable="false"
-        show-icon
-        title="也可以只把目录纳入管理"
-        description="勾选下方选项后，Workbench 只记录这个目录、不执行任何命令；等 package.json 修好后，可在详情抽屉里用「重新定位」重新识别。"
-      />
-
-      <template v-if="scan && (scan.ok || parseFailed) && !duplicate">
+      <template v-if="scan && !duplicate">
         <el-form-item label="显示名">
           <el-input
             v-model="form.name"
@@ -268,10 +252,6 @@ async function submit(): Promise<void> {
         <!-- 首页那张项目卡只画勾了这一项的项目，所以这里默认不勾（见 Project.home） -->
         <el-checkbox v-model="form.home" class="option">
           在首页展示
-        </el-checkbox>
-
-        <el-checkbox v-if="parseFailed" v-model="allowInvalid" class="option">
-          以「仅管理目录」方式加入（不执行命令）
         </el-checkbox>
 
         <div v-if="scan.ok" class="scan">
@@ -373,11 +353,7 @@ async function submit(): Promise<void> {
   color: var(--st-fail);
 }
 
-.alert {
-  margin-bottom: var(--sp-1);
-}
-
-/** 两个勾选项（在首页展示 / 仅管理目录）：只占自己那点宽度，别被 .form 拉成整行 */
+/** 勾选项（在首页展示）：只占自己那点宽度，别被 .form 拉成整行 */
 .option {
   align-self: flex-start;
 }

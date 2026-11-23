@@ -106,8 +106,10 @@ const stats = computed(() => {
   const disabled = list.filter(item => !item.enabled).length
   const pending = list.filter(item => item.enabled && !item.ready).length
   const remain = Object.values(credits.value).reduce((sum, item) => sum + item.remain, 0)
-  const size = Object.values(credits.value).reduce((sum, item) => sum + item.size, 0)
-  return { total: list.length, usable, disabled, pending, quota, remain, size }
+  // 总额 = 剩余 + 近 30 天已用（与用量页「近 30 天 · 扣除积分」同一份流水，含同步进来的别的机器）；
+  // 不再取包容量之和 —— 包的窗口长短不一、过期包会把总量带走，横向比不了。无流水的号按 0 计。
+  const used30 = accounts.value.reduce((sum, account) => sum + (usageOf(account.uid)?.credits ?? 0), 0)
+  return { total: list.length, usable, disabled, pending, quota, remain, size: remain + used30 }
 })
 
 function usageOf(uid: string) {

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { Box, Close, Download, FolderOpened, Refresh, VideoPause, VideoPlay } from '@element-plus/icons-vue'
+import { commandLabel } from '@workbench/core'
 import { computed } from 'vue'
 import { isBusyStatus, STATUS_META, statusLabel } from '@/status'
 import { useProjectsStore } from '@/stores/projects'
@@ -37,6 +38,14 @@ function onBuild(script?: unknown): void {
   if (current)
     void store.build(current.id, typeof script === 'string' ? script : undefined)
 }
+
+/** 打包下拉：自定义引用显示成「自定义：名称」 */
+const buildOptions = computed(() =>
+  (project.value?.scripts.build ?? []).map(name => ({
+    value: name,
+    label: commandLabel(name, project.value?.scripts.custom ?? []),
+  })),
+)
 </script>
 
 <template>
@@ -69,11 +78,6 @@ function onBuild(script?: unknown): void {
       </el-button>
     </div>
 
-    <p v-if="project.manageOnly" class="drawer__notice">
-      这个项目是以「仅管理目录」加入的：package.json 无法解析，Workbench 只能帮你管目录，
-      不会执行任何命令。修好 package.json 后可用「重新定位」重新识别。
-    </p>
-
     <!-- 主操作 -->
     <div class="drawer__actions">
       <!-- 安装 / 打包进行中：只能停，不能启动，否则按钮全是灰的没处下手 -->
@@ -93,7 +97,7 @@ function onBuild(script?: unknown): void {
         size="small"
         type="primary"
         :icon="VideoPlay"
-        :disabled="!pathValid || !project.scripts.serve || !!project.manageOnly"
+        :disabled="!pathValid || !project.scripts.serve"
         @click="store.start(project.id)"
       >
         启动
@@ -102,7 +106,7 @@ function onBuild(script?: unknown): void {
       <el-dropdown
         split-button
         size="small"
-        :disabled="isBusy || isRunning || !pathValid || !!project.manageOnly || !project.scripts.build.length"
+        :disabled="isBusy || isRunning || !pathValid || !project.scripts.build.length"
         @click="onBuild()"
         @command="onBuild"
       >
@@ -110,12 +114,12 @@ function onBuild(script?: unknown): void {
         <template #dropdown>
           <el-dropdown-menu>
             <el-dropdown-item
-              v-for="s in project.scripts.build"
-              :key="s"
-              :command="s"
-              :class="{ 'is-current': s === project.scripts.defaultBuild }"
+              v-for="opt in buildOptions"
+              :key="opt.value"
+              :command="opt.value"
+              :class="{ 'is-current': opt.value === project.scripts.defaultBuild }"
             >
-              {{ s }}
+              {{ opt.label }}
             </el-dropdown-item>
           </el-dropdown-menu>
         </template>
@@ -125,7 +129,7 @@ function onBuild(script?: unknown): void {
         size="small"
         :icon="Download"
         :loading="status === 'installing'"
-        :disabled="isBusy || isRunning || !pathValid || !!project.manageOnly"
+        :disabled="isBusy || isRunning || !pathValid || project.hasPackageJson === false"
         @click="store.install(project.id)"
       >
         安装依赖
@@ -217,18 +221,6 @@ function onBuild(script?: unknown): void {
   gap: var(--sp-2);
   padding: 0 var(--sp-4) var(--sp-4);
   border-bottom: 1px solid var(--border);
-}
-
-/* 「仅管理目录」的说明条：把原因讲清楚，别让用户对着灰按钮猜 */
-.drawer__notice {
-  margin: 0 var(--sp-4) var(--sp-3);
-  padding: var(--sp-2) var(--sp-3);
-  border: 1px solid var(--st-run);
-  border-radius: var(--r-sm);
-  background: var(--st-run-soft);
-  font-size: var(--fs-meta);
-  line-height: 1.7;
-  color: var(--ink-2);
 }
 
 .drawer__build {

@@ -5,7 +5,7 @@ import type { CommandEntry, ProcessLogEvent, ProcessStatusEvent, Project, Result
  * 后端只认 sessionId 与整行命令；起什么命令、状态怎么转、日志落进哪个终端，都在这里决定。
  * 终端键同时充当 sessionId —— 日志与状态都靠它回到正确的终端（见 packages/terminal/src/terminal-key.ts）。
  */
-import { fail, isValidScriptName, ok, parsePortFromLog } from '@workbench/core'
+import { customRefIndex, fail, isValidScriptName, ok, parsePortFromLog } from '@workbench/core'
 import { cleanLogLine, terminalKey } from '@workbench/terminal'
 
 import * as activity from './activity'
@@ -117,6 +117,34 @@ function nowTime(): string {
 /** 实际使用的包管理器：auto 时用扫描锁文件得出的那个 */
 function packageManagerOf(project: Project): string {
   return project.packageManager === 'auto' ? project.detectedPackageManager : project.packageManager
+}
+
+/**
+ * 把一个启动 / 打包引用解析成实际命令行。
+ *
+ * 自定义引用（`@custom:<i>`）指向用户配的整行原文，原样执行、不带 nvm 前置 PATH；
+ * 普通引用是 package.json 的脚本名，拼成 `<pm> run <name>` 并校验名字合法性。
+ * 返回 null 表示引用失效（自定义下标越界或脚本名不合法）。
+ */
+function commandLineOf(project: Project, ref: string | undefined, action: string): string | null {
+  if (!ref)
+    return null
+
+  const customIndex = customRefIndex(ref)
+  if (customIndex !== null) {
+    const command = project.scripts.custom?.[customIndex]?.command
+    if (!command) {
+      console.warn(`[workbench] ${action}引用的自定义命令 #${customIndex} 已不存在`)
+      return null
+    }
+    return command
+  }
+
+  if (!isValidScriptName(ref)) {
+    console.warn(`[workbench] ${action}脚本名不合法，已阻止执行：${ref}`)
+    return null
+  }
+  return `${packageManagerOf(project)} run ${ref}`
 }
 
 function statusOf(kind: TerminalKind): ProcessStatusEvent['status'] {
@@ -366,13 +394,13 @@ export function installSessionListeners(): void {
 
 export function startProject(project: Project): Promise<Result<null>> {
   const script = project.scripts.serve
-  if (!script)
-    return Promise.resolve(fail('该项目没有可用的启动脚本'))
-  if (!isValidScriptName(script)) {
-    return Promise.resolve(fail(`启动脚本名不合法，已阻止执行：${script}`))
+  const line = commandLineOf(project, script, '启动')
+  if (!line) {
+    return Promise.resolve(fail(script ? `启动命令不合法或已失效：${script}` : '该项目没有可用的启动脚本'))
   }
 
-  const line = `${packageManagerOf(project)} run ${script}`
+  // 原始命令行不带 nvm 前置 PATH（自定义命令不以 node 为前提）
+  const isCustom = customRefIndex(script) !== null
   return run({
     projectId: project.id,
     kind: 'start',
@@ -380,17 +408,17 @@ export function startProject(project: Project): Promise<Result<null>> {
     label: '启动',
     line,
     cwd: project.path,
-    nodeVersion: project.nodeVersion,
+    nodeVersion: isCustom ? undefined : project.nodeVersion,
   })
 }
 
 export function buildProject(project: Project, script: string): Promise<Result<null>> {
-  // 项目是早先存下来的话，scripts 里可能留着加项目那会儿没挡住的旧名字
-  if (!isValidScriptName(script)) {
-    return Promise.resolve(fail(`打包脚本名不合法，已阻止执行：${script}`))
+  const line = commandLineOf(project, script, '打包')
+  if (!line) {
+    return Promise.resolve(fail(`打包命令不合法或已失效：${script}`))
   }
 
-  const line = `${packageManagerOf(project)} run ${script}`
+  const isCustom = customRefIndex(script) !== null
   return run({
     projectId: project.id,
     kind: 'build',
@@ -398,7 +426,7 @@ export function buildProject(project: Project, script: string): Promise<Result<n
     label: '打包',
     line,
     cwd: project.path,
-    nodeVersion: project.nodeVersion,
+    nodeVersion: isCustom ? undefined : project.nodeVersion,
   })
 }
 

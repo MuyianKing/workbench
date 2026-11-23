@@ -15,8 +15,10 @@ export type PackageManager = 'npm' | 'yarn' | 'pnpm'
 export interface ScanResult {
   ok: boolean
   error?: string
-  /** package.json 存在但解析失败：允许以「仅管理目录」方式加入 */
+  /** package.json 存在但内容损坏（没有可识别的 Node 脚本） */
   parseError?: boolean
+  /** 目录里没有 package.json（如 Rust / Tauri 项目） */
+  missingPackageJson?: boolean
   name: string
   version: string
   framework: string
@@ -242,7 +244,14 @@ export async function scanProject(scan: ScanFs, dirPath: string): Promise<ScanRe
 
   const raw = await scan.readText(joinPath(dirPath, 'package.json'))
   if (raw === null) {
-    return { ...empty, error: '该目录下没有 package.json，不是有效的 Node 项目' }
+    // 没有 package.json 不再直接判死：Rust / Tauri 这类项目加入后，
+    // 可在详情抽屉里挂自定义命令（cargo tauri dev / cargo build）来启动打包。
+    return {
+      ...empty,
+      missingPackageJson: true,
+      name: baseName(dirPath),
+      error: '该目录下没有 package.json，可在详情里配置命令后启动打包',
+    }
   }
 
   let pkg: {
@@ -257,7 +266,7 @@ export async function scanProject(scan: ScanFs, dirPath: string): Promise<ScanRe
     pkg = JSON.parse(raw)
   }
   catch {
-    // 解析失败不直接拒绝：允许以「仅管理目录」的方式加入（设计文档 §7）
+    // 解析失败不直接拒绝：没有可识别的脚本，但仍可加入后再配命令
     return {
       ...empty,
       parseError: true,

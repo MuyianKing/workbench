@@ -127,10 +127,15 @@ async function onClick(event: MouseEvent): Promise<void> {
   margin: 2px 0;
 }
 
+/**
+ * 行内代码要一眼看出是代码：底色取 --bg-selected（比面底深一档）—— --bg-inset 那档太淡，
+ * 压在半透明卡片上几乎看不出来（工作日志里 `docScene` 这类标识符读不出来）。
+ * 代码块的代码（pre code）在下面把底色与内边距去掉、融进 pre，不套这枚灰块。
+ */
 .md :deep(code) {
-  padding: 1px 5px;
+  padding: 1px 6px;
   border-radius: var(--r-sm);
-  background: var(--bg-inset);
+  background: var(--bg-selected);
   font-family: var(--font-mono);
   font-size: var(--fs-meta);
 }
