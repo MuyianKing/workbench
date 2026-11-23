@@ -360,7 +360,7 @@ function installActive(): void {
 
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
   gap: var(--card-gap, 14px);
   align-content: start;
 }
