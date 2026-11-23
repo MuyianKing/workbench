@@ -728,6 +728,11 @@ export interface VideoWindowContext extends VideoWindowOpen {
 export interface MarkdownWindowContext {
   /** 文件名（不带目录），窗口标题用的也是它 */
   name: string
+  /**
+   * 文件所在文件夹（绝对路径）。
+   * 粘贴图片按「机器 + 笔记本」分层时要它当 root：独立窗口没有 store，root 只由 Rust 会话持有。
+   */
+  dir: string
   /** 读盘时的正文 */
   text: string
   /** 读盘那一刻文件的 mtime，保存时当基准 */

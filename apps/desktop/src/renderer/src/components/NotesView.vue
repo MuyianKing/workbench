@@ -634,15 +634,21 @@ async function pullActiveFromDisk(): Promise<void> {
   if (!store.root || !store.active)
     return
 
-  // 先把正在路上的那一笔等掉：它落地之后磁盘才是"用户刚敲的那份"，
-  // 否则拿还在防抖里的内容去比，会把刚写下的这段误判成"和磁盘不同"
+  const editor = editorRef.value
+
+  // 先把防抖里还没交出去的那一份交出来、等它落盘，再拿编辑器正文和磁盘比。
+  // `waitForWrites()` 只等**已经 emit 出去**的那一笔，而用户刚敲下的字还攒在编辑器的
+  // 600ms 防抖里、磁盘上并没有 —— 不等它就把这段自己的输入误判成「别处改过」，
+  // 独立视频窗口（置顶、来回切焦点）每切一次都会弹一次，正是这个坑。
+  // 与 runPush 同一套次序：flushAll → waitForWrites。若这一笔因 mtime 冲突被 Rust
+  // 拒掉，磁盘仍是别处那份，下面的比较照样能发现真分歧，不会漏掉外部修改。
+  editor?.flushAll()
   await store.waitForWrites()
 
   const active = store.active
   if (!active)
     return
 
-  const editor = editorRef.value
   const editorText = editor?.currentContent()
   // 编辑器还没初始化：没内容可丢，只把基准对齐到磁盘（rereadActive 内部做）
   if (editorText === undefined) {

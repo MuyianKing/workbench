@@ -11,6 +11,9 @@
  * 这一壳只管三件事：弹窗骨架与菜单、每屏的显隐（v-show —— 各屏各滚、滚动位置
  * 与切屏前的输入都留在原地）、以及「打开时压一次内置壁纸的缩略图」。
  * 各屏的取数时机（设备列表、版本号）由 pane 自己盯 open / active。
+ *
+ * 开关与「打开时定位到哪一项」都住在 settings store（顶栏与别处的「设置 → …」入口共用），
+ * 不在本地留 ref：素材管理空态那种入口要能从另一棵组件树里直接开它并带到图片仓库那一行。
  */
 import { computed, ref, watch } from 'vue'
 import AppDialog from '@/components/AppDialog.vue'
@@ -21,15 +24,14 @@ import CapturePane from './settings/CapturePane.vue'
 import GeneralPane from './settings/GeneralPane.vue'
 import MenuPane from './settings/MenuPane.vue'
 
-/** 弹层开关:v-model 一条口径(与 AppDialog / el-dialog 相同,全应用的弹层都这么开) */
-const open = defineModel<boolean>({ required: true })
-
 const settings = useSettingsStore()
 
 const visible = computed({
-  get: () => open.value,
+  get: () => settings.settingsDialogVisible,
   set: (value: boolean) => {
-    open.value = value
+    if (value)
+      settings.openSettingsDialog()
+    else settings.closeSettingsDialog()
   },
 })
 
@@ -50,6 +52,17 @@ watch(visible, (open) => {
   if (open)
     void settings.ensureWallpapers()
 })
+
+// 带 focus 打开（如素材管理空态的「设置 → 笔记图片」）：切到对应那一屏。
+// 触发器是 settingsDialogFocus 本身，关闭时 store 会清成 null（这里不做事）。
+watch(
+  () => settings.settingsDialogFocus,
+  (focus) => {
+    if (focus === 'noteImageRepo')
+      activeTab.value = 'general'
+  },
+  { immediate: true },
+)
 </script>
 
 <template>

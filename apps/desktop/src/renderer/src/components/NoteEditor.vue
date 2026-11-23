@@ -55,7 +55,7 @@ import { acceleratorOfEvent } from '@/composables/use-hotkey-recorder'
 import { notifyWarning } from '@/notify'
 import 'vditor/dist/index.css'
 
-const props = withDefaults(defineProps<{
+const props = defineProps<{
   note: NoteDocument
   /**
    * 当前笔记本（笔记文件夹的绝对路径）。
@@ -66,7 +66,7 @@ const props = withDefaults(defineProps<{
   root: string
   /**
    * 当前笔记本连着的 origin（有仓库时）：粘贴的图片按 origin 分层、跨设备共享。
-   * 与 imageRepo 同一条规矩——不从 store 读，由上层（笔记页）传，独立窗口不传。
+   * 与 imageRepo 同一条规矩——不从 store 读，由上层传（笔记页从 store、独立窗口现探）。
    */
   imageOrigin?: string
   /** 应用当前的明暗（编辑器的配色要跟着走，它与应用的主题是两套） */
@@ -82,9 +82,9 @@ const props = withDefaults(defineProps<{
   /**
    * 图片仓库地址（设置里的 `noteImageRepo`）。
    *
-   * **不再从 settings store 里读**：这枚组件要能在独立 Markdown 编辑窗口里挂起来，
-   * 而那扇窗口只装适配层、不装 Pinia（见 docs/modules/notes.md）。笔记页把值传进来，
-   * 独立窗口不传，粘贴图片时如实提示去设置里配。
+   * **不从 settings store 里读**：这枚组件要能在独立 Markdown 编辑窗口里挂起来，
+   * 而那扇窗口只装适配层、不装 Pinia（见 docs/modules/notes.md）。值由上层传进来：
+   * 笔记页传设置里的值，独立窗口从首屏快照的设置取，没配时粘贴图片如实提示去设置里配。
    */
   imageRepo?: string
   /**
@@ -96,13 +96,6 @@ const props = withDefaults(defineProps<{
    * 用户存空串的动作被禁用（不拦，只剩 Vditor 原厂键位）。
    */
   editorHotkeys?: Record<string, string>
-  /**
-   * 允不允许粘贴 / 拖入图片（默认允许）。
-   *
-   * 独立编辑窗口传 false：那个窗口没有「笔记本」这个概念，一次上传会把图片推到
-   * 图片仓库的某个临时层级里，不是用户在那个窗口里期待的动作。挡下来并说清楚。
-   */
-  allowImageUpload?: boolean
   /** 空文档时的提示语；不传用笔记页那一句（含 Ctrl+/ 说明），独立窗口用简短版 */
   placeholder?: string
   /**
@@ -121,13 +114,7 @@ const props = withDefaults(defineProps<{
    * 右键菜单里的「大纲」项在这一档不出现（否则能从菜单把它关掉，栏里剩一条空白）。
    */
   outlinePinned?: boolean
-}>(), {
-  /**
-   * **必须显式给 true**：布尔 prop 在父组件不传时 Vue 会转成 `false`，不是 `undefined` ——
-   * 笔记页不传这个 prop，靠默认值放行；独立窗口显式传 `false` 才挡。
-   */
-  allowImageUpload: true,
-})
+}>()
 
 const emit = defineEmits<{
   /**
@@ -1213,11 +1200,8 @@ async function uploadImages(files: File[]): Promise<string | null> {
   if (props.readOnly)
     return '只读模式：图片没有上传（Ctrl+/ 切回可写再贴）'
 
-  // 独立 Markdown 编辑窗口：没有「笔记本」这一层，一次上传会把图片推到图片仓库里
-  // 一个临时层级 —— 不是那个窗口里期待的动作，挡下来并说清楚（笔记页行为不变）
-  if (props.allowImageUpload === false)
-    return '这个编辑窗口不上传图片：粘贴图片只在笔记页里推到图片仓库'
-
+  // 独立 Markdown 编辑窗口也走同一套：root / imageRepo / imageOrigin 都由上层传进来，
+  // 没有 store 也不影响（见 MarkdownWindowApp）。没有图片仓库地址时下面的分支如实提示去配。
   if (!props.imageRepo) {
     return '还没有配置图片仓库：设置 → 笔记图片，填一个 git 仓库地址后，粘贴的图片会自动传上去'
   }

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { InputInstance } from 'element-plus'
 import type { AppSettings } from '@/types'
 import { APP_NAME_DEFAULT, APP_NAME_MAX_LENGTH } from '@workbench/appearance'
 import { accountLabel } from '@workbench/auth'
@@ -16,7 +17,7 @@ import { ElMessage } from 'element-plus'
  * 快捷键那一行是一块共用件（HotkeyField）：录制态自己管、失焦即放弃，
  * 所以这一屏不再需要盯着弹窗开关去复位它。
  */
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import AccountDialog from '@/components/AccountDialog.vue'
 import HotkeyField from '@/components/HotkeyField.vue'
 import { useDraftField } from '@/composables/use-draft-field'
@@ -181,12 +182,28 @@ function commitSyncRepo(): void {
 // ---------- 笔记图片 ----------
 
 const imageRepoDraft = useDraftField(() => settings.settings.noteImageRepo)
+/** 图片仓库那一行的输入框：别处「设置 → 笔记图片」入口进来时滚过去并聚焦 */
+const imageRepoInput = ref<InputInstance | null>(null)
 
 function commitImageRepo(): void {
   if (imageRepoDraft.value === settings.settings.noteImageRepo)
     return
   save({ noteImageRepo: imageRepoDraft.value })
 }
+
+// 从空态入口带 focus 打开时：等面板切屏 / 显隐落定，再滚到图片仓库那一行并把光标放进去。
+// props.open 一起盯住 —— 关掉再开时 focus 已在 store 里被清掉，但打开这一下仍要够准确。
+watch(
+  () => [props.open, settings.settingsDialogFocus] as const,
+  async ([open, focus]) => {
+    if (!open || focus !== 'noteImageRepo')
+      return
+    await nextTick()
+    imageRepoInput.value?.focus()
+    imageRepoInput.value?.$el?.scrollIntoView?.({ block: 'center', behavior: 'smooth' })
+  },
+  { immediate: true },
+)
 
 // ---------- 天气 ----------
 
@@ -476,6 +493,7 @@ function resetEditorHotkey(action: string): void {
           </span>
         </div>
         <el-input
+          ref="imageRepoInput"
           v-model="imageRepoDraft"
           size="small"
           spellcheck="false"

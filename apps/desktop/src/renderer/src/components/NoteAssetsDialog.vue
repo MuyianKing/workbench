@@ -120,6 +120,11 @@ const migrationCandidates = computed(() => {
   return planImageMigration({ images: scan.legacy, texts: scan.texts, oldDir: scan.oldDir, newDir })
 })
 
+/** 没配图片仓库时，空态里「设置 → 笔记图片」那一下直接开设置并带到那一栏 */
+function openImageRepoSetting(): void {
+  settings.openSettingsDialog('noteImageRepo')
+}
+
 const repoMissing = computed(() => !settings.settings.noteImageRepo)
 /** 还没打开笔记本：清单是按笔记本来分的，这一页这时没有什么可管的 */
 const rootMissing = computed(() => !props.root.trim())
@@ -260,13 +265,16 @@ function clearSelection(): void {
   selected.value = []
 }
 
-/** 在浏览器里打开这张图（就是它自己的地址）：删之前想确认「这是哪张」，这是最直接的办法 */
-async function openAsset(asset: NoteImageAsset): Promise<void> {
-  if (!asset.url)
-    return
-  const result = await window.workbench.openExternal(asset.url)
-  if (!result.ok)
-    notifyError(result.error ?? '打不开这个地址')
+/**
+ * 点缩略图看大图：用 EP 的 el-image 查看器（与 AI 对话里贴的图同一套）——
+ * 能在这一列里左右翻、滚轮缩放、Esc / 点外面关掉。缩略图才 40×30，删之前想确认是哪张，
+ * 光看缩略图不够。列表只取当前可见、且拼得出地址的那几张（与眼前看到的顺序一致）。
+ */
+const previewSrcs = computed(() =>
+  visible.value.filter(asset => !!asset.url).map(asset => asset.url as string),
+)
+function previewIndex(asset: NoteImageAsset): number {
+  return previewSrcs.value.indexOf(asset.url ?? '')
 }
 
 /**
@@ -367,9 +375,11 @@ async function migrate(): Promise<void> {
       </el-icon>
       <p>还没有配置图片仓库。</p>
       <p class="empty__hint">
-        笔记里粘贴的图片都推到一个你自己的 git 仓库（设置 → 笔记图片），
-        这一页管的是这个笔记本传上去的那些：谁还在用、把没人用的清掉。
+        笔记里粘贴的图片都推到一个你自己的 git 仓库，这一页管的是这个笔记本传上去的那些：谁还在用、把没人用的清掉。
       </p>
+      <button class="empty__action" type="button" @click="openImageRepoSetting">
+        去设置 · 笔记图片
+      </button>
     </div>
 
     <!-- 没打开笔记本：素材是按笔记本来分的，这时列不出「这个笔记本的图」，也不该拿上一层去猜 -->
@@ -454,25 +464,25 @@ async function migrate(): Promise<void> {
             @change="(checked: string | number | boolean) => toggle(asset.path, Boolean(checked))"
           />
 
-          <!-- 缩略图直接取仓库里的原图（与正文里显示图片是同一条路）：
-               只在面板打开时、且推得出地址时才有；按行懒加载，不给看不见的行发请求 -->
-          <el-tooltip
-            :content="asset.url ? '在浏览器里打开' : '拼不出访问地址（去设置里填前缀）'"
-            placement="top"
-            :show-after="300"
-          >
-            <button
-              class="asset__thumb"
-              :class="{ 'is-clickable': Boolean(asset.url) }"
-              type="button"
-              @click="openAsset(asset)"
-            >
-              <img v-if="asset.url" :src="asset.url" alt="" loading="lazy">
-              <el-icon v-else>
-                <Picture />
-              </el-icon>
-            </button>
-          </el-tooltip>
+          <!-- 缩略图直接取仓库里的原图（与正文里显示图片是同一条路）：只在面板打开时、
+               且推得出地址时才有；按行懒加载。点一下用 EP 查看器看大图，能在这列里翻、缩放 -->
+          <el-image
+            v-if="asset.url"
+            class="asset__thumb is-clickable"
+            :src="asset.url"
+            :preview-src-list="previewSrcs"
+            :initial-index="previewIndex(asset)"
+            fit="contain"
+            preview-teleported
+            hide-on-click-modal
+            :show-progress="previewSrcs.length > 1"
+            loading="lazy"
+          />
+          <span v-else class="asset__thumb" title="拼不出访问地址（去设置里填前缀）">
+            <el-icon>
+              <Picture />
+            </el-icon>
+          </span>
 
           <span class="asset__name truncate" :title="asset.path">{{ asset.name }}</span>
 
@@ -515,6 +525,21 @@ async function migrate(): Promise<void> {
 <style scoped>
 .asset-empty {
   min-height: 160px;
+}
+
+/* 空态里直达设置的按钮：文字按钮的样，主题色只用在交互态 */
+.empty__action {
+  margin-top: var(--sp-1);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink-accent);
+  font-size: var(--fs-body);
+  cursor: pointer;
+}
+
+.empty__action:hover {
+  text-decoration: underline;
 }
 
 .assets__bar {
@@ -598,6 +623,7 @@ async function migrate(): Promise<void> {
   color: var(--st-fail);
 }
 
+/* 缩略图：el-image 的外框收成一小块，里面的图按 contain 缩进去（不裁、不放大） */
 .asset__thumb {
   flex-shrink: 0;
   display: flex;
@@ -605,13 +631,11 @@ async function migrate(): Promise<void> {
   justify-content: center;
   width: 40px;
   height: 30px;
-  padding: 0;
-  overflow: hidden;
   background: var(--bg-inset);
-  border: 0;
+  border: 1px solid var(--border);
   border-radius: var(--r-sm);
   color: var(--ink-3);
-  cursor: default;
+  overflow: hidden;
 }
 
 .asset__thumb.is-clickable {
@@ -619,13 +643,17 @@ async function migrate(): Promise<void> {
 }
 
 .asset__thumb.is-clickable:hover {
-  outline: 1px solid var(--border-strong);
+  border-color: var(--border-strong);
 }
 
-.asset__thumb img {
-  max-width: 100%;
-  max-height: 100%;
-  object-fit: contain;
+/* el-image 的 inner 默认 width/height 100%，配上 fit=contain 正好缩在框里 */
+.asset__thumb :deep(.el-image__inner) {
+  display: block;
+}
+
+/* 拼不出地址时的占位图标（不是 el-image，是一枚 span） */
+.asset__thumb > .el-icon {
+  font-size: 18px;
 }
 
 .asset__name {

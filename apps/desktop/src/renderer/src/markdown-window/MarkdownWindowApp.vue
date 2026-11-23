@@ -26,7 +26,7 @@ import { applyThemeWithTransition } from '@/theme-transition'
  * 三颗窗口键自绘在标题栏右端（规格照 TitleBar.vue，但那份引着 store，这里照抄不引）；
  * 标题栏与底栏都标了 `data-tauri-drag-region` 兼做拖动带（双击最大化由 Tauri 接管）。
  *
- * 四件自己管的事：
+ * 五件自己管的事：
  *   1. **写盘串行**：一次输入防抖后的保存进入队列，下一笔等上一笔回来才发 ——
  *      否则两笔并发写盘会拿同一个 mtime 当基准，后一笔被 Rust 当成「别处改过」拒掉；
  *   2. **关闭握手**：Rust 先拦住窗口关闭并发 `markdown-window:flush`，这里把防抖里
@@ -37,9 +37,8 @@ import { applyThemeWithTransition } from '@/theme-transition'
  *   4. **外部改动要提示重新加载**：窗口重新获得焦点时只 stat 一次磁盘 mtime，与手上的基准
  *      不同就问「重新加载 / 保留当前内容」；保存被 Rust 以「别处改过」拒掉时也走同一条提示，
  *      底栏把「重试」换成「重新加载」。重读会丢掉编辑器与队列里那一份（见 reloadFromDisk）。
- *
- * 这扇窗**不上传图片**（NoteEditor 的 allowImageUpload=false）：它没有「笔记本」这一层，
- * 粘贴图片会把图推到图片仓库里一个临时层级，不是这个窗口里期待的动作。
+ *   5. **粘贴图片跟笔记页走同一套**：root 从 Rust 会话拿（就是这个文件所在文件夹），
+ *      图片仓库地址从首屏快照的设置取、origin 现探一次，粘贴的图照样推到图片仓库。
  *
  * 面板本身是按「工作台」那一版设计做的：大纲在左、正文在右，中间一条发丝线；
  * 标题栏与底栏各 52 / 34px。**明暗是这扇窗自己的**（标题栏那枚日 / 月按钮，见下方
@@ -194,15 +193,26 @@ function messageOf(error: unknown): string {
 
 /** 编辑器的自定义快捷键（设置里的 editorHotkeys）：开窗时取一次，窗口里不跟主窗口实时联动 */
 const editorHotkeys = ref<Record<string, string>>({})
+/**
+ * 粘贴图片的落点来源（与笔记页同一套，只是没有 store）：
+ * - root：文件所在文件夹，从 Rust 会话拿（本文件第一节），拼「机器 + 笔记本」那层目录用；
+ * - imageRepo：图片仓库地址，从首屏快照的设置里取（异步 getSettings 在这里是默认值）；
+ * - imageOrigin：文件所在文件夹连着的 origin，现探一次（有就走共享层、没有走本机层）。
+ * 三者都只开窗时取一次，与明暗 / 快捷键同一档，不跟主窗口实时联动。
+ */
+const noteRoot = ref('')
+const imageRepo = ref('')
+const imageOrigin = ref('')
 
 async function load(): Promise<void> {
   loading.value = true
   loadError.value = ''
 
-  // 编辑器快捷键从首屏快照拿（与 theme 同一条）：独立窗口不 initState，
+  // 编辑器快捷键与图片仓库地址都从首屏快照拿（与 theme 同一条）：独立窗口不 initState，
   // getSettings() 返回的是适配层内存里的默认数据 —— 设置里配的自定义键只有
-  // Rust 注入的快照里才有。快照那侧已经 sanitize 过，缺项退回内置键位
+  // Rust 注入的快照里才有。快照那侧已经 sanitize 过，缺项退回内置键位 / 空仓库地址
   editorHotkeys.value = bootstrapSnapshot()?.settings.editorHotkeys ?? {}
+  imageRepo.value = bootstrapSnapshot()?.settings.noteImageRepo ?? ''
 
   const result = await window.workbench.markdownWindowContext()
   if (!result.ok || !result.data) {
@@ -212,6 +222,7 @@ async function load(): Promise<void> {
   }
 
   const context = result.data
+  noteRoot.value = context.dir
   mtimeMs = context.mtimeMs
   savedAt.value = context.mtimeMs
   content.value = context.text
@@ -224,6 +235,12 @@ async function load(): Promise<void> {
     mtimeMs: context.mtimeMs,
   }
   loading.value = false
+
+  // origin 决定图片进共享层还是本机层：现探一次（探不到按本机笔记处理，不弹错、不阻塞加载）
+  void window.workbench.noteRepoState(context.dir).then((probe) => {
+    if (probe.ok && probe.data)
+      imageOrigin.value = probe.data.origin
+  })
 }
 
 function enqueueSave(text: string): Promise<void> {
@@ -605,10 +622,11 @@ onBeforeUnmount(() => {
             <NoteEditor
               ref="editorRef"
               :note="note"
-              root=""
+              :root="noteRoot"
               :theme="theme"
               :read-only="false"
-              :allow-image-upload="false"
+              :image-repo="imageRepo"
+              :image-origin="imageOrigin"
               placeholder="写点什么…"
               :editor-hotkeys="editorHotkeys"
               :outline-host="outlineRail"

@@ -13,7 +13,11 @@
       明暗不写死：入口里 applyBootstrapTheme(initialMarkdownWindowTheme()) 把这扇窗自己
       存过的那份（没设过才回落到主应用当前明暗）落到 data-theme / .dark 上，tokens.css
       随之切换；窗口在页面加载完成前一直藏着，不会闪白。它不跟随系统。
+
+      与 index.html 同一条：文档级 Referrer-Policy=no-referrer，给笔记里的 Gitee /raw/ 图用
+      （带 Referer 会被防盗链 403 裂图）。正文用的就是这扇窗自己的 <img> 请求，必须带这一条。
     -->
+    <meta name="referrer" content="no-referrer" />
     <title>Markdown</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <style>

@@ -1,6 +1,6 @@
 import type { ViewId } from '@workbench/appearance'
 import type { ThemeOrigin } from '@/theme-transition'
-import type { AppSettings, TopBarStyle } from '@/types'
+import type { AppSettings, SettingsFocus, TopBarStyle } from '@/types'
 import { clampCardOpacity } from '@workbench/appearance'
 import { defineStore } from 'pinia'
 /**
@@ -37,6 +37,26 @@ export const useSettingsStore = defineStore('settings', () => {
    */
   const bootstrap = bootstrapSnapshot()
   const settings = ref<AppSettings>(bootstrap ? bootstrap.settings : { ...DEFAULT_SETTINGS })
+
+  /**
+   * 设置弹窗的开关与「打开时直接带到哪一项」。
+   *
+   * 弹窗本体挂在顶栏，但别处（素材管理空态的「设置 → 笔记图片」）也要能开它并定位到具体字段，
+   * 所以状态放这里（与 catalog 管命令弹窗同一套），不塞进组件本地 ref。focus 只在打开那一刻读，
+   * 关闭时清掉，下次从顶栏正常打开还是停在上次那一屏。
+   */
+  const settingsDialogVisible = ref(false)
+  const settingsDialogFocus = ref<SettingsFocus | null>(null)
+
+  function openSettingsDialog(focus: SettingsFocus | null = null): void {
+    settingsDialogFocus.value = focus
+    settingsDialogVisible.value = true
+  }
+
+  function closeSettingsDialog(): void {
+    settingsDialogVisible.value = false
+    settingsDialogFocus.value = null
+  }
 
   // 主题内核：先把落盘入口以闭包递进去（updateSettings 是下面的函数声明，已提升）
   const theme = useSettingsTheme({
@@ -231,6 +251,11 @@ export const useSettingsStore = defineStore('settings', () => {
 
   return {
     settings,
+    // 设置弹窗（挂在顶栏，别处也能开并定位到某一项）
+    settingsDialogVisible,
+    settingsDialogFocus,
+    openSettingsDialog,
+    closeSettingsDialog,
     effectiveTheme: theme.effectiveTheme,
     updateSettings,
     toggleTheme: theme.toggleTheme,

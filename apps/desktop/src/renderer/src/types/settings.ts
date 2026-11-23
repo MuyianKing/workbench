@@ -445,6 +445,12 @@ export interface AppSettings {
 export type StoredSettings = Omit<AppSettings, AppearanceSettingKey>
 
 /**
+ * 打开设置弹窗时直接带到哪一项（别处「设置 → …」那种入口用）。
+ * 目前只有笔记图片仓库一处；要加新的就往这里扩，设置弹窗按它切屏、对应 pane 滚动并聚焦输入框。
+ */
+export type SettingsFocus = 'noteImageRepo'
+
+/**
  * 设置默认值。
  *
  * 不再是设计文档 4.8 里的出厂值，而是按当前正在使用的配置固化的：

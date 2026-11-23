@@ -344,6 +344,9 @@ fn attach_window_events(window: &WebviewWindow) {
 }
 
 /// 窗口拿到自己打开的是哪个文件、正文与 mtime（读盘只在这里做一次）。
+///
+/// 带上 `dir`（文件所在文件夹）：粘贴图片要按「哪台机器、哪个笔记本」分层，独立窗口没有
+/// store，root 只能从 Rust 会话里拿 —— 路径仍然只由 Rust 持有，渲染层传不了别的文件。
 #[tauri::command(async)]
 pub fn markdown_window_context(
     window: WebviewWindow,
@@ -353,6 +356,7 @@ pub fn markdown_window_context(
     let mut document = notes::read(&dir, &name)?;
     if let Some(object) = document.as_object_mut() {
         object.insert("name".into(), json!(name));
+        object.insert("dir".into(), json!(dir));
     }
     Ok(document)
 }

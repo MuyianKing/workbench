@@ -27,7 +27,14 @@ const store = useNavStore()
 const settings = useSettingsStore()
 const auth = useAuthStore()
 const zentao = useZentaoStore()
-const settingsVisible = ref(false)
+const settingsVisible = computed({
+  get: () => settings.settingsDialogVisible,
+  set: (value: boolean) => {
+    if (value)
+      settings.openSettingsDialog()
+    else settings.closeSettingsDialog()
+  },
+})
 const accountVisible = ref(false)
 
 /** 已登录时顶栏显示头像，未登录显示一个通用的账号图标 */
@@ -161,7 +168,7 @@ const zentaoTitle = computed(() =>
       </button>
     </div>
 
-    <SettingsDialog v-model="settingsVisible" />
+    <SettingsDialog />
     <AccountDialog v-model="accountVisible" />
   </header>
 </template>
