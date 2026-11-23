@@ -72,17 +72,29 @@ export function initialZentaoConfigured(): boolean {
   return rawBootstrap()?.zentaoConfigured === true
 }
 
+/** 启动时数据文件读不出来的提示，等界面挂载后再一次性弹给用户（见 App.vue）。 */
+const loadWarnings: string[] = []
+
+/** 取走（并清空）启动载入失败的提示。载入成功时是空数组。 */
+export function takeLoadWarnings(): string[] {
+  return loadWarnings.splice(0)
+}
+
 /**
  * 读一份数据文件。**读失败不再被当成空数据**：通道已经会把「文件坏掉 / 读不出来」回成 Err，
- * 这里留下一条带原因的日志再按空数据启动 —— 启动不能停，但也不能静默；
- * 之后用户任何一次保存都会用新内容覆盖那份坏文件（Rust 侧 `set` 会清掉载入错误）。
+ * 这里留下一段给用户看的提示再按空数据启动 —— 启动不能停，但也不能静默。
+ *
+ * Rust 侧在解析失败时已先把坏文件另存成 `<文件>.corrupt-<时间>`（见 store.rs 的 `preserve_corrupt`），
+ * 所以这里提示用户可以按那个副本恢复；那次落盘不会再把还能救的原文件盖掉。
  */
 async function loadFile(channel: 'data_load' | 'theme_load'): Promise<unknown> {
   try {
     return await invoke<unknown>(channel)
   }
   catch (error) {
-    console.error(`[workbench] ${channel} 失败，按空数据启动（下一次保存会覆盖坏文件）`, error)
+    const detail = error instanceof Error ? error.message : String(error)
+    console.error(`[workbench] ${channel} 失败，按空数据启动`, error)
+    loadWarnings.push(`${channel === 'data_load' ? '项目数据' : '主题设置'}读不出来：${detail}`)
     return null
   }
 }

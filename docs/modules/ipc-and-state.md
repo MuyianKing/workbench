@@ -35,7 +35,9 @@
   `ai_news_load` / `etf_load`）、`probe_version`、`fs_exists` / `fs_is_dir` / `fs_stat_mtime`、`process_created_at`、
   `nvm_node_dir`、`check_port`、`nvm_status` / `nrm_status` 把「读不出来 / 探测失败」回成 `Err`；
   「文件不存在 / 没装 / 进程已退出」仍是正常值（`Ok(None)` / `Ok(false)` / 带 `error` 字段的 payload）。
-  调用侧要么提示，要么显式降级并留日志 —— 启动时那几份数据文件属于后者（见 `workbench/state.ts` 的 `loadFile`）。
+  调用侧要么提示，要么显式降级并留日志 —— 启动时那几份数据文件属于后者（见 `workbench/state.ts` 的 `loadFile`）：
+  读失败按空数据起来，但**原因与坏文件备份位置会收集到 `takeLoadWarnings`，由 `App.vue` 在挂载后弹提示条**，
+  不再只写控制台让用户以为数据凭空消失。
 - 新增通道三步：在 `types/api/` 对应域的 `*Channel` 里登记 → 适配层实现 → 需要后端时在 `commands.rs` 写命令并在
   `main.rs` 的 `generate_handler!` 注册。没有对应域就先加一个 `*Channel` 文件并在 `types/api/index.ts` 的并集里加上。
   渲染层→主进程的单向事件走适配层的 `events.ts` 广播。
@@ -74,7 +76,11 @@
 
 ### 落盘
 
-- 落盘全在 Rust 侧（`store.rs`：300ms 防抖 + 临时文件 rename + 退出前同步落盘）。数据文件分工：`workbench-data.json`（项目 /
+- 落盘全在 Rust 侧（`store.rs`：300ms 防抖 + 临时文件 **`fsync` 后再 rename** + 退出前同步落盘）。**载入时解析失败的文件
+  先另存为 `<文件名>.corrupt-<时间>`，再按空数据启动**；另存成功才允许本次写回，挪 / 复制都失败则整轮禁止落盘 —— 宁可这次改动不保存，
+  也不能用空数据覆盖唯一还能人工恢复的原文件（踩过：断电把 `workbench-data.json` 写成全 0，启动按空数据跑、保存时又把它覆盖成
+  空壳，项目列表全丢）。**文件读不出来（权限 / 被占用）时不当成损坏**：保留原文件、不挪走，同样整轮禁止落盘。
+  `fsync` 是为了让「内容」先于「rename」落盘：只写不刷时断电可能只留下已分配、内容全 0 的文件。数据文件分工：`workbench-data.json`（项目 /
   快捷启动 / 命令 + 与本机绑定的设置，含笔记文件夹 `noteDir`）、`theme.json`（外观 + 首页布局）、`token-usage.json`、
   `work-log.json` 与 `ai-news.json`（都只在本机）、`vault.json`（密码保险库，**里面只有密文**，密钥在 Windows 凭据管理器，
   见 [vault.md](vault.md)）、`mail-watch.json`（邮件后台监视的 UID 基准与上轮检查时间，见 [mail.md](mail.md)，只是通知记账，

@@ -39,6 +39,7 @@ import { useProjectsStore } from '@/stores/projects'
 import { useSettingsStore } from '@/stores/settings'
 import { useWeatherStore } from '@/stores/weather'
 import { useZentaoStore } from '@/stores/zentao'
+import { takeLoadWarnings } from '@/workbench/state'
 
 const store = useProjectsStore()
 const nav = useNavStore()
@@ -109,6 +110,10 @@ const appStyle = computed(() => {
 })
 
 onMounted(() => {
+  // 启动时数据文件读不出来（且已按空数据起来）：把原因与坏文件备份位置告诉用户，
+  // 别让人以为"项目凭空没了"。提示条在挂载后才弹，确保窗口看得见。
+  for (const message of takeLoadWarnings())
+    ElMessage.warning(message)
   void store.init()
   // 设备认领检测挂在项目数据 init 之后：它要读设置里的仓库地址与设备列表，不能挡住启动
   void deviceClaim.check()

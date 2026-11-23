@@ -322,7 +322,7 @@ export function installTauriWorkbench(): void {
   window.workbench = createApi()
 }
 
-export { initState } from './state'
+export { initState, takeLoadWarnings } from './state'
 
 /**
  * 启动收尾：处理上次被强杀 / 更新安装时留下的子进程（开发服务还在监听端口的会保留，

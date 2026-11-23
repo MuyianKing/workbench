@@ -76,9 +76,14 @@ pub fn mtime_ms(path: &Path) -> u64 {
         .unwrap_or(0)
 }
 
-/// 先写同目录的临时文件再 rename：rename 在同一卷上是原子的，读者（并发的进程、
-/// 或者扫盘的杀毒软件）不会看到半个文件。临时文件是「目标名 + .tmp」，rename 失败时
-/// 把它删掉，不留垃圾。
+/// 先写同目录的临时文件、**刷到磁盘**再 rename：rename 在同一卷上是原子的，读者
+/// （并发的进程、或者扫盘的杀毒软件）不会看到半个文件。临时文件是「目标名 + .tmp」，
+/// rename 失败时把它删掉，不留垃圾。
+///
+/// **rename 之前必须 `sync_all`**：只写不刷时，内容还在系统缓存里，断电后 NTFS 可能
+/// 只把「文件已分配」的元数据落盘、数据块仍是 0 —— 这正是「文件长度还在、内容却全是
+/// `00`」的来源（踩过：一次意外断电让 workbench-data.json 与两个账号文件变成全 0）。
+/// 刷盘失败不阻断替换（否则网络盘 / 某些过滤驱动会让原本能存的也存不了），但留一条警告。
 ///
 /// **父目录不存在时不建**：目录该不该由调用方说了算 —— 数据目录可以悄悄建起来，
 /// 「笔记所在文件夹没了」却是要报给用户的真实错误。
@@ -87,7 +92,17 @@ pub fn write_atomic(file: &Path, data: &[u8]) -> Result<(), String> {
         "{}.tmp",
         file.file_name().unwrap_or_default().to_string_lossy()
     ));
-    std::fs::write(&temp, data).map_err(|err| format!("写入失败: {err}"))?;
+    {
+        use std::io::Write;
+        let mut handle = std::fs::File::create(&temp).map_err(|err| format!("写入失败: {err}"))?;
+        handle.write_all(data).map_err(|err| format!("写入失败: {err}"))?;
+        if let Err(err) = handle.sync_all() {
+            crate::error_log::warn(
+                "落盘",
+                format!("刷盘失败（{}）：{err}，仍继续替换文件", file.display()),
+            );
+        }
+    }
     std::fs::rename(&temp, file).map_err(|err| {
         let _ = std::fs::remove_file(&temp);
         format!("替换文件失败: {err}")
