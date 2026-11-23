@@ -23,8 +23,12 @@
   侧 —— 迁 Tauri 时漏过一次，症状是贡献图不再变深。它只是首页那张图的**来源之一**（另有工作日志 / 新建笔记 / AI 助手跑
   一轮 / 知识库整理，见 [home.md](home.md)），写账与广播成对走
   [workbench/activity.ts](../../apps/desktop/src/renderer/src/workbench/activity.ts)。
-- **「在 VS Code 中打开」走 `vscode://` 协议**（`system.rs` 直启 ShellExecute），不去找 `Code.exe` 的安装路径；
+- **「VS Code 打开」走 `vscode://` 协议**（`system.rs` 直启 ShellExecute），不去找 `Code.exe` 的安装路径；
   **不要照着再引别的编辑器**（VS Code 是唯一那个可选外部程序）。
+- **项目仓库平时只读，唯一的写入口是项目卡「⋯」里的 git pull**：用户点它才在项目目录里直启
+  `git pull --ff-only`（`project_git.rs` 的 `pull`），只快进，不合并 / 不 rebase / 不 autostash —— 分叉、工作区不干净、
+  不是仓库都收敛成一句提示交给用户处理。凭据只用系统 git 已存的那一套，**不注入同步仓库的账号 token**；
+  不碰远端配置、不做定时 / 后台拉取。
 - **残留清理宁可漏掉几个，也不能杀错进程**：先核记录里的 `ownerPid`，再按进程创建时间 + 存活判据（`OpenProcess` +
   `GetProcessTimes` + `GetExitCodeProcess`）认进程；老记录缺字段一律跳过。
 - **更新 / 强杀后的开发服务不清**：`kind === 'start'` 且项目端口还在监听就保留进程（交给端口探测认成「外部运行中」），
@@ -68,9 +72,12 @@
   所以在 A 机器绑的要到 B 机器各绑一次；生成日志读的也是各自本机仓库。它决定「从提交生成」的下拉范围：绑定给当前设备的 + 未绑定的通用项目
   才列出，绑定给别处的项目隐藏（见 [work-log.md](work-log.md)），不改工作页的项目显示，也不新增网络出口。
 - 目录被移动或删除时卡片标记「路径无效」并屏蔽操作，支持「重新定位」。
-- 项目卡的「⋯」里有**在 VS Code 中打开**：走 `vscode://file/<路径>/` 协议，不去猜 `Code.exe` 装在哪 —— 只有协议处理器是
+- 项目卡的「⋯」里有**VS Code 打开**：走 `vscode://file/<路径>/` 协议，不去猜 `Code.exe` 装在哪 —— 只有协议处理器是
   「这台机器现在用哪个 VS Code」的可靠答案。路径按 URL 规则转义、结尾 `/` 表示目录；没装时按 ShellExecute 错误码给一句
   明确提示，而不是点了没反应。
+- 同一份菜单里还有 **git pull**：在项目目录里跑一次 `git pull --ff-only`，拉到新提交与「已经是最新版本」各给一条提示，
+  失败原样带回 git 的话（分叉 / 未提交改动 / 没连上游）。拉取期间卡片上那颗「⋯」按钮转圈、菜单项禁用，
+  避免重复触发；路径无效的项目不画这一项。它是项目仓库唯一会写的动作，**不会替用户合并、开 rebase 或 stash**。
 - 列表与设置写在数据目录下（安装版 `%APPDATA%/Workbench/data/`，开发版 `%APPDATA%/Workbench-dev/data/`；位置固定，没有
   「换目录」这一说）。
 - **项目卡是毛玻璃**：底色跟「卡片不透明度」走，底下还有一道共用的磨砂 —— 配方与「哪些面吃这一套」的清单在
@@ -157,6 +164,7 @@
 ```
   src/nvm.rs             nvm 只读探测（目录 / settings.txt / 软链）
   src/nrm.rs             nrm 探测与镜像源切换（清单来自 nrm ls）
+  src/project_git.rs     项目仓库的 git：提交记录只读读取 + 用户显式 git pull（pull --ff-only）
 ```
 
 渲染层三处（原注解）：

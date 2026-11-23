@@ -36,6 +36,8 @@ const buildOptions = computed(() =>
 )
 const isBusy = computed(() => isBusyStatus(status.value))
 const isRunning = computed(() => status.value === 'running')
+/** git pull 进行中：更多按钮转圈，菜单里那一项禁用，避免连点两次 pull */
+const pulling = computed(() => store.isPulling(props.project.id))
 
 /**
  * 项目标识色（在抽屉里选、新项目自动分配）。
@@ -132,6 +134,9 @@ function onMore(command: string): void {
     void store.reveal(props.project.path)
   else if (command === 'vscode')
     void store.openInVSCode(props.project.path)
+  // 用户显式点这一项才写项目仓库（git pull --ff-only，见 project_git.rs）
+  else if (command === 'pull')
+    void store.pullProject(id)
   else if (command === 'relocate')
     void store.relocate(id)
   else if (command === 'drawer')
@@ -316,6 +321,8 @@ function onMore(command: string): void {
           class="icon-btn icon-btn--end"
           size="small"
           :icon="MoreFilled"
+          :loading="pulling"
+          :disabled="pulling"
           aria-label="更多"
           @click.stop
         />
@@ -329,10 +336,13 @@ function onMore(command: string): void {
               {{ project.home ? '从首页移除' : '在首页展示' }}
             </el-dropdown-item>
             <el-dropdown-item v-if="pathValid" command="vscode">
-              在 VS Code 中打开
+              VS Code 打开
             </el-dropdown-item>
             <el-dropdown-item v-if="pathValid" command="reveal">
               打开项目目录
+            </el-dropdown-item>
+            <el-dropdown-item v-if="pathValid" command="pull" :disabled="pulling">
+              {{ pulling ? '正在拉取…' : 'git pull' }}
             </el-dropdown-item>
             <el-dropdown-item v-else command="relocate">
               重新定位…

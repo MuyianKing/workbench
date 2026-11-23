@@ -10,6 +10,7 @@ import type {
   CommandInput,
   CommandPatch,
   Project,
+  ProjectGitPull,
   ProjectGroup,
   ProjectPatch,
   QuickApp,
@@ -35,6 +36,12 @@ export interface ProjectChannel {
 
   /** 检查所有项目目录是否仍然存在，返回 项目 ID -> 是否有效 */
   checkProjectPaths: () => Promise<Result<Record<string, boolean>>>
+
+  /**
+   * 项目卡的 git pull：用户点它才在项目目录里跑一次 `git pull --ff-only`。
+   * 返回当前分支与「有没有拉到新提交」；失败原样带回 git 的话（不是仓库 / 分叉 / 有未提交改动）。
+   */
+  pullProjectGit: (dir: string) => Promise<Result<ProjectGitPull>>
 
   createGroup: (name: string) => Promise<Result<ProjectGroup>>
 

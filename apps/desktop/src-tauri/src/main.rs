@@ -587,6 +587,7 @@ fn main() {
             commands::work_log_load,
             commands::work_log_save,
             commands::project_git_log,
+            commands::project_git_pull,
             repo_git::repo_git_open,
             repo_git::repo_git_branches,
             repo_git::repo_git_authors,

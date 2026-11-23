@@ -50,9 +50,10 @@
   直启 `git.exe`（`proc::run_direct`），**不要**经 `cmd /C`；子进程一律带 `GIT_TERMINAL_PROMPT=0`、
   `-c core.quotepath=false` 与 `--no-pager`（理由见 [sync-and-auth.md](docs/modules/sync-and-auth.md)）；
   超时与失败收敛成给用户看的提示。**只在用户自己那两个文件夹（笔记本、技能库）所在的仓库、项目目录与 Git 页里用户打开的仓库跑 git**：
-  前两处可写（同步提交），**项目仓库与 Git 页的仓库一律只读**（项目仓库只跑 `git log` / `git config user.email`；
+  前两处可写（同步提交），**项目仓库与 Git 页的仓库平时只读**（项目仓库只跑 `git log` / `git config user.email`；
+  唯一例外是项目卡「⋯」里的 git pull：用户点它才跑一次 `git pull --ff-only`，不注入同步账号 token；
   Git 页只读命令清单与三条防注入参数见 [git-client.md](docs/modules/git-client.md)；「切换分支」只把 `log` / `ls-tree` 的
-  ref 换成 `refs/heads/<name>`，**不 checkout / switch**），不 add / commit / push / fetch，且从不写它们的远端配置
+  ref 换成 `refs/heads/<name>`，**不 checkout / switch**），除这次显式拉取外不 add / commit / push / fetch，且从不写它们的远端配置
   （不 `init`、不 `remote add` / `set-url`；只在仓库没配过身份时写一次本地 `user.email` / `user.name` 兜底）。
   别处不新增这类外部依赖。
 - **外部依赖与内置组件的边界**：唯一预装的是 git（调用规矩见上一条），VS Code 与微信是仅有的两个

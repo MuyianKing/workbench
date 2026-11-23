@@ -143,6 +143,15 @@ pub fn project_git_log(dir: String, since: Option<i64>, until: Option<i64>) -> R
     crate::project_git::log(&dir, since, until)
 }
 
+/// 项目卡的 git pull：用户点它才在项目目录里跑一次 `git pull --ff-only`。
+/// 要出网、要等 git，异步执行 —— 也只在用户明确点这一下时才会写项目工作区。
+#[tauri::command(async)]
+pub fn project_git_pull(
+    dir: String,
+) -> Result<crate::project_git::ProjectGitPull, String> {
+    crate::project_git::pull(&dir)
+}
+
 // ---------- 笔记（用户自己挑的一个文件夹，见 notes.rs） ----------
 //
 // 这一组只认「相对笔记根的路径」，越界与非法名字在 notes.rs 里挡住。

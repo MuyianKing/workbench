@@ -19,7 +19,7 @@
   的老数据算本机），筛选与设备清单在 [work-log-devices.ts](../../packages/work-log/src/work-log-devices.ts)。**手写新建永远写
   本机**（正在看别的设备时写完把选择切回本机 —— 否则刚存的记录会从眼前消失）；**「从提交生成」可以选写到哪台设备**，默认取
   工作页当前看的那台，写完把选择切到那台；设备清单、显示名（`workLogDeviceLabel`）都取同一份，别另拍一套。
-- **「从提交生成」只读项目仓库**：`project_git.rs` 只跑 `git log` 与 `git config user.email`，一个字节都不写仓库、不联网、
+- **「从提交生成」只读项目仓库**：`project_git.rs` 的 `log()` 只跑 `git log` 与 `git config user.email`，一个字节都不写仓库、不联网、
   不新增网络出口；**日期范围由弹窗里选**（必选、默认今天，可快捷选今天 / 昨天 / 本周），按**作者时间**落在本地时区的哪一天判断
   （不是 git 的提交时间）；**项目可多选、也可不选**（不选 = 全部项目，生成前确认一次），选了几个就只读那几个仓库。**设备也在
   弹窗里选**（默认工作页当前看的那台；只有一台设备时不摆这颗下拉）：新建条目的 `by` 取它，去重与「追加到哪条」只认这台设备的
@@ -133,7 +133,7 @@
 
 ```
     work-log.ts         工作日志的适配包装（workbench/，整份读 / 增删改后整份落盘；多机同步也在这里编排）
-  src/project_git.rs     项目仓库的只读提交读取（git log / git config user.email，不写仓库）
+  src/project_git.rs     项目仓库的 git：只读提交读取（git log / git config user.email）+ 用户显式 git pull
   packages/work-log      条目 / 时间轴 / 提交生成的纯逻辑（git-import.ts 管分组、去重与草稿；
                          work-log-sync.ts 管分片、后写胜出与墓碑合并；
                          work-log-devices.ts 管按设备筛条目、切换器的设备清单与显示名、按设备预选项目（projectsOfDevice）、按设备可见项目（visibleProjectsOfDevice）与归属设备收敛（sanitizeDeviceIds））

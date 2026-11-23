@@ -1,4 +1,4 @@
-import type { AddProjectInput, CommandEntry, Project, Result, TerminalKind, WorkbenchApi } from '@/types'
+import type { AddProjectInput, CommandEntry, Project, ProjectGitPull, Result, TerminalKind, WorkbenchApi } from '@/types'
 import { fail, nextProjectColor, ok, samePath } from '@workbench/core'
 import { openDialog } from './api-system'
 import { errorText, guard, invoke } from './bridge'
@@ -115,6 +115,26 @@ export const projectApi = {
   relocateProject: (id: string, newPath: string) =>
     guard(Promise.resolve(state.relocateProject(id, newPath)), '重新绑定路径失败'),
   checkProjectPaths: () => guard(state.checkProjectPaths(), '检查项目目录失败'),
+
+  /**
+   * 项目卡的 git pull：宿主侧直启 git 在项目目录里跑 `git pull --ff-only`。
+   *
+   * 只在用户点菜单里那一项时走 —— 项目仓库平时仍然只读；凭据用系统 git 那一套，
+   * 不注入同步仓库的账号 token（见 project_git.rs 的注释）。
+   */
+  pullProjectGit: async (dir: string): Promise<Result<ProjectGitPull>> => {
+    const result = await guard(
+      invoke<{ branch?: unknown, received?: unknown }>('project_git_pull', { dir }),
+      '拉取项目代码失败',
+    )
+    if (!result.ok || !result.data)
+      return fail(result.error ?? '拉取项目代码失败')
+
+    return ok({
+      branch: typeof result.data.branch === 'string' ? result.data.branch : '',
+      received: result.data.received === true,
+    })
+  },
 
   // ---------- 分组 ----------
   createGroup: (name: string) =>

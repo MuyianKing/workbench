@@ -46,6 +46,11 @@ export const useProjectsStore = defineStore('projects', () => {
   const ready = ref(false)
   /** 项目目录是否仍然存在；尚未检查过的项目按有效处理 */
   const pathValidity = ref<Record<string, boolean>>({})
+  /**
+   * 正在拉取的项目。菜单点完就关，卡片上那颗「⋯」按钮据此转圈 ——
+   * 一次 pull 要走网络，最长会等到宿主侧 60 秒的超时。
+   */
+  const pullingIds = ref<Set<string>>(new Set())
   /** 按天聚合的操作总次数，首页活跃度图的深浅用；任何一种来源记了一笔就重拉 */
   const activity = ref<ActivityCounts>({})
   /** 各来源的分项（日期 → 来源 → 次数），图里格子的悬停提示用它 */
@@ -733,6 +738,40 @@ export const useProjectsStore = defineStore('projects', () => {
       notifyError(result.error ?? '打开 VS Code 失败')
   }
 
+  /** 这个项目是否正在跑 git pull（卡片上的更多按钮据此转圈、菜单项禁用） */
+  function isPulling(id: string): boolean {
+    return pullingIds.value.has(id)
+  }
+
+  /**
+   * 项目卡的 git pull：用户显式点菜单里那一项才在项目目录里跑一次
+   * `git pull --ff-only`。不弹确认 —— 只快进；分叉 / 有未提交改动时 git 自己会拒绝，
+   * 不会替用户合并或开 rebase。
+   */
+  async function pullProject(id: string): Promise<void> {
+    const project = findProject(id)
+    if (!project || isPulling(id))
+      return
+
+    pullingIds.value.add(id)
+    try {
+      const result = await window.workbench.pullProjectGit(project.path)
+      if (!result.ok) {
+        notifyError(result.error ?? '拉取项目代码失败')
+        return
+      }
+
+      const branch = result.data?.branch
+      if (result.data?.received)
+        notifySuccess(branch ? `已拉取 ${branch} 的最新代码` : '已拉取最新代码')
+      else
+        notifySuccess('已经是最新版本')
+    }
+    finally {
+      pullingIds.value.delete(id)
+    }
+  }
+
   /**
    * 把开发服务交给系统默认浏览器打开（用户点卡片上那颗分享图标才走这里，
    * 不会因为「项目跑起来了」自己弹窗 —— 见 docs/modules/projects.md）。
@@ -937,6 +976,8 @@ export const useProjectsStore = defineStore('projects', () => {
     runCustom,
     reveal,
     openInVSCode,
+    pullProject,
+    isPulling,
     openInBrowser,
     isPathValid,
     refreshPaths,

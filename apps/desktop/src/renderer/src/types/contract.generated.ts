@@ -73,6 +73,11 @@ export interface PortCheckResult {
   processName?: string | null
 }
 
+export interface ProjectGitPull {
+  branch: string
+  received: boolean
+}
+
 export interface TokenDevice {
   id: string
   name: string

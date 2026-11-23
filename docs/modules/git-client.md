@@ -9,8 +9,9 @@
 
 - **只读**：只跑 `rev-parse` / `for-each-ref` / `log` / `ls-tree` / `show` / `diff` / `cat-file -s`，绝不 `add` / `commit` /
   `checkout` / `switch` / `push` / `pull` / `fetch` / `gc`。没有暂存、提交、切工作区、推拉这些入口 —— 那是另一件事，别顺手
-  加进来。**「切换分支」是只读浏览**：分支下拉只把 `log` / `ls-tree` 的 ref 换成另一条 `refs/heads/*`，工作区与 HEAD 都不动；
-  界面上正在看别的分支时 chip 带「未切换」标记。
+  加进来（项目卡「⋯」里的 git pull 是**项目页**的入口，走 `project_git.rs`，不属于这一页，见
+  [projects.md](projects.md)）。**「切换分支」是只读浏览**：分支下拉只把 `log` / `ls-tree` 的 ref 换成另一条 `refs/heads/*`，
+  工作区与 HEAD 都不动；界面上正在看别的分支时 chip 带「未切换」标记。
 - **只在本机、只读用户在这一页打开的仓库**：仓库根由 `git rev-parse --show-toplevel` 得到，选中目录相对根的位置（`scope`）
   由 `--show-prefix` 得到，之后每条命令都以仓库根为工作目录（用户选中的可以是仓库里的子目录，也可以只是外层仓库里的一个
   子项目）。不联网、不新增网络出口、不写仓库、不碰远端配置。这条是对 [AGENTS.md](../../AGENTS.md) 第 1 节 git 范围的扩展：
