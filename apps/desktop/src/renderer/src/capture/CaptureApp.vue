@@ -77,6 +77,7 @@ import {
   moveAnnotation,
   planBand,
   planNotches,
+  planRepaint,
   planTickDelay,
   readableInkOn,
   rectContains,
@@ -1595,6 +1596,11 @@ function cropStitched(canvas: HTMLCanvasElement, height: number): HTMLCanvasElem
  * 一起带过去，稳态只在预测窗口里找几个候选），主线程不背几十万次像素比较；贴画布只贴
  * `planBand` 算出的**新露出条带**（起点向上越过粘底栏多要一段）—— Δ 估错时污染只在
  * 条带里，粘底栏的旧副本被后续条带盖掉、最终只在最后一帧的位置出现一次。
+ *
+ * **每步还要把上一步贴过的那段用新帧重贴一遍**（`planRepaint`）：贴进去的是「当时
+ * 那一屏」，目标应用自己的浮动小件（AI 助手的变更药丸、悬浮按钮）、动画中间态、
+ * 粘底副本都压在里面，不重贴就停在长图中间盖住正文。首屏（整帧）也按同一口径重贴，
+ * 只有粘头与首步位移那几行留在原位。
  */
 async function runScroll(): Promise<void> {
   const state = scrollState.value
@@ -1620,6 +1626,11 @@ async function runScroll(): Promise<void> {
   let note = ''
   let top = 0
   let steps = 0
+  // 画布上「还没被新帧确认过」的那一段（画布行）：首屏是整帧，之后是上一步贴进来的条带。
+  // 下一步先用新帧把它重贴一遍（planRepaint）—— 那一段内容届时已经上移一个步长，
+  // 露出来的是它自己的像素，当时压在上面的浮动小件 / 动画 / 粘底副本跟着洗掉
+  let paintedTop = 0
+  let paintedBottom = rect.height
   let notches = 1
   // 每次发的滚轮单位数（一格 120；一格跨整屏的窗口减半细分到 60 / 30）。
   // 与 notches 相乘就是实际发给 Rust 的总单位数
@@ -1841,11 +1852,31 @@ async function runScroll(): Promise<void> {
           note = '长图画布扩不动了'
           break
         }
+        // 先把上一步贴过的那段用**这一帧**重贴一遍（见 stitch.ts 的 planRepaint）：
+        // 那一段当时是把「那一屏」原样贴进去的，应用自己的浮动小件（变更药丸、悬浮按钮）、
+        // 动画中间态、粘底副本都压在里面，不重贴就停在长图中间盖住正文。这段内容此刻
+        // 已经上移，浮件不在它上面了，重贴进去就是它自己的像素
+        const repair = planRepaint(
+          { top: paintedTop, bottom: paintedBottom },
+          top,
+          rect.height,
+          result.stickyTop,
+          result.stickyBottom,
+        )
+        if (repair) {
+          target.putImageData(
+            new ImageData(frame.data.subarray(repair.sourceRow * rect.width * 4), rect.width, repair.height),
+            0,
+            repair.row,
+          )
+        }
         target.putImageData(
           new ImageData(frame.data.subarray(bandTop * rect.width * 4), rect.width, rect.height - bandTop),
           0,
           top + bandTop,
         )
+        paintedTop = top + bandTop
+        paintedBottom = top + rect.height
         prev = frame
         steps += 1
         state.stitched = top + rect.height

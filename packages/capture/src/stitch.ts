@@ -43,6 +43,12 @@
  * 每一步都恰好盖住上一帧留下的粘底副本，粘底栏最终只在最后一帧的位置出现一次；
  * Δ 估错时污染也只落在条带里，不会抹过整个重叠区。
  *
+ * 贴的是「当时那一帧」，所以那一屏上的**临时像素**（应用自己的浮动小件 / 悬浮按钮、
+ * 动画中间态、粘底栏的副本）会一起贴进去。`planRepaint` 治的就是这个：下一步先用
+ * **新帧**把上一步贴过的那段重贴一遍 —— 那段内容此时已经上移了一个步长，露出来的是
+ * 它自己的像素，浮件留在别处不来。首屏整屏贴进去的那一屏同理（`painted` 给它
+ * `[0, 帧高)`）：除粘头与首步位移那几行之外，其余全部由第一步重贴一遍。
+ *
  * 这里只认数字（与 ocr.ts 同一口径）：怎么抓帧、怎么画长图由渲染层做 —— 那一步要问
  * DOM 与 IPC，纯逻辑这边不掺和。
  */
@@ -378,6 +384,48 @@ export function planBand(
   const raw = height - delta - stickyBottom - BAND_PAD
   const lo = Math.min(stickyTop, height - 1)
   return Math.max(lo, Math.min(raw, height - 1))
+}
+
+/** 上一步贴过的那段要用新帧重贴的位置：画布行、行数、从这一帧的哪一行取 */
+export interface RepaintPlan {
+  /** 重贴到画布从这一行起 */
+  row: number
+  /** 重贴多少行（> 0） */
+  height: number
+  /** 从这一帧的这一行开始取（= row − 这一帧的画布顶） */
+  sourceRow: number
+}
+
+/**
+ * 上一步在画布上贴过的那段（画布行 `[painted.top, painted.bottom)`）这一步要用新帧
+ * 重贴一遍 —— 贴进去的是**当时那一帧**，它上面的浮动小件（应用自己的变更药丸 / 悬浮
+ * 按钮）、动画中间态、粘底栏副本都被当成内容留下了；到了这一步，同一段内容已经上移
+ * 一个步长，它在 `frameTop` 这一帧里露出来的是干净像素。
+ *
+ * 两条夹法缺一不可：
+ * - **不把粘头重贴进长图**：源行要让开这一帧的粘头（`stickyTop`）—— 首屏重贴时源行
+ *   从 0 起会把标题栏搬到长图中间去；粘头只该在长图最上面出现一次；
+ * - **不把粘底栏当内容贴上去**：源行止于这一帧粘底栏的上缘（`frameTop + h − stickyBottom`），
+ *   再往下取到的就是输入框那一栏，会贴到长图中间去。
+ *
+ * 重贴区间与这一步的条带（`planBand`）在画布上有重叠 —— 条带起点比 `painted.bottom`
+ * 还要再往上 `stickyBottom + 8` 行；两块取的又都是这一帧的字节，重叠处一致，也不会
+ * 漏行。返回 null = 没有可重贴的行（源行已经被滚出屏幕、或夹完不剩行）。
+ */
+export function planRepaint(
+  painted: { top: number, bottom: number },
+  frameTop: number,
+  regionHeight: number,
+  stickyTop: number,
+  stickyBottom: number,
+): RepaintPlan | null {
+  if (!(regionHeight > 0) || !(painted.bottom > painted.top))
+    return null
+  const row = Math.max(painted.top, frameTop + Math.max(0, stickyTop))
+  const bottom = Math.min(painted.bottom, frameTop + regionHeight - Math.max(0, stickyBottom))
+  if (bottom <= row)
+    return null
+  return { row, height: bottom - row, sourceRow: row - frameTop }
 }
 
 /** 两帧字节是不是完全一样：等稳判定靠它（抓屏是确定的，同内容必同字节） */

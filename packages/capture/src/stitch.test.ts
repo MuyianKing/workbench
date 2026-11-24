@@ -1,6 +1,6 @@
 import type { StitchFrame } from './stitch'
 import { describe, expect, it } from 'vitest'
-import { analyzeScrollOffset, bytesEqual, planBand, planNotches, planTickDelay, scrollOffset, TICK_MAX } from './stitch'
+import { analyzeScrollOffset, bytesEqual, planBand, planNotches, planRepaint, planTickDelay, scrollOffset, TICK_MAX } from './stitch'
 
 /** 一条「页面内容」的确定性花纹：像素值跟 y 有关，行与行都能区分 */
 function pagePixel(x: number, y: number): [number, number, number] {
@@ -265,6 +265,124 @@ describe('planBand', () => {
   })
 })
 
+describe('planRepaint', () => {
+  const H = 600
+
+  it('第一步：首屏除首步位移那几行外整屏重贴', () => {
+    // 首屏画布 [0, 600)，这一步的帧顶在 150：长图 150..600 在这一帧的 0..450
+    expect(planRepaint({ top: 0, bottom: H }, 150, H, 0, 0)).toEqual({ row: 150, height: 450, sourceRow: 0 })
+  })
+
+  it('粘头留在长图最上面：源行从粘头之下起', () => {
+    expect(planRepaint({ top: 0, bottom: H }, 150, H, 40, 0)).toEqual({ row: 190, height: 410, sourceRow: 40 })
+  })
+
+  it('源行不进这一帧的粘底栏', () => {
+    // 帧顶 500 时源行只到 500 + 600 − 60；首屏画布到 600 就没了
+    expect(planRepaint({ top: 0, bottom: H }, 500, H, 0, 60)).toEqual({ row: 500, height: 100, sourceRow: 0 })
+  })
+
+  it('稳态：重贴上一步那条带，首尾与这一步的条带相接', () => {
+    // 上一步 top=150、bandTop=382 → 画布 [532, 750)；这一步 top=300，重贴到 750 为止
+    expect(planRepaint({ top: 532, bottom: 750 }, 300, H, 0, 60)).toEqual({ row: 532, height: 218, sourceRow: 232 })
+  })
+
+  it('源行已经滚出屏幕 / 没有可重贴的行：不重贴', () => {
+    expect(planRepaint({ top: 0, bottom: 40 }, 150, H, 0, 0)).toBeNull()
+    expect(planRepaint({ top: 100, bottom: 100 }, 150, H, 0, 0)).toBeNull()
+  })
+})
+
+describe('贴条带 + 重贴上一步那段', () => {
+  const W = 240
+  const H = 600
+  /** 粘底栏（聊天输入框那一类）：每一帧都在同样的屏幕位置 */
+  const FOOTER = 60
+  /** 目标应用自己的浮动小件：钉在屏幕上不动、压在正文上（AI 助手的变更药丸 / 悬浮按钮） */
+  const CHIP = { x: 60, y: 470, width: 120, height: 24 }
+  /** 页面花纹不可能撞上的两个色：pagePixel 三通道上限分别是 250 / 240 / 232 */
+  const CHIP_RGB = [255, 0, 255] as const
+  const FOOTER_RGB = [255, 255, 255] as const
+
+  function frameAt(top: number): StitchFrame {
+    return makeFrame(W, H, (x, y) => {
+      if (x >= CHIP.x && x < CHIP.x + CHIP.width && y >= CHIP.y && y < CHIP.y + CHIP.height)
+        return [255, 0, 255]
+      if (y >= H - FOOTER)
+        return [255, 255, 255]
+      return pagePixel(x, top + y)
+    })
+  }
+
+  function paintRows(canvas: Uint8ClampedArray, frame: StitchFrame, from: number, count: number, destRow: number): void {
+    const rowBytes = frame.width * 4
+    canvas.set(frame.data.subarray(from * rowBytes, (from + count) * rowBytes), destRow * rowBytes)
+  }
+
+  /** 按 CaptureApp 的口径跑一遍：首屏整帧 → 每步先重贴上一步那段、再贴新条带 */
+  function stitch(tops: number[]): Uint8ClampedArray {
+    const first = frameAt(0)
+    const canvas = new Uint8ClampedArray(W * (tops[tops.length - 1] + H) * 4)
+    paintRows(canvas, first, 0, H, 0)
+    let paintedTop = 0
+    let paintedBottom = H
+    let top = 0
+    let prev = first
+    for (const expected of tops) {
+      const frame = frameAt(expected)
+      const result = analyzeScrollOffset(prev, frame)
+      expect(result.delta).toBe(150)
+      const delta = result.delta as number
+      const bandTop = planBand(delta, H, result.stickyTop, result.stickyBottom)
+      top += delta
+      const repair = planRepaint({ top: paintedTop, bottom: paintedBottom }, top, H, result.stickyTop, result.stickyBottom)
+      if (repair)
+        paintRows(canvas, frame, repair.sourceRow, repair.height, repair.row)
+      paintRows(canvas, frame, bandTop, H - bandTop, top + bandTop)
+      paintedTop = top + bandTop
+      paintedBottom = top + H
+      prev = frame
+    }
+    return canvas
+  }
+
+  /** 画布上出现过指定颜色的行号 */
+  function rowsOf(canvas: Uint8ClampedArray, rgb: readonly [number, number, number]): number[] {
+    const rows: number[] = []
+    for (let y = 0; y < canvas.length / 4 / W; y += 1) {
+      for (let x = 0; x < W; x += 1) {
+        const i = (y * W + x) * 4
+        if (canvas[i] === rgb[0] && canvas[i + 1] === rgb[1] && canvas[i + 2] === rgb[2]) {
+          rows.push(y)
+          break
+        }
+      }
+    }
+    return rows
+  }
+
+  const range = (start: number, count: number): number[] => Array.from({ length: count }, (_, i) => start + i)
+
+  it('浮件只停在最后一帧的位置，不会一路贴进长图', () => {
+    // 每一步都把当时那一屏贴进来，不重贴的话浮件会在 620 / 770 / 920 各留一份
+    const canvas = stitch([150, 300, 450])
+    expect(rowsOf(canvas, CHIP_RGB)).toEqual(range(450 + CHIP.y, CHIP.height))
+  })
+
+  it('粘底栏只在长图最底下出现一次（重贴顺手盖掉旧副本）', () => {
+    const canvas = stitch([150, 300, 450])
+    expect(rowsOf(canvas, FOOTER_RGB)).toEqual(range(450 + H - FOOTER, FOOTER))
+  })
+
+  it('正文按绝对位置拼对（不重不漏）', () => {
+    const canvas = stitch([150, 300, 450])
+    for (const y of [0, 100, 300, 500, 700, 900]) {
+      const i = (y * W + 20) * 4
+      expect([canvas[i], canvas[i + 1], canvas[i + 2]]).toEqual(pagePixel(20, y))
+    }
+  })
+})
+
 describe('planTickDelay', () => {
   it('第一步就稳了（瞬时跳滚）：tick 降一档', () => {
     expect(planTickDelay(TICK_MAX, 1)).toBe(TICK_MAX - 40)
@@ -381,7 +499,8 @@ describe('hint + 条带贴端到端', () => {
     const frame = (top: number) => makeFrame(W, H, (x, y) =>
       y >= H - FOOTER ? footerP(x, y) : pagePixel(x, top + y))
 
-    // 长图（纯数组模拟渲染层的画布）：第 0 帧整帧贴，之后每步只贴 planBand 的条带
+    // 长图（纯数组模拟渲染层的画布）：第 0 帧整帧贴，之后每步先重贴上一步那段、
+    // 再贴 planBand 的条带（与 CaptureApp 的滚动循环同一口径）
     const longH = CONTENT_H + FOOTER
     const image = new Uint8ClampedArray(W * longH * 4)
     const paste = (frameData: StitchFrame, bandTop: number, at: number) => {
@@ -389,12 +508,18 @@ describe('hint + 条带贴端到端', () => {
       for (let y = bandTop; y < H; y += 1)
         image.set(frameData.data.subarray(y * w4, (y + 1) * w4), (at + y) * w4)
     }
+    const pasteRows = (frameData: StitchFrame, from: number, count: number, at: number) => {
+      const w4 = W * 4
+      image.set(frameData.data.subarray(from * w4, (from + count) * w4), at * w4)
+    }
 
     let top = 0
     let perNotch = 0
     let notches = 1
     let prev = frame(0)
     paste(prev, 0, 0)
+    let paintedTop = 0
+    let paintedBottom = H
 
     for (let step = 0; step < 40; step += 1) {
       const actual = Math.min(notches * NOTCH_PX, BOTTOM - top)
@@ -407,7 +532,13 @@ describe('hint + 条带贴端到端', () => {
       expect(result.stickyBottom).toBe(FOOTER)
       const delta = result.delta!
       top += delta
-      paste(next, planBand(delta, H, result.stickyTop, result.stickyBottom), top)
+      const repair = planRepaint({ top: paintedTop, bottom: paintedBottom }, top, H, result.stickyTop, result.stickyBottom)
+      if (repair)
+        pasteRows(next, repair.sourceRow, repair.height, repair.row)
+      const bandTop = planBand(delta, H, result.stickyTop, result.stickyBottom)
+      paste(next, bandTop, top)
+      paintedTop = top + bandTop
+      paintedBottom = top + H
       perNotch = delta / notches
       prev = next
       notches = planNotches(perNotch, H)
@@ -450,12 +581,18 @@ describe('实色粘底栏的拼接端到端', () => {
       for (let y = bandTop; y < H; y += 1)
         image.set(frameData.data.subarray(y * w4, (y + 1) * w4), (at + y) * w4)
     }
+    const pasteRows = (frameData: StitchFrame, from: number, count: number, at: number) => {
+      const w4 = W * 4
+      image.set(frameData.data.subarray(from * w4, (from + count) * w4), at * w4)
+    }
 
     let top = 0
     let perNotch = 0
     let notches = 1
     let prev = frame(0)
     paste(prev, 0, 0)
+    let paintedTop = 0
+    let paintedBottom = H
 
     for (let step = 0; step < 40; step += 1) {
       const actual = Math.min(notches * NOTCH_PX, BOTTOM - top)
@@ -468,7 +605,13 @@ describe('实色粘底栏的拼接端到端', () => {
       expect(result.stickyBottom).toBe(FOOTER)
       const delta = result.delta!
       top += delta
-      paste(next, planBand(delta, H, result.stickyTop, result.stickyBottom), top)
+      const repair = planRepaint({ top: paintedTop, bottom: paintedBottom }, top, H, result.stickyTop, result.stickyBottom)
+      if (repair)
+        pasteRows(next, repair.sourceRow, repair.height, repair.row)
+      const bandTop = planBand(delta, H, result.stickyTop, result.stickyBottom)
+      paste(next, bandTop, top)
+      paintedTop = top + bandTop
+      paintedBottom = top + H
       perNotch = delta / notches
       prev = next
       notches = planNotches(perNotch, H)
