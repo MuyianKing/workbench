@@ -2,7 +2,7 @@
 import type { NoteKind } from '@workbench/notes'
 import type { Component } from 'vue'
 import type { FloatingMenuItem } from '@/components/FloatingMenu.vue'
-import { CopyDocument, FolderAdd, FolderOpened, Plus, TopRight } from '@element-plus/icons-vue'
+import { CopyDocument, Delete, EditPen, FolderAdd, FolderOpened, Plus, TopRight } from '@element-plus/icons-vue'
 import { computed } from 'vue'
 import FloatingMenu from '@/components/FloatingMenu.vue'
 /**
@@ -35,8 +35,8 @@ const emit = defineEmits<{
 const items = computed<FloatingMenuItem[]>(() => [
   { name: 'new-note', label: '新建笔记', icon: Plus as Component, sep: false },
   { name: 'new-folder', label: '新建文件夹', icon: FolderAdd as Component, sep: true },
-  { name: 'rename', label: '重命名', sep: true },
-  { name: 'remove', label: '删除', sep: false },
+  { name: 'rename', label: '重命名', icon: EditPen as Component, sep: true },
+  { name: 'remove', label: '删除', icon: Delete as Component, danger: true, sep: false },
   { name: 'reveal', label: '在资源管理器中显示', icon: FolderOpened as Component, sep: true },
   { name: 'copy-path', label: '复制路径', icon: CopyDocument as Component, sep: false },
   ...(props.kind === 'note'

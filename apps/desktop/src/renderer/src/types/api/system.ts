@@ -77,6 +77,11 @@ export interface SystemChannel {
   /** 按路径读一个文本文件（AI 预览栏、日志解析这类「按需读一份」的解析当数据源） */
   readTextFile: (path: string) => Promise<Result<string>>
 
+  /**
+   * 把一段文本写到用户亲手挑的路径（笔记导出用）。路径来自「另存为」，写失败回 Err。
+   */
+  writeTextFile: (path: string, content: string) => Promise<Result<null>>
+
   /** 按路径读一个二进制文件、以 base64 回传（AI 预览栏的 DOCX / PPTX 是 zip 容器，文本通道读不了） */
   readBinaryFile: (path: string) => Promise<Result<string>>
 

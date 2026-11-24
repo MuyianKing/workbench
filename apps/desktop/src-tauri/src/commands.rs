@@ -1321,6 +1321,20 @@ pub fn fs_read_text(path: String) -> Result<String, String> {
     std::fs::read_to_string(&path).map_err(|err| format!("读取失败: {err}"))
 }
 
+/**
+ * 把一段文本写到用户亲手挑的路径（笔记导出用）。路径来自「另存为」对话框，
+ * 与 vault_key_export / mail_attachment_save 同一个信任模型：渲染层不给路径，
+ * 这里也不替它猜名字。异步落盘，先写同目录临时文件再改名，断电不留半份。
+ */
+#[tauri::command(async)]
+pub fn fs_write_text(path: String, content: String) -> Result<(), String> {
+    let path = path.trim();
+    if path.is_empty() {
+        return Err("保存路径是空的".into());
+    }
+    fs_util::write_atomic(std::path::Path::new(path), content.as_bytes())
+}
+
 /// 按路径读一个二进制文件、编成 base64 回传：AI 预览栏的 DOCX / PPTX 是 zip 容器，
 /// 文本通道读不了。文件可能上十兆，一律异步。
 #[tauri::command(async)]

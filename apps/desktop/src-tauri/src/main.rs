@@ -762,6 +762,7 @@ fn main() {
             commands::process_created_at,
             commands::kill_process_tree,
             commands::fs_read_text,
+            commands::fs_write_text,
             commands::fs_read_base64,
             commands::fs_exists,
             commands::fs_is_dir,

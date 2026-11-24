@@ -3,7 +3,7 @@
  * 笔记正文的右键菜单。
  *
  * 编辑器那条工具带被藏起来了（见 NoteEditor），它那套动作搬到这里，
- * 形式是「分组图标按钮 + 带子菜单的行」：上面三排随手要用，底下两行是标题与插入。
+ * 形式是「分组图标按钮 + 带子菜单的行」：上面三排随手要用，底下三行是段落、插入与导出。
  *
  * 这个组件**只管摆和收**：每一项只记一个**动作名**（就是 Vditor 工具带上的项名），
  * 点下去经 `act` 交回 NoteEditor，由它去点工具带上那颗按钮 ——
@@ -56,7 +56,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  /** 选中了一项；名字是工具带项名（标题是 heading1…heading6；`table:` 前缀的归 execTable） */
+  /** 选中了一项；名字是工具带项名（标题是 heading1…heading6；`table:` 前缀的归 execTable，`export:` 前缀的归 exportNote） */
   act: [name: string]
   close: []
 }>()
@@ -120,7 +120,7 @@ const groups = computed(() => {
     .filter(group => group.length > 0)
 })
 
-/** 两行带子菜单的：标题（Vditor 工具带上是一个下拉）与插入整块的东西 */
+/** 三行带子菜单的：段落、插入整块的东西、导出（格式用 `export:` 前缀，归 NoteEditor 的 exportNote 认领） */
 const SUBMENUS: { label: string, items: MenuRow[] }[] = [
   {
     label: '段落',
@@ -138,6 +138,14 @@ const SUBMENUS: { label: string, items: MenuRow[] }[] = [
     items: [
       { name: 'code', label: '代码块' },
       { name: 'table', label: '表格' },
+    ],
+  },
+  {
+    label: '导出',
+    items: [
+      { name: 'export:markdown', label: 'Markdown' },
+      { name: 'export:html', label: 'HTML' },
+      { name: 'export:pdf', label: 'PDF（打印另存）' },
     ],
   },
 ]

@@ -4,8 +4,14 @@ import type { FloatingMenuItem } from '@/components/FloatingMenu.vue'
 import { Loading } from '@element-plus/icons-vue'
 import { blobToBase64 } from '@workbench/core'
 
-import { imageFileName, imageMarkdown, mergeEditorHotkeys, NOTE_IMAGE_MAX_BYTES, resolveNoteLink } from '@workbench/notes'
+import { buildExportHtml, imageFileName, imageMarkdown, mergeEditorHotkeys, NOTE_IMAGE_MAX_BYTES, resolveNoteLink } from '@workbench/notes'
 import Vditor from 'vditor'
+// 自包含 HTML 导出：把随包那几份 CSS 在构建期读成字符串，导出时直接内联进去 ——
+// 运行期不再去 fetch 资源（默认不联网，且导出的文件离开应用后相对路径也解析不了）
+import contentThemeDarkCss from 'vditor/dist/css/content-theme/dark.css?raw'
+import contentThemeLightCss from 'vditor/dist/css/content-theme/light.css?raw'
+import highlightDarkCss from 'vditor/dist/js/highlight.js/styles/github-dark.min.css?raw'
+import highlightLightCss from 'vditor/dist/js/highlight.js/styles/github.min.css?raw'
 /**
  * 笔记正文编辑器（Vditor，即时渲染模式）。
  *
@@ -52,7 +58,7 @@ import FloatingMenu from '@/components/FloatingMenu.vue'
 import NoteContextMenu from '@/components/NoteContextMenu.vue'
 import OverlayScrollbar from '@/components/OverlayScrollbar.vue'
 import { acceleratorOfEvent } from '@/composables/use-hotkey-recorder'
-import { notifyWarning } from '@/notify'
+import { notifyError, notifySuccess, notifyWarning } from '@/notify'
 import 'vditor/dist/index.css'
 
 const props = defineProps<{
@@ -610,14 +616,122 @@ function openMenu(event: MouseEvent): void {
 }
 
 /**
- * 右键菜单点了一项：`table:` 前缀的走快捷键通道，其余照旧点工具带上那颗按钮。
+ * 右键菜单点了一项：`table:` 前缀走快捷键通道，`export:` 前缀走导出，其余照旧点工具带按钮。
  */
 function onMenuAction(name: string): void {
   if (name.startsWith('table:')) {
     runTableAction(name.slice('table:'.length) as Parameters<typeof runTableAction>[0])
     return
   }
+  if (name.startsWith('export:')) {
+    void exportNote(name.slice('export:'.length) as 'markdown' | 'html' | 'pdf')
+    return
+  }
   runAction(name)
+}
+
+/** 导出容器的默认文件名：笔记名 + 后缀（去掉可能带上的 .md） */
+function exportBaseName(): string {
+  return props.note.name.replace(/\.(md|markdown)$/i, '') || '笔记'
+}
+
+/**
+ * 把渲染后的正文包成自包含 HTML（样式内联，任何浏览器打开都一样）。
+ *
+ * 不做「点 Vditor 工具带按钮」那条路：它导出 HTML 时引随包的 `cdn` 资源，
+ * PDF 更是往 iframe 写内联 `<script>` —— 生产态有 CSP nonce，那段脚本被丢掉，点了没反应。
+ * 这里改成应用自己拼文档：CSS 构建期内联（`?raw`），不引用任何应用内相对路径。
+ */
+function exportHtmlDocument(): string {
+  const html = editor?.getHTML() ?? ''
+  return buildExportHtml({
+    body: html,
+    title: props.note.name,
+    contentThemeCss: isDark() ? contentThemeDarkCss : contentThemeLightCss,
+    highlightCss: isDark() ? highlightDarkCss : highlightLightCss,
+    dark: isDark(),
+  })
+}
+
+/**
+ * 导出正文：弹「另存为」让用户挑路径，写完给一句 feedback。
+ *
+ * - Markdown：正文原文（`getValue()`）直接存 `.md`；
+ * - HTML：自包含 HTML 存下来，双击就能在任意浏览器打开；
+ * - PDF：不写文件，用隐藏 iframe 装自包含 HTML 调 `window.print()`，
+ *   由用户在打印对话框里选「另存为 PDF」—— Tauri 里没有免对话框的 PDF 生成器，
+ *   这是不引新依赖、也不联网的前提下唯一可靠的路。
+ */
+async function exportNote(format: 'markdown' | 'html' | 'pdf'): Promise<void> {
+  const filters = format === 'markdown'
+    ? [{ name: 'Markdown', extensions: ['md'] }]
+    : [{ name: 'HTML', extensions: ['html', 'htm'] }]
+
+  if (format === 'pdf') {
+    printPdf()
+    return
+  }
+
+  const base = exportBaseName()
+  const path = await window.workbench.pickSavePath({
+    title: format === 'markdown' ? '导出为 Markdown' : '导出为 HTML',
+    defaultPath: `${base}.${format === 'markdown' ? 'md' : 'html'}`,
+    filters,
+  })
+  if (!path)
+    return // 用户取消，不是失败
+
+  const content = format === 'markdown' ? (currentValue() ?? '') : exportHtmlDocument()
+  const result = await window.workbench.writeTextFile(path, content)
+  if (!result.ok) {
+    notifyError(result.error ?? '导出失败')
+    return
+  }
+  notifySuccess(`已导出到 ${path}`)
+}
+
+/**
+ * PDF：临时往页面里塞一个 srcdoc iframe 装自包含 HTML，加载完调它的 `print()`，
+ * 由用户在打印对话框里选「另存为 PDF」—— Tauri 里没有免对话框的 PDF 生成器，
+ * 这是不引新依赖、也不联网的前提下唯一可靠的路（不用 `window.open`：WebView2 里它
+ * 会开到没有应用上下文的错误页，见文档开头的链接那一条）。
+ *
+ * 用 `srcdoc`（不是写 iframe.innerHTML 内联脚本）绕开生产 CSP：srcdoc 是新文档，
+ * 里面只有 `<style>` 与正文，没有需要 nonce 的脚本；打印由我们这边调，文档里不放脚本。
+ * 打印窗口关掉后（print 是同步返回的）把 iframe 摘掉。
+ */
+function printPdf(): void {
+  const frame = document.createElement('iframe')
+  frame.title = '打印预览'
+  // CSSOM 定位（行内 style 属性在生产态 CSP nonce 下会被丢弃，见文档）——
+  // 放到屏幕外而不是 display:none：后者在部分 WebView 里打印出来是空白页
+  frame.style.position = 'fixed'
+  frame.style.left = '-10000px'
+  frame.style.top = '0'
+  frame.style.width = '794px'
+  frame.style.height = '1123px'
+  frame.style.border = '0'
+  frame.srcdoc = exportHtmlDocument()
+  frame.addEventListener('load', () => {
+    // 独立 Markdown 窗口的 index.html 有内联 <style>，生产态 Tauri 会给 CSP 的 style-src
+    // 加 nonce（nonce 在场 'unsafe-inline' 失效，子框架继承同一份策略）—— srcdoc 里的
+    // <style> 没带 nonce 就会被丢掉、打出无样式的白纸。把父文档那枚 nonce 抄过来。
+    // 必须用 IDL 的 .nonce：内容属性被 CSP 刻意藏起来，get/setAttribute('nonce') 不参与匹配。
+    const nonce = document.querySelector('style')?.nonce
+    if (nonce) {
+      frame.contentDocument?.querySelectorAll('style').forEach((style) => {
+        style.nonce = nonce
+      })
+    }
+    // 等一帧让布局与样式就绪再打印，避免打出空白页
+    window.setTimeout(() => {
+      frame.contentWindow?.focus()
+      frame.contentWindow?.print()
+      // print 对话框关掉后把临时 iframe 摘掉
+      window.setTimeout(() => frame.remove(), 1000)
+    }, 100)
+  })
+  document.body.appendChild(frame)
 }
 
 /**

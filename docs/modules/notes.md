@@ -477,7 +477,8 @@ notes store 里只在「重读这个文件夹」几处与每次同步后探一�
 - **拖动只认「文件拖进文件夹」与「拖到树下面空白区」（移回最外层）**：文件夹不可拖，落在文件上 / 原处都不放行。
   松手后真挪磁盘，**失败重扫** —— `el-tree` 松手时已挪过自己那份数据，不重扫左栏显示的就是不存在的位置。
 - 树的增删改都在**右键菜单**：节点行是新建笔记 / 新建文件夹 / 重命名 / 删除（整行都算），另加三项**读**的动作 ——
-  在资源管理器中显示、复制路径（绝对路径，`noteAbsPath` 按笔记本根拼）、用默认程序打开（只对笔记）。菜单**贴指针
+  在资源管理器中显示、复制路径（绝对路径，`noteAbsPath` 按笔记本根拼）、用默认程序打开（只对笔记）。**每项都带图标**
+  （重命名 `EditPen`、删除 `Delete` 走危险档红字），与共用外壳 `FloatingMenu` 的其它菜单一致。菜单**贴指针
   落点**出现（`NoteTreeMenu`，与笔记正文 / 邮件行 / 视频行共用 `use-floating-position` / `use-floating-dismiss`）——
   `el-dropdown` 的 contextmenu 触发器锚在整行上、右击行尾会弹回行首，**不要再用它**；**同一时刻只有一份**，右击
   另一行直接换落点。空白区是新建两项 + 刷新列表 + 在资源管理器中打开笔记本，新建一律落笔记本根。名字上限 60 字，
@@ -520,11 +521,21 @@ notes store 里只在「重读这个文件夹」几处与每次同步后探一�
 
 ### 编辑器动作（右键菜单 / 表格）
 
-- **编辑器动作全部挪到正文右键菜单**，工具带 CSS 藏起来（元素还在）：菜单三排图标 + 两行带子菜单（段落 / 插入），
-  共 17 项 —— 正好是工具带全部动作；光标在表格单元格时再多一排（见下条）。位置贴指针、不越出窗口，右边放不下子
+- **编辑器动作全部挪到正文右键菜单**，工具带 CSS 藏起来（元素还在）：菜单三排图标 + 三行带子菜单（段落 / 插入 / 导出），
+  覆盖工具带的全部动作；光标在表格单元格时再多一排（见下条）。位置贴指针、不越出窗口，右边放不下子
   菜单整份翻左；点别处 / Esc / 滚轮 / 窗口变化收起。**菜单自己不实现编辑动作**：每项按名字点工具带对应按钮
   （动作名必须与 `TOOLBAR` 对得上，点不到只在控制台告警）。菜单 Teleport 到 body，按下时 `preventDefault` 掉
   mousedown —— 否则焦点挪走、**选区没了**。
+- **导出子菜单**：Markdown / HTML / PDF 三种，落盘走应用自己那套，**不点 Vditor 的导出工具带** ——
+  Vditor 的 Markdown / HTML 导出是 `a[download]` + blob 静默下载（Tauri WebView2 里没有下载处理器，
+  点了没有任何可见反馈），PDF 那条往 iframe 写内联 `<script>` 再 `window.print()`，生产态 CSP nonce
+  会把那段脚本整体丢掉（见 [ipc-and-state.md](ipc-and-state.md) 的 CSP 那条）—— 两条路在真应用里都等于「没反应」。
+  现在：Markdown 取 `getValue()` 原文、HTML 由 `buildExportHtml`（packages/notes，纯函数有单测）把 `getHTML()`
+  与随包 CSS（`?raw` 构建期内联）包成**自包含**文档，两者都经 `pickSavePath` 让用户挑路径、`fs_write_text`
+  落盘、成功提示路径；PDF 用同款自包含文档塞进 `srcdoc` iframe（srcdoc 是新文档，里面没有要 nonce 的脚本）
+  调 `contentWindow.print()`，由用户在打印对话框里选「另存为 PDF」。三项共用子菜单外壳与翻边，动作名带 `export:` 前缀。
+  另存为对话框与写文件通道走 system 那一组（`pickSavePath` / `writeTextFile`，后者映射 `fs_write_text`），
+  独立 Markdown 窗口也装了这套 API，导出与笔记页同一条路。
 - **表格行列增删在右键菜单第四排**（光标在单元格里右键才出现）：下方 / 上方插行、右侧 / 左侧插列、删行、删列六项。
   Vditor 4 的表格工具条**只挂 wysiwyg**，IR 模式没有，行列操作平时只能按它自己那组快捷键（Ctrl+= / Ctrl+Shift+F /
   Ctrl+Shift+= / Ctrl+Shift+G / Ctrl+- / Ctrl+Shift+-，菜单提示里带着）。菜单这排**不点工具带** —— 工具带没有对应
@@ -601,7 +612,7 @@ notes store 里只在「重读这个文件夹」几处与每次同步后探一�
                          文件路径只从会话取，渲染层传不了第二个文件
 ```
 
-其余两处在渲染层（同为原注解）：
+其余几处在渲染层与域包（同为原注解 + 导出）：
 
 ```
     note.ts             笔记的适配包装（workbench/，与 video.ts / work-log.ts 等同一排）
@@ -610,5 +621,7 @@ notes store 里只在「重读这个文件夹」几处与每次同步后探一�
     markdown-window/     独立 Markdown 编辑窗口的宿主（markdown.html 入口）：只装适配层，
                          正文 / 保存队列 / 关闭握手都在这；不装 store
     markdown-window.ts   独立编辑窗口的适配层（workbench/：上下文 / 保存 / 关闭 / 冲刷事件）
+    export-html.ts       packages/notes：把渲染后的正文 + 随包 CSS（构建期 ?raw 内联）拼成
+                         自包含 HTML（笔记导出用，纯函数有单测）
 apps/desktop/scripts/sync-vditor-assets.mjs  dev / build 前把 Vditor 用得着的静态资源复制进渲染层 public/
 ```

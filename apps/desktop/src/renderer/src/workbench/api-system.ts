@@ -210,6 +210,9 @@ export const systemApi = {
   openPath: (path: string) => guard(invoke<null>('open_path', { path }), '打开文件失败'),
   /** 按路径读一个文本文件（AI 预览栏用；fs_read_text 一直在，这里给个能判 ok 的门面） */
   readTextFile: (path: string) => guard(invoke<string>('fs_read_text', { path }), '读取文件失败'),
+  /** 把一段文本写到用户「另存为」挑的路径（笔记导出用）；失败回 Err */
+  writeTextFile: (path: string, content: string) =>
+    guard(invoke<null>('fs_write_text', { path, content }), '导出文件失败'),
   /**
    * 按路径读一个二进制文件、以 base64 回传（AI 预览栏的 DOCX / PPTX 是 zip 容器，
    * 文本通道读不了；解码见 decodeBase64ToBuffer）。
