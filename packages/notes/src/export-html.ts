@@ -5,6 +5,10 @@
  * 样式直接内联进 `<style>`，图片本来就是笔记正文里的外链。不引用应用里的相对路径
  * （导出的文件不在应用目录里，那些路径一个都解析不了），也不引用随包的 Vditor 资源
  * （换个环境就没有了）。代码块的高亮由 Vditor 渲染时写好的 class 决定，这里只带配色表。
+ *
+ * 三份 CSS 都要带：Vditor 的**基础结构**（index.css）决定表格的 border-collapse、单元格
+ * padding、列表缩进这些排版骨架，内容主题（content-theme）只换配色。只带主题不带基础时
+ * 表格会退回浏览器默认的 separate 模式，每个格子各画各的框、之间裂出白缝。
  */
 
 /** 只对文档标题用：标题是纯文本，别让它里面的 `<` `&` 破坏结构 */
@@ -21,7 +25,9 @@ export interface ExportHtmlInput {
   body: string
   /** 文档标题（笔记名，纯文本） */
   title: string
-  /** 随包内容主题 CSS（Vditor 的 content-theme/<light|dark>.css 原文） */
+  /** Vditor 基础结构 CSS（index.css 原文）：表格合并 / 单元格 padding / 列表缩进等排版骨架 */
+  baseCss: string
+  /** 随包内容主题 CSS（Vditor 的 content-theme/<light|dark>.css 原文），只换配色 */
   contentThemeCss: string
   /** 代码块高亮配色 CSS（github / github-dark 的原文） */
   highlightCss: string
@@ -49,6 +55,7 @@ html, body { margin: 0; padding: 0; background: ${pageBg}; color: ${pageInk}; }
 body { font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; }
 .export-page { max-width: 860px; margin: 0 auto; padding: 40px 32px 80px; }
 ${input.highlightCss}
+${input.baseCss}
 ${input.contentThemeCss}
 @media print { html, body { background: #fff; color: #000; } .export-page { max-width: none; padding: 0; } }
 </style>

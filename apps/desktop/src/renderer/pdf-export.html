@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <!--
+      PDF 静默导出用的空白窗口（第七个 HTML 入口，见 vite.config.ts 的多入口）。
+
+      这个窗口从头到尾不显示：Rust 侧（pdf_export.rs）建好隐藏窗口后，用 WebView2 的
+      NavigateToString 把 buildExportHtml 生成的自包含文档整篇灌进来，等导航完成再调
+      ICoreWebView2_7::PrintToPdf 静默出 PDF，全程不弹系统打印预览。这里只提供一个
+      能加载的 about 壳，不装 store、不 initState —— 它没有 JS 上下文要跑的东西。
+    -->
+    <title>PDF_EXPORT_BLANK</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+        background: #fff;
+      }
+    </style>
+  </head>
+  <body></body>
+</html>

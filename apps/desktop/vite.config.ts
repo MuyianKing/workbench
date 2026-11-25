@@ -58,10 +58,11 @@ export default defineConfig({
     emptyOutDir: true,
     rollupOptions: {
       /**
-       * 六个入口：主界面、截图遮罩、钉图、悬浮球、独立视频窗口、独立 Markdown 编辑窗口。
+       * 七个入口：主界面、截图遮罩、钉图、悬浮球、独立视频窗口、独立 Markdown 编辑窗口、
+       * PDF 静默导出用的空白窗口。
        *
-       * 后五个是**独立的窗口、各自的 JS 上下文**（Rust 侧用 WebviewUrl::App 分别加载
-       * capture.html / pin.html / ball.html / video.html / markdown.html），所以必须是 HTML
+       * 后六个是**独立的窗口、各自的 JS 上下文**（Rust 侧用 WebviewUrl::App 分别加载
+       * capture.html / pin.html / ball.html / video.html / markdown.html / pdf-export.html），所以必须是 HTML
        * 入口而不是路由 —— 它们不该、也不能去装主界面那套 store（那会与主窗口抢着写同一批 JSON，
        * 见 docs/modules/screenshot.md、docs/modules/float-ball.md、docs/modules/video.md 与
        * docs/modules/notes.md）。
@@ -73,6 +74,7 @@ export default defineConfig({
         ball: resolve(import.meta.dirname, 'src/renderer/ball.html'),
         video: resolve(import.meta.dirname, 'src/renderer/video.html'),
         markdown: resolve(import.meta.dirname, 'src/renderer/markdown.html'),
+        pdfExport: resolve(import.meta.dirname, 'src/renderer/pdf-export.html'),
       },
     },
   },

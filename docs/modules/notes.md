@@ -531,11 +531,38 @@ notes store 里只在「重读这个文件夹」几处与每次同步后探一�
   点了没有任何可见反馈），PDF 那条往 iframe 写内联 `<script>` 再 `window.print()`，生产态 CSP nonce
   会把那段脚本整体丢掉（见 [ipc-and-state.md](ipc-and-state.md) 的 CSP 那条）—— 两条路在真应用里都等于「没反应」。
   现在：Markdown 取 `getValue()` 原文、HTML 由 `buildExportHtml`（packages/notes，纯函数有单测）把 `getHTML()`
-  与随包 CSS（`?raw` 构建期内联）包成**自包含**文档，两者都经 `pickSavePath` 让用户挑路径、`fs_write_text`
-  落盘、成功提示路径；PDF 用同款自包含文档塞进 `srcdoc` iframe（srcdoc 是新文档，里面没有要 nonce 的脚本）
-  调 `contentWindow.print()`，由用户在打印对话框里选「另存为 PDF」。三项共用子菜单外壳与翻边，动作名带 `export:` 前缀。
-  另存为对话框与写文件通道走 system 那一组（`pickSavePath` / `writeTextFile`，后者映射 `fs_write_text`），
+  与随包 CSS（`?raw` 构建期内联）包成**自包含**文档；三者都经 `pickSavePath` 让用户挑路径、成功提示路径。
+  Markdown / HTML 落盘走 `fs_write_text`；**PDF 静默出 PDF**：同一份自包含文档交 `exportPdf(path, html)`，
+  Rust 侧 `pdf_export.rs` 建一个隐藏 WebView2 窗口、`NavigateToString` 灌入 HTML、`NavigationCompleted`
+  后调 `ICoreWebView2_7::PrintToPdf` 直接写 .pdf，**全程不弹系统打印预览**（WebView2 的 `print()` 只有
+  交互式那一种，做不到静默；也不走 Edge headless，那是给项目引第三个外部程序，见
+  [AGENTS.md](../../AGENTS.md) 的外部程序边界）。三项共用子菜单外壳与翻边，动作名带 `export:` 前缀。
+  另存为对话框与写文件通道走 system 那一组（`pickSavePath` / `writeTextFile` / `exportPdf`），
   独立 Markdown 窗口也装了这套 API，导出与笔记页同一条路。
+- **PDF 隐藏窗口的线程模型（踩过自锁，别改回去）**：`WebviewWindow::with_webview` 把闭包**异步派发到主 UI 线程**，
+  WebView2 的 COM 与回调也都住在主线程。**主线程闭包里绝不做任何阻塞等待** —— 曾经在闭包里 `recv_timeout` /
+  `wait_with_pump` 等 NavigationCompleted 回调，结果整个界面卡死：WebView2 的回调靠主线程消息循环派发，
+  主线程被阻塞住又不泵消息，回调永远来不了（`with_webview` 返回成功却界面冻结，就是这个症状；
+  `wait_with_pump` 还会接管主循环和 Tauri 自己的循环打架）。正确做法：闭包只**发起**异步操作立即返回，
+  `WebMessage → PrintToPdf → PrintToPdfCompleted` 整条链都在各自的 COM 回调里接力、由 Tauri 主循环驱动；
+  只有 async 命令所在的**工作线程**用 `recv_timeout(30s)` 等最终结果（不冻结 UI），成不论败都关掉隐藏窗口。
+  `PrintToPdf` 在 `ICoreWebView2_7` 上，controller 给的 `ICoreWebView2` 要 cast 上去；打印设置由
+  `ICoreWebView2Environment6::CreatePrintSettings()` 建。窗口给纸张尺寸（794×1123），`webview2-com(-sys)`
+  已在编译图（tauri → wry 引入），pin 0.39.1 对齐当前 lock，只加 Cargo.toml 声明才能从本项目 `use`，
+  不新增编译单元。
+- **打印时机必须用页面回传的 WebMessage，别用 NavigationCompleted（真机踩坑）**：`NavigationCompleted`
+  触发时页面还没渲染完（DocumentTitle 已是 `about:blank`、IsSuccess 常为 false），据此打印必得空白 PDF
+  （真机实测打出 864 字节、标题 about:blank 的空页；标题哨兵也挡不住）。最终方案：灌入的 HTML 尾部追加
+  `<script>window.addEventListener('load',()=>window.chrome.webview.postMessage('PDF_READY'))</script>`，
+  Rust 用 `WebMessageReceived`（`TryGetWebMessageAsString`）收到 `PDF_READY` 才调 PrintToPdf —— load 完成
+  意味着 DOM/样式就绪，标题 / IsSuccess 那些不可靠判据全部去掉。**窗口全程 `visible(false)`、从不 `show()`**：
+  早先以为"不可见窗口不渲染 → 空页"，真机证实那是上面的导航时序问题；WebMessage 保证打印时机后，全程隐藏
+  也能导出有内容的 PDF（真机验证 446KB、标题为笔记名、9 处中文），用户完全看不到窗口、也就没有闪现。
+- **自包含 HTML 必须内联三份 CSS**：Vditor 基础结构（`index.css`，`buildExportHtml` 的 `baseCss`）、内容主题
+  （`content-theme/<light|dark>.css`）、代码高亮配色。基础结构决定表格 `border-collapse: collapse` / 单元格
+  padding / 列表缩进这些排版骨架，主题只换配色 —— 漏掉基础结构时导出文档的表格退回浏览器默认
+  `separate` 模式，每个格子各画各的框、之间裂出白缝（应用内预览正常是因为它本来就加载了 `index.css`）。
+  基础结构在前、主题在后，顺序不能反。
 - **表格行列增删在右键菜单第四排**（光标在单元格里右键才出现）：下方 / 上方插行、右侧 / 左侧插列、删行、删列六项。
   Vditor 4 的表格工具条**只挂 wysiwyg**，IR 模式没有，行列操作平时只能按它自己那组快捷键（Ctrl+= / Ctrl+Shift+F /
   Ctrl+Shift+= / Ctrl+Shift+G / Ctrl+- / Ctrl+Shift+-，菜单提示里带着）。菜单这排**不点工具带** —— 工具带没有对应
@@ -610,6 +637,9 @@ notes store 里只在「重读这个文件夹」几处与每次同步后探一�
   src/md_window.rs       资源管理器「打开方式」的独立编辑窗口：命令行解析 / 会话（窗口 label →
                          文件路径）/ 建窗 / markdown_window_context / save / close（关闭握手），
                          文件路径只从会话取，渲染层传不了第二个文件
+  src/pdf_export.rs      笔记 PDF 静默导出：export_pdf(path, html) 建隐藏 WebView2 窗口，
+                         NavigateToString 灌自包含 HTML → NavigationCompleted → PrintToPdf 出 .pdf，
+                         全程不弹打印预览；主线程只发起异步操作，回调接力、工作线程等结果（勿阻塞主线程）
 ```
 
 其余几处在渲染层与域包（同为原注解 + 导出）：
@@ -622,6 +652,7 @@ notes store 里只在「重读这个文件夹」几处与每次同步后探一�
                          正文 / 保存队列 / 关闭握手都在这；不装 store
     markdown-window.ts   独立编辑窗口的适配层（workbench/：上下文 / 保存 / 关闭 / 冲刷事件）
     export-html.ts       packages/notes：把渲染后的正文 + 随包 CSS（构建期 ?raw 内联）拼成
-                         自包含 HTML（笔记导出用，纯函数有单测）
+                         自包含 HTML（笔记导出用，纯函数有单测）；三份 CSS 缺一不可：基础结构
+                         index.css（表格合并 / padding）、内容主题、高亮配色
 apps/desktop/scripts/sync-vditor-assets.mjs  dev / build 前把 Vditor 用得着的静态资源复制进渲染层 public/
 ```

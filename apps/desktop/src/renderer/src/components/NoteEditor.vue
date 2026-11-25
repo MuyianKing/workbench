@@ -6,10 +6,13 @@ import { blobToBase64 } from '@workbench/core'
 
 import { buildExportHtml, imageFileName, imageMarkdown, mergeEditorHotkeys, NOTE_IMAGE_MAX_BYTES, resolveNoteLink } from '@workbench/notes'
 import Vditor from 'vditor'
-// 自包含 HTML 导出：把随包那几份 CSS 在构建期读成字符串，导出时直接内联进去 ——
-// 运行期不再去 fetch 资源（默认不联网，且导出的文件离开应用后相对路径也解析不了）
 import contentThemeDarkCss from 'vditor/dist/css/content-theme/dark.css?raw'
 import contentThemeLightCss from 'vditor/dist/css/content-theme/light.css?raw'
+// 自包含 HTML 导出：把随包那几份 CSS 在构建期读成字符串，导出时直接内联进去 ——
+// 运行期不再去 fetch 资源（默认不联网，且导出的文件离开应用后相对路径也解析不了）
+// 基础结构 CSS（index.css）不能少：表格的 border-collapse / 单元格 padding / 列表缩进都在这里，
+// 只带 content-theme 的话导出文档里表格会裂出白缝（应用内有这份基础 CSS 所以正常）
+import vditorBaseCss from 'vditor/dist/index.css?raw'
 import highlightDarkCss from 'vditor/dist/js/highlight.js/styles/github-dark.min.css?raw'
 import highlightLightCss from 'vditor/dist/js/highlight.js/styles/github.min.css?raw'
 /**
@@ -647,6 +650,7 @@ function exportHtmlDocument(): string {
   return buildExportHtml({
     body: html,
     title: props.note.name,
+    baseCss: vditorBaseCss,
     contentThemeCss: isDark() ? contentThemeDarkCss : contentThemeLightCss,
     highlightCss: isDark() ? highlightDarkCss : highlightLightCss,
     dark: isDark(),
@@ -658,80 +662,39 @@ function exportHtmlDocument(): string {
  *
  * - Markdown：正文原文（`getValue()`）直接存 `.md`；
  * - HTML：自包含 HTML 存下来，双击就能在任意浏览器打开；
- * - PDF：不写文件，用隐藏 iframe 装自包含 HTML 调 `window.print()`，
- *   由用户在打印对话框里选「另存为 PDF」—— Tauri 里没有免对话框的 PDF 生成器，
- *   这是不引新依赖、也不联网的前提下唯一可靠的路。
+ * - PDF：同一份自包含 HTML 交给 Rust 用隐藏 WebView2 窗口调 PrintToPdf 静默落盘
+ *   （`export_pdf`），不再弹系统打印预览。WebView2 的 print() 只有交互式那一种，
+ *   静默出 PDF 必须走 COM；不引外部程序（见 pdf_export.rs）。
  */
 async function exportNote(format: 'markdown' | 'html' | 'pdf'): Promise<void> {
+  const ext = format === 'markdown' ? 'md' : format === 'html' ? 'html' : 'pdf'
   const filters = format === 'markdown'
     ? [{ name: 'Markdown', extensions: ['md'] }]
-    : [{ name: 'HTML', extensions: ['html', 'htm'] }]
+    : format === 'html'
+      ? [{ name: 'HTML', extensions: ['html', 'htm'] }]
+      : [{ name: 'PDF', extensions: ['pdf'] }]
 
-  if (format === 'pdf') {
-    printPdf()
-    return
-  }
-
+  // 三种格式都先弹「另存为」挑路径：PDF 也一样 —— 静默指的是省掉中间的打印预览，
+  // 不是不问用户就把文件写到某个地方（避免覆盖、也不知道文件去了哪）。
   const base = exportBaseName()
   const path = await window.workbench.pickSavePath({
-    title: format === 'markdown' ? '导出为 Markdown' : '导出为 HTML',
-    defaultPath: `${base}.${format === 'markdown' ? 'md' : 'html'}`,
+    title: `导出为 ${format === 'markdown' ? 'Markdown' : format === 'html' ? 'HTML' : 'PDF'}`,
+    defaultPath: `${base}.${ext}`,
     filters,
   })
   if (!path)
     return // 用户取消，不是失败
 
+  // Markdown 存原文；HTML / PDF 共用同一份自包含文档（三份 CSS 都内联，表格不会裂白缝）
   const content = format === 'markdown' ? (currentValue() ?? '') : exportHtmlDocument()
-  const result = await window.workbench.writeTextFile(path, content)
+  const result = format === 'pdf'
+    ? await window.workbench.exportPdf(path, content)
+    : await window.workbench.writeTextFile(path, content)
   if (!result.ok) {
     notifyError(result.error ?? '导出失败')
     return
   }
   notifySuccess(`已导出到 ${path}`)
-}
-
-/**
- * PDF：临时往页面里塞一个 srcdoc iframe 装自包含 HTML，加载完调它的 `print()`，
- * 由用户在打印对话框里选「另存为 PDF」—— Tauri 里没有免对话框的 PDF 生成器，
- * 这是不引新依赖、也不联网的前提下唯一可靠的路（不用 `window.open`：WebView2 里它
- * 会开到没有应用上下文的错误页，见文档开头的链接那一条）。
- *
- * 用 `srcdoc`（不是写 iframe.innerHTML 内联脚本）绕开生产 CSP：srcdoc 是新文档，
- * 里面只有 `<style>` 与正文，没有需要 nonce 的脚本；打印由我们这边调，文档里不放脚本。
- * 打印窗口关掉后（print 是同步返回的）把 iframe 摘掉。
- */
-function printPdf(): void {
-  const frame = document.createElement('iframe')
-  frame.title = '打印预览'
-  // CSSOM 定位（行内 style 属性在生产态 CSP nonce 下会被丢弃，见文档）——
-  // 放到屏幕外而不是 display:none：后者在部分 WebView 里打印出来是空白页
-  frame.style.position = 'fixed'
-  frame.style.left = '-10000px'
-  frame.style.top = '0'
-  frame.style.width = '794px'
-  frame.style.height = '1123px'
-  frame.style.border = '0'
-  frame.srcdoc = exportHtmlDocument()
-  frame.addEventListener('load', () => {
-    // 独立 Markdown 窗口的 index.html 有内联 <style>，生产态 Tauri 会给 CSP 的 style-src
-    // 加 nonce（nonce 在场 'unsafe-inline' 失效，子框架继承同一份策略）—— srcdoc 里的
-    // <style> 没带 nonce 就会被丢掉、打出无样式的白纸。把父文档那枚 nonce 抄过来。
-    // 必须用 IDL 的 .nonce：内容属性被 CSP 刻意藏起来，get/setAttribute('nonce') 不参与匹配。
-    const nonce = document.querySelector('style')?.nonce
-    if (nonce) {
-      frame.contentDocument?.querySelectorAll('style').forEach((style) => {
-        style.nonce = nonce
-      })
-    }
-    // 等一帧让布局与样式就绪再打印，避免打出空白页
-    window.setTimeout(() => {
-      frame.contentWindow?.focus()
-      frame.contentWindow?.print()
-      // print 对话框关掉后把临时 iframe 摘掉
-      window.setTimeout(() => frame.remove(), 1000)
-    }, 100)
-  })
-  document.body.appendChild(frame)
 }
 
 /**

@@ -213,6 +213,9 @@ export const systemApi = {
   /** 把一段文本写到用户「另存为」挑的路径（笔记导出用）；失败回 Err */
   writeTextFile: (path: string, content: string) =>
     guard(invoke<null>('fs_write_text', { path, content }), '导出文件失败'),
+  /** 自包含 HTML 静默导出成 PDF（隐藏 WebView2 窗口 PrintToPdf，不弹打印预览）；失败回 Err */
+  exportPdf: (path: string, html: string) =>
+    guard(invoke<null>('export_pdf', { path, html }), '导出 PDF 失败'),
   /**
    * 按路径读一个二进制文件、以 base64 回传（AI 预览栏的 DOCX / PPTX 是 zip 容器，
    * 文本通道读不了；解码见 decodeBase64ToBuffer）。

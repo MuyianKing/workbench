@@ -134,6 +134,13 @@ windows = { version = "0.62", features = [
 ] }
 windows-future = "0.3"
 
+# 笔记 PDF 静默导出（pdf_export.rs）：拿 Tauri Webview 的 WebView2 controller 直接调
+# ICoreWebView2_7::PrintToPdf。webview2-com(-sys) 已在编译图里（tauri → wry 引入），
+# pin 住 0.39.1 对齐当前 lock（tauri 2.12.5 / wry 0.57.2），只加声明才能从本项目 use，
+# 不新增编译单元（cargo tree -e normal -i 可复核）。
+webview2-com = "=0.39.1"
+webview2-com-sys = "=0.39.1"
+
 # 开发档位：只留行号级调试信息。Windows 上链接时间的大头就是调试信息，
 # 这一条直接决定改一行之后要等多久（见 docs/dev-notes/build-performance.md）。
 [profile.dev]

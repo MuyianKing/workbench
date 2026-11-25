@@ -37,6 +37,7 @@ mod oauth;
 mod ocr;
 mod panic_log;
 mod paths;
+mod pdf_export;
 mod pi_skills;
 mod pin;
 mod proc;
@@ -763,6 +764,7 @@ fn main() {
             commands::kill_process_tree,
             commands::fs_read_text,
             commands::fs_write_text,
+            pdf_export::export_pdf,
             commands::fs_read_base64,
             commands::fs_exists,
             commands::fs_is_dir,
