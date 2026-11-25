@@ -99,11 +99,9 @@ const running = computed(() => new Set(props.runningIds))
           </el-icon>
           <span class="row__name truncate">{{ sessionLabel(session.title) }}</span>
           <span v-if="running.has(session.id)" class="row__run" aria-hidden="true" />
-          <el-tooltip content="删除这个会话（对话记录一起删掉）" placement="top">
-            <button type="button" class="row__action" @click.stop="emit('remove', session.id)">
-              <el-icon><Delete /></el-icon>
-            </button>
-          </el-tooltip>
+          <button type="button" class="row__action" @click.stop="emit('remove', session.id)">
+            <el-icon><Delete /></el-icon>
+          </button>
         </div>
       </template>
     </div>
