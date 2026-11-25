@@ -103,7 +103,7 @@ git -c core.quotepath=false status --short
 
 ## 第 4 步：生成提交信息并提交
 
-提交信息采用 **Conventional Commits + emoji 主题**：` 类型: emoji 简述`（类型小写，冒号后有且只有一个空格，简述用中文）。
+提交信息采用 **Conventional Commits + emoji 主题**：`<emoji> <类型>: <简述>`（emoji 在前，后跟一个空格、小写类型、冒号、一个空格，简述用中文）。
 
 类型与 emoji 一一对应，按改动性质挑选唯一类型（主题里只放该类型对应的 emoji，不放其它）：
 
@@ -123,13 +123,13 @@ git -c core.quotepath=false status --short
 
 用户给出的带 `emoji` 字段的配置源（形如 `:sparkles:` / `:bug:` 的短码）等价于上表 emoji：`:sparkles:`→✨、`:bug:`→🐛、`:memo:`→📝、`:lipstick:`→💄、`:recycle:`→♻️、`:zap:`→⚡️、`:white_check_mark:`→✅、`:package:`→📦️、`:ferris_wheel:`→🎡、`:rewind:`→⏪️、`:hammer:`→🔨。主题里写 emoji 本身，不写短码。
 
-- 参考 `git log --oneline -10` 的语言和风格：历史用中文就写中文，历史用 Conventional Commits 就沿用（如 `fix: ...`、`feat: ...`）。
+- 参考 `git log --oneline -10` 的语言和风格：历史用中文就写中文，历史用 Conventional Commits 就沿用（如 `🐛 fix: ...`、`✨ feat: ...`）。
 - 信息基于实际 staged diff 归纳，写清改了什么，避免“update code”“修改文件”这类空话。
 - 用 heredoc 传入，避免 Windows 下引号、换行和编码问题：
 
   ```bash
   git commit -F - <<'MSG'
-  <类型>: <emoji> <一句话主题>
+  <emoji> <类型>: <一句话主题>
 
   - <要点 1>
   - <要点 2>
