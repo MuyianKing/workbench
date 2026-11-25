@@ -1,6 +1,6 @@
 ---
 name: git-commit-push
-version: 0.0.4
+version: 0.1.0
 description: 把本次会话的改动提交并推送到远程（没说「全部」就只提交本次会话改过的文件），目标分支有歧义时先确认分支（只有一个分支则不确认）。当用户说“提交代码”“提交所有改动并推送”“commit and push”“推一下”“/git-commit-push”，或要求把项目代码提交到远程时使用。只做提交+推送，不创建 PR、不做代码审查、不强制推送。
 metadata:
   requires:
