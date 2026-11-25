@@ -644,6 +644,29 @@ describe('对话按轮切（过程 / 答案 / 收据）', () => {
     expect(turns[0].process.map(item => item.kind)).toEqual(['thinking', 'text', 'tool'])
     expect(turns[0].tail).toEqual([])
   })
+
+  it('live 只挡最后一轮：新一轮开跑时历史答案照样摘出来，不被收进过程块', () => {
+    // 复现：发第二句、正在思考时若把 live 广播到全部轮，历史答案会被塞回过程块收起
+    const turns = aiTurns(
+      [
+        line('user', '第一句'),
+        line('thinking', '想'),
+        line('text', '第一句的答案'),
+        line('duration', '用时 5 秒'),
+        line('user', '第二句'),
+        line('thinking', '正在想'),
+      ],
+      true,
+    )
+    expect(turns).toHaveLength(2)
+    // 历史轮照常摘答案（过程块外独立成段），收据在外面
+    expect(turns[0].answer?.text).toBe('第一句的答案')
+    expect(turns[0].process.map(item => item.kind)).toEqual(['thinking'])
+    expect(turns[0].tail.map(item => item.text)).toEqual(['用时 5 秒'])
+    // 最后一轮还在跑：没答案、正在想留在过程里
+    expect(turns[1].answer).toBeNull()
+    expect(turns[1].process.map(item => item.kind)).toEqual(['thinking'])
+  })
 })
 
 describe('命令与提示词', () => {

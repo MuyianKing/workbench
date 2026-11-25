@@ -1693,9 +1693,10 @@ export function confirmFrame(id: string, confirmed: boolean): string {
  *    一段对话要读的是「我说了什么、它最后说了什么」，中间那些步骤是要查证时才摊开的
  *    （一次读文件、一条命令都占一行，摊着就是一面墙）。
  *  - **答案**（`answer`）：**收尾时**紧挨着收据的那段正文 —— 它后面没再跟工具 / 思考，
- *    才算「最后说了什么」。`live` 为真（这轮还在跑）时不摘：正文落地也先留在过程里，
+ *    才算「最后说了什么」。`live` 为真时只对**最后一轮**（正在跑的那轮）不摘：正文落地也先留在过程里，
  *    新长出来的思考才会在它**下面**（摘出去的话思考段就压到它头上了，时序倒挂），
- *    等收尾（`agent_settled`）再弹出去当答案。
+ *    等收尾（`agent_settled`）再弹出去当答案。历史轮早跑完了，照常摘 ——
+ *    否则新一轮一开始，历史答案就被塞回过程块收起来（见 AiRunPanel 传 `live` 的口径）。
  *  - **收据**（`tail`）：轮尾成串的那几行（「用时 …」，收尾时才落地）—— 留在外面，
  *    它是一轮的句号。
  *
@@ -1722,12 +1723,14 @@ export function aiTurns(lines: AiLogLine[], live = false): AiTurn[] {
     else turn.rest.push(line)
   })
 
-  return turns.map((turn) => {
+  return turns.map((turn, turnIdx) => {
     // 收据从轮尾往回收（「用时 …」收尾时才落地，只会成串地待在末尾）；
-    // 紧挨着它的那段正文才是答案，再往前哪怕也是正文，那也是过程中的旁白
+    // 紧挨着它的那段正文才是答案，再往前哪怕也是正文，那也是过程中的旁白。
+    // live 只挡最后一轮（正在跑的）；历史轮照常摘，免得新一轮一开就把旧答案收进过程块。
+    const liveTurn = live && turnIdx === turns.length - 1
     let tailAt = turn.rest.length
     while (tailAt > 0 && turn.rest[tailAt - 1].kind === 'duration') tailAt--
-    if (!live && tailAt > 0 && turn.rest[tailAt - 1].kind === 'text') {
+    if (!liveTurn && tailAt > 0 && turn.rest[tailAt - 1].kind === 'text') {
       return {
         index: turn.index,
         user: turn.user,
