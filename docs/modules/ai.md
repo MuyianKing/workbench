@@ -112,11 +112,12 @@
   **不整棵 `npm install`** —— `npm pack` 只取 Pi 本体的 tarball，预填表的数据源（`pi-ai`）单下一份、读完就删（版本钉在 `CATALOG_VERSION`），
   再装 `jiti` / `photon-node` 两个运行期小包；然后按**保留清单**（`KEEP`）裁到运行时加载的那**三个**包：`pi-coding-agent` 的 `dist/bundle/`（实际执行的就是它的 `cli.js`，
   提供方实现已内联在 chunks 里）、`jiti`（扩展加载器，删了 `-e` 那份扩展会静默不加载、权限确认整条消失）、`@silvia-odwyer/photon-node`（贴图缩放）。
-  其余整包（云厂商 SDK、protobuf、gaxios、highlight.js、quickjs-wasi…）与树里的 `*.map` / `*.d.ts` / `docs/images` / `examples/` /`CHANGELOG.md` / `bundle` 之外的 `dist` 全删；
+  其余整包（云厂商 SDK、protobuf、gaxios、highlight.js、quickjs-wasi…）与树里的 `*.map` / `*.d.ts` / `*.d.mts` / `*.d.cts` / `docs/images` / `examples/` /`CHANGELOG.md` / `bundle` 之外的 `dist` 全删
+  （类型声明按整名后缀判：`extname('x.d.ts')` 只回到 `.ts`，用扩展名比会全部放过）；
   `docs/*.md` 留着（系统提示词会把 `docs/` 指给模型）。**`typebox` / `pi-ai` / `pi-tui` / `pi-agent-core` / `chord` 也不留**：
   它们是「扩展里 import Pi SDK」时的 alias 目标，只有 `getAliases()` 被调到时才用得上，当前那份 permission.js 一个 import 都没有。
   树里只有一层（`npm pack` 直接解到 `node_modules/@earendil-works/pi-coding-agent`），不再有 npm 那种「整棵树嵌进自己的 `node_modules`」的嵌套。
-  裁完 **13.5MB / 160 个文件**（Pi 1.5.0；整棵树 tar.gz 3.3MB；没裁前 55.6MB 的树是 9.7MB，Pi 1.0.4），
+  裁完 **14MB / 153 个文件**（Pi 本体，Pi 1.5.0；连网页扩展整棵 16MB / 413 个文件、tar.gz 3.6MB；没裁前 55.6MB 的树是 9.7MB，Pi 1.0.4），
   脚本末尾跑一次 `cli.js --version` 自检（裁错包时 Pi 往往还能启动，只查文件存在拦不住）。**加回条件**：哪天应用带会 import Pi SDK 的扩展，
   把那几个包名放回 `KEEP` 重跑探针。**升级 Pi 或改裁剪规则** = 改版本常量 / `PRUNE_REVISION` + 重跑 `pnpm run vendor:pi` + 瘦身验证重做（假 key 打一轮每个提供方），
   会话 / 续聊 / 权限扩展 / 确认帧那条链照[dev-notes/pi-session-probe.md](../dev-notes/pi-session-probe.md) 的假端点探针重跑。
@@ -237,7 +238,11 @@
   **`turndown` 的传递依赖 `@mixmark-io/domino`（8.9MB，含 7.2MB test/）在 vendor 时被实体 stub 替换**：扩展把 Readability 出的正文字符串
   用 linkedom 再解析成 DOM node 传给 `turndown.turndown()`（走它的 node 分支），不触发 domino 的 `createDocument`（那条只在传 HTML 字符串时用）；
   stub 是一个能被 require 的 `main` + 抛错的 `createDocument`（真被调到说明传了字符串、会破坏瘦身，立刻暴露）。不放 symlink（resources/pi 整树打包）。
-  这样 web-search 依赖树从 13MB 压到约 3.7MB，整棵 `resources/pi` 27MB→18MB。
+  **只留 CJS 链**：Pi 捆绑版的 jiti 不带 `esmResolve`（`tryNative: !1`，解析走 package.json 的 `main`），
+  所以各包的 `esm/` 副本、`linkedom` 的 `worker.js`、`turndown` 的 browser / umd / es 变体、readability 的 `JSDOMParser` 都删掉，
+  类型声明与 README / CHANGELOG / tsconfig 一并清（清单在 `vendor-pi.mjs` 的 `WEB_DROP_FILES` / `WEB_DROP_FILENAMES`）。
+  这样 web-search 依赖树从 13MB 压到约 **1.4MB**，整棵 `resources/pi` 27MB→16MB（tar.gz 4.0MB→3.6MB）。
+  删完用 Pi 自带的 jiti + babel 实跑一遍 `parseHTML → Readability → turndown` 验过（2026-11-25）。
   `ai.rs` 以**第二个 `-e`** 加载 `web-search/index.ts`（与 `resolve_cli` 同源推导 dev / 打包两处路径），**与权限档无关** —— 它不执行本地命令，问不问是 `permission.js` 那一条的事。
   缺了这棵树（没跑 vendor / 退到 PATH 上的全局 pi）就跳过，只是少这两个工具，不阻断会话。旧的整棵 pi-web-access（61MB / 211 包）已弃用，vendor 时清场。
 - **改它要验证**：改扩展源码 / package.json 后重跑 `pnpm run vendor:pi`（改 KEEP / 文件规则仍要 bump `PRUNE_REVISION`）。

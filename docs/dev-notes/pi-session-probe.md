@@ -90,5 +90,10 @@
     （探针里写成带 `/v1` 的地址，实际打的就是 `/v1/v1/messages`）。`AI_PROVIDER_PRESETS` 里 Anthropic
     预设给的是 `https://api.anthropic.com`，别照着 OpenAI 那种带 `/v1` 的地址改。
 
+- **2026-11-25（裁剪版 9）**：网页扩展的依赖树只留 **CJS 链**（Pi 捆绑版 jiti 不带 `esmResolve`，
+  解析走 `main`），ESM 副本 / 类型声明 / turndown 的多套构建 / linkedom 的 `worker.js` 全删。
+  验证只用 jiti + babel 实跑 `parseHTML → Readability → turndown`，输出与删之前一致；
+  整棵 `resources/pi` 16MB / 413 个文件（tar.gz 3.6MB）。**这一刀不碰 Pi 本体**，上面 17 项不必重跑。
+
 **换 Pi 版本后重跑一遍**这些点 —— CLI 与事件协议是外部契约（见
 [ai.md](../modules/ai.md) 的文件头）。改裁剪规则（`KEEP` / `PRUNE_REVISION`）同样要重跑。

@@ -130,9 +130,10 @@ pnpm run dist         # 产出 NSIS 安装包
   （`pnpm run dist` 与 `pnpm run dev` 都会自动带上这一步）。
 - 内置壁纸经 `bundle.resources` 映射到 `backgrounds/`，运行时 Rust 从 `resource_dir()` 读取（清单与缩略图用）；开发态
   `list_wallpapers` 回落到仓库里的 `apps/desktop/resources/backgrounds`，`tauri dev` 会把资源拷到
-  `target/debug/backgrounds/`、实际优先命中那份。工作区背景图本身走 asset 协议按文件加载，不经过这条链。**壁纸按长边 2560 /
-  JPEG q82 存**（7 张共 2.2MB，2026-10-22 重采样）：界面按 `cover` 铺、上面还压一层蒙版，再高的分辨率看不出来，而 JPEG 在
-  安装包里压不动 —— **图多大，包就大多少**（原来是 4.2MB）。换图时照这个口径压，别再塞 4K 原图。
+  `target/debug/backgrounds/`、实际优先命中那份。工作区背景图本身走 asset 协议按文件加载，不经过这条链。**壁纸按长边 1920 /
+  JPEG q82 progressive 存**（7 张共 1.6MB，2026-11-25 从 2560 降档重采样；`五星红旗.jpg` 本来就是 1920 却按近无损编码、单张 926KB，
+  这一轮只重编码）：界面按 `cover` 铺、上面还压一层蒙版，再高的分辨率看不出来，而 JPEG 在
+  安装包里压不动 —— **图多大，包就大多少**（最早 4K 原图 9.0MB → q85 4.2MB → 2560/q82 2.2MB → 1920 1.6MB）。换图时照这个口径压，别再塞 4K 原图。
 - 安装包里的大头与实测口径见 [ai.md](modules/ai.md) 的 Pi 瘦身一节：Pi 那棵树原来占 44%（压缩后 9.7MB）、壁纸占 17%
   （3.8MB），两处按上面的口径收完约省 8.5MB。
 - release 档位是 thin LTO + 16 个 codegen 单元，链接器换成工具链自带的 `rust-lld`（配置在

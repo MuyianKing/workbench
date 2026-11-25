@@ -6,8 +6,8 @@
  * 源码映射、类型声明、`pi-coding-agent/dist` 里除 `bundle/` 之外的那几兆
  * （实际跑的是 `dist/bundle/cli.js` 这份自带全部提供方实现的 bundle）、文档配图 / 示例 /
  * CHANGELOG，以及云厂商 SDK、protobuf、google-auth、highlight.js、quickjs-wasi 这些整包。
- * 裁完 **13.5MB / 160 个文件**（Pi 1.5.0，2026-11-06 实测；整棵树 tar.gz 3.3MB。没裁之前那套
- * 55.6MB 的树是 9.7MB —— 那一组是 1.0.4 时量的）。
+ * 裁完 **Pi 本体 14MB / 153 个文件**（连网页扩展 16MB / 413 个文件，整棵树 tar.gz 3.6MB；
+ * Pi 1.5.0，2026-11-25 实测。没裁之前那套 55.6MB 的树是 9.7MB —— 那一组是 1.0.4 时量的）。
  *
  * 连「装什么」也一起省了：**不再 `npm install` 整棵树**（那等于把 108MB 下下来再删九成），
  * 改成 `npm pack` 只取 Pi 自己的 tarball、再装 `jiti` 与 `photon-node` 两个小包 ——
@@ -58,7 +58,7 @@ const WEB_SOURCE = join(root, 'scripts', 'pi-web-search')
  * 裁剪方案的版本号。**动了 KEEP、下面那几条文件级规则或网页扩展的 vendoring 就必须 +1**：
  * 跳过判据比的是 stamp 文件内容，对不上才会重装重裁。
  */
-const PRUNE_REVISION = '8'
+const PRUNE_REVISION = '9'
 /**
  * 预填表的数据源版本：`@earendil-works/pi-ai` 里那份 models.dev 快照（`dist/providers/data`）。
  * 它只被 `npm pack` 下来读一次、生成完就删 —— **不进树**。pi-coding-agent 从 1.3.0 起把
@@ -135,8 +135,12 @@ const KEEP = [
   'jiti',
 ]
 
-/** 文件级的裁剪规则（路径都相对 `resources/pi`） */
-const DROP_EXTENSIONS = ['.map', '.d.ts']
+/**
+ * 文件级的裁剪规则（路径都相对 `resources/pi`）。类型声明按**整名后缀**判：
+ * `extname('photon_rs.d.ts')` 只回到 `.ts`，用扩展名比会把它们全放过。
+ */
+const DROP_SUFFIXES = ['.map', '.d.ts', '.d.mts', '.d.cts']
+const isDroppedFile = name => DROP_SUFFIXES.some(suffix => name.toLowerCase().endsWith(suffix))
 /**
  * 文档只留 `docs/*.md`：Pi 的系统提示词与 codemode 描述会把 `docs/` 指给模型，那是它的
  * 参考手册。`docs/images` 是给 GitHub 渲染的配图（2.4MB）；`examples/`（1.0MB）与
@@ -254,7 +258,7 @@ function prune() {
   // 2) 源码映射与类型声明：运行时一个字节都不读
   let stripped = 0
   walk(modules, (path, entry) => {
-    if (!entry.isFile() || !DROP_EXTENSIONS.includes(extname(entry.name)))
+    if (!entry.isFile() || !isDroppedFile(entry.name))
       return
     stripped += dirSize(path)
     rmSync(path, { force: true })
@@ -344,7 +348,7 @@ function vendorWebSearch() {
   }
   // 只留运行时要读的：源码映射 / 类型声明不加载；package-lock 是本地装出来的，不进随包树
   walk(join(WEB_TARGET, 'node_modules'), (path, entry) => {
-    if (!entry.isFile() || !DROP_EXTENSIONS.includes(extname(entry.name)))
+    if (!entry.isFile() || !isDroppedFile(entry.name))
       return
     removed += dirSize(path)
     rmSync(path, { force: true })
@@ -352,9 +356,72 @@ function vendorWebSearch() {
   const lock = join(WEB_TARGET, 'package-lock.json')
   if (existsSync(lock))
     removed += drop(lock)
+  removed += pruneWebSearchRuntime()
   console.log(
     `[vendor-pi] 网页扩展（web_search + fetch_content）已内置到 resources/pi/web-search/（删掉 ${mb(removed)} MB 非运行时文件）`,
   )
+}
+
+/**
+ * 网页扩展那棵树只留 **CJS 链**：Pi 捆绑版的 jiti 不带 `esmResolve`（`tryNative: !1`，解析走
+ * package.json 的 `main`），所以各包的 `esm/` 副本、linkedom 的 `worker.js`、turndown 的
+ * browser / umd / es 变体、readability 的 JSDOMParser 运行时都读不到。删完实测
+ * （2026-11-25）：用 Pi 自带的 jiti + babel 跑一遍 parseHTML → Readability → turndown，
+ * 输出与删之前一致；3.7MB / 801 文件 → 1.4MB / 258 文件。**动这份清单要 bump `PRUNE_REVISION`**。
+ */
+const WEB_DROP_FILES = [
+  'node_modules/linkedom/worker.js',
+  'node_modules/@mozilla/readability/JSDOMParser.js',
+  'node_modules/turndown/lib/turndown.browser.cjs.js',
+  'node_modules/turndown/lib/turndown.browser.es.js',
+  'node_modules/turndown/lib/turndown.browser.umd.js',
+  'node_modules/turndown/lib/turndown.es.js',
+  'node_modules/turndown/lib/turndown.umd.js',
+]
+/** 运行时只读 LICENSE；README / CHANGELOG / 社区文件与 tsconfig 都不加载 */
+const WEB_DROP_FILENAMES = [
+  'readme.md',
+  'changelog.md',
+  'code_of_conduct.md',
+  'contributing.md',
+  'security.md',
+  'tsconfig.json',
+  'eslint.config.mjs',
+]
+
+/** 删空的目录也走掉：类型目录（如 linkedom/types）删完只剩空壳 */
+function pruneEmptyDirs(dir) {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (!entry.isDirectory())
+      continue
+    const path = join(dir, entry.name)
+    pruneEmptyDirs(path)
+    if (!readdirSync(path).length)
+      rmSync(path, { recursive: true, force: true })
+  }
+}
+
+function pruneWebSearchRuntime() {
+  const modules = join(WEB_TARGET, 'node_modules')
+  let freed = 0
+  // 先收集、再删：walk 会走进它刚回调过的目录，边遍历边整棵删会读到已不存在的路径
+  const esmDirs = []
+  walk(modules, (path, entry) => {
+    if (entry.isDirectory() && entry.name === 'esm')
+      esmDirs.push(path)
+  })
+  for (const dir of esmDirs)
+    freed += drop(dir)
+  for (const rel of WEB_DROP_FILES)
+    freed += drop(join(WEB_TARGET, rel))
+  walk(WEB_TARGET, (path, entry) => {
+    if (!entry.isFile() || !WEB_DROP_FILENAMES.includes(entry.name.toLowerCase()))
+      return
+    freed += dirSize(path)
+    rmSync(path, { force: true })
+  })
+  pruneEmptyDirs(modules)
+  return freed
 }
 
 /**
