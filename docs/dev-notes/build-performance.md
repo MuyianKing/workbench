@@ -72,7 +72,7 @@ Rust 两行与前端用什么打包器无关；**合计两行仍是 vite 7 那�
 ### Pi 的随包内置（`vendor-pi.mjs`）
 
 `pnpm run dist` 与 `pnpm run dev` 都会先跑它。**不要整棵 `npm install`**：pi-coding-agent
-声明的依赖树（云厂商 SDK、protobuf…）装出来 139MB / 15,165 个文件，裁完只剩 14MB（Pi 本体，1.5.0；
+声明的依赖树（云厂商 SDK、protobuf…）装出来 139MB / 15,165 个文件，裁完只剩约 14MB（Pi 本体，1.6.0 实测 11MB；
 连网页扩展整棵 16MB）——
 那 125MB 纯属「装完就删」。现在改成 `npm pack` 只取 Pi 自己的 tarball（7.8MB）+
 `pi-ai` 的模型数据（0.8MB，生成完预填表就删），再 `npm install` 两个运行期小包

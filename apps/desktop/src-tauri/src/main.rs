@@ -37,7 +37,6 @@ mod oauth;
 mod ocr;
 mod panic_log;
 mod paths;
-mod pdf_export;
 mod pi_skills;
 mod pin;
 mod proc;
@@ -764,7 +763,6 @@ fn main() {
             commands::kill_process_tree,
             commands::fs_read_text,
             commands::fs_write_text,
-            pdf_export::export_pdf,
             commands::fs_read_base64,
             commands::fs_exists,
             commands::fs_is_dir,
@@ -794,10 +792,6 @@ fn main() {
             capture::capture_copy_text,
             capture::capture_copy_frame,
             capture::capture_save,
-            capture::capture_scroll_begin,
-            capture::capture_scroll_grab,
-            capture::capture_scroll_wheel,
-            capture::capture_scroll_stop,
             ocr::capture_ocr,
             pin::pin_create,
             pin::pin_context,

@@ -95,5 +95,23 @@
   验证只用 jiti + babel 实跑 `parseHTML → Readability → turndown`，输出与删之前一致；
   整棵 `resources/pi` 16MB / 413 个文件（tar.gz 3.6MB）。**这一刀不碰 Pi 本体**，上面 17 项不必重跑。
 
+- **Pi 1.6.0（2026-11-25 重验）**：`PI_VERSION` / `CATALOG_VERSION` 都到 1.6.0，同一套假端点探针重跑，**19 项全过**：
+  - `node cli.js --version` → `1.6.0`；裁完 `apps/desktop/resources/pi` 整棵 **16MB / 415 个文件**
+    （Pi 本体 11MB / 133 个文件；1.5.0 是 13.5MB / 160）；
+  - 上面 17 项的行为全部照旧：两形态打假端点、confirm 一问一答后 `bash` 真跑、`read`/`write`/`edit` 各成功一次、带图、abort
+    （`agent_settled` 的 `aborted:true`）、硬杀重开 `get_messages` 读回历史、会话文件首行 `version:3`；
+  - **1.6 新增的贴图 resize 验过**：`processImage` 先用 photon 的 `photon_rs_bg.wasm` 做 `resizeImage` 再发
+    `image_url` data URL；裁完的树上 wasm 完整，一张合法 PNG 发出去的 base64 一字不差。
+    **探针的图必须是合法 PNG** —— 用一张 1x1 的假 PNG 会在 resize 那步被判「无法缩到内联上限以下」，
+    静默变成一句 `[Image omitted: …]`，看着像裁剪把 wasm 弄丢了（实测直接调 `resizeImage(1x1)` 返回 `null`，
+    换 100x100 的合法 PNG 正常）。探针脚本里生成 PNG 要走 `zlib.deflateSync` + CRC32，别复用那串 1x1 base64；
+  - anthropic-messages 的请求路径带 `?beta=true` 查询串（判据按 `/v1/messages` 前缀匹配，别写成全等），
+    `x-api-key` 照旧是 `probe-key`；
+  - **一个探针脚本自身的坑**：两条 prompt 共用同一个 `--session-id` 时，后一条的请求体里会带上前一轮的
+    `tool` 消息，`hasToolResult(body)` 的分支判断会让工具轮次直接跳过 —— 每条用例给独立 id 即可，不是 Pi 行为变化。
+  - 应用那份 `models.json`（`build_models_json` 的输出）原样能用；运行期外部包版本没变（`jiti` 2.7.0 /
+    `photon-node` 0.3.4），`KEEP` 不动。预填表按 1.6.0 的 models.dev 快照再生（43 家），ai.test 的三个夹具
+    （`chat:claude-fable-5` / `DeepSeek-V4-Flash-0731` / `zai` 的 `chat:glm-5.2`）数值一致，不用改。
+
 **换 Pi 版本后重跑一遍**这些点 —— CLI 与事件协议是外部契约（见
 [ai.md](../modules/ai.md) 的文件头）。改裁剪规则（`KEEP` / `PRUNE_REVISION`）同样要重跑。

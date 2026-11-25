@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import type { NoteDocument } from '@workbench/notes'
+import type { NoteDocument, NotePageSize } from '@workbench/notes'
 import type { EffectiveTheme } from '@/types'
 import { DArrowLeft, Document, Moon, Sunny } from '@element-plus/icons-vue'
 import { clampWidth } from '@workbench/appearance'
+import { NOTE_PAGE_SIZE_DEFAULT } from '@workbench/notes'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { applyMarkdownWindowTheme, bootstrapSnapshot, initialMarkdownWindowTheme } from '@/bootstrap'
 import EmptyState from '@/components/EmptyState.vue'
@@ -193,6 +194,8 @@ function messageOf(error: unknown): string {
 
 /** 编辑器的自定义快捷键（设置里的 editorHotkeys）：开窗时取一次，窗口里不跟主窗口实时联动 */
 const editorHotkeys = ref<Record<string, string>>({})
+/** 导出版面（纸张）：同样从首屏快照取一次，不跟主窗口实时联动 */
+const pageSize = ref<NotePageSize>(NOTE_PAGE_SIZE_DEFAULT)
 /**
  * 粘贴图片的落点来源（与笔记页同一套，只是没有 store）：
  * - root：文件所在文件夹，从 Rust 会话拿（本文件第一节），拼「机器 + 笔记本」那层目录用；
@@ -213,6 +216,7 @@ async function load(): Promise<void> {
   // Rust 注入的快照里才有。快照那侧已经 sanitize 过，缺项退回内置键位 / 空仓库地址
   editorHotkeys.value = bootstrapSnapshot()?.settings.editorHotkeys ?? {}
   imageRepo.value = bootstrapSnapshot()?.settings.noteImageRepo ?? ''
+  pageSize.value = bootstrapSnapshot()?.settings.notePageSize ?? NOTE_PAGE_SIZE_DEFAULT
 
   const result = await window.workbench.markdownWindowContext()
   if (!result.ok || !result.data) {
@@ -629,6 +633,7 @@ onBeforeUnmount(() => {
               :image-origin="imageOrigin"
               placeholder="写点什么…"
               :editor-hotkeys="editorHotkeys"
+              :page-size="pageSize"
               :outline-host="outlineRail"
               outline-pinned
               @change="onChange"

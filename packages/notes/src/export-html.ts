@@ -11,6 +11,9 @@
  * 表格会退回浏览器默认的 separate 模式，每个格子各画各的框、之间裂出白缝。
  */
 
+import type { NotePageSize } from './page-size'
+import { notePageSizeCss } from './page-size'
+
 /** 只对文档标题用：标题是纯文本，别让它里面的 `<` `&` 破坏结构 */
 function escapeHtml(text: string): string {
   return text
@@ -33,6 +36,8 @@ export interface ExportHtmlInput {
   highlightCss: string
   /** 深色档（影响页面底色与文字色） */
   dark: boolean
+  /** 导出版面（纸张）大小：注入 @page size 并决定容器宽度，见 page-size.ts */
+  pageSize: NotePageSize
 }
 
 /**
@@ -44,6 +49,7 @@ export interface ExportHtmlInput {
 export function buildExportHtml(input: ExportHtmlInput): string {
   const pageBg = input.dark ? '#1e1e1e' : '#ffffff'
   const pageInk = input.dark ? '#d4d4d4' : '#24292f'
+  const page = notePageSizeCss(input.pageSize)
   return `<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -53,7 +59,8 @@ export function buildExportHtml(input: ExportHtmlInput): string {
 <style>
 html, body { margin: 0; padding: 0; background: ${pageBg}; color: ${pageInk}; }
 body { font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; }
-.export-page { max-width: 860px; margin: 0 auto; padding: 40px 32px 80px; }
+@page { size: ${page.atPage}; }
+.export-page { max-width: ${page.maxWidth}; margin: 0 auto; padding: 40px 32px 80px; }
 ${input.highlightCss}
 ${input.baseCss}
 ${input.contentThemeCss}

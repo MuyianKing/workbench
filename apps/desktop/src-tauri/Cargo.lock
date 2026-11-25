@@ -5392,8 +5392,6 @@ dependencies = [
  "url",
  "uuid",
  "walkdir",
- "webview2-com",
- "webview2-com-sys",
  "windows",
  "windows-future",
  "windows-sys 0.61.2",

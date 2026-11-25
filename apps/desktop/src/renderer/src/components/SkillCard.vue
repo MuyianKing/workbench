@@ -202,7 +202,8 @@ const initial = computed(() => props.skill.name.charAt(0).toUpperCase())
 
 .card__version {
   flex-shrink: 0;
-  align-self: flex-start;
+  /* 不写 align-self: 让 tag 跟着 .card__head 的 align-items: center 垂直居中，
+     与左侧徽章 / 名字同一条中线；贴顶会显得比左侧高一截（用户 2026-11 指出） */
   /* 版本用主题色：覆盖 el-tag 的三件套变量（--ink-accent 是「这段话用主题色」的令牌，
      对比度已按主题调好）；描边与底色从主色混淡，不硬编码颜色 */
   --el-tag-text-color: var(--ink-accent);
@@ -260,13 +261,9 @@ const initial = computed(() => props.skill.name.charAt(0).toUpperCase())
   gap: var(--sp-2);
   margin-top: auto;
   border-top: 1px solid var(--border);
-  background: var(--bg-subtle);
+  /* 不铺 --bg-subtle 灰底（2026-11 用户要求）：底栏与卡面同色，只靠上边框分区，
+     悬停也不再单独变色（整卡已有 hover 描边 / 投影 / 提亮） */
   padding: var(--sp-2) var(--sp-4);
-  transition: background 0.18s var(--ease-out);
-}
-
-.card:hover .card__bar {
-  background: var(--bg-inset);
 }
 
 .card__ops {

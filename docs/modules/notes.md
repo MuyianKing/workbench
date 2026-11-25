@@ -521,43 +521,26 @@ notes store 里只在「重读这个文件夹」几处与每次同步后探一�
 
 ### 编辑器动作（右键菜单 / 表格）
 
-- **编辑器动作全部挪到正文右键菜单**，工具带 CSS 藏起来（元素还在）：菜单三排图标 + 三行带子菜单（段落 / 插入 / 导出），
+- **编辑器动作全部挪到正文右键菜单**，工具带 CSS 藏起来（元素还在）：菜单三排图标 + 两行带子菜单（段落 / 插入）+ 一行直接动作（导出为 HTML），
   覆盖工具带的全部动作；光标在表格单元格时再多一排（见下条）。位置贴指针、不越出窗口，右边放不下子
   菜单整份翻左；点别处 / Esc / 滚轮 / 窗口变化收起。**菜单自己不实现编辑动作**：每项按名字点工具带对应按钮
   （动作名必须与 `TOOLBAR` 对得上，点不到只在控制台告警）。菜单 Teleport 到 body，按下时 `preventDefault` 掉
   mousedown —— 否则焦点挪走、**选区没了**。
-- **导出子菜单**：Markdown / HTML / PDF 三种，落盘走应用自己那套，**不点 Vditor 的导出工具带** ——
-  Vditor 的 Markdown / HTML 导出是 `a[download]` + blob 静默下载（Tauri WebView2 里没有下载处理器，
-  点了没有任何可见反馈），PDF 那条往 iframe 写内联 `<script>` 再 `window.print()`，生产态 CSP nonce
-  会把那段脚本整体丢掉（见 [ipc-and-state.md](ipc-and-state.md) 的 CSP 那条）—— 两条路在真应用里都等于「没反应」。
-  现在：Markdown 取 `getValue()` 原文、HTML 由 `buildExportHtml`（packages/notes，纯函数有单测）把 `getHTML()`
-  与随包 CSS（`?raw` 构建期内联）包成**自包含**文档；三者都经 `pickSavePath` 让用户挑路径、成功提示路径。
-  Markdown / HTML 落盘走 `fs_write_text`；**PDF 静默出 PDF**：同一份自包含文档交 `exportPdf(path, html)`，
-  Rust 侧 `pdf_export.rs` 建一个隐藏 WebView2 窗口、`NavigateToString` 灌入 HTML、`NavigationCompleted`
-  后调 `ICoreWebView2_7::PrintToPdf` 直接写 .pdf，**全程不弹系统打印预览**（WebView2 的 `print()` 只有
-  交互式那一种，做不到静默；也不走 Edge headless，那是给项目引第三个外部程序，见
-  [AGENTS.md](../../AGENTS.md) 的外部程序边界）。三项共用子菜单外壳与翻边，动作名带 `export:` 前缀。
-  另存为对话框与写文件通道走 system 那一组（`pickSavePath` / `writeTextFile` / `exportPdf`），
-  独立 Markdown 窗口也装了这套 API，导出与笔记页同一条路。
-- **PDF 隐藏窗口的线程模型（踩过自锁，别改回去）**：`WebviewWindow::with_webview` 把闭包**异步派发到主 UI 线程**，
-  WebView2 的 COM 与回调也都住在主线程。**主线程闭包里绝不做任何阻塞等待** —— 曾经在闭包里 `recv_timeout` /
-  `wait_with_pump` 等 NavigationCompleted 回调，结果整个界面卡死：WebView2 的回调靠主线程消息循环派发，
-  主线程被阻塞住又不泵消息，回调永远来不了（`with_webview` 返回成功却界面冻结，就是这个症状；
-  `wait_with_pump` 还会接管主循环和 Tauri 自己的循环打架）。正确做法：闭包只**发起**异步操作立即返回，
-  `WebMessage → PrintToPdf → PrintToPdfCompleted` 整条链都在各自的 COM 回调里接力、由 Tauri 主循环驱动；
-  只有 async 命令所在的**工作线程**用 `recv_timeout(30s)` 等最终结果（不冻结 UI），成不论败都关掉隐藏窗口。
-  `PrintToPdf` 在 `ICoreWebView2_7` 上，controller 给的 `ICoreWebView2` 要 cast 上去；打印设置由
-  `ICoreWebView2Environment6::CreatePrintSettings()` 建。窗口给纸张尺寸（794×1123），`webview2-com(-sys)`
-  已在编译图（tauri → wry 引入），pin 0.39.1 对齐当前 lock，只加 Cargo.toml 声明才能从本项目 `use`，
-  不新增编译单元。
-- **打印时机必须用页面回传的 WebMessage，别用 NavigationCompleted（真机踩坑）**：`NavigationCompleted`
-  触发时页面还没渲染完（DocumentTitle 已是 `about:blank`、IsSuccess 常为 false），据此打印必得空白 PDF
-  （真机实测打出 864 字节、标题 about:blank 的空页；标题哨兵也挡不住）。最终方案：灌入的 HTML 尾部追加
-  `<script>window.addEventListener('load',()=>window.chrome.webview.postMessage('PDF_READY'))</script>`，
-  Rust 用 `WebMessageReceived`（`TryGetWebMessageAsString`）收到 `PDF_READY` 才调 PrintToPdf —— load 完成
-  意味着 DOM/样式就绪，标题 / IsSuccess 那些不可靠判据全部去掉。**窗口全程 `visible(false)`、从不 `show()`**：
-  早先以为"不可见窗口不渲染 → 空页"，真机证实那是上面的导航时序问题；WebMessage 保证打印时机后，全程隐藏
-  也能导出有内容的 PDF（真机验证 446KB、标题为笔记名、9 处中文），用户完全看不到窗口、也就没有闪现。
+- **导出只有 HTML 一种，右键菜单里直接一项，没有二级菜单**：由 `buildExportHtml`（packages/notes，纯函数有单测）把
+  `getHTML()` 与随包 CSS（`?raw` 构建期内联）包成**自包含**文档，经 `pickSavePath` 让用户挑路径、`fs_write_text`
+  落盘，成功提示路径。不点 Vditor 工具带那个导出按钮：它的 HTML 导出引随包 `cdn` 资源、PDF 那条往 iframe 写内联
+  `<script>` 再 `window.print()`，生产态 CSP nonce 会把脚本丢掉，在真应用里等于「没反应」（见
+  [ipc-and-state.md](ipc-and-state.md) 的 CSP 那条）。动作名 `export:html`，另存为与写文件走 system 那一组
+  （`pickSavePath` / `writeTextFile`），独立 Markdown 窗口也装了这套 API，导出与笔记页同一条路。
+  早期支持过 Markdown / PDF 三种格式（含一个 `pdf_export.rs` 隐藏 WebView2 窗口 + `webview2-com` 调
+  `PrintToPdf` 静默导出），随「只导出 HTML」一并移除 —— 通道、依赖与实现都不再保留。
+- **导出版面（纸张）默认 A4，可在设置里改**：`buildExportHtml` 注入 `@page { size: … }`（A4 / Letter，
+  口径与收敛在 packages/notes 的 `page-size.ts`），双击导出的 HTML 用浏览器「打印 / 另存为 PDF」时按对应纸张
+  分页；`.export-page` 的最大宽度也随纸张取短边减内边距（A4 730px、Letter 752px），打印时由
+  `@media print` 把宽度与内边距收掉，交给 `@page` 控制。**只影响导出，不改变编辑器里的正文宽度**（那仍是左右固定
+  留白 + 自适应）。设置住 `AppSettings.notePageSize`（数据文件，不进 theme.json、不参与外观同步），老数据缺项 /
+  坏值收敛成 A4；设置 · 通用 → 笔记那块有下拉。值由上层以 `pageSize` prop 传给 `NoteEditor`（不读 store）：
+  笔记页传设置值，独立 Markdown 窗口从首屏快照取（开窗时一次，不跟主窗口实时联动）。
 - **自包含 HTML 必须内联三份 CSS**：Vditor 基础结构（`index.css`，`buildExportHtml` 的 `baseCss`）、内容主题
   （`content-theme/<light|dark>.css`）、代码高亮配色。基础结构决定表格 `border-collapse: collapse` / 单元格
   padding / 列表缩进这些排版骨架，主题只换配色 —— 漏掉基础结构时导出文档的表格退回浏览器默认
@@ -637,9 +620,6 @@ notes store 里只在「重读这个文件夹」几处与每次同步后探一�
   src/md_window.rs       资源管理器「打开方式」的独立编辑窗口：命令行解析 / 会话（窗口 label →
                          文件路径）/ 建窗 / markdown_window_context / save / close（关闭握手），
                          文件路径只从会话取，渲染层传不了第二个文件
-  src/pdf_export.rs      笔记 PDF 静默导出：export_pdf(path, html) 建隐藏 WebView2 窗口，
-                         NavigateToString 灌自包含 HTML → NavigationCompleted → PrintToPdf 出 .pdf，
-                         全程不弹打印预览；主线程只发起异步操作，回调接力、工作线程等结果（勿阻塞主线程）
 ```
 
 其余几处在渲染层与域包（同为原注解 + 导出）：
@@ -653,6 +633,9 @@ notes store 里只在「重读这个文件夹」几处与每次同步后探一�
     markdown-window.ts   独立编辑窗口的适配层（workbench/：上下文 / 保存 / 关闭 / 冲刷事件）
     export-html.ts       packages/notes：把渲染后的正文 + 随包 CSS（构建期 ?raw 内联）拼成
                          自包含 HTML（笔记导出用，纯函数有单测）；三份 CSS 缺一不可：基础结构
-                         index.css（表格合并 / padding）、内容主题、高亮配色
+                         index.css（表格合并 / padding）、内容主题、高亮配色；按 pageSize 注入
+                         @page size 并定容器宽度
+    page-size.ts         packages/notes：导出版面（纸张）大小口径——允许 A4 / Letter、默认 A4，
+                         坏值收敛与 @page / 容器宽度的 CSS 都有单测
 apps/desktop/scripts/sync-vditor-assets.mjs  dev / build 前把 Vditor 用得着的静态资源复制进渲染层 public/
 ```

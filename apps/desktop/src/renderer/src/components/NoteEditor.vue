@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import type { NoteDocument } from '@workbench/notes'
+import type { NoteDocument, NotePageSize } from '@workbench/notes'
 import type { FloatingMenuItem } from '@/components/FloatingMenu.vue'
 import { Loading } from '@element-plus/icons-vue'
 import { blobToBase64 } from '@workbench/core'
 
-import { buildExportHtml, imageFileName, imageMarkdown, mergeEditorHotkeys, NOTE_IMAGE_MAX_BYTES, resolveNoteLink } from '@workbench/notes'
+import { buildExportHtml, imageFileName, imageMarkdown, mergeEditorHotkeys, NOTE_IMAGE_MAX_BYTES, NOTE_PAGE_SIZE_DEFAULT, resolveNoteLink } from '@workbench/notes'
 import Vditor from 'vditor'
 import contentThemeDarkCss from 'vditor/dist/css/content-theme/dark.css?raw'
 import contentThemeLightCss from 'vditor/dist/css/content-theme/light.css?raw'
@@ -105,6 +105,13 @@ const props = defineProps<{
    * 用户存空串的动作被禁用（不拦，只剩 Vditor 原厂键位）。
    */
   editorHotkeys?: Record<string, string>
+  /**
+   * 导出版面（纸张）大小，默认 A4（见 @workbench/notes 的 page-size.ts）。
+   *
+   * 与 imageRepo 同一条规矩：不从 settings store 里读（独立 Markdown 窗口不装 Pinia），
+   * 由上层传进来；没传时导出按 A4。只影响导出 HTML 的 @page size。
+   */
+  pageSize?: NotePageSize
   /** 空文档时的提示语；不传用笔记页那一句（含 Ctrl+/ 说明），独立窗口用简短版 */
   placeholder?: string
   /**
@@ -619,15 +626,15 @@ function openMenu(event: MouseEvent): void {
 }
 
 /**
- * 右键菜单点了一项：`table:` 前缀走快捷键通道，`export:` 前缀走导出，其余照旧点工具带按钮。
+ * 右键菜单点了一项：`table:` 前缀走快捷键通道，`export:html` 走导出，其余照旧点工具带按钮。
  */
 function onMenuAction(name: string): void {
   if (name.startsWith('table:')) {
     runTableAction(name.slice('table:'.length) as Parameters<typeof runTableAction>[0])
     return
   }
-  if (name.startsWith('export:')) {
-    void exportNote(name.slice('export:'.length) as 'markdown' | 'html' | 'pdf')
+  if (name === 'export:html') {
+    void exportNote()
     return
   }
   runAction(name)
@@ -654,42 +661,31 @@ function exportHtmlDocument(): string {
     contentThemeCss: isDark() ? contentThemeDarkCss : contentThemeLightCss,
     highlightCss: isDark() ? highlightDarkCss : highlightLightCss,
     dark: isDark(),
+    pageSize: props.pageSize ?? NOTE_PAGE_SIZE_DEFAULT,
   })
 }
 
 /**
- * 导出正文：弹「另存为」让用户挑路径，写完给一句 feedback。
+ * 导出为 HTML：弹「另存为」让用户挑路径，写完给一句 feedback。
  *
- * - Markdown：正文原文（`getValue()`）直接存 `.md`；
- * - HTML：自包含 HTML 存下来，双击就能在任意浏览器打开；
- * - PDF：同一份自包含 HTML 交给 Rust 用隐藏 WebView2 窗口调 PrintToPdf 静默落盘
- *   （`export_pdf`），不再弹系统打印预览。WebView2 的 print() 只有交互式那一种，
- *   静默出 PDF 必须走 COM；不引外部程序（见 pdf_export.rs）。
+ * 只出 HTML 一种，右键菜单里直接一项，没有子菜单。正文包成自包含文档（样式内联，
+ * 双击就能在任意浏览器打开），落盘走 `writeTextFile`（fs_write_text）。
+ *
+ * 不点 Vditor 工具带那个导出按钮：它导出时引随包的 `cdn` 资源，PDF 那条更是往 iframe
+ * 写内联 `<script>`，生产态有 CSP nonce，点了没反应。这里改成应用自己拼文档。
  */
-async function exportNote(format: 'markdown' | 'html' | 'pdf'): Promise<void> {
-  const ext = format === 'markdown' ? 'md' : format === 'html' ? 'html' : 'pdf'
-  const filters = format === 'markdown'
-    ? [{ name: 'Markdown', extensions: ['md'] }]
-    : format === 'html'
-      ? [{ name: 'HTML', extensions: ['html', 'htm'] }]
-      : [{ name: 'PDF', extensions: ['pdf'] }]
-
-  // 三种格式都先弹「另存为」挑路径：PDF 也一样 —— 静默指的是省掉中间的打印预览，
-  // 不是不问用户就把文件写到某个地方（避免覆盖、也不知道文件去了哪）。
+async function exportNote(): Promise<void> {
   const base = exportBaseName()
   const path = await window.workbench.pickSavePath({
-    title: `导出为 ${format === 'markdown' ? 'Markdown' : format === 'html' ? 'HTML' : 'PDF'}`,
-    defaultPath: `${base}.${ext}`,
-    filters,
+    title: '导出为 HTML',
+    defaultPath: `${base}.html`,
+    filters: [{ name: 'HTML', extensions: ['html', 'htm'] }],
   })
   if (!path)
     return // 用户取消，不是失败
 
-  // Markdown 存原文；HTML / PDF 共用同一份自包含文档（三份 CSS 都内联，表格不会裂白缝）
-  const content = format === 'markdown' ? (currentValue() ?? '') : exportHtmlDocument()
-  const result = format === 'pdf'
-    ? await window.workbench.exportPdf(path, content)
-    : await window.workbench.writeTextFile(path, content)
+  // 三份 CSS 都内联在文档里，表格不会裂白缝（见 exportHtmlDocument）
+  const result = await window.workbench.writeTextFile(path, exportHtmlDocument())
   if (!result.ok) {
     notifyError(result.error ?? '导出失败')
     return

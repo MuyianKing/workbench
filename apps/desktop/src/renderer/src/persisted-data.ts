@@ -21,7 +21,7 @@ import { pruneDays, sanitizeActivity, sanitizeCommands, sanitizeIconCache, sanit
 import { sanitizeGitRepoRoot, sanitizeRepoHistory } from '@workbench/git'
 import { sanitizeKbSourceLinks } from '@workbench/kb'
 import { sanitizeMailAccounts, sanitizeMailBulkSenders, sanitizeMailContacts, sanitizeMailPollMinutes } from '@workbench/mail'
-import { sanitizeEditorHotkeys, sanitizeImageRepo, sanitizeNoteHistory, sanitizeNoteRoot, sanitizeNoteTreeExpanded } from '@workbench/notes'
+import { sanitizeEditorHotkeys, sanitizeImageRepo, sanitizeNoteHistory, sanitizeNotePageSize, sanitizeNoteRoot, sanitizeNoteTreeExpanded } from '@workbench/notes'
 import { sanitizeSyncRepo } from '@workbench/usage'
 import { sanitizeVaultGroupNames } from '@workbench/vault'
 import { sanitizeVideoHistory, sanitizeVideoLastRel, sanitizeVideoRoot, sanitizeVideoTreeExpanded } from '@workbench/video'
@@ -113,6 +113,8 @@ export function sanitizeSettings(raw: unknown): StoredSettings {
   // 打开过的笔记本清单（笔记页左栏底部的「最近打开」）：老数据文件里没有，默认空；
   // 手工改坏过、重复、超上限的都在这里收敛
   value.noteDirs = sanitizeNoteHistory(value.noteDirs)
+  // 导出版面（纸张）：老数据文件里没有这个字段，默认 A4；坏值收敛回默认（见 page-size.ts）
+  value.notePageSize = sanitizeNotePageSize(value.notePageSize)
   // 技能库目录（本机挑的一个目录）：老数据文件里没有，默认空串 = 还没选过。
   // 与笔记文件夹同一条收敛（去空白与末尾分隔符、盘根留住分隔符）—— 它要拿去拼文件路径
   value.skillDir = sanitizeNoteRoot(value.skillDir)

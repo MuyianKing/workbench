@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ArrowRight, Loading } from '@element-plus/icons-vue'
+import { ArrowRight } from '@element-plus/icons-vue'
 /**
  * 一轮的**过程**收成的一块：模型想的那几段、工具调用、报错、中途那些旁白都在它里面。
  *
@@ -8,15 +8,15 @@ import { ArrowRight, Loading } from '@element-plus/icons-vue'
  * 是在那儿定的，有单测）。
  *
  * **跑着的时候摊开、跑完自动收起**；点标题那一行随时展开 / 收起。
- * 「还在跑」的状态也在这一行上（转圈 + 正在思考… / {程序名}正在努力探索中....）—— 它是这一轮自己的事，
- * 顶部那行说的是等你确认 / 接历史 / 在停 / 装 Pi / 出错（见 AiRunPanel）。
+ * 「还在跑」的状态不在这儿 —— 它画在整块对话面板的底部（见 AiRunPanel），
+ * 顶部那行说的是等你确认 / 接历史 / 在停 / 装 Pi / 出错。
  */
 import { ref, watch } from 'vue'
 
 const props = defineProps<{
-  /** 标题上那句话（跑着是「正在思考…」或「{程序名}正在努力探索中....」，跑完是「过程 · 12 步」） */
+  /** 标题那句话：过程步数（「过程 · 12 步」） */
   label: string
-  /** 还在跑：标题上带转圈、内容自动摊开 */
+  /** 还在跑：内容自动摊开 */
   active: boolean
 }>()
 
@@ -35,10 +35,7 @@ watch(
 <template>
   <div class="proc" :class="{ 'is-live': active }">
     <button type="button" class="proc__head" @click="expanded = !expanded">
-      <el-icon v-if="active" class="proc__spin">
-        <Loading />
-      </el-icon>
-      <el-icon v-else class="proc__chevron" :class="{ 'is-open': expanded }">
+      <el-icon class="proc__chevron" :class="{ 'is-open': expanded }">
         <ArrowRight />
       </el-icon>
       <span class="proc__label">{{ label }}</span>
@@ -78,23 +75,6 @@ watch(
   text-decoration: underline;
 }
 
-/* 跑着：转圈用运行色（彩色只表达运行状态，见 AGENTS.md 第 4 节） */
-.proc.is-live .proc__head {
-  color: var(--st-run);
-}
-
-.proc__spin {
-  font-size: var(--fs-meta);
-  animation: proc-spin 1.2s linear infinite;
-}
-
-@keyframes proc-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-/* 收起来时的小箭头：摊开就转 90 度（与左栏那棵树的展开态同一个意思） */
 .proc__chevron {
   font-size: var(--fs-meta);
   transition: transform 0.15s ease;

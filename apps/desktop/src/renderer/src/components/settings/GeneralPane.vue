@@ -1,9 +1,10 @@
 <script setup lang="ts">
+import type { NotePageSize } from '@workbench/notes'
 import type { InputInstance } from 'element-plus'
 import type { AppSettings } from '@/types'
 import { APP_NAME_DEFAULT, APP_NAME_MAX_LENGTH } from '@workbench/appearance'
 import { accountLabel } from '@workbench/auth'
-import { EDITOR_HOTKEY_ACTIONS, EDITOR_HOTKEY_DEFAULTS, EDITOR_HOTKEY_LABELS, resolveEditorHotkeyConflict } from '@workbench/notes'
+import { EDITOR_HOTKEY_ACTIONS, EDITOR_HOTKEY_DEFAULTS, EDITOR_HOTKEY_LABELS, NOTE_PAGE_SIZES, resolveEditorHotkeyConflict } from '@workbench/notes'
 import { WEATHER_CITY_MAX } from '@workbench/weather'
 import { sanitizeZentaoPollMinutes } from '@workbench/zentao'
 import { ElMessage } from 'element-plus'
@@ -500,6 +501,27 @@ function resetEditorHotkey(action: string): void {
           placeholder="git@github.com:you/notes-images.git"
           @change="commitImageRepo"
         />
+      </div>
+
+      <!--
+        导出版面（纸张）：注入到导出 HTML 的 @page size，决定浏览器「打印 / 另存为 PDF」
+        时按哪种纸张分页；只影响导出，不改变编辑器里的正文宽度。默认 A4。
+      -->
+      <div class="row row--stack">
+        <div class="row__text">
+          <span class="row__label">导出版面</span>
+          <span class="row__hint">
+            笔记导出成 HTML 时的纸张大小；用浏览器打印或另存为 PDF 时按这个版面分页。默认 A4。
+          </span>
+        </div>
+        <el-select
+          :model-value="settings.settings.notePageSize"
+          size="small"
+          aria-label="导出版面"
+          @change="(value: NotePageSize) => save({ notePageSize: value })"
+        >
+          <el-option v-for="size in NOTE_PAGE_SIZES" :key="size" :label="size" :value="size" />
+        </el-select>
       </div>
 
       <!--

@@ -328,7 +328,9 @@
 ### 登录流程
 
 `POST /v2/plugin/auth/state?platform=CLI` 拿 `state` 与授权链接 → 浏览器授权 → 轮询 `GET /v2/plugin/auth/token?state=` 换
-token → `GET /v2/plugin/login/account?state=` 取昵称与企业 id。state 存在内存里（10 分钟过期），不落盘。上游签发 state，没有
+token → `GET /v2/plugin/login/account?state=` 取昵称与企业 id。state 存在内存里（`LOGIN_TTL_SECS` 10 分钟过期），不落盘；
+**轮询时也按这个系统配置回收过期 state**（与 Qoder 同一口径）：用户开了浏览器走开、或上游一直回 pending，到点后该命令返回
+「已过期」错误，前端据此收尾（清掉等待提示、恢复登录按钮），不会无限轮询。上游签发 state，没有
 PKCE。之后靠 `POST /v2/plugin/auth/token/refresh`（`X-Refresh-Token` 头）续期，**永不再走登录**。
 
 ### 账号导出 / 导入

@@ -82,13 +82,6 @@ export interface SystemChannel {
    */
   writeTextFile: (path: string, content: string) => Promise<Result<null>>
 
-  /**
-   * 把自包含 HTML 静默导出成 PDF（笔记导出用）。path 来自「另存为」对话框，
-   * html 是 buildExportHtml 的产物；Rust 侧用隐藏 WebView2 窗口调 PrintToPdf 直接落盘，
-   * 不弹系统打印预览。失败回 Err。
-   */
-  exportPdf: (path: string, html: string) => Promise<Result<null>>
-
   /** 按路径读一个二进制文件、以 base64 回传（AI 预览栏的 DOCX / PPTX 是 zip 容器，文本通道读不了） */
   readBinaryFile: (path: string) => Promise<Result<string>>
 

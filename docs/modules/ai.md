@@ -84,11 +84,11 @@
   工具与系统行是浅灰窄行注脚；轮尾补「用时 …」，端点报了消耗同轮带上 token（`parsePiUsage` 拆 `usage`、按轮累加，输入含缓存读 / 写；
   没报就只有用时）。**回话流式长出**（`message_update` ›`text_delta`）：增量攒到 `STREAM_TICK`（80ms）发布一次（逐字重画白烧钱）；
   `message_end` 的整段为准；块首尾不画；被停的那轮保留已吐出的部分（`endStream` 的 `keep`）。**一轮 = 用户那句 + 过程 + 答案 + 收据**（`aiTurns` 切轮、`AiProcess.vue` 画，
-  都有单测）：过程默认收着、跑着摊开（标题转圈）、跑完自动收，点标题再摊；**答案只认收尾时紧挨收据的那段正文**（后面还跟工具 / 思考行的都是旁白，旁白照常渲染 markdown、跟着过程收）；
+  都有单测）：过程默认收着、跑着摊开、跑完自动收，点标题再摊（标题只报步数）；跑着的那点动静（转圈 + 状态词）画在**整块对话面板底部**，不在过程块标题上；**答案只认收尾时紧挨收据的那段正文**（后面还跟工具 / 思考行的都是旁白，旁白照常渲染 markdown、跟着过程收）；
   收据只收轮尾成串的「用时 …」，报错不进收据。**只有跑着的那轮（最后一轮）不摘答案**，收尾才弹出；历史轮照常摘 ——
   `aiTurns` 的 `live` 只挡末轮，若广播到全部轮，新一轮一开跑历史答案就被塞回过程块收起（曾出此 bug，回归用例在 ai.test.ts）。想的几段（`thinking_delta`，同一节流）走**纯文本**，
   一段以 `thinking_end` 整块为准；历史里的 `thinking` 块同样认（脱敏空块不画）。**顶部状态行只说等确认 / 接历史 / 在停 / 装 Pi / 出错**，
-  「运行中」的动静跟过程块走（转圈 + 正文末尾竖条）。**轮间「开始执行 / 执行结束」不画**（`isTurnMarker`）—— 连续对话里是噪音。
+  「运行中」的动静在面板底部那行转圈（+ 正文末尾竖条）。**轮间「开始执行 / 执行结束」不画**（`isTurnMarker`）—— 连续对话里是噪音。
   **对话区不铺底色、不描边**（底色归 `.panel` 与卡片不透明度，再铺一层就是灰压在对话上）。
 - **正文里的站内链接与「写下 N 个文件」都点得动，开进右侧预览栏**（`AiPreviewPane.vue`，DOCX / PPTX / HTML 三个画法各是 `AiPreviewDoc` / `AiPreviewSlides` / `AiPreviewHtml`）：
   这是**页内的分栏面板，不是弹层**（读文件与看对话要同时进行，AppDialog 那套不适用）。**一个文件一个 Tab**（`previews` + `activeKey`，
@@ -117,10 +117,19 @@
   `docs/*.md` 留着（系统提示词会把 `docs/` 指给模型）。**`typebox` / `pi-ai` / `pi-tui` / `pi-agent-core` / `chord` 也不留**：
   它们是「扩展里 import Pi SDK」时的 alias 目标，只有 `getAliases()` 被调到时才用得上，当前那份 permission.js 一个 import 都没有。
   树里只有一层（`npm pack` 直接解到 `node_modules/@earendil-works/pi-coding-agent`），不再有 npm 那种「整棵树嵌进自己的 `node_modules`」的嵌套。
-  裁完 **14MB / 153 个文件**（Pi 本体，Pi 1.5.0；连网页扩展整棵 16MB / 413 个文件、tar.gz 3.6MB；没裁前 55.6MB 的树是 9.7MB，Pi 1.0.4），
+  裁完 **整棵 16MB / 415 个文件**（Pi 本体 11MB / 133 个文件，Pi 1.6.0，2026-11-25 实测；
+  连网页扩展（2MB / 258 个文件）整棵 tar.gz 约 3.6MB；1.5.0 时整棵 13.5MB / 160 个文件，没裁前 55.6MB 的树是 9.7MB，Pi 1.0.4），
   脚本末尾跑一次 `cli.js --version` 自检（裁错包时 Pi 往往还能启动，只查文件存在拦不住）。**加回条件**：哪天应用带会 import Pi SDK 的扩展，
   把那几个包名放回 `KEEP` 重跑探针。**升级 Pi 或改裁剪规则** = 改版本常量 / `PRUNE_REVISION` + 重跑 `pnpm run vendor:pi` + 瘦身验证重做（假 key 打一轮每个提供方），
   会话 / 续聊 / 权限扩展 / 确认帧那条链照[dev-notes/pi-session-probe.md](../dev-notes/pi-session-probe.md) 的假端点探针重跑。
+- **Pi 1.6 起贴图多一道 resize，photon 的 wasm 必须在树里**：`processImage` 先 `resizeImage`（`photon_rs_bg.wasm`，靠 `loadPhoton()` 动态 import）
+  再按 `image_url` data URL 发给端点，wasm 丢了会静默变成一句 `[Image omitted: could not be resized below the inline image size limit.]`。
+  `@silvia-odwyer/photon-node` 整包（含 wasm）在 `KEEP` 里，升级换版本要重跑带图那条探针确认 base64 一字不差
+  （**探针的图得是合法 PNG**：一张 1x1 的假 PNG 在 resize 那步必失败，会误报成裁剪问题）。
+- **Pi 1.6 把 `cacheWarming` 默认改成 `idle`（轮次之间也保温、最多 30 分钟、要走模型端点花钱）—— 对我们不生效**：保温器只在模型带
+  `promptCache` TTL 时启动（`getPromptCacheTtlMs` 读 `model.promptCache`，缺字段就 `stop("cache lifetime unavailable")`），
+  我们 `models.json` 里的自定义端点模型从不写这个字段，应用也不写 Pi 的 `settings.json`；所以不新增写盘、不新增出口。
+  若哪天给模型加了 `promptCache`，要重新拍板（改 settings 或明确接受空闲请求，并同步 [privacy.md](../privacy.md)）。
 - **进程直启、不经 `cmd /C`**（`session::spawn_args`，带一根可写 stdin）：整行交给 cmd 会被它的引号剥离规则拆坏。
   提示词与确认答复都走那根 stdin，不落临时文件、不走 shell。
 - **写 stdin 一律落在工作线程**（`ai_run` 与 `session_write` 都标 `(async)`）：管道写要阻塞到对端来消费 ——
@@ -251,7 +260,7 @@
 
 ### 技能
 
-- **技能 = `--no-skills` + 逐条 `--skill`，两头合起来才成立**：Pi（1.5.0）有显式 `--skill <路径>`（可重复）与**自动发现**（`~/.agents/skills`、信任项目的 `.agents/skills`（还往上找）、`<agentDir>/skills`、`<cwd>/.pi/skills`、package 与扩展）。
+- **技能 = `--no-skills` + 逐条 `--skill`，两头合起来才成立**：Pi（1.6.0）有显式 `--skill <路径>`（可重复）与**自动发现**（`~/.agents/skills`、信任项目的 `.agents/skills`（还往上找）、`<agentDir>/skills`、`<cwd>/.pi/skills`、package 与扩展）。
   **自动发现必须关**（`-ns`），否则「关掉」是假的（只给 `--skill` 时 `~/.agents/skills` 仍在清单里，加 `-ns` 才只剩给出去的；
   `get_commands` 里另会列 `llama` / `mcp` 两条内置命令，它们不随技能表变，应用也不读这份清单）。于是**应用那份表是唯一真源**：
   起进程先 `-ns`，再把开着的逐个`--skill <目录>`（目录不存在跳过、按整条路径去重、上限 200）。代价：**用户在应用之外装给 Pi 的技能 在应用的会话里看不见**，

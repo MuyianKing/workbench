@@ -851,6 +851,7 @@ function onWindowFocus(): void {
             :image-repo="settings.settings.noteImageRepo"
             :image-origin="store.remoteUrl"
             :editor-hotkeys="settings.settings.editorHotkeys"
+            :page-size="settings.settings.notePageSize"
             :outline-host="outlineRail"
             outline-pinned
             @change="onContentChange"

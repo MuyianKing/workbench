@@ -13,6 +13,7 @@ describe('buildExportHtml', () => {
     contentThemeCss: MIN_CSS,
     highlightCss: '',
     dark: false,
+    pageSize: 'A4' as const,
   }
 
   it('把标题、正文与样式都收进同一份文档', () => {
@@ -41,5 +42,15 @@ describe('buildExportHtml', () => {
     expect(buildExportHtml({ ...base, dark: true })).toContain('background: #1e1e1e')
     // 打印时一律白底黑字
     expect(buildExportHtml(base)).toContain('background: #fff; color: #000')
+  })
+
+  it('按纸张注入 @page size，并给容器相称的排版宽度', () => {
+    const a4 = buildExportHtml({ ...base, pageSize: 'A4' })
+    expect(a4).toContain('@page { size: A4; }')
+    expect(a4).toContain('max-width: 730px')
+
+    const letter = buildExportHtml({ ...base, pageSize: 'Letter' })
+    expect(letter).toContain('@page { size: Letter; }')
+    expect(letter).toContain('max-width: 752px')
   })
 })

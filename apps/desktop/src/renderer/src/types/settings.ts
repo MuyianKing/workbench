@@ -13,11 +13,13 @@ import type { AccentInkMode, AppearanceSettingKey, ThemeSource, TopBarStyle, Vie
 import type { ProjectSort } from '@workbench/core'
 import type { KbSourceLink } from '@workbench/kb'
 import type { MailAccount, MailContact } from '@workbench/mail'
+import type { NotePageSize } from '@workbench/notes'
 import type { WorkRange, WorkRangeBounds, WorkSort } from '@workbench/work-log'
 import { AI_PERMISSION_DEFAULT, AI_THINKING_DEFAULT } from '@workbench/ai'
 import { DEFAULT_APPEARANCE, TERMINAL_BUTTON_TOP_DEFAULT } from '@workbench/appearance'
 import { CAPTURE_ENABLED_DEFAULT, CAPTURE_HOTKEY_DEFAULT, CAPTURE_MAGNIFIER_DEFAULT, CAPTURE_PIN_OPACITY_DEFAULT, CAPTURE_SAVE_DIR_DEFAULT } from '@workbench/capture'
 import { PROJECT_SORT_DEFAULT } from '@workbench/core'
+import { NOTE_PAGE_SIZE_DEFAULT } from '@workbench/notes'
 import { WORK_RANGE_DEFAULT, WORK_SORT_DEFAULT } from '@workbench/work-log'
 import { ZENTAO_POLL_MINUTES_DEFAULT } from '@workbench/zentao'
 
@@ -149,6 +151,14 @@ export interface AppSettings {
    * 「当前这个笔记本在这台机器上传的图」，仓库是所有笔记本、所有机器共用的一份。
    */
   noteImageRepo: string
+  /**
+   * 笔记导出的版面（纸张）大小，默认 A4（见 @workbench/notes 的 page-size.ts）。
+   *
+   * 注入到导出 HTML 的 `@page { size: … }` 里，双击导出的文件用浏览器「打印 / 另存为 PDF」
+   * 时按对应纸张分页；同时决定容器宽度。只影响导出，不改变编辑器里的正文宽度。
+   * 只对本机成立，进数据文件、不参与外观同步。
+   */
+  notePageSize: NotePageSize
   /**
    * 技能库目录（用户自己挑的一个目录）：技能就是它下面的一个个子目录（每个带一份 SKILL.md）。
    *
@@ -479,6 +489,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   noteDir: '',
   noteDirs: [],
   noteImageRepo: '',
+  notePageSize: NOTE_PAGE_SIZE_DEFAULT,
   skillDir: '',
   kbDir: '',
   kbRawSources: [],

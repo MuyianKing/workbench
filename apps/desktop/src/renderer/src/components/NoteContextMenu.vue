@@ -3,7 +3,8 @@
  * 笔记正文的右键菜单。
  *
  * 编辑器那条工具带被藏起来了（见 NoteEditor），它那套动作搬到这里，
- * 形式是「分组图标按钮 + 带子菜单的行」：上面三排随手要用，底下三行是段落、插入与导出。
+ * 形式是「分组图标按钮 + 带子菜单的行 + 直接动作行」：上面三排随手要用，
+ * 底下两行是段落与插入，最后是「导出为 HTML」—— 导出只有 HTML 一种，直接点，不出二级菜单。
  *
  * 这个组件**只管摆和收**：每一项只记一个**动作名**（就是 Vditor 工具带上的项名），
  * 点下去经 `act` 交回 NoteEditor，由它去点工具带上那颗按钮 ——
@@ -56,7 +57,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  /** 选中了一项；名字是工具带项名（标题是 heading1…heading6；`table:` 前缀的归 execTable，`export:` 前缀的归 exportNote） */
+  /** 选中了一项；名字是工具带项名（标题是 heading1…heading6；`table:` 前缀的归 execTable，`export:html` 归 exportNote） */
   act: [name: string]
   close: []
 }>()
@@ -120,7 +121,7 @@ const groups = computed(() => {
     .filter(group => group.length > 0)
 })
 
-/** 三行带子菜单的：段落、插入整块的东西、导出（格式用 `export:` 前缀，归 NoteEditor 的 exportNote 认领） */
+/** 两行带子菜单的：段落、插入整块的东西（导出是下面的直接动作行，不走子菜单） */
 const SUBMENUS: { label: string, items: MenuRow[] }[] = [
   {
     label: '段落',
@@ -138,14 +139,6 @@ const SUBMENUS: { label: string, items: MenuRow[] }[] = [
     items: [
       { name: 'code', label: '代码块' },
       { name: 'table', label: '表格' },
-    ],
-  },
-  {
-    label: '导出',
-    items: [
-      { name: 'export:markdown', label: 'Markdown' },
-      { name: 'export:html', label: 'HTML' },
-      { name: 'export:pdf', label: 'PDF（打印另存）' },
     ],
   },
 ]
@@ -242,6 +235,13 @@ onMounted(place)
           </div>
         </div>
       </div>
+      <!-- 导出只有 HTML 一种：直接一行动作，不出二级菜单 -->
+      <button class="menu__action" type="button" role="menuitem" @click="pick('export:html')">
+        <span class="sub__label">导出为 HTML</span>
+        <svg class="menu__action-icon" aria-hidden="true">
+          <use href="#vditor-icon-export" />
+        </svg>
+      </button>
     </div>
   </Teleport>
 </template>
@@ -344,6 +344,35 @@ onMounted(place)
 .sub:hover > .sub__row {
   color: var(--ink);
   background: var(--bg-subtle);
+}
+
+/* 导出为 HTML：与子菜单行同一副行片，只是它直接点就动作（没有箭头、没有二级面板） */
+.menu__action {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  height: 28px;
+  padding: 0 var(--sp-2);
+  background: transparent;
+  border: 0;
+  border-radius: var(--r-sm);
+  font: inherit;
+  font-size: var(--fs-body);
+  color: var(--ink-2);
+  text-align: left;
+  cursor: pointer;
+}
+
+.menu__action:hover {
+  color: var(--ink);
+  background: var(--bg-subtle);
+}
+
+.menu__action-icon {
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
 }
 
 /*

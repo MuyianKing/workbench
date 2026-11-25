@@ -81,28 +81,6 @@ export interface CaptureChannel {
    */
   saveImage: (png: string, dir: string, name: string, unique: boolean) => Promise<Result<string>>
 
-  /**
-   * 滚动截图开场：Rust 把焦点还给开场时的前台窗口、光标钉进选区中心、遮罩设成鼠标穿透
-   * —— 三件事合起来才把滚轮喂进目标窗口（焦点与光标是双保险，穿透挡住遮罩自己吃滚轮）。
-   * 矩形口径与 copyFrame 一致：这块屏的画布坐标（物理像素）。
-   */
-  scrollBegin: (rect: { x: number, y: number, width: number, height: number }) => Promise<Result<null>>
-
-  /**
-   * 滚动中抓一次选区的**实时**像素（二进制 IPC，`invoke` 拿到 `ArrayBuffer`，同 captureFrame）。
-   * 不走会话缓存 —— 目标窗口正在动，开场冻结的那一帧早过时了。
-   */
-  scrollGrab: (rect: { x: number, y: number, width: number, height: number }) => Promise<Result<ArrayBuffer>>
-
-  /**
-   * 向下滚 `units` 个滚轮单位（120 = 一整格）。渲染层按上一步实际位移自适应：稳态发整格
-   * （120 × 齿数），遇到「一格跨过整个选区」的窗口减半细分（60 / 30）找能拼的步长。
-   */
-  scrollWheel: (units: number) => Promise<Result<null>>
-
-  /** JS 自己停（到底 / 拼不上）：遮罩恢复交互并拿回焦点，进结果相 */
-  scrollStop: () => Promise<Result<null>>
-
   /** 把这张图钉到屏幕上（位置与尺寸按物理像素给），返回它的记账 */
   pinImage: (
     png: string,
@@ -146,11 +124,4 @@ export interface CaptureChannel {
    * 顺序反了会漏掉中间那一条。
    */
   onCaptureSync: (fn: (id: number | null) => void) => Promise<() => void>
-
-  /**
-   * 滚动截图运行中按了截图热键 = **停止**（不是收场，结果留着给结果条）：Rust 已把遮罩
-   * 恢复成交互态并拿回焦点，这条只负责叫 JS 停下循环、进结果相。只在滚动运行中发 ——
-   * 订阅在遮罩开场就挂上，远早于任何一场滚动，普通 listen 就够。
-   */
-  onScrollStop: (fn: () => void) => () => void
 }

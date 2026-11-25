@@ -406,7 +406,10 @@ pub fn wb_gateway_login_poll(
     login_state: String,
 ) -> Result<LoginPoll, String> {
     {
-        let inner = state.lock()?;
+        // 每次轮询都按 LOGIN_TTL_SECS 回收：用户开了浏览器走开、或上游一直回 pending，
+        // 超过有效期就当成过期，前端收到 Err 后收尾（清提示、恢复按钮），不会无限轮询。
+        let mut inner = state.lock()?;
+        inner.prune_logins();
         if !inner.logins.contains_key(login_state.trim()) {
             return Err("这个登录已过期或不存在，请重新发起".into());
         }
@@ -1557,6 +1560,27 @@ mod tests {
             quota_models: Vec::new(),
             token_expired: false,
         }
+    }
+
+    #[test]
+    fn 登录会话按系统配置的_ttl_回收() {
+        // 轮询会先 prune 再判 contains_key：超过 LOGIN_TTL_SECS 的 state 必须被回收，
+        // 这样「开了浏览器走开」或上游一直回 pending 的登录不会无限轮询下去。
+        let mut inner = Inner::default();
+        let now = crate::common::now_secs();
+        inner.logins.insert(
+            "fresh".into(),
+            LoginSession { created: now },
+        );
+        inner.logins.insert(
+            "stale".into(),
+            LoginSession {
+                created: now - relay_core::LOGIN_TTL_SECS - 1,
+            },
+        );
+        inner.prune_logins();
+        assert!(inner.logins.contains_key("fresh"), "有效期内的登录要留着");
+        assert!(!inner.logins.contains_key("stale"), "超过系统配置 TTL 的要回收");
     }
 
     #[test]

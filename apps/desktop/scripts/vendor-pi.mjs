@@ -6,8 +6,8 @@
  * 源码映射、类型声明、`pi-coding-agent/dist` 里除 `bundle/` 之外的那几兆
  * （实际跑的是 `dist/bundle/cli.js` 这份自带全部提供方实现的 bundle）、文档配图 / 示例 /
  * CHANGELOG，以及云厂商 SDK、protobuf、google-auth、highlight.js、quickjs-wasi 这些整包。
- * 裁完 **Pi 本体 14MB / 153 个文件**（连网页扩展 16MB / 413 个文件，整棵树 tar.gz 3.6MB；
- * Pi 1.5.0，2026-11-25 实测。没裁之前那套 55.6MB 的树是 9.7MB —— 那一组是 1.0.4 时量的）。
+ * 裁完 **整棵 16MB / 415 个文件**（Pi 本体 11MB / 133 个文件；连网页扩展 2MB / 258 个文件，
+ * 整棵树 tar.gz 3.6MB；Pi 1.6.0，2026-11-25 实测。没裁之前那套 55.6MB 的树是 9.7MB —— 那一组是 1.0.4 时量的）。
  *
  * 连「装什么」也一起省了：**不再 `npm install` 整棵树**（那等于把 108MB 下下来再删九成），
  * 改成 `npm pack` 只取 Pi 自己的 tarball、再装 `jiti` 与 `photon-node` 两个小包 ——
@@ -16,7 +16,9 @@
  *
  * 判据不是「看着没用」，而是**运行时真的会加载它**：KEEP 里每一项都在裁完的树上用假端点
  * 探针验过（RPC 一轮：模型请求 → 权限确认 → 命令真跑 → `agent_settled`；两种 API 形态、
- * read/write/edit、`-ns --skill` 各一遍），见 docs/dev-notes/pi-session-probe.md。
+ * read/write/edit、`-ns --skill`、带图、abort、硬杀重开各一遍），见 docs/dev-notes/pi-session-probe.md。
+ * **Pi 1.6 起带图会先经 photon 的 wasm 做 resize**（wasm 丢了图会静默变成一句 `[Image omitted: …]`），
+ * 所以 photon 整包必须在 KEEP 里，探针的图也得是合法 PNG（1x1 假图会在 resize 那步误报失败）。
  * 裁完还会跑一次 `node cli.js --version` 自检 —— 裁错了当场失败，不会等用户点开 AI 助手页
  * 才发现「权限确认没了」。
  *
@@ -47,7 +49,7 @@ import { fileURLToPath } from 'node:url'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 /** 钉死的 Pi 版本；升级要连着 docs/dev-notes/pi-session-probe.md 的验证一起重做 */
-const PI_VERSION = '1.5.0'
+const PI_VERSION = '1.6.0'
 /**
  * 随包内置的最小网页扩展源码（`scripts/pi-web-search/`，进版本库）：只给 Pi 注册 `web_search`
  * （Exa 匿名 MCP，零 key）与 `fetch_content`（Readability + turndown 抽正文）两个工具。
@@ -62,10 +64,10 @@ const PRUNE_REVISION = '9'
 /**
  * 预填表的数据源版本：`@earendil-works/pi-ai` 里那份 models.dev 快照（`dist/providers/data`）。
  * 它只被 `npm pack` 下来读一次、生成完就删 —— **不进树**。pi-coding-agent 从 1.3.0 起把
- * 内部 Pi 包钉成精确版本（1.5.0），这里仍单独写死：**升级 Pi 时这个版本要一起看**
+ * 内部 Pi 包钉成精确版本（1.6.0），这里仍单独写死：**升级 Pi 时这个版本要一起看**
  * （数据变了，预填表的内容就会变）。
  */
-const CATALOG_VERSION = '1.5.0'
+const CATALOG_VERSION = '1.6.0'
 /**
  * 树里除 Pi 本体之外真正需要的两个外部包。版本照 pi-coding-agent 自己 package.json 里钉的抄：
  * `jiti`（扩展加载器）与 `@silvia-odwyer/photon-node`（贴图缩放的 wasm）。
