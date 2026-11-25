@@ -1,6 +1,6 @@
 ---
 name: git-commit-push
-version: 0.0.3
+version: 0.0.4
 description: 把本次会话的改动提交并推送到远程（没说「全部」就只提交本次会话改过的文件），目标分支有歧义时先确认分支（只有一个分支则不确认）。当用户说“提交代码”“提交所有改动并推送”“commit and push”“推一下”“/git-commit-push”，或要求把项目代码提交到远程时使用。只做提交+推送，不创建 PR、不做代码审查、不强制推送。
 metadata:
   requires:
@@ -103,13 +103,33 @@ git -c core.quotepath=false status --short
 
 ## 第 4 步：生成提交信息并提交
 
+提交信息采用 **Conventional Commits + emoji 主题**：` 类型: emoji 简述`（类型小写，冒号后有且只有一个空格，简述用中文）。
+
+类型与 emoji 一一对应，按改动性质挑选唯一类型（主题里只放该类型对应的 emoji，不放其它）：
+
+| 类型 | emoji | 用途 |
+| --- | --- | --- |
+| `feat` | ✨ | 新增功能 |
+| `fix` | 🐛 | 修复缺陷 |
+| `docs` | 📝 | 文档变更 |
+| `style` | 💄 | 代码格式（不影响功能，例如空格、分号等格式修正） |
+| `refactor` | ♻️ | 代码重构（不包括 bug 修复、功能新增） |
+| `perf` | ⚡️ | 性能优化 |
+| `test` | ✅ | 添加疏漏测试或已有测试改动 |
+| `build` | 📦️ | 构建流程、外部依赖变更（如升级 npm 包、修改 vite 配置等） |
+| `ci` | 🎡 | 修改 CI 配置、脚本 |
+| `revert` | ⏪️ | 回滚 commit |
+| `chore` | 🔨 | 对构建过程或辅助工具和库的更改（不影响源文件、测试用例） |
+
+用户给出的带 `emoji` 字段的配置源（形如 `:sparkles:` / `:bug:` 的短码）等价于上表 emoji：`:sparkles:`→✨、`:bug:`→🐛、`:memo:`→📝、`:lipstick:`→💄、`:recycle:`→♻️、`:zap:`→⚡️、`:white_check_mark:`→✅、`:package:`→📦️、`:ferris_wheel:`→🎡、`:rewind:`→⏪️、`:hammer:`→🔨。主题里写 emoji 本身，不写短码。
+
 - 参考 `git log --oneline -10` 的语言和风格：历史用中文就写中文，历史用 Conventional Commits 就沿用（如 `fix: ...`、`feat: ...`）。
 - 信息基于实际 staged diff 归纳，写清改了什么，避免“update code”“修改文件”这类空话。
 - 用 heredoc 传入，避免 Windows 下引号、换行和编码问题：
 
   ```bash
   git commit -F - <<'MSG'
-  <一句话主题>
+  <类型>: <emoji> <一句话主题>
 
   - <要点 1>
   - <要点 2>
