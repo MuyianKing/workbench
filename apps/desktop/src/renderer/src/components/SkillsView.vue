@@ -275,7 +275,7 @@ function installActive(): void {
               v-for="skill in store.skills"
               :key="skill.id"
               :skill="skill"
-              :updated-copies="store.updatedCopies[skill.id] ?? 0"
+              :project-version="store.projectVersions[skill.id] ?? ''"
               @open="openDetail(skill)"
               @install="openInstall(skill)"
               @folder="store.reveal(skill.id)"

@@ -1,7 +1,7 @@
 import type { SkillCommit, SkillCompareFile, SkillCreateInput, SkillEntry, SkillFileInfo, SkillLibraryState } from '@workbench/skills'
 import type { Result } from '@/types'
 import { noteNameProblem, noteRootName, sanitizeNoteName, sanitizeNoteRoot } from '@workbench/notes'
-import { compareSkillCopy, SKILL_FILE, skillFileRel, skillRel } from '@workbench/skills'
+import { compareSkillVersions, SKILL_FILE, skillFileRel, skillRel, skillVersionOf } from '@workbench/skills'
 import { defineStore } from 'pinia'
 /**
  * 技能：列表、当前打开的那一篇、增删改、版本历史与安装的编排。
@@ -83,11 +83,12 @@ export const useSkillsStore = defineStore('skills', () => {
   /** 本地有已提交、还没推出去的改动：保存 / 删改 / 导入 / 恢复成功之后置位 */
   const needPush = ref(false)
   /**
-   * 卡片上「项目里有这份技能的新副本」的标记：技能 id → 有几个项目副本比库新 / 不一样。
-   * 由后台扫描填（见 scanCopies），只影响卡片徽标，不影响详情弹窗自己那次检测 —— 两边口径
-   * 都是域包的 `compareSkillCopy`，这里只读结果、不另拍一套。
+   * 卡片上「项目里有更新的版本」：技能 id → 各项目副本里的最高版本号（没装就空串）。
+   * 由后台扫描填（见 scanCopies）。卡片拿它与库里的 `version` 直接比，谁高谁低一眼可见 ——
+   * 不再用 `compareSkillCopy` 那套「内容不同也算」的判定（那会让副本只在格式上有差异时也挂标记，
+   * 而用户要的只是「有没有更高版本」）。
    */
-  const updatedCopies = ref<Record<string, number>>({})
+  const projectVersions = ref<Record<string, string>>({})
   /** 副本扫描在途：进页面 / 保存 / 安装 / 同步可能连着触发，串成一条免得互相盖结果 */
   let copyScanJob = 0
 
@@ -111,7 +112,7 @@ export const useSkillsStore = defineStore('skills', () => {
     syncNotice.value = ''
     needPush.value = false
     copyScanJob += 1
-    updatedCopies.value = {}
+    projectVersions.value = {}
     cancelAutoPush()
   }
 
@@ -255,12 +256,11 @@ export const useSkillsStore = defineStore('skills', () => {
   }
 
   /**
-   * 后台扫一遍各项目里的技能副本，给卡片填「项目有更新」徽标。
+   * 后台扫一遍各项目里的技能副本，给卡片填「项目里有更高版本」标记。
    *
-   * 口径与详情弹窗完全同一处（`compareSkillCopy`）：版本更高 / 项目里多出文件 / 同版本内容不同，
-   * 版本更低的旧快照不算。文件与判定都由域包负责，这里只数「这份技能有几份副本需要看」。
-   * 连着触发（进页面 / 保存 / 安装 / 同步）只认最后一轮的结果（job 号防过期）。
-   * 读盘失败的项目按「没更新」处理 —— 徽标是提示，不该因为一次 IO 失败就挡住页面。
+   * 每个技能取所有项目副本里的**最高版本号**（没装就空串）；卡片拿它与库里的 `version` 比，
+   * 高出来才标。连着触发（进页面 / 保存 / 安装 / 同步）只认最后一轮的结果（job 号防过期）。
+   * 读盘失败的项目按「没装」处理 —— 标记是提示，不该因为一次 IO 失败就挡住页面。
    */
   async function scanCopies(): Promise<void> {
     const job = ++copyScanJob
@@ -268,28 +268,37 @@ export const useSkillsStore = defineStore('skills', () => {
     const dirs = projects.projects.map(project => project.path).filter(Boolean)
     if (!rootPath || !dirs.length || !skills.value.length) {
       if (job === copyScanJob)
-        updatedCopies.value = {}
+        projectVersions.value = {}
       return
     }
 
     const ids = skills.value.map(skill => skill.id)
-    const counts = await Promise.all(ids.map(async (id) => {
+    const versions = await Promise.all(ids.map(async (id) => {
       const result = await window.workbench.scanSkillCopies(rootPath, dir.value, id, dirs)
       if (!result.ok || !result.data)
-        return 0
-      const scan = result.data
-      return scan.projects.filter(copy => compareSkillCopy(scan.library, copy.files).needsAttention).length
+        return ''
+      // 副本的 SKILL.md 原文 → 版本号；取所有项目里最高的那个
+      let highest = ''
+      for (const copy of result.data.projects) {
+        const skillMd = copy.files.find(file => file.rel === SKILL_FILE)?.content
+        if (!skillMd)
+          continue
+        const version = skillVersionOf(skillMd)
+        if (version && compareSkillVersions(version, highest) > 0)
+          highest = version
+      }
+      return highest
     }))
 
     // 期间又扫了一轮 / 换了库 / 技能列表变了：这份结果已经过期
     if (job !== copyScanJob || rootPath !== gitRoot.value)
       return
-    const next: Record<string, number> = {}
+    const next: Record<string, string> = {}
     ids.forEach((id, index) => {
-      if (counts[index] > 0)
-        next[id] = counts[index]
+      if (versions[index])
+        next[id] = versions[index]
     })
-    updatedCopies.value = next
+    projectVersions.value = next
   }
 
   /** 安装成功后重扫徽标：刚装进去的那份与库一致，对应卡片的标记要跟着消失 */
@@ -329,7 +338,7 @@ export const useSkillsStore = defineStore('skills', () => {
     needPush.value = false
     syncNotice.value = ''
     copyScanJob += 1
-    updatedCopies.value = {}
+    projectVersions.value = {}
     void reload()
   })
 
@@ -712,7 +721,7 @@ export const useSkillsStore = defineStore('skills', () => {
     syncError,
     syncNotice,
     needPush,
-    updatedCopies,
+    projectVersions,
     scanCopies,
     refreshCopyBadges,
     init,

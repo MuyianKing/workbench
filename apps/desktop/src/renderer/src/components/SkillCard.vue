@@ -13,13 +13,14 @@ import { FolderOpened, Position } from '@element-plus/icons-vue'
  * 点击要 stopPropagation，不该顺带把详情弹窗也拉开。没有 SKILL.md 的卡片挂着常显的
  * 警示徽标，安装按钮置灰。
  *
- * 版本号旁还有一颗「N 个项目有更新」徽标（`updatedCopies`，后台扫描填的）：卡片上的
- * `v0.0.2` 是**库里那份**的版本，项目副本更新到 `v0.0.3` 时库不会自己动 —— 没有这颗徽标，
- * 那件事只有点开详情才看得见。数字是「有几份副本比库新 / 不一样」，只提示、不替用户挑边。
+ * 版本号旁还有一颗「项目里有更新」徽标（`projectVersion`，后台扫描填的各项目副本最高版本）：
+ * 卡片上的 `v0.0.2` 是**库里那份**的版本，项目副本更新到 `v0.0.3` 时库不会自己动 —— 没有这颗徽标，
+ * 那件事只有点开详情才看得见。判定只看版本号高低（`compareSkillVersions`），不掺内容差异。
  */
+import { compareSkillVersions } from '@workbench/skills'
 import { computed } from 'vue'
 
-const props = defineProps<{ skill: SkillEntry, updatedCopies: number }>()
+const props = defineProps<{ skill: SkillEntry, projectVersion: string }>()
 const emit = defineEmits<{
   (event: 'open'): void
   (event: 'install'): void
@@ -28,8 +29,10 @@ const emit = defineEmits<{
 
 /** 没有清单文件的目录还不是技能：警示常显，安装置灰 */
 const metaWarn = !props.skill.hasSkillMd
-/** 有项目副本需要看：竖条点亮、徽标出现 */
-const hasUpdate = props.updatedCopies > 0
+/** 项目里有更高版本：竖条点亮、徽标出现；只看版本号，不掺内容差异 */
+const hasUpdate = computed(
+  () => Boolean(props.projectVersion) && compareSkillVersions(props.projectVersion, props.skill.version) > 0,
+)
 /** 徽章取名字首字符（中文名直接取汉字）；名字回落目录名，不会是空串 */
 const initial = computed(() => props.skill.name.charAt(0).toUpperCase())
 </script>
@@ -54,15 +57,15 @@ const initial = computed(() => props.skill.name.charAt(0).toUpperCase())
             </h3>
           </div>
           <div v-if="hasUpdate || metaWarn" class="card__status-row">
-            <!-- 项目里的副本比库新 / 不一样：只提示有几份，点开详情看逐项差异，不在这里替用户挑边 -->
+            <!-- 项目里的副本版本比库高：只提示项目里的版本号，点开详情看逐项差异，不在这里替用户挑边 -->
             <el-tooltip
               v-if="hasUpdate"
-              content="有项目里的副本与库中这份不一样，点开看详情"
+              content="项目里有这份技能的更新版本，点开看详情"
               placement="top-start"
               teleported
             >
               <span class="card__outdated">
-                {{ updatedCopies }} 个项目有更新
+                项目里有更新 · v{{ projectVersion }}
               </span>
             </el-tooltip>
             <span v-if="metaWarn" class="card__warn">没有 SKILL.md</span>
