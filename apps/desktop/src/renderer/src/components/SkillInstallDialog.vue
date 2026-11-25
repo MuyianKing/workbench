@@ -130,16 +130,6 @@ async function submit(): Promise<void> {
     :close-on-click-modal="!installing"
     :close-on-press-escape="!installing"
   >
-    <div class="lead">
-      <span class="lead__badge" aria-hidden="true">
-        {{ skillName.slice(0, 1).toUpperCase() }}
-      </span>
-      <div class="lead__text">
-        <strong class="lead__name truncate">{{ skillName }}</strong>
-        <span class="lead__sub">选择要安装的项目，可多选</span>
-      </div>
-    </div>
-
     <div class="picker__bar">
       <span class="picker__title">目标项目</span>
       <span class="picker__count">已选 <b>{{ selected.length }}</b> / {{ projects.projects.length }}</span>
@@ -164,18 +154,22 @@ async function submit(): Promise<void> {
       <button
         v-for="project in projects.projects"
         :key="project.id"
-        class="picker__row"
+        class="picker__card"
         type="button"
         :aria-pressed="selectedIds.includes(project.id)"
         :disabled="installing"
         :class="{ 'is-active': selectedIds.includes(project.id) }"
         @click="toggle(project.id)"
       >
-        <i class="picker__dot" :style="{ background: colorVarOf(project.color) }" aria-hidden="true" />
-        <span class="picker__name truncate" :title="project.name">{{ project.name }}</span>
-        <span class="picker__path mono truncate" :title="project.path">{{ project.path }}</span>
         <span class="picker__check" aria-hidden="true">
           <el-icon><Check /></el-icon>
+        </span>
+        <span class="picker__body">
+          <span class="picker__head">
+            <i class="picker__dot" :style="{ background: colorVarOf(project.color) }" aria-hidden="true" />
+            <span class="picker__name truncate" :title="project.name">{{ project.name }}</span>
+          </span>
+          <span class="picker__path mono truncate" :title="project.path">{{ project.path }}</span>
         </span>
       </button>
     </div>
@@ -215,54 +209,12 @@ async function submit(): Promise<void> {
 </template>
 
 <style scoped>
-/* 技能标识条：一眼确认装的是什么，不靠读标题 */
-.lead {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-3);
-  padding: var(--sp-3) var(--sp-4);
-  border-radius: var(--r-md);
-  background: var(--bg-subtle);
-}
-
-.lead__badge {
-  display: grid;
-  flex-shrink: 0;
-  place-items: center;
-  width: 38px;
-  height: 38px;
-  border-radius: var(--r-md);
-  background: var(--bg-surface);
-  box-shadow: var(--shadow-card);
-  color: var(--ink);
-  font-size: var(--fs-title);
-  font-weight: 700;
-}
-
-.lead__text {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.lead__name {
-  color: var(--ink);
-  font-size: var(--fs-body);
-  font-weight: 600;
-}
-
-.lead__sub {
-  color: var(--ink-3);
-  font-size: var(--fs-meta);
-}
-
-/* 工具行：计数与全选/清空贴右端，与标题同一行 */
+/* 工具行：计数与全选/清空贴右端 */
 .picker__bar {
   display: flex;
   align-items: center;
   gap: var(--sp-2);
-  margin: var(--sp-5) 0 var(--sp-3);
+  margin: 0 0 var(--sp-3);
 }
 
 .picker__title {
@@ -293,69 +245,45 @@ async function submit(): Promise<void> {
   font-size: var(--fs-meta);
 }
 
-/* 列表不画外框：行本身是卡片，选中态用底色 + 描边，不用发丝线堆成表格 */
+/* 卡片网格：一排两张，窄窗自动收成一张；卡片本身是可点的复选块 */
 .picker {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-1);
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: var(--sp-2);
   max-height: 320px;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding-right: 2px;
+  padding: 2px;
 }
 
-.picker__row {
+.picker__card {
   display: flex;
-  align-items: center;
-  gap: var(--sp-3);
-  width: 100%;
+  align-items: flex-start;
+  gap: var(--sp-2);
   min-width: 0;
   padding: var(--sp-3);
-  border: 1px solid transparent;
-  border-radius: var(--r-md);
-  background: transparent;
+  border: 1px solid var(--glass-border-color);
+  border-radius: var(--r-lg);
+  background: rgba(var(--bg-surface-rgb), var(--card-alpha, 1));
+  box-shadow: var(--shadow-card);
   color: inherit;
   text-align: left;
   cursor: pointer;
-  transition: background-color 0.15s, border-color 0.15s;
+  transition: background-color 0.15s, border-color 0.15s, box-shadow 0.15s;
 }
 
-.picker__row:hover:not(:disabled) {
-  background: var(--bg-subtle);
+.picker__card:hover:not(:disabled) {
+  border-color: var(--glass-border-color-hover);
+  box-shadow: var(--shadow-hover);
 }
 
-.picker__row:disabled {
+.picker__card:disabled {
   cursor: default;
 }
 
-.picker__row.is-active {
+.picker__card.is-active {
   border-color: var(--border-strong);
   background: var(--bg-selected);
-}
-
-/* 标识色点：与项目卡、工作日志里选项目那处的圆点同一个口径 */
-.picker__dot {
-  flex-shrink: 0;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-}
-
-/* 名字先让位（最多吃掉四成半），路径跟着缩，两边都省略号收尾 */
-.picker__name {
-  flex: 0 1 auto;
-  max-width: 45%;
-  color: var(--ink);
-  font-size: var(--fs-body);
-  font-weight: 600;
-}
-
-.picker__path {
-  flex: 1 1 auto;
-  min-width: 0;
-  text-align: right;
-  color: var(--ink-3);
-  font-size: var(--fs-meta);
 }
 
 /* 勾选圈常驻占宽：未选是空心灰圈，选中是实心墨底白勾 —— 一眼数清选了几个 */
@@ -363,18 +291,53 @@ async function submit(): Promise<void> {
   display: grid;
   flex-shrink: 0;
   place-items: center;
-  width: 20px;
-  height: 20px;
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
   border: 1px solid var(--border-strong);
-  border-radius: 50%;
+  border-radius: var(--r-sm);
   color: transparent;
-  font-size: var(--fs-meta);
+  font-size: var(--fs-micro);
 }
 
-.picker__row.is-active .picker__check {
+.picker__card.is-active .picker__check {
   border-color: transparent;
   background: var(--ink);
   color: var(--ink-inverse);
+}
+
+.picker__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  min-width: 0;
+  flex: 1;
+}
+
+.picker__head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+/* 标识色点：与项目卡、工作日志里选项目那处的圆点同一个口径 */
+.picker__dot {
+  flex-shrink: 0;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+
+.picker__name {
+  color: var(--ink);
+  font-size: var(--fs-body);
+  font-weight: 600;
+}
+
+.picker__path {
+  color: var(--ink-3);
+  font-size: var(--fs-micro);
 }
 
 /* 安装位置单独成块，跟选择区分开：这是提交前最后要确认的事实 */

@@ -94,9 +94,11 @@
   （信息 `skill: <id> 保存 <文件路径>`）；**version 门槛只对 SKILL.md**。切换文件有未保存修改先确认；
   二进制读不出文本就如实提示。清单在打开 / 保存 / 刷新时重拉
 - **一键安装到项目**：整棵复制到 `<项目>/.agents/skills/<技能名>/`（各 agent 通用的项目级约定）；
-  项目选择列表由 [ProjectPickList.vue](../../apps/desktop/src/renderer/src/components/ProjectPickList.vue)
-  共用（技能安装与设计应用）：一行一项，标识色点 + 名字 + 右侧省略的路径，选中行显示对勾；
-  点击整行切换选中，可同时选择多个项目，不加复选框，提交按钮显示已选数量。按项目依次安装，
+  安装弹窗 [SkillInstallDialog.vue](../../apps/desktop/src/renderer/src/components/SkillInstallDialog.vue)
+  把项目画成**小卡片网格**（一排两张，窄窗收成一张）：每卡是勾选块，标识色点 + 名字 + 下方省略的路径，
+  勾选圈常驻（未选空心、选中墨底白勾），点整卡切换选中、可多选，提交按钮显示已选数量。
+  设计应用那处另用共用的 [ProjectPickList.vue](../../apps/desktop/src/renderer/src/components/ProjectPickList.vue)
+  单行列表；两处布局不同、互不复用。按项目依次安装，
   已有同名技能集中确认一次覆盖（取消即跳过）；某项失败继续其他项，最后汇总成功、失败和跳过数量，
   失败原因显示在弹窗内；全部成功后关闭，否则仅保留失败与跳过项选中。处理期间锁定选择、提交和关闭。
   没有 `SKILL.md` 的目录装不出去（复制走 `walkdir`，点开头的目录整支跳过）
