@@ -355,7 +355,8 @@ JSON 让用户抄进密码管理器，另一台设备把它贴回来，**不必�
 - 同 uid 怎么办由用户当场选：「跳过已有」（默认，本机那份可能更新）或「覆盖本机」。导入的号 `source` 写 `"import"`；先写盘
   成功再改内存，最后按 `addedAt` 排序（与 `load_all` 一致）。
 - **导出内容含明文 token**，这是账号文件本来就不加密的直接后果：拿到那段 JSON 等于拿到这些号。它只由用户点「导出」触发，
-  `wb_gateway_accounts_export` 是账号视图之外唯一回读 token 的通道；复制走 `navigator.clipboard`，不加新的 Tauri 权限。
+  `wb_gateway_accounts_export` 是账号视图之外唯一回读 token 的通道；复制走统一的 `copyText`（底层是 Tauri `capture_copy_text` /
+  Win32 `CF_UNICODETEXT`），不加新的 Tauri 权限。
 - 两台机器同时长期使用同一个号时，续期可能各自拿到新的 refresh token（上游若轮换，先换的那份会让另一份失效）。要长期并行就各
   登录一次；只做搬家就「导出 → 导入 → 旧机器停用」。
 

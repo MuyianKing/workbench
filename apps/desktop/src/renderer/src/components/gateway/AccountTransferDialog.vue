@@ -60,6 +60,11 @@ async function prepare(): Promise<void> {
   payload.value = result.data
 }
 
+async function copy(): Promise<void> {
+  if (await copyText(payload.value, '账号数据'))
+    open.value = false
+}
+
 async function submit(): Promise<void> {
   const text = payload.value.trim()
   if (!text)
@@ -118,7 +123,7 @@ function summary(result: GatewayAccountImport | QoderAccountImport): string {
         v-if="mode === 'export'"
         type="primary"
         :disabled="!payload"
-        @click="copyText"
+        @click="copy"
       >
         复制
       </el-button>
