@@ -1,6 +1,7 @@
 export * from './codebuddy-log'
 export * from './credit-expiry'
 export * from './dsh-log'
+export * from './gateway-range'
 export * from './gateway-usage'
 export * from './growth-credits'
 export * from './model-catalog'

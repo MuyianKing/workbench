@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import type { Result } from '@workbench/core'
-import type { GatewayUsageSummary } from '@workbench/usage'
+import type { GatewayRangePreset, GatewayUsageSummary } from '@workbench/usage'
 import type { GatewayUsageRow, GatewayUsageWindow } from '@/workbench/gateway'
 import { Bottom, CircleCheck, DataLine, Histogram, Timer, Top } from '@element-plus/icons-vue'
-import { gatewayBucketUnit, recentHourBuckets, summarizeGatewayRows } from '@workbench/usage'
+import { GATEWAY_RANGE_PRESETS, gatewayBucketUnit, gatewayRangeBounds, gatewayUtc8DayKey, recentHourBuckets, resolveGatewayRange, summarizeGatewayRows } from '@workbench/usage'
 import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref } from 'vue'
 import EmptyState from '@/components/EmptyState.vue'
 import { formatCompactTokens } from '@/format'
@@ -24,7 +24,10 @@ import GatewayTable from './GatewayTable.vue'
  * 时序图固定看**最近 24 小时**（逐小时，带纵轴）：页面顶上的时间范围只管 KPI 与明细表，
  * 不再决定图表的粒度 —— 两者回答的不是同一个问题（「这段时间一共多少」vs「最近这一天的节奏」）。
  * 时间范围按**自然日**算（UTC+8 零点起）：`今日` = 今天 0 点到现在，`昨日` = 昨天一整天，
- * `近 3 天` = 今天加前两天。取回的行会盖住最近 24 小时（图要用），统计前按 `since` 再裁一次。
+ * `近 N 天` = 今天加前 N-1 天，`本月` = 月初到今天，`上个月` = 走完的整月，`自定义` 由日期框指定的起止日决定。
+ * 档位与区间解析的纯逻辑在 `@workbench/usage` 的 `gateway-range`，本页只管选择、裁剪与展示。
+ * Rust 的 `gatewayUsageRows` 只认「从今天零点往前数 N 天」这一种窗口，区间会换算成等价的
+ * `fetchDays`（见 `gatewayRangeBounds`），取回来的行再多按 `[since, until)` 裁一次。
  *
  * 所有数字来自 `usage_rows`（默认走 `window.workbench.gatewayUsageRows` —— 适配层会带上同步仓库与
  * 本机设备 id，别的机器的流水才合得进来；Qoder 页注入自己的命令），这一页只做格式化。
@@ -42,36 +45,24 @@ const props = defineProps<{
   loadNames?: () => Promise<Record<string, string>>
 }>()
 
-/** 一天的秒数：`since` 一定是自然日零点，加它正好是次日零点 */
-const DAY_SECONDS = 86_400
+/** 自定义档位的日期区间（含两端）：默认取今天一天 */
+const customRange = ref({ fromKey: gatewayUtc8DayKey(Date.now() / 1000), toKey: gatewayUtc8DayKey(Date.now() / 1000) })
+/** `el-date-picker` 要 `[开始, 结束]`，内部统一收成 `{ fromKey, toKey }`，与 WorkView 同一写法 */
+const customRangeInput = computed<[string, string]>({
+  get: (): [string, string] => [customRange.value.fromKey, customRange.value.toKey],
+  set: (value: [string, string] | null) => {
+    if (value?.[0] && value[1])
+      customRange.value = { fromKey: value[0], toKey: value[1] }
+  },
+})
 
-interface RangeOption {
-  label: string
-  value: string
-  /** 传给 Rust 的窗口天数（从今天零点往前数，含今天） */
-  days: number
-  /** 「昨日」：窗口取两天（昨天 + 今天），统计前把今天那一段裁掉 */
-  previousDay?: boolean
-}
+/** 默认「今日」：进页面先看当天，要更长的窗口再手动切 */
+const rangeKey = ref<GatewayRangePreset>('today')
 
-/**
- * 时间范围。Rust 只认「从今天零点往前数 N 天」这一种窗口，所以「昨日」取 `days = 2`，
- * 再用 `previousDay` 把今天裁掉（上界是 `since` 加一整天）。
- */
-const RANGES: RangeOption[] = [
-  { label: '今日', value: 'today', days: 1 },
-  { label: '昨日', value: 'yesterday', days: 2, previousDay: true },
-  { label: '近 3 天', value: 'last3', days: 3 },
-  { label: '近 7 天', value: 'last7', days: 7 },
-  { label: '近 30 天', value: 'last30', days: 30 },
-]
 const DIMENSIONS = [
   { label: '按账号', value: 'account' },
   { label: '按模型', value: 'model' },
 ]
-
-/** 默认「今日」：进页面先看当天，要更长的窗口再手动切 */
-const rangeKey = ref('today')
 /** 明细表唯一的维度切换：用量列与积分列一起切，不再各留一个 */
 const dimension = ref<'account' | 'model'>('account')
 const summary = ref<GatewayUsageSummary | null>(null)
@@ -236,23 +227,25 @@ function nameOf(uid: string): string {
 }
 
 function load(): void {
-  const range = RANGES.find(item => item.value === rangeKey.value) ?? RANGES[0]
+  // 每次刷新都按当前时钟重解档位：跨过午夜后「今日 / 近 N 天」自动跟着走
+  const now = Date.now() / 1000
+  const range = resolveGatewayRange(rangeKey.value, now, customRange.value)
+  const { since, until, fetchDays, bucketDays } = gatewayRangeBounds(range, now)
   // 默认必须走 `window.workbench` 这一份：适配层（api-sync）会给它带上同步仓库与本机设备 id，
   // 直接调 `@/workbench/gateway` 的同名函数是空仓库 —— 只读本机，别的机器的流水永远进不来。
   const fetchRows = props.loadRows ?? window.workbench.gatewayUsageRows
   const fetchNames = props.loadNames ?? gatewayAccountNames
   loading.value = true
-  void fetchRows(range.days).then((result) => {
+  void fetchRows(fetchDays).then((result) => {
     if (result.ok && result.data) {
       // Rust 只取数：分组 / 分桶 / 比率的口径在 @workbench/usage。
-      // 取回来的行盖住了最近 24 小时（图表要用），统计只算 `since` 之后的那一段；
-      // 「昨日」取的是昨天 + 今天两天，上界再收在 `since` 加一天（今天零点）。
-      const { since, rows: fetched } = result.data
-      const until = range.previousDay ? since + DAY_SECONDS : Number.POSITIVE_INFINITY
+      // Rust 的窗口只保证铺满 `since` 以降（图要看最近 24 小时），KPI 与明细表按本页
+      // 自己算的 [since, until) 再裁一次 —— 昨日、上个月、自定义都靠这个上界收口。
+      const { rows: fetched } = result.data
       rows.value = fetched
       summary.value = summarizeGatewayRows(
         fetched.filter(row => row.ts >= since && row.ts < until),
-        gatewayBucketUnit(range.days),
+        gatewayBucketUnit(bucketDays),
       )
       loadError.value = ''
     }
@@ -316,7 +309,21 @@ onBeforeUnmount(() => {
   <div class="usage">
     <div class="panel usage__head">
       <div class="panel__head">
-        <el-segmented v-model="rangeKey" :options="RANGES" size="small" @change="load" />
+        <el-segmented v-model="rangeKey" :options="GATEWAY_RANGE_PRESETS" size="small" @change="load" />
+        <!-- 自定义那一档才展开日期框，与档位同一行（不是第二排药丸）；与 el-segmented 同为 small 档 -->
+        <el-date-picker
+          v-if="rangeKey === 'custom'"
+          v-model="customRangeInput"
+          type="daterange"
+          size="small"
+          value-format="YYYY-MM-DD"
+          format="YYYY-MM-DD"
+          :clearable="false"
+          range-separator="至"
+          start-placeholder="开始日期"
+          end-placeholder="结束日期"
+          @change="load"
+        />
       </div>
       <p v-if="loadError" class="usage__error">
         {{ loadError }}
@@ -560,6 +567,21 @@ onBeforeUnmount(() => {
   margin: 0;
   font-size: var(--gw-fs-micro);
   color: var(--st-fail);
+}
+
+/**
+ * 自定义档位的日期范围：与档位同一行、同为 small 档。
+ * `el-date-picker` 的根节点是 ElTooltip，scoped 的 [data-v] 落在它身上而不是日期框元素上，
+ * 必须 `:deep()` 命中内层 `.el-date-editor`（与 WorkView 的自定义范围同一个坑）。
+ */
+.usage__head :deep(.el-date-editor) {
+  flex: 0 0 240px;
+  width: 240px;
+  height: 24px;
+}
+
+.usage__head :deep(.el-range-input) {
+  font-size: var(--gw-fs-micro);
 }
 
 .usage__cards {

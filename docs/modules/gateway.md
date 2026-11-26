@@ -117,6 +117,7 @@
   [GatewayTabs.vue](../../apps/desktop/src/renderer/src/components/gateway/GatewayTabs.vue)（与 Qoder 同一份）：下划线式导航，
   文字 + 2px 主色下划线、不铺底色、字号走 `--gw-fs-body`（14px）、项间 `--sp-5`；**页面里别再自己写 `el-tabs` 的 deep 规则**。
   时间范围这类筛选继续用 `el-segmented` 药丸 —— 两排一模一样的药丸叠在一起时分不清哪个是「在哪一栏」、哪个是「看多长时间」。
+  「自定义」那一档才在药丸同一行展开一枚 `el-date-picker`（daterange，small 档），**不另起一排**。
 - **启停就在页首那一行**：页签靠左、网关状态与启停靠右，每个页签下都看得到 —— 这一页最高频的动作不该先点开一层，也不该只在
   「账号」栏才有。点状态开接入弹层，旁边那枚按钮就地启停，所以弹层里也不再放第二份。「随程序启动」在设置·通用 → TBuddy；
   「福利每天自动」也在那一块（TBuddy 与 Qoder 共用一个开关），都不占页首这一行。
@@ -180,10 +181,17 @@
   KPI 卡与明细表，不改图表的窗口。柱子仍取主题色（`--el-color-primary`），不代表状态。
 - **时间范围按自然日算**（`wb_usage::window_start`，UTC+8 零点起）：`今日` = 今天 0 点到现在，`昨日` = 昨天 0 点到今天 0 点
   （Rust 只有「含今天往前数 N 天」这一种窗口，页面取 `days = 2` 再把今天那段裁掉），`近 3 天` = 今天加前两天，依此类推。
-  **不是滚动的 N×24 小时** —— 上午打开时滚动窗口会把昨天下午也算进「今日」，两档显示同一批数，看着像切换没生效。取数起点另由
-  `wb_usage::fetch_start` 定：至少往前铺满 24 小时（「今日」在上午比 24 小时短，图表要这一段），所以 `wb_gateway_usage_rows`
-  回的是 `{ since, rows }`，行可能早于 `since`（「昨日」还可能晚于窗口上界），KPI 与明细表由页面按 `since` 与次零点再裁。同步
-  仓库那边的窗口也用同一个 `since`（`read_gateway_rows` 收 Unix 秒，不再收天数）。
+  **`本月` = 月初到今天，`上个月` = 走完的整月，`自定义` 由日期框指定的起止日决定**（两头都含）。档位与区间解析的纯逻辑在
+  `packages/usage/src/gateway-range.ts`（`resolveGatewayRange` / `gatewayRangeBounds`，单测同目录）：`上个月` 先把锚点挪到
+  1 号再退月（避开 3/31 → 3/3 的坑），`自定义` 校验两头日期键、交换大小、把上界钳到今天；选项表 `GATEWAY_RANGE_PRESETS`
+  直接喂给 `el-segmented`，自定义那一档才在同行展开一枚 `el-date-picker`（`type="daterange"`，small 档，不是第二排药丸）。
+  **Rust 命令的入参没变**（仍只收 `days`）：任意 UTC+8 区间都换算成等价的 `fetchDays`，让 `window_start(fetchDays)` 落在
+  `fromKey` 零点（`fetchDays = (今天零点 - fromKey 零点)/86400 + 1`）；`fetch_start` 只会更早，区间内的行一定取回。页面用
+  `gatewayRangeBounds` 自己算的 `[since, until)` 再裁一次，分桶粒度按区间真实跨度 `bucketDays` 定（`gatewayBucketUnit`，
+  ≤7 天按小时、其余按天）。不是滚动的 N×24 小时 —— 上午打开时滚动窗口会把昨天下午也算进「今日」，两档显示同一批数，
+  看着像切换没生效。取数起点另由 `wb_usage::fetch_start` 定：至少往前铺满 24 小时（「今日」在上午比 24 小时短，图表要这一段），
+  所以 `wb_gateway_usage_rows` 回的是 `{ since, rows }`，行可能早于 `since`（「昨日」还可能晚于窗口上界），KPI 与明细表由页面按
+  自己算的 `since` / `until` 再裁。同步仓库那边的窗口也用同一个 `since`（`read_gateway_rows` 收 Unix 秒，不再收天数）。
 
 ### 出网与请求清洗
 
@@ -557,5 +565,5 @@ JSON 让用户抄进密码管理器，另一台设备把它贴回来，**不必�
 - `apps/desktop/src/renderer/src/components/gateway/{GatewayView,AccountCards,CreditsDialog,AccessDialog,AccountTransferDialog,PerksPane,PerksCreditsChart,UsagePane,RequestsPane,ModelsPane}.vue`
 - `apps/desktop/src/renderer/src/workbench/{gateway,auto-sync,sync-queue}.ts`
 - `apps/desktop/src/renderer/src/stores/perks-auto.ts`（福利自动跑的后台节拍）
-- `packages/usage/src/{credit-expiry,growth-credits,gateway-usage,model-catalog}.ts`（到期档位 / 福利流水 / 用量汇总 / 模型目录排序的纯逻辑）
+- `packages/usage/src/{credit-expiry,growth-credits,gateway-range,gateway-usage,model-catalog}.ts`（到期档位 / 福利流水 / 用量时间档位 / 用量汇总 / 模型目录排序的纯逻辑）
 - `packages/appearance/src/views.ts`（`gateway` 页签）

@@ -140,8 +140,9 @@
 - **额度字段取上游 `usage.credits`（复数）**：Qoder 的 usage 里这一位是 `credits`，与客户端会话日志
   （[qoder-log.ts](../../packages/usage/src/qoder-log.ts)）同一个字段；`qd_usage::parse_credits` 兼容旧形态 `credit`。只认这个
   字段，**不拿 token 乘倍率去推**。
-- **时间范围按自然日算（UTC+8）**，含「昨日」；24 小时图固定看最近 24 小时（从当前小时往前补 0），不跟时间范围走。流水**每 15 秒
-  重读一次**，页面被 KeepAlive 缓存时暂停、切回来立即补读。
+- **时间范围按自然日算（UTC+8）**，含「昨日」「本月」「上个月」「自定义」（档位与区间解析见 `packages/usage/src/gateway-range.ts`，
+  与 TBuddy 同一份）；24 小时图固定看最近 24 小时（从当前小时往前补 0），不跟时间范围走。流水**每 15 秒重读一次**，
+  页面被 KeepAlive 缓存时暂停、切回来立即补读。
 - token 按千进制收短（K / M，**不写「兆」**）：`compact()` 与 TBuddy 用量页同一套。
 - **取数与统计分开**：Rust 的 `wb_qoder_usage_rows` 只回窗口内的流水与 `since`，分组 / 分桶 / 积分比率在 `packages/usage` 的
   `summarizeGatewayRows`（与 TBuddy 同一份、同一口径）。原来那条 Rust 汇总 `wb_qoder_usage` 没有调用方，已随
