@@ -409,10 +409,15 @@ export const useGitStore = defineStore('git', () => {
     await loadHistory(true)
   }
 
-  /** 中间那栏只看某个文件的历史 */
+  /** 中间那栏只看某个文件的历史；再点一次同一个文件 = 取消选中，回到整仓库历史 */
   async function showFileHistory(path: string): Promise<void> {
-    if (!path || path === historyPath.value)
+    if (!path)
       return
+    // 再点一次当前文件 = 取消（与「返回仓库历史」同一条收尾：清历史、详情、对比，重取整仓库）
+    if (path === historyPath.value) {
+      await showRepoHistory()
+      return
+    }
     historyPath.value = path
     resetHistory()
     resetDetail()

@@ -18,16 +18,21 @@ const emit = defineEmits<{ fullscreen: [value: boolean] }>()
  * 右侧：一次提交（相对第一父提交）或两个提交之间的差异。
  *
  * 上半截是「谁跟谁比、改了什么」——单个提交写标题 / 作者 / 时间 / 根提交 / 合并提交，
- * 对比写两头的短号与各自的标题；下半截分成两列：左侧是改动文件清单（竖排、可滚动），
+ * 对比写两头的短号与各自的标题；下半截平时分两列：左侧是改动文件清单（竖排、可滚动），
  * 右侧是选中文件的补丁，中间那条缝可以左右拖（宽度住在 theme.json 的 `gitFilesWidth`）。
  * 两者不会同时出现：store 在选中提交或开始对比时会把另一边清掉。
+ *
+ * 左栏点开了某个文件时（中栏是它的提交历史）不再摆文件清单，补丁独占整栏 —— 已经锁定一个
+ * 文件，再列一遍这次提交的几百上千个文件只是噪音；切文件走左栏 / 回到仓库历史。
  */
 const store = useGitStore()
 const settings = useSettingsStore()
 
 /** 改动文件清单的宽度来自 theme.json，补丁区吃掉剩余宽度 */
 const bodyStyle = computed(() => ({
-  gridTemplateColumns: `${settings.themeConfig.gitFilesWidth}px minmax(0, 1fr)`,
+  gridTemplateColumns: store.isFileHistory
+    ? 'minmax(0, 1fr)'
+    : `${settings.themeConfig.gitFilesWidth}px minmax(0, 1fr)`,
 }))
 
 const hasSelection = computed(() => Boolean(store.detail || store.compare))
@@ -237,7 +242,7 @@ onDeactivated(() => {
       </p>
 
       <div v-if="store.activeFiles.length" class="diff-body" :style="bodyStyle">
-        <aside class="diff-files">
+        <aside v-if="!store.isFileHistory" class="diff-files">
           <GitChangedFiles
             :files="store.activeFiles"
             :active-path="store.selectedFile"
@@ -274,8 +279,9 @@ onDeactivated(() => {
         </Teleport>
 
         <!-- 文件清单与补丁之间那条缝：宽度住 theme.json 的 gitFilesWidth。全屏期间要藏
-             （PanelResizer 比全屏卡片高，会戳出来） -->
+             （PanelResizer 比全屏卡片高，会戳出来）；文件历史模式下根本没有清单，一并藏掉 -->
         <PanelResizer
+          v-if="!store.isFileHistory"
           v-show="!patchFull"
           :width="settings.themeConfig.gitFilesWidth"
           body-class="is-resizing-git-pane"
