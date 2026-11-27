@@ -240,7 +240,7 @@ const title = computed(() => (props.provider ? '编辑 AI 服务' : '添加 AI �
       </div>
 
       <div v-if="advanced" class="svc__fields">
-        <el-form label-position="top" class="svc__form">
+        <el-form label-position="left" label-width="96px" class="svc__form">
           <el-form-item label="显示名称">
             <el-input v-model="label" placeholder="界面上怎么叫它" @change="onLabelChange" />
           </el-form-item>
@@ -394,6 +394,17 @@ const title = computed(() => (props.provider ? '编辑 AI 服务' : '添加 AI �
 
 .svc__form :deep(.el-form-item) {
   margin-bottom: 0;
+}
+
+/* 标签与输入框同一行：标签不换行、右对齐留一口气，输入框吃掉这格剩下的宽度 */
+.svc__form :deep(.el-form-item__label) {
+  align-items: center;
+  white-space: nowrap;
+}
+
+.svc__form :deep(.el-form-item__content) {
+  flex: 1;
+  min-width: 0;
 }
 
 .svc__api {

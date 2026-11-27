@@ -457,7 +457,7 @@ function contextText(size: number): string {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: var(--sp-3);
-  height: 372px;
+  height: 480px;
 }
 
 .pick__pane {

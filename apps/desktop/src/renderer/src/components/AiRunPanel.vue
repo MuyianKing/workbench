@@ -13,7 +13,8 @@ import { aiTurns, visibleInstruction } from '@workbench/ai'
  *    中途那些旁白都在里面 —— 一段对话要读的是「我说了什么、它最后说了什么」，
  *    那些步骤摊着就是一面墙（一次读文件、一条命令各占一行）。跑着的时候那块是摊开的、
  *    跑完自动收起，点标题随时再摊开；「还在跑」的状态（转圈 + 正在思考… /
- *    {程序名}正在努力探索中....）画在**整块对话面板的底部**，不在过程块的标题上；
+ *    {程序名}正在努力探索中....）跟在**这轮内容末尾**（滚动区里的最后一条：内容没撑满时
+ *    紧挨最后一行，涨满时自然落到最底），不在过程块的标题上，也不钉在面板下沿；
  *    **跑着的那轮还没有「答案」** —— 正文后面随时会跟上工具与思考，先摘出去的话，
  *    新长出来的思考就压在它上面了（时序倒挂），整轮都在块里按时序往下长，收尾才把
  *    最后那段正文弹出去（见 aiTurns 的 live）；
@@ -31,7 +32,7 @@ import { aiTurns, visibleInstruction } from '@workbench/ai'
  * 用户看到的就是一大块灰）。分隔靠行与行之间的留白，不靠框。
  *
  * 顶部那一行**只在有事情要说的时候出现**：等你确认命令、正在接历史、正在停、在装 Pi、
- * 出错、或者还缺 Pi 要装。**「还在跑」不归它说** —— 那是模型自己的动静：底部那行转圈、
+ * 出错、或者还缺 Pi 要装。**「还在跑」不归它说** —— 那是模型自己的动静：对话末尾那行转圈、
  * 写的时候在正文末尾闪一根竖条，顶部再说一句「运行中…」只是重复（顺带一提，它从前就在那儿，
  * 把思考的 loading 说成了整轮的状态）。
  *
@@ -45,7 +46,7 @@ import MarkdownView from '@/components/MarkdownView.vue'
 import { basenameOf } from '@/format'
 
 const props = defineProps<{
-  /** 程序名（设置里的那个）：底部那行「还在跑」的状态拿它当主语（见 activeLabel） */
+  /** 程序名（设置里的那个）：「还在跑」那行状态拿它当主语（见 activeLabel） */
   appName: string
   /** 这台机器上探到的 Pi 版本；空串 = 还没装 */
   piVersion: string
@@ -119,12 +120,12 @@ function manyShots(images?: string[]): boolean {
   return (images?.length ?? 0) > 1
 }
 
-/** 那一块「过程」的标题：只报步数（状态词在底部那行） */
+/** 那一块「过程」的标题：只报步数（状态词在对话末尾那行） */
 function processLabel(turn: { process: AiLogLine[], index: number }): string {
   return turn.process.length ? `过程 · ${turn.process.length} 步` : '过程'
 }
 
-/** 面板底部那行「还在跑」的状态：有活动轮才画（主语是程序名，智能体跟程序同一个名字） */
+/** 对话末尾那行「还在跑」的状态：有活动轮才画（主语是程序名，智能体跟程序同一个名字） */
 const activeLabel = computed(() => {
   if (!props.running || liveIndex.value < 0)
     return ''
@@ -324,14 +325,15 @@ const hasHead = computed(() => notice.value !== null || !props.piVersion)
         text="这段对话还没有开始"
         hint="在下面写点什么。"
       />
-    </div>
 
-    <!-- 跑着的那点动静：转圈 + 状态词，画在面板底部（不占顶部的通知行，也不压在过程块标题上） -->
-    <div v-if="activeLabel" class="run__active">
-      <el-icon class="run__spin">
-        <Loading />
-      </el-icon>
-      {{ activeLabel }}
+      <!-- 跑着的那点动静：转圈 + 状态词，跟在这轮内容后面（内容没撑满时紧挨着最后一行，
+           内容涨满滚动区时自然落到最底；不占顶部的通知行，也不压在过程块标题上） -->
+      <div v-if="activeLabel" class="run__active">
+        <el-icon class="run__spin">
+          <Loading />
+        </el-icon>
+        {{ activeLabel }}
+      </div>
     </div>
 
     <div v-if="written.length" class="run__foot">
@@ -609,8 +611,9 @@ const hasHead = computed(() => notice.value !== null || !props.piVersion)
 }
 
 /**
- * 底部那行「还在跑」：转圈 + 状态词，钉在对话区下面（确认条、过程块都不占它的位置）。
- * 用运行色 —— 彩色只表达运行状态（见 AGENTS.md 第 4 节）。
+ * 那行「还在跑」：转圈 + 状态词，跟在对话内容末尾（它是滚动区里最后一条，内容没撑满时
+ * 紧挨最后一行、涨满时自然落到最底 —— 不再钉在面板下沿留一大块空白）。用运行色 ——
+ * 彩色只表达运行状态（见 AGENTS.md 第 4 节）。
  */
 .run__active {
   display: inline-flex;
@@ -618,6 +621,7 @@ const hasHead = computed(() => notice.value !== null || !props.piVersion)
   align-self: flex-start;
   gap: var(--sp-1);
   flex: 0 0 auto;
+  margin-top: var(--sp-1);
   color: var(--st-run);
   font-size: var(--fs-meta);
 }

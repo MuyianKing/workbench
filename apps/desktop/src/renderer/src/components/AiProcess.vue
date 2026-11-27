@@ -8,7 +8,7 @@ import { ArrowRight } from '@element-plus/icons-vue'
  * 是在那儿定的，有单测）。
  *
  * **跑着的时候摊开、跑完自动收起**；点标题那一行随时展开 / 收起。
- * 「还在跑」的状态不在这儿 —— 它画在整块对话面板的底部（见 AiRunPanel），
+ * 「还在跑」的状态不在这儿 —— 它跟在这轮对话内容的末尾（见 AiRunPanel），
  * 顶部那行说的是等你确认 / 接历史 / 在停 / 装 Pi / 出错。
  */
 import { ref, watch } from 'vue'
